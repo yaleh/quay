@@ -137,6 +137,25 @@ function git(root: string, args: string[]): { ok: true; out: string } | { ok: fa
 }
 
 /**
+ * The branch the main checkout IS ON — the raw `symbolic-ref` read, or `null` when HEAD is detached
+ * (or the repo is unborn).
+ *
+ * Kept DISTINCT from `resolveDocBranchRole` below on purpose: that function substitutes the default
+ * branch when HEAD is detached (fine for "which branch fills the doc role in the mechanism's eyes"),
+ * whereas the doc-branch bootstrap must NOT treat a detached HEAD as any known branch — see
+ * `DocBranchState`'s `unreadable`. Two readers of one git call with two honest answers, one shared
+ * primitive.
+ */
+export function resolveCheckedOutBranch(root: string): string | null {
+  const cur = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (cur.ok) {
+    const ref = cur.out.trim();
+    if (ref) return ref;
+  }
+  return null;
+}
+
+/**
  * Resolve the DOC-branch role: the branch the main checkout is on.
  *
  * ⛔ NOT a name. `author` is quay's OWN naming convention, not part of the protocol, so hardcoding it
@@ -144,19 +163,14 @@ function git(root: string, args: string[]): { ok: true; out: string } | { ok: fa
  * `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync` removed from
  * `driver-filters.ts` (whose `resolveDocBranch` is this same runtime derivation), and exactly what
  * `target-identity-literal-check.ts` fails RED on (`LEGAL_IDENTITY_VALUES` deliberately excludes
- * `author`). `quay init` therefore REPORTS which branch fills the role and **never creates** a doc
- * branch: a created `author` in a third-party project would be a dead artifact, because the shipped
- * mechanism derives the doc branch at runtime and would never return it.
+ * `author`). This function therefore REPORTS which branch fills the role; it never names one and
+ * never creates one — the NAME comes from the caller's CLI parameter / config default (see
+ * `ensureDocBranch`'s header for how the role gets BOOTSTRAPPED without this module naming a branch).
  *
  * @returns the checked-out branch name, the default branch when HEAD is detached, or null.
  */
 export function resolveDocBranchRole(root: string): string | null {
-  const cur = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-  if (cur.ok) {
-    const ref = cur.out.trim();
-    if (ref) return ref;
-  }
-  return detectDefaultBranch(root);
+  return resolveCheckedOutBranch(root) ?? detectDefaultBranch(root);
 }
 
 /** Refs whose sha is resolvable (`git rev-parse --verify --quiet <ref>^{commit}`). */
@@ -506,4 +520,275 @@ export function formatBranchModelReport(report: BranchModelReport): string {
   }
   if (report.remedy) lines.push(`  remedy: ${report.remedy}`);
   return lines.join("\n");
+}
+
+// ── the doc-branch role: BOOTSTRAP (gap-quay-init-no-doc-branch-bootstrap-…) ─────────────────────
+//
+// ============================ WHY THIS EXISTS ============================
+// `ensureBranchModel` above ESTABLISHES the landing baseline but only REPORTS the doc branch: a
+// project can therefore satisfy the whole branch model while its MAIN CHECKOUT sits on `develop`,
+// which is the one branch the shipped mechanism writes to (propagate pushes develop; fan-in merges
+// into develop). Human edits and driver commits then share one branch AND one git index — the
+// collision class `driver-filters.ts`'s doc-branch indirection exists to prevent. Measured
+// 2026-09-13 on a real third-party project (quay-fleet): `git branch -a` had never contained any
+// doc branch, and `.quay/doc-develop-sync.jsonl` had never contained a line, because
+// `propagateDocBranchToDevelop` short-circuits when the doc branch IS `develop` (a degenerate but
+// mechanically correct path). The gap is that NOTHING EVER MOVED THAT PROJECT OFF `develop`.
+//
+// ============================ WHAT THIS FUNCTION IS NOT ============================
+// ⛔ It names NO branch. The doc-branch NAME is an INPUT (`opts.name`), supplied by the caller's CLI
+// parameter or its config default — never by this module. A name invented here would be exactly the
+// per-project identity literal `target-identity-literal-check.ts` fails RED on, and a created
+// `author` in a third-party project would be a DEAD ARTIFACT: the shipped mechanism derives the doc
+// branch at runtime (`driver-filters.ts resolveDocBranch` = the checked-out branch) and would never
+// return it. Supplying the name and judging the state are two different jobs; this function does
+// only the second.
+//
+// ⛔ The judgment is NAME-AGNOSTIC. The only ref compared against by NAME is `develop`, the
+// protocol-fixed landing-baseline literal (`LEGAL_IDENTITY_VALUES`) — the comparison is "is the main
+// checkout sitting on the landing baseline", which is true for every project regardless of what its
+// doc branch is called. No branch name in the world gets a special branch here (AC1's four-state
+// invariant, and the DoD's explicit bar).
+
+/** The doc-branch role's state relative to the landing baseline. A CLASSIFICATION, never a boolean
+ *  (hard rule 3): `blocked` and `unreadable` are both non-empty answers but only one of them is a
+ *  refusal. */
+export type DocBranchState =
+  /** ①/②: the main checkout is NOT on the landing baseline — the invariant already holds. */
+  | "independent"
+  /** ①: the main checkout IS on the landing baseline and no branch carries the requested name. */
+  | "absent"
+  /** ①: the main checkout IS on the landing baseline and a RELATED branch carries the name. */
+  | "reusable"
+  /** ①: the name is taken by a branch with NO ancestry relation to the baseline — a real collision. */
+  | "blocked"
+  /** HEAD detached/unborn, not a work tree, or undecidable ancestry — verdict WITHHELD. */
+  | "unreadable";
+
+/** What the operation did (or would have done). Kept apart from `DocBranchState` so a mutation that
+ *  FAILED is not silently reported as the classification it failed to act on. */
+export type DocBranchAction = "created" | "switched" | "noop" | "blocked" | "unreadable" | "failed";
+
+export interface DocBranchReport {
+  state: DocBranchState;
+  action: DocBranchAction;
+  /** False ONLY for a real refusal or a failed mutation — `unreadable` is NOT a failure. */
+  ok: boolean;
+  /** True iff the verdict was withheld (`state === "unreadable"`) — distinct from `ok === true`. */
+  notEvaluated: boolean;
+  /** The requested doc-branch name (echoed verbatim; never invented here). */
+  name: string;
+  checkedOut: string | null;
+  baselineSha: string | null;
+  /** Sha of the named branch BEFORE the operation (null when it did not exist). */
+  preexistingSha: string | null;
+  /** The doc branch's sha AFTER the operation (null when nothing was established). */
+  sha: string | null;
+  detail: string;
+}
+
+export interface EnsureDocBranchOptions {
+  /**
+   * The doc-branch name to establish — REQUIRED, and the caller owns its default. Empty/absent is
+   * reported as `unreadable`, never silently defaulted (see this section's header).
+   */
+  name: string;
+  /** Plan only — classify and report, mutate nothing (no branch created, HEAD not moved). */
+  dryRun?: boolean;
+}
+
+/**
+ * Establish the doc-only work branch in `root`: when the main checkout is sitting ON the landing
+ * baseline, put the main checkout on a doc branch so human edits and driver commits stop sharing one
+ * branch and one index.
+ *
+ * Four states, each its own answer (this is what AC1 pins):
+ *   - main checkout already OFF the landing baseline (whatever its name) ⇒ `independent`, NO-OP.
+ *   - ON the baseline, name free ⇒ create that branch AT THE BASELINE'S TIP and switch to it; the
+ *     tree is byte-identical (same commit), so this is pure git metadata.
+ *   - ON the baseline, name taken by a RELATED branch ⇒ switch to it (the existing doc branch wins;
+ *     ⛔ never renamed, never re-pointed).
+ *   - ON the baseline, name taken by an UNRELATED branch ⇒ `blocked`, nothing moves — silently
+ *     re-pointing a ref that means something to the target project is the damage class the adopt
+ *     path of `ensureBranchModel` exists to make an EXPLICIT decision, and no such decision was made
+ *     here.
+ *   - HEAD detached / not a work tree ⇒ `unreadable`: the verdict is WITHHELD, never collapsed into
+ *     `independent` (hard rule 3b — a judge that cannot read its input must not return the value a
+ *     judge that read it would return).
+ */
+export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): DocBranchReport {
+  const name = (opts.name ?? "").trim();
+  const dryRun = opts.dryRun === true;
+  const base = {
+    name,
+    checkedOut: null as string | null,
+    baselineSha: null as string | null,
+    preexistingSha: null as string | null,
+    sha: null as string | null,
+  };
+  const notEvaluated = (detail: string): DocBranchReport => ({
+    ...base,
+    state: "unreadable",
+    action: "unreadable",
+    ok: true,
+    notEvaluated: true,
+    detail,
+  });
+  const blocked = (detail: string): DocBranchReport => ({
+    ...base,
+    state: "blocked",
+    action: "blocked",
+    ok: false,
+    notEvaluated: false,
+    detail,
+  });
+
+  const insideRepo = git(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!insideRepo.ok || insideRepo.out.trim() !== "true") {
+    return notEvaluated(`${root} is not inside a git work tree — the doc-branch role is not judged`);
+  }
+
+  const checkedOut = resolveCheckedOutBranch(root);
+  if (checkedOut === null) {
+    return notEvaluated(
+      "HEAD is detached (or the repository is unborn): no branch is checked out, so the doc-branch " +
+        "role cannot be judged — ⛔ NOT treated as 'already independent' (an unreadable HEAD is its own state).",
+    );
+  }
+  base.checkedOut = checkedOut;
+  const baselineSha = resolveSha(root, LANDING_BASELINE_ROLE);
+  base.baselineSha = baselineSha;
+
+  if (checkedOut !== LANDING_BASELINE_ROLE) {
+    return {
+      ...base,
+      state: "independent",
+      action: "noop",
+      ok: true,
+      notEvaluated: false,
+      detail:
+        `the main checkout is on '${checkedOut}', which is not the landing baseline ` +
+        `'${LANDING_BASELINE_ROLE}' — the doc-branch invariant already holds; nothing was created, ` +
+        `renamed or switched`,
+    };
+  }
+
+  if (baselineSha === null) {
+    return notEvaluated(
+      `the main checkout is on '${LANDING_BASELINE_ROLE}' but that ref does not resolve — the doc ` +
+        `branch cannot be judged against (or forked from) it`,
+    );
+  }
+
+  if (name === "") {
+    // ⛔ NOT defaulted here. Inventing a branch name in the judgment layer is the per-project
+    // identity literal this module is explicitly barred from carrying. Checked AFTER the
+    // `independent` verdict above on purpose: whether the invariant already holds is knowable
+    // without a name, so a project that is already off the baseline still gets its true answer.
+    return notEvaluated(
+      "no doc-branch name was supplied — refusing to invent one (a branch name invented in the " +
+        "judgment layer is the per-project identity literal target-identity-literal-check.ts fails " +
+        "RED on). Pass it in: `--doc-branch-name <name>`, or `loop.doc_branch` in .quay/config.yml.",
+    );
+  }
+
+  if (name === LANDING_BASELINE_ROLE) {
+    return blocked(
+      `the requested doc-branch name '${name}' IS the landing baseline — a doc branch must be a ` +
+        `DIFFERENT ref from '${LANDING_BASELINE_ROLE}'; refusing (nothing created or switched)`,
+    );
+  }
+
+  const preexistingSha = resolveSha(root, name);
+  base.preexistingSha = preexistingSha;
+
+  if (preexistingSha === null) {
+    if (dryRun) {
+      return {
+        ...base,
+        state: "absent",
+        action: "created",
+        ok: true,
+        notEvaluated: false,
+        sha: baselineSha,
+        detail: `would create '${name}' at '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) and switch the main checkout to it`,
+      };
+    }
+    const r = git(root, ["checkout", "-b", name]);
+    return {
+      ...base,
+      state: "absent",
+      action: r.ok === true ? "created" : "failed",
+      ok: r.ok === true,
+      notEvaluated: false,
+      sha: r.ok === true ? baselineSha : null,
+      detail:
+        r.ok === true
+          ? `created '${name}' at '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) and switched the main checkout to it — the working tree is byte-identical (same commit)`
+          : `could not create/switch to '${name}': git checkout -b returned non-zero: ${r.err}`,
+    };
+  }
+
+  const nameContainsBaseline = isAncestor(root, LANDING_BASELINE_ROLE, name);
+  const baselineContainsName = isAncestor(root, name, LANDING_BASELINE_ROLE);
+  if (nameContainsBaseline === null || baselineContainsName === null) {
+    return notEvaluated(
+      `branch '${name}' exists (${preexistingSha.slice(0, 8)}) but its ancestry with ` +
+        `'${LANDING_BASELINE_ROLE}' could not be decided — refusing to judge it as either related or a collision`,
+    );
+  }
+  if (!nameContainsBaseline && !baselineContainsName) {
+    return blocked(
+      `branch '${name}' (${preexistingSha.slice(0, 8)}) shares NO ancestry with ` +
+        `'${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) — a name collision, not a doc branch. ` +
+        `Switching the main checkout onto it would move the human edit surface onto a foreign line. ` +
+        `NOTHING WAS MOVED. Resolve it by hand, or re-run with a different --doc-branch-name.`,
+    );
+  }
+
+  if (dryRun) {
+    return {
+      ...base,
+      state: "reusable",
+      action: "switched",
+      ok: true,
+      notEvaluated: false,
+      sha: preexistingSha,
+      detail: `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`,
+    };
+  }
+  const r = git(root, ["checkout", name]);
+  return {
+    ...base,
+    state: "reusable",
+    action: r.ok === true ? "switched" : "failed",
+    ok: r.ok === true,
+    notEvaluated: false,
+    sha: preexistingSha,
+    detail:
+      r.ok === true
+        ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`
+        : `could not switch to the existing branch '${name}': git checkout returned non-zero: ${r.err}`,
+  };
+}
+
+/**
+ * One-line-per-state rendering for the operator (and the shell entry's `[BLOCKED] doc-branch`
+ * relay token). The `doc-branch` role token is what `quay-init.sh` matches on — it is a POSITION in
+ * the output, not a verdict recomputed downstream (the shell never re-judges; branch-model.ts owns
+ * the judgment — ADR-004).
+ */
+export function formatDocBranchReport(report: DocBranchReport): string {
+  const mark =
+    report.state === "blocked"
+      ? "BLOCKED"
+      : report.notEvaluated
+        ? "NOT-EVALUATED"
+        : report.action === "failed"
+          ? "FAILED"
+          : report.action.toUpperCase();
+  return [
+    `doc branch (name: ${report.name === "" ? "(none supplied)" : report.name}, landing baseline: ${LANDING_BASELINE_ROLE}):`,
+    `  [${mark}] doc-branch -> ${report.name === "" ? "(none)" : report.name} — ${report.detail}`,
+  ].join("\n");
 }

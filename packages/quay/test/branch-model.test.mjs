@@ -23,6 +23,9 @@ import {
   classifyBranch,
   detectDefaultBranch,
   ensureBranchModel,
+  ensureDocBranch,
+  formatDocBranchReport,
+  resolveCheckedOutBranch,
   resolveDocBranchRole,
   verifyBranchModel,
 } from "../src/branch-model.ts";
@@ -205,12 +208,17 @@ test("shape ②: adoption preserves the old tip as a backup ref and re-points `d
   assert.equal(classifyBranch(dir, LANDING_BASELINE_ROLE, "main").state, "compatible");
 });
 
-test("the doc-branch role is DERIVED from the checkout — never a literal, never created", () => {
+test("the doc-branch role is DERIVED from the checkout — ensureBranchModel never invents a name", () => {
   // ⛔ Hardcoding a doc-branch NAME here would re-introduce exactly what
   // gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync removed: `author` is quay's own
-  // convention, and target-identity-literal-check.ts fails RED on it. The shipped mechanism derives
-  // the doc branch at runtime (driver-filters.ts resolveDocBranch = the checked-out branch), so
-  // creating a named branch would produce a dead artifact the mechanism never returns.
+  // convention, and target-identity-literal-check.ts fails RED on it.
+  //
+  // This arm is scoped to the PROVISIONING step (`ensureBranchModel`): it reports which branch fills
+  // the role and names none. The role can now also be BOOTSTRAPPED — but only by `ensureDocBranch`,
+  // which takes the name as a REQUIRED input from the caller and never supplies one itself; a branch
+  // it creates is therefore NOT a dead artifact, because the shipped mechanism derives the doc branch
+  // at runtime (driver-filters.ts resolveDocBranch = the checked-out branch) and will return exactly
+  // that branch. The invariant both share: the judgment layer carries no branch-name literal.
   const dir = thirdPartyShapedRepo();
   assert.equal(resolveDocBranchRole(dir), "main", "the role is the checked-out branch");
   const report = ensureBranchModel(dir, { adopt: true });
@@ -539,4 +547,223 @@ test("shipped quay-init.sh: a compatible baseline is NOT refused (the AC4 arm of
   assert.doesNotMatch(r.stderr, /REFUSES to upgrade/, "a compatible baseline must never be refused");
   assert.match(r.stdout, /\[REUSED\] landing-baseline -> develop/);
   assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "and no branch is moved");
+});
+
+// ── the DOC-branch bootstrap (gap-quay-init-no-doc-branch-bootstrap-leaves-main-checkout-on-develop)
+//
+// The defect: `ensureBranchModel` establishes the landing baseline but only REPORTS the doc branch,
+// so a project can satisfy the whole branch model while its MAIN CHECKOUT sits on `develop` — the one
+// branch the shipped mechanism writes to. Human edits and driver commits then share one branch AND
+// one git index. Measured 2026-09-13 on a real third-party project (quay-fleet): no doc branch had
+// ever existed and `.quay/doc-develop-sync.jsonl` had never contained a line.
+//
+// The invariant these tests pin is NAME-AGNOSTIC: the only ref compared BY NAME is `develop` (the
+// protocol literal). No test below would change if the doc branch were called anything else.
+//
+// Falsifiability: revert `ensureDocBranch` and every assertion below reads `undefined` on the first
+// property access; drop the `--doc-branch-name` pass-through in quay-init.sh and the AC3 default test
+// (which drives the SHIPPED entry, not the TS layer) loses its branch.
+
+/** The full local-branch listing, so "no-op" can be asserted as "nothing was created", not merely
+ *  "the branch I checked did not change". */
+function refsOf(dir) {
+  return git(dir, ["for-each-ref", "refs/heads", "--format=%(refname) %(objectname)"]);
+}
+
+/** A quay-shaped project with the MAIN CHECKOUT SITTING ON `develop` (state ①) and a free `author`. */
+function onDevelopRepo(tag) {
+  const dir = newRepo(tag);
+  fs.writeFileSync(path.join(dir, "a.txt"), "1\n");
+  commit(dir, "base");
+  git(dir, ["branch", "develop"]);
+  git(dir, ["checkout", "-q", "develop"]);
+  fs.writeFileSync(path.join(dir, "b.txt"), "2\n");
+  commit(dir, "verified work on develop");
+  return dir;
+}
+
+test("doc branch ①: on `develop` with the name free ⇒ created AT the baseline tip, HEAD switched", () => {
+  const dir = onDevelopRepo("docb-absent");
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+  const r = ensureDocBranch(dir, { name: "docwork" });
+
+  assert.equal(r.state, "absent");
+  assert.equal(r.action, "created");
+  assert.equal(r.ok, true);
+  assert.equal(r.notEvaluated, false);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "docwork", "the main checkout moved onto the doc branch");
+  assert.equal(git(dir, ["rev-parse", "docwork"]), beforeDevelop, "the new branch IS the baseline tip (zero tree difference)");
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "and the baseline did not move");
+  assert.match(formatDocBranchReport(r), /\[CREATED\] doc-branch -> docwork/);
+});
+
+test("doc branch ②: already on a NON-develop branch ⇒ a true no-op (branch, HEAD sha AND ref list)", () => {
+  const dir = newRepo("docb-independent");
+  fs.writeFileSync(path.join(dir, "a.txt"), "1\n");
+  commit(dir, "base");
+  git(dir, ["branch", "develop"]);
+  git(dir, ["checkout", "-q", "-b", "some-other-line"]);
+  const beforeRefs = refsOf(dir);
+  const beforeHead = git(dir, ["rev-parse", "HEAD"]);
+
+  const r = ensureDocBranch(dir, { name: "docwork" });
+
+  assert.equal(r.state, "independent");
+  assert.equal(r.action, "noop");
+  assert.equal(r.ok, true);
+  // ⛔ "looks unchanged but quietly did something" is the failure this arm exists to exclude: the
+  // WHOLE local ref list must be identical — not just the two refs this assertion happens to name.
+  assert.equal(refsOf(dir), beforeRefs, "no branch may be created on the already-independent arm");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "some-other-line");
+});
+
+test("doc branch ③: the name is taken by an UNRELATED branch ⇒ BLOCKED, both refs frozen", () => {
+  const dir = onDevelopRepo("docb-collision");
+  git(dir, ["checkout", "-q", "--orphan", "docwork"]); // no common ancestor with `develop`
+  git(dir, ["rm", "-r", "-q", "--cached", "."]);
+  fs.writeFileSync(path.join(dir, "orphan.txt"), "unrelated\n");
+  commit(dir, "an unrelated line");
+  const collisionSha = git(dir, ["rev-parse", "docwork"]);
+  git(dir, ["checkout", "-q", "develop"]);
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+  const beforeHead = git(dir, ["rev-parse", "HEAD"]);
+
+  const r = ensureDocBranch(dir, { name: "docwork" });
+
+  assert.equal(r.state, "blocked");
+  assert.equal(r.action, "blocked");
+  assert.equal(r.ok, false, "a collision is a refusal, not a verdict-shaped pass");
+  assert.equal(git(dir, ["rev-parse", "docwork"]), collisionSha, "the colliding tip is untouched");
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "and so is the baseline");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), beforeHead, "and HEAD did not move");
+  assert.match(formatDocBranchReport(r), /\[BLOCKED\] doc-branch -> docwork/);
+});
+
+test("doc branch ④: a detached HEAD is NOT-EVALUATED, never ① or ②", () => {
+  const dir = onDevelopRepo("docb-detached");
+  git(dir, ["checkout", "-q", "--detach", "develop"]);
+  const beforeHead = git(dir, ["rev-parse", "HEAD"]);
+  const beforeRefs = refsOf(dir);
+
+  const r = ensureDocBranch(dir, { name: "docwork" });
+
+  assert.equal(r.state, "unreadable", "an unreadable HEAD is its own state (hard rule 3b)");
+  assert.equal(r.notEvaluated, true);
+  assert.equal(r.ok, true, "not-evaluated is NOT a failure — it is a withheld verdict");
+  assert.notEqual(r.state, "absent", "⛔ must not be reported as the create case");
+  assert.notEqual(r.state, "independent", "⛔ must not be reported as the already-done case");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(refsOf(dir), beforeRefs, "nothing may be created for an unjudged state");
+  assert.match(formatDocBranchReport(r), /\[NOT-EVALUATED\] doc-branch -> docwork/);
+  // The raw primitive the state rests on: a detached HEAD has NO checked-out branch.
+  assert.equal(resolveCheckedOutBranch(dir), null);
+  assert.notEqual(resolveDocBranchRole(dir), null, "resolveDocBranchRole substitutes the default branch — a DIFFERENT question");
+});
+
+test("doc branch: an absent name is NOT-EVALUATED, and no name is ever invented", () => {
+  const dir = onDevelopRepo("docb-noname");
+  const beforeRefs = refsOf(dir);
+  const r = ensureDocBranch(dir, { name: "" });
+  assert.equal(r.state, "unreadable");
+  assert.equal(r.notEvaluated, true);
+  assert.equal(refsOf(dir), beforeRefs);
+  assert.match(r.detail, /--doc-branch-name/);
+});
+
+test("doc branch: --dry-run classifies state ① and mutates NOTHING", () => {
+  const dir = onDevelopRepo("docb-dryrun");
+  const beforeRefs = refsOf(dir);
+  const beforeHead = git(dir, ["rev-parse", "HEAD"]);
+  const r = ensureDocBranch(dir, { name: "docwork", dryRun: true });
+  assert.equal(r.state, "absent");
+  assert.equal(r.action, "created");
+  assert.equal(refsOf(dir), beforeRefs, "a dry run's job is to say what WOULD happen");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), beforeHead);
+  assert.match(r.detail, /would create 'docwork'/);
+});
+
+test("doc branch: idempotent — the second run is a no-op on the unchanged repository", () => {
+  const dir = onDevelopRepo("docb-idempotent");
+  const first = ensureDocBranch(dir, { name: "docwork" });
+  assert.equal(first.action, "created");
+  const afterFirstRefs = refsOf(dir);
+  const afterFirstHead = git(dir, ["rev-parse", "HEAD"]);
+  const afterFirstStatus = git(dir, ["status", "--porcelain"]);
+
+  // No state is cleaned between the runs — that is the point of the AC.
+  const second = ensureDocBranch(dir, { name: "docwork" });
+
+  assert.equal(second.state, "independent", "the second run lands on the already-done arm");
+  assert.equal(second.action, "noop");
+  assert.equal(second.ok, true, "⛔ the second run must not error");
+  assert.equal(refsOf(dir), afterFirstRefs, "⛔ no second creation, no renamed branch");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), afterFirstHead);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "docwork");
+  assert.equal(git(dir, ["status", "--porcelain"]), afterFirstStatus, "⛔ and no file may change");
+});
+
+test("doc branch: a RELATED existing branch is switched to, never renamed or re-pointed", () => {
+  // The arm the four AC states do not name, kept because its ABSENCE would make the collision rule
+  // read as "any existing branch is refused" — the opposite of what the plan specifies.
+  const dir = onDevelopRepo("docb-related");
+  git(dir, ["checkout", "-q", "-b", "docwork"]);
+  fs.writeFileSync(path.join(dir, "doc.txt"), "doc work\n");
+  commit(dir, "a doc commit");
+  const docSha = git(dir, ["rev-parse", "docwork"]);
+  git(dir, ["checkout", "-q", "develop"]);
+
+  const r = ensureDocBranch(dir, { name: "docwork" });
+  assert.equal(r.state, "reusable");
+  assert.equal(r.action, "switched");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "docwork");
+  assert.equal(git(dir, ["rev-parse", "docwork"]), docSha, "the existing doc branch is used AS IS");
+});
+
+// ── AC3: the DEFAULT name lives in the CLI-parameter layer, and the identity check stays GREEN ────
+
+test("AC3: the SHIPPED entry's default doc-branch name is 'author' (no --doc-branch-name passed)", () => {
+  if (!fs.existsSync(VENDORED_CLI)) return; // same can't-evaluate convention as the arms above
+  const dir = onDevelopRepo("docb-default-name");
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  let r;
+  try {
+    r = {
+      stdout: execFileSync(
+        "bash",
+        [SHIPPED_INIT, "--root", dir, "--repo-root", dir, "--worktree-root", `${dir}-worktrees`, "--auto-commit-skip"],
+        { encoding: "utf8", cwd: dir },
+      ),
+      stderr: "",
+      exitCode: 0,
+    };
+  } catch (err) {
+    r = { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
+  }
+
+  assert.equal(r.exitCode, 0, `the shipped entry must establish the doc branch; got ${r.exitCode}\n${r.stdout}\n${r.stderr}`);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author", "the unspecified default IS 'author'");
+  assert.equal(git(dir, ["rev-parse", "author"]), beforeDevelop, "created at the baseline tip");
+});
+
+test("AC3: the default literal did not turn target-identity-literal-check RED", () => {
+  // The direct executable check of the reconciliation: the name default is allowed to EXIST (in the
+  // CLI-parameter / config-default layer) without the protocol whitelist being widened. ⛔ Dropping
+  // `author` out of `LEGAL_IDENTITY_VALUES`' exclusion — i.e. adding it to that Set — would make
+  // this test pass while destroying the invariant it exists to protect, which is why the second
+  // assertion pins the Set itself.
+  const checker = path.join(REPO_ROOT, "plugin", "scripts", "target-identity-literal-check.ts");
+  const out = execFileSync(
+    "node",
+    ["--no-warnings", "--experimental-strip-types", checker, "--root", REPO_ROOT, "--json"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.ok, true, `identity literals reported: ${JSON.stringify(parsed.violations)}`);
+  assert.equal(parsed.status, "pass");
+  const src = fs.readFileSync(checker, "utf8");
+  assert.match(src, /LEGAL_IDENTITY_VALUES = new Set\(\["develop", "integration", "master", "HEAD", "tasks"\]\)/);
 });
