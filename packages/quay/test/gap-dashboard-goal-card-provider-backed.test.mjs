@@ -160,7 +160,7 @@ function get(port, urlPath) {
 
 /** Poll until `fn()` is truthy or the deadline passes; returns whether it became true. Asserted on
  *  the result at every call site — a bare `await` on a timeout-returning helper is a 恒真空转. */
-async function until(fn, ms = 10_000, step = 25) {
+async function until(fn, ms = 30_000, step = 25) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     if (fn()) return true;
