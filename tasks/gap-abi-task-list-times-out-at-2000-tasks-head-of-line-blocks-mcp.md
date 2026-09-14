@@ -131,7 +131,12 @@ MCP tool 结果同时带 `content[0].text` 与 `structuredContent`，SDK 把**�
 - `packages/quay/src/cli/task-list.ts`
 - `packages/quay/src/gate/driver.ts`
 - `packages/quay/test/gap-abi-task-list-pagination-payload-bound.test.mjs`
+- `plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs`
 - `tasks/gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp.md`
+
+> **最后一条 Touches 是后加的，理由见 `## Evidence`「fan-in 被一条无关的 suite 红挡下」**：
+> 该测试文件是本任务 delta 的一部分（本分支确实改了它），不是「把别人的红算进自己的范围」。
+> 详见该节的双向控制与 5b 扫描读数。
 
 ## 实测读数（真实生产任务库，非 fixture）
 
@@ -286,5 +291,74 @@ N = **2,000** 的合成任务库、每个任务 ~4 KB body（≈8 MB body），�
 > 但它连的生产 bundle 是构建产物，修复尚未落进去 —— 该条**不**被当成「修复已在生产生效」的证据，
 > 也刻意没有手工重建 bundle 去凑。
 
+## Evidence
 
-反证（2026-09-14 04:5xZ，立案后同轮补记，避免结论过强）：同一时段自主循环本身仍在成功建任务——03:00 后落盘的 gap-ac255-driver-internalization-pid-le2-six-kinds-fresh / gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun / gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved 等 8 条均非本会话所建。⇒ 不是「ABI 全局不可用」，而是【本会话这条 MCP 连接/服务端实例】被一个 37 s 的全量 task_list 堵死后，其上后续所有请求陪绑超时。修复本任务时，第一步应先判定：是每连接一个 provider 实例、还是共享实例；队头阻塞发生在哪一层（Core MCP handler / provider-client / native mcp-server）。⛔ 不要把「循环还在工作」当成「没有缺陷」——37 s 的全量载入是实测事实，它只是还没有打到每一个消费者身上。
+### fan-in 被一条无关的 suite 红挡下（2026-09-14，第 2/3 次续做轮）
+
+前一轮 `exited-not-landed`，`step=suite`，唯一红：
+
+```
+✖ AC3a': kernelSiblingArgv / kernelConfigPath 锚在 kernel 安装位置（⛔ 非 workspace root）
+  AssertionError [ERR_ASSERTION]: 配置路径必须落在 quay 安装树下（⛔ 非 workspace root）
+    at plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs:190:10
+# tests 2562 / # pass 2561 / # fail 1
+```
+
+**判读：不是本任务 delta 的缺陷，但也不是纯环境噪声——是本任务 worktree 里一条真红。**
+机械 delta-relatedness 给的 `UNRELATED` 只是提示；按规矩重跑一次仍复现 ⇒ 按真发现处理。
+
+**根因（一条命令可核）**：该用例断言的是**缺省**解析下的锚点，却从没中和 `QUAY_PLUGIN_ROOT`
+（`driver-runtime.ts:290/297` 的显式指针缝）。生产环境的 driver 实测**带着**这个变量：
+
+```
+$ tr '\0' '\n' < /proc/<worker-supervisor-pid>/environ | grep QUAY_
+QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin      ← 主检出，不是 worktree
+$ env QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin node -e '…'
+pluginRoot = /home/yale/work/quay/plugin
+cfgPath    = /home/yale/work/quay/plugin/scripts/drivers.yml   ← 落在 REPO_ROOT（worktree）之外
+```
+
+worker 的 suite 子进程继承该变量 ⇒ 在**任何** task worktree 里跑，`cfgPath` 都落到主检出
+⇒ `cfgPath.startsWith(REPO_ROOT)` 恒假。同文件紧邻的 `AC3a` 保存/复原了这个变量
+（`:139-171`），`AC3a'` 漏了——**同一个文件里两个兄弟用例，一个中和、一个没中和**（硬规则 5b 形态）。
+
+**旁证（不是自证）**：同一 runId 的**兄弟任务** `gap-fan-in-ts-typecheck-gate-cannot-read-third-party-config`
+的 fan-in 日志（`wk-prod-1789367589`）**同一时刻同样只红这一条**，`# tests 4862 / # pass 4861 / # fail 1`，
+同一行号。⇒ 这不是本任务独有的，是两个任务同时被同一条红挡下。
+
+**修法（最小、且让判据重新成为测量）**：在 `AC3a'` 里保存/复原 `QUAY_PLUGIN_ROOT`（与 `AC3a` 同款），
+使断言的对象回到 AC 所声明的那个量，并**与环境无关**。
+
+**双向控制（都在本轮实跑）**：
+
+| 条件 | 结果 |
+|---|---|
+| 环境带 `QUAY_PLUGIN_ROOT`（= 失败条件）+ **改前** | **红**：`AssertionError` @ `:190`（生产日志 2 次 + 本地复现 1 次） |
+| 环境带 `QUAY_PLUGIN_ROOT` + **改后** | **绿**：`tests 6 / pass 6 / fail 0` |
+| **不带** `QUAY_PLUGIN_ROOT` + 改后 | **绿**：`tests 6 / pass 6 / fail 0`（⛔ 无回归：不是靠删变量把用例变空转） |
+
+第三行是关键：改后**两种环境取同一真值** ⇒ 判据不再由环境决定（硬规则 4b：读数不得由被测对象之外的量决定）。
+
+**硬规则 5b 扫描（本缺陷的其它适用点）**，载体 = 全部 import 了 kernel 解析函数的测试文件：
+
+```
+$ grep -rln "resolveKernelPluginRoot\|resolveKernelScriptsDir\|kernelConfigPath\|resolveKernelSibling" plugin/test/ packages/*/test/
+⇒ 14 个文件（含 2 个 fixture）
+```
+
+逐条看「是否断言绝对路径锚点、且未中和该变量」：**命中 1 处**，就是本文件 `AC3a'`。其余或
+自带 save/restore（`driver-runtime` / `worker-driver*` / `promotion-driver` / `cap-from-gate-process-budget-path` /
+`conformance-target-fixture` / `driver-third-party-fixture`），或断言**两侧同用同一函数**故 override 对称抵消
+（`worker-driver-resident.test.mjs:268`：期望值与实得值都取自 `resolveKernelScriptsDir()`），
+或只对源码文本做静态扫描（`kernel-sibling-resolution-check` / `registry-bare-filename-scan` /
+`criterion-fidelity-historical-case` / `build-plugin-dist`）。⇒ **与本轮 suite 实测的 `# fail 1` 一致**。
+
+**Touches 加这一条的理由（⛔ 不是把别人的红算进自己的范围）**：`git diff develop...HEAD` 里
+本分支**确实**改了这个文件，所以它是本任务 delta 的一部分；anti-drift 是 **NON-WAIVABLE HARD FAIL**，
+不声明就每轮报 `out-of-declared`。按纪律先问「develop 是否也在修它」——**没有**
+（`git log develop -- <该文件>` 最后一条是 `00df3163a`，即引入该用例的那次；develop 侧无对应修复），
+所以「再 merge 一次 develop 就会自愈」那条路不存在 ⇒ 走「登记 Touches 并写明理由」这一支。
+
+**⛔ 未做的事（留档）**：没有去动生产侧的 `QUAY_PLUGIN_ROOT` 传递（driver 环境里带着它，
+在 quay 自己的检出里与自解析同值、无害；它的**继承进 suite** 才是本次的触发条件）。
+本轮只把**测试**改成 hermetic —— 那是该红所属的那一层，且无论生产侧将来怎么变都成立。
