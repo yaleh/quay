@@ -2,7 +2,8 @@
 id: gap-quay-native-task-create-duplicate-id-prepends-frontmatter
 title: quay-native task create 对已存在 id 返回 0 并把第二段 frontmatter 前置（静默损坏任务文件 + ABI
   的 status 变成 todo）
-status: todo
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - mechanism
@@ -62,3 +63,10 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 
 真实落地 = 在**一个真实的任务文件**上跑一次对已存在 id 的 `task create`，该文件**字节不变**且退出非 0
 （⛔ 只有单测不算）；并且新 id 的创建路径逐字未变。
+
+## Needs-Human
+
+**执行 2026-09-14T08:03:14.184Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
+- 成因类：human-adjudication
