@@ -2,7 +2,8 @@
 id: gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger
 title: AC-214 第四次转红（升级面 AC-238/239 202/200，margin −2；同一对主体 24h 内第二次）：关闭动作 =
   重跑升级面产出者；并把「刷新动作」机械化——主体↔产出者映射的完备性判定 + 由 margin 载体派生的 routine 触发
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -697,3 +698,14 @@ flipAcGateVerdict: {"ok":false,"status":"fail","total":8,"checked":3,"unchecked"
 `packages/quay/scripts/package.sh` 的 dist 闭包推导，需另立任务）。
 **后半**：AC7/AC8 已完成且独立可验（分支 `task/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger`
 上 3 个提交，scoped 门绿，scoped-gate cache 已按 `develop-sha ce53bde1` 写入）—— 人裁定后可单独落地。
+## Needs-Human
+
+**执行 2026-09-14T23:46:24.907Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=23735 /home/yale/work/quay-worktrees/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger/packages/quay/test/serve-ac95-views.test.mjs passed=false end_ms=1789429481825 cpu_ms=15770.405 mem_peak_kb=117052
+- run_id：wk-prod-1789367589
+- session_id：b3aa85ed-d236-4d25-8008-2426604f87a7
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger~wk-prod-1789367589~1789429014738-11ebfb.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger-wk-prod-1789367589.log
