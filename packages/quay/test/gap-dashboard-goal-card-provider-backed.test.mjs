@@ -170,7 +170,18 @@ before(async () => {
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
   port = server.address().port;
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: /dashboard's request path now serves a
+  // SNAPSHOT built by a background tick (the goal card included — `client.goalList()` costs ~1 s
+  // through the real ABI, so it cannot stay on the request path). Retire the tick here and rebuild
+  // EXPLICITLY (`rebuild()` below) after each fixture change, so the tests keep exercising the
+  // PRODUCTION path instead of racing a 30 s refresh.
+  server.dashboardSnapshot.stop();
 });
+
+/** Make the dashboard snapshot reflect the goal store as it is right now. */
+async function rebuild() {
+  await server.dashboardSnapshot.rebuildNow();
+}
 
 after(async () => {
   await new Promise((r) => server.close(r));
@@ -191,6 +202,7 @@ test("AC1+AC2: a running serve instance serves goal-card AND task-card on /dashb
 
 test("AC4: with no goals the /dashboard still returns 200 and shows the empty state", async () => {
   for (const f of fs.readdirSync(goalsDir)) fs.rmSync(path.join(goalsDir, f));
+  await rebuild();
   try {
     const r = await get(port, "/dashboard");
     assert.equal(r.status, 200);
