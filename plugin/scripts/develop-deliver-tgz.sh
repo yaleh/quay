@@ -2233,6 +2233,8 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --ac257-plugin-root "\${PLUGIN_ROOT}" \
   --ac257-task-id "${ac257_task}" \
   --ac257-task-body "\${HOME}/ac257-task-body.md" \
+  --ac257-host-fqdn "${host_target[$hk]}" \
+  --build-sha "${develop_tip}" \
   --ac89 "\${EV}"
 RC=\$?
 echo "VERIFY-RC \${RC}"
@@ -2245,7 +2247,12 @@ fi
 REMOTE
 )
     set +e
-    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    # ⚠️ `bash -ls`（【登录】shell），⛔ 不是 `bash -s`：被取证的那一步要用 `claude`，而 ad-arm1 上
+    # `claude` 只装在 ~/.local/bin、且【不在非登录 shell 的 PATH 里】（实测：`ssh ad-arm1 'command -v
+    # claude'` ⇒ 空，`bash -lc` ⇒ /home/yale/.local/bin/claude）。用非登录 shell 会让 `command -v claude`
+    # 取假 ⇒ 项目级安装整段被跳过 ⇒ install_scope 永远读不到 project ⇒ 本 AC 结构上不可能达成，
+    # 而失败形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b / 4b：代理量 vs 直接量）。
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -ls" <<< "${remote_script}" 2>&1)"
     remote_rc=$?
     set -e
     remote_log="${repo_root}/.quay/verify-ac257-remote-${hk}-${develop_tip:0:8}.log"

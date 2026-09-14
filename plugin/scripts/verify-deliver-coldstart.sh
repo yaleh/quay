@@ -326,6 +326,8 @@ AC257_PLUGIN_ROOT_ARG=""                     # --ac257-plugin-root：远端持�
 AC257_TASK_ID_ARG=""                         # --ac257-task-id：要驱动的真实缺陷修复任务 id
 AC257_TASK_BODY=""                           # --ac257-task-body：该任务的任务体文件
 AC257_POLL_SECS=""                           # --ac257-poll-secs：done 轮询窗（缺省 3600）
+AC257_HOST_FQDN_ARG=""                       # --ac257-host-fqdn：驱动方用来 ssh 到目标机的全名；host 字段由它派生
+AC257_HOST_SOURCE=""                         # host 字段的来源（fqdn-verified | hostname-fallback），写进日志可核
 AC257_WRITTEN_THIS_RUN=0
 
 # ── AC-238（GOAL-009）：【既有旧痕迹第三方项目】的升级路径（gap-aged-third-party-project-quay-upgrade-verification）
@@ -589,6 +591,12 @@ while [ $# -gt 0 ]; do
     --ac257-task-id) AC257_TASK_ID_ARG="$2"; shift 2 ;;
     --ac257-task-body) AC257_TASK_BODY="$2"; shift 2 ;;
     --ac257-poll-secs) AC257_POLL_SECS="$2"; shift 2 ;;
+    # --ac257-host-fqdn：驱动方【实际用来 ssh 到目标机】的那个全名（如 ad-arm1.wan.hwang.men）。
+    # host 字段=它的第一个 label，且该全名必须【在目标机上解析到目标机自己拥有的地址】才成立
+    # —— 见 ac257_host_from_fqdn 的注释：criterion 要求字面 host="ad-arm1"，而目标机的 `hostname`
+    # 是实例名（实测 instance-20221019-1509）⇒ 唯一忠实的取法是从驱动方的连接名派生【并当场核验
+    # 该名字确实指向这台机器】。缺省不传 ⇒ 回落 hostname（既有行为不变，但那个值不满足本 AC 的判据）。
+    --ac257-host-fqdn) AC257_HOST_FQDN_ARG="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -1865,6 +1873,51 @@ ac257_is_probe_path() {
     *verify-*|*probe*|*/tmp/*) return 0 ;;
   esac
   return 1
+}
+
+# ── host 字段的取法（criterion 逐字要求 host="ad-arm1"）─────────────────────────────────────
+# 为什么不是 `hostname`：目标机的 `hostname` 是【实例名】（ad-arm1 实测 instance-20221019-1509），
+# 与本 AC 要求的字面 `ad-arm1` 不同形；而目标机上【没有任何直接量】能读回 `ad-arm1`（实测：
+# /etc/hosts 无该名、`getent hosts <自身各地址>` 一律返回实例名、IPv4/IPv6 的 PTR 也都返回实例名）。
+# ⇒ 唯一忠实的取法是：从【驱动方实际用来 ssh 到目标机的那个全名】派生第一个 label，并【当场核验
+# 该全名确实指向这台机器】——核验方式是「该名字在【目标机上】解析出的地址里，至少有一个属于目标机
+# 自己拥有的地址集」。核验不过 ⇒ 读不出 ⇒ 调用方 NOT-EVALUATED（⛔ 不回落成一个「看起来也行」的值：
+# 那正是硬规则 3b 的形态）。这条判据能取假：在一台【不是】ad-arm1 的机器上跑，那个全名不会解析到
+# 它 ⇒ 拒写。
+ac257_owned_addrs() {
+  hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
+}
+# 默认解析器（getent 优先走 NSS、dig 兜底）。AC257_RESOLVE_CMD 是【测试接缝】（同 VC_NODE 的性质）：
+# --selfcheck 用它注入确定的解析读数，⛔ 产品路径不设它。
+ac257_resolve_default() {
+  local fqdn="$1"
+  getent hosts "$fqdn" 2>/dev/null | awk '{print $1}'
+  dig +short A "$fqdn" 2>/dev/null
+  dig +short AAAA "$fqdn" 2>/dev/null
+}
+# $1 = fqdn；$2 = 拥有的地址集（缺省 hostname -I；--selfcheck 用它做注入）。
+# 成功 ⇒ 打印第一个 label 且返回 0；任一步读不出/核验不过 ⇒ 不打印、返回 1。
+ac257_host_from_fqdn() {
+  local fqdn="$1" owned="${2:-}" addrs="" ip hit=0
+  [ -n "$fqdn" ] || return 1
+  [ -n "$owned" ] || owned="$(ac257_owned_addrs)"
+  [ -n "$owned" ] || return 1
+  if [ -n "${AC257_RESOLVE_CMD:-}" ]; then
+    # 接缝是一个【命令字符串】，用 bash -c 执行（⛔ 不是 "$AC257_RESOLVE_CMD" "$fqdn"——变量展开
+    # 不做去引号，带引号的写法会把引号当字面量、静默变成 command-not-found ⇒ 空读数 ⇒ 正例假红）。
+    addrs="$(AC257_SEAM_FQDN="$fqdn" bash -c "$AC257_RESOLVE_CMD" 2>/dev/null)"
+  else
+    addrs="$(ac257_resolve_default "$fqdn")"
+  fi
+  [ -n "$addrs" ] || return 1
+  while IFS= read -r ip; do
+    [ -n "$ip" ] || continue
+    if printf '%s\n' "$owned" | grep -qxF "$ip"; then hit=1; break; fi
+  done <<EOF
+$addrs
+EOF
+  [ "$hit" = "1" ] || return 1
+  printf '%s\n' "${fqdn%%.*}"
 }
 
 # ── AC-257 记录写（fail-closed）───────────────────────────────────────────────────────────
@@ -3175,14 +3228,27 @@ MP_ENABLED_LEAK=0       # 1 = enabledPlugins 出现用户级 quay 键（AC-161 �
 step_ac257_project_scope() {
   local root="$1" plugin_root="$2" qrl="$3" task_id="$4" bodyfile="$5"
   local settings="$root/.claude/settings.json" settings_rel=".claude/settings.json"
-  AC257_HOST="$(hostname 2>/dev/null || echo '')"
+  # host 字段（见 ac257_host_from_fqdn 头注释：criterion 要字面 ad-arm1，而目标机 hostname 是实例名）。
+  # 两条路径【可区分】：fqdn-verified（驱动方给了连接名且当场核验通过）| hostname-fallback（没给连接名）。
+  # ⛔ fallback 不是「也能过」——它写出的实例名不满足本 AC 的判据，故在下面显式打印出来。
+  if [ -n "$AC257_HOST_FQDN_ARG" ]; then
+    AC257_HOST="$(ac257_host_from_fqdn "$AC257_HOST_FQDN_ARG" 2>/dev/null || true)"
+    AC257_HOST_SOURCE="fqdn-verified"
+    if [ -z "$AC257_HOST" ]; then
+      echo "  AC257-NOT-EVALUATED: --ac257-host-fqdn '$AC257_HOST_FQDN_ARG' 在本机解析不出【本机拥有的】地址 ⇒ host 读不出（⛔ 不回落 hostname）⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  else
+    AC257_HOST="$(hostname 2>/dev/null || echo '')"
+    AC257_HOST_SOURCE="hostname-fallback"
+  fi
   AC257_PROJECT_ROOT="$root"
   local rc_pre_scope rc_reset rc_rerun rc_ms rc_inst
   local before_stop="" after_stop="" before_keys="" after_keys="" before_ep="" after_ep=""
   local reset_state="as-is"
 
   echo "== ⑨ AC-257 project-scope + quay-init rerun (merge semantics) + real todo→done =="
-  echo "  host=$AC257_HOST project_root=$root plugin_root=$plugin_root"
+  echo "  host=$AC257_HOST (source=$AC257_HOST_SOURCE) project_root=$root plugin_root=$plugin_root"
 
   # ── quay_version：从【安装物】读（⛔ 不自报）──────────────────────────────────────────
   AC257_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
@@ -6864,6 +6930,22 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   write_ac257_record "${ac257_pp[@]}" >/dev/null 2>&1 || ac257_probe_refused=$((ac257_probe_refused + 1))
   echo "selfcheck: ac257(probe-path-negatives) refused=$ac257_probe_refused/2 (expect 2/2 — 探测路径字面必须被写入期闸挡住)"
   [ "$ac257_probe_refused" = "2" ] || fail="$fail AC257-probe-path-accepted"
+  # host 字段的取法（ac257_host_from_fqdn）：解析读数与「本机拥有的地址集」两个输入都注入，
+  # 四种组合逐一断言 —— ⛔ 只证「能读出」不证「读不出」（硬规则 3b 的镜像半边）。
+  # ⚠️ 本组证明的是【该判据能取假】；「它在生产上真的取到了 ad-arm1」由 AC-257 的真机运行负责
+  # （硬规则 4 推论三：只能被夹具满足的判据不是测量，所以夹具只承担可证伪这一半）。
+  local ac257_h_ok="" ac257_h_own_ok="" ac257_h_foreign="" ac257_h_unres=""
+  ac257_h_ok="$(AC257_RESOLVE_CMD='echo 10.9.9.9' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.9.9.9" 2>/dev/null || true)"
+  AC257_RESOLVE_CMD='echo 10.9.9.9' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.0.0.1" >/dev/null 2>&1 && ac257_h_foreign="ACCEPTED" || ac257_h_foreign="refused"
+  AC257_RESOLVE_CMD='true' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.9.9.9" >/dev/null 2>&1 && ac257_h_unres="ACCEPTED" || ac257_h_unres="refused"
+  ac257_host_from_fqdn "" "10.9.9.9" >/dev/null 2>&1 && ac257_h_own_ok="ACCEPTED" || ac257_h_own_ok="refused"
+  echo "selfcheck: ac257(host-from-fqdn) label='$ac257_h_ok' (expect 'ad-arm1' — 解析到【本机拥有】的地址才成立，且 label 取自连接名的第一个 label)"
+  echo "selfcheck: ac257(host-from-fqdn negatives) resolved-but-foreign=$ac257_h_foreign unresolved=$ac257_h_unres empty-fqdn=$ac257_h_own_ok (expect refused/refused/refused — 三种读不出各成一例)"
+  [ "$ac257_h_ok" = "ad-arm1" ] || fail="$fail AC257-host-fqdn-positive"
+  [ "$ac257_h_foreign" = "refused" ] || fail="$fail AC257-host-fqdn-foreign-address-accepted"
+  [ "$ac257_h_unres" = "refused" ] || fail="$fail AC257-host-fqdn-unresolved-accepted"
+  [ "$ac257_h_own_ok" = "refused" ] || fail="$fail AC257-host-fqdn-empty-input-accepted"
+  unset AC257_RESOLVE_CMD
   AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
 
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
