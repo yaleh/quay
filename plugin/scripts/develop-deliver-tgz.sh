@@ -2568,8 +2568,58 @@ FAKESSH
     echo "selfcheck: worker-preflight FAIL — the probe predicate drifted between the two scripts" >&2
     rc=1
   fi
+
+  # ── worker-env 下发（ac258_worker_env_export）三个方向都取 ──────────────────────────────────
+  # ①两个都没设 ⇒ 【什么都不发】—— 否则会给目标机注入空片段；②只设 env ⇒ 逐字下发；
+  # ③只设探测谓词 ⇒ 下发 `export …=<quoted>`，且【往返后逐字相同】。③是本组的可证伪点：`%q` 有没有
+  # 把 `"` 与 `$` 转义对，读一眼输出会以为对（它看起来就是个带引号的字符串），只有把下发物再
+  # source 一次、再把变量读回来比，才验得到。⛔ 三个方向缺任一个，这一组就与「恒真」同形。
+  local env_out="" rt=""
+  env_out="$(QUAY_AC258_WORKER_ENV='' QUAY_AC258_WORKER_PROBE_CMD='' ac258_worker_env_export)"
+  echo "selfcheck: worker-env(unset) bytes=${#env_out} (expect 0 — 未声明 ⇒ 不下发，⛔ 不回落不猜)"
+  [ -z "$env_out" ] || { echo "selfcheck: worker-env FAIL — unset emitted '${env_out}'" >&2; rc=1; }
+  env_out="$(QUAY_AC258_WORKER_ENV='export SENTINEL=1' QUAY_AC258_WORKER_PROBE_CMD='' ac258_worker_env_export)"
+  echo "selfcheck: worker-env(env-only) verbatim=$([ "$env_out" = 'export SENTINEL=1' ] && echo 1 || echo 0) (expect 1)"
+  [ "$env_out" = 'export SENTINEL=1' ] || { echo "selfcheck: worker-env FAIL — env-only not verbatim ('${env_out}')" >&2; rc=1; }
+  local probe_src='source ~/.k; export T="$K"; claude -p "say ok"'
+  env_out="$(QUAY_AC258_WORKER_ENV='' QUAY_AC258_WORKER_PROBE_CMD="$probe_src" ac258_worker_env_export)"
+  { printf '%s\n' "$env_out"; printf 'printf "%%s" "$QUAY_AC258_WORKER_PROBE_CMD"\n'; } > "$t/envrt.sh"
+  rt="$(env -u QUAY_AC258_WORKER_PROBE_CMD bash "$t/envrt.sh" 2>/dev/null)"
+  echo "selfcheck: worker-env(probe-cmd round-trip) identical=$([ "$rt" = "$probe_src" ] && echo 1 || echo 0) (expect 1 — %q 的引号必须在目标机上往返回来)"
+  [ "$rt" = "$probe_src" ] || { echo "selfcheck: worker-env FAIL — probe cmd did not survive the %q round-trip ('$rt')" >&2; rc=1; }
   rm -rf "$t"
   return $rc
+}
+
+# ── ac258_worker_env_export — 目标机上 worker 的启动环境声明（被驱动 e2e 的【登录面】）────────────
+# 存在的理由（本轮实测，硬规则 4b）：AC-258 第 ④ 步要靠【目标项目自己的 drivers】驱动一条真实任务到
+# done，而 worker 由 driver spawn ⇒ 继承的是 **driver 的进程环境**，⛔ 不是登录 shell 的环境（实测
+# 「worker env is process env, not login shell」）。因此一台目标机只有两条登录面：
+#   ① 该机自己的 Claude Code OAuth 登录态；
+#   ② 调用方显式声明的 Anthropic-compatible 环境（ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN …）。
+# 实测 orangevps 2026-09-14：① 已死（~/.claude/.credentials.json 的 accessToken 与 refreshToken 均为
+# 【空串】，expiresAt=0 ⇒ 连自动刷新这条路径都不存在）；而 ② 在那台机器上【可用且已由人授权】——
+# `~/.local/etc/fjdac-api-key` + `~/.local/bin/claude-fjdac` 就是「绕开 OAuth 走第三方 endpoint」的既定
+# 形态（AC-207 记录在案，人 2026-09-09 授权）。⛔ 缺的不是授权，是这条【声明通道】：没有它，本模式
+# 只能靠 ①，而 ① 一坏，整条第 ④ 步就与「机制坏了」同形（硬规则 3b）。
+# ⚠️ 与探测的关系（本函数另一半的理由）：片段在远端 `bash -ls` 下**先于** verify-deliver-coldstart.sh
+#    执行 ⇒ 该脚本的 worker 前置探测（`bash -lc <probe>`）与它随后启动的 driver/worker 继承【同一个】
+#    环境 ⇒ 探测对象 == 实际 spawn 对象。否则探测量的与真正跑的是两回事（同一类代理量缺陷）。
+# ⛔ 缺省（未设）时什么都不发：不回落、不猜、不读目标机上的任何密钥——由调用方逐字声明。
+ac258_worker_env_export() {
+  if [ -n "${QUAY_AC258_WORKER_ENV:-}" ]; then
+    printf '%s\n' "${QUAY_AC258_WORKER_ENV}"
+  fi
+  # ⚠️ 探测谓词也必须一起带过去，否则报出一个【本地查了、远端没查】的不对称：本地那份探测
+  #    （ac258_probe_target_worker）会读 QUAY_AC258_WORKER_PROBE_CMD，而远端 verify-deliver-coldstart.sh
+  #    的 ac258_worker_preflight 读的是它【自己进程】的环境（ssh 不过环境）⇒ 没带过去时远端退回缺省
+  #    谓词，两个探测量的不是同一件事。**而远端那一份才是权威判定**（它就在那台机器上跑、且在删键前
+  #    再判一次）⇒ 本地通过、远端否决：破坏性步骤一步都不会跑，而失败形态看起来像「探测太严」。
+  #    这与 QUAY_AC258_WORKER_ENV 是同一件事的两端，故同处下发（硬规则 5b：修一个不等于只有一处）。
+  if [ -n "${QUAY_AC258_WORKER_PROBE_CMD:-}" ]; then
+    printf 'export QUAY_AC258_WORKER_PROBE_CMD=%s\n' "$(printf '%q' "${QUAY_AC258_WORKER_PROBE_CMD}")"
+  fi
+  return 0
 }
 
 # ── verify_ac258_mode — GOAL-018-AC-258：user scope 删键重注册 + quay-init 重跑 + 真实 todo→done ──
@@ -2622,6 +2672,7 @@ verify_ac258_mode() {
     fi
     remote_script=$(cat <<REMOTE
 $(verify_node_export_for "${hk}")
+$(ac258_worker_env_export)
 EV="\${HOME}/quay-verify-ac258-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
 PREFIX="\${HOME}/.local/opt/quay/${ac258_ver}"
