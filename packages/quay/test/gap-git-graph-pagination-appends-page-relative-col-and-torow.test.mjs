@@ -16,6 +16,14 @@
 //   AC6  分页 payload 不再携带页内相对量：行对象不含 col 字段、不含 edges（故不含 toRow）。
 //   AC7  生产读数：AC1/AC2/AC3 均在真实生产仓库经多轮加载后取值（>500 条、有跨列边），非 fixture。
 //
+// ── gap-git-graph-pagination-ac2-oracle-races-live-refs: the feed and the oracle read ONE frozen ref window ──
+// The feed (`readGitHistory` → `git log --all --topo-order -n 500 --skip=N`) and the oracle
+// (`git log --graph --all -n <loaded>`) used to be two INDEPENDENT LIVE reads of `--all`. Any ref that
+// advanced between them shifted the window head by K and dropped K off the tail ⇒ exactly K
+// mismatches, every one shaped `git=undefined` (the rendered commit is not IN the oracle window) and
+// never `git=<number>` — a window SHIFT, not a column bug. Both sides now take the SAME frozen ref
+// window; see the block above `snapshotRefWindow()`.
+//
 // Run (scoped): node --test packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +32,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory, clearGitHistoryCache, GIT_HISTORY_LIMIT } from "../src/observation.ts";
+import { readGitHistory, clearGitHistoryCache, GIT_HISTORY_LIMIT, realGitExec } from "../src/observation.ts";
 import {
   gitGraphClientScript,
   assignGitColumns,
@@ -136,12 +144,83 @@ function renderedColByHash(mount) {
   return map;
 }
 
-/** The git oracle: `git log --graph --all -n <n>` → hash → column (the adopt test's sentinel parse). */
-function gitGraphReferenceColumns(n) {
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", "--all", "-n", String(n), "--pretty=format:%x01%H"], {
+// ── the immutable ref window (gap-git-graph-pagination-ac2-oracle-races-live-refs) ────────────────
+//
+// RACE (measured 2026-09-14: 1 real fan-in sample + 1 controlled repro, same signature): the FEED
+// (`readGitHistory` → `git log --all --topo-order -n 500 --skip=N`) and the ORACLE
+// (`git log --graph --all -n <loaded>`) were TWO INDEPENDENT LIVE READS of `--all`, with no snapshot
+// between them. Any ref that advances in between shifts the window head by K and drops K off the
+// tail ⇒ exactly K mismatches, every one shaped `git=undefined` (the rendered commit is not IN the
+// oracle window) and never `git=<number>`. A window SHIFT, not a column bug. This repo's loop keeps
+// advancing `develop`/`author` WHILE the suite runs, so `--all`'s stability was an assumption the
+// test never held and production never satisfies.
+//
+// FIX: snapshot the ref set ONCE into immutable object names and hand the SAME list to BOTH sides.
+// `git log <sha…>` over a frozen list is a pure function of immutable git objects — no live ref is
+// read on either side, so there is no instant at which the two windows can disagree.
+// (Verified on this repo, `--skip` 0/500/1000/1500: `git log <all-ref-shas> --topo-order -n 500
+// --skip=N` is byte-identical to `git log --all --topo-order -n 500 --skip=N`, and
+// `git log --graph <shas>` to `git log --graph --all`.)
+//
+// LOCATION: snapshotRefWindow() / frozenGitExec() below. The production read path (`observation.ts`)
+// is UNCHANGED — the frozen list is fed through its existing `exec` host-read seam (`GitExec`),
+// which exists for exactly this ("hand the reader a frozen snapshot of the host instead of racing
+// the live repo"). This is NOT a fixture: the real `git` binary reads the real repo; only the
+// START-POINT LIST is pinned instead of `--all`.
+// TIMING: taken at the top of each reading helper, BEFORE either side reads; both the feed and the
+// oracle of that reading are served from it.
+
+/** Negative-control seam (task AC3): with this set both sides go back to reading live `--all`
+ *  independently — the pre-fix shape — so the race is re-exposed under concurrent ref churn.
+ *  Default (unset) = the frozen window. */
+const LIVE_REFS = process.env.QUAY_TEST_GIT_GRAPH_LIVE_REFS === "1";
+
+/** The repo's ref set frozen into immutable object names, plus a provenance record (which refs, when). */
+function snapshotRefWindow() {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "for-each-ref", "--format=%(objectname)%09%(refname)"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
+  const shas = new Set();
+  const heads = [];
+  const tags = [];
+  for (const line of out.split("\n")) {
+    const [sha, ref] = line.split("\t");
+    if (!sha || !ref) continue;
+    shas.add(sha);
+    if (ref.startsWith("refs/heads/")) heads.push(ref);
+    else if (ref.startsWith("refs/tags/")) tags.push(ref);
+  }
+  try {
+    const h = execFileSync("git", ["-C", REPO_ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    if (h) shas.add(h); // `--all` includes HEAD, `for-each-ref refs/` does not
+  } catch { /* unborn HEAD — `%D` still marks it when it exists */ }
+  return { shas: [...shas].sort(), refCount: shas.size, heads, tags, at: new Date().toISOString() };
+}
+
+/** The window for one reading: frozen by default, `null` only under the negative-control seam. */
+function resolveRefWindow() {
+  return LIVE_REFS ? null : snapshotRefWindow();
+}
+
+/** A `GitExec` that pins every `log` invocation to the frozen ref window (no live `--all`). */
+function frozenGitExec(shas) {
+  return (args, opts = {}) =>
+    execFileSync("git", args.includes("log") ? args.flatMap((a) => (a === "--all" ? shas : [a])) : args, {
+      encoding: "utf8",
+      timeout: opts.timeout ?? 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+}
+
+/** The git oracle: `git log --graph <frozen window> -n <n>` → hash → column (the adopt test's
+ *  sentinel parse). `refs = null` is the negative-control live-`--all` arm. */
+function gitGraphReferenceColumns(n, refs = null) {
+  const out = execFileSync(
+    "git",
+    ["-C", REPO_ROOT, "log", "--graph", ...(refs ? refs.shas : ["--all"]), "-n", String(n), "--pretty=format:%x01%H"],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
   const map = new Map();
   for (const line of out.split("\n")) {
     const idx = line.indexOf("\x01");
@@ -152,6 +231,30 @@ function gitGraphReferenceColumns(n) {
     map.set(hash, Math.floor(star / 2));
   }
   return map;
+}
+
+/** The column-window judge, with an explicit THIRD state (硬规则 3b: "cannot evaluate" must not
+ *  share an output with "passed"). `evaluated` carries a mismatch count that must be 0;
+ *  `not-evaluated` means the two windows could not be lined up at all, which is NOT a column
+ *  verdict and must never be reported as one. */
+function judgeColumnWindow({ renderedCols, oracleCols, loaded }) {
+  if (oracleCols.size !== loaded) {
+    return {
+      state: "not-evaluated",
+      mismatch: null,
+      samples: [],
+      reason: `oracle window size ${oracleCols.size} ≠ loaded ${loaded} — the two windows do not line up, so a mismatch count here would be meaningless`,
+    };
+  }
+  let mismatch = 0;
+  const samples = [];
+  for (const [hash, col] of renderedCols) {
+    if (oracleCols.get(hash) !== col) {
+      mismatch++;
+      if (samples.length < 8) samples.push(`${hash.slice(0, 7)} rendered=${col} git=${oracleCols.get(hash)}`);
+    }
+  }
+  return { state: "evaluated", mismatch, samples, reason: null };
 }
 
 /** Execute the emitted client script with a fetch queue + an IntersectionObserver we can fire by hand.
@@ -195,33 +298,38 @@ async function flush() {
   for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-/** Build the production multi-page feed exactly as the client walks it: initial page + skip=500k pages. */
-function productionFeed(pageCount) {
+/** Build the production multi-page feed exactly as the client walks it: initial page + skip=500k pages.
+ *  `refs` (the frozen window) is threaded into the production read path via its `exec` seam; `null`
+ *  is the negative-control arm that reads live `--all`. */
+function productionFeed(pageCount, refs) {
+  const exec = refs ? frozenGitExec(refs.shas) : realGitExec;
   const pages = [];
   for (let k = 0; k < pageCount; k++) {
-    const h = readGitHistory(REPO_ROOT, { limit: LIMIT, skip: k === 0 ? null : LIMIT * k });
+    const h = readGitHistory(REPO_ROOT, { limit: LIMIT, skip: k === 0 ? null : LIMIT * k, exec });
     assert.equal(h.status, "ok", `production page ${k} reads ok`);
     pages.push(h);
   }
   return pages;
 }
 
-/** Run the real client over `loads` additional pages (each trigger = one loadOlder); return the mount. */
+/** Run the real client over `loads` additional pages (each trigger = one loadOlder); return the mount
+ *  and the frozen ref window both sides were served from (so the oracle can use the same one). */
 async function renderAfterLoads(loads, script = gitGraphClientScript()) {
-  const feed = productionFeed(loads + 1);
+  const refs = resolveRefWindow(); // frozen ONCE, before either the feed or the oracle reads
+  const feed = productionFeed(loads + 1, refs);
   const seed = layoutGitGraph(feed[0]).rows;
   const pages = feed.slice(1).map((h) => ({ status: "ok", reason: null, rows: gitGraphRawRows(h) }));
   const { mount, fetchCalls, trigger } = runClientWithLoads({ seedRows: seed, pages, script });
   for (let i = 0; i < loads; i++) { trigger(); await flush(); }
   assert.ok(fetchCalls.length >= loads, `≥${loads} scroll loads happened (${fetchCalls.length})`);
-  return mount;
+  return { mount, refs };
 }
 
 // ── AC1: after ≥3 scroll loads every cross-column edge endpoint anchors to a node center ─────────
 
 test("AC1: after ≥3 scroll loads every .git-svg-edge endpoint anchors to a node center (unanchored = 0)", async () => {
   clearGitHistoryCache();
-  const mount = await renderAfterLoads(3);
+  const { mount } = await renderAfterLoads(3);
   const edges = collectByClass(mount, "git-svg-edge");
   assert.ok(edges.length > 0, "cross-column edges exist after pagination (a non-degenerate judge)");
   const centers = renderedNodeCenters(mount);
@@ -240,25 +348,39 @@ test("AC1: after ≥3 scroll loads every .git-svg-edge endpoint anchors to a nod
 test("AC2: after N pages every rendered commit's column equals git log --graph --all -n <loaded> (mismatch = 0)", async () => {
   clearGitHistoryCache();
   const loads = 3;
-  const mount = await renderAfterLoads(loads);
+  const { mount, refs } = await renderAfterLoads(loads);
   const renderedCols = renderedColByHash(mount);
   const loaded = renderedCols.size;
   assert.ok(loaded > LIMIT, `the judge uses the loaded count (${loaded}), not a hardcoded ${LIMIT}`);
-  const refCols = gitGraphReferenceColumns(loaded);
-  assert.equal(refCols.size, loaded, "the oracle parses the same loaded window (contiguous emission-order pages)");
-  let mismatch = 0;
-  const samples = [];
-  for (const [hash, col] of renderedCols) {
-    if (refCols.get(hash) !== col) { mismatch++; if (samples.length < 8) samples.push(`${hash.slice(0, 7)} rendered=${col} git=${refCols.get(hash)}`); }
-  }
-  assert.equal(mismatch, 0, `column mismatch after ${loads} pages = 0 (got ${mismatch} of ${loaded}${samples.length ? ": " + samples.join(", ") : ""})`);
+  const oracleCols = gitGraphReferenceColumns(loaded, refs); // SAME frozen window as the feed
+  // Reading provenance: which window, and when it was taken (this task's fix / 取值时机).
+  console.log(
+    `[AC2] oracle window: ${refs ? `FROZEN at ${refs.at} (${refs.refCount} ref object names)` : "LIVE --all (negative-control seam QUAY_TEST_GIT_GRAPH_LIVE_REFS=1)"}; n=${loaded}`,
+  );
+  const judged = judgeColumnWindow({ renderedCols, oracleCols, loaded });
+  assert.equal(
+    judged.state,
+    "evaluated",
+    `NOT-EVALUATED — ${judged.reason} (the oracle must not report a column verdict it could not compute)`,
+  );
+  assert.equal(
+    judged.mismatch,
+    0,
+    `column mismatch after ${loads} pages = 0 (got ${judged.mismatch} of ${loaded}${judged.samples.length ? ": " + judged.samples.join(", ") : ""})`,
+  );
+  // The third state is REACHABLE and distinguishable, over a real reading of a real window: an
+  // oracle window that does not line up is reported as not-evaluated — never as a mismatch count
+  // and never as a pass (硬规则 3b: "读不懂输入" must not share an output with "合格").
+  const misaligned = judgeColumnWindow({ renderedCols, oracleCols: gitGraphReferenceColumns(loaded - 1, refs), loaded });
+  assert.equal(misaligned.state, "not-evaluated", "an unaligned window is the distinguishable third state, not a pass");
+  assert.equal(misaligned.mismatch, null, "the third state carries no mismatch count (it cannot share an output with `passed`)");
 });
 
 // ── AC3: every column line's x is strictly left of the commit text's x (intrusions = 0) ──────────
 
 test("AC3: every line.git-svg-column x is strictly left of the commit text's x (intrusions = 0)", async () => {
   clearGitHistoryCache();
-  const mount = await renderAfterLoads(3);
+  const { mount } = await renderAfterLoads(3);
   const columns = collectByClass(mount, "git-svg-column");
   const texts = collectByClass(mount, "git-svg-ink");
   assert.ok(columns.length > 0 && texts.length > 0, "column lines and commit text both exist (non-degenerate)");
@@ -276,7 +398,7 @@ test("AC3: every line.git-svg-column x is strictly left of the commit text's x (
 
 test("AC4: restoring the raw-push page rows (page-relative col/toRow, no recompute) leaves unanchored > 0", async () => {
   clearGitHistoryCache();
-  const feed = productionFeed(2);
+  const feed = productionFeed(2, resolveRefWindow());
   const page1Rows = layoutGitGraph(feed[0]).rows;
   const page2Rows = layoutGitGraph(feed[1]).rows;
   // The OLD loadOlder: dedup + append page rows VERBATIM — page-relative col/edges/toRow survive to render.
@@ -336,10 +458,20 @@ test("AC6: the pagination payload rows carry no col and no edges/toRow (raw comm
 
 test("AC7: the AC1/AC2/AC3 readings operate on real production data (>500 rows, cross-column edges)", () => {
   clearGitHistoryCache();
+  // AC5: the window IS the real repo's ref set — real branch refs AND real tag refs, i.e. a
+  // ref-dense production repo, not a synthetic fixture with a handful of refs. AC7 snapshots
+  // unconditionally: it asserts the READING is real, which is orthogonal to the negative-control
+  // seam (that seam changes only which window AC2's comparison uses).
+  const refs = snapshotRefWindow();
+  assert.ok(
+    refs.heads.length >= 1 && refs.tags.length >= 1,
+    `the window is the real repo's ref set (${refs.heads.length} branch refs, ${refs.tags.length} tag refs)`,
+  );
+  const exec = frozenGitExec(refs.shas);
   const loaded = [];
   const seen = new Set();
   for (let k = 0; k < 3; k++) {
-    const h = readGitHistory(REPO_ROOT, { limit: LIMIT, skip: k === 0 ? null : LIMIT * k });
+    const h = readGitHistory(REPO_ROOT, { limit: LIMIT, skip: k === 0 ? null : LIMIT * k, exec });
     assert.equal(h.status, "ok");
     assert.ok(h.commits.length > 0, `production page ${k} is non-empty (real repo, not a fixture)`);
     for (const c of h.commits) if (!seen.has(c.hash)) { seen.add(c.hash); loaded.push({ hash: c.hash, parentHashes: c.parentHashes }); }

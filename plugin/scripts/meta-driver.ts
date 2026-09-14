@@ -1754,28 +1754,11 @@ export async function driveItems(
 // 在其之后机械执行。故「spawn 期间出现的新改动」= 违约。
 // ⛔ 不自动还原：共享检出里同时有别的 driver 在写，还原会毁掉它们的工作。改为**检出即拒**——
 // 违约轮 fail-closed，不落任何提案/决策/任务（一个越权的 probe，其输出不可信）。
-
-/** 当前被改动的 tracked 文件集（porcelain 的 XY 前缀去掉后的路径）。git 不可用 ⇒ null
- *  （读不出 ≠ 没有改动，硬规则 6——调用侧据此跳过守卫而不是伪装成"干净"）。 */
-export function snapshotTrackedChanges(root: string): Set<string> | null {
-  try {
-    const r = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" });
-    if (r.status !== 0) return null;
-    const set = new Set<string>();
-    for (const line of String(r.stdout ?? "").split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("??")) continue; // 未跟踪文件不算（probe 产出的落盘由本文件做）
-      set.add(t.slice(2).trim());
-    }
-    return set;
-  } catch { return null; }
-}
-
-/** spawn 期间新增的改动 = 违约集合。任一侧读不出 ⇒ 返回 null（无法评估，⛔ 不当作"没违约"）。 */
-export function probeWriteViolations(before: Set<string> | null, after: Set<string> | null): string[] | null {
-  if (before === null || after === null) return null;
-  return [...after].filter((f) => !before.has(f));
-}
+//
+// 2026-09-13 迁移：实现搬到 `probe-write-guard.ts`（第二个消费者 probe-routine.ts 由 quality
+// driver 承载 ⇒ 留在这里会形成 quality-gate-driver → probe-routine → meta-driver → quality-gate-driver
+// 的 import 环）。此处 re-export 保持所有既有调用点/测试的 import 路径不变，实现仍只有一份。
+export { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guard.ts";
 
 // ── 决策通道（方向问题也必须【被路由】，⛔ 不许停在一个死胡同字段里）──────────────────────────────
 // 人 2026-09-06 裁定：这些问题都在自举的 quay 应自行处理的范围内——meta-driver 可以不自己解决，

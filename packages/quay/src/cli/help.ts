@@ -221,9 +221,19 @@ Examples:
 Usage:
   quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
+  quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
+  --doc-branch-name <name>
+               (with --branch-model-only) Establish the DOC-ONLY work branch: when the main
+               checkout is sitting on the landing baseline 'develop', create <name> at that
+               tip and switch the main checkout to it, so human edits and driver commits stop
+               sharing one branch and one git index. Already off 'develop' => no-op. <name>
+               taken by a branch unrelated to 'develop' => REFUSED (exit 1, nothing moved).
+               Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
+               default for <name>: it is supplied by the caller (the shipped quay-init.sh
+               resolves --doc-branch-name, then loop.doc_branch, then its own default).
   --dry-run    Print the generated config to stdout without writing to disk.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
@@ -259,6 +269,13 @@ Description:
   need the branch model established (the shipped plugin/scripts/quay-init.sh
   upgrade entry calls this): it never rewrites config, so an existing project's
   gates: / loop: / routines: survive.
+
+  Adding --doc-branch-name to that entry also ESTABLISHES the doc-only work
+  branch. 'quay init' REPORTS which branch fills the doc role and never names
+  one itself; the name is the caller's (a CLI parameter, or the project's
+  loop.doc_branch). A project whose main checkout stays on 'develop' has no
+  buffer between human edits and the driver's own commits — they share one
+  branch and one git index.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
