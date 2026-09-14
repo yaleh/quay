@@ -1,6 +1,8 @@
 // crystallization-half-life.test.mjs — tests for plugin/scripts/crystallization-half-life.ts
 //
-// @test-group main
+// Runs in the runner's default group set; no group annotation is declared here, because the
+// runner's recognized groups are product|engine|serial|lowconc and a mis-typed or unknown one
+// makes it fail closed rather than silently degrade the file.
 //
 // The instrument's PREDICATES are exercised on fixtures (each fixture pins ONE reading, including
 // the negative controls that make the reading falsifiable); the instrument's CLAIM is exercised
@@ -341,7 +343,9 @@ test("AC4: hard rules are parsed per entry, self-labels counted, and the cross-c
     adrs: { "ADR-001-a.md": adr("ADR-001") },
     claudeMd,
     files: {
-      "scripts/test.sh": "#!/bin/sh\nrun_checker scripts/checker-one.ts\n",
+      // The fixture's "already executing" registry — the runner's own checker registry file. It
+      // lists checker-one but NOT orphan, which is what makes rule 5's reading falsifiable.
+      "plugin/scripts/runner-static-gate.ts": "run_checker scripts/checker-one.ts\n",
       "scripts/checker-one.ts": "// c1\n",
       "scripts/orphan.ts": "// never referenced by the runner\n",
     },
