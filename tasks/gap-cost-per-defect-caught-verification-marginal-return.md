@@ -2,6 +2,7 @@
 id: gap-cost-per-defect-caught-verification-marginal-return
 title: 算每拦下一个缺陷的验证成本——给 ADR-005「验证是绑定约束」一个数（ready-pool-check 独占 97.8%）
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - analysis
@@ -62,3 +63,23 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 含可复跑锚点（命令行 + 日期 + develop tip SHA + 去重口径定义）。
 若结论显示某些检查器是纯税，**本任务只报数不删检查器**——删除要另行立案并经人裁定，
 避免用一个口径敏感的数去砍掉一道闸。
+
+## Needs-Human
+
+**执行 2026-09-14T21:46:12.406Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 5
+- run_id：wk-prod-1789367589
+- session_id：c527bfa3-2b79-40a6-8a04-1d0db6860362
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-cost-per-defect-caught-verification-marginal-return~wk-prod-1789367589~1789422155572-ef28b1.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-cost-per-defect-caught-verification-marginal-return-wk-prod-1789367589.log
+
+## Resolution note (追加, 由另一会话诊断)
+
+**2026-09-14T22:0xZ** — 上面这条 needs-human 的成因描述有误：这不是「归因不出任何失败测试文件」的基建/契约疑似问题，而是一个可精确归因的静态检查器红：`kernel-sibling-resolution-check` 在本任务自己新增的 `plugin/scripts/verification-marginal-return.ts:839` 上报了一处未豁免的 naive kernel-sibling 解析（`path.join(root, "plugin", "scripts", "runner-static-gate.ts")`，target-root 形）。
+
+已直接在本任务自己的 worktree/分支（`task/gap-cost-per-defect-caught-verification-marginal-return`）上按本仓库已有的同形先例（`axis-generator.ts` / `guard-lineage-check.ts` / `precommit-guard.ts` / `rhythm-consumer-check.ts` / `quality-gate-driver.ts` 等 ~10 处）加上检查器自己文档化的豁免标记 `kernel-sibling-dev-tree-only`（本脚本只分析本仓库自己的载体，从不对第三方项目的 root 做 sibling 解析，属同一豁免前提），commit `a324daa01`。已直接跑该检查器验证：`status: pass, violations: []`（修复前为 exit 1）。
+
+未做的事：未改动本任务其它任何 AC 的实现或结论，未重跑完整套件（那是下一次派发的常规工作），未改变 needs_human_cause 分类字段本身（成因文字已在此说明，供下一位处置者/worker 参考）。
