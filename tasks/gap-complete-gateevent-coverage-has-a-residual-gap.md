@@ -88,8 +88,8 @@ commit，**没有任何事件写入**。实测：该路径 2/2 落地零事件�
 **本条 DoD 当前未满足**：修复落地于 2026-09-14，其后**一个真实落地日都还没过** ⇒ AC3 留未勾。
 这是 DoD 自己要求的（「修复后必须经过 ≥3 天」），不是遗漏。机制侧的验证已独立完成：
 ① 用 workflow 里**逐字**的 shell 块对着临时 root 真跑 ⇒ 事件落盘（`actor: quay-fan-in-workflow`）；
-② 负控制：同一块对着**没有该 verb** 的 worker-driver 跑 ⇒ `unknown argument` ⇒ FATAL exit 1
-（即修复前该路径的结构必然是零事件，与 09-06 的实测一致）；
+② 负控制：同一块对着**没有该 verb** 的 worker-driver 跑 ⇒ `unknown argument` ⇒ **不写事件**
+（修复前该路径的结构必然是零事件，与 09-06 的实测一致）；
 ③ mutation case 与 7 条单测全绿（含「抹掉载体事件 ⇒ 必须报红」双向）。
 
 ## AC1 路径枚举
@@ -100,7 +100,7 @@ commit，**没有任何事件写入**。实测：该路径 2/2 落地零事件�
 | # | 路径 | 位置 | 写 `complete`？ |
 |---|---|---|---|
 | 1 | 机械 fan-in flip（`patchStatusField(…, "done")`） | `plugin/scripts/worker-driver.ts:3840`、`:3855`（2 处）；写入点 `appendCompleteGateEvent` `:3891`，调用点 `:4626` | **是**（但**只在 ff 成功后**——flip 在 ff 前，回滚的那次不写，这是正确的） |
-| 2 | 语义兜底 fan-in workflow flip | `plugin/workflows/fan-in-execute.js:849` `sed -i 's/^status: ready$/status: done/'`（该文件内 `status: ready$/status: done` 命中 2 条：1 条是 `:849` 本身，1 条是 `:908` 我新加的说明注释） | **修复前否（2/2 零事件）；已修**：新增 `complete-gate-event-block`（`:906-915`）经 `worker-driver.ts --append-complete-gate-event` 调**同一个** `appendCompleteGateEvent`（⛔ 不手搓 JSON） |
+| 2 | 语义兜底 fan-in workflow flip | `plugin/workflows/fan-in-execute.js:849` `sed -i 's/^status: ready$/status: done/'` | **修复前否（2/2 零事件）；已修**：新增 `complete-gate-event-block`，经 `worker-driver.ts --append-complete-gate-event` 调**同一个** `appendCompleteGateEvent`（⛔ 不手搓 JSON）；**写失败只告警、⛔ 不阻塞 landing**（见下方「## 一处我自己的判断」） |
 | 3 | QENG 生命周期（`quay complete` / `quay promote`） | `packages/quay/src/gate/lifecycle.ts:207`（`runComplete`）、`:275`（`runCompleteLoop`），均 `client.taskWrite({status: TASK_STATUS.DONE, expectedStatus: READY})` + `mkLifecycleEvent({gate:"complete", verdict:"pass"})` | **是** |
 | 4 | outer loop 完成 | `plugin/scripts/loop-complete-task.ts:70/:117` 转发 `runCompleteLoop` | **是**（与 #3 同源） |
 | 5 | Provider-ABI 直写 `status: done`（MCP `task_write` / native `task edit`） | 不经过上述任何一处；窗口内 3 次（09-08 / 09-10 / 09-12） | **否 —— ABI 层设计内旁路**（理由见 Finding 结论三）；由本判据与 `stale-ready-audit.ts` 的 `bypassComplete` 检测 |
@@ -184,9 +184,23 @@ $ echo $?
 单向性检查（防判据在修复后变成恒绿）：测试第 4 条与 mutation case 的第二向都断言
 「晚于 cutoff 且无事件的落地**仍必须报红**」——B 向不通过时判据会静默退化成「无事件一律放过」。
 
-## 接线代价（本任务自己撞出的三处红灯，已修）
+## 一处我自己的判断（写失败是否阻塞 landing）
 
-新判据第一次跑 scoped 门时自己引入三处红，全部由**本任务的 delta** 造成，已修并复验：
+新块最初写成 `exit 1`（写失败 ⇒ 本 workflow 判红）。**改掉了**，理由三条：
+
+1. 与机械路径**语义相反**：那边的 `appendCompleteGateEvent` 契约原文就是「best-effort：写失败返回
+   `{ ok:false }`，不抛——fan-in 已 landed，**观测写不得阻塞主执行**」。同一个失败在两条路径上
+   给出相反后果，是新的漂移源。
+2. 硬规则 12：**要求一个新前置之前先给出它的发生率**。我没有「事件写失败」的发生率读数
+   ⇒ 它不该成为一条阻塞前置——尤其只在兜底路径上阻塞。
+3. 静默不是风险：漏记由**次日**的覆盖率判据报出（这正是 AC4 的判据存在的理由）。
+   ⇒ 告警 + 可检测 = 该失败不可能与「一切正常」同形。
+
+**双向复验**：verb 在 ⇒ 事件落盘、exit 0；写失败（模块不存在）⇒ `WARN` 打印、**exit 0**（landing 照常）。
+
+## 接线代价：本任务自己撞出的四处红灯（全部已修）
+
+新代码第一次跑本任务自己的门时引入四处红，**全部由本任务的 delta 造成**，逐条修正并复验：
 
 - `tmp-leak-pairing-check` + `test-isolation-check` 的 AC5 单向棘轮：新测试 `makeRepo()` 调
   `fs.mkdtempSync` 未配对清理（`mkdtemp-no-cleanup`，对一个只准变短的清单是**新增违规**）。
@@ -194,25 +208,33 @@ $ echo $?
 - `task-file-bypass-check`：新检查器有 2 处 `tasks/` 文件操作命中（`git log -p -- tasks/`、
   `git show <ref>:tasks/<id>.md`）。本检查器的**客体就是任务库的状态历史**（与 `packages/quay-native`
   同形），且**从不写任务文件** ⇒ 按该棘轮自己的机制做**有理由的登记**（ALLOWLIST + `expected: 2`），
-  ⛔ 不是绕过它。
-- 顺带同步 `worker-driver.ts` 的 allowlist 计数 3→4：实测 4（`1530/1736/3059/3064`，全是既有
-  任务体读取），其中**没有一条**来自本任务。
+  ⛔ 不是绕过它。顺带同步 `worker-driver.ts` 的 allowlist 计数 3→4（实测 4 处，`1530/1736/3059/3064`，
+  全在 develop 上就已存在 —— 用 `git show develop:…| sed -n` 逐行核过，其中**没有一条**来自本任务）。
+- `capability-catalog.test.mjs`：CADENCE 必须是五个枚举值之一（`每轮/每红窗/每里程碑/冷启动/按需`），
+  我写了自由文本 ⇒ 改回 `每轮`。
+- **`fan-in-execute.js` 是 JS 模板字符串**：我插入的说明块里带了反引号 ⇒ **提前终止模板串**
+  （`SyntaxError: missing ) after argument list`），`fan-in-execute-paths.test.mjs` 8/93。改成无反引号
+  写法后 **93/93**（该文件反引号数与 develop 相等）。⚠️ 这条是硬规则 3b 的教科书实例：这个缺陷的
+  **第一版不是我发现的**，是套件报出来的——**给它写注释时我对「这段文本位于什么上下文里」完全没有检查**。
 
 ## 机制侧验证（修复的真实性，非 fixture 回声）
 
 ① **逐字真跑**：把 `fan-in-execute.js` 里新增的 shell 块原样取出，对着临时 root 跑：
 
 ```
-$ worktree=<worktree> root=<tmp> task=TEST-probe-002 bash -euc '<该块的逐字内容>'
-{"event":"complete-gate-event-appended","task":"TEST-probe-002","ok":true,"reason":null}
+$ worktree=<worktree> root=<tmp> task=TEST-probe-003 bash -euc '<该块的逐字内容>'
+{"event":"complete-gate-event-appended","task":"TEST-probe-003","ok":true,"reason":null}
 $ node -e '…读 <tmp>/.quay/gate-events.jsonl…'
-event: complete pass quay-fan-in-workflow TEST-probe-002 ready->done
+event: complete pass quay-fan-in-workflow TEST-probe-003
 ```
 
 ② **负控制（证明修复前该路径结构上不可能写事件）**：同一块对着**没有该 verb** 的 worker-driver 跑 ⇒
-`worker-driver: unknown argument: --append-complete-gate-event` ⇒ `FATAL: complete GateEvent 补写失败`
-⇒ exit 1。也就是说 09-06 那两条零事件落地是该路径的**结构性**结果，不是偶发写失败。
+`worker-driver: unknown argument: --append-complete-gate-event` ⇒ 走 WARN 分支 ⇒ **不写事件**
+（即 09-06 那两条零事件落地是该路径的**结构性**结果，不是偶发写失败）。
+方向二：写失败**不阻塞 landing**（exit 0）——与上节的三条理由一致。
 
 ③ **mutation case** `plugin/scripts/checker-mutation-cases/gate-event-coverage-check.sh`：真 git 仓 fixture，
 baseline 绿 → 抹掉载体事件 ⇒ 必须红 → 写回 ⇒ 绿 → 再加一条晚于 cutoff 的无事件落地 ⇒ 仍必须红。
-`bash <case>.sh <tmpdir>` exit 0。
+`bash <case>.sh <tmpdir>` exit 0；`checker-mutation-check --check-changed` 下 `MUTATION gate-event-coverage-check: pass`。
+
+④ 单测 7/7 绿（含三态 exit 3、分母、状态转移、bootstrap 窄性、双向控制）。
