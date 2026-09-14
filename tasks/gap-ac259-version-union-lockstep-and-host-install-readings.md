@@ -2,7 +2,7 @@
 id: gap-ac259-version-union-lockstep-and-host-install-readings
 title: 版本一致性收口：9 文件并集锁步（checker 补 plugin/VERSION）+ AC-259
   判据复跑与两台真机安装直接量（GOAL-018/AC-259）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
