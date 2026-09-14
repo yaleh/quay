@@ -39,6 +39,7 @@ import {
   deriveEntries,
   scanCoreReferences,
   scanPluginSelfReferences,
+  scanPluginSiblingReferences,
   closureMissing,
   bundleEntries,
   topLevelIfConditions,
@@ -50,6 +51,7 @@ import {
 } from "../scripts/build-plugin-dist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 function tmp(prefix = "build-plugin-dist-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -464,6 +466,194 @@ test("AC1 — negative control: the unnamed-guard gate TAKES FALSE (bare form fl
     assert.match(withDangling.find((d) => d.module === "scripts/dangling.ts").condition, /NOT-EVALUATED/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-dist-closure-missing-driver-anchor-js ────────────────────────────────────────────────────
+// The 4th instance of "the entry set is blind to a reference SHAPE". driver-runtime.ts's
+// preferredAnchorKernel() resolves the anchor as a sibling of a **directory VARIABLE**
+// (`path.join(here, "driver-anchor.ts")` / `path.join(mainDir, "driver-anchor.js")`) — no literal
+// path segment for any of the earlier scans to key on — so driver-anchor.ts never became an entry,
+// `dist/driver-anchor.js` never entered the artifact, and in EVERY installed/packaged layout
+// `quay driver start --kind <any>` died at spawnAnchor with "driver-anchor module not found next to
+// driver-runtime" (rc=1). Structurally invisible to this repo's own tests: the DEV tree resolves the
+// raw .ts sibling that the artifact had deleted. Measured before this task: deriveEntries = 88
+// entries, driver-anchor absent.
+//
+// The tests below pin BOTH halves of the task's DoD: the derivation catches the SHAPE (not the
+// filename), and the packaged artifact really starts a driver — a file-existence assertion alone is
+// the weaker instrument the task explicitly rejects (a truncated/incompatible file also "exists").
+
+test('AC1/AC2 — scanPluginSiblingReferences derives modules resolved as path.join(<dirExpr>, "X.ts") — the SHAPE, not the filename', () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    // The defect form (a directory VARIABLE, optionally via one call) + the installed-layout twin.
+    fs.writeFileSync(path.join(dir, "scripts", "kernel.ts"), [
+      'const here = path.dirname(kernelSelfPath());',
+      'const a = path.join(here, "sibling-module.ts");',
+      'const b = path.join(mainDir, "installed-only.js");',
+      'const c = path.join(path.dirname(kernelSelfPath()), "one-call.ts");',
+      // NOT this shape: a literal path-segment join (covered by the literal scans; its `,` in the
+      // first argument is exactly what keeps this rule false-positive-free — the BASH file
+      // runner-static-gate.ts is read as TEXT through `path.join(root,"plugin","scripts",…)`).
+      'const d = path.join(root, "plugin", "scripts", "literal-seg.ts");',
+      // NOT this shape either: an expression that is not a directory variable.
+      'const e = path.join(someVar + "/x", "expression-dir.ts");',
+    ].join("\n"), "utf8");
+    for (const n of ["sibling-module.ts", "installed-only.ts", "one-call.ts", "literal-seg.ts", "expression-dir.ts"]) {
+      fs.writeFileSync(path.join(dir, "scripts", n), "export const x = 1;\n", "utf8");
+    }
+    assert.deepEqual([...scanPluginSiblingReferences(dir)].sort(),
+      ["installed-only.ts", "one-call.ts", "sibling-module.ts"],
+      "the scan must derive directory-variable sibling joins (.ts and .js forms), and must NOT match literal-segment or non-dirExpr joins");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the scan is LOAD-BEARING in deriveEntries (a synthetic root loses the module when the join is not the dirExpr shape)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    const kernel = (joinExpr) => `const a = ${joinExpr};\nexport const k = 1;\n`;
+    fs.writeFileSync(path.join(dir, "scripts", "sib.ts"), "export const s = 1;\n", "utf8");
+    fs.writeFileSync(path.join(dir, "scripts", "kernel.ts"), kernel('path.join(here, "sib.ts")'), "utf8");
+    assert.ok(deriveEntries(dir).scripts.includes("scripts/sib.ts"),
+      "a module named by the dirExpr sibling join must be a derived entry");
+    // Same module, same file, reference spelled so it is NOT this shape ⇒ nothing derives it.
+    fs.writeFileSync(path.join(dir, "scripts", "kernel.ts"), kernel('path.join(here + "/x", "sib.ts")'), "utf8");
+    assert.ok(!deriveEntries(dir).scripts.includes("scripts/sib.ts"),
+      "the entry must disappear when the reference is not a dirExpr sibling join — the scan is the only thing naming it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the reference closure on the REAL plugin root derives + requires driver-anchor (the missed entry)", () => {
+  assert.ok(scanPluginSiblingReferences(PLUGIN_ROOT).has("driver-anchor.ts"),
+    "driver-runtime.ts's `path.join(here, \"driver-anchor.ts\")` must be derived");
+  const { scripts, gateScripts } = deriveEntries(PLUGIN_ROOT);
+  assert.ok(scripts.includes("scripts/driver-anchor.ts"),
+    "driver-anchor.ts must be in the derived entry set (before this task: 88 entries, absent)");
+  // Fails-ability at the GATE: the closure now requires dist/driver-anchor.js — an artifact without
+  // it fails package.sh instead of shipping broken.
+  const required = [...scripts, ...gateScripts].map((p) => path.basename(p).replace(/\.ts$/, ""));
+  assert.ok(closureMissing(required, ["package/plugin/scripts/dist/other.js"]).includes("driver-anchor"),
+    "the dist-closure gate must flag a tarball that lacks dist/driver-anchor.js");
+  // The pre-fix BLINDNESS, mechanically: no other derivation form names it (that is why the shape
+  // scan is load-bearing rather than a duplicate of an existing rule).
+  const otherForms = new Set([...scanCoreReferences(), ...scanPluginSelfReferences(PLUGIN_ROOT)]);
+  assert.ok(!otherForms.has("driver-anchor.ts"),
+    "no earlier scan form may name driver-anchor.ts — if one does, this task's rule is not what fixes it");
+});
+
+// ── the packaged ARTIFACT (not a fixture): build the real dist closure, run the real driver start.
+// Staging mirrors package.sh: raw .ts sources → bundled dist/<name>.js, node_modules resolvable (the
+// staged copy lives outside the repo, so link the repo's), and the kernel run FROM its dist form —
+// which is what makes the defect reachable at all (a dev-tree run resolves the raw .ts sibling).
+let stagedClosure = null;
+async function stagedDistClosure() {
+  if (stagedClosure) return stagedClosure;
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), "dist-closure-stage-"));
+  for (const d of ["scripts", "gate-scripts"]) {
+    const src = path.join(PLUGIN_ROOT, d);
+    if (!fs.existsSync(src)) continue;
+    fs.cpSync(src, path.join(stage, d), { recursive: true, filter: (p) => !/(^|\/)dist(\/|$)/.test(p) });
+  }
+  fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(stage, "node_modules"), "dir");
+  const { scripts, gateScripts } = deriveEntries(stage);
+  await bundleEntries(stage, [...scripts, ...gateScripts]);
+  stagedClosure = stage;
+  return stage;
+}
+
+/** A workspace whose ONLY driver kind is a fake promotion driver (the same seam driver-anchor.test.mjs
+ *  uses): the loop writes the kind's `pidSelf` readiness marker and then idles, so `driver start`'s
+ *  confirmation is deterministic and no production dispatch logic runs against the fixture root. */
+function fakePromotionWorkspace() {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "dist-closure-ws-"));
+  const scripts = path.join(ws, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    "export async function main(argv) {",
+    "  const args = argv.slice(2);",
+    '  const get = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };',
+    '  const root = get("--root");',
+    '  const pidFile = get("--pid-file");',
+    '  if (pidFile) fs.writeFileSync(pidFile, String(process.pid) + "\\n", "utf8");',
+    '  const carrier = path.join(root, ".quay", "promotion-round.jsonl");',
+    "  for (;;) {",
+    '    try { fs.appendFileSync(carrier, JSON.stringify({ ts: Date.now() }) + "\\n"); } catch {}',
+    "    await new Promise((r) => setTimeout(r, 150));",
+    "  }",
+    "}",
+    "",
+  ].join("\n"), "utf8");
+  return ws;
+}
+
+function startDriver(distDir, ws) {
+  return spawnSync(process.execPath, ["--no-warnings", path.join(distDir, "driver-runtime.js"),
+    "start", "--kind", "promotion", "--root", ws, "--confirm-timeout", "20"], {
+    encoding: "utf8",
+    timeout: 180_000,
+    // QUAY_PLUGIN_ROOT = the fixture's plugin dir (where the fake kind module lives).
+    // QUAY_ANCHOR_SHUTDOWN_GRACE_MS is the documented test seam (production value is 120s): it makes
+    // the anchor's bounded shutdown deterministic.
+    env: { ...process.env, QUAY_PLUGIN_ROOT: path.join(ws, "plugin"), QUAY_ANCHOR_SHUTDOWN_GRACE_MS: "3000" },
+  });
+}
+
+/** The anchor runs DETACHED (production requirement: it outlives the CLI). Kill it by its own pid
+ *  carrier — the fake kind loop does not observe stop requests, so SIGKILL is the bounded teardown. */
+function killAnchor(ws) {
+  const p = path.join(ws, ".quay", "anchor.pid");
+  if (!fs.existsSync(p)) return;
+  const pid = Number(fs.readFileSync(p, "utf8").trim());
+  if (Number.isInteger(pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+}
+
+test("AC5 — the packaged dist closure STARTS A DRIVER for real (driver-runtime.js from dist, rc=0, host=anchor)", async () => {
+  const stage = await stagedDistClosure();
+  const dist = path.join(stage, "scripts", "dist");
+  // The artifact carries the bundle at all — the entry the closure used to miss.
+  assert.ok(fs.existsSync(path.join(dist, "driver-anchor.js")),
+    `the built closure must carry dist/driver-anchor.js (got: ${fs.readdirSync(dist).filter((f) => /anchor/.test(f)).join(", ") || "no anchor bundle"})`);
+  const ws = fakePromotionWorkspace();
+  try {
+    const r = startDriver(dist, ws);
+    const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+    assert.doesNotMatch(out, /cannot spawn driver anchor/,
+      `the packaged kernel must find its anchor sibling; got:\n${out}`);
+    assert.equal(r.status, 0, `quay driver start must succeed on the packaged artifact. Output:\n${out}`);
+    assert.match(r.stdout ?? "", /started: anchor pid=\d+ kind=promotion host=anchor|"host":"anchor"/,
+      `driver start must report the anchor-hosted loop ready:\n${out}`);
+  } finally {
+    killAnchor(ws);
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — negative control: the SAME packaged artifact without dist/driver-anchor.js reproduces the production failure (rc=1 + the exact error)", async () => {
+  const stage = await stagedDistClosure();
+  const dist = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dist-closure-noanchor-")), "dist");
+  fs.cpSync(path.join(stage, "scripts", "dist"), dist, { recursive: true });
+  fs.rmSync(path.join(dist, "driver-anchor.js"));
+  const ws = fakePromotionWorkspace();
+  try {
+    const r = startDriver(dist, ws);
+    const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+    assert.equal(r.status, 1, `an artifact whose closure dropped the anchor must fail closed. Output:\n${out}`);
+    assert.match(out, /driver-anchor module not found next to driver-runtime/,
+      `the production failure signature must be reproduced verbatim:\n${out}`);
+  } finally {
+    killAnchor(ws);
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(path.dirname(dist), { recursive: true, force: true });
   }
 });
 
