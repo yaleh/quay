@@ -569,6 +569,80 @@ test("classifyCandidate — A24 classification (三可修 / 五不可修), ⛔ n
   assert.deepEqual(mixed.unfixable, ["depsReady=false"]);
 });
 
+// ── BODY-FRESHNESS third state (tasks/gap-ready-pool-body-still-read-from-stale-main-checkout) ─────
+// The consumer half. The defect: the gate's read source was behind the write face, so it reported a
+// body defect that no longer existed; the driver spawned a fix worker for it, the worker could not
+// fix what was not there, timed out, and 3 rounds of that flipped the task needs-human
+// (2026-09-14 gap-rework-multiplier-predictors). The fix worker IS the harm — so the consumer must
+// refuse it on an unvouched-for body, with a value that cannot be confused with a verdict.
+
+test("classifyCandidate — bodyEvaluated=false is its OWN class: ⛔ no fix worker for a body the gate could not vouch for", () => {
+  const base = {
+    id: "gap-a", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
+    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
+  };
+  // THE FALSIFIABLE PAIR — same body-derived input (`touchesResolve=false`, a fixable class), the
+  // ONLY difference is whether the body was evaluated. Body fresh ⇒ spawn; body unvouched-for ⇒ ⛔ no.
+  const fresh = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: true, bodyFreshness: "fresh" });
+  assert.equal(fresh.fixable, true, "control: a fresh body with touchesResolve=false IS the fixable class");
+  assert.deepEqual(fresh.missing, ["touchesResolve=false"]);
+  assert.ok(fresh.prompt, "control: a fix worker prompt is built");
+
+  const stale = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: false, bodyFreshness: "stale-suspected" });
+  assert.equal(stale.fixable, false, "same input + an unvouched-for body ⇒ ⛔ NO spawn (this is the 3-retry burn closed)");
+  assert.deepEqual(stale.missing, [], "⛔ the fixable identifier is NOT carried — it was judged on a body we cannot vouch for");
+  assert.equal(stale.prompt, null, "⛔ no fix worker prompt");
+  assert.equal(stale.notEvaluated, true, "the third state is carried as its own value, separate from `missing`/`unfixable` (硬规则 3b)");
+  assert.deepEqual(stale.unfixable, ["bodyNotEvaluated=true freshness=stale-suspected (闸读源落后写面 ⇒ 该体未被评估,⛔ 不派 fix worker)"],
+    "the reason names the freshness value — distinct from every A24 class");
+
+  // `unknown` (unmeasurable direction) is its own reason too, never collapsed into stale-suspected.
+  const unknown = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: false, bodyFreshness: "unknown" });
+  assert.equal(unknown.notEvaluated, true);
+  assert.match(unknown.unfixable[0], /freshness=unknown/, "unknown is distinguishable from stale-suspected in the word list");
+
+  // 缺值 = 未查 (硬规则 6): an OLDER gate output without the field must NOT be read as `false`.
+  assert.equal(classifyCandidate({ ...base, touchesResolve: false }).fixable, true, "field absent ⇒ pre-change behavior (undefined is not false)");
+});
+
+test("runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)", () => {
+  // The override command keeps the negative control hermetic: `node -e 0` exits 0 without an LLM.
+  const INERT = "node -e 0";
+  const notEval = runFixPass(
+    [{ id: "gap-a", fixable: false, missing: [], notEvaluated: true, unfixable: ["bodyNotEvaluated=true freshness=stale-suspected"], prompt: null }],
+    REPO_ROOT, INERT,
+  )[0];
+  assert.equal(notEval.spawned, false, "⛔ no worker spawned");
+  assert.equal(notEval.notEvaluated, true, "…and the outcome record says WHICH kind of no-spawn this is");
+  assert.equal(notEval.argv, null);
+  // Negative control: the same id with a fixable decision DOES spawn (so the assertion above is about
+  // this decision, not about runFixPass being inert).
+  const fixable = runFixPass(
+    [{ id: "gap-a", fixable: true, missing: ["touchesResolve=false"], unfixable: [], prompt: "p" }],
+    REPO_ROOT, INERT,
+  )[0];
+  assert.equal(fixable.spawned, true, "control: a fixable decision still spawns");
+  assert.equal(!!fixable.notEvaluated, false, "control: a spawn is never marked not-evaluated");
+});
+
+test("computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)", () => {
+  const re = {
+    ok: true, error: null, pool: 1, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false,
+    fixDecisions: [
+      { id: "gap-stale", fixable: false, missing: [], notEvaluated: true, unfixable: ["bodyNotEvaluated=true freshness=stale-suspected"], prompt: null },
+      { id: "gap-real", fixable: true, missing: ["touchesResolve=false"], unfixable: [], prompt: "p" },
+    ],
+  };
+  const r = computeReverifyOutcome(["gap-stale", "gap-real"], re);
+  assert.deepEqual(r.notEvaluatedIds, ["gap-stale"], "the unvouched-for body ⇒ third bucket");
+  assert.deepEqual(r.stillIneligibleIds, ["gap-real"], "a genuine still-ineligible stays counted (⛔ the third state did not swallow it)");
+  assert.deepEqual(r.nowEligibleIds, []);
+  // The consequence that matters: only the genuine failure advances the cap.
+  const state = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(state, r.stillIneligibleIds, 1), ["gap-real"], "the real failure counts");
+  assert.equal(state.counts.has("gap-stale"), false, "⛔ the unvouched-for body never advances the retry cap — this is the needs-human flip's root");
+});
+
 test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a prose directive", () => {
   const p = buildFixWorkerPrompt("gap-a", ["fourArtifacts=false missing=[dod]"]);
   assert.ok(p.includes("task_id=gap-a"), "the prompt carries the task id");

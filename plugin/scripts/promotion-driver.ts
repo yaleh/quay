@@ -178,16 +178,26 @@ export interface CandidateChecks {
   superseded: boolean;
   compound: boolean;
   prosePrereqGap: string[];
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): `false` ⇒ the gate's
+  // body-derived checks above were computed from a read source measurably behind the write face.
+  // Optional so an older gate output (field absent) keeps the pre-change behavior (`undefined` is
+  // NOT `false` — 缺值 = 未查, 硬规则 6: absent is never read as a positive).
+  bodyEvaluated?: boolean;
+  bodyFreshness?: string;
 }
 
 /** A24 分类结果。fixable = 可修三类之一且【无】不可修五类 ⇒ 该 spawn fix worker；
- *  missing = 结构化可修缺项标识（prompt 输入）；unfixable = 不可修五类的结构化原因（逐条记、不修）。 */
+ *  missing = 结构化可修缺项标识（prompt 输入）；unfixable = 不可修五类的结构化原因（逐条记、不修）。
+ *  notEvaluated = 第三态（gap-ready-pool-body-still-read-from-stale-main-checkout）：闸的读源落后于
+ *  写面 ⇒ 上面那些 body 维度的判定【未被评估】，⛔ 既不 spawn fix worker 也不计入失败上限——
+ *  派 worker 去修一个只存在于陈旧副本里的"缺陷"，正是 2026-09-14 烧满三次重试翻 needs-human 的形状。 */
 export interface FixDecision {
   id: string;
   fixable: boolean;
   missing: string[];
   unfixable: string[];
   prompt: string | null;
+  notEvaluated?: boolean;
 }
 
 /** A24 可修三类 → 结构化缺项标识；不可修五类 → 结构化原因。⛔ 不重新设计分类——
@@ -196,6 +206,22 @@ export interface FixDecision {
  *  进 ## Touches）· touchesResolve=false（Touches 写错 ⇒ 改对）。不可修五类：depsReady=false ·
  *  retiredMechanism · superseded · compound · prosePrereqGap 非空。 */
 export function classifyCandidate(c: CandidateChecks): FixDecision {
+  // BODY-FRESHNESS THIRD STATE — judged BEFORE the A24 classes, and deliberately not merged into
+  // them (硬规则 3b: an "I could not evaluate this" value must not share a shape with a verdict).
+  // 2026-09-14 replay: the gate read a body the write face had already replaced, reported
+  // `touchesResolve=false`, and the fix worker was dispatched for a defect that did not exist in the
+  // current body — it could not fix it (it was not there), timed out, and three rounds of that
+  // flipped the task needs-human. The fix worker is the harm, so the consumer must refuse it here.
+  if (c.bodyEvaluated === false) {
+    return {
+      id: c.id,
+      fixable: false,
+      missing: [],
+      notEvaluated: true,
+      unfixable: [`bodyNotEvaluated=true freshness=${c.bodyFreshness ?? "unknown"} (闸读源落后写面 ⇒ 该体未被评估,⛔ 不派 fix worker)`],
+      prompt: null,
+    };
+  }
   const missing: string[] = [];
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
@@ -367,6 +393,10 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           superseded: !!c.superseded,
           compound: !!c.compound,
           prosePrereqGap: Array.isArray(c.prosePrereqGap) ? c.prosePrereqGap.map(String) : [],
+          // BODY-FRESHNESS: `undefined` (an older gate output without the field) must NOT read as
+          // `false` — 缺值 = 未查 (硬规则 6). Only an explicit `false` marks the third state.
+          bodyEvaluated: c.bodyEvaluated === false ? false : true,
+          bodyFreshness: typeof c.bodyFreshness === "string" ? c.bodyFreshness : undefined,
         }),
       );
     return {
@@ -401,6 +431,10 @@ export interface FixOutcome {
   argv: string[] | null;
   /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的墙钟耗时（毫秒）。 */
   durationMs: number | null;
+  /** BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout)：本条是【未评估】态——
+   *  闸读源落后写面 ⇒ 未派 worker、未计入失败上限、也不得记为「仍不合格」。与 spawned:false 的
+   *  其它原因（不可修五类）可区分。 */
+  notEvaluated?: boolean;
 }
 
 export function computeRoundRecord(opts: {
@@ -456,7 +490,10 @@ export function computeRoundRecord(opts: {
 export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null };
+      // The third-state marker is written ONLY when it is true, so every pre-existing no-spawn shape
+      // (the five unfixable classes) keeps a byte-identical outcome record — a consumer that
+      // deep-compares the record is not disturbed by a field it never asked for.
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null, ...(d.notEvaluated === true ? { notEvaluated: true } : {}) };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
     const { exitCode, stderr, timedOut, argv: spawnedArgv, durationMs } = spawnFixWorker(argv, root);
@@ -468,8 +505,10 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
 
 /** AC133 重验证结果。fixedIds = 本轮被 spawn 过 fix worker 的任务 id；重跑闸后按【闸的新判定】归类：
  *  nowEligibleIds = 闸判合格（fix 生效，已由 --apply 落地晋升）；stillIneligibleIds = 闸仍判不合格
- *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 读不到输入（重跑闸 spawn 失败/输出不可解析 ⇒
- *  无法评估，⛔ 不是「仍不合格」也不是「消失」——AC153 与 verified/failed 分离的第三态）。
+ *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 无法评估——两个来源共用这一桶：重跑闸 spawn
+ *  失败/输出不可解析（读不到输入），或重跑闸判该任务 body 未被评估（读源落后写面，
+ *  gap-ready-pool-body-still-read-from-stale-main-checkout）⛔ 不是「仍不合格」也不是「消失」——
+ *  AC153 与 verified/failed 分离的第三态，且不计入失败上限。
  *  ⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
 export interface ReverifyOutcome {
   nowEligibleIds: string[];
@@ -491,11 +530,18 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
   }
   const promoted = new Set(reRound.promotedIds);
   const stillBad = new Set(reRound.fixDecisions.map((d) => d.id));
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout)：重跑闸判「未评估」
+  // （读源落后写面）⇒ 该 id 归 notEvaluatedIds，⛔ 不进 stillIneligibleIds——否则它会被
+  // advanceRetryCap 计入失败上限，而这正是要消灭的形状：worker 无缺陷可修 ⇒ 重跑仍不合格 ⇒ 三次
+  // 翻 needs-human。与 `!reRound.ok` 的「读不到输入」共用同一个第三态桶（AC153 的单一不变式）。
+  const notEvaluated = new Set(reRound.fixDecisions.filter((d) => d.notEvaluated === true).map((d) => d.id));
   const nowEligibleIds: string[] = [];
   const stillIneligibleIds: string[] = [];
+  const notEvaluatedIds: string[] = [];
   for (const id of fixedIds) {
     // vanished（task 不再出现在候选池——被别的 actor 晋升/删除）：三态词表不承载，沿用原行为不计数。
     if (!promoted.has(id) && !stillBad.has(id)) continue;
+    if (notEvaluated.has(id)) { notEvaluatedIds.push(id); continue; }
     const res = verifyIndependently(
       {
         value: id,
@@ -508,7 +554,7 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
     if (res.state === "verified") nowEligibleIds.push(id);
     else stillIneligibleIds.push(id);
   }
-  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds: [] };
+  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds };
 }
 
 // AC133 失败上限（RetryState / advanceRetryCap / markNeedsHuman）已上收 driver-filters.ts（单一真相源
