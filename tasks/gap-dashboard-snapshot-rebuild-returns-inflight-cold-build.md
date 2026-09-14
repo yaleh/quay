@@ -112,11 +112,14 @@ READING 2（改动后）: status=200 "暂无 active GOAL" present=true GOAL-001 
 RESULT: real quay serve reflects the on-disk change on GET /dashboard — PASS
 ```
 
-**同时携带的机械修复（develop 自身红，merge 修不了）**：`docs/analysis/quay-init-closure-ratchet.baseline.json`
-在 `92c5b1b15`（release: 0.6.2 -> 0.6.3）之后 stale——版本 bump 改了 4 个 LAYDOWN_SOURCES 之一
-（`plugin/.claude-plugin/plugin.json`）却没带 re-anchor 伴生提交，于是**全量静态闸**
-`quay-init-closure-ratchet-stale` 恒 fail-closed（`scripts/test.sh <file>` 实测 `EXIT=1`，与任何任务的
-delta 无关）。这是 12:24 那次 `9ea261f14` 的同形复发。本 delta 内 re-anchor：
+**期间一度携带、随后被 develop 吸收的机械修复（不属本 delta，`## Touches` 已撤出）**：开工时 develop 的全量
+静态闸 `quay-init-closure-ratchet-stale` 恒 fail-closed——`92c5b1b15`（release: 0.6.2 -> 0.6.3）改了 4 个
+LAYDOWN_SOURCES 之一（`plugin/.claude-plugin/plugin.json`）却没带 re-anchor 伴生提交；实测
+`scripts/test.sh <file>` 在 develop 自己的 tip 上 `EXIT=1`，与任何任务的 delta 无关。本分支一度携带了同形
+re-anchor，随后 develop 上出现了**内容逐字相同**的独立 re-anchor（`fcd24b0f7`，13:24:15，紧接着 13:34
+`gap-ac169-readme-version-not-in-version-consistency-set` 的 fan-in 成功翻 done ⇒ 该红确已解）。
+⇒ merge develop 后该文件**不再进入 delta**（`git diff develop..HEAD` 对它为空），遂从 `## Touches` 撤出
+（不声明一个本 delta 不再改动的文件）。两次 re-anchor 读数一致：
 
 ```
 --check-stale 改前: FAIL changed=1 added=0 removed=0 (plugin/.claude-plugin/plugin.json)
@@ -125,13 +128,11 @@ delta 无关）。这是 12:24 那次 `9ea261f14` 的同形复发。本 delta �
 --gate        : PASS — 3 files / 1022 bytes ≤ baseline 3 files / 1022 bytes（shrink-only 不变）
 ```
 
-⇒ files/bytes 与基线**逐字相同**，只有 fingerprint 与 plugin.json 的 sha 移动——是那次 bump 漏掉的
-伴生提交，不是放松（与 `9ea261f14` 的 before/after 同形）。
+⇒ files/bytes 与基线**逐字相同**，只有 fingerprint 与 plugin.json 的 sha 移动——不是放松。
 
 ## Touches
 
 - `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs`
 - `packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs`
-- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-dashboard-snapshot-rebuild-returns-inflight-cold-build.md`
