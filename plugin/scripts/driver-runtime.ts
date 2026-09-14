@@ -318,10 +318,18 @@ export function resolveKernelPluginRoot(): string {
  *  推进），选 raw 零收益、代价是启动即崩 ⇒ 判据是「是不是源检出」，⛔ 不是「哪个形态存在」。
  *
  *  ⛔ 镜像 Core `packages/quay/src/plugin-root.ts::isPluginSourceCheckout`（同一判据，从本 kernel
- *  自身安装位置解析 —— kernel ⛔ 不能 import Core 模块）。两处必须同改。 */
+ *  自身安装位置解析 —— kernel ⛔ 不能 import Core 模块）。两处必须同改。
+ *
+ *  ⛔ 本函数只做存在性探针，**不在这里第二次拼 `packages/quay/src`**：布局知识必须只存在于单一入口
+ *  （kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则——root 锚点拼法只允许出现在
+ *  `resolveQuayCodeRoot` / `resolveQuaySrcModule` / `quaySrcModuleLegacyShape` 三个函数体内；
+ *  实测 2026-09-14 本函数原先自己 `path.join(codeRoot, "packages", "quay", "src")` 时，
+ *  `kernel-sibling-resolution-check` 报 `driver-root-anchor` ⇒ 整轮 suite `# fail 5`）。
+ *  故取源树形的**目录**（`rel=""` ⇒ `path.join` 的末段空串被规范化掉，得 `<codeRoot>/packages/quay/src`
+ *  本身，与原本的目录级判据逐字等价），⛔ 不要改成探某个具体文件（夹具只建目录、不建文件）。 */
 export function isKernelSourceCheckout(): boolean {
   const codeRoot = resolveQuayCodeRoot();
-  return !!codeRoot && fs.existsSync(path.join(codeRoot, "packages", "quay", "src"));
+  return !!codeRoot && fs.existsSync(quaySrcModuleLegacyShape(codeRoot, ""));
 }
 
 /** 解析本 kernel 的一个 sibling 脚本到可运行形态：原始 .ts（dev tree，用 --experimental-strip-types 跑）
