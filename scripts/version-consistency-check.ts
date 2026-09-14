@@ -50,6 +50,26 @@ const VERSION_ENTRIES: VersionEntry[] = [
     extract: (raw) => JSON.parse(raw).version,
   },
   {
+    // Prose carrier, not a machine field: its version lives inside the sentence
+    // `quay plugin v<semver> — …`. The extractor is ANCHORED to that sentence and THROWS when it
+    // cannot find it — a reworded README must redden the gate (mode:'error'), never silently
+    // return '' and read as "consistent" (hard rule 3b: an input it cannot parse must not
+    // produce a value shaped like "pass"). Added by
+    // gap-ac169-readme-version-not-in-version-consistency-set: README had drifted to v0.6.1 while
+    // plugin.json was 0.6.3 across two bumps, precisely because it was NOT in this set.
+    label: 'plugin/README.md',
+    path: 'plugin/README.md',
+    extract: (raw: string) => {
+      const m = raw.match(/^quay plugin v(\d+\.\d+\.\d+)\b/m);
+      if (!m) {
+        throw new Error(
+          'no "quay plugin v<semver>" version line found in plugin/README.md (cannot evaluate — not a pass)',
+        );
+      }
+      return m[1];
+    },
+  },
+  {
     label: 'plugin/.claude-plugin/marketplace.json (quay entry)',
     path: 'plugin/.claude-plugin/marketplace.json',
     extract: (raw) => {
