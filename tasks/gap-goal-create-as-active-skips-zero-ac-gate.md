@@ -2,7 +2,7 @@
 id: gap-goal-create-as-active-skips-zero-ac-gate
 title: GOAL 出生即 active 绕过 P6-goal「名下至少一条 AC」闸——`activating` 逐字 `prevStatus !==
   undefined`，GOAL-018 零 AC 流通 60s，AC-217 判红并 spawn 了一次无物可修的 gap-filing agent
-status: todo
+status: ready
 labels:
   - gap
   - defect
