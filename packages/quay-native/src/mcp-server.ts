@@ -165,7 +165,10 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
       // the board. isError stays reserved for genuine call-level failures
       // (store itself unreachable, etc.), which still throw.
       const { tasks, malformed, total, page: resolvedPage, pageSize: resolvedSize, totalPages, scannedFiles } =
-        store.queryPage({ status, label, search, prefix }, { page, pageSize });
+        store.queryPage(
+          { status, label, search, prefix },
+          { page, pageSize, includeBody: includeBody !== false },
+        );
       const outTasks = includeBody === false
         ? tasks.map((t) => { const { body: _omit, ...rest } = t; return rest; })
         : tasks;

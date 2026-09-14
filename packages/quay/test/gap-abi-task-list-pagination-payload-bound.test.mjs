@@ -248,7 +248,7 @@ test("ABI task_list: pushed-down filters/paging agree with the store's own filte
   const readyIds = store.list({ status: "ready" }).map((t) => t.id);
   const page3 = await client.callTool({
     name: "task_list",
-    arguments: { status: "ready", page: 3, pageSize: 25 },
+    arguments: { status: "ready", page: 3, pageSize: 100 },
   });
   assert.deepEqual(
     page3.structuredContent.tasks.map((t) => t.id),

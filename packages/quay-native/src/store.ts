@@ -1043,18 +1043,21 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    *   - `tasks` is the requested window of the filtered set, in `listIds()` order.
    *   - `total` is the filtered count BEFORE paging (== tasks.length when unpaged).
    *   - `malformed` keeps `listWithMalformed`'s meaning: every file whose frontmatter
-   *     failed to parse, collected during the walk phase 1/`search` performed. It is
-   *     an advisory side-channel (never counted in `total`), not a claim of a
-   *     whole-store scan: a query that short-circuits to the directory listing
-   *     examined no file, so it can report none. `scannedFiles` says WHICH of the
-   *     two happened, so a caller can tell "no bad files" from "did not look"
-   *     (硬规则 3b — an un-evaluated thing must not read as a clean one).
-   *   - Absent `pageSize` ⇒ no paging (whole filtered set), byte-compatible with
-   *     the pre-existing `listWithMalformed` result.
+   *     failed to parse, collected during the walk phase 1 performed. It is an advisory
+   *     side-channel (never counted in `total`), not a claim of a whole-store scan: an
+   *     UNFILTERED PAGED query answers from the directory listing, examines no file, and
+   *     therefore has nothing to report. `scannedFiles` says WHICH of the two happened, so
+   *     a caller can tell "no bad files" from "did not look" (硬规则 3b — an un-evaluated
+   *     thing must not read as a clean one).
+   *   - Absent `pageSize` ⇒ no paging (whole filtered set), and the walk always runs, so
+   *     the unpaged answer is byte-compatible with the pre-existing `listWithMalformed`
+   *     result — INCLUDING a complete `malformed` list.
+   *   - `includeBody:false` ⇒ phase 2 builds the window from the frontmatter index instead
+   *     of `get()`, so no task body is read at all.
    */
   function queryPage(
     filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {},
-    opts: { page?: number; pageSize?: number } = {},
+    opts: { page?: number; pageSize?: number; includeBody?: boolean } = {},
   ): {
     tasks: (Task & { updatedAt?: number })[];
     malformed: Array<{ file: string; error: string }>;
@@ -1069,6 +1072,8 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     const sq = filter.search ? filter.search.toLowerCase() : null;
     const hasIndexFilter =
       Boolean(filter.status) || filter.label !== undefined || Boolean(filter.prefix);
+    const isPaged = opts.pageSize !== undefined && opts.pageSize !== null;
+    const wantBodies = opts.includeBody !== false;
     const allIds = listIds();
     let matchedIds: string[];
     let scannedFiles: boolean;
@@ -1090,11 +1095,19 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (!matchesListFilter(t, filter, sq)) continue;
         matchedIds.push(id);
       }
-    } else if (!hasIndexFilter) {
-      // No filter at all: the matching set IS the id set, so phase 1 needs no file
-      // I/O — not even a stat. This is what makes an unfiltered page genuinely
-      // independent of the store's size for the walk phase; phase 2 still reads
-      // exactly `pageSize` bodies below.
+    } else if (!hasIndexFilter && isPaged) {
+      // Requested as a PAGE with no filter at all: the matching set IS the id set, so
+      // phase 1 needs no file I/O — not even a stat. This is what makes an unfiltered
+      // page genuinely independent of the store's size for the walk phase; phase 2
+      // still reads exactly `pageSize` entries below.
+      //
+      // ⛔ The no-filter short-circuit is deliberately NOT taken when the request is
+      // UNPAGED: `malformed` is derived from the files the walk examined, and the
+      // pre-existing whole-set contract is that it is COMPLETE (it is what surfaces a
+      // bad task file on the board). Skipping the walk there would turn a complete list
+      // into an empty one — "scanned and clean" would become indistinguishable from
+      // "never looked" for every existing caller (硬规则 3b). A paged caller has opted
+      // into a window, and says so back to the caller via `scannedFiles:false` below.
       matchedIds = allIds;
       scannedFiles = false;
     } else {
@@ -1120,14 +1133,30 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
     }
     const total = matchedIds.length;
-    const paged = opts.pageSize !== undefined && opts.pageSize !== null;
-    const size = paged ? Math.max(0, Math.trunc(opts.pageSize as number)) : total;
+    const size = isPaged ? Math.max(0, Math.trunc(opts.pageSize as number)) : total;
     const pageNum = Math.max(1, Math.trunc(opts.page ?? 1));
-    const start = paged ? (pageNum - 1) * size : 0;
-    const windowIds = paged ? matchedIds.slice(start, start + size) : matchedIds;
-    // Phase 2 — bodies for the window only.
+    const start = isPaged ? (pageNum - 1) * size : 0;
+    const windowIds = isPaged ? matchedIds.slice(start, start + size) : matchedIds;
+    // Phase 2 — full tasks for the window only. `includeBody:false` builds them from the
+    // frontmatter index instead (no readFileSync at all) — the same projection the
+    // response layer applies anyway, done one step earlier so the body is never read.
     const tasks: (Task & { updatedAt?: number })[] = [];
     for (const id of windowIds) {
+      if (!wantBodies) {
+        let fm: Record<string, unknown>;
+        let updatedAt: number | undefined;
+        try {
+          const meta = getMeta(id);
+          if (meta === null) continue;
+          fm = meta.frontmatter;
+          updatedAt = meta.updatedAt;
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        tasks.push(toViewModel(fm, "", updatedAt, id));
+        continue;
+      }
       let t: (Task & { updatedAt?: number }) | null;
       try {
         t = get(id);
