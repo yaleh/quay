@@ -35,10 +35,10 @@ extra: {}
 
 ## Touches
 
-- `plugin/scripts/rework-predictors.ts`
-- `plugin/test/rework-predictors.test.mjs`
+- `plugin/scripts/rework-predictors.ts` (new)
+- `plugin/test/rework-predictors.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/rework-multiplier-predictors.md`
+- `docs/analysis/rework-multiplier-predictors.md` (new)
 - `tasks/gap-rework-multiplier-predictors.md`
 
 ## Acceptance Criteria
