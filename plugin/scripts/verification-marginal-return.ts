@@ -350,7 +350,7 @@ export function dedupeFails<F, A>(
   const failSet = new Set<F>(fails);
   return {
     D1: countStreaks(allEvents, keyOf, (e) => failSet.has(e as unknown as F), tsOf),
-    D2: countDistinct(fails, (e) => `${keyOf(e)} ${normalizeReason(reasonOf(e))}`),
+    D2: countDistinct(fails, (e) => `${keyOf(e)}\u0000${normalizeReason(reasonOf(e))}`),
     D3: countDistinct(fails, (e) => keyOf(e)),
   };
 }
