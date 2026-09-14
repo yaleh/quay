@@ -2,7 +2,8 @@
 id: gap-ac256-worker-restart-preserves-inflight-children
 title: GOAL-017/AC-256：重启 `driver:worker` 这一个服务不杀它在飞的 worker 子进程 —— 载体
   `.quay/unified-server-verification.jsonl` 有合格记录（SPEC §6.9 不变式 3 / §8-7 后半）
-status: ready
+status: needs-human
+needs_human_cause: unclassified
 labels:
   - gap
 parent: null
@@ -250,3 +251,12 @@ criterion 逐字跑 **exit 0**。⛔ 唯一由夹具驱动的是【负控制】�
 - 改坏 `driver-runtime.ts:1593 stopKind()` 的「⛔ 不扫 in-flight」语义（那是被测对象，不是可调项）；
 - 重启 `driver:worker` 之外还碰了其余五个 kind（本任务的最小作用面是一个服务）—— **本轮实测：六个 kind 的 pid 文件事后仍全部指向 anchor 3057428**；
 - 用宽松 glob（`.quay/*driver*.pid`，实测 136）数进程 / 进记录。
+
+## Needs-Human
+
+**执行 2026-09-14T05:29:48.867Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
+- run_id：wk-prod-1789350883
