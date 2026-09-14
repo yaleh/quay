@@ -12,6 +12,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-214
+depends_on:
+  - gap-dist-closure-missing-driver-anchor-js
 ---
 ## Proposal
 
