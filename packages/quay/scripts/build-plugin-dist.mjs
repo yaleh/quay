@@ -13,7 +13,10 @@
 // WHAT is bundled: every plugin .ts that a shipped invoker references by path or bare name —
 // loop tick docs, skills, probes, .sh wrappers, quay-init's explicit mechanism additions,
 // Core's mcp-server instrument entry, and the plugin source's OWN spawns (driver-runtime.ts's
-// DRIVER_KINDS `driver: "X.ts"` table fields + `path.join(…,"plugin","scripts","X.ts")` helpers).
+// DRIVER_KINDS `driver: "X.ts"` table fields + `path.join(…,"plugin","scripts","X.ts")` helpers +
+// `resolveKernelSibling("X.ts")` calls, AND — gap-dist-closure-missing-driver-anchor-js — modules
+// resolved as a sibling of a directory VARIABLE, `path.join(<dirExpr>, "X.ts")`, which carries no
+// literal path segment for the other scans to key on: see scanPluginSiblingReferences).
 // The entry set is DERIVED at build time by scanning the shipped surface for `<name>.ts` basenames
 // that match an existing plugin .ts — never a hand-maintained list: when a new tool is referenced
 // by a tick doc/skill the next package.sh run bundles it. Libraries (gate-script-base.ts,
@@ -109,6 +112,49 @@ const PLUGIN_DRIVER_FIELD_RE = /driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g;
 const PLUGIN_PATH_JOIN_TS_RE = /"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g;
 const PLUGIN_SIBLING_RESOLVER_RE = /resolveKernelSibling\(\s*"([A-Za-z0-9_.-]+\.ts)"\s*\)/g;
 
+// ── the SIBLING-OF-A-DIRECTORY-VARIABLE reference form (4th instance of "the closure scan is blind
+//    to a reference SHAPE") ────────────────────────────────────────────────────────────────────────
+// gap-dist-closure-missing-driver-anchor-js. Every scan above keys on a LITERAL path segment
+// (`"plugin"`, `"scripts"`, `$SCRIPT_DIR`, `dist/<name>.js`, `resolveKernelSibling("…")`). A module
+// resolved at runtime as a sibling of a **directory VARIABLE** —
+// `path.join(here, "driver-anchor.ts")` / `path.join(mainDir, "driver-anchor.js")` in
+// driver-runtime.ts's preferredAnchorKernel() — carries no literal segment at all, so it matched
+// none of them: driver-anchor.ts was never an entry, the dist closure never carried
+// `dist/driver-anchor.js`, and in ANY installed/packaged layout `quay driver start --kind <任何>`
+// died at `spawnAnchor` with "driver-anchor module not found next to driver-runtime" (rc=1). The
+// direct量 in that failure is a FILE, which is why no test in the source tree could see it — the
+// dev tree resolves the .ts sibling that the artifact had deleted.
+//
+// The fix is the SHAPE, not the filename (硬規則 5b: the previous three instances — Core spawn refs,
+// dist-table rows, driver-runtime's own spawn refs — were each fixed only where the defect surfaced):
+// a 2-argument `path.join(<dirExpr>, "<name>.ts")` names a module that must ship as its sibling
+// `dist/<name>.js`. Any future `path.join(SOME_DIR, "x.ts")` is captured by the same rule.
+//
+// ⛔ The DIR EXPRESSION is restricted to a dotted identifier path, optionally with ONE call —
+// `here`, `SCRIPT_DIR`, `mainDir`, `resolveKernelScriptsDir()`, `path.dirname(x)` — i.e. a variable
+// (or a call) holding a directory. That restriction is what keeps the rule false-positive-free:
+// `path.join(root, "plugin", "scripts", "X.ts")` cannot match (the expression must be a single
+// identifier-led term, so `"plugin"` — a string literal — is not one, and the `"X.ts"` alternative
+// then lands where `"plugin"` sits), so the non-module readFile targets that forced the
+// driver-runtime.ts scoping above (`runner-static-gate.ts`, a BASH file deliberately named `.ts`, read
+// as TEXT) are not dragged in. Measured over the whole plugin source (scripts/ + gate-scripts/):
+// exactly two basenames match — driver-anchor.ts (the defect) and fast-mode-telemetry.ts (already an
+// entry). A future match against a non-module file fails LOUDLY at the esbuild step (a .sh parsed as
+// TS is a syntax error ⇒ package.sh exits 1), never silently.
+//
+// The `.js` half is the same shape seen from the INSTALLED side: the artifact probes
+// `path.join(here, "X.js")`, so a `.js`-only sibling probe names `X.ts` too (reverse-mapped; ignored
+// when no such `.ts` exists — the caller intersects with the plugin tree).
+const SIBLING_DIR_EXPR = String.raw`[A-Za-z_$][A-Za-z0-9_$.]*(?:\([^;]*?\))?(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*`;
+const PLUGIN_SIBLING_JOIN_TS_RE = new RegExp(
+  String.raw`path\.join\(\s*${SIBLING_DIR_EXPR}\s*,\s*"([A-Za-z0-9_.-]+\.ts)"\s*\)`,
+  "g"
+);
+const PLUGIN_SIBLING_JOIN_JS_RE = new RegExp(
+  String.raw`path\.join\(\s*${SIBLING_DIR_EXPR}\s*,\s*"([A-Za-z0-9_.-]+\.js)"\s*\)`,
+  "g"
+);
+
 // quay-init.sh's EXPLICIT mechanism additions (plugin/scripts/quay-init.sh `derive_loop_scripts`
 // step (c)) name .ts files by BARE basename with no invocation prefix. These must ship as
 // executable bundles so quay-init's lay-down set resolves after the raw .ts are removed. The list
@@ -182,6 +228,43 @@ export function scanPluginSelfReferences(pluginRoot) {
 }
 
 /**
+ * Derive the plugin `.ts` basenames referenced as a SIBLING OF A DIRECTORY VARIABLE —
+ * `path.join(<dirExpr>, "X.ts")` (and its installed-layout twin `path.join(<dirExpr>, "X.js")`,
+ * reverse-mapped to `X.ts`). See the PLUGIN_SIBLING_JOIN_* constants for why this is a SHAPE rule
+ * (any directory-variable join, not the `driver-anchor` filename) and why the restricted
+ * `<dirExpr>` keeps it false-positive-free.
+ *
+ * Scanned over the WHOLE plugin source (scripts/ + gate-scripts/, build/fixture dirs skipped) —
+ * not just driver-runtime.ts. Unlike the literal `"plugin","scripts","X.ts"` form (which matches
+ * non-spawn readFile text-reads elsewhere and is therefore scoped to driver-runtime.ts), this shape
+ * has no such collision: measured, it matches exactly driver-anchor.ts + fast-mode-telemetry.ts
+ * across the whole surface.
+ *
+ * The caller intersects the result with existing plugin `.ts` (a `.js`-only probe with no matching
+ * `.ts` source, or a name that names nothing, is ignored).
+ * @param {string} pluginRoot
+ * @returns {Set<string>} `.ts` basenames (e.g. "driver-anchor.ts")
+ */
+export function scanPluginSiblingReferences(pluginRoot) {
+  const basenames = new Set();
+  const roots = [path.join(pluginRoot, "scripts"), path.join(pluginRoot, "gate-scripts")];
+  for (const root of roots) {
+    for (const f of walk(root)) {
+      if (!f.endsWith(".ts")) continue;
+      const rel = path.relative(root, f);
+      // Build output / deps / fixtures / archived copies are not the shipped source surface.
+      if (rel.split(path.sep).some((seg) => SURFACE_SKIP_DIRS.has(seg))) continue;
+      const text = fs.readFileSync(f, "utf8");
+      for (const m of text.matchAll(PLUGIN_SIBLING_JOIN_TS_RE)) if (m[1]) basenames.add(m[1]);
+      for (const m of text.matchAll(PLUGIN_SIBLING_JOIN_JS_RE)) {
+        if (m[1]) basenames.add(`${m[1].replace(/\.js$/, "")}.ts`);
+      }
+    }
+  }
+  return basenames;
+}
+
+/**
  * Derive the consumer-referenced entry set for a plugin root.
  * @param {string} pluginRoot
  * @returns {{ scripts: string[], gateScripts: string[] }} relative entry paths
@@ -227,6 +310,10 @@ export function deriveEntries(pluginRoot) {
   }
   for (const self of scanPluginSelfReferences(pluginRoot)) {
     const rel = existing.get(self);
+    if (rel) referenced.add(rel);
+  }
+  for (const sibling of scanPluginSiblingReferences(pluginRoot)) {
+    const rel = existing.get(sibling);
     if (rel) referenced.add(rel);
   }
   for (const explicit of QUAY_INIT_EXPLICIT) {
