@@ -39,13 +39,37 @@
 
 | 载体 | 写者 | 何时写 | 每行/内容 |
 |---|---|---|---|
-| `.quay/worker-outcome.jsonl` | `appendOutcome` / `appendOutcomeToFile`（worker-driver.ts:788） | 每任务终态一次（completed / exited-not-landed / failed / killed / timed-out / spawn-failed / not-dispatched） | 终态、exit_code、reason、worker_pid、run_id、session_id、wall clock、`mechanical_fan_in{step, verdict{step,exitCode,summary,logFile}, reason, lockHoldSecs, suiteOutcome, suitePid, landedSha}`、worktree_cleanup_* |
+| `.quay/worker-outcome.jsonl` | `appendOutcome` / `appendOutcomeToFile`（worker-driver.ts:788，**含 `assertFinalState` 词表闸**） | 每任务终态一次（取值见下「`final_state` 的成功态是 `completed`」；**成功态 = `completed`**） | 终态、exit_code、reason、worker_pid、run_id、session_id、wall clock、`mechanical_fan_in{step, verdict{step,exitCode,summary,logFile}, reason, lockHoldSecs, suiteOutcome, suitePid, landedSha}`、worktree_cleanup_* |
 | `.quay/worker-round.jsonl` | `appendRoundToFile` / `computeWorkerRoundRecord`（worker-driver.ts:844） | 常驻循环【每轮】无条件一条（含池空/判停轮，作 liveness 直接量） | ts（首字段）、round、run_id、pid、action(start/dispatch/idle/stop)、in_flight、pool、stop_reason、liveness、cold_start_inflight、needs_human、needs_human_committed |
 
 - **分工**（⛔ 不混用）：outcome 只在任务真终态写；round 每轮写。池空时 outcome 停更会被 supervisor
   `last_record_ts`（读全载体 max）误读为「死亡」，故 round 是无条件心跳。
 - **机械 fan-in 的权威记录**：`runMechanicalFanIn` 结果整体落进 outcome 的 `mechanical_fan_in`——
   单步失败是 `verdict`（step / summary / logFile 指针），不是裸流投影进 reason（D5/D6/D7 单一结构化来源）。
+
+#### ⚠️ `final_state` 的成功态是 `completed`——⛔ 不是 `landed`（同名陷阱）
+
+同一条 outcome 记录里躺着**两个词表**，它们描述**同一个事件**（机械 fan-in 是否落地）却**不同名**：
+
+| 字段 | 成功取值 | 词表正本（⛔ 本文件不复制全表） |
+|---|---|---|
+| `final_state`（顶层） | **`completed`** | `worker-driver.ts` `FINAL_STATES` / `isFinalState` |
+| `mechanical_fan_in.outcome`（子对象） | `landed` | `worker-driver.ts` `runMechanicalFanIn` 的 outcome 联合类型 |
+
+⇒ **`landed` 不是 `final_state` 的取值**（本仓库另有**第三个**用 `landed` 的词表：live 页的
+`InFlightPhase`，与本节无关——⛔ 别把三处一起「清理」）。
+
+- **实证代价**（`gap-worker-outcome-final-state-landed-is-a-dead-value`）：生产载体里出现过 **1** 条
+  `final_state:"landed"` 的记录（2026-08-28，一次**手工** fan-in 的手写落盘——非 `worker-driver.ts`
+  任何代码路径所写）。任何按 `final_state == "landed"` 统计吞吐的消费者会读到 **0**，与「系统完全停摆」
+  **同形且不可区分**（硬规则 3b/4b）；本任务的定量复核作者本人在初稿里就栽了这一跤。
+- **enforce（不是靠记得）**：`assertFinalState` 挂在**唯一落盘点** `appendOutcomeToFile` 上 ⇒
+  词表外的取值**写不进去**（抛错 + 不留半条记录），而不仅是在文档里声明它不合法（硬规则 9）。
+  负控制：`plugin/test/worker-driver.test.mjs` 传 `"landed"` 必须抛。
+- **读数口径**（用载体量吞吐）：成功态计数取 `final_state == "completed"` 的**任务数**；
+  分母若用 `git log | grep '翻 … done'` 的**提交数**会**高估**（同一任务可在一天内被多次翻 done ⇒
+  重复计数，实测 09-09 提交 71 vs 去重任务 54）。实测：去重任务口径下 09-08 → 09-14 连续 7 天
+  成功态计数与落地数的偏差 ≤4.8%（见 `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md` §6）。
 
 ### B. 机械 fan-in 单步 / suite 裸流（`/tmp/`，⛔ 非 git，跨 relaunch 带 runId 隔离）
 

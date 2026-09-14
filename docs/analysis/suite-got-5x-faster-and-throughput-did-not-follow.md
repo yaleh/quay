@@ -121,11 +121,15 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
 
 ⊢ 两个错误同源：**都在没有分时间窗、没有核对载体覆盖面的情况下，把聚合数字当成当前状态。**
 
-## 6. 载体自身的三个完整性缺口（已按实测修正表述）
+## 6. 载体自身的完整性缺口（已按实测修正表述；其中一条已修，修复时又露出第二条）
+
+> **本节的用法**：任何「按载体统计吞吐/完成数」的结论，先读这张表——四行里有三行会让读数
+> **与某个正常或异常状态同形**（硬规则 3b/4b），而其中一行的根因是**口径**而非载体。
 
 | 缺口 | 实测 | 影响 |
 |---|---|---|
-| `worker-outcome.final_state` 有死取值 `landed` | 全库 **1** 条（2026-08-28），真实成功态是 `completed`（09-13：45 条 vs git 落地 48 次） | 拿 `landed` 统计吞吐会得到「吞吐 ≈ 0」 |
+| ~~`worker-outcome.final_state` 有死取值 `landed`~~ → **已修**（`gap-worker-outcome-final-state-landed-is-a-dead-value`） | 死取值全库 **1** 条（2026-08-28，手工 fan-in 手写落盘，⛔ 非代码所写）；真实成功态是 `completed`。**修复** = 词表闸 `assertFinalState` 挂在唯一落盘点 `appendOutcomeToFile` 上（词表外取值写不进去）+ 载体正本写明「成功态 = `completed`」 | 修复前：拿 `landed` 统计吞吐会得到「吞吐 ≈ 0」（与「系统停摆」同形）。修复后仍**不能**靠词表外的取值读数——闸只保证「不再写进去」，⛔ 不追改历史那条 |
+| **（读数口径陷阱，修 `landed` 时当场发现）** 用 `git log \| grep '翻 … done'` 的**提交数**当地落数会**高估** | 同一任务可在一天内被多次翻 done ⇒ 09-09 提交 **71** 条 vs 去重任务 **54** 个（重复 17），09-10 54/44，09-11 43/34 | 提交数当分母 ⇒ 偏差被抬到 17.8–49.4%（看起来像「载体漏记」）；改用**去重任务数** ⇒ 同一窗口偏差 ≤4.8%。**这是同一个缺陷的另一张脸：口径错 ⇒ 读数与某异常态同形** |
 | `fan-in-step-trace` 孤儿 `step-end` | 2,097 / 7,204 = 29%，**100% 集中在 4 个 step**（`ac-precheck` 697、`suite-start` 697、`suite-end` 695、`suite-skip` 15），其余 8 个步骤孤儿率 **0%** | 这 4 步的 `step-begin` 自 08-28 改写去 per-run 文件而 `step-end` 仍写共享载体 ⇒ **最贵的 suite 步骤在该载体里结构上不可测时长**；已 done 的 `gap-fan-in-step-trace-suite-step-stopped-writing` 认为这批步骤已整体停写，与盘上实际（end 仍在写）不符 |
 | `complete` GateEvent 覆盖率 | 修复后 74–94%，非 100% | 用它统计完成数会少 6–26% |
 
@@ -157,5 +161,32 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
 - 套件时长：`.quay/verification-round.jsonl` 的 `startedAt`/`durationMs`/`laneCount`
 - 熔融↔结晶：`git log develop --numstat`，按 `tasks/` / `adr/` / `*.md` / `*.{ts,js,mjs,sh,py}` 分类
 - 返工：`.quay/worker-outcome.jsonl` 按 `task` 计数
+- **吞吐（成功态 vs 落地数）——⚠️ 口径见 §6 第二行，⛔ 别用提交数**：成功态 = `final_state == "completed"`；
+  落地数 = `git log develop` 里 `^tasks: 翻 <id> done（` 的**去重任务数**（同一任务一天内可被翻 done 多次）。
+  可复跑（粘贴即用，读生产载体 + git，无 fixture）：
+  ```bash
+  python3 - <<'PY'
+  import json,subprocess,re,collections
+  comp=collections.defaultdict(set)
+  for line in open('.quay/worker-outcome.jsonl'):
+      line=line.strip()
+      if not line: continue
+      r=json.loads(line)
+      if r.get('final_state')=='completed' and r.get('task'): comp[(r.get('ts') or '')[:10]].add(r['task'])
+  byday=collections.defaultdict(set)
+  for l in subprocess.run(['git','log','develop','--format=%aI|%s'],capture_output=True,text=True).stdout.splitlines():
+      iso,subj=l.split('|',1)
+      m=re.match(r'^tasks: 翻 (\S+) done（',subj) or re.match(r'^tasks: 翻 (\S+)（',subj)
+      if m: byday[iso[:10]].add(m.group(1))
+  print(f"{'日(UTC)':12}{'去重落地':>9}{'completed':>10}{'偏差':>8}")
+  for d in sorted(set(comp)&set(byday))[-7:]:
+      a,b=len(byday[d]),len(comp[d])
+      print(f"{d:12}{a:9d}{b:10d}{abs(b-a)/a*100:7.1f}%")
+  PY
+  ```
+  实测（2026-09-14 读数）最近 7 个完整 UTC 日 **09-08 → 09-14** 偏差 =
+  **4.8% / 0.0% / 2.3% / 2.9% / 0.0% / 0.0% / 0.0%**（全部 <10%）。
+  ⚠️ 窗口敏感，如实记录：同一判据在 08-23…08-31 与 09-06 上是 12–29%（**未归因**——无对照，
+  不声称成因）；载体本身从 08-23 起才有 `final_state`。故「<10%」是**最近窗口**的性质，⛔ 不是全载体的性质。
 - 验证税：`.quay/checker-cost.jsonl` 的 `name`/`ms`/`at`
 - ⚠️ `fan-in-step-trace.jsonl` 的 `epoch` 字段单位是**秒**不是毫秒（初稿在此栽过一次）
