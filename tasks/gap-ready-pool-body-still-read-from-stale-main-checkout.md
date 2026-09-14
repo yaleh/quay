@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-body-still-read-from-stale-main-checkout
 title: 闸的 task body 仍从主检出磁盘读（status 那一维早已改读 develop 权威 ref）——propagate 失败时闸连读旧体烧满重试
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -128,11 +128,10 @@ extra:
 
 ⛔ 除此之外未触碰任何文件;这份扩展本身写在这里,作为范围变更的记录。
 
-### AC5 scoped 门(读数)
+### AC5 scoped 门(最终读数)
 
 `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
-⇒ **exit 0** · `tests 216 / pass 216 / fail 0`(scoped static tier 无 violation;`task-contract-check: no violations`)。
-**按测试名核对新增用例确实被选中执行**(7 条,全部出现在本轮输出里,⛔ 不看总数):
+⇒ **exit 0** · `tests 219 / pass 219 / fail 0`(scoped static tier 无 violation)。**按测试名核对新增用例确实被选中执行**(7 条,逐字抄自本轮 stdout,零条遗漏):
 
 ```
 ✔ body-freshness: the free functions — ledger read, the narrow failure predicate, the ahead measure (AC2)
@@ -144,6 +143,55 @@ extra:
 ✔ computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)
 ```
 
+**⚠️ 本轮 scoped 门被一个【非本条】的 develop 侧陈旧挡过一次,如实记录**(硬规则 5/11b):
+`quay-init-closure-ratchet-stale --check-stale` 曾红 —— 人令的 0.6.1→0.6.2 版本 bump 改了
+`plugin/.claude-plugin/plugin.json`(该 ratchet 的四个 fingerprint source 之一)而基线未 re-anchor。
+**它不是本条的改动**:本条差分里没有该文件;**已有一个在飞任务认领**
+(`gap-worker-outcome-final-state-landed-is-a-dead-value`,其 worktree 内提交
+`chore(ratchet): re-anchor quay-init closure baseline after the 0.6.2 version bump`)⇒ 本条**不重复动手**
+(避免两处落同一文件),改为等它落地 develop 后 merge 重跑。它已落 develop ⇒ 最终读数如上。
+**⇒ 这也决定了 scoped-gate 缓存键**:写的是**本轮实际跑绿的那个 tip**(`HEAD^2` = `8df173613`),
+不是写缓存那一刻的 `develop`(彼时已前进到 `25811c60e`)——否则 fan-in 可能在**本条从未验过的**
+develop 状态上命中缓存并跳过门(该规矩的正本见 `scoped-gate-cache-sha-must-be-the-tip-you-gated`)。
+fan-in 若发现 develop 已前进 ⇒ 缓存未命中 ⇒ 照跑 scoped 门(fail-closed,设计如此)。
+
+### 本轮续做(2026-09-14,第二次 re-anchor):0.6.3 bump 再次 re-stale —— 全局阻断,本轮处置
+
+上面 AC5 记的 0.6.2 陈旧由在飞任务落地修好;**本轮续做时 develop 又前进 7 个提交**,其中人令的
+**0.6.2→0.6.3 版本 bump**(`92c5b1b15`,为解 quay-fleet 的 dist 打包缺陷而发)再次改了
+`plugin/.claude-plugin/plugin.json`(该 ratchet 的四个 fingerprint source 之一)而**未 re-anchor**
+⇒ scoped 门**在 static tier 就 fail-closed**(`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`),
+**动态用例根本没跑**(故本轮第一次读数的产物里连 `# tests` 行都没有——静态层先失败即中止)。
+
+**它不是本条的 delta**:`git diff develop...HEAD` 里没有该文件;`grep -rl '0.6.3' tasks/*.md`
+只有 bump 自身的修复任务(`gap-dist-plugin-missing-node-modules-task-schema-yaml`)⇒ **本次无任何在飞任务认领**。
+⇒ 它是**全局阻断**(此后每个任务的 fan-in 都会撞同一处)⇒ 按
+`out-of-touches-red-fix-self-inflicts-anti-drift-take-develop` **第 4 步**("develop **没修** ⇒ 此时才是真判断点:
+把它登记为 Touches 并在提交信息里写明理由")处置,**⛔ 不是静默改文件,也不是干等 develop**:
+
+- `node … quay-init-closure-ratchet.ts --reanchor --root <worktree>` ⇒ `3 files / 1022 bytes`
+  —— **足迹与 develop 那份逐字相同**(改前也是 3/1022);`git diff` 该基线文件**只含**
+  `fingerprint` 与 `plugin/.claude-plugin/plugin.json` 的 `sha` —— 逐条符合
+  `quay-init-edits-re-stale-the-closure-ratchet` 的两条核对(足迹不变 + diff 面最小),⛔ 不是拿 re-anchor 洗增长;
+- `--check-stale` 复跑 ⇒ `PASS: … laydown source fingerprint fresh (58d2c6a57caf03e3…, 4 sources) — baseline in sync`;
+- **Touches 增列 `docs/analysis/quay-init-closure-ratchet.baseline.json`**(正是
+  `expand-touches-when-implementation-footprint-grows` 点名的两个常漏基线文件之一),理由即本段。
+- **范围纪律不受影响**:本轮仍未改 body 读源(AC3 不变);上面这次改动**不在**本任务的 delta 语义内,
+  它是**机制性的全局修复**,归属写在此处以免被误读为本条的实现。
+
+**本轮最终读数**(合并 develop 后共跑三次 scoped 门,fix 前一次红、fix 后两次绿且互相一致):
+`bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
+⇒ **exit 0** · `tests 219 / pass 219 / fail 0`;`quay-init-closure-ratchet: laydown source fingerprint
+fresh (58d2c6a57caf03e3…, 4 sources) — baseline in sync`;**7 条新增用例逐字按名核到被选中执行**
+(与 AC5 同一份名单,零条遗漏);`ANTI-DRIFT OK: task … — 6 actual file(s), all within declared Touches`。
+三点 diff(`git diff develop...HEAD --name-only`)恰好 = 上列 6 个 Touches 文件,**⛔ 不含
+`plugin/.claude-plugin/plugin.json`**——即"bump 不是本条的 delta"这句有可复核的读数支撑。
+
+**scoped-gate 缓存键 = `HEAD^2`**(本轮实际合并并跑绿的那个 tip = `d1fac462…`),**⛔ 不是写缓存那一刻的
+`develop`**(彼时已前进到 `a4169be5…`,2 个提交且全是别的任务的 task 文件)——沿用 AC5 上一段同一条纪律
+(`scoped-gate-cache-sha-must-be-the-tip-you-gated`;⛔ 记录一个没跑过的 tip 等于宣称验过一个没验过的状态,
+硬规则 3b)。develop 若在缓存写入后继续前进 ⇒ 键失配 ⇒ fan-in 照跑 scoped 门(fail-closed,设计如此)。
+
 ## Touches
 
 - `plugin/scripts/ready-pool-check.ts`
@@ -151,3 +199,4 @@ extra:
 - `plugin/scripts/promotion-driver.ts`
 - `plugin/test/promotion-driver.test.mjs`
 - `tasks/gap-ready-pool-body-still-read-from-stale-main-checkout.md`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`

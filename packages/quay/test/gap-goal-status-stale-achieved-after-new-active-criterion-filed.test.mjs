@@ -58,7 +58,10 @@ function carrierLines(root) {
 
 /** GOAL-001 (active) + AC-010 (active) — then GOAL-001 is closed, the precondition for the defect. */
 function achievedGoalWithAc(store) {
-  store.write("GOAL-001", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
+  // ⚠️ Two-step (draft → file the AC → close): a GOAL born `active` now needs a naming AC first
+  // (gap-goal-create-as-active-skips-zero-ac-gate). The precondition this helper establishes — a
+  // CLOSED goal carrying a live child — is unchanged.
+  store.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("AC-010", { title: "ac", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   store.write("GOAL-001", { title: "g", status: "achieved", origin: "o", body: GOAL_BODY });
 }
@@ -86,6 +89,9 @@ test("AC1 — a non-achieved AC filed under an achieved GOAL appends exactly ONE
 test("AC1 negative control (a) — filing an AC under an ACTIVE GOAL writes NO signal", () => {
   const root = tmpDir("ac1-active");
   const store = createGoalStore(path.join(root, "goals"));
+  // ⚠️ This control needs a LIVE goal ⇒ its exit condition is filed first (the seeded AC is written
+  // while GOAL-001 does not exist yet, so it appends no signal of its own).
+  store.write("AC-910", { title: "seeded exit condition", status: "draft", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   store.write("GOAL-001", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
   store.write("AC-010", { title: "ac", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   const before = carrierLines(root).length;
@@ -136,7 +142,9 @@ test("AC2 (store) — a stale achieved GOAL and a clean achieved GOAL are DIFFER
   store.write("AC-020", { title: "new child", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
 
   // A genuinely closed GOAL, built the same way but with its child discharged BEFORE closure.
-  store.write("GOAL-002", { title: "clean", status: "active", origin: "o", body: GOAL_BODY });
+  // ⚠️ `draft` at birth (gap-goal-create-as-active-skips-zero-ac-gate) — the goal is closed at :141
+  // either way, and the 「clean」 half measures the carrier, not the path it took to `achieved`.
+  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("AC-030", { title: "ac", status: "achieved", goal: "GOAL-002", criterion: "true", expect: EXPECT, origin: "o" });
   store.write("GOAL-002", { title: "clean", status: "achieved", origin: "o", body: GOAL_BODY });
 
@@ -239,7 +247,7 @@ test("AC2 (end-to-end) — `quay goal list` marks the stale achieved GOAL and NO
   const store = createGoalStore(path.join(ws, "goals"));
   achievedGoalWithAc(store);
   store.write("AC-020", { title: "new child", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
-  store.write("GOAL-002", { title: "clean", status: "active", origin: "o", body: GOAL_BODY });
+  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("AC-030", { title: "ac", status: "achieved", goal: "GOAL-002", criterion: "true", expect: EXPECT, origin: "o" });
   store.write("GOAL-002", { title: "clean", status: "achieved", origin: "o", body: GOAL_BODY });
 

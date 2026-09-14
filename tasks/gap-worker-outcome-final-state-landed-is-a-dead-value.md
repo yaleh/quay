@@ -1,7 +1,7 @@
 ---
 id: gap-worker-outcome-final-state-landed-is-a-dead-value
 title: worker-outcome.final_state 的 landed 是只出现过 1 次的死取值——按它统计吞吐会读成「吞吐≈0」
-status: ready
+status: done
 labels:
   - gap
   - defect

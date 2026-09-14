@@ -1537,6 +1537,10 @@ export interface DashboardSnapshot {
 
 const dashboardSnapshots = new Map<string, DashboardSnapshot>();
 const dashboardSnapshotRebuilds = new Map<string, Promise<void>>();
+/** Per root, the ONE follow-up rebuild coalescing every `rebuildNow()` caller that arrived while a
+ *  build was already in flight (see RebuildPolicy). Distinct from `dashboardSnapshotRebuilds`, which
+ *  tracks the build that is actually running. */
+const dashboardSnapshotFollowUps = new Map<string, Promise<void>>();
 
 /** True when the snapshot mechanism is switched off (see DASHBOARD_SNAPSHOT_DISABLED_ENV). Read at
  *  CALL time, not at module load, so a test can flip it per test. */
@@ -1564,6 +1568,7 @@ export function setDashboardSnapshotStepHook(hook: (() => Promise<void>) | null)
 export function clearDashboardSnapshots(): void {
   dashboardSnapshots.clear();
   dashboardSnapshotRebuilds.clear();
+  dashboardSnapshotFollowUps.clear();
   dashboardSnapshotStepHook = null;
 }
 
@@ -1573,9 +1578,20 @@ export function isDashboardSnapshotRebuilding(root: string): boolean {
   return dashboardSnapshotRebuilds.has(root);
 }
 
-/** Await the in-flight rebuild for `root`, if any (test seam — the request path never does this). */
+/** Await the rebuild for `root`, if any (test seam — the request path never does this).
+ *
+ *  When a follow-up is queued it is preferred over the running build: the follow-up resolves strictly
+ *  after the incumbent (it is chained onto it), so awaiting it is the reading that means "the store
+ *  is reflected now" rather than "that older build finished". */
 export function awaitDashboardSnapshotRebuild(root: string): Promise<void> {
-  return dashboardSnapshotRebuilds.get(root) ?? Promise.resolve();
+  return dashboardSnapshotFollowUps.get(root) ?? dashboardSnapshotRebuilds.get(root) ?? Promise.resolve();
+}
+
+/** True when a follow-up rebuild is queued for `root` (an explicit `rebuildNow()` arrived while a
+ *  build was in flight). Distinct from `isDashboardSnapshotRebuilding`, which reports the build that
+ *  is RUNNING — together they are the honest reading of the two waits this mechanism can be in. */
+export function isDashboardSnapshotFollowUpQueued(root: string): boolean {
+  return dashboardSnapshotFollowUps.has(root);
 }
 
 const EMPTY_LIVE: LiveResult = { status: "error", reason: "internal", inFlight: [], concurrencyCap: DEFAULT_DRIVER_CAP, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
@@ -1650,25 +1666,38 @@ export async function buildDashboardSnapshot(
   return { builtAt: Date.now(), live, sys, mgr, tests, suiteRun, history, tasks, goals, workerOutcomes };
 }
 
+/** What to do when a rebuild is requested while one is already in flight for the same root.
+ *
+ *  - `skip`  — the PERIODIC TICK's policy: return the incumbent and start nothing. A slow store must
+ *              not queue up work that all lands at once.
+ *  - `after` — an explicit `rebuildNow()` caller's policy, and the whole point of this type. Such a
+ *              caller made its change BEFORE the call, while the incumbent build issued its provider
+ *              round-trips (`client.goalList()` is the first thing `buildDashboardSnapshot` does)
+ *              before that — so the incumbent is structurally incapable of reflecting the change
+ *              (gap-dashboard-snapshot-rebuild-returns-inflight-cold-build: this is where the goal
+ *              card served a store state from before the caller's fixture mutation). Every such
+ *              caller is COALESCED onto ONE follow-up build started when the incumbent settles, so
+ *              `after` adds at most one build per in-flight build — it cannot stack unboundedly. */
+type RebuildPolicy = "skip" | "after";
+
 /** Start the background rebuild tick for `root`. Runs one build immediately (the cold build lives
  *  HERE, at startup, not in a request — the same shape as startDevelopRefBackgroundRefresh), then
  *  re-builds every `intervalMs`. The interval is unref'd so it never keeps the process alive.
  *
  *  Rebuilds never stack: while one is in flight the next tick is skipped (a slow store must not
- *  queue up work that all lands at once). A FAILED rebuild keeps the previous snapshot rather than
- *  blanking the page — a stale dashboard is honest, an empty one would be a fabricated absence. */
+ *  queue up work that all lands at once) and explicit callers coalesce onto a single follow-up (see
+ *  RebuildPolicy). A FAILED rebuild keeps the previous snapshot rather than blanking the page — a
+ *  stale dashboard is honest, an empty one would be a fabricated absence. */
 export function startDashboardSnapshotRefresh(
   root: string,
   client: ProviderClient,
   { intervalMs = DASHBOARD_SNAPSHOT_REFRESH_MS }: { intervalMs?: number } = {},
 ): { stop: () => void; rebuildNow: () => Promise<void> } {
   if (dashboardSnapshotDisabled()) return { stop: () => {}, rebuildNow: () => Promise.resolve() };
-  // `stop()` retires the INTERVAL only — `rebuildNow()` stays live, because an on-demand rebuild is
-  // exactly what a caller (or a test that has retired the tick to make its fixture deterministic)
-  // wants and it is never implicit.
-  const rebuild = (): Promise<void> => {
-    const inFlight = dashboardSnapshotRebuilds.get(root);
-    if (inFlight) return inFlight; // never stack rebuilds on one root
+  // Run one build unconditionally and register it as the in-flight one. Only ever called when nothing
+  // is in flight for `root` (the `if (map.get(root) === p)` in its own `finally` keeps a stale build
+  // from deleting a newer build's marker).
+  const start = (): Promise<void> => {
     const p = buildDashboardSnapshot(root, client, {
       // Install the complete-enough snapshot ONLY when there is nothing to serve yet. On a refresh
       // the incumbent snapshot is strictly better (it already carries the shell-out cards), so an
@@ -1677,16 +1706,44 @@ export function startDashboardSnapshotRefresh(
     })
       .then((snap) => { dashboardSnapshots.set(root, snap); })
       .catch(() => { /* keep the previous snapshot — see the contract above */ })
-      .finally(() => { dashboardSnapshotRebuilds.delete(root); });
+      .finally(() => { if (dashboardSnapshotRebuilds.get(root) === p) dashboardSnapshotRebuilds.delete(root); });
     dashboardSnapshotRebuilds.set(root, p);
     return p;
   };
-  void rebuild(); // the cold build — at startup, off the request path
-  let handle: ReturnType<typeof setInterval> | null = setInterval(() => { void rebuild(); }, intervalMs);
+  const rebuild = (policy: RebuildPolicy): Promise<void> => {
+    const inFlight = dashboardSnapshotRebuilds.get(root);
+    if (!inFlight) return start();
+    if (policy === "skip") return inFlight; // the tick: never stack rebuilds on one root
+    // `after`: this caller's change predates the incumbent's provider round-trips, so the incumbent
+    // can never show it. Coalesce onto the ONE queued follow-up (a second `rebuildNow()` arriving
+    // during the same wait must join it, not add a second build).
+    const queued = dashboardSnapshotFollowUps.get(root);
+    if (queued) return queued;
+    // Re-enter `rebuild` (not `start`) once the incumbent settles: its `finally` has already dropped
+    // the marker, so this normally starts a build; if a tick won that microtask gap the `skip` branch
+    // returns THAT build, which also began after this caller's change and is therefore a valid answer.
+    let followUp: Promise<void>;
+    const beginFollowUp = (): Promise<void> => {
+      // Retire the queue entry as the follow-up STARTS, not as it settles. Otherwise a `rebuildNow()`
+      // arriving while the follow-up build itself runs would be handed this same, already-started
+      // promise — which began before its call and so cannot reflect its change, i.e. the exact defect
+      // this policy exists to remove, one level deeper.
+      if (dashboardSnapshotFollowUps.get(root) === followUp) dashboardSnapshotFollowUps.delete(root);
+      return rebuild("skip");
+    };
+    followUp = inFlight.then(beginFollowUp, beginFollowUp);
+    dashboardSnapshotFollowUps.set(root, followUp);
+    return followUp;
+  };
+  // `stop()` retires the INTERVAL only — `rebuildNow()` stays live, because an on-demand rebuild is
+  // exactly what a caller (or a test that has retired the tick to make its fixture deterministic)
+  // wants and it is never implicit.
+  void rebuild("skip"); // the cold build — at startup, off the request path
+  let handle: ReturnType<typeof setInterval> | null = setInterval(() => { void rebuild("skip"); }, intervalMs);
   (handle as unknown as { unref?: () => void }).unref?.();
   return {
     stop: () => { if (handle != null) { clearInterval(handle); handle = null; } },
-    rebuildNow: rebuild,
+    rebuildNow: () => rebuild("after"),
   };
 }
 

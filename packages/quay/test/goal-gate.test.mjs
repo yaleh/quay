@@ -32,6 +32,14 @@ test.after(() => {
 const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
 const EXPECT = "the expected outcome this criterion proves";
 
+// gap-goal-create-as-active-skips-zero-ac-gate: the P6-goal gate now covers the CREATE path, so a
+// brand-new GOAL that no AC names can no longer be born `active`. Every fixture here needs a LIVE
+// goal, so it files the exit condition first (draft goal → AC → activate), as production now must.
+function seedAc(store, goalId) {
+  const id = `AC-9${String(Number(String(goalId).replace(/\D/g, ""))).padStart(2, "0")}`;
+  return store.write(id, { title: "seeded exit condition", status: "draft", goal: goalId, criterion: "true", expect: EXPECT, origin: "o" });
+}
+
 test("goal gate fails-closed when the goal record does not exist", async () => {
   const dir = tmpGoalDir("missing");
   const r = await makeGoalGate("AC-999", dir)({ id: "T" });
@@ -42,6 +50,7 @@ test("goal gate fails-closed when the goal record does not exist", async () => {
 test("goal gate fails-closed when the criterion is empty/missing (AC2)", async () => {
   const dir = tmpGoalDir("nocriterion");
   const store = createGoalStore(dir);
+  seedAc(store, "GOAL-001");
   store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
   // A criterion-less record is now unrepresentable via write() (gap-goal-record-completeness-undefined
   // requires criterion+expect for criterion records), so hand-write a legacy file to keep the gate's
@@ -56,6 +65,7 @@ test("goal gate fails-closed when the criterion is empty/missing (AC2)", async (
 test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zero", async () => {
   const dir = tmpGoalDir("real");
   const store = createGoalStore(dir);
+  seedAc(store, "GOAL-001");
   store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
   store.write("AC-010", { title: "pass", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   store.write("AC-011", { title: "fail", status: "active", goal: "GOAL-001", criterion: "false", expect: EXPECT, origin: "o" });
@@ -71,6 +81,7 @@ test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zer
 test("a dynamically registered goal-<id> gate runs through the registry (same shape as doc/adr)", async () => {
   const dir = tmpGoalDir("registry");
   const store = createGoalStore(dir);
+  seedAc(store, "GOAL-001");
   store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
   store.write("AC-100", { title: "conforming", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   registerGoalGate("goal-fixture-pass", dir, "AC-100");
@@ -92,6 +103,7 @@ test("listGates() includes a goal gate once one is registered", () => {
 test("goal gate executes via sh: bash process-substitution criterion fails (exit 2), POSIX temp-file comm passes", async () => {
   const dir = tmpGoalDir("sh-compat");
   const store = createGoalStore(dir);
+  seedAc(store, "GOAL-001");
   store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
 
   // `<(...)` is bash-only: under /bin/sh (dash) → "Syntax error: ( unexpected" → exit 2.

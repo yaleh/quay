@@ -2,8 +2,8 @@
 id: gap-quay-native-task-create-duplicate-id-prepends-frontmatter
 title: quay-native task create 对已存在 id 返回 0 并把第二段 frontmatter 前置（静默损坏任务文件 + ABI
   的 status 变成 todo）
-status: ready
-needs_human_cause: human-adjudication
+status: done
+needs_human_cause: unclassified
 labels:
   - gap
   - mechanism
@@ -61,6 +61,7 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 - packages/quay-native/bin/quay-native.ts（native CLI `task create` 子命令入口：走 `{ create: true }`，捕获后 exit 1）
 - packages/quay-native/test/create-validation.test.mjs（AC3 断言宿主：QN-025 同族用例已在此，本次两个前门各加一组）
 - plugin/test-isolation-violations.txt（test-isolation 棘轮清单：修好该文件的 R1/R4 后必须删掉其陈旧条目）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（**carry-in 修复**：develop 侧 v0.6.3 bump（`92c5b1b15`）漏 `--reanchor` ⇒ closure ratchet 陈旧 ⇒ 全库 suite 静态层 fail-closed 红、**每个任务**的 fan-in 都过不去；本任务被它挡住，故随本分支携带这次机械重锚——diff 仅 `fingerprint` 与 plugin.json 的 `sha`，`3 files / 1022 bytes` 数字不变）
 
 ## AC
 
@@ -123,6 +124,34 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 - **C. 另一条路径未收口**：`--body` 传入含完整 frontmatter 的整篇任务文本时，`serialize()` 会写出一份新 frontmatter + 原文（含其 frontmatter）作为正文，
   得到"两段 frontmatter"——与 report 观察到的字节形态一致，但根因是 body 内容而非重复 id。按 Plan 的范围声明**不在此合并**。
 
+## Evidence（本轮复核 2026-09-14T13:0xZ，per-task worker）
+
+**三条 AC 本轮全部逐条现场复跑，读数如下**（不是复述上一轮）：
+
+- AC1 native：`task create NEW-001` 新建 ⇒ exit 0、`NEW-001.md` 出现；再次 `task create NEW-001 --title recreated --status todo` ⇒ **exit 1**、
+  stderr 点名 id、md5 `8554b03a9bf0fb801d8f5f3636e879dd` 前后同一、`task get` 仍读到原 title。
+- AC1 Core（**真任务文件**，非夹具）：在本 worktree 的 `tasks/gap-quay-native-task-create-duplicate-id-prepends-frontmatter.md` 上跑
+  `node packages/quay/bin/quay.ts task create <self-id> --title "recreated by core" --status todo` ⇒ **exit 1**；
+  md5 `e79da51bb7d4ef0c8644c3cf1be583ec` 前后同一；`status:` 仍为 `ready`；`git status --porcelain` 空。
+  （AC1 正文里那个 `f465137d…` 是 AC 勾选当时的读数；该文件此后被 task_write/合并改过，故复跑取到新的**前后同一**值——判据要的是"前后不变"，读数随身。）
+- AC2 回归：`task edit` 对新 id 仍建立（`updated UPSERT-001` + 文件出现）、对已存在 id 仍合并**不拒**（`updated UPSERT-001`）；
+  而 `task create` 对同一已存在 id **拒**（exit 1）。二者语义分离成立。
+- AC3：`bash scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0 / tests 98 / pass 98 / fail 0**。
+
+**本轮真正的阻碍（前三次 needs-human 的根因，前几轮记为"归因不出"——本轮定位到具体文件）**：
+
+前三次 suite 红的判词都是 `STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1` ⇒ 静态层 **fail-closed，
+`# tests 0`**（一个测试都没跑）⇒ "归因不出任何失败测试文件"是**症状**，不是成因。
+
+根因：`quay-init-closure-ratchet` 的 fingerprint source set 里有 `plugin/.claude-plugin/plugin.json`；
+v0.6.3 发布（`92c5b1b15`，12:46Z）改了它却没随附 `--reanchor`（上一次重锚 `9ea261f14` 是 0.6.2 bump 时做的）
+⇒ **develop 上这条静态检查是红的，且它对每个任务的 fan-in 都 fail-closed**。独立复核：在**主检出**上跑同一命令得到**同一个**陈旧指纹
+（`58d2c6a5…` vs baseline `143a8d93…`，`changed: plugin/.claude-plugin/plugin.json`）⇒ 与我的 delta 无关（我的五个 Touches 文件一个都不在 source set 里）。
+
+处置：`--reanchor`（`3 files / 1022 bytes` 不变 ⇒ 只刷新指纹，不动数字），随本分支携带。
+同一时刻 `gap-dist-plugin-missing-node-modules-task-schema-yaml` 也已声明该文件（它的 bump 是成因），
+两边都做是**幂等**的——先落地的一方解掉全库的红。
+
 ## Needs-Human
 
 **执行 2026-09-14T08:03:14.184Z — 连续修满重试上限仍不合格（标 needs-human）**
@@ -143,3 +172,12 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 - session_id：7834ccd7-80bd-4375-8ed1-dc2d4a22c00e
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-quay-native-task-create-duplicate-id-prepends-frontmatter~wk-prod-1789367589~1789387501555-c063a0.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-quay-native-task-create-duplicate-id-prepends-frontmatter-wk-prod-1789367589.log
+
+## Needs-Human
+
+**执行 2026-09-14T12:44:01.154Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-quay-native-task-create-duplicate-id-prepends-frontmatter still present
+- run_id：wk-prod-1789367589
