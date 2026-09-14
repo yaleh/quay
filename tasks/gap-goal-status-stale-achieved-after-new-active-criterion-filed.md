@@ -95,4 +95,5 @@ gate` 等任务已经在 AC 层建立了 `covered`/`insufficient`/`not-evaluated
 - packages/quay/src/abi.ts
 - packages/quay/src/cli/goal.ts
 - packages/quay/test/gap-goal-status-stale-achieved-after-new-active-criterion-filed.test.mjs
+- .gitignore
 - tasks/gap-goal-status-stale-achieved-after-new-active-criterion-filed.md
