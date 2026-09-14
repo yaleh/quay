@@ -2,7 +2,7 @@
 id: gap-ac169-readme-version-not-in-version-consistency-set
 title: AC169 判据复红——plugin/README.md 版本漂移到 v0.6.1（实际
   v0.6.3），且该文件不在版本一致性闸的受检集内（再改字面量必复发）
-status: todo
+status: ready
 labels:
   - gap
   - defect
