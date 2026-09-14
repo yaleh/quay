@@ -138,6 +138,30 @@ function makeRoot(tag) {
   return root;
 }
 
+/** 失败安全的 driver 清理（gap-ac3-live-test-fixture-leaks-supervised-driver-processes）。
+ *
+ *  ⚠️ `quay driver start` 起的是 **detached** supervisor（生产需要：CLI 退出后驱动必须活着）⇒ 它和它
+ *  fork 出的 driver 【不随测试进程退出而消失】，只能显式停。而 `stopKind` 唯一的杀法是从
+ *  `<root>/.quay/` 读 pid 文件发信号 ⇒ **root 一旦不在，它一个信号都发不出去**，且**两种形态都静默**
+ *  （实测：root 被删 ⇒ `invalid --root` + exit 2；root 在而 pid 文件没了 ⇒ `not-running` + exit 0）
+ *  ⇒ 泄漏是**静默**的（硬规则 3b：读不懂输入 ⇒ 与「干净」同形）。
+ *  ⇒ 顺序固定：先 stop（本测试起过的每个 kind），**最后**才 rmSync；整段在 try/finally 里 ⇒ 断言失败
+ *  也照样收。
+ *
+ *  实测（2026-09-14，本条立案）：本文件 `ac1-stop` 的一次失败留下了一对
+ *  `/tmp/driver-cli-ac1-stop-XpH3GN` 进程（supervisor + worker driver），活了 **2.7 天**
+ *  （`ps -o lstart=` 2026-09-11 10:13:14）。⛔ 别把它退回成「t.after 只 rmSync、stop 写在测试体里」
+ *  ——那正是这条泄漏的产生路径。 */
+async function teardownDrivers(root, kinds) {
+  try {
+    for (const kind of kinds) {
+      try { await cli(["driver", "stop", "--kind", kind, "--root", root]); } catch { /* 继续收下一个 */ }
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true }); // 必须最后：root 一没，stop 就读不到 pid 文件了
+  }
+}
+
 function git(cwd, args) {
   return execFileSync("git", args, {
     cwd,
@@ -171,7 +195,9 @@ function statusJson(root, kind) {
 
 test("AC1 — both kinds start + status + stop through `quay driver`", async (t) => {
   const root = makeRoot("ac1");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⛔ 不在测试体里 stop、也不只 rmSync：断言一失败 stop 就跑不到，而 rmSync 一跑 stop 就空转
+  // （gap-ac3-live-test-fixture-leaks-supervised-driver-processes）。
+  t.after(() => teardownDrivers(root, ["promotion", "worker"]));
 
   for (const kind of ["promotion", "worker"]) {
     const start = await cli(["driver", "start", "--kind", kind, "--root", root]);
@@ -216,9 +242,14 @@ test("AC1 — worker `stop` does NOT kill in-flight workers (⛔ falsifiable: ki
   const root = makeRoot("ac1-stop");
   const inflight = path.join(root, ".quay", "worker-driver-inflight.pid");
   let inflightPid = "";
-  t.after(() => {
-    if (inflightPid) { try { process.kill(Number(inflightPid), "SIGKILL"); } catch { /* gone */ } }
-    fs.rmSync(root, { recursive: true, force: true });
+  t.after(async () => {
+    try {
+      // 夹具自己的 in-flight sleeper（⛔ 不属于 driver，teardownDrivers 不管它）。
+      if (inflightPid) { try { process.kill(Number(inflightPid), "SIGKILL"); } catch { /* gone */ } }
+    } finally {
+      // driver 的清理在 finally 里 ⇒ sleeper 那步抛错也照样收 driver。
+      await teardownDrivers(root, ["worker"]);
+    }
   });
 
   const start = await cli(["driver", "start", "--kind", "worker", "--root", root]);
@@ -352,10 +383,7 @@ test("AC1 — resume is drain's inverse: clears halted=false (surface recovery, 
 
 test("AC2 — start when halted REFUSES with a clear message + resume hint (⛔ no silent respawn loop)", async (t) => {
   const root = makeRoot("start-halted");
-  t.after(async () => {
-    await cli(["driver", "stop", "--kind", "worker", "--root", root]);
-    fs.rmSync(root, { recursive: true, force: true });
-  });
+  t.after(() => teardownDrivers(root, ["worker"]));
 
   // drain+stop 的模拟：drain 写 halted=true（stop 只杀 supervisor+driver、不碰控制态——同真实语义）。
   const d = await cli(["driver", "drain", "--kind", "worker", "--root", root]);
