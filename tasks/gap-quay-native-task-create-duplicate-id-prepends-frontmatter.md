@@ -131,3 +131,15 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 - 成因类：human-adjudication
 - **2026-09-14 处置**：本条为历史记录，保留不改写。本轮由 per-task worker 重做：实现落 `b02d7f04c`，
   两道 static 红各自修复落 `b3de5e939` / `a6ce55a8e`，`--for-task` scoped 门 exit 0（98/98）。
+
+## Needs-Human
+
+**执行 2026-09-14T12:28:14.347Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 5
+- run_id：wk-prod-1789367589
+- session_id：7834ccd7-80bd-4375-8ed1-dc2d4a22c00e
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-quay-native-task-create-duplicate-id-prepends-frontmatter~wk-prod-1789367589~1789387501555-c063a0.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-quay-native-task-create-duplicate-id-prepends-frontmatter-wk-prod-1789367589.log
