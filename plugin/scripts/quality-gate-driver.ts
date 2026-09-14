@@ -47,7 +47,9 @@ import {
   runAsync,
   scheduleIsDue,
   isHalted,
+  registerKindStop,
   resourceGateCheck,
+  type DriverKind,
   type Fact,
   type RoutineSpec,
 } from "./driver-runtime.ts";
@@ -1000,6 +1002,9 @@ export interface QualityGateLoopOptions {
    *  复用它比让下一个例程型 driver 再抄 95 行样板正确（SPEC §4 正是要消灭那种重复）。
    *  ⛔ 不同 kind 必须用各自的控制面——共用会让一个 kind 的 halt 误停另一个。 */
   controlStateRel?: string;
+  /** AC-255（SPEC §7 阶段 C）：本循环是哪个 kind 的。用来登记**进程内**停机信号（`registerKindStop`），
+   *  使 anchor 能只停这一个 kind 的循环。缺省 "quality"（本循环的原生 kind）。 */
+  kind?: DriverKind;
 }
 
 /** 组装一条 round 记录（heartbeat carrier 的一行）。facts 是轮内跑出的全部例程读数。 */
@@ -1052,8 +1057,9 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
   const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  process.on("SIGINT", requestStop);
-  process.on("SIGTERM", requestStop);
+  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
+  // 只停【这一个】循环（收敛后多个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
+  registerKindStop(opts.kind ?? "quality", requestStop);
   const sleep = (ms: number) => new Promise<void>((resolve) => {
     wakeResolve = resolve;
     setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
@@ -1285,7 +1291,7 @@ export async function main(argv: string[]): Promise<number> {
     probeRoutines: probeSelection.routines,
   });
 
-  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
+  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });
 }
 
 // Direct entry guard (gate-script-base convention)：仅当本文件是入口时跑 main()。

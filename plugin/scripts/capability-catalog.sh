@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [driver-anchor.ts]="Do the six driver kinds’ resident loops live in ONE OS process (SPEC-unified-quay-server §7 stage C / §6.1) — an anchor host that runs each kind’s OWN main(argv) loop in-process behind an independent event-loop error boundary + restart counter, writes each kind’s .quay/<prefix>.pid as its own pid (so AC-255’s criterion de-duplicates to ONE live pid) while retiring the per-kind supervisor pid files, reconciles a declarative .quay/anchor-desired.json so quay driver start|stop --kind X adds/removes exactly ONE loop without touching the others or killing in-flight worker children (§6.9 inv.2/3), and self-refreshes onto the main checkout’s kernel when it advances (AC8 durability; the base is the MAIN CHECKOUT OF THE KERNEL’S OWN REPO — ⛔ NOT the workspace root passed as --root, whose <workspaceRoot>/plugin/scripts/… form resolves to a nonexistent file in a third-party project and is fail-closed by kernel-sibling-resolution-check’s DRIVER-SCOPE rule on driver-runtime.ts) — rather than 12 supervisor+driver processes whose per-kind crash isolation is bought with 8 registry tables and a ps that can no longer tell ‘the process is up’ from ‘this kind is still turning’ (§6.10)?"
   [fan-in-queueing-model.ts]="「把 worker 并发调高，落地吞吐会上升，还是只有排队时间上升」—— 用三个生产载体（fan-in 锁事件 / per-run fan-in 过程日志 / worker 执行记录 + git 落地历史）报出锁持有分布、排队等待分布、锁利用率 ρ、到达率 λ、平均在系统数 L，以及实测的 wait-vs-ρ 曲线（本报告里唯一可取假的那个量），据此说出系统当前落在排队论 knee 的哪一侧、以及距饱和还有几倍余量（tasks/gap-fan-in-queueing-model-does-concurrency-help；并纠正 docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §7 第 5 条『排队无载体』的错误结论——该量自 2026-08-30 起写在 per-run 过程日志里）?"
   [worktree-namespace-literal-check.ts]="Does the product/plugin source spell the worktree-namespace directory literal (the double-quoted 'quay-worktrees') in more than the ONE place that is allowed to — i.e. is a grep -rn of that literal over packages/quay/src + plugin/scripts at most 1 hit, and is that hit the DEFAULT_WORKTREE_NAMESPACE_NAME declaration in packages/quay/src/worktree-namespace.ts (the single resolver's fallback branch)? An unquoted occurrence (path regex / comment / prose) is reported as an advisory count, never a hard failure (tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3)?"
   [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
@@ -455,6 +456,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [driver-anchor.ts]="按需"
   [fan-in-queueing-model.ts]="按需"
   [worktree-namespace-literal-check.ts]="每轮"
   [gitignore-runtime-coverage-check.ts]="每轮"
@@ -788,6 +790,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [driver-anchor.ts]="失效前提：驱动 kind 的常驻循环仍然可以在同一个 Node 进程的事件循环里并发跑（即 §9 开放问题 1「会不会互相饿死」的实测结论仍为「可行」）且 quay driver <verb> --kind X 仍是驱动生命周期的用户面；若某个 kind 被实测饿死而转回独立进程（或驱动启停面整体换成 systemd 类承载），本条退休"
   [fan-in-queueing-model.ts]="失效前提：三条载体的字段口径不变 —— ①.quay/fan-in-lock-events.jsonl 的 event/epoch/taskId/runId/pid 五键与 epoch 以【秒】为单位的约定；②per-run 过程日志 fan-in-<task>-<runId>.log 里 acquire-fan-in-lock 步的 wall_ms（它 = 排队时延，本条全部延迟结论都建立在它上面）；③.quay/worker-outcome.jsonl 的 in_flight_count/wall_clock_ms 与 git log develop 里 tasks: 翻 <id>… 的提交主题形状。任一字段改名、改单位或给 wall_ms 换语义，本条需同步"
   [worktree-namespace-literal-check.ts]="失效前提：worktree 命名空间仍由单一入口 packages/quay/src/worktree-namespace.ts 的 DEFAULT_WORKTREE_NAMESPACE_NAME 回落分支持字面量、其余读侧仍只经该入口取命名空间；若命名空间约定整体退休（不再有 per-task worktree）或字面量改由配置/环境注入（字面量消失），本条随之失效"
   [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
@@ -883,7 +886,7 @@ declare -A INVALIDATION=(
   [driver-config.ts]="失效前提：并发 cap / 轮询间隔 / 协调地板 仍需一份 git 版本化的声明式配置（plugin/scripts/drivers.yml）作为单一真相源、且两 driver + cap-from-gate 仍经本模块的 loadDriverConfig/driverCap 派生（⛔ 不各写一份字面量/env）；若配置并入 .quay/config.yml（不再是 plugin/scripts/drivers.yml 这一份）或并发裁决面整体退役（旧 loop slot-refill 退役后 cap-from-gate 亦退），本条随单一真相源迁址而失效"
   [driver-filters.ts]="失效前提：worker-driver 与 promotion-driver 仍各自在 spawn 前过滤候选、且五个派发前谓词仍须是同一份可组合列表（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-filters.ts 这一份）或谓词集合迁出/拆分，本条退休"
   [driver-result.ts]="失效前提：worker-driver 与 promotion-driver 仍各自 spawn 执行者后须经独立判据复核（worker 读 status=done ∧ 无残留 worktree、promotion 重跑闸），且三态词表仍须是同一份 DriverResult（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-result.ts 这一份）或词表迁出/拆分，本条退休"
-  [driver-runtime.ts]="失效前提：三种 driver 仍须共享同一份常驻运行时（循环/心跳/判停/supervisor/控制面/notify/profile/ResultVocab），且 supervisor 仍须是 TS 实现（⛔ 不再有 bash promotion-driver-launch.sh）；若 driver 启动面换用别的承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry）或分层被摊平回 N 个平级 plugin（1b 重实现循环/心跳/判停），本条退休"
+  [driver-runtime.ts]="失效前提：三种 driver 仍须共享同一份常驻运行时（循环/心跳/判停/supervisor/控制面/notify/profile/ResultVocab），且 supervisor 仍须是 TS 实现（⛔ 不再有 bash promotion-driver-launch.sh）；若 driver 启动面换用别的承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry）或分层被摊平回 N 个平级 plugin（1b 重实现循环/心跳/判停），⛔ 追加（GOAL-017/AC-255，SPEC §7 阶段 C 已落地）：**默认启动路径不再是 runSupervisor** —— 六个 kind 的常驻循环改经 driver-anchor.ts 收进**一个** anchor 进程（supervisor 退为 QUAY_DRIVER_LEGACY_SUPERVISOR=1 的可回退路径）⇒ 本条的「supervisor 仍须是 TS 实现」这一半对**默认路径**已不成立；本条仍在，是因为 driver-runtime.ts 依旧是六个 kind 共享的 Layer 0（循环/心跳/判停/控制面/notify/profile/ResultVocab）与注册表正本"
   [driver-shared.ts]="失效前提：worker-driver 与 promotion-driver 仍各自常驻同机、且资源门/控制面判定仍须是同一份实现（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-shared.ts 这一份）或两驱动不再共享资源门，本条退休"
   [profile-policy.ts]="失效前提：仍有 L2 policy 需求（主备回退/加载校验/继承去重三态）；若归属 blocker（packages/quay vs plugin/scripts）裁为产品主张而把 profile 选择规则迁入 packages/quay（不再是 plugin/scripts/profile-policy.ts 这一份）或 policy 并入 L1 profile 层，本条退休"
   [execution-policy.ts]="无可测前提，靠周期复核"
@@ -1121,6 +1124,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [driver-anchor.ts]="2026-09-13"
   [fan-in-queueing-model.ts]="2026-09-14"
   [worktree-namespace-literal-check.ts]="2026-09-13"
   [gitignore-runtime-coverage-check.ts]="2026-09-13"
@@ -1454,6 +1458,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [driver-anchor.ts]="n/a"
   [fan-in-queueing-model.ts]="n/a"
   [worktree-namespace-literal-check.ts]="keyword"
   [gitignore-runtime-coverage-check.ts]="position"
@@ -1793,6 +1798,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [driver-anchor.ts]="谁按：driver-runtime.ts（startKind/stopKind/restartKind 经本文件的 spawnAnchor + .quay/anchor-desired.json 期望态拉起/停掉 kind）+ 六个 kind driver（registerKindStop 登记进程内停机信号）；条件=需要把六个 kind 的常驻循环收进一个进程（SPEC §7 阶段 C）且保留 per-kind 停机与在飞子进程不被杀的语义"
   [fan-in-queueing-model.ts]="谁按：任何要动本工作区并发旋钮的人/层，在改 .quay/config.yml 的 concurrency / concurrency_bands 之前与之后各跑一次做前后对照（node --experimental-strip-types plugin/scripts/fan-in-queueing-model.ts --root <主检出>），也由本任务实现者跑出 docs/analysis/fan-in-queueing-model.md 的全部读数；条件=要判定 fan-in 锁当前处在排队论 knee 的哪一侧（ρ 与实测 wait-vs-ρ 曲线），或要把一次 fan-in 的端到端拆成排队 / suite / 其余三段"
   [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
   [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
