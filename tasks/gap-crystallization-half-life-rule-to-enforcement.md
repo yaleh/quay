@@ -33,10 +33,10 @@ ADR-007 的 enforcement 注释自 2026-07-20 起标 "STILL FUTURE WORK"，两个
 
 ## Touches
 
-- `plugin/scripts/crystallization-half-life.ts`
-- `plugin/test/crystallization-half-life.test.mjs`
+- `plugin/scripts/crystallization-half-life.ts` (new)
+- `plugin/test/crystallization-half-life.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/crystallization-half-life.md`
+- `docs/analysis/crystallization-half-life.md` (new)
 - `tasks/gap-crystallization-half-life-rule-to-enforcement.md`
 
 ## Acceptance Criteria
