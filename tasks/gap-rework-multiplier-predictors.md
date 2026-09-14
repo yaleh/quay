@@ -1,7 +1,7 @@
 ---
 id: gap-rework-multiplier-predictors
 title: 找返工的预测因子——什么样的任务注定被执行 5 次以上（中位 2 次、p90 5 次、最高 27 次）
-status: todo
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
