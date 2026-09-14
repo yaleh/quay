@@ -1,7 +1,7 @@
 ---
 id: gap-worker-outcome-final-state-landed-is-a-dead-value
 title: worker-outcome.final_state 的 landed 是只出现过 1 次的死取值——按它统计吞吐会读成「吞吐≈0」
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -27,6 +27,7 @@ extra: {}
 - `plugin/test/worker-driver.test.mjs`
 - `orchestration/worker-driver-log-carriers.md`
 - `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-worker-outcome-final-state-landed-is-a-dead-value.md`
 
 ## Acceptance Criteria
@@ -124,6 +125,15 @@ grep 命中 **0**（只出现在 `.quay/` 运行时载体：`worker-outcome.json
 正臂那条记录同时印证了本缺陷的根因：同一条记录里 `final_state:"completed"` **与**
 `mechanical_fan_in.outcome:"landed"` 并存——两个词表描述同一事件却不同名。
 
+**⚠️ 补记（本次续做轮复核，⛔ 不改上表、不伪造历史读数）**：负臂那个任务已于 **09-14T10:33:50Z
+真实落地**（载体 `final_state:"completed"` / `mechanical_fan_in.outcome:"landed"`；`git show
+develop:tasks/…` 现为 `status: done`，残留 worktree 0）。上表是**读取时刻**的真实读数，且可从
+git 复现——`git log develop -- tasks/gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10.md`
+在 09-14T04:07:49Z / 05:19:21Z 两次提交均为 `status: ready`，落在 04:41:47Z 两侧。**判据的意图
+（两臂取值可区分）用当日实时数据复核仍成立**：最近 60 条「每任务末次记录」里 `completed` ∧
+develop `done` = **49** 条，非 `completed` ∧ 非 `done` = **10** 条（各例：正 `gap-serve-stale-signal-
+has-no-consumer`；负 `gap-goal-create-as-active-skips-zero-ac-gate` `exited-not-landed`/`ready`）。
+
 ### AC4 — 成功态计数 vs 同期 git 落地数
 
 可复跑命令（⛔ 分母必须是**去重任务数**，理由见下）：
@@ -209,6 +219,32 @@ grep -rnE "final_state.*[\"']landed[\"']" --include='*.ts' --include='*.mjs' --i
 
 另：`tasks/gap-rework-multiplier-predictors.md:65` 已自带正确的陷阱提醒（⛔ 无需改）。
 
+### 续做轮的阻塞与解除（⛔ 与本次判据无关，但它改变了 Touches）
+
+前一次退出的原因是机械 fan-in 未落地（adopted orphan worker 退出、exit code 不可观测），
+**不是实现缺陷**。本轮重跑 scoped 门时遇到一条 develop 侧红：
+
+- **现象**：`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`。
+- **根因（已实锤，⛔ 非本任务引入）**：develop@`158616df7`（release: 版本 bump 0.6.1 → 0.6.2）
+  改了 `plugin/.claude-plugin/plugin.json`——它是 ratchet 指纹集 `LAYDOWN_SOURCES` 的 4 个源之一——
+  **但没有带上棘轮要求的 `--reanchor` 伴随提交**。在**干净的 develop worktree** 上单跑
+  `--check-stale` 同样 exit 1（已实测），故这是 develop 侧的既存红。
+- **为什么会在这个任务的 fan-in 上红**（本任务的 delta 并不含该文件）：该检查登记为
+  `@static-tier change` + `@static-object plugin/scripts/ plugin/workflows/ plugin/agents/
+  plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/`。本任务改了 `orchestration/` 下的载体
+  文档 ⇒ **被选中**；而真正变 stale 的 `plugin/.claude-plugin/plugin.json` **不在该 object 表里**
+  ⇒ 改动者自己的 scoped 门放行，红出现在**无关任务**的 fan-in 上。
+  **这正是该检查存在的目的**（其注册处注释自称把这类 fan-in 红从 35 降到 0）⇒ 是同一缺陷类的
+  **第 9 次复发**：`LAYDOWN_SOURCES` 有 4 个源，`@static-object` 只覆盖 2 个，
+  **漏了 `plugin/.quay/profiles.yml` 与 `plugin/.claude-plugin/plugin.json`**（硬规则 5b：兄弟实例）。
+- **本轮动作**：跑棘轮自己指定的修法 `--reanchor`（提交 `9ea261f14`）。**实测是语义上的空操作**：
+  改前 `--gate` 已是 `3 files / 1022 bytes ≤ baseline 3/1022`（shrink-only 成立），re-anchor 后
+  files/bytes **逐字不变**，只有 `fingerprint` 与 `plugin.json` 的 sha 移动。
+  ⇒ 这是版本 bump 漏掉的**伴随提交**，⛔ 不是把判据放宽。故 Touches 增列该 baseline 文件。
+- **⛔ 本轮【不】修**（超出本任务范围、且需自带 AC 与负控制）：`@static-object` 漏登两个源目录
+  这个选择器缺陷。⇒ 下一次改 `plugin.json` / `profiles.yml` 会再次复发，需另立任务。
+
 ### 提交
 
-实现提交 `39dcc3c8a`（含本次 grep 清单与红控制记录）。
+- 实现提交 `39dcc3c8a`（含本次 grep 清单与红控制记录）。
+- 续做轮：`9ea261f14` chore(ratchet): re-anchor quay-init closure baseline after the 0.6.2 version bump。

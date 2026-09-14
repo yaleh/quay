@@ -38,6 +38,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const SETUP = path.join(REPO_ROOT, "plugin/scripts/dispatch-worktree-setup.sh");
 const CHECK = path.join(REPO_ROOT, "plugin/scripts/worktree-node-modules-check.sh");
+const WI = path.join(REPO_ROOT, "scripts/worktree-include.sh");
 
 function t(name, fn) {
   test(name, fn);
@@ -385,4 +386,208 @@ t("AC2 wiring — worker-driver.ts (the LIVE dispatch path) wires dispatch-workt
   // 定义在 buildWorkerPrompt 之前，源码级 indexOf 顺序不是该语义的正确载体）。
   assert.match(workerDriver, /dispatchSetupSignature\(root, "<the worktree path/, "create prompt calls the setup helper (step-1 placeholder)");
   assert.match(workerDriver, /dispatchSetupSignature\(root, wt\)/, "continue prompt calls the setup helper with the concrete worktree path");
+});
+
+// ── worktree-include.sh: SIGPIPE-141 primary resolution + the failure face ──────────────────────
+// gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning. The defect: the
+// primary checkout was resolved as
+//   git worktree list --porcelain | awk '/^worktree /{print $2; exit}'
+// The early-exiting awk closes the read end while git still has output to write ⇒ git takes EPIPE
+// and dies 141 ⇒ under `set -euo pipefail` the ASSIGNMENT kills the whole script: 0 bytes printed,
+// 0 files copied. Combined with dispatch-worktree-setup.sh's one-line "failed", a FRESH task
+// worktree ended up with node_modules linked but no .quay/config.yml — mechanism claiming to have
+// provisioned, having copied nothing.
+//
+// The trigger is output VOLUME (worktree count) and it is a RACE — measured 4/5 runs dead on the
+// 45-worktree primary, 3/3 immediately before the fix. A race is not pinnable by re-running it, so
+// these tests pin the INVARIANT instead: primary resolution must not DEPEND on a successful
+// `git worktree list`. The stub-git fixture below makes that dependency fail deterministically —
+// red against the old implementation (exit 141, nothing copied), green against the fixed one.
+
+/** The real git, captured before any stub can shadow it on PATH. */
+const REAL_GIT = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+
+/**
+ * Fixture: a real git repo whose .worktreeinclude declares ONE gitignored file, plus a second
+ * gitignored file that is NOT declared (the negative control), plus a registered task worktree.
+ * `.quay/` must be gitignored for the declared file to qualify — the copy rule is
+ * declared ∩ gitignored, so a declared-but-tracked file is deliberately never copied.
+ */
+function makeIncludeRepo() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wi-include-"));
+  const git = (...args) => {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr ?? ""}`);
+    return r.stdout.trim();
+  };
+  git("init", "-q");
+  git("config", "user.email", "t@test");
+  git("config", "user.name", "t");
+  fs.writeFileSync(path.join(root, ".worktreeinclude"), "/.quay/secret.yml\n");
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\nignored-dir/\n");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "ignored-dir"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "secret.yml"), "declared-payload\n");
+  fs.writeFileSync(path.join(root, "ignored-dir", "other.txt"), "not-declared\n");
+  fs.mkdirSync(path.join(root, "node_modules"), { recursive: true }); // step 1 must be a no-op
+  git("add", ".worktreeinclude", ".gitignore");
+  git("commit", "-q", "-m", "baseline");
+  const wt = path.join(root, "wt");
+  git("worktree", "add", "-q", "-b", "task/fx", wt, "HEAD");
+  return { root, wt };
+}
+
+/**
+ * Give a fixture root the two files the dispatcher's step 2 composes — the REAL
+ * scripts/worktree-include.sh plus the plugin/scripts/repo-root.sh it sources — so the fixture
+ * matches a real checkout's layout instead of testing a script in an impossible environment.
+ */
+function installWorktreeIncludeInto(root) {
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.copyFileSync(WI, path.join(root, "scripts", "worktree-include.sh"));
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "plugin/scripts/repo-root.sh"),
+    path.join(root, "plugin", "scripts", "repo-root.sh"),
+  );
+}
+
+/** A `git` that dies (141, no output) on `worktree list` and forwards everything else to the real git. */
+function makeNoWorktreeListGitStub() {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "wi-stubgit-"));
+  fs.writeFileSync(
+    path.join(bin, "git"),
+    `#!/usr/bin/env bash\n` +
+      `a=("$@")\n` +
+      `if [ "\${1:-}" = "-C" ]; then a=("\${a[@]:2}"); fi\n` +
+      `if [ "\${a[0]:-}" = "worktree" ] && [ "\${a[1]:-}" = "list" ]; then exit 141; fi\n` +
+      `exec "${REAL_GIT}" "$@"\n`,
+  );
+  fs.chmodSync(path.join(bin, "git"), 0o755);
+  return bin;
+}
+
+t("worktree-include — copies declared ∩ gitignored into a fresh worktree, never an undeclared file", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    const r = bash(WI, [wt]);
+    assert.equal(r.status, 0, `copy must exit 0: ${r.stdout} ${r.stderr}`);
+    assert.equal(
+      fs.readFileSync(path.join(wt, ".quay", "secret.yml"), "utf8"),
+      "declared-payload\n",
+      "the declared gitignored file must land in the worktree",
+    );
+    assert.ok(
+      !fs.existsSync(path.join(wt, "ignored-dir", "other.txt")),
+      "negative control: gitignored-but-UNDECLARED is never copied",
+    );
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("worktree-include — primary resolution does not depend on `git worktree list` (SIGPIPE-141 guard)", () => {
+  const { root, wt } = makeIncludeRepo();
+  const stubBin = makeNoWorktreeListGitStub();
+  const env = { ...process.env, PATH: `${stubBin}:${process.env.PATH}` };
+  try {
+    // Premise check: under the stub the deprecated read really is dead (141), so a failure below
+    // is the script's dependency, not a fixture that failed to inject the fault.
+    const probe = spawnSync("git", ["-C", wt, "worktree", "list", "--porcelain"], { encoding: "utf8", env });
+    assert.equal(probe.status, 141, "fixture premise: `git worktree list` must die 141 under the stub");
+
+    const r = bash(WI, [wt], { env });
+    assert.equal(
+      r.status,
+      0,
+      `primary resolution must survive a dead \`git worktree list\` (exit ${r.status}): ${r.stdout} ${r.stderr}`,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(wt, ".quay", "secret.yml"), "utf8"),
+      "declared-payload\n",
+      "the declared file must still be copied when `git worktree list` cannot run",
+    );
+  } finally {
+    rmrf(stubBin);
+    rmrf(root);
+  }
+});
+
+t("worktree-include --verify — exits 0 + names every file; exits 1 and names the absent one", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    bash(WI, [wt]); // populate first
+    const ok = bash(WI, ["--verify", wt]);
+    assert.equal(ok.status, 0, `verify on a populated worktree must exit 0: ${ok.stdout} ${ok.stderr}`);
+    assert.match(ok.stdout, /verify OK — all 1 declared file\(s\) present/);
+
+    fs.rmSync(path.join(wt, ".quay", "secret.yml"));
+    const bad = bash(WI, ["--verify", wt]);
+    assert.equal(bad.status, 1, "verify must be fail-closed (exit 1) when a declared file is absent");
+    assert.match(bad.stderr, /MISSING \.quay\/secret\.yml/, "the ABSENT file must be named, not merely counted");
+    assert.match(bad.stderr, /verify FAILED — 1 of 1 declared file\(s\) absent/);
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("worktree-include — a copy that cannot land exits non-zero instead of reporting done", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    // A regular FILE where the target DIRECTORY must be: `mkdir -p` fails for any uid (a chmod
+    // fixture would pass vacuously when the suite runs as root).
+    fs.writeFileSync(path.join(wt, ".quay"), "not-a-directory\n");
+    const r = bash(WI, [wt]);
+    assert.notEqual(r.status, 0, `an unlandable copy must not report success: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /FAILED to create .*needed for \.quay\/secret\.yml/, "the failure must name the file it could not land");
+    assert.match(r.stderr, /1 copy failure\(s\), 1 expected file\(s\) absent/, "both counts must be enumerated, not boolean");
+    assert.ok(!fs.statSync(path.join(wt, ".quay")).isDirectory(), "negative control: the fixture really did block the copy");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("dispatch-worktree-setup — a failed copy exits 2 and NAMES the absent declared file (not a bare 'failed')", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    // The dispatcher runs <root>/scripts/worktree-include.sh; give the fixture the REAL one.
+    installWorktreeIncludeInto(root);
+    fs.writeFileSync(path.join(wt, ".quay"), "not-a-directory\n"); // block the copy, any uid
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 2, `incomplete provisioning must exit 2: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /provisioning INCOMPLETE/);
+    assert.match(r.stderr, /declared files ABSENT/);
+    assert.match(r.stderr, /MISSING \.quay\/secret\.yml/, "the absent file must be named");
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "premise: step 1 DID succeed — this is the half-success shape the message must disambiguate");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("dispatch-worktree-setup — a verifier that cannot evaluate is reported as such, not as a file list", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    // A worktree-include.sh that fails AND does not support --verify: the dispatcher must say the
+    // declaration could not be evaluated. "Could not check" must never print the same shape as a
+    // file list, nor as "checked, all fine" (hard rule 3b).
+    installWorktreeIncludeInto(root);
+    fs.writeFileSync(path.join(root, "scripts", "worktree-include.sh"), "#!/usr/bin/env bash\nexit 2\n");
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 2, `must still be fail-closed: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /could not evaluate the declaration \(this is not a file list\)/);
+    assert.doesNotMatch(r.stderr, /declared files ABSENT/, "an unevaluated declaration is not a file list");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("dispatch-worktree-setup — .worktreeinclude without any worktree-include.sh is refused (not a warning)", () => {
+  const { root, wt } = makeIncludeRepo();
+  try {
+    const r = bash(SETUP, [wt, "--root", root]); // no <root>/scripts/worktree-include.sh
+    assert.equal(r.status, 2, `a declarable-but-unprovidable worktree must not exit 0: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /\.worktreeinclude declares gitignored files — cannot provision/);
+  } finally {
+    rmrf(root);
+  }
 });

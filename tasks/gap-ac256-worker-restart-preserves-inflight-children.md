@@ -2,7 +2,7 @@
 id: gap-ac256-worker-restart-preserves-inflight-children
 title: GOAL-017/AC-256：重启 `driver:worker` 这一个服务不杀它在飞的 worker 子进程 —— 载体
   `.quay/unified-server-verification.jsonl` 有合格记录（SPEC §6.9 不变式 3 / §8-7 后半）
-status: ready
+status: done
 needs_human_cause: unclassified
 labels:
   - gap
@@ -94,8 +94,11 @@ CLI    node packages/quay/bin/quay.js server restart --only driver:worker
 - `packages/quay/bin/quay.ts`（`restart` 的动词派发 + usage 行）
 - `packages/quay/src/cli/help.ts`（`server restart` 帮助条目 ⚠️ 用户可见的帮助正本在 `cli/help.ts`，⛔ 不是 `cli/driver.ts` 内联那份）
 - `packages/quay/test/server-status-web-control-same-pid.test.mjs`（AC-251 的用法行断言原先钉死四动词字面量；动词集合法长大后它变红并把它报成「文档没跟上」—— 改为从 `SERVER_VERBS` 派生）
+- `packages/quay/test/cli.test.mjs`（AC-256 的**第二处**同类陈旧点，与上一行是【同一次硬规则 5b 扫描的两个实例】：usage-fallback drift gate 的 `handlerSubs` 手工清单里 `server <verb>` 那一角没跟上 `restart` 动词 ⇒ 门把新动词报成 `extra`、整个文件红；修法同型 —— 从 `SERVER_VERBS` 派生，⛔ 不手抄第二份）
 - `plugin/test/server-restart-inflight-verify.test.mjs` (new)（生产者的类型 / fail-closed / 负控制 / /proc 直接量 / 逐字跑 criterion）
 - `packages/quay/test/server-restart.test.mjs` (new)（服务级 restart 的语义 + `start` no-op 对照 + anchor 安全闸的活体负控制）
+- `plugin/scripts/core-src-import.ts`（本趟修 develop 侧恒红①：其文档注释里引用的 import 示例被 `precommit-guard.test.mjs` 的 `guardClosure()` 正则当成真依赖 ⇒ 闭包走查 throws。⛔ 零代码改动，仅把示例路径改成不呈 import 形状）
+- `plugin/test/test-isolation-check.test.mjs`（本趟修 develop 侧恒红②：AC4 期望清单手工抄的 6 个 `process-exit-1` 含已由 `a6ce55a8e` 从棘轮摘除的 `create-validation.test.mjs` ⇒ 恒红。摘掉该条 + 计数 6→5）
 - `tasks/gap-ac256-worker-restart-preserves-inflight-children.md`（自身文件：勾 AC + 贴实跑证据）
 
 ## Acceptance Criteria
@@ -224,6 +227,46 @@ startKind）的组合形态，⛔ 未新增任何杀进程路径。
 只剩 **AC10**（全量套件绿 —— 外层 verification-round 验证）⛔ 保持未勾：它的量产生在 fan-in /
 外层 suite 轮，⛔ 不是 worker 自己的读数（scoped 门绿 ≠ 全量绿）。其余 9 条全部达成。
 
+### ⑧ 本趟（2026-09-14 续做）：上一趟那堵「归因不出」的 suite 红已定位并修掉
+
+上一趟以「suite 红但归因不出任何失败测试文件」标了 needs-human。**本趟查明它不是基建缺陷 —— 是一个真缺陷 + 一个跑法陷阱**。
+
+**根因（真缺陷，本任务自己的 `5d6d61d91` 引入）**：AC-256 把 `restart` 加进了 `bin/quay.ts` 的 fallback
+usage 行，却漏了 `packages/quay/test/cli.test.mjs` 的 usage-fallback drift gate（block28）里那份**手工抄的**
+`handlerSubs` 清单 ⇒ 门把新动词报成 `extra`（present in the usage line, absent from the expected set），整个文件红。
+**这正是硬规则 5b**：上一趟已在 `47680e3f5` 把**兄弟实例**（`server-status-web-control-same-pid.test.mjs` 的用法行断言）
+改成从 `SERVER_VERBS` 派生，**只修了被报出来的那一个**，漏了同一缺陷类在这份载体里的第二个实例。
+**修法同型**：`handlerSubs` 的 `server <verb>` 一角也改为 `SERVER_VERBS.map((v) => \`server ${v}\`)` —— 类被关掉，不是打一个补丁。
+
+**为什么上一趟「归因不出」**：`cli.test.mjs` 用**自带 harness**（自定义 `FAIL: …` 打到 stdout、然后 exit 1），
+而全量套件日志**不落该文件的 stdout** ⇒ 日志里只剩 `test at …:1:1 'test failed'`，**没有任何测试名**。
+⇒ 归因的位置不是在套件日志里找，是**单独跑那个文件**。（同族硬规则 3b：一个只报「失败」不报「哪条失败」的载体，与「查不出」同形。）
+
+**第二个红（10 条 golden-replay）是跑法陷阱，⛔ 不是缺陷**：直接 `node --test` 时 `dist/` 是陈旧的
+⇒ `cli-entry.mjs` 回退到 `.ts` 源，**子进程**于是为 `plugin/scripts/shape-sections.ts`（根 `package.json` 无 `"type":"module"`）
+打出 `MODULE_TYPELESS_PACKAGE_JSON` 警告，**而该警告文本里带 node 进程号** ⇒ 与进程内那侧**永远不可能**逐字节相同。
+**⇒ 走 `scripts/test.sh`（会重建 dist）才有意义** —— 与本仓既知陷阱 `direct-node-test-in-worktree-reds-golden-replay-no-dist` 同形。
+
+**本趟读数（⛔ 非 fixture；`cli.test.mjs` 一行为 fresh dist 下无任何 env 技巧直跑）**：
+
+| 读数 | 值 |
+|---|---|
+| `packages/quay/test/cli.test.mjs`（fresh dist） | **exit 0，pass 1 / fail 0，0 条 `FAIL:`** |
+| 同文件 · 改前对照（main checkout，无本修） | `FAIL: usage fallback command set == dispatch-table command set (missing: , extra: server restart)` |
+| `plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs` | **7 pass / 0 fail**（上一趟另一条红；随 merge 带入 develop 的 `951fbb15c` 后消失 —— 纯滞后，非缺陷） |
+| `anti-drift-touches-check` | **`ANTI-DRIFT OK` — 9 actual file(s), all within declared Touches (11 globs)** |
+| AC-256 criterion（生产 root，从 frontmatter 折叠块解出后逐字跑） | **exit 0**（载体 4 行、`GOAL-017-AC-256` 记录 1 条） |
+| scoped 门 `--for-task … --allow-thin` | **exit 0** |
+
+**5b 扫描（本趟产物）**：按「手工抄的 server 动词集」在 `packages/quay/{src,test,bin}` + `plugin/{scripts,test}` 全扫，
+命中 **3 处**：`src/cli/server.ts`（`SERVER_VERBS` 单一真源 ✓）、`bin/quay.ts:223`（fallback usage 行，已含 `restart` ✓）、
+`src/cli/help.ts:61/389`（两处 `quay server restart` 都在 ✓）⇒ **陈旧的手工清单只有 `cli.test.mjs` 这一处**，已修。
+
+**⚠️ 一处结构性遗留（本趟未动，⛔ 不在本任务范围）**：scoped 门的测试选择是按每个测试文件**自报的 `@judges` glob** 取交，
+而 `cli.test.mjs` 不声明自己 ⇒ **本趟的改动不在 scoped 门的选择面内**（实测：门选中 105 个测试文件，其中**没有** `cli.test.mjs`）。
+**这正是上一趟「scoped 绿而全量红」的机制半边** —— scoped 门绿 ⇒ 不等于这个文件被跑过。
+
+
 ## Definition of Done
 
 **AC-256 的 criterion 在生产载体上 exit 0，且那条记录是一次真运行、真服务级重启、真差分的产物**：`driver:worker` 是作为**服务**被重启的（记录留 `restarted_via` argv），重启前在飞的 worker 子进程集合由**进程树独立推导**且**逐个存活**，重启后**对原集合逐个再核活**得到的集合与之前**完全相等**；`driver_pid_before` 在重启后**真的不在**；`.quay/worker-round.jsonl` 在重启后出现**晚于重启时刻的新 `run_id`** 记录（直接量，⛔ 不只 mtime）。生产者对每条读数 fail-closed：读不出/不满足 ⇒ 零记录 + 可区分的未评估值。
@@ -260,3 +303,50 @@ criterion 逐字跑 **exit 0**。⛔ 唯一由夹具驱动的是【负控制】�
 - 成因类：unclassified
 - 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
 - run_id：wk-prod-1789350883
+## Needs-Human
+
+**执行 2026-09-14T11:19:05.619Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
+- run_id：wk-prod-1789367589
+
+## Needs-Human
+
+**执行 2026-09-14T13:47:40.479Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 4 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
+- run_id：wk-prod-1789367589
+
+## 本趟记录（2026-09-14 16:4xZ）：合并 develop 后修掉的两个 develop 侧恒红
+
+⛔ **都不是本任务的 delta** —— 两条都在**未含本任务改动的 develop 树**上逐字复现（主检出 `/home/yale/work/quay`，
+`author` == `develop` @`87adee15d`，直接 `node --test` 跑该文件）⇒ **develop 自身红，merge 修不了**。
+两条都已在**本分支**修掉（提交 `6c59fdb36`），逐字读数如下。
+
+**① `precommit-guard.test.mjs` 的 `guardClosure()` 把注释当成 import**：它用
+`REL_IMPORT_RE = /(?:from\s*|import\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\1/g` 扫**源码全文**，于是把新落地的
+`plugin/scripts/core-src-import.ts:7` 文档注释里逐字写着的 `` `import … from "../../packages/quay/src/<rel>"` ``
+当成真依赖 ⇒ 闭包走查 throws `… which does not resolve`（硬规则 2：按位置判定，注释里提到不算命中）。
+**本趟修法取最小面**：把该示例路径改成不呈 import 形状（`"<repo-top>/packages/quay/src/<rel>"`），⛔ 零代码改动。
+实测：闭包 **11 个文件前后同数**（只掉了那条幻影边，没有掉真依赖）；`25 pass / 0 fail`。
+**⚠️ 本趟【未立案、未修】的类（硬规则 5b 记账）**：`guardClosure` 的**注释盲区仍在** —— 下一个在闭包文件里
+引用 import 示例的注释会**再次**把全量套件弄红。⚠️ 修它时注意方向：给它「加去注释」会引入**更坏**的失败模式 ——
+注释掉一个真 import 会让闭包**静默变短**，而静默变短的闭包与完整闭包在 hook 执行前**不可区分**
+（正是该函数头注释点名要防的形态）⇒ 正确修法是**按位置判定地屏蔽注释与字符串**（仓库已有 `maskComments`
+同族手法），且必须验证**闭包文件数不减少**。
+
+**② `test-isolation-check.test.mjs` 的 AC4 期望清单未随棘轮缩短**：该清单手工抄了 6 个 `process-exit-1`，
+含 `packages/quay-native/test/create-validation.test.mjs`；而 `a6ce55a8e`（11:08Z）已修好该文件的 R1 + R4
+并把它**从棘轮清单摘除**（棘轮「只减不增、修好即缩短」）⇒ 测试仍要求它出现、**恒红**。
+**这正是硬规则 5b**：`a6ce55a8e` 修了棘轮那一份，漏了同一缺陷类在**另一份载体**（本测试的手工清单）里的实例。
+修法同型：摘掉该条 + 计数 6→5（含测试名与注释）。实测 `15 pass / 0 fail`；5b 扫描
+（`grep -rn 'create-validation'` 该测试 + 棘轮清单）确认**无第三个陈旧点**。
+
+**合并后的本趟读数**：anti-drift **OK**（11 actual file(s) / 13 glob(s)）；scoped 门 **144 pass / 0 fail**（exit 0）；
+**全量套件 exit 0**（主泳道 626 文件，全日志 **654** 条 `__PERFILE__` 全部 `passed=true`、`passed=false` **0** 条）；
+fan-in ac-gate **`pass-external`**（AC10 ⛔ 仍留未勾 —— 其措辞 `全量套件绿 —— 外层 verification-round 验证`
+已被 `isOuterVerificationItem` 认作外层验证项，**不需要**额外加 `（待外部）`）。

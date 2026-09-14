@@ -8,14 +8,21 @@
 // without that round-trip, so users bypassed /dashboard (only 4 hits) and went straight to /tasks.
 //
 // This task turns the taskCard from "count bar + one mixed list" into per-status mini lists for the
-// three NON-terminal states (ready/todo/needs-human), N=3, updatedAt descending, /task/<id> links —
+// three NON-terminal states (ready/todo/needs-human), updatedAt descending, /task/<id> links —
 // derived IN-MEMORY from the same readTaskSummary() array (30s-TTL-cached client.taskList result), so
 // no new provider call and no new network round-trip. done/superseded stay pure counts (no expansion).
 //
+// The per-status cap started at N=3 (this task's original spec); the 2026-09-14 human ruling
+// (gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10) raised it to 10. The assertions below
+// therefore read the cap from serve-dashboard.ts instead of pinning a literal — a pinned 3 would have
+// kept the ABSENCE assertions green while asserting the absence of a heading string that can no longer
+// be rendered (a tautology, not a check). The VALUE is pinned by the owning task's own test
+// (serve-dashboard.test.mjs: 12 ready ⇒ exactly 10 rows; 5 todo ⇒ 5 rows).
+//
 // Tests:
 //   AC1/AC4 — a four-status mixed fixture renders three per-status blocks (each heading + the correct
-//             task-id links in updatedAt-descending order, N=3 cap), and done/superseded are NOT
-//             expanded into mini-list rows.
+//             task-id links in updatedAt-descending order, capped at MINI_LIST_N), and done/superseded
+//             are NOT expanded into mini-list rows.
 //   AC2 — a status with 0 tasks renders no mini-list block (no empty-placeholder noise) but the count
 //         row still shows 0.
 //   AC3 — zero additional provider calls: one readTaskSummary() → exactly one client.taskList call
@@ -73,12 +80,30 @@ function fnBody(src, fnName) {
   throw new Error(`${fnName} body not terminated`);
 }
 
-test("AC1/AC4: four-status fixture renders ready/todo/needs-human mini lists (N=3, updatedAt desc) and skips done/superseded", () => {
+/** The per-status mini-list cap is a single constant in serve-dashboard.ts. Read it rather than pinning
+ *  a literal: this file asserts both PRESENCE (`` `${s}（最近 N 条）` ``) and ABSENCE of that heading, and
+ *  an absence assertion keyed on a stale literal is unfalsifiable — it stays green while the heading it
+ *  names can no longer be produced. The constant's VALUE is pinned where it belongs: the owning task's
+ *  own test (serve-dashboard.test.mjs, 12 ready ⇒ exactly 10 rows / 5 todo ⇒ 5 rows). */
+function readMiniListN(src) {
+  const m = /const\s+MINI_LIST_N\s*=\s*(\d+)\s*;/.exec(src);
+  assert.ok(m, "MINI_LIST_N declaration found in serve-dashboard.ts");
+  return Number(m[1]);
+}
+const MINI_LIST_N = readMiniListN(fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8"));
+
+test("AC1/AC4: four-status fixture renders ready/todo/needs-human mini lists (cap from source, updatedAt desc) and skips done/superseded", () => {
+  // ready carries cap+2 tasks so the cap is genuinely exercised: the two OLDEST must be the dropped
+  // ones, which discriminates sort-then-cap from "any N rows happened to be present".
+  const ready = Array.from({ length: MINI_LIST_N + 2 }, (_, i) => ({
+    id: `R-${String(i).padStart(2, "0")}`,
+    title: `ready ${i}`,
+    status: "ready",
+    labels: [],
+    updatedAt: 100 + i, // strictly increasing with index ⇒ index order IS updatedAt order
+  }));
   const tasks = [
-    { id: "R-1", title: "ready one",   status: "ready",       labels: [], updatedAt: 100 },
-    { id: "R-2", title: "ready two",   status: "ready",       labels: [], updatedAt: 50 },
-    { id: "R-3", title: "ready three", status: "ready",       labels: [], updatedAt: 10 },
-    { id: "R-4", title: "ready four",  status: "ready",       labels: [], updatedAt: 200 },
+    ...ready,
     { id: "T-1", title: "todo one",    status: "todo",        labels: [], updatedAt: 300 },
     { id: "T-2", title: "todo two",    status: "todo",        labels: [], updatedAt: 20 },
     { id: "N-1", title: "needs one",   status: "needs-human", labels: [], updatedAt: 5 },
@@ -88,32 +113,36 @@ test("AC1/AC4: four-status fixture renders ready/todo/needs-human mini lists (N=
   ];
   const html = renderDashboardPage(makeDashboardArgs(tasks));
 
-  // Each non-terminal status renders its own block heading.
+  // Each non-terminal status renders its own block heading, labelled with the source's cap.
   for (const s of ["ready", "todo", "needs-human"]) {
-    assert.ok(html.includes(`${s}（最近 3 条）`), `renders the ${s} mini-list heading`);
+    assert.ok(html.includes(`${s}（最近 ${MINI_LIST_N} 条）`), `renders the ${s} mini-list heading`);
   }
   // done / superseded stay pure counts — no mini-list block.
-  assert.ok(!html.includes("done（最近 3 条）"), "done has no mini-list block");
-  assert.ok(!html.includes("superseded（最近 3 条）"), "superseded has no mini-list block");
+  assert.ok(!html.includes(`done（最近 ${MINI_LIST_N} 条）`), "done has no mini-list block");
+  assert.ok(!html.includes(`superseded（最近 ${MINI_LIST_N} 条）`), "superseded has no mini-list block");
 
-  // ready: top-3 by updatedAt (200, 100, 50) — R-3 (10) is dropped by the N=3 cap.
-  assert.ok(html.includes("/task/R-4"), "ready lists R-4 (updatedAt 200)");
-  assert.ok(html.includes("/task/R-1"), "ready lists R-1 (updatedAt 100)");
-  assert.ok(html.includes("/task/R-2"), "ready lists R-2 (updatedAt 50)");
-  assert.ok(!html.includes("/task/R-3"), "ready drops R-3 beyond the N=3 cap");
-  const iR4 = html.indexOf("/task/R-4");
-  const iR1 = html.indexOf("/task/R-1");
-  const iR2 = html.indexOf("/task/R-2");
-  assert.ok(iR4 >= 0 && iR1 > iR4 && iR2 > iR1, "ready rows are updatedAt-descending (R-4 → R-1 → R-2)");
+  // ready: the cap NEWEST survive, the two OLDEST fall off (indices 0 and 1 of an ascending series).
+  const p2 = (i) => String(i).padStart(2, "0");
+  const newest = MINI_LIST_N + 1;
+  assert.ok(html.includes(`/task/R-${p2(newest)}"`), "ready lists the newest task");
+  assert.ok(html.includes(`/task/R-${p2(newest - 1)}"`), "ready lists the 2nd-newest task");
+  assert.ok(html.includes(`/task/R-${p2(2)}"`), "ready lists the cap-th newest task (index 2)");
+  assert.ok(!html.includes('/task/R-01"'), "ready drops the (cap+1)-th newest — beyond the cap");
+  assert.ok(!html.includes('/task/R-00"'), "ready drops the (cap+2)-th newest — beyond the cap");
+  const idx = (i) => html.indexOf(`/task/R-${p2(i)}"`);
+  assert.ok(
+    idx(newest) >= 0 && idx(newest) < idx(newest - 1) && idx(newest - 1) < idx(newest - 2),
+    "ready rows are updatedAt-descending (newest → older → oldest shown)",
+  );
 
   // todo + needs-human list their correct ids.
   assert.ok(html.includes("/task/T-1") && html.includes("/task/T-2"), "todo lists T-1 and T-2");
   assert.ok(html.includes("/task/N-1"), "needs-human lists N-1");
 
   // done / superseded ids never appear as mini-list links.
-  assert.ok(!html.includes("/task/D-1"), "done D-1 is not expanded");
-  assert.ok(!html.includes("/task/D-2"), "done D-2 is not expanded");
-  assert.ok(!html.includes("/task/S-1"), "superseded S-1 is not expanded");
+  for (const id of ["D-1", "D-2", "S-1"]) {
+    assert.ok(!html.includes(`/task/${id}"`), `${id} (terminal) is not expanded`);
+  }
 });
 
 test("AC2: a status with 0 tasks renders no mini-list block (no empty-placeholder noise) but the count row still shows 0", () => {
@@ -123,12 +152,12 @@ test("AC2: a status with 0 tasks renders no mini-list block (no empty-placeholde
   ];
   const html = renderDashboardPage(makeDashboardArgs(tasks));
 
-  assert.ok(html.includes("ready（最近 3 条）"), "ready (1 task) still renders its block");
+  assert.ok(html.includes(`ready（最近 ${MINI_LIST_N} 条）`), "ready (1 task) still renders its block");
   assert.ok(html.includes("/task/R-1"), "ready lists its single task");
 
   // todo / needs-human have 0 tasks → no block heading, no empty placeholder.
-  assert.ok(!html.includes("todo（最近 3 条）"), "todo (0 tasks) renders no mini-list block");
-  assert.ok(!html.includes("needs-human（最近 3 条）"), "needs-human (0 tasks) renders no mini-list block");
+  assert.ok(!html.includes(`todo（最近 ${MINI_LIST_N} 条）`), "todo (0 tasks) renders no mini-list block");
+  assert.ok(!html.includes(`needs-human（最近 ${MINI_LIST_N} 条）`), "needs-human (0 tasks) renders no mini-list block");
 
   // …but the count row still shows their 0.
   assert.ok(html.includes("<b>0</b> todo"), "count row still shows 0 todo");

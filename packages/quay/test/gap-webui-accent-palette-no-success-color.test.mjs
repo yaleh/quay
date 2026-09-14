@@ -23,6 +23,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { clearVerificationRoundCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,7 +86,18 @@ before(async () => {
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
   port = server.address().port;
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: /dashboard's request path now serves a
+  // SNAPSHOT built by a background tick, so a ledger written after startup would otherwise be read
+  // back only at the next 30 s refresh. Retire the tick and rebuild EXPLICITLY when the fixture
+  // changes (below) — the test keeps exercising the PRODUCTION path.
+  server.dashboardSnapshot.stop();
 });
+
+/** Make the dashboard snapshot reflect the fixture written just above. */
+async function rebuild() {
+  clearVerificationRoundCache();
+  await server.dashboardSnapshot.rebuildNow();
+}
 
 after(async () => {
   await new Promise((r) => server.close(r));
@@ -119,6 +131,7 @@ test("AC7: /dashboard colours the green round + GO with the positive token, not 
     { round: 1, state: "green", pass: 100, fail: 0, tests: 100, startedAt: "2026-09-01T08:00:00Z" },
     { round: 2, state: "red", pass: 90, fail: 10, tests: 100, startedAt: "2026-09-01T09:00:00Z" },
   ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  await rebuild();
 
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);

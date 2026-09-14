@@ -26,7 +26,11 @@ function makeFixture(name: string, versions: Record<string, string>): string {
   for (const d of dirs) mkdirSync(d, { recursive: true });
   for (const [p, v] of Object.entries(versions)) {
     const full = resolve(tmp, p);
-    if (p.includes('marketplace.json')) {
+    if (p === 'plugin/README.md') {
+      // Prose carrier — the fixture MUST carry a parseable `quay plugin v<semver>` sentence, or the
+      // README entry lands in mode:'error' and every GREEN assertion below becomes a false red.
+      writeFileSync(full, `# quay plugin\n\nquay plugin v${v} — test fixture.\n`);
+    } else if (p.includes('marketplace.json')) {
       writeFileSync(full, JSON.stringify([{ name: 'quay', version: v }], null, 2));
     } else if (p === 'plugin/.claude-plugin/plugin.json') {
       writeFileSync(full, JSON.stringify({ version: v }, null, 2));
@@ -45,6 +49,7 @@ const ALL_PATHS = [
   'packages/quay-github/package.json',
   'packages/quay-backlog/package.json',
   'plugin/.claude-plugin/plugin.json',
+  'plugin/README.md',
   'plugin/.claude-plugin/marketplace.json',
   '.claude-plugin/marketplace.json',
   'plugin/vendor/quay/package.json',
@@ -52,9 +57,9 @@ const ALL_PATHS = [
 
 // ── Unit tests ──────────────────────────────────────────────────────────
 
-test('readVersions returns 8 entries for the real tree', () => {
+test('readVersions returns 9 entries for the real tree', () => {
   const entries = readVersions(repoRoot);
-  assert.equal(entries.length, 8);
+  assert.equal(entries.length, 9);
   for (const e of entries) {
     assert.ok(e.label.length > 0, `entry for ${e.path} has no label`);
   }
@@ -108,6 +113,47 @@ test('check detects single-entry drift (RED after one drift)', () => {
   }
 });
 
+// ── README-only paths (gap-ac169-readme-version-not-in-version-consistency-set) ─────────────
+// The pre-existing cases above only mutate a JSON machine field. Without these two, "the README
+// entry was added" and "the README entry actually judges" are indistinguishable (hard rule 4:
+// a criterion that cannot take the false value is not a measurement).
+
+test('check detects drift when ONLY plugin/README.md moves (RED)', () => {
+  const ver = '9.9.9';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  versions['plugin/README.md'] = '9.9.8'; // drift ONLY the prose carrier
+  const tmp = makeFixture('readme-drift', versions);
+  try {
+    const result = check(tmp);
+    assert.equal(result.mode, 'drift');
+    assert.equal(result.ok, false);
+    const drifted = result.entries.find((e: any) => e.path === 'plugin/README.md');
+    assert.ok(drifted, 'README entry must be in the checked set');
+    assert.equal(drifted.version, '9.9.8');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('check returns mode=error (NOT all-equal) when README has no parseable version line', () => {
+  const ver = '9.9.9';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  const tmp = makeFixture('readme-unparseable', versions);
+  try {
+    // A README that CANNOT be read must not be shaped like a README that agrees.
+    writeFileSync(resolve(tmp, 'plugin/README.md'), '# quay plugin\n\nNo version sentence here.\n');
+    const result = check(tmp);
+    assert.equal(result.mode, 'error');
+    assert.equal(result.ok, false);
+    const e = result.entries.find((x: any) => x.path === 'plugin/README.md');
+    assert.ok(e?.error, 'the unparseable README must carry an error');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('check handles marketplace.json with { plugins: [...] } wrapper', () => {
   const ver = '1.0.0';
   const tmp = makeFixture('plugins-wrapper', Object.fromEntries(ALL_PATHS.map((p) => [p, ver])));
@@ -134,7 +180,7 @@ test('CLI --json exits 0 with JSON output even on drift', () => {
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.ok, 'boolean');
   assert.ok(Array.isArray(parsed.entries));
-  assert.equal(parsed.entries.length, 8);
+  assert.equal(parsed.entries.length, 9);
   assert.ok(Array.isArray(parsed.uniqueVersions));
 });
 
