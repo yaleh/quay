@@ -2364,8 +2364,12 @@ verify_ac258_mode() {
   fail=0
   for hk in ${hosts}; do
     target="${host_target[$hk]:-}"
-    if [ -z "${target}" ]; then
-      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+    if [ -z "${target}" ] || [ "${target}" = "${hk}" ]; then
+      # ⚠️ 后半个条件不是多余的：AC-258 首跑实测的缺陷正是【把 host KEY 当成连接名传下去】
+      # （`--ac258-host-fqdn "${hk}"` ⇒ 远端读到 'B' ⇒ 解析不出、模式在门口 NOT-EVALUATED，
+      # 而失败形态是「记录没写出来」，与「机制坏了」同形，硬规则 3b）。关联数组查空与查错在同一处
+      # 发生，而它们同形 ⇒ 这里一次挡住两个（空 = 未知 host key；等于 key = 传错了对象）。
+      echo "develop-deliver: ${hk} — host_target lookup unusable (got '${target}') (NOT-EVALUATED)"
       fail=1
       continue
     fi
@@ -2398,7 +2402,7 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --ac258-prefix "\${PREFIX}" \
   --ac258-task-id "${ac258_task}" \
   --ac258-task-body "\${HOME}/ac258-task-body.md" \
-  --ac258-host-fqdn "${hk}" \
+  --ac258-host-fqdn "${host_target[$hk]}" \
   --build-sha "${develop_tip}" \
   --ac89 "\${EV}"
 RC=\$?
