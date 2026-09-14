@@ -436,6 +436,7 @@ declare -A QUESTION=(
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
   [mcp-blacklist-resolve.ts]="Which MCP servers will a blacklisted role ACTUALLY connect to — enumerate the three real config sources (the user-level server table, the project-level MCP declarations, and enabledPlugins pointing at the plugin's own MCP declaration with the literal CLAUDE_PLUGIN_ROOT placeholder expanded to the DETECTED version dir), drop the role's mcpBlacklist, and emit the --strict-mcp-config --mcp-config payload — so a pure code-writing worker stops dragging up the chrome-devtools-mcp / playwright-mcp process trees (2026-09-14 reading: 48 + 12 servers plus 12 watchdogs approx 3.24GB RSS, the largest single concentration of memory pressure), NEVER by shelling out to the mcp list subcommand which health-checks (i.e. spawns) the very servers this exists to avoid, and where an input that cannot be decoded yields null so the caller adds NO flag rather than shipping a partial config that would silently DROP servers (硬规则 3b) (tasks/gap-worker-mcp-blacklist-strict-config)?"
+  [crystallization-half-life.ts]="规则从落笔到有【可执行】强制落地要多久 —— 对真实 adr 目录与真实 git 历史逐条测出 {落笔日期, enforcement 字段值, 强制首次落地提交 SHA 与日期, 间隔天数, 状态}，报出间隔的中位/p90/最大值以及『至今无产物』的完整清单（不是抽样），并逐条判 CLAUDE.md 硬规则自标『靠自觉』与其点名产物是否真的落地。状态取五值，其中『无法判定』与 N/A 各自独立、不与『无产物』或『已强制』合并（硬规则 3b），GateEvent 载体读不到时报未评估而不是零事件（tasks/gap-crystallization-half-life-rule-to-enforcement）?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -780,6 +781,7 @@ declare -A CADENCE=(
   [channel-probe-server.ts]="按需"
   [server-partial-stop-verify.ts]="按需"
   [mcp-blacklist-resolve.ts]="按需"
+  [crystallization-half-life.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1111,6 +1113,7 @@ declare -A INVALIDATION=(
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
   [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
   [mcp-blacklist-resolve.ts]="失效前提：黑名单仍由 .quay/profiles.yml 的【角色】层 mcpBlacklist 声明、launchArgv 仍是驱动 spawn 的唯一 argv 构造点、且用户级/插件级 MCP server 仍声明在这三类配置文件里；若 MCP 连接控制改由 Claude Code 原生设置表达（如能覆盖用户级 mcpServers 的 disabledMcpjsonServers）、或 role→profile 解析不再经 profile-policy.ts resolveRole，本条失去消费面，退休"
+  [crystallization-half-life.ts]="失效前提：① adr 目录仍是 ADR 的正本、且每条 ADR 的落笔日期仍写在 frontmatter 的 date 键或正文的日期行（日期改由别的登记表承载 ⇒ 三条取源全部落空，间隔一栏整列转『无法判定』）；② enforcement 声明仍以 frontmatter 的 enforcement 键或正文的 enforcement 注释为形态（改由集中表声明 ⇒ 本脚本的抽取面失效）；③ 首次落地仍能从 git 的逐文件 add 历史取得（仓库改以整仓快照发布、丢掉逐文件 add 历史 ⇒ 间隔失去来源）"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1442,6 +1445,7 @@ declare -A LAST_REAFFIRMED=(
   [channel-probe-server.ts]="2026-09-13"
   [server-partial-stop-verify.ts]="2026-09-13"
   [mcp-blacklist-resolve.ts]="2026-09-14"
+  [crystallization-half-life.ts]="2026-09-14"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1772,6 +1776,7 @@ declare -A MATCHING=(
   [channel-probe-server.ts]="n/a"
   [server-partial-stop-verify.ts]="n/a"
   [mcp-blacklist-resolve.ts]="n/a"
+  [crystallization-half-life.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1913,6 +1918,7 @@ declare -A CONSUMER=(
   [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
   [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"
   [mcp-blacklist-resolve.ts]="谁按：plugin/scripts/driver-runtime.ts 的 launchArgv（AC140 唯一 argv 构造点）在该 role 的 mcpBlacklist 非空时按——机器按，每次派发一次；条件=派发 task-worker/fix-worker/selector 需要一个既保留 quay/archguard/meta-cc 又排除 chrome-devtools/playwright 的 MCP 配置面（实测 3.24GB RSS 集中在浏览器 MCP 上）。⛔ outer/manager/pool-judge 不按（mcpBlacklist 为空 ⇒ argv 逐字不变，不被共享 profile 连坐）"
+  [crystallization-half-life.ts]="谁按：任务实现者在量『规则落笔→可执行强制落地』的分布时按（node --experimental-strip-types plugin/scripts/crystallization-half-life.ts --root <主检出> 可加 --json），它同时是 docs/analysis/crystallization-half-life.md 全部读数的产出者；条件=要判某条 ADR / 某条 CLAUDE.md 硬规则至今有没有可执行产物，或要判 ADR-004 的『硬形变优于散文』是否有分布支撑（而不是只有轶事）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
