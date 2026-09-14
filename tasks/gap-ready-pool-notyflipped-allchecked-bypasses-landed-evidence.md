@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-notyflipped-allchecked-bypasses-landed-evidence
 title: notYetFlipped() 的 allChecked 分支绕过一切落地证据独立触发误判——AC 预勾选的新任务一进 ready 就被判"已落地只是漏翻转"
-status: ready
+status: superseded
 labels:
   - gap
   - mechanism
@@ -59,3 +59,7 @@ fleet-warden（quay-fleet 项目）报告并附初步代码定位；本任务立
 ## Definition of Done
 
 修复落地后，`notYetFlipped()` 对「AC 全勾但零落地证据」的任务不再误判为已落地；`ready-pool-check.test.mjs` 新增用例（改动前先红）+ 既有用例不回归；`--for-task` scoped 门绿；对一个真实已落地任务跑同一函数行为不变（AC3 负控制通过）。
+
+## Cancelled
+
+人 2026-09-14 直接指示取消本任务立案。
