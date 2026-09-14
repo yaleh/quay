@@ -205,12 +205,14 @@ bash scripts/test.sh --for-task gap-ac179-criterion-cold-miss-30s-ttl-always-exp
 而 AC-179 是**每小时一次**的复验 —— 它**结构上永远落在 30 s TTL 之外**，所以那次优化优化的是它从不走的路径。
 本条的判据不是「有没有缓存」，而是**「未命中是否还在请求路径内付」**：只要付，第一次永远是冷的。
 
-### DoD 未勾项（#1）与落地后的必需动作 —— 如实上报
+### DoD 未勾项的落地动作 —— 如实上报
 
-DoD #1 要求「判据在**运行中的生产 serve 实例**上实跑 + `.quay/gate-events.jsonl` 中 `item_id=AC-179`
-最新一条 `verdict=pass` 的原始行」。**本 worker 无法在落地前产出它**：生产实例的 cwd 是仓库根，
-它加载的是主检出的代码，而主检出此刻仍是修复前的（上面已实测 = 0 命中）。落地后需要：
+DoD 第 1 条要求「判据在**运行中的生产 serve 实例**上实跑 + `.quay/gate-events.jsonl` 中 `item_id=AC-179`
+最新一条 `verdict=pass` 的原始行」。**本 worker 在落地前无法产出它**：生产实例的 cwd 是仓库根，
+它加载的是主检出的代码，而主检出此刻仍是修复前的（上面已实测 = 0 命中）。⇒ 该条已按仓库机制标注
+**`（待外部）`**（依赖 fan-in 落地 + 主检出同步 + 重启生产实例，非本任务待补的实现/证据）。
 
+落地后需要：
 1. fan-in 把本分支 ff 进 develop；
 2. 主检出同步到 develop（`syncDevelopToDoc`，否则「晋升读 develop」不生效）；
 3. **重启生产 serve 实例**（pid 2795007 / :4173）—— 在此之前 AC-179 的每小时复验仍会打在旧代码上；
@@ -222,7 +224,7 @@ DoD #1 要求「判据在**运行中的生产 serve 实例**上实跑 + `.quay/g
 
 ## DoD
 
-- [ ] 判据在**运行中的生产 serve 实例**上实跑（须重启该实例以加载新代码），贴出：5 轮冷请求读数 + `.quay/gate-events.jsonl` 中 `item_id=AC-179` **最新一条 `verdict=pass`** 的原始行
+- [ ] 判据在**运行中的生产 serve 实例**上实跑（须重启该实例以加载新代码），贴出：5 轮冷请求读数 + `.quay/gate-events.jsonl` 中 `item_id=AC-179` **最新一条 `verdict=pass`** 的原始行（待外部）
 - [x] 取假那条实跑并贴出（回退后 exit 1）
 - [x] ⛔ **未改** `goals/AC-179-web-card-and-cli.md` 的 `criterion` / `expect` 两字段任何字节（沿用前序任务已立约束）
 - [x] 写清**为什么前两次修复没有保住这一条**（30s TTL 在 AC-179 的复验节奏下结构性恒冷；上一次优化的是它从不走的稳态路径）
