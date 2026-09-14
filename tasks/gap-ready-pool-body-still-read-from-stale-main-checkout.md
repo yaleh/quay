@@ -155,6 +155,30 @@ extra:
 develop 状态上命中缓存并跳过门(该规矩的正本见 `scoped-gate-cache-sha-must-be-the-tip-you-gated`)。
 fan-in 若发现 develop 已前进 ⇒ 缓存未命中 ⇒ 照跑 scoped 门(fail-closed,设计如此)。
 
+### 本轮续做(2026-09-14,第二次 re-anchor):0.6.3 bump 再次 re-stale —— 全局阻断,本轮处置
+
+上面 AC5 记的 0.6.2 陈旧由在飞任务落地修好;**本轮续做时 develop 又前进 7 个提交**,其中人令的
+**0.6.2→0.6.3 版本 bump**(`92c5b1b15`,为解 quay-fleet 的 dist 打包缺陷而发)再次改了
+`plugin/.claude-plugin/plugin.json`(该 ratchet 的四个 fingerprint source 之一)而**未 re-anchor**
+⇒ scoped 门**在 static tier 就 fail-closed**(`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`),
+**动态用例根本没跑**(故本轮第一次读数的产物里连 `# tests` 行都没有——静态层先失败即中止)。
+
+**它不是本条的 delta**:`git diff develop...HEAD` 里没有该文件;`grep -rl '0.6.3' tasks/*.md`
+只有 bump 自身的修复任务(`gap-dist-plugin-missing-node-modules-task-schema-yaml`)⇒ **本次无任何在飞任务认领**。
+⇒ 它是**全局阻断**(此后每个任务的 fan-in 都会撞同一处)⇒ 按
+`out-of-touches-red-fix-self-inflicts-anti-drift-take-develop` **第 4 步**("develop **没修** ⇒ 此时才是真判断点:
+把它登记为 Touches 并在提交信息里写明理由")处置,**⛔ 不是静默改文件,也不是干等 develop**:
+
+- `node … quay-init-closure-ratchet.ts --reanchor --root <worktree>` ⇒ `3 files / 1022 bytes`
+  —— **足迹与 develop 那份逐字相同**(改前也是 3/1022);`git diff` 该基线文件**只含**
+  `fingerprint` 与 `plugin/.claude-plugin/plugin.json` 的 `sha` —— 逐条符合
+  `quay-init-edits-re-stale-the-closure-ratchet` 的两条核对(足迹不变 + diff 面最小),⛔ 不是拿 re-anchor 洗增长;
+- `--check-stale` 复跑 ⇒ `PASS: … laydown source fingerprint fresh (58d2c6a57caf03e3…, 4 sources) — baseline in sync`;
+- **Touches 增列 `docs/analysis/quay-init-closure-ratchet.baseline.json`**(正是
+  `expand-touches-when-implementation-footprint-grows` 点名的两个常漏基线文件之一),理由即本段。
+- **范围纪律不受影响**:本轮仍未改 body 读源(AC3 不变);上面这次改动**不在**本任务的 delta 语义内,
+  它是**机制性的全局修复**,归属写在此处以免被误读为本条的实现。
+
 ## Touches
 
 - `plugin/scripts/ready-pool-check.ts`
@@ -162,3 +186,4 @@ fan-in 若发现 develop 已前进 ⇒ 缓存未命中 ⇒ 照跑 scoped 门(fai
 - `plugin/scripts/promotion-driver.ts`
 - `plugin/test/promotion-driver.test.mjs`
 - `tasks/gap-ready-pool-body-still-read-from-stale-main-checkout.md`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
