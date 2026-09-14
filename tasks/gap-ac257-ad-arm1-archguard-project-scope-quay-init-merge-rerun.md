@@ -2,7 +2,7 @@
 id: gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun
 title: ad-arm1/archguard 真机重验：project scope 装 0.7.0 + quay-init 重跑（非空
   settings.json 合并语义）+ 真实 todo→done（GOAL-018/AC-257）
-status: todo
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
