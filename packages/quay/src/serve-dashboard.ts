@@ -1581,11 +1581,28 @@ const EMPTY_HISTORY: GitHistoryResult = { status: "error", reason: "internal", c
 /** Build one snapshot. Cooperative by construction: the async probes are started FIRST (their
  *  shell-outs run in the OS while the sync steps below yield), each blocking reader gets its own
  *  macrotask, and the 70 MB ledger goes through the sliced/yielding reader. Never throws — a reader
- *  that fails yields the same honest error shape the request path already used. */
-export async function buildDashboardSnapshot(root: string, client: ProviderClient): Promise<DashboardSnapshot> {
-  const asyncProbes = Promise.all([
+ *  that fails yields the same honest error shape the request path already used.
+ *
+ *  `onInterim` is called with a COMPLETE-ENOUGH snapshot BEFORE waiting on the two shell-out probes
+ *  (readDashboardSystem / readDashboardManagerLight — the long pole: measured 7 s + 1.9 s idle, and
+ *  tens of seconds under host load). Without it, a process that was just started has NO snapshot for
+ *  as long as that pole takes, and every request in that window falls back to the legacy in-request
+ *  build — measured: on a loaded host the very first criterion-shaped request after a restart hit
+ *  the 10 s cap. Which is the same intermittent failure this task exists to remove, just moved to
+ *  the restart window. With it, the cold window costs the cheap readers only. */
+export async function buildDashboardSnapshot(
+  root: string,
+  client: ProviderClient,
+  { onInterim, previous }: { onInterim?: (snap: DashboardSnapshot) => void; previous?: DashboardSnapshot | null } = {},
+): Promise<DashboardSnapshot> {
+  // The long pole: two mechanism shell-outs. Started first so they run in the OS while everything
+  // below yields between its blocking readers.
+  const slowProbes = Promise.all([
     readDashboardSystem(root).catch(() => EMPTY_SYS),
     readDashboardManagerLight(root).catch(() => EMPTY_MGR),
+  ]);
+  // Provider round-trips (~1.5 s combined through the real ABI) — also started up front.
+  const fastProbes = Promise.all([
     readTaskSummary(root, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
@@ -1611,7 +1628,20 @@ export async function buildDashboardSnapshot(root: string, client: ProviderClien
   let workerOutcomes: WorkerOutcomeRecord[] = [];
   try { workerOutcomes = readWorkerOutcomeRecords(root); } catch { workerOutcomes = []; }
 
-  const [sys, mgr, tasks, goals] = await asyncProbes;
+  const [tasks, goals] = await fastProbes;
+  // Complete-enough: every card except the two shell-out ones is renderable. Their readings are
+  // carried over from `previous` when there is one (a refresh must never regress a card that is
+  // already populated); on a true cold start they are the honest "not read yet" shapes, which is
+  // transient — the same build replaces this snapshot a few seconds later.
+  onInterim?.({
+    builtAt: Date.now(),
+    live,
+    sys: previous?.sys ?? EMPTY_SYS,
+    mgr: previous?.mgr ?? EMPTY_MGR,
+    tests, suiteRun, history, tasks, goals, workerOutcomes,
+  });
+
+  const [sys, mgr] = await slowProbes;
   return { builtAt: Date.now(), live, sys, mgr, tests, suiteRun, history, tasks, goals, workerOutcomes };
 }
 
@@ -1634,7 +1664,12 @@ export function startDashboardSnapshotRefresh(
   const rebuild = (): Promise<void> => {
     const inFlight = dashboardSnapshotRebuilds.get(root);
     if (inFlight) return inFlight; // never stack rebuilds on one root
-    const p = buildDashboardSnapshot(root, client)
+    const p = buildDashboardSnapshot(root, client, {
+      // Install the complete-enough snapshot ONLY when there is nothing to serve yet. On a refresh
+      // the incumbent snapshot is strictly better (it already carries the shell-out cards), so an
+      // interim would only ever downgrade it.
+      onInterim: (snap) => { if (!dashboardSnapshots.has(root)) dashboardSnapshots.set(root, snap); },
+    })
       .then((snap) => { dashboardSnapshots.set(root, snap); })
       .catch(() => { /* keep the previous snapshot — see the contract above */ })
       .finally(() => { dashboardSnapshotRebuilds.delete(root); });
