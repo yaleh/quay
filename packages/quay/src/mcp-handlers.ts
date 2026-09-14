@@ -50,6 +50,40 @@ export function stripHeadings(text: string): string {
   }).join(" ");
 }
 
+// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
+// carries `structuredContent` AND a `content[0].text` holding the SAME JSON ships those bytes
+// TWICE — the SDK serializes the whole result object over stdio, whose framing is super-linear
+// in payload (ReadBuffer does a Buffer.concat per incoming chunk; the receiver then JSON.parses
+// AND zod-validates the entire message). Measured on this host: a ~0.8 MB result round-trips in
+// ~60 ms, ~3.3 MB in ~1 s, ~8.4 MB in ~3 s. The duplicate is therefore not a constant factor —
+// it is the half of the payload that decides whether a list request queue-blocks the server.
+//
+// Below the budget the text form is kept VERBATIM (every existing small response, and every test
+// that reads it, is byte-identical); above it the text becomes a one-line summary and the data
+// lives exactly once, in structuredContent. The budget sits far below where the framing cost
+// turns super-linear.
+const TEXT_PAYLOAD_BUDGET_BYTES = 256 * 1024;
+
+/** Build task_list's `content` block under the budget above. `payload` is measured, and returned
+ *  verbatim when it fits — so the small-payload surface is unchanged. */
+function budgetedTaskListContent(
+  payload: Record<string, unknown>,
+  summary: { count: number; total: number; page: number; totalPages: number },
+): Array<{ type: "text"; text: string }> {
+  const json = JSON.stringify(payload, null, 2);
+  if (json.length <= TEXT_PAYLOAD_BUDGET_BYTES) return [{ type: "text" as const, text: json }];
+  return [
+    {
+      type: "text" as const,
+      text:
+        `task_list: ${summary.count} task(s) — page ${summary.page}/${Math.max(1, summary.totalPages)} ` +
+        `of ${summary.total} matching task(s). This page (${json.length} bytes) is in this result's ` +
+        `structuredContent. The text form is omitted above ${TEXT_PAYLOAD_BUDGET_BYTES} bytes because a ` +
+        `second copy of the same bytes doubles the stdio payload, whose framing cost grows super-linearly.`,
+    },
+  ];
+}
+
 export function registerTaskHandlers(
   server: McpServer,
   getClient: (id: string | undefined) => Promise<ConnectedProvider>
@@ -93,6 +127,9 @@ export function registerTaskHandlers(
         "`malformed`: an array of { file, error } naming each unparseable file and its parser error " +
         "(these entries are unfiltered/unpaginated and never counted in `total`). " +
         "Filter order: status → label → prefix → search → pagination. " +
+        "The filter+pagination work is pushed DOWN to the Provider when it supports it, so the " +
+        "response carries only the requested page rather than every task's body — pageSize is a " +
+        "real bound on the payload, not a post-hoc slice of an already-fully-transferred list. " +
         "The `label` parameter accepts an array of label strings for AND-join filtering (all specified labels must be present on the task). " +
         "A single string is also accepted for backward compatibility (treated as a one-element array). " +
         "The `prefix` parameter filters by task-id prefix (e.g. prefix='QX' returns only QX-* tasks, case-insensitive). " +
@@ -114,44 +151,103 @@ export function registerTaskHandlers(
       const { client } = await getClient(provider);
       // QX-032: normalize label to an array (backward-compatible — single string still works).
       const labelFilters: string[] = Array.isArray(label) ? label : (label ? [label] : []);
-      // gap-one-unparseable-task-takes-down-the-whole-board: taskList() now
-      // returns partial success — { tasks, malformed }. `malformed` (files
-      // whose frontmatter failed to parse) is forwarded verbatim below: it has
-      // no id/title/status/labels to filter by, so it is passed through
-      // unfiltered and unpaginated, and it is never counted in `total`.
-      let { tasks, malformed } = await client.taskList({ status });
-      // QX-032: client-side AND-join label filter — matches CLI (--label A --label B) and
-      // Web UI (?label=A&label=B) semantics. Empty labelFilters = no filter applied.
-      if (labelFilters.length > 0) {
-        tasks = tasks.filter((t) =>
-          labelFilters.every((l) => Array.isArray(t.labels) && t.labels.includes(l))
-        );
-      }
-      // QX-003: client-side prefix filter.
-      if (prefix) {
-        tasks = tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()));
-      }
-      // QX-029: client-side search filter (title + stripped body, case-insensitive).
-      if (search) {
-        const sq = search.toLowerCase();
-        tasks = tasks.filter((t) =>
-          (t.title + " " + stripHeadings(t.body || "")).toLowerCase().includes(sq)
-        );
-      }
-      // QX-030: pagination — applied after all filters so page/total reflect filtered set.
-      const total = tasks.length;
+      // QX-030: pagination values resolved BEFORE the fetch now, because they are
+      // pushed DOWN to the Provider (see the push-down note below) — the previous
+      // code could only resolve them after holding the whole store.
       const pageNum = Math.max(1, parseInt(String(page)) || 1);
       const size = Math.min(200, Math.max(1, parseInt(String(pageSize)) || 50));
-      const start = (pageNum - 1) * size;
-      const paged = tasks.slice(start, start + size);
-      const totalPages = Math.ceil(total / size);
+
+      // ── gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp ──────────────
+      // PUSH THE FILTERS AND THE PAGE DOWN. The previous shape here — `taskList({status})`
+      // then filter and page in this process — forced the Provider to hand back EVERY
+      // matching task WITH ITS BODY before any filter or page could be applied. On the
+      // live store that is 2135 tasks / 14.4 MB, measured at 34-52 s on the ABI round
+      // trip, and Core's MCP server is single-threaded: while that response was being
+      // read and parsed, an unrelated `task_get` (2 ms of real work) sat in the queue and
+      // the caller saw `-32001 Request timed out`. That is what made the ABI-only
+      // `quay:quay-task` subagent — the documented task-CRUD main path, whose tool
+      // allowlist has no CLI fallback — structurally unusable.
+      //
+      // The Provider's task_list applies status → label → prefix → search → page, the
+      // SAME order and the SAME predicates this handler used to apply locally (the
+      // native store shares one `matchesListFilter`, and its search clause is the same
+      // title + heading-stripped-body substring match `stripHeadings` implements here).
+      // So when it reports `paged: true` the answer IS the answer, and this handler
+      // reports it without a second pass.
+      //
+      // Sentinel `paged: true` (not just "did the Provider return fewer rows"): a Provider
+      // that ignores these optional args returns the whole unfiltered set and no `paged`
+      // flag, which is exactly the case the client-side fallback below still serves.
+      let listRes: Awaited<ReturnType<typeof client.taskList>>;
+      try {
+        listRes = await client.taskList({
+          status,
+          ...(labelFilters.length === 1 ? { label: labelFilters[0] } : {}),
+          // >1 label: the array form is what the AND-join needs; the ABI's original
+          // `label` is a single string, so a Provider whose schema rejects arrays
+          // falls into the catch below rather than failing the read.
+          ...(labelFilters.length > 1 ? { label: labelFilters } : {}),
+          ...(prefix ? { prefix } : {}),
+          ...(search ? { search } : {}),
+          page: pageNum,
+          pageSize: size,
+        });
+      } catch {
+        // A Provider whose task_list schema rejects one of the pushed-down args (or an
+        // older Provider build) fails the whole call. Re-issue the PRE-EXISTING call
+        // shape — `{status}`, the one filter every Provider has always accepted — and
+        // let the client-side fallback below do the filtering and paging. Either way the
+        // caller gets a correct answer; only the cost differs. A genuine store failure
+        // re-throws on this second call, so it is never masked.
+        listRes = await client.taskList({ status });
+      }
+      const malformed = listRes.malformed;
+      let tasks: typeof listRes.tasks;
+      let total: number;
+      let paged: typeof listRes.tasks;
+      let totalPages: number;
+      if (listRes.paged === true && typeof listRes.total === "number") {
+        // The Provider applied every filter above and this is the requested window of
+        // that filtered set — trust its count and its page.
+        tasks = listRes.tasks;
+        total = listRes.total;
+        paged = tasks;
+        totalPages = typeof listRes.totalPages === "number" ? listRes.totalPages : Math.ceil(total / size);
+      } else {
+        // ── client-side fallback (the pre-existing behaviour, kept for Providers that
+        //    do not implement the optional filter/paging args) ──
+        // QX-032: client-side AND-join label filter — matches CLI (--label A --label B) and
+        // Web UI (?label=A&label=B) semantics. Empty labelFilters = no filter applied.
+        let filtered = listRes.tasks;
+        if (labelFilters.length > 0) {
+          filtered = filtered.filter((t) =>
+            labelFilters.every((l) => Array.isArray(t.labels) && t.labels.includes(l))
+          );
+        }
+        // QX-003: client-side prefix filter.
+        if (prefix) {
+          filtered = filtered.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()));
+        }
+        // QX-029: client-side search filter (title + stripped body, case-insensitive).
+        if (search) {
+          const sq = search.toLowerCase();
+          filtered = filtered.filter((t) =>
+            (t.title + " " + stripHeadings(t.body || "")).toLowerCase().includes(sq)
+          );
+        }
+        // QX-030: pagination — applied after all filters so page/total reflect filtered set.
+        total = filtered.length;
+        const start = (pageNum - 1) * size;
+        paged = filtered.slice(start, start + size);
+        totalPages = Math.ceil(total / size);
+      }
       // QX-035 (experiment 4, iteration 10): Mitigation A — _version field lets
       // AI agents detect MCP server staleness by comparing against expected version.
       // gap-one-unparseable-task-takes-down-the-whole-board: forward the
       // provider's malformed list verbatim (partial success — see above).
       const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages, _version: QUAY_VERSION, malformed };
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: budgetedTaskListContent(result, { count: paged.length, total, page: pageNum, totalPages }),
         structuredContent: result,
       };
     }

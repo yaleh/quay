@@ -25,6 +25,43 @@ import { createMetaStore } from "./meta-store.ts";
 // the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
 import { runAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
 
+// ── task_list's text/content budget ────────────────────────────────────────────────────────────
+// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
+// carries `structuredContent` AND a `content[0].text` of the SAME JSON ships those bytes TWICE —
+// the SDK serializes the whole result object over stdio. The transport's framing is super-linear
+// in payload (ReadBuffer.append does a Buffer.concat per incoming chunk, then the receiver
+// JSON.parses AND zod-validates the whole message), measured here as ~60 ms for a 0.8 MB result,
+// ~1 s for 3.3 MB, ~3 s for 8.4 MB. So the duplicate is not a constant factor, it is the half of
+// the payload that turns a usable response into a queue-blocking one.
+//
+// Below the budget the text form is kept VERBATIM (every existing small response — and every test
+// that reads it — is byte-identical); above it, the text becomes a one-line summary and the data
+// lives once, in structuredContent. The budget is deliberately far below the point where the
+// framing cost turns super-linear.
+const TEXT_PAYLOAD_BUDGET_BYTES = 256 * 1024;
+
+/** Build a task_list result's `content` block under the budget above. `json` MUST be the exact
+ *  serialization of `summarySource` — it is measured to decide, and returned verbatim when small. */
+function budgetedTaskListContent(
+  payload: Record<string, unknown>,
+  summarySource: { count: number; total: number; page: number; totalPages: number; scannedFiles: boolean },
+): Array<{ type: "text"; text: string }> {
+  const json = JSON.stringify(payload, null, 2);
+  if (json.length <= TEXT_PAYLOAD_BUDGET_BYTES) return [{ type: "text" as const, text: json }];
+  return [
+    {
+      type: "text" as const,
+      text:
+        `task_list: ${summarySource.count} task(s) — page ${summarySource.page}/${Math.max(1, summarySource.totalPages)} ` +
+        `of ${summarySource.total} matching task(s)` +
+        `${summarySource.scannedFiles ? "" : " (resolved from the directory listing; no task file was read)"}. ` +
+        `This page (${json.length} bytes) is in this result's structuredContent. ` +
+        `The text form is omitted above ${TEXT_PAYLOAD_BUDGET_BYTES} bytes because a second copy of the ` +
+        `same bytes doubles the stdio payload, whose framing cost grows super-linearly.`,
+    },
+  ];
+}
+
 export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; metaDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
   // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
@@ -89,18 +126,37 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
   // search uses this to avoid the 1572-body payload that timed out the MCP
   // round-trip (-32001). Search is applied in the store walk (status → label →
   // search), independent of `includeBody` (which only shapes the response).
+  // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: OPTIONAL
+  // `prefix`/`page`/`pageSize` complete the server-side filter+page surface, so a
+  // caller that wants one screen of tasks no longer has to receive every body in
+  // the store to get it. Measured on the live store (2135 tasks): the whole-store
+  // payload is 14.4 MB and the ABI round-trip of it is ~34-52 s, which on Core's
+  // single-threaded MCP server queue-blocks every concurrent read (-32001). With
+  // `pageSize` the response carries at most `pageSize` bodies whatever the store
+  // size, and the filter/index phase reads no bodies at all (store.queryPage).
+  //
+  // BACKWARD COMPATIBLE BY CONSTRUCTION: `prefix`/`page`/`pageSize` are optional
+  // and their absence reproduces the previous whole-filtered-set answer exactly
+  // (pageSize undefined ⇒ no paging), so every existing caller — the web board's
+  // `includeBody:false`, `serve-task`'s `search`, the ABI conformance suite — is
+  // untouched. The response's `total`/`page`/`pageSize`/`totalPages`/`paged`/
+  // `scannedFiles` fields are additive: a caller that ignores them sees the same
+  // `tasks` + `malformed` it always did.
   server.registerTool(
     "task_list",
     {
-      description: "List tasks in the native Provider's task store, optionally filtered by status/label/search.",
+      description: "List tasks in the native Provider's task store, optionally filtered by status/label/prefix/search and paginated by page/pageSize.",
       inputSchema: {
         status: z.string().optional(),
-        label: z.string().optional(),
+        label: z.union([z.string(), z.array(z.string())]).optional(),
         includeBody: z.boolean().optional(),
         search: z.string().optional(),
+        prefix: z.string().optional(),
+        page: z.number().int().optional(),
+        pageSize: z.number().int().optional(),
       },
     },
-    async ({ status, label, includeBody, search }) => {
+    async ({ status, label, includeBody, search, prefix, page, pageSize }) => {
       // gap-one-unparseable-task-takes-down-the-whole-board: partial success.
       // One task file whose frontmatter fails to parse must not take down the
       // whole task_list call (that was the "all-or-nothing" defect) — return
@@ -108,13 +164,39 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
       // error}) so the Core can surface the bad file visibly instead of 500ing
       // the board. isError stays reserved for genuine call-level failures
       // (store itself unreachable, etc.), which still throw.
-      const { tasks, malformed } = store.listWithMalformed({ status, label, search });
+      const { tasks, malformed, total, page: resolvedPage, pageSize: resolvedSize, totalPages, scannedFiles } =
+        store.queryPage(
+          { status, label, search, prefix },
+          { page, pageSize, includeBody: includeBody !== false },
+        );
       const outTasks = includeBody === false
         ? tasks.map((t) => { const { body: _omit, ...rest } = t; return rest; })
         : tasks;
+      // `paged` is the caller's own signal that this response is a WINDOW of the
+      // filtered set (and therefore that every filter it sent was applied by the
+      // store, not silently dropped) — Core's MCP `task_list` reads it to decide
+      // whether it may use `total` as the filtered count instead of re-fetching
+      // everything and re-filtering client-side. It is false when `pageSize` was
+      // absent, which is exactly the pre-existing whole-set contract.
+      const result = {
+        tasks: outTasks,
+        malformed,
+        total,
+        page: resolvedPage,
+        pageSize: resolvedSize,
+        totalPages,
+        paged: pageSize !== undefined && pageSize !== null,
+        scannedFiles,
+      };
       return {
-        content: [{ type: "text", text: JSON.stringify({ tasks: outTasks, malformed }, null, 2) }],
-        structuredContent: { tasks: outTasks, malformed },
+        content: budgetedTaskListContent(result, {
+          count: outTasks.length,
+          total,
+          page: resolvedPage,
+          totalPages,
+          scannedFiles,
+        }),
+        structuredContent: result,
       };
     }
   );
