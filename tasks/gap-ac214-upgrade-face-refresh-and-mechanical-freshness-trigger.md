@@ -102,11 +102,11 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 ## Acceptance Criteria
 
 - [x] AC1 改前读数（能取假）：本仓库根逐字跑 AC-214 criterion ⇒ **exit 1**，stderr 逐字含 `stale evidence: GOAL-009-AC-238:…` 与 `GOAL-009-AC-239:…`；贴 `.quay/goal-freshness-margin.json` 全文、`.quay/gate-events.jsonl` 中 AC-214 的最后一次 pass 与第一次 fail 两个时刻、以及载体里 AC-238/AC-239 **全部**记录的 `ts`/`build_sha`（证明最新一条停在 2026-09-13T17:11:09Z / `32ff4f3a…`）。⛔ 引述本节不算，须实现者复跑。
-- [ ] AC2 产出运行的真读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具、⛔ 不是 `--check`）：贴 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force --root /home/yale/work/quay` 的**退出码** + 全部 `develop-deliver:` 行 + 本次实测墙钟 + 前置核的 `df -h`/`ssh` 读数；并贴 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 ⑦/⑦b 两段（`ac238 record written` 与 `ac239 record written … ✓`），或失败时的 fail-closed 原文 + `UPGRADE_PAIR_MISSING` 行。
-- [ ] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**、且只计**运行之后**的时间窗）：**主检出** `/home/yale/work/quay/.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-238"` **且** ≥1 条 `ac="GOAL-009-AC-239"` 记录，两者 `ts` 均晚于本次运行开始时刻、`build_sha` 为 40-hex，**且两条 `project_root` 逐字相同**；各贴全文 + `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200 的读数（paths 由 `packages/quay/package.json` 的 `files` 机械推导，⛔ 不手写）。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
-- [ ] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）；`goal-store gate AC-214 --root .` ⇒ exit 0。⛔ 通过放宽 criterion 达成不算。
-- [ ] AC5 负控制（判据仍能取假，且转绿不来自放宽）：① `QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；② `git diff --exit-code -- goals/` 为空（判据文本逐字节未变）；③ **只跑 criterion** 的前后 `md5sum .quay/productization-verification.jsonl` **相同**（证明判据本体只读；⛔ 与步骤 3 的写入是两件事）。三条读数全部贴出。
-- [ ] AC6 落点正确（⛔ 防空转）：贴出记录**在主检出**载体中的位置（绝对路径 + 载体行数）**且** worktree 的 `.quay/productization-verification.jsonl` 中**没有**本次新增（若 worktree 里也出现 ⇒ `--root` 传错、判据读不到 ⇒ 未达成，须说明并重跑）。
+- [x] AC2 产出运行的真读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具、⛔ 不是 `--check`）：贴 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force --root /home/yale/work/quay` 的**退出码** + 全部 `develop-deliver:` 行 + 本次实测墙钟 + 前置核的 `df -h`/`ssh` 读数；并贴 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 ⑦/⑦b 两段（`ac238 record written` 与 `ac239 record written … ✓`），或失败时的 fail-closed 原文 + `UPGRADE_PAIR_MISSING` 行。
+- [x] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**、且只计**运行之后**的时间窗）：**主检出** `/home/yale/work/quay/.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-238"` **且** ≥1 条 `ac="GOAL-009-AC-239"` 记录，两者 `ts` 均晚于本次运行开始时刻、`build_sha` 为 40-hex，**且两条 `project_root` 逐字相同**；各贴全文 + `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200 的读数（paths 由 `packages/quay/package.json` 的 `files` 机械推导，⛔ 不手写）。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
+- [x] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）；`goal-store gate AC-214 --root .` ⇒ exit 0。⛔ 通过放宽 criterion 达成不算。
+- [x] AC5 负控制（判据仍能取假，且转绿不来自放宽）：① `QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；② `git diff --exit-code -- goals/` 为空（判据文本逐字节未变）；③ **只跑 criterion** 的前后 `md5sum .quay/productization-verification.jsonl` **相同**（证明判据本体只读；⛔ 与步骤 3 的写入是两件事）。三条读数全部贴出。
+- [x] AC6 落点正确（⛔ 防空转）：贴出记录**在主检出**载体中的位置（绝对路径 + 载体行数）**且** worktree 的 `.quay/productization-verification.jsonl` 中**没有**本次新增（若 worktree 里也出现 ⇒ `--root` 传错、判据读不到 ⇒ 未达成，须说明并重跑）。
 - [x] AC7 刷新动作机械化之一：**版本控制**的主体↔产出者映射产物 `plugin/freshness-producers.json`（**单源**：判定与探针都读它）+ 判定 `plugin/scripts/freshness-producer-coverage-check.ts`（+ `plugin/test/freshness-producer-coverage-check.test.mjs`），后者对「载体里出现过、却未在映射里登记产出者的主体」**fail-closed 报出**。负控制**双向**贴出（夹具载体里加一条未登记主体 ⇒ 判定变红且逐条指名；去掉 ⇒ 变绿）；并贴该判定对**生产**载体 `.quay/productization-verification.jsonl` 的一次真实读数（硬规则 4 推论三：只由夹具满足的判据不算产出）。同时贴新增 `plugin/scripts/*.ts` 的全部义务落实读数（`capability-catalog.sh` 声明行 / `runner-static-gate` 登记 / mutation case / `@checker-count`）与 `mirror-pair-drift-check.ts` 的读数；⛔ 义务清单若与本任务列出的 Touches 不一致（少一处落点），须在 body 里补记并把该落点补进 `## Touches`。
 - [x] AC8 刷新动作机械化之二（routine 接线）：`.quay/config.yml` 的 `loop.routines` 中新增条目（贴该条目的逐字内容与其 trigger 文法的出处）；`plugin/probes/freshness-refresh.md` 经**真** `read-probe-spec.ts` 载入成功（贴返回值四键）；规格 objective 中触发阈值**显式写成 K 与已测量量的函数**并在 body 里给出该算式的代入过程（⛔ 不得出现与 K 无关的独立魔数）；镜像 `packages/quay/plugin/probes/freshness-refresh.md` 存在且 `mirror-pair-drift-check.ts` 通过。若该 routine 结构上无法被调度 ⇒ 贴 fail-closed 原文 + 可区分的 NOT-EVALUATED 并升 `needs-human`（⛔ 不得静默跳过、⛔ 不得用「观察项」代替）。
 
@@ -158,17 +158,225 @@ bundle 中无这两者）。静态检查器是**本仓自己的 harness**（`scr
 
 ## Resolution
 
-**本任务分两半，两半的结局不同 —— 逐条读数在下面：**
+**两半都已关闭 —— 逐条读数在下面。** Round 1 的历史读数保留在各自小节（已被 Round 2 取代的已就地标注）。
 
-- **前半（关闭当前缺口）—— 只关了一半。** 升级面产出者真的跨机跑了；**AC-238 半边成功并已刷新到
-  d=0/margin 200**，**AC-239 半边结构性不可达**（升级后的项目自己的 drivers 起不来 ⇒ 任务停 `todo`
-  ⇒ 不写记录）。⇒ **AC2–AC6 未达成，任务升 `needs-human`**（任务 step 9 逐字要求）。
-- **后半（让缺口不再第 5 次出现）—— 完成且独立可验。** AC7 / AC8 全部达成。
+- **前半（关闭当前缺口）—— 已关闭（Round 2，2026-09-14T23:12:51Z 起的一次真跨机运行）。**
+  Round 1 卡住 AC-239 的根因是**交付物缺 `dist/driver-anchor.js`**（阶段 C 之后任何安装形态
+  `quay driver start` 恒 rc=1）；该缺陷已由 `gap-dist-closure-missing-driver-anchor-js`（`6b1aa601f`）
+  修好并落在 develop。本次重跑升级面产出者 ⇒ **AC-238 与 AC-239 两条记录都产出、`project_root` 逐字相同、
+  AC-214 criterion exit 0**（七项 margin 全正）⇒ **AC2–AC6 全部达成**（读数见 Round 2 小节）。
+- **后半（让缺口不再第 5 次出现）—— 完成且独立可验。** AC7 / AC8 全部达成（Round 1 完成；Round 2 复验仍绿）。
 
 ⛔ 未做的事，逐条声明：⛔ 没有手写记录、⛔ 没有从别处搬旧记录、⛔ 没有改 K、⛔ 没有改 criterion /
 `goals/`（`git diff --exit-code -- goals/` 为空，实测）、⛔ 没有自行 `superseded` 该 AC、⛔ 没有用
 `--verify-coldstart` 冒充（冷启动面产出者不产出 AC-238/239）、⛔ 没有把后半降格成「观察项」、
 ⛔ 没有为「不烧 fan-in」把未达成的 AC 勾上。
+
+### Round 2（2026-09-14T23:12:51Z – 23:32:37Z）：前半已关闭 —— AC2–AC6 全部达成
+
+**Round 1 的阻断为何消失（⛔ 不是「重跑就好」）**：Round 1 判 AC-239「结构性不可达」，根因是
+**交付物缺 `dist/driver-anchor.js`**（阶段 C 之后，任何安装形态 `quay driver start --kind <any>` 恒 rc=1）。
+该缺陷已由 `gap-dist-closure-missing-driver-anchor-js`（`6b1aa601f`，"dist-closure: derive modules
+resolved as path.join(<dirExpr>, \"X.ts\")"）修好并已落在 develop。
+
+**运行前的直接判据（⛔ 不是「听说修了」）—— 对本次要发货的 tarball 直接读：**
+
+```
+$ tar tzf .quay/deliver-worktree-10c664c9e32c/packages/quay/quay-0.7.0.tgz | grep driver-anchor
+package/plugin/scripts/dist/driver-anchor.js
+```
+
+**运行中的直接判据（硬规则 4b：用外部可核的直接量，⛔ 不用自述）—— 远端活进程：**
+
+```
+$ ssh orangevps pgrep -af driver-anchor
+856959 node .../quay-verify-upgrade-10c664c9.npm/lib/node_modules/quay/plugin/scripts/dist/driver-anchor.js \
+        __anchor --root /home/yale/quay-verify-upgrade-10c664c9-root
+```
+
+⇒ 升级后的项目**从安装形态的交付物里**起了自己的 anchor。Round 1 里这一步是 rc=1。
+
+#### AC2 —— 产出运行的真读数
+
+**起止（`date -u` 实测）与退出码**
+
+```
+=== RUN START 2026-09-14T23:12:51Z ===
+...
+PRODUCER_EXIT=0
+=== RUN END   2026-09-14T23:32:37Z ===          （实测墙钟 19 分 46 秒）
+```
+
+**⚠️ `--upgrade-source` 与 AC 正文的差异（如实披露）**：AC 正文写 `work/meta-cc`，本次实际用
+`work/meta-cc-aged-ac238-copy`。原因（实测，⛔ 非推测）：`~/work/meta-cc` 已于 2026-09-14T15:06Z 被一次裸
+`quay-init` **就地升级**，其旧 `.quay/runtime` 被退休进 `.quay/quay-init-backups/1789398411/runtime`
+（`ls ~/work/meta-cc/.quay/runtime` ⇒ No such file or directory）。升级面测的是「**带旧 vendored 布局**的项目
+被升级」；指向已升级的目录会让这条路径**测不到升级动作**。故沿用 Round 1 重建并留痕的 aged 副本
+（`AGED-SOURCE-PROVENANCE.txt`；runtime sha256 与 meta-cc 自己的备份逐字节相同 `b2d6737c…`/`5742fa27…`，
+mtime 保留 ⇒ `runtime_age_days=25.01`）。**⛔ 项目数据无一处合成**：103 条真实任务 / 真实 `config.yml` /
+真实 git 历史都是 meta-cc 自己的。
+
+**前置核（跑之前取，让失败可归因）**
+
+```
+$ ssh -o BatchMode=yes -o ConnectTimeout=10 orangevps 'df -h $HOME | tail -1; ...'
+/dev/sda1        96G   89G  7.6G  93% /                  ← 运行中读数
+$ ls -l $HOME/work/meta-cc-aged-ac238-copy/.quay/config.yml
+-rw-rw-r-- 1 yale yale 2250 Sep 14 15:06 .../.quay/config.yml
+$ ls -d $HOME/work/meta-cc-aged-ac238-copy/.quay/runtime
+/home/yale/work/meta-cc-aged-ac238-copy/.quay/runtime
+$ ls $HOME/work/meta-cc-aged-ac238-copy/.quay/*.pid
+ls: cannot access '...': No such file or directory       ← Round 1 的「活进程握手」已剔除
+$ ls -la .quay/profiles.yml
+-rw-rw-r-- 1 yale yale 7247 Sep 14 12:17 .quay/profiles.yml
+```
+
+**磁盘清理的披露**：运行前远端 `/` 已 97%（3.6G 空闲）。删除 7 个 2026-09-11 期的
+`quay-verify-upgrade-*-root` + 其 `.npm` 前缀（证据早已 transported 回本仓载体，属可弃验证产物）⇒ 9.0G 空闲。
+**⛔ 这不是任何结论的理由**，只是排除已知风险面；成败判据全部来自下面的读数。
+
+**`develop-deliver:` 全部行（`.quay/ac214-run6-producer.log`，逐字）**
+
+```
+=== RUN START 2026-09-14T23:12:51Z ===
+develop-deliver: develop tip = 10c664c9e32c (10c664c9e32c766d3b22dce6e3973ea2340068dc)
+develop-deliver: creating detached worktree at develop tip: /home/yale/work/quay/.quay/deliver-worktree-10c664c9e32c
+develop-deliver: package.sh (quay .tgz)...
+  → /home/yale/work/quay/.quay/deliver-worktree-10c664c9e32c/packages/quay/quay-0.7.0.tgz
+  → /home/yale/work/quay/.quay/deliver-worktree-10c664c9e32c/packages/quay-native/quay-native-0.7.0.tgz
+develop-deliver: --verify-upgrade develop=10c664c9e32c build_date=2026-09-14T23:09:56+00:00 source=$HOME/work/meta-cc-aged-ac238-copy
+develop-deliver: B (orangevps.wan.hwang.men) — scp verify-deliver-coldstart.sh + its FULL closure ($SCRIPT_DIR siblings + node_modules deps) + both .tgz
+develop-deliver: B (orangevps.wan.hwang.men) remote stdout persisted → /home/yale/work/quay/.quay/verify-upgrade-remote-B-10c664c9.log (rc=0)
+EVIDENCE-TRANSPORT appended=4 carrier=/home/yale/work/quay/.quay/productization-verification.jsonl evidence=/home/yale/work/quay/.quay/verify-upgrade-evidence-B-10c664c9.jsonl
+develop-deliver: evidence-completeness COMPLETE present=2
+develop-deliver: B (orangevps.wan.hwang.men) — declared ac set [GOAL-009-AC-238 GOAL-009-AC-239] transported into /home/yale/work/quay/.quay/productization-verification.jsonl ✓
+develop-deliver: upgrade-pairing UPGRADE-PAIR OK host=orangevps roots=/home/yale/quay-verify-upgrade-10c664c9-root
+develop-deliver: --verify-upgrade OK — GOAL-009-AC-238 record transported into /home/yale/work/quay/.quay/productization-verification.jsonl
+PRODUCER_EXIT=0
+=== RUN END 2026-09-14T23:32:37Z ===
+```
+
+**⑦ / ⑦b 两段（逐字，取自 `.quay/verify-upgrade-remote-B-10c664c9.log`）**
+
+```
+== ⑦ upgrade-existing: /home/yale/quay-verify-upgrade-10c664c9-root ==
+  fresh deliverable: quay.js + quay-native.js (from /home/yale/quay-verify-upgrade-10c664c9.npm)
+  isolated copy: /home/yale/work/meta-cc-aged-ac238-copy -> /home/yale/quay-verify-upgrade-10c664c9-root (source opened read-only, never written)
+  pre: tasks=103 runtime_age_days=25.01 taskset=765b6b387e3a
+  pre binding: pre_binding=path-resolved (read with NO $PATH assistance — the stale-inventory reading)
+  upgrade action: shipped quay-init (config-preserving branch) rc=0 → .../.quay-upgrade-init.log
+  post-binding: retired_to=.../quay-init-backups/1789427666/runtime retired_matches_pre=1 live_rt_gone=1 bound=.../vendor/quay-native/dist/quay-native.js bound_sha=3039256afff0 delivered_qn_sha=3039256afff0
+  post: tasks=103 taskset_stable=1 runtime_replaced=1
+  post binding: post_binding=path-resolved (read with NO $PATH assistance — the gate below)
+  cli read-back: list_count=103 sample=AC118-001 sample_ok=1 task_list_ok=1
+  ac238 record written → /home/yale/quay-verify-upgrade-evidence-10c664c9.jsonl (via the ac_record_append choke point)
+
+== ⑦b post-upgrade continuation (AC-239): the upgraded project's OWN drivers drive a NEW task to done ==
+  target-profiles: configured (launcher=claude-fjdac model=deepseek-v4-pro-anthropic auth=token → .../10c664c9-root/.quay/profiles.yml)
+  [⑦b] go toolchain: /home/yale/go-sdk/bin (go version go1.24.4 linux/amd64)
+  [⑦b] landing-baseline pre-flight: state=compatible (delivered init --dry-run rc=0) :: [REUSED] landing-baseline -> develop — 'develop' contains 'main' (0 commit(s) ahead, 0 behind) — a valid quay landing baseline
+  [⑦b] real defect-fix task created in the upgraded project: ac239-subagent-session-id-scan
+  [⑦b] driver start: promotion rc=0 worker rc=0 started=1
+  [⑦b] poll finished: task_status=done (poll window 3600s)
+  [⑦b] task_status=done commit_sha=d7f2231cb271 commit_files=["docs/guides/mcp-query-tools.md","docs/guides/two-stage-query-guide.md","internal/mcp/executor/errors_projection_e2e_test.go","internal/mcp/executor/handlers.go","internal/mcp/tools/tools.go","internal/query/errors_projection.go","internal/query/errors_projection_test.go"] gate_events=158 produced_by_driver=1 evaluated=1 host=orangevps
+  ac239 record written → /home/yale/quay-verify-upgrade-evidence-10c664c9.jsonl (same root as AC-238: /home/yale/quay-verify-upgrade-10c664c9-root) ✓
+```
+
+⇒ **两条出口都成立**：主出口（`ac238 record written` **且** `ac239 record written … ✓`）成立；
+`upgrade-pairing UPGRADE-PAIR OK` 佐证两条同 root。（备出口 `UPGRADE_PAIR_MISSING` 不适用——那是
+「运输成功但两记录不同 root」的 PARTIAL 形态。）
+
+#### AC3 —— 生产载体上的新读数（硬规则 4 推论三：只计运行【之后】的时间窗）
+
+**主检出 `/home/yale/work/quay/.quay/productization-verification.jsonl`：运行前 176 行 ⇒ 运行后 180 行。**
+
+新增 2 条，`ts` **均** `2026-09-14T23:14:12Z` > 运行开始 `23:12:51Z`。两条全文：
+
+```json
+{"ac": "GOAL-009-AC-238", "adopt_decision": true, "binding": "delivered-vendor", "bound_mcp_entry": "/home/yale/quay-verify-upgrade-10c664c9.npm/lib/node_modules/quay/plugin/vendor/quay-native/dist/quay-native.js", "build_sha": "10c664c9e32c766d3b22dce6e3973ea2340068dc", "fresh_runtime_sha256": "3039256afff0b69c41f808c54532bda19769f35613660d8c1a3e08b77a6e10bb", "host": "orangevps", "host_key": "B", "isolated_copy": true, "post_binding": "path-resolved", "post_upgrade_task_count": 103, "pre_binding": "path-resolved", "pre_upgrade_runtime_age_days": 25.01, "pre_upgrade_task_count": 103, "project_root": "/home/yale/quay-verify-upgrade-10c664c9-root", "retired_backup_matches_pre": true, "retired_runtime_backup": "/home/yale/quay-verify-upgrade-10c664c9-root/.quay/quay-init-backups/1789427666/runtime", "runtime_replaced": true, "sample_task": "AC118-001", "task_list_ok": true, "taskset_stable": true, "ts": "2026-09-14T23:14:12Z", "upgrade_init_rc": 0, "upgrade_source": "/home/yale/work/meta-cc-aged-ac238-copy"}
+{"ac": "GOAL-009-AC-239", "build_sha": "10c664c9e32c766d3b22dce6e3973ea2340068dc", "commit_files": ["docs/guides/mcp-query-tools.md", "docs/guides/two-stage-query-guide.md", "internal/mcp/executor/errors_projection_e2e_test.go", "internal/mcp/executor/handlers.go", "internal/mcp/tools/tools.go", "internal/query/errors_projection.go", "internal/query/errors_projection_test.go"], "commit_sha": "d7f2231cb2711dc485b092c531c8c0bf51361528", "gate_events": 158, "host": "orangevps", "produced_by_driver": true, "project_root": "/home/yale/quay-verify-upgrade-10c664c9-root", "task_id": "ac239-subagent-session-id-scan", "task_status": "done", "ts": "2026-09-14T23:14:12Z"}
+```
+
+- `build_sha` = `10c664c9e32c766d3b22dce6e3973ea2340068dc` —— **40-hex** ✔
+- 两条 `project_root` **逐字相同** = `/home/yale/quay-verify-upgrade-10c664c9-root` ✔
+- 交付面距离：paths 由 `packages/quay/package.json` 的 `files` **机械推导**（⛔ 不手写）——
+  `['packages/quay/README.md','packages/quay/CHANGELOG.md','packages/quay/LICENSE.md','packages/quay/bin','packages/quay/src','packages/quay/dist','packages/quay/plugin','packages/quay/scripts/register-plugin.mjs','plugin','packages/quay-native/src']`
+  —— criterion 自己算出 **d = 4 ≤ K = 200**（见 AC4 的 `freshness GOAL-009-AC-238: 4/200`、`AC-239: 4/200`）。
+
+#### AC4 —— 判据真转绿
+
+```
+$ bash /tmp/ac214-criterion.sh ; echo EXIT=$?
+freshness GOAL-009-AC-201: 4/200 (margin 196)
+freshness GOAL-009-AC-232: 82/200 (margin 118)
+freshness GOAL-009-AC-205: 82/200 (margin 118)
+freshness GOAL-009-AC-207: 82/200 (margin 118)
+freshness GOAL-009-AC-203: 82/200 (margin 118)
+freshness GOAL-009-AC-238: 4/200 (margin 196)
+freshness GOAL-009-AC-239: 4/200 (margin 196)
+CRITERION_EXIT=0
+```
+
+七行**全部** `margin > 0`。`.quay/goal-freshness-margin.json` 全文：
+
+```json
+{"at": "2026-09-14T23:32:59Z", "k": 200, "subjects": {"GOAL-009-AC-201": {"K": 200, "d": 4, "margin": 196}, "GOAL-009-AC-203": {"K": 200, "d": 82, "margin": 118}, "GOAL-009-AC-205": {"K": 200, "d": 82, "margin": 118}, "GOAL-009-AC-207": {"K": 200, "d": 82, "margin": 118}, "GOAL-009-AC-232": {"K": 200, "d": 82, "margin": 118}, "GOAL-009-AC-238": {"K": 200, "d": 4, "margin": 196}, "GOAL-009-AC-239": {"K": 200, "d": 4, "margin": 196}}}
+```
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-214 --root .
+..."reason": "acceptance passed (exit 0)"
+GATE_EXIT=0
+```
+
+#### AC5 —— 负控制（判据仍能取假，且转绿不来自放宽）
+
+```
+① $ QUAY_GOAL009_FRESHNESS_K=1 bash /tmp/ac214-criterion.sh
+   stderr 逐条指名: stale evidence: GOAL-009-AC-201:4/1 (margin -3), GOAL-009-AC-232:82/1 (margin -81),
+     GOAL-009-AC-205:82/1 (margin -81), GOAL-009-AC-207:82/1 (margin -81), GOAL-009-AC-203:82/1 (margin -81),
+     GOAL-009-AC-238:4/1 (margin -3), GOAL-009-AC-239:4/1 (margin -3)
+   K1_EXIT=1                                  ⇒ 判据仍能取假，且读数跟随 K ✔
+② $ git diff --exit-code -- goals/ ; echo EXIT=$?
+   GOALS_DIFF_EXIT=0                          ⇒ 判据文本逐字节未变 ✔
+③ 只跑 criterion 前后（⛔ 与步骤 3 的 append 是两件事）：
+   md5 before: 07623ab4ce627ba9b4a544c89880cd29
+   md5 after : 07623ab4ce627ba9b4a544c89880cd29
+   READONLY: YES                               ⇒ 判据本体只读 ✔
+```
+
+#### AC6 —— 落点正确（⛔ 防空转）
+
+```
+主检出载体：/home/yale/work/quay/.quay/productization-verification.jsonl
+  运行前 176 行 ⇒ 运行后 180 行；ts > 23:12:51Z 的 AC-238/AC-239 记录 = 2（AC-238 一条 + AC-239 一条）
+worktree 载体：<worktree>/.quay/productization-verification.jsonl
+  176 行（与运行前相同）；ts > 23:12:51Z 的 AC-238/AC-239 记录数 = 0
+```
+
+⇒ `--root` 传对（记录落在判据读的那一份）；worktree 侧**无**新增（⛔ 无空转）。
+
+#### 后半的 Round 2 复验（Round 1 已完成；merge develop 后重跑仍绿）
+
+```
+$ node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root <wt>
+  [ok] plugin/scripts/runner-static-gate.ts:run_static_checks — declared 60, measured 60
+  [ok] plugin/scripts/runner-static-gate.ts:run_operational_checks — declared 11, measured 11
+  [ok] scripts/test.sh:run_doc_checks — declared 8, measured 8
+  PASS — every declared registry count matches its function body (3/3 evaluated)
+
+$ node --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root <wt>
+mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed with an unchanged signature.
+
+$ node --test plugin/test/freshness-producer-coverage-check.test.mjs
+ℹ tests 10   ℹ pass 10   ℹ fail 0
+
+$ node --experimental-strip-types plugin/scripts/freshness-producer-coverage-check.ts \
+    --root /home/yale/work/quay --mapping <wt>/plugin/freshness-producers.json --json
+{"evaluated": true, "ok": true, "findings": [], "reason": "consistent — 7 observed subject(s), 7 registered, margin snapshot 7 subject(s)"}   EXIT=0
+```
+
+⇒ AC7 / AC8 保持达成，且在**本次运行之后**的生产载体上复验。
 
 ### AC1 —— 改前读数（复跑，⛔ 非引述本节）
 
@@ -220,6 +428,9 @@ GOAL-009-AC-239 2026-09-13T17:11:09Z 32ff4f3afcd409096b9cf262b8933ba723b5fcb4 /h
 ⇒ 最新一条确实停在 **2026-09-13T17:11:09Z / `32ff4f3a…`**，与立案读数逐字相符。
 
 ### AC2 —— 产出运行的真读数（真跑，⛔ 非 `--selfcheck`/夹具/`--check`）
+
+> ⚠️ **历史（Round 1）**：本小节记的是 Round 1 那次「只跑了 AC-238 半边」的运行，已被下面的
+> **Round 2** 取代。保留原文以存证「阻断确实发生过、且成因不是重跑能解决的」。
 
 **本次跨机运行（host B = orangevps），起止（`date -u` 实测）**
 
@@ -281,6 +492,9 @@ develop-deliver: B — NOT-EVALUATED (declared ac set [GOAL-009-AC-238 GOAL-009-
 的 PARTIAL 形态，本次是 **AC-239 压根没产出**，不是同源问题）⇒ ⛔ 不勾 AC2。
 
 ### ⛔ AC3 / AC4 / AC5 / AC6 未达成 —— 产出者【结构性不可达】，升 `needs-human`
+
+> ⚠️ **历史（Round 1）**：此状态已被 **Round 2** 关闭（阻断缺陷 `gap-dist-closure-missing-driver-anchor-js`
+> 已落地）。本小节保留，作为「成因链」的存证。
 
 **现象**：AC-238 半边**成功**（升级本体全部读数成立），AC-239 半边**结构性不可达**：升级后的项目
 自己的 drivers 起不来 ⇒ 任务停在 `todo`、0 条 gate event ⇒ 不写 AC-239 记录（fail-closed 是对的）。
@@ -561,7 +775,7 @@ I = 120m = 2h（依据：观测间隔不必短于最慢产出者的墙钟 ——
 **镜像**：`packages/quay/plugin/probes/freshness-refresh.md` 实测存在（7096 B，由真 staging 生成）；
 `mirror-pair-drift-check.ts` PASS（读数见 AC7）。
 
-### AC4 / AC5 / AC6 的读数（⛔ 逐条贴出，但不勾 —— 见上「只关了一半」）
+### AC4 / AC5 / AC6 的读数（Round 1，⛔ 逐条贴出但不勾 —— 见上「只关了一半」；已被 Round 2 取代）
 
 **AC4（判据真转绿）—— 未达成**：criterion **exit 1**（唯一陈旧项 = AC-239）。逐字：
 
