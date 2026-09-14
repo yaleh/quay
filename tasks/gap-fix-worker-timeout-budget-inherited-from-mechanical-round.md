@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-timeout-budget-inherited-from-mechanical-round
 title: fix-worker 的 180s 超时预算抄自机械脚本的 ROUND_TIMEOUT_MS——落在 agent 真实时长分布正中，落地后仍 66% 被截断
-status: todo
+status: ready
 labels:
   - gap
   - defect
