@@ -141,6 +141,17 @@ export interface TaskRow {
   filedAt: string | null;
   /** Whole days between filing and the analysis instant; null when unfiled/unobservable. */
   ageDays: number | null;
+  /**
+   * ISO timestamp of the task's FIRST worker-outcome record, and whole days since — the task's
+   * EXPOSURE to the worker pool, read straight from the production carrier.
+   *
+   * This is the confounder that actually matters: `executions` is bounded by how long a task has
+   * been IN THE POOL, not by how long its file has existed (a task filed long ago but promoted
+   * yesterday has one day of exposure, not thirty). `filedAt` is a weaker, git-derived proxy.
+   * Always present for an analysable row (a row exists only because it has ≥1 record).
+   */
+  firstSeen: string;
+  firstSeenDays: number;
   // Per-state execution breakdown (the dead-value trap, made visible per task).
   successExecutions: number;
   legacyAliasExecutions: number;
@@ -229,15 +240,15 @@ export interface Analysis {
   };
   /** Stratified (within-shape) correlations — the confounder control of AC4. */
   byShape: { shape: string; n: number; median: number; mean: number; spearman: number | null; sufficient: boolean }[];
-  /** Observation-window control: the same statistic on tasks filed before `ageCutoff`. */
+  /** Observation-window control: the same statistic on tasks with ≥`cutoff` days of POOL EXPOSURE. */
   windowControl: {
     cutoff: string;
-    n: number;
-    median: number;
-    mean: number;
-    spearmanTouches: number;
-    spearmanAge: number;
-    ageConfound: { spearmanAgeVsExecutions: number; spearmanAgeVsTouches: number; spearmanAgeVsGoalAc: number; spearmanAgeVsBodyLen: number; n: number };
+    /** Primary cut: tasks whose FIRST worker-outcome record predates the cutoff (carrier-derived). */
+    byFirstSeen: { n: number; median: number; mean: number; spearmanTouches: number; spearmanAge: number };
+    /** Secondary cut: tasks whose FILE predates the cutoff (git-derived, weaker proxy). */
+    byFiledAt: { n: number; median: number; mean: number; spearmanTouches: number; spearmanAge: number };
+    /** How strongly the exposure variable itself confounds executions (the thing the cut neutralises). */
+    ageConfound: { n: number; spearmanAgeVsExecutions: number; spearmanAgeVsTouches: number; spearmanAgeVsGoalAc: number; spearmanAgeVsBodyLen: number };
   };
   recommendation: Recommendation | null;
   recommendationRefusal: string | null;
@@ -536,6 +547,10 @@ export function buildTaskRow(
   const touches = parseTouchEntries(section);
   const filedMs = filer?.date ? Date.parse(filer.date) : NaN;
   const ageDays = Number.isFinite(filedMs) ? Math.floor((nowMs - filedMs) / 86_400_000) : null;
+  // Pool exposure, from the carrier itself (the first record for this task).
+  const firstSeen = records.map((r) => r.ts).filter(Boolean).sort()[0] ?? "";
+  const firstSeenMs = firstSeen ? Date.parse(firstSeen) : NaN;
+  const firstSeenDays = Number.isFinite(firstSeenMs) ? Math.floor((nowMs - firstSeenMs) / 86_400_000) : 0;
   return {
     taskId,
     executions: records.length,
@@ -551,6 +566,8 @@ export function buildTaskRow(
     author: filer?.author ?? null,
     filedAt: filer?.date ?? null,
     ageDays,
+    firstSeen,
+    firstSeenDays,
     successExecutions: records.filter((r) => r.stateClass === "success").length,
     legacyAliasExecutions: records.filter((r) => r.stateClass === "legacy-alias").length,
     nonLandedExecutions: records.filter((r) => r.stateClass === "non-landed").length,
@@ -772,25 +789,30 @@ export function analyseDataset(ds: Dataset, opts: AnalyzeOptions = {}): Analysis
     };
   });
 
-  // Confounder control 2 — observation window. `executions` is bounded by how long a task has
-  // existed, so tasks filed recently cannot have accumulated many rounds. Restricting to tasks
-  // filed before the cutoff gives every member of the subpopulation the same ≥N-day runway.
-  const dated = rows.filter((r) => r.filedAt !== null);
+  // Confounder control 2 — observation window. `executions` is bounded by how long a task has been
+  // IN THE POOL, so a task promoted yesterday cannot have accumulated many rounds. The primary cut
+  // uses the carrier-derived first-record instant (the exposure variable that actually bounds the
+  // outcome); the git-derived file-add date is reported alongside as the weaker proxy.
   const cutoffMs = Date.parse(`${ageCutoff}T23:59:59Z`);
-  const windowRows = dated.filter((r) => Date.parse(r.filedAt as string) <= cutoffMs);
+  const summariseWindow = (sub: TaskRow[], ageOf: (r: TaskRow) => number) => ({
+    n: sub.length,
+    median: median(sub.map((r) => r.executions)),
+    mean: mean(sub.map((r) => r.executions)),
+    spearmanTouches: spearman(sub.map((r) => r.touchesFileCount), sub.map((r) => r.executions)),
+    spearmanAge: spearman(sub.map(ageOf), sub.map((r) => r.executions)),
+  });
+  const exposed = rows.filter((r) => Date.parse(r.firstSeen) <= cutoffMs);
+  const dated = rows.filter((r) => r.filedAt !== null && Date.parse(r.filedAt) <= cutoffMs);
   const windowControl = {
     cutoff: ageCutoff,
-    n: windowRows.length,
-    median: median(windowRows.map((r) => r.executions)),
-    mean: mean(windowRows.map((r) => r.executions)),
-    spearmanTouches: spearman(windowRows.map((r) => r.touchesFileCount), windowRows.map((r) => r.executions)),
-    spearmanAge: spearman(windowRows.map((r) => r.ageDays ?? 0), windowRows.map((r) => r.executions)),
+    byFirstSeen: summariseWindow(exposed, (r) => r.firstSeenDays),
+    byFiledAt: summariseWindow(dated, (r) => r.ageDays ?? 0),
     ageConfound: {
-      n: dated.length,
-      spearmanAgeVsExecutions: spearman(dated.map((r) => r.ageDays ?? 0), dated.map((r) => r.executions)),
-      spearmanAgeVsTouches: spearman(dated.map((r) => r.ageDays ?? 0), dated.map((r) => r.touchesFileCount)),
-      spearmanAgeVsGoalAc: spearman(dated.map((r) => r.ageDays ?? 0), dated.map((r) => (r.hasGoalAc ? 1 : 0))),
-      spearmanAgeVsBodyLen: spearman(dated.map((r) => r.ageDays ?? 0), dated.map((r) => r.bodyLen)),
+      n: rows.length,
+      spearmanAgeVsExecutions: spearman(rows.map((r) => r.firstSeenDays), rows.map((r) => r.executions)),
+      spearmanAgeVsTouches: spearman(rows.map((r) => r.firstSeenDays), rows.map((r) => r.touchesFileCount)),
+      spearmanAgeVsGoalAc: spearman(rows.map((r) => r.firstSeenDays), rows.map((r) => (r.hasGoalAc ? 1 : 0))),
+      spearmanAgeVsBodyLen: spearman(rows.map((r) => r.firstSeenDays), rows.map((r) => r.bodyLen)),
     },
   };
 
@@ -1014,30 +1036,35 @@ export function renderMarkdown(ds: Dataset, an: Analysis): string {
   L.push(`### 5.2 观测窗控制（任务年龄）`);
   L.push("");
   const w = an.windowControl;
-  L.push(`\`executions\` 是**有上界**的量：立案越晚的任务，越没有时间累积轮次。因此任务**年龄**是一等混杂因子，实测：`);
+  L.push(`\`executions\` 是**有上界**的量：进入 worker 池越晚的任务，越没有时间累积轮次。`);
+  L.push(`**曝露时长**（本任务第一条 worker-outcome 记录距今的天数，**直接取自生产载体**）因此是一等混杂因子，实测：`);
   L.push("");
-  L.push(`| 年龄 vs | Spearman ρ |`);
+  L.push(`| 曝露天数 vs | Spearman ρ |`);
   L.push(`|---|---|`);
   L.push(`| \`executions\` | ${num(w.ageConfound.spearmanAgeVsExecutions, 4)} |`);
   L.push(`| \`touchesFileCount\` | ${num(w.ageConfound.spearmanAgeVsTouches, 4)} |`);
   L.push(`| \`hasGoalAc\` | ${num(w.ageConfound.spearmanAgeVsGoalAc, 4)} |`);
   L.push(`| \`bodyLen\` | ${num(w.ageConfound.spearmanAgeVsBodyLen, 4)} |`);
   L.push("");
-  L.push(`⇒ **\`hasGoalAc\` 与年龄强负相关（${num(w.ageConfound.spearmanAgeVsGoalAc, 4)}）**：有 \`goal_ac\` 的任务系统性更新。`);
+  L.push(`⇒ **\`hasGoalAc\` 与曝露时长强负相关（${num(w.ageConfound.spearmanAgeVsGoalAc, 4)}）**：有 \`goal_ac\` 的任务系统性更新。`);
   L.push(`其分组差异（见 §3）因此**不能**读作「加了 goal_ac 就会少返工」，最省事的解释是「新任务还没来得及返工」。`);
   L.push(`**\`hasGoalAc\` 在本报告中只作观察项，不作结论。**`);
   L.push("");
-  L.push(`控制手段：把总体限制在 **${w.cutoff} 之前立案**的子集（每条的观测跑道 ≥14 天）：`);
+  L.push(`控制手段：把总体限制在 **${w.cutoff} 之前就已进入 worker 池**的子集（每条的观测跑道 ≥14 天）。`);
+  L.push(`主控制用**载体派生的曝露时长**；副控制用**git 派生的任务文件年龄**（更弱的代理，因为「文件存在久」不等于「在池里久」）：`);
   L.push("");
-  L.push(`| 读数 | 全体（有立案日期 n=${w.ageConfound.n}） | 截止 ${w.cutoff} 子集（n=${w.n}） |`);
-  L.push(`|---|---|---|`);
-  L.push(`| 中位 executions | ${ds.summary.median} | ${w.median} |`);
-  L.push(`| 均值 executions | ${num(ds.summary.mean)} | ${num(w.mean)} |`);
-  L.push(`| ρ(Touches, executions) | ${num(an.partials.touchesVsExecutions, 4)} | **${num(w.spearmanTouches, 4)}** |`);
-  L.push(`| ρ(年龄, executions) | ${num(w.ageConfound.spearmanAgeVsExecutions, 4)} | **${num(w.spearmanAge, 4)}** |`);
+  L.push(`| 读数 | 全体（n=${w.ageConfound.n}） | 主：曝露 ≥14 天（n=${w.byFirstSeen.n}） | 副：文件 ≥14 天（n=${w.byFiledAt.n}） |`);
+  L.push(`|---|---|---|---|`);
+  L.push(`| 中位 executions | ${ds.summary.median} | ${w.byFirstSeen.median} | ${w.byFiledAt.median} |`);
+  L.push(`| 均值 executions | ${num(ds.summary.mean)} | ${num(w.byFirstSeen.mean)} | ${num(w.byFiledAt.mean)} |`);
+  L.push(`| ρ(Touches, executions) | ${num(an.partials.touchesVsExecutions, 4)} | **${num(w.byFirstSeen.spearmanTouches, 4)}** | ${num(w.byFiledAt.spearmanTouches, 4)} |`);
+  L.push(`| ρ(年龄, executions)——该子集内 | ${num(w.ageConfound.spearmanAgeVsExecutions, 4)} | **${num(w.byFirstSeen.spearmanAge, 4)}** | ${num(w.byFiledAt.spearmanAge, 4)} |`);
   L.push("");
-  L.push(`- **能排除**：关联不是「全体里混着大量新任务」造成的——限制观测跑道后仍然成立（${num(w.spearmanTouches, 4)} vs 全体 ${num(an.partials.touchesVsExecutions, 4)}）；`);
-  L.push(`  且**年龄在子集内已不再与返工相关**（ρ = ${num(w.spearmanAge, 4)} ≈ 0），说明这条控制确实把年龄这一混杂因子摁住了，而不是换了个说法重述同一批数据。`);
+  L.push(`- **能排除**：关联不是「全体里混着大量新任务」造成的——限制观测跑道后仍然成立` +
+    `（主控制 ${num(w.byFirstSeen.spearmanTouches, 4)} / 副控制 ${num(w.byFiledAt.spearmanTouches, 4)} vs 全体 ${num(an.partials.touchesVsExecutions, 4)}）；`);
+  L.push(`  且**曝露时长在主控制子集内已不再与返工相关**（ρ = ${num(w.byFirstSeen.spearmanAge, 4)}），` +
+    `说明这条控制确实摁住了曝露这一混杂因子，而不是换了个说法重述同一批数据。`);
+  L.push(`- ⚠️ 两列若**方向相反**，以主控制为准（副控制的「文件年龄」与曝露时长不是同一个量）；此处两列${Math.sign(w.byFirstSeen.spearmanTouches) === Math.sign(w.byFiledAt.spearmanTouches) ? "同号" : "异号"}。`);
   L.push(`- **不能排除**：难度；以及「已经被执行过的任务才进入样本」这一选择效应（§1 的 ${ds.population.taskFilesWithoutOutcomes} 个未入池任务不在样本内）。`);
   L.push("");
   L.push(`## 6. 立案期建议（附适用边界与实测支撑）`);

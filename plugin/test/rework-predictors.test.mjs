@@ -24,7 +24,7 @@
 //   scripts/test.sh --for-task gap-rework-multiplier-predictors
 //   scripts/test.sh plugin/test/rework-predictors.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -57,6 +57,21 @@ import {
 import { repoRoot, mainCheckoutRoot } from "../scripts/repo-root.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// ── tmp-dir carrier (the tmp-leak-pairing-check contract) ─────────────────────────────────────────
+// Every synthetic-repo dir is registered here and removed once at the end of the file. A mkdtemp
+// fixture without cleanup leaks a /tmp dir per run (the 2026-08-12 audit: 3389 dirs / 1.1 GB), so
+// the pairing is structural — no mkdtempSync in this file escapes the carrier.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function tmpDir(tag) {
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", tag));
+  _tmpDirs.push(dir);
+  return dir;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -104,7 +119,7 @@ function taskText(id, { touches = ["a/b.ts"], extra = "", labels = ["gap"], head
 
 /** Build a throwaway repo-shaped dir: tasks/<id>.md + .quay/worker-outcome.jsonl. */
 function mkFixtureRepo(tasksSpec, outcomeRows) {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "rework-predictors-"));
+  const dir = tmpDir("rework-predictors-");
   fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
   for (const [id, spec] of Object.entries(tasksSpec)) {
     fs.writeFileSync(path.join(dir, "tasks", `${id}.md`), taskText(id, spec));
@@ -383,12 +398,29 @@ test("AC4: shape stratification and the observation-window control are computed"
 });
 
 test("AC4: with no filing dates observable, the window control reports an empty subpopulation", () => {
-  const dir = mkFixtureRepo({ t: {} }, [mkRecord("t", "completed")]);
+  // ts 2026-09-01 is AFTER the 2026-08-31 cutoff, so neither cut retains the task.
+  const dir = mkFixtureRepo({ t: {} }, [mkRecord("t", "completed", "2026-09-01T00:00:00.000Z")]);
   const ds = buildDataset({ root: dir }); // fixture dir is not a git repo ⇒ filers are unobservable
   assert.equal(ds.rows[0].filedAt, null, "no git history ⇒ filedAt is null (缺值=未查, never faked)");
   assert.equal(ds.rows[0].ageDays, null);
+  // The EXPOSURE variable is carrier-derived, so it IS observable even without git — that is the
+  // point of reading it from the outcome stream rather than from the file's add-commit.
+  assert.equal(ds.rows[0].firstSeen, "2026-09-01T00:00:00.000Z");
+  assert.equal(typeof ds.rows[0].firstSeenDays, "number");
   const an = analyseDataset(ds, { minBinN: 10, permutations: 20 });
-  assert.equal(an.windowControl.n, 0, "an empty window subpopulation is reported as 0, not as a reading");
+  assert.equal(an.windowControl.byFirstSeen.n, 0, "no task has ≥14 days of pool exposure yet");
+  assert.equal(an.windowControl.byFiledAt.n, 0, "no task file is ≥14 days old (git is unobservable here)");
+});
+
+test("AC4: a task exposed for ≥14 days IS retained by the carrier-derived cut", () => {
+  const dir = mkFixtureRepo({ old: {}, new: {} }, [
+    mkRecord("old", "completed", "2026-08-01T00:00:00.000Z"),
+    mkRecord("new", "completed", "2026-09-10T00:00:00.000Z"),
+  ]);
+  const ds = buildDataset({ root: dir });
+  const an = analyseDataset(ds, { minBinN: 1, permutations: 20, ageCutoff: "2026-08-31" });
+  assert.equal(an.windowControl.byFirstSeen.n, 1, "only the August task clears the exposure cut");
+  assert.equal(an.windowControl.byFiledAt.n, 0, "the file-age cut cannot see anything (no git history)");
 });
 
 // ── AC5 — the recommendation refuses when unsupported ─────────────────────────────────────────────
@@ -545,7 +577,7 @@ test("primitives: parseOutcomeLine rejects malformed input instead of inventing 
 });
 
 test("primitives: loadOutcomes counts malformed lines instead of silently dropping them", () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "rework-load-"));
+  const dir = tmpDir("rework-load-");
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, ".quay", "worker-outcome.jsonl"),
@@ -561,7 +593,7 @@ test("primitives: loadOutcomes counts malformed lines instead of silently droppi
 });
 
 test("primitives: an absent carrier loads as EMPTY, not as an error or a fake zero-task report", () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "rework-absent-"));
+  const dir = tmpDir("rework-absent-");
   const load = loadOutcomes(path.join(dir, ".quay", "worker-outcome.jsonl"));
   assert.equal(load.records.length, 0);
   assert.equal(load.totalLines, 0);
