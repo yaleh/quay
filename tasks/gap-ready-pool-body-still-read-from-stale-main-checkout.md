@@ -57,7 +57,7 @@ extra:
 - [x] **痕迹被消费(步骤 1)**:存在一条能取假的判据,证明 `propagated:false` 已接进某个动作,且输出词表里有**独立的「未评估」取值**(⛔ 不与「合格」同形——硬规则 3b)。判据:人为制造一次 propagate 失败后,闸对该 task 的输出与正常态**可区分**。
 - [x] **范围纪律写进产物**:`## Resolution` 里写明本轮**没有**改 body 读源、以及触发宽修法的条件(交叉表命中数 > 1),⛔ 不得顺手扩大到步骤 2。
 - [x] **反向陷阱已验(仅当本轮真要动读源时才需)**:若实现者判断必须提前做步骤 2,则 Plan 步骤 3 的反向案例读数必须先贴进 `## Resolution`;不做步骤 2 则本条记 N/A 并写明理由(⛔ 不静默跳过)。
-- [ ] `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout` 全绿,新增用例在该轮**被实际选中执行**(按测试名核对,不看总数)。
+- [x] `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout` 全绿,新增用例在该轮**被实际选中执行**(按测试名核对,不看总数)。
 
 ## Definition of Done
 
@@ -128,9 +128,21 @@ extra:
 
 ⛔ 除此之外未触碰任何文件;这份扩展本身写在这里,作为范围变更的记录。
 
-### AC5 scoped 门
+### AC5 scoped 门(读数)
 
-（待本轮 scoped 门读数填入）
+`bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
+⇒ **exit 0** · `tests 216 / pass 216 / fail 0`(scoped static tier 无 violation;`task-contract-check: no violations`)。
+**按测试名核对新增用例确实被选中执行**(7 条,全部出现在本轮输出里,⛔ 不看总数):
+
+```
+✔ body-freshness: the free functions — ledger read, the narrow failure predicate, the ahead measure (AC2)
+✔ body-freshness: AC1 — a body dimension's verdict FLIPS with the read source, and the gate's third state fires on the production read source
+✔ body-freshness: AC2 negative controls — a HEALED propagate and the two by-design `propagated:false` shapes never withhold a promotion
+✔ body-freshness: AC2 — an unmeasurable direction is `unknown`, its own value, never `fresh` (硬规则 3b)
+✔ classifyCandidate — bodyEvaluated=false is its OWN class: ⛔ no fix worker for a body the gate could not vouch for
+✔ runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)
+✔ computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)
+```
 
 ## Touches
 
