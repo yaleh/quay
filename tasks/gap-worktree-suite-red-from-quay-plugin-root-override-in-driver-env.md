@@ -2,7 +2,7 @@
 id: gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env
 title: worktree 全量套件结构性恒红 —— driver 环境带的 `QUAY_PLUGIN_ROOT` 覆盖指针 +
   一条把【断言者所在树】当【kernel 安装树】的断言（loop 自 2026-09-14T06:40Z 起零落地）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -104,5 +104,6 @@ spawn 全量 suite ⇒ 该键被**继承进每一轮 worktree 套件** ⇒ `reso
 
 - plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs
 - plugin/scripts/suite-driver.ts
+- tasks/gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env.md（自身文件：派发授权的 C8 self-touch——勾 AC + 贴实跑证据）
 
 （若选 (a) 环境面，则本任务零代码改动，Touches 保留为「两条候选修法的落点」并在任务体注明实际未改。）
