@@ -898,6 +898,37 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
   }
 
+  /** The list-filter predicate, over a task VIEW-MODEL (so it sees the same status
+   *  coercion / id fallback / label normalisation `toViewModel` gives every other
+   *  reader — never the raw frontmatter, which would let an illegal `status:` filter
+   *  differently here than it renders elsewhere). Shared by the body-aware walk
+   *  (`walkTasks`) AND the frontmatter-only index walk (`queryPage`), so the two can
+   *  never disagree about which tasks match.
+   *
+   *  `sq` is the pre-lowercased `search` needle, or null when no search was asked
+   *  for. `search` is the ONE body-dependent clause: a caller on the index path
+   *  (no body read) MUST pass a task whose `body` it is willing to match against —
+   *  `queryPage` documents why it never combines the two. */
+  function matchesListFilter(
+    t: Task & { updatedAt?: number },
+    filter: { status?: string; label?: string | string[]; prefix?: string },
+    sq: string | null,
+  ): boolean {
+    if (filter.status && t.status !== filter.status) return false;
+    if (filter.label !== undefined) {
+      // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: `label`
+      // accepts a string (single filter, the ABI's original shape) OR an array
+      // (AND-join — the semantics Core's MCP/CLI/Web surfaces have always applied
+      // client-side; the array form lets them push the work down instead).
+      const wanted = Array.isArray(filter.label) ? filter.label : [filter.label];
+      const have = t.labels || [];
+      if (wanted.length > 0 && !wanted.every((l) => have.includes(l))) return false;
+    }
+    if (filter.prefix && !t.id.toUpperCase().startsWith(filter.prefix.toUpperCase())) return false;
+    if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) return false;
+    return true;
+  }
+
   // gap-one-unparseable-task-takes-down-the-whole-board: the per-task walk
   // shared by list() and listWithMalformed(). One file whose frontmatter fails
   // to parse must poison exactly its own entry, never the whole store —
@@ -906,7 +937,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // is a CLEAR error, safe degradation per DIR-001; listWithMalformed()
   // collects it into a machine-readable failure list).
   function walkTasks(
-    filter: { status?: string; label?: string; search?: string },
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string },
     onError: (id: string, err: unknown) => void,
   ): (Task & { updatedAt?: number })[] {
     const tasks: (Task & { updatedAt?: number })[] = [];
@@ -925,15 +956,13 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         continue;
       }
       if (t === null) continue;
-      if (filter.status && t.status !== filter.status) continue;
-      if (filter.label && !(t.labels || []).includes(filter.label)) continue;
-      if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) continue;
+      if (!matchesListFilter(t, filter, sq)) continue;
       tasks.push(t);
     }
     return tasks;
   }
 
-  function list(filter: { status?: string; label?: string } = {}): (Task & { updatedAt?: number })[] {
+  function list(filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {}): (Task & { updatedAt?: number })[] {
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime in ms)
     // on each task in list results. This lets CLI (--sort updated) and Web UI
     // (?sort=updated) sort by recency without needing a separate fs.stat call
@@ -971,7 +1000,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * partial success, not a call-level failure.
    */
   function listWithMalformed(
-    filter: { status?: string; label?: string; search?: string } = {},
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {},
   ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
     const malformed: Array<{ file: string; error: string }> = [];
     ensurePersistentCacheLoaded();
@@ -980,6 +1009,181 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
     flushPersistentCache();
     return { tasks, malformed };
+  }
+
+  /**
+   * gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: the PAGED
+   * list — the shape every list consumer that renders one screen actually needs.
+   *
+   * WHY THIS EXISTS: `listWithMalformed()` (and `list()`) resolve the WHOLE filtered
+   * set and hand back every matching task WITH ITS BODY. On the live store that is
+   * 2135 tasks / 14.4 MB of bodies; the Provider ABI round-trip of that payload
+   * measured **51.6 s** (MCP) and the Core MCP server is single-threaded, so a
+   * concurrent `task_get` (2 ms of real work) queued behind it and timed out
+   * (-32001) — the head-of-line block that made the ABI-only `quay:quay-task`
+   * subagent structurally unusable. The cost was never the walk (warm: ~40 ms) nor
+   * the serialisation (~200 ms): it was that the RESPONSE carried every body
+   * regardless of how many the caller asked for.
+   *
+   * THE FIX, in two phases so the response cost tracks the PAGE, not the STORE:
+   *   1. resolve the matching ID SET without reading bodies — from the directory
+   *      listing alone when no filter is asked for (zero file reads), otherwise a
+   *      frontmatter-only walk (persistent-cache stat + the same `matchesListFilter`
+   *      predicate the body-aware walk uses, so the two can never disagree);
+   *   2. read the full task (body included) for the page WINDOW only — at most
+   *      `pageSize` files, whatever the store's size.
+   *
+   * ⛔ `search` is the ONE filter that needs a body, so it cannot use phase 1's
+   * index: a search request falls back to the body-aware walk (`walkTasks`, i.e.
+   * every body read once, matches only carrying bodies onward). That keeps the
+   * PRE-EXISTING server-side-search behaviour of `gap-serve-search-timeout-all-
+   * body-fetch` intact — the response still carries only the matches.
+   *
+   * CONTRACT (what the caller may rely on):
+   *   - `tasks` is the requested window of the filtered set, in `listIds()` order.
+   *   - `total` is the filtered count BEFORE paging (== tasks.length when unpaged).
+   *   - `malformed` keeps `listWithMalformed`'s meaning: every file whose frontmatter
+   *     failed to parse, collected during the walk phase 1/`search` performed. It is
+   *     an advisory side-channel (never counted in `total`), not a claim of a
+   *     whole-store scan: a query that short-circuits to the directory listing
+   *     examined no file, so it can report none. `scannedFiles` says WHICH of the
+   *     two happened, so a caller can tell "no bad files" from "did not look"
+   *     (硬规则 3b — an un-evaluated thing must not read as a clean one).
+   *   - Absent `pageSize` ⇒ no paging (whole filtered set), byte-compatible with
+   *     the pre-existing `listWithMalformed` result.
+   */
+  function queryPage(
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {},
+    opts: { page?: number; pageSize?: number } = {},
+  ): {
+    tasks: (Task & { updatedAt?: number })[];
+    malformed: Array<{ file: string; error: string }>;
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    scannedFiles: boolean;
+  } {
+    const malformed: Array<{ file: string; error: string }> = [];
+    ensurePersistentCacheLoaded();
+    const sq = filter.search ? filter.search.toLowerCase() : null;
+    const hasIndexFilter =
+      Boolean(filter.status) || filter.label !== undefined || Boolean(filter.prefix);
+    const allIds = listIds();
+    let matchedIds: string[];
+    let scannedFiles: boolean;
+    if (sq !== null) {
+      // `search` matches body text, so it is the one filter the frontmatter index
+      // cannot answer — walk with bodies (the persistent cache still spares the
+      // re-parse; only the body read is per-task) and keep the matches' ids.
+      matchedIds = [];
+      scannedFiles = true;
+      for (const id of allIds) {
+        let t: (Task & { updatedAt?: number }) | null;
+        try {
+          t = get(id);
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        if (t === null) continue;
+        if (!matchesListFilter(t, filter, sq)) continue;
+        matchedIds.push(id);
+      }
+    } else if (!hasIndexFilter) {
+      // No filter at all: the matching set IS the id set, so phase 1 needs no file
+      // I/O — not even a stat. This is what makes an unfiltered page genuinely
+      // independent of the store's size for the walk phase; phase 2 still reads
+      // exactly `pageSize` bodies below.
+      matchedIds = allIds;
+      scannedFiles = false;
+    } else {
+      matchedIds = [];
+      scannedFiles = true;
+      for (const id of allIds) {
+        let frontmatter: Record<string, unknown>;
+        try {
+          const meta = getMeta(id);
+          if (meta === null) continue;
+          frontmatter = meta.frontmatter;
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        // Same predicate as the body-aware walk — via the same view-model
+        // construction, so a coerced status / id fallback / label default can
+        // never make the index path select a different set than the walk would.
+        // `body` is "" here, which is sound because `search` is handled above
+        // (this branch runs only when `sq === null`, so the body clause is dead).
+        if (!matchesListFilter(toViewModel(frontmatter, "", undefined, id), filter, null)) continue;
+        matchedIds.push(id);
+      }
+    }
+    const total = matchedIds.length;
+    const paged = opts.pageSize !== undefined && opts.pageSize !== null;
+    const size = paged ? Math.max(0, Math.trunc(opts.pageSize as number)) : total;
+    const pageNum = Math.max(1, Math.trunc(opts.page ?? 1));
+    const start = paged ? (pageNum - 1) * size : 0;
+    const windowIds = paged ? matchedIds.slice(start, start + size) : matchedIds;
+    // Phase 2 — bodies for the window only.
+    const tasks: (Task & { updatedAt?: number })[] = [];
+    for (const id of windowIds) {
+      let t: (Task & { updatedAt?: number }) | null;
+      try {
+        t = get(id);
+      } catch (err) {
+        malformed.push({ file: `${id}.md`, error: (err as Error).message });
+        continue;
+      }
+      if (t === null) continue;
+      tasks.push(t);
+    }
+    flushPersistentCache();
+    return {
+      tasks,
+      malformed,
+      total,
+      page: pageNum,
+      pageSize: size,
+      totalPages: size > 0 ? Math.ceil(total / size) : 0,
+      scannedFiles,
+    };
+  }
+
+  /** Frontmatter-only read: everything `matchesListFilter` needs EXCEPT the body.
+   *  On a persistent-cache hit this is the cache lookup alone — no readFileSync,
+   *  which is the entire point (the walk phase of `queryPage` runs once per task
+   *  in the store; the body read is what phase 2 restricts to the page window).
+   *  A cache MISS falls through to a full parse, which both refreshes the cache
+   *  and is where a malformed file is detected (the caller catches and records it).
+   *
+   *  Correctness note: the persistent cache is keyed on (mtimeMs, size) — the same
+   *  heuristic `get()` already documents and accepts. A hit therefore means "this
+   *  file is byte-unchanged since a parse that SUCCEEDED", so serving its cached
+   *  frontmatter without re-reading cannot invent a match for a file that has since
+   *  become unparseable (its size would have changed). */
+  function getMeta(id: string): { frontmatter: Record<string, unknown>; updatedAt?: number } | null {
+    const taskFile = path.join(tasksDir, `${id}.md`);
+    let stat: fs.Stats | null = null;
+    try {
+      stat = fs.statSync(taskFile);
+    } catch {
+      // stat failed (file absent or a transient race) — fall through; readRaw below
+      // re-asserts absence and returns the same null contract.
+    }
+    if (stat === null) return null;
+    const cached = persistentCache.get(id);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return { frontmatter: cached.frontmatter, updatedAt: stat.mtimeMs };
+    }
+    const raw = readRaw(id);
+    if (raw === null) return null;
+    const { frontmatter } = parse(raw);
+    if (isJsonSafe(frontmatter)) {
+      persistentCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter });
+      persistentCacheDirty = true;
+    }
+    return { frontmatter, updatedAt: stat.mtimeMs };
   }
 
   /**
@@ -1826,6 +2030,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   return {
     list,
     listWithMalformed,
+    queryPage,
     get,
     write,
     delete: deleteTask,
