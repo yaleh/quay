@@ -2237,6 +2237,78 @@ test("AC2/AC3 (跳过路径) — doc-only develop 前进 ⇒ suite-skip 也两�
   assert.equal(perRun.length, 1, "per-run carrier must match (suite-skip only)");
 });
 
+// ── gap-fan-in-step-trace-suite-steps-write-end-without-begin ───────────────────────────────────
+// 病根：4 个 suite 决策步（ac-precheck/suite-start/suite-end/suite-skip）在共享载体上只有 `step-end`
+// 没有 `step-begin`——它们是【单发决策事件】而非区间。于是「用 begin/end 配对算时长」这个读法对它们
+// 恒返回「无数据」，而「无数据」与「这一步不存在」同形（硬规则 3b）；实测一位分析者正是据此得出
+// 「suite 结构上不在这个载体里」的错误结论，并把一个基于该结论的「75% 是等待」判断收回。
+// 修法（AC2 选项②）：时长改为**每条 `step-end` 自带 `durationMs`**，12 个分组统一，不依赖配对。
+
+function readSharedTrace(root) {
+  return fs.readFileSync(path.join(root, ".quay", "fan-in-step-trace.jsonl"), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+test("AC2 — 共享载体每条 step-end 自带 durationMs（12 组统一），suite-end 的读数就是真实墙钟", async (t) => {
+  const m = makeMechRepo("step-trace-duration");
+  const runId = "mf-run-duration";
+  t.after(() => rmSafe(m.base));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    // sleep 1 ⇒ suite-end 的 durationMs 必须落在这个量级；占位 0 / 拿错量的实现都会被下面挡下。
+    suiteCommand: ["bash", "-c", "echo suite-running; sleep 1; exit 0"],
+  }));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+  const ends = readSharedTrace(m.repo).filter((l) => l.event === "step-end" && l.runId === runId);
+  // 全 12 组统一：每一条 step-end 都自带数值 durationMs（⛔ 不能只有 suite 那 4 条有）。
+  const missing = ends.filter((l) => typeof l.durationMs !== "number" || !Number.isFinite(l.durationMs) || l.durationMs < 0);
+  assert.deepEqual(missing.map((l) => l.step), [],
+    "every step-end in the shared carrier must carry a numeric durationMs (the uniform duration channel)");
+  assert.ok(ends.length >= 11, `a landed run traces ≥11 step-ends (got ${ends.length}: ${ends.map((l) => l.step).join(",")})`);
+  // 真读数：suite 里 sleep 1 ⇒ suite-end 的 durationMs ≥ 1000（⛔ 常量 0 / 抄错字段都过不了）。
+  const se = ends.find((l) => l.step === "suite-end");
+  assert.ok(se, "suite-end must be in the shared carrier");
+  assert.ok(se.durationMs >= 1000, `suite-end durationMs must reflect the real suite wall clock, got ${se.durationMs}`);
+  // 两载体同一步同一读数：共享 durationMs == per-run wall_ms（同一个 t0，⛔ 不各算一次）。
+  const perRun = fs.readFileSync(path.join(m.repo, ".quay", fanInLogFileName("gap-mfh", runId)), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const sePerRun = perRun.find((l) => l.step === "suite-end");
+  assert.ok(sePerRun, "per-run carrier keeps its own suite-end row");
+  assert.equal(se.durationMs, sePerRun.wall_ms, "shared durationMs and per-run wall_ms are the same single reading");
+});
+
+test("AC2 负控制 — 4 个 suite 决策步仍只有 end 没有 begin；配对读法对它们恒空，durationMs 读法有值（两法相反）", async (t) => {
+  const m = makeMechRepo("step-trace-nobegin");
+  const runId = "mf-run-nobegin";
+  t.after(() => rmSafe(m.base));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    suiteCommand: ["bash", "-c", "echo suite-running; sleep 1; exit 0"],
+  }));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+  const rows = readSharedTrace(m.repo).filter((l) => l.runId === runId);
+  const began = new Set(rows.filter((l) => l.event === "step-begin").map((l) => l.step));
+  const ends = rows.filter((l) => l.event === "step-end");
+  for (const s of ["ac-precheck", "suite-start", "suite-end"]) {
+    // 一个「写下去就立刻被配掉」的 begin 结构上不可能与 end 分离 ⇒ 那不是挂起检测，是给孤儿率看的样子
+    // （硬规则 4：恒等式不是测量）。所以这 4 步**不补** begin，本断言把它钉住（防下一个人顺手补上）。
+    assert.equal(began.has(s), false, `${s} is a single-shot decision event — it must NOT grow a synthetic step-begin`);
+    const e = ends.find((l) => l.step === s);
+    assert.ok(e, `${s} must still be traced (end-only)`);
+    assert.equal(typeof e.durationMs, "number", `${s} carries its own durationMs`);
+  }
+  // 判别性对照（硬规则 4 推论四）：两个读法对同一个 step 给出【相反】结果 —— 只要这个差异消失，
+  // 就说明有人把 begin 补上了（指标被刷绿）或把 durationMs 去掉了（时长通道又断）。
+  const se = ends.find((l) => l.step === "suite-end");
+  assert.equal(pairedEndCount(rows, "suite-end"), 0, "the pairing method yields NOTHING for suite-end (the old blind spot)");
+  assert.equal(typeof se.durationMs, "number", "the durationMs method yields a reading for the very same step");
+});
+
+/** 配对读法：同 runId 下该 step 有几条能配上 begin 的 end（本次要证明它对 suite 恒 0）。 */
+function pairedEndCount(rows, step) {
+  const b = rows.filter((r) => r.step === step && r.event === "step-begin").length;
+  const e = rows.filter((r) => r.step === step && r.event === "step-end").length;
+  return Math.min(b, e);
+}
+
 // ── gap-worker-execution-history-index-not-reachable-from-task（A：suiteLog 记录）──────────────────
 // A 缺口的病根：机械 fan-in 的 suite 步失败时 verdict.logFile 一路 null（183KB 真因文件只能靠命名约定猜，
 // 硬规则 4c「穿不过中间层的量」）。修法：suite 红 ⇒ mechanical_fan_in.suiteLog（basename）+ verdict.logFile

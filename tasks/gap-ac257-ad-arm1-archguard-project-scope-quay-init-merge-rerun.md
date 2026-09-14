@@ -3,6 +3,7 @@ id: gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun
 title: ad-arm1/archguard 真机重验：project scope 装 0.7.0 + quay-init 重跑（非空
   settings.json 合并语义）+ 真实 todo→done（GOAL-018/AC-257）
 status: ready
+needs_human_cause: unclassified
 labels:
   - gap
   - delivery-critical
@@ -71,6 +72,7 @@ goal_ac: AC-257
 - plugin/scripts/quay-init.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
+- plugin/test/supervisor-preempt-candidates.test.mjs
 - packages/quay/scripts/register-plugin.mjs
 - packages/quay/package.json
 - packages/quay-native/package.json
@@ -139,7 +141,7 @@ VERSION-CONSISTENCY: OK
 ### AC3 产出侧接线
 `grep -c 'GOAL-018-AC-257' plugin/scripts/verify-deliver-coldstart.sh` = **3**；前 3 条命中（硬规则 ②：引用计数前先打印命中）：
 ```
-:1894  ac_record_append ",\"ac\":\"GOAL-018-AC-257\",\"host\":\"$host\",...
+:1894  ac_record_append ","\"ac\":\"GOAL-018-AC-257\",\"host\":\"$host\",...
 :6193  GOAL-018-AC-257 host:str project_root:str install_scope:str quay_version:str ...
 :6938  # 它在目标机上做 ⑨ 的四件事并写一条 ac=GOAL-018-AC-257
 ```
@@ -274,8 +276,62 @@ NO-MODES -> []  ⇒ 由新增的 assert.ok(modeDefs.length >= 5) 兜住（否则
 （结构上阻断 ⇒ 就地修），它属「阻断本任务落地」一侧，且与 `develop-deliver-tgz.sh` 的改动是同一改动面
 ⇒ 就地修 + 登记 Touches。（下方 AC10 表内 1–9 条的分母不变：那 9 条是**产出路径**缺陷。）
 
+### 第二轮（2026-09-14 10:3xZ 之后，本回合）：develop 追赶 + 第二次 fan-in 套件红的真因
+
+**① merge develop（当时落后 32 提交，本回合合并体 = `bf87827f6`）**：唯一冲突
+`docs/analysis/quay-init-closure-ratchet.baseline.json`（closure ratchet 基线：两侧 `files:3 bytes:1022`
+**相同**，只有 `fingerprint` 行不同）。⛔ 不手拼两侧的 `sources` —— 走该基线自己的机械重锚
+（正本 `plugin/scripts/quay-init-closure-ratchet.ts --reanchor`：跑**真实** laydown 后由 4 个源文件的
+sha 重算）：
+```
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor
+PASS: quay-init-closure-ratchet: re-anchored baseline → 3 files / 1022 bytes (fingerprint a0e13664f5b2054e…, 4 source files)
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale
+PASS: quay-init-closure-ratchet: laydown source fingerprint fresh (a0e13664f5b2054e…) — baseline in sync
+```
+⇒ 文件数/字节数与两侧**一致**（**未放宽 ratchet**），指纹是合并后源树的真实值
+（两侧各自的值 `1666d725…` / `08ae0dcb…` 都不是合并后的真值 —— 手选任一侧都会留一个恒红的 freshness 闸）。
+合并后 `node --experimental-strip-types scripts/version-consistency-check.ts` → `VERSION-CONSISTENCY: OK`
+（8 文件 0.7.0，另 `plugin/VERSION` = 0.7.0）。
+
+**② 第二次 fan-in 套件红的真因（AC10 第 10 条）**：`plugin/test/supervisor-preempt-candidates.test.mjs:150`
+的 `assert.match(r.stdout, /95\.0 min/)` 失败，实收 **`95.1 min`**。
+
+- **不是本任务 delta 造成的**：`git diff develop...HEAD -- <该测试> <其脚本>` = **空**（本分支一个字都没动它们）。
+  同一条红在**前一次** fan-in（09:45 那次，同一分支同一 delta）里该文件是 `passed=true` ⇒ 它是**间歇**的。
+- **真因是判据的形状**：被测脚本 `supervisor-preempt-candidates.ts:88` 用
+  `Number(((nowMs − startedAtMs) / 60_000).toFixed(1))` —— **墙钟派生值再过四舍五入**；而测试把 bracket
+  backdate **恰好 95 分钟** ⇒ 打印值 = `95.0 + δ/60`，δ = 「写 bracket」到「脚本自己取 `Date.now()`」之间的
+  真实墙钟。`.toFixed(1)` 的舍入边界落在 **95.05 min = 3 秒**：δ 一旦超过 3 秒（全量套件并发下实测
+  δ≈3–9 秒），字面量就从 `95.0` 翻成 `95.1`。该测试自己的头两行就写着 `@load-sensitive wall-clock`
+  —— 作者已知这一族负载敏感，只是判据仍钉在四舍五入**之后**的字面量上。
+- **对照（决定性 —— 同一夹具只改一个参数，两假设给出相反预测，硬规则 4 推论四）**：
+```
+A 真实夹具、无注入延迟   stdout "… 95.0 min  timeout-no-progress" ⇒ OLD GREEN / NEW GREEN
+B 同一夹具 + 注入 4s 延迟 stdout "… 95.1 min  timeout-no-progress" ⇒ OLD **RED** / NEW GREEN   ← 逐字复现 fan-in 那条红
+C 红控制：backdate 改 91 分钟（时长事实错） stdout "… 91.0 min …" ⇒ OLD RED / **NEW RED**    ← 新判据能取假
+```
+  ⇒ **B 证明旧字面量是负载敏感的**（同一次代码、同一夹具，只有延迟不同就翻），
+  **C 证明新判据不是空转**（硬规则 4 推论三：在任何输入下都绿的判据不是测量）。
+- **修法（就地、最小）**：把「匹配四舍五入后的字面量」换成「**解析该列 + 断区间 `[95,96)`**」，并补一条
+  旧判据从未有的约束 `timeout-no-progress`（reason 列）。边界从 **3 秒**放宽到 **60 秒**，仍能红在
+  「时长事实错」（C）。修复后 worktree 内 `node --test plugin/test/supervisor-preempt-candidates.test.mjs`
+  → `pass 11 / fail 0`。
+- **为何就地修而不是另立 `gap-*`**：它与本任务**落地**结构性冲突（套件红 ⇒ 本任务 exited-not-landed；
+  本任务已因此烧满一次重试上限并进过 needs-human，本次再红即第二次）。按 Plan 处置边界属
+  「结构上阻断本任务落地」一侧；并已按 `anti-drift-touches-check.ts` 的 HARD 要求把该文件登记进
+  `## Touches`（⛔ 不是放宽声明：改了它的判据就必须声明它）。
+- **已知残余（不隐藏）**：本轮只收了「判据形状」这一条，**没有**把它改路由到 serial/lowconc 泳道
+  （它仍是 `@test-group engine` 并行泳道）——那是调度器改动，不在本任务内。若该族再现 ≥2 次，应按仓内
+  既有做法（`known-load-sensitive.ts` 的分级闸 / `@load-sensitive-entry`）另立任务收编。
+
+⚠️ **本任务正文里 `needs_human_cause: human-adjudication` 与末尾 `## Needs-Human` 段是 2026-09-14T10:26Z
+那次「连续修满重试上限」的**历史审计记录**（确实发生过），不是当前状态；本回合是接手它继续修
+（git 历史里第一次 fan-in 那条红的成因见上一节，第二次见本节）。⛔ 未删该记录（append-only 审计），
+也⛔ 未自行改写 `status:`（该字段归 driver）。
+
 ### AC10 承接纪律
-见下方「承接：本轮发现的机制缺陷」——9 条，全部在**本任务自己的产出路径**上（两个文件都在本任务 `## Touches` 内，且 Plan §7/§8 明令改它们），**9 条全部结构上阻断本 AC 的产出**（每一条都把「记录落盘」这条路堵死，而失败形态都是「记录没写出来」，与「机制坏了」同形）⇒ 全部就地修。唯一另立 `gap-*` 的是第 8 条的**产品侧半边**（`quay-native task create`，不属本任务 Touches 的产品面）。
+见下方「承接：本轮发现的机制缺陷」——9 条，全部在**本任务自己的产出路径**上（两个文件都在本任务 `## Touches` 内，且 Plan §7/§8 明令改它们），**9 条全部结构上阻断本 AC 的产出**（每一条都把「记录落盘」这条路堵死，而失败形态都是「记录没写出来」，与「机制坏了」同形）⇒ 全部就地修。唯一另立 `gap-*` 的是第 8 条的**产品侧半边**（`quay-native task create`，不属本任务 Touches 的产品面）。第 10 条（第二条套件红，见上）不在产出路径上但阻断落地 ⇒ 同上就地修。
 
 ### 承接：本轮发现的机制缺陷（9 条）
 
@@ -309,3 +365,24 @@ NO-MODES -> []  ⇒ 由新增的 assert.ok(modeDefs.length >= 5) 兜住（否则
   写进项目级 `settings.json`（`extraKnownMarketplaces`），而 `quay-init` 自己的安装说明把 marketplace
   注册定为 **user scope「不提交」**。收尾时该行已退回 HEAD（⛔ 项目级 `enabledPlugins` 那条**未动**，
   它才是本 AC `install_scope=project` 的可核锚点）。
+
+## Needs-Human
+
+**执行 2026-09-14T10:26:19.180Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /95\.0 min/. Input:
+- run_id：wk-prod-1789367589
+- session_id：d4b5291f-ac8d-4361-a63d-d2da925035c0
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun~wk-prod-1789367589~1789379993178-4b51a8.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun-wk-prod-1789367589.log
+
+## Needs-Human
+
+**执行 2026-09-14T11:18:10.828Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun still present
+- run_id：wk-prod-1789367589
