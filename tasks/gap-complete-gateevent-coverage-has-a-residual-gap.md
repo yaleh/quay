@@ -1,7 +1,7 @@
 ---
 id: gap-complete-gateevent-coverage-has-a-residual-gap
 title: complete GateEvent 修复后覆盖率仅 74–94%——仍有约两成落地不写该事件，且偏差与「那天完成得少」同形
-status: ready
+status: done
 labels:
   - gap
   - defect
