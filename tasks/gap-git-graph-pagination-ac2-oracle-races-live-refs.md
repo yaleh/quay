@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-pagination-ac2-oracle-races-live-refs
 title: git 图分页 AC2 的对拍 oracle 读实时的 `--all`——套件运行期间任何 ref 前进都会把它误判成列号错位（已受控复现）
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -105,7 +105,7 @@ instead of racing the live repo"）进入生产读路径。选 1a 而非改 `rea
 - [x] AC3（负控制，取假）：把冻结/重试关掉 ⇒ 并发 ref 推进下必须重新报红；打开 ⇒ 绿。（两次都要真实读数，不得只跑一边。）
 - [x] AC4（判据不得退化）：`refCols.size === loaded`（"oracle 解析同一个已加载窗口"）修后仍成立、`loaded > LIMIT` 仍可满足；且"重试超限/无法评估"必须是**可区分的第三态**，⛔ 不得与"通过"同形。
 - [x] AC5（生产读数，非 fixture）：修后 AC1/AC2/AC3 的取值仍来自真实本仓库（>500 行、有跨列边），不是合成 fixture。
-- [ ] AC6 全量 `scripts/test.sh` 绿（待外部；由 fan-in 那一次全量运行判定）
+- [ ] AC6 全量套件绿（`scripts/test.sh`；由 fan-in 那一次运行判定）（待外部）
 
 ## Definition of Done
 
@@ -203,3 +203,26 @@ AC7 全绿：窗口含 `refs/heads/` ≥1 与 `refs/tags/` ≥1（真实 ref 密
 在 develop 于 worker 运行期间前进时它会记下一个**本门从未验证过**的 SHA ⇒ 潜在地造成 fan-in 假命中。本条按
 fan-in 的真实判据（`worker-driver.ts:4437-4438`：与**锁内 merge 到的** develop tip 逐字相符才算命中）写诚实值：
 develop 此后若再前进 ⇒ 缓存未命中 ⇒ 门照跑（fail-closed，安全方向）。该指引缺陷不属本任务 Touches，另记。
+
+### E8 AC6 标注形态未被子句识别器认出（本条自带的收口陷阱，已修）
+
+原 AC6 写作 ``AC6 全量 `scripts/test.sh` 绿（待外部；由 fan-in 那一次全量运行判定）``。fan-in 翻 done 前的
+AC 完成闸（`fan-in-ac-completion-gate.ts` → `isLandedCodeComplete`，`slot-refill.ts`）对"未勾项"的放行条件是
+`isOuterVerificationItem(text)`，即二者之一：
+
+- `isExternalVerificationItem` = `/（待外部）\s*$/` —— **必须落在该条文本的末尾**；
+- `OUTER_VERIFICATION_RE` = `/全量套件绿|外层(?:全量)?验证|外层\s*verification-round/` —— 需**字面** `全量套件绿`。
+
+原写法两不沾（`全量 \`scripts/test.sh\` 绿` ≠ `全量套件绿`；末尾是 `判定）`），**实测**（真跑该断言，非推断）：
+```
+sectionFound: true total: 6 checked: 5 unchecked: 1
+  uncheckedItem: "AC6 全量 `scripts/test.sh` 绿（待外部；由 fan-in 那一次全量运行判定）" => isOuterVerificationItem: false
+isLandedCodeComplete: false
+```
+⇒ 该条一旦原样进 fan-in，翻 done 会被拒 ⇒ **整轮 fan-in 白跑**。已改为**同时满足两个识别器**的形态：
+``AC6 全量套件绿（`scripts/test.sh`；由 fan-in 那一次运行判定）（待外部）``（含字面 `全量套件绿` ∧ 末尾 `（待外部）`）。
+
+**同形发生率（实测，全库扫描 `tasks/*.md` 的未勾项）**：带 `待外部` 但**不**落在末尾的共 **3** 条 —
+`gap-single-flight-lock-2-slot-concurrent-suites.md:75`（BLIND，且末尾还有续写）、
+`gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker.md:120`（OUTER-OK，命中外层族）、
+本文件（BLIND）。⇒ 3 条中 **2 条**会被拒。本条已修；另 2 条不属本任务 Touches，另记。
