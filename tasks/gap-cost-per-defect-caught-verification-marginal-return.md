@@ -33,10 +33,10 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 
 ## Touches
 
-- `plugin/scripts/verification-marginal-return.ts`
-- `plugin/test/verification-marginal-return.test.mjs`
+- `plugin/scripts/verification-marginal-return.ts` (new)
+- `plugin/test/verification-marginal-return.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/cost-per-defect-caught.md`
+- `docs/analysis/cost-per-defect-caught.md` (new)
 - `tasks/gap-cost-per-defect-caught-verification-marginal-return.md`
 
 ## Acceptance Criteria
