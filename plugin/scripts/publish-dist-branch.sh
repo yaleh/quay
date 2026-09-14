@@ -4,7 +4,10 @@
 # branch (the gh-pages pattern), force-updated each run.
 #
 # This is the single mechanism used by BOTH:
-#   - .github/workflows/publish-plugin-dist.yml (CI, on release/workflow_dispatch)
+#   - .github/workflows/publish-plugin-dist.yml (CI, workflow_dispatch ONLY —
+#     gap-github-actions-no-implicit-triggers, 2026-09-14: no longer auto-runs
+#     on a push to develop or a tag push, so publishing is always an explicit
+#     request, never a side effect of an ordinary commit or `git push --tags`)
 #   - a human/agent running it by hand (e.g. to seed the branch before the CI
 #     job exists, or to re-publish out of band)
 #

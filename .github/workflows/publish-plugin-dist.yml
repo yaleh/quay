@@ -5,16 +5,20 @@ name: Publish plugin dist
 # OUT of the master branch's git history while still giving external
 # `/plugin install` a real, buildable-nowhere-but-here artifact to fetch.
 #
-# Triggers:
-#   * a `v*` tag push (release) — rebuild + force-publish the dist-plugin branch;
-#   * a push to `develop` that touches plugin-relevant sources — so the develop
-#     three-layer flow keeps `/plugin install` fresh (AC93: the chain must be
-#     actually triggerable in the develop flow, not only on release tags that
-#     the flow never creates). Path-filtered so telemetry/task/orchestration-only
-#     pushes do not rebuild the bundle;
-#   * workflow_dispatch (manual) — used to seed/re-seed the branch outside a
-#     release, and to prove this job actually works end-to-end without waiting
-#     for a version tag.
+# Trigger: workflow_dispatch (manual) ONLY — used to publish/re-publish the
+# dist-plugin branch from a chosen ref.
+#
+# gap-github-actions-no-implicit-triggers (2026-09-14, human ruling): this
+# workflow used to ALSO auto-run on every push to `develop` touching
+# plugin-relevant paths, and on every `v*` tag push. Publishing the
+# marketplace-installable plugin is no longer an implicit side effect of
+# ordinary development commits or of cutting a version tag — it must be a
+# separately, explicitly requested action, because an automatic republish can
+# race an in-progress manual one (observed 2026-09-14: an auto-triggered run
+# force-overwrote a manually-published fix mid-flight) and because a plain
+# `git push` to develop should never have a GitHub-writing side effect on its
+# own. Publish (or re-publish) explicitly whenever the marketplace build needs
+# to reflect new develop state or a new release tag.
 #
 # Each run runs plugin/scripts/sync-vendor.sh to produce a fresh build, then
 # force-publishes the built `plugin/` subtree to the orphan `dist-plugin` branch
@@ -27,18 +31,13 @@ name: Publish plugin dist
 # — never source .ts, never a stale in-master committed bundle.
 
 on:
-  push:
-    branches:
-      - develop
-    tags:
-      - 'v*'
-    paths:
-      - 'plugin/**'
-      - 'packages/**'
-      - '.claude-plugin/**'
-      - 'package.json'
-      - 'package-lock.json'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to build the plugin from"
+        required: false
+        default: "develop"
+        type: string
 
 jobs:
   publish-dist-branch:
@@ -49,6 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 1
 
       - uses: actions/setup-node@v4
