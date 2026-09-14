@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-timeout-budget-inherited-from-mechanical-round
 title: fix-worker 的 180s 超时预算抄自机械脚本的 ROUND_TIMEOUT_MS——落在 agent 真实时长分布正中，落地后仍 66% 被截断
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -29,6 +29,8 @@ depends_on:
 **若成因为假会看到什么(反向指标)**:若这些超时是另一种失败模式(挂死/卡在某一步),干净返回组应聚集在远低于上限处、并与上限之间留出空档;实测是 **63s → 173s 连续铺满并顶住上限**——这是阈值切过连续分布中部的形状,不是双峰。
 
 **⚠️ 已被证否、本任务不再采信的成因**:`[claude-code:unrecognized_model]` 已由 `gap-fix-worker-spawn-timeout-persists-post-fix` 的负控制证否(换 SDK 已知模型名 6.1s 干净报错退出,不挂)。本轮补一条同向读数:**落地后 11 次干净返回中 11/11 都带这行警告** ⇒ 它在成功与失败记录里同样出现,不是判据(硬规则 2)。
+
+**⚠️ 一条会误导实现者的既有读数，已复算证否**：`gap-goal-gap-filing-spawn-budget-too-small-ring-spins-empty`（done）的对照表（该任务体第 53 行）记 `| promotion-driver fix-worker | 180s | 最近 400 轮 **266/266 零超时** |`，并据此论证「同一个数字对 fix-worker 100% 够、对 gap-filing 100% 不够」。**该读数在同一载体上不复现**：`.quay/promotion-round.jsonl` 最近 400 轮的 `fixes[]` 条目共 **684** 条，其中 **672 条是 `spawned:false`**（根本没起进程 ⇒ `timedOut` 结构上恒 false，与「跑完且没超时」同形），真正 `spawned==true` 的只有 **12** 条、其中 **10 条超时（83%）**。⇒ 那个「零超时」计数把**非事件**计成了成功——硬规则 4「一个结构上不可能取假的量，不是测量」，同时也是硬规则 3b「读不懂/没发生 不得与合格同形」。**⛔ 实现者不要据该表认为 fix-worker 的 180s 预算是够的。** 该表对 goal-driver 那一半（gap-filing agent 3/3 全超时、放宽到 900s 后单次 602.9s 成功）有独立的区分性对照支撑，**不受本条影响**，其「⛔ 不要换成另一个写死的数字、应接成配置项」的结论对本任务同样适用。**⊢ 更强的形式:这个计数不只是「不复现」,而是【结构上不可能】**——`.quay/promotion-round.jsonl` **全历史** 43,722 轮、40,570 条 `fixes[]` 条目里，`spawned==true` 的合计只有 **121** 次。`266 > 121` ⇒ 无论取哪个 400 轮窗口，266 都不可能是「真实 spawn 次数」的计数，只能是把 `spawned:false` 的条目算了进去。⛔ 这条不需要知道正确答案是多少就能判它为假（同 `instrument-failure-check` 的自检形态）。
 
 **旋钮缺失**:`spawnFixWorker(argv, root, timeoutMs = FIX_WORKER_TIMEOUT_MS)` 的第三参数**全仓库无一调用方传值**,也没有 env / CLI / profiles.yml 覆盖路径 ⇒ 换机器、换模型、换 prompt 规模后,这个数只能改代码(硬规则 4 推论二:依赖宿主/外生条件的字面值不应写死)。
 
