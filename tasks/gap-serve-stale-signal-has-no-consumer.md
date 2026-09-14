@@ -3,7 +3,7 @@ id: gap-serve-stale-signal-has-no-consumer
 title: serve 陈旧信号无消费者：/health 已报 stale:true 而 start-drivers 只探可达 ⇒ 生产实例跑 pre-fix
   代码、/dashboard 冷请求 14.59s 越过 AC-179 criterion 的 --max-time 10，verdict pass⇄fail
   振荡
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -93,6 +93,24 @@ $ curl -s --max-time 20 http://0.0.0.0:4173/health
 - **AC3 双向**：`planActions({...serveListening:true, serveStale:true}).startServe === true`（陈旧 ⇒ 重载）与 `serveStale:false` ⇒ `false`（新鲜 ⇒ 仍 skip）——两个方向都有用例，且端到端用例里旧宿主进程**真的消失**、新宿主真的应答端口。
 - **AC4**：`/health` 无 `stale` 字段 ⇒ `serve.staleness = "not-evaluated"`（`reason: "no-stale-field"`）+ stderr `staleness NOT-EVALUATED ... NOT restarting`；宿主进程**未被杀**、无 `serve` 派生。
 
+## 附：develop 侧一条被本任务一并修掉的全量套件恒红（2026-09-14）
+
+`gap-worker-mcp-blacklist-strict-config`（**done**，2026-09-14T10:11:12Z 落地 `c34f81330`）把 `mcpBlacklist`
+写进了两份 profiles carrier，**但漏了第三份**——`packages/quay/src/init.ts` 的 `SHIPPED_PROFILES_TEMPLATE`
+（`generateProfilesContent("quay")` 必须与 `plugin/.quay/profiles.yml` 逐字相同，由
+`packages/quay/test/init.test.mjs:496` 的字节相等断言绑定；该断言的失败信息原文就是「edit BOTH or neither」）。
+⇒ develop 上该断言红、`scripts/test.sh` 全量 `# tests 6200 / # fail 1`（前一轮 fan-in 的真实读数），
+**任何任务的 fan-in 都过不了**。且该任务已 done ⇒ **不会自愈**；新开一个任务去修，也会被同一条红挡在它自己的 fan-in 上（循环）。
+⇒ 本任务在飞时一并补齐第三份，使三份逐字一致。**这就是 `packages/quay/src/init.ts` 出现在本任务 `## Touches` 里的理由**
+（不是范围漂移：该文件此时确实是本分支 delta 的一部分，理由同时写进提交信息）。
+
+判据（实测，非引用，修复当场跑）：
+- 修复前：`generateProfilesContent("quay")` 与 `plugin/.quay/profiles.yml` **不相等**（1967 vs 2581 字节，首个差异在第 37 行）；
+  把 `plugin/.quay/profiles.yml` 换成 `c34f81330^` 那一版再比 ⇒ **相等** ⇒ 单边改动确实来自 `c34f81330`，不是本任务引入。
+- 修复后：两者**逐字相等**；`generateProfilesContent("some-other-project")` 与 shipped **仍不等**（参数化未被破坏）。
+- `packages/quay/test/init.test.mjs` **36/36 绿**（修复前 35/36，唯一红即该断言）；`plugin/test/profiles-role-coverage-check.test.mjs` **6/6 绿**。
+- `anti-drift-touches-check.ts --driver` 对 `develop...HEAD` 的 `packages/quay/src/init.ts` 报 OK（已在上方 `## Touches` 声明）。
+
 ## Touches
 
 - plugin/scripts/start-drivers.ts
@@ -101,3 +119,4 @@ $ curl -s --max-time 20 http://0.0.0.0:4173/health
 - packages/quay/plugin/test/start-drivers.test.mjs（mirror）
 - packages/quay/src/serve.ts（`computeStaleStatus` / `SERVE_CODE_PATHS` 的导出面）
 - tasks/gap-serve-stale-signal-has-no-consumer.md（自身）
+- packages/quay/src/init.ts（第三方 profiles carrier 单边改动修复，理由见上节「附」）
