@@ -39,6 +39,7 @@ extra: {}
 ## Touches
 
 - `plugin/scripts/worker-driver.ts`
+- `plugin/test/worker-driver-fan-in.test.mjs`
 - `tasks/gap-fan-in-step-trace-suite-step-stopped-writing.md`
 - `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md`
 - `tasks/gap-fan-in-step-trace-suite-steps-write-end-without-begin.md`
