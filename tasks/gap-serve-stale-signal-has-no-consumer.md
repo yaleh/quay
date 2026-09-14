@@ -65,20 +65,33 @@ $ curl -s --max-time 20 http://0.0.0.0:4173/health
 
 ⛔ **不改 criterion 的任何字节**：它读"运行中的服务"而非源码是**有意设计**（`goals/AC-179-web-card-and-cli.md` 的 origin 明写依据硬规则 4 推论三），前序任务已立此约束。
 
+### 六、落地（本条实现，`df07bd506`）
+
+`probeServeStaleness` 三值读 `/health`（布尔 `stale` = evaluated；其余一切——不可达/超时/非200/解析不了/无字段/非布尔/服务自报 `stale:null`——各带独立 token 的 NOT-EVALUATED）；`planActions` 增 `serveStale` 维（`!serveListening || serveStale === true`，main 的决策真的走它）；陈旧时从 `.quay/server.json`（⛔ 不是会陈旧的 `.quay/serve.pid`）取宿主 pid ⇒ SIGTERM ⇒ 等端口静默 ⇒ 起新实例，停不下来就报自己的失败而不是往占着的端口上叠。NOT-EVALUATED 大声报独立字面量且**不重启**（读不到的读数在哪个方向都不是判决）。
+
 ## AC
 
-- [ ] **AC1（判据原样、冷窗连跑）**：`goals/AC-179-web-card-and-cli.md` 的 criterion **逐字未改**，在**重启后**的生产 serve 实例上连跑 **≥5 轮**、每轮之前 ≥30s 无任何请求（确保每轮都是冷未命中）⇒ **5/5 退出码 0**。证据：5 条读数（时刻 + 墙钟 + 退出码 + 该轮 `/health` 的 `stale`）。
-- [ ] **AC2（ledger tail 翻 pass，且晚于重启）**：`.quay/gate-events.jsonl` 中 `item_id=AC-179` 的**最新一条** `verdict` 为 `"pass"`，且其 `timestamp` **晚于本次重启时刻**（⛔ 不得拿重启前的旧 pass 顶替——那是硬规则 4 的"回声"）。证据：该行原始 JSONL + 本次重启时刻。
-- [ ] **AC3（决策点必须区分陈旧，不再与"健康"同形）**：`start-drivers` 在 serve **陈旧但可达**时**不再 skip**——陈旧维进入 `planActions`（或等价判定），使 `stale:true` ⇒ `startServe: true`（幂等启动面据此重载），`stale:false` ∧ 可达 ⇒ 仍 skip。证据：`plugin/test/start-drivers.test.mjs` **双向**用例绿，两向读数都贴出。
-- [ ] **AC4（AC3 的镜像半边，硬规则 3b）**：`/health` **取不到 / 解析不了 / 无该字段**时判为 **NOT-EVALUATED**（独立取值），**不得**与"新鲜"共用输出、也不得静默当作"陈旧"去重启。证据：该分支的测试 + 输出字面量。
+- [x] **AC1（判据原样、冷窗连跑）**：`goals/AC-179-web-card-and-cli.md` 的 criterion **逐字未改**，在**重启后**的生产 serve 实例上连跑 **≥5 轮**、每轮之前 ≥30s 无任何请求（确保每轮都是冷未命中）⇒ **5/5 退出码 0**。证据：5 条读数（时刻 + 墙钟 + 退出码 + 该轮 `/health` 的 `stale`）。
+- [x] **AC2（ledger tail 翻 pass，且晚于重启）**：`.quay/gate-events.jsonl` 中 `item_id=AC-179` 的**最新一条** `verdict` 为 `"pass"`，且其 `timestamp` **晚于本次重启时刻**（⛔ 不得拿重启前的旧 pass 顶替——那是硬规则 4 的"回声"）。证据：该行原始 JSONL + 本次重启时刻。
+- [x] **AC3（决策点必须区分陈旧，不再与"健康"同形）**：`start-drivers` 在 serve **陈旧但可达**时**不再 skip**——陈旧维进入 `planActions`（或等价判定），使 `stale:true` ⇒ `startServe: true`（幂等启动面据此重载），`stale:false` ∧ 可达 ⇒ 仍 skip。证据：`plugin/test/start-drivers.test.mjs` **双向**用例绿，两向读数都贴出。
+- [x] **AC4（AC3 的镜像半边，硬规则 3b）**：`/health` **取不到 / 解析不了 / 无该字段**时判为 **NOT-EVALUATED**（独立取值），**不得**与"新鲜"共用输出、也不得静默当作"陈旧"去重启。证据：该分支的测试 + 输出字面量。
 
 ## DoD
 
-- [ ] 生产 serve 已重启到当前代码：贴重启前后 `pid` / `startedAt` 对照，与重启后 `/health` 的原始 JSON（`processStartedAt` 应晚于 `latestCodeCommitAt`）。
-- [ ] AC-179 的 criterion / expect **零字节改动**：`git diff -- goals/AC-179-web-card-and-cli.md` 为空，且 `md5sum` 仍为 `59c88b885b09753adbb368f51e9065c0`。
-- [ ] ⛔ 不以调大 `--max-time`、也不以加长任何 TTL 收口——10s 帽是 AC 的一部分；⛔ 不以「加了缓存所以没问题」收口。
-- [ ] 写清为什么前几次没保住：08-23 只造了检测器（信号无消费者）、09-14 只修了代码（跑着的进程没换），**两次的止血都是人工重启**。
-- [ ] 若 5 轮冷请求中仍有 ≥1 轮越过 10s，须给出逐轮读数与根因，⛔ 不得以"差不多"收口。
+- [x] 生产 serve 已重启到当前代码：贴重启前后 `pid` / `startedAt` 对照，与重启后 `/health` 的原始 JSON（`processStartedAt` 应晚于 `latestCodeCommitAt`）。
+- [x] AC-179 的 criterion / expect **零字节改动**：`git diff -- goals/AC-179-web-card-and-cli.md` 为空，且 `md5sum` 仍为 `59c88b885b09753adbb368f51e9065c0`。
+- [x] ⛔ 不以调大 `--max-time`、也不以加长任何 TTL 收口——10s 帽是 AC 的一部分；⛔ 不以「加了缓存所以没问题」收口。
+- [x] 写清为什么前几次没保住：08-23 只造了检测器（信号无消费者）、09-14 只修了代码（跑着的进程没换），**两次的止血都是人工重启**。
+- [x] 若 5 轮冷请求中仍有 ≥1 轮越过 10s，须给出逐轮读数与根因，⛔ 不得以"差不多"收口。
+
+读数（AC1 / AC2 / DoD，全部实测，非引用）：
+- **重启前**：`.quay/server.json` `pid=3373657` `startedAt=2026-09-14T06:53:32.784Z`；`/health` = `{"ok":true,"stale":true,"evaluated":true,"processStartedAt":"2026-09-14T06:53:32.785Z","latestCodeCommitAt":"2026-09-14T09:45:21.000Z","source":"git"}`；旧 pid 的 cmdline 仍无快照机制。
+- **重载动作**（由本条的新 `start-drivers` 完成，非人工）：`serve: STALE (code on disk newer than pid=3373657) — reloading` ⇒ `serve: reloaded (was stale pid=3373657 → pid=1583636)`，exit 0。
+- **重启后**：`pid=1583636` `startedAt=2026-09-14T10:04:47.823Z`；`/health` = `{"ok":true,"stale":false,"evaluated":true,"processStartedAt":"2026-09-14T10:04:47.824Z","latestCodeCommitAt":"2026-09-14T09:45:21.000Z","source":"git"}` ⇒ `processStartedAt` 晚于 `latestCodeCommitAt` ✓；旧 pid 已消失（`ps` 无该进程）。
+- **AC1 五轮冷读数**（每轮前 ≥35s 无请求；criterion 逐字取自 `goal-store get AC-179`，562 字节，md5 `1d7dfd396c4e8acf89a7dbffc4e720fb`）：`10:06:07Z / 0.117s / exit 0 / stale=false`、`10:06:43Z / 0.110s / exit 0 / stale=false`、`10:07:18Z / 0.106s / exit 0 / stale=false`、`10:07:53Z / 0.152s / exit 0 / stale=false`、`10:08:29Z / 0.120s / exit 0 / stale=false`。**无一轮越过 10s**（最大 0.152s；同一实例 pre-fix 冷请求为 14.589s）。
+- **AC2**：`.quay/gate-events.jsonl` 最新 `item_id=AC-179` = `{"id":"7323c531-865b-4dc5-a033-468ecec5d6e8","item_id":"AC-179","pipeline_id":"AC-179","gate":"goal","actor":"goal-cli","verdict":"pass","timestamp":"2026-09-14T10:09:05.611Z","payload":{"reason":"acceptance passed (exit 0)"}}` ⇒ pass，且 `10:09:05.611Z` **晚于**重启时刻 `10:04:47.823Z` ✓（此前最新一条是重启前的 `fail`）。
+- **AC3 双向**：`planActions({...serveListening:true, serveStale:true}).startServe === true`（陈旧 ⇒ 重载）与 `serveStale:false` ⇒ `false`（新鲜 ⇒ 仍 skip）——两个方向都有用例，且端到端用例里旧宿主进程**真的消失**、新宿主真的应答端口。
+- **AC4**：`/health` 无 `stale` 字段 ⇒ `serve.staleness = "not-evaluated"`（`reason: "no-stale-field"`）+ stderr `staleness NOT-EVALUATED ... NOT restarting`；宿主进程**未被杀**、无 `serve` 派生。
 
 ## Touches
 
