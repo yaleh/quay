@@ -2,7 +2,7 @@
 id: gap-ac161-postinstall-rematerializes-user-scope-enable
 title: AC-161 第三次回归：`npm install -g` 的 postinstall materialization 仍默认以 user
   scope 启用插件——上一次的修法把它登记为「产品决策」留作残差，于是每次真实安装都重新打红
-status: ready
+status: done
 labels:
   - gap
   - defect
