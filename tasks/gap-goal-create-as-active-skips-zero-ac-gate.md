@@ -43,14 +43,16 @@ create（新记录）时 `prevStatus === undefined`（`:1987` 由文件是否存
 
 <!-- dedup-ref --> **相关但不同形（不重复）**：`gap-criterion-attribution-write-gate-at-birth` 管的是**出生时 criterion 的内容**（裸失败出口）；本条管的是**出生时 GOAL 名下的 AC 条数**。两条挂在同一行注释揭示的同一个 `create-as-active NOT gated` 上，但被改的是不同的量，需分别处置。
 
-## AC（draft）
+**立案时顺带实测到的一处分叉（⛔ 不扩大本任务范围，仅记录）**：本任务的首版用了 `## AC（draft）` / `## DoD（draft）` 标题（照抄同族 done 任务），`quay task check` 报 `ok:false, reason:"AC section has no checkboxes"`——因为**形状判定**（`plugin/scripts/shape-sections.ts:57`）认识 draft 变体，而**复选框闸**（`packages/quay-native/src/store.ts:1686`）逐字只传 `["AC","Acceptance Criteria"]` 给 `sectionAfterHeading`（`:167` 为整行精确匹配 `^##\s+AC\s*$`）⇒ `## AC（draft）` 对它不可见。本任务因此改用**平标题**`## AC` / `## DoD`（同时满足两处）。该分叉若需修，应另立任务。
+
+## AC
 
 - [ ] **写面行为（不读源码版式）**：新增 `plugin/test/goal-create-as-active-requires-ac.test.mjs`，断言三件事——①对一条**新** GOAL 记录以 `--status active` 写入时，store **不允许该状态持久化**（fail-closed 拒绝，且讯息里枚举名下 AC 条数 = 0）；②**两步路径仍可用**（非 active 创建 → 写一条 `goal:` 指向它的 AC → 转 active 放行）；③名下已有 ≥1 AC 的 GOAL 仍可正常转 active。今天红（行为缺失），实现后绿。
 - [ ] **生产载体（真 CLI，非仅 fixture）**：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts write GOAL-998 --status active --title … --origin … --body <≥40 非空白字符> --dry-run` ⇒ **exit ≠ 0** 且 stderr 枚举「名下 AC 条数 = 0」；同一命令换 `--status draft` ⇒ exit 0。**今天的读数是 exit 0**（见 Finding 第 4 条），故本条今天红。
 - [ ] **负控制（判据能取假）**：把实现改回「create 放行」（即 `activating` 恢复含 `prevStatus !== undefined` 或其等价形态），上面两条判据必须红；贴出改前 / 改后两次读数对照。
 - [ ] **⛔ AC-217 的判据不得被弱化**：改后重跑 AC-217 的判据原文，仍能对「注入一条零 AC 的 active GOAL」取假——贴出注入前 / 注入后 exit code 对照。这是防止「把窗口合法化」冒充「把窗口关掉」。
 
-## DoD（draft）
+## DoD
 
 - [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红，贴对照读数）。
 - [ ] 修的是**已有的那一道**闸（P6-goal）让它覆盖出生路径，⛔ 不新建并行机制；若结论是「出生路径结构上无法满足该前置」（出生时不可能有 AC 指向它），则把「GOAL 不得出生即 active」落成**写面约束**，并说明为何这不与人 2026-09-10 确立的重开行为冲突。
