@@ -31,10 +31,10 @@ CLAUDE.md 的硬规则（静默失败一族）与 `docs/references/维度边界�
 
 ## Touches
 
-- `plugin/scripts/defect-latency-pair.ts`
-- `plugin/test/defect-latency-pair.test.mjs`
+- `plugin/scripts/defect-latency-pair.ts` (new)
+- `plugin/test/defect-latency-pair.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/defect-discovery-latency-distribution.md`
+- `docs/analysis/defect-discovery-latency-distribution.md` (new)
 - `tasks/gap-defect-discovery-latency-has-no-distribution.md`
 
 ## Acceptance Criteria
