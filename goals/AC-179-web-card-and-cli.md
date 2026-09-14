@@ -16,7 +16,9 @@ criterion: >-
 
   { echo "AC-179 fail: no running quay.ts serve instance with cwd=$root served
   GET /dashboard containing id=goal-card (curl --max-time 10; last candidate
-  addr=${a:-none})" >&2; exit 1; }
+  addr=${a:-none})" >&2; { echo "AC-179 fail: no running quay.ts serve instance
+  with cwd=$root served GET /dashboard containing id=goal-card (curl --max-time
+  10; last candidate addr=${a:-none})" >&2; exit 1; }; }
 expect: exit 0（仅遍历 cwd = 仓库根的生产 serve 实例；按位置认元素 id="goal-card"，不认标题/提交主题里的字符串提及）
 origin: |
   人 2026-09-06 需求⑥「在 quay web 为 goal 实现相应的页面和 dashboard 卡片」。
