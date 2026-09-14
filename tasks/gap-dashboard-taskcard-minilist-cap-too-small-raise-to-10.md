@@ -34,6 +34,13 @@ extra:
 2. 不修改 `miniList()` 函数的其余逻辑（排序方式、过滤条件、渲染结构均不变）。
 3. 不新增溢出提示——`ready`/`todo`/`needs-human` 三个状态各自的条目数一旦超过 10 仍然静默截断，
    这条已知的不一致本任务不处理（记在本 Proposal 里供以后单独立案参考，不是本任务遗漏）。
+4. **连带处理（不是扩范围）**：两个已落地任务的测试把「（最近 3 条）」这个标题字面量钉死
+   （`gap-dashboard-taskcard-multistatus-minitable`、`gap-dashboard-minilist-row-layout`），
+   改常量后全量套件 2 红——这是上一轮 exited-not-landed 的真因，不是环境抖动。
+   修法是让这两处改为从 `serve-dashboard.ts` 读 `MINI_LIST_N`（**不是**把 3 改成 10：下一个改上限的人
+   会再踩一次，且这两个文件同时断言该标题的【在场】与【缺席】，钉死字面量会让缺席断言变成空转），
+   常量**值**仍被钉住、且钉在拥有该常量的任务自己的测试里（`serve-dashboard.test.mjs`）。
+   这不引入自适应阈值、不新增溢出提示，裁定范围未变。
 
 ## Acceptance Criteria
 
@@ -52,8 +59,35 @@ extra:
 - 任务体保留人本次的原始裁定措辞（"只调常量，不做自适应，不加提示"）以及那个"+N 更多不一致"作为
   已知、暂不处理的观察项，供以后单独立案参考。
 
+## Evidence
+
+上一轮 exited-not-landed 的真因（全量套件日志
+`.quay/fan-in-suite-gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10~wk-prod-1789350883~1789357624434-a893c7.log`）：
+`# tests 2562 / # pass 2560 / # fail 2`，两条 ✖ 全在同一文件、且都是本任务改常量造成的连带：
+
+- `packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs` — `renders the ready
+  mini-list heading`（断言 `${s}（最近 3 条）`）、以及 `ready (1 task) still renders its block`。
+- `packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs:131` — 该处是**缺席**断言
+  （`!zero.includes("ready（最近 3 条）")`），改常量后它不再报红，但**变成空转**——断言一个已不可能
+  出现的字符串不存在（同硬规则 4c 的「恒真但什么也没验到」形态），故一并修。
+
+双向对照（都在本 worktree 实跑，非推断）：
+
+```
+A 常量 10 → 3（其余不动）        ⇒ serve-dashboard.test.mjs AC1/AC2 红（fail 2）
+                                  ⇒ 值 10 确实被钉住，不是恒真
+B 常量留 10、标题字面量写死 3     ⇒ 两个兄弟测试红（fail 2）
+                                  ⇒ 派生断言可假，不是空转
+```
+
+作用域门（`scripts/test.sh --for-task <本任务> --allow-thin`）结果与 scoped-gate 缓存写入记录见本轮
+提交与 `.quay/scoped-gate-cache.json`；**AC4 的「全量」这一半由 driver 机械 fan-in 的套件运行判定**
+（worker 不自己跑全量套件）。
+
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/serve-dashboard.test.mjs
+- packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
+- packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs
 - tasks/gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10.md
