@@ -309,3 +309,12 @@ criterion 逐字跑 **exit 0**。⛔ 唯一由夹具驱动的是【负控制】�
 - 成因类：unclassified
 - 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
 - run_id：wk-prod-1789367589
+
+## Needs-Human
+
+**执行 2026-09-14T13:47:40.479Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 4 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
+- run_id：wk-prod-1789367589
