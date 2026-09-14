@@ -1,7 +1,7 @@
 ---
 id: gap-closure-lag-driver-runtime-promotion-hardcoded-wallclock-margin
 title: 三个测试文件的硬编码墙钟余量在负载下击穿（closure-lag-check / driver-runtime / promotion-driver）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -182,6 +182,45 @@ PY
 
 判据能取假：若这三个文件在下一次 fan-in 里**又**因墙钟余量红，上面命令输出 `FAIL` 并列出该文件
 的 `durationMs` ⇒ 说明本次修法是**回归**，本任务应 `quay retreat` 而非当作已修好。
+
+### 阻断记录（2026-09-14 worker 轮 · 第二次 `exited-not-landed`：suite 恒红**非本 delta**，已确证）
+
+本轮 fan-in 的 `step=suite` 唯一红点**不在本任务 Touches 内**（是另一个已单独立案的文件）：
+
+```
+✖ AC3a' @ plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs:190
+  AssertionError: 配置路径必须落在 quay 安装树下（⛔ 非 workspace root）
+```
+
+**两向对照（一条命令，差别只在环境）** —— worktree 内、同一文件、同一命令：
+
+| 环境 | 读数 |
+|---|---|
+| `QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin` | `tests 6 / pass 5 / fail 1` ⇒ `✖ AC3a'` @ `:190` |
+| `env -u QUAY_PLUGIN_ROOT`（同一命令） | `tests 6 / pass 6 / fail 0` ⇒ `✔ AC3a'` |
+
+**「与本次改动无关」的三条独立读数**：① 该文件在本分支与 develop 上**逐字节相同**
+（`git diff develop HEAD -- <该文件>` 为空）；② 机械 delta-relatedness 判 `UNRELATED`
+（不在 Touches/diff，direct import 不相交）；③ 生产载体 `.quay/verification-round.jsonl` 里
+该文件 r1686 及此前**每一轮** `passed=true`，r1688（06:40Z，driver 重启后）起 `passed=false`，
+且跨 ≥2 个**互不相关**的任务（r1688 abi-task-list / r1689 fan-in-ts-typecheck / r1690 本任务 /
+r1691 ac256 / r1693 ac179）。
+
+**触发量（直接量，⛔ 非其自述）**：`tr '\0' '\n' < /proc/<live worker-driver pid>/environ | grep QUAY_PLUGIN_ROOT`
+⇒ `/home/yale/work/quay/plugin`（主检出）；而 `plugin/scripts/suite-driver.ts:176` 以
+`env: { ...process.env, … }` spawn 全量 suite ⇒ 该键被继承进**每一个** worktree 套件。
+
+⇒ 已有专属任务在办且已 `needs-human`：`gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env`
+（AC1/AC2 已勾，AC3「生产读数」待外部）。**本条不重复立案、不改该文件** —— 它在 Touches 之外，
+改了会自招 anti-drift 常设红；且修法（a 环境面 / b 测试面）的选定权在该任务体里明示属 owning layer。
+
+**本任务自身状态（本轮所做的事）**：实现提交 `2665cbf1d` 仍在分支上，AC 1–5 全勾；
+`git merge develop` 干净（本轮并入的 17 个 develop 提交**全部是 `tasks/*.md` 写入，零代码改动**）；
+scoped 门（本任务 Touches 选择集）在合并后的 tip 上 **exit 0 / 零 `✖`**。
+scoped-gate 缓存按**门实际合并的 tip（`HEAD^2`）**写入 —— ⛔ 不用「写缓存那一刻的 `develop`」：
+develop 在本次门运行期间又前进了（`a4086a1b → dd68bcde`），用后者会造出一次**假命中**
+（我第一版正是这么写的，已当场改写为 `HEAD^2`；同 memory `scoped-gate-cache-sha-must-be-the-tip-you-gated`）。
+⇒ 本任务只差 fan-in 全量 suite 这一步，而它被上述**环境**恒红挡住（与本次改动无关）。
 
 ## Touches
 
