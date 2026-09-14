@@ -2,7 +2,7 @@
 id: gap-dist-closure-missing-driver-anchor-js
 title: 打包 dist entry 集对 driver-anchor 的动态路径引用盲 → dist/driver-anchor.js 不进
   tarball，任何第三方安装的 driver 自 2026-09-13 起结构上起不来
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
