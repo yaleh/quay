@@ -60,3 +60,5 @@ release(); await p;                               // 冷构建装盘
 - `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs`
 - `packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs`
+- `tasks/gap-dashboard-snapshot-rebuild-returns-inflight-cold-build.md`
+- `packages/quay/test/gap-dashboard-snapshot-rebuild-dedup-resolution.test.mjs`
