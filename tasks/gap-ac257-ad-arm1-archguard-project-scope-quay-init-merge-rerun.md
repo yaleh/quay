@@ -2,8 +2,8 @@
 id: gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun
 title: ad-arm1/archguard 真机重验：project scope 装 0.7.0 + quay-init 重跑（非空
   settings.json 合并语义）+ 真实 todo→done（GOAL-018/AC-257）
-status: ready
-needs_human_cause: human-adjudication
+status: todo
+needs_human_cause: unclassified
 labels:
   - gap
   - delivery-critical
@@ -377,3 +377,12 @@ C 红控制：backdate 改 91 分钟（时长事实错） stdout "… 91.0 min �
 - session_id：d4b5291f-ac8d-4361-a63d-d2da925035c0
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun~wk-prod-1789367589~1789379993178-4b51a8.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun-wk-prod-1789367589.log
+
+## Needs-Human
+
+**执行 2026-09-14T11:18:10.828Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun still present
+- run_id：wk-prod-1789367589
