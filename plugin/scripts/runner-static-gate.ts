@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 59 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 60 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -890,6 +890,20 @@ run_static_checks() {
   # run_checker entries — declared≠measured ⇒ exit 1; annotation/function unreadable ⇒ exit 3
   # (NOT-EVALUATED, never silently PASS; 硬规则 3b).
   run_checker "checker-count-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checker-count-drift-check.ts" --root "${repo_root}"
+  echo "== gate-event-coverage-check — 每日「落地 ⇒ complete GateEvent」覆盖率（PRODUCTION carrier） =="
+  # @static-tier change
+  # @static-object plugin/scripts/gate-event-coverage-check.ts plugin/scripts/checker-mutation-cases/gate-event-coverage-check.sh plugin/test/gate-event-coverage-check.test.mjs plugin/workflows/fan-in-execute.js plugin/scripts/worker-driver.ts
+  # --root main_root + --days 1: BOTH are load-bearing, not defaults (gap-complete-gateevent-coverage-
+  # has-a-residual-gap AC4).
+  #   --root main_root —— 载体 <root>/.quay/gate-events.jsonl 是 MAIN-checkout 的 gitignored 运行时状态，
+  #     一次性 verify worktree 里**不存在**。指向 repo_root 会让它在每个 worktree 轮里恒定 exit 3
+  #     NOT-EVALUATED —— 那正是上面 direct-to-develop-bypass-check 注释点名的缺陷类：「一个永远
+  #     NOT-EVALUATED 的检查器与一个恒绿的检查器在记录上同形」（硬规则 3b/9）。指向 main_root ⇒ 读到
+  #     的是生产那一份，判据**能取假**。
+  #   --days 1 —— AC4 的字面读法是**当日**覆盖率。窗口 3 天会把某一天的漏记变成持续 3 天的红、挡住
+  #     无关任务的 fan-in（本仓已记过这类「成本落在无关任务头上」的缺陷）；1 天把影响面限制在次日。
+  #   无载体 / 零落地 ⇒ exit 3（run_checker 认第三态，不 fail-closed 不 abort 套件）。
+  run_checker "gate-event-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gate-event-coverage-check.ts" --root "${main_root}" --days 1 --gate
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
