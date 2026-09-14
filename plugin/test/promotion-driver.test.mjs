@@ -634,10 +634,11 @@ test("gap-fix-worker-spawn-timeout-persists-post-fix AC4 — failure record carr
   const root = makeRoot("ac4-diag");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // 非零退出（失败）：argv 逐字、durationMs 有限、exitCode 落盘。
-  // 超时用生产默认值（FIX_WORKER_TIMEOUT_MS = 180s），⛔ 不再传硬字面 5000：本断言要测的是
-  // 「非零退出被记录」，而 5000ms 是「模块加载后 spawn 一个 node 必须 <5s」的墙钟余量——并发
-  // 负载下本文件耗时 222s（隔离 70s，实测 2026-09-13）⇒ 子进程起不来、exitCode 变成 null，
-  // 余量被负载击穿。默认值有 ~1000x 余量，与相邻 runFixPass 测试（也断言 timedOut===false）一致。
+  // 超时用生产默认值（FIX_WORKER_TIMEOUT_MS，gap-fix-worker-timeout-budget-inherited-from-mechanical-round
+  // 后为 600s），⛔ 不再传硬字面 5000：本断言要测的是「非零退出被记录」，而 5000ms 是「模块加载后
+  // spawn 一个 node 必须 <5s」的墙钟余量——并发负载下本文件耗时 222s（隔离 70s，实测 2026-09-13）
+  // ⇒ 子进程起不来、exitCode 变成 null，余量被负载击穿。默认值余量更大，与相邻 runFixPass 测试
+  // （也断言 timedOut===false）一致。
   const argv = ["node", "-e", "process.stderr.write('boom');process.exit(3)"];
   const r = spawnFixWorker(argv, root, FIX_WORKER_TIMEOUT_MS);
   assert.equal(r.timedOut, false, `a fast exit must NOT be reported as a timeout (timeoutMs=${FIX_WORKER_TIMEOUT_MS})`);
