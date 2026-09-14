@@ -2,7 +2,7 @@
 id: gap-ac241-frozen-bare-failure-exits-have-no-owner
 title: AC-241 台账回归（第 5 次）：判据的【真值】有 owner（frozen-violated）而【归因】没有 —— 30
   条存量裸失败出口被棘轮基线豁免、写门只管出生，任一条被轮转到并失败就写出不可归因 fail
-status: todo
+status: ready
 labels:
   - gap
   - defect
