@@ -1,7 +1,8 @@
 ---
 id: gap-cost-per-defect-caught-verification-marginal-return
 title: 算每拦下一个缺陷的验证成本——给 ADR-005「验证是绑定约束」一个数（ready-pool-check 独占 97.8%）
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - analysis
@@ -62,3 +63,15 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 含可复跑锚点（命令行 + 日期 + develop tip SHA + 去重口径定义）。
 若结论显示某些检查器是纯税，**本任务只报数不删检查器**——删除要另行立案并经人裁定，
 避免用一个口径敏感的数去砍掉一道闸。
+
+## Needs-Human
+
+**执行 2026-09-14T21:46:12.406Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 5
+- run_id：wk-prod-1789367589
+- session_id：c527bfa3-2b79-40a6-8a04-1d0db6860362
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-cost-per-defect-caught-verification-marginal-return~wk-prod-1789367589~1789422155572-ef28b1.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-cost-per-defect-caught-verification-marginal-return-wk-prod-1789367589.log
