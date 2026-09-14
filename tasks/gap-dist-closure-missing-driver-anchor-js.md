@@ -11,6 +11,7 @@ parent: null
 children: []
 extra:
   schema: finding
+goal_ac: AC-202
 ---
 ## Finding
 
@@ -38,6 +39,18 @@ WORKER_RC=1
 **影响面**：不是 AC-239 测试专属问题——它意味着**任何**通过 npm-pack 通道（`packages/quay/scripts/package.sh` 产出的 tarball，`npm install -g` / `quay-init` 路径）安装 quay 的第三方项目，跑 `quay driver start` 时**任意 kind 都会 rc=1**。这是自 2026-09-13 晚间以来对每一个全新第三方部署的一次性阻断——drivers 这一核心能力在生产上跑不起来。
 
 **查重（机制维度，⛔ 非关键词）**：已 grep `driver-anchor` / `dist-closure` 全库，同类缺陷 CLASS 已有 3 条 `done` 修复（`gap-delivery-laydown-dist-closure-gap`、`gap-driver-kinds-table-literal-not-in-dist-entry`、`gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs`），但均不覆盖 `driver-anchor.ts`/`.js` 这个具体文件；`task_list(search: "driver-anchor module not found")` 仅命中引用任务本身（该任务明确声明此缺陷不在其 Touches 范围、需另立任务）。无重复。
+
+## Goal Backing
+
+`goal_ac: AC-202`（GOAL-009「凡被 spawn 的机件必进交付物——把闭包闸扩到 DRIVER_KINDS 这类数据表字面量引用」，status: achieved）。
+
+**为什么是这条 AC**：AC-202 立的就是本条要修的那条不变量——**每一个被 spawn 的机件都必须在交付物的 entry 集里**——而且它的 criterion 逐字枚举了三种引用形状（`driver: "X.ts"` 数据表字段、`path.join(...,"plugin","scripts","X.ts")` spawn 形式、`resolveKernelSibling("X.ts")`）。本条的引用形状（**运行期拼接的动态路径**，形如 `path.join(here, "driver-anchor.ts")`）正是该枚举覆盖不到的第四种 ⇒ 同一条保证在同一份代码上又一次以「未被枚举的引用形态」复发（硬规则 5b：修好一个形状不等于该类只存在于那一处）。这正是本条挂在 AC-202 下、而不是另立一条新 goal AC 的理由：它的**领域已被 AC-202 覆盖**，缺的是枚举的完备性；另立一条会把「同一条不变量的第四次复发」伪装成一条新保证。
+
+⛔ **不引 AC-201**（`现 build 产物完整且可溯源——产物记录锚在 develop 祖先 commit + tgz sha256`）：那条管的是 build 产物的**可溯源**（`build_sha`/`tgz_sha256` 记录存在），不是**闭包完整性**，与本条机制不同域。
+
+⛔ **不引 AC-239**（`升级后闭环：driver 在已升级的旧痕迹项目上继续驱动出新任务到 done`）：AC-239 是本缺陷的**下游消费者**——它的 e2e 正是被这条阻断的那半边（见本条 Finding 的「时间界限」），不是本任务所修机制所处的域；把它当 goal 背书会把「机制修复」与「升级 e2e 验收」混为一谈。
+
+_（本键由 `gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved` 的 worker 在合并 develop 时按 `precommit-guard.ts` 判定 ③ 的指引补齐；同一条修复也是 `gap-ac190-write-face-rule-unreachable-under-no-verify` 的 AC3。）_
 
 ## Plan
 
