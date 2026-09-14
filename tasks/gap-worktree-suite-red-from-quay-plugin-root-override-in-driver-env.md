@@ -2,7 +2,7 @@
 id: gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env
 title: worktree 全量套件结构性恒红 —— driver 环境带的 `QUAY_PLUGIN_ROOT` 覆盖指针 +
   一条把【断言者所在树】当【kernel 安装树】的断言（loop 自 2026-09-14T06:40Z 起零落地）
-status: needs-human
+status: ready
 needs_human_cause: unclassified
 labels:
   - gap
