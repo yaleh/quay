@@ -2,7 +2,7 @@
 id: gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger
 title: AC-214 第四次转红（升级面 AC-238/239 202/200，margin −2；同一对主体 24h 内第二次）：关闭动作 =
   重跑升级面产出者；并把「刷新动作」机械化——主体↔产出者映射的完备性判定 + 由 margin 载体派生的 routine 触发
-status: needs-human
+status: todo
 labels:
   - gap
   - delivery-critical
@@ -12,6 +12,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-214
+depends_on:
+  - gap-dist-closure-missing-driver-anchor-js
 ---
 ## Proposal
 
