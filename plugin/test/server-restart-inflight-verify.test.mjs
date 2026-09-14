@@ -38,7 +38,7 @@ import {
   INFLIGHT_SOURCE,
   REQUIRED_RECORD_FIELDS,
   RESTARTED_SERVICE,
-  WORKER_DRIVER_MARKER,
+  WORKER_DRIVER_MARKERS,
   aliveAmong,
   aliveNonZombie,
   buildRecord,
@@ -403,6 +403,25 @@ test("AC-256 — parsePidFile / cmdlineIsWorkerDriver are total (a junk carrier 
   assert.deepEqual(parsePidFile(null), []);
   assert.deepEqual(parsePidFile("not-a-pid 12x"), []);
   assert.equal(cmdlineIsWorkerDriver(2147483646), false, "an absent process is not the worker driver");
-  assert.equal(WORKER_DRIVER_MARKER, "worker-driver.ts", "the marker is derived from the kernel registry");
+  assert.equal(WORKER_DRIVER_MARKERS[0], "worker-driver.ts", "the primary marker is derived from the kernel registry");
+  assert.equal(WORKER_DRIVER_MARKERS[1], "worker-driver.js", "the shipped/bundled form is derived from the SAME registry stem (⛔ no second literal)");
   assert.equal(procCmdline(2147483646), null, "an absent process has no cmdline (null, ⛔ never an empty string that reads as «matched nothing»)");
+});
+
+test("AC-256 — the worker-driver identity probe accepts BOTH entry forms and still excludes the supervisor", (t) => {
+  // 实测形态（2026-09-14，生产 root /home/yale/work/quay）：生产跑的是**出厂 bundle**，不是源树 .ts。
+  // 只认 `.ts` 的探针因此对每一个真实生产驱动**恒假** —— 而「恒假」与「驱动没在跑」同形（硬规则 4b），
+  // 生产者会在正确的 pid 上拒绝动手。本用例把两个形态都钉住，同时证明它仍能把驱动与 supervisor 分开
+  // （supervisor 的 cmdline 带 kind 词 `worker` 但 ⛔ 不带驱动入口名 ⇒ 放宽到裸 `worker` 就会误认）。
+  const dir = makeProc({
+    700: { state: "S", cmdline: ["node", "/repo/plugin/scripts/dist/worker-driver.js", "--root", "/ws", "--pid-file", "/ws/.quay/worker-driver-inflight.pid", "--run-id", "wk-prod-1"] },
+    701: { state: "S", cmdline: ["node", "--experimental-strip-types", "/repo/plugin/scripts/worker-driver.ts", "--root", "/ws"] },
+    702: { state: "S", cmdline: ["node", "--experimental-strip-types", "/repo/plugin/scripts/dist/driver-runtime.js", "__supervise", "--kind", "worker", "--root", "/ws"] },
+    703: { state: "S", cmdline: ["node", "/repo/plugin/scripts/dist/promotion-driver.js", "--root", "/ws"] },
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(cmdlineIsWorkerDriver(700, dir), true, "the SHIPPED/bundled form (dist/worker-driver.js) IS the worker driver — this is the form production runs");
+  assert.equal(cmdlineIsWorkerDriver(701, dir), true, "the source-tree form (worker-driver.ts) IS the worker driver");
+  assert.equal(cmdlineIsWorkerDriver(702, dir), false, "the SUPERVISOR runs driver-runtime.js — it must never be mistaken for the driver it supervises");
+  assert.equal(cmdlineIsWorkerDriver(703, dir), false, "another kind's driver is not this kind's driver");
 });

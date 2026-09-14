@@ -97,10 +97,26 @@ const SERVER_STATE_REL = ".quay/server.json";
  *  认出「这个 kind 的 pid 其实是 anchor 的 pid」——⛔ 不读它就会 SIGTERM 一个承载六个 kind 的进程。 */
 const ANCHOR_STATE_REL = ".quay/anchor.json";
 const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
-/** The marker that identifies the worker-driver process in a cmdline — derived from the kernel
+/** The markers that identify the worker-driver process in a cmdline — derived from the kernel
  *  registry (`DRIVER_KINDS.worker.driver`), ⛔ not typed out (a new driver filename must not silently
- *  turn this probe into a constant-false reader). */
-export const WORKER_DRIVER_MARKER: string = DRIVER_KINDS.worker.driver;
+ *  turn this probe into a constant-false reader).
+ *
+ *  ⚠️ TWO forms, and the second is the one PRODUCTION runs: a source tree spawns the raw
+ *  `worker-driver.ts` (`node --experimental-strip-types …`), while a shipped/installed tree DELETES
+ *  the raw .ts and spawns the bundled `dist/worker-driver.js`. Matching only the registry's `.ts`
+ *  filename made this probe **constant-false against every real production driver** — measured
+ *  2026-09-14 on `/home/yale/work/quay`, whose live driver cmdline is
+ *  `node …/plugin/scripts/dist/worker-driver.js --root …`: the producer refused with "refusing to
+ *  act on an unrelated process" while the process was in fact exactly the right one (硬规则 4b's
+ *  constant-false shape: a reader that can never say yes is indistinguishable from "not running").
+ *  The `.js` form is derived from the SAME registry stem — ⛔ no second literal.
+ *  Not widened into a bare `worker` match on purpose: the supervisor's own cmdline
+ *  (`driver-runtime.js __supervise --kind worker …`) carries the kind word but ⛔ NOT this stem, so
+ *  the probe still tells the driver apart from its supervisor (verified against both live pids). */
+export const WORKER_DRIVER_MARKERS: readonly string[] = (() => {
+  const stem = DRIVER_KINDS.worker.driver.replace(/\.tsx?$/, "");
+  return [`${stem}.ts`, `${stem}.js`];
+})();
 /** The worker kind's round carrier, derived the same way (⛔ 不硬编码). */
 export const WORKER_ROUND_CARRIER: string | null = roundCarrierName(DRIVER_KINDS.worker.carriers);
 
@@ -177,10 +193,11 @@ export function parsePidFile(text: string | null): number[] {
   return [...out].sort((a, b) => a - b);
 }
 
-/** `pid` 是否【就是】本 kind 的驱动进程（cmdline 命中注册表里的驱动文件名）。 */
+/** `pid` 是否【就是】本 kind 的驱动进程（cmdline 命中注册表里的驱动入口名，源树 `.ts` 与出厂
+ *  bundle `.js` 两个形态都认 —— 见 WORKER_DRIVER_MARKERS 的实测记录）。 */
 export function cmdlineIsWorkerDriver(pid: number, procDir = "/proc"): boolean {
   const cmd = procCmdline(pid, procDir);
-  return cmd !== null && cmd.includes(WORKER_DRIVER_MARKER);
+  return cmd !== null && WORKER_DRIVER_MARKERS.some((m) => cmd.includes(m));
 }
 
 export interface InflightReading {
@@ -613,7 +630,7 @@ async function main(argv: string[]): Promise<number> {
     out(json, {
       ac: AC_ID,
       verdict: "NOT-EVALUATED",
-      reason: `the pid in ${driverPidFile} (${driverPidBefore}) is alive but its cmdline does not identify it as ${WORKER_DRIVER_MARKER} (cmdline: ${JSON.stringify(procCmdline(driverPidBefore))}) — refusing to act on an unrelated process`,
+      reason: `the pid in ${driverPidFile} (${driverPidBefore}) is alive but its cmdline does not identify it as any of ${JSON.stringify(WORKER_DRIVER_MARKERS)} (cmdline: ${JSON.stringify(procCmdline(driverPidBefore))}) — refusing to act on an unrelated process`,
       record_written: false,
       ...derivation,
     });
