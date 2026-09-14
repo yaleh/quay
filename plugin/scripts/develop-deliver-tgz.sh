@@ -195,6 +195,7 @@ verify_ac258=0    # 1 = GOAL-018-AC-258: user-scope delete-key re-registration +
 ac258_root=""     # --target-root (shared with AC-257/248/249, recorded separately): the REAL project the AC-258 record names
 ac258_task=""     # --ac258-task-id: the REAL task in the target project that this run drives to done
 ac258_task_body="" # --ac258-task-body: LOCAL path to that task's body file (shipped to the host, ⛔ not hand-typed there)
+ac258_poll_secs="" # --ac258-poll-secs: how long the remote step may poll for the task to reach done (⛔ the verify script's default is 3600s; a real driven todo→done needs its own budget)
 adr_flip_task=""  # --task-id: the task IN THAT PROJECT whose driven-out fix the record is about
 verify_complete_change=0 # 1 = GOAL-016-AC-249: read the SAME task's commit_files UNION (code side AND ADR-007 doc side) and transport only its AC-249 record
 selfcheck_evidence=0
@@ -235,6 +236,7 @@ while [ $# -gt 0 ]; do
     --verify-ac258) verify_ac258=1; shift ;;
     --ac258-task-id) ac258_task="$2"; shift 2 ;;
     --ac258-task-body) ac258_task_body="$2"; shift 2 ;;
+    --ac258-poll-secs) ac258_poll_secs="$2"; shift 2 ;;
     --verify-complete-change) verify_complete_change=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
@@ -2402,6 +2404,7 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --ac258-prefix "\${PREFIX}" \
   --ac258-task-id "${ac258_task}" \
   --ac258-task-body "\${HOME}/ac258-task-body.md" \
+  --ac258-poll-secs "${ac258_poll_secs:-2700}" \
   --ac258-host-fqdn "${host_target[$hk]}" \
   --build-sha "${develop_tip}" \
   --ac89 "\${EV}"
