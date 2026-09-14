@@ -329,6 +329,8 @@ export const RECONCILE_INTERVAL_SECS_DEFAULT = defaultDriverConfig().worker.reco
  * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记 + 落地判定 + transcript session_id）。
  * @returns {object} { ts, task, selector_reason, exit_code, signal, wall_clock_ms, final_state,
  *   failure_reason, started_at, ended_at, worker_pid, run_id, in_flight_count, timed_out, session_id }
+ *   ＋ 快速死亡时追加 `quick_death_cause`（"transient-external" | "ordinary" | "unclassifiable"；
+ *   非快速死亡 ⇒ 缺键。见下方发射点注释）。
  */
 export function computeOutcome({
   task,
@@ -425,6 +427,15 @@ export function computeOutcome({
     //   outside the lock). Absent (缺键) when the suite didn't take the lock or no record matches the runId.
     ...(lockWaitMs !== null && lockWaitMs !== undefined ? { lock_wait_ms: lockWaitMs } : {}),
     ...(lockHoldMs !== null && lockHoldMs !== undefined ? { lock_hold_ms: lockHoldMs } : {}),
+    // 快速死亡成因（gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human
+    // AC5）：踩生产载体 .quay/worker-outcome.jsonl 的字段——含 "session limit" 的记录取值为
+    // "transient-external"。⛔ 只在【本记录是快速死亡】时发射（缺键 = 不适用，硬规则 6：缺值 ≠ 某个取值；
+    // hard rule 3b：completed/exited-not-landed 不得落成某个成因取值）。⛔ 此处按机制缺省 quickDeathMs
+    // 判定；driver 的 --quick-death-ms 覆盖只影响退避决策，不回溯改写已落盘记录——记录同带 final_state
+    // + wall_clock_ms，自定义阈值下的读者可自行复算（差异在此注明，⛔ 不静默）。
+    ...(isQuickDeath(finalState, endedAtMs - startedAtMs)
+      ? { quick_death_cause: classifyQuickDeathCause(selectorReason) }
+      : {}),
   };
 }
 
@@ -2455,6 +2466,86 @@ export function isQuickDeath(
   return QUICK_DEATH_FINAL_STATES.has(finalState) && wallClockMs < cfg.quickDeathMs;
 }
 
+// ── 快速死亡【成因】分类（gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human）
+// 根因：上面的快速死亡退避把【一切】<quickDeathMs 的非零退出计入同一个桶（QUICK_DEATH_FINAL_STATES），
+//   连续 ≥backoffMaxRetries 次即标 needs-human 终态。但账号级限流在【性质上不同】：瞬时的、外部的、
+//   自愈的，且错误文本自带失效时刻。它被计入同一个桶 ⇒ 任务被永久停摆（终态不自愈），而真相是「等一会儿」。
+// 实测（2026-09-13，第三方项目 quay-fleet，第一手载体 .quay/worker-outcome.jsonl）：连续三条记录的
+//   selector_reason 逐字相同——`selector worker returned no valid pick (exit 1, got "You've hit your
+//   session limit · resets 11:30am (UTC)"); fallback to first shuffled candidate`，对应 wall_clock_ms =
+//   4643 / 7685 / 5106（三次都 <60s ⇒ 三次都计入上限）⇒ 任务 fleet-agent-sessions-screen-endpoint 被机械
+//   翻 needs-human，成因类记成 human-adjudication（"需要人裁决"，而真相是"等 17 分钟"）。
+// ⛔ 关键点：driver 【已经握着能区分的证据】——限流原文完整落在 selector_reason 字段里并落了盘。
+//   不是"看不出来"，是"看出来了但不分类"。
+// 判据来源（⛔ 不新增探测面、⛔ 不做语义判断）：只用 driver 已捕获的 selector_reason 文本做【字面子串】
+//   匹配（硬规则 2 按位置判定；硬规则 3 枚举不布尔；硬规则 3b 三个取值两两不同形）。
+// 负控制（也解释它为何一直没被发现）：quay 自己的 .quay/worker-outcome.jsonl 实测 1889 条记录、含
+//   "session limit" 的 0 条——quay 的 worker 经 ANTHROPIC_DEFAULT_*_MODEL 走别的后端，不消耗 Anthropic
+//   账号额度 ⇒ 本缺陷只在 worker 使用 Anthropic 账号的第三方项目上暴露，本仓库的生产数据不会自然产生样本。
+
+/** 快速死亡成因（可枚举三态，两两不同形）：
+ *   - "transient-external"：已捕获的文本命中【账号级限流/配额】签名 ⇒ 瞬时、外部、自愈 ⇒
+ *     ⛔ 不计入 backoffMaxRetries 连续计数（否则终态停摆，正是本缺陷），改为退避重试。
+ *   - "ordinary"：文本【读得懂】且不命中 ⇒ 普通快速死亡 ⇒ 沿用既有语义（计入连续计数，到上限转 needs-human）。
+ *   - "unclassifiable"：文本缺失/读不懂（null / 非字符串 / 全空白）⇒ 第三个取值。⛔ 既不与
+ *     "transient-external" 同形（那会把读不懂静默当成自愈、让它无限重派），也不与 "ordinary" 同形
+ *     （那会把读不懂静默当成任务自身缺陷）。判别式上按 ordinary 计（fail-safe 不无限重派），
+ *     但【取值本身】可区分——这正是硬规则 3b：读不懂不得与任一合格态同形。 */
+export type QuickDeathCause = "transient-external" | "ordinary" | "unclassifiable";
+
+/** 账号级限流/配额签名（【字面子串】，大小写归一后匹配；⛔ 无语义判断、⛔ 不调模型、⛔ 不新增探测面）。
+ *  以 2026-09-13 quay-fleet 第一手样本 "You've hit your session limit · resets 11:30am (UTC)" 为准，
+ *  并覆盖同族（API 速率限制 / 配额耗尽）的常见字面形态。⛔ 宁窄勿宽：每多一条签名，就多一条它能取假
+ *  的反例要举（本条的反例 = "worker exited with code 1" 不命中）。 */
+const TRANSIENT_EXTERNAL_SIGNATURES: readonly string[] = [
+  "session limit", // 实测：You've hit your session limit · resets 11:30am (UTC)
+  "rate limit",
+  "rate_limit",
+  "usage limit",
+  "quota exceeded",
+  "exceeded your current quota",
+  "too many requests",
+];
+
+/** 快速死亡成因分类（纯函数）。只对 driver 已捕获的文本做字面子串匹配（硬规则 2 按位置判定）。
+ *  输入读不懂（null / 非字符串 / 全空白）⇒ "unclassifiable"（⛔ 不与任一合格态同形，硬规则 3b）。
+ *  ⛔ 本函数不读文件、不看进程、不调模型——它只回答「这条已捕获文本说的是哪一类成因」。 */
+export function classifyQuickDeathCause(selectorReason: string | null | undefined): QuickDeathCause {
+  if (typeof selectorReason !== "string" || selectorReason.trim().length === 0) return "unclassifiable";
+  const lower = selectorReason.toLowerCase();
+  for (const sig of TRANSIENT_EXTERNAL_SIGNATURES) {
+    if (lower.includes(sig)) return "transient-external";
+  }
+  return "ordinary";
+}
+
+/** 从已捕获文本里解析账号限流的【重置时刻】（UTC）——错误文本自带，⛔ 不猜、⛔ 不新增探测面。
+ *  支持 `resets 11:30am (UTC)` / `resets 3pm (UTC)` / `resets 11:30 (UTC)`（24h）。返回 epoch ms：
+ *  当天该 UTC 时刻；【已过 ⇒ 次日同时刻】（日额度重置语义，⛔ 不回退到"立刻重试"）。
+ *  解析不出 ⇒ null（硬规则 6：缺值 = 未查，⛔ 不伪造成某个时刻）——调用方据此【回落指数退避】，
+ *  ⛔ 不得静默当成"立刻重试"，也 ⛔ 不得静默当成 needs-human。 */
+export function parseRateLimitResetAtMs(text: string | null | undefined, nowMs: number): number | null {
+  if (typeof text !== "string" || text.length === 0) return null;
+  const m = /\bresets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(utc\)/i.exec(text);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = m[2] != null ? Number(m[2]) : 0;
+  const meridiem = m[3] ? m[3].toLowerCase() : null;
+  if (!Number.isInteger(hour) || minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (meridiem === "pm" ? 12 : 0);
+  } else if (hour > 23) {
+    return null;
+  }
+  const now = new Date(nowMs);
+  let at = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute, 0, 0);
+  // 已过（含恰在此刻）⇒ 次日同时刻。⛔ 不返回一个已过去的时刻（那会让 isBackedOff 立刻为假 =
+  // 静默退化成"立刻重试"，正是 plan item 3 禁的那一种）。
+  if (at <= nowMs) at += 24 * 60 * 60 * 1000;
+  return at;
+}
+
 /** 指数退避等待：baseBackoffMs * 2^(consecutive - backoffThreshold)，封顶 maxBackoffMs（⛔ 不无限增长）。 */
 export function backoffDelayMs(
   consecutive: number,
@@ -2466,15 +2557,19 @@ export function backoffDelayMs(
 
 /** 快速死亡退避状态（按 task 记，⛔ 不全局）。跨轮存活于常驻循环内（⛔ 不落盘，与 RetryState 同寿命）。 */
 export interface QuickDeathBackoffState {
-  /** task id → 连续快速死亡次数。 */
+  /** task id → 连续【普通】快速死亡次数（计入 backoffMaxRetries 上限）。 */
   counts: Map<string, number>;
+  /** task id → 连续【transient-external】快速死亡次数。⛔ 与 counts 【分开】记——混在一个 Map 里会让
+   *  一段限流把计数顶到上限，随后一次普通快速死亡立刻误触 needs-human（成因维度丢失）。本计数只用来
+   *  驱动「解析不出重置时刻」时的指数退避回落增长。 */
+  transientCounts: Map<string, number>;
   /** task id → 退避到此时刻（epoch ms）。now < until 期间不重派该 task。 */
   backoffUntil: Map<string, number>;
 }
 
 /** 新建一个退避状态。 */
 export function newQuickDeathBackoffState(): QuickDeathBackoffState {
-  return { counts: new Map(), backoffUntil: new Map() };
+  return { counts: new Map(), transientCounts: new Map(), backoffUntil: new Map() };
 }
 
 /** 该 task 此刻是否在退避中（backoffUntil 未到）。 */
@@ -2492,7 +2587,19 @@ export function isBackedOff(state: QuickDeathBackoffState, taskId: string, nowMs
  *  liveness（可选）：孤儿 finalize 的 /proc 存活实测取值，语义同 isQuickDeath。实测为
  *  "unknown"/"alive" 时**不动状态**（既不 +1 也不复位）：unknown 对计数是零信息，既不该算一次死亡
  *  （那会烧预算），也不该打断一次**已测量**的连续死亡序列（那会让交错注入 unknown 洗白真实streak）。
- *  ⛔ 与「非快速死亡 ⇒ 复位」那条分支刻意不同形——硬规则 3：第三个取值不得与前两者任一同形。 */
+ *  ⛔ 与「非快速死亡 ⇒ 复位」那条分支刻意不同形——硬规则 3：第三个取值不得与前两者任一同形。
+ *  成因分流（gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human）：
+ *    selectorReason 判为 "transient-external" ⇒ ⛔ 【不计入】state.counts（因此 ⛔ 永不 newlyNeedsHuman，
+ *    终态不自愈正是本缺陷），改记 state.transientCounts 并设 backoffUntil = 文本自带的重置时刻
+ *    （解析不出 ⇒ 回落指数退避，⛔ 不是"立刻重试"）。连续计数【不动】：既不 +1（那不是任务自身缺陷），
+ *    也不复位（那会让交错注入的限流洗白普通连续序列）——与 liveness === "unknown" 分支同族，
+ *    硬规则 3b 的第三个取值形态。
+ *    selectorReason 判为 "unclassifiable" ⇒ 取值如实为 "unclassifiable"（读者可区分），判别式上按普通
+ *    快速死亡计（fail-safe：读不懂不无限重派）。
+ *    liveness === "unknown"/"alive" 或 非快速死亡 ⇒ 两个连续计数一并复位（「连续」断链）。
+ *  @returns { quickDeath, backedOff, newlyNeedsHuman, cause, backoffUntil }
+ *    cause：本次的成因取值（非快速死亡 / 未评估 ⇒ null，缺值 ≠ 某个取值，硬规则 6）。
+ *    backoffUntil：本次实际设下的退避时刻（未退避 ⇒ null），供调用方/载体观测。 */
 export function recordQuickDeathBackoff(
   state: QuickDeathBackoffState,
   taskId: string,
@@ -2502,24 +2609,46 @@ export function recordQuickDeathBackoff(
   backoffMaxRetries: number,
   cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
   liveness: OrphanPidLiveness | null | undefined = undefined,
-): { quickDeath: boolean; backedOff: boolean; newlyNeedsHuman: boolean } {
+  selectorReason: string | null | undefined = undefined,
+): {
+  quickDeath: boolean;
+  backedOff: boolean;
+  newlyNeedsHuman: boolean;
+  cause: QuickDeathCause | null;
+  backoffUntil: number | null;
+} {
   if (liveness === "unknown" || liveness === "alive") {
-    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null };
   }
   if (!isQuickDeath(finalState, wallClockMs, cfg, liveness)) {
     state.counts.delete(taskId);
+    state.transientCounts.delete(taskId);
     state.backoffUntil.delete(taskId);
-    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null };
   }
+  const cause = classifyQuickDeathCause(selectorReason);
+  if (cause === "transient-external") {
+    // 瞬时外部（账号级限流/配额）：⛔ 不进 state.counts ⇒ ⛔ 永不 newlyNeedsHuman（终态不自愈正是本缺陷）。
+    // state.counts 也【不复位】——「连续普通快速死亡」序列不被限流打断，也不被限流洗白（同 unknown 分支）。
+    const tn = (state.transientCounts.get(taskId) ?? 0) + 1;
+    state.transientCounts.set(taskId, tn);
+    // 退避时刻优先取错误文本自带的重置时刻（已知 ⇒ 不必猜）；解析不出 ⇒ 回落指数退避（⛔ 不是"立刻重试"）。
+    const until = parseRateLimitResetAtMs(selectorReason, nowMs) ?? nowMs + backoffDelayMs(tn, cfg);
+    const backedOff = tn >= cfg.backoffThreshold;
+    if (backedOff) state.backoffUntil.set(taskId, until);
+    return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: backedOff ? until : null };
+  }
+  // ordinary / unclassifiable 共用既有判别式（fail-safe：读不懂不无限重派），但 cause 取值如实可区分。
   const n = (state.counts.get(taskId) ?? 0) + 1;
   state.counts.set(taskId, n);
   if (n >= backoffMaxRetries) {
     state.backoffUntil.delete(taskId);
-    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true };
+    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true, cause, backoffUntil: null };
   }
   const backedOff = n >= cfg.backoffThreshold;
-  if (backedOff) state.backoffUntil.set(taskId, nowMs + backoffDelayMs(n, cfg));
-  return { quickDeath: true, backedOff, newlyNeedsHuman: false };
+  const until = backedOff ? nowMs + backoffDelayMs(n, cfg) : null;
+  if (until != null) state.backoffUntil.set(taskId, until);
+  return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: until };
 }
 
 /** 解析 --quick-death-ms <ms>（快速死亡墙钟阈值）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
@@ -5007,17 +5136,32 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
     // 孤儿 finalize 的 outcome 带 orphan_pid_liveness（/proc 实测取值）时一并传：⛔ 没测出来的死亡
     // 不烧重试预算（AC4）。普通 worker 终态无该字段 ⇒ undefined ⇒ 行为不变。
+    // 成因分类（gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human）：
+    // 把 driver 【已捕获】的 selector_reason 交给纯分类器（⛔ 不新增探测面、⛔ 无语义判断）。
+    // transient-external（账号级限流/配额）⇒ 内部不计入连续上限、只退避 ⇒ 下面的 newlyNeedsHuman
+    // 分支对它永不成立（任务不再被终态停摆）；转而按错误文本自带的重置时刻退避重试。
     const backoff = recordQuickDeathBackoff(
       backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
       (r.outcome as { orphan_pid_liveness?: OrphanPidLiveness | null }).orphan_pid_liveness ?? undefined,
+      (r.outcome as { selector_reason?: string | null }).selector_reason ?? null,
     );
     if (backoff.newlyNeedsHuman) {
       retryState.needsHuman.add(r.taskId);
-      markNeedsHuman(rootDir, r.taskId, `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）`);
+      // 成因类写进注记（plan item 4「成因类必须让读者一眼区分」）：⛔ 不再让 quick-death 路径的成因
+      // 与 human-adjudication 同形——markNeedsHuman 对【无 exited-not-landed 尝试】的翻转默认落
+      // human-adjudication，而这里如实带上本条分类器的取值（ordinary / unclassifiable；transient-external
+      // 结构上到不了这里）。⛔ transient-external 不自动回捞（终态由人/上层裁决），此处只保证
+      // 「若真落了终态，成因可区分」。
+      markNeedsHuman(
+        rootDir,
+        r.taskId,
+        `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）` +
+          `；成因类：${backoff.cause ?? "unclassifiable"}（快速死亡成因分类器取值，⛔ 非 human-adjudication 模板）`,
+      );
     }
     if (backoff.quickDeath && json) {
       process.stdout.write(
-        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, consecutive_quick_deaths: backoffState.counts.get(r.taskId), backed_off: backoff.backedOff, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, cause: backoff.cause, consecutive_quick_deaths: backoffState.counts.get(r.taskId), consecutive_transient_deaths: backoffState.transientCounts.get(r.taskId), backed_off: backoff.backedOff, backoff_until: backoff.backoffUntil, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
       );
     }
     return r;
