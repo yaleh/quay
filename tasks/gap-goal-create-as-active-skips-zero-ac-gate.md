@@ -100,6 +100,17 @@ create（新记录）时 `prevStatus === undefined`（`:1987` 由文件是否存
 
 **改动面（硬规则 5b）** — 以「goal 创建动词 + 同语句内 `status: active`」的结构化扫描覆盖 `packages/quay/test`、`plugin/test`、`packages/quay-native`、`scripts`、`plugin/scripts`、`packages/quay/src`：共 6 个测试文件 + 1 个脚本需按新语义处置，全部已改并各自跑绿（首轮单行 grep 漏掉 2 处——对象字面量跨行 ⇒ 靠结构化扫描才现形）。⛔ 生产路径（`goal-driver.ts` / `meta-driver.ts`）无一处把 GOAL 写成 active（已核）。
 
+**DoD-4 追补（2026-09-14 本轮 worker；⛔ 不修改上面那条历史读数，只追加）** — 本轮 worker **直接跑了全量** `bash scripts/test.sh`（worktree，合并 develop 前，HEAD `b15338f02`）：**651/651 文件 `passed=true`，0 fail**；其中包含上一轮 fan-in 报红的那一个文件 `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs` ⇒ `passed=true`。
+
+- ⇒ 上一轮 `step=suite: AssertionError [ERR_ASSERTION]: empty state shown`（该文件 `:210`，判词逐字）**不是本任务 delta 造成的**：该文件不在本任务 Touches/diff 内（delta-relatedness 判 UNRELATED），且本轮以**确定性复现**定位了它的真实成因——`packages/quay/src/serve-dashboard.ts:1670` 的 `rebuild()` 在启动冷构建仍 in-flight 时**返回那趟冷构建**（其 `client.goalList()` 早在 `:1612` 就发出 ⇒ 装盘的是改动【前】的数据）。复现用仓库公开测试钩子 `setDashboardSnapshotStepHook` 按住冷构建 → 删 fixtures → `await rebuildNow()` → `GET /dashboard` ⇒ 无「暂无 active GOAL」；**同一脚本指向未改动的主检出（其 `serve-dashboard.ts`/`serve.ts`/`goal-store.ts` 与 develop 逐字相同）同样失败**（负控制）⇒ 该形态与任何 delta 无关，在 develop 的代码上就存在。
+- ⇒ 已另立 `gap-dashboard-snapshot-rebuild-returns-inflight-cold-build`（finding 形，4 条 AC，含上面的确定性复现步骤）。
+- **scoped 门（合并 develop 后重跑）**：`bash scripts/test.sh --for-task gap-goal-create-as-active-skips-zero-ac-gate --allow-thin` ⇒ **234 tests / 233 pass / 0 fail**，exit 0；已写 scoped-gate 缓存（developSha `3b7ffe2e…`）。上面历史读数里的 `186/186` 是 develop 前进前的选择集，⛔ 不是矛盾读数（两条都是绿的）。
+- ⚠️ 本轮另实测到一处**既存 develop 侧红**（⛔ 非本任务、非本 delta）：0.6.3 版本 bump（`92c5b1b15`，12:46:56Z）后闭包棘轮未重锚 ⇒ **每一个 scoped 门**都在 `quay-init-closure-ratchet-stale` 上红（主检出一字不差同样红，已核）；13:24:15Z 由 `fcd24b0f7`（`chore(ratchet): re-anchor … after the 0.6.3 version bump`）修复，本任务合并该提交后通过。该红的归属由 `gap-dist-plugin-missing-node-modules-task-schema-yaml` 的 Touches 逐字认领（`docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor：v0.6.3 bump 漏重锚造成的既存 stale 红）`）⇒ 本任务 ⛔ 未重锚（不在本任务 Touches，且与在飞任务撞同一文件）。
+
+**AC1–AC4 本轮逐条重跑读数（⛔ 与上面各条同结论，非新增主张）**：AC1 **6/6 绿**；AC2 出生 active ⇒ **exit 2**（stderr 含 `ACs naming GOAL-998: 0`）／`--status draft` ⇒ **exit 0**；AC3 双方向：改回 create 放行 ⇒ AC2 `exit 0` + AC1 **1 fail / 5 pass**，恢复 ⇒ AC2 `exit 2` + AC1 **6/6**；AC4 判据原文：基线 **exit 0** → 注入零 AC 的 active GOAL **exit 1**（`active GOAL(s) with zero ACs: GOAL-999`）→ 移除 **exit 0**。
+
+**⑥ 控制说明修正（commit `1622d9ebc`；⛔ 断言未改）** — 原注释称 ⑥ 的 fixture 是「一条【空的】criterion」，而 argv 传的是**合法** criterion；本轮实测空 criterion 在 create 路径上由 **create 完整性契约**拒绝（exit 2，另一道闸）⇒ 该注释描述的控制并不存在（硬规则 3b 的「看起来覆盖了的选项」形态）。断言本身有效：它钉的是 `goalActivating && isGoalRecord` 的**记录种类守卫**；**负控制实测**：摘掉该守卫 ⇒ ⑥ 红（1 fail / 0 pass，其余 5 条不受影响）。只改注释文字，行为与判据均未变。
+
 ## Needs-Human
 
 **执行 2026-09-14T10:50:47.175Z — 连续修满重试上限仍不合格（标 needs-human）**
