@@ -3785,15 +3785,32 @@ step_ac258_user_scope() {
   local install_home="$home"
   echo "  host=$AC258_HOST (source=$AC258_HOST_SOURCE) project_root=$root plugin_root=$plugin_root home=$install_home"
 
-  # ── (0) quay_version：从【安装物】读（⛔ 不自报）；前缀由它派生（缺省 $HOME/.local/opt/quay/<ver>）──
-  AC258_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
-  if [ -z "$AC258_QUAY_VERSION" ]; then
-    echo "  AC258-NOT-EVALUATED: 从 $plugin_root/vendor/quay/package.json 读不出版本 ⇒ 记录 NOT written" >&2
+  # ── (0) 持久前缀 ────────────────────────────────────────────────────────────────────────
+  # ⚠️ 顺序（实测 2026-09-14 真机第三跑踩到）：**版本号读自【安装物】，而安装发生在 (c)** ⇒ 此处
+  # 只能先用**交付物自己携带的版本**（tgz 名 `quay-<ver>.tgz` —— 交付模式派生前缀用的正是同一个
+  # 来源）来定前缀；装完再在 (c2) 从安装物复读一次并要求两者一致。原实现在 (0) 就去读
+  # `<prefix>/lib/node_modules/quay/plugin/vendor/quay/package.json` —— 那一刻它按定义还不存在（那是
+  # 本步骤即将创建的东西）⇒ 模式在门口 NOT-EVALUATED，而失败形态是「记录没写出来」，与「机制坏了」
+  # 同形（硬规则 3b）。同一类错误的第一个实例是 CLI 候选（见 (c) 的注释）。
+  prefix="${prefix_arg:-}"
+  if [ -z "$prefix" ]; then
+    local tgz_base tgz_ver=""
+    tgz_base="$(basename "$tgz" 2>/dev/null || true)"
+    tgz_ver="${tgz_base#quay-}"; tgz_ver="${tgz_ver%.tgz}"
+    if [ -z "$tgz_ver" ] || [ "$tgz_ver" = "$tgz_base" ]; then
+      echo "  AC258-NOT-EVALUATED: 既无 --ac258-prefix，又无法从交付物名 '$tgz_base' 派出版本 ⇒ 记录 NOT written" >&2
+      return 1
+    fi
+    prefix="$home/.local/opt/quay/$tgz_ver"
+  fi
+  local want_dir="$prefix/lib/node_modules/quay/plugin"
+  # 前缀自身的形状闸：criterion 的排除模式（verify-|probe|/tmp/）就核对在这条路径上，所以【在建任何
+  # 东西之前】先判一次 —— 一个探测形态的前缀不该先把交付物装进去再被发现不合格。
+  if ac257_is_probe_path "$prefix"; then
+    echo "  AC258-NOT-EVALUATED: --ac258-prefix '$prefix' 命中探测模式（verify-|probe|/tmp/）⇒ 记录 NOT written" >&2
     return 1
   fi
-  prefix="${prefix_arg:-$home/.local/opt/quay/$AC258_QUAY_VERSION}"
-  local want_dir="$prefix/lib/node_modules/quay/plugin"
-  echo "  [⑩a] installed quay_version=$AC258_QUAY_VERSION persistent prefix=$prefix (⛔ 不是 verify-/probe-/tmp- 形态)"
+  echo "  [⑩a] persistent prefix=$prefix (⛔ 不是 verify-/probe-/tmp- 形态)"
 
   # ── (a) 删前形态：三处枚举（硬规则 5b：⛔ 不只删一处，因此也不只读一处）────────────────────
   [ -f "$settings" ] || {
@@ -3879,6 +3896,21 @@ step_ac258_user_scope() {
   fi
   qrl="$qrl_now"
   echo "          delivery CLI resolved AFTER install: $qrl"
+
+  # ── (c2) quay_version：从【安装物】读（⛔ 不自报），并与交付前缀里那一段版本交叉核对 ─────────────
+  # 为什么是两条而不是一条：只读安装物 ⇒ 无法区分「装的是本次交付物」与「前缀里躺着别的版本」
+  # （前缀是持久的，上一次的残留会一直满足「读出版本」）。前缀名里的版本来自 tgz 名，安装物里的版本
+  # 来自它自己的 package.json —— 两者相等才说明「本次交付物确实装进了这个前缀」。
+  AC258_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
+  if [ -z "$AC258_QUAY_VERSION" ]; then
+    echo "  AC258-NOT-EVALUATED: 装完后仍从 $plugin_root/vendor/quay/package.json 读不出版本 ⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  case "$prefix" in
+    */"$AC258_QUAY_VERSION") ;;
+    *) echo "  AC258-NOT-EVALUATED: 安装物版本($AC258_QUAY_VERSION)与交付前缀($prefix)不一致 ⇒ 记录 NOT written" >&2; return 1 ;;
+  esac
+  echo "  [⑩c2] installed quay_version=$AC258_QUAY_VERSION (read from the installed artifact, ⛔ not self-reported; cross-checked against the delivery prefix)"
   # postinstall 必须真跑过（否则「装了但没注册」，与「注册坏了」同形）——按位置读它的输出痕迹。
   local reg_hits=0
   # `grep -c` 在零命中时【既打印 0 又返回 1】⇒ `|| echo 0` 会把读数变成两行（"0\n0"）。用 `|| true`
