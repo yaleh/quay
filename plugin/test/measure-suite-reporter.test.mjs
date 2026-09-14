@@ -224,6 +224,43 @@ test("mem_peak_kb source: the preload reads resourceUsage().maxRSS (the kernel p
   assert.match(code, /memPeakKb|\.mem`/, "the preload must be the writer of the .mem report");
 });
 
+test("AC5 — the LEGACY/LPT emission path emits mem_peak_kb end-to-end (real reporter as --test-reporter over a real test file)", () => {
+  // The other half of AC5's two-paths contract, and the half gap-suite-scheduler-perfile-cpu-emitter-
+  // missing proved gets forgotten: the SCHEDULER path's emitter has its own test (suite-scheduler.test.mjs)
+  // and this is the reporter's. Both are wired the way scripts/test.sh wires them: the reporter is passed
+  // as `--test-reporter`, the route (a) preload seam rides NODE_OPTIONS, and the report dir is
+  // QUAY_PERFILE_CPU_DIR. Asserting merely that the source mentions the field would pass even if the
+  // emitter never ran — this runs it.
+  const dir = mkdtempSync(join(os.tmpdir(), "reporter-mem-"));
+  try {
+    const fx = join(dir, "balloon.test.mjs");
+    writeFileSync(
+      fx,
+      'import { test } from "node:test";\n' +
+        'test("balloon", () => { let b = Buffer.alloc(48 * 1024 * 1024, 1); b.fill(2); b = null; });\n',
+    );
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    childEnv.QUAY_PERFILE_CPU_DIR = join(dir, "cpu");
+    const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
+    const reporter = join(repoRoot, "plugin", "scripts", "measure-suite-reporter.mjs");
+    childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload}`;
+    const r = spawnSync(
+      process.execPath,
+      ["--test", `--test-reporter=${reporter}`, fx],
+      { encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 0, `fixture suite should pass (stderr: ${r.stderr})`);
+    const m = r.stderr.match(/__PERFILE__ duration_ms=[0-9.]+ \S+balloon\.test\.mjs passed=true [^\n]*mem_peak_kb=([0-9]+)/);
+    assert.ok(m, `the legacy/LPT reporter path must emit mem_peak_kb on its __PERFILE__ line (stderr: ${r.stderr})`);
+    assert.ok(Number(m[1]) > 70_000, `the reading must reflect the fixture's real peak; got ${m[1]}KB`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("both __PERFILE__ emission points append mem_peak_kb (reporter legacy path + unified scheduler)", () => {
   // gap-suite-scheduler-perfile-cpu-emitter-missing is the precedent: the __PERFILE__ line has TWO
   // independent emission points, and fixing only one leaves the PRODUCTION default dark. The scheduler
