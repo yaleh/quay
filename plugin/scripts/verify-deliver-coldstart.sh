@@ -300,6 +300,36 @@ AC207_E2E=0                                  # 1 = --ac207-e2e 触发端到端�
 AC207_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-207（见 AC-240 块）
 AC207_WRITTEN_ROOT=""                        # 写出时的 project_root（AC-240 配对判据比它）
 
+# ── AC-257（GOAL-018）：project scope 安装 + 非空 settings.json 的【合并】语义 ────────────────────
+# 判据读载体（host/project_root/install_scope/quay_version/quay_init_rerun/merge_preserved/
+# marketplace_path/provider_path/task_status/commit_sha/produced_by_driver）。本组读数的共同纪律是
+# 硬规则 4b：全部取【外部可核】的直接量 —— quay_version 从安装物的 package.json 读、install_scope 从
+# 目标项目级 .claude/settings.json 的实际形态读、merge_preserved 要【两条同时成立】的读数（见下）。
+AC257_HOST=""                                # 目标宿主 hostname（criterion 要求 = ad-arm1）
+AC257_PROJECT_ROOT=""                        # 被取证项目根（真实项目本体，⛔ 不是隔离副本）
+AC257_INSTALL_SCOPE=""                       # project | user | none | not-evaluated（三态以上，⛔ 不与「没查成」同形）
+AC257_QUAY_VERSION=""                        # 从【安装物】plugin/vendor/quay/package.json 读，⛔ 不从记录自报
+AC257_QUAY_INIT_RERUN=""                     # 1 | 0 | not-evaluated
+AC257_MERGE_PRESERVED="not-evaluated"        # 1 | 0 | not-evaluated（两读数同时成立才 1）
+AC257_MERGE_NOTE=""                          # 1/0/not-evaluated 的理由（非空，可核）
+AC257_MARKETPLACE_PATH=""                    # 项目级 .claude/settings.json 里 quay 的 marketplace 源路径
+AC257_PROVIDER_PATH=""                       # 目标项目 .quay/config.yml 的 providers.native.path
+AC257_TASK_ID=""
+AC257_TASK_STATUS=""
+AC257_COMMIT_SHA=""
+AC257_COMMIT_FILES_JSON=""
+AC257_GATE_EVENTS=-1
+AC257_PRODUCED_BY_DRIVER=0
+AC257_EVALUATED=0                            # 1 = 上述直接量全部读成（缺任一 ⇒ 不写记录）
+AC257_PROJECT_SCOPE=0                        # 1 = --ac257-project-scope 触发本模式（真跑，昂贵）
+AC257_PLUGIN_ROOT_ARG=""                     # --ac257-plugin-root：远端持久插件交付物绝对路径（缺省由脚本位置推出）
+AC257_TASK_ID_ARG=""                         # --ac257-task-id：要驱动的真实缺陷修复任务 id
+AC257_TASK_BODY=""                           # --ac257-task-body：该任务的任务体文件
+AC257_POLL_SECS=""                           # --ac257-poll-secs：done 轮询窗（缺省 3600）
+AC257_HOST_FQDN_ARG=""                       # --ac257-host-fqdn：驱动方用来 ssh 到目标机的全名；host 字段由它派生
+AC257_HOST_SOURCE=""                         # host 字段的来源（fqdn-verified | hostname-fallback），写进日志可核
+AC257_WRITTEN_THIS_RUN=0
+
 # ── AC-238（GOAL-009）：【既有旧痕迹第三方项目】的升级路径（gap-aged-third-party-project-quay-upgrade-verification）
 # 与 ② 的区别是本质的：② 的 $ROOT 是 `rm -rf` 后新建的一次性靶子（全新 quay-init，GOAL-009 已有 9 条 AC
 # 全是这个形态）；本模式的 $ROOT 是一个**已经跑过 quay-native、带真实存量数据与旧版本 vendored runtime**
@@ -551,6 +581,22 @@ while [ $# -gt 0 ]; do
     --ac250-port) AC250_PORT="$2"; shift 2 ;;
     --ac250-window) AC250_WINDOW="$2"; shift 2 ;;
     --ac-record-schema-report) AC_RECORD_SCHEMA_REPORT=1; shift ;;
+    # AC-257（GOAL-018）：project-scope 安装 + quay-init 重跑（合并语义）+ 真实 todo→done。
+    # 与 --target-root 共用被取证项目根；--ac257-task-id/--ac257-task-body 是【要驱动的真实缺陷修复
+    # 任务】的 id 与任务体文件（⛔ 不在脚本里硬编码一个项目专属的缺陷——那是把夹具写成产品）。
+    --ac257-project-scope) AC257_PROJECT_SCOPE=1; shift ;;
+    # --ac257-plugin-root：远端【持久】插件交付物的绝对路径（…/quay/plugin）。缺省由脚本自身位置推出
+    # （本脚本住在 <plugin>/scripts/ 下）；跨机传输模式下脚本被平铺到 $HOME，那条推导会指错 ⇒ 必须显式传。
+    --ac257-plugin-root) AC257_PLUGIN_ROOT_ARG="$2"; shift 2 ;;
+    --ac257-task-id) AC257_TASK_ID_ARG="$2"; shift 2 ;;
+    --ac257-task-body) AC257_TASK_BODY="$2"; shift 2 ;;
+    --ac257-poll-secs) AC257_POLL_SECS="$2"; shift 2 ;;
+    # --ac257-host-fqdn：驱动方【实际用来 ssh 到目标机】的那个全名（如 ad-arm1.wan.hwang.men）。
+    # host 字段=它的第一个 label，且该全名必须【在目标机上解析到目标机自己拥有的地址】才成立
+    # —— 见 ac257_host_from_fqdn 的注释：criterion 要求字面 host="ad-arm1"，而目标机的 `hostname`
+    # 是实例名（实测 instance-20221019-1509）⇒ 唯一忠实的取法是从驱动方的连接名派生【并当场核验
+    # 该名字确实指向这台机器】。缺省不传 ⇒ 回落 hostname（既有行为不变，但那个值不满足本 AC 的判据）。
+    --ac257-host-fqdn) AC257_HOST_FQDN_ARG="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -1748,6 +1794,217 @@ BODY
   else
     echo "  [⑦b] NOTE: AC-239 record NOT written (task not driven to done / no implementation commit / no gate events — 缺值≠合格)" >&2
   fi
+  return 0
+}
+
+# ── AC-257 直接量读取（全部在【目标机】上读，硬规则 4b：外部可核，⛔ 不自报）────────────────────
+# 每个小函数【只做一件事】、读一个外部可核的量、读不出就返回 1（⛔ 不返回一个与「读到了且合格」同形
+# 的值——硬规则 3b）。它们被 step_ac257_project_scope 与 --selfcheck 的 AC257 组同时驱动。
+
+# 从【安装物】读 quay 版本 —— 这是与 quay_version 字段配对的产生处。⛔ 不接受调用方自报一个字符串：
+# 「用自报字符串凑 install_scope 不算」（DoD 逐字），quay_version 同一条纪律。
+# $1 = 安装物 plugin 目录（含 vendor/quay/package.json）。读不出 ⇒ 不打印、返回 1。
+ac257_installed_version() {
+  local plugin_root="$1" pkg="$1/vendor/quay/package.json"
+  [ -f "$pkg" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    try { const v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version;
+          if (typeof v === "string" && v) { process.stdout.write(v + "\n"); process.exit(0); } }
+    catch (e) {}
+    process.exit(1);' "$pkg"
+}
+
+# 读项目级 .claude/settings.json 的形态 → 三态以上（⛔ 不是布尔）：
+#   project   = 该文件存在且其 enabledPlugins 含 `<name>@<marketplace>` 为 true
+#   none      = 文件存在但不含 quay 的键（「查过，没有」）
+#   absent    = 文件不存在（「查过，文件不在」）
+#   not-evaluated = 文件在但读不懂（JSON 坏 / 无读权限）—— 独立取值，⛔ 不与 none 同形
+# 这是 install_scope=project 的【可核形态】锚点（GOAL-018 正文：项目级 .claude/settings.json 的
+# enabledPlugins 键），⛔ 不是 installed_plugins.json 里某个 scope 字符串。
+ac257_settings_scope_state() {
+  local root="$1" name="$2"
+  local f="$root/.claude/settings.json"
+  [ -f "$f" ] || { printf 'absent\n'; return 0; }
+  "$VC_NODE" --no-warnings -e '
+    let fs; try { fs = require("fs"); } catch (e) { process.exit(1); }
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.stdout.write("not-evaluated\n"); process.exit(0); }
+    const ep = (d && typeof d === "object" && d.enabledPlugins && typeof d.enabledPlugins === "object") ? d.enabledPlugins : null;
+    const want = process.argv[2];
+    if (ep && ep[want] === true) { process.stdout.write("project\n"); process.exit(0); }
+    process.stdout.write("none\n");' "$f" "$name" 2>/dev/null || printf 'not-evaluated\n'
+}
+
+# 读 .claude/settings.json 里 quay 的 marketplace 源路径 —— 与 marketplace_path 字段配对的产生处。
+# 优先读【项目级】的 extraKnownMarketplaces；回落到用户级（~/.claude/settings.json）——两者都读不到
+# ⇒ 不打印、返回 1（缺值≠合格）。⛔ 不从别处推。
+ac257_marketplace_path() {
+  local root="$1" name="$2" home="${HOME:-}"
+  local candidates=("$root/.claude/settings.json")
+  [ -n "$home" ] && candidates+=("$home/.claude/settings.json")
+  # ⚠️ argv 下标：`node -e '<script>' A B C` 的 process.argv 是 `[node, A, B, C]` —— **没有 script 那
+  # 一项**（`-e` 不给 argv[1] 留位置）。原实现按「有 script 路径」的下标写（名字取 argv[2]、文件取
+  # slice(3)），于是它把**第一个文件路径当成 marketplace 名字**、并且**一个文件都没遍历** ⇒ 恒返回空、
+  # rc 1。它在生产上表现为「marketplace_path 为空 ⇒ 整个 AC-257 NOT-EVALUATED」，与「目标项目确实没
+  # 登记 marketplace」同形（硬规则 3b）。⇒ 名字取 argv[1]、文件取 slice(2)。
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    const name = process.argv[1];
+    for (const f of process.argv.slice(2)) {
+      let d; try { d = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { continue; }
+      const mk = (d && d.extraKnownMarketplaces) ? d.extraKnownMarketplaces[name] : null;
+      const src = mk && mk.source ? mk.source : null;
+      const p = src && src.path ? String(src.path) : "";
+      if (p) { process.stdout.write(p + "\n"); process.exit(0); }
+    }
+    process.exit(1);' "$name" "${candidates[@]}" 2>/dev/null
+}
+
+# 读目标项目 .quay/config.yml 的 providers.native.path —— 与 provider_path 字段配对的产生处。
+# ⛔ 刻意【不】引入 yaml 依赖（远端不保证有 PyYAML）；要解的形态是闭集（`native:` 块下的 `path:`），
+# 解错即空串 ⇒ 调用方 fail-closed（同 config_native_mcp_entry 的分工）。
+ac257_provider_path() {
+  local root="$1"
+  [ -f "$root/.quay/config.yml" ] || return 1
+  awk '
+    /^  native:/ { in_native = 1; next }
+    in_native && /^  [A-Za-z_]/ { in_native = 0 }
+    in_native && /^[ \t]+path:[ \t]*/ { sub(/^[ \t]+path:[ \t]*/, ""); gsub(/^["'"'"']|["'"'"']$/, ""); print; exit }
+  ' "$root/.quay/config.yml" 2>/dev/null | { read -r v; [ -n "$v" ] && printf '%s\n' "$v"; }
+}
+
+# 探测模式字面（criterion 侧逐字 forbids）：`verify-` / `probe` / `/tmp/`。
+# 返回 0 = 命中（不合格）；1 = 未命中。⛔ 与「读不出」不同形 —— 空串单独由调用方按缺值处理。
+ac257_is_probe_path() {
+  case "$1" in
+    *verify-*|*probe*|*/tmp/*) return 0 ;;
+  esac
+  return 1
+}
+
+# ── host 字段的取法（criterion 逐字要求 host="ad-arm1"）─────────────────────────────────────
+# 为什么不是 `hostname`：目标机的 `hostname` 是【实例名】（ad-arm1 实测 instance-20221019-1509），
+# 与本 AC 要求的字面 `ad-arm1` 不同形；而目标机上【没有任何直接量】能读回 `ad-arm1`（实测：
+# /etc/hosts 无该名、`getent hosts <自身各地址>` 一律返回实例名、IPv4/IPv6 的 PTR 也都返回实例名）。
+# ⇒ 唯一忠实的取法是：从【驱动方实际用来 ssh 到目标机的那个全名】派生第一个 label，并【当场核验
+# 该全名确实指向这台机器】——核验方式是「该名字在【目标机上】解析出的地址里，至少有一个属于目标机
+# 自己拥有的地址集」。核验不过 ⇒ 读不出 ⇒ 调用方 NOT-EVALUATED（⛔ 不回落成一个「看起来也行」的值：
+# 那正是硬规则 3b 的形态）。这条判据能取假：在一台【不是】ad-arm1 的机器上跑，那个全名不会解析到
+# 它 ⇒ 拒写。
+ac257_owned_addrs() {
+  hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^[[:space:]]*$/d'
+}
+# 默认解析器（getent 优先走 NSS、dig 兜底）。AC257_RESOLVE_CMD 是【测试接缝】（同 VC_NODE 的性质）：
+# --selfcheck 用它注入确定的解析读数，⛔ 产品路径不设它。
+ac257_resolve_default() {
+  local fqdn="$1"
+  getent hosts "$fqdn" 2>/dev/null | awk '{print $1}'
+  dig +short A "$fqdn" 2>/dev/null
+  dig +short AAAA "$fqdn" 2>/dev/null
+}
+# $1 = fqdn；$2 = 拥有的地址集（缺省 hostname -I；--selfcheck 用它做注入）。
+# 成功 ⇒ 打印第一个 label 且返回 0；任一步读不出/核验不过 ⇒ 不打印、返回 1。
+ac257_host_from_fqdn() {
+  local fqdn="$1" owned="${2:-}" addrs="" ip hit=0
+  [ -n "$fqdn" ] || return 1
+  [ -n "$owned" ] || owned="$(ac257_owned_addrs)"
+  [ -n "$owned" ] || return 1
+  if [ -n "${AC257_RESOLVE_CMD:-}" ]; then
+    # 接缝是一个【命令字符串】，用 bash -c 执行（⛔ 不是 "$AC257_RESOLVE_CMD" "$fqdn"——变量展开
+    # 不做去引号，带引号的写法会把引号当字面量、静默变成 command-not-found ⇒ 空读数 ⇒ 正例假红）。
+    addrs="$(AC257_SEAM_FQDN="$fqdn" bash -c "$AC257_RESOLVE_CMD" 2>/dev/null)"
+  else
+    addrs="$(ac257_resolve_default "$fqdn")"
+  fi
+  [ -n "$addrs" ] || return 1
+  while IFS= read -r ip; do
+    [ -n "$ip" ] || continue
+    if printf '%s\n' "$owned" | grep -qxF "$ip"; then hit=1; break; fi
+  done <<EOF
+$addrs
+EOF
+  [ "$hit" = "1" ] || return 1
+  printf '%s\n' "${fqdn%%.*}"
+}
+
+# ── 交付物 CLI 入口的解析（⛔ 不硬编码 `bin/quay`）──────────────────────────────────────────
+# 实测 2026-09-14：npm 装出来的 quay 包【没有 bin/ 目录】—— `package.json` 的 bin 是
+# `{"quay":"./dist/quay.js"}`，npm 只在 <prefix>/bin/quay 放一个软链。原实现把 CLI 写死成
+# `<plugin>/../bin/quay`，于是 --ac257-project-scope 在【门口】就 NOT-EVALUATED（记录不落盘），
+# 而失败形态与「机制坏了」同形（硬规则 3b）。⇒ 从安装物自己的 package.json 的 bin 字段解析，
+# ⛔ 不猜第二份真源。读不出 ⇒ 不打印、返回 1（调用方保留旧候选并由存在性检查 fail-closed）。
+ac257_delivery_cli() {
+  local plugin_root="$1" pkg="$1/../package.json" rel="" dir=""
+  [ -f "$pkg" ] || return 1
+  rel="$("$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const b = d && d.bin;
+    let v = "";
+    if (typeof b === "string") { v = b; }
+    else if (b && typeof b === "object") { v = b[Object.keys(b)[0]] || ""; }
+    if (typeof v === "string" && v) { process.stdout.write(v + "\n"); process.exit(0); }
+    process.exit(1);' "$pkg" 2>/dev/null)" || true
+  [ -n "$rel" ] || return 1
+  dir="$(cd "$(dirname "$pkg")" 2>/dev/null && pwd)" || return 1
+  [ -n "$dir" ] || return 1
+  printf '%s\n' "$dir/${rel#./}"
+}
+
+# ── AC-257 记录写（fail-closed）───────────────────────────────────────────────────────────
+# 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 不出现 `build_sha` 字面量（多一个补锚点 = 下次改锚格式必漏一处）。
+# 11 个字段逐字满足 criterion 的过滤谓词。⛔ 缺任一条 ⇒ return 1、一条都不写 —— 包括「读不出就写
+# false/空串」这个形态：它会把「没查成」伪装成「查过且不合格」，比不写更贵（硬规则 3b）。
+# ⚠️ merge_preserved 的**语义**（两条读数同时成立）在调用方判定并作为一个参数传进来；本函数只做
+# 「取值为 true 才写」的写入期闸 —— 值的产生处与写入期闸分工，同 AC_RECORD_SCHEMA 头注释的分工。
+write_ac257_record() {
+  local host="$1" project_root="$2" install_scope="$3" quay_version="$4" quay_init_rerun="$5" \
+        merge_preserved="$6" marketplace_path="$7" provider_path="$8" task_status="$9" \
+        commit_sha="${10}" produced_by_driver="${11}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ "$install_scope" = "project" ] || return 1
+  [ -n "$quay_version" ] || return 1
+  [ "$quay_init_rerun" = "true" ] || return 1
+  [ "$merge_preserved" = "true" ] || return 1
+  [ -n "$marketplace_path" ] || return 1
+  [ -n "$provider_path" ] || return 1
+  ac257_is_probe_path "$marketplace_path" && return 1
+  ac257_is_probe_path "$provider_path" && return 1
+  [ "$task_status" = "done" ] || return 1
+  [ -n "$commit_sha" ] || return 1
+  [ "$produced_by_driver" = "true" ] || return 1
+  ac_record_append ",\"ac\":\"GOAL-018-AC-257\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver"
+}
+
+# 读 AC-257 的四个外部可核直接量（task_status / commit_sha / commit_files / gate_events）并复制进
+# AC257_* —— 复用 ac207_select_implementation_commit / ac207_is_bookkeeping_commit / ac207_commit_files
+# 判定手法（Plan 6 逐字要求⛔ 不复刻第二份实现）。produced_by_driver 的最强可得直接量 = 「提交出自
+# driver 建的任务 worktree ∧ gate 事件齐全」（同 AC-207 正文；该半判据属人裁定口证，不冒充测量）。
+probe_ac257_measures() {
+  local root="$1" task_id="$2" qrl="$3" status_json="" gate_log=""
+  status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  AC257_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
+  ' 2>/dev/null)"
+  AC257_COMMIT_SHA="$(ac207_select_implementation_commit "$root" || true)"
+  if [ -n "$AC257_COMMIT_SHA" ]; then
+    local -a _ac257_files=()
+    while IFS= read -r _f; do [ -n "$_f" ] && _ac257_files+=("$_f"); done <<EOF
+$(ac207_commit_files "$root" "$AC257_COMMIT_SHA" || true)
+EOF
+    AC257_COMMIT_FILES_JSON="$(ac207_files_to_json "${_ac257_files[@]}")"
+  fi
+  gate_log="$root/.quay/gate-events.jsonl"
+  if [ -f "$gate_log" ]; then
+    AC257_GATE_EVENTS="$(grep -c . "$gate_log" 2>/dev/null || echo 0)"
+  fi
+  # produced_by_driver：提交存在于 driver 建的任务 worktree 的历史里 ∧ gate 事件 > 0。
+  if [ -n "$AC257_COMMIT_SHA" ] && [ "${AC257_GATE_EVENTS:-0}" -gt 0 ] 2>/dev/null; then
+    AC257_PRODUCED_BY_DRIVER=1
+  fi
+  [ -n "$AC257_TASK_STATUS" ] && [ -n "$AC257_COMMIT_SHA" ] && [ "${AC257_GATE_EVENTS:--1}" -gt 0 ] 2>/dev/null \
+    && AC257_EVALUATED=1
   return 0
 }
 
@@ -2985,6 +3242,269 @@ MP_SETTINGS_PATH=""     # 实际断言读的 settings.json 路径（$HOME/.claud
 MP_ENTRY_PATH=""        # 读回的 extraKnownMarketplaces.quay.source.path（实测值）
 MP_SETTINGS_OK=0        # 1 = marketplace 断言全部成立（源已注册 且 无 enabledPlugins 外溢）
 MP_ENABLED_LEAK=0       # 1 = enabledPlugins 出现用户级 quay 键（AC-161 违反，能取假）
+
+# ── ⑨ AC-257 project-scope 安装 + quay-init 重跑（合并语义）+ 真实 todo→done（GOAL-018）──────────
+# 独立模式（--ac257-project-scope，昂贵，opt-in）。在【目标机】上跑，四件事各留一个外部可核读数：
+#   (a) 把目标项目的 .claude/settings.json 恢复到它【committed 的】内容（若被先前安装改脏）——
+#       这一步是夹具的「重置」，⛔ 不是判据的一部分：AC-257 要测的是「quay-init 在一个**非空、
+#       非 quay 写的** settings.json 上做【合并】」，所以基线必须是项目自己那份。恢复动作留痕。
+#   (b) 读【重跑前】的 hooks.Stop 逐字 + enabledPlugins 是否已含 quay 键。
+#   (c) 用交付物的 quay-init --force 重跑（该路径走 json.load + setdefault 合并）。
+#   (d) 读【重跑后】同样两件 ⇒ merge_preserved 的两条读数同时成立才为 true。
+#   (e) 项目级 marketplace/plugin 安装（--scope project）+ 用交付物 CLI 真列一次任务。
+#   (f) 真实任务驱动 todo→done，读四个外部可核量（复用 ac207_* 判定手法）⇒ 经 choke point 写记录。
+# 判据（⛔ 不是「本步骤跑完了」）：上述读数全部取成 **且** merge_preserved 的两条同时成立 **且**
+# 记录写入成功。任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 非 0。
+step_ac257_project_scope() {
+  local root="$1" plugin_root="$2" qrl="$3" task_id="$4" bodyfile="$5"
+  local settings="$root/.claude/settings.json" settings_rel=".claude/settings.json"
+  # host 字段（见 ac257_host_from_fqdn 头注释：criterion 要字面 ad-arm1，而目标机 hostname 是实例名）。
+  # 两条路径【可区分】：fqdn-verified（驱动方给了连接名且当场核验通过）| hostname-fallback（没给连接名）。
+  # ⛔ fallback 不是「也能过」——它写出的实例名不满足本 AC 的判据，故在下面显式打印出来。
+  if [ -n "$AC257_HOST_FQDN_ARG" ]; then
+    AC257_HOST="$(ac257_host_from_fqdn "$AC257_HOST_FQDN_ARG" 2>/dev/null || true)"
+    AC257_HOST_SOURCE="fqdn-verified"
+    if [ -z "$AC257_HOST" ]; then
+      echo "  AC257-NOT-EVALUATED: --ac257-host-fqdn '$AC257_HOST_FQDN_ARG' 在本机解析不出【本机拥有的】地址 ⇒ host 读不出（⛔ 不回落 hostname）⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  else
+    AC257_HOST="$(hostname 2>/dev/null || echo '')"
+    AC257_HOST_SOURCE="hostname-fallback"
+  fi
+  AC257_PROJECT_ROOT="$root"
+  local rc_pre_scope rc_reset rc_rerun rc_ms rc_inst
+  local before_stop="" after_stop="" before_keys="" after_keys="" before_ep="" after_ep=""
+  local reset_state="as-is"
+
+  echo "== ⑨ AC-257 project-scope + quay-init rerun (merge semantics) + real todo→done =="
+  echo "  host=$AC257_HOST (source=$AC257_HOST_SOURCE) project_root=$root plugin_root=$plugin_root"
+
+  # ── quay_version：从【安装物】读（⛔ 不自报）──────────────────────────────────────────
+  AC257_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
+  if [ -z "$AC257_QUAY_VERSION" ]; then
+    echo "  AC257-NOT-EVALUATED: 从 $plugin_root/vendor/quay/package.json 读不出版本 ⇒ 记录 NOT written (fail-closed: 缺值≠合格)" >&2
+    return 1
+  fi
+  echo "  [⑨a] installed quay_version=$AC257_QUAY_VERSION (read from the installed artifact, ⛔ not self-reported)"
+
+  # ── (a) 基线：把 settings.json 恢复到【quay 的 enabledPlugins 键进入它之前】的那一版 ──────────
+  # ⛔ 不能用「从 git 重置到 HEAD」：本实验自己会把合并结果 auto-commit 进 HEAD（实测 2026-09-14：
+  # run4 在 archguard 留下 `chore(quay-init): initialize quay project files`，其 .claude/settings.json
+  # 已含 "quay@quay"）⇒ 跑第二次时 HEAD 已经是【quay 写的】了，本步骤要求的「非空、非 quay 写的
+  # settings.json」这个前提【被上一次运行自己吃掉】⇒ 实验不可重复，第二次必然 NOT-EVALUATED，
+  # 而失败形态与「合并语义坏了」同形（硬规则 3b）。
+  # 取法（项目无关，⛔ 不硬编码 archguard）：`git log -S'"quay@quay"'` 找【最早】把该键写进这个文件的
+  # 提交，取它的【父提交】那一版 —— 那一版按定义就是「含本项目自己的内容、但不含 quay 写的键」。
+  # 取不到 ⇒ 不写、留给 (b) 的闸判（enabledPlugins 已含 quay ⇒ NOT-EVALUATED），⛔ 不退回 HEAD。
+  if git -C "$root" ls-files --error-unmatch "$settings_rel" >/dev/null 2>&1; then
+    local _qint=""
+    _qint="$(git -C "$root" log --format=%H -S'"quay@quay"' -- "$settings_rel" 2>/dev/null | tail -1)"
+    if [ -n "$_qint" ] && git -C "$root" cat-file -e "${_qint}^:${settings_rel}" 2>/dev/null; then
+      if git -C "$root" show "${_qint}^:${settings_rel}" > "$settings" 2>/dev/null; then
+        reset_state="reset-to-pre-quay-version(${_qint:0:8}^)"
+      fi
+    else
+      reset_state="no-pre-quay-version-tracked"
+    fi
+  else
+    reset_state="untracked"
+  fi
+  echo "  [⑨b] settings baseline: $reset_state (AC-257 要的是一个【非空、非 quay 写的】settings.json —— tracked 项目从它自己 committed 的那份起算)"
+  [ -f "$settings" ] || {
+    echo "  AC257-NOT-EVALUATED: 目标项目没有 .claude/settings.json ⇒ 合并语义无对象 ⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  }
+
+  # ── (b) 重跑前读数 ───────────────────────────────────────────────────────────────────
+  before_stop="$(ac257_settings_stop_segment "$settings" 2>/dev/null || true)"
+  before_ep="$(ac257_settings_enabled_plugins "$settings" 2>/dev/null || true)"
+  [ -n "$before_stop" ] || {
+    echo "  AC257-NOT-EVALUATED: 重跑前读不出 hooks.Stop 段（settings.json 读不懂）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  if printf '%s' "$before_ep" | grep -q '"quay@quay"[[:space:]]*:[[:space:]]*true'; then
+    AC257_MERGE_PRESERVED="not-evaluated"
+    AC257_MERGE_NOTE="重跑前 enabledPlugins 已含 quay 键 ⇒ 读数②平凡成立（结构上不可能取假，硬规则 4）⇒ merge_preserved 记 not-evaluated，⛔ 不与 true 同形"
+    echo "  AC257-MERGE-NOT-EVALUATED: $AC257_MERGE_NOTE" >&2
+    return 1
+  fi
+  echo "  [⑨c] BEFORE hooks.Stop md5=$(printf '%s' "$before_stop" | md5sum | cut -c1-12) ; enabledPlugins=$before_ep"
+
+  # ── (c) quay-init --force 重跑（合并路径）────────────────────────────────────────────
+  # ⚠️ `--auto-commit-confirm`【不是】为了好看：quay-init 的铺设面里 `.quay/config.yml` /
+  # `.quay/profiles.yml` / `.claude/settings.json` / `.claude/launch.settings.json` / `.gitignore`
+  # 在任何真实项目里都是 **tracked** 的（archguard 实测 6 个 tracked 修改）。用 `--auto-commit-skip`
+  # 会让这些修改留在工作树 ⇒ 目标项目的主检出变脏 ⇒ **该项目的机械 fan-in 的 `ff` 会被
+  # `cleanTreeCheck` 拒**（实测 2026-09-14：`ff: exit 2 — working tree not clean in
+  # /home/yale/work/archguard`，而 fan-in 的其余每一步都已通过）。即：本步骤若不把 quay-init 的铺设
+  # 【提交掉】，它自己就会把被取证项目推入「任何任务都落不了地」的状态——那是本 AC 的产出破坏本 AC
+  # 的产出。quay-init 的 auto-commit 只暂存它自己的闭集（`CLOSED_SET_ITEMS`），⛔ 不碰别的改动。
+  set +e
+  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm) >/dev/null 2>&1
+  rc_rerun=$?
+  set -e
+  # 铺设后主检出必须重新是干净的（这是「不把被取证项目弄脏」的当场读数，⛔ 不靠事后发现）。
+  AC257_TREE_DIRTY_AFTER_INIT="$(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  echo "  [⑨d0] working tree after quay-init: ${AC257_TREE_DIRTY_AFTER_INIT} entry(ies) (expect 0 — 否则该项目的 fan-in ff 会被 cleanTreeCheck 拒)"
+  AC257_QUAY_INIT_RERUN="$([ "$rc_rerun" = "0" ] && echo true || echo false)"
+  echo "  [⑨d] quay-init --force rc=$rc_rerun (rerun=$AC257_QUAY_INIT_RERUN)"
+
+  # ── (d) 重跑后读数 ⇒ merge_preserved 的两条读数 ───────────────────────────────────────
+  after_stop="$(ac257_settings_stop_segment "$settings" 2>/dev/null || true)"
+  after_ep="$(ac257_settings_enabled_plugins "$settings" 2>/dev/null || true)"
+  local stop_same=0 ep_gained=0
+  [ -n "$after_stop" ] && [ "$before_stop" = "$after_stop" ] && stop_same=1
+  printf '%s' "$after_ep" | grep -q '"quay@quay"[[:space:]]*:[[:space:]]*true' && ep_gained=1
+  echo "  [⑨e] AFTER hooks.Stop md5=$(printf '%s' "$after_stop" | md5sum | cut -c1-12) verbatim-preserved=$stop_same ; enabledPlugins=$after_ep gained-quay-key=$ep_gained"
+  if [ "$stop_same" = "1" ] && [ "$ep_gained" = "1" ]; then
+    AC257_MERGE_PRESERVED="true"
+    AC257_MERGE_NOTE="①hooks.Stop 逐字保留 ∧ ②enabledPlugins 出现 quay@quay=true（两读数同时成立）"
+  else
+    AC257_MERGE_PRESERVED="0"
+    AC257_MERGE_NOTE="①hooks.Stop 逐字相同=$stop_same ∧ ②enabledPlugins 新增 quay 键=$ep_gained —— 两条未同时成立"
+    echo "  AC257-MERGE-FAILED: $AC257_MERGE_NOTE" >&2
+    return 1
+  fi
+
+  # ── (e) project-scope 安装 + 用交付物 CLI 真列一次任务 ─────────────────────────────────
+  if command -v claude >/dev/null 2>&1; then
+    set +e
+    (cd "$root" && claude plugin marketplace add "$plugin_root" --scope project) >/dev/null 2>&1
+    rc_ms=$?
+    (cd "$root" && claude plugin install quay@quay --scope project -y) >/dev/null 2>&1
+    rc_inst=$?
+    set -e
+    echo "  [⑨f] project-scope install: marketplace-add rc=$rc_ms install rc=$rc_inst"
+  else
+    rc_ms=127; rc_inst=127
+    echo "  [⑨f] claude 不在 PATH ⇒ project-scope 安装未尝试（可区分取值，⛔ 不与「装失败」同形）"
+  fi
+  AC257_INSTALL_SCOPE="$(ac257_settings_scope_state "$root" "quay@quay" 2>/dev/null || echo 'not-evaluated')"
+  AC257_MARKETPLACE_PATH="$(ac257_marketplace_path "$root" "quay" 2>/dev/null || true)"
+  AC257_PROVIDER_PATH="$(ac257_provider_path "$root" 2>/dev/null || true)"
+  echo "  [⑨g] install_scope=$AC257_INSTALL_SCOPE marketplace_path=$AC257_MARKETPLACE_PATH provider_path=$AC257_PROVIDER_PATH"
+  if [ "$AC257_INSTALL_SCOPE" != "project" ]; then
+    echo "  AC257-NOT-EVALUATED: 项目级 .claude/settings.json 的 enabledPlugins 未出现 quay 键（state=$AC257_INSTALL_SCOPE）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  if [ -z "$AC257_MARKETPLACE_PATH" ] || ac257_is_probe_path "$AC257_MARKETPLACE_PATH" \
+     || [ -z "$AC257_PROVIDER_PATH" ] || ac257_is_probe_path "$AC257_PROVIDER_PATH"; then
+    echo "  AC257-NOT-EVALUATED: marketplace/provider 路径为空或命中探测模式（marketplace='$AC257_MARKETPLACE_PATH' provider='$AC257_PROVIDER_PATH'）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  # provider 可用性：用交付物 CLI 经该 config 真列一次任务（读得出才算绑定有效）。
+  local list_out=""
+  list_out="$( (cd "$root" && node "$qrl" task list --root "$root" --json) 2>/dev/null || true)"
+  if [ -z "$list_out" ]; then
+    echo "  AC257-NOT-EVALUATED: 用去探测化后的 config 列不出任务（provider 绑定不可用）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  echo "  [⑨h] provider usable: task list returned $(printf '%s' "$list_out" | wc -c) bytes"
+
+  # ── (f) 真实任务驱动 todo→done ──────────────────────────────────────────────────────
+  if [ -z "$task_id" ] || [ ! -f "$bodyfile" ]; then
+    echo "  AC257-NOT-EVALUATED: 未给 --ac257-task-id / --ac257-task-body（真实缺陷修复任务体）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  AC257_TASK_ID="$task_id"
+  # 存在性必须【先查】再决定建不建：`quay-native task create` 对【已存在的 id】**返回 0**，并把新的
+  # frontmatter 块【前置】到 tasks/<id>.md —— 文件因此出现【两段 frontmatter】，ABI 读到的是前面那一段
+  # （status: todo）。实测 2026-09-14（run5）：一条 settled 的 done 任务被"创建"成 todo，随后
+  # promotion-driver 把它晋升到 ready，而本步骤正等它 done ⇒ 结构上不可达；**并且把被取证项目的任务
+  # 文件弄坏了**（那正是 DoD 逐字禁止的「弄脏被取证项目」）。失败形态仍是「记录没写出来」，与
+  # 「机制坏了」同形（硬规则 3b）。⇒ 先 `task view`：读得到 ⇒ 复用（⛔ 绝不调 create）；读不到 ⇒ 才
+  # create，create 之后再核一次存在性（读不出 ⇒ fail-closed）。两条路径打印【可区分】的痕迹。
+  local create_rc=0 task_exists=0 task_view_json="" status_at_entry=""
+  task_view_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  if [ -n "$task_view_json" ] \
+     && printf '%s' "$task_view_json" | grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\""; then
+    task_exists=1
+    status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
+    echo "  [⑨h2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter，把该任务「创建」成 todo）"
+  else
+    set +e
+    (cd "$root" && node "$qrl" task create "$task_id" --title "AC-257 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1
+    create_rc=$?
+    set -e
+    if [ "$create_rc" = "0" ] \
+       && [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
+      task_exists=1; status_at_entry="todo"
+      echo "  [⑨h2] task created: $task_id (create rc=0 ∧ 建后可见)"
+    else
+      echo "  AC257-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  fi
+  # ── 驱动（仅当任务【还没到 done】时）────────────────────────────────────────────────────
+  # ⛔ 对一条【已 done】的任务启动 promotion/worker driver 不是「驱动」，是【破坏读数】：实测 2026-09-14
+  # （run5）settled done 被推回 todo ⇒ ready，而本步骤正等它 done ⇒ 结构上不可达；同族纪律见
+  # 「反复探一个带 TTL 缓存的端点会把被测对象捂热」——测量动作本身改变了被测对象。
+  # ⇒ 已 done ⇒ 不起 driver、不轮询，直接读直接量（probe_ac257_measures 读的仍是【外部可核】的
+  # 任务状态 + 历史实现提交 + gate 事件，⛔ 不因跳过驱动而放宽任何一条）；未 done ⇒ 原路径（起 driver + 轮询）。
+  local d_rc_p=0 d_rc_w=0
+  local poll="${AC257_POLL_SECS:-3600}" i st=""
+  if [ "$status_at_entry" = "done" ]; then
+    echo "  [⑨i] task already done at entry ⇒ drivers NOT started, no poll (⛔ 起它们会把这条 done 任务重置：实测 run5 done⇒todo⇒ready)"
+    st="$status_at_entry"
+  else
+    set +e
+    (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
+    d_rc_p=$?
+    (cd "$root" && node "$qrl" driver start --kind worker --root "$root") >/dev/null 2>&1
+    d_rc_w=$?
+    set -e
+    echo "  [⑨i] driver start: promotion rc=$d_rc_p worker rc=$d_rc_w (status at entry=$status_at_entry)"
+    for i in $(seq 1 "$poll"); do
+      st="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null \
+        | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})' 2>/dev/null)"
+      [ "$st" = "done" ] && break
+      sleep 1
+    done
+  fi
+  echo "  [⑨j] poll finished: task_status=${st:-<unreadable>} (window ${poll}s)"
+
+  probe_ac257_measures "$root" "$task_id" "$qrl"
+  echo "  [⑨k] task_status=$AC257_TASK_STATUS commit_sha=${AC257_COMMIT_SHA:0:12} files=$AC257_COMMIT_FILES_JSON gate_events=$AC257_GATE_EVENTS produced_by_driver=$AC257_PRODUCED_BY_DRIVER evaluated=$AC257_EVALUATED"
+  if [ "$AC257_EVALUATED" != "1" ] || [ "$AC257_TASK_STATUS" != "done" ]; then
+    echo "  AC257-NOT-EVALUATED: 任务未驱动到 done 或缺直接量（缺值≠合格）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  if write_ac257_record "$AC257_HOST" "$AC257_PROJECT_ROOT" "$AC257_INSTALL_SCOPE" "$AC257_QUAY_VERSION" \
+       "$AC257_QUAY_INIT_RERUN" "$AC257_MERGE_PRESERVED" "$AC257_MARKETPLACE_PATH" "$AC257_PROVIDER_PATH" \
+       "$AC257_TASK_STATUS" "$AC257_COMMIT_SHA" "true"; then
+    AC257_WRITTEN_THIS_RUN=1
+    echo "  ac257 record written → $AC89 ✓"
+    return 0
+  fi
+  echo "  AC257-NOT-EVALUATED: write_ac257_record 拒写（fail-closed: BUILD_SHA 缺/非 40-hex、AC89 空、或某字段不满足）⇒ 未落账" >&2
+  return 1
+}
+
+# 读 .claude/settings.json 的 hooks.Stop 段（原样 JSON 文本，键序归一）—— merge_preserved 读数①的
+# 产生处。读不出（文件不在/JSON 坏）⇒ 不打印、返回 1（缺值≠合格）。
+ac257_settings_stop_segment() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const stop = d && d.hooks ? d.hooks.Stop : undefined;
+    if (stop === undefined) { process.exit(1); }
+    process.stdout.write(JSON.stringify(stop) + "\n");' "$f" 2>/dev/null
+}
+
+# 读 .claude/settings.json 的 enabledPlugins（原样 JSON 文本）—— merge_preserved 读数②的产生处。
+# 文件不在/JSON 坏 ⇒ 不打印、返回 1。键不存在 ⇒ 打印 `{}`（「查过，没有」≠「没查成」）。
+ac257_settings_enabled_plugins() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const ep = d && d.enabledPlugins;
+    process.stdout.write(JSON.stringify(ep && typeof ep === "object" ? ep : {}) + "\n");' "$f" 2>/dev/null
+}
 
 mp_assert_settings() {
   # $1 = settings.json 路径；$2 = 期望的 plugin 目录路径。
@@ -5797,6 +6317,16 @@ GOAL-016-AC-247 host:str project_root:str pre_task_count:int post_task_count:int
 GOAL-016-AC-248 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool adr_check_before_detects:bool adr_check_after_detects:bool adr_check_probe_tool:str
 GOAL-016-AC-249 host:str project_root:str task_id:str commit_files:jsonarr
 GOAL-016-AC-250 host:str project_root:str bind_host:str tailscale0_ip:str probe_from_host:str http_status:int observed_task_id:str observed_status_before:str observed_status_after:str store_status_after:str
+# AC-257（GOAL-018，2026-09-14 本轮接入）：project scope 安装 + 非空 settings.json 的合并语义。
+# ⚠️ 本行声明 11 个字段 —— 比 task 正文 Plan 里写的那一行【多一个 `provider_path`】。理由是可复算的：
+# 判据逐字是 `mp = str(r.get("marketplace_path") or r.get("provider_path") or "")`，**两个键都在读**
+# （`or` 右侧不是死代码——左键缺值时它会去读右键）。`--ac-record-schema-report` 的
+# `crit_not_declared` 判据是「判据读 ∖ 声明」，少声明 `provider_path` 只会让它打印
+# `⚠ 判据读、声明缺` 并 exit 1（实测形态与本文件 AC-238 行的同类注释同源）。
+# 同理 writer 也必须【实写】这两个键，否则 `crit_not_written` 也会红 —— 记录里
+# marketplace_path=项目级 marketplace 源路径、provider_path=.quay/config.yml 的 provider 路径，
+# 两者都非空且都不含探测模式字面（`verify-`/`probe`/`/tmp/`，criterion 侧另有正则再查一遍）。
+GOAL-018-AC-257 host:str project_root:str install_scope:str quay_version:str quay_init_rerun:bool merge_preserved:bool marketplace_path:str provider_path:str task_status:str commit_sha:str produced_by_driver:bool
 '
 
 # 取某 AC 的 schema 行（去掉 ac 前缀后的 `field:kind …`）。未登记 ⇒ 非 0（调用方 fail-closed）。
@@ -6431,6 +6961,82 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   [ "${ac238_choke_hits:-0}" = "1" ] || fail="$fail AC238-write-does-not-go-through-choke-point"
   [ "${ac238_anchor_hits:-1}" = "0" ] || fail="$fail AC238-write-carries-its-own-anchor-literal"
 
+  # ── AC257（GOAL-018）：write_ac257_record 两个方向都要取得到 ─────────────────────────
+  # 本组驱动【产品函数】write_ac257_record（⛔ 不在夹具里复刻判定逻辑——硬规则 4 推论三：只能被
+  # 夹具复刻满足的判据不算被测）。负例取 merge_preserved 缺 —— 它是本 AC 最贵的一条读数（两条子
+  # 读数①hooks.Stop 逐字保留 ∧②enabledPlugins 新增 quay 键同时成立才为 true）；若它缺席仍能写出
+  # 记录，merge_preserved=true 就退化成「谁都能填的字符串」，而那正是一个结构上不可能取假的量。
+  # ⚠️ 逐字段都要能拒（硬规则 5b：缺陷是成簇的，⛔ 不只测被报出来的那一个）。
+  local ac257_f="$t/ac257.jsonl" ac257_pos_w=0 ac257_pos_lines=0 ac257_neg_w=0 ac257_neg_lines=0
+  AC_RECORD_SCHEMA="$save_schema"
+  AC89="$ac257_f"; : > "$ac257_f"
+  local -a ac257_args=("ad-arm1" "/home/yale/work/archguard" "project" "0.7.0" "true" "true" \
+                       "/srv/quay/plugin" "/srv/quay/plugin/vendor/quay-native" "done" "$SHA40" "true")
+  if write_ac257_record "${ac257_args[@]}" >/dev/null 2>&1; then ac257_pos_w=1; fi
+  ac257_pos_lines="$(wc -l < "$ac257_f" 2>/dev/null || echo 0)"
+  # 缺 merge_preserved（下标 5）—— 本 AC 的核心负例。
+  local -a ac257_miss=("${ac257_args[@]}"); ac257_miss[5]=""
+  write_ac257_record "${ac257_miss[@]}" >/dev/null 2>&1 || ac257_neg_w=1
+  ac257_neg_lines="$(wc -l < "$ac257_f" 2>/dev/null || echo 0)"
+  echo "selfcheck: ac257(positive, all 11 fields) wrote=$ac257_pos_w lines=0→$ac257_pos_lines (expect 1/0→1 — 全字段正例必须写出一条)"
+  echo "selfcheck: ac257(negative, merge_preserved omitted) refused=$ac257_neg_w lines=$ac257_pos_lines→$ac257_neg_lines (expect 1/1→1 — 缺 merge_preserved 必须拒写且【零新增行】)"
+  [ "$ac257_pos_w" = "1" ] || fail="$fail AC257-positive-refused"
+  [ "$ac257_pos_lines" = "1" ] || fail="$fail AC257-positive-wrote-no-line"
+  [ "$ac257_neg_w" = "1" ] || fail="$fail AC257-negative-without-merge-preserved-accepted"
+  [ "$ac257_neg_lines" = "$ac257_pos_lines" ] || fail="$fail AC257-negative-wrote-a-line"
+  # 逐字段：每一个字段缺席都必须被写入期闸挡住（声明 11 个 ⇒ 11 次全拒）。
+  local ac257_i ac257_refused=0
+  for ac257_i in "${!ac257_args[@]}"; do
+    local -a ac257_mut=("${ac257_args[@]}"); ac257_mut[$ac257_i]=""
+    write_ac257_record "${ac257_mut[@]}" >/dev/null 2>&1 || ac257_refused=$((ac257_refused + 1))
+  done
+  echo "selfcheck: ac257(every-field-enforced) declared=${#ac257_args[@]} each_omitted_refused=$ac257_refused (expect 11/11 — 声明逐字段在写入期被强制)"
+  [ "$ac257_refused" = "${#ac257_args[@]}" ] || fail="$fail AC257-declared-field-not-enforced-at-write-time"
+  # 探测路径负例：marketplace_path / provider_path 命中 `verify-`|`probe`|`/tmp/` ⇒ 必须拒写。
+  local ac257_probe_refused=0
+  local -a ac257_pv=("${ac257_args[@]}"); ac257_pv[6]="/home/yale/quay-verify-takeover-x.npm/plugin"
+  write_ac257_record "${ac257_pv[@]}" >/dev/null 2>&1 || ac257_probe_refused=$((ac257_probe_refused + 1))
+  local -a ac257_pp=("${ac257_args[@]}"); ac257_pp[7]="/tmp/probe/vendor/quay-native"
+  write_ac257_record "${ac257_pp[@]}" >/dev/null 2>&1 || ac257_probe_refused=$((ac257_probe_refused + 1))
+  echo "selfcheck: ac257(probe-path-negatives) refused=$ac257_probe_refused/2 (expect 2/2 — 探测路径字面必须被写入期闸挡住)"
+  [ "$ac257_probe_refused" = "2" ] || fail="$fail AC257-probe-path-accepted"
+  # host 字段的取法（ac257_host_from_fqdn）：解析读数与「本机拥有的地址集」两个输入都注入，
+  # 四种组合逐一断言 —— ⛔ 只证「能读出」不证「读不出」（硬规则 3b 的镜像半边）。
+  # ⚠️ 本组证明的是【该判据能取假】；「它在生产上真的取到了 ad-arm1」由 AC-257 的真机运行负责
+  # （硬规则 4 推论三：只能被夹具满足的判据不是测量，所以夹具只承担可证伪这一半）。
+  local ac257_h_ok="" ac257_h_own_ok="" ac257_h_foreign="" ac257_h_unres=""
+  ac257_h_ok="$(AC257_RESOLVE_CMD='echo 10.9.9.9' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.9.9.9" 2>/dev/null || true)"
+  AC257_RESOLVE_CMD='echo 10.9.9.9' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.0.0.1" >/dev/null 2>&1 && ac257_h_foreign="ACCEPTED" || ac257_h_foreign="refused"
+  AC257_RESOLVE_CMD='true' ac257_host_from_fqdn "ad-arm1.wan.hwang.men" "10.9.9.9" >/dev/null 2>&1 && ac257_h_unres="ACCEPTED" || ac257_h_unres="refused"
+  ac257_host_from_fqdn "" "10.9.9.9" >/dev/null 2>&1 && ac257_h_own_ok="ACCEPTED" || ac257_h_own_ok="refused"
+  echo "selfcheck: ac257(host-from-fqdn) label='$ac257_h_ok' (expect 'ad-arm1' — 解析到【本机拥有】的地址才成立，且 label 取自连接名的第一个 label)"
+  echo "selfcheck: ac257(host-from-fqdn negatives) resolved-but-foreign=$ac257_h_foreign unresolved=$ac257_h_unres empty-fqdn=$ac257_h_own_ok (expect refused/refused/refused — 三种读不出各成一例)"
+  [ "$ac257_h_ok" = "ad-arm1" ] || fail="$fail AC257-host-fqdn-positive"
+  [ "$ac257_h_foreign" = "refused" ] || fail="$fail AC257-host-fqdn-foreign-address-accepted"
+  [ "$ac257_h_unres" = "refused" ] || fail="$fail AC257-host-fqdn-unresolved-accepted"
+  [ "$ac257_h_own_ok" = "refused" ] || fail="$fail AC257-host-fqdn-empty-input-accepted"
+  unset AC257_RESOLVE_CMD
+  # marketplace 路径读取器（ac257_marketplace_path）。**本条是补一个【已发生】的缺陷**：原实现按
+  # 「`node -e` 的 argv 里有 script 项」的下标写（名字取 argv[2]、文件取 slice(3)），于是它把【第一个
+  # 文件路径】当成 marketplace 名字、并且【一个文件都没遍历】⇒ 恒返回空 ⇒ 生产上表现为
+  # 「marketplace_path 为空 ⇒ 整个 AC-257 NOT-EVALUATED」，与「目标项目确实没登记 marketplace」同形
+  # （硬规则 3b）。三例：项目级命中 / 项目级无该键⇒回落到用户级（这一例正是 slice(3) 会漏掉项目文件的
+  # 形态）/ 两处都无 ⇒ 空且非 0（⛔ 不打印一个「看起来也行」的串）。
+  local ac257_mk="$t/ac257-mk" ac257_mk_proj="" ac257_mk_fallback="" ac257_mk_none="ACCEPTED"
+  mkdir -p "$ac257_mk/proj/.claude" "$ac257_mk/home/.claude" "$ac257_mk/useronly/.claude" "$ac257_mk/none/.claude" "$ac257_mk/emptyhome"
+  printf '%s\n' '{"extraKnownMarketplaces":{"quay":{"source":{"path":"/srv/quay/plugin-proj"}}}}' > "$ac257_mk/proj/.claude/settings.json"
+  printf '%s\n' '{"extraKnownMarketplaces":{"quay":{"source":{"path":"/srv/quay/plugin-user"}}}}' > "$ac257_mk/home/.claude/settings.json"
+  printf '%s\n' '{}' > "$ac257_mk/useronly/.claude/settings.json"
+  printf '%s\n' '{}' > "$ac257_mk/none/.claude/settings.json"
+  ac257_mk_proj="$(HOME="$ac257_mk/home" ac257_marketplace_path "$ac257_mk/proj" quay 2>/dev/null || true)"
+  ac257_mk_fallback="$(HOME="$ac257_mk/home" ac257_marketplace_path "$ac257_mk/useronly" quay 2>/dev/null || true)"
+  HOME="$ac257_mk/emptyhome" ac257_marketplace_path "$ac257_mk/none" quay >/dev/null 2>&1 && ac257_mk_none="ACCEPTED" || ac257_mk_none="refused"
+  echo "selfcheck: ac257(marketplace-path) project='$ac257_mk_proj' fallback-to-user='$ac257_mk_fallback' neither='$ac257_mk_none' (expect /srv/quay/plugin-proj / /srv/quay/plugin-user / refused)"
+  [ "$ac257_mk_proj" = "/srv/quay/plugin-proj" ] || fail="$fail AC257-marketplace-path-project-miss"
+  [ "$ac257_mk_fallback" = "/srv/quay/plugin-user" ] || fail="$fail AC257-marketplace-path-user-fallback-miss"
+  [ "$ac257_mk_none" = "refused" ] || fail="$fail AC257-marketplace-path-absent-accepted"
+  AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
+
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
   # 把内存里的声明删掉一个【判据确实在读】的字段（AC-247 的 carrier_records）⇒ 报告必须取 DRIFT
   # 且点名该字段 + 退出非 0。⛔ 这是 AC1 的可失败控制：一个永远打印 ok 的检查不是测量（硬规则 4），
@@ -6482,6 +7088,56 @@ fi
 # 交叉核对，九件全有效才经 ac_record_append choke point 写一条 ac=GOAL-016-AC-250 记录。
 # 判定与 AC-247/AC-248 同一条纪律：任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 退出非 0（⛔ 不降级成 not-live，
 # 那会让一次「没产出」的运行与「产出但没达标」同形）。
+# ── AC-257 project-scope 模式（GOAL-018）────────────────────────────────────────────────────
+# 独立于主流程：本模式观测的是【目标机上那个真实项目】（archguard 本体），而 step① 装的是判读侧的
+# 隔离前缀——与「目标机上的项目绑了什么」无关。它在目标机上做 ⑨ 的四件事并写一条 ac=GOAL-018-AC-257
+# 记录。plugin_root 由脚本自身位置推出（本脚本就住在 <plugin>/scripts/ 下，单一来源），CLI 取
+# <plugin>/../bin/quay（同一安装物）——⛔ 不接受「随便一个 PATH 上的 quay」。
+if [ "$AC257_PROJECT_SCOPE" = 1 ]; then
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
+  if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
+  if [ -n "$AC248_ROOT" ]; then ROOT="$AC248_ROOT"; fi
+  if [ -n "$AC257_PLUGIN_ROOT_ARG" ]; then
+    AC257_PLUGIN_ROOT="$AC257_PLUGIN_ROOT_ARG"
+  else
+    AC257_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  fi
+  # CLI 入口从安装物自己的 package.json 解析（见 ac257_delivery_cli 头注释：实测 quay 包没有
+  # bin/ 目录，bin.quay=./dist/quay.js ⇒ 硬编码 bin/quay 会在门口 NOT-EVALUATED）。解析不出 ⇒
+  # 保留旧候选，由下面的存在性检查 fail-closed（⛔ 不静默退回一个 PATH 上的 quay）。
+  AC257_QRL="$(ac257_delivery_cli "$AC257_PLUGIN_ROOT" 2>/dev/null || true)"
+  [ -n "$AC257_QRL" ] || AC257_QRL="${AC257_PLUGIN_ROOT}/../bin/quay"
+  echo "== verify-deliver-coldstart (AC-257 project-scope 模式) =="
+  echo "ts=$TS | ac89=$AC89 | root=${ROOT:-<unset>} | plugin_root=$AC257_PLUGIN_ROOT | cli=$AC257_QRL"
+  if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+    echo "AC257-NOT-EVALUATED: --target-root 不是目录: ${ROOT:-<empty>} ⇒ 记录 NOT written (fail-closed)" >&2
+    exit 1
+  fi
+  if [ ! -f "$AC257_QRL" ]; then
+    echo "AC257-NOT-EVALUATED: 交付物 CLI 不在 $AC257_QRL（本脚本应住在 <plugin>/scripts/ 下）⇒ 记录 NOT written" >&2
+    exit 1
+  fi
+  if step_ac257_project_scope "$ROOT" "$AC257_PLUGIN_ROOT" "$AC257_QRL" "$AC257_TASK_ID_ARG" "$AC257_TASK_BODY"; then
+    echo ""
+    echo "AC257_HOST=$AC257_HOST"
+    echo "AC257_PROJECT_ROOT=$AC257_PROJECT_ROOT"
+    echo "AC257_INSTALL_SCOPE=$AC257_INSTALL_SCOPE"
+    echo "AC257_QUAY_VERSION=$AC257_QUAY_VERSION"
+    echo "AC257_QUAY_INIT_RERUN=$AC257_QUAY_INIT_RERUN"
+    echo "AC257_MERGE_PRESERVED=$AC257_MERGE_PRESERVED ($AC257_MERGE_NOTE)"
+    echo "AC257_MARKETPLACE_PATH=$AC257_MARKETPLACE_PATH"
+    echo "AC257_PROVIDER_PATH=$AC257_PROVIDER_PATH"
+    echo "AC257_TASK_ID=$AC257_TASK_ID status=$AC257_TASK_STATUS commit_sha=$AC257_COMMIT_SHA"
+    echo "AC257_WRITTEN_THIS_RUN=$AC257_WRITTEN_THIS_RUN"
+    exit 0
+  fi
+  echo ""
+  echo "AC257_MERGE_PRESERVED=$AC257_MERGE_PRESERVED ($AC257_MERGE_NOTE)" >&2
+  echo "verify-deliver-coldstart: FAIL (AC-257 记录未落账 —— 缺一条读数即不写，⛔ 不静默当成功)" >&2
+  exit 1
+fi
+
 if [ "$AC250_WEB_OBSERVE" = 1 ]; then
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
