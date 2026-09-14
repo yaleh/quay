@@ -87,6 +87,7 @@ goal_ac: AC-258
 - plugin/test/verify-deliver-coldstart.test.mjs
 - packages/quay/scripts/register-plugin.mjs
 - plugin/scripts/quay-init.sh
+- plugin/test/driver-anchor.test.mjs（**⛔ 非本任务 delta**：落地时修掉的 suite-red 阻塞 —— 夹具的 fake driver 必须 import anchor 实际加载的那份 kernel，否则停机登记表分裂；机制、两向对照与边界见 Evidence 的「本轮（2026-09-14T22:0xZ）」一节）
 
 ## AC
 
@@ -301,6 +302,8 @@ EXIT=1                                    ✔ 与预期一致
 | 6 | 本条实现自身的缺陷：argv 下标错位 / `set -u` 同语句词展开 / 版本与 CLI 候选的**读在装之前** / 把 host KEY 当连接名传 / 判据比 criterion 更严 | 全部是「我认为」而非「我测过」的产物 | **就地修**并各补一个**能取假**的控制（selfcheck 三态控制 + `ac258-smoke.sh` 本地预演台） |
 | 7 | 本文件里 `--selfcheck` 对 AC 条数的**写死字面量**（`15 AC registered`，注释里还留着 13→14→15 的手改史） | 与「真的坏了」同形；AC-257 已在**另一个**测试文件改过，本条是兄弟文件里的残留（硬规则 5b） | **就地修**：改为从 `AC_RECORD_SCHEMA`（单一真源）**推导**条数，并顺带钉住 GOAL-018 两条 |
 | 8 | 交付流程把「目标机能否跑 worker」这个**可秒级探测**的后置条件排在**三步破坏性且自耗**的动作（删键/持久安装/quay-init 重跑）之后 ⇒ 一次环境故障的代价从「1 秒探测失败」放大为「一整轮报废 + 手工重置夹具」。本轮当场实测：凭据被清空，meta-cc 的 worker 起不来，而前三步已全部执行 | 环境会坏，但**步骤序不可逆**：后置条件可先探测却排在最后 | **另立** `gap-ac258-pipeline-destructive-steps-before-worker-preflight`（本轮立案，finding 形状） |
+| 9 | `plugin/test/driver-anchor.test.mjs` 的夹具与 anchor 的停机登记表分裂（夹具硬编码 import worktree 那份 kernel，而 anchor 经 `preferredAnchorKernel()` 跑主检出那份）⇒ `stop --kind X` 等满 60s 后 exit 1，**在任一 worktree 里确定性红**，会挡住每一次 fan-in | 「判据与实现不同源」，且失败形态与「被测机制真的挂了」逐字相同（硬规则 3b 的同形异因） | **就地修**（逐字采用兄弟任务 `gap-perfile-memory-cost-collection-missing` 的补丁 `d29592113`，并把该文件写进 `## Touches`）；机制归属见 Evidence |
+
 
 **未阻断本 AC 但登记在案的观察项（⛔ 不就地改被取证对象）**：
 - `quay-init` 在 meta-cc 留下未跟踪的 `.claude/launch.settings.json.bak.<ts>`（`dirty=1`）⇒ 会让该项目
@@ -436,6 +439,25 @@ gate_events_task     = 2（>0，来自 meta-cc 自己的 .quay/gate-events.jsonl
   carrier 173 行（含新落账的那条记录），EXIT=0
   （confirmed live via bash on the criterion script extracted from goals/AC-258-....md）
 ```
+
+### 本轮（2026-09-14T22:0xZ）—— suite-red 阻塞的定位与修复（⛔ 非本任务 delta）
+
+**结论先说**：上一轮 `step=suite` 的红（`AssertionError [ERR_ASSERTION]: stop --kind goal` / `stop --kind worker`）**与本任务 delta 无关**——它是 `plugin/test/driver-anchor.test.mjs` 的一个既有夹具缺陷，在**任何 worktree** 里都确定性红，会挡住每一次 fan-in。
+
+**两向对照（本工作树当场实测，同一棵树，只改夹具那一行 import）**：
+
+| 夹具 import 哪份 kernel | AC6（`stop --kind worker`） |
+|---|---|
+| worktree 那份（原状） | 65750 ms / **FAIL**（`null !== 0` —— `spawnSync` 的 60s `timeout` 触发，`status` 变 null） |
+| anchor 实际加载的那份 | 6906 ms / **PASS** |
+
+修后整文件 **7/7 绿、exit 0**（`AC1/AC2/AC4` + `AC3①②` + `AC6` + `§6.1` + `§6.9 inv.3` + 双派发硬闸）。
+
+**真因（机制）**：anchor 经 `preferredAnchorKernel()` **优先主检出**的内核（AC-184/AC-255 的设计：常驻 anchor 的生存期⛔ 不绑在短命 worktree 路径上），而停机登记表（`registerKindStop`/`requestKindStop`）是**模块级**的 ⇒ 夹具硬编码 import worktree 那份 ⇒ 与 anchor 各持**一张独立登记表** ⇒ `requestKindStop(kind)` 置的不是该 kind 读的那个标志 ⇒ `stop --kind X` 等不到收尾，等满 60s 后 exit 1 —— 与「该 kind 的循环真的挂了」**同形**（硬规则 3b 的同形异因）。
+
+**⚠️ 如实划界（⛔ 不声称这是本任务的机制发现）**：该缺陷的**诊断与实现**属于兄弟任务 `gap-perfile-memory-cost-collection-missing`（其 commit `d29592113`，本轮尚未落 develop）。本任务按**逐字相同**的补丁落地（`md5 = 6d1a91d2d0dc81220b5626c218aa98f0`，与那条分支的版本一致），目的是让本任务的 fan-in 能过；机制分析、边界标注（worktree 中对 anchor 内核本身的改动本文件验不到）以那条任务的 Evidence 为准。两条分支携带**同一份**改动 ⇒ 无论谁先落，另一条的 merge 对这两个 hunk 都是恒等合流。
+
+**同源的生产面风险（本任务⛔ 不修，只登记）**：`spawnAnchor` 透传 `env: process.env`（不剥 `QUAY_PLUGIN_ROOT`），而 `invokeKindDefault` 经 `resolveKernelSibling` 解析 kind 模块（`$QUAY_PLUGIN_ROOT/scripts` 优先）⇒ 当 anchor 的内核与 `QUAY_PLUGIN_ROOT` 指向**不同 plugin 目录**时，同一套登记表在**生产**上也会分裂（`stop --kind X` 退化为等满 60s 的 no-op）。
 
 ## Resolution
 
