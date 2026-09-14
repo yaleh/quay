@@ -21,7 +21,12 @@
 #   2. config.yml — delegates to the EXISTING scripts/worktree-include.sh (declarative
 #      .worktreeinclude copy: .quay/config.yml + plugin/vendor dist), the same step
 #      provision-verify-worktree.sh composes. A worktree without .quay/config.yml cannot resolve
-#      the workspace root (round-5's "Cannot find repo root" crash family).
+#      the workspace root (round-5's "Cannot find repo root" crash family). The copy POST-CONDITIONS
+#      ITSELF FROM DISK (worktree-include.sh reads back that every declared file is present before
+#      it exits 0), so this script's exit 0 is a claim about ${worktree}'s contents; on failure it
+#      runs `worktree-include.sh --verify` to NAME the absent files instead of printing a bare
+#      "failed" that is indistinguishable from half-success
+#      (gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning).
 #
 # DELIBERATELY NOT DONE:
 #   - No independent `npm install` per worktree when the main has node_modules (copying the
@@ -32,7 +37,10 @@
 #
 # Idempotent: re-running on a provisioned worktree is a no-op (existing node_modules kept;
 # worktree-include re-copies overwriting). Exit 0 = provisioned / already-provisioned;
-# 2 = usage/env error (missing worktree arg, missing install product, non-repo worktree).
+# 2 = usage/env error (missing worktree arg, missing install product, non-repo worktree),
+#     OR incomplete provisioning (a declared file is absent — step 2 is verified, not assumed).
+# ⛔ "step 1 succeeded" is never reported as success: exit 0 requires the declared files to be
+#    on disk in the worktree, checked by worktree-include.sh --verify.
 #
 # Usage:
 #   bash plugin/scripts/dispatch-worktree-setup.sh <worktree-path> [--root <main-repo>] [--dry-run]
@@ -130,15 +138,53 @@ else
 fi
 
 # ── 2. config.yml (delegated to the EXISTING declarative worktree-include.sh) ─────────────────
+# The failure face is deliberately NOT a bare one-line "failed": a bare message is indistinguishable
+# from HALF success — step 1 (node_modules) has already been linked, so a worktree reported as
+# "failed" while missing every declared file looks exactly like one reported as "failed" for a
+# harmless reason (hard rule 3b). Two mechanical properties instead:
+#   (a) a copy step that exits 0 without landing the files is caught by the verifier post-condition;
+#   (b) every failure path names the declared files that are actually ABSENT.
+# "Absent" is judged by the verifier reading the declaration (worktree-include.sh --verify), never
+# by trusting the copy step's own exit code or message.
 WI="${root}/scripts/worktree-include.sh"
-if [ -f "${WI}" ]; then
-  if [ "${dry_run}" -eq 1 ]; then
-    echo "dispatch-worktree-setup: [dry-run] would run worktree-include.sh ${worktree} (config.yml + vendor dist)"
-  else
-    bash "${WI}" "${worktree}" || { echo "dispatch-worktree-setup: worktree-include.sh failed" >&2; exit 2; }
+verify_output=""
+verify_rc=0
+if [ ! -f "${WI}" ]; then
+  # No include script. Harmless ONLY when nothing is declared — a repo whose .worktreeinclude names
+  # files has no way to place them, and pretending otherwise is the same half-success shape.
+  if [ -f "${worktree}/.worktreeinclude" ] || [ -f "${root}/.worktreeinclude" ]; then
+    echo "dispatch-worktree-setup: ${WI} not found, but .worktreeinclude declares gitignored files — cannot provision ${worktree} (it will lack .quay/config.yml / vendor dist)" >&2
+    exit 2
   fi
+  echo "dispatch-worktree-setup: WARNING no worktree-include.sh at ${WI} and no .worktreeinclude — nothing declared, nothing copied" >&2
+elif [ "${dry_run}" -eq 1 ]; then
+  echo "dispatch-worktree-setup: [dry-run] would run worktree-include.sh ${worktree} (config.yml + vendor dist)"
 else
-  echo "dispatch-worktree-setup: WARNING worktree-include.sh not found at ${WI} — config.yml/vendor dist not copied" >&2
+  # `cmd` then `rc=$?` on its OWN line (no `||`): this script runs under `set -uo pipefail` without
+  # `-e`, so a failing command simply continues — and it keeps the `$?` read clean of any `|`
+  # (instrument-failure-check FAMILY-3 reads a `$?` that follows a `|` as a pipeline-status read).
+  bash "${WI}" "${worktree}"
+  copy_rc=$?
+  if [ "${copy_rc}" -ne 0 ]; then
+    # Enumerate what is actually absent. Exit 1 = the verifier evaluated the declaration and lists
+    # the absent files; exit 2 = it could not evaluate at all (unresolvable primary, unsupported
+    # --verify). The two are reported differently — "could not check" must never print the same
+    # shape as a file list, and never the same shape as "checked, all fine" (hard rule 3b).
+    verify_output=""
+    verify_output="$(bash "${WI}" --verify "${worktree}" 2>&1)"
+    verify_rc=$?
+    echo "dispatch-worktree-setup: provisioning INCOMPLETE for ${worktree} — copy exited ${copy_rc}, verify exited ${verify_rc}" >&2
+    if [ "${verify_rc}" -eq 1 ]; then
+      echo "dispatch-worktree-setup: declared files ABSENT from ${worktree}:" >&2
+    else
+      echo "dispatch-worktree-setup: the verifier could not evaluate the declaration (this is not a file list):" >&2
+    fi
+    printf '%s\n' "${verify_output}" >&2
+    exit 2
+  fi
+  # copy_rc = 0 already means the declared files are ON DISK: worktree-include.sh reads its own
+  # result back from the worktree before exiting 0 (see its header). No second matcher pass here —
+  # a post-condition that re-derives the whole declaration would double the cost of every dispatch.
 fi
 
 exit 0

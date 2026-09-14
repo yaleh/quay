@@ -2,7 +2,7 @@
 id: gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy
 title: touches-orthogonality-check.ts 的相对导入路径写死假设仓库顶层布局——在 npm 打包用的 staged
   plugin 副本下 ERR_MODULE_NOT_FOUND,quay driver 命令整体失败
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -224,3 +224,87 @@ import，且两 bundle 内含 `resolveCoreSrcFile`（`core-src-import.ts` 被 IN
 - session_id：9387e177-51a1-4292-bc35-9b72d9449ff3
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy~wk-prod-1789350883~1789361453052-578927.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy-wk-prod-1789350883.log
+
+## 续做轮记录（2026-09-14 续做轮）
+
+### 6. 并入 develop（当时落后 453 个提交）后逐条复验 AC1–AC4
+
+merge 无冲突。四条已勾 AC 全部以「**同一载体、同一命令，只换文件内容**」的红/绿对照重取读数：
+
+| AC | 载体 | 修复后 | 对照（develop 那份文件，同一载体、同一命令） |
+|---|---|---|---|
+| AC1 | 仓库顶层 `plugin/scripts/touches-orthogonality-check.ts --help` | node **exit=0**，打印 usage | ——（负控制：未嵌套场景行为不变；`fast-mode-telemetry.ts --help` 同 exit=0） |
+| AC2 | 沙箱 staged 布局（`<pkg>/plugin/` + `<pkg>/src/`） | `usage: …` **exit=0** | `Cannot find module '/tmp/…/pkg/packages/quay/src/runtime-artifacts.ts'` exit=1 |
+| AC3 | 同一沙箱跑 **driver 内核** `driver-runtime.ts status --kind promotion`（**无 `QUAY_PLUGIN_ROOT`**） | 打印真实 `promotion-driver: kind=promotion … carrier_records=87573 …` **exit=0** | 同一 `ERR_MODULE_NOT_FOUND` exit=1 |
+| AC3′ | **真·生产载体**：主检出 `packages/quay/plugin/scripts/touches-orthogonality-check.ts`（staged 副本的修复前形态） | —— | `Cannot find module '/home/yale/work/quay/packages/quay/packages/quay/src/runtime-artifacts.ts'` **exit=1**——与任务标题逐字一致 |
+
+**AC2/AC3 沙箱的一次自纠（诚实标注）**：首版沙箱漏了 `node_modules`，两臂都挂在
+`Cannot find package 'yaml' imported from …/task-schema.ts` ⇒ **两臂同错 = 什么也没对照到**（硬规则 2 的
+同形计数形态：一个两臂同错的"对照"不是对照）。补 `node_modules` 符号链接后重跑，两臂才只差文件内容。
+
+**AC4 合并后重枚举（按位置判定，非关键词）**：develop 新增 453 个提交后，真代码命中仍是
+**15 个文件 / 20 处**，与合并前逐字相同 ⇒ **develop 侧零个新增同类实例**。另 7 处为注释提及（不计）：
+`fast-mode-telemetry:115`、`kernel-sibling-resolution-check:35`、`send-to-session:48`、`task-status:5`、
+`core-src-import:7`、`precommit-guard:606`、`touches-orthogonality-check:26`。
+原始 AC 那条带闭合引号的模式命中仍为 **0**（§4 已纠正该判据本身）。
+
+### 7. scoped 门（本轮实测）
+
+`scripts/test.sh --for-task <id> --allow-thin` ⇒ **172 tests / 172 pass / 0 fail，exit 0**
+（本轮选择器给出 3 个文件：`capability-catalog` + `fast-mode-telemetry` + `touches-orthogonality-check`；
+上一轮是 2 个文件 / 86 tests——**是 develop 前进改变了选择集，不是回归**）。
+scoped-gate cache 已按 develop sha `6db65d9d0b06` 写入。
+
+### 8. 前三轮 suite 红的取证：宿主争用 + 一棵陈旧树（**不是本 delta**）
+
+前三轮（03:40 / 04:23 / 04:54）都倒在 suite 步。证据一致指向环境，而非这份 delta：
+
+1. **失败文件在轮次之间迁移**：03:40 红在 `build-evidence-manifest`、04:23 红在 `driver-runtime`、
+   04:54 红在 6 个文件。**同一份 delta 不会让失败对象在轮次之间换位置。**
+2. **同一窗口内别的任务也在红，且红的是另外的文件**：03:32 红在 `gap-ac255-driver-internalization-…`；
+   03:58 与 04:36 红在 `gap-dashboard-taskcard-minilist-…`（分别 `gap-dashboard-taskcard-multistatus-minitable`
+   与 `worker-driver-retry-classification`）；**同时段 04:09 另一个任务的 suite 跑了 639,495ms 仍然绿**
+   ⇒ 是机器慢，不是某一个 delta 慢。
+3. **全部失败都是内部超时签名**（`spawnSync … ETIMEDOUT`、`exit null`、`waitExit … within 60000ms`），
+   且每个失败文件实测耗时是**它自己**常态的 2–8 倍：`driver-runtime` 263,892ms vs 同机常态 45–66s；
+   `worker-driver-fan-in` 367,236ms vs 100–137s；`goal-driver` 249,649ms vs 27–45s；
+   `full-suite-runner-phases` 295,653ms vs 50–70s。这 6 个文件在同机**其他任务的每一轮里都是绿的**。
+   ⛔ **别用 suite 总时长判**：绿的一轮跑过 639s。
+4. **其中一个失败文件是【陈旧树】，与本 delta 无关，且已在上游修掉**：`driver-runtime.test.mjs:617`
+   当时断言 `procStartTimeMs(process.pid) > Date.now() - 60_000`——一条「模块加载到这一行必须 <60s」的
+   墙钟余量。该断言**已于 develop `2665cbf1d`**（"remove three load-broken hardcoded wall-clock margins"，
+   改为对 `process.uptime()` 取基准）修掉；其提交注释记的正是本形态（「并发负载下本文件耗时 139s
+   （隔离 36s）⇒ 余量被负载击穿、与任何缺陷无关」）。本分支当时**落后 develop 453 个提交**，跑的是
+   修复前那份 ⇒ **这条失败随本轮 merge 结构性消失**。
+5. 本 delta 只有 4 个文件（1 个新库 + 2 处 import 改写 + 1 条 catalog 声明）；直接 A/B 实测 driver 模块图
+   的 import 时间修复前后无差异（本 delta 0.89–1.94s / develop 版 0.69–1.35s，噪声主导）。
+6. 六项机械 `delta-relatedness` 均为 UNRELATED——**hint 不是结论**，故本轮按该 hint 的要求做了上述独立复核。
+
+⚠️ **边界**：本节是取证，**不是「suite 已绿」的断言**。按委派本轮只跑 scoped 门，AC5 仍交 fan-in 的
+suite 步裁定。
+
+### 9. 六个曾失败文件的【合并后】隔离重跑（本条是 §8 结论的直接验证）
+
+在并入 develop 之后，把上一轮 suite 里失败的**同一批 6 个文件**单独重跑一次（`scripts/test.sh <6 files>`）：
+
+```
+ℹ tests 306   ℹ pass 306   ℹ fail 0   ℹ cancelled 0   duration_ms 92758.96   EXIT=0
+```
+
+**与红轮的数直接对照**（同一批文件、同一份代码）：
+
+| 文件 | suite 红轮（争用下） | 本轮隔离重跑（6 个文件合计） |
+|---|---|---|
+| `driver-runtime` | 263,892ms **FAIL** | 整批 6 文件 **92,759ms / 306 pass / 0 fail** |
+| `worker-driver-fan-in` | 367,236ms **FAIL** | 同上 |
+| `full-suite-runner-phases` | 295,653ms **FAIL** | 同上 |
+| `closure-lag-check` | 232,191ms **FAIL** | 同上 |
+| `goal-driver` | 249,649ms **FAIL** | 同上 |
+| `fan-in-driver-mechanical-orchestration` | 204,832ms **FAIL** | 同上 |
+
+⇒ **6 个文件在争用下各自耗时 205–367s 且全部失败；隔离后 6 个合起来只要 93s 且全绿。**
+这是「争用 ⇒ 内部超时」的直接验证（硬规则 11b 的同类形态：读数要能取假——若这 6 个文件真有缺陷，
+隔离重跑必然仍红，而它没有）。
+
+⚠️ 仍须注意边界：本条**不是** AC5 的证据（AC5 要求全量 `scripts/test.sh` 且由 fan-in 的 suite 步裁定）。
+本条只证明「上一轮那 6 条失败在隔离下不复现」。
