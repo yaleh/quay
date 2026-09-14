@@ -300,6 +300,7 @@ EXIT=1                                    ✔ 与预期一致
 | 5 | `register-plugin.mjs` 调 `claude plugin install` 未传 `-y` | 我据此**先立了一条 gap，随后撤回**：真机上 postinstall **确实** materialize 成功（`[⑩d2] leg: postinstall`）⇒ 没有测量支持该断言，按硬规则 12 不作阻塞、不留假任务 | **撤回**（`task_delete`）。留作观察项 |
 | 6 | 本条实现自身的缺陷：argv 下标错位 / `set -u` 同语句词展开 / 版本与 CLI 候选的**读在装之前** / 把 host KEY 当连接名传 / 判据比 criterion 更严 | 全部是「我认为」而非「我测过」的产物 | **就地修**并各补一个**能取假**的控制（selfcheck 三态控制 + `ac258-smoke.sh` 本地预演台） |
 | 7 | 本文件里 `--selfcheck` 对 AC 条数的**写死字面量**（`15 AC registered`，注释里还留着 13→14→15 的手改史） | 与「真的坏了」同形；AC-257 已在**另一个**测试文件改过，本条是兄弟文件里的残留（硬规则 5b） | **就地修**：改为从 `AC_RECORD_SCHEMA`（单一真源）**推导**条数，并顺带钉住 GOAL-018 两条 |
+| 8 | 交付流程把「目标机能否跑 worker」这个**可秒级探测**的后置条件排在**三步破坏性且自耗**的动作（删键/持久安装/quay-init 重跑）之后 ⇒ 一次环境故障的代价从「1 秒探测失败」放大为「一整轮报废 + 手工重置夹具」。本轮当场实测：凭据被清空，meta-cc 的 worker 起不来，而前三步已全部执行 | 环境会坏，但**步骤序不可逆**：后置条件可先探测却排在最后 | **另立** `gap-ac258-pipeline-destructive-steps-before-worker-preflight`（本轮立案，finding 形状） |
 
 **未阻断本 AC 但登记在案的观察项（⛔ 不就地改被取证对象）**：
 - `quay-init` 在 meta-cc 留下未跟踪的 `.claude/launch.settings.json.bak.<ts>`（`dirty=1`）⇒ 会让该项目
@@ -309,41 +310,138 @@ EXIT=1                                    ✔ 与预期一致
 - 立案读数 `installed_plugins.json` 的 `quay@quay` = 16 条，本次当场读到 **18** 条（多出两条 project-scope
   探测残留）⇒ 读数会随机器漂移，判据必须当场重读（本模式就是这么做的）。
 
+### 本轮续做（2026-09-14 15:4x–16:1xZ）：复核 + 三条未勾 AC 的当场读数
+
+⚠️ 结论先说：AC1–AC7/AC9/AC10/AC13 复核**全部仍然成立**（读数见下）；AC8/AC11/AC12 **仍然结构上阻断**，
+本轮把成因从上一轮的「OAuth session expired」精确到「**凭据被清空 + 该机没有本机那套代理 env**」
+（见 `## Blocker`）。三条**保持未勾**。
+
+**① 工作树与门（driver fan-in 的同一条命令）**
+- 起点：worktree 工作树 clean；合并前分支 tip `ebe1b9011` **领先 develop 10 提交 / 落后 4 提交**
+  （`git rev-list --count 7ebee56ab..ebe1b9011` = 10，`git rev-list --count ebe1b9011..7ebee56ab` = 4）。
+- `git merge --no-edit develop` ⇒ 无冲突，生成合并提交 `ebe94c24f`（parents `ebe1b9011` + `7ebee56ab`）。
+- scoped 门 `bash scripts/test.sh --for-task gap-ac258-… --allow-thin` ⇒ **exit 0（绿）**。
+- scoped-gate 缓存按**本轮实际门过的 develop tip** 写入：`--develop-sha $(git rev-parse HEAD^2)`
+  = `7ebee56ab9c6067613be2e9bee2e071e3f8956ca`。⛔ **没有**用 `git rev-parse develop`（= `7e9c6cf41`，
+  那是合并之后才前进的 ref）——用它会把**本轮没有门过的 sha** 记进缓存。
+
+**② AC9 / AC10 复核（产出侧，本机可判）**
+- `grep -c 'GOAL-018-AC-258' plugin/scripts/verify-deliver-coldstart.sh` = **2**；前两条命中：
+  `:2237` writer 实写 `ac_record_append ",…AC-258…"` 与 `:7024` `AC_RECORD_SCHEMA` 声明行
+  `GOAL-018-AC-258 host:str project_root:str install_scope:str quay_version:str quay_init_rerun:bool
+  merge_preserved:bool marketplace_path:str provider_path:str task_status:str commit_sha:str produced_by_driver:bool`。
+- `--ac-record-schema-report` 该行仍 **`[ok] criterion=11 schema=11 writer=11`**；末行
+  `16 AC registered, 16 producer(s) in script, missing(criterion-vs-schema)=0 missing(criterion-vs-writer)=0
+  missing(schema-vs-writer)=0 surplus=1 unregistered=0 not-evaluated=0`（`surplus=1` 仍是既有的
+  `GOAL-009-AC-239`/`commit_files`，与本任务无关）。
+- `--selfcheck` ⇒ **exit 0**，ac258 的**全部**正/负控制仍符合期望：`positive(all 11 fields) wrote=1 lines=0→1`；
+  `negative(merge_preserved omitted) refused=1 lines=1→1`；`negative(install_scope omitted) refused=1`；
+  `wrong-scope(project) refused=1`；`every-field-enforced 11/11`；`probe-path-negatives 2/2`；
+  `non-quay keyset unchanged=1 / changed=1`（两方向都取得到，⛔ 非常量）；`user-scope entry three states 0/1/2`；
+  `delete three places quay-left 0/0/0 non-quay-preserved=1`。
+
+**③ AC12「落账前」半（原样执行 criterion）**
+- 取法：goal 文件的 `criterion:` 折叠标量经 `yaml.safe_load` 取出后原样 `bash -c`，cwd = 仓根
+  `/home/yale/work/quay`（实测该值是 1387 字符、含 26 个换行的**真多行**文本）。
+- 载体 `/home/yale/work/quay/.quay/productization-verification.jsonl` **168 行**；`GOAL-018-AC-258` 命中 = **0**。
+- `EXIT = 1`；stderr 逐字：`AC-258: no qualifying record (need host=orangevps,
+  project_root=/home/yale/work/meta-cc, install_scope=user, quay_version=0.7.0, quay_init_rerun=true,
+  merge_preserved=true, a non-probe marketplace/provider path, task_status=done, commit_sha set,
+  produced_by_driver=true)` ⇒ 与 AC12「落账前须 exit 1」一致。
+
+**④ AC4/AC5/AC6/AC7 的终点态当场重读（orangevps，⛔ 不是采信上一轮读数）**
+```
+settings.json 847 B
+  extraKnownMarketplaces.quay.source.path = /home/yale/.local/opt/quay/0.7.0/lib/node_modules/quay/plugin
+  known_marketplaces.quay.source.path     = 同左（两处一致，且都不匹配 verify-|probe|/tmp/）
+  installed_plugins.json 的 quay@quay 现存 2 条，其中 USER 条：
+    {"scope":"user","version":"0.7.0","installPath":"/home/yale/.claude/plugins/cache/quay/quay/0.7.0"}
+  非 quay 键集逐字保留：ekm {baime,manda,meta-cc-marketplace} / ep {baime@baime,manda@manda,meta-cc@meta-cc-marketplace}
+meta-cc（当场重读）：branch=main head=b8bb887 tasks=103
+  .quay/config.yml md5 = e0367a16cd927fe5179b75295fcd4e39      ← 与 AC6 的「重跑后」读数逐字相同
+  .claude/settings.json 存在（130 B，Sep 14 15:12）             ← 与 AC6 的 <absent>→… 一致
+  .quay/gate-events.jsonl = 155 行（>0 —— produced_by_driver 的另一半条件已具备）
+  git log --grep=quay-init ⇒ 59c1078 chore(quay-init): initialize quay project files (plugin v0.7.0) 仍在
+  ⚠️ 方法学更正：首次用 `git log --oneline --all -12 | grep -i quay-init` 报 NONE —— 那是 `-12` 截断
+     造成的**假阴性**；换成 `git log --all --grep=quay-init` 才拿到上面这条（硬规则 2/5：
+     截断的枚举会把「不在窗口内」读成「不存在」）。
+```
+⇒ AC4/AC5/AC6/AC7 的终点态**完全仍在**；且机器**当前停在终点态**：判据要的「起点」（指向探测路径的
+注册）已不存在 ⇒ 下一次重跑**必须先跑 `~/ac258-fixture-reset.sh` 把夹具恢复到起点**。
+
+**⑤ meta-cc 上被驱动的那条任务的现状（当场重读）**
+```
+tasks/FIX-MCP-SCANNER.md: status=todo  needs_human_cause=human-adjudication  带自己的 ## Needs-Human
+  其 AC 一条都未勾（make check-no-scanner 去掉豁免 / >64KiB 单行测试 / make commit 绿）
+  ⇒ 目标项目那条任务也卡在同一堵墙上
+```
+
+**⑥ 为什么本轮【没有】把 AC8/AC11/AC12 标 `（待外部）`（判据语义，⛔ 不是遗漏）**
+`ready-pool-check.ts:874` 的闭枚举逐字：`（待外部）` = 「depends only on an EXTERNAL event
+(suite green / outer verification / someone's merge)」；`（待本任务）` = 「this task's OWN
+implementation/evidence to produce」，且**未标注默认 = 待本任务（fail-closed）**。
+这三条的剩余工作 = **本任务自己要去执行的那一趟真实运行**（`todo→done` 尚未发生、载体记录尚不存在）
+⇒ 语义上是 `（待本任务）`。若标 `（待外部）`，`fan-in-ac-completion-gate` 会据此**允许翻 done**
+（「remaining unchecked 均为（待外部）⇒ PASS, flip allowed」），而 AC-258 的 criterion 仍 exit 1、
+DoD 逐字写着「⛔ 只登记 schema + 写 writer 而不在 orangevps 真跑，不算达成」⇒ 那是**伪造完成**，本条不写。
+（同族纪律：`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable` 的 AC6
+逐字「若某宿主结构上不具备条件，**照实报告**…⛔ 不得为凑绿而伪造」。）
+
+**⑦ 本轮新立案的机制缺陷（AC13 表已加第 8 行）**
+`gap-ac258-pipeline-destructive-steps-before-worker-preflight`（finding 形状，status: todo，本轮经
+`quay:quay-task` 立案并回读确认）：交付流程把「目标机能否跑 worker」这个**可秒级探测**的后置条件排在
+**三步破坏性且自耗**的动作（删键/持久安装/quay-init 重跑）之后，一次环境故障的代价因此从
+「1 秒探测失败」放大为「一整轮报废 + 手工重置夹具」。
+
 ## Blocker（结构上阻断 AC-258 的产出，按 Plan 的处置边界记 needs-human）
 
-**阻断点**：**orangevps 上的 Claude Code 凭据已失效** ⇒ 该机**无法运行任何 worker** ⇒
-「由 meta-cc 自己的 drivers 驱动 `todo→ready→done` 并留下一笔非记账实现提交」这条**结构上不可达**。
+**阻断点（本轮当场重读后精确化）**：orangevps 上 Claude Code 的凭据**不是「过期」，是被清空的**，
+且该机**没有本机那套代理凭据** ⇒ 该机**无法运行任何 worker** ⇒「由 meta-cc 自己的 drivers 驱动一条
+真实任务 `todo→ready→done` 并留下非记账实现提交」**结构上不可达**；AC11（载体落账）与 AC12
+（判据 exit 0）随之不可达。
 
-**证据（三条互相独立，都是外部可核的直接量）**：
+**证据（三条互相独立，全部外部可核；本轮当场重读）**
 ```
-① meta-cc 自己的 worker-driver 日志：/home/yale/work/meta-cc/.quay/worker-driver.log
-     Failed to authenticate: OAuth session expired and could not be refreshed
-     [claude-code:unrecognized_model] {"model":"deepseek-v4-pro","query_source":"sdk"}
-② meta-cc 自己的 task 体把成因写成 needs-human：
-     执行 2026-09-14T15:14:19.135Z — 阻碍原因：worker-driver 连续 3 次 <60000ms 快速死亡（退避上限）
-③ 独立探针（本任务直接跑，⛔ 不依赖驱动自报）：
-     $ ssh orangevps 'bash -lc "claude -p \"say ok\""'
-     Failed to authenticate: OAuth session expired and could not be refreshed
-     PROBE_RC=1
+① 凭据文件本体（直接量，⛔ 不是自报）：
+   ~/.claude/.credentials.json（280 B，2026-08-18 16:27）
+     accessToken  = ""    （len 0）
+     refreshToken = ""    （len 0）
+     expiresAt    = 0
+     scopes = [user:file_upload, user:inference, user:mcp_servers, user:profile, user:sessions:claude_code]
+   ⇒ 刷新令牌本身是空的 ⇒ 不存在任何非交互的恢复路径。
+   （上一轮写的「OAuth session expired」会让人以为可以自动刷新 —— 本轮读数证否。）
+② 该机没有本机那套代理凭据：
+   ssh orangevps 'bash -lc "env | grep -i anthropic"'                        ⇒ 空
+   ssh orangevps grep -ic anthropic ~/.claude/settings.json ~/.bashrc ~/.profile ⇒ 0 / 0 / 0；无 *.env、无 ~/.config/claude*
+   对照（本机 boheidc）：ANTHROPIC_BASE_URL=https://fjbigmodel.fjdac.cn/ + ANTHROPIC_AUTH_TOKEN=<set>
+   ⇒ 本机与 orangevps 是**两台不同机器**（hostname boheidc / orangevps；/home/yale/work/meta-cc 只存在于后者）：
+     本机靠代理 env 跑 Claude Code，orangevps 只能走已死的 OAuth。
+③ 独立探针 + 目标项目自己的驱动日志：
+   ssh orangevps 'bash -lc "claude -p \"say ok\""' ⇒ Failed to authenticate: OAuth session expired and could not be refreshed
+   /home/yale/work/meta-cc/.quay/worker-driver.log ⇒ 同一条 + [claude-code:unrecognized_model] {"model":"deepseek-v4-pro","query_source":"sdk"}
+   meta-cc 自己的任务体 ⇒ worker-driver 连续 3 次 <60000ms 快速死亡 ⇒ ready→needs-human
 ```
-**不是本任务能修的东西**：`~/.claude/.credentials.json`（280 B，2026-08-18）是 OAuth 会话，
-刷新需要交互式登录；该机上没有任何 `ANTHROPIC_*` 环境变量或已配置的备用凭据路径。
-**⛔ 我没有把本机的 `ANTHROPIC_*` 凭据投送到 orangevps** —— 那是一次把凭据复制到另一台主机的、
-不可逆且面向外部的动作，本任务没有授权它，也没有任何既有机制在做这件事
-（`grep -rn 'ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|credentials.json'` 在
-`verify-deliver-coldstart.sh` / `develop-deliver-tgz.sh` 里零命中 ⇒ 既有的兄弟流程
-（AC-207/AC-257）靠的是**目标机自己的**登录态，不是投送凭据）。
+⚠️ `unrecognized_model` 那条**是伴随症状不是成因**：`deepseek-v4-pro` 是本机代理上的模型名，
+orangevps 没有该代理 ⇒ 即使凭据恢复，meta-cc 的 worker 仍需那个模型名可达。
 
-**⇒ 要恢复本 AC，需要人先在那台机器上重新登录 Claude Code，然后重跑本模式**：
-```bash
-bash plugin/scripts/develop-deliver-tgz.sh --hosts B --verify-ac258 \
-  --target-root /home/yale/work/meta-cc \
-  --ac258-task-id FIX-MCP-SCANNER \
-  --ac258-task-body /home/yale/ac258-evidence/ac258-task-body-nofm.md
-```
-（重跑前需把 user scope 的三处注册恢复到「指向探测路径」的起点 —— 本任务用
-`~/ac258-fixture-reset.sh` 做过两次并把 md5 留在 `.quay/ac258-fixture-reset*.txt`：
-该实验在定义上会吃掉自己的前提（删键→重注册），这与 AC-257 的 ⑨b 基线重置同一性质。）
+**恢复本 AC 需要人的动作（二选一，都超出本任务授权面）**
+- **(A) 人恢复那台机器的登录（推荐）**：`ssh orangevps` 后跑一次交互式 `claude` 并 `/login`
+  （或 `claude setup-token`），然后重跑：
+  ```bash
+  bash plugin/scripts/develop-deliver-tgz.sh --hosts B --verify-ac258 \
+    --target-root /home/yale/work/meta-cc \
+    --ac258-task-id FIX-MCP-SCANNER \
+    --ac258-task-body /home/yale/ac258-evidence/ac258-task-body-nofm.md
+  ```
+- **(B) 人显式授权把本机的代理凭据投送到 orangevps**（`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`）。
+  ⛔ **本轮我没有做这件事**：把凭据复制到另一台主机是不可逆且面向外部的动作，本任务没有授权它，
+  也没有任何既有机制在做（`verify-deliver-coldstart.sh` / `develop-deliver-tgz.sh` 里
+  `grep -nE 'ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|credentials.json'` 零命中 ⇒ 兄弟流程
+  （AC-207/AC-257）靠的是**目标机自己的**登录态）。要选 B 请**显式授权**。
+
+**重跑前必须先把夹具恢复到起点**（该实验定义上会吃掉自己的前提：删键→重注册）：
+`~/ac258-fixture-reset.sh` 已用过两次并把 md5 留在 `.quay/ac258-fixture-reset*.txt`；本轮重读确认
+机器当前停在**终点态**（注册已指向持久路径、`installed_plugins` 探测残留已清）⇒ 直接重跑不会经过判据要的起点。
 ## Needs-Human
 
 **执行 2026-09-14T15:39:54.714Z — 连续修满重试上限仍不合格（标 needs-human）**
