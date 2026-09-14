@@ -52,10 +52,12 @@ exit 0
 5. 同步 `.github/workflows/ci.yml:120` 的注释「8 version-bearing artifacts」为实际条数（**仅注释行**，不改 job 逻辑）。
 6. ⛔ **明确不动** `plugin/scripts/direct-to-develop-bypass-check.ts:309`：那里的「'All 8 files carry version 0.6.1'」是 ruled 表里对既提交 `a388ca38` 的**历史引文**，改它等于篡改历史记录。
 
+**7.（执行期追加的越界解阻，非原计划——如实记录）** scoped 门实测红在 `quay-init-closure-ratchet-stale`：**与本次 delta 无关的既存全仓红**（主检出同读 `changed: plugin/.claude-plugin/plugin.json`，且 `git diff develop -- plugin/.claude-plugin/plugin.json` 为空）。根因：`92c5b1b15`（0.6.2→0.6.3 bump）改了被 fingerprint 的 source `plugin.json` 却**漏了 re-anchor**——上一次 `9ea261f14` 是 bump 后跟了一个 re-anchor chore 提交，这次没跟。**已实测零增长**（`--gate`：3 files / 1022 bytes = baseline 3/1022，因 0.6.2→0.6.3 同长度 ⇒ 只动 sha 不动字节轴）⇒ `--reanchor` 是**纯新鲜度刷新、不掩盖任何增长**。已在 worktree 执行 `--reanchor`（files/bytes 逐字不变，仅 `fingerprint` 与 `plugin.json` 的 `sha` 刷新），`--check-stale` 转 PASS。故 `docs/analysis/quay-init-closure-ratchet.baseline.json` 进入本任务 Touches。
+
 **已知边界（诚实声明）**：该检查器**不在 `scripts/test.sh` 的本地 static-check 集内**（本地套件 glob 为 `packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs`，不含 `scripts/*.test.ts`），其执行点是 CI job `version-consistency` 与 mutation case（`plugin/test/checker-mutation-check.test.mjs`，在本地 glob 内）。把它接入 `plugin/scripts/runner-static-gate.ts` 的 `run_static_checks` 属**另一个机制裁决**，不在本任务范围内（⛔ 不顺手扩大）。
 
 <!-- dedup-ref -->
-**与既有任务的关系（追溯，不构成本任务的额外声明）**：`tasks/gap-ac259-version-union-lockstep-and-host-install-readings.md`（**todo**，claim `goal_ac: AC-259`）第 1 步要往同一个 `VERSION_ENTRIES` 里加 `plugin/VERSION`，并同步同一份单测与 mutation fixture。两者是**同一个数组的并集**（它加 `plugin/VERSION`，本任务加 `plugin/README.md`），不是二选一；后落地者 `git merge develop` 取并集，⛔ 不凭记忆重写整段数组。历史 `gap-ac169-delivery-surface-doc-sync`（done）是本 AC 的**前一次未守住**的修复，其结论不被本任务采信。
+**与既有任务的关系（追溯，不构成本任务的额外声明）**：`tasks/gap-ac259-version-union-lockstep-and-host-install-readings.md`（**todo**，claim `goal_ac: AC-259`）第 1 步要往同一个 `VERSION_ENTRIES` 里加 `plugin/VERSION`，并同步同一份单测与 mutation fixture。两者是**同一个数组的并集**（它加 `plugin/VERSION`，本任务加 `plugin/README.md`），不是二选一；后落地者 `git merge develop` 取并集，⛔ 不凭记忆重写整段数组。历史 `gap-ac169-delivery-surface-doc-sync`（done）是本 AC 的**前一次未守住**的修复，其结论不被本任务采信。第 7 步与 `gap-quay-init-closure-ratchet-manual-reanchor-recurs`（done）同源但**不是同一条**：那条治的是**字节轴增长**（footprint grew），本条遇到的是**新鲜度轴**（source sha 变了而 baseline 未 re-anchor，字节轴零增长）——该任务未覆盖后者。
 
 ## AC
 
@@ -79,4 +81,5 @@ exit 0
 - scripts/version-consistency-check.test.ts
 - plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - .github/workflows/ci.yml
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-ac169-readme-version-not-in-version-consistency-set.md
