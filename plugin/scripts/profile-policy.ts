@@ -44,6 +44,11 @@ export interface RoleSpec {
   bare?: boolean;
   env?: Record<string, string>;
   unset?: string[];
+  /** gap-worker-mcp-blacklist-strict-config：本 role 派发时**不连接**的 MCP server 名。
+   *  ⚠️ 必须挂在【角色】层而不是共享 profile 层：outer 与三个 worker role 共享 worker-default，
+   *  而 outer 按 ADR-010 milestone e2e 可能真需要浏览器工具 ⇒ 挂 profile 会把它连坐。
+   *  缺省/空 ⇒ 该 role 的 argv 与改动前逐字一致（不追加任何 mcp flag）。 */
+  mcpBlacklist?: string[];
 }
 
 /** .quay/profiles.yml 的顶层形状。 */
@@ -69,6 +74,9 @@ export interface ResolvedProfile {
 /** 解析后的一份 role（kind → profile + name）。 */
 export interface ResolvedRole extends ResolvedProfile {
   name: string;
+  /** 该 role 的 MCP 黑名单（角色层，⛔ 不从 profile 继承——见 RoleSpec.mcpBlacklist）。
+   *  未声明 ⇒ 空数组（「不排除任何 server」与「排除空集」在这里同义且都是显式的）。 */
+  mcpBlacklist: string[];
 }
 
 /** resolveRole 的可选信号：判定某个 model 是否可用（主备回退的触发面）。
@@ -159,6 +167,8 @@ export function resolveRole(config: ProfilesConfig, roleName: string, opts: Reso
     env,
     fallbackModel,
     name: role.name ?? roleName,
+    // 角色层字段：⛔ 不读 profile（shared worker-default 上的黑名单会连坐 outer）。
+    mcpBlacklist: role.mcpBlacklist ?? [],
   };
 }
 
@@ -184,6 +194,14 @@ export function validateProfiles(config: ProfilesConfig): { ok: boolean; errors:
     if (p.extends !== undefined && !(p.extends in profiles)) {
       errors.push(`profile "${name}": extends references unknown profile "${p.extends}"`);
     }
+    // mcpBlacklist 是【角色层】字段：挂到共享 profile 上会把同 profile 的别的 role 连坐
+    // （worker-default 被 outer 与三个 worker role 共享；outer 按 ADR-010 可能真需要浏览器工具）。
+    // schema 封闭 ⇒ 位置性错误在加载时被拒，⛔ 不是靠 review。下一条 assert 让 TS 也拒绝这个写法。
+    if ("mcpBlacklist" in (p as Record<string, unknown>)) {
+      errors.push(
+        `profile "${name}": mcpBlacklist is a ROLE-level field — putting it on a shared profile would blacklist MCP servers for every role sharing it (e.g. outer on worker-default)`
+      );
+    }
     // extends 循环由 resolveProfile 抛错；这里用干跑捕获，把它转成一条 error 而非 throw。
     if (p.extends !== undefined && p.extends in profiles) {
       try {
@@ -197,6 +215,12 @@ export function validateProfiles(config: ProfilesConfig): { ok: boolean; errors:
   for (const [name, r] of Object.entries(roles)) {
     if (!(r.profile in profiles)) {
       errors.push(`role "${name}": references unknown profile "${r.profile}"`);
+    }
+    // 角色层 mcpBlacklist：必须是字符串数组（封闭 schema；读不懂 ⇒ 拒，⛔ 不当空数组放过）。
+    if (r.mcpBlacklist !== undefined) {
+      if (!Array.isArray(r.mcpBlacklist) || r.mcpBlacklist.some((s) => typeof s !== "string" || s.trim() === "")) {
+        errors.push(`role "${name}": mcpBlacklist must be a non-empty-string array, got ${JSON.stringify(r.mcpBlacklist)}`);
+      }
     }
   }
 

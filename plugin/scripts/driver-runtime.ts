@@ -80,6 +80,7 @@ import { isDue } from "./routine-scheduler.ts";
 // Layer 0 · profile → L2 policy（gap-driver-binding-semantic-kind-to-profile：launchArgv 经 policy 解析
 // 语义 kind → profile，⛔ 不各自解析 profiles.yml / 不硬编码 launcher/model）。
 import { loadProfiles, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
+import { rootsFromEnv, mcpConfigArgvSuffix, type McpConfigRoots } from "./mcp-blacklist-resolve.ts";
 
 // ── Layer 0 · ResultVocab / controlPlane（re-export，单一真相源）────────────────────────────────────
 // 三种 driver 全部经本文件消费这些词表/控制面；⛔ 不得在 kind 里另写一份。
@@ -701,9 +702,22 @@ function launchSettingsArg(root: string, config: ProfilesConfig, kind: string, r
   return needsJson ? JSON.stringify({ ...settings, env }) : settingsFile;
 }
 
+/** `launchArgv` 的可选缝。全部缺省 ⇒ 生产行为（读真实 profiles.yml / 真实配置根）。 */
+export interface LaunchArgvOpts {
+  /** MCP 配置根覆盖（测试缝，AC7）：`null` = 显式「解析不出」⇒ 不追加任何 mcp flag；
+   *  缺省（undefined）⇒ 生产路径（env 缝 / 真实 `~/.claude*`）。⛔ 用 undefined vs null 区分
+   *  「没传」与「传了、结论是不可用」——两者动作相同但成因不同，测试要能分别钉住。 */
+  mcpRoots?: McpConfigRoots | null;
+}
+
 /** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。经 L2 policy 解析
- *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。 */
-export function launchArgv(role: string, prompt: string, root: string): string[] {
+ *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。
+ *
+ *  MCP 黑名单（gap-worker-mcp-blacklist-strict-config）：若该 role 声明了非空 `mcpBlacklist`，
+ *  枚举当前实际配置的 MCP server、减去黑名单，追加 `--strict-mcp-config --mcp-config <inline json>`。
+ *  ⛔ 解析不出（读不懂输入）⇒ 一个 flag 都不加（回退原样派发）——这是资源优化，不是正确性闸。
+ *  空黑名单（如 outer）⇒ 逐字不变的 argv（AC1 负控制：共享 profile 不连坐）。 */
+export function launchArgv(role: string, prompt: string, root: string, opts: LaunchArgvOpts = {}): string[] {
   const config = loadProfiles(root); // L2：读 + 校验 profiles.yml（加载校验 AC2）
   const resolved = resolveRole(config, role); // L2：kind → profile（主备回退 / 继承去重）
   if (!resolved.launcher || !resolved.name) {
@@ -714,6 +728,10 @@ export function launchArgv(role: string, prompt: string, root: string): string[]
   if (config.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
   if (resolved.model) argv.push("--model", resolved.model);
   if (resolved.bare) argv.push("--bare");
+  if (resolved.mcpBlacklist.length > 0) {
+    const roots = opts.mcpRoots !== undefined ? opts.mcpRoots : rootsFromEnv([root], process.env, resolveKernelPluginRoot());
+    if (roots) argv.push(...mcpConfigArgvSuffix(resolved.mcpBlacklist, roots));
+  }
   argv.push("-n", resolved.name, "-p", prompt);
   return argv;
 }
