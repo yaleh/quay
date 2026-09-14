@@ -125,9 +125,10 @@ fallback 本身再失败 ⇒ **重抛原始错误**（硬规则 3b：不得把"�
 **AC1 负控制**：仓库顶层 `plugin/scripts/` 下两个文件 `--help` 均 exit=0（未嵌套场景行为不变）。
 **bundled 形态**：`build-plugin-dist.mjs` 在 HEAD 树与修复后树各跑一次，均为 **87 个 entrypoints**
 （无增减）；`node <staged>/scripts/dist/touches-orthogonality-check.js --help`（**裸 node、不带
-`--experimental-strip-types`**）exit=0，`dist/driver-runtime.js` 可 import —— shipped 形态仍自包含
-（bundle 内残留的 `packages/quay/src/runtime-artifacts.ts` 只是 `__esm` 注册表键与源边界注释，
-fallback 那行在 bundle 里是**取不到的死码**：primary 已内联，不会抛）。
+`--experimental-strip-types`**）exit=0（`fast-mode-telemetry.js` 同），`dist/driver-runtime.js` 可
+import，且两 bundle 内含 `resolveCoreSrcFile`（`core-src-import.ts` 被 INLINE，不需要自己成为 entry）
+—— shipped 形态仍自包含（bundle 内残留的 `packages/quay/src/runtime-artifacts.ts` 只是 `__esm`
+注册表键与源边界注释，fallback 那行在 bundle 里是**取不到的死码**：primary 已内联，不会抛）。
 
 ### 4. AC4 同类清单（实测枚举，按位置判定非关键词）
 
@@ -165,19 +166,36 @@ fallback 那行在 bundle 里是**取不到的死码**：primary 已内联，不
 （15 文件/20 处）**——`grep` 是"类"的检测器，不是"缺陷"的检测器；判断某处是否已修必须**跑它**，
 不能数 grep。上表的"残余状态"就是这么测出来的。
 
+### 5. 本任务自身跑过的门（AC5 之外）
+
+- **scoped 门**（`scripts/test.sh --for-task <id> --allow-thin`）：绿。选择器给出 2 个文件
+  （`packages/quay/test/build-plugin-dist.test.mjs` + `plugin/test/touches-orthogonality-check.test.mjs`），
+  实测 **86 tests / 86 pass / 0 fail，exit 0**。
+- **定向测试**：`touches-{orthogonality-check,parser-parity,one-entry-one-path-check}`、
+  `self-touch-convention`、`capability-catalog`、`rhythm-consumer-check`、`repo-root-unification`
+  = **153 tests / 0 fail**；`fast-mode-telemetry{,-gitignore,-halt}` + `driver-cli`
+  = **121 tests / 0 fail**。
+- **新脚本入件义务**：`capability-catalog.sh` 补 `core-src-import.ts` 声明后
+  `--summary` = 322 scripts / 322 declared / **0 unclassified**（exit 0）、`--entry-surface` exit 0、
+  `rhythm-consumer-check --check` exit 0。库脚本不需要 `runner-static-gate.ts` 登记
+  （与 `touches-parser.ts` 同形，实测该文件在 registry 中出现 0 次）。
+- ⚠️ **一次假绿已排除**：修复 staged 副本的 scratch 干扰后曾出现一次「0 输出 + exit 0」，经查是
+  `--allow-thin` 在**选择器返回 0 个文件**时的静默放行路径（`test.sh:1586`）。本次 AC 依据的是
+  **前台重跑、有 86 条实测输出**的那一次，不是那次空日志（硬规则：空日志 = 什么都没跑）。
+
 ## Acceptance Criteria
 
-- [ ] AC1 在仓库顶层 `plugin/scripts/` 直接运行 `touches-orthogonality-check.ts`（现有行为）仍然正常
+- [x] AC1 在仓库顶层 `plugin/scripts/` 直接运行 `touches-orthogonality-check.ts`（现有行为）仍然正常
       工作（负控制：本任务不能破坏未嵌套场景下的既有行为）。
-- [ ] AC2 构造一份 staged 副本（复现 `package.sh` 的拷贝步骤，或直接对现有 `packages/quay/plugin/`
+- [x] AC2 构造一份 staged 副本（复现 `package.sh` 的拷贝步骤，或直接对现有 `packages/quay/plugin/`
       跑一次同类刷新），在这份副本路径下运行同一个文件，**不再**报 `ERR_MODULE_NOT_FOUND`。
-- [ ] AC3 `quay driver status`/`quay driver restart --kind <any>`（不带 `QUAY_PLUGIN_ROOT` 覆盖）在
+- [x] AC3 `quay driver status`/`quay driver restart --kind <any>`（不带 `QUAY_PLUGIN_ROOT` 覆盖）在
       staged 副本处于"刚完整刷新"状态时，跑通不报错——这是这次真实撞到的触发条件，必须直接复现并
       验证修复。
-- [ ] AC4 `grep -rn '"\.\./\.\./packages/quay/src"' plugin/scripts/*.ts` 的命中数与本任务处理前的命中数
+- [x] AC4 `grep -rn '"\.\./\.\./packages/quay/src"' plugin/scripts/*.ts` 的命中数与本任务处理前的命中数
       对比，若发现其他文件有同类写死路径，须在本任务体里列出清单（不必在本任务里全部修完，但必须
       枚举出来，不能只顾自己撞到的这一个）。
-- [ ] AC5 全量 `scripts/test.sh` 绿。
+- [ ] AC5 全量 `scripts/test.sh` 绿；由 worker-driver 机械 fan-in 的 suite 步骤验证（本 worker 按委派只跑 scoped 门，见 §5）（待外部）
 
 ## Definition of Done
 

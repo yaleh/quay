@@ -37,13 +37,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 构造一个含 12 条 `status: ready` 任务的合成任务集，`renderTaskCard` 的输出里 `ready` 这个
+- [x] AC1 构造一个含 12 条 `status: ready` 任务的合成任务集，`renderTaskCard` 的输出里 `ready` 这个
       mini-list 必须包含 **10** 条（不是 3 条）——直接断言渲染出的行数。
-- [ ] AC2 构造一个含 5 条 `status: todo` 任务的合成任务集（真实小项目场景），`todo` 的 mini-list 必须
+- [x] AC2 构造一个含 5 条 `status: todo` 任务的合成任务集（真实小项目场景），`todo` 的 mini-list 必须
       包含全部 **5** 条（验证"真实数量小于新上限时应完整展示"这个人裁定的实际诉求）。
-- [ ] AC3 负控制：`done`/`superseded` 这两个终态状态的渲染路径不受影响——它们本来就只显示计数、没有
+- [x] AC3 负控制：`done`/`superseded` 这两个终态状态的渲染路径不受影响——它们本来就只显示计数、没有
       mini-list，本任务不得意外给它们也加上一个 mini-list。
-- [ ] AC4 全量 `scripts/test.sh` 绿。
+- [x] AC4 全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 
