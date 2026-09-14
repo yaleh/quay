@@ -141,8 +141,9 @@ worktree-include: verify FAILED — 1 of 3 declared file(s) absent from …
 
 ## DoD
 
-- [ ] 修法随 develop 落地 —— **fan-in 的机械步骤，本 worker 不自行合**；提交 `2b4048e3a` 在
-      `task/gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning` 上。
+- [ ] 修法随 develop 落地（待外部）
+      提交 `2b4048e3a` 已在本任务的 `task/gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning`
+      分支上；落地由本任务的 fan-in 机械完成，worker 不自行合 develop。
 - [x] 在真机上用一个全新 worktree 跑一次，三个声明文件真的到位（贴 `ls` 与 `diff` 读数）
       → 见 Evidence：`ls -l` 三个文件在位，三条 `diff` 全部 IDENTICAL。
 - [x] `dispatch-worktree-setup.sh` 的退出码在「一个文件都没拷」时为非 0
