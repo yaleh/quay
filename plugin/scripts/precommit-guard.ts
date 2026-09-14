@@ -71,6 +71,14 @@
 //   无 add commit 的路径 = 本提交正在新增它 ⇒ 按「现在立案」判；下限取生效线，使宿主时钟落后于生效线时
 //   也不得静默 grandfathered（fail-closed，硬规则 3b）。
 //
+//   ⛔ 本条【不是】该规则的执行面（gap-ac190-write-face-rule-unreachable-under-no-verify, 2026-09-14）。
+//   本 detector 只在 git `pre-commit` 钩子上跑，而生产立案路径根本不过钩子：`task_write` →
+//   `store.ts write()` → `commitStoreWrite()` → `git commit --no-verify`（store-commit.ts:13-15 把
+//   `--no-verify` 明写为设计），实测 370/400 条 tasks 提交是该形态 ⇒ ③ 在写者路径上【结构性不可达】
+//   （同硬规则 4 推论三：只有那条没人走的路径能满足它）。规则的执行面现落在 `packages/quay-native/
+//   src/store.ts` 的 write() 创建路径（判定正本 = `packages/quay/src/goal-ac-write-face.ts`），本
+//   detector 保留为【提交那一刻】的第二道判定，与 store 面共用同一个 `judgeStagedDeliveryCritical`。
+//
 // <!-- enforcement: plugin/scripts/precommit-guard.ts -->
 
 import fs from "node:fs";
@@ -80,17 +88,18 @@ import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
-// goal_ac write-surface judgment — the SAME pure functions the AC-190 detector uses (no second
-// string comparison; single source of the delivery-critical / goal_ac / activation-line semantics).
+// goal_ac write-surface judgment — the SAME pure functions the AC-190 detector and the STORE's
+// creation path use (no second string comparison; single source of the delivery-critical / goal_ac /
+// activation-line semantics — 正本 = packages/quay/src/goal-ac-write-face.ts, re-exported by the
+// detector so this file's import surface is unchanged).
 import {
   activationLineMs,
   filedAfterCutoff,
   hasGoalAc,
   isDeliveryCritical,
+  judgeStagedDeliveryCritical,
+  type StagedTaskCandidate,
 } from "./long-term-guarantee-goal-backed-check.ts";
-// Frontmatter reading routes through the ONE parser + the SAME projections the detector's readTasks
-// uses (task-schema.ts) — the staged blob is judged with the same field semantics as the disk read.
-import { parseFrontmatterCompletely, frontmatterLabels, frontmatterGoalAc } from "./task-schema.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -377,15 +386,10 @@ export interface GoalAcCheckResult {
   output: string;
 }
 
-/** A staged task candidate: the STAGED blob (what WILL be committed) + its first-add time. */
-export interface StagedTaskCandidate {
-  /** repo-relative path (`tasks/<id>.md`) — printed on rejection as the remediation location. */
-  rel: string;
-  /** the staged (index) content of the file. */
-  content: string;
-  /** first-add ms epoch; null when the path has NO add commit (⇒ this commit is filing it now). */
-  filedAtMs: number | null;
-}
+/** A staged task candidate: the STAGED blob (what WILL be committed) + its first-add time.
+ *  ⛔ The type (and the judgment below) live in Core (`packages/quay/src/goal-ac-write-face.ts`) and
+ *  are re-exported by the detector — the STORE's creation path runs the very same judgment, so this
+ *  file may not carry a second copy (gap-ac190-write-face-rule-unreachable-under-no-verify). */
 
 /**
  * First-add epoch ms of a repo-relative path — the committer date of the commit that ADDED it
@@ -409,47 +413,6 @@ export function pathFirstAddMs(root: string, rel: string): number | null {
 }
 
 /**
- * The write-surface position judgment: return the offender descriptions (empty = allow). Pure — the
- * caller supplies the candidates, so every branch is directly testable and every input axis
- * (label / goal_ac / first-add time / non-task path) can be driven to BOTH values (硬规则 4).
- *
- * The judgment is the detector's own (`isDeliveryCritical` ∧ `filedAfterCutoff` ∧ ¬`hasGoalAc`), in
- * the detector's own order, with the detector's activation line — the write surface cannot drift
- * from the round-level report (硬规则 1: one judgment, two moments).
- */
-export function judgeStagedDeliveryCritical(
-  candidates: readonly StagedTaskCandidate[],
-  cutoffMs: number = activationLineMs(),
-): string[] {
-  const offenders: string[] = [];
-  for (const c of candidates) {
-    const fmMatch = c.content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    // No frontmatter ⇒ not a task file this judgment can speak about (a deleted staged path, or a
-    // file whose shape is judged elsewhere: task-contract-check / the task-file-violation-ledger).
-    // ⛔ Not reported as a violation: this detector's subject is `delivery-critical` WITHOUT
-    // `goal_ac`, and an unreadable frontmatter cannot carry the label (硬规则 3b's mirror: it must
-    // not be reported as PASS either — it is simply not in this judgment's population).
-    if (!fmMatch) continue;
-    const fm = parseFrontmatterCompletely(fmMatch[1]) as Record<string, unknown>;
-    const id = path.basename(c.rel, ".md");
-    const task = {
-      id,
-      labels: frontmatterLabels(fm),
-      goal_ac: frontmatterGoalAc(fm),
-      // A path with no add commit IS being filed by the commit under judgment ⇒ "filed now". The
-      // floor is the activation line so a host clock BEHIND the cutoff cannot silently grandfather a
-      // brand-new file (fail-closed — the direction the detector's own 缺值⇒true takes).
-      filedAtMs: c.filedAtMs ?? Math.max(Date.now(), cutoffMs),
-    };
-    if (!isDeliveryCritical(task)) continue;
-    if (!filedAfterCutoff(task, cutoffMs)) continue; // pre-cutoff stock: same judgment ⇒ grandfathered
-    if (hasGoalAc(task)) continue;
-    offenders.push(`${c.rel} (id=${id})`);
-  }
-  return offenders;
-}
-
-/**
  * Run the goal_ac judgment over the staged task files. A commit with NO staged task file is always ok
  * (nothing to judge). The staged BLOB is read (`git show :<rel>`), not the working-tree copy — the
  * commit being judged carries the index content, and a working-tree edit that is not staged must not
@@ -463,7 +426,10 @@ export function runGoalAcChecks(root: string): GoalAcCheckResult {
     content: stagedBlob(root, rel),
     filedAtMs: pathFirstAddMs(root, rel),
   }));
-  const offenders = judgeStagedDeliveryCritical(candidates);
+  // The activation line is passed EXPLICITLY (identical to the judgment's own default) so the import
+  // stays load-bearing at this call site: the commit-moment judgment and the store's creation-time
+  // judgment must read the same cutoff from the same place (硬规则 1).
+  const offenders = judgeStagedDeliveryCritical(candidates, activationLineMs());
   if (offenders.length === 0) return { ok: true, output: "" };
   return { ok: false, output: offenders.join("\n") };
 }
