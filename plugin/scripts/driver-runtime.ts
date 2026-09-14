@@ -80,6 +80,7 @@ import { isDue } from "./routine-scheduler.ts";
 // Layer 0 · profile → L2 policy（gap-driver-binding-semantic-kind-to-profile：launchArgv 经 policy 解析
 // 语义 kind → profile，⛔ 不各自解析 profiles.yml / 不硬编码 launcher/model）。
 import { loadProfiles, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
+import { rootsFromEnv, mcpConfigArgvSuffix, type McpConfigRoots } from "./mcp-blacklist-resolve.ts";
 
 // ── Layer 0 · ResultVocab / controlPlane（re-export，单一真相源）────────────────────────────────────
 // 三种 driver 全部经本文件消费这些词表/控制面；⛔ 不得在 kind 里另写一份。
@@ -302,20 +303,55 @@ export function resolveKernelPluginRoot(): string {
   return path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
 }
 
+/** 本 kernel 是否跑在【源检出】里 —— Core 源码就在本 plugin root 旁边
+ *  （`<repo>/plugin/scripts/*.ts` + `<repo>/packages/quay/src/**`）。只有那里 raw `.ts` 才是真相源
+ *  （编辑即生效 + `sourceFilesMaxMtimeMs` 的源码自刷新）。
+ *
+ *  ⛔ 出厂安装一律以自包含 dist bundle 为可运行形态：npm-pack（raw .ts 直接不存在）、plugin
+ *  MARKETPLACE cache（`publish-dist-branch.sh` rsync 整个 plugin/，raw 与 dist 并存、且没有
+ *  node_modules 可解析 raw 的裸 npm import）、第三方 vendored 副本、`package.sh` 的 staged 快照。
+ *  实测 2026-09-14（gap-dist-plugin-missing-node-modules-task-schema-yaml）：在真实的
+ *  `~/.claude/plugins/cache/quay/quay/0.6.2` 上，raw kernel 的 23 文件 import 闭包需要 `yaml` /
+ *  `@modelcontextprotocol/sdk/*` / `zod`，`quay driver start` 对**每一个 kind** 都崩在
+ *  `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from <cache>/scripts/task-schema.ts`，
+ *  而同一目录的 `scripts/dist/driver-runtime.js` 跑同一个 verb 正常。出厂树是静态的（没有源码可
+ *  推进），选 raw 零收益、代价是启动即崩 ⇒ 判据是「是不是源检出」，⛔ 不是「哪个形态存在」。
+ *
+ *  ⛔ 镜像 Core `packages/quay/src/plugin-root.ts::isPluginSourceCheckout`（同一判据，从本 kernel
+ *  自身安装位置解析 —— kernel ⛔ 不能 import Core 模块）。两处必须同改。
+ *
+ *  ⛔ 本函数只做存在性探针，**不在这里第二次拼 `packages/quay/src`**：布局知识必须只存在于单一入口
+ *  （kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则——root 锚点拼法只允许出现在
+ *  `resolveQuayCodeRoot` / `resolveQuaySrcModule` / `quaySrcModuleLegacyShape` 三个函数体内；
+ *  实测 2026-09-14 本函数原先自己 `path.join(codeRoot, "packages", "quay", "src")` 时，
+ *  `kernel-sibling-resolution-check` 报 `driver-root-anchor` ⇒ 整轮 suite `# fail 5`）。
+ *  故取源树形的**目录**（`rel=""` ⇒ `path.join` 的末段空串被规范化掉，得 `<codeRoot>/packages/quay/src`
+ *  本身，与原本的目录级判据逐字等价），⛔ 不要改成探某个具体文件（夹具只建目录、不建文件）。 */
+export function isKernelSourceCheckout(): boolean {
+  const codeRoot = resolveQuayCodeRoot();
+  return !!codeRoot && fs.existsSync(quaySrcModuleLegacyShape(codeRoot, ""));
+}
+
 /** 解析本 kernel 的一个 sibling 脚本到可运行形态：原始 .ts（dev tree，用 --experimental-strip-types 跑）
  *  或 bundled dist/<name>.js（installed artifact，纯 ESM，不带 flag 跑）。两者都不在 ⇒ null（调用方
- *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。 */
+ *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。
+ *
+ *  ⛔ raw 只在【源检出】里胜出（isKernelSourceCheckout）：出厂安装里 raw 与 dist 并存时 dist 优先
+ *  —— 否则 supervisor 会 spawn 一个 import 不到 `yaml`/`zod`/`@modelcontextprotocol/sdk` 的裸 .ts，
+ *  六个 driver kind 全部启动即崩（`runSupervisor` 的 `spec.driver` 正是经本函数解析）。dist 不存在
+ *  ⇒ 退回 raw（保持既有行为，不把可解析的脚本变成 null）。 */
 export function resolveKernelSibling(name: string): { path: string; stripTypes: boolean } | null {
   const dir = resolveKernelScriptsDir();
   const raw = path.join(dir, name);
-  if (fs.existsSync(raw)) return { path: raw, stripTypes: true };
-  if (name.endsWith(".ts")) {
+  const isTs = name.endsWith(".ts");
+  if (fs.existsSync(raw) && (!isTs || isKernelSourceCheckout())) return { path: raw, stripTypes: true };
+  if (isTs) {
     const js = name.replace(/\.ts$/, ".js");
     const bundledDir = path.basename(dir) === "dist" ? dir : path.join(dir, "dist");
     const bundled = path.join(bundledDir, js);
     if (fs.existsSync(bundled)) return { path: bundled, stripTypes: false };
   }
-  return null;
+  return fs.existsSync(raw) ? { path: raw, stripTypes: isTs } : null;
 }
 
 /** 解析本 kernel 的一个 shell sibling（.sh）到 `<pluginRoot>/scripts/<name>`。shipped 下 .sh 以
@@ -701,9 +737,22 @@ function launchSettingsArg(root: string, config: ProfilesConfig, kind: string, r
   return needsJson ? JSON.stringify({ ...settings, env }) : settingsFile;
 }
 
+/** `launchArgv` 的可选缝。全部缺省 ⇒ 生产行为（读真实 profiles.yml / 真实配置根）。 */
+export interface LaunchArgvOpts {
+  /** MCP 配置根覆盖（测试缝，AC7）：`null` = 显式「解析不出」⇒ 不追加任何 mcp flag；
+   *  缺省（undefined）⇒ 生产路径（env 缝 / 真实 `~/.claude*`）。⛔ 用 undefined vs null 区分
+   *  「没传」与「传了、结论是不可用」——两者动作相同但成因不同，测试要能分别钉住。 */
+  mcpRoots?: McpConfigRoots | null;
+}
+
 /** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。经 L2 policy 解析
- *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。 */
-export function launchArgv(role: string, prompt: string, root: string): string[] {
+ *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。
+ *
+ *  MCP 黑名单（gap-worker-mcp-blacklist-strict-config）：若该 role 声明了非空 `mcpBlacklist`，
+ *  枚举当前实际配置的 MCP server、减去黑名单，追加 `--strict-mcp-config --mcp-config <inline json>`。
+ *  ⛔ 解析不出（读不懂输入）⇒ 一个 flag 都不加（回退原样派发）——这是资源优化，不是正确性闸。
+ *  空黑名单（如 outer）⇒ 逐字不变的 argv（AC1 负控制：共享 profile 不连坐）。 */
+export function launchArgv(role: string, prompt: string, root: string, opts: LaunchArgvOpts = {}): string[] {
   const config = loadProfiles(root); // L2：读 + 校验 profiles.yml（加载校验 AC2）
   const resolved = resolveRole(config, role); // L2：kind → profile（主备回退 / 继承去重）
   if (!resolved.launcher || !resolved.name) {
@@ -714,6 +763,10 @@ export function launchArgv(role: string, prompt: string, root: string): string[]
   if (config.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
   if (resolved.model) argv.push("--model", resolved.model);
   if (resolved.bare) argv.push("--bare");
+  if (resolved.mcpBlacklist.length > 0) {
+    const roots = opts.mcpRoots !== undefined ? opts.mcpRoots : rootsFromEnv([root], process.env, resolveKernelPluginRoot());
+    if (roots) argv.push(...mcpConfigArgvSuffix(resolved.mcpBlacklist, roots));
+  }
   argv.push("-n", resolved.name, "-p", prompt);
   return argv;
 }

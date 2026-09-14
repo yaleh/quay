@@ -255,3 +255,84 @@ test("SHIPPED — task-worker/fix-worker keep CLAUDE_CODE_PRINT_BG_WAIT_CEILING_
     assert.equal(r.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0");
   }
 });
+
+// ── ROLE-LEVEL mcpBlacklist（gap-worker-mcp-blacklist-strict-config AC1）──────────────────────────
+// 纯写代码的三个 role 派发时不连浏览器 MCP；⛔ 字段必须挂【角色】层——outer 与它们共享
+// worker-default profile，挂 profile 会把 outer 连坐（而 outer 按 ADR-010 可能真需要浏览器工具）。
+
+const BLACKLISTED_ROLES = ["task-worker", "selector", "fix-worker"];
+const MUST_NOT_BE_BLACKLISTED = ["outer", "manager", "pool-judge", "meta-driver"];
+
+test("AC1 — the three code-writing roles carry the role-level mcpBlacklist", () => {
+  const cfg = readProfilesConfig(REPO_ROOT);
+  for (const role of BLACKLISTED_ROLES) {
+    const r = resolveRole(cfg, role);
+    assert.deepEqual(
+      [...r.mcpBlacklist].sort(),
+      ["chrome-devtools", "playwright"],
+      `role ${role} must blacklist both browser MCP servers`,
+    );
+  }
+});
+
+test("AC1 negative control — outer/manager/pool-judge are NOT infected by the shared profile", () => {
+  const cfg = readProfilesConfig(REPO_ROOT);
+  // 前提：这些 role 确实与 task-worker 共享 worker-default（否则这条负控制是空转）。
+  assert.equal(cfg.roles["outer"].profile, cfg.roles["task-worker"].profile, "precondition: shared profile");
+  for (const role of MUST_NOT_BE_BLACKLISTED) {
+    const r = resolveRole(cfg, role);
+    assert.deepEqual(r.mcpBlacklist, [], `role ${role} must resolve an EMPTY blacklist`);
+  }
+  // profile 层本身不带该字段（角色层是唯一合法位置）。
+  assert.equal(cfg.profiles["worker-default"].mcpBlacklist, undefined);
+});
+
+test("AC1 — SHIPPED carrier carries the same role-level blacklist (⛔ not dev-tree only)", () => {
+  // quay-init lays plugin/.quay/profiles.yml verbatim into a consumer's .quay/profiles.yml
+  // (profiles-role-coverage-check.ts exists precisely because "fixed one copy, the init path laid
+  // down the other" shipped once). A dev-tree-only edit leaves the feature inert for every install.
+  const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
+  for (const role of BLACKLISTED_ROLES) {
+    assert.deepEqual([...resolveRole(shipped, role).mcpBlacklist].sort(), ["chrome-devtools", "playwright"]);
+  }
+  for (const role of MUST_NOT_BE_BLACKLISTED) {
+    assert.deepEqual(resolveRole(shipped, role).mcpBlacklist, []);
+  }
+});
+
+test("AC1 — negative control: the blacklist is FALSIFIABLE (a role without it resolves empty)", () => {
+  const cfg = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key" } },
+    roles: {
+      "task-worker": { profile: "w", name: "tw", mcpBlacklist: ["chrome-devtools"] },
+      selector: { profile: "w", name: "sel" },
+    },
+  };
+  assert.deepEqual(resolveRole(cfg, "task-worker").mcpBlacklist, ["chrome-devtools"]);
+  assert.deepEqual(resolveRole(cfg, "selector").mcpBlacklist, [], "same profile, no inheritance of the field");
+});
+
+test("AC1 — validateProfiles rejects mcpBlacklist on a PROFILE (positional error, not a review catch)", () => {
+  const cfg = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key", mcpBlacklist: ["playwright"] } },
+    roles: { "task-worker": { profile: "w", name: "tw" } },
+  };
+  const r = validateProfiles(cfg);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /ROLE-level/.test(e)), JSON.stringify(r.errors));
+});
+
+test("AC1 — validateProfiles rejects a malformed role-level blacklist (读不懂 ⇒ 拒，⛔ 不当空数组放过)", () => {
+  const base = (mcpBlacklist) => ({
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key" } },
+    roles: { "task-worker": { profile: "w", name: "tw", mcpBlacklist } },
+  });
+  for (const bad of ["playwright", [1, 2], [""], ["  "], {}]) {
+    const r = validateProfiles(base(bad));
+    assert.equal(r.ok, false, `mcpBlacklist=${JSON.stringify(bad)} must be rejected`);
+  }
+  assert.equal(validateProfiles(base(["playwright"])).ok, true, "a valid array still passes");
+});

@@ -27,7 +27,7 @@ extra:
 
 ## AC
 
-- [ ] **生产载体取真**：修复落地时刻之后的 `.quay/promotion-round.jsonl` 记录中，`fixes[]` 里 `spawned==true && timedOut==false` 的条数 ≥ 1（⛔ 只计落地时刻之后的时间窗；fixture / 合成记录不算——硬规则 4 推论三）（待外部）
+- [x] **生产载体取真**：修复落地时刻之后的 `.quay/promotion-round.jsonl` 记录中，`fixes[]` 里 `spawned==true && timedOut==false` 的条数 ≥ 1（⛔ 只计落地时刻之后的时间窗；fixture / 合成记录不算——硬规则 4 推论三）——**实测 11 条**（落地 `3278ac8af` 2026-09-07T23:51:20Z 之后；首条 2026-09-08T22:54:23.847Z、末条 2026-09-14T08:03:14Z；同窗口超时 21 条 ⇒ 干净率 11/32 = 34%，而落地前自 2026-08-23 起 88 次 spawn 无一干净 = 0）
 - [x] **对照已跑**：Plan 步骤 2 的两条负控制各有一次实际输出贴进 `## Resolution`，且能区分两个假说（⛔ 给不出区分性对照的成因说明降为假说，不得作为结论）
 - [x] **成因写进正本**：真因写入 `.quay/profiles.yml` 的 worker-default 注释或 `plugin/scripts/promotion-driver.ts` 头注释，并就地更正上一轮那条已被证否的「后缀不一致」解释（⛔ 不静默删除）
 - [x] **诊断可见**：fix-worker 失败时的记录含 argv、耗时、退出码三项（`.quay/promotion-round.jsonl` 的 `fixes[]` 条目可 grep 到）
@@ -61,6 +61,8 @@ ELAPSED_MS=8 status=0 error=null stdout="immediate-exit-ok"
 **修法**：`.quay/profiles.yml` `roles.fix-worker.env` 加 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`（对齐 task-worker）；worker-default 注释就地更正被证否的「后缀不一致」解释、写入真因（⛔ 不静默删除）。诊断缺口：`promotion-driver.ts` `FixOutcome` 补 `argv` + `durationMs`（exitCode 已有），失败记录可 grep「命令+耗时+退出码」三项。
 
 **判据挪到生产载体**：AC1（待外部）= 落地后 `.quay/promotion-round.jsonl` 出现 `spawned==true && timedOut==false` ≥1（⛔ 只计落地时刻之后窗口；fixture/合成不算）。
+
+**AC1 外部验证闭合（2026-09-14，manager 复核，读生产载体）**：`.quay/promotion-round.jsonl` 中带 `durationMs` 的记录共 32 条，全部产生于本任务修复 `3278ac8af`（2026-09-07T23:51:20Z）之后，且 32/32 的 argv 均含 `BG_WAIT_CEILING` 键（⇒ 修复确在生效）。其中 `spawned==true && timedOut==false` **11 条**（AC1 要求 ≥1，满足）、超时 21 条。对照落地前：自 2026-08-23 起 88 次 spawn 无一干净（0）。⇒ 本任务的修法成立，干净率 0% → 34%。**剩余 66% 的超时是另一个成因**（`FIX_WORKER_TIMEOUT_MS=180_000` 抄自机械脚本 `ROUND_TIMEOUT_MS`，落在 agent 真实时长分布正中：11 条干净返回耗时 63.7–173.0s、中位 149s、最大值距上限仅 7s），已另立 `gap-fix-worker-timeout-budget-inherited-from-mechanical-round` 承接，⛔ 不并入本任务。
 
 ## Touches
 

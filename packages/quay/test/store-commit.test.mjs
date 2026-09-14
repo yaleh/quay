@@ -150,7 +150,10 @@ const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions �
 test("AC1 goal-store: a create and a status flip produce distinguishable, subtyped subjects", () => {
   const { dir, run } = gitRepo("ac1");
   const s = createGoalStore(path.join(dir, "goals"));
-  s.write("GOAL-001", { title: "g", status: "active", origin: "o", body: GOAL_BODY }); // create
+  // ⚠️ `status: "draft"`: a GOAL born `active` now needs a naming AC first
+  // (gap-goal-create-as-active-skips-zero-ac-gate); the subject under test here is the commit
+  // SUBJECT SHAPE (create vs status flip), which is independent of which status the create lands.
+  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY }); // create
   s.write("AC-001", { title: "a", status: "draft", goal: "GOAL-001", criterion: "true", expect: "e", origin: "o" }); // create
   s.write("AC-001", { status: "active" }); // status draft→active
   const subs = run("log", "--format=%s", "--", "goals").trim().split("\n");

@@ -2009,12 +2009,33 @@ export function createGoalStore(
       // superseded→active, retired→active — are activations too (gap-activation-gates-bypassed-on-
       // reopen-path-non-draft-to-active: they were ~19% of all activations and walked past all three
       // gates, so a criterion rewritten mid-reopen entered active unchecked). create-as-active is NOT
-      // gated — a new record's criterion is validated by the create completeness contract, and the P6
-      // round-trip concern ("does the criterion still run after YAML round-trip?") only exists once a
-      // record has been stored once and later activated. active→active (no status change) is not an
-      // activation. ⛔ The most-frequent reopen shape is needs-human→active (3/5) — the human re-arms
-      // a record after a ruling, precisely when criterion/expect were most likely just rewritten.
+      // gated BY THIS PREDICATE — a new record's criterion is validated by the create completeness
+      // contract, and the P6 round-trip concern ("does the criterion still run after YAML round-trip?")
+      // only exists once a record has been stored once and later activated. (P6-goal, whose quantity is
+      // a different one, has its own wider predicate below — that is the one place the create path IS
+      // gated; read the two together.) active→active (no status change) is not an activation. ⛔ The
+      // most-frequent reopen shape is needs-human→active (3/5) — the human re-arms a record after a
+      // ruling, precisely when criterion/expect were most likely just rewritten.
+      // ⛔ The `prevStatus !== undefined` half is justified ONLY for those two CRITERION gates; it is
+      // NOT a statement that the create path is gate-free (gap-goal-create-as-active-skips-zero-ac-gate).
       const activating = nextStatus === "active" && prevStatus !== undefined && prevStatus !== "active";
+      // P6-goal's OWN predicate — deliberately wider than `activating` by exactly the create half
+      // (`prevStatus === undefined`), because P6-goal asks a DIFFERENT quantity (see the gate body):
+      // how many AC records name this GOAL. The create completeness contract does not answer that
+      // (it checks title/origin/body, and nothing requires an AC to name the new record); and on the
+      // ordinary birth path the count is knowable and zero — an AC points at an ALREADY-EXISTING
+      // goal (`goal: GOAL-NNN`), so nothing can name a record that does not exist yet.
+      // gap-goal-create-as-active-skips-zero-ac-gate: GOAL-018 was written straight as `active` on
+      // 2026-09-14T04:01:57Z (commit 1a83bfe7a, no `statusLog` ⇒ never transitioned), circulated for
+      // a 60s window carrying ZERO exit conditions — violating AC-217 the whole time — and the one
+      // signal that did fire (AC-217 判红 ⇒ standing-violated) spawned a gap-filing worker with
+      // nothing to fix. The window's distance to an irreversible false `achieved` was one guard
+      // (`goal-driver.ts:466`, GOAL has no reverse flip).
+      // This is the SAME shape the cap gate two blocks below already uses (`nextStatus === "active"`,
+      // birth included) — one invariant, one predicate, ⛔ not a second gate. active→active is still
+      // not an activation, and a create-as-active that genuinely has an AC already naming it (an AC
+      // may be filed before its GOAL) still passes — the count is measured, not assumed.
+      const goalActivating = nextStatus === "active" && prevStatus !== "active";
 
       // A criterion record MUST point at a goal (its activeness derives from that goal).
       if (!isGoalRecord && (typeof frontmatter.goal !== "string" || frontmatter.goal.trim() === "")) {
@@ -2198,13 +2219,30 @@ export function createGoalStore(
       // a criterion I hold. The AC count is not a judgment, it is a mechanical count of this store's
       // own carrier files; there is nothing in it to override, and an override here would land
       // exactly the silent zero-AC active goal this gate exists to make impossible.
-      if (activating && isGoalRecord) {
+      //
+      // ⚠️ `goalActivating`, NOT `activating` — this gate covers the CREATE path too
+      // (gap-goal-create-as-active-skips-zero-ac-gate). Because an AC names a goal that must already
+      // exist, a brand-new GOAL born `active` has zero ACs by construction ⇒ this gate refuses it
+      // (fail-closed) and the birth path is closed. The invariant is therefore a WRITE-SURFACE
+      // constraint — 「GOAL 不得出生即 active」, create as draft → file the ACs → flip to active —
+      // ⛔ NOT a new mechanism layered beside this one. It does not conflict with the reopen behavior
+      // ruled on 2026-09-10 (achieved / needs-human / superseded / retired → active stays ALLOWED,
+      // unchanged: the reopen path already had ACs, that is precisely why it is separable). The
+      // narrowing that `activating` still carries is a statement about the two CRITERION gates only.
+      if (goalActivating && isGoalRecord) {
         const namingAcs = list().filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === id);
         if (namingAcs.length === 0) {
+          // The birth path gets one extra actionable sentence: on a transition the fix is "write the
+          // AC, then re-run this"; on a create the caller has to go back a step, and saying so beats
+          // letting them retry the same command.
+          const birthPath = prevStatus === undefined
+            ? ` This is a NEW record and no AC can name a goal that does not exist yet — create ${id} as ` +
+              `draft first ('--status draft'), file its AC(s), then flip it to active.`
+            : "";
           throw new Error(
             `cannot activate ${id}: 0 AC records name it — an active GOAL must carry at least one AC ` +
             `(a goal is judged by the conjunction of its ACs, so a goal with none has no exit condition ` +
-            `and its achievement is undecidable; ACs naming ${id}: none). Write one first: ` +
+            `and its achievement is undecidable; ACs naming ${id}: ${namingAcs.length}).${birthPath} Write one first: ` +
             `goal-store write AC-NNN --goal ${id} --status draft --criterion '<runnable command>' ` +
             `--expect '<expected outcome>' --origin '<empirical basis>'`
           );

@@ -14,7 +14,7 @@ criterion: |
   const SELF=new Set(["GOAL-007","AC-188","AC-189","AC-190","AC-191"]);
   const need=["gap-fan-in-ff-retry-counter-scope","gap-suite-load-sampler-orphan-process","gap-direct-to-develop-bypasses-fan-in-gates"];
   const mig=recs.filter(r=>!SELF.has(r.id)&&r.kind==="criterion"&&["active","achieved"].includes(r.status)&&String(r.criterion||"").trim().length>=20&&need.some(t=>String(r.origin||"").includes(t)));
-  if(mig.length<need.length){console.log("迁移 AC 不足:",mig.length+"/"+need.length);process.exit(1);}
+  if(mig.length<need.length){console.error("AC-191 fail - 迁移 AC 不足:",mig.length+"/"+need.length);process.exit(1);}
   let ok=0;
   for(const r of mig){
     const file=fs.readdirSync(root+"/goals").find(f=>f.startsWith(r.id+"-"));

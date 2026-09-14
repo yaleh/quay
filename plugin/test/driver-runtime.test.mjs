@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // driver-runtime.test.mjs — AC151 (tasks/gap-ac151-two-level-driver-layer-landing): the two-level
 // layering (Layer 0 driver-runtime + Layer 1a task-processing / Layer 1b routine) + the supervisor
 // ported from promotion-driver-launch.sh (bash) into TS.
@@ -56,6 +56,8 @@ import {
   aliveness,
   statePaths,
   kernelSelfPath,
+  resolveKernelSibling,
+  kernelSiblingArgv,
   watchedSourceFiles,
   sourceFilesMaxMtimeMs,
   sourceChangedSince,
@@ -612,9 +614,17 @@ test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ no
   assert.equal(typeof fresh.supervisorStartedAt, "number", "supervisorStartedAt 读得（epoch ms）");
   assert.ok(fresh.supervisorStartedAt > 0, "启动时刻非恒 0");
 
-  // procStartTimeMs(自己) 落在 [进程启动, 现在] 之间（epoch ms 上下界）。
+  // procStartTimeMs(自己) == 本测试进程【实际的】启动时刻（epoch ms）。
+  // ⛔ 不写成 `start > Date.now() - 60_000`：那是一个「模块加载 → 走到这一行必须 <60s」的墙钟
+  // 余量，并发负载下本文件耗时 139s（隔离 36s，实测 2026-09-13）⇒ 余量被负载击穿、与任何缺陷
+  // 无关。基准改为 process.uptime()（同一进程的真实存活时长）⇒ 断言与文件跑多久完全解耦。
   const start = procStartTimeMs(process.pid);
-  assert.ok(start != null && start > Date.now() - 60_000 && start <= Date.now(), `procStartTimeMs 合理: ${start}`);
+  const expectedStart = Date.now() - process.uptime() * 1000;
+  assert.ok(start != null && start <= Date.now(), `procStartTimeMs 合理（不晚于现在）: ${start}`);
+  assert.ok(
+    Math.abs(start - expectedStart) <= 10_000,
+    `procStartTimeMs 等于本进程实际启动时刻: start=${start} expected≈${Math.round(expectedStart)}`,
+  );
 });
 
 test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {
@@ -1009,4 +1019,144 @@ test("AC1/AC2 (gap-driver-start-false-confirms) — 未进入常驻循环的驱�
     "就绪标记由【驱动自己】写的 kind 清单（= registry 的 pidSelf=true）；worker 是登记在案的残留",
   );
   assert.equal(driverPidIsReadinessMarker("worker"), false, "worker 的 driver pid 文件仍由 supervisor 写（代理量）");
+});
+
+// ── MCP 黑名单接线（gap-worker-mcp-blacklist-strict-config AC1/AC3/AC6）────────────────────────
+// launchArgv 是【唯一 argv 构造点】。AC1 的负控制在这里是「argv 不依赖 MCP 配置」这条可取的假：
+// 若哪天黑名单被误挂到共享 profile 上（outer 连坐），或那个 `length > 0` 的守卫被去掉，
+// 下面第一条就会红——而不是等 outer 真的起不来浏览器才被发现。
+
+const REPO_ROOT_DR = path.resolve(__dirname, "..", "..");
+
+/** 三源 MCP fixture（家目录 + 一个项目目录），⛔ 不读真实 ~/.claude*（AC7 同款缝）。 */
+function mcpFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dr-mcp-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const homeDir = path.join(dir, "home");
+  const projectDir = path.join(dir, "project");
+  const w = (p, v) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(v)); };
+  w(path.join(homeDir, ".claude.json"), {
+    mcpServers: {
+      "chrome-devtools": { command: "npx", args: ["chrome-devtools-mcp@latest"] },
+      playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
+      "user-extra": { command: "node", args: ["user-extra.js"] },
+    },
+  });
+  w(path.join(homeDir, ".claude", "settings.json"), { enabledPlugins: { "quay@quay": true, "archguard@archguard": true } });
+  w(path.join(projectDir, ".mcp.json"), { mcpServers: { "proj-server": { command: "node", args: ["proj.js"] } } });
+  return {
+    roots: { homeDir, projectDirs: [projectDir], kernelPluginRoot: path.join(REPO_ROOT_DR, "plugin") },
+  };
+}
+
+test("AC1/AC6 — an EMPTY blacklist adds no mcp flag and the argv does not depend on MCP config at all", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["outer", "manager", "pool-judge", "meta-driver"]) {
+    const plain = launchArgv(role, "P", REPO_ROOT_DR);
+    const withRoots = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    assert.deepEqual(plain, withRoots, `${role}: argv must be INDEPENDENT of the MCP configuration`);
+    assert.ok(!plain.includes("--strict-mcp-config"), `${role}: no --strict-mcp-config`);
+    assert.ok(!plain.includes("--mcp-config"), `${role}: no --mcp-config`);
+    assert.equal(plain.at(-2), "-p", `${role}: the -n <name> -p <prompt> tail is intact`);
+    assert.equal(plain[plain.indexOf("-n") + 1], `quay-${role}`, `${role}: name resolved from the role`);
+    assert.equal(plain.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC1 wiring — the three code-writing roles carry --strict-mcp-config --mcp-config, blacklist subtracted", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["task-worker", "selector", "fix-worker"]) {
+    const argv = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    const i = argv.indexOf("--strict-mcp-config");
+    assert.ok(i >= 0, `${role}: must carry --strict-mcp-config`);
+    assert.equal(argv[i + 1], "--mcp-config");
+    const table = JSON.parse(argv[i + 2]).mcpServers;
+    assert.equal(table["chrome-devtools"], undefined, `${role}: chrome-devtools dropped`);
+    assert.equal(table["playwright"], undefined, `${role}: playwright dropped`);
+    // ⛔ 负控制：黑名单不得连坐掉 worker 自己要用 quay 工具（AC4）。
+    assert.ok(table["plugin_quay_quay"], `${role}: the quay MCP server must SURVIVE`);
+    assert.ok(table["user-extra"] && table["proj-server"], `${role}: unrelated servers survive`);
+    assert.equal(argv.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC5 precondition — the emitted plugin entry points at a REAL on-disk command (not a dead path)", (t) => {
+  const fx = mcpFixture(t);
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+  const table = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]).mcpServers;
+  const spec = table["plugin_quay_quay"];
+  assert.ok(spec, "precondition: quay entry present");
+  const cmdPath = spec.args[0];
+  assert.ok(!cmdPath.includes("${CLAUDE_PLUGIN_ROOT}"), "placeholder expanded");
+  assert.ok(fs.existsSync(cmdPath), `the emitted MCP command must exist on disk: ${cmdPath}`);
+});
+
+test("AC3 caller — an unresolvable MCP configuration ⇒ ZERO mcp flags (dispatch is never blocked)", (t) => {
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: null });
+  assert.ok(!argv.includes("--strict-mcp-config"), "no flag when the config cannot be evaluated");
+  assert.ok(!argv.includes("--mcp-config"));
+  assert.equal(argv.at(-1), "P");
+  // 负控制（对照必须能把结论翻过来）：同一个调用给了可解析的根 ⇒ flag 立刻出现。
+  const fx = mcpFixture(t);
+  assert.ok(launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots }).includes("--strict-mcp-config"));
+});
+
+// ── resolveKernelSibling: raw .ts vs the shipped dist bundle ─────────────────────────────────────────
+// gap-dist-plugin-missing-node-modules-task-schema-yaml (kernel half — mirror of Core
+// `plugin-root.ts::isPluginSourceCheckout`). `runSupervisor` resolves EVERY kind's driver through
+// `resolveKernelSibling(spec.driver)`, and the driver scripts' import closure needs `yaml` /
+// `@modelcontextprotocol/sdk/*` / `zod`, none of which an installed plugin tree carries — so a raw
+// pick there means all six kinds die at spawn with ERR_MODULE_NOT_FOUND, exactly as measured on the
+// real plugin cache. The dist bundle is self-contained and runs without --experimental-strip-types.
+
+/** `<dir>/plugin/scripts/<name>.ts` (+ `dist/<name>.js`) and — when `withCoreSrc` — the
+ *  `<dir>/packages/quay/src` marker that makes `<dir>/plugin` a SOURCE checkout. */
+function kernelLayoutFixture(withCoreSrc) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-kernel-layout-"));
+  const pluginRoot = path.join(dir, "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "scripts", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "promotion-driver.ts"), 'import { parse } from "yaml";\n');
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "dist", "promotion-driver.js"), "// bundled\n");
+  if (withCoreSrc) fs.mkdirSync(path.join(dir, "packages", "quay", "src"), { recursive: true });
+  return { dir, pluginRoot };
+}
+
+function withKernelRoot(root, fn) {
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+}
+
+test("resolveKernelSibling() — shipped install (raw .ts + dist coexist): the BUNDLE wins, stripTypes false", () => {
+  const fx = kernelLayoutFixture(false);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, false, "no --experimental-strip-types in a shipped install");
+    assert.ok(r.path.endsWith(path.join("scripts", "dist", "promotion-driver.js")), `bundle path: ${r.path}`);
+    // The kernel spawns via this argv, so assert the ARGV too (the flag is what would be wrong).
+    process.env.QUAY_PLUGIN_ROOT = fx.pluginRoot;
+    const argv = kernelSiblingArgv("promotion-driver.ts", ["--root", "/tmp/x"]);
+    delete process.env.QUAY_PLUGIN_ROOT;
+    assert.deepEqual(argv.slice(0, 3), ["node", "--no-warnings", r.path], `argv: ${JSON.stringify(argv)}`);
+  } finally {
+    delete process.env.QUAY_PLUGIN_ROOT;
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveKernelSibling() NEGATIVE CONTROL — the SAME fixture + the source-checkout marker ⇒ raw .ts wins", () => {
+  const fx = kernelLayoutFixture(true);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, true, "source checkout ⇒ raw .ts (edit-visible, source-respawn still works)");
+    assert.ok(r.path.endsWith(path.join("scripts", "promotion-driver.ts")), `raw path: ${r.path}`);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
 });

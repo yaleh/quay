@@ -4,16 +4,24 @@ title: 「task 层判据是一次性的、需长期维持的保证必须上移 g
 status: achieved
 kind: criterion
 goal: GOAL-007
-long-term: true
-criterion: |
+criterion: >
   f=orchestration/SPEC-goal-mechanism-2026-09-06.md
+
   sec=$(awk '/^##.*task 层判据/{g=1;next} g&&/^##/{exit} g' "$f")
-  if [ -z "$sec" ]; then echo "章节不存在: $f"; exit 1; fi
-  printf '%s' "$sec" | grep -q '上移' || { echo "章节未写上移"; exit 1; }
-  printf '%s' "$sec" | grep -q 'goal 层' || { echo "章节未点名 goal 层"; exit 1; }
+
+  if [ -z "$sec" ]; then echo "AC-189 fail - 章节不存在 $f" >&2; exit 1; fi
+
+  printf '%s' "$sec" | grep -q '上移' || { echo "AC-189 fail - 章节未写上移" >&2; exit
+  1; }
+
+  printf '%s' "$sec" | grep -q 'goal 层' || { echo "AC-189 fail - 章节未点名 goal 层"
+  >&2; exit 1; }
+
   n=$(printf '%s' "$sec" | tr -d '[:space:]' | wc -c)
+
   echo "章节非空白字符数: $n"
-  [ "$n" -ge 200 ]
+
+  [ "$n" -ge 200 ] || { echo "AC-189 fail: 章节非空白字符数 $n -lt 200" >&2; exit 1; }
 expect: exit 0
 origin: >-
   人 2026-09-07 就 GOAL-007 裁定方向【丁：不修，上移 goal 层】——承认 task 层判据是一次性的，
@@ -48,4 +56,5 @@ origin: >-
 
 
   干跑（2026-09-07）：章节不存在，exit 1 ⇒ 今天取假。
+long-term: true
 ---

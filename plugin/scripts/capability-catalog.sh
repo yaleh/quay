@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [fan-in-queueing-model.ts]="「把 worker 并发调高，落地吞吐会上升，还是只有排队时间上升」—— 用三个生产载体（fan-in 锁事件 / per-run fan-in 过程日志 / worker 执行记录 + git 落地历史）报出锁持有分布、排队等待分布、锁利用率 ρ、到达率 λ、平均在系统数 L，以及实测的 wait-vs-ρ 曲线（本报告里唯一可取假的那个量），据此说出系统当前落在排队论 knee 的哪一侧、以及距饱和还有几倍余量（tasks/gap-fan-in-queueing-model-does-concurrency-help；并纠正 docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §7 第 5 条『排队无载体』的错误结论——该量自 2026-08-30 起写在 per-run 过程日志里）?"
   [worktree-namespace-literal-check.ts]="Does the product/plugin source spell the worktree-namespace directory literal (the double-quoted 'quay-worktrees') in more than the ONE place that is allowed to — i.e. is a grep -rn of that literal over packages/quay/src + plugin/scripts at most 1 hit, and is that hit the DEFAULT_WORKTREE_NAMESPACE_NAME declaration in packages/quay/src/worktree-namespace.ts (the single resolver's fallback branch)? An unquoted occurrence (path regex / comment / prose) is reported as an advisory count, never a hard failure (tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3)?"
   [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
@@ -435,6 +436,7 @@ declare -A QUESTION=(
   [peer-identity-probe.ts]="Can a NON-Claude process be delivered to by other Claude Code sessions on this machine — does registering an HONEST peer identity (real pid/procStart/pidDomain/socket path, agent:'quay', explicitly NOT impersonating a Claude session) into ~/.claude/sessions/<pid>.json make it addressable by the platform SendMessage tool, and which record fields are actually load-bearing for that reachability (agent/pid/procStart/messagingSocketPath/spare/parkedJobId...) — the 方案 C feasibility spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
+  [mcp-blacklist-resolve.ts]="Which MCP servers will a blacklisted role ACTUALLY connect to — enumerate the three real config sources (the user-level server table, the project-level MCP declarations, and enabledPlugins pointing at the plugin's own MCP declaration with the literal CLAUDE_PLUGIN_ROOT placeholder expanded to the DETECTED version dir), drop the role's mcpBlacklist, and emit the --strict-mcp-config --mcp-config payload — so a pure code-writing worker stops dragging up the chrome-devtools-mcp / playwright-mcp process trees (2026-09-14 reading: 48 + 12 servers plus 12 watchdogs approx 3.24GB RSS, the largest single concentration of memory pressure), NEVER by shelling out to the mcp list subcommand which health-checks (i.e. spawns) the very servers this exists to avoid, and where an input that cannot be decoded yields null so the caller adds NO flag rather than shipping a partial config that would silently DROP servers (硬规则 3b) (tasks/gap-worker-mcp-blacklist-strict-config)?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -452,6 +454,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [fan-in-queueing-model.ts]="按需"
   [worktree-namespace-literal-check.ts]="每轮"
   [gitignore-runtime-coverage-check.ts]="每轮"
   [psi-failure-correlation-check.ts]="按需"
@@ -778,10 +781,12 @@ declare -A CADENCE=(
   [peer-identity-probe.ts]="按需"
   [channel-probe-server.ts]="按需"
   [server-partial-stop-verify.ts]="按需"
+  [mcp-blacklist-resolve.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [fan-in-queueing-model.ts]="失效前提：三条载体的字段口径不变 —— ①.quay/fan-in-lock-events.jsonl 的 event/epoch/taskId/runId/pid 五键与 epoch 以【秒】为单位的约定；②per-run 过程日志 fan-in-<task>-<runId>.log 里 acquire-fan-in-lock 步的 wall_ms（它 = 排队时延，本条全部延迟结论都建立在它上面）；③.quay/worker-outcome.jsonl 的 in_flight_count/wall_clock_ms 与 git log develop 里 tasks: 翻 <id>… 的提交主题形状。任一字段改名、改单位或给 wall_ms 换语义，本条需同步"
   [worktree-namespace-literal-check.ts]="失效前提：worktree 命名空间仍由单一入口 packages/quay/src/worktree-namespace.ts 的 DEFAULT_WORKTREE_NAMESPACE_NAME 回落分支持字面量、其余读侧仍只经该入口取命名空间；若命名空间约定整体退休（不再有 per-task worktree）或字面量改由配置/环境注入（字面量消失），本条随之失效"
   [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
@@ -1108,10 +1113,12 @@ declare -A INVALIDATION=(
   [peer-identity-probe.ts]="失效前提：平台仍以 ~/.claude/sessions/<pid>.json 注册表 + 记录内 procStart 与【文件名 pid】的 /proc starttime 一致性判可达；若平台改为原生 API 投递、或改掉该判定（本任务实测 2.1.270 的判定与静态推断不同：记录里 pid 字段不参与、.key 文件完全不被读），本条退休"
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
   [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
+  [mcp-blacklist-resolve.ts]="失效前提：黑名单仍由 .quay/profiles.yml 的【角色】层 mcpBlacklist 声明、launchArgv 仍是驱动 spawn 的唯一 argv 构造点、且用户级/插件级 MCP server 仍声明在这三类配置文件里；若 MCP 连接控制改由 Claude Code 原生设置表达（如能覆盖用户级 mcpServers 的 disabledMcpjsonServers）、或 role→profile 解析不再经 profile-policy.ts resolveRole，本条失去消费面，退休"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [fan-in-queueing-model.ts]="2026-09-14"
   [worktree-namespace-literal-check.ts]="2026-09-13"
   [gitignore-runtime-coverage-check.ts]="2026-09-13"
   [psi-failure-correlation-check.ts]="2026-09-05"
@@ -1438,10 +1445,12 @@ declare -A LAST_REAFFIRMED=(
   [peer-identity-probe.ts]="2026-09-13"
   [channel-probe-server.ts]="2026-09-13"
   [server-partial-stop-verify.ts]="2026-09-13"
+  [mcp-blacklist-resolve.ts]="2026-09-14"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [fan-in-queueing-model.ts]="n/a"
   [worktree-namespace-literal-check.ts]="keyword"
   [gitignore-runtime-coverage-check.ts]="position"
   [psi-failure-correlation-check.ts]="n/a"
@@ -1767,6 +1776,7 @@ declare -A MATCHING=(
   [peer-identity-probe.ts]="n/a"
   [channel-probe-server.ts]="n/a"
   [server-partial-stop-verify.ts]="n/a"
+  [mcp-blacklist-resolve.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1778,6 +1788,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [fan-in-queueing-model.ts]="谁按：任何要动本工作区并发旋钮的人/层，在改 .quay/config.yml 的 concurrency / concurrency_bands 之前与之后各跑一次做前后对照（node --experimental-strip-types plugin/scripts/fan-in-queueing-model.ts --root <主检出>），也由本任务实现者跑出 docs/analysis/fan-in-queueing-model.md 的全部读数；条件=要判定 fan-in 锁当前处在排队论 knee 的哪一侧（ρ 与实测 wait-vs-ρ 曲线），或要把一次 fan-in 的端到端拆成排队 / suite / 其余三段"
   [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
   [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
   [gitignore-runtime-coverage-check.ts]="谁按：run_static_checks（scripts/test.sh 静态检查链，change tier，@static-object 命中 .gitignore / plugin/scripts/quay-runtime-artifacts.txt / 本检查自身时）；条件=要判 quay 自己 .gitignore 里标为运行时产物的条目集与 quay-init 写出的 manifest 是否仍然一致（漂移即红，manifest 读不到 NOT-EVALUATED）"
@@ -1906,6 +1917,7 @@ declare -A CONSUMER=(
   [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
   [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
   [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"
+  [mcp-blacklist-resolve.ts]="谁按：plugin/scripts/driver-runtime.ts 的 launchArgv（AC140 唯一 argv 构造点）在该 role 的 mcpBlacklist 非空时按——机器按，每次派发一次；条件=派发 task-worker/fix-worker/selector 需要一个既保留 quay/archguard/meta-cc 又排除 chrome-devtools/playwright 的 MCP 配置面（实测 3.24GB RSS 集中在浏览器 MCP 上）。⛔ outer/manager/pool-judge 不按（mcpBlacklist 为空 ⇒ argv 逐字不变，不被共享 profile 连坐）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
