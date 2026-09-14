@@ -2211,7 +2211,12 @@ verify_ac257_mode() {
       fail=1
       continue
     fi
-    if ! scp "${ssh_opts[@]}" "${ac257_task_body}" "${target}:\$HOME/ac257-task-body.md" >/dev/null 2>&1; then
+    # ⚠️ 目标路径必须写 `~/`，⛔ 不是 `\$HOME/`：现代 scp 走 SFTP 子系统（本脚本的 ssh 调用即
+    # `-s ... sftp`），**远端路径不做 shell 展开** —— `$HOME/...` 会被当成一个字面文件名去创建，
+    # scp 直接失败（实测 2026-09-14：整个模式在门口 NOT-EVALUATED，远端根本没有那个文件）。
+    # `~` 是 SFTP 协议自己认的，所以本文件其余五处 scp 目标一律写 `:~/`。两条路径在远端是同一个
+    # 文件（脚本用 `\${HOME}/ac257-task-body.md` 读它）。
+    if ! scp "${ssh_opts[@]}" "${ac257_task_body}" "${target}:~/ac257-task-body.md" >/dev/null 2>&1; then
       echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED)"
       fail=1
       continue
