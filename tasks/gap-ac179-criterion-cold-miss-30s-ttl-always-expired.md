@@ -101,4 +101,7 @@ curl -sf --max-time 60  /dashboard   rc= 0         wall= 1.43s  bytes=78277  id=
 - packages/quay/src/observation.ts
 - packages/quay/src/serve.ts
 - packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs（new）
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
+- packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
 - tasks/gap-ac179-criterion-cold-miss-30s-ttl-always-expired.md
