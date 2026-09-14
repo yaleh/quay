@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10
 title: dashboard 首页任务台账速览的 ready/todo/needs-human mini-list 上限从 3 调到 10
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -84,7 +84,7 @@ B 常量留 10、标题字面量写死 3     ⇒ 两个兄弟测试红（fail 2�
 提交与 `.quay/scoped-gate-cache.json`；**AC4 的「全量」这一半由 driver 机械 fan-in 的套件运行判定**
 （worker 不自己跑全量套件）。
 
-### 本轮复验（2026-09-14 05:0x–05:2x）：上一轮那条 suite 红**未复现**——但机制已定位且有两向对照
+### 2026-09-14 05:0x–05:2x 复验：上一轮那条 suite 红**未复现**——但机制已定位且有两向对照
 
 全量 `scripts/test.sh` 在本 worktree 重跑一次：**绿（EXIT=0，无 ✖）**；上一轮红的那条
 （`plugin/test/worker-driver-retry-classification.test.mjs` 的 `round 记录携带判定（生产载体）`）
@@ -115,9 +115,29 @@ B-poll-carrier (轮询载体)  : stops=2 kinds=["count-and-retry","stop-terminal
 - **为何不在本任务里修**：该文件不在本任务 `## Touches`、与 develop 零 diff、与本任务所改常量无因果；
   在分支里修它会把一个 engine 测试文件带进本任务 delta（anti-drift 需扩 `## Touches`），而人本次裁定
   明确限定范围为一个常量。故照本任务既有惯例（Proposal 第 3 条对「+N 更多」不一致的处理）**记录在案、
-  供以后单独立案参考**。发生率观测：生产载体 `verification-round.jsonl` 中该文件共出现 32 次、
-  `passed=false` **1** 次（即本轮之前那一次，commit `4f83865ac`）——即约个位数百分比/轮，高负载下更高。
-  修法已备好，是一条 3 行改动；**下一次该文件在 fan-in 套件里再红时，应当照着上面这段直接修**。
+  供以后单独立案参考**。修法已备好，是一条 3 行改动；**下一次该文件在 fan-in 套件里再红时，应当照着
+  上面这段直接修**。
+
+### 2026-09-14 09:5xZ（worker 续做第 4 轮）：同一条 suite 红再次出现，读数从「单点观测」升级为「发生率」
+
+本轮**未**采用上面备好的 3 行修法——理由不变（不在 `## Touches`、与本任务所改常量零因果、人裁定限定范围）。
+本轮新增的是**发生率**读数，不是又一次单点观测：
+
+- 近 25 份 `fan-in-suite-*.log` 中含该文件的有 **9** 次，其中 `passed=false` **2** 次
+  （① 本任务 `~1789360449027-edcb92`；② `gap-ac255-driver-internalization-pid-le2-six-kinds-fresh`
+  的 `~1789365557802-30860f`，同一断言、同一夹具数组逐字相同，见该日志 `:4695`）⇒ **7/9 通过**。
+  ⚠️ 该对照**不是干净的**：ac255 的 `## Touches` 含 `worker-driver.ts`，故只能说明「同一红在两个
+  不同 delta 的 worktree 上都出现过」，不能单独据此判定无关。
+- **干净的半边在本 worktree**：本分支对该文件与 `plugin/scripts/worker-driver.ts` 与 develop **零 diff**
+  （`git diff develop...HEAD --stat --` 两者均为空）。
+- 本 worktree 单独跑该文件：**12/12 全绿**（`node --experimental-strip-types --test
+  plugin/test/worker-driver-retry-classification.test.mjs`，duration 4008ms）。
+- ⇒ 与上面那两向对照一致：**间歇性负载竞态**（约 22%/轮，高负载时更高），非本任务连带。
+
+本轮作用域门：`scripts/test.sh --for-task <本任务> --allow-thin` **绿（tests 102 / pass 102 / fail 0）**，
+AC1（12 条 ready ⇒ 渲染 10 行）/AC2（5 条 todo ⇒ 全部 5 条）/AC3（终态无 mini-list，负控制）三条断言
+逐条在场并 ✔；merge develop 无冲突；scoped-gate 缓存已按 develop `d4856fbfe` 写入
+（`.quay/scoped-gate-cache.json`）。
 
 ## Touches
 
