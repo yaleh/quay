@@ -1,6 +1,6 @@
 {
   "name": "quay",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "description": "Quay Core: provider-agnostic web + CLI + MCP client over the Provider ABI (v0 walking skeleton).",
   "license": "MIT",

@@ -123,9 +123,48 @@ export function resolvePluginRootFrom(startDir: string): string | null {
  */
 export function resolvePluginScript(rel: string): string | null {
   const root = resolvePluginRoot();
-  if (!root) return null;
+  return root ? resolvePluginScriptUnder(root, rel) : null;
+}
+
+/** `resolvePluginScript` against an ALREADY-RESOLVED root — so a caller that needs the root twice
+ *  (resolvePluginScriptExec: once for the raw path, once for the source-checkout predicate) pays the
+ *  `resolvePluginRoot()` walk exactly once (it can spawn `git worktree list`). */
+function resolvePluginScriptUnder(root: string, rel: string): string | null {
   const abs = path.resolve(root, rel);
   return fs.existsSync(abs) ? abs : null;
+}
+
+/**
+ * True when `root` (a plugin root — the dir that directly contains `scripts/`) is the quay SOURCE
+ * checkout's plugin tree: Core's own source (`packages/quay/src`) sits directly beside it.
+ *
+ * Only there is the raw `.ts` the form of record — it is what the resident driver's source-respawn
+ * watches (`driver-runtime.ts::sourceFilesMaxMtimeMs`) and what edits to `plugin/scripts/*.ts` are
+ * meant to reach without a rebuild. Every SHIPPED layout prefers the self-contained `dist/*.js`
+ * bundle instead, because a raw `.ts` there cannot load its bare npm imports:
+ *   - npm-pack / npm-global (`<pkg>/plugin` + flat `<pkg>/src`) — raw `.ts` deleted outright;
+ *   - the plugin MARKETPLACE cache from a `directory` source (`~/.claude/plugins/cache/…`, the install
+ *     quay-init's own printed steps produce) — the plugin tree is COPIED verbatim, so raw `.ts` and
+ *     `dist/*.js` coexist there and no `node_modules` is installed beside either;
+ *   - a third-party vendored copy, and `package.sh`'s staged `packages/quay/plugin/` snapshot.
+ *     (The `github`/dist-plugin marketplace channel strips raw `.ts` at publish — commit 018253163 —
+ *     so it never reaches this branch; the two channels differ, and only this resolver covers both.)
+ *
+ * Measured 2026-09-14 (gap-dist-plugin-missing-node-modules-task-schema-yaml) on the real
+ * `~/.claude/plugins/cache/quay/quay/0.6.2` install: no `node_modules` anywhere up the tree, and
+ * the raw kernel's 23-file import closure needs `yaml` (via `task-schema.ts` / `profile-policy.ts`),
+ * `@modelcontextprotocol/sdk/*` and `zod` (via `driver-shared.ts`) ⇒ `quay driver start` died with
+ * `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from <cache>/scripts/task-schema.ts`
+ * for EVERY driver kind, while `<cache>/scripts/dist/driver-runtime.js` ran the same verb fine.
+ * Choosing raw there buys nothing (a shipped tree is static — there is no source to pick up) and
+ * costs a startup crash, so the discriminator is the source checkout, not "which form exists".
+ *
+ * ⛔ Mirror: `plugin/scripts/driver-runtime.ts::isKernelSourceCheckout` (same predicate, resolved
+ * from the kernel's own install location — the kernel cannot import this module). Change both.
+ */
+export function isPluginSourceCheckout(root: string | null = resolvePluginRoot()): boolean {
+  if (!root) return false;
+  return fs.existsSync(path.join(path.dirname(root), "packages", "quay", "src"));
 }
 
 /**
@@ -137,16 +176,25 @@ export function resolvePluginScript(rel: string): string | null {
  * (`mcp-server.ts`'s `resolvePluginExecutable`, `observation.ts`'s `readBoardLanding`,
  * `serve-send.ts`'s `resolveTranscriptChecker`). Returns null when neither form resolves; the
  * caller decides whether to fail closed. `.sh` rels never fall back (shell scripts ship raw).
+ *
+ * ⛔ raw WINS only inside the source checkout (`isPluginSourceCheckout`); in a shipped install a
+ * `.ts` that has a dist bundle resolves to the BUNDLE even though the raw file is present — the
+ * marketplace cache ships both, and the raw form's npm imports are not installed there.
  */
 export function resolvePluginScriptExec(rel: string): { path: string; stripTypes: boolean } | null {
-  const raw = resolvePluginScript(rel);
-  if (raw) return { path: raw, stripTypes: rel.endsWith(".ts") };
-  if (rel.endsWith(".ts")) {
+  const root = resolvePluginRoot();
+  if (!root) return null;
+  const isTs = rel.endsWith(".ts");
+  const raw = resolvePluginScriptUnder(root, rel);
+  if (raw && (!isTs || isPluginSourceCheckout(root))) return { path: raw, stripTypes: isTs };
+  if (isTs) {
     // rel is plugin-root-relative (`scripts/…` or `gate-scripts/…`), so the bundled form is
     // `scripts/dist/….js` (NOT `plugin/scripts/dist/…` — that prefix was stripped by the caller).
     const bundledRel = rel.replace(/\.ts$/, ".js").replace(/^(scripts|gate-scripts)\//, "$1/dist/");
-    const bundled = resolvePluginScript(bundledRel);
+    const bundled = resolvePluginScriptUnder(root, bundledRel);
     if (bundled) return { path: bundled, stripTypes: false };
   }
-  return null;
+  // No bundle to prefer (e.g. a dev-only tool that the build never bundles): the raw form is all
+  // there is — keep today's behaviour rather than turning a resolvable script into null.
+  return raw ? { path: raw, stripTypes: isTs } : null;
 }

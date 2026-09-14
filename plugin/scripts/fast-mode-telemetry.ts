@@ -105,11 +105,18 @@
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
+import { acquireCoreSrc } from "./core-src-import.ts";
 // The SINGLE resolver of "where do THIS workspace's task worktrees live" (loop.worktree_root from
 // .quay/config.yml, falling back to the <parent-of-root>/quay-worktrees convention). Shared with the
 // Core serve path — packages/quay/src/observation.ts — so the read side can never drift from the
 // write side again (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root).
-import { resolveWorktreeNamespace } from "../../packages/quay/src/worktree-namespace.ts";
+// ⛔ Acquired layout-independently (core-src-import.ts): this file is reached by `quay driver`'s own
+// kernel import graph (driver-runtime.ts → driver-filters.ts → concurrent-batch-scheduler.ts → here),
+// and a bare `../../packages/quay/src/…` literal dies in the staged `packages/quay/plugin/` copy.
+const { resolveWorktreeNamespace } = await acquireCoreSrc(
+  () => import("../../packages/quay/src/worktree-namespace.ts"),
+  "worktree-namespace.ts",
+);
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";

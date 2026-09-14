@@ -44,6 +44,28 @@ export async function handleTaskCreate({ positional, flags, wantsJson }: CliCtx)
   if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
 
   await withProvider(async (client) => {
+    // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: `create` must not be a
+    // silent upsert. This verb is Core-side and provider-agnostic, so it can only reach the
+    // task store through the ABI — and the ABI's `task_write` is an upsert with no create-only
+    // flag. Without this check, re-creating an existing id (e.g. a driver re-running a task's
+    // "ensure it exists" setup) returned exit 0 while silently re-statusing a settled `done`
+    // task to whatever `--status` said — the reported defect (archguard's TASK-TSCONFIG-EXTENDS
+    // went `done` -> `todo` under a fresh frontmatter block).
+    //
+    // Shape: read-then-write, so a concurrent create of the SAME new id can still interleave.
+    // That residue is deliberate and bounded: the native Provider's store guards the create path
+    // race-free inside its own lock (`AlreadyExistsError` in store.ts#write), and the ABI-level
+    // check here is what covers the CLI front door it cannot see. Closing it fully would mean a
+    // create-only flag on the Provider ABI itself — a separate change, not this defect's scope.
+    const existing = await client.taskGet(id);
+    if (existing) {
+      console.error(
+        `quay task create: task "${id}" already exists — refusing to create it ` +
+          `(nothing written; use \`task edit\` / task_write to modify an existing task)`
+      );
+      process.exitCode = 1;
+      return;
+    }
     const t = await client.taskWrite({ id, ...patch });
     if (wantsJson) printJson(t);
     else console.log(`${t.id}: ${t.title} [${t.status}]`);

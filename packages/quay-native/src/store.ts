@@ -259,6 +259,42 @@ export class ConflictError extends Error {
   }
 }
 
+/**
+ * gap-quay-native-task-create-duplicate-id-prepends-frontmatter: thrown by
+ * `write()` when the caller opted into CREATE semantics (`{ create: true }`)
+ * and the target file ALREADY EXISTS.
+ *
+ * Why a dedicated class and not a generic Error: the create path's whole job is
+ * to refuse, and a caller must be able to branch on "this id is taken" without
+ * parsing a message string — the same reasoning ConflictError documents above.
+ *
+ * Why the store and not the CLI: `task create` has two front doors (the native
+ * CLI's `task create` and Core's `quay task create`, which reaches this store
+ * through the Provider ABI's `task_write`). The existence check belongs at the
+ * single write chokepoint so the guard is race-free (it runs inside the same
+ * `withLocks()` acquisition as the read-modify-write) rather than a TOCTOU
+ * pre-check each front door would have to re-implement.
+ *
+ * The defect it closes: before this guard, `create` on an existing id fell
+ * through to `write()`'s ordinary read-modify-write and silently MERGED the
+ * caller's patch into the existing task — exit code 0, no stderr — so a settled
+ * `done` task was re-statused to the caller's `todo` and (when the caller also
+ * passed a body) the original document survived only as duplicated text below a
+ * second `---` block. Failure and success were the same shape (exit 0, a
+ * well-formed file), which is why it went unnoticed.
+ */
+export class AlreadyExistsError extends Error {
+  id: string;
+  constructor(id: string) {
+    super(
+      `task "${id}" already exists — refusing to create it (nothing written to disk; ` +
+        `use \`task edit\` / task_write to modify an existing task)`
+    );
+    this.name = "AlreadyExistsError";
+    this.id = id;
+  }
+}
+
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
@@ -1555,10 +1591,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean; create?: boolean }): (Task & { updatedAt?: number }) | null {
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
+    // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: opt-in CREATE semantics.
+    // `write()` is shared by create and edit; only the create path asserts "this id must be free"
+    // (see AlreadyExistsError). Default false keeps every existing `task edit` / task_write call
+    // byte-for-byte unchanged — an edit of an id that does not exist still creates it, exactly as
+    // before (that is `edit`'s documented upsert behavior, not a defect).
+    const create = opts?.create === true;
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1581,6 +1623,17 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
     const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
+      // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: the create guard.
+      // Placed HERE — inside the lock, before any mutation — for two reasons:
+      //   * race-free: a pre-check done by a caller (outside the lock) is TOCTOU — two concurrent
+      //     `task create <same-id>` calls would both observe "absent", both proceed, and the second
+      //     would silently clobber the first. Inside the lock the loser sees the winner's file.
+      //   * zero write: throwing before `fs.writeFileSync` below means the existing file's bytes are
+      //     untouched, which is what makes AC1's byte-identical assertion meaningful (a guard that
+      //     wrote first and rolled back would pass a status check but not a byte check).
+      if (create && existingRaw !== null) {
+        throw new AlreadyExistsError(id);
+      }
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
       let beforeFrontmatter: Record<string, unknown> | null = null;

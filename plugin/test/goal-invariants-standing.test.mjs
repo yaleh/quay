@@ -253,7 +253,10 @@ test("AC3 常设 — update 清空 criterion 被拒；status-only 放行（机�
   const dir = tmpDir("gi-ac3-");
   const s = createGoalStore(path.join(dir, "goals"));
   const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
-  s.write("GOAL-001", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
+  // ⚠️ `status: "draft"`: a GOAL born `active` now needs a naming AC first
+  // (gap-goal-create-as-active-skips-zero-ac-gate). The subject here is the CRITERION write surface
+  // (blanking refused / status-only flip allowed), which does not depend on the GOAL's own status.
+  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("AC-001", { title: "a", status: "active", goal: "GOAL-001", criterion: "true", expect: "expected", origin: "o" });
   assert.throws(() => s.write("AC-001", { criterion: "" }), /criterion/);
   // status-only 写入不碰内容字段 ⇒ 不校验内容，机械 flip 放行。

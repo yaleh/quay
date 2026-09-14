@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [fan-in-queueing-model.ts]="「把 worker 并发调高，落地吞吐会上升，还是只有排队时间上升」—— 用三个生产载体（fan-in 锁事件 / per-run fan-in 过程日志 / worker 执行记录 + git 落地历史）报出锁持有分布、排队等待分布、锁利用率 ρ、到达率 λ、平均在系统数 L，以及实测的 wait-vs-ρ 曲线（本报告里唯一可取假的那个量），据此说出系统当前落在排队论 knee 的哪一侧、以及距饱和还有几倍余量（tasks/gap-fan-in-queueing-model-does-concurrency-help；并纠正 docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §7 第 5 条『排队无载体』的错误结论——该量自 2026-08-30 起写在 per-run 过程日志里）?"
   [worktree-namespace-literal-check.ts]="Does the product/plugin source spell the worktree-namespace directory literal (the double-quoted 'quay-worktrees') in more than the ONE place that is allowed to — i.e. is a grep -rn of that literal over packages/quay/src + plugin/scripts at most 1 hit, and is that hit the DEFAULT_WORKTREE_NAMESPACE_NAME declaration in packages/quay/src/worktree-namespace.ts (the single resolver's fallback branch)? An unquoted occurrence (path regex / comment / prose) is reported as an advisory count, never a hard failure (tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3)?"
   [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
@@ -185,6 +186,7 @@ declare -A QUESTION=(
   [suite-slot-lib.sh]="What are the suite lock slots (bash side — the canonical scripts/test.sh sources): suite_slot_count = RESOURCE_GATE_CONCURRENT_SUITES seam → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, suite_slot_paths = base.0..S-1 (loop-generated, never a hardcoded .0/.1 literal); the behavioral invariant suite-slot-ssot-check verifies it agrees with the TS canonical (gap-suite-concurrency-ff-gate-and-slot-ssot); plus spawn_suite_lock_hold_watchdog — the hold-cap watchdog that releases a slot held past T seconds (a child of the HOLDING process, ⛔ not a worker-driver kill) and records a fail-loud lock_hold_exceeded=1 marker (gap-suite-lock-starvation-long-validation-hold AC1)?"
   [suite-slot-ssot-check.ts]="Do the suite-concurrency single-definition-point BEHAVIORAL invariants hold (gap-suite-concurrency-ff-gate-and-slot-ssot AC4): I1 packages/quay/src/fan-in/ff-merge.ts code contains no full-suite.lock read (ff 闸只读本任务 capture) / I2 no full-suite.lock.<digit> literal nor FULL_SUITE_LOCK_<digit> variable in code across the surface / I3 the four consumers read the canonical (suite-slot-lib.sh / suite-lock-slots.ts) / I4 bash canonical slot count == TS canonical slot count under the same env — each can take false (by POSITION, 硬规则 2)?"
   [concurrent-batch-scheduler.ts]="Which ready tasks can be dispatched concurrently without touching overlapping files?"
+  [core-src-import.ts]="From a plugin script that is executed as RAW .ts (not as a bundled dist entry), in WHICH layout is a Core-src module (packages/quay/src/...) actually reachable — repo tree, staged packages/quay/plugin copy, or shipped bundle — and does acquisition fail loud when none of them resolves?"
   [config-key-consumer-check.ts]="Does every delivered config key quay-init writes into a downstream .quay/config.yml loop: section have a CODE consumer — a zero-consumer key (delivered but never read) is either wired or deleted, proven by mechanical enumeration (writer face derived from quay-init.sh's heredoc + python upgrade writer; consumer face grepped over plugin/scripts/*.ts + packages/quay/src/*.ts excluding tests) with a three-state output has-consumer / no-consumer-to-wire / documented-with-reason where an exemption must carry a reviewable reason text (⛔ not a bare allowlist — GOAL-015 风险 3 / AC-235)?"
   [provider-binding-resolvability-check.ts]="Does a quay project's provider binding name its runtime by a PATH the project itself controls — i.e. can it read its OWN task board WITHOUT external \$PATH assistance (absolute, or relative to <workspaceRoot>/<provider.path>, and present on disk) — where a separator-less token (the pre-ba960f503 form mcp_entry: [quay-native, mcp], satisfied only by whatever \$PATH happens to hold on the machine that runs it) is RED regardless of whether this host resolves it, and no-mcp-entry / unrecognized-shape are NOT-EVALUATED never sharing an output with 合格 (tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected)?"
   [config-wiring-check.ts]="Does every declared config field have exactly one wirer?"
@@ -453,6 +455,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [fan-in-queueing-model.ts]="按需"
   [worktree-namespace-literal-check.ts]="每轮"
   [gitignore-runtime-coverage-check.ts]="每轮"
   [psi-failure-correlation-check.ts]="按需"
@@ -509,6 +512,7 @@ declare -A CADENCE=(
   [suite-slot-lib.sh]="每轮"
   [suite-slot-ssot-check.ts]="每轮"
   [concurrent-batch-scheduler.ts]="每里程碑"
+  [core-src-import.ts]="每里程碑"
   [config-key-consumer-check.ts]="每轮"
   [provider-binding-resolvability-check.ts]="每轮"
   [config-wiring-check.ts]="按需"
@@ -784,6 +788,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [fan-in-queueing-model.ts]="失效前提：三条载体的字段口径不变 —— ①.quay/fan-in-lock-events.jsonl 的 event/epoch/taskId/runId/pid 五键与 epoch 以【秒】为单位的约定；②per-run 过程日志 fan-in-<task>-<runId>.log 里 acquire-fan-in-lock 步的 wall_ms（它 = 排队时延，本条全部延迟结论都建立在它上面）；③.quay/worker-outcome.jsonl 的 in_flight_count/wall_clock_ms 与 git log develop 里 tasks: 翻 <id>… 的提交主题形状。任一字段改名、改单位或给 wall_ms 换语义，本条需同步"
   [worktree-namespace-literal-check.ts]="失效前提：worktree 命名空间仍由单一入口 packages/quay/src/worktree-namespace.ts 的 DEFAULT_WORKTREE_NAMESPACE_NAME 回落分支持字面量、其余读侧仍只经该入口取命名空间；若命名空间约定整体退休（不再有 per-task worktree）或字面量改由配置/环境注入（字面量消失），本条随之失效"
   [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
@@ -840,6 +845,7 @@ declare -A INVALIDATION=(
   [suite-slot-lib.sh]="失效前提：scripts/test.sh 仍以单个 single-flight 锁文件族（full-suite.lock.*）串行化全量 suite 且槽数仍由 QUAY_MAX_CONCURRENT_SUITES 生成；若 suite 串行化改走其它机制（如单一全局锁/队列），本条退休"
   [suite-slot-ssot-check.ts]="失效前提：suite 并发量定义点仍分散在多个消费者（test.sh/full-suite-runner/worktree-process-reaper/ff-merge.ts）且需行为层不变量守着；若收敛到单一实现且该实现本身受测试覆盖，本条退休"
   [concurrent-batch-scheduler.ts]="无可测前提，靠周期复核"
+  [core-src-import.ts]="失效前提：staged 副本布局下裸相对 import 已可解析（即该缺陷不再存在）；或所有调用点都收进 esbuild 内联的静态字面量、不再有 raw .ts 执行路径——本条按 ④ 失效"
   [config-key-consumer-check.ts]="失效前提：交付配置键仍由 quay-init 以 loop: 段写入下游 .quay/config.yml 且消费者面仍以 plugin/scripts/*.ts + packages/quay/src/*.ts 字面 grep 为判据口径；若 writer 面改由他处声明（不再经 quay-init.sh 的 heredoc/python 写手）或 consumer 判据口径被推翻，本条按 ④ 失效"
   [provider-binding-resolvability-check.ts]="失效前提：provider 绑定仍由 .quay/config.yml 的 providers.<id>.mcp_entry 承载，且产品仍以 packages/quay/src/cli/shared.ts:175 的 provider.path 为 cwd 解析该 token；若绑定改由他处声明（mcp_entry 被别的键取代）或产品改了 runtime 解析口径（相对 token 不再对 provider dir 解析/裸名不再走 \$PATH），本条的 path-resolved 与裸名判据随之失效"
   [config-wiring-check.ts]="无可测前提，靠周期复核"
@@ -1115,6 +1121,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [fan-in-queueing-model.ts]="2026-09-14"
   [worktree-namespace-literal-check.ts]="2026-09-13"
   [gitignore-runtime-coverage-check.ts]="2026-09-13"
   [psi-failure-correlation-check.ts]="2026-09-05"
@@ -1171,6 +1178,7 @@ declare -A LAST_REAFFIRMED=(
   [suite-slot-lib.sh]="2026-08-18"
   [suite-slot-ssot-check.ts]="2026-08-18"
   [concurrent-batch-scheduler.ts]="2026-08-10"
+  [core-src-import.ts]="2026-09-14"
   [config-key-consumer-check.ts]="2026-09-10"
   [provider-binding-resolvability-check.ts]="2026-09-11"
   [config-wiring-check.ts]="2026-08-10"
@@ -1446,6 +1454,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [fan-in-queueing-model.ts]="n/a"
   [worktree-namespace-literal-check.ts]="keyword"
   [gitignore-runtime-coverage-check.ts]="position"
   [psi-failure-correlation-check.ts]="n/a"
@@ -1502,6 +1511,7 @@ declare -A MATCHING=(
   [suite-slot-lib.sh]="n/a"
   [suite-slot-ssot-check.ts]="position"
   [concurrent-batch-scheduler.ts]="keyword"
+  [core-src-import.ts]="n/a"
   [config-key-consumer-check.ts]="enumerative"
   [provider-binding-resolvability-check.ts]="position"
   [config-wiring-check.ts]="keyword"
@@ -1783,6 +1793,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [fan-in-queueing-model.ts]="谁按：任何要动本工作区并发旋钮的人/层，在改 .quay/config.yml 的 concurrency / concurrency_bands 之前与之后各跑一次做前后对照（node --experimental-strip-types plugin/scripts/fan-in-queueing-model.ts --root <主检出>），也由本任务实现者跑出 docs/analysis/fan-in-queueing-model.md 的全部读数；条件=要判定 fan-in 锁当前处在排队论 knee 的哪一侧（ρ 与实测 wait-vs-ρ 曲线），或要把一次 fan-in 的端到端拆成排队 / suite / 其余三段"
   [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
   [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
   [gitignore-runtime-coverage-check.ts]="谁按：run_static_checks（scripts/test.sh 静态检查链，change tier，@static-object 命中 .gitignore / plugin/scripts/quay-runtime-artifacts.txt / 本检查自身时）；条件=要判 quay 自己 .gitignore 里标为运行时产物的条目集与 quay-init 写出的 manifest 是否仍然一致（漂移即红，manifest 读不到 NOT-EVALUATED）"
