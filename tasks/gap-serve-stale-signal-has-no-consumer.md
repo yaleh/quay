@@ -3,7 +3,7 @@ id: gap-serve-stale-signal-has-no-consumer
 title: serve 陈旧信号无消费者：/health 已报 stale:true 而 start-drivers 只探可达 ⇒ 生产实例跑 pre-fix
   代码、/dashboard 冷请求 14.59s 越过 AC-179 criterion 的 --max-time 10，verdict pass⇄fail
   振荡
-status: ready
+status: done
 labels:
   - gap
   - defect
