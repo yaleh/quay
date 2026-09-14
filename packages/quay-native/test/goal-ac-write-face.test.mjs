@@ -23,7 +23,7 @@
 //
 // Run: scripts/test.sh packages/quay-native/test/goal-ac-write-face.test.mjs
 
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -70,6 +70,15 @@ function git(root, ...args) {
   });
 }
 
+/** Every temp workspace this file creates, cleaned in ONE `after()` — the `_createdDirs` + after()
+ *  carrier pattern tmp-leak-pairing-check pairs on. An unpaired `mkdtempSync` is a hard RED gate
+ *  (the 2026-08-12 /tmp audit: 3389 leftover dirs / 1.1GB), so the pairing is structural here, not a
+ *  thing the author remembers to do per test. */
+const _createdDirs = [];
+after(() => {
+  for (const d of _createdDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
 /**
  * A disposable git workspace. `goalLayer` picks the enable condition's value:
  *   "records" — goals/ holds ≥1 goal-layer record      ⇒ the rule is ENABLED
@@ -78,6 +87,7 @@ function git(root, ...args) {
  */
 function makeWorkspace(goalLayer = "records") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `quay-ac190-${goalLayer}-`));
+  _createdDirs.push(root);
   const tasksDir = path.join(root, "tasks");
   fs.mkdirSync(tasksDir, { recursive: true });
   if (goalLayer !== "absent") {
