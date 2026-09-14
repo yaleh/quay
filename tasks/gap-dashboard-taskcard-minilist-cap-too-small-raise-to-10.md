@@ -84,6 +84,41 @@ B 常量留 10、标题字面量写死 3     ⇒ 两个兄弟测试红（fail 2�
 提交与 `.quay/scoped-gate-cache.json`；**AC4 的「全量」这一半由 driver 机械 fan-in 的套件运行判定**
 （worker 不自己跑全量套件）。
 
+### 本轮复验（2026-09-14 05:0x–05:2x）：上一轮那条 suite 红**未复现**——但机制已定位且有两向对照
+
+全量 `scripts/test.sh` 在本 worktree 重跑一次：**绿（EXIT=0，无 ✖）**；上一轮红的那条
+（`plugin/test/worker-driver-retry-classification.test.mjs` 的 `round 记录携带判定（生产载体）`）
+本轮 `passed=true`（该文件本轮 `__PERFILE__ duration_ms=5940`；失败轮该测试自身耗时 8058ms）。
+
+它是**负载相关的竞态**，不是本任务的连带：该文件与本任务 delta **零 diff**（与 develop 逐字节相同，
+见 `git diff --stat develop task/<本任务> -- plugin/test/worker-driver-retry-classification.test.mjs` 为空）。
+
+- 机制：`worker-driver.ts` 的 `writeRound()` 在**轮末**调用（`:5233`，定义 `:4874`），而
+  `spawnSelected()` **不 await worker**（`:5038` `rw.promise = runOneWorker({...}).then(r => onWorkerFinished(rw, r))`
+  之后随即 `running.push(rw)` 返回）⇒ 第 N 轮的 `exited_not_landed_stops` 会落在**第 N+1 轮**的记录里。
+  测试在 `waitFor(picks>=2)` 之后只等固定 **400ms**（`worker-driver-retry-classification.test.mjs:303`）
+  就读载体 ⇒ 若下一轮（reap + ready-pool 子进程 + writeRound）超过 400ms，读到 1 条而非 2 条 ⇒ `:311`
+  的 `assert.ok(stops.length >= 2)` 红。
+- 两向对照（`/tmp/rcl-race-control.mjs`：逐字复制该测试的驱动配置与读法，只把 `--ready-pool-cmd` 放慢到
+  2s，令「一轮 > 固定宽限」按构造为真）：
+
+```
+A-fixed400ms (测试现有读法): stops=1 kinds=["count-and-retry"]                picks=2 outcomes=2 => FAIL
+B-poll-carrier (轮询载体)  : stops=2 kinds=["count-and-retry","stop-terminal"] picks=2 outcomes=2 => PASS
+```
+
+  A 复现出的数组与 2026-09-14 那轮全量红**逐字同形**（`[{"task":"gap-stop","kind":"count-and-retry",...}]`，
+  即该断言打印的那一份）⇒ 两个假设给出相反预测、一条命令的对照分开了它们（硬规则 4 推论四）。
+- 修法（已由上面的 B 验证，**本任务未采用**）：把 `:303` 的固定 sleep 换成轮询载体本身——
+  `await waitFor(() => readRoundLines(root).flatMap(r => r.exited_not_landed_stops ?? []).length >= 2, 30000)`
+  ——断言强度不变（仍断言 ≥2 条、kind 可区分、顺序），只是不再与驱动轮次竞态。
+- **为何不在本任务里修**：该文件不在本任务 `## Touches`、与 develop 零 diff、与本任务所改常量无因果；
+  在分支里修它会把一个 engine 测试文件带进本任务 delta（anti-drift 需扩 `## Touches`），而人本次裁定
+  明确限定范围为一个常量。故照本任务既有惯例（Proposal 第 3 条对「+N 更多」不一致的处理）**记录在案、
+  供以后单独立案参考**。发生率观测：生产载体 `verification-round.jsonl` 中该文件共出现 32 次、
+  `passed=false` **1** 次（即本轮之前那一次，commit `4f83865ac`）——即约个位数百分比/轮，高负载下更高。
+  修法已备好，是一条 3 行改动；**下一次该文件在 fan-in 套件里再红时，应当照着上面这段直接修**。
+
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
