@@ -303,20 +303,47 @@ export function resolveKernelPluginRoot(): string {
   return path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
 }
 
+/** 本 kernel 是否跑在【源检出】里 —— Core 源码就在本 plugin root 旁边
+ *  （`<repo>/plugin/scripts/*.ts` + `<repo>/packages/quay/src/**`）。只有那里 raw `.ts` 才是真相源
+ *  （编辑即生效 + `sourceFilesMaxMtimeMs` 的源码自刷新）。
+ *
+ *  ⛔ 出厂安装一律以自包含 dist bundle 为可运行形态：npm-pack（raw .ts 直接不存在）、plugin
+ *  MARKETPLACE cache（`publish-dist-branch.sh` rsync 整个 plugin/，raw 与 dist 并存、且没有
+ *  node_modules 可解析 raw 的裸 npm import）、第三方 vendored 副本、`package.sh` 的 staged 快照。
+ *  实测 2026-09-14（gap-dist-plugin-missing-node-modules-task-schema-yaml）：在真实的
+ *  `~/.claude/plugins/cache/quay/quay/0.6.2` 上，raw kernel 的 23 文件 import 闭包需要 `yaml` /
+ *  `@modelcontextprotocol/sdk/*` / `zod`，`quay driver start` 对**每一个 kind** 都崩在
+ *  `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from <cache>/scripts/task-schema.ts`，
+ *  而同一目录的 `scripts/dist/driver-runtime.js` 跑同一个 verb 正常。出厂树是静态的（没有源码可
+ *  推进），选 raw 零收益、代价是启动即崩 ⇒ 判据是「是不是源检出」，⛔ 不是「哪个形态存在」。
+ *
+ *  ⛔ 镜像 Core `packages/quay/src/plugin-root.ts::isPluginSourceCheckout`（同一判据，从本 kernel
+ *  自身安装位置解析 —— kernel ⛔ 不能 import Core 模块）。两处必须同改。 */
+export function isKernelSourceCheckout(): boolean {
+  const codeRoot = resolveQuayCodeRoot();
+  return !!codeRoot && fs.existsSync(path.join(codeRoot, "packages", "quay", "src"));
+}
+
 /** 解析本 kernel 的一个 sibling 脚本到可运行形态：原始 .ts（dev tree，用 --experimental-strip-types 跑）
  *  或 bundled dist/<name>.js（installed artifact，纯 ESM，不带 flag 跑）。两者都不在 ⇒ null（调用方
- *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。 */
+ *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。
+ *
+ *  ⛔ raw 只在【源检出】里胜出（isKernelSourceCheckout）：出厂安装里 raw 与 dist 并存时 dist 优先
+ *  —— 否则 supervisor 会 spawn 一个 import 不到 `yaml`/`zod`/`@modelcontextprotocol/sdk` 的裸 .ts，
+ *  六个 driver kind 全部启动即崩（`runSupervisor` 的 `spec.driver` 正是经本函数解析）。dist 不存在
+ *  ⇒ 退回 raw（保持既有行为，不把可解析的脚本变成 null）。 */
 export function resolveKernelSibling(name: string): { path: string; stripTypes: boolean } | null {
   const dir = resolveKernelScriptsDir();
   const raw = path.join(dir, name);
-  if (fs.existsSync(raw)) return { path: raw, stripTypes: true };
-  if (name.endsWith(".ts")) {
+  const isTs = name.endsWith(".ts");
+  if (fs.existsSync(raw) && (!isTs || isKernelSourceCheckout())) return { path: raw, stripTypes: true };
+  if (isTs) {
     const js = name.replace(/\.ts$/, ".js");
     const bundledDir = path.basename(dir) === "dist" ? dir : path.join(dir, "dist");
     const bundled = path.join(bundledDir, js);
     if (fs.existsSync(bundled)) return { path: bundled, stripTypes: false };
   }
-  return null;
+  return fs.existsSync(raw) ? { path: raw, stripTypes: isTs } : null;
 }
 
 /** 解析本 kernel 的一个 shell sibling（.sh）到 `<pluginRoot>/scripts/<name>`。shipped 下 .sh 以
