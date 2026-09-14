@@ -38,10 +38,10 @@ Little's law（L = λW）判定系统当前处在哪个区间，给出一个可�
 
 ## Touches
 
-- `plugin/scripts/fan-in-queueing-model.ts`
-- `plugin/test/fan-in-queueing-model.test.mjs`
+- `plugin/scripts/fan-in-queueing-model.ts` (new)
+- `plugin/test/fan-in-queueing-model.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/fan-in-queueing-model.md`
+- `docs/analysis/fan-in-queueing-model.md` (new)
 - `tasks/gap-fan-in-queueing-model-does-concurrency-help.md`
 
 ## Acceptance Criteria
