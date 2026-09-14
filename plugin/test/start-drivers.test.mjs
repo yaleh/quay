@@ -8,9 +8,15 @@
 //   - pure helpers: parseDriverStatus (alive/dead/unreadable are three distinguishable values),
 //     resolveWorkspaceRoot, resolveCliInvocation (explicit/source-tree/vendor-bundle/PATH
 //     precedence — the vendor-bundle branch and its own coverage live in
-//     start-drivers-cli-resolution.test.mjs), planActions (the idempotency decision), probeUrl.
+//     start-drivers-cli-resolution.test.mjs), planActions (the idempotency decision, INCLUDING its
+//     staleness dimension), probeUrl, probeServeStaleness + readServeHostPid (the two three-valued
+//     readings the stale-reload path is built on).
 //   - full flow (hermetic): a fake `quay` CLI scripts `driver status`/`driver start` and actually
 //     listens for `serve`, proving run#1 starts everything and run#2 starts nothing (idempotent).
+//   - stale reload (gap-serve-stale-signal-has-no-consumer): a REAL separate server process answers
+//     /health with `stale:true`; the script must SIGTERM it (identified from `.quay/server.json`),
+//     wait for the port, and start a fresh one — then SKIP on the next run because it is now fresh.
+//     Mirror half: an unreadable /health is NOT-EVALUATED — its own literal, host untouched.
 //   - failure relay: a fake CLI whose `driver start` exits 1 with a "halted" message — the script
 //     must relay that verbatim (not swallow / not misreport), and fail non-zero.
 //   - structural: plugin/skills/drivers/SKILL.md references plugin/scripts/start-drivers.ts (the
@@ -24,7 +30,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -33,12 +39,16 @@ import {
   resolveCliInvocation,
   planActions,
   probeUrl,
+  probeServeStaleness,
+  readServeHostPid,
 } from "../scripts/start-drivers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "start-drivers.ts");
 const SKILL = path.join(REPO_ROOT, "plugin", "skills", "drivers", "SKILL.md");
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function runScript(args, opts = {}) {
   return spawnSync(process.execPath, ["--experimental-strip-types", SCRIPT, ...args], {
@@ -98,13 +108,92 @@ if (cmd === "driver") {
   rec(["serve"]);
   const port = Number(argv[argv.indexOf("--port") + 1]);
   const host = argv[argv.indexOf("--host") + 1];
-  http.createServer((req, res) => { res.end("ok"); }).listen(port, host);
+  const rootArg = argv[argv.indexOf("--root") + 1];
+  const health = process.env.FAKE_QUAY_HEALTH || '{"ok":true,"stale":false,"evaluated":true}';
+  if (rootArg && process.env.FAKE_QUAY_WRITE_SERVER_JSON === "1") {
+    try {
+      fs.mkdirSync(rootArg + "/.quay", { recursive: true });
+      fs.writeFileSync(rootArg + "/.quay/server.json", JSON.stringify({ schemaVersion: 1, pid: process.pid, startedAt: new Date().toISOString(), services: [] }));
+    } catch (e) { /* best-effort, mirrors the real host */ }
+  }
+  http.createServer((req, res) => {
+    if (req.url && req.url.indexOf("/health") === 0) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(health);
+    } else {
+      res.end("ok");
+    }
+  }).listen(port, host);
 } else {
   process.exit(2);
 }
 `;
   fs.writeFileSync(fake, src, "utf8");
   return fake;
+}
+
+/** A standalone HTTP server PROCESS (not an in-test server) — so the reload path's SIGTERM has a
+ *  real target and "the old host is gone" is observable. Answers `healthBody` on /health, "ok"
+ *  elsewhere. Resolves once it actually answers. */
+async function startForeignServer(dir, healthBody) {
+  const f = path.join(dir, "foreign-server.js");
+  fs.writeFileSync(f, `const http = require("node:http");
+const port = Number(process.argv[2]);
+const host = process.argv[3];
+const body = process.env.HEALTH_BODY || "";
+http.createServer((req, res) => {
+  if (req.url && req.url.indexOf("/health") === 0) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(body); }
+  else { res.end("ok"); }
+}).listen(port, host);
+`, "utf8");
+  const port = await freePort();
+  const child = spawn(process.execPath, [f, String(port), "127.0.0.1"], {
+    env: { ...process.env, HEALTH_BODY: healthBody },
+    stdio: "ignore",
+  });
+  let exited = false;
+  child.on("exit", () => { exited = true; });
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (await probeUrl("127.0.0.1", port, 300)) return { child, pid: child.pid, port, exited: () => exited };
+    await sleep(50);
+  }
+  try { child.kill("SIGKILL"); } catch { /* gone */ }
+  throw new Error(`foreign server never answered on ${port}`);
+}
+
+/** Is the process RUNNING — i.e. still serving? ⛔ `kill(pid, 0)` is true for a reaped-but-unwaited
+ *  ZOMBIE too, so it answers "a pid entry exists", not "the host is alive"; the state field is the
+ *  reading that actually distinguishes them. */
+function pidRunning(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] !== "Z";
+  } catch {
+    return false;
+  }
+}
+
+/** Poll until the port answers, within a deadline — the SAME contract `startServe` itself offers.
+ *  ⛔ A single immediate probe is the wrong reading: a freshly-spawned listener can be briefly
+ *  unresponsive right after its parent exits (measured here: the first probe after the reload
+ *  returned false, every probe from +200ms returned true), so a one-shot probe measures the test's
+ *  timing rather than the script's behavior. */
+async function waitForProbe(host, port, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await probeUrl(host, port, 1000)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(200);
+  }
+}
+
+/** Publish the `.quay/server.json` carrier `quay serve` writes about itself — the reload path's ONLY
+ *  pid source (⛔ not `.quay/serve.pid`, which goes stale). */
+function writeServeCarrier(root, pid) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "server.json"),
+    JSON.stringify({ schemaVersion: 1, pid, startedAt: new Date().toISOString(), services: [] }));
 }
 
 function makeWorkspaceRoot(parent) {
@@ -181,6 +270,93 @@ test("planActions — the idempotency decision is pure", () => {
   );
 });
 
+// AC3 (gap-serve-stale-signal-has-no-consumer) — BIDIRECTIONAL: the staleness dimension must move
+// `startServe` in BOTH directions, otherwise the dimension is decoration.
+test("AC3 — planActions: listening+STALE ⇒ start (reload); listening+FRESH ⇒ skip; NOT-EVALUATED ⇒ skip", () => {
+  const base = { promotionAlive: true, workerAlive: true, outerAlive: true, goalAlive: true, serveListening: true };
+  // (a) stale-but-reachable ⇒ MUST start. Before this task this was `false` — the defect.
+  assert.equal(planActions({ ...base, serveStale: true }).startServe, true,
+    "a listening-but-STALE server is not 'already running' — it must be reloaded");
+  // (b) fresh-and-reachable ⇒ MUST skip (the negative control: (a) is not just "always true").
+  assert.equal(planActions({ ...base, serveStale: false }).startServe, false,
+    "a listening-and-FRESH server must NOT be restarted");
+  // (c) listening but NOT-EVALUATED ⇒ skip (AC4: a reading we could not take is not a verdict in
+  //     either direction) — and distinctly from (b): the caller reports the two differently.
+  assert.equal(planActions({ ...base, serveStale: null }).startServe, false,
+    "an unevaluated reading must not become a restart");
+  assert.equal(planActions({ ...base }).startServe, false, "omitted staleness is not-evaluated, not stale");
+  // (d) nothing listening ⇒ start regardless of staleness value.
+  assert.equal(planActions({ ...base, serveListening: false, serveStale: false }).startServe, true);
+  assert.equal(planActions({ ...base, serveListening: false, serveStale: null }).startServe, true);
+});
+
+// AC3/AC4 — the reading itself. Every "could not read" mode is a SEPARATE value from "fresh"
+// (硬規則 3b), and none of them is "stale".
+test("AC4 — probeServeStaleness: boolean stale is evaluated; every unreadable mode is NOT-EVALUATED with its own token", async () => {
+  const port = await freePort();
+  let body = JSON.stringify({ ok: true, stale: true, evaluated: true });
+  let status = 200;
+  const srv = http.createServer((req, res) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(body);
+  });
+  await new Promise((resolve) => srv.listen(port, "127.0.0.1", resolve));
+
+  // (a) evaluated, both directions
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000), { evaluated: true, stale: true, reason: null });
+  body = JSON.stringify({ ok: true, stale: false, evaluated: true });
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000), { evaluated: true, stale: false, reason: null });
+
+  // (b) the server's OWN not-evaluated value (stale:null) is NOT-EVALUATED here too — never "fresh"
+  body = JSON.stringify({ ok: true, stale: null, evaluated: false, source: null });
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000),
+    { evaluated: false, stale: null, reason: "health-says-not-evaluated" });
+
+  // (c) missing field / wrong type / unparseable body — three distinct tokens, none "fresh"
+  body = JSON.stringify({ ok: true });
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000),
+    { evaluated: false, stale: null, reason: "no-stale-field" });
+  body = JSON.stringify({ stale: "yes" });
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000),
+    { evaluated: false, stale: null, reason: "stale-not-boolean" });
+  body = "not-json-at-all";
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000),
+    { evaluated: false, stale: null, reason: "unparseable-body" });
+
+  // (d) a non-200 is not a health answer
+  status = 404;
+  body = JSON.stringify({ stale: false });
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 1000),
+    { evaluated: false, stale: null, reason: "http-404" });
+  status = 200;
+
+  await new Promise((resolve) => srv.close(resolve));
+
+  // (e) nothing there at all
+  assert.deepEqual(await probeServeStaleness("127.0.0.1", port, 500),
+    { evaluated: false, stale: null, reason: "unreachable" });
+});
+
+test("readServeHostPid — present / absent / unreadable are three distinguishable values (硬規則 3b)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-carrier-"));
+  try {
+    assert.deepEqual(readServeHostPid(root), { state: "absent" }, "no carrier at all");
+    writeServeCarrier(root, 4242);
+    const present = readServeHostPid(root);
+    assert.equal(present.state, "present");
+    assert.equal(present.pid, 4242);
+    assert.equal(typeof present.startedAt, "string", "the carrier's startedAt is carried through when present");
+    // A carrier that exists but cannot be used is NOT "no server" — the reload path acts on the
+    // difference (absent ⇒ nothing to kill; unreadable ⇒ refuse to guess).
+    fs.writeFileSync(path.join(root, ".quay", "server.json"), "{ not json");
+    assert.deepEqual(readServeHostPid(root), { state: "unreadable", reason: "unparseable" });
+    fs.writeFileSync(path.join(root, ".quay", "server.json"), JSON.stringify({ schemaVersion: 1 }));
+    assert.deepEqual(readServeHostPid(root), { state: "unreadable", reason: "no-usable-pid" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("probeUrl — false with nothing listening, true once a server answers", async () => {
   const port = await freePort();
   assert.equal(await probeUrl("127.0.0.1", port, 500), false);
@@ -219,6 +395,7 @@ test("full flow — run#1 starts drivers + serve, run#2 starts nothing (idempote
     assert.match(second.stdout, /outer: already running/);
     assert.match(second.stdout, /goal: already running/);
     assert.match(second.stdout, /serve: already listening/);
+    assert.match(second.stdout, /code fresh/, "run#2 must have READ /health and seen a fresh code state");
     assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve"]],
       "second run must not re-start anything");
 
@@ -228,6 +405,96 @@ test("full flow — run#1 starts drivers + serve, run#2 starts nothing (idempote
       try { process.kill(Number(fs.readFileSync(pidFile, "utf8").trim()), "SIGKILL"); } catch { /* gone */ }
     }
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// AC3 (gap-serve-stale-signal-has-no-consumer) — the END-TO-END half: a listening-but-STALE server
+// must actually be REPLACED. Before this task the script saw "reachable" and skipped, leaving the
+// pre-fix process serving forever (2026-08-23: 8.5h; 2026-09-14: 3h+, AC-179 oscillating 6/20) —
+// every remedy was a human restart. This test pins the successor: the old host is gone AND a fresh
+// one answers, with the second run proving the reload is not a loop (fresh ⇒ skip).
+test("AC3 — listening-but-STALE serve is RELOADED (old host killed, fresh one started); then fresh ⇒ skip", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-stale-"));
+  let foreign = null;
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    // The pre-existing, STALE listener: a real separate process, answering /health with stale:true.
+    foreign = await startForeignServer(tmp, JSON.stringify({ ok: true, stale: true, evaluated: true, source: "git" }));
+    writeServeCarrier(root, foreign.pid);
+    assert.ok(pidRunning(foreign.pid), "the foreign (stale) host is really running before the run");
+    // Pre-alive drivers so the fake CLI prints nothing on stdout — the `--json` report is the only
+    // stdout output, which is what the assertions below parse.
+    fs.writeFileSync(stateFile, JSON.stringify({ promotion: true, worker: true, outer: true, goal: true }));
+    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_HEALTH: JSON.stringify({ ok: true, stale: false, evaluated: true, source: "git" }) };
+    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(foreign.port), "--serve-timeout", "10000", "--json"];
+
+    const first = runScript(args, { env });
+    assert.equal(first.status, 0, `stale reload run must exit 0:\n${first.stdout}\n${first.stderr}`);
+    const report = JSON.parse(first.stdout);
+    assert.equal(report.serve.state, "reloaded-stale", "the listening-but-stale server must be RELOADED, not skipped");
+    assert.equal(report.serve.staleness, "stale");
+    assert.equal(report.serve.previousPid, foreign.pid, "the stale host is identified from .quay/server.json");
+    assert.match(first.stderr, /STALE \(code on disk newer than pid=/, "the reload is announced, not silent");
+    // The old host is GONE (not merely reported gone) and a fresh one answers the probe.
+    assert.equal(pidRunning(foreign.pid), false, "the stale host process must actually be gone (⛔ a zombie is gone too)");
+    assert.equal(await waitForProbe("127.0.0.1", foreign.port), true, "a fresh server must be answering the port it freed");
+    assert.deepEqual(readLogLines(log), [["serve"]], "exactly ONE serve spawn — the reload — and no driver churn (they were pre-alive)");
+
+    // Second run: the replacement answers stale:false ⇒ NO reload, no second spawn (negative control).
+    const second = runScript(args, { env });
+    assert.equal(second.status, 0, `second run must exit 0:\n${second.stdout}\n${second.stderr}`);
+    const report2 = JSON.parse(second.stdout);
+    assert.equal(report2.serve.state, "already-listening");
+    assert.equal(report2.serve.staleness, "fresh");
+    assert.deepEqual(readLogLines(log), [["serve"]],
+      "a FRESH listening server must not be restarted — reload is not a loop (still exactly one serve spawn)");
+
+    const pidFile = path.join(root, ".quay", "serve.pid");
+    if (fs.existsSync(pidFile)) {
+      try { process.kill(Number(fs.readFileSync(pidFile, "utf8").trim()), "SIGKILL"); } catch { /* gone */ }
+    }
+  } finally {
+    if (foreign && !foreign.exited()) { try { foreign.child.kill("SIGKILL"); } catch { /* gone */ } }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// AC4 (硬規則 3b) — the mirror half, END-TO-END: when /health cannot be read, the script must NOT
+// launder the non-reading into an action. No restart (a reading we could not take is not "stale"),
+// no "fresh" either — its own literal, said loudly.
+test("AC4 — /health unreadable ⇒ NOT-EVALUATED literal, the host is left alone, and it is said loudly", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-noteval-"));
+  let foreign = null;
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    // Listening, answers GET / with 200 — but its /health carries no boolean `stale` at all.
+    foreign = await startForeignServer(tmp, JSON.stringify({ ok: true }));
+    writeServeCarrier(root, foreign.pid);
+    fs.writeFileSync(stateFile, JSON.stringify({ promotion: true, worker: true, outer: true, goal: true }));
+    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_HEALTH: JSON.stringify({ ok: true }) };
+    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(foreign.port), "--serve-timeout", "3000", "--json"];
+
+    const r = runScript(args, { env });
+    assert.equal(r.status, 0, `an unreadable /health is not a start failure:\n${r.stdout}\n${r.stderr}`);
+    const report = JSON.parse(r.stdout);
+    assert.equal(report.serve.state, "already-listening");
+    assert.equal(report.serve.staleness, "not-evaluated", "NOT-EVALUATED is its own value — ⛔ not 'fresh'");
+    assert.equal(report.serve.stalenessReason, "no-stale-field");
+    assert.ok(!("stale" in report.serve), "⛔ the not-evaluated case must not carry a stale verdict at all");
+    assert.match(r.stderr, /staleness NOT-EVALUATED \(reason: no-stale-field\)/, "the non-reading is SAID, not silent");
+    assert.match(r.stderr, /NOT restarting/, "⛔ a reading we could not take must not become a restart");
+    // Concretely: the host is untouched and no replacement was spawned.
+    assert.equal(pidRunning(foreign.pid), true, "the unreadable-health host must NOT be killed");
+    assert.equal(readLogLines(log).filter((l) => l[0] === "serve").length, 0, "⛔ no serve spawn on a reading we could not take");
+  } finally {
+    if (foreign && !foreign.exited()) { try { foreign.child.kill("SIGKILL"); } catch { /* gone */ } }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
