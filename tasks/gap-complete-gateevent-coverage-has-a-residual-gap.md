@@ -69,6 +69,7 @@ commit，**没有任何事件写入**。实测：该路径 2/2 落地零事件�
 - `plugin/workflows/fan-in-execute.js`
 - `plugin/scripts/runner-static-gate.ts`
 - `plugin/scripts/capability-catalog.sh`
+- `plugin/scripts/task-file-bypass-check.ts`
 - `tasks/gap-complete-gateevent-coverage-has-a-residual-gap.md`
 
 ## Acceptance Criteria
@@ -182,6 +183,20 @@ $ echo $?
 
 单向性检查（防判据在修复后变成恒绿）：测试第 4 条与 mutation case 的第二向都断言
 「晚于 cutoff 且无事件的落地**仍必须报红**」——B 向不通过时判据会静默退化成「无事件一律放过」。
+
+## 接线代价（本任务自己撞出的三处红灯，已修）
+
+新判据第一次跑 scoped 门时自己引入三处红，全部由**本任务的 delta** 造成，已修并复验：
+
+- `tmp-leak-pairing-check` + `test-isolation-check` 的 AC5 单向棘轮：新测试 `makeRepo()` 调
+  `fs.mkdtempSync` 未配对清理（`mkdtemp-no-cleanup`，对一个只准变短的清单是**新增违规**）。
+  改为登记 + `after()` 统一 `rmSync`。
+- `task-file-bypass-check`：新检查器有 2 处 `tasks/` 文件操作命中（`git log -p -- tasks/`、
+  `git show <ref>:tasks/<id>.md`）。本检查器的**客体就是任务库的状态历史**（与 `packages/quay-native`
+  同形），且**从不写任务文件** ⇒ 按该棘轮自己的机制做**有理由的登记**（ALLOWLIST + `expected: 2`），
+  ⛔ 不是绕过它。
+- 顺带同步 `worker-driver.ts` 的 allowlist 计数 3→4：实测 4（`1530/1736/3059/3064`，全是既有
+  任务体读取），其中**没有一条**来自本任务。
 
 ## 机制侧验证（修复的真实性，非 fixture 回声）
 
