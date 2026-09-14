@@ -2,7 +2,7 @@
 id: gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning
 title: worktree-include.sh 在 pipefail 下被 awk 早退触发 SIGPIPE(141) 当场退出：新 worktree
   一个声明文件都不拷，而 dispatch-worktree-setup 只报一行 "failed"
-status: todo
+status: ready
 labels:
   - gap
   - defect
