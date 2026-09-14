@@ -4,7 +4,7 @@
 //
 // WHY THIS EXISTS (gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy,
 // 2026-09-14 — reproduced on this machine, not constructed): a bare
-// `import … from "../../packages/quay/src/<rel>"` hard-codes the repo-top layout
+// `import … from "<repo-top>/packages/quay/src/<rel>"` hard-codes the repo-top layout
 // (`<repo>/plugin/scripts/x.ts` → `<repo>/packages/quay/src/<rel>`). The SAME source file also
 // exists in the STAGED copy `package.sh` builds (`plugin/` → `packages/quay/plugin/`,
 // the npm-pack snapshot `build-plugin-dist.mjs` compiles its dist bundles from — see

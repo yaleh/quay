@@ -2,7 +2,7 @@
 id: gap-ac256-worker-restart-preserves-inflight-children
 title: GOAL-017/AC-256：重启 `driver:worker` 这一个服务不杀它在飞的 worker 子进程 —— 载体
   `.quay/unified-server-verification.jsonl` 有合格记录（SPEC §6.9 不变式 3 / §8-7 后半）
-status: ready
+status: done
 needs_human_cause: unclassified
 labels:
   - gap
@@ -97,6 +97,8 @@ CLI    node packages/quay/bin/quay.js server restart --only driver:worker
 - `packages/quay/test/cli.test.mjs`（AC-256 的**第二处**同类陈旧点，与上一行是【同一次硬规则 5b 扫描的两个实例】：usage-fallback drift gate 的 `handlerSubs` 手工清单里 `server <verb>` 那一角没跟上 `restart` 动词 ⇒ 门把新动词报成 `extra`、整个文件红；修法同型 —— 从 `SERVER_VERBS` 派生，⛔ 不手抄第二份）
 - `plugin/test/server-restart-inflight-verify.test.mjs` (new)（生产者的类型 / fail-closed / 负控制 / /proc 直接量 / 逐字跑 criterion）
 - `packages/quay/test/server-restart.test.mjs` (new)（服务级 restart 的语义 + `start` no-op 对照 + anchor 安全闸的活体负控制）
+- `plugin/scripts/core-src-import.ts`（本趟修 develop 侧恒红①：其文档注释里引用的 import 示例被 `precommit-guard.test.mjs` 的 `guardClosure()` 正则当成真依赖 ⇒ 闭包走查 throws。⛔ 零代码改动，仅把示例路径改成不呈 import 形状）
+- `plugin/test/test-isolation-check.test.mjs`（本趟修 develop 侧恒红②：AC4 期望清单手工抄的 6 个 `process-exit-1` 含已由 `a6ce55a8e` 从棘轮摘除的 `create-validation.test.mjs` ⇒ 恒红。摘掉该条 + 计数 6→5）
 - `tasks/gap-ac256-worker-restart-preserves-inflight-children.md`（自身文件：勾 AC + 贴实跑证据）
 
 ## Acceptance Criteria
@@ -318,3 +320,33 @@ criterion 逐字跑 **exit 0**。⛔ 唯一由夹具驱动的是【负控制】�
 - 成因类：unclassified
 - 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
 - run_id：wk-prod-1789367589
+
+## 本趟记录（2026-09-14 16:4xZ）：合并 develop 后修掉的两个 develop 侧恒红
+
+⛔ **都不是本任务的 delta** —— 两条都在**未含本任务改动的 develop 树**上逐字复现（主检出 `/home/yale/work/quay`，
+`author` == `develop` @`87adee15d`，直接 `node --test` 跑该文件）⇒ **develop 自身红，merge 修不了**。
+两条都已在**本分支**修掉（提交 `6c59fdb36`），逐字读数如下。
+
+**① `precommit-guard.test.mjs` 的 `guardClosure()` 把注释当成 import**：它用
+`REL_IMPORT_RE = /(?:from\s*|import\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\1/g` 扫**源码全文**，于是把新落地的
+`plugin/scripts/core-src-import.ts:7` 文档注释里逐字写着的 `` `import … from "../../packages/quay/src/<rel>"` ``
+当成真依赖 ⇒ 闭包走查 throws `… which does not resolve`（硬规则 2：按位置判定，注释里提到不算命中）。
+**本趟修法取最小面**：把该示例路径改成不呈 import 形状（`"<repo-top>/packages/quay/src/<rel>"`），⛔ 零代码改动。
+实测：闭包 **11 个文件前后同数**（只掉了那条幻影边，没有掉真依赖）；`25 pass / 0 fail`。
+**⚠️ 本趟【未立案、未修】的类（硬规则 5b 记账）**：`guardClosure` 的**注释盲区仍在** —— 下一个在闭包文件里
+引用 import 示例的注释会**再次**把全量套件弄红。⚠️ 修它时注意方向：给它「加去注释」会引入**更坏**的失败模式 ——
+注释掉一个真 import 会让闭包**静默变短**，而静默变短的闭包与完整闭包在 hook 执行前**不可区分**
+（正是该函数头注释点名要防的形态）⇒ 正确修法是**按位置判定地屏蔽注释与字符串**（仓库已有 `maskComments`
+同族手法），且必须验证**闭包文件数不减少**。
+
+**② `test-isolation-check.test.mjs` 的 AC4 期望清单未随棘轮缩短**：该清单手工抄了 6 个 `process-exit-1`，
+含 `packages/quay-native/test/create-validation.test.mjs`；而 `a6ce55a8e`（11:08Z）已修好该文件的 R1 + R4
+并把它**从棘轮清单摘除**（棘轮「只减不增、修好即缩短」）⇒ 测试仍要求它出现、**恒红**。
+**这正是硬规则 5b**：`a6ce55a8e` 修了棘轮那一份，漏了同一缺陷类在**另一份载体**（本测试的手工清单）里的实例。
+修法同型：摘掉该条 + 计数 6→5（含测试名与注释）。实测 `15 pass / 0 fail`；5b 扫描
+（`grep -rn 'create-validation'` 该测试 + 棘轮清单）确认**无第三个陈旧点**。
+
+**合并后的本趟读数**：anti-drift **OK**（11 actual file(s) / 13 glob(s)）；scoped 门 **144 pass / 0 fail**（exit 0）；
+**全量套件 exit 0**（主泳道 626 文件，全日志 **654** 条 `__PERFILE__` 全部 `passed=true`、`passed=false` **0** 条）；
+fan-in ac-gate **`pass-external`**（AC10 ⛔ 仍留未勾 —— 其措辞 `全量套件绿 —— 外层 verification-round 验证`
+已被 `isOuterVerificationItem` 认作外层验证项，**不需要**额外加 `（待外部）`）。

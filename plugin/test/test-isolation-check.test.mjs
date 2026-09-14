@@ -541,7 +541,7 @@ test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries 
 });
 
 // ── AC3/AC4 real-repo rehearsal: the known instances appear, relation-sync is quiet ─────────────────
-test("AC3/AC4 rehearsal: real repo reports the three known instances + the 6 remaining process.exit(1)s", () => {
+test("AC3/AC4 rehearsal: real repo reports the three known instances + the 5 remaining process.exit(1)s", () => {
   const res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, "--list"], { encoding: "utf8", timeout: 60_000 });
   assert.equal(res.status, 0, res.stderr);
   const lines = res.stdout.trim().split("\n").filter(Boolean);
@@ -567,20 +567,21 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 6 rem
   ]) {
     assert.ok(!lines.some((l) => l.startsWith(`${f}:shared-root-mkdtemp`)), `${f} R8 must not report (fixed to os.tmpdir):\n${res.stdout}`);
   }
-  // AC4: the 6 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync
-  // and gap002 — the tmp-leak fix d887ab12 made gap002 import node:test + use an after() cleanup
-  // hook, so R4's hand-rolled-only scope no longer applies to it).
+  // AC4: the 5 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync,
+  // gap002 and create-validation — the tmp-leak fix d887ab12 made gap002 import node:test + use an
+  // after() cleanup hook, so R4's hand-rolled-only scope no longer applies to it; a6ce55a8e then
+  // fixed create-validation's R1 + R4 and removed BOTH of its ratchet entries, which retires it
+  // from this list too — the ratchet "only shrinks; fixing a violation means shortening the list").
   for (const f of [
     "packages/quay-native/test/adversarial-eval.test.mjs",
     "packages/quay-native/test/cas-write.test.mjs",
-    "packages/quay-native/test/create-validation.test.mjs",
     "packages/quay-native/test/edit-validation.test.mjs",
     "packages/quay-native/test/lock.test.mjs",
     "packages/quay-native/test/yaml-frontmatter-colon.test.mjs",
   ]) {
     assert.ok(lines.includes(`${f}:process-exit-1`), `missing AC4 process.exit(1) file ${f}:\n${res.stdout}`);
   }
-  assert.equal(byRule("process-exit-1").length, 6, `expected exactly 6 process-exit-1 entries:\n${res.stdout}`);
+  assert.equal(byRule("process-exit-1").length, 5, `expected exactly 5 process-exit-1 entries:\n${res.stdout}`);
 });
 
 // ── AC7: a deliberately-constructed violating test file is reported by the CLI ──────────────────────

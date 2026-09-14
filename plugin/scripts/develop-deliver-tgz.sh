@@ -169,7 +169,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 verify_port=18091
-ssh_opts=(-o BatchMode=yes -o ConnectTimeout=8)
+# ⚠️ ServerAlive* 不是仪式：--verify-ac258 等模式用【单个前台 ssh】跨 --ac258-poll-secs
+# （默认 3600、实测跑过 2700s=45min）整段保持连接，这正是 NAT/中间盒空闲超时会静默杀掉的连接形状。
+# 2026-09-14 真机实测（orangevps）：远端 verify-deliver-coldstart.sh 跑满全程、AC258_WRITTEN_THIS_RUN=1、
+# 记录真的写进了远端 $EV（事后 ssh 读回逐字段核对，11 个判据全部满足）——但本地捕获的 $out 在那一行
+# 之后被截断，连 `VERIFY-RC`/`EVIDENCE-PATH` 两行都没收到，导致本地 `remote_evidence` 解析恒空、
+# 判成 NOT-EVALUATED（`develop-deliver: --verify-ac258 FAILED`），而失败形态与「机制真坏了」同形
+# （硬规则 3b）——这正是本 AC 连续 4 轮 needs-human、且每轮读数都显示远端各步骤实测通过的成因。
+# 加 keepalive 让 ssh 客户端主动发心跳，连接路径上就没有「空闲」可被中间盒计时器判定超时。
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
 
 hosts="B C"
 force=0
