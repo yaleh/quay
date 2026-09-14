@@ -73,7 +73,7 @@ worker 可用性探测（例如 `ssh <host> 'bash -lc "claude -p ok"'`，或直�
 
 ## Touches
 
-- tasks/gap-ac258-pipeline-destructive-steps-before-worker-preflight.md
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
+- tasks/gap-ac258-pipeline-destructive-steps-before-worker-preflight.md
