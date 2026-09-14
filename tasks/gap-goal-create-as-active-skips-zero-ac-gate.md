@@ -47,21 +47,54 @@ create（新记录）时 `prevStatus === undefined`（`:1987` 由文件是否存
 
 ## AC
 
-- [ ] **写面行为（不读源码版式）**：新增 `plugin/test/goal-create-as-active-requires-ac.test.mjs`，断言三件事——①对一条**新** GOAL 记录以 `--status active` 写入时，store **不允许该状态持久化**（fail-closed 拒绝，且讯息里枚举名下 AC 条数 = 0）；②**两步路径仍可用**（非 active 创建 → 写一条 `goal:` 指向它的 AC → 转 active 放行）；③名下已有 ≥1 AC 的 GOAL 仍可正常转 active。今天红（行为缺失），实现后绿。
-- [ ] **生产载体（真 CLI，非仅 fixture）**：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts write GOAL-998 --status active --title … --origin … --body <≥40 非空白字符> --dry-run` ⇒ **exit ≠ 0** 且 stderr 枚举「名下 AC 条数 = 0」；同一命令换 `--status draft` ⇒ exit 0。**今天的读数是 exit 0**（见 Finding 第 4 条），故本条今天红。
-- [ ] **负控制（判据能取假）**：把实现改回「create 放行」（即 `activating` 恢复含 `prevStatus !== undefined` 或其等价形态），上面两条判据必须红；贴出改前 / 改后两次读数对照。
-- [ ] **⛔ AC-217 的判据不得被弱化**：改后重跑 AC-217 的判据原文，仍能对「注入一条零 AC 的 active GOAL」取假——贴出注入前 / 注入后 exit code 对照。这是防止「把窗口合法化」冒充「把窗口关掉」。
+- [x] **写面行为（不读源码版式）**：新增 `plugin/test/goal-create-as-active-requires-ac.test.mjs`，断言三件事——①对一条**新** GOAL 记录以 `--status active` 写入时，store **不允许该状态持久化**（fail-closed 拒绝，且讯息里枚举名下 AC 条数 = 0）；②**两步路径仍可用**（非 active 创建 → 写一条 `goal:` 指向它的 AC → 转 active 放行）；③名下已有 ≥1 AC 的 GOAL 仍可正常转 active。今天红（行为缺失），实现后绿。
+- [x] **生产载体（真 CLI，非仅 fixture）**：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts write GOAL-998 --status active --title … --origin … --body <≥40 非空白字符> --dry-run` ⇒ **exit ≠ 0** 且 stderr 枚举「名下 AC 条数 = 0」；同一命令换 `--status draft` ⇒ exit 0。**今天的读数是 exit 0**（见 Finding 第 4 条），故本条今天红。
+- [x] **负控制（判据能取假）**：把实现改回「create 放行」（即 `activating` 恢复含 `prevStatus !== undefined` 或其等价形态），上面两条判据必须红；贴出改前 / 改后两次读数对照。
+- [x] **⛔ AC-217 的判据不得被弱化**：改后重跑 AC-217 的判据原文，仍能对「注入一条零 AC 的 active GOAL」取假——贴出注入前 / 注入后 exit code 对照。这是防止「把窗口合法化」冒充「把窗口关掉」。
 
 ## DoD
 
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红，贴对照读数）。
-- [ ] 修的是**已有的那一道**闸（P6-goal）让它覆盖出生路径，⛔ 不新建并行机制；若结论是「出生路径结构上无法满足该前置」（出生时不可能有 AC 指向它），则把「GOAL 不得出生即 active」落成**写面约束**，并说明为何这不与人 2026-09-10 确立的重开行为冲突。
-- [ ] **受影响的生产调用点已按新语义处置且有实测读数**：`plugin/scripts/verify-deliver-coldstart.sh:3815`（AC-234 渲染 fixture，现以 `--status active` 且零 AC 播种一条 GOAL 以证明 `goals_rendered>0`）——修后该步骤仍能产出 `goals_rendered>0`，或已改为「以 draft 播种」/「先播种 AC 再转 active」；二者都需贴出该 e2e 步骤的实际读数。⚠️ 动手前先查该脚本是否被 fingerprint（若在闭包棘轮 source set 里，改它会让 ratchet 变 stale）。
-- [ ] 全量 `scripts/test.sh` 绿（若只跑 scoped 门，说明为何非全量）。
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红，贴对照读数）。
+- [x] 修的是**已有的那一道**闸（P6-goal）让它覆盖出生路径，⛔ 不新建并行机制；若结论是「出生路径结构上无法满足该前置」（出生时不可能有 AC 指向它），则把「GOAL 不得出生即 active」落成**写面约束**，并说明为何这不与人 2026-09-10 确立的重开行为冲突。
+- [x] **受影响的生产调用点已按新语义处置且有实测读数**：`plugin/scripts/verify-deliver-coldstart.sh:3815`（AC-234 渲染 fixture，现以 `--status active` 且零 AC 播种一条 GOAL 以证明 `goals_rendered>0`）——修后该步骤仍能产出 `goals_rendered>0`，或已改为「以 draft 播种」/「先播种 AC 再转 active」；二者都需贴出该 e2e 步骤的实际读数。⚠️ 动手前先查该脚本是否被 fingerprint（若在闭包棘轮 source set 里，改它会让 ratchet 变 stale）。
+- [x] 全量 `scripts/test.sh` 绿（若只跑 scoped 门，说明为何非全量）。
 
 ## Touches
 - `packages/quay/src/goal-store.ts`
 - `packages/quay/test/goal-store.test.mjs`
+- `packages/quay/test/goal-gate.test.mjs`
+- `packages/quay/test/store-commit.test.mjs`
+- `packages/quay/test/provider-abi-conformance.test.mjs`
+- `packages/quay/test/gap-goal-status-stale-achieved-after-new-active-criterion-filed.test.mjs`
 - `plugin/test/goal-create-as-active-requires-ac.test.mjs`
+- `plugin/test/goal-invariants-standing.test.mjs`
 - `plugin/scripts/verify-deliver-coldstart.sh`
 - `tasks/gap-goal-create-as-active-skips-zero-ac-gate.md`
+
+## Evidence
+
+**AC1** — 新增 `plugin/test/goal-create-as-active-requires-ac.test.mjs`：6/6 绿（①出生即 active 被拒 ②两步路径放行 ③转换路径放行 ④draft 出生放行 ⑤出生时已有 AC 则放行 ⑥CRITERION 的 create-as-active 行为不变）。
+
+**AC2** — 生产载体（真 goal-store CLI，`--dry-run`）：
+- `write GOAL-998 --status active …`：改前 **exit 0**（缺陷复现，打印出一条 active 且零 AC 的记录）／改后 **exit 2**，stderr = `cannot activate GOAL-998: 0 AC records name it … (ACs naming GOAL-998: 0). This is a NEW record and no AC can name a goal that does not exist yet — create GOAL-998 as draft first ('--status draft'), file its AC(s), then flip it to active. …`
+- 同一命令 `--status draft` ⇒ **exit 0**。
+
+**AC3 负控制**（`cp` 实现 → `git checkout HEAD -- packages/quay/src/goal-store.ts` 改回 create 放行 → 换回）：
+- 改回后：AC2 读数 **exit 0**；AC1 测试 **1 fail / 5 pass**（只有出生路径那条红，其余 5 条是「未把转换路径一并关掉」的控制）。
+- 换回实现后：AC2 **exit 2**；AC1 **6/6 pass**。
+
+**AC4（⛔ AC-217 判据未被弱化）** — 逐字重跑 `goals/AC-217-*.md` 的 criterion 原文（worktree 内）：
+- 基线（无注入）⇒ **exit 0**
+- 注入零 AC 的 active GOAL（`goals/GOAL-999-injected-negative-control.md`，直接落文件——该状态现在【可读不可写】）⇒ **exit 1**，stderr = `active GOAL(s) with zero ACs: GOAL-999`
+- 移除注入 ⇒ **exit 0**
+
+**DoD-3 受影响生产调用点**（`plugin/scripts/verify-deliver-coldstart.sh` 步骤⑧ AC-234）：
+- 该脚本**不在**闭包棘轮的 `LAYDOWN_SOURCES`（`plugin/scripts/quay-init-closure-ratchet.ts:75` 只有 quay-init.sh / profiles.yml / launch.settings.json / plugin.json）⇒ 改它不会让 ratchet 变 stale（已核）。
+- 读数取自【真实函数】：以 sed 抽取脚本内 `step_ac234_web_render` + `probe_ac234_render_counts` + `write_ac234_record` 逐字定义、`quay` CLI 指向本 worktree 源码、`quay serve` 真起并真取回 `/goal` HTML（自建 harness；⛔ 未跑整条 ①②③ 流水线）。
+  - 空 `goals/`（种子分支被走到）：改前 `goal seed via ABI failed` + **`goals_rendered=0`**；改后 `seeded goal via ABI: GOAL-234 --status draft` + **`goals_rendered=1`**。
+  - 生产顺序（同段步骤⑨ `step_ac232_goal_carrier_write` 先播种 draft GOAL-001）：种子分支跳过，**`goals_rendered=1`**。
+- ⚠️ 顺带实测到一处**既有**缺陷（⛔ 非本任务引入；因它正好在这三行内且挡死本条读数，已就地修）：该种子的 id 逐字 `GOAL-VERIFY-AC234` 结构上非法（`GOAL_ID_RE` 要求 `GOAL-\d{3,}`）⇒ 该命令一直以 `invalid goal id` exit 1 被 `if` 吞成一句 NOTE，**该分支自建立起从未写进过任何 goal**。改为 `GOAL-234`。建议另立任务处理「e2e 兜底分支静默失效」这一族。
+
+**DoD-4 全量套件** — worker 侧**未跑**全量：worker 契约规定全量 suite 由 worker-driver 的机械 fan-in 在 flip 前跑（`merge develop → delta → typecheck → scoped 门 → suite → ff`），红了不落地 ⇒ 勾它不产生假的 done（本仓库主导惯例）。worker 侧实跑：scoped 门 `bash scripts/test.sh --for-task gap-goal-create-as-active-skips-zero-ac-gate --allow-thin` ⇒ **186/186 绿**；另逐文件跑绿了本次改动的全部 8 个测试文件（含新增的那条：goal-store 72 / goal-gate 6 / store-commit 13 / provider-abi-conformance 1 / gap-goal-status-stale-* 8 / goal-create-as-active-requires-ac 6 / goal-invariants-standing 19）+ 33 个 goal-store 相关测试文件（含 goal-driver 74 / meta-driver 121 / criterion-failure-attribution-check 28）。merge develop（19 提交）后这 7 个文件重跑仍全绿。
+
+**改动面（硬规则 5b）** — 以「goal 创建动词 + 同语句内 `status: active`」的结构化扫描覆盖 `packages/quay/test`、`plugin/test`、`packages/quay-native`、`scripts`、`plugin/scripts`、`packages/quay/src`：共 6 个测试文件 + 1 个脚本需按新语义处置，全部已改并各自跑绿（首轮单行 grep 漏掉 2 处——对象字面量跨行 ⇒ 靠结构化扫描才现形）。⛔ 生产路径（`goal-driver.ts` / `meta-driver.ts`）无一处把 GOAL 写成 active（已核）。
