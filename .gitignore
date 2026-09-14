@@ -150,6 +150,15 @@ packages/quay/plugin/
 # supervisor state files + control state (halt/control plane goal-control.json). All runtime state,
 # never git-tracked; same gitignored family as outer/quality round+control.
 **/.quay/goal-round.jsonl
+# gap-goal-status-stale-achieved-after-new-active-criterion-filed (2026-09-14): the goal-staleness
+# signal carrier (.quay/goal-staleness-signal.jsonl) — one append-only line per divergence between a
+# GOAL's own `status` and its children (a criterion filed under an `achieved` GOAL), plus one for the
+# human's resolution of it. Runtime state, never git-tracked; same gitignored family as goal-round.jsonl
+# / worker-outcome.jsonl. It is written by the goal store's `write()` on ANY non-achieved criterion
+# landing under an achieved GOAL — i.e. by ordinary production writes, not by a test — so without this
+# entry a live file here would dirty the checkout (the documented incident class in this file: a dirty
+# checkout made fan-in-ff-merge refuse, unrelated to the blocked task's code).
+**/.quay/goal-staleness-signal.jsonl
 **/.quay/goal-control.json
 **/.quay/goal-driver.pid
 **/.quay/goal-driver-supervisor.pid

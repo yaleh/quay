@@ -48,6 +48,16 @@ Related but NOT a duplicate: `gap-driver-status-carrier-path-names-first-entry-n
 - plugin/test/driver-status-carrier-path.test.mjs
 - packages/quay/test/cli.test.mjs
 - tasks/gap-driver-status-carrier-path-source-label-mismatch.md
+- `plugin/scripts/capability-catalog.sh`（⛔ 非本任务所写：随前置 `gap-ac255-driver-internalization-pid-le2-six-kinds-fresh` 的 fast-forward 并入本分支；理由见 Evidence「anti-drift 收尾」）
+- `plugin/scripts/driver-anchor.ts`（同上，前置并入）
+- `plugin/scripts/goal-driver.ts`（同上，前置并入）
+- `plugin/scripts/meta-driver.ts`（同上，前置并入）
+- `plugin/scripts/outer-driver.ts`（同上，前置并入）
+- `plugin/scripts/promotion-driver.ts`（同上，前置并入）
+- `plugin/scripts/quality-gate-driver.ts`（同上，前置并入）
+- `plugin/scripts/worker-driver.ts`（同上，前置并入）
+- `plugin/test/driver-anchor.test.mjs`（同上，前置并入）
+- `plugin/test/driver-runtime.test.mjs`（同上，前置并入）
 
 ## Evidence（2026-09-13T23:0x–23:2xZ · 生产数据 + 改前/改后对照）
 
@@ -82,3 +92,24 @@ Related but NOT a duplicate: `gap-driver-status-carrier-path-names-first-entry-n
 - `plugin/test/driver-status-carrier-path.test.mjs` **8/8 pass**（含 4 条既有测试，其中 AC1b 钉住 `carrier_path` 语义未变）。
 - scoped 门：`bash scripts/test.sh --for-task gap-driver-status-carrier-path-source-label-mismatch --allow-thin` ⇒ **EXIT=0，0 fail**（在 develop tip `0b9b843af` 上跑；two test 文件均在选中集内并各自产出 PASS）；scoped-gate 缓存已按该 develop sha 写入。
 - 全量 `scripts/test.sh` 由 fan-in（driver）执行，本 worker 不跑（派发链规定）。
+
+**2026-09-14 · anti-drift 收尾（Touches 补全，⛔ 不是新实现）**
+
+上一轮 fan-in 停在 `step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-driver-status-carrier-path-source-label-mismatch — 10 violation(s)`。逐条核实后确认：**这 10 条不是本任务的越界写**，而是**前置 `gap-ac255-...` 的 10 个文件随前置 fast-forward 进入本分支的三点 diff**——`git diff --name-only develop...HEAD` 实为 **14** 个文件，本任务自己只写了其中 4 个 + 自身任务文件。
+
+- **判定（硬规则 3b/5：给「无法评估」一个独立取值，别把它折进违规数）**：checker 的判据前提是「`<mergeTarget>...HEAD` = 任务自己的提交」。当分支**叠在一个尚未落地的兄弟分支上**时该前提不成立——前置的提交必然出现在三点 diff 里。⇒ 这是**声明漏了前置那一半**（窄化），⛔ 不是「写了 Touches 外的文件」（真违规）。
+- **⛔ 为什么不能靠「等前置落地」自愈（实测，不是推断）**：把 `develop` 临时指向前置 tip `dea660d23` 再跑同一命令 ⇒ `git merge-base --all` 返回**两个** merge-base（`2916c9ffb` + `4e93a6950`），`git diff` 取较浅的那个 ⇒ **仍是 14 文件、10 违规**。⇒ 前置落地**结构上不会**让本 diff 收敛（criss-cross）——必须补声明。（临时 ref 已删。）
+- **修法**：`## Touches` 补上这 10 个前置文件，逐条标注「前置并入」，⛔ **不声称本任务写了它们**。前置落地后这 10 条 glob 不匹配任何实际文件——而 checker 只有 `out-of-declared` / `overbroad-declaration` 两个失败臂（**没有**「声明了却没写」这一臂）⇒ 届时自然失效、不产生假红。
+- **双向实测（同一命令、同一 worktree）**：
+  - 补全后 ⇒ `ANTI-DRIFT OK: task … — 14 actual file(s), all within declared Touches (15 glob(s))`，**exit 0**。
+  - **负控制**（从同一声明里删掉 `plugin/scripts/worker-driver.ts` **一行**）⇒ `ANTI-DRIFT HARD FAIL — 1 violation(s): out-of-declared: task wrote plugin/scripts/worker-driver.ts` ⇒ 补全**没有**把声明放宽到能吸收任何东西（非 overbroad），仍逐文件咬。
+  - **改前**（原 5 条 glob）⇒ **10 violation(s)**，与上一轮 fan-in 报的条数**逐字相同** ⇒ 补全前后的差异确由这 10 条引起。
+
+**2026-09-14T02:0xZ · AC 逐条复验（生产 root `/home/yale/work/quay`，本分支代码 + 本分支 plugin）+ 一条**非构造**的负控制**
+
+- **AC1**：`QUAY_PLUGIN_ROOT=<wt>/plugin quay driver status --kind promotion --json` ⇒ `carrier_path=…/promotion-outcome.jsonl`、`last_record_ts=2026-09-14T02:03:22.385Z`、`last_record_carrier=…/promotion-round.jsonl`。**判据对「被点名的载体」本身取真读数**：`promotion-round.jsonl` 末条 ts = `2026-09-14T02:03:22.385Z` **== 所报 ts**；`promotion-outcome.jsonl` 末条 ts = `2026-09-13T23:37:27.771Z` **≠ 所报 ts**（陈旧 2.4h）⇒ 点名者确为供数者，`carrier_path` 那个确未供数。
+- **AC2**：`<wt>/packages/quay/bin/quay.js server status --json`（本分支 `packages` + `QUAY_PLUGIN_ROOT` 指本分支 `plugin`）⇒ 六行 `drivers[].liveness.source` 逐字：`promotion` ⇒ `carrier:/home/yale/work/quay/.quay/promotion-round.jsonl last ts`；`worker`/`outer`/`quality` ⇒ 各自 `<kind>-round.jsonl`；`meta` ⇒ `meta-driver-round.jsonl`（`goal` 无 round 载体，走 `driver pid` 臂）。⛔ `promotion` **没有**点名陈旧的 `promotion-outcome.jsonl`。
+- **AC4**：同 kind 非 `--json` 一行形 ⇒ `… · last_record_ts=2026-09-14T02:03:22.385Z (cross-carrier max) · last_record_carrier=…/promotion-round.jsonl · …` ⇒ 来源 path **紧跟** ts，且该 ts 明确标注为跨载体最大值。
+- **顺带取到的负控制（`carrier 缺失` 半边 · ⛔ 非构造——是我第一次跑错形态时取的）**：同一命令只把 `plugin` 留在 develop（`packages` 仍取本分支）⇒ 六行 source **全部**为 `driver status last_record_ts (carrier not named by the kernel)`，**没有任何一行退回点名 `carrier_path`**。这既是 AC2 允许的另一半（kernel 不报来源 ⇒ 不声称具体载体），又证明该回退分支**在真实载体上可达**、不是死代码（硬规则 3b：读不懂输入 ⇒ 不得退回一个与「合格」同形的值）。
+- **代价（诚实登记）**：Touches 补全后本任务与前置 `gap-ac255-…` 在 `plugin/scripts/*` 上**声明重叠** ⇒ 前置落地前，若前置被**重新派发**会被本任务挡（transient 假阻塞）。前置已 8/8 AC 完成、worktree 已在 pre-merge 态等 fan-in，**无需再派发** ⇒ 该窗口的实际影响为零；前置落地后这 10 条 glob 失配、重叠自动消失。
+- **本轮 scoped 门**：`bash scripts/test.sh --for-task gap-driver-status-carrier-path-source-label-mismatch --allow-thin` ⇒ **tests 516 / pass 516 / fail 0 / EXIT=0**（选择集已含 Touches 补全后新增的相关测试）。

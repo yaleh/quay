@@ -79,22 +79,22 @@ CLI 参数层（同 `:28` 注释已豁免的形态），不进 `resolveDocBranch
 
 ## Acceptance Criteria
 
-- [ ] AC1 四个状态各构造一个真实临时 git 仓库（不是内存 mock）验证：①主检出在 develop 上时，运行后主检出
+- [x] AC1 四个状态各构造一个真实临时 git 仓库（不是内存 mock）验证：①主检出在 develop 上时，运行后主检出
       切到新建分支，该分支 sha 与运行前的 develop sha 相同；②主检出已在某非 develop 分支（随便起个名字）
       时，运行后分支名和 HEAD sha 均不变（真正的 no-op，不是"看起来没变但悄悄做了什么"）；③预先构造一个
       与默认名同名、但和当前 develop 无共同祖先的分支，运行后必须拒绝（非零退出或明确的 BLOCKED 输出）且
       develop/该分支两者 sha 均不变；④HEAD detached 时运行后必须回退到"不判定"路径，⛔ 不得当作①或②处理。
-- [ ] AC2 幂等：对同一个仓库连续跑两次（第二次紧跟第一次之后，不清理任何状态），第二次必须是状态②那类
+- [x] AC2 幂等：对同一个仓库连续跑两次（第二次紧跟第一次之后，不清理任何状态），第二次必须是状态②那类
       no-op（HEAD sha 与第一次跑完后完全相同），⛔ 不得报错、不得二次创建、不得改动任何文件。
-- [ ] AC3 `--doc-branch-name` 未指定时默认值确实是 `"author"`，且这个字面量只出现在 CLI 参数/配置默认值
+- [x] AC3 `--doc-branch-name` 未指定时默认值确实是 `"author"`，且这个字面量只出现在 CLI 参数/配置默认值
       读取处；跑一遍 `plugin/scripts/target-identity-literal-check.ts` 对本任务改动后的代码库，必须仍然
       **通过**（不因为本任务引入了字面量 "author" 而使该检查转红——这是对"调和方案是否真的没违反既有约束"
       的直接可执行验证，不是靠人读代码判断）。
-- [ ] AC4 在真实的第三方项目 quay-fleet 上做一次**只读分类**（复用 AC1 状态①的判定逻辑，`--dry-run`，不
+- [x] AC4 在真实的第三方项目 quay-fleet 上做一次**只读分类**（复用 AC1 状态①的判定逻辑，`--dry-run`，不
       真的创建/切换分支）：断言判定结果确实是"状态①：主检出在 develop 上，无独立 doc 分支"——用真实项目
       验证判定逻辑读得对，而不是只在合成 fixture 上通过。⛔ 本 AC 不要求真的对 quay-fleet 执行切换（那是
       对一个正在跑活 driver 的真实项目做状态变更，需要人另外决定时机与授权，不在本任务范围内）。
-- [ ] AC5 全量 `scripts/test.sh` 绿。
+- [ ] AC5 全量 `scripts/test.sh` 绿 —— worker 不跑全量套件，由 fan-in 自己那一次全量运行判定（待外部）
 
 ## Definition of Done
 
@@ -111,4 +111,8 @@ CLI 参数层（同 `:28` 注释已豁免的形态），不进 `resolveDocBranch
 ## Touches
 - plugin/scripts/quay-init.sh
 - packages/quay/src/branch-model.ts
+- packages/quay/src/cli/init.ts
+- packages/quay/src/cli/help.ts
+- packages/quay/test/branch-model.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-no-doc-branch-bootstrap-leaves-main-checkout-on-develop.md

@@ -698,6 +698,73 @@ function makeBareRoot(tag) {
   return root;
 }
 
+// ── gap-ac3-live-test-fixture-leaks-supervised-driver-processes：真实被监督 driver 的夹具清理 ──────
+//
+// ⚠️ 下面这一段里的【顺序】就是修法本身，不是代码风格。
+//
+// 实测根因（2026-09-14，本文件 AC3 测试）：泄漏【不是】失败路径特有的——**绿灯路径照样泄漏**。三个
+// 环节缺一不可：
+//   ① `startKind` 以 `detached: true` + `unref()` 起 supervisor（生产需要——`quay driver start` 退出
+//      之后驱动必须活着）⇒ supervisor 与它 fork 出的 driver 【不随测试进程退出而消失】，只能显式杀。
+//   ② `stopKind` 唯一的杀法是从 `<root>/.quay/` 读 pid 文件发信号 ⇒ **root 一旦不在，它一个信号都发
+//      不出去**。实测两种形态（**都静默**）：root 被整个删掉 ⇒ `driver-runtime: invalid --root: …` +
+//      exit 2；root 还在但 pid 文件没了 ⇒ 打印 `not-running` + exit 0。后者是硬规则 3b 的教科书形态
+//      （读不懂输入 ⇒ 与「干净」同形）——**泄漏能长期隐形正是因为 stop 报了「没在跑」**。而残留
+//      supervisor 自己的 `appendLog` 会 `mkdir -p` 把删掉的 `.quay/` 重建出来 ⇒ 同一夹具两种形态都
+//      可能命中。
+//   ③ 本测试原先注册【两个独立的 `t.after`】（先 `fs.rmSync(root)`、后 `run(["stop", …])`），而
+//      node:test 的 `after` 钩子按【注册顺序】FIFO 执行（本机实测：先注册的 A 先跑，后注册的 B 后跑）
+//      ⇒ rmSync 先把 root 删掉 ⇒ ② 空转 ⇒ 泄漏。**实测：跑一次 AC3 测试（绿）即残留 supervisor +
+//      driver 各一个，而 root 目录已不存在**。
+//
+// 发现现场读数（本条立案证据）：同一时刻 4 个不同任务 worktree 下共 7 个存活进程（峰值一次 46 个），
+// 年龄 2.1–6.15 小时（`ps -o etimes=`：7677s / 22138s 等）；`/tmp/dr-ac3-live-*` 目录 141 个——残留
+// supervisor 的 `appendLog` 会 `mkdir -p` 把已删掉的 `.quay/` 重新建出来 ⇒ 「目录还在」不等于
+// 「stop 跑过」，这个读数本身也取不了假。
+//
+// ⇒ 修法 = 【单个】teardown，三段固定顺序 + try/finally（任一段失败都不跳过后面的段）：
+//     ① stop（机制路径）→ ② 按【进程组】兜底 kill → ③ 删 root。
+//   ⛔ 拆成两个 `t.after`、或把 ③ 提到 ①② 之前 ⇒ 当场复现泄漏。这条由 AC2（失败路径）/ AC3（通过
+//   路径）两个【独立跑通的】对照实测守住，⛔ 不靠「读代码相信 finally 会跑」——那是解释不是检验
+//   （硬规则 4 推论四）。
+
+/** 精确残留读数：cmdline 里含 `needle` 的进程行。⛔ 不按 `dr-ac3-live` 通配匹配——套件并发时别的
+ *  任务 worktree 的历史残留会命中，那是与本条无关的**假阳性**；按【本次 root】这条唯一路径匹配，读数
+ *  才是可取假的。⛔ `ps` 读不到时返回 `null`（⛔ 不返回 `[]` 冒充「干净」——硬规则 3b）。 */
+function processesMentioning(needle) {
+  const ps = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" });
+  if (ps.status !== 0 || typeof ps.stdout !== "string") return null;
+  return ps.stdout.split("\n").map((l) => l.trim()).filter((l) => l && l.includes(needle));
+}
+
+/** 只在 pid 【确实是它自己进程组的组长】时才 `kill(-pid)`——否则 `kill(-pgid)` 会打到【别人的】进程组
+ *  （本机同一时刻就有别的任务 worktree 的同类残留，误杀的代价是别人的套件）。`startKind` 以
+ *  `detached: true` 起 supervisor（setsid ⇒ pgid == pid），但这里仍【实测一次 pgid】，⛔ 不假设它成立
+ *  （硬规则 4：「应该成立」的量不是测量）。pid 已死 / 读不到 ⇒ 静默返回。 */
+function killProcessGroupOf(pidRaw) {
+  const pid = Number(pidRaw);
+  if (!pid) return;
+  const r = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" });
+  if (r.status !== 0 || Number((r.stdout || "").trim()) !== pid) return;
+  try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+/** 真实被监督 driver 的夹具清理（唯一定义处；⛔ 别在别处再抄一份顺序）。三段顺序固定，整段在
+ *  try/finally 里：① 走机制路径 stop；② 进程组兜底 kill（supervisor 是它自己进程组的组长 ⇒ 一次覆盖
+ *  supervisor 与它 fork 出的全部 driver 化身——只 kill 直接子进程不够，这正是同仓库
+ *  `detached-test-child-leak-hangs-suite` 的同类模式）；③ 最后才删 root。 */
+function teardownLiveDriver(root, pluginRoot) {
+  try {
+    run(["stop", "--kind", "promotion", "--root", root], { pluginRoot, timeout: 20000 });
+  } catch { /* ① 抛错也必须走到 ②③——清理不能因为机制路径失败而跳过 */ }
+  try {
+    killProcessGroupOf(readPid(root, "promotion-driver-supervisor"));
+    killProcessGroupOf(readPid(root, "promotion-driver"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true }); // ③ 必须最后：root 一没，②的 pid 文件也就读不到了
+  }
+}
+
 test("AC3 (gap-ac203) — 必死启动 ⇒ start 非零退出 + 死因；移除注入 ⇒ 正常启动成功（两态逐字留档）", (t) => {
   // 注入：plugin root 里有 scripts/ 但【没有】driver 脚本（⇒ supervisor 找不到 driver 而退出）。
   const deadRoot = makeBareRoot("ac3-dead");
@@ -714,14 +781,89 @@ test("AC3 (gap-ac203) — 必死启动 ⇒ start 非零退出 + 死因；移除�
 
   // 移除注入：同一个 root 换成带 driver 脚本的 plugin root ⇒ 正常启动成功。
   const liveRoot = makeRoot("ac3-live");
-  t.after(() => fs.rmSync(liveRoot, { recursive: true, force: true }));
-  const live = run(["start", "--kind", "promotion", "--root", liveRoot, "--restart-delay", "1", "--run-id", "dr-ac3-live", "--confirm-timeout", "15"], { pluginRoot: path.join(liveRoot, "plugin") });
+  const livePlugin = path.join(liveRoot, "plugin");
+  // ⚠️ 清理必须在 `start` 【之前】注册，且是【单个】钩子——见 teardownLiveDriver 头注释：拆成两个
+  // t.after 就按注册顺序先删 root、后 stop ⇒ 泄漏。注册在 start 之前 ⇒ start 与注册之间抛错也有人管。
+  t.after(() => teardownLiveDriver(liveRoot, livePlugin));
+  const live = run(["start", "--kind", "promotion", "--root", liveRoot, "--restart-delay", "1", "--run-id", "dr-ac3-live", "--confirm-timeout", "15"], { pluginRoot: livePlugin });
   console.log(`[AC3 正常态] exit=${live.status}\n  stdout: ${live.stdout.trim()}\n  stderr: ${live.stderr.trim()}`);
-  t.after(() => run(["stop", "--kind", "promotion", "--root", liveRoot], { pluginRoot: path.join(liveRoot, "plugin"), timeout: 20000 }));
+  // 机器可读的本次锚点：AC2/AC3 两个对照（父测试）用它做【精确】残留读数。
+  console.log(`[AC3 fixture] root=${liveRoot} run_id=dr-ac3-live`);
+  // AC2 负控制接缝：注入一次「夹具内部的断言失败」，让清理走【失败路径】。默认不生效，只在 AC2 派生的
+  // 子进程里由 env 打开。没有它，AC2 就只能是「读代码相信 finally 会跑」——那是解释不是检验。
+  if (process.env.QUAY_AC3_LIVE_INJECT_FAIL === "1") {
+    assert.fail("AC2 负控制：注入的夹具内部断言失败——清理必须仍然执行（零残留进程 + root 已删）");
+  }
   assert.equal(live.status, 0, `正常启动必须成功：${live.stdout}\n${live.stderr}`);
   assert.match(live.stdout, /^started: /m, `正常态打印 started:：${live.stdout}`);
   assert.match(live.stdout, /confirmed_ms=\d+/, `started: 行带 confirmed_ms（可核的耗时读数）：${live.stdout}`);
   assert.ok(!/start-failed/.test(live.stderr), `正常态不得出现 start-failed：${live.stderr}`);
+});
+
+// ── gap-ac3-live-test-fixture-leaks-supervised-driver-processes AC2/AC3：两个【独立跑通的】对照 ──────
+//
+// 判据要取假，就必须分清「清理真的执行了」与「读数本来就是空的」。做法：把【真实的 AC3 夹具】放进一个
+// 子 `node --test` 进程里跑，等它【整个进程退出】之后再在父进程读数。⛔ 为什么必须隔一层子进程：被测
+// 对象是「夹具是否收掉了它 spawn 的 detached supervisor」——只有在子进程退出之后读数，才不依赖父进程
+// 自己的生命周期与调度（同硬规则 4b：别用会与对象同生共死的代理量判活）。
+//
+// AC2 = 失败路径（夹具内部断言失败）；AC3 = 通过路径（夹具全绿）。两条【各自跑一次、各自读数】，
+// ⛔ 不是「跑一次然后断言应该都清理了」（DoD 明写禁止这种形态）。
+
+/** 在子 `node --test` 里跑真实的 AC3 夹具一次，返回退出码 + 夹具回传的 root 锚点。
+ *  ⛔ 模式串只匹配 `AC3 (gap-ac203)` ⇒ 本文件新增的 AC2/AC3 对照不会被递归跑（结构上无环）。
+ *
+ *  ⚠️ 必须删掉子进程 env 里的 `NODE_TEST_CONTEXT`：node:test 用它识别「我正跑在一个测试文件里」并对
+ *  嵌套 runner 直接**静默跳过**（实测：exit 0、stdout 为空、一行 `Warning: node:test run() is being
+ *  called recursively within a test file. skipping running files.`）——⛔ 那是「读不懂输入 ⇒ 与成功
+ *  同形」（硬规则 3b），本轮实测就踩到了：两条对照都因 root=null 才暴露，否则会被读成「绿」。绕过这个
+ *  守卫在这里是【安全】的，因为它的目的是防自递归，而本函数的模式串把两条对照排除在外 ⇒ 环不存在。
+ *  即便如此，AC2/AC3 仍各自断言子进程【真的跑了】（pass/fail 计数），⛔ 不依赖「它应该跑了」。 */
+function runAc3FixtureOnce(injectFail) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  if (injectFail) env.QUAY_AC3_LIVE_INJECT_FAIL = "1";
+  else delete env.QUAY_AC3_LIVE_INJECT_FAIL;
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--test", "--test-name-pattern=AC3 \\(gap-ac203\\)", path.join(__dirname, "driver-runtime.test.mjs")],
+    { encoding: "utf8", env, timeout: 180000 },
+  );
+  const m = /^\[AC3 fixture\] root=(\S+) run_id=(\S+)$/m.exec(r.stdout || "");
+  return { status: r.status, stdout: r.stdout || "", stderr: r.stderr || "", root: m ? m[1] : null };
+}
+
+/** 一次对照的读数与断言：零残留进程 + root 已删。 */
+function assertNoResidue(child, label) {
+  assert.ok(child.root, `${label}：夹具必须回传 root 锚点才谈得上读数：\n${child.stdout}\n${child.stderr}`);
+  const residue = processesMentioning(child.root);
+  assert.ok(residue !== null, `${label}：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）`);
+  assert.deepEqual(
+    residue, [],
+    `${label}：不得残留任何引用本次 root 的进程（按本次 root 精确匹配；⛔ 不通配 dr-ac3-live——那会把\n别的任务 worktree 的历史残留算进来）：\n${residue.join("\n")}`,
+  );
+  assert.ok(!fs.existsSync(child.root), `${label}：/tmp root 必须已删：${child.root}`);
+}
+
+test("AC2 (gap-ac3-live…) 负控制 — 夹具内部断言失败 ⇒ 清理仍然执行（零残留进程 + root 已删）", (t) => {
+  const child = runAc3FixtureOnce(true);
+  console.log(`[AC2 负控制] child exit=${child.status} root=${child.root}`);
+  // ⛔ 先证明这条控制真的跑在失败路径上——否则它测的是 AC3 那条（两态混淆 = 判据恒真）。
+  assert.notEqual(child.status, 0, `负控制必须真的失败：\n${child.stdout}\n${child.stderr}`);
+  assert.match(`${child.stdout}${child.stderr}`, /fail 1/, `子进程必须真的跑过 AC3（⛔ 不是被静默跳过）：\n${child.stdout}\n${child.stderr}`);
+  assert.ok(
+    `${child.stdout}${child.stderr}`.includes("AC2 负控制：注入的夹具内部断言失败"),
+    `失败必须来自注入的夹具内断言（而不是别的岔路）：\n${child.stdout}\n${child.stderr}`,
+  );
+  assertNoResidue(child, "AC2 失败路径");
+});
+
+test("AC3 (gap-ac3-live…) 正控制 — 通过路径同样零残留（对照 AC2，证明清理没变成「总是不清理」）", (t) => {
+  const child = runAc3FixtureOnce(false);
+  console.log(`[AC3 正控制] child exit=${child.status} root=${child.root}`);
+  assert.equal(child.status, 0, `正控制必须真的绿：\n${child.stdout}\n${child.stderr}`);
+  assert.match(child.stdout, /pass 1/, `子进程必须真的跑过 AC3（⛔ 不是被静默跳过）：\n${child.stdout}`);
+  assertNoResidue(child, "AC3 通过路径");
 });
 
 test("AC4 (gap-ac203) — 慢启动（3s > 窗口）⇒ start-pending（⛔ 非死亡）；给足窗口 ⇒ 确认成功", async (t) => {

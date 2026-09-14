@@ -6,6 +6,34 @@
 
 import { withProvider, printJson } from "./shared.ts";
 import type { CliCtx } from "./context.ts";
+import type { GoalRecord } from "../abi.ts";
+
+/**
+ * AC2 — the staleness marker for a GOAL row's TEXT rendering
+ * (gap-goal-status-stale-achieved-after-new-active-criterion-filed).
+ *
+ * THE DEFECT IT RENDERS: a GOAL whose `status` is `achieved` while a new undischarged criterion has
+ * since been filed under it used to print EXACTLY the same `achieved` token as a genuinely closed
+ * GOAL. A reader had no field that told the two apart. So the marker is appended to the status
+ * token itself — ⛔ not as an optional extra column a reader can skip past.
+ *
+ * THREE-STATE, ⛔ never a boolean (hard rule 3b):
+ *   clean         → ""                        (byte-identical to the pre-change output)
+ *   stale         → "(⚠️stale:n=<N>)"         (N ENUMERATED — "how many", not just "something")
+ *   not-evaluated → "(⚠️stale:NOT-EVALUATED)"  (an INSTRUMENT failure — deliberately a different
+ *                                              string from both, so "could not read the carrier"
+ *                                              can never be mistaken for "read it, nothing there")
+ *
+ * Applies to `status: achieved` GOAL rows ONLY: the field answers 「is this GOAL's `achieved` still
+ * earned」, a question with no subject on a GOAL that is not claiming to be closed.
+ */
+export function goalStalenessMark(g: GoalRecord): string {
+  const s = g.staleness;
+  if (!s || g.status !== "achieved") return "";
+  if (s.state === "stale") return `(⚠️stale:n=${s.signals?.length ?? 0})`;
+  if (s.state === "not-evaluated") return "(⚠️stale:NOT-EVALUATED)";
+  return "";
+}
 
 export async function handleGoal({ sub, positional, flags, wantsJson }: CliCtx) {
   if (sub === "list") {
@@ -17,7 +45,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson }: CliCtx) 
       const goals = await client.goalList(filter);
       if (wantsJson) printJson(goals);
       else if (goals.length === 0) console.log("(no goals)");
-      else for (const g of goals) console.log(`${g.id}\t${g.status}\t${g.kind}\t${g.title}`);
+      else for (const g of goals) console.log(`${g.id}\t${g.status}${goalStalenessMark(g)}\t${g.kind}\t${g.title}`);
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
@@ -29,8 +57,23 @@ export async function handleGoal({ sub, positional, flags, wantsJson }: CliCtx) 
       if (!g) { console.error(`no such goal: ${id}`); process.exitCode = 1; return; }
       if (wantsJson) printJson(g);
       else {
-        console.log(`${g.id}: ${g.title} [${g.status}]${g.kind ? ` (${g.kind})` : ""}${g.goal ? ` → ${g.goal}` : ""}`);
+        console.log(`${g.id}: ${g.title} [${g.status}${goalStalenessMark(g)}]${g.kind ? ` (${g.kind})` : ""}${g.goal ? ` → ${g.goal}` : ""}`);
         if (g.criterion) console.log(`criterion: ${g.criterion}`);
+        if (g.status === "achieved" && g.staleness && g.staleness.state !== "clean") {
+          // Same three-state distinction as the marker, spelled out: the reader needs to know WHICH
+          // criterion introduced the divergence and HOW to record the human decision (AC3's path).
+          if (g.staleness.state === "stale") {
+            console.log(
+              `staleness: ⚠️ ${g.staleness.signals.length} criterion/criteria were filed under this GOAL after it read achieved — its status field may be outdated. Triggering: ${g.staleness.signals
+                .map((s) => `${s.triggeringAcId} (${s.staleSince})`)
+                .join(", ")}. Reopening is a HUMAN decision: quay goal write ${g.id} --status active --reason "…"`,
+            );
+          } else {
+            console.log(
+              `staleness: ⚠️ NOT-EVALUATED — the signal carrier could not be read (${g.staleness.reason}); whether this GOAL's achieved is still earned is UNKNOWN, ⛔ not "no divergence".`,
+            );
+          }
+        }
         if (g.body) console.log(g.body);
       }
     }, { providerId: flags.provider, root: flags.root });
