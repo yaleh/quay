@@ -2,7 +2,7 @@
 id: gap-register-plugin-cli-install-missing-y-leaves-user-scope-unmaterialized
 title: register-plugin.mjs 的 CLI materialization 没传 -y：非 TTY 下确认取不到 ⇒
   插件只登记不落地（user scope 无 scope:"user" 条目）
-status: todo
+status: ready
 labels:
   - gap
   - defect
