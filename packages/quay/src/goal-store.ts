@@ -353,6 +353,202 @@ function ledgerEvidenceMap(goalDir: string): Map<string, LedgerEvidence> {
   return map;
 }
 
+// ── goal-staleness signal (gap-goal-status-stale-achieved-after-new-active-criterion-filed) ──────
+// THE DEFECT. `write()` is PER-RECORD (this file's own structure, not an oversight): writing
+// `AC-029 {goal: "GOAL-003", status: "active", …}` touches nothing on GOAL-003's record. So a GOAL
+// whose `status` is `achieved` while a NEW undischarged criterion has since been filed under it
+// reads EXACTLY like a genuinely closed GOAL — one `achieved` token for two different worlds
+// (hard rule 3b). Measured 2026-09-14 in a third-party workspace (quay-fleet): GOAL-003 sat at
+// `achieved` while AC-029/030/031/032 were filed `active` under it; only a human noticing the
+// inconsistency corrected it. Nothing on any carrier distinguished the two states.
+//
+// ⛔ WHAT THIS IS NOT. It is NOT an auto-reopen. `plugin/scripts/goal-driver.ts:516`（and `:2243`）
+// records 裁定 3 verbatim: 「不得反向翻转状态（achieved→active；激活归人）」 — activation is a human /
+// authorized-actor decision, and a mechanism must never flip `achieved`→`active` on its own. A fix
+// phrased as "detect a new AC and flip the GOAL back" would collide with that ruling head-on. So
+// the GOAL record is NEVER written here — only a SIDE CARRIER (append-only, gitignored, the same
+// shape as `goal-round.jsonl` / `*-sync.jsonl`): the reader can then SEE the divergence and a human
+// can decide. Visibility, not automation.
+//
+// ⛔ AND IT IS NOT THE SUFFICIENCY VERDICT. Sufficiency (`covered` / `insufficient` /
+// `not-evaluated`) answers 「do the ACs cover the goal's exit conditions」; this answers 「does the
+// GOAL's `status` FIELD still reflect its children as they are now」. Different dimensions — folding
+// them into one field would re-commit the very conflation (hard rule 3b) this task exists to remove.
+//
+// CARRIER SHAPE — one JSONL line per event, append-only, resolution is a SECOND line (the signal's
+// audit trail is never deleted or rewritten, mirroring the `*-sync.jsonl` 「事件不删只追加状态」
+// convention this repo already uses):
+//   {"ts":"<iso>","event":"stale",   "goalId","staleSince","triggeringAcId","goalStatusAtTime"}
+//   {"ts":"<iso>","event":"resolved","goalId","actor","reason"}
+// A goal's state = the tail of its own event stream: `stale` with no later `resolved` ⇒ unresolved.
+export const GOAL_STALENESS_SIGNAL_REL = ".quay/goal-staleness-signal.jsonl";
+
+/** One unresolved signal's DISCRIMINATING fields — the four the task names, so a reader can see
+ *  WHICH AC introduced the divergence (an enumeration, ⛔ never a bare boolean; hard rule 3). */
+export interface GoalStalenessSignal {
+  goalId: string;
+  /** When the triggering write happened (this is the signal's own `ts`). */
+  staleSince: string;
+  /** The criterion whose write introduced the undischarged child. */
+  triggeringAcId: string;
+  /** The owning GOAL's status AS READ at that moment — recorded, not re-derived from today's file
+   *  (a value re-derived later would answer a different question: hard rule 4 corollary 2). */
+  goalStatusAtTime: string;
+}
+
+/**
+ * The derived judgment for ONE goal. THREE-STATE, ⛔ never a boolean (hard rule 3b): a carrier that
+ * exists but cannot be parsed must not read the same as "read it, there is nothing" — an
+ * unreadable carrier is an INSTRUMENT failure, and reporting it as `clean` would be the exact
+ * "读不懂 ⇒ 伪装成检查通过" shape this repo names as its most expensive failure mode.
+ */
+export interface GoalStaleness {
+  state: "clean" | "stale" | "not-evaluated";
+  /** The unresolved signals, in append order. Empty unless `state === "stale"`; enumerated so the
+   *  output can name N and WHICH AC — not just "something is off". */
+  signals: GoalStalenessSignal[];
+  /** Present only for `not-evaluated`: why the carrier could not be read. */
+  reason?: string;
+}
+
+/** `<workspaceRoot>/.quay/goal-staleness-signal.jsonl` — derived from goalDir the SAME way
+ *  `ledgerEvidenceMap` derives the gate ledger (`dirname(goalDir)/.quay/…`), so both carriers
+ *  follow one rule instead of two. */
+function stalenessSignalPath(goalDir: string): string {
+  return path.join(path.dirname(goalDir), GOAL_STALENESS_SIGNAL_REL);
+}
+
+/**
+ * Append ONE signal line (never rewrites the carrier — the whole point of an append-only audit
+ * trail). Returns the carrier path so a caller can report where the evidence landed.
+ * ⛔ Best-effort: a failure to record visibility must never abort a record write that already
+ * succeeded — but it IS reported on stderr, never swallowed (hard rule 3b).
+ */
+export function appendGoalStalenessSignal(goalDir: string, rec: GoalStalenessSignal): string {
+  const file = stalenessSignalPath(goalDir);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify({ ts: rec.staleSince, event: "stale", ...rec }) + "\n", "utf8");
+  } catch (err) {
+    console.error(
+      `goal-store: could not append the goal-staleness signal for ${rec.goalId} (${rec.triggeringAcId}) — the record was written but the divergence is NOT recorded: ${(err as Error).message}`,
+    );
+  }
+  return file;
+}
+
+/**
+ * AC3 — the HUMAN CONFIRMATION PATH, and the ONLY writer of `resolved`. Deliberately NOT a new
+ * verb: it is called by `write()` when a GOAL is written with `status: active` (the existing
+ * 「确认重开」 path), so "activation is a human decision" (裁定 3) is preserved — the mechanism
+ * records THAT a human decided, it never decides. Resolution APPENDS (never deletes/rewrites), so
+ * the original signal stays auditable. Returns how many signals were resolved (enumerated).
+ */
+export function resolveGoalStaleness(
+  goalDir: string,
+  goalId: string,
+  opts: { actor: string; reason?: string },
+): number {
+  const n = readGoalStalenessIndex(goalDir).byGoal.get(goalId)?.length ?? 0;
+  if (n === 0) return 0;
+  const file = stalenessSignalPath(goalDir);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(
+      file,
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        event: "resolved",
+        goalId,
+        actor: opts.actor,
+        reason: opts.reason ?? "",
+      }) + "\n",
+      "utf8",
+    );
+  } catch (err) {
+    console.error(
+      `goal-store: could not append the goal-staleness RESOLUTION for ${goalId} — the reopen was written but the signal stays marked unresolved: ${(err as Error).message}`,
+    );
+    return 0;
+  }
+  return n;
+}
+
+/**
+ * Read the carrier ONCE and fold each goal's event stream to its UNRESOLVED signals (append order
+ * = on-disk order; a `resolved` line clears everything before it). `evaluated:false` means the
+ * carrier exists but could not be parsed — the caller must surface that as `not-evaluated`, ⛔ not
+ * as `clean`.
+ */
+function readGoalStalenessIndex(goalDir: string): {
+  evaluated: boolean;
+  reason?: string;
+  byGoal: Map<string, GoalStalenessSignal[]>;
+} {
+  const byGoal = new Map<string, GoalStalenessSignal[]>();
+  const file = stalenessSignalPath(goalDir);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    // ENOENT = the carrier does not exist ⇒ no signal has ever been recorded ⇒ a definite "clean".
+    // Anything else (EACCES, EISDIR) means we could NOT read it — a different answer.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { evaluated: true, byGoal };
+    return { evaluated: false, reason: `${file}: ${(err as Error).message}`, byGoal };
+  }
+  for (const [i, line] of raw.split("\n").entries()) {
+    if (line.trim() === "") continue;
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(line) as Record<string, unknown>;
+    } catch (err) {
+      return { evaluated: false, reason: `${file}:${i + 1}: unparseable JSON (${(err as Error).message})`, byGoal };
+    }
+    const goalId = typeof rec.goalId === "string" ? rec.goalId : "";
+    if (goalId === "") {
+      return { evaluated: false, reason: `${file}:${i + 1}: no goalId`, byGoal };
+    }
+    if (rec.event === "resolved") {
+      byGoal.delete(goalId);
+    } else if (rec.event === "stale") {
+      const arr = byGoal.get(goalId) ?? [];
+      arr.push({
+        goalId,
+        staleSince: String(rec.staleSince ?? rec.ts ?? ""),
+        triggeringAcId: String(rec.triggeringAcId ?? ""),
+        goalStatusAtTime: String(rec.goalStatusAtTime ?? ""),
+      });
+      byGoal.set(goalId, arr);
+    } else {
+      // An event kind this reader does not know ⇒ it cannot say what the stream means (hard rule
+      // 3b). Fail the READ, ⛔ never silently skip the line and report `clean`.
+      return { evaluated: false, reason: `${file}:${i + 1}: unknown event ${JSON.stringify(rec.event)}`, byGoal };
+    }
+  }
+  return { evaluated: true, byGoal };
+}
+
+/** The derived staleness judgment for ONE goal id (the exported single-goal reader). */
+export function readGoalStaleness(goalDir: string, goalId: string): GoalStaleness {
+  const idx = readGoalStalenessIndex(goalDir);
+  if (!idx.evaluated) return { state: "not-evaluated", signals: [], reason: idx.reason };
+  const signals = idx.byGoal.get(goalId) ?? [];
+  return { state: signals.length > 0 ? "stale" : "clean", signals };
+}
+
+/** The owning GOAL's status AS STORED, or null when the record is absent / unreadable / carries no
+ *  status. Read-only: ⛔ this never writes the GOAL's record (see the section header — AC4). */
+function goalStatusOf(goalDir: string, goalId: string): string | null {
+  const file = fileNameForId(goalDir, goalId);
+  if (!file) return null;
+  try {
+    const { frontmatter } = parseFrontmatter(fs.readFileSync(path.join(goalDir, file), "utf8"));
+    return typeof frontmatter.status === "string" ? frontmatter.status : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── cap / stale policy values ────────────────────────────────────────────────────────────────
 // Both are HUMAN-GIVEN initial strategy values with NO cost-structure backing (hard rule 4:
 // no numeric threshold before the cost is measured). Configurable via `.quay/config.yml`'s
@@ -458,6 +654,12 @@ interface GoalViewModel {
   lastProgressAt?: string;
   /** Ledger-derived (never stored, never mtime): the record's earliest goal-gate-event time. */
   firstEvidenceAt?: string;
+  /** Derived (never stored, never mtime): whether this GOAL's own `status` field may no longer
+   *  reflect its children — a criterion was filed under it WHILE it read `achieved`
+   *  (gap-goal-status-stale-achieved-after-new-active-criterion-filed). Present on GOAL records
+   *  only. ⛔ Deliberately NOT folded into `status`: the whole defect is that one `achieved` token
+   *  covered both "genuinely closed" and "closed, then re-opened by a new child" (hard rule 3b). */
+  staleness?: GoalStaleness;
 }
 
 export interface DisposeOld {
@@ -983,6 +1185,30 @@ function annotateGoalProgress(all: GoalViewModel[]): void {
 }
 
 /**
+ * Attach the derived staleness judgment to every GOAL row in `all` (gap-goal-status-stale-achieved-
+ * after-new-active-criterion-filed AC2). Reads the carrier ONCE for the whole list, ⛔ not per row —
+ * the same "compute over the FULL pre-filter list" discipline `annotateGoalProgress` uses, so a
+ * `?kind=criterion` filter can never change what a goal's staleness reads as.
+ *
+ * Set on GOAL records ONLY: staleness is a claim about a GOAL's own `status` field, and an AC
+ * record carries no such field (attaching it there would be a value with no subject).
+ */
+function annotateGoalStaleness(all: GoalViewModel[], goalDir: string): void {
+  if (!all.some((g) => isGoalId(String(g.id)))) return;
+  const idx = readGoalStalenessIndex(goalDir);
+  for (const g of all) {
+    if (!isGoalId(String(g.id))) continue;
+    if (!idx.evaluated) {
+      // Unreadable carrier ⇒ EVERY goal reads `not-evaluated`, never `clean` (hard rule 3b).
+      g.staleness = { state: "not-evaluated", signals: [], reason: idx.reason };
+      continue;
+    }
+    const signals = idx.byGoal.get(String(g.id)) ?? [];
+    g.staleness = signals.length > 0 ? { state: "stale", signals } : { state: "clean", signals: [] };
+  }
+}
+
+/**
  * STRIP-EVIDENCE-TIMESTAMP — the SINGLE shared judgment for "is a goal-file change substantive?"
  * (gap-goal-gate-timestamp-commit-flood). Defined HERE (Core) so BOTH goal-store's commit decision
  * and meta-driver's settleEvidenceWrites (plugin/scripts/meta-driver.ts, which imports this) apply
@@ -1176,7 +1402,11 @@ export function createGoalStore(
     try {
       updatedAt = fs.statSync(p).mtimeMs;
     } catch { /* omit */ }
-    return toViewModel(frontmatter as GoalFrontmatter, body, ledgerEvidenceMap(goalDir), updatedAt);
+    const vm = toViewModel(frontmatter as GoalFrontmatter, body, ledgerEvidenceMap(goalDir), updatedAt);
+    // Same derived judgment `list()` attaches, for the single-record reader (goal_get / `goal show`
+    // / write()'s own return) — ⛔ no second implementation, `annotateGoalStaleness` is the ONE.
+    annotateGoalStaleness([vm], goalDir);
+    return vm;
   }
 
   function list(filter: GoalFilter = {}): GoalViewModel[] {
@@ -1190,6 +1420,9 @@ export function createGoalStore(
       });
     // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
     annotateGoalProgress(all);
+    // …and their staleness is derived from the side carrier, over the SAME full list (a filter must
+    // never be able to change what a goal's staleness reads as — hard rule 3b).
+    annotateGoalStaleness(all, goalDir);
     return all
       .filter((g) => (filter.status ? g.status === filter.status : true))
       .filter((g) => (filter.kind ? g.kind === filter.kind : true))
@@ -2094,6 +2327,41 @@ export function createGoalStore(
       }
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
+      // ── goal-staleness signal (gap-goal-status-stale-achieved-after-new-active-criterion-filed) ──
+      // ⛔ NOTHING below touches the record just written, and NOTHING here touches the OWNING GOAL's
+      // record: the AC write and the GOAL write stay as decoupled as they were (AC4 is the direct
+      // mechanical check of that). The only effect is a SIDE-CARRIER append + a derived read.
+      if (!isGoalRecord) {
+        // A criterion was persisted that is NOT discharged (`achieved`) under a GOAL whose stored
+        // status still reads `achieved` ⇒ that GOAL's status field may now be false, and NOTHING
+        // else on any carrier says so. Record the divergence; do NOT flip the GOAL (裁定 3).
+        const owningGoal = typeof frontmatter.goal === "string" ? frontmatter.goal.trim() : "";
+        if (owningGoal !== "" && nextStatus !== "achieved") {
+          const ownerStatus = goalStatusOf(goalDir, owningGoal);
+          if (ownerStatus === "achieved") {
+            appendGoalStalenessSignal(goalDir, {
+              goalId: owningGoal,
+              staleSince: new Date().toISOString(),
+              triggeringAcId: id,
+              goalStatusAtTime: ownerStatus,
+            });
+            console.error(
+              `goal-store: ${id} was filed ${nextStatus} under ${owningGoal} which reads achieved — recorded a goal-staleness signal (the GOAL record itself is NOT modified; reopening is a human decision)`,
+            );
+          }
+        }
+      } else if (nextStatus === "active") {
+        // AC3 — the HUMAN CONFIRMATION PATH is this EXISTING write, ⛔ not a new verb: when a GOAL is
+        // written `status: active` (the 「确认重开」 decision, which only a human / authorized actor
+        // makes — 裁定 3), any signals standing against it are marked resolved (appended, ⛔ never
+        // deleted — the audit trail keeps the original divergence AND the decision that closed it).
+        const resolved = resolveGoalStaleness(goalDir, id, { actor: actor ?? "goal-cli", reason });
+        if (resolved > 0) {
+          console.error(
+            `goal-store: ${id} → active resolved ${resolved} goal-staleness signal(s) (actor=${actor ?? "goal-cli"})`,
+          );
+        }
+      }
       if (commit) {
         // Action semantics (gap-store-commit-action-and-actor AC1): create / status flip / field
         // update are DISTINGUISHABLE in the commit subject — never the old fixed prose that made
