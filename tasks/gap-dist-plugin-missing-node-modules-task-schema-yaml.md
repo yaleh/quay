@@ -66,19 +66,27 @@ resolve+import"而非静态 import 的调用，需要实现者用 `grep -rn reso
 
 ## Touches
 
-- packages/quay/src/plugin-root.ts（resolvePluginScriptExec 的 raw/dist 选择逻辑）
-- plugin/scripts/driver-filters.ts 和/或 plugin/scripts/driver-runtime.ts（怀疑的动态解析调用点，需实现者先用 grep -rn resolvePluginScriptExec 定位精确行号再动手，不要臆测）
-- plugin/scripts/sync-vendor.sh（决定哪些文件被 rsync 进发布包的规则，可能的另一条修法：不再随包携带这些裸 .ts 副本，只留 dist）
-- plugin/scripts/build-plugin-dist.mjs（预编译 entrypoint 名单，可能的第三条修法：既然 dist 已存在且已验证自包含，driver 侧改成 dist 优先、raw 仅在开发检出场景兜底）
+- packages/quay/src/plugin-root.ts（isPluginSourceCheckout + resolvePluginScriptExec 的 raw/dist 选择）
+- packages/quay/test/plugin-root.test.mjs（AC4 Core 半边：shipped 优先 bundle + 源检出负控制）
+- plugin/scripts/driver-runtime.ts（isKernelSourceCheckout 镜像 + resolveKernelSibling 同一判据）
+- plugin/test/driver-runtime.test.mjs（AC4 kernel 半边 + kernelSiblingArgv 的 argv 断言）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor：v0.6.3 bump 漏重锚造成的既存 stale 红）
+- plugin/scripts/publish-dist-branch.sh（**本任务已落地的发布侧半边**：commit `018253163`，非本分支 delta）
+- plugin/scripts/build-plugin-dist.mjs（同上，发布侧预编译入口推导；非本分支 delta）
+- plugin/scripts/sync-vendor.sh（同上，随包内容规则；非本分支 delta）
 - tasks/gap-dist-plugin-missing-node-modules-task-schema-yaml.md
+
+（发布侧三行由**并行会话**在同一 task id 下落进 develop，本分支不改动它们——把它们留在 Touches 里是为了
+让 scoped 门继续覆盖打包面（`plugin-packaging` / `npm-pack-e2e` / `sync-vendor --check`），
+并让这条任务的记录完整。）
 
 ## Acceptance Criteria
 
 - [x] AC1 定位真实调用点：用 `grep -rn resolvePluginScriptExec` 交叉核对，找到具体是哪一行代码触发了对 task-schema.ts 的动态 raw 解析，贴出文件名+行号+调用上下文，⛔ 不接受"大概是哪里"这种未核实的猜测。
 - [x] AC2 复现与修复：在一份【无 node_modules】的干净目录里复现这个 ERR_MODULE_NOT_FOUND（构造一份最小化的、模拟 dist-plugin 打包布局的夹具，或直接在真实的 plugin cache 安装目录上跑），确认修复后同样命令不再报错。
 - [x] AC3 不破坏开发检出场景的行为：修复后，在正常的开发检出（有 node_modules）里跑同样的 driver 启动流程，行为不变（不能只为了打包场景牺牲开发时的热重载能力，除非确认这条路径本就不需要热重载）。
-- [ ] AC4 单测覆盖：至少一条测试断言"在缺少 node_modules 的环境下，driver 相关的入口不依赖任何裸 .ts 的 npm 包 import"（可以是扫描 dist 产物真的自包含，或扫描运行时不会触碰带 npm import 的裸 .ts 文件）。
-- [ ] AC5 `scripts/test.sh` 对应泳道绿。
+- [x] AC4 单测覆盖：至少一条测试断言"在缺少 node_modules 的环境下，driver 相关的入口不依赖任何裸 .ts 的 npm 包 import"（可以是扫描 dist 产物真的自包含，或扫描运行时不会触碰带 npm import 的裸 .ts 文件）。
+- [x] AC5 `scripts/test.sh` 对应泳道绿。
 
 ## Definition of Done
 
@@ -133,3 +141,154 @@ walk 找 `node_modules` 的——`/tmp` 路径样样以上都没有 `node_module
 `scripts/test.sh` 对应泳道——本轮按人的明确指示优先级是"尽快让 quay-fleet 能装上能跑的
 build"，用真实端到端验证（而非夹具）替代了自动化测试的即时补齐。遗留跟进项：为
 `publish-dist-branch.sh` 的输出补一条断言"不含带 npm import 的裸 plugin/gate-scripts .ts"。
+
+## Resolution（第二条修法：resolver 半边 · per-task worker，同日第二次落地）
+
+**先读背景（否则会以为这是重复工作）**：本 task id 已被另一会话落地了一半——发布侧修法
+（`plugin/scripts/publish-dist-branch.sh` 补 build+strip+rewrite 三步，commit `018253163`，已进 develop）
++ v0.6.2→0.6.3 发布；AC1–AC3 由那次勾上，AC4/AC5 明确留作跟进。本次 worker 被驱动器按同一 task id
+派发，落地的是**本任务 Touches 里原列的"第三条修法"**（"driver 侧改成 dist 优先、raw 仅在开发检出
+场景兜底"）+ AC4/AC5。两条修法互补、不重复：
+
+- **发布侧**（已落地）：`github/dist-plugin` 通道的产物不再带裸 `.ts` —— 走该通道安装的第三方拿到的是纯 bundle；
+- **resolver 侧**（本次）：**任何** raw 与 dist 并存的安装仍然选中自包含 bundle。这一条发布侧结构上覆盖不到：
+  `claude plugin marketplace add <本地插件目录>`（**quay-init 自己打印给用户的安装步骤**、
+  也是本机 `known_marketplaces.json` 的实际形态）是**整棵 `plugin/` 原样拷贝**进 cache 的，
+  本地检出里有什么就带什么——实测本机 `~/.claude/plugins/cache/quay/quay/0.6.2/` 里 237 个裸 `.ts`
+  与 85 个 dist bundle 并存，正是这一种。
+
+### AC1（更正上一节的定位）
+
+上一节把触发点写成 `observation.ts:3169-3174 loadDriverRuntime()`。实测触发 `quay driver start` 的是
+**另一处**，而且**不是"动态 resolve 一个 .ts 依赖"**——是一条**静态 import 链被整体加载**：
+
+| 环节 | 位置 | 内容 |
+|---|---|---|
+| 解析入口（触发 `quay driver start` 的） | `packages/quay/src/cli/driver.ts:181` | `resolvePluginScriptExec(path.join("scripts","driver-runtime.ts"))` → 选中 raw，`stripTypes:true` |
+| 同款入口（in-process kernel 懒加载） | `packages/quay/src/observation.ts:3174` | 同一次调用 |
+| 静态 import | `plugin/scripts/driver-runtime.ts:52` | `… from "./driver-filters.ts"` |
+| 静态 import | `plugin/scripts/driver-filters.ts:25` | `… from "./task-schema.ts"` |
+| 裸 npm import（崩点） | `plugin/scripts/task-schema.ts:127` | `import { parse as parseYaml } from "yaml"` |
+
+⛔ 所以上一节"怀疑是 driver-filters.ts/driver-runtime.ts 里对 task-schema.ts 的某次**动态**
+resolve+import"**不成立**：全仓没有任何一行 `resolvePluginScriptExec("scripts/task-schema.ts")`
+（`grep -rn resolvePluginScriptExec` 的全部非测试调用点只有 5 处，已逐条核过）——
+**raw kernel 是被"选中"的那个，task-schema.ts 是它自己的静态闭包拖进来的。**
+
+**独立复现（同一安装目录、只换被执行的形态，其它全不变）**：
+```
+$ node --experimental-strip-types <cache>/scripts/driver-runtime.ts status --kind promotion --root <ws>
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'yaml' imported from <cache>/scripts/task-schema.ts
+$ node <cache>/scripts/dist/driver-runtime.js status --kind promotion --root <ws>
+worktree-process-reaper: one of --worktree <path> or --orphans is required
+promotion-driver: kind=promotion · supervisor pid=none alive=0 · … · carrier_files=…:missing
+```
+**闭包实测**（注释剥离后的静态扫描，不是"大概"）：raw kernel 闭包含 **23 个文件**；其中的裸依赖是
+`yaml`（`task-schema.ts` / `profile-policy.ts`）、`@modelcontextprotocol/sdk/{server/mcp,server/streamableHttp,types}.js`
+与 `zod`（`driver-shared.ts`）——**四个都不在安装目录里**（该目录 `find -iname node_modules` 命中 0）。
+同一函数的另外 3 个调用点里，`observation.ts:2291`（`task-status-drift-check.ts:35 → task-schema.ts`）
+同样触到 `yaml`，一并被同一次修改覆盖；`mcp-server.ts:157`（runtime-usage-inventory）与
+`serve-send.ts:195`（transcript-delivery-check）的 raw 闭包**不含** npm 依赖（实测），
+它们只是跟着改成走 bundle（形态统一，行为无差）。
+
+### AC2/AC3 修法
+
+- `packages/quay/src/plugin-root.ts`：新增 **`isPluginSourceCheckout(root)`** =「Core 源码就在 plugin root
+  旁边」（`<root>/../packages/quay/src` 存在）。`resolvePluginScriptExec` 改为 **raw 只在源检出里胜出**；
+  非源检出且存在 dist bundle ⇒ 选 bundle（`stripTypes:false`）；bundle 不存在 ⇒ 仍回退 raw
+  （⛔ 不把可解析的脚本变成 null）。
+- `plugin/scripts/driver-runtime.ts`：同一判据的 kernel 镜像 **`isKernelSourceCheckout()`**，`resolveKernelSibling`
+  同样处理——`runSupervisor` 的 `spec.driver` 正是经它解析（**六个 kind 全在这一条上**），
+  `kernelSiblingArgv` 随之继承。
+
+**为什么判据是"源检出"而不是"有没有 node_modules"**：出厂树是静态的（`sourceFilesMaxMtimeMs` 的注释
+自己就写着"installed artifact 只有 dist bundle、无原始 .ts ⇒ 恒 0 ⇒ 无自刷新"），在出厂安装里选 raw
+零收益、代价是启动即崩；而"有没有 node_modules"是会随宿主变化的**代理量**（硬规则 4b：共享机/
+用户 HOME 下都可能存在）。源检出判据把"raw 是真相源"这件事直接说清楚，也保住了源检出里的
+编辑即生效 + 源码自刷新。
+
+### AC2/DoD 端到端（真实安装，不是夹具）
+
+1. 从**修好的树**构建 plugin（`sync-vendor.sh` + `build-plugin-dist.mjs <pluginRoot>` ⇒ 87 entrypoints），
+   拷成一份目录源 marketplace；
+2. `HOME=/tmp/qa-home2 claude plugin marketplace add ./qa-ship2` + `claude plugin install quay@quay`
+   ⇒ **走官方路径真实安装**出 `/tmp/qa-home2/.claude/plugins/cache/quay/quay/0.6.3/`
+   （修好的树上 `plugin/VERSION` 已是 develop 的 0.6.3；报障那份是 0.6.2，两者同形）：
+   **无 node_modules、无 .git、237 个裸 .ts + 85 个 dist bundle**；
+3. `CLAUDE_PLUGIN_ROOT=<cache> node <cache>/scripts/dist/start-drivers.js --root /tmp/qa-thirdparty --port 4199`
+   ⇒ **四个 kind 全部启动**：`promotion` / `worker` / `outer` / `goal` 均 `alive:1 running:1`
+   （+ `serve: started` 在 4199）；跑完逐 kind `driver stop` + 收掉 serve，**无残留进程**。
+
+**单变量红/绿对照（同一安装目录、同一条命令，只换一个文件）**：把 `vendor/quay/dist/quay.js`
+换回**修复前**那份（取自真实 cache 0.6.2 的 bundle）⇒ 同一条命令立刻复现报障原文
+`ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from …/scripts/task-schema.ts`；
+换回修复版 ⇒ 全绿。⇒ 结论钉在"跑的是哪个 Core bundle"这**一个**变量上，不是环境差异、不是夹具差异。
+
+### AC3（开发检出行为不变）
+
+同一 resolver 在源检出上：`resolvePluginScriptExec("scripts/driver-runtime.ts")` ⇒
+`<repo>/plugin/scripts/driver-runtime.ts` + `stripTypes:true`（= 修复前行为）；kernel 侧
+`resolveKernelSibling("promotion-driver.ts")` ⇒ 同样选 raw（实测探针输出见下）。负控制见 AC4 的两条测试
+（同一夹具，只多加一个 `packages/quay/src` 目录 ⇒ 结论翻转回 raw）：
+
+```
+SHIPPED(cache 0.6.2) | core: <root>/scripts/dist/driver-runtime.js    strip=false | kernel: <root>/scripts/dist/promotion-driver.js strip=false
+DEV(repo plugin)     | core: <root>/scripts/driver-runtime.ts         strip=true  | kernel: <root>/scripts/promotion-driver.ts        strip=true
+```
+
+### AC4 单测（新增 6 例，含红对照）
+
+- `packages/quay/test/plugin-root.test.mjs`：`isPluginSourceCheckout()` 真值表；**raw+dist 并存、
+  非源检出 ⇒ 选 bundle**；**同一夹具 + 源检出标记 ⇒ 选 raw（负控制）**；无 bundle 的裸 `.ts` 仍回退 raw。
+- `plugin/test/driver-runtime.test.mjs`：`resolveKernelSibling` 同一对（含 `kernelSiblingArgv` 的 argv 断言）。
+- **红对照（实际跑过，不是声称）**：把两个判据临时改成 `return true`（= 修复前的 raw 优先语义）
+  ⇒ Core 侧恰好多出 2 条红、kernel 侧 1 条红，两条负控制保持绿；改回即全绿。
+- AC 要求的属性（"用不到 node_modules 的环境里，driver 入口不碰带 npm import 的裸 .ts"）=
+  上面的**运行时半边**（本次新增）**∧** `packages/quay/test/build-plugin-dist.test.mjs:256`
+  的**产物半边**（"deriveEntries DERIVES the 6 driver kinds + send-to-session.ts"，已存在）：
+  每个 driver 入口都有 bundle 可被选中 ⇒ 非源检出下不会落到裸 `.ts`。
+
+### AC5 scoped 门
+
+`bash scripts/test.sh --for-task gap-dist-plugin-missing-node-modules-task-schema-yaml --allow-thin`
+（在任务 worktree 内、已 `merge develop`、源码已冻结）——读数见下（**有实测输出，不是空日志**）：
+
+```
+✔ resolveKernelSibling() — shipped install (raw .ts + dist coexist): the BUNDLE wins, stripTypes false
+✔ resolvePluginScriptExec() prefers the dist bundle when raw .ts and dist COEXIST outside the source checkout
+ℹ tests 159
+ℹ pass 159
+ℹ fail 0
+GATE_EXIT=0
+```
+静态检查面 **0 个 STATIC_CHECK_FAILED**；选择集 11 个测试文件（含 `packages/quay/test/plugin-root.test.mjs`、
+`plugin/test/driver-runtime.test.mjs` + crosscut packaging-state/check-adr/lint）——
+**159 条实测输出，不是 `--allow-thin` 在 0 文件时的静默放行**。
+
+### 顺手修掉一个 develop 上的既存红（不属本任务，但不修则本任务无法落地）
+
+第一次跑 scoped 门时静态检查 **fail-closed 红**：`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`
+⇒ `changed: plugin/.claude-plugin/plugin.json`。根因**不是本次改动**：v0.6.3 发布（`92c5b1b15`）
+改了 `plugin/.claude-plugin/plugin.json`（在 ratchet 的 fingerprint source set 里），但没有随附
+`--reanchor`——上一次 re-anchor（`9ea261f14`）是 0.6.2 bump 时做的。**即 develop 上该静态检查是红的，
+且它对每个任务都 fail-closed。** 实测 `--gate` 通过（真实 laydown **3 files / 1022 bytes ≤ baseline
+3/1022**，shrink-only 成立）⇒ 重锚只刷新指纹、**不动任何数字**。已 `--reanchor` 并随本分支提交
+`docs/analysis/quay-init-closure-ratchet.baseline.json`（diff 仅 `fingerprint` 与 plugin.json 的 `sha`）。
+
+### 覆盖边界（如实记录，未修）
+
+1. **装了裸 `.ts` 但一个 dist bundle 都没有**的树：resolver 无从选择（bundle 不存在）⇒ 仍落回 raw，
+   报错形态不变。这类安装必须先构建（或改从 dist-plugin 通道安装）。本次修的是"raw 与 dist 并存"
+   的安装——报障那份 cache 正是这一种。
+2. **同类未修点（枚举，按位置判定）**：`packages/quay/src/mcp-server.ts:141 resolveWorkspaceInstrument`
+   对 `<workspaceRoot>/plugin/scripts/*.ts` 也是 raw 优先。但那是**工作区本地** instrument 目录轴
+   （quay-init 铺进消费方工作区的副本），与 driver 入口无关，不在本任务 DoD 路径上。
+3. `plugin/scripts/driver-runtime.ts` 在 Core 侧还有一个**同形但未修**的镜像点：
+   `packages/quay/src/fan-in/ff-merge.ts:313 siblingScriptArgv`（同样是 raw 优先）。它的
+   `scriptsDir` 在生产里是 `<plugin>/scripts/dist`（kernel 是 bundle 时），raw 候选不存在 ⇒ 不触发；
+   只有在 `QUAY_PLUGIN_ROOT` 被显式指向一个出厂 plugin root（**实测全仓没有任何生产写入者**，
+   只有测试缝/运维覆盖）时才会选到裸 `.ts`，故本任务不改（改动面越出 DoD，且无生产触发路径）。
+4. `plugin/scripts/start-drivers.ts:109 resolvePluginRoot` 要求 `basename(dir)==="scripts"`，
+   于是 `node <cache>/scripts/dist/start-drivers.js`（不带 `CLAUDE_PLUGIN_ROOT` 时）推导不出 plugin root、
+   回退 PATH `quay`（实测 ENOENT）。生产里 `CLAUDE_PLUGIN_ROOT` 由 harness 给出，非阻塞；
+   且失败是**响亮报错**（打印 argv0/argv），不是静默假绿。
