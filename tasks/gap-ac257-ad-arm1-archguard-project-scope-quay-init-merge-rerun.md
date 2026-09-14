@@ -83,6 +83,7 @@ goal_ac: AC-257
 - plugin/.claude-plugin/plugin.json
 - plugin/VERSION
 - plugin/vendor/quay/package.json
+- plugin/README.md
 
 ## AC
 
@@ -137,6 +138,7 @@ VERSION-CONSISTENCY: OK
 另实测 `plugin/VERSION` = `0.7.0`、`plugin/vendor/quay/package.json` 的 `version` = `0.7.0`
 ⇒ 两清单并集的 9 个文件同版（`VERSION_ENTRIES` 8 项 ∪ AC-259 清单的 `plugin/VERSION`）。
 ⚠️ 只做使 `quay_version=0.7.0` 可满足的最小 bump，⛔ 不宣称 AC-259 达成。
+⚠️ 该并集的**计数口径随 develop 前进而漂移**（develop 新增 `plugin/README.md` 为承载文件）—— 见第三轮 ②，本轮已就地吸收，判据未变。
 
 ### AC3 产出侧接线
 `grep -c 'GOAL-018-AC-257' plugin/scripts/verify-deliver-coldstart.sh` = **3**；前 3 条命中（硬规则 ②：引用计数前先打印命中）：
@@ -329,6 +331,42 @@ C 红控制：backdate 改 91 分钟（时长事实错） stdout "… 91.0 min �
 那次「连续修满重试上限」的**历史审计记录**（确实发生过），不是当前状态；本回合是接手它继续修
 （git 历史里第一次 fan-in 那条红的成因见上一节，第二次见本节）。⛔ 未删该记录（append-only 审计），
 也⛔ 未自行改写 `status:`（该字段归 driver）。
+
+### 第三轮（2026-09-14 12:5xZ，本回合）：develop 追赶 103 提交 + 版本冲突取 GOAL 钉的 0.7.0 + 承载集新增一个文件
+
+**① merge develop（合并前落后 103 提交；合并体 `8b201b985`）** —— 10 处冲突，两类：
+
+- **9 个版本承载文件**（`packages/quay{,-native,-github,-backlog}/package.json`、`plugin/VERSION`、
+  `plugin/.claude-plugin/{plugin,marketplace}.json`、`.claude-plugin/marketplace.json`、
+  `plugin/vendor/quay/package.json`）：develop = **0.6.3**，本分支 = **0.7.0** ⇒ **取 0.7.0**（⛔ 非 develop wins）。
+  依据：版本是**单值、不可语义合并**，而**生效 GOAL 逐字钉住它** —— GOAL-018 标题即「…版本 bump 到 0.7.0」，
+  AC-257 判据要求 `quay_version == "0.7.0"`（AC-257 已 `status: achieved`）。取 develop 的 0.6.3 会**同时**
+  打坏 AC-257 与 AC-259。该理由已写进 merge commit message。
+- **`docs/analysis/quay-init-closure-ratchet.baseline.json`**：两侧 `files:3 bytes:1022` **相同**、只有
+  fingerprint/sources 不同 ⇒ ⛔ 不手选任一侧（任一侧都会留一个恒红的 freshness 闸），走**机械重锚**（同第二轮）：
+  `--reanchor` → `3 files / 1022 bytes`（**footprint 未变 ⇒ ratchet 未放宽**）、`--check-stale` → PASS。
+- 本分支上一轮的两处修复（`develop-deliver-tgz-evidence-transport.test.mjs` 的推导计数、
+  `supervisor-preempt-candidates.test.mjs` 的区间断言）合并后**逐字保留**（已当场核）。
+
+**② develop 给承载集新增了一个文件 ⇒ 9 → 10**：develop `b15fc2e2c`（`fix(ac169): put plugin/README.md
+into the version-consistency canonical set`）把 `plugin/README.md` 加进 `VERSION_ENTRIES`，而该文件在
+本分支上**从未被 bump** ⇒ 合并后 `version-consistency-check.ts` 报 `DRIFT DETECTED … plugin/README.md 0.6.3`。
+**就地修**：`plugin/README.md:3` 的 `v0.6.3` → `v0.7.0`，并把该文件登记进 `## Touches`
+（⛔ 不是放宽声明：**改了版本承载集就必须声明新增的承载文件**，否则 `anti-drift-touches-check.ts` 按
+`out-of-declared` HARD FAIL）。复跑 `node --experimental-strip-types scripts/version-consistency-check.ts`
+→ `VERSION-CONSISTENCY: OK`，末行 `All 9 files carry version 0.7.0`（9 个 entry 含 `plugin/README.md`）。
+
+⚠️ **AC2 的「9 文件」计数口径随 develop 前进而漂移，显式登记**：立案当轮的并集 = `VERSION_ENTRIES`(8 项，
+含 `plugin/vendor/quay/package.json`、不含 `plugin/VERSION`) ∪ AC-259 清单(含 `plugin/VERSION`) = **9**；
+本轮 `VERSION_ENTRIES` 已是 **9 个 entry（含 `plugin/README.md`）** ⇒ 并集 = **10 个文件**。
+AC2 的**可取假判据本身未变**（checker exit 0 ∧ `plugin/VERSION` 与 `plugin/vendor/quay/package.json`
+同为 `0.7.0`）且已复跑通过；此处只登记计数真值，⛔ 不回头改判据迁就真值。
+
+**③ anti-drift 前置核对（本回合当场实测，⛔ 不靠推断）**：合并后在工作树内跑
+`anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ **恰好 1 条**
+`out-of-declared: plugin/README.md (matches no declared Touches glob)`（⛔ 不是「Touches 陈旧」的泛指 ——
+是逐条列出的、一条具体的违规）⇒ ② 的 Touches 登记正是**为它**而做；登记后按同一命令复跑（见本轮退出前的
+scoped 门前置核对）。
 
 ### AC10 承接纪律
 见下方「承接：本轮发现的机制缺陷」——9 条，全部在**本任务自己的产出路径**上（两个文件都在本任务 `## Touches` 内，且 Plan §7/§8 明令改它们），**9 条全部结构上阻断本 AC 的产出**（每一条都把「记录落盘」这条路堵死，而失败形态都是「记录没写出来」，与「机制坏了」同形）⇒ 全部就地修。唯一另立 `gap-*` 的是第 8 条的**产品侧半边**（`quay-native task create`，不属本任务 Touches 的产品面）。第 10 条（第二条套件红，见上）不在产出路径上但阻断落地 ⇒ 同上就地修。
