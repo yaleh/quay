@@ -150,19 +150,29 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "a shipped sibling must be listed exactly once — a second inline copy defeats the closure check");
   assert.equal((src.match(/\$\{SCRIPT_DIR\}\/provider-binding-resolvability-check\.ts/g) || []).length, 1,
     "the checker must be listed exactly once — inline copies are how 2026-09-11 stayed invisible in BOTH modes");
-  // 5 since gap-ac249-complete-change-code-doc-same-task-record added --verify-complete-change (the
-  // fifth verify mode); every mode must go through the ONE enumeration — a direct scp in any of them is
-  // exactly how the 2026-09-11 defect stayed invisible.
-  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 5,
-    "ALL FIVE scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode / verify_adr_flip_mode / verify_complete_change_mode) must ship through ship_verify_closure");
+  // EVERY verify mode must go through the ONE enumeration — a direct scp in any of them is exactly how
+  // the 2026-09-11 defect stayed invisible. The expected number is DERIVED from the mode definitions,
+  // ⛔ not hardcoded: the literal was 5 and went stale the moment a sixth mode appeared
+  // (gap-ac257-ad-arm1-… added --verify-ac257) — and a stale literal fails in exactly the same shape
+  // as a real violation, which is the one shape this whole test exists to keep distinguishable.
+  // Per-mode slicing is also strictly stronger than a total count: it catches a mode with ZERO sites
+  // and a mode with TWO (a total can be fooled by one of each).
+  const modeDefs = [...src.matchAll(/^(verify_[a-z0-9_]+_mode)\(\) \{/gm)];
+  assert.ok(modeDefs.length >= 5, `the verify modes must be discoverable (found ${modeDefs.length})`);
+  for (let i = 0; i < modeDefs.length; i++) {
+    const from = modeDefs[i].index;
+    const to = i + 1 < modeDefs.length ? modeDefs[i + 1].index : src.length;
+    assert.equal((src.slice(from, to).match(/^\s*if ! ship_verify_closure /gm) || []).length, 1,
+      `${modeDefs[i][1]} must ship through ship_verify_closure — exactly one site; a direct scp here is how the 2026-09-11 defect stayed invisible`);
+  }
   // the SECOND, independent gap on the same transport surface (measured 2026-09-11): neither verify
   // mode put the host's Node ≥20 floor on PATH, so on C the run inherits /usr/bin/node v18.19.1 and
   // `node --experimental-strip-types` dies with "bad option" ⇒ binding_state() reads "unreadable" for
   // EVERY project there too. Same syndrome, different cause — so it needs its own wiring control.
   assert.equal((src.match(/^verify_node_export_for\(\) \{/gm) || []).length, 1,
     "verify_node_export_for must be defined exactly once (single source for ALL verify modes)");
-  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 5,
-    "ALL FIVE verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
+  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, modeDefs.length,
+    "EVERY verify mode's remote script must prepend the host's Node floor — the deliver mode always did (count DERIVED from the mode definitions, ⛔ not a literal that goes stale per new mode)");
 });
 
 // ── AC-247 (GOAL-016) — the SAME transport, for a ≥14-day-stalled legacy project ─────────────────
