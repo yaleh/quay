@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-attribution-has-no-control-measure-first
 title: fan-in suite 红一律记为本任务缺陷而无任何对照——先量确定性 develop 侧红的发生率，再决定是否建 develop-tip 基线轮
-status: ready
+status: done
 labels:
   - gap
 parent: null
