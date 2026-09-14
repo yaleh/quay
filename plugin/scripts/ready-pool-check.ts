@@ -2414,7 +2414,9 @@ function writeCacheJson(file, obj) {
 function writeCacheJsonSerialized(file, text) {
   try {
     const dir = path.dirname(file);
-    // The cache dir is `<root>/.quay` — present in a real workspace, absent on a bare fixture store.
+    // The cache dir is `<git-common-dir>/quay-ready-pool-cache/` (see rpcCacheDir — NOT `.quay/`,
+    // which is gitignored file-by-file and would dirty the working tree). rpcCacheDir already created
+    // it, so this is the belt-and-braces path for a caller that ever passes a cache file directly.
     // Created only when missing (never `recursive` blindly: a recursive mkdir under a /proc-style path
     // hangs), and a failure here just means no cache, never a wrong answer.
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
