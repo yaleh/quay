@@ -1841,11 +1841,17 @@ ac257_marketplace_path() {
   local root="$1" name="$2" home="${HOME:-}"
   local candidates=("$root/.claude/settings.json")
   [ -n "$home" ] && candidates+=("$home/.claude/settings.json")
+  # ⚠️ argv 下标：`node -e '<script>' A B C` 的 process.argv 是 `[node, A, B, C]` —— **没有 script 那
+  # 一项**（`-e` 不给 argv[1] 留位置）。原实现按「有 script 路径」的下标写（名字取 argv[2]、文件取
+  # slice(3)），于是它把**第一个文件路径当成 marketplace 名字**、并且**一个文件都没遍历** ⇒ 恒返回空、
+  # rc 1。它在生产上表现为「marketplace_path 为空 ⇒ 整个 AC-257 NOT-EVALUATED」，与「目标项目确实没
+  # 登记 marketplace」同形（硬规则 3b）。⇒ 名字取 argv[1]、文件取 slice(2)。
   "$VC_NODE" --no-warnings -e '
     const fs = require("fs");
-    for (const f of process.argv.slice(3)) {
+    const name = process.argv[1];
+    for (const f of process.argv.slice(2)) {
       let d; try { d = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { continue; }
-      const mk = (d && d.extraKnownMarketplaces) ? d.extraKnownMarketplaces[process.argv[2]] : null;
+      const mk = (d && d.extraKnownMarketplaces) ? d.extraKnownMarketplaces[name] : null;
       const src = mk && mk.source ? mk.source : null;
       const p = src && src.path ? String(src.path) : "";
       if (p) { process.stdout.write(p + "\n"); process.exit(0); }
@@ -3282,12 +3288,24 @@ step_ac257_project_scope() {
   fi
   echo "  [⑨a] installed quay_version=$AC257_QUAY_VERSION (read from the installed artifact, ⛔ not self-reported)"
 
-  # ── (a) 基线：把 settings.json 恢复到 committed 内容（只在本项目把它 tracked ∧ 已改脏时）──────
+  # ── (a) 基线：把 settings.json 恢复到【quay 的 enabledPlugins 键进入它之前】的那一版 ──────────
+  # ⛔ 不能用「从 git 重置到 HEAD」：本实验自己会把合并结果 auto-commit 进 HEAD（实测 2026-09-14：
+  # run4 在 archguard 留下 `chore(quay-init): initialize quay project files`，其 .claude/settings.json
+  # 已含 "quay@quay"）⇒ 跑第二次时 HEAD 已经是【quay 写的】了，本步骤要求的「非空、非 quay 写的
+  # settings.json」这个前提【被上一次运行自己吃掉】⇒ 实验不可重复，第二次必然 NOT-EVALUATED，
+  # 而失败形态与「合并语义坏了」同形（硬规则 3b）。
+  # 取法（项目无关，⛔ 不硬编码 archguard）：`git log -S'"quay@quay"'` 找【最早】把该键写进这个文件的
+  # 提交，取它的【父提交】那一版 —— 那一版按定义就是「含本项目自己的内容、但不含 quay 写的键」。
+  # 取不到 ⇒ 不写、留给 (b) 的闸判（enabledPlugins 已含 quay ⇒ NOT-EVALUATED），⛔ 不退回 HEAD。
   if git -C "$root" ls-files --error-unmatch "$settings_rel" >/dev/null 2>&1; then
-    if [ -n "$(git -C "$root" status --porcelain -- "$settings_rel" 2>/dev/null || true)" ]; then
-      if git -C "$root" checkout -- "$settings_rel" >/dev/null 2>&1; then reset_state="reset-from-git"; fi
+    local _qint=""
+    _qint="$(git -C "$root" log --format=%H -S'"quay@quay"' -- "$settings_rel" 2>/dev/null | tail -1)"
+    if [ -n "$_qint" ] && git -C "$root" cat-file -e "${_qint}^:${settings_rel}" 2>/dev/null; then
+      if git -C "$root" show "${_qint}^:${settings_rel}" > "$settings" 2>/dev/null; then
+        reset_state="reset-to-pre-quay-version(${_qint:0:8}^)"
+      fi
     else
-      reset_state="already-clean-tracked"
+      reset_state="no-pre-quay-version-tracked"
     fi
   else
     reset_state="untracked"
@@ -6970,6 +6988,25 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   [ "$ac257_h_unres" = "refused" ] || fail="$fail AC257-host-fqdn-unresolved-accepted"
   [ "$ac257_h_own_ok" = "refused" ] || fail="$fail AC257-host-fqdn-empty-input-accepted"
   unset AC257_RESOLVE_CMD
+  # marketplace 路径读取器（ac257_marketplace_path）。**本条是补一个【已发生】的缺陷**：原实现按
+  # 「`node -e` 的 argv 里有 script 项」的下标写（名字取 argv[2]、文件取 slice(3)），于是它把【第一个
+  # 文件路径】当成 marketplace 名字、并且【一个文件都没遍历】⇒ 恒返回空 ⇒ 生产上表现为
+  # 「marketplace_path 为空 ⇒ 整个 AC-257 NOT-EVALUATED」，与「目标项目确实没登记 marketplace」同形
+  # （硬规则 3b）。三例：项目级命中 / 项目级无该键⇒回落到用户级（这一例正是 slice(3) 会漏掉项目文件的
+  # 形态）/ 两处都无 ⇒ 空且非 0（⛔ 不打印一个「看起来也行」的串）。
+  local ac257_mk="$t/ac257-mk" ac257_mk_proj="" ac257_mk_fallback="" ac257_mk_none="ACCEPTED"
+  mkdir -p "$ac257_mk/proj/.claude" "$ac257_mk/home/.claude" "$ac257_mk/useronly/.claude" "$ac257_mk/none/.claude" "$ac257_mk/emptyhome"
+  printf '%s\n' '{"extraKnownMarketplaces":{"quay":{"source":{"path":"/srv/quay/plugin-proj"}}}}' > "$ac257_mk/proj/.claude/settings.json"
+  printf '%s\n' '{"extraKnownMarketplaces":{"quay":{"source":{"path":"/srv/quay/plugin-user"}}}}' > "$ac257_mk/home/.claude/settings.json"
+  printf '%s\n' '{}' > "$ac257_mk/useronly/.claude/settings.json"
+  printf '%s\n' '{}' > "$ac257_mk/none/.claude/settings.json"
+  ac257_mk_proj="$(HOME="$ac257_mk/home" ac257_marketplace_path "$ac257_mk/proj" quay 2>/dev/null || true)"
+  ac257_mk_fallback="$(HOME="$ac257_mk/home" ac257_marketplace_path "$ac257_mk/useronly" quay 2>/dev/null || true)"
+  HOME="$ac257_mk/emptyhome" ac257_marketplace_path "$ac257_mk/none" quay >/dev/null 2>&1 && ac257_mk_none="ACCEPTED" || ac257_mk_none="refused"
+  echo "selfcheck: ac257(marketplace-path) project='$ac257_mk_proj' fallback-to-user='$ac257_mk_fallback' neither='$ac257_mk_none' (expect /srv/quay/plugin-proj / /srv/quay/plugin-user / refused)"
+  [ "$ac257_mk_proj" = "/srv/quay/plugin-proj" ] || fail="$fail AC257-marketplace-path-project-miss"
+  [ "$ac257_mk_fallback" = "/srv/quay/plugin-user" ] || fail="$fail AC257-marketplace-path-user-fallback-miss"
+  [ "$ac257_mk_none" = "refused" ] || fail="$fail AC257-marketplace-path-absent-accepted"
   AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
 
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
