@@ -2,7 +2,7 @@
 id: gap-quay-native-task-create-duplicate-id-prepends-frontmatter
 title: quay-native task create 对已存在 id 返回 0 并把第二段 frontmatter 前置（静默损坏任务文件 + ABI
   的 status 变成 todo）
-status: todo
+status: ready
 needs_human_cause: unclassified
 labels:
   - gap
