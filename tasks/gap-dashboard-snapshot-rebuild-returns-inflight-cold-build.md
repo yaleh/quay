@@ -3,7 +3,7 @@ id: gap-dashboard-snapshot-rebuild-returns-inflight-cold-build
 title: dashboard 快照 `rebuild()` 在启动冷构建仍 in-flight
   时静默返回【那趟旧构建】——`gap-dashboard-goal-card-provider-backed` AC4「empty state
   shown」在负载下红，与子任务 delta 无关却消耗其 fan-in 重试预算
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -60,3 +60,4 @@ release(); await p;                               // 冷构建装盘
 - `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs`
 - `packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs`
+- `tasks/gap-dashboard-snapshot-rebuild-returns-inflight-cold-build.md`

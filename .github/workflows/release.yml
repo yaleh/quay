@@ -1,16 +1,28 @@
 name: Release
 
 # QX-033 (experiment 4, iteration 9): closes CB-008 (no packaging/distribution).
-# Triggers on version tags (v*). Builds a distributable npm pack artifact and
-# publishes it to the GitHub Release created by the tag push.
+# Manually triggered against an EXISTING version tag (v*). Builds a
+# distributable npm pack artifact and publishes it to the GitHub Release for
+# that tag.
 #
 # Approach: npm pack (Option B) — produces quay-<version>.tgz installable via
 # `npm install -g quay-<version>.tgz`. No build toolchain required beyond Node.js.
+#
+# gap-github-actions-no-implicit-triggers (2026-09-14, human ruling): this
+# workflow used to auto-run on every `v*` tag push. A tag push is no longer
+# treated as an implicit "please publish" request — publishing must be
+# triggered explicitly (workflow_dispatch, with the tag to release named
+# as an input) so a plain `git push --tags` never has a GitHub-writing side
+# effect on its own. `github.ref_name` (only meaningful for a ref-triggered
+# run) is replaced throughout this file by the `tag` input.
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to release (e.g. v0.6.3) — must already exist"
+        required: true
+        type: string
 
 jobs:
   release:
@@ -28,6 +40,8 @@ jobs:
       issues: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -80,7 +94,7 @@ jobs:
         with:
           files: ${{ steps.pack.outputs.artifact }}
           body: |
-            ## quay ${{ github.ref_name }}
+            ## quay ${{ inputs.tag }}
 
             Install globally with Node.js >= 20:
 
@@ -119,6 +133,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -224,7 +240,7 @@ jobs:
         with:
           files: ${{ env.ARCHIVE_PATH }}
           body: |
-            ## quay ${{ github.ref_name }} — single-file executables (Node SEA)
+            ## quay ${{ inputs.tag }} — single-file executables (Node SEA)
 
             Platform-specific archives (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
             are the **recommended distribution**: two single-file executables (`quay`,
@@ -289,14 +305,14 @@ jobs:
           # not the public web download URL. Fetch the asset id from the
           # release-by-tag API, then GET
           # /releases/assets/{id} with Accept: application/octet-stream.
-          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
           ASSET_NAME="quay-sea-${VERSION}-linux-x64.tar.gz"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
           ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
             | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
             | grep '"id":' | head -1 | grep -o '[0-9]\+')"
           if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
             exit 1
           fi
           curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
@@ -368,14 +384,14 @@ jobs:
           set -euo pipefail
           # Same private-repo assets-API fetch technique as sea-verify-node-free above (the public
           # browser_download_url 404s on a private repo even with a valid token).
-          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
           ASSET_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
           ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
             | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
             | grep '"id":' | head -1 | grep -o '[0-9]\+')"
           if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
             exit 1
           fi
           curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
@@ -454,14 +470,14 @@ jobs:
           # public browser_download_url 404s on a private repo, so resolve the
           # asset id from the release-by-tag API and GET the assets endpoint
           # with an octet-stream Accept header.
-          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
           ASSET_NAME="quay-${VERSION}.tgz"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
           ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
             | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
             | grep '"id":' | head -1 | grep -o '[0-9]\+')"
           if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
             exit 1
           fi
           curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
@@ -469,7 +485,7 @@ jobs:
       - name: Install the published tarball on Node 20 and run its packaged bin
         run: |
           set -euo pipefail
-          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
           echo "Installing quay-${VERSION}.tgz on $(node --version)"
           npm install -g "quay-${VERSION}.tgz"
           quay --help
@@ -488,6 +504,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
