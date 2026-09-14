@@ -41,18 +41,18 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 
 ## Acceptance Criteria
 
-- [ ] 脚本对真实载体输出每个 checker/闸的：累计成本（小时）、判定次数、fail 次数、
+- [x] 脚本对真实载体输出每个 checker/闸的：累计成本（小时）、判定次数、fail 次数、
       **去重后的不同缺陷数**、每缺陷成本；并打印所用去重口径的定义。
-- [ ] 敏感性分析：至少 **2 种**合理去重口径（例如「同一 task+checker 的连续 fail 段算一次」
+- [x] 敏感性分析：至少 **2 种**合理去重口径（例如「同一 task+checker 的连续 fail 段算一次」
       与「同一 task+checker+失败原因算一次」），报出两种口径下的排序，并说明排序是否稳定；
       若翻转，明确说「该结论对口径敏感，不可用于决策」。
-- [ ] 给出 `ready-pool-check` 的专项读数：它 212.7 h 的成本对应多少个去重后的真实拦截，
+- [x] 给出 `ready-pool-check` 的专项读数：它 212.7 h 的成本对应多少个去重后的真实拦截，
       每拦截成本是多少——这是全仓最贵的单个检查器，必须单列。
-- [ ] 识别「纯税」候选：累计成本 >1 h 且去重后拦截数 = 0 的检查器清单（条数 + 清单）；
+- [x] 识别「纯税」候选：累计成本 >1 h 且去重后拦截数 = 0 的检查器清单（条数 + 清单）；
       零命中时必须把谓词对一个**已知有拦截**的检查器干跑一次证明谓词有效
       （硬规则 2 零计数配套动作）。
-- [ ] 结论对 ADR-005 明确表态：实测是支持、不支持，还是样本不足以判定；并给出理由。
-- [ ] `bash scripts/test.sh --for-task gap-cost-per-defect-caught-verification-marginal-return` 全绿，
+- [x] 结论对 ADR-005 明确表态：实测是支持、不支持，还是样本不足以判定；并给出理由。
+- [x] `bash scripts/test.sh --for-task gap-cost-per-defect-caught-verification-marginal-return` 全绿，
       新测试在该轮被实际选中执行（按测试名核对）。
 
 ## Definition of Done
