@@ -3224,10 +3224,21 @@ step_ac257_project_scope() {
   echo "  [⑨c] BEFORE hooks.Stop md5=$(printf '%s' "$before_stop" | md5sum | cut -c1-12) ; enabledPlugins=$before_ep"
 
   # ── (c) quay-init --force 重跑（合并路径）────────────────────────────────────────────
+  # ⚠️ `--auto-commit-confirm`【不是】为了好看：quay-init 的铺设面里 `.quay/config.yml` /
+  # `.quay/profiles.yml` / `.claude/settings.json` / `.claude/launch.settings.json` / `.gitignore`
+  # 在任何真实项目里都是 **tracked** 的（archguard 实测 6 个 tracked 修改）。用 `--auto-commit-skip`
+  # 会让这些修改留在工作树 ⇒ 目标项目的主检出变脏 ⇒ **该项目的机械 fan-in 的 `ff` 会被
+  # `cleanTreeCheck` 拒**（实测 2026-09-14：`ff: exit 2 — working tree not clean in
+  # /home/yale/work/archguard`，而 fan-in 的其余每一步都已通过）。即：本步骤若不把 quay-init 的铺设
+  # 【提交掉】，它自己就会把被取证项目推入「任何任务都落不了地」的状态——那是本 AC 的产出破坏本 AC
+  # 的产出。quay-init 的 auto-commit 只暂存它自己的闭集（`CLOSED_SET_ITEMS`），⛔ 不碰别的改动。
   set +e
-  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-skip) >/dev/null 2>&1
+  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm) >/dev/null 2>&1
   rc_rerun=$?
   set -e
+  # 铺设后主检出必须重新是干净的（这是「不把被取证项目弄脏」的当场读数，⛔ 不靠事后发现）。
+  AC257_TREE_DIRTY_AFTER_INIT="$(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  echo "  [⑨d0] working tree after quay-init: ${AC257_TREE_DIRTY_AFTER_INIT} entry(ies) (expect 0 — 否则该项目的 fan-in ff 会被 cleanTreeCheck 拒)"
   AC257_QUAY_INIT_RERUN="$([ "$rc_rerun" = "0" ] && echo true || echo false)"
   echo "  [⑨d] quay-init --force rc=$rc_rerun (rerun=$AC257_QUAY_INIT_RERUN)"
 
@@ -3289,10 +3300,26 @@ step_ac257_project_scope() {
     return 1
   fi
   AC257_TASK_ID="$task_id"
-  (cd "$root" && node "$qrl" task create "$task_id" --title "AC-257 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1 || {
-    echo "  AC257-NOT-EVALUATED: task create 失败 ⇒ 记录 NOT written (fail-closed)" >&2
-    return 1
-  }
+  # 建任务（幂等）。⛔ 反复跑本步骤不该因为「任务已存在」而失败——但也不能因此把「一个恰好同名的
+  # 已 done 任务」当成「这次驱动的结果」：下面的 poll + probe_ac257_measures 读的是【该任务此刻的
+  # 真实状态与它历史上那条实现提交】，而 create 失败时这里要【先确认该 id 真的存在】才复用（存在性
+  # 读不出 ⇒ 仍然 fail-closed）。两条路径打印【可区分】的痕迹（新建 vs 复用），不静默。
+  local create_rc=0 task_exists=0
+  set +e
+  (cd "$root" && node "$qrl" task create "$task_id" --title "AC-257 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1
+  create_rc=$?
+  set -e
+  if [ "$create_rc" = "0" ]; then
+    echo "  [⑨h2] task created: $task_id"
+  else
+    if [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
+      task_exists=1
+      echo "  [⑨h2] REUSING existing task $task_id (create rc=$create_rc ⇒ 已存在；它的状态与实现提交由下面的直接量读，⛔ 不因复用而放宽)"
+    else
+      echo "  AC257-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  fi
   local d_rc_p=0 d_rc_w=0
   set +e
   (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
