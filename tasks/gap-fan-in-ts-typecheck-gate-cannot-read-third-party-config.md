@@ -2,7 +2,7 @@
 id: gap-fan-in-ts-typecheck-gate-cannot-read-third-party-config
 title: fan-in ts-typecheck 闸在第三方 TS 项目上结构性必然失败（canonical 回落写死 quay 的 packages/
   布局 + loader 导入基准错用被取证项目）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
