@@ -97,6 +97,8 @@ CLI    node packages/quay/bin/quay.js server restart --only driver:worker
 - `packages/quay/test/cli.test.mjs`（AC-256 的**第二处**同类陈旧点，与上一行是【同一次硬规则 5b 扫描的两个实例】：usage-fallback drift gate 的 `handlerSubs` 手工清单里 `server <verb>` 那一角没跟上 `restart` 动词 ⇒ 门把新动词报成 `extra`、整个文件红；修法同型 —— 从 `SERVER_VERBS` 派生，⛔ 不手抄第二份）
 - `plugin/test/server-restart-inflight-verify.test.mjs` (new)（生产者的类型 / fail-closed / 负控制 / /proc 直接量 / 逐字跑 criterion）
 - `packages/quay/test/server-restart.test.mjs` (new)（服务级 restart 的语义 + `start` no-op 对照 + anchor 安全闸的活体负控制）
+- `plugin/scripts/core-src-import.ts`（本趟修 develop 侧恒红①：其文档注释里引用的 import 示例被 `precommit-guard.test.mjs` 的 `guardClosure()` 正则当成真依赖 ⇒ 闭包走查 throws。⛔ 零代码改动，仅把示例路径改成不呈 import 形状）
+- `plugin/test/test-isolation-check.test.mjs`（本趟修 develop 侧恒红②：AC4 期望清单手工抄的 6 个 `process-exit-1` 含已由 `a6ce55a8e` 从棘轮摘除的 `create-validation.test.mjs` ⇒ 恒红。摘掉该条 + 计数 6→5）
 - `tasks/gap-ac256-worker-restart-preserves-inflight-children.md`（自身文件：勾 AC + 贴实跑证据）
 
 ## Acceptance Criteria
