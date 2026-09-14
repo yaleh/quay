@@ -2,7 +2,7 @@
 id: gap-ac179-criterion-cold-miss-30s-ttl-always-expired
 title: AC-179 判据恒冷：/dashboard 的 30s TTL 与每小时复验节奏结构性错开 ⇒ 每次复验都是冷未命中（实测冷 19.17s /
   热 1.61s），越过 criterion 的 --max-time 10
-status: ready
+status: done
 labels:
   - gap
   - defect

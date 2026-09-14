@@ -31,6 +31,26 @@ export interface MalformedTask {
 export interface TaskListResult {
   tasks: Task[];
   malformed: MalformedTask[];
+  // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: OPTIONAL paging
+  // metadata. A Provider that can answer a filtered+paginated `task_list` returns
+  // `paged: true` plus the window's `total`/`page`/`pageSize`/`totalPages`, which lets
+  // Core report the filtered count WITHOUT ever holding the whole store (and, before
+  // this, without a 14 MB body round-trip that queue-blocked Core's MCP server).
+  // A Provider that cannot (any provider that never implemented `page`/`pageSize` —
+  // the ABI does not require them) leaves `paged` undefined/false; Core then falls
+  // back to fetching the unpaged list and doing the filtering+paging itself, which is
+  // the pre-existing behaviour. `undefined` here therefore means "the Provider did not
+  // say", NEVER "the Provider paged with zero results" — the two must stay
+  // distinguishable (硬规则 3b).
+  paged?: boolean;
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  // Whether the Provider's own walk actually examined every task file — it reports
+  // false when it could answer from the directory listing alone. Optional for the
+  // same "the Provider may not say" reason as above.
+  scannedFiles?: boolean;
 }
 
 export interface ProviderClient {
@@ -100,8 +120,21 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     // with a `malformed` array), so it never reaches this throw in the first
     // place.
     if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_list failed");
-    const sc = (r.structuredContent ?? {}) as { tasks?: Task[]; malformed?: MalformedTask[] };
-    return { tasks: sc.tasks ?? [], malformed: sc.malformed ?? [] };
+    const sc = (r.structuredContent ?? {}) as Partial<TaskListResult>;
+    // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: forward the
+    // Provider's paging metadata verbatim when it sent any (see TaskListResult). Each
+    // field is passed through ONLY if present, so a Provider that never declares paging
+    // leaves them `undefined` — "did not say" stays distinguishable from a paged answer.
+    return {
+      tasks: sc.tasks ?? [],
+      malformed: sc.malformed ?? [],
+      ...(sc.paged !== undefined ? { paged: sc.paged } : {}),
+      ...(typeof sc.total === "number" ? { total: sc.total } : {}),
+      ...(typeof sc.page === "number" ? { page: sc.page } : {}),
+      ...(typeof sc.pageSize === "number" ? { pageSize: sc.pageSize } : {}),
+      ...(typeof sc.totalPages === "number" ? { totalPages: sc.totalPages } : {}),
+      ...(sc.scannedFiles !== undefined ? { scannedFiles: sc.scannedFiles } : {}),
+    };
   }
 
   async function taskGet(id: string): Promise<Task> {
