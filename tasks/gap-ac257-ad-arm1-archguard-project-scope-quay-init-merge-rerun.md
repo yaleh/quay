@@ -70,6 +70,7 @@ goal_ac: AC-257
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/scripts/quay-init.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
 - packages/quay/scripts/register-plugin.mjs
 - packages/quay/package.json
 - packages/quay-native/package.json
@@ -236,6 +237,42 @@ EXIT_AFTER=0
 ```
 （criterion 由 goal 文件的 `criterion:` 折叠标量经 `yaml.safe_load` 取出后原样执行 —— 与 `ac_record_finalize` 同一读法。
 落账时 `ac_record_finalize` 已自动复跑并落账 `criterion_rerun_rc=0`。）
+
+### 收尾：首次 fan-in 套件红的真因（AC10 第 10 条 —— 测试里的陈旧字面量）
+
+首次 fan-in 的套件红 `# fail 1`（**4862 tests / 4861 pass，全库只有这一条**）：
+`⑥ shipped-set closure — the ENUMERATION is proven complete, not asserted (AC1..AC4)`
+（`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs:156`）。它断言 `develop-deliver-tgz.sh` 里
+`if ! ship_verify_closure` 恰好出现 **5** 次，而本任务新增的 `--verify-ac257` 模式**正确地**作为第 6 个
+走同一个枚举 ⇒ `6 !== 5`（同文件 :174 的 `$(verify_node_export_for "${hk}")` 也是同一个字面量 5）。
+
+⚠️ 机械 `delta-relatedness` 提示把该测试判为 **UNRELATED**（"its direct imports do not intersect this
+task's delta"）—— **该判定对本例是错的**：那个测试用 `readFileSync(SCRIPT)` 读 **shell 脚本文本**、
+不是 `import`，所以一跳 import 检查结构上看不见这条依赖。worktree 内 `node --test <file>` 当场复现
+（`6 !== 5`）⇒ 真因，不是环境噪声（同族：`delta-relatedness-hint-misses-two-hop-data-dependency`）。
+
+**修法**：把字面量 `5` 换成**从模式定义推导**的计数，并按模式切片逐段断言「恰好 1 个 scp 站」。
+它现在**比原来更强** —— 既抓「某模式 0 个站」（直接 scp，即 2026-09-11 那个缺陷的形态），
+也抓「某模式 2 个站」；**总计数会被「一多一少」互抵，逐段断言不会**。第二处同形字面量一并改成同一推导。
+
+**红控制（断言确实能取假，⛔ 不是空转）** —— 对真实脚本做变异后跑同一谓词：
+```
+REAL     -> [["verify_coldstart_mode",1],...,["verify_complete_change_mode",1]]   6 模式 × 1 站
+DROP-1   -> [["verify_coldstart_mode",0],...]  bad=[["verify_coldstart_mode",0]]   ⇒ 判据红 ✓
+DUP-1    -> [["verify_coldstart_mode",2],...]  bad=[["verify_coldstart_mode",2]]   ⇒ 判据红 ✓
+NO-MODES -> []  ⇒ 由新增的 assert.ok(modeDefs.length >= 5) 兜住（否则循环为空、恒绿）✓
+```
+修复后 worktree 内 `node --test plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` → `pass 16 / fail 0`。
+
+**Touches 扩展（必须登记）**：本条的修复落在 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`，
+它**不在**本任务原 `## Touches` 内，而 `anti-drift-touches-check.ts` 对「写在自己的声明之外」是
+**HARD FAIL**（`out-of-declared`）⇒ 已把该文件加进 `## Touches`。⛔ 不是放宽声明：本任务改了
+`develop-deliver-tgz.sh` 的枚举面，钉住该面的守卫测试必须随之更新，两者是同一个改动。
+
+**为何不另立 `gap-*`**：这一条不在 AC-257 的**产出路径**上（它不阻塞「记录落盘」），
+但它**阻塞本任务落地**（套件红 ⇒ fan-in 红 ⇒ exited-not-landed）。按 Plan 的处置边界
+（结构上阻断 ⇒ 就地修），它属「阻断本任务落地」一侧，且与 `develop-deliver-tgz.sh` 的改动是同一改动面
+⇒ 就地修 + 登记 Touches。（下方 AC10 表内 1–9 条的分母不变：那 9 条是**产出路径**缺陷。）
 
 ### AC10 承接纪律
 见下方「承接：本轮发现的机制缺陷」——9 条，全部在**本任务自己的产出路径**上（两个文件都在本任务 `## Touches` 内，且 Plan §7/§8 明令改它们），**9 条全部结构上阻断本 AC 的产出**（每一条都把「记录落盘」这条路堵死，而失败形态都是「记录没写出来」，与「机制坏了」同形）⇒ 全部就地修。唯一另立 `gap-*` 的是第 8 条的**产品侧半边**（`quay-native task create`，不属本任务 Touches 的产品面）。
