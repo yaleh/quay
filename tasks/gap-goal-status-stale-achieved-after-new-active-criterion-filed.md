@@ -2,7 +2,7 @@
 id: gap-goal-status-stale-achieved-after-new-active-criterion-filed
 title: 给已 achieved 的 GOAL 挂新 active criterion 后,GOAL 自己的 status
   字段不会跟着标记过期——真正完成与名义完成同形
-status: ready
+status: done
 labels:
   - gap
 parent: null

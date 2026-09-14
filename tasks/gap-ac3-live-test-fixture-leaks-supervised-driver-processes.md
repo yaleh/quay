@@ -1,7 +1,7 @@
 ---
 id: gap-ac3-live-test-fixture-leaks-supervised-driver-processes
 title: 共享的"AC3 live"测试夹具泄漏真实被监督的 driver 子进程——跨多个任务的 worktree 反复出现,数量持续增长
-status: ready
+status: done
 labels:
   - gap
 parent: null
