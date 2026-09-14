@@ -2,7 +2,7 @@
 id: gap-ac255-driver-internalization-pid-le2-six-kinds-fresh
 title: GOAL-017/AC-255：driver 内收 —— `.quay/*-driver*.pid` ≤2 且六个 kind 的 round
   心跳全新鲜（SPEC 阶段 C1+C2 / §6.10）
-status: ready
+status: done
 labels:
   - gap
 parent: null
