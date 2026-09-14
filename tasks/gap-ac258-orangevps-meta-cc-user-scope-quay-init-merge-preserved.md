@@ -2,7 +2,7 @@
 id: gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved
 title: orangevps/meta-cc 真机重验：user scope 装 0.7.0 + quay-init 重跑（删键重注册，非探测路径）+ 真实
   todo→done（GOAL-018/AC-258）
-status: ready
+status: needs-human
 needs_human_cause: unclassified
 labels:
   - gap
@@ -451,3 +451,13 @@ orangevps 没有该代理 ⇒ 即使凭据恢复，meta-cc 的 worker 仍需那�
 - 失败步/判词：AC 未全勾（checked 10/13，剩余未勾 3）——续做只需验证并勾选 AC
 - run_id：wk-prod-1789367589
 - session_id：8c3c039f-8948-453f-a338-8ed17c8bca83
+
+## Needs-Human
+
+**执行 2026-09-14T16:03:45.140Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 10/13，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-1789367589
+- session_id：87bfc4ba-4d28-4dd7-99c7-03ba32ef44e8
