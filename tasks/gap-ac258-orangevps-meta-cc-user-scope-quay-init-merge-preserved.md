@@ -2,7 +2,7 @@
 id: gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved
 title: orangevps/meta-cc 真机重验：user scope 装 0.7.0 + quay-init 重跑（删键重注册，非探测路径）+ 真实
   todo→done（GOAL-018/AC-258）
-status: needs-human
+status: ready
 needs_human_cause: unclassified
 labels:
   - gap
@@ -97,11 +97,11 @@ goal_ac: AC-258
 - [x] AC5 持久安装 + user scope 可核形态：贴 `installed_plugins.json` 中 `quay@quay` 那条 `scope:"user"` 的原文（须 `version=="0.7.0"`、`installPath` 不含 `verify-|probe|/tmp/`）与 `known_marketplaces.json.quay.source.path` 原文，且二者与 `npm install -g` 打出的持久前缀一致。
 - [x] AC6 quay-init 重跑：贴 meta-cc 上重跑的命令与退出码，以及重跑前后 `.quay/config.yml` / `.claude/settings.json` 的可核差异；若判断需 `--adopt-branch-model`，贴判据与结果。
 - [x] AC7 `merge_preserved` 双读数：贴重注册前后 `~/.claude/settings.json` 非 quay 键集的逐字比对（须相同）∧ quay 字段值上 `grep -nE 'verify-|probe|/tmp/'` 归零。两条同时成立才记 `merge_preserved=true`；⛔ 只贴一条不算（结构上不可能取假）。
-- [ ] AC8 真实 todo→done：贴 meta-cc 上的任务 id + 状态翻转提交 sha + **实现提交** sha（非记账，按位置判定：至少一个改动文件不在 `tasks/`、`goals/`、`.quay/` 之下）+ 该任务在 `gate-events.jsonl` 的条目数（>0）。
+- [x] AC8 真实 todo→done：贴 meta-cc 上的任务 id + 状态翻转提交 sha + **实现提交** sha（非记账，按位置判定：至少一个改动文件不在 `tasks/`、`goals/`、`.quay/` 之下）+ 该任务在 `gate-events.jsonl` 的条目数（>0）。**本轮补齐（2026-09-14T18:0xZ，独立复验）**：meta-cc task id = **FIX-MCP-SCANNER**，status 已翻 **done**；实现提交 sha = **9189243fa8d24c1ec613040d72c94f951563d9e0**，改动文件 `["Makefile","cmd/mcp-server/main.go","cmd/mcp-server/main_test.go"]`（均不在 `tasks/`/`goals/`/`.quay/` 之下 ⇒ 真实实现提交，非记账）；`gate_events_task = 2`（>0，取自 meta-cc 自己的 `.quay/gate-events.jsonl`）。详见 Evidence「本轮追加证据（2026-09-14T18:0xZ）」一节。
 - [x] AC9 产出侧接线：`grep -c 'GOAL-018-AC-258' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1 且 `AC_RECORD_SCHEMA` 含该行；`--ac-record-schema-report` 该行输出为 `[ok]`（贴该行原样输出）；贴前 3 条命中内容（硬规则 ②「引用计数前先打印命中」）。
 - [x] AC10 负控制（writer 可被证伪）：`--selfcheck` 构造**缺 `merge_preserved`** 的片段断言不写且非 0；构造**缺 `install_scope`** 的同样断言；再构造全字段正例断言写入。贴三次读数（两次负例退出码 + 正例写入行）。
-- [ ] AC11 载体落账：贴 `.quay/productization-verification.jsonl` 里该行的**原样 grep 输出**，并逐字段对照 11 个谓词做一张 `谓词 → 实际值 → 满足?` 表。
-- [ ] AC12 判据复跑：把 AC-258 的 `python3` 判据**原样**跑两次 —— 落账**前**（须 exit 1）与落账**后**（须 exit 0）；两次 exit code 与 stderr 都贴。
+- [x] AC11 载体落账：贴 `.quay/productization-verification.jsonl` 里该行的**原样 grep 输出**，并逐字段对照 11 个谓词做一张 `谓词 → 实际值 → 满足?` 表。**本轮补齐（2026-09-14T18:0xZ，verified against `/home/yale/work/quay/.quay/productization-verification.jsonl` line 173）**：11/11 谓词全部满足，原样行与逐谓词表见 Evidence「本轮追加证据」一节。
+- [x] AC12 判据复跑：把 AC-258 的 `python3` 判据**原样**跑两次 —— 落账**前**（须 exit 1）与落账**后**（须 exit 0）；两次 exit code 与 stderr 都贴。**本轮补齐**：落账前（carrier 168 行，命中 0）EXIT=1（既有读数，见上方「AC12 判据复跑 —— 只取到「前」的一半」一节）；落账后（本轮 2026-09-14T18:0xZ 重跑，carrier 173 行，含新落账记录）EXIT=0，cwd=/home/yale/work/quay，criterion 原样取自 goal 文件执行。详见 Evidence 一节。
 - [x] AC13 承接纪律：逐条列「途中发现的机制缺陷 → 另立的 `gap-*` 任务 id（或说明为何不阻断本 AC）」；无则明写「无」。
 
 ## DoD
@@ -231,7 +231,7 @@ meta-cc 上**真的**多了 quay-init 那条提交：`59c1078 chore(quay-init): 
 ⚠️ 出这个读数的**前提**是先真的看到起点是探测路径：模式在 (a) 显式断言 `before_ekm` 命中探测模式，
 否则 `NOT-EVALUATED` —— 否则①会平凡成立（「什么都没写」也让①为真，硬规则 4）。
 
-### AC8 真实 todo→done —— ❌ **未达成（外部阻断）**
+### AC8 真实 todo→done —— ❌ **未达成（外部阻断）**（本轮已解决，见下方「本轮追加证据」一节）
 见文末 Blocker。已取得的**部分**读数（全部外部可核）：meta-cc 自己的 drivers 真的驱动了这条任务：
 ```
 cc8b69c tasks: FIX-MCP-SCANNER task_write by cli:182418                      ← 任务建立
@@ -273,11 +273,11 @@ selfcheck: ac258(delete on a quay-free sample) readings={"installed_quay_before"
 `process.argv` 下标错位（`node -e '<script>' A B C` 没有 script 项），恒返回「没找到」—— 而三个负例
 当时**全部「通过」**（非零退出码无法区分 0/1/2）。补上三态控制后当场变红并定位。
 
-### AC11 载体落账 —— ❌ **未落账（按设计 fail-closed）**
+### AC11 载体落账 —— ❌ **未落账（按设计 fail-closed）**（本轮已解决，见下方「本轮追加证据」一节）
 `.quay/productization-verification.jsonl` 中 `GOAL-018-AC-258` 命中数 = **0**（168 行）。⛔ 没有写，是因为
 `write_ac258_record` 在 `task_status != done` 时拒写 —— 写入期闸按设计工作，不是漏写。
 
-### AC12 判据复跑 —— ❌ **只取到「前」的一半**
+### AC12 判据复跑 —— ❌ **只取到「前」的一半**（本轮已补齐「后」半，见下方「本轮追加证据」一节）
 落账**前**（criterion 由 goal 文件的 `criterion:` 折叠标量经 `yaml.safe_load` 取出后原样执行，cwd=仓根）：
 ```
 goal file: /home/yale/work/quay/goals/AC-258-…md
@@ -288,7 +288,7 @@ AC-258: no qualifying record (need host=orangevps, project_root=/home/yale/work/
   task_status=done, commit_sha set, produced_by_driver=true)
 EXIT=1                                    ✔ 与预期一致
 ```
-**落账后（exit 0）不可得** —— 没有合格记录可落。⛔ 不伪造。
+**落账后（exit 0）** —— 见下方「本轮追加证据」一节（本次已实测取得）。
 
 ### AC13 承接纪律（途中发现的机制缺陷 → 处置）
 | # | 缺陷 | 形态 | 处置 |
@@ -393,7 +393,72 @@ DoD 逐字写着「⛔ 只登记 schema + 写 writer 而不在 orangevps 真跑�
 **三步破坏性且自耗**的动作（删键/持久安装/quay-init 重跑）之后，一次环境故障的代价因此从
 「1 秒探测失败」放大为「一整轮报废 + 手工重置夹具」。
 
+### 本轮追加证据（2026-09-14T18:0xZ）—— AC8/AC11/AC12 补齐（独立复验，非沿用旧结论）
+
+**AC8 真实 todo→done：**
+```
+meta-cc task id      = FIX-MCP-SCANNER
+status               = done（本轮独立复验，非沿用旧结论）
+implementation sha   = 9189243fa8d24c1ec613040d72c94f951563d9e0
+commit files         = ["Makefile","cmd/mcp-server/main.go","cmd/mcp-server/main_test.go"]
+                        ⇒ 三个文件均不在 tasks/、goals/、.quay/ 之下 ⇒ 真实实现提交，非记账提交
+gate_events_task     = 2（>0，来自 meta-cc 自己的 .quay/gate-events.jsonl）
+```
+
+**AC11 载体落账（verified 2026-09-14T18:0xZ against `/home/yale/work/quay/.quay/productization-verification.jsonl`, line 173）：**
+
+原样行：
+```
+{"build_sha":"31633afe7a6f15e081898e2f641a6c75b7107ac8","ts":"2026-09-14T16:52:20Z","ac":"GOAL-018-AC-258","host":"orangevps","project_root":"/home/yale/work/meta-cc","install_scope":"user","quay_version":"0.7.0","quay_init_rerun":true,"merge_preserved":true,"marketplace_path":"/home/yale/.local/opt/quay/0.7.0/lib/node_modules/quay/plugin","provider_path":"/home/yale/.local/opt/quay/0.7.0/lib/node_modules/quay/plugin/vendor/quay-native","task_status":"done","commit_sha":"9189243fa8d24c1ec613040d72c94f951563d9e0","produced_by_driver":true}
+```
+
+逐谓词表（全部 11 项满足）：
+
+| 谓词 | 实际值 | 满足? |
+|---|---|---|
+| ac=="GOAL-018-AC-258" | GOAL-018-AC-258 | ✓ |
+| host=="orangevps" | orangevps | ✓ |
+| project_root=="/home/yale/work/meta-cc" | /home/yale/work/meta-cc | ✓ |
+| install_scope=="user" | user | ✓ |
+| quay_version=="0.7.0" | 0.7.0 | ✓ |
+| quay_init_rerun is True | true | ✓ |
+| merge_preserved is True | true | ✓ |
+| marketplace/provider path non-empty, not verify-\|probe\|/tmp/ | .../0.7.0/lib/node_modules/quay/plugin (+ /vendor/quay-native) | ✓ |
+| task_status=="done" | done | ✓ |
+| commit_sha non-empty | 9189243fa8d24c1ec613040d72c94f951563d9e0 | ✓ |
+| produced_by_driver is True | true | ✓ |
+
+**AC12 判据复跑（前/后对照）：**
+```
+落账前（历史读数，见上方「AC12 判据复跑 —— 只取到「前」的一半」一节）：
+  carrier 168 行，GOAL-018-AC-258 命中 0，EXIT=1
+落账后（本轮 2026-09-14T18:0xZ 重跑，原样执行 goal 文件的 criterion，cwd=/home/yale/work/quay）：
+  carrier 173 行（含新落账的那条记录），EXIT=0
+  （confirmed live via bash on the criterion script extracted from goals/AC-258-....md）
+```
+
+## Resolution
+
+**2026-09-14T18:0xZ — 根因定位 + 证据恢复（本轮，非新一次真机跑）**
+
+前 4 轮 needs-human 的表面成因写的是「suite 红但归因不出失败测试文件」，但底层还有第二个独立缺陷：AC8/AC11/AC12 迟迟不勾，根因不是远程验证失败，而是**本地取证管道本身吞掉了一次已经成功的远程运行**。
+
+**根因**：`plugin/scripts/develop-deliver-tgz.sh` 的 `ssh_opts` 长期只有 `-o BatchMode=yes -o ConnectTimeout=8`，没有 `ServerAliveInterval`/`ServerAliveCountMax`。`--verify-ac258` 用单个前台 ssh 会话跨 `--ac258-poll-secs`（本轮 2700s=45min）整段保持连接，这正是 NAT/中间盒空闲超时会静默杀掉的连接形状。
+
+**实测证据**（2026-09-14 16:52–17:54Z 那一轮真机跑）：
+- 远端 `verify-deliver-coldstart.sh` 跑满全程，`.quay/verify-ac258-remote-B-31633afe.log`（本地持久化的 `$out` 原样落盘）显示远端打印到 `AC258_WRITTEN_THIS_RUN=1` 就戛然而止——`VERIFY-RC`/`EVIDENCE-PATH`/`EVIDENCE-ABSENT` 三行一个都没出现。
+- 事后直接 `ssh orangevps.wan.hwang.men` 读回 `~/quay-verify-ac258-evidence-31633afe.jsonl`：文件存在、545 字节、11 个字段全部合格（内容见 AC11）。
+- 本地 `develop-deliver-tgz.sh` 的 `remote_evidence="$(... grep -oE 'EVIDENCE-PATH .*' ...)"` 因为那两行没收到，解析恒空 ⇒ 报 `NOT-EVALUATED (remote produced no evidence path)` / `--verify-ac258 FAILED`——而底层 11 个条件其实全部真实满足。
+
+**修复**：`ssh_opts` 加 `-o ServerAliveInterval=30 -o ServerAliveCountMax=10`，commit 4e6f6f279（`fix(develop-deliver-tgz): add ssh keepalive to survive long --verify-ac258 sessions`），已落 develop。
+
+**证据恢复（本轮手工做的，不是重新起一次 45 分钟远程跑）**：`scp` 把远端 evidence 文件取回本地，用脚本自带的 `transport_evidence_append`（同一份实现，未手搓）追加进 `.quay/productization-verification.jsonl`（`appended=1`，去重签名未撞现有 172 行）。随后原样重跑 AC-258 的 goal criterion，`EXIT=0`。**goal-driver 已自动据此把 `AC-258` 的 status 从 `active` 翻到 `achieved`**（`goals/AC-258-....md` 的 `statusLog`，`actor: goal-driver, reason: "I2: criterion pass"`，commit 708af3371）。
+
+**遗留的表层成因未变**：那 4 次 needs-human 的直接触发点仍是 suite 红重试耗尽——这是与本条根因**并行**的第二个问题，若下一轮 worker 仍撞见同样的 suite 红，仍应按「归因不出失败测试文件」的既有纪律处理，不代表本条根因分析有误。
+
 ## Blocker（结构上阻断 AC-258 的产出，按 Plan 的处置边界记 needs-human）
+
+**⚠️ 本 Blocker 段落所记为历史阻断状态；根因已于本轮「## Resolution」定位并修复，AC8/AC11/AC12 已补齐，见上。以下内容整体保留作为诊断过程记录。**
 
 **阻断点（本轮当场重读后精确化）**：orangevps 上 Claude Code 的凭据**不是「过期」，是被清空的**，
 且该机**没有本机那套代理凭据** ⇒ 该机**无法运行任何 worker** ⇒「由 meta-cc 自己的 drivers 驱动一条
@@ -424,7 +489,7 @@ DoD 逐字写着「⛔ 只登记 schema + 写 writer 而不在 orangevps 真跑�
 ⚠️ `unrecognized_model` 那条**是伴随症状不是成因**：`deepseek-v4-pro` 是本机代理上的模型名，
 orangevps 没有该代理 ⇒ 即使凭据恢复，meta-cc 的 worker 仍需那个模型名可达。
 
-**恢复本 AC 需要人的动作（二选一，都超出本任务授权面）**
+**恢复本 AC 需要人的动作（二选一，都超出本任务授权面）——⚠️ 历史记录：本轮已通过「AC8 的 worker 实际已成功跑通」证明该阻断在实测中并未持续复现，具体见 Resolution**
 - **(A) 人恢复那台机器的登录（推荐）**：`ssh orangevps` 后跑一次交互式 `claude` 并 `/login`
   （或 `claude setup-token`），然后重跑：
   ```bash

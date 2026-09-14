@@ -1,7 +1,7 @@
 ---
 id: AC-258
 title: orangevps/meta-cc：user scope 装 0.7.0 + quay-init 重跑（删键重注册，非探测路径）+ 真实 todo→done
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-018
 criterion: >-
@@ -54,4 +54,10 @@ expect: exit 0 = 载体中存在一条 ac=GOAL-018-AC-258 的记录：host=orang
 origin: 人 2026-09-14 裁定：orangevps/meta-cc 扛 user scope（该机已有 baime/manda/meta-cc
   等其它 user-scope 插件注册，是验证"替换 quay 一条、不动其它"语义的真实场景）。
 activatedAt: 2026-09-14T04:03:21.195Z
+statusLog:
+  - at: 2026-09-14T18:07:19.584Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
