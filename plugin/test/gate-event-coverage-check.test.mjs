@@ -10,7 +10,7 @@
 //      「枚举所有会把任务翻 done 的路径」的机械版；按提交信息扫会**一条都看不见**（实测 09-04~09-14
 //      有 3 条这种落地）。
 // 三态：载体读不到 ⇒ exit 3 NOT-EVALUATED，与控制流上的 PASS（exit 0）可区分。
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -27,9 +27,23 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CHECKER = path.join(HERE, "..", "scripts", "gate-event-coverage-check.ts");
 
+// 每个 fixture 仓登记在册，after() 一次性清掉 —— mkdtemp 不配对清理会被 tmp-leak-pairing-check
+// 判红、并被 test-isolation-check 的 AC5 单向棘轮判为「新引入的违规」（实测）。
+const made = [];
+after(() => {
+  for (const d of made) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* best-effort：清理失败不该把测试判成红的 */
+    }
+  }
+});
+
 /** 一个真 git 仓 + 真 carrier 的最小 fixture（⛔ 不 mock git：本检查的读数全部来自 git 与载体）。 */
 function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gec-"));
+  made.push(root);
   const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   git.__root = root;
   git("init", "-q", "-b", "develop");
