@@ -56,6 +56,8 @@ import {
   aliveness,
   statePaths,
   kernelSelfPath,
+  resolveKernelSibling,
+  kernelSiblingArgv,
   watchedSourceFiles,
   sourceFilesMaxMtimeMs,
   sourceChangedSince,
@@ -1097,4 +1099,64 @@ test("AC3 caller — an unresolvable MCP configuration ⇒ ZERO mcp flags (dispa
   // 负控制（对照必须能把结论翻过来）：同一个调用给了可解析的根 ⇒ flag 立刻出现。
   const fx = mcpFixture(t);
   assert.ok(launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots }).includes("--strict-mcp-config"));
+});
+
+// ── resolveKernelSibling: raw .ts vs the shipped dist bundle ─────────────────────────────────────────
+// gap-dist-plugin-missing-node-modules-task-schema-yaml (kernel half — mirror of Core
+// `plugin-root.ts::isPluginSourceCheckout`). `runSupervisor` resolves EVERY kind's driver through
+// `resolveKernelSibling(spec.driver)`, and the driver scripts' import closure needs `yaml` /
+// `@modelcontextprotocol/sdk/*` / `zod`, none of which an installed plugin tree carries — so a raw
+// pick there means all six kinds die at spawn with ERR_MODULE_NOT_FOUND, exactly as measured on the
+// real plugin cache. The dist bundle is self-contained and runs without --experimental-strip-types.
+
+/** `<dir>/plugin/scripts/<name>.ts` (+ `dist/<name>.js`) and — when `withCoreSrc` — the
+ *  `<dir>/packages/quay/src` marker that makes `<dir>/plugin` a SOURCE checkout. */
+function kernelLayoutFixture(withCoreSrc) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-kernel-layout-"));
+  const pluginRoot = path.join(dir, "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "scripts", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "promotion-driver.ts"), 'import { parse } from "yaml";\n');
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "dist", "promotion-driver.js"), "// bundled\n");
+  if (withCoreSrc) fs.mkdirSync(path.join(dir, "packages", "quay", "src"), { recursive: true });
+  return { dir, pluginRoot };
+}
+
+function withKernelRoot(root, fn) {
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+}
+
+test("resolveKernelSibling() — shipped install (raw .ts + dist coexist): the BUNDLE wins, stripTypes false", () => {
+  const fx = kernelLayoutFixture(false);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, false, "no --experimental-strip-types in a shipped install");
+    assert.ok(r.path.endsWith(path.join("scripts", "dist", "promotion-driver.js")), `bundle path: ${r.path}`);
+    // The kernel spawns via this argv, so assert the ARGV too (the flag is what would be wrong).
+    process.env.QUAY_PLUGIN_ROOT = fx.pluginRoot;
+    const argv = kernelSiblingArgv("promotion-driver.ts", ["--root", "/tmp/x"]);
+    delete process.env.QUAY_PLUGIN_ROOT;
+    assert.deepEqual(argv.slice(0, 3), ["node", "--no-warnings", r.path], `argv: ${JSON.stringify(argv)}`);
+  } finally {
+    delete process.env.QUAY_PLUGIN_ROOT;
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveKernelSibling() NEGATIVE CONTROL — the SAME fixture + the source-checkout marker ⇒ raw .ts wins", () => {
+  const fx = kernelLayoutFixture(true);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, true, "source checkout ⇒ raw .ts (edit-visible, source-respawn still works)");
+    assert.ok(r.path.endsWith(path.join("scripts", "promotion-driver.ts")), `raw path: ${r.path}`);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
 });

@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginScript, resolvePluginScriptExec, mainCheckoutRoot } from "../src/plugin-root.ts";
+import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginScript, resolvePluginScriptExec, isPluginSourceCheckout, mainCheckoutRoot } from "../src/plugin-root.ts";
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
@@ -136,6 +136,96 @@ test("resolvePluginScriptExec() resolves a .sh with stripTypes:false and NO dist
   assert.ok(r, "must resolve the raw .sh");
   assert.equal(r.stripTypes, false, ".sh runs via bash, never --experimental-strip-types");
   assert.ok(r.path.endsWith(path.join("scripts", "resource-gate.sh")), `sh path: ${r.path}`);
+});
+
+// ── shipped layout: raw .ts + dist/*.js COEXIST, and raw is NOT runnable there ───────────────────────
+// gap-dist-plugin-missing-node-modules-task-schema-yaml. The published plugin ships BOTH forms (the
+// marketplace `directory` source copies the plugin tree as-is, raw .ts included; a github/dist-plugin
+// install carries the bundles), and an installed copy has NO node_modules — so a raw plugin `.ts`
+// dies on its first bare npm import: measured on the real `~/.claude/plugins/cache/quay/quay/0.6.2`
+// install, `quay driver start` reported `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported
+// from <cache>/scripts/task-schema.ts` for EVERY kind (the raw kernel's 21-file closure needs `yaml`,
+// `@modelcontextprotocol/sdk/*`, `zod`), while `<cache>/scripts/dist/driver-runtime.js` ran the same
+// verb fine. `stripTypes` is the discriminator the callers branch on, so it is what these assert.
+
+/** A synthetic plugin root: `<dir>/plugin/scripts/<name>.ts` + `<dir>/plugin/scripts/dist/<name>.js`.
+ *  `withCoreSrc` additionally plants `<dir>/packages/quay/src` — the source-checkout marker. */
+function makePluginRootFixture(withCoreSrc) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-ship-"));
+  const pluginRoot = path.join(dir, "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "scripts", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "driver-runtime.ts"), 'import { parse } from "yaml";\n');
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "dist", "driver-runtime.js"), "// bundled\n");
+  if (withCoreSrc) fs.mkdirSync(path.join(dir, "packages", "quay", "src"), { recursive: true });
+  return { dir, pluginRoot };
+}
+
+function withPluginRoot(root, fn) {
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+}
+
+test("isPluginSourceCheckout() — true only when Core source sits beside the plugin root", () => {
+  const shipped = makePluginRootFixture(false);
+  const source = makePluginRootFixture(true);
+  try {
+    assert.equal(isPluginSourceCheckout(shipped.pluginRoot), false, "no sibling packages/quay/src ⇒ shipped install");
+    assert.equal(isPluginSourceCheckout(source.pluginRoot), true, "<root>/plugin beside <root>/packages/quay/src ⇒ source checkout");
+    assert.equal(isPluginSourceCheckout(null), false, "unresolvable root ⇒ false");
+  } finally {
+    fs.rmSync(shipped.dir, { recursive: true, force: true });
+    fs.rmSync(source.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginScriptExec() prefers the dist bundle when raw .ts and dist COEXIST outside the source checkout", () => {
+  const fx = makePluginRootFixture(false);
+  try {
+    const r = withPluginRoot(fx.pluginRoot, () => resolvePluginScriptExec("scripts/driver-runtime.ts"));
+    assert.ok(r, "must still resolve");
+    assert.equal(r.stripTypes, false, "shipped install ⇒ the raw .ts cannot load its npm imports ⇒ bundle (no strip-types)");
+    assert.ok(r.path.endsWith(path.join("scripts", "dist", "driver-runtime.js")), `bundle path: ${r.path}`);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginScriptExec() NEGATIVE CONTROL — the SAME fixture + the source-checkout marker ⇒ raw wins again", () => {
+  // Only ONE thing differs from the test above (the `<root>/packages/quay/src` dir), so a pass here
+  // is evidence the marker — not some other difference — flips the choice. It also pins the dev
+  // behaviour the source checkout depends on (edit `plugin/scripts/*.ts` ⇒ the next spawn sees it,
+  // and `driver-runtime.ts::sourceFilesMaxMtimeMs`'s source respawn has a source to watch).
+  const fx = makePluginRootFixture(true);
+  try {
+    const r = withPluginRoot(fx.pluginRoot, () => resolvePluginScriptExec("scripts/driver-runtime.ts"));
+    assert.ok(r, "must still resolve");
+    assert.equal(r.stripTypes, true, "source checkout ⇒ raw .ts with --experimental-strip-types");
+    assert.ok(r.path.endsWith(path.join("scripts", "driver-runtime.ts")), `raw path: ${r.path}`);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginScriptExec() falls back to the raw .ts when the shipped layout has NO bundle for it", () => {
+  // A dev-only tool the build never bundles: the bundle is absent, so raw is all there is. The
+  // preference must not turn a resolvable script into null (the caller would report "not found").
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-nobundle-"));
+  const pluginRoot = path.join(dir, "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "dev-only-tool.ts"), "// no bundle anywhere\n");
+  try {
+    const r = withPluginRoot(pluginRoot, () => resolvePluginScriptExec("scripts/dev-only-tool.ts"));
+    assert.ok(r, "raw-only tool must still resolve");
+    assert.equal(r.stripTypes, true);
+    assert.ok(r.path.endsWith(path.join("scripts", "dev-only-tool.ts")), `raw path: ${r.path}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("mainCheckoutRoot() detects inside a linked worktree, null for the main checkout", () => {

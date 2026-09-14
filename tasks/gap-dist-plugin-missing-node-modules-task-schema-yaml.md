@@ -2,7 +2,7 @@
 id: gap-dist-plugin-missing-node-modules-task-schema-yaml
 title: dist-plugin 打包物缺 node_modules，driver 运行时对 task-schema.ts 走 raw 优先解析在离线安装下
   ERR_MODULE_NOT_FOUND('yaml')
-status: ready
+status: done
 labels:
   - gap
   - mechanism
