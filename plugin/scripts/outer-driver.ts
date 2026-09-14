@@ -42,7 +42,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 + 1b（driver-runtime.ts）：splitArgs / ts / appendHeartbeatLine（心跳单一落点）/ Fact /
 // RoutineSpec / scheduleIsDue / collectFacts。⛔ 不 import Layer 1a 的 source/select/verify——
 // 本 kind 是例程型（1b），结构上不被迫实现任务处理三段（AC151 取假①）。
-import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, registerKindStop, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 0 · controlPlane（driver-shared.ts）：运行期 halt = 读控制态单一真相源（与 promotion/worker 同族）。
 import { isHalted } from "./driver-shared.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
@@ -408,8 +408,9 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
   const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  process.on("SIGINT", requestStop);
-  process.on("SIGTERM", requestStop);
+  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
+  // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
+  registerKindStop("outer", requestStop);
 
   const sleep = (ms: number) => new Promise<void>((resolve) => {
     wakeResolve = resolve;

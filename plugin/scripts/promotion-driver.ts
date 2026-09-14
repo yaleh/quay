@@ -63,7 +63,7 @@ import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
 // LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
-import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, type LivenessResult } from "./driver-runtime.ts";
+import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, registerKindStop, type LivenessResult } from "./driver-runtime.ts";
 // AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
 // 证「继承 Layer 0 的 profile/liveness 单一实现」。
 export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
@@ -793,8 +793,9 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
   const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  process.on("SIGINT", requestStop);
-  process.on("SIGTERM", requestStop);
+  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
+  // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
+  registerKindStop("promotion", requestStop);
 
   // 可被信号唤醒的 sleep：SIGINT/SIGTERM 立即 resolve，本轮结束即退出（⛔ 不杀在飞——单轮是同步的，
   // 不存在「在飞轮」）。
