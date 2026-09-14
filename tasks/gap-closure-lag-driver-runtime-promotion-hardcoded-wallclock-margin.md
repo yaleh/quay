@@ -91,19 +91,19 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensit
 
 ## AC
 
-- [ ] `closure-lag-check.test.mjs` 的 fresh-timestamp 断言（现 `:171` 附近）不再依赖固定 60s 模块
+- [x] `closure-lag-check.test.mjs` 的 fresh-timestamp 断言（现 `:171` 附近）不再依赖固定 60s 模块
       加载余量——`nowEpoch`（或等价基准）改为在断言前取值，或改为 `parsed.ranAt <= Date.now()`
       一类不设余量上限的比较，语义（"记录是刚刚写的"）不变；`node --test plugin/test/closure-lag-check.test.mjs` 单独跑 exit 0
-- [ ] `driver-runtime.test.mjs` 的 procStartTimeMs 断言（现 `:617` 附近）改为与测试进程实际启动
+- [x] `driver-runtime.test.mjs` 的 procStartTimeMs 断言（现 `:617` 附近）改为与测试进程实际启动
       时刻比较，不再使用硬编码 `Date.now() - 60_000`；`node --test plugin/test/driver-runtime.test.mjs` 单独跑 exit 0
-- [ ] `promotion-driver.test.mjs` 传给 `spawnFixWorker` 的超时字面值（现 `:636` 附近的 `5000`）
+- [x] `promotion-driver.test.mjs` 传给 `spawnFixWorker` 的超时字面值（现 `:636` 附近的 `5000`）
       改为在正常负载下不会误触发超时的宽松值，或断言改为「exitCode===3 或 timedOut 均可、但
       argv 逐字校验」；`node --test plugin/test/promotion-driver.test.mjs` 单独跑 exit 0
-- [ ] 三个文件的最终状态在 `known-load-sensitive.ts --list` 输出与 DoD 里的落地方式一致——若选择
+- [x] 三个文件的最终状态在 `known-load-sensitive.ts --list` 输出与 DoD 里的落地方式一致——若选择
       「消除硬编码墙钟依赖」（AC 前三条）则三个文件可以不进入该注册表；若改为「登记为已知负载
       敏感」则三个文件头部须新增 `// @load-sensitive wall-clock`，且
       `node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --check` exit 0
-- [ ] 落地后至少一次全量 fan-in suite 跑（`verification-round.jsonl` 等价载体，落地提交之后的轮次，
+- [x] 落地后至少一次全量 fan-in suite 跑（`verification-round.jsonl` 等价载体，落地提交之后的轮次，
       按硬规则「推论三」窗口约束）里，这三个测试文件不再出现在该轮失败列表中——若立案时尚无
       该轮次，在 DoD 里明确记录「待下一次 fan-in 验证」并给出如何核验的命令，不得用隔离跑代替
 
@@ -114,6 +114,74 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensit
 是本任务体里写了修复方案。落地后必须有至少一次真实 fan-in 全量 suite 跑经过这三个文件且不再
 因本条描述的墙钟余量问题失败（隔离跑绿只是必要非充分条件，不能替代生产载体上的验证——同硬
 规则「推论三」：只能被 fixture/单独隔离满足的判据不是测量）。
+
+### 落地记录（worker 提交；合入 develop 由 fan-in 完成）
+
+- 实现提交：`2665cbf1d` — 分支 `task/gap-closure-lag-driver-runtime-promotion-hardcoded-wallclock-margin`
+- 三处修法（语义不变，只换基准）：
+  1. `closure-lag-check`：模块加载常量 `nowEpoch` → 用时取值 `epochNow()`；AC3 的 fresh 窗口改由
+     `--record` **调用前后各取一次读数**夹住（`beforeRecord <= ranAt <= afterRecord`）——比原来的
+     单边 60s 余量**更强**（双侧夹逼），且与文件跑多久完全解耦。
+  2. `driver-runtime`：`start > Date.now() - 60_000` → 与**本进程实际启动时刻**比（`process.uptime()`
+     推导），容差 10s。负控制（落笔当轮实测）：两个读数相差 **0.14ms**，而「返回 now」的回归会偏
+     一个完整进程年龄（本文件内 ≈90s）⇒ 判据能取假，不是恒真。
+  3. `promotion-driver`：`spawnFixWorker(argv, root, 5000)` → 生产默认 `FIX_WORKER_TIMEOUT_MS`（180s）
+     ＋ 显式 `timedOut === false` 断言，与相邻 `runFixPass` 测试一致；超时路径仍由后一条
+     `sleep 5` / 200ms 用例覆盖（该用例负载安全：`sleep 5` 在任何负载下都超 200ms）。
+- 隔离跑（必要非充分，⛔ 不是 AC5 的满足条件）：closure-lag-check **18/18**（41s）·
+  driver-runtime **27/27**（93s）· promotion-driver **41/41**（118s），各自 exit 0。
+  （注意 driver-runtime 隔离跑本身就 93s > 旧断言的 60s 上限 ⇒ 旧判据在本机已处于必红边缘。）
+- 注册表路径核查：`known-load-sensitive.ts --list` 命中这三个文件 = **0**；`--check` exit 0。
+  选的是 AC 允许的「消除硬编码墙钟依赖」路径 ⇒ 三文件不进注册表，且**不加**
+  `@load-sensitive` / `@test-group-downgrade`（两者都会 stale：负载依赖是被**移除**而非**换址**）。
+- 硬规则 5b 扫描（同一载体里的同原则其它适用点）：三文件内
+  `grep -nE '[<>]=? *(Date\.now\(\)|[0-9_]{3,})|timeout: *[0-9_]+'` 命中 **29** 条，前 3 条 =
+  driver-runtime `:104` `timeout: opts.timeout || 30000`（`run()` 默认）·
+  `:363` `run(["stop"], { timeout: 15000 })` · `:689` 夹具 `if (Date.now() - first < 3000) process.exit(1)`。
+  **评估后不改**：两条 `>=`/`<` 是**下界**（越忙读数越大，负载不可能击穿），`timeout:` 是**杀进程
+  的死线**（有限挂起保护）而非余量。其中 `driver-runtime:410` 的 `start failed:`（30s `run()` 默认
+  被杀）是已知宿主负载形态 (c)（见 memory `driver-runtime-ac4-confirmed-ms-asserts-step1-walltime`），
+  **发生率 = 1**，且在 1688 轮载体里**从未作为失败断言行出现** ⇒ 按硬规则 12 记为本任务的
+  **观察项**，不据此放宽一条挂起保护死线（改它需要逐个分析 ~20 处 spawnSync 站点）。**此处登记，
+  不是静默忽略。**
+
+### AC5 的第二分支（本任务按 AC 原文的分支条款执行）
+
+AC5 原文自带分支：「若立案时尚无该轮次，在 DoD 里明确记录『待下一次 fan-in 验证』并给出如何核验
+的命令」。本任务的落地提交只能由 driver 在我退出后合入 develop ⇒ **写这一行时结构上不存在
+「落地之后的轮次」**，故按该分支执行：**待下一次 fan-in 验证**。⛔ 上面那三行隔离跑**不能**代替它
+（硬规则推论三：只能被隔离跑满足的判据不是测量）。
+
+核验命令（落地后在下一次 fan-in 之后跑，读的**生产载体**是 `.quay/verification-round.jsonl`，
+⛔ 不是隔离跑；三态：无轮次 / 没跑到 / 通过 三者可区分，⛔ 不把「没跑到」读成「通过」）：
+
+```bash
+LAND=2665cbf1d   # 本任务实现提交（落地后 git log --grep 可重新定位）
+python3 - "$LAND" <<'PY'
+import json, subprocess, sys
+land = sys.argv[1]
+names = ('closure-lag-check.test.mjs', 'driver-runtime.test.mjs', 'promotion-driver.test.mjs')
+def after(c):
+    return bool(c) and subprocess.run(['git','merge-base','--is-ancestor',land,c],
+                                      capture_output=True).returncode == 0
+rounds = [json.loads(l) for l in open('.quay/verification-round.jsonl') if l.strip()]
+cand = [r for r in rounds if after(r.get('commit'))]
+if not cand:
+    print('NOT-EVALUATED: 还没有「落地之后」的轮次（⛔ 不等于通过）'); sys.exit(3)
+r = cand[-1]
+pf = [p for p in (r.get('perFile') or []) if any(n in str(p.get('file','')) for n in names)]
+bad = [p for p in pf if p.get('passed') is False]
+print('round=%s commit=%s perFile_hits=%d' % (r.get('round'), str(r.get('commit'))[:12], len(pf)))
+for p in pf:
+    print('   %s passed=%s durationMs=%s' % (p.get('file'), p.get('passed'), p.get('durationMs')))
+if not pf:
+    print('NOT-EVALUATED: 这三个文件在该轮根本没跑到（⛔ 不等于通过）'); sys.exit(3)
+print('PASS — 三个文件本轮均 passed=true' if not bad else 'FAIL — %s' % bad)
+PY
+```
+
+判据能取假：若这三个文件在下一次 fan-in 里**又**因墙钟余量红，上面命令输出 `FAIL` 并列出该文件
+的 `durationMs` ⇒ 说明本次修法是**回归**，本任务应 `quay retreat` 而非当作已修好。
 
 ## Touches
 
