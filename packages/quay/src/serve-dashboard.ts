@@ -1513,13 +1513,22 @@ export interface DashboardSnapshot {
   suiteRun: CurrentSuiteRun | null;
   history: GitHistoryResult;
   tasks: TaskSummary[];
+  goals: GoalRecord[];
   workerOutcomes: WorkerOutcomeRecord[];
 }
-// ⊢ `goals` is deliberately NOT in the snapshot. Every other field already had a 30s TTL cache on the
-// request path (taskSummary / live / sys / mgr / readTests), so snapshotting them preserves today's
-// freshness contract exactly. The goal list was UNCACHED — it was read fresh on every request — and it
-// is the one card AC-179 itself measures, so keeping it fresh keeps AC5's "real data" reading at its
-// strongest. It costs ~6 ms (measured), which is not the build cost this task moves off the path.
+// ⊢ `goals` IS snapshotted, and the reason is a MEASUREMENT that contradicts the plan's estimate. The
+// plan budgeted `client.goalList()` at ~6 ms (a direct-import reading) and therefore allowed it to
+// stay on the request path. Through the real Provider ABI it is an MCP round-trip over the live goal
+// store: measured 987 ms on this workspace, and on a loaded host the whole `/dashboard` request
+// reached 7.3 s — i.e. the residual was itself a host-dependent constant of exactly the kind this
+// task exists to remove (hard rule 4 corollary 2). Rendering, by contrast, measured 36 ms for the
+// whole page (`renderDashboardPage`, 1686 rounds + 1909 outcomes + 2138 tasks).
+//
+// ⊢ `goals` was also the ONLY field with no TTL cache on the request path, so snapshotting it is the
+// one place this change *adds* staleness (bounded by DASHBOARD_SNAPSHOT_REFRESH_MS, the same bound
+// every other card already had). The card still renders REAL data — an active GOAL's achieved/total
+// AC count and its fresh/stale/NOT-EVALUATED marker — just up to one tick old, which is exactly the
+// contract the dashboard's other cards have always had.
 
 const dashboardSnapshots = new Map<string, DashboardSnapshot>();
 const dashboardSnapshotRebuilds = new Map<string, Promise<void>>();
@@ -1578,6 +1587,7 @@ export async function buildDashboardSnapshot(root: string, client: ProviderClien
     readDashboardSystem(root).catch(() => EMPTY_SYS),
     readDashboardManagerLight(root).catch(() => EMPTY_MGR),
     readTaskSummary(root, client).catch(() => [] as TaskSummary[]),
+    client.goalList().catch(() => [] as GoalRecord[]),
   ]);
 
   await yieldToEventLoop();
@@ -1601,15 +1611,8 @@ export async function buildDashboardSnapshot(root: string, client: ProviderClien
   let workerOutcomes: WorkerOutcomeRecord[] = [];
   try { workerOutcomes = readWorkerOutcomeRecords(root); } catch { workerOutcomes = []; }
 
-  const [sys, mgr, tasks] = await asyncProbes;
-  return { builtAt: Date.now(), live, sys, mgr, tests, suiteRun, history, tasks, workerOutcomes };
-}
-
-/** The goal-card's data: read FRESH on every request (see the note on DashboardSnapshot above) — the
- *  one reader the request path still performs, because it is ~6 ms and it is the card AC-179 measures.
- *  Degrades to [] like every other dashboard read (never 500s the page). */
-async function readDashboardGoals(client: ProviderClient): Promise<GoalRecord[]> {
-  return await client.goalList().catch(() => [] as GoalRecord[]);
+  const [sys, mgr, tasks, goals] = await asyncProbes;
+  return { builtAt: Date.now(), live, sys, mgr, tests, suiteRun, history, tasks, goals, workerOutcomes };
 }
 
 /** Start the background rebuild tick for `root`. Runs one build immediately (the cold build lives
@@ -1662,10 +1665,9 @@ export async function handleDashboard(
   // build below runs unchanged — the negative control.
   const snapshot = peekDashboardSnapshot(cfg.workspaceRoot);
   if (snapshot != null) {
-    const goals = await readDashboardGoals(client);
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderDashboardPage(
-      { live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun, history: snapshot.history, tasks: snapshot.tasks, goals },
+      { live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun, history: snapshot.history, tasks: snapshot.tasks, goals: snapshot.goals },
       { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes },
     ));
     return;
@@ -1728,10 +1730,9 @@ export async function handleDashboardCards(
   if (snapshot != null) {
     const hours = timelineHoursFromRequest(req);
     const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
-    const goals = await readDashboardGoals(client);
     const payload = JSON.stringify(buildCardsPayload({
       live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun,
-      tasks: snapshot.tasks, goals, workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
+      tasks: snapshot.tasks, goals: snapshot.goals, workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
       workerOutcomes: snapshot.workerOutcomes,
     }));
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });

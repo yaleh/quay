@@ -168,6 +168,15 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   // fallback below) a cache-less request MUST read the ledger and therefore MUST show #9999.
   const extra = JSON.stringify({ round: 9999, state: "red", tests: 1, pass: 0, startedAt: "2026-09-14T06:00:00.000Z", durationMs: 1000 });
   fs.appendFileSync(roundsPath, extra + "\n");
+  // …and mutate the GOAL store too — the goal card is snapshot-backed as well (its `client.goalList()`
+  // measured 987 ms through the real ABI, so leaving it on the request path would have reintroduced a
+  // host-dependent constant).
+  for (const id of ["AC-172", "AC-173"]) {
+    fs.writeFileSync(
+      path.join(goalsDir, `${id}-late.md`),
+      `---\nid: ${id}\ntitle: late ac\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: "exit 0"\norigin: test\n---\n## Rationale\nlate\n`,
+    );
+  }
   await coldCaches(await import("../src/serve-dashboard.ts"));
 
   const afterMutate = await get(port, "/dashboard");
@@ -176,11 +185,16 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
     /#9999/,
     "the snapshot is served — the request path ran no reader, so a ledger mutation plus a cold cache is still invisible",
   );
+  assert.deepEqual(
+    goalRows(afterMutate.body),
+    ["1/2"],
+    "and the goal card is the snapshot's reading too — the two late ACs are not yet reflected",
+  );
   assert.match(afterMutate.body, /id="goal-card"/, "and the page is still the real page, not a skeleton");
 
   // Negative control for THIS assertion (the falsifiable half): with the mechanism switched off, the
-  // very same cache-less request DOES read the ledger and DOES show #9999. Without this, "mutation
-  // invisible" would be indistinguishable from "the mutation never took effect at all".
+  // very same cache-less request DOES read the store and DOES reflect BOTH mutations. Without this,
+  // "mutation invisible" would be indistinguishable from "the mutation never took effect at all".
   process.env[DASHBOARD_SNAPSHOT_DISABLED_ENV] = "1";
   try {
     await coldCaches(await import("../src/serve-dashboard.ts"));
@@ -190,15 +204,17 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
       /#9999/,
       "with the snapshot off, the legacy in-request build reads the ledger and shows the sentinel — the fix, not the host, is what hides it",
     );
+    assert.deepEqual(goalRows(legacy.body), ["1/4"], "and the legacy path reflects the two late ACs");
   } finally {
     delete process.env[DASHBOARD_SNAPSHOT_DISABLED_ENV];
   }
 
-  // …and a rebuild picks the mutation up again, so the snapshot is a fresh-enough view, not a freeze.
+  // …and a rebuild picks both mutations up again, so the snapshot is a fresh-enough view, not a freeze.
   await coldCaches(await import("../src/serve-dashboard.ts"));
   await server.dashboardSnapshot.rebuildNow();
   const afterRebuild = await get(port, "/dashboard");
   assert.match(afterRebuild.body, /#9999/, "after a rebuild the sentinel round IS rendered");
+  assert.deepEqual(goalRows(afterRebuild.body), ["1/4"], "and the two late ACs are rendered too");
 });
 
 // ── AC3′ / AC4′: concurrent requests DURING a rebuild ────────────────────────────────────────────
@@ -340,8 +356,8 @@ test("buildDashboardSnapshot degrades per reader and awaitDashboardSnapshotRebui
   assert.equal(typeof snap.builtAt, "number", "the snapshot carries its build instant");
   assert.ok(typeof snap.live === "object" && snap.live !== null, "live is always an object (never undefined)");
   assert.ok(Array.isArray(snap.tasks), "tasks is always an array");
+  assert.ok(Array.isArray(snap.goals), "goals is always an array — the goal card is snapshot-backed too, because client.goalList() measured 987 ms through the real ABI");
   assert.ok(Array.isArray(snap.workerOutcomes), "workerOutcomes is always an array");
-  assert.equal("goals" in snap, false, "goals is NOT snapshotted — the goal card reads fresh on the request path");
   assert.ok(snap.tests && Array.isArray(snap.tests.runs), "tests always carries a runs array");
 
   // awaitDashboardSnapshotRebuild resolves against an in-flight build (no rebuild ⇒ resolves at once).
