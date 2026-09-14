@@ -61,20 +61,20 @@ gate` 等任务已经在 AC 层建立了 `covered`/`insufficient`/`not-evaluated
 
 ## Acceptance Criteria
 
-- [ ] AC1 构造一个 `status: achieved` 的 GOAL，往它名下写一条 `status: active` 的新 AC——写入完成后，
+- [x] AC1 构造一个 `status: achieved` 的 GOAL，往它名下写一条 `status: active` 的新 AC——写入完成后，
       staleness 信号载体（如 `goal-staleness-signal.jsonl`）必须新增恰好一条记录，字段完整（`goalId`/
       `staleSince`/`triggeringAcId`/`goalStatusAtTime`）。⛔ 负控制：往一个本来就 `active` 的 GOAL 挂新
       AC，不得产生 staleness 信号（只有"曾经 achieved"这一态触发）。
-- [ ] AC2 `quay goal list`（或等价读接口）读到一个带未清除 staleness 信号的 `achieved` GOAL 时，输出必须
+- [x] AC2 `quay goal list`（或等价读接口）读到一个带未清除 staleness 信号的 `achieved` GOAL 时，输出必须
       带有可枚举的过期标记；读到一个没有 staleness 信号、名下 AC 确实全部 achieved 的 GOAL 时，输出**不带**
       该标记——两种情况的输出必须可区分（不是同一个字符串）。
-- [ ] AC3 人工确认路径：对一条带 staleness 信号的 GOAL 执行"确认重开"动作后（走既有的 `status: active`
+- [x] AC3 人工确认路径：对一条带 staleness 信号的 GOAL 执行"确认重开"动作后（走既有的 `status: active`
       写入路径，不新造一条），对应的 staleness 信号被标记为已处理（不是删除——保留审计痕迹，类比其他
       `*-sync.jsonl` 载体"事件不删只追加状态"的既有风格）；之后 `quay goal list` 不再显示过期标记。
-- [ ] AC4 `write()` 函数本身（`goal-store.ts:1663`）**不得**对被写入 AC 所属的 GOAL 记录做任何字段级修改
+- [x] AC4 `write()` 函数本身（`goal-store.ts:1663`）**不得**对被写入 AC 所属的 GOAL 记录做任何字段级修改
       （不改 `status`，不改任何既有字段）——只允许新增旁路的 staleness 信号记录。用一次前后对比
       （goal 记录的完整内容 diff）验证：GOAL 自己的 `.md` 文件字节内容在这次写入前后必须完全一致。
-- [ ] AC5 全量 `scripts/test.sh` 绿。
+- [x] AC5 全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 
@@ -92,6 +92,7 @@ gate` 等任务已经在 AC 层建立了 `covered`/`insufficient`/`not-evaluated
 
 ## Touches
 - packages/quay/src/goal-store.ts
-- packages/quay/src/observation.ts（或实际承载 `quay goal list`/dashboard 展示逻辑的文件——实现者需先
-  确认这层具体在哪个文件，再精确声明，不预先猜测）
+- packages/quay/src/abi.ts
+- packages/quay/src/cli/goal.ts
+- packages/quay/test/gap-goal-status-stale-achieved-after-new-active-criterion-filed.test.mjs
 - tasks/gap-goal-status-stale-achieved-after-new-active-criterion-filed.md
