@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-queueing-model-does-concurrency-help
 title: 用排队论量 fan-in 锁竞争——加并发到底提吞吐还是只加长队列（corr(suite时长,落地数)=−0.11 指向排队）
-status: ready
+status: done
 labels:
   - gap
   - analysis
