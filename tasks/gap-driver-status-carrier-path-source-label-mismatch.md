@@ -104,3 +104,12 @@ Related but NOT a duplicate: `gap-driver-status-carrier-path-names-first-entry-n
   - 补全后 ⇒ `ANTI-DRIFT OK: task … — 14 actual file(s), all within declared Touches (15 glob(s))`，**exit 0**。
   - **负控制**（从同一声明里删掉 `plugin/scripts/worker-driver.ts` **一行**）⇒ `ANTI-DRIFT HARD FAIL — 1 violation(s): out-of-declared: task wrote plugin/scripts/worker-driver.ts` ⇒ 补全**没有**把声明放宽到能吸收任何东西（非 overbroad），仍逐文件咬。
   - **改前**（原 5 条 glob）⇒ **10 violation(s)**，与上一轮 fan-in 报的条数**逐字相同** ⇒ 补全前后的差异确由这 10 条引起。
+
+**2026-09-14T02:0xZ · AC 逐条复验（生产 root `/home/yale/work/quay`，本分支代码 + 本分支 plugin）+ 一条**非构造**的负控制**
+
+- **AC1**：`QUAY_PLUGIN_ROOT=<wt>/plugin quay driver status --kind promotion --json` ⇒ `carrier_path=…/promotion-outcome.jsonl`、`last_record_ts=2026-09-14T02:03:22.385Z`、`last_record_carrier=…/promotion-round.jsonl`。**判据对「被点名的载体」本身取真读数**：`promotion-round.jsonl` 末条 ts = `2026-09-14T02:03:22.385Z` **== 所报 ts**；`promotion-outcome.jsonl` 末条 ts = `2026-09-13T23:37:27.771Z` **≠ 所报 ts**（陈旧 2.4h）⇒ 点名者确为供数者，`carrier_path` 那个确未供数。
+- **AC2**：`<wt>/packages/quay/bin/quay.js server status --json`（本分支 `packages` + `QUAY_PLUGIN_ROOT` 指本分支 `plugin`）⇒ 六行 `drivers[].liveness.source` 逐字：`promotion` ⇒ `carrier:/home/yale/work/quay/.quay/promotion-round.jsonl last ts`；`worker`/`outer`/`quality` ⇒ 各自 `<kind>-round.jsonl`；`meta` ⇒ `meta-driver-round.jsonl`（`goal` 无 round 载体，走 `driver pid` 臂）。⛔ `promotion` **没有**点名陈旧的 `promotion-outcome.jsonl`。
+- **AC4**：同 kind 非 `--json` 一行形 ⇒ `… · last_record_ts=2026-09-14T02:03:22.385Z (cross-carrier max) · last_record_carrier=…/promotion-round.jsonl · …` ⇒ 来源 path **紧跟** ts，且该 ts 明确标注为跨载体最大值。
+- **顺带取到的负控制（`carrier 缺失` 半边 · ⛔ 非构造——是我第一次跑错形态时取的）**：同一命令只把 `plugin` 留在 develop（`packages` 仍取本分支）⇒ 六行 source **全部**为 `driver status last_record_ts (carrier not named by the kernel)`，**没有任何一行退回点名 `carrier_path`**。这既是 AC2 允许的另一半（kernel 不报来源 ⇒ 不声称具体载体），又证明该回退分支**在真实载体上可达**、不是死代码（硬规则 3b：读不懂输入 ⇒ 不得退回一个与「合格」同形的值）。
+- **代价（诚实登记）**：Touches 补全后本任务与前置 `gap-ac255-…` 在 `plugin/scripts/*` 上**声明重叠** ⇒ 前置落地前，若前置被**重新派发**会被本任务挡（transient 假阻塞）。前置已 8/8 AC 完成、worktree 已在 pre-merge 态等 fan-in，**无需再派发** ⇒ 该窗口的实际影响为零；前置落地后这 10 条 glob 失配、重叠自动消失。
+- **本轮 scoped 门**：`bash scripts/test.sh --for-task gap-driver-status-carrier-path-source-label-mismatch --allow-thin` ⇒ **tests 516 / pass 516 / fail 0 / EXIT=0**（选择集已含 Touches 补全后新增的相关测试）。
