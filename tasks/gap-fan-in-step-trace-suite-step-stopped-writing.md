@@ -1,8 +1,8 @@
 ---
 id: gap-fan-in-step-trace-suite-step-stopped-writing
 title: fan-in-step-trace.jsonl 的 suite
-  决策步骤（ac-precheck/suite-start/suite-end/suite-skip）自 2026-08-28 起写去了另一个per-run
-  日志文件，共享载体上的这批步骤永久停写
+  决策步骤（ac-precheck/suite-start/suite-end/suite-skip）自 2026-08-28 起写去了另一个 per-run
+  日志文件，共享载体一度停写（已由 f4bab32c3 修复为双写；残留 = 只有 end 没有 begin）
 status: done
 labels:
   - gap
@@ -13,6 +13,31 @@ extra:
   schema: execution
 ---
 **type:** execution
+
+## Correction (2026-09-14, by gap-fan-in-step-trace-suite-steps-write-end-without-begin)
+
+**原标题声称这批步骤在共享载体上「永久停写」——与盘上实际不符，已更正。** 本任务自己的 AC2 修复
+（`f4bab32c3`）落地后，`ac-precheck` / `suite-start` / `suite-end` / `suite-skip` **一直在写**
+`.quay/fan-in-step-trace.jsonl`：2026-09-14 现场实测该载体（窗口 09-04 → 09-14）有
+`ac-precheck` 713 条、`suite-start` 713 条、`suite-end` 709 条、`suite-skip` 15 条，全部是
+`step-end`。
+
+⇒ 「停写」这个结论只对 **08-28 → 09-04** 那个窗口成立（`a5a301e03` 之后、本任务修复之前），
+**本任务修复后就不再成立**，而任务标题却把它写成永久态——这是一条**修复后没有回头改结论**的
+残留表述（硬规则 3b：一个恒真的「已停写」断言与「一切正常」同形，没人会再去看它）。
+
+**真正的残留（不是「停写」，是「只有一半」）**：这 4 步只写 `step-end`、**不写 `step-begin`**
+——它们是**单发决策事件**而非区间，本就没有可配对的 begin。于是「用 begin/end 配对算时长」这个
+读法对它们恒返回「无数据」，而「无数据」与「这一步不存在」同形，导致一位分析者据此得出
+「最贵的 suite 步骤在该载体里结构上不可测时长」的错误结论（该结论及其派生的「75% 是等待」判断
+均已收回，见 `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md` §5 错误一）。
+
+**残留已由 `gap-fan-in-step-trace-suite-steps-write-end-without-begin` 处理**：修法是让每条
+`step-end` 自带 `durationMs`（12 组统一，不依赖配对），⛔ **不是**给这 4 步补一个「写下去就立刻
+被配掉」的 begin——那种 begin 结构上不可能与 end 分离，是给孤儿率看的样子，不是挂起检测。
+本任务的 AC1–AC4 与 DoD 结论不变（它们测的是「共享载体上能不能看到这批步骤」，当时确实看不到）。
+
+---
 
 ## Proposal
 

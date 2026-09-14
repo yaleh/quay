@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // closure-lag-check.test.mjs — tasks/gap-closure-pass-has-no-lag-signal.
 // The outer's async closure pass ("1b. 异步收尾例程") flips implemented ready-tasks to done. It had
 // NO lag signal: a "forced, every-tick" step could silently stop for hours and nothing would report

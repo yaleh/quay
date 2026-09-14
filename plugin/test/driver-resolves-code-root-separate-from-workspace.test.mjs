@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import {
   resolveQuayCodeRoot,
   resolveQuaySrcModule,
+  resolveKernelPluginRoot,
   kernelSiblingArgv,
   kernelConfigPath,
 } from "../scripts/driver-runtime.ts";
@@ -105,6 +106,16 @@ function makeSeparatedWorkspace(tag) {
   return ws;
 }
 
+/**
+ * 判据①：`root` 必须真的是一棵 kernel 安装树（含 kernel anchor：raw `driver-runtime.ts` 或
+ * shipped 的 `dist/driver-runtime.js` —— 与 `plugin-root.ts` 的 `KERNEL_RELS` 同形）。
+ * 抽成函数是为了让红面控制（`AC3a''-red`）测【同一条】判据，而不是测它的一份手抄副本。
+ */
+function isKernelInstallTree(root) {
+  return ["scripts/driver-runtime.ts", "scripts/dist/driver-runtime.js"]
+    .some((r) => fs.existsSync(path.join(root, r)));
+}
+
 /** 跑一个例程并返回它的单条 fact。 */
 async function factOfRoutine(fn) {
   const facts = await fn();
@@ -172,39 +183,116 @@ test("AC3a: resolveQuayCodeRoot 按【kernel 安装位置】的布局解析，�
 });
 
 test("AC3a': kernelSiblingArgv / kernelConfigPath 锚在 kernel 安装位置（⛔ 非 workspace root）", () => {
-  // 本用例断言的是【缺省】解析（无显式 override）下的锚点。QUAY_PLUGIN_ROOT 是显式指针缝
-  // （driver-runtime.ts:290/297：`resolveKernelScriptsDir`/`resolveKernelPluginRoot` 的 override 分支），
-  // 生产 driver 的环境里可能带着它——实测本仓 quay-root 的 driver supervisor 就带着
-  // `QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin`，而 worker 的 suite 子进程会继承它。
-  // 不中和它 ⇒ 本用例断言的对象从「本 kernel 安装位置」悄悄换成「那个 env 指向的目录」，
-  // 于是在 task worktree 里跑时 `cfgPath` 落到主检出 ⇒ 断言恒假（硬规则 4b：读数由环境决定）。
-  // 中和之后，断言的对象重新是 AC 所声明的那个量，且【与环境无关】——env 在不在都取同一真值。
-  const prevPluginRoot = process.env.QUAY_PLUGIN_ROOT;
-  delete process.env.QUAY_PLUGIN_ROOT;
+  const sib = kernelSiblingArgv("slot-refill.ts", ["--root", "/tmp/x"]);
+  assert.ok(Array.isArray(sib), "本仓 dev tree 下 slot-refill.ts 必须可解析");
+  assert.deepEqual(sib.slice(-2), ["--root", "/tmp/x"], "调用方给的多余参数必须原样附加在末尾");
+  const scriptPath = sib.find((a) => a.endsWith("slot-refill.ts") || a.endsWith("slot-refill.js"));
+  assert.ok(scriptPath && fs.existsSync(scriptPath), `解析出的脚本必须真实存在：${scriptPath}`);
+
+  // .sh sibling 走 bash + <pluginRoot>/scripts/<name>（shipped 下 .sh 以 loose 形态随包）。
+  const sh = kernelSiblingArgv("closure-lag-check.sh");
+  assert.ok(Array.isArray(sh), "closure-lag-check.sh 必须可解析");
+  assert.equal(sh[0], "bash", "shell sibling 的解释器是 bash");
+  assert.ok(fs.existsSync(sh[1]), `解析出的 .sh 必须真实存在：${sh[1]}`);
+
+  // 配置类资源（P2 的正则结构上匹配不到的那一半）同样锚在 kernel。
+  //
+  // ⛔ 这里【不能】拿 `REPO_ROOT`（= 本断言文件所在的那棵树）当判据 —— 它是一个【代理量】
+  // （硬规则 4b）：它悄悄假定了「断言者所在树 == kernel 安装树」，也就是假定
+  // `QUAY_PLUGIN_ROOT` 这个**文档化的显式指针**（`plugin-root.ts:83`「explicit pointer
+  // (hermetic tests / operator override)」；`driver-runtime.ts` `resolveKernelPluginRoot()`
+  // 的第一分支）不存在。生产 driver 的环境里**确实**带着它（实测：`QUAY_PLUGIN_ROOT=
+  // /home/yale/work/quay/plugin` 在 supervisor/driver 的 environ 里，而 driver spawn 的每个
+  // 会话 + `suite-driver.ts` 的 suite 子进程都继承它）⇒ 在 task worktree 里跑时 `cfgPath`
+  // 落到主检出、`startsWith(worktree REPO_ROOT)` 恒假 ⇒ **每一个任务的 fan-in 全量套件都红**，
+  // 与本任务改了什么无关（2026-09-14 r1688–r1691 实测，零任务落地）。
+  //
+  // 换成**直接量**：判据 = ①解析器实际锚定的那棵树必须真的是一棵 kernel 安装树（含 kernel
+  // anchor）；②cfgPath 必须真实存在；③锚点由**显式指针**决定而不由断言者所在树决定 ——
+  // 有指针 ⇒ 必须跟随指针；无指针 ⇒ 两者重合、保留原有的齿（必须落在本树下）。
+  // 三条都能取假；红面控制见紧随其后的 `AC3a''-red` 用例（本文件自带，⛔ 不是只跑一遍看它绿）。
+  const kernelRoot = resolveKernelPluginRoot();
+  const cfgPath = kernelConfigPath(path.join("scripts", "drivers.yml"));
+  const override = process.env.QUAY_PLUGIN_ROOT;
+
+  assert.ok(
+    isKernelInstallTree(kernelRoot),
+    `解析器锚定的位置必须真的是一棵 kernel 安装树（⛔ 不是任意目录）：${kernelRoot}`,
+  );
+  assert.ok(fs.existsSync(cfgPath), `drivers.yml 必须可解析：${cfgPath}`);
+  if (override) {
+    // 有显式指针 ⇒ 断言者所在树【不是】kernel 安装树 ⇒ 旧断言的前提为假。
+    // 正确语义 = 跟随指针（⛔ 不被断言者所在树 / workspace root / cwd 俘获）——「锚在 kernel
+    // 安装位置」这条命题在最需要它的场景（第三方 / 重定向安装）下才真正有内容。
+    assert.equal(
+      cfgPath,
+      path.join(override, "scripts", "drivers.yml"),
+      `显式指针存在时 kernel 资源必须解析到指针所指的树（⛔ 不被断言者所在树俘获）：${cfgPath}`,
+    );
+  } else {
+    assert.ok(cfgPath.startsWith(REPO_ROOT), "无显式指针时配置路径必须落在 quay 安装树下（⛔ 非 workspace root）");
+  }
+
+  // 解析不出 ⇒ null（⛔ 不回退到 `<root>/plugin/scripts/<name>`：那会把「找不到」伪装成「跑过了、没数据」）。
+  assert.equal(kernelSiblingArgv("no-such-sibling-xyz.ts"), null, "找不到 ⇒ null（fail-closed）");
+  assert.equal(kernelSiblingArgv("no-such-sibling-xyz.sh"), null, "找不到的 .sh ⇒ null（fail-closed）");
+});
+
+// ── AC3a'' · 上一用例的判据【能取假】——红面控制（绿面 / 红面都在本文件里） ────────────────────────
+
+test("AC3a''-red: kernel 锚点判据能取假 —— 假 kernel 树 / decoy workspace root 两向控制", () => {
+  const prevOverride = process.env.QUAY_PLUGIN_ROOT;
+  const prevCwd = process.cwd();
   try {
-    const sib = kernelSiblingArgv("slot-refill.ts", ["--root", "/tmp/x"]);
-    assert.ok(Array.isArray(sib), "本仓 dev tree 下 slot-refill.ts 必须可解析");
-    assert.deepEqual(sib.slice(-2), ["--root", "/tmp/x"], "调用方给的多余参数必须原样附加在末尾");
-    const scriptPath = sib.find((a) => a.endsWith("slot-refill.ts") || a.endsWith("slot-refill.js"));
-    assert.ok(scriptPath && fs.existsSync(scriptPath), `解析出的脚本必须真实存在：${scriptPath}`);
+    // 绿面：一棵 hermetic 假 kernel 安装树（含 anchor + scripts/drivers.yml）。
+    const fakeKernel = mkTemp("fake-kernel");
+    fs.mkdirSync(path.join(fakeKernel, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(fakeKernel, "scripts", "driver-runtime.ts"), "// fixture\n", "utf8");
+    const fakeCfg = path.join(fakeKernel, "scripts", "drivers.yml");
+    fs.writeFileSync(fakeCfg, "decoy: false\n", "utf8");
+    assert.equal(isKernelInstallTree(fakeKernel), true, "夹具本身必须满足判据①（否则下面的绿面是假的）");
 
-    // .sh sibling 走 bash + <pluginRoot>/scripts/<name>（shipped 下 .sh 以 loose 形态随包）。
-    const sh = kernelSiblingArgv("closure-lag-check.sh");
-    assert.ok(Array.isArray(sh), "closure-lag-check.sh 必须可解析");
-    assert.equal(sh[0], "bash", "shell sibling 的解释器是 bash");
-    assert.ok(fs.existsSync(sh[1]), `解析出的 .sh 必须真实存在：${sh[1]}`);
+    process.env.QUAY_PLUGIN_ROOT = fakeKernel;
+    assert.equal(
+      kernelConfigPath(path.join("scripts", "drivers.yml")),
+      fakeCfg,
+      "绿面：显式指针 ⇒ 解析必须跟随指针（⛔ 不是跟随断言者所在树 REPO_ROOT）",
+    );
 
-    // 配置类资源（P2 的正则结构上匹配不到的那一半）同样锚在 kernel。
-    const cfgPath = kernelConfigPath(path.join("scripts", "drivers.yml"));
-    assert.ok(fs.existsSync(cfgPath), `drivers.yml 必须可解析：${cfgPath}`);
-    assert.ok(cfgPath.startsWith(REPO_ROOT), "配置路径必须落在 quay 安装树下（⛔ 非 workspace root）");
+    // 红面 A：指针指向【不含 kernel anchor】的目录 ⇒ 判据①必须取假。
+    // （若无此控制，① 可能退化成一条恒真的装饰 —— 本任务选 (b) 的补偿控制：显式指针若指向
+    // 一棵非 kernel 树，套件必须报红，而不是被「重定向是合法的」这个理由一起放行。）
+    const notKernel = mkTemp("not-kernel");
+    assert.equal(
+      isKernelInstallTree(notKernel),
+      false,
+      "红面 A：不含 kernel anchor 的目录上判据①必须取假（⛔ 不是恒真装饰）",
+    );
+    process.env.QUAY_PLUGIN_ROOT = notKernel;
+    assert.equal(
+      fs.existsSync(kernelConfigPath(path.join("scripts", "drivers.yml"))),
+      false,
+      "红面 A：指针指向非 kernel 树时 drivers.yml 必须解析不到（existsSync 是真判据，不是装饰）",
+    );
 
-    // 解析不出 ⇒ null（⛔ 不回退到 `<root>/plugin/scripts/<name>`：那会把「找不到」伪装成「跑过了、没数据」）。
-    assert.equal(kernelSiblingArgv("no-such-sibling-xyz.ts"), null, "找不到 ⇒ null（fail-closed）");
-    assert.equal(kernelSiblingArgv("no-such-sibling-xyz.sh"), null, "找不到的 .sh ⇒ null（fail-closed）");
+    // 红面 B：cwd + 一个带 decoy `plugin/scripts/drivers.yml` 的合法 workspace root 都摆出来
+    // ⇒ 解析仍必须锚在显式指针处。若实现改回「按 workspace root / cwd 拼 plugin/scripts/…」，
+    // 解析会落到 decoy ⇒ 本条取假（这正是本测试文件【存在】的理由，不能被 (b) 删掉）。
+    const ws = makeSeparatedWorkspace("anchor-decoy");
+    fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
+    const decoy = path.join(ws, "plugin", "scripts", "drivers.yml");
+    fs.writeFileSync(decoy, "decoy: true\n", "utf8");
+    process.chdir(ws);
+    process.env.QUAY_PLUGIN_ROOT = fakeKernel;
+    assert.equal(
+      kernelConfigPath(path.join("scripts", "drivers.yml")),
+      fakeCfg,
+      `红面 B：workspace root / cwd 上有 decoy plugin/ 时，解析仍必须锚在 kernel 安装位置（decoy=${decoy}）`,
+    );
   } finally {
-    if (prevPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT;
-    else process.env.QUAY_PLUGIN_ROOT = prevPluginRoot;
+    process.chdir(prevCwd);
+    if (prevOverride === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prevOverride;
   }
 });
 

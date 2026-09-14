@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // worker-driver-fan-in.test.mjs — mechanical fan-in (locks/merge/trace) + dispatch filters + cold-start + retry/backoff. Split from gap-suite-file-split-two-longest.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
