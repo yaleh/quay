@@ -220,7 +220,7 @@ export async function run(argv, ctx = {}) {
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server start|server add|server stop|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

@@ -154,6 +154,13 @@ import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 // gap-driver-cli-help-hides-four-of-six-kinds: 帮助文本的 kind/verb 单一真源（零依赖叶模块——⛔ 不要
 // 从 ../src/cli/driver.ts 取，那条路径把 config.ts/plugin-root.ts 拖进来，正是本任务要避免的成本）。
 import { KINDS as DRIVER_KINDS_VOCAB, VERBS as DRIVER_VERBS_VOCAB } from "../src/cli/driver-vocab.ts";
+// gap-ac256: `server <verb>` subs are DERIVED from the single source (cli/server.ts's SERVER_VERBS —
+// the same table the usage line itself is built from), ⛔ not re-listed here. A hand-copied list is
+// exactly what went stale when AC-256 added the `restart` verb: the usage line grew it, this list did
+// not, and the drift gate correctly reported the new verb as `extra`. Deriving closes the class rather
+// than patching one string — the same fix the sibling usage-line assertion got in
+// server-status-web-control-same-pid.test.mjs (which had pinned four verb literals).
+import { SERVER_VERBS } from "../src/cli/server.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source: route CLI spawns through the prebuilt
@@ -2059,18 +2066,20 @@ function block28() {
   // `server <verb>` joins them: its subcommands live inside src/cli/server.ts (the handler dispatches
   // on `sub` and reports the usage line Served's verb set for anything else), exactly like
   // config/manager — not via `cmd && sub` routes in quay.ts.
-  // ⚠️ AC-254 added the three stage-B verbs. They MUST be listed here or this gate reports them as
-  // `extra` (present in the usage line, absent from the expected set) — which is the correct
+  // ⚠️ AC-254 added the three stage-B verbs. They MUST be accounted for here or this gate reports
+  // them as `extra` (present in the usage line, absent from the expected set) — which is the correct
   // behaviour: a verb nobody declared is drift, whether it was added by accident or on purpose.
+  //
+  // The `server <verb>` half is DERIVED from cli/server.ts's SERVER_VERBS — the same single source the
+  // usage line is built from — so a verb legitimately added there can never be reported as drift by
+  // this gate. That is not hypothetical: AC-256 added `restart`, the usage line grew it, and this
+  // hand-copied list (the only place it was missing) turned the whole file red.
   const handlerSubs = [
     "config validate",
     "config check",
     "manager start",
     "manager arm",
-    "server start",
-    "server add",
-    "server stop",
-    "server status",
+    ...SERVER_VERBS.map((v) => `server ${v}`),
   ];
   const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
 
