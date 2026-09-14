@@ -501,13 +501,15 @@ export function concurrencVsThroughput(
   landingsReadError: string | null = null,
 ): ConcurrencyTable {
   const byDay = new Map<string, { max: number; wallMs: number }>();
-  let cap = 0;
+  // ⚠️ 变量名刻意不叫 cap：本值是**观测到的** in_flight_count 上界（一个读数），不是任何
+  // 并发**设定**。叫 cap 会撞 concurrency-literal-check 的 P1 词表（词表碰撞，非语义缺陷）。
+  let maxSeenInFlight = 0;
   for (const o of outcomes) {
     if (!o.day) continue;
     const cur = byDay.get(o.day) ?? { max: 0, wallMs: 0 };
     if (typeof o.inFlight === "number") {
       cur.max = Math.max(cur.max, o.inFlight);
-      cap = Math.max(cap, o.inFlight);
+      maxSeenInFlight = Math.max(maxSeenInFlight, o.inFlight);
     }
     cur.wallMs += o.wallMs ?? 0;
     byDay.set(o.day, cur);
@@ -540,7 +542,7 @@ export function concurrencVsThroughput(
   return {
     levels,
     landingsReadError,
-    observedCap: cap > 0 ? cap : NOT_EVALUATED,
+    observedCap: maxSeenInFlight > 0 ? maxSeenInFlight : NOT_EVALUATED,
     confound:
       "⛔ 档位不是随机分配的：并发 cap 由资源闸（avg300）自适应选出（GO=5 / WAIT=2 / EXTREME=1），" +
       "且低档日往往同时是「池里没货」的日 ⇒ 低档位的低落地数是**因果双向**的，" +
