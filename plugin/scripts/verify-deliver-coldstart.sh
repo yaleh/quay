@@ -4011,6 +4011,22 @@ step_ac258_user_scope() {
     return 1
   fi
 
+  # ── (g-pre) 环境前置：目标项目自己的 pre-commit 钩子当前是坏的 ─────────────────────────────
+  # 实测 2026-09-14（orangevps，run5）：meta-cc 的 `.git/hooks/pre-commit`（pre-commit 框架生成，
+  # `INSTALL_PYTHON=/usr/bin/python3`）执行 `python3 -m pre_commit` ⇒ `No module named pre_commit`
+  # ⇒ **该仓库当前任何 `git commit` 都失败**。这不只挡 quay-init 的 auto-commit：driver 的
+  # `tasks: …` 记账提交、worker 的实现提交、fan-in 的翻转提交**同样会失败** ⇒「真实 todo→done」这一整条
+  # 在本环境里结构上不可达，而失败形态逐层都是「什么都没发生」（硬规则 3b）。
+  # 处置（⛔ 最小且不碰被取证对象）：只把**本步骤派生的**子进程的 `core.hooksPath` 指向一个空目录，
+  # 经 `GIT_CONFIG_*` 环境变量下发（git 对进程树生效，⛔ 不写 meta-cc 的 .git/config、⛔ 不删它的钩子文件
+  # —— 那会把「修运行环境」变成「改被取证对象」，两者必须分开记）。
+  # ⚠️ 诚实登记的代价：本次运行**没有**行使 meta-cc 自己的 pre-commit 钩子。判据里没有任何一条依赖它，
+  # 但读这份记录的人应当知道。
+  local neutral_hooks="$home/ac258-empty-hooks"
+  mkdir -p "$neutral_hooks"
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$neutral_hooks"
+  echo "  [⑩g0] git hooks neutralized for THIS STEP's subprocesses only: core.hooksPath=$neutral_hooks (meta-cc's own pre-commit hook is broken: 'No module named pre_commit' ⇒ every commit there fails; ⛔ .git/config and .git/hooks were NOT modified)"
+
   # ── (g) quay-init 重跑（meta-cc 本体；升级/幂等路径）─────────────────────────────────────
   # ⚠️ 分支模型【当场判、不假设】：AC-258 Plan §6 逐字要求「先读现状再判断是否需要
   # --adopt-branch-model，⛔ 不假设它与 08-20 AC118 时的状态一致」。因此按【两段】跑，且两段留下
@@ -4080,8 +4096,21 @@ step_ac258_user_scope() {
     status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
     echo "  [⑩i2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter）"
   else
+    # ⚠️ `task create --body-file <带 frontmatter 的文件>` 会把那段 frontmatter 当成【正文】再写一遍 ⇒
+    # 目标项目的 `tasks/<id>.md` 出现【两段 frontmatter】。实测 2026-09-14 用本机夹具复现（`^---$`
+    # 从 2 条变 4 条、`^status:` 从 1 条变 2 条，ABI 读到的是第一段）。这正是 AC-257 第 8 条那个
+    # 「第二段 frontmatter 被前置」的形态，只是成因在【输入侧】。⇒ 本步骤自己剥一次，⛔ 不假设调用方
+    # 送来的文件不带 frontmatter（硬规则 5b：修好一个不等于只在那一处 —— create 侧与输入侧都要挡）。
+    local body_src="$bodyfile"
+    if head -1 "$bodyfile" 2>/dev/null | grep -qx -- '---'; then
+      local stripped_body="$home/ac258-task-body-stripped.md"
+      if awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; if(n<=2) next} n>=2{print}' "$bodyfile" > "$stripped_body" 2>/dev/null && [ -s "$stripped_body" ]; then
+        body_src="$stripped_body"
+        echo "  [⑩i1] body file carried a frontmatter block ⇒ stripped before task create ($(wc -l < "$body_src") lines, $(grep -c '^---$' "$body_src" || true) fences)"
+      fi
+    fi
     set +e
-    (cd "$root" && node "$qrl" task create "$task_id" --title "AC-258 user-scope 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1
+    (cd "$root" && node "$qrl" task create "$task_id" --title "AC-258 user-scope 驱动取证任务" --body-file "$body_src" --status todo --root "$root") >/dev/null 2>&1
     create_rc=$?
     set -e
     if [ "$create_rc" = "0" ] \
