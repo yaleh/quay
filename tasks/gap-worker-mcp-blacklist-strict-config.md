@@ -1,7 +1,7 @@
 ---
 id: gap-worker-mcp-blacklist-strict-config
 title: worker/fix-worker/selector 按黑名单排除 chrome-devtools/playwright 等重量级 MCP server
-status: todo
+status: ready
 labels:
   - gap
 parent: null
