@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard } from "./serve-render.ts";
@@ -1204,13 +1204,16 @@ export function renderDashboardPage(
     tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
-  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null } = {},
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[] } = {},
 ): string {
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: read the worker-outcome history ONCE and
   // feed it to BOTH the liveCard gantt and the fan-in card (same data source, no second I/O path).
-  const workerOutcomes = opts.workspaceRoot != null ? readWorkerOutcomeRecords(opts.workspaceRoot) : [];
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: a caller holding a snapshot passes the
+  // already-read records in, so the request path performs NO reader I/O (the disk read stays on the
+  // background rebuild). Absent ⇒ read here, i.e. the legacy in-request behaviour, unchanged.
+  const workerOutcomes = opts.workerOutcomes ?? (opts.workspaceRoot != null ? readWorkerOutcomeRecords(opts.workspaceRoot) : []);
   const liveCard = renderLiveCard(d.live, nowMs, d.tasks, workerOutcomes, hours);
   const sysCard = renderSysCard(d.sys);
   const mgrCard = renderMgrCard(d.mgr);
@@ -1272,11 +1275,14 @@ export function buildCardsPayload(args: {
   hours: number;
   cap: number;
   staleMs: number;
+  /** Pre-read worker-outcome history (a snapshot caller passes it in so this path does no reader
+   *  I/O). Absent ⇒ read from disk here — the legacy in-request behaviour, unchanged. */
+  workerOutcomes?: WorkerOutcomeRecord[];
 }): Record<string, unknown> {
   const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs } = args;
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: same single-read worker-outcome history fed
   // to both the liveCard gantt and the fan-in card (the /dashboard/cards auto-refresh path).
-  const workerOutcomes = workspaceRoot != null ? readWorkerOutcomeRecords(workspaceRoot) : [];
+  const workerOutcomes = args.workerOutcomes ?? (workspaceRoot != null ? readWorkerOutcomeRecords(workspaceRoot) : []);
   return {
     liveCard: renderLiveCard(live, Date.now(), tasks, workerOutcomes, hours),
     testsCard: renderTestsCard(tests, suiteRun, { hours }),
@@ -1460,6 +1466,187 @@ async function readDashboardManagerLight(root: string): Promise<ManagerResult> {
   return value;
 }
 
+// ── Dashboard SNAPSHOT + background rebuild (gap-ac179-criterion-cold-miss-30s-ttl-always-expired) ─
+//
+// WHY THIS EXISTS. Every reader `/dashboard` needs is 30s-TTL cached, and the dashboard's own browser
+// auto-refresh polls at 30s — so on the *steady* path the caches look warm. The AC-179 goal criterion
+// is not on that path: it is a goal-sweep that re-runs **once per hour**. Two requests an hour is
+// structurally outside EVERY 30s TTL, so each re-run is a guaranteed COLD miss and pays the full build
+// inside the request: measured on the live store, 19.17 s cold vs 1.61 s warm, against the criterion's
+// fixed `curl --max-time 10`. The failure is intermittent (660 passes then one fail), which is the
+// worst shape — an intermittent fail is indistinguishable from a real defect in the ledger.
+//
+// ⊢ The fix cannot be "a longer TTL" (the first request is always cold) and cannot be a bigger
+// `--max-time` (a constant that depends on the host load will always flip back — hard rule 4
+// corollary 2). The required property is ONE: **the request path must not carry the build cost.**
+// So the build moves to a background tick and requests read a snapshot.
+//
+// ⊢ Why a snapshot and not merely "warm the caches": with warm caches a request is still coupled to
+// the TTL — one expired reader and the request pays that reader. A snapshot is a value the request
+// path reads unconditionally, so the request cost no longer depends on when the last refresh ran.
+//
+// ⊢ Why the rebuild is COOPERATIVE (awaits `yieldToEventLoop` between readers, and parses the 70 MB
+// verification ledger through `readTestsNonBlocking`): the sync readers block the event loop
+// (`readLive` alone spends ~0.6 s in `spawnSync`; a sync parse of the ledger is ~1.6 s). A single
+// blocking rebuild would stall every concurrent request — `/health` included — which is exactly what
+// AC4 forbids. Each blocking reader therefore gets its OWN macrotask, so the longest a concurrent
+// request can wait is ONE reader, never their sum.
+
+/** Snapshot refresh period (ms). Matches the readers' own 30s TTL and the dashboard's 30s client
+ *  auto-refresh, so the snapshot is never staler than the page's existing freshness contract. */
+export const DASHBOARD_SNAPSHOT_REFRESH_MS = 30_000;
+
+/** Kill switch for the whole mechanism. Setting it to "1" makes BOTH the tick and the request-path
+ *  snapshot lookup inert, so `/dashboard` falls back to the legacy in-request build — the negative
+ *  control that proves the fix (and not the host) is what makes the criterion's first request fast. */
+export const DASHBOARD_SNAPSHOT_DISABLED_ENV = "QUAY_DASHBOARD_SNAPSHOT_DISABLED";
+
+/** Everything `/dashboard` renders from root-only + client reads, captured at one instant. Holding
+ *  the VALUES (not a rendered page) keeps the page render pure and lets the request path choose
+ *  `?hours=` per request without rebuilding. */
+export interface DashboardSnapshot {
+  builtAt: number;
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
+  history: GitHistoryResult;
+  tasks: TaskSummary[];
+  workerOutcomes: WorkerOutcomeRecord[];
+}
+// ⊢ `goals` is deliberately NOT in the snapshot. Every other field already had a 30s TTL cache on the
+// request path (taskSummary / live / sys / mgr / readTests), so snapshotting them preserves today's
+// freshness contract exactly. The goal list was UNCACHED — it was read fresh on every request — and it
+// is the one card AC-179 itself measures, so keeping it fresh keeps AC5's "real data" reading at its
+// strongest. It costs ~6 ms (measured), which is not the build cost this task moves off the path.
+
+const dashboardSnapshots = new Map<string, DashboardSnapshot>();
+const dashboardSnapshotRebuilds = new Map<string, Promise<void>>();
+
+/** True when the snapshot mechanism is switched off (see DASHBOARD_SNAPSHOT_DISABLED_ENV). Read at
+ *  CALL time, not at module load, so a test can flip it per test. */
+export function dashboardSnapshotDisabled(): boolean {
+  return process.env[DASHBOARD_SNAPSHOT_DISABLED_ENV] === "1";
+}
+
+/** The snapshot for `root`, or null when none has been built yet. **Sync and non-building** — this is
+ *  the request path's whole lookup, and it never awaits, so a request can never be made to wait for a
+ *  rebuild (AC3). */
+export function peekDashboardSnapshot(root: string): DashboardSnapshot | null {
+  if (dashboardSnapshotDisabled()) return null;
+  return dashboardSnapshots.get(root) ?? null;
+}
+
+/** Test seam: an optional hook awaited BETWEEN the rebuild's cooperative steps. Production never sets
+ *  it. It lets a test hold a rebuild open and observe what concurrent requests see WHILE it runs —
+ *  rather than racing a fixture rebuild that finishes in microseconds. */
+let dashboardSnapshotStepHook: (() => Promise<void>) | null = null;
+export function setDashboardSnapshotStepHook(hook: (() => Promise<void>) | null): void {
+  dashboardSnapshotStepHook = hook;
+}
+
+/** Test-hygiene handle: drop every snapshot, in-flight rebuild marker and refresh registration. */
+export function clearDashboardSnapshots(): void {
+  dashboardSnapshots.clear();
+  dashboardSnapshotRebuilds.clear();
+  dashboardSnapshotStepHook = null;
+}
+
+/** True while a rebuild for `root` is in flight — the read AC3/AC4's measurement needs (a direct
+ *  reading of the mechanism's own state, not an inference from a timestamp). */
+export function isDashboardSnapshotRebuilding(root: string): boolean {
+  return dashboardSnapshotRebuilds.has(root);
+}
+
+/** Await the in-flight rebuild for `root`, if any (test seam — the request path never does this). */
+export function awaitDashboardSnapshotRebuild(root: string): Promise<void> {
+  return dashboardSnapshotRebuilds.get(root) ?? Promise.resolve();
+}
+
+const EMPTY_LIVE: LiveResult = { status: "error", reason: "internal", inFlight: [], concurrencyCap: DEFAULT_DRIVER_CAP, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+const EMPTY_SYS: SystemResult = { status: "error", reason: "internal", resourceGate: { status: "error", reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error", reason: null, totalBudget: null, inUse: null, available: null, verdict: null } };
+const EMPTY_MGR: ManagerResult = { status: "error", reason: "internal", loopDriver: { status: "error", reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error", reason: null, sessions: [] }, observers: { status: "error", reason: null, rows: [] }, pool: { status: "error", reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null };
+const EMPTY_HISTORY: GitHistoryResult = { status: "error", reason: "internal", commits: [], head: null, heads: {}, mainlineHead: null };
+
+/** Build one snapshot. Cooperative by construction: the async probes are started FIRST (their
+ *  shell-outs run in the OS while the sync steps below yield), each blocking reader gets its own
+ *  macrotask, and the 70 MB ledger goes through the sliced/yielding reader. Never throws — a reader
+ *  that fails yields the same honest error shape the request path already used. */
+export async function buildDashboardSnapshot(root: string, client: ProviderClient): Promise<DashboardSnapshot> {
+  const asyncProbes = Promise.all([
+    readDashboardSystem(root).catch(() => EMPTY_SYS),
+    readDashboardManagerLight(root).catch(() => EMPTY_MGR),
+    readTaskSummary(root, client).catch(() => [] as TaskSummary[]),
+  ]);
+
+  await yieldToEventLoop();
+  if (dashboardSnapshotStepHook) await dashboardSnapshotStepHook();
+  let tests: TestsResult;
+  try { tests = await readTestsNonBlocking(root); } catch { tests = { status: "error", reason: "internal", runs: [] }; }
+
+  await yieldToEventLoop();
+  if (dashboardSnapshotStepHook) await dashboardSnapshotStepHook();
+  let live: LiveResult;
+  try { live = readDashboardLive(root); } catch { live = EMPTY_LIVE; }
+
+  await yieldToEventLoop();
+  if (dashboardSnapshotStepHook) await dashboardSnapshotStepHook();
+  // These three are cheap (measured ~0.11 s / ~0.05 s / ~0.001 s) — one macrotask each would add
+  // scheduling overhead for no blocking win, so they share one.
+  let history: GitHistoryResult;
+  try { history = readGitHistory(root); } catch { history = EMPTY_HISTORY; }
+  let suiteRun: CurrentSuiteRun | null;
+  try { suiteRun = readCurrentSuiteRun(root); } catch { suiteRun = null; }
+  let workerOutcomes: WorkerOutcomeRecord[] = [];
+  try { workerOutcomes = readWorkerOutcomeRecords(root); } catch { workerOutcomes = []; }
+
+  const [sys, mgr, tasks] = await asyncProbes;
+  return { builtAt: Date.now(), live, sys, mgr, tests, suiteRun, history, tasks, workerOutcomes };
+}
+
+/** The goal-card's data: read FRESH on every request (see the note on DashboardSnapshot above) — the
+ *  one reader the request path still performs, because it is ~6 ms and it is the card AC-179 measures.
+ *  Degrades to [] like every other dashboard read (never 500s the page). */
+async function readDashboardGoals(client: ProviderClient): Promise<GoalRecord[]> {
+  return await client.goalList().catch(() => [] as GoalRecord[]);
+}
+
+/** Start the background rebuild tick for `root`. Runs one build immediately (the cold build lives
+ *  HERE, at startup, not in a request — the same shape as startDevelopRefBackgroundRefresh), then
+ *  re-builds every `intervalMs`. The interval is unref'd so it never keeps the process alive.
+ *
+ *  Rebuilds never stack: while one is in flight the next tick is skipped (a slow store must not
+ *  queue up work that all lands at once). A FAILED rebuild keeps the previous snapshot rather than
+ *  blanking the page — a stale dashboard is honest, an empty one would be a fabricated absence. */
+export function startDashboardSnapshotRefresh(
+  root: string,
+  client: ProviderClient,
+  { intervalMs = DASHBOARD_SNAPSHOT_REFRESH_MS }: { intervalMs?: number } = {},
+): { stop: () => void; rebuildNow: () => Promise<void> } {
+  if (dashboardSnapshotDisabled()) return { stop: () => {}, rebuildNow: () => Promise.resolve() };
+  // `stop()` retires the INTERVAL only — `rebuildNow()` stays live, because an on-demand rebuild is
+  // exactly what a caller (or a test that has retired the tick to make its fixture deterministic)
+  // wants and it is never implicit.
+  const rebuild = (): Promise<void> => {
+    const inFlight = dashboardSnapshotRebuilds.get(root);
+    if (inFlight) return inFlight; // never stack rebuilds on one root
+    const p = buildDashboardSnapshot(root, client)
+      .then((snap) => { dashboardSnapshots.set(root, snap); })
+      .catch(() => { /* keep the previous snapshot — see the contract above */ })
+      .finally(() => { dashboardSnapshotRebuilds.delete(root); });
+    dashboardSnapshotRebuilds.set(root, p);
+    return p;
+  };
+  void rebuild(); // the cold build — at startup, off the request path
+  let handle: ReturnType<typeof setInterval> | null = setInterval(() => { void rebuild(); }, intervalMs);
+  (handle as unknown as { unref?: () => void }).unref?.();
+  return {
+    stop: () => { if (handle != null) { clearInterval(handle); handle = null; } },
+    rebuildNow: rebuild,
+  };
+}
+
 export async function handleDashboard(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1467,6 +1654,22 @@ export async function handleDashboard(
   manifest: Manifest,
   cfg: ServePageCfg,
 ): Promise<void> {
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the SNAPSHOT is the request path. It is a
+  // sync map lookup — no reader runs here, so the response cost is bounded by the render alone and
+  // is independent of every reader's TTL and of the host's load. A rebuild in flight does not touch
+  // this path at all: the previous snapshot is served (AC3), and when the mechanism is switched off
+  // (DASHBOARD_SNAPSHOT_DISABLED_ENV) `peekDashboardSnapshot` returns null and the legacy in-request
+  // build below runs unchanged — the negative control.
+  const snapshot = peekDashboardSnapshot(cfg.workspaceRoot);
+  if (snapshot != null) {
+    const goals = await readDashboardGoals(client);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderDashboardPage(
+      { live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun, history: snapshot.history, tasks: snapshot.tasks, goals },
+      { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes },
+    ));
+    return;
+  }
   // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: the async probe group is started
   // FIRST — its shell-script subprocesses (resource-gate / process-budget / loop-driver-check) run in
   // the OS while the three sync readers below do their (now cached / bounded) work on the main thread.
@@ -1517,6 +1720,25 @@ export async function handleDashboardCards(
   client: ProviderClient,
   cfg: { workspaceRoot: string },
 ): Promise<void> {
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: this endpoint is polled by every open tab
+  // every 30s, so it is the OTHER hot reader of the same build. It shares the snapshot with
+  // /dashboard — one build, two faces — and therefore blocks the event loop no more than a map
+  // lookup does. Absent (or the mechanism switched off) ⇒ the legacy in-request build below.
+  const snapshot = peekDashboardSnapshot(cfg.workspaceRoot);
+  if (snapshot != null) {
+    const hours = timelineHoursFromRequest(req);
+    const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
+    const goals = await readDashboardGoals(client);
+    const payload = JSON.stringify(buildCardsPayload({
+      live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun,
+      tasks: snapshot.tasks, goals, workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
+      workerOutcomes: snapshot.workerOutcomes,
+    }));
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(payload);
+    return;
+  }
+
   // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: same async-first + cached readLive
   // (computeBlocking:false) structure as handleDashboard — this endpoint is the 30s auto-refresh
   // poll, so it must NOT re-run the full task-store scan or the sync readers on every poll.
