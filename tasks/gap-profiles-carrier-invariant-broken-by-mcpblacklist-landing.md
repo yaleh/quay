@@ -3,7 +3,7 @@ id: gap-profiles-carrier-invariant-broken-by-mcpblacklist-landing
 title: shipped `plugin/.quay/profiles.yml` 与 `src/init.ts`
   内联模板不再逐字一致——`c34f81330` 只改 carrier 未改模板，`packages/quay/test/init.test.mjs` 的
   "profiles carrier" 判据在全库套件里恒红，任何任务的 fan-in 都会被它拦住
-status: todo
+status: superseded
 labels:
   - gap
   - defect
@@ -34,6 +34,8 @@ assert.equal(generateProfilesContent("quay"), fs.readFileSync("plugin/.quay/prof
 **另外两处（同一次扫描，按硬规则 5b 一并登记，⛔ 不扩大本任务范围）**：
 - 生产调用点 `plugin/scripts/verify-deliver-coldstart.sh` 的 AC-234 渲染 fixture 以 GOAL 播种（`gap-goal-create-as-active-skips-zero-ac-gate` 已按新写面语义处置为 draft 播种，与该任务同批落地）——与 carrier 不变量无关，仅记录。
 - `plugin/.quay/profiles.yml` 的注释逐字写着「本文件是 quay-init 逐字铺进消费者 .quay/ 的那一份；只改 dev-tree 根 ⇒ 第三方项目功能静默失效」——**本次破的正是它自己警告的那条**（改了一份、`init.ts` 那份没改）。
+
+**SUPERSEDED（2026-09-14，协调者更正）**：上面「为什么它没有归属」的**前提是错的**——修它的任务**已经存在**：`gap-serve-stale-signal-has-no-consumer`（status `ready`，在飞）的 `## Touches` 里已含 `packages/quay/src/init.ts` 并写明理由（其正文「附」小节），且该任务正文记录的正是同一次单边改动（`c34f81330` 只改 carrier、模板未同步）与同一组读数（1967 vs 2581 字节）。查重当时读到的是本 worktree 过期的 `tasks/` 快照——`gap-serve-stale-signal-has-no-consumer` 的那行 Touches 于 11:37:36Z 才落进主检出，晚于那次合并。⇒ 本条**不是第二个 owner**，而是被 `gap-serve-stale-signal-has-no-consumer` **取代**（superseded）：owner 的在飞分支已覆盖同一文件，两个任务同时动 `packages/quay/src/init.ts` 只会互相碰撞，且本条落地时其 AC1 早已由 owner 变绿。**本条唯一保留的增量证据**是**环境无关性的三重对照**（带 `QUAY_PLUGIN_ROOT` / `env -u QUAY_PLUGIN_ROOT` / cwd 移到 `/tmp`）：三种读法**读数相同**（produced/shipped = 1967/2581 字节、`equal:false`、20 行差），用以排除「这是 driver-env 代理量缺陷（那类已由 951fbb15c 修）」——**owner 任务的证据里没有记录这一对照**，故保留于此。⛔ 本条不追加 `## Touches` 自触项、也不做任何使其可晋升的改动，以免与在飞 owner 争同一文件。
 
 ## AC
 
