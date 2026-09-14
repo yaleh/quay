@@ -2,7 +2,7 @@
 id: gap-ac190-write-face-rule-unreachable-under-no-verify
 title: AC-190 二次复发：写入面判定落在 pre-commit 钩子，而生产立案路径 commitStoreWrite 一律 --no-verify
   ⇒ 判定结构性不可达（生效线后第 2 条 delivery-critical 任务再次无 goal_ac）
-status: todo
+status: ready
 labels:
   - gap
   - defect
