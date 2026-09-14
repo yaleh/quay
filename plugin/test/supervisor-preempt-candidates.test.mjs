@@ -147,7 +147,21 @@ test("AC1/AC2 band: a single >90min no-progress task (status in-progress) is det
     assert.equal(r.status, 0);
     assert.match(r.stdout, /^preemptible: 1$/m, "band: 超时且无推进的任务可被确定性列出");
     assert.match(r.stdout, /gap-preempt-a/);
-    assert.match(r.stdout, /95\.0 min/);
+    // The duration COLUMN is wall-clock-derived (`(now − startedAt)/60000` → `.toFixed(1)` in
+    // supervisor-preempt-candidates.ts:88), so its rendered literal drifts by the spawn latency
+    // between the backdated bracket and the script's own `Date.now()`. The former `/95\.0 min/`
+    // literal therefore flaked as soon as that latency crossed the `.toFixed(1)` rounding boundary
+    // (3 s) under full-suite load — observed `95.1 min` at 2026-09-14T10:26Z, while the identical
+    // run 22 min earlier printed `95.0` and passed. Assert the duration FACT as a band (a 95-min
+    // backdate ⇒ 95 ≤ m < 96, a 60 s margin instead of 3 s) plus the reason column (a constraint
+    // the literal never carried). The band still reds on a mis-wired duration (a 91-min backdate
+    // lands outside it — the red control recorded in
+    // tasks/gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun.md).
+    const dm = r.stdout.match(/\b(\d+\.\d) min\b/);
+    assert.ok(dm, `duration column present in stdout: ${JSON.stringify(r.stdout)}`);
+    const minutes = Number(dm[1]);
+    assert.ok(minutes >= 95 && minutes < 96, `duration reflects the 95-min backdate (got ${minutes} min)`);
+    assert.match(r.stdout, /timeout-no-progress/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
