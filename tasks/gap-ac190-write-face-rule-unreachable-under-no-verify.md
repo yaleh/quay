@@ -85,15 +85,15 @@ offenders(同一内容 + 一行顶层 goal_ac)                  = []          �
 
 ## AC
 
-- [ ] AC1 `node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts` exit 0；`--json` 的 `ok` 为 `true` 且 `violating` 为 `[]`
-- [ ] AC2 `--inject-unbacked-fixture` 仍 exit 非零（⛔ 不得靠放宽判据换绿）
-- [ ] AC3 `tasks/gap-dist-closure-missing-driver-anchor-js.md` 的**顶层** `goal_ac` 非空、任务体里写明「为什么是这条 AC」，且其 `delivery-critical` 标签仍在（⛔ 不得靠摘标签换绿）
-- [ ] AC4 负控制走**真实 ABI 写路径**（store `write()` / MCP `task_write`，⛔ 不是 git 钩子、⛔ 不是只调纯函数）：创建一条「`delivery-critical` + 无 `goal_ac`」的任务 ⇒ 被拒（throw / 非零）且文件未落盘
-- [ ] AC5 反向对照：同一内容补上顶层 `goal_ac` ⇒ 写入成功、文件落盘、store 提交成功
-- [ ] AC6 不误伤：已存在的 delivery-critical 无 `goal_ac` 存量任务被翻状态 ⇒ 放行；无标签 / 非 `tasks/` 路径不触发。给出**真仓库全量任务档**的读数（⛔ 不只 fixture）
-- [ ] AC7 第三方不误伤：一个没有 goal 层的工作区里创建一条带 `delivery-critical` 的新任务 ⇒ 不被本条判定拒绝（给出可复跑命令与读数）
-- [ ] AC8 单源：写入面判定与检测器 / 钩子共用同一组判定函数（证据 = `import` 或 `export … from` 行本身，⛔ 不是第二份字符串比较）；`judgeStagedDeliveryCritical` 对同一样本的双向读数在改动前后逐字相同
-- [ ] AC9 `node --no-warnings --experimental-strip-types plugin/scripts/eligible-no-goal-source-check.ts` exit 0（未把 goal 源塞回 `ready-pool-check.ts` 的准入合取）
+- [x] AC1 `node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts` exit 0；`--json` 的 `ok` 为 `true` 且 `violating` 为 `[]`
+- [x] AC2 `--inject-unbacked-fixture` 仍 exit 非零（⛔ 不得靠放宽判据换绿）
+- [x] AC3 `tasks/gap-dist-closure-missing-driver-anchor-js.md` 的**顶层** `goal_ac` 非空、任务体里写明「为什么是这条 AC」，且其 `delivery-critical` 标签仍在（⛔ 不得靠摘标签换绿）
+- [x] AC4 负控制走**真实 ABI 写路径**（store `write()` / MCP `task_write`，⛔ 不是 git 钩子、⛔ 不是只调纯函数）：创建一条「`delivery-critical` + 无 `goal_ac`」的任务 ⇒ 被拒（throw / 非零）且文件未落盘
+- [x] AC5 反向对照：同一内容补上顶层 `goal_ac` ⇒ 写入成功、文件落盘、store 提交成功
+- [x] AC6 不误伤：已存在的 delivery-critical 无 `goal_ac` 存量任务被翻状态 ⇒ 放行；无标签 / 非 `tasks/` 路径不触发。给出**真仓库全量任务档**的读数（⛔ 不只 fixture）
+- [x] AC7 第三方不误伤：一个没有 goal 层的工作区里创建一条带 `delivery-critical` 的新任务 ⇒ 不被本条判定拒绝（给出可复跑命令与读数）
+- [x] AC8 单源：写入面判定与检测器 / 钩子共用同一组判定函数（证据 = `import` 或 `export … from` 行本身，⛔ 不是第二份字符串比较）；`judgeStagedDeliveryCritical` 对同一样本的双向读数在改动前后逐字相同
+- [x] AC9 `node --no-warnings --experimental-strip-types plugin/scripts/eligible-no-goal-source-check.ts` exit 0（未把 goal 源塞回 `ready-pool-check.ts` 的准入合取）
 - [ ] AC10 `scripts/test.sh` 全量绿（含 AC4–AC7 的正、反、对照断言）（待外部）
 
 ## DoD
