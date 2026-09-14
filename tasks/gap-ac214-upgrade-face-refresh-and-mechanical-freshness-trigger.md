@@ -90,8 +90,8 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 6. **判据转绿（干跑 criterion 本体，⛔ 不是「我看它绿了」）**：AC-214 criterion ⇒ 贴 **exit 0** + 七行 freshness（每条 `margin > 0`）+ `.quay/goal-freshness-margin.json` 全文；再跑 `goal-store gate AC-214 --root .` ⇒ exit 0。
 7. **负控制（判据仍能取假，⛔ 双向）**：① `QUAY_GOAL009_FRESHNESS_K=1` 重跑 AC-214 criterion ⇒ **exit 1** 且 stderr **逐条指名**主体；② 判据文本**逐字节未变**：`git diff --exit-code -- goals/` 为空；③ **判据本体是只读的**：只跑 criterion 的那一次，前后 `md5sum .quay/productization-verification.jsonl` **相同**（⛔ 不要把步骤 3 的 append 与它混为一谈——两者的 md5 对比是两件事）。三条全部贴出。
 8. **刷新动作机械化（本条的第二个交付物，⛔ 与本条前半独立可验）**：
-   - **8.1 主体↔产出者映射**：做一个**版本控制**的产物，把 NEED 的 7 个主体映射到产出它的命令（当前实测：冷启动面一次运行写出 AC-201/203/205/207/232 五条，升级面一次运行写出 AC-238/239——见 §Proposal 的载体表按 `build_sha`+`ts` 分组）。落点建议 `plugin/freshness-producers.json`（**单源**：判定与探针都读它，⛔ 不复制两份）。
-   - **8.2 完备性判定（能取假）**：任何出现在载体里、却没在映射里登记产出者的主体 ⇒ **fail-closed 报出**（这正是 09-13 那次转红的成因：两个产出者只跑了一个）。负控制必须**双向**：临时加一个假主体 ⇒ 判定变红；去掉 ⇒ 变绿。
+   - **8.1 主体↔产出者映射**：`plugin/freshness-producers.json` —— 把 NEED 的 7 个主体映射到产出它的命令（当前实测：冷启动面一次运行写出 AC-201/203/205/207/232 五条，升级面一次运行写出 AC-238/239——见 §Proposal 的载体表按 `build_sha`+`ts` 分组）。**单源**：判定与探针都读它，⛔ 不复制两份。
+   - **8.2 完备性判定（能取假）**：`plugin/scripts/freshness-producer-coverage-check.ts` —— 任何出现在载体里、却没在映射里登记产出者的主体 ⇒ **fail-closed 报出**（这正是 09-13 那次转红的成因：两个产出者只跑了一个）。负控制必须**双向**：夹具载体加一条未登记主体 ⇒ 判定变红且逐条指名；去掉 ⇒ 变绿。⭐ 该判定还要对**生产**载体跑一次并贴读数（⛔ 只有夹具能满足的判据不是测量）。
    - **8.3 探针 + routine 接线**：新增 `plugin/probes/freshness-refresh.md`（版本控制；frontmatter 文法正本 `plugin/scripts/read-probe-spec.ts`，须含 `instrument`/`fallback`/`output_routing`；路由词表**对着消费方核实**，⛔ 不臆造），并在 `.quay/config.yml` 的 `loop.routines` 增一条（trigger 用既有文法 `interval:<N>m`）。规格的 objective 要求探针读 `.quay/goal-freshness-margin.json`，对 margin 低于阈值的主体**产出 finding**（由既有的 routine→task filing 链落成任务）。**阈值必须是 K 与已测量量的函数**：`阈值 ≥ 产出者墙钟(小时) × 实测前进速率(交付面提交/小时) ⇒ fraction ≥ (产出者墙钟 × 速率) / K`（例：升级面约 2h × ≈15/h = 30 ⇒ fraction ≥ 0.15），⛔ 不引入与 K 无关的独立魔数。⛔ 探针**只 file 不 execute**：⛔ 不得让探针自动跑跨机产出器（重跑的决定仍归人/派发链；routine 的 FILE-ONLY 边界）。
    - **8.4 镜像与静态闸义务（⛔ 先查再动）**：`plugin/` 有镜像 `packages/quay/plugin/`（`probes/` 亦在其中）⇒ 新增规格必须同步镜像并通过 `mirror-pair-drift-check.ts`；若新增 `plugin/scripts/*.ts`，须履行 CLAUDE.md 记载的义务（`capability-catalog.sh` 六行 / `runner-static-gate` 登记 / mutation case / `@checker-count`+1），并在 body 里**逐项贴出**。优先复用既有形态，⛔ 不新造第二套检查器形态。
    - **8.5 真 loader 载入的证据**：用**真** `read-probe-spec.ts` 载入新规格 ⇒ 贴返回值（四键齐全）。若该 routine 在本机**结构上**无法被调度（例如探针读不到主检出的 `.quay/`）⇒ 贴 fail-closed 原文 + **可区分的 NOT-EVALUATED**（⛔ 不与合格同形，硬规则 3b），并把本条升 `needs-human`，⛔ **不得静默跳过**。
@@ -105,7 +105,7 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 - [ ] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）；`goal-store gate AC-214 --root .` ⇒ exit 0。⛔ 通过放宽 criterion 达成不算。
 - [ ] AC5 负控制（判据仍能取假，且转绿不来自放宽）：① `QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；② `git diff --exit-code -- goals/` 为空（判据文本逐字节未变）；③ **只跑 criterion** 的前后 `md5sum .quay/productization-verification.jsonl` **相同**（证明判据本体只读；⛔ 与步骤 3 的写入是两件事）。三条读数全部贴出。
 - [ ] AC6 落点正确（⛔ 防空转）：贴出记录**在主检出**载体中的位置（绝对路径 + 载体行数）**且** worktree 的 `.quay/productization-verification.jsonl` 中**没有**本次新增（若 worktree 里也出现 ⇒ `--root` 传错、判据读不到 ⇒ 未达成，须说明并重跑）。
-- [ ] AC7 刷新动作机械化之一：**版本控制**的主体↔产出者映射产物（`plugin/freshness-producers.json` 或实现者选定的等价单源产物）+ 一个**能取假**的完备性判定；负控制**双向**贴出（临时加假主体 ⇒ 变红；去掉 ⇒ 变绿），并贴「载体中出现但未登记的主体」在判定下的真实报出形态。若判定落在新增的 `plugin/scripts/*.ts`，贴出 CLAUDE.md 记载的全部义务的落实读数（catalog 六行 / runner-static-gate 登记 / mutation case / `@checker-count`）与 `mirror-pair-drift-check` 的读数。
+- [ ] AC7 刷新动作机械化之一：**版本控制**的主体↔产出者映射产物 `plugin/freshness-producers.json`（**单源**：判定与探针都读它）+ 判定 `plugin/scripts/freshness-producer-coverage-check.ts`（+ `plugin/test/freshness-producer-coverage-check.test.mjs`），后者对「载体里出现过、却未在映射里登记产出者的主体」**fail-closed 报出**。负控制**双向**贴出（夹具载体里加一条未登记主体 ⇒ 判定变红且逐条指名；去掉 ⇒ 变绿）；并贴该判定对**生产**载体 `.quay/productization-verification.jsonl` 的一次真实读数（硬规则 4 推论三：只由夹具满足的判据不算产出）。同时贴新增 `plugin/scripts/*.ts` 的全部义务落实读数（`capability-catalog.sh` 声明行 / `runner-static-gate` 登记 / mutation case / `@checker-count`）与 `mirror-pair-drift-check.ts` 的读数；⛔ 义务清单若与本任务列出的 Touches 不一致（少一处落点），须在 body 里补记并把该落点补进 `## Touches`。
 - [ ] AC8 刷新动作机械化之二（routine 接线）：`.quay/config.yml` 的 `loop.routines` 中新增条目（贴该条目的逐字内容与其 trigger 文法的出处）；`plugin/probes/freshness-refresh.md` 经**真** `read-probe-spec.ts` 载入成功（贴返回值四键）；规格 objective 中触发阈值**显式写成 K 与已测量量的函数**并在 body 里给出该算式的代入过程（⛔ 不得出现与 K 无关的独立魔数）；镜像 `packages/quay/plugin/probes/freshness-refresh.md` 存在且 `mirror-pair-drift-check.ts` 通过。若该 routine 结构上无法被调度 ⇒ 贴 fail-closed 原文 + 可区分的 NOT-EVALUATED 并升 `needs-human`（⛔ 不得静默跳过、⛔ 不得用「观察项」代替）。
 
 ## Definition of Done
@@ -118,10 +118,18 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 
 ## Touches
 
-- `plugin/probes/freshness-refresh.md`（新增探针规格；版本控制）
-- `packages/quay/plugin/probes/freshness-refresh.md`（↑ 的镜像 —— `plugin/` 有镜像对，`mirror-pair-drift-check.ts` 两边都数）
-- `plugin/freshness-producers.json`（新增主体↔产出者映射的单源产物）+ 对应镜像路径
-- `plugin/scripts/freshness-producer-coverage-check.ts` 与 `plugin/test/freshness-producer-coverage-check.test.mjs`（**仅当**实现者选择新增检查器作为 8.2 的判定落点；若复用既有机件则这两条不适用，并在 body 里说明改用了哪一条）
+（新文件一律带 `(new)` 结构标签 —— `touches-parser.ts` 的 admission 约定：未被标 `(new)` 的 Touches 条目必须在盘上存在，否则该候选按 `majorityMissing` 判为不可派发。）
+
+- `plugin/probes/freshness-refresh.md` (new)
+- `packages/quay/plugin/probes/freshness-refresh.md` (new)
+- `plugin/freshness-producers.json` (new)
+- `packages/quay/plugin/freshness-producers.json` (new)
+- `plugin/scripts/freshness-producer-coverage-check.ts` (new)
+- `packages/quay/plugin/scripts/freshness-producer-coverage-check.ts` (new)
+- `plugin/test/freshness-producer-coverage-check.test.mjs` (new)
+- `packages/quay/plugin/test/freshness-producer-coverage-check.test.mjs` (new)
+- `plugin/scripts/capability-catalog.sh`（新增脚本的 catalog 声明行落点）
+- `plugin/scripts/runner-static-gate.ts`（新增脚本的静态闸登记落点）
 - `.quay/config.yml`（gitignored：`loop.routines` 条目落点。声明它是为了表明产出位置，⛔ 不是可提交物）
 - `.quay/productization-verification.jsonl`（gitignored：本 AC 的载体，本次运行 append 的 AC-238/239 记录。⚠️ `anti-drift-touches-check` 只比对**已跟踪**文件的 diff；该载体被 `.gitignore:330` 忽略 ⇒ 不进那个集合，声明它是为了表明产出落点，⛔ 不是可提交物）
 - `tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger.md`（自身文件：勾 AC + 贴实跑证据）
