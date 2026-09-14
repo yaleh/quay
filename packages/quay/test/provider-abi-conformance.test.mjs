@@ -561,7 +561,10 @@ test("provider-abi-conformance: goal ABI — native goal_list non-empty via goal
     const written = await coreClient.goalWrite({
       id: "GOAL-001",
       title: "goal ABI conformance",
-      status: "active",
+      // gap-goal-create-as-active-skips-zero-ac-gate: the P6-goal gate now covers the CREATE path, so
+      // a brand-new GOAL no AC names cannot be born `active`. The subject here is the ABI round-trip
+      // (goal_write → goal_list), which is status-agnostic — `draft` exercises it identically.
+      status: "draft",
       origin: "provider-abi-conformance (AC-176 goal group)",
       // gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 chars) —
       // origin is provenance only, never the body.
