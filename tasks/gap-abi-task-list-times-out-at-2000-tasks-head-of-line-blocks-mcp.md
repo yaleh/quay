@@ -291,6 +291,8 @@ N = **2,000** 的合成任务库、每个任务 ~4 KB body（≈8 MB body），�
 > 但它连的生产 bundle 是构建产物，修复尚未落进去 —— 该条**不**被当成「修复已在生产生效」的证据，
 > 也刻意没有手工重建 bundle 去凑。
 
+反证（2026-09-14 04:5xZ，立案后同轮补记，避免结论过强）：同一时段自主循环本身仍在成功建任务——03:00 后落盘的 gap-ac255-driver-internalization-pid-le2-six-kinds-fresh / gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun / gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved 等 8 条均非本会话所建。⇒ 不是「ABI 全局不可用」，而是【本会话这条 MCP 连接/服务端实例】被一个 37 s 的全量 task_list 堵死后，其上后续所有请求陪绑超时。修复本任务时，第一步应先判定：是每连接一个 provider 实例、还是共享实例；队头阻塞发生在哪一层（Core MCP handler / provider-client / native mcp-server）。⛔ 不要把「循环还在工作」当成「没有缺陷」——37 s 的全量载入是实测事实，它只是还没有打到每一个消费者身上。
+
 ## Evidence
 
 ### fan-in 被一条无关的 suite 红挡下（2026-09-14，第 2/3 次续做轮）
