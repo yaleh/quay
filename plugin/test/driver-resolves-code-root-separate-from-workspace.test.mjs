@@ -172,26 +172,40 @@ test("AC3a: resolveQuayCodeRoot 按【kernel 安装位置】的布局解析，�
 });
 
 test("AC3a': kernelSiblingArgv / kernelConfigPath 锚在 kernel 安装位置（⛔ 非 workspace root）", () => {
-  const sib = kernelSiblingArgv("slot-refill.ts", ["--root", "/tmp/x"]);
-  assert.ok(Array.isArray(sib), "本仓 dev tree 下 slot-refill.ts 必须可解析");
-  assert.deepEqual(sib.slice(-2), ["--root", "/tmp/x"], "调用方给的多余参数必须原样附加在末尾");
-  const scriptPath = sib.find((a) => a.endsWith("slot-refill.ts") || a.endsWith("slot-refill.js"));
-  assert.ok(scriptPath && fs.existsSync(scriptPath), `解析出的脚本必须真实存在：${scriptPath}`);
+  // 本用例断言的是【缺省】解析（无显式 override）下的锚点。QUAY_PLUGIN_ROOT 是显式指针缝
+  // （driver-runtime.ts:290/297：`resolveKernelScriptsDir`/`resolveKernelPluginRoot` 的 override 分支），
+  // 生产 driver 的环境里可能带着它——实测本仓 quay-root 的 driver supervisor 就带着
+  // `QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin`，而 worker 的 suite 子进程会继承它。
+  // 不中和它 ⇒ 本用例断言的对象从「本 kernel 安装位置」悄悄换成「那个 env 指向的目录」，
+  // 于是在 task worktree 里跑时 `cfgPath` 落到主检出 ⇒ 断言恒假（硬规则 4b：读数由环境决定）。
+  // 中和之后，断言的对象重新是 AC 所声明的那个量，且【与环境无关】——env 在不在都取同一真值。
+  const prevPluginRoot = process.env.QUAY_PLUGIN_ROOT;
+  delete process.env.QUAY_PLUGIN_ROOT;
+  try {
+    const sib = kernelSiblingArgv("slot-refill.ts", ["--root", "/tmp/x"]);
+    assert.ok(Array.isArray(sib), "本仓 dev tree 下 slot-refill.ts 必须可解析");
+    assert.deepEqual(sib.slice(-2), ["--root", "/tmp/x"], "调用方给的多余参数必须原样附加在末尾");
+    const scriptPath = sib.find((a) => a.endsWith("slot-refill.ts") || a.endsWith("slot-refill.js"));
+    assert.ok(scriptPath && fs.existsSync(scriptPath), `解析出的脚本必须真实存在：${scriptPath}`);
 
-  // .sh sibling 走 bash + <pluginRoot>/scripts/<name>（shipped 下 .sh 以 loose 形态随包）。
-  const sh = kernelSiblingArgv("closure-lag-check.sh");
-  assert.ok(Array.isArray(sh), "closure-lag-check.sh 必须可解析");
-  assert.equal(sh[0], "bash", "shell sibling 的解释器是 bash");
-  assert.ok(fs.existsSync(sh[1]), `解析出的 .sh 必须真实存在：${sh[1]}`);
+    // .sh sibling 走 bash + <pluginRoot>/scripts/<name>（shipped 下 .sh 以 loose 形态随包）。
+    const sh = kernelSiblingArgv("closure-lag-check.sh");
+    assert.ok(Array.isArray(sh), "closure-lag-check.sh 必须可解析");
+    assert.equal(sh[0], "bash", "shell sibling 的解释器是 bash");
+    assert.ok(fs.existsSync(sh[1]), `解析出的 .sh 必须真实存在：${sh[1]}`);
 
-  // 配置类资源（P2 的正则结构上匹配不到的那一半）同样锚在 kernel。
-  const cfgPath = kernelConfigPath(path.join("scripts", "drivers.yml"));
-  assert.ok(fs.existsSync(cfgPath), `drivers.yml 必须可解析：${cfgPath}`);
-  assert.ok(cfgPath.startsWith(REPO_ROOT), "配置路径必须落在 quay 安装树下（⛔ 非 workspace root）");
+    // 配置类资源（P2 的正则结构上匹配不到的那一半）同样锚在 kernel。
+    const cfgPath = kernelConfigPath(path.join("scripts", "drivers.yml"));
+    assert.ok(fs.existsSync(cfgPath), `drivers.yml 必须可解析：${cfgPath}`);
+    assert.ok(cfgPath.startsWith(REPO_ROOT), "配置路径必须落在 quay 安装树下（⛔ 非 workspace root）");
 
-  // 解析不出 ⇒ null（⛔ 不回退到 `<root>/plugin/scripts/<name>`：那会把「找不到」伪装成「跑过了、没数据」）。
-  assert.equal(kernelSiblingArgv("no-such-sibling-xyz.ts"), null, "找不到 ⇒ null（fail-closed）");
-  assert.equal(kernelSiblingArgv("no-such-sibling-xyz.sh"), null, "找不到的 .sh ⇒ null（fail-closed）");
+    // 解析不出 ⇒ null（⛔ 不回退到 `<root>/plugin/scripts/<name>`：那会把「找不到」伪装成「跑过了、没数据」）。
+    assert.equal(kernelSiblingArgv("no-such-sibling-xyz.ts"), null, "找不到 ⇒ null（fail-closed）");
+    assert.equal(kernelSiblingArgv("no-such-sibling-xyz.sh"), null, "找不到的 .sh ⇒ null（fail-closed）");
+  } finally {
+    if (prevPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prevPluginRoot;
+  }
 });
 
 // ── AC3 · 静态检查器 + 双向控制（红面 / 绿面都在本文件里，⛔ 不是只跑一遍看它绿） ──────────────────
