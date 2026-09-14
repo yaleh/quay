@@ -2,7 +2,7 @@
 id: gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy
 title: touches-orthogonality-check.ts 的相对导入路径写死假设仓库顶层布局——在 npm 打包用的 staged
   plugin 副本下 ERR_MODULE_NOT_FOUND,quay driver 命令整体失败
-status: todo
+status: ready
 labels:
   - gap
 parent: null
