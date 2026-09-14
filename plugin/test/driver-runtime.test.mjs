@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // driver-runtime.test.mjs — AC151 (tasks/gap-ac151-two-level-driver-layer-landing): the two-level
 // layering (Layer 0 driver-runtime + Layer 1a task-processing / Layer 1b routine) + the supervisor
 // ported from promotion-driver-launch.sh (bash) into TS.
@@ -612,9 +612,17 @@ test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ no
   assert.equal(typeof fresh.supervisorStartedAt, "number", "supervisorStartedAt 读得（epoch ms）");
   assert.ok(fresh.supervisorStartedAt > 0, "启动时刻非恒 0");
 
-  // procStartTimeMs(自己) 落在 [进程启动, 现在] 之间（epoch ms 上下界）。
+  // procStartTimeMs(自己) == 本测试进程【实际的】启动时刻（epoch ms）。
+  // ⛔ 不写成 `start > Date.now() - 60_000`：那是一个「模块加载 → 走到这一行必须 <60s」的墙钟
+  // 余量，并发负载下本文件耗时 139s（隔离 36s，实测 2026-09-13）⇒ 余量被负载击穿、与任何缺陷
+  // 无关。基准改为 process.uptime()（同一进程的真实存活时长）⇒ 断言与文件跑多久完全解耦。
   const start = procStartTimeMs(process.pid);
-  assert.ok(start != null && start > Date.now() - 60_000 && start <= Date.now(), `procStartTimeMs 合理: ${start}`);
+  const expectedStart = Date.now() - process.uptime() * 1000;
+  assert.ok(start != null && start <= Date.now(), `procStartTimeMs 合理（不晚于现在）: ${start}`);
+  assert.ok(
+    Math.abs(start - expectedStart) <= 10_000,
+    `procStartTimeMs 等于本进程实际启动时刻: start=${start} expected≈${Math.round(expectedStart)}`,
+  );
 });
 
 test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {

@@ -5,13 +5,15 @@ status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
-  [ "$(head -1 archive/INDEX.tsv | awk -F'\t' '{print NF}')" = 7 ] || exit 1
+  [ "$(head -1 archive/INDEX.tsv | awk -F'\t' '{print NF}')" = 7 ] || { echo
+  "AC-157 fail: archive/INDEX.tsv header does not have exactly 7 tab-separated
+  fields" >&2; exit 1; }
 
   for f in plugin/scripts/capability-catalog.sh
   plugin/scripts/runtime-usage-inventory.ts scripts/test.sh
   plugin/scripts/laydown-set-check.sh scripts/version-consistency-check.ts; do
-    [ -e "$f" ] || exit 1
-    grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -q 'archive/' || exit 1
+    [ -e "$f" ] || { echo "AC-157 fail: exclusion surface $f does not exist" >&2; exit 1; }
+    grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -q 'archive/' || { echo "AC-157 fail: $f has no non-comment line referencing archive/" >&2; exit 1; }
   done
 
   exit 0

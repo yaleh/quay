@@ -7,10 +7,10 @@ goal: GOAL-008
 criterion: >-
   f=packages/quay/test/store-commit.test.mjs
 
-  test -f "$f" || { echo "负控制单测不存在: $f"; exit 1; }
+  test -f "$f" || { echo "AC-199 fail - 负控制单测不存在 $f" >&2; exit 1; }
 
-  head -3 "$f" | grep -q '@test-group' || { echo "缺 @test-group 标注 ⇒ 不进默认
-  suite（ADR-019 in-file skip）"; exit 1; }
+  head -3 "$f" | grep -q '@test-group' || { echo "AC-199 fail - $f 缺 @test-group
+  标注（ADR-019 in-file skip，不进默认 suite）" >&2; exit 1; }
 
   node --no-warnings --experimental-strip-types --test "$f"
 expect: 今天：文件不存在 ⇒ 红。落地后四组负控制全绿且该文件出现在默认 suite 选择里。

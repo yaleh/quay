@@ -55,7 +55,7 @@ criterion: >-
 
   if(recs.length>0 && withKey===0){
     console.log("NOT-EVALUATED: carrier has "+recs.length+" retry records but none carries attemptKey — per-cycle key absent, guarantee untested (fail, not pass)");
-    process.exit(1);
+    console.error("AC-192 fail - carrier "+f+" has "+recs.length+" retry records but none carries attemptKey (per-cycle key absent, guarantee untested)"); process.exit(1);
   }
 
   const bad=Object.entries(byKey).filter(([,t])=>t.size>1);

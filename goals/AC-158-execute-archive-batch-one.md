@@ -16,11 +16,13 @@ criterion: >-
   batch=[r for r in rows if r[3].strip()=='zero-call' and
   r[0].startswith('plugin/scripts/')]
 
-  if not batch: sys.exit(1)
+  if not batch: sys.stderr.write("AC-158 fail - archive/INDEX.tsv has no
+  reason_code=zero-call row whose original_path is under plugin/scripts/\n");
+  sys.exit(1)
 
   for r in batch:
-      if os.path.exists(r[0]) or not os.path.exists(r[1]): sys.exit(1)
-      if not (r[4].strip() and r[5].strip() and r[6].strip()): sys.exit(1)
+      if os.path.exists(r[0]) or not os.path.exists(r[1]): sys.stderr.write("AC-158 fail - original_path=%s exists=%s, archive_path=%s exists=%s\n"%(r[0],os.path.exists(r[0]),r[1],os.path.exists(r[1]))); sys.exit(1)
+      if not (r[4].strip() and r[5].strip() and r[6].strip()): sys.stderr.write("AC-158 fail - INDEX.tsv row original_path=%s has an empty evidence/restore_cmd/commit field\n"%r[0]); sys.exit(1)
   sys.exit(0)
 
   P

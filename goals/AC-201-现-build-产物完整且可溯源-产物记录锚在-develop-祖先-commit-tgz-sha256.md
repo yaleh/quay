@@ -23,7 +23,9 @@ criterion: >-
       if subprocess.run(["git","merge-base","--is-ancestor",r["build_sha"],"develop"],
                         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
           sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-201 fail - no .quay/productization-verification.jsonl
+  record with ac=GOAL-009-AC-201, build_sha an ancestor of develop and non-empty
+  tgz_sha256\n"); sys.exit(1)
 
   P
 expect: exit 0 = 载体 .quay/productization-verification.jsonl 中存在

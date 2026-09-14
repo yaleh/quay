@@ -17,12 +17,30 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     return;
   }
   await withProvider(async (client) => {
+    // QX-021/QX-023/QX-028: --search is matched locally below (title + heading-stripped
+    // body), so its value has to be known BEFORE the fetch to decide the fetch's shape.
+    // Hoisted here (it used to be read further down, where its only use was the filter).
+    const searchQuery = typeof flags.search === "string" ? flags.search : null;
+    // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: the TABLE view
+    // renders id/status/role/title/updatedAt — never a body — yet this used to ask the
+    // Provider for every task's body anyway. On the live store that is ~14 MB and 37 s
+    // for `quay task list` (measured 2026-09-14), for output that contains none of it.
+    // `includeBody:false` is the ABI's existing frontmatter-only projection (the same one
+    // the web board, dashboard and /tasks page already use).
+    //   ⛔ `--json` DOES print the task objects, body included — its output IS the tasks,
+    //      so it keeps the full shape. And `--search` is matched against the body locally
+    //      (there is no body to match when includeBody is false), so it keeps it too.
+    //   The Provider filter args are deliberately unchanged: this is the same query as
+    //   before, just without bytes the caller never renders.
+    const needsBodies = wantsJson === true || searchQuery !== null;
     // QX-016 (iteration 4): pass only status to taskList; label filtering handled
     // client-side below so we can apply AND-logic for multiple --label values.
     // gap-one-unparseable-task-takes-down-the-whole-board: taskList() returns
     // partial success { tasks, malformed }. The unparseable files are reported
     // on stderr — never silently dropped, and never treated as "0 tasks".
-    const { tasks, malformed } = await client.taskList({ status: flags.status });
+    const { tasks, malformed } = await client.taskList(
+      needsBodies ? { status: flags.status } : { status: flags.status, includeBody: false }
+    );
     // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
     // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
     // Client-side filter after provider fetch — no provider-side changes needed.
@@ -68,7 +86,6 @@ export async function handleTaskList({ flags, positional, wantsJson }: CliCtx) {
     // QX-028 (experiment 4, iteration 7): use stripHeadings() to exclude
     // structural markdown heading lines from the body search index.
     // Closes CB-017 (significant: template boilerplate false positives).
-    const searchQuery = typeof flags.search === "string" ? flags.search : null;
     const filtered = searchQuery
       ? filteredByLabel.filter((t) =>
           (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(searchQuery.toLowerCase())

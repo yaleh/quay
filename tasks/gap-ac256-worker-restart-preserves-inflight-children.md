@@ -3,6 +3,7 @@ id: gap-ac256-worker-restart-preserves-inflight-children
 title: GOAL-017/AC-256：重启 `driver:worker` 这一个服务不杀它在飞的 worker 子进程 —— 载体
   `.quay/unified-server-verification.jsonl` 有合格记录（SPEC §6.9 不变式 3 / §8-7 后半）
 status: ready
+needs_human_cause: unclassified
 labels:
   - gap
 parent: null
@@ -99,98 +100,142 @@ CLI    node packages/quay/bin/quay.js server restart --only driver:worker
 
 ## Acceptance Criteria
 
-- [ ] **AC1 载体上判据翻转** ⛔ **本趟未达成（见「阻塞」节）**：逐字跑 `goals/AC-256-重启单个服务不杀在飞-worker-重启-driver-worker-后其在飞子进程一个都没死-spec-6-9-不变式.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1：载体不存在）。贴出该命令的 exit code、载体 `.quay/unified-server-verification.jsonl` 的行数、以及那条 `ac="GOAL-017-AC-256"` 记录的原文。
-- [ ] **AC2 服务级重启面在位，且 `restart` 不是 `start` 兼职**（负控制已达成，正半未达成）：`quay server restart --only driver:worker`（或生产者的组合形态）可执行且 argv 留档（`restarted_via`）；**负控制**：`quay server start` 一个**已在跑**的服务 ⇒ exit 0 且该服务 pid **不变**（证明是 no-op 而非静默重启 —— §6.9 不变式 1）。两读数并列贴出。
-- [ ] **AC3 在飞集合是独立推导且逐个存活** ⛔ **本趟未达成（无合格记录）**：`inflight_worker_pids_before` 由**进程树**推导（留 `inflight_source:"proc-tree"`）且**非空**、**每个 pid 取样时存活且非 Z 态**（留 `inflight_worker_pids_before_all_alive: true`）；贴出 driver 自报集合 `inflight_declared_by_driver` 与独立推导结果的**并列读数**。**负控制**：在飞为空时跑 ⇒ 零记录 + NOT-EVALUATED（证明「无可杀」不被计为合格）。
-- [ ] **AC4 真重启（不是 pid 文件改写）** ⛔ **本趟未达成（无合格记录）**：`driver_pid_before != driver_pid_after` ∧ `driver_pid_before` 在重启后**真的不在**（`driver_pid_before_dead_after: true`）∧ `driver_pid_after` 活（`driver_pid_after_alive: true`）⇒ 三读数并列贴出。**负控制**：no-op（pid 不变）⇒ 拒写。
-- [ ] **AC5 一个都没死（本任务的核心断言）** ⛔ **本趟未达成（无合格记录）**：`set(inflight_worker_pids_alive_after) == set(inflight_worker_pids_before)`，且 after 是**对原集合逐个再核活**（⛔ 不是重新枚举进程树）⇒ 贴出两个集合原文。**负控制（合成夹具，⛔ 不在生产上做）**：窗口内杀一个在飞 worker ⇒ 生产者/判据拒写（证明该断言能抓到真回退）。
-- [ ] **AC6 driver 真恢复运转（直接量，⛔ 不只靠 mtime）** ⛔ **本趟未达成（无合格记录）**：`.quay/worker-round.jsonl` 出现**晚于重启时刻的新 `run_id`** 记录（留 `worker_run_id_after` + `worker_round_ts_after`），并与 `os.path.getmtime` 并列贴出。**负控制**：只 stop 不 start ⇒ 零记录（证明「停了所以没杀人」不被计为达成）。
+- [x] **AC1 载体上判据翻转**：逐字跑 `goals/AC-256-重启单个服务不杀在飞-worker-重启-driver-worker-后其在飞子进程一个都没死-spec-6-9-不变式.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1：载体不存在）。贴出该命令的 exit code、载体 `.quay/unified-server-verification.jsonl` 的行数、以及那条 `ac="GOAL-017-AC-256"` 记录的原文。 ⇒ **达成（2026-09-14 05:09Z，生产 root）**：criterion 改前 **exit 1**（载体 3 行、`ac="GOAL-017-AC-256"` 的记录 0 条）→ 改后 **exit 0**（载体 **4 行**、该 ac 的记录 **1 条**）。记录原文见「实测」节。
+- [x] **AC2 服务级重启面在位，且 `restart` 不是 `start` 兼职**：`quay server restart --only driver:worker`（或生产者的组合形态）可执行且 argv 留档（`restarted_via`）；**负控制**：`quay server start` 一个**已在跑**的服务 ⇒ exit 0 且该服务 pid **不变**（证明是 no-op 而非静默重启 —— §6.9 不变式 1）。两读数并列贴出。 ⇒ **达成**：正半 —— `restarted_via` 逐字留档 argv `…/packages/quay/bin/quay.ts server restart --only driver:worker --json --root /home/yale/work/quay`，exit 0，`outcome:"restarted"`，pid **2381279 → 169682**。负控制（§6.9 不变式 1）—— `quay server start --only driver:worker`（**已在跑**）⇒ `outcome:"already-running"`、exit 0、pid **169682 不变**；`--only web` ⇒ 同样 `already-running`、pid 1323037 不变、exit 0。
+- [x] **AC3 在飞集合是独立推导且逐个存活**：`inflight_worker_pids_before` 由**进程树**推导（留 `inflight_source:"proc-tree"`）且**非空**、**每个 pid 取样时存活且非 Z 态**（留 `inflight_worker_pids_before_all_alive: true`）；贴出 driver 自报集合 `inflight_declared_by_driver` 与独立推导结果的**并列读数**。**负控制**：在飞为空时跑 ⇒ 零记录 + NOT-EVALUATED（证明「无可杀」不被计为合格）。 ⇒ **达成**：`inflight_source:"proc-tree"`；`inflight_worker_pids_before=[2593072,3562333,3600343,3611837,4148384]`（非空，5 个），`inflight_worker_pids_before_all_alive:true`。并列读数：独立推导 **5** vs driver 自报 `inflight_declared_by_driver` **1956 条**（`inflight_declared_vs_derived:"DIFFERENT — the independent derivation is authoritative"`）。**负控制（真实端到端，合成 root，⛔ 不碰生产）**：在飞为空 ⇒ `verdict:"NOT-EVALUATED"`、exit 2、**零记录**（载体文件不生成）。
+- [x] **AC4 真重启（不是 pid 文件改写）**：`driver_pid_before != driver_pid_after` ∧ `driver_pid_before` 在重启后**真的不在**（`driver_pid_before_dead_after: true`）∧ `driver_pid_after` 活（`driver_pid_after_alive: true`）⇒ 三读数并列贴出。**负控制**：no-op（pid 不变）⇒ 拒写。 ⇒ **达成**：`driver_pid_before:2381279` ≠ `driver_pid_after:169682` ∧ `driver_pid_before_dead_after:true`（旧 pid 重启后真的不在）∧ `driver_pid_after_alive:true`。**负控制**：`--control no-op-read` 结构性对照 ⇒ `verdict:"NOT-A-RESTART"`、`record_written:false`、exit 1（证明该字段在做功而非装饰）。
+- [x] **AC5 一个都没死（本任务的核心断言）**：`set(inflight_worker_pids_alive_after) == set(inflight_worker_pids_before)`，且 after 是**对原集合逐个再核活**（⛔ 不是重新枚举进程树）⇒ 贴出两个集合原文。**负控制（合成夹具，⛔ 不在生产上做）**：窗口内杀一个在飞 worker ⇒ 生产者/判据拒写（证明该断言能抓到真回退）。 ⇒ **达成**：`inflight_worker_pids_before` 与 `inflight_worker_pids_alive_after` **按集合相等**，且 after 是**对原集合逐个再核活**（⛔ 非重新枚举进程树）。两处原文均为 `[2593072,3562333,3600343,3611837,4148384]`。**负控制（合成夹具，⛔ 不在生产上做）**：`plugin/test/server-restart-inflight-verify.test.mjs` 的 (f) 用例 —— 窗口内杀一个在飞 worker ⇒ `verdict:"INFLIGHT-KILLED"` 且 reason 点名该 pid ⇒ 拒写。
+- [x] **AC6 driver 真恢复运转（直接量，⛔ 不只靠 mtime）**：`.quay/worker-round.jsonl` 出现**晚于重启时刻的新 `run_id`** 记录（留 `worker_run_id_after` + `worker_round_ts_after`），并与 `os.path.getmtime` 并列贴出。**负控制**：只 stop 不 start ⇒ 零记录（证明「停了所以没杀人」不被计为达成）。 ⇒ **达成**：新 `run_id` **wk-prod-1789362571**（改前 wk-prod-1789350883），`worker_round_ts_after:"2026-09-14T05:09:35.418Z"` **严格晚于**重启动作时刻；并列 mtime 读数 `worker_round_jsonl_mtime:"2026-09-14T05:09:35.418Z"`（⛔ 不只靠 mtime）。**负控制**：只 stop 不 start ⇒ 测试 (e) `verdict:"DRIVER-NOT-RESUMED"` ⇒ 拒写。
 - [x] **AC7 读数不自报（硬规则 4b）**：在飞集合与 driver 存活均由**独立推导**（进程树 / `/proc`）得到；⛔ 不采信 `.quay/worker-driver-inflight.pid`、`quay driver status` 或 `server status` 的自报（它们只作交叉核对字段留档）。贴出至少一处两者**一致或不一致**的并列读数。⇒ **达成**：`deriveInflight` 从 `/proc/<driver_pid>/task/*/children` ∩ 本 workspace 的 `task-workers` 角色名推导（`resolveWorkerProcessName(root)`，⛔ 不用写死的 `quay-task-worker`）；`aliveNonZombie` 读 `/proc/<pid>/status` 的 State 字符（⛔ 不用 `kill(pid,0)` —— 僵尸仍可被 signal）；自报文件只进 `inflight_declared_by_driver`。生产并列读数见「阻塞」节：**derived=[300998]（1 个真 worker）vs declared=1933 条**，`inflight_declared_vs_derived: "DIFFERENT — the independent derivation is authoritative"`。
-- [ ] **AC8 生产载体真跑过（硬规则 4 推论三）** ⛔ **本趟未达成（出于安全，⛔ 刻意不跑）**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`，其 `ts` 晚于本任务实现落地时刻，且是在**统一 server 形态**（`quay server status --json` 报 web 与 control 同 host pid）上跑出来的。⛔ 不是 worktree、⛔ 不是夹具注入。
+- [x] **AC8 生产载体真跑过（硬规则 4 推论三）**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`，其 `ts` 晚于本任务实现落地时刻，且是在**统一 server 形态**（`quay server status --json` 报 web 与 control 同 host pid）上跑出来的。⛔ 不是 worktree、⛔ 不是夹具注入。 ⇒ **达成**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`，`at:"2026-09-14T05:09:26.328Z"` 晚于本任务实现落地时刻（分支提交 2026-09-13T22:19Z；本趟另有 05:0xZ 的探针修复提交）；且是在**统一 server 形态**上跑出（`quay server status --json` 报 web 与 control 同 host pid 1323037）。⛔ 唯一由夹具驱动的是【负控制】那几行，正记录来自生产真跑。
 - [x] **AC9 零回退**：`plugin/test/driver-cli.test.mjs`、`plugin/test/driver-runtime*.test.mjs`、`packages/quay/test/serve-*.test.mjs`、`packages/quay/test/server-*.test.mjs` 全绿（贴各文件 `# pass`/`# fail` 计数）；`stopKind()` 的不杀语义未被改坏 —— 贴该函数头注释与 `driver-runtime.ts:1603-1611` 的 diff 为空。⇒ **达成**：driver-cli + driver-runtime\* **40 pass / 0 fail**；`server-*.test.mjs` **20 pass / 0 fail**；`serve-*.test.mjs` **182 pass / 0 fail**（183 tests）；`git diff develop -- plugin/scripts/driver-runtime.ts` **为空**（该文件本趟未被触碰，`stopKind()` 语义原样）。
 - [ ] **AC10 全量套件绿 —— 外层 verification-round 验证**（本条的量产生在 fan-in / 外层 suite 轮，⛔ 不是 worker 自己的读数；scoped 门绿不等于全量绿）。
 
-## 实测与阻塞（2026-09-13 22:0xZ，本任务实现落地后）
+## 实测（2026-09-14 05:09Z，生产 root，真跑）
 
-### ① 实现已落地并绿（本趟可交的部分）
+### ① 上一趟的阻塞已消失：阶段 C 的 anchor 不在
 
-| 交付物 | 状态 | 证据 |
+上一趟（2026-09-13 22:0xZ）报的阻塞是「阶段 C 的 anchor 把六个 kind 收进一个进程 ⇒
+`driver_pid_before == driver_pid_after` 恒成立 ⇒ 判据结构上不可满足」。本趟开工前实测
+（2026-09-14 05:07Z）该形态**已不存在**：
+
+```
+$ cat .quay/anchor.json                ⇒ No such file or directory
+$ for k in promotion worker outer quality meta goal; do cat .quay/$k-driver.pid; done
+2381001  2381279  2381709  4071640  4054342  4041369    ← 六个【不同】的 pid（各 kind 独立进程）
+$ ps -p 2381279 -o args= ⇒ node …/plugin/scripts/dist/worker-driver.js --root /home/yale/work/quay …
+$ quay server status --json ⇒ "pid 1323037 hosts web + control on one process"   ← 统一 server 形态
+```
+
+⇒ 上一趟列的处置 **(c)**（阶段 C 被回退 ⇒ 实现原样可用，只需在生产上跑一次）成立，本趟据此执行。
+
+### ② 本趟新增并修掉的一个真缺陷（本任务第 4 个提交）
+
+生产者判「这个 pid 是不是 worker 驱动」用的标记取自注册表的**源树文件名** `worker-driver.ts`，
+而**生产跑的是出厂 bundle** `…/plugin/scripts/dist/worker-driver.js` ⇒ 该探针对**每一个真实生产
+驱动恒假** ⇒ 生产者对**完全正确的 pid** 报 `refusing to act on an unrelated process` 而拒绝对它
+动手。「恒假」与「驱动没在跑」同形（硬规则 4b：一个永远说不出「是」的读数携带零信息）。
+修法：从【同一个】注册表条目派生 `.ts` + `.js` 两个形态，⛔ 不写第二个字面量；且⛔ 不放宽到裸
+`worker` —— supervisor 的 cmdline 是 `driver-runtime.js __supervise --kind worker …`，带 kind 词
+但不带驱动入口名，放宽就会把它误认成驱动。两个形态 + supervisor 排除各有 hermetic 用例钉住。
+
+### ③ 真跑（就是本任务要的那一次服务级重启）
+
+```
+$ node --experimental-strip-types plugin/scripts/server-restart-inflight-verify.ts \
+    --root /home/yale/work/quay --cli <worktree>/packages/quay/bin/quay.ts --json
+⇒ verdict=OK, record_written=true, exit 0
+```
+
+写入载体 `.quay/unified-server-verification.jsonl`（第 4 行）的记录原文（节选全部判据字段）：
+
+| 字段 | 值 |
+|---|---|
+| `ac` | `GOAL-017-AC-256` |
+| `restarted_service` | `driver:worker` |
+| `at` | `2026-09-14T05:09:26.328Z` |
+| `driver_pid_before` → `driver_pid_after` | `2381279` → `169682` |
+| `driver_pid_before_dead_after` | `true`（旧 pid 重启后**真的不在**） |
+| `driver_pid_after_alive` | `true` |
+| `inflight_worker_pids_before` | `[2593072, 3562333, 3600343, 3611837, 4148384]` |
+| `inflight_worker_pids_alive_after` | `[2593072, 3562333, 3600343, 3611837, 4148384]`（**集合相等 ⇒ 一个都没死**） |
+| `inflight_worker_pids_before_all_alive` | `true` |
+| `inflight_source` | `proc-tree` |
+| `worker_run_id_before` → `worker_run_id_after` | `wk-prod-1789350883` → `wk-prod-1789362571` |
+| `worker_round_ts_after` | `2026-09-14T05:09:35.418Z`（严格晚于重启动作时刻） |
+| `worker_round_jsonl_mtime` | `2026-09-14T05:09:35.418Z`（与直接量并列，⛔ 不只靠 mtime） |
+| `restarted_via` | `<worktree>/packages/quay/bin/quay.ts server restart --only driver:worker --json --root /home/yale/work/quay` |
+| `restarted_exit` | `0` |
+
+被重启的服务自身的 stdout（服务级面）：
+
+```
+$ quay server restart --only driver:worker --json --root /home/yale/work/quay   ⇒ exit 0
+{ "action":"restart", "changed":true, "changedCount":1,
+  "services":[{"name":"driver:worker","outcome":"restarted","pid":169682,
+  "detail":"driver restarted via `quay driver restart --kind worker` — pid 2381279 → 169682;
+            in-flight worker children are NOT killed (stopKind does not scan in-flight)"}] }
+```
+
+事后核对（⛔ 最小作用面 = 一个服务）：
+
+```
+$ for k in promotion worker outer quality meta goal; do …; done
+promotion 2381001(S)   worker 169682(R)   outer 2381709(S)
+quality 4071640(S)     meta 4054342(S)    goal 4041369(S)
+⇒ 其余五个 kind 的 pid 与本趟开工时【逐字相同】——一个都没被碰
+$ ps -p 4148384 -o state= ⇒ S
+⇒ 本会话（本任务自己的 worker 进程，重启前在被杀驱动的进程树里）在重启后仍存活
+```
+
+### ④ 判据翻转（AC1 的直接读数）
+
+```
+改前（本趟开工时 05:07Z）：载体 3 行，ac=GOAL-017-AC-256 的记录 0 条  ⇒ criterion exit 1
+改后（05:1xZ）：           载体 4 行，ac=GOAL-017-AC-256 的记录 1 条  ⇒ criterion exit 0
+```
+
+criterion 从 `goals/AC-256-….md` 的 frontmatter `criterion:` 折叠块解出（yaml，⛔ 未手抄、⛔ 未改一字）后原样执行：
+
+```
+$ bash /tmp/ac256-criterion.py ; echo EXIT=$?
+EXIT=0
+```
+
+### ⑤ 负控制（逐条能取假）
+
+| 控制 | 怎么做的 | 结果 |
 |---|---|---|
-| `quay server restart --only <svc,...>`（独立动词，⛔ 不由 `start` 兼职） | ✅ | `packages/quay/test/server-restart.test.mjs` 5/5；`quay server --help` 用法行 + `started \| already-running \| restarted \| stopped` 词表 |
-| driver 型 kind 组合既有 `quay driver restart --kind X`（= stopKind + startKind） | ✅ | 同上；⛔ 未新增任何杀进程路径 |
-| 生产者 `plugin/scripts/server-restart-inflight-verify.ts` + 六张表声明 | ✅ | `plugin/test/server-restart-inflight-verify.test.mjs` 15/15；`capability-catalog.sh` → `summary: 320 scripts \| 320 declared \| 0 unclassified` |
-| scoped 门（driver 的 fan-in 跑的那一个） | ✅ **119/119，exit 0** | `scripts/test.sh --for-task gap-ac256-worker-restart-preserves-inflight-children --allow-thin` |
-| AC9 零回退 | ✅ | 见 AC9 行 |
+| 结构 no-op（AC2/AC4） | `--control no-op-read`：拿 `server status` 纯读顶替重启动作 | `verdict=NOT-A-RESTART`、`record_written=false`、exit 1 —— 证明 `driver_pid_before != after` 在做功 |
+| `start` 不静默重启（AC2，§6.9 不变式 1） | `quay server start --only driver:worker`（**已在跑**） | `outcome=already-running`、exit 0、pid **169682 不变**；`--only web` ⇒ pid 1323037 不变、exit 0 |
+| 空集（AC3，**真实端到端**，⛔ 不碰生产） | 合成 root：`server.json`（web+control 同 pid）+ 一个真进程顶着 `worker-driver.js` 的 cmdline、无子进程 | `verdict=NOT-EVALUATED`、exit 2、**零记录**（载体文件不生成） |
+| 杀子进程（AC5，合成夹具） | 测试 (f)：窗口内杀一个在飞 worker | `verdict=INFLIGHT-KILLED`，reason **点名该 pid** ⇒ 拒写 |
+| 停机不恢复（AC6，合成夹具） | 测试 (e)：run_id 不变 / round ts 不晚于重启 | `verdict=DRIVER-NOT-RESUMED` ⇒ 拒写 |
+| 僵尸前集（AC3 b，合成夹具） | 测试 (a)/(b)：before 含已死/僵尸 pid | `verdict=NOT-EVALUATED` ⇒ 拒写 |
 
-### ② 🔴 阻塞：本 AC 的判据在当前的 SPEC §7 阶段 C 形态下**结构上不可满足**
+### ⑥ 被测对象未被修改
 
-**实测（生产 root `/home/yale/work/quay`，2026-09-13 22:0xZ）**：
+`git diff develop -- plugin/scripts/driver-runtime.ts` ⇒ **0 行**（`stopKind()` 的「⛔ 不扫
+in-flight」语义原样未动）。重启走的正是既有 `quay driver restart --kind worker`（= stopKind +
+startKind）的组合形态，⛔ 未新增任何杀进程路径。
 
-```
-$ cat .quay/{promotion,worker,outer,quality,meta,goal}-driver.pid
-3057428  3057428  3057428  3057428  3057428  3057428      ← 六个文件一个 pid
-$ cat .quay/anchor.json
-{"pid":3057428,"startedAt":"2026-09-13T20:34:46.314Z",
- "kinds":["quality","promotion","worker","outer","goal","meta"],"host":"anchor"}
-$ ps -p 3057428 -o args   → node … /home/yale/work/quay-worktrees/gap-ac255-…/plugin/scripts/driver-anchor.ts __anchor --root /home/yale/work/quay
-$ cat .quay/worker-driver-supervisor.pid   → No such file（阶段 C 起 supervisor 层退役）
-```
+### ⑦ 未勾的 AC
 
-`gap-ac255-driver-internalization-pid-le2-six-kinds-fresh`（**status: ready，未落地**，4 提交在 develop 之外）交付的 anchor 把六个 kind 的常驻循环收进**一个**进程，`.quay/<prefix>.pid` 的内容因此是 **anchor 的 pid**。后果：
-
-1. **判据不可满足**：`quay server restart --only driver:worker` 在阶段 C 下是「anchor 内的事件循环 respawn」，`driver_pid_before` 与 `driver_pid_after` **永远相同** ⇒ AC-256 的 `driver_pid_before != driver_pid_after`（criterion 用它证明「真重启」）**结构上取不到真**。这不是实现问题，是**判据与架构的冲突**：本任务 15:38 立案时阶段 C 还不存在（anchor 20:26/20:34 起）。
-2. **⛔ 更危险的是照旧执行会杀人**：现开发（develop）的 `driver_runtime.ts` 里 `stopKind()` 读同一批 pid 文件并 `SIGTERM` 它们 ⇒ `quay driver restart --kind worker` 会 **SIGTERM anchor，一次带走全部六个 kind** —— 既违反 §6.9「服务是可独立起停的单元」，也违反本任务 DoD 的「⛔ 重启 `driver:worker` 之外还碰了其余五个 kind」。
-
-⇒ **本趟刻意未在生产上执行任何重启**（会被杀的正是它要保护的）。这不是省事，是 DoD「⛔ 不得为取证去杀生产在飞 worker」与「最小作用面是一个服务」的直接要求。
-
-### ③ 已加的安全闸（把 ② 的杀人路径堵上，且它是本趟的实质产出）
-
-`packages/quay/src/cli/server.ts` 的服务级 `restart` 在动手之前读 `.quay/anchor.json`：本 kind 若被 anchor 承载（`anchor.pid === 该 kind 的 pid 文件内容`），**拒绝**并给出 `outcome: "not-evaluated"`，⛔ 不调 `quay driver restart`。生产者同款：给出**可区分**的 `verdict: "HOSTED-BY-ANCHOR"`（硬规则 3b：「本形态下判据不可满足」⛔ 不与「没测成」同形）。
-
-**生产实测（两条命令，anchor 与六个 kind 事后逐个复核仍在）**：
-
-```
-$ quay server restart --only driver:worker --json --root /home/yale/work/quay
-  ⇒ outcome=not-evaluated, changed=false, exit 3
-    detail: "kind 'worker' is hosted by the anchor process pid 3057428 (SPEC §7 stage C: one anchor runs
-             all [6 kinds] in one event loop) — `quay driver restart --kind worker` would signal that anchor
-             and take every hosted kind down with it, so no per-kind restart is attempted."
-  事后：六个 .quay/<kind>-driver.pid 仍为 3057428（⛔ 未杀）
-
-$ quay server start --only web --json --root /home/yale/work/quay      ← AC2 的负控制（§6.9 不变式 1）
-  ⇒ outcome=already-running, pid=1323037, changed=false, exit 0
-  事后：.quay/server.json 的 pid 仍为 1323037（宿主未被替换）
-
-$ node --experimental-strip-types plugin/scripts/server-restart-inflight-verify.ts --root /home/yale/work/quay --json
-  ⇒ exit 2, verdict=HOSTED-BY-ANCHOR, record_written=false
-    anchor_pid=3057428, anchor_kinds=[quality,promotion,worker,outer,goal,meta]
-    inflight_source=proc-tree
-    inflight_worker_pids_before=[300998]            ← 进程树推导：1 个真 worker（本任务的 worker）
-    inflight_declared_by_driver=1933 条             ← driver 自报的陈旧集合
-    inflight_declared_vs_derived="DIFFERENT — the independent derivation is authoritative"
-    driver_children_all=[300998, 420436]            ← 全部直接子进程（含被排除的例程探针，可核）
-
-$ bash <AC-256 criterion>
-  ⇒ exit 1（"no qualifying record"）；载体 .quay/unified-server-verification.jsonl 3 行，其中 ac=GOAL-017-AC-256 的 0 条
-```
-
-**AC7 的并列读数**（同一时刻、同一对象）：独立推导 **1** 个在飞 worker，driver 自报 **1933** 条 —— 相差三个数量级。这正是硬规则 4b 要防的形态：那个自报文件在 driver 停摆时恰好也停止更新，与「一切正常」同形；把它当读数，「一个都没死」在任何时刻都恒真。
-
-### ④ 需要谁裁什么（⛔ 本任务自己解不了）
-
-本 AC 与 AC-255 是**同一 SPEC（GOAL-017）的两个阶段**，方向相反且判据互斥；AC-256 立案（15:38）早于阶段 C 落地（20:26）。可能的处置（择一，需人/管理者裁定）：
-
-- **(a) 重切 AC-256 的判据**：把「真重启」的证明从 `driver_pid 变化` 换成**阶段 C 下仍可取假的形态**（例如 anchor 的 per-kind stop→start 期间 kind 循环的重启计数 / 该 kind 的 round 序列出现新 run_id 且在该窗口内无在飞 worker 消失）。判据的**核心断言（在飞 worker 一个都没死）不变**，只换「重启确实发生过」的见证量。
-- **(b) 声明 AC-256 只在阶段 C **之前**的形态有效**，并在阶段 C 落地时把它的结论带过去（即本条退化为「阶段 C 不得引入新的杀在飞 worker 路径」的守卫，判据改锚在 anchor 自己的 kind 重启路径上）。
-- **(c) 若阶段 C 被回退**：本任务的实现（`restart` 动词 + 生产者 + 安全闸）原样可用，只需在生产上跑一次即可产出合格记录 —— 生产者已实测能在该形态下正确推导（本趟唯一的缺口是形态本身）。
-
-**本趟未勾的 AC（1/2/3/4/5/6/8/10）全部只差这一件事**：一次**真**的 `driver:worker` 服务级重启。⛔ 本趟未用夹具、⛔ 未改写判据、⛔ 未把未测量的量标成达成 —— 载体上**没有** AC-256 的记录，这是事实。
+只剩 **AC10**（全量套件绿 —— 外层 verification-round 验证）⛔ 保持未勾：它的量产生在 fan-in /
+外层 suite 轮，⛔ 不是 worker 自己的读数（scoped 门绿 ≠ 全量绿）。其余 9 条全部达成。
 
 ## Definition of Done
 
 **AC-256 的 criterion 在生产载体上 exit 0，且那条记录是一次真运行、真服务级重启、真差分的产物**：`driver:worker` 是作为**服务**被重启的（记录留 `restarted_via` argv），重启前在飞的 worker 子进程集合由**进程树独立推导**且**逐个存活**，重启后**对原集合逐个再核活**得到的集合与之前**完全相等**；`driver_pid_before` 在重启后**真的不在**；`.quay/worker-round.jsonl` 在重启后出现**晚于重启时刻的新 `run_id`** 记录（直接量，⛔ 不只 mtime）。生产者对每条读数 fail-closed：读不出/不满足 ⇒ 零记录 + 可区分的未评估值。
 
-**⛔ 本趟未达成**：原因不是实现缺口，是**判据在 SPEC §7 阶段 C 形态下结构上不可满足**（见上「阻塞」节）——阶段 C 下 `driver_pid_before == driver_pid_after` 恒成立。实现（`restart` 动词 + 生产者 + anchor 安全闸）已落地、已绿、已过 scoped 门；缺的只有「在一个能产生真差分的形态上跑一次」。
+**✅ 本趟达成（2026-09-14 05:09Z，生产 root，真跑）**：上面每一条都在生产上跑出来了 ——
+`driver:worker` 是作为**服务**被重启的（`restarted_via` 留 argv 原文，exit 0）；重启前在飞的
+**5 个** worker 子进程由**进程树独立推导**（`inflight_source:"proc-tree"`）且**逐个存活**
+（`inflight_worker_pids_before_all_alive:true`）；重启后**对原集合逐个再核活**得到的集合与之前
+**完全相等**；`driver_pid_before`(2381279) 重启后**真的不在**（`driver_pid_before_dead_after:true`）
+而 `driver_pid_after`(169682) 活；`.quay/worker-round.jsonl` 出现**晚于重启时刻的新 `run_id`**
+记录（`wk-prod-1789362571`，`ts=2026-09-14T05:09:35.418Z`，直接量），并与 mtime 并列留档。
+criterion 逐字跑 **exit 0**。⛔ 唯一由夹具驱动的是【负控制】那几行，正记录来自生产真跑。
 
 ⛔ 以下不算达成：
 
@@ -206,3 +251,12 @@ $ bash <AC-256 criterion>
 - 改坏 `driver-runtime.ts:1593 stopKind()` 的「⛔ 不扫 in-flight」语义（那是被测对象，不是可调项）；
 - 重启 `driver:worker` 之外还碰了其余五个 kind（本任务的最小作用面是一个服务）—— **本轮实测：六个 kind 的 pid 文件事后仍全部指向 anchor 3057428**；
 - 用宽松 glob（`.quay/*driver*.pid`，实测 136）数进程 / 进记录。
+
+## Needs-Human
+
+**执行 2026-09-14T05:29:48.867Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-ac256-worker-restart-preserves-inflight-children still present
+- run_id：wk-prod-1789350883
