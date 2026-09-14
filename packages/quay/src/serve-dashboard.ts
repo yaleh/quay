@@ -852,7 +852,12 @@ export function renderTaskCard(
     const pct = total > 0 ? (c / total) * 100 : 0;
     return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
-  const MINI_LIST_N = 3;
+  // 人裁定 2026-09-14：3 → 10。三个非终态（ready/todo/needs-human）各自的「最近更新」预览列表原先
+  // 截断在 3 条，对小任务量项目（三态合计常年在个位数）经常静默截断本该完整可见的任务。
+  // 范围明确限定为这一个常量：不引入自适应阈值、不新增「+N 更多」提示——`renderLiveCard` 的
+  // `live.inFlight.slice(0, 3)` 已有该溢出徽标（gap-dashboard-livecard-minilist-overflow-indicator），
+  // 这处不一致是真的、已记录在案，留待以后单独立案，不在本任务内顺带处理。
+  const MINI_LIST_N = 10;
   const miniStatuses: readonly string[] = [TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN];
   const miniList = (s: string): string => {
     const rows = tasks
