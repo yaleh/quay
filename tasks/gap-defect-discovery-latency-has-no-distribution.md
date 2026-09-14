@@ -1,7 +1,7 @@
 ---
 id: gap-defect-discovery-latency-has-no-distribution
 title: 量化「缺陷发现延迟」——给硬规则「频率 × 静默」一个分布，而不是轶事
-status: todo
+status: ready
 labels:
   - gap
   - analysis
