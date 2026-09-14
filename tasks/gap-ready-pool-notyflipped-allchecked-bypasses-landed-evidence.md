@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-notyflipped-allchecked-bypasses-landed-evidence
 title: notYetFlipped() 的 allChecked 分支绕过一切落地证据独立触发误判——AC 预勾选的新任务一进 ready 就被判"已落地只是漏翻转"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
