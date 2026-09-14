@@ -6,7 +6,9 @@ kind: criterion
 goal: GOAL-003
 criterion: >-
   grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs |
-  grep -q 'enabledPlugins' && exit 1
+  grep -q 'enabledPlugins' && { echo "AC-162 fail:
+  packages/quay/scripts/register-plugin.mjs still mentions enabledPlugins on a
+  non-comment line" >&2; exit 1; }
 
   exit 0
 expect: exit 0（packages/quay/scripts/register-plugin.mjs 的【非注释行】不再出现

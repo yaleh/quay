@@ -25,7 +25,9 @@ criterion: >-
       if r.get("transcript_confirmed") is not True: continue  # 目标会话 transcript 外部可核，⛔ 非发送方自述
       if not r.get("shipped_from_installed_artifact"): continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-205 fail - no carrier record ac=GOAL-009-AC-205 with host
+  other than this host, transcript_confirmed=true and
+  shipped_from_installed_artifact\n"); sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-009-AC-205 的记录，host≠本机 ∧

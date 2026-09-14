@@ -13,6 +13,21 @@ extra:
   schema: execution
 goal_ac: AC-257
 ---
+---
+id: gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun
+title: ad-arm1/archguard 真机重验：project scope 装 0.7.0 + quay-init 重跑（非空
+  settings.json 合并语义）+ 真实 todo→done（GOAL-018/AC-257）
+status: ready
+labels:
+  - gap
+  - delivery-critical
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+goal_ac: AC-257
+---
 ## Proposal
 
 **要满足的判据（正本 `goals/AC-257-ad-arm1-archguard-project-scope-装-0-7-0-quay-init-重跑-非空-sett.md`）**：载体 `.quay/productization-verification.jsonl` 中存在一条记录，逐字满足 11 个谓词 —— `ac=GOAL-018-AC-257` ∧ `host="ad-arm1"` ∧ `project_root="/home/yale/work/archguard"` ∧ `install_scope="project"` ∧ `quay_version="0.7.0"` ∧ `quay_init_rerun is True` ∧ `merge_preserved is True` ∧ (`marketplace_path`|`provider_path`) 非空且**不**匹配 `verify-|probe|/tmp/` ∧ `task_status="done"` ∧ `commit_sha` 非空 ∧ `produced_by_driver is True`。exit 1 = 载体缺失或无合格记录。判据正文另逐字禁止引用 GOAL-016/AC-247..250 的历史记录充数（本 AC 要求 `install_scope` 与 `merge_preserved`，这两字段既往记录从未出现）。
@@ -66,6 +81,7 @@ goal_ac: AC-257
 
 - tasks/gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun.md
 - plugin/scripts/verify-deliver-coldstart.sh
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/scripts/quay-init.sh
 - plugin/test/verify-deliver-coldstart.test.mjs

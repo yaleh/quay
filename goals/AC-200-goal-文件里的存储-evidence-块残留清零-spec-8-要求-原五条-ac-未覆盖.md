@@ -5,10 +5,11 @@ status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: >-
-  ls goals/*.md >/dev/null 2>&1 || { echo "goals/ 为空或不存在 —— 无法评估（≠ 合格）"; exit 1;
-  }
+  ls goals/*.md >/dev/null 2>&1 || { echo "AC-200 fail - goals/ 为空或不存在 —— 无法评估（≠
+  合格）" >&2; exit 1; }
 
-  test "$(grep -l '^evidence:' goals/*.md 2>/dev/null | wc -l)" -eq 0
+  test "$(grep -l '^evidence:' goals/*.md 2>/dev/null | wc -l)" -eq 0 || { echo
+  "AC-200 fail: goals/*.md still carry a stored evidence block" >&2; exit 1; }
 expect: 今天读数 18 个文件仍带存储 evidence 块 ⇒ 红。清理后 0。新写入的 goal 文件天然不带该块，故清完不会复发。
 origin: >-
   SPEC-store-commit-unification-2026-09-08 §8 末段逐字要求「19 个 goal 文件仍带冻结的

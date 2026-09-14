@@ -27,7 +27,9 @@ criterion: >-
       if int(r.get("goals_rendered") or 0)<=0: continue
       if int(r.get("round_records_rendered") or 0)<=0: continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-234 fail - no carrier record ac=GOAL-015-AC-234 with host
+  other than this host, tasks_rendered>0, goals_rendered>0 and
+  round_records_rendered>0\n"); sys.exit(1)
 
   P
 expect: >-
