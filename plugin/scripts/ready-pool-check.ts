@@ -246,7 +246,7 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
-import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
+import { listWorktrees, worktreeExists, worktreeMatchesTask } from "./fast-mode-telemetry.ts";
 // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
 // promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
 // so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
@@ -1003,7 +1003,15 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // baseline-step-change, both worktree-open + taskWorkLanded=true while their files are ABSENT from
   // develop). Hoisting also skips the taskWorkLanded grep for worktree-open tasks. `worktreeExists` is
   // fail-soft (non-git root / unreadable list ⇒ false ⇒ the arms below still judge normally).
-  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  // The open-worktree list is enumerated ONCE per analyze pass and threaded in via `o.worktrees`
+  // (gap-ready-pool-check-is-o-pool-size-…): `worktreeExists` runs `git worktree list --porcelain`
+  // itself, so asking it per ready task re-ran the same subprocess once per task (~40 ms × the ready
+  // count, on a host holding 45 worktrees). The MATCH PREDICATE is still the single source
+  // `worktreeMatchesTask` (exported by fast-mode-telemetry) — this shares the enumeration, not a copy
+  // of the judgment. Omitted ⇒ the original per-task `worktreeExists` call, unchanged.
+  const hasLeftoverWorktree = o.worktrees
+    ? o.worktrees.some((wt) => worktreeMatchesTask(wt, task.id))
+    : worktreeExists(repoRoot, task.id);
   if (hasLeftoverWorktree) return false;
   const workLanded = taskWorkLanded(task.body, repoRoot, o);
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
@@ -2333,22 +2341,63 @@ export function readTaskFileAtRef(root, ref, taskId) {
 const RPC_CACHE_VERSION = 1;
 const RPC_STORE_CACHE_FILE = "ready-pool-store-cache.json";
 const RPC_HISTORY_CACHE_FILE = "ready-pool-history-cache.json";
+// Size cap for the store cache (the history cache is O(history), not O(churn), and needs no cap).
+// Sized to hold several times the current store (19 MB for 2,141 tasks) so a normal poll — which
+// re-keeps everything it reads — never trips it, while unbounded churn still cannot accumulate.
+// Overridable so a test can drive a cap small enough to exercise the eviction path; a cap that cannot
+// be tested is a cap nobody knows works. Read PER CALL, not at import — a test must be able to change
+// it after the module is loaded (a module-level const would be frozen at import time and untestable).
+export function rpcStoreCacheMaxBytes() {
+  return Number(process.env.QUAY_READY_POOL_CACHE_MAX_BYTES) || 64 * 1024 * 1024;
+}
 
 /** Cache kill-switch (test/experiment seam, not a production knob). */
 export function rpcCacheEnabled() {
   return process.env.QUAY_READY_POOL_CACHE !== "0";
 }
 
+// The cache lives in the repo's GIT DIR (`<git-common-dir>/quay-ready-pool-cache/`), not in `.quay/`.
+// Two reasons, both load-bearing:
+//   1. It keeps the WORKING TREE CLEAN. `.quay/` files are gitignored ONE BY ONE, so a new carrier
+//      there shows up as an untracked `?? .quay/` until someone edits .gitignore — which is a real
+//      behaviour change for every consumer that reads `git status --porcelain` (two existing tests
+//      assert the fixture tree is clean after a promotion, and both went red on exactly this).
+//   2. It is the right home semantically: the cache is keyed by GIT OBJECT IDENTITY, which lives in
+//      that same git dir. Worktrees share the common dir, so a worktree cache-hits on the entries the
+//      main checkout parsed (the object store is shared) — which is what object-addressed caching means.
+// Non-git root (or no common dir) ⇒ null ⇒ every caller takes the uncached path.
+const _gitCacheDirs = new Map(); // root -> dir | null (memoized; one `rev-parse` per process at most)
+function rpcCacheDir(root) {
+  if (_gitCacheDirs.has(root)) return _gitCacheDirs.get(root);
+  let dir = null;
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out) {
+      dir = path.join(path.resolve(root, out), "quay-ready-pool-cache");
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch { dir = null; }
+  _gitCacheDirs.set(root, dir);
+  return dir;
+}
+
+/** Cache file path under the git dir, or null when the root is not a git work tree (uncached). */
 function rpcCacheFile(root, name) {
-  return path.join(root, ".quay", name);
+  const dir = rpcCacheDir(root);
+  return dir ? path.join(dir, name) : null;
 }
 
 /** Read a cache file, returning null on ANY doubt (absent / unreadable / corrupt / version drift).
  *  缺值 = 未查 (硬规则 6): a miss must be a miss, never a partially-believed structure. */
 function readCacheJson(file) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed && parsed.v === RPC_CACHE_VERSION ? parsed : null;
+    const text = fs.readFileSync(file, "utf8");
+    const parsed = JSON.parse(text);
+    if (!parsed || parsed.v !== RPC_CACHE_VERSION) return null;
+    parsed._bytes = text.length; // the ON-DISK size, for the self-healing cap check (never re-serialized to measure)
+    return parsed;
   } catch {
     return null;
   }
@@ -2357,6 +2406,12 @@ function readCacheJson(file) {
 /** Write a cache file atomically (tmp + rename) so a concurrent reader never sees a half-written
  *  file; every failure is swallowed — losing the cache costs time, never correctness. */
 function writeCacheJson(file, obj) {
+  writeCacheJsonSerialized(file, JSON.stringify(obj));
+}
+
+/** As `writeCacheJson`, for a payload already serialized (the store cache measures its own encoded
+ *  size against the cap, so it must not be stringified twice). */
+function writeCacheJsonSerialized(file, text) {
   try {
     const dir = path.dirname(file);
     // The cache dir is `<root>/.quay` — present in a real workspace, absent on a bare fixture store.
@@ -2364,7 +2419,7 @@ function writeCacheJson(file, obj) {
     // hangs), and a failure here just means no cache, never a wrong answer.
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const tmp = `${file}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(obj));
+    fs.writeFileSync(tmp, text);
     fs.renameSync(tmp, file);
   } catch { /* fail-soft: the uncached path is always available */ }
 }
@@ -2455,6 +2510,7 @@ export function loadParsedTaskStoreAtRef(root, ref, ids) {
   if (!blobs) return uncached();
 
   const file = rpcCacheFile(root, RPC_STORE_CACHE_FILE);
+  if (!file) return uncached();
   const prev = readCacheJson(file);
   const prevEntries = (prev && prev.entries) || {};
 
@@ -2486,9 +2542,42 @@ export function loadParsedTaskStoreAtRef(root, ref, ids) {
     else firstHolder.set(oid, id);
   }
 
-  const entries = Object.keys(keep);
-  if (missing.length > 0 || keySetSignature(entries) !== prev?.sig) {
-    writeCacheJson(file, { v: RPC_CACHE_VERSION, sig: keySetSignature(entries), entries: keep });
+  // KEEP THE UNION, not just this poll's ids. Pruning to this poll's ids is only equivalent when the
+  // caller always names the whole store — a caller that names a SUBSET (a scoped analysis, a test, an
+  // experiment) would then evict the other entries and force the next full poll to re-read them all.
+  // The union also makes the cache monotone in the useful direction: the blobs a store has ever had
+  // stay parsed. Growth is bounded by BYTES instead (see below), so an unbounded-entry-set cache
+  // cannot accumulate — and a normal poll, which re-keeps everything it reads, never trips the cap.
+  const union = { ...prevEntries, ...keep };
+  const entries = Object.keys(union);
+  const maxBytes = rpcStoreCacheMaxBytes();
+  // Write when the entry set changed, OR when the file is already over the cap and something is
+  // droppable. The second arm makes the cap SELF-HEALING: without it a file that grew past the cap
+  // would stay there until the next unrelated write, and every poll in between would keep re-reading
+  // it. Read off the recorded size, so the check costs nothing.
+  const overCap = (prev?._bytes ?? 0) > maxBytes;
+  if (missing.length > 0 || keySetSignature(entries) !== prev?.sig || (overCap && entries.length > Object.keys(keep).length)) {
+    const payload = { v: RPC_CACHE_VERSION, sig: keySetSignature(entries), entries: union };
+    // SIZE CAP: over the cap, drop the entries this poll did NOT use (oldest insertion first — JSON
+    // preserves insertion order for string keys). Never drops an entry this poll asked for: a poll
+    // whose own set exceeds the cap leaves the file over the cap, which is the correct trade (a
+    // slightly fat cache beats a poll that cannot answer). Dropped in CHUNKS sized from the measured
+    // average entry — deleting one entry per re-stringify would be O(n²) on a multi-MB file.
+    let serialized = JSON.stringify(payload);
+    if (serialized.length > maxBytes) {
+      const dropped = Object.keys(union).filter((oid) => !keep[oid]);
+      let taken = 0;
+      while (serialized.length > maxBytes && taken < dropped.length) {
+        const avg = Math.max(1, Math.ceil(serialized.length / Math.max(1, Object.keys(union).length)));
+        const need = Math.ceil((serialized.length - maxBytes) / avg);
+        const chunk = Math.max(1, Math.min(need, dropped.length - taken));
+        for (let i = 0; i < chunk; i++) delete union[dropped[taken++]];
+        serialized = JSON.stringify({ v: RPC_CACHE_VERSION, sig: payload.sig, entries: union });
+      }
+      payload.sig = keySetSignature(Object.keys(union));
+      serialized = JSON.stringify({ v: RPC_CACHE_VERSION, sig: payload.sig, entries: union });
+    }
+    writeCacheJsonSerialized(file, serialized);
   }
   return out;
 }
@@ -2513,6 +2602,7 @@ export function loadLandingIndex(root, ref) {
   if (!oid) return full();
 
   const file = rpcCacheFile(root, RPC_HISTORY_CACHE_FILE);
+  if (!file) return full();
   const cached = readCacheJson(file);
   const rehydrate = (c) => {
     const commits = new Map();
@@ -2648,6 +2738,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // `--all` so the two-line model's INTEGRATION fan-in is visible where the stale-master git-history
   // index sees nothing (master..integration=2224 on 2026-08-11).
   const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
+  // ONE open-worktree enumeration for the whole ready scan (see notYetFlipped's `o.worktrees`).
+  const worktrees = readyCount > 0 ? listWorktrees(root) : [];
   const ready = [];
   const excluded = [];
   let nyfBacklogCount = 0; // 甲 — not-yet-flipped AND every completion checkbox checked (work done, only the status flip missing)
@@ -2661,7 +2753,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isAcRecord(t)) reasons.push("ac-record");
     let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
     let pendingVerification = false;
-    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects });
+    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees });
     if (nyf) {
       reasons.push("not-yet-flipped");
       // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped

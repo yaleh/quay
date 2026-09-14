@@ -93,6 +93,7 @@ import {
   listRefTaskBlobs,
   loadParsedTaskStoreAtRef,
   loadLandingIndex,
+  rpcStoreCacheMaxBytes,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
@@ -4634,6 +4635,14 @@ function withCacheOff(fn) {
   }
 }
 
+/** The cache lives in the repo's GIT DIR (see the loadParsedTaskStoreAtRef doc comment) — never in
+ *  the working tree, so it cannot dirty `git status`. Resolved through git, not assumed, because the
+ *  fixtures are real repos created by `makeGitWorkspace`. */
+function rpCachePath(root, name) {
+  const common = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim();
+  return path.join(path.resolve(root, common), "quay-ready-pool-cache", name);
+}
+
 test("store cache: the parse-cached ref read equals the uncached batched read, cold and warm", (t) => {
   const { root } = makeGitWorkspace("store-eq", { n: 40 });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -4642,7 +4651,7 @@ test("store cache: the parse-cached ref read equals the uncached batched read, c
   const expected = new Map();
   for (const [id, raw] of readTaskFilesAtRefBatch(root, "HEAD", ids)) expected.set(id, parseTask(raw));
 
-  const cacheFile = path.join(root, ".quay", "ready-pool-store-cache.json");
+  const cacheFile = rpCachePath(root, "ready-pool-store-cache.json");
   fs.rmSync(cacheFile, { force: true });
   const cold = loadParsedTaskStoreAtRef(root, "HEAD", ids);
   assert.ok(fs.existsSync(cacheFile), "the first call must WRITE the cache (otherwise there is nothing to be warm)");
@@ -4696,7 +4705,7 @@ test("store cache fail-soft: absent, corrupt, version-drifted and kill-switched 
   const { root } = makeGitWorkspace("store-soft", { n: 12 });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const ids = refTaskIds(root);
-  const cacheFile = path.join(root, ".quay", "ready-pool-store-cache.json");
+  const cacheFile = rpCachePath(root, "ready-pool-store-cache.json");
   const baseline = normStore(withCacheOff(() => loadParsedTaskStoreAtRef(root, "HEAD", ids)));
 
   fs.rmSync(cacheFile, { force: true });
@@ -4708,6 +4717,63 @@ test("store cache fail-soft: absent, corrupt, version-drifted and kill-switched 
   fs.writeFileSync(cacheFile, JSON.stringify({ v: 1, entries: {} }));
   assert.equal(normStore(loadParsedTaskStoreAtRef(root, "HEAD", ids)), baseline, "empty entry set ⇒ identical result (refetch, never a silent gap)");
   assert.equal(normStore(withCacheOff(() => loadParsedTaskStoreAtRef(root, "HEAD", ids))), baseline, "kill-switch ⇒ identical result");
+});
+
+test("store cache KEEPS THE UNION: a subset poll must not evict entries a later full poll needs", (t) => {
+  // Pruning the cache to the ids the CURRENT call named is only safe when every caller names the whole
+  // store. A scoped caller (a subset analysis, an experiment) would otherwise evict everything else and
+  // make the next full poll re-read the entire store — the cache would be a net loss for exactly the
+  // mixed-workload case it should serve. Pin the union policy by byte-difference, not by timing.
+  const { root } = makeGitWorkspace("store-union", { n: 30 });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = refTaskIds(root);
+  const cacheFile = rpCachePath(root, "ready-pool-store-cache.json");
+
+  loadParsedTaskStoreAtRef(root, "HEAD", ids);                       // full poll — caches all 30
+  const afterFull = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+  assert.equal(Object.keys(afterFull.entries).length, 30, "full poll caches every task");
+
+  loadParsedTaskStoreAtRef(root, "HEAD", ids.slice(0, 3));          // subset poll — must not evict
+  const afterSubset = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+  assert.equal(Object.keys(afterSubset.entries).length, 30, "a 3-id poll must not evict the other 27 entries");
+
+  // Interleave the two shapes and assert the entry set is STABLE across it — a re-fetch is not
+  // observable as a result change, so the entry set is the only honest reading here.
+  loadParsedTaskStoreAtRef(root, "HEAD", ids.slice(0, 3));
+  loadParsedTaskStoreAtRef(root, "HEAD", ids);
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(cacheFile, "utf8")).entries).length, 30, "interleaving subset and full polls must not shrink the cache");
+  assert.equal(normStore(loadParsedTaskStoreAtRef(root, "HEAD", ids)), normStore(withCacheOff(() => loadParsedTaskStoreAtRef(root, "HEAD", ids))), "union-policy cache still agrees with the uncached read");
+});
+
+test("store cache SIZE CAP: churn is bounded, but never at the cost of the poll's own entries", (t) => {
+  // The union policy bounds growth by BYTES, not by entry set — so the eviction path has to be
+  // exercised, not assumed.
+  const { root } = makeGitWorkspace("store-cap", { n: 30 });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = refTaskIds(root);
+  const cacheFile = rpCachePath(root, "ready-pool-store-cache.json");
+  const entryCount = () => Object.keys(JSON.parse(fs.readFileSync(cacheFile, "utf8")).entries).length;
+  const prevCap = process.env.QUAY_READY_POOL_CACHE_MAX_BYTES;
+  t.after(() => { if (prevCap === undefined) delete process.env.QUAY_READY_POOL_CACHE_MAX_BYTES; else process.env.QUAY_READY_POOL_CACHE_MAX_BYTES = prevCap; });
+
+  loadParsedTaskStoreAtRef(root, "HEAD", ids);                       // fill uncapped
+  const full = entryCount();
+  assert.equal(full, 30, "fixture precondition: 30 entries cached");
+
+  // A SUBSET poll makes the other entries evictable. With a cap that fits only a few, the cache must
+  // shed them — and must still answer correctly for the ids it was actually asked about.
+  process.env.QUAY_READY_POOL_CACHE_MAX_BYTES = "3000";
+  const few = ids.slice(0, 3);
+  const sub = loadParsedTaskStoreAtRef(root, "HEAD", few);
+  assert.equal(sub.size, 3);
+  assert.equal(normStore(sub), normStore(withCacheOff(() => loadParsedTaskStoreAtRef(root, "HEAD", few))), "capped cache still agrees with the uncached read for the polled ids");
+  const capped = entryCount();
+  assert.ok(capped < full, `the cap must actually bound the entry set: ${full} -> ${capped}`);
+  for (const id of few) assert.ok(sub.has(id), `the poll's own id ${id} must survive the cap`);
+
+  // The cap is read PER CALL (a module-level const would freeze at import and be untestable).
+  delete process.env.QUAY_READY_POOL_CACHE_MAX_BYTES;
+  assert.equal(loadParsedTaskStoreAtRef(root, "HEAD", ids).size, 30, "uncapped again: the full poll is served");
 });
 
 test("landing history index: the incremental (A..B) merge equals a full rebuild, and the cache round-trips", (t) => {
@@ -4745,7 +4811,7 @@ test("landing history index fail-soft: absent / corrupt cache and a rewritten re
   git("commit", "-qm", "gap-land-soft: x");
 
   const expected = normIndex(buildGitHistoryIndex(root, { ref: "HEAD" }));
-  const cacheFile = path.join(root, ".quay", "ready-pool-history-cache.json");
+  const cacheFile = rpCachePath(root, "ready-pool-history-cache.json");
   fs.rmSync(cacheFile, { force: true });
   assert.equal(normIndex(loadLandingIndex(root, "HEAD")), expected, "absent cache ⇒ full rebuild");
   fs.writeFileSync(cacheFile, "@@@ not json");
