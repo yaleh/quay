@@ -2,7 +2,7 @@
 id: gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-whole-suite
 title: ready-pool-check 占全仓 checker 成本 97.8%（212.7h，与整个测试套件同量级）且三周涨 5
   倍——每次轮询重解析全部 2123 个任务，同根已让 MCP task_list 超时
-status: needs-human
+status: todo
 needs_human_cause: human-adjudication
 labels:
   - gap
