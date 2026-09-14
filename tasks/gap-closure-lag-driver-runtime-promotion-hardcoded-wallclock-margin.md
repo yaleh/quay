@@ -1,7 +1,7 @@
 ---
 id: gap-closure-lag-driver-runtime-promotion-hardcoded-wallclock-margin
 title: 三个测试文件的硬编码墙钟余量在负载下击穿（closure-lag-check / driver-runtime / promotion-driver）
-status: todo
+status: ready
 labels:
   - gap
   - defect
