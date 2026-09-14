@@ -13,7 +13,7 @@ criterion: |-
   let reason="exit "+r.status;
   try{ const o=JSON.parse((r.stdout||"").trim()); if(o&&o.reason) reason=o.reason; }catch{}
   console.log("direct-to-develop bypass check not pass: "+reason);
-  process.exit(1);
+  console.error("AC-194 fail - plugin/scripts/direct-to-develop-bypass-check.ts did not pass (--baseline develop~100)", reason); process.exit(1);
   '
 expect: exit 0
 origin: >-

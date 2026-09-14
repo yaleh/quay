@@ -6,11 +6,15 @@ kind: criterion
 goal: GOAL-003
 criterion: >-
   grep -vE '^[[:space:]]*(//|\*)' plugin/scripts/runtime-usage-inventory.ts |
-  grep -q 'subagents/workflows' || exit 1
+  grep -q 'subagents/workflows' || { echo "AC-160 fail:
+  plugin/scripts/runtime-usage-inventory.ts has no non-comment reference to
+  subagents/workflows" >&2; exit 1; }
 
   node --experimental-strip-types --test
   plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs >/dev/null
-  2>&1
+  2>&1 || { echo "AC-160 fail: regression test
+  plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs did not
+  pass" >&2; exit 1; }
 expect: exit 0（runtime-usage-inventory.ts 在非注释位置枚举 subagents/workflows ∧ 回归测试
   runtime-usage-inventory-workflows-enumeration.test.mjs 通过——该测试须在未修版本上必红）
 origin: >
