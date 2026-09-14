@@ -128,11 +128,10 @@ extra:
 
 ⛔ 除此之外未触碰任何文件;这份扩展本身写在这里,作为范围变更的记录。
 
-### AC5 scoped 门(读数)
+### AC5 scoped 门(最终读数)
 
 `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
-⇒ **exit 0** · `tests 216 / pass 216 / fail 0`(scoped static tier 无 violation;`task-contract-check: no violations`)。
-**按测试名核对新增用例确实被选中执行**(7 条,全部出现在本轮输出里,⛔ 不看总数):
+⇒ **exit 0** · `tests 219 / pass 219 / fail 0`(scoped static tier 无 violation)。**按测试名核对新增用例确实被选中执行**(7 条,逐字抄自本轮 stdout,零条遗漏):
 
 ```
 ✔ body-freshness: the free functions — ledger read, the narrow failure predicate, the ahead measure (AC2)
@@ -143,6 +142,18 @@ extra:
 ✔ runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)
 ✔ computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)
 ```
+
+**⚠️ 本轮 scoped 门被一个【非本条】的 develop 侧陈旧挡过一次,如实记录**(硬规则 5/11b):
+`quay-init-closure-ratchet-stale --check-stale` 曾红 —— 人令的 0.6.1→0.6.2 版本 bump 改了
+`plugin/.claude-plugin/plugin.json`(该 ratchet 的四个 fingerprint source 之一)而基线未 re-anchor。
+**它不是本条的改动**:本条差分里没有该文件;**已有一个在飞任务认领**
+(`gap-worker-outcome-final-state-landed-is-a-dead-value`,其 worktree 内提交
+`chore(ratchet): re-anchor quay-init closure baseline after the 0.6.2 version bump`)⇒ 本条**不重复动手**
+(避免两处落同一文件),改为等它落地 develop 后 merge 重跑。它已落 develop ⇒ 最终读数如上。
+**⇒ 这也决定了 scoped-gate 缓存键**:写的是**本轮实际跑绿的那个 tip**(`HEAD^2` = `8df173613`),
+不是写缓存那一刻的 `develop`(彼时已前进到 `25811c60e`)——否则 fan-in 可能在**本条从未验过的**
+develop 状态上命中缓存并跳过门(该规矩的正本见 `scoped-gate-cache-sha-must-be-the-tip-you-gated`)。
+fan-in 若发现 develop 已前进 ⇒ 缓存未命中 ⇒ 照跑 scoped 门(fail-closed,设计如此)。
 
 ## Touches
 
