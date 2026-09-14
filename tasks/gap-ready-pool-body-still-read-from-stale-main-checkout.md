@@ -53,18 +53,101 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] **能取假的复现**:构造一个 body 在主检出与 develop 不一致的对象,闸对它某个 body 维度的判定**随读源不同而不同**;**负控制**:两侧一致时两种读源给出**相同**判定。两次读数都贴进 `## Resolution`。
-- [ ] **痕迹被消费(步骤 1)**:存在一条能取假的判据,证明 `propagated:false` 已接进某个动作,且输出词表里有**独立的「未评估」取值**(⛔ 不与「合格」同形——硬规则 3b)。判据:人为制造一次 propagate 失败后,闸对该 task 的输出与正常态**可区分**。
-- [ ] **范围纪律写进产物**:`## Resolution` 里写明本轮**没有**改 body 读源、以及触发宽修法的条件(交叉表命中数 > 1),⛔ 不得顺手扩大到步骤 2。
-- [ ] **反向陷阱已验(仅当本轮真要动读源时才需)**:若实现者判断必须提前做步骤 2,则 Plan 步骤 3 的反向案例读数必须先贴进 `## Resolution`;不做步骤 2 则本条记 N/A 并写明理由(⛔ 不静默跳过)。
-- [ ] `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout` 全绿,新增用例在该轮**被实际选中执行**(按测试名核对,不看总数)。
+- [x] **能取假的复现**:构造一个 body 在主检出与 develop 不一致的对象,闸对它某个 body 维度的判定**随读源不同而不同**;**负控制**:两侧一致时两种读源给出**相同**判定。两次读数都贴进 `## Resolution`。
+- [x] **痕迹被消费(步骤 1)**:存在一条能取假的判据,证明 `propagated:false` 已接进某个动作,且输出词表里有**独立的「未评估」取值**(⛔ 不与「合格」同形——硬规则 3b)。判据:人为制造一次 propagate 失败后,闸对该 task 的输出与正常态**可区分**。
+- [x] **范围纪律写进产物**:`## Resolution` 里写明本轮**没有**改 body 读源、以及触发宽修法的条件(交叉表命中数 > 1),⛔ 不得顺手扩大到步骤 2。
+- [x] **反向陷阱已验(仅当本轮真要动读源时才需)**:若实现者判断必须提前做步骤 2,则 Plan 步骤 3 的反向案例读数必须先贴进 `## Resolution`;不做步骤 2 则本条记 N/A 并写明理由(⛔ 不静默跳过)。
+- [x] `bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout` 全绿,新增用例在该轮**被实际选中执行**(按测试名核对,不看总数)。
 
 ## Definition of Done
 
 `propagated:false` 不再是一条无人消费的痕迹——闸在读源可能陈旧时给出**可区分的第三态**,而不是拿旧 body 照判;范围纪律(本轮不改读源、宽修法的触发条件)写在产物里。⛔「把 body 读源改了」不是本轮的达成条件,反而**超范围**;⛔「单测绿了」不算——AC1/AC2 的读数须来自真实可区分的对照。
 
+## Resolution
+
+**读源方向与立案描述相反(实证,非推断)——这一条改变了修法的落点。**
+
+立案把陈旧源写成「主检出磁盘读(`fs.readdirSync` 构建 allTasks)」。实测:那个 `readdirSync` 构建的是
+`analyzeTasks` 的 `fileNames`(**id 清单**,它确实来自磁盘),而 body 本身走的是
+`taskReadRef` ⇒ `loadParsedTaskStoreAtRef(root, taskReadRef, ids)`,**全部维度(含 body)从 git ref 读**。
+生产两处调用点都传了 ref:
+- `promotion-driver` spawn 的 `ready-pool-check --apply`(CLI 末段:`apply ? applyPromotions({...base, taskReadRef: develop}) : analyzeTasks({...base, taskReadRef: develop})`);
+- `slot-refill` 的 `analyzeTasks({..., taskReadRef })`(默认 `"develop"`)。
+
+⇒ **陈旧的是 develop ref 那一侧,不是磁盘**:写面 05:05:16 提交了修复,05:05:17 的 propagate 失败
+(`branchClass:"other" changeKind:"must-propagate" propagated:false`),develop 上仍是修复前的体。闸读 ref
+⇒ 读到修复前的体 ⇒ `touchesResolve=false` ⇒ `fixable` 三类之一 ⇒ **派 fix worker 去修一个当前体里根本
+不存在的缺陷** ⇒ 修不了 ⇒ 超时 ⇒ 三次 ⇒ needs-human。
+⇒ **这是 `gap-dispatch-reads-stale-main-checkout-*` 家族的镜像半边**:那一族是「盘落后 ref,修法是读 ref」;
+本条是「写面领先 ref(propagate 失败),读 ref 才陈旧」。两方向需要相反的判据,只有传播账本带方向。
+
+### AC1 能取假的复现(两次读数)
+
+同一 root、同一 `checkTaskTouchesResolve`,只换读源(fixture = 3 个新文件未标 `(new)` 的修复前体 vs 标了 `(new)` 的修复后体):
+
+| 读源 | body | `touchesResolve` | bodyFreshness |
+|---|---|---|---|
+| `analyzeTasks({taskReadRef:"develop"})`(**生产读源**) | 修复前 | `false` | `stale-suspected` |
+| `analyzeTasks({})`(盘) | 修复后 | `true` | `fresh` |
+
+⇒ **同一个 body 维度的判定随读源翻转**(AC1 上半)。**负控制**:两侧体一致时(HEAD 移到 develop 上,写面不再持有 ref 没有的版本),两种读源**都判 `touchesResolve=false`**,且 `not_evaluated` 为空。
+
+### AC2 痕迹被消费(第三态,独立取值)
+
+触发 = 两个独立读数之**合**:
+- (a) 账本该任务最后一条是**写面真实传播失败**(`other` + `must-propagate` + `false`;⛔ 刻意排除两种**设计如此**的 `propagated:false`:`task-branch`(worktree 写,由 fan-in 带过去)与 `self-only`(AC tick,同样由自身 fan-in 带过去));
+- (b) 直接量 `git rev-list --count <ref>..HEAD -- tasks/<id>.md` > 0 —— 写面持有 ref 没有的版本。**(b) 自带方向**:既有的「主检出落后 develop」一族量到 **0**,永不被误判(由测试的负控制钉住)。
+
+**(a) 单独会滥用**(propagate 失败下一次同步就自愈,账本却仍写 `false`);**(b) 单独会在每次在飞写时滥发**。两者相合才精确,且**自愈**:无缓存、每轮重取,内容一到 ref,(b) 即归 0。
+
+输出词表(三个值,⛔ 不与「合格」同形——硬规则 3b):`fresh` / `stale-suspected`(测得:写面领先)/ `unknown`(写了失败记录但方向**测不到** ⇒ 绝不与「量过且干净」同形)。`bodyEvaluated = (fresh)` 进 `eligible`;顶层 `not_evaluated` 数组带 id/freshness/reason/evidence(含 `commitsAhead` 与账本 `ts`)。
+
+读数:ref 读源下该 candidate ⇒ `bodyFreshness:"stale-suspected"`、`bodyEvaluated:false`、`eligible:false`、`promotions:[]`、`not_evaluated:[{freshness:"stale-suspected",reason:"write-face-ahead-of-ref",evidence:{commitsAhead:1,ts:"2026-09-14T05:05:17.097Z"}}]`。
+负控制:①已自愈的 propagate(账本仍 `false` 但写面不领先)⇒ `fresh`、照常晋升;②两种设计如此的 `propagated:false` ⇒ `fresh`、照常晋升;③方向测不到(无 develop ref)⇒ `"unknown"`(独立取值)。
+
+**消费端**(`promotion-driver.ts`,见下方范围说明):`classifyCandidate` 在 `bodyEvaluated===false` 时给出独立第三态(`fixable:false` / `missing:[]` / `notEvaluated:true`),⛔ **不派 fix worker**。**取假对照**:同一个 `touchesResolve=false`,`bodyEvaluated:true` ⇒ `fixable:true`(照旧派);`bodyEvaluated:false` ⇒ `fixable:false`(不派)。`computeReverifyOutcome` 把该 id 归 `notEvaluatedIds`,**`advanceRetryCap` 不计数**(否则重验证仍会把它计入失败上限,翻 needs-human 的形状原样保留)。`bodyEvaluated` 缺值(旧版闸输出)⇒ 读作「未标记」而非 `false`(硬规则 6)。
+
+### AC3 范围纪律(写在产物里)
+
+- **本轮【没有】改 body 读源。** `taskReadRef` 的语义、`allTasks` 的构建、四个 body 维度判据的输入一字未动;新增的是**这些判据之外**的一个三值新鲜度字段 + 它的消费。
+- 宽修法(把 body 维度改到与 status 同一个权威读源)的**触发条件**:立案给的交叉表命中数 **> 1**(即出现第二个独立案例),或本轮的「未评估」态在生产上被触发超过 N 次(N 由步骤 1 的读数定,⛔ 不预设)。本轮实测交叉表命中 **1** ⇒ 未达触发条件 ⇒ ⛔ 不扩大。
+- ⛔ 若将来做步骤 2,须**覆盖四个维度而非一维**(`touchesResolve`/`fourArtifacts`/`touchesNarrow`/`selfTouch`),并先取 Plan 步骤 3 的反向案例读数——这正是本缺陷的成因(硬规则 5b),⛔ 不用同一个错误去修它。
+
+### AC4 反向陷阱 —— N/A(并写明理由)
+
+本轮**没有**动读源 ⇒ 按 AC4 自己的规定记 N/A,⛔ 不静默跳过。理由:Plan 步骤 3 的反向案例(「刚在主检出写下、尚未 propagate 的合法新任务」在改读源后会不会被读成不存在)没有读数,而写面保留 author 是人 2026-08-31 的裁定 ⇒ 那种任务是常态 ⇒ 给不出该读数就**不得改读源**。本轮的第三态**顺带**把那个反向陷阱的边界显式化了:`unknown` 与 `fresh` 分列,读不到就不装作读到。
+
+### 范围说明:Touches 扩展(为什么加了 promotion-driver)
+
+立案的 Touches 只有 `ready-pool-check.ts` 与它的测试。**但只做生产者半边不构成修复**:`classifyCandidate`
+的 `touchesResolve=false` ⇒ `fixable` 三类之一 ⇒ **派 fix worker**,而派 worker 正是本条缺陷的**危害本身**。
+生产者单独上线时,复现场景下仍会:闸判 `eligible:false` ⇒ driver 读 `touchesResolve=false` ⇒ 派 worker
+⇒ 超时 ⇒ 三次 ⇒ needs-human ⇒ **危害原样保留**。故 Touches 增列:
+- `plugin/scripts/promotion-driver.ts`(消费端:分类第三态 + 重验证不计数)
+- `plugin/test/promotion-driver.test.mjs`(其取假对照)
+
+⛔ 除此之外未触碰任何文件;这份扩展本身写在这里,作为范围变更的记录。
+
+### AC5 scoped 门(读数)
+
+`bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
+⇒ **exit 0** · `tests 216 / pass 216 / fail 0`(scoped static tier 无 violation;`task-contract-check: no violations`)。
+**按测试名核对新增用例确实被选中执行**(7 条,全部出现在本轮输出里,⛔ 不看总数):
+
+```
+✔ body-freshness: the free functions — ledger read, the narrow failure predicate, the ahead measure (AC2)
+✔ body-freshness: AC1 — a body dimension's verdict FLIPS with the read source, and the gate's third state fires on the production read source
+✔ body-freshness: AC2 negative controls — a HEALED propagate and the two by-design `propagated:false` shapes never withhold a promotion
+✔ body-freshness: AC2 — an unmeasurable direction is `unknown`, its own value, never `fresh` (硬规则 3b)
+✔ classifyCandidate — bodyEvaluated=false is its OWN class: ⛔ no fix worker for a body the gate could not vouch for
+✔ runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)
+✔ computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)
+```
+
 ## Touches
 
 - `plugin/scripts/ready-pool-check.ts`
 - `plugin/test/ready-pool-check.test.mjs`
+- `plugin/scripts/promotion-driver.ts`
+- `plugin/test/promotion-driver.test.mjs`
 - `tasks/gap-ready-pool-body-still-read-from-stale-main-checkout.md`
