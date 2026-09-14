@@ -2,7 +2,7 @@
 id: gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved
 title: orangevps/meta-cc 真机重验：user scope 装 0.7.0 + quay-init 重跑（删键重注册，非探测路径）+ 真实
   todo→done（GOAL-018/AC-258）
-status: needs-human
+status: todo
 needs_human_cause: unclassified
 labels:
   - gap
