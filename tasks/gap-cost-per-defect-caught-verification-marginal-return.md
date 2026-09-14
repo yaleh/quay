@@ -1,7 +1,7 @@
 ---
 id: gap-cost-per-defect-caught-verification-marginal-return
 title: 算每拦下一个缺陷的验证成本——给 ADR-005「验证是绑定约束」一个数（ready-pool-check 独占 97.8%）
-status: todo
+status: ready
 labels:
   - gap
   - analysis
@@ -33,10 +33,10 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 
 ## Touches
 
-- `plugin/scripts/verification-marginal-return.ts`
-- `plugin/test/verification-marginal-return.test.mjs`
+- `plugin/scripts/verification-marginal-return.ts` (new)
+- `plugin/test/verification-marginal-return.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/cost-per-defect-caught.md`
+- `docs/analysis/cost-per-defect-caught.md` (new)
 - `tasks/gap-cost-per-defect-caught-verification-marginal-return.md`
 
 ## Acceptance Criteria
