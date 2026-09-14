@@ -109,8 +109,13 @@ worktree-include: verify FAILED — 1 of 3 declared file(s) absent from …
 换回修法 ⇒ 绿。竞态无法靠重跑钉住，所以测试钉的是**不变量**：primary 解析不得依赖一次成功的
 `git worktree list`。
 
-**测试**：`plugin/test/dispatch-worktree-setup.test.mjs` 27 pass / 0 fail（含既有 17 条不回归）；
-`plugin/test/repo-root.test.mjs` 与 `provision-verify-worktree.test.mjs`、`repo-root-unification.test.mjs` 全绿。
+**测试**（2026-09-14 worker 逐文件复跑；`node --test` 的 `ℹ` 摘要行带 ANSI 色，读数先剥色）：
+`plugin/test/dispatch-worktree-setup.test.mjs` **23 pass / 0 fail**（develop 上既有 **16** 条 + 本 delta
+新增 **7** 条，全部通过）；`plugin/test/repo-root.test.mjs` **4 pass / 0 fail**、
+`plugin/test/provision-verify-worktree.test.mjs` **5 pass / 0 fail**、
+`plugin/test/repo-root-unification.test.mjs` **10 pass / 0 fail**。前两个文件合跑 = **27 pass / 0 fail**。
+（⛔ 更正：原记录「27 pass / 既有 17 条」把两个文件合跑的 27 当成了单文件读数、且既有数多算 1；
+单独跑 `dispatch-worktree-setup.test.mjs` 恒得 23/23，已按逐文件复测更正。）
 
 ## Touches
 
@@ -137,7 +142,7 @@ worktree-include: verify FAILED — 1 of 3 declared file(s) absent from …
       哪些文件，⛔ 不是只打印一行 `failed` 然后继续。
       → exit 2 且逐条点名缺席文件；且「验证器无法评估」与「列出缺席文件」「查过且合格」三态可区分。
 - [x] 跑一次既有测试 `plugin/test/dispatch-worktree-setup.test.mjs` 证不回归。
-      → 27 pass / 0 fail（既有 17 条全绿）。
+      → 23 pass / 0 fail（develop 上既有 16 条全绿 + 本 delta 新增 7 条全绿；逐文件复测读数与读法见 Evidence）。
 
 ## DoD
 
