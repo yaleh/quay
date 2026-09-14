@@ -58,13 +58,15 @@ exit=1
 
 ## AC
 
-- [ ] AC1: 逐字跑 `goals/AC-161-user-level-marketplace-only.md` 的 criterion（python3 heredoc 原文）⇒ **exit 0**（立案当轮实测 exit 1，`CAUSE=user-enabled-plugins — …: quay@quay`）。
-- [ ] AC2: 用户级 marketplace 源不再指向临时前缀——`python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.claude/settings.json')));p=((d.get('extraKnownMarketplaces') or {}).get('quay') or {}).get('source',{}).get('path','');sys.exit(1 if '/tmp/' in p else 0)"` ⇒ exit 0；同一条断言对 `~/.claude/plugins/known_marketplaces.json` 的 `quay.installLocation` 也 ⇒ exit 0（立案当轮两者都指向 `/tmp/quay-install-PREFIX-20260914-214317/…` ⇒ exit 1）。
-- [ ] AC3（**读生产载体，不是夹具**）：把**真实产物 tarball**（`plugin/scripts/develop-deliver-tgz.sh` / `package.sh` 产出的 `quay-*.tgz`）用 `npm install -g --prefix <新建临时前缀>` 装一次，**操作者真实 `HOME`、⛔ 不设 `QUAY_SKIP_PLUGIN_REGISTER` / `QUAY_SKIP_PLUGIN_CLI` / 不做 HOME 隔离**；跑完复跑 AC1 的同一条 criterion ⇒ 仍 **exit 0**，且 `~/.claude/settings.json` 的 `enabledPlugins` 键集与安装前**逐字相同**（前后各取一次读数并贴出）。
-- [ ] AC4（**能取假**）：把 materialization 换回修复前语义（默认 user scope）重跑 AC3 的同一条断言 ⇒ **红**（用户级 `quay@quay` 键重现）；换回修复 ⇒ 绿。两组读数贴进结果段。
-- [ ] AC5（**能力不丢**，AC-258 面向）：显式 opt-in（如 `QUAY_PLUGIN_SCOPE=user`）下同一次真实安装 ⇒ 用户级 `enabledPlugins["quay@quay"]` **确实出现**（正控制）；不设该变量 ⇒ **不出现**（即 AC3）。两条构成一对，缺一即「把能力删了」而非「把默认改了」。该 opt-in 在 `README.md` 环境变量表中有行。
-- [ ] AC6（**修空转判据**）：`packages/quay/test/npm-pack-e2e.test.mjs` 里「register 不得写用户级 enabledPlugins」的断言不再只在 `QUAY_SKIP_PLUGIN_CLI=1` 下取值——新增控制：materialization 打开（或假 `claude` shim 复刻真 CLI 的 user-scope 写入）⇒ 该断言**转红**；关闭 ⇒ 绿。
-- [ ] AC7（不引入新红）：`node --test packages/quay/test/npm-pack-e2e.test.mjs`、`plugin/test/quay-init.test.mjs`、`plugin/test/shipped-entry-runnable.test.mjs` 全绿；`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ exit 0（既有 control 13 `MP_ENABLED_LEAK` 不退化）。⚠️「不产生新红」本身不是接线成功的证据，故必须与 AC3/AC4 同读。
+- [x] AC1: 逐字跑 `goals/AC-161-user-level-marketplace-only.md` 的 criterion（python3 heredoc 原文）⇒ **exit 0**（立案当轮实测 exit 1，`CAUSE=user-enabled-plugins — …: quay@quay`）。
+- [x] AC2: 用户级 marketplace 源不再指向临时前缀——`python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.claude/settings.json')));p=((d.get('extraKnownMarketplaces') or {}).get('quay') or {}).get('source',{}).get('path','');sys.exit(1 if '/tmp/' in p else 0)"` ⇒ exit 0；同一条断言对 `~/.claude/plugins/known_marketplaces.json` 的 `quay.installLocation` 也 ⇒ exit 0（立案当轮两者都指向 `/tmp/quay-install-PREFIX-20260914-214317/…` ⇒ exit 1）。
+- [x] AC3（**读生产载体，不是夹具**）：把**真实产物 tarball**（`plugin/scripts/develop-deliver-tgz.sh` / `package.sh` 产出的 `quay-*.tgz`）用 `npm install -g --prefix <新建临时前缀>` 装一次，**操作者真实 `HOME`、⛔ 不设 `QUAY_SKIP_PLUGIN_REGISTER` / `QUAY_SKIP_PLUGIN_CLI` / 不做 HOME 隔离**；跑完复跑 AC1 的同一条 criterion ⇒ 仍 **exit 0**，且 `~/.claude/settings.json` 的 `enabledPlugins` 键集与安装前**逐字相同**（前后各取一次读数并贴出）。
+- [x] AC4（**能取假**）：把 materialization 换回修复前语义（默认 user scope）重跑 AC3 的同一条断言 ⇒ **红**（用户级 `quay@quay` 键重现）；换回修复 ⇒ 绿。两组读数贴进结果段。
+- [x] AC5（**能力不丢**，AC-258 面向）：显式 opt-in（如 `QUAY_PLUGIN_SCOPE=user`）下同一次真实安装 ⇒ 用户级 `enabledPlugins["quay@quay"]` **确实出现**（正控制）；不设该变量 ⇒ **不出现**（即 AC3）。两条构成一对，缺一即「把能力删了」而非「把默认改了」。该 opt-in 在 `README.md` 环境变量表中有行。
+- [x] AC6（**修空转判据**）：`packages/quay/test/npm-pack-e2e.test.mjs` 里「register 不得写用户级 enabledPlugins」的断言不再只在 `QUAY_SKIP_PLUGIN_CLI=1` 下取值——新增控制：materialization 打开（或假 `claude` shim 复刻真 CLI 的 user-scope 写入）⇒ 该断言**转红**；关闭 ⇒ 绿。
+- [x] AC7（不引入新红）：`node --test packages/quay/test/npm-pack-e2e.test.mjs`、`plugin/test/quay-init.test.mjs`、`plugin/test/shipped-entry-runnable.test.mjs` 全绿；`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ exit 0（既有 control 13 `MP_ENABLED_LEAK` 不退化）。⚠️「不产生新红」本身不是接线成功的证据，故必须与 AC3/AC4 同读。
+
+**逐条读数 → `## Result（本轮证据）` 段。**
 
 ## DoD
 
@@ -83,3 +85,36 @@ exit=1
 - `packages/quay/test/npm-pack-e2e.test.mjs`
 - `README.md`
 - `tasks/gap-ac161-postinstall-rematerializes-user-scope-enable.md`
+
+## Result（本轮证据，2026-09-14）
+
+**实现**（commit `86e5c1db4`；随后 merge develop ⇒ `8777c05b4`）：
+
+- `packages/quay/scripts/register-plugin.mjs`：materialization 的 **enable 步改为显式 opt-in**。默认只跑 `claude plugin marketplace add <pluginDir>`（用户级只留 marketplace 源，AC-161 语义）；仅当 `QUAY_PLUGIN_SCOPE=user|project|local` 时才额外跑 `claude plugin install <ref> --scope <scope>`。未设 / 不识别 ⇒ 只注册不启用（fail-closed 方向）。删除了 `:132-147` 的 RESIDUAL 段，换成文件头的 SCOPE POLICY 说明与 guard-rail 一行。
+- `packages/quay/test/npm-pack-e2e.test.mjs`：新增「ENABLE 通道默认关闭」控制。用假 `claude` shim 复刻真 CLI 的 user-scope 写入（含调用日志）。两半：(a) `QUAY_PLUGIN_SCOPE=user` ⇒ shim 被调用、键出现；(b) 默认 ⇒ 调用日志里**没有** `plugin install` 行、键不存在。
+- `README.md`：环境变量表新增 `QUAY_PLUGIN_SCOPE` 行；Option A 的 fallback 命令块加 `--scope project` 与默认语义说明。
+
+**AC 读数**：
+
+| AC | 读数 |
+|---|---|
+| AC1 | criterion 从 goal 文件 heredoc **提取后逐字跑**（非手抄）⇒ **exit 0** |
+| AC2 | cmd1 `settings.json` 的 path = `/home/yale/work/quay/plugin` ⇒ exit 0；cmd2 `known_marketplaces.json` 的 `quay.installLocation` = `/home/yale/work/quay/plugin` ⇒ exit 0 |
+| AC3 | 真 tarball `quay-fixed.tgz`（sha256 `7e2f1536cb6a0a9295bdd12d2141ee01b6ce44ab5b2e66c91f9b2a52d9b1083b`，`package.sh` 产出）；`npm install -g --prefix /tmp/ac161/prefix-fixed`，真实 HOME、无 skip 变量、无隔离 ⇒ criterion **exit 0**；`enabledPlugins` 键集 前 = 后 = `["archguard@archguard","meta-cc@meta-cc-marketplace"]`（**逐字相同**）。整文件 sha256 前 `9bcdb5e5…` → 后 `ab8c3b96…`，用重建哈希证明**差异只在** `extraKnownMarketplaces.quay.source.path`（重建后 sha 与安装前逐字相符） |
+| AC4 | 先恢复到干净基线（criterion exit 0）⇒ 装**修复前**脚本的 tarball `quay-prefix.tgz`（sha256 `b998d0fb37c4b9e4b4e73fdefab02b9a856f839e8ee29fa111351e069b651bd9`）⇒ `enabledPlugins` 重现 `"quay@quay": true`、criterion **exit 1**（`CAUSE=user-enabled-plugins — …: quay@quay`）；换回修复 ⇒ exit 0 |
+| AC5 | `QUAY_PLUGIN_SCOPE=user npm install -g --prefix /tmp/ac161/prefix-optin quay-fixed.tgz`（真实 HOME）⇒ `enabledPlugins` **确实出现** `"quay@quay": true`（正控制）；不设该变量 ⇒ 不出现（= AC3）。README 环境变量表已有该行 |
+| AC6 | prefix-code-swap 控制（同一断言、同一 shim、默认 env）：**修复前**脚本 ⇒ 断言 **FAIL**（shim 调用日志 = `plugin marketplace add … | plugin install quay@quay`，键 = true）；**修复后** ⇒ **PASS**（日志只有 `plugin marketplace add …`，键 = undefined）。⇒ 断言能取假，且新控制真的穿过 enable 通道 |
+| AC7 | `node --test packages/quay/test/npm-pack-e2e.test.mjs` **10/10 绿**（含新控制）；`plugin/test/quay-init.test.mjs` **14/14 绿**；`plugin/test/shipped-entry-runnable.test.mjs` **2/2 绿**；`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ **exit 0**，其中 control 11 `MP_EVALUATED=1 MP_REGISTER_OK=1 MP_SETTINGS_OK=1 MP_ENABLED_LEAK=0`、control 13 `MP_SETTINGS_OK=0 MP_ENABLED_LEAK=1`、control 12 `0`、control 14 `0/1/1`、control 45/46 `1/1/1/1` 与 `0/0` 全部未退化 |
+
+**为「能取假」而造的对照**（硬规则 4 推论四）：① 修复前安装把 `settings.json` 的 marketplace 路径写成**该次安装自己的临时前缀**（`/tmp/ac161/prefix-prefix/…`）——手工 `claude plugin install` 不会产生该路径，故「污染来自 postinstall 链」有对照；② AC4 从**干净基线**（先 exit 0）出发再装 ⇒ 排除「本来就红所以红」；③ AC6 的 (a) 半真的写出违规键 ⇒ (b) 半的绿不是空转。
+
+**状态恢复（Plan 步骤 1，顺序 ①→④）**：① 项目级 `/home/yale/work/quay/.claude/settings.json` = `{"enabledPlugins":{"quay@quay":true}}`（读回）；② `installed_plugins.json` 里 `quay@quay` 的 `scope:"project"`（`projectPath=/home/yale/work/quay`）记录在 ⇒ 删用户级不会锁死；③ 删用户级 `enabledPlugins["quay@quay"]`；④ `claude plugin marketplace add /home/yale/work/quay/plugin` ⇒ `settings.json` 与 `known_marketplaces.json` 两处路径都回到 `/home/yale/work/quay/plugin`。
+
+**⛔ 本 worker 不声称的部分**：DoD 第 4 条（goal-driver 下一轮把 `.quay/goal-round.jsonl` 里 AC-161 的 `verdict` 由 fail 翻 **pass**、并从 `achievedButFailing` 消失）由 **goal-driver 的下一轮**产生，非本 worker 可观测 ⇒ **此处不作声称**。
+
+**硬规则 5b 扫描（同形实例，全仓 `claude plugin install` 调用点 4 处，默认 user scope 的另 2 处本轮未改，逐条给理由）**：
+
+1. `plugin/scripts/verify-deliver-coldstart.sh:4038` `claude plugin install "quay@quay" -y`（`:4034-4040`）—— 属 **AC-258** 的 user-scope 物化兜底腿，该任务（`gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved`，Touches 含本文件与 `quay-init.sh`，现已 done）的判据**要求** user scope（selfcheck 明写 `install_scope must be user` / `project 取值必须被写入期闸挡住`）⇒ 本轮改它等于与 AC-258 的方向对撞，**不动**。**但该处 `:4025-4032` 的注释把 register-plugin.mjs 描述为「自己会调两条 CLI 命令 … runCli(["plugin","install",pluginRef])」——修复后该默认已不成立，是本轮引入的一处陈旧注释**，登记在此供 AC-258 侧或后续任务修正。同一腿在无 `claude` 的宿主上会退化为 `not-attempted`（该边界 AC-258 自陈存在于 B/C，本轮不改变它，但后续重跑需知悉主线已改由兜底腿承担）。
+2. `plugin/scripts/quay-init.sh:2648` 打印给用户的 `claude plugin install quay@quay`（无 `--scope`）—— 同属 AC-258 的 quay-init / user-scope 领地（任务名即 `…user-scope-quay-init-merge-preserved`）⇒ **不动**，登记为同形实例。
+
+（另 2 处 `verify-deliver-coldstart.sh:3709-3711` 已显式 `--scope project`，无问题。）
