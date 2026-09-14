@@ -195,8 +195,7 @@ import，且两 bundle 内含 `resolveCoreSrcFile`（`core-src-import.ts` 被 IN
 - [x] AC4 `grep -rn '"\.\./\.\./packages/quay/src"' plugin/scripts/*.ts` 的命中数与本任务处理前的命中数
       对比，若发现其他文件有同类写死路径，须在本任务体里列出清单（不必在本任务里全部修完，但必须
       枚举出来，不能只顾自己撞到的这一个）。
-- [ ] AC5 全量 `scripts/test.sh` 绿——由 worker-driver 机械 fan-in 的 suite 步骤验证（本 worker 按委派
-      只跑 scoped 门，不跑全量；见 §5）（待外部）
+- [ ] AC5 全量 `scripts/test.sh` 绿；由 worker-driver 机械 fan-in 的 suite 步骤验证（本 worker 按委派只跑 scoped 门，见 §5）（待外部）
 
 ## Definition of Done
 
