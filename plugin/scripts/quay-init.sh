@@ -30,7 +30,14 @@
 # 的写路径，只是仍然被下游机件按库方式消费；它们的整体退役属 AC158/AC159 波次。
 #
 # Flags: 见 plugin/skills/init/SKILL.md（--root/--project/--repo-root/--test-command/--tmux-session/
-# --worktree-root/--plugin-root/--force/--dry-run/--auto-commit-confirm/--auto-commit-skip）。
+# --worktree-root/--plugin-root/--force/--dry-run/--auto-commit-confirm/--auto-commit-skip/
+# --adopt-branch-model/--doc-branch-name）。
+#   --doc-branch-name <name>  establish the doc-only work branch: when the main checkout is sitting
+#     on the landing baseline 'develop', create <name> at that tip and switch the main checkout to
+#     it (human edits and driver commits then stop sharing one branch and one git index). Already
+#     off 'develop' ⇒ no-op; <name> taken by an UNRELATED branch ⇒ REFUSED, nothing moved; HEAD
+#     detached ⇒ NOT-EVALUATED, nothing moved. Default 'author'; a project's existing
+#     `loop.doc_branch` overrides it. Passed through to `quay init --branch-model-only`.
 # --all/--loop/--manager/--workflows/--agents 为向后兼容 no-op（收敛到同一闭集）。
 # Plugin root: ${CLAUDE_PLUGIN_ROOT} 或 --plugin-root <dir>。Fail-closed if unset/missing.
 
@@ -67,6 +74,16 @@ DRY_RUN=false
 # `<branch>-pre-quay-init-<sha>` and re-points the branch at the default branch tip. The DECISION is
 # the operator's; the JUDGMENT is never re-implemented here (see ensure_target_branch_model).
 ADOPT_BRANCH_MODEL=false
+# gap-quay-init-no-doc-branch-bootstrap-leaves-main-checkout-on-develop: the DOC-branch NAME.
+# ⛔ This is the CLI-PARAMETER layer, and it is the ONLY place the default value of a doc-branch name
+# lives in this repo. The judgment layer (`packages/quay/src/branch-model.ts`) is NAME-AGNOSTIC and
+# carries no branch-name literal at all: `author` is deliberately excluded from
+# `target-identity-literal-check.ts`'s `LEGAL_IDENTITY_VALUES`, so a literal there would (a) turn
+# that check RED and (b) hardcode a per-project convention into the mechanism. Resolution order is
+# the config-preserving-upgrade idiom already used for repo_root/test_command (see the
+# defaults block below): --doc-branch-name wins, else the project's existing `loop.doc_branch`,
+# else this default.
+DOC_BRANCH_NAME=""
 DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
@@ -93,6 +110,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --adopt-branch-model) ADOPT_BRANCH_MODEL=true; shift ;;
+    --doc-branch-name) DOC_BRANCH_NAME="$2"; shift 2 ;;
     --auto-commit-confirm) AUTO_COMMIT_CONFIRM=yes; shift ;;
     --auto-commit-skip) AUTO_COMMIT_CONFIRM=no; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
@@ -214,6 +232,13 @@ if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(read_existing_loop_value repo_root)"
   if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
 fi
+# DOC_BRANCH_NAME: explicit --doc-branch-name wins, else the consumer's recorded loop.doc_branch,
+# else the CLI-parameter default. Same precedence shape as repo_root above (and it MUST keep that
+# shape: a project that pinned a doc-branch name is not silently given a different one).
+if [ -z "$DOC_BRANCH_NAME" ]; then
+  DOC_BRANCH_NAME="$(read_existing_loop_value doc_branch)"
+fi
+if [ -z "$DOC_BRANCH_NAME" ]; then DOC_BRANCH_NAME="author"; fi
 # NOTE: TMUX_SESSION is deliberately NOT defaulted here. The old default was a guessed
 # "<project>-0:0.0" (gap-init-guesses-the-tmux-session): it only worked for the project it was
 # written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
@@ -2786,10 +2811,15 @@ ensure_target_branch_model() {
   # Argument order matters: the CLI's flag parser only treats `--dry-run` as boolean (BOOLEAN_FLAGS),
   # so a bare boolean flag is followed by the NEXT `--flag`. Every optional flag is therefore emitted
   # before the value-bearing `--root` tail — do not reorder `--root` into the middle.
+  # `--doc-branch-name` (gap-quay-init-no-doc-branch-bootstrap-…) rides the SAME config-free entry:
+  # after the landing baseline is judged, the CLI establishes the doc-only work branch. The NAME is
+  # resolved HERE (this script is the CLI-parameter/config-default layer — see the defaults block
+  # above); `branch-model.ts` never names a branch. Value-bearing, so it must stay before `--root`.
   local -a bm_args
   bm_args=(init --branch-model-only)
   if [ "$ADOPT_BRANCH_MODEL" = true ]; then bm_args+=(--adopt-branch-model); fi
   if [ "$DRY_RUN" = true ]; then bm_args+=(--dry-run); fi
+  bm_args+=(--doc-branch-name "$DOC_BRANCH_NAME")
   bm_args+=(--root "$WORKSPACE_ROOT")
 
   # The report is captured (not just streamed) so the three outcomes stay DISTINGUISHABLE below. It
@@ -2811,7 +2841,28 @@ ensure_target_branch_model() {
   # that). `case` (not `printf | grep -q`) on purpose: under `set -o pipefail` a `-q` grep can
   # SIGPIPE its producer, making the predicate read FALSE when it is TRUE.
   case "$bm_out" in
+    *"[BLOCKED] doc-branch"*)
+      # The doc-BRANCH step's refusal, not the baseline's: the requested doc-branch name is already
+      # taken by a branch with no ancestry relation to `develop`. The CLI has already printed the
+      # detail; ⛔ nothing was moved (no branch created, HEAD not switched) — that is what the
+      # judgment guarantees and what this branch must not paper over.
+      echo "" >&2
+      echo "ERROR: quay-init REFUSES to establish the doc-only work branch — the name '${DOC_BRANCH_NAME}'" >&2
+      echo "       is already taken by a branch unrelated to the landing baseline 'develop'." >&2
+      echo "       NOTHING WAS MOVED (no branch created, HEAD not switched, config untouched)." >&2
+      echo "       Resolve that branch by hand, or re-run with a different name:" >&2
+      echo "           bash $0 --root $WORKSPACE_ROOT --doc-branch-name <other-name> <same flags as before>" >&2
+      return 1
+      ;;
     *"[BLOCKED] landing-baseline"*) ;;
+    *"doc branch (name:"*)
+      # The doc-branch step RAN and reported something other than a name collision (a failed
+      # `git checkout`, say). Its own line carries the reason; this is NOT "cannot judge the branch
+      # model", so it must not take the cannot-evaluate exit below.
+      echo "ERROR: quay-init could not establish the doc-only work branch (its report is above)." >&2
+      echo "       Refusing to continue: the branch model was judged but not established." >&2
+      return 1
+      ;;
     *)
       echo "ERROR: cannot judge this project's branch model — the delivered CLI exited ${bm_rc} without" >&2
       echo "       reporting a landing-baseline verdict (its output is above)." >&2
