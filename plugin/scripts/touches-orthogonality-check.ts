@@ -18,11 +18,19 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { acquireCoreSrc } from "./core-src-import.ts";
 // The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
 // with fan-in/ff-merge.ts's clean-tree check). tasks/gap-quay-init-gitignore-misses-quay-runtime-
 // artifacts-outside-dot-quay: the `.quay/`-only口径 used to live in BOTH judges; only the ff's half was
 // reachable from the other, so widening one silently left the other refusing.
-import { isRuntimeArtifactPath, loadRuntimeArtifactPatterns } from "../../packages/quay/src/runtime-artifacts.ts";
+// ⛔ Acquired layout-independently (core-src-import.ts), NOT via a bare `../../packages/quay/src/…`
+// literal: this file also runs RAW from the staged `packages/quay/plugin/` copy `package.sh` builds,
+// where that literal resolves to `packages/quay/packages/quay/src/…` (nonexistent) and took the whole
+// `quay driver` verb down with it (driver-runtime.ts → driver-filters.ts → here).
+const { isRuntimeArtifactPath, loadRuntimeArtifactPatterns } = await acquireCoreSrc(
+  () => import("../../packages/quay/src/runtime-artifacts.ts"),
+  "runtime-artifacts.ts",
+);
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
