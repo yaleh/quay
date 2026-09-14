@@ -25,7 +25,7 @@ criterion: |-
       if int(r.get("forbidden_count") if r.get("forbidden_count") is not None else 1)!=0: continue
       if r.get("enable_declared") is not True: continue     # 成对：禁列为空 ∧ 启用声明存在
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-204 fail - no carrier record ac=GOAL-009-AC-204 with host other than this host, project_root outside this repo, forbidden_count=0 and enable_declared=true\n"); sys.exit(1)
   P
 expect: exit 0 = FORBIDDEN_PREFIXES 含 .mcp.json/.claude/commands//.claude/hooks/
   ∧ 载体中存在 ac=GOAL-009-AC-204 的记录（host≠本机、非本仓库项目、forbidden_count=0 ∧

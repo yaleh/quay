@@ -4,11 +4,22 @@ title: baime-iteration-executor.md 从 plugin.json 摘除并 archive
 status: achieved
 kind: criterion
 goal: GOAL-003
-criterion: |-
-  grep -q 'baime-iteration-executor' plugin/.claude-plugin/plugin.json && exit 1
-  [ -e plugin/agents/baime-iteration-executor.md ] && exit 1
-  [ -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && exit 1
-  grep -q 'baime-iteration-executor' archive/INDEX.tsv || exit 1
+criterion: >-
+  grep -q 'baime-iteration-executor' plugin/.claude-plugin/plugin.json && { echo
+  "AC-167 fail: plugin/.claude-plugin/plugin.json still references
+  baime-iteration-executor" >&2; exit 1; }
+
+  [ -e plugin/agents/baime-iteration-executor.md ] && { echo "AC-167 fail:
+  plugin/agents/baime-iteration-executor.md still exists" >&2; exit 1; }
+
+  [ -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && { echo "AC-167
+  fail: plugin/scripts/workflows-dual-copy-drift-check.ts still exists" >&2;
+  exit 1; }
+
+  grep -q 'baime-iteration-executor' archive/INDEX.tsv || { echo "AC-167 fail:
+  archive/INDEX.tsv has no archive record for baime-iteration-executor" >&2;
+  exit 1; }
+
   exit 0
 expect: exit 0（plugin/.claude-plugin/plugin.json 不再提及 baime-iteration-executor ∧
   该 agent 与 workflows-dual-copy-drift-check.ts 均已移走 ∧ archive/INDEX.tsv 有其归档记录）

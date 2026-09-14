@@ -1,7 +1,7 @@
 ---
 id: AC-256
 title: 重启单个服务不杀在飞 worker —— 重启 driver:worker 后其在飞子进程一个都没死（SPEC §6.9 不变式 3）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: >-
@@ -73,4 +73,10 @@ origin: 2026-09-13 独立对照审计发现的最大单点缺口：SPEC §6.9 �
   进程管理」节：stop/restart 只杀 supervisor+driver 自身，不碰在飞子进程），合并后丢掉它 =
   静默回退，且丢掉的是真实在跑的工作。
 activatedAt: 2026-09-13T15:38:17.524Z
+statusLog:
+  - at: 2026-09-14T05:18:44.370Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
