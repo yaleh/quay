@@ -4,9 +4,12 @@ title: quay-init 收缩到 SPEC §6 闭集
 status: achieved
 kind: criterion
 goal: GOAL-003
-criterion: grep -qE '^[[:space:]]*copy_dir
-  "\$PLUGIN_ROOT/(scripts|agents|workflows)"|^[[:space:]]*copy_one
-  "\$PLUGIN_ROOT/scripts/\$s"' plugin/scripts/quay-init.sh && exit 1; exit 0
+criterion: "grep -qE '^[[:space:]]*copy_dir
+  \"\\$PLUGIN_ROOT/(scripts|agents|workflows)\"|^[[:space:]]*copy_one
+  \"\\$PLUGIN_ROOT/scripts/\\$s\"' plugin/scripts/quay-init.sh && { echo
+  \"AC-168 fail: plugin/scripts/quay-init.sh still copies
+  \\$PLUGIN_ROOT/scripts|agents|workflows into the target workspace\" >&2; exit
+  1; }; exit 0"
 expect: exit 0（plugin/scripts/quay-init.sh 中不再存在把
   $PLUGIN_ROOT/scripts|agents|workflows 整体或逐脚本 copy 进目标工作区的调用点——静态判据，非 fixture
   自证；旧判据改跑 quay init（CLI, DIR-098）而非 /quay:init 技能实际调用的 quay-init.sh，quay init

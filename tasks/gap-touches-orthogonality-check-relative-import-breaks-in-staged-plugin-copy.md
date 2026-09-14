@@ -3,6 +3,7 @@ id: gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy
 title: touches-orthogonality-check.ts 的相对导入路径写死假设仓库顶层布局——在 npm 打包用的 staged
   plugin 副本下 ERR_MODULE_NOT_FOUND,quay driver 命令整体失败
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -211,3 +212,15 @@ import，且两 bundle 内含 `resolveCoreSrcFile`（`core-src-import.ts` 被 IN
 - plugin/scripts/touches-orthogonality-check.ts
 - plugin/scripts/fast-mode-telemetry.ts（`quay driver` 闭包内第二个同类调用点，AC3 要求一并修）
 - plugin/scripts/capability-catalog.sh（新脚本入件必须补的目录声明，否则 catalog 的 AC1c 门 exit 1）
+
+## Needs-Human
+
+**执行 2026-09-14T05:03:09.358Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: mechanical fan-in must land (step=anti-drift reason=exit null)
+- run_id：wk-prod-1789350883
+- session_id：9387e177-51a1-4292-bc35-9b72d9449ff3
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy~wk-prod-1789350883~1789361453052-578927.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-touches-orthogonality-check-relative-import-breaks-in-staged-plugin-copy-wk-prod-1789350883.log

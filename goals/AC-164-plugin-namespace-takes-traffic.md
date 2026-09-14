@@ -5,17 +5,20 @@ status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
-  root=$(git rev-parse --show-toplevel) || exit 1
+  root=$(git rev-parse --show-toplevel) || { echo "AC-164 fail: git rev-parse
+  --show-toplevel produced no repo root" >&2; exit 1; }
 
   dir="$HOME/.claude/projects/$(printf '%s' "$root" | sed 's|/|-|g')"
 
-  [ -d "$dir" ] || exit 1
+  [ -d "$dir" ] || { echo "AC-164 fail: no transcript dir for this project at
+  $dir" >&2; exit 1; }
 
   L=$(mktemp); find "$dir" -name '*.jsonl' -mtime -1 > "$L" 2>/dev/null
 
   n=$(wc -l < "$L")
 
-  [ "$n" -gt 0 ] || { rm -f "$L"; exit 1; }
+  [ "$n" -gt 0 ] || { echo "AC-164 fail: no *.jsonl modified in the last 24h
+  under $dir - empty file set, fail-closed" >&2; rm -f "$L"; exit 1; }
 
   a=$(xargs -r -a "$L" grep -oh '"name":"mcp__plugin_quay_quay__[a-z_]*"'
   2>/dev/null | wc -l)
@@ -25,9 +28,12 @@ criterion: >-
 
   rm -f "$L"
 
-  [ $((a+b)) -gt 0 ] || exit 1
+  [ $((a+b)) -gt 0 ] || { echo "AC-164 fail: zero mcp__plugin_quay_quay__ and
+  zero mcp__quay__ calls in the 24h transcript window" >&2; exit 1; }
 
-  [ "$a" -gt "$b" ]
+  [ "$a" -gt "$b" ] || { echo "AC-164 fail: mcp__plugin_quay_quay__ calls (a=$a)
+  did not exceed mcp__quay__ calls (b=$b) in the 24h transcript window" >&2;
+  exit 1; }
 expect: exit 0（本项目 transcript 目录 24h 窗口内，按 "name" 字段计的 mcp__plugin_quay_quay__
   真调用数 > mcp__quay__ 真调用数；文件集为空或两者皆 0 时 fail-closed 判假，不与合格同形）
 origin: >

@@ -60,7 +60,19 @@ before(async () => {
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
   port = server.address().port;
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: /dashboard's request path now serves a
+  // SNAPSHOT built by a background tick, so a fixture written and then read back in the same test
+  // would otherwise race a 30 s refresh. Retire the tick here and rebuild EXPLICITLY (`rebuild()`
+  // below) after each fixture write — the tests keep exercising the PRODUCTION path (rather than
+  // switching the mechanism off, which would test a path production no longer takes).
+  server.dashboardSnapshot.stop();
 });
+
+/** Write this file's fixture, then make the dashboard snapshot reflect it. */
+async function rebuild() {
+  clearVerificationRoundCache();
+  await server.dashboardSnapshot.rebuildNow();
+}
 
 after(async () => {
   await new Promise((r) => server.close(r));
@@ -97,6 +109,7 @@ test("AC1: a live-running suite (no taskId field, real writer shape) renders 运
     state: "running", runner: "inner", startedAt, laneCount: 16, scope: "worktree",
     runId: "mfi-some-task-1700000000000-abcdef", pid: 12345,
   }));
+  await rebuild();
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("运行中"), "testsCard shows 运行中 while a suite is live");
@@ -107,6 +120,7 @@ test("AC1: a live-running suite (no taskId field, real writer shape) renders 运
 test("AC2: no live suite + gate-blocked latest round names the gate, never a bare pass 0/0 headline", async () => {
   fs.writeFileSync(roundsFile(), MIXED_ROUNDS.map((r) => JSON.stringify(r)).join("\n") + "\n");
   // no full-suite-state.json — nothing currently running
+  await rebuild();
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("gate 未过"), "gate-blocked latest round is labeled, not shown as bare pass 0/0");
@@ -116,6 +130,7 @@ test("AC2: no live suite + gate-blocked latest round names the gate, never a bar
 
 test("AC3: the recent-run list (round chips) distinguishes gate-blocked from real green/red", async () => {
   fs.writeFileSync(roundsFile(), MIXED_ROUNDS.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  await rebuild();
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);
   assert.ok(/#2/.test(r.body) && /#3/.test(r.body), "the recent-run list renders round chips for a green and a gate-blocked round (the single latest row is not the only signal)");
@@ -124,6 +139,7 @@ test("AC3: the recent-run list (round chips) distinguishes gate-blocked from rea
 });
 
 test("AC3b: an empty ledger (no verification-round.jsonl) still renders 200 with an honest empty state", async () => {
+  await rebuild();
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("未接入") || r.body.includes("无验证轮记录"), "empty ledger → honest empty state, not a crash");
