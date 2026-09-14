@@ -18,6 +18,10 @@ import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { handleAllRoutes, serveIdentity, type ServePageCfg } from "./serve-handlers.ts";
 import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation.ts";
+// gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard's build moves OFF the request
+// path onto a background snapshot tick, started here beside the develop-ref refresh tick (the same
+// "cold build at startup, unref'd interval, never in a request" shape).
+import { startDashboardSnapshotRefresh } from "./serve-dashboard.ts";
 // GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §7 stage A2): the MCP control plane is
 // hosted by THIS process. `serveControlPlane` is imported from plugin/scripts/driver-shared.ts
 // rather than reimplemented here — the control plane has exactly ONE implementation (AC150-3), and
@@ -666,6 +670,15 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(reconcileTimer);
+    // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard snapshot tick is a HOST-owned
+    // background loop, so it dies with the host — exactly like `reconcileTimer` above. Without this the
+    // tick outlives `server.close()` FOREVER: it keeps rebuilding every 30s against a workspace the
+    // caller may already have deleted, and keeps calling `goalList()` on a ProviderClient the caller may
+    // already have closed. Measured on a closed server whose temp workspace was then rmSync'd: the tick
+    // still fired at +30s and +60s (`builtAt` advanced both times). Production has one long-lived server
+    // so it never noticed; every test that starts a server does. `stop()` retires the INTERVAL only —
+    // `rebuildNow()` stays callable, which is what the AC3/AC4 readings use.
+    dashboardSnapshot.stop();
     const root = cfg.workspaceRoot;
     try {
       await stopWebFace();
@@ -726,13 +739,26 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // unref'd — it never keeps the process alive; a non-git workspace fails the refresh silently.
   startDevelopRefBackgroundRefresh(cfg.workspaceRoot, "develop");
 
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard's readers are 30s-TTL
+  // cached, but AC-179's goal-sweep re-runs once per HOUR — structurally outside every TTL — so each
+  // re-run was a guaranteed cold miss paying the whole build inside the request (19.17 s measured,
+  // against `curl --max-time 10`). This tick builds a dashboard SNAPSHOT at startup and refreshes it
+  // every 30s, so `/dashboard` + `/dashboard/cards` serve a value instead of running readers. Unref'd
+  // and never awaited here: the cold build must not delay `listen` (a request arriving first simply
+  // takes the legacy in-request path until the first snapshot lands).
+  const dashboardSnapshot = startDashboardSnapshotRefresh(cfg.workspaceRoot, client);
+
   // Expose the control-plane handle the same way QN-031 exposed `client`: a caller (notably a test)
   // can retire BOTH hosted services deterministically instead of orphaning the control socket.
   const owned = server as Server & {
     client: ProviderClient;
     control: ControlPlaneHandle;
     hostedServices: HostedServiceManager;
+    // The dashboard snapshot tick's handle — `rebuildNow()` lets a caller drive a rebuild on demand
+    // (what the AC3/AC4 readings need) and `stop()` retires the tick, so a test never leaks one.
+    dashboardSnapshot: { stop: () => void; rebuildNow: () => Promise<void> };
   };
+  owned.dashboardSnapshot = dashboardSnapshot;
   owned.control = control;
   owned.hostedServices = {
     isUp: (name: "web" | "control") => (name === "web" ? webServer !== null : controlHandle !== null),
