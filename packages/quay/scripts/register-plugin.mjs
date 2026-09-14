@@ -9,9 +9,18 @@
 // This hook is the missing registration step.
 //
 // Mechanism (matching a machine whose config is known-good): write the installed
-// plugin directory as a Claude Code DIRECTORY marketplace source and materialize it
-// via the CLI. It does NOT write a user-level enabledPlugins entry — enabling is
-// left to the target project's <repo>/.claude/settings.json (AC-161).
+// plugin directory as a Claude Code DIRECTORY marketplace source and materialize the
+// MARKETPLACE via the CLI. It does NOT write a user-level enabledPlugins entry —
+// enabling is left to the target project's <repo>/.claude/settings.json (AC-161).
+//
+// SCOPE POLICY (AC-161; re-fixed 2026-09-14 by
+// gap-ac161-postinstall-rematerializes-user-scope-enable): the user level carries
+// ONLY the marketplace source. The enable step is therefore OFF by default:
+// `claude plugin install` defaults to `--scope user` (measured against Claude Code
+// 2.1.271), so calling it unconditionally wrote a user-level
+// `enabledPlugins["quay@quay"]` and re-reddened the STANDING goal AC-161 on every
+// real global install. Set `QUAY_PLUGIN_SCOPE=user|project|local` to opt in
+// explicitly (documented in README) — e.g. a deliberate user-scope install.
 //
 //   "extraKnownMarketplaces": { "quay": { "source": { "source": "directory", "path": "<installed>/quay/plugin" } } }
 //
@@ -28,6 +37,9 @@
 //     is what this gap measured on machine B).
 //   * `QUAY_SKIP_PLUGIN_REGISTER=1` opts out (documented in README) — the only
 //     supported way to install quay for the CLI alone.
+//   * `QUAY_PLUGIN_SCOPE` is the ONLY way to get a user-level enable out of this
+//     script; unset (or any unrecognized value) means "register the marketplace,
+//     enable nothing".
 //   * FAILS CLOSED on a genuine error (missing bundle, unparsable settings.json,
 //     unwritable home) rather than silently producing a broken install.
 
@@ -122,29 +134,28 @@ console.log(`       plugin "${pluginRef}"`);
 console.log(`       wrote ${settingsPath}`);
 
 // 7. BEST-EFFORT materialization: writing settings.json makes the marketplace
-//    KNOWN, but a Claude Code session only fully loads the plugin after it is
-//    materialized into ~/.claude/plugins (cache + installed_plugins.json). The
-//    official CLI does that in two non-interactive commands — run them so a
-//    fresh `npm install -g` alone leaves /quay:init usable, with NO user step.
+//    KNOWN; `claude plugin marketplace add` additionally materializes the
+//    marketplace itself into ~/.claude/plugins (cache + known_marketplaces.json)
+//    so a Claude Code session can resolve plugins from it with NO user step.
 //    This is enhancement, not the fail-closed core: if `claude` is missing (the
 //    user has not installed Claude Code yet — /quay:init is moot for them) or a
 //    step errors, we keep the settings.json registration and say what to run.
 //
-//    ⚠️ RESIDUAL, KNOWN AND DELIBERATELY NOT FIXED HERE
-//    (gap-ac161-user-scope-enable-repolluted-by-cli-materialization, 2026-09-11):
-//    the `claude plugin install` below makes the CLI write a USER-level
-//    enabledPlugins entry — i.e. the contract stated at the top of this file
-//    ("It does NOT write a user-level enabledPlugins entry") is violated one
-//    level DOWNSTREAM, by the CLI this file calls. That is exactly how STANDING
-//    goal AC-161 got re-reddened on every real global install. This task closed
-//    the channel it was scoped to — the DELIVERY/VERIFICATION path
-//    (verify-deliver-coldstart.sh segment ① now runs under an isolated HOME with
-//    QUAY_SKIP_PLUGIN_CLI=1) — and did NOT change this file's materialization,
-//    because choosing which scope to materialize into is a product decision
-//    (AC-162 only closed the script's OWN direct write). ⇒ A plain
-//    `npm install -g quay-*.tgz` on this host still re-reddens AC-161. Until that
-//    is decided, run delivery/verification with HOME isolation or
-//    QUAY_SKIP_PLUGIN_CLI=1.
+//    ⚠️ The ENABLE step is deliberately NOT part of the default flow — see the
+//    SCOPE POLICY note at the top of this file. `claude plugin install` defaults
+//    to `--scope user` and therefore writes a user-level
+//    `enabledPlugins["quay@quay"]`, which is exactly how STANDING goal AC-161
+//    got re-reddened by every real global install
+//    (gap-ac161-user-scope-enable-repolluted-by-cli-materialization, 2026-09-11,
+//    registered the materialization as a "known residual, product decision not
+//    made" — the third regression filed above retired that residual: an
+//    undecided product question must not sit permanently on top of a standing
+//    criterion). Enabling is the target project's job:
+//
+//      "<repo>/.claude/settings.json": { "enabledPlugins": { "quay@quay": true } }
+//
+//    Callers who deliberately want a materialized enable opt in with
+//    `QUAY_PLUGIN_SCOPE=user|project|local`.
 function runCli(args) {
   try {
     return spawnSync("claude", args, {
@@ -156,6 +167,20 @@ function runCli(args) {
   } catch (err) {
     return { status: 1, error: err };
   }
+}
+
+// 8. Which scope (if any) to ENABLE at. This is the AC-161 fix point: an
+//    unconditional `claude plugin install` writes user-level enabledPlugins
+//    (CLI default scope is `user`), so the enable is opt-in only. Unset and
+//    unrecognized both mean "register the marketplace, enable nothing" — the
+//    fail-closed direction for a criterion that says the user level must not
+//    carry a quay enable.
+const ENABLE_SCOPES = new Set(["user", "project", "local"]);
+const rawScope = (process.env.QUAY_PLUGIN_SCOPE ?? "").trim().toLowerCase();
+const enableScope = ENABLE_SCOPES.has(rawScope) ? rawScope : null;
+if (rawScope && !enableScope) {
+  console.log(`[quay] warning: unrecognized QUAY_PLUGIN_SCOPE=${JSON.stringify(rawScope)} —`);
+  console.log(`       expected one of: ${[...ENABLE_SCOPES].join(", ")}. Skipping the enable step.`);
 }
 
 if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
@@ -170,13 +195,19 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
     console.log(`[quay] warning: 'claude plugin marketplace add' exited ${add.status}; the plugin is`);
     console.log("       registered in settings.json but not yet materialized. Run, once:");
     console.log(`       claude plugin marketplace add ${pluginDir}`);
-    console.log("       claude plugin install quay@quay");
+    if (enableScope) console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
+  } else if (!enableScope) {
+    console.log("[quay] The marketplace is registered; the plugin is NOT enabled at user scope");
+    console.log("       (AC-161: the user level carries only the marketplace source). Enable it per");
+    console.log(`       project by adding  "enabledPlugins": { "${pluginRef}": true }  to that project's`);
+    console.log("       .claude/settings.json — or re-run this install with QUAY_PLUGIN_SCOPE=user for");
+    console.log("       a deliberate user-scope enable.");
   } else {
-    const install = runCli(["plugin", "install", `${pluginName}@${marketplaceName}`]);
+    const install = runCli(["plugin", "install", pluginRef, "--scope", enableScope]);
     if (install.status !== 0) {
-      console.log(`[quay] warning: 'claude plugin install ${pluginName}@${marketplaceName}' exited ${install.status};`);
+      console.log(`[quay] warning: 'claude plugin install ${pluginRef} --scope ${enableScope}' exited ${install.status};`);
       console.log("       the plugin is registered in settings.json but not yet materialized. Run, once:");
-      console.log("       claude plugin install quay@quay");
+      console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
     }
   }
 }

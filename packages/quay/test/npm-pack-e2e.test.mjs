@@ -211,9 +211,11 @@ test("register-plugin (global-install mode, temp HOME) writes settings.json poin
     fs.writeFileSync(existing, JSON.stringify({ model: "sonnet", extraKnownMarketplaces: { other: { source: { source: "directory", path: "/x/other" } } } }, null, 2));
     const out = execFileSync("node", [register], {
       encoding: "utf8",
-      // QUAY_SKIP_PLUGIN_CLI=1 keeps this a pure settings.json assertion (the claude-CLI
-      // materialization path is proven separately in the task's manual AC evidence and is
-      // environment-heavy — no need to shell out to `claude` on every test run).
+      // QUAY_SKIP_PLUGIN_CLI=1 keeps this a pure settings.json assertion (no need to shell
+      // out to a real `claude` on every test run). ⚠️ That is ALSO why this assertion alone
+      // was not a measurement: it ran with the enable channel shut, so it could never take
+      // false. The channel-open control lives in the next test
+      // (gap-ac161-postinstall-rematerializes-user-scope-enable, 硬规则 4 推论三).
       env: { ...process.env, HOME: tempHome, npm_config_global: "true", QUAY_SKIP_PLUGIN_CLI: "1" },
     });
     const settings = JSON.parse(fs.readFileSync(existing, "utf8"));
@@ -226,6 +228,94 @@ test("register-plugin (global-install mode, temp HOME) writes settings.json poin
     assert.match(out, /Registered the installed quay plugin/, "hook must report success");
   } finally {
     fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("register-plugin's ENABLE channel is off by default (AC-161) — control: a `claude` shim that DOES write user scope is NOT reached", () => {
+  // gap-ac161-postinstall-rematerializes-user-scope-enable. Pre-fix, register-plugin
+  // shelled out to `claude plugin install quay@quay`, whose default `--scope` is user
+  // (measured against Claude Code 2.1.271) — so EVERY real `npm install -g` rewrote the
+  // operator's ~/.claude/settings.json and re-reddened STANDING goal AC-161. The fix
+  // makes the enable opt-in (`QUAY_PLUGIN_SCOPE`).
+  //
+  // The assertion below is only a measurement if the channel it guards can actually
+  // produce the violation, so this runs against a fake `claude` on PATH that replicates
+  // exactly one real behaviour: `plugin install` writes a USER-level enabledPlugins
+  // entry. Two halves, both required:
+  //   (a) QUAY_PLUGIN_SCOPE=user ⇒ the shim IS reached and the key APPEARS (control is live)
+  //   (b) default                ⇒ the shim's install branch is NEVER invoked and the key is ABSENT
+  const scratchRegister = path.join(scratch, "node_modules", "quay", "scripts", "register-plugin.mjs");
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-shim-"));
+  const shimLog = path.join(shimDir, "invocations.log");
+  fs.writeFileSync(
+    path.join(shimDir, "claude"),
+    `#!/usr/bin/env node
+// Fake \`claude\` CLI: replicates ONLY the behaviour under test — \`plugin install\`
+// writes a USER-level enabledPlugins entry (the real CLI's default scope is user).
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.QUAY_SHIM_LOG, args.join(" ") + "\\n");
+if (args[0] === "plugin" && args[1] === "install") {
+  const p = path.join(os.homedir(), ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+  s.enabledPlugins = s.enabledPlugins || {};
+  s.enabledPlugins[args[2]] = true;
+  fs.writeFileSync(p, JSON.stringify(s, null, 2));
+}
+`
+  );
+  fs.chmodSync(path.join(shimDir, "claude"), 0o755);
+  const runThroughShim = (env) => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-home-"));
+    try {
+      fs.mkdirSync(path.join(tempHome, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(tempHome, ".claude", "settings.json"), "{}\n");
+      execFileSync("node", [scratchRegister], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: tempHome,
+          npm_config_global: "true",
+          QUAY_SHIM_LOG: shimLog,
+          PATH: `${shimDir}:${process.env.PATH}`,
+          ...env,
+        },
+      });
+      return JSON.parse(fs.readFileSync(path.join(tempHome, ".claude", "settings.json"), "utf8"));
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  };
+  try {
+    // (a) opt-in: the enable path is reachable and the shim reproduces the AC-161 violation.
+    const opted = runThroughShim({ QUAY_PLUGIN_SCOPE: "user" });
+    assert.equal(
+      opted.enabledPlugins?.["quay@quay"],
+      true,
+      "QUAY_PLUGIN_SCOPE=user must reach the enable step (control: the shim is capable of writing the user-level key)"
+    );
+    const logAfterOptIn = fs.readFileSync(shimLog, "utf8");
+    assert.match(logAfterOptIn, /^plugin marketplace add /m, "marketplace add must always run");
+    assert.match(logAfterOptIn, /^plugin install /m, "the opt-in path must invoke `plugin install`");
+
+    // (b) default: the channel is shut — the shim's install branch is never reached.
+    fs.writeFileSync(shimLog, "");
+    const dflt = runThroughShim({});
+    assert.equal(
+      dflt.enabledPlugins?.["quay@quay"],
+      undefined,
+      "register must NOT enable the plugin at user scope by default — the user level carries only the marketplace source (AC-161)"
+    );
+    assert.equal(dflt.extraKnownMarketplaces?.quay?.source?.source, "directory", "default must still register the marketplace");
+    const logAfterDefault = fs.readFileSync(shimLog, "utf8");
+    assert.match(logAfterDefault, /^plugin marketplace add /m, "marketplace add must run by default");
+    assert.doesNotMatch(logAfterDefault, /^plugin install /m, "default must NOT invoke `plugin install` (that is the AC-161 regression)");
+  } finally {
+    fs.rmSync(shimDir, { recursive: true, force: true });
   }
 });
 
