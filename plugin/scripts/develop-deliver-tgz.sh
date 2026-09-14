@@ -191,6 +191,10 @@ build_ref=""      # --build-ref: build the deliverable from THIS ref instead of 
 ac257_task=""     # --ac257-task-id: the REAL defect-fix task in the target project that this run drives to done
 ac257_task_body="" # --ac257-task-body: LOCAL path to that task's body file (shipped to the host, ⛔ not hand-typed there)
 ac257_plugin_root="" # --ac257-plugin-root: ABSOLUTE path (on the remote host) of the PERSISTENT plugin delivery (…/quay/plugin) the target is bound to
+verify_ac258=0    # 1 = GOAL-018-AC-258: user-scope delete-key re-registration + quay-init rerun + a real driven todo→done, ON the host; transport only its AC-258 record
+ac258_root=""     # --target-root (shared with AC-257/248/249, recorded separately): the REAL project the AC-258 record names
+ac258_task=""     # --ac258-task-id: the REAL task in the target project that this run drives to done
+ac258_task_body="" # --ac258-task-body: LOCAL path to that task's body file (shipped to the host, ⛔ not hand-typed there)
 adr_flip_task=""  # --task-id: the task IN THAT PROJECT whose driven-out fix the record is about
 verify_complete_change=0 # 1 = GOAL-016-AC-249: read the SAME task's commit_files UNION (code side AND ADR-007 doc side) and transport only its AC-249 record
 selfcheck_evidence=0
@@ -221,13 +225,16 @@ while [ $# -gt 0 ]; do
     # --target-root / --task-id 由 AC-248 与 AC-249 两条 verify 模式【共用】（同一条被驱动任务的两条读数）。
     # AC-257 与 AC-248/249 量的是【两个不同的项目】（前者是被 project-scope 取证的真实本体，后者是
     # 被驱动出修复的那个副本）⇒ 同一个 --target-root 旗标各自记录到各自的名字，⛔ 不互相覆盖语义。
-    --target-root) adr_flip_root="$2"; ac257_root="$2"; shift 2 ;;
+    --target-root) adr_flip_root="$2"; ac257_root="$2"; ac258_root="$2"; shift 2 ;;
     --task-id) adr_flip_task="$2"; shift 2 ;;
     --build-ref) build_ref="$2"; shift 2 ;;
     --verify-ac257) verify_ac257=1; shift ;;
     --ac257-task-id) ac257_task="$2"; shift 2 ;;
     --ac257-task-body) ac257_task_body="$2"; shift 2 ;;
     --ac257-plugin-root) ac257_plugin_root="$2"; shift 2 ;;
+    --verify-ac258) verify_ac258=1; shift ;;
+    --ac258-task-id) ac258_task="$2"; shift 2 ;;
+    --ac258-task-body) ac258_task_body="$2"; shift 2 ;;
     --verify-complete-change) verify_complete_change=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
@@ -2302,6 +2309,159 @@ REMOTE
   return 0
 }
 
+# validate_ac258_args — the ONE place that decides whether the AC-258 transport flags are usable.
+# 与 validate_ac257_args 同一条纪律、同样在 build 之前判（⛔ 一个坏参数不该花一次 develop-tip 构建）：
+#   · --target-root 必须是【目标机上的绝对路径】：它在远端解析，相对路径会静默落到远端 $HOME ⇒
+#     被取证的是【另一个项目】，而判据侧的 project_root 会如实记下那个错的项目。
+#   · --ac258-task-id 必填：被取证的是【那一条被驱动到 done 的任务】；让脚本去猜（或取最新一条）正是
+#     AC-207 已经踩过的坑（「最新一条提交」= 记账提交）。
+#   · --ac258-task-body 必须是【本地存在的文件】：它被 scp 到远端再喂给 task create，⛔ 不在远端手打。
+# ⚠️ 与 AC-257 的差别：**没有** --ac258-plugin-root —— 本模式把交付物装到它自己派生的【持久前缀】
+# （$HOME/.local/opt/quay/<tgz 版本>），plugin root 由该前缀推出。少一个调用方可以拧错的旋钮
+# （「前缀是什么」与「plugin root 是什么」若是两个入参就能互相矛盾，硬规则 3b）。
+validate_ac258_args() {
+  if [ -z "${ac258_root}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --target-root <absolute path ON the remote host of the REAL project>" >&2
+    return 1
+  fi
+  case "${ac258_root}" in
+    /*) ;;
+    *) echo "develop-deliver: --verify-ac258 --target-root must be an ABSOLUTE path on the remote host (got: ${ac258_root})" >&2; return 1 ;;
+  esac
+  if [ -z "${ac258_task}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --ac258-task-id <the task in THAT project driven to done>" >&2
+    return 1
+  fi
+  if [ -z "${ac258_task_body}" ] || [ ! -f "${ac258_task_body}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --ac258-task-body <local path to that task's body file> (got: ${ac258_task_body:-<empty>})" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ── verify_ac258_mode — GOAL-018-AC-258：user scope 删键重注册 + quay-init 重跑 + 真实 todo→done ──
+# 与 verify_ac257_mode 同一组原语（ship_verify_closure / transport_evidence_append /
+# check_evidence_completeness），差别在**被测对象**：AC-257 量的是目标【项目级】的安装与 settings 合并
+# 语义；本模式量的是目标机 **user scope 的注册本身**（三处枚举的删键 + install_scope=user 的可核形态）。
+# ⛔ 因此本模式【不】预先安装：把交付物装到持久前缀这件事本身是被测动作的一部分（删键→重注册的前后
+# 读数必须在同一个函数体内取），远端脚本切到 --ac258-user-scope 并自己完成三段。
+# 版本号从 tgz 名解析（⛔ 不另写一份版本真源）；持久前缀 = $HOME/.local/opt/quay/<ver>。
+# 只取回 ac=GOAL-018-AC-258 那一条记录；没有 ⇒ NOT-EVALUATED + 非 0（硬规则 3b）。
+verify_ac258_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI "${develop_tip}" 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-ac258 tip=${develop_tip:0:12} build_date=${build_date} target_root=${ac258_root} task=${ac258_task} carrier=${local_carrier}"
+  if ! validate_ac258_args; then return 2; fi
+  local expected_acs="GOAL-018-AC-258"
+  local ac258_ver
+  ac258_ver="$(basename "${quay_tgz}")"; ac258_ver="${ac258_ver#quay-}"; ac258_ver="${ac258_ver%.tgz}"
+  if [ -z "${ac258_ver}" ]; then
+    echo "develop-deliver: --verify-ac258 cannot derive the version from the tgz name ($(basename "${quay_tgz}"))" >&2
+    return 2
+  fi
+  echo "develop-deliver: --verify-ac258 delivery version=${ac258_ver} ⇒ persistent prefix \$HOME/.local/opt/quay/${ac258_ver}"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure + both .tgz + the task body"
+    # ⛔ 闭集的单一真相源在 transport_flat_files / transport_node_modules_deps（由 selfcheck 证完整）。
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    # ⚠️ scp 目标写 `~/`，⛔ 不是 `\$HOME/`：现代 scp 走 SFTP 子系统，远端路径不做 shell 展开
+    # （AC-257 实测过一次：整个模式在门口 NOT-EVALUATED）。
+    if ! scp "${ssh_opts[@]}" "${ac258_task_body}" "${target}:~/ac258-task-body.md" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
+EV="\${HOME}/quay-verify-ac258-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+PREFIX="\${HOME}/.local/opt/quay/${ac258_ver}"
+echo "AC258-PERSISTENT-PREFIX \${PREFIX}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --ac258-user-scope \
+  --target-root "${ac258_root}" \
+  --ac258-plugin-root "\${PREFIX}/lib/node_modules/quay/plugin" \
+  --ac258-tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --ac258-qn-tgz "\${HOME}/$(basename "${qn_tgz}")" \
+  --ac258-prefix "\${PREFIX}" \
+  --ac258-task-id "${ac258_task}" \
+  --ac258-task-body "\${HOME}/ac258-task-body.md" \
+  --ac258-host-fqdn "${hk}" \
+  --build-sha "${develop_tip}" \
+  --ac89 "\${EV}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    # ⚠️ `bash -ls`（【登录】shell）：本模式要跑 `npm install -g` 的 postinstall，而它调 `claude` 去
+    # materialize 插件 —— orangevps 上 `claude` 只装在 ~/.local/bin、且【不在非登录 shell 的 PATH 里】
+    # （实测：非登录 ⇒ NO_CLAUDE，`bash -lc` ⇒ /home/yale/.local/bin/claude）。用非登录 shell 会让
+    # materialization 整段被跳过 ⇒ installed_plugins.json 永远不出现 scope=user 条目 ⇒ 本 AC 结构上
+    # 不可能达成，而失败形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b / 4b）。
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -ls" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-ac258-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-ac258-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${expected_acs}] transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-ac258 FAILED (a host produced no AC-258 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-ac258 OK — GOAL-018-AC-258 record transported into ${local_carrier}"
+  return 0
+}
+
 # validate_adr_flip_args — the ONE place that decides whether --target-root / --task-id are usable.
 # 与 validate_takeover_args 同一条纪律、同样在 build 之前判（⛔ 一个坏参数不该花一次 develop-tip 构建）：
 #   · --target-root 必须是【目标机上的绝对路径】：它在远端解析，相对路径会静默落到远端 $HOME ⇒
@@ -2572,6 +2732,16 @@ if [ "${verify_ac257}" -eq 1 ]; then
     exit 1
   fi
   verify_ac257_mode
+  exit $?
+fi
+
+if [ "${verify_ac258}" -eq 1 ]; then
+  # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
+  validate_ac258_args || exit 2
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_ac258_mode
   exit $?
 fi
 
