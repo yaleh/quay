@@ -2,7 +2,7 @@
 id: gap-ac256-worker-restart-preserves-inflight-children
 title: GOAL-017/AC-256：重启 `driver:worker` 这一个服务不杀它在飞的 worker 子进程 —— 载体
   `.quay/unified-server-verification.jsonl` 有合格记录（SPEC §6.9 不变式 3 / §8-7 后半）
-status: todo
+status: ready
 needs_human_cause: unclassified
 labels:
   - gap
