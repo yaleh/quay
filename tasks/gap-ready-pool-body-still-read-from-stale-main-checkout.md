@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-body-still-read-from-stale-main-checkout
 title: 闸的 task body 仍从主检出磁盘读（status 那一维早已改读 develop 权威 ref）——propagate 失败时闸连读旧体烧满重试
-status: ready
+status: done
 labels:
   - gap
   - defect
