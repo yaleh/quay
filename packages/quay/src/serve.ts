@@ -670,6 +670,15 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(reconcileTimer);
+    // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard snapshot tick is a HOST-owned
+    // background loop, so it dies with the host — exactly like `reconcileTimer` above. Without this the
+    // tick outlives `server.close()` FOREVER: it keeps rebuilding every 30s against a workspace the
+    // caller may already have deleted, and keeps calling `goalList()` on a ProviderClient the caller may
+    // already have closed. Measured on a closed server whose temp workspace was then rmSync'd: the tick
+    // still fired at +30s and +60s (`builtAt` advanced both times). Production has one long-lived server
+    // so it never noticed; every test that starts a server does. `stop()` retires the INTERVAL only —
+    // `rebuildNow()` stays callable, which is what the AC3/AC4 readings use.
+    dashboardSnapshot.stop();
     const root = cfg.workspaceRoot;
     try {
       await stopWebFace();
