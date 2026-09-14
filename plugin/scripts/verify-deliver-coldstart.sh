@@ -2181,6 +2181,66 @@ ac258_user_scope_entry() {
 # 原子写（temp + rename），并在删前把三处的**条数**打出来 —— 计数为 0 时必须能看出是「本来就没有」
 # 还是「没查到」（硬规则 ②：零计数的配套动作是对已知真样本干跑谓词）。
 # stdout = 一行 JSON 读数；任一步读不出/写失败 ⇒ 非 0（调用方 fail-closed）。
+# ── ac258_worker_preflight — 目标机能不能起一个 Claude Code worker（1 秒级前置探测）──────────────
+# 存在的理由（本函数是 gap-ac258-pipeline-destructive-steps-before-worker-preflight 的产物）：
+# AC-258 的步骤序把「目标机能否跑 worker」这个【可秒级探测】的后置条件，排在【三步破坏性且自耗】的
+# 动作（① 三处删键 ② 持久安装 ③ quay-init 重跑）之后。目标机的登录态一旦不可用，实施体会在整整
+# 三步破坏性工作之后才失败，而机器已被留在【终点】状态 —— 判据要的起点（指向探测路径的注册）不复
+# 存在 ⇒ 一次环境故障的代价从「1 秒探测失败」放大为「一整轮运行 + 一次手工夹具重置」（实测
+# 2026-09-14：orangevps 的 ~/.claude/.credentials.json 被清空，①②③ 全跑完、第 ④ 步才失败）。
+# 环境会坏；**把不可逆的动作排在一个可秒级探测的后置条件之前**，才是机制缺陷。
+#
+# 判据（硬规则 3b：读不懂输入不得返回与【合格】同形的值）⇒ 每一态各自取值，⛔ 不与 usable 同构：
+#   0 = usable      探测通过（目标机真的跑通了一次 `claude -p`）
+#   1 = credentials 探测跑了但失败 ⇒ 凭据/模型不可用（原样输出点名，见 stdout）
+#   2 = absent      `claude` 不在【登录 shell】的 PATH 里 ⇒ 连探测都起不来（⛔ 不与 1 合并）
+#   3 = timeout     探测超时（挂住 ≠ 跑失败：修法不同 ⇒ 独立取值）
+# stdout 恒为一枚单行机器可读的 `AC258-PREFLIGHT <verdict> <detail>` —— verdict 就是那个可区分的
+# 取值，调用方按它分支，⛔ 不是按「退出码是否为零」猜（零/非零只有两态，装不下这里的三态）。
+#
+# ⚠️ 探测必须走【登录】shell（`bash -lc`）：实测 orangevps 上 `claude` 只装在 ~/.local/bin、且不在
+#    非登录 shell 的 PATH 里（非登录 ⇒ NO_CLAUDE）。用非登录 shell 探测会把【代理量伪影】读成
+#    「机器没有 claude」—— 那正是硬规则 4b 的形态，而它的后果是把每一台好机器都判死。
+#
+# 夹具接缝（⛔ 换的是【claude 这个可执行文件】，不是判定逻辑 —— 退出码分类与超时处理照走）：
+#   QUAY_AC258_WORKER_PROBE_CMD     缺省 = AC258_WORKER_PROBE_PREDICATE
+#   QUAY_AC258_PROBE_TIMEOUT_SECS   缺省 30
+AC258_WORKER_PROBE_PREDICATE='claude -p "say ok"'
+ac258_worker_preflight() {
+  local timeout_secs="${1:-${QUAY_AC258_PROBE_TIMEOUT_SECS:-30}}"
+  local probe_cmd="${QUAY_AC258_WORKER_PROBE_CMD:-}"
+  local out="" rc=0 claude_bin=""
+  if [ -z "$probe_cmd" ]; then
+    # 缺省谓词的专属前置：`claude` 在不在【登录 shell】的 PATH 里。⛔ 这一条只对缺省谓词成立 ——
+    # 调用方显式换了命令时，被探测的就是它自己指的那个可执行文件，问 `claude` 在不在是问错了对象。
+    claude_bin="$(bash -lc 'command -v claude' 2>/dev/null || true)"
+    if [ -z "$claude_bin" ]; then
+      echo "AC258-PREFLIGHT absent \`claude\` not on the PATH of a LOGIN shell (bash -lc 'command -v claude' ⇒ empty)"
+      return 2
+    fi
+    probe_cmd="$AC258_WORKER_PROBE_PREDICATE"
+  fi
+  set +e
+  out="$(timeout "$timeout_secs" bash -lc "$probe_cmd" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" = "124" ]; then
+    echo "AC258-PREFLIGHT timeout probe exceeded ${timeout_secs}s (partial: $(printf '%s' "$out" | tail -2 | tr '\n' ' '))"
+    return 3
+  fi
+  if [ "$rc" = "0" ]; then
+    echo "AC258-PREFLIGHT usable probe exited 0${claude_bin:+ (${claude_bin})} ⇒ $(printf '%s' "$out" | tail -1)"
+    return 0
+  fi
+  if [ "$rc" = "127" ]; then
+    # bash -lc 的 command-not-found —— 与「跑了但失败」是两回事（一个是装没装，一个是登录态）。
+    echo "AC258-PREFLIGHT absent probe command not found (rc=127): $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+    return 2
+  fi
+  echo "AC258-PREFLIGHT credentials probe exited ${rc} ⇒ $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  return 1
+}
+
 ac258_delete_registrations() {
   local home="${1:?}"
   "$VC_NODE" --no-warnings -e '
@@ -3538,6 +3598,24 @@ step_ac257_project_scope() {
   echo "== ⑨ AC-257 project-scope + quay-init rerun (merge semantics) + real todo→done =="
   echo "  host=$AC257_HOST (source=$AC257_HOST_SOURCE) project_root=$root plugin_root=$plugin_root"
 
+  # ── ⓪ 前置探测：目标机能不能起 worker（⛔ 必须在【任何破坏性步骤之前】）──────────────────────
+  # 同一个 gap 的【兄弟实例】（gap-ac258-pipeline-destructive-steps-before-worker-preflight 的
+  # DoD 逐字要求「及同族的 --verify-ac257，若共用同一段步骤序」，硬规则 5b：修好一个 ≠ 只在那一处）。
+  # 本模式共用同一段步骤序：(c) quay-init --force 重跑 与 (f) project-scope 安装都会改目标项目的
+  # `.claude/settings.json` / `.quay/`（本 AC 的判据读的正是这些的「前/后」两态），而 (i) 的真实
+  # todo→done 依赖一个在它们之前完全没测过的前置条件 —— 目标机有一个能跑的 Claude Code 登录态。
+  # 探测失败 ⇒ 一个破坏性步骤都不执行（判据要的起点因此完好无损）。
+  local preflight_out="" preflight_rc=0
+  set +e
+  preflight_out="$(ac258_worker_preflight 2>&1)"
+  preflight_rc=$?
+  set -e
+  echo "  [⑨0] worker preflight: $preflight_out"
+  if [ "$preflight_rc" != "0" ]; then
+    echo "  AC257-NOT-EVALUATED: 目标机 worker 可用性前置探测未通过 (rc=$preflight_rc, verdict=$(printf '%s' "$preflight_out" | awk '{print $2}')) ⇒ ⛔ 一个破坏性步骤都没有执行（目标项目的 settings/.quay 未被触碰）⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
+
   # ── quay_version：从【安装物】读（⛔ 不自报）──────────────────────────────────────────
   AC257_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
   if [ -z "$AC257_QUAY_VERSION" ]; then
@@ -3784,6 +3862,25 @@ step_ac258_user_scope() {
   AC258_PROJECT_ROOT="$root"
   local install_home="$home"
   echo "  host=$AC258_HOST (source=$AC258_HOST_SOURCE) project_root=$root plugin_root=$plugin_root home=$install_home"
+
+  # ── ⓪ 前置探测：目标机能不能起 worker（⛔ 必须在【任何破坏性步骤之前】）──────────────────────
+  # 这一步不是仪式，是本步骤序的**唯一**不可逆性防线：①②③（三处删键 / 持久安装 / quay-init 重跑）
+  # 都是破坏性且自耗的 —— 它们把本实验的【起点】（指向探测路径的注册）当场吃掉；而第 ④ 步
+  # 「让目标机自己的 drivers 把一条真实任务驱动到 done」依赖一个在 ①②③ 之前**完全没测过**的前置
+  # 条件：目标机有一个能跑的 Claude Code 登录态（worker 靠 `claude -p` 起）。
+  # 该条件不成立时，原实现会在整整三步破坏性工作之后才失败（实测 2026-09-14：凭据被清空）⇒ 整轮
+  # 报废 + 必须手工把三处注册恢复成探测路径（`~/ac258-fixture-reset.sh`，已用过两次）。
+  # 1 秒的探测可以完全避免这条路径，而代价是零 —— 这就是本调用点存在的全部理由。
+  local preflight_out="" preflight_rc=0
+  set +e
+  preflight_out="$(ac258_worker_preflight 2>&1)"
+  preflight_rc=$?
+  set -e
+  echo "  [⑩0] worker preflight: $preflight_out"
+  if [ "$preflight_rc" != "0" ]; then
+    echo "  AC258-NOT-EVALUATED: 目标机 worker 可用性前置探测未通过 (rc=$preflight_rc, verdict=$(printf '%s' "$preflight_out" | awk '{print $2}')) ⇒ ⛔ 一个破坏性步骤都没有执行（三处注册 / 持久前缀 / 目标项目的 config 全未被触碰）⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
 
   # ── (0) 持久前缀 ────────────────────────────────────────────────────────────────────────
   # ⚠️ 顺序（实测 2026-09-14 真机第三跑踩到）：**版本号读自【安装物】，而安装发生在 (c)** ⇒ 此处
@@ -7878,6 +7975,80 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
     *'"installed_quay_before":0'*) ;;
     *) fail="$fail AC258-quay-free-sample-did-not-report-zero" ;;
   esac
+
+  # (5) 前置探测（gap-ac258-pipeline-destructive-steps-before-worker-preflight 的产物）——
+  #     判据是「探测失败 ⇒ 一个破坏性步骤都不执行」，所以夹具必须给出【两个方向】：
+  #       方向 A：探测失败 ⇒ 停在门口，三处注册 md5 逐字不变（①②③ 一次都没发生）；
+  #       方向 B：同一夹具把探测改成可用 ⇒ 流程**必须继续进入 ①②③**（否则方向 A 会被一个
+  #               「恒退出、什么都做不成」的实现平凡满足 —— 硬规则 4：能取假的量才是测量）。
+  #     ⚠️ 方向 A 的两个断言（rc≠0 ∧ md5 不变）**单独不够**：任何在门口因别的原因退出的实现都满足
+  #     它们。所以还要断言【退出理由就是那条探测】，且方向 B 里那三步【真的发生了】。
+  #     三个失败态（credentials / absent / timeout）也在这里各取一条原样输出：AC3 要求它们可分，
+  #     而「可分」只有在真的拿到三条【不同】输出时才算取到（⛔ 不是代码里写了三行就算）。
+  local ac258_pf="$t/ac258-preflight" ac258_pf_a_rc=0 ac258_pf_a_out="" ac258_pf_b_rc=0 ac258_pf_b_out=""
+  local ac258_pf_md5_before="" ac258_pf_md5_after=""
+  local ac258_pf_cred="" ac258_pf_absent="" ac258_pf_timeout="" ac258_pf_usable=""
+  mkdir -p "$ac258_pf/.claude/plugins" "$ac258_pf/bin"
+  # 起点态：三处注册都指向【探测路径】—— 正是 AC-258 判据要的那个起点，也正是 ①②③ 会吃掉的东西。
+  printf '%s\n' '{"agentPushNotifEnabled":true,"extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}},"enabledPlugins":{"baime@baime":true,"quay@quay":true}}' > "$ac258_pf/.claude/settings.json"
+  printf '%s\n' '{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}}' > "$ac258_pf/.claude/plugins/known_marketplaces.json"
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"user","version":"0.3.20","installPath":"/home/u/.claude/plugins/cache/quay/quay/0.3.20"}]}}' > "$ac258_pf/.claude/plugins/installed_plugins.json"
+  # claude 替身：夹具要的是「`claude -p` 返回非 0」这一件事，⛔ 不换判定逻辑（退出码分类与超时照走）。
+  printf '#!/bin/sh\necho "Failed to authenticate: OAuth session expired and could not be refreshed" >&2\nexit 1\n' > "$ac258_pf/bin/claude-fail"
+  printf '#!/bin/sh\necho ok\n' > "$ac258_pf/bin/claude-ok"
+  chmod +x "$ac258_pf/bin/claude-fail" "$ac258_pf/bin/claude-ok"
+  ac258_pf_md5_before="$(md5sum "$ac258_pf/.claude/settings.json" "$ac258_pf/.claude/plugins/known_marketplaces.json" "$ac258_pf/.claude/plugins/installed_plugins.json" | md5sum)"
+
+  # ── 三个失败态各自取值（AC3：可分）──────────────────────────────────────────────────────
+  set +e
+  ac258_pf_cred="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-fail -p \"say ok\""; ac258_worker_preflight 2>&1 )"
+  ac258_pf_absent="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="ac258-probe-binary-that-does-not-exist -p ok"; ac258_worker_preflight 2>&1 )"
+  ac258_pf_timeout="$( export HOME="$ac258_pf" QUAY_AC258_PROBE_TIMEOUT_SECS=1 QUAY_AC258_WORKER_PROBE_CMD="sleep 30"; ac258_worker_preflight 2>&1 )"
+  ac258_pf_usable="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-ok -p \"say ok\""; ac258_worker_preflight 2>&1 )"
+  # ── 方向 A：探测失败 ⇒ 一个破坏性步骤都不许发生 ─────────────────────────────────────────
+  ac258_pf_a_out="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-fail -p \"say ok\""; step_ac258_user_scope "/srv/proj" "/srv/plugin" "/srv/quay" "TID" "" "$ac258_pf/missing.tgz" "" "/home/u/.local/opt/quay/0.7.0" 2>&1 )"
+  ac258_pf_a_rc=$?
+  set -e
+  ac258_pf_md5_after="$(md5sum "$ac258_pf/.claude/settings.json" "$ac258_pf/.claude/plugins/known_marketplaces.json" "$ac258_pf/.claude/plugins/installed_plugins.json" | md5sum)"
+  echo "selfcheck: ac258(worker preflight verdicts) credentials='${ac258_pf_cred:0:70}' absent='${ac258_pf_absent:0:70}' timeout='${ac258_pf_timeout:0:70}' usable='${ac258_pf_usable:0:70}'"
+  echo "selfcheck: ac258(preflight failure ⇒ zero destructive steps) rc=$ac258_pf_a_rc md5-unchanged=$([ "$ac258_pf_md5_before" = "$ac258_pf_md5_after" ] && echo 1 || echo 0) quay-still-registered=$(grep -q '"quay"' "$ac258_pf/.claude/settings.json" && echo 1 || echo 0)"
+  case "$ac258_pf_a_out" in
+    *'AC258-PREFLIGHT credentials'*) ;;
+    *) fail="$fail AC258-preflight-failure-not-attributed-to-the-probe" ;;
+  esac
+  case "$ac258_pf_a_out" in
+    *'一个破坏性步骤都没有执行'*) ;;
+    *) fail="$fail AC258-preflight-abort-did-not-say-no-destructive-step-ran" ;;
+  esac
+  [ "$ac258_pf_a_rc" != "0" ] || fail="$fail AC258-preflight-failure-did-not-stop"
+  [ "$ac258_pf_md5_before" = "$ac258_pf_md5_after" ] || fail="$fail AC258-preflight-failure-touched-the-start-state"
+  grep -q '"quay"' "$ac258_pf/.claude/settings.json" || fail="$fail AC258-preflight-failure-ate-its-own-starting-point"
+  # ── 方向 B：同一夹具，探测可用 ⇒ 流程必须继续进入 ①②③（否则方向 A 平凡成立）──────────────
+  set +e
+  ac258_pf_b_out="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-ok -p \"say ok\""; step_ac258_user_scope "/srv/proj" "/srv/plugin" "/srv/quay" "TID" "" "$ac258_pf/missing.tgz" "" "/home/u/.local/opt/quay/0.7.0" 2>&1 )"
+  ac258_pf_b_rc=$?
+  set -e
+  echo "selfcheck: ac258(preflight pass ⇒ flow enters ①②③) rc=$ac258_pf_b_rc delete-ran=$(grep -q '"quay"' "$ac258_pf/.claude/settings.json" && echo 0 || echo 1) (expect delete-ran=1：探测通过后 ① 真的执行了；rc 非 0 是因为夹具的 tgz 不存在，流程停在 ② 的入口)"
+  case "$ac258_pf_b_out" in
+    *'[⑩c] DELETE'*) ;;
+    *) fail="$fail AC258-preflight-pass-did-not-enter-the-destructive-sequence" ;;
+  esac
+  grep -q '"quay"' "$ac258_pf/.claude/settings.json" && fail="$fail AC258-preflight-pass-never-executed-step-1"
+  # 四态互不相同 —— ⛔ 「不与探测通过共用同一个结构」（硬规则 3b）。
+  local ac258_v_cred ac258_v_absent ac258_v_timeout ac258_v_usable
+  ac258_v_cred="$(printf '%s' "$ac258_pf_cred" | awk '{print $2}')"
+  ac258_v_absent="$(printf '%s' "$ac258_pf_absent" | awk '{print $2}')"
+  ac258_v_timeout="$(printf '%s' "$ac258_pf_timeout" | awk '{print $2}')"
+  ac258_v_usable="$(printf '%s' "$ac258_pf_usable" | awk '{print $2}')"
+  echo "selfcheck: ac258(preflight verdict vocabulary) credentials=$ac258_v_cred absent=$ac258_v_absent timeout=$ac258_v_timeout usable=$ac258_v_usable (expect 4 distinct — 没有独立取值的判定无法区分「查过且合格」与「没查成」)"
+  [ "$ac258_v_cred" = "credentials" ] || fail="$fail AC258-preflight-credential-verdict-missing"
+  [ "$ac258_v_absent" = "absent" ] || fail="$fail AC258-preflight-absent-verdict-not-distinct"
+  [ "$ac258_v_timeout" = "timeout" ] || fail="$fail AC258-preflight-timeout-verdict-not-distinct"
+  [ "$ac258_v_usable" = "usable" ] || fail="$fail AC258-preflight-usable-verdict-missing"
+  [ "$ac258_v_cred" != "$ac258_v_usable" ] || fail="$fail AC258-preflight-failure-shares-the-passing-structure"
+  [ "$ac258_v_absent" != "$ac258_v_cred" ] || fail="$fail AC258-preflight-absent-conflated-with-credentials"
+  [ "$ac258_v_timeout" != "$ac258_v_cred" ] || fail="$fail AC258-preflight-timeout-conflated-with-credentials"
+
   AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
 
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
