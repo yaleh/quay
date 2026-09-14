@@ -1,7 +1,7 @@
 ---
 id: gap-ac3-live-test-fixture-leaks-supervised-driver-processes
 title: 共享的"AC3 live"测试夹具泄漏真实被监督的 driver 子进程——跨多个任务的 worktree 反复出现,数量持续增长
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -75,4 +75,6 @@ driver 进程，指向一个 `/tmp/dr-ac3-live-<random>` 临时 root，但**测�
 - ⛔ 不得只清理"当前发现的"这一批残留进程了事——那只是症状；本任务修的是泄漏的产生路径本身。
 
 ## Touches
-（实现者需先执行 Plan 第 1 步定位后再精确声明；暂不预先猜测具体文件路径，避免声明与实际改动位置不符）
+
+- tasks/gap-ac3-live-test-fixture-leaks-supervised-driver-processes.md
+- plugin/test/driver-runtime.test.mjs
