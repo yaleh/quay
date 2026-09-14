@@ -1018,3 +1018,83 @@ test("AC1/AC2 (gap-driver-start-false-confirms) — 未进入常驻循环的驱�
   );
   assert.equal(driverPidIsReadinessMarker("worker"), false, "worker 的 driver pid 文件仍由 supervisor 写（代理量）");
 });
+
+// ── MCP 黑名单接线（gap-worker-mcp-blacklist-strict-config AC1/AC3/AC6）────────────────────────
+// launchArgv 是【唯一 argv 构造点】。AC1 的负控制在这里是「argv 不依赖 MCP 配置」这条可取的假：
+// 若哪天黑名单被误挂到共享 profile 上（outer 连坐），或那个 `length > 0` 的守卫被去掉，
+// 下面第一条就会红——而不是等 outer 真的起不来浏览器才被发现。
+
+const REPO_ROOT_DR = path.resolve(__dirname, "..", "..");
+
+/** 三源 MCP fixture（家目录 + 一个项目目录），⛔ 不读真实 ~/.claude*（AC7 同款缝）。 */
+function mcpFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dr-mcp-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const homeDir = path.join(dir, "home");
+  const projectDir = path.join(dir, "project");
+  const w = (p, v) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(v)); };
+  w(path.join(homeDir, ".claude.json"), {
+    mcpServers: {
+      "chrome-devtools": { command: "npx", args: ["chrome-devtools-mcp@latest"] },
+      playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
+      "user-extra": { command: "node", args: ["user-extra.js"] },
+    },
+  });
+  w(path.join(homeDir, ".claude", "settings.json"), { enabledPlugins: { "quay@quay": true, "archguard@archguard": true } });
+  w(path.join(projectDir, ".mcp.json"), { mcpServers: { "proj-server": { command: "node", args: ["proj.js"] } } });
+  return {
+    roots: { homeDir, projectDirs: [projectDir], kernelPluginRoot: path.join(REPO_ROOT_DR, "plugin") },
+  };
+}
+
+test("AC1/AC6 — an EMPTY blacklist adds no mcp flag and the argv does not depend on MCP config at all", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["outer", "manager", "pool-judge", "meta-driver"]) {
+    const plain = launchArgv(role, "P", REPO_ROOT_DR);
+    const withRoots = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    assert.deepEqual(plain, withRoots, `${role}: argv must be INDEPENDENT of the MCP configuration`);
+    assert.ok(!plain.includes("--strict-mcp-config"), `${role}: no --strict-mcp-config`);
+    assert.ok(!plain.includes("--mcp-config"), `${role}: no --mcp-config`);
+    assert.equal(plain.at(-2), "-p", `${role}: the -n <name> -p <prompt> tail is intact`);
+    assert.equal(plain[plain.indexOf("-n") + 1], `quay-${role}`, `${role}: name resolved from the role`);
+    assert.equal(plain.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC1 wiring — the three code-writing roles carry --strict-mcp-config --mcp-config, blacklist subtracted", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["task-worker", "selector", "fix-worker"]) {
+    const argv = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    const i = argv.indexOf("--strict-mcp-config");
+    assert.ok(i >= 0, `${role}: must carry --strict-mcp-config`);
+    assert.equal(argv[i + 1], "--mcp-config");
+    const table = JSON.parse(argv[i + 2]).mcpServers;
+    assert.equal(table["chrome-devtools"], undefined, `${role}: chrome-devtools dropped`);
+    assert.equal(table["playwright"], undefined, `${role}: playwright dropped`);
+    // ⛔ 负控制：黑名单不得连坐掉 worker 自己要用 quay 工具（AC4）。
+    assert.ok(table["plugin_quay_quay"], `${role}: the quay MCP server must SURVIVE`);
+    assert.ok(table["user-extra"] && table["proj-server"], `${role}: unrelated servers survive`);
+    assert.equal(argv.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC5 precondition — the emitted plugin entry points at a REAL on-disk command (not a dead path)", (t) => {
+  const fx = mcpFixture(t);
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+  const table = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]).mcpServers;
+  const spec = table["plugin_quay_quay"];
+  assert.ok(spec, "precondition: quay entry present");
+  const cmdPath = spec.args[0];
+  assert.ok(!cmdPath.includes("${CLAUDE_PLUGIN_ROOT}"), "placeholder expanded");
+  assert.ok(fs.existsSync(cmdPath), `the emitted MCP command must exist on disk: ${cmdPath}`);
+});
+
+test("AC3 caller — an unresolvable MCP configuration ⇒ ZERO mcp flags (dispatch is never blocked)", (t) => {
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: null });
+  assert.ok(!argv.includes("--strict-mcp-config"), "no flag when the config cannot be evaluated");
+  assert.ok(!argv.includes("--mcp-config"));
+  assert.equal(argv.at(-1), "P");
+  // 负控制（对照必须能把结论翻过来）：同一个调用给了可解析的根 ⇒ flag 立刻出现。
+  const fx = mcpFixture(t);
+  assert.ok(launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots }).includes("--strict-mcp-config"));
+});
