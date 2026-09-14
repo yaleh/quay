@@ -128,7 +128,7 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 - `plugin/freshness-producers.json` (new)
 - `packages/quay/plugin/freshness-producers.json` (new)
 - `plugin/scripts/freshness-producer-coverage-check.ts` (new)
-- `plugin/scripts/checker-mutation-cases/freshness-producer-coverage-check.sh` (new) ← **补记**：原 Touches 未列，实现时按 CLAUDE.md 的义务四件套新增
+- `plugin/scripts/checker-mutation-cases/freshness-producer-coverage-check.sh` (new)（补记：原 Touches 未列，实现时按 CLAUDE.md 的义务四件套新增）
 - `plugin/test/freshness-producer-coverage-check.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`（新增脚本的 catalog 六行落点）
 - `plugin/scripts/runner-static-gate.ts`（新增脚本的静态闸登记 + `@checker-count` 59→60 落点）
