@@ -2,7 +2,7 @@
 
 **产出者**：`plugin/scripts/crystallization-half-life.ts`（读数全部由它产出，本文不含手抄数字）
 **读数日期**：2026-09-14（UTC）
-**develop tip**：`1dc1eeda69b0c22b4b40c1f0afcebd01154c56f0`
+**develop tip（读数时刻）**：`1dc1eeda69b0c22b4b40c1f0afcebd01154c56f0`（develop 会前进，这个 SHA 钉的是**读数当时**的基线）
 **复跑锚点**（一条命令，只需 `--root` 指向含 `adr/` 与 `CLAUDE.md` 的检出）：
 
 ```
