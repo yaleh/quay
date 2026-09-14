@@ -3408,42 +3408,60 @@ step_ac257_project_scope() {
     return 1
   fi
   AC257_TASK_ID="$task_id"
-  # 建任务（幂等）。⛔ 反复跑本步骤不该因为「任务已存在」而失败——但也不能因此把「一个恰好同名的
-  # 已 done 任务」当成「这次驱动的结果」：下面的 poll + probe_ac257_measures 读的是【该任务此刻的
-  # 真实状态与它历史上那条实现提交】，而 create 失败时这里要【先确认该 id 真的存在】才复用（存在性
-  # 读不出 ⇒ 仍然 fail-closed）。两条路径打印【可区分】的痕迹（新建 vs 复用），不静默。
-  local create_rc=0 task_exists=0
-  set +e
-  (cd "$root" && node "$qrl" task create "$task_id" --title "AC-257 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1
-  create_rc=$?
-  set -e
-  if [ "$create_rc" = "0" ]; then
-    echo "  [⑨h2] task created: $task_id"
+  # 存在性必须【先查】再决定建不建：`quay-native task create` 对【已存在的 id】**返回 0**，并把新的
+  # frontmatter 块【前置】到 tasks/<id>.md —— 文件因此出现【两段 frontmatter】，ABI 读到的是前面那一段
+  # （status: todo）。实测 2026-09-14（run5）：一条 settled 的 done 任务被"创建"成 todo，随后
+  # promotion-driver 把它晋升到 ready，而本步骤正等它 done ⇒ 结构上不可达；**并且把被取证项目的任务
+  # 文件弄坏了**（那正是 DoD 逐字禁止的「弄脏被取证项目」）。失败形态仍是「记录没写出来」，与
+  # 「机制坏了」同形（硬规则 3b）。⇒ 先 `task view`：读得到 ⇒ 复用（⛔ 绝不调 create）；读不到 ⇒ 才
+  # create，create 之后再核一次存在性（读不出 ⇒ fail-closed）。两条路径打印【可区分】的痕迹。
+  local create_rc=0 task_exists=0 task_view_json="" status_at_entry=""
+  task_view_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  if [ -n "$task_view_json" ] \
+     && printf '%s' "$task_view_json" | grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\""; then
+    task_exists=1
+    status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
+    echo "  [⑨h2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter，把该任务「创建」成 todo）"
   else
-    if [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
-      task_exists=1
-      echo "  [⑨h2] REUSING existing task $task_id (create rc=$create_rc ⇒ 已存在；它的状态与实现提交由下面的直接量读，⛔ 不因复用而放宽)"
+    set +e
+    (cd "$root" && node "$qrl" task create "$task_id" --title "AC-257 驱动取证任务" --body-file "$bodyfile" --status todo --root "$root") >/dev/null 2>&1
+    create_rc=$?
+    set -e
+    if [ "$create_rc" = "0" ] \
+       && [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
+      task_exists=1; status_at_entry="todo"
+      echo "  [⑨h2] task created: $task_id (create rc=0 ∧ 建后可见)"
     else
       echo "  AC257-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
       return 1
     fi
   fi
+  # ── 驱动（仅当任务【还没到 done】时）────────────────────────────────────────────────────
+  # ⛔ 对一条【已 done】的任务启动 promotion/worker driver 不是「驱动」，是【破坏读数】：实测 2026-09-14
+  # （run5）settled done 被推回 todo ⇒ ready，而本步骤正等它 done ⇒ 结构上不可达；同族纪律见
+  # 「反复探一个带 TTL 缓存的端点会把被测对象捂热」——测量动作本身改变了被测对象。
+  # ⇒ 已 done ⇒ 不起 driver、不轮询，直接读直接量（probe_ac257_measures 读的仍是【外部可核】的
+  # 任务状态 + 历史实现提交 + gate 事件，⛔ 不因跳过驱动而放宽任何一条）；未 done ⇒ 原路径（起 driver + 轮询）。
   local d_rc_p=0 d_rc_w=0
-  set +e
-  (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
-  d_rc_p=$?
-  (cd "$root" && node "$qrl" driver start --kind worker --root "$root") >/dev/null 2>&1
-  d_rc_w=$?
-  set -e
-  echo "  [⑨i] driver start: promotion rc=$d_rc_p worker rc=$d_rc_w"
-  local poll="${AC257_POLL_SECS:-3600}" i st
-  st=""
-  for i in $(seq 1 "$poll"); do
-    st="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null \
-      | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})' 2>/dev/null)"
-    [ "$st" = "done" ] && break
-    sleep 1
-  done
+  local poll="${AC257_POLL_SECS:-3600}" i st=""
+  if [ "$status_at_entry" = "done" ]; then
+    echo "  [⑨i] task already done at entry ⇒ drivers NOT started, no poll (⛔ 起它们会把这条 done 任务重置：实测 run5 done⇒todo⇒ready)"
+    st="$status_at_entry"
+  else
+    set +e
+    (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
+    d_rc_p=$?
+    (cd "$root" && node "$qrl" driver start --kind worker --root "$root") >/dev/null 2>&1
+    d_rc_w=$?
+    set -e
+    echo "  [⑨i] driver start: promotion rc=$d_rc_p worker rc=$d_rc_w (status at entry=$status_at_entry)"
+    for i in $(seq 1 "$poll"); do
+      st="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null \
+        | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})' 2>/dev/null)"
+      [ "$st" = "done" ] && break
+      sleep 1
+    done
+  fi
   echo "  [⑨j] poll finished: task_status=${st:-<unreadable>} (window ${poll}s)"
 
   probe_ac257_measures "$root" "$task_id" "$qrl"
