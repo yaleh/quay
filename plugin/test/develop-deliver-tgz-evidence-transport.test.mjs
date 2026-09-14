@@ -390,3 +390,79 @@ test("⑥ AC-203 kind dimension survives transport: same (ts,ac,host,project_roo
   assert.match(r.stdout, /kind dimension preserved/,
     "the positive PASS line must name the kind dimension (so a silent regression cannot hide behind a bare PASS)");
 });
+
+// ── gap-ac258-pipeline-destructive-steps-before-worker-preflight ────────────────────────────────
+// AC1 的【位置判定】半边（硬规则 2：按位置判定，不按关键词——注释里提到不算命中）。
+// AC1 的【行为】半边（探测失败 ⇒ 零破坏 / 探测通过 ⇒ 进入 ①②③）是 hermetic 夹具，住在
+// verify-deliver-coldstart.sh 的 `--selfcheck` 里（那台检查器跑一次 ~57s，本仓库为它只付一次：
+// verify-deliver-coldstart.test.mjs 的 "AC2+AC5 — --selfcheck exits 0 …" 断言它的退出码）。
+// ⇒ 本文件【不】再 spawn 第二次；这里只钉住「调用点确实排在那两步之前」这条排序不变量。
+test("AC-258 preflight — the probe call site precedes the delete-key step and the quay-init rerun (position, not keyword)", () => {
+  const src = readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh"), "utf8");
+  const bodyStart = src.indexOf("step_ac258_user_scope() {");
+  assert.ok(bodyStart >= 0, "step_ac258_user_scope must exist");
+  const bodyEnd = src.indexOf("\n}", bodyStart);
+  assert.ok(bodyEnd > bodyStart, "step_ac258_user_scope body must be delimited");
+  const body = src.slice(bodyStart, bodyEnd);
+  const bodyLine = (needle) => {
+    const i = body.indexOf(needle);
+    assert.ok(i >= 0, `expected to find ${needle} inside step_ac258_user_scope`);
+    return src.slice(0, bodyStart + i).split("\n").length;
+  };
+  const lPre = bodyLine('preflight_out="$(ac258_worker_preflight 2>&1)"');
+  const lDel = bodyLine('del_json="$(ac258_delete_registrations "$home"');
+  const lInit = bodyLine('bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm)');
+  assert.ok(lPre < lDel,
+    `the worker preflight must run BEFORE the three-place delete-key step (preflight line ${lPre}, delete line ${lDel})`);
+  assert.ok(lPre < lInit,
+    `the worker preflight must run BEFORE the quay-init rerun (preflight line ${lPre}, quay-init line ${lInit})`);
+  // 兄弟实例（硬规则 5b）：AC-257 共用同一段步骤序（破坏性的 quay-init 重跑 + 安装排在真实
+  // todo→done 之前）⇒ 它也要这一道。只在 AC-258 里修会让 AC-257 成为无人守的那个空白。
+  const b257s = src.indexOf("step_ac257_project_scope() {");
+  const b257 = src.slice(b257s, src.indexOf("\n}", b257s));
+  const i257pre = b257.indexOf("ac258_worker_preflight 2>&1");
+  const i257init = b257.indexOf('bash "$plugin_root/scripts/quay-init.sh"');
+  assert.ok(i257pre >= 0, "step_ac257_project_scope must also carry the worker preflight (DoD: 同族的 --verify-ac257，若共用同一段步骤序)");
+  assert.ok(i257pre < i257init,
+    "the AC-257 preflight must run BEFORE its quay-init rerun (the sibling instance of the same defect)");
+});
+
+test("AC-258 preflight — both --verify-ac257 and --verify-ac258 probe the target BEFORE building the deliverable", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  for (const [flag, mode] of [["--verify-ac257", "verify_ac257_mode"], ["--verify-ac258", "verify_ac258_mode"]]) {
+    const start = src.indexOf(`if [ "\${${mode === "verify_ac257_mode" ? "verify_ac257" : "verify_ac258"}}" -eq 1 ]; then`);
+    assert.ok(start >= 0, `the ${flag} dispatch block must exist`);
+    const block = src.slice(start, src.indexOf("\nfi", start));
+    const iPre = block.indexOf("worker_preflight_every_host");
+    const iBuild = block.indexOf("build_develop_tgz");
+    assert.ok(iPre >= 0, `${flag} must probe the target's worker usability before doing anything irreversible`);
+    assert.ok(iBuild >= 0, `${flag} must still build the deliverable`);
+    assert.ok(iPre < iBuild,
+      `${flag} must probe BEFORE build_develop_tgz — a host that cannot run a worker must not cost a develop-tip build, let alone the three destructive remote steps (preflight offset ${iPre}, build offset ${iBuild})`);
+    assert.match(block, /if ! worker_preflight_every_host; then[\s\S]*?exit 1/,
+      `${flag} must ABORT on a failed preflight (a probe whose failure does not stop the run is decoration)`);
+  }
+});
+
+test("AC-258 preflight — five DISTINCT verdicts, both timeout stages, and every host judged (⛔ no short-circuit)", () => {
+  const r = run(["--selfcheck-worker-preflight"]);
+  assert.equal(r.status, 0, `--selfcheck-worker-preflight must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /worker-preflight\(unreachable\) rc=4 verdict='unreachable'/,
+    "ssh unreachable must be its own verdict (a different remedy from a dead login)");
+  assert.match(r.stdout, /worker-preflight\(credentials\) rc=1 verdict='credentials'/,
+    "a probe that ran and failed must be named credentials");
+  assert.match(r.stdout, /worker-preflight\(absent\) rc=2 verdict='absent'/,
+    "`claude` missing must NOT be conflated with credentials (硬规则 3b)");
+  assert.match(r.stdout, /worker-preflight\(usable\) rc=0 verdict='usable'/);
+  assert.match(r.stdout, /worker-preflight\(timeout, transport stage\) rc=3[^\n]*ssh connect exceeded/,
+    "an ssh that hangs must be timeout, named at the transport stage");
+  assert.match(r.stdout, /worker-preflight\(timeout, probe stage\) rc=3[^\n]*remote probe exceeded/,
+    "a probe that hangs must be timeout too, but named at the probe stage (two distinct code paths — hard rule 5b)");
+  assert.match(r.stdout, /verdict vocabulary\) distinct=5 of 6 samples/,
+    "all five verdicts must be distinct — a verdict with no independent value cannot distinguish 'checked and qualified' from 'could not check'");
+  assert.match(r.stdout, /every-host, all pass\) rc=0 hosts-reported=2/);
+  assert.match(r.stdout, /every-host, one fails\) rc=1 hosts-reported=2/,
+    "a failing host must abort the run AND still judge every host (enumeration, not a boolean — hard rule 3)");
+  assert.match(r.stdout, /predicate single-spelling\) here='claude -p "say ok"' there='claude -p "say ok"'/,
+    "the probe predicate must be spelled identically in both scripts — drift would read as an environment difference");
+});

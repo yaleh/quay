@@ -2,7 +2,7 @@
 id: gap-ac258-pipeline-destructive-steps-before-worker-preflight
 title: AC-258/AC-257 交付流程把「目标机能否跑 worker」留到最后一步：破坏性且自耗的前置步骤先全跑完，才在驱动 todo→done
   时发现目标机凭据不可用 ⇒ 整轮报废且必须手工重置夹具
-status: ready
+status: done
 labels:
   - gap
   - mechanism

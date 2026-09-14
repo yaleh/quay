@@ -29,6 +29,12 @@ import net from "node:net";
 import os from "node:os";
 import { startServer, shutdownHost } from "../src/serve.ts";
 import { readServerState, pidAlive, SERVER_STATE_REL, CONTROL_PLANE_NAME } from "../src/server-state.ts";
+// The verb table is the SINGLE source of the usage line (cli/server.ts's SERVER_VERBS feeds both
+// `handleServer`'s dispatch and its USAGE string), so the assertion below derives from it rather than
+// re-typing the set — a pinned literal here is what makes a test defend last release's verb list.
+// (AC-256 added `restart`; the previous literal `start|add|stop|status` then failed for the RIGHT
+// reason but reported it as a documentation bug.)
+import { SERVER_VERBS } from "../src/cli/server.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -418,9 +424,13 @@ test("`quay server status` is reachable and documented — top-level usage, help
   // Bare `quay server` is a usage error, not a silent no-op.
   const bare = await cli(["server"], REPO_ROOT);
   assert.equal(bare.code, 1);
-  // The usage line enumerates the verb set; since AC-254 it is the FOUR verbs of SPEC §6.9 — the
-  // assertion is on the PREFIX (the verb set itself is asserted, by value, in the stage-B test).
-  assert.match(bare.stderr, /usage: quay server <start\|add\|stop\|status>/);
+  // The usage line enumerates the verb set — DERIVED from the module that owns it (no pinned
+  // literal: the set legitimately grew at AC-256, and a hard-coded copy would report that growth as
+  // a documentation defect instead of as a verb-set change).
+  assert.ok(
+    bare.stderr.includes(`usage: quay server <${SERVER_VERBS.join("|")}>`),
+    `the usage line enumerates EXACTLY the verb table (expected <${SERVER_VERBS.join("|")}>; got: ${JSON.stringify(bare.stderr)})`,
+  );
 
   // `quay server --help` documents the three exit codes (the contract of the command).
   const help = await cli(["server", "--help"], REPO_ROOT);

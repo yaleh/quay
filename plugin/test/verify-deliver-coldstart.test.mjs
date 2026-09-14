@@ -789,8 +789,23 @@ test("AC-238 — the drift report sees it and reads ok on all three sides (was: 
   assert.equal(r.status, 0, `the report must exit 0 when there is no hard diff:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /GOAL-009-AC-238\s+\[ok\] criterion=7 schema=7 writer=7/,
     "AC-238 must be registered, written and read — and the three counts must agree (else it is DRIFT/surplus)");
-  assert.match(r.stdout, /15 AC registered/,
-    "the declaration table must have grown by exactly the new AC-238 row (13 → 14) and then by the AC-257 row (14 → 15)");
+  // ⚠️ 这一条原先是**写死的字面量**（`/15 AC registered/`，注释里还留着 13→14→15 的手改史 ——
+  // 每加一行声明就要人来改一次）。这类字面量与「真的坏了」**同形**：加一行新 AC 会红，而红的样子
+  // 与真违规一模一样。AC-257 已经在**另一个**测试文件（develop-deliver-tgz-evidence-transport.test.mjs）
+  // 里踩过这个坑并改成「从模式定义推导」；本条是**同一缺陷在兄弟文件里的残留**
+  // （硬规则 5b：修好一个 ≠ 只在那一处；兄弟实例常在同一处甚至同一行）。本次加 AC-258 行时它果然红了。
+  // ⇒ 改为从【单一真源】推导：AC_RECORD_SCHEMA 里非注释、非空行的条数。它再也无法过期。
+  const declSrc = fs.readFileSync(SCRIPT, "utf8");
+  const declBlock = declSrc.match(/^AC_RECORD_SCHEMA='\n([\s\S]*?)\n'$/m);
+  assert.ok(declBlock, "AC_RECORD_SCHEMA must be findable as its own single-source block in the script");
+  const declaredCount = declBlock[1].split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).length;
+  assert.match(r.stdout, new RegExp(`${declaredCount} AC registered`),
+    `the registered count must equal the number of non-comment rows in AC_RECORD_SCHEMA (${declaredCount}) — DERIVED from the single source, ⛔ not a literal that goes stale with every new AC`);
+  // 同一个动作里把 GOAL-018 的两条一并钉住：它们各自的 criterion / 声明 / writer 三边必须一致。
+  for (const ac of ["GOAL-018-AC-257", "GOAL-018-AC-258"]) {
+    assert.match(r.stdout, new RegExp(`${ac}\\s+\\[ok\\] criterion=11 schema=11 writer=11`),
+      `${ac} must be registered, declared and written on all three sides (criterion=11 schema=11 writer=11)`);
+  }
 });
 
 // AC4 — the new write point is fail-closed and the failure is falsifiable: every declared AC-238 field

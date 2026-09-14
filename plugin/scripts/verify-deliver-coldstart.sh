@@ -330,6 +330,48 @@ AC257_HOST_FQDN_ARG=""                       # --ac257-host-fqdn：驱动方用�
 AC257_HOST_SOURCE=""                         # host 字段的来源（fqdn-verified | hostname-fallback），写进日志可核
 AC257_WRITTEN_THIS_RUN=0
 
+# ── AC-258（GOAL-018）：**user scope** 上「删键后用持久路径重注册」+ quay-init 重跑 + 真实 todo→done ──
+# 与 AC-257 的差别是本质的，⛔ 不是同一段代码换个 host：AC-257 的被测对象是【项目级】安装与
+# `hooks.Stop` 的合并语义（可核形态锚在项目级 `.claude/settings.json` 的 enabledPlugins 键）；本 AC 的
+# 被测对象是【user scope 上的注册本身】—— 起点是「quay 的注册分布在三个文件里、其中指向的是探测路径」，
+# 终点是「同一条注册被换成持久路径，且同一个 settings.json 里其它 marketplace 逐字未动」。
+# 三个文件（实测 2026-09-14，⛔ 硬规则 5b：删一个位置 ≠ 只在那一处）：
+#   ① ~/.claude/settings.json            extraKnownMarketplaces.quay + enabledPlugins["quay@quay"]
+#   ② ~/.claude/plugins/known_marketplaces.json          quay
+#   ③ ~/.claude/plugins/installed_plugins.json           plugins["quay@quay"]（数组，本项目实测 18 条，
+#                                                        其中 1 条 scope:user(0.3.20) + 17 条 project 探测残留）
+# install_scope=user 的可核形态（⛔ 不接受自报字符串，GOAL-018 风险 4 逐字）：③ 中出现一条
+# scope=="user" ∧ version==读自安装物的版本 ∧ installPath 不含探测模式，且与 ② 的 source.path 一致。
+AC258_USER_SCOPE=0                           # 1 = --ac258-user-scope 触发本模式（真跑，昂贵）
+AC258_PLUGIN_ROOT_ARG=""                     # --ac258-plugin-root：远端【持久】插件交付物绝对路径（…/quay/plugin）
+AC258_TGZ_ARG=""                             # --ac258-tgz：远端已送达的 quay 交付物 .tgz（持久安装的输入）
+AC258_QN_TGZ_ARG=""                          # --ac258-qn-tgz：远端已送达的 quay-native 交付物 .tgz
+AC258_PREFIX_ARG=""                          # --ac258-prefix：远端持久 npm 前缀（缺省 $HOME/.local/opt/quay/<ver>）
+AC258_TASK_ID_ARG=""                         # --ac258-task-id：要驱动的真实任务 id
+AC258_TASK_BODY=""                           # --ac258-task-body：该任务的任务体文件（已 scp 到目标机）
+AC258_POLL_SECS=""                           # --ac258-poll-secs：done 轮询窗（缺省 3600）
+AC258_HOST_FQDN_ARG=""                       # --ac258-host-fqdn：驱动方用来 ssh 到目标机的名字；host 字段由它派生
+AC258_HOST=""                                # 目标宿主（criterion 要求 = orangevps）
+AC258_HOST_SOURCE=""
+AC258_PROJECT_ROOT=""                        # 被取证项目根（meta-cc 本体，⛔ 不是隔离副本）
+AC258_INSTALL_SCOPE=""                       # user | none | not-evaluated（⛔ 不与「没查成」同形）
+AC258_QUAY_VERSION=""                        # 从【安装物】plugin/vendor/quay/package.json 读
+AC258_QUAY_INIT_RERUN=""                     # true | false
+AC258_MERGE_PRESERVED="not-evaluated"        # true | 0 | not-evaluated（两读数同时成立才 true）
+AC258_MERGE_NOTE=""
+AC258_MARKETPLACE_PATH=""                    # ~/.claude/settings.json 里 quay 的 marketplace 源路径
+AC258_KNOWN_MARKETPLACE_PATH=""              # ~/.claude/plugins/known_marketplaces.json 里 quay 的 source.path
+AC258_PROVIDER_PATH=""                       # 目标项目 .quay/config.yml 的 providers.native.path
+AC258_DELETE_NOTE=""                         # 三处删键的读数摘要（删前/删后条数，可核）
+AC258_TASK_ID=""
+AC258_TASK_STATUS=""
+AC258_COMMIT_SHA=""
+AC258_COMMIT_FILES_JSON=""
+AC258_GATE_EVENTS=-1
+AC258_PRODUCED_BY_DRIVER=0
+AC258_EVALUATED=0                            # 1 = 上述直接量全部读成（缺任一 ⇒ 不写记录）
+AC258_WRITTEN_THIS_RUN=0
+
 # ── AC-238（GOAL-009）：【既有旧痕迹第三方项目】的升级路径（gap-aged-third-party-project-quay-upgrade-verification）
 # 与 ② 的区别是本质的：② 的 $ROOT 是 `rm -rf` 后新建的一次性靶子（全新 quay-init，GOAL-009 已有 9 条 AC
 # 全是这个形态）；本模式的 $ROOT 是一个**已经跑过 quay-native、带真实存量数据与旧版本 vendored runtime**
@@ -597,6 +639,20 @@ while [ $# -gt 0 ]; do
     # 是实例名（实测 instance-20221019-1509）⇒ 唯一忠实的取法是从驱动方的连接名派生【并当场核验
     # 该名字确实指向这台机器】。缺省不传 ⇒ 回落 hostname（既有行为不变，但那个值不满足本 AC 的判据）。
     --ac257-host-fqdn) AC257_HOST_FQDN_ARG="$2"; shift 2 ;;
+    # AC-258（GOAL-018）：**user scope** 删键重注册 + quay-init 重跑 + 真实 todo→done。
+    # 与 --target-root 共用被取证项目根（meta-cc 本体）；⛔ 不另开一个同义旋钮去拧「被取证项目是哪个」。
+    --ac258-user-scope) AC258_USER_SCOPE=1; shift ;;
+    --ac258-plugin-root) AC258_PLUGIN_ROOT_ARG="$2"; shift 2 ;;
+    # --ac258-tgz / --ac258-qn-tgz：远端【已送达】的两个交付物路径 —— 本模式自己把它们装到持久前缀
+    # （⛔ 不是由调用方先装好再进来：删键→重注册→读 before/after 三段必须在同一个函数体内才有可核的
+    # before/after，把安装留在外面会让「重注册」这个动作的边界不可见）。
+    --ac258-tgz) AC258_TGZ_ARG="$2"; shift 2 ;;
+    --ac258-qn-tgz) AC258_QN_TGZ_ARG="$2"; shift 2 ;;
+    --ac258-prefix) AC258_PREFIX_ARG="$2"; shift 2 ;;
+    --ac258-task-id) AC258_TASK_ID_ARG="$2"; shift 2 ;;
+    --ac258-task-body) AC258_TASK_BODY="$2"; shift 2 ;;
+    --ac258-poll-secs) AC258_POLL_SECS="$2"; shift 2 ;;
+    --ac258-host-fqdn) AC258_HOST_FQDN_ARG="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -2008,6 +2064,268 @@ EOF
   return 0
 }
 
+# ══ AC-258（GOAL-018）读取器：user scope 的【三处注册】与 install_scope=user 的可核形态 ════════════
+# 全部只读、只打印、缺值即非 0（缺值≠合格）。⚠️ 与 AC-257 的核心差别：AC-257 的 install_scope 锚在
+# **项目级** .claude/settings.json 的 enabledPlugins 键上（那是一条【声明】通道）；本 AC 的
+# install_scope=user 锚在 `~/.claude/plugins/installed_plugins.json` 的 **scope 字段**上，即 Claude Code
+# 自己 materialize 出来的**实际**安装记录 —— 两者不是同一个量，⛔ 不可互相代替。
+
+# ~/.claude/plugins/<name>.json 的路径（$1 = HOME）。
+ac258_plugins_json() {
+  printf '%s\n' "${1:?}/.claude/plugins/$2"
+}
+
+# `~/.claude/settings.json` 的【非 quay 键集】—— merge_preserved 读数①的产生处。
+# 定义（可复算，⛔ 不是「整个文件」）：顶层除 extraKnownMarketplaces / enabledPlugins 两个容器之外的
+# 全部键，加上两个容器里【除 quay 那条】以外的全部条目。
+# 为什么必须这样切：若把「两个容器整块」算进键集，则「删键 ⇒ 容器空 ⇒ 重注册 ⇒ 容器非空」自己就会
+# 让它变化 ⇒ 读数①恒假；反过来若把整个文件当键集，读数①又会被 quay 那条的变化污染 ⇒ 恒真。
+# 只摘掉 quay 那一条，才是「替换一条、其它逐字保留」这个命题的可取假形态。
+# 读不出（文件不在/JSON 坏）⇒ 不打印、返回 1。
+ac258_nonkay_keyset() {
+  local f="$1"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    if (typeof d !== "object" || d === null || Array.isArray(d)) process.exit(1);
+    const top = {};
+    for (const k of Object.keys(d)) { if (k !== "extraKnownMarketplaces" && k !== "enabledPlugins") top[k] = d[k]; }
+    const ekm = Object.assign({}, d.extraKnownMarketplaces || {}); delete ekm.quay;
+    const ep  = Object.assign({}, d.enabledPlugins || {});        delete ep["quay@quay"];
+    process.stdout.write(JSON.stringify({ top, extraKnownMarketplaces: ekm, enabledPlugins: ep }));' "$f" 2>/dev/null
+}
+
+# `~/.claude/settings.json` 的 extraKnownMarketplaces.quay.source.path —— marketplace_path 字段的产生处。
+# 缺键/读不出 ⇒ 不打印、返回 1（⛔ 不回落成空串再让调用方当「没有」）。
+ac258_settings_marketplace_path() {
+  local f="$1" name="${2:-quay}"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const mk = d && d.extraKnownMarketplaces ? d.extraKnownMarketplaces[process.argv[2]] : null;
+    const p = mk && mk.source && mk.source.path ? String(mk.source.path) : "";
+    if (p) { process.stdout.write(p + "\n"); process.exit(0); }
+    process.exit(1);' "$f" "$name" 2>/dev/null
+}
+
+# `~/.claude/plugins/known_marketplaces.json` 里 quay 的 source.path（= 该 marketplace 的登记位置）。
+# 缺键/读不出 ⇒ 不打印、返回 1。AC5 要求它与 settings.json 那条【一致】且都等于持久前缀——
+# 两条独立通道都读到同一个持久路径，才算「user scope 真的绑上了它」（⛔ 不是自报字符串）。
+ac258_known_marketplace_path() {
+  local f="$1" name="${2:-quay}"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const mk = d && d[process.argv[2]] ? d[process.argv[2]] : null;
+    const cands = [];
+    if (mk && mk.source && mk.source.path) cands.push(String(mk.source.path));
+    if (mk && mk.installLocation) cands.push(String(mk.installLocation));
+    for (const c of cands) { if (c) { process.stdout.write(c + "\n"); process.exit(0); } }
+    process.exit(1);' "$f" "$name" 2>/dev/null
+}
+
+# `~/.claude/plugins/installed_plugins.json` 里 quay@quay 的条目【条数】（任何 scope）。
+# 打印一个整数；文件/结构读不出 ⇒ 不打印、返回 1（⛔ 「读不出」不与 0 同形 —— 硬规则 3b）。
+ac258_installed_entry_count() {
+  local f="$1" name="${2:-quay@quay}"
+  [ -f "$f" ] || return 1
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const pl = d && d.plugins ? d.plugins : null;
+    if (!pl) process.exit(1);
+    const arr = Array.isArray(pl[process.argv[2]]) ? pl[process.argv[2]] : null;
+    if (arr === null) { process.stdout.write("0\n"); process.exit(0); }
+    process.stdout.write(arr.length + "\n");' "$f" "$name" 2>/dev/null
+}
+
+# install_scope=user 的【可核形态】：在 installed_plugins.json 里找一条 quay@quay 条目，满足
+#   scope=="user" ∧ version==<期望版本> ∧ installPath 不含探测模式 ∧ projectPath 不存在
+# 命中 ⇒ 打印该条目的原样 JSON（单行）+ 返回 0；否则不打印、返回 1。
+# ⚠️ 三态以上（⛔ 不是布尔）：调用方另有一个 "not-evaluated" 分支（文件读不懂），本函数只负责
+# 「读到了一条合格的」，读不出一条合格的就返回 1 —— 「查过、没有」与「没查成」由调用方区分。
+ac258_user_scope_entry() {
+  local f="$1" wantver="$2" name="${3:-quay@quay}"
+  [ -f "$f" ] || return 1
+  # ⚠️ argv 下标：`node -e '<script>' A B C` 的 process.argv 是 `[node, A, B, C]` —— **没有 script 那一项**。
+  # 本函数传的是 (文件, 期望版本, 插件名) ⇒ argv[1]=文件、argv[2]=版本、**argv[3]=名字**。原实现把名字
+  # 读成 argv[2]、版本读成 argv[3] ⇒ 下标错位 ⇒ 恒返回「没找到」—— 与「user scope 上确实没有合格条目」
+  # 同形（硬规则 3b）。⚠️ 这不是复制 AC-257 的教训，是同一个下标错误换了一个函数又犯一次（硬规则 5b：
+  # 修好一个不等于只在那一处 —— 本文件里另有四个 `node -e` 读取器，已逐个核对：它们的下标正确）。
+  # 退出码三态可分：0 = 命中一条合格条目（打印原文）；1 = 查过、没有；2 = 文件读不懂（未评估）。
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(2); }
+    const pl = d && d.plugins ? d.plugins : null;
+    if (!pl || !Array.isArray(pl[process.argv[3]])) process.exit(1);
+    const probe = /verify-|probe|\/tmp\//;
+    for (const e of pl[process.argv[3]]) {
+      if (!e || typeof e !== "object") continue;
+      if (e.scope !== "user") continue;
+      if (String(e.version || "") !== process.argv[2]) continue;
+      const ip = String(e.installPath || "");
+      if (!ip || probe.test(ip)) continue;
+      if (e.projectPath) continue;                     // project-scope 条目一定带 projectPath ⇒ 排除
+      process.stdout.write(JSON.stringify(e) + "\n"); process.exit(0);
+    }
+    process.exit(1);' "$f" "$wantver" "$name" 2>/dev/null
+}
+
+# 三处注册的删键（AC-258 Plan §4）。枚举、⛔ 不只删一处（硬规则 5b）。
+# 删的是 quay 的**全部**注册（探测路径与非探测的陈旧版本一并清 —— 后者是 0.3.20 的遗留 user 条目，
+# 留着会让「install_scope=user 且 version=0.7.0」这条判据出现两条同类条目，判据只能靠版本号区分，
+# 而一条陈旧的 user 条目本身就是「删键」要清掉的对象）。
+# 原子写（temp + rename），并在删前把三处的**条数**打出来 —— 计数为 0 时必须能看出是「本来就没有」
+# 还是「没查到」（硬规则 ②：零计数的配套动作是对已知真样本干跑谓词）。
+# stdout = 一行 JSON 读数；任一步读不出/写失败 ⇒ 非 0（调用方 fail-closed）。
+# ── ac258_worker_preflight — 目标机能不能起一个 Claude Code worker（1 秒级前置探测）──────────────
+# 存在的理由（本函数是 gap-ac258-pipeline-destructive-steps-before-worker-preflight 的产物）：
+# AC-258 的步骤序把「目标机能否跑 worker」这个【可秒级探测】的后置条件，排在【三步破坏性且自耗】的
+# 动作（① 三处删键 ② 持久安装 ③ quay-init 重跑）之后。目标机的登录态一旦不可用，实施体会在整整
+# 三步破坏性工作之后才失败，而机器已被留在【终点】状态 —— 判据要的起点（指向探测路径的注册）不复
+# 存在 ⇒ 一次环境故障的代价从「1 秒探测失败」放大为「一整轮运行 + 一次手工夹具重置」（实测
+# 2026-09-14：orangevps 的 ~/.claude/.credentials.json 被清空，①②③ 全跑完、第 ④ 步才失败）。
+# 环境会坏；**把不可逆的动作排在一个可秒级探测的后置条件之前**，才是机制缺陷。
+#
+# 判据（硬规则 3b：读不懂输入不得返回与【合格】同形的值）⇒ 每一态各自取值，⛔ 不与 usable 同构：
+#   0 = usable      探测通过（目标机真的跑通了一次 `claude -p`）
+#   1 = credentials 探测跑了但失败 ⇒ 凭据/模型不可用（原样输出点名，见 stdout）
+#   2 = absent      `claude` 不在【登录 shell】的 PATH 里 ⇒ 连探测都起不来（⛔ 不与 1 合并）
+#   3 = timeout     探测超时（挂住 ≠ 跑失败：修法不同 ⇒ 独立取值）
+# stdout 恒为一枚单行机器可读的 `AC258-PREFLIGHT <verdict> <detail>` —— verdict 就是那个可区分的
+# 取值，调用方按它分支，⛔ 不是按「退出码是否为零」猜（零/非零只有两态，装不下这里的三态）。
+#
+# ⚠️ 探测必须走【登录】shell（`bash -lc`）：实测 orangevps 上 `claude` 只装在 ~/.local/bin、且不在
+#    非登录 shell 的 PATH 里（非登录 ⇒ NO_CLAUDE）。用非登录 shell 探测会把【代理量伪影】读成
+#    「机器没有 claude」—— 那正是硬规则 4b 的形态，而它的后果是把每一台好机器都判死。
+#
+# 夹具接缝（⛔ 换的是【claude 这个可执行文件】，不是判定逻辑 —— 退出码分类与超时处理照走）：
+#   QUAY_AC258_WORKER_PROBE_CMD     缺省 = AC258_WORKER_PROBE_PREDICATE
+#   QUAY_AC258_PROBE_TIMEOUT_SECS   缺省 30
+AC258_WORKER_PROBE_PREDICATE='claude -p "say ok"'
+ac258_worker_preflight() {
+  local timeout_secs="${1:-${QUAY_AC258_PROBE_TIMEOUT_SECS:-30}}"
+  local probe_cmd="${QUAY_AC258_WORKER_PROBE_CMD:-}"
+  local out="" rc=0 claude_bin=""
+  if [ -z "$probe_cmd" ]; then
+    # 缺省谓词的专属前置：`claude` 在不在【登录 shell】的 PATH 里。⛔ 这一条只对缺省谓词成立 ——
+    # 调用方显式换了命令时，被探测的就是它自己指的那个可执行文件，问 `claude` 在不在是问错了对象。
+    claude_bin="$(bash -lc 'command -v claude' 2>/dev/null || true)"
+    if [ -z "$claude_bin" ]; then
+      echo "AC258-PREFLIGHT absent \`claude\` not on the PATH of a LOGIN shell (bash -lc 'command -v claude' ⇒ empty)"
+      return 2
+    fi
+    probe_cmd="$AC258_WORKER_PROBE_PREDICATE"
+  fi
+  set +e
+  out="$(timeout "$timeout_secs" bash -lc "$probe_cmd" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" = "124" ]; then
+    echo "AC258-PREFLIGHT timeout probe exceeded ${timeout_secs}s (partial: $(printf '%s' "$out" | tail -2 | tr '\n' ' '))"
+    return 3
+  fi
+  if [ "$rc" = "0" ]; then
+    echo "AC258-PREFLIGHT usable probe exited 0${claude_bin:+ (${claude_bin})} ⇒ $(printf '%s' "$out" | tail -1)"
+    return 0
+  fi
+  if [ "$rc" = "127" ]; then
+    # bash -lc 的 command-not-found —— 与「跑了但失败」是两回事（一个是装没装，一个是登录态）。
+    echo "AC258-PREFLIGHT absent probe command not found (rc=127): $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+    return 2
+  fi
+  echo "AC258-PREFLIGHT credentials probe exited ${rc} ⇒ $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  return 1
+}
+
+ac258_delete_registrations() {
+  local home="${1:?}"
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("fs"), path = require("path");
+    const home = process.argv[1];
+    const readJson = p => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return undefined; } };
+    const writeJson = (p, o) => { const t = p + ".ac258-tmp-" + process.pid; fs.writeFileSync(t, JSON.stringify(o, null, 2) + "\n"); fs.renameSync(t, p); };
+    const out = {};
+    const sp = path.join(home, ".claude", "settings.json");
+    let s = readJson(sp);
+    if (s === undefined || typeof s !== "object" || s === null || Array.isArray(s)) { console.error("AC258-DELETE: cannot read " + sp); process.exit(1); }
+    out.settings_ekm_quay_before = (s.extraKnownMarketplaces && Object.prototype.hasOwnProperty.call(s.extraKnownMarketplaces, "quay")) ? 1 : 0;
+    out.settings_ep_quay_before  = (s.enabledPlugins && Object.prototype.hasOwnProperty.call(s.enabledPlugins, "quay@quay")) ? 1 : 0;
+    if (s.extraKnownMarketplaces) delete s.extraKnownMarketplaces.quay;
+    if (s.enabledPlugins) delete s.enabledPlugins["quay@quay"];
+    writeJson(sp, s);
+    const kp = path.join(home, ".claude", "plugins", "known_marketplaces.json");
+    let k = readJson(kp);
+    out.known_quay_before = (k && Object.prototype.hasOwnProperty.call(k, "quay")) ? 1 : 0;
+    if (k && out.known_quay_before) { delete k.quay; writeJson(kp, k); }
+    const ip = path.join(home, ".claude", "plugins", "installed_plugins.json");
+    let i = readJson(ip);
+    const arr = i && i.plugins && Array.isArray(i.plugins["quay@quay"]) ? i.plugins["quay@quay"] : null;
+    out.installed_quay_before = arr === null ? 0 : arr.length;
+    out.installed_user_before = arr === null ? 0 : arr.filter(e => e && e.scope === "user").length;
+    if (arr !== null) { delete i.plugins["quay@quay"]; writeJson(ip, i); }
+    process.stdout.write(JSON.stringify(out) + "\n");' "$home"
+}
+
+# ── AC-258 记录写（fail-closed）──────────────────────────────────────────────────────────
+# 经 ac_record_append 统一补 top-level build_sha/ts（唯一补锚 choke point）；⛔ 本函数体内不出现
+# build_sha 字面量。11 个字段逐字满足 criterion 的过滤谓词；⛔ 缺任一条 ⇒ return 1、一条都不写 ——
+# 包括「读不出就写 false/空串」这个形态（它把「没查成」伪装成「查过且不合格」，比不写更贵，硬规则 3b）。
+# 与 AC-257 的差别：install_scope 必须是 **user**（本 AC 测的就是 user scope 那条路径）。
+# merge_preserved 的**语义**（两条读数同时成立）在调用方判定并作为一个参数传进来；本函数只做
+# 「取值为 true 才写」的写入期闸 —— 值的产生处与写入期闸分工，同 AC_RECORD_SCHEMA 头注释的分工。
+write_ac258_record() {
+  local host="$1" project_root="$2" install_scope="$3" quay_version="$4" quay_init_rerun="$5" \
+        merge_preserved="$6" marketplace_path="$7" provider_path="$8" task_status="$9" \
+        commit_sha="${10}" produced_by_driver="${11}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ "$install_scope" = "user" ] || return 1
+  [ -n "$quay_version" ] || return 1
+  [ "$quay_init_rerun" = "true" ] || return 1
+  [ "$merge_preserved" = "true" ] || return 1
+  [ -n "$marketplace_path" ] || return 1
+  [ -n "$provider_path" ] || return 1
+  ac257_is_probe_path "$marketplace_path" && return 1
+  ac257_is_probe_path "$provider_path" && return 1
+  [ "$task_status" = "done" ] || return 1
+  [ -n "$commit_sha" ] || return 1
+  [ "$produced_by_driver" = "true" ] || return 1
+  ac_record_append ",\"ac\":\"GOAL-018-AC-258\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver"
+}
+
+# 读 AC-258 的外部可核直接量（task_status / commit_sha / commit_files / gate_events）并复制进 AC258_*。
+# 复用 ac207_select_implementation_commit / ac207_is_bookkeeping_commit / ac207_commit_files（Plan 逐字
+# 要求⛔ 不复刻第二份实现）——与 probe_ac257_measures 是同一组判定手法，只是落到另一组变量上。
+probe_ac258_measures() {
+  local root="$1" task_id="$2" qrl="$3" status_json="" gate_log=""
+  status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  AC258_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
+  ' 2>/dev/null)"
+  AC258_COMMIT_SHA="$(ac207_select_implementation_commit "$root" || true)"
+  if [ -n "$AC258_COMMIT_SHA" ]; then
+    local -a _ac258_files=()
+    while IFS= read -r _f; do [ -n "$_f" ] && _ac258_files+=("$_f"); done <<EOF
+$(ac207_commit_files "$root" "$AC258_COMMIT_SHA" || true)
+EOF
+    AC258_COMMIT_FILES_JSON="$(ac207_files_to_json "${_ac258_files[@]}")"
+  fi
+  gate_log="$root/.quay/gate-events.jsonl"
+  if [ -f "$gate_log" ]; then
+    AC258_GATE_EVENTS="$(grep -c . "$gate_log" 2>/dev/null || echo 0)"
+  fi
+  if [ -n "$AC258_COMMIT_SHA" ] && [ "${AC258_GATE_EVENTS:-0}" -gt 0 ] 2>/dev/null; then
+    AC258_PRODUCED_BY_DRIVER=1
+  fi
+  [ -n "$AC258_TASK_STATUS" ] && [ -n "$AC258_COMMIT_SHA" ] && [ "${AC258_GATE_EVENTS:--1}" -gt 0 ] 2>/dev/null \
+    && AC258_EVALUATED=1
+  return 0
+}
+
 # ── ⑧ AC-247 直接量读取（全部在【目标机】上读，硬规则 4b：外部可核，⛔ 不自报）──────────────────
 # 下面四个小函数各自【只做一件事】，且都被 step_ac247_takeover 与 --selfcheck 同时驱动——
 # ⛔ 不让夹具复刻一遍读数逻辑（硬规则 4 推论三：只能被夹具复刻满足的判据不算被测）。
@@ -3280,6 +3598,24 @@ step_ac257_project_scope() {
   echo "== ⑨ AC-257 project-scope + quay-init rerun (merge semantics) + real todo→done =="
   echo "  host=$AC257_HOST (source=$AC257_HOST_SOURCE) project_root=$root plugin_root=$plugin_root"
 
+  # ── ⓪ 前置探测：目标机能不能起 worker（⛔ 必须在【任何破坏性步骤之前】）──────────────────────
+  # 同一个 gap 的【兄弟实例】（gap-ac258-pipeline-destructive-steps-before-worker-preflight 的
+  # DoD 逐字要求「及同族的 --verify-ac257，若共用同一段步骤序」，硬规则 5b：修好一个 ≠ 只在那一处）。
+  # 本模式共用同一段步骤序：(c) quay-init --force 重跑 与 (f) project-scope 安装都会改目标项目的
+  # `.claude/settings.json` / `.quay/`（本 AC 的判据读的正是这些的「前/后」两态），而 (i) 的真实
+  # todo→done 依赖一个在它们之前完全没测过的前置条件 —— 目标机有一个能跑的 Claude Code 登录态。
+  # 探测失败 ⇒ 一个破坏性步骤都不执行（判据要的起点因此完好无损）。
+  local preflight_out="" preflight_rc=0
+  set +e
+  preflight_out="$(ac258_worker_preflight 2>&1)"
+  preflight_rc=$?
+  set -e
+  echo "  [⑨0] worker preflight: $preflight_out"
+  if [ "$preflight_rc" != "0" ]; then
+    echo "  AC257-NOT-EVALUATED: 目标机 worker 可用性前置探测未通过 (rc=$preflight_rc, verdict=$(printf '%s' "$preflight_out" | awk '{print $2}')) ⇒ ⛔ 一个破坏性步骤都没有执行（目标项目的 settings/.quay 未被触碰）⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
+
   # ── quay_version：从【安装物】读（⛔ 不自报）──────────────────────────────────────────
   AC257_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
   if [ -z "$AC257_QUAY_VERSION" ]; then
@@ -3478,6 +3814,453 @@ step_ac257_project_scope() {
     return 0
   fi
   echo "  AC257-NOT-EVALUATED: write_ac257_record 拒写（fail-closed: BUILD_SHA 缺/非 40-hex、AC89 空、或某字段不满足）⇒ 未落账" >&2
+  return 1
+}
+
+# ── ⑩ AC-258 user-scope 模式（--ac258-user-scope，昂贵，opt-in）────────────────────────────────
+# 在【目标机】上跑。被测对象是那台机器上 **user scope 的 quay 注册本身**（⛔ 不是某个项目里的绑定）。
+# 六件事，每件各留一个外部可核读数：
+#   (a) user scope 三处注册的删前形态（settings.json / known_marketplaces.json / installed_plugins.json）
+#   (b) **删键**：三处枚举，quay 的注册全清；删键动作本身有一个可取假的控制 —— 「只摘掉 quay 那一条
+#       ⇒ 非 quay 键集逐字不变」（摘错了别人、或整块重写，这条就会红）
+#   (c) 持久安装：`npm install -g --prefix <持久前缀>` + 其 postinstall（register-plugin.mjs）
+#   (d) 重注册的可核形态：settings.json 的 marketplace 源路径 ∧ known_marketplaces.json 的 source.path
+#       ∧ installed_plugins.json 里一条 scope=="user" 且 version==安装物版本的条目 —— 三者都等于
+#       `<前缀>/lib/node_modules/quay/plugin`，且都不含探测模式
+#   (e) merge_preserved 的**两条读数同时成立**：① (a)/(d) 取的非 quay 键集逐字相同；② quay 那条的
+#       值确实从探测路径换成了持久路径（删了不重注册 ⇒ 键不存在 ⇒ ② 不成立，⛔ 不会平凡为真）
+#   (f) quay-init 重跑 + 真实任务 todo→done（复用 ac207_* 判定手法）⇒ 经 choke point 写记录
+# 判据（⛔ 不是「本步骤跑完了」）：上述读数全部取成 **且** merge_preserved 两条同时成立 **且** 记录
+# 写入成功。任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 非 0。
+step_ac258_user_scope() {
+  local root="$1" plugin_root="$2" qrl="$3" task_id="$4" bodyfile="$5" tgz="$6" qn_tgz="$7" prefix_arg="$8"
+  # ⚠️ `home` 必须先【单独】声明再被引用：同一个 `local` 语句里的全部参数在**赋值之前**就完成了
+  # 词展开，所以 `local home="${HOME:-}" settings="$home/…"` 里的 `$home` 读的是**外层作用域**
+  # （未设 ⇒ `set -u` 报 "home: unbound variable" 并当场退出）。实测 2026-09-14 真机首跑：
+  # 模式在门口 exit 1、什么都没做（幸而是门口 —— 它排在删键之前）。⛔ 不是风格问题。
+  local home="${HOME:-}"
+  local settings="$home/.claude/settings.json"
+  local km="$home/.claude/plugins/known_marketplaces.json" ip="$home/.claude/plugins/installed_plugins.json"
+  local rc_rerun=0 prefix="" before_km="" before_ip="" before_set="" after_km="" after_ip="" after_set=""
+
+  echo "== ⑩ AC-258 user-scope 删键重注册 + quay-init rerun + real todo→done =="
+
+  # ── host 字段：与 AC-257 同一取法（criterion 要字面 host="orangevps"，而「目标机自己报的名字」
+  #    与「驱动方连接用的名字」是两个不同的量；后者才是本 AC 所指的那台机器，且当场核验它解析到
+  #    目标机自己拥有的地址）。⛔ 核验不过 ⇒ 读不出，不回落。 ──────────────────────────────
+  if [ -n "$AC258_HOST_FQDN_ARG" ]; then
+    AC258_HOST="$(ac257_host_from_fqdn "$AC258_HOST_FQDN_ARG" 2>/dev/null || true)"
+    AC258_HOST_SOURCE="fqdn-verified"
+    if [ -z "$AC258_HOST" ]; then
+      echo "  AC258-NOT-EVALUATED: --ac258-host-fqdn '$AC258_HOST_FQDN_ARG' 在本机解析不出【本机拥有的】地址 ⇒ host 读不出（⛔ 不回落 hostname）⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  else
+    AC258_HOST="$(hostname 2>/dev/null || echo '')"
+    AC258_HOST_SOURCE="hostname-fallback"
+  fi
+  AC258_PROJECT_ROOT="$root"
+  local install_home="$home"
+  echo "  host=$AC258_HOST (source=$AC258_HOST_SOURCE) project_root=$root plugin_root=$plugin_root home=$install_home"
+
+  # ── ⓪ 前置探测：目标机能不能起 worker（⛔ 必须在【任何破坏性步骤之前】）──────────────────────
+  # 这一步不是仪式，是本步骤序的**唯一**不可逆性防线：①②③（三处删键 / 持久安装 / quay-init 重跑）
+  # 都是破坏性且自耗的 —— 它们把本实验的【起点】（指向探测路径的注册）当场吃掉；而第 ④ 步
+  # 「让目标机自己的 drivers 把一条真实任务驱动到 done」依赖一个在 ①②③ 之前**完全没测过**的前置
+  # 条件：目标机有一个能跑的 Claude Code 登录态（worker 靠 `claude -p` 起）。
+  # 该条件不成立时，原实现会在整整三步破坏性工作之后才失败（实测 2026-09-14：凭据被清空）⇒ 整轮
+  # 报废 + 必须手工把三处注册恢复成探测路径（`~/ac258-fixture-reset.sh`，已用过两次）。
+  # 1 秒的探测可以完全避免这条路径，而代价是零 —— 这就是本调用点存在的全部理由。
+  local preflight_out="" preflight_rc=0
+  set +e
+  preflight_out="$(ac258_worker_preflight 2>&1)"
+  preflight_rc=$?
+  set -e
+  echo "  [⑩0] worker preflight: $preflight_out"
+  if [ "$preflight_rc" != "0" ]; then
+    echo "  AC258-NOT-EVALUATED: 目标机 worker 可用性前置探测未通过 (rc=$preflight_rc, verdict=$(printf '%s' "$preflight_out" | awk '{print $2}')) ⇒ ⛔ 一个破坏性步骤都没有执行（三处注册 / 持久前缀 / 目标项目的 config 全未被触碰）⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
+
+  # ── (0) 持久前缀 ────────────────────────────────────────────────────────────────────────
+  # ⚠️ 顺序（实测 2026-09-14 真机第三跑踩到）：**版本号读自【安装物】，而安装发生在 (c)** ⇒ 此处
+  # 只能先用**交付物自己携带的版本**（tgz 名 `quay-<ver>.tgz` —— 交付模式派生前缀用的正是同一个
+  # 来源）来定前缀；装完再在 (c2) 从安装物复读一次并要求两者一致。原实现在 (0) 就去读
+  # `<prefix>/lib/node_modules/quay/plugin/vendor/quay/package.json` —— 那一刻它按定义还不存在（那是
+  # 本步骤即将创建的东西）⇒ 模式在门口 NOT-EVALUATED，而失败形态是「记录没写出来」，与「机制坏了」
+  # 同形（硬规则 3b）。同一类错误的第一个实例是 CLI 候选（见 (c) 的注释）。
+  prefix="${prefix_arg:-}"
+  if [ -z "$prefix" ]; then
+    local tgz_base tgz_ver=""
+    tgz_base="$(basename "$tgz" 2>/dev/null || true)"
+    tgz_ver="${tgz_base#quay-}"; tgz_ver="${tgz_ver%.tgz}"
+    if [ -z "$tgz_ver" ] || [ "$tgz_ver" = "$tgz_base" ]; then
+      echo "  AC258-NOT-EVALUATED: 既无 --ac258-prefix，又无法从交付物名 '$tgz_base' 派出版本 ⇒ 记录 NOT written" >&2
+      return 1
+    fi
+    prefix="$home/.local/opt/quay/$tgz_ver"
+  fi
+  local want_dir="$prefix/lib/node_modules/quay/plugin"
+  # 前缀自身的形状闸：criterion 的排除模式（verify-|probe|/tmp/）就核对在这条路径上，所以【在建任何
+  # 东西之前】先判一次 —— 一个探测形态的前缀不该先把交付物装进去再被发现不合格。
+  if ac257_is_probe_path "$prefix"; then
+    echo "  AC258-NOT-EVALUATED: --ac258-prefix '$prefix' 命中探测模式（verify-|probe|/tmp/）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  echo "  [⑩a] persistent prefix=$prefix (⛔ 不是 verify-/probe-/tmp- 形态)"
+
+  # ── (a) 删前形态：三处枚举（硬规则 5b：⛔ 不只删一处，因此也不只读一处）────────────────────
+  [ -f "$settings" ] || {
+    echo "  AC258-NOT-EVALUATED: $settings 不存在 ⇒ user scope 的注册无对象 ⇒ 记录 NOT written" >&2
+    return 1
+  }
+  before_set="$(ac258_nonkay_keyset "$settings" 2>/dev/null || true)"
+  [ -n "$before_set" ] || {
+    echo "  AC258-NOT-EVALUATED: 读不出 $settings 的非 quay 键集（JSON 坏？）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  before_km="$(ac258_known_marketplace_path "$km" quay 2>/dev/null || echo '<absent>')"
+  before_ip="$(ac258_installed_entry_count "$ip" 'quay@quay' 2>/dev/null || echo '<unreadable>')"
+  local before_set_path before_ekm=""
+  before_set_path="$(ac258_settings_marketplace_path "$settings" quay 2>/dev/null || echo '<absent>')"
+  before_ekm="$before_set_path"
+  echo "  [⑩b] BEFORE: settings.extraKnownMarketplaces.quay.source.path=$before_ekm"
+  echo "          settings non-quay keyset md5=$(printf '%s' "$before_set" | md5sum | cut -c1-12)"
+  echo "          known_marketplaces.json.quay.source.path=$before_km ; installed_plugins.json quay@quay entries=$before_ip"
+  # ⚠️ 删键前必须【真的看到】指向探测路径的那条 —— 否则「起点本来就没有 quay 注册」，而本 AC 测的
+  # 恰恰是「替换/删掉【已有的】探测注册」。起点缺失 ⇒ 两个读数中的一个平凡成立 ⇒ NOT-EVALUATED
+  # （⛔ 不当作「照样能过」，硬规则 4：结构上不可能取假的量不是测量）。
+  if ! ac257_is_probe_path "$before_ekm"; then
+    echo "  AC258-NOT-EVALUATED: 删键前 settings 里 quay 的源路径不命中探测模式（='$before_ekm'）⇒ 「删掉探测注册再用持久路径重注册」这个起点不存在 ⇒ 记录 NOT written" >&2
+    return 1
+  fi
+
+  # ── (b) 删键（三处枚举）+ 删键自身的可取假控制：非 quay 键集必须逐字不变 ─────────────────────
+  local del_json="" del_rc=0
+  set +e
+  del_json="$(ac258_delete_registrations "$home" 2>/dev/null)"
+  del_rc=$?
+  set -e
+  if [ "$del_rc" != "0" ] || [ -z "$del_json" ]; then
+    echo "  AC258-NOT-EVALUATED: 三处删键失败（rc=$del_rc）⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
+  AC258_DELETE_NOTE="$del_json"
+  echo "  [⑩c] DELETE (three places enumerated): $del_json"
+  local after_del_set="" del_set_same=0
+  after_del_set="$(ac258_nonkay_keyset "$settings" 2>/dev/null || true)"
+  [ -n "$after_del_set" ] && [ "$before_set" = "$after_del_set" ] && del_set_same=1
+  echo "          post-delete non-quay keyset verbatim-preserved=$del_set_same (expect 1 — 只摘掉 quay 那一条，⛔ 不整块重写)"
+  [ "$del_set_same" = "1" ] || {
+    echo "  AC258-NOT-EVALUATED: 删键改动了非 quay 键集（摘错了对象或整块重写）⇒ 记录 NOT written" >&2
+    return 1
+  }
+
+  # ── (c) 持久安装：npm install -g --prefix <持久前缀>（触发 postinstall register-plugin.mjs）──────
+  if [ ! -f "$tgz" ]; then
+    echo "  AC258-NOT-EVALUATED: 交付物 tgz 不在 $tgz ⇒ 记录 NOT written (fail-closed)" >&2
+    return 1
+  fi
+  local rc_npm=0 install_log="$home/ac258-npm-install.log"
+  mkdir -p "$prefix"
+  set +e
+  # ⚠️ `--foreground-scripts` 是【判据所必需】，不是好看：实测 2026-09-14（npm 11.17.0）——
+  # 不加它时 npm **吞掉**被安装包 postinstall 的 stdout/stderr，而 postinstall 是【真的跑了】的
+  # （证据是它的效果：settings.json 被写上 extraKnownMarketplaces.quay）。⇒ 用它自己打印的那行
+  # 「Registered the installed quay plugin」当「postinstall 跑过」的读数，在默认参数下**恒为零**，
+  # 于是每一次真机运行都会在 (d) 以「postinstall 未跑？」告终 —— 一句【成因说错】的 NOT-EVALUATED，
+  # 与「机制坏了」同形（硬规则 3b / 4：「恒零的读数携带零信息」）。
+  # 同一测点还看到 npm 11 的 allow-scripts 策略会为未声明的 install script 打印一条 warning（安装仍
+  # 照常、脚本仍照跑）—— 故本判据刻意【不】把「有没有那条 warning」当读数：它不是「脚本跑没跑」。
+  npm install -g --prefix "$prefix" --foreground-scripts --no-audit --no-fund "$tgz" ${qn_tgz:+"$qn_tgz"} >"$install_log" 2>&1
+  rc_npm=$?
+  set -e
+  echo "  [⑩d] npm install -g --prefix $prefix rc=$rc_npm (log: $install_log, $(wc -l < "$install_log" 2>/dev/null || echo 0) lines)"
+  [ "$rc_npm" = "0" ] || {
+    echo "  AC258-NOT-EVALUATED: 持久安装失败（rc=$rc_npm，见 $install_log）⇒ 记录 NOT written" >&2
+    tail -20 "$install_log" 2>/dev/null || true
+    return 1
+  }
+  # ⚠️ CLI 入口必须在【安装之后】才解析 —— 它住在被安装物的 package.json 的 bin 字段里，而那一刻
+  # 之前那个文件不存在。调用方（模式分发块）传进来的 qrl 只是一个**候选**（本脚本在别的模式下的
+  # 推导），⛔ 不能拿它的存在性在门口 fail-closed：那会把「还没装」误判成「装没有 CLI」，
+  # 而失败形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
+  local qrl_now=""
+  qrl_now="$(ac257_delivery_cli "$plugin_root" 2>/dev/null || true)"
+  if [ -z "$qrl_now" ] || [ ! -f "$qrl_now" ]; then
+    echo "  AC258-NOT-EVALUATED: 装完后解析不出交付物 CLI（plugin_root=$plugin_root，候选=$qrl）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  qrl="$qrl_now"
+  echo "          delivery CLI resolved AFTER install: $qrl"
+
+  # ── (c2) quay_version：从【安装物】读（⛔ 不自报），并与交付前缀里那一段版本交叉核对 ─────────────
+  # 为什么是两条而不是一条：只读安装物 ⇒ 无法区分「装的是本次交付物」与「前缀里躺着别的版本」
+  # （前缀是持久的，上一次的残留会一直满足「读出版本」）。前缀名里的版本来自 tgz 名，安装物里的版本
+  # 来自它自己的 package.json —— 两者相等才说明「本次交付物确实装进了这个前缀」。
+  AC258_QUAY_VERSION="$(ac257_installed_version "$plugin_root" 2>/dev/null || true)"
+  if [ -z "$AC258_QUAY_VERSION" ]; then
+    echo "  AC258-NOT-EVALUATED: 装完后仍从 $plugin_root/vendor/quay/package.json 读不出版本 ⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  case "$prefix" in
+    */"$AC258_QUAY_VERSION") ;;
+    *) echo "  AC258-NOT-EVALUATED: 安装物版本($AC258_QUAY_VERSION)与交付前缀($prefix)不一致 ⇒ 记录 NOT written" >&2; return 1 ;;
+  esac
+  echo "  [⑩c2] installed quay_version=$AC258_QUAY_VERSION (read from the installed artifact, ⛔ not self-reported; cross-checked against the delivery prefix)"
+  # postinstall 必须真跑过（否则「装了但没注册」，与「注册坏了」同形）——按位置读它的输出痕迹。
+  local reg_hits=0
+  # `grep -c` 在零命中时【既打印 0 又返回 1】⇒ `|| echo 0` 会把读数变成两行（"0\n0"）。用 `|| true`
+  # 保留那一个 0（它是真读数，不是缺值）。
+  reg_hits="$(grep -c 'Registered the installed quay plugin' "$install_log" 2>/dev/null || true)"
+  echo "          postinstall register-plugin.mjs ran: hits=$reg_hits (expect >=1)"
+  [ "${reg_hits:-0}" -ge 1 ] 2>/dev/null || {
+    echo "  AC258-NOT-EVALUATED: postinstall 的注册痕迹未出现（register-plugin.mjs 未跑？）⇒ 记录 NOT written" >&2
+    return 1
+  }
+
+  # ── (d0) materialization 的兜底腿（可区分，⛔ 不是「换一条机制」）──────────────────────────────
+  # register-plugin.mjs 在写 settings.json 之后【自己】会调两条 CLI 命令去把插件 materialize 进
+  # ~/.claude/plugins（缓存 + installed_plugins.json）：
+  #     runCli(["plugin","marketplace","add",pluginDir]) ; runCli(["plugin","install",pluginRef])
+  # —— 但它【没传 `-y`】，而 `plugin install` 在非 TTY 下可能取不到确认 ⇒ materialization 可能整段
+  # 不生效，于是 installed_plugins.json 里不会出现 scope:"user" 条目，本 AC 结构上不可满足，而失败
+  # 形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
+  # ⇒ 仅当 user-scope 条目【读不出】时，补跑【同样两条命令】并显式带 `-y`，且把「哪条腿产出了它」
+  # 打成一行可核读数。⛔ 这不是绕过产品路径：命令、目标、调用方都是 register-plugin.mjs 自己那两条，
+  # 补的只是一个它漏掉的非交互确认标志；两条腿都在日志里留痕，判据不区分来源。
+  local mat_leg="postinstall(register-plugin.mjs)" rc_ms=0 rc_inst=0
+  if [ -z "$(ac258_user_scope_entry "$ip" "$AC258_QUAY_VERSION" 'quay@quay' 2>/dev/null || true)" ]; then
+    if command -v claude >/dev/null 2>&1; then
+      set +e
+      claude plugin marketplace add "$plugin_root" >"$home/ac258-cli-materialize.log" 2>&1
+      rc_ms=$?
+      claude plugin install "quay@quay" -y >>"$home/ac258-cli-materialize.log" 2>&1
+      rc_inst=$?
+      set -e
+      mat_leg="cli-materialize-fallback(marketplace-add rc=$rc_ms, install -y rc=$rc_inst)"
+    else
+      mat_leg="not-attempted(claude not on PATH in this shell)"
+    fi
+  fi
+  echo "  [⑩d2] user-scope materialization leg: $mat_leg"
+
+  # ── (d) 重注册的可核形态：三条独立通道都必须读到 <want_dir>，且都不含探测模式 ──────────────────
+  local after_set_path after_km_path after_user_entry=""
+  after_set_path="$(ac258_settings_marketplace_path "$settings" quay 2>/dev/null || true)"
+  after_km_path="$(ac258_known_marketplace_path "$km" quay 2>/dev/null || true)"
+  after_user_entry="$(ac258_user_scope_entry "$ip" "$AC258_QUAY_VERSION" 'quay@quay' 2>/dev/null || true)"
+  echo "  [⑩e] AFTER : settings.quay.source.path=$after_set_path"
+  echo "          known_marketplaces.quay.source.path=$after_km_path"
+  echo "          installed_plugins.json scope=user entry=$after_user_entry"
+  [ -n "$after_set_path" ] && [ -n "$after_km_path" ] && [ -n "$after_user_entry" ] || {
+    echo "  AC258-NOT-EVALUATED: 三条可核通道之一读不出（settings/known_marketplaces/user-scope 条目）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  ac257_is_probe_path "$after_set_path" && {
+    echo "  AC258-NOT-EVALUATED: 重注册后的 settings 源路径仍命中探测模式（='$after_set_path'）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  ac257_is_probe_path "$after_km_path" && {
+    echo "  AC258-NOT-EVALUATED: known_marketplaces 的 source.path 命中探测模式（='$after_km_path'）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  # 三条通道【互相印证】：都等于 <前缀>/lib/node_modules/quay/plugin。⛔ 只要求「非探测」会让一个
+  # 指向别处的持久路径也通过 —— 那与本 AC 说的「装到本次交付物的持久前缀」不是同一件事。
+  if [ "$after_set_path" != "$want_dir" ] || [ "$after_km_path" != "$want_dir" ]; then
+    echo "  AC258-NOT-EVALUATED: 两条注册通道未指向本次持久前缀（want=$want_dir settings=$after_set_path known=$after_km_path）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  # ⚠️ user-scope 条目的 installPath：criterion 只要求「非空 ∧ 不匹配 verify-|probe|/tmp/」——
+  # ⛔ **不**要求它等于 want_dir。实测 2026-09-14（orangevps 真机第 4 跑）：Claude Code 的 CLI 把插件
+  # materialize 进它**自己的缓存** `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`，而**不是**
+  # marketplace 的源路径。那是产品本来的形态（缓存在用户 home 下的持久位置，版本段就是本次交付版本），
+  # 把它判成不合格是【判据写错了】而不是被测对象错了 —— 而失败形态是「记录没写出来」+ 一句把成因指向
+  # 被测对象的话，两者都与「机制坏了」同形（硬规则 3b）。原实现要求 installPath 含 want_dir ⇒
+  # 每一次真机运行都会停在这里。⇒ 按 criterion 的原文判，并把实际路径打出来供 AC-5 的交叉核对。
+  local entry_ip=""
+  entry_ip="$(printf '%s' "$after_user_entry" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); process.stdout.write(String(j.installPath||"")); }catch{} });' 2>/dev/null)"
+  if [ -z "$entry_ip" ] || ac257_is_probe_path "$entry_ip"; then
+    echo "  AC258-NOT-EVALUATED: user-scope 条目的 installPath 为空或命中探测模式（='$entry_ip'）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  echo "          user-scope installPath=$entry_ip (Claude Code 的插件缓存：持久位置，⛔ 不是 marketplace 源路径 —— 判据不要求二者相等)"
+  AC258_MARKETPLACE_PATH="$after_set_path"
+  AC258_KNOWN_MARKETPLACE_PATH="$after_km_path"
+  AC258_INSTALL_SCOPE="user"
+
+  # ── (e) merge_preserved 两条读数（⛔ 只贴一条不算）────────────────────────────────────────
+  after_set="$(ac258_nonkay_keyset "$settings" 2>/dev/null || true)"
+  local keyset_same=0 quay_replaced=0
+  [ -n "$after_set" ] && [ "$before_set" = "$after_set" ] && keyset_same=1
+  if ac257_is_probe_path "$before_ekm" && ! ac257_is_probe_path "$after_set_path" && [ -n "$after_set_path" ]; then
+    quay_replaced=1
+  fi
+  echo "  [⑩f] merge_preserved: ①non-quay keyset verbatim-preserved=$keyset_same (before md5=$(printf '%s' "$before_set" | md5sum | cut -c1-12) after md5=$(printf '%s' "$after_set" | md5sum | cut -c1-12)) ; ②quay replaced probe→persistent=$quay_replaced"
+  if [ "$keyset_same" = "1" ] && [ "$quay_replaced" = "1" ]; then
+    AC258_MERGE_PRESERVED="true"
+    AC258_MERGE_NOTE="①非 quay 键集逐字保留 ∧ ②quay 那条由探测路径换成持久路径（两读数同时成立）"
+  else
+    AC258_MERGE_PRESERVED="0"
+    AC258_MERGE_NOTE="①非 quay 键集逐字相同=$keyset_same ∧ ②quay 被换成持久路径=$quay_replaced —— 两条未同时成立"
+    echo "  AC258-MERGE-FAILED: $AC258_MERGE_NOTE" >&2
+    return 1
+  fi
+
+  # ── (g-pre) 环境前置：目标项目自己的 pre-commit 钩子当前是坏的 ─────────────────────────────
+  # 实测 2026-09-14（orangevps，run5）：meta-cc 的 `.git/hooks/pre-commit`（pre-commit 框架生成，
+  # `INSTALL_PYTHON=/usr/bin/python3`）执行 `python3 -m pre_commit` ⇒ `No module named pre_commit`
+  # ⇒ **该仓库当前任何 `git commit` 都失败**。这不只挡 quay-init 的 auto-commit：driver 的
+  # `tasks: …` 记账提交、worker 的实现提交、fan-in 的翻转提交**同样会失败** ⇒「真实 todo→done」这一整条
+  # 在本环境里结构上不可达，而失败形态逐层都是「什么都没发生」（硬规则 3b）。
+  # 处置（⛔ 最小且不碰被取证对象）：只把**本步骤派生的**子进程的 `core.hooksPath` 指向一个空目录，
+  # 经 `GIT_CONFIG_*` 环境变量下发（git 对进程树生效，⛔ 不写 meta-cc 的 .git/config、⛔ 不删它的钩子文件
+  # —— 那会把「修运行环境」变成「改被取证对象」，两者必须分开记）。
+  # ⚠️ 诚实登记的代价：本次运行**没有**行使 meta-cc 自己的 pre-commit 钩子。判据里没有任何一条依赖它，
+  # 但读这份记录的人应当知道。
+  local neutral_hooks="$home/ac258-empty-hooks"
+  mkdir -p "$neutral_hooks"
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$neutral_hooks"
+  echo "  [⑩g0] git hooks neutralized for THIS STEP's subprocesses only: core.hooksPath=$neutral_hooks (meta-cc's own pre-commit hook is broken: 'No module named pre_commit' ⇒ every commit there fails; ⛔ .git/config and .git/hooks were NOT modified)"
+
+  # ── (g) quay-init 重跑（meta-cc 本体；升级/幂等路径）─────────────────────────────────────
+  # ⚠️ 分支模型【当场判、不假设】：AC-258 Plan §6 逐字要求「先读现状再判断是否需要
+  # --adopt-branch-model，⛔ 不假设它与 08-20 AC118 时的状态一致」。因此按【两段】跑，且两段留下
+  # 可区分的痕迹：
+  #   第一段 不带 --adopt-branch-model —— 若该项目的落地基线本来就是默认分支的延续，这一段就成功；
+  #   第二段 仅当第一段以【分支模型拒绝】告终时跑 —— quay-init 自己的拒绝语点名了
+  #          `bash $0 … --adopt-branch-model`（实测形态：`REFUSES to upgrade this project`）。
+  # ⛔ 第二段不是「失败就换参数重试」的兜底：它是把 quay-init 自己给出的判据当成输入，再跑一次它
+  # 自己指名的命令；两段各自的 rc 与日志都留痕，判据（rerun=true）只在【任一段成功】时成立。
+  # ⛔ 也不把「第一段失败」直接当 NOT-EVALUATED —— 那会把「项目需要 adoption 决定」这件事与
+  # 「quay-init 坏了」压成同形（硬规则 3b）。
+  local dirty_after=0 init_log="$home/ac258-quay-init.log" adopt_log="$home/ac258-quay-init-adopt.log"
+  local cfg_before="" cfg_after="" settings_md5_before="" settings_md5_after="" adopt_used=0
+  cfg_before="$(md5sum "$root/.quay/config.yml" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
+  settings_md5_before="$(md5sum "$root/.claude/settings.json" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
+  set +e
+  (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm) >"$init_log" 2>&1
+  rc_rerun=$?
+  set -e
+  if [ "$rc_rerun" != "0" ] && grep -q 'REFUSES to upgrade this project' "$init_log" 2>/dev/null; then
+    echo "  [⑩g1] quay-init refused on the branch model (rc=$rc_rerun) — quay-init's OWN message names --adopt-branch-model ⇒ re-running as it instructs"
+    set +e
+    (cd "$root" && bash "$plugin_root/scripts/quay-init.sh" --root "$root" --plugin-root "$plugin_root" --force --auto-commit-confirm --adopt-branch-model) >"$adopt_log" 2>&1
+    rc_rerun=$?
+    set -e
+    adopt_used=1
+    echo "  [⑩g2] quay-init --adopt-branch-model rc=$rc_rerun (log: $adopt_log)"
+  fi
+  dirty_after="$(git -C "$root" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  cfg_after="$(md5sum "$root/.quay/config.yml" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
+  settings_md5_after="$(md5sum "$root/.claude/settings.json" 2>/dev/null | cut -d' ' -f1 || echo '<absent>')"
+  AC258_QUAY_INIT_RERUN="$([ "$rc_rerun" = "0" ] && echo true || echo false)"
+  echo "  [⑩g] quay-init rerun rc=$rc_rerun (rerun=$AC258_QUAY_INIT_RERUN) adopt-branch-model-used=$adopt_used ; worktree dirty entries after=$dirty_after"
+  echo "        .quay/config.yml md5 $cfg_before → $cfg_after ; .claude/settings.json md5 $settings_md5_before → $settings_md5_after"
+  [ "$AC258_QUAY_INIT_RERUN" = "true" ] || {
+    echo "  AC258-NOT-EVALUATED: quay-init 重跑非 0 ⇒ 记录 NOT written（见 $init_log）" >&2
+    tail -20 "$init_log" 2>/dev/null || true
+    return 1
+  }
+
+  # ── (h) provider 路径：目标项目 .quay/config.yml 的 providers.native.path（复读一次，可核）────────
+  AC258_PROVIDER_PATH="$(ac257_provider_path "$root" 2>/dev/null || true)"
+  echo "  [⑩h] provider_path=$AC258_PROVIDER_PATH"
+  if [ -z "$AC258_PROVIDER_PATH" ] || ac257_is_probe_path "$AC258_PROVIDER_PATH"; then
+    echo "  AC258-NOT-EVALUATED: provider 路径为空或命中探测模式（='$AC258_PROVIDER_PATH'）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  local list_out=""
+  list_out="$( (cd "$root" && node "$qrl" task list --root "$root" --json) 2>/dev/null || true)"
+  [ -n "$list_out" ] || {
+    echo "  AC258-NOT-EVALUATED: 用该 config 列不出任务（provider 绑定不可用）⇒ 记录 NOT written" >&2
+    return 1
+  }
+  echo "          provider usable: task list returned $(printf '%s' "$list_out" | wc -c) bytes"
+
+  # ── (i) 真实任务 todo→ready→done（由该项目【自己的】drivers 驱动）──────────────────────────
+  if [ -z "$task_id" ] || [ ! -f "$bodyfile" ]; then
+    echo "  AC258-NOT-EVALUATED: 未给 --ac258-task-id / --ac258-task-body（真实任务）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  AC258_TASK_ID="$task_id"
+  local create_rc=0 task_exists=0 task_view_json="" status_at_entry=""
+  task_view_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  if [ -n "$task_view_json" ] \
+     && printf '%s' "$task_view_json" | grep -q "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\""; then
+    task_exists=1
+    status_at_entry="$(printf '%s' "$task_view_json" | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})')"
+    echo "  [⑩i2] REUSING existing task $task_id (status=$status_at_entry) — ⛔ 不调 task create（它在已存在的 id 上会前置第二段 frontmatter）"
+  else
+    # ⚠️ `task create --body-file <带 frontmatter 的文件>` 会把那段 frontmatter 当成【正文】再写一遍 ⇒
+    # 目标项目的 `tasks/<id>.md` 出现【两段 frontmatter】。实测 2026-09-14 用本机夹具复现（`^---$`
+    # 从 2 条变 4 条、`^status:` 从 1 条变 2 条，ABI 读到的是第一段）。这正是 AC-257 第 8 条那个
+    # 「第二段 frontmatter 被前置」的形态，只是成因在【输入侧】。⇒ 本步骤自己剥一次，⛔ 不假设调用方
+    # 送来的文件不带 frontmatter（硬规则 5b：修好一个不等于只在那一处 —— create 侧与输入侧都要挡）。
+    local body_src="$bodyfile"
+    if head -1 "$bodyfile" 2>/dev/null | grep -qx -- '---'; then
+      local stripped_body="$home/ac258-task-body-stripped.md"
+      if awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; if(n<=2) next} n>=2{print}' "$bodyfile" > "$stripped_body" 2>/dev/null && [ -s "$stripped_body" ]; then
+        body_src="$stripped_body"
+        echo "  [⑩i1] body file carried a frontmatter block ⇒ stripped before task create ($(wc -l < "$body_src") lines, $(grep -c '^---$' "$body_src" || true) fences)"
+      fi
+    fi
+    set +e
+    (cd "$root" && node "$qrl" task create "$task_id" --title "AC-258 user-scope 驱动取证任务" --body-file "$body_src" --status todo --root "$root") >/dev/null 2>&1
+    create_rc=$?
+    set -e
+    if [ "$create_rc" = "0" ] \
+       && [ -n "$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null | grep -o "\"id\"[[:space:]]*:[[:space:]]*\"$task_id\"" || true)" ]; then
+      task_exists=1; status_at_entry="todo"
+      echo "  [⑩i2] task created: $task_id (create rc=0 ∧ 建后可见)"
+    else
+      echo "  AC258-NOT-EVALUATED: task create rc=$create_rc 且该 id 读不出来 ⇒ 记录 NOT written (fail-closed)" >&2
+      return 1
+    fi
+  fi
+  local d_rc_p=0 d_rc_w=0
+  local poll="${AC258_POLL_SECS:-3600}" i st=""
+  if [ "$status_at_entry" = "done" ]; then
+    echo "  [⑩i3] task already done at entry ⇒ drivers NOT started, no poll (⛔ 起它们会把 settled done 推回 todo：实测 run5 同形)"
+    st="$status_at_entry"
+  else
+    set +e
+    (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
+    d_rc_p=$?
+    (cd "$root" && node "$qrl" driver start --kind worker --root "$root") >/dev/null 2>&1
+    d_rc_w=$?
+    set -e
+    echo "  [⑩i3] driver start: promotion rc=$d_rc_p worker rc=$d_rc_w (status at entry=$status_at_entry)"
+    for i in $(seq 1 "$poll"); do
+      st="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null \
+        | "$VC_NODE" --no-warnings -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j&&j.status?String(j.status):"")}catch{console.log("")}})' 2>/dev/null)"
+      [ "$st" = "done" ] && break
+      sleep 1
+    done
+  fi
+  echo "  [⑩j] poll finished: task_status=${st:-<unreadable>} (window ${poll}s)"
+
+  probe_ac258_measures "$root" "$task_id" "$qrl"
+  local task_gate_events=0
+  if [ -f "$root/.quay/gate-events.jsonl" ]; then
+    task_gate_events="$(grep -c "\"$task_id\"" "$root/.quay/gate-events.jsonl" 2>/dev/null || echo 0)"
+  fi
+  echo "  [⑩k] task_status=$AC258_TASK_STATUS commit_sha=${AC258_COMMIT_SHA:0:12} files=$AC258_COMMIT_FILES_JSON gate_events_total=$AC258_GATE_EVENTS gate_events_task=$task_gate_events produced_by_driver=$AC258_PRODUCED_BY_DRIVER evaluated=$AC258_EVALUATED"
+  if [ "$AC258_EVALUATED" != "1" ] || [ "$AC258_TASK_STATUS" != "done" ]; then
+    echo "  AC258-NOT-EVALUATED: 任务未驱动到 done 或缺直接量（缺值≠合格）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+
+  # ── (j) 写记录（fail-closed 的写入期闸在 write_ac258_record 里，这里只负责把读数凑齐）──────────
+  if write_ac258_record "$AC258_HOST" "$AC258_PROJECT_ROOT" "$AC258_INSTALL_SCOPE" "$AC258_QUAY_VERSION" \
+       "$AC258_QUAY_INIT_RERUN" "$AC258_MERGE_PRESERVED" "$AC258_MARKETPLACE_PATH" "$AC258_PROVIDER_PATH" \
+       "$AC258_TASK_STATUS" "$AC258_COMMIT_SHA" "true"; then
+    AC258_WRITTEN_THIS_RUN=1
+    echo "  ac258 record written → $AC89 ✓"
+    return 0
+  fi
+  echo "  AC258-NOT-EVALUATED: write_ac258_record 拒写（fail-closed: BUILD_SHA 缺/非 40-hex、AC89 空、或某字段不满足）⇒ 未落账" >&2
   return 1
 }
 
@@ -6327,6 +7110,15 @@ GOAL-016-AC-250 host:str project_root:str bind_host:str tailscale0_ip:str probe_
 # marketplace_path=项目级 marketplace 源路径、provider_path=.quay/config.yml 的 provider 路径，
 # 两者都非空且都不含探测模式字面（`verify-`/`probe`/`/tmp/`，criterion 侧另有正则再查一遍）。
 GOAL-018-AC-257 host:str project_root:str install_scope:str quay_version:str quay_init_rerun:bool merge_preserved:bool marketplace_path:str provider_path:str task_status:str commit_sha:str produced_by_driver:bool
+# AC-258（GOAL-018，2026-09-14 本轮接入）：**user scope** 的删键重注册 + quay-init 重跑 + 真实 todo→done。
+# ⚠️ 本行与 AC-257 行【逐字段相同】—— 这不是复制粘贴，是两条 criterion 读了同一组谓词名（人 2026-09-14
+# 把 GOAL-018 拆成 project/user 两条时沿用了同一套字段名）。差别在【取值】而不在字段集：AC-257 的
+# install_scope 是 `project`（锚在项目级 .claude/settings.json 的 enabledPlugins 键），本 AC 是 `user`
+# （锚在 ~/.claude/plugins/installed_plugins.json 的 scope 字段 + 与持久前缀交叉可核）。
+# ⚠️ 同 AC-257 行：`marketplace_path` 与 `provider_path` 两个键【都必须】写非空 —— criterion 逐字是
+# `str(r.get("marketplace_path") or r.get("provider_path") or "")`，两个键都在读（or 右侧不是死代码），
+# 少写一个会让 `crit_not_written` 红，少声明一个会让 `crit_not_declared` 红。
+GOAL-018-AC-258 host:str project_root:str install_scope:str quay_version:str quay_init_rerun:bool merge_preserved:bool marketplace_path:str provider_path:str task_status:str commit_sha:str produced_by_driver:bool
 '
 
 # 取某 AC 的 schema 行（去掉 ac 前缀后的 `field:kind …`）。未登记 ⇒ 非 0（调用方 fail-closed）。
@@ -7037,6 +7829,228 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   [ "$ac257_mk_none" = "refused" ] || fail="$fail AC257-marketplace-path-absent-accepted"
   AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
 
+  # ── AC258（GOAL-018）：user-scope 的四个读取器 + writer，各取两个方向 ────────────────────
+  # 本组与 AC257 组的差别：AC257 组测的是「项目级合并语义」的一组读数，本组测的是「user scope 三处注册」
+  # 的另一组读数（⛔ 不可互替 —— 两条 AC 的被测对象不同，这正是它们被拆成两条的原因）。
+  # 硬规则 4 推论三：夹具只承担「该判据能被证伪」这一半；「它在生产上真的取到了 orangevps/meta-cc」
+  # 由 AC-258 的真机运行负责。
+  # (1) writer：全字段正例写入 ∧ 缺 merge_preserved / 缺 install_scope 必须拒写（AC-258 Plan §10 逐字）。
+  local ac258_f="$t/ac258.jsonl" ac258_pos_w=0 ac258_pos_lines=0 ac258_neg_w=0 ac258_neg_lines=0
+  AC89="$ac258_f"; : > "$ac258_f"
+  local -a ac258_args=("orangevps" "/home/yale/work/meta-cc" "user" "0.7.0" "true" "true" \
+                       "/srv/quay/0.7.0/lib/node_modules/quay/plugin" "." "done" "$SHA40" "true")
+  if write_ac258_record "${ac258_args[@]}" >/dev/null 2>&1; then ac258_pos_w=1; fi
+  ac258_pos_lines="$(wc -l < "$ac258_f" 2>/dev/null || echo 0)"
+  # 缺 merge_preserved（下标 5）—— 本 AC 最贵的一条读数（两条子读数同时成立才为 true）。
+  local -a ac258_miss_mp=("${ac258_args[@]}"); ac258_miss_mp[5]=""
+  write_ac258_record "${ac258_miss_mp[@]}" >/dev/null 2>&1 || ac258_neg_w=1
+  # 缺 install_scope（下标 2）—— 本 AC 与 AC-257 的分界字段。
+  local ac258_neg_scope=0
+  local -a ac258_miss_is=("${ac258_args[@]}"); ac258_miss_is[2]=""
+  write_ac258_record "${ac258_miss_is[@]}" >/dev/null 2>&1 || ac258_neg_scope=1
+  ac258_neg_lines="$(wc -l < "$ac258_f" 2>/dev/null || echo 0)"
+  echo "selfcheck: ac258(positive, all 11 fields) wrote=$ac258_pos_w lines=0→$ac258_pos_lines (expect 1/0→1 — 全字段正例必须写出一条)"
+  echo "selfcheck: ac258(negative, merge_preserved omitted) refused=$ac258_neg_w lines=$ac258_pos_lines→$ac258_neg_lines (expect 1/1→1 — 缺 merge_preserved 必须拒写且【零新增行】)"
+  echo "selfcheck: ac258(negative, install_scope omitted) refused=$ac258_neg_scope (expect 1 — 缺 install_scope 必须拒写)"
+  [ "$ac258_pos_w" = "1" ] || fail="$fail AC258-positive-refused"
+  [ "$ac258_pos_lines" = "1" ] || fail="$fail AC258-positive-wrote-no-line"
+  [ "$ac258_neg_w" = "1" ] || fail="$fail AC258-negative-without-merge-preserved-accepted"
+  [ "$ac258_neg_scope" = "1" ] || fail="$fail AC258-negative-without-install-scope-accepted"
+  [ "$ac258_neg_lines" = "$ac258_pos_lines" ] || fail="$fail AC258-negative-wrote-a-line"
+  # install_scope 必须是 user：**传 project ⇒ 拒写**（这条证明本 AC 的字段不是「随便什么 scope 都收」，
+  # 即 install_scope=user 这个取值在写入期被强制，⛔ 不是一条自报字符串）。
+  local ac258_wrong_scope=0
+  local -a ac258_pj=("${ac258_args[@]}"); ac258_pj[2]="project"
+  write_ac258_record "${ac258_pj[@]}" >/dev/null 2>&1 || ac258_wrong_scope=1
+  echo "selfcheck: ac258(install_scope must be user) wrong-scope-refused=$ac258_wrong_scope (expect 1 — project 取值必须被写入期闸挡住)"
+  [ "$ac258_wrong_scope" = "1" ] || fail="$fail AC258-wrong-install-scope-accepted"
+  # 逐字段：声明 11 个 ⇒ 11 次全拒（硬规则 5b：⛔ 不只测被报出来的那两个）。
+  local ac258_i ac258_refused=0
+  for ac258_i in "${!ac258_args[@]}"; do
+    local -a ac258_mut=("${ac258_args[@]}"); ac258_mut[$ac258_i]=""
+    write_ac258_record "${ac258_mut[@]}" >/dev/null 2>&1 || ac258_refused=$((ac258_refused + 1))
+  done
+  echo "selfcheck: ac258(every-field-enforced) declared=${#ac258_args[@]} each_omitted_refused=$ac258_refused (expect 11/11 — 声明逐字段在写入期被强制)"
+  [ "$ac258_refused" = "${#ac258_args[@]}" ] || fail="$fail AC258-declared-field-not-enforced-at-write-time"
+  # 探测路径负例：两条通道都要挡（⛔ 只挡 marketplace 会让 provider 那条成为绕过口）。
+  local ac258_probe_refused=0
+  local -a ac258_pv=("${ac258_args[@]}"); ac258_pv[6]="/home/yale/quay-verify-upgrade-x.npm/lib/node_modules/quay/plugin"
+  write_ac258_record "${ac258_pv[@]}" >/dev/null 2>&1 || ac258_probe_refused=$((ac258_probe_refused + 1))
+  local -a ac258_pp=("${ac258_args[@]}"); ac258_pp[7]="/tmp/probe/native"
+  write_ac258_record "${ac258_pp[@]}" >/dev/null 2>&1 || ac258_probe_refused=$((ac258_probe_refused + 1))
+  echo "selfcheck: ac258(probe-path-negatives) refused=$ac258_probe_refused/2 (expect 2/2 — 两条路径通道的探测模式字面都必须被写入期闸挡住)"
+  [ "$ac258_probe_refused" = "2" ] || fail="$fail AC258-probe-path-accepted"
+
+  # (2) 非 quay 键集读取器（ac258_nonkay_keyset）—— merge_preserved 读数①的产生处。
+  # 它必须同时能取两个方向：**摘掉 quay 那条 ⇒ 不变**（正例，这正是「替换一条、其它保留」），
+  # **摘掉一条非 quay 的 ⇒ 必须变**（负例）。⛔ 少任何一个方向它都不是测量：只会「不变」的实现
+  # （如返回常量）会让 merge_preserved 结构上不可能取假（硬规则 4）。
+  local ac258_ks="$t/ac258-ks" ac258_ks_a="" ac258_ks_b="" ac258_ks_c=""
+  mkdir -p "$ac258_ks"
+  printf '%s\n' '{"agentPushNotifEnabled":true,"model":"m","extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"manda":{"source":{"path":"/srv/manda"}},"quay":{"source":{"path":"/srv/quay-probe"}}},"enabledPlugins":{"baime@baime":true,"manda@manda":true,"quay@quay":true}}' > "$ac258_ks/settings.json"
+  ac258_ks_a="$(ac258_nonkay_keyset "$ac258_ks/settings.json" 2>/dev/null || true)"
+  printf '%s\n' '{"agentPushNotifEnabled":true,"model":"m","extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"manda":{"source":{"path":"/srv/manda"}}},"enabledPlugins":{"baime@baime":true,"manda@manda":true}}' > "$ac258_ks/settings.json"
+  ac258_ks_b="$(ac258_nonkay_keyset "$ac258_ks/settings.json" 2>/dev/null || true)"
+  printf '%s\n' '{"agentPushNotifEnabled":true,"model":"m","extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/srv/quay-probe"}}},"enabledPlugins":{"baime@baime":true,"quay@quay":true}}' > "$ac258_ks/settings.json"
+  ac258_ks_c="$(ac258_nonkay_keyset "$ac258_ks/settings.json" 2>/dev/null || true)"
+  local ac258_ks_same=0 ac258_ks_diff=0
+  [ -n "$ac258_ks_a" ] && [ "$ac258_ks_a" = "$ac258_ks_b" ] && ac258_ks_same=1
+  [ -n "$ac258_ks_a" ] && [ "$ac258_ks_a" != "$ac258_ks_c" ] && ac258_ks_diff=1
+  echo "selfcheck: ac258(non-quay keyset) after-deleting-quay-entry-unchanged=$ac258_ks_same after-deleting-manda-entry-changed=$ac258_ks_diff (expect 1/1 — ⛔ 只证不变会让它退化成常量)"
+  [ "$ac258_ks_same" = "1" ] || fail="$fail AC258-nonkay-keyset-changed-when-only-quay-removed"
+  [ "$ac258_ks_diff" = "1" ] || fail="$fail AC258-nonkay-keyset-constant (删除一条非 quay 条目它也报相同 ⇒ 结构上不可能取假)"
+
+  # (3) install_scope=user 的可核形态读取器（ac258_user_scope_entry）—— 四例，三负一正。
+  local ac258_ip="$t/ac258-ip.json"
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"user","version":"0.3.20","installPath":"/home/u/.claude/plugins/cache/quay/quay/0.3.20"},{"scope":"project","projectPath":"/home/u/ac207-x","version":"0.7.0","installPath":"/srv/quay/0.7.0/lib/node_modules/quay/plugin"},{"scope":"user","version":"0.7.0","installPath":"/home/u/quay-verify-coldstart-root/.claude/plugins/cache/quay/quay/0.7.0"},{"scope":"user","version":"0.7.0","installPath":"/srv/quay/0.7.0/lib/node_modules/quay/plugin"}]}}' > "$ac258_ip"
+  local ac258_us_hit="" ac258_us_oldver=0 ac258_us_projscope=0 ac258_us_probe=0
+  ac258_us_hit="$(ac258_user_scope_entry "$ac258_ip" "0.7.0" 'quay@quay' 2>/dev/null || true)"
+  ac258_user_scope_entry "$ac258_ip" "9.9.9" 'quay@quay' >/dev/null 2>&1 && ac258_us_oldver=1 || ac258_us_oldver=0
+  # project-scope 条目即使 version/路径都对也【不】算 —— 它带 projectPath，是另一条通道的读数。
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"project","projectPath":"/home/u/proj","version":"0.7.0","installPath":"/srv/quay/0.7.0/lib/node_modules/quay/plugin"}]}}' > "$ac258_ip.proj"
+  ac258_user_scope_entry "$ac258_ip.proj" "0.7.0" 'quay@quay' >/dev/null 2>&1 && ac258_us_projscope=1 || ac258_us_projscope=0
+  # scope:user ∧ version 对 ∧ installPath 命中探测模式 ⇒ 拒（这正是本 AC 要消灭的形态）。
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"user","version":"0.7.0","installPath":"/home/u/quay-verify-upgrade-x.npm/lib/node_modules/quay/plugin"}]}}' > "$ac258_ip.probe"
+  ac258_user_scope_entry "$ac258_ip.probe" "0.7.0" 'quay@quay' >/dev/null 2>&1 && ac258_us_probe=1 || ac258_us_probe=0
+  echo "selfcheck: ac258(user-scope entry) hit='$(printf '%s' "$ac258_us_hit" | cut -c1-80)' (expect 命中【持久路径】那条，⛔ 不是先出现的 0.3.20 那条)"
+  echo "selfcheck: ac258(user-scope entry negatives) wrong-version-accepted=$ac258_us_oldver project-scope-accepted=$ac258_us_projscope probe-installPath-accepted=$ac258_us_probe (expect 0/0/0)"
+  case "$ac258_us_hit" in
+    *'"/srv/quay/0.7.0/lib/node_modules/quay/plugin"'*) ;;
+    *) fail="$fail AC258-user-scope-entry-missed-the-persistent-one" ;;
+  esac
+  [ "$ac258_us_oldver" = "0" ] || fail="$fail AC258-user-scope-entry-accepted-wrong-version"
+  [ "$ac258_us_projscope" = "0" ] || fail="$fail AC258-user-scope-entry-accepted-project-scope"
+  [ "$ac258_us_probe" = "0" ] || fail="$fail AC258-user-scope-entry-accepted-probe-installPath"
+  # ⚠️ 上面四个负例【单独】不足：一个「永远读不出」的实现（例如 argv 下标错位）会让它们全部「通过」，
+  # 因为非零退出码无法区分 1（查过、没有）与 2（读不懂）。⇒ 三态必须【分别】取到：命中=0 / 无合格条目=1 /
+  # 读不懂=2。这条控制正是本轮抓到那个真实缺陷的那一条（`hit=''` 时它在下面第三条上红）。
+  local ac258_rc_hit=9 ac258_rc_none=9 ac258_rc_bad=9
+  ac258_user_scope_entry "$ac258_ip" "0.7.0" 'quay@quay' >/dev/null 2>&1; ac258_rc_hit=$?
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"project","projectPath":"/p","version":"0.7.0","installPath":"/srv/quay/plugin"}]}}' > "$ac258_ip.none"
+  ac258_user_scope_entry "$ac258_ip.none" "0.7.0" 'quay@quay' >/dev/null 2>&1; ac258_rc_none=$?
+  printf '%s\n' '{"version":2,"plugins":' > "$ac258_ip.bad"
+  ac258_user_scope_entry "$ac258_ip.bad" "0.7.0" 'quay@quay' >/dev/null 2>&1; ac258_rc_bad=$?
+  echo "selfcheck: ac258(user-scope entry three states) hit_rc=$ac258_rc_hit none_rc=$ac258_rc_none unreadable_rc=$ac258_rc_bad (expect 0/1/2 — 三态可分；⛔ 把「读不懂」与「查过没有」压成同一个非零会让上面三条负例全部空转)"
+  [ "$ac258_rc_hit" = "0" ] || fail="$fail AC258-user-scope-entry-positive-rc-not-zero"
+  [ "$ac258_rc_none" = "1" ] || fail="$fail AC258-user-scope-entry-not-three-state (查过没有 应=1)"
+  [ "$ac258_rc_bad" = "2" ] || fail="$fail AC258-user-scope-entry-not-three-state (读不懂 应=2)"
+
+  # (4) 三处删键（ac258_delete_registrations）—— 枚举面必须真的覆盖三处，且删前条数可读。
+  # ⛔ 只删一处是这个缺陷本身的形态（硬规则 5b）：本组三处【各自】断言归零，任一处漏删即红。
+  local ac258_del="$t/ac258-del" ac258_del_out="" ac258_del_rc=0 ac258_del_set_same=0
+  mkdir -p "$ac258_del/.claude/plugins"
+  printf '%s\n' '{"agentPushNotifEnabled":true,"extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}},"enabledPlugins":{"baime@baime":true,"quay@quay":true}}' > "$ac258_del/.claude/settings.json"
+  printf '%s\n' '{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}}' > "$ac258_del/.claude/plugins/known_marketplaces.json"
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"user","version":"0.3.20","installPath":"/home/u/.claude/plugins/cache/quay/quay/0.3.20"},{"scope":"project","projectPath":"/home/u/ac207-x","version":"0.3.20","installPath":"/home/u/.claude/plugins/cache/quay/quay/0.3.20"}],"baime@baime":[{"scope":"user","version":"1.4.0"}]}}' > "$ac258_del/.claude/plugins/installed_plugins.json"
+  local ac258_del_set_before=""
+  ac258_del_set_before="$(ac258_nonkay_keyset "$ac258_del/.claude/settings.json" 2>/dev/null || true)"
+  set +e
+  ac258_del_out="$(ac258_delete_registrations "$ac258_del" 2>/dev/null)"
+  ac258_del_rc=$?
+  set -e
+  local ac258_left_ekm=1 ac258_left_km=1 ac258_left_ip=1
+  printf '%s' "$(cat "$ac258_del/.claude/settings.json")" | grep -q '"quay"' && ac258_left_ekm=1 || ac258_left_ekm=0
+  grep -q '"quay"' "$ac258_del/.claude/plugins/known_marketplaces.json" && ac258_left_km=1 || ac258_left_km=0
+  grep -q '"quay@quay"' "$ac258_del/.claude/plugins/installed_plugins.json" && ac258_left_ip=1 || ac258_left_ip=0
+  local ac258_del_set_after=""
+  ac258_del_set_after="$(ac258_nonkay_keyset "$ac258_del/.claude/settings.json" 2>/dev/null || true)"
+  [ -n "$ac258_del_set_before" ] && [ "$ac258_del_set_before" = "$ac258_del_set_after" ] && ac258_del_set_same=1
+  echo "selfcheck: ac258(delete three places) rc=$ac258_del_rc readings=$ac258_del_out"
+  echo "selfcheck: ac258(delete three places) quay-left: settings=$ac258_left_ekm known_marketplaces=$ac258_left_km installed_plugins=$ac258_left_ip non-quay-keyset-preserved=$ac258_del_set_same (expect 0/0/0/1 — 三处【各自】归零，且只摘 quay 那一条)"
+  [ "$ac258_del_rc" = "0" ] || fail="$fail AC258-delete-three-places-rc"
+  [ "$ac258_left_ekm" = "0" ] || fail="$fail AC258-delete-left-quay-in-settings"
+  [ "$ac258_left_km" = "0" ] || fail="$fail AC258-delete-left-quay-in-known-marketplaces"
+  [ "$ac258_left_ip" = "0" ] || fail="$fail AC258-delete-left-quay-in-installed-plugins"
+  [ "$ac258_del_set_same" = "1" ] || fail="$fail AC258-delete-disturbed-non-quay-keyset"
+  # 零计数方向（硬规则 ② 的后半）：对一个【本来就没有 quay 注册】的样本，读数必须报 0 而【不是】
+  # 报「读不出」——两者在调用方是不同分支，若这里同形，生产上「起点本来就没有」会被伪装成删成功。
+  local ac258_del2="$t/ac258-del2" ac258_del2_out=""
+  mkdir -p "$ac258_del2/.claude/plugins"
+  printf '%s\n' '{"extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}}}}' > "$ac258_del2/.claude/settings.json"
+  printf '%s\n' '{"baime":{"source":{"path":"/srv/baime"}}}' > "$ac258_del2/.claude/plugins/known_marketplaces.json"
+  printf '%s\n' '{"version":2,"plugins":{}}' > "$ac258_del2/.claude/plugins/installed_plugins.json"
+  ac258_del2_out="$(ac258_delete_registrations "$ac258_del2" 2>/dev/null || echo '<rc-nonzero>')"
+  echo "selfcheck: ac258(delete on a quay-free sample) readings=$ac258_del2_out (expect installed_quay_before:0 — 「本来就没有」必须报 0，⛔ 不与「读不出」同形)"
+  case "$ac258_del2_out" in
+    *'"installed_quay_before":0'*) ;;
+    *) fail="$fail AC258-quay-free-sample-did-not-report-zero" ;;
+  esac
+
+  # (5) 前置探测（gap-ac258-pipeline-destructive-steps-before-worker-preflight 的产物）——
+  #     判据是「探测失败 ⇒ 一个破坏性步骤都不执行」，所以夹具必须给出【两个方向】：
+  #       方向 A：探测失败 ⇒ 停在门口，三处注册 md5 逐字不变（①②③ 一次都没发生）；
+  #       方向 B：同一夹具把探测改成可用 ⇒ 流程**必须继续进入 ①②③**（否则方向 A 会被一个
+  #               「恒退出、什么都做不成」的实现平凡满足 —— 硬规则 4：能取假的量才是测量）。
+  #     ⚠️ 方向 A 的两个断言（rc≠0 ∧ md5 不变）**单独不够**：任何在门口因别的原因退出的实现都满足
+  #     它们。所以还要断言【退出理由就是那条探测】，且方向 B 里那三步【真的发生了】。
+  #     三个失败态（credentials / absent / timeout）也在这里各取一条原样输出：AC3 要求它们可分，
+  #     而「可分」只有在真的拿到三条【不同】输出时才算取到（⛔ 不是代码里写了三行就算）。
+  local ac258_pf="$t/ac258-preflight" ac258_pf_a_rc=0 ac258_pf_a_out="" ac258_pf_b_rc=0 ac258_pf_b_out=""
+  local ac258_pf_md5_before="" ac258_pf_md5_after=""
+  local ac258_pf_cred="" ac258_pf_absent="" ac258_pf_timeout="" ac258_pf_usable=""
+  mkdir -p "$ac258_pf/.claude/plugins" "$ac258_pf/bin"
+  # 起点态：三处注册都指向【探测路径】—— 正是 AC-258 判据要的那个起点，也正是 ①②③ 会吃掉的东西。
+  printf '%s\n' '{"agentPushNotifEnabled":true,"extraKnownMarketplaces":{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}},"enabledPlugins":{"baime@baime":true,"quay@quay":true}}' > "$ac258_pf/.claude/settings.json"
+  printf '%s\n' '{"baime":{"source":{"path":"/srv/baime"}},"quay":{"source":{"path":"/home/u/quay-verify-x.npm/plugin"}}}' > "$ac258_pf/.claude/plugins/known_marketplaces.json"
+  printf '%s\n' '{"version":2,"plugins":{"quay@quay":[{"scope":"user","version":"0.3.20","installPath":"/home/u/.claude/plugins/cache/quay/quay/0.3.20"}]}}' > "$ac258_pf/.claude/plugins/installed_plugins.json"
+  # claude 替身：夹具要的是「`claude -p` 返回非 0」这一件事，⛔ 不换判定逻辑（退出码分类与超时照走）。
+  printf '#!/bin/sh\necho "Failed to authenticate: OAuth session expired and could not be refreshed" >&2\nexit 1\n' > "$ac258_pf/bin/claude-fail"
+  printf '#!/bin/sh\necho ok\n' > "$ac258_pf/bin/claude-ok"
+  chmod +x "$ac258_pf/bin/claude-fail" "$ac258_pf/bin/claude-ok"
+  ac258_pf_md5_before="$(md5sum "$ac258_pf/.claude/settings.json" "$ac258_pf/.claude/plugins/known_marketplaces.json" "$ac258_pf/.claude/plugins/installed_plugins.json" | md5sum)"
+
+  # ── 三个失败态各自取值（AC3：可分）──────────────────────────────────────────────────────
+  set +e
+  ac258_pf_cred="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-fail -p \"say ok\""; ac258_worker_preflight 2>&1 )"
+  ac258_pf_absent="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="ac258-probe-binary-that-does-not-exist -p ok"; ac258_worker_preflight 2>&1 )"
+  ac258_pf_timeout="$( export HOME="$ac258_pf" QUAY_AC258_PROBE_TIMEOUT_SECS=1 QUAY_AC258_WORKER_PROBE_CMD="sleep 30"; ac258_worker_preflight 2>&1 )"
+  ac258_pf_usable="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-ok -p \"say ok\""; ac258_worker_preflight 2>&1 )"
+  # ── 方向 A：探测失败 ⇒ 一个破坏性步骤都不许发生 ─────────────────────────────────────────
+  ac258_pf_a_out="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-fail -p \"say ok\""; step_ac258_user_scope "/srv/proj" "/srv/plugin" "/srv/quay" "TID" "" "$ac258_pf/missing.tgz" "" "/home/u/.local/opt/quay/0.7.0" 2>&1 )"
+  ac258_pf_a_rc=$?
+  set -e
+  ac258_pf_md5_after="$(md5sum "$ac258_pf/.claude/settings.json" "$ac258_pf/.claude/plugins/known_marketplaces.json" "$ac258_pf/.claude/plugins/installed_plugins.json" | md5sum)"
+  echo "selfcheck: ac258(worker preflight verdicts) credentials='${ac258_pf_cred:0:70}' absent='${ac258_pf_absent:0:70}' timeout='${ac258_pf_timeout:0:70}' usable='${ac258_pf_usable:0:70}'"
+  echo "selfcheck: ac258(preflight failure ⇒ zero destructive steps) rc=$ac258_pf_a_rc md5-unchanged=$([ "$ac258_pf_md5_before" = "$ac258_pf_md5_after" ] && echo 1 || echo 0) quay-still-registered=$(grep -q '"quay"' "$ac258_pf/.claude/settings.json" && echo 1 || echo 0)"
+  case "$ac258_pf_a_out" in
+    *'AC258-PREFLIGHT credentials'*) ;;
+    *) fail="$fail AC258-preflight-failure-not-attributed-to-the-probe" ;;
+  esac
+  case "$ac258_pf_a_out" in
+    *'一个破坏性步骤都没有执行'*) ;;
+    *) fail="$fail AC258-preflight-abort-did-not-say-no-destructive-step-ran" ;;
+  esac
+  [ "$ac258_pf_a_rc" != "0" ] || fail="$fail AC258-preflight-failure-did-not-stop"
+  [ "$ac258_pf_md5_before" = "$ac258_pf_md5_after" ] || fail="$fail AC258-preflight-failure-touched-the-start-state"
+  grep -q '"quay"' "$ac258_pf/.claude/settings.json" || fail="$fail AC258-preflight-failure-ate-its-own-starting-point"
+  # ── 方向 B：同一夹具，探测可用 ⇒ 流程必须继续进入 ①②③（否则方向 A 平凡成立）──────────────
+  set +e
+  ac258_pf_b_out="$( export HOME="$ac258_pf" QUAY_AC258_WORKER_PROBE_CMD="$ac258_pf/bin/claude-ok -p \"say ok\""; step_ac258_user_scope "/srv/proj" "/srv/plugin" "/srv/quay" "TID" "" "$ac258_pf/missing.tgz" "" "/home/u/.local/opt/quay/0.7.0" 2>&1 )"
+  ac258_pf_b_rc=$?
+  set -e
+  echo "selfcheck: ac258(preflight pass ⇒ flow enters ①②③) rc=$ac258_pf_b_rc delete-ran=$(grep -q '"quay"' "$ac258_pf/.claude/settings.json" && echo 0 || echo 1) (expect delete-ran=1：探测通过后 ① 真的执行了；rc 非 0 是因为夹具的 tgz 不存在，流程停在 ② 的入口)"
+  case "$ac258_pf_b_out" in
+    *'[⑩c] DELETE'*) ;;
+    *) fail="$fail AC258-preflight-pass-did-not-enter-the-destructive-sequence" ;;
+  esac
+  grep -q '"quay"' "$ac258_pf/.claude/settings.json" && fail="$fail AC258-preflight-pass-never-executed-step-1"
+  # 四态互不相同 —— ⛔ 「不与探测通过共用同一个结构」（硬规则 3b）。
+  local ac258_v_cred ac258_v_absent ac258_v_timeout ac258_v_usable
+  ac258_v_cred="$(printf '%s' "$ac258_pf_cred" | awk '{print $2}')"
+  ac258_v_absent="$(printf '%s' "$ac258_pf_absent" | awk '{print $2}')"
+  ac258_v_timeout="$(printf '%s' "$ac258_pf_timeout" | awk '{print $2}')"
+  ac258_v_usable="$(printf '%s' "$ac258_pf_usable" | awk '{print $2}')"
+  echo "selfcheck: ac258(preflight verdict vocabulary) credentials=$ac258_v_cred absent=$ac258_v_absent timeout=$ac258_v_timeout usable=$ac258_v_usable (expect 4 distinct — 没有独立取值的判定无法区分「查过且合格」与「没查成」)"
+  [ "$ac258_v_cred" = "credentials" ] || fail="$fail AC258-preflight-credential-verdict-missing"
+  [ "$ac258_v_absent" = "absent" ] || fail="$fail AC258-preflight-absent-verdict-not-distinct"
+  [ "$ac258_v_timeout" = "timeout" ] || fail="$fail AC258-preflight-timeout-verdict-not-distinct"
+  [ "$ac258_v_usable" = "usable" ] || fail="$fail AC258-preflight-usable-verdict-missing"
+  [ "$ac258_v_cred" != "$ac258_v_usable" ] || fail="$fail AC258-preflight-failure-shares-the-passing-structure"
+  [ "$ac258_v_absent" != "$ac258_v_cred" ] || fail="$fail AC258-preflight-absent-conflated-with-credentials"
+  [ "$ac258_v_timeout" != "$ac258_v_cred" ] || fail="$fail AC258-preflight-timeout-conflated-with-credentials"
+
+  AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
+
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
   # 把内存里的声明删掉一个【判据确实在读】的字段（AC-247 的 carrier_records）⇒ 报告必须取 DRIFT
   # 且点名该字段 + 退出非 0。⛔ 这是 AC1 的可失败控制：一个永远打印 ok 的检查不是测量（硬规则 4），
@@ -7135,6 +8149,54 @@ if [ "$AC257_PROJECT_SCOPE" = 1 ]; then
   echo ""
   echo "AC257_MERGE_PRESERVED=$AC257_MERGE_PRESERVED ($AC257_MERGE_NOTE)" >&2
   echo "verify-deliver-coldstart: FAIL (AC-257 记录未落账 —— 缺一条读数即不写，⛔ 不静默当成功)" >&2
+  exit 1
+fi
+
+# ── AC-258 user-scope 模式（GOAL-018）────────────────────────────────────────────────────────
+# 与 AC-257 同一纪律、同一组 choke point，被测对象不同：本模式观测的是**目标机上 user scope 的 quay
+# 注册本身**（三处枚举 + install_scope=user 的可核形态），而 AC-257 观测的是**某个项目里的**项目级安装
+# 与 settings.json 合并语义。plugin_root 由脚本自身位置推出（本脚本住在 <plugin>/scripts/ 下）。
+if [ "$AC258_USER_SCOPE" = 1 ]; then
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
+  if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
+  if [ -n "$AC248_ROOT" ]; then ROOT="$AC248_ROOT"; fi
+  if [ -n "$AC258_PLUGIN_ROOT_ARG" ]; then
+    AC258_PLUGIN_ROOT="$AC258_PLUGIN_ROOT_ARG"
+  else
+    AC258_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  fi
+  AC258_QRL="$(ac257_delivery_cli "$AC258_PLUGIN_ROOT" 2>/dev/null || true)"
+  [ -n "$AC258_QRL" ] || AC258_QRL="${AC258_PLUGIN_ROOT}/../bin/quay"
+  echo "== verify-deliver-coldstart (AC-258 user-scope 模式) =="
+  echo "ts=$TS | ac89=$AC89 | root=${ROOT:-<unset>} | plugin_root=$AC258_PLUGIN_ROOT | cli=$AC258_QRL"
+  if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+    echo "AC258-NOT-EVALUATED: --target-root 不是目录: ${ROOT:-<empty>} ⇒ 记录 NOT written (fail-closed)" >&2
+    exit 1
+  fi
+  # ⚠️ 这里【不】对 $AC258_QRL 做存在性 fail-closed：它指向的是**本模式自己即将安装的**交付物
+  # （<persistent prefix>/lib/node_modules/quay/dist/quay.js），安装发生在 step_ac258_user_scope 的
+  # 第 (c) 步 ⇒ 此刻它按定义还不存在。真正的解析与检查在安装之后（该函数内），⛔ 不在这里门口判。
+  echo "AC258_CLI_CANDIDATE=$AC258_QRL (resolved after install inside the step — ⛔ 此刻按定义不存在)"
+  if step_ac258_user_scope "$ROOT" "$AC258_PLUGIN_ROOT" "$AC258_QRL" "$AC258_TASK_ID_ARG" "$AC258_TASK_BODY" \
+       "$AC258_TGZ_ARG" "$AC258_QN_TGZ_ARG" "$AC258_PREFIX_ARG"; then
+    echo ""
+    echo "AC258_HOST=$AC258_HOST"
+    echo "AC258_PROJECT_ROOT=$AC258_PROJECT_ROOT"
+    echo "AC258_INSTALL_SCOPE=$AC258_INSTALL_SCOPE"
+    echo "AC258_QUAY_VERSION=$AC258_QUAY_VERSION"
+    echo "AC258_QUAY_INIT_RERUN=$AC258_QUAY_INIT_RERUN"
+    echo "AC258_MERGE_PRESERVED=$AC258_MERGE_PRESERVED ($AC258_MERGE_NOTE)"
+    echo "AC258_MARKETPLACE_PATH=$AC258_MARKETPLACE_PATH"
+    echo "AC258_KNOWN_MARKETPLACE_PATH=$AC258_KNOWN_MARKETPLACE_PATH"
+    echo "AC258_PROVIDER_PATH=$AC258_PROVIDER_PATH"
+    echo "AC258_TASK_ID=$AC258_TASK_ID status=$AC258_TASK_STATUS commit_sha=$AC258_COMMIT_SHA"
+    echo "AC258_WRITTEN_THIS_RUN=$AC258_WRITTEN_THIS_RUN"
+    exit 0
+  fi
+  echo ""
+  echo "AC258_MERGE_PRESERVED=$AC258_MERGE_PRESERVED ($AC258_MERGE_NOTE)" >&2
+  echo "verify-deliver-coldstart: FAIL (AC-258 记录未落账 —— 缺一条读数即不写，⛔ 不静默当成功)" >&2
   exit 1
 fi
 
