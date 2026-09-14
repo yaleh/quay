@@ -75,3 +75,11 @@ ADR-005（`adr/ADR-005-verification-is-the-binding-constraint.md`）主张「稀
 - session_id：c527bfa3-2b79-40a6-8a04-1d0db6860362
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-cost-per-defect-caught-verification-marginal-return~wk-prod-1789367589~1789422155572-ef28b1.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-cost-per-defect-caught-verification-marginal-return-wk-prod-1789367589.log
+
+## Resolution note (追加, 由另一会话诊断)
+
+**2026-09-14T22:0xZ** — 上面这条 needs-human 的成因描述有误：这不是「归因不出任何失败测试文件」的基建/契约疑似问题，而是一个可精确归因的静态检查器红：`kernel-sibling-resolution-check` 在本任务自己新增的 `plugin/scripts/verification-marginal-return.ts:839` 上报了一处未豁免的 naive kernel-sibling 解析（`path.join(root, "plugin", "scripts", "runner-static-gate.ts")`，target-root 形）。
+
+已直接在本任务自己的 worktree/分支（`task/gap-cost-per-defect-caught-verification-marginal-return`）上按本仓库已有的同形先例（`axis-generator.ts` / `guard-lineage-check.ts` / `precommit-guard.ts` / `rhythm-consumer-check.ts` / `quality-gate-driver.ts` 等 ~10 处）加上检查器自己文档化的豁免标记 `kernel-sibling-dev-tree-only`（本脚本只分析本仓库自己的载体，从不对第三方项目的 root 做 sibling 解析，属同一豁免前提），commit `a324daa01`。已直接跑该检查器验证：`status: pass, violations: []`（修复前为 exit 1）。
+
+未做的事：未改动本任务其它任何 AC 的实现或结论，未重跑完整套件（那是下一次派发的常规工作），未改变 needs_human_cause 分类字段本身（成因文字已在此说明，供下一位处置者/worker 参考）。
