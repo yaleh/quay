@@ -776,6 +776,37 @@ test("AC3: the SHIPPED entry's default doc-branch name is 'author' (no --doc-bra
   assert.equal(git(dir, ["rev-parse", "author"]), beforeDevelop, "created at the baseline tip");
 });
 
+test("AC3: a project's `loop.doc_branch` overrides the default (the config-default half)", () => {
+  // The Plan's "名字来自 --doc-branch-name CLI 参数**或** .quay/config.yml 配置项" — the second
+  // source, pinned here rather than left to a manual probe. Precedence: flag > config > default.
+  if (!fs.existsSync(VENDORED_CLI)) return;
+  const dir = onDevelopRepo("docb-config-name");
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\nloop:\n  board: native\n  gates: [acceptance]\n  doc_branch: fromcfg\n",
+  );
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  let exitCode = 0;
+  try {
+    execFileSync(
+      "bash",
+      [SHIPPED_INIT, "--root", dir, "--repo-root", dir, "--worktree-root", `${dir}-worktrees`, "--auto-commit-skip"],
+      { encoding: "utf8", cwd: dir },
+    );
+  } catch (err) {
+    exitCode = err.status ?? 1;
+  }
+
+  assert.equal(exitCode, 0);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "fromcfg", "the project's own name wins over the default");
+  assert.equal(git(dir, ["rev-parse", "fromcfg"]), beforeDevelop);
+  assert.equal(git(dir, ["branch", "--list", "author"]), "", "the default must not also be created");
+});
+
 test("AC3: the default literal did not turn target-identity-literal-check RED", () => {
   // The direct executable check of the reconciliation: the name default is allowed to EXIST (in the
   // CLI-parameter / config-default layer) without the protocol whitelist being widened. ⛔ Dropping
