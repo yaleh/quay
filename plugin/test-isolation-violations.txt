@@ -104,8 +104,6 @@ packages/quay-native/test/cas-write.test.mjs:fixed-path-write
 packages/quay-native/test/cas-write.test.mjs:process-exit-1
 packages/quay-native/test/compound-gate-recursive.test.mjs:fixed-path-write
 packages/quay-native/test/compound-gate.test.mjs:fixed-path-write
-packages/quay-native/test/create-validation.test.mjs:fixed-path-write
-packages/quay-native/test/create-validation.test.mjs:process-exit-1
 packages/quay-native/test/edit-validation.test.mjs:fixed-path-write
 packages/quay-native/test/edit-validation.test.mjs:process-exit-1
 packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write

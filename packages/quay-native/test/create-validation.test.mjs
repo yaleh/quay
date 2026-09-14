@@ -227,7 +227,10 @@ async function run() {
 
   if (failures > 0) {
     console.error(`\n${failures} assertion(s) failed.`);
-    process.exit(1);
+    // R4 of the test-isolation contract: process.exitCode, never process.exit(1) —
+    // exit() can drop async stderr writes under a POSIX pipe, which is how
+    // relation-sync's suite-red went silent. The process still exits non-zero.
+    process.exitCode = 1;
   } else {
     console.log("\nAll create-validation tests passed (QN-025 + duplicate-id fail-closed, both front doors).");
   }
