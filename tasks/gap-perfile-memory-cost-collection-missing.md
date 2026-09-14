@@ -54,9 +54,10 @@ extra:
 - plugin/test/measure-trend-check.test.mjs（新旧行形解析 + 缺席非 0）
 - plugin/test/full-suite-runner.test.mjs（writer 之一带该字段）
 - plugin/test/pre-verified-round-record.test.mjs（writer 之二带该字段）
+- plugin/test/driver-anchor.test.mjs（**⛔ 非本任务 delta**：落地时修掉的 suite-red 阻塞——夹具的 fake driver 必须 import anchor 实际加载的那份 kernel，否则停机登记表分裂；机制、两向对照与边界见下方 Evidence 的「落地时修掉的 suite-red 阻塞」一节）
 - tasks/gap-perfile-memory-cost-collection-missing.md（自身）
 
-**⚠️ 本清单已按实现核实改写**：原文列的 `plugin/test/measure-suite.test.mjs` **在仓库里不存在**（撰写时按"机制自己的测试落在哪些文件"猜的，任务体自己就写明需实现者核实）。实测该机制的测试落在 `measure-suite-reporter.test.mjs`（preload seam 的接线 + 行形）与 `suite-scheduler.test.mjs`（调度器发射），这两份都在原文清单里；本次实际改动的是上面这 11 个文件 + 自身任务体。
+**⚠️ 本清单已按实现核实改写**：原文列的 `plugin/test/measure-suite.test.mjs` **在仓库里不存在**（撰写时按"机制自己的测试落在哪些文件"猜的，任务体自己就写明需实现者核实）。实测该机制的测试落在 `measure-suite-reporter.test.mjs`（preload seam 的接线 + 行形）与 `suite-scheduler.test.mjs`（调度器发射），这两份都在原文清单里；本次实际改动的是上面这 12 个文件 + 自身任务体。
 
 ## Acceptance Criteria
 
@@ -142,3 +143,25 @@ bash scripts/test.sh --for-task gap-perfile-memory-cost-collection-missing --all
 
 1. **`QUAY_PLUGIN_ROOT` 会让 runner 的 per-file 采集指向主检出**：worker 环境导出 `QUAY_PLUGIN_ROOT=<主检出>/plugin`，而 `full-suite-runner.ts` 的 `PER_FILE_CPU_PRELOAD = resolveKernelPluginRoot()/scripts/per-file-cpu-report.mjs` **优先读它** ⇒ 从 worktree 起的 runner 会把**主检出那份**（改动未落地时 = 旧代码）preload 烘进 `NODE_OPTIONS`。实测：第一次证据轮 6 条真实 `__PERFILE__` 行**全部只有 `cpu_ms=` 而没有 `mem_peak_kb=`**，看起来像"新字段没接上"；`env -u QUAY_PLUGIN_ROOT` 后同一条命令立刻恢复 654/654。**这不是本改动引入的**（`resolveKernelPluginRoot` 是既有机制），但它会让任何"在 worktree 里验一个 preload 改动"的尝试跑成假阴性。**⇒ 生产上这个字段同样要等主检出那份同步到本改动之后才会亮**（author↔develop 同步链），与 sibling 的 `cpu_ms` 同一个前提。
 2. **`--for-task`/`--scoped` 路径结构上不接 per-file 成本采集**：`scripts/test.sh` 的该分支直接 `node --test <files>`，既没有 `$(suite_reporter_flags)` 也没有调度器 ⇒ **不可能**产出 `__PERFILE__`。用它取证会得到"0 条"并误判为"字段没接上"（第一次尝试就是这样，0 条）。取证必须走全量/分组路径（或直接调调度器）。
+
+### 落地时修掉的 suite-red 阻塞（⛔ 非本任务 delta，如实划界）
+
+本任务前两轮 `exited-not-landed` 都停在 `step=suite`，失败断言是 `stop --kind goal` / `stop --kind worker`（`plugin/test/driver-anchor.test.mjs`）。**如实说明：这是本任务 delta 之外的既有缺陷**，两条独立证据：
+
+1. `plugin/test/driver-anchor.test.mjs`、`plugin/scripts/driver-runtime.ts`、`plugin/scripts/driver-anchor.ts` 在本分支与 develop **逐字相同**（`git diff HEAD develop -- <三者>` 为空），且 `driver-runtime.ts` 不 import 本任务改动的任何文件（一跳 import 无交集）。
+2. 单跑即复现（⛔ 不是负载 flake）：`env -u QUAY_PLUGIN_ROOT node --test plugin/test/driver-anchor.test.mjs` ⇒ 两条断言各等满 60s 后失败（62325ms / 65321ms）。
+
+**真因（实测，非推测）**：anchor 进程经 `preferredAnchorKernel()` **优先主检出**的内核（AC-184/AC-255 的设计：常驻 anchor 的生存期⛔ 不绑在短命 worktree 路径上），而停机登记表（`registerKindStop`/`requestKindStop`）是**模块级**的（`driver-anchor.ts` 头注释：「在本进程里只有一个模块实例，登记表才与各 kind 看到的是同一张」）。夹具原本硬编码 import worktree 那份 `driver-runtime` ⇒ anchor 与夹具各持一张**独立登记表** ⇒ `requestKindStop(kind)` 置的不是该 kind 读的那个标志 ⇒ `stop --kind X` 永远等不到收尾，等满 60s 后 exit 1 —— 与「该 kind 的循环真的挂了」**同形**（硬规则 3b 的同形异因）。故本文件在**任何 worktree** 里都是确定性红，这正是前两轮卡的同一个点。
+
+**两向对照（同一棵树，只改夹具那一行 import）**：
+
+| 夹具 import 哪份 kernel | AC3①（`stop --kind goal`） | AC6（`stop --kind worker`） |
+|---|---|---|
+| worktree 那份（原状） | 62325 ms / **FAIL** | 65321 ms / **FAIL** |
+| 主检出那份（= anchor 实际加载的） | 2739 ms / **PASS** | 6784 ms / **PASS** |
+
+**改法**：`DRIVER_RUNTIME_ABS` 由 `preferredAnchorKernel()` 派生（+ 存在性断言，⛔ 不静默回退到一个自造路径 —— 硬规则 3b）。修后整文件 `EXIT=0`，6/6 全绿（提交 `d29592113`）。
+
+**⚠️ 如实标注该修法的边界（⛔ 不声称它做不到的事）**：本文件因此验的是 anchor **实际加载的那份**内核 —— 在 worktree 里 = 主检出那份 ⇒ **worktree 中对 anchor 内核本身的改动不会被本文件验到**（`driver-runtime.ts` 的 `preferredAnchorKernel` 注释里已明记该形态「结构上无法自测」）。这是 anchor 形态的性质，⛔ 不是夹具能绕开的，故本修法**不**使 anchor 改动在 worktree 里变得可测。
+
+**同源的生产面风险（本任务⛔ 不修，只记，留给 anchor 归属的任务裁定）**：`spawnAnchor` 透传 `env: process.env`（不剥 `QUAY_PLUGIN_ROOT`），而 `invokeKindDefault` 经 `resolveKernelSibling` 解析 kind 模块（= `$QUAY_PLUGIN_ROOT/scripts` 优先）。⇒ 当 anchor 的内核与 `QUAY_PLUGIN_ROOT` **指向不同的 plugin 目录**时，同一套登记表分裂在**生产**上也会发生（`stop --kind X` 退化成等满 60s 的 no-op，且 `stopKindViaAnchor` 会打 `loop did not stop within 60s` 后返回 1）。常规配置下两者同目录，故未观察到；机制与上面这条完全相同，属 anchor 形态的设计面。

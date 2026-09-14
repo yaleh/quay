@@ -61,19 +61,89 @@ _（本键由 `gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved`
 
 ## Acceptance Criteria
 
-- [ ] AC1：对着当前 `develop`（非假设、非照抄本任务描述）确认根因——闭包推导漏掉 driver-anchor 引用的确切代码位置。
-- [ ] AC2：修复落地为通用形式（闭包推导捕获被漏掉的引用形状本身，不是仅针对文件名的特判补丁）。
-- [ ] AC3：负控制——在修复前的提交上，一次干净的打包+安装副本，`driver start` 可复现地报出本条引用的错误（prefix-swap 式负控制，参照既有先例 `prefix-code-swap-for-red-control`）。
-- [ ] AC4：修复后，一次**真实**全新 npm-pack 安装（隔离副本，非主检出）上 `driver start --kind promotion` 与 `--kind worker` 均 rc=0——真机器读数，不是仅夹具通过（硬规则 4 推论三：只由夹具满足的判据不是生产修复的证据）。
-- [ ] AC5：存在一个能捕获本次缺陷的测试（针对打包产物做真实 driver-start 成功性断言，不是仅文件存在性断言）。
+- [x] AC1：对着当前 `develop`（非假设、非照抄本任务描述）确认根因——闭包推导漏掉 driver-anchor 引用的确切代码位置。
+- [x] AC2：修复落地为通用形式（闭包推导捕获被漏掉的引用形状本身，不是仅针对文件名的特判补丁）。
+- [x] AC3：负控制——在修复前的提交上，一次干净的打包+安装副本，`driver start` 可复现地报出本条引用的错误（prefix-swap 式负控制，参照既有先例 `prefix-code-swap-for-red-control`）。
+- [x] AC4：修复后，一次**真实**全新 npm-pack 安装（隔离副本，非主检出）上 `driver start --kind promotion` 与 `--kind worker` 均 rc=0——真机器读数，不是仅夹具通过（硬规则 4 推论三：只由夹具满足的判据不是生产修复的证据）。
+- [x] AC5：存在一个能捕获本次缺陷的测试（针对打包产物做真实 driver-start 成功性断言，不是仅文件存在性断言）。
 
 ## Definition of Done
 
 真实落地的判据：一次全新的、非主检出的 npm-pack 安装副本上，`quay driver start --kind promotion` 与 `--kind worker` 均 rc=0；且有测试能在修复被回退时重新报红（而不仅仅是"文件存在"这种更弱的信号）。⛔ 不接受：只在主检出或 fixture 内验证通过、不做真实隔离安装验证；只补文件存在性检查而不验证真实启动成功。
 
+## Resolution
+
+**实现（commit `6b1aa601f`，测试补齐 `4c60479be`）**：`packages/quay/scripts/build-plugin-dist.mjs` 新增第 4 种引用形状的扫描
+`scanPluginSiblingReferences()` —— **目录变量**的兄弟拼接 `path.join(<dirExpr>, "<name>.ts")`（及其安装形态孪生
+`"<name>.js"`，反查同名 `.ts`），对**全部** plugin 源码扫描（scripts/ + gate-scripts/，跳过 dist/test/vendor 等构建与夹具目录）。
+`<dirExpr>` 限定为「标识符起头、可选带一次调用」的项（`here` / `SCRIPT_DIR` / `resolveKernelScriptsDir()` / `path.dirname(x)`）
+—— 这正是让规则**零假阳性**的原因：`path.join(root, "plugin", "scripts", "X.ts")` 结构上无法匹配，故此前迫使
+driver-runtime.ts 限定扫描的非模块 readFile 目标（`runner-static-gate.ts`，一个**故意**命名为 `.ts` 的 bash 文件，被当**文本**读）
+不会被拖进来。真正的闭包成员是**形状**而不是文件名：未来任何 `path.join(SOME_DIR, "x.ts")` 都被同一条规则捕获。
+
+**AC1 根因（对着当前 develop 核实，非照抄）**：`plugin/scripts/driver-runtime.ts:833/834/837/838`（`preferredAnchorKernel()`）
+的四处拼接；闭包推导里的四条既有扫描（`PLUGIN_PATH_JOIN_TS_RE` 要求字面量 `"plugin","scripts"`、`PLUGIN_SIBLING_RESOLVER_RE`
+要求 `resolveKernelSibling("…")`、`PLUGIN_DRIVER_FIELD_RE` 要求 `driver: "…"`、`CORE_PATH_JOIN_TS_RE` 只扫 Core src 且要求 `"scripts"`）
+**没有一条**能看见一个「目录变量」的拼接 ⇒ `deriveEntries` 实测 **88** 条、`driver-anchor` **不在其中**。
+
+**AC2 实测（直接量，非代理量）**：`scanPluginSiblingReferences` 在真 plugin 根上命中恰好
+`{driver-anchor.ts, fast-mode-telemetry.ts, ready-pool-check.ts}`（后两者本就是 entry，非新增面）⇒ `deriveEntries` **88 → 89**，
+新增的那一条正是缺陷本身；`runner-static-gate` 仍不在集合里（无假阳性）。`package.sh` 的闭包闸随之**要求**它：
+`dist-closure gate OK: 89 referenced dist bundles all present`，`tar tzf` 里 `scripts/dist/driver-anchor.js` 计数 = 1。
+
+**AC3 prefix-swap 负控制（真打包 + 真安装）**：把 `build-plugin-dist.mjs` 换回修复前那份
+（`git show a742771eb:packages/quay/scripts/build-plugin-dist.mjs`）后重跑 `package.sh`：tarball 里
+`dist/driver-anchor.js` 计数 **0**；装入隔离 prefix 后（`git rev-parse --is-inside-work-tree` ⇒
+`fatal: not a git repository`，确认非主检出）两个 kind 都复现本条引用的错误、rc 均为 1：
+
+```
+start-failed: kind=promotion — cannot spawn driver anchor: driver-anchor module not found next to driver-runtime (<prefix>/lib/node_modules/quay/plugin/scripts/dist)
+PREFIX_PROMOTION_RC=1   |   PREFIX_WORKER_RC=1
+```
+
+随后 `git checkout --` 恢复修复。
+
+**AC4 真机读数（隔离 npm-pack 安装，非主检出）**：修复后的 tarball 装入 `/tmp/quay-install-A-*`（非 git 检出、无 packages/ 源码树）：
+
+```
+PROMOTION_RC=0  started: anchor pid=3636788 kind=promotion driver pid=3636788 confirmed_ms=279
+WORKER_RC=0     started: anchor pid=3636788 kind=worker    driver pid=3636788 confirmed_ms=257
+ps -o pid,cmd -p <anchor.pid> → .../lib/node_modules/quay/plugin/scripts/dist/driver-anchor.js __anchor --root <ws>
+                                （安装产物里的 dist bundle，纯 ESM 不带 --experimental-strip-types）
+promotion-driver.pid -> 3636788 ；worker-driver.pid -> 3636788   （一个 anchor 承载两个 kind）
+```
+
+**⚠️ 第一次 AC4 读数是【被污染的】，已作废并重取（记录于此，因为差别正是本条要防的那一类）**：本 worker 的 shell 带有
+`QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin`（driver 环境注入），继承它时 `resolvePluginRoot()`
+（`packages/quay/src/plugin-root.ts:90`）返回**主检出**的 plugin 树 ⇒ CLI spawn 的是**开发树内核**而非安装产物，
+而那次运行照样打印 `started:` / rc=0。暴露它的是**直接量**：`ps` 显示 anchor 的 cmdline 是
+`node --experimental-strip-types /home/yale/work/quay/plugin/scripts/driver-anchor.ts` —— 主检出开发树。
+⇒ 那次 rc=0 对「打包产物」什么也没证明（硬规则 4b：代理量「driver start 退出 0」被一个**不同的对象**满足了）。
+上表所有 AC3/AC4 读数一律以 `env -u QUAY_PLUGIN_ROOT` 取得。
+
+**AC5 测试**：`packages/quay/test/build-plugin-dist.test.mjs` 新增 4 条（`node --test` 该文件 29/29 绿）：
+① 形状规则及其边界（目录变量拼接命中；字面量段拼接与非 dirExpr 形式**不**命中）；
+② 承重控制——把引用改写成非该形状后 `deriveEntries` 里该模块**消失**（证明是这条规则在命名它）；
+③ 真 plugin 根的闭包**推导并强制要求** `driver-anchor`，且既有任一扫描形态都**不**命名它（证明第四条形状是承重的）；
+④ **打包产物**级：从暂存副本构建**真实** dist 闭包、从它的 dist 形态跑**真实** `driver start`（rc=0、`started:`、`host=anchor`），
+并配一个**同产物**负控制（摘掉 `driver-anchor.js` ⇒ rc=1 且逐字复现生产错误串）。⛔ 断言落在真实启动成功性上，不是文件存在性。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-dist-closure-missing-driver-anchor-js --allow-thin` **RC=0**（29/29 绿）。
+首轮红在两条静态检查上、根因是本文件新测试自己的 temp 泄漏（`tmp-leak-pairing-check` 的 `mkdtemp-no-cleanup` +
+`test-isolation-check` 的 ratchet +1）⇒ 已改为「每个 artifact 测试各建各的 stage、`finally` 里 rmSync」并复跑转绿。
+scoped-gate 缓存按**实际被合并进本 worktree 的 develop tip** 写入（`.quay/scoped-gate-cache.json` 是**单条**缓存，
+并发写入者会覆盖它 ⇒ 未命中时 fan-in 照跑门，fail-closed，无静默跳过风险）。
+
+**原始输出**：`.quay/ac-dist-anchor-evidence.md`（本 worktree 的**未提交**运行时证据文件；与主检出处 `.quay/` 下既有的
+59 个证据文件同形，不进 git delta。⛔ 该目录**并未**被 gitignore——前一版本条写成「gitignored」是错的，此处更正）。
+
+**一处未验证、故不作断言的观察**：`driver-anchor.ts` 是否在 `quay-init` 的 laydown 集合里，本次**没有**取到读数
+（`quay-init.sh --loop --dry-run` 在本机 RC=2，未走到 laydown 清单）。因为 anchor 一律从**内核自身安装位置**解析
+（`preferredAnchorKernel` 不看 `QUAY_PLUGIN_ROOT`、也不看 `--root`），laydown 集合与本题机制不同域 ⇒ 仅记为观察项，
+不作阻塞、不在此处声称结论。
+
 ## Touches
 
-- `packages/quay/scripts/package.sh`
-- `plugin/scripts/driver-runtime.ts`（只读引用核对，除非修复本身也需要改动引用写法）
-- 实现者最终确定的新增/改动测试文件（用以捕获真实 driver-start 成功性，而非仅文件存在）
+- `packages/quay/scripts/build-plugin-dist.mjs`
+- `packages/quay/test/build-plugin-dist.test.mjs`
 - `tasks/gap-dist-closure-missing-driver-anchor-js.md`（自身文件：勾 AC + 贴实跑证据）
