@@ -295,3 +295,50 @@ test("runScheduler — unified-scheduler __PERFILE__ line carries cpu_ms (route 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// gap-perfile-memory-cost-collection-missing AC5 — the memory mirror of the test above, on the SAME
+// production-default path (QUAY_SUITE_SCHEDULER). AC5 forbids repeating
+// gap-suite-scheduler-perfile-cpu-emitter-missing's failure mode ("one path verified, the other
+// production path never emitted"), so BOTH emission points are pinned by an end-to-end subprocess run.
+// This one goes further than mere presence: the fixture allocates a large object, so the assertion is
+// that the scheduler's line carries a value that is actually the fixture's PEAK (not a token digit).
+test("runScheduler — unified-scheduler __PERFILE__ line carries mem_peak_kb (route a preload seam, memory dimension)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-mem-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    const bigFile = path.join(dir, "big.test.mjs");
+    fs.writeFileSync(
+      bigFile,
+      'import { test } from "node:test";\n' +
+        'test("balloon", () => { let b = Buffer.alloc(64 * 1024 * 1024, 1); b.fill(2); b = null; });\n',
+    );
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    // Same route (a) wiring as full-suite-runner.ts's suiteEnv (see the cpu sibling above).
+    childEnv.QUAY_PERFILE_CPU_DIR = cpuDir;
+    const preload = path.join(__dirname, "..", "scripts", "per-file-cpu-report.mjs");
+    childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload}`;
+
+    const r = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", SCHEDULER_CLI,
+        "--root", dir, "--main-root", dir,
+        "--serial-concurrency", "1", "--lowconc-concurrency", "1", "--main-concurrency", "1",
+        "--groups", "product,engine"],
+      { input: `${bigFile}\n`, encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 0, `scheduler should exit 0 (stderr: ${r.stderr})`);
+    const m = r.stderr.match(new RegExp(`__PERFILE__ .* ${bigFile} passed=true .* mem_peak_kb=([0-9]+)`));
+    assert.ok(m, `unified-scheduler __PERFILE__ line must carry mem_peak_kb (stderr: ${r.stderr})`);
+    // 64MB allocated ⇒ a node process peak well above the ~60MB baseline. A constant/stub reading
+    // (or an exit-time snapshot that already released the buffer) could not reach this.
+    assert.ok(
+      Number(m[1]) > 90_000,
+      `mem_peak_kb must reflect the fixture's real peak (>90000KB); got ${m[1]}KB`,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

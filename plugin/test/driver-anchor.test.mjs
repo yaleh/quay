@@ -25,13 +25,42 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
-import { DRIVER_KINDS, KNOWN_KINDS } from "../scripts/driver-runtime.ts";
+import { DRIVER_KINDS, KNOWN_KINDS, preferredAnchorKernel } from "../scripts/driver-runtime.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const KERNEL = path.join(REPO_ROOT, "plugin", "scripts", "driver-runtime.ts");
 const ANCHOR_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "driver-anchor.ts");
-const DRIVER_RUNTIME_ABS = path.join(REPO_ROOT, "plugin", "scripts", "driver-runtime.ts");
+
+// ── 夹具的 fake driver 必须与 anchor **进程实际加载的那一份** kernel 同源 ──────────────────────────
+//
+// anchor 进程经 preferredAnchorKernel() 解析要跑的内核：**优先主检出**（AC-184/AC-255：常驻 anchor 的
+// 生存期⛔ 不绑在短命 worktree 路径上 —— 见 driver-runtime.ts 的 preferredAnchorKernel 注释）。
+// 而 `registerKindStop` / `requestKindStop` 的停机登记表是**模块级**的（driver-anchor.ts 头注释：
+// 「在本进程里只有一个模块实例，登记表才与各 kind 看到的是同一张」）。
+//
+// ⇒ 从 worktree 里跑本文件时，anchor 跑主检出那份、夹具若 import worktree 那份 ⇒ **两张独立的登记表**
+//   ⇒ `requestKindStop(kind)` 置的不是夹具那个 kind 读的那个标志 ⇒ `stop --kind X` 永远等不到该 kind
+//   收尾，等满 60s 后 exit 1（与「该 kind 的循环真的挂了」**同形**，但真因是夹具自造的）。
+//   实测对照（同一棵树，只改这一行 import）：import worktree 那份 ⇒ stop 60543ms / exit 1；
+//   import 主检出那份 ⇒ stop 1099ms / exit 0。
+//
+// ⚠️ 已知边界（如实标注，⛔ 不伪装成全测）：本文件因此验的是**anchor 实际加载的那份**内核 ——
+//   在 worktree 里就 = 主检出那份 ⇒ **worktree 中对 anchor 内核本身的改动不会被本文件验到**
+//   （driver-runtime.ts 已明记该形态「结构上无法自测」）。这是形态的性质，⛔ 不是夹具能绕开的。
+const _anchorKernel = preferredAnchorKernel();
+assert.ok(
+  _anchorKernel,
+  "preferredAnchorKernel() resolves — 取不到 ⇒ anchor 的 start/stop 语义无从测起（⛔ 不静默回退到一个自造的路径）",
+);
+const DRIVER_RUNTIME_ABS = path.join(
+  path.dirname(_anchorKernel.path),
+  _anchorKernel.stripTypes ? "driver-runtime.ts" : "driver-runtime.js",
+);
+assert.ok(
+  fs.existsSync(DRIVER_RUNTIME_ABS),
+  `夹具的 fake driver 必须 import anchor 自己那份 runtime（${DRIVER_RUNTIME_ABS}）—— 否则停机登记表分裂`,
+);
 
 // ── 夹具 ───────────────────────────────────────────────────────────────────────────────────────────
 //
