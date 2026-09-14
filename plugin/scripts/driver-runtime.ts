@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
-import { mainCheckoutRoot } from "./repo-root.ts";
+import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
 import { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus } from "./driver-filters.ts";
 // Layer 0 · ResultVocab + verify（AC153 单一实现：核心不变式 + 词表强制含 not-evaluated）。
@@ -752,30 +752,56 @@ export function updateDesired(
   return next;
 }
 
+/** 本内核【自身安装位置】在主检出里的对应目录 —— 仅当本内核跑在一个 **linked worktree** 里时才与自身
+ *  目录不同（dev tree 的 worktree 场景：常驻 anchor ⛔ 不应把生存期绑在一个短命的 worktree 路径上 ——
+ *  worktree 被回收后，任何一次 kind 重启都会 import 失败）。
+ *
+ *  ⚠️ 基准是**本内核自己的路径**（`kernelSelfPath()`），⛔ 不是 `--root`（工作区）：`--root` 在第三方项目里
+ *  是**别人的项目**，其下没有 quay 的 `plugin/scripts/` —— 「把 quay 自己的资源拼在 workspace root 下」
+ *  正是 AC-203 / gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root 的缺陷形（症状：
+ *  第三方项目上解析到一个不存在的文件 ⇒ spawn 只得 ENOENT/非零退出，被例程读成「跑过了、没数据」）。
+ *  `kernel-sibling-resolution-check` 的 DRIVER-SCOPE 规则对 driver-runtime.ts 上的这一形态 fail-closed，
+ *  且 **不认** dev-tree-only 豁免（该标记的前提在这些文件上为假）。⛔ 不能靠「在 quay 自己的检出里跑
+ *  测试」发现它：那里 `--root` 与「内核所在仓库」恰好重合 ⇒ 该缺陷形态**结构上无法自测**。
+ *
+ *  非 git / 主检出不可解析 / 本内核不在 worktree 里 / 主检出里没有对应目录 ⇒ 返回本内核自身的目录
+ *  （⇒ 行为与「兄弟文件回退」逐字相同，⛔ 不引入新的失败面）。 */
+function mainCheckoutKernelDir(): string {
+  const here = path.dirname(kernelSelfPath());
+  try {
+    const selfRepo = repoRoot(here);
+    const main = mainCheckoutRoot(here);
+    if (!main || main === selfRepo || !fs.existsSync(main)) return here;
+    const rel = path.relative(selfRepo, here);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return here;
+    const candidate = path.join(main, rel);
+    return fs.existsSync(candidate) ? candidate : here;
+  } catch {
+    return here;
+  }
+}
+
 /** 解析 anchor 内核可执行文件的**优选**路径。
  *
- *  优先级（GOAL-017/AC-255）：① **主检出**的 `<mainRoot>/plugin/scripts/driver-anchor.{ts,js}` —— 收敛形态
- *  的**持久**落点（常驻 anchor ⛔ 不应把生存期绑在一个短命的 worktree 路径上：worktree 被回收后，
- *  任何一次 kind 重启都会 import 失败）；② 本内核的**兄弟文件**（`import.meta.url` 同目录）。
+ *  优先级（GOAL-017/AC-255）：① **主检出**的 `driver-anchor.{ts,js}` —— 收敛形态的**持久**落点（常驻
+ *  anchor ⛔ 不应把生存期绑在一个短命的 worktree 路径上）；② 本内核的**兄弟文件**（`import.meta.url`
+ *  同目录）。① 的基准见 `mainCheckoutKernelDir` —— **是本内核自己的仓库的主检出**，⛔ 不是 `--root`。
+ *  两者都是「本内核自身安装位置」的派生量，故 ① 只在「本内核跑在 linked worktree 里」时生效；其余情况
+ *  `mainCheckoutKernelDir()` 逐字返回自身目录 ⇒ ① 与 ② 指向同一个文件 ⇒ 直接走 ②（⛔ 不重复加载）。
  *
- *  ⚠️ ① 存在但**就是本文件自己**时等同 ②（⛔ 不重复加载）。锚定 ② 而**不走 `QUAY_PLUGIN_ROOT`**：
- *  那是「第三方项目/夹具的 plugin/ 在哪」的缝，用它会让每个夹具都必须复制一份完整内核闭包；而 anchor
- *  要跑的是**内核自己的**代码（只有它托管的 kind 模块才可能来自 QUAY_PLUGIN_ROOT——那正是
- *  `invokeKindDefault` 用 resolveKernelSibling 的地方）。 */
-export function preferredAnchorKernel(root: string): { path: string; stripTypes: boolean } | null {
+ *  ⛔ **不走 `QUAY_PLUGIN_ROOT`**：那是「第三方项目/夹具的 plugin/ 在哪」的缝，用它会让每个夹具都必须
+ *  复制一份完整内核闭包；而 anchor 要跑的是**内核自己的**代码（只有它托管的 kind 模块才可能来自
+ *  QUAY_PLUGIN_ROOT——那正是 `invokeKindDefault` 用 resolveKernelSibling 的地方）。 */
+export function preferredAnchorKernel(): { path: string; stripTypes: boolean } | null {
   const here = path.dirname(kernelSelfPath());
   const selfTs = path.join(here, "driver-anchor.ts");
   const selfJs = path.join(here, "driver-anchor.js");
-  let mainRoot = root;
-  try {
-    mainRoot = resolveMainRoot(root);
-  } catch { /* 非 git / 推导失败 ⇒ 用 root 自身 */ }
-  for (const candidate of [
-    { p: path.join(mainRoot, "plugin", "scripts", "driver-anchor.ts"), strip: true },
-    { p: path.join(mainRoot, "plugin", "scripts", "driver-anchor.js"), strip: false },
-  ]) {
-    if (candidate.p === selfTs || candidate.p === selfJs) continue;
-    if (fs.existsSync(candidate.p)) return { path: candidate.p, stripTypes: candidate.strip };
+  const mainDir = mainCheckoutKernelDir();
+  if (mainDir !== here) {
+    const mainTs = path.join(mainDir, "driver-anchor.ts");
+    const mainJs = path.join(mainDir, "driver-anchor.js");
+    if (fs.existsSync(mainTs)) return { path: mainTs, stripTypes: true };
+    if (fs.existsSync(mainJs)) return { path: mainJs, stripTypes: false };
   }
   if (fs.existsSync(selfTs)) return { path: selfTs, stripTypes: true };
   if (fs.existsSync(selfJs)) return { path: selfJs, stripTypes: false };
@@ -787,7 +813,7 @@ export function spawnAnchor(
   root: string,
   opts: { logFile?: string; takeoverPid?: number | null } = {},
 ): { pid: number | null; error: string | null } {
-  const sibling = preferredAnchorKernel(root);
+  const sibling = preferredAnchorKernel();
   if (!sibling) return { pid: null, error: `driver-anchor module not found next to driver-runtime (${path.dirname(kernelSelfPath())})` };
   const anchorLog = opts.logFile ?? anchorPaths(root).logFile;
   fs.mkdirSync(path.dirname(anchorLog), { recursive: true });

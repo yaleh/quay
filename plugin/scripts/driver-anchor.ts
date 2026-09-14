@@ -297,15 +297,18 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     // 会因为双份 driver-runtime 而让停机登记表分裂，见 invokeKindDefault 的注释）。⛔ 只在**确认替换
     // 进程活着**之后才退出——否则一次 spawn 失败 = 六个 driver 一起消失（比不刷新更糟）。
     const stale = [...active.keys()].filter((k) => sourceChangedSince(opts.root, k, hostStartedAt));
-    // AC8 的持久化半边：当**主检出**的 anchor 内核出现（或推进）到本进程启动时刻之后 ⇒ 同样自刷新 ——
-    // 替换进程经 preferredAnchorKernel 会**优先**加载主检出那一份。这让「实现落地后常驻形态自动换成
-    // 主检出版本」不需要任何人工重启，也把常驻 anchor 的生存期从「当前 worktree 路径」上解绑。
+    // AC8 的持久化半边：当**本内核所在仓库的主检出**的 anchor 内核出现（或推进）到本进程启动时刻之后
+    // ⇒ 同样自刷新 —— 替换进程经 preferredAnchorKernel 会**优先**加载主检出那一份。这让「实现落地后常驻
+    // 形态自动换成主检出版本」不需要任何人工重启，也把常驻 anchor 的生存期从「当前 worktree 路径」上解绑。
+    // （基准是**本内核自身的安装位置**的仓库主检出，⛔ 不是 `opts.root` 工作区——见 mainCheckoutKernelDir：
+    //  用 `--root` 拼 `<workspaceRoot>/plugin/scripts/…` 是第三方项目上的缺陷形，由
+    //  kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则挡住。）
     // ⛔ 自刷新条件里必须排除「主检出那份就是我自己」——否则替换进程会立刻再判一次 stale = 重启风暴。
     let mainKernelStale = false;
     let mainKernelPath: string | null = null;
     try {
       const me = fileURLToPath(import.meta.url);
-      const cand = preferredAnchorKernel(opts.root);
+      const cand = preferredAnchorKernel();
       if (cand && cand.path !== me) {
         mainKernelPath = cand.path;
         mainKernelStale = fs.statSync(cand.path).mtimeMs > hostStartedAt;
