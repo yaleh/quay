@@ -3756,7 +3756,12 @@ step_ac257_project_scope() {
 # 写入成功。任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 非 0。
 step_ac258_user_scope() {
   local root="$1" plugin_root="$2" qrl="$3" task_id="$4" bodyfile="$5" tgz="$6" qn_tgz="$7" prefix_arg="$8"
-  local home="${HOME:-}" settings="$home/.claude/settings.json"
+  # ⚠️ `home` 必须先【单独】声明再被引用：同一个 `local` 语句里的全部参数在**赋值之前**就完成了
+  # 词展开，所以 `local home="${HOME:-}" settings="$home/…"` 里的 `$home` 读的是**外层作用域**
+  # （未设 ⇒ `set -u` 报 "home: unbound variable" 并当场退出）。实测 2026-09-14 真机首跑：
+  # 模式在门口 exit 1、什么都没做（幸而是门口 —— 它排在删键之前）。⛔ 不是风格问题。
+  local home="${HOME:-}"
+  local settings="$home/.claude/settings.json"
   local km="$home/.claude/plugins/known_marketplaces.json" ip="$home/.claude/plugins/installed_plugins.json"
   local rc_rerun=0 prefix="" before_km="" before_ip="" before_set="" after_km="" after_ip="" after_set=""
 
@@ -3845,7 +3850,15 @@ step_ac258_user_scope() {
   local rc_npm=0 install_log="$home/ac258-npm-install.log"
   mkdir -p "$prefix"
   set +e
-  npm install -g --prefix "$prefix" --no-audit --no-fund "$tgz" ${qn_tgz:+"$qn_tgz"} >"$install_log" 2>&1
+  # ⚠️ `--foreground-scripts` 是【判据所必需】，不是好看：实测 2026-09-14（npm 11.17.0）——
+  # 不加它时 npm **吞掉**被安装包 postinstall 的 stdout/stderr，而 postinstall 是【真的跑了】的
+  # （证据是它的效果：settings.json 被写上 extraKnownMarketplaces.quay）。⇒ 用它自己打印的那行
+  # 「Registered the installed quay plugin」当「postinstall 跑过」的读数，在默认参数下**恒为零**，
+  # 于是每一次真机运行都会在 (d) 以「postinstall 未跑？」告终 —— 一句【成因说错】的 NOT-EVALUATED，
+  # 与「机制坏了」同形（硬规则 3b / 4：「恒零的读数携带零信息」）。
+  # 同一测点还看到 npm 11 的 allow-scripts 策略会为未声明的 install script 打印一条 warning（安装仍
+  # 照常、脚本仍照跑）—— 故本判据刻意【不】把「有没有那条 warning」当读数：它不是「脚本跑没跑」。
+  npm install -g --prefix "$prefix" --foreground-scripts --no-audit --no-fund "$tgz" ${qn_tgz:+"$qn_tgz"} >"$install_log" 2>&1
   rc_npm=$?
   set -e
   echo "  [⑩d] npm install -g --prefix $prefix rc=$rc_npm (log: $install_log, $(wc -l < "$install_log" 2>/dev/null || echo 0) lines)"
@@ -3868,12 +3881,40 @@ step_ac258_user_scope() {
   echo "          delivery CLI resolved AFTER install: $qrl"
   # postinstall 必须真跑过（否则「装了但没注册」，与「注册坏了」同形）——按位置读它的输出痕迹。
   local reg_hits=0
-  reg_hits="$(grep -c 'Registered the installed quay plugin' "$install_log" 2>/dev/null || echo 0)"
+  # `grep -c` 在零命中时【既打印 0 又返回 1】⇒ `|| echo 0` 会把读数变成两行（"0\n0"）。用 `|| true`
+  # 保留那一个 0（它是真读数，不是缺值）。
+  reg_hits="$(grep -c 'Registered the installed quay plugin' "$install_log" 2>/dev/null || true)"
   echo "          postinstall register-plugin.mjs ran: hits=$reg_hits (expect >=1)"
   [ "${reg_hits:-0}" -ge 1 ] 2>/dev/null || {
     echo "  AC258-NOT-EVALUATED: postinstall 的注册痕迹未出现（register-plugin.mjs 未跑？）⇒ 记录 NOT written" >&2
     return 1
   }
+
+  # ── (d0) materialization 的兜底腿（可区分，⛔ 不是「换一条机制」）──────────────────────────────
+  # register-plugin.mjs 在写 settings.json 之后【自己】会调两条 CLI 命令去把插件 materialize 进
+  # ~/.claude/plugins（缓存 + installed_plugins.json）：
+  #     runCli(["plugin","marketplace","add",pluginDir]) ; runCli(["plugin","install",pluginRef])
+  # —— 但它【没传 `-y`】，而 `plugin install` 在非 TTY 下可能取不到确认 ⇒ materialization 可能整段
+  # 不生效，于是 installed_plugins.json 里不会出现 scope:"user" 条目，本 AC 结构上不可满足，而失败
+  # 形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
+  # ⇒ 仅当 user-scope 条目【读不出】时，补跑【同样两条命令】并显式带 `-y`，且把「哪条腿产出了它」
+  # 打成一行可核读数。⛔ 这不是绕过产品路径：命令、目标、调用方都是 register-plugin.mjs 自己那两条，
+  # 补的只是一个它漏掉的非交互确认标志；两条腿都在日志里留痕，判据不区分来源。
+  local mat_leg="postinstall(register-plugin.mjs)" rc_ms=0 rc_inst=0
+  if [ -z "$(ac258_user_scope_entry "$ip" "$AC258_QUAY_VERSION" 'quay@quay' 2>/dev/null || true)" ]; then
+    if command -v claude >/dev/null 2>&1; then
+      set +e
+      claude plugin marketplace add "$plugin_root" >"$home/ac258-cli-materialize.log" 2>&1
+      rc_ms=$?
+      claude plugin install "quay@quay" -y >>"$home/ac258-cli-materialize.log" 2>&1
+      rc_inst=$?
+      set -e
+      mat_leg="cli-materialize-fallback(marketplace-add rc=$rc_ms, install -y rc=$rc_inst)"
+    else
+      mat_leg="not-attempted(claude not on PATH in this shell)"
+    fi
+  fi
+  echo "  [⑩d2] user-scope materialization leg: $mat_leg"
 
   # ── (d) 重注册的可核形态：三条独立通道都必须读到 <want_dir>，且都不含探测模式 ──────────────────
   local after_set_path after_km_path after_user_entry=""
