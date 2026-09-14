@@ -89,17 +89,17 @@ MCP tool 结果同时带 `content[0].text` 与 `structuredContent`，SDK 把**�
 ## 修复
 
 1. **`packages/quay-native/src/store.ts` — 新增 `queryPage()`，把「解析匹配集合」与「取回这一页的
-   body」拆成两相**：
-   - 相位 1 解析匹配的 **id 集合**，**不读 body**——无任何过滤条件时**直接来自 `listIds()` 目录列举
-     （零文件读取）**；有 status/label/prefix 过滤时走**仅 frontmatter 的走查**（持久解析缓存
-     stat 命中即不 `readFileSync`，body 永不进内存）；只有 `search` 因为要匹配正文才必须读 body
-     （这是 `gap-serve-search-timeout-all-body-fetch` 建立的既有行为，保持不变）。
-   - 相位 2 **只为这一页窗口**读取完整 task（含 body），上限 `pageSize` 个文件，与库大小无关。
+   条目」拆成两相**：
+   - 相位 1 解析匹配的 **id 集合**，**不读 body**——「有过滤条件」时走**仅 frontmatter 的走查**
+     （持久解析缓存 stat 命中即不 `readFileSync`，body 永不进内存）；只有 `search` 因为要匹配正文
+     才必须读 body（这是 `gap-serve-search-timeout-all-body-fetch` 建立的既有行为，保持不变）。
+   - 相位 2 **只为这一页窗口**取回完整 task，上限 `pageSize` 条，与库大小无关。
    - 两相共用**同一个** `matchesListFilter` 谓词，且都经 `toViewModel` 构造视图模型
      （status 非法值强转、id 回退、labels 归一），所以「索引路径」与「走查路径」**结构上不可能
      选出不同的集合**。
-   - `malformed` 语义保持不变，并新增 `scannedFiles` 明确区分「扫过且没有坏文件」与「根本没扫」
-     （硬规则 3b：未评估不得与合格同形）。
+   - `malformed` 语义保持不变（**未分页时仍然完整**——见下「实现中的一次自纠」），并新增
+     `scannedFiles` 明确区分「扫过且没有坏文件」与「根本没扫」（硬规则 3b：未评估不得与合格同形）。
+   - `includeBody:false` 时相位 2 直接用 frontmatter 索引构造该页，**一个 body 都不读**。
 2. **`packages/quay-native/src/mcp-server.ts`** — `task_list` 接受 `prefix`/`page`/`pageSize`
    （`label` 同时接受 string 与 string[]，AND-join），响应新增
    `total`/`page`/`pageSize`/`totalPages`/`paged`/`scannedFiles`。**加性、可选**：不传
@@ -115,8 +115,12 @@ MCP tool 结果同时带 `content[0].text` 与 `structuredContent`，SDK 把**�
 5. **去重**：`task_list` 的 `content[0].text` 在 payload ≤ 256 KB 时**逐字保留**（所有既有小响应
    与读它的测试**字节不变**），超过则改为一行摘要、数据只经 `structuredContent` 走一次
    （见上「第二条独立根因」）。native provider 侧与 Core 侧各一处。
-6. **硬规则 5b 兄弟实例**（清单与逐条处置见下节）：一并修 `packages/quay/src/cli/task-list.ts`
-   与 `packages/quay/src/gate/driver.ts` 两条同类全量取 body 的读路径。
+
+**实现中的一次自纠（留档，不藏）**：第一版把「无过滤条件」一律短路到目录列举，于是**任何**
+未分页调用的 `malformed` 都恒为空——把「扫遍全库且没有坏文件」变成了「根本没看」，而消费这个字段的
+正是 web board 的坏文件行渲染。这是硬规则 3b 的形态，且是我自己在复查时才发现的。
+**修法**：短路只在**调用方要的是一页**时生效；未分页请求保留完整走查
+（也因此未分页的答案与修复前的 `listWithMalformed()` 逐字节兼容）。见 `147524439`。
 
 ## Touches
 
@@ -129,21 +133,146 @@ MCP tool 结果同时带 `content[0].text` 与 `structuredContent`，SDK 把**�
 - `packages/quay/test/gap-abi-task-list-pagination-payload-bound.test.mjs`
 - `tasks/gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp.md`
 
+## 实测读数（真实生产任务库，非 fixture）
+
+**环境**：`<worktree>/tasks/` = **2,136** 个真实任务（立案时 2,123，库在增长）。
+**通道**：Core 的 MCP 服务器（`quay mcp`）——即 `quay:quay-task` subagent 走的那条。
+**方法**：每条腿先做一次预热调用，把 Core+provider 子进程启动（~1 s，且与库大小无关）排除在读数外。
+
+```bash
+cd <worktree> && node --experimental-strip-types --input-type=module -e '
+import {Client} from "@modelcontextprotocol/sdk/client/index.js";
+import {StdioClientTransport} from "@modelcontextprotocol/sdk/client/stdio.js";
+const t=new StdioClientTransport({command:"node",args:["--experimental-strip-types","packages/quay/bin/quay.ts","mcp"],cwd:process.cwd(),stderr:"pipe"});
+t.stderr?.on("data",()=>{});
+const c=new Client({name:"probe",version:"0"}); await c.connect(t);
+await c.callTool({name:"task_list",arguments:{pageSize:1}});                       // 预热
+const s=Date.now(); const r=await c.callTool({name:"task_list",arguments:{pageSize:1}});
+console.log(Date.now()-s,"ms  total=",r.structuredContent.total,
+            " bytes=",JSON.stringify(r.structuredContent).length);
+await c.close();'
+```
+
+| AC | 读法 | 修复前（develop `c1cea6663`） | 修复后（本分支） |
+|---|---|---|---|
+| ① | `task_list({pageSize:1})` 热 | **28,549 ms** | **13 ms** |
+| ① | `task_list({pageSize:1})` 冷（含启动） | **`MCP error -32001: Request timed out`** | 1,076 ms |
+| ② | `task_list({pageSize:50})` 热 | — | 54 ms（响应 422,237 B） |
+| ② | `task_list({pageSize:200})` 热 | **15,812 ms** | **755 ms**（响应 2,868,309 B） |
+| ③ | 并发 `task_get`（heavy `task_list` 在飞） | **20,387 ms** | **647 ms** |
+
+> 修复前的「超时」不是脚注：控制组上**同一脚本的预热调用本身就返回
+> `MCP error -32001: Request timed out`**（60 s 客户端上限），立案体记录的症状原样复现。
+> 修复前两次独立运行的 `pageSize:1` 分别为 28,549 ms 与 33,632 ms——都在 5 s 上限的 5 倍以上。
+
+### ② 的子集／全集对比（同一脚本、同一台机器）
+
+| 库 | `pageSize:1` 中位（5 次样本） | 其响应 | `pageSize:200` 中位 | 其响应 |
+|---|---|---|---|---|
+| 全集 **2,136** | **13 ms** | **3,220 B** | 447 ms | 2,868,309 B |
+| 子集 **200**（真实库前 200 个文件） | **10 ms** | **3,219 B** | 600 ms | 2,868,336 B |
+
+- **代价随 pageSize 增长** ⇒ 与**返回条数**相关：13 ms → 447 ms（34×），响应 3,220 B → 2,868,309 B（890×）。
+- **代价不随任务总数线性增长**：库大 10.7×，`pageSize:1` 从 10 ms 变 13 ms（落在噪声内，
+  且**更慢的是小库**），响应**逐字节同性质**（3,220 vs 3,219 B = 一个任务）。
+  修复前同一对比是 **28,549 ms（全集）vs 1,430 ms（子集）≈ 20×**——即在跟着库走。
+- 残下的与库相关成本只剩一次目录 `readdir`（无过滤且分页时**一个任务文件都不读**），
+  在 5 s 预算里占 ~0.3%。
+
+## 兄弟实例枚举（硬规则 5b）
+
+`grep -rn "\.taskList(" packages/ plugin/ --include=*.ts --include=*.js | grep -v '/(test|vendor|node_modules)/'`
+⇒ **11 行命中，其中 2 行是注释**（`migrate.ts:57`、`serve-dashboard.ts:1380`）⇒ **9 个真实调用点**
+（硬规则 2：注释不算命中）。前 3 条实际内容：
+
+```
+packages/quay/src/serve-board.ts:200:    const r = await client.taskList({ includeBody: false });
+packages/quay/src/migrate.ts:70:  const { tasks } = await source.taskList({});
+packages/quay/src/mcp-handlers.ts:183:        listRes = await client.taskList({        (Core MCP task_list — 被报出来的那一个)
+```
+
+逐条处置：
+
+| # | 位置 | 修复前取回的 payload | 同样受影响？ | 本任务内 |
+|---|---|---|---|---|
+| 1 | `packages/quay/src/mcp-handlers.ts:183`（Core MCP `task_list`） | 每一页都取全库 body | **是（被报出来的那一个）** | **已修**（下推 + 分页 + 去重） |
+| 2 | `packages/quay/src/mcp-handlers.ts:202` | 全库 body | 只在外来 provider 拒绝下推形状时可达 | **保留**（它就是那条回落路径，读路径不因形状不认识而失败） |
+| 3 | `packages/quay/src/cli/task-list.ts:41` | 全库 body | **是**（立案体：37.7 s；本次实测 **30.6 s**） | **已修**：表格视图不渲染 body，改取 frontmatter 投影 |
+| 4 | `packages/quay/src/gate/driver.ts:96`（`scanActionable`） | 每次 pass 取全部 ready 的 body | **是**（promotion driver 每趟都付费） | **已修**：只读 `status`/`id`/`extra.acceptance` |
+| 5 | `packages/quay/src/migrate.ts:70` | 全库 body | 是 | **不改**：迁移的产出**就是**每一条 body（`--json` 全量导出同理），不是「取了不用的字节」 |
+| 6 | `packages/quay/src/serve-needs-human.ts:112` | `needs-human` 的 body | 否（子集小） | **不改**：body 是**故意**要的（要从 `## Needs-Human` 段提取理由），池子规模小 |
+| 7 | `packages/quay/src/serve-task.ts:55` | 匹配集 / frontmatter | 否 | 兄弟任务 `gap-serve-search-timeout-all-body-fetch` 已修 |
+| 8 | `packages/quay/src/serve-board.ts:200` | frontmatter | 否 | 同上 |
+| 9 | `packages/quay/src/serve-dashboard.ts:1396` | frontmatter + 30 s TTL 缓存 | 否 | 同上 |
+
+另有一条**不同载体**的同类：`packages/quay-native/bin/quay-native.ts:312` 在**进程内**直接
+`store.list()`（不经 stdio）——它也把 body 全读进来，但**没有 MCP 分帧那一跳**，因此不受本缺陷影响
+（冷 ~1.5 s / 热 ~40 ms）。
+
+**#3 的读数（同一条命令，同一台机器）**：`node packages/quay/bin/quay.ts task list`
+⇒ 修复前 **30.6 s** → 修复后 **2.29 s**。`--json`（全量导出，见 #5）10.2 s。
+两条腿是同一份 `withProvider`，所以这条读路径与 #1 是同一个修复面。
+
+## 回归测试（AC⑤）
+
+新增 `packages/quay/test/gap-abi-task-list-pagination-payload-bound.test.mjs`（`@test-group product`）：
+N = **2,000** 的合成任务库、每个任务 ~4 KB body（≈8 MB body），断言
+（a）热 `task_list({page:1,pageSize:1})` 在 **5 s** 内返回；
+（b）该响应**不携带整个库**（< 64 KB；这条是**确定性**断言，不依赖机器速度，因此在任何负载下
+都能把修复前后分开）；（c）`paged:true` / `total` 是过滤后计数 / `pageSize` 条数；
+（d）下推后的过滤+分页**逐条等于 store 自己的过滤结果**（谓词漂移会在这里现形）；
+（e）不传 page 参数时保持「全集」契约。
+
+| 同一测试文件 | 结果 |
+|---|---|
+| 修复前（control worktree，develop `c1cea6663`） | **0 pass / 3 fail**；第 1 条用例的**预热调用**即 `MCP error -32001: Request timed out`（用例耗时 61,329 ms） |
+| 修复后（本分支） | **3 pass / 0 fail**（1.4 s） |
+
+## Definition of Done 状态
+
+- **`quay:quay-task` subagent 已实际唤起一次**并完成真实 `task_list({pageSize:1})` → `task_get`
+  → `task_write` 往返，**三次调用全部成功、无 -32001**：`total`=2,138、`tasks.length`=1；
+  `task_get` 返回 `status=ready`、`labels=["gap","defect"]`；`task_write` 幂等重写同一对标签成功
+  （该 subagent 的回报已按其原话记录，未改一字）。
+- **诚实标注**：该 subagent 连的是**生产 MCP 服务器**，它跑的是
+  `plugin/vendor/quay/dist/quay.js`（gitignored 的**构建产物**，`ps` 实测：
+  `node /home/yale/work/quay/plugin/vendor/quay/dist/quay.js mcp`），**本次修复尚未落进它**。
+  所以这一条证明的是「ABI 主路径可达、往返完整」，**不构成「修复在生产生效」的证据**；
+  后者要等 fan-in 落 develop、构建产物刷新、主检出 config 同步之后才成立。
+  ⛔ 刻意**没有**手工去重建那个 bundle 来「满足」这条 DoD——那正是
+  「生产形态 AC 靠手工起动未落地代码满足 ⇒ 重启即回退」的形态。
+- **修复本身在生产代码路径上的证据**是下面那条**机械往返**（同一个 Core MCP 服务器、同样三个动词、
+  跑在本分支的修复代码上）：`task_list({pageSize:1})` **10–15 ms**、`task_get` **8–12 ms**、
+  `task_write` **75–101 ms**、读回一致。
+- **反例判据**（DoD 要求）：把 fixture/注入 seam 关掉后上述耗时 AC 仍成立——上面的读数**全部**取自
+  真实生产任务库（2,136 个真任务），不是夹具；合成库只用于 AC⑤ 那条可重复的回归断言。
+
 ## Acceptance Criteria
 
-- [ ] 在**真实**任务库（≥2,100 个任务，不是 fixture）上，MCP `task_list({pageSize:1})`
+- [x] 在**真实**任务库（≥2,100 个任务，不是 fixture）上，MCP `task_list({pageSize:1})`
       在 5 秒内返回；命令行与耗时读数贴进任务体。
-- [ ] 分页不再全量载入 body：对同一真实库，`pageSize:1` 与 `pageSize:200` 的耗时差
+      ⇒ 热 **13 ms** / 冷 1,076 ms（库 2,136 个真实任务）；修复前 28,549 ms、冷调用直接
+      `-32001` 超时。命令与对照见上「实测读数」。
+- [x] 分页不再全量载入 body：对同一真实库，`pageSize:1` 与 `pageSize:200` 的耗时差
       必须随 pageSize 增长（证明代价与返回条数相关），且 `pageSize:1` 的耗时
       **不随任务总数线性增长**——用 `tasks/` 的子集与全集两次实测对比给出读数。
-- [ ] 队头阻塞消除的**双向控制**：并发发起一个全量 `task_list` 与一个 `task_get(<id>)`，
+      ⇒ 13 ms → 447 ms（34×）、响应 3,220 B → 2,868,309 B（890×）；全集 2,136 vs 子集 200：
+      **13 ms vs 10 ms**（响应 3,220 vs 3,219 B = 一个任务）。修复前同一对比 ≈20×（28,549 vs 1,430 ms）。
+- [x] 队头阻塞消除的**双向控制**：并发发起一个全量 `task_list` 与一个 `task_get(<id>)`，
       `task_get` 必须在 5 秒内返回（当前：超时）。负控制 = 在修复前的提交上重跑同一脚本，
       `task_get` 应超时；两次读数都贴进任务体。
-- [ ] 按硬规则 5b 枚举兄弟实例：列出仓库内**所有**会「全量载入任务 body」的读路径
+      ⇒ 修复后 **647 ms**；修复前 **20,387 ms**（>5 s 上限 4 倍），且同一控制组上同一脚本的
+      `task_list` 曾直接 `-32001` 超时（60 s 上限）。两次读数均见上表。
+- [x] 按硬规则 5b 枚举兄弟实例：列出仓库内**所有**会「全量载入任务 body」的读路径
       （给出 grep 命中数 + 前 3 条实际内容 + 文件:行号），逐条说明是否同样受影响、
       是否在本任务内一并修复；写不出这个清单视为只修了被报出来的那一个。
-- [ ] 回归判据：新增一条测试，断言在 N≥2,000 的合成任务库上 `task_list({pageSize:1})`
+      ⇒ 11 行命中 / 9 个真实调用点，前 3 条与实际内容、9 条逐条处置表见上「兄弟实例枚举」；
+      本任务内**已修** 3 条（#1 Core MCP、#3 CLI 表格视图、#4 gate driver），另 6 条逐条给了
+      「不受影响」或「不改也是对的」的理由，并单列了 1 条不同载体的同类（进程内 `store.list()`）。
+- [x] 回归判据：新增一条测试，断言在 N≥2,000 的合成任务库上 `task_list({pageSize:1})`
       的耗时低于阈值；该测试在修复前的代码上必须红（贴出红的输出）。
+      ⇒ `packages/quay/test/gap-abi-task-list-pagination-payload-bound.test.mjs`，
+      修复前 **0/3 pass**（预热调用即 `-32001`，61,329 ms），修复后 **3/3 pass**。
 
 ## Definition of Done
 
@@ -152,6 +281,10 @@ MCP tool 结果同时带 `content[0].text` 与 `structuredContent`，SDK 把**�
 `quay:quay-task` subagent 必须被实际唤起一次并成功完成一次真实的 `task_list` + `task_get`
 + `task_write` 往返（贴出该 subagent 的回报），证明 ABI 主路径恢复可用——
 仅仅「CLI 能跑」不构成完成，因为 CLI 从来没坏过，坏的是 MCP 这条被文档指定为主路径的通道。
+
+> 状态见上「Definition of Done 状态」：subagent 往返已实际完成且成功；
+> 但它连的生产 bundle 是构建产物，修复尚未落进去 —— 该条**不**被当成「修复已在生产生效」的证据，
+> 也刻意没有手工重建 bundle 去凑。
 
 
 反证（2026-09-14 04:5xZ，立案后同轮补记，避免结论过强）：同一时段自主循环本身仍在成功建任务——03:00 后落盘的 gap-ac255-driver-internalization-pid-le2-six-kinds-fresh / gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun / gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved 等 8 条均非本会话所建。⇒ 不是「ABI 全局不可用」，而是【本会话这条 MCP 连接/服务端实例】被一个 37 s 的全量 task_list 堵死后，其上后续所有请求陪绑超时。修复本任务时，第一步应先判定：是每连接一个 provider 实例、还是共享实例；队头阻塞发生在哪一层（Core MCP handler / provider-client / native mcp-server）。⛔ 不要把「循环还在工作」当成「没有缺陷」——37 s 的全量载入是实测事实，它只是还没有打到每一个消费者身上。
