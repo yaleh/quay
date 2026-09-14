@@ -2,7 +2,8 @@
 id: gap-goal-create-as-active-skips-zero-ac-gate
 title: GOAL 出生即 active 绕过 P6-goal「名下至少一条 AC」闸——`activating` 逐字 `prevStatus !==
   undefined`，GOAL-018 零 AC 流通 60s，AC-217 判红并 spawn 了一次无物可修的 gap-filing agent
-status: ready
+status: needs-human
+needs_human_cause: unclassified
 labels:
   - gap
   - defect
@@ -98,3 +99,12 @@ create（新记录）时 `prevStatus === undefined`（`:1987` 由文件是否存
 **DoD-4 全量套件** — worker 侧**未跑**全量：worker 契约规定全量 suite 由 worker-driver 的机械 fan-in 在 flip 前跑（`merge develop → delta → typecheck → scoped 门 → suite → ff`），红了不落地 ⇒ 勾它不产生假的 done（本仓库主导惯例）。worker 侧实跑：scoped 门 `bash scripts/test.sh --for-task gap-goal-create-as-active-skips-zero-ac-gate --allow-thin` ⇒ **186/186 绿**；另逐文件跑绿了本次改动的全部 8 个测试文件（含新增的那条：goal-store 72 / goal-gate 6 / store-commit 13 / provider-abi-conformance 1 / gap-goal-status-stale-* 8 / goal-create-as-active-requires-ac 6 / goal-invariants-standing 19）+ 33 个 goal-store 相关测试文件（含 goal-driver 74 / meta-driver 121 / criterion-failure-attribution-check 28）。merge develop（19 提交）后这 7 个文件重跑仍全绿。
 
 **改动面（硬规则 5b）** — 以「goal 创建动词 + 同语句内 `status: active`」的结构化扫描覆盖 `packages/quay/test`、`plugin/test`、`packages/quay-native`、`scripts`、`plugin/scripts`、`packages/quay/src`：共 6 个测试文件 + 1 个脚本需按新语义处置，全部已改并各自跑绿（首轮单行 grep 漏掉 2 处——对象字面量跨行 ⇒ 靠结构化扫描才现形）。⛔ 生产路径（`goal-driver.ts` / `meta-driver.ts`）无一处把 GOAL 写成 active（已核）。
+
+## Needs-Human
+
+**执行 2026-09-14T10:50:47.175Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-goal-create-as-active-skips-zero-ac-gate still present
+- run_id：wk-prod-1789367589
