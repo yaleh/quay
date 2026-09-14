@@ -27,6 +27,8 @@ import { mainCheckoutRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
+/** <repo>/scripts — the repo-root scripts dir, NOT SCRIPTS_DIR (which is plugin/scripts). */
+const REPO_SCRIPTS_DIR = path.resolve(__dirname, "..", "..", "scripts");
 
 function git(cwd, args, opts = {}) {
   return execFileSync("git", args, {
@@ -124,4 +126,15 @@ test("AC3/AC4 — the three former sites delegate to the shared mainCheckoutRoot
   assert.match(setup, /\. "\$\{SCRIPT_DIR\}\/repo-root\.sh"/, "setup must source repo-root.sh");
   assert.match(setup, /mainCheckoutRoot "\$\{worktree\}"/, "setup must call mainCheckoutRoot");
   assert.doesNotMatch(setup, /print \$2; exit/, "the first-line awk is deleted from setup");
+
+  // The FOURTH site — scripts/worktree-include.sh — carried the identical first-line parsing and was
+  // not enumerated here, so nothing noticed it (hard rule 5b: fixing one instance is not fixing the
+  // principle). It was the most damaging of the four: there the early-exiting consumer's EPIPE killed
+  // the whole script under `set -euo pipefail` (exit 141, 0 bytes, 0 files copied) for EVERY fresh
+  // task worktree, not merely for a caller that ignored an empty result
+  // (gap-worktree-include-pipefail-sigpipe-141-blocks-fresh-worktree-provisioning).
+  const include = fs.readFileSync(path.join(REPO_SCRIPTS_DIR, "worktree-include.sh"), "utf8");
+  assert.match(include, /\. "\$\{REPO_ROOT_SH\}"/, "worktree-include must source repo-root.sh");
+  assert.match(include, /mainCheckoutRoot "\$WORKTREE"/, "worktree-include must call mainCheckoutRoot");
+  assert.doesNotMatch(include, /print \$2; exit/, "the first-line awk must not come back to worktree-include");
 });
