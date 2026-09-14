@@ -3,6 +3,7 @@ id: gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env
 title: worktree 全量套件结构性恒红 —— driver 环境带的 `QUAY_PLUGIN_ROOT` 覆盖指针 +
   一条把【断言者所在树】当【kernel 安装树】的断言（loop 自 2026-09-14T06:40Z 起零落地）
 status: ready
+needs_human_cause: unclassified
 labels:
   - gap
   - defect
@@ -94,9 +95,9 @@ spawn 全量 suite ⇒ 该键被**继承进每一轮 worktree 套件** ⇒ `reso
       = "按 workspace root 解析"形态）⇒ 有该键 `pass 4 / fail 3`（`✖AC3a ✖AC3a' ✖AC3a''-red`）、
       无该键 `pass 5 / fail 2`（`✖AC3a ✖AC3a''-red`）⇒ 判据**两向都取假**；还原后
       `git diff -- plugin/scripts/driver-runtime.ts` 为空。读数逐条见 `## Evidence`。
-- [ ] **AC3 生产读数（硬规则 4 推论三：读生产载体，⛔ 不是夹具）**（待外部）：修复后**至少一轮 worktree 全量套件**
-      在 `.quay/verification-round.jsonl` 里对该文件留 `perFile … passed=true` 的记录
-      （贴 round 号 + startedAt + commit），且该轮之后**至少一个任务落地**（fan-in 走完 ff）。
+- [ ] **AC3 生产读数（硬规则 4 推论三：读生产载体，⛔ 不是夹具）**：修复后**至少一轮 worktree 全量套件**对该文件留 `perFile … passed=true` 的记录 ∧ 该轮之后**至少一个任务落地**（fan-in 走完 ff）——逐项判据见续行（待外部）
+      ① 在 `.quay/verification-round.jsonl` 里对该文件留 `perFile … passed=true` 的记录（贴 round 号 + startedAt + commit）；
+      ② 该轮之后**至少一个任务落地**（fan-in 走完 ff）。
       ⚠️ 本条**结构上无法由本 worker 在自身回合内观测**：本任务自己的 fan-in 全量轮就是"修复后第一轮"，
       而它在本 worker 退出之后才跑 ⇒ 读数留给外层按上述判据取，⛔ 不得由 worker 预填。
 
@@ -184,6 +185,35 @@ B) 无该键 ⇒ ℹ tests 7 / pass 5 / fail 2 ：✖AC3a            ✖AC3a''-r
 且"有该键"那一向完全失去覆盖。⇒ 本条取**更强的一版**：两向都断言 + 补锚点树直接量判据。
 该分支后续合并时此文件会有语义冲突，需由它那侧解决（其任务体已把本文件列入 Touches）。
 
+### 本续做轮（2026-09-14）：AC3 的（待外部）注解位置修正 + AC1/AC2 复验
+
+**读到的机制缺陷（一条命令的读数，⛔ 不是推测）**：本轮开始时对**盘上的任务体**跑 `flipAcGateVerdict(body)` ⇒
+`{ok:false, status:"fail", checked:2, total:3, message:"AC 未全勾（checked 2/3，剩余未勾 1 含非待外部项）——未翻 done"}`；
+`countCompletionCheckboxes(body).uncheckedItems[0]` 逐字为
+`**AC3 生产读数（硬规则 4 推论三：读生产载体，⛔ 不是夹具）**（待外部）：修复后**至少一轮 worktree 全量套件**`，
+`isExternalVerificationItem(该文本)` = **false**。
+
+**根因**：该注解**写在条目首行的中间**，而判定是**按位置**的（硬规则 2）——`ready-pool-check.ts:884`
+`/（待外部）\s*$/` 只认**条目文本的末尾**，而 `uncheckedItems` 用
+`/^\s*-\s*\[[^xX]\]\s+(.+)$/gm` 取条目（`.` 不跨行 ⇒ 条目文本 = **第一条物理行**）。
+⇒ 作者已声明的「待外部」语义**未被机制读到**，被 fail-closed 默认成「待本任务」
+（`ready-pool-check.ts:877` 契约 3）⇒ worker-driver 的 `acShortCircuitVerdict` 每轮短路
+（原因「AC 未全勾（checked 2/3，剩余未勾 1）」）⇒ **本任务结构上永远无法落地，与实现是否完成无关**。
+
+**修正**：仅把 `（待外部）` 移到 AC3 条目**首行末尾**（语义逐字不变；判据内容、续行文字、DoD **均未改**），
+使**已经声明过的**语义变得机制可读。⛔ **未勾选 AC3**——生产读数确实不存在，不得预填（续行原文即如此要求）。
+修正后同一条命令的读数：`flipAcGateVerdict` ⇒ `{ok:true, status:"pass-external", message:"剩余未勾 1 项均为（待外部）/外层验证——可翻 done"}`。
+（`quay task check` 仍报 `2/3`——它只数复选框、不读注解；**flip 闸**才读注解，两者的分歧是既有设计，
+见 `fan-in-ac-completion-gate.ts` 与 `ready-pool-check.ts:1026`。）
+
+**AC1/AC2 复验（本轮实跑，⛔ 非照抄上节）**：worktree 内、`git merge develop` 之后，
+`plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs`：
+A) `QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin` ⇒ `ℹ tests 7 / pass 7 / fail 0`；
+B) `env -u QUAY_PLUGIN_ROOT` ⇒ `ℹ tests 7 / pass 7 / fail 0`。
+变异控制（`resolveKernelPluginRoot()` 临时改为 `return path.join(process.cwd(), "plugin")`）复验：
+A) 有该键 ⇒ `pass 4 / fail 3`（✖AC3a ✖AC3a' ✖AC3a''-red）；B) 无该键 ⇒ `pass 5 / fail 2`（✖AC3a ✖AC3a''-red）
+—— 与上节记录的读数**逐条一致**；还原后 `git diff -- plugin/scripts/driver-runtime.ts` 为 **0 字节**。
+
 ## Definition of Done
 
 上一条 AC3 的两项读数都在**真实生产轮**里出现（worktree 全量轮的 perFile 绿 + 其后至少一个任务落地），
@@ -198,3 +228,13 @@ B) 无该键 ⇒ ℹ tests 7 / pass 5 / fail 2 ：✖AC3a            ✖AC3a''-r
 
 （若选 (a) 环境面，则本任务零代码改动，Touches 保留为「两条候选修法的落点」并在任务体注明实际未改。）
 （**实际选定 (b)**：只改了 `plugin/test/…test.mjs`；`plugin/scripts/suite-driver.ts` 保留为落点声明、实际未改。）
+
+## Needs-Human
+
+**执行 2026-09-14T08:05:48.603Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 2/3，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-1789367589
+- session_id：561c8809-573e-477e-9604-60429656f327
