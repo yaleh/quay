@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10
 title: dashboard 首页任务台账速览的 ready/todo/needs-human mini-list 上限从 3 调到 10
-status: ready
+status: done
 labels:
   - gap
 parent: null
