@@ -2004,6 +2004,95 @@ test("taskIdFromBranchRef — task/<id> unconditionally; a bare ref only when gr
   assert.equal(cli.taskIdFromBranchRef(null, taskIds), null, "null ref yields null");
 });
 
+// ── suffix-truncated worktree names (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption)
+// The MEASURED failure (2026-09-15): a worktree created as
+// `…/quay-worktrees/gap-worker-driver-counts-transient-rate-limit` on branch
+// `task/gap-worker-driver-counts-transient-rate-limit` for the task
+// `…-as-fast-death-and-parks-task-needs-human` matched NOTHING under exact equality. The
+// leftover-worktree exemption never fired (task trapped out of the pool 30+ h, indistinguishable from
+// "work really is done, only the status flip is missing") and the superseded reclaim reported
+// `unreadable` (a truncated string queried against the real store). `resolveTaskName` /
+// `resolveWorktreeTaskId` / `mismatchedWorktreeNames` are the fix; these tests pin all FOUR verdicts.
+
+test("resolveTaskName — exact / prefix / unmatched / ungrounded are pairwise distinct (hard rule 3b)", async () => {
+  const cli = await importCli();
+  const taskIds = new Set(["gap-full-name", "gap-full-name-with-a-long-suffix", "gap-other"]);
+  assert.deepEqual(cli.resolveTaskName("gap-full-name", taskIds), { taskId: "gap-full-name", match: "exact" }, "exact: the name IS a real task id");
+  assert.deepEqual(cli.resolveTaskName("gap-full-name-with-a-long", taskIds), { taskId: "gap-full-name-with-a-long-suffix", match: "prefix" },
+    "prefix: the truncation shape — a proper prefix of exactly ONE real task id resolves to it");
+  assert.deepEqual(cli.resolveTaskName("gap-absent", taskIds), { taskId: null, match: "unmatched" }, "unmatched: grounded and nothing binds");
+  assert.deepEqual(cli.resolveTaskName("gap-absent", new Set()), { taskId: null, match: "ungrounded" },
+    "ungrounded: no store to ground against — ⛔ never reported as `unmatched` (hard rule 6: 缺值 = 未查)");
+  // AMBIGUOUS prefix: `gap-` prefixes three real ids. Guessing one would silently attribute work to
+  // the wrong task ⇒ resolve nothing and report it instead.
+  assert.deepEqual(cli.resolveTaskName("gap-", taskIds), { taskId: null, match: "unmatched" }, "an AMBIGUOUS prefix resolves to nothing (never guessed)");
+  // Direction matters: a name LONGER than a real id is not a truncation of it.
+  assert.deepEqual(cli.resolveTaskName("gap-full-name-with-a-long-suffix-x", taskIds), { taskId: null, match: "unmatched" },
+    "a name that EXTENDS a real id is not a truncation ⇒ no false match (the pre-existing prefix negative control)");
+});
+
+test("resolveWorktreeTaskId — basename AND de-prefixed branch name both bind; exact wins over prefix", async () => {
+  const cli = await importCli();
+  const taskIds = new Set(["gap-truncated-id-as-fast-death", "gap-branch-only-suffix"]);
+  // The measured shape verbatim: BOTH slots carry the truncated name.
+  assert.deepEqual(
+    cli.resolveWorktreeTaskId({ path: "/home/yale/work/quay-worktrees/gap-truncated-id", branch: "refs/heads/task/gap-truncated-id" }, taskIds),
+    { taskId: "gap-truncated-id-as-fast-death", name: "gap-truncated-id", match: "prefix" },
+    "path basename == de-prefixed branch == truncated name ⇒ resolves to the real task id",
+  );
+  // Branch-only truncation (a worktree dir named something else entirely): the de-prefixed branch slot.
+  assert.deepEqual(
+    cli.resolveWorktreeTaskId({ path: "/tmp/wt-not-a-task-name", branch: "refs/heads/task/gap-branch-only" }, taskIds),
+    { taskId: "gap-branch-only-suffix", name: "gap-branch-only", match: "prefix" },
+    "the de-prefixed branch slot resolves even when the path basename is unrelated",
+  );
+  // Exact wins over prefix across slots: the basename merely PREFIXES a real id, the branch IS one.
+  assert.deepEqual(
+    cli.resolveWorktreeTaskId({ path: "/tmp/gap-branch-only", branch: "refs/heads/task/gap-truncated-id-as-fast-death" }, taskIds),
+    { taskId: "gap-truncated-id-as-fast-death", name: "gap-truncated-id-as-fast-death", match: "exact" },
+    "exact equality wins over the prefix arm — a basename must not shadow the worktree's own task/<id> branch",
+  );
+  assert.deepEqual(cli.resolveWorktreeTaskId({ path: "/tmp/x", branch: "refs/heads/develop" }, taskIds),
+    { taskId: null, name: "x", match: "unmatched" }, "a non-task worktree binds to nothing");
+  assert.deepEqual(cli.resolveWorktreeTaskId({ path: "/tmp/x", branch: null }, new Set()),
+    { taskId: null, name: "x", match: "ungrounded" }, "no task store ⇒ ungrounded, not unmatched");
+});
+
+test("mismatchedWorktreeNames — AC2 diagnostic: unmatched task worktrees are reported; resolved ones and non-task worktrees are not", async () => {
+  const cli = await importCli();
+  const taskIds = new Set(["gap-real", "gap-truncated-id-as-fast-death"]);
+  const isQuayWorktree = (p) => String(p).startsWith("/home/yale/work/quay-worktrees/");
+  const worktrees = [
+    { path: "/home/yale/work/quay-worktrees/gap-real", branch: "refs/heads/task/gap-real" },
+    { path: "/home/yale/work/quay-worktrees/gap-truncated-id", branch: "refs/heads/task/gap-truncated-id" },
+    { path: "/home/yale/work/quay-worktrees/gap-nobody-knows-this-one", branch: "refs/heads/task/gap-nobody-knows-this-one" },
+    { path: "/tmp/not-in-the-namespace", branch: "refs/heads/develop" },
+    { path: "/home/yale/work/quay", branch: "refs/heads/develop" },
+  ];
+  const { evaluated, records } = cli.mismatchedWorktreeNames(worktrees, taskIds, { isQuayWorktree });
+  assert.equal(evaluated, true, "a non-empty task-id set ⇒ evaluated");
+  assert.deepEqual(records.map((r) => r.name), ["gap-nobody-knows-this-one"], "only the unresolvable task worktree is reported");
+  assert.equal(records[0].type, "mismatched-worktree-name", "the record is TYPED — a distinct diagnostic entry, not a silent no-op");
+  assert.equal(records[0].path, "/home/yale/work/quay-worktrees/gap-nobody-knows-this-one");
+  assert.equal(records[0].branch, "refs/heads/task/gap-nobody-knows-this-one");
+  // Negative controls: a RESOLVED (truncated-but-bound) worktree is not a mismatch (it is the fix
+  // working), and neither is a non-task worktree (main checkout / develop / outside the namespace).
+  assert.equal(records.some((r) => r.name === "gap-truncated-id"), false, "a truncated name that RESOLVES is not a mismatch");
+  assert.equal(records.some((r) => r.name === "not-in-the-namespace" || r.name === "quay"), false, "non-task worktrees are out of scope (⛔ noise must not bury the real signal)");
+});
+
+test("mismatchedWorktreeNames — an unreadable store reports evaluated:false, ⛔ never a clean bill of health (hard rule 3b)", async () => {
+  const cli = await importCli();
+  const worktrees = [{ path: "/home/yale/work/quay-worktrees/gap-whatever", branch: "refs/heads/task/gap-whatever" }];
+  const grounded = cli.mismatchedWorktreeNames(worktrees, new Set(["gap-real"]), { isQuayWorktree: () => true });
+  const ungrounded = cli.mismatchedWorktreeNames(worktrees, new Set(), { isQuayWorktree: () => true });
+  assert.equal(grounded.evaluated, true);
+  assert.equal(grounded.records.length, 1, "grounded + unmatched ⇒ one record");
+  assert.equal(ungrounded.evaluated, false, "no task-id set ⇒ nothing was judged");
+  assert.deepEqual(ungrounded.records, [], "…and the record list is empty");
+  assert.notDeepEqual(ungrounded, grounded, "「could not tell」 must not be shaped like 「checked, one mismatch」 — and the empty-record forms must differ too");
+});
+
 // 能取假 (hard rule ④): the branch pass must enumerate REF space, not worktree space. A task branch
 // whose worktree was already removed — the entire exited-not-landed population — still has an
 // attempt-1 first-commit reading. Enumerating open worktrees instead makes every assertion below

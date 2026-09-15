@@ -104,6 +104,10 @@ import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-schedule
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded, buildGitHistoryIndex } from "../scripts/task-status-drift-check.ts";
+// The EXACT-equality worktree judgment the leftover-worktree exemption used alone before
+// gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption — imported so the AC1 negative
+// control asserts the PRE-FIX predicate directly, not a knob on the new one.
+import { worktreeMatchesTask } from "../scripts/fast-mode-telemetry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -807,6 +811,81 @@ test("LEFTOVER-WORKTREE — a single allChecked dead task no longer zeroes the p
   assert.equal(r.pool, 1, "the single allChecked dead task is counted in the pool, not dropped (AC4)");
   assert.equal(r.dispatchable_disjoint, 1, "dispatchable_disjoint ≥ 1 — the dead task is itself dispatchable, no longer zeroed (AC4)");
   assert.equal(r.pool_big_all_colliding, false, "pool_big_all_colliding stays false (AC4)");
+});
+
+// ── SUFFIX-TRUNCATED worktree/branch names
+// (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption) ─────────────────────────────
+// MEASURED 2026-09-15: task `gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-
+// task-needs-human` was implemented in a worktree named (path AND branch) `…-transient-rate-limit` —
+// the task id MINUS a real suffix. Exact equality is blind to that, so the leftover-worktree exemption
+// never fired: the task fell through to the landed/allChecked arms, was judged a done-flip, and sat
+// outside the pool for 30+ hours with NO signal distinguishing it from "work really is done, only the
+// status flip is missing" (hard rule 3b). These two tests pin the real shape end-to-end.
+
+const MISMATCH_FULL_ID = "gap-nyf-name-mismatch-as-fast-death-and-parks-task-needs-human";
+const MISMATCH_TRUNCATED_ID = "gap-nyf-name-mismatch"; // the full id minus a REAL suffix
+
+/** The measured fixture: a real repo, the FULL id in the task store, a worktree whose path basename
+ *  AND branch both carry the TRUNCATED id. Returns { root, wtPath, task }. */
+function makeTruncatedWorktreeFixture(t, tag) {
+  const root = makeRealGitRepo(tag);
+  const wtRoot = path.join(root, "..", `${path.basename(root)}-worktrees`);
+  const wtPath = path.join(wtRoot, MISMATCH_TRUNCATED_ID);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtRoot, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  // The touch EXISTS on disk and is committed ⇒ the workLanded arm fires, so the ONLY thing standing
+  // between this task and a done-flip verdict is the leftover-worktree exemption.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  gitCommit(root, "seed + landed");
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/landed.ts (new)"] });
+  writeTask(root, MISMATCH_FULL_ID, { status: "ready", labels: ["gap"], body });
+  fs.mkdirSync(wtRoot, { recursive: true });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${MISMATCH_TRUNCATED_ID}`, wtPath]);
+  return { root, wtPath, task: { id: MISMATCH_FULL_ID, status: "ready", body } };
+}
+
+test("AC1 (name mismatch) — a truncated worktree/branch name still suppresses the done-flip arms (⛔ no silent pool exit)", (t) => {
+  const { root, wtPath, task } = makeTruncatedWorktreeFixture(t, "nyf-name-mismatch");
+  const worktrees = [{ path: wtPath, branch: `refs/heads/task/${MISMATCH_TRUNCATED_ID}` }];
+  // NEGATIVE CONTROL — the pre-fix predicate itself (imported, not re-derived), run on the real
+  // worktree: exact equality sees NOTHING. On the pre-fix code this is the whole judgment, so the
+  // exemption below never fires and the task is silently excluded from the pool.
+  assert.equal(worktreeMatchesTask(worktrees[0], MISMATCH_FULL_ID), false, "negative control: the pre-fix exact-equality judgment is blind to the truncated name");
+  assert.equal(notYetFlipped(task, root, null, { worktrees, taskIds: new Set() }), true,
+    "negative control: with nothing to ground against, the truncated worktree stays invisible ⇒ judged a done-flip (the pre-fix verdict)");
+  // AC1 — the fix. `taskIds` is what analyzeTasks threads; the same verdict must also come from the
+  // fully-legacy call form (no opts at all), so the fix is not gated on a test-only knob.
+  assert.equal(notYetFlipped(task, root, null, { worktrees, taskIds: new Set([MISMATCH_FULL_ID]) }), false,
+    "AC1: the truncated name resolves to the real task ⇒ the leftover-worktree exemption fires");
+  assert.equal(notYetFlipped(task, root), false,
+    "AC1: the no-opts form (worktreeExists reading the store off disk) reaches the same verdict");
+  // BIDIRECTIONAL — remove the worktree and the done-flip arm fires again: the exemption, not the
+  // fixture, is what changed the verdict (hard rule 4: a量 that cannot take the other value is not a measurement).
+  execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath]);
+  assert.equal(notYetFlipped(task, root), true, "worktree gone ⇒ done-flip again (the exemption is the only difference)");
+});
+
+test("AC2/AC3 (name mismatch) — analyzeTasks reports the unresolvable name AND keeps the resolvable one in the pool", (t) => {
+  const { root } = makeTruncatedWorktreeFixture(t, "nyf-name-mismatch-report");
+  // A second worktree whose name binds to NOTHING (not even a unique prefix) — the AC2 population.
+  const orphanRoot = path.join(root, "..", `${path.basename(root)}-orphan`);
+  const orphanWt = path.join(orphanRoot, "gap-nobody-knows-this-one");
+  t.after(() => fs.rmSync(orphanRoot, { recursive: true, force: true }));
+  fs.mkdirSync(orphanRoot, { recursive: true });
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", "task/gap-nobody-knows-this-one", orphanWt]);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.ready.includes(MISMATCH_FULL_ID), true, "AC1: the task stays in the ready pool (its truncated worktree was recognized)");
+  assert.equal(r.excluded.some((e) => e.id === MISMATCH_FULL_ID), false, "AC1: no not-yet-flipped exclusion — the silent 30 h pool exit is closed");
+
+  assert.equal(r.mismatched_worktrees.evaluated, true, "AC2: the store was readable ⇒ the diagnostic is a real judgment, not a default");
+  assert.deepEqual(r.mismatched_worktrees.records.map((x) => x.name), ["gap-nobody-knows-this-one"],
+    "AC2: exactly the unresolvable task-worktree name is reported — the resolvable truncated one is not a mismatch");
+  assert.equal(r.mismatched_worktrees.count, 1);
+  assert.equal(r.mismatched_worktrees.records[0].type, "mismatched-worktree-name",
+    "AC2: a TYPED record — structurally distinct from «everything is fine», not a silent no-op");
 });
 
 // ── HOISTED leftover-worktree exemption + touch-absent-from-ref veto
