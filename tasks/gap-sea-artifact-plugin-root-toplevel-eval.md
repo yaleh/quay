@@ -2,7 +2,7 @@
 id: gap-sea-artifact-plugin-root-toplevel-eval
 title: SEA 产物的 quay serve 可用：plugin-root.ts 顶层求值 import.meta.url 归零（惰性化进函数）+ 立起
   ci-runs.jsonl 的 seaVerify 载体字段（AC-267）
-status: ready
+status: done
 labels:
   - gap
   - defect
