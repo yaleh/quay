@@ -2,7 +2,7 @@
 id: gap-frozen-violated-files-on-stale-verdict
 title: 「此刻为假」实读【最多 4 小时前】的轮转 verdict：frozen-violated 在「修复已落地、台账尾未及轮转」的窗口内为同一 AC
   反复立案（今日 3 例：AC-162 ×1、AC-194 ×2），且 prompt 断言「没有别的机制重跑它」已被有界轮转证否
-status: todo
+status: ready
 labels:
   - gap
   - defect
