@@ -2,7 +2,7 @@
 id: gap-ac264-quay-fleet-project-scope-plugin-only-deployment
 title: quay-fleet 以 project scope + marketplace 渠道纯 plugin 部署并由自己的 driver
   把一条真任务驱到 done（AC-264 收口）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
