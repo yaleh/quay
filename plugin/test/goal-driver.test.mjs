@@ -24,6 +24,7 @@ import {
   checkStaleness,
   checkAchievedFailing,
   readFrozenFailing,
+  recheckFrozenFailing,
   parseFrozenFailingReading,
   isFilingGapState,
   sweepFrozenAcs,
@@ -68,7 +69,7 @@ import {
 } from '../scripts/goal-driver.ts';
 import { readsFrozenPopulation } from '../../packages/quay/src/goal-store.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
-import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
+import { DRIVER_KINDS, KNOWN_KINDS, GOAL_ACCEPTANCE_ACTIVE_ENV } from '../scripts/driver-runtime.ts';
 // cli/driver.ts 的 KINDS 白名单（AC6 断言对象；已导出）。
 import { KINDS } from '../../packages/quay/src/cli/driver.ts';
 // goal 动词 argv 的单一构造点 + 「quay CLI 解析得出吗」的判据（AC5 断言对象）。
@@ -1246,6 +1247,184 @@ test('冻结population 端到端：真 runGoalRound 把域外失败的 AC 枚举
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+// ── 立案前【直接量复核】（gap-frozen-violated-files-on-stale-verdict）──────────────────────────────
+//
+// 缺陷：`frozenReading.failing` 是**台账读数**（轮转 verdict，新鲜度界 4h），而轮转周期实测 13–101 min
+// ⇒ 修复落地后尾读数最长数小时仍写 `fail`，driver 每轮据此立案 + prompt 逐字告诉下游「earlier fix did
+// not hold」。修法 = 立案前真跑一次那条 criterion，只有复核后**仍非 0** 才产 frozen-violated。
+//
+// 下面四组互为控制：①三态互不同形（含闸拒绝）；②真跑判据的「修复已落地」形态（cleared）；③缺口分派
+// 的改前/改后对照（同一时刻同一 AC）；④端到端（生产形态：修复落地、台账尾尚未轮转 ⇒ 不立案）。
+
+test('立案前复核：闸拒绝 ⇒ 独立结局 guard-refused（⛔ 不与「复核通过」同形）；未传/非 violated ⇒ ran:false 零成本', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-guard-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1' });
+    const reading = { failing: ['AC-900'], judgment: 'violated', cause: null, frozenScope: 1 };
+
+    // 正控制：不在闸下 ⇒ 真跑判据 ⇒ confirmed-failing（`exit 1` 此刻仍为假）。
+    const on = await recheckFrozenFailing(repoRoot, tmp, reading);
+    assert.equal(on.ran, true);
+    assert.equal(on.guardRefused, false);
+    assert.deepEqual(on.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'confirmed-failing', 'still-false']],
+      '不在闸下 ⇒ 真跑；`exit 1` ⇒ confirmed-failing（判据此刻仍为假）');
+
+    // 闸拒绝：本进程已在跑判据 ⇒ **一条都不跑**，且结局是**独立取值**（⛔ 不是 cleared，也不是 confirmed）。
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = '1';
+    try {
+      const refused = await recheckFrozenFailing(repoRoot, tmp, reading);
+      assert.equal(refused.ran, false, '闸拒绝 ⇒ 没跑');
+      assert.equal(refused.guardRefused, true);
+      assert.equal(refused.attempted, 1);
+      assert.deepEqual(refused.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'not-evaluated', 'guard-refused']],
+        '拒绝是独立结局：not-evaluated + cause=guard-refused（⛔ 与 cleared / confirmed 都不同形）');
+      assert.notEqual(refused.entries[0].outcome, 'cleared', '⛔ 闸拒绝不得冒充「复核通过」');
+      assert.notEqual(refused.entries[0].outcome, 'confirmed-failing', '⛔ 也不得冒充「复核后仍为假」');
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+
+    // 零成本路径：读数不适用（未传 / clean / 空 failing）⇒ ran:false，不跑任何判据。
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, null)).ran, false, '未传读数 ⇒ 不跑');
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, { failing: [], judgment: 'clean', cause: null, frozenScope: 1 })).ran, false,
+      'clean ⇒ 不跑');
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, { failing: [], judgment: 'not-evaluated', cause: 'unreadable', frozenScope: -1 })).ran, false,
+      '读数本身 not-evaluated ⇒ 不跑（缺口分派已在该分支落 not-evaluated）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('立案前复核 ②：台账尾说 fail 而判据此刻 exit 0 ⇒ cleared —— 台账读数是【陈旧】的直接量证据', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-cleared-'));
+  const marker = path.join(tmp, 'fix-landed');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    // 判据 = 「修复已落地」的代理：`test -f <marker>`。⛔ 判据文本全程不变 ⇒ criterionHash 不变
+    // ⇒ 台账尾的那条 `fail` 说的**正是当前这条判据**（否则会被判 amendedUnverified，测不到本形态）。
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: `test -f ${marker}` });
+
+    // 轮转跑一次（marker 不在）⇒ 台账写下 actor=goal-sweep 的 fail。
+    await sweepFrozenAcs(repoRoot, tmp);
+    const stale = await readFrozenFailing(repoRoot, tmp);
+    assert.equal(stale.judgment, 'violated');
+    assert.deepEqual(stale.failing, ['AC-900'], 'marker 不在 ⇒ 轮转记 fail');
+
+    // 「修复落地」：marker 出现。台账**没有**因此改变——这正是本任务要修的时差。
+    fs.writeFileSync(marker, '', 'utf8');
+    const stillStale = await readFrozenFailing(repoRoot, tmp);
+    assert.equal(stillStale.judgment, 'violated', '台账尾仍是 fail（轮转 verdict 在 4h 内 ⇒ 优先级高于尾事件）——缺陷形态：读数陈旧');
+    assert.deepEqual(stillStale.failing, ['AC-900']);
+
+    // 直接量复核：真跑判据 ⇒ exit 0 ⇒ cleared。
+    const rc = await recheckFrozenFailing(repoRoot, tmp, stillStale);
+    assert.equal(rc.ran, true);
+    assert.deepEqual(rc.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'cleared', 'now-true']],
+      '复核是直接量：判据此刻 exit 0 ⇒ cleared（⛔ 台账尾说的不算）');
+
+    // 反方向（负控制①）：marker 撤掉 ⇒ 同一判据此刻为假 ⇒ confirmed-failing，立案照旧。
+    fs.rmSync(marker, { force: true });
+    const rc2 = await recheckFrozenFailing(repoRoot, tmp, stillStale);
+    assert.deepEqual(rc2.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'confirmed-failing', 'still-false']],
+      '负控制①：真为假 ⇒ confirmed-failing（复核不是恒绿闸）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('立案前复核 ③：同一时刻同一 AC 的改前/改后对照 —— 改前 frozen-violated，改后无读数', () => {
+  const recs = [
+    { id: 'GOAL-900', status: 'achieved' },
+    { id: 'AC-900', status: 'achieved', goal: 'GOAL-900', criterion: 'exit 1' },
+  ];
+  const staleReading = { failing: ['AC-900'], judgment: 'violated', cause: null, frozenScope: 1 };
+  // 改前（未传复核读数 ⇒ 既有行为）：台账尾 fail 直接被当「此刻为假」⇒ 立案。
+  const before = computeGoalGaps(recs, [], null, null, staleReading).find((x) => x.ac === 'AC-900');
+  assert.equal(before.state, 'frozen-violated', '改前：产 frozen-violated（台账尾被当直接量）');
+  assert.ok(isFilingGapState('frozen-violated'));
+
+  // 改后（复核 cleared）：**不产 frozen-violated**，也不产任何读数（此刻确无工作可立）。
+  const cleared = { ran: true, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'cleared', cause: 'now-true', reason: 'exit 0' }], guardRefused: false };
+  const after = computeGoalGaps(recs, [], null, null, staleReading, cleared).find((x) => x.ac === 'AC-900');
+  assert.equal(after, undefined, '改后：复核 cleared ⇒ 不产 frozen-violated（同一时刻同一 AC 的对照）');
+
+  // 复核 not-evaluated ⇒ **独立取值**（⛔ 既不是 cleared 的「无读数」，也不是 confirmed 的 frozen-violated）。
+  const notEv = { ran: false, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'not-evaluated', cause: 'guard-refused', reason: 'guard' }], guardRefused: true };
+  const ne = computeGoalGaps(recs, [], null, null, staleReading, notEv).find((x) => x.ac === 'AC-900');
+  assert.equal(ne.state, 'not-evaluated', '复核不可评估 ⇒ 独立取值 not-evaluated');
+  assert.equal(ne.taskCount, null, 'not-evaluated 时 taskCount=null（⛔ 不与 0 同形）');
+  assert.notEqual(ne.state, 'frozen-violated', '⛔ 不得回落成「复核后仍为假」');
+  assert.ok(!isFilingGapState('not-evaluated'), 'not-evaluated 不在 spawn 选取面（复核跑不成 ≠ 判据为假）');
+
+  // 复核 confirmed-failing ⇒ 立案照旧（负控制①的分派半边）。
+  const confirmed = { ran: true, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'confirmed-failing', cause: 'still-false', reason: 'exit 1' }], guardRefused: false };
+  assert.equal(computeGoalGaps(recs, [], null, null, staleReading, confirmed).find((x) => x.ac === 'AC-900').state, 'frozen-violated',
+    '负控制①（分派）：复核后仍非 0 ⇒ frozen-violated 照旧立案');
+
+  // 漏传复核读数 ⇒ 照旧立案（fail-visible：调用方漏传不得静默变成「复核通过」）。
+  assert.equal(computeGoalGaps(recs, [], null, null, staleReading).find((x) => x.ac === 'AC-900').state, 'frozen-violated',
+    '未传复核读数 ⇒ 保守立案（⛔ 不与 cleared 同形）');
+});
+
+test('立案前复核 ④（生产形态端到端）：修复已落地而台账尾尚未轮转 ⇒ 下一轮不再产生 gap 立案', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-e2e-'));
+  const marker = path.join(tmp, 'fix-landed');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true }); // 空 tasks ⇒ taskFacts=[]（⛔ 不是 null）
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: `test -f ${marker}` });
+
+    // 第 1 轮：判据为假（marker 不在）⇒ 复核 confirmed-failing ⇒ 立案（既有行为不许被削弱）。
+    const r1 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const g1 = new Map(r1.fact.value.gaps.map((g) => [g.ac, g.state]));
+    assert.equal(g1.get('AC-900'), 'frozen-violated', '第 1 轮：真为假 ⇒ 照旧立案');
+    assert.deepEqual(r1.fact.value.gap_spawns.map((s) => s.ac), ['AC-900'], '第 1 轮：进 spawn 立案路径');
+    assert.deepEqual(r1.fact.value.frozenRecheck.entries.map((e) => [e.ac, e.outcome]), [['AC-900', 'confirmed-failing']],
+      '第 1 轮：复核读数落进轮记录（产物可查）');
+
+    // 「修复落地」：marker 出现。⛔ 不动判据文本 ⇒ criterionHash 不变 ⇒ 台账尾的那条 fail 仍描述当前判据。
+    fs.writeFileSync(marker, '', 'utf8');
+
+    // 第 2 轮：台账尾**仍然**是 fail（轮转 verdict 在 4h 内、且 fail 的再查窗口 10 min 未到）⇒ 缺陷形态
+    // 必须仍在读数里，而复核必须把它按下去 ⇒ 不立案。
+    const r2 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    assert.deepEqual(r2.fact.value.frozenFailing.failing, ['AC-900'],
+      '第 2 轮：台账读数**仍然**说此刻为假（轮转尚未轮到它）——这正是缺陷的输入，⛔ 不是被修好了');
+    const g2 = new Map(r2.fact.value.gaps.map((g) => [g.ac, g.state]));
+    assert.notEqual(g2.get('AC-900'), 'frozen-violated', '第 2 轮：复核 cleared ⇒ 不产 frozen-violated');
+    assert.equal(g2.get('AC-900'), undefined, '第 2 轮：也不产任何读数（此刻确无工作可立）');
+    assert.deepEqual(r2.fact.value.gap_spawns.map((s) => s.ac), [], '第 2 轮：不 spawn（不烧 spawn 名额，也不给下游指一个不存在的缺陷）');
+    assert.deepEqual(r2.fact.value.frozenRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'cleared', 'now-true']],
+      '第 2 轮：复核读数「cleared/now-true」落进轮记录（这就是「修复已落地」的直接量证据）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC5：frozen 分支的 prompt 不再断言「No other mechanism re-runs it」——改为可核的「本轮已复核」表述', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'frozen-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(!p.includes('No other mechanism re-runs it'),
+    '⛔ 该断言自【有界轮转】落地后为假，且与 checkStalePass 自己的设计注释互相矛盾');
+  assert.ok(!p.includes('stays false forever'), '⛔ 同句的结论半边一并去掉');
+  assert.ok(p.includes('RE-RAN its criterion directly before filing'),
+    '改为陈述本轮真的做了什么：立案前跑过一次 criterion（直接量，⛔ 不是台账尾的陈旧读数）');
+  // 既有口径不许被这次改动削弱（同处断言，防止改 A 破 B）。
+  assert.ok(p.includes('LEFT the reverify scope'), '口径仍在：已离开复验域');
+  assert.ok(p.includes('IN FLIGHT') && !p.includes('ANY status'), '去重口径仍在：只有在飞任务算重复');
+  assert.ok(p.includes('make the criterion TRUE again') && p.includes('superseded') && p.includes('long-term: true'),
+    '三条合法终态仍在');
+  // 常设不变式（standing）分支不受影响：⛔ 不得把 frozen 的新措辞漏进那一支。
+  const s = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'standing-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(!s.includes('LEFT the reverify scope') && !s.includes('RE-RAN its criterion'), 'standing 分支不带 frozen 的措辞');
+});
+
 // ── 被驱动系统（目标项目）健康度 —— gap-goal-driver-blind-to-driven-system-health ────────────────
 //
 // 症状：本 driver 6 天 5308 轮只产出**内省**读数（goal-ring / goal-sufficiency），它驱动的目标项目

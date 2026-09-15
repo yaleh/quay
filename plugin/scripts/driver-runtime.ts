@@ -453,7 +453,11 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
 // 而是从本模块取符号：布局知识留在 Layer 0，driver 只表达「我需要这个符号」。
 // ⊢ AC-262 判据按源文本扫这两个文件（剥掉 `//` 行注释后不得出现 Core 源码树字面量），故符号本身
 //   必须在这里落地一次；⛔ 不是把字面量藏起来——是把「谁知道布局」收敛到它该在的地方。
-export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
+// `GOAL_ACCEPTANCE_ACTIVE_ENV`（判据重入闸的**变量名**）在这里落地一次的理由与上面完全相同：
+// goal-driver 的「立案前直接量复核」要**参与**那道闸（跑判据前置位、已在跑则拒绝），而它必须读
+// 同一个名字。⛔ 在 driver 侧重写一份 `"QUAY_GOAL_ACCEPTANCE_ACTIVE"` 字面量就是第二个定义——
+// store 侧改名后 driver 会**静默停止守闸**（硬规则 5b 的形态），故走单一导入面。
+export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
 export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
