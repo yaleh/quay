@@ -1,7 +1,7 @@
 ---
 id: gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix
 title: 交付面 skill/loop 文档里的 scripts/dist/*.js 引用全部带 cwd 相对 plugin/ 前缀——在消费项目里一个都解析不到
-status: todo
+status: ready
 labels:
   - gap
 parent: null
