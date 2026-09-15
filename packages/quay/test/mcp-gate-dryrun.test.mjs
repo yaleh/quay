@@ -111,6 +111,13 @@ test("DIR-103-B MCP gate_run dryRun: executes the meter without recording a Gate
   seedTask(tasksDir, "D103-FALSE-PASS", { title: "DIR-103-B explicit-false pass", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: "true" } });
 
   const { client, transport } = await connectStdio("node", [QUAY_CLI, "mcp"], workspaceRoot);
+  // gap-release-run-tests-hangs-on-shared-mcp-client-leak (Requested action 4, hard rule 5b): the
+  // same defect shape as mcp-server.test.mjs lived here — `const { client, transport } = await
+  // connectStdio(…)` with no `finally`, so any throwing assertion skipped the teardown and left the
+  // `quay mcp` child (plus its provider child) holding the event loop open: `node --test` would
+  // never exit. This file has no live-network trigger (it is fully local), but the leak mechanism
+  // is verbatim the same, so the close is unconditional here too.
+  try {
 
   // ── AC1 + AC2: dryRun:true executes and appends ZERO GateEvents, status unchanged ──
   {
@@ -156,7 +163,9 @@ test("DIR-103-B MCP gate_run dryRun: executes the meter without recording a Gate
 
   // Clean-exit teardown (Grounded fact #3): stdin.end() → quay mcp exits cleanly
   // → child-process coverage is merged. Never child.kill() here.
-  await transport.close();
-  fs.rmSync(tasksDir, { recursive: true, force: true });
-  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  } finally {
+    await client.close();
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });

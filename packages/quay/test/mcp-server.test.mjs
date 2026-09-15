@@ -117,6 +117,13 @@ function seedTask(tasksDir, id, fields) {
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
+// ADR-019/DIR-109 + gap-release-run-tests-hangs-on-shared-mcp-client-leak (AC-266): live-GitHub
+// blocks run ONLY when opted in, mirroring cli.test.mjs:189-190's own LIVE_GITHUB_ENV /
+// liveGithubEnabled pair rather than inventing a second spelling of the same opt-in. The release
+// job deliberately does not set this (nor GH_TOKEN), so block 10 must self-skip there.
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
+
 let failures = 0;
 let _lastAssertMs = 0; // AC1b assertion-gap timing (gap-suite-cost-model-is-wrong-optimizations-buy-nothing)
 function assert(cond, msg) {
@@ -226,6 +233,22 @@ async function main() {
   // ---- 1. Connect the real `quay mcp` subprocess ----
   const { client: core, transport: coreTransport } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot);
 
+  // gap-release-run-tests-hangs-on-shared-mcp-client-leak (AC-266): EVERY client this file opens is
+  // wrapped in `try { … } finally { await <client>.close(); }` so that a throwing block cannot skip
+  // the close. Before this, `core.close()` sat only on the happy path (its old position is the
+  // `} finally {` that now ends this block); any block that threw left the `quay mcp` child — and
+  // that child's own provider subprocess — alive, the stdio handle held the event loop open, and
+  // `node --test` never exited. That is the release job's 30m21s/30m17s zero-output hang (AC-266),
+  // and the repo's known `detached-test-child-leak-hangs-suite` shape. The trigger in release is
+  // block 10 below (live GitHub, and release.yml deliberately sets no token), but the ROOT is this
+  // lifecycle, not that block: on the machine the defect was filed from the first throw was block
+  // 7b's `dir.total`, i.e. a different block with the identical shape.
+  //
+  // The wrapped bodies below are deliberately NOT re-indented — a whole-file re-indent would bury
+  // the one-line change that matters under ~3800 lines of churn. `git diff -w` on this commit shows
+  // only the added `try {` / `} finally { … }` pairs.
+  try {
+
   // ---- 2. Resource enumeration ----
   const resources = await core.listResources();
   const uris = resources.resources.map((r) => r.uri).sort();
@@ -299,6 +322,7 @@ async function main() {
     const { client: directA } = await connectStdio("node", [nativeBin, "mcp"], nativeProviderDir, {
       QUAY_NATIVE_TASKS_DIR: tasksDirA,
     });
+    try {
     const direct = await directA.callTool({ name: "task_get", arguments: { id: "MCP-A1" } });
     const viaCore = await core.callTool({ name: "task_get", arguments: { id: "MCP-A1", provider: "native" } });
     assert(
@@ -312,7 +336,9 @@ async function main() {
       JSON.stringify(directCheck.structuredContent) === JSON.stringify(viaCoreCheck.structuredContent),
       "task_check via `quay mcp` (provider=native) is byte-identical to calling quay-native's own mcp server directly"
     );
-    await directA.close();
+    } finally {
+      await directA.close();
+    }
   }
 
   // ---- 6. task_write passthrough (generic, provider-agnostic) ----
@@ -486,8 +512,9 @@ async function main() {
   // NOTE (AC4 connection consolidation): `core` is deliberately NOT closed here
   // — blocks 17 (QX-035) and 19 (QX-044) below are read-only and id/search-
   // scoped, so they reuse this same connection (default provider "native" =
-  // tasksDirA, where their VSN-1/FENCE-1/FENCE-2 fixtures were seeded). It is
-  // closed just before the QENG gate block below, after block 19's assertions.
+  // tasksDirA, where their VSN-1/FENCE-1/FENCE-2 fixtures were seeded). The
+  // close now lives in this try's `finally` (see the `try {` above block 2),
+  // so it runs on the throwing path too, not only on the happy path.
 
   // ---- 10. (QN-060) live cross-Provider (GitHub) aggregation through
   //      `quay mcp`, against the real, live yaleh/quay issue gh-3 ----
@@ -496,7 +523,13 @@ async function main() {
   // block's real-network dependency is isolated to its own connection and
   // cleanup, matching cli.test.mjs's own per-block github fixture convention
   // (tests 8/10/11 there each stand up their own config.yml).
-  {
+  //
+  // ⚠️ This block is an async IIFE, not a bare `{}` block, because of the opt-in guard below:
+  // the guard's `return` must exit THIS BLOCK only. A bare `return` at that point would exit
+  // main() and silently skip blocks 11-19 plus the entire QENG gate section — and scripts/test.sh
+  // does not set QUAY_TEST_LIVE_GITHUB either, so the ordinary suite would keep a green tick while
+  // ~1500 lines of assertions never ran (a green that means nothing, hard rule 3b).
+  await (async () => {
     const ghWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-workspace-gh-"));
     fs.mkdirSync(path.join(ghWorkspaceRoot, ".quay"), { recursive: true });
     fs.writeFileSync(
@@ -520,6 +553,15 @@ async function main() {
     );
 
     const { client: coreGh, transport: coreGhTransport } = await connectStdio("node", [coreBin, "mcp"], ghWorkspaceRoot);
+
+    try {
+    // ADR-019/DIR-109 + AC-266 arm (b): this block talks to the REAL, LIVE yaleh/quay issue store,
+    // and release.yml deliberately sets no GH_TOKEN (its own comment says live-GitHub tests
+    // self-skip unless opted in, and this file's header says the suite has zero external-network
+    // dependency -- both were FALSE for this block before this guard). Without it the tokenless
+    // release run dereferenced undefined at `tl.structuredContent.tasks` a few lines down, which
+    // threw, which leaked this client (see the try/finally) and hung the job for 30 minutes.
+    if (!liveGithubEnabled) { console.log("skip: block 10 needs live GitHub — opt in with QUAY_TEST_LIVE_GITHUB=1"); return; }
 
     const tl = await coreGh.callTool({ name: "task_list", arguments: { provider: "github" } });
     assert(
@@ -567,10 +609,11 @@ async function main() {
     // live writes in an automated, repeatable test file) and iteration 55's
     // identical `task edit --provider github` CLI-layer exclusion, this
     // exclusion is intentional, not an oversight.
-
-    await coreGh.close();
+    } finally {
+      await coreGh.close();
+    }
     fs.rmSync(ghWorkspaceRoot, { recursive: true, force: true });
-  }
+  })();
 
   // ---- 11. (QN-062, iteration 58) Provider-subprocess STARTUP-FAILURE
   //      propagation through `quay mcp`'s tool-call surface, local-only (no
@@ -614,7 +657,7 @@ async function main() {
     );
 
     const { client: coreBroken, transport: coreBrokenTransport } = await connectStdio("node", [coreBin, "mcp"], brokenWorkspaceRoot);
-
+    try {
     const tl = await coreBroken.callTool({ name: "task_list", arguments: {} });
     assert(tl.isError === true, "task_list against a Provider whose mcp_entry crashes on launch returns isError:true (a graceful MCP-level failure, not a hang or an uncaught crash of quay mcp itself)");
     assert(
@@ -629,7 +672,9 @@ async function main() {
     const tl2 = await coreBroken.callTool({ name: "task_list", arguments: {} });
     assert(tl2.isError === true, "a second task_list call against the same broken Provider also returns isError:true (quay mcp itself did not crash or hang after the first failure)");
 
-    await coreBroken.close();
+    } finally {
+      await coreBroken.close();
+    }
     fs.rmSync(brokenWorkspaceRoot, { recursive: true, force: true });
   }
 
@@ -670,6 +715,7 @@ async function main() {
     );
 
     const { client: corePrefix } = await connectStdio("node", [coreBin, "mcp"], prefixWorkspaceRoot);
+    try {
 
     // task_list with prefix: returns only matching tasks
     const filtered = await corePrefix.callTool({ name: "task_list", arguments: { prefix: "PFXA" } });
@@ -719,7 +765,9 @@ async function main() {
     const emptyTasks = empty.structuredContent?.tasks ?? [];
     assert(emptyTasks.length === 0, "task_list with non-matching prefix returns empty array");
 
-    await corePrefix.close();
+    } finally {
+      await corePrefix.close();
+    }
     fs.rmSync(prefixWorkspaceRoot, { recursive: true, force: true });
     fs.rmSync(prefixTasksDir, { recursive: true, force: true });
   }
@@ -764,6 +812,7 @@ async function main() {
     seedTask(schemaTasksDir, "SCH-001", { title: "Schema test task", status: "todo", body: MINIMAL_BODY });
 
     const { client: coreSchema } = await connectStdio("node", [coreBin, "mcp"], schemaWorkspaceRoot);
+    try {
 
     // QX-010: listTools() response includes all 6 expected tools.
     const toolsResult = await coreSchema.listTools();
@@ -816,7 +865,9 @@ async function main() {
       );
     }
 
-    await coreSchema.close();
+    } finally {
+      await coreSchema.close();
+    }
     fs.rmSync(schemaTasksDir, { recursive: true, force: true });
     fs.rmSync(schemaWorkspaceRoot, { recursive: true, force: true });
   }
@@ -869,6 +920,7 @@ async function main() {
       body: "## Proposal\nContains unique-xyzzy-prose token in a prose line.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n" });
 
     const { client: coreSrch } = await connectStdio("node", [coreBin, "mcp"], srchWorkspaceRoot);
+    try {
 
     // (a) search="toggle" — title match on SRCH-1 only
     {
@@ -931,7 +983,9 @@ async function main() {
       }
     }
 
-    await coreSrch.close();
+    } finally {
+      await coreSrch.close();
+    }
     fs.rmSync(srchTasksDir, { recursive: true, force: true });
     fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
   }
@@ -985,6 +1039,7 @@ async function main() {
     seedTask(pagTasksDir, "PAG-4", { title: "pag-special token task", status: "todo", body: PAG_BODY });
 
     const { client: corePag } = await connectStdio("node", [coreBin, "mcp"], pagWorkspaceRoot);
+    try {
 
     // (a) default: structuredContent has total=4, page=1, pageSize=50 metadata
     {
@@ -1073,7 +1128,9 @@ async function main() {
       }
     }
 
-    await corePag.close();
+    } finally {
+      await corePag.close();
+    }
     fs.rmSync(pagTasksDir, { recursive: true, force: true });
     fs.rmSync(pagWorkspaceRoot, { recursive: true, force: true });
   }
@@ -1124,6 +1181,7 @@ async function main() {
     seedTask(mltTasksDir, "MLT-4", { title: "Multi-label task 4", status: "todo", body: MLT_BODY, labels: ["iteration-9"] });
 
     const { client: coreMlt } = await connectStdio("node", [coreBin, "mcp"], mltWorkspaceRoot);
+    try {
 
     // (a) AND-join: label array with 2 elements — only MLT-2 has both
     {
@@ -1186,7 +1244,9 @@ async function main() {
       }
     }
 
-    await coreMlt.close();
+    } finally {
+      await coreMlt.close();
+    }
     fs.rmSync(mltTasksDir, { recursive: true, force: true });
     fs.rmSync(mltWorkspaceRoot, { recursive: true, force: true });
   }
@@ -1267,6 +1327,7 @@ async function main() {
     const { client: coreQx42, transport: coreQx42Transport } = await connectStdio(
       "node", [coreBin, "mcp"], qx42WorkspaceRoot
     );
+    try {
 
     // (a) empty result: filter to non-existent status → total=0, totalPages=0
     {
@@ -1299,7 +1360,9 @@ async function main() {
       assert(sc.total === 3, `pageSize=201 clamped: all 3 tasks present in total (got ${sc.total}) (SH-004, QX-042)`);
     }
 
-    await coreQx42Transport.close();
+    } finally {
+      await coreQx42.close();
+    }
     fs.rmSync(qx42TasksDir, { recursive: true, force: true });
     fs.rmSync(qx42WorkspaceRoot, { recursive: true, force: true });
   }
@@ -1355,7 +1418,11 @@ async function main() {
   // All blocks that reuse the primary `core` connection (2-9, 17, 19) are done —
   // close it before the gate block, which needs its own workspace/connection
   // (write operations + default-cwd semantics tied to its own workspace root).
-  await core.close();
+  // This is the `finally` of the try opened above block 2: same position, same
+  // ordering (before the gate block), but now reached on every exit path.
+  } finally {
+    await core.close();
+  }
 
   // ---- 12. QENG gate/lifecycle MCP tools (M53/exp5-M-GATE-MCP-PARITY-GAP) ----
   // gate_run, gate_log, lifecycle_complete, lifecycle_adjudicate,
@@ -1392,6 +1459,10 @@ async function main() {
     const { client: coreGate, transport: coreGateTransport } = await connectStdio(
       "node", [coreBin, "mcp"], gateWorkspaceRoot
     );
+    // Declared OUTSIDE the try below so the `finally` can remove it even when an assertion throws
+    // (it is created by the cwd-threading block further down; its own comment lives there).
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-cwd-"));
+    try {
 
     // gate_run: happy path (PASS).
     {
@@ -1414,7 +1485,7 @@ async function main() {
     // gate_run: cwd parameter threading (M94/DIR-046 regression guard).
     // The CLI path (quay gate --cwd) is already fixed via pinAcceptanceEnv in bin/quay.js.
     // These assertions target the MCP cwd parameter specifically.
-    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-cwd-"));
+    // (worktreeDir is created just above this try — see the declaration there.)
     // GATE-CWD-EXPLICIT: acceptance command checks that pwd equals worktreeDir (not gateWorkspaceRoot).
     // GATE-CWD-DEFAULT: acceptance command checks that pwd equals gateWorkspaceRoot (default).
     // Pure-data fixtures (the acceptance command lives in `extra`) → store write.
@@ -1616,6 +1687,7 @@ async function main() {
         "node", [coreBin, "mcp"], envPresetWorkspaceRoot,
         { QUAY_ACCEPTANCE_CWD: presetCwdDir }
       );
+      try {
 
       // (a) lifecycle_complete: call on ENV-LC (ready, acceptance=true) -> should complete.
       {
@@ -1650,7 +1722,9 @@ async function main() {
         assert(r.structuredContent?.ok === true, `DIR-084 after lifecycle_promote, QUAY_ACCEPTANCE_CWD was restored: gate_run sees presetCwdDir (got: ${JSON.stringify(r.structuredContent)})`);
       }
 
-      await coreEnvTransport.close();
+      } finally {
+        await coreEnv.close();
+      }
       fs.rmSync(presetCwdDir, { recursive: true, force: true });
       fs.rmSync(envPresetTasksDir, { recursive: true, force: true });
       fs.rmSync(envPresetWorkspaceRoot, { recursive: true, force: true });
@@ -1711,10 +1785,12 @@ async function main() {
       }
     }
 
-    await coreGateTransport.close();
-    fs.rmSync(gateTasksDir, { recursive: true, force: true });
-    fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });
-    fs.rmSync(worktreeDir, { recursive: true, force: true });
+    } finally {
+      await coreGate.close();
+      fs.rmSync(gateTasksDir, { recursive: true, force: true });
+      fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
   }
 
   // ---- Cleanup ----
