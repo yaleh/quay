@@ -85,6 +85,9 @@ import {
   goalStoreArgv,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
+// 读回 supersedes 用 store 自己的投影（⛔ 不 grep 落盘文本：字段名在 YAML 里的排版是序列化细节，
+// 断言它会把「字段没写进去」与「排版变了」混为一谈）。
+import { createGoalStore } from '../../packages/quay/src/goal-store.ts';
 
 // 脚本根（goal 动词的 quay CLI 入口从这里解析）——数据根在各测试里另给临时目录。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -331,6 +334,113 @@ test('writeDraftProposal 真的写出一条 draft 记录（真跑 goal-store CLI
     assert.match(text, /^status: draft$/m, '提案必须落为 draft，⛔ 绝不能是 active');
     assert.match(text, /goal: GOAL-001/);
     assert.ok(text.includes('gate-events.jsonl'), 'origin 的实证内容必须落盘');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── supersedes：新提案携带「我取代哪条旧 AC」的声明（gap-meta-driver-proposal-lacks-supersedes-field）
+// 这一组判据守的是【声明可写】与【旧 AC 不被机械翻转】两件事——后者由 store 的 isGoalRecord
+// 闸结构性保证（goal-store.ts:2322），下面第三条负控制钉的就是它。
+const supersedesProposalJson = (supersedes) => JSON.stringify({
+  divergences: [], decisions: [], autoDrive: [],
+  proposals: [{
+    goal: 'GOAL-001',
+    title: '把 GOAL-001 的交付面判据从旧口径换成新口径',
+    criterion: 'node packages/quay/src/goal-store.ts gate AC-007',
+    expect: 'exit 0 表示新口径确实可跑',
+    origin: '.quay/gate-events.jsonl 中 AC-007 的 gate 计数为 0，且 goals/AC-007-t.md 的 criterion 与 GOAL-001 现行业务目标不一致',
+    ...(supersedes === undefined ? {} : { supersedes }),
+  }],
+});
+
+test('parseProbeOutput: 缺省 supersedes ⇒ 解析结果与改动前逐字一致（零变化路径）', () => {
+  const out = parseProbeOutput(supersedesProposalJson(undefined));
+  // 逐字一致 = 【键集也一致】：写成 `supersedes: undefined` 会让键多出来，deepEqual 就红了。
+  assert.deepEqual(out.proposals[0], {
+    goal: 'GOAL-001',
+    title: '把 GOAL-001 的交付面判据从旧口径换成新口径',
+    criterion: 'node packages/quay/src/goal-store.ts gate AC-007',
+    expect: 'exit 0 表示新口径确实可跑',
+    origin: '.quay/gate-events.jsonl 中 AC-007 的 gate 计数为 0，且 goals/AC-007-t.md 的 criterion 与 GOAL-001 现行业务目标不一致',
+  });
+  assert.deepEqual(Object.keys(out.proposals[0]), ['goal', 'title', 'criterion', 'expect', 'origin']);
+});
+
+test('parseProbeOutput: 带 supersedes ⇒ 解析出该字段，且首尾空白被去掉', () => {
+  const out = parseProbeOutput(supersedesProposalJson('  AC-007  '));
+  assert.equal(out.proposals[0].supersedes, 'AC-007');
+});
+
+// 负控制（硬规则 3b）：空白串/非字符串不是 id。⛔ 不得把它凑成一条「看起来合格」的声明——
+// 否则 frontmatter 里会出现一个指向空白的 supersedes，与真实的替代关系同形。
+test('parseProbeOutput: supersedes 为空白串或非字符串 ⇒ 【不产生该键】（⛔ 不凑成一条声明）', () => {
+  for (const bad of ['', '   ', 7, ['AC-007'], null, { id: 'AC-007' }]) {
+    const out = parseProbeOutput(supersedesProposalJson(bad));
+    assert.equal(out.proposals.length, 1, `${JSON.stringify(bad)}: 提案本身仍应被接受（supersedes 只是可选字段）`);
+    assert.equal('supersedes' in out.proposals[0], false, `${JSON.stringify(bad)}: 不得产生 supersedes 键`);
+  }
+});
+
+// AC4 端到端（真 execve、真落盘）：LLM 输出的 JSON 带 supersedes ⇒ 新 draft AC 的 frontmatter
+// 读回得到 supersedes。⛔ 不走 dry-run、不注入 seam——这条路径必须真的跑过（硬规则 4 推论三：
+// 只能被 fixture/dry-run 满足的判据不是测量）。
+test('端到端：proposal JSON 带 supersedes ⇒ 新 draft AC 读回含 supersedes（真跑 goal-store CLI）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-supersedes-'));
+  try {
+    const goals = path.join(tmp, 'goals');
+    fs.mkdirSync(goals, { recursive: true });
+    fs.writeFileSync(path.join(goals, 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: test fixture\n---\n## Goal\nx\n');
+    fs.writeFileSync(path.join(goals, 'AC-007-old.md'),
+      '---\nid: AC-007\ntitle: old\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: "true"\nexpect: e\norigin: test fixture\n---\nold body\n');
+
+    const parsed = parseProbeOutput(supersedesProposalJson('AC-007'));
+    const r = await fileProposals(repoRoot, parsed.proposals, [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+
+    // 读回用 store 自己的投影（AC2 的「等价读法」），⛔ 不 grep 落盘文本。
+    const rec = createGoalStore(goals).get(r[0].id);
+    assert.ok(rec, '新 AC 应可读回');
+    assert.deepEqual(rec.supersedes, ['AC-007'], '新 AC 的 frontmatter 必须带上 supersedes 声明');
+    assert.equal(rec.status, 'draft', '提案仍必须落为 draft');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// AC3 负控制：本任务的⛔设计边界——声明是声明，处置是处置。被指认的旧 AC 必须【逐字不动】。
+// 断言的是「不变」而不是「变成了 superseded」：这条测试的存在本身就在守「不得机械翻转旧 AC
+// 状态」这条边界，所以它红了意味着有人加了一条自动翻转路径，而不是意味着功能没做完。
+test('负控制：带 supersedes 的提案落地后，被指认的旧 AC 文件逐字未变（status 仍是 active）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-supersedes-noflip-'));
+  try {
+    const goals = path.join(tmp, 'goals');
+    fs.mkdirSync(goals, { recursive: true });
+    fs.writeFileSync(path.join(goals, 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: test fixture\n---\n## Goal\nx\n');
+    const oldPath = path.join(goals, 'AC-007-old.md');
+    fs.writeFileSync(oldPath,
+      '---\nid: AC-007\ntitle: old\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: "true"\nexpect: e\norigin: test fixture\n---\nold body\n');
+
+    // 逐字基线的取法：字节 + 解析出的 status，两者都要对得上——只比 status 字面量的话，一条
+    // 顺带改写（例如自动补 statusLog/superseded-by）会漏过去。
+    const beforeBytes = fs.readFileSync(oldPath, 'utf8');
+    const beforeStatus = createGoalStore(goals).get('AC-007').status;
+    assert.equal(beforeStatus, 'active', '夹具前提：旧 AC 起始是 active');
+
+    const parsed = parseProbeOutput(supersedesProposalJson('AC-007'));
+    const r = await fileProposals(repoRoot, parsed.proposals, [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+
+    assert.equal(fs.readFileSync(oldPath, 'utf8'), beforeBytes,
+      '旧 AC 文件必须逐字未变——声明 supersedes 不得触发任何对旧 AC 的机械写入');
+    assert.equal(createGoalStore(goals).get('AC-007').status, beforeStatus,
+      '旧 AC 的 status 必须保持不变；翻转它仍然是人的动作');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
