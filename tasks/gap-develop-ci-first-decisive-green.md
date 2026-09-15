@@ -2,7 +2,7 @@
 id: gap-develop-ci-first-decisive-green
 title: develop 上 CI 首次 decisive 绿：落地 .quay/ci-runs.jsonl 采集器（testFiles 派生 + 历史回填
   + 生产接线）并把 11 个 CI-only 红修到可移植（AC-265）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
