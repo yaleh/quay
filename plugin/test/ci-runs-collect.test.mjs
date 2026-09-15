@@ -15,6 +15,9 @@
 //   ④ gh 不可达必须**可区分**（硬规则 3b）：driver 的 PATH 不保证含 ~/.local/bin，而 gh 不可达若与
 //      「CI 没有 run」同形，判据的 still-red 就是假读数。⇒ resolveGhBin 显式解析 + gh-unavailable 态。
 //   ⑤ collectForRound 的节流是**一个读数**（throttled），不是静默跳过。
+//   ⑥ seaVerify（AC-267 载体臂，tasks/gap-sea-artifact-plugin-root-toplevel-eval）：release workflow
+//      的 SEA 验证 job 结论派生进记录，词表 {success, failure, incomplete, absent} —— **没有**
+//      「读不懂 ⇒ success」的路径（硬规则 3b/4）。没有它，AC-267 永久停在 CAUSE=carrier-absent。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -420,4 +423,103 @@ test("buildRecord — testFiles 为 null/0/负数时【不写】该键（buildRe
     assert.equal("testFiles" in rec, false, `testFiles=${v} 不该落键`);
   }
   assert.equal(buildRecord(ghRun(), { testFiles: 631 }).testFiles, 631);
+});
+
+// ── ⑧ seaVerify：AC-267 载体臂的字段（tasks/gap-sea-artifact-plugin-root-toplevel-eval）─────────
+//
+// 为什么这条非有不可：AC-267 的静态臂只证明【源码里】再没有模块顶层求值 import.meta.url 的点；
+// 「发出去的 SEA 二进制真能起 quay serve」只能由一次**真实 release run** 证明。载体里若没有承载
+// 这个读数的字段，判据就**永久停在 `CAUSE=carrier-absent`**（硬规则 4 推论三：实现了、测试绿了、
+// 生产没跑过 —— 与「没实现」同形）。
+//
+// ⛔ 本组断的是**关系**（三条夹具 ⇒ 三个不同输出），不是快照，也**不是**「值是 success」这一类
+// 单点断言：单点断言在一个恒为 success 的实现上同样通过（硬规则 4 —— 一个结构上不可能取假的
+// 量不是测量）。故最后一条是**负控制**：同一个夹具只翻一个 job 的 conclusion，输出必须跟着变。
+
+/** release.yml 的两个 SEA 验证 job 的真实名字（实测 gh 2026-09-15 run 34845477762）。
+ *  第二个是 matrix job，gh 把矩阵值缀在名字后 —— 逐字相等会把它读成「缺失」。 */
+const SEA_JOB_LINUX = "sea-verify-node-free";
+const SEA_JOB_XPLAT_MACOS = "sea-verify-node-free-cross-platform (macos-latest, macos-arm64, tar.gz)";
+const SEA_JOB_XPLAT_WIN = "sea-verify-node-free-cross-platform (windows-latest, windows-x64, zip)";
+
+function seaJob(name, conclusion) {
+  return { id: name.length, name, conclusion, started_at: "2026-09-15T02:00:00Z", completed_at: "2026-09-15T02:05:00Z" };
+}
+
+/** 走**真实的 collect()**（不是导出的私有函数）：离线缝喂 run + job，零 gh 调用。 */
+function seaVerifyOf(jobs, runOver = {}, opts = {}) {
+  const r = collect({
+    repo: "o/n",
+    runs: [ghRun({ id: 1001, name: "Release", conclusion: "failure", ...runOver })],
+    jobsByRun: { 1001: jobs },
+    logFetch: "none",
+    ...opts,
+  });
+  return r.records[0];
+}
+
+const SEA_ALL_GREEN = [
+  seaJob(SEA_JOB_LINUX, "success"),
+  seaJob(SEA_JOB_XPLAT_MACOS, "success"),
+  seaJob(SEA_JOB_XPLAT_WIN, "success"),
+];
+
+test("seaVerify — 两个 SEA 验证 job 全在且全 success ⇒ 'success'（matrix 后缀名必须被认出来）", () => {
+  assert.equal(seaVerifyOf(SEA_ALL_GREEN).seaVerify, "success");
+});
+
+test("seaVerify — 任一 job 非 success ⇒ 'failure'（⛔ 不是 'success'）", () => {
+  // 只翻一个 —— 其余逐字不变，故差异只可能来自这一处。
+  const jobs = [seaJob(SEA_JOB_LINUX, "failure"), seaJob(SEA_JOB_XPLAT_MACOS, "success"), seaJob(SEA_JOB_XPLAT_WIN, "success")];
+  const rec = seaVerifyOf(jobs);
+  assert.equal(rec.seaVerify, "failure");
+  assert.notEqual(rec.seaVerify, "success");
+});
+
+test("seaVerify — job 列表读不到 / 一个都不在 ⇒ 'absent'，且它 ≠ 'success'（硬规则 3b：没评估成 ≠ 通过）", () => {
+  const empty = seaVerifyOf([]);
+  assert.equal(empty.seaVerify, "absent", "读不到 job ⇒ 独立的『没评估成』取值");
+  assert.notEqual(empty.seaVerify, "success", "⛔ 绝不回落到常量 success");
+  // 一份「跑了 job 但里面没有 SEA 验证 job」的列表走同一条路（成因不同、读数同形是对的：
+  // 两者都是「没有可评估的 SEA 验证读数」）。
+  assert.equal(seaVerifyOf([seaJob("test", "success"), seaJob("release", "success")]).seaVerify, "absent");
+});
+
+test("seaVerify — 只到了一部分 SEA 验证 job ⇒ 'incomplete'（≠ 'success'，也 ≠ 'absent'/'failure'）", () => {
+  const rec = seaVerifyOf([seaJob(SEA_JOB_LINUX, "success")]);
+  assert.equal(rec.seaVerify, "incomplete");
+  for (const other of ["success", "absent", "failure"]) assert.notEqual(rec.seaVerify, other);
+});
+
+test("seaVerify — 非 release workflow 的记录【没有】这个键（缺 ≠ 'absent'，硬规则 6）", () => {
+  const rec = seaVerifyOf(SEA_ALL_GREEN, { name: "CI" });
+  assert.equal("seaVerify" in rec, false, "ci.yml 的 run 不带 seaVerify 键");
+  // 正控制（同一夹具、只换 workflow 名）：同一个 job 列表在 Release 上就有这个键。
+  assert.equal(seaVerifyOf(SEA_ALL_GREEN, { name: "Release" }).seaVerify, "success");
+  // 两种写法都认（gh 的 run.name 给的是 workflow 的 name:，判据两种都收）。
+  assert.equal(seaVerifyOf(SEA_ALL_GREEN, { name: "release.yml" }).seaVerify, "success");
+});
+
+test("seaVerify — 负控制：它不是恒值（同一个夹具只翻一个 job 的 conclusion，输出跟着变）", () => {
+  // 硬规则 4：恒为 success 的字段与「一切正常」同形。若实现回落到常量，这条必红。
+  const green = seaVerifyOf(SEA_ALL_GREEN).seaVerify;
+  const oneRed = seaVerifyOf([
+    seaJob(SEA_JOB_LINUX, "success"),
+    seaJob(SEA_JOB_XPLAT_MACOS, "failure"),
+    seaJob(SEA_JOB_XPLAT_WIN, "success"),
+  ]).seaVerify;
+  assert.notEqual(green, oneRed, "翻一个 job 的结论必须改变读数 —— 否则它是常量，不是测量");
+  // 再加上「读不到」的那一态 ⇒ 词表里至少有三个**互不相同**的取值真的出现过。
+  const absent = seaVerifyOf([]).seaVerify;
+  assert.equal(new Set([green, oneRed, absent]).size, 3, "success / failure / absent 必须是三个不同取值");
+});
+
+test("seaVerify — 经真实 CLI 形状的 buildRecord 也派生（--from-file 走的就是这条路）", () => {
+  const rec = buildRecord(
+    { id: 7, name: "Release", conclusion: "failure", created_at: "2026-09-15T02:38:35Z" },
+    { jobs: SEA_ALL_GREEN }
+  );
+  assert.equal(rec.seaVerify, "success");
+  // 同一位置：不给 job ⇒ absent（⛔ 不是 success）。
+  assert.equal(buildRecord({ id: 7, name: "Release", conclusion: "failure" }, {}).seaVerify, "absent");
 });
