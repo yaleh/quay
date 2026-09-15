@@ -921,14 +921,33 @@ function mainCheckoutKernelDir(): string {
  *  两者都是「本内核自身安装位置」的派生量，故 ① 只在「本内核跑在 linked worktree 里」时生效；其余情况
  *  `mainCheckoutKernelDir()` 逐字返回自身目录 ⇒ ① 与 ② 指向同一个文件 ⇒ 直接走 ②（⛔ 不重复加载）。
  *
+ *  ③ **本内核是构建产物时**（自己目录里没有 raw `driver-anchor.ts`）= 跑的是 dist bundle / pack-time
+ *  暂存拷贝 ⇒ 优先它**源树**的**同名 dist bundle**（`<源树>/scripts/dist/driver-anchor.js`），且只在
+ *  那份**比本内核更新**时才选它（`gap-ac259-frozen-reading-stale-staging-kernel`）。
+ *  两条约束的理由：
+ *   - **换版本只在同形态内发生（bundle → bundle）**：raw 会丢掉 bundle 形态的保证 —— shipped 布局下
+ *     raw 的裸 npm import（yaml/zod/@modelcontextprotocol/sdk）解析不到（见 `isKernelSourceCheckout`
+ *     的实测注释），而「让一个跑得好好的 bundle 内核悄悄变成 raw」不是自刷新该做的事。
+ *   - **只换到更新的那一份**：替换目标不比本内核新时换过去还是同一版 ⇒ 每次 reconcile 都换 = 重启风暴。
+ *     换不动的形态由 `driver-anchor.ts` **如实报出**（独立取值），⛔ 不静默、⛔ 不假装 fresh。
+ *
  *  ⛔ **不走 `QUAY_PLUGIN_ROOT`**：那是「第三方项目/夹具的 plugin/ 在哪」的缝，用它会让每个夹具都必须
  *  复制一份完整内核闭包；而 anchor 要跑的是**内核自己的**代码（只有它托管的 kind 模块才可能来自
  *  QUAY_PLUGIN_ROOT——那正是 `invokeKindDefault` 用 resolveKernelSibling 的地方）。 */
 export function preferredAnchorKernel(): { path: string; stripTypes: boolean } | null {
   const here = path.dirname(kernelSelfPath());
+  return preferredAnchorKernelIn(here, mainCheckoutKernelDir(), kernelSourceScriptsDir());
+}
+
+/** `preferredAnchorKernel` 的**判定半边**（三个输入全部显式传入 ⇒ 可单测；⛔ 路径解析只留在上面那个
+ *  包装里）。判定本身与「本内核装在哪」无关，只与这三个目录有关。 */
+export function preferredAnchorKernelIn(
+  here: string,
+  mainDir: string,
+  srcScripts: string | null,
+): { path: string; stripTypes: boolean } | null {
   const selfTs = path.join(here, "driver-anchor.ts");
   const selfJs = path.join(here, "driver-anchor.js");
-  const mainDir = mainCheckoutKernelDir();
   if (mainDir !== here) {
     const mainTs = path.join(mainDir, "driver-anchor.ts");
     const mainJs = path.join(mainDir, "driver-anchor.js");
@@ -936,6 +955,17 @@ export function preferredAnchorKernel(): { path: string; stripTypes: boolean } |
     if (fs.existsSync(mainJs)) return { path: mainJs, stripTypes: false };
   }
   if (fs.existsSync(selfTs)) return { path: selfTs, stripTypes: true };
+  // ③ 构建产物内核 → 源树里**更新**的那份 bundle（见上）。
+  if (!fs.existsSync(selfTs) && srcScripts) {
+    const srcDistJs = path.join(srcScripts, "dist", "driver-anchor.js");
+    try {
+      if (fs.existsSync(srcDistJs) && path.resolve(srcDistJs) !== path.resolve(selfJs)) {
+        const srcMtime = fs.statSync(srcDistJs).mtimeMs;
+        const selfMtime = fs.existsSync(selfJs) ? fs.statSync(selfJs).mtimeMs : 0;
+        if (srcMtime > selfMtime) return { path: srcDistJs, stripTypes: false };
+      }
+    } catch { /* 读不到 mtime ⇒ 不换（⛔ 不把「读不懂」当「更新」） */ }
+  }
   if (fs.existsSync(selfJs)) return { path: selfJs, stripTypes: false };
   return null;
 }
@@ -1448,13 +1478,9 @@ export function watchedSourceFiles(kind: DriverKind): string[] {
   return [DRIVER_KINDS[kind].driver, ...SHARED_SOURCE_FILES];
 }
 
-/** 被监视源码的最新 mtime（mtimeMs 的 max）。全部缺失/读失败 ⇒ 0——0 恒不大于 driver 启动时刻 ⇒
- *  不触发 respawn（与「未变更」同形；源码缺失本就是非 git root 测试临时目录的常态，⛔ 不是「无源码」）。
- *  源码目录锚在本 kernel 自身安装位置（⛔ 非 root —— AC-203）；installed artifact 只有 dist bundle、
- *  无原始 .ts ⇒ 恒 0 ⇒ 无自刷新（正确：装好的 bundle 是静态的，无源码可推进）。 */
-export function sourceFilesMaxMtimeMs(_root: string, kind: DriverKind): number {
+/** 一个目录里被监视文件的最新 mtime（mtimeMs 的 max）；一个都 stat 不到 ⇒ 0。 */
+function watchedMax(dir: string, kind: DriverKind): number {
   let max = 0;
-  const dir = resolveKernelScriptsDir();
   for (const rel of watchedSourceFiles(kind)) {
     try {
       const st = fs.statSync(path.join(dir, rel));
@@ -1464,7 +1490,87 @@ export function sourceFilesMaxMtimeMs(_root: string, kind: DriverKind): number {
   return max;
 }
 
-/** 源码是否推进到 sinceMs 之后（任一被监视文件 mtimeMs > sinceMs ⇒ true）。纯函数，可单测。 */
+// ── Layer 0 · 内核源树 / 源码监视三态（gap-ac259-frozen-reading-stale-staging-kernel）──────────────
+// 缺陷（2026-09-15 实测）：本仓库自宿主 anchor 的 cmdline 是
+//   <repo>/packages/quay/plugin/scripts/dist/driver-anchor.js __anchor --root <repo>
+// 而 `packages/quay/plugin/` 是 **pack-time 暂存快照**（`.gitignore` 忽略、`git ls-files` 0 条，由
+// `package.sh` 从 `<repo>/plugin/` 拷出），它的 `.ts` 源在 `<repo>/plugin/scripts/`。旧读法只看
+// `resolveKernelScriptsDir()`（= 那个 dist 目录，里面只有 `.js`）⇒ 每个被监视 `.ts` 都 stat 抛错 ⇒
+// `max` **恒 0** ⇒「源码从未推进」与「没有源码可推进」同形（硬规则 3b）⇒ 07:35 构建的 bundle 上跑着的
+// 内核永远不知道自己陈旧：10:17 落地的修复从未执行，且**重启也不换版本**（重启后仍是那个 dist 目录）。
+// ⛔ 这与「装好的 bundle 是静态的」不是一回事：装好的产物盘上**没有**源树（下面 fail-closed 返 null，
+// 行为与今天逐字相同）；暂存快照**有**源树，它只是从来没被看见过。
+
+/** 本内核所【构建自】的源树 scripts 目录；本内核自己就是源树 / 找不到源树 ⇒ null。
+ *
+ *  唯一候选：`<主检出>/<本内核 plugin 树同名>/scripts`。基准是**本内核自身安装位置**的主检出
+ *  （`mainCheckoutRoot`，git 推导；非 git 夹具退回 `repoRoot` 的 bundle 形态判定），⛔ 不是 `--root`
+ *  （工作区）——「把 quay 自己的资源拼在 target root 下」正是 AC-203 / gap-drivers-resolve-quay-scripts-
+ *  under-project-root-not-plugin-root 的缺陷形。⛔ 布局段取**本内核 plugin 树的 basename**，不写死
+ *  `"plugin"` 字面量：driver 域的布局锚点由 kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则判红，
+ *  且取 basename 对改名/打平后的布局同样成立。
+ *  ⛔ fail-closed（宁可「看不见源树」= 今天的行为）：候选必须真的**是源树**（≥2 个被监视文件在位）且
+ *  不是本内核自己的目录，否则 null —— 不把某个碰巧同名的目录当成源树。
+ *  ⛔ 基准只用 `mainCheckoutRoot`（git 推导），⛔ **不用 `repoRoot`**：后者的兜底是 `process.cwd()`，
+ *  于是一个从 quay 检出目录里起来的**装好的**内核会把 cwd 误当仓库根、把 `<cwd>/plugin/scripts` 当成
+ *  自己的源树（硬规则 5b：一处成立不等于处处成立；宁可「看不见源树」= 今天的行为）。
+ *  结果按**内核目录**记忆（内核的源树在一次进程生存期内不会搬家；`mainCheckoutRoot` 每次要 spawn git；
+ *  按内核目录而非全局单值 ⇒ 同进程里换夹具/换内核目录仍各算各的）。 */
+const _kernelSourceScriptsDirCache = new Map<string, string | null>();
+export function kernelSourceScriptsDir(): string | null {
+  const dir = resolveKernelScriptsDir();
+  const cached = _kernelSourceScriptsDirCache.get(dir);
+  if (cached !== undefined) return cached;
+  const out = ((): string | null => {
+    // 本内核自己的目录里就有被监视源码 ⇒ 它跑在源树上，「源树」就是它自己（无镜像）。
+    if (SHARED_SOURCE_FILES.some((rel) => fs.existsSync(path.join(dir, rel)))) return null;
+    let root = "";
+    try { root = mainCheckoutRoot(dir); } catch { root = ""; }
+    if (!root || !fs.existsSync(root)) return null;
+    const cand = path.join(root, path.basename(resolveKernelPluginRoot()), "scripts");
+    if (path.resolve(cand) === path.resolve(dir)) return null;
+    const hits = SHARED_SOURCE_FILES.filter((rel) => fs.existsSync(path.join(cand, rel))).length;
+    return hits >= 2 ? cand : null;
+  })();
+  _kernelSourceScriptsDirCache.set(dir, out);
+  return out;
+}
+
+/** 被监视源码的解析结果（三态）。⛔ 存在的理由就是让「源码没推进」与「根本没有源码可推进 / 跑的是
+ *  一份构建产物」在读数上**可区分**——此前两者共用那个恒 0 的 `max`。 */
+export interface SourceWatch {
+  /** watched   = 本内核目录里就能 stat 到被监视 `.ts`（dev 源树直跑的内核）；
+   *  mirror    = 本内核目录里一个都没有，但它的**源树**里有 ⇒ 本内核是一份**构建产物**
+   *              （dist bundle / 暂存拷贝），`dir`/`mtimeMs` 指向源树；
+   *  unwatched = 两处都没有（装好的产物：盘上没有源可推进）。 */
+  state: "watched" | "mirror" | "unwatched";
+  /** 实际求值的目录（本内核目录，或它的源树目录）。 */
+  dir: string;
+  /** 该目录里被监视 `.ts` 的最新 mtime（epoch ms）。unwatched ⇒ 0，由 `state` 区分取值含义。 */
+  mtimeMs: number;
+}
+
+/** 被监视源码的解析（`watched` / `mirror` / `unwatched`）。基准同 `sourceFilesMaxMtimeMs`（内核自身
+ *  安装位置，⛔ 非 `--root`）。 */
+export function sourceWatch(root: string, kind: DriverKind): SourceWatch {
+  void root; // 参数保留（既有调用方/测试按 (root, kind) 传参）；基准是内核自身安装位置。
+  const dir = resolveKernelScriptsDir();
+  const own = watchedMax(dir, kind);
+  if (own > 0) return { state: "watched", dir, mtimeMs: own };
+  const src = kernelSourceScriptsDir();
+  if (src) return { state: "mirror", dir: src, mtimeMs: watchedMax(src, kind) };
+  return { state: "unwatched", dir, mtimeMs: 0 };
+}
+
+/** 被监视源码的最新 mtime（mtimeMs 的 max）。全部缺失/读失败 ⇒ 0。
+ *  源码目录锚在本 kernel 自身安装位置（⛔ 非 root —— AC-203）；本内核自己目录里没有原始 `.ts` 时
+ *  退回它的**源树**（见 `sourceWatch`）—— 跑在构建产物上的内核必须拿源树的 mtime 比，⛔ 不是恒 0。 */
+export function sourceFilesMaxMtimeMs(root: string, kind: DriverKind): number {
+  return sourceWatch(root, kind).mtimeMs;
+}
+
+/** 源码是否推进到 sinceMs 之后（任一被监视文件 mtimeMs > sinceMs ⇒ true）。纯函数，可单测。
+ *  ⚠️ unwatched（无源可推进）⇒ 恒 false；调用方若要区分「未推进」与「无源」，读 `sourceWatch().state`。 */
 export function sourceChangedSince(root: string, kind: DriverKind, sinceMs: number): boolean {
   return sourceFilesMaxMtimeMs(root, kind) > sinceMs;
 }
@@ -1547,30 +1653,43 @@ export interface SupervisorStaleness {
   state: "fresh" | "stale" | "not-evaluated";
   /** supervisor 进程启动时刻（epoch ms）；读不到 ⇒ null。 */
   supervisorStartedAt: number | null;
-  /** 被监视源码最新 mtime（epoch ms；全部缺失 ⇒ 0）。 */
+  /** 被监视源码最新 mtime（epoch ms；unwatched ⇒ 0，见 `sourceWatch`）。 */
   sourceMtimeMs: number;
+  /** 被监视源码的解析态（gap-ac259-frozen-reading-stale-staging-kernel）：`watched`（本内核目录里
+   *  就有 .ts）/ `mirror`（本内核是构建产物，比的是它的**源树**）/ `unwatched`（盘上没有源可推进，
+   *  装好的产物）。⛔ 独立取值：`fresh` 在 `unwatched` 下说的是「无源可推进」、在 `watched`/`mirror`
+   *  下说的是「源码未推进」——两者必须可区分（硬规则 3b）。 */
+  sourceWatch: SourceWatch["state"];
+  /** 实际被求值的目录（`sourceWatch` 选中的那个；unwatched 时 = 本内核自己的目录）。 */
+  sourceWatchDir: string;
 }
 
 /** 判定一个 supervisor 是否陈旧：supervisor 启动时刻 vs 被监视源码最新 mtime。源码推进到启动时刻之后
  *  ⇒ stale（supervisor 内存里的 kernel 早于盘上源码，sourceCheck 只重启 driver、永远改不动它自己）。
- *  supervisor pid 缺失/已死/读不到启动时刻 ⇒ not-evaluated。 */
+ *  supervisor pid 缺失/已死/读不到启动时刻 ⇒ not-evaluated。
+ *
+ *  ⚠️ 对被监视源码的解析走 `sourceWatch`：本内核是**构建产物**（dist bundle / pack-time 暂存拷贝）时
+ *  比的是它的**源树**的 mtime —— 这正是 2026-09-15 的缺陷形：暂存树里只有 `.js`，旧的「只看自己
+ *  目录」读法恒得 0，于是跑在 07:35 bundle 上、而源树已在 10:17 前进的常驻内核被报 `fresh`
+ *  （与「一切正常」同形）。`sourceWatch` 把该形态报成 `mirror` 并给出真读数 ⇒ 该内核报 **stale**。 */
 export function supervisorStaleness(
   root: string,
   kind: DriverKind,
   supervisorPid: number | null,
 ): SupervisorStaleness {
-  const sourceMtimeMs = sourceFilesMaxMtimeMs(root, kind);
+  const watch = sourceWatch(root, kind);
+  const base = { sourceMtimeMs: watch.mtimeMs, sourceWatch: watch.state, sourceWatchDir: watch.dir };
   if (supervisorPid === null || !pidAlive(supervisorPid)) {
-    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+    return { state: "not-evaluated", supervisorStartedAt: null, ...base };
   }
   const supervisorStartedAt = procStartTimeMs(supervisorPid);
   if (supervisorStartedAt === null) {
-    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+    return { state: "not-evaluated", supervisorStartedAt: null, ...base };
   }
   return {
-    state: sourceMtimeMs > supervisorStartedAt ? "stale" : "fresh",
+    state: watch.mtimeMs > supervisorStartedAt ? "stale" : "fresh",
     supervisorStartedAt,
-    sourceMtimeMs,
+    ...base,
   };
 }
 
@@ -1729,7 +1848,11 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   const sourceCheckIntervalMs = Math.max(opts.restartDelaySecs, 1) * 1000;
   const sourceCheck = setInterval(() => {
     if (stopping || !child || driverStartedAt <= 0) return;
-    if (sourceChangedSince(opts.root, opts.kind, driverStartedAt)) {
+    // ⛔ 只对 **watched** 的 kind 重启 child：child 重启只有在它**从盘上源码**重载时才会换版本
+    // （dev 源树直跑）。**mirror**（本内核是构建产物）下 child 重启加载的是**同一个 bundle** ⇒
+    // 换不了版本、只是白重启一轮（gap-ac259-frozen-reading-stale-staging-kernel）。构建产物内核的
+    // 「陈旧」由 `driver-anchor.ts` 的 bundleStale 支处理（目标 = 源树里更新的那份 bundle）。
+    if (sourceWatch(opts.root, opts.kind).state === "watched" && sourceChangedSince(opts.root, opts.kind, driverStartedAt)) {
       appendLog(
         st.supervisorLog,
         `${ts()} supervisor: source changed (mtime=${sourceFilesMaxMtimeMs(opts.root, opts.kind)} > driver_start=${driverStartedAt}); restarting driver`,
@@ -1776,6 +1899,14 @@ export function aliveness(root: string, kind: DriverKind): {
   /** supervisor 是否陈旧（其启动时刻早于被监视源码最新 mtime）。true=stale；false=fresh；null=
    *  not-evaluated（supervisor 缺失/已死/读不到启动时刻）。 */
   supervisorStale: boolean | null;
+  /** gap-ac259-frozen-reading-stale-staging-kernel：被监视源码的解析态（`watched` / `mirror` /
+   *  `unwatched`）。⛔ 独立取值：`supervisorStale=false` 在 `unwatched` 下说的是「盘上没有源可推进」、
+   *  在 `watched`/`mirror` 下说的是「源码没推进到启动时刻之后」——先读这个字段再解释 `supervisorStale`
+   *  （硬规则 3b：读不到输入不得与合格同形）。`mirror` 且 `supervisorStale=true` = **本内核跑的是
+   *  一份比源树旧的构建产物**（暂存 dist / pack-time 快照）——那是本任务的核心读数。 */
+  sourceWatch: SourceWatch["state"];
+  /** 实际被求值的目录（`sourceWatch` 选中的那个）。 */
+  sourceWatchDir: string;
   /** AC-255：承载该 kind 常驻循环的宿主模型。`anchor` = 收敛形态（一个进程承载全部 kind 循环）；
    *  `supervisor` = 旧的多进程形态。⛔ 两者必须不同形，否则「收敛了没」在读数上不可见。 */
   host: "anchor" | "supervisor";
@@ -1832,6 +1963,8 @@ export function aliveness(root: string, kind: DriverKind): {
     deaths,
     supervisorStartedAt: staleness.supervisorStartedAt,
     supervisorStale: staleness.state === "stale" ? true : staleness.state === "fresh" ? false : null,
+    sourceWatch: staleness.sourceWatch,
+    sourceWatchDir: staleness.sourceWatchDir,
     host: host.hosted ? "anchor" : "supervisor",
     anchorPid: host.anchorPid,
   };
@@ -1871,6 +2004,11 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_files: stats.files,
       supervisor_started_at: a.supervisorStartedAt,
       supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
+      // gap-ac259-…：`supervisor_stale` 的**输入从哪来**必须与它相邻可读——`watched`（本内核目录里就有
+      // .ts）/ `mirror`（本内核是构建产物，比的是源树）/ `unwatched`（盘上没有源可推进）。⛔ 没有这个
+      // 字段时，「跑在陈旧构建产物上」与「一切正常」在同一个 `fresh`/`stale` 取值里不可区分（硬规则 3b）。
+      source_watch: a.sourceWatch,
+      source_watch_dir: a.sourceWatchDir,
       // AC-255：宿主模型（anchor=收敛形态 / supervisor=旧多进程形态）+ anchor pid。⛔ 两者不同形。
       host: a.host,
       anchor_pid: a.anchorPid,
@@ -1881,6 +2019,7 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
+      `source_watch=${a.sourceWatch} · ` +
       // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
       `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
       `last_record_ts=${stats.lastTs ?? "null"}${crossCarrier} · ` +

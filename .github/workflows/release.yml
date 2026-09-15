@@ -566,3 +566,76 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node --experimental-strip-types scripts/delivery-manifest-check.ts --ci
+
+  # ── advance-master (orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §6.1) ────────
+  # master is redefined as "the tag of the most recent FULLY GREEN release run" and is advanced by
+  # exactly this one event — never by a direct commit. This job is that event. It exists because
+  # before it, nothing in this repo moved master at all: measured 2026-09-15, master was frozen at
+  # 9316b797d (2026-08-03) while develop ran ~19.6k commits ahead, and no workflow, script or task
+  # contained the name `advance-master` — the mechanism the human ruling named (§1 ⑤ 问 3, option A)
+  # had zero implementation.
+  #
+  # THREE INVARIANTS (§6.1), each carried by a MECHANISM rather than by review:
+  #   1. any dependency not fully successful ⇒ master does not move. That is GitHub Actions' own
+  #      `needs:` semantics (a job whose dependency did not succeed is SKIPPED), so fail-closed is
+  #      the default here, not code that could be forgotten.
+  #   2. fast-forward only, never a rewrite. `git push` refuses a non-fast-forward update by
+  #      default; this job therefore adds no force flag of any kind, and the file must contain none
+  #      (asserted by release-master-advance-needs-check's sibling grep, AC1). If master was ever
+  #      committed to directly, this job goes RED — which is the intended outcome (§3.1).
+  #   3. `needs:` must cover EVERY other job in this file. That one is the only new fragility this
+  #      job introduces, and it is precisely the failure mode §6.1 exists to prevent: add a 7th job
+  #      to this workflow and forget to list it here, and master advances on a half-green release.
+  #      ⛔ Human enumeration drifts, so it is NOT left to review — it is asserted mechanically by
+  #      `plugin/scripts/release-master-advance-needs-check.ts`, landed in the SAME batch as this
+  #      job (§6.1: "与 A 同批落地，不得延后"). That checker is the reason this list is safe to
+  #      read as "the full set" rather than "the set someone remembered".
+  #
+  # The environment is the tag's own tree (ref: the dispatch input), NOT the dispatching ref: a
+  # workflow_dispatch run executes the release.yml carried by the named ref. ⇒ This job only takes
+  # effect for a tag cut AFTER this block reached develop; a re-run of an older tag cannot advance
+  # master, because that tag's tree does not contain this job at all.
+  #
+  # First fast-forward is deliberately deferred: it happens automatically the first time every job
+  # below succeeds (§1 ⑤ 问 4 — waiting for a fully green release rather than ff-ing onto the red
+  # v0.6.3). Until then master standing still is the rule's correct output, not a defect.
+  advance-master:
+    needs: [release, sea-release, sea-verify-node-free, sea-verify-node-free-cross-platform,
+            dist-verify-node-floor, delivery-manifest-verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 — the push below moves master across this tag's whole history, and a
+          # shallow clone cannot reason about (or serve) the fast-forward. The dispatching job that
+          # cut the tag used the same depth for the same reason.
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Fast-forward master to this release's tag
+        env:
+          TAG: ${{ inputs.tag }}
+        # ⛔ PUSH THE PEELED COMMIT, NOT THE TAG NAME. `git push origin <annotated-tag>:master` is
+        # REJECTED by the receiving repo — measured 2026-09-15 in a scratch remote pair:
+        #   remote: error: cannot update ref 'refs/heads/master': trying to write non-commit object
+        #   <tag-object-sha> to branch 'refs/heads/master' -> [remote rejected] (failed to update ref)
+        # An annotated tag is a tag OBJECT and refs/heads/* must point at a COMMIT, so the refspec
+        # source has to be peeled first. Every version tag in this repo is annotated
+        # (`git cat-file -t v0.7.0` -> `tag`), so the unpeeled form would have failed on every real
+        # release — and nothing local could have caught it: the syntax is valid, the history is
+        # present, and only the remote's own ref-update rule refuses the write.
+        # `git push` still rejects a non-fast-forward update on its own, so invariant 2 needs no
+        # extra code here — and adding a force flag would silently destroy it, which is why no force
+        # flag appears anywhere in this file. (Both directions were checked: the unpeeled refspec
+        # fails, the peeled one fast-forwards.)
+        run: |
+          set -euo pipefail
+          echo "advance-master: fast-forwarding refs/heads/master to ${TAG}"
+          git log -1 --format='%H %cI %s' "${TAG}"
+          # Peel the annotated tag to its commit. This is the same expression the closing echo used
+          # below — the push refspec was the one place it was missing.
+          TARGET="$(git rev-parse "${TAG}^{commit}")"
+          git push origin "${TARGET}:master"
+          echo "advance-master: origin/master now at ${TARGET}"

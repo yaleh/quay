@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 62 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 63 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -937,6 +937,26 @@ run_static_checks() {
   # wiring used main_root and this very check went RED inside its own task's worktree, because the
   # main checkout (branch `author`) had not yet received the fix the worktree was carrying.
   run_checker "release-test-client-close-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-test-client-close-check.ts" --root "${repo_root}"
+  # gap-first-green-release-and-master-ff (GOAL-020 AC-274, SPEC §6.1 invariant 3): `advance-master`
+  # is the ONE job allowed to move `master`, and its `needs:` list is the only thing that keeps that
+  # from happening on a half-green release — GitHub skips a job whose dependency did not succeed, so
+  # fail-closed is default behaviour rather than code. But the list is written by HAND, and §6.1 names
+  # the rot exactly: add a 7th job to release.yml, forget it here, and master advances on a release
+  # that was never fully green. §6.1 requires this assertion in the SAME batch as the job.
+  # Code-class, not operational: it reads ONLY the checked-in workflow (no live loop state, no git
+  # history), so it belongs here rather than in run_operational_checks. The job key set is DERIVED
+  # from the file on every run — nothing is hardcoded, because a hardcoded list of the six names would
+  # be a copy that drifts from the thing it copies, i.e. this checker's own defect.
+  # 0 = needs covers every other job; 1 = a job is missing (named); 3 = NOT-EVALUATED for an absent
+  # workflow / unreadable `jobs:` / zero jobs / no advance-master job / an unreadable `needs:` value —
+  # never 0 (硬规则 3b). ⛔ An ABSENT `needs:` is a FAIL, not a NOT-EVALUATED: a job with no
+  # dependencies moves master on ANY release run, which is readable and is the worst reading.
+  # --root repo_root, NOT main_root, for the same reason as the checker above: the only input is a
+  # CHECKED-IN file, so the verdict must be about the tree under test (this task's own worktree
+  # carries the job before the main checkout does).
+  # @static-tier change
+  # @static-object .github/workflows/release.yml plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh
+  run_checker "release-master-advance-needs-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-master-advance-needs-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
