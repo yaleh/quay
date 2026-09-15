@@ -19,8 +19,8 @@ extra: {}
 ### 结论一：74–94% 里的绝大部分是**分母伪影**，不是漏写
 
 原读数的分母是 `翻 X done` **提交条数**。但**一次落地会留下 1..N 条**该提交：机械 fan-in 的 flip
-发生在 ff **之前**（`worker-driver.ts:4611` flip → `:4617` ff），ff 失败 ⇒ `reset done→ready` 回滚重试
-（`worker-driver.ts:3844-3857`）。实测 2026-09-07：89 条 flip 提交 / 47 个任务 = **1.89×**；单个任务
+发生在 ff **之前**（`worker-driver.ts:3900` flip → `:4690` ff），ff 失败 ⇒ `reset done→ready` 回滚重试
+（`worker-driver.ts:3904-3920`）。实测 2026-09-07：89 条 flip 提交 / 47 个任务 = **1.89×**；单个任务
 最多 **9 次** flip + 8 次 reset（`gap-goal-driver-draft-ac-invisible-yet-blocking`）。
 按**落地**（每任务最后一次 status 转移到 done，且 tip 上 status=done）重算同一窗口：
 
@@ -92,6 +92,9 @@ commit，**没有任何事件写入**。实测：该路径 2/2 落地零事件�
 （修复前该路径的结构必然是零事件，与 09-06 的实测一致）；
 ③ mutation case 与 7 条单测全绿（含「抹掉载体事件 ⇒ 必须报红」双向）。
 
+⚠️ **AC3 的窗口不等于「修复被验证过」**——见文末「## 复核」②：被修的那条路径（#2）目前在生产上
+**一次都还没跑过**，所以三日覆盖率全绿只能证明机械路径没退化。翻 AC3 前先读那一节。
+
 ## AC1 路径枚举
 
 判定手法：`grep` 按**位置**（命令位/行首锚定），不是关键词扫注释与字符串（硬规则 2）。
@@ -99,8 +102,8 @@ commit，**没有任何事件写入**。实测：该路径 2/2 落地零事件�
 
 | # | 路径 | 位置 | 写 `complete`？ |
 |---|---|---|---|
-| 1 | 机械 fan-in flip（`patchStatusField(…, "done")`） | `plugin/scripts/worker-driver.ts:3840`、`:3855`（2 处）；写入点 `appendCompleteGateEvent` `:3891`，调用点 `:4626` | **是**（但**只在 ff 成功后**——flip 在 ff 前，回滚的那次不写，这是正确的） |
-| 2 | 语义兜底 fan-in workflow flip | `plugin/workflows/fan-in-execute.js:849` `sed -i 's/^status: ready$/status: done/'` | **修复前否（2/2 零事件）；已修**：新增 `complete-gate-event-block`，经 `worker-driver.ts --append-complete-gate-event` 调**同一个** `appendCompleteGateEvent`（⛔ 不手搓 JSON）；**写失败只告警、⛔ 不阻塞 landing**（见下方「## 一处我自己的判断」） |
+| 1 | 机械 fan-in flip（`patchStatusField(…, "done")`） | `plugin/scripts/worker-driver.ts:3900`、`:3915`（2 处）；写入点 `appendCompleteGateEvent` `:3951`，调用点 `:4704` | **是**（但**只在 ff 成功后**——flip 在 ff 前，回滚的那次不写，这是正确的） |
+| 2 | 语义兜底 fan-in workflow flip | `plugin/workflows/fan-in-execute.js:849` `sed -i 's/^status: ready$/status: done/'` | **修复前否（2/2 零事件）；已修**：新增 `complete-gate-event-block`（`:908-922`），经 `worker-driver.ts --append-complete-gate-event` 调**同一个** `appendCompleteGateEvent`（⛔ 不手搓 JSON）；**写失败只告警、⛔ 不阻塞 landing**（见下方「## 一处我自己的判断」） |
 | 3 | QENG 生命周期（`quay complete` / `quay promote`） | `packages/quay/src/gate/lifecycle.ts:207`（`runComplete`）、`:275`（`runCompleteLoop`），均 `client.taskWrite({status: TASK_STATUS.DONE, expectedStatus: READY})` + `mkLifecycleEvent({gate:"complete", verdict:"pass"})` | **是** |
 | 4 | outer loop 完成 | `plugin/scripts/loop-complete-task.ts:70/:117` 转发 `runCompleteLoop` | **是**（与 #3 同源） |
 | 5 | Provider-ABI 直写 `status: done`（MCP `task_write` / native `task edit`） | 不经过上述任何一处；窗口内 3 次（09-08 / 09-10 / 09-12） | **否 —— ABI 层设计内旁路**（理由见 Finding 结论三）；由本判据与 `stale-ready-audit.ts` 的 `bypassComplete` 检测 |
@@ -238,3 +241,91 @@ baseline 绿 → 抹掉载体事件 ⇒ 必须红 → 写回 ⇒ 绿 → 再加�
 `bash <case>.sh <tmpdir>` exit 0；`checker-mutation-check --check-changed` 下 `MUTATION gate-event-coverage-check: pass`。
 
 ④ 单测 7/7 绿（含三态 exit 3、分母、状态转移、bootstrap 窄性、双向控制）。
+
+## 复核：合并 develop 后的重锚与生产重读（2026-09-14）
+
+### ① 行号重锚
+
+`plugin/scripts/worker-driver.ts` 因 develop 的后续合并整体下移，Finding 与 AC1 表里的旧行号
+**已就地更正**（上表内已是新值）。判定手法同 AC1：**位置锚定** grep + 命中内容逐条核对，⛔ 不是
+按关键词扫（硬规则 2）。旧→新对照，每条都贴出命中内容：
+
+| 旧引用 | 现状（命中内容核对） |
+|---|---|
+| `:3840` | `:3900` `const flipped = patchStatusField(split.frontmatterRaw, "done");` |
+| `:3855` | `:3915` reset 后的第二次 flip（reset 块 `:3904-3920`） |
+| `:3891` | `:3951` `export async function appendCompleteGateEvent(` |
+| `:4626` | `:4704` `const gateEvent = await appendCompleteGateEvent(root, task);`（ff 调用在 `:4690`） |
+| `:4611` / `:4617` | `:3900` flip / `:4690` ff |
+
+**未变的引用**：`fan-in-execute.js:849`（sed flip，事件块 `:908-922`）、`lifecycle.ts:207/:275`、
+`loop-complete-task.ts:70/:117`。
+
+### ② 路径集合无新增；但**被修的路径在生产上一次都没跑过**（翻 AC3 前必读）
+
+**集合完备性**：重跑位置锚定的全仓 sweep（三个谓词 `status: TASK_STATUS.DONE` / `status: "done"` /
+`sed 's/^status: ready$/status: done/'`，排除 `dist/`、`vendor/`、测试夹具）⇒ 除 AC1 表内 6 条外
+**无新写入点**，枚举仍完备。
+
+**生产重读**：`2026-09-14` 由实现当轮的 `6/6` 长到 **`33/33 = 100%`**（0 条 UNCOVERED）。
+
+⚠️ **但这条读数不能当作「修复被验证了」**，实测载体按 actor 拆开：
+
+```
+$ node -e '…读 .quay/gate-events.jsonl，按 gate=="complete" 的 actor 分组…'
+total complete events: 426
+{ outer: 9, 'quay-cli': 2, 'quay-driver': 415 }
+--- quay-fan-in-workflow events (the FIXED semantic path) ---
+（空）
+```
+
+⇒ **`actor:"quay-fan-in-workflow"` 的事件数为 0**。原因是那条路径**自修复落地以来一次都没落地过**
+（该路径最后一次真落地是 09-06 的 2 条；09-14 的 33 条落地全部是机械路径 `quay-driver`）。
+所以：
+
+- 09-14 的 100% 只证明**机械路径没退化**——而机械路径是**另一个任务**（09-04）修的，不是本条的 delta；
+- AC3 的三日窗口**可能在不跑一次路径 #2 的情况下全绿** ⇒ 那将是一个「恒真但什么也没验到」的读数
+  （硬规则 4c 的第二种失败形态：空转，与「验过了」同形）。
+- 因此本条的修复到 2026-09-14 为止，**只有机制侧证据（上面 ①②③④），没有生产证据**。
+  这正是硬规则 4 推论三的形状（实现了、fixture 绿了、生产没跑过 ⇒ 与「没实现」同形），
+  区别是本条**不**留下假绿：AC3 仍未勾，且此处明写生产证据缺席。
+
+**已定的处置（⛔ 不新增阻塞前置）**：硬规则 12——要求一个新前置前先给它的发生率。路径 #2 的
+**真落地**发生率实测为窗口内 2 次（均在 09-06），即数量级「约每 1–2 周一次」；把它写成 AC3 的
+阻塞条件会让 AC3 无限期挂起。故记为**观察项 + 一条一命令可查的后续读数**，⛔ 不作为阻塞：
+
+```
+$ node -e '…filter(e=>e.gate=="complete" && e.actor==="quay-fan-in-workflow").length'
+# ≥1 ⇒ 被修路径已在生产上跑过（事件由它在 ff 成功后自己写）；==0 ⇒ 仍只有机制侧证据
+```
+
+即：AC3 翻勾时，若上式为 0，则该绿**只能**支撑「机械路径无退化」，⛔ 不得写成「本条的修复已在
+生产验证」。翻勾者请把上式读数一并贴进任务体。
+
+### ③ 复核轮自己跑的三步（本轮的独立证据）
+
+- **scoped 门绿**（driver fan-in 用的同一条命令）：
+  `bash scripts/test.sh --for-task gap-complete-gateevent-coverage-has-a-residual-gap --allow-thin`
+  ⇒ 退出码 0；其中新检查器在 selected 集内实跑
+  （`run_checker "gate-event-coverage-check" … --root "${main_root}" --days 1 --gate` ⇒
+  `PASS: 窗口内全部非豁免日覆盖率 ≥ 95%（最差 100%）`），
+  `checker-mutation-check --check-changed` ⇒ `MUTATION gate-event-coverage-check: pass`
+  （该 delta 的 3 个 checker 全部「注入缺陷 ⇒ 红、还原 ⇒ 绿」）。
+- **正/负控制（对着当前树重跑，非引用上一轮）**：verb 在 ⇒
+  `{"event":"complete-gate-event-appended","task":"TEST-probe-003","ok":true,"reason":null}`、exit 0，
+  载体新增一条 `actor:"quay-fan-in-workflow"` 的 `complete pass` 记录；
+  同一调用给一个不存在的 flag ⇒ exit 2、载体**行数不变**（不写）。
+- **分支与 develop 对齐**：合并 develop 后无冲突、无未合并路径。
+
+### ④ 上一轮 exited-not-landed 的真因：陈旧分支，⛔ 不是本任务的 delta
+
+上一轮 suite 红于 `plugin/test/test-isolation-check.test.mjs:544` 的
+`AC3/AC4 rehearsal: real repo reports the three known instances + the 6 remaining process.exit(1)s`
+— `missing AC4 process.exit(1) file packages/quay-native/test/create-validation.test.mjs:`。
+
+真因是**测试文件比 develop 旧一版**：develop 的 `a6ce55a8e` 修掉了 `create-validation` 的 R1+R4 并
+按「棘轮只准变短」把该文件从清单里**移除**（6 → 5 条），而失败那次 suite 跑的是移除前的 6 条版本
+（该版本要求 `create-validation.test.mjs:process-exit-1` 出现，而它已被修好 ⇒ 结构上必然红）。
+本任务分支在 `828d046a3` 合并 develop 时已取到 5 条版本 ⇒ **本轮复跑不再复现**（上述 scoped 门已含
+`test-isolation-check` 且全绿）。**与 delta 无关**——delta-relatedness 判 UNRELATED 是对的，
+但当时的「按 UNRELATED 忽略」会漏掉真正的修法（merge develop），故此处记明。

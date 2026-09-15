@@ -22,11 +22,15 @@
 // gateCriterion 调起（criterion 正文 = goals/AC-190-task-ac.md），无需接入 scripts/test.sh。
 //
 // ⚠️ 写入面的同一条规则（gap-ac190-goal-ac-rule-not-enforced-at-filing, 2026-09-13）：本文件是
-// 【事后】报告——它看得见违反，却没有任何权力阻止违反发生。生效线之后第一条 delivery-critical 任务
-// 经本仓自己的立案路径写入、机械晋升到 ready，全程没有任何一步问过 goal_ac（硬规则⑨：产物造在了
-// 违反发生之后 ⇒ 等于靠意志）。同一条规则在【提交那一刻】的判定落在 precommit-guard.ts 的 ③
-// （staged tasks/*.md 的 delivery-critical ∧ 生效线之后 ∧ 无 goal_ac ⇒ 拒），判定函数由本文件导出、
-// 单源复用（isDeliveryCritical / hasGoalAc / filedAfterCutoff / activationLineMs），⛔ 不留第二份实现。
+// 【事后】报告——它看得见违反，却没有任何权力阻止违反发生。同一条规则在【写入那一刻】的判定原本
+// 落在 precommit-guard.ts 的 ③（提交那一刻）；判定函数由本文件导出、单源复用，⛔ 不留第二份实现。
+//
+// ⛔ 落点第二次修正（gap-ac190-write-face-rule-unreachable-under-no-verify, 2026-09-14）：③ 只在
+// git `pre-commit` 钩子上跑，而生产立案路径根本不过钩子（store-commit.ts 明写 `git commit
+// --no-verify`，实测 370/400 条 tasks 提交是该形态）⇒ 判定在写者路径上【结构性不可达】。
+// 判定的正本因此搬到 `packages/quay/src/goal-ac-write-face.ts`（Core），由 store.ts 的创建路径、
+// 本检测器、以及钩子三处共用；本文件只再导出该模块的名字，**脚本入口路径与 AC-190 的读数都不变**
+// （照 criterion-failure-attribution-check.ts :42 的先例）。
 //
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts
@@ -40,92 +44,34 @@ import { repoRoot } from "./repo-root.ts";
 import { emitPass, emitFail, emitNotEvaluated, isDirectEntry } from "./gate-script-base.ts";
 import { parseFrontmatterCompletely, frontmatterLabels, frontmatterGoalAc } from "./task-schema.ts";
 
-// ── 生效线（显式 cutoff） ───────────────────────────────────────────────────────────────────────────
-// 只对【生效线之后新立案】的任务 fail-closed。实测（2026-09-09）：带 delivery-critical 标签的任务
-// 125 条、其中 120 条无 goal_ac；最新一条 first-add 时刻 2026-09-08T22:30:33Z。生效线取
-// 2026-09-09T00:00:00Z ⇒ 存量全部 grandfathered（单独排期，⛔ 不在本任务清）。
-export const ACTIVATION_LINE_ISO = "2026-09-09T00:00:00Z";
+// ── 判定的正本在 Core（packages/quay/src/goal-ac-write-face.ts）——本文件只再导出 ──────────────────
+// 三个消费面（store 的创建路径 / 本检测器 / precommit-guard 的 ③）必须是【同一个判定】；单源在
+// 记录上必须可分辨（硬规则 1），所以这里给的是 `export … from` 行本身，⛔ 不是第二份字符串比较。
+export {
+  ACTIVATION_LINE_ISO,
+  DELIVERY_CRITICAL_LABEL,
+  INJECTED_UNBACKED_ID,
+  GOAL_CARRIER_DIR_NAME,
+  activationLineMs,
+  isDeliveryCritical,
+  hasGoalAc,
+  filedAfterCutoff,
+  evaluateDeliveryCritical,
+  judgeStagedDeliveryCritical,
+  goalCarrierHasRecords,
+  writeFaceRejectionOnCreate,
+  type DeliveryCriticalTaskLike,
+  type StagedTaskCandidate,
+} from "../../packages/quay/src/goal-ac-write-face.ts";
 
-export const DELIVERY_CRITICAL_LABEL = "delivery-critical";
-
-// 负控制注入的合成条目：一条「生效线之后、带 delivery-critical、无 goal_ac」的任务。
-export const INJECTED_UNBACKED_ID = "gap-injected-unbacked-fixture";
-
-/** 生效线时刻（ms epoch）。ISO 不可解析 ⇒ 0（一切任务都算之后 ⇒ fail-closed，宁可红不宁绿）。 */
-export function activationLineMs(): number {
-  const ms = Date.parse(ACTIVATION_LINE_ISO);
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-// ── 位置判定（纯函数，可被单测直接 import 不触发主流程） ──────────────────────────────────────────
-
-export interface DeliveryCriticalTaskLike {
-  id?: unknown;
-  labels?: unknown;
-  goal_ac?: unknown;
-  /** first-add commit 时刻（ms epoch）；缺值/NaN = git 读不到 ⇒ 按新立案 fail-closed（缺值=未查≠旧）。 */
-  filedAtMs?: unknown;
-}
-
-/** 带 delivery-critical 标签判定：读 labels 数组（frontmatter 位置），非手维护名单。 */
-export function isDeliveryCritical(task: DeliveryCriticalTaskLike): boolean {
-  return Array.isArray(task.labels) && task.labels.map(String).includes(DELIVERY_CRITICAL_LABEL);
-}
-
-/** goal_ac 非空判定：string 且 trim 后非空。缺值/空串/非 string ⇒ false（fail-closed）。 */
-export function hasGoalAc(task: DeliveryCriticalTaskLike): boolean {
-  const s = task?.goal_ac;
-  return typeof s === "string" && s.trim() !== "";
-}
-
-/** 是否「生效线之后新立案」：filedAtMs ≥ cutoffMs。filedAtMs 缺值 ⇒ true（缺值=未查，fail-closed）。 */
-export function filedAfterCutoff(task: DeliveryCriticalTaskLike, cutoffMs: number = activationLineMs()): boolean {
-  const t = task?.filedAtMs;
-  if (typeof t === "number" && Number.isFinite(t)) return t >= cutoffMs;
-  return true;
-}
-
-/**
- * 枚举每条带 delivery-critical 标签的任务，判定其 goal_ac 是否非空。返回清单 + 总数（枚举，
- * 不布尔——硬规则③）：
- *   violating    — 生效线之后、带标签、goal_ac 空 ⇒ 报红
- *   compliant    — 生效线之后、带标签、goal_ac 非空
- *   grandfathered — 生效线之前、带标签（不分 goal_ac 有无，均不判红）
- *   grandfatheredNoGoalAc / grandfatheredWithGoalAc — 生效线之前的存量再按 goal_ac 有无拆开
- *     （DoD 要记的「存量条数 125/120」= 总数 / 无 goal_ac 那半边，单独排期）。
- */
-export function evaluateDeliveryCritical(
-  tasks: readonly DeliveryCriticalTaskLike[],
-  cutoffMs: number = activationLineMs(),
-): {
-  violating: string[];
-  compliant: string[];
-  grandfathered: string[];
-  grandfatheredNoGoalAc: string[];
-  grandfatheredWithGoalAc: string[];
-  total: number;
-} {
-  const violating: string[] = [];
-  const compliant: string[] = [];
-  const grandfathered: string[] = [];
-  const grandfatheredNoGoalAc: string[] = [];
-  const grandfatheredWithGoalAc: string[] = [];
-  let total = 0;
-  for (const t of tasks) {
-    if (!isDeliveryCritical(t)) continue;
-    total += 1;
-    if (!filedAfterCutoff(t, cutoffMs)) {
-      grandfathered.push(String(t.id));
-      if (hasGoalAc(t)) grandfatheredWithGoalAc.push(String(t.id));
-      else grandfatheredNoGoalAc.push(String(t.id));
-    } else if (hasGoalAc(t)) {
-      compliant.push(String(t.id));
-    } else {
-      violating.push(String(t.id));
-    }
-  }
-  return { violating, compliant, grandfathered, grandfatheredNoGoalAc, grandfatheredWithGoalAc, total };
-}
+import {
+  ACTIVATION_LINE_ISO,
+  DELIVERY_CRITICAL_LABEL,
+  INJECTED_UNBACKED_ID,
+  activationLineMs,
+  evaluateDeliveryCritical,
+  type DeliveryCriticalTaskLike,
+} from "../../packages/quay/src/goal-ac-write-face.ts";
 
 // ── 生产载体读取 ─────────────────────────────────────────────────────────────────────────────────────
 

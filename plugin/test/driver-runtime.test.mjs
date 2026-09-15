@@ -54,6 +54,8 @@ import {
   collectFacts,
   reportFacts,
   aliveness,
+  anchorHosts,
+  readAnchorState,
   statePaths,
   kernelSelfPath,
   resolveKernelSibling,
@@ -365,6 +367,125 @@ test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not
   const a = aliveness(root, "promotion");
   assert.equal(a.supervisorAlive, false);
   assert.deepEqual(a.deaths, ["supervisor_dead"], "stale supervisor pid ⇒ supervisor_dead");
+});
+
+// ── gap-driver-status-misreports-anchor-hosted-kind-as-down ────────────────────────────────────────
+// 生产实测（2026-09-15，`/home/yale/work/quay`，6 个 kind 全由一个 anchor 托管）：`quay driver status
+// --kind <k> --json` 对其中 5 个报 `host=supervisor, driver_pid=null, alive=0, running=0`，而**同刻**这
+// 5 个 kind 的 round 载体都在**秒级**刷新。根因：`anchorHosts()` 要求「逐 kind pid 载体
+// `.quay/<prefix>.pid` 里恰好写着 anchor 的 pid」——而那张文件是**循环的产物**（进循环体时写一次、
+// 循环收尾时被删、活着期间**没有任何东西重写**），⛔ 不是托管关系的产物。⇒ 任意时刻「哪些 kind 有它」
+// 是一个随循环代次漂移的**任意子集**。本测试钉住新判据：**anchor 进程活着 ∧ 回读面 `.quay/anchor.json`
+// 点名了本 kind**，且夹具里**故意不写**那张逐 kind pid 载体（旧判据在它上面必挂）。
+function writeAnchorHostedRoot(tag, kinds, opts = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dr-anchor-${tag}-`));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  const anchorPid = opts.anchorPid ?? process.pid;
+  fs.writeFileSync(path.join(q, "anchor.pid"), `${anchorPid}\n`, "utf8");
+  if (opts.state !== false) {
+    fs.writeFileSync(
+      path.join(q, "anchor.json"),
+      JSON.stringify({ pid: opts.statePid ?? anchorPid, startedAt: "2026-09-15T02:15:14.983Z", kinds, host: "anchor" }) + "\n",
+      "utf8",
+    );
+  }
+  return root;
+}
+
+test("gap-driver-status-misreports — anchor-hosted kind with NO per-kind pid carrier ⇒ host=anchor & alive=1（⛔ 不报假死）", (t) => {
+  const root = writeAnchorHostedRoot("nofile", ["worker", "outer", "promotion"]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⚠️ 夹具的关键：**故意不写** `.quay/<kind>-driver.pid`（旧判据正是读它 ⇒ 旧代码在这里必然报假死）。
+  assert.equal(fs.existsSync(path.join(root, ".quay", "worker-driver.pid")), false, "夹具：逐 kind pid 载体确实不存在");
+
+  for (const kind of ["worker", "outer", "promotion"]) {
+    assert.equal(readAnchorState(root)?.kinds.includes(kind), true, `${kind}: 回读面点名了它`);
+    assert.equal(anchorHosts(root, kind).hosted, true, `${kind}: anchorHosts ⇒ hosted`);
+    const a = aliveness(root, kind);
+    assert.equal(a.host, "anchor", `${kind}: host=anchor`);
+    assert.equal(a.anchorPid, process.pid, `${kind}: anchor_pid`);
+    assert.equal(a.driverPid, process.pid, `${kind}: 承载进程 = anchor（⛔ 不是「pid 载体里碰巧写了谁」）`);
+    assert.equal(a.driverAlive, true, `${kind}: driver_alive=1`);
+    assert.equal(a.running, true, `${kind}: running=1`);
+    assert.equal(a.supervisorAlive, false, `${kind}: 阶段 C 无 supervisor`);
+    assert.deepEqual(a.deaths, [], `${kind}: ⛔ 不得报任何死因`);
+  }
+});
+
+test("gap-driver-status-misreports — 逐 kind pid 载体【陈旧/指向死 pid】而 anchor 托管它 ⇒ 仍报 alive=1", (t) => {
+  const root = writeAnchorHostedRoot("stale", ["outer"]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // AC5 点名的另一半夹具形态：文件在，但内容是**一个死 pid**（旧判据下 `driverPid === anchorPid` 为假
+  // ⇒ 同样报假死）。
+  writePidFile(path.join(root, ".quay", "outer-driver.pid"), Number(deadPid()));
+  const a = aliveness(root, "outer");
+  assert.equal(a.host, "anchor");
+  assert.equal(a.running, true, "承载进程是活着的 anchor ⇒ 在跑");
+  assert.deepEqual(a.deaths, [], "⛔ 不因那张陈旧文件报 driver_dead");
+});
+
+test("gap-driver-status-misreports — 负控制：未被 anchor 点名的 kind / 无活 anchor / 回读面读不到", (t) => {
+  // ① 活 anchor 托管 [worker,outer]，但**没有**点名 goal ⇒ goal 走旧形态（⛔ 「down」必须仍可报出）。
+  const rootA = writeAnchorHostedRoot("neg-unnamed", ["worker", "outer"]);
+  t.after(() => fs.rmSync(rootA, { recursive: true, force: true }));
+  const g = aliveness(rootA, "goal");
+  assert.equal(g.host, "supervisor", "未被点名 ⇒ host=supervisor（legacy 形态）");
+  assert.equal(g.running, false, "未被点名 ⇒ 不报在跑");
+  assert.equal(anchorHosts(rootA, "goal").hosted, false);
+
+  // ② anchor.pid 指向一个**死进程**：回读面照样点名了，⛔ 但不得据此报「在跑」（自报不足以制造托管）。
+  const rootB = writeAnchorHostedRoot("neg-deadanchor", ["worker"], { anchorPid: Number(deadPid()) });
+  t.after(() => fs.rmSync(rootB, { recursive: true, force: true }));
+  const w = aliveness(rootB, "worker");
+  assert.equal(w.host, "supervisor", "anchor 死 ⇒ 回落 legacy 形态，⛔ 不报 anchor");
+  assert.equal(w.anchorPid, null);
+  assert.equal(w.running, false, "anchor 死 ⇒ 不报在跑");
+
+  // ③ 回读面缺失（旧 anchor / 换代窗口）⇒ 兼容回退到逐 kind pid 载体那条旧判据（⛔ 读不懂 ⇒ 不报死亡）。
+  const rootC = writeAnchorHostedRoot("neg-nostate", ["promotion"], { state: false });
+  t.after(() => fs.rmSync(rootC, { recursive: true, force: true }));
+  assert.equal(readAnchorState(rootC), null, "回读面缺失 ⇒ null（三态，⛔ 不是 kinds:[]）");
+  writePidFile(path.join(rootC, ".quay", "promotion-driver.pid"), process.pid);
+  assert.equal(anchorHosts(rootC, "promotion").hosted, true, "回退判据：载体写着活 anchor 的 pid");
+  // ④ 回读面**换代**（其 pid 与 anchor.pid 对不上）⇒ 不采信它的 kinds（那是上一代 anchor 的名单）。
+  fs.writeFileSync(
+    path.join(rootC, ".quay", "anchor.json"),
+    JSON.stringify({ pid: 999999, kinds: ["worker"], host: "anchor" }) + "\n",
+    "utf8",
+  );
+  assert.equal(anchorHosts(rootC, "worker").hosted, false, "换代的回读面不采信");
+});
+
+test("gap-driver-status-misreports — AC2 交叉核对：`status --json` 同时给出 host/alive 与独立的载体新鲜度直接量", (t) => {
+  const root = makeRoot("anchorhosted");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "anchor.pid"), `${process.pid}\n`, "utf8");
+  fs.writeFileSync(
+    path.join(q, "anchor.json"),
+    JSON.stringify({ pid: process.pid, kinds: ["promotion"], host: "anchor" }) + "\n",
+    "utf8",
+  );
+  // 载体新鲜度 = **独立于 anchor 自报**的直接量（AC2 要求以它交叉核对 host/alive，⛔ 不是只信内部状态）。
+  fs.writeFileSync(
+    path.join(q, "promotion-round.jsonl"),
+    JSON.stringify({ ts: new Date().toISOString(), runId: "dr-anchorhosted" }) + "\n",
+    "utf8",
+  );
+  // ⛔ 夹具不写 .quay/promotion-driver.pid —— 逐 kind 载体缺失正是本缺陷的触发形态。
+  const r = run(["status", "--root", root, "--kind", "promotion", "--json"]);
+  assert.equal(r.status, 0, `status exit 0: ${r.stdout}\n${r.stderr}`);
+  const j = JSON.parse(r.stdout.split("\n").find((l) => l.trim().startsWith("{")));
+  assert.equal(j.host, "anchor", "JSON 契约：host=anchor");
+  assert.equal(j.anchor_pid, process.pid);
+  assert.equal(j.alive, 1, "JSON 契约：alive=1");
+  assert.equal(j.running, 1, "JSON 契约：running=1");
+  // ⚠️ server.ts 用 `driver_alive !== 1` 判「这个 kind 的循环没在转」⇒ 这个字段必须同修，否则只是把假死
+  // 从一个字段搬到另一个（packages/quay/src/cli/server.ts 的 driverServiceReport）。
+  assert.equal(j.driver_alive, 1, "JSON 契约：driver_alive=1（server status 的消费点）");
+  assert.ok(Math.abs(Date.now() - Date.parse(j.last_record_ts)) < 60_000, "载体新鲜度直接量可读（交叉核对面）");
 });
 
 // ── 集成（spawn kernel CLI，与旧 promotion-driver-launch.sh 同形的端到端）────────────────────────

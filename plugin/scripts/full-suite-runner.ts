@@ -993,6 +993,11 @@ export interface SuiteRoundRecord {
    * process.cpuUsage() in ms, route a 子进程自报) when the reporter's `__PERFILE__` line carried
    * `cpu_ms=`; absent on legacy lines (缺键 ≠ 0, the same absent-field contract as endedAtMs). This
    * writer forms perFile from the shared parser, so cpuMs rides the record automatically — 禁止只改一边.
+   * gap-perfile-memory-cost-collection-missing — the same holds for `memPeakKb` (the file's OWN
+   * process peak RSS in KB from the `mem_peak_kb=` field; ⛔ this process only, its SPAWNED
+   * subprocesses are NOT covered). BOTH round-record writers (this one +
+   * pre-verified-round-record.ts's parsePerFile) read the shared parser, so both carry it —
+   * 禁止只改一边.
    */
   perFile?: PerFileRecord[];
   /**
@@ -2425,6 +2430,8 @@ export async function run(argv: string[]): Promise<number> {
     // (NODE_OPTIONS=--require) loads into every node process of the suite; each isolated test-file child
     // reports its own process.cpuUsage() into perFileCpuDir at exit, and measure-suite-reporter reads it
     // back to append cpu_ms. NODE_OPTIONS is APPENDED (never overwritten) so a caller-set value survives.
+    // gap-perfile-memory-cost-collection-missing — the SAME dir/seam also collects the child's peak RSS
+    // (`<key>.mem`), appended as mem_peak_kb. One dir, two dimensions — no second env var to wire.
     QUAY_PERFILE_CPU_DIR: perFileCpuDir,
     NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
   };

@@ -169,7 +169,12 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
   // 只看心跳新鲜度会让「这个 kind 已经被停掉」在 **60 分钟**内与「一切正常」同形（心跳窗口是 60min，
   // 而停掉的循环当然不会再写 —— 于是它的最后一条记录在窗口内仍然「新鲜」）。实测：`stop --kind meta`
   // 之后该行仍报 alive:true，只有 pid 变 null。那不是「服务在转」的读数。
-  // ⇒ 先判承载进程（`driver_alive` = 该 kind 的 pid 载体所指进程是否活着），再判心跳。
+  // ⇒ 先判承载进程（`driver_alive` = **承载该 kind 常驻循环的那个进程**是否活着——收敛形态下就是
+  // anchor 自己），再判心跳。
+  // ⚠️ 这里的 `driver_alive` 曾一度只在「逐 kind pid 载体恰好写着承载者的 pid」时为 1，于是收敛形态下
+  // 五个 kind 被读成「没有活着的承载进程 ⇒ the loop is not running」（`gap-driver-status-misreports-
+  // anchor-hosted-kind-as-down`：2026-09-15 生产实测，同刻它们的 round 载体都在秒级刷新）。判据已改到
+  // 承载关系本身（见 driver-runtime.ts 的 `anchorHosts`）⇒ 本消费点随之正确，⛔ 不必在这里再判一次。
   if (j.driver_alive !== 1) {
     return {
       ...base,

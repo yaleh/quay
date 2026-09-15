@@ -119,8 +119,14 @@ and prints what to run once — you can either restart Claude Code and run
 
 ```sh
 claude plugin marketplace add "$(npm root -g)/quay/plugin"
-claude plugin install quay@quay
+claude plugin install quay@quay --scope project   # scope user only if you mean it — see below
 ```
+
+Registration deliberately does **not** enable the plugin at user scope: the
+user-level `~/.claude/settings.json` carries only the marketplace source, and a
+project opts in through its own `.claude/settings.json`
+(`{"enabledPlugins": {"quay@quay": true}}`). Pass `QUAY_PLUGIN_SCOPE=user` to
+`npm install -g` if you deliberately want a user-scope enable.
 
 Opt-out (install the CLI without registering the plugin):
 
@@ -138,11 +144,17 @@ npm `allow-scripts` denylist will skip it — see the fallback above.)
 git clone https://github.com/yaleh/quay.git
 cd quay
 npm install
+cp .quay/config.yml.example .quay/config.yml   # see below — gitignored, not created by npm install
 ```
 
 This is an npm workspaces monorepo (`package.json` `"workspaces": ["packages/*"]`)
 — one `npm install` at the repo root wires up all three packages and their
 shared dependency tree (`@modelcontextprotocol/sdk`, `yaml`, `zod`).
+
+`.quay/config.yml` (the Provider map `quay` Core reads — see [Configuration](#configuration)
+below) is per-workspace and gitignored, so a fresh clone doesn't have one; `.quay/config.yml.example`
+is this repo's own real, working config, checked in so you don't have to construct one by hand
+just to run `quay serve` or the test suite against your own checkout.
 
 Each package also has its own binary you can invoke directly with `node`,
 which is how every example below is actually run (no global install step
@@ -758,6 +770,7 @@ paths, limits, and behavior overrides. The most commonly needed ones:
 | `QUAY_ACCEPTANCE_ENV` | gate | Override the acceptance env-file path (see above). |
 | `QUAY_SKIP_PLUGIN_REGISTER` | npm postinstall | `1` opts out of Claude Code plugin registration entirely. |
 | `QUAY_SKIP_PLUGIN_CLI` | npm postinstall | `1` skips the `claude plugin` CLI materialization sub-step (settings.json is still written). |
+| `QUAY_PLUGIN_SCOPE` | npm postinstall | Scope for a deliberate plugin ENABLE: `user`, `project`, or `local`. Unset (default) registers the marketplace only — the user level carries no quay `enabledPlugins` entry (AC-161); enable per project instead. |
 | `QUAY_ACTION_MOCK_LOG` | action | Path for deterministic mock/file-log action delivery instead of live delivery (DIR-009). |
 | `QUAY_GLOBAL_DIR` | manager | Cross-project base directory for the manager layer (its session home is `$QUAY_GLOBAL_DIR/manager/`). |
 
