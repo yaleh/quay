@@ -1,6 +1,6 @@
 {
   "name": "quay-github",
-  "version": "0.7.0-dev",
+  "version": "0.7.0",
   "private": true,
   "description": "The GitHub Provider for Quay: read + write (create, and edit title/body/status/labels/parent/children) mapping GitHub Issues onto the canonical task view-model (QN-002, DIR-041/M57). Second real backend, proves the ABI transfers (proposal §14, protocol §10.1).",
   "type": "module",

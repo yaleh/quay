@@ -14,7 +14,7 @@
         "repo": "yaleh/quay",
         "ref": "dist-plugin"
       },
-      "version": "0.7.0-dev",
+      "version": "0.7.0",
       "description": "quay MCP server (task_list/task_get/task_write/task_check/action_list/action_run over whichever Provider the target workspace's .quay/config.yml enables) + quay-native author/execute authoring skills + a workspace-portable quay-directive skill (ships its own schema-check, no experiments/ dir required).",
       "license": "MIT",
       "homepage": "https://github.com/yaleh/quay",
