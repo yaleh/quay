@@ -89,5 +89,6 @@ enabledPlugins still carries a quay key; this record's project-scope premise is 
 - packages/quay/scripts/register-plugin.mjs
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
+- tasks/gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall.md（自身：勾 AC + 贴证据）
 
 Note: filed from the AC-259 re-anchoring worker, where it blocked the AC-257 record write (`.quay/ac259-evidence/ac161-depollution.txt`).
