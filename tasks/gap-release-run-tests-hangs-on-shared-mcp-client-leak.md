@@ -2,7 +2,7 @@
 id: gap-release-run-tests-hangs-on-shared-mcp-client-leak
 title: mcp-server.test.mjs 的共享 MCP client 在断言失败路径上不关闭 ⇒ release 的 Run tests
   泄漏子进程、node --test 永不退出撞 30m job 超时（AC-266 静态臂 + hang 根）
-status: todo
+status: ready
 labels:
   - gap
   - defect
