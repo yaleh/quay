@@ -56,6 +56,7 @@ import { helpExit } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -163,34 +164,14 @@ export function stripShellComments(src: string): string {
   return out.join("\n");
 }
 
-/** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS and non-script files. */
+/** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS and non-script files.
+ *  Traversal (fs-walk.ts); the skip-set and the extension set stay this checker's own. */
 export function collectShellScripts(root: string): string[] {
-  const out: string[] = [];
-  function walk(dir: string) {
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SKIP_DIRS.has(e)) continue;
-      const full = path.join(dir, e);
-      let st: fs.Stats;
-      try {
-        st = fs.statSync(full);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) {
-        walk(full);
-      } else if (SHELL_EXT.has(path.extname(e))) {
-        out.push(path.relative(root, full).split(path.sep).join("/"));
-      }
-    }
-  }
-  walk(root);
-  return out.sort();
+  return walkFiles(root, {
+    entryKind: "stat",
+    prune: (name) => SKIP_DIRS.has(name),
+    include: (name, ext) => SHELL_EXT.has(ext),
+  });
 }
 
 /** True iff `text` references shell variable `name` as `$name` or `${name}`. */

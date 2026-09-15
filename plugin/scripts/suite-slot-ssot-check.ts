@@ -38,6 +38,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount, suiteLockBase } from "./suite-lock-slots.ts";
+import { scanRoots } from "./fs-walk.ts";
 
 /** I2 — the slot-path literal shapes in CODE positions (直接对着表现形式 — the 槽文件名模式). The
  *  canonical generation loops emit `${base}.${i}` (a variable digit) and the variable is never named
@@ -59,23 +60,11 @@ const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp }> = [
   { dir: "plugin/workflows", rel: "plugin/workflows", ext: /\.js$/ },
 ];
 
+/** Directories pruned while walking a scan root (traversal lives in fs-walk.ts#scanRoots). */
+const SURFACE_SKIP_DIRS = new Set(["node_modules", ".git", "test", "checker-mutation-cases"]);
+
 export function scanSurface(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string, base: string, ext: RegExp) => {
-    if (!fs.existsSync(dir)) return;
-    for (const f of fs.readdirSync(dir)) {
-      const abs = path.join(dir, f);
-      const s = fs.statSync(abs);
-      if (s.isDirectory()) {
-        if (f === "node_modules" || f === ".git" || f === "test" || f === "checker-mutation-cases") continue;
-        walk(abs, path.join(base, f), ext);
-      } else if (ext.test(f)) {
-        out.push(path.join(base, f));
-      }
-    }
-  };
-  for (const { dir, rel, ext } of SCAN_ROOTS) walk(path.join(root, dir), rel, ext);
-  return out.sort();
+  return scanRoots(root, SCAN_ROOTS, SURFACE_SKIP_DIRS);
 }
 
 /** Comment-only mask (line slashes, block slashes-star, and shell `#`) — strings/template literals
