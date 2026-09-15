@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-fs-walk-family
 title: "semantic-dedup-scan: 22 recursive readdirSync({withFileTypes:true})
   walkers across 19 files share one skeleton (try/catch-return + Dirent loop +
   sorted output) and differ ONLY in t"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
