@@ -1,6 +1,7 @@
 # SPEC：release 与 hotfix 分支 —— 把 master 从化石改造成「最近一次全绿发布」
 
-**作者**：manager（会话 `git branching model discussion`）｜**日期**：2026-09-15｜**状态**：proposal，**待人裁定**
+**作者**：manager（会话 `git branching model discussion`）｜**日期**：2026-09-15｜
+**状态**：**ruled**（人 2026-09-15 对全部 5 个开放问题逐条裁定，见 §1 ⑤）——待立案与实现
 **来源**：人 2026-09-15「参考 nvie 的 git branching model，讨论如何为本项目应用 release 和 hotfix 分支，以及如何同步到 master 分支」
 → 两轮讨论后人要求成文。
 **前置阅读**：
@@ -21,6 +22,11 @@
 release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 且那 1 次已被现有手段解决】，
 故降为有条件备用通道，⛔ 不作为落地前置。**
 
+**人 2026-09-15 裁定后的四条确定动作**（§1 ⑤）：
+**①默认分支即刻切 `develop`（不等 master）｜②develop 携带 `X.Y.Z-dev`，release 分支去后缀｜
+③master 推进落在 `release.yml` 内一个新 job（`needs:` 枚举其余全部 6 个 job，ff-only，⛔ 永不 `--force`）｜
+④首次 ff 等 v0.7.0 全绿——在此之前 master 不动是规则的正确输出，不是缺陷。**
+
 ---
 
 ## 1. 授权链与前身裁定（本 SPEC 的立论基础）
@@ -31,6 +37,17 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 | ② | 2026-08-13 | AC48 判据2：integration 分支退役，per-task 验证模型取代（每任务从 develop fork、worktree 内跑全量、绿后 merge 回 develop）【转引 R23】 | ⛔ 本 SPEC **不推翻、不重新引入** integration。现行两线（develop + `task/<id>`）保持 |
 | ③ | 2026-09-14 | 人令（`gap-github-actions-no-implicit-triggers`）：GitHub Actions 不得有隐式触发。publish-plugin-dist 与 release 改为 `workflow_dispatch` 独占。原因逐字：自动触发「force-overwrote a manually-published fix mid-flight」【读码 `publish-plugin-dist.yml` 头注释】 | ⛔ 本 SPEC **不**提议把发布重新挂回 tag-push/branch-push 自动触发。master 的推进机制必须与这条兼容（§6） |
 | ④ | 2026-09-15 | 人提出参考 nvie，问 release/hotfix 与 master 同步 | 本 SPEC 的任务书 |
+| ⑤ | 2026-09-15 | **人对 §10 的 5 个开放问题逐条裁定**（原文见下表） | **本 SPEC 由 proposal 转为 ruled**；§3.2 / §4.3 / §6 / §7 / §9 已按裁定改写，⛔ 不再保留"倾向/待裁定"措辞 |
+
+**⑤ 的五条裁定原文与落点**：
+
+| 问 | 裁定 | 落点 | 效力 |
+|---|---|---|---|
+| 1 默认分支是否现在切 `develop` | **「是，且与 master 改造无冲突」** | §3.2、§9 第 1 步 | 解除 §2.2 后果 1+2；**不等 master 修好** |
+| 2 版本 bump 落 develop（带 `-dev`）还是落 release 分支 | **「`-dev` 后缀」** | §4.3 选项 ii | develop 携带 `X.Y.Z-dev`，release 分支去后缀 |
+| 3 master 推进用 A 还是 C | **「A 工作流内」** | §6 | ⊢ 人由此同时裁定：**同一次显式 dispatch 内的后续 job 写 GitHub，不违反 ③ 的裁定精神**（③ 禁的是隐式触发，不是显式 run 内的后续步骤） |
+| 4 首次 ff 等 v0.7.0 全绿还是接受红着的 v0.6.3 | **「等 v0.7.0 全绿」** | §6 末、§9 第 5 步 | master 在此之前**保持不动是正确输出** |
+| 5 判据甲–戊 挂 GOAL-020 还是独立立 GOAL | **「挂 GOAL-020」** | §7 | 编号立案时分配（当前最大 `AC-269`） |
 
 **⊢ 立论一句话**：2026-08-05 的判断在当时是对的（那时 master 角色是空的，加一条空转发布线是白付成本）；
 **今天它失效的原因不是那个判断错了，而是它点名的前提条件发生了变化**——发布流程从"不存在"变成了"存在但半截"。
@@ -170,13 +187,32 @@ nvie 模型在现代实践里默认靠分支保护兜底，**这里必须全部�
 | 方案 | 优点 | 缺点 | 判断 |
 |---|---|---|---|
 | **A 归档 master**（照本仓库已有先例 `origin/b-master-archive-2026-08-06`、`develop-archived-20260816` 改名）+ 默认分支切 develop + 用 tag 序列当发布台账 | 一次性了结；不需要维护第三条线 | **发布状态不再有一个可 ff 比较的 ref**：要回答"最新一次真正成功的发布是哪个"必须查 gh run 的 conclusion，而 §2.6 说明 criterion **不得调 gh**（60s 预算 + PATH/认证/限流）【转引 GOAL-020 §三.2】⇒ 该问题退化为不可本地判定 | ✗ |
-| **B 改造 master**（本 SPEC） | 「最近一次全绿发布」成为一个**本地可读的 git ref**，`git rev-parse master` 一条命令即得，天然满足 criterion 的机制约束；且 master 重新前进后，`ci.yml` 里 `push: branches:[master]` 那条今天的死配置自动复活成"发布点复核" | 需要定义并实现推进机制（§6） | ✅ **推荐** |
+| **B 改造 master**（本 SPEC） | 「最近一次全绿发布」成为一个**本地可读的 git ref**，`git rev-parse master` 一条命令即得，天然满足 criterion 的机制约束；且 master 重新前进后，`ci.yml` 里 `push: branches:[master]` 那条今天的死配置自动复活成"发布点复核" | 需要定义并实现推进机制（§6） | ✅ **采纳** |
 
 **⚠️ 但 A 里有一条必须单独采纳**：**默认分支切到 `develop`**。
 它与 B 不冲突，且解决的是 §2.2 后果 1+2（新 clone / 新 worktree 的基点），
 **而 B 解决的是后果 3（半截发布不可见）**——两者治的是不同的病。
 nvie 原文时代"默认分支 = master"是因为默认分支同时承担"门面"和"PR 目标"；
 本仓库的 PR/worktree 目标应当是主干，**发布线不需要当默认分支**。
+
+### 3.2.1 已裁定：默认分支即刻切 `develop`（人 2026-09-15，§1 ⑤ 问 1）
+
+**动作**（一条，可逆）：
+
+```
+gh api repos/yaleh/quay -X PATCH -f default_branch=develop
+```
+
+**⚠️ 不等 master 改造完成**——理由是两者治的病不同（见上），且 §9 第 5 步（首次 ff）被 `AC-268` 阻塞中，
+**若把默认分支的修复绑在它后面，§2.2 后果 1+2 会一直存在到第一次全绿发布为止**。
+
+**影响面核查**【读码】：
+- `ci.yml` 的 `push/pull_request: branches:[master, develop]` —— **不受影响**（按分支名匹配，非按默认分支）
+- `release.yml` / `publish-plugin-dist.yml` —— **不受影响**（`workflow_dispatch` + 显式 `ref`/`tag` 输入）
+- `marketplace.json` 的 `ref: dist-plugin` —— **不受影响**（钉死分支名）
+- **受影响且正是目的**：新 `git clone` 的检出分支、新 PR 的默认 base、`EnterWorktree` 的默认基点
+  （`origin/HEAD` 随默认分支走 ⇒ §2.2 后果 2 消失）
+- ⚠️ 切换后 `origin/HEAD` 的本地缓存不会自动更新，各检出需 `git remote set-head origin -a` 一次
 
 ---
 
@@ -216,10 +252,28 @@ release/vX.Y.Z        ← 取代现行的 release-vXXX-build
 | 选项 | 做法 | 代价 |
 |---|---|---|
 | **i. nvie 严格** | bump 只发生在 `release/*` 上，随合并回到 develop；develop 间歇期携带**上一个已发布版本号** | ⚠️ 更糟：滚动渠道装到的东西会自称 `0.6.3`（一个真实存在的已发布版本）而内容是 develop ⇒ 版本号说谎的方向从"未来"变成"过去"，**更难查** |
-| **ii. 预发布标记**（推荐） | develop 上的版本写作 `0.7.0-dev`；`release/vX.Y.Z` 上去掉 `-dev` 后缀；tag 打在去后缀的提交上 | 需要 `version-consistency-check.ts` 的 9 条目认 `-dev` 后缀（它已是集中式清单，改动局部）【读码】 |
+| **ii. 预发布标记** ✅**已裁定采纳** | develop 上的版本写作 `0.7.0-dev`；`release/vX.Y.Z` 上去掉 `-dev` 后缀；tag 打在去后缀的提交上 | 需要 `version-consistency-check.ts` 的 9 条目认 `-dev` 后缀（它已是集中式清单，改动局部）【读码】 |
 
-**倾向 ii**：它让「装到的是不是一个已发布版本」从**字面量**即可判定，不需要查 tag、不需要调 gh，
-与 §2.6 的 criterion 机制约束一致。⊢ **裁定权在人**（§10 开放问题 2）。
+**⊢ 已裁定：选项 ii（`-dev` 后缀）**（人 2026-09-15，§1 ⑤ 问 2）。
+理由：它让「装到的是不是一个已发布版本」从**字面量**即可判定，不需要查 tag、不需要调 gh，
+与 §2.6 的 criterion 机制约束一致。
+
+**落实口径**：
+
+| 位置 | 版本形态 | 说明 |
+|---|---|---|
+| `develop` 常态 | `0.7.0-dev` | 9 处版本字面量齐步；滚动渠道 B 装到的东西自称 `-dev` ⇒ **自证"不是已发布版本"** |
+| `release/v0.7.0` 上的 bump 提交 | `0.7.0` | 去后缀即定稿；tag 打在合回 develop 的合并点 |
+| 合回 develop 之后 | `0.8.0-dev` | 下一轮开发立即带上新的 `-dev`（⛔ 不要让 develop 停留在无后缀的已发布版本号上，否则 §2.5 的歧义原样复发，只是方向相反） |
+
+**实现要点**【读码】：
+- `scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 是**集中式清单**（9 条），
+  改动局部：让比对认 `-dev` 后缀，并断言**要么全带、要么全不带**（⛔ 半带 = 漂移，必须红）
+- `0.7.0-dev` 是合法 semver prerelease ⇒ `package.json` / `npm pack` 接受
+- 产物名在非发布构建下会带后缀（`quay-0.7.0-dev.tgz` / `quay-sea-0.7.0-dev-linux-x64.tar.gz`），
+  **正式发布产物名不变**（release 分支上已去后缀）
+- ⚠️ **一个需实测的未知**：Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀。
+  ⛔ 不得假定可行——落实前先用一次真实 `/plugin install` 验证（残留项，§10）
 
 ### 4.4 打 tag 与发布：复用已被证过的三点同一判据
 
@@ -268,7 +322,7 @@ release.yml → 全绿后 master ff 到新 tag。
 
 ---
 
-## 6. master 的推进机制：三个选项
+## 6. master 的推进机制：已裁定为 **A（release.yml 内新 job）**
 
 **机制约束（⛔ 硬约束，不是偏好）**【转引 GOAL-020 §三.2 + §2.6】：
 - criterion 只有 pass/fail 两态、总预算 60s、**不得现场调 `gh`**（网络/认证/限流会被记成"红"，且 `gh` 在非标准 PATH）
@@ -277,7 +331,7 @@ release.yml → 全绿后 master ff 到新 tag。
 
 | 选项 | 做法 | 优 | 劣 |
 |---|---|---|---|
-| **A 工作流内** | `release.yml` 末尾加一个 job（`needs: [delivery-manifest-verify]`，`contents: write`）执行 `git push origin ${{ inputs.tag }}:master` | 与 ④ 天然同源（job 依赖即条件）；零人工 | 新增一个有写权限的 job；与人 2026-09-14「不要隐式 GitHub 写副作用」的精神需确认边界（此处是**显式 dispatch 的同一次 run 内**，不是隐式触发，应可接受但需裁定） |
+| **A 工作流内** ✅**已裁定采纳** | `release.yml` 末尾加一个 job（`needs:` 枚举其余全部 job，`contents: write`）执行 `git push origin ${{ inputs.tag }}:master` | 与 ④ 天然同源（job 依赖即条件）；零人工 | 新增一个有写权限的 job（边界问题已由人裁定 ③ 不适用于显式 dispatch 的同一次 run，见 §1 ⑤ 问 3） |
 | **B 纯人工** | 人确认全绿后 `git push origin vX.Y.Z:master` | 零实现 | 无留痕、无强制；§2.6 说明这里没有任何兜底 |
 | **C 本地机件** | `plugin/scripts/release-advance-master.ts`：读 `.quay/ci-runs.jsonl` 判 ④ → ff → 写事件 | 与本仓库既有机件范式一致；离线可判；留痕；**不需要给 CI 发新的写权限** | 多一个机件要进 capability-catalog（六行义务）【转引 memory】 |
 
@@ -289,32 +343,79 @@ release.yml → 全绿后 master ff 到新 tag。
 正好落在 §6 开头那条硬约束（criterion 不得调 gh）的可行侧。
 ⛔ 但按硬规则 4 推论三，"载体已产出" ≠ "本机制已验证"——C 仍需一次真实演练才算数（判据戊）。
 
-**倾向 A**（条件：人确认"同一次显式 dispatch 内的后续 job"不违反 ③ 的裁定精神）；
-**若人不愿给 CI 增加写权限，则 C 今天即可实施**（依赖已满足，见上）；
-⛔ 不推荐 B（§2.6：没有任何兜底的规矩，在本仓库等于没有规矩）。
+**⊢ 已裁定：A**（人 2026-09-15，§1 ⑤ 问 3）。
+⊢ 该裁定同时确定了 ③ 的边界：**③ 禁的是隐式触发（push/tag 自动跑），不是显式 dispatch 的同一次 run 内的后续 job。**
+C 不采纳，但 **C 的载体（`.quay/ci-runs.jsonl`）仍然是判据甲的读取面**（§7）——
+即：**推进由 A 做，核对由本地载体做，两者互为独立读法**（硬规则 4b：判活性不用被测对象自己产生的量）。
+
+### 6.1 A 的落地形态（实现期照此写）
+
+**`release.yml` 现有 job 全集（6 个，逐字枚举）**【读码 `.github/workflows/release.yml`】：
+
+```
+release                              :28
+sea-release                          :119   (matrix ×3)
+sea-verify-node-free                 :269   (needs: sea-release)
+sea-verify-node-free-cross-platform  :364   (matrix, needs: sea-release)
+dist-verify-node-floor               :452   (needs: release)
+delivery-manifest-verify             :499   (needs: [release, sea-release])
+```
+
+**新 job**：
+
+```yaml
+  advance-master:
+    needs: [release, sea-release, sea-verify-node-free,
+            sea-verify-node-free-cross-platform,
+            dist-verify-node-floor, delivery-manifest-verify]   # ⛔ 必须是上面 6 个的全集
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: ${{ inputs.tag }}, fetch-depth: 0 }
+      - run: git push origin ${{ inputs.tag }}:master      # ⛔ 永不加 --force
+```
+
+**三条不变式**：
+
+| # | 不变式 | 靠什么保证 |
+|---|---|---|
+| 1 | 任一 job 失败或被跳过 ⇒ master 不动 | GitHub Actions 的 `needs` 默认语义（被依赖 job 非 success 时本 job 跳过）⇒ **fail-closed 是默认行为，不是额外代码** |
+| 2 | 只做 fast-forward，永不改写 | `git push` 对非 ff 更新**默认拒绝**；⛔ 永不加 `--force`。若 master 曾被直接提交过 ⇒ 这里会红，**这正是期望行为**（§3.1 禁止直接提交） |
+| 3 | `needs:` 必须覆盖全部其余 job | ⚠️ **人工枚举会漂移**：将来给 `release.yml` 加第 7 个 job 而忘了加进 `needs:`，master 就会在"半绿"时前进——**正是本 SPEC 要防的那个失效模式原样复发**。⇒ 必须配一个静态检查：断言 `advance-master.needs` ⊇（全部 job 键 − `advance-master`）。⊢ 与 `GOAL-012`「用机械枚举取代三次都漏的人工枚举」同源，⛔ 不靠 review 记得 |
+
+**⊢ 不变式 3 是 A 唯一新增的脆弱点**，且它有已知同形先例（硬规则 5b）⇒ 它的静态检查**与 A 同批落地，不得延后**。
 
 **首次 ff 的跨度**：`master..v0.6.3` = **18852** 个提交【git 实测】。
 ⚠️ **但首次 ff 不应该指向 v0.6.3**——v0.6.3 的 run 是红的（§2.3），按 §3.1 的规则它不够格。
 **最近一次 release run 全绿是 v0.3.13（2026-07-24）**【转引 GOAL-020】，而 master 当前 tip（2026-08-03）
 **晚于**它 ⇒ 回退到 v0.3.13 将是 non-ff 改写，违反 §3.1。
 
-⊢ **故首次推进的正确形态是：master 保持不动，直到 `AC-268` 产出第一个全绿发布（预期为 v0.7.0），
-一次 ff 到那个 tag。** 在此之前 master 停在原地**是规则的正确输出，不是缺陷**——
+⊢ **已裁定（人 2026-09-15，§1 ⑤ 问 4）：首次 ff 等 v0.7.0 全绿。**
+即 master 保持不动，直到 `AC-268` 产出第一个全绿发布，由 §6.1 的 `advance-master` job **自动**一次 ff 到那个 tag
+（跨度届时约 19.5k+ 提交，一次性）。在此之前 master 停在原地**是规则的正确输出，不是缺陷**——
 它诚实地表达了"至今没有一次全绿发布"。
+⛔ **不接受 ff 到红着的 v0.6.3**：那会让 master 从第一天起就说谎，等于把 §2.3 揭示的"半截发布不可见"
+用一条新的线重新制造一遍。
 ⚠️ 这也意味着 §2.2 的后果 1+2（默认分支/worktree 基点）**不能等 master 修好**，
-必须由 §3.2 那条独立动作（默认分支切 develop）先行解决。
+已由 §3.2.1 那条独立动作（默认分支即刻切 develop）先行解决。
 
 ---
 
-## 7. 判据草案（⛔ 本 SPEC 不自行立案；编号由立案时分配）
+## 7. 判据（归属已裁定：挂 `GOAL-020`；⛔ 本 SPEC 不自行写 goal store，编号由立案时分配）
 
-**归属**：全部挂 `GOAL-020` 之下（该 GOAL 的标题「CI 与 release 渠道成为可信守门员」正是本 SPEC 的上位）。
+**归属**：**已裁定全部挂 `GOAL-020` 之下**（人 2026-09-15，§1 ⑤ 问 5）——
+该 GOAL 的标题「CI 与 release 渠道成为可信守门员」正是本 SPEC 的上位命题，
+且本 SPEC 的判据甲/戊**消费** `AC-268` 的结果，同一 GOAL 内依赖关系可直接表达。
+**立案时注意**【转引 memory】：goal store 无 CAS，并发会话会互相覆盖 ⇒ 建新 AC 必须传 `--expect-absent`；
+当前最大编号 `AC-269`。
 **⚠️ `achieved` 永久锁定**（全仓 `writeGoalStatus` 仅 2 个调用点、均写 `achieved`，无回退路径）【转引 GOAL-020 §三.1】
 ⇒ 会回退的活性判据必须 `long-term: true`。
 
 | # | 判据（口径） | 能取假的形态（⛔ 今天就要能取到假） | long-term |
 |---|---|---|---|
-| **甲** | `master` 要么等于某个 tag，要么等于其初始化值；且若等于某 tag，则该 tag 在本地载体里 release run 为 success | **今天取假**：`git describe --exact-match master` 无输出（master tip 不是任何 tag）⇒ 判据现在就红，⛔ 不是等未来才有意义的空判据 | ✅ |
+| **甲** | `master` ∈ {`9316b797d`（首次 ff 之前的化石 tip，裁定 4 明确允许）, 某个 tag}；**且**若等于某 tag，则该 tag 在本地载体 `.quay/ci-runs.jsonl` 里的 Release run `conclusion=success` | **今天取假**：`git describe --exact-match master` → `fatal: no tag exactly matches 9316b797d…`（实跑确认）⇒ 判据现在就红。⚠️ 首次 ff 前允许停在化石值，**但必须写成对那个具体 sha 的白名单，⛔ 不能写成"或任意非 tag 值"**——后者会把"有人往 master 直推了一个提交"也判成合格 | ✅ |
 | **乙** | 存活的 `release/*` 分支数为 0，或其 tip 逐字等于同名 tag | **今天取假**：`release-v063-build` 比 `v0.6.3` 多 **15** 个提交（§2.4） | ✅ |
 | **丙** | 滚动渠道 B 的产物可机械回答"装的是哪个版本"：`dist-plugin` 的构建来源 commit 可解析，且其声明版本与该 commit 上的 `plugin/VERSION` 一致 | **今天取假**：声明 `0.7.0`、无对应 tag、构建自 `2b47315d7`（v0.6.3 之后 548 / develop 之前 155）（§2.5） | ✅ |
 | **丁** | 默认分支与新建 worktree 的基点落在主干上 | **今天取假**：`gh repo view` = `master`；实测新建 worktree 落后 develop **19555**（§2.2） | ✅ |
@@ -346,23 +447,30 @@ release.yml → 全绿后 master ff 到新 tag。
 | 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ 本文件 |
 | 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ 一次点击/一条 `gh api`，解决 §2.2 后果 1+2 |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ 下一次切版本时即可采用；现存两条 `release-v06x-build` 按判据乙清理 |
-| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii） | 人裁定 | ⚠️ 待裁定 |
-| 4 | master 推进机制（§6 的 A 或 C） | 人裁定 A/C | ⚠️ 待裁定；**C 的依赖已于本 SPEC 撰写当轮满足**（`.quay/ci-runs.jsonl` 已含 Release 记录，§6）⇒ 实现可先行，**生效要等第 5 步** |
-| 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布） |
+| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ 可实现；⚠️ marketplace 是否接受 prerelease 版本号需先实测（§10 残留 1） |
+| 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
+| 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布）；⚠️ 第 4 步落地后**这一步是自动发生的**，不需要另外的人工动作 |
 | 6 | hotfix 线 | 第 5 步 + 真实触发条件出现（§5） | ❌ 且**不应催化**（发生率 1） |
 
-⊢ **今天就能拿到的价值集中在第 1、2 步**，它们都不依赖任何在跑的 AC。
+⊢ **裁定之后，第 1–4 步全部解除阻塞**（第 3、4 步此前唯一的阻塞就是裁定本身）。
+⊢ **唯一仍被外部阻塞的是第 5 步**，它等 `AC-268`；而它一旦发生，由 §6.1 的 job **自动完成**。
 
 ---
 
-## 10. 开放问题（交人裁定）
+## 10. 开放问题：**已全部裁定**（人 2026-09-15）＋ 实现期残留
 
-1. **默认分支是否现在就切到 `develop`？**（§3.2 / §9 第 1 步）——本 SPEC 建议：是，且与 master 改造无冲突。
-2. **版本 bump 落 develop（带 `-dev`）还是落 release 分支？**（§4.3）——本 SPEC 倾向 `-dev` 后缀。
-3. **master 推进用 §6 的 A（release.yml 内新 job）还是 C（本地机件）？**——取决于"同一次显式 dispatch 内的后续 job 写 GitHub"是否符合 ③ 的裁定精神。
-4. **首次 ff 等 v0.7.0 全绿（本 SPEC 立场），还是接受 ff 到红着的 v0.6.3？**——本 SPEC 建议前者：后者会让 master 从第一天起就说谎。
-5. **是否立为 `GOAL-020` 下的新 AC（甲–戊），还是独立立 GOAL？**——本 SPEC 建议挂 GOAL-020（同一上位命题），⛔ 由人/外层立案，本 SPEC 不自行写 goal store。
+**原 5 个开放问题的裁定见 §1 ⑤ 表**（1 默认分支即刻切 develop｜2 `-dev` 后缀｜3 方案 A｜4 等 v0.7.0 全绿｜5 挂 GOAL-020）。
+⛔ 本节**不再保留**这 5 条为开放项。
+
+**实现期残留（不是裁定问题，是必须实测才能回答的未知）**：
+
+| # | 残留 | 为什么不能靠推断解决 | 触发点 |
+|---|---|---|---|
+| 1 | Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`） | 官方 schema 未声明该约束；⛔ 「semver 合法」不蕴含「该渠道接受」（同硬规则 5：某来源没说不等于不存在限制） | §9 第 3 步落地前，用一次真实 `/plugin install` 验证 |
+| 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
+| 3 | 判据甲–戊的立案时机：与实现同批，还是先立后做 | 取决于外层派发节奏（本 SPEC 无权决定） | 立案时；⚠️ 并发写 goal store 须 `--expect-absent`（§7） |
 
 ---
 
-**本文件不自行立案、不自行改配置、不推进任何分支。** §9 的每一步都需要人裁定或既有 AC 先达成。
+**本文件已被裁定（§1 ⑤），但本文件自身不执行任何动作**——不写 goal store、不改 GitHub 配置、不推进任何分支。
+§9 第 1–4 步已解除阻塞，等待立案与实现；第 5 步等 `AC-268`，届时由 §6.1 的 job 自动完成。
