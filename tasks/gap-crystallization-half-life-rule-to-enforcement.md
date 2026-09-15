@@ -1,7 +1,7 @@
 ---
 id: gap-crystallization-half-life-rule-to-enforcement
 title: 量「结晶半衰期」——规则从落笔到有可执行强制要多久、多少条至今没有（把 ADR-004 从轶事变成分布）
-status: done
+status: ready
 labels:
   - gap
   - analysis
