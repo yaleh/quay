@@ -737,8 +737,8 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   // ⇒ fan-in delivered（非直投、非 unclassifiable）。
   //
   // ── 准入判据（gap-ac194-bracket-filter-drops-offspine-landing-tip，本判据第三次「前提变更」）────────
-  // 现判据：**T 必须落在扫描窗的可达集内**（`windowSet` = `rev-list <baseline>..<develop>`；无 baseline
-  // ⇒ `rev-list <develop>` 全域）。
+  // 现判据：**只排除「T 是窗底 baseline 的祖先」这一类括注**（`windowAncestors` = `rev-list <baseline>`），
+  //   其余括注一律处理 ⇒ `refMoveCovered` 用**完整候选集**（见下「新判据是必要条件」）。
   // ⛔ 前判据（本任务修掉的那个）是「T 必须在当前 first-parent spine 上」，其理由写在旧注释里：「一次
   //   ref-level 落地到 develop 必然让 T 成为 develop tip（spine 成员）」。**该前提被实测证伪，且不是边角
   //   情形**：任务分支在工作树里 `git merge develop`（把当时的 develop tip 记成**第二父**）、随后该分支被
