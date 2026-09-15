@@ -28,7 +28,11 @@ const syncSh = path.join(pluginDir, "sync.sh");
 const versionFile = path.join(pluginDir, "VERSION");
 const vendoredPkg = path.join(pluginDir, "vendor", "quay", "package.json");
 
-const SEMVER = /^\d+\.\d+\.\d+$/;
+// SPEC §4.3 option ii (ruling 2, 2026-09-15): develop carries X.Y.Z-dev, release branches
+// drop the suffix. Both are valid semver, so the version-marker assertion accepts the
+// prerelease form — a bare-X.Y.Z expectation would go red on every develop build (AC-272 /
+// gap-develop-version-union-missing-dev-suffix). Same dialect as version-consistency-check.ts.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 function runSync(...args) {
   return spawnSync("bash", [syncSh, ...args], { encoding: "utf8" });

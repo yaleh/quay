@@ -94,7 +94,11 @@ export function writeFakeBundles(src, coreContent, nativeContent) {
 export function readVendoredVersion(plugin) {
   const pkg = path.join(plugin, 'vendor', 'quay', 'package.json');
   const data = JSON.parse(fs.readFileSync(pkg, 'utf8'));
-  assert.ok(typeof data.version === 'string' && /^\d+\.\d+\.\d+$/.test(data.version),
+  // SPEC §4.3 option ii (2026-09-15): develop carries X.Y.Z-dev, release branches drop it —
+  // both are valid semver, and this helper reads a carrier of that very union, so a bare-X.Y.Z
+  // expectation is wrong the moment the repo version takes the suffix (AC-272 /
+  // gap-develop-version-union-missing-dev-suffix).
+  assert.ok(typeof data.version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(data.version),
     `vendored package.json must declare a semver version (got ${JSON.stringify(data.version)})`);
   return data.version;
 }

@@ -108,7 +108,11 @@ test('vendor bundle runs --help / --version from an isolated copy with zero node
       cwd: root,
       env: { ...process.env, NODE_PATH: '' },
     }).trim();
-    assert.match(version, /^\d+\.\d+\.\d+$/, '--version must print a semver version (build-time inlined, no ENOENT)');
+    // SPEC §4.3 option ii (ruling 2, 2026-09-15): develop carries X.Y.Z-dev, release branches
+    // drop the suffix. Both are semver, so accept the prerelease form — the build-time-inlined
+    // constant is the develop version (0.7.0-dev), which a bare-X.Y.Z expectation rejects
+    // (AC-272 / gap-develop-version-union-missing-dev-suffix).
+    assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, '--version must print a semver version (build-time inlined, no ENOENT)');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

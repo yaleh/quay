@@ -114,7 +114,11 @@ test("wrapper subprocess: current node (>= 22.6) is an unblocked pass-through �
   });
   assert.equal(r.status, 0, `wrapper --version passes through, got status ${r.status}`);
   assert.equal(r.stderr, "");
-  assert.match(r.stdout.trim(), /^\d+\.\d+\.\d+$/); // e.g. 0.4.0
+  // SPEC §4.3 option ii (ruling 2, 2026-09-15): develop carries the prerelease suffix
+  // (X.Y.Z-dev), release branches drop it. Both are valid semver, so the pass-through
+  // assertion accepts the prerelease form — a bare-X.Y.Z expectation goes red on every
+  // develop build the moment the version bumps (AC-272 / gap-develop-version-union-missing-dev-suffix).
+  assert.match(r.stdout.trim(), /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/); // e.g. 0.4.0 or 0.7.0-dev
 });
 
 test("probe standalone: exit 1 on old-node override, exit 0 on real current version", () => {
