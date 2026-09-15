@@ -125,7 +125,7 @@ Requested action 第 4 条逐字引用为「由 AC-265 的产出」；两条任�
 - [x] **AC4（生产接线，非手工）**：采集器的调用点有 `file:line` 证据，并贴出一条**由该路径写入**（⛔ 不是手工 `node …` 跑出来）的载体记录及其时刻，以及该轮日志/事件里对应的调用痕。**实测**：调用点 `plugin/scripts/goal-driver.ts:3080`（import 在 `:83`；开关 `drivers.yml` `kinds.goal.ci_runs_collect: true` + 节流 600000ms）。由该路径写出的记录（`.quay/ac-devci-ac4-production-path.mjs` 跑**生产入口 `runGoalRound()`**，夹具带真 `origin` remote，⛔ 未注入 `ciRunsCollectFn`）：`wall_ms=46773`、`ciRuns={"status":"ok","ran":true,"appended":20,"attributed":12,"logsFetched":16,"testFilesDerived":5}`、轮记录 reason 含 `ciRuns=ok(appended=20,enriched=0,attributed=12,logs=16)`、载体 20 行（首行 runId 34971747152 带 `testFiles:631` + `attribution:"real-defect"`）。gh 解析实测：`PATH`/`HOME` 都无 gh 时 `bin=null, source="none"`（6 候选）；`HOME=/home/yale` 时回落 `/home/yale/.local/bin/gh`（本机 gh 恰在那里，driver 的 PATH 不含它）。
 - [ ] **AC5（真交付：develop 首次 decisive 绿）**：落地后存在一次 `branch=develop`、`conclusion=success` 的 CI run；贴出 `gh run view <id>` 的结论、其 `testFiles` 与紧邻前一次的 `testFiles`，以及 **AC-265 判据 exit 0** 的全文（落 `.quay/` 一个证据文件并在 Evidence 引用）。**⛔ 实测未达成，成因是机制层不是实现层**：`origin/develop` 自 `2026-09-15T02:38:26Z`（`9dd806756`）起**冻结**，本地 develop 落后 **326+** 提交（`git rev-list --count origin/develop..develop` = 326）；12:47/12:55 那两次 CI run 是**人工 dispatch 在旧 sha 上**跑的 ⇒ 它们报的 11 条红是「已在 develop 修好、只是没推上去」的旧读数。而**没有任何机件在推 develop**：`sync-lag-check.sh --push`（人 2026-08-06 裁定保留的单机防丢 upsync 心跳）在 `.ts/.sh/.mjs` 里**零代码调用方**，它的四个「调用点」全是 `.md`，其中**三个是已退役的 tick core**（`fast-mode-tick-core.md` / `fast-mode-loop-tick.md` / `orchestrator-loop-tick.md`）——而 `rhythm-consumer-check` 判据1 只按「文件名含 tick + 基名出现」判 `wired-strict`，⛔ 不问那个 tick core 是否还活着。机械 fan-in 的 ff 是 `fan-in/ff-merge.ts` 的**本地 ref 移动**，不推 origin。⇒ AC5 在 worker 回合内**结构性不可达**。解除阻塞的一条命令（非 force、fail-closed，正是那条被裁定保留的机制）：`bash plugin/scripts/sync-lag-check.sh --push --branch develop --root /home/yale/work/quay`。**⛔ 本任务没有推**：一次性手工推送会把 326+ 提交（含其他在飞任务的中间状态）发布出去，且不是「修好机制」。（待外部）
 - [x] **AC6（⛔ 绿不是靠少跑测试换的）**：①绿 run 的 `__GROUP__ … files=N` ≥ 紧邻前一次 decisive run 的同读数（逐字贴）；②`git show --stat` 证明落地提交**没有删除或改名任何 `*.test.mjs`**、也没有缩小 `scripts/test.sh` 的 glob；③Finding 表 11 条逐条给出处置与**修前/修后**读数（`node --test <file>` 的 exit/tests/pass/fail/skip）；凡用 skip 守卫的，必须证明该守卫**以依赖缺席为条件**且**依赖在场时不触发**（正控制：本机跑同一条，skipped 计数不变）。**实测**：① 当前 CI 的 `__GROUP__ concurrency=8 files=631`；本任务树在与 CI 同形的复制检出上全量 suite 全绿，同读数 `__GROUP__ concurrency=4 files=640`（≥ 631，⛔ 不是少跑）；② 落地提交 `a09aa38a5` 的 stat 全是新增/修改，`git diff --diff-filter=DR --name-only develop...HEAD -- '*.test.mjs'` 与 `git diff develop...HEAD -- scripts/test.sh` **均为空**（⛔ 无删除/改名、无 glob 缩小）；③ 11 条的修前/修后读数见 §0 表。**skip 守卫双向控制**（`plugin/test/launch-settings.test.mjs`，AC7 那条的形态）：claude 在场 ⇒ pass 15 / fail 0 / **skipped 0**；claude 缺席（PATH 去掉其目录）⇒ pass 14 / fail 0 / **skipped 1** ⇒ 守卫只在依赖缺席时触发。全文见 `.quay/ac-devci-ac6-controls.txt`。
-- [x] **AC7（登记 + scoped 门）**：`bash plugin/scripts/capability-catalog.sh --entry-surface` 与 `node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check --root .` 均 exit 0；`bash scripts/test.sh --for-task gap-develop-ci-first-decisive-green` 绿。**实测**：`capability-catalog.sh --entry-surface` exit 0（AC3 gate PASS）；`rhythm-consumer-check.ts --check --root .` exit 0（判据1 221 judged / 0 violation、判据2 110 / 0、判据3 4 / 0）；scoped 门 `--for-task … --allow-thin` exit 0（tests 311 / pass 311 / fail 0 / skipped 0，静态检查全 PASS）。登记变动：CADENCE `按需 → 每轮`、CONSUMER 行改为「①机器·每轮 goal-driver collectForRound + ②人·按需 CLI」、QUESTION 行补 testFiles 派生默认开/增量/上界与 gh 解析；`quay-init-closure-ratchet --gate` = `3 files / 1022 bytes ≤ baseline`（无需 `--reanchor`）、`--check-stale` = `baseline in sync`；`gitignore-runtime-coverage-check` 修前修后均 PASS（marked=9 / manifest=9，清单未改）。全文见 `.quay/ac-devci-ac7-scoped-gate.log`。
+- [x] **AC7（登记 + scoped 门）**：`bash plugin/scripts/capability-catalog.sh --entry-surface` 与 `node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check --root .` 均 exit 0；`bash scripts/test.sh --for-task gap-develop-ci-first-decisive-green` 绿。**实测**：`capability-catalog.sh --entry-surface` exit 0（AC3 gate PASS）；`rhythm-consumer-check.ts --check --root .` exit 0（判据1 221 judged / 0 violation、判据2 110 / 0、判据3 4 / 0）；scoped 门 `--for-task … --allow-thin` exit 0（tests 311 / pass 311 / fail 0 / skipped 0，静态检查全 PASS）。登记变动：CADENCE `按需 → 每轮`、CONSUMER 行改为「①机器·每轮 goal-driver collectForRound + ②人·按需 CLI」、QUESTION 行补 testFiles 派生默认开/增量/上界与 gh 解析；`quay-init-closure-ratchet --gate` = `3 files / 1022 bytes ≤ baseline`（无需 `--reanchor`）、`--check-stale` = `baseline in sync`；`gitignore-runtime-coverage-check` 修前修后均 PASS（marked=9 / manifest=9，清单未改）。全文见 `.quay/ac-devci-ac7-scoped-gate.txt`。
 
 ## Definition of Done
 
@@ -138,11 +138,11 @@ Requested action 第 4 条逐字引用为「由 AC-265 的产出」；两条任�
 ## Evidence
 
 完整证据（含逐条读数、负控制、成本）落 `.quay/ac-devci-evidence.md`（随本任务提交）；
-原始读数：
+原始读数（同样随本任务提交，`ac7`/`ac9` 两份是**判定行摘录**，原日志 435KB / 1.2MB 留在跑它的机器上）：
 `.quay/ac-devci-ac1-criterion-rerun.txt` / `.quay/ac-devci-ac23-carrier-rows.txt` /
 `.quay/ac-devci-ac4-production-path.mjs` + `.quay/ac-devci-ac4-carrier-written-by-round.jsonl` /
-`.quay/ac-devci-ac6-controls.txt` / `.quay/ac-devci-ac7-scoped-gate.log` /
-`.quay/ac-devci-ac9-full-suite-clone.log` / `.quay/ac-devci-evidence.md`。
+`.quay/ac-devci-ac6-controls.txt` / `.quay/ac-devci-ac7-scoped-gate.txt` /
+`.quay/ac-devci-ac9-full-suite-clone.txt` / `.quay/ac-devci-evidence.md`。
 
 **立案前提复核（先查，再改）**：Finding 表那 11 条「CI 里红、本机绿」的文件，在与 CI 同形的复制检出
 （`git clone --no-hardlinks` + `.quay/config.yml.example → config.yml` + `HOME=/tmp/fakehome`
@@ -150,7 +150,7 @@ Requested action 第 4 条逐字引用为「由 AC-265 的产出」；两条任�
 修好的，而那份修复**从未到达 origin**。⇒ 本任务真正要交付的不是「修 11 条」，是「让 AC-265 有生产者」
 +「让 develop 的树真的是绿的」。
 
-**本任务实际改的（11 个文件，anti-drift OK：11 actual ⊆ 23 declared）**：
+**本任务实际改的（代码/配置面 11 个文件，anti-drift OK）**：
 `plugin/scripts/ci-runs-collect.ts`（testFiles 派生默认对 decisive 开 / 增量跳过 / 只拉 test job / 上界留痕 /
 就地补全 / gh 显式解析 / collectForRound 四态读数）、`plugin/test/ci-runs-collect.test.mjs`（20 条，含
 「缺 `__GROUP__` ⇒ 键缺失而非常量」的负控制与同一夹具的正控制）、`plugin/scripts/goal-driver.ts`（每轮
@@ -212,6 +212,13 @@ merge 外不得触碰 develop」。且一次性推送**不修机制**——根�
 - .gitignore
 - .quay/ci-runs.jsonl
 - .quay/ac-devci-evidence.md
+- .quay/ac-devci-ac1-criterion-rerun.txt
+- .quay/ac-devci-ac23-carrier-rows.txt
+- .quay/ac-devci-ac4-carrier-written-by-round.jsonl
+- .quay/ac-devci-ac4-production-path.mjs
+- .quay/ac-devci-ac6-controls.txt
+- .quay/ac-devci-ac7-scoped-gate.txt
+- .quay/ac-devci-ac9-full-suite-clone.txt
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/test/axis-generator.test.mjs
 - plugin/test/launch-settings.test.mjs

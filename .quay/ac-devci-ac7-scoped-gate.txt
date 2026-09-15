@@ -1,0 +1,28 @@
+# 本文件是 .quay/ac-devci-ac7-scoped-gate.log 的**判定行摘录**（原日志 435KB 全文；摘录保留判词与计数）
+# 命令：bash scripts/test.sh --for-task gap-develop-ci-first-decisive-green --allow-thin
+# 树：本任务 worktree HEAD（含 merge develop 到 302d73074）
+
+NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base develop); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.
+PASS: no dead code after a top-level return (the gap-concurrency-derivation-reverted shape is absent)
+PASS — reattribution ratchet: 0 pure-S un-attributed test(s) (layer 1, blocking); 0 zombie entr(y|ies) (layer 3, blocking); 32 S-signal-multi un-attributed (layer 2, report-only)
+PASS: all 43 orchestration/SPEC-*.md declared at each of 2 declaration points
+PASS: active whole-screen-hash violations (0) within band (0..1)
+PASS: all 12 SKILL.md with allowed-tools use the mcp__plugin_quay_quay__* namespace (0 violation(s))
+PASS: every test file uses node:test or is a listed legacy exemption; exemption list is at/below the ratchet ceiling and did not grow; new files declare @test-group.
+PASS: quay's 9 marked runtime-artifact .gitignore pattern(s) match the manifest plugin/scripts/quay-runtime-artifacts.txt exactly (marked=9 manifest=9): **/.quay-parse-cache.json .workflow-events/ milestones/fast-mode-telemetry/*.json orchestration/dispatch-record.jsonl orchestration/inner-idle-log.jsonl orchestration/manager-pending.md orchestration/manager-tick-log.md orchestration/semantic-face-dispatch-record.jsonl orchestration/tick-log.md
+PASS: quay-init-closure-ratchet: laydown source fingerprint fresh (6886789d39f521b2…, 4 sources) — baseline in sync
+PASS — every suite-slot SSoT invariant holds (0 RED)
+PASS: no new task-file bypass — 38 hit(s), all within the allowlist
+PASS: every destructured connectStdio client binding in the release glob is closed inside a finally — files scanned 250 (globs packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs), bindings checked 13, non-destructuring connectStdio call sites NOT judged 4
+PASS — every declared landing target == forward branch 'develop' (0 violations)
+PASS: all 22 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+PASS: no test file was moved out of the default {product,engine} set without a commit-message reason.
+PASS: no test file was moved out of the default {product,engine} set without a commit-message reason.
+PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)
+PASS: no checked-in-tree writes: 494 write-verb call(s) across 2 executed input(s), 0 inside the tree — delta against develop (2 of 16 delta path(s) judged; unchanged test files are NOT judged by --changed)
+ℹ tests 311
+ℹ pass 311
+ℹ fail 0
+ℹ skipped 0
+ℹ todo 0
+SCOPED2_EXIT=0

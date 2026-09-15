@@ -1,0 +1,26 @@
+# 本文件是 .quay/ac-devci-ac9-full-suite-clone.log 的**判定行摘录**（原日志 1.2MB 全文；摘录保留判词与计数）
+# 环境：/tmp/citest = git clone --no-hardlinks + .quay/config.yml.example→config.yml + HOME=/tmp/fakehome + GIT_CONFIG_GLOBAL=/dev/null
+# 树：本任务分支 bd69f3969（develop + 本任务的代码 delta）
+
+__OVERHEAD__ lock_wait_ms=2
+RESULT: PASS — 每个 wired 判据的消费动作可 grep 验证；unfinished 判据如实列出。
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+STATIC_CHECK_NOT_EVALUATED: gate-event-coverage-check
+STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check
+✔ negative control — a marker-less overlap round (done-markers missed) still records via the __OVERHEAD__ burst fallback and never crashes (gap-verification-round-phases-overlap-merged) (800.735513ms)
+__GROUP__ concurrency=8 files=14 sum_ms=558242 floor_ms=101104 capped=0
+__OVERHEAD__ serial_phase_ms=133820
+__GROUP__ concurrency=8 files=14 sum_ms=333361 floor_ms=135773 capped=0
+__OVERHEAD__ lowconc_phase_ms=158014
+✔ parseRedFailures — parses STATIC_CHECK_FAILED fail-closed lines into {name,exitCode,line} and test-failure lines via the shared isFailureLine 口径 (3.392944ms)
+__GROUP__ concurrency=4 files=640 sum_ms=2894675 floor_ms=723668.75 capped=0
+__OVERHEAD__ main_phase_ms=764631
+__OVERHEAD__ scheduler_ms=869679
+__OVERHEAD__ lock_overhead_ms=24
+__OVERHEAD__ resource_gate_ms=900
+__OVERHEAD__ build_dist_ms=666
+__OVERHEAD__ run_static_checks_ms=52728
+__OVERHEAD__ lock_hold_ms=926564
+SUITE_EXIT=0
+
+# 真实 per-file 失败数（排除测试名里含该字面量的假阳性）: 0
