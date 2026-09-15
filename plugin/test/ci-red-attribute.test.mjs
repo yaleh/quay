@@ -26,6 +26,7 @@ import {
   ATTRIBUTION_VOCAB,
   DEFAULT_NO_SIGNAL,
   DEFECT_TESTS_RAN,
+  TEST_STEP_RE,
   attributeRun,
   loadKnownFlakes,
   hasValidAttribution,
@@ -170,6 +171,105 @@ test("AC1 — ⛔ 没有步级读数时不得报『测试步从未开始』（�
   assert.ok(!res.signals.some((s) => s.startsWith("infra:")), JSON.stringify(res.signals));
 });
 
+// ── 回归：两条真实语料上暴露的误判（2026-09-15，首次对真 run 归因时发现的）──────────────────
+// 首次落盘后 19 条真失败**全部**被判 infrastructure —— 一个在真实语料上恒定的取值，方向是把真红
+// 豁免掉。根因是「测试步**没成功**」被当成「测试步**没跑**」。下面两条把这两个形态钉住。
+test("回归 — ⛔ 测试步【跑了且失败】不得判成『测试从未开始』（真红不得被豁免）", () => {
+  const record = {
+    conclusion: "failure",
+    jobs: [
+      {
+        name: "test",
+        conclusion: "failure",
+        durationSec: 1088,
+        steps: [
+          { name: "Set up job", conclusion: "success" },
+          { name: "Run actions/checkout@v4", conclusion: "success" },
+          { name: "Run npm install", conclusion: "success" },
+          { name: "Run tests", conclusion: "failure" },
+        ],
+      },
+    ],
+  };
+  const res = attributeRun(record, { knownFlakes: null });
+  console.log(`    attribution=${res.attribution} signals=${JSON.stringify(res.signals)}`);
+  assert.equal(res.attribution, "real-defect", "Run tests 步失败 = 测试跑了并失败，不是基础设施问题");
+  assert.ok(res.signals.includes(DEFECT_TESTS_RAN), JSON.stringify(res.signals));
+  assert.ok(!res.signals.some((s) => s.startsWith("infra:")), JSON.stringify(res.signals));
+});
+
+test("回归 — ⛔ 失败在一个【非 setup 的测试前步】不得判成 infrastructure（宁多一次人看）", () => {
+  const record = {
+    conclusion: "failure",
+    jobs: [
+      {
+        name: "test",
+        conclusion: "failure",
+        steps: [
+          { name: "Set up job", conclusion: "success" },
+          { name: "Run actions/checkout@v4", conclusion: "success" },
+          { name: "Run npm install", conclusion: "success" },
+          { name: "Test-coverage self-check (DIR-110/ADR-019 decision #4)", conclusion: "failure" },
+          { name: "Run tests", conclusion: "skipped" },
+        ],
+      },
+    ],
+  };
+  const res = attributeRun(record, { knownFlakes: null });
+  assert.equal(res.attribution, "real-defect", "既非 setup 形 ⇒ 不得豁免成 infrastructure");
+  assert.ok(res.signals.includes(DEFAULT_NO_SIGNAL), JSON.stringify(res.signals));
+});
+
+test("回归 — ⛔ 兄弟 job 被取消不得豁免另一个 job 的实质失败（真缺陷不得洗成基础设施）", () => {
+  // 实测形态（release run 34845477762 / 34843029988）：`release` job 被取消，
+  // 而 `sea-verify-node-free` 的 `Run quay serve and curl it (no Node on PATH)` 步真的失败
+  // —— 那正是 AC-267 追的 SEA 缺陷。若「有 job 被取消」一句话豁免整条 run，这个真缺陷就没了。
+  const record = {
+    conclusion: "failure",
+    jobs: [
+      { name: "release", conclusion: "cancelled", durationSec: 1817, steps: [{ name: "Run tests", conclusion: "cancelled" }] },
+      {
+        name: "sea-verify-node-free",
+        conclusion: "failure",
+        durationSec: 23,
+        steps: [
+          { name: "Install runtime deps (libatomic1; explicitly NOT nodejs, NOT gh)", conclusion: "success" },
+          { name: "Run quay --help (no Node on PATH)", conclusion: "success" },
+          { name: "Run quay serve and curl it (no Node on PATH)", conclusion: "failure" },
+        ],
+      },
+    ],
+  };
+  const res = attributeRun(record, { knownFlakes: null });
+  console.log(`    attribution=${res.attribution} signals=${JSON.stringify(res.signals)}`);
+  assert.equal(res.attribution, "real-defect", "实质失败优先于兄弟 job 的取消");
+  // 被压制的 infra 信号必须仍留在 signals 里（看得见「命中过，只是没定案」）
+  assert.ok(res.signals.some((s) => s.startsWith("suppressed-by-substantive-failure:infra:job-cancelled:")), JSON.stringify(res.signals));
+  assert.ok(res.signals.some((s) => s.startsWith("defect:substantive-failure:sea-verify-node-free")), JSON.stringify(res.signals));
+});
+
+test("回归 — 被取消的 job 若没有兄弟实质失败，infrastructure 照常生效（压制不是一票否决）", () => {
+  const record = {
+    conclusion: "failure",
+    jobs: [
+      { name: "release", conclusion: "cancelled", durationSec: 1817, steps: [{ name: "Run tests", conclusion: "cancelled" }] },
+      { name: "sea-release", conclusion: "success", durationSec: 45, steps: [{ name: "Build", conclusion: "success" }] },
+    ],
+  };
+  const res = attributeRun(record, { knownFlakes: null });
+  assert.equal(res.attribution, "infrastructure");
+  assert.ok(res.signals.includes("infra:job-cancelled:release"));
+});
+
+test("回归 — 步名含 test 但不是测试步（Test-coverage self-check）不得被当成测试步", () => {
+  // 直接钉步名谓词本身：它只认「跑测试套件」的形态，不认裸词 test/suite。
+  assert.equal(TEST_STEP_RE.test("Test-coverage self-check (DIR-110/ADR-019 decision #4)"), false);
+  assert.equal(TEST_STEP_RE.test("Run tests"), true);
+  assert.equal(TEST_STEP_RE.test("Run node --test"), true);
+  assert.equal(TEST_STEP_RE.test("Run npm install"), false);
+  assert.equal(TEST_STEP_RE.test("Run actions/checkout@v4"), false);
+});
+
 // ── AC2：单变量对照（本任务核心）──────────────────────────────────────────────────────────
 test("AC2 — 只翻转 timedOut 一个字段，attribution 必须改判", () => {
   // 其余字段逐字不变：同一份 JSON 文本解析出来、只改一个键。
@@ -218,6 +318,31 @@ test("AC2 — 控制臂：另有两条单变量翻转同样改判（job-cancelle
   const withId = { ...base, failedTests: ["f::t"] };
   assert.equal(attributeRun(withId, { knownFlakes: null }).attribution, "real-defect");
   assert.equal(attributeRun(withId, { knownFlakes: flakes }).attribution, "known-flake");
+});
+
+test("AC2 — ⛔ 单变量对照不成立于【有兄弟实质失败】的记录上，那是设计而非恒值（方向说明）", () => {
+  // 上一条对照成立的前提是这条记录里没有 job「实质性地」失败。若把同一条记录补上一个真的失败了
+  // 测试步的兄弟 job，再翻转 timedOut，则 attribution **不变** —— 因为那条真红才是这个 run 红的
+  // 成因（豁免它 = 把真缺陷洗成基础设施，方向不可逆）。本条把这个边界逐字钉住：
+  // 「改判不了」与「恒值」不是同一件事，signals 会把被压制的信号原样吐出来，可分辨。
+  const withSibling = {
+    ts: "2026-09-15T02:38:35Z",
+    conclusion: "failure",
+    durationSec: 1091,
+    jobs: [
+      { name: "test", conclusion: "failure", durationSec: 1088, steps: [{ name: "Run tests", conclusion: "failure" }] },
+    ],
+  };
+  const before = attributeRun(withSibling, { knownFlakes: null });
+  const after = attributeRun({ ...withSibling, timedOut: true }, { knownFlakes: null });
+  console.log(`    before: ${before.attribution} ${JSON.stringify(before.signals)}`);
+  console.log(`    after : ${after.attribution} ${JSON.stringify(after.signals)}`);
+  assert.equal(before.attribution, "real-defect");
+  assert.equal(after.attribution, "real-defect", "兄弟实质失败把 infra 信号压住了");
+  assert.ok(
+    after.signals.some((s) => s.startsWith("suppressed-by-substantive-failure:infra:run-timed-out")),
+    "被压制的信号必须可见 —— 否则读记录的人分不出「没命中」与「命中但没定案」",
+  );
 });
 
 // ── AC3：写面 ─────────────────────────────────────────────────────────────────────────────

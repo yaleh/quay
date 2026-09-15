@@ -107,8 +107,14 @@ export interface AttributeOptions {
   jobTimeoutMinutes?: number | null;
 }
 
-/** job 里「测试真的开始跑了」的步名形态（只在步名上判定，不读日志正文）。 */
-export const TEST_STEP_RE = /(run tests|test suite|suite|vitest|node --test|npm test|playwright|e2e)/i;
+/**
+ * job 里「这一步在跑测试套件」的步名形态（只在步名上判定，不读日志正文）。
+ *
+ * ⚠️ 刻意**不**含裸的 `test` / `suite`：实测 ci.yml 里有一个失败的前置步叫
+ * `Test-coverage self-check (DIR-110/ADR-019 …)` —— 它名字里有 test 但**不是**测试套件。
+ * 用裸词匹配会把它读成「测试步跑过」，从而把「测试根本没开始」判反。
+ */
+export const TEST_STEP_RE = /(run tests?\b|run the (test )?suite|test suite\b|vitest|node --test|npm (run )?test\b|jest\b|playwright|cypress|\be2e\b)/i;
 /** job 里「失败的只是 setup」的步名形态（Finding 点名的三类：checkout / setup-node / 依赖安装）。 */
 export const SETUP_STEP_RE = /(set up job|checkout|setup-node|setup node|install|npm ci|npm install|yarn|pnpm|restore cache|cache)/i;
 
@@ -127,11 +133,49 @@ function stepReadings(job: JobReading): JobStepReading[] {
   return job.steps.map((s) => asRecord(s) as JobStepReading).filter((s): s is JobStepReading => s !== null);
 }
 
-/** 该 job 是否真的跑过一个测试步（**只看步名与结论**）。 */
-function testStepSucceeded(job: JobReading): boolean {
-  return stepReadings(job).some(
-    (s) => TEST_STEP_RE.test(String(s.name ?? "")) && String(s.conclusion ?? "") === "success",
-  );
+/** 该 job 里匹配「这是一次测试步」的步读数（**只看步名**，不读日志正文）。 */
+function testSteps(job: JobReading): JobStepReading[] {
+  return stepReadings(job).filter((s) => TEST_STEP_RE.test(String(s.name ?? "")));
+}
+
+/**
+ * 测试步是否**执行过**（不论是成功还是失败）。
+ *
+ * ⚠️ 这一条与被它取代的 `=== "success"` 的差别是本模块最贵的一个 bug（2026-09-15 实测）：
+ * 旧写法把「测试步**没成功**」当成「测试步**没跑**」⇒ 一条名叫 `Run tests` 且 conclusion=failure
+ * 的步被判成「测试从未开始」⇒ 19 条真失败**全部**被归为 infrastructure（一个在真实语料上恒定的取值，
+ * 且方向是把真红**豁免**掉，正是本任务明令不可逆的那一侧）。判据：`skipped` 才是「没跑」，
+ * `success` / `failure` / `cancelled` 都是「跑了」。
+ */
+function testStepStarted(job: JobReading): boolean {
+  return testSteps(job).some((s) => ["success", "failure", "cancelled"].includes(String(s.conclusion ?? "")));
+}
+
+/** 测试步是否**跑过且失败了**（「测试确实跑了并失败」的直接读出）。 */
+function testStepFailed(job: JobReading): boolean {
+  return testSteps(job).some((s) => String(s.conclusion ?? "") === "failure");
+}
+
+/**
+ * 这个 job 的红是不是**实质性的** —— 即它来自被测对象，而不是基础设施把它截断了。
+ *
+ * 存在的理由（2026-09-15 对真 run 归因时发现）：一个 run 里**有 job 被取消**（`conclusion=cancelled`）
+ * 并不代表这个 run 的红就发生在被测对象之外 —— 同一 run 的**另一个** job 可能真真切切地失败了。
+ * 实测两次 release run 都是这个形态：`release` job 被取消，而 `sea-verify-node-free` 的
+ * `Run quay serve and curl it (no Node on PATH)` 步**真的失败**（那正是 AC-267 追的 SEA 缺陷）。
+ * 若让「有 job 被取消」一句话把整条 run 豁免成 infrastructure，就把一个真缺陷洗成了基础设施
+ * —— 正是本任务明令不可逆的那一侧。
+ *
+ * ⛔ 找不到步级证据时返回 false（**不声称**实质性）—— 但那只影响「infra 信号是否被推翻」，
+ * 不构成「判为 infrastructure」的理由：没有实质失败时 infra 信号照常生效。
+ */
+function jobFailureIsSubstantive(job: JobReading): boolean {
+  if (String(job.conclusion ?? "") !== "failure") return false;
+  const failing = stepReadings(job).filter((s) => String(s.conclusion ?? "") === "failure");
+  if (failing.length === 0) return false;
+  const testRan = testStepStarted(job) || testStepFailed(job);
+  const nonSetupFailed = failing.some((s) => !SETUP_STEP_RE.test(String(s.name ?? "")));
+  return testRan || nonSetupFailed;
 }
 
 /**
@@ -173,28 +217,37 @@ export function attributeRun(record: RunRecord, opts: AttributeOptions = {}): At
     }
   }
 
-  // 失败集中在 setup 步而测试步从未开始。⛔ 只在【有步级读数】时成立：没有步级读数就分不出
-  // 「挂在 setup」与「挂在测试」，此时不得报 infra（读不懂 ⇒ 回到兜底，方向安全）。
+  // 失败集中在 **setup 步**（checkout / setup-node / 依赖安装）而测试步从未开始。
+  // 两个限定都不可省：
+  //   ① ⛔ 只在【有步级读数】时成立 —— 没有步级读数就分不出「挂在 setup」与「挂在测试」，
+  //      此时不得报 infra（读不懂 ⇒ 回到兜底，方向安全）。
+  //   ② ⛔ 只有【失败的步本身是 setup 形】才成立 —— 否则一个失败在测试之前、但既非 setup 也非测试
+  //      的步（实测：`Test-coverage self-check …`）会被误豁免。找不出 setup 形 ⇒ 不报 infra，
+  //      落到 real-defect（多一次人看），而不是把一个可能的真缺陷洗成基础设施。
   const hasStepReadings = jobs.some((j) => stepReadings(j).length > 0);
   const failedStepNames = jobs.flatMap((j) =>
     stepReadings(j)
       .filter((s) => String(s.conclusion ?? "") === "failure")
       .map((s) => String(s.name ?? "")),
   );
-  const anyTestStepRan = jobs.some((j) => testStepSucceeded(j));
+  const testStepRan = jobs.some((j) => testStepStarted(j));
+  const testStepRed = jobs.some((j) => testStepFailed(j));
   const testsReported = typeof rec.testFiles === "number" && rec.testFiles > 0;
-  if (hasStepReadings && failedStepNames.length > 0 && !anyTestStepRan && !testsReported) {
-    // 命中的步名里优先点名 setup 形（checkout / setup-node / 依赖安装）—— Finding 点名的三类；
-    // 没有 setup 形时（例如失败在静态检查步）仍成立（测试步同样从未开始），只是不点名。
-    const setupStep = failedStepNames.find((n) => SETUP_STEP_RE.test(n));
-    infra.push(
-      setupStep
-        ? `infra:failed-before-tests-started:setup-step:${setupStep}`
-        : `infra:failed-before-tests-started:first-failed-step:${failedStepNames[0]}`,
-    );
+  const setupStepFailed = failedStepNames.find((n) => SETUP_STEP_RE.test(n));
+  if (hasStepReadings && setupStepFailed !== undefined && !testStepRan && !testsReported) {
+    infra.push(`infra:failed-before-tests-started:setup-step:${setupStepFailed}`);
   }
 
-  if (infra.length > 0) return { attribution: "infrastructure", signals: infra };
+  // infra 信号**不是一票通过**：同一 run 里若另有 job 的红是实质性的，则那个红才是这个 run 红的
+  // 成因，不得被兄弟 job 的取消/超时豁免掉（方向不可逆）。被压制的 infra 信号原样留在 signals 里
+  // —— 读记录的人要能看见「它命中过，只是没定案」，而不是看不见它。
+  const substantiveJob = jobs.find((j) => jobFailureIsSubstantive(j));
+  const suppressed: string[] = [];
+  if (infra.length > 0) {
+    if (substantiveJob === undefined) return { attribution: "infrastructure", signals: infra };
+    suppressed.push(`defect:substantive-failure:${String(substantiveJob.name ?? "<unnamed-job>")}`);
+    for (const s of infra) suppressed.push(`suppressed-by-substantive-failure:${s}`);
+  }
 
   // ── 2. known-flake — 失败测试标识命中登记表 ──────────────────────────────────────────
   // ⛔ 登记表为空 / 读不到就**判不出** known-flake。「看起来像 flake」「上次也红过」不是信号：
@@ -211,12 +264,13 @@ export function attributeRun(record: RunRecord, opts: AttributeOptions = {}): At
   if (flakeSignals.length > 0) return { attribution: "known-flake", signals: flakeSignals };
 
   // ── 3. real-defect — 兜底 ────────────────────────────────────────────────────────────
-  // 与兜底可分辨的正向读出：测试**确实跑了**并失败（testFiles > 0，或某个 job 的测试步跑成功了）
+  // 与兜底可分辨的正向读出：测试**确实跑了**（`testFiles > 0`，或某个 job 的测试步执行过）
   // ⇒ 这是「读懂了记录，判为真缺陷」，不是「无信号可依」。
-  if (testsReported || anyTestStepRan) {
-    return { attribution: "real-defect", signals: [DEFECT_TESTS_RAN] };
+  const tail = suppressed.length > 0 ? suppressed : [];
+  if (testsReported || testStepRan || testStepRed) {
+    return { attribution: "real-defect", signals: [DEFECT_TESTS_RAN, ...tail] };
   }
-  return { attribution: "real-defect", signals: [DEFAULT_NO_SIGNAL] };
+  return { attribution: "real-defect", signals: [DEFAULT_NO_SIGNAL, ...tail] };
 }
 
 /** 判定一条已归因记录是否「带一个合法 attribution」（供只读复核与写面自检）。 */
