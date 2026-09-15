@@ -1,7 +1,7 @@
 ---
 id: AC-260
 title: 缺口A：dist-plugin 交付面上带 cwd 相对 plugin/ 前缀的 dist 引用归零（基线 96/96 全是错形）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-019
 criterion: |-
@@ -42,4 +42,15 @@ origin: 2026-09-15 对 dist-plugin 分支的直接测量：96 个 scripts/dist �
   前缀（跨 loop/ 与 8 个 skill），正确形式 0 个。根因 build-plugin-dist.mjs:445-459 的
   rewriteMarkdown 只改扩展名、不加任何 plugin-root 前缀（该文件内 CLAUDE_PLUGIN_ROOT grep 零命中）。这是
   SPEC-plugin-lifecycle:203-206 活着的那一半：引擎解析已由 plugin-root.ts 修好，skill 文档没修。
+activatedAt: 2026-09-15T04:00:16.249Z
+statusLog:
+  - at: 2026-09-15T04:00:16.249Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-019 已激活，本 AC 进入在评
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T04:00:16.249Z
 ---
