@@ -67,7 +67,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { scanKernelSurface } from "./fs-walk.ts";
+import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -432,10 +432,9 @@ export function isDriverScopeFile(rel: string): boolean {
  *
  *  面表、skip 集与那三行 body 已移入 fs-walk.ts#KERNEL_SURFACE_SCAN_ROOTS / scanKernelSurface——
  *  本 checker 与 target-identity-literal-check.ts 的这两份是逐字相同的（.quay/routine-findings.jsonl
- *  finding `shell-scan-surface-family`）。面本身是一条决定，不是一个 checker 的私有细节。 */
-export function scanSurface(root: string): string[] {
-  return scanKernelSurface(root);
-}
+ *  finding `shell-scan-surface-family`）。面本身是一条决定，不是一个 checker 的私有细节。
+ *  此处只保留 `scanSurface` 之名（re-export），本 checker 的公开面不变，⛔ 不再留一份可漂移的 body。 */
+export { scanSurface };
 
 /** 组合判定（含扫描面读取）。RED(1) > NOT-EVALUATED(3) > PASS(0)。 */
 export function runCheck(root: string): SiblingCheckResult {

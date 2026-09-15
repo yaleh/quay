@@ -59,8 +59,9 @@ import type { DriverResult } from "./checker-io.ts";
 // collectShellScripts now lives in fs-walk.ts (it was a whole-function byte-identical copy of
 // dead-code-after-return-check.ts's, apart from the JSDoc — .quay/routine-findings.jsonl finding
 // `shell-scan-surface-family`). The extension set moved with it: fs-walk.ts#SHELL_FILE_EXTENSIONS
-// carries the record of why `.ts` is deliberately NOT scanned. The SKIP_DIRS set stays here.
-import { collectShellScripts as collectShellScriptsShared } from "./fs-walk.ts";
+// carries the record of why `.ts` is deliberately NOT scanned. The SKIP_DIRS set stays here, so it
+// is passed at the call site — no local wrapper left behind to re-duplicate.
+import { collectShellScripts } from "./fs-walk.ts";
 // stripShellComments now lives in source-text-lib.ts (it was byte-identical to
 // dead-code-after-return-check.ts's copy apart from brace layout — .quay/routine-findings.jsonl
 // finding `firstargregion-stripshellcomments`). Re-exported so this module's public surface is
@@ -129,14 +130,6 @@ export interface ScanResult {
   violations: Violation[];
   retired: Violation[];
   files: string[];
-}
-
-/** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS and non-script files.
- *  Walk + extension set live in fs-walk.ts (finding `shell-scan-surface-family`); the SKIP_DIRS set
- *  stays this checker's own — it prunes `dist-sea`, dead-code-after-return-check.ts's prunes
- *  `vendor` instead, and merging the two would change which files each scans (硬规则 3b). */
-export function collectShellScripts(root: string): string[] {
-  return collectShellScriptsShared(root, SKIP_DIRS);
 }
 
 /** True iff `text` references shell variable `name` as `$name` or `${name}`. */
@@ -239,7 +232,11 @@ export function detectTickDocViolations(rel: string, source: string): Violation[
 /** Scan a tree for whole-screen-hash violations. Pure + fs: the caller picks the root. Shell
  * scripts everywhere (.sh/.bash); shipped/live tick docs' fenced BASH blocks (MD_TICK_DOCS). */
 export function scanForScreenHashViolations(root: string): ScanResult {
-  const files = collectShellScripts(root);
+  // The skip-set is this checker's OWN: it prunes `dist-sea`, where dead-code-after-return-check.ts
+  // prunes `vendor` instead. ⛔ The two stay apart (fs-walk.ts#collectShellScripts) — merging them
+  // would change which files each scans, and a checker reading the wrong surface passes silently
+  // (硬规则 3b).
+  const files = collectShellScripts(root, SKIP_DIRS);
   const violations: Violation[] = [];
   const retired: Violation[] = [];
   const absorb = (rel: string, found: Violation[]) => {

@@ -39,6 +39,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// listExecutableFiles now lives in fs-walk.ts (it was a whole-function byte-identical copy of
+// fan-in-workflow-retirement-check.ts's — .quay/routine-findings.jsonl finding
+// `shell-scan-surface-family`). EXEC_EXTENSIONS went with it and is still this checker's reference
+// set for listScriptBasenames (.md is deliberately absent: a doc mention is not a call surface).
 import { listExecutableFiles, EXEC_EXTENSIONS } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,10 +59,6 @@ export const SCRIPTS_DIR_REL = "plugin/scripts";
 export const CHECKER_RE = /-check\.(ts|sh)$/;
 /** 显式退役标记：orphan checker 文件头带此 token ⇒ 已处置（非静默孤儿）。 */
 export const RETIRED_MARKER = "RETIRED-WITH-RETIRING-LAYER";
-/** 引用扫描的可执行扩展名（.md 一律排除——SPEC §2.3b「⛔ 已排除 .md 提及」）。
- *  值与 listExecutableFiles 一起移入 fs-walk.ts#EXEC_EXTENSIONS（.quay/routine-findings.jsonl
- *  finding `shell-scan-surface-family`：与 fan-in-workflow-retirement-check.ts 的副本逐字相同）。
- *  本 checker 的 listScriptBasenames 仍用同一集合，故从那里 import。 */
 /** 不算调用面的元数据/测试文件（测试随 checker 退役；catalog/shipping 是元数据）。
  *  checker-driver-result-ratchet-check.ts（gap-b4-checker-reuse-driver-result）的 REQUIRED_ADOPTERS
  *  是一个【钉住清单】（把已迁移 checker 的 basename 作为字符串数据列出），不是 `import from` 式调用面——
@@ -170,12 +170,6 @@ export function codeOnlyText(src: string): string {
   }
   return chars.join("");
 }
-
-/** 递归列出 `dir` 下的普通文件（绝对路径，排序），跳过 node_modules/.git/.quay 与符号链接。
- *  实现移入 fs-walk.ts#listExecutableFiles（finding `shell-scan-surface-family`：与
- *  fan-in-workflow-retirement-check.ts 的副本逐字相同，⛔ 不是本 checker 的私有策略）；
- *  此处保留本名再导出，本 checker 的公开面不变。 */
-export { listExecutableFiles };
 
 /** 枚举 plugin/scripts 顶层脚本（.ts/.sh/.mjs，非递归——checker-mutation-cases 是子目录）。 */
 export function listScriptBasenames(root: string): string[] {

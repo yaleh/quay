@@ -239,6 +239,14 @@ export function scanRoots(
  * ⛔ The OTHER two `scanRoots` callers reach the traversal directly with their own tables
  * (concurrency-literal-check.ts / suite-slot-ssot-check.ts). Their roots genuinely differ, so only
  * the traversal was ever theirs to share. Do not fold them in here.
+ *
+ * 硬规则 5b sweep (the same-carrier count, measured on the extraction that landed this): before,
+ * `plugin/scripts/*.ts` held 3 normalized-identical-body groups — collectShellScripts ×2,
+ * listExecutableFiles ×2, and scanSurface ×4 (the kernel pair plus those two). After, ONE remains:
+ * concurrency-literal-check.ts + suite-slot-ssot-check.ts, whose whole body is the one-line call
+ * `return scanRoots(root, SCAN_ROOTS, SURFACE_SKIP_DIRS);` over two DIFFERENT tables. That is the
+ * floor, not an oversight — there is no algorithm left in it to extract; sharing it further would
+ * only rename `scanRoots`.
  */
 export const KERNEL_SURFACE_SCAN_ROOTS: readonly ScanRoot[] = [
   { dir: "plugin/scripts", rel: "plugin/scripts", ext: /\.(ts|mjs|js)$/, recursive: false },

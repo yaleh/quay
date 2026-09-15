@@ -45,8 +45,8 @@ import type { DriverResult } from "./checker-io.ts";
 // collectShellScripts now lives in fs-walk.ts (it was a whole-function byte-identical copy of
 // adr016-screen-use-check.ts's, apart from the JSDoc — .quay/routine-findings.jsonl finding
 // `shell-scan-surface-family`). Walk + extension set moved with it; the SKIP_DIRS set stays here
-// (it prunes `vendor`, adr016's prunes `dist-sea` instead — merging them would change the surface).
-import { collectShellScripts as collectShellScriptsShared } from "./fs-walk.ts";
+// and is passed at the call site (it prunes `vendor`, adr016's prunes `dist-sea` — not mergeable).
+import { collectShellScripts } from "./fs-walk.ts";
 // stripShellComments now lives in source-text-lib.ts (it was byte-identical to
 // adr016-screen-use-check.ts's copy apart from brace layout — .quay/routine-findings.jsonl finding
 // `firstargregion-stripshellcomments`). Re-exported so this module's public surface is unchanged
@@ -79,14 +79,6 @@ export interface Violation {
   fn: string;
   returnStmt: string;
   after: string;
-}
-
-/** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS.
- *  Walk + extension set live in fs-walk.ts (finding `shell-scan-surface-family`); the SKIP_DIRS set
- *  stays this checker's own — it prunes `vendor`, adr016-screen-use-check.ts's prunes `dist-sea`
- *  instead, and merging the two would change which files each scans (硬规则 3b). */
-export function collectShellScripts(root: string): string[] {
-  return collectShellScriptsShared(root, SKIP_DIRS);
 }
 
 const BARE_RETURN_RE = /^return(\s+\S+)?\s*$/;
@@ -148,7 +140,10 @@ export function detectFileViolations(rel: string, source: string): Violation[] {
 
 /** Scan a tree for dead-code-after-return instances. Pure + fs: the caller picks the root. */
 export function scanTree(root: string): { violations: Violation[]; files: string[] } {
-  const files = collectShellScripts(root);
+  // The skip-set is this checker's OWN: it prunes `vendor`, where adr016-screen-use-check.ts prunes
+  // `dist-sea` instead. ⛔ The two stay apart (fs-walk.ts#collectShellScripts) — merging them would
+  // change which files each scans, and a checker reading the wrong surface passes silently (硬规则 3b).
+  const files = collectShellScripts(root, SKIP_DIRS);
   const violations: Violation[] = [];
   for (const rel of files) {
     const source = fs.readFileSync(path.join(root, rel), "utf8");
