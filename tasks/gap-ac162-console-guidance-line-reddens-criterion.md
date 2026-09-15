@@ -32,13 +32,13 @@ goal_ac: AC-162
 
 ## AC
 
-- [ ] AC-162 判据 exit 0：`grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs | grep -q 'enabledPlugins'` 不命中（内层 grep exit 1 ⇒ 判据整体 exit 0）；证据 = 判据原文在落地后的工作树上的一次真实运行输出。
-- [ ] `packages/quay/scripts/register-plugin.mjs` 的所有非注释行不含该字面量；精确的项目级 JSON 形状仍在该文件头部注释里可查（不因本次改动丢失）。
-- [ ] 运行时指引仍告诉用户「去项目级启用」并指向 `.claude/settings.json`（信息不缩水；不得为过判据而删掉整段指引）。
-- [ ] 新守卫测试逐字复用 AC-162 谓词并对源码取值，位于 `packages/quay/test/npm-pack-e2e.test.mjs`；`node --test packages/quay/test/npm-pack-e2e.test.mjs` 全绿。
-- [ ] 红控制：临时把原 `:202` 行写回 ⇒ 新守卫 fail（贴输出）；换回 ⇒ pass（贴输出）。缺红控制不算达成（恒绿守卫 = 假保证）。
-- [ ] 行为不变：同文件行为断言 `packages/quay/test/npm-pack-e2e.test.mjs:227`（无用户级 enabledPlugins 键）保持绿；marketplace 源仍注册。
-- [ ] 未改判据：`goals/AC-162-register-plugin-no-user-enabled.md` 的 `criterion:` 逐字未变（`git diff` 该文件为空）。
+- [x] AC-162 判据 exit 0：`grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs | grep -q 'enabledPlugins'` 不命中（内层 grep exit 1 ⇒ 判据整体 exit 0）；证据 = 判据原文在落地后的工作树上的一次真实运行输出。
+- [x] `packages/quay/scripts/register-plugin.mjs` 的所有非注释行不含该字面量；精确的项目级 JSON 形状仍在该文件头部注释里可查（不因本次改动丢失）。
+- [x] 运行时指引仍告诉用户「去项目级启用」并指向 `.claude/settings.json`（信息不缩水；不得为过判据而删掉整段指引）。
+- [x] 新守卫测试逐字复用 AC-162 谓词并对源码取值，位于 `packages/quay/test/npm-pack-e2e.test.mjs`；`node --test packages/quay/test/npm-pack-e2e.test.mjs` 全绿。
+- [x] 红控制：临时把原 `:202` 行写回 ⇒ 新守卫 fail（贴输出）；换回 ⇒ pass（贴输出）。缺红控制不算达成（恒绿守卫 = 假保证）。
+- [x] 行为不变：同文件行为断言 `packages/quay/test/npm-pack-e2e.test.mjs:227`（无用户级 enabledPlugins 键）保持绿；marketplace 源仍注册。
+- [x] 未改判据：`goals/AC-162-register-plugin-no-user-enabled.md` 的 `criterion:` 逐字未变（`git diff` 该文件为空）。
 
 ## DoD
 
