@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-205
 title: "freshness-refresh: delivery-face evidence for AC-205 (build_sha
   f19397c6, 2026-09-14T14:25:05Z) is d=190 commits behind the develop tip; only
   10 commits of margin remain against th"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
