@@ -31,6 +31,7 @@ import {
   listScriptBasenames,
   computeKept,
   buildReferenceMap,
+  main,
 } from "../scripts/registry-bare-filename-scan.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -254,6 +255,44 @@ test("kind ③ config-gate keeps a script registered in .quay/config.yml", () =>
     const executed = new Map([["foo.sh", 0]]);
     const kept = computeKept(root, scripts, executed, [], false, extra);
     assert.ok(kept.has("foo.sh"), "config-gate keeps foo.sh alive");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── --check 对「样本载体在磁盘上根本不存在」与「载体存在但 collector 扫不到样本」的区分 ──────────────
+// (2026-09-15 真机实测：GitHub CI 一个干净 `actions/checkout@v4`，.quay/config.yml 是 gitignored、
+// 从未在那种 checkout 里存在过 —— 此前两种态共用同一条 `RED: ... predicate broken`，把「读不到输入」
+// 判成了「输入不对」，硬规则 3b。这条固定 CI 会在任何新 clone 上恒红这个回归。)
+
+test("--check: a sample carrier absent from the checkout ⇒ NOT-EVALUATED (exit 3), not RED", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-check-absent-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+    // KNOWN_SAMPLE 前置：quay-deliver.ts 里真的有 supervisor-bus-identity.sh，且该脚本真的存在于
+    // plugin/scripts/ 下 —— 否则 --check 会在更早的「known-sample not found by scan」处就退出，
+    // 测不到本条要测的分支。
+    fs.writeFileSync(path.join(root, "plugin", "scripts", KNOWN_SAMPLE), "#!/usr/bin/env bash\n:\n");
+    fs.writeFileSync(
+      path.join(root, "plugin", "scripts", "quay-deliver.ts"),
+      `export const MEMBERS = [{ name: "x", file: "${KNOWN_SAMPLE}", kind: "bash" }];\n`,
+    );
+    // 死集一致性前置：写一份不含任何 dead 项的 dead-set-recomputed.json，让 --check 走到
+    // EXTRA_KIND_SAMPLES 那一段（本条要测的分支）。
+    fs.writeFileSync(
+      path.join(root, "docs", "analysis", "dead-set-recomputed.json"),
+      JSON.stringify({ after: { dead: [] } }),
+    );
+    // 刻意【不】创建 EXTRA_KIND_SAMPLES 第一项的载体（scripts/test.sh）——它在这个 checkout 里
+    // 结构上就不存在，与 .quay/config.yml 在一个干净 checkout 里的处境同形。
+    assert.ok(
+      !fs.existsSync(path.join(root, EXTRA_KIND_SAMPLES[0].carrier)),
+      "fixture precondition: the first known-sample carrier is genuinely absent",
+    );
+
+    const rc = main(["--check", "--root", root]);
+    assert.equal(rc, 3, "an absent sample carrier must read as NOT-EVALUATED (3), never RED (1)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

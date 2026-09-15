@@ -103,6 +103,26 @@ test("gap-perfile-cpu-cost-collection AC2 — parsePerFileLines parses cpu_ms (n
   assert.equal(zero.cpuMs, 0, "a present cpu_ms=0 is carried as 0 (distinct from absent)");
 });
 
+test("gap-perfile-memory-cost-collection-missing — parsePerFileLines parses mem_peak_kb (the 5th optional trailing field) and leaves it ABSENT on lines without it", () => {
+  // This parser is the SINGLE 口径 both round-record writers consume
+  // (full-suite-runner.ts + pre-verified-round-record.ts), so parsing here is what makes the field
+  // reach `.quay/verification-round.jsonl`'s perFile[] on BOTH landing paths.
+  const log =
+    "__PERFILE__ duration_ms=210.5 /repo/big.test.mjs passed=false end_ms=1724000000123 cpu_ms=45.625 mem_peak_kb=185728\n" +
+    "__PERFILE__ duration_ms=12.25 /repo/cpuonly.test.mjs passed=true cpu_ms=7\n" +
+    "__PERFILE__ duration_ms=3 /repo/legacy.test.mjs passed=true\n" +
+    "__PERFILE__ duration_ms=1 /repo/zero.test.mjs passed=true mem_peak_kb=0\n";
+  const recs = parsePerFileLines(log);
+  assert.equal(recs.length, 4, "all four lines parse (the extra trailing field stays backward compatible)");
+  const big = recs.find((r) => r.file === "/repo/big.test.mjs");
+  assert.equal(big.memPeakKb, 185728, "mem_peak_kb carried verbatim into memPeakKb");
+  assert.equal(big.cpuMs, 45.625, "cpu_ms still parses when mem_peak_kb follows it");
+  // A cpu-only line (the state of every production round before this task landed) ⇒ memPeakKb ABSENT.
+  assert.equal(recs.find((r) => r.file === "/repo/cpuonly.test.mjs").memPeakKb, undefined, "no mem_peak_kb ⇒ field absent (缺键 ≠ 0)");
+  assert.equal(recs.find((r) => r.file === "/repo/legacy.test.mjs").memPeakKb, undefined, "legacy line ⇒ field absent");
+  assert.equal(recs.find((r) => r.file === "/repo/zero.test.mjs").memPeakKb, 0, "a present mem_peak_kb=0 is carried as 0 (distinct from absent)");
+});
+
 test("gap-fan-in-suite-log-cross-relaunch-reuse — parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only, no stale-old-round read)", () => {
   // A fan-in relaunch rotates the log: old round (marker round=full) then current round (marker round=full).
   // The parser must read ONLY the current (last-marker) round's __PERFILE__ lines — the old round's

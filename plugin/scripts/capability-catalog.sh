@@ -99,6 +99,9 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [driver-anchor.ts]="Do the six driver kinds’ resident loops live in ONE OS process (SPEC-unified-quay-server §7 stage C / §6.1) — an anchor host that runs each kind’s OWN main(argv) loop in-process behind an independent event-loop error boundary + restart counter, writes each kind’s .quay/<prefix>.pid as its own pid (so AC-255’s criterion de-duplicates to ONE live pid) while retiring the per-kind supervisor pid files, reconciles a declarative .quay/anchor-desired.json so quay driver start|stop --kind X adds/removes exactly ONE loop without touching the others or killing in-flight worker children (§6.9 inv.2/3), and self-refreshes onto the main checkout’s kernel when it advances (AC8 durability; the base is the MAIN CHECKOUT OF THE KERNEL’S OWN REPO — ⛔ NOT the workspace root passed as --root, whose <workspaceRoot>/plugin/scripts/… form resolves to a nonexistent file in a third-party project and is fail-closed by kernel-sibling-resolution-check’s DRIVER-SCOPE rule on driver-runtime.ts) — rather than 12 supervisor+driver processes whose per-kind crash isolation is bought with 8 registry tables and a ps that can no longer tell ‘the process is up’ from ‘this kind is still turning’ (§6.10)?"
+  [fan-in-queueing-model.ts]="「把 worker 并发调高，落地吞吐会上升，还是只有排队时间上升」—— 用三个生产载体（fan-in 锁事件 / per-run fan-in 过程日志 / worker 执行记录 + git 落地历史）报出锁持有分布、排队等待分布、锁利用率 ρ、到达率 λ、平均在系统数 L，以及实测的 wait-vs-ρ 曲线（本报告里唯一可取假的那个量），据此说出系统当前落在排队论 knee 的哪一侧、以及距饱和还有几倍余量（tasks/gap-fan-in-queueing-model-does-concurrency-help；并纠正 docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §7 第 5 条『排队无载体』的错误结论——该量自 2026-08-30 起写在 per-run 过程日志里）?"
+  [freshness-producer-coverage-check.ts]="Does every subject whose delivery evidence the AC-214 freshness criterion tracks have a producer REGISTERED in the single-source mapping plugin/freshness-producers.json — i.e. is the set of subjects observed in the evidence carrier (.quay/productization-verification.jsonl, under the mapping's own declared scope rule: ac matches subject_id_pattern AND the record carries a 40-hex build_sha) equal to the registered set, is the registered set equal to the set the criterion itself publishes in .quay/goal-freshness-margin.json, and does every registered subject actually have carrier records — so that the refresh mechanism's COMPLETENESS (not its freshness) becomes a mechanical question, and the 2026-09-13 shape (two producer faces existed, only one was re-run, the other's subjects aged past K) cannot recur silently (tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger AC7)?"
   [worktree-namespace-literal-check.ts]="Does the product/plugin source spell the worktree-namespace directory literal (the double-quoted 'quay-worktrees') in more than the ONE place that is allowed to — i.e. is a grep -rn of that literal over packages/quay/src + plugin/scripts at most 1 hit, and is that hit the DEFAULT_WORKTREE_NAMESPACE_NAME declaration in packages/quay/src/worktree-namespace.ts (the single resolver's fallback branch)? An unquoted occurrence (path regex / comment / prose) is reported as an advisory count, never a hard failure (tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3)?"
   [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
@@ -185,6 +188,7 @@ declare -A QUESTION=(
   [suite-slot-lib.sh]="What are the suite lock slots (bash side — the canonical scripts/test.sh sources): suite_slot_count = RESOURCE_GATE_CONCURRENT_SUITES seam → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, suite_slot_paths = base.0..S-1 (loop-generated, never a hardcoded .0/.1 literal); the behavioral invariant suite-slot-ssot-check verifies it agrees with the TS canonical (gap-suite-concurrency-ff-gate-and-slot-ssot); plus spawn_suite_lock_hold_watchdog — the hold-cap watchdog that releases a slot held past T seconds (a child of the HOLDING process, ⛔ not a worker-driver kill) and records a fail-loud lock_hold_exceeded=1 marker (gap-suite-lock-starvation-long-validation-hold AC1)?"
   [suite-slot-ssot-check.ts]="Do the suite-concurrency single-definition-point BEHAVIORAL invariants hold (gap-suite-concurrency-ff-gate-and-slot-ssot AC4): I1 packages/quay/src/fan-in/ff-merge.ts code contains no full-suite.lock read (ff 闸只读本任务 capture) / I2 no full-suite.lock.<digit> literal nor FULL_SUITE_LOCK_<digit> variable in code across the surface / I3 the four consumers read the canonical (suite-slot-lib.sh / suite-lock-slots.ts) / I4 bash canonical slot count == TS canonical slot count under the same env — each can take false (by POSITION, 硬规则 2)?"
   [concurrent-batch-scheduler.ts]="Which ready tasks can be dispatched concurrently without touching overlapping files?"
+  [core-src-import.ts]="From a plugin script that is executed as RAW .ts (not as a bundled dist entry), in WHICH layout is a Core-src module (packages/quay/src/...) actually reachable — repo tree, staged packages/quay/plugin copy, or shipped bundle — and does acquisition fail loud when none of them resolves?"
   [config-key-consumer-check.ts]="Does every delivered config key quay-init writes into a downstream .quay/config.yml loop: section have a CODE consumer — a zero-consumer key (delivered but never read) is either wired or deleted, proven by mechanical enumeration (writer face derived from quay-init.sh's heredoc + python upgrade writer; consumer face grepped over plugin/scripts/*.ts + packages/quay/src/*.ts excluding tests) with a three-state output has-consumer / no-consumer-to-wire / documented-with-reason where an exemption must carry a reviewable reason text (⛔ not a bare allowlist — GOAL-015 风险 3 / AC-235)?"
   [provider-binding-resolvability-check.ts]="Does a quay project's provider binding name its runtime by a PATH the project itself controls — i.e. can it read its OWN task board WITHOUT external \$PATH assistance (absolute, or relative to <workspaceRoot>/<provider.path>, and present on disk) — where a separator-less token (the pre-ba960f503 form mcp_entry: [quay-native, mcp], satisfied only by whatever \$PATH happens to hold on the machine that runs it) is RED regardless of whether this host resolves it, and no-mcp-entry / unrecognized-shape are NOT-EVALUATED never sharing an output with 合格 (tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected)?"
   [config-wiring-check.ts]="Does every declared config field have exactly one wirer?"
@@ -192,6 +196,7 @@ declare -A QUESTION=(
   [dead-code-after-return-check.ts]="Does any shell function have executable statements AFTER a top-level return (dead code — the 2026-08-03 concurrency-pin shape)?"
   [dead-loop-check.sh]="Is a target project's loop alive or dead (L2 continuous-health: transcript user-msg or git commit window)?"
   [dead-loop-check.sh]="Is the loop ACTUALLY RUNNING (L2 continuous health) — a recent transcript user message or git commit in the last N minutes, INDEPENDENT of backlog emptiness (dead-loop vs healthy-idle)?"
+  [defect-latency-pair.ts]="本项目一个缺陷从「被引入」到「被立案」的延迟是多少小时 —— 对真仓库每一个 gap 任务把「任务文件首次进入 git 的时刻」t1 与「该任务修复提交所改旧行经 git blame 上溯到的引入时刻」t0 配对，报出分母、可核配对数、失真率（unresolvable/总数）、延迟的中位/p90/最大、最长 10 条尾部、以及按缺陷类型（静默失败/报错失败/性能/文档漂移/未分类）分组的中位与条数，并单列本口径量不了什么（blame 落在重构或 merge 提交、多候选 t0、修复提交无法机械定位各自的条数）；给 CLAUDE.md 硬规则「频率 × 静默失败」与 docs/references/维度边界与结晶.md §2.1 ② 的个案判据一个分布版本（tasks/gap-defect-discovery-latency-has-no-distribution；output = docs/analysis/defect-discovery-latency-distribution.md）—— ⚠️ 本机件唯一的按关键词判定是【缺陷类型分组】一处，已声明为口径例外：t0/t1 全部取自 git 对象时刻，不读任务体；分组取命中次数最多的一类，全零 ⇒ unclassified 是独立取值，见 output 文档 §3.2/§5。"
   [defect-shape-aggregate.ts]="Are N recently-landed gap-* defects the SAME root manifesting repeatedly — clustered by shared mechanism vocabulary (code identifiers / CLI flags in title+body, NOT file overlap) that no single task's record shows (cross-task architecture-debt aggregation: the loop's input is single defects and debt appears only as N same-shape defects)?"
   [derive-touches-heuristic.ts]="When a task body lacks a ## Touches section, what globs would a cheap scheduling-time heuristic derive for it?"
   [delivery-inventory-drift-gate.sh]="Did this change ADD/DELETE a file under .claude/workflows/ WITHOUT mirroring it into plugin/workflows/ in the same change (gap-drift-gate-covers-only-plugin-scripts-not-workflows)?"
@@ -407,6 +412,7 @@ declare -A QUESTION=(
   [trend-check.ts]="Is a standing criterion quantified as a trend over time, not a point-in-time snapshot (the TREND criterion)?"
   [verify-installed-executables.sh]="Is every installed executable byte-identical to its plugin source?"
   [vmeta-lag-check.sh]="How far is the V_meta consolidation lagging behind the evidence?"
+  [verification-marginal-return.ts]="「每拦下一个缺陷，我们花了多少验证成本」—— 把成本载体 .quay/checker-cost.jsonl（每行 {name,ms,n,load,at,verdict}）与三类【拦截载体】（闸判定 .quay/gate-events.jsonl / 晋升准入 .quay/promotion-outcome.jsonl / 静态检查红 .quay/verification-round.jsonl 的 STATIC_CHECK_FAILED 行，配静态检查器注册表 plugin/scripts/runner-static-gate.ts）按名字对起来，报出每个 checker/闸的累计成本（小时）、判定次数、fail 次数、三种去重口径下的不同缺陷数与每缺陷成本，做敏感性分析（换口径排序翻不翻），并对全仓最贵的单个检查器 ready-pool-check 单列专项读数 —— 给 ADR-005「验证是绑定约束」的第一个数（tasks/gap-cost-per-defect-caught-verification-marginal-return）?"
   [vmeta-lag-check.ts]="How far is the V_meta consolidation lagging (canonical arithmetic)?"
   [wiring-coverage-check.ts]="Is every mechanism claim in a task body wired to a real mechanism?"
   [workflow-baseline-metrics.ts]="What are the workflow's mechanical baseline metrics?"
@@ -434,6 +440,7 @@ declare -A QUESTION=(
   [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
   [peer-identity-probe.ts]="Can a NON-Claude process be delivered to by other Claude Code sessions on this machine — does registering an HONEST peer identity (real pid/procStart/pidDomain/socket path, agent:'quay', explicitly NOT impersonating a Claude session) into ~/.claude/sessions/<pid>.json make it addressable by the platform SendMessage tool, and which record fields are actually load-bearing for that reachability (agent/pid/procStart/messagingSocketPath/spare/parkedJobId...) — the 方案 C feasibility spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
+  [server-restart-inflight-verify.ts]="Does restarting ONE service — driver:worker — on the UNIFIED server form kill the worker subprocesses that were IN FLIGHT (SPEC-unified-quay-server-2026-09-13 §6.9 不变式 3 / §8-7 后半)? The in-flight set is derived INDEPENDENTLY from the driver process tree (/proc/<driver_pid>/task/*/children filtered by the workspace's own task-worker role name), each pid is checked alive-and-NON-ZOMBIE before the restart and the ORIGINAL set is re-checked individually after it, and the record is written only when the old driver pid is really gone, a NEW live driver pid exists, and a round record on a NEW run_id turns strictly after the restart — otherwise ZERO record plus a DISTINGUISHABLE verdict (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-256). Under SPEC §7 阶段 C it refuses with verdict=HOSTED-BY-ANCHOR: a per-kind restart there is an event-loop respawn inside the anchor, so the criterion's driver_pid_before != driver_pid_after is structurally unsatisfiable and acting would SIGTERM the anchor and take all six hosted kinds down."
   [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
   [mcp-blacklist-resolve.ts]="Which MCP servers will a blacklisted role ACTUALLY connect to — enumerate the three real config sources (the user-level server table, the project-level MCP declarations, and enabledPlugins pointing at the plugin's own MCP declaration with the literal CLAUDE_PLUGIN_ROOT placeholder expanded to the DETECTED version dir), drop the role's mcpBlacklist, and emit the --strict-mcp-config --mcp-config payload — so a pure code-writing worker stops dragging up the chrome-devtools-mcp / playwright-mcp process trees (2026-09-14 reading: 48 + 12 servers plus 12 watchdogs approx 3.24GB RSS, the largest single concentration of memory pressure), NEVER by shelling out to the mcp list subcommand which health-checks (i.e. spawns) the very servers this exists to avoid, and where an input that cannot be decoded yields null so the caller adds NO flag rather than shipping a partial config that would silently DROP servers (硬规则 3b) (tasks/gap-worker-mcp-blacklist-strict-config)?"
 )
@@ -449,10 +456,14 @@ declare -A GUARD_OBJECT=(
   [checker-mutation-check.sh]="invariant:every registered checker can be mutation-reddened (preventive — the L_S instrument's own object is the checkers' ability to fail)"
   [instrument-decay-check.ts]="invariant:telemetry carriers under .quay/ keep writing (companion contrast, not absolute rate)"
   [checker-mechanical-spine-check.ts]="invariant:every shipped checker conforms to the mechanical-spine contract (exit-code vocabulary within {0,1,2,3} + a --json claim that actually emits JSON)"
+  [verification-marginal-return.ts]="invariant:一个 checker/闸 的拦截数只有三种取值（查过且有 / 查过且零 / 未查），「没有拦截通道」绝不与「拦截数 = 0」同形（硬规则 6 + 3b）—— 并给出判据：谓词 isPureTax 必须对一个【已知有拦截】的行干跑一次返回 false"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [driver-anchor.ts]="按需"
+  [fan-in-queueing-model.ts]="按需"
+  [freshness-producer-coverage-check.ts]="每轮"
   [worktree-namespace-literal-check.ts]="每轮"
   [gitignore-runtime-coverage-check.ts]="每轮"
   [psi-failure-correlation-check.ts]="按需"
@@ -509,6 +520,7 @@ declare -A CADENCE=(
   [suite-slot-lib.sh]="每轮"
   [suite-slot-ssot-check.ts]="每轮"
   [concurrent-batch-scheduler.ts]="每里程碑"
+  [core-src-import.ts]="每里程碑"
   [config-key-consumer-check.ts]="每轮"
   [provider-binding-resolvability-check.ts]="每轮"
   [config-wiring-check.ts]="按需"
@@ -516,6 +528,7 @@ declare -A CADENCE=(
   [cross-machine-verify.sh]="每轮"
   [dead-code-after-return-check.ts]="每轮"
   [dead-loop-check.sh]="每轮"
+  [defect-latency-pair.ts]="按需"
   [defect-shape-aggregate.ts]="按需"
   [derive-touches-heuristic.ts]="每里程碑"
   [delivery-inventory-drift-gate.sh]="每轮"
@@ -749,6 +762,7 @@ declare -A CADENCE=(
   [verify-deliver-coldstart.sh]="按需"
   [verify-installed-executables.sh]="冷启动"
   [vmeta-lag-check.sh]="按需"
+  [verification-marginal-return.ts]="按需"
   [vmeta-lag-check.ts]="按需"
   [wiring-coverage-check.ts]="每里程碑"
   [workflow-baseline-metrics.ts]="每里程碑"
@@ -779,11 +793,15 @@ declare -A CADENCE=(
   [peer-identity-probe.ts]="按需"
   [channel-probe-server.ts]="按需"
   [server-partial-stop-verify.ts]="按需"
+  [server-restart-inflight-verify.ts]="按需"
   [mcp-blacklist-resolve.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [driver-anchor.ts]="失效前提：驱动 kind 的常驻循环仍然可以在同一个 Node 进程的事件循环里并发跑（即 §9 开放问题 1「会不会互相饿死」的实测结论仍为「可行」）且 quay driver <verb> --kind X 仍是驱动生命周期的用户面；若某个 kind 被实测饿死而转回独立进程（或驱动启停面整体换成 systemd 类承载），本条退休"
+  [fan-in-queueing-model.ts]="失效前提：三条载体的字段口径不变 —— ①.quay/fan-in-lock-events.jsonl 的 event/epoch/taskId/runId/pid 五键与 epoch 以【秒】为单位的约定；②per-run 过程日志 fan-in-<task>-<runId>.log 里 acquire-fan-in-lock 步的 wall_ms（它 = 排队时延，本条全部延迟结论都建立在它上面）；③.quay/worker-outcome.jsonl 的 in_flight_count/wall_clock_ms 与 git log develop 里 tasks: 翻 <id>… 的提交主题形状。任一字段改名、改单位或给 wall_ms 换语义，本条需同步"
+  [freshness-producer-coverage-check.ts]="失效前提：goal AC-214 仍以「每个主体类的证据距 develop tip ≤ K 交付面提交」为判据、其主体集合仍由 criterion 自己写进 .quay/goal-freshness-margin.json 的 subjects 键（本条的两条独立读数之一），且刷新的唯一路径仍是跑 plugin/freshness-producers.json 里登记的那个跨机产出器命令；若 AC-214 退役或改判据、主体集合改由别处声明（该快照不再由 criterion 产出）、或刷新改为由 driver 直接持有（不再有 subject→producer 命令映射），本条失去断言对象，退休"
   [worktree-namespace-literal-check.ts]="失效前提：worktree 命名空间仍由单一入口 packages/quay/src/worktree-namespace.ts 的 DEFAULT_WORKTREE_NAMESPACE_NAME 回落分支持字面量、其余读侧仍只经该入口取命名空间；若命名空间约定整体退休（不再有 per-task worktree）或字面量改由配置/环境注入（字面量消失），本条随之失效"
   [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
@@ -840,6 +858,7 @@ declare -A INVALIDATION=(
   [suite-slot-lib.sh]="失效前提：scripts/test.sh 仍以单个 single-flight 锁文件族（full-suite.lock.*）串行化全量 suite 且槽数仍由 QUAY_MAX_CONCURRENT_SUITES 生成；若 suite 串行化改走其它机制（如单一全局锁/队列），本条退休"
   [suite-slot-ssot-check.ts]="失效前提：suite 并发量定义点仍分散在多个消费者（test.sh/full-suite-runner/worktree-process-reaper/ff-merge.ts）且需行为层不变量守着；若收敛到单一实现且该实现本身受测试覆盖，本条退休"
   [concurrent-batch-scheduler.ts]="无可测前提，靠周期复核"
+  [core-src-import.ts]="失效前提：staged 副本布局下裸相对 import 已可解析（即该缺陷不再存在）；或所有调用点都收进 esbuild 内联的静态字面量、不再有 raw .ts 执行路径——本条按 ④ 失效"
   [config-key-consumer-check.ts]="失效前提：交付配置键仍由 quay-init 以 loop: 段写入下游 .quay/config.yml 且消费者面仍以 plugin/scripts/*.ts + packages/quay/src/*.ts 字面 grep 为判据口径；若 writer 面改由他处声明（不再经 quay-init.sh 的 heredoc/python 写手）或 consumer 判据口径被推翻，本条按 ④ 失效"
   [provider-binding-resolvability-check.ts]="失效前提：provider 绑定仍由 .quay/config.yml 的 providers.<id>.mcp_entry 承载，且产品仍以 packages/quay/src/cli/shared.ts:175 的 provider.path 为 cwd 解析该 token；若绑定改由他处声明（mcp_entry 被别的键取代）或产品改了 runtime 解析口径（相对 token 不再对 provider dir 解析/裸名不再走 \$PATH），本条的 path-resolved 与裸名判据随之失效"
   [config-wiring-check.ts]="无可测前提，靠周期复核"
@@ -847,6 +866,7 @@ declare -A INVALIDATION=(
   [cross-machine-verify.sh]="无可测前提，靠周期复核"
   [dead-code-after-return-check.ts]="无可测前提，靠周期复核"
   [dead-loop-check.sh]="无可测前提，靠周期复核"
+  [defect-latency-pair.ts]="失效前提：落地形状不变 —— ①develop 上落地一个任务仍会产生一对可辨识提交（Merge branch 'develop' into task/<id> 与 tasks: 翻 <id> done（…）/ tasks: <id> flip done（…）），且两者至少其一的 (tip,base) 区间包含该任务的修复提交；② 任务文件的首次加入在 develop 历史里仍是一个 --diff-filter=A 提交；③ 任务清单仍由 git ls-tree <ref> tasks/ 派生（⛔ 不是工作树 glob）。任一失效 ⇒ 分母/可核配对数/失真率三项读数需同步重算，已发布的分布不可续用"
   [defect-shape-aggregate.ts]="无可测前提，靠周期复核"
   [derive-touches-heuristic.ts]="无可测前提，靠周期复核"
   [delivery-inventory-drift-gate.sh]="失效前提：.claude/workflows/ 仍是 canonical 源且 plugin/workflows/ 是其 byte-identical 分布镜像（M143/AC9/C6 逐字节校）；若取消双副本/镜像约定，本条退休（outline §6 快照触发已于 2026-08-29 退休——inventory 改 check 时现算）"
@@ -877,7 +897,7 @@ declare -A INVALIDATION=(
   [driver-config.ts]="失效前提：并发 cap / 轮询间隔 / 协调地板 仍需一份 git 版本化的声明式配置（plugin/scripts/drivers.yml）作为单一真相源、且两 driver + cap-from-gate 仍经本模块的 loadDriverConfig/driverCap 派生（⛔ 不各写一份字面量/env）；若配置并入 .quay/config.yml（不再是 plugin/scripts/drivers.yml 这一份）或并发裁决面整体退役（旧 loop slot-refill 退役后 cap-from-gate 亦退），本条随单一真相源迁址而失效"
   [driver-filters.ts]="失效前提：worker-driver 与 promotion-driver 仍各自在 spawn 前过滤候选、且五个派发前谓词仍须是同一份可组合列表（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-filters.ts 这一份）或谓词集合迁出/拆分，本条退休"
   [driver-result.ts]="失效前提：worker-driver 与 promotion-driver 仍各自 spawn 执行者后须经独立判据复核（worker 读 status=done ∧ 无残留 worktree、promotion 重跑闸），且三态词表仍须是同一份 DriverResult（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-result.ts 这一份）或词表迁出/拆分，本条退休"
-  [driver-runtime.ts]="失效前提：三种 driver 仍须共享同一份常驻运行时（循环/心跳/判停/supervisor/控制面/notify/profile/ResultVocab），且 supervisor 仍须是 TS 实现（⛔ 不再有 bash promotion-driver-launch.sh）；若 driver 启动面换用别的承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry）或分层被摊平回 N 个平级 plugin（1b 重实现循环/心跳/判停），本条退休"
+  [driver-runtime.ts]="失效前提：三种 driver 仍须共享同一份常驻运行时（循环/心跳/判停/supervisor/控制面/notify/profile/ResultVocab），且 supervisor 仍须是 TS 实现（⛔ 不再有 bash promotion-driver-launch.sh）；若 driver 启动面换用别的承载（如 systemd unit 直接管进程、绕过 driver-runtime 的 runSupervisor/registry）或分层被摊平回 N 个平级 plugin（1b 重实现循环/心跳/判停），⛔ 追加（GOAL-017/AC-255，SPEC §7 阶段 C 已落地）：**默认启动路径不再是 runSupervisor** —— 六个 kind 的常驻循环改经 driver-anchor.ts 收进**一个** anchor 进程（supervisor 退为 QUAY_DRIVER_LEGACY_SUPERVISOR=1 的可回退路径）⇒ 本条的「supervisor 仍须是 TS 实现」这一半对**默认路径**已不成立；本条仍在，是因为 driver-runtime.ts 依旧是六个 kind 共享的 Layer 0（循环/心跳/判停/控制面/notify/profile/ResultVocab）与注册表正本"
   [driver-shared.ts]="失效前提：worker-driver 与 promotion-driver 仍各自常驻同机、且资源门/控制面判定仍须是同一份实现（两驱动 import 本模块）；若 AC151 分层抽象把共性上收为独立包/入口（不再是 plugin/scripts/driver-shared.ts 这一份）或两驱动不再共享资源门，本条退休"
   [profile-policy.ts]="失效前提：仍有 L2 policy 需求（主备回退/加载校验/继承去重三态）；若归属 blocker（packages/quay vs plugin/scripts）裁为产品主张而把 profile 选择规则迁入 packages/quay（不再是 plugin/scripts/profile-policy.ts 这一份）或 policy 并入 L1 profile 层，本条退休"
   [execution-policy.ts]="无可测前提，靠周期复核"
@@ -1080,6 +1100,7 @@ declare -A INVALIDATION=(
   [verify-deliver-coldstart.sh]="失效前提：交付验证仍是「装 tgz → quay-init → 冷启动」三步形态且冷启动活性判据是直接量；若交付形态改成单一 SEA 产物不再分步、或活性判据改回仅端口探活/自报心跳，本条退休"
   [verify-installed-executables.sh]="无可测前提，靠周期复核"
   [vmeta-lag-check.sh]="无可测前提，靠周期复核"
+  [verification-marginal-return.ts]="失效前提：五个载体的字段口径不变 —— ①.quay/checker-cost.jsonl 的 name/ms/n/at/verdict 五键，与「gate:<闸>:<item> 折回闸名」的命名约定；②.quay/gate-events.jsonl 的 gate/verdict/timestamp/payload.reason；③.quay/promotion-outcome.jsonl 的 task_id/gate.missing/action；④.quay/verification-round.jsonl 的 failures[].line 里 STATIC_CHECK_FAILED: <name> exit=<rc> 的形状；⑤静态检查器注册表仍是 plugin/scripts/runner-static-gate.ts（+scripts/test.sh）里的 run_checker \"<name>\" 行。任一键改名、换语义或换载体，本条需同步"
   [vmeta-lag-check.ts]="无可测前提，靠周期复核"
   [wiring-coverage-check.ts]="无可测前提，靠周期复核"
   [workflow-baseline-metrics.ts]="无可测前提，靠周期复核"
@@ -1109,12 +1130,16 @@ declare -A INVALIDATION=(
   [deletion-closure-check.ts]="失效前提：本仓库仍以字符串字面量路径/basename、跨语言 shell-out（bash/exec/source/spawn）、Touches 段声明为实现构件耦合的发生面（import 图不可见）；若迁移到单一 import 图可见的打包产物，闭包边归零或语义变更，需同步"
   [peer-identity-probe.ts]="失效前提：平台仍以 ~/.claude/sessions/<pid>.json 注册表 + 记录内 procStart 与【文件名 pid】的 /proc starttime 一致性判可达；若平台改为原生 API 投递、或改掉该判定（本任务实测 2.1.270 的判定与静态推断不同：记录里 pid 字段不参与、.key 文件完全不被读），本条退休"
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
+  [server-restart-inflight-verify.ts]="失效前提：① driver:worker 仍是**每 kind 一个进程**（SPEC §7 阶段 C 的 anchor 形态下 .quay/worker-driver.pid 是 anchor 的 pid、一次重启是 anchor 内的事件循环 respawn ⇒ 判据的 driver_pid_before != driver_pid_after 结构上不可满足；生产者对此显式给出 verdict=HOSTED-BY-ANCHOR 并拒绝动手，⛔ 不静默）；② 在飞集合的推导仍是「driver 进程树的直接子进程 ∩ cmdline 命中本 workspace 的 task-worker 角色名」（角色改名/驱动改为非直接子进程 spawn ⇒ 集合会静默变小，而变小使「一个都没死」更容易恒真）；③ .quay/worker-round.jsonl 的末行仍带 run_id + ts（driver 恢复运转的直接量），且 round 仍是 JSON 字符串（写入前转 int）"
   [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
   [mcp-blacklist-resolve.ts]="失效前提：黑名单仍由 .quay/profiles.yml 的【角色】层 mcpBlacklist 声明、launchArgv 仍是驱动 spawn 的唯一 argv 构造点、且用户级/插件级 MCP server 仍声明在这三类配置文件里；若 MCP 连接控制改由 Claude Code 原生设置表达（如能覆盖用户级 mcpServers 的 disabledMcpjsonServers）、或 role→profile 解析不再经 profile-policy.ts resolveRole，本条失去消费面，退休"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [driver-anchor.ts]="2026-09-13"
+  [fan-in-queueing-model.ts]="2026-09-14"
+  [freshness-producer-coverage-check.ts]="2026-09-14"
   [worktree-namespace-literal-check.ts]="2026-09-13"
   [gitignore-runtime-coverage-check.ts]="2026-09-13"
   [psi-failure-correlation-check.ts]="2026-09-05"
@@ -1171,6 +1196,7 @@ declare -A LAST_REAFFIRMED=(
   [suite-slot-lib.sh]="2026-08-18"
   [suite-slot-ssot-check.ts]="2026-08-18"
   [concurrent-batch-scheduler.ts]="2026-08-10"
+  [core-src-import.ts]="2026-09-14"
   [config-key-consumer-check.ts]="2026-09-10"
   [provider-binding-resolvability-check.ts]="2026-09-11"
   [config-wiring-check.ts]="2026-08-10"
@@ -1178,6 +1204,7 @@ declare -A LAST_REAFFIRMED=(
   [cross-machine-verify.sh]="2026-08-10"
   [dead-code-after-return-check.ts]="2026-08-10"
   [dead-loop-check.sh]="2026-08-10"
+  [defect-latency-pair.ts]="2026-09-15"
   [defect-shape-aggregate.ts]="2026-09-04"
   [derive-touches-heuristic.ts]="2026-08-10"
   [delivery-inventory-drift-gate.sh]="2026-08-29"
@@ -1411,6 +1438,7 @@ declare -A LAST_REAFFIRMED=(
   [verify-deliver-coldstart.sh]="2026-08-16"
   [verify-installed-executables.sh]="2026-08-10"
   [vmeta-lag-check.sh]="2026-08-10"
+  [verification-marginal-return.ts]="2026-09-14"
   [vmeta-lag-check.ts]="2026-08-10"
   [wiring-coverage-check.ts]="2026-08-10"
   [workflow-baseline-metrics.ts]="2026-08-10"
@@ -1441,11 +1469,15 @@ declare -A LAST_REAFFIRMED=(
   [peer-identity-probe.ts]="2026-09-13"
   [channel-probe-server.ts]="2026-09-13"
   [server-partial-stop-verify.ts]="2026-09-13"
+  [server-restart-inflight-verify.ts]="2026-09-13"
   [mcp-blacklist-resolve.ts]="2026-09-14"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [driver-anchor.ts]="n/a"
+  [fan-in-queueing-model.ts]="n/a"
+  [freshness-producer-coverage-check.ts]="enumerative"
   [worktree-namespace-literal-check.ts]="keyword"
   [gitignore-runtime-coverage-check.ts]="position"
   [psi-failure-correlation-check.ts]="n/a"
@@ -1502,6 +1534,7 @@ declare -A MATCHING=(
   [suite-slot-lib.sh]="n/a"
   [suite-slot-ssot-check.ts]="position"
   [concurrent-batch-scheduler.ts]="keyword"
+  [core-src-import.ts]="n/a"
   [config-key-consumer-check.ts]="enumerative"
   [provider-binding-resolvability-check.ts]="position"
   [config-wiring-check.ts]="keyword"
@@ -1509,6 +1542,7 @@ declare -A MATCHING=(
   [cross-machine-verify.sh]="keyword"
   [dead-code-after-return-check.ts]="position"
   [dead-loop-check.sh]="keyword"
+  [defect-latency-pair.ts]="keyword"
   [defect-shape-aggregate.ts]="enumerative"
   [derive-touches-heuristic.ts]="keyword"
   [delivery-inventory-drift-gate.sh]="position"
@@ -1742,6 +1776,7 @@ declare -A MATCHING=(
   [verify-deliver-coldstart.sh]="position"
   [verify-installed-executables.sh]="keyword"
   [vmeta-lag-check.sh]="keyword"
+  [verification-marginal-return.ts]="position"
   [vmeta-lag-check.ts]="keyword"
   [wiring-coverage-check.ts]="keyword"
   [workflow-baseline-metrics.ts]="n/a"
@@ -1771,6 +1806,7 @@ declare -A MATCHING=(
   [peer-identity-probe.ts]="n/a"
   [channel-probe-server.ts]="n/a"
   [server-partial-stop-verify.ts]="n/a"
+  [server-restart-inflight-verify.ts]="n/a"
   [mcp-blacklist-resolve.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
@@ -1783,7 +1819,10 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [driver-anchor.ts]="谁按：driver-runtime.ts（startKind/stopKind/restartKind 经本文件的 spawnAnchor + .quay/anchor-desired.json 期望态拉起/停掉 kind）+ 六个 kind driver（registerKindStop 登记进程内停机信号）；条件=需要把六个 kind 的常驻循环收进一个进程（SPEC §7 阶段 C）且保留 per-kind 停机与在飞子进程不被杀的语义"
+  [fan-in-queueing-model.ts]="谁按：任何要动本工作区并发旋钮的人/层，在改 .quay/config.yml 的 concurrency / concurrency_bands 之前与之后各跑一次做前后对照（node --experimental-strip-types plugin/scripts/fan-in-queueing-model.ts --root <主检出>），也由本任务实现者跑出 docs/analysis/fan-in-queueing-model.md 的全部读数；条件=要判定 fan-in 锁当前处在排队论 knee 的哪一侧（ρ 与实测 wait-vs-ρ 曲线），或要把一次 fan-in 的端到端拆成排队 / suite / 其余三段"
   [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
+  [freshness-producer-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/freshness-producers.json plugin/scripts/freshness-producer-coverage-check.ts plugin/test/freshness-producer-coverage-check.test.mjs；另由 plugin/test/freshness-producer-coverage-check.test.mjs 双控：生产载体真读数 + 四条 RED fixture 双向 + NOT-EVALUATED 三态；mutation case 见 plugin/scripts/checker-mutation-cases/freshness-producer-coverage-check.sh）+ plugin/probes/freshness-refresh.md 的探针在 .quay/config.yml 的 loop.routines 里那条 interval:120m 例程中读同一份映射（单源）；条件=要判「AC-214 的七个载体型主体是否每一个都登记了产出者、且登记的那些是否真有载体记录」（tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger AC7）"
   [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
   [gitignore-runtime-coverage-check.ts]="谁按：run_static_checks（scripts/test.sh 静态检查链，change tier，@static-object 命中 .gitignore / plugin/scripts/quay-runtime-artifacts.txt / 本检查自身时）；条件=要判 quay 自己 .gitignore 里标为运行时产物的条目集与 quay-init 写出的 manifest 是否仍然一致（漂移即红，manifest 读不到 NOT-EVALUATED）"
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
@@ -1803,6 +1842,7 @@ declare -A CONSUMER=(
   [dispatch-worktree-setup.sh]="谁按：派发器在创建任务 worktree 后按；条件=worktree 要可自验证（node_modules 就绪）"
   [doc-check-cache.ts]="谁按：worker-driver.ts 的 fan-in doc-check 步（step 6）在跑 scripts/test.sh --static-checks-doc 前按；条件=doc 面未变时复用上次绿 verdict、面变失效重跑"
   [deliver-verify-usage.sh]="谁按：develop-deliver-tgz.sh 在每台验证机装完 tgz 后按（AC92 usage-verify 段）；条件=交付验证面要与实际使用面相交"
+  [defect-latency-pair.ts]="谁按：本任务实现者跑出 docs/analysis/defect-discovery-latency-distribution.md 的全部读数一次（node --experimental-strip-types plugin/scripts/defect-latency-pair.ts --ref <冻结的 develop tip> --emit-json，⛔ 必须钉 --ref 否则跑的三分钟里 develop 前进会让分母漂），以及任何要重算该分布的人；抽样复核用 --sample 10 --seed <种子>；条件=要回答「一个缺陷从被引入到被立案的延迟分布是什么」或要在「静默失败延迟更长」这条既有叙述上取一个读数（本口径的读数与它相悖，见文档 §4）；⛔ 本机件只报数、不改任何载体、不立案"
   [defect-shape-aggregate.ts]="谁按：manager 在每日复盘节奏（orchestration/REVIEW-cadence.md §3e，与 §3d 趋势判据并列，每次复盘跑一次）按；条件=要判最近 N 条已落地 gap-* 缺陷是否共享同一根（跨任务架构债聚合——「N 次失败同根」的信号单任务记录里看不出，只有跨任务聚类才可见；输出候选报告供人判断是否收敛为架构候选，⛔ 不写任务库不自动立案）"
   [drivable-workspace-check.sh]="谁按：loop 启动前人工/脚本按；条件=workspace 要交给自动 loop 驱动"
   [driver-config.ts]="谁按：worker-driver.ts（resolveConcurrency/parseIntervalMs/parseReconcileIntervalSecs 经 driverCap/loadDriverConfig 读 cap/interval/reconcile）+ promotion-driver.ts（resolveCap/parseIntervalMs）+ cap-from-gate.ts（computeEffectiveCap 经 driverCap 现读）+ outer-driver.ts（main 经 loadDriverConfig 读 interval）+ quality-gate-driver.ts（main 经 loadDriverConfig 读 interval，AC144 补接线）；条件=并发 cap / 轮询间隔 / 协调地板要一份 git 版本化声明式配置的单一真相源（⛔ 不各写一份字面量/env）"
@@ -1890,6 +1930,7 @@ declare -A CONSUMER=(
   [tmux-test-isolation-check.ts]="谁按：测试作者/复核者按；条件=要查测试是否 spawn 真 tmux 而无隔离机制"
   [touches-one-entry-one-path-check.ts]="谁按：任务 subagent / 复核者在落地后核验 Touches 形态时按；条件=任务 Touches 要验一条目一路径（未来接线 run_static_checks 后随 task-contract-check 每轮自动按）"
   [vmeta-lag-check.sh]="谁按：V_meta 复核者按；条件=要量 V_meta 合并滞后"
+  [verification-marginal-return.ts]="谁按：任何要判「某道检查器/闸值不值它的成本」的人/层，在提「砍掉某个检查器」之前先跑一次（node --experimental-strip-types plugin/scripts/verification-marginal-return.ts --root <主检出>，要机器可读加 --json）；条件=要把某道闸/checker 的累计成本与它实际拦下的缺陷数对起来，或要给 ADR-005「验证是绑定约束」取一个数"
   [vmeta-lag-check.ts]="谁按：同上（canonical 算术面）；条件=要量 V_meta 滞后"
   [verify-deliver-coldstart.sh]="谁按：AC88 跨主机验证驱动者按（develop-deliver-tgz.sh --verify-coldstart 或 AC88 驱动方在跨主机交付验证时）；条件=要可重复地验证 ①装 tgz →②项目内 quay-init →③冷启动（outer 窗口 + inner 层）三步并产出 AC5 证据（build commit sha + 产物 sha256，达成=新于 2026-08-16 阶段切换）"
   [task-contract-check.ts]="消费方：manager/outer 每轮读 .quay/task-file-violation-ledger.jsonl（grow-only 账本），新违规进账本绝不静默；--no-block 故不阻产品验证轮（task-file 语法≠产品可用性）"
@@ -1909,6 +1950,7 @@ declare -A CONSUMER=(
   [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
   [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
   [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
+  [server-restart-inflight-verify.ts]="谁按：GOAL-017/AC-256 的判据消费它写的载体（.quay/unified-server-verification.jsonl 里 ac=GOAL-017-AC-256 那条）；条件=要在统一 server 形态上真重启一次 driver:worker，并把「在飞 worker 子进程一个都没死」写成合格记录（在飞集合由进程树独立推导、逐个核活且非 Z 态、重启后对原集合逐个再核活；⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
   [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
   [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
   [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"

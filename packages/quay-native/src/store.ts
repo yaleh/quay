@@ -24,6 +24,14 @@ import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 // the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
 // the sole path into develop from a task worktree).
 import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+// AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify): the judgment that a NEW
+// `delivery-critical` task must declare a top-level `goal_ac`. It lives in the product layer next to
+// store-commit.ts because the PREVIOUS home — the git `pre-commit` hook (precommit-guard.ts ③) — is
+// structurally unreachable for this store: `commitStoreWrite` commits with `--no-verify` by design
+// (store-commit.ts:13-15), and 370/400 of the last 400 `tasks/` commits are store-commit-shaped. The
+// writer's own path is here, so the rule is enforced here (硬规则 4 推论三: a judgment only the hand
+// path can reach proves nothing about the writer path).
+import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
 // sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
@@ -256,6 +264,42 @@ export class ConflictError extends Error {
     this.id = id;
     this.expectedStatus = expectedStatus;
     this.actualStatus = actualStatus;
+  }
+}
+
+/**
+ * gap-quay-native-task-create-duplicate-id-prepends-frontmatter: thrown by
+ * `write()` when the caller opted into CREATE semantics (`{ create: true }`)
+ * and the target file ALREADY EXISTS.
+ *
+ * Why a dedicated class and not a generic Error: the create path's whole job is
+ * to refuse, and a caller must be able to branch on "this id is taken" without
+ * parsing a message string — the same reasoning ConflictError documents above.
+ *
+ * Why the store and not the CLI: `task create` has two front doors (the native
+ * CLI's `task create` and Core's `quay task create`, which reaches this store
+ * through the Provider ABI's `task_write`). The existence check belongs at the
+ * single write chokepoint so the guard is race-free (it runs inside the same
+ * `withLocks()` acquisition as the read-modify-write) rather than a TOCTOU
+ * pre-check each front door would have to re-implement.
+ *
+ * The defect it closes: before this guard, `create` on an existing id fell
+ * through to `write()`'s ordinary read-modify-write and silently MERGED the
+ * caller's patch into the existing task — exit code 0, no stderr — so a settled
+ * `done` task was re-statused to the caller's `todo` and (when the caller also
+ * passed a body) the original document survived only as duplicated text below a
+ * second `---` block. Failure and success were the same shape (exit 0, a
+ * well-formed file), which is why it went unnoticed.
+ */
+export class AlreadyExistsError extends Error {
+  id: string;
+  constructor(id: string) {
+    super(
+      `task "${id}" already exists — refusing to create it (nothing written to disk; ` +
+        `use \`task edit\` / task_write to modify an existing task)`
+    );
+    this.name = "AlreadyExistsError";
+    this.id = id;
   }
 }
 
@@ -1555,10 +1599,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean; create?: boolean }): (Task & { updatedAt?: number }) | null {
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
+    // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: opt-in CREATE semantics.
+    // `write()` is shared by create and edit; only the create path asserts "this id must be free"
+    // (see AlreadyExistsError). Default false keeps every existing `task edit` / task_write call
+    // byte-for-byte unchanged — an edit of an id that does not exist still creates it, exactly as
+    // before (that is `edit`'s documented upsert behavior, not a defect).
+    const create = opts?.create === true;
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1581,6 +1631,17 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
     const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
+      // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: the create guard.
+      // Placed HERE — inside the lock, before any mutation — for two reasons:
+      //   * race-free: a pre-check done by a caller (outside the lock) is TOCTOU — two concurrent
+      //     `task create <same-id>` calls would both observe "absent", both proceed, and the second
+      //     would silently clobber the first. Inside the lock the loser sees the winner's file.
+      //   * zero write: throwing before `fs.writeFileSync` below means the existing file's bytes are
+      //     untouched, which is what makes AC1's byte-identical assertion meaningful (a guard that
+      //     wrote first and rolled back would pass a status check but not a byte check).
+      if (create && existingRaw !== null) {
+        throw new AlreadyExistsError(id);
+      }
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
       let beforeFrontmatter: Record<string, unknown> | null = null;
@@ -1647,8 +1708,32 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       invalidateCache(id);
       try {
         validateWrittenYaml(taskFilePath, id, frontmatter);
+        // ── AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify) ──────────────
+        // `delivery-critical` asserts a LONG-TERM guarantee that only the goal layer can back, so a
+        // task carrying it cannot be BORN without a top-level `goal_ac`. The judgment is the SAME one
+        // the per-round detector and the pre-commit hook run (one function, three moments —
+        // packages/quay/src/goal-ac-write-face.ts); ⛔ no second string comparison here.
+        //   SCOPE = CREATION ONLY (`existingRaw === null`), which IS the grandfather semantics at the
+        //   write face: flipping the status of a pre-existing delivery-critical task without goal_ac
+        //   must never be blocked (this repo alone has 115 such stock tasks).
+        //   ENABLE CONDITION = the workspace actually HAS a goal layer (≥1 GOAL-/AC- record); a
+        //   third-party workspace has no goal layer at all, so `goal_ac` would have nothing to point
+        //   at and the rule's premise does not hold ⇒ it must never be blocked (硬规则 12's mirror: do
+        //   not impose an unmeasured restriction). ⛔ `goals/` merely EXISTING is not the condition —
+        //   quay-init mkdir's it unconditionally, so existence alone is true everywhere.
+        if (existingRaw === null) {
+          const rejection = writeFaceRejectionOnCreate({
+            id,
+            rel: path.join("tasks", `${id}.md`), // the store's own rel convention (see commitTaskWrite)
+            content: raw,
+            goalDir: path.join(path.dirname(tasksDir), GOAL_CARRIER_DIR_NAME),
+          });
+          if (rejection !== null) throw new Error(rejection);
+        }
       } catch (validationErr) {
-        // Rollback: restore prior content if it existed, or remove the new file.
+        // Rollback: restore prior content if it existed, or remove the new file. The AC-190 write-face
+        // rejection above rides the SAME seam — it is only ever raised on a creation (`existingRaw ===
+        // null`), so its rollback is exactly the "new file" arm: the task never lands on disk.
         if (existingRaw !== null) {
           fs.writeFileSync(taskFilePath, existingRaw, "utf8");
         } else {

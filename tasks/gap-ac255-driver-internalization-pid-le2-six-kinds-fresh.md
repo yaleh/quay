@@ -2,7 +2,7 @@
 id: gap-ac255-driver-internalization-pid-le2-six-kinds-fresh
 title: GOAL-017/AC-255：driver 内收 —— `.quay/*-driver*.pid` ≤2 且六个 kind 的 round
   心跳全新鲜（SPEC 阶段 C1+C2 / §6.10）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -79,6 +79,19 @@ exit=1
 - [ ] AC8: **生产载体真跑过（硬规则 4 推论三）**：主检出的常驻形态本身就是收敛形态，其上 AC2 的 criterion 逐字 exit 0，且读数时刻晚于本任务实现落地时刻；⛔ 不以测试夹具里起过的收敛形态充当。 —— ⛔ **2026-09-14T03:0xZ 复验：本 AC 此刻【不成立】**：主检出常驻形态**不是**收敛形态（12 个 legacy supervisor+driver）；且 `git show develop:plugin/scripts/driver-anchor.ts` ⇒ 不存在 ⇒ 2026-09-13 那次收敛由 **worktree 手工起动**产生、**非已落地机制产出**（⊢ 关掉「手工起动」这一 seam ⇒ criterion exit 1）。**重取须在「落地 + 主检出同步 + 逐 kind 迁移」之后**（待外部）
 
 ## Evidence（GOAL-017/AC-255 · 2026-09-13 22:2x–23:0xZ 实测读数）
+
+**♻️ 2026-09-14T17:2xZ worker 续轮（fan-in 前）：上一轮的 suite-red 成因 = 分支落后 465 提交（⛔ 非本任务缺陷），已由 merge develop 消除**
+
+- **上一轮退出形态**：`exited-not-landed`，`step=suite`，真因日志 `# fail 3`（6153 tests / 6150 pass）——`plugin/test/build-evidence-manifest.test.mjs`、`plugin/test/worker-driver-fan-in.test.mjs`、`plugin/test/worker-driver-retry-classification.test.mjs`（更早一次 `build-evidence-manifest` 以 `spawnSync /bin/sh ETIMEDOUT`（`git diff --numstat 9316b797..46041f83`）失败）。
+- **落后读数（本轮实测，非印象）**：`git rev-list --count HEAD..develop` = **465**（分支自身 15 提交）。
+- **处置**：merge develop（三次：→ `19ddeecb7` → `b12aeff0d` → `9926b16e`），⛔ 未重做任何已有提交。唯一冲突 `plugin/scripts/capability-catalog.sh` —— 6 个关联数组各一处 hunk，两侧键**不同**（本分支 `[driver-anchor.ts]` vs develop `[fan-in-queueing-model.ts]`）⇒ 按**并集**解析（两行都留，⛔ 不二选一）。校验：`bash -n` 通过；`bash plugin/scripts/capability-catalog.sh` ⇒ `summary: 326 scripts | 326 declared | 0 unclassified`；两个键各 **6** 次命中。
+- **合并后三个失败文件全部转绿（逐字读数）**：scoped 门 `--for-task … --allow-thin` **523 pass / 0 fail, exit 0**（在两个不同基线上各跑一次）；两个**不在 scoped 选中集内**的失败文件单独跑 `scripts/test.sh --scoped plugin/test/build-evidence-manifest.test.mjs plugin/test/worker-driver-fan-in.test.mjs` ⇒ **121 pass / 0 fail, exit 0**；`plugin/test/driver-anchor.test.mjs` 在 scoped 选中集内 **7/7 pass**。⇒ 三个文件均已转绿，**无一构成真实缺陷**。
+- **⛔ 诚实边界**：`build-evidence-manifest` 那次 `spawnSync … ETIMEDOUT` 的成因**不能**由本轮单独判定为「落后」——它同时具备负载相关形态（全量 suite 以 `concurrency=24` 跑，该文件耗时 76s）。本轮只登记「在合并后的基线上它连续两次转绿」，⛔ 不声称已定位其唯一成因。
+- **scoped-gate 缓存**：按**实际跑绿的那个 tip** 写入（`--develop-sha $(git rev-parse HEAD^2)` = `9926b16ed`，⛔ 不是「写缓存那刻的 develop」——本轮实测 develop 在 90s 的 gate 窗口内前进过 1 提交，用移动引用会记下一个**未被 gate 过的** sha）。
+- **生产形态本轮复测（与上一轮读数一致）**：`git show develop:plugin/scripts/driver-anchor.ts` ⇒ 不存在；主检出无该文件；`.quay/anchor.json` **不存在**；匹配 criterion 两个 glob 的 pid 文件 = **12**（goal/meta/outer/promotion/quality/worker 各 {driver, supervisor}）。⇒ **AC1/AC2/AC8 的前置仍未满足**，三条**保持未勾**并保留行末 `（待外部）`。
+- **本轮【未】做**：⛔ 未跑会停生产 driver 的动词（`quay driver stop|restart`）——生产 12 个 driver 正在跑本仓库自己的循环，且 driver 生命周期是 manager/人 的常设授权面（CLAUDE.md「driver 进程管理」节），⛔ 不是 per-task worker 的授权面；⛔ 未改 AC-255 的判据；⛔ 未改任何 driver 判定语义。本轮交付 = **把分支推进到可 fan-in 的状态**（落后 465 提交已并入、冲突已解、scoped 门绿、缓存已写）；AC1/AC2/AC8 仍由 `fan-in-ac-completion-gate.ts` 的 `pass-external` 分支放行。
+
+
 
 **🔴 2026-09-14T03:0xZ 复验：生产形态已回退 ⇒ AC1/AC2/AC8 改回未勾（⛔ 不沿用上一轮的「已收敛」结论）**
 

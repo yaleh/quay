@@ -50,6 +50,26 @@ const VERSION_ENTRIES: VersionEntry[] = [
     extract: (raw) => JSON.parse(raw).version,
   },
   {
+    // Prose carrier, not a machine field: its version lives inside the sentence
+    // `quay plugin v<semver> — …`. The extractor is ANCHORED to that sentence and THROWS when it
+    // cannot find it — a reworded README must redden the gate (mode:'error'), never silently
+    // return '' and read as "consistent" (hard rule 3b: an input it cannot parse must not
+    // produce a value shaped like "pass"). Added by
+    // gap-ac169-readme-version-not-in-version-consistency-set: README had drifted to v0.6.1 while
+    // plugin.json was 0.6.3 across two bumps, precisely because it was NOT in this set.
+    label: 'plugin/README.md',
+    path: 'plugin/README.md',
+    extract: (raw: string) => {
+      const m = raw.match(/^quay plugin v(\d+\.\d+\.\d+)\b/m);
+      if (!m) {
+        throw new Error(
+          'no "quay plugin v<semver>" version line found in plugin/README.md (cannot evaluate — not a pass)',
+        );
+      }
+      return m[1];
+    },
+  },
+  {
     label: 'plugin/.claude-plugin/marketplace.json (quay entry)',
     path: 'plugin/.claude-plugin/marketplace.json',
     extract: (raw) => {
@@ -75,6 +95,28 @@ const VERSION_ENTRIES: VersionEntry[] = [
     label: 'plugin/vendor/quay/package.json',
     path: 'plugin/vendor/quay/package.json',
     extract: (raw) => JSON.parse(raw).version,
+  },
+  {
+    // Plain-text version stamp (`plugin/VERSION` holds a bare semver and nothing else) — deliberately
+    // NOT JSON.parse'd. Added by gap-ac259-version-union-lockstep-and-host-install-readings: this file
+    // was the ONE member of the version-bearing union that no single judge covered. AC-259's criterion
+    // enumerated it while this list did not (and vice versa for plugin/vendor/quay/package.json), so a
+    // `plugin/VERSION`-only drift reddened AC-259 while this checker stayed green. Precedent on the real
+    // release path: `6bf000622` claimed to bump "all 8 version-bearing files" and left plugin/VERSION at
+    // 0.5.0 — requiring a second commit `bd466ce2a` to repair, with this checker green in between.
+    // The extractor THROWS when the file does not hold a semver token: an unreadable stamp must land in
+    // mode:'error', never be shaped like a stamp that agrees (hard rule 3b).
+    label: 'plugin/VERSION',
+    path: 'plugin/VERSION',
+    extract: (raw: string) => {
+      const v = raw.trim();
+      if (!/^\d+\.\d+\.\d+/.test(v)) {
+        throw new Error(
+          'no bare semver in plugin/VERSION (cannot evaluate — not a pass)',
+        );
+      }
+      return v;
+    },
   },
 ];
 

@@ -3311,6 +3311,7 @@ export async function main(argv: string[]): Promise<number> {
     runId: resolvedRunId,
     json,
     pidFile,
+    kind: "goal",
     controlStateRel: GOAL_CONTROL_STATE_REL,
     routines: goalDriverRoutines(rootDir, roundOpts),
   });

@@ -195,7 +195,9 @@ import {
   defaultSelectorArgv,
   parseSelectorOutput,
   runSelectorWorker,
+  kindStopRequested,
   makeStopCondition,
+  registerKindStop,
   resolveKernelSibling,
   resolveKernelScriptsDir,
   resolveKernelPluginRoot,
@@ -262,9 +264,47 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
 export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
 
-/** 终态枚举：completed（退出码 0 且落地）/ exited-not-landed（退出码 0 但没落地）/ failed（非零退出）/
- *  killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/ not-dispatched（halt 未派）。 */
+/** 终态枚举：**completed（退出码 0 且落地——成功态就是它）** / exited-not-landed（退出码 0 但没落地）/
+ *  failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/
+ *  not-dispatched（halt 未派）。
+ *
+ *  🔴 词表陷阱（gap-worker-outcome-final-state-landed-is-a-dead-value）：同一条 outcome 记录里的
+ *  `mechanical_fan_in.outcome` 用的是**另一个**词表（`"landed" | "red"`）。两者描述同一个事件
+ *  （机械 fan-in 是否落地）却**不同名** ⇒ `landed` 极易被写进 `final_state`。实测生产载体
+ *  `.quay/worker-outcome.jsonl` 里有 **1** 条这样的记录（2026-08-28，一次手工 fan-in 的手写落盘，
+ *  非本文件任何代码路径所写）。**后果**：任何按 `final_state == "landed"` 统计吞吐的消费者读到 **0**，
+ *  与「系统完全停摆」同形、且不可区分（硬规则 3b/4b）——本任务的定量复核作者本人就在这里栽过一跤
+ *  （见 `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md` §6）。
+ *  ⇒ `landed` ⛔ 不是本词表的取值；**成功态是 `completed`**。
+ *  **enforce**：`assertFinalState` 在唯一落盘闸 `appendOutcomeToFile` 上拒收词表外的取值
+ *  （硬规则 9：给规则造产物，不靠提醒；硬规则 3b：写不对 ⇒ 不得与「合格」同形）。 */
 export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
+
+/** `v` 是否为 `final_state` 词表内取值（`FINAL_STATES.includes` 的类型谓词版——供落盘闸与读者共用，
+ *  ⛔ 不各写一份词表副本）。 */
+export function isFinalState(v: unknown): v is (typeof FINAL_STATES)[number] {
+  return typeof v === "string" && (FINAL_STATES as readonly string[]).includes(v);
+}
+
+/** 落盘闸把关：`final_state ∉ FINAL_STATES` ⇒ **抛**（⛔ 不静默写入、⛔ 不归一化伪造成合法值——
+ *  归一化会把「写错了」变成「写对了」，正是硬规则 3b 禁止的「读不懂 ⇒ 与合格同形」）。
+ *
+ *  **它为什么不是恒真闸**：本文件四个 outcome 构造器（computeOutcome / computeAdoptedOutcome /
+ *  computeOrphanFinalizedOutcome / computeHaltedOutcome）都只产出词表内取值 ⇒ 生产路径上本断言
+ *  不可达，**恰恰因此它才是测量**（硬规则 4）——它拦的是「未来某个调用方 / 重构 / 手工脚本写进一个
+ *  词表外的取值」。没有它，2026-08-28 那条 `final_state:"landed"` 就是**静默**落盘的；
+ *  负控制见 `plugin/test/worker-driver.test.mjs`（传 `"landed"` 必须抛，传词表内取值必须不抛）。 */
+export function assertFinalState(value: unknown, ctx: string): void {
+  if (isFinalState(value)) return;
+  const trap =
+    value === "landed" || value === "red"
+      ? ` — ${JSON.stringify(value)} 是 mechanical_fan_in.outcome 的取值，⛔ 不是 final_state；成功态写 "completed"`
+      : "";
+  throw new Error(
+    `worker-driver: refusing to write an out-of-vocabulary final_state ${JSON.stringify(value)} (${ctx})${trap}. ` +
+      `Known final_state values: ${FINAL_STATES.join(" | ")}`,
+  );
+}
 
 /** 驱动对 exited-not-landed 的退出码（gap-worker-driver-fake-completion-exit-0：exit 0 ≠ 落地，
  *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
@@ -1112,8 +1152,14 @@ function landingFailedReason(status: string | null, worktreePresent: boolean | n
   return parts.join(" and ");
 }
 
-/** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。 */
+/** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。
+ *
+ *  **词表闸**（gap-worker-outcome-final-state-landed-is-a-dead-value）：本函数是 `worker-outcome.jsonl`
+ *  的**唯一**落盘点（4 个内部调用点 + appendOutcome 包装都经它）⇒ `assertFinalState` 放在这里，
+ *  就把「`landed` 这类词表外取值」从**写入面**上移除掉了，而不仅是在文档里声明它不合法。
+ *  闸在 mkdir/append **之前**：拒收时不留半条记录、不留新目录（负控制断言载体文件不存在）。 */
 export function appendOutcomeToFile(file: string, outcome: ReturnType<typeof computeOutcome>): string {
+  assertFinalState(outcome.final_state, `appendOutcomeToFile → ${path.basename(file)}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, JSON.stringify(outcome) + "\n", "utf8");
   return file;
@@ -4976,6 +5022,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  下一轮重读 stopCondition。⛔ AC151：判停经 Layer 0 的 makeStopCondition 消费（halt ∧ resourceGate
    *  单一实现），不各写一遍。 */
   const stopCondition = makeStopCondition(rootDir, "worker", resourceGateArgv);
+  // AC-255（SPEC §7 阶段 C）：停机登记。anchor 请求停本 kind 时，本循环**与 mcp-halt 走同一条路**：
+  // 不再起新 worker（下面的 dispatch-loop 条件），在飞全部跑完后 break（`running.length === 0` 那一支）
+  // ⇒ ⛔ 不杀在飞子进程（§6.9 不变式 3，与旧 `quay driver stop` 的语义逐字相同）。
+  registerKindStop("worker");
 
   /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
    *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
@@ -5212,7 +5262,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
       //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
       step = "dispatch-loop";
-      while (running.length < cap && !stopReason) {
+      while (running.length < cap && !stopReason && !kindStopRequested("worker")) {
         const sc = stopCondition();
         if (sc.stop) {
           if (sc.terminal) stopReason = sc.reason;
@@ -5267,7 +5317,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
       //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
       if (running.length === 0) {
-        if (stopReason) break;
+        if (stopReason || kindStopRequested("worker")) break;
         step = "sleep";
         await sleep(intervalMs);
         continue;

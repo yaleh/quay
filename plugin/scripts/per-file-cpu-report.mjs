@@ -1,5 +1,7 @@
-// per-file-cpu-report.mjs — route (a) 子进程自报 preload seam for per-file CPU (cost_f).
-// (gap-perfile-cpu-cost-collection, human 2026-09-04 定向: 默认测量路线必须是子进程自报)
+// per-file-cpu-report.mjs — route (a) 子进程自报 preload seam for per-file MACHINE COST (cost_f):
+// CPU (cpu_ms) + peak memory (mem_peak_kb).
+// (gap-perfile-cpu-cost-collection, human 2026-09-04 定向: 默认测量路线必须是子进程自报;
+//  gap-perfile-memory-cost-collection-missing — 内存镜像半边, added into the SAME exit hook.)
 //
 // Loaded into a measured suite's node processes via `NODE_OPTIONS=--require=<this-file>` (set by
 // full-suite-runner.ts's suiteEnv). node:test runs each test file in an isolated child process
@@ -8,9 +10,11 @@
 // by the absolute path of the file this process ran (argv[1]).
 //
 // The suite's measure-suite-reporter.mjs (running in the node --test runner / LPT runner process)
-// reads that file back at the file's `test:complete` event and appends `cpu_ms=<n>` to the
-// `__PERFILE__` line. The child's exit handler runs synchronously BEFORE the process dies, so the
-// write is on disk before the parent emits `test:complete` — no race, no sampling error.
+// reads those files back at the file's `test:complete` event and appends `cpu_ms=<n> mem_peak_kb=<n>`
+// to the `__PERFILE__` line. The child's exit handler runs synchronously BEFORE the process dies, so
+// the write is on disk before the parent emits `test:complete` — no race, no sampling error.
+// TWO files, one per dimension (`<key>.cpu` / `<key>.mem`), so the CPU contract (a bare Number) is
+// untouched by the memory addition — neither reader has to parse a composite payload.
 //
 // WHAT cpu_ms MEANS (cost_f = "跑这个文件消耗多少机器"): the sum of
 //   (1) THIS process's OWN `process.cpuUsage()` (user+system, µs — the isolated test-file child), and
@@ -22,6 +26,29 @@
 // cutime/cstime only accumulates children that have been wait()-REAPED by this process before its
 // exit; a released/detached orphan's CPU is not counted. HZ is read from the host (getconf CLK_TCK),
 // never hardcoded (CLAUDE.md 硬规则 4 推论二).
+//
+// WHAT mem_peak_kb MEANS — and its COVERAGE BOUNDARY (硬规则 3b: 不得把部分覆盖伪装成全覆盖):
+//   `process.resourceUsage().maxRSS` = the kernel's PEAK resident set of THIS process over its WHOLE
+//   lifetime (getrusage(RUSAGE_SELF).ru_maxrss, KB on Linux). It is deliberately NOT
+//   `process.memoryUsage().rss`, which is a snapshot AT THE MOMENT OF THE CALL — taken in an exit
+//   handler that is a snapshot of the process AFTER the test released its allocations, so it
+//   systematically UNDER-reports the peak (measured on a 128MB alloc+release fixture: maxRSS≈177MB
+//   vs exit-time rss≈46MB — a 3.8x under-report; both readings pinned by the AC1 fixture in
+//   plugin/test/measure-suite-reporter.test.mjs).
+//   ⛔ COVERED: this process only — i.e. the isolated test-file child node:test forked for this file.
+//      A test file's own in-process allocations (the dominant memory sink for a leak/OOM hunt) ARE
+//      covered.
+//   ⛔ NOT COVERED: any SUBPROCESS this file spawned. There is no RUSAGE_CHILDREN equivalent in
+//      Node's `process.resourceUsage()` (it is uv_getrusage → RUSAGE_SELF only), and /proc/<pid>/stat
+//      (the source of the child-CPU term above) carries no peak-RSS column, and a reaped child's
+//      rusage is not retrievable after wait(). So a spawn-heavy file that makes its CHILD allocate a
+//      lot reports only the parent's peak — the same class of blind spot the cpu term had to solve
+//      with cutime/cstime, except here no equivalent kernel column exists.
+//      To close it, each spawned child would have to be a node process that this seam can inject into
+//      (`NODE_OPTIONS=--require` inherits down the tree, so a spawned `node` child that is itself a
+//      test-file child DOES report — but a non-node child, or a node child the test spawns with a
+//      scrubbed env, is out of reach by construction). ⛔ Do NOT read this field as "the file's total
+//      memory cost" on a spawn-heavy file.
 //
 // WHY 子进程自报 rather than sampling /proc (route b): the measurement this task exists to produce
 // must RESOLVE Type 2 files (CPU≈0, wall-long, waiting-type). A 5s /proc sample of a 160s-wall /
@@ -63,6 +90,11 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
+// The per-file cost report directory. ONE dir holds both dimensions (`<key>.cpu` + `<key>.mem`) —
+// deliberately NOT a second env var, which would be a second thing to wire and the exact two-writer
+// drift this seam already paid for once (gap-suite-scheduler-perfile-cpu-emitter-missing). The name
+// keeps its historical `CPU` spelling so every existing wiring site (full-suite-runner.ts suiteEnv,
+// the scheduler test) stays byte-identical.
 const cpuDir = process.env.QUAY_PERFILE_CPU_DIR;
 // The isolated test-file child carries `--test-isolation=process` (NOT the bare `--test`, which is
 // the direct runner). Restricting to this marker keeps the seam off `node -e` probes and other
@@ -117,9 +149,26 @@ if (cpuDir && isIsolatedTestChild) {
       // own (µs → ms, ≤3 decimals) + children (ticks → ms). The raw sum already carries µs
       // granularity on the own term.
       const cpuMs = (own.user + own.system) / 1000 + childMs;
+      // gap-perfile-memory-cost-collection-missing — peak memory of THIS process, in KB, from the
+      // kernel's own high-water mark (see the WHAT mem_peak_kb MEANS block at the top for the
+      // coverage boundary: this process only, children NOT covered). Same hook, no new seam, no
+      // async work — resourceUsage() is a synchronous getrusage(RUSAGE_SELF) syscall, so reading it
+      // in the exit handler cannot miss the peak (the kernel holds the high-water mark, not us).
+      // A non-finite / non-positive reading ⇒ `undefined` ⇒ the file is NOT written, and the caller
+      // omits `mem_peak_kb=` (absent = "not measured", never a fabricated 0 — 硬规则 3b).
+      let memPeakKb;
+      try {
+        const maxRSS = process.resourceUsage().maxRSS;
+        if (Number.isFinite(maxRSS) && maxRSS > 0) memPeakKb = maxRSS;
+      } catch {
+        // resourceUsage unavailable on this host → field simply absent (never a fabricated 0)
+      }
       const key = crypto.createHash("sha256").update(abs).digest("hex").slice(0, 16);
       fs.mkdirSync(cpuDir, { recursive: true });
       fs.writeFileSync(path.join(cpuDir, `${key}.cpu`), String(cpuMs) + "\n", "utf8");
+      if (memPeakKb !== undefined) {
+        fs.writeFileSync(path.join(cpuDir, `${key}.mem`), String(memPeakKb) + "\n", "utf8");
+      }
     } catch {
       // best-effort — a report failure must never fail the test it is measuring
     }

@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 59 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 60 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -326,6 +326,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
   run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
+  echo "== freshness-producer coverage check (gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger, AC7) =="
+  # AC-214 要求七个「载体型主体」的证据距 develop tip ≤ K 交付面提交，而**刷新动作曾无触发器**：
+  # 4 次转红 / 5 天，每次一次性人工重跑关闭、每次关闭后重新越界。本检查判的是**刷新机制的完备性**
+  # （不是新鲜度）：载体里出现过的主体是否每一个都在单源映射 plugin/freshness-producers.json 里登记了
+  # 产出者、登记的那些是否真有载体记录，并与 criterion 自己写出的 .quay/goal-freshness-margin.json
+  # 的 subjects 双向对照（那一侧能看见「产出者从未跑过、载体里根本没记录」的主体 —— 09-13 的形态）。
+  # 载体是 gitignored 运行时态：**缺席 ⇒ exit 0 且 evaluated:false**（可区分的 NOT-EVALUATED，⛔ 不与
+  # 合格同形；硬规则 3b），故被动检出（无 .quay/ 载体）照样在代码面绿；映射缺失/损坏 ⇒ exit 2 fail-closed。
+  # @static-tier change
+  # @static-object plugin/freshness-producers.json plugin/scripts/freshness-producer-coverage-check.ts plugin/test/freshness-producer-coverage-check.test.mjs
+  run_checker "freshness-producer-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/freshness-producer-coverage-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
