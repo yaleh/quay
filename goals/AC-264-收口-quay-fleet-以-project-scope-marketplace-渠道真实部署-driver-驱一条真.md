@@ -2,7 +2,7 @@
 id: AC-264
 title: 收口：quay-fleet 以 project scope + marketplace 渠道真实部署，driver 驱一条真任务到 done，免
   npm 与免 QUAY_PLUGIN_ROOT 由文件系统直接量确认
-status: draft
+status: active
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -86,4 +86,15 @@ origin: "人 2026-09-15 指定本 GOAL 的目标包含「在 quay-fleet project 
   /home/yale/work/quay/plugin/vendor/… 开发检出 ⇒ 声明了 project scope 而实际消费的是 dev 树，不是
   marketplace 产物。AC-203 的教训（driver_alive=1 ∧ carrier_records>0 两个代理量在 goal-ring
   state=failed 时照样绿，goal-driver.ts:2179 注释自述该形态）决定了本 AC 必须交叉核文件系统直接量而不能只信记录字段。"
+activatedAt: 2026-09-15T04:05:08.100Z
+statusLog:
+  - at: 2026-09-15T04:05:08.100Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-019 已激活，本 AC 进入在评
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T04:05:08.099Z
 ---
