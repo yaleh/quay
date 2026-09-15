@@ -29,8 +29,36 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-/** This module's own directory — the anchor for the walk-up (never process.cwd()). */
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+// ⛔ This module's own directory is resolved LAZILY, never at module top level — an evaluation
+// TIMING fix, not a value fix (tasks/gap-sea-artifact-plugin-root-toplevel-eval, AC-267).
+//
+// WHY the timing matters: `packages/quay/scripts/build-sea.sh` bundles ESM → CJS (Node SEA has no
+// ESM main module), and esbuild compiles `import.meta` there into a plain `{}` ⇒ at module top
+// level `import.meta.url` is `undefined`, so `fileURLToPath(undefined)` throws the moment the
+// module is imported. In the SEA binary 0.5.0/0.6.2/0.6.3 that killed EVERY command pulling this
+// module in (goal-store → gate/config/loader chain; `quay serve` outright), while `quay --help`
+// stayed green precisely because it never loads that chain — the shipped binary's core verb was
+// unusable (AC-267 origin).
+//
+// ⛔ The judge (goals/AC-267-goal.md) is POSITION-based, not runtime-based: a
+// `typeof __dirname === "string" ? __dirname : path.dirname(fileURLToPath(import.meta.url))`
+// one-liner at indent 0 still counts as a module-top-level evaluation, even though the ternary
+// short-circuits to `__dirname` at runtime under CJS. That is the shape gate/registry.ts:15 uses
+// and it does NOT satisfy AC-267. The evaluation must live inside a function body — see moduleDir().
+declare const __dirname;
+
+/**
+ * This module's own directory — the anchor for the walk-up (never process.cwd()).
+ *
+ * Nothing here runs at import time (moduleDir() is called only from resolvePluginRoot()). The
+ * order covers both shipped forms: `__dirname` first (the SEA/CJS bundle, and any CJS load),
+ * then the ESM dev form's own URL (`node --experimental-strip-types`, where `__dirname` does not
+ * exist — `typeof` on an undeclared name is safe and yields "undefined", it does not throw).
+ */
+function moduleDir(): string {
+  if (typeof __dirname === "string") return __dirname;
+  return path.dirname(fileURLToPath(import.meta.url));
+}
 
 /** The kernel script that anchors "this dir is the plugin root" (the load-bearing non-skill
  *  consumer is cli/driver.ts). A candidate root must contain `scripts/` with the kernel in EITHER
@@ -89,13 +117,14 @@ export function mainCheckoutRoot(dir: string): string | null {
 export function resolvePluginRoot(): string | null {
   if (process.env.QUAY_PLUGIN_ROOT) return process.env.QUAY_PLUGIN_ROOT;
 
-  const main = mainCheckoutRoot(MODULE_DIR);
+  const dir = moduleDir();
+  const main = mainCheckoutRoot(dir);
   if (main) {
     const cand = path.join(main, "plugin");
     return kernelAnchorExists(cand) ? cand : null;
   }
 
-  return resolvePluginRootFrom(MODULE_DIR);
+  return resolvePluginRootFrom(dir);
 }
 
 /**

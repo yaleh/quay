@@ -21,6 +21,12 @@
 //   conclusion    只取 success|failure|cancelled（cancelled 按设计不进 decisive 记分）。
 //   testFiles     该 run 实际跑到的测试文件数，由日志的 `__GROUP__ … files=N` 派生（GitHub run 元数据里
 //                 没有这个字段）；派生不出就【不写这个键】—— 缺 ≠ 0（硬规则 6）。
+//   seaVerify     **只在 release workflow 的记录上**出现（`workflow ∈ {Release, release.yml}`）：
+//                 release.yml 的 SEA 验证 job（`sea-verify-node-free` +
+//                 matrix 形态的 `sea-verify-node-free-cross-platform (…)`）的结论派生 ——
+//                 `success` / `failure` / `incomplete`（只到一部分 job）/ `absent`（一个都不在 =
+//                 job 列表读不到 ⇒ **没评估成**）。⛔ 词表里没有「读不懂 ⇒ success」的路径
+//                 （硬规则 3b/4：恒为 success 的字段与「一切正常」同形）。AC-267 的载体臂读它。
 //
 // ── 载体的归宿：**gitignored 运行时载体**（⛔ 2026-09-15 改判，理由如下）─────────────────────
 // 本文件此前把载体写成**被 git 跟踪**的，并要求「采集与提交必须成对做」。**那与本文件的第 ② 条
@@ -98,6 +104,63 @@ export function deriveTestFilesFromLog(logText: string): number | null {
     if (Number.isFinite(n) && n > 0 && (max === null || n > max)) max = n;
   }
   return max;
+}
+
+// ── seaVerify：SEA 产物「真的能在无 Node 环境跑起来吗」的载体字段（AC-267 载体臂）──────────────
+// 为什么需要它：AC-267 的判据静态臂只证明**源码里**再没有模块顶层求值 `import.meta.url` 的点；
+// 「发出去的二进制真的能起 `quay serve`」这件事只能由**一次真实 release run** 证明。在此之前载体里
+// 根本没有承载这个读数的字段 ⇒ 判据停在 `CAUSE=carrier-absent`，而那是**结构性**的（同硬规则 4
+// 推论三：实现了、测试绿了、生产没跑过）。本字段把 release workflow 自己的 SEA 验证 job 结论
+// 派生进记录，让载体臂有东西可读。
+//
+// ⛔ 词表里**没有**「读不懂 ⇒ success」的路径（硬规则 3b）：job 列表读不到 / 这些 job 一个都不在
+// ⇒ `absent`（一个**独立取值**，明确「没评估成」），⛔ 绝不回落到常量 `success` —— 一个恒为
+// `success` 的字段与「一切正常」同形，它会让 AC-267 的载体臂变成恒真的回声（硬规则 4）。
+
+/** release workflow 的两种写法：gh 的 `run.name` 给的是 workflow 的 `name:`（本仓
+ *  `.github/workflows/release.yml` 的 `name:` 是 `Release`），判据两种都认。 */
+export const RELEASE_WORKFLOW_NAMES = ["Release", "release.yml"];
+
+/** release.yml 里真正跑 SEA 二进制的那两个 job 的**基名**。
+ *  ⚠️ 第二个是 matrix job，gh 把矩阵值缀在名字后
+ *  （实测 2026-09-15：`sea-verify-node-free-cross-platform (macos-latest, macos-arm64, tar.gz)`）
+ *  ⇒ 必须按**基名 + ` (`** 匹配，逐字相等会把它读成「缺失」。
+ *  第一个 `sea-verify-node-free` 不带矩阵后缀。 */
+export const SEA_VERIFY_JOB_BASES = ["sea-verify-node-free", "sea-verify-node-free-cross-platform"];
+
+/** `seaVerify` 的取值词表。四个取值各对应一个**不同的观测**，相互可区分。 */
+export const SEA_VERIFY_SUCCESS = "success";
+/** 这些 job 中至少有一个在，且结论不是 success（真红）。 */
+export const SEA_VERIFY_FAILURE = "failure";
+/** 一部分 job 在、一部分不在 ⇒ 结论**不完整**，无法据此判 success。 */
+export const SEA_VERIFY_INCOMPLETE = "incomplete";
+/** **一个都不在** —— job 列表读不到（API 失败 / 空），或这条 run 根本没有 SEA 验证 job。
+ *  ⛔ 这是「没评估成」，不是「通过了」。 */
+export const SEA_VERIFY_ABSENT = "absent";
+
+/** job 名是否属于某个基名（精确名，或 matrix 形态 `基名 (…, …)`）。 */
+function jobMatchesBase(job: { name?: string }, base: string): boolean {
+  const n = String(job.name ?? "");
+  return n === base || n.startsWith(`${base} (`);
+}
+
+/**
+ * 从一条 run 的 job 读数派生 `seaVerify`。
+ *
+ * 判定次序（先报**确证的观测**，再报「读不全」，最后才是 success —— ⛔ success 只能是兜底之外
+ * 唯一的正读数，绝不能是兜底）：
+ *   ① 两个基名一个都不在 ⇒ `absent`（job 列表读不到 / 无 SEA 验证 job）
+ *   ② 命中的 job 里有任何一条 conclusion !== "success" ⇒ `failure`
+ *   ③ 只到了一部分基名 ⇒ `incomplete`
+ *   ④ 两个基名都在且全为 success ⇒ `success`
+ */
+export function deriveSeaVerify(jobs: Array<{ name?: string; conclusion?: string | null }>): string {
+  const presentBases = SEA_VERIFY_JOB_BASES.filter((b) => jobs.some((j) => jobMatchesBase(j, b)));
+  if (presentBases.length === 0) return SEA_VERIFY_ABSENT;
+  const matched = jobs.filter((j) => SEA_VERIFY_JOB_BASES.some((b) => jobMatchesBase(j, b)));
+  if (matched.some((j) => String(j.conclusion ?? "") !== "success")) return SEA_VERIFY_FAILURE;
+  if (presentBases.length < SEA_VERIFY_JOB_BASES.length) return SEA_VERIFY_INCOMPLETE;
+  return SEA_VERIFY_SUCCESS;
 }
 
 /** 从 workflow YAML 里抽 per-job `timeout-minutes`（键为 job id）。抽不出 ⇒ {}。 */
@@ -181,6 +244,12 @@ export function buildRecord(run: GhRun, opts: BuildRecordOptions = {}): RunRecor
 
   const jobs = opts.jobs ?? [];
   if (jobs.length > 0) rec.jobs = toJobReadings(jobs, opts.timeouts ?? {});
+  // seaVerify：**只在 release workflow 的记录上**派生（AC-267 载体臂读的是
+  // `workflow ∈ {release.yml, Release}` 的记录）。派生自本条记录自己的 job 读数 —— 与 `rec.jobs`
+  // 同源，两者不会各说各话。⛔ jobs 为空（API 读失败 / 离线缝没喂）⇒ `absent`，⛔ 不是 `success`。
+  if (RELEASE_WORKFLOW_NAMES.includes(String(run.name ?? ""))) {
+    rec.seaVerify = deriveSeaVerify(rec.jobs ?? jobs);
+  }
   // `timedOut` 只记 **GitHub 自己说的**（run 或 job 结论为 timed_out）；从时长推断的那条走
   // 归因器的 infra:job-timeout-reached（两个不同来源，不合并成一个布尔）。
   // ⛔ 这一条**不在** `jobs.length > 0` 块里：run 级的 timed_out 与「job 列表取没取到」无关，

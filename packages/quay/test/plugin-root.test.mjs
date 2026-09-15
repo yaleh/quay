@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -294,5 +294,109 @@ test("resolvePluginRootFrom() anchors on the dist kernel in the marketplace layo
     );
   } finally {
     fs.rmSync(fakeRoot, { recursive: true, force: true });
+  }
+});
+
+// ── AC4 (tasks/gap-sea-artifact-plugin-root-toplevel-eval): the THREE resolution paths, explicitly ────
+// The task touches plugin-root.ts (lazy self-location, AC-267), so AC4 requires the three paths the
+// resolver promises to be covered by name — not merely "the file is green". Each test below names its
+// path, and each carries the counterfactual that would flip it (so a pass is evidence, not an echo).
+
+test("AC4 path ① QUAY_PLUGIN_ROOT — the env pointer WINS over every other path (explicit priority)", () => {
+  // The module really lives in the quay source checkout, where the walk-up WOULD resolve
+  // <repo>/plugin. If the resolver consulted the walk-up before (or instead of) the env, this
+  // assertion goes red — so it is a priority assertion, not a "it returned something" assertion.
+  const synthetic = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-env-"));
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  try {
+    process.env.QUAY_PLUGIN_ROOT = synthetic;
+    assert.equal(resolvePluginRoot(), synthetic, "env pointer must be returned verbatim");
+    // ⛔ deliberately does NOT require a kernel anchor there: the env seam is an explicit operator
+    // override (hermetic tests), and silently "fixing up" a bad value would hide a typo'd root.
+    assert.notEqual(resolvePluginRoot(), resolvePluginRootFrom(synthetic));
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(synthetic, { recursive: true, force: true });
+  }
+  assert.ok(resolvePluginRoot(), "with the env cleared the walk-up resolves again (control)");
+});
+
+test("AC4 path ② worktree → MAIN checkout: a module loaded FROM a linked worktree relocates (AC139-4)", async () => {
+  // The real thing: copy the resolver into a LINKED WORKTREE and import that copy, so moduleDir()
+  // genuinely reports the worktree — the resolution-order code path under test then has to relocate.
+  // ⛔ The worktree ALSO gets a kernel-bearing plugin/ copy, so a regression to "use the worktree's
+  // own copy" is caught rather than silently passing (that is the defect AC139-4 named).
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-reloc-"));
+  const main = path.join(base, "main");
+  const wt = path.join(base, "wt");
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  try {
+    delete process.env.QUAY_PLUGIN_ROOT;
+    fs.mkdirSync(main);
+    execFileSync("git", ["init", "-q", "-b", "main", main]);
+    execFileSync("git", ["-C", main, "config", "user.email", "t@example.com"]);
+    execFileSync("git", ["-C", main, "config", "user.name", "t"]);
+    fs.writeFileSync(path.join(main, "f.txt"), "x\n");
+    execFileSync("git", ["-C", main, "add", "f.txt"]);
+    execFileSync("git", ["-C", main, "commit", "-q", "-m", "init"]);
+    execFileSync("git", ["-C", main, "worktree", "add", "-q", "-b", "reloc-wt", wt]);
+
+    // A kernel-bearing plugin/ in BOTH checkouts — this is what makes the assertion discriminating.
+    for (const root of [main, wt]) {
+      fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+      fs.writeFileSync(path.join(root, "plugin", "scripts", "driver-runtime.ts"), "// kernel\n");
+    }
+    // Copy the resolver under test into the worktree and import THAT copy (its dir = the worktree).
+    const modDir = path.join(wt, "packages", "quay", "src");
+    fs.mkdirSync(modDir, { recursive: true });
+    fs.copyFileSync(
+      fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
+      path.join(modDir, "plugin-root.ts")
+    );
+    const wtModule = await import(pathToFileURL(path.join(modDir, "plugin-root.ts")).href + `?t=${Date.now()}`);
+
+    assert.equal(
+      wtModule.mainCheckoutRoot(modDir),
+      path.resolve(main),
+      "the copy really is inside a linked worktree (precondition of this test)"
+    );
+    assert.equal(
+      wtModule.resolvePluginRoot(),
+      path.resolve(main, "plugin"),
+      "loaded from a linked worktree ⇒ the MAIN checkout's plugin/, never the worktree's own copy"
+    );
+    assert.notEqual(
+      wtModule.resolvePluginRoot(),
+      path.resolve(wt, "plugin"),
+      "the worktree copy exists and carries a kernel — so returning it is the AC139-4 defect"
+    );
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("AC4 path ③ walk-up — resolvePluginRootFrom(startDir) climbs to an ANCESTOR's plugin/ (seam form)", () => {
+  // The seam is called with a start dir, not read from the module — so this pins the parameterised
+  // form the installed-artifact layouts rely on (AC139-4), including a start dir several levels deep.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-walkup-"));
+  try {
+    const pluginRoot = path.join(base, "plugin");
+    fs.mkdirSync(path.join(pluginRoot, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, "scripts", "driver-runtime.ts"), "// kernel\n");
+    const deep = path.join(base, "packages", "quay", "src", "gate"); // 4 levels below the anchor
+    fs.mkdirSync(deep, { recursive: true });
+    assert.equal(resolvePluginRootFrom(deep), path.resolve(pluginRoot), "must climb to the ancestor's plugin/");
+    assert.ok(resolvePluginRootFrom(deep).endsWith(path.join("plugin")));
+    // Negative control: from a sibling tree with NO anchor anywhere above it, the walk-up must
+    // return null rather than guessing — and to keep that honest, the temp base must really lack one.
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-bare-"));
+    try {
+      assert.equal(resolvePluginRootFrom(bare), null, "no anchor up the tree ⇒ null (caller fails closed)");
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });

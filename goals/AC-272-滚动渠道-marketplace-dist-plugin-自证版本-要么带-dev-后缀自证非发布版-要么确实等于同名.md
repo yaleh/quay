@@ -1,7 +1,7 @@
 ---
 id: AC-272
 title: 滚动渠道（marketplace/dist-plugin）自证版本：要么带 -dev 后缀自证非发布版，要么确实等于同名 tag 的构建
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -57,5 +57,11 @@ origin: SPEC §2.5 + §4.3（人 2026-09-15 裁定 2：版本 bump 落 develop �
   后缀就是让这个问题从字面量即可回答。立案当轮实跑：exit
   1，CAUSE=claims-a-version-that-was-never-released。
 activatedAt: 2026-09-15T14:01:43.417Z
+statusLog:
+  - at: 2026-09-15T15:09:42.589Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
