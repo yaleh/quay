@@ -447,6 +447,8 @@ declare -A QUESTION=(
   [gate-event-coverage-check.ts]="Is every LANDING reflected by a 'complete' pass GateEvent in .quay/gate-events.jsonl — per day, landings = tasks whose final status transition to done on develop that day (⛔ not the '翻 X done' commit count: one landing yields 1..N flip commits when ff fails and the flip is reset), and does any non-exempt day fall below the threshold (tasks/gap-complete-gateevent-coverage-has-a-residual-gap)?"
   [mcp-blacklist-resolve.ts]="Which MCP servers will a blacklisted role ACTUALLY connect to — enumerate the three real config sources (the user-level server table, the project-level MCP declarations, and enabledPlugins pointing at the plugin's own MCP declaration with the literal CLAUDE_PLUGIN_ROOT placeholder expanded to the DETECTED version dir), drop the role's mcpBlacklist, and emit the --strict-mcp-config --mcp-config payload — so a pure code-writing worker stops dragging up the chrome-devtools-mcp / playwright-mcp process trees (2026-09-14 reading: 48 + 12 servers plus 12 watchdogs approx 3.24GB RSS, the largest single concentration of memory pressure), NEVER by shelling out to the mcp list subcommand which health-checks (i.e. spawns) the very servers this exists to avoid, and where an input that cannot be decoded yields null so the caller adds NO flag rather than shipping a partial config that would silently DROP servers (硬规则 3b) (tasks/gap-worker-mcp-blacklist-strict-config)?"
   [crystallization-half-life.ts]="规则从落笔到有【可执行】强制落地要多久 —— 对真实 adr 目录与真实 git 历史逐条测出 {落笔日期, enforcement 字段值, 强制首次落地提交 SHA 与日期, 间隔天数, 状态}，报出间隔的中位/p90/最大值以及『至今无产物』的完整清单（不是抽样），并逐条判 CLAUDE.md 硬规则自标『靠自觉』与其点名产物是否真的落地。状态取五值，其中『无法判定』与 N/A 各自独立、不与『无产物』或『已强制』合并（硬规则 3b），GateEvent 载体读不到时报未评估而不是零事件（tasks/gap-crystallization-half-life-rule-to-enforcement）?"
+  [ci-red-attribute.ts]="一条 CI 红是哪一类 —— 真缺陷 / 被测对象之外的基础设施问题（超时 / 被取消 / 测试步从未开始）/ 已知负载 flake？入参是载体 .quay/ci-runs.jsonl 的一条失败记录（可带 job 级读数），出参 {attribution, signals}；判定只取客观字段（timedOut / job 时长 vs 该 job 的 timeout-minutes / job 结论 / 步级结论 / testFiles / failedTests），⛔ 不读日志正文做关键词匹配；兜底方向取『当作真缺陷』（误记 infra/flake 会豁免一条红，代价不对称），且兜底必须写显式标记 default:no-signal-matched 以便与命中信号判出的 real-defect 可分辨（硬规则 3b）；登记表 plugin/scripts/known-flakes.json 为空或读不到就判不出 known-flake；infra 信号**不是一票通过**——同一 run 里若另有 job 的红是实质性的（测试步执行过，或失败在非 setup 步），则那个红才是成因，兄弟 job 的取消/超时不得豁免它（被压制的信号原样留在 signals 里，读记录的人分得出「没命中」与「命中但没定案」）（tasks/gap-ci-red-attribution-classifier，GOAL-020/AC-269）?"
+  [ci-runs-collect.ts]="哪些 CI run 跑过、结论是什么、跑到了多少个测试文件、每一个红又是哪一类 —— 把 GitHub Actions 的 run 落成载体 .quay/ci-runs.jsonl（ts = run 自己的时刻、branch/workflow/conclusion/runId/testFiles/timedOut/durationSec/job 级读数），并在**写面**上对 conclusion=failure 的记录接一处机械归因（非 failure 记录不写 attribution，否则『有归因』这件事失去信息量）；testFiles 由 job 日志的 __GROUP__ … files=N 派生（run 元数据里没有这个字段），派生不出就不写该键（缺 ≠ 0）；离线缝 --from-file 走的是同一条写路径（tasks/gap-ci-red-attribution-classifier，AC-265 载体生产者）?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -804,6 +806,8 @@ declare -A CADENCE=(
   [gate-event-coverage-check.ts]="每轮"
   [mcp-blacklist-resolve.ts]="按需"
   [crystallization-half-life.ts]="按需"
+  [ci-red-attribute.ts]="按需"
+  [ci-runs-collect.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1146,6 +1150,8 @@ declare -A INVALIDATION=(
   [gate-event-coverage-check.ts]="失效前提：'complete' GateEvent 仍是「完成数」的权威载体，且落地仍以 develop 上 tasks/*.md 的 status 翻 done 为判据。若完成数改由另一个载体承载（如 goal-store / 结构化遥测），或落地判据迁出 status 行，本条口径需同步，否则会把「新载体里的读数」误判为漏写"
   [mcp-blacklist-resolve.ts]="失效前提：黑名单仍由 .quay/profiles.yml 的【角色】层 mcpBlacklist 声明、launchArgv 仍是驱动 spawn 的唯一 argv 构造点、且用户级/插件级 MCP server 仍声明在这三类配置文件里；若 MCP 连接控制改由 Claude Code 原生设置表达（如能覆盖用户级 mcpServers 的 disabledMcpjsonServers）、或 role→profile 解析不再经 profile-policy.ts resolveRole，本条失去消费面，退休"
   [crystallization-half-life.ts]="失效前提：① adr 目录仍是 ADR 的正本、且每条 ADR 的落笔日期仍写在 frontmatter 的 date 键或正文的日期行（日期改由别的登记表承载 ⇒ 三条取源全部落空，间隔一栏整列转『无法判定』）；② enforcement 声明仍以 frontmatter 的 enforcement 键或正文的 enforcement 注释为形态（改由集中表声明 ⇒ 本脚本的抽取面失效）；③ 首次落地仍能从 git 的逐文件 add 历史取得（仓库改以整仓快照发布、丢掉逐文件 add 历史 ⇒ 间隔失去来源）"
+  [ci-red-attribute.ts]="失效前提：载体 .quay/ci-runs.jsonl 的记录仍以 conclusion ∈ {success,failure,cancelled} + job 级 {conclusion,durationSec,timeoutMinutes,steps[]} + testFiles + failedTests 的形态承载失败读数，且『基础设施问题』仍可由『超时 / 被取消 / 测试步从未开始』三者之一客观识别；若 GitHub 改掉 job/step 的 conclusion 词表、或 run 元数据里直接给出测试文件总数与失败测试标识（那时 testFiles/failedTests 的派生面消失，应直接读那个字段）、或 known-flakes 登记表改由别处声明（本模块的注入点失效），本条需同步"
+  [ci-runs-collect.ts]="失效前提：CI 仍以 GitHub Actions 的 run 承载、gh CLI 仍是读取面（gh api .../actions/runs 与 .../runs/<id>/jobs 的字段名不变：created_at/head_branch/name/conclusion/started_at/completed_at/steps[].conclusion），且 .quay/ci-runs.jsonl 仍是 AC-265/268/269 判据读的那个载体路径；若 CI 迁离 Actions、或 gh 被换掉、或载体改由 CI 自己上报（不再需要本地采集），本条退休"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1488,6 +1494,8 @@ declare -A LAST_REAFFIRMED=(
   [gate-event-coverage-check.ts]="2026-09-14"
   [mcp-blacklist-resolve.ts]="2026-09-14"
   [crystallization-half-life.ts]="2026-09-14"
+  [ci-red-attribute.ts]="2026-09-15"
+  [ci-runs-collect.ts]="2026-09-15"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1829,6 +1837,8 @@ declare -A MATCHING=(
   [gate-event-coverage-check.ts]="position"
   [mcp-blacklist-resolve.ts]="n/a"
   [crystallization-half-life.ts]="n/a"
+  [ci-red-attribute.ts]="position"
+  [ci-runs-collect.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1979,6 +1989,8 @@ declare -A CONSUMER=(
   [gate-event-coverage-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts，@static-tier change，--root main_root --days 1 --gate；载体是主检出 gitignored 运行态，一次性 verify worktree 里不存在 ⇒ 指 repo_root 会恒定 exit 3 与恒绿同形）；mutation case 见 plugin/scripts/checker-mutation-cases/gate-event-coverage-check.sh（baseline 绿 → 抹掉载体事件 ⇒ 必须红 → 写回绿 → 再加一条晚于 bootstrap cutoff 的无事件落地 ⇒ 仍必须红）；另由 plugin/test/gate-event-coverage-check.test.mjs 双控（真 git 仓 fixture：分母=落地而非提交条数 / 状态转移扫而非提交信息扫 / bootstrap 豁免窄性 / 三态 exit 3）；条件=要判「完成数载体是否被系统性少算」（tasks/gap-complete-gateevent-coverage-has-a-residual-gap AC4）"
   [mcp-blacklist-resolve.ts]="谁按：plugin/scripts/driver-runtime.ts 的 launchArgv（AC140 唯一 argv 构造点）在该 role 的 mcpBlacklist 非空时按——机器按，每次派发一次；条件=派发 task-worker/fix-worker/selector 需要一个既保留 quay/archguard/meta-cc 又排除 chrome-devtools/playwright 的 MCP 配置面（实测 3.24GB RSS 集中在浏览器 MCP 上）。⛔ outer/manager/pool-judge 不按（mcpBlacklist 为空 ⇒ argv 逐字不变，不被共享 profile 连坐）"
   [crystallization-half-life.ts]="谁按：任务实现者在量『规则落笔→可执行强制落地』的分布时按（node --experimental-strip-types plugin/scripts/crystallization-half-life.ts --root <主检出> 可加 --json），它同时是 docs/analysis/crystallization-half-life.md 全部读数的产出者；条件=要判某条 ADR / 某条 CLAUDE.md 硬规则至今有没有可执行产物，或要判 ADR-004 的『硬形变优于散文』是否有分布支撑（而不是只有轶事）"
+  [ci-red-attribute.ts]="谁按：CI 红的定性者 —— node --experimental-strip-types plugin/scripts/ci-red-attribute.ts --record-file <一条 JSON 记录> 拿 {attribution, signals}，或 --carrier <载体> 只读复核每条 failure 记录是否都带合法 attribution（缺归因 exit 3），或 --list-flakes 看登记表；条件=要判一条红是真缺陷 / 基础设施 / 已知 flake，或要判归因器本身是不是恒值（单变量对照）"
+  [ci-runs-collect.ts]="谁按：CI 载体的产出者 —— node --experimental-strip-types plugin/scripts/ci-runs-collect.ts --limit <n>（可加 --workflow ci.yml --branch develop --fetch-logs），把 run 结论连同 attribution 追加进 .quay/ci-runs.jsonl；条件=要让 AC-265/268/269 的判据有一个 ts 晚于落地时刻的窗口可读，或要补一段历史 run。⚠️ 载体在本仓被 git 跟踪，故采集与提交必须成对做：只采集不提交会留下一条 M .quay/ci-runs.jsonl，而 ff 的 benign-runtime-dirty 通道只放行未跟踪的 .quay/*，跟踪+已改会挡住之后每一次 fan-in 的 ff"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

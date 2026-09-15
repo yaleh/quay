@@ -1,0 +1,85 @@
+# AC-269 判据自跑留档
+# 生成时刻: 2026-09-15T13:20:40Z
+# 目录: /home/yale/work/quay-worktrees/gap-ci-red-attribution-classifier
+# 判据取自 goals/AC-269-goal.md 的 criterion: 块（⛔ 不是手抄 —— 该块是折叠块标量 |-，
+#   朴素按行 join 会错）。抽取命令逐字如下（在任务 worktree 的根上跑）：
+#     node --experimental-strip-types -e '
+#       import { parseGoalFile } from "./plugin/scripts/criterion-failure-attribution-check.ts";
+#       import fs from "node:fs";
+#       const g = parseGoalFile(fs.readFileSync("goals/AC-269-goal.md","utf8"));
+#       fs.writeFileSync("/tmp/ac269-criterion.criterion.txt", g.criterion);'
+#   （parseGoalFile 是折叠块标量抽取的正本；同款先例见 plugin/scripts/criterion-failure-attribution-check.ts）
+# 落地时刻 (git log -1 --format=%cI -- plugin/scripts/ci-red-attribute.ts):
+#   2026-09-15T12:54:29+00:00
+
+════════════ 判据正文（逐字） ════════════
+python3 - <<'P'
+import json, os, subprocess, sys
+ATTR = "plugin/scripts/ci-red-attribute.ts"
+CAR = ".quay/ci-runs.jsonl"
+VOCAB = ("real-defect", "infrastructure", "known-flake")
+land = subprocess.run(["git","log","-1","--format=%cI","--",ATTR],capture_output=True,text=True).stdout.strip()
+if not land:
+    sys.stderr.write("CAUSE=attributor-not-landed — no commit touches %s => nothing mechanically classifies a red CI run, which is precisely the cost this AC exists to remove (2026-09-15: defining one batch of reds took a human read of a 15684-line log)\n" % ATTR); sys.exit(1)
+if not os.path.exists(CAR):
+    sys.stderr.write("CAUSE=carrier-absent — %s does not exist => the attributor landed at %s but no run record has ever been written\n" % (CAR, land)); sys.exit(1)
+post = []
+for ln in open(CAR, encoding="utf-8"):
+    ln = ln.strip()
+    if not ln: continue
+    try: r = json.loads(ln)
+    except Exception: continue
+    ts = str(r.get("ts") or "")
+    if ts and ts > land: post.append(r)
+if not post:
+    sys.stderr.write("CAUSE=collection-stalled — carrier holds no record with ts > the attributor landing %s => either no CI has run since, or the collector stopped writing; both leave this AC unverifiable on production data\n" % land); sys.exit(1)
+reds = [r for r in post if r.get("conclusion") == "failure"]
+if not reds:
+    # Legitimate vacuous-but-honest state: collection is demonstrably alive (post is non-empty) and
+    # nothing went red, so the attributor has had nothing to classify. NOT a silent pass on absent data.
+    sys.exit(0)
+missing = [r for r in reds if r.get("attribution") not in VOCAB]
+if missing:
+    sys.stderr.write("CAUSE=red-unattributed — %d of %d post-landing red runs carry no attribution from %r (first 3: %r) => a red still has to be classified by hand\n" % (len(missing), len(reds), list(VOCAB), [(r.get("runId"), r.get("attribution")) for r in missing[:3]])); sys.exit(1)
+sys.exit(0)
+P
+════════════ 跑法 1：把判据正文当【shell 命令】跑（原始 exit code） ════════════
+$ bash criterion.txt     # criterion 块以 'python3 - <<'P'' 开头 ⇒ 它是一条 shell 命令，不是纯 python
+#   ⛔ 反面教训：先写成 'python3 - < criterion.txt' 会得到 SyntaxError/exit 1 —— 那不是判据的红，
+#      是【跑法错】。acceptance-runner 也是把它当 shell 命令 spawn 的。
+exit=0
+
+--- stdout（全文）---
+--- stderr（全文）---
+
+════════════ 跑法 2：canonical 入口 quay goal gate AC-269 ════════════
+$ node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-269 --root /home/yale/work/quay-worktrees/gap-ci-red-attribution-classifier
+{
+  "id": "AC-269",
+  "verdict": "pass",
+  "reason": "acceptance passed (exit 0)",
+  "timestamp": "2026-09-15T13:20:42.577Z",
+  "dryRun": false,
+  "event": {
+    "id": "c3a82b2e-3c92-4b98-8de8-96e2f78ac770",
+    "item_id": "AC-269",
+    "pipeline_id": "AC-269",
+    "gate": "goal",
+    "actor": "goal-cli",
+    "verdict": "pass",
+    "timestamp": "2026-09-15T13:20:42.577Z",
+    "payload": {
+      "reason": "acceptance passed (exit 0)"
+    }
+  }
+}
+
+════════════ 跑法 3：POST 窗口读数（AC4；⛔ 只报 exit 0 区分不了「没有红」与「采集没跑」）════════════
+landing (-- plugin/scripts/ci-red-attribute.ts) = 2026-09-15T12:54:29+00:00
+carrier records total = 40
+post-window records (ts > landing) = 1
+post earliest ts = 2026-09-15T12:55:17Z
+post latest   ts = 2026-09-15T12:55:17Z
+post runIds/branch/workflow/conclusion/attribution:
+  2026-09-15T12:55:17Z  develop  CI  failure  attribution=real-defect
+post failures = 1 ; all attributed = True
