@@ -1,13 +1,19 @@
 ---
 id: GOAL-018
 title: 两台真机重验：project scope + user scope 各扛一半，quay-init 重跑，版本 bump 到 0.7.0
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-14 裁定（对话中三问三答）：①host×scope 分工 = ad-arm1/archguard 测 project
   scope、orangevps/meta-cc 测 user scope（不是每台各测两种）；②版本直接定 0.7.0（minor，不再按 develop
   领先量重新核算）；③不是"讨论完就停"也不是"现在直接执行"，而是"为这次验证创建一个 GOAL"——预期验证过程中会发现不少新问题，那些问题各自另立
   gap 任务承接，不在本 GOAL 内解决。
 activatedAt: 2026-09-14T04:01:54.269Z
+statusLog:
+  - at: 2026-09-15T02:19:55.522Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景（2026-09-14 实测，动手创建本 GOAL 前直接 ssh 两台机器读到的现状，非推断）
 
