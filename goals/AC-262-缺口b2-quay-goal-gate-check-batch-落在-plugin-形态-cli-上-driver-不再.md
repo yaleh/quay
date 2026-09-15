@@ -2,7 +2,7 @@
 id: AC-262
 title: 缺口B2：quay goal gate/check/batch 落在 plugin 形态 CLI 上，driver 不再引用 Core
   源码树，且生产载体里 goal-ring 非 failed
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: |-
@@ -79,6 +79,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-019 已激活，本 AC 进入在评
+  - at: 2026-09-15T12:58:13.778Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
