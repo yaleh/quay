@@ -1,0 +1,1 @@
+../../../plugin/scripts/release-master-advance-needs-check.ts
