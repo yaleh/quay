@@ -171,13 +171,13 @@ export function buildRecord(run: GhRun, opts: BuildRecordOptions = {}): RunRecor
   if (dur !== undefined) rec.durationSec = dur;
 
   const jobs = opts.jobs ?? [];
-  if (jobs.length > 0) {
-    rec.jobs = toJobReadings(jobs, opts.timeouts ?? {});
-    // `timedOut` 只记 **GitHub 自己说的**（run/job 结论为 timed_out）；从时长推断的那条走
-    // 归因器的 infra:job-timeout-reached（两个不同来源，不合并成一个布尔）。
-    if (String(run.conclusion ?? "") === "timed_out" || jobs.some((j) => String(j.conclusion ?? "") === "timed_out")) {
-      rec.timedOut = true;
-    }
+  if (jobs.length > 0) rec.jobs = toJobReadings(jobs, opts.timeouts ?? {});
+  // `timedOut` 只记 **GitHub 自己说的**（run 或 job 结论为 timed_out）；从时长推断的那条走
+  // 归因器的 infra:job-timeout-reached（两个不同来源，不合并成一个布尔）。
+  // ⛔ 这一条**不在** `jobs.length > 0` 块里：run 级的 timed_out 与「job 列表取没取到」无关，
+  // 放进那个块会让「jobs API 读失败」静默地连带丢掉 run 级超时这个直接观测。
+  if (String(run.conclusion ?? "") === "timed_out" || jobs.some((j) => String(j.conclusion ?? "") === "timed_out")) {
+    rec.timedOut = true;
   }
   if (typeof opts.testFiles === "number" && opts.testFiles > 0) rec.testFiles = opts.testFiles;
   if (Array.isArray(opts.failedTests) && opts.failedTests.length > 0) rec.failedTests = opts.failedTests;
