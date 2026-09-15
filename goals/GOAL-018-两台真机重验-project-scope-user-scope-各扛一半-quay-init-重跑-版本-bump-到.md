@@ -49,6 +49,14 @@ project scope 与 user scope 两种安装/启用方式**，重新执行 `quay-in
   **删键**（不是 disable——disable 只置 false 不删键，判据会误判"已注册"，见既往实证），换成指向本次
   0.7.0 交付物持久安装位置的注册。
 
+## 退出条件
+
+**散文版**：两台真实主机上各自独立地、通过 Claude Code 插件系统（不是直接起 driver 二进制）完成一次
+0.7.0 交付物的安装/重跑，且各自都留下一条真实的 `todo→ready→done` 任务与非记账代码提交；同时"版本已
+bump 到 0.7.0"这件事必须能在两台机器各自的实际安装读数上核实，而不只是仓库内的一次文本替换。机器判据在
+AC-257..AC-259，本节只是它们共同要收敛到的那句话——**ad-arm1 扛 project scope 的合并语义、orangevps
+扛 user scope 的删键重注册语义，两条路径都真的走通，且版本读数两边都对得上**。
+
 ## 范围（AC-257..AC-259）
 
 - **AC-257**：ad-arm1/archguard，project scope，0.7.0，quay-init 重跑（非空 settings.json 合并语义），
