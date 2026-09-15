@@ -2,7 +2,7 @@
 id: gap-ci-red-attribution-classifier
 title: CI 红有机械归因：落地 plugin/scripts/ci-red-attribute.ts 并把 attribution 写进
   .quay/ci-runs.jsonl 的每条失败记录（AC-269）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
