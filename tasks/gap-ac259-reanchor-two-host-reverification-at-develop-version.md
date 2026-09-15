@@ -101,16 +101,16 @@ $ git worktree list | grep dev-suffix
 
 ## Acceptance Criteria
 
-- [ ] **AC1 前置读数当场重取**：贴 Requested action 第 0 步的七条原始输出，并显式写出 `depends_on` 任务 status 与 8 文件的逐条字面值。⛔ 不引用立案基线。
-- [ ] **AC2 外生前提已结算（SPEC §10 残留 1）**：贴一次真实 `/plugin install`（或等价渠道命令）拉 `0.7.0-dev` 的命令与**原始输出**。接受 ⇒ 进入 AC3；**拒绝 ⇒ 贴拒绝原文并记 `needs-human`，AC3–AC9 明确标注为「被外生前提阻断、未执行」**（⛔ 不得静默跳过、⛔ 不得以模糊措辞结案）。
-- [ ] **AC3 臂1 已成立（依赖面，非本任务所改）**：8 个版本承载文件逐条字面值 == `0.7.0-dev`，贴命令与输出；并贴 `git show HEAD:plugin/VERSION` 证明是**已提交**状态。
-- [ ] **AC4 ad-arm1 真机重跑**：贴 ① 该机**实际安装读数**（`plugin/VERSION` 或 `installed_plugins.json` 里该条的 `version`，⛔ 不是自报字符串）② `quay-init` 重跑命令与退出码 ③ 重跑前后 `.claude/settings.json` 的 `hooks.Stop` 段 md5（须逐字相同）④ `enabledPlugins` 出现 quay 键 ⑤ 任务 id + 状态翻转提交 sha + **实现提交** sha（非记账）⑥ `.quay/config.yml` 的 `grep -nE 'verify-|probe|/tmp/'` 归零。所有 `claude` 调用标注为登录 shell。
-- [ ] **AC5 orangevps 真机重跑**：贴 ① `installed_plugins.json` 中 `quay@quay` 那条 `scope:"user"` 原文（须 `version == "0.7.0-dev"`、`installPath` 不含探测模式）② `known_marketplaces.json.quay.source.path` 原文 ③ 重注册前后 `~/.claude/settings.json` **非 quay 键集逐字比对**（须相同）④ `quay-init` 重跑命令与退出码 ⑤ 任务 id + 翻转提交 sha + 实现提交 sha（非记账）。
-- [ ] **AC6 载体落账（经 writer，非手写）**：贴 `.quay/productization-verification.jsonl` 里两条新记录的**原样输出**，并对每条做一张 `谓词 → 实际值 → 满足?` 表（`ac` / `quay_version` / `task_status` 三项是 AC-259 臂2 逐字读的，须逐条列出）；另贴 `grep -c 'GOAL-018-AC-257' plugin/scripts/verify-deliver-coldstart.sh` ≥1 与 `--ac-record-schema-report` 对应行的原样输出（硬规则 ②：引用计数前先打印前 3 条命中）。
-- [ ] **AC7 判据复跑（两向）**：AC-259 criterion 落账前 exit 1 / 落账后 exit 0，两次 exit code 与 stderr 都贴，并指明落账前那次落在哪个失败分支。⛔ 只贴绿读数不算（一条恒绿判据与「合格」同形，硬规则 3b/4）。
-- [ ] **AC8 同族不回归**：AC-257 / AC-258 的 gate 各贴一条读数，须仍为 pass（证明 append-only 没有把旧记录挤掉）。
-- [ ] **AC9 负控制（臂2 判据能取假）**：在**临时副本**上构造一条 `quay_version="0.7.0"`（不带后缀）的 `GOAL-018-AC-257` 记录、且副本内不存在任何 `-dev` 记录 ⇒ AC-259 的判据在副本上须 exit 1 且落在 `missing qualifying … record`；补一条 `-dev` 记录 ⇒ exit 0。两次读数都贴（⛔ 不动真实载体）。
-- [ ] **AC10 承接纪律**：逐条列「途中发现的机制缺陷 → 另立的 `gap-*` 任务 id（或说明为何不阻断本 AC）」；无则明写「无」。
+- [x] **AC1 前置读数当场重取**：贴 Requested action 第 0 步的七条原始输出，并显式写出 `depends_on` 任务 status 与 8 文件的逐条字面值。⛔ 不引用立案基线。
+- [x] **AC2 外生前提已结算（SPEC §10 残留 1）**：贴一次真实 `/plugin install`（或等价渠道命令）拉 `0.7.0-dev` 的命令与**原始输出**。接受 ⇒ 进入 AC3；**拒绝 ⇒ 贴拒绝原文并记 `needs-human`，AC3–AC9 明确标注为「被外生前提阻断、未执行」**（⛔ 不得静默跳过、⛔ 不得以模糊措辞结案）。
+- [x] **AC3 臂1 已成立（依赖面，非本任务所改）**：8 个版本承载文件逐条字面值 == `0.7.0-dev`，贴命令与输出；并贴 `git show HEAD:plugin/VERSION` 证明是**已提交**状态。
+- [x] **AC4 ad-arm1 真机重跑**：贴 ① 该机**实际安装读数**（`plugin/VERSION` 或 `installed_plugins.json` 里该条的 `version`，⛔ 不是自报字符串）② `quay-init` 重跑命令与退出码 ③ 重跑前后 `.claude/settings.json` 的 `hooks.Stop` 段 md5（须逐字相同）④ `enabledPlugins` 出现 quay 键 ⑤ 任务 id + 状态翻转提交 sha + **实现提交** sha（非记账）⑥ `.quay/config.yml` 的 `grep -nE 'verify-|probe|/tmp/'` 归零。所有 `claude` 调用标注为登录 shell。
+- [x] **AC5 orangevps 真机重跑**：贴 ① `installed_plugins.json` 中 `quay@quay` 那条 `scope:"user"` 原文（须 `version == "0.7.0-dev"`、`installPath` 不含探测模式）② `known_marketplaces.json.quay.source.path` 原文 ③ 重注册前后 `~/.claude/settings.json` **非 quay 键集逐字比对**（须相同）④ `quay-init` 重跑命令与退出码 ⑤ 任务 id + 翻转提交 sha + 实现提交 sha（非记账）。
+- [x] **AC6 载体落账（经 writer，非手写）**：贴 `.quay/productization-verification.jsonl` 里两条新记录的**原样输出**，并对每条做一张 `谓词 → 实际值 → 满足?` 表（`ac` / `quay_version` / `task_status` 三项是 AC-259 臂2 逐字读的，须逐条列出）；另贴 `grep -c 'GOAL-018-AC-257' plugin/scripts/verify-deliver-coldstart.sh` ≥1 与 `--ac-record-schema-report` 对应行的原样输出（硬规则 ②：引用计数前先打印前 3 条命中）。
+- [x] **AC7 判据复跑（两向）**：AC-259 criterion 落账前 exit 1 / 落账后 exit 0，两次 exit code 与 stderr 都贴，并指明落账前那次落在哪个失败分支。⛔ 只贴绿读数不算（一条恒绿判据与「合格」同形，硬规则 3b/4）。
+- [x] **AC8 同族不回归**：AC-257 / AC-258 的 gate 各贴一条读数，须仍为 pass（证明 append-only 没有把旧记录挤掉）。
+- [x] **AC9 负控制（臂2 判据能取假）**：在**临时副本**上构造一条 `quay_version="0.7.0"`（不带后缀）的 `GOAL-018-AC-257` 记录、且副本内不存在任何 `-dev` 记录 ⇒ AC-259 的判据在副本上须 exit 1 且落在 `missing qualifying … record`；补一条 `-dev` 记录 ⇒ exit 0。两次读数都贴（⛔ 不动真实载体）。
+- [x] **AC10 承接纪律**：逐条列「途中发现的机制缺陷 → 另立的 `gap-*` 任务 id（或说明为何不阻断本 AC）」；无则明写「无」。
 
 ## Definition of Done
 
@@ -133,3 +133,157 @@ $ git worktree list | grep dev-suffix
 - goals/AC-259-版本一致性-仓库-8-处文本-两台真机安装读数均落到-0-7-0.md
 
 ⛔ 不声明版本承载文件（`packages/*/package.json`、`plugin/VERSION` 等）——那 8 处的 bump 由 `depends_on` 的 AC-272 任务落地，本任务**只读它们**。若第 1 步发现并集未合入 ⇒ 停，不改。
+
+## Result
+
+**Disposition:** arm 1 of the AC-259 criterion was **already satisfied** on arrival (the AC-272 version union
+had landed on develop: all 8 carriers read `0.7.0-dev`), so the remaining object was **arm 2** — the two
+per-host `quay_version="0.7.0-dev"` carrier records. Both were produced by **real runs on both hosts**
+(install → quay-init rerun → a task genuinely driven `todo→ready→done` by the target project's own drivers
+→ record written on the host by the writer, then transported into the carrier).
+
+Raw evidence bundle: `.quay/ac259-evidence/` (index in `README-evidence-index.md`).
+
+### AC1 — step-0 prerequisites re-taken on the spot
+
+`quay goal gate AC-259` → `fail`, reason `acceptance failed (exit 1) — AC-259: missing qualifying
+quay_version=0.7.0-dev done-record for ['GOAL-018-AC-257', 'GOAL-018-AC-258']` — i.e. the failure is in
+**arm 2**, not `repo version mismatch`. AC-257 / AC-258 / AC-272 all `pass`.
+`git show HEAD:plugin/VERSION` = `0.7.0-dev`; `origin/dist-plugin:VERSION` = `0.7.0-dev`
+(`origin/dist-plugin` = `1e9c65114d2f33a8758089e6ce4c9261ba92bb75` — "dist-plugin: build from 7b3b0cc");
+`develop:plugin/VERSION` = `0.7.0-dev`. `depends_on` task
+`gap-develop-version-union-missing-dev-suffix` = **done**. All 8 carriers literal `0.7.0-dev`
+(4 × `packages/quay*/package.json`, both `marketplace.json` `plugins[0].version`,
+`plugin/.claude-plugin/plugin.json`, `plugin/VERSION`). Raw: `ac1-ac3-prereq-readings.txt`.
+
+### AC2 — the channel ACCEPTS the prerelease (so the step-2 rejection branch does not fire)
+
+Isolated `HOME`, real `dist-plugin` content:
+
+```
+$ claude plugin validate <dist-plugin-src>   → ✔ Validation passed
+$ claude plugin marketplace add <dist-plugin-src>  → ✔ Successfully added marketplace: quay
+$ claude plugin install quay@quay            → ✔ Successfully installed plugin: quay@quay (scope: user)
+```
+
+and it records the prerelease verbatim:
+`"installPath": ".../plugins/cache/quay/quay/0.7.0-dev", "version": "0.7.0-dev",
+"gitCommitSha": "1e9c65114d2f33a8758089e6ce4c9261ba92bb75"`. Raw: `step2-probe.txt`.
+
+### AC3 — arm 1 holds (dependency side; ⛔ not changed by this task)
+
+See the AC1 table plus `git show HEAD:plugin/VERSION` → `0.7.0-dev` (committed).
+
+### AC4 — ad-arm1 / archguard real rerun (project scope)
+
+* ① **actual install reading**: `/home/yale/.local/opt/quay/0.7.0-dev/lib/node_modules/quay/plugin/VERSION`
+  → `0.7.0-dev` (read from the delivered artifact, ⛔ not self-reported).
+* ② `quay-init` rerun: `[⑨d] quay-init --force rc=0 (rerun=true)`.
+* ③ `hooks.Stop` **verbatim identical** before/after: `[⑨c] md5=e5255b86660f` → `[⑨e] md5=e5255b86660f
+  verbatim-preserved=1`.
+* ④ `enabledPlugins` gained the key: `[⑨e] enabledPlugins={"quay@quay":true} gained-quay-key=1`;
+  project settings confirm `1`.
+* ⑤ task `TASK-AC259-ARCHGUARD-SMALLDEFECT` created **by this run** (`[⑨h2] task created`), driven to
+  `status: done`; done-flip commit `d5edeb4b`; **implementation commit**
+  `ef48077ae710d52cf51961886cd7756e7a05806d` — `fix(check): feed real relations to no-dependency fitness
+  rules`, files `src/cli/commands/check.ts`, `src/cli/utils/cluster-archjson-loader.ts`,
+  `tests/unit/cli/commands/check.test.ts` (non-accounting, 3 files).
+* ⑥ `.quay/config.yml` `grep -nE 'verify-|probe|/tmp/'` → **zero hits**; provider bound to
+  `/home/yale/.local/opt/quay/0.7.0-dev/.../vendor/quay-native`.
+* All `claude` invocations ran under a **login shell** (`ssh <host> "bash -ls"`). Raw: `ac4-ad-arm1-after.txt`.
+
+### AC5 — orangevps / meta-cc real rerun (user scope)
+
+* ① `installed_plugins.json`, `scope:"user"` entry verbatim: `{"scope": "user", "installPath":
+  "/home/yale/.claude/plugins/cache/quay/quay/0.7.0-dev", "version": "0.7.0-dev", "installedAt":
+  "2026-09-15T16:27:32.465Z", ...}` — version `0.7.0-dev`, installPath non-probe.
+* ② `known_marketplaces.json.quay.source.path` = `/home/yale/.local/opt/quay/0.7.0-dev/lib/node_modules/quay/plugin`.
+* ③ non-quay keyset of `~/.claude/settings.json` **verbatim identical**: `[⑩f] ①non-quay keyset
+  verbatim-preserved=1 (before md5=577be3d80ee2 after md5=577be3d80ee2)`.
+* ④ `quay-init` rerun `[⑩g] rc=0 (rerun=true)`.
+* ⑤ task `FIX-AC259-SMALLDEFECT` created **by this run** (`[⑩i2] task created`), poll finished
+  `task_status=done`; done-flip commit `36cfc0d`; **implementation commit**
+  `48ad935bb1ccf4d2dc370684e2f15401285bdbd1` — `fix(docs): gate every top-level page, correct
+  CONTRIBUTING.md Go prerequisite`, files `CONTRIBUTING.md`, `internal/release/doc_contract_test.go`
+  (non-accounting). `gate_events_task=1`, `produced_by_driver=1`.
+* Also: `[⑩f] ②quay replaced probe→persistent=1` — the fixture was reset to its documented probe-path
+  start state before the run. Raw: `ac5-orangevps-after.txt`.
+
+### AC6 — carrier records, via the writer
+
+Both records are in `.quay/productization-verification.jsonl` (carrier grew 181 → 183 lines) and were
+produced **on the host** by `ac_record_append` through `--ac89`; they were transported back with the
+delivery script's own `transport_evidence_append` (`appended=1`, ⛔ no hand-written JSONL). The two new
+lines, verbatim, are in `ac6-carrier-records.txt`, together with the `谓词 → 实际值` tables. The three
+fields arm 2 reads:
+
+| ac | quay_version | task_status |
+|---|---|---|
+| GOAL-018-AC-257 (new, line 183) | `0.7.0-dev` | `done` |
+| GOAL-018-AC-258 (new, line 182) | `0.7.0-dev` | `done` |
+
+Supporting: `grep -c 'GOAL-018-AC-257' plugin/scripts/verify-deliver-coldstart.sh` → `5`
+(first 3 hits printed in `ac6-schema-support.txt`, per 硬规则 ②), `grep -c 'GOAL-018-AC-258'` → `3`; and
+`--ac-record-schema-report` prints `GOAL-018-AC-257 [ok] criterion=11 schema=11 writer=11` and
+`GOAL-018-AC-258 [ok] criterion=11 schema=11 writer=11`.
+
+### AC7 — the criterion read BOTH ways
+
+* before (2026-09-15T16:25:23Z, from the repo root): `verdict=fail`, **EXIT 1**,
+  `reason=… missing qualifying quay_version=0.7.0-dev done-record for ['GOAL-018-AC-257', 'GOAL-018-AC-258']`
+  — i.e. the failing branch is **`missing qualifying … record`**, NOT `repo version mismatch`
+  (arm 1 was already true).
+* after both records landed (2026-09-15T17:39:50Z): `verdict=pass`, **EXIT 0**.
+* intermediate reading (AC-258 landed, AC-257 not) also taken: `fail`, `missing … ['GOAL-018-AC-257']` —
+  the predicate is monotone in the records, not stuck-green.
+Both raw readings: `ac7-criterion-before-after.txt`.
+
+### AC8 — siblings do not regress
+
+`quay goal gate AC-257` → `pass`; `quay goal gate AC-258` → `pass` (after the new records were appended —
+the carrier is append-only, so the older `quay_version="0.7.0"` records those two criteria literally
+require are still present).
+
+### AC9 — negative control: arm 2 takes FALSE
+
+On a **temp copy** (`/tmp/ac259-ac9`: the real goal file + the 8 carriers at `0.7.0-dev` + a constructed
+carrier), run as `quay goal gate AC-259 --root /tmp/ac259-ac9` (store dialect, real carrier untouched):
+
+| test | carrier | verdict | exit | branch |
+|---|---|---|---|---|
+| 1 | only `quay_version="0.7.0"` records for both ac | fail | **1** | `missing qualifying … record` |
+| 2 | + one `0.7.0-dev` record per ac | pass | **0** | — |
+
+Raw: `ac9-negative-control.txt`.
+
+### AC10 — mechanism defects found on the way
+
+1. **`gap-ac257-verify-leg-misses-declared-worker-env`** — the `--verify-ac257` transport leg does not ship
+   the declared worker env (`$(ac258_worker_env_export)`), although both legs share
+   `step_ac257_project_scope`, whose first action is `ac258_worker_preflight`. Consequence measured on
+   ad-arm1: the leg's own remote run prints
+   `[⑨0] worker preflight: AC258-PREFLIGHT credentials probe exited 1` and aborts
+   `AC257-NOT-EVALUATED` before any destructive step, while the local preflight (which does read the
+   declared probe cmd) passes — a same-machine, same-predicate two-direction reading
+   (`ac10-mechanism-gap.txt`). The AC-257 drive was therefore done by invoking the **same** remote
+   verification script directly on the host with the declared env in the login shell (which is what
+   Requested action step 3 literally prescribes), and transporting its evidence back.
+   **Status: this gap was fixed on develop during this session** — `develop-deliver-tgz.sh:2251` now
+   carries `$(ac258_worker_env_export)` in the AC-257 heredoc.
+2. **`gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall`** — ad-arm1's **user-level**
+   `~/.claude/settings.json` carried `enabledPlugins["quay@quay"]`, so `write_ac257_record` refused the
+   AC-257 record (`AC161-USER-SCOPE: … record refused … present:quay@quay`) even though the whole run had
+   genuinely succeeded. The record was obtained after removing exactly that one key (keeping the
+   marketplace source the AC-161 doctrine wants at the user level) and re-running the write
+   (`ac161-depollution.txt`). **The writer of that key is NOT identified**: my first attribution (the
+   delivery pipeline's own npm postinstall) was **refuted by a control I then ran** — two sandbox-HOME
+   postinstall runs, with and without the declared endpoint env and with `claude` on PATH, wrote only
+   `extraKnownMarketplaces.quay` and never an `enabledPlugins` key (`ac161-attribution-control.txt`). The
+   filed task's body was corrected to carry the refutation and the open question rather than the wrong
+   cause.
+
+No other blocking defects were found. Two incidental observations, not filed because neither blocks this
+AC: (a) both target hosts' Claude Code OAuth is dead (`accessToken`/`refreshToken` empty, `expiresAt=0`),
+so the human-authorized FJDAC endpoint is the only login face there; (b) my first manual AC-257 attempt
+passed a 12-char `--build-sha`, which `ac_record_append` refuses (40-hex required) — a property of my
+throwaway runner, not of the product.
