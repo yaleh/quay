@@ -474,3 +474,75 @@ $ node --input-type=module -e "import {readVendoredVersion} from './plugin/test/
 **是在一个没选中这三个测试文件的集合上取得的**（scoped 门的测试选择集来自 `## Touches`；
 这三个文件此前不在 Touches 里 ⇒ 门绿而全量红，正是「scoped 门不覆盖全量集」那个已知形态）。
 本轮已把这四个文件**写进 Touches**，故 scoped 门的选择集现在**包含**它们 —— 本轮的 exit 0 才是可用的读数。
+### AC9 补齐（第 3 处，本轮新发现）：本任务的测试夹具写在**已签入树内** —— checked-in-write 违规，已修
+
+**发现路径（机械的，不是猜的）**：Touches 补齐后重跑 scoped 门 ⇒ `STATIC_CHECK_FAILED: checked-in-write-check exit=1`。
+逐条原始读数（`plugin/scripts/checked-in-write-check.ts --changed --root <worktree>`）：
+
+```
+FAIL: 184 write(s) into the checked-in tree across 4 input(s):
+  mkdirSync   -> <wt>/test/fixtures/version-consistency-unified/packages/quay
+  writeFileSync -> <wt>/test/fixtures/version-consistency-cli-green/plugin/VERSION
+  rmSync      -> <wt>/test/fixtures/version-consistency-cli-green
+  … 共 184 条，全部出自 scripts/version-consistency-check.test.ts:20 makeFixture()
+```
+
+⇒ `makeFixture()` 把每条夹具写到 `resolve(repoRoot, 'test/fixtures/version-consistency-<name>')`，即**已签入树内**。
+**这是判定不是风格意见**：该 checker 由 `checked-in-write-guard.cjs` 拦截 `node:fs` 的写动词、
+判的是**解析后的目标路径**（硬规则 2 按位置判定），不是源码关键词。它守的不变量是
+「测试不得在已签入路径下创建/删除条目」——仓库树同时是别的测试/工具的**输入**。
+
+**修法**：夹具改落 `os.tmpdir()` —— `mkdtempSync(join(tmpdir(), 'version-consistency-<name>-'))`，
+进程私有、按构造豁免，且每次给独立目录故并行不撞。原有 try/finally teardown 一字未动。
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/checked-in-write-check.ts --changed --root <wt>
+PASS: no checked-in-tree writes: 255 write-verb call(s) across 4 executed input(s), 0 inside the tree
+→ exit 0
+
+$ node --experimental-strip-types --test scripts/version-consistency-check.test.ts
+ℹ tests 16 · pass 16 · fail 0
+```
+
+**⚠️ 为什么此前没有任何门抓到它**（如实登记，不缩小）：`scripts/*.test.ts` 不在 `scripts/test.sh` 的 glob 内
+（见本任务 Evidence 末尾「落地后仍存在的两处」第 2 条），而 scoped 门的 checker 选择集此前也不含它。
+本次**补 Touches** 把它带进 `--changed` 的输入集，缺陷才暴露 ⇒ **补 Touches 不只是为了过 anti-drift，
+它同时扩大了判据的覆盖**。⚠️ 注意 anti-drift 在**未提交**状态下会报 OK 而掩盖问题
+（它读已提交的 diff）——本处是**提交后**的读数。
+
+**硬规则 5b 兄弟扫描（同缺陷类，⛔ 未修，已上报）**：
+全仓 grep「夹具经 `resolve(repoRoot|__dirname, …fixtures…)` 定位」命中 30 个文件，
+绝大多数是**读**已签入夹具（合法）；确有**写/删**的一个：
+
+```
+experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:229
+  const tmp = path.join(__dirname, "..", "fixtures", "vmeta", ".tmp-empty-na.md");
+  fs.writeFileSync(tmp, "# empty ledger\nno rows here\n");
+  … finally { fs.rmSync(tmp, { force: true }); }
+```
+
+它**写并删已签入的** `experiments/quay-perpetual-stream/test/fixtures/vmeta/` 下的条目 —— **同一个缺陷类**。
+⛔ **本任务不修它**：它不在本任务 delta 内（`git diff develop...HEAD` 无此文件），把它写进 Touches
+就是「用一次声明漂移换一次绿灯」，正是 anti-drift 存在的理由；`--changed` 模式也不会判它。
+⇒ **作为发现上报**，由 manager/人决定是否立项（修法同上：改落 `os.tmpdir()`）。
+
+### 本轮收尾读数（修复后，两条门各自实跑）
+
+```
+$ bash scripts/test.sh --for-task gap-develop-version-union-missing-dev-suffix --allow-thin
+  warning: test-selection-thin: resolved tests for 3/21 Touches entries (0.14) < 0.5; --allow-thin to run anyway
+  == scoped static checks (change-relevant tier) == → 20 checkers 执行，含 checked-in-write-check
+  ℹ tests 23 · pass 23 · fail 0
+  → exit 0
+
+$ bash scripts/test.sh --static-checks
+  checkers_total: 80 · checkers_with_mutation: 80 · mutations_that_stayed_green: 0 · errors: 0
+  RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore
+  → exit 0
+```
+
+⚠️ **scoped 门的覆盖缺口（如实登记，⛔ 不是本任务的落地判据）**：`selector` 只解析出 **3/21** 条 Touches，
+因为 `scripts/version-consistency-check.test.ts` 落在 `scripts/*.test.ts`、**不在 `scripts/test.sh` 的 glob 内**
+⇒ 它的 16 条断言**不被 scoped 门的测试层跑**；唯一覆盖它的是 `--static-checks` 里的
+`checked-in-write-check --changed`（把 delta 里的测试文件当**输入执行**）。
+这正是「scoped 门绿 ≠ 全量绿」的又一实例，也是本任务末尾上报的「两个 `scripts/*.test.ts` 未接入套件」那条发现。
