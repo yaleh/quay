@@ -1,7 +1,7 @@
 ---
 id: gap-ac162-console-guidance-line-reddens-criterion
 title: AC162 判据被运行时提示行重新打红：register-plugin console.log 非注释行仍含 enabledPlugins
-status: todo
+status: ready
 labels:
   - gap
   - defect
