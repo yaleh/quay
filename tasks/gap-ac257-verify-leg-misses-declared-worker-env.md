@@ -216,6 +216,52 @@ $ grep -c "quay@quay" /tmp/ac4sandbox/.claude/settings.json
 ⛔ 不是本次运行、更不是本次改动引入的。orangevps 现场读数同形（该键存在 ⇒ 该机 AC-257-only 运行同样会被拒）。
 **⇒ 这条残留是另一个机制的事，本次不越界处理，只如实上报。**
 
+### 续做（2026-09-15）：先排掉 develop 侧的阻塞红，本 delta 未改
+
+上一轮 fan-in 的 suite 红（`# fail 10` / `STATIC_CHECK_FAILED: checker-mutation-check exit=1`）**与本任务 delta 无关**。
+成因在 develop：`ee49cb056`（2026-09-15 16:52:19）把 `delivery-manifest.json` 加进
+`scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES`，却**没有**同步更新它的 mutation 夹具
+`plugin/scripts/checker-mutation-cases/version-consistency-check.sh`。夹具不建那个文件 ⇒ 新条目落进
+`mode:'error'` ⇒ **GREEN 基线自己变红**（夹具内那句 `baseline RED on a consistent store (checker always-red?)`）
+⇒ `MUTATION version-consistency-check: always-red` ⇒ 全仓**每一个** fan-in 都死在静态相位。
+（同名先例：16:26 那次 suite 日志里该检查仍是 `pass`，因为它那次 fan-in 起于 16:52:19 之前。）
+
+**区分对照**（硬规则 4 推论四：附一个若「与本 delta 无关」为假则结论会不同的对照）——
+用 develop 自己的两份文件（`git show develop:<path>`，⛔ 不经本分支）跑同一夹具：
+
+```
+（在干净树里放 develop 的 checker + 夹具）
+baseline RED on a consistent store (checker always-red?)
+CASE_EXIT=4
+$ git diff --stat develop -- scripts/version-consistency-check.ts \
+    plugin/scripts/checker-mutation-cases/version-consistency-check.sh
+（空 ⇒ 两份与 develop 逐字相同；本分支只改过 develop-deliver-tgz.sh 与其测试）
+```
+
+**修法**：⛔ 不是把 `delivery-manifest.json` 撤出 `VERSION_ENTRIES`（`ee49cb056` 加它有据：manifest 曾停在 0.5.0
+而 checker 读 GREEN，在真实发布路径上致命）；⛔ 也不是改 checker。**补夹具**，并按夹具既有 doctrine 补上它的
+注入路径 —— Inject 2/3 的注释逐字说：没有注入路径，「条目加进了 `VERSION_ENTRIES`」与「条目真的在参与判定」
+不可区分（硬规则 4）。故 **Inject 4 = 只动 `delivery-manifest.json` ⇒ 必须转红**：
+
+```
+$ bash plugin/scripts/checker-mutation-cases/version-consistency-check.sh "$wd"      # 修后
+CASE_EXIT=0
+
+$ （负控制：同一份新夹具 vs 9c27bdca0 的旧 checker —— 它不判 manifest）
+STAYED-GREEN — delivery-manifest.json-only version drift did not redden the checker (entry not judging)
+CASE_EXIT=3        ← 注入路径确实在区分「判了」与「没判」，不是空转（硬规则 3b）
+
+$ bash plugin/scripts/checker-mutation-check.sh --run                                # 全量
+MUTATION version-consistency-check: pass
+mutations_that_stayed_green: 0 / mutations_that_always_red: 0 / errors: 0
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore
+```
+
+⇒ 本轮**扩 Touches 一条**并在提交信息里写明理由（⛔ 不是目录级通配）：该文件**不是**本任务的 delta，
+而是恢复全仓 fan-in 的救火改动。按既有判据先确认 develop 侧无人正在修
+（`git log --all --since=2026-09-15 -- <夹具>` 空；`gap-release-cut-via-workflow-dispatch` 的 worktree 里该文件与
+develop 无 diff）⇒ 走「等不到 develop」那条分支，登记为 Touches，而不是让每一轮 fan-in 继续烧在同一个 develop 红上。
+
 ### 回归
 
 `bash scripts/test.sh --for-task gap-ac257-verify-leg-misses-declared-worker-env --allow-thin` ⇒ **exit 0**（25 tests pass / 0 fail，
@@ -225,6 +271,9 @@ scoped 静态检查全 PASS）。`--verify-ac258` 一侧未改动，其远端序
 
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
+- plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - tasks/gap-ac257-verify-leg-misses-declared-worker-env.md
 
 Note: this task is filed from the AC-259 re-anchoring worker, where it was discovered (the AC-257 leg had to be driven by invoking the remote verification script directly, with the declared env in the login shell, because this transport leg cannot carry it).
+`plugin/scripts/checker-mutation-cases/version-consistency-check.sh` 是 2026-09-15 续做时为排掉 develop 侧阻塞红
+（`ee49cb056` 只加条目未补夹具 ⇒ 全仓 fan-in 的静态相位恒红）而扩入的，见 Evidence「续做」一节。
