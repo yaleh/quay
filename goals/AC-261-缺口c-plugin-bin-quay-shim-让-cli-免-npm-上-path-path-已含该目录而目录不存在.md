@@ -1,7 +1,7 @@
 ---
 id: AC-261
 title: 缺口C：plugin/bin/quay shim 让 CLI 免 npm 上 PATH（PATH 已含该目录而目录不存在）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -56,4 +56,15 @@ origin: SPEC-plugin-lifecycle:41 与 :307 自己的 T4 实测记录「PATH 中�
   <plugin-root>/bin（该目录尚不存在也照样在）⇒ 建目录即可让 CLI 免 npm 全局安装」；本会话 PATH 复核确认含
   /home/yale/work/quay/plugin/bin 而该目录不存在；官方文档确认 plugin 根的 bin/ 自动进 Bash tool 的
   PATH。即「已设计、已验证可用、就是没建」。人 2026-09-15 裁定优先遵循 plugin 分发实践、在此实现前不考虑 npm。
+activatedAt: 2026-09-15T04:00:59.057Z
+statusLog:
+  - at: 2026-09-15T04:00:59.057Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-019 已激活，本 AC 进入在评
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T04:00:59.057Z
 ---
