@@ -207,12 +207,23 @@ test("三态：载体读不到 ⇒ exit 3 NOT-EVALUATED（与 PASS 的 exit 0 �
 
 test("端到端：真 git 仓 + 真载体 —— 全绿时 exit 0，删掉一条事件后 exit 1 并点名", () => {
   const { root, git } = makeRepo();
-  for (const id of ["t-1", "t-2"]) {
+  // ⚠️ 每个时刻都从 D2（墙钟算出的「2 天前」）派生，⛔ 一个日历字面量都不写。写成字面量会与
+  //    commitAt 的墙钟日期错位，而覆盖判据是 `e.ts >= l.ts - 60s` ⇒ 过了某个午夜之后它**结构上必然**
+  //    恒假、测试恒红。实测 2026-09-15 本轮就是这样红的：落地提交在 09-13、事件却钉死在 09-12。
+  //    这是硬规则 4 推论二的日历版——「恰好等于今天/昨天」的字面量不是常量，是会过期的宿主依赖。
+  // ⚠️ 两条落地必须**不同时**：t-2 的落地要晚于 t-1 的**事件**。否则 INJECT 删掉 t-2 事件后，
+  //    它的落地会落进 bootstrap 豁免（`l.ts < cutoff`，cutoff 由仍存活的 t-1 事件给出）
+  //    ⇒ 下面那条负控制退化成恒绿（硬规则 4c 的第二种失败形态）。
+  const cases = [
+    { id: "t-1", at: `${D2}T08:00:00Z`, ev: `${D2}T08:05:00Z` },
+    { id: "t-2", at: `${D2}T10:00:00Z`, ev: `${D2}T10:05:00Z` },
+  ];
+  for (const { id, at, ev } of cases) {
     writeTask(root, id, "ready");
-    commit(git, "seed");
+    commitAt(git, "seed", at);
     writeTask(root, id, "done");
-    commit(git, `tasks: 翻 ${id} done（driver 机械 fan-in）`);
-    writeEvent(root, id, "2026-09-12T10:00:00.000Z");
+    commitAt(git, `tasks: 翻 ${id} done（driver 机械 fan-in）`, at);
+    writeEvent(root, id, ev);
   }
   const green = runChecker(root, ["--days", "3"]);
   assert.equal(green.code, 0, `baseline 应 PASS：${green.out}${green.err ?? ""}`);
@@ -226,4 +237,5 @@ test("端到端：真 git 仓 + 真载体 —— 全绿时 exit 0，删掉一条
   const parsed = JSON.parse(red.out);
   assert.equal(parsed.verdict, "red");
   assert.deepEqual(parsed.days[0].uncovered, ["t-2"]);
+  assert.deepEqual(parsed.days[0].exempt, [], "⛔ 不得落进 bootstrap 豁免——落进去这条负控制就恒绿了");
 });
