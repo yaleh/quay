@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mutation case for version-consistency-check (fail-closed gate: every version-bearing
-# artifact must carry the identical version). Fixture: a temp root with all 9 version
+# artifact must carry the identical version). Fixture: a temp root with all 10 version
 # artifacts pinned to 1.0.0.
 # Inject 1: bump ONE machine field (packages/quay) to 1.0.1 → drift → the checker MUST exit 1 (RED).
 # Restore: pin it back to 1.0.0 → the checker MUST exit 0 (GREEN).
@@ -8,6 +8,10 @@
 #   plugin/README.md → drift → MUST exit 1 (RED). Without this path, "the README entry was added to
 #   VERSION_ENTRIES" and "the README entry actually participates in the judgment" are
 #   indistinguishable (hard rule 4). Restore → MUST exit 0 (GREEN).
+# Inject 3 (gap-ac259-version-union-lockstep-and-host-install-readings): bump ONLY the plain-text stamp
+#   plugin/VERSION → drift → MUST exit 1 (RED). This is the member that 6bf000622 left at 0.5.0 while
+#   the checker read GREEN — the class of gap this fixture exists to make unrepeatable.
+#   Restore → MUST exit 0 (GREEN).
 set -u
 name="version-consistency-check"
 workdir="${1:?usage: $name.sh <workdir>}"
@@ -28,12 +32,15 @@ printf '[{"name":"quay","version":"1.0.0","source":"github"}]\n' > "${workdir}/p
 printf '[{"name":"quay","version":"1.0.0","source":"github"}]\n' > "${workdir}/.claude-plugin/marketplace.json"
 # Prose carrier — must be present and parseable, else the baseline reads mode:'error' (NOT exit 0).
 printf '# quay plugin\n\nquay plugin v1.0.0 - fixture.\n' > "${workdir}/plugin/README.md"
+# Plain-text stamp — MUST be present, else the new entry reads mode:'error' and the whole case reports
+# a false "checker always-red" (exit 4) instead of exercising the drift path (hard rule 3b).
+printf '1.0.0\n' > "${workdir}/plugin/VERSION"
 
 checker_cmd() {
   node --experimental-strip-types "${scripts_dir}/version-consistency-check.ts" --root "$1" >/dev/null 2>&1
 }
 
-# GREEN baseline: all 8 artifacts at 1.0.0 → all-equal → exit 0.
+# GREEN baseline: all 10 artifacts at 1.0.0 → all-equal → exit 0.
 if checker_cmd "${workdir}"; then :; else
   echo "baseline RED on a consistent store (checker always-red?)" >&2
   exit 4
@@ -64,6 +71,20 @@ fi
 printf '# quay plugin\n\nquay plugin v1.0.0 - fixture.\n' > "${workdir}/plugin/README.md"
 if checker_cmd "${workdir}"; then :; else
   echo "ALWAYS-RED — restored README consistency still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT 3 (plugin/VERSION-only): bump ONLY the plain-text stamp → drift → exit 1.
+printf '1.0.1\n' > "${workdir}/plugin/VERSION"
+if checker_cmd "${workdir}"; then
+  echo "STAYED-GREEN — plugin/VERSION-only version drift did not redden the checker (entry not judging)" >&2
+  exit 3
+fi
+
+# RESTORE: pin back to 1.0.0 → all-equal → exit 0.
+printf '1.0.0\n' > "${workdir}/plugin/VERSION"
+if checker_cmd "${workdir}"; then :; else
+  echo "ALWAYS-RED — restored plugin/VERSION consistency still reddens the checker" >&2
   exit 4
 fi
 

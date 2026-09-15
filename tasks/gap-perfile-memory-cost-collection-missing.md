@@ -2,7 +2,7 @@
 id: gap-perfile-memory-cost-collection-missing
 title: 逐文件内存成本采集缺失——per-file-cpu-report.mjs 只报 CPU,verification-round.jsonl
   的内存字段只有整轮粒度
-status: ready
+status: done
 labels:
   - gap
   - mechanism

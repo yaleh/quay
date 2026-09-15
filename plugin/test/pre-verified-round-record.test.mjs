@@ -1024,6 +1024,21 @@ test("parsePerFile — carries cpuMs on new __PERFILE__ lines, absent on legacy 
   assert.equal(perFile[1].cpuMs, undefined, "legacy line → cpuMs absent (缺键 ≠ 0)");
 });
 
+test("parsePerFile — carries memPeakKb on new __PERFILE__ lines, absent on lines without it (gap-perfile-memory-cost-collection-missing AC2, writer 之二)", () => {
+  // The memory dimension's half of the same two-writer contract: this bucket-scoped fan-in landing
+  // path writes its round record through THIS writer, NOT full-suite-runner.ts — so a field wired
+  // into only one of them would be dark on the most-used landing path.
+  const log = writeSuiteLog(null, [
+    "__PERFILE__ duration_ms=123.456 /home/yale/work/quay-worktrees/gap-foo/plugin/test/foo.test.mjs passed=true cpu_ms=45.6 mem_peak_kb=185728",
+    "__PERFILE__ duration_ms=999.0 /home/yale/work/quay-worktrees/gap-foo/plugin/test/bar.test.mjs passed=false cpu_ms=7",
+  ]);
+  const perFile = parsePerFile(log);
+  assert.equal(perFile.length, 2, "both __PERFILE__ lines parse");
+  assert.equal(perFile[0].memPeakKb, 185728, "mem_peak_kb is parsed into memPeakKb on this writer's path (writer 之二)");
+  assert.equal(perFile[0].cpuMs, 45.6, "the cpu dimension is unaffected");
+  assert.equal(perFile[1].memPeakKb, undefined, "line without mem_peak_kb → memPeakKb absent (缺键 ≠ 0)");
+});
+
 test("parseCeilingFloor — parses __CEILING__ lines into ceiling (stream order) + floor_ms (DISTINCT floors)", () => {
   const log = writeSuiteLog(null, [
     "__CEILING__ /home/yale/work/quay-worktrees/gap-foo/plugin/test/slow.test.mjs duration_ms=500 floor_ms=123.4 封顶者/该拆",

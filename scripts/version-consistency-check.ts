@@ -96,6 +96,28 @@ const VERSION_ENTRIES: VersionEntry[] = [
     path: 'plugin/vendor/quay/package.json',
     extract: (raw) => JSON.parse(raw).version,
   },
+  {
+    // Plain-text version stamp (`plugin/VERSION` holds a bare semver and nothing else) — deliberately
+    // NOT JSON.parse'd. Added by gap-ac259-version-union-lockstep-and-host-install-readings: this file
+    // was the ONE member of the version-bearing union that no single judge covered. AC-259's criterion
+    // enumerated it while this list did not (and vice versa for plugin/vendor/quay/package.json), so a
+    // `plugin/VERSION`-only drift reddened AC-259 while this checker stayed green. Precedent on the real
+    // release path: `6bf000622` claimed to bump "all 8 version-bearing files" and left plugin/VERSION at
+    // 0.5.0 — requiring a second commit `bd466ce2a` to repair, with this checker green in between.
+    // The extractor THROWS when the file does not hold a semver token: an unreadable stamp must land in
+    // mode:'error', never be shaped like a stamp that agrees (hard rule 3b).
+    label: 'plugin/VERSION',
+    path: 'plugin/VERSION',
+    extract: (raw: string) => {
+      const v = raw.trim();
+      if (!/^\d+\.\d+\.\d+/.test(v)) {
+        throw new Error(
+          'no bare semver in plugin/VERSION (cannot evaluate — not a pass)',
+        );
+      }
+      return v;
+    },
+  },
 ];
 
 export function resolveRepoRoot(callerDir?: string): string {

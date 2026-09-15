@@ -2,7 +2,7 @@
 id: gap-dist-closure-missing-driver-anchor-js
 title: 打包 dist entry 集对 driver-anchor 的动态路径引用盲 → dist/driver-anchor.js 不进
   tarball，任何第三方安装的 driver 自 2026-09-13 起结构上起不来
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -142,8 +142,35 @@ scoped-gate 缓存按**实际被合并进本 worktree 的 develop tip** 写入�
 （`preferredAnchorKernel` 不看 `QUAY_PLUGIN_ROOT`、也不看 `--root`），laydown 集合与本题机制不同域 ⇒ 仅记为观察项，
 不作阻塞、不在此处声称结论。
 
+## 落地时修掉的 suite-red 阻塞（⛔ 非本任务 delta）
+
+fan-in 的 suite 在 `plugin/test/driver-anchor.test.mjs` 上**确定性红**（AC3① 61468ms / AC6 63612ms，两者都是
+`stop --kind <k>` 的 `spawnSync` 60s 超时 ⇒ `status: null !== 0`）。真因**不在本任务 delta 内**：anchor 进程经
+`preferredAnchorKernel()` 优先跑**主检出**那份 kernel（AC-184/AC-255 的设计，⛔ 不是缺陷），而
+`registerKindStop` / `requestKindStop` 的停机登记表是**模块级**的；夹具硬编码 import worktree 那份
+`driver-runtime.ts` ⇒ anchor 与夹具各持一张独立登记表 ⇒ `requestKindStop(kind)` 置的不是该 kind 读的那个标志
+⇒ 等满 60s 后 exit 1 —— **与「该 kind 的循环真的挂了」逐字同形**（硬规则 3b 的同形异因）。
+⇒ 该文件在**任一 worktree** 里确定性红，会挡住**每一次** fan-in（实测：同期另外两条任务的 fan-in 日志里
+`driver-anchor.test.mjs passed=false`）。
+
+**处置**：逐字采用兄弟任务 `gap-perfile-memory-cost-collection-missing` 的补丁 `d29592113`（`git cherry-pick`；
+base blob `c0bb66c1d` 与本 worktree 逐字相符 ⇒ 零冲突）。该补丁把 `DRIVER_RUNTIME_ABS` 由 `preferredAnchorKernel()`
+派生。与 `gap-ac258-…` 分支携带的 `fa9df5b4a` md5 一致 ⇒ **谁先落都是恒等合流**。机制归属属于那条任务，本任务只承载它。
+
+**两向读数（同一棵树、只改夹具那一行 import；本 worker 单跑实测）**：
+
+```
+改前（import worktree 那份）：AC3① 61468ms FAIL · AC6 63612ms FAIL（null !== 0）
+改后（import anchor 那份）  ：AC3①  3296ms PASS · AC6  6756ms PASS —— 整文件 7/7 绿、exit 0
+```
+
+⚠️ **如实标注边界**：该文件因此验的是 anchor **实际加载的那份**内核（worktree 里 = 主检出那份）
+⇒ worktree 中对 anchor 内核本身的改动**不会**被它验到（`driver-runtime.ts` 已明记该形态「结构上无法自测」）。
+这是形态的性质，⛔ 不是夹具能绕开的。
+
 ## Touches
 
 - `packages/quay/scripts/build-plugin-dist.mjs`
 - `packages/quay/test/build-plugin-dist.test.mjs`
+- `plugin/test/driver-anchor.test.mjs`（**⛔ 非本任务 delta**：落地时修掉的 suite-red 阻塞 —— 夹具的 fake driver 必须 import anchor 实际加载的那份 kernel，否则停机登记表分裂 ⇒ `stop --kind X` 等满 60s 后 exit 1，**在任一 worktree 里确定性红**，挡住每一次 fan-in；逐字采用兄弟任务的补丁 `d29592113`；机制、两向对照与边界见上方「落地时修掉的 suite-red 阻塞」一节）
 - `tasks/gap-dist-closure-missing-driver-anchor-js.md`（自身文件：勾 AC + 贴实跑证据）
