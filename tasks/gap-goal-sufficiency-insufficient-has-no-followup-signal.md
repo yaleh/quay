@@ -31,10 +31,10 @@ extra:
 
 implementer refines these before promoting to ready:
 
-- [ ] AC1: 设计一个"insufficient 持续 N 轮/M 分钟"的可见信号机制——具体形态可以是 spawn 一个短命的语义 agent（复用 `computeGoalGaps`/`runGapSpawnPass` 已有的"spawn 一个 fix-worker 角色的 agent 去处理"模式,而不是 driver 自己直接改 AC),职责是读 GOAL 的退出条件/范围/在域 AC 集合,**提议**(不直接写)一条候选的新 AC 或者退出条件修订说明,写进一条新立案的普通 gap 任务里供人审核——⛔ 不自动写 goal-store。**（另见文末「补充」一节：meta-driver 既有的 probe/proposals 通道是这个 AC1 的一个具体候选实现，implementer 可二选一或合并。）**
-- [ ] AC2: 该信号只在"充分性确定裁决为 insufficient 且已经持续超过阈值(轮数或时间,复用与 AC-214 freshness routine 同类的推导方式,不要写死魔数)"时触发一次,不是每轮都触发(避免像 244 次运行零指引价值的旧反例那样变成噪音)——同一个 GOAL 的同一个 insufficient 裁决只 file 一次,裁决变化(判官重判出新结果)才重新计时。
-- [ ] AC3: 负控制——GOAL 的充分性是 `covered` 或 `not-evaluated` 时不触发;裁决很快就变化(判官在阈值内给出了不同结果)也不触发。
-- [ ] AC4: 生产验证——对 quay-fleet 的 GOAL-005(本任务的真实证据来源之一)跑一次,确认机制真的会为它 file 出一条信号/任务(⛔ 不接受只在 fixture 里验证过,硬规则 4 推论三)。
+- [x] AC1: 设计一个"insufficient 持续 N 轮/M 分钟"的可见信号机制——具体形态可以是 spawn 一个短命的语义 agent（复用 `computeGoalGaps`/`runGapSpawnPass` 已有的"spawn 一个 fix-worker 角色的 agent 去处理"模式,而不是 driver 自己直接改 AC),职责是读 GOAL 的退出条件/范围/在域 AC 集合,**提议**(不直接写)一条候选的新 AC 或者退出条件修订说明,写进一条新立案的普通 gap 任务里供人审核——⛔ 不自动写 goal-store。**（另见文末「补充」一节：meta-driver 既有的 probe/proposals 通道是这个 AC1 的一个具体候选实现，implementer 可二选一或合并。）**
+- [x] AC2: 该信号只在"充分性确定裁决为 insufficient 且已经持续超过阈值(轮数或时间,复用与 AC-214 freshness routine 同类的推导方式,不要写死魔数)"时触发一次,不是每轮都触发(避免像 244 次运行零指引价值的旧反例那样变成噪音)——同一个 GOAL 的同一个 insufficient 裁决只 file 一次,裁决变化(判官重判出新结果)才重新计时。
+- [x] AC3: 负控制——GOAL 的充分性是 `covered` 或 `not-evaluated` 时不触发;裁决很快就变化(判官在阈值内给出了不同结果)也不触发。
+- [x] AC4: 生产验证——对 quay-fleet 的 GOAL-005(本任务的真实证据来源之一)跑一次,确认机制真的会为它 file 出一条信号/任务(⛔ 不接受只在 fixture 里验证过,硬规则 4 推论三)。
 
 ## DoD
 
@@ -43,7 +43,8 @@ implementer refines these before promoting to ready:
 ## Touches
 
 - `plugin/scripts/goal-driver.ts`
-- `plugin/test/goal-driver.test.mjs`（implementer 决定是否新增独立测试文件）
+- `plugin/test/goal-driver.test.mjs`
+- `plugin/test/goal-sufficiency-followup.test.mjs`（本次新增：机制的四态/阈值/负控制/端到端）
 - `tasks/gap-goal-sufficiency-insufficient-has-no-followup-signal.md`
 
 ---
@@ -87,3 +88,62 @@ implementer refines these before promoting to ready:
 - `plugin/scripts/meta-driver.ts`
 - `plugin/test/meta-driver.test.mjs`
 - `tasks/gap-goal-sufficiency-insufficient-has-no-followup-signal.md`
+
+## Evidence
+
+**实现落点**（本次提交，分支 `task/gap-goal-sufficiency-insufficient-has-no-followup-signal`）：
+`plugin/scripts/goal-driver.ts` 的 ⑥b 一节 —— `sufficiencyStallWindowMs`（窗口推导式）、
+`sufficiencyStallReading`（纯函数四态）、`buildSufficiencyFollowupPrompt` / `buildSufficiencyFollowupArgv`、
+`runSufficiencyFollowupPass`（台账 + 过 halt/资源门/spawnCap 后 spawn）。轮记录新增
+`fact.value.sufficiency_stall`；台账载体 `.quay/goal-sufficiency-followup.json`。
+新测试 `plugin/test/goal-sufficiency-followup.test.mjs`（14 条，全绿，独立于既有 goal 测试文件）。
+
+**AC1（机制）**：到阈值且未 file 过 ⇒ spawn 一个短命 `fix-worker` 角色 agent，prompt 内嵌该 GOAL 的
+`## 退出条件` 节原文 + `## 范围` 节 + 在域 AC 的 `(id, title, expect)`，要求它**提议**（⛔ 不写）一条候选
+新 AC 或退出条件修订，经 `quay-file-task` 立案供人审核；prompt 逐字含
+`Do NOT write the goal store` / `Do NOT mark any GOAL or AC`。⛔ 不写 goal-store、⛔ 不翻任何状态。
+单测以 seam agent 端到端证明「真的落出一条 `tasks/` 记录」（⛔ 不是只数 spawn 数）。
+
+**AC2（阈值推导 + 只 file 一次）**：
+- 缺省窗口是**推导式** `judgeWallclockMs + roundIntervalMs`（实测 180000 + 30000 = **210000ms**），
+  ⛔ 无自由常数；可显式覆盖（`--sufficiency-stall-window-ms` / drivers.yml
+  `kinds.goal.sufficiency_stall_window_ms`）。同族先例 = AC-214 freshness routine 的 `(W_p+I)×R/K`。
+- 「不是每轮都触发」由台账 `filedAt` 守卫：同一 `(GOAL, sufficiencyCacheKey)` 第 1 轮 file、
+  第 2 轮 `alreadyFiled=1` 且零第二次 spawn（单测直接断言 marker 计数不增）。
+- 裁决变化 ⇒ `sufficiencyCacheKey` 变 ⇒ 换实例 ⇒ **计时重开**（单测：旧实例已等 10 个窗口，
+  新 key 仍 `wait`，不累计旧时长）。
+- spawn 失败 / 超时 / 非零退出 ⇒ `filedAt` **不置**（⛔ 不消耗该实例的唯一一次机会），下一轮仍在阈值内即重试。
+
+**AC3（负控制）**：`covered` / `not-evaluated` ⇒ `insufficient=0`、`filed=0`、台账条目**被删除**
+（不保留陈旧实例）；裁决在阈值内变化 ⇒ 不触发；halt / 资源门 / 每轮上限**只挡 spawn、不挡计时**
+（记 `deferred`，⛔ 与 `waiting` 不同形）。三条各有独立单测，另有一条 `runGoalRound` 端到端负控制。
+
+**AC4（生产验证，quay-fleet 真实工作区 + 真实判官 + 真实 agent，⛔ 不是 fixture）**：
+在 `/home/yale/work/quay-fleet`（真实第三方项目、其 goal-driver 与 worker-driver 当时都在跑）上，
+用**本次落地的真代码**跑本机制：
+
+1. **轮 1**（`2026-09-15T09:36:57.891Z`）真实语义判官（`launchArgv("fix-worker")` 真 LLM，2 次一致才采纳）
+   对 GOAL-005 当前在域 AC 集（10 条，key `c61d1d0d1444…`）给出确定裁决 **`insufficient`** ⇒
+   `waiting=1, filed=0`（窗口 210000ms 内），台账记 `since=09:36:57.891Z, filedAt=null`。
+2. **过阈值后第 1 次**（09:42:08）**资源门判 WAIT**（`cpu_stall_avg10=79.74 ≥ 60`，宿主真在跑 fan-in）
+   ⇒ `deferred=1, filed=0`，**`filedAt` 仍为 null**（信号没丢，只是被挡）。
+3. **门开后的下一次**（09:43:11，`gate=GO`）⇒ `filed=1`，真 spawn 出一个 `fix-worker` agent（墙钟约 7 分钟），
+   它真的在 quay-fleet 的 task store 里立了案：
+   `tasks/fleet-agent-pwa-real-browser-click-verification.md`（`status: needs-human`）。该任务体逐字引用
+   GOAL-005 `## 退出条件` 里未被覆盖的那半句（"点击后真的发生了声称的动作"），指出 AC-070 自己的 expect
+   逐字声明"不包含实际触发这些动作本身"⇒ 覆盖率 0，并提议新增 AC-073。
+   台账随即记 `filedAt=2026-09-15T09:43:11.686Z`（同 key）。
+
+⇒ 真判官的裁决与 AC-070 的原文互证「判官是对的」；机制把这条**此前无人处理的否决裁决**变成了一条
+人可见、可审核的立案。⛔ 未改 goal-store（该任务只是提案，⛔ 不自动创建 AC-073）。
+
+**副作用（如实记录）**：本次生产验证在 quay-fleet 侧写了两处运行时载体
+（`.quay/goal-sufficiency-followup.json` 台账、`.quay/goal-sufficiency-cache.json` 里 GOAL-005
+当前 key 的真裁决——后者顺带结束了该 driver 此前连续 `judge-unavailable` 的状态），并立案一条
+`needs-human` 的任务（曾短暂被该项目的 promotion-driver 翻 ready、随后被 agent 按 prompt 置回
+`needs-human`，⛔ 不会被当作工作派发）。
+
+**未选「补充」一节的可选路径（如实记录）**：文末补充提出的 meta-driver `proposals` 接线是一条**并列可选**
+路径（该节自己声明"不替代上面的 ## AC，那才是本任务门控的清单"）。本次只实现 AC1 正文点名的 spawn-agent
+路径；meta-driver 接线不在本任务 `## Touches` 内（它自带一份 `## Touches`），且其验收项也不在门控清单里，
+故留作独立任务。
