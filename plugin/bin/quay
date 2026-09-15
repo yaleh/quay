@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# plugin/bin/quay — the plugin form's CLI entry point, so `quay` works WITHOUT
+# `npm install -g quay`.
+#
+# WHY THIS FILE EXISTS (gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global):
+# Claude Code unconditionally prepends `<plugin-root>/bin` to the Bash tool's PATH
+# for every enabled plugin — measured 2026-09-02 and recorded as T4 in
+# orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §3a/§9 ("PATH 中已
+# 存在 <plugin-root>/bin，该目录尚不存在也照样在"). The directory did not exist, so
+# a plugin-form install had NO `quay` on PATH and users were pushed to
+# `npm install -g` for the CLI alone — even though the plugin already ships a
+# self-contained, Node-≥20-runnable bundle at <plugin-root>/vendor/quay/dist/quay.js.
+#
+# The capability was there; the entry point was missing. This shim is that entry
+# point and nothing else: it resolves its OWN location (so PATH lookup, a symlink
+# from ~/.local/bin, and Claude Code's plugin-cache copy all work) and execs the
+# vendored bundle with the caller's argv. No npm, no global install, no
+# node_modules of its own — the bundle inlines its dependencies.
+#
+# The bundle is generated (gitignored) and built by plugin/scripts/sync-vendor.sh;
+# the root `npm install` postinstall, scripts/test.sh, publish-dist-branch.sh and
+# packages/quay/scripts/package.sh all run that build, so both delivery channels
+# (the dist-plugin orphan branch and the npm tarball) carry it.
+set -euo pipefail
+
+# Resolve this script's real path, following symlinks, so <plugin-root> is correct
+# however the shim was reached. POSIX readlink only (no `readlink -f`, which is a
+# GNU/BSD extension) — the loop below is the portable equivalent.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  dir="$(cd -P "$(dirname "$self")" && pwd)"
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="${dir}/${link}" ;;
+  esac
+done
+plugin_root="$(cd -P "$(dirname "$self")/.." && pwd)"
+
+entry="${plugin_root}/vendor/quay/dist/quay.js"
+if [ ! -f "$entry" ]; then
+  printf 'quay: the plugin'"'"'s bundled CLI is missing: %s\n' "$entry" >&2
+  printf 'quay: build it with `bash %s/scripts/sync-vendor.sh`, or install the npm package (`npm install -g quay`).\n' "$plugin_root" >&2
+  exit 127
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  printf 'quay: node not found on PATH — the plugin CLI needs Node.js >= 20.\n' >&2
+  exit 127
+fi
+
+exec node "$entry" "$@"

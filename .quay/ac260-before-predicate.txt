@@ -1,0 +1,12 @@
+AC4 — 负控制：谓词读的是【分支内容】，不是工作树。下面是【修前】对同一谓词的一次读数
+（在 publish 重跑【之前】取自 dist-plugin=b2b7ea4ea，逐字执行 goals/AC-260-*.md 的 criterion）。
+谓词原文见 .quay/ac260-criterion.py（从 goal 文件 criterion: |- 块逐字提取，去 2 空格缩进）。
+
+$ bash .quay/ac260-criterion.py
+exit=1
+--- stderr（原文）---
+AC-260: 260 of 261 dist references on dist-plugin still carry a cwd-relative plugin/ prefix (first 3: [('loop/fast-mode-loop-tick.md', 'plugin/scripts/dist/task-status-drift-check.js'), ('loop/fast-mode-loop-tick.md', 'plugin/scripts/dist/fast-mode-telemetry.js'), ('loop/fast-mode-loop-tick.md', '`plugin/scripts/dist/known-load-sensitive.js')]) => in a consuming project the plugin IS the tree root, so these resolve to a path that does not exist there
+--- stdout（原文，空）---
+(empty)
+
+⇒ 修前 260/261 offender，证明该扫描能命中 ⇒ 修后的 0 携带信息（硬规则 3b）。

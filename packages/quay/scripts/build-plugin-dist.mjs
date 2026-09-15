@@ -62,12 +62,23 @@ const CONSUMER_DIRS = ["skills", "loop", "probes", "agents", "workflows", "scrip
 const INVOCATION_RE =
   /node\s+(?:--[a-z-]+\s+)*[^"\n]*?([A-Za-z0-9_.-]+\.ts)|gate_delegate_ts\s+"([A-Za-z0-9_.-]+\.ts)"|(?:\$\{SCRIPT_DIR\}|\$SCRIPT_DIR|\$\(dirname "\$0"\))\/[A-Za-z0-9_.-]+\/([A-Za-z0-9_.-]+\.ts)|(?:\$\{SCRIPT_DIR\}|\$SCRIPT_DIR|\$\(dirname "\$0"\))\/([A-Za-z0-9_.-]+\.ts)/g;
 
-// In markdown docs the probes/skills ALSO invoke tools by bare `plugin/scripts/<name>.ts` path
-// with no `node` prefix (e.g. probes/architecture-analysis.md lists
-// `plugin/scripts/git-lens-l-d-code-doc-ratio.ts <base> <head>` as a runnable line). Every
-// `.ts` path-prefixed in a shipped .md is a reference that must resolve after the raw .ts are
-// removed, so it is an entry regardless of invocation spelling.
-const MD_PATH_PREFIXED_RE = /(?:plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+\.ts)/g;
+// In markdown docs the probes/skills ALSO invoke tools by a PATH-PREFIXED `<name>.ts` reference
+// with no reachable `node`-prefix match (e.g. probes/architecture-analysis.md lists
+// `plugin/scripts/git-lens-l-d-code-doc-ratio.ts <base> <head>` as a runnable line; the skills run
+// them as `node "${CLAUDE_PLUGIN_ROOT}/scripts/X.ts"`, which INVOCATION_RE's first branch cannot
+// reach because `[^"\n]*?` excludes the opening quote and the basename must follow immediately).
+// Every `.ts` path-prefixed in a shipped .md is a reference that must resolve after the raw .ts are
+// removed, so it is an entry regardless of anchor spelling: BOTH spellings are the same reference
+// shape, and covering only the repo-relative one is what left `serial-fanin-absorb.ts` and
+// `routine-file-gate.ts` (loop-driver / routines) missing from the bundle set — publish's strip
+// step then deleted their raw .ts and the skills pointed at files that never shipped. Measured
+// 2026-09-15 on the artifact: those two are the dangling refs AC-260 reports once the cwd-relative
+// offenders are gone. Fifth instance of "the entry set is blind to a reference SHAPE"
+// (gap-dist-closure-missing-driver-anchor-js was the fourth) — the shape, not the filename.
+// Deliberately `.md`-only (the caller gates on the extension): a fixture .sh that spells a checker
+// path with a shell variable is a hermetic harness, not a shipped invoker.
+const MD_PATH_PREFIXED_RE =
+  /(?:\$\{CLAUDE_PLUGIN_ROOT\}\/|plugin\/)(scripts|gate-scripts)\/([A-Za-z0-9_.-]+\.ts)/g;
 
 // Core code (packages/quay/src) spawns plugin .ts by relative path and ships inside dist/quay.js —
 // cli/driver.ts + plugin-root.ts's KERNEL_RELS anchor reference driver-runtime.ts, mcp-server.ts
@@ -292,7 +303,7 @@ export function deriveEntries(pluginRoot) {
       }
       if (f.endsWith(".md")) {
         for (const m of text.matchAll(MD_PATH_PREFIXED_RE)) {
-          const rel = existing.get(m[1]);
+          const rel = existing.get(m[2]);
           if (rel) referenced.add(rel);
         }
       }
@@ -441,29 +452,96 @@ export function verifyDistClosure(pluginRoot, tarballEntries) {
   return { required: [...required].sort(), missing };
 }
 
-/** Rewrite a markdown doc's plugin .ts references to the bundled dist entrypoints. */
-export function rewriteMarkdown(text) {
-  // node --no-warnings --experimental-strip-types [<prefix>/]plugin/{scripts,gate-scripts}/X.ts
+// ── the plugin-root anchor: every shipped reference must resolve in a CONSUMING project ──────────
+// A plugin-level marketplace source (`{"source":"github","repo":"…","ref":"dist-plugin"}`) supports
+// no `path` parameter (publish-dist-branch.sh:106-107), so the orphan branch's ROOT *is* the plugin.
+// The dev tree's repo-relative `plugin/scripts/X.ts` therefore names `<plugin>/plugin/scripts/X.ts`
+// in a consuming project — a path that never exists there. `${CLAUDE_PLUGIN_ROOT}` is the anchor
+// Claude Code expands for plugin-borne content, and the spelling the shipped sources already use
+// (plugin/skills/routines/SKILL.md:16, asserted by plugin/test/plugin-packaging.test.mjs:333).
+// The rewrite rules below used to swap only the EXTENSION and keep whatever prefix they found, so
+// the artifact shipped 260 references of the unresolvable form (AC-260, measured 2026-09-15).
+const ROOT_ANCHOR = "${CLAUDE_PLUGIN_ROOT}";
+
+/**
+ * Rewrite every plugin-script reference in `text` to the plugin-root-anchored bundled form.
+ *
+ * Three input shapes, one root cause (the rewriter did not know the anchor existed):
+ *   ① `plugin/{scripts,gate-scripts}/X.ts` — the dev tree's repo-relative form. Here `plugin/` is
+ *      the ANCHOR MARKER, not a path segment to preserve; an optional repo-root expression in front
+ *      of it (`${worktree}/plugin/…`, `<root>/plugin/…`) means "that root's plugin subtree", so it
+ *      is replaced by the anchor too. Keeping the prefix is what produced the doubled, unresolvable
+ *      `<anchor>/plugin/…`, and keeping `plugin/` is what produced `<plugin>/plugin/…`.
+ *   ② `${CLAUDE_PLUGIN_ROOT}/{scripts,gate-scripts}/X.ts` — already anchored, but the CHILD is
+ *      stale: publish-dist-branch.sh:133 deletes every raw plugin .ts the bundler inlined into
+ *      dist/*.js, so the reference points at a file the artifact does not carry (11 refs across 5
+ *      SKILL.md, measured 2026-09-15 — invisible to a cwd-relative-prefix predicate alone, 硬规则 5b).
+ *   ③ a reference that already carries the bundled extension (authored, or emitted by an earlier
+ *      pass) — same prefix problem, no bundling decision to make.
+ * ① and ② become `${CLAUDE_PLUGIN_ROOT}/<kind>/dist/<name>.js`.
+ *
+ * A script that is NOT bundled keeps its `.ts` reference. `runner-static-gate.ts` is the
+ * static-check REGISTRY — a bash library shipped verbatim, never a bundler entry (see
+ * publish-dist-branch.sh:130) — so `dist/runner-static-gate.js` names a file the build never
+ * produces. The predicate is injected rather than assumed: rewriting a raw-shipped script to a
+ * bundle path is exactly the referenced-not-landed defect this function exists to remove.
+ *
+ * @param {string} text
+ * @param {(kind: "scripts"|"gate-scripts", name: string) => boolean} bundleExists
+ *   Whether the staged plugin root carries `dist/<name>.js` for that directory. Defaults to
+ *   "every script is bundled" — the dev-tree SOURCE assumption the pure callers (unit tests)
+ *   hold; the production caller (rewriteInvokers) always passes the real filesystem predicate.
+ */
+export function rewritePluginPaths(text, bundleExists = () => true) {
+  const bundled = (kind, name) =>
+    bundleExists(kind, name) ? `${ROOT_ANCHOR}/${kind}/dist/${name}.js` : null;
+  // ② the anchor is already right — only the child is stale.
   text = text.replace(
-    /node --no-warnings --experimental-strip-types (([^\s"'`]*\/)?)(plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
-    "node --no-warnings $1$3/dist/$4.js"
+    /\$\{CLAUDE_PLUGIN_ROOT\}\/(scripts|gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
+    (m, kind, name) => bundled(kind, name) ?? m
   );
-  // node --experimental-strip-types [<prefix>/]plugin/{scripts,gate-scripts}/X.ts
+  // ① dev-tree repo-relative form, with any repo-root expression in front of it. `<>` are in the
+  //    prefix class for the `<root>/plugin/…` spelling the cold-start table uses; every other
+  //    boundary (whitespace, backtick, quote, paren, CJK punctuation) simply ends the prefix, which
+  //    is empty for the bare `plugin/…` token.
   text = text.replace(
-    /node --experimental-strip-types (([^\s"'`]*\/)?)(plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
-    "node $1$3/dist/$4.js"
+    /[A-Za-z0-9_${}<>./-]*?plugin\/(scripts|gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g,
+    (m, kind, name) => bundled(kind, name) ?? m
   );
-  // any remaining plugin/{scripts,gate-scripts}/X.ts path reference (prose + bare-path invocations)
-  text = text.replace(/(plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g, "$1/dist/$2.js");
+  // ③ already-bundled reference carrying the dev-tree prefix.
+  text = text.replace(
+    /[A-Za-z0-9_${}<>./-]*?plugin\/(scripts|gate-scripts)\/dist\/([A-Za-z0-9_.-]+)\.js/g,
+    `${ROOT_ANCHOR}/$1/dist/$2.js`
+  );
   return text;
+}
+
+/** Drop `--experimental-strip-types` where the target is now a bundled `dist/*.js`. Guarded on the
+ *  bundled path form on purpose: a script that kept its `.ts` (the raw-shipped registry) still
+ *  NEEDS the flag, so a blanket strip would break exactly the reference the guard preserved. */
+function stripTypesFlagForBundles(text) {
+  text = text.replace(
+    /node --no-warnings --experimental-strip-types (\$\{CLAUDE_PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
+    "node --no-warnings $1"
+  );
+  return text.replace(
+    /node --experimental-strip-types (\$\{CLAUDE_PLUGIN_ROOT\}\/(?:scripts|gate-scripts)\/dist\/)/g,
+    "node $1"
+  );
+}
+
+/** Rewrite a markdown doc's plugin .ts references to the bundled, plugin-root-anchored entrypoints. */
+export function rewriteMarkdown(text, bundleExists) {
+  return stripTypesFlagForBundles(rewritePluginPaths(text, bundleExists));
 }
 
 /**
  * Rewrite a shell file's plugin .ts delegation references to the bundled dist entrypoints.
  * @param {string} text
  * @param {boolean} isQuayInit apply quay-init.sh's derivation/mechanism-specific fixes
+ * @param {(kind: "scripts"|"gate-scripts", name: string) => boolean} [bundleExists] see rewritePluginPaths
  */
-export function rewriteShell(text, isQuayInit = false) {
+export function rewriteShell(text, isQuayInit = false, bundleExists) {
   // node "$(dirname "$0")/X.ts" → node "$(dirname "$0")/dist/X.js"
   text = text.replace(/node "\$\(dirname "\$0"\)\/([A-Za-z0-9_.-]+)\.ts"/g, 'node "$(dirname "$0")/dist/$1.js"');
   // exec node --experimental-strip-types "$SCRIPT_DIR/X.ts"
@@ -482,8 +560,12 @@ export function rewriteShell(text, isQuayInit = false) {
   text = text.replace(/(\$\{SCRIPT_DIR\}|\$SCRIPT_DIR)\/([A-Za-z0-9_.-]+)\.ts/g, "$1/dist/$2.js");
   // $PLUGIN_ROOT/scripts/X.ts → $PLUGIN_ROOT/scripts/dist/X.js (quay-init code refs)
   text = text.replace(/(\$PLUGIN_ROOT\/scripts)\/([A-Za-z0-9_.-]+)\.ts/g, "$1/dist/$2.js");
-  // any remaining plugin/{scripts,gate-scripts}/X.ts path reference in shell text (comments/refs)
-  text = text.replace(/(plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+)\.ts/g, "$1/dist/$2.js");
+  // every remaining plugin/{scripts,gate-scripts}/… reference (comments, prose refs, and bare-path
+  // invocations) → the plugin-root-anchored bundled form. This is the .sh half of the same defect
+  // AC-260 counts on the .md/.js side: leaving it as `plugin/scripts/dist/X.js` resolves to
+  // <plugin>/plugin/scripts/… in a consuming project.
+  text = rewritePluginPaths(text, bundleExists);
+  text = stripTypesFlagForBundles(text);
   // node --no-warnings --experimental-strip-types "<var>" → node --no-warnings "<var>" (var now a .js bundle)
   text = text.replace(/node --no-warnings --experimental-strip-types "\$([A-Za-z0-9_]+)"/g, 'node --no-warnings "$$$1"');
   if (isQuayInit) {
@@ -504,6 +586,18 @@ export function rewriteShell(text, isQuayInit = false) {
 export function rewriteInvokers(pluginRoot) {
   const mdDirs = ["skills", "loop", "probes", "agents", "workflows"];
   const shDirs = ["scripts", "gate-scripts"];
+  // Hermetic FIXTURE trees are not invokers. `scripts/checker-mutation-cases/*.sh` BUILD their own
+  // throwaway `<workdir>/plugin/scripts/…` layout, so a `plugin/` prefix *inside them* means "the
+  // fixture's fake repo root" — not this repo. Rewriting them re-points the fixture at the installed
+  // plugin and corrupts what it constructs (the old extension rules already re-targeted the very
+  // files they write: `cat > plugin/scripts/X.ts` became `…/dist/X.js`). They reference nothing the
+  // artifact ships, so leaving them byte-identical to the source is both correct and the safe
+  // default; AC-260's carrier scan reaches them (硬规则 5b) and finds no `dist/*.js` reference in
+  // the untouched form.
+  const isFixture = (f) => f.includes(`${path.sep}checker-mutation-cases${path.sep}`);
+  // Whether the staged root really carries a bundle — the build+strip ran before this, so a `.ts`
+  // that survived is one the bundler never inlined (runner-static-gate.ts) and keeps its raw form.
+  const bundleExists = (kind, name) => fs.existsSync(path.join(pluginRoot, kind, "dist", `${name}.js`));
   let filesTouched = 0;
   for (const dir of mdDirs) {
     for (const f of walk(path.join(pluginRoot, dir))) {
@@ -517,8 +611,9 @@ export function rewriteInvokers(pluginRoot) {
       // node --experimental-strip-types invocation forms; dev-repo `experiments/...ts` and bare-name
       // prose refs are deliberately left untouched).
       if (!f.endsWith(".md") && !f.endsWith(".js")) continue;
+      if (isFixture(f)) continue;
       const text = fs.readFileSync(f, "utf8");
-      const out = rewriteMarkdown(text);
+      const out = rewriteMarkdown(text, bundleExists);
       if (out !== text) {
         fs.writeFileSync(f, out);
         filesTouched++;
@@ -528,9 +623,10 @@ export function rewriteInvokers(pluginRoot) {
   for (const dir of shDirs) {
     for (const f of walk(path.join(pluginRoot, dir))) {
       if (!f.endsWith(".sh")) continue;
+      if (isFixture(f)) continue;
       const isQuayInit = path.basename(f) === "quay-init.sh";
       const text = fs.readFileSync(f, "utf8");
-      const out = rewriteShell(text, isQuayInit);
+      const out = rewriteShell(text, isQuayInit, bundleExists);
       if (out !== text) {
         fs.writeFileSync(f, out);
         filesTouched++;
