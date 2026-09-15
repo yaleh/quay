@@ -466,6 +466,54 @@ test("采集器 — 离线缝走的是同一条 collect()：failure 记录落盘
   assert.equal("attribution" in rows[1], false);
 });
 
+test("采集器 — 拉 job 日志必须带 --allow-escape-sequences（省掉它恒取回 0 字节 ⇒ testFiles 永远派生不出）", () => {
+  const calls = [];
+  const runner = (args) => {
+    calls.push(args);
+    const p = args[args.length - 1];
+    if (p.includes("/actions/runs?")) {
+      return JSON.stringify({
+        workflow_runs: [
+          {
+            id: 1,
+            name: "CI",
+            head_branch: "develop",
+            status: "completed",
+            conclusion: "failure",
+            created_at: "2026-09-15T02:00:00Z",
+            run_started_at: "2026-09-15T02:00:05Z",
+            updated_at: "2026-09-15T02:10:00Z",
+          },
+        ],
+      });
+    }
+    if (p.includes("/jobs/")) return "__GROUP__ concurrency=8 files=631\n";
+    if (p.includes("/jobs")) {
+      return JSON.stringify({
+        jobs: [
+          {
+            id: 11,
+            name: "test",
+            conclusion: "failure",
+            started_at: "2026-09-15T02:00:05Z",
+            completed_at: "2026-09-15T02:10:00Z",
+            steps: [{ name: "Run tests", conclusion: "failure" }],
+          },
+        ],
+      });
+    }
+    throw new Error("unexpected gh call: " + p);
+  };
+  const { records, warnings } = collect({ repo: "o/n", run: runner, limit: 1, fetchLogs: true });
+  const logCalls = calls.filter((a) => a[a.length - 1].includes("/logs"));
+  assert.equal(logCalls.length, 1, "应当拉过 1 次 job 日志");
+  assert.ok(logCalls[0].includes("--allow-escape-sequences"), `gh 调用缺 --allow-escape-sequences: ${JSON.stringify(logCalls[0])}`);
+  assert.deepEqual(warnings, []);
+  assert.equal(records[0].testFiles, 631, "从真实形状的日志里派生 testFiles");
+  assert.equal(records[0].attribution, undefined, "collect() 只组装，不归因");
+  assert.equal(withAttribution(records[0], null).attribution, "real-defect");
+});
+
 test("采集器 — 登记表读不到 ⇒ loadKnownFlakes 返回 null（⛔ 不是空表）", () => {
   const dir = tmpDir("flakes");
   assert.equal(loadKnownFlakes(path.join(dir, "missing.json")), null);

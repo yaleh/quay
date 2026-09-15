@@ -302,7 +302,11 @@ export function collect(opts: CollectOptions): CollectResult {
       for (const j of jobs) {
         if (typeof j.id !== "number" && typeof j.id !== "string") continue;
         try {
-          const log = run(["api", `/repos/${opts.repo}/actions/jobs/${j.id}/logs`]);
+          // `--allow-escape-sequences` 不可省：gh 默认**拒绝**输出含 ANSI 转义色的 job 日志
+          // （报 "the response contains terminal escape sequences; pass --allow-escape-sequences"），
+          // 而测试日志恰恰是带色的 ⇒ 省掉它会让每一条 job 都取回 0 字节，testFiles 永远派生不出来。
+          // 实测 2026-09-15：不加该旗标 `gh api .../jobs/<id>/logs` 返回 0 字节。
+          const log = run(["api", "--allow-escape-sequences", `/repos/${opts.repo}/actions/jobs/${j.id}/logs`]);
           const n = deriveTestFilesFromLog(log);
           if (n !== null && (testFiles === null || n > testFiles)) testFiles = n;
         } catch (e) {
