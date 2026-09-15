@@ -3,7 +3,7 @@ id: gap-ac194-reflog-action-vocabulary-incomplete
 title: "AC-194 判据再变假：develop reflog 出现第三种 ref-level 落地拼法（`branch: Reset
   to`）不在分类词汇表内 ⇒ 2 条 unclassifiable ⇒ NOT-EVALUATED fail-closed（GOAL-007 三例之③
   的第二次「前提变更」）"
-status: ready
+status: done
 labels:
   - gap
   - defect
