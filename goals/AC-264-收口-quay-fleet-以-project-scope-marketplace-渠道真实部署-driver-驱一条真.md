@@ -2,7 +2,7 @@
 id: AC-264
 title: 收口：quay-fleet 以 project scope + marketplace 渠道真实部署，driver 驱一条真任务到 done，免
   npm 与免 QUAY_PLUGIN_ROOT 由文件系统直接量确认
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -93,6 +93,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-019 已激活，本 AC 进入在评
+  - at: 2026-09-15T07:03:55.429Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
