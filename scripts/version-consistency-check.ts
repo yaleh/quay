@@ -131,6 +131,34 @@ const VERSION_ENTRIES: VersionEntry[] = [
       return v;
     },
   },
+  {
+    // Added by gap-release-cut-via-workflow-dispatch (2026-09-15). `delivery-manifest.json` was the
+    // ONE version-bearing file outside this set, and it drifted exactly the way this checker exists to
+    // prevent: bumped through `08e8ec55f` (0.4.0 -> 0.5.0) and then left at `0.5.0` across the 0.6.x/0.7.x
+    // bumps. The drift was invisible here but fatal on the release path —
+    // `scripts/delivery-manifest-check.ts:252` builds the expected asset name as
+    // `quay-sea-${manifest.version}-${platform}` and EXACT-matches it against the assets a run really
+    // published, so against release `v0.7.0` (assets `quay-sea-0.7.0-*`) it matched nothing. Measured
+    // two-way in the task worktree with the real GitHub Release: manifest 0.5.0 => 4 failures
+    // (2 SEA + 2 npm/plugin); manifest 0.7.0 => only the 2 npm/plugin failures that were there because
+    // that run's `release` job had failed and never uploaded `quay-0.7.0.tgz`. Same shape as the
+    // plugin/README.md and plugin/VERSION additions above (hard rule 5b: fixing the one instance that
+    // was reported does not mean it was the only one — the sweep over the other version-bearing files
+    // returned this single remaining point).
+    // The extractor THROWS when the field is absent: an unparseable manifest must land in mode:'error',
+    // never be shaped like a version that agrees (hard rule 3b).
+    label: 'delivery-manifest.json',
+    path: 'delivery-manifest.json',
+    extract: (raw: string) => {
+      const v = JSON.parse(raw).version;
+      if (typeof v !== 'string' || !/^\d+\.\d+\.\d+/.test(v)) {
+        throw new Error(
+          'no semver in delivery-manifest.json .version (cannot evaluate — not a pass)',
+        );
+      }
+      return v;
+    },
+  },
 ];
 
 export function resolveRepoRoot(callerDir?: string): string {

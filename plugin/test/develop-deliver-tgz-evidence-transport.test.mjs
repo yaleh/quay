@@ -488,3 +488,70 @@ test("AC-258 preflight — five DISTINCT verdicts, both timeout stages, and ever
   assert.match(r.stdout, /predicate single-spelling\) here='claude -p "say ok"' there='claude -p "say ok"'/,
     "the probe predicate must be spelled identically in both scripts — drift would read as an environment difference");
 });
+
+// ── gap-ac257-verify-leg-misses-declared-worker-env ──────────────────────────────────────────────
+// The sibling half of the SAME defect the block above pins (硬规则 5b). Both legs share ONE step
+// sequence — `step_ac257_project_scope`'s first action IS `ac258_worker_preflight`, same source as
+// `step_ac258_user_scope` — so both need the caller-declared worker login face delivered into the
+// remote process env. Only the AC-258 leg got it ⇒ on a target whose own OAuth is dead and which can
+// only run a worker through a side-channel Anthropic-compatible endpoint (ad-arm1/orangevps: empty
+// accessToken/refreshToken, expiresAt=0), the AC-257 remote preflight fell back to `credentials` and
+// returned 1 BEFORE any destructive step ⇒ AC257-NOT-EVALUATED. The failure shape is "no record was
+// written", which is the same shape as "the mechanism is broken" (硬规则 3b).
+//
+// Judged by POSITION, per mode (硬规则 2): the object is the LEADING command-substitution lines of
+// that mode's own remote heredoc (⛔ not a whole-file keyword grep — a hit in another mode, in a
+// comment, or in the selfcheck fixture must NOT satisfy this). Removing either call site reds this
+// test, and the in-process negative control below proves the predicate is able to red at all
+// (硬规则 4: a check that cannot fail is not a measurement).
+test("AC-257/AC-258 — BOTH legs' remote preamble carries the caller-declared worker env (position, per-mode slice)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  const modeDefs = [...src.matchAll(/^(verify_[a-z0-9_]+_mode)\(\) \{/gm)];
+  const bodyOf = (name) => {
+    const i = modeDefs.findIndex((m) => m[1] === name);
+    assert.ok(i >= 0, `${name} must exist`);
+    const to = i + 1 < modeDefs.length ? modeDefs[i + 1].index : src.length;
+    return src.slice(modeDefs[i].index, to);
+  };
+  // the preamble = the contiguous run of `$(...)` lines at the TOP of that mode's remote heredoc.
+  // Contiguity matters: it is what makes this a real ordering assertion (the export must be part of
+  // the prologue, before the step sequence), ⛔ not "somewhere in the heredoc".
+  const preambleOf = (body, mode) => {
+    const hStart = body.indexOf("remote_script=$(cat <<REMOTE");
+    assert.ok(hStart >= 0, `${mode} must generate a remote script heredoc`);
+    const hEnd = body.indexOf("\nREMOTE\n", hStart);
+    assert.ok(hEnd > hStart, `${mode}'s remote heredoc must be terminated`);
+    const heredoc = body.slice(hStart, hEnd);
+    const pre = [];
+    for (const l of heredoc.split("\n").slice(1)) {
+      if (/^\$\(.*\)$/.test(l)) pre.push(l);
+      else break;
+    }
+    return { pre, heredoc };
+  };
+  const carriesWorkerEnv = (pre) => pre.includes("$(ac258_worker_env_export)");
+
+  for (const mode of ["verify_ac257_mode", "verify_ac258_mode"]) {
+    const { pre, heredoc } = preambleOf(bodyOf(mode), mode);
+    assert.deepEqual(pre, ['$(verify_node_export_for "${hk}")', "$(ac258_worker_env_export)"],
+      `${mode}: the remote preamble must be [Node floor, declared worker env] — the declared login face must reach the remote PROCESS env, because that is what the preflight AND the driver/worker it later spawns both inherit (两个不同的下发点 = 探测量与实际 spawn 对象不是一回事)`);
+    const iEnv = heredoc.indexOf("$(ac258_worker_env_export)");
+    const iSteps = heredoc.indexOf('bash "\\${HOME}/verify-deliver-coldstart.sh"');
+    assert.ok(iSteps > iEnv,
+      `${mode}: the declared-env export must precede the remote step sequence (export at ${iEnv}, first step at ${iSteps})`);
+  }
+
+  // ── in-process negative control ─────────────────────────────────────────────────────────────
+  // Run the SAME predicate against a copy with the call site removed. If this does not flip, the
+  // positive assertion above is vacuous (and per 硬规则 3b a vacuous green is more expensive than an
+  // absent check, because it reads as a guarantee).
+  for (const mode of ["verify_ac257_mode", "verify_ac258_mode"]) {
+    const { pre } = preambleOf(bodyOf(mode), mode);
+    assert.ok(carriesWorkerEnv(pre), `${mode}: precondition for the negative control`);
+    const mutated = pre.filter((l) => l !== "$(ac258_worker_env_export)");
+    assert.equal(mutated.length, pre.length - 1,
+      `${mode}: the negative control must actually remove the call site`);
+    assert.ok(!carriesWorkerEnv(mutated),
+      `${mode}: removing the call site MUST make the predicate false — otherwise this check cannot red for the defect it pins`);
+  }
+});

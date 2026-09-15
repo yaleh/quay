@@ -71,6 +71,43 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # gap-release-cut-via-workflow-dispatch (AC1, 2026-09-15): `.quay/config.yml` is
+      # gitignored (DIR-050, per-workspace), so a fresh `actions/checkout@v4` of the
+      # TAGGED tree has none — and quay's own "walk upward looking for .quay/config.yml"
+      # root helpers treat its absence as fatal. Observed in release run 34987120091
+      # (tag v0.7.0): the "Run tests" step below failed with 157 test failures, every one
+      # of the shape `Error: no .quay/config.yml found (searched from ... upward)` /
+      # `AssertionError: real .quay/config.yml must exist in this worktree`, NOT a hang
+      # and NOT a SEA failure. `ci.yml` gained this exact step in
+      # gap-config-yml-example-and-ci-bootstrap; this job is a SECOND call site that the
+      # fix missed (hard rule 5b: fixing one instance ≠ it was the only one) — it is a
+      # separate call site because this job deliberately does NOT delegate to
+      # scripts/test.sh (see the rationale on "Run tests" below), so it does not inherit
+      # that entrypoint's own bootstrap.
+      - name: Bootstrap .quay/config.yml (gap-config-yml-example-and-ci-bootstrap)
+        run: cp .quay/config.yml.example .quay/config.yml
+
+      # gap-release-cut-via-workflow-dispatch (AC7, 2026-09-15): `scripts/test.sh` builds the
+      # bundles FIRST — its `build_dist_once()` runs `packages/{quay,quay-native}/scripts/build-dist.mjs`
+      # and then `plugin/scripts/sync-vendor.sh --sync-dist`, and it refuses to run tests against a
+      # possibly-stale bundle (test.sh:953 "refusing to run tests against a possibly-stale bundle").
+      # THIS job deliberately does not delegate to scripts/test.sh (see the rationale on "Run tests"
+      # below), so it also lost that entrypoint's build half — exactly the same second-call-site gap
+      # the .quay/config.yml bootstrap above closed for the OTHER thing test.sh does first. `dist/` is
+      # gitignored, so a fresh `actions/checkout@v4` of the tagged tree has none, and the subset this
+      # job runs is not dist-free: `packages/quay/test/server-status-web-control-same-pid.test.mjs:490`
+      # asserts `QUAY_CLI.endsWith(".js")` — "the CLI entry under test is the prebuilt bundle" — which
+      # `cli-entry.mjs` cannot satisfy when the bundle is missing, because its fallback is `bin/quay.ts`.
+      # Measured locally (worktree, .quay/config.yml present): without the build the step exits non-zero
+      # with that exact AC4 assertion plus a file-level `cli.test.mjs` failure; the build is the missing
+      # half, not a test that needs excluding.
+      - name: Build dist bundles (the build half of scripts/test.sh's build_dist_once)
+        run: |
+          set -euo pipefail
+          node packages/quay/scripts/build-dist.mjs
+          node packages/quay-native/scripts/build-dist.mjs
+          bash plugin/scripts/sync-vendor.sh --sync-dist
+
       - name: Run tests
         # QX-056 (experiment 4, iteration 15): DIR-004 publish.
         # quay-github package tests are excluded (they require broader org perms) —

@@ -45,6 +45,10 @@ function makeFixture(name: string, versions: Record<string, string>): string {
       writeFileSync(full, JSON.stringify([{ name: 'quay', version: v }], null, 2));
     } else if (p === 'plugin/.claude-plugin/plugin.json') {
       writeFileSync(full, JSON.stringify({ version: v }, null, 2));
+    } else if (p === 'delivery-manifest.json') {
+      // Version-bearing JSON field like the package.json files, but its own fixture branch keeps the
+      // shape honest (a `$schema` + `artifacts` body, not a package.json stand-in).
+      writeFileSync(full, JSON.stringify({ $schema: 'delivery-manifest-v1', version: v, artifacts: { 'npm-tarballs': [] } }, null, 2));
     } else {
       // package.json
       const name = p.split('/').slice(-2, -1)[0] || 'unknown';
@@ -65,13 +69,14 @@ const ALL_PATHS = [
   '.claude-plugin/marketplace.json',
   'plugin/vendor/quay/package.json',
   'plugin/VERSION',
+  'delivery-manifest.json',
 ];
 
 // ── Unit tests ──────────────────────────────────────────────────────────
 
-test('readVersions returns 10 entries for the real tree', () => {
+test('readVersions returns 11 entries for the real tree', () => {
   const entries = readVersions(repoRoot);
-  assert.equal(entries.length, 10);
+  assert.equal(entries.length, 11);
   for (const e of entries) {
     assert.ok(e.label.length > 0, `entry for ${e.path} has no label`);
   }
@@ -251,6 +256,32 @@ test('check reddens a HALF-applied -dev bump and names both forms (RED)', () => 
   }
 });
 
+// ── delivery-manifest.json-only paths (gap-release-cut-via-workflow-dispatch) ────────────────
+// Same discipline as the README and plugin/VERSION pairs above. This file was the ONE remaining
+// version-bearing member outside the set, and it drifted exactly as they did (0.4.0 -> 0.5.0 at
+// 08e8ec55f, then left at 0.5.0 through the 0.6.x/0.7.x bumps) — invisible here, fatal on the release
+// path, where delivery-manifest-check.ts exact-matches `quay-sea-${manifest.version}-${platform}`
+// against the assets a run really published. Without these two, "the entry was added" and "the entry
+// actually judges" are indistinguishable (hard rule 4).
+
+test('check detects drift when ONLY delivery-manifest.json moves (RED)', () => {
+  const ver = '9.9.9';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  versions['delivery-manifest.json'] = '9.9.8'; // drift ONLY the manifest version
+  const tmp = makeFixture('delivery-manifest-drift', versions);
+  try {
+    const result = check(tmp);
+    assert.equal(result.mode, 'drift');
+    assert.equal(result.ok, false);
+    const drifted = result.entries.find((e: any) => e.path === 'delivery-manifest.json');
+    assert.ok(drifted, 'delivery-manifest.json entry must be in the checked set');
+    assert.equal(drifted.version, '9.9.8');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('suffixPolicyOf is three-state: all-bare is NOT mixed, unreadable is NOT a policy', () => {
   assert.equal(suffixPolicyOf(['1.0.0', '2.0.0']), 'all-bare');
   assert.equal(suffixPolicyOf(['1.0.0-dev', '2.0.0-dev']), 'all-suffixed');
@@ -260,6 +291,24 @@ test('suffixPolicyOf is three-state: all-bare is NOT mixed, unreadable is NOT a 
   assert.equal(suffixPolicyOf([]), 'not-evaluated');
   // The unreadable-tree path must report not-evaluated rather than a policy.
   assert.equal(check('/nonexistent/path/xyz').suffixPolicy, 'not-evaluated');
+});
+
+test('check returns mode=error (NOT all-equal) when delivery-manifest.json holds no semver', () => {
+  const ver = '9.9.9';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  const tmp = makeFixture('delivery-manifest-unparseable', versions);
+  try {
+    // A manifest that CANNOT be read must not be shaped like a manifest that agrees.
+    writeFileSync(resolve(tmp, 'delivery-manifest.json'), JSON.stringify({ $schema: 'delivery-manifest-v1', version: 'not-a-version' }, null, 2));
+    const result = check(tmp);
+    assert.equal(result.mode, 'error');
+    assert.equal(result.ok, false);
+    const e = result.entries.find((x: any) => x.path === 'delivery-manifest.json');
+    assert.ok(e?.error, 'the unparseable manifest must carry an error');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('check handles marketplace.json with { plugins: [...] } wrapper', () => {
@@ -288,7 +337,7 @@ test('CLI --json exits 0 with JSON output even on drift', () => {
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.ok, 'boolean');
   assert.ok(Array.isArray(parsed.entries));
-  assert.equal(parsed.entries.length, 10);
+  assert.equal(parsed.entries.length, 11);
   assert.ok(Array.isArray(parsed.uniqueVersions));
 });
 
