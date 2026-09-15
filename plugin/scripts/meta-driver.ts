@@ -1076,6 +1076,15 @@ export interface Proposal {
   criterion: string;
   expect: string;
   origin: string;
+  /** 可选：本条提案意图取代的旧 AC id。**这是一条声明，不是一次处置**——它只记录「新提案 X
+   *  与旧 AC Y 的替代关系」，让这层关联第一次有了载体（此前只存在于人的脑子里：决策通道的
+   *  prompt 要人自己去跑 supersede，中间不留任何记录）。
+   *
+   *  ⛔ 边界（gap-meta-driver-proposal-lacks-supersedes-field 的 DoD，且由 store 结构性保证）：
+   *  写入它**不会**翻转旧 AC 的 status。goal-store 的处置分支以 `isGoalRecord` 为闸
+   *  （goal-store.ts:2322），而本 driver 只写 `AC-*` ⇒ 旧 AC 的状态在任何路径上都不动。
+   *  淘汰旧 AC 仍然是人的动作。 */
+  supersedes?: string;
 }
 
 /** 把提案渲染成 `routine-file-gate` 认识的候选文本（**同一个函数也用来给既有记录算 key**，
@@ -1118,6 +1127,9 @@ export async function writeDraftProposal(root: string, id: string, p: Proposal, 
     "--criterion", p.criterion,
     "--expect", p.expect,
     "--origin", p.origin,
+    // `supersedes` 非空时才追加 ⇒ 未声明的提案 argv 与改动前逐字一致（零变化路径不只是解析层的
+    // 契约，argv 层同样成立——否则 AC1 的「逐字一致」会因为多一个 flag 而只对了一半）。
+    ...(p.supersedes && p.supersedes.trim() !== "" ? ["--supersedes", p.supersedes.trim()] : []),
   ], dataRoot);
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
@@ -2150,9 +2162,14 @@ export function parseProbeOutput(stdout: string): {
         const p = raw as Record<string, unknown>;
         const need = ["goal", "title", "criterion", "expect", "origin"] as const;
         if (need.some((k) => typeof p[k] !== "string" || String(p[k]).trim() === "")) return [];
+        // `supersedes` 是**可选**字段：LLM 不给它时返回的对象里【不出现这个键】——⛔ 不写成
+        // `supersedes: undefined`，那会让对象多出一个键、破坏「缺省路径与改动前逐字一致」。
+        // 给了但纯净（空白）也不认：空白不是 id，⛔ 不把它凑成一条「看起来合格」的声明（硬规则 3b）。
+        const supersedes = typeof p.supersedes === "string" ? p.supersedes.trim() : "";
         return [{
           goal: String(p.goal).trim(), title: String(p.title).trim(), criterion: String(p.criterion).trim(),
           expect: String(p.expect).trim(), origin: String(p.origin).trim(),
+          ...(supersedes !== "" ? { supersedes } : {}),
         }];
       })
     : [];
