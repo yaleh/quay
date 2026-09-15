@@ -91,6 +91,11 @@
 #   --ac205-session  ⑦ 会话投递（GOAL-009-AC-205）：用安装物 dist/send-to-session.js 给同址目标会话
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
+#                    ⚠️ 本步的产出前置【不只是「有一个活会话」】：该会话的 settings 还必须具备
+#                    permissions.defaultMode=bypassPermissions 或 crossSessionInbound=accept，否则
+#                    probe 被按 Held peer message 扣下 ⇒ 不落账（这是设计如此，⛔ 不是缺陷）。
+#                    三态落痕：delivered / held（逐字贴出那条 Held 记录）/ absent（互不同形，
+#                    见 AC205_DELIVERY_OUTCOME 的取值表）。登记面见 plugin/freshness-producers.json。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
 #   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC161 第四次回归「用户级读数进记录」四态正/负控制 + AC-247 八件读数正/负控制 + AC 记录 schema 机制的正/负控制），不碰真实安装。exit 0/1。
 #   --ac-record-schema-report
@@ -260,6 +265,15 @@ AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=0      # 1 = 所用 send-to-session 出自
 AC205_TRANSCRIPT_CONFIRMED=0                 # 1 = transcript-delivery-check 判 delivered（读 transcript）
 AC205_EVALUATED=0                            # 1 = send 已发 + transcript 已读
 AC205_SESSION=0                              # 1 = --ac205-session 触发（需同址目标会话，opt-in）
+# ── AC-205 三态落痕（gap-ac205-delivery-held-unidentified-peer-sender Req. action 1）──────────
+# 本腿此前把「投递不到 / 投出去但被扣下 / 已送达」全印成一句 NOT written ⇒ 三态同形（硬规则 3b
+# 的反面：缺席被伪装成合格，且「被扣下」在记录里与「本机没有可投递会话」不可区分）。
+# 现取值为【互不同形】的六个：no-target / no-transcript / send-failed / delivered / held / absent；
+#   held 还要逐字贴出那条 `Held peer message` 记录（AC2 判据）。⛔ 不改 transcript-delivery-check.ts
+#   的三态契约（它判 delivered/failed/unknown 是对的）：本腿只把「非 delivered」再分成 held/absent。
+AC205_DELIVERY_OUTCOME=""                    # no-target|no-transcript|send-failed|delivered|held|absent
+AC205_HOLD_PRECHECK=""                       # 安装物 send-to-session 的发送前前置读数（direct|will-hold|unknown|not-reported）
+AC205_HELD_RECORD=""                         # held 时逐字贴出的那条记录（⛔ 不截断）
 
 # ── 目标项目 profiles 配置（gap-verify-coldstart-does-not-configure-target-profiles）────────
 # verify-deliver-coldstart 要证明「目标项目自己的 drivers 能驱动真实提交」，就必须先把目标项目配置到
@@ -5145,14 +5159,59 @@ find_ac205_target_session() {
   ' 2>/dev/null
 }
 
+# 三态落痕（gap-ac205-delivery-held-unidentified-peer-sender Req. action 1）。
+#   $1 = transcript 路径 · $2 = 起始字节偏移 · $3 = probe 文本 · $4 = delivered 标志（1 = 安装物的
+#   transcript-delivery-check 已判 delivered）。
+# stdout：第 1 行 = delivered|held|absent；held 时第 2 行 = 逐字贴出的那条记录（⛔ 不截断、不摘要）。
+# ⛔ 「delivered」【不由本函数判】：那会复制 transcript-delivery-check.ts 的三态契约（单一定义源，
+#    它是对的，⛔ 不改）。本函数只在【非 delivered】时把「被扣下（Held peer message）」与
+#    「查无此文本（absent）」分开 —— 这两态此前同形（都是一句 NOT written）。
+# 归因：只看【起始偏移之后】追加的行（本次投递的产物），避免把历史 held 记录算到本次 probe 头上；
+# 命中 probe 文本的那条记录优先于只在同一窗口里出现的其它 held 记录。
+ac205_delivery_outcome() {
+  if [ "$4" = "1" ]; then printf 'delivered\n'; return 0; fi
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("node:fs");
+    const file = process.argv[1], startRaw = process.argv[2], probe = process.argv[3];
+    const start = Number(startRaw) || 0;
+    let full = "";
+    try { full = fs.readFileSync(file, "utf8"); } catch { process.stdout.write("absent\n"); process.exit(0); }
+    const asText = (v) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v));
+    let held = null, pos = 0;
+    for (const raw of full.split("\n")) {
+      if (pos >= start) {
+        const t = raw.trim();
+        if (t) {
+          let rec = null;
+          try { rec = JSON.parse(t); } catch { rec = null; }
+          if (rec && rec.type === "system" && rec.subtype === "informational") {
+            const content = asText(rec.content);
+            if (content.includes("Held peer message")) {
+              const hit = !!probe && content.includes(probe);
+              if (!held || (hit && !held.hit)) held = { line: t, hit };
+            }
+          }
+        }
+      }
+      pos += Buffer.byteLength(raw, "utf8") + 1;
+    }
+    if (held) process.stdout.write("held\n" + held.line + "\n");
+    else process.stdout.write("absent\n");
+  ' "$1" "$2" "$3" 2>/dev/null
+}
+
 # step ⑦：会话投递（AC-205）——用安装物 dist/send-to-session.js 给同址目标会话发 probe，
 # 读目标 transcript 判 delivered ⇒ 写 AC-205 记录。缺任一生效读数不写（fail-closed）。
 step_ac205_session_delivery() {
   local qroot send_js check_js target pid session_id sock cwd transcript probe i verdict
+  local start_bytes send_out send_rc hold_precheck outcome_line held_line
   AC205_HOST="$(hostname 2>/dev/null || echo '')"
   AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=0
   AC205_TRANSCRIPT_CONFIRMED=0
   AC205_EVALUATED=0
+  AC205_DELIVERY_OUTCOME=""
+  AC205_HOLD_PRECHECK=""
+  AC205_HELD_RECORD=""
   qroot="$(npm root -g --prefix "$STEP1_PREFIX" 2>/dev/null || echo '')"
   send_js="$qroot/quay/plugin/scripts/dist/send-to-session.js"
   check_js="$qroot/quay/plugin/scripts/dist/transcript-delivery-check.js"
@@ -5164,7 +5223,12 @@ step_ac205_session_delivery() {
   # 所用 send-to-session 出自安装物 dist（非 dev 树）——shipped_from_installed_artifact 的事实来源。
   AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=1
   target="$(find_ac205_target_session)"
-  [ -n "$target" ] || { echo "  NOTE: AC-205 record NOT written (no live same-host target session in ~/.claude/sessions — 缺目标会话≠合格)"; return 0; }
+  if [ -z "$target" ]; then
+    AC205_DELIVERY_OUTCOME="no-target"
+    echo "  NOTE: AC-205 record NOT written (no live same-host target session in ~/.claude/sessions — 缺目标会话≠合格)"
+    echo "  delivery_outcome=$AC205_DELIVERY_OUTCOME hold_precheck=not-run send_rc=-"
+    return 0
+  fi
   pid="$(printf '%s\n' "$target" | sed -n '1p')"
   session_id="$(printf '%s\n' "$target" | sed -n '2p')"
   sock="$(printf '%s\n' "$target" | sed -n '3p')"
@@ -5175,33 +5239,74 @@ step_ac205_session_delivery() {
   if [ ! -f "$transcript" ]; then
     transcript="$(ls -t "${HOME}"/.claude/projects/*/"${session_id}".jsonl 2>/dev/null | head -1 || true)"
   fi
-  [ -n "$transcript" ] && [ -f "$transcript" ] || { echo "  NOTE: AC-205 record NOT written (target transcript not found for sessionId=$session_id — 缺值≠合格)"; return 0; }
+  if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+    AC205_DELIVERY_OUTCOME="no-transcript"
+    echo "  NOTE: AC-205 record NOT written (target transcript not found for sessionId=$session_id — 缺值≠合格)"
+    echo "  delivery_outcome=$AC205_DELIVERY_OUTCOME hold_precheck=not-run send_rc=-"
+    return 0
+  fi
   probe="ac205-probe-$(date +%s)-$$"
   echo "  target: pid=$pid sessionId=$session_id (name from registry)"
   echo "  send-to-session (installed dist): $send_js"
   echo "  transcript: $transcript"
-  # ① 发送 probe（send exit 0 只表示「连接+写成功」，socket 无 ack ⇒ ⛔ 不作 transcript_confirmed 依据）
-  if ! "$VC_NODE" --no-warnings "$send_js" --pid "$pid" "$probe" >/dev/null 2>&1; then
-    echo "  NOTE: AC-205 record NOT written (send-to-session failed to connect — 缺值≠合格)"
+  # 起始字节偏移：三态落痕只看【本次投递之后】追加的行（⛔ 不把历史 held 记录算到本次 probe 头上）。
+  start_bytes=0
+  if [ -f "$transcript" ]; then start_bytes="$(wc -c < "$transcript" 2>/dev/null | tr -d ' ' || echo 0)"; fi
+  [ -n "$start_bytes" ] || start_bytes=0
+  # ① 发送 probe（send exit 0 只表示「连接+写成功」，socket 无 ack ⇒ ⛔ 不作 transcript_confirmed 依据）。
+  #    --allow-hold：本腿【就是要观察 held 结局本身】，故显式越过安装物 send-to-session 的发送前拒发
+  #    （exit 5）。旧版安装物不认该旗标（以 `--` 开头 ⇒ 不进正文、行为同前），其 stderr 也不带
+  #    hold-precheck 行 ⇒ 下面读成 not-reported（如实，⛔ 不编一个 direct）。
+  # ⚠️ 读退出码用 set +e + 独立一行赋值：instrument-failure-check 的 FAMILY-3 检测器不区分管道符
+  # 与 shell 的逻辑或运算符，把两者写在同一行会撞成 ABOVE-BASELINE 并挡住提交（基线 shrink-only）。
+  send_rc=0
+  set +e
+  send_out="$("$VC_NODE" --no-warnings "$send_js" --pid "$pid" --allow-hold "$probe" 2>&1)"
+  send_rc=$?
+  set -e
+  # ⛔ 不用 `| sed | head`（pipefail + 早退会带出 SIGPIPE 状态）：herestring + 参数展开逐字取 token。
+  hold_precheck=""
+  while IFS= read -r _l; do
+    case "$_l" in
+      *"hold-precheck="*) hold_precheck="${_l#*hold-precheck=}"; hold_precheck="${hold_precheck%%[!a-z-]*}"; break ;;
+    esac
+  done <<< "$send_out"
+  [ -n "$hold_precheck" ] || hold_precheck="not-reported"
+  AC205_HOLD_PRECHECK="$hold_precheck"
+  if [ "$send_rc" != "0" ]; then
+    AC205_DELIVERY_OUTCOME="send-failed"
+    echo "  NOTE: AC-205 record NOT written (send-to-session failed to connect, rc=$send_rc — 缺值≠合格)"
+    echo "  delivery_outcome=$AC205_DELIVERY_OUTCOME hold_precheck=$hold_precheck send_rc=$send_rc"
     return 0
   fi
   AC205_EVALUATED=1
   # ② transcript 外部可核：轮询 transcript-delivery-check.js --check（读 transcript jsonl 判 delivered）。
   #    ⛔ transcript_confirmed 只从这里得出（exit 0 = delivered），⛔ 从不读 send 的退出码（AC2/AC4）。
+  #    --start：只认本次投递之后物化的证据（CRYSTALLIZED fault 4 的「新增」要求）。
   for i in $(seq 1 30); do
-    if "$VC_NODE" --no-warnings "$check_js" --check "$transcript" --text "$probe" >/dev/null 2>&1; then
+    if "$VC_NODE" --no-warnings "$check_js" --check "$transcript" --start "$start_bytes" --text "$probe" >/dev/null 2>&1; then
       AC205_TRANSCRIPT_CONFIRMED=1
       break
     fi
     sleep 1
   done
+  # ②' 三态落痕：非 delivered 时区分 held（被扣下、逐字贴出那条 Held 记录）与 absent（查无此文本）。
+  outcome_line="$(ac205_delivery_outcome "$transcript" "$start_bytes" "$probe" "$AC205_TRANSCRIPT_CONFIRMED")"
+  AC205_DELIVERY_OUTCOME="$(printf '%s\n' "$outcome_line" | sed -n '1p')"
+  held_line="$(printf '%s\n' "$outcome_line" | sed -n '2p')"
+  [ -n "$AC205_DELIVERY_OUTCOME" ] || AC205_DELIVERY_OUTCOME="absent"
+  if [ "$AC205_DELIVERY_OUTCOME" = "held" ] && [ -n "$held_line" ]; then AC205_HELD_RECORD="$held_line"; fi
   echo "  shipped_from_installed_artifact=$AC205_SHIPPED_FROM_INSTALLED_ARTIFACT transcript_confirmed=$AC205_TRANSCRIPT_CONFIRMED evaluated=$AC205_EVALUATED host=$AC205_HOST"
+  echo "  delivery_outcome=$AC205_DELIVERY_OUTCOME hold_precheck=$hold_precheck send_rc=$send_rc"
+  if [ "$AC205_DELIVERY_OUTCOME" = "held" ] && [ -n "$AC205_HELD_RECORD" ]; then
+    echo "  held_record: $AC205_HELD_RECORD"
+  fi
   if [ "$AC205_EVALUATED" = "1" ] && [ "$AC205_SHIPPED_FROM_INSTALLED_ARTIFACT" = "1" ] && [ "$AC205_TRANSCRIPT_CONFIRMED" = "1" ]; then
     write_ac205_record "$AC205_HOST" "true" "true"
     echo "  ac205 record written → $AC89"
     return 0
   fi
-  echo "  NOTE: AC-205 record NOT written (transcript_confirmed=$AC205_TRANSCRIPT_CONFIRMED — send exit 0 但 transcript 未物化 ⇒ 不落账，负控制 AC4)"
+  echo "  NOTE: AC-205 record NOT written (delivery_outcome=$AC205_DELIVERY_OUTCOME hold_precheck=$hold_precheck transcript_confirmed=$AC205_TRANSCRIPT_CONFIRMED — send exit 0 但 transcript 未物化 ⇒ 不落账，负控制 AC4。三态互不同形：held=被扣下待批 / absent=查无此文本 / send-failed=连接失败)"
   return 0
 }
 
@@ -6102,6 +6207,91 @@ FAKE_NPM
     rm -rf "$ac205s_tmp"
   fi
   echo "selfcheck: ac205-target-session-liveness(dead-stale-sock skipped) fixture_shape=$ac205s_shape only_dead_empty=$ac205s_only_dead_empty only_live_picked=$ac205s_only_live_picked both_picked_live=$ac205s_both_picked_live (expect 1/1/1/1 — 死会话的 stale .sock 对新选择器不再是合格目标；both 必须选活的，⛔ 不是「没有活的才失败」)"
+
+  # control 56 (AC-205 三态落痕, gap-ac205-delivery-held-unidentified-peer-sender Req. action 1):
+  #   此前「投递不到 / 被扣下 / 已送达」全印成一句 NOT written ⇒ 三态同形（硬规则 3b 的反面）。
+  #   本控制逐夹具取假，且每个夹具都带一个【负控制】：正确实现必须能同时拒掉「该说 held 的说 absent」
+  #   与「不该说 held 的说了 held」两个方向 —— 只做正向会让「恒 held」的谓词也通过。
+  #   fixture A(4=1)         : leg 已由 transcript-delivery-check 判 delivered ⇒ delivered（短路由安装物那个判据定）
+  #   fixture B(in-window)   : 含 probe 的 Held 记录 ⇒ held【且逐字返回那一行】
+  #   fixture C(no-held)     : 只有普通记录 ⇒ absent（负控制：⛔ 不把「查无此文本」说成 held）
+  #   fixture D(out-of-window): Held 记录在 start 偏移【之前】⇒ absent（负控制：窗口被遵守，⛔ 不整文件搜）
+  #   fixture E(two-held)    : 窗口内两条 Held 记录、只有第二条含 probe ⇒ 必须取【含 probe 的那条】
+  #                            （负控制：⛔ 不取 readdir 序里的第一条 —— 那会把别的投递算到本次 probe 头上）
+  #   fixture F(non-system)  : 同文本出现在 `type:"user"` 记录里 ⇒ absent（负控制：形态是判据的一部分）
+  local a205o_dir a205o_delivered="" a205o_held="" a205o_heldline_ok=0 a205o_absent=""
+  local a205o_outwin="" a205o_two="" a205o_twoline_ok=0 a205o_nonsys="" a205o_dstart
+  a205o_dir="$tmp/ac205-outcome"
+  mkdir -p "$a205o_dir"
+  local a205o_probe="ac205-probe-fixture-$$"
+  # 每个夹具自带 start 参数（窗口边界是这个判据的一部分，⛔ 不是每个夹具都用同一个常量）：
+  # B/C/E/F 窗口 = 整个文件（start=0）；D 的窗口从【第二行起】——其 Held 记录落在窗口之前。
+  # B：窗口内的 Held 记录（含 probe 文本）
+  printf '{"type":"system","subtype":"informational","content":"Held peer message — from an unidentified session [verified pid 157212] (peer claude) %s"}\n' "$a205o_probe" > "$a205o_dir/b.jsonl"
+  # C：窗口内只有普通记录
+  printf '{"type":"assistant","message":{"role":"assistant","content":"nothing to see"}}\n' > "$a205o_dir/c.jsonl"
+  # D：Held 记录在窗口【之前】（start = 该行自身的字节数）
+  printf '{"type":"system","subtype":"informational","content":"Held peer message — older delivery %s"}\n' "$a205o_probe" > "$a205o_dir/d.jsonl"
+  a205o_dstart="$(wc -c < "$a205o_dir/d.jsonl" | tr -d ' ')"
+  printf '{"type":"assistant","message":{"role":"assistant","content":"after"}}\n' >> "$a205o_dir/d.jsonl"
+  # E：窗口内两条 Held，只有第二条含 probe
+  printf '{"type":"system","subtype":"informational","content":"Held peer message — probe belonging to another delivery"}\n' > "$a205o_dir/e.jsonl"
+  printf '{"type":"system","subtype":"informational","content":"Held peer message — ours %s"}\n' "$a205o_probe" >> "$a205o_dir/e.jsonl"
+  # F：同文本在非 system/informational 记录里
+  printf '{"type":"user","message":{"role":"user","content":"quoting: Held peer message %s"}}\n' "$a205o_probe" > "$a205o_dir/f.jsonl"
+  [ "$(ac205_delivery_outcome "$a205o_dir/b.jsonl" 0 "$a205o_probe" 1 | sed -n '1p')" = "delivered" ] && a205o_delivered=1
+  a205o_held="$(ac205_delivery_outcome "$a205o_dir/b.jsonl" 0 "$a205o_probe" 0)"
+  [ "$(printf '%s\n' "$a205o_held" | sed -n '1p')" = "held" ] || a205o_held=""
+  case "$(printf '%s\n' "$a205o_held" | sed -n '2p')" in
+    *"Held peer message"*"$a205o_probe"*) a205o_heldline_ok=1 ;;
+  esac
+  [ "$(ac205_delivery_outcome "$a205o_dir/c.jsonl" 0 "$a205o_probe" 0 | sed -n '1p')" = "absent" ] && a205o_absent=1
+  [ "$(ac205_delivery_outcome "$a205o_dir/d.jsonl" "$a205o_dstart" "$a205o_probe" 0 | sed -n '1p')" = "absent" ] && a205o_outwin=1
+  a205o_two="$(ac205_delivery_outcome "$a205o_dir/e.jsonl" 0 "$a205o_probe" 0)"
+  [ "$(printf '%s\n' "$a205o_two" | sed -n '1p')" = "held" ] || a205o_two=""
+  case "$(printf '%s\n' "$a205o_two" | sed -n '2p')" in
+    *"ours $a205o_probe"*) a205o_twoline_ok=1 ;;
+  esac
+  [ "$(ac205_delivery_outcome "$a205o_dir/f.jsonl" 0 "$a205o_probe" 0 | sed -n '1p')" = "absent" ] && a205o_nonsys=1
+  echo "selfcheck: ac205-delivery-outcome(three-state) delivered=$a205o_delivered held=$([ -n "$a205o_held" ] && echo 1 || echo 0) held_line_verbatim=$a205o_heldline_ok absent=$a205o_absent out_of_window_absent=$a205o_outwin two_held_picks_probe=$a205o_twoline_ok non_system_form_absent=$a205o_nonsys (expect 1/1/1/1/1/1/1 — 三态互不同形，且 held 只在本窗口、只认 system/informational、只取含 probe 的那条)"
+
+  # control 57 (AC-205 发送前 HOLD 前置: 可检测且可翻转, gap-ac205-delivery-held-unidentified-peer-sender Req. action 2):
+  #   判据 = 目标会话 settings 的 permissions.defaultMode=bypassPermissions 或 crossSessionInbound=accept
+  #   （SPEC §10.1 四样本单变量对照）。夹具 HOME 隔离（⛔ 不碰操作者真实 ~/.claude）：同一夹具【只】
+  #   翻转 crossSessionInbound 一个变量，结局必须从 will-hold 翻到 direct —— 这就是本判据的取假控制。
+  #   同夹具下再断言：无键 ⇒ 发送前【拒发】(exit 5，⛔ 不是 exit 0 让下游猜)；一个面都读不到 ⇒ unknown
+  #   （硬规则 3b：读不懂不得与 direct 同形）。
+  local a205p_tmp a205p_willhold="" a205p_direct="" a205p_unknown="" a205p_refused_rc=""
+  a205p_tmp="$(mktemp -d 2>/dev/null)" || a205p_tmp=""
+  if [ -n "$a205p_tmp" ]; then
+    mkdir -p "$a205p_tmp/.claude/sessions" "$a205p_tmp/proj/.claude"
+    # 夹具会话登记：pid 用【本 shell 自己的 pid】（真活进程 ⇒ /proc/<pid>/cmdline 可读，且其 argv 无
+    # --permission-mode/--settings ⇒ 无 argv 面，判据只能落在 settings 文件面上）。
+    printf '{"pid":%s,"messagingSocketPath":"/nonexistent-fixture.sock","sessionId":"sid-fixture","cwd":"%s/proj"}\n' "$$" "$a205p_tmp" > "$a205p_tmp/.claude/sessions/$$.json"
+    printf 'k' > "$a205p_tmp/.claude/sessions/$$.fixture.key"
+    # 面①（无键）：全局 {} + 项目 {permissions:{allow:[]}} ⇒ 两个键都没有
+    printf '{}' > "$a205p_tmp/.claude/settings.json"
+    printf '{"permissions":{"allow":[]}}' > "$a205p_tmp/proj/.claude/settings.json"
+    a205p_willhold="$(HOME="$a205p_tmp" "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/send-to-session.ts" --pid "$$" --precheck 2>/dev/null || true)"
+    # 发送前拒发：不加 --allow-hold ⇒ exit 5（⛔ 不 exit 0）
+    a205p_refused_rc=0
+    set +e
+    HOME="$a205p_tmp" "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/send-to-session.ts" --pid "$$" "fixture-msg" >/dev/null 2>&1
+    a205p_refused_rc=$?
+    set -e
+    # 面②（翻转）：只把 crossSessionInbound 加上 ⇒ direct
+    printf '{"crossSessionInbound":"accept"}' > "$a205p_tmp/.claude/settings.json"
+    a205p_direct="$(HOME="$a205p_tmp" "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/send-to-session.ts" --pid "$$" --precheck 2>/dev/null || true)"
+    # 面③（未评估）：一个面都读不到（不存在的 pid + 无任何 settings 文件）⇒ unknown
+    printf '{"pid":999999,"messagingSocketPath":"/nonexistent-fixture.sock","sessionId":"sid-nofaces","cwd":"%s/proj"}\n' "$a205p_tmp" > "$a205p_tmp/.claude/sessions/999999.json"
+    rm -f "$a205p_tmp/.claude/settings.json" "$a205p_tmp/proj/.claude/settings.json"
+    a205p_unknown="$(HOME="$a205p_tmp" "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/send-to-session.ts" --pid "999999" --precheck 2>/dev/null || true)"
+    rm -rf "$a205p_tmp"
+  fi
+  case "$a205p_willhold" in *"hold-precheck=will-hold"*) a205p_willhold=1 ;; *) a205p_willhold=0 ;; esac
+  case "$a205p_direct" in *"hold-precheck=direct"*) a205p_direct=1 ;; *) a205p_direct=0 ;; esac
+  case "$a205p_unknown" in *"hold-precheck=unknown"*) a205p_unknown=1 ;; *) a205p_unknown=0 ;; esac
+  echo "selfcheck: ac205-hold-precheck(settings-flip) will_hold=$a205p_willhold refused_rc=$a205p_refused_rc direct_after_crossSessionInbound=$a205p_direct no_faces_unknown=$a205p_unknown (expect 1/5/1/1 — 同一夹具只翻转 crossSessionInbound 一个变量 ⇒ will-hold→direct；无键时发送前拒发 exit 5；读不到面 ⇒ unknown 而⛔非 direct)"
 
   # control 25/26/27 (目标项目 profiles 配置, gap-verify-coldstart-does-not-configure-target-profiles):
   #   单一真相源 = 驱动方 profiles worker-default。正(25)：驱动方有 worker-default 取值 ⇒ 目标 profiles

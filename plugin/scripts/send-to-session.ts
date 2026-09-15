@@ -25,7 +25,159 @@
 //      ⇒ 对端把你当 own-child ⇒ 直接投递，不 hold（docs：own-child rules）。
 //      ⚠️ childToken 是会话密钥——把它带出目标会话 = 把「以该会话身份发消息」的能力给了持有者。
 //
-// 退出码：0 = 连接+写成功（socket 无 ack，投递与否取决于对端 inbox 控制）；非 0 = 连接/读注册文件失败。
+//   ④ 【发送前】只看前置、不发送：node --experimental-strip-types send-to-session.ts --pid <pid> --precheck
+//      打印一行 `hold-precheck: direct|will-hold|unknown`（exit 0）。
+//   ⑤ 明知会被扣下仍要发（⛔ 唯一正当用途 = 【观察 held 结局本身】，例如 AC-205 的验证腿）：
+//      `--allow-hold` ⇒ 不拒发，但前置结论仍逐字打印在 stderr 上。
+//
+// 退出码：0 = 连接+写成功（socket 无 ack，投递与否取决于对端 inbox 控制）；非 0 = 连接/读注册文件失败；
+//         5 = 【发送前拒发】目标会话 settings 不具备免 hold 的两个键之一（见下方「发送前 HOLD 前置检测」）。
+//         ⛔ 5 与 3（缺 .key）/4（连接失败）是三个【互不同形】的结局（硬规则 8：编号不复用）。
+
+
+// ── 发送前 HOLD 前置检测（gap-ac205-delivery-held-unidentified-peer-sender，Req. action 2）──────────
+//
+// ⛔ 这【不是】送达判定，也不是已退役的 deliveryStateFor / deliverySettingsFromArgv 的复活：
+//   * 送达判定的唯一真相源仍是 transcript-delivery-check.ts 的三态读数（事后读产物，
+//     serve-send.ts 也只 shell-out 它，见 plugin/test/delivery-status-single-source.test.mjs）；
+//   * 本函数判的是【发送前】的一个可区分前置 —— 目标会话的 settings 是否具备「免 hold」的两个键之一
+//     （事前读配置）。**本函数的任何取值都不得被当成 delivered**，它只回答「照判据这次会不会被扣下」。
+//
+// 判据（SPEC-web-session-observability-and-control-2026-08-24.md §10.1，四样本单变量对照）：
+//   接收方 settings 的 `permissions.defaultMode=bypassPermissions` 或 `crossSessionInbound=accept`
+//   任一 ⇒ 直通；两者皆无 ⇒ held→expired。cwd 已被该对照排除（同一 cwd 下两种结局都出现过）。
+//   ⇒ 两个键就是判据的【直接量】；本检测读的就是它们，⛔ 不读代理量（不看 pane、不看 status 字段）。
+//
+// 三态（硬规则 3b：读不懂输入时，⛔ 不得返回与「合格」同形的值）：
+//   direct    — 读到 ≥1 个面且命中两个键之一（evidence 里写明是哪一个面命中的）
+//   will-hold — 读到 ≥1 个面，两个键都没有
+//   unknown   — 一个面都读不到（/proc/<pid>/cmdline 与三个 settings 文件全部不可读）
+//   ⛔ unknown ≠ direct：它只是【不拒发】（本检测是前置提示，不是投递闸的替代 —— 真值仍由
+//      transcript 读取端定：held 与 absent 的区别只能在读产物时看出来）。
+
+/** 一个「设置面」的两个键读数（⛔ 取不到 = null，不是 false —— 硬规则 6）。 */
+export interface InboundFace {
+  /** 该面的人类可读标签（逐字进 evidence，便于事后核对读的是哪个文件/哪段 argv）。 */
+  label: string;
+  defaultMode: string | null;
+  crossSessionInbound: string | null;
+}
+
+export type InboundVerdict = "direct" | "will-hold" | "unknown";
+
+export interface InboundPolicy {
+  verdict: InboundVerdict;
+  /** 命中证据（direct）或逐面读数（will-hold）或读不到的原因（unknown）。 */
+  evidence: string[];
+}
+
+/** 从一段 settings 文本（文件内容或 `--settings` 的内联 JSON）取两个键。解析不出 ⇒ null。 */
+export function inboundKeysFromSettingsText(
+  text: string,
+): { defaultMode: string | null; crossSessionInbound: string | null } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const o = parsed as Record<string, unknown>;
+  const perms =
+    o.permissions && typeof o.permissions === "object" && !Array.isArray(o.permissions)
+      ? (o.permissions as Record<string, unknown>)
+      : {};
+  return {
+    defaultMode: typeof perms.defaultMode === "string" ? perms.defaultMode : null,
+    crossSessionInbound: typeof o.crossSessionInbound === "string" ? o.crossSessionInbound : null,
+  };
+}
+
+/** argv 面：`--permission-mode <v>` / `--permission-mode=<v>` 与 `--settings <v>`（v 可能是内联
+ *  JSON —— 实测 worker-driver 就是这么传的 —— 也可能是文件路径）。
+ *  ⚠️ 只 push【解析成功】的面：`--settings` 指向一个读不到的文件时不得记成一个「读了但没键」的面
+ *  —— 那正是 gap-send-message-held-inline-settings-json 的镜像形态（把「没读到」与「没有该键」
+ *  混为一谈）。读不到 ⇒ 该面缺席（全部面都缺席 ⇒ unknown，⛔ 不落成 will-hold）。 */
+export function inboundFacesFromArgv(argv: string[], readFile: (p: string) => string | null): InboundFace[] {
+  const faces: InboundFace[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--permission-mode" && i + 1 < argv.length) {
+      faces.push({ label: "argv:--permission-mode", defaultMode: argv[i + 1], crossSessionInbound: null });
+    } else if (a.startsWith("--permission-mode=")) {
+      faces.push({
+        label: "argv:--permission-mode",
+        defaultMode: a.slice("--permission-mode=".length),
+        crossSessionInbound: null,
+      });
+    } else if (a === "--settings" && i + 1 < argv.length) {
+      const v = argv[i + 1];
+      const text = v.trimStart().startsWith("{") ? v : readFile(v);
+      if (text == null) continue; // 读不到 ⇒ 该面缺席（⛔ 不记成「读了、无键」）
+      const k = inboundKeysFromSettingsText(text);
+      if (k) faces.push({ label: "argv:--settings", ...k });
+    }
+  }
+  return faces;
+}
+
+/** 纯判定：三个面读数 ⇒ 三态。 */
+export function evaluateInboundPolicy(faces: InboundFace[]): InboundPolicy {
+  const hits: string[] = [];
+  for (const f of faces) {
+    if (f.defaultMode === "bypassPermissions") hits.push(`${f.label}: permissions.defaultMode=bypassPermissions`);
+    if (f.crossSessionInbound === "accept") hits.push(`${f.label}: crossSessionInbound=accept`);
+  }
+  if (hits.length > 0) return { verdict: "direct", evidence: hits };
+  if (faces.length === 0) {
+    return {
+      verdict: "unknown",
+      evidence: ["no readable settings face (/proc/<pid>/cmdline, user/project/local settings files all unreadable)"],
+    };
+  }
+  return {
+    verdict: "will-hold",
+    evidence: faces.map(
+      (f) => `${f.label}: defaultMode=${f.defaultMode ?? "<unset>"} crossSessionInbound=${f.crossSessionInbound ?? "<unset>"}`,
+    ),
+  };
+}
+
+/** 目标会话（pid）的发送前前置：argv 面（/proc/<pid>/cmdline）+ 三个 settings 文件面。
+ *  `readFile` 是单测接缝（⛔ 不 spawn `ps`，也⛔ 不读 pane）。 */
+export function targetInboundPolicy(
+  pid: string | number,
+  opts: { cwd?: string; home?: string; readFile?: (p: string) => string | null } = {},
+): InboundPolicy {
+  const readFile = opts.readFile ?? ((p: string) => {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch {
+      return null;
+    }
+  });
+  const home = opts.home ?? os.homedir();
+  const cwd = opts.cwd ?? "";
+  const cmdlineRaw = readFile(`/proc/${pid}/cmdline`);
+  const argv = cmdlineRaw ? cmdlineRaw.split("\0").filter(Boolean) : [];
+  const faces = inboundFacesFromArgv(argv, readFile);
+  const settingsPaths: Array<{ label: string; p: string }> = [
+    { label: path.join(home, ".claude", "settings.json"), p: path.join(home, ".claude", "settings.json") },
+  ];
+  if (cwd) {
+    settingsPaths.push(
+      { label: path.join(cwd, ".claude", "settings.json"), p: path.join(cwd, ".claude", "settings.json") },
+      { label: path.join(cwd, ".claude", "settings.local.json"), p: path.join(cwd, ".claude", "settings.local.json") },
+    );
+  }
+  for (const s of settingsPaths) {
+    const text = readFile(s.p);
+    if (text == null) continue;
+    const k = inboundKeysFromSettingsText(text);
+    if (k) faces.push({ label: s.label, ...k });
+  }
+  return evaluateInboundPolicy(faces);
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -105,6 +257,10 @@ if (args.includes("--keys")) {
 const self = args.includes("--self");
 const pidIdx = args.indexOf("--pid");
 const tokenIdx = args.indexOf("--token");
+// --precheck 只报前置、不发送；--allow-hold 明知会被扣下仍发（唯一正当用途 = 观察 held 结局本身）。
+// 两者都以 `--` 开头 ⇒ 已被下面的 text 过滤排除，⛔ 不会漏进消息正文。
+const precheckOnly = args.includes("--precheck");
+const allowHold = args.includes("--allow-hold");
 const text =
   args
     .filter((a, i) => !a.startsWith("--") && i !== pidIdx + 1 && i !== tokenIdx + 1)
@@ -131,7 +287,35 @@ if (self) {
   if (tokenIdx !== -1) {
     token = args[tokenIdx + 1];
     console.error(`  token 来源 = --token 参数（childToken，own-child，不 hold）`);
+    // ⛔ own-child 路径不做 HOLD 前置检测：文档的 own-child 规则下它不 hold（判据的两个键只约束 peerToken 路径）。
   } else {
+    // ── 发送前 HOLD 前置检测（peerToken 路径独有）──────────────────────────────────────────────
+    // 检测在【读 .key / 连接之前】跑：不具备两个键之一 ⇒ 以独立结局收场（exit 5），⛔ 不 exit 0 让下游去猜。
+    const policy = targetInboundPolicy(pid, { cwd: typeof reg.cwd === "string" ? reg.cwd : "" });
+    if (precheckOnly) {
+      // 只报前置、不发送（AC-205 验证腿据此把「事前预测」与「事后结局」并排落痕）。
+      // 形态固定为 `hold-precheck=<verdict>`（⛔ 无空格、无后缀），供调用方一 token 解析。
+      console.log(`hold-precheck=${policy.verdict}`);
+      console.error(`  evidence: ${policy.evidence.join(" | ")}`);
+      process.exit(0);
+    }
+    if (policy.verdict === "will-hold" && !allowHold) {
+      console.error(`⛔ target will HOLD (no bypassPermissions/crossSessionInbound) — 发送前拒发（exit 5）`);
+      for (const e of policy.evidence) console.error(`    ${e}`);
+      console.error(`    判据：SPEC-web-session-observability-and-control-2026-08-24.md §10.1（四样本单变量对照）。`);
+      console.error(`    若目标是自己启动的会话，用 --token <childToken>（own-child 不 hold）；`);
+      console.error(`    若【就是要观察 held 结局本身】（例如 AC-205 验证腿），加 --allow-hold。`);
+      process.exit(5);
+    }
+    // 形态固定为 `hold-precheck=<verdict>`（⛔ 无空格、无后缀），供调用方一 token 解析。
+    if (policy.verdict === "will-hold") {
+      console.error(`  hold-precheck=will-hold — ⚠️ --allow-hold：仍然发送（本腿就是要观察 held 结局）`);
+      for (const e of policy.evidence) console.error(`    ${e}`);
+    } else if (policy.verdict === "direct") {
+      console.error(`  hold-precheck=direct — ${policy.evidence.join(" | ")}`);
+    } else {
+      console.error(`  hold-precheck=unknown — 读不到任何设置面，⛔ 不置真，继续发（真值仍由 transcript 读取端定）`);
+    }
     const keyFile = fs
       .readdirSync(path.join(home, ".claude", "sessions"))
       .find((f) => f.startsWith(`${pid}.`) && f.endsWith(".key"));

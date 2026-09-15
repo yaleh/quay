@@ -18,7 +18,14 @@
     "`wallclock_hours` is a MEASURED quantity, not an estimate: it is the end-to-end wall clock of",
     "one producer run observed on this repo, and it feeds the probe's threshold",
     "THRESHOLD_fraction = (wallclock_hours + interval_hours) * rate_per_hour / K. A wrong value",
-    "here moves a threshold, so each entry records where its number came from."
+    "here moves a threshold, so each entry records where its number came from.",
+    "",
+    "`preconditions` (optional) names ENVIRONMENTAL requirements a producer's subjects need BEFORE",
+    "re-running it can refresh them. It exists because 're-run the producer' is not always a complete",
+    "remedy: the session-delivery entry's subject only refreshes on a machine that already HAS a live",
+    "session whose settings allow inbound, which this repo does not control (measured 2026-09-15: host",
+    "C's only live session holds unidentified peers). Read it before filing a finding that says",
+    "'just re-run <producer id>' — that file is the probe's ONLY input for which producer to name."
   ],
   "carrier": ".quay/productization-verification.jsonl",
   "margin_snapshot": ".quay/goal-freshness-margin.json",
@@ -34,9 +41,24 @@
       "subjects": [
         "GOAL-009-AC-201",
         "GOAL-009-AC-203",
-        "GOAL-009-AC-205",
         "GOAL-009-AC-207",
         "GOAL-009-AC-232"
+      ]
+    },
+    {
+      "id": "session-delivery",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts \"B C\" --force --root <main-checkout>",
+      "_same_run_as": "coldstart-face — AC-205 由同一次运行的 ⑦ --ac205-session 腿产出，⛔ 不存在单独的命令。两条 producer 条目【共用同一条命令行】：改其中一处必须同时改另一处（行文相同的重复是这里唯一的真相源，本条 _same_run_as 就是它的指针）。",
+      "wallclock_hours": 0.34,
+      "_wallclock_measured": "同 coldstart-face 的 20m36s 端到端实测 —— AC-205 腿在那次运行之内，没有单独测量，所以 ⛔ 不编一个更小的数（W 相同 ⇒ 探针的阈值算术不变，不会因为拆分而移动任何阈值）。",
+      "preconditions": [
+        "验证机上必须有一个【活】会话 —— 进程活着（kill(pid,0) 不抛 ESRCH ∧ procStart 相符）；⛔ 「socket 文件存在」不算（进程死后 socket 不被 unlink，见 verify-deliver-coldstart.sh 的 find_ac205_target_session 活性闸）。",
+        "【且】该会话的 settings 具备 permissions.defaultMode=bypassPermissions 或 crossSessionInbound=accept 之一（判据的直接量；SPEC-web-session-observability-and-control-2026-08-24.md §10.1 四样本单变量对照）。发送前即可检测：send-to-session.ts --pid <pid> --precheck 打印 hold-precheck=direct|will-hold|unknown。",
+        "两者皆无 ⇒ probe 被按 `Held peer message`（type:system/subtype:informational）扣下 ⇒ 本腿落痕 delivery_outcome=held、不落账。2026-09-15 实测 host C：其唯一活会话（cwd=/home/yale/work/archguard）两键皆无 ⇒ held。⛔ 这不是缺陷，是判据在工作。",
+        "⇒ 本前置【不由本仓库保证】（取决于验证机上别的会话的配置，那些会话属于别的项目）⇒ AC-205 不能与 coldstart-face 的其余四个主体同等对待：那四条「重跑即刷新」，本条【先要满足前置】才谈得上刷新（host B 满足 ⇒ 可产出；host C 不满足 ⇒ 产不出，且两种失败现在落痕不同形）。"
+      ],
+      "subjects": [
+        "GOAL-009-AC-205"
       ]
     },
     {

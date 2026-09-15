@@ -250,6 +250,21 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
   assert.match(r.stdout,
     /ac205-target-session-liveness\(dead-stale-sock skipped\) fixture_shape=1 only_dead_empty=1 only_live_picked=1 both_picked_live=1/,
     "AC-205 picker: stale .sock + dead pid ⇒ skipped; live candidate still picked when a stale one is present");
+  // AC-205 THREE-STATE delivery ledger (gap-ac205-delivery-held-unidentified-peer-sender Req. action 1):
+  // the leg used to print one "NOT written" string for delivery-failed / held-for-approval / delivered
+  // alike (three states in one form). Every fixture below carries its own negative control, so a
+  // predicate that always said "held" — or one that searched the whole file instead of the delivery
+  // window — fails this assertion rather than passing it.
+  assert.match(r.stdout,
+    /ac205-delivery-outcome\(three-state\) delivered=1 held=1 held_line_verbatim=1 absent=1 out_of_window_absent=1 two_held_picks_probe=1 non_system_form_absent=1/,
+    "AC-205 ledger: delivered/held/absent are distinct; held is window-bound, form-bound (system+informational) and attributed to the record carrying THIS probe");
+  // AC-205 pre-send HOLD precondition (gap-ac205-delivery-held-unidentified-peer-sender Req. action 2):
+  // the determinant (SPEC §10.1) is the target session's settings — permissions.defaultMode=
+  // bypassPermissions OR crossSessionInbound=accept. The control flips ONE variable in ONE fixture, and
+  // separately requires the refusal to be a DISTINCT exit (5), never exit 0 that leaves callers guessing.
+  assert.match(r.stdout,
+    /ac205-hold-precheck\(settings-flip\) will_hold=1 refused_rc=5 direct_after_crossSessionInbound=1 no_faces_unknown=1/,
+    "AC-205 hold precheck: no key ⇒ will-hold + pre-send refusal (exit 5); flipping crossSessionInbound alone ⇒ direct; unreadable ⇒ unknown (≠ direct)");
   // AC-234 (gap-ac234-web-third-party-renders-carriers-and-round-records): the --selfcheck must ALSO
   // exercise the web-render content-count positive/negative controls (three counts derived from
   // rendered HTML content — task/goal anchors + round-row anchors — never an HTTP status code) and the
