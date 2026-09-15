@@ -30,7 +30,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -195,6 +195,44 @@ test("the tarball ships the postinstall register script + the plugin's .claude-p
   for (const rel of ["package/plugin/.claude-plugin/marketplace.json", "package/plugin/.claude-plugin/plugin.json"]) {
     assert.ok(tar.includes(rel), `tarball must carry ${rel}`);
   }
+});
+
+test("register-plugin.mjs names the user-level enable key on comment lines only (STANDING AC-162)", () => {
+  // gap-ac162-console-guidance-line-reddens-criterion. AC-162 is a SOURCE-TEXT
+  // criterion, not a behavioural one: strip comment lines, then require the
+  // literal to be absent. Nothing pinned that predicate — so when 86e5c1db4 added
+  // a runtime pointer for the new default (correct in itself; it is the AC-161
+  // direction) it wrote the literal on a console.log line and silently re-reddened
+  // a STANDING criterion no round was re-reading. This guard IS the missing pin:
+  // it runs AC-162's predicate against the very file the criterion names, so the
+  // next such edit fails HERE instead of sitting red unnoticed (硬规则 9 —
+  // visibility is not execution; give the rule a product).
+  //
+  // The pattern below is copied VERBATIM from
+  // goals/AC-162-register-plugin-no-user-enabled.md, and it runs through the real
+  // `grep -E` rather than being re-spelled as a JS regex: the ERE relies on the
+  // POSIX class [[:space:]], which inside a JS character class is just a literal
+  // character list — a JS re-spelling would be a DIFFERENT predicate, and a guard
+  // that merely resembles the criterion it pins is a false guarantee (硬规则 3b).
+  const script = path.join(pkgDir, "scripts", "register-plugin.mjs");
+  assert.ok(fs.existsSync(script), `AC-162 predicate target must exist: ${script}`);
+  const res = spawnSync("grep", ["-vE", "^[[:space:]]*(//|\\*|#)", script], { encoding: "utf8" });
+  // grep exits 1 when it selects NO line (here: a file that is entirely comments).
+  // That still satisfies AC-162, so it is not an error. Any OTHER non-zero means
+  // "could not evaluate", which must not be reported with the same face as
+  // "passes" (硬规则 3b — give "not evaluated" its own value instead of letting a
+  // broken read masquerade as a clean one).
+  assert.ok(
+    res.status === 0 || res.status === 1,
+    `AC-162 predicate could not be evaluated (grep exited ${res.status}): ${res.stderr}`
+  );
+  assert.equal(
+    String(res.stdout).includes("enabledPlugins"),
+    false,
+    `AC-162 RED: ${script} mentions "enabledPlugins" on a NON-comment line. Keep the literal in the ` +
+      `header comments (they document the exact JSON callers must use) and refer to it in prose at ` +
+      `runtime — see goals/AC-162-register-plugin-no-user-enabled.md.`
+  );
 });
 
 test("register-plugin (global-install mode, temp HOME) writes settings.json pointing at the INSTALLED plugin dir", () => {
