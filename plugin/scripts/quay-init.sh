@@ -2644,10 +2644,16 @@ settings are not read at all — so "config committed => auto-installed" is FALS
 EOF
   printf '  claude plugin marketplace add quay "%s"\n\n' "$PLUGIN_ROOT"
   cat <<'EOF'
-  # 2. install the plugin (writes the install + shells out to install):
-  claude plugin install quay@quay
+  # 2. install the plugin for THIS project (⛔ always pass --scope: `claude plugin install` defaults
+  #    to `user`, which writes a user-level enabledPlugins key and reddens the STANDING goal AC-161):
+  claude plugin install quay@quay --scope project
 
-  # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall does the same)
+  # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall registers the
+  #  marketplace source only; the enable is deliberately NOT user-scope by default)
+  #
+  # ⚠️ To merely RE-FILL a shared plugin-cache entry (~/.claude/plugins/cache/<mkt>/<plugin>/<ver> is
+  #    keyed by marketplace+plugin+version and SHARED ACROSS SCOPES), do NOT reach for --scope user:
+  #      claude plugin update quay@quay --scope project
 
   # 3. accept the trust dialog the FIRST time you enter this directory, then restart the session.
 After that, the enabledPlugins block below takes effect (a restart is required to apply).

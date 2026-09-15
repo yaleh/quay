@@ -42,6 +42,25 @@
 //     enable nothing".
 //   * FAILS CLOSED on a genuine error (missing bundle, unparsable settings.json,
 //     unwritable home) rather than silently producing a broken install.
+//
+// REFRESHING THE SHARED CACHE — and why `--scope user` is never the way to do it
+// (AC-161 fourth regression, gap-ac161-4th-regression-agent-runs-scope-user-install-to-refresh-a-shared-plugin-cache,
+// measured 2026-09-15 against Claude Code 2.1.271):
+//
+//   The plugin cache lives at ~/.claude/plugins/cache/<marketplace>/<plugin>/<version> — keyed by
+//   marketplace+plugin+version, and SHARED ACROSS SCOPES. There is no cache path that "belongs" to a
+//   scope, so "refresh that shared cache" has no project-scope-shaped install/uninstall verb either.
+//   An in-flight agent hit exactly this: it wanted to re-fill an incomplete shared cache entry, found
+//   no project-scope-only form, and reached for `claude plugin install quay@quay --scope user` — which
+//   wrote a user-level enabledPlugins key and re-reddened the STANDING goal AC-161 (fourth time, and
+//   the first time the polluter was not one of this repo's declared write channels but any agent
+//   holding a Bash tool).
+//
+//   The scope-correct form DOES exist: `claude plugin update <plugin> --scope <scope>`
+//   (`claude plugin update --help` lists `-s, --scope <scope>` with user|project|local|managed,
+//   default user). Given `--scope project` (or `local`) it re-materializes the SHARED cache without
+//   writing any user-level enable. Use it — never `--scope user` — when the goal is merely to re-fill
+//   the cache. `--scope user` is reserved for a deliberate, human-intended user-level enable.
 
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -186,15 +205,20 @@ if (rawScope && !enableScope) {
 if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
   console.log("[quay] QUAY_SKIP_PLUGIN_CLI=1 — skipping claude CLI materialization (settings.json only)");
 } else {
-  const add = runCli(["plugin", "marketplace", "add", pluginDir]);
+  // `--scope user` is EXPLICIT here on purpose. The user level is allowed to carry the MARKETPLACE
+  // SOURCE (AC-161 says exactly that); `marketplace add` defaults to `user` anyway, and writing the
+  // default out loud means a future CLI default change cannot silently move this write to a different
+  // scope while the command line, the logs and the record all look unchanged.
+  const add = runCli(["plugin", "marketplace", "add", pluginDir, "--scope", "user"]);
   if (add.error && add.error.code === "ENOENT") {
     console.log("[quay] `claude` CLI not found on PATH — the quay marketplace is registered in");
     console.log("       settings.json and will be recognized when Claude Code next starts.");
-    console.log("       To use /quay:init immediately, run:  /plugin install quay  in a session.");
+    console.log("       To use /quay:init immediately, install the plugin in a session (the session");
+    console.log("       asks for the scope; pick the project — see the REFRESH/SCOPE notes above).");
   } else if (add.status !== 0) {
     console.log(`[quay] warning: 'claude plugin marketplace add' exited ${add.status}; the plugin is`);
     console.log("       registered in settings.json but not yet materialized. Run, once:");
-    console.log(`       claude plugin marketplace add ${pluginDir}`);
+    console.log(`       claude plugin marketplace add ${pluginDir} --scope user`);
     if (enableScope) console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
   } else if (!enableScope) {
     console.log("[quay] The marketplace is registered; the plugin is NOT enabled at user scope");
@@ -203,12 +227,17 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
     console.log("       .claude/settings.json (the exact JSON shape is spelled out in the SCOPE");
     console.log("       POLICY note at the top of this script) — or re-run this install with");
     console.log("       QUAY_PLUGIN_SCOPE=user for a deliberate user-scope enable.");
+    console.log("       ⚠️ To merely RE-FILL a shared cache entry (it is keyed by marketplace+plugin+");
+    console.log("       version and shared across scopes), do NOT reach for --scope user — use the");
+    console.log(`       scope-correct refresh instead:  claude plugin update ${pluginRef} --scope project`);
   } else {
     const install = runCli(["plugin", "install", pluginRef, "--scope", enableScope]);
     if (install.status !== 0) {
       console.log(`[quay] warning: 'claude plugin install ${pluginRef} --scope ${enableScope}' exited ${install.status};`);
       console.log("       the plugin is registered in settings.json but not yet materialized. Run, once:");
       console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
+      console.log(`       (or, if it is already installed and only the shared cache needs re-filling:`);
+      console.log(`        claude plugin update ${pluginRef} --scope ${enableScope === "user" ? "project" : enableScope})`);
     }
   }
 }

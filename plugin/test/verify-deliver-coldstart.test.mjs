@@ -855,6 +855,52 @@ test("AC-257 — write_ac257_record refuses a missing merge_preserved and writes
     "a probe-shaped marketplace/provider path (verify-/probe//tmp/) must be refused at write time, not only by the criterion");
 });
 
+// ── AC-161 fourth regression ──────────────────────────────────────────────────────────────────
+// gap-ac161-4th-regression-agent-runs-scope-user-install-to-refresh-a-shared-plugin-cache
+// (2026-09-15). Three regressions in a row were each closed by plugging ONE declared write channel;
+// the fourth came from an agent that simply CHOSE `--scope user` while re-filling the cross-scope
+// SHARED plugin cache. The fix moves the criterion onto the artifact: the delivery channel's records
+// (AC-257/AC-258) read the user-level enabledPlugins state before writing and carry it as a field
+// on the SAME record, and the reading is three-valued so "could not read" never shares an output
+// with "read and clean" (硬规则 3b).
+
+// AC3 (task) — the reading must reach the RECORD, not a side file: 「同一条记录」.
+test("AC-161/4th — the user-scope reading is a field ON the AC-257/AC-258 record, with distinct values per state", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(user-scope state\) clean='absent' dirty='present:quay@quay' missing='unreadable:not-found' malformed='unreadable:parse'/,
+    "the reading must be three-valued (absent / present:<keys> / unreadable:<reason>) — a two-valued one conflates 'read and clean' with 'could not read' (硬规则 3b)");
+  assert.match(r.stdout, /ac161\(record field, clean\) ac257_wrote=1 lines=0→1 field='absent'/,
+    "a clean user level must let the AC-257 record through AND stamp the reading into that very record line (AC3: 与记录同时产生)");
+  assert.match(r.stdout, /ac161\(record field, user-key-present\) ac257_refused=1 lines=1→1 ac258_wrote=1 ac258_field='present:quay@quay'/,
+    "with a user-level quay key the AC-257 record must be REFUSED with zero new lines — while the AC-258 record must still be written and record the lived state (its own premise REQUIRES a user-scope registration)");
+  assert.match(r.stdout, /ac161\(record field, unreadable\) ac257_refused=1/,
+    "an unreadable user level must also refuse — and be reported as NOT-EVALUATED, distinct from the violation");
+});
+
+// AC4 (task) — the judgement must be able to take FALSE. A criterion that reads the same in both
+// states is vacuous (硬规则 4: 一个结构上不可能取假的量不是测量).
+test("AC-161/4th — the criterion can take false (clean≠dirty) and the two refusals are distinguishable", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(refusal messages\) dirty='AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=present:quay@quay[^']*' unreadable='AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=unreadable:not-found[^']*'/,
+    "the two refusal paths must NAME different states — 'the premise is violated' vs 'could not evaluate' (硬规则 3b: 读不懂不得与不合格同形)");
+});
+
+// AC6 (task) — hard rule 5b, applied to the mechanism the fourth regression actually used: the
+// defect was NOT the string `--scope user`, it was OMITTING `--scope` and inheriting the CLI default.
+// Command line, logs and record look identical before and after such a default flips.
+test("AC-161/4th — every EXECUTED `claude plugin install|update` in the script carries an explicit --scope (positional)", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(explicit-scope, positional\) executed-calls=(\d+) with-scope=(\d+) probe-known-true-sample=(\d+) unscoped=''/,
+    "the scan must report a call count, a scoped count, and a dry run proving the predicate can hit the known-true sample");
+  const m = r.stdout.match(/ac161\(explicit-scope, positional\) executed-calls=(\d+) with-scope=(\d+) probe-known-true-sample=(\d+)/);
+  assert.ok(m, "the scan line must be present");
+  assert.equal(m[1], m[2], "every executed `claude plugin install|update` line must pass --scope — an omitted flag silently means the CLI default (`user`), which is exactly how the shared-cache refresh reddened AC-161");
+  assert.ok(Number(m[3]) >= 1, "the predicate must be dry-run against a known-true sample, otherwise a zero hit count is indistinguishable from a broken scan (硬规则 2)");
+});
+
 // AC2 — the rename is complete: the historical name is gone from the WHOLE script, comments included,
 // and the entry point sits in the `ac_record_*` family like its collaborators.
 test("AC2 — the historical entry-function name is gone and the entry point joins the ac_record_* family", () => {

@@ -39,9 +39,17 @@ script's output carries the explicit steps, which are:
 
 ```bash
 claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
-claude plugin install quay@quay
-# (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall does the same)
+claude plugin install quay@quay --scope project
+# (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall registers the
+#  marketplace source only; the enable is deliberately NOT user-scope by default)
 ```
+
+⚠️ **Always pass `--scope`.** `claude plugin install` defaults to `scope=user`, which writes a
+user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
+carry only the marketplace *source*). Same class of mistake, same fix: to merely *re-fill* a shared
+plugin-cache entry (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` is keyed by
+marketplace+plugin+version and **shared across scopes** — no scope owns a cache path), use
+`claude plugin update quay@quay --scope project`, **never** `--scope user`.
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
 

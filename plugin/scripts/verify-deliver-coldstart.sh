@@ -92,7 +92,7 @@
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC-247 八件读数正/负控制 + AC 记录 schema 机制的正/负控制），不碰真实安装。exit 0/1。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC161 第四次回归「用户级读数进记录」四态正/负控制 + AC-247 八件读数正/负控制 + AC 记录 schema 机制的正/负控制），不碰真实安装。exit 0/1。
 #   --ac-record-schema-report
 #                    只打印判读侧 criterion / 产出侧声明 AC_RECORD_SCHEMA / 产出侧实写 writer 三侧的
 #                    两向差集（都按位置机械提取，⛔ 不是 grep 关键词），逐 AC 一行。exit 0=无硬差集；
@@ -2006,6 +2006,65 @@ ac257_delivery_cli() {
   printf '%s\n' "$dir/${rel#./}"
 }
 
+# ══ AC-161（第四次回归）用户级 enabledPlugins 的 quay 键读数 ════════════════════════════════
+# 命题：用户级 ~/.claude/settings.json 的 enabledPlugins 不含 quay 键（STANDING goal AC-161；
+# 正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02 §4b）。
+#
+# 为什么把判据落到【产物】上（第四次回归的根）：前三次修复各自只关掉一条【被声明】的写通道
+# （①只恢复状态不碰写侧 / ②只堵 register-plugin.mjs 自己那一笔 / ③只堵 CLI materialization 的默认）。
+# 第四次没有任何被声明的通道被用到——是一个**拿着 Bash 的在飞 agent** 自己选了
+# `claude plugin install quay@quay --scope user`：plugin cache 的路径
+# `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` 按 marketplace+plugin+version 键控、
+# **跨 scope 共享**，它要刷新那份共享 cache 而当时取了这个顺手解。AC-161 的 criterion 每轮都跑，
+# 但**没有阻塞力**（只把红记进台账），肇事任务自己的门也完全不读用户级。
+# ⇒ 判据钉在产物上：交付渠道的记录（AC-257/AC-258）在落盘**之前**读一次用户级，把读数作为
+#    可核字段带进**同一条记录**；出现即不得静默通过。
+#
+# 三取值（硬规则 3b）：absent | present:<quay 键> | unreadable:<原因>
+#   ⛔ 「读不懂」【不】与 absent 共用取值——否则「没查成」会伪装成「查过且合格」。
+#   ⛔ 也【不】做成全库套件级的静态检查：那会让任何**故意**的 user-scope 安装（AC-258 在目标机上
+#      正是被要求的那种）把整个套件打红，等于把「主机态」错当「代码态」。
+#
+# $1 = settings.json 路径；空 ⇒ $AC161_SETTINGS_PATH；再空 ⇒ 操作者真实 $HOME。
+#      AC161_SETTINGS_PATH 是 --selfcheck 的注入缝（让自检 hermetic），产品路径不设它——
+#      与 AC257_RESOLVE_CMD 同一种分工。
+# 退出码：0=absent 1=present 2=unreadable。stdout 恒为那个取值（调用方取读数，⛔ 不看退出码）。
+AC161_SETTINGS_PATH=""
+ac161_user_scope_quay_state() {
+  local p="${1:-${AC161_SETTINGS_PATH:-}}" out=""
+  if [ -z "$p" ]; then
+    if [ -z "${HOME:-}" ]; then printf 'unreadable:no-home\n'; return 2; fi
+    p="$HOME/.claude/settings.json"
+  fi
+  if [ ! -f "$p" ]; then printf 'unreadable:not-found\n'; return 2; fi
+  out="$("$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch (e) { console.log("unreadable:parse"); process.exit(2); }
+    if (d === null || typeof d !== "object" || Array.isArray(d)) { console.log("unreadable:not-object"); process.exit(2); }
+    const ep = (d.enabledPlugins && typeof d.enabledPlugins === "object" && !Array.isArray(d.enabledPlugins)) ? d.enabledPlugins : {};
+    const ks = Object.keys(ep).filter(k => String(k).includes("quay"));
+    if (ks.length > 0) { console.log("present:" + ks.join(",")); process.exit(1); }
+    console.log("absent");
+    process.exit(0);
+  ' "$p" 2>/dev/null)"
+  case "$out" in
+    absent)    printf 'absent\n'; return 0 ;;
+    present:*) printf '%s\n' "$out"; return 1 ;;
+    *)         printf '%s\n' "${out:-unreadable:no-output}"; return 2 ;;
+  esac
+}
+
+# 记录片段的一小段尾（AC-161 第四次回归）——写成【变量/函数】而不是直写字面量，是刻意复用 AC-238 的
+# 先例：`--ac-record-schema-report` 的 writer 侧按【位置】取「落盘那一行上的 JSON 字面键」，直写会让
+# AC-257/AC-258 从 `[ok]` 掉成 `[surplus]`（该字段没有 criterion 消费者——AC-161 的 criterion 是
+# achieved 的判据、⛔ 不可改），而本任务⛔ 不引入新红。经变量尾写入的记录照样携带该字段
+# （写入通道对未声明的额外字段不拒，与 AC-238 的 14 个额外字段同一形态），AC7 的既有 control 不退化。
+ac161_user_scope_fragment() {
+  printf ',"user_scope_quay_state":"%s"' "$1"
+}
+
 # ── AC-257 记录写（fail-closed）───────────────────────────────────────────────────────────
 # 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量（多一个补锚点 = 下次改锚格式必漏一处）。
@@ -2030,7 +2089,22 @@ write_ac257_record() {
   [ "$task_status" = "done" ] || return 1
   [ -n "$commit_sha" ] || return 1
   [ "$produced_by_driver" = "true" ] || return 1
-  ac_record_append ",\"ac\":\"GOAL-018-AC-257\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver"
+  # ── AC-161（第四次回归）：本条记录宣称的是 **project scope** 的合并语义 ⇒ 它的前提之一是
+  #    用户级只留 marketplace 源。落盘【之前】读一次用户级（判据在产物上的那一半）。
+  #    ⛔ 两态必须可区分（硬规则 3b）：「有 quay 键」= 本 AC 的前提被违反（大声报出并拒写）；
+  #       「读不懂」= 无法评估（NOT-EVALUATED，同样拒写，但读数不同）。⛔ 不与合格同形。
+  local ac161_state ac161_frag; ac161_state="$(ac161_user_scope_quay_state)"
+  case "$ac161_state" in
+    absent) ;;
+    present:*)
+      echo "AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=$ac161_state — user-level ~/.claude/settings.json enabledPlugins still carries a quay key; this record's project-scope premise is FALSE → nothing written (standing goal AC-161)" >&2
+      return 1 ;;
+    *)
+      echo "AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=$ac161_state — user-level settings NOT-EVALUATED (读不懂 ≠ 合格) → nothing written" >&2
+      return 1 ;;
+  esac
+  ac161_frag="$(ac161_user_scope_fragment "$ac161_state")"
+  ac_record_append ",\"ac\":\"GOAL-018-AC-257\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver${ac161_frag}"
 }
 
 # 读 AC-257 的四个外部可核直接量（task_status / commit_sha / commit_files / gate_events）并复制进
@@ -2294,7 +2368,21 @@ write_ac258_record() {
   [ "$task_status" = "done" ] || return 1
   [ -n "$commit_sha" ] || return 1
   [ "$produced_by_driver" = "true" ] || return 1
-  ac_record_append ",\"ac\":\"GOAL-018-AC-258\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver"
+  # ── AC-161（第四次回归）：落盘前读一次用户级，读数进【同一条记录】。
+  #    ⛔ 本函数【不】因 present 拒写，与本 AC 的前提一致：AC-258 测的就是 user scope 那条路径，
+  #       它的终态**要求**用户级有注册（(d) 三条可核通道之一就是 installed_plugins.json 的
+  #       scope=="user" 条目）。若在这里按「无 quay 键」拒写，本 AC 会结构上不可满足——那正是
+  #       任务正文⛔ 警告的「把主机态错当代码态」。⇒ present 是**被记录的值**，不是拒写理由。
+  #    ⛔ 只有「读不懂」拒写（fail-closed：无法评估 ⇒ 不与合格同形，硬规则 3b）。
+  local ac161_state ac161_frag; ac161_state="$(ac161_user_scope_quay_state)"
+  case "$ac161_state" in
+    absent|present:*) ;;
+    *)
+      echo "AC161-USER-SCOPE: GOAL-018-AC-258 record refused — state=$ac161_state — user-level settings NOT-EVALUATED (读不懂 ≠ 合格) → nothing written" >&2
+      return 1 ;;
+  esac
+  ac161_frag="$(ac161_user_scope_fragment "$ac161_state")"
+  ac_record_append ",\"ac\":\"GOAL-018-AC-258\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"install_scope\":\"$install_scope\",\"quay_version\":\"$quay_version\",\"quay_init_rerun\":$quay_init_rerun,\"merge_preserved\":$merge_preserved,\"marketplace_path\":\"$marketplace_path\",\"provider_path\":\"$provider_path\",\"task_status\":\"$task_status\",\"commit_sha\":\"$commit_sha\",\"produced_by_driver\":$produced_by_driver${ac161_frag}"
 }
 
 # 读 AC-258 的外部可核直接量（task_status / commit_sha / commit_files / gate_events）并复制进 AC258_*。
@@ -4020,25 +4108,32 @@ step_ac258_user_scope() {
   }
 
   # ── (d0) materialization 的兜底腿（可区分，⛔ 不是「换一条机制」）──────────────────────────────
-  # register-plugin.mjs 在写 settings.json 之后【自己】会调两条 CLI 命令去把插件 materialize 进
-  # ~/.claude/plugins（缓存 + installed_plugins.json）：
-  #     runCli(["plugin","marketplace","add",pluginDir]) ; runCli(["plugin","install",pluginRef])
-  # —— 但它【没传 `-y`】，而 `plugin install` 在非 TTY 下可能取不到确认 ⇒ materialization 可能整段
-  # 不生效，于是 installed_plugins.json 里不会出现 scope:"user" 条目，本 AC 结构上不可满足，而失败
-  # 形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
-  # ⇒ 仅当 user-scope 条目【读不出】时，补跑【同样两条命令】并显式带 `-y`，且把「哪条腿产出了它」
-  # 打成一行可核读数。⛔ 这不是绕过产品路径：命令、目标、调用方都是 register-plugin.mjs 自己那两条，
-  # 补的只是一个它漏掉的非交互确认标志；两条腿都在日志里留痕，判据不区分来源。
+  # register-plugin.mjs 会调 `claude plugin marketplace add <pluginDir>` 把 marketplace materialize 进
+  # ~/.claude/plugins（缓存 + known_marketplaces.json）。⚠️ 本段注释 2026-09-15 更正（AC-161 第四次回归，
+  # gap-ac161-4th-regression-…）：它此前写的「register-plugin.mjs 自己会调两条 CLI 命令
+  # （marketplace add + plugin install）」在 AC-161 第二次修复（gap-ac161-postinstall-rematerializes-
+  # user-scope-enable，86e5c1db4）之后**已不成立**——enable 步现在是**显式 opt-in**
+  # （`QUAY_PLUGIN_SCOPE` 未设/不可识别 ⇒ ⛔ 不跑 `plugin install`）。故本兜底腿补的是
+  # **user-scope 那一条**（它本就是 AC-258 的被测对象）：命令是 `plugin install --scope user`
+  # （**显式**，⛔ 不再依赖 CLI 默认值——见下），并显式带 `-y`（非 TTY 下 `plugin install` 取不到确认 ⇒
+  # materialization 整段不生效 ⇒ installed_plugins.json 里不会出现 scope:"user" 条目 ⇒ 本 AC 结构上
+  # 不可满足，而失败形态是「记录没写出来」，与「机制坏了」同形，硬规则 3b）。
+  # ⛔ 显式 `--scope user` 是本次修复的一部分（硬规则 5b 扫描的命中点之一）：原写法
+  # `claude plugin install "quay@quay" -y` **不带 `--scope`** ⇒ 取的是 Claude Code CLI 的**默认
+  # user**。对 AC-258 而言 user 正是想要的，但「靠默认值表达意图」这一形态本身就是缺陷类
+  # （CLI 默认一旦改动，这里会静默变成**另一个 scope**，而命令行、日志、记录全都看不出变化）。
+  # 显式写出后，本机跑一次仍然会写操作者真实 $HOME——那是 AC-258 的设计（它在**目标机**上跑），
+  # 不是本次修复要消除的东西；本次修复消除的是「隐式默认」这个不可见的耦合。
   local mat_leg="postinstall(register-plugin.mjs)" rc_ms=0 rc_inst=0
   if [ -z "$(ac258_user_scope_entry "$ip" "$AC258_QUAY_VERSION" 'quay@quay' 2>/dev/null || true)" ]; then
     if command -v claude >/dev/null 2>&1; then
       set +e
       claude plugin marketplace add "$plugin_root" >"$home/ac258-cli-materialize.log" 2>&1
       rc_ms=$?
-      claude plugin install "quay@quay" -y >>"$home/ac258-cli-materialize.log" 2>&1
+      claude plugin install "quay@quay" --scope user -y >>"$home/ac258-cli-materialize.log" 2>&1
       rc_inst=$?
       set -e
-      mat_leg="cli-materialize-fallback(marketplace-add rc=$rc_ms, install -y rc=$rc_inst)"
+      mat_leg="cli-materialize-fallback(marketplace-add rc=$rc_ms, install --scope user -y rc=$rc_inst)"
     else
       mat_leg="not-attempted(claude not on PATH in this shell)"
     fi
@@ -7753,6 +7848,38 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   [ "${ac238_choke_hits:-0}" = "1" ] || fail="$fail AC238-write-does-not-go-through-choke-point"
   [ "${ac238_anchor_hits:-1}" = "0" ] || fail="$fail AC238-write-carries-its-own-anchor-literal"
 
+  # ── AC161（第四次回归，gap-ac161-4th-regression-agent-runs-scope-user-install-…）─────────
+  # 被测命题：交付渠道的记录（AC-257/AC-258）在落盘前读用户级 enabledPlugins 的 quay 键，把读数
+  # 作为【同一条记录里的可核字段】带出；且该读数在四种输入形态下取值【两两不同】。
+  # 本组驱动【产品函数】ac161_user_scope_quay_state（⛔ 不在夹具里复刻判定逻辑——硬规则 4 推论三）。
+  # ⚠️ 本组只证明「该判据能取假」这一半；「它在生产上真的取到了操作者真实 HOME」由产线读数负责
+  # （本任务 AC4 的两组读数 / DoD 的 criterion exit 0）。
+  # ⚠️ 夹具路径经 AC161_SETTINGS_PATH 注入 ⇒ 自检保持 hermetic：⛔ 不读操作者真实 ~/.claude，
+  # 否则「自检是否绿」会变成「操作者主机态」的函数（把主机态错当代码态）。
+  local ac161_d="$t/ac161" ac161_clean ac161_dirty ac161_missing ac161_bad
+  local ac161_s_clean="" ac161_s_dirty="" ac161_s_missing="" ac161_s_bad=""
+  local ac161_save_settings="${AC161_SETTINGS_PATH:-}"
+  mkdir -p "$ac161_d"
+  ac161_clean="$ac161_d/clean.json"; ac161_dirty="$ac161_d/dirty.json"
+  ac161_missing="$ac161_d/absent.json"; ac161_bad="$ac161_d/malformed.json"
+  printf '%s\n' '{"model":"m","extraKnownMarketplaces":{"quay":{"source":{"source":"directory","path":"/srv/quay/plugin"}}},"enabledPlugins":{"meta-cc@meta-cc-marketplace":true}}' > "$ac161_clean"
+  printf '%s\n' '{"model":"m","extraKnownMarketplaces":{"quay":{"source":{"source":"directory","path":"/srv/quay/plugin"}}},"enabledPlugins":{"meta-cc@meta-cc-marketplace":true,"quay@quay":true}}' > "$ac161_dirty"
+  printf '%s\n' 'this is not json at all' > "$ac161_bad"
+  AC161_SETTINGS_PATH="$ac161_clean";   ac161_s_clean="$(ac161_user_scope_quay_state || true)"
+  AC161_SETTINGS_PATH="$ac161_dirty";   ac161_s_dirty="$(ac161_user_scope_quay_state || true)"
+  AC161_SETTINGS_PATH="$ac161_missing"; ac161_s_missing="$(ac161_user_scope_quay_state || true)"
+  AC161_SETTINGS_PATH="$ac161_bad";     ac161_s_bad="$(ac161_user_scope_quay_state || true)"
+  echo "selfcheck: ac161(user-scope state) clean='$ac161_s_clean' dirty='$ac161_s_dirty' missing='$ac161_s_missing' malformed='$ac161_s_bad' (expect absent / present:quay@quay / unreadable:not-found / unreadable:parse — 四态两两不同)"
+  [ "$ac161_s_clean" = "absent" ] || fail="$fail AC161-state-clean-not-absent"
+  [ "$ac161_s_dirty" = "present:quay@quay" ] || fail="$fail AC161-state-dirty-not-present"
+  [ "$ac161_s_missing" = "unreadable:not-found" ] || fail="$fail AC161-state-missing-not-unreadable"
+  [ "$ac161_s_bad" = "unreadable:parse" ] || fail="$fail AC161-state-malformed-not-unreadable"
+  # 空转判据的排除（AC4 逐字：「若该判据在两种状态下取值相同 ⇒ 判 AC4 未达成」）。
+  [ "$ac161_s_clean" != "$ac161_s_dirty" ] || fail="$fail AC161-state-cannot-take-false (clean 与 dirty 取值相同)"
+  [ "$ac161_s_dirty" != "$ac161_s_missing" ] || fail="$fail AC161-state-present-conflated-with-unreadable"
+  # 后两组（AC257/AC258）走【干净】夹具：它们测的是别的维度，⛔ 不该被本条的新前提牵动。
+  AC161_SETTINGS_PATH="$ac161_clean"
+
   # ── AC257（GOAL-018）：write_ac257_record 两个方向都要取得到 ─────────────────────────
   # 本组驱动【产品函数】write_ac257_record（⛔ 不在夹具里复刻判定逻辑——硬规则 4 推论三：只能被
   # 夹具复刻满足的判据不算被测）。负例取 merge_preserved 缺 —— 它是本 AC 最贵的一条读数（两条子
@@ -8051,6 +8178,72 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
 
   AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
 
+  # ── AC161 第二半（第四次回归）：读数真的进了【记录本身】，且写入期闸两态可分 ─────────────────
+  # 前三组证明读数函数四态可分；本组证明它**穿过了写入通道**（硬规则 4c：那个量必须穿过所有中间层
+  # 还取得到——AC3 逐字要求「同一条记录」，⛔ 不是在另一个文件里另写一遍）。
+  #   · AC-257 记录：干净 ⇒ 写，且**记录行里**带 user_scope_quay_state=absent；脏 ⇒ 拒写 + 零新增行 + 点名；
+  #     读不懂 ⇒ 拒写，且读数是**另一个**取值（⛔ 不与「有键」同形）。
+  #   · AC-258 记录：脏 ⇒ **必须照写**，且记录行里带 present:quay@quay —— 本 AC 测的就是 user scope，
+  #     它的终态【要求】用户级有注册；在这里按「无 quay 键」拒写会让本 AC 结构上不可满足。
+  local ac161_f="$t/ac161-rec.jsonl" ac161_lines0=0 ac161_lines1=0
+  local ac161_w_proj=0 ac161_w_refused=0 ac161_w_unreadable=0 ac161_w_user=0
+  local ac161_frag_proj="" ac161_frag_user="" ac161_msg_dirty="" ac161_msg_unread=""
+  local ac161_s_proj="" ac161_s_user=""
+  AC89="$ac161_f"; : > "$ac161_f"
+  AC161_SETTINGS_PATH="$ac161_clean"
+  if write_ac257_record "${ac257_args[@]}" >/dev/null 2>&1; then ac161_w_proj=1; fi
+  ac161_lines1="$(wc -l < "$ac161_f" 2>/dev/null | tr -d ' ')"
+  ac161_frag_proj="$(sed -n '1p' "$ac161_f" 2>/dev/null || true)"
+  ac161_s_proj="$(printf '%s' "$ac161_frag_proj" | sed -n 's/.*"user_scope_quay_state":"\([^"]*\)".*/\1/p')"
+  # 脏夹具：AC-257 ⇒ 拒写（前提被违反）；AC-258 ⇒ 照写（它的前提就是 user scope）。
+  AC161_SETTINGS_PATH="$ac161_dirty"
+  ac161_msg_dirty="$(write_ac257_record "${ac257_args[@]}" 2>&1 >/dev/null || true)"
+  write_ac257_record "${ac257_args[@]}" >/dev/null 2>&1 || ac161_w_refused=1
+  ac161_lines0="$(wc -l < "$ac161_f" 2>/dev/null | tr -d ' ')"
+  if write_ac258_record "${ac258_args[@]}" >/dev/null 2>&1; then ac161_w_user=1; fi
+  ac161_frag_user="$(sed -n '2p' "$ac161_f" 2>/dev/null || true)"
+  ac161_s_user="$(printf '%s' "$ac161_frag_user" | sed -n 's/.*"user_scope_quay_state":"\([^"]*\)".*/\1/p')"
+  # 读不懂（夹具路径不存在）：AC-257 必须拒写，且读数是第三个取值。
+  AC161_SETTINGS_PATH="$ac161_missing"
+  ac161_msg_unread="$(write_ac257_record "${ac257_args[@]}" 2>&1 >/dev/null || true)"
+  write_ac257_record "${ac257_args[@]}" >/dev/null 2>&1 || ac161_w_unreadable=1
+  echo "selfcheck: ac161(record field, clean) ac257_wrote=$ac161_w_proj lines=0→$ac161_lines1 field='$ac161_s_proj' (expect 1/0→1/absent — 读数必须真的进记录)"
+  echo "selfcheck: ac161(record field, user-key-present) ac257_refused=$ac161_w_refused lines=$ac161_lines1→$ac161_lines0 ac258_wrote=$ac161_w_user ac258_field='$ac161_s_user' (expect 1/1→1/1/present:quay@quay — AC-257 拒写且零新增行；AC-258 照写并如实记录)"
+  echo "selfcheck: ac161(record field, unreadable) ac257_refused=$ac161_w_unreadable (expect 1 — 读不懂 ≠ 合格)"
+  echo "selfcheck: ac161(refusal messages) dirty='${ac161_msg_dirty:0:90}' unreadable='${ac161_msg_unread:0:90}'"
+  [ "$ac161_w_proj" = "1" ] || fail="$fail AC161-AC257-record-refused-on-a-clean-user-level"
+  [ "$ac161_lines1" = "1" ] || fail="$fail AC161-AC257-record-not-written"
+  [ "$ac161_s_proj" = "absent" ] || fail="$fail AC161-AC257-record-does-not-carry-the-user-scope-reading (AC3 逐字：读数必须与记录同时产生)"
+  [ "$ac161_w_refused" = "1" ] || fail="$fail AC161-AC257-record-written-despite-a-user-level-quay-key"
+  [ "$ac161_lines0" = "$ac161_lines1" ] || fail="$fail AC161-refusal-wrote-a-line"
+  [ "$ac161_w_user" = "1" ] || fail="$fail AC161-AC258-record-refused (它的前提就是 user scope——拒写会让该 AC 结构上不可满足)"
+  [ "$ac161_s_user" = "present:quay@quay" ] || fail="$fail AC161-AC258-record-did-not-record-the-lived-user-scope"
+  [ "$ac161_s_user" != "$ac161_s_proj" ] || fail="$fail AC161-record-field-is-vacuous (两态在同一字段上取值相同)"
+  [ "$ac161_w_unreadable" = "1" ] || fail="$fail AC161-AC257-record-written-while-the-user-level-was-unreadable"
+  case "$ac161_msg_dirty" in *'present:quay@quay'*) ;; *) fail="$fail AC161-refusal-did-not-name-the-lived-state" ;; esac
+  case "$ac161_msg_unread" in *'NOT-EVALUATED'*) ;; *) fail="$fail AC161-unreadable-refusal-not-distinguishable-from-the-violation" ;; esac
+  AC161_SETTINGS_PATH="$ac161_save_settings"
+
+  # ── AC161 第三半：**隐式 CLI 默认 scope** 这一类（本文件内的结构性控制）───────────────────────
+  # 第四次回归的机制不是「用了 --scope user」，而是「**没写** --scope ⇒ 取 CLI 默认 user」——
+  # 命令行、日志、记录在改动前后**看起来一模一样**。⇒ 本文件里每一条【会执行】的
+  # `claude plugin install|update` 都必须显式带 `--scope`。
+  # ⛔ 按位置判定（硬规则 2）：只数**非注释行**（以 `#` 起首的行是解释/引用，不是调用点）——
+  #    但本组自身所在的这几行也是注释，故必须先证明谓词能命中【已知为真样本】。
+  # 已知真样本：:3799 的 `(cd "$root" && claude plugin install quay@quay --scope project -y)`。
+  local ac161_self="$SCRIPT_DIR/verify-deliver-coldstart.sh"
+  local ac161_calls="" ac161_total=0 ac161_scoped=0 ac161_unscoped="" ac161_probe_hits=0
+  ac161_calls="$(grep -nE 'claude plugin (install|update)' "$ac161_self" 2>/dev/null | grep -vE ':[[:space:]]*#' || true)"
+  ac161_total="$(printf '%s\n' "$ac161_calls" | grep -c . || true)"
+  ac161_scoped="$(printf '%s\n' "$ac161_calls" | grep -c -- '--scope' || true)"
+  ac161_unscoped="$(printf '%s\n' "$ac161_calls" | grep -v -- '--scope' | head -3 || true)"
+  # 谓词干跑（硬规则 2 的配套动作）：对【已知含该命令的非注释行】必须命中。
+  ac161_probe_hits="$(printf '%s\n' "$ac161_calls" | grep -c 'plugin install quay@quay --scope project' || true)"
+  echo "selfcheck: ac161(explicit-scope, positional) executed-calls=$ac161_total with-scope=$ac161_scoped probe-known-true-sample=$ac161_probe_hits unscoped='$ac161_unscoped' (expect total==scoped ∧ probe>=1 — 隐式默认不得作为意图的载体)"
+  [ "$ac161_total" -ge 1 ] 2>/dev/null || fail="$fail AC161-scope-scan-found-no-call-sites (谓词没命中任何东西 ⇒ 它在空转)"
+  [ "$ac161_probe_hits" -ge 1 ] 2>/dev/null || fail="$fail AC161-scope-scan-predicate-cannot-hit-the-known-true-sample"
+  [ "$ac161_total" = "$ac161_scoped" ] || fail="$fail AC161-some-executed-cli-call-omits---scope (implicit CLI default is not an intent carrier)"
+
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
   # 把内存里的声明删掉一个【判据确实在读】的字段（AC-247 的 carrier_records）⇒ 报告必须取 DRIFT
   # 且点名该字段 + 退出非 0。⛔ 这是 AC1 的可失败控制：一个永远打印 ok 的检查不是测量（硬规则 4），
@@ -8081,6 +8274,7 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
     rc=1
   fi
   AC_RECORD_SCHEMA="$save_schema"; AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
+  AC161_SETTINGS_PATH="$ac161_save_settings"
   rm -rf "$t"
   return $rc
 }

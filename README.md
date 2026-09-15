@@ -99,12 +99,15 @@ The `npm install -g quay-*.tgz` path **registers the plugin automatically**:
 - The package's `postinstall` hook (`packages/quay/scripts/register-plugin.mjs`)
   adds the **installed** plugin directory (`$(npm root -g)/quay/plugin`, a legal
   Claude Code *directory marketplace* containing `.claude-plugin/marketplace.json`
-  and `plugin.json`) to `~/.claude/settings.json` as `extraKnownMarketplaces.quay`
-  and enables it via `enabledPlugins["quay@quay"]`.
+  and `plugin.json`) to `~/.claude/settings.json` as `extraKnownMarketplaces.quay`.
+  It deliberately does **not** write `enabledPlugins["quay@quay"]` at user scope —
+  the user level carries only the marketplace *source* (STANDING goal AC-161); a
+  project opts in through its own `.claude/settings.json`.
 - When the `claude` CLI is on `PATH`, the hook then runs
-  `claude plugin marketplace add <installed-plugin-dir>` and
-  `claude plugin install quay@quay`, which materializes the plugin into
-  `~/.claude/plugins/` so `/quay:init` is usable with **no manual step**.
+  `claude plugin marketplace add <installed-plugin-dir> --scope user`, which
+  materializes the marketplace into `~/.claude/plugins/`. The enable step is
+  **opt-in** (`QUAY_PLUGIN_SCOPE=user|project|local`) because `claude plugin install`
+  defaults to `--scope user`.
 - **After installing, restart Claude Code**, then run `/quay:init` in a session.
 
 Verify the registration (the task's contract measure, must be `>= 1`):
