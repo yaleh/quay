@@ -47,8 +47,12 @@ expect: exit 0 = dist-plugin 分支上（.md/.sh/.js 三类载体）scripts|gate
   2）。基线读数 2026-09-15：261 个引用中 260 个是 cwd 相对 offender（.md 96／.sh 134／.js 30），另有
   11 条 plugin-root 锚定的悬空 .ts（跨 5 个 SKILL.md，目标被 publish-dist-branch.sh:136 的
   strip 步删除）。⚠️ 第三支是硬规则 5b 的产物：那 11 条的锚是对的，cwd 相对谓词数不到它们——只修 .md 那 96 条会让本 AC
-  变绿而交付面仍是半坏。⛔ 判据刻意不锁具体前缀写法（不要求必须是 ${CLAUDE_PLUGIN_ROOT}），只要求在消费项目里解析得到。⚠️
-  实现落地后必须重跑 publish-dist-branch.sh，否则读到的是旧交付面。
+  变绿而交付面仍是半坏。⛔ 判据刻意不锁具体前缀写法（不要求必须是
+  ${CLAUDE_PLUGIN_ROOT}），只要求在消费项目里解析得到。【取证义务，随并发撞车收尾并入】实现方必须【实测】${CLAUDE_PLUGIN_ROOT}
+  在 SKILL.md 正文上下文中究竟可用与否、把读数入档，⛔ 不得只凭 plugin/skills/init/SKILL.md:41-44
+  的既有用法推断可用——官方文档只确认 hooks 与 MCP command 两个上下文，SKILL
+  正文未表态；可用则采用它，不可用则换等价自解析形式（两种都满足本判据）。⚠️ 实现落地后必须重跑
+  publish-dist-branch.sh，否则读到的是旧交付面。
 origin: 2026-09-15 对 dist-plugin 分支的直接测量：scripts/dist 引用带 cwd 相对 plugin/ 前缀，正确形式
   0 条。根因 build-plugin-dist.mjs 的 rewriteMarkdown(:445-459) 与
   rewriteShell(:466-501) 只换扩展名、不加任何 plugin-root 锚（该文件内 CLAUDE_PLUGIN_ROOT grep
