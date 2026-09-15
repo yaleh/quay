@@ -22,6 +22,14 @@
 //   testFiles     该 run 实际跑到的测试文件数，由日志的 `__GROUP__ … files=N` 派生（GitHub run 元数据里
 //                 没有这个字段）；派生不出就【不写这个键】—— 缺 ≠ 0（硬规则 6）。
 //
+// ── 运维后果（⛔ 跑之前先读这一条）────────────────────────────────────────────────────────
+// 载体在本仓是**被 git 跟踪**的（与 `.quay/routine-findings.jsonl` 同一形态 —— AC-269/268/267 的判据
+// 就是在某个检出里读这个文件，不被跟踪它就只能活在跑采集的那一个 worktree 里）。
+// 后果：**采集与提交必须成对做**。只跑采集不提交，工作树会留下一条 ` M .quay/ci-runs.jsonl`；
+// 而 ff 的 benign-runtime-dirty 通道只放行 `??`（未跟踪）的 `.quay/*`（`fan-in/ff-merge.ts` 的
+// `pstatus !== "??"` 分支），跟踪+已改的路径会被判「working tree not clean」⇒ 挡住之后每一次 fan-in 的 ff。
+// ⇒ 用法：`… ci-runs-collect.ts … && git add .quay/ci-runs.jsonl && git commit -m 'chore: CI run 载体'`。
+//
 // ── 离线缝 ─────────────────────────────────────────────────────────────────────────────
 // `--from-file <runs.json>` 用一份 gh 形状的 run 数组替代真实 API 调用，走的是**同一个 collect()**
 // 与**同一个写函数**。这让「写面会写 attribution」可以在没有网络时被真跑一遍，而不是靠手工往载体里塞一行。
