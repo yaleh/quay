@@ -53,12 +53,12 @@ EXIT=0
 
 ## AC
 
-- [ ] AC1 立案前直接量复核已接入 frozen 分支，并贴出**同一时刻同一 AC** 的改前 / 改后读数对照（改前：产 `frozen-violated`；改后：不产）
-- [ ] AC2 负控制①（真为假仍立案）：criterion 为 `exit 1` 的 AC 仍产 `frozen-violated`，贴出读数
-- [ ] AC3 负控制②（陈旧 fail 不立案）：tail=`fail` 而 criterion 此刻 `exit 0` 的 AC（本任务的实测形态）**不**产 `frozen-violated`，贴出读数
-- [ ] AC4 复核不可评估时取独立值，且与「复核通过」可区分（贴出该分支的读数）
-- [ ] AC5 prompt 的假前提已改：`buildGapWorkerPrompt` 的 frozen 分支不再出现 `No other mechanism re-runs it`
-- [ ] AC6 发生率读数（9 对 / 7 条 AC / 13–101 min）与 3 例立案已落进任务体或代码注释（可复核）
+- [x] AC1 立案前直接量复核已接入 frozen 分支，并贴出**同一时刻同一 AC** 的改前 / 改后读数对照（改前：产 `frozen-violated`；改后：不产）
+- [x] AC2 负控制①（真为假仍立案）：criterion 为 `exit 1` 的 AC 仍产 `frozen-violated`，贴出读数
+- [x] AC3 负控制②（陈旧 fail 不立案）：tail=`fail` 而 criterion 此刻 `exit 0` 的 AC（本任务的实测形态）**不**产 `frozen-violated`，贴出读数
+- [x] AC4 复核不可评估时取独立值，且与「复核通过」可区分（贴出该分支的读数）
+- [x] AC5 prompt 的假前提已改：`buildGapWorkerPrompt` 的 frozen 分支不再出现 `No other mechanism re-runs it`
+- [x] AC6 发生率读数（9 对 / 7 条 AC / 13–101 min）与 3 例立案已落进任务体或代码注释（可复核）
 
 ## DoD
 
@@ -71,5 +71,21 @@ EXIT=0
 ## Touches
 
 - plugin/scripts/goal-driver.ts
+- plugin/scripts/driver-runtime.ts
 - plugin/test/goal-driver.test.mjs
 - tasks/gap-frozen-violated-files-on-stale-verdict.md
+
+## Resolution
+
+**改动**（worktree `/home/yale/work/quay-worktrees/gap-frozen-violated-files-on-stale-verdict`，分支 `task/gap-frozen-violated-files-on-stale-verdict`）：新增 `recheckFrozenFailing()`（`plugin/scripts/goal-driver.ts`）——对 `frozenReading.failing` 命中的每条 AC 真跑一次它的 criterion（复用 pass 1 的 `gateCriterion` = `goal-store gate` 动词，同一条 acceptance 执行路径、同一道重入闸 `GOAL_ACCEPTANCE_ACTIVE_ENV`）；`computeGoalGaps` 增第 6 参 `frozenRecheck` 并在 frozen 分支按三态分派；轮记录新增 `frozenRecheck`；prompt 假前提已改。Touches 新增 `plugin/scripts/driver-runtime.ts`（Core 库符号单一导入面补出 `GOAL_ACCEPTANCE_ACTIVE_ENV`——闸的**变量名**必须只有一个定义，⛔ 不在 driver 侧重写字面量，硬规则 5b）。
+
+**读数**（证据脚本原文 + 完整输出落 `/home/yale/work/quay/.quay/frozen-recheck-ac-evidence.{mjs,txt}`；`node --experimental-strip-types .quay/frozen-recheck-ac-evidence.mjs`，判据文本全程不变 ⇒ `criterionHash` 不变，故台账尾那条 fail 说的正是当前这条判据，缺陷形态成立）：
+
+- **AC1（同一时刻同一 AC 的改前/改后）**：台账读数 = `{judgment:"violated", failing:["AC-900"]}`（修复落地**前后各取一次，两次逐字相同**——即台账确实陈旧）。改前 `computeGoalGaps(...staleReading)` ⇒ `{state:"frozen-violated", taskCount:0}`；接入复核后 `frozenRecheck = {ran:true, attempted:1, entries:[{ac:"AC-900", outcome:"cleared", cause:"now-true", reason:"acceptance passed (exit 0)"}], guardRefused:false}` ⇒ `computeGoalGaps(...staleReading, recheck)` **无该条读数**（`undefined`）。
+- **AC2（负控制①，判据真为假）**：撤掉 marker 后生产形态 `runGoalRound` ⇒ `frozenRecheck.entries = [{ac:"AC-900", outcome:"confirmed-failing", cause:"still-false", reason:"acceptance failed (exit 1) …"}]`、`gaps = [{…, state:"frozen-violated", taskCount:0}]`、`gap_spawns = ["AC-900"]` ⇒ 立案照旧（复核不是恒绿闸）。
+- **AC3（负控制②，本任务实测形态）**：marker 出现后走真 `runGoalRound` ⇒ `frozenFailing.failing` **仍是** `["AC-900"]`（⛔ 台账没有变好——这正是缺陷的输入），而 `frozenRecheck.entries=[{ac:"AC-900", outcome:"cleared", cause:"now-true"}]`、`gaps = []`、`gap_spawns = []` ⇒ **不产** `frozen-violated`、不烧 spawn 名额。
+- **AC4（复核不可评估 ⇒ 独立值）**：置位 `GOAL_ACCEPTANCE_ACTIVE_ENV=1` ⇒ `recheckFrozenFailing` 返回 `{ran:false, attempted:1, entries:[{ac:"AC-900", outcome:"not-evaluated", cause:"guard-refused", …}], guardRefused:true}` ⇒ 缺口取值 `{state:"not-evaluated", taskCount:null}`（⛔ 既不同于 cleared 的「无读数」，也不同于 confirmed 的 `frozen-violated`；`not-evaluated` 不在 spawn 选取面）。
+- **AC5**：`buildGapWorkerPrompt(...frozen-violated...)` 首段不含 `No other mechanism re-runs it` / `stays false forever`；新句为 "This round RE-RAN its criterion directly before filing (the filing is a direct measurement, not a stale ledger tail), so the criterion is false as of now."
+- **AC6**：本条 ⑥ 已载 9 对 / 7 条 AC / 13–101 min 与 3 例立案；同一读数**独立重算过一遍**（按 `actor=goal-sweep ∧ gate=goal` 的 fail→pass 翻转对统计，结果逐字一致：AC-172/228/203/179×3/169/162/194，窗 13–101 min），并写进 `goal-driver.ts` 新函数上方的设计注释。
+
+**控制与边界**：⛔ 未改判据、未改 `goals/`、未改 AC 记录；复核只对 `failing` 命中的跑（通常 0–1 条，实测 avg 1.31s/criterion）；未传复核读数时**保守立案**（fail-visible，⛔ 不静默变成「复核通过」）。**scoped 门绿**：`bash scripts/test.sh --for-task gap-frozen-violated-files-on-stale-verdict --allow-thin` → EXIT=0（`plugin/test/goal-driver.test.mjs` 81/81，含新增 5 条）。
