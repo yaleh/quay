@@ -71,10 +71,10 @@ $ node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-259 --d
 
 ## AC
 
-- [ ] AC1 读数是**直接量**，且指向**跑着**的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。**现状：0 / 1**。⛔ 对 `plugin/scripts/goal-driver.ts`（源侧）求值不算——源侧本来就过，是空转形。
-- [ ] AC2 **活的内核**上复核真的跑了：激活后经一轮真实 goal 环，`.quay/goal-round.jsonl` 该轮 fact 的 `frozenRecheck.ran` = `true`；若该轮 `failing` 命中 AC-259，其 entry 的 `outcome` = `cleared` / `cause` = `now-true`。**负控制**：激活前最后一轮该字段必须取 `false` 或缺失，二者可区分。⛔ 只断言「函数存在」不算。
-- [ ] AC3 AC-259 的 `--stale-pass` 读数转 `verifiedFresh`：`quay goal check --stale-pass --root /home/yale/work/quay` → **exit 0** 且 `failing` 不含 `AC-259`。**负控制（区分「轮转真的重取过」与「等它自己掉出去」）**：`.quay/gate-events.jsonl` 里存在满足 `pipeline_id="AC-259" ∧ gate="goal" ∧ actor ∈ {goal-sweep, goal-amend} ∧ verdict="pass" ∧ timestamp > 2026-09-15T17:35:05.096Z ∧ payload.criterionHash == "8ccfd00300ded08f"` 的事件。⛔ 后写的 `goal-cli` pass 判定面**不读**，不算。（老化不产生新事件，故这条能取假。）若轮转尚未取到 AC-259，可调用同一条有界轮转的动作面 `quay goal check --stale-pass --sweep [--budget N] [--min-age-ms N] [--wall-ms N]` 让它真跑一次——⛔ 不得改写/删除台账事件来伪造 pass。
-- [ ] AC4 陈旧内核这一形态在**生产载体**上可见（`sourceWatch` 修复的落地验证；硬规则 4 推论三要求 AC 至少有一条读生产载体）：`quay driver status --json`（或 `aliveness()` 同一口径）在**活着的** anchor 上给出 `source_watch` 与 `source_watch_dir`，且 `source_watch ∈ {watched, mirror, unwatched}` 是**独立取值**（⛔ 不与「新鲜」同形）。**两臂对照**：激活后 `source_watch_dir` 必须指向真实存在且被监视的源（非空、非 `unwatched`），而**激活前**同一读数取不到该键或为 `unwatched`。只给一臂不算过。
+- [x] AC1 读数是**直接量**，且指向**跑着**的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。**现状：0 / 1**。⛔ 对 `plugin/scripts/goal-driver.ts`（源侧）求值不算——源侧本来就过，是空转形。 **【已满足：3 / 0，见 `## Resolution` §AC1】**
+- [ ] AC2 **活的内核**上复核真的跑了：激活后经一轮真实 goal 环，`.quay/goal-round.jsonl` 该轮 fact 的 `frozenRecheck.ran` = `true`；若该轮 `failing` 命中 AC-259，其 entry 的 `outcome` = `cleared` / `cause` = `now-true`。**负控制**：激活前最后一轮该字段必须取 `false` 或缺失，二者可区分。⛔ 只断言「函数存在」不算。 **【未满足，且在本状态不可达：激活后 7 轮全为 `failing=[]` ⇒ `ran=false`。见 `## Resolution` §AC2 —— 这是 AC 集的次序缺陷（AC3 的动作消灭了 AC2 的前置），非实现缺失。⛔ 不做假勾。】**
+- [x] AC3 AC-259 的 `--stale-pass` 读数转 `verifiedFresh`：`quay goal check --stale-pass --root /home/yale/work/quay` → **exit 0** 且 `failing` 不含 `AC-259`。**负控制（区分「轮转真的重取过」与「等它自己掉出去」）**：`.quay/gate-events.jsonl` 里存在满足 `pipeline_id="AC-259" ∧ gate="goal" ∧ actor ∈ {goal-sweep, goal-amend} ∧ verdict="pass" ∧ timestamp > 2026-09-15T17:35:05.096Z ∧ payload.criterionHash == "8ccfd00300ded08f"` 的事件。⛔ 后写的 `goal-cli` pass 判定面**不读**，不算。（老化不产生新事件，故这条能取假。）若轮转尚未取到 AC-259，可调用同一条有界轮转的动作面 `quay goal check --stale-pass --sweep [--budget N] [--min-age-ms N] [--wall-ms N]` 让它真跑一次——⛔ 不得改写/删除台账事件来伪造 pass。 **【已满足：exit 0；负控事件 `2026-09-15T19:09:27.729Z goal-sweep pass hash=8ccfd00300ded08f`。见 `## Resolution` §AC3】**
+- [x] AC4 陈旧内核这一形态在**生产载体**上可见（`sourceWatch` 修复的落地验证；硬规则 4 推论三要求 AC 至少有一条读生产载体）：`quay driver status --json`（或 `aliveness()` 同一口径）在**活着的** anchor 上给出 `source_watch` 与 `source_watch_dir`，且 `source_watch ∈ {watched, mirror, unwatched}` 是**独立取值**（⛔ 不与「新鲜」同形）。**两臂对照**：激活后 `source_watch_dir` 必须指向真实存在且被监视的源（非空、非 `unwatched`），而**激活前**同一读数取不到该键或为 `unwatched`。只给一臂不算过。 **【已满足（两臂）：激活前**无该键**；激活后六 kind 全为 `mirror` + `/home/yale/work/quay/plugin/scripts`。见 `## Resolution` §AC4】**
 
 ## DoD
 
@@ -92,3 +92,85 @@ $ node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-259 --d
 - tasks/gap-ac259-resident-kernel-never-runs-landed-prefiling-recheck.md
 
 注：前置**已落地，勿重复实现**——`b4157cdab` / `a87688a63`（`sourceWatch` / `kernelSourceScriptsDir`）已在源树，`32d8ddd4d`（`recheckFrozenFailing`）在 develop。本任务是**激活 + 生产载体验证**；若实测发现必须改代码（例如进程内 respawn 换不了模块），才改上面三个文件。
+
+## Resolution
+
+激活已完成并逐条留痕（2026-09-15T19:0x–20:0xZ，主检出 `/home/yale/work/quay`）。**未改任何代码**（理由见 §为何不改代码）。
+
+### 跑着的内核（激活后，AC1 口径）
+
+```
+$ cat .quay/anchor.pid            # 1713778
+$ ps -o cmd= -p 1713778
+/home/yale/.nvm/versions/node/v24.19.0/bin/node /home/yale/work/quay/plugin/scripts/dist/driver-anchor.js __anchor --root /home/yale/work/quay
+```
+
+该内核按 `resolveKernelSibling` 口径加载的 goal 模块 = `/home/yale/work/quay/plugin/scripts/dist/goal-driver.js`（内核目录里没有 raw `goal-driver.ts` ⇒ 取同目录 bundle；mtime `2026-09-15 19:05:18`）：
+
+- `grep -c 'recheckFrozenFailing'` = **3**（≥1 ✓）
+- `grep -c 'No other mechanism re-runs it'` = **0** ✓
+
+**与 Finding ④ 的同一个量对照**：激活前 = `packages/quay/plugin/scripts/dist/goal-driver.js`（mtime 07:35:49）**0 / 1**；激活后 = `plugin/scripts/dist/goal-driver.js`（mtime 19:05:18）**3 / 0**。**跑着的内核路径已不在 gitignored 暂存树上。**
+
+### 三个动作与实测结果
+
+1. `node packages/quay/scripts/build-plugin-dist.mjs /home/yale/work/quay/plugin` → `103 bundled entrypoints → /home/yale/work/quay/plugin/scripts/dist`；产物 `goal-driver.js` 含 `recheckFrozenFailing`(3)、删句计数 0；`driver-runtime.js` 含 `kernelSourceScriptsDir`(7) / `sourceWatch`(11) / `source_watch`(3)。（12:39 那版只有 `recheck`，无 `kernelSourceScriptsDir` —— 正是 Finding ⑤ 的第三行。）
+2. `rsync -a plugin/scripts/dist/ packages/quay/plugin/scripts/dist/` → `diff -r` 为空（两树逐字节相同，各 101 个条目）。⛔ 只覆盖 `scripts/dist`。
+3. **重启**：实测确认了任务预期的那条——
+   - **按 kind 的 `stop`/`start` 换不了模块**：anchor 承载下 `stop --kind X` 只摘该 kind 的循环（`driver-runtime.ts:2639-2642` → `stopKindViaAnchor`，⛔ 不杀 anchor），`start --kind X` 经 `driver-anchor.ts:88` 的 `import(pathToFileURL(sibling.path).href)` 对**同一 URL** 命中 ESM 模块缓存 ⇒ 同进程内模块不换。
+   - **只有整进程替换才换**：先 `quay driver stop --kind {promotion,outer,quality,meta,goal}`（五个循环在 60s 停超时点同时退出，锚日志 19:04:34 五行 `loop stopped`），再 `stop --kind worker`（`remaining=[]` ⇒ 对旧 anchor 发 SIGTERM/SIGKILL；该次 stop 返回 **1** 是**预期**的 still-running —— 本 worker 自身在飞，循环不肯 break），最后 `quay driver start --kind {goal,promotion,worker,outer,quality,meta}`。
+   - **对照（直接量）**：内核由 `packages/quay/plugin/…/driver-anchor.js`（pid **4014875**，02:15 起）换成 `plugin/scripts/dist/driver-anchor.js`（pid **1713778**，19:05:22 起）。
+   - **anchor 形态未缩**：`.quay/anchor.json` = `{"pid":1713778,"startedAt":"2026-09-15T19:05:22.727Z","kinds":["goal","promotion","worker","outer","quality","meta"],"host":"anchor"}`；六个 `*-driver.pid` 全为 `1713778`，distinct live pid = **1**。⛔ 未退回逐 kind supervisor 形态。
+
+### AC 逐条读数
+
+**AC1 ✓** —— 见上（3 / 0，取自跑着内核的路径）。⛔ 未对 `plugin/scripts/goal-driver.ts` 求值（源侧永远过，是空转形）。
+
+**AC2 ✗（不可达）** —— 激活后 goal 环已跑 **7 轮**（round 1…7，`pid=1713778`，ts `19:13:51.904Z` … `20:0xZ`）。每轮 fact：
+
+```
+frozenFailing = {"failing":[],"judgment":"clean","cause":null,"frozenScope":86}
+frozenRecheck = {"ran":false,"attempted":0,"entries":[],"guardRefused":false}
+```
+
+**负控成立**：激活前最后一轮（round 114，`pid=4014875`，`18:57:13.313Z`）**没有** `frozenRecheck` 键（absent），且 `frozenFailing.failing=["AC-259"]`、`judgment="violated"`。⇒ 两臂可区分（**缺失** vs `ran:false`）。
+
+但 AC2 要求的那一臂（`ran=true`）**没有发生**，成因是机械的、可核的：
+
+- `recheckFrozenFailing`（`plugin/scripts/goal-driver.ts:519-527`）**仅在** `reading.judgment === "violated"` 时才跑；而 `judgment === "violated"` ⇔ `check --stale-pass` **exit 1** ⇔ `failing.length > 0`（`packages/quay/src/goal-store.ts:3029-3034`，读代码核实）。
+- AC3 要求的轮转落定后 `failing` 已空（86/86 `verifiedFresh`），故 `ran=false` 是**正确**行为。
+
+**⇒ AC2 与 AC3 有次序依赖，且任务文本未写明**：`.quay/goal-round.jsonl` 全历史 6570 轮里 `judgment=violated` 的 111 轮，**最后 12 轮 `failing` 恒为 `["AC-259"]`**——AC-259 是唯一一条 frozen-failing。AC3 的动作（把 AC-259 复验为 pass）恰好**消灭**了 AC2 唯一的前置。正确次序是**先等一轮 goal 环**（AC2：`ran=true` + `AC-259 → cleared/now-true`），**再**做轮转（AC3）。本任务在 **19:09:27** 先做了轮转，而新内核第一轮落在 **19:13:51** —— 差 **4 分钟**。⛔ 未做假勾：AC2 的字面谓词为假，且在冻结 population 全绿期间不可达（穷举轮转 86 条：85 pass + 1 次暂态 not-evaluated，**无一条 fail**；六 kind 心跳全 <7min ⇒ AC-255 两条失败路径都不可达）。**这是本任务 AC 集的缺陷，不是实现缺失**——建议人改 AC2 的措辞（接受 `ran=false ∧ failing=[]` 作「此刻无可复核」这一独立取值，与「没跑」不同形），或把它显式排在 AC3 之前。
+
+**AC3 ✓** —— `node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass --root /home/yale/work/quay` → **EXIT=0**，`failing=[]`（不含 AC-259）、`notEvaluated=[]`、`staleUnverified=[]`、`verifiedFresh=86`、`rotation={"sweptEver":86,"lastSweepAt":"2026-09-15T19:09:29.099Z","minAgeMs":3600000,"maxAgeMs":14400000}`。
+
+负控（判定面**真读**的那条事件，⛔ 非 `goal-cli`）：
+
+```json
+{"pipeline_id":"AC-259","gate":"goal","actor":"goal-sweep","verdict":"pass",
+ "timestamp":"2026-09-15T19:09:27.729Z","payload":{"criterionHash":"8ccfd00300ded08f"}}
+```
+
+满足全部四项：`> 2026-09-15T17:35:05.096Z` ✓、`actor=goal-sweep` ✓、`verdict=pass` ✓、`payload.criterionHash` = 现行指纹 ✓（⇒ 不是「老化掉出去」）。驱动它的动作是任务授权的那条有界轮转：`quay goal check --stale-pass --sweep --budget 40 --min-age-ms 5400000 --wall-ms 780000`（AC-259 rank 31/94，oldest-first）。⛔ 未改写/删除任何台账事件。
+
+真值仍为真：`quay goal gate AC-259 --dry-run` → **EXIT=0**（`AC-259: acceptance passed (exit 0)`）。
+
+**AC4 ✓（两臂）**
+
+- **激活前**：`quay driver status --kind goal --json` **无** `source_watch` / `source_watch_dir` 键（07:35 的暂存 bundle 早于 18:17 的 `b4157cdab`）。
+- **激活后**：六 kind 全为 `"source_watch":"mirror"`、`"source_watch_dir":"/home/yale/work/quay/plugin/scripts"`、`"host":"anchor"`、`"anchor_pid":1713778`。该目录**真实存在且被监视**（`plugin/scripts/*.ts` 在位）⇒ 非空、非 `unwatched` ✓。三态里取的是 `mirror`（内核是构建产物、源树在）——独立取值，⛔ 不与「新鲜」同形。
+
+### 为何不改代码
+
+任务把改代码设为**条件**（「若实测证明进程内 respawn 换不了模块，才改上面三个文件」）。实测：
+
+- 「按 kind 的 restart 换不了模块」**成立**（ESM 模块缓存，见 §三个动作 第 3 条），但它**没有被需要**——整进程替换换得动，且已实测换成。
+- 「自宿主 anchor 从 gitignored 暂存树加载陈旧 bundle」这一**形态**已由数据纠正：`preferredAnchorKernel` 的 ③ 分支（`plugin/scripts/driver-runtime.ts:959-968`，`b4157cdab` 已落地）在「源树 bundle 比本内核新」时优先源树。⚠️ 注意 `rsync -a` **保留 mtime** ⇒ 只 build 一次时两树 mtime 相等，③ 的 `srcMtime > selfMtime` 不成立、anchor 会**又落回暂存树**；所以我**多跑了一次 build**（19:05:17），让源树 bundle **严格**新于暂存树。跑着的 anchor 因此落在 `<repo>/plugin/scripts/dist/`。
+
+⛔ 未改 `plugin/scripts/driver-anchor.ts` / `driver-runtime.ts` / `plugin/test/driver-anchor.test.mjs`：没有任何 AC 要求，且对一个「保住六个 driver 命」的机制做**未被任何判据测过**的行为改动，风险大于收益（同硬规则 12：给不出发生率的前置/改动不得阻塞）。
+
+### 残留（下一轮无需重新推导）
+
+1. **同一路径原地重建不自刷新**：anchor 跑在 `<repo>/plugin/scripts/dist/driver-anchor.js` 时，重建后 `preferredAnchorKernel()` 的候选**就是它自己**，而 `driver-anchor.ts` 的 `canRefresh` 含 `cand.path !== me` ⇒ 只打 `STALE BUNDLE … rebuild the bundle to clear this`（该行在「已重建、只差重启」时是**误导**的）。⇒ 下一次运行期修复落地后仍需「重建 + 整进程重启」。
+2. **暂存树会被重新 staging**：`packages/quay/scripts/package.sh:93-95` 每次 `npm pack` 前 `rm -rf` 再 `cp -R plugin/. packages/quay/plugin/`，副本 mtime = 当时 ⇒ 暂存树再次新于源树，重启后 anchor 会**再次**落回暂存树。根治点在 Core 的 `resolvePluginRoot()` 走查（`packages/quay/src/plugin-root.ts:136` `resolvePluginRootFrom`）：它从 `packages/quay/src` 起走查，**先**命中 `packages/quay/plugin/`（pack-time 暂存），**后**才是仓库根的 `plugin/`。⛔ 该文件不在本任务 Touches 内，未改。
+3. **AC-255 判据的载体尾脆弱**（实测到的一次暂态，非本任务引入）：`.quay/quality-round.jsonl` 的**最后一行**若是 judge 记录（有 `judgedAt`、**无 `ts`**），AC-255 即 `exit 3`，进而使 `--stale-pass` 整体 exit 3。19:16:25 实测触发；19:21:16 在 quality 环写出带 `ts` 的轮次记录后复验为 pass（该次 not-evaluated 已由轮转覆盖，⛔ 未删改事件）。
