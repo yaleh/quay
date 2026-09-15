@@ -1402,7 +1402,16 @@ test("AC5 (生产载体, 双臂) — 常驻环 reconcile：确已退出的孤儿
   assert.equal(rec5.orphan_pid_liveness, "exited",
     "AC5 承重: 载体记录带【实测】liveness ⇒ 断言从此可被读者取假（⛔ 此前载体里没有这个字段，声称无法被检验）");
   assert.match(rec5.failure_reason, /already exited/, "AC5 臂①: 实测已退出 ⇒ 保留原措辞");
-  assert.equal(readDispatchStore(dispatchFile)[taskDead], undefined, "AC5 臂①: 记录被清（孤儿有归宿）");
+  // ⚠️ 本断言此前是【立即】`assert.equal(readDispatchStore(...)[taskDead], undefined)`，在满载下偶发红
+  // （`AC5 臂①: 记录被清（孤儿有归宿）`）。根因是【观测时差】，不是记录没被清：驱动的
+  // `finalizeOrphanDispatch` 在同一函数里【先】`appendOutcomeToFile`（= 上面 waitFor 的触发条件）
+  // 【后】`removeDispatchRecord`，两者在驱动进程内同步且相邻；而本测试是从【另一个进程】经文件系统
+  // 观测的 ⇒ 看到 outcome 行的那一刻，清记录可能尚未跑完（fs 延迟随宿主负载增长，窗口随之变宽）。
+  // 判别对照（决定性）：在 append 与 remove 之间注入 400ms 同步延迟 ⇒ 该断言 5/5 必红 ⇒ 这是观测时差，
+  // 不是跨进程 read-modify-write 竞争（无并发写者也能构造出该红）。故改为【等待终态成立】——
+  // 判据语义逐字不变（终态仍必须清记录；`removeDispatchRecord` 若被移除/失效 ⇒ 轮询超时 ⇒ 断言取假）。
+  const clearedOrphan = await waitFor(() => readDispatchStore(dispatchFile)[taskDead] === undefined, 10000);
+  assert.ok(clearedOrphan, "AC5 臂①: 记录被清（孤儿有归宿）");
 
   // AC5 的判据形式：该载体里此类记录数 ≥1 且【假阳性 = 0】（假阳性 = 声称已退出但实测不是已退出）。
   const all = orphanRecords();
