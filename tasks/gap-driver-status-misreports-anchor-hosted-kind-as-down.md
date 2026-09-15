@@ -2,7 +2,7 @@
 id: gap-driver-status-misreports-anchor-hosted-kind-as-down
 title: quay driver status --kind &lt;k&gt; 误报被 driver-anchor 托管的 kind 为
   alive=0/running=0(host=supervisor)，实际该 kind 正在正常运转
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
