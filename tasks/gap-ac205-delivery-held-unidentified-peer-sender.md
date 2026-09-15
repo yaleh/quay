@@ -3,7 +3,10 @@ id: gap-ac205-delivery-held-unidentified-peer-sender
 title: AC-205 的产出前置是环境的且未登记：host C 的 probe 投出去了但被接收方按「unidentified
   session」扣下（Held peer message）＋ 选择器不查活性（后者已修）
 status: todo
-labels: []
+labels:
+  - gap
+  - defect
+  - mechanism
 parent: null
 children: []
 extra: {}
