@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [discovery-path-classify.ts]="「谁先发现它」的分布是什么 —— 全部真实 gap 任务的**首次揭发**里，①人的追问/裁定 ②自主循环的主动巡检 ③测试套件/闸门报红 各占多少，以及该分布随立案月份与 08-11 前后两窗怎么变，从而让「人是唯一的样本外探测器」这条原本只有 n=5 的定性结论第一次有一个几百例的读数可对（判据命不中时落 other 且不留证据，绝不静默并进任一实质类；tasks/gap-who-discovered-it-first-sample-is-only-five）?"
   [driver-anchor.ts]="Do the six driver kinds’ resident loops live in ONE OS process (SPEC-unified-quay-server §7 stage C / §6.1) — an anchor host that runs each kind’s OWN main(argv) loop in-process behind an independent event-loop error boundary + restart counter, writes each kind’s .quay/<prefix>.pid as its own pid (so AC-255’s criterion de-duplicates to ONE live pid) while retiring the per-kind supervisor pid files, reconciles a declarative .quay/anchor-desired.json so quay driver start|stop --kind X adds/removes exactly ONE loop without touching the others or killing in-flight worker children (§6.9 inv.2/3), and self-refreshes onto the main checkout’s kernel when it advances (AC8 durability; the base is the MAIN CHECKOUT OF THE KERNEL’S OWN REPO — ⛔ NOT the workspace root passed as --root, whose <workspaceRoot>/plugin/scripts/… form resolves to a nonexistent file in a third-party project and is fail-closed by kernel-sibling-resolution-check’s DRIVER-SCOPE rule on driver-runtime.ts) — rather than 12 supervisor+driver processes whose per-kind crash isolation is bought with 8 registry tables and a ps that can no longer tell ‘the process is up’ from ‘this kind is still turning’ (§6.10)?"
   [fan-in-queueing-model.ts]="「把 worker 并发调高，落地吞吐会上升，还是只有排队时间上升」—— 用三个生产载体（fan-in 锁事件 / per-run fan-in 过程日志 / worker 执行记录 + git 落地历史）报出锁持有分布、排队等待分布、锁利用率 ρ、到达率 λ、平均在系统数 L，以及实测的 wait-vs-ρ 曲线（本报告里唯一可取假的那个量），据此说出系统当前落在排队论 knee 的哪一侧、以及距饱和还有几倍余量（tasks/gap-fan-in-queueing-model-does-concurrency-help；并纠正 docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §7 第 5 条『排队无载体』的错误结论——该量自 2026-08-30 起写在 per-run 过程日志里）?"
   [freshness-producer-coverage-check.ts]="Does every subject whose delivery evidence the AC-214 freshness criterion tracks have a producer REGISTERED in the single-source mapping plugin/freshness-producers.json — i.e. is the set of subjects observed in the evidence carrier (.quay/productization-verification.jsonl, under the mapping's own declared scope rule: ac matches subject_id_pattern AND the record carries a 40-hex build_sha) equal to the registered set, is the registered set equal to the set the criterion itself publishes in .quay/goal-freshness-margin.json, and does every registered subject actually have carrier records — so that the refresh mechanism's COMPLETENESS (not its freshness) becomes a mechanical question, and the 2026-09-13 shape (two producer faces existed, only one was re-run, the other's subjects aged past K) cannot recur silently (tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger AC7)?"
@@ -442,6 +443,7 @@ declare -A QUESTION=(
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [server-restart-inflight-verify.ts]="Does restarting ONE service — driver:worker — on the UNIFIED server form kill the worker subprocesses that were IN FLIGHT (SPEC-unified-quay-server-2026-09-13 §6.9 不变式 3 / §8-7 后半)? The in-flight set is derived INDEPENDENTLY from the driver process tree (/proc/<driver_pid>/task/*/children filtered by the workspace's own task-worker role name), each pid is checked alive-and-NON-ZOMBIE before the restart and the ORIGINAL set is re-checked individually after it, and the record is written only when the old driver pid is really gone, a NEW live driver pid exists, and a round record on a NEW run_id turns strictly after the restart — otherwise ZERO record plus a DISTINGUISHABLE verdict (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-256). Under SPEC §7 阶段 C it refuses with verdict=HOSTED-BY-ANCHOR: a per-kind restart there is an event-loop respawn inside the anchor, so the criterion's driver_pid_before != driver_pid_after is structurally unsatisfiable and acting would SIGTERM the anchor and take all six hosted kinds down."
   [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
+  [gate-event-coverage-check.ts]="Is every LANDING reflected by a 'complete' pass GateEvent in .quay/gate-events.jsonl — per day, landings = tasks whose final status transition to done on develop that day (⛔ not the '翻 X done' commit count: one landing yields 1..N flip commits when ff fails and the flip is reset), and does any non-exempt day fall below the threshold (tasks/gap-complete-gateevent-coverage-has-a-residual-gap)?"
   [mcp-blacklist-resolve.ts]="Which MCP servers will a blacklisted role ACTUALLY connect to — enumerate the three real config sources (the user-level server table, the project-level MCP declarations, and enabledPlugins pointing at the plugin's own MCP declaration with the literal CLAUDE_PLUGIN_ROOT placeholder expanded to the DETECTED version dir), drop the role's mcpBlacklist, and emit the --strict-mcp-config --mcp-config payload — so a pure code-writing worker stops dragging up the chrome-devtools-mcp / playwright-mcp process trees (2026-09-14 reading: 48 + 12 servers plus 12 watchdogs approx 3.24GB RSS, the largest single concentration of memory pressure), NEVER by shelling out to the mcp list subcommand which health-checks (i.e. spawns) the very servers this exists to avoid, and where an input that cannot be decoded yields null so the caller adds NO flag rather than shipping a partial config that would silently DROP servers (硬规则 3b) (tasks/gap-worker-mcp-blacklist-strict-config)?"
   [crystallization-half-life.ts]="规则从落笔到有【可执行】强制落地要多久 —— 对真实 adr 目录与真实 git 历史逐条测出 {落笔日期, enforcement 字段值, 强制首次落地提交 SHA 与日期, 间隔天数, 状态}，报出间隔的中位/p90/最大值以及『至今无产物』的完整清单（不是抽样），并逐条判 CLAUDE.md 硬规则自标『靠自觉』与其点名产物是否真的落地。状态取五值，其中『无法判定』与 N/A 各自独立、不与『无产物』或『已强制』合并（硬规则 3b），GateEvent 载体读不到时报未评估而不是零事件（tasks/gap-crystallization-half-life-rule-to-enforcement）?"
 )
@@ -462,6 +464,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [discovery-path-classify.ts]="按需"
   [driver-anchor.ts]="按需"
   [fan-in-queueing-model.ts]="按需"
   [freshness-producer-coverage-check.ts]="每轮"
@@ -795,12 +798,14 @@ declare -A CADENCE=(
   [channel-probe-server.ts]="按需"
   [server-partial-stop-verify.ts]="按需"
   [server-restart-inflight-verify.ts]="按需"
+  [gate-event-coverage-check.ts]="每轮"
   [mcp-blacklist-resolve.ts]="按需"
   [crystallization-half-life.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [discovery-path-classify.ts]="失效前提：任务体仍以叙事段（Finding / Proposal / Resolution / Requested action / Setup）承载触发描述、且出处仍写成正文散文 —— 本分类器的全部证据都逐字取自该窗口；若任务体改由结构化字段声明发现路径（那时应直接读那个字段而不是抽散文），或叙事段的标题集合改名、或出处写法从「主体+日期+动作」改成别的形态，本条需同步"
   [driver-anchor.ts]="失效前提：驱动 kind 的常驻循环仍然可以在同一个 Node 进程的事件循环里并发跑（即 §9 开放问题 1「会不会互相饿死」的实测结论仍为「可行」）且 quay driver <verb> --kind X 仍是驱动生命周期的用户面；若某个 kind 被实测饿死而转回独立进程（或驱动启停面整体换成 systemd 类承载），本条退休"
   [fan-in-queueing-model.ts]="失效前提：三条载体的字段口径不变 —— ①.quay/fan-in-lock-events.jsonl 的 event/epoch/taskId/runId/pid 五键与 epoch 以【秒】为单位的约定；②per-run 过程日志 fan-in-<task>-<runId>.log 里 acquire-fan-in-lock 步的 wall_ms（它 = 排队时延，本条全部延迟结论都建立在它上面）；③.quay/worker-outcome.jsonl 的 in_flight_count/wall_clock_ms 与 git log develop 里 tasks: 翻 <id>… 的提交主题形状。任一字段改名、改单位或给 wall_ms 换语义，本条需同步"
   [freshness-producer-coverage-check.ts]="失效前提：goal AC-214 仍以「每个主体类的证据距 develop tip ≤ K 交付面提交」为判据、其主体集合仍由 criterion 自己写进 .quay/goal-freshness-margin.json 的 subjects 键（本条的两条独立读数之一），且刷新的唯一路径仍是跑 plugin/freshness-producers.json 里登记的那个跨机产出器命令；若 AC-214 退役或改判据、主体集合改由别处声明（该快照不再由 criterion 产出）、或刷新改为由 driver 直接持有（不再有 subject→producer 命令映射），本条失去断言对象，退休"
@@ -1134,12 +1139,14 @@ declare -A INVALIDATION=(
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
   [server-restart-inflight-verify.ts]="失效前提：① driver:worker 仍是**每 kind 一个进程**（SPEC §7 阶段 C 的 anchor 形态下 .quay/worker-driver.pid 是 anchor 的 pid、一次重启是 anchor 内的事件循环 respawn ⇒ 判据的 driver_pid_before != driver_pid_after 结构上不可满足；生产者对此显式给出 verdict=HOSTED-BY-ANCHOR 并拒绝动手，⛔ 不静默）；② 在飞集合的推导仍是「driver 进程树的直接子进程 ∩ cmdline 命中本 workspace 的 task-worker 角色名」（角色改名/驱动改为非直接子进程 spawn ⇒ 集合会静默变小，而变小使「一个都没死」更容易恒真）；③ .quay/worker-round.jsonl 的末行仍带 run_id + ts（driver 恢复运转的直接量），且 round 仍是 JSON 字符串（写入前转 int）"
   [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
+  [gate-event-coverage-check.ts]="失效前提：'complete' GateEvent 仍是「完成数」的权威载体，且落地仍以 develop 上 tasks/*.md 的 status 翻 done 为判据。若完成数改由另一个载体承载（如 goal-store / 结构化遥测），或落地判据迁出 status 行，本条口径需同步，否则会把「新载体里的读数」误判为漏写"
   [mcp-blacklist-resolve.ts]="失效前提：黑名单仍由 .quay/profiles.yml 的【角色】层 mcpBlacklist 声明、launchArgv 仍是驱动 spawn 的唯一 argv 构造点、且用户级/插件级 MCP server 仍声明在这三类配置文件里；若 MCP 连接控制改由 Claude Code 原生设置表达（如能覆盖用户级 mcpServers 的 disabledMcpjsonServers）、或 role→profile 解析不再经 profile-policy.ts resolveRole，本条失去消费面，退休"
   [crystallization-half-life.ts]="失效前提：① adr 目录仍是 ADR 的正本、且每条 ADR 的落笔日期仍写在 frontmatter 的 date 键或正文的日期行（日期改由别的登记表承载 ⇒ 三条取源全部落空，间隔一栏整列转『无法判定』）；② enforcement 声明仍以 frontmatter 的 enforcement 键或正文的 enforcement 注释为形态（改由集中表声明 ⇒ 本脚本的抽取面失效）；③ 首次落地仍能从 git 的逐文件 add 历史取得（仓库改以整仓快照发布、丢掉逐文件 add 历史 ⇒ 间隔失去来源）"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [discovery-path-classify.ts]="2026-09-15"
   [driver-anchor.ts]="2026-09-13"
   [fan-in-queueing-model.ts]="2026-09-14"
   [freshness-producer-coverage-check.ts]="2026-09-14"
@@ -1473,12 +1480,14 @@ declare -A LAST_REAFFIRMED=(
   [channel-probe-server.ts]="2026-09-13"
   [server-partial-stop-verify.ts]="2026-09-13"
   [server-restart-inflight-verify.ts]="2026-09-13"
+  [gate-event-coverage-check.ts]="2026-09-14"
   [mcp-blacklist-resolve.ts]="2026-09-14"
   [crystallization-half-life.ts]="2026-09-14"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [discovery-path-classify.ts]="position"
   [driver-anchor.ts]="n/a"
   [fan-in-queueing-model.ts]="n/a"
   [freshness-producer-coverage-check.ts]="enumerative"
@@ -1811,6 +1820,7 @@ declare -A MATCHING=(
   [channel-probe-server.ts]="n/a"
   [server-partial-stop-verify.ts]="n/a"
   [server-restart-inflight-verify.ts]="n/a"
+  [gate-event-coverage-check.ts]="position"
   [mcp-blacklist-resolve.ts]="n/a"
   [crystallization-half-life.ts]="n/a"
 )
@@ -1824,6 +1834,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [discovery-path-classify.ts]="谁按：本任务实现者跑出 docs/analysis/who-found-it-first-distribution.md 的全部读数（命令行 + 种子 20260915 + develop tip 都写在文档的「可复跑锚点」节），以及任何要复审 docs/references/维度边界与结晶——从熔融实现中发现原则.md §2.1 ① 那条分级的人或层（分级已按本次读数改写，要再判就得重跑）；条件=要判定「人是唯一的样本外探测器」这条结论是否被扩大样本支持或推翻，或语料增长后要刷新分布与趋势"
   [driver-anchor.ts]="谁按：driver-runtime.ts（startKind/stopKind/restartKind 经本文件的 spawnAnchor + .quay/anchor-desired.json 期望态拉起/停掉 kind）+ 六个 kind driver（registerKindStop 登记进程内停机信号）；条件=需要把六个 kind 的常驻循环收进一个进程（SPEC §7 阶段 C）且保留 per-kind 停机与在飞子进程不被杀的语义"
   [fan-in-queueing-model.ts]="谁按：任何要动本工作区并发旋钮的人/层，在改 .quay/config.yml 的 concurrency / concurrency_bands 之前与之后各跑一次做前后对照（node --experimental-strip-types plugin/scripts/fan-in-queueing-model.ts --root <主检出>），也由本任务实现者跑出 docs/analysis/fan-in-queueing-model.md 的全部读数；条件=要判定 fan-in 锁当前处在排队论 knee 的哪一侧（ρ 与实测 wait-vs-ρ 曲线），或要把一次 fan-in 的端到端拆成排队 / suite / 其余三段"
   [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
@@ -1959,6 +1970,7 @@ declare -A CONSUMER=(
   [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
   [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
   [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"
+  [gate-event-coverage-check.ts]="谁按：run_static_checks 每轮自动按（runner-static-gate.ts，@static-tier change，--root main_root --days 1 --gate；载体是主检出 gitignored 运行态，一次性 verify worktree 里不存在 ⇒ 指 repo_root 会恒定 exit 3 与恒绿同形）；mutation case 见 plugin/scripts/checker-mutation-cases/gate-event-coverage-check.sh（baseline 绿 → 抹掉载体事件 ⇒ 必须红 → 写回绿 → 再加一条晚于 bootstrap cutoff 的无事件落地 ⇒ 仍必须红）；另由 plugin/test/gate-event-coverage-check.test.mjs 双控（真 git 仓 fixture：分母=落地而非提交条数 / 状态转移扫而非提交信息扫 / bootstrap 豁免窄性 / 三态 exit 3）；条件=要判「完成数载体是否被系统性少算」（tasks/gap-complete-gateevent-coverage-has-a-residual-gap AC4）"
   [mcp-blacklist-resolve.ts]="谁按：plugin/scripts/driver-runtime.ts 的 launchArgv（AC140 唯一 argv 构造点）在该 role 的 mcpBlacklist 非空时按——机器按，每次派发一次；条件=派发 task-worker/fix-worker/selector 需要一个既保留 quay/archguard/meta-cc 又排除 chrome-devtools/playwright 的 MCP 配置面（实测 3.24GB RSS 集中在浏览器 MCP 上）。⛔ outer/manager/pool-judge 不按（mcpBlacklist 为空 ⇒ argv 逐字不变，不被共享 profile 连坐）"
   [crystallization-half-life.ts]="谁按：任务实现者在量『规则落笔→可执行强制落地』的分布时按（node --experimental-strip-types plugin/scripts/crystallization-half-life.ts --root <主检出> 可加 --json），它同时是 docs/analysis/crystallization-half-life.md 全部读数的产出者；条件=要判某条 ADR / 某条 CLAUDE.md 硬规则至今有没有可执行产物，或要判 ADR-004 的『硬形变优于散文』是否有分布支撑（而不是只有轶事）"
 )

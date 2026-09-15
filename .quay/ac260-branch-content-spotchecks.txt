@@ -1,0 +1,52 @@
+DoD — 「跑过一次 publish」不算落地：下面是【分支上的实际文件内容】，每个受影响面各抽一个。
+（dist-plugin = 784fb13dddee3821bb00b8042880aafa01157a55）
+
+── 面 1：skills/loop-driver/SKILL.md（原 2 条 dangling + 4 条 cwd 相对）
+56:3. **Fan-in (serial):** collect the survivors (gate PASS **and** audit NO-REFUTATION). Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dist/anti-drift-touches-check.js" <ran-batch-manifest.json>` on the REAL diffs — a mis-declared overlap HARD-FAILs the batch (NON-WAIVABLE, do not merge). Then `node "${CLAUDE_PLUGIN_ROOT}/scripts/dist/serial-fanin-absorb.js"` for the deterministic merge plan; merge each survivor one-at-a-time and mark it `done`. A build that FAILED gate or was REFUTED → `needs-human`, EXCLUDED from fan-in (partial-batch: disjoint survivors still land).
+72:The agent's findings are **FILED as evidence-backed tasks** (`## Finding`-bearing), each gated by the MECHANICAL `node "${CLAUDE_PLUGIN_ROOT}/scripts/dist/routine-file-gate.js" --board <tasksDir> --recent <N> --k <K> <candidate-task.md>` (exit 0 = ACCEPT: actionable finding with reproduction evidence, not a duplicate on the board, within the per-window rate cap; exit 1 = REJECT). Do NOT file a REJECTed candidate — the gate is a runnable check, not a prose promise. **FILE-ONLY invariant:** a routine NEVER executes its own findings — the SELECT track drives the filed tasks under the normal gate + audit (routines DISCOVER, SELECT+audit DECIDE). Backstop the invariant mechanically: after a routine fires, a routine run MUST have produced ONLY new task files and NO commits/diffs to product or method code — `git -C <ws> status --porcelain` should show only new `tasks/` (or board) entries; if a routine touched anything else, that is a FILE-ONLY violation → discard and flag. Routine scheduling never dispatches manda.
+
+── 面 2：loop/fast-mode-loop-tick.md（原 36 条，全仓最多）
+100:node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/task-status-drift-check.js
+101:node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/fast-mode-telemetry.js --report --json
+188:**这族测试的权威清单是机器可读的**：`${CLAUDE_PLUGIN_ROOT}/scripts/dist/known-load-sensitive.js --list`（解析各测试文件头
+282:| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/fast-mode-telemetry.js --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，**固定 `effective_cap=5`**——人 2026-08-11 裁定与 manager A2/outer A6 对齐；`cap-from-gate.sh` 降为观测输出，读其 `band`/`effective_cap` 记 tick-log 不参与派发裁决）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+
+── 面 3：workflows/fan-in-execute.js（原 21 条）
+101://     per-task-suite-record（${CLAUDE_PLUGIN_ROOT}/scripts/dist/per-task-suite-record.js）——含跳过全量（fullSuiteRan=
+236:setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings ${CLAUDE_PLUGIN_ROOT}/scripts/dist/full-suite-runner.js --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings ${CLAUDE_PLUGIN_ROOT}/scripts/dist/full-suite-runner.js --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+318:import { parseTouches, matchGlob, normalizePath } from "${CLAUDE_PLUGIN_ROOT}/scripts/dist/touches-orthogonality-check.js";
+
+── 面 4：scripts/capability-catalog.sh（原 25 条 .sh 面）
+133:  [capability-manifest-check.ts]="Does delivery-manifest.json's capabilities array list EVERY source capability (driver kind = ${CLAUDE_PLUGIN_ROOT}/scripts/dist/driver-runtime.js DRIVER_KINDS keys; CLI top-level command = packages/quay/bin/quay.ts dispatch cmd === \"X\" verbs; MCP server = packages/*/src/mcp-server.ts), and does every listed entry still exist in source — a source capability NOT listed, or a listed entry with no source, both fail (NOT-EVALUATED exit 2 when a source cannot be enumerated; tasks/gap-delivery-manifest-capability-map)?"
+156:  [suite-bucket-hub-list.ts]="Which files are HUB files whose change forces the FULL suite unconditionally (no precise fan-out), and does a given change touch any hub — the explicit hub list (scripts/test.sh, ${CLAUDE_PLUGIN_ROOT}/scripts/dist/full-suite-runner.js, plugin/scripts/runner-grouping*, plugin/scripts/select-tests-for-touches.ts) plus the hubDecision/touchesHub judgment?"
+352:  [shape-sections.ts]="Which headings count as the proposal/plan/ac/dod section artifacts per task shape — the single-source SHAPE_SECTIONS registry (incl. suffixed 'Acceptance Criteria (runnable)' and finding-shape draft 'AC（draft）' variants) that BOTH packages/quay-native/src/store.ts's SHAPE_REGISTRY and ${CLAUDE_PLUGIN_ROOT}/scripts/dist/ready-pool-check.js import, so the author→ready shape judgment is one judge (gap-shape-section-tables-dual-copy-no-single-source)?"
+
+── 面 5：两个此前【从未随产物发出】的 bundle 现在真的在分支上
+scripts/dist/routine-file-gate.js
+scripts/dist/serial-fanin-absorb.js
+
+── 面 6：raw 直发的注册表【保持】raw 形态（guard 未误伤）
+scripts/runner-static-gate.ts
+
+── 面 6b：raw 注册表的【调用点】也保住了（这是本轮顺带修掉的一条潜伏断链）
+   修前：`STATIC_GATE="${repo_root}/plugin/scripts/dist/runner-static-gate.js"` —— 那是旧重写器
+         无条件把 `.ts` 换成 `dist/.js` 的产物，而 build 从不产出该 bundle（它被 strip 步显式豁免、
+         以 raw .ts 直发）⇒ 指向一个结构上不存在的文件。
+   修后：分支上的实际内容 ——
+99:STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"
+601:    --repo-root) shift; repo_root="$1"; CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"; TEST_SH="${repo_root}/scripts/test.sh"; STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"; WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml" ;;
+
+── 面 7：checker-mutation-cases 夹具【逐字未改】（它们的 plugin/ 是宿主的假 repo 根）
+   $ git show dist-plugin:scripts/checker-mutation-cases/red-on-omission-audit.sh | grep -n 'workdir}/plugin'
+25:mkdir -p "${workdir}/plugin/scripts"
+26:mkdir -p "${workdir}/plugin/workflows"
+64:cat > "${workdir}/plugin/scripts/full-suite-runner.ts" <<'EOF'
+70:cat > "${workdir}/plugin/workflows/execute-suite-fix.js" <<'EOF'
+75:cat > "${workdir}/plugin/scripts/semantic-observer-judge.ts" <<'EOF'
+81:: > "${workdir}/plugin/scripts/adr016-screen-use-check.ts"
+82:: > "${workdir}/plugin/scripts/drive-contract-check.ts"
+83:: > "${workdir}/plugin/scripts/task-contract-check.ts"
+84:: > "${workdir}/plugin/scripts/resource-gate.sh"
+120:cp "${workdir}/plugin/scripts/full-suite-runner.ts" "${workdir}/runner.golden.ts"
+121:printf 'export interface SuiteState {}\n' > "${workdir}/plugin/scripts/full-suite-runner.ts"
+128:mv "${workdir}/runner.golden.ts" "${workdir}/plugin/scripts/full-suite-runner.ts"

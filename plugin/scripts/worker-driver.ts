@@ -5390,6 +5390,8 @@ export async function main(argv: string[]): Promise<number> {
   let mechMergeTarget: string | undefined;
   let writeScopedGateCacheFlag = false;
   let scopedGateCacheDevelopSha: string | undefined;
+  let appendCompleteGateEventFlag = false;
+  let appendCompleteActor: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -5420,6 +5422,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--merge-target") mechMergeTarget = args[++i];
     else if (a === "--write-scoped-gate-cache") writeScopedGateCacheFlag = true;
     else if (a === "--develop-sha") scopedGateCacheDevelopSha = args[++i];
+    else if (a === "--append-complete-gate-event") appendCompleteGateEventFlag = true;
+    else if (a === "--actor") appendCompleteActor = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -5436,6 +5440,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
+          "  --append-complete-gate-event --task <id> [--actor <a>]  写 `complete` pass GateEvent 到 <root>/.quay/gate-events.jsonl（语义 fan-in workflow 的 flip 落地补写；exit 0=已写 / 2=缺参）\n" +
           "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
           "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
@@ -5483,6 +5488,24 @@ export async function main(argv: string[]): Promise<number> {
     writeScopedGateCache(cacheFile, scopedGateKey(task, scopedGateCacheDevelopSha));
     process.stdout.write(`${JSON.stringify({ event: "scoped-gate-cache-written", task, developSha: scopedGateCacheDevelopSha, cacheFile })}\n`);
     return 0;
+  }
+
+  // --append-complete-gate-event：把 `complete` pass GateEvent 写进 <root>/.quay/gate-events.jsonl。
+  // gap-complete-gateevent-coverage-has-a-residual-gap 的第二条落地路径（`plugin/workflows/
+  // fan-in-execute.js` 的 flip 块，commit `tasks: 翻 <id> done（AC78 fan-in-execute workflow）`）此前
+  // 直接 `sed -i` 翻 status 并 commit，⛔ 全文零 GateEvent ⇒ 该路径的每一次落地在生产载体上都不留痕
+  // （09-04~09-14 实测：该路径 2/2 落地零事件，而机械 fan-in 路径 386/388 有事件）。本 verb 让该
+  // workflow 用【同一个】appendCompleteGateEvent（gate-event-store 的 appendGateEvent，⛔ 不手搓 JSON），
+  // 与 `--mechanical-fan-in` 的 9.4b 写侧同源。stdout 单行 JSON；exit 0 = 已写 / 2 = 缺参（fail-closed）。
+  if (appendCompleteGateEventFlag) {
+    const task = tasks[0];
+    if (!task) {
+      console.error("worker-driver: --append-complete-gate-event requires --task <id>");
+      return 2;
+    }
+    const r = await appendCompleteGateEvent(rootDir, task, appendCompleteActor ?? "quay-fan-in-workflow");
+    process.stdout.write(`${JSON.stringify({ event: "complete-gate-event-appended", task, ok: r.ok, reason: r.reason })}\n`);
+    return r.ok ? 0 : 2;
   }
 
   // ⛔ 本文件【不再】自带 serveControlPlane 调用点（GOAL-017/AC-252，SPEC §7 阶段 A1）：控制面已上收进

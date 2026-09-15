@@ -1,0 +1,13 @@
+AC2 — 交付面判据：重跑 publish-dist-branch.sh 之后，逐字执行同一谓词。
+dist-plugin 由 b2b7ea4ea → 784fb13dd（本地 ref；未 --push，DoD 允许）。
+
+$ bash plugin/scripts/publish-dist-branch.sh
+exit=0    # orphan commit ready: 784fb13dddee3821bb00b8042880aafa01157a55
+
+$ bash .quay/ac260-criterion.py
+exit=0
+--- stderr（原文，空）---
+--- stdout（原文，空）---
+(empty)
+
+⇒ exit 0：三支同时满足 —— total>=1 ∧ cwd 相对 plugin/ offender=0 ∧ 悬空 raw .ts=0。

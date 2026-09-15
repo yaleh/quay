@@ -99,11 +99,17 @@ test("AC1 — the packaged closure regex extracts dist/X.js from a ${SCRIPT_DIR}
 });
 
 // ── AC-workflows: rewriteInvokers rewrites the shipped workflow FILES' plugin/scripts/X.ts refs ─────
-test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scripts/X.ts refs to dist/X.js", () => {
+test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scripts/X.ts refs to the plugin-root-anchored dist form", () => {
   const dir = tmp();
   try {
     const wfDir = path.join(dir, "workflows");
     fs.mkdirSync(wfDir, { recursive: true });
+    // The staged root carries the bundles the build would have produced — rewriteInvokers decides
+    // "is this reference bundlable?" from the FILESYSTEM, not from a guess (see rewritePluginPaths).
+    fs.mkdirSync(path.join(dir, "scripts", "dist"), { recursive: true });
+    for (const n of ["anti-drift-touches-check", "per-task-suite-record"]) {
+      fs.writeFileSync(path.join(dir, "scripts", "dist", `${n}.js`), "export const x = 1;\n", "utf8");
+    }
     fs.writeFileSync(path.join(wfDir, "fan-in-execute.js"), [
       "// comment referencing plugin/scripts/per-task-suite-record.ts",
       "if ! node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task ${task}; then",
@@ -115,28 +121,38 @@ test("AC-workflows — rewriteInvokers rewrites plugin/workflows/*.js plugin/scr
     const touched = rewriteInvokers(dir);
     assert.equal(touched, 1, "the workflow .js must be counted as a rewritten invoker");
     const out = fs.readFileSync(path.join(wfDir, "fan-in-execute.js"), "utf8");
-    assert.ok(out.includes("plugin/scripts/dist/anti-drift-touches-check.js"),
-      "the node --experimental-strip-types invocation must point at the dist bundle");
-    assert.ok(out.includes("plugin/scripts/dist/per-task-suite-record.js"),
-      "the comment reference must point at the dist bundle");
+    assert.ok(out.includes("${CLAUDE_PLUGIN_ROOT}/scripts/dist/anti-drift-touches-check.js"),
+      "the node --experimental-strip-types invocation must point at the anchored dist bundle");
+    assert.ok(out.includes("${CLAUDE_PLUGIN_ROOT}/scripts/dist/per-task-suite-record.js"),
+      "the comment reference must point at the anchored dist bundle");
     assert.ok(!out.includes("anti-drift-touches-check.ts"),
       "no plugin/scripts/*.ts reference may survive in the shipped workflow");
+    assert.ok(!/plugin\/(scripts|gate-scripts)\/dist\//.test(out),
+      "no cwd-relative plugin/ prefix may survive — in a consuming project the plugin IS the tree root");
     assert.ok(out.includes("experiments/quay-perpetual-stream/scripts/drain-scheduler.ts"),
       "a dev-repo experiments/...ts path (not a plugin mechanism) must be left untouched");
+    // The flag is dropped only because the target really became a bundle.
+    assert.ok(out.includes("node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/anti-drift-touches-check.js"),
+      "the strip-types flag must be gone once the reference names a bundled .js");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 // ── AC5: rewriteMarkdown rewrites the cold-start SKILL.md PRECONDITION's path form ─────────────────
-test("AC5 — rewriteMarkdown rewrites the cold-start precondition plugin/scripts/fast-mode-telemetry.ts to the dist form", () => {
+test("AC5 — rewriteMarkdown rewrites the cold-start precondition plugin/scripts/fast-mode-telemetry.ts to the anchored dist form", () => {
   const precondition =
     "| loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `<root>/plugin/scripts/fast-mode-telemetry.ts` exist |";
   const out = rewriteMarkdown(precondition);
-  assert.ok(out.includes("<root>/plugin/scripts/dist/fast-mode-telemetry.js"),
-    "the precondition's .ts reference must become the bundled executable form the packaged install lays down");
+  // AC-260: the `<root>/plugin/…` spelling is the defect — `<root>` is the CONSUMER's cwd, and the
+  // plugin is the tree root there, so `<root>/plugin/scripts/…` resolves to nothing. Both the
+  // repo-root expression AND the `plugin/` segment are replaced by the plugin-root anchor.
+  assert.ok(out.includes("`${CLAUDE_PLUGIN_ROOT}/scripts/dist/fast-mode-telemetry.js`"),
+    "the precondition's .ts reference must become the bundled, plugin-root-anchored form the install lays down");
   assert.ok(!out.includes("fast-mode-telemetry.ts"),
     "no raw .ts reference may survive the precondition after packaging");
+  assert.ok(!out.includes("<root>/plugin/scripts/dist/"),
+    "the repo-root prefix must be dropped, not kept in front of the anchor");
 });
 
 test("AC5 — the REAL cold-start SKILL.md precondition table carries no raw .ts reference after rewriteMarkdown (C-machine 'entire .ts layer missing' zeroed)", () => {
@@ -152,8 +168,10 @@ test("AC5 — the REAL cold-start SKILL.md precondition table carries no raw .ts
   const preOut = out.slice(out.indexOf("## Preconditions"), preEnd(out));
   assert.doesNotMatch(preOut, /[a-zA-Z0-9_-]+\.ts/,
     "after packaging the precondition table must carry NO raw .ts reference (every one rewritten to the executable dist form)");
-  assert.match(preOut, /plugin\/scripts\/dist\/fast-mode-telemetry\.js/,
-    "the precondition must reference the bundled executable form the packaged install lays down");
+  assert.match(preOut, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/dist\/fast-mode-telemetry\.js/,
+    "the precondition must reference the bundled, plugin-root-anchored form the packaged install lays down");
+  assert.doesNotMatch(preOut, /plugin\/scripts\/dist\//,
+    "AC-260: the packaged precondition must not carry a cwd-relative plugin/ prefix (the consuming project's plugin IS the tree root)");
 });
 
 test("AC5 — a BARE .ts token (no plugin/scripts/ prefix) is deliberately NOT rewritten (prose/mechanism-name references stay)", () => {
@@ -165,6 +183,116 @@ test("AC5 — a BARE .ts token (no plugin/scripts/ prefix) is deliberately NOT r
   const out = rewriteMarkdown(prose);
   assert.ok(out.includes("transcript-delivery-check.ts"),
     "a bare-name .ts token without a plugin/scripts/ prefix must stay untouched");
+});
+
+// ── AC-260 (gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths) ──────────────────────
+// Every reference the rewriter EMITS must resolve in a CONSUMING project: a plugin-level marketplace
+// source supports no `path` parameter (publish-dist-branch.sh:106-107), so the dist-plugin branch's
+// ROOT is the plugin — a repo-relative `plugin/scripts/…` there names `<plugin>/plugin/scripts/…`,
+// which does not exist. Measured baseline before this task (2026-09-15, dist-plugin branch): 96 .md
+// + 134 .sh + 30 .js = 260 references of that form, plus 11 `${CLAUDE_PLUGIN_ROOT}/scripts/X.ts`
+// refs whose anchor was right but whose target the publish strip step (publish-dist-branch.sh:133)
+// had deleted. Field order mirrors the goal criterion's BAD_RE exactly.
+const CWD_RELATIVE_RE = /(^|[^A-Za-z0-9_${}.-])(\.?\/)?plugin\/(scripts|gate-scripts)\/dist\/[A-Za-z0-9_.-]+\.js/m;
+
+test("AC1 — rewriteMarkdown anchors BOTH input shapes and emits no cwd-relative plugin/ prefix", () => {
+  const input = [
+    "node --experimental-strip-types plugin/scripts/task-status-drift-check.ts", // ① repo-relative, bare
+    "| laid down | `<root>/plugin/scripts/fast-mode-telemetry.ts` exists |", // ① with a repo-root expr
+    "call `${CLAUDE_PLUGIN_ROOT}/scripts/concurrent-batch-scheduler.ts` now", // ② anchor right, child stale
+    "prose `plugin/gate-scripts/gate-script-base.ts`", // ① the gate-scripts branch
+  ].join("\n");
+  const out = rewriteMarkdown(input);
+  for (const [name, kind] of [
+    ["task-status-drift-check", "scripts"],
+    ["fast-mode-telemetry", "scripts"],
+    ["concurrent-batch-scheduler", "scripts"],
+    ["gate-script-base", "gate-scripts"],
+  ]) {
+    assert.match(out, new RegExp(`\\$\\{CLAUDE_PLUGIN_ROOT\\}/${kind}/dist/${name}\\.js`),
+      `${name} must take the plugin-root-anchored bundled form`);
+  }
+  assert.ok(!/<root>\$\{CLAUDE_PLUGIN_ROOT\}/.test(out),
+    "no repo-root expression may survive in front of the anchor (that is the doubled, unresolvable form)");
+  assert.doesNotMatch(out, CWD_RELATIVE_RE, "no cwd-relative plugin/ prefix may survive");
+  assert.doesNotMatch(out, /\.ts\b/, "no raw .ts reference may survive when every target is bundled");
+});
+
+test("AC1 — negative control: a non-plugin path is left byte-identical (the anchor rule is not vacuous)", () => {
+  const prose = "run node experiments/quay-perpetual-stream/scripts/drain-scheduler.ts and node packages/quay/bin/quay.js";
+  assert.equal(rewriteMarkdown(prose), prose,
+    "a dev-tree experiments/… or packages/… path names no plugin script and must survive verbatim");
+});
+
+test("AC1 — a plugin script that is NOT bundled keeps its raw .ts reference (no dist/ path is invented)", () => {
+  // runner-static-gate.ts ships verbatim (publish-dist-branch.sh:130): it is the static-check
+  // REGISTRY, a bash library, never a bundler entry — so dist/runner-static-gate.js does not exist
+  // and rewriting to it would be exactly the referenced-not-landed defect this rewrite removes.
+  const src = "node --experimental-strip-types plugin/scripts/runner-static-gate.ts";
+  const guarded = rewriteMarkdown(src, () => false);
+  assert.equal(guarded, src, "an unbundled plugin script must keep its raw .ts form AND its flag");
+  // Positive control: the SAME input with the bundle present takes the anchored dist form — the
+  // guard is the only difference, so the assertion above is about the guard, not about the input.
+  assert.match(rewriteMarkdown(src, () => true),
+    /^node \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/dist\/runner-static-gate\.js$/);
+});
+
+test("AC1 — rewriteShell anchors repo-relative plugin/ refs too (the .sh half of the same defect)", () => {
+  const out = rewriteShell('probe "x" "$REPO_ROOT/plugin/scripts/dist/transcript-delivery-check.js"\n');
+  assert.match(out, /"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/dist\/transcript-delivery-check\.js"/,
+    "the .sh carriers must take the same anchored form as .md/.js");
+  assert.doesNotMatch(out, CWD_RELATIVE_RE, "no cwd-relative plugin/ prefix may survive in shell text");
+});
+
+test("AC1 — checker-mutation-cases fixtures are NOT rewritten (their plugin/ means their OWN fake root)", () => {
+  const dir = tmp();
+  try {
+    const fx = path.join(dir, "scripts", "checker-mutation-cases");
+    fs.mkdirSync(fx, { recursive: true });
+    fs.mkdirSync(path.join(dir, "scripts", "dist"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "dist", "full-suite-runner.js"), "export const x = 1;\n", "utf8");
+    // The fixture constructs its OWN throwaway `<workdir>/plugin/scripts/…` tree — a `plugin/` here
+    // is that tree's root marker, NOT this plugin, so the anchor rule must not touch it.
+    const body = 'cat > "${workdir}/plugin/scripts/full-suite-runner.ts" <<\'EOF\'\n';
+    fs.writeFileSync(path.join(fx, "x.sh"), body, "utf8");
+    assert.equal(rewriteInvokers(dir), 0, "fixture files must not be counted as rewritten invokers");
+    assert.equal(fs.readFileSync(path.join(fx, "x.sh"), "utf8"), body,
+      "the fixture must stay byte-identical — rewriting it re-points it at the installed plugin");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — deriveEntries DERIVES a script named by a ${CLAUDE_PLUGIN_ROOT}-anchored .md reference (the 5th blind-shape instance)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "skills", "s"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "anchored-only.ts"), "export const x = 1;\n", "utf8");
+    // The ONLY reference is the anchor-anchored, quoted spelling a shipped SKILL.md uses — the
+    // node-invocation scan cannot reach it (`[^"\n]*?` excludes the opening quote), so if this rule
+    // does not cover it, nothing derives the entry and publish's strip step deletes the raw .ts.
+    const doc = path.join(dir, "skills", "s", "SKILL.md");
+    fs.writeFileSync(doc, 'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/anchored-only.ts"`\n', "utf8");
+    assert.ok(deriveEntries(dir).scripts.includes("scripts/anchored-only.ts"),
+      "an anchored .md path reference must derive its entry — no other scan form names it");
+    // Negative control: the SAME filename as a bare prose token (no path prefix, no invocation)
+    // names no entrypoint — the scan keys on the reference SHAPE, not on the filename appearing.
+    fs.writeFileSync(doc, "the mechanism `anchored-only.ts` runs\n", "utf8");
+    assert.ok(!deriveEntries(dir).scripts.includes("scripts/anchored-only.ts"),
+      "a bare prose mention must not derive an entry (the rule is about the reference shape)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the REAL plugin root derives the anchored-only SKILL.md entries (serial-fanin-absorb, routine-file-gate)", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  for (const n of ["serial-fanin-absorb", "routine-file-gate"]) {
+    assert.ok(scripts.includes(`scripts/${n}.ts`),
+      `${n}.ts is named ONLY by a quoted ${"${CLAUDE_PLUGIN_ROOT}"}-anchored SKILL.md reference — ` +
+      `without this rule publish deletes its raw .ts and the skill points at a file that never ships`);
+  }
 });
 
 // ── gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs ────────────────────────────────
