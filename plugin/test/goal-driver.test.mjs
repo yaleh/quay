@@ -71,8 +71,10 @@ import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
 // cli/driver.ts 的 KINDS 白名单（AC6 断言对象；已导出）。
 import { KINDS } from '../../packages/quay/src/cli/driver.ts';
+// goal 动词 argv 的单一构造点 + 「quay CLI 解析得出吗」的判据（AC5 断言对象）。
+import { goalStoreArgv, goalCliResolvable } from '../scripts/meta-driver.ts';
 
-// 脚本根（goal-store.ts 从这里取，经 goalStoreArgv）；数据根（goals/）在各测试里给临时目录。
+// 代码根（goal 动词的 quay CLI 入口从这里解析，经 goalStoreArgv）；数据根（goals/）在各测试里给临时目录。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** 把一个 GOAL/AC 记录写成 goals/ 下的真实 frontmatter 文件（⛔ 不注入 seam，跑真 goal-store CLI）。
@@ -2113,6 +2115,53 @@ test('派生判据 (c) 负控制：闸不恒开 —— ③ 说不了话时仍立
   const violated = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
   const g4 = computeGoalGaps(records, [], null, standings0, violated);
   assert.ok(g4.some((g) => isFilingGapState(g.state)), '让位后仍有一条可立案的读数（③ 的主体 AC）');
+});
+
+// ── AC5：goal 动词 argv 的形态（gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache）──
+//
+// 缺陷原样：goalStoreArgv 曾把 `<codeRoot>/packages/quay/src/goal-store.ts` 当【子进程入口】返回。
+// 那个文件在出厂布局（plugin marketplace cache / npm-pack / 第三方 vendored 副本）里【不存在】：
+// goal-store 的【库】已被 coreSrcAliasPlugin 内联进 scripts/dist/goal-driver.js，而它的 CLI 入口不可达
+// （`isMain` 判 `process.argv[1].endsWith("goal-store.ts")`，bundle 里恒 false）。⇒ 每轮 spawn 一个
+// 不存在的文件，读数全线落 unreadable，而进程 alive=1、载体仍在写（静默失效）。
+test('AC5: goal 动词 argv 不含 packages/quay/src（源码树入口已消失），且非空转', () => {
+  const dataRoot = '/tmp/ac262-data-root';
+  const argv = goalStoreArgv(repoRoot, ['gate', 'AC-001'], dataRoot);
+  const line = argv.join(' ');
+
+  // ① 判据本体。⛔ 负控制：把 argv 构造改回旧形（spawn packages/quay/src/goal-store.ts）⇒ 本行必红。
+  assert.doesNotMatch(line, /packages\/quay\/src/, `argv 仍指向源码树：${line}`);
+  // ② 空转防线（硬规则 3b）：一个空 argv、或一个缺动词的 argv，同样「不含 packages/quay/src」——
+  //    不钉住形态，本条就与「什么也没验」同形。故逐项断言它是一条真命令。
+  assert.ok(argv.length >= 5, `argv 太短，没构造出真命令：${line}`);
+  assert.ok(argv.includes('goal'), `argv 缺 goal 动词：${line}`);
+  assert.ok(argv.includes('gate') && argv.includes('AC-001'), `argv 缺子命令/位置参数：${line}`);
+  assert.ok(argv.includes('--store'), `argv 缺 --store（driver 跑的是无 config 的裸 root，见 cli/goal.ts）：${line}`);
+  assert.ok(argv.includes('--root') && argv.includes(dataRoot), `argv 缺 --root <dataRoot>：${line}`);
+  // ③ 入口必须真的【存在】：一个不存在的路径在负控制里也「不含 packages/quay/src」，却跑不动。
+  //    ⚠️ 入口段按【前缀】定位（它解析不出时叫 `quay-cli-unresolved`、没有扩展名 —— 用 `.ts/.js`
+  //    后缀找会在负控制上恒找不着，把判据写成恒假）。
+  const entry = argv.find((a) => a.startsWith(repoRoot));
+  assert.ok(entry && fs.existsSync(entry), `argv 的 quay CLI 入口不存在：${entry}`);
+});
+
+test('AC5 负控制（契约另一半）: 解析不出的代码根 ⇒ 一个【不存在】的路径，⛔ 不抛、不回退 PATH 上的 quay', () => {
+  const bogus = fs.mkdtempSync(path.join(os.tmpdir(), 'ac262-no-quay-cli-'));
+  try {
+    // 前置：夹具根【存在】但是没有 quay CLI —— 这样 ENOENT 归因于「解析不出」，而不是「根本身不存在」。
+    assert.equal(fs.existsSync(bogus), true, '前置：夹具根必须存在');
+    assert.equal(fs.existsSync(path.join(bogus, 'packages', 'quay', 'bin', 'quay.ts')), false, '前置：夹具里没有源码 CLI');
+    const argv = goalStoreArgv(bogus, ['check', '--staleness'], '/tmp/ac262-data-root');
+    // 入口段 = 以该代码根开头的那个 argv 元素（解析不出时它是 `<bogus>/quay-cli-unresolved`）。
+    const entry = argv.find((a) => a.startsWith(bogus));
+    assert.ok(entry, `argv 缺入口段：${argv.join(' ')}`);
+    assert.equal(fs.existsSync(entry), false, `解析不出时必须给出不存在的路径（调用方按 unreadable 处理）：${entry}`);
+    assert.doesNotMatch(argv.join(' '), /packages\/quay\/src/, '⛔ 解析不出也不得回落到源码树形');
+    // 端到端半边：真跑一次 —— 它必须是「解析不出 ⇒ 读不懂」，而⛔ 不是「跑通了、零条」。
+    assert.equal(goalCliResolvable(bogus), false, '解析判据本身必须能取假');
+  } finally {
+    fs.rmSync(bogus, { recursive: true, force: true });
+  }
 });
 
 test('派生判据的识别式：按【位置】（判据里成词出现）判定，⛔ 不按子串/散文提及', () => {

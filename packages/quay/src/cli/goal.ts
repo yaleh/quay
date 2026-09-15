@@ -3,10 +3,20 @@
 // ABI (`client.goalList` / `client.goalGet` / `client.goalWrite`), never the store
 // directly — the store lives in quay-native; Core keeps only the view-model + shim.
 // Mirrors cli/adr.ts's `withProvider` shape (the same per-invocation context + flags).
+//
+// ⚠️ ONE deliberate exception, added by gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache:
+// `gate` / `check` / `batch` (and a `write` that asks for a store-only flag) delegate to the goal
+// store's OWN CLI dispatch — see the "store-level verbs" block below for why the ABI cannot carry
+// them and why restating the dialect here would be the wrong fix. `list` / `show` / plain `write`
+// keep the provider-agnostic ABI path above, unchanged.
 
+import path from "node:path";
+import fs from "node:fs";
 import { withProvider, printJson } from "./shared.ts";
 import type { CliCtx } from "./context.ts";
+import type { CliFlags } from "./flags.ts";
 import type { GoalRecord } from "../abi.ts";
+import { runGoalStoreCli } from "../goal-store.ts";
 
 /**
  * AC2 — the staleness marker for a GOAL row's TEXT rendering
@@ -35,7 +45,99 @@ export function goalStalenessMark(g: GoalRecord): string {
   return "";
 }
 
-export async function handleGoal({ sub, positional, flags, wantsJson }: CliCtx) {
+// ── store-level verbs: gate / check / batch (+ the store-only flags of `write`) ────────────────────
+//
+// WHY THESE DELEGATE (gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache):
+// goal-driver / meta-driver drive the goal mechanism by SPAWNING one command per record read,
+// criterion run and status flip, and they read the EXIT CODE as a verdict — `gate` = 0 pass /
+// 1 fail / 2 usage, `check --stale-pass` = 0 clean / 1 violated / 3 not-evaluated. Those codes,
+// the flag grammar and the stdout JSON are therefore a CONTRACT, not a presentation choice. The
+// drivers used to spawn `<quayCodeRoot>/packages/quay/src/goal-store.ts` directly, which does not
+// exist in an installed layout (plugin marketplace cache / npm-pack / third-party vendored copy —
+// the store is present only as a LIBRARY inlined into the driver bundle, whose `isMain` guard is
+// false, so its CLI dispatch is unreachable). They now spawn `quay goal gate|check|batch|write`
+// instead, and these verbs hand the argv to the store's OWN dispatch (`runGoalStoreCli`) rather
+// than restating it: ⛔ a second implementation of the exit codes the driver reads as verdicts is
+// precisely the drift class this repo keeps removing (硬规则 5b).
+//
+// The store-only `write` flags take the same path for the same reason: `--actor`, `--reason`,
+// `--force`, `--dry-run`, `--long-term`, `--expect-absent` / `--expect-existing`, `--dispose-old`
+// / `--dispose-to` and `--fidelity-judge-argv` are goal-STORE semantics with no field in the
+// Provider ABI's `goal_write` view-model. Forwarding them through the ABI would DROP them silently
+// — and `--actor` is load-bearing (it is recorded in the status log and it is the actor handed to
+// `resolveGoalStaleness` on a transition back into `active`), as is `--fidelity-judge-argv` (the
+// activation gate). So an invocation that asks for any of them runs where they exist. An
+// invocation that does not keeps the provider-agnostic ABI path (unchanged).
+
+/** `write` flags the Provider ABI cannot carry — presence of any of them routes the write to the
+ *  goal store itself (see the block comment above). Enumerated, ⛔ not a boolean "is it weird". */
+const STORE_ONLY_WRITE_FLAGS = [
+  "actor", "reason", "force", "dry-run", "long-term",
+  "expect-absent", "expect-existing", "dispose-old", "dispose-to", "fidelity-judge-argv",
+] as const;
+
+/** The goal store's CLI verbs — store-level BY NATURE: they have no Provider ABI counterpart at all
+ *  (`gate` writes a GateEvent into the ledger, `check` reads it, `batch` writes N records in one
+ *  commit), so there is no other implementation to route them to. */
+const STORE_VERBS = new Set(["gate", "check", "batch"]);
+
+/** `--store` — select the goal-store dialect for a verb that ALSO has an ABI form (`list` / `show`
+ *  / `write`). ⛔ Not decoration: the ABI route needs a WORKSPACE (`.quay/config.yml` at `--root`,
+ *  found by `withProvider`'s `resolveWorkspaceRootOrThrow`), while the store route needs only
+ *  `<root>/goals` + `<root>/.quay/gate-events.jsonl`. The goal-driver's per-round reads run on
+ *  EXACTLY the config-free shape (its fixtures — and a third-party root before quay-init — are bare
+ *  directories), so it asks for the dialect it can actually reach instead of having the CLI guess.
+ *  ⛔ The CLI never falls back on its own: a `--root` with no workspace still FAILS CLOSED on the
+ *  ABI route (⛔ never silently read `--root/goals` instead — pointing `--root` at the wrong
+ *  directory would then render as "(no goals)", i.e. a wrong reading wearing the shape of a real one). */
+const STORE_DIALECT_FLAG = "store";
+
+/** The workspace root for a store-level invocation. `--root <dir>` wins; otherwise walk up from the
+ *  cwd for the repository root — the same anchor goal-store's own CLI uses (it walks up from its
+ *  module's directory), restated here for the cwd case. ⛔ No config lookup: a store-level verb
+ *  reads `<root>/goals` + `<root>/.quay/gate-events.jsonl` only, so it must keep working in a bare
+ *  checkout with no `.quay/config.yml` (which is exactly the shape goal-driver's fixtures use). */
+function storeWorkspaceRoot(): string | null {
+  let dir = process.cwd();
+  for (let i = 0; i < 12; i++) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
+/** Build the goal-store argv for a delegation, ensuring `--root` is explicit.
+ *  ⚠️ `sub` must be re-prepended: the Core dispatch consumed it (`[cmd, sub, ...rest]`), while the
+ *  store's dispatch reads it as `argv.slice(2)[0]` — dropping it silently shifts the verb away and
+ *  the store reports `unknown subcommand "<first flag>"` (observed).
+ *  Returns null (and prints a usage error) for a bare `--root` — the same fail-closed shape every
+ *  other workspace-scoped command uses (⛔ never a silent cwd fallback). */
+function storeDelegationArgv(sub: string, rest: string[], flags: CliFlags): string[] | null {
+  if (flags.root !== undefined && typeof flags.root !== "string") {
+    console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+    return null;
+  }
+  // `--store` is a CORE-side dialect selector — the store's own dispatch does not know it, so it
+  // must not travel in the delegated argv (for `write`/`check` an unknown flag is a usage error).
+  const out = [sub, ...rest.filter((a) => a !== `--${STORE_DIALECT_FLAG}`)];
+  if (flags.root === undefined) out.push("--root", storeWorkspaceRoot() as string);
+  return ["node", "goal-store", ...out];
+}
+
+export async function handleGoal({ sub, positional, flags, wantsJson, rest }: CliCtx) {
+  // Store-level verbs (gate / check / batch) — full argv, exit code is the verdict.
+  // `write` joins them when the caller asks for a store-only flag the ABI cannot carry.
+  const storeOnlyWrite = (sub === "write" || sub === "new") &&
+    STORE_ONLY_WRITE_FLAGS.some((f) => flags[f] !== undefined);
+  const storeDialect = flags[STORE_DIALECT_FLAG] === true;
+  if (sub !== undefined && (STORE_VERBS.has(sub) || storeDialect || storeOnlyWrite)) {
+    const argv = storeDelegationArgv(sub, rest ?? [], flags);
+    if (argv === null) { process.exitCode = 1; return; }
+    process.exitCode = await runGoalStoreCli(argv);
+    return;
+  }
   if (sub === "list") {
     await withProvider(async (client) => {
       const filter: Record<string, unknown> = {};
@@ -97,7 +199,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson }: CliCtx) 
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
-  console.error(`unknown goal subcommand: ${sub} (try: list, show, write)`);
+  console.error(`unknown goal subcommand: ${sub} (try: list, show, write, gate, check, batch)`);
   process.exitCode = 1;
   return;
 }

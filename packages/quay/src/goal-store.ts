@@ -2651,7 +2651,24 @@ export function resolveFidelityJudgeArgvFromConfig(root: string): string[] | nul
   return argv;
 }
 
-async function main(argv: string[]) {
+/** The goal store's CLI dispatch, **exported** so a second surface can run the SAME dialect instead
+ *  of restating it (gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache).
+ *
+ *  WHY IT IS EXPORTED (⛔ not a cosmetic re-export): the goal mechanism is driven by SUBPROCESS argv —
+ *  `goal-driver`/`meta-driver` spawn one command per record read / criterion run / status flip and
+ *  read its EXIT CODE as a verdict (0/1/2 for `gate`, 0/1/3 for `check --stale-pass`). Those codes,
+ *  the flag grammar and the stdout JSON shape are therefore a CONTRACT between the store and its
+ *  callers. The drivers used to spawn `<codeRoot>/packages/quay/src/goal-store.ts` directly; that
+ *  file does not exist in an installed layout (plugin marketplace cache / npm-pack / third-party
+ *  vendored copy — the store is there only as a LIBRARY inlined into the driver bundle, so this
+ *  module's `isMain` guard is false there and its CLI is unreachable). The drivers now spawn the
+ *  quay CLI's `goal` verbs (`quay goal gate|check|batch|write`), which land in cli/goal.ts and call
+ *  THIS function. ⛔ Restating the dialect in cli/goal.ts would create a second implementation of the
+ *  exit codes the driver reads as verdicts — i.e. exactly the drift class this repo keeps removing.
+ *
+ *  Behaviour is unchanged for the module's own entry: the `isMain` guard at the bottom of this file
+ *  still calls it with `process.argv` when the file is invoked directly. */
+export async function runGoalStoreCli(argv: string[]): Promise<number> {
   const args = argv.slice(2);
   const rootFlagIdx = args.indexOf("--root");
   let root: string | null = null;
@@ -3042,5 +3059,5 @@ async function main(argv: string[]) {
 const isMain =
   process.argv[1] != null && process.argv[1].endsWith("goal-store.ts");
 if (isMain) {
-  main(process.argv).then((code) => { process.exitCode = code; });
+  runGoalStoreCli(process.argv).then((code) => { process.exitCode = code; });
 }
