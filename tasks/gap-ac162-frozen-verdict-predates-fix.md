@@ -1,7 +1,7 @@
 ---
 id: gap-ac162-frozen-verdict-predates-fix
 title: AC-162 的台账 fail 早于修复 9 分 12 秒：真值已恢复，差额是【读数】——重取并落账，⛔ 勿再找不存在的缺陷
-status: todo
+status: ready
 labels:
   - gap
   - defect
