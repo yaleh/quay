@@ -1,7 +1,7 @@
 ---
 id: gap-ac259-reanchor-two-host-reverification-at-develop-version
 title: AC-259 再锚定：两台真机按 develop 现版本（0.7.0-dev）重跑安装/重注册并重落 GOAL-018-AC-257/AC-258 载体记录
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
