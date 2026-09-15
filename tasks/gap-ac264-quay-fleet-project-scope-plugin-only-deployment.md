@@ -9,7 +9,7 @@ labels:
 parent: null
 children: []
 extra:
-  schema: execution
+  schema: v1
 depends_on:
   - gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths
   - gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global
