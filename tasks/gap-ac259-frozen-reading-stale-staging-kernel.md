@@ -3,7 +3,7 @@ id: gap-ac259-frozen-reading-stale-staging-kernel
 title: AC-259 台账读数「此刻为假」的成因不止轮转排队：跑着的 goal 内核是 gitignored dev-tree 暂存 dist（07:35
   构建，早于 10:17 落地的立案前复核）⇒ 已落地的修复从未生效，且该内核结构上永不自刷新（实测 sourceFilesMaxMtimeMs 恒 0 /
   supervisorStaleness 报 fresh）
-status: ready
+status: done
 labels:
   - gap
   - defect
