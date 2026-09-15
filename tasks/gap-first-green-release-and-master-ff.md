@@ -1,7 +1,7 @@
 ---
 id: gap-first-green-release-and-master-ff
 title: 首次真实全绿发布且 master 已 ff 到它的 tag：落地 advance-master job + needs 全集静态检查并真跑一次（AC-274）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
