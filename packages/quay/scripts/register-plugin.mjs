@@ -199,9 +199,10 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
   } else if (!enableScope) {
     console.log("[quay] The marketplace is registered; the plugin is NOT enabled at user scope");
     console.log("       (AC-161: the user level carries only the marketplace source). Enable it per");
-    console.log(`       project by adding  "enabledPlugins": { "${pluginRef}": true }  to that project's`);
-    console.log("       .claude/settings.json — or re-run this install with QUAY_PLUGIN_SCOPE=user for");
-    console.log("       a deliberate user-scope enable.");
+    console.log("       project instead — add this plugin's enable entry to that project's");
+    console.log("       .claude/settings.json (the exact JSON shape is spelled out in the SCOPE");
+    console.log("       POLICY note at the top of this script) — or re-run this install with");
+    console.log("       QUAY_PLUGIN_SCOPE=user for a deliberate user-scope enable.");
   } else {
     const install = runCli(["plugin", "install", pluginRef, "--scope", enableScope]);
     if (install.status !== 0) {
