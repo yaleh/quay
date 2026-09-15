@@ -2,7 +2,8 @@
 id: gap-release-cut-via-workflow-dispatch
 title: release 渠道经 workflow_dispatch 真发一个版本：切 post-fix tag v0.7.0 → dispatch →
   采集器落痕（AC-268）
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -223,3 +224,15 @@ packages/quay/test/serve-handlers.test.mjs:977                                  
 - delivery-manifest.json
 - scripts/version-consistency-check.ts
 - scripts/version-consistency-check.test.ts
+
+## Needs-Human
+
+**执行 2026-09-15T16:09:37.308Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 10
+- run_id：wk-prod-anchor
+- session_id：b6a9ac4a-8955-49a2-922b-0b8c328bcd5e
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-release-cut-via-workflow-dispatch~wk-prod-anchor~1789488412258-0aacd1.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-release-cut-via-workflow-dispatch-wk-prod-anchor.log
