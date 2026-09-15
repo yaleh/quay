@@ -134,8 +134,30 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "…and the flagged one must be the value import, by name");
   assert.ok(!/also-not-shipped/.test(r.stdout),
     "the type-only ./also-not-shipped.ts import must never be reported (--experimental-strip-types erases it)");
-  assert.match(r.stdout, /empty-list → violations=5 \(expect ≥1/,
+  // The count must be DERIVED from the consumer, ⛔ not pinned. It is |$SCRIPT_DIR siblings the verify
+  // script references OUTSIDE its own selfcheck()|, and the literal `5` went stale the moment a sixth
+  // reference appeared (gap-ac161-4th-regression… made verify-deliver-coldstart.sh read its own path
+  // for the positional --scope scan). A stale literal fails in exactly the shape of a real violation —
+  // the one distinction this whole test exists to keep. Mirroring the sed/grep in JS is deliberate:
+  // two independent readings of the same consumer is what makes the expected number a measurement
+  // (硬规则 4) instead of an echo, and it takes false only when the two readings DISAGREE.
+  const consumerRefs = (() => {
+    const lines = readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh"), "utf8").split("\n");
+    const outside = []; // mirror of `sed '/^selfcheck() {/,/^}$/d'` — selfcheck() runs LOCALLY
+    let inSelf = false;
+    for (const line of lines) {
+      if (inSelf) { if (/^\}$/.test(line)) inSelf = false; continue; }
+      if (/^selfcheck\(\) \{$/.test(line)) { inSelf = true; continue; }
+      outside.push(line);
+    }
+    const hits = outside.join("\n").match(/\$\{?SCRIPT_DIR\}?\/[A-Za-z0-9._-]+\.(ts|mjs|js|sh)/g) || [];
+    return [...new Set(hits.map((h) => h.replace(/^\$\{?SCRIPT_DIR\}?\//, "")))].sort();
+  })();
+  const emptyList = r.stdout.match(/empty-list → violations=(\d+) \(expect ≥1/);
+  assert.ok(emptyList && Number(emptyList[1]) >= 1,
     "an unreadable (empty) list must not read as 合格 — the reference half is driven by the CONSUMER");
+  assert.equal(Number(emptyList[1]), consumerRefs.length,
+    `the empty-list violation count must equal the CONSUMER's own sibling references (${consumerRefs.length}: ${consumerRefs.join(", ")}) — a pinned literal goes stale the moment a sibling reference is added, and a stale literal is indistinguishable from a real violation`);
   // AC4 产物: the per-file import face must be printed (which sibling is not self-sufficient, and why)
   assert.match(r.stdout, /import-face provider-binding-resolvability-check\.ts -> \[\.\/gate-script-base\.ts \.\/repo-root\.ts node:fs node:path yaml\]/,
     "the import face of every shipped .ts must be printed — this is the artifact 硬规则 5b asks for");
