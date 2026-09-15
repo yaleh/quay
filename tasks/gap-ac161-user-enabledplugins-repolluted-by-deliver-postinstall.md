@@ -1,8 +1,7 @@
 ---
 id: gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall
-title: 交付管线的 npm install -g postinstall（register-plugin.mjs 的 materialize 腿）在
-  project-scope 交付里也按 user scope 注册 ⇒ 用户级 enabledPlugins 出现 quay 键 ⇒ AC-257 记录被
-  AC-161 常设闸拒写
+title: ad-arm1 用户级 enabledPlugins 出现 quay@quay ⇒ AC-257 记录被 AC-161
+  常设闸拒写：写入者【未识别】（原归因于交付管线 postinstall 已被对照证伪，⛔ 勿按该成因行动）
 status: ready
 labels:
   - gap
