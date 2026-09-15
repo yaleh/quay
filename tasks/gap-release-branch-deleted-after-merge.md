@@ -2,7 +2,7 @@
 id: gap-release-branch-deleted-after-merge
 title: release 分支合回后即删除：清理 release-v063-build 使 AC-271 转绿，并把「合回后删除」落成一个
   fail-closed 的命令（AC-271）
-status: done
+status: ready
 labels:
   - gap
   - delivery-critical
