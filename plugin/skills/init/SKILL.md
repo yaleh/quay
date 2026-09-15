@@ -48,18 +48,36 @@ claude plugin install quay@quay --scope project
 user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
 carry only the marketplace *source*). Same class of mistake, same fix: to merely *re-fill* a shared
 plugin-cache entry (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` is keyed by
-marketplace+plugin+version and **shared across scopes** — no scope owns a cache path), do the
-two-step at the **same** scope, **never** `--scope user`:
+marketplace+plugin+version and **shared across scopes** — no scope owns a cache path).
+
+**Resolve the scope first** — that step is not optional. `claude plugin uninstall <ref> --scope
+project` FAILS outright when the record is held at **user** scope:
+
+```
+✘ Failed to uninstall plugin "quay@quay": Plugin "quay@quay" is installed in user scope, not
+  project. Use --scope user to uninstall.
+```
+
+i.e. the CLI's own error message hands you the one command this note forbids. (That is the fifth
+AC-161 regression, 2026-09-15: an agent followed the earlier form of this recipe verbatim and was
+machine-redirected onto `--scope user`.) So, in this order:
 
 ```bash
-claude plugin uninstall quay@quay --scope project
+# (1) which scope ACTUALLY holds the record? (never assume `project`)
+claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
+# (2) uninstall THERE — a USER-scope uninstall is AC-161-safe: it DELETES the user-level key,
+#     it never adds one (and it does not remove the shared cache payload)
+claude plugin uninstall quay@quay --scope <the scope just printed>
+# (3) ALWAYS install at project scope — the only step that writes an enabledPlugins key, and it
+#     writes it to <cwd>/.claude/settings.json, never to ~/.claude/settings.json
 claude plugin install   quay@quay --scope project -y
 ```
 
-(Measured 2026-09-15 / Claude Code 2.1.271 against a deliberately damaged cache entry: both
+(Measured 2026-09-15 / Claude Code 2.1.271–2.1.272 against a deliberately damaged cache entry: both
 `claude plugin update --scope project` and a re-`install` short-circuit on the unchanged version and
-re-materialize **nothing** — file count 0 → 0. Only the uninstall+install pair re-filled it, 0 → 1,
-with no user-level key appearing.)
+re-materialize **nothing** — file count 0 → 0; the short-circuit is keyed on an install **record**,
+not on the cache. Only remove-the-record-then-install re-filled it, 0 → 1, with no user-level key
+appearing.)
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
 

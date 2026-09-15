@@ -56,19 +56,34 @@
 //   the first time the polluter was not one of this repo's declared write channels but any agent
 //   holding a Bash tool).
 //
-//   A scope-correct refresh DOES exist — but it is NOT `plugin update`, and that is measured, because
-//   the obvious answer is wrong (Claude Code 2.1.271, 2026-09-15, all three against the same damaged
-//   cache entry whose `payload/dist` file count was 0):
+//   A scope-COMPLETE refresh DOES exist — but it is NOT `plugin update`, and the scope-resolution
+//   step is NOT optional. Both halves are measured (Claude Code 2.1.271/2.1.272, 2026-09-15, against
+//   a cache entry whose `payload/dist` file count was 0):
 //     · `claude plugin update <plugin> --scope project` ⇒ "already at the latest version", file
 //       count 0 → 0. It short-circuits on an unchanged version and re-materializes NOTHING.
 //     · `claude plugin install <plugin> --scope project -y` on an already-installed plugin ⇒
-//       "already installed", file count 0 → 0. Same short-circuit.
-//     · `claude plugin uninstall <plugin> --scope project` then
-//       `claude plugin install <plugin> --scope project -y` ⇒ file count 0 → 1 (the SHARED cache was
-//       re-filled) and `~/.claude/settings.json` `enabledPlugins` gained no key and no quay key
-//       appeared (the AC-161 criterion still exited 0).
-//   ⇒ The two-step at the SAME scope is the supported refresh. `--scope user` is reserved for a
-//     deliberate, human-intended user-level enable — never a way to re-fill a cache.
+//       "already installed", file count 0 → 0. Same short-circuit. The short-circuit is keyed on an
+//       install RECORD for the current project — NOT on the cache: with no record present the same
+//       command re-materializes the cache even when the cache directory already exists.
+//     · ⛔ `claude plugin uninstall <plugin> --scope project` IS NOT ALWAYS EXECUTABLE. When the
+//       record is held at USER scope it fails outright:
+//         ✘ Failed to uninstall plugin "<plugin>": Plugin "<plugin>" is installed in user scope,
+//           not project. Use --scope user to uninstall.
+//       The CLI's own error message therefore hands you the ONE command this recipe forbids. An agent
+//       following the earlier form of this recipe verbatim is MACHINE-REDIRECTED onto `--scope user`
+//       — that is exactly how the FIFTH AC-161 regression happened (2026-09-15,
+//       gap-ac161-5th-regression-refresh-recipe-not-scope-complete: "the CLI won").
+//   ⇒ The refresh is scope-COMPLETE, in this order:
+//       (1) RESOLVE the scope that actually holds the record, and uninstall THERE —
+//             claude plugin list --json | jq -r '.[] | select(.id=="<ref>") | .scope' | sort -u
+//           A USER-scope uninstall is AC-161-SAFE: it DELETES the user-level key, it never adds one,
+//           and (measured) it does not remove the shared cache payload.
+//       (2) ALWAYS install with `--scope project`. This is the only step that writes an
+//           enabledPlugins key, and it writes it to <cwd>/.claude/settings.json — never to the user
+//           level. Measured after (1)+(2) on a user-scope-held, damaged cache: file count 0 → 1,
+//           no user-level quay key, AC-161 criterion exit 0.
+//     `--scope user` remains reserved for a deliberate, human-intended user-level enable — never a
+//     way to re-fill a cache.
 
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -238,9 +253,14 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
     console.log("       ⚠️ To merely RE-FILL a shared cache entry (it is keyed by marketplace+plugin+");
     console.log("       version and shared across scopes), do NOT reach for --scope user. `plugin update`");
     console.log("       and a re-`install` both short-circuit on an unchanged version and re-materialize");
-    console.log("       nothing; the form that works is the two-step at the SAME scope:");
-    console.log(`         claude plugin uninstall ${pluginRef} --scope project`);
+    console.log("       nothing. The refresh is scope-COMPLETE — resolve FIRST, then install at project:");
+    console.log("         ⛔ `uninstall --scope project` FAILS when the record is held at USER scope");
+    console.log("            (\"... is installed in user scope, not project. Use --scope user\") — the CLI");
+    console.log("            itself then points you at the one command to avoid. Resolve the real scope:");
+    console.log(`         claude plugin list --json | jq -r '.[] | select(.id=="${pluginRef}") | .scope' | sort -u`);
+    console.log(`         claude plugin uninstall ${pluginRef} --scope <the scope just printed>`);
     console.log(`         claude plugin install   ${pluginRef} --scope project -y`);
+    console.log("       (a user-scope uninstall DELETES the user-level key, never adds one — AC-161-safe)");
   } else {
     const install = runCli(["plugin", "install", pluginRef, "--scope", enableScope]);
     if (install.status !== 0) {
@@ -249,9 +269,11 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
       console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
       if (enableScope !== "user") {
         console.log(`       (or, if it is already installed and only the shared cache needs re-filling —`);
-        console.log(`        \`plugin update\` short-circuits on an unchanged version, so do the two-step:`);
-        console.log(`          claude plugin uninstall ${pluginRef} --scope ${enableScope}`);
-        console.log(`          claude plugin install   ${pluginRef} --scope ${enableScope} -y )`);
+        console.log(`        \`plugin update\` short-circuits on an unchanged version, so resolve the`);
+        console.log(`        scope that ACTUALLY holds the record, uninstall THERE, then install at project:`);
+        console.log(`          claude plugin list --json | jq -r '.[] | select(.id=="${pluginRef}") | .scope' | sort -u`);
+        console.log(`          claude plugin uninstall ${pluginRef} --scope <the scope just printed>`);
+        console.log(`          claude plugin install   ${pluginRef} --scope project -y )`);
       }
     }
   }
