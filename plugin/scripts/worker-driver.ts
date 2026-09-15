@@ -264,9 +264,47 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
  *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
 export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
 
-/** 终态枚举：completed（退出码 0 且落地）/ exited-not-landed（退出码 0 但没落地）/ failed（非零退出）/
- *  killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/ not-dispatched（halt 未派）。 */
+/** 终态枚举：**completed（退出码 0 且落地——成功态就是它）** / exited-not-landed（退出码 0 但没落地）/
+ *  failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/
+ *  not-dispatched（halt 未派）。
+ *
+ *  🔴 词表陷阱（gap-worker-outcome-final-state-landed-is-a-dead-value）：同一条 outcome 记录里的
+ *  `mechanical_fan_in.outcome` 用的是**另一个**词表（`"landed" | "red"`）。两者描述同一个事件
+ *  （机械 fan-in 是否落地）却**不同名** ⇒ `landed` 极易被写进 `final_state`。实测生产载体
+ *  `.quay/worker-outcome.jsonl` 里有 **1** 条这样的记录（2026-08-28，一次手工 fan-in 的手写落盘，
+ *  非本文件任何代码路径所写）。**后果**：任何按 `final_state == "landed"` 统计吞吐的消费者读到 **0**，
+ *  与「系统完全停摆」同形、且不可区分（硬规则 3b/4b）——本任务的定量复核作者本人就在这里栽过一跤
+ *  （见 `docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md` §6）。
+ *  ⇒ `landed` ⛔ 不是本词表的取值；**成功态是 `completed`**。
+ *  **enforce**：`assertFinalState` 在唯一落盘闸 `appendOutcomeToFile` 上拒收词表外的取值
+ *  （硬规则 9：给规则造产物，不靠提醒；硬规则 3b：写不对 ⇒ 不得与「合格」同形）。 */
 export const FINAL_STATES = ["completed", "exited-not-landed", "failed", "killed", "timed-out", "spawn-failed", "not-dispatched"] as const;
+
+/** `v` 是否为 `final_state` 词表内取值（`FINAL_STATES.includes` 的类型谓词版——供落盘闸与读者共用，
+ *  ⛔ 不各写一份词表副本）。 */
+export function isFinalState(v: unknown): v is (typeof FINAL_STATES)[number] {
+  return typeof v === "string" && (FINAL_STATES as readonly string[]).includes(v);
+}
+
+/** 落盘闸把关：`final_state ∉ FINAL_STATES` ⇒ **抛**（⛔ 不静默写入、⛔ 不归一化伪造成合法值——
+ *  归一化会把「写错了」变成「写对了」，正是硬规则 3b 禁止的「读不懂 ⇒ 与合格同形」）。
+ *
+ *  **它为什么不是恒真闸**：本文件四个 outcome 构造器（computeOutcome / computeAdoptedOutcome /
+ *  computeOrphanFinalizedOutcome / computeHaltedOutcome）都只产出词表内取值 ⇒ 生产路径上本断言
+ *  不可达，**恰恰因此它才是测量**（硬规则 4）——它拦的是「未来某个调用方 / 重构 / 手工脚本写进一个
+ *  词表外的取值」。没有它，2026-08-28 那条 `final_state:"landed"` 就是**静默**落盘的；
+ *  负控制见 `plugin/test/worker-driver.test.mjs`（传 `"landed"` 必须抛，传词表内取值必须不抛）。 */
+export function assertFinalState(value: unknown, ctx: string): void {
+  if (isFinalState(value)) return;
+  const trap =
+    value === "landed" || value === "red"
+      ? ` — ${JSON.stringify(value)} 是 mechanical_fan_in.outcome 的取值，⛔ 不是 final_state；成功态写 "completed"`
+      : "";
+  throw new Error(
+    `worker-driver: refusing to write an out-of-vocabulary final_state ${JSON.stringify(value)} (${ctx})${trap}. ` +
+      `Known final_state values: ${FINAL_STATES.join(" | ")}`,
+  );
+}
 
 /** 驱动对 exited-not-landed 的退出码（gap-worker-driver-fake-completion-exit-0：exit 0 ≠ 落地，
  *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
@@ -1114,8 +1152,14 @@ function landingFailedReason(status: string | null, worktreePresent: boolean | n
   return parts.join(" and ");
 }
 
-/** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。 */
+/** 把一条 outcome 追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON）。
+ *
+ *  **词表闸**（gap-worker-outcome-final-state-landed-is-a-dead-value）：本函数是 `worker-outcome.jsonl`
+ *  的**唯一**落盘点（4 个内部调用点 + appendOutcome 包装都经它）⇒ `assertFinalState` 放在这里，
+ *  就把「`landed` 这类词表外取值」从**写入面**上移除掉了，而不仅是在文档里声明它不合法。
+ *  闸在 mkdir/append **之前**：拒收时不留半条记录、不留新目录（负控制断言载体文件不存在）。 */
 export function appendOutcomeToFile(file: string, outcome: ReturnType<typeof computeOutcome>): string {
+  assertFinalState(outcome.final_state, `appendOutcomeToFile → ${path.basename(file)}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, JSON.stringify(outcome) + "\n", "utf8");
   return file;
@@ -3486,7 +3530,21 @@ export async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechS
 
 /** 机械 fan-in 步骤 trace 载体（.quay/fan-in-step-trace.jsonl，gitignored 运行时诊断日志——AC1：
  *  每步 begin/end 各一条；begin 无 end ⇒ 该步挂起/未返回，据 epoch 定位）。best-effort：写失败不致命
- *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。 */
+ *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。
+ *
+ *  ── 时长通道（gap-fan-in-step-trace-suite-steps-write-end-without-begin AC2）──────────────────
+ *  **每条 `step-end` 自带 `durationMs`（该步真实墙钟毫秒）——读时长⛔不要用 begin/end 配对。**
+ *  两个理由，都不是风格问题：
+ *  1) **4 个 suite 决策步只有 end 没有 begin**（见 traceSuiteEvent）：ac-precheck / suite-start /
+ *     suite-end / suite-skip 是【单发决策事件】而非区间——它们没有可配对的 begin，任何配对读法
+ *     对它们恒返回「无数据」，而「无数据」与「这一步不存在」同形（硬规则 3b）。实测一位分析者
+ *     正是用配对读法得出「suite 结构上不在这个载体里」的错误结论（该结论已收回，见
+ *     docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §5 错误一）。
+ *  2) 配对读法**对它覆盖的那 8 步也不可靠**：跨天/跨轮的陈旧 begin 会与新的 end 配错。自带时长
+ *     没有这个失败模式。
+ *  ⛔ 因此：**不要**给这 4 个决策事件补一个「紧挨着 end 写的 begin」来把孤儿率刷到 0 —— 一个
+ *  写下去就立刻被配掉的 begin 结构上不可能与 end 分离（硬规则 4：恒等式不是测量），那是给指标
+ *  看的样子，不是仪器。 */
 export function appendFanInStepTrace(
   root: string,
   task: string,
@@ -4274,19 +4332,34 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 监控的读者，如 gap-archguard-p5-instrument-decay-standing-guard）——两者服务不同读者，⛔ 互斥=分裂
   // （原 bug：只写 per-run 让共享读者永久看不到这批步骤）。phase 统一 "end"（单发事件，⛔ 用 "begin"
   // 会给挂起检测留下「begin 无 end」的假挂起）。与 trace() 一一对应 ⇒ 两载体 suite 条目数一致（AC3）。
+  //
+  // 时长（gap-fan-in-step-trace-suite-steps-write-end-without-begin AC2）：共享载体上这批事件
+  // **自带 `durationMs`**（= per-run 的 `wall_ms`，同一读数），因此 suite 时长不必、也不能靠
+  // begin/end 配对得到（它们本就没有 begin——AC1 的孤儿根因）。两个载体各自的时长效字段名不同是
+  // 刻意的：per-run 的读者（web 详情页 / fan-in-execute 的 poll 证书）认 `wall_ms`，共享载体的
+  // 聚合读者认 `durationMs`；⛔ 不互相复制一份（同载体两个同义字段 = 漂移源）。
   const traceSuiteEvent = (step: string, extra: Record<string, unknown>): void => {
-    appendFanInStepTrace(root, task, runId, step, "end", extra);
+    const { wall_ms, ...rest } = extra as Record<string, unknown> & { wall_ms?: number };
+    // 缺 wall_ms 的调用点是编码错误，不是「时长 0」——不过滤成 0，留 null 让读者看得出「没测」
+    // （硬规则 6/3b：缺值 = 未查，⛔ 不与「合格」共用取值）。
+    appendFanInStepTrace(root, task, runId, step, "end", {
+      ...rest,
+      durationMs: typeof wall_ms === "number" ? wall_ms : null,
+    });
     trace({ step, ...extra });
   };
   // mechSh 步的包层：跑 + 计时 + 两路 trace——① appendFanInStepTrace begin/end（挂起 = begin 无 end，
   // 据 epoch 定位挂起步；gap-fan-in-subprocess-hang-timeout-recovery AC1）；② A1 一行过程日志。
+  // `durMs` 算【一次】，共享载体的 `durationMs` 与 per-run 的 `wall_ms` 用同一个读数——⛔ 不各算一次
+  // （两次 Date.now() 会给出两个不一致的「同一步时长」）。
   const step = async (name: string, argv: string[], timeoutMs = 120_000): Promise<MechShResult> => {
     const t0 = Date.now();
     appendFanInStepTrace(root, task, runId, name, "begin");
     const r = await mechSh(argv, timeoutMs);
-    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok });
+    const durMs = Date.now() - t0;
+    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok, durationMs: durMs });
     trace({
-      step: name, exit: r.status, wall_ms: Date.now() - t0, ok: r.ok,
+      step: name, exit: r.status, wall_ms: durMs, ok: r.ok,
       ...(r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     });
     return r;
@@ -4396,8 +4469,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // third-party-no-doc-check-tooling（⛔ 不与「doc 检查真的跑了且失败」同形，硬规则 3b）。
       if (docCmd === null) {
         const reason = "third-party-no-doc-check-tooling";
-        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason });
-        trace({ step: "doc-check", exit: 0, wall_ms: Date.now() - t0, ok: true, reason });
+        const durMs = Date.now() - t0;
+        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason, durationMs: durMs });
+        trace({ step: "doc-check", exit: 0, wall_ms: durMs, ok: true, reason });
         return { ok: true, status: 0, stdout: "", stderr: "", error: null };
       }
       const docKey = computeDocCheckFaceKey(worktree);
@@ -4433,8 +4507,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
     if (scopedCmd === null) {
       const reason = "third-party-no-scoped-tooling";
-      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason });
-      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason });
+      const durMs = Date.now() - scopedT0;
+      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason, durationMs: durMs });
+      trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, reason });
     } else {
       const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
       const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
@@ -4616,8 +4691,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       task, root, mergeTarget, runId, attemptKey: perSuiteRunId, worktree, suiteCapture, suiteState: suiteStateFile,
       lockWaitSecs: 30, token: ffToken, scriptsDir,
     });
-    appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
-    trace({ step: "ff", exit: ff.code, wall_ms: Date.now() - ffT0, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
+    const ffDurMs = Date.now() - ffT0;
+    appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0, durationMs: ffDurMs });
+    trace({ step: "ff", exit: ff.code, wall_ms: ffDurMs, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
 
     // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械
@@ -5314,6 +5390,8 @@ export async function main(argv: string[]): Promise<number> {
   let mechMergeTarget: string | undefined;
   let writeScopedGateCacheFlag = false;
   let scopedGateCacheDevelopSha: string | undefined;
+  let appendCompleteGateEventFlag = false;
+  let appendCompleteActor: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -5344,6 +5422,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--merge-target") mechMergeTarget = args[++i];
     else if (a === "--write-scoped-gate-cache") writeScopedGateCacheFlag = true;
     else if (a === "--develop-sha") scopedGateCacheDevelopSha = args[++i];
+    else if (a === "--append-complete-gate-event") appendCompleteGateEventFlag = true;
+    else if (a === "--actor") appendCompleteActor = args[++i];
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -5360,6 +5440,7 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
+          "  --append-complete-gate-event --task <id> [--actor <a>]  写 `complete` pass GateEvent 到 <root>/.quay/gate-events.jsonl（语义 fan-in workflow 的 flip 落地补写；exit 0=已写 / 2=缺参）\n" +
           "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
           "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
@@ -5407,6 +5488,24 @@ export async function main(argv: string[]): Promise<number> {
     writeScopedGateCache(cacheFile, scopedGateKey(task, scopedGateCacheDevelopSha));
     process.stdout.write(`${JSON.stringify({ event: "scoped-gate-cache-written", task, developSha: scopedGateCacheDevelopSha, cacheFile })}\n`);
     return 0;
+  }
+
+  // --append-complete-gate-event：把 `complete` pass GateEvent 写进 <root>/.quay/gate-events.jsonl。
+  // gap-complete-gateevent-coverage-has-a-residual-gap 的第二条落地路径（`plugin/workflows/
+  // fan-in-execute.js` 的 flip 块，commit `tasks: 翻 <id> done（AC78 fan-in-execute workflow）`）此前
+  // 直接 `sed -i` 翻 status 并 commit，⛔ 全文零 GateEvent ⇒ 该路径的每一次落地在生产载体上都不留痕
+  // （09-04~09-14 实测：该路径 2/2 落地零事件，而机械 fan-in 路径 386/388 有事件）。本 verb 让该
+  // workflow 用【同一个】appendCompleteGateEvent（gate-event-store 的 appendGateEvent，⛔ 不手搓 JSON），
+  // 与 `--mechanical-fan-in` 的 9.4b 写侧同源。stdout 单行 JSON；exit 0 = 已写 / 2 = 缺参（fail-closed）。
+  if (appendCompleteGateEventFlag) {
+    const task = tasks[0];
+    if (!task) {
+      console.error("worker-driver: --append-complete-gate-event requires --task <id>");
+      return 2;
+    }
+    const r = await appendCompleteGateEvent(rootDir, task, appendCompleteActor ?? "quay-fan-in-workflow");
+    process.stdout.write(`${JSON.stringify({ event: "complete-gate-event-appended", task, ok: r.ok, reason: r.reason })}\n`);
+    return r.ok ? 0 : 2;
   }
 
   // ⛔ 本文件【不再】自带 serveControlPlane 调用点（GOAL-017/AC-252，SPEC §7 阶段 A1）：控制面已上收进

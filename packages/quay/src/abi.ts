@@ -74,6 +74,23 @@ export interface GoalRecord {
   supersededBy: string[];
   body: string;
   updatedAt?: number;
+  /** Derived by the PROVIDER (never stored): whether this GOAL's own `status` field may no longer
+   *  reflect its children, because a criterion was filed under it while it read `achieved`
+   *  (gap-goal-status-stale-achieved-after-new-active-criterion-filed). Declared here because it is
+   *  now part of what a provider must be able to REPORT — a GOAL row that could only say `achieved`
+   *  made "genuinely closed" and "closed, then re-opened by a new child" the same token, which is
+   *  the defect the field exists to remove (hard rule 3b). `state` is three-valued: `clean` /
+   *  `stale` / `not-evaluated` — ⛔ an unreadable carrier must never read as `clean`. */
+  staleness?: {
+    state: "clean" | "stale" | "not-evaluated";
+    signals: Array<{
+      goalId: string;
+      staleSince: string;
+      triggeringAcId: string;
+      goalStatusAtTime: string;
+    }>;
+    reason?: string;
+  };
 }
 
 /** All valid goal-status values (draft → active → achieved / superseded / retired, plus the human

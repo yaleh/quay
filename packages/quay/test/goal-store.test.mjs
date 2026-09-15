@@ -65,6 +65,27 @@ const EXPECT = "the expected outcome this criterion proves";
 // written on the way out.
 const FLAG_CRITERION = "test -f passflag || { echo 'passflag absent' >&2; exit 1; }";
 
+// gap-goal-create-as-active-skips-zero-ac-gate: the P6-goal gate (`goalActivating` in
+// packages/quay/src/goal-store.ts) now covers the CREATE path as well. A brand-new GOAL that no AC
+// names can no longer be born `active` — "how many AC records name this GOAL" is knowable at birth
+// (an AC points at an ALREADY-EXISTING goal), and on the ordinary birth path it is 0. A fixture that
+// needs a LIVE goal therefore has to file its exit condition first, exactly as production now must
+// (create draft → file AC(s) → activate).
+//
+// `seedAc` / `seedAcCli` write that one AC. The id is derived from the goal number (GOAL-010 →
+// AC-910) so each seeded goal gets its own and nothing collides; `status` is a parameter because a
+// few tests care about the AC rollup — `isGoalAchieved` / I4 `divergent` need the seed `achieved`,
+// and the tests that measure a zero-AC goal hand-write their record instead (that state is no longer
+// WRITABLE but is still READABLE, which is what those readers are being tested against).
+function seedAc(s, goalId, { status = "draft", criterion = "true" } = {}) {
+  const id = `AC-9${String(Number(String(goalId).replace(/\D/g, ""))).padStart(2, "0")}`;
+  return s.write(id, { title: "seeded exit condition", status, goal: goalId, criterion, origin: "test fixture", expect: EXPECT });
+}
+function seedAcCli(n, goalId, { status = "draft", criterion = "true" } = {}) {
+  const id = `AC-9${String(Number(String(goalId).replace(/\D/g, ""))).padStart(2, "0")}`;
+  return n(["write", id, "--title", "seeded exit condition", "--status", status, "--goal", goalId, "--criterion", criterion, "--origin", "test fixture", "--expect", EXPECT]);
+}
+
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
   const src = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
@@ -84,6 +105,7 @@ test("AC9 — ids are GOAL-NNN / AC-NNN (pure sequence); kind derived from the p
   assert.ok(!isGoalId("AC-028"));
   assert.ok(!isGoalId("PHASE-001"), "PHASE-NNN was renamed to GOAL-NNN by SPEC §2");
   const s = createGoalStore(tmpDir("ac9"));
+  seedAc(s, "GOAL-001");
   const p = s.write("GOAL-001", { title: "three-layer unification", status: "active", origin: "o", body: GOAL_BODY });
   assert.equal(p.kind, "goal");
   const a = s.write("AC-028", { title: "experience flows", status: "active", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
@@ -111,6 +133,7 @@ test("AC6 — writing a record without a non-empty origin is rejected", () => {
 
 test("AC6 — an existing origin survives a later write that omits it; blanking it is rejected", () => {
   const s = createGoalStore(tmpDir("ac6b"));
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p", status: "active", origin: "2026-08-09 human goal setting", body: GOAL_BODY });
   s.write("GOAL-001", { title: "p renamed", status: "active", body: GOAL_BODY }); // omit origin → kept
   assert.equal(s.get("GOAL-001").origin, "2026-08-09 human goal setting");
@@ -121,33 +144,47 @@ test("AC6 — an existing origin survives a later write that omits it; blanking 
 // ── AC4: active set DERIVED from goal status (change the goal, the set follows) ──────────────────
 test("AC4 — listActiveCriteria() derives the active set from goal status, not a hand-maintained checklist", () => {
   const s = createGoalStore(tmpDir("ac4"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o1", body: GOAL_BODY });
+  // ⚠️ 「出生即 active」不再是可写状态（gap-goal-create-as-active-skips-zero-ac-gate）⇒ 走两步：
+  // 非 active 建 → 落 AC → 激活。⛔ 不用 seedAc：本测试逐条 deepEqual 活跃集，多一条 AC 就是噪声。
+  s.write("GOAL-010", { title: "p10", status: "draft", origin: "o1", body: GOAL_BODY });
   s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o2", expect: EXPECT });
   s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o3", expect: EXPECT });
+  s.write("GOAL-010", { status: "active" });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-010", "AC-011"]);
 
   // Switch the goal (I1 with disposition) → the ACTIVE SET follows automatically.
-  s.write("GOAL-011", { title: "p11", status: "active", origin: "o4", supersedes: ["GOAL-010"], body: GOAL_BODY });
-  assert.deepEqual(s.listActiveCriteria().map((g) => g.id), [], "goal switched → old ACs leave the active set");
+  // GOAL-011 is filed draft with its own AC first: the `supersedes` disposition fires at ACTIVATION
+  // (goal-store.ts's cap block reads the PARAM, not the stored field), so the「old ACs left」half is
+  // observed against the ids that must be gone and the「new AC entered」half against the new id.
+  s.write("GOAL-011", { title: "p11", status: "draft", origin: "o4", body: GOAL_BODY });
   s.write("AC-012", { title: "a3", status: "active", goal: "GOAL-011", criterion: "true", origin: "o5", expect: EXPECT });
+  assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-010", "AC-011"], "GOAL-011 尚未激活 ⇒ 活跃集不变");
+  s.write("GOAL-011", { status: "active", supersedes: ["GOAL-010"] });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-012"], "new goal's AC enters the active set");
 });
 
 // ── AC10: I1′ hard cap (SPEC §4.1) ──────────────────────────────────────────────────────────────
 test("AC10 — under the default cap (3), a second and third active GOAL are allowed; a fourth is rejected", () => {
   const s = createGoalStore(tmpDir("ac10a"));
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  seedAc(s, "GOAL-002");
   s.write("GOAL-002", { title: "p2", status: "active", origin: "o", body: GOAL_BODY });
+  seedAc(s, "GOAL-003");
   s.write("GOAL-003", { title: "p3", status: "active", origin: "o", body: GOAL_BODY });
   assert.throws(
-    () => s.write("GOAL-004", { title: "p4", status: "active", origin: "o", body: GOAL_BODY }),
+    // ⚠️ GOAL-004 must clear P6-goal first (its own naming AC) — otherwise the P6-goal rejection
+    // would arrive INSTEAD of the cap rejection and this negative control would stop measuring the cap.
+    () => { seedAc(s, "GOAL-004"); s.write("GOAL-004", { title: "p4", status: "active", origin: "o", body: GOAL_BODY }); },
     /exceed cap 3/
   );
 });
 
 test("AC10 — the SAME call may dispose the old goal (achieved) and activate the new one", () => {
   const s = createGoalStore(tmpDir("ac10b"));
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  seedAc(s, "GOAL-002");
   s.write("GOAL-002", { title: "p2", status: "active", origin: "o", disposeOld: { id: "GOAL-001", to: "achieved" }, body: GOAL_BODY });
   assert.equal(s.get("GOAL-001").status, "achieved");
   assert.equal(s.get("GOAL-002").status, "active");
@@ -156,7 +193,9 @@ test("AC10 — the SAME call may dispose the old goal (achieved) and activate th
 
 test("AC10 — supersedes:[oldId] in the same call atomically supersedes the old goal", () => {
   const s = createGoalStore(tmpDir("ac10c"));
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  seedAc(s, "GOAL-002");
   s.write("GOAL-002", { title: "p2", status: "active", origin: "o", supersedes: ["GOAL-001"], body: GOAL_BODY });
   assert.equal(s.get("GOAL-001").status, "superseded");
   assert.deepEqual(s.get("GOAL-001").supersededBy, ["GOAL-002"]);
@@ -165,6 +204,7 @@ test("AC10 — supersedes:[oldId] in the same call atomically supersedes the old
 // ── AC11: I2 derived (never stored) + checkWithinCap checker ─────────────────────────────────────
 test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved", () => {
   const s = createGoalStore(tmpDir("ac11"));
+  seedAc(s, "GOAL-010", { status: "achieved" });
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
@@ -178,8 +218,16 @@ test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved
 });
 
 test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withinCap from hasDirection", () => {
-  const s = createGoalStore(tmpDir("ac11b"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
+  const dir = tmpDir("ac11b");
+  const s = createGoalStore(dir);
+  // ⚠️ A zero-AC ACTIVE goal is no longer WRITABLE (gap-goal-create-as-active-skips-zero-ac-gate) —
+  // `checkWithinCap`/`isGoalAchieved` are READERS, and what they must still handle is the state a
+  // pre-fix record left on disk, so construct it as a record file.
+  fs.writeFileSync(
+    path.join(dir, "GOAL-010-p10.md"),
+    `---\nid: GOAL-010\ntitle: p10\nstatus: active\nkind: goal\nbody: >-\n  ${GOAL_BODY}\norigin: o\n---\n\n## body\n${GOAL_BODY}\n`,
+    "utf8"
+  );
   assert.equal(s.isGoalAchieved("GOAL-010"), false, "no ACs → not achieved");
   let chk = s.checkWithinCap();
   assert.equal(chk.withinCap, true);
@@ -187,6 +235,7 @@ test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withi
   assert.equal(chk.activeCount, 1);
   assert.equal(chk.cap, 3);
   assert.deepEqual(chk.active, ["GOAL-010"]);
+  seedAc(s, "GOAL-011");
   s.write("GOAL-011", { title: "p11", status: "active", origin: "o", disposeOld: { id: "GOAL-010", to: "achieved" }, body: GOAL_BODY });
   chk = s.checkWithinCap();
   assert.equal(chk.withinCap, true);
@@ -239,6 +288,7 @@ test("AC2 — an AC with an EMPTY criterion fails closed (red), and the CLI reco
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
+  spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "AC-901", "--title", "seeded exit condition", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "test fixture", "--expect", EXPECT])], { encoding: "utf8" });
   spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY])], { encoding: "utf8" });
   // AC-020 has NO criterion — now unrepresentable via write() (gap-goal-record-completeness-undefined
   // requires criterion+expect for criterion records), so hand-write a legacy file to keep the gate’s
@@ -259,6 +309,7 @@ test("AC3 — a goal gate run leaves a verdict+timestamp event in .quay/gate-eve
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const g = runCli(["gate", "AC-028", "--root", root]);
@@ -283,7 +334,10 @@ test("goal-store list/get/write round-trip through the CLI (invoke surface)", ()
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  // ⚠️ `--status draft`: this test counts records (list.length === 1), and a live GOAL now needs a
+  // naming AC first (gap-goal-create-as-active-skips-zero-ac-gate) — the round-trip v1 surface is
+  // the subject here, not activation legality.
+  n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
   const list = JSON.parse(n(["list"]).stdout);
   assert.equal(list.length, 1);
   assert.equal(list[0].id, "GOAL-001");
@@ -315,10 +369,15 @@ test("migration completeness — AC143..AC155 and AC156..AC169 each have exactly
 // is the actionable info a booleanized "over cap" would drop).
 test("AC-3 — cap=2: a 3rd active GOAL is REJECTED and the error names both current holders", () => {
   const s = createGoalStore(tmpDir("ac3-cap"), { cap: 2 });
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  seedAc(s, "GOAL-002");
   s.write("GOAL-002", { title: "p2", status: "active", origin: "o", body: GOAL_BODY });
   let caught = null;
   try {
+    // ⚠️ GOAL-003 must clear P6-goal first — otherwise its rejection would arrive INSTEAD of the cap
+    // rejection and this negative control would stop measuring the cap (error ORDER, not error text).
+    seedAc(s, "GOAL-003");
     s.write("GOAL-003", { title: "p3", status: "active", origin: "o", body: GOAL_BODY });
   } catch (err) {
     caught = err;
@@ -332,8 +391,16 @@ test("AC-3 — cap=2: a 3rd active GOAL is REJECTED and the error names both cur
 // AC-4 negative control: a zero-AC GOAL is notEvaluated — never "fresh" (judging an unevaluated
 // object healthy, hard rule 3b) and never "stale" (a just-created goal is not yet overdue).
 test("AC-4 — a zero-AC GOAL is notEvaluated (never fresh, never stale)", () => {
-  const s = createGoalStore(tmpDir("ac4-stale"));
-  s.write("GOAL-001", { title: "bare", status: "active", origin: "o", body: GOAL_BODY });
+  const dir4 = tmpDir("ac4-stale");
+  const s = createGoalStore(dir4);
+  // ⚠️ A zero-AC ACTIVE goal is no longer WRITABLE (gap-goal-create-as-active-skips-zero-ac-gate).
+  // `checkStaleness` is a READER and the state it must still dispose of is the one a pre-fix record
+  // (GOAL-018, 2026-09-14) left on disk — so construct the record directly.
+  fs.writeFileSync(
+    path.join(dir4, "GOAL-001-bare.md"),
+    `---\nid: GOAL-001\ntitle: bare\nstatus: active\nkind: goal\nbody: >-\n  ${GOAL_BODY}\norigin: o\n---\n\n## body\n${GOAL_BODY}\n`,
+    "utf8"
+  );
   const r = s.checkStaleness(Date.now());
   assert.deepEqual(r.fresh, [], "zero-AC must not be fresh");
   assert.deepEqual(r.stale, [], "zero-AC must not be stale");
@@ -350,6 +417,7 @@ test("AC-5 — cap/stale read from .quay/config.yml (change config → check fol
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
 
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), "goals:\n  cap: 2\n  stale: 3d\n", "utf8");
@@ -367,6 +435,7 @@ test("AC-5 — cap/stale read from .quay/config.yml (change config → check fol
 // reported as `divergent` by checkStaleness.
 test("AC-6 — I4: status=active with all ACs achieved reports divergence", () => {
   const s = createGoalStore(tmpDir("ac6-divergence"));
+  seedAc(s, "GOAL-010", { status: "achieved" });
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
@@ -385,6 +454,7 @@ test("AC-6 — I4: status=active with all ACs achieved reports divergence", () =
 
 test("I5 — an achieved AC whose criterion now fails lands in checkAchievedFailing (separate from divergent)", () => {
   const s = createGoalStore(tmpDir("i5-achfail"));
+  seedAc(s, "GOAL-010", { status: "achieved" });
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o", expect: EXPECT });
@@ -401,6 +471,7 @@ test("I5 — an achieved AC whose criterion now fails lands in checkAchievedFail
 
 test("I5 bidirectional — criterion fail→pass moves the AC out of checkAchievedFailing", () => {
   const s = createGoalStore(tmpDir("i5-bidir"));
+  seedAc(s, "GOAL-010", { status: "achieved" });
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-020", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o", expect: EXPECT });
   s.write("AC-021", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
@@ -420,6 +491,7 @@ test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC,
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-010", { status: "achieved" });
   n(["write", "GOAL-010", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-020", "--title", "achieved-but-failing", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
   n(["write", "AC-021", "--title", "still-active", "--status", "active", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
@@ -474,6 +546,7 @@ test("AC1 — gate 不写 evidence：两次 gate 后该文件提交数不变（�
   const { root, run } = gitRepo("ac1");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   // The file's commits come from `write` (creation), NEVER from gate — evidence is no longer stored.
@@ -493,6 +566,7 @@ test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数�
   const { root, run } = gitRepo("ac2");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // Criterion reads a flag file: absent → fail; present → pass. Deterministic flip.
   n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
@@ -511,6 +585,7 @@ test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提
   const { root, run } = gitRepo("ac3");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-030", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const before = acFileCommitCount(root, run, "AC-030");
@@ -524,6 +599,7 @@ test("AC4 — N 次 gate（含 1 次 verdict flip）⇒ 恰 0 个提交：gate �
   const { root, run } = gitRepo("ac4");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
   // Simulate the 42s cadence burst: one first fail gate + 3 no-change fail gates, then a flip.
@@ -553,6 +629,7 @@ test("AC1 (evidence-out-of-git) — gate 后文件逐字节不变", () => {
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("AC-028-"));
@@ -570,6 +647,7 @@ test("AC2 (evidence-out-of-git) — lastProgressAt 与 get evidence 都取自账
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const g = runCli(["gate", "AC-028", "--root", root]);
@@ -610,6 +688,7 @@ test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdi
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
   // fail → get 立刻反映 fail。
@@ -673,6 +752,7 @@ test("AC2 — 0 active goal: checkStaleness 报 evaluated:false + scopeSize:0", 
 
 test("AC4 — 负控制：1 active goal + achieved AC ⇒ checkAchievedFailing 报 evaluated:true + scopeSize>0", () => {
   const s = createGoalStore(tmpDir("nonempty-af"));
+  seedAc(s, "GOAL-010");
   s.write("GOAL-010", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-010", { title: "a", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   const af = s.checkAchievedFailing();
@@ -683,6 +763,7 @@ test("AC4 — 负控制：1 active goal + achieved AC ⇒ checkAchievedFailing �
 
 test("AC4 — 负控制：1 active goal ⇒ checkStaleness 报 evaluated:true + scopeSize>0", () => {
   const s = createGoalStore(tmpDir("nonempty-stale"));
+  seedAc(s, "GOAL-010");
   s.write("GOAL-010", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-010", { title: "a", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   const r = s.checkStaleness(Date.now());
@@ -703,6 +784,7 @@ test("AC1 (P1) — update 省略 --origin 保留原值；create 省略 --origin 
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "2026-09-09 human basis", "--body", GOAL_BODY]);
   // 正向：既有记录 update 不传 --origin ⇒ exit 0 且 origin 逐字保留。
   const up = n(["write", "GOAL-001", "--title", "p renamed"]);
@@ -721,6 +803,7 @@ test("AC3 (P4/P5) — update --criterion \"\" 被拒；status-only 放行（机�
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   // 正向：update 清空 criterion ⇒ exit≠0（旧代码 exit 0 静默写成空串）。
@@ -738,6 +821,7 @@ test("AC4 (P6) — 激活不可评估 criterion 的 AC 被拒（stderr 含 not-e
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // 一条 draft 且无 criterion 的遗留 AC（不可评估）。
   fs.writeFileSync(path.join(root, "goals", "AC-020-legacy.md"),
@@ -761,6 +845,7 @@ test("AC1 (P6 reopen) — achieved→active 触发可评估性闸：不可评估
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // 方向①放行：一条已 achieved、判据 exit≠0（`false`）的 AC——确定性判决 ⇒ 可评估 ⇒ 重开放行。
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
@@ -781,6 +866,7 @@ test("AC4 (P6 create) — create-as-active 不过闸（无 'criterion ran' 痕�
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // 新建即 active（prevStatus === undefined）⇒ 不过闸：闸的两种可见副作用（stderr 的 "criterion ran"
   // 痕迹 + 记录里的 fidelity 字段）都不出现。改动前 `activating` 的 create-as-active 豁免被保留。
@@ -794,6 +880,7 @@ test("AC4 (P6 create) — create-as-active 不过闸（无 'criterion ran' 痕�
 
 test("AC5 (P3) — draft→active 写 activatedAt + statusLog；title-only 不追加 statusLog", () => {
   const s = createGoalStore(tmpDir("ac5-p3"));
+  seedAc(s, "GOAL-001");
   s.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
   s.write("AC-001", { title: "a", status: "draft", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-001", { status: "active" }); // draft→active
@@ -839,6 +926,7 @@ test("AC6 (P9) — write --dry-run exit 0 ∧ goals/ 无新增变化 ∧ 记录�
 test("AC1 — 已存在的 active GOAL + `--expect-absent`（create 意图）⇒ 非零退出 + 文件未被改动（事故重放）", () => {
   const { root, run } = gitRepo("intent-ac1");
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-013");
   n(["write", "GOAL-013", "--title", "original title", "--status", "active", "--origin", "original origin", "--body", GOAL_BODY]);
   const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("GOAL-013-"));
   const before = run("hash-object", `goals/${file}`).trim();
@@ -853,6 +941,7 @@ test("AC1 — 已存在的 active GOAL + `--expect-absent`（create 意图）⇒
 
 test("AC1 library — 已存在记录 + intent 'absent' 抛 GoalIntentConflictError（instanceof 可捕获）", () => {
   const s = createGoalStore(tmpDir("intent-ac1-lib"));
+  seedAc(s, "GOAL-013");
   s.write("GOAL-013", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
   let caught = null;
   try {
@@ -906,6 +995,7 @@ test("AC3 — 未声明意图时 create/update 的落痕可区分（提交 subje
 test("AC4 — status-only flip 不传意图声明仍 exit 0（goal-driver 机械 flip 不回归）", () => {
   const { root } = gitRepo("intent-ac4");
   const n = (cmd) => runCli([...cmd, "--root", root]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const flip = n(["write", "AC-001", "--status", "achieved"]); // no --origin, no intent
@@ -926,6 +1016,7 @@ test("AC-longterm-1 — `--long-term true` 写入并经 get 回读 longTerm===tr
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
   assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, false, "前置：未声明时 longTerm 为 false");
@@ -942,6 +1033,7 @@ test("AC-longterm-2 — `--long-term false` 是【显式清除】而非 no-op（
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT, "--long-term", "true"]);
   assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "前置：已声明");
@@ -959,6 +1051,7 @@ test("AC-longterm-3 — `--long-term yes` ⇒ exit 2 且不落任何变更（⛔
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
   for (const bad of ["yes", "1", "TRUE", ""]) {
@@ -975,6 +1068,7 @@ test("AC-longterm-3 — `--long-term yes` ⇒ exit 2 且不落任何变更（⛔
 test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subject 点名 long-term（可归因）", () => {
   const { root, run } = gitRepo("longterm-create");
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
   const flip = n(["write", "AC-001", "--long-term", "true"]);
@@ -995,10 +1089,13 @@ test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subje
 test("AC-reverify-1 — checkReverifyScope annotates each in-scope AC with goal / goalStatus / longTerm", () => {
   const s = createGoalStore(tmpDir("reverify1"));
   // GOAL-001 stays ACTIVE ⇒ its achieved AC is in scope via the FIRST branch of the predicate.
-  s.write("GOAL-001", { title: "active goal", status: "active", origin: "o", body: GOAL_BODY });
+  // ⚠️ Two-step (draft → AC → activate): born-active is no longer writable, and ⛔ no `seedAc` here —
+  // this test deepEquals the whole scope, so an extra AC would be noise.
+  s.write("GOAL-001", { title: "active goal", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("AC-001", { title: "under an active goal", status: "achieved", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("GOAL-001", { status: "active" });
   // GOAL-002 is CLOSED ⇒ its ACs leave the scope unless each carries `long-term: true`.
-  s.write("GOAL-002", { title: "closed goal", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-002", { title: "closed goal", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("AC-002", { title: "leaves with its GOAL", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-003", { title: "standing guarantee", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
   s.write("GOAL-002", { status: "achieved" });
@@ -1028,6 +1125,7 @@ test("AC-reverify-2 — a ruling that did not land as a field is reported; writi
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "closed", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   n(["write", "GOAL-001", "--status", "achieved"]);
@@ -1061,6 +1159,10 @@ test("AC-reverify-3 — the REVERSE error (ruled one-time yet still in scope) is
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
+  // ⚠️ The seeded exit condition is required to reach `active` at all
+  // (gap-goal-create-as-active-skips-zero-ac-gate); it is unruled, so it never enters the
+  // 「ruled one-time but still in scope」bucket this test reads.
+  seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "active", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const table = path.join(root, "adjudication.md");
@@ -1092,7 +1194,9 @@ test("AC-reverify-5 — the CLI reports NOT-EVALUATED (exit 3) when the scope is
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
-  n(["write", "GOAL-001", "--title", "active", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  // ⚠️ `--status draft`, ⛔ no seeded AC: this test asserts scopeSize === 0, and a live GOAL now
+  // requires a naming AC first — the subject here is the EMPTY-scope reading, not activation legality.
+  n(["write", "GOAL-001", "--title", "active", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
   n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const r = n(["check", "--reverify-scope"]);
   // An unachieved AC is not in the I5 scope at all, so nothing was evaluated: "empty" must be

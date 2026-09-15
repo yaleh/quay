@@ -31,7 +31,7 @@ criterion: |-
       if r.get("goals_dir_created") is not True or r.get("tasks_dir_created") is not True: continue
       if r.get("goal_store_readable") is not True or r.get("task_store_readable") is not True: continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-206 fail - no carrier record ac=GOAL-009-AC-206 with host other than this host, goals_dir_created and tasks_dir_created true, both stores readable\n"); sys.exit(1)
   P
 expect: exit 0 = SPEC 闭集块含 goals/ ∧ CLOSED_SET_DIRS 含 goals ∧ quay-init.sh 真的
   mkdir goals/ ∧ 载体中存在 ac=GOAL-009-AC-206 的记录（host≠本机、非本仓库项目、两目录均创建、两 store

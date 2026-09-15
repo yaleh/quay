@@ -224,14 +224,30 @@ test("AC5 zero-writer detection reproduces the inner-agent-budget shape (fixture
 });
 
 // ── 真实生产载体路径（AC3「读生产载体」——fixture 只证明能产出，这个证明已产出） ──────────────────────
-test("AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces manager re-checks", { timeout: 120_000 }, () => {
+test("AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces manager re-checks", { timeout: 120_000 }, (t) => {
   const audit = getAudit();
   // 生产树断言（稳定量，不依赖具体计数）：
   assert.ok(audit.doneTaskCount > 1000, `done tasks = ${audit.doneTaskCount}`);
   assert.ok(audit.prodRoot, "production root resolved");
   // 判据6：谓词自检命中非空
   assert.ok(audit.predicateHit, `predicate hit must be present, got ${audit.predicateHit}`);
-  assert.ok(audit.predicateHit.includes("verification-round.jsonl"), audit.predicateHit);
+  // 自检的语义是「find 谓词本身有效 ⇒ 一个 NOT-FOUND 是真缺失而非定位器坏了」。可移植的判法是
+  // 【交叉核对自检命中的载体确实被本次报告标为 found】——这与 checkout 上恰好存在哪些载体无关。
+  // 原断言写死 `includes("verification-round.jsonl")`，那是**载体枚举顺序 + 该载体恰好存在**的
+  // 派生物：全新 checkout 上首个被定位到的载体是别的（CI 实测
+  // `checker-cost.jsonl@/home/runner/work/quay/quay/.quay/checker-cost.jsonl`），本机则是
+  // verification-round（Class A 的失败根因之一）。
+  const hitAt = audit.predicateHit.indexOf("@");
+  const hitName = audit.predicateHit.slice(0, hitAt);
+  const hitPath = audit.predicateHit.slice(hitAt + 1);
+  const hitCarrier = audit.carriers.find((r) => r.name === hitName);
+  assert.ok(hitCarrier, `predicateHit must name a carrier this audit reports: ${hitName}`);
+  // 独立核对（非自证）：自检点名的那个路径必须真的在盘上——这条不依赖报告自己的 found 字段。
+  assert.ok(fs.existsSync(hitPath), `predicateHit must name a path that exists on disk: ${hitPath}`);
+  // 该载体在场时，自检必须仍命中它（长寿命检出上的原有强度不变）。
+  if (fs.existsSync(path.join(audit.prodRoot, ".quay", "verification-round.jsonl"))) {
+    assert.ok(audit.predicateHit.includes("verification-round.jsonl"), audit.predicateHit);
+  }
 
   const byName = (n) => audit.carriers.find((r) => r.name === n);
   // 判据2：三态独立取值
@@ -262,20 +278,32 @@ test("AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces m
   assert.equal(budget.disposition, DISPOSITIONS.RETIRED);
   assert.equal(budget.threeState, THREE_STATES.NOT_EVALUATED);
 
-  // 活载体 sanity：verification-round.jsonl 存在且有数据（①），gate-events.jsonl 亦然。
-  const vr = byName("verification-round.jsonl");
-  assert.ok(vr, "verification-round.jsonl in report");
-  assert.equal(vr.threeState, THREE_STATES.HAS_DATA);
-  assert.ok(vr.found, "verification-round.jsonl is found on disk");
-  assert.ok(vr.recordCount > 0);
-
-  const ge = byName("gate-events.jsonl");
-  assert.ok(ge, "gate-events.jsonl in report");
-  assert.equal(ge.threeState, THREE_STATES.HAS_DATA);
-
   // 计数结构：三态计数之和 == 报告载体数（无遗漏）。
   const sum = audit.counts.HAS_DATA + audit.counts.ZERO_DATA + audit.counts.NOT_EVALUATED;
   assert.equal(sum, audit.carriers.length);
+
+  // ── 以下断言需要【真实运行时载体】在场（`verification-round.jsonl` / `gate-events.jsonl` 是
+  // gitignored 的运行产物）。全新 checkout（CI runner / 首次 clone）上它们根本不存在
+  // ——这正是本测试在 GitHub Actions 上失败的根因（Class A）。
+  // 硬规则 3b：此时抛 AssertionError 会把「没有输入」伪装成「检查失败」。
+  // 故给「无法评估」独立取值（t.skip），且跳过键在【载体缺席】上、不在【断言失败】上
+  // ——载体在场时下面的断言照跑，回归防护分毫未减（DoD：不得为了变绿而放宽断言）。
+  const vr = byName("verification-round.jsonl");
+  assert.ok(vr, "verification-round.jsonl in report");
+  const ge = byName("gate-events.jsonl");
+  assert.ok(ge, "gate-events.jsonl in report");
+  if (!vr.found || !ge.found) {
+    t.skip(
+      `NOT-EVALUATED: 生产运行时载体缺席（verification-round.jsonl found=${vr.found}, gate-events.jsonl found=${ge.found}）` +
+      ` at prodRoot=${audit.prodRoot} —— 全新 checkout 的正常形态；上面全部结构/分类判据已跑过，仅「载体有数据」这一组无输入可判`,
+    );
+    return;
+  }
+
+  // 活载体 sanity：verification-round.jsonl 存在且有数据（①），gate-events.jsonl 亦然。
+  assert.equal(vr.threeState, THREE_STATES.HAS_DATA);
+  assert.ok(vr.recordCount > 0);
+  assert.equal(ge.threeState, THREE_STATES.HAS_DATA);
 });
 
 test("AC1 explicit carriers are always reported even at zero position-based refs", () => {

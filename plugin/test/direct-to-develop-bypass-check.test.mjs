@@ -21,6 +21,18 @@
 // ⛔ cddc55e2（原 ruled 样本）现因 init/ 入排除集变全设计内——code-surface 锚失效，改用 8e024f88
 // （plugin/test/outer-cron-registry.test.mjs 仍代码面）作 ruled 样本，保持「ruled 豁免仍代码面可见」不变式。
 //
+// 落地词汇表按结构判定（gap-ac194-reflog-action-vocabulary-incomplete）：旧 `isReflogFanIn` 是**拼法
+// 白名单**（`push` | `/Fast-forward/`），生产出现第三种 ref-level 落地拼法 `branch: Reset to` 时它结构上
+// 不可能发现 ⇒ 两条 tip 落进 unclassifiable ⇒ 硬规则③b ⇒ AC-194 恒 fail。本文件现钉住：
+//   · PURE `classifyReflogAction` 三态（direct = action 以 commit 开头；refMove = 六种实测 ref-level
+//     拼法，逐条贴探针原文；unknown = 其余 ⇒ fail-closed）；
+//   · PURE `reflogActionForm`（reason 点名用的形）与 `buildRefMoveBrackets`（含「unknown 不产 tip」）；
+//   · CLI `branch: Reset to` 落地代码面 ⇒ GREEN 且 `classification.refMoveIntroduced` 逐条可见
+//     （sha + code-surface 标记，⛔ 不并入 fan-in 计数）；
+//   · CLI 未知 action 形 ⇒ exit 3 且 reason 逐字点名该形（旧版只报 unclassifiable-commits-in-range 计数）；
+//   · CLI rewind（P 非 T 祖先）⇒ 不计为「带入 commit 的落地」，单列 `nonForwardRefMoves`（引入集为空）；
+//   · CLI `commit:` action 的 code-surface 直投仍 RED（放宽词汇表不得漏掉真直投）。
+//
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
 //   node --test plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -49,10 +61,11 @@ import {
   findRuledHistoricalEntry,
   extractFanInLandedShas,
   isReflogDirectCommit,
+  classifyReflogAction,
+  reflogActionForm,
   buildReflogIndex,
   classifyLandingMode,
-  isReflogFanIn,
-  buildFanInBrackets,
+  buildRefMoveBrackets,
   classifySpineLandingMode,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
@@ -671,11 +684,23 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED�
   assert.equal(out.reason, "unclassifiable-commits-in-range");
   assert.ok(out.unclassifiableCommits > 0, "基线区间内存在 ledger 无记录且 reflog 也查不到的 commit");
   assert.ok(out.denominator.unclassifiableCommits > 0, "denominator 同步暴露 unclassifiable 计数");
-  // AC4：分类覆盖率可读数——classified/total/ratio 且 0 < ratio < 1（部分可分类）。
+  // AC4：分类覆盖率可读数——classified/total/ratio。⚠️ 下界是【检出 reflog 深度】的代理量，不是
+  // 检查器的性质（硬规则 4b）：基线区间 ~5376 条 commit 里能分类的条数，取决于本检出的 reflog
+  // 是否还记得它们。实测（`git init` + fetch 单 ref + `checkout -B`，即 actions/checkout@v4 的
+  // 机制）：区间 5376 条中**恰好 1 条**可分类（ratio 0.019%），而 CI 的 checkout 机制把它压到 0
+  // ⇒ 原断言 `ratio > 0` 在全新 checkout 上恒假（Class D 的失败根因：`部分可分类 ⇒ 0 < ratio < 1`）。
+  // 本测试的**主张**是「reflog 被剪 ⇒ NOT-EVALUATED，不伪装成『未发现 direct』」，由上方的
+  // exit 3 / evaluated:false / reason / unclassifiable>0 / ratio<1 与下面的结构一致性完整覆盖。
+  // 故：检出带生产状态（fan-in ledger 在场 ⇒ reflog/ledger 有东西可分类）时保留原强度 `ratio > 0`；
+  // 全新 checkout 上只保留真正的判据 `ratio < 1`（= 并非全部可分类 ⇒ NOT-EVALUATED 是真被举起）。
   assert.equal(typeof out.classification, "object", "输出必须带 classification 对象");
   assert.ok(out.classification.total > 0, "total 为 rev-list 命中条数");
   assert.equal(out.classification.classified, out.classification.total - out.unclassifiableCommits, "classified = total − unclassifiable");
-  assert.ok(out.classification.ratio > 0 && out.classification.ratio < 1, "部分可分类 ⇒ 0 < ratio < 1");
+  assert.ok(out.classification.ratio < 1, "并非全部可分类 ⇒ NOT-EVALUATED 不是伪装的 PASS");
+  const hasProductionState = fs.existsSync(path.join(REPO_ROOT, ".quay", "fan-in-merge-lock-events.jsonl"));
+  if (hasProductionState) {
+    assert.ok(out.classification.ratio > 0, "生产状态下部分可分类 ⇒ 0 < ratio（检出带 ledger/reflog 材料时才可判）");
+  }
   assert.equal(out.denominator.totalScannedCommits, out.classification.total, "denominator 同步 totalScannedCommits");
   assert.equal(out.denominator.classifiedCommits, out.classification.classified, "denominator 同步 classifiedCommits");
 });
@@ -968,37 +993,94 @@ test("PURE classifyLandingMode — ledger ⇒ fan-in；reflog direct ⇒ direct�
 // 落进 unclassifiable ⇒ AC-194 `expect: exit 0` 结构上不可达。修法：只扫 first-parent spine（off-spine
 // 结构上非直投），对 spine 上无 reflog 条目的中间 commit 用 fan-in 括注 [P, T] 判 fan-in delivered。
 
-test("PURE isReflogFanIn — push / merge … Fast-forward 是 fan-in 落地；commit/reset/rebase 不是", () => {
-  assert.equal(isReflogFanIn("push"), true, "git push . src:develop 落地 = fan-in");
-  assert.equal(isReflogFanIn("merge task/gap-x: Fast-forward"), true, "git merge --ff-only 落地 = fan-in");
-  assert.equal(isReflogFanIn("merge author: Fast-forward"), true);
-  assert.equal(isReflogFanIn("commit: direct"), false, "直接提交不是 fan-in 落地");
-  assert.equal(isReflogFanIn("commit (amend): x"), false);
-  assert.equal(isReflogFanIn("reset: moving to HEAD~1"), false, "reset 既非直投也非 fan-in 落地");
-  assert.equal(isReflogFanIn("rebase (finish): returning to refs/heads/develop"), false);
-  assert.equal(isReflogFanIn("checkout: moving from x to develop"), false);
-  assert.equal(isReflogFanIn(""), false);
-  assert.equal(isReflogFanIn(null), false);
+// ── 落地词汇表按结构判定（gap-ac194-reflog-action-vocabulary-incomplete）───────────────────────────
+// 缺陷：旧 `isReflogFanIn` 是**拼法白名单**（`push` | `/Fast-forward/`）。生产出现第三种落地拼法
+// `branch: Reset to HEAD`（`git branch -f develop <t>`）⇒ 落在 unclassifiable ⇒ 硬规则③b fail-closed
+// ⇒ AC-194 `expect: exit 0` 结构上不可达。旧断言 `isReflogFanIn("reset: moving to HEAD~1")===false`
+// 逐字钉住旧词汇——对「生产会写出第三种拼法」结构上不可能发现（硬规则④推论三：只能被 fixture 满足的
+// 判据不是测量）。⇒ 改为按结构判定 + 逐条钉住**探针实测原文**（⛔ 无凭记忆字面量）。
+
+test("PURE classifyReflogAction — 结构判定：commit 前缀 ⇒ direct；把 ref 移到已存在 commit 的形 ⇒ refMove；其余 ⇒ unknown", () => {
+  // direct：在 develop 上**创建** commit（探针实测原文，git 2.43.0）
+  assert.equal(classifyReflogAction("commit: direct"), "direct");
+  assert.equal(classifyReflogAction("commit (initial): c1"), "direct");
+  assert.equal(classifyReflogAction("commit (amend): x"), "direct");
+  assert.equal(classifyReflogAction("commit (merge): Merge made by the 'ort' strategy."), "direct");
+  // refMove：把 ref 移到**已存在的** commit —— 六种实测拼法，全部落同一边，⛔ 不是白名单
+  assert.equal(classifyReflogAction("push"), "refMove", "git push . <src>:<dst>");
+  assert.equal(classifyReflogAction("merge task/gap-x: Fast-forward"), "refMove", "git merge --ff-only <b>");
+  assert.equal(classifyReflogAction("merge author: Fast-forward"), "refMove");
+  assert.equal(classifyReflogAction("branch: Reset to HEAD"), "refMove", "git branch -f <已存在 b> HEAD（本任务的生产拼法）");
+  assert.equal(classifyReflogAction("branch: Reset to 4c789a55dced9a1561115054efc63172a9216fc8"), "refMove", "git branch -f <已存在 b> <sha>（实测原文：git 保留命令行传入的字面量）");
+  assert.equal(classifyReflogAction("branch: Created from HEAD"), "refMove", "git branch <新 b> <target> ⇒ 也只是指向已存在 commit");
+  assert.equal(classifyReflogAction("reset: moving to 4f731764c5f394f5cc465b3f84053abeda3b7c48"), "refMove", "git reset --hard <sha>（b 已检出）");
+  assert.equal(classifyReflogAction("fetch -q . f21c1721852fdd7857dbd7e4e354822d9d56061e:refs/heads/dst2: storing ref"), "refMove", "git fetch . <src>:<dst>");
+  // unknown：读不懂的形 ⇒ fail-closed（⛔ 不与合格同形，硬规则③b）
+  assert.equal(classifyReflogAction("rebase (finish): returning to refs/heads/develop"), "unknown");
+  assert.equal(classifyReflogAction("checkout: moving from x to develop"), "unknown");
+  assert.equal(classifyReflogAction("merge side: Merge made by the 'ort' strategy."), "unknown", "非 ff merge **创建**了 merge commit，但 action 形读不懂 ⇒ unknown（fail-closed，⛔ 不洗成 refMove）");
+  assert.equal(classifyReflogAction("bogus-action-form"), "unknown", "任意 update-ref -m 文本（无 `前缀: rest` 形）");
+  assert.equal(classifyReflogAction(""), "unknown", "git update-ref 无 -m ⇒ 空 gs");
+  assert.equal(classifyReflogAction(null), "unknown");
+  assert.equal(classifyReflogAction(undefined), "unknown");
 });
 
-test("PURE buildFanInBrackets — faninTips + 括注对（T=tip, P=前一条更旧）；最老条目无前一条 ⇒ 不产括注", () => {
-  const { faninTips, brackets } = buildFanInBrackets([
+test("PURE reflogActionForm — 点名根因用的 action 形（取前缀；无前缀形取整串；空 ⇒ (empty)）", () => {
+  assert.equal(reflogActionForm("reset: moving to HEAD~1"), "reset");
+  assert.equal(reflogActionForm("branch: Reset to HEAD"), "branch");
+  assert.equal(reflogActionForm("commit (amend): x"), "commit (amend)");
+  assert.equal(reflogActionForm("bogus-action-form"), "bogus-action-form");
+  assert.equal(reflogActionForm(""), "(empty)");
+  assert.equal(reflogActionForm(null), "(empty)");
+});
+
+test("PURE isReflogDirectCommit 消费 classifyReflogAction（判定只留一份，⛔ 不再自持拼法谓词）", () => {
+  assert.equal(isReflogDirectCommit("commit: direct"), true);
+  assert.equal(isReflogDirectCommit("commit (merge): x"), true);
+  assert.equal(isReflogDirectCommit("push"), false);
+  assert.equal(isReflogDirectCommit("branch: Reset to HEAD"), false, "refMove 不是直投");
+  assert.equal(isReflogDirectCommit("bogus-action-form"), false);
+  assert.equal(isReflogDirectCommit(""), false);
+  assert.equal(isReflogDirectCommit(null), false);
+});
+
+test("PURE buildRefMoveBrackets — refMoveTips + 括注对（T=tip, P=前一条更旧）；最老条目无前一条 ⇒ 不产括注", () => {
+  const { refMoveTips, brackets } = buildRefMoveBrackets([
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tpush",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tmerge task/gap-x: Fast-forward",
     "cccccccccccccccccccccccccccccccccccccccc\tcommit: direct",
   ]);
-  assert.ok(faninTips.has("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-  assert.ok(faninTips.has("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
-  assert.ok(!faninTips.has("cccccccccccccccccccccccccccccccccccccccc"), "commit 不是 fanin tip");
+  assert.ok(refMoveTips.has("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+  assert.ok(refMoveTips.has("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+  assert.ok(!refMoveTips.has("cccccccccccccccccccccccccccccccccccccccc"), "commit 不是 refMove tip");
   assert.equal(brackets.length, 2);
   assert.deepEqual(brackets[0], { T: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", P: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, "newest 括注 P=前一条（更旧）");
   assert.deepEqual(brackets[1], { T: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", P: "cccccccccccccccccccccccccccccccccccccccc" });
-  // 最老 fanin 条目（无前一条）⇒ 不产括注（其「之前」超出 reflog 保留，不可分类——硬规则③b）
-  const solo = buildFanInBrackets(["zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\tpush"]);
-  assert.ok(solo.faninTips.has("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+  // 第三种拼法（本任务的生产形态）也是 refMove tip——旧白名单在这里失明。
+  const br = buildRefMoveBrackets([
+    "dddddddddddddddddddddddddddddddddddddddd\tbranch: Reset to HEAD",
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\tpush",
+  ]);
+  assert.ok(br.refMoveTips.has("dddddddddddddddddddddddddddddddddddddddd"), "branch: Reset to 是 refMove tip（旧 isReflogFanIn 判 false）");
+  assert.deepEqual(br.brackets[0], { T: "dddddddddddddddddddddddddddddddddddddddd", P: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" });
+  // 读不懂的形不产 tip（⇒ 其 sha 落进 unclassifiable，fail-closed）；夹在中间的 unknown 形仍然充当
+  // 后一条 refMove 的 P（括注 P = 前一条 reflog 条目，不要求它自己是 refMove）。
+  const unk = buildRefMoveBrackets([
+    "dddddddddddddddddddddddddddddddddddddddd\tpush",
+    "ffffffffffffffffffffffffffffffffffffffff\tbogus-action-form",
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\tpush",
+  ]);
+  assert.ok(!unk.refMoveTips.has("ffffffffffffffffffffffffffffffffffffffff"), "unknown 形不产 refMove tip");
+  assert.ok(unk.refMoveTips.has("dddddddddddddddddddddddddddddddddddddddd"));
+  assert.ok(unk.refMoveTips.has("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"));
+  assert.equal(unk.brackets.length, 1, "只有 dddd 那条产括注（eeee 是最老条目、无前一条）");
+  assert.deepEqual(unk.brackets[0], { T: "dddddddddddddddddddddddddddddddddddddddd", P: "ffffffffffffffffffffffffffffffffffffffff" }, "unknown 条目仍可作 P");
+  // 最老 refMove 条目（无前一条）⇒ 不产括注（其「之前」超出 reflog 保留，不可分类——硬规则③b）
+  const solo = buildRefMoveBrackets(["zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\tpush"]);
+  assert.ok(solo.refMoveTips.has("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
   assert.equal(solo.brackets.length, 0, "最老条目无前一条 ⇒ 不产括注");
-  assert.equal(buildFanInBrackets([]).brackets.length, 0);
-  assert.equal(buildFanInBrackets(null).faninTips.size, 0);
+  assert.equal(buildRefMoveBrackets([]).brackets.length, 0);
+  assert.equal(buildRefMoveBrackets(null).refMoveTips.size, 0);
 });
 
 test("PURE classifySpineLandingMode — ledger/direct/faninTips/括注覆盖 ⇒ fan-in|direct；否则 unclassifiable", () => {
@@ -1309,6 +1391,155 @@ test("NEGATIVE CONTROL on the REGISTERED argv: a code-surface direct commit to d
     gitCmd(dir, "reset", "-q", "--hard", "HEAD~1");
     const restored = runRegisteredFlags("direct-to-develop-bypass-check", "run_static_checks", dir);
     assert.equal(restored.status, 0, `RESTORE must return to GREEN:\n${restored.stdout}${restored.stderr}`);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── 落地词汇表按结构判定：CLI 级负控制（gap-ac194-reflog-action-vocabulary-incomplete AC2/AC3/AC5/AC6）──
+// 探针实测原文（git 2.43.0，逐条在 /tmp 临时仓库跑出，⛔ 无凭记忆字面量）：
+//   git branch -f <已存在 b> HEAD   → `branch: Reset to HEAD`        ← 本任务的生产拼法（AC1 的根因）
+//   git branch -f <已存在 b> <sha>  → `branch: Reset to <sha>`
+//   git branch <新 b> <target>      → `branch: Created from <target>`
+//   git update-ref -m <msg> <ref> <sha> → `<msg>`（任意文本 ⇒ unknown，fail-closed）
+// ⚠️ `git branch -f <b>` 只在 <b> **未被任何 worktree 检出**时允许 ⇒ 夹具先 `git checkout --detach`。
+
+/** 建一个 base 为 design-internal 提交、且 `develop` **未被检出**的 repo（`git branch -f develop <t>`
+ *  只在该分支未被检出时可用——这正是生产上 develop 的落地形态：主检出检的是 author，不是 develop）。 */
+function makeForkedDevelopRepo(prefix) {
+  const dir = makeTmp(prefix);
+  gitCmd(dir, "init", "-q", "-b", "main");
+  gitCmd(dir, "config", "user.name", "d2d-test");
+  gitCmd(dir, "config", "user.email", "d2d@example.com");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", "base.md"), "base\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCommitFixed(dir, FIXED_PAST, "tasks: base");
+  gitCmd(dir, "branch", "develop");
+  return { dir, base: gitCmd(dir, "rev-parse", "HEAD").stdout.trim() };
+}
+
+/** 在当前分支（main）上提交一个代码面文件，返回其 sha。 */
+function commitCodeSurface(dir, name) {
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", name), "export const x = 1;\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", `feat: ${name}`);
+  return gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+}
+
+test("AC5 CLI — refMove 形（`branch: Reset to`）落地代码面 ⇒ GREEN 但**可见**：refMoveIntroduced 列出带入窗内的 sha + code-surface 标记", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-refmove");
+  try {
+    const tip = commitCodeSurface(dir, "x.ts");
+    gitCmd(dir, "checkout", "-q", "--detach"); // develop 不再被检出 ⇒ branch -f 可用
+    const bf = gitCmd(dir, "branch", "-f", "develop", tip);
+    assert.equal(bf.status, 0, `git branch -f develop 应成功: ${bf.stderr}`);
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    assert.match(reflog, /^branch: Reset to /, `夹具必须产出 branch: Reset to 形（实测原文）: ${reflog}`);
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    // ref-level 落地不创建 commit ⇒ 不是直投 ⇒ exit 0（与 fan-in 的 push / merge --ff-only 同类）。
+    assert.equal(r.status, 0, `refMove 落地不得判为直投: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.unclassifiableCommits, 0, "refMove tip 不再落进 unclassifiable（旧白名单在这里失明 ⇒ AC-194 恒 fail）");
+    assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+    // 可见而非静默豁免（AC5）：带入窗内的 first-parent sha 清单 + code-surface 标记。
+    assert.equal(out.classification.refMoveIntroduced.length, 1);
+    const rm = out.classification.refMoveIntroduced[0];
+    assert.equal(rm.tip, tip);
+    assert.deepEqual(rm.introduced.map((i) => i.sha), [tip], "带入窗内的 first-parent sha 清单");
+    assert.equal(rm.introduced[0].codeSurface, true, "plugin/scripts/x.ts 是 code-surface（可见）");
+    assert.ok(rm.introduced[0].files.includes("plugin/scripts/x.ts"), "code-surface 结论要能看到是哪个文件");
+    // ⛔ 不并入 fan-in 计数：直投分母仍为 0（refMove 是读数，不参与 RED/GREEN）。
+    assert.equal(out.denominator.totalDirectCommits, 0, "refMove 不得计入直投分母");
+    assert.equal(out.denominator.codeSurfaceCommits, 0);
+    assert.equal(out.denominator.unclassifiableCommits, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC2 CLI — 未知 action 形 ⇒ exit 3 且 reason **逐字点名**该形（旧版只报 unclassifiable-commits-in-range 计数 ⇒ 需事后反推）", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-unknownform");
+  try {
+    const tip = commitCodeSurface(dir, "y.ts");
+    gitCmd(dir, "checkout", "-q", "--detach");
+    const ur = gitCmd(dir, "update-ref", "-m", "bogus-action-form", "refs/heads/develop", tip);
+    assert.equal(ur.status, 0, `git update-ref 应成功: ${ur.stderr}`);
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    assert.match(reflog, /^bogus-action-form$/m, `夹具必须产出自定义的未知 action 形: ${reflog}`);
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    assert.equal(r.status, 3, `读不懂的 action 形必须 NOT-EVALUATED exit 3（⛔ 不得与合格同形/exit 0）: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, false, "硬规则③b：读不懂 ≠ 合格");
+    assert.equal(out.reason, "unsupported-reflog-action: bogus-action-form", "reason 必须逐字点名该 action 形（根因在失败那一刻可见）");
+    assert.equal(out.reasonSecondary, "unclassifiable-commits-in-range", "既有 reason 作为并列信息保留");
+    assert.equal(out.classification.unclassifiedActionForms.length, 1);
+    const uf = out.classification.unclassifiedActionForms[0];
+    assert.equal(uf.form, "bogus-action-form");
+    assert.equal(uf.count, 1);
+    assert.deepEqual(uf.sampleShas, [tip]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC6 CLI — rewind（`branch: Reset to <older>`，P 非 T 祖先）⇒ 不计为「带入 commit 的落地」，且单独可见", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-rewind");
+  try {
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", "c2.md"), "c2\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "tasks: c2");
+    const c2 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    fs.writeFileSync(path.join(dir, "tasks", "c3.md"), "c3\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "tasks: c3");
+    const c3 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "--detach");
+    gitCmd(dir, "branch", "-f", "develop", c3); // 前向
+    gitCmd(dir, "branch", "-f", "develop", c2); // 回退（rewind）
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    assert.equal(r.status, 0, `rewind 仍是 ref-level 落地（不创建 commit）⇒ 不报直投: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.classification.refMoveIntroduced.length, 0, "rewind 不得计为「带入了 commit 的落地」");
+    assert.equal(out.classification.nonForwardRefMoves.length, 1, "rewind 必须单独可见（⛔ 不是静默豁免）");
+    const nf = out.classification.nonForwardRefMoves[0];
+    assert.equal(nf.tip, c2, "T = 回退后的 tip");
+    assert.equal(nf.prev, c3, "P = 回退前的 tip（P 非 T 祖先）");
+    assert.deepEqual(nf.introduced, [], "引入集为空（rev-list --first-parent P..T 为空）");
+    assert.match(nf.reason, /rewind/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC3 CLI — `commit:` action 的 code-surface 直投仍 RED（放宽词汇表不得漏掉真直投）", () => {
+  const dir = makeTmp("cli-direct-still-red");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "d.test.mjs"), "export const d = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: direct code commit");
+    const sha = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    assert.match(reflog, /^commit: test: direct code commit$/m, `夹具必须是 commit: 形: ${reflog}`);
+
+    // ① reflog 扫描路径
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 1, `commit: 形 code-surface 直投必须仍 RED: ${r.stdout}${r.stderr}`);
+    assert.equal(jsonOut(r).reason, "direct-commit-bypasses-fan-in");
+    assert.ok(jsonOut(r).denominator.codeSurfaceCommits >= 1);
+    // ② --commits 回放路径（同一判定的 fixture seam）
+    const r2 = runChecker(["--root", dir, "--commits", sha]);
+    assert.equal(r2.status, 1, `--commits 回放同一 commit 也必须 RED: ${r2.stdout}${r2.stderr}`);
+    assert.equal(jsonOut(r2).reason, "direct-commit-bypasses-fan-in");
   } finally {
     cleanup(dir);
   }

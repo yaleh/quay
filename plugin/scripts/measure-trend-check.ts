@@ -72,6 +72,12 @@ export interface PerFileRecord {
    *  Present only when the reporter's `__PERFILE__` line carried `cpu_ms=` (a report was actually
    *  written); ABSENT on legacy lines (field omitted ≠ 0 — "not measured" vs "measured 0", 硬规则 3b). */
   cpuMs?: number;
+  /** gap-perfile-memory-cost-collection-missing — the file's OWN process peak RSS in KB
+   *  (`process.resourceUsage().maxRSS`, kernel high-water mark — NOT an exit-time snapshot).
+   *  Same absent-field contract as cpuMs: present only when the line carried `mem_peak_kb=`.
+   *  ⛔ COVERAGE BOUNDARY: this process only — the file's SPAWNED subprocesses are NOT covered
+   *  (no RUSAGE_CHILDREN equivalent in Node). Do not read it as the file's total memory cost. */
+  memPeakKb?: number;
 }
 
 export interface HistoryLine extends PerFileRecord {
@@ -143,7 +149,8 @@ function lastSuiteStartOffset(text: string): number {
   return last;
 }
 
-/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool> [end_ms=<epoch-ms>]` lines
+/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool> [end_ms=<epoch-ms>] [cpu_ms=<ms>]
+ *  [mem_peak_kb=<kb>]` lines
  *  (measure-suite-reporter). The optional trailing `end_ms` (gap-test-detail-timeline AC1) is the
  *  file's END epoch-ms; the START is back-computed as end − duration. Legacy lines without `end_ms`
  *  still parse (records simply omit the two time fields — backward compatible).
@@ -155,7 +162,11 @@ export function parsePerFileLines(text: string, worktreeDir?: string | null): Pe
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?(?: cpu_ms=([0-9.]+))?$/);
+    // gap-perfile-memory-cost-collection-missing — `mem_peak_kb=` is the FIFTH optional trailing field,
+    // AFTER cpu_ms (both emission points — measure-suite-reporter.mjs's legacy/LPT path AND
+    // suite-scheduler.ts's finishFile — append them in this order). The trailing-optional chain stays
+    // backward compatible: a legacy line with neither field still parses.
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?(?: cpu_ms=([0-9.]+))?(?: mem_peak_kb=([0-9.]+))?$/);
     if (m) {
       const dur = parseFloat(m[1]);
       if (Number.isFinite(dur) && dur > 0) {
@@ -173,6 +184,17 @@ export function parsePerFileLines(text: string, worktreeDir?: string | null): Pe
           const cpuMs = Number(m[5]);
           if (Number.isFinite(cpuMs) && cpuMs >= 0) {
             rec.cpuMs = cpuMs;
+          }
+        }
+        // gap-perfile-memory-cost-collection-missing — optional trailing mem_peak_kb (same route a 子进程
+        // 自报 seam, the memory dimension). Present only when the line carried it; a legacy line leaves
+        // the field ABSENT (never a fabricated 0). This parser is the SINGLE 口径 both round-record
+        // writers use (full-suite-runner.ts + pre-verified-round-record.ts), so the field reaches both
+        // carriers from this one place — 禁止只改一边.
+        if (m[6] != null) {
+          const memPeakKb = Number(m[6]);
+          if (Number.isFinite(memPeakKb) && memPeakKb >= 0) {
+            rec.memPeakKb = memPeakKb;
           }
         }
         out.push(rec);

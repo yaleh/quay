@@ -246,7 +246,7 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
-import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
+import { listWorktrees, worktreeExists, worktreeMatchesTask } from "./fast-mode-telemetry.ts";
 // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
 // promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
 // so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
@@ -1003,7 +1003,15 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // baseline-step-change, both worktree-open + taskWorkLanded=true while their files are ABSENT from
   // develop). Hoisting also skips the taskWorkLanded grep for worktree-open tasks. `worktreeExists` is
   // fail-soft (non-git root / unreadable list ⇒ false ⇒ the arms below still judge normally).
-  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  // The open-worktree list is enumerated ONCE per analyze pass and threaded in via `o.worktrees`
+  // (gap-ready-pool-check-is-o-pool-size-…): `worktreeExists` runs `git worktree list --porcelain`
+  // itself, so asking it per ready task re-ran the same subprocess once per task (~40 ms × the ready
+  // count, on a host holding 45 worktrees). The MATCH PREDICATE is still the single source
+  // `worktreeMatchesTask` (exported by fast-mode-telemetry) — this shares the enumeration, not a copy
+  // of the judgment. Omitted ⇒ the original per-task `worktreeExists` call, unchanged.
+  const hasLeftoverWorktree = o.worktrees
+    ? o.worktrees.some((wt) => worktreeMatchesTask(wt, task.id))
+    : worktreeExists(repoRoot, task.id);
   if (hasLeftoverWorktree) return false;
   const workLanded = taskWorkLanded(task.body, repoRoot, o);
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
@@ -1960,8 +1968,15 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop") {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop", bodyFreshnessOf = null) {
   const kind = classifyKind(id);
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the body-derived
+  // judgments below (touchesResolve / touchesNarrow / fourArtifacts / selfTouch / prosePrereqGap)
+  // are computed from `task.body` — the copy the analysis READ (the develop ref when taskReadRef is
+  // set). When the write face is measurably ahead of that read source, those judgments are about a
+  // body the mechanism cannot vouch for, so they carry a THIRD state instead of a verdict.
+  const bodyFreshness = bodyFreshnessOf ? bodyFreshnessOf(id) : { status: "fresh", reason: "not-applicable", evidence: null };
+  const bodyEvaluated = bodyFreshness.status === "fresh";
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
   // TOUCHES-WIDTH (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock): a directory-level
@@ -2072,6 +2087,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     selfTouchOk: selfTouch.ok,
     // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
     prosePrereqGap: prosePrereqGapIds,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the three-valued
+    // freshness of the body the checks above were computed from, plus the boolean the `eligible`
+    // conjunction consumes. `fresh` is the ONLY value that lets the body verdicts stand; the other
+    // two are carried with their own reason + evidence so "not evaluated" never shares a shape with
+    // "evaluated and clean" (硬规则 3b). The consumer is promotion-driver's classifyCandidate, which
+    // must NOT send a fix worker for these (the defect may exist only in the stale copy).
+    bodyFreshness: bodyFreshness.status,
+    bodyEvaluated,
+    bodyFreshnessReason: bodyFreshness.reason,
+    bodyStaleEvidence: bodyFreshness.evidence,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
     // is never eligible either.
@@ -2086,7 +2111,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
     // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (see the invariant above): no goal-derived term
     // may enter this conjunction — `eligible-no-goal-source-check.ts` asserts exactly that.
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): `bodyEvaluated` is
+    // ADDED — a body judged from a read source measurably behind the write face must not be promoted
+    // on that judgment. It is NOT a goal-derived term (the invariant above is untouched) and it is
+    // fail-closed only toward WITHHOLDING a promotion, never toward a needs-human flip: the consumer
+    // (promotion-driver) treats it as its own class, not as a fixable defect.
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && bodyEvaluated,
   };
 }
 
@@ -2288,6 +2318,504 @@ export function readTaskFileAtRef(root, ref, taskId) {
   return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// BODY-FRESHNESS — the third state for "the gate's read source may not carry the write face's body"
+// (tasks/gap-ready-pool-body-still-read-from-stale-main-checkout)
+//
+// THE OBSERVED DEFECT (2026-09-14, read from the production carriers, not inferred). `gap-rework-
+// multiplier-predictors` was flipped needs-human not because its authoring was bad but because the
+// gate judged a body the write face had already replaced:
+//   04:47:15Z  filing committed on the write face (author/disk), ff-propagated to develop   ⇒ propagated:true
+//   05:05:16Z  the FIX (the missing `(new)` annotations) committed on the write face
+//   05:05:17Z  its propagation FAILED — `.quay/store-commit-propagation.jsonl` records
+//              `branchClass:"other" changeKind:"must-propagate" propagated:false`
+//   ~05:09Z/05:12Z  the gate (which reads the DEVELOP REF — `taskReadRef`, not the disk) still read
+//              the pre-fix body ⇒ `touchesResolve=false` ⇒ fix worker ⇒ timeout ⇒ retry ⇒ 3rd ⇒
+//              needs-human.
+// Replaying both historical bodies through the SAME `checkTaskTouchesResolve` on the SAME root: the
+// filed body ⇒ `mustExist:5 missing:3 majorityMissing:true`, the fixed body ⇒ `mustExist:2 missing:0
+// majorityMissing:false`. The fixed body passes the gate BY CONSTRUCTION — so the gate did not read
+// it. The read SOURCE was correct (the ref); the ref was BEHIND THE WRITE FACE.
+//
+// WHY THIS IS NOT THE `gap-dispatch-reads-stale-main-checkout-task-status` FAMILY — it is its mirror.
+// That family: the disk lags the ref, so reading the REF is the fix. This one: the WRITE FACE
+// (author/disk, where every task write lands first — 人 2026-08-31 裁定) is ahead of the ref because
+// a propagation FAILED, so reading the ref is what goes stale. The two directions need opposite
+// evidence, and only the propagation ledger carries it.
+//
+// ⛔ SCOPE (this round, deliberately narrow — see the task's Plan 1/2): the ledger trace is CONSUMED
+// and the judgment gets a distinguishable third state; the body READ SOURCE is NOT changed. Widening
+// to the read source requires a reading of the reverse trap (Plan 3) that does not exist yet.
+//
+// ── The trigger is TWO independent readings, one of which is a DIRECT量 (硬规则 4b) ────────────────
+//   (a) the LEDGER says the write face's last write for this task failed to propagate — the trace
+//       that was previously written by nobody-reads (`logPropagationOutcome`, store.ts); and
+//   (b) `git rev-list --count <ref>..HEAD -- tasks/<id>.md` > 0 — commits touching THIS task file
+//       that exist on the write face but NOT on the ref. That count is the direct量: it answers the
+//       direction question (which side is behind) natively, so the "disk lags the ref" case — the
+//       NORMAL case this repo already handles by reading the ref — measures 0 and is NOT flagged.
+//   (a) alone would over-fire (a failed propagate is usually healed by the next sync, and the ledger
+//   keeps saying `false`); (b) alone would fire on every in-flight write. Together they are precise.
+//
+// ── Three values, never two (硬规则 3b) ───────────────────────────────────────────────────────────
+//   "fresh"          — the ref carries the write face's content for this task (or there is no
+//                      evidence of a failed write at all) ⇒ the body judgment stands.
+//   "stale-suspected"— the write face is measurably ahead of the read source ⇒ NOT EVALUATED.
+//   "unknown"        — the failed-propagate trace exists but the direction could not be MEASURED
+//                      (git unavailable / ref missing). Distinct from both of the above: a reading
+//                      that could not be taken must never share a value with one that was taken and
+//                      came back clean.
+//   `bodyEvaluated` (= status === "fresh") is the single boolean the admission conjunction consumes.
+//
+// ── Self-healing, by construction ────────────────────────────────────────────────────────────────
+//   Nothing here is sticky: once the content reaches the ref (a later successful write, or any sync
+//   that brings the write face to the ref) reading (b) returns 0 and the task is judged normally on
+//   the next round. There is no cache and no recorded state — both readings are taken每轮.
+
+/** The propagation ledger (relative to the repo root). Written best-effort by
+ *  `packages/quay-native/src/store.ts`'s `logPropagationOutcome`, one JSON line per committed
+ *  task write/delete. */
+export const PROPAGATION_LEDGER_REL = ".quay/store-commit-propagation.jsonl";
+
+/** Last ledger record per task id, or an EMPTY map when the ledger is absent/unreadable. Absent is
+ *  not "clean" — it is "nothing was ever recorded", which the judgment below treats as no failed
+ *  write (the ledger is append-only and chronological, so the last record for an id is its latest
+ *  write attempt). */
+export function readLastPropagationRecords(root) {
+  const map = new Map();
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, PROPAGATION_LEDGER_REL), "utf8");
+  } catch {
+    return map;
+  }
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; } // a torn/partial line is skipped, not fatal
+    if (!rec || typeof rec !== "object" || typeof rec.id !== "string") continue;
+    map.set(rec.id, rec);
+  }
+  return map;
+}
+
+/** Is this ledger record a WRITE-FACE PROPAGATION FAILURE? Narrow on purpose — two other shapes in
+ *  the same ledger say `propagated:false` BY DESIGN and are not staleness:
+ *    `branchClass:"task-branch"`  — a worktree write: fan-in is its only path into develop;
+ *    `changeKind:"self-only"`     — an AC tick / Evidence write on a non-task branch, carried by
+ *                                   the task's own fan-in.
+ *  Only `other` + `must-propagate` + `false` means "a write that HAD to reach develop did not". */
+export function isWriteFacePropagationFailure(rec) {
+  return !!rec && rec.propagated === false && rec.changeKind === "must-propagate" && rec.branchClass === "other";
+}
+
+/** Commits that touch `tasks/<id>.md` and exist on HEAD (the write face) but NOT on `ref` — the
+ *  DIRECT量 for "which side is behind". `> 0` ⇒ the write face carries a version of this task file
+ *  the ref does not. Returns null when the reading could not be taken (no ref / git failure) —
+ *  never a positive from an unavailable source (硬规则 5/6). */
+export function commitsAheadOfRefForTask(root, ref, id) {
+  if (!ref) return null;
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "rev-list", "--count", `${ref}..HEAD`, "--", `tasks/${id}.md`],
+      { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const n = Number(out);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The body-freshness judgment: `{ status, reason, evidence }` with status ∈
+ *  "fresh" | "stale-suspected" | "unknown". `ref` is the ref the store was actually READ from
+ *  (`taskReadRef`); null ⇒ the analysis read the disk, and the disk IS the write face, so nothing
+ *  can be stale relative to it. */
+export function judgeBodyFreshness({ root, id, ref, lastRecords }) {
+  const rec = lastRecords ? lastRecords.get(id) : null;
+  if (!rec) return { status: "fresh", reason: "no-propagation-record", evidence: null };
+  const evidence = {
+    ts: typeof rec.ts === "string" ? rec.ts : null,
+    verb: rec.verb ?? null,
+    changeKind: rec.changeKind ?? null,
+    branchClass: rec.branchClass ?? null,
+    propagated: rec.propagated ?? null,
+  };
+  if (!isWriteFacePropagationFailure(rec)) {
+    return { status: "fresh", reason: "last-write-not-a-failed-propagate", evidence };
+  }
+  if (!ref) return { status: "fresh", reason: "no-ref-read", evidence };
+  const ahead = commitsAheadOfRefForTask(root, ref, id);
+  if (ahead === null) {
+    // The trace says a write failed; the direction could not be measured ⇒ NOT the same value as a
+    // measurement that came back clean (硬规则 3b).
+    return { status: "unknown", reason: "ahead-unmeasurable", evidence };
+  }
+  if (ahead > 0) {
+    return { status: "stale-suspected", reason: "write-face-ahead-of-ref", evidence: { ...evidence, commitsAhead: ahead } };
+  }
+  return { status: "fresh", reason: "ref-not-behind-write-face", evidence };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PERSISTENT CONTENT-KEYED CACHES
+// (tasks/gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-whole-suite)
+//
+// THE COST: this checker ran 75,571 times in 33 days and consumed 212.7 h — 97.8% of all checker cost,
+// the same order as the ENTIRE test suite (231 h). Every call re-derived, from scratch and in a fresh
+// process, two pure functions of git CONTENT that had not changed since the previous call ~0.6 s
+// earlier:
+//   1. the parsed task store   — read all 2,141 blobs (`cat-file --batch`, 5.1 s) and YAML-parse them
+//   2. the landing history index — one full-history `git log --name-only` over 21,309 commits
+//                                  (11 MB of text, 9.1 s) plus its 0.9 s in-memory index build
+// Together those two were ~75% of a 19–35 s call.
+//
+// THE FIX (and the shape of it): a git ref is CONTENT-ADDRESSED — "develop at OID X" always has
+// byte-identical content. So neither derivation has to happen twice for the same content. Two
+// persistent caches keyed by git OBJECT IDENTITY (never by mtime, never by wall clock) let a poll pay
+// only for what actually changed:
+//   - the task-store cache is keyed PER BLOB OID, so when develop advances by one commit only the
+//     handful of blobs that commit changed are re-read and re-parsed (`git ls-tree` names the OIDs
+//     without reading the blobs: 28 ms for 2,141 files vs 5,100 ms to read them); and
+//   - the history cache stores the index plus the OID it was built at, and advances INCREMENTALLY via
+//     `buildGitHistoryIndex(root, {ref: "<oldOid>..<newOid>"})` (the SAME function, the same flags,
+//     the same parser — a range is a single valid git revision argument), so a develop advance costs a
+//     few commits rather than 21,309.
+//
+// ⛔ WHAT THIS DOES **NOT** CHANGE — the invariant the cache must not break
+// (gap-dispatch-reads-stale-main-checkout-task-status, 硬规则 4b): the single-source DISPATCH READ
+// still comes from the ref, never from the working-tree disk. The cache holds the parse of blobs AT
+// THE REF; the disk is consulted for exactly the same case as before (an id the ref does not carry).
+// Nothing here reads a task status off the disk.
+//
+// ⛔ FAIL-SOFT, ALWAYS: every cache read is a hit or a miss — never a source of truth. An absent,
+// truncated, corrupt or version-drifted cache file, a git failure, a non-git root, a ref without
+// `tasks/`: each falls back to the pre-fix uncached path, which stays in the file verbatim. A wrong
+// cache can therefore only ever cost TIME, never correctness (the only way it could is by returning a
+// value for content that is not that content — which content addressing makes structurally impossible).
+//
+// QUAY_READY_POOL_CACHE=0 forces the uncached path (the negative control's seam: it makes the before/
+// after reading takeable on ONE commit, so "the cache is what changed" is separable from "the code
+// changed").
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+const RPC_CACHE_VERSION = 1;
+const RPC_STORE_CACHE_FILE = "ready-pool-store-cache.json";
+const RPC_HISTORY_CACHE_FILE = "ready-pool-history-cache.json";
+// Size cap for the store cache (the history cache is O(history), not O(churn), and needs no cap).
+// Sized to hold several times the current store (19 MB for 2,141 tasks) so a normal poll — which
+// re-keeps everything it reads — never trips it, while unbounded churn still cannot accumulate.
+// Overridable so a test can drive a cap small enough to exercise the eviction path; a cap that cannot
+// be tested is a cap nobody knows works. Read PER CALL, not at import — a test must be able to change
+// it after the module is loaded (a module-level const would be frozen at import time and untestable).
+export function rpcStoreCacheMaxBytes() {
+  return Number(process.env.QUAY_READY_POOL_CACHE_MAX_BYTES) || 64 * 1024 * 1024;
+}
+
+/** Cache kill-switch (test/experiment seam, not a production knob). */
+export function rpcCacheEnabled() {
+  return process.env.QUAY_READY_POOL_CACHE !== "0";
+}
+
+// The cache lives in the repo's GIT DIR (`<git-common-dir>/quay-ready-pool-cache/`), not in `.quay/`.
+// Two reasons, both load-bearing:
+//   1. It keeps the WORKING TREE CLEAN. `.quay/` files are gitignored ONE BY ONE, so a new carrier
+//      there shows up as an untracked `?? .quay/` until someone edits .gitignore — which is a real
+//      behaviour change for every consumer that reads `git status --porcelain` (two existing tests
+//      assert the fixture tree is clean after a promotion, and both went red on exactly this).
+//   2. It is the right home semantically: the cache is keyed by GIT OBJECT IDENTITY, which lives in
+//      that same git dir. Worktrees share the common dir, so a worktree cache-hits on the entries the
+//      main checkout parsed (the object store is shared) — which is what object-addressed caching means.
+// Non-git root (or no common dir) ⇒ null ⇒ every caller takes the uncached path.
+const _gitCacheDirs = new Map(); // root -> dir | null (memoized; one `rev-parse` per process at most)
+function rpcCacheDir(root) {
+  if (_gitCacheDirs.has(root)) return _gitCacheDirs.get(root);
+  let dir = null;
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out) {
+      dir = path.join(path.resolve(root, out), "quay-ready-pool-cache");
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch { dir = null; }
+  _gitCacheDirs.set(root, dir);
+  return dir;
+}
+
+/** Cache file path under the git dir, or null when the root is not a git work tree (uncached). */
+function rpcCacheFile(root, name) {
+  const dir = rpcCacheDir(root);
+  return dir ? path.join(dir, name) : null;
+}
+
+/** Read a cache file, returning null on ANY doubt (absent / unreadable / corrupt / version drift).
+ *  缺值 = 未查 (硬规则 6): a miss must be a miss, never a partially-believed structure. */
+function readCacheJson(file) {
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    const parsed = JSON.parse(text);
+    if (!parsed || parsed.v !== RPC_CACHE_VERSION) return null;
+    parsed._bytes = text.length; // the ON-DISK size, for the self-healing cap check (never re-serialized to measure)
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Write a cache file atomically (tmp + rename) so a concurrent reader never sees a half-written
+ *  file; every failure is swallowed — losing the cache costs time, never correctness. */
+function writeCacheJson(file, obj) {
+  writeCacheJsonSerialized(file, JSON.stringify(obj));
+}
+
+/** As `writeCacheJson`, for a payload already serialized (the store cache measures its own encoded
+ *  size against the cap, so it must not be stringified twice). */
+function writeCacheJsonSerialized(file, text) {
+  try {
+    const dir = path.dirname(file);
+    // The cache dir is `<git-common-dir>/quay-ready-pool-cache/` (see rpcCacheDir — NOT `.quay/`,
+    // which is gitignored file-by-file and would dirty the working tree). rpcCacheDir already created
+    // it, so this is the belt-and-braces path for a caller that ever passes a cache file directly.
+    // Created only when missing (never `recursive` blindly: a recursive mkdir under a /proc-style path
+    // hangs), and a failure here just means no cache, never a wrong answer.
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${file}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, file);
+  } catch { /* fail-soft: the uncached path is always available */ }
+}
+
+/** A cheap signature of a key SET (not its values) — used to skip rewriting a multi-MB cache file
+ *  whose entry set did not change. Order-independent (keys are sorted) so a readdir ordering change
+ *  is not mistaken for a content change. */
+function keySetSignature(keys) {
+  const sorted = [...keys].sort();
+  let h = 0;
+  for (const k of sorted) for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0;
+  return `${sorted.length}:${h}`;
+}
+
+/** `{ id -> blobOid }` for `tasks/*.md` at `ref`, in ONE `git ls-tree -r` pass. This is the CHEAP half
+ *  of the ref read: it NAMES the content (measured 28 ms for 2,141 files) without reading a single
+ *  blob (5,100 ms), which is what lets the store cache be keyed by blob OID instead of by ref tip —
+ *  so a develop advance only invalidates the blobs that commit actually changed. Returns null on any
+ *  git failure (caller falls back to the uncached batched read). */
+export function listRefTaskBlobs(root, ref) {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-tree", "-r", ref, "tasks/"], {
+      encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const map = new Map();
+    for (const line of out.split("\n")) {
+      // Default ls-tree line: `<mode> blob <oid>\t<path>`.
+      const tab = line.indexOf("\t");
+      if (tab === -1) continue;
+      const meta = line.slice(0, tab).split(/\s+/);
+      if (meta[1] !== "blob") continue;
+      const p = line.slice(tab + 1);
+      if (!p.startsWith("tasks/") || !p.endsWith(".md")) continue;
+      map.set(p.slice("tasks/".length, -".md".length), meta[2]);
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
+/** `git rev-parse --verify <ref>^{commit}` → OID, or null. */
+function resolveCommitOid(root, ref) {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", `${ref}^{commit}`], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Is `a` an ancestor of (or equal to) `b`? Guards the incremental history merge: a `A..B` range only
+ *  yields a correct SUPERSET-union when everything A contributed is still reachable from B. A rewritten
+ *  / rebased / unrelated tip answers false ⇒ full rebuild (fail-soft toward correctness). */
+function isAncestorCommit(root, a, b) {
+  try {
+    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", a, b], { timeout: 30_000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** PARSE-CACHED task-store read at a git ref — the drop-in replacement for
+ *  `readTaskFilesAtRefBatch(...)` + `parseTask(...)` over the whole store, returning the SAME shape
+ *  (a Map<id, parseTaskOutput>) for the ids PRESENT at the ref (absent ids stay absent, so the caller's
+ *  working-tree fallback is unchanged).
+ *
+ *  Content key = the blob OID. Two polls against an unchanged ref share every entry; a ref that moved
+ *  by one task re-reads and re-parses exactly one file. The cache file is pruned to the OIDs this poll
+ *  actually referenced and rewritten only when that key set changed (so the steady state is a pure
+ *  read — one `ls-tree` + one JSON.parse).
+ *
+ *  Aliasing guard: two ids whose files are byte-identical share one blob OID and therefore one parsed
+ *  object. `analyzeTasks` stamps `id`/`status`/`parent` onto the objects it is handed, so a shared
+ *  object would make the last id win — the first holder keeps the object, every later one gets a clone.
+ *  (Measured on the real store: 0 such pairs; the guard is there so a future one cannot corrupt.) */
+export function loadParsedTaskStoreAtRef(root, ref, ids) {
+  const uncached = () => {
+    const out = new Map();
+    for (const [id, text] of readTaskFilesAtRefBatch(root, ref, ids)) out.set(id, parseTask(text));
+    return out;
+  };
+  if (!rpcCacheEnabled() || ids.length === 0) return uncached();
+  const blobs = listRefTaskBlobs(root, ref);
+  if (!blobs) return uncached();
+
+  const file = rpcCacheFile(root, RPC_STORE_CACHE_FILE);
+  if (!file) return uncached();
+  const prev = readCacheJson(file);
+  const prevEntries = (prev && prev.entries) || {};
+
+  const out = new Map();
+  const keep = {};                 // oid -> parseTask output (what gets written back)
+  const oidOf = new Map();         // id -> oid, for the ids the ref carries
+  const missing = [];              // ids whose blob content is not in the cache yet
+  for (const id of ids) {
+    const oid = blobs.get(id);
+    if (!oid) continue;            // not at the ref ⇒ caller falls back to the working tree
+    oidOf.set(id, oid);
+    const hit = prevEntries[oid];
+    if (hit) { out.set(id, hit); keep[oid] = hit; } else { missing.push(id); }
+  }
+
+  if (missing.length > 0) {
+    for (const [id, text] of readTaskFilesAtRefBatch(root, ref, missing)) {
+      const parsed = parseTask(text);
+      out.set(id, parsed);
+      keep[oidOf.get(id)] = parsed;
+    }
+  }
+
+  // De-alias shared blobs (see the doc comment).
+  const firstHolder = new Map();   // oid -> id
+  for (const id of [...out.keys()]) {
+    const oid = oidOf.get(id);
+    if (firstHolder.has(oid)) out.set(id, structuredClone(out.get(id)));
+    else firstHolder.set(oid, id);
+  }
+
+  // KEEP THE UNION, not just this poll's ids. Pruning to this poll's ids is only equivalent when the
+  // caller always names the whole store — a caller that names a SUBSET (a scoped analysis, a test, an
+  // experiment) would then evict the other entries and force the next full poll to re-read them all.
+  // The union also makes the cache monotone in the useful direction: the blobs a store has ever had
+  // stay parsed. Growth is bounded by BYTES instead (see below), so an unbounded-entry-set cache
+  // cannot accumulate — and a normal poll, which re-keeps everything it reads, never trips the cap.
+  const union = { ...prevEntries, ...keep };
+  const entries = Object.keys(union);
+  const maxBytes = rpcStoreCacheMaxBytes();
+  // Write when the entry set changed, OR when the file is already over the cap and something is
+  // droppable. The second arm makes the cap SELF-HEALING: without it a file that grew past the cap
+  // would stay there until the next unrelated write, and every poll in between would keep re-reading
+  // it. Read off the recorded size, so the check costs nothing.
+  const overCap = (prev?._bytes ?? 0) > maxBytes;
+  if (missing.length > 0 || keySetSignature(entries) !== prev?.sig || (overCap && entries.length > Object.keys(keep).length)) {
+    const payload = { v: RPC_CACHE_VERSION, sig: keySetSignature(entries), entries: union };
+    // SIZE CAP: over the cap, drop the entries this poll did NOT use (oldest insertion first — JSON
+    // preserves insertion order for string keys). Never drops an entry this poll asked for: a poll
+    // whose own set exceeds the cap leaves the file over the cap, which is the correct trade (a
+    // slightly fat cache beats a poll that cannot answer). Dropped in CHUNKS sized from the measured
+    // average entry — deleting one entry per re-stringify would be O(n²) on a multi-MB file.
+    let serialized = JSON.stringify(payload);
+    if (serialized.length > maxBytes) {
+      const dropped = Object.keys(union).filter((oid) => !keep[oid]);
+      let taken = 0;
+      while (serialized.length > maxBytes && taken < dropped.length) {
+        const avg = Math.max(1, Math.ceil(serialized.length / Math.max(1, Object.keys(union).length)));
+        const need = Math.ceil((serialized.length - maxBytes) / avg);
+        const chunk = Math.max(1, Math.min(need, dropped.length - taken));
+        for (let i = 0; i < chunk; i++) delete union[dropped[taken++]];
+        serialized = JSON.stringify({ v: RPC_CACHE_VERSION, sig: payload.sig, entries: union });
+      }
+      payload.sig = keySetSignature(Object.keys(union));
+      serialized = JSON.stringify({ v: RPC_CACHE_VERSION, sig: payload.sig, entries: union });
+    }
+    writeCacheJsonSerialized(file, serialized);
+  }
+  return out;
+}
+
+/** History index (`{commits: Map<hash,{hash,parents,subject,paths:Set}>, byPath: Map<path,Set<hash>>}`,
+ *  the exact shape `buildGitHistoryIndex` returns) served from a persistent cache keyed by the landing
+ *  ref's COMMIT OID, advancing incrementally when the ref moves forward.
+ *
+ *  Why incremental is not optional: on this repo `landingRef` resolves to `develop` (the two-line
+ *  model's `integration` ref does not exist), and develop is exactly the ref that advances most often —
+ *  a cache that rebuilt on every advance would miss on most polls and buy nothing.
+ *
+ *  The delta reuses `buildGitHistoryIndex` itself with `ref: "<cachedOid>..<newOid>"` — one range
+ *  argument is a valid git revision, so the dump command, its flags and its parser stay SINGLE-SOURCED
+ *  (no parallel copy of the `--full-history -m` format here). Commits are additive and `-m` repeats a
+ *  merge's header per parent, so unioning the delta into the cached maps reproduces a full rebuild
+ *  exactly when the cached tip is an ancestor. */
+export function loadLandingIndex(root, ref) {
+  const full = () => buildGitHistoryIndex(root, { ref });
+  if (!rpcCacheEnabled()) return full();
+  const oid = resolveCommitOid(root, ref);
+  if (!oid) return full();
+
+  const file = rpcCacheFile(root, RPC_HISTORY_CACHE_FILE);
+  if (!file) return full();
+  const cached = readCacheJson(file);
+  const rehydrate = (c) => {
+    const commits = new Map();
+    const byPath = new Map();
+    for (const [hash, parents, subject] of c.commits || []) commits.set(hash, { hash, parents, subject, paths: new Set() });
+    for (const [p, hashes] of c.byPath || []) {
+      const set = new Set(hashes);
+      byPath.set(p, set);
+      // `paths` is the same relation stored the other way round — rebuilt from byPath so a consumer
+      // that reads `commits[hash].paths` (buildGitHistoryIndex's own shape) is not silently handed an
+      // empty set (硬规则 3b: never return a "read it and it was empty" for "never loaded").
+      for (const h of hashes) commits.get(h)?.paths.add(p);
+    }
+    return { commits, byPath };
+  };
+  const serialize = (index, refOid) => ({
+    v: RPC_CACHE_VERSION,
+    refOid,
+    commits: [...index.commits].map(([h, r]) => [h, r.parents, r.subject]),
+    byPath: [...index.byPath].map(([p, hs]) => [p, [...hs]]),
+  });
+  const mergeInto = (base, delta) => {
+    for (const [hash, rec] of delta.commits) {
+      let target = base.commits.get(hash);
+      if (!target) { target = { hash, parents: rec.parents, subject: rec.subject, paths: new Set() }; base.commits.set(hash, target); }
+      for (const p of rec.paths) {
+        target.paths.add(p);
+        let set = base.byPath.get(p);
+        if (!set) { set = new Set(); base.byPath.set(p, set); }
+        set.add(hash);
+      }
+    }
+    return base;
+  };
+
+  if (cached && cached.refOid === oid) return rehydrate(cached);
+
+  if (cached && cached.refOid && isAncestorCommit(root, cached.refOid, oid)) {
+    const delta = buildGitHistoryIndex(root, { ref: `${cached.refOid}..${oid}` });
+    const merged = mergeInto(rehydrate(cached), delta);
+    writeCacheJson(file, serialize(merged, oid));
+    return merged;
+  }
+
+  const built = full();
+  writeCacheJson(file, serialize(built, oid));
+  return built;
+}
+
 // readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
 // Formerly verbatim-copied here + driver-filters.ts + worker-driver.ts (async); now imported + re-exported
 // (ready-pool-check.test.mjs / slot-refill.test.mjs import it from this module). readTaskFileAtRef /
@@ -2319,21 +2847,37 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // in ONE batched `git cat-file --batch` process, falling back to the working-tree disk only for
   // tasks not yet on the ref. The manager working branch's disk is a stale agent-proxy — reading it
   // for status re-dispatches already-done tasks (硬规则 4b).
+  // PARSE-CACHED single-source read (gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-
+  // whole-suite): same ref, same ids, same fallback — but a blob whose content this store has already
+  // parsed (keyed by blob OID) is not re-read and not re-parsed. The ref remains the ONLY status
+  // source (硬规则 4b); the disk is still consulted for exactly the ids the ref does not carry.
   const refTasks = taskReadRef
-    ? readTaskFilesAtRefBatch(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
+    ? loadParsedTaskStoreAtRef(root, taskReadRef, fileNames.map((f) => f.replace(/\.md$/, "")))
     : null;
   for (const f of fileNames) {
     const id = f.replace(/\.md$/, "");
-    const raw = refTasks
-      ? (refTasks.get(id) ?? fs.readFileSync(path.join(tasksDir, f), "utf8"))
-      : fs.readFileSync(path.join(tasksDir, f), "utf8");
-    const task = parseTask(raw);
+    const task = (refTasks && refTasks.get(id)) || parseTask(fs.readFileSync(path.join(tasksDir, f), "utf8"));
     task.id = id;
     const rawStatus = readFrontField(task.frontmatterRaw, "status");
     task.status = isTaskStatus(rawStatus) ? rawStatus : "";
     task.parent = readFrontField(task.frontmatterRaw, "parent");
     allTasks.set(id, task);
   }
+
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): ONE ledger read per
+  // analysis; the per-task git measurement is MEMOIZED and only paid for the tasks whose last ledger
+  // record is a write-face propagation failure (rare — the ledger's `propagated:false` is mostly the
+  // by-design task-branch/self-only shapes, which `isWriteFacePropagationFailure` excludes).
+  // `taskReadRef` is the ref the store was actually read from: null ⇒ the analysis read the disk,
+  // which IS the write face, so nothing can be stale relative to it.
+  const lastPropagationRecords = readLastPropagationRecords(root);
+  const bodyFreshnessMemo = new Map();
+  const bodyFreshnessOf = (id) => {
+    if (!bodyFreshnessMemo.has(id)) {
+      bodyFreshnessMemo.set(id, judgeBodyFreshness({ root, id, ref: taskReadRef, lastRecords: lastPropagationRecords }));
+    }
+    return bodyFreshnessMemo.get(id);
+  };
 
   // Value-prioritization index (built once — blocking needs to know if ANY other task names this id
   // as its parent, so the maps are precomputed here rather than re-scanned per task).
@@ -2364,12 +2908,17 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // misjudges everything landed after it as unlanded. "Config source" = these CLI flags, which the
   // outer loop drives from .quay/config.yml's branch model (gap-quay-init-never-writes-branch-model-config).
   const landRef = landingRef(root, { candidates: [integration, develop, master] });
-  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root, { ref: landRef }) : null;
+  // Cached + incremental (gap-ready-pool-check-is-o-pool-size-…): a full-history dump over 21,309
+  // commits cost 9.1 s of EVERY call. Keyed by the landing ref's commit OID; a forward move pays a
+  // `A..B` delta through the same builder, a rewrite falls back to a full rebuild.
+  const gitIndex = readyCount > 0 ? loadLandingIndex(root, landRef) : null;
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): ONE `git log --all` subject pass for the
   // whole pool scan (like buildGitHistoryIndex's batched index — never per-task git calls). Reads
   // `--all` so the two-line model's INTEGRATION fan-in is visible where the stale-master git-history
   // index sees nothing (master..integration=2224 on 2026-08-11).
   const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
+  // ONE open-worktree enumeration for the whole ready scan (see notYetFlipped's `o.worktrees`).
+  const worktrees = readyCount > 0 ? listWorktrees(root) : [];
   const ready = [];
   const excluded = [];
   let nyfBacklogCount = 0; // 甲 — not-yet-flipped AND every completion checkbox checked (work done, only the status flip missing)
@@ -2383,7 +2932,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isAcRecord(t)) reasons.push("ac-record");
     let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
     let pendingVerification = false;
-    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects });
+    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees });
     if (nyf) {
       reasons.push("not-yet-flipped");
       // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped
@@ -2550,7 +3099,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   for (const [id, t] of allTasks) {
     if (t.status !== TASK_STATUS.TODO) continue;
     if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop));
+    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop, bodyFreshnessOf));
   }
   // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
   // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
@@ -2579,7 +3128,21 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (c.superseded) intercepted.push({ id: c.id, reason: "superseded" });
     if (c.compound) intercepted.push({ id: c.id, reason: "compound-not-dispatchable" });
     if (!c.selfTouchOk) intercepted.push({ id: c.id, reason: "self-touch-missing-c8" });
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): a candidate withheld
+    // because its body could not be judged is recorded here too — a withheld promotion must stay a
+    // traceable decision. The reason carries the freshness value + its cause, so `stale-suspected`
+    // (measured) is never confusable with `unknown` (unmeasurable).
+    if (!c.bodyEvaluated) intercepted.push({ id: c.id, reason: `body-not-evaluated (${c.bodyFreshness}: ${c.bodyFreshnessReason})` });
   }
+  // BODY-FRESHNESS — the output's OWN word-list entry for the third state (AC2 of
+  // gap-ready-pool-body-still-read-from-stale-main-checkout): the candidates whose body dimensions
+  // were NOT evaluated, each with the distinct freshness value, its cause, and the evidence (the
+  // ledger record + the measured commit gap). Separate from `intercepted` because it is a READING of
+  // the read source's freshness, not a defect list — and separate from `promotions`/`candidates`, so
+  // a consumer can answer "was anything withheld for staleness this round?" in one read.
+  const notEvaluated = candidates
+    .filter((c) => !c.bodyEvaluated)
+    .map((c) => ({ id: c.id, freshness: c.bodyFreshness, reason: c.bodyFreshnessReason, evidence: c.bodyStaleEvidence }));
   // RETIRED GATE (AC48): the `promotions.length >= deficit` cap is removed — the bulk path now
   // promotes EVERY eligible candidate (合格即晋), not just enough to reach the floor.
   for (const c of candidates) {
@@ -2613,7 +3176,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== TASK_STATUS.TODO) continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop, bodyFreshnessOf);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
@@ -2693,6 +3256,12 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     candidates,
     promotions,
     intercepted,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the third state —
+    // candidates whose body dimensions were not evaluated because the read source is measurably
+    // behind the write face (`stale-suspected`), or because that direction could not be measured
+    // (`unknown`). Empty ⇒ every candidate's body was judged from content the write face agrees with
+    // (the normal case: negative control).
+    not_evaluated: notEvaluated,
     // REVALUATION (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor): the
     // ready tasks whose static conditions have decayed, each with grep-able `reasons` + a
     // `destination: "todo"` (the legal ready.back="todo" transition). The revaluation EXECUTOR

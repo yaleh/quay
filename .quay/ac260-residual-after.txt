@@ -1,0 +1,32 @@
+== (anchor, dist/, ext, target-exists) => count ==
+  ('ROOT_ANCHOR', 'dist/', 'js', False)                        1
+  ('ROOT_ANCHOR', 'dist/', 'js', True)                         166
+  ('prefixed', '', 'js', False)                                1
+  ('prefixed', '', 'ts', False)                                399
+  ('prefixed', '', 'ts', True)                                 34
+== DANGLING (target not on branch): 401 ==
+    invariant-ownership.md | plugin/scripts/manager-tick-readings.ts -> MISSING scripts/manager-tick-readings.ts
+    invariant-ownership.md | plugin/scripts/manager-tick-readings.ts -> MISSING scripts/manager-tick-readings.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-d-code-doc-ratio.ts -> MISSING scripts/git-lens-l-d-code-doc-ratio.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-g-structural-drift.ts -> MISSING scripts/git-lens-l-g-structural-drift.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-s-behavior-variance.ts -> MISSING scripts/git-lens-l-s-behavior-variance.ts
+    probes/semantic-dedup-scan.md | plugin/scripts/git-lens-l-g-structural-drift.ts -> MISSING scripts/git-lens-l-g-structural-drift.ts
+    scripts/capability-catalog.sh | plugin/scripts/select-tests-for-touches.ts -> MISSING scripts/select-tests-for-touches.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-filters.ts -> MISSING scripts/driver-filters.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-result.ts -> MISSING scripts/driver-result.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-shared.ts -> MISSING scripts/driver-shared.ts
+    scripts/capability-catalog.sh | plugin/scripts/profile-policy.ts -> MISSING scripts/profile-policy.ts
+    scripts/capability-catalog.sh | plugin/scripts/select-tests-for-touches.ts -> MISSING scripts/select-tests-for-touches.ts
+    scripts/capability-catalog.sh | plugin/scripts/freshness-producer-coverage-check.ts -> MISSING scripts/freshness-producer-coverage-check.ts
+    scripts/checker-cost-lib.sh | plugin/scripts/checker-cost.ts -> MISSING scripts/checker-cost.ts
+    scripts/checker-mutation-cases/cap-counts-subagents-check.sh | plugin/scripts/slot-refill.ts -> MISSING scripts/slot-refill.ts
+    scripts/checker-mutation-cases/cap-counts-subagents-check.sh | ${workdir}/plugin/scripts/slot-refill.ts -> MISSING scripts/slot-refill.ts
+    scripts/checker-mutation-cases/capability-manifest-check.sh | ${repo_root}/plugin/scripts/capability-manifest-check.ts -> MISSING scripts/capability-manifest-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/a.ts -> MISSING scripts/a.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/b.ts -> MISSING scripts/b.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/op-a.ts -> MISSING scripts/op-a.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/doc-a.ts -> MISSING scripts/doc-a.ts
+    scripts/checker-mutation-cases/concurrency-literal-check.sh | plugin/scripts/fixture.ts -> MISSING scripts/fixture.ts

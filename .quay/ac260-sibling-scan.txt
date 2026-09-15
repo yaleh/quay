@@ -1,0 +1,79 @@
+AC3 — 兄弟实例扫描（硬规则 5b：修好被报出来的那一个 ≠ 只有那一个）。
+扫描器 = .quay/ac260-scan.py（覆盖 .md/.sh/.js 全部载体，三支 predicate 与 AC-260 的谓词同形，
+另加一支 BARE 用于暴露被谓词结构性地看不见的形态）。
+
+════ 修前（dist-plugin=b2b7ea4ea，取自本会话基线）════
+Traceback (most recent call last):
+  File "/home/yale/work/quay-worktrees/gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths/.quay/ac260-scan.py", line 3, in <module>
+    files = subprocess.run(["git","ls-tree","-r","--name-only",BR],capture_output=True,text=True,check=True).stdout.split()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'ls-tree', '-r', '--name-only', 'dist-plugin']' returned non-zero exit status 128.
+
+════ 修后（dist-plugin=784fb13dd）════
+carriers=342 total_dist_refs=168
+per_ext_total={'md': 103, 'sh': 37, 'js': 28}
+BAD(cwd-relative plugin/ prefix)=0 per_ext={}
+DANGLING(plugin-root-anchored raw .ts)=0
+BARE(scripts/X.ts not anchored, target missing on branch)=9
+   BARE: ('scripts/develop-deliver-tgz.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/develop-deliver-tgz.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('skills/quay-task-operator/SKILL.md', 'scripts/agents-claude-drift-check.ts')
+   BARE: ('skills/quay-task-operator/SKILL.md', 'scripts/agents-claude-drift-check.ts')
+
+⇒ 修前 per_ext = {md:96, sh:134, js:30} 全为 cwd 相对 offender（AC-260 记载逐字吻合）；
+  修后 BAD=0 且 DANGLING=0，total 168 >= 1（防「扫不到被伪装成修好」的配对）。
+  「只修 .md 那 96 条」会留下 sh 134 + js 30 ⇒ 本 AC 不满足；本轮三支同时归零。
+
+════ 残留分类（BARE=9 的逐条判定；硬规则 2「打印实际命中」）════
+BARE 谓词 = (?<![A-Za-z0-9_${}/.-])((scripts|gate-scripts)/[A-Za-z0-9_.-]+\.ts) —— 不带任何锚的裸 scripts/X.ts。
+命中 9 条，逐条查证后【全部不是本插件引用】：
+  · scripts/develop-deliver-tgz.sh  ×2、scripts/verify-deliver-coldstart.sh ×5 → `scripts/check-adr.ts`
+    出现在【示例 JSON 载荷 / 夹具 heredoc / 注释】里，描述的是【另一个项目】(archguard 仓库) 的
+    <foreign>/scripts/check-adr.ts（同段还写着 archguard 的 ADR-007 与它的 tests/unit/）。
+    quay 仓库根本不存在该文件（find . -name 'agents-claude-drift-check*' 只命中下一条）。
+  · skills/quay-task-operator/SKILL.md ×2 → `scripts/agents-claude-drift-check.ts`
+    指的是【quay 仓库根】的 ./scripts/agents-claude-drift-check.ts（该文件确实存在于仓库根，
+    不在 plugin/ 下），与同段「root AGENTS.md」的单源断言是同一层；不是 plugin 脚本。
+⇒ 9 条均为 ad-hoc 谓词的假阳性；本任务不改它们（它们也不是 plugin/ 引用）。
+
+════ 残留 plugin/scripts/X.ts（无 dist/）的形态普查 ════
+== (anchor, dist/, ext, target-exists) => count ==
+  ('ROOT_ANCHOR', 'dist/', 'js', False)                        1
+  ('ROOT_ANCHOR', 'dist/', 'js', True)                         166
+  ('prefixed', '', 'js', False)                                1
+  ('prefixed', '', 'ts', False)                                399
+  ('prefixed', '', 'ts', True)                                 34
+== DANGLING (target not on branch): 401 ==
+    invariant-ownership.md | plugin/scripts/manager-tick-readings.ts -> MISSING scripts/manager-tick-readings.ts
+    invariant-ownership.md | plugin/scripts/manager-tick-readings.ts -> MISSING scripts/manager-tick-readings.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-d-code-doc-ratio.ts -> MISSING scripts/git-lens-l-d-code-doc-ratio.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-g-structural-drift.ts -> MISSING scripts/git-lens-l-g-structural-drift.ts
+    probes/architecture-analysis.md | plugin/scripts/git-lens-l-s-behavior-variance.ts -> MISSING scripts/git-lens-l-s-behavior-variance.ts
+    probes/semantic-dedup-scan.md | plugin/scripts/git-lens-l-g-structural-drift.ts -> MISSING scripts/git-lens-l-g-structural-drift.ts
+    scripts/capability-catalog.sh | plugin/scripts/select-tests-for-touches.ts -> MISSING scripts/select-tests-for-touches.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-filters.ts -> MISSING scripts/driver-filters.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-result.ts -> MISSING scripts/driver-result.ts
+    scripts/capability-catalog.sh | plugin/scripts/driver-shared.ts -> MISSING scripts/driver-shared.ts
+    scripts/capability-catalog.sh | plugin/scripts/profile-policy.ts -> MISSING scripts/profile-policy.ts
+    scripts/capability-catalog.sh | plugin/scripts/select-tests-for-touches.ts -> MISSING scripts/select-tests-for-touches.ts
+    scripts/capability-catalog.sh | plugin/scripts/freshness-producer-coverage-check.ts -> MISSING scripts/freshness-producer-coverage-check.ts
+    scripts/checker-cost-lib.sh | plugin/scripts/checker-cost.ts -> MISSING scripts/checker-cost.ts
+    scripts/checker-mutation-cases/cap-counts-subagents-check.sh | plugin/scripts/slot-refill.ts -> MISSING scripts/slot-refill.ts
+    scripts/checker-mutation-cases/cap-counts-subagents-check.sh | ${workdir}/plugin/scripts/slot-refill.ts -> MISSING scripts/slot-refill.ts
+    scripts/checker-mutation-cases/capability-manifest-check.sh | ${repo_root}/plugin/scripts/capability-manifest-check.ts -> MISSING scripts/capability-manifest-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/check-set-after-change-check.sh | plugin/scripts/tick-core-static-check.ts -> MISSING scripts/tick-core-static-check.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/a.ts -> MISSING scripts/a.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/b.ts -> MISSING scripts/b.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/op-a.ts -> MISSING scripts/op-a.ts
+    scripts/checker-mutation-cases/checker-count-drift-check.sh | ${repo_root}/plugin/scripts/doc-a.ts -> MISSING scripts/doc-a.ts
+    scripts/checker-mutation-cases/concurrency-literal-check.sh | plugin/scripts/fixture.ts -> MISSING scripts/fixture.ts
+（说明见 .quay/ac260-evidence-notes.txt）

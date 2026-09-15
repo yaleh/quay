@@ -789,8 +789,23 @@ test("AC-238 — the drift report sees it and reads ok on all three sides (was: 
   assert.equal(r.status, 0, `the report must exit 0 when there is no hard diff:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /GOAL-009-AC-238\s+\[ok\] criterion=7 schema=7 writer=7/,
     "AC-238 must be registered, written and read — and the three counts must agree (else it is DRIFT/surplus)");
-  assert.match(r.stdout, /14 AC registered/,
-    "the declaration table must have grown by exactly the new AC-238 row (13 → 14)");
+  // ⚠️ 这一条原先是**写死的字面量**（`/15 AC registered/`，注释里还留着 13→14→15 的手改史 ——
+  // 每加一行声明就要人来改一次）。这类字面量与「真的坏了」**同形**：加一行新 AC 会红，而红的样子
+  // 与真违规一模一样。AC-257 已经在**另一个**测试文件（develop-deliver-tgz-evidence-transport.test.mjs）
+  // 里踩过这个坑并改成「从模式定义推导」；本条是**同一缺陷在兄弟文件里的残留**
+  // （硬规则 5b：修好一个 ≠ 只在那一处；兄弟实例常在同一处甚至同一行）。本次加 AC-258 行时它果然红了。
+  // ⇒ 改为从【单一真源】推导：AC_RECORD_SCHEMA 里非注释、非空行的条数。它再也无法过期。
+  const declSrc = fs.readFileSync(SCRIPT, "utf8");
+  const declBlock = declSrc.match(/^AC_RECORD_SCHEMA='\n([\s\S]*?)\n'$/m);
+  assert.ok(declBlock, "AC_RECORD_SCHEMA must be findable as its own single-source block in the script");
+  const declaredCount = declBlock[1].split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).length;
+  assert.match(r.stdout, new RegExp(`${declaredCount} AC registered`),
+    `the registered count must equal the number of non-comment rows in AC_RECORD_SCHEMA (${declaredCount}) — DERIVED from the single source, ⛔ not a literal that goes stale with every new AC`);
+  // 同一个动作里把 GOAL-018 的两条一并钉住：它们各自的 criterion / 声明 / writer 三边必须一致。
+  for (const ac of ["GOAL-018-AC-257", "GOAL-018-AC-258"]) {
+    assert.match(r.stdout, new RegExp(`${ac}\\s+\\[ok\\] criterion=11 schema=11 writer=11`),
+      `${ac} must be registered, declared and written on all three sides (criterion=11 schema=11 writer=11)`);
+  }
 });
 
 // AC4 — the new write point is fail-closed and the failure is falsifiable: every declared AC-238 field
@@ -809,6 +824,81 @@ test("AC-238 — every declared field is enforced at write time, and the refusal
   // the choke point, and must NOT carry its own anchor literal (the anchored mode injects build_sha/ts).
   assert.match(r.stdout, /ac238-writer bare-printf-to-AC89-hits=0 choke-point-hits=1 build_sha-literal-hits=0/,
     "the bare printf must be gone, the write must go through ac_record_append, and the anchor must come from the choke point alone");
+});
+
+// ── GOAL-018 AC-257：project-scope 安装 + quay-init 合并语义 + 真实 todo→done ────────────────────
+// AC3 — the third side of the report must see it: registered, written and read, all three counts equal.
+// ⚠️ criterion=11 而不是 10：判据逐字 `mp = str(r.get("marketplace_path") or r.get("provider_path") or "")`
+// —— `or` 右侧不是死代码，两个键【都在读】。若只声明 10 个字段，报告会打印
+// `⚠ 判据读、声明缺: ['provider_path']` 并 exit 1（这正是本次实测到的形态）。
+test("AC-257 — the drift report reads it ok on all three sides, at 11 fields", () => {
+  const r = run(["--ac-record-schema-report"]);
+  assert.equal(r.status, 0, `the report must exit 0 when there is no hard diff:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /GOAL-018-AC-257\s+\[ok\] criterion=11 schema=11 writer=11/,
+    "AC-257 must be registered, written and read, and the three counts must agree (else it is DRIFT)");
+});
+
+// AC4 — write_ac257_record can take BOTH values (正例写入 / 负例拒写), and merge_preserved is the
+// negative that matters: it is the AC's most expensive reading (two sub-readings must BOTH hold), so a
+// missing one must be REFUSED rather than defaulted — otherwise `merge_preserved: true` degrades into
+// a string anyone can fill in, i.e. a量 that cannot take false (硬规则 4).
+test("AC-257 — write_ac257_record refuses a missing merge_preserved and writes the complete record", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac257\(positive, all 11 fields\) wrote=1 lines=0→1/,
+    "the all-fields positive must write exactly one record (so the refusals below are not vacuous)");
+  assert.match(r.stdout, /ac257\(negative, merge_preserved omitted\) refused=1 lines=1→1/,
+    "omitting merge_preserved must be refused with ZERO new lines — the AC's core reading must be falsifiable");
+  assert.match(r.stdout, /ac257\(every-field-enforced\) declared=11 each_omitted_refused=11/,
+    "every declared field — not just the one the criterion happens to name — must be individually enforced (硬规则 5b)");
+  assert.match(r.stdout, /ac257\(probe-path-negatives\) refused=2\/2/,
+    "a probe-shaped marketplace/provider path (verify-/probe//tmp/) must be refused at write time, not only by the criterion");
+});
+
+// ── AC-161 fourth regression ──────────────────────────────────────────────────────────────────
+// gap-ac161-4th-regression-agent-runs-scope-user-install-to-refresh-a-shared-plugin-cache
+// (2026-09-15). Three regressions in a row were each closed by plugging ONE declared write channel;
+// the fourth came from an agent that simply CHOSE `--scope user` while re-filling the cross-scope
+// SHARED plugin cache. The fix moves the criterion onto the artifact: the delivery channel's records
+// (AC-257/AC-258) read the user-level enabledPlugins state before writing and carry it as a field
+// on the SAME record, and the reading is three-valued so "could not read" never shares an output
+// with "read and clean" (硬规则 3b).
+
+// AC3 (task) — the reading must reach the RECORD, not a side file: 「同一条记录」.
+test("AC-161/4th — the user-scope reading is a field ON the AC-257/AC-258 record, with distinct values per state", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(user-scope state\) clean='absent' dirty='present:quay@quay' missing='unreadable:not-found' malformed='unreadable:parse'/,
+    "the reading must be three-valued (absent / present:<keys> / unreadable:<reason>) — a two-valued one conflates 'read and clean' with 'could not read' (硬规则 3b)");
+  assert.match(r.stdout, /ac161\(record field, clean\) ac257_wrote=1 lines=0→1 field='absent'/,
+    "a clean user level must let the AC-257 record through AND stamp the reading into that very record line (AC3: 与记录同时产生)");
+  assert.match(r.stdout, /ac161\(record field, user-key-present\) ac257_refused=1 lines=1→1 ac258_wrote=1 ac258_field='present:quay@quay'/,
+    "with a user-level quay key the AC-257 record must be REFUSED with zero new lines — while the AC-258 record must still be written and record the lived state (its own premise REQUIRES a user-scope registration)");
+  assert.match(r.stdout, /ac161\(record field, unreadable\) ac257_refused=1/,
+    "an unreadable user level must also refuse — and be reported as NOT-EVALUATED, distinct from the violation");
+});
+
+// AC4 (task) — the judgement must be able to take FALSE. A criterion that reads the same in both
+// states is vacuous (硬规则 4: 一个结构上不可能取假的量不是测量).
+test("AC-161/4th — the criterion can take false (clean≠dirty) and the two refusals are distinguishable", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(refusal messages\) dirty='AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=present:quay@quay[^']*' unreadable='AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=unreadable:not-found[^']*'/,
+    "the two refusal paths must NAME different states — 'the premise is violated' vs 'could not evaluate' (硬规则 3b: 读不懂不得与不合格同形)");
+});
+
+// AC6 (task) — hard rule 5b, applied to the mechanism the fourth regression actually used: the
+// defect was NOT the string `--scope user`, it was OMITTING `--scope` and inheriting the CLI default.
+// Command line, logs and record look identical before and after such a default flips.
+test("AC-161/4th — every EXECUTED `claude plugin install|update` in the script carries an explicit --scope (positional)", () => {
+  const r = selfcheck();
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac161\(explicit-scope, positional\) executed-calls=(\d+) with-scope=(\d+) probe-known-true-sample=(\d+) unscoped=''/,
+    "the scan must report a call count, a scoped count, and a dry run proving the predicate can hit the known-true sample");
+  const m = r.stdout.match(/ac161\(explicit-scope, positional\) executed-calls=(\d+) with-scope=(\d+) probe-known-true-sample=(\d+)/);
+  assert.ok(m, "the scan line must be present");
+  assert.equal(m[1], m[2], "every executed `claude plugin install|update` line must pass --scope — an omitted flag silently means the CLI default (`user`), which is exactly how the shared-cache refresh reddened AC-161");
+  assert.ok(Number(m[3]) >= 1, "the predicate must be dry-run against a known-true sample, otherwise a zero hit count is indistinguishable from a broken scan (硬规则 2)");
 });
 
 // AC2 — the rename is complete: the historical name is gone from the WHOLE script, comments included,
