@@ -49,4 +49,6 @@ extract
 - `plugin/scripts/outer-retirement-precondition-check.ts`
 - `plugin/scripts/kernel-sibling-resolution-check.ts`
 - `plugin/scripts/target-identity-literal-check.ts`
+- `plugin/scripts/fs-walk.ts`
+- `plugin/test/fs-walk.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-shell-scan-surface-family.md`
