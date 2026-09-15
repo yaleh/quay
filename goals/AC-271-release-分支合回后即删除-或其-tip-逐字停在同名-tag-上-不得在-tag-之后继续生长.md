@@ -1,7 +1,7 @@
 ---
 id: AC-271
 title: release 分支合回后即删除，或其 tip 逐字停在同名 tag 上——⛔ 不得在 tag 之后继续生长
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -40,5 +40,11 @@ origin: SPEC §4.1 + §7 乙。立案实测：release-v062-build 的 tip 正好�
   改动）⇒ 分支名说『v063 的构建』，内容已经不是。nvie 原文要求 release 分支合回后删除；本判据接受删除或 tip 停在 tag
   上两种合规形态。立案当轮实跑：exit 1，1 of 2 违规。
 activatedAt: 2026-09-15T14:02:15.532Z
+statusLog:
+  - at: 2026-09-15T16:20:53.791Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
