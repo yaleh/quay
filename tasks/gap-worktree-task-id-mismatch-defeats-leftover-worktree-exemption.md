@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption
 title: worktree/分支名与任务 id 不精确匹配（如被截断）时 leftover-worktree 豁免与 superseded-reclaim 双双静默失效
-status: ready
+status: done
 labels:
   - gap
   - defect
