@@ -82,19 +82,63 @@ supervisorStaleness              = fresh
 
 ## AC
 
-- [ ] AC1 读数是**直接量**，且指向跑着的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。（⛔ 对 `plugin/scripts/goal-driver.ts` 求值不算——源侧本来就过，是空转形，硬规则 4c 推论三。）
-- [ ] AC2 **活的内核**上复核：修复后经一轮真实 goal 环，`grep -c 'RE-RAN its criterion directly before filing'` 在该轮实际写出的 gap-filing prompt 载体上 ≥ 1（或在跑内核加载的模块上 ≥ 1，AC1 同口径）。
-- [ ] AC3 **区分对照**（硬规则 4c 推论四：必须给出「若假设为假则结果会不同」的对照）：对「内核在 gitignored dev-tree 暂存目录」这一输入，两臂预测相反并各有落痕——
+- [ ] AC1 读数是**直接量**，且指向跑着的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。（⛔ 对 `plugin/scripts/goal-driver.ts` 求值不算——源侧本来就过，是空转形，硬规则 4c 推论三。）——**待激活**：跑着的内核仍加载 07:35 的暂存 bundle（`recheckFrozenFailing`=0、旧句=1）。⛔ 这不是实现缺口，是**引导缺口**：修复的自刷新只在「跑着的内核已含本修复」时才生效，故需要一次外部激活（见 `## Resolution` 的激活配方）；激活后本判据在本修复的基线上自动成立，无需再改代码。**（待外部）**
+- [ ] AC2 **活的内核**上复核：修复后经一轮真实 goal 环，`grep -c 'RE-RAN its criterion directly before filing'` 在该轮实际写出的 gap-filing prompt 载体上 ≥ 1（或在跑内核加载的模块上 ≥ 1，AC1 同口径）。——**待激活**（与 AC1 同一引导缺口、同一配方）。**（待外部）**
+- [x] AC3 **区分对照**（硬规则 4c 推论四：必须给出「若假设为假则结果会不同」的对照）：对「内核在 gitignored dev-tree 暂存目录」这一输入，两臂预测相反并各有落痕——
   **(a) 源内核未推进** ⇒ 读数/行为 = `fresh`（不自刷新、不报陈旧）；**(b) 源内核已推进** ⇒ 读数/行为 = 陈旧（自刷新到源内核，或以独立取值报出）。只给一臂不算过。
-- [ ] AC4 回归钉子接进常规套件（`plugin/test/driver-anchor.test.mjs` 或 `plugin/test/kernel-sibling-resolution-check.test.mjs`，路径须匹配 `scripts/test.sh` 的 glob），且该测试**能取假**：把修复回退 ⇒ 它必红（⛔ 不许用只断言「函数存在」的形状）。
+  **落地**：`plugin/test/driver-anchor.test.mjs` 的 `内核源树两臂对照`（同一夹具、只改源树 mtime 这一处）：(a) ⇒ `mirror` + `fresh`；(b) ⇒ `stale`；并显式断言同一输入下**旧读法** = 0（正控制）。(b) 的**行为**半边 = `preferredAnchorKernelIn` 换到源树里更新的那份 bundle（测试 ii/iii 钉住「更旧不换 / 无源树不换」）。**活体读数**（跑着内核的路径，见 Resolution 表）：goal/promotion 均 `mirror` + `stale`。
+- [x] AC4 回归钉子接进常规套件（`plugin/test/driver-anchor.test.mjs` 或 `plugin/test/kernel-sibling-resolution-check.test.mjs`，路径须匹配 `scripts/test.sh` 的 glob），且该测试**能取假**：把修复回退 ⇒ 它必红（⛔ 不许用只断言「函数存在」的形状）。
+  **落地**：`plugin/test/driver-anchor.test.mjs` 三个测试（两臂对照 / fail-closed 三态 / `preferredAnchorKernelIn` 三态）。**突变实测 1/1 红**：把 `sourceFilesMaxMtimeMs` 回退成「只 stat 本内核目录」的旧 body ⇒ `内核源树两臂对照` 红（`ℹ fail 1`），恢复 ⇒ 3/3 绿。
 - [ ] AC5 AC-259 的 `--stale-pass` 读数转 `verifiedFresh`：`quay goal check --stale-pass --root /home/yale/work/quay` → **exit 0** 且 `failing` 不含 `AC-259`；**负控制**：`.quay/gate-events.jsonl` 里存在满足 `pipeline_id="AC-259" ∧ gate="goal" ∧ actor ∈ {goal-sweep, goal-amend} ∧ verdict="pass" ∧ timestamp > 2026-09-15T17:35:05.096Z ∧ payload.criterionHash == "8ccfd00300ded08f"` 的事件。（老化不产生新事件；后写的 `goal-cli` pass 判定面不读 ⇒ 这条能区分「轮转真的重取过」与「等它自己掉出去」。）
+  ——**待轮转**：轮转在推进中（18:20 那轮取了 AC-201/205/207/232/234/238），尚未取到 AC-259（当前 `failing: ["AC-259"]`、`frozenScope: 86`）。本条**与本修复无关**（是 Finding ③ 的竞态，靠轮转重取收敛），且**不需要激活**。**（待外部）**
 
 ## DoD
 
-- 跑着的 self-host 内核加载的 goal 模块**含** `recheckFrozenFailing`，且不再逐字携带 `No other mechanism re-runs it…` 那句——证据取自**跑着内核的路径**（AC1 口径），不是源文件。
-- 「内核跑在 dev-tree 暂存目录 ⇒ 静默陈旧」这一形态被消除或被报出（AC3 两臂实测落痕）；`driver-runtime.ts:1451-1454` 那句「装好的 bundle 是静态的」所依赖的前提被写清（暂存目录 ≠ 装好的产物），或该注释与代码一并更正。
-- AC-259 的判据仍为真（`quay goal gate AC-259` → exit 0），且读数 exit 0 / `failing` 不含它，AC5 的负控事件真实存在。
-- `## Resolution` 留有可复核的：内核 pid + cmdline + 其加载模块的**绝对路径** + 该路径上的两个 grep 读数 + AC3 两臂读数 + AC5 事件 timestamp。下一轮无需重新推导。
+- 跑着的 self-host 内核加载的 goal 模块**含** `recheckFrozenFailing`，且不再逐字携带 `No other mechanism re-runs it…` 那句——证据取自**跑着内核的路径**（AC1 口径），不是源文件。**（待激活，见 AC1）**
+- 「内核跑在 dev-tree 暂存目录 ⇒ 静默陈旧」这一形态被消除或被报出（AC3 两臂实测落痕）；`driver-runtime.ts:1451-1454` 那句「装好的 bundle 是静态的」所依赖的前提被写清（暂存目录 ≠ 装好的产物），或该注释与代码一并更正。**✅ 已做**：该注释整段重写为「一个目录里被监视 .ts 全缺 ⇒ 退回它的**源树**；源树也没有（真·装好的产物）⇒ `unwatched` 独立取值」，并新增 `kernelSourceScriptsDir` / `sourceWatch`。
+- AC-259 的判据仍为真（`quay goal gate AC-259` → exit 0），且读数 exit 0 / `failing` 不含它，AC5 的负控事件真实存在。**（AC5 待轮转）**
+- `## Resolution` 留有可复核的：内核 pid + cmdline + 其加载模块的**绝对路径** + 该路径上的两个 grep 读数 + AC3 两臂读数 + AC5 事件 timestamp。下一轮无需重新推导。**✅ 见下**
+
+## Resolution
+
+**实现（3 处，全在 kernel 自身安装位置的派生量上；⛔ 不拼 `--root`、⛔ 不碰 Core 的 `plugin-root.ts`）**
+
+1. `driver-runtime.ts` 新增 `kernelSourceScriptsDir()` + `sourceWatch(root,kind)` **三态**（`watched` / `mirror` / `unwatched`）；`sourceFilesMaxMtimeMs` 改走它 ⇒ `mirror` 态比的是**源树**的 mtime，`unwatched` 是**独立取值**（⛔ 不再与「未变更」共用一个恒 0）。源树 = `<mainCheckoutRoot>/<本内核 plugin 树的同名树>/scripts`（取 basename，⛔ 不写死 `"plugin"` 字面量——driver 域的布局锚点被 `kernel-sibling-resolution-check` 的 DRIVER-SCOPE 规则判红）。⛔ **不用 `repoRoot`**：它兜底 `process.cwd()`，会让一个从 quay 检出目录里起来的**装好的**内核把 cwd 误当仓库根。
+2. `supervisorStaleness` / `aliveness()` / `driver status --json` 带上 `sourceWatch` + `sourceWatchDir`（JSON 键 `source_watch` / `source_watch_dir`）——`fresh` 在 `unwatched` 下说的是「盘上没有源可推进」，在 `mirror` 下说的是「源码未推进到启动时刻之后」，⛔ 两者不再同形（硬规则 3b）。
+3. `preferredAnchorKernel` 的**判定半边**拆成 `preferredAnchorKernelIn(here, mainDir, srcScripts)`（⇒ 可单测）：本内核是**构建产物**时优先**源树里更新的那份 dist bundle**；`runAnchor` 新增 `bundleStale` 支，判据 = 「源树最新 mtime > **本进程加载的那份 kernel 文件的 mtime**」（⛔ 不是 `> hostStartedAt`——那会被重启洗掉），换不动时**如实留痕**并留在原地（⛔ 不重启风暴、⛔ 不假装 fresh）。`runSupervisor` 的 sourceCheck 同口径（只对 `watched` 才重启 child——构建产物下 child 重启加载的是同一个 bundle，换不了版本）。**⛔ 全程保持 dist-kernel 形态**（bundle → bundle），不退回 raw：`gap-driver-runtime-driver-path-anchored-at-project-root-not-dist`（done）的第三方能力不受影响。
+
+**活体读数（⛔ 直接量，取自跑着内核的路径）**
+
+内核：`pid 4014875`，cmdline `/home/yale/work/quay/packages/quay/plugin/scripts/dist/driver-anchor.js __anchor --root /home/yale/work/quay`；它加载的 goal 模块 `/home/yale/work/quay/packages/quay/plugin/scripts/dist/goal-driver.js`（mtime `2026-09-15T07:35:49.685Z`；`grep -c 'recheckFrozenFailing'` = **0**，`grep -c 'No other mechanism re-runs it'` = **1**）。
+
+按该内核的 `resolveKernelScriptsDir()` 基准跑本修复：
+
+| kind | 旧读法 | `sourceWatch` | `dir` | mtime | vs 启动 02:15:14.983Z |
+|---|---|---|---|---|---|
+| goal | 0（恒 0） | `mirror` | `/home/yale/work/quay/plugin/scripts` | 2026-09-15T14:45:40.177Z | **stale** |
+| promotion | 0（恒 0） | `mirror` | 同上 | 2026-09-15T12:28:38.947Z | **stale** |
+
+⇒ 陈旧检测器从「对一个陈旧 2h41m 的内核报 `fresh`」变成 **`stale` + `sourceWatch=mirror`**。
+
+**AC3 两臂 / AC4 突变实测**：见对应 AC 勾选处的落地与读数。
+
+**⛔ AC1/AC2 的引导缺口与激活配方（需 manager/operator 权限；driver 生命周期是 manager 的常设权限）**
+
+引导缺口：修复的自刷新（`preferredAnchorKernel` ③ + `bundleStale`）只在**跑着的内核已含本修复**时才生效；而 `quay driver start` 经 Core 的 `resolvePluginRoot()` 解析到的仍是**同一个暂存 dist**（`packages/quay/plugin`）⇒ 单靠重启不换版本。⇒ 需要一次**外部激活**：
+
+```bash
+# ① dev 产物（源树那份，<repo>/plugin/scripts/dist）重建到最新
+node /home/yale/work/quay/packages/quay/scripts/build-plugin-dist.mjs /home/yale/work/quay/plugin
+# ② 同步进运行内核所在的暂存树（只覆盖 scripts/dist；⛔ 不动暂存树的其它文件）
+rsync -a /home/yale/work/quay/plugin/scripts/dist/ /home/yale/work/quay/packages/quay/plugin/scripts/dist/
+# ③ 重启 anchor（stop 不杀 worker 在飞子进程，SPEC §6.9 不变式 3）；随后负控制：ps aux | grep driver-anchor
+node /home/yale/work/quay/packages/quay/bin/quay.js driver restart --kind promotion   # 六个 kind 逐个
+# ④ 复核 AC1：ps -o cmd= -p $(cat .quay/anchor.pid) → 同口径解析 goal 模块 → 两个 grep
+```
+
+激活后 AC1/AC2 在本修复的基线上自动成立（内核换到 `<repo>/plugin/scripts/dist/`，其 goal 模块为 12:39 版：`recheckFrozenFailing` = 3、旧句 = 0），**无需再改代码**；且此后源树产物一旦更新，内核会经 `bundleStale` 自行换过去（不再需要人工）。
+
+**AC5 状态**：与本修复无关（Finding ③ 的竞态靠轮转重取收敛）。实测 18:2xZ：轮转在推进（18:20 那轮 AC-201/205/207/232/234/238），AC-259 未取到 ⇒ `failing: ["AC-259"]`、`frozenScope: 86`。事件 timestamp 待轮转写下（判据条件见 AC5 负控制）。
 
 ## Touches
 
