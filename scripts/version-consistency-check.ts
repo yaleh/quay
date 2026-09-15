@@ -57,10 +57,19 @@ const VERSION_ENTRIES: VersionEntry[] = [
     // produce a value shaped like "pass"). Added by
     // gap-ac169-readme-version-not-in-version-consistency-set: README had drifted to v0.6.1 while
     // plugin.json was 0.6.3 across two bumps, precisely because it was NOT in this set.
+    //
+    // The capture group spans the WHOLE version token, INCLUDING an optional prerelease suffix.
+    // This is not cosmetic: the previous form `/^quay plugin v(\d+\.\d+\.\d+)\b/m` *looks* like it
+    // matches a version, but `\b` holds between `0` and `-`, so on `quay plugin v0.7.0-dev` the
+    // group closes at `0.7.0` and the suffixed token reads as a BARE `0.7.0` — exactly the
+    // self-description AC-272 exists to eliminate (hard rule 4c: a quantity that does not survive
+    // the intermediate layer is not the quantity being judged; this one was measured, not assumed).
+    // Widening the COMPARISON to prefix-equality is NOT the fix — that would let `0.7.0-dev` and
+    // `0.7.0` judge each other consistent, which is the ambiguity itself.
     label: 'plugin/README.md',
     path: 'plugin/README.md',
     extract: (raw: string) => {
-      const m = raw.match(/^quay plugin v(\d+\.\d+\.\d+)\b/m);
+      const m = raw.match(/^quay plugin v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/m);
       if (!m) {
         throw new Error(
           'no "quay plugin v<semver>" version line found in plugin/README.md (cannot evaluate — not a pass)',
@@ -106,6 +115,10 @@ const VERSION_ENTRIES: VersionEntry[] = [
     // 0.5.0 — requiring a second commit `bd466ce2a` to repair, with this checker green in between.
     // The extractor THROWS when the file does not hold a semver token: an unreadable stamp must land in
     // mode:'error', never be shaped like a stamp that agrees (hard rule 3b).
+    // CONFIRMED (AC4, 2026-09-15) to survive the `-dev` suffix: it RETURNS THE WHOLE TRIMMED LINE
+    // (`return v`), and `/^\d+\.\d+\.\d+/` is only a fail-closed GUARD, not a capture — so
+    // `plugin/VERSION` holding `0.7.0-dev` reads back verbatim as `0.7.0-dev`. Contrast the README
+    // entry above, whose extractor DID capture a truncated prefix.
     label: 'plugin/VERSION',
     path: 'plugin/VERSION',
     extract: (raw: string) => {
@@ -147,23 +160,57 @@ export function readVersions(root: string): { label: string; path: string; versi
     });
 }
 
+/**
+ * SPEC §4.3 option ii (human ruling 2, 2026-09-15): develop carries `X.Y.Z-dev`, the release branch
+ * drops the suffix, the tag is cut on the de-suffixed commit. The union must therefore be
+ * ALL-OR-NONE — either every carrier advertises a prerelease, or none does. A half-applied bump
+ * (`0.7.0-dev` here, `0.7.0` there) makes "is this a released version?" depend on WHICH carrier you
+ * read, which is the ambiguity AC-272 exists to remove.
+ *
+ * Honest scope (hard rule 4 — do not dress a redundant quantity up as a measurement): given the
+ * exact-string comparison above, `mixed` already implies `drift`, so this predicate does not add a
+ * second independent gate TODAY. What it adds is (a) a named diagnosis that enumerates BOTH forms
+ * instead of reporting "N different versions", and (b) a guard that survives a future relaxation of
+ * the comparison — if anyone ever "fixes" this checker to compare version PREFIXES (to be
+ * suffix-tolerant), exact equality stops reddening the half-bump and this predicate becomes the
+ * only thing that still does. Structure, not string equality, is what it reads.
+ */
+export function isPrereleaseVersion(v: string): boolean {
+  return /-[0-9A-Za-z.-]+$/.test(v);
+}
+
+export type SuffixPolicy = 'all-suffixed' | 'all-bare' | 'mixed' | 'not-evaluated';
+
+export function suffixPolicyOf(versions: string[]): SuffixPolicy {
+  if (versions.length === 0) return 'not-evaluated';
+  const suffixed = versions.filter(isPrereleaseVersion).length;
+  if (suffixed === versions.length) return 'all-suffixed';
+  if (suffixed === 0) return 'all-bare';
+  return 'mixed';
+}
+
 export interface CheckResult {
   ok: boolean;
   entries: { label: string; path: string; version: string; error?: string }[];
   uniqueVersions: string[];
   mode: 'all-equal' | 'drift' | 'error';
+  suffixPolicy: SuffixPolicy;
 }
 
 export function check(root: string): CheckResult {
   const entries = readVersions(root);
   const errors = entries.filter((e) => e.error);
   if (errors.length > 0) {
-    return { ok: false, entries, uniqueVersions: [], mode: 'error' };
+    // An unreadable member is NOT-EVALUATED, never 'all-bare' (hard rule 3b: "could not read" must
+    // not wear the same value as "read and it was fine").
+    return { ok: false, entries, uniqueVersions: [], mode: 'error', suffixPolicy: 'not-evaluated' };
   }
   const versions = entries.map((e) => e.version);
   const unique = [...new Set(versions)];
+  const suffixPolicy = suffixPolicyOf(versions);
   const allEqual = unique.length === 1;
-  return { ok: allEqual, entries, uniqueVersions: unique, mode: allEqual ? 'all-equal' : 'drift' };
+  const ok = allEqual && suffixPolicy !== 'mixed';
+  return { ok, entries, uniqueVersions: unique, mode: ok ? 'all-equal' : 'drift', suffixPolicy };
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -194,6 +241,14 @@ if (isMain) {
       console.error(`  ${e.label.padEnd(55)} ${e.version}`);
     }
     console.error(`\n${result.uniqueVersions.length} different versions across ${result.entries.length} files`);
+    if (result.suffixPolicy === 'mixed') {
+      // Name the failure mode: a half-applied `-dev` bump is not "N versions drifted", it is the
+      // union disagreeing with itself about whether this tree is a released version.
+      console.error('\nSUFFIX POLICY: MIXED — the union carries BOTH forms:');
+      console.error(`  prerelease (X.Y.Z-…): ${JSON.stringify(result.uniqueVersions.filter(isPrereleaseVersion))}`);
+      console.error(`  bare       (X.Y.Z) : ${JSON.stringify(result.uniqueVersions.filter((v) => !isPrereleaseVersion(v)))}`);
+      console.error('SPEC §4.3 option ii (ruling 2, 2026-09-15): all-or-none — every carrier carries -dev, or none does.');
+    }
     process.exit(1);
   }
 

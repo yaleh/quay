@@ -10,7 +10,7 @@ import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { check, readVersions } from './version-consistency-check.ts';
+import { check, readVersions, suffixPolicyOf } from './version-consistency-check.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -199,6 +199,60 @@ test('check returns mode=error (NOT all-equal) when plugin/VERSION holds no semv
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── -dev suffix discipline (SPEC §4.3 option ii; gap-develop-version-union-missing-dev-suffix) ──
+// Hard rule 4: "the union is all-or-none" is only a measurement if it can take the FALSE value.
+// The GREEN half is not enough on its own — a checker that never reddens looks exactly like one
+// that judges (hard rule 3b), so a mixed-suffix case is pinned here alongside the uniform one.
+
+test('check returns all-equal for a uniformly -dev-suffixed fixture (GREEN)', () => {
+  const ver = '9.9.9-dev';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  const tmp = makeFixture('suffixed-unified', versions);
+  try {
+    const result = check(tmp);
+    // The README entry is the one that goes wrong here if its capture group does not span the
+    // suffix: with the old regex `/^quay plugin v(\d+\.\d+\.\d+)\b/m` this fixture reads the
+    // README as bare `9.9.9` ⇒ mode:'drift'. So this assertion is falsifiable by construction.
+    assert.equal(result.mode, 'all-equal');
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.uniqueVersions, [ver]);
+    assert.equal(result.suffixPolicy, 'all-suffixed');
+    const readme = result.entries.find((e: any) => e.path === 'plugin/README.md');
+    assert.equal(readme?.version, ver, 'README extractor must carry the -dev suffix through verbatim');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('check reddens a HALF-applied -dev bump and names both forms (RED)', () => {
+  const ver = '9.9.9-dev';
+  const versions: Record<string, string> = {};
+  for (const p of ALL_PATHS) versions[p] = ver;
+  versions['plugin/VERSION'] = '9.9.9'; // ONE member left bare — the half-bump AC-272 is about
+  const tmp = makeFixture('suffix-mixed', versions);
+  try {
+    const result = check(tmp);
+    assert.equal(result.ok, false);
+    assert.equal(result.mode, 'drift');
+    assert.equal(result.suffixPolicy, 'mixed');
+    assert.deepEqual([...result.uniqueVersions].sort(), ['9.9.9', '9.9.9-dev']);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('suffixPolicyOf is three-state: all-bare is NOT mixed, unreadable is NOT a policy', () => {
+  assert.equal(suffixPolicyOf(['1.0.0', '2.0.0']), 'all-bare');
+  assert.equal(suffixPolicyOf(['1.0.0-dev', '2.0.0-dev']), 'all-suffixed');
+  assert.equal(suffixPolicyOf(['1.0.0-dev', '2.0.0']), 'mixed');
+  // An empty read is NOT-EVALUATED, never 'all-bare' (hard rule 3b: "could not read" must not wear
+  // the same value as "read and it was fine").
+  assert.equal(suffixPolicyOf([]), 'not-evaluated');
+  // The unreadable-tree path must report not-evaluated rather than a policy.
+  assert.equal(check('/nonexistent/path/xyz').suffixPolicy, 'not-evaluated');
 });
 
 test('check handles marketplace.json with { plugins: [...] } wrapper', () => {
