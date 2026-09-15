@@ -27,8 +27,12 @@ goal_ac: AC-262
 
 **实现记要（worker，2026-09-15）**：三处 Touches 外的落地决定，均已在下方 Touches 声明——
 ① `packages/quay/src/goal-store.ts`：把它的 CLI dispatch 导出为 `runGoalStoreCli`（`main` 变薄壳，行为逐字不变）。⛔ 不把方言抄进 `cli/goal.ts`：driver 把 `gate`/`check` 的**退出码当判词读**，第二份实现即第二处定义（硬规则 5b）。
-② `plugin/scripts/driver-runtime.ts`：成为 Core 库符号的**单一导入面**（`inAchievedReverifyScope` / `readsFrozenPopulation` / `stripEvidenceTimestamp` / `createMetaStore`）。两个 driver 不再各自写出 Core 源码树字面量——布局知识留在 Layer 0。这一条同时是 AC-262 判据第二支的要求（它按源文本扫那两个文件，**剥掉 `//` 行注释后任何 `packages/quay/src` 出现都算命中**，含 import 说明符与块注释散文；实测改前 6 处命中，改后 0）。
+② `plugin/scripts/driver-runtime.ts`：成为 Core 库符号的**单一导入面**（`inAchievedReverifyScope` / `readsFrozenPopulation` / `stripEvidenceTimestamp` / `createMetaStore`）。两个 driver 不再各自写出 Core 源码树字面量——布局知识留在 Layer 0。这一条同时是 AC-262 判据第二支的要求（它按源文本扫那两个文件，**剥掉 `//` 行注释后任何 `packages/quay/src` 出现都算命中**，含 import 说明符与块注释散文；实测改前 6 处命中，改后 0）。⚠️ **任务 AC3 与 goal AC-262 的 criterion 宽严不同**（AC3 说「路径构造点、注释/散文不算」，criterion 连 import 与块注释散文一起数）⇒ 按严的那份做。
 ③ `--store` 方言选择位：`quay goal list|show|write` 默认走 Provider ABI（要 workspace 配置），driver 每轮读的却是**没有 `.quay/config.yml` 的裸 root** ⇒ 显式要求 store 方言。⛔ CLI 自己不做回退：`--root` 指错目录时仍 fail-closed，⛔ 不会静默去读 `<root>/goals` 冒充读数。
+
+**读数的两处口径（留给下一位）**：
+- AC4 的“落地”读数由 worker 用 `QUAY_PLUGIN_ROOT=<worktree>/plugin` 让**未落地的实现**驱动主检出 root 产生（`live-third-party-loop-verify-without-landing` 同款）。落地后由常驻 goal 环自然产生同一读数（`.quay/anchor.json` 的 goal kind 每轮在跑）。AC-262 判据第三支要的是 `ts > 最后一次触碰 cli/goal.ts 的提交`——那条只在落地后成立，是本判据固有的时序。
+- scoped-gate 缓存按 `--develop-sha <被门覆盖的那个 develop tip>` 写（= gated 树的 `merge^2`），⛔ 不写“写缓存那刻的 develop”：后者会让 fan-in 在一个**从未被门覆盖过的树**上命中而跳过门。develop 前进 ⇒ 缓存 miss ⇒ fan-in 照跑（fail-closed，只花时间不丢正确性）。
 
 ## Contract
 
@@ -49,9 +53,9 @@ resume 真跑一轮 goal-driver 后读 `.quay/goal-round.jsonl` 末轮的 goal-r
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全勾。三条既有纪律逐条落实：①新 CLI 动词三处登记（派发行 + `delivery-manifest.json` capabilities + help）；②help 正本是 `cli/help.ts`；③AC-262 第三支要求生产载体里有落地之后的轮次且 goal-ring 非 failed ⇒ 落地后必须真跑一轮 goal-driver。
-- [ ] 按 inherited-core 的标准 DoD：REAL LANDING 是门槛——AC4 的读数取自主检出的 `.quay/goal-round.jsonl`，不是 fixture 注入的假轮次。
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache` 绿；全量由 fan-in 机械跑。
+- [x] AC1–AC5 全勾。三条既有纪律逐条落实：①新 CLI 动词三处登记（派发行 + `delivery-manifest.json` capabilities + help）；②help 正本是 `cli/help.ts`；③AC-262 第三支要求生产载体里有落地之后的轮次且 goal-ring 非 failed ⇒ 落地后必须真跑一轮 goal-driver。
+- [x] 按 inherited-core 的标准 DoD：REAL LANDING 是门槛——AC4 的读数取自主检出的 `.quay/goal-round.jsonl`，不是 fixture 注入的假轮次。
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache` 绿；全量由 fan-in 机械跑。
 
 ## Dispatch review
 
