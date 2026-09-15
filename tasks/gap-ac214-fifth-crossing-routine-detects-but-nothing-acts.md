@@ -3,7 +3,7 @@ id: gap-ac214-fifth-crossing-routine-detects-but-nothing-acts
 title: AC-214 第五次转红（冷启动面 AC-203/205/207/232 = 201/200，margin
   −1）：第四次任务建的「刷新动作机械化」只机械化了【检测】——freshness-refresh 例程今日跑了 9 次、报了 30+ 条 stale 主体
   finding 落进 .quay/routine-findings.jsonl，而该载体【没有消费者】，10.5 小时预警窗内零动作
-status: ready
+status: done
 labels:
   - gap
   - defect
