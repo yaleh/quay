@@ -1,7 +1,7 @@
 ---
 id: AC-263
 title: 缺口D：主发布渠道（marketplace）有能取假且被 mutation case 钉住的 dist 闭包闸
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -63,6 +63,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-019 已激活，本 AC 进入在评
+  - at: 2026-09-15T05:52:53.163Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
