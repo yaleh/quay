@@ -92,6 +92,11 @@ import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 本条曾经是第三次手搓
 // buildNonCodeMask (写 A16 时又犯一次), 现在与 drive-contract/test-framework-policy 共用同一库。
 import { buildNonCodeMask } from "./checker-lib.ts";
+// firstArgRegion now lives in source-text-lib.ts (it was the same algorithm as
+// task-file-bypass-check.ts's copy, differing only in parameter order — .quay/routine-findings.jsonl
+// finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
+// exported it.
+import { firstArgRegion } from "./source-text-lib.ts";
 import { helpExit, readFileSafe } from "./gate-script-base.ts";
 import {
   hasNodeTestImport,
@@ -529,24 +534,6 @@ function sharedRootVars(src: string, mask: Uint8Array, initRe: RegExp = /process
     if (initRe.test(src.slice(m.index, end))) names.add(m[1]);
   }
   return names;
-}
-
-/** Region [start,end) of the FIRST argument of a call whose `(` is at `openIdx` (region = the
- * balanced-paren span returned by callRegion). Handles nested parens/brackets/braces and returns
- * the slice up to the first top-level comma (or the closing paren for a single-arg call). */
-function firstArgRegion(src: string, mask: Uint8Array, openIdx: number, region: string): [number, number] {
-  const endBound = openIdx + region.length;
-  let depth = 0;
-  for (let i = openIdx + 1; i < endBound; i++) {
-    if (mask[i] !== 0) continue;
-    const c = src[i];
-    if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") {
-      if (depth === 0) return [openIdx + 1, i];
-      depth--;
-    } else if (c === "," && depth === 0) return [openIdx + 1, i];
-  }
-  return [openIdx + 1, endBound - 1];
 }
 
 /** Region [start,end) of the initializer of the LAST declaration of `name` before `beforeIdx`

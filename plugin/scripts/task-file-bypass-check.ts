@@ -45,6 +45,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildNonCodeMask } from "./checker-lib.ts";
+// firstArgRegion now lives in source-text-lib.ts (it was the same algorithm as
+// test-isolation-check.ts's copy, differing only in parameter order — .quay/routine-findings.jsonl
+// finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
+// exported it.
+import { firstArgRegion } from "./source-text-lib.ts";
 import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 
 // ── ALLOWLIST (the ratchet baseline) ───────────────────────────────────────────────────────────────
@@ -123,22 +128,6 @@ function regionHasTaskPath(src: string, baseIdx: number, region: string, mask: U
   return false;
 }
 
-/** Region [start,end) of the FIRST argument of a call whose `(` is at `openIdx` (region = the
- *  balanced-paren span). Skips masked (string/comment) positions when tracking nesting so a comma
- *  inside a string literal never reads as the argument separator. */
-function firstArgRegion(src: string, openIdx: number, region: string, mask: Uint8Array): [number, number] {
-  const endBound = openIdx + region.length;
-  let depth = 0;
-  for (let i = openIdx + 1; i < endBound; i++) {
-    if (mask[i] !== 0) continue;
-    const c = src[i];
-    if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") { if (depth === 0) return [openIdx + 1, i]; depth--; }
-    else if (c === "," && depth === 0) return [openIdx + 1, i];
-  }
-  return [openIdx + 1, endBound - 1];
-}
-
 /** Scan one TS/JS/MJS source for task-path file-operation hits. Returns {line, snippet} list. */
 export function scanCode(src: string): Array<{ line: number; snippet: string }> {
   const codeMask = buildNonCodeMask(src);   // comments + strings + regex → non-code (call-site guard)
@@ -171,7 +160,7 @@ export function scanCode(src: string): Array<{ line: number; snippet: string }> 
       const closeIdx = balanced(openIdx);
       if (closeIdx < 0) continue;
       const region = src.slice(openIdx, closeIdx + 1);
-      const [as, ae] = firstArgRegion(src, openIdx, region, codeMask);
+      const [as, ae] = firstArgRegion(src, codeMask, openIdx, region);
       if (regionHasTaskPath(src, as, src.slice(as, ae), commentMask)) push(m.index);
     }
   }

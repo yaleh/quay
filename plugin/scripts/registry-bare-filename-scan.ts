@@ -35,6 +35,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// stripComments now lives in source-text-lib.ts (it was byte-identical to runtime-usage-inventory.ts's
+// copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside the finding's own pair). Not
+// re-exported: this module never exported it.
+import { stripComments } from "./source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -521,24 +525,6 @@ export function countExecutions(
 
 function walkSourceFiles(root: string): string[] {
   return listFiles(root, new Set([".ts", ".mjs", ".js", ".sh", ".md", ".yml", ".yaml"]));
-}
-
-function stripComments(src: string): string {
-  let out = "";
-  let i = 0;
-  while (i < src.length) {
-    if (src[i] === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-    } else if (src[i] === "/" && src[i + 1] === "*") {
-      i += 2;
-      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
-      i += 2;
-    } else {
-      out += src[i];
-      i++;
-    }
-  }
-  return out;
 }
 
 /** 屏蔽注释（行注释、块注释、bash 井号注释）但保留字符串字面量与代码，返回注释处替换为空格、其余

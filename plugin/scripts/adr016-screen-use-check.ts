@@ -57,6 +57,12 @@ import { helpExit } from "./gate-script-base.ts";
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
 import { walkFiles } from "./fs-walk.ts";
+// stripShellComments now lives in source-text-lib.ts (it was byte-identical to
+// dead-code-after-return-check.ts's copy apart from brace layout — .quay/routine-findings.jsonl
+// finding `firstargregion-stripshellcomments`). Re-exported so this module's public surface is
+// unchanged (plugin/test/adr016-screen-use-check.test.mjs imports it from here).
+import { stripShellComments } from "./source-text-lib.ts";
+export { stripShellComments };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -128,40 +134,6 @@ export interface ScanResult {
   violations: Violation[];
   retired: Violation[];
   files: string[];
-}
-
-/** Strip shell line comments (`#` to end of line) that are outside single/double quotes. A comment
- * mentioning `capture-pane | md5sum` must never satisfy the detector (same comment-vs-code
- * principle as test-framework-policy-check's non-code mask). Heredoc bodies are not fully modeled —
- * the scan excludes checker-mutation-cases (the only place heredocs embed the anti-pattern), so
- * the residual risk is accepted and documented. */
-export function stripShellComments(src: string): string {
-  const out: string[] = [];
-  for (const rawLine of src.split("\n")) {
-    let inS = false;
-    let inD = false;
-    let outLine = "";
-    for (let i = 0; i < rawLine.length; i++) {
-      const c = rawLine[i];
-      if (inS) {
-        outLine += c;
-        if (c === "'") inS = false;
-        continue;
-      }
-      if (inD) {
-        outLine += c;
-        if (c === "\\") { outLine += rawLine[i + 1] ?? ""; i++; continue; }
-        if (c === '"') inD = false;
-        continue;
-      }
-      if (c === "'") { inS = true; outLine += c; continue; }
-      if (c === '"') { inD = true; outLine += c; continue; }
-      if (c === "#" && (i === 0 || /\s/.test(rawLine[i - 1]))) break; // line comment
-      outLine += c;
-    }
-    out.push(outLine);
-  }
-  return out.join("\n");
 }
 
 /** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS and non-script files.

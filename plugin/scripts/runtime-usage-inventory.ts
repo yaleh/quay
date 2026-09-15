@@ -41,6 +41,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// stripComments now lives in source-text-lib.ts (it was byte-identical to
+// registry-bare-filename-scan.ts's copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside
+// the finding's own pair). Not re-exported: this module never exported it.
+import { stripComments } from "./source-text-lib.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -586,26 +590,6 @@ export function readTranscripts(
 }
 
 // ── Import parsing (AC3) ───────────────────────────────────────────────────────────────────────────────
-
-function stripComments(src: string): string {
-  // Remove line comments and block comments (naive — good enough for import-statements; a string
-  // literal containing "import ... from" is an acceptable, documented false positive).
-  let out = "";
-  let i = 0;
-  while (i < src.length) {
-    if (src[i] === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-    } else if (src[i] === "/" && src[i + 1] === "*") {
-      i += 2;
-      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
-      i += 2;
-    } else {
-      out += src[i];
-      i++;
-    }
-  }
-  return out;
-}
 
 const IMPORT_SPEC_RE = /(?:import\s*\(\s*|require\s*\(\s*|from\s*|import\s*)(['"])([^'"]+)\1/g;
 
