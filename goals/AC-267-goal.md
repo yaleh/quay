@@ -2,7 +2,7 @@
 id: AC-267
 title: SEA 产物的 quay serve 可用：plugin-root.ts 模块顶层求值 import.meta.url 的点数归零 +
   seaVerify=success
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -64,6 +64,11 @@ statusLog:
     to: active
     actor: manager
     reason: 激活：判据当轮干跑取假，精确命中 plugin-root.ts:33 顶层求值
+  - at: 2026-09-15T15:28:44.137Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
