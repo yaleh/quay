@@ -92,19 +92,38 @@ self-skip unless opted in」，**两处对本块都为假**。而 `release.yml:7
 
 ## Acceptance Criteria
 
-- [ ] AC1（静态臂，按位置判定）：逐字跑 AC-266 判据的静态两半——`unified = any("scripts/test.sh" in ln.split("#", 1)[0] for ln in wf.splitlines())` 与 `guarded`（剥 `//` 后同一物理行同时命中 token 名与 skip/return）——**`unified or guarded` 为真**。⛔ 报数前先打印 `unified` / `guarded` 两个布尔与命中的前 3 行（硬规则 2：裸子串在本文件恒真——`scripts/test.sh` 出现 3 次全在注释里，且注释说的是「不委托给它」）。立案基线（本机实测）：`unified=False, guarded=False`。
-- [ ] AC2（hang 根的直接量，本任务核心，必须能取假）：`env -u GH_TOKEN -u GITHUB_TOKEN -u QUAY_TEST_LIVE_GITHUB timeout 300 node --test packages/quay/test/mcp-server.test.mjs` **exit ≠ 124**，且 node:test 摘要**不再是 `cancelled 1` / `pass 0 fail 0`**，而是一个**已决结论**（`fail 0` 且 `pass ≥ 1`，或干净 `fail ≥ 1` 且 exit 1）。修前基线（本机实测）：`exit=124` / `cancelled 1` / `duration_ms 149941` / `'Promise resolution is still pending but the event loop has already resolved'`。
-- [ ] AC3（负控制，必须给出**相反预测**才算做，硬规则 4 推论四）：把第 2 条（block 10 的闸）**单独回退**、保留第 1 条（try/finally），同一条命令必须得**不同**结果——run 以**干净 FAIL + exit 1 退出**（rc=1，不是 124）。这同时证明两件事：①泄漏路径确由第 1 条关闭；②AC2 测的是 finally 本身，而不是那条闸。两次读数（带闸 / 去闸）的 rc 与 node:test 摘要都要贴出。
-- [ ] AC4（5b，修完贴数）：在 250 文件的 glob 里重跑本 Finding 的三条计数，`connectStdio` 有而 `finally` 无的文件数由 **2 → 0**；并把扫描命中数与前 3 条命中逐条贴出，⛔ 不是「修好我看到的这一个」。
-- [ ] AC5（机械产物能取假）：`release-test-client-close-check.ts` 存在且①在**故意去掉某文件 finally** 的变异下非零退出并打印该文件与行号（把原文件换回 ⇒ exit 0）；②对解析不出的输入返回 `NOT-EVALUATED`（与 exit 0 可区分）。四件登记义务齐备，且 `bash plugin/scripts/capability-catalog.sh --summary` 的自报脚本数与登记一致。
-- [ ] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-release-run-tests-hangs-on-shared-mcp-client-leak` 绿。⛔ 只跑 scoped 不足以证明 AC2 的命题——AC2/AC3 的两条直接量是独立证据，两者都要。
+- [x] AC1（静态臂，按位置判定）：逐字跑 AC-266 判据的静态两半——`unified = any("scripts/test.sh" in ln.split("#", 1)[0] for ln in wf.splitlines())` 与 `guarded`（剥 `//` 后同一物理行同时命中 token 名与 skip/return）——**`unified or guarded` 为真**。⛔ 报数前先打印 `unified` / `guarded` 两个布尔与命中的前 3 行（硬规则 2：裸子串在本文件恒真——`scripts/test.sh` 出现 3 次全在注释里，且注释说的是「不委托给它」）。立案基线（本机实测）：`unified=False, guarded=False`。**实测：`unified=False`（3 处 `scripts/test.sh` 剥注释后全为空串，逐条已打印）、`guarded=True`（`mcp-server.test.mjs:564` 一行内同时含字面量 `QUAY_TEST_LIVE_GITHUB` 与小写 `return`），`unified or guarded = True`。**
+- [x] AC2（hang 根的直接量，本任务核心，必须能取假）：`env -u GH_TOKEN -u GITHUB_TOKEN -u QUAY_TEST_LIVE_GITHUB timeout 300 node --test packages/quay/test/mcp-server.test.mjs` **exit ≠ 124**，且 node:test 摘要**不再是 `cancelled 1` / `pass 0 fail 0`**，而是一个**已决结论**（`fail 0` 且 `pass ≥ 1`，或干净 `fail ≥ 1` 且 exit 1）。修前基线（本机实测）：`exit=124` / `cancelled 1` / `duration_ms 149941` / `'Promise resolution is still pending but the event loop has already resolved'`。**实测（本任务 worktree、merge develop 之后、逐字命令）：`rc=0` / `pass 1` / `fail 0` / `cancelled 0` / `duration_ms 9471`；同一命令在 CI 等价环境（`GH_CONFIG_DIR` 指向空目录 ⇒ `gh` 未认证）下同样 `rc=0` / `pass 1` / `fail 0` / `cancelled 0`。⚠️ 该逐字命令在本机【修前也是 rc=0】——本机 `gh` 已登录（`gh auth status` = `✓ Logged in to github.com account yaleh`），env 变量不是闸、凭据库才是；故「修前 124」只能用 CI 等价环境复现，矩阵见 Evidence。**
+- [x] AC3（负控制，必须给出**相反预测**才算做，硬规则 4 推论四）：把第 2 条（block 10 的闸）**单独回退**、保留第 1 条（try/finally），同一条命令必须得**不同**结果——run 以**干净 FAIL + exit 1 退出**（rc=1，不是 124）。这同时证明两件事：①泄漏路径确由第 1 条关闭；②AC2 测的是 finally 本身，而不是那条闸。两次读数（带闸 / 去闸）的 rc 与 node:test 摘要都要贴出。**实测（闸单独回退、finally 保留、CI 等价环境）：`rc=1`（不是 124）/ `pass 0` / `fail 1` / `cancelled 0` / `duration_ms 4711`；抛点与修前逐字相同（`TypeError: Cannot read properties of undefined (reading 'tasks')`）。对照同环境下修前 `rc=124` / `cancelled 1` / `149946ms`。另做 DoD 那半边的反证：保留闸、只去掉 `finally`、把 block 10 强制跑起来 ⇒ `rc=124` / `cancelled 1` / `149936ms`（重新 hang 回去）。**
+- [x] AC4（5b，修完贴数）：在 250 文件的 glob 里重跑本 Finding 的三条计数，`connectStdio` 有而 `finally` 无的文件数由 **2 → 0**；并把扫描命中数与前 3 条命中逐条贴出，⛔ 不是「修好我看到的这一个」。**实测：glob=250（与 Finding 一致）；`connectStdio` 有而 `finally` 无 2 → 0（修前 `mcp-server.test.mjs`、`mcp-gate-dryrun.test.mjs`；修后为空）。⚠️ 位置判定下 `connectStdio` 作为【定义的 helper】只在 **4** 个文件（core-three-way-symmetry / mcp-gate-dryrun / mcp-server / provider-abi-conformance），Finding 的 **6** 是按关键词数出来的——`acceptance.test.mjs:415` 与 `acceptance-env.test.mjs:8` 只出现在注释里，正是判据头注释警告的那种假阳性。更宽的一遍（真 spawn stdio 子进程 = 代码里出现 `StdioClientTransport`，剥注释）：**16** 个文件，其中 5 个无 `finally`，但它们**全部用 node:test `after()` 钩子**（异常路径同样执行）⇒ 机制安全、不是缺陷。真打线上 `yaleh/quay` 且无闸的 = 1 → 0（`config-validate.test.mjs` 唯一一处是 `:1261` 的注释，已逐条确认）。**
+- [x] AC5（机械产物能取假）：`release-test-client-close-check.ts` 存在且①在**故意去掉某文件 finally** 的变异下非零退出并打印该文件与行号（把原文件换回 ⇒ exit 0）；②对解析不出的输入返回 `NOT-EVALUATED`（与 exit 0 可区分）。四件登记义务齐备，且 `bash plugin/scripts/capability-catalog.sh --summary` 的自报脚本数与登记一致。**实测（真树，非夹具）：基线 `exit 0`（`files scanned 250 … bindings checked 13, NOT judged 4`）；把真文件 `mcp-server.test.mjs` 里 `coreGh` 的 `finally` 删掉 ⇒ `exit 1` 且打印 `packages/quay/test/mcp-server.test.mjs: 'coreGh' bound at line 555 is never closed inside a finally`；换回 ⇒ `exit 0`；`--root` 指向无 workflow 的目录 ⇒ `exit 3 NOT-EVALUATED`（与 0、1 均可区分）。四件义务齐：catalog 六表 / `run_static_checks`（`@static-tier change` + `@static-object`）/ mutation case / `@checker-count` 61→62；`--summary` = `334 scripts | 334 declared | 0 unclassified | 329 ship`。**
+- [x] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-release-run-tests-hangs-on-shared-mcp-client-leak` 绿。⛔ 只跑 scoped 不足以证明 AC2 的命题——AC2/AC3 的两条直接量是独立证据，两者都要。**实测：先 `git merge --no-edit develop`（`Merge made by the 'ort' strategy`，无冲突），再跑 `--allow-thin` ⇒ `rc=0`。`--allow-thin` 是因为选择器报 `tests for 3/7 Touches entries (0.43) < 0.5`（7 条 Touches 里 3 条是新增文件、无测试映射），是选择宽度告警不是失败。**
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全勾，**且 AC2 的读数是在本任务 worktree 上、用上面那条逐字命令**跑出来的（本文的立案基线只作「修前」对照保留，不作「修后」证据）。
-- [ ] **REAL LANDING（DIR-026 Reading A）**：判据不是「测试文件里加了几行」，而是**那条会 hang 的命令现在会退出**，且**去掉 finally 能让它重新 hang 回去**——AC3 / AC5 的变异控制操作的就是这个对象本身，不是描述它。
-- [ ] **AC-266 的载体臂如实交代**：AC-266 判据还有第二半——`.quay/ci-runs.jsonl` 里存在一条 `ts` 晚于修复落地、且未因 job 超时被杀的 release run。本任务**不生产该载体**（它的生产者是 AC-265 的 `plugin/scripts/ci-runs-collect.ts`；触发一次真实 release run 属 AC-268 的范围）。⇒ 收口时若载体仍不存在 / 仍无 post-fix release run，**如实记为「静态臂已闭合、载体臂待一次真实 release run」**，⛔ 不伪造一条记录去骗 AC-266，也不把这条缺口说成已完成。
-- [ ] 负控制留档：AC3 的两个 rc 与 node:test 摘要、AC5 的变异/还原两次读数，落 `.quay/` 下一个证据文件并在本任务的 Evidence 段引用。
+- [x] AC1–AC6 全勾，**且 AC2 的读数是在本任务 worktree 上、用上面那条逐字命令**跑出来的（本文的立案基线只作「修前」对照保留，不作「修后」证据）。
+- [x] **REAL LANDING（DIR-026 Reading A）**：判据不是「测试文件里加了几行」，而是**那条会 hang 的命令现在会退出**，且**去掉 finally 能让它重新 hang 回去**——AC3 / AC5 的变异控制操作的就是这个对象本身，不是描述它。**两条变异控制都跑在真树/真命令上：AC3 去掉闸 ⇒ rc 124→1；DoD 控制去掉 `finally` ⇒ 重新 rc=124（149936ms）。**
+- [x] **AC-266 的载体臂如实交代**：AC-266 判据还有第二半——`.quay/ci-runs.jsonl` 里存在一条 `ts` 晚于修复落地、且未因 job 超时被杀的 release run。本任务**不生产该载体**（它的生产者是 AC-265 的 `plugin/scripts/ci-runs-collect.ts`；触发一次真实 release run 属 AC-268 的范围）。⇒ 收口时若载体仍不存在 / 仍无 post-fix release run，**如实记为「静态臂已闭合、载体臂待一次真实 release run」**，⛔ 不伪造一条记录去骗 AC-266，也不把这条缺口说成已完成。**如实记录：`.quay/ci-runs.jsonl` 仍不存在，无 post-fix release run ⇒ 静态臂已闭合、载体臂待一次真实 release run。未伪造任何记录。**
+- [x] 负控制留档：AC3 的两个 rc 与 node:test 摘要、AC5 的变异/还原两次读数，落 `.quay/` 下一个证据文件并在本任务的 Evidence 段引用。
+
+## Evidence
+
+`.quay/ac266-release-client-close-evidence.md`（实现提交 `630a10414`，worktree `gap-release-run-tests-hangs-on-shared-mcp-client-leak`）。
+
+**两因子控制矩阵**（同一条逐字命令，只差 where the table says）：
+
+| # | finally | 闸 | env | rc | node:test 摘要 |
+|---|---|---|---|---|---|
+| A | ✗ | ✗ | CI 等价（`gh` 未认证） | **124** | `pass 0 / fail 0 / cancelled 1`，`149946ms` |
+| B | ✓ | ✗（闸单独回退 = **AC3**） | CI 等价 | **1** | `pass 0 / fail 1 / cancelled 0`，`4711ms` |
+| C | ✓ | ✓（**AC2 逐字命令**） | 本机（`gh` 已登录） | **0** | `pass 1 / fail 0 / cancelled 0`，`9471ms` |
+| D | ✓ | ✓ | CI 等价 | **0** | `pass 1 / fail 0 / cancelled 0` |
+| E | ✓ | ✓ | `QUAY_TEST_LIVE_GITHUB=1` + 已登录 | **0** | `pass 1 / fail 0`；github 断言**跑了**（闸不是永久禁用） |
+| G | ✗（只去 finally） | ✓ | CI 等价 + 强制 opt-in | **124** | `pass 0 / fail 0 / cancelled 1`，`149936ms` |
+
+**必须记下的一条取证更正**：AC2 的那条逐字命令在本机**修前也返回 `rc=0`**（本机 `gh` 已登录，env 变量解不掉凭据）；它取假的能力来自「CI 等价环境」那一维。A/B/G 三行都在 `GH_CONFIG_DIR` 指向空目录下取得，A 与立案基线逐字一致（`cancelled 1` / `149946ms` / 同一句 `Promise resolution is still pending`）。
+
+**本任务未覆盖、已如实记录的兄弟实例（硬规则 5b，⛔ 未扩入本任务范围）**：`provider-abi-conformance.test.mjs` 的 `const nativeClient = await connectStdio(…)`（`:151`，close 在 `:247`）与 `const githubClient = …`（`:256`，close 在 `:510`）是同一缺陷形状的**非解构**绑定，新检查器的谓词按任务书只判解构形式，故**抓不到**——该缺口已作为检查器的 declared blind spot 写进它的头注释并**每次运行都打印计数**（`NOT judged 4`），留作后续任务。
 
 ## Touches
 
