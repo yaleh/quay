@@ -2652,8 +2652,11 @@ EOF
   #  marketplace source only; the enable is deliberately NOT user-scope by default)
   #
   # ⚠️ To merely RE-FILL a shared plugin-cache entry (~/.claude/plugins/cache/<mkt>/<plugin>/<ver> is
-  #    keyed by marketplace+plugin+version and SHARED ACROSS SCOPES), do NOT reach for --scope user:
-  #      claude plugin update quay@quay --scope project
+  #    keyed by marketplace+plugin+version and SHARED ACROSS SCOPES), do NOT reach for --scope user.
+  #    `plugin update` and a re-`install` both short-circuit on an unchanged version (measured
+  #    2026-09-15 / Claude Code 2.1.271: file count 0→0); the two-step at the same scope works (0→1):
+  #      claude plugin uninstall quay@quay --scope project
+  #      claude plugin install   quay@quay --scope project -y
 
   # 3. accept the trust dialog the FIRST time you enter this directory, then restart the session.
 After that, the enabledPlugins block below takes effect (a restart is required to apply).

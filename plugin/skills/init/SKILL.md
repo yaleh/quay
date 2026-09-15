@@ -48,8 +48,18 @@ claude plugin install quay@quay --scope project
 user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
 carry only the marketplace *source*). Same class of mistake, same fix: to merely *re-fill* a shared
 plugin-cache entry (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` is keyed by
-marketplace+plugin+version and **shared across scopes** — no scope owns a cache path), use
-`claude plugin update quay@quay --scope project`, **never** `--scope user`.
+marketplace+plugin+version and **shared across scopes** — no scope owns a cache path), do the
+two-step at the **same** scope, **never** `--scope user`:
+
+```bash
+claude plugin uninstall quay@quay --scope project
+claude plugin install   quay@quay --scope project -y
+```
+
+(Measured 2026-09-15 / Claude Code 2.1.271 against a deliberately damaged cache entry: both
+`claude plugin update --scope project` and a re-`install` short-circuit on the unchanged version and
+re-materialize **nothing** — file count 0 → 0. Only the uninstall+install pair re-filled it, 0 → 1,
+with no user-level key appearing.)
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
 

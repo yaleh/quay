@@ -56,11 +56,19 @@
 //   the first time the polluter was not one of this repo's declared write channels but any agent
 //   holding a Bash tool).
 //
-//   The scope-correct form DOES exist: `claude plugin update <plugin> --scope <scope>`
-//   (`claude plugin update --help` lists `-s, --scope <scope>` with user|project|local|managed,
-//   default user). Given `--scope project` (or `local`) it re-materializes the SHARED cache without
-//   writing any user-level enable. Use it — never `--scope user` — when the goal is merely to re-fill
-//   the cache. `--scope user` is reserved for a deliberate, human-intended user-level enable.
+//   A scope-correct refresh DOES exist — but it is NOT `plugin update`, and that is measured, because
+//   the obvious answer is wrong (Claude Code 2.1.271, 2026-09-15, all three against the same damaged
+//   cache entry whose `payload/dist` file count was 0):
+//     · `claude plugin update <plugin> --scope project` ⇒ "already at the latest version", file
+//       count 0 → 0. It short-circuits on an unchanged version and re-materializes NOTHING.
+//     · `claude plugin install <plugin> --scope project -y` on an already-installed plugin ⇒
+//       "already installed", file count 0 → 0. Same short-circuit.
+//     · `claude plugin uninstall <plugin> --scope project` then
+//       `claude plugin install <plugin> --scope project -y` ⇒ file count 0 → 1 (the SHARED cache was
+//       re-filled) and `~/.claude/settings.json` `enabledPlugins` gained no key and no quay key
+//       appeared (the AC-161 criterion still exited 0).
+//   ⇒ The two-step at the SAME scope is the supported refresh. `--scope user` is reserved for a
+//     deliberate, human-intended user-level enable — never a way to re-fill a cache.
 
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -228,16 +236,23 @@ if (process.env.QUAY_SKIP_PLUGIN_CLI === "1") {
     console.log("       POLICY note at the top of this script) — or re-run this install with");
     console.log("       QUAY_PLUGIN_SCOPE=user for a deliberate user-scope enable.");
     console.log("       ⚠️ To merely RE-FILL a shared cache entry (it is keyed by marketplace+plugin+");
-    console.log("       version and shared across scopes), do NOT reach for --scope user — use the");
-    console.log(`       scope-correct refresh instead:  claude plugin update ${pluginRef} --scope project`);
+    console.log("       version and shared across scopes), do NOT reach for --scope user. `plugin update`");
+    console.log("       and a re-`install` both short-circuit on an unchanged version and re-materialize");
+    console.log("       nothing; the form that works is the two-step at the SAME scope:");
+    console.log(`         claude plugin uninstall ${pluginRef} --scope project`);
+    console.log(`         claude plugin install   ${pluginRef} --scope project -y`);
   } else {
     const install = runCli(["plugin", "install", pluginRef, "--scope", enableScope]);
     if (install.status !== 0) {
       console.log(`[quay] warning: 'claude plugin install ${pluginRef} --scope ${enableScope}' exited ${install.status};`);
       console.log("       the plugin is registered in settings.json but not yet materialized. Run, once:");
       console.log(`       claude plugin install ${pluginRef} --scope ${enableScope}`);
-      console.log(`       (or, if it is already installed and only the shared cache needs re-filling:`);
-      console.log(`        claude plugin update ${pluginRef} --scope ${enableScope === "user" ? "project" : enableScope})`);
+      if (enableScope !== "user") {
+        console.log(`       (or, if it is already installed and only the shared cache needs re-filling —`);
+        console.log(`        \`plugin update\` short-circuits on an unchanged version, so do the two-step:`);
+        console.log(`          claude plugin uninstall ${pluginRef} --scope ${enableScope}`);
+        console.log(`          claude plugin install   ${pluginRef} --scope ${enableScope} -y )`);
+      }
     }
   }
 }
