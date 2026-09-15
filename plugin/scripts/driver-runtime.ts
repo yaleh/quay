@@ -2048,7 +2048,7 @@ function reportUnconfirmed(root: string, kind: DriverKind, v: ConfirmResult, con
 async function startKindViaAnchor(
   root: string,
   kind: DriverKind,
-  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
+  opts: StartOptions,
   out: (s: string) => void,
   err: (s: string) => void,
 ): Promise<number> {
@@ -2110,10 +2110,21 @@ async function startKindViaAnchor(
   }
 }
 
+/** start/restart 共用的启动参数面（`quay driver start --kind X --cap …` 的透传面）。
+ *  提成具名类型是 `restartKind` 需要 `StartOptions & StopOptions` 的结果——⛔ 语义未变。 */
+export interface StartOptions {
+  cap?: string;
+  interval?: string;
+  reconcileInterval?: string;
+  restartDelaySecs: number;
+  runId?: string;
+  confirmTimeoutSecs?: number;
+}
+
 export async function startKind(
   root: string,
   kind: DriverKind,
-  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
+  opts: StartOptions,
   out: (s: string) => void = (s) => process.stdout.write(s),
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<number> {
@@ -2168,15 +2179,26 @@ export async function startKind(
   }
 
   // 无活 supervisor；清掉孤儿驱动（supervisor 已死但驱动还在的中间态）。
-  const dpidRaw = readPidFile(st.driverPidFile);
-  if (dpidRaw && pidAlive(dpidRaw)) {
-    err(`orphan driver pid=${dpidRaw} (no live supervisor); killing\n`);
-    try { process.kill(Number(dpidRaw), "SIGTERM"); } catch { /* gone */ }
-    await sleep(1000);
+  //
+  // ⚠️ 这是 stop 侧被修的那个缺陷类的**第二个实例**（硬规则 5b 扫描：同一载体里同族的命中见提交说明）——
+  // 旧实现「快照一次 pid → 一个 SIGTERM → 等 1s → ⛔ 不验证 → **无条件删三张载体**」与
+  // `stopKind` legacy 分支逐字同形：杀不掉就把记录删掉 ⇒ 活着的孤儿变成盘上不可见的进程。
+  // ⇒ 复用同一个原语（每轮重读 + SIGKILL 升级 + 回读确认 + 活进程的载体不摘）。宽限保持 1s（旧值）。
+  const orphan = await stopLegacyPair(root, kind, { graceMs: 1000, killWaitMs: 1000 });
+  if (orphan.state === "stopped") {
+    err(`orphan legacy pair pid=[${orphan.signalled.join(",")}] (no live supervisor); stopped\n`);
+  } else if (orphan.state === "still-running") {
+    // 清不掉 ⇒ 如实报出并**保留载体**，⛔ 不静默继续（旧实现这里删掉载体就直接往下走）。
+    err(
+      `start-warning: kind=${kind} — 无活 supervisor 但盘上仍有未退出的旧进程（remaining pid=[${orphan.remaining.join(",")}]）；` +
+      `⛔ 其 pid 载体已保留（核对：ps -o pid,ppid,stat,cmd -p ${orphan.remaining.join(",")}）。\n`,
+    );
   }
-  for (const f of [st.driverPidFile, st.supervisorPidFile, st.stopSentinel]) {
-    try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
-  }
+  rmCarrierUnlessForeignLive(st.driverPidFile, null);
+  rmCarrierUnlessForeignLive(st.supervisorPidFile, null);
+  // ⛔ stop sentinel 必须清掉（`stopLegacyPair` 会写它）：留着会让下面刚 spawn 的 supervisor 在它的
+  // driver 一退出时就 exit(0)（那是「刚起来就自己停了」的静默失败）。
+  try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
   const runId = opts.runId || `${spec.runPrefix}-${Math.floor(Date.now() / 1000)}`;
 
   // spawn detached supervisor（Node 侧等价原语：spawn(detached:true, stdio:["ignore",fd,fd]).unref()
@@ -2224,17 +2246,165 @@ export async function startKind(
   return 1;
 }
 
+/** 读该 kind 的**【旧形态】两张 pid 载体**（supervisor / driver）并解析成 pid。
+ *  ⛔ 本函数**不读 in-flight 载体**：worker 的在飞子进程是独立 OS 进程，`stop` 的语义是「杀调度者，
+ *  ⛔ 不是在跑的工作」（SPEC §6.9 不变式 3）——凡是拆除旧 pair 的路径都必须守着这一条。 */
+export function legacyCarrierPids(root: string, kind: DriverKind): { supervisorPid: number | null; driverPid: number | null } {
+  const st = statePaths(root, kind);
+  const sup = readPidFile(st.supervisorPidFile);
+  const drv = readPidFile(st.driverPidFile);
+  return {
+    supervisorPid: /^\d+$/.test(sup) ? Number(sup) : null,
+    driverPid: /^\d+$/.test(drv) ? Number(drv) : null,
+  };
+}
+
 /** 该 kind 是否由 anchor 形态拥有（决定 stop 走哪条路）。**三态判据**：
  *  ① driver pid 文件已被 anchor 接管 ⇒ 是；
- *  ② workspace 已声明 anchor 期望态（`.quay/anchor-desired.json` 存在）**且该 kind 没有活 supervisor** ⇒ 是
+ *  ② workspace 已声明 anchor 期望态（`.quay/anchor-desired.json` 存在）**且盘上没有任何活着的
+ *     【旧形态】进程**（supervisor 载体、或一个不是 anchor 自己的 driver 载体）⇒ 是
  *     （anchor 可能正崩在重拉间隙，此时仍走 anchor 路径——⛔ 不因「anchor 恰好死了」就回落到杀 supervisor）；
- *  ③ 其余 ⇒ 否（旧多进程 supervisor 形态）。
- *  ⛔ 「读不懂期望态」（文件在但 JSON 坏）由 readDesired 返回 null 表达 ⇒ 落 ③，与本函数的语义一致。 */
+ *  ③ 其余 ⇒ 否（旧多进程 supervisor 形态，或旧形态的孤儿 driver）。
+ *  ⛔ 「读不懂期望态」（文件在但 JSON 坏）由 readDesired 返回 null 表达 ⇒ 落 ③，与本函数的语义一致。
+ *
+ *  ⚠️ ② 里「**不是 anchor 自己的** driver 载体」这一条是
+ *  `gap-driver-restart-unreliable-legacy-to-anchor-migration` 的根因修复点，⛔ 不是修饰：旧实现只看
+ *  supervisor 载体，于是「期望态文件存在（**任意一个** kind 已经迁移过就会存在）∧ 没有活 supervisor
+ *  载体」被当作「anchor 所有这个 kind」。legacy→anchor 迁移期恰好常处于这个形状（旧的 supervisor 先
+ *  退出、它的 driver 还活着，或那两张载体已被上一次拆除删掉）⇒ `stop --kind X` 走 anchor 路径，
+ *  而 anchor 路径**一个信号都不发给遗留 pid**、只把两张载体删掉 ⇒ 活着的旧 loop 变成盘上不可见的孤儿，
+ *  与新的 anchor loop 同时派发（生产实测：四组 supervisor+driver 在 restart 返回 60s 后仍活，`goal`
+ *  的旧进程 8 分钟以上仍在写同一个 `goal-round.jsonl`）。
+ *  ⇒ 判据必须问「**盘上还有没有活着的旧形态进程**」，⛔ 不能问「有没有活 supervisor 载体」
+ *  （载体是**循环的产物**，会在拆除/收尾时被删——同 `anchorHosts` 的注释）。 */
 function anchorOwns(root: string, kind: DriverKind): boolean {
   if (anchorHosts(root, kind).hosted) return true;
   if (readDesired(root) === null) return false;
-  const spid = readPidFile(statePaths(root, kind).supervisorPidFile);
-  return !(spid && pidAlive(spid));
+  const anchorPid = readAnchorPid(root);
+  const { supervisorPid, driverPid } = legacyCarrierPids(root, kind);
+  if (supervisorPid !== null && pidAlive(supervisorPid)) return false;
+  if (driverPid !== null && driverPid !== anchorPid && pidAlive(driverPid)) return false;
+  return true;
+}
+
+/** 停动词的**测试缝 + 生产缺省**参数（⛔ 缺省值就是生产值——见 driver-anchor 的 `reconcileMs` 等
+ *  同名手法；测试用它把「宽限」压到毫秒级，⛔ 不改生产节奏）。 */
+export interface StopOptions {
+  /** 旧 pair 的 SIGTERM 宽限（缺省 10000 = 既有 `stop` 的 20×500ms，⛔ 不是新阈值）。 */
+  legacyGraceMs?: number;
+  /** SIGKILL 之后的确认窗口（缺省 2000）：杀完要**回读确认**，⛔ 不假设 SIGKILL 必然生效。 */
+  legacyKillWaitMs?: number;
+  /** 等 anchor 承载的该 kind 循环收尾的窗口（缺省 60000 = 既有值）。 */
+  stopTimeoutMs?: number;
+  /** 等 anchor 自身退出的确认窗口（缺省 30000 = 既有值）。 */
+  anchorExitMs?: number;
+}
+
+const LEGACY_STOP_GRACE_MS = 10_000;
+const LEGACY_STOP_POLL_MS = 250;
+const LEGACY_KILL_WAIT_MS = 2_000;
+const ANCHOR_LOOP_STOP_TIMEOUT_MS = 60_000;
+const ANCHOR_EXIT_WAIT_MS = 30_000;
+
+/** 拆除旧 pair 的**判别式结果**（⛔ 不是布尔）——「停掉了」/「本来就没跑」/「停不掉」三者必须
+ *  不同形（硬规则 3b；同族先例 `start-drivers.ts` 的 `stopServeHost`：could-not-stop 永不报成
+ *  stopped）。`still-running` 那一支的调用方**必须**把它当失败上报，⛔ 不得继续 start。 */
+export interface LegacyStopResult {
+  state: "stopped" | "not-running" | "still-running";
+  /** 本次拆除中送过信号的 pid（含旧 supervisor 在期间**重拉出来的新** driver pid）。 */
+  signalled: number[];
+  /** `still-running` 时到点仍活着的 pid。 */
+  remaining: number[];
+}
+
+/** 拆除该 kind 的**旧形态 supervisor+driver pair**（阶段 C 之前的多进程形态）。
+ *
+ *  与旧 `stopKind` legacy 分支的三点差别，逐条都是本任务要修的可靠性缺陷：
+ *   ① **每轮重读载体**（旧实现只在入口快照一次）⇒ 旧 supervisor 在宽限内重拉出来的**新** driver
+ *      pid 会被看见并一起停掉；旧实现看不见它，于是「命令返回了、新 driver 还活着」——正是
+ *      「报成功但旧进程树没退出」的直接成因。
+ *   ② **SIGKILL 之后回读确认**（旧实现杀完即 `return 0`，⛔ 不验证）⇒ 返回值从此承载真实结论；
+ *      杀不掉时返回 `still-running` + pid 清单，⛔ 不假装 `stopped`。
+ *   ③ **确认不在之前不摘载体**（旧实现在没把握时照样删两张 pid 文件）⇒ 一个活着的进程不会因为
+ *      记录被删而变成盘上不可见的孤儿（这正是生产里 8 分钟以上的 `goal` 旧进程的成因）。
+ *
+ *  ⛔ 信号只发给**本函数观察到的 carrier pid**：不扫 `/proc`、不按名字匹配、**从不碰 in-flight 载体**
+ *  ⇒ worker 的在飞子进程（独立 OS 进程）在任何分支下都不受影响（SPEC §6.9 不变式 3，AC5）。
+ *  `excludePid` 用于 anchor 承载路径：收敛形态下 `pidSelf=false` 的 worker 其 driver 载体里写的
+ *  **就是 anchor 自己的 pid**，那不是遗留进程（⛔ 不排除它就会把 anchor 自己 SIGTERM 掉）。 */
+export async function stopLegacyPair(
+  root: string,
+  kind: DriverKind,
+  opts: {
+    graceMs?: number;
+    killWaitMs?: number;
+    excludePid?: number | null;
+    /** 测试缝：发信号的实现（缺省 `process.kill`）。存在的理由和 `invokeKind` / `maxReconcilePasses`
+     *  一样——`still-running` 那一支在真实 OS 上**不可确定地制造**（SIGKILL 杀不掉一个普通进程），
+     *  而「停不掉」必须与「停掉了」不同形是这个修复的核心契约之一 ⇒ 它不能被留成一条没测过的分支。 */
+    signalFn?: (pid: number, sig: "SIGTERM" | "SIGKILL") => void;
+  } = {},
+): Promise<LegacyStopResult> {
+  const st = statePaths(root, kind);
+  const graceMs = Math.max(0, opts.graceMs ?? LEGACY_STOP_GRACE_MS);
+  const killWaitMs = Math.max(0, opts.killWaitMs ?? LEGACY_KILL_WAIT_MS);
+  const excludePid = opts.excludePid ?? null;
+  const signalFn = opts.signalFn ?? ((pid: number, sig: "SIGTERM" | "SIGKILL") => { process.kill(pid, sig); });
+  // stop sentinel：让还活着的旧 supervisor 在它的 child 退出时**退出**而不是重拉（与旧 stop 逐字同）。
+  try { fs.writeFileSync(st.stopSentinel, "\n", "utf8"); } catch { /* ignore */ }
+
+  // `seen` 只增不减：一个 pid 一旦在**载体里出现过**就一直是本函数的目标，即使那张载体随后被删
+  // （载体被删而进程还活着，正是本任务要覆盖的形状）。每轮重读载体 ⇒ 重拉出的新 pid 也进 seen。
+  const seen = new Set<number>();
+  const signalled: number[] = [];
+  const refresh = (): number[] => {
+    const { supervisorPid, driverPid } = legacyCarrierPids(root, kind);
+    for (const p of [supervisorPid, driverPid]) if (p !== null && p !== excludePid) seen.add(p);
+    return [...seen].filter((p) => pidAlive(p));
+  };
+  const deadline = Date.now() + graceMs;
+  for (;;) {
+    const live = refresh();
+    if (live.length === 0) break;
+    for (const p of live) {
+      if (signalled.includes(p)) continue;
+      try { signalFn(p, "SIGTERM"); signalled.push(p); } catch { /* already gone */ }
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(LEGACY_STOP_POLL_MS);
+  }
+  // 到点仍在 ⇒ **确定性升级** SIGKILL（⛔ 只针对本函数观察到的 carrier pid）。
+  let remaining = refresh();
+  if (remaining.length > 0) {
+    for (const p of remaining) { try { signalFn(p, "SIGKILL"); } catch { /* already gone */ } }
+    await sleep(killWaitMs);
+    remaining = refresh();
+  }
+  if (remaining.length > 0) {
+    // ⛔ 载体**刻意保留**：这是一个活进程在盘上唯一的记录（`anchorOwns` 也靠它把下一次 stop 引回
+    // legacy 路径）。删了它 = 下一次 restart 起第二个 loop 而没有任何东西记得第一个还在。
+    return { state: "still-running", signalled, remaining };
+  }
+  // 确认不在 ⇒ 摘载体（死 pid 会让「已经停了」与「在跑」同形，硬规则 3b）。
+  // ⛔ 但**任何指向活进程的载体都不摘**——包括写着 anchor 自己 pid 的那张（收敛形态下 worker 的
+  // driver 载体由 anchor 写、pidSelf 类 kind 由跑在 anchor 里的驱动写）：本函数只负责**遗留**进程，
+  // 它没有资格判定「anchor 自己的标记该不该留」，那是调用方的收尾（`stopKindViaAnchor`）的事。
+  rmCarrierUnlessForeignLive(st.driverPidFile, null);
+  rmCarrierUnlessForeignLive(st.supervisorPidFile, null);
+  try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
+  return { state: signalled.length > 0 ? "stopped" : "not-running", signalled, remaining: [] };
+}
+
+/** 摘掉一张 pid 载体，**除非它指向一个活着的、且 pid ≠ `ownPid` 的进程**。两个条件都是必须的：
+ *  · 指向**外来的**活进程的载体 = 那个进程在盘上唯一的记录（⛔ 旧实现无条件删两张载体 ⇒ 盘上若还有
+ *    活着的旧进程，删完就成了不可见孤儿 —— 本任务修的正是这个）；
+ *  · `ownPid`（= anchor 自己）是**已知写者**，它的标记可以摘 —— 不摘会让下一次 `start` 读到一个假
+ *    的 `already-running`（gap-driver-status-misreports 的同族形态）。 */
+function rmCarrierUnlessForeignLive(file: string, ownPid: number | null): void {
+  const raw = readPidFile(file);
+  const pid = /^\d+$/.test(raw) ? Number(raw) : null;
+  if (pid !== null && pid !== ownPid && pidAlive(pid)) return; // 外来的活进程 ⇒ 留痕，⛔ 不删
+  try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
 }
 
 /** 阶段 C 的 stop 路径（anchor 承载）：从期望态里摘掉该 kind ⇒ anchor 只停**那一个**循环。
@@ -2242,24 +2412,51 @@ function anchorOwns(root: string, kind: DriverKind): boolean {
  *  ⛔ 关键语义（§6.9 不变式 2/3，AC6）：停 `worker` 时其余五个 kind 的循环**不受影响**（它们住在同一个
  *  anchor 进程里，但各有独立的停机信号——`requestKindStop`），而 worker 的在飞子进程是**独立 OS 进程**，
  *  本函数一行都不碰它们（与旧 `quay driver stop` 的硬停语义逐字相同：杀的是调度者，⛔ 不是在跑的工作）。
- *  集群里若还有别的 kind 被声明，anchor 进程继续活着；一个 kind 都不剩才停 anchor 自身。 */
+ *  集群里若还有别的 kind 被声明，anchor 进程继续活着；一个 kind 都不剩才停 anchor 自身。
+ *
+ *  ⚠️ `gap-driver-restart-unreliable-legacy-to-anchor-migration`：本函数开头**先真的停掉遗留 pair**
+ *  （`stopLegacyPair`）。旧实现在这一支里只删两张载体、⛔ 一个信号都不发 ⇒ 只要 anchor 声称托管了该
+ *  kind 而旧的 supervisor+driver 还活着（legacy→anchor 迁移期的实测形态），两份 loop 就会一直同时跑。 */
 async function stopKindViaAnchor(
   root: string,
   kind: DriverKind,
   out: (s: string) => void,
+  opts: StopOptions = {},
 ): Promise<number> {
   const st = statePaths(root, kind);
+  const anchorPid0 = readAnchorPid(root);
+  // ① 遗留 pair 先真的停掉（⛔ 与「谁拥有这个 kind」无关：盘上有活着的旧进程就必须先停干净）。
+  const legacy = await stopLegacyPair(root, kind, {
+    graceMs: opts.legacyGraceMs,
+    killWaitMs: opts.legacyKillWaitMs,
+    excludePid: anchorPid0,
+  });
+  if (legacy.state === "still-running") {
+    process.stderr.write(
+      `stop-failed: kind=${kind} — 旧 supervisor/driver pair 在宽限内未能退出（remaining pid=[${legacy.remaining.join(",")}]，` +
+      `signalled=[${legacy.signalled.join(",")}]）。⛔ 旧形态载体**保留**（那是一个活进程在盘上唯一的记录）。` +
+      `核对：ps -o pid,ppid,stat,cmd -p ${legacy.remaining.join(",")}\n`,
+    );
+    return 1;
+  }
+  if (legacy.state === "stopped") {
+    // 独立取值（⛔ 不与 `not-running` 同形）：确实停掉了东西，但停的是**遗留 pair**，不是 anchor 的循环。
+    out(`stopped-legacy: kind=${kind} — 旧 supervisor/driver pair pids=[${legacy.signalled.join(",")}] 已退出\n`);
+  }
+
   const before = aliveness(root, kind);
   if (!before.running) {
     // ⛔「本来就没跑」与「刚停掉」必须不同形（硬规则 3b）。
     // 清理残留的 pid 载体（anchor 崩溃留下的死 pid 文件会让下一次 start 读到假读数）。
-    try { fs.rmSync(st.driverPidFile, { force: true }); } catch { /* ignore */ }
-    out("not-running\n");
+    // ⛔ 但只摘**死的或 anchor 自己的**：一张指向**外来**活进程的载体是那个进程在盘上唯一的记录。
+    rmCarrierUnlessForeignLive(st.driverPidFile, anchorPid0);
+    out(legacy.state === "stopped" ? "stopped\n" : "not-running\n");
     return 0;
   }
   const remaining = updateDesired(root, kind, false, "quay-driver-stop");
   // 等该 kind 的循环收尾（anchor 摘掉 pid 文件 = 循环已退出的直接量）。
-  const deadline = Date.now() + 60_000;
+  const stopTimeoutMs = Math.max(0, opts.stopTimeoutMs ?? ANCHOR_LOOP_STOP_TIMEOUT_MS);
+  const deadline = Date.now() + stopTimeoutMs;
   while (Date.now() < deadline) {
     if (!aliveness(root, kind).running) break;
     await sleep(250);
@@ -2269,18 +2466,24 @@ async function stopKindViaAnchor(
   const anchorPid = readAnchorPid(root);
   if (remaining.length === 0 && anchorPid !== null && pidAlive(anchorPid)) {
     try { process.kill(anchorPid, "SIGTERM"); } catch { /* gone */ }
-    const adl = Date.now() + 30_000;
+    const adl = Date.now() + Math.max(0, opts.anchorExitMs ?? ANCHOR_EXIT_WAIT_MS);
     while (pidAlive(anchorPid) && Date.now() < adl) await sleep(200);
     if (pidAlive(anchorPid)) { try { process.kill(anchorPid, "SIGKILL"); } catch { /* gone */ } }
-    try { fs.rmSync(anchorPaths(root).pidFile, { force: true }); } catch { /* ignore */ }
+    // ⛔ 只摘**已经不在的** anchor.pid（5b 扫描的同族第三例）：anchor 若扛住了 SIGKILL，删它这张载体
+    // 会把一个活着的 anchor 变成盘上不可见的进程——正是本任务修的那个形态。
+    rmCarrierUnlessForeignLive(anchorPaths(root).pidFile, null);
     try { fs.rmSync(anchorPaths(root).stateFile, { force: true }); } catch { /* ignore */ }
   }
-  try { fs.rmSync(st.driverPidFile, { force: true }); } catch { /* ignore */ }
-  try { fs.rmSync(st.supervisorPidFile, { force: true }); } catch { /* ignore */ }
+  rmCarrierUnlessForeignLive(st.driverPidFile, anchorPid0);
+  rmCarrierUnlessForeignLive(st.supervisorPidFile, anchorPid0);
   try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
   if (stillRunning) {
-    process.stderr.write(`quay driver: kind=${kind} loop did not stop within 60s (anchor pid=${anchorPid ?? "none"})\n`);
-    out("not-running\n");
+    process.stderr.write(
+      `stop-failed: kind=${kind} — 该 kind 的循环在 ${stopTimeoutMs}ms 内未收尾（anchor pid=${anchorPid ?? "none"}）。` +
+      `⛔ 本条**不报成 not-running**：循环仍在 ⇒ 接着 start 会得到两份 loop（双派发）。` +
+      `锚日志尾:\n`,
+    );
+    process.stderr.write(`${fileTailLines(anchorPaths(root).logFile) || "(anchor 日志为空/读不到 —— ⛔ 这不等于「无死因」)"}\n`);
     return 1;
   }
   out("stopped\n");
@@ -2288,29 +2491,26 @@ async function stopKindViaAnchor(
 }
 
 /** stop（硬停：杀 supervisor + 驱动；⛔ 不杀 worker 在飞子进程）。 */
-export async function stopKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): Promise<number> {
-  const st = statePaths(root, kind);
+export async function stopKind(
+  root: string,
+  kind: DriverKind,
+  out: (s: string) => void = (s) => process.stdout.write(s),
+  opts: StopOptions = {},
+): Promise<number> {
   // SPEC §7 阶段 C：anchor 承载时，`stop --kind X` 只停 X 的循环（⛔ 不杀 anchor ⇒ 其余 kind 不受影响）。
   if (process.env.QUAY_DRIVER_LEGACY_SUPERVISOR !== "1" && anchorOwns(root, kind)) {
-    return await stopKindViaAnchor(root, kind, out);
+    return await stopKindViaAnchor(root, kind, out, opts);
   }
-  const spidRaw = readPidFile(st.supervisorPidFile);
-  const dpidRaw = readPidFile(st.driverPidFile);
-  let stopped = 0;
-  try { fs.writeFileSync(st.stopSentinel, "\n", "utf8"); } catch { /* ignore */ }
-  if (spidRaw && pidAlive(spidRaw)) { try { process.kill(Number(spidRaw), "SIGTERM"); } catch { /* gone */ } stopped = 1; }
-  if (dpidRaw && pidAlive(dpidRaw)) { try { process.kill(Number(dpidRaw), "SIGTERM"); } catch { /* gone */ } stopped = 1; }
-  for (let i = 0; i < 20; i++) {
-    if ((!spidRaw || !pidAlive(spidRaw)) && (!dpidRaw || !pidAlive(dpidRaw))) break;
-    await sleep(500);
+  const r = await stopLegacyPair(root, kind, { graceMs: opts.legacyGraceMs, killWaitMs: opts.legacyKillWaitMs });
+  if (r.state === "still-running") {
+    process.stderr.write(
+      `stop-failed: kind=${kind} — 旧 supervisor/driver pair 在 SIGTERM 宽限 + SIGKILL 确认之后仍在运行` +
+      `（remaining pid=[${r.remaining.join(",")}]，signalled=[${r.signalled.join(",")}]）。` +
+      `⛔ 本条不报 \`stopped\`（「停不掉」与「停掉了」必须不同形）。核对：ps -o pid,ppid,stat,cmd -p ${r.remaining.join(",")}\n`,
+    );
+    return 1;
   }
-  // 兜底 kill -9（supervisor/驱动 10s 内未退出）。⛔ 只针对 supervisor 与驱动自身，不扫 in-flight。
-  if (spidRaw && pidAlive(spidRaw)) { try { process.kill(Number(spidRaw), "SIGKILL"); } catch { /* gone */ } }
-  if (dpidRaw && pidAlive(dpidRaw)) { try { process.kill(Number(dpidRaw), "SIGKILL"); } catch { /* gone */ } }
-  for (const f of [st.driverPidFile, st.supervisorPidFile, st.stopSentinel]) {
-    try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
-  }
-  out(stopped === 1 ? "stopped\n" : "not-running\n");
+  out(r.state === "stopped" ? "stopped\n" : "not-running\n");
   return 0;
 }
 
@@ -2350,15 +2550,35 @@ export function resumeKind(root: string, kind: DriverKind, out: (s: string) => v
   return 0;
 }
 
-/** restart = stop then start。 */
+/** restart = **确认停干净之后的** start。
+ *
+ *  ⚠️ `gap-driver-restart-unreliable-legacy-to-anchor-migration`：旧实现 `await stopKind(...)` 后
+ *  **丢弃返回值**、无条件 start。于是 legacy→anchor 迁移期最危险的那种形状——stop 报「旧进程树还在」
+ *  ——恰恰会继续走到 start，把该 kind 加进 anchor 期望态 ⇒ **两份 loop 同时跑同一个 kind**，而命令的
+ *  退出码与输出（`started:` / `already-running:` / `start-pending:`）读起来都像一次重启的产物，人无法
+ *  从中看出旧 loop 没死（生产实证：四组旧 supervisor+driver 在 restart 返回 60s 后仍活）。
+ *  ⇒ 现在 stop 未确认干净（非 0）就**中止**，⛔ 不起新循环；退出码 1 = 「重启没发生」，是可信的。
+ *  这也让 `restart --kind X` 的判据与 DoD 一致：0 ⇔ 旧进程树已消失 ∧ 新循环已确认就绪。 */
 export async function restartKind(
   root: string,
   kind: DriverKind,
-  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
+  opts: StartOptions & StopOptions,
   out: (s: string) => void = (s) => process.stdout.write(s),
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<number> {
-  await stopKind(root, kind, () => {});
+  const stopRc = await stopKind(root, kind, out, {
+    legacyGraceMs: opts.legacyGraceMs,
+    legacyKillWaitMs: opts.legacyKillWaitMs,
+    stopTimeoutMs: opts.stopTimeoutMs,
+    anchorExitMs: opts.anchorExitMs,
+  });
+  if (stopRc !== 0) {
+    err(
+      `restart-aborted: kind=${kind} — stop 未确认旧进程树已退出（exit=${stopRc}）；⛔ 不起新循环（否则与旧 loop 双派发）。` +
+      `按上面的 stop-failed 行核对 pid；确认旧进程消亡后重跑 \`quay driver restart --kind ${kind}\`。\n`,
+    );
+    return 1;
+  }
   return startKind(root, kind, opts, out, err);
 }
 
@@ -2414,6 +2634,13 @@ Usage:
   --confirm-timeout <s>  start/restart 的【存活确认窗口】(default ${DEFAULT_CONFIRM_TIMEOUT_SECS})。窗口内确认 supervisor+driver
                          双活 ⇒ \`started:\` 且退出 0；supervisor 进程已退出且无 driver ⇒ \`start-failed:\` 且退出 1
                          并贴出 supervisor 日志尾；窗口用尽而 supervisor 仍活 ⇒ \`start-pending:\`（⛔ 不是死亡判定）。
+
+stop/restart 的【旧进程树确认】（gap-driver-restart-unreliable-legacy-to-anchor-migration）：
+  ⛔ 退出 0 的 \`stopped\` 表示**盘上已无活着的旧形态 supervisor/driver**（每轮重读载体 ⇒ 旧 supervisor
+  重拉出的新 driver 也算；SIGTERM 宽限 ${LEGACY_STOP_GRACE_MS}ms → SIGKILL → 回读确认）。停不干净 ⇒
+  \`stop-failed:\` + 仍活的 pid 清单 + 退出 1，且**旧形态载体被保留**（那是一个活进程在盘上唯一的记录）。
+  \`restart\` 在 stop 非 0 时**中止**（⛔ 不起新循环 ⇒ 不会与旧 loop 双派发），退出 1 = 「重启没发生」。
+  worker 的在飞子进程是独立 OS 进程，任何分支都不受影响（只发信号给本 kind 的 pid 载体里的进程）。
 `);
     return 0;
   }
