@@ -51,3 +51,13 @@ kinds:
     # ⛔ 值改动只在重启 goal driver 后生效（与其它 driver 配置同）。
     target_host: ad-arm1                       # 被驱动系统所在主机（ssh 目标；空 = 本机）
     target_root: /home/yale/work/archguard     # 被驱动系统（GOAL-016 靶子项目）根路径
+    # ── CI run 载体的每轮采集（tasks/gap-develop-ci-first-decisive-green Requested action 2）──────
+    # 本 driver 是 AC-265 的评估者，而 AC-265 读的是本地载体 `.quay/ci-runs.jsonl`；没有生产者时
+    # 判据只能报 carrier-absent / collection-stalled，与「CI 真红」在读法上同形。这里就是那个生产者
+    # 的调用点（采集器 capability-catalog 的 CADENCE 行声明「每轮」，此处兑现它）。
+    # ⛔ 代码缺省是 false（见 goalCiRunsCollect）：这条读数会 spawn gh + 走网络，默认打开会让每个跑
+    # runGoalRound 的测试都打真 API。生产「开」由**本真源显式置位**表达，⛔ 不是把代码默认改成 true。
+    ci_runs_collect: true
+    # 采集节流（毫秒）：gh 是外部配额资源，goal 轮间隔 30s ⇒ 不节流等于每分钟 2 次 API 调用。
+    # 10 分钟 = 覆盖 AC-265 所需的时效（一次 CI run 实测 18–25 分钟）而不打爆配额。
+    ci_runs_collect_throttle_ms: 600000

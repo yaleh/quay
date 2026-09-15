@@ -226,6 +226,19 @@ packages/quay/plugin/
 # cap-from-gate.ts at each dispatch decision point). Same gitignored runtime-state family as
 # gate-events.jsonl — the band decision is per-dispatch state, not committed provenance.
 **/.quay/concurrency-cap-state.json
+# gap-develop-ci-first-decisive-green (2026-09-15): the CI-run carrier `.quay/ci-runs.jsonl` was
+# TRACKED and is hereby untracked. ⛔ Tracking it is structurally incompatible with its own
+# production writer: ci-runs-collect.ts is now called by goal-driver every round, and the fan-in
+# ff's benign-runtime-dirty channel only passes `??` (untracked) paths
+# (fan-in/ff-merge.ts:239 `if (pstatus !== "??") { benignOk = false; break; }`) — so a tracked
+# carrier rewritten every round made EVERY task's ff fail ("working tree not clean").
+# Not `@quay-runtime-artifact`-marked on purpose, same as the sibling `**/.quay/*` entries above:
+# a consumer project's `.gitignore` gets the covering `.quay/*` rule from quay-init, so listing it
+# in quay-runtime-artifacts.txt would contradict that file's stated policy (and break the
+# marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
+# The carrier is a DERIVED view of GitHub state and is rebuildable by the collector's backfill.
+**/.quay/ci-runs.jsonl
+**/.quay/ci-runs-collect-state.json
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 .workflow-events/

@@ -75,6 +75,13 @@ import { parse as parseYaml } from "yaml";
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
 import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV } from "./driver-runtime.ts";
 
+// ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
+// ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
+// 没有生产者时判据只能报 `carrier-absent`/`collection-stalled`，与「CI 真红」在读法上同形。
+// 采集器自己声明了「每轮」的节奏（capability-catalog 的 CADENCE 行），这里就是兑现它的那处调用。
+// ⛔ 与 DIR-131 边界无关：读的是**外部 CI 系统**的状态（GitHub Actions），不是本仓 task 的落地率。
+import { collectForRound, DEFAULT_COLLECT_THROTTLE_MS, type CiRunsRoundReading } from "./ci-runs-collect.ts";
+
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
 /** 轮记录载体（.quay/goal-round.jsonl，gitignored 运行时日志——heartbeat，与 round 记录同族）。
@@ -161,6 +168,38 @@ export function goalGapWorkerTimeoutMs(root: string, explicit?: number): number 
     /* drivers.yml 缺失/不可解析 ⇒ 回退缺省（同 goalSpawnCap 的 fail-open） */
   }
   return GAP_WORKER_TIMEOUT_MS_DEFAULT;
+}
+
+/** ⑨ 每轮 CI run 采集的开关。**代码缺省 false、生产真源 drivers.yml 显式 true**（见 GoalRoundOptions
+ *  的同名字段注释：这条读数会 spawn gh + 走网络，默认打开会让每个跑 runGoalRound 的测试都打真 API）。
+ *  接法照 goalSpawnCap：就地读 drivers.yml（单一真相源 DRIVERS_CONFIG_REL，基准 = workspace root）。 */
+export function goalCiRunsCollect(root: string, explicit?: boolean): boolean {
+  if (typeof explicit === "boolean") return explicit;
+  try {
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
+    const parsed = parseYaml(text) as { kinds?: { goal?: { ci_runs_collect?: unknown } } } | null;
+    const v = parsed?.kinds?.goal?.ci_runs_collect;
+    if (typeof v === "boolean") return v;
+  } catch {
+    /* drivers.yml 缺失/不可解析 ⇒ 回退缺省（同 goalSpawnCap 的 fail-open） */
+  }
+  return false;
+}
+
+/** ⑨ CI run 采集的节流间隔（毫秒）：explicit（测试缝 / CLI）→ drivers.yml 的
+ *  goal.ci_runs_collect_throttle_ms → DEFAULT_COLLECT_THROTTLE_MS（采集器自己的常量，⛔ 不在这里
+ *  再写一个字面量）。0 是**合法值**（= 不节流），故 `>= 0` 而不是 `> 0`。 */
+export function goalCiRunsThrottleMs(root: string, explicit?: number): number {
+  if (explicit != null && Number.isInteger(explicit) && explicit >= 0) return explicit;
+  try {
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
+    const parsed = parseYaml(text) as { kinds?: { goal?: { ci_runs_collect_throttle_ms?: unknown } } } | null;
+    const v = parsed?.kinds?.goal?.ci_runs_collect_throttle_ms;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+  } catch {
+    /* 同 goalSpawnCap 的 fail-open */
+  }
+  return DEFAULT_COLLECT_THROTTLE_MS;
 }
 
 /** 充分性「持续 insufficient」信号的 stall 窗口（毫秒）。**缺省是一个【函数】，不是一个字面量**：
@@ -2591,6 +2630,11 @@ export interface GoalRoundReadings {
    *  被 halt·资源门·上限挡下数 / 逐条 spawn 诊断。⛔ 每轮都产出（`insufficient: 0` 是一个**测量**，
    *  不是「没跑这条」——本 pass 无条件执行，硬规则 3b）。 */
   sufficiency_stall: SufficiencyStallPassResult;
+  /** ⑨ CI run 载体采集（tasks/gap-develop-ci-first-decisive-green）：本轮是否真采集了、以及
+   *  **可区分**的成因（status ∈ ok / throttled / gh-unavailable / error / disabled）。
+   *  ⛔ 恒非 null：没跑这条读数时它是显式的 `disabled`，⛔ 不与「采集了零条」同形（硬规则 3b）。
+   *  它是 AC-265 判据**本地载体**的活性证明，也是该判据「采集停了」与「CI 真红」的分界。 */
+  ciRuns: CiRunsRoundReading;
 }
 
 export interface GoalRoundOptions {
@@ -2649,6 +2693,16 @@ export interface GoalRoundOptions {
    *  2 小时窗口导出）。⛔ 读的是**目标项目自己的** fan-in-step-trace.jsonl（人 2026-09-12 DIR-131
    *  补充裁定：外部被驱动系统读数 ≠ 本仓落地率读数）。 */
   healthWindowSec?: number;
+  /** ⑨ 每轮 CI run 载体采集的开关。缺省读 drivers.yml `kinds.goal.ci_runs_collect`（代码缺省 **false**）。
+   *  ⛔ 代码缺省 false 而**生产真源 drivers.yml 里显式 true**：这条读数会 spawn gh + 走网络，
+   *  测试里默认打开会让每个跑 runGoalRound 的用例都打真 API（慢且依赖网络）——「生产开、测试不意外开」
+   *  由「配置真源显式置位」表达，⛔ 不是把默认写成 true 再让测试各自关它。 */
+  ciRunsCollect?: boolean;
+  /** ⑨ 覆盖采集节流间隔（毫秒）；缺省 drivers.yml `kinds.goal.ci_runs_collect_throttle_ms`
+   *  → DEFAULT_COLLECT_THROTTLE_MS。0 ⇒ 每轮都采。 */
+  ciRunsThrottleMs?: number;
+  /** ⑨ 采集函数注入（测试缝）。缺省 = ci-runs-collect 的 collectForRound（真跑 gh）。 */
+  ciRunsCollectFn?: (root: string, opts: { throttleMs?: number }) => CiRunsRoundReading;
 }
 
 export interface GoalRoundResult {
@@ -3001,6 +3055,49 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     judgeWallclockMs: opts.sufficiencyTimeoutMs,
   });
 
+  // ⑨ CI run 载体采集（生产调用点）。⛔ 与上面各 pass 的关键差别：它**只写载体、不判定**
+  // （判据是 AC-265，由 ① 的 gateCriterion 独立跑）——所以它不需要过 halt / 资源门，也不参与
+  // 「本轮能不能翻状态」。⛔ 但它必须**每轮**留下一条读数：停采与「CI 真红」在载体上同形，
+  // 而这条读数就是分界（硬规则 3b）。
+  const ciRunsEnabled = goalCiRunsCollect(root, opts.ciRunsCollect);
+  let ciRuns: CiRunsRoundReading;
+  if (!ciRunsEnabled) {
+    ciRuns = {
+      status: "disabled",
+      ran: false,
+      reason: "drivers.yml kinds.goal.ci_runs_collect 未置位（或缺省 false）—— 本机不采集 CI 载体",
+      carrier: path.join(root, ".quay", "ci-runs.jsonl"),
+      appended: 0,
+      skipped: 0,
+      attributed: 0,
+      enriched: 0,
+      logsFetched: 0,
+      testFilesDerived: 0,
+      warnings: [],
+    };
+  } else {
+    const throttleMs = goalCiRunsThrottleMs(root, opts.ciRunsThrottleMs);
+    const fn = opts.ciRunsCollectFn ?? ((r: string, o: { throttleMs?: number }) => collectForRound(r, o));
+    try {
+      ciRuns = fn(root, { throttleMs });
+    } catch (e) {
+      // ⛔ 采集坏掉不得把整轮判失败（它是旁路读数）：折算成一条可区分的 error 读数。
+      ciRuns = {
+        status: "error",
+        ran: false,
+        reason: `采集抛错: ${e instanceof Error ? e.message : String(e)}`,
+        carrier: path.join(root, ".quay", "ci-runs.jsonl"),
+        appended: 0,
+        skipped: 0,
+        attributed: 0,
+        enriched: 0,
+        logsFetched: 0,
+        testFilesDerived: 0,
+        warnings: [],
+      };
+    }
+  }
+
   const value: GoalRoundReadings = {
     goalCount: activeGoals.length,
     criterionCount: criteria.length,
@@ -3017,6 +3114,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     llm_invoked: spawnPass.llmInvoked,
     gap_spawns: spawnPass.outcomes,
     sufficiency_stall: stallPass,
+    ciRuns,
   };
   if (staleness === null) {
     return {
@@ -3042,7 +3140,12 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `closeBlocked=${closeBlocks.filter((b) => b.verdict === "blocked-failing-ac").length} ` +
         `closeNotEvaluated=${closeBlocks.filter((b) => b.verdict === "not-evaluated").length} ` +
         // 冻结域轮转（pass 1c）：`-` = 读不到；`0/0` = 本轮无合格对象（未到 minAge，正常）。
-        `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`}`,
+        `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`} ` +
+        // ⑨ CI run 采集：`ok(a+b+c)` = 追加 a / 补全 b / 归因 c；其余态逐字带出 status（⛔ 不折成一个布尔）。
+        `ciRuns=${ciRuns.status}` +
+        (ciRuns.status === "ok"
+          ? `(appended=${ciRuns.appended},enriched=${ciRuns.enriched},attributed=${ciRuns.attributed},logs=${ciRuns.logsFetched})`
+          : `(${ciRuns.reason})`),
     },
     sufficiencyFacts,
     objectiveFacts,
