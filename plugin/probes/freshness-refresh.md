@@ -5,6 +5,11 @@ output_routing:
   stale-subject: milestone-candidate
   missing-producer: milestone-candidate
   default: milestone-candidate
+  # 产出者登记面：本探针的 finding 会点名一个产出者（`producer`），而机械立案步要求那个名字**真的
+  # 登记在册**——未登记 ⇒ 本轮判 failed 并逐条指名（⛔ 不把一个凭空造出来的主体立成任务）。
+  # 这是本探针自己的声明：未声明该键的例程不受这条闸约束（那一闸对它们不适用，⛔ 不是「都未登记」）。
+  # gap-ac214-fifth-crossing-routine-detects-but-nothing-acts
+  producers_file: plugin/freshness-producers.json
 ---
 You are a fresh-context FRESHNESS-REFRESH analyst for a quay workspace.
 

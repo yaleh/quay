@@ -36,11 +36,31 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { launchArgv, runAsync } from "./driver-runtime.ts";
 import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guard.ts";
+// 机械立案步（AC5/AC6）：三道闸与 finding→任务 的形状判据都复用 routine-file-gate.ts 的单一实现，
+// ⛔ 不在这里另写一份质量/去重/限流判据。该模块只 import gate-script-base，无环
+// （⛔ 不可改 import meta-driver.ts：quality-gate-driver → probe-routine → meta-driver → quality-gate-driver
+//  正是 probe-write-guard 当初被拆出去要消掉的那个环）。
+import {
+  boardKeys,
+  countRecentFilings,
+  findingKey,
+  gateFinding,
+  hasRequestedAction,
+  producerGate,
+  readProducerRegistry,
+  renderRoutineTaskBody,
+  resolveTaskCliEntry,
+  routineFindingCandidateText,
+  routineTaskId,
+  DEFAULT_RATE,
+} from "./routine-file-gate.ts";
 import type { Fact, RoutineSpec } from "./driver-runtime.ts";
 
 /** 结构化 finding 的载体（追加式 JSONL）。登记在任务 ## Touches 里 ⇒ 是**可查的落地产物**，
@@ -158,6 +178,9 @@ export interface ProbeFinding {
   verdict: string | null;
   rationale: string;
   suggestedAction: string | null;
+  /** 探针点名的产出者/主体（探针契约可选带；`plugin/probes/freshness-refresh.md` 的 finding 带
+   *  `producer`）。⛔ `null` = 没点名，与「点名了但没登记」不同形（硬规则 3b）。 */
+  producer: string | null;
 }
 
 export interface ParsedProbeOutput {
@@ -251,6 +274,7 @@ export function parseProbeFindings(stdout: string): ParsedProbeOutput | null {
       verdict: typeof r.verdict === "string" && r.verdict.trim() ? r.verdict.trim() : null,
       rationale,
       suggestedAction: typeof r.suggestedAction === "string" && r.suggestedAction.trim() ? r.suggestedAction.trim() : null,
+      producer: typeof r.producer === "string" && r.producer.trim() ? r.producer.trim() : null,
     });
   }
   const inv = obj.inventory && typeof obj.inventory === "object" && !Array.isArray(obj.inventory)
@@ -268,6 +292,126 @@ export function parseProbeFindings(stdout: string): ParsedProbeOutput | null {
   };
 }
 
+// ── 机械立案步（AC5/AC6 of gap-ac214-fifth-crossing-routine-detects-but-nothing-acts）────────────
+//
+// THE MISSING HALF. Everything above ends at "append the finding to the carrier". Measured: 61
+// finding records / 57 distinct findingIds landed there and **zero** became tasks (`grep -rl <id>
+// tasks/` matched only the routine's own task quoting its output). The carrier had no consumer, so
+// "the routine is running and has findings" was shaped exactly like "the gap is being handled" —
+// which is the whole defect. This step closes it: actionable findings are FILED (⛔ not executed).
+//
+// ⛔ FILE-ONLY. The closing action for a filed task (re-running a cross-machine producer, fixing a
+// defect) belongs to the dispatch chain. A routine that executes is the rogue-probe failure mode the
+// probe specs forbid in prose; here it is bounded by construction — this function can only create
+// `tasks/<id>.md`.
+
+export interface FilingDisposition {
+  findingId: string | null;
+  taskId: string | null;
+  accepted: boolean;
+  /** 哪一道处置判据给的结论——⛔ 不合并成布尔（硬规则 3）；`producer` 单独一类，因为它是探针
+   *  自身完整性问题（点名一个不存在的产出者），与「有产出者但被质量/去重/限流挡下」不同形。 */
+  gate: "action" | "producer" | "quality-dedup-rate" | "collision" | "filed";
+  reason: string;
+}
+
+export interface FilingOptions {
+  routine: string;
+  probe: string;
+  runId: string;
+  ts: string;
+  /** 载体路径（绝对）——rate 窗口从它自己的 `filing-round` 记录里读，⛔ 不另立一个计数器文件。 */
+  carrierPath: string;
+  /** 载体相对 root 的路径（写进任务体的逐字来源行）。 */
+  carrierRel: string;
+  /** 任务板目录（绝对）——dedup 闸从这里读既有 finding key。 */
+  tasksDir: string;
+  /** 板上的既有任务文件路径 → 内容（测试缝可覆盖；缺省从 tasksDir 读）。 */
+  boardKeys?: Set<string>;
+  nowMs: number;
+  /** rate 闸的上限（本窗口内允许立案的条数）。 */
+  k: number;
+  /** 登记在册的产出者集合。**三值**（见 producerGate 注释）：`undefined` = 本例程未声明登记面 ⇒
+   *  该闸不适用；`null` = 声明了但读不懂 ⇒ fail-closed；`Set` = 读到了，按成员判定。 */
+  registeredProducers: Set<string> | null | undefined;
+}
+
+/** 逐条处置 finding（⛔ 不只回一个布尔，硬规则 3）。**纯函数**：不写盘、不 spawn——落盘在调用方，
+ *  于是同一个判定可以对着**生产载体**跑一次而不改变任何东西（AC5 的「生产载体真实读数」）。 */
+export function selectFilings(findings: readonly ProbeFinding[], o: FilingOptions): FilingDisposition[] {
+  const out: FilingDisposition[] = [];
+  const keys = o.boardKeys ?? boardKeys(o.tasksDir);
+  let acceptedThisRound = 0;
+  let recentBase: number | null = null;
+  for (const f of findings) {
+    const id = f.id;
+    const reject = (gate: FilingDisposition["gate"], reason: string): void => {
+      out.push({ findingId: id, taskId: null, accepted: false, gate, reason });
+    };
+
+    // ① 只立「要求了动作」的 finding。semantic-dedup-scan 的 `suggestedAction: "leave"` 判定是
+    //    **测量**不是工作；把它们也立成任务会让这条轨道变成噪音，而噪音轨道会被关掉。
+    if (!hasRequestedAction(f)) {
+      reject("action", `action: finding declares no requested action (suggestedAction=${JSON.stringify(f.suggestedAction)}) ⇒ a measurement, not work`);
+      continue;
+    }
+    // ② 产出者闸（AC5 红侧）：点名的产出者必须在登记面上。
+    const pg = producerGate(f, o.registeredProducers);
+    if (!pg.ok) { reject("producer", pg.reason); continue; }
+    // ③ 既有三道闸（质量 / 去重 / 限流）——⛔ 复用单一实现，不在这里另写一份判据。
+    if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+    const candidate = routineFindingCandidateText(f);
+    const g = gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+    if (!g.accept) { reject("quality-dedup-rate", g.reason); continue; }
+
+    // ④ id 派生 + 撞车处置：同 slug 但**不同** finding ⇒ 加确定性后缀（⛔ 不覆盖既有任务体）。
+    let taskId = routineTaskId(o.routine, f.id);
+    if (fs.existsSync(path.join(o.tasksDir, `${taskId}.md`))) {
+      taskId = `${taskId}-${createHash("sha1").update(findingKey(candidate)).digest("hex").slice(0, 8)}`;
+    }
+    if (fs.existsSync(path.join(o.tasksDir, `${taskId}.md`))) {
+      reject("collision", `collision: tasks/${taskId}.md already exists and is not this finding ⇒ not overwriting`);
+      continue;
+    }
+    keys.add(findingKey(candidate));
+    acceptedThisRound += 1;
+    out.push({ findingId: id, taskId, accepted: true, gate: "filed", reason: "accepted: actionable, novel, within rate" });
+  }
+  return out;
+}
+
+/** 立一条任务：spawn workspace 自己的 task store CLI（⛔ 不手搓 markdown 落盘）。
+ *
+ *  ⚠️ `cwd` 必须显式设为 root，⛔ 不能靠继承（`runAsync` 不接受 cwd ⇒ 用的是**父进程的** cwd）。
+ *  实测（2026-09-15，两次）：`quay-native task create` 在错误 cwd 下会把 `tasks/<id>.md` 写进
+ *  `<cwd>/tasks`——一次造出 `/tmp/tasks/WRONGCWD-1.md`。这与 `tasks/EXIST.md` 那条残留同源
+ *  （都是「写入落点由 cwd 决定，而调用方以为它由 root 决定」）。两道保险都用，因为二者的失效模式不同：
+ *    ① `cwd: root` —— 让 CLI 从正确的工作区解析 `.quay/config.yml`（provider/tasks_dir 的正本）；
+ *    ② `QUAY_NATIVE_TASKS_DIR` 绝对路径 —— 让**写入落点**与 `selectFilings` 做撞车检查时看的
+ *      `tasksDir` 是**同一个目录**（检查与实际写盘不得各看一处）。实测该 env 在错误 cwd 下仍然生效。
+ *  解析不出 CLI ⇒ 返回 `unresolved`（与「没有要立的」不同形，硬规则 3b）。 */
+export function fileRoutineTask(
+  root: string, kernelPluginRoot: string | null, taskId: string, title: string, body: string,
+  labels: readonly string[], tasksDir: string, timeoutMs = 120_000,
+): { ok: boolean; reason: string } {
+  const entry = resolveTaskCliEntry(root, kernelPluginRoot);
+  if (!entry) return { ok: false, reason: "task store CLI unresolved (no packages/quay-native and no vendored bundle) — nothing filed" };
+  const argv = [process.execPath, ...entry, "task", "create", taskId, "--title", title, "--labels", labels.join(","), "--body", body];
+  const r = spawnSync(argv[0], argv.slice(1), {
+    cwd: root,
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: path.resolve(tasksDir) },
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
+  if (r.error) return { ok: false, reason: `task create spawn error: ${(r.error as Error).message}` };
+  if (r.status !== 0) return { ok: false, reason: `task create exit ${r.status}: ${String(r.stderr ?? "").trim().slice(0, 200)}` };
+  // 写入必须真的发生在这个目录里（⛔ 不采信 CLI 的自报——EXIST 那次 CLI 也报了 ok 而文件落在别处）。
+  if (!fs.existsSync(path.join(tasksDir, `${taskId}.md`))) {
+    return { ok: false, reason: `task create reported ok but ${path.join(tasksDir, `${taskId}.md`)} does not exist ⇒ filing not trusted` };
+  }
+  return { ok: true, reason: `filed as ${taskId}` };
+}
+
 // ── 载体（追加式 JSONL）──────────────────────────────────────────────────────────────────────
 /** 追加记录到载体；返回实际追加条数。目录自动创建。 */
 export function appendRoutineFindings(findingsPath: string, records: readonly Record<string, unknown>[]): number {
@@ -275,6 +419,51 @@ export function appendRoutineFindings(findingsPath: string, records: readonly Re
   fs.mkdirSync(path.dirname(findingsPath), { recursive: true });
   fs.appendFileSync(findingsPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
   return records.length;
+}
+
+/** 追加即提交（AC7 of gap-ac214-fifth-crossing-routine-detects-but-nothing-acts）。
+ *
+ *  WHY: the carrier is git-TRACKED but its append was never committed ⇒ the working-tree copy was
+ *  permanently dirty, and **any** tree-hygiene `git checkout`/`reset` on the shared checkout silently
+ *  restored it to HEAD. Measured 2026-09-15: rounds 1–473 appended 25 records (3 scan-round + 22
+ *  finding) between 02:17Z and 14:36Z; the file then held HEAD's 54 lines + only the last two rounds'
+ *  10 ⇒ those 25 are gone, and with them the ability to re-examine why round 473 reported 6 findings
+ *  where its neighbours reported 4. **The loss window was the interval between "the routine wrote it"
+ *  and "somebody happened to commit it" — i.e. it was never bounded.** Closing it means the append and
+ *  its commit are the same action, so HEAD and the work tree agree after every round and there is
+ *  nothing left for a `checkout` to take back.
+ *
+ *  ⛔ NOT the gitignore route (the other option the task names): `git rm --cached` would put a
+ *  DELETION of this file on develop, and the main checkout holds a locally-modified copy of it ⇒ the
+ *  very next `--ff-only` sync would refuse ("local changes would be overwritten"), i.e. the fix for a
+ *  silent-loss defect would break the sync path. Keeping it tracked and committing the append has no
+ *  such edge and additionally preserves the record as the diff-able artifact it was designed to be.
+ *
+ *  Shape copied from Core's `commitStoreWrite` (the repo's ONE task-store commit primitive): pathspec-
+ *  limited add+commit back-to-back (hard rule 11 — never leave the shared index staged), `--no-verify`
+ *  (the pre-commit guard is for human/driver commits, not for an append that already happened on disk),
+ *  and on failure `git reset -- <path>` to unstage while keeping the bytes. Returns a reason rather
+ *  than throwing ⇒ the caller reports it in the Fact (⛔ never a silent "not committed"). */
+export function commitCarrierAppend(root: string, relPath: string, message: string): { ok: boolean; reason: string } {
+  const git = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const inside = git(["rev-parse", "--is-inside-work-tree"]);
+  if (inside.status !== 0 || String(inside.stdout ?? "").trim() !== "true") {
+    return { ok: false, reason: "not a git work tree — append left uncommitted" };
+  }
+  if (git(["ls-files", "--error-unmatch", "--", relPath]).status !== 0) {
+    return { ok: false, reason: `${relPath} is untracked — append left uncommitted` };
+  }
+  const added = git(["add", "--", relPath]);
+  if (added.status !== 0) {
+    return { ok: false, reason: `git add failed: ${String(added.stderr ?? "").trim().slice(0, 200)}` };
+  }
+  const committed = git(["commit", "--no-verify", "-m", message, "--", relPath]);
+  if (committed.status !== 0) {
+    // hard rule 11：⛔ 绝不在共享索引上留一个已暂存未提交的状态去等窗口。
+    git(["reset", "--", relPath]);
+    return { ok: false, reason: `git commit failed (unstaged, bytes kept on disk): ${String(committed.stderr ?? "").trim().slice(0, 200)}` };
+  }
+  return { ok: true, reason: "committed" };
 }
 
 /** 持久 last-run 表（读不出/坏 JSON ⇒ `{}`：**从未运行 ⇒ due**，与 routine-scheduler.isDue 同契约）。 */
@@ -336,6 +525,17 @@ export interface ProbeRoutineOptions {
   spawnFn?: typeof runAsync;
   /** 时钟缝（缺省 Date.now）。 */
   now?: () => number;
+  /** 任务板目录（缺省 `<root>/tasks`）——机械立案步的落点。 */
+  tasksDir?: string;
+  /** 本 kernel 的 plugin root（缺省从本文件位置推导）：出厂布局下 vendored task CLI 的锚点。 */
+  kernelPluginRoot?: string | null;
+  /** **立案开关缝（测试用）**：缺省 true。`false` ⇒ 立案步整段不出产任务，用于「关掉产出面 ⇒ 不产出」
+   *  的反向对照（AC6）——⛔ 不是生产开关，生产恒为 true。 */
+  filingEnabled?: boolean;
+  /** 立案的 rate 上限（缺省 DEFAULT_RATE）。 */
+  filingRate?: number;
+  /** 任务写入缝（测试用；缺省 spawn workspace 自己的 task store CLI）。 */
+  fileTaskFn?: (taskId: string, title: string, body: string) => Promise<{ ok: boolean; reason: string }>;
 }
 
 /** 把一条声明变成 Layer-1b 例程。`schedule` 用 routine-scheduler 的解析结果（**interval:<N>m 是
@@ -462,8 +662,76 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       } catch (e) {
         return fact("failed", base, `carrier append failed: ${(e as Error).message}`);
       }
+
+      // ⑦ 机械立案（AC5/AC6）：append 之后，把 actionable finding 经三道闸落成**新任务文件**。
+      //    ⛔ FILE-ONLY —— 只立案，不执行（缺口重跑/修复仍归派发链）。见本文件头部与 selectFilings 注释。
+      const tasksDir = opts.tasksDir ?? path.join(opts.root, "tasks");
+      // 产出者登记面：由**探针规格自己声明**（`output_routing.producers_file`，readProbeSpec 原样透传），
+      // 故本步对任意 routine 通用——未声明 ⇒ 该闸不适用，而不是「都未登记」。
+      const registryRel = (spec.output_routing as Record<string, unknown> | undefined)?.producers_file;
+      const producersDeclared = typeof registryRel === "string" && registryRel.trim() !== "";
+      // ⚠️ 三值，⛔ 不把「未声明」与「声明了但读不懂」合并（硬规则 3b；第一版合并过，被 (f) 的
+      //    「no registry declared」用例抓住）：undefined = 未声明 ⇒ 闸不适用；null = 读不懂 ⇒ fail-closed。
+      const registeredProducers = producersDeclared ? readProducerRegistry(path.join(opts.root, String(registryRel))) : undefined;
+      if (producersDeclared && registeredProducers === null) {
+        // fail-closed：登记面声明了却读不懂 ⇒ 不立案（⛔ 不得把「读不懂」当成「没有未登记的」）。
+        return fact("failed", { ...base, runId, recordsAppended: recorded, producerRegistry: String(registryRel) },
+          `producer registry declared but unreadable (${String(registryRel)}) ⇒ no findings filed this round, carrier records kept`);
+      }
+      let dispositions: FilingDisposition[] = [];
+      const filed: string[] = [];
+      const fileErrors: string[] = [];
+      if (opts.filingEnabled !== false) {
+        dispositions = selectFilings(parsed.findings, {
+          routine: decl.name, probe: decl.probe as string, runId, ts: new Date(started).toISOString(),
+          carrierPath: findingsPath, carrierRel: path.relative(opts.root, findingsPath),
+          tasksDir, nowMs: started, k: opts.filingRate ?? DEFAULT_RATE, registeredProducers,
+        });
+        for (const d of dispositions) {
+          if (!d.accepted || !d.taskId) continue;
+          const f = parsed.findings.find((x) => x.id === d.findingId);
+          if (!f) continue;
+          const title = `${decl.name}: ${f.rationale}`.slice(0, 180);
+          const body = renderRoutineTaskBody({ ...f }, {
+            routine: decl.name, probe: decl.probe as string, runId, carrier: path.relative(opts.root, findingsPath),
+            ts: new Date(started).toISOString(), taskId: d.taskId,
+          });
+          const w = opts.fileTaskFn
+            ? await opts.fileTaskFn(d.taskId, title, body)
+            : fileRoutineTask(opts.root, opts.kernelPluginRoot ?? null, d.taskId, title, body, ["gap", "routine-filed", decl.name], tasksDir);
+          if (w.ok) filed.push(d.taskId); else fileErrors.push(`${d.taskId}: ${w.reason}`);
+        }
+      }
+      // 立案轮次落痕（rate 窗口的唯一读数来源；⛔ 不另立计数器文件）。
+      try {
+        appendRoutineFindings(findingsPath, [{
+          ts: new Date(started).toISOString(), kind: "filing-round", routine: decl.name, probe: decl.probe,
+          runId, evaluated: opts.filingEnabled !== false,
+          candidates: parsed.findings.length,
+          filed,
+          rejected: dispositions.filter((d) => !d.accepted).map((d) => ({ findingId: d.findingId, gate: d.gate, reason: d.reason })),
+          errors: fileErrors,
+        }]);
+      } catch { /* 立案落痕失败不推翻本轮读数 */ }
+
+      // ⑧ 追加即提交（AC7）：本轮的全部追加（scan-round + finding + filing-round）在**同一次动作**里
+      //    落到 HEAD，于是「例程写了、还没人提交」这个丢失窗口长度归零。失败只报不抛（见其注释）。
+      const carrierRel = path.relative(opts.root, findingsPath);
+      const commit = commitCarrierAppend(opts.root, carrierRel, `routine(${decl.name}): findings round ${runId}`);
+
       // last-run 只在**真的产出了记录**之后写回：违约/失败轮不占窗口，下一轮仍会重试。
       try { writeLastRun(lastRunPath, decl.name, started); } catch { /* last-run 写失败 ⇒ 下轮重跑，不致命 */ }
+
+      // AC5 的红侧：探针点名了一个**未登记**的产出者 = 探针自身的完整性缺陷（它凭空造了一个主体）
+      // ⇒ 本轮判 failed 并**逐条指名**（⛔ 不静默降级成一条普通 rejected 记录）。登记齐备 ⇒ verified。
+      const producerRejects = dispositions.filter((d) => d.gate === "producer");
+      if (producerRejects.length > 0) {
+        return fact("failed", {
+          ...base, runId, recordsAppended: recorded, findings: parsed.findings.length, malformed: parsed.malformed,
+          filed, filingRejected: dispositions.length - filed.length, carrierCommit: commit.ok ? "committed" : commit.reason,
+          unregisteredProducers: producerRejects.map((d) => ({ findingId: d.findingId, reason: d.reason })),
+        }, `probe named ${producerRejects.length} UNREGISTERED producer(s) — nothing filed for them: ${producerRejects.map((d) => `${d.findingId ?? "<no-id>"} (${d.reason})`).join("; ")}`);
+      }
       return fact("verified", {
         ...base,
         runId,
@@ -472,7 +740,10 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         shards: parsed.shards,
         inventory: parsed.inventory,
         recordsAppended: recorded,
-      }, `deep scan ran: ${parsed.findings.length} structured finding(s), ${parsed.malformed} malformed, ${parsed.shards ?? "?"} shard(s), ${recorded} record(s) appended to ${path.relative(opts.root, findingsPath)}`);
+        filed,
+        filingRejected: dispositions.filter((d) => !d.accepted).length,
+        carrierCommit: commit.ok ? "committed" : commit.reason,
+      }, `deep scan ran: ${parsed.findings.length} structured finding(s), ${parsed.malformed} malformed, ${parsed.shards ?? "?"} shard(s), ${recorded} record(s) appended to ${path.relative(opts.root, findingsPath)}, ${filed.length} filed as task(s)`);
     },
   };
 }

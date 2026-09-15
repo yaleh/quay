@@ -38,6 +38,7 @@ import {
   probeRoutinesFromConfig,
   readRoutinesConfig,
   readLastRunMap,
+  selectFilings,
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
 
@@ -245,7 +246,10 @@ test("llmProbeRoutine — real run appends a round record + one record per findi
   assert.equal(facts[0].value.shards, 3);
 
   const records = readCarrier(root);
-  assert.equal(records.length, 3, "one scan-round record + one record per finding");
+  // 3 条扫描记录（1 scan-round + 2 finding）**外加** 1 条立案轮记录（gap-ac214-fifth-crossing-…：
+  // append 之后的机械立案步）。按 kind 断言，⛔ 不数总数——总数会随立案步的落痕条数漂移。
+  assert.equal(records.filter((r) => r.kind !== "filing-round").length, 3, "one scan-round record + one record per finding");
+  assert.equal(records.filter((r) => r.kind === "filing-round").length, 1, "append 之后必须留下一条立案轮记录");
   assert.equal(records[0].kind, "scan-round");
   assert.equal(records[0].findings, 2);
   assert.deepEqual(records[0].inventory, { plugin_scripts: 2, package_src: 1, candidate_clusters: 1 });
@@ -374,4 +378,215 @@ test("quality-gate-driver --once runs the config-declared probe routine and appe
   // 老四条照旧（本任务不改它们的形状）
   assert.deepEqual(rec.facts.filter((f) => !f.name.startsWith("semantic-dedup")).map((f) => f.name).sort(),
     ["architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+});
+
+// ── (f) the mechanical FILING step (tasks/gap-ac214-fifth-crossing-routine-detects-but-nothing-acts) ─
+//
+// THE DEFECT THIS PINS: the mechanical channel appended findings to `.quay/routine-findings.jsonl`
+// and stopped. 61 finding records / 57 distinct findingIds landed there; `grep -rl <id> tasks/`
+// matched ZERO of them ⇒ "the routine is running and has findings" was indistinguishable from "the
+// gap is being handled" (硬规则 3b / 硬规则 9). These cases make the filing step takeable-false:
+//   (i)   a finding naming an UNREGISTERED producer ⇒ the run is `failed` and NAMES IT (AC5 red side);
+//   (ii)  register that producer ⇒ `verified` and the task file exists (AC5 green side);
+//   (iii) filing switched off ⇒ NO task at all (AC6's "关掉产出面 ⇒ 不产出" reverse control);
+//   (iv)  a `leave` verdict is a MEASUREMENT, not work ⇒ never filed (keeps the track non-noisy);
+//   (v)   the selector is PURE — run over the repo's real carrier it writes nothing (AC5's
+//         "对生产载体跑一次真实读数" is only a reading if it cannot change the thing it reads).
+
+const FRESHNESS_FINDING = {
+  id: "freshness-goal-009-ac-207",
+  kind: "stale-subject",
+  symbols: ["coldstart-face"],
+  files: ["plugin/freshness-producers.json:32", ".quay/productization-verification.jsonl:166"],
+  verdict: "act-now",
+  rationale: "delivery-face evidence for AC-207 is d=192 commits behind the develop tip — the window closes mid-flight",
+  suggestedAction: "re-run coldstart-face on hosts B C",
+  producer: "coldstart-face",
+};
+
+/** 工作区：一条声明了产出者登记面的 probe 例程 + 空的 `tasks/` 板 + git 仓库。 */
+function makeFilingWorkspace({ registeredProducers = [], finding = FRESHNESS_FINDING, declareRegistry = true } = {}) {
+  const root = makeTmpDir("probe-filing-");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "probes"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), [
+    "loop:", "  routines:", "    - name: freshness-refresh", "      trigger: interval:120m",
+    "      probe: freshness-refresh", "",
+  ].join("\n"), "utf8");
+  const routing = declareRegistry ? "output_routing:\n  stale-subject: milestone-candidate\n  producers_file: plugin/freshness-producers.json\n" : "output_routing:\n  stale-subject: milestone-candidate\n";
+  fs.writeFileSync(path.join(root, "plugin", "probes", "freshness-refresh.md"),
+    `---\ninstrument: none\nfallback: none\n${routing}---\nReport stale subjects.\n`, "utf8");
+  fs.writeFileSync(path.join(root, "plugin", "freshness-producers.json"),
+    JSON.stringify({ producers: registeredProducers.map((id) => ({ id, subjects: [] })) }), "utf8");
+  spawnSync("git", ["-C", root, "init", "-q"], { encoding: "utf8" });
+  return root;
+}
+
+/** 跑一次例程（假探针 = 直接打印 finding JSON，⛔ 不 spawn LLM），并捕获它请求立的任务。 */
+async function runFilingRoutine(root, finding, extra = {}) {
+  const written = [];
+  const routine = llmProbeRoutine(
+    { name: "freshness-refresh", trigger: "interval:120m", probe: "freshness-refresh", dispatch: null },
+    {
+      root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
+      probeArgv: () => fakeProbeArgv({ findings: [finding], shards: 1 }),
+      fileTaskFn: async (taskId, title, body) => { written.push({ taskId, title, body }); return { ok: true, reason: `filed as ${taskId}` }; },
+      ...extra,
+    },
+  );
+  const facts = await routine.run({ halted: false });
+  return { facts, written };
+}
+
+test("FILING AC5 (red side) — a finding naming an UNREGISTERED producer fails the run and NAMES it", async () => {
+  const root = makeFilingWorkspace({ registeredProducers: ["upgrade-face"] });
+  const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING);
+  assert.equal(facts[0].state, "failed", "an unregistered producer is a probe-integrity failure, not a routine no-op");
+  assert.match(facts[0].reason, /UNREGISTERED producer/);
+  assert.match(facts[0].reason, /freshness-goal-009-ac-207/, "⛔ 逐条指名：the finding id must appear");
+  assert.match(facts[0].reason, /coldstart-face/, "⛔ 逐条指名：the offending producer must appear");
+  assert.equal(written.length, 0, "⛔ a phantom producer must never reach the board");
+  // and the disposition is recorded on the carrier (⛔ not silently dropped — 硬规则 3)
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.ok(round, "the filing round must leave a record");
+  assert.equal(round.filed.length, 0);
+  assert.equal(round.rejected[0].gate, "producer");
+  assert.match(round.rejected[0].reason, /not registered/);
+});
+
+test("FILING AC5 (green side) — register the producer and the SAME finding files a task, verbatim", async () => {
+  const root = makeFilingWorkspace({ registeredProducers: ["coldstart-face", "upgrade-face"] });
+  const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING);
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 1, "the registered finding must be filed");
+  assert.equal(facts[0].value.filed.length, 1);
+  // AC6: the task's `## Finding` corresponds VERBATIM to the routine finding.
+  assert.ok(written[0].body.includes(FRESHNESS_FINDING.rationale), "the task body must quote the finding's rationale verbatim");
+  assert.ok(written[0].body.includes("coldstart-face"), "the named producer must survive into the task");
+  assert.ok(written[0].body.includes("freshness-goal-009-ac-207"), "the finding id must survive into the task");
+  assert.match(written[0].taskId, /^gap-routine-freshness-refresh-/);
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.deepEqual(round.filed, [written[0].taskId]);
+});
+
+test("FILING AC6 reverse control — with filing switched off the SAME finding produces NO task", async () => {
+  const on = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  const a = await runFilingRoutine(on, FRESHNESS_FINDING);
+  assert.equal(a.written.length, 1, "control baseline: it DOES file when enabled");
+  const off = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  const b = await runFilingRoutine(off, FRESHNESS_FINDING, { filingEnabled: false });
+  assert.equal(b.written.length, 0, "⛔ 关掉产出面 ⇒ 不产出（区分「立案步在工作」与「恒有输出」）");
+  const round = readCarrier(off).find((r) => r.kind === "filing-round");
+  assert.equal(round.evaluated, false, "the round must record that it did not evaluate");
+  assert.deepEqual(round.filed, []);
+  assert.equal(readCarrier(on).filter((r) => r.kind === "finding").length, 1, "the scan itself still ran (only filing was off)");
+});
+
+test("FILING — a `leave` verdict is a measurement, not work ⇒ never filed (the track must not become noise)", async () => {
+  const root = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  const { facts, written } = await runFilingRoutine(root, { ...FRESHNESS_FINDING, id: "dupe", suggestedAction: "leave", producer: null });
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 0, "⛔ `leave` findings must not become tasks");
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.equal(round.rejected[0].gate, "action");
+});
+
+test("FILING — a registry DECLARED but unreadable fails closed (⛔ 读不懂 ≠ 没有未登记的)", async () => {
+  const root = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  fs.rmSync(path.join(root, "plugin", "freshness-producers.json")); // declared, but gone
+  const { facts, written } = await runFilingRoutine(root, FRESHNESS_FINDING);
+  assert.equal(facts[0].state, "failed");
+  assert.match(facts[0].reason, /registry declared but unreadable/);
+  assert.equal(written.length, 0);
+  assert.equal(readCarrier(root).filter((r) => r.kind === "filing-round").length, 0,
+    "⛔ fail-closed BEFORE the filing round: no half-disposition record");
+});
+
+test("FILING — with NO registry declared the producer gate does not apply (generic across routines)", async () => {
+  const root = makeFilingWorkspace({ declareRegistry: false });
+  const { facts, written } = await runFilingRoutine(root, { ...FRESHNESS_FINDING, producer: "who-knows" });
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 1, "a routine that declares no producer registry is unaffected by the gate");
+});
+
+test("FILING — the selector is PURE: run over the repo's REAL carrier it writes nothing", async () => {
+  // AC5's "对生产载体跑一次真实读数": it is only a READING if running it cannot change what it reads.
+  const carrierPath = path.join(REPO_ROOT, ROUTINE_FINDINGS_REL);
+  assert.ok(fs.existsSync(carrierPath), `the repo's own carrier must exist to be read: ${carrierPath}`);
+  const before = fs.readFileSync(carrierPath);
+  const findings = fs.readFileSync(carrierPath, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+    .filter((r) => r.kind === "finding").map((r) => ({
+    id: r.findingId ?? null, kind: r.dupKind ?? null, symbols: r.symbols ?? [], files: r.files ?? [],
+    verdict: r.verdict ?? null, rationale: r.rationale ?? "", suggestedAction: r.suggestedAction ?? null,
+    producer: r.producer ?? null,
+  }));
+  assert.ok(findings.length > 0, "the production carrier must actually carry findings");
+  const dispositions = selectFilings(findings, {
+    routine: "PRODUCTION-READING", probe: "PRODUCTION-READING", runId: "production-reading", ts: "1970-01-01T00:00:00Z",
+    carrierPath, carrierRel: ROUTINE_FINDINGS_REL, tasksDir: path.join(REPO_ROOT, "tasks"),
+    nowMs: Date.now(), k: 3, registeredProducers: undefined, // 本读数统一按「未声明登记面」跑：它测的是枚举完备性与纯度，不是产出者判定
+  });
+  assert.equal(dispositions.length, findings.length, "⛔ every finding gets a disposition (枚举不布尔)");
+  for (const d of dispositions) assert.ok(d.reason.length > 10, `disposition must carry a reason: ${JSON.stringify(d)}`);
+  assert.equal(fs.readFileSync(carrierPath).equals(before), true, "⛔ the selector must not touch the carrier it reads");
+});
+
+// ── (g) the carrier's landing: append and commit are ONE action (AC7) ────────────────────────────
+//
+// THE DEFECT: the carrier is git-TRACKED, but `appendRoutineFindings` never committed ⇒ the
+// working-tree copy sat dirty until somebody happened to commit it, and any tree-hygiene
+// `git checkout` on the shared checkout took the appends back. Measured 2026-09-15: 25 records
+// appended 02:17Z–14:36Z were gone by 16:35Z, leaving only HEAD's 54 lines + the last two rounds' 10.
+// The case below takes that reading BOTH ways: the old shape really does lose the append, and the
+// new shape does not.
+test("CARRIER AC7 — an uncommitted append IS lost by a checkout; a committed one is not", async () => {
+  const root = makeTmpDir("probe-carrier-");
+  const carrierRel = ROUTINE_FINDINGS_REL;
+  const carrierAbs = path.join(root, carrierRel);
+  const git = (args) => spawnSync("git", ["-C", root, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { encoding: "utf8" });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "probes"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), [
+    "loop:", "  routines:", "    - name: freshness-refresh", "      trigger: interval:120m",
+    "      probe: freshness-refresh", "",
+  ].join("\n"), "utf8");
+  fs.writeFileSync(path.join(root, "plugin", "probes", "freshness-refresh.md"),
+    "---\ninstrument: none\noutput_routing:\n  producers_file: plugin/freshness-producers.json\n---\nbody\n", "utf8");
+  fs.writeFileSync(path.join(root, "plugin", "freshness-producers.json"),
+    JSON.stringify({ producers: [{ id: "coldstart-face" }] }), "utf8");
+  // The carrier is TRACKED (that is its declared landing — ⛔ NOT gitignored).
+  fs.writeFileSync(carrierAbs, "");
+  git(["init", "-q"]);
+  git(["add", "-A"]);
+  git(["commit", "-qm", "baseline"]);
+  assert.equal(git(["ls-files", "--error-unmatch", "--", carrierRel]).status, 0, "precondition: the carrier is tracked");
+
+  // (1) NEGATIVE CONTROL — the OLD shape: an append nobody committed is silently lost.
+  fs.appendFileSync(carrierAbs, JSON.stringify({ ts: "2026-09-15T02:17:52Z", kind: "finding", findingId: "LOST-1" }) + "\n", "utf8");
+  assert.equal(git(["status", "--porcelain", "--", carrierRel]).stdout.trim().startsWith("M"), true, "an uncommitted append really does dirty the shared checkout");
+  git(["checkout", "--", carrierRel]);
+  assert.equal(fs.readFileSync(carrierAbs, "utf8").trim(), "", "⛔ and a plain checkout takes the append back — this is the measured 2026-09-15 loss");
+
+  // (2) THE FIX — run the routine; the append and its commit are one action.
+  const routine = llmProbeRoutine(
+    { name: "freshness-refresh", trigger: "interval:120m", probe: "freshness-refresh", dispatch: null },
+    {
+      root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
+      probeArgv: () => fakeProbeArgv({ findings: [FRESHNESS_FINDING], shards: 1 }),
+      fileTaskFn: async (id) => ({ ok: true, reason: `filed as ${id}` }),
+    },
+  );
+  const facts = await routine.run({ halted: false });
+  assert.equal(facts[0].value.carrierCommit, "committed", `the round must commit its own append: ${facts[0].value.carrierCommit}`);
+  assert.equal(git(["status", "--porcelain", "--", carrierRel]).stdout.trim(), "",
+    "⛔ HEAD and the work tree must AGREE after the round — nothing left for a checkout to take back");
+  const head = git(["show", `HEAD:${carrierRel}`]).stdout;
+  assert.match(head, /freshness-goal-009-ac-207/, "the finding record must be in HEAD, not only on disk");
+  assert.match(head, /"kind":"filing-round"/, "the filing round's record must be in HEAD too");
+  // and the whole point: the same checkout that destroyed (1) is now a no-op
+  git(["checkout", "--", carrierRel]);
+  assert.ok(fs.readFileSync(carrierAbs, "utf8").includes("freshness-goal-009-ac-207"),
+    "⛔ after the fix the same checkout can no longer destroy the records");
 });
