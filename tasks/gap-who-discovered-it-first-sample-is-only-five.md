@@ -33,6 +33,7 @@ extra: {}
 - `plugin/scripts/discovery-path-classify.ts`
 - `plugin/test/discovery-path-classify.test.mjs`
 - `plugin/scripts/capability-catalog.sh`
+- `plugin/scripts/task-file-bypass-check.ts`（只读 ratchet：本机件的一次 `git log -- tasks/` 读立案时刻被它按位置判为 LIVE-STORE 读取面，需按其既有 ALLOWLIST 先例登记 reason/expected；⛔ 不改其判据）
 - `docs/analysis/who-found-it-first-distribution.md`
 - `docs/references/维度边界与结晶——从熔融实现中发现原则.md`
 - `tasks/gap-who-discovered-it-first-sample-is-only-five.md`
