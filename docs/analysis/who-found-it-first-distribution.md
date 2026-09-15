@@ -264,6 +264,10 @@ node --experimental-strip-types plugin/scripts/discovery-path-classify.ts --samp
 ```
 
 - **读数日期**：2026-09-15；**develop tip**：`be12f1118bce458af07ef26d29a78419594b2380`
+- ⚠️ **tip 钉的是【读数那一刻】的语料。** `tasks/` 是活的（本报告写下的同一小时里
+  语料就从 1,669 变成 1,668 条）——**要复现本文的每一个数，就必须在 `be12f111` 上跑**；
+  在更晚的 tip 上跑会得到略有差异的 n，这是**语料在长大**，不是分类器变了。
+  §0 的结论对这个漂移不敏感：上界与 60% 之间隔着 24 个百分点。
 - **抽样种子**：`20260915`（`mulberry32`，同一 seed 在任何机器上给同一序列）
 - **一致性测试**：`node --experimental-strip-types --test plugin/test/discovery-path-classify.test.mjs`
 - ⚠️ **本报告里的每一个占比都是从盘上真实任务体与真实 git 历史读出来的**，关掉测试 fixture 后
