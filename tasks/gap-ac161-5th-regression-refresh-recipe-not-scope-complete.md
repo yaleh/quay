@@ -291,7 +291,7 @@ the CLI call  4160:      claude plugin install "quay@quay" --scope user -y …
 - 本 workspace 的 `.quay/*.jsonl` 里**没有**带 `user_scope_quay_state` 字段的 AC-257/AC-258 产出记录（`grep -rn 'user_scope_quay_state' .quay/*.jsonl` = **0** 条）⇒ AC-258 的交付记录在本机**从未产出过**；
 - 但 **12:53:23.850**（本 worker 开工后、读状态前数秒）`~/.claude/settings.json` 被**再次写入**，**12:53:24.305** 出现一条新的 `scope:"user"` 记录（Δ=**455ms**）——与立案事件（12:42:44.751 → 12:42:45.146，Δ=395ms）**同形**，是一次**独立的第二次排污**；
 - ⛔ **没有**找到把这次写入连到 `:4133` 的正向证据：`.quay/` 无对应产物；`find . -newermt '12:52' ! -newermt '12:56'` 命中的是一批 `plugin/scripts/*` 与 `packages/quay/dist/*` 文件 + `.quay/store-commit-propagation.jsonl`，**未检定为** `verify-deliver-coldstart.sh` 的产物。
-- ⇒ **§结论**：`:4133` 是**本机已知唯一**「写 user-scope 且零还原」的生产者（`grep -c uninstall` = 0），**且**它的命令足以产出所观察到的状态（AC5a 实测：同一条命令产出**同形指纹**）；但**本次**那两条记录**归因未建立**。⇒ 这两句分开陈述，**不给因果结论**。
+- ⇒ **结论（两句分开陈述，不给因果）**：`:4133` 是**本机已知唯一**「写 user-scope 且零还原」的生产者（`grep -c uninstall` = 0），**且**它的命令足以产出所观察到的状态（AC5a 实测：同一条命令产出**同形指纹**）；但**本次**那两条记录**归因未建立**。
 
 **「AC-161 与 AC-258 在同一台机器上能否同时为真」⇒ 能。支撑读数：**
 
@@ -334,9 +334,11 @@ the CLI call  4160:      claude plugin install "quay@quay" --scope user -y …
 - **scoped 门**（`scripts/test.sh --for-task gap-ac161-5th-regression-refresh-recipe-not-scope-complete --allow-thin`）：
   - **首轮 RED** — `STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`，报 `plugin/scripts/quay-init.sh` 改动后 baseline 指纹过期，指示 `--reanchor`；
   - 处置：跑 `--reanchor`（**footprint 未变**：`files 3 / bytes 1022`，只有 fingerprint 与 `quay-init.sh` 的 sha 变——改动是注释，不改 laydown 产物），并把 `docs/analysis/quay-init-closure-ratchet.baseline.json` **加入 Touches**（避免 Touches 外改动自招 anti-drift）；
-  - **复跑 GREEN** — `ℹ tests 45 / pass 45 / fail 0 / skipped 0 / todo 0`，`SCOPED_GATE_EXIT=0`；
-  - scoped 门 cache 已写：`{"event":"scoped-gate-cache-written","task":"gap-ac161-5th-regression-refresh-recipe-not-scope-complete","developSha":"104153b2b304b842df1de76e56b2fb950cf1882e"}`。
-- scoped 门 3 条静态读数逐字：`PASS — every suite-slot SSoT invariant holds (0 RED)` / `PASS — every declared landing target == forward branch 'develop' (0 violations)` / `PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)`。
+  - **复跑 GREEN（第二次运行，develop=`104153b2b…`）** — `ℹ tests 45 / pass 45 / fail 0 / skipped 0 / todo 0`；
+  - **再跑 GREEN（第三次运行，merge develop 之后，develop=`46d3a65b8…`）** — 同为 `ℹ tests 45 / pass 45 / fail 0`，`SCOPED_GATE_EXIT=0`。
+  - 三次运行的静态读数逐字：`PASS — every suite-slot SSoT invariant holds (0 RED)` / `PASS — every declared landing target == forward branch 'develop' (0 violations)` / `PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)` / `PASS: quay-init-closure-ratchet: laydown source fingerprint fresh … — baseline in sync`。
+- **scoped 门 cache 已写**（最终态）：`{"event":"scoped-gate-cache-written","task":"gap-ac161-5th-regression-refresh-recipe-not-scope-complete","developSha":"46d3a65b89e9069cd5eaafe0073a0545fce19355"}`；缓存文件键 = `gap-ac161-5th-…\t46d3a65b89e9069cd5eaafe0073a0545fce19355`，`ok: true`。
+  ⚠️ **一次自我更正（记录在案）**：首次写缓存时 develop 是 `104153b2b…`；第三次 `task_write` 把任务体落到 `author` 后，propagation 使 **develop 前进到 `46d3a65b8…`**（`git diff --name-only 104153b2b… 46d3a65b8…` = **仅本任务体一个文件**，无代码变化）。⇒ 为保证缓存是**对着现行 develop** 挣来的，重新 merge develop 进 worktree、**重跑了 scoped 门**（45/45，见上），再按 `rev-parse develop` 重写缓存。
 
 ⚠️ 与硬规则 3b 同读：`--selfcheck` 绿与「套件不产生新红」**都不是**接线成功的证据——AC4/AC5 的读数才是。
 
@@ -346,7 +348,8 @@ the CLI call  4160:      claude plugin install "quay@quay" --scope user -y …
 
 ### 交付物
 
-两个提交在本任务分支上（`develop..HEAD`）：
+任务分支相对 develop 的提交：
 
 - `8a67f7f7d` — 配方 scope-complete（三处）+ AC-258 腿加闸 + 更正该腿已被推翻的注释
 - `62a866345` — closure-ratchet 重新锚定（footprint 未变）
+- `340e702fe` — `Merge branch 'develop' into task/…`（把上面第三条 scoped 门所对的 develop 并进来）
