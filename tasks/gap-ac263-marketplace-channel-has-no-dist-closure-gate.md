@@ -7,7 +7,7 @@ labels:
 parent: null
 children: []
 extra:
-  schema: execution
+  schema: v1
 depends_on:
   - gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths
 goal_ac: AC-263
