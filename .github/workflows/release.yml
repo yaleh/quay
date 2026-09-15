@@ -617,12 +617,25 @@ jobs:
       - name: Fast-forward master to this release's tag
         env:
           TAG: ${{ inputs.tag }}
-        # Pushing <tag>:master updates refs/heads/master to the tag's commit. `git push` rejects a
-        # non-fast-forward update on its own, so invariant 2 needs no extra code — and adding a
-        # force flag would silently destroy it, which is why none appears anywhere in this file.
+        # ⛔ PUSH THE PEELED COMMIT, NOT THE TAG NAME. `git push origin <annotated-tag>:master` is
+        # REJECTED by the receiving repo — measured 2026-09-15 in a scratch remote pair:
+        #   remote: error: cannot update ref 'refs/heads/master': trying to write non-commit object
+        #   <tag-object-sha> to branch 'refs/heads/master' -> [remote rejected] (failed to update ref)
+        # An annotated tag is a tag OBJECT and refs/heads/* must point at a COMMIT, so the refspec
+        # source has to be peeled first. Every version tag in this repo is annotated
+        # (`git cat-file -t v0.7.0` -> `tag`), so the unpeeled form would have failed on every real
+        # release — and nothing local could have caught it: the syntax is valid, the history is
+        # present, and only the remote's own ref-update rule refuses the write.
+        # `git push` still rejects a non-fast-forward update on its own, so invariant 2 needs no
+        # extra code here — and adding a force flag would silently destroy it, which is why no force
+        # flag appears anywhere in this file. (Both directions were checked: the unpeeled refspec
+        # fails, the peeled one fast-forwards.)
         run: |
           set -euo pipefail
           echo "advance-master: fast-forwarding refs/heads/master to ${TAG}"
           git log -1 --format='%H %cI %s' "${TAG}"
-          git push origin "${TAG}:master"
-          echo "advance-master: origin/master now at $(git rev-parse "${TAG}^{commit}")"
+          # Peel the annotated tag to its commit. This is the same expression the closing echo used
+          # below — the push refspec was the one place it was missing.
+          TARGET="$(git rev-parse "${TAG}^{commit}")"
+          git push origin "${TARGET}:master"
+          echo "advance-master: origin/master now at ${TARGET}"
