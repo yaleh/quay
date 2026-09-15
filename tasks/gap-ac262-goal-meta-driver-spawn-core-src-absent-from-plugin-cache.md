@@ -2,7 +2,7 @@
 id: gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache
 title: goal-driver/meta-driver 把 goal-store 当 CLI spawn
   packages/quay/src——plugin cache 里没有那棵源码树（缺的是调用方式，不是代码）
-status: ready
+status: done
 labels:
   - gap
 parent: null
