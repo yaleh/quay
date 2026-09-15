@@ -414,3 +414,98 @@ goal-driver 每轮对 active AC 的轻量 criterion 承担，而非对 task acce
 **操作纪律（与 §11 合读）**：§11 决定「哪些保证值得长期维持」，本节决定「其中哪些形态能成为
 goal AC」。两步都过，才是一条合法的 goal 层判据；只过 §11 不过本节（活性量上移），是
 AC-181/AC-184/AC-186 的类别错误。
+
+### 12b. ⚠️ 更正（2026-09-15）：`long-term: true` 把上面的二岔改成三岔
+
+**本节写于 `long-term` 复验域机制落地之前 6.5 小时,其绝对禁令的前提已经变了**——两个时刻都可当场核：
+
+```
+§12 落地            ee105a4b9  2026-09-09T04:25:10Z  docs: 新增 §12「会回退的量不得作 goal AC」筛子
+long-term 复验域落地             2026-09-09T10:51:39Z  gap-goal-standing-ac-reverify-scope: I5 复验域加 long-term 显式声明 + inScope 枚举
+```
+
+⇒ 本节推理链上的那一步「achieved 即**永久**锁死，此后没有任何东西把它翻回来」，在
+`long-term: true` 存在之后**不再无条件成立**：该字段把 AC 送进 AC-216 复验域
+（`achieved ∧ long-term ∧ GOAL 非 active`），goal-driver 每轮重跑它，回归时以
+`standing-violated` 自动立案。⛔ 注意 `writeGoalStatus` 仍然只写 `"achieved"`、仍无反向翻转——
+**变的不是"能不能翻回来"，而是"翻不回来这件事还要不要紧"**：复验域让一条已 achieved 的 AC
+在回归时重新产生动作，所以它不再是一个结构上不可能取假的记录。
+
+**筛子因此从二岔变三岔**：
+
+| 量会回退？ | 带 `long-term: true`？ | 判定 |
+|---|---|---|
+| 会 | ❌ 否 | **仍然不得作 AC**（本节原结论不变，AC-181/184/186 即此类） |
+| 会 | ✅ 是 | **可作 AC**，进复验域每轮复验 |
+| 不会 | — | **可作 AC**（本节原结论不变，AC-177 即此类） |
+
+**⛔ `long-term` 不是免费的**：它把成本从「一次判定」变成「每轮复验」，故 §11 的成本边界
+（判据必须轻量，⛔ 不得是 suite 规模命令）对它加倍适用。**先例**：GOAL-020 的
+AC-265/266/267/269 四条都是会回退的量（CI 会再红、release 会再挂），全部写 `long-term: true`
+并把判据做成「读本地载体 + 静态断言」的轻量形态；AC-268（一次性发版）不带。
+
+---
+
+## 13. 软判据（判不出布尔值的量）怎么进 AC——**判断**与**判断的记录**必须分离
+
+**§11/§12 都默认「那个量取得到」，本节处理取不到的情形。** 有些目标的判据本身不是布尔量：
+「Web UI 与设计 mockup 视觉一致」「这个 API 好不好用」——它们没有二元定义。本仓库自己的
+`plugin/skills/quay-webui-bootstrap-methodology/reference/visual-review-mechanism.md` 开篇即逐字承认：
+
+> `visual_design_quality` is a soft criterion — "visually coherent and accessible" has no binary
+> pass/fail definition the way a logic test does.
+
+**⛔ 不要把 LLM 判定直接写进 criterion。** 两个结构性理由：①**预算不够**——criterion 的
+`timeoutMs` 是 **60s**（`goal-store.ts` gate 调 `runAcceptance` 处），而两个 LLM 判官各自的预算是
+**180s**（`SUFFICIENCY_TIMEOUT_MS` / `FIDELITY_JUDGE_TIMEOUT_MS`）：**判据的预算比判官短三倍，
+设计上就没打算让 criterion 调 LLM**；②硬规则 4——不确定性判定倾向给出肯定答案，写进 criterion
+会得到一个看起来绿、却取不了假的判据。
+
+**做法是三层拆开，每层各自可机械判定：**
+
+- **(a) 具体意图 → 编码成产生它的结构断言。** 这是本仓库既有的、唯一被真正执行过的做法。
+  `tasks/QX-017.md`（纯视觉 bug「actions 列在手机上要粘住右边」）把视觉意图编码成产生该效果的
+  那条 CSS 声明：`pageStyles() 在 @media (max-width: 600px) 块内对 .col-actions 含
+  position: sticky; right: 0`；`tasks/QW-001.md`（标题逐字含 `(visual_design_quality)`）同形，
+  7 条 AC 全是可 grep 的结构断言。**代价要说清**：它判的不是「看起来像不像」，而是
+  「产生那个效果的机制在不在」——对有明确结构对应物的意图几乎无损，对「整体气质一致」则不够。
+- **(b) 客观可量化的分量 → 阈值。** 如 Lighthouse `accessibility ≥ 90`。⛔ 阈值不得凭空设
+  （硬规则 4 推论：成本结构未知前不设数值阈值）——先量基线，或改用**关系而非快照**
+  （`plugin/scripts/test-file-baseline.ts` 的规矩：断言「不得比基线更差」，⛔ 永不写 `== <常量>`）。
+- **(c) 整体「像不像」→ 独立评审产出闭集枚举落载体，criterion 只读载体。**
+  可机读的软判定长什么样，仓库里已有正确范式：`plugin/scripts/pool-quality-judge.ts:45`
+  `export const VERDICTS = ["ready","needs-work","should-remove","uncertain"] as const;`，
+  其头注释逐字「**脚本只做算术，判定交给 agent**」；AC 记录自带的
+  `fidelity: {verdict, reason, at}` 字段同形。⇒ **LLM/人判定 → 闭集枚举 + 理由 + 时刻 → 落 jsonl
+  → 确定性 criterion 读枚举。**
+
+**(c) 的 criterion 必须同时断言三件事，缺一条即退化为自证：**
+
+```
+① 判词在闭集里    rec["verdict"] == "PASS"（⛔ 散文不行——criterion 读不了自然语言）
+② 判定晚于实现     rec["ts"] > git log -1 --format=%cI -- <实现文件>   ⛔ 不写死 sha
+③ 判定者独立       rec["reviewer_session"] != <实现者会话>              ← 承重墙
+```
+
+**⚠️ 现状记账（2026-09-15 实测，⛔ 不要以为 (c) 已经能用）**：§0c 双重强制检查机制
+（Lighthouse 阈值 + fresh-context 整体评审、四模式视口网格、Lighthouse 必须先跑）确实存在，
+但**整个在 goal/AC 机器之外**，三个读数：
+`grep -rn "CONCERNS" --include=*.ts --include=*.mjs --include=*.sh plugin/ scripts/ packages/` = **0**
+（零计数已做正控制：同一谓词对 `.md` 有命中 ⇒ 是真 0，不是谓词失效）；
+`goals/*.md` 中引用视觉评审的 AC = **0**；评审 verdict 是 `.md` 散文（`The page as a whole: PASS.`）
+而非结构化枚举，**criterion 读不了**。**且约束③在实测中塌了**：
+`experiments/quay-webui-bootstrap/audits/` 的 11 份评审里 9 份带 `Reviewer` 字段，
+7 份明确是 `Inline (same session…)` / `Orchestrator inline (degraded-fallback mode)`，
+2 份声称 fresh-context 的里还有 1 份自陈 `same session` ⇒ **真正独立的只有 1 份**。
+
+**⇒ 本节的诚实结论**：criterion 必须可执行，**代价是把「判断」与「判断的记录」分离，问题从
+判据层搬到了评审流程层**。它没有消灭主观性，只是给主观判断加了三个可机械验证的约束：
+**谁判的、什么时候判的、判词是不是闭集里的值**。⛔ 若约束③无法保证（评审者就是实现者），
+那条 AC 是自证而非测量（硬规则 4），此时应退回 (a)+(b)，**不要用一条读自证载体的 criterion
+制造已被判定过的假象**。
+
+**已对了一半的现成件**：`orchestration/manager-visual-check.py` 的 `stdout` 已是 JSON、
+退出码只表示调用成败（`0=调用成功（无论视觉判断内容）`，⛔ 不把「仪器失败」与「判断为否」混同）
+——形态正确。它离 (c) 还差的是：verdict 未约束为闭集、结果不落载体、无 reviewer 身份字段。
+⛔ 但它依赖操作者**个人的**阿里云订阅（manager SKILL §10），**不得原样搬进产品判据**；
+要产品化须走正常路径（转 outer → inner 实现 → 用项目自己的服务账号 key）。

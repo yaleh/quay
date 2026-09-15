@@ -203,6 +203,20 @@ nvie 原文时代"默认分支 = master"是因为默认分支同时承担"门面
 gh api repos/yaleh/quay -X PATCH -f default_branch=develop
 ```
 
+**✅ 执行记录（2026-09-15T13:5xZ，人授权后当轮执行）**：
+
+```
+切换前  gh repo view yaleh/quay --json defaultBranchRef  →  master
+执行    gh api repos/yaleh/quay -X PATCH -f default_branch=develop  →  develop
+复核    gh repo view yaleh/quay --json defaultBranchRef  →  develop          ✅
+本地半  git remote set-head origin -a  →  origin/HEAD set to develop
+        （切换前 refs/remotes/origin/HEAD = refs/remotes/origin/master）      ✅
+```
+
+⚠️ **本地那一半是每个检出各自要跑一次的**——`origin/HEAD` 是本地缓存，GitHub 侧改了不会自动同步。
+worktree 与主检出共享 `refs/remotes/`，故本轮这一次覆盖了它们；**其它机器/其它 clone 仍需各跑一次**。
+⊢ `AC-273` 守的就是这个量（§7 丁）。
+
 **⚠️ 不等 master 改造完成**——理由是两者治的病不同（见上），且 §9 第 5 步（首次 ff）被 `AC-268` 阻塞中，
 **若把默认分支的修复绑在它后面，§2.2 后果 1+2 会一直存在到第一次全绿发布为止**。
 
@@ -413,13 +427,27 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **⚠️ `achieved` 永久锁定**（全仓 `writeGoalStatus` 仅 2 个调用点、均写 `achieved`，无回退路径）【转引 GOAL-020 §三.1】
 ⇒ 会回退的活性判据必须 `long-term: true`。
 
-| # | 判据（口径） | 能取假的形态（⛔ 今天就要能取到假） | long-term |
-|---|---|---|---|
-| **甲** | `master` ∈ {`9316b797d`（首次 ff 之前的化石 tip，裁定 4 明确允许）, 某个 tag}；**且**若等于某 tag，则该 tag 在本地载体 `.quay/ci-runs.jsonl` 里的 Release run `conclusion=success` | **今天取假**：`git describe --exact-match master` → `fatal: no tag exactly matches 9316b797d…`（实跑确认）⇒ 判据现在就红。⚠️ 首次 ff 前允许停在化石值，**但必须写成对那个具体 sha 的白名单，⛔ 不能写成"或任意非 tag 值"**——后者会把"有人往 master 直推了一个提交"也判成合格 | ✅ |
-| **乙** | 存活的 `release/*` 分支数为 0，或其 tip 逐字等于同名 tag | **今天取假**：`release-v063-build` 比 `v0.6.3` 多 **15** 个提交（§2.4） | ✅ |
-| **丙** | 滚动渠道 B 的产物可机械回答"装的是哪个版本"：`dist-plugin` 的构建来源 commit 可解析，且其声明版本与该 commit 上的 `plugin/VERSION` 一致 | **今天取假**：声明 `0.7.0`、无对应 tag、构建自 `2b47315d7`（v0.6.3 之后 548 / develop 之前 155）（§2.5） | ✅ |
-| **丁** | 默认分支与新建 worktree 的基点落在主干上 | **今天取假**：`gh repo view` = `master`；实测新建 worktree 落后 develop **19555**（§2.2） | ✅ |
-| **戊** | 一次真实的、全绿的发布完成，且 master 已 ff 到它 | ⚠️ 一次性；**⛔ 不得用 fixture/注入满足**——必须读生产载体且时间窗在实现落地之后（硬规则 4 推论三） | ❌（一次性） |
+**已立案（2026-09-15T14:0xZ，5 条全部写入 goal store，`--expect-absent`，挂 `GOAL-020`）**：
+
+| # | AC | 判据（口径） | 立案当轮的**实跑**取值 | long-term |
+|---|---|---|---|---|
+| **甲** | `AC-270` | `master` ∈ {`9316b797d`（首次 ff 前的化石 tip，裁定 4 允许）, 某个 tag}；若等于某 tag，则该 tag 在 `.quay/ci-runs.jsonl` 里的 Release run `conclusion=success` | **PASS**（守卫型）。⚠️ **本行原稿写作"今天取假"，那是裁定 4 之前的口径**——裁定 4 把化石值列为允许取值后，它今天就必然是 PASS。⇒ 改判为**守卫**：首次 ff 前守"没有东西直推 master"，首次 ff 后守"没有在半绿发布上前进"。**负控制（已跑）**：把判据指向 `develop`（既非化石也非 tag）⇒ `exit 1 / CAUSE=master-moved-to-a-non-tag-commit` ⇒ **能取假** | ✅ |
+| **乙** | `AC-271` | 本地 `release-*` / `release/*` 分支不存在，或每条的 tip 都 `points-at` 某个 tag | **FAIL**：`1 of 2` 违规——`release-v063-build` 的 tip 不指向任何 tag（比 `v0.6.3` 多 15 个提交）。⊢ 判据按"tip 是否指向 tag"判，⛔ 不解析分支名里的版本号 ⇒ 新旧命名都适用 | ✅ |
+| **丙** | `AC-272` | `dist-plugin` 声明的版本以 `-dev` 结尾（自证非发布版），**或**存在同名 tag 且其 `build from <sha>` 正是该 tag 的提交 | **FAIL**：`CAUSE=claims-a-version-that-was-never-released` —— 声明 `0.7.0` 而 `v0.7.0` 不存在（§2.5）。⊢ 这条把裁定 2 的目的编码成判据：`-dev` 一旦落实，此臂自动转绿 | ✅ |
+| **丁** | `AC-273` | `git symbolic-ref refs/remotes/origin/HEAD` == `refs/remotes/origin/develop` | **PASS**（守卫型）——**因为裁定 1 已于本轮执行**（见 §3.2.1 执行记录）。跑 `set-head` 之前它是红的。**负控制（已跑）**：把期望值换成 `origin/master` ⇒ `exit 1 / CAUSE=default-branch-not-the-trunk` ⇒ **能取假**。⊢ 读本地 ref 而非调 `gh`：criterion 只有 pass/fail 两态、60s 预算，`gh` 不在 driver 的 PATH 上 | ✅ |
+| **戊** | `AC-274` | 载体里存在 `workflow=Release ∧ conclusion=success ∧ ts > 2026-09-15T14:00:00Z` 的 run，**且** master 正是其 tag 的提交 | **FAIL**：`CAUSE=no-green-release-in-the-post-filing-window` —— 载体 2 条 Release run 全 failure。⛔ 时间窗是硬规则 4 推论三的要求：能被立案**之前**的绿满足的判据，证明的是"能产出"不是"已产出" | ❌（一次性） |
+
+**⊢ 两条守卫型判据（甲/丁）今天是 PASS，这不是空判据**——判别标准不是"今天红不红"，而是**能不能取假**，
+而这一点由上表里两个已经跑过的负控制证明。⛔ 但也要认：**原稿把它们写成"今天取假"是错的**，
+错因是裁定 4 落进文档时我只改了 §6 的表述、没有回头改 §7 的那一列（**硬规则 5b：在某处修好 X ≠ X 只在那一处**）。
+
+**写入面实测的一条约束**（立案当轮撞到，值得记）：goal store 的 write surface **fail-closed 地要求
+每一个 failure exit 与它的 stderr 写在【同一物理行】**——乙/戊 初稿把消息拆成多行续行，
+被 `criterion carries N failure exit(s) that write no cause` 拒绝，改成 `msg = …` + `sys.stderr.write(msg); sys.exit(1)` 后通过。
+⊢ 这正是硬规则 3b 的机制化：**一个失败但不说原因的判据，与"没查成"同形**，所以它在写入时就被挡住。
+
+**验证**：5 条记录写入后，用 store 自己的 runner（`quay goal gate <id> --dry-run`，⛔ 不是我本地那份 python）
+逐条复跑，取值与上表逐条一致：`270=0 / 271=1 / 272=1 / 273=0 / 274=1`。
 
 **依赖**：甲/戊 依赖 `AC-268`；§4.2 的切点前置依赖 `AC-265`；丙 与 `GOAL-019` 相邻但不重叠（见 §8）。
 
@@ -444,8 +472,9 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 | 步 | 动作 | 依赖 | 今天可做？ |
 |---|---|---|---|
-| 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ 本文件 |
-| 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ 一次点击/一条 `gh api`，解决 §2.2 后果 1+2 |
+| 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ **已完成** |
+| 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
+| 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ **已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 其它 clone 需各跑一次 `git remote set-head origin -a`（`AC-273` 守此量） |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ 下一次切版本时即可采用；现存两条 `release-v06x-build` 按判据乙清理 |
 | 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ 可实现；⚠️ marketplace 是否接受 prerelease 版本号需先实测（§10 残留 1） |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
@@ -468,9 +497,10 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 |---|---|---|---|
 | 1 | Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`） | 官方 schema 未声明该约束；⛔ 「semver 合法」不蕴含「该渠道接受」（同硬规则 5：某来源没说不等于不存在限制） | §9 第 3 步落地前，用一次真实 `/plugin install` 验证 |
 | 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
-| 3 | 判据甲–戊的立案时机：与实现同批，还是先立后做 | 取决于外层派发节奏（本 SPEC 无权决定） | 立案时；⚠️ 并发写 goal store 须 `--expect-absent`（§7） |
+| 3 | ~~判据甲–戊的立案时机~~ | **已关闭**：2026-09-15T14:0xZ 全部立案为 `AC-270`..`AC-274`（`--expect-absent`，挂 GOAL-020），见 §7 | — |
 
 ---
 
-**本文件已被裁定（§1 ⑤），但本文件自身不执行任何动作**——不写 goal store、不改 GitHub 配置、不推进任何分支。
-§9 第 1–4 步已解除阻塞，等待立案与实现；第 5 步等 `AC-268`，届时由 §6.1 的 job 自动完成。
+**执行状态（2026-09-15T14:1xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
+第 2/3/4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
+⛔ 本文件自身仍不推进任何分支——master 至今未动，且按裁定 4 这正是正确输出。
