@@ -3,7 +3,7 @@ id: gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall
 title: ad-arm1 用户级 enabledPlugins 出现 quay@quay ⇒ AC-257 记录被 AC-161
   常设闸拒写：写入者【已定位】= 09-14 05:28 那次 `npm install -g` 的【修复前】postinstall（line 175 无
   `--scope` ⇒ CLI 默认 user）；原「已证伪」结论只覆盖了修复后的版本
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
