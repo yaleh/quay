@@ -2248,6 +2248,7 @@ verify_ac257_mode() {
     fi
     remote_script=$(cat <<REMOTE
 $(verify_node_export_for "${hk}")
+$(ac258_worker_env_export)
 EV="\${HOME}/quay-verify-ac257-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
 PREFIX="\${HOME}/.local/opt/quay/${ac257_ver}"
@@ -2614,6 +2615,15 @@ FAKESSH
 #    执行 ⇒ 该脚本的 worker 前置探测（`bash -lc <probe>`）与它随后启动的 driver/worker 继承【同一个】
 #    环境 ⇒ 探测对象 == 实际 spawn 对象。否则探测量的与真正跑的是两回事（同一类代理量缺陷）。
 # ⛔ 缺省（未设）时什么都不发：不回落、不猜、不读目标机上的任何密钥——由调用方逐字声明。
+#
+# ⚠️ 名字里的 `ac258` 是【它被发现时的出处】，不是它的作用域：两条腿（--verify-ac257 /
+#    --verify-ac258）共用同一段步骤序 —— `step_ac257_project_scope` 的第一个动作就是
+#    `ac258_worker_preflight`（verify-deliver-coldstart.sh，与 step_ac258_user_scope 同源）——
+#    ⇒ 上面那条理由对 AC-257 逐字成立。2026-09-15 前只在 AC-258 一处下发，后果是【一条腿可达、
+#    另一条结构性不可达】：目标机自己的 OAuth 已死、只能靠旁路 endpoint 时（ad-arm1 实测），
+#    --verify-ac257 的远端前置退回 `credentials` ⇒ 在任何破坏性步骤【之前】return 1 ⇒
+#    AC257-NOT-EVALUATED，而失败形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
+#    ⇒ 硬规则 5b 的那个修法：两处一起下发，并由 test 按【位置】钉住（⛔ 不是靠注释提醒勿忘）。
 ac258_worker_env_export() {
   if [ -n "${QUAY_AC258_WORKER_ENV:-}" ]; then
     printf '%s\n' "${QUAY_AC258_WORKER_ENV}"
