@@ -1,0 +1,27 @@
+== AC6-① testFiles (green run 与紧邻前一次)：当前无 green run（见 AC5）==
+carrier decisive develop rows 的 testFiles 分布：631 × 5、<absent> × 18
+当前 __GROUP__ 读数（run 34971747152 / 34970958367 / 34921960393 的 test job 日志）：
+  __GROUP__ concurrency=8 files=631 sum_ms=6253419 floor_ms=781677.375 capped=0
+
+== AC6-② 落地提交 stat（无 test 删除/改名、无 glob 缩小）==
+a09aa38a5fec77c3a94474eff1b6d6c9dad8ba7c 2026-09-15T13:57:10+00:00
+
+ .gitignore                           |  13 +
+ .quay/ci-runs.jsonl                  |  40 ---
+ plugin/scripts/capability-catalog.sh |   6 +-
+ plugin/scripts/ci-runs-collect.ts    | 494 ++++++++++++++++++++++++++++++++---
+ plugin/scripts/drivers.yml           |  10 +
+ plugin/scripts/goal-driver.ts        | 105 +++++++-
+ plugin/test/ci-runs-collect.test.mjs | 423 ++++++++++++++++++++++++++++++
+ plugin/test/goal-driver.test.mjs     | 122 +++++++++
+ 8 files changed, 1137 insertions(+), 76 deletions(-)
+
+-- git diff develop...HEAD 的 test 文件删除/改名（应为空）--
+(以上为空)
+
+-- git diff develop...HEAD -- scripts/test.sh（应为空）--
+(以上为空)
+
+== AC6-③ skip 守卫双向控制（plugin/test/launch-settings.test.mjs）==
+claude 在场: pass 15 / fail 0 / skipped 0
+claude 缺席: pass 14 / fail 0 / skipped 1

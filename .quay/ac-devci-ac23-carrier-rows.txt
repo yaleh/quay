@@ -1,0 +1,31 @@
+land(collector) = 2026-09-15T13:57:10+00:00
+carrier = .quay/ci-runs.jsonl  total lines = 50
+all rows = 50
+decisive develop rows = 23
+with integer testFiles = 5
+ts < land = 23  ts > land = 0
+
+--- decisive develop rows (ts / conclusion / runId / testFiles) ---
+2026-08-22T03:16:38Z  failure  32548528776  testFiles=<absent>
+2026-08-22T03:36:37Z  failure  32549444011  testFiles=<absent>
+2026-08-22T04:17:36Z  failure  32551311648  testFiles=<absent>
+2026-08-22T04:36:18Z  failure  32552139740  testFiles=<absent>
+2026-08-22T05:36:33Z  failure  32554788073  testFiles=<absent>
+2026-08-22T05:56:24Z  failure  32555642081  testFiles=<absent>
+2026-08-22T06:46:30Z  failure  32557833134  testFiles=<absent>
+2026-08-22T08:16:37Z  failure  32561855807  testFiles=<absent>
+2026-08-22T08:58:01Z  failure  32563667558  testFiles=<absent>
+2026-08-22T09:58:41Z  failure  32566382901  testFiles=<absent>
+2026-08-22T17:19:23Z  failure  32587376731  testFiles=<absent>
+2026-08-24T02:56:14Z  failure  32684698655  testFiles=<absent>
+2026-08-24T03:19:35Z  failure  32686066747  testFiles=<absent>
+2026-08-24T03:37:19Z  failure  32687088952  testFiles=<absent>
+2026-08-28T09:52:28Z  failure  33161142343  testFiles=<absent>
+2026-09-04T07:47:28Z  failure  33850339488  testFiles=<absent>
+2026-09-04T11:11:35Z  failure  33866769552  testFiles=<absent>
+2026-09-15T01:13:47Z  failure  34916428597  testFiles=<absent>
+2026-09-15T01:44:41Z  failure  34918479090  testFiles=631
+2026-09-15T02:10:56Z  failure  34920186372  testFiles=631
+2026-09-15T02:38:35Z  failure  34921960393  testFiles=631
+2026-09-15T12:47:36Z  failure  34970958367  testFiles=631
+2026-09-15T12:55:17Z  failure  34971747152  testFiles=631

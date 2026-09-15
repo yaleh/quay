@@ -1,0 +1,7 @@
+$ git log -1 --format=%cI -- plugin/scripts/ci-runs-collect.ts
+2026-09-15T13:57:10+00:00
+
+$ python3 <AC-265 criterion: block verbatim (goals/AC-265-goal.md)>
+STDERR: CAUSE=no-decisive-run-after-landing — carrier holds 23 decisive develop runs in total but none with ts > the collector landing 2026-09-15T13:57:10+00:00 (cancelled runs are excluded by design: 43% of develop runs are superseded pushes, not reds)
+STDOUT: 
+EXIT: 1
