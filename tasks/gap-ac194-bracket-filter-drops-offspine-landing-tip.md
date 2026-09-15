@@ -2,7 +2,7 @@
 id: gap-ac194-bracket-filter-drops-offspine-landing-tip
 title: AC-194 判据第三次变假：bypass-check 的括注准入要求落地 tip 在当前 first-parent spine 上 ⇒ 6 条已
   fan-in 的提交 unclassifiable ⇒ NOT-EVALUATED exit 1
-status: ready
+status: done
 labels:
   - gap
   - defect
