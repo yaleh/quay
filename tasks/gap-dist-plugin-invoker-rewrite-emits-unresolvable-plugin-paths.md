@@ -2,7 +2,7 @@
 id: gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths
 title: dist-plugin 交付面的 dist 引用在消费项目里解析不到：重写器只换扩展名、从不加 plugin-root 锚（96/96 错形 +
   11 条悬空 .ts 兄弟实例）
-status: ready
+status: done
 labels:
   - gap
   - defect

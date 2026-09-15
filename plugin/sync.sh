@@ -103,7 +103,11 @@ install_user_scope() {
     :
   else
     # tar unavailable/failed → plain cp fallback.
-    for d in skills scripts workflows agents vendor probes loop; do
+    # `bin` is in this list for the same reason the tar branch above carries it implicitly:
+    # plugin/bin/quay is the plugin form's CLI entry point (gap-ac261-plugin-bin-shim-missing-
+    # so-cli-needs-npm-global), and an enumeration that omits it installs a plugin whose CLI
+    # silently disappears. Keep this list in sync with the tar branch, which copies the whole tree.
+    for d in bin skills scripts workflows agents vendor probes loop; do
       [ -d "$PLUGIN_DIR/$d" ] && cp -r "$PLUGIN_DIR/$d" "$dest/"
     done
     cp "$PLUGIN_DIR/README.md" "$dest/" 2>/dev/null || true
