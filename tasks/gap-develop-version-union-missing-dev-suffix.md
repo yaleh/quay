@@ -187,6 +187,10 @@ $ check() 直调 → ok:true  mode=all-equal  unique=["0.7.0"]     （10 条版�
 - orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md
 - goals/AC-259-版本一致性-仓库-8-处文本-两台真机安装读数均落到-0-7-0.md
 - tasks/gap-develop-version-union-missing-dev-suffix.md
+- packages/quay/test/node-version-check.test.mjs
+- plugin/test/plugin-vendor-standalone.test.mjs
+- plugin/test/user-scope-reinstall.test.mjs
+- plugin/test/quay-init-loop-helpers.mjs
 
 ## Evidence
 
@@ -414,3 +418,59 @@ $ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --
    实测同形共 **2** 个文件（另一为 `scripts/delivery-manifest-check.test.ts`），两者皆未接入。
    本次**不擅自接入**（会动 `scripts/test.sh` 这个「唯一入口」且需评估另一个文件在套件环境下的行为，
    超出本任务授权与 Touches）⇒ 作为发现上报，由人/manager 决定是否立项。
+
+### AC9 补齐（第 2 轮落地）：版本形状断言 —— 全量套件曾因本次改动转红，已修
+
+**上一轮 `exited-not-landed` 的真因**（读 fan-in 套件日志，末三行 `# tests 8463 / # pass 8460 / # fail 3`，⛔ 非推测）：
+本次把版本并集改到 `0.7.0-dev` 之后，三处**既有**断言仍把「裸 `X.Y.Z`」当作唯一合法形状 ⇒ 全量套件红：
+
+```
+plugin/test/plugin-vendor-standalone.test.mjs:111  ✖ --version must print a semver version (build-time inlined, no ENOENT)
+    actual '0.7.0-dev'   expected /^\d+\.\d+\.\d+$/
+packages/quay/test/node-version-check.test.mjs:117 ✖ wrapper subprocess: current node (>= 22.6) is an unblocked pass-through — AC2
+    actual '0.7.0-dev'   expected /^\d+\.\d+\.\d+$/
+plugin/test/user-scope-reinstall.test.mjs:53       ✖ AC1 — plugin/VERSION exists, is a semver, and matches the vendored package.json version
+    AssertionError: plugin/VERSION must be a semver string, got 0.7.0-dev
+```
+
+⚠️ **δ-relatedness 把这三个文件标为 UNRELATED（都不在 Touches/diff 内）—— 提示不是结论，实测证否。**
+三处失败读数**逐字**都是 `actual '0.7.0-dev'` vs `expected /^\d+\.\d+\.\d+$/`，且当轮在本 worktree 复跑
+同一命令稳定复现（`fail 3`）⇒ 它们是**本任务版本改动的直接后果**，不是环境 flake。
+这正是那条提示自己写的「re-run the suite once to verify; if it reproduces, treat it as a real finding」。
+
+**硬规则 5b 兄弟扫描**（全工作树排除 `node_modules/` 与 `dist/`，grep 裸 semver 形状谓词，逐条判是否读本仓库版本载体）：
+
+```
+plugin/test/plugin-vendor-standalone.test.mjs:111   ← 已修（套件红）
+packages/quay/test/node-version-check.test.mjs:117  ← 已修（套件红）
+plugin/test/user-scope-reinstall.test.mjs:31        ← 已修（套件红）
+plugin/test/quay-init-loop-helpers.mjs:97           ← 已修（readVendoredVersion；全仓 0 调用者，潜伏陷阱）
+plugin/scripts/peer-identity-probe.ts:289           ← ⛔ 不改：读的是 Claude Code 自己的
+                                                       ~/.local/share/claude/versions 目录名，与 quay 版本并集无关
+```
+
+第 4 条 `readVendoredVersion` 是**死代码**（`grep -rn readVendoredVersion` 全仓只有定义、零调用者），故它
+**没有产生红**；但它的断言读的正是本次改动的载体 `plugin/vendor/quay/package.json`，一旦被接回就立刻红
+⇒ 一并修正，不留「接回去就炸」的陷阱。
+
+**修法（⛔ 不是把断言放宽成前缀相等）**：四处统一采用 `scripts/version-consistency-check.ts` 已有的同一方言
+`/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/`（SPEC §4.3 选项 ii 的 develop 常态形）。
+**等值 / 单源断言一字未动** —— `plugin/VERSION` == `plugin/vendor/quay/package.json` 仍被强制，
+被放宽的只有「形状」这一维。
+
+**修复后读数（当轮实跑，两条都贴）**：
+
+```
+$ node --test packages/quay/test/node-version-check.test.mjs \
+      plugin/test/user-scope-reinstall.test.mjs plugin/test/plugin-vendor-standalone.test.mjs
+ℹ tests 23 · pass 23 · fail 0        ← 同一命令在修复前：fail 3
+
+$ node --input-type=module -e "import {readVendoredVersion} from './plugin/test/quay-init-loop-helpers.mjs';
+      console.log(readVendoredVersion('./plugin'))"
+0.7.0-dev                            ← 第 4 条（死代码）也取到真实读数，非恒真
+```
+
+⚠️ **对本 AC 语义的如实更正**：AC9 原文写「`scripts/test.sh --for-task …` exit 0」，而上一轮那一次 exit 0
+**是在一个没选中这三个测试文件的集合上取得的**（scoped 门的测试选择集来自 `## Touches`；
+这三个文件此前不在 Touches 里 ⇒ 门绿而全量红，正是「scoped 门不覆盖全量集」那个已知形态）。
+本轮已把这四个文件**写进 Touches**，故 scoped 门的选择集现在**包含**它们 —— 本轮的 exit 0 才是可用的读数。
