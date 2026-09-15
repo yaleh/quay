@@ -2,7 +2,7 @@
 id: gap-release-cut-via-workflow-dispatch
 title: release 渠道经 workflow_dispatch 真发一个版本：切 post-fix tag v0.7.0 → dispatch →
   采集器落痕（AC-268）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
