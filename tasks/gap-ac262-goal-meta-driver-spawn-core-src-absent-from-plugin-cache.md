@@ -25,6 +25,11 @@ goal_ac: AC-262
 
 **查重（按机制）**：`gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root`（done）只 scope 了**源树 + shipped-flat 两种布局**，plugin-cache 是第三种、不在其中；`DIR-049:193-211` 指出 plugin cache 无法满足 `readLoopParams` / `bin/quay.js`，但记为 "not urgent: no consumer hits it today"，且都不涉及「补 CLI 动词」这个修法。全店搜 `goal subcommand` 命中 0 ⇒ 本条无既存承接任务。
 
+**实现记要（worker，2026-09-15）**：三处 Touches 外的落地决定，均已在下方 Touches 声明——
+① `packages/quay/src/goal-store.ts`：把它的 CLI dispatch 导出为 `runGoalStoreCli`（`main` 变薄壳，行为逐字不变）。⛔ 不把方言抄进 `cli/goal.ts`：driver 把 `gate`/`check` 的**退出码当判词读**，第二份实现即第二处定义（硬规则 5b）。
+② `plugin/scripts/driver-runtime.ts`：成为 Core 库符号的**单一导入面**（`inAchievedReverifyScope` / `readsFrozenPopulation` / `stripEvidenceTimestamp` / `createMetaStore`）。两个 driver 不再各自写出 Core 源码树字面量——布局知识留在 Layer 0。这一条同时是 AC-262 判据第二支的要求（它按源文本扫那两个文件，**剥掉 `//` 行注释后任何 `packages/quay/src` 出现都算命中**，含 import 说明符与块注释散文；实测改前 6 处命中，改后 0）。
+③ `--store` 方言选择位：`quay goal list|show|write` 默认走 Provider ABI（要 workspace 配置），driver 每轮读的却是**没有 `.quay/config.yml` 的裸 root** ⇒ 显式要求 store 方言。⛔ CLI 自己不做回退：`--root` 指错目录时仍 fail-closed，⛔ 不会静默去读 `<root>/goals` 冒充读数。
+
 ## Contract
 
 measure goal_cli_verb_exit = `node packages/quay/bin/quay.js goal gate <id>` 及 `goal check --staleness` / `goal batch` 三者的 exit_code 与 stderr_signature 两个读数
@@ -36,11 +41,11 @@ resume 真跑一轮 goal-driver 后读 `.quay/goal-round.jsonl` 末轮的 goal-r
 
 ## Acceptance Criteria
 
-- [ ] AC1：`quay goal gate|check|batch` 三个动词落地，覆盖 driver 实际用的全部 8 个子命令形态（`list` / `gate <id>` / `write <id> --status` / `check --staleness` / `check --achieved-failing` / `check --stale-pass` / `check --stale-pass --sweep` / `batch`）——逐形态实跑，exit 0 且 stdout 是可解析 JSON。负控制（改前必须红）：同三条在改前 rc=1 且 stderr 含 `unknown goal subcommand`。
-- [ ] AC2：新动词登记三处——`packages/quay/src/cli/goal.ts` 的派发行、`delivery-manifest.json` 的 capabilities、`packages/quay/src/cli/help.ts`。⛔ `quay <verb> --help` 渲染的是 `cli/help.ts` 那一份、**不是** verb 文件内联那份，只改后者等于没改：判据 = `quay goal --help` 的**真实输出**含三个新动词。
-- [ ] AC3：`plugin/scripts/goal-driver.ts` 与 `plugin/scripts/meta-driver.ts` 的 argv 构造改为调 vendored bundle 的 CLI 动词，两文件里指向 `packages/quay/src` 的路径构造点计数为 0（按位置扫源码；注释/散文提及不算命中）。
-- [ ] AC4：**生产载体读数**——实现落地后真跑一轮 goal-driver，`.quay/goal-round.jsonl` 里存在**实现落地时刻之后**的轮次，且该轮 goal-ring 的 state 不是 failed（⛔ 单测绿不算；只能被 fixture 满足的判据不是测量，硬规则 4 推论三）。
-- [ ] AC5：`plugin/test/goal-driver.test.mjs` 与 `plugin/test/meta-driver.test.mjs` 各有一个用例钉住「argv 不含 `packages/quay/src`」，且把 argv 构造改回旧形态时该用例红（双向控制）。
+- [x] AC1：`quay goal gate|check|batch` 三个动词落地，覆盖 driver 实际用的全部 8 个子命令形态（`list` / `gate <id>` / `write <id> --status` / `check --staleness` / `check --achieved-failing` / `check --stale-pass` / `check --stale-pass --sweep` / `batch`）——逐形态实跑，exit 0 且 stdout 是可解析 JSON。负控制（改前必须红）：同三条在改前 rc=1 且 stderr 含 `unknown goal subcommand`。
+- [x] AC2：新动词登记三处——`packages/quay/src/cli/goal.ts` 的派发行、`delivery-manifest.json` 的 capabilities、`packages/quay/src/cli/help.ts`。⛔ `quay <verb> --help` 渲染的是 `cli/help.ts` 那一份、**不是** verb 文件内联那份，只改后者等于没改：判据 = `quay goal --help` 的**真实输出**含三个新动词。
+- [x] AC3：`plugin/scripts/goal-driver.ts` 与 `plugin/scripts/meta-driver.ts` 的 argv 构造改为调 vendored bundle 的 CLI 动词，两文件里指向 `packages/quay/src` 的路径构造点计数为 0（按位置扫源码；注释/散文提及不算命中）。
+- [x] AC4：**生产载体读数**——实现落地后真跑一轮 goal-driver，`.quay/goal-round.jsonl` 里存在**实现落地时刻之后**的轮次，且该轮 goal-ring 的 state 不是 failed（⛔ 单测绿不算；只能被 fixture 满足的判据不是测量，硬规则 4 推论三）。
+- [x] AC5：`plugin/test/goal-driver.test.mjs` 与 `plugin/test/meta-driver.test.mjs` 各有一个用例钉住「argv 不含 `packages/quay/src`」，且把 argv 构造改回旧形态时该用例红（双向控制）。
 
 ## Definition of Done
 
@@ -58,7 +63,9 @@ changed: 无（B2 方向、8 个子命令清单、三条纪律均按人给定原
 
 - packages/quay/src/cli/goal.ts
 - packages/quay/src/cli/help.ts
+- packages/quay/src/goal-store.ts
 - packages/quay/src/provider-client.ts
+- plugin/scripts/driver-runtime.ts
 - plugin/scripts/goal-driver.ts
 - plugin/scripts/meta-driver.ts
 - plugin/test/goal-driver.test.mjs
