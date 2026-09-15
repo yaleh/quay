@@ -163,6 +163,55 @@ export function goalGapWorkerTimeoutMs(root: string, explicit?: number): number 
   return GAP_WORKER_TIMEOUT_MS_DEFAULT;
 }
 
+/** 充分性「持续 insufficient」信号的 stall 窗口（毫秒）。**缺省是一个【函数】，不是一个字面量**：
+ *
+ *      stallWindowMs = judgeWallclockMs + roundIntervalMs
+ *
+ *    judgeWallclockMs = 充分性判官自己的墙钟上限（SUFFICIENCY_TIMEOUT_MS；opts.sufficiencyTimeoutMs 可覆盖）
+ *    roundIntervalMs  = 本 driver 自己的轮间隔（drivers.yml goal.interval_ms；main() 把【生效值】传进来，
+ *                       故 --interval 覆盖也一并跟着走，⛔ 不在此处另读一份造成第二个布局知识）
+ *
+ *  WHY 恰好这两项（可核的理由，不是一个拍出来的系数）：窗口必须覆盖【一个完整的「判官判定 + driver 再
+ *  看一眼」周期】—— 那正是「一个合法的裁决变化会被观察到」所需的最长时间。充分性裁决是**确定性**的：
+ *  同一语义输入（sufficiencyCacheKey）恒给同一裁决，只有【输入变了】才会重判；而输入变化只可能来自
+ *  （a）人改 GOAL 标题/退出条件/范围节，或（b）在域 AC 集合增删改 —— 两者都不是时钟驱动的。故一个已
+ *  超过该周期仍未变的 insufficient，**不再有任何机制会自己去改它**；唯一剩下的改变途径正是本条信号要
+ *  请人做的那件事（改退出条件，或改 AC 集合）。⛔ 门槛比这更短会把「判官刚给出结论、driver 还没轮到
+ *  下一眼」误报成卡死；更长则白白延后一个人本来该被叫醒的时刻。
+ *
+ *  ⛔ 上下限都不加字面量：换机器 / 换 interval / 换判官超时，窗口自动跟着走（硬规则 4 推论二）。
+ *  可显式覆盖（CLI --sufficiency-stall-window-ms → drivers.yml kinds.goal.sufficiency_stall_window_ms
+ *  → 本推导式），⛔ 但缺省路径里没有任何自由常数。
+ *  同族先例：AC-214 freshness routine 的触发阈值 `(W_p + I) × R / K` —— 同为「已测量量的函数」，非常量。 */
+export function sufficiencyStallWindowMs(
+  root: string,
+  opts: { explicit?: number; judgeWallclockMs?: number; roundIntervalMs?: number } = {},
+): number {
+  const { explicit, judgeWallclockMs, roundIntervalMs } = opts;
+  if (explicit != null && Number.isInteger(explicit) && explicit >= 0) return explicit;
+  try {
+    // 同 goalSpawnCap：经 DRIVERS_CONFIG_REL 单一真相源、基准是 workspace root。
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
+    const parsed = parseYaml(text) as { kinds?: { goal?: { sufficiency_stall_window_ms?: unknown } } } | null;
+    const v = parsed?.kinds?.goal?.sufficiency_stall_window_ms;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+  } catch {
+    /* drivers.yml 缺失/不可解析 ⇒ 回退【推导缺省】（⛔ 不是回退到另一个字面量） */
+  }
+  const judge = judgeWallclockMs != null && Number.isFinite(judgeWallclockMs) && judgeWallclockMs > 0
+    ? judgeWallclockMs
+    : SUFFICIENCY_TIMEOUT_MS;
+  let interval = roundIntervalMs;
+  if (interval == null || !Number.isFinite(interval) || interval <= 0) {
+    try {
+      interval = loadDriverConfig(root).goal.intervalMs;
+    } catch {
+      interval = INTERVAL_MS_DEFAULT;
+    }
+  }
+  return judge + interval;
+}
+
 // ── goal-store CLI 客户端（单一 argv 构造点经 meta-driver 的 goalStoreArgv；读/写/check 在本文件，
 //    ⛔ 不复写 meta-driver 的 listGoalRecords/gateCriterion——它们把 scriptRoot 与 dataRoot 合二为一，
 //    本 driver 要支持【测试缝】把两者分开：scriptRoot 定位 goal-store.ts，dataRoot 定位 goals/）。──
@@ -1944,6 +1993,72 @@ export function buildGapWorkerArgv(gap: GoalGap, goalTitle: string, acTitle: str
   return launchArgv("fix-worker", prompt, root);
 }
 
+/** 充分性卡死信号的 agent prompt（AC1）。⛔ 与 buildGapWorkerPrompt 是**两个命题**，故两份 prompt
+ *  ⛔ 不合并：G9 问的是「某条 AC 没人推进」（判定对象上的缺口），本条问的是「这组 AC 的**定义**没有
+ *  覆盖 GOAL 的退出条件」（判定输入上的缺口）。合并会把「AC 全绿而目标不成立」这条形态重新藏回
+ *  「有缺口」里——而那正是本任务立案的那两个实例的共同形态。
+ *
+ *  ⛔ 边界（同 G9 环 + DIR-131）：只**提议**、只**立案**，⛔ 不写 goal-store、⛔ 不翻任何状态。
+ *  proposer 是语义 agent（不是 driver 自己），因为「该补哪条 AC / 退出条件是否写过头」是内容判断，
+ *  不是计算——driver 只负责把「判官已经说了不够」这件事变成有人看得见的立案。 */
+export function buildSufficiencyFollowupPrompt(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+  elapsedMs: number,
+): string {
+  const gid = String(goal.id ?? "");
+  const title = String(goal.title ?? "").replace(/\s+/g, " ").trim();
+  const exit = exitConditionsText(String(goal.body ?? "")).trim();
+  const acs = inScopeAcs.map(
+    (ac) => `  - ${String(ac.id ?? "")}: ${String(ac.title ?? "").replace(/\s+/g, " ").trim()}\n    expect: ${String(ac.expect ?? "").replace(/\s+/g, " ").trim()}`,
+  );
+  return [
+    "You are a goal-sufficiency follow-up agent in the quay repo. A goal's sufficiency judge has rendered a DETERMINATE verdict of `insufficient` for this goal, and that verdict has stayed unchanged well past one full judge+look cycle. The verdict means: the goal's in-scope AC set does NOT cover the goal's exit conditions.",
+    "⛔ No other mechanism consumes this verdict. It has been repeating in the round log every round with nobody acting on it, so the goal will stay stuck at `active` forever unless someone changes either the AC set or the exit-conditions text. That is the job your task creates.",
+    `Repo root: ${root}.`,
+    `goal_id=${gid}`,
+    `goal_title=${title}`,
+    `elapsed_since_first_observed_ms=${elapsedMs}`,
+    "## The goal's exit conditions (verbatim)",
+    exit === ""
+      ? "(NONE — the goal body carries no non-empty `## 退出条件` section. That absence is ITSELF why the mechanical layer judged `insufficient`, without ever consulting the semantic judge.)"
+      : exit,
+    "## The in-scope AC set that was judged insufficient",
+    acs.length === 0
+      ? "  (EMPTY — this goal has zero in-scope ACs. That emptiness is ITSELF why the mechanical layer judged `insufficient`.)"
+      : acs.join("\n"),
+    "## Your job",
+    "Read the goal record (`goal_get` MCP) and whatever repo sources you need. Then PROPOSE — you do NOT apply — exactly one of:",
+    "  (a) a candidate NEW AC, with a runnable criterion, that closes a gap between the exit conditions and the current AC set; or",
+    "  (b) a REVISION of the exit-conditions / scope text, if the exit conditions as written demand more than this goal should.",
+    "In the task body: quote VERBATIM the exit condition (or the part of the goal title) that is currently uncovered, say why the existing AC set does not cover it, and say why your proposal does. A proposal that does not name the uncovered part is not reviewable and will be rejected.",
+    "⛔ Do NOT write the goal store. ⛔ Do NOT mark any GOAL or AC achieved / active / draft / retired. ⛔ Do NOT edit `goals/*.md`. Your product is a TASK, not a state change — a human decides the AC set.",
+    "File ONE task via the `quay-file-task` skill (Skill tool). ⛔ Not more than one. If an in-flight task already proposes an AC / exit-condition change for this goal, do NOT file a duplicate — report that task's id instead.",
+    "Then move it to `status: needs-human` (task_write MCP) so a human reviews the proposal before it is dispatched as work.",
+  ].join("\n");
+}
+
+/** 信号 agent argv = launchArgv("fix-worker", <prompt>)（短命；launcher/model/--bare 由 .quay/profiles.yml
+ *  的 profiles/roles 承载——AC140 单一构造点）。⛔ 复用既有 fix-worker role 的 profile（语义由 prompt
+ *  承载），与 G9 缺口环同一个角色——两者都是「读→建议→立案」的一次性语义 agent。followupCmd 覆盖
+ *  【前缀】时把 prompt 作为末参数追加（测试缝捕获真实 prompt，同 --gap-worker-cmd）。 */
+export function buildSufficiencyFollowupArgv(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+  elapsedMs: number,
+  followupCmd?: string | null,
+): string[] {
+  const prompt = buildSufficiencyFollowupPrompt(goal, inScopeAcs, root, elapsedMs);
+  if (followupCmd != null) {
+    const prefix = splitArgs(followupCmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
+}
+
 /** spawn 一个短命 gap-filing agent 的结果（诊断面：stdout/stderr/timedOut 落进可查载体，spawn 失败
  *  不再零诊断信息——同 promotion-driver 的 FixWorkerSpawnResult）。 */
 export interface GapWorkerSpawnResult {
@@ -2072,6 +2187,232 @@ export function runGapSpawnPass(
   return { spawned: outcomes.length, llmInvoked, outcomes };
 }
 
+// ── 充分性卡死信号（AC1~AC3 / gap-goal-sufficiency-insufficient-has-no-followup-signal）────────
+//
+// 缺口（2026-09-15，两个真实工作区各独立确认一次，⛔ 不是假说）：确定裁决 `insufficient` 写进
+// `.quay/goal-sufficiency-cache.json` 之后**没有任何下游消费者**——它只在每一轮
+// `.quay/goal-round.jsonl` 里原样重复，不升级成 finding/立案、不提醒、不上面板。两个实例：
+//   ① 本仓 GOAL-018：body 缺 `## 退出条件` ⇒ 机械层直接判 insufficient（从未调语义判官）⇒ GOAL 静默卡死；
+//   ② quay-fleet GOAL-005：在域 AC 全部真实 achieved，而语义判官对这组 AC 的裁决是 `insufficient`
+//      （`.quay/goal-sufficiency-cache.json` 里是一条**已确定**的缓存记录，约 35 轮原样重复）
+//      ⇒ GOAL 永久卡在 active，无人知道要去改 AC 集合或退出条件。
+//
+// 本节补的就是那条：把「持续 insufficient」变成**一条人可见的立案**——过 halt + 资源门 + 每轮上限后
+// spawn 一个短命语义 agent，读 GOAL 的退出条件/范围/在域 AC 集合，**提议**（⛔ 不直接写）一条候选新 AC
+// 或退出条件修订说明，经 `quay-file-task` 立案供人审核。⛔ 不写 goal-store；⛔ 不翻任何 GOAL/AC 状态。
+//
+// ⛔ 与 G9 缺口立案环是**两条并行的 spawn pass，⛔ 不合并**：G9 的输入是「AC 零任务牵引 / 常设不变式被
+// 违反 / 冻结population 此刻为假」——都是**判定对象**上的缺口；本条的输入是「判据集合对目标是否充分
+// 这件事上，判官已经给出否定结论而没人处理」——是**判定输入**上的缺口。合并会把「AC 全绿而目标不
+// 成立」这条形态重新藏回「有缺口」里。
+
+/** 持续 insufficient 信号的台账条目。台账 map 的键 = GOAL id；一条 entry 只记【当前】那个裁决实例
+ *  （`key` = sufficiencyCacheKey）。裁决一变化 ⇒ 新实例覆盖旧实例 ⇒ 计时自动重新开始（AC2）。
+ *  ⛔ 每个 (GOAL, 裁决实例) 最多 file 一次——「不是每轮都触发」由 filedAt 保证，不由阈值保证。 */
+export interface SufficiencyStallEntry {
+  /** 该 insufficient 裁决实例的身份 = sufficiencyCacheKey（语义输入哈希）。 */
+  key: string;
+  /** 该实例【首次被观察到】的时刻（ISO）。 */
+  since: string;
+  /** 已为该实例 file 过信号的时刻（ISO）；null = 尚未 file。 */
+  filedAt: string | null;
+}
+
+/** 台账载体 basename（.quay/ 下，同 goal-sufficiency-cache.json / goal-round.jsonl 族——gitignored
+ *  运行时载体，⛔ 不 commit）。 */
+const SUFFICIENCY_STALL_BASENAME = "goal-sufficiency-followup.json";
+
+/** 一条裁决实例的 stall 判定（**纯函数**：state 与时钟都从入参来 ⇒ 可被直接单测，无需起 driver）。
+ *  四态互不同形（硬规则 3b）——⛔ 不折叠成一个布尔：
+ *    not-insufficient  当前裁决不是 insufficient（covered / not-evaluated）⇒ 条目删除、不计时（AC3）；
+ *    wait              是 insufficient，但本实例计时未到阈值 ⇒ 本轮不 file；
+ *    file              是 insufficient 且计时已到阈值且尚未 file ⇒ 本轮 file（AC1/AC2）；
+ *    already-filed     本实例已经 file 过 ⇒ ⛔ 不再 file（AC2：不是每轮都触发）。
+ *  `next` = 更新后该 GOAL 应持有的台账条目；null ⇒ **删除**（⛔ 不保留陈旧实例——留着会让裁决变化后
+ *  的计时不重置，正是 AC2 禁止的形态）。`elapsedMs` = 本实例已计时时长；not-insufficient 时 null
+ *  （⛔ 「不计时」与「计时 0 秒」不得同形）。 */
+export function sufficiencyStallReading(
+  verdict: SufficiencyVerdict,
+  currentKey: string,
+  prior: SufficiencyStallEntry | null,
+  nowMs: number,
+  windowMs: number,
+): { decision: "not-insufficient" | "wait" | "file" | "already-filed"; next: SufficiencyStallEntry | null; elapsedMs: number | null } {
+  if (verdict !== "insufficient") return { decision: "not-insufficient", next: null, elapsedMs: null };
+  const nowIso = new Date(nowMs).toISOString();
+  const sameInstance = prior !== null && prior.key === currentKey;
+  // ⛔ prior.since 读不懂 ⇒ 从此刻**重新计时**（方向 = 「再等一个窗口」）：硬规则 3b —— 「读不懂」
+  // 不得冒充「已经等够了」而立即 file，也不得冒充「没到阈值」而永久静默。
+  const parsedSince = sameInstance ? Date.parse(prior.since) : NaN;
+  const sinceValid = Number.isFinite(parsedSince);
+  const entry: SufficiencyStallEntry = {
+    key: currentKey,
+    since: sinceValid ? prior.since : nowIso,
+    filedAt: sameInstance ? prior.filedAt : null,
+  };
+  const elapsedMs = nowMs - (sinceValid ? parsedSince : nowMs);
+  if (entry.filedAt !== null) return { decision: "already-filed", next: entry, elapsedMs };
+  if (elapsedMs >= windowMs) return { decision: "file", next: entry, elapsedMs };
+  return { decision: "wait", next: entry, elapsedMs };
+}
+
+/** 一条 stall 信号的逐条诊断（同 GapSpawnOutcome 的形态：⛔ 零诊断信息的 spawn 不可接受——
+ *  一个没跑起来的信号 agent 必须留下「卡在哪一步」，否则它自己就是下一个静默缺口）。 */
+export interface SufficiencyStallOutcome {
+  goal: string;
+  key: string;
+  exitCode: number | null;
+  error: string | null;
+  stdout: string | null;
+  stderr: string | null;
+  timedOut: boolean;
+}
+
+/** 充分性卡死信号的 pass 读数。⛔ 五个计数互不同形（硬规则 3b）：本 pass **每轮都跑**，故
+ *  「本轮零条 insufficient」是一个**测量**（不是一个缺席）；「被 halt/资源门/上限挡住」也单独计数，
+ *  ⛔ 不得与「还没到阈值」折叠成同一个 0。 */
+export interface SufficiencyStallPassResult {
+  /** 本轮裁决为 insufficient 的 active GOAL 数。 */
+  insufficient: number;
+  /** 本轮仍在计时、未到阈值的实例数。 */
+  waiting: number;
+  /** 本轮已 file 过、不再重复 file 的实例数。 */
+  alreadyFiled: number;
+  /** 本轮实际 file 出的信号数（= spawn 且 agent 真的跑起来了的条数）。 */
+  filed: number;
+  /** 本轮到达阈值但被 halt / 资源门 / 每轮上限挡下的条数（⛔ 与 waiting 不同形）。 */
+  deferred: number;
+  /** 本轮 spawn 是否调用了 LLM（派生自真实 argv，⛔ 不硬编码）。 */
+  llmInvoked: boolean;
+  /** 逐条 spawn 诊断。 */
+  outcomes: SufficiencyStallOutcome[];
+}
+
+/** 充分性卡死信号的 pass：对每条【本轮裁决为 insufficient】的 active GOAL 过一遍台账——
+ *  首次观察 ⇒ 开始计时；计时 ≥ 阈值且未 file 过 ⇒ spawn 一个短命语义 agent 去**提议**一条候选
+ *  新 AC / 退出条件修订并立案（⛔ 不写 goal-store）。⛔ 每个裁决实例最多 file 一次。
+ *
+ *  ⛔ 计时与 spawn 分开：halt / 资源门 / 每轮上限只挡 **spawn**，⛔ 不挡**计时**（读数零 LLM，
+ *  不受资源约束——同 G9 环「机械 criterion/缺口读数不受 halt 约束」的口径）。被挡下的条数记进
+ *  `deferred`，下一轮仍在阈值内即重试。 */
+export function runSufficiencyFollowupPass(
+  readings: Array<{ goal: string; verdict: SufficiencyVerdict; key: string }>,
+  records: Array<Record<string, unknown>>,
+  root: string,
+  opts: {
+    /** 覆盖信号 agent 命令前缀（测试缝；prompt 仍作末参数追加）。 */
+    followupCmd?: string | null;
+    /** 覆盖信号 agent spawn 超时（缺省 = 同 gap-filing 的 drivers.yml 字段）。 */
+    followupTimeoutMs?: number;
+    llmCommands?: readonly string[];
+    spawnCap?: number;
+    resourceGateArgv?: string[] | null;
+    halted?: boolean;
+    /** 覆盖 stall 窗口（缺省 = sufficiencyStallWindowMs 的推导式）。 */
+    stallWindowMs?: number;
+    /** 推导缺省窗口用的两项（main() 传生效值；⛔ 不传则各自回落）。 */
+    roundIntervalMs?: number;
+    judgeWallclockMs?: number;
+    /** 测试缝：注入「现在」（缺省 Date.now()）。 */
+    nowMs?: number;
+  } = {},
+): SufficiencyStallPassResult {
+  const nowMs = opts.nowMs ?? Date.now();
+  const dir = path.join(root, ".quay");
+  const windowMs = opts.stallWindowMs ?? sufficiencyStallWindowMs(root, {
+    roundIntervalMs: opts.roundIntervalMs,
+    judgeWallclockMs: opts.judgeWallclockMs,
+  });
+  // 台账载体的读写复用通用实现（readCacheMap/writeCacheMap）——⛔ 不为这条抄一份同形代码
+  // （两份解析器漂移是下一个假命中源，同 sufficiency cache 的接法）。
+  const ledger = readCacheMap<SufficiencyStallEntry>(dir, SUFFICIENCY_STALL_BASENAME, (v) => {
+    if (typeof v.key !== "string" || typeof v.since !== "string") return null;
+    return { key: v.key, since: v.since, filedAt: typeof v.filedAt === "string" ? v.filedAt : null };
+  });
+  const toFile: Array<{ goal: string; key: string }> = [];
+  let insufficient = 0;
+  let waiting = 0;
+  let alreadyFiled = 0;
+  for (const r of readings) {
+    const d = sufficiencyStallReading(r.verdict, r.key, ledger.get(r.goal) ?? null, nowMs, windowMs);
+    if (d.next === null) ledger.delete(r.goal);
+    else ledger.set(r.goal, d.next);
+    if (r.verdict !== "insufficient") continue;
+    insufficient++;
+    if (d.decision === "wait") waiting++;
+    else if (d.decision === "already-filed") alreadyFiled++;
+    else if (d.decision === "file") toFile.push({ goal: r.goal, key: r.key });
+  }
+  // 台账**先**落盘（记下「何时开始计时」）：spawn 失败不丢计时起点——下一轮仍在阈值内即可重试。
+  writeCacheMap(dir, SUFFICIENCY_STALL_BASENAME, ledger);
+
+  const outcomes: SufficiencyStallOutcome[] = [];
+  let llmInvoked = false;
+  let deferred = 0;
+  let spawnable = toFile;
+  if (spawnable.length > 0) {
+    // halt / 资源门 / 每轮上限与 G9 缺口环【同一份实现】（driver-shared / goalSpawnCap 的单一真相源，
+    // ⛔ 不各写一份谓词）。三者的语义都是「本轮不 spawn」，但都记进 deferred（⛔ 不静默丢弃）。
+    if (opts.halted) {
+      deferred = spawnable.length;
+      spawnable = [];
+    } else {
+      const gate = resourceGateCheck(root, opts.resourceGateArgv ?? null);
+      if (!gate.go) {
+        deferred = spawnable.length;
+        spawnable = [];
+      } else {
+        const cap = goalSpawnCap(root, opts.spawnCap);
+        if (spawnable.length > cap) {
+          deferred = spawnable.length - cap;
+          spawnable = spawnable.slice(0, cap);
+        }
+      }
+    }
+  }
+  // 每 spawn 超时：与 gap-filing agent 同源（同为 fix-worker 角色、同为一次性语义 agent），
+  // ⛔ 不另立一个字面量；测试缝可覆盖。
+  const timeoutMs = goalGapWorkerTimeoutMs(root, opts.followupTimeoutMs);
+  for (let i = 0; i < spawnable.length; i++) {
+    const t = spawnable[i];
+    const goal = records.find((r) => String(r.id ?? "") === t.goal) ?? {};
+    const inScope = inScopeAcsOf(records, t.goal);
+    const entry = ledger.get(t.goal);
+    const elapsedMs = entry ? Math.max(0, nowMs - Date.parse(entry.since)) : 0;
+    let argv: string[];
+    try {
+      argv = buildSufficiencyFollowupArgv(goal, inScope, root, Number.isFinite(elapsedMs) ? elapsedMs : 0, opts.followupCmd);
+    } catch (e) {
+      // launchArgv 抛错（profiles.yml 缺失/非法）⇒ 记诊断，⛔ 不静默：这条 spawn 没发生。
+      outcomes.push({
+        goal: t.goal, key: t.key, exitCode: null,
+        error: `launchArgv failed: ${e && typeof e === "object" && "message" in e ? String((e as Error).message) : String(e)}`,
+        stdout: null, stderr: null, timedOut: false,
+      });
+      continue;
+    }
+    // llm_invoked 派生自真实 argv（⛔ 不硬编码 true）；全部 targets 用同一命令前缀 ⇒ 取首条即可。
+    if (i === 0) llmInvoked = isLlmInvocation(argv, opts.llmCommands ?? LLM_COMMAND_SET_DEFAULT);
+    const r = spawnGapWorker(argv, root, timeoutMs);
+    outcomes.push({ goal: t.goal, key: t.key, exitCode: r.exitCode, error: r.error, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut });
+    // ⛔ 只在【agent 真的跑起来了（exit 0 且无 spawn error）】时记 filedAt：spawn 失败 / 超时 / 非零退出
+    // = 没有任何 agent 做过任何事 ⇒ **不消耗**该实例的唯一一次机会，下一轮仍在阈值内即重试。
+    // ⛔ 不解析 agent 自述判「立没立案」（同 G9：⛔ 不信自述）——本 pass 的产物是「信号被发出」这件事，
+    // 信号到没到由 agent 自己的 ABI 写路径保证。
+    if (r.exitCode === 0 && r.error === null && entry) entry.filedAt = new Date(nowMs).toISOString();
+  }
+  if (outcomes.length > 0) writeCacheMap(dir, SUFFICIENCY_STALL_BASENAME, ledger);
+  return {
+    insufficient,
+    waiting,
+    alreadyFiled,
+    filed: outcomes.filter((o) => o.exitCode === 0 && o.error === null).length,
+    deferred,
+    llmInvoked,
+    outcomes,
+  };
+}
+
 // ── 一轮（机械环）─────────────────────────────────────────────────────────────────────────
 
 /** 一轮的读数。 */
@@ -2113,6 +2454,10 @@ export interface GoalRoundReadings {
    *  {ac, decision, reason}（decision ∈ 四态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
    *  「查过且零条」与「未跑分诊」按字段存在性区分（硬规则 3b）。 */
   triage: Array<TriageEntry>;
+  /** ⑥b 充分性卡死信号（AC1~AC3）：本轮 insufficient 实例数 / 计时中 / 已 file 过 / 新 file 数 /
+   *  被 halt·资源门·上限挡下数 / 逐条 spawn 诊断。⛔ 每轮都产出（`insufficient: 0` 是一个**测量**，
+   *  不是「没跑这条」——本 pass 无条件执行，硬规则 3b）。 */
+  sufficiency_stall: SufficiencyStallPassResult;
 }
 
 export interface GoalRoundOptions {
@@ -2140,8 +2485,19 @@ export interface GoalRoundOptions {
   /** 覆盖充分性语义判定命令前缀（测试缝；prompt 仍作末参数追加，同 readyPoolCmd 的数组形态）。
    *  null/undefined ⇒ launchArgv("fix-worker") 真 LLM；空数组 ⇒ not-evaluated（不可用）。 */
   sufficiencyCmd?: string[] | null;
-  /** 覆盖充分性语义判定 spawn 超时（缺省 = SUFFICIENCY_TIMEOUT_MS；负控制 b 的「超时」注入小值）。 */
+  /** 覆盖充分性语义判定 spawn 超时（缺省 = SUFFICIENCY_TIMEOUT_MS；负控制 b 的「超时」注入小值）。
+   *  ⚠️ 它同时是 ⑥b stall 窗口推导式的一项（judgeWallclockMs）——换它就是换判官墙钟，窗口跟着走。 */
   sufficiencyTimeoutMs?: number;
+  /** ⑥b 覆盖充分性卡死信号的 stall 窗口（毫秒）（测试缝 / CLI --sufficiency-stall-window-ms；缺省 =
+   *  sufficiencyStallWindowMs 的【推导式】，⛔ 不是一个字面量）。 */
+  sufficiencyStallWindowMs?: number;
+  /** ⑥b 覆盖信号 agent 命令前缀（测试缝；prompt 仍作末参数追加）。null/undefined ⇒ launchArgv("fix-worker")。 */
+  sufficiencyFollowupCmd?: string | null;
+  /** ⑥b 覆盖信号 agent spawn 超时（缺省 = 同 gap-filing 的 drivers.yml goal.gap_worker_timeout_ms）。 */
+  sufficiencyFollowupTimeoutMs?: number;
+  /** 本轮生效的轮间隔（毫秒）。⛔ 只用于 ⑥b stall 窗口的**推导式**（`judgeWallclockMs + roundIntervalMs`）：
+   *  main() 把生效值传进来 ⇒ `--interval` 覆盖也一并跟着走；不传则回落 loadDriverConfig(root).goal.intervalMs。 */
+  roundIntervalMs?: number;
   /** 被驱动系统（目标项目）所在主机；缺省读 drivers.yml `kinds.goal.target_host`（空 = 目标在本机）。 */
   targetHost?: string | null;
   /** 被驱动系统（目标项目）根路径；缺省读 drivers.yml `kinds.goal.target_root`。 */
@@ -2224,6 +2580,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const closeBlocks: GoalRoundReadings["closeBlocks"] = [];
   const sufficiencyFacts: Array<Fact<Record<string, unknown>>> = [];
   const objectiveFacts: Array<Fact<Record<string, unknown>>> = [];
+  // ⑥b 充分性卡死信号的输入面：pass 1 逐 GOAL 收集（裁决 + 裁决实例身份），pass 1 全部跑完才过
+  // stall 台账（⛔ 不在 pass 1 里 spawn——那时的读数还不是完整的「本轮裁决集」）。
+  const stallReadings: Array<{ goal: string; verdict: SufficiencyVerdict; key: string }> = [];
   // 关闭判定【延后到本轮全部 gate 落账之后】（pass 2，见下）。原因（硬规则 4c：判据点名的量必须穿过所有
   // 中间层还取得到）：`records` 是【轮开始时】读的快照，其 `evidence`（台账尾）比本轮晚一拍 —— 一条
   // 「上一轮 pass、本轮转红」的 achieved AC，若拿轮初快照判，尾 verdict 仍是 pass ⇒ 漏报并放行关闭，
@@ -2323,6 +2682,12 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         ` / distinct project_root ${objective.profile.distinctProjectRoots.length}）` +
         (objective.assertion !== null ? ` 指认：全部证据记录 ${objective.assertion.field}=${objective.assertion.value}` : ""),
     });
+
+    // ⑥b 的输入面：本 GOAL 本轮的充分性裁决 + 其**裁决实例身份**（sufficiencyCacheKey = 判官的全部语义
+    // 输入哈希）。⛔ 机械路径（无退出条件 / 零在域 AC）也要收——那正是本任务实例①（GOAL-018 body 缺
+    // `## 退出条件`）的形态：机械层直接判 insufficient、从未调语义判官，而它同样会永久卡死。
+    // 用 key 而非 goal id 当实例身份：判官重判出新结果（输入变了）⇒ key 变 ⇒ 台账换实例 ⇒ 计时重开（AC2）。
+    stallReadings.push({ goal: gid, verdict: sufficiency, key: sufficiencyCacheKey(goal, inScope) });
 
     // 关闭判定不在本 pass 做——见上方 pendingCloses 与下方 pass 2（本轮全部 gate 落账后才刷台账尾）。
     pendingCloses.push({ goal, gid, sufficiency });
@@ -2479,6 +2844,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     halted,
   });
 
+  // ⑥b 充分性卡死信号（AC1~AC3）：pass 1 收集的裁决集非空（或本轮为空——一样要过台账，把上一轮留下的
+  // 条目按「当前裁决不是 insufficient」删掉，⛔ 不保留陈旧实例）⇒ 过 stall 台账；到达阈值且未 file 过的
+  // 实例 spawn 一个短命语义 agent 提议新 AC / 退出条件修订并立案（⛔ 不写 goal-store）。
+  // halt / 资源门 / 每轮上限与 ⑥ 同一份实现（pass 内读），⛔ 不在这里重推一遍。
+  const stallPass = runSufficiencyFollowupPass(stallReadings, records, root, {
+    followupCmd: opts.sufficiencyFollowupCmd,
+    followupTimeoutMs: opts.sufficiencyFollowupTimeoutMs,
+    llmCommands: opts.llmCommands,
+    spawnCap: opts.spawnCap,
+    resourceGateArgv: opts.resourceGateArgv,
+    halted,
+    stallWindowMs: opts.sufficiencyStallWindowMs,
+    roundIntervalMs: opts.roundIntervalMs,
+    judgeWallclockMs: opts.sufficiencyTimeoutMs,
+  });
+
   const value: GoalRoundReadings = {
     goalCount: activeGoals.length,
     criterionCount: criteria.length,
@@ -2493,6 +2874,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     spawned: spawnPass.spawned,
     llm_invoked: spawnPass.llmInvoked,
     gap_spawns: spawnPass.outcomes,
+    sufficiency_stall: stallPass,
   };
   if (staleness === null) {
     return {
@@ -3203,6 +3585,10 @@ const HELP = [
   "  --llm-commands <csv>   配置声明的 LLM 命令集，逗号分隔（缺省 claude,claude-fjdac）",
   "  --spawn-cap <n>        覆盖每轮缺口立案 spawn 上限（缺省 drivers.yml goal.spawn_cap）",
   "  --gap-worker-timeout-ms <ms> 覆盖 gap-filing agent spawn 超时（缺省 drivers.yml goal.gap_worker_timeout_ms）",
+  "  --sufficiency-stall-window-ms <ms> 覆盖充分性卡死信号的 stall 窗口（缺省 = 推导式 judgeWallclockMs + roundIntervalMs，",
+  "                         即 drivers.yml 不写值就是推导值；显式值可用 drivers.yml kinds.goal.sufficiency_stall_window_ms）",
+  "  --sufficiency-followup-cmd <s> 覆盖信号 agent 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --sufficiency-followup-timeout-ms <ms> 覆盖信号 agent spawn 超时（缺省同 gap-filing 的 drivers.yml 字段）",
   "  --target-host <h>       覆盖被驱动系统所在主机（缺省 drivers.yml goal.target_host；空 = 目标在本机）",
   "  --target-root <dir>     覆盖被驱动系统根路径（缺省 drivers.yml goal.target_root；未声明 ⇒ 该读数 not-evaluated）",
   "  --health-window-sec <n> 被驱动系统健康度的 fan-in 窗口（秒，缺省 " + HEALTH_WINDOW_SEC_DEFAULT + "）",
@@ -3231,6 +3617,9 @@ export async function main(argv: string[]): Promise<number> {
   let targetHostRaw: string | undefined;
   let targetRootRaw: string | undefined;
   let healthWindowSecRaw: string | undefined;
+  let sufficiencyStallWindowMsRaw: string | undefined;
+  let sufficiencyFollowupCmd: string | undefined;
+  let sufficiencyFollowupTimeoutMsRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -3251,6 +3640,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--target-host") targetHostRaw = args[++i];
     else if (a === "--target-root") targetRootRaw = args[++i];
     else if (a === "--health-window-sec") healthWindowSecRaw = args[++i];
+    else if (a === "--sufficiency-stall-window-ms") sufficiencyStallWindowMsRaw = args[++i];
+    else if (a === "--sufficiency-followup-cmd") sufficiencyFollowupCmd = args[++i];
+    else if (a === "--sufficiency-followup-timeout-ms") sufficiencyFollowupTimeoutMsRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`goal-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
@@ -3291,6 +3683,32 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write("goal-driver: --gap-worker-timeout-ms must be a positive integer\n");
     return 2;
   }
+  // ⑥b：stall 窗口（--sufficiency-stall-window-ms 覆盖；缺省 = 推导式）。非负整数才合法——0 合法
+  // （「观察到的当轮就 file」，测试缝/紧急放行用），负值非法（负窗口在任何时钟下都无意义）。
+  const sufficiencyStallWindowMs = sufficiencyStallWindowMsRaw === undefined
+    ? undefined
+    : (() => {
+        const n = Number(sufficiencyStallWindowMsRaw);
+        if (!Number.isInteger(n) || n < 0) return null;
+        return n;
+      })();
+  if (sufficiencyStallWindowMsRaw !== undefined && sufficiencyStallWindowMs === null) {
+    process.stderr.write("goal-driver: --sufficiency-stall-window-ms must be a non-negative integer\n");
+    return 2;
+  }
+  // ⑥b：信号 agent 超时（--sufficiency-followup-timeout-ms 覆盖；缺省 = goalGapWorkerTimeoutMs 读
+  // drivers.yml 的 gap_worker_timeout_ms——两者同为 fix-worker 角色的一次性语义 agent，⛔ 不另立字面量）。
+  const sufficiencyFollowupTimeoutMs = sufficiencyFollowupTimeoutMsRaw === undefined
+    ? undefined
+    : (() => {
+        const n = Number(sufficiencyFollowupTimeoutMsRaw);
+        if (!Number.isInteger(n) || n <= 0) return null;
+        return n;
+      })();
+  if (sufficiencyFollowupTimeoutMsRaw !== undefined && sufficiencyFollowupTimeoutMs === null) {
+    process.stderr.write("goal-driver: --sufficiency-followup-timeout-ms must be a positive integer\n");
+    return 2;
+  }
   // AC140-4：配置声明的 LLM 命令集（缺省 LLM_COMMAND_SET_DEFAULT；--llm-commands 逗号分隔注入）。
   const llmCommands = llmCommandsRaw === undefined
     ? [...LLM_COMMAND_SET_DEFAULT]
@@ -3308,6 +3726,11 @@ export async function main(argv: string[]): Promise<number> {
     targetHost: targetHostRaw,
     targetRoot: targetRootRaw,
     healthWindowSec: healthWindowSecRaw !== undefined ? Number(healthWindowSecRaw) : undefined,
+    sufficiencyStallWindowMs: sufficiencyStallWindowMs ?? undefined,
+    sufficiencyFollowupCmd: sufficiencyFollowupCmd ?? null,
+    sufficiencyFollowupTimeoutMs: sufficiencyFollowupTimeoutMs ?? undefined,
+    // ⑥b stall 窗口推导式的第二项：把【生效的】轮间隔传进去（--interval 覆盖也一并跟着走）。
+    roundIntervalMs: intervalMs,
   };
 
   // 常驻（例程型）：复用通用例程型循环，⛔ 不另写一份。缺省 = 常驻（once=false）；--once 跑一轮即退。
