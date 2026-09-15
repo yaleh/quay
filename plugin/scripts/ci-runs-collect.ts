@@ -244,6 +244,14 @@ export function collect(opts: CollectOptions): CollectResult {
   }
   runs = runs.slice(0, limit);
 
+  // ⛔ 还在跑的 run 不落盘：它的 conclusion 此刻还不存在，记下来就是**冻结一个瞬态** ——
+  // 那条记录会永久带着一个永远不会被修正的取值，且没有任何判据认它。跳过并留痕。
+  if (runs.some((r) => typeof r.status === "string" && r.status !== "completed")) {
+    const skipped = runs.filter((r) => typeof r.status === "string" && r.status !== "completed");
+    for (const r of skipped) warnings.push(`run-not-completed:${String(r.id ?? "")}:${String(r.status)}`);
+    runs = runs.filter((r) => !(typeof r.status === "string" && r.status !== "completed"));
+  }
+
   const timeoutsCache = new Map<string, Record<string, number>>();
   const records: RunRecord[] = [];
 
