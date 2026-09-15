@@ -452,6 +452,119 @@ export function verifyDistClosure(pluginRoot, tarballEntries) {
   return { required: [...required].sort(), missing };
 }
 
+// ── the MARKETPLACE channel's closure reading: the artifact is a DIRECTORY, not a pack listing ────
+// AC-263: the same reference closure was asserted on the npm-tarball channel (package.sh →
+// `--verify-closure` above) and NOWHERE on the marketplace channel — `plugin/scripts/publish-dist-
+// branch.sh` assembles the orphan-branch tree (rsync → bundle → strip raw .ts → rewrite → commit →
+// push) with no equivalent check (grep for `closure` in that script: 0 hits before this task), while
+// orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md:139 declares marketplace the
+// PRIMARY publish channel. So the guarded channel was the secondary one and the main one was
+// unchecked: a bundle the shipped carriers reference could be absent from the published branch, and
+// the only symptom would be a consumer-side failure — structurally invisible to this repo's tests,
+// which is exactly the class the tarball gate exists to close.
+//
+// Same predicate (every required `dist/<name>.js` must be present), different READING: the tarball
+// verifier eats `npm pack` listing text; here the tree on disk IS the artifact, so the present-set is
+// a directory walk and the required-set gains a second, artifact-side half (below).
+const PUBLISH_TREE_BUNDLE_REF_RE = /(?:scripts|gate-scripts)\/dist\/([A-Za-z0-9_.-]+)\.js/g;
+
+/**
+ * Bundle names referenced by the assembled tree's OWN carrier files (the `CONSUMER_DIRS` surface the
+ * rewriter owns; `.md`/`.sh`/`.js`). This is the half a source-side derivation cannot express: it
+ * reads what the ARTIFACT says, so a rewrite that emitted `<anchor>/scripts/dist/<name>.js` for a
+ * bundle the build never produced registers as "referenced but not landed" instead of staying
+ * invisible.
+ *
+ * ⛔ `knownNames` (the source root's existing `.ts` basenames) filters the result, for the reason the
+ * tarball-side docstring gives for its own intersection: a `dist/<name>.js` mentioned in PROSE names
+ * no real plugin script and is not part of the closure. MEASURED on the real publish tree
+ * 2026-09-15: without the filter this scan reports `X.js` — `plugin/scripts/quay-init.sh`'s four
+ * comments spelling the rewritten form as `${SCRIPT_DIR}/dist/X.js` (no `X.ts` exists) — i.e. the
+ * unfiltered predicate fails the primary publish channel on a doc placeholder. With it, every name
+ * that survives is one the build necessarily bundles, so a surviving name CAN only be missing when
+ * the tree genuinely lost a bundle.
+ *
+ * `runner-static-gate.ts` — the raw-shipped registry, never a bundle entry — is unaffected: the
+ * rewriter leaves its `.ts` reference alone (see rewritePluginPaths' bundleExists guard), so it never
+ * appears here in `dist/*.js` form.
+ *
+ * Fixture trees (`scripts/checker-mutation-cases/*.sh`) BUILD their own throwaway `plugin/scripts/…`
+ * layout, so a path inside them names the fixture's fake root, not this artifact — the same
+ * exclusion rewriteInvokers makes, for the same reason.
+ *
+ * `vendor/` is deliberately outside the scanned surface: those are separate pre-bundled packages
+ * (`vendor/quay/dist/quay.js`), not carriers of this plugin's `dist/` references.
+ *
+ * @param {string} publishRoot the assembled tree about to be committed to the orphan branch
+ * @param {Set<string>|undefined} [knownNames] when given, only these bundle names count (see above)
+ * @returns {Set<string>} bundle names (without `.js`)
+ */
+export function scanPublishTreeReferences(publishRoot, knownNames) {
+  const names = new Set();
+  const isFixture = (f) => f.includes(`${path.sep}checker-mutation-cases${path.sep}`);
+  for (const dir of CONSUMER_DIRS) {
+    for (const f of walk(path.join(publishRoot, dir))) {
+      if (!/\.(md|sh|js)$/.test(f)) continue;
+      if (isFixture(f)) continue;
+      for (const m of fs.readFileSync(f, "utf8").matchAll(PUBLISH_TREE_BUNDLE_REF_RE)) {
+        if (knownNames && !knownNames.has(m[1])) continue;
+        names.add(m[1]);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * The reference-closure gate for the marketplace / dist-plugin channel, read off the assembled
+ * DIRECTORY. The required set is the union of
+ *   ① the SAME derivation the tarball gate uses (`deriveEntries`), when the SOURCE plugin root is
+ *      given — the rewritten tree no longer carries raw `.ts`, so that derivation must run against a
+ *      root that still has them; and
+ *   ② everything the artifact's own carriers reference (scanPublishTreeReferences; names with no
+ *      backing `.ts` in the source root are prose, not closure — see that function).
+ * The present set is the directory listing, fed through the SAME `closureMissing` predicate as the
+ * tarball path (one closure rule, two readings — never a second copy of it).
+ *
+ * A non-empty `missing` MUST abort the publish: a gate that prints a warning and continues cannot be
+ * red, and a check that cannot be red is a false assurance rather than a measurement (硬规则 3b) —
+ * the caller (publish-dist-branch.sh) therefore guards the invocation and exits non-zero.
+ *
+ * @param {string} publishRoot the assembled tree about to be committed to the orphan branch
+ * @param {string} [sourcePluginRoot] SOURCE plugin root (raw `.ts` still present); omit to require
+ *   only the artifact-side reference set.
+ * @returns {{required: string[], missing: string[]}}
+ */
+export function verifyDistClosureDir(publishRoot, sourcePluginRoot) {
+  const required = new Set();
+  // The source root's own `.ts` basenames. Two uses: the prose filter for the artifact-side scan
+  // (an artifact reference counts only when a real plugin script backs the name) and — via
+  // deriveEntries — the same required set the tarball gate computes.
+  const knownNames = new Set();
+  if (sourcePluginRoot) {
+    const { scripts, gateScripts } = deriveEntries(sourcePluginRoot);
+    for (const rel of [...scripts, ...gateScripts]) {
+      required.add(path.basename(rel).replace(/\.ts$/, ""));
+    }
+    for (const kind of ["scripts", "gate-scripts"]) {
+      for (const f of walk(path.join(sourcePluginRoot, kind))) {
+        if (f.endsWith(".ts")) knownNames.add(path.basename(f).replace(/\.ts$/, ""));
+      }
+    }
+  }
+  for (const name of scanPublishTreeReferences(publishRoot, sourcePluginRoot ? knownNames : undefined)) {
+    required.add(name);
+  }
+  const listing = [];
+  for (const kind of ["scripts", "gate-scripts"]) {
+    for (const f of walk(path.join(publishRoot, kind, "dist"))) {
+      if (f.endsWith(".js")) listing.push(f);
+    }
+  }
+  const missing = closureMissing(required, listing);
+  return { required: [...required].sort(), missing };
+}
+
 // ── the plugin-root anchor: every shipped reference must resolve in a CONSUMING project ──────────
 // A plugin-level marketplace source (`{"source":"github","repo":"…","ref":"dist-plugin"}`) supports
 // no `path` parameter (publish-dist-branch.sh:106-107), so the orphan branch's ROOT *is* the plugin.
@@ -892,6 +1005,7 @@ if (invokedAsScript) {
   const args = process.argv.slice(2);
   const rewrite = args.includes("--rewrite");
   const verifyClosure = args.includes("--verify-closure");
+  const verifyClosureDir = args.includes("--verify-closure-dir");
   const positional = args.filter((a) => !a.startsWith("--"));
   const pluginRoot = positional[0] ? path.resolve(positional[0]) : DEFAULT_PLUGIN_ROOT;
   (async () => {
@@ -916,6 +1030,22 @@ if (invokedAsScript) {
       }
       console.log(
         `dist-closure gate OK: ${required.length} referenced dist bundles all present in ${path.basename(path.resolve(tarball))}`
+      );
+    } else if (verifyClosureDir) {
+      // AC-263: the marketplace channel's reading of the SAME closure rule. `pluginRoot` here is the
+      // assembled publish tree (directory form); the optional second positional is the SOURCE plugin
+      // root, whose raw `.ts` the derivation needs (the staged tree's were stripped).
+      const sourcePluginRoot = positional[1] ? path.resolve(positional[1]) : undefined;
+      const { required, missing } = verifyDistClosureDir(pluginRoot, sourcePluginRoot);
+      if (missing.length) {
+        console.error(
+          `dist-closure gate FAILED: ${missing.length} referenced dist bundle(s) absent from the publish tree ${pluginRoot}:`
+        );
+        for (const name of missing) console.error(`  - ${name}.js`);
+        process.exit(1);
+      }
+      console.log(
+        `dist-closure gate OK (directory): ${required.length} referenced dist bundles all present in ${pluginRoot}`
       );
     } else {
       await buildPluginDist(pluginRoot);
