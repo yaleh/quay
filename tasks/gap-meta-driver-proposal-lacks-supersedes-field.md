@@ -1,7 +1,7 @@
 ---
 id: gap-meta-driver-proposal-lacks-supersedes-field
 title: gap-meta-driver-proposal-lacks-supersedes-field
-status: todo
+status: ready
 labels:
   - gap
 parent: null
