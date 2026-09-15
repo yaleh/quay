@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-firstargregion-stripshellcomments
 title: "semantic-dedup-scan: Both pairs have identical algorithms —
   firstArgRegion differs only in parameter ORDER (283b vs 295b),
   stripShellComments only in brace layout (679b vs 777b); t"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
