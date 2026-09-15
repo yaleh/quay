@@ -2,7 +2,7 @@
 id: gap-ac257-verify-leg-misses-declared-worker-env
 title: --verify-ac257 腿不下发声明的 worker 环境，而 AC-257/AC-258 共用同一段 worker 前置 ⇒
   只能用旁路凭据的目标机上 AC-257 结构上不可达
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
