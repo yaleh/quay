@@ -54,6 +54,10 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/release-master-advance-needs-check.ts [--root <dir>] [--json]
+//   ⛔ With NO arguments at all it is a USAGE ERROR (exit 2, `Usage:` on stderr) — it does NOT judge
+//   `process.cwd()`. Judge a directory only by naming it (`--root .`): an exit-0 path that had judged
+//   nothing would be isomorphic to the PASS reading (硬规则 3b), and this is the population contract for
+//   verdict checkers (see the `argv.length === 0` branch in main()).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -153,7 +157,7 @@ export function judgeWorkflowText(text: string): Outcome {
 
 function usage(): string {
   return [
-    "usage: release-master-advance-needs-check.ts [--root <dir>] [--json]",
+    "Usage: release-master-advance-needs-check.ts [--root <dir>] [--json]",
     "",
     `Asserts \`${WORKFLOW_REL}\`'s \`${TARGET_JOB}\` job lists EVERY other job of that workflow in its`,
     "`needs:`, so any non-successful dependency skips it and master cannot advance on a half-green",
@@ -166,6 +170,23 @@ function usage(): string {
 }
 
 function main(argv: string[]): number {
+  // ⛔ NO ARGUMENTS IS A USAGE ERROR (exit 2), NOT A SILENT JUDGEMENT OF THE CWD. Two reasons:
+  //   (1) 硬规则 3b — this checker's exit 0 means "PASS: needs: covers every other job". A path that
+  //       exits 0 without having judged anything would be isomorphic to that reading. Defaulting the
+  //       root to `process.cwd()` and emitting a real verdict there is legitimate only when the caller
+  //       NAMED that root (`--root .`), because then the object being judged is the caller's choice
+  //       rather than an accident of where the shell happened to be.
+  //   (2) the population contract: every verdict-producing checker mirrored into
+  //       experiments/quay-perpetual-stream/scripts/ (touches-orthogonality-check, anti-drift-touches-check,
+  //       routine-file-gate, serial-fanin-absorb, derive-touches-heuristic) prints `Usage:` to stderr and
+  //       exits 2 with no args; only the report tool (fast-mode-telemetry) exits 0 with a Usage block on
+  //       stdout. This is caught, not remembered: experiments/quay-perpetual-stream/test/
+  //       symlink-mirror-invocation.test.mjs rejects an exit-0 no-args path whose stdout carries no
+  //       `Usage:` — which is exactly how this branch came to exist.
+  if (argv.length === 0) {
+    process.stderr.write(usage() + "\n");
+    return 2;
+  }
   let root = process.cwd();
   const json = argv.includes("--json");
   const rootIdx = argv.indexOf("--root");

@@ -19,6 +19,10 @@
 //   AC (set semantics): the comparison is against the file's own job keys, so adding a job anywhere in
 //     `jobs:` (before or after advance-master) is caught; and `needs` naming an unknown job is
 //     reported as a count, not mistaken for coverage.
+//   AC (no-args contract): with NO arguments the CLI is a usage error (exit 2, `Usage:` on stderr) and
+//     judges nothing. An exit-0 no-args path would share its exit code with PASS while having judged no
+//     root the caller named (硬规则 3b); the cross-cutting symlink-mirror guard rejects that shape too,
+//     but it lives outside this checker's object, so the contract is pinned here as well.
 //
 // Run:
 //   scripts/test.sh plugin/test/release-master-advance-needs-check.test.mjs
@@ -163,6 +167,24 @@ test("judgeWorkflowText: needs naming an unknown job is COUNTED, not treated as 
 });
 
 // ── the CLI's three states, each DISTINGUISHABLE ──────────────────────────────────────────────────
+
+test("CLI: NO ARGUMENTS is a usage error (exit 2, `Usage:` on stderr), NOT a judgement of the cwd", () => {
+  // Pinned HERE (not only in the cross-cutting guard that caught it) because that guard
+  // (experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs) lives outside this
+  // checker's object and rejects any exit-0 no-args path whose stdout carries no `Usage:` block. The
+  // defect it found was real: a cwd-defaulting no-args path exited 0 with `PASS:`, i.e. it rendered
+  // "read it and it was clean" for a run that judged no root the caller named (硬规则 3b — an exit
+  // code shared with PASS must not be reachable without judging). cwd is deliberately REPO_ROOT here:
+  // that directory DOES carry the covered workflow, so a cwd-defaulting implementation exits 0 with
+  // `PASS:` and fails both assertions below — the choice of cwd is what makes this test discriminating.
+  const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECK], {
+    encoding: "utf8",
+    cwd: REPO_ROOT,
+  });
+  assert.equal(r.status, 2, `expected 2 (usage error), got ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /Usage:/);
+  assert.doesNotMatch(r.stdout + r.stderr, /^PASS:/m, "a no-args run must not emit a verdict");
+});
 
 test("CLI: real covered fixture ⇒ exit 0", () => {
   const r = judgeText(covered());
