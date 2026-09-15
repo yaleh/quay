@@ -1,7 +1,7 @@
 ---
 id: AC-263
 title: 缺口D：主发布渠道（marketplace）有能取假且被 mutation case 钉住的 dist 闭包闸
-status: draft
+status: active
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -56,4 +56,15 @@ origin: 2026-09-15 实测对照：npm tarball 侧有 --verify-closure
   闭包断言（package.sh:193-206，且自带负控制——移除一个被引用的 bundle 即 exit 1），而 marketplace 侧的
   publish-dist-branch.sh 无任何等价断言。⇒ 被 SPEC-plugin-lifecycle:139
   声明为主发布渠道的那一条，恰恰是没有自包含校验的那一条。
+activatedAt: 2026-09-15T04:02:47.506Z
+statusLog:
+  - at: 2026-09-15T04:02:47.506Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-019 已激活，本 AC 进入在评
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T04:02:47.506Z
 ---
