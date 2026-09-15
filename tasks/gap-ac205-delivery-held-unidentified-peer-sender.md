@@ -1,0 +1,61 @@
+---
+id: gap-ac205-delivery-held-unidentified-peer-sender
+title: AC-205 的产出前置是环境的且未登记：probe 投出去了但被接收方按「unidentified session」扣下（Held peer
+  message），AC-214 判据因此在当前环境恒 red
+status: todo
+labels:
+  - gap
+  - defect
+  - mechanism
+parent: null
+children: []
+extra: {}
+---
+## Finding
+
+**AC-205 的现状不是「没跑」也不是「跑坏了」，而是「投出去了、被接收方扣下」——而扣下的原因是投递方没有身份。**
+本 finding 是 `gap-ac214-fifth-crossing-routine-detects-but-nothing-acts` 在 AC2 的取证过程中实测出来的；该任务因此无法把 AC-205 刷进新鲜度窗口（AC-214 判据到现在只剩它一条 red）。
+
+实测（2026-09-15，`bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B C" --force --root /home/yale/work/quay`，两轮）：
+
+1. **host B（`orangevps.wan.hwang.men`）**：`target: pid=1003072`，`send-to-session failed to connect`。ssh 实测该机 `~/.claude/sessions` 里 4 个登记会话的 pid **全部不是活进程**（`ps -p 1664053/1634692/1429681/1003072 -o comm=` 全空）⇒ 该机没有可投递的同址会话。远端日志逐字：`verify-deliver-coldstart.sh` 第 53 行 `NOTE: AC-205 record NOT written (send-to-session failed to connect — 缺值≠合格)`。
+2. **host C（`ad-arm1.wan.hwang.men`）**：`target: pid=1958929`（活），`send exit 0`，但 `transcript_confirmed=0`。远端日志逐字：`NOTE: AC-205 record NOT written (transcript_confirmed=0 — send exit 0 但 transcript 未物化 ⇒ 不落账，负控制 AC4)`。
+3. **事后直读目标 transcript（决定性读数）**：`~/.claude/projects/-home-yale-work-archguard/dad21301-02e7-42dd-814e-c6ca58ad975e.jsonl` 里 `grep -c ac205-probe` = **4** ⇒ probe **确实送达了**。但四条记录的形态**全部**是：
+   `{"type":"system","subtype":"informational","content":"Held peer message — from an unidentified session [verified pid 157212] (peer cla…"`
+   即 `type:"system"` + `subtype:"informational"`，**不是** `type:"user"` 也**不是** `type:"attachment"`。
+
+**为什么这构成一个缺陷（而不是「检查太严」）**：`plugin/scripts/transcript-delivery-check.ts` 的三态契约（该文件第 25–40 行）**只**把两类物化形态算作 DELIVERED —— a real USER message（`type==="user"` ∧ `message.role==="user"`）或 `type==="attachment"`，二者都是「被接收方【采纳】了」的形态。「Held peer message」是**待批**形态，判 UNKNOWN(exit 3) 是**正确**的：把它算成 delivered 等于把「排队中」说成「已送达」。⇒ **检查是对的，被检查的对象变了。**
+
+⇒ 根因在**投递方身份**：probe 由短命的 `node …/dist/send-to-session.js` 进程经 unix socket 发出，接收方**认证了 pid**（逐字 `verified pid 157212`）却**识别不出会话身份**（逐字 `from an unidentified session`）⇒ 按平台策略扣下待批，永不物化。
+
+⇒ **AC-205 的产出前置是环境的，而且是【未登记】的**：验证机上必须有一个会把「未识别身份的 peer 消息」物化的活会话（2026-09-14 那次成功就是在 `orangevps` 上恰好满足了这个前提）。`plugin/freshness-producers.json` 把 `GOAL-009-AC-205` 登记在 `coldstart-face.subjects` 下时**没有记录这个前置**。
+
+**后果（为什么必须立案而不能只当观察项）**：AC-214 的 `NEED` 含 AC-205，新鲜度窗口 K=200；AC-205 在两条验证机上都产不出新记录 ⇒ **AC-214 判据在当前环境下恒 red**，而 `freshness-producers.json` 仍然把 AC-205 登记为一个「跑一次 `coldstart-face` 就能刷新」的主体。**这正是本仓库反复出现的形态：一个恒 red 的判据与「机制坏了」同形，而这次机制没坏——是它的一个外部前置不再成立。**
+5b 扫描（同载体内的同形点）：`coldstart-face.subjects` 的另外四条（AC-201/203/207/232）本轮**全部刷到 d=0 margin 200**（实测），⇒ **只有 AC-205 这一条的产出路径与那四条不同**（它读的是会话投递面，不是安装/交付面），登记时被并进了同一个 producer 名下。
+
+## Requested action
+
+1. **先把两类失败分开**（这是取假的前提）：`plugin/scripts/verify-deliver-coldstart.sh` 的 AC-205 腿目前把「投递不到」与「投出去但被扣下」都印成「NOT written」。让它在 `send` exit 0 之后**先读一次 transcript 判定记录形态**，把三种结局分别落痕：`delivered`（物化）/ `held`（`Held peer message`，逐字贴出该行）/ `absent`（查无此文本）。⛔ 不改 `transcript-delivery-check.ts` 的三态契约（它是对的）。
+2. **修投递方身份**：让 `plugin/scripts/send-to-session.ts` 发出的 peer 消息**可被接收方识别**（`peer-identity-probe.ts` 是既有的身份探测机件，先查它是否已经提供了接收方认的那个标记）。判据必须能取假：同一台机上，未识别身份时目标 transcript 出现 `Held peer message`；补上身份后同一条命令产生的记录形态变为 `type:"user"` 或 `type:"attachment"`。⛔ 不通过放宽 `transcript-delivery-check` 来达成。
+3. **登记面说实话**：`plugin/freshness-producers.json` 里 AC-205 的条目补上它的产出前置（需要一个会把未识别 peer 消息物化的活会话）。若判定该前置【无法由本仓库保证】⇒ 把 AC-205 从 `coldstart-face.subjects` 拆出、单列一个 `session-delivery` producer 并写明前置；⛔ 不改 K、不改 AC-205 的 `criterion`、不删主体（那是人裁定的事）。
+
+## AC
+
+- [ ] 判据能取假①（红）：在一台**只有已死会话**的验证机上跑 AC-205 腿 ⇒ 三态落痕为 `absent` 或连接失败，且**不写记录**（与今天 host B 同形，逐字贴出）。
+- [ ] 判据能取假②（红）：在一台**有活会话但会扣下未识别 peer 消息**的验证机上跑 AC-205 腿 ⇒ 落痕为 `held` 并**逐字贴出那条 `Held peer message` 记录**（与今天 host C 同形）。
+- [ ] 判据能取假③（绿）：补上投递方身份之后，同一台机上落痕变为 `delivered`，且载体出现一条新的 `ac=GOAL-009-AC-205` ∧ `transcript_confirmed=true` 记录。
+- [ ] 生产载体读数：实现落地后，`.quay/productization-verification.jsonl` 里出现 `ts` 晚于落地时刻的 AC-205 记录（⛔ 只由夹具满足不算产出）。
+- [ ] `plugin/freshness-producers.json` 的 AC-205 条目要么写清前置，要么按 3 拆分；两种处置都要贴出改后的条目原文。
+
+## DoD
+
+AC-205 腿对「投递不到 / 被扣下 / 已送达」三态**逐条留痕且互不同形**（⛔ 不再是一句 NOT written），并且**至少在一台验证机上**把身份补齐后真的产出一条 `transcript_confirmed=true` 的 AC-205 记录（生产载体读数，ts 晚于落地时刻）。⛔ 不接受的替代物：改 K / 改 criterion / 删主体；放宽 `transcript-delivery-check.ts` 的三态契约；手写或搬运证据记录。
+
+## Touches
+
+- `plugin/scripts/send-to-session.ts`（投递方：补可识别身份）
+- `plugin/scripts/peer-identity-probe.ts`（既有身份探测机件，先用它）
+- `plugin/scripts/verify-deliver-coldstart.sh`（AC-205 腿：三态落痕）
+- `plugin/scripts/transcript-delivery-check.ts`（⛔ 只读，不改其契约）
+- `plugin/freshness-producers.json`（登记面：前置或拆分）
+- `tasks/gap-ac205-delivery-held-unidentified-peer-sender.md`（自身文件）
