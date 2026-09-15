@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-shell-scan-surface-family
 title: "semantic-dedup-scan: collectShellScripts and listExecutableFiles are
   whole-function byte-identical copies (521b / 558b, only JSDoc wording differs)
   and scanSurface is a 5-member sa"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
