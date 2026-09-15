@@ -42,6 +42,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
+          # gap-release-cut-via-workflow-dispatch (2026-09-15): default fetch-depth (1, shallow)
+          # left several git-graph product tests unable to resolve historical commits they assert
+          # against (e.g. `git show <sha>^` for a lane-palette regression fixture) — same root
+          # cause ci.yml already documents for itself ("默认浅克隆缺历史 baseline"). This job never
+          # got the equivalent fix. Full history restores that resolvability.
+          fetch-depth: 0
+
+      - name: Fetch develop (git-graph tests read real branch decorations)
+        # gap-release-cut-via-workflow-dispatch: a tag checkout has no LOCAL `develop` branch ref
+        # even with fetch-depth: 0 (that only guarantees the OBJECTS/history are present, not a
+        # local branch pointer) — several /git-history rendering tests use the real repo's own git
+        # log as their data source and assert on a `develop` decoration existing somewhere in the
+        # window. Verified two-way in-task (worker session, same day): without this step those
+        # tests fail (no `develop` ref to decorate); with it, they pass identically to a normal
+        # branch checkout. This does not touch the checked-out tree — HEAD stays on the tag.
+        run: git fetch origin develop:develop
 
       - uses: actions/setup-node@v4
         with:
