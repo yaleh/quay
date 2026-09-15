@@ -138,6 +138,32 @@ fi
 echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles ..."
 node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}"
 
+# ── AC-263: the dist reference-closure gate for THIS channel — and it must ABORT, not warn ────────
+# The npm-tarball channel has had an equivalent assertion since gap-plugin-dist-entry-derivation-
+# blind-to-core-and-table-refs (package.sh → build-plugin-dist.mjs --verify-closure, landing on the
+# `npm pack` listing). This marketplace/dist-plugin channel — declared the PRIMARY publish channel by
+# orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md:139 — assembled the same kind of
+# tree with NO equivalent check (this script had 0 `closure` hits), so a bundle the shipped carriers
+# reference could be absent from the published branch and the only symptom would be a failure in a
+# CONSUMING project: structurally invisible to this repo's own tests, which is exactly the class the
+# tarball gate was built to close.
+# ⛔ The reading is the DIRECTORY (the tarball verifier eats pack-listing text): the present-set is a
+# walk of the assembled tree, and the required-set is the tarball gate's own derivation (against
+# ${PLUGIN_DIR}, whose raw .ts are still present — ${WORK}'s were stripped above) UNION every
+# `{scripts,gate-scripts}/dist/<name>.js` the artifact's own carriers reference.
+# ⛔ It must ABORT: a WARN-and-continue gate cannot take the value false, and a check that cannot be
+# red is a false assurance, not a measurement (硬规则 3b — 「没有检查」是已知的空白，「一个恒绿的检
+# 查」是一个假的保证，后者更贵). The guard below is explicit rather than relying on `set -e`, so the
+# abort survives a future caller that sources this file or disables errexit. Nothing has been
+# committed or pushed at this point, so an abort publishes nothing.
+echo "[publish-dist-branch] verifying dist reference closure in the assembled publish tree ..."
+if ! node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" \
+     --verify-closure-dir "${WORK}" "${PLUGIN_DIR}"; then
+  echo "ERROR: dist reference-closure gate FAILED — refusing to publish the orphan branch." >&2
+  echo "       No commit, no push: the assembled tree is discarded on exit, ${REMOTE}/${BRANCH} untouched." >&2
+  exit 1
+fi
+
 git -C "$WORK" add -A
 # ⛔ `--no-verify` is REQUIRED here, and it is not a bypass of a gate that applies.
 # This commit is assembled in a throwaway orphan worktree whose content is a GENERATED

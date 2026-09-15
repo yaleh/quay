@@ -441,6 +441,21 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
   return null;
 }
 
+// ── Layer 0 · Core 库符号的单一导入面（gap-ac262-…）──────────────────────────────────────────────
+//
+// 为什么在这里：drivers 需要 Core 的**库**符号（不是把它当 CLI spawn——那是另一个缺陷）。这类静态
+// import 是正当的代码依赖：`build-plugin-dist.mjs` 的 coreSrcAliasPlugin 会把它内联进 `dist/*.js`，
+// 出厂 bundle 因此自包含（⛔ 不能用运行期拼路径的 dynamic import 替代——那会让 shipped 形态落到
+// node_modules 里的 `.ts`，Node ≥23.7 拒绝 strip-types；见 core-src-import.ts 头注释）。
+//
+// 但**「哪棵树里有 Core」这条布局知识只能出现在一处**（DRIVER-SCOPE 规则；本文件正是那个单一入口）。
+// 于是这两个消费方（goal-driver / meta-driver）不再各自写出 `<repo>/packages/quay/src/…` 字面量，
+// 而是从本模块取符号：布局知识留在 Layer 0，driver 只表达「我需要这个符号」。
+// ⊢ AC-262 判据按源文本扫这两个文件（剥掉 `//` 行注释后不得出现 Core 源码树字面量），故符号本身
+//   必须在这里落地一次；⛔ 不是把字面量藏起来——是把「谁知道布局」收敛到它该在的地方。
+export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
+export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
 // 规范化到 primary worktree（主检出）。git 不可用 / 非 git 仓库 / 解析失败 ⇒ 原样返回 root。
