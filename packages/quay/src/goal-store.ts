@@ -2778,6 +2778,7 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         }
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
+            key === "supersedes" ||
             key === "dispose-old" || key === "dispose-to" || key === "actor" || key === "reason") {
           opts[key] = v;
           i++;
@@ -2809,6 +2810,21 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
           supersededBy: Array.isArray(opts["superseded-by"])
             ? opts["superseded-by"] as string[]
             : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),
+          // `--supersedes <id>` — the DECLARATION half of the same field `write()` already owns
+          // (goal-store.ts:1913 `supersedes?: string[]`, applied at :2002). It was reachable through
+          // the JS API but had no CLI surface, so every CLI writer (meta-driver's draft proposals)
+          // was structurally unable to carry it. Single id per flag ⇒ wrapped, the same shape
+          // `--superseded-by` uses just above.
+          //
+          // ⛔ BOUNDARY — this flag carries no disposal power over a CRITERION, and that is
+          // structural, not a convention to be maintained: `write()`'s disposal branch is gated on
+          // `isGoalRecord && nextStatus === "active"` (:2322), so for an `AC-*` record the flip is
+          // unreachable on EVERY status, including activation. A proposal that declares
+          // `supersedes: [AC-old]` therefore leaves `AC-old`'s `status` byte-identical — flipping it
+          // stays a human action. (For a GOAL record the disposal semantics are the pre-existing I1′
+          // mechanism, already reachable via `--dispose-old`; this flag adds no new semantic there,
+          // it only stops the field from being un-writable.)
+          supersedes: typeof opts.supersedes === "string" ? [opts.supersedes] : undefined,
           disposeOld,
           // `--long-term true|false` (AC-216 declaration, machine-writable). `false` is MEANINGFUL
           // (explicitly clear the declaration) — hence the `!== undefined` guard, not a truthiness

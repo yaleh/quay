@@ -734,23 +734,54 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   }
 
   // 括注分类（gap-ac194）：spine 上无独立 reflog 条目的中间 commit，落在某次 ref-level 落地 [P, T] 之间
-  // ⇒ fan-in delivered（非直投、非 unclassifiable）。只处理 T 落在 baseline 窗内的括注（更旧的括注不引入窗内
-  // spine commit，省去其 subprocess）。
+  // ⇒ fan-in delivered（非直投、非 unclassifiable）。
+  //
+  // ── 准入判据（gap-ac194-bracket-filter-drops-offspine-landing-tip，本判据第三次「前提变更」）────────
+  // 现判据：**只排除「T 是窗底 baseline 的祖先」这一类括注**（`windowAncestors` = `rev-list <baseline>`），
+  //   其余括注一律处理 ⇒ `refMoveCovered` 用**完整候选集**（见下「新判据是必要条件」）。
+  // ⛔ 前判据（本任务修掉的那个）是「T 必须在当前 first-parent spine 上」，其理由写在旧注释里：「一次
+  //   ref-level 落地到 develop 必然让 T 成为 develop tip（spine 成员）」。**该前提被实测证伪，且不是边角
+  //   情形**：任务分支在工作树里 `git merge develop`（把当时的 develop tip 记成**第二父**）、随后该分支被
+  //   ff fan-in ⇒ develop 的 first-parent spine 走的变成**任务分支那条线**，先前的落地 tip 落进第二父位置
+  //   （develop 可达、离脊）。实测：develop reflog 最近 **200** 条 tip 里**只有 4 条**在当前 spine 上，
+  //   **196 条是 develop 的祖先但不在当前 first-parent spine 上**。旧判据把它们的括注全部跳过 ⇒ 其带入的
+  //   窗内 spine 提交无家可归 ⇒ unclassifiable（NOT-EVALUATED，exit 3）。
+  // 新判据是**必要条件**（⛔ 不是充分条件）：T 是窗底 baseline 的祖先 ⇒ T 的祖先**全是** baseline 的祖先，
+  //   而窗内 spine commit 按定义**不是** baseline 的祖先 ⇒ `rev-list --first-parent P..T` 结构上不可能含
+  //   窗内 spine commit（做不了任何事，只是白跑一条 subprocess）。
+  //   （用【窗底祖先集】而不是【窗内可达集】当排除集：后者要求 T 落在 develop 可达集内，会把「曾是 develop
+  //    tip、后被 force-move 出可达集」的 T 一并跳过——那类 T 的括注同样可能带出窗内 spine 提交。窗底祖先集
+  //   是**更宽**的排除集，只排除结构上确证做不了事的那些。）
+  // 判据**能取假**（硬规则④——不是恒真）：①真直投有独立 `commit:` reflog 条目，而 `classifySpineLandingMode`
+  //   里 `directSet` **先于** `refMoveCovered` 判定 ⇒ 扩大括注覆盖**结构上不可能**把真直投洗成 fan-in；
+  //   ②带不出窗内提交的括注（含 reflog 已被 gc 剪、无条目的老 commit）仍保持 unclassifiable（硬规则③b）。
+  // 成本（实测，本仓 3891 条 reflog / 3456 条括注）：旧判据准入 27 条；新判据准入 648 条（+621 条 subprocess，
+  // 判据墙钟 2.0s → 7.0s，仍在 goal-gate 60s criterion 预算内）。
+  //
   // 同时产出 refMove 的【可见性读数】（AC5）——admission 与静默豁免的分界就在这里：带入窗内的 first-parent
   // commit 清单 + 各自 code-surface 标记，⛔ 不并入 fan-in 计数（硬规则④：不得把「不知道」洗成「合格」）。
+  // ⚠️ **可见性读数（`refMoveIntroduced` / `nonForwardRefMoves`）仍按窄口径**（`T ∈ spineSet`）：完整候选集
+  // 会把 --json 撑到 376KB（实测），而覆盖集 `refMoveCovered` 才是判定输入 ⇒ 只有它用完整候选集。
+  let windowAncestors = null; // 窗底（baseline）的祖先集——命中它 ⇒ 该括注结构上带入不了窗内 spine commit
+  if (baseline) {
+    try {
+      windowAncestors = new Set(git(root, ["rev-list", baseline]).split("\n").filter(Boolean));
+    } catch {
+      windowAncestors = null; // 读不出 ⇒ 不排除任何括注（保守：多覆盖一点 ⇒ 由 directSet 优先级保证不掩真直投）
+    }
+  }
   const refMoveCovered = new Set();
   const refMoveIntroduced = [];
   const nonForwardRefMoves = [];
   if (reflogIndex) {
     for (const { T, P } of brackets) {
-      // 只处理 **T 落在窗内 first-parent spine 上**的括注：一次 ref-level 落地到 develop 必然让 T 成为
-      // develop tip（spine 成员）。off-spine 的 T（历史被改写后遗留的旧 tip）的 first-parent 链不在 develop
-      // 的 spine 上 ⇒ 其 P..T 结构上不含窗内 spine commit，既覆盖不到任何东西、也不是窗内的落地（实测：
-      // windowDag 过滤会把 255 条 off-spine 旧 tip 混进读数、把 --json 撑到 376KB，而 spine 过滤 = 27 条）。
-      if (!spineSet.has(T)) continue;
+      // 准入（见上注——⛔ 不是「T 在当前 first-parent spine 上」）：只排除结构上确证带入不了窗内提交的括注。
+      if (windowAncestors?.has(T)) continue;
       try {
         const intro = git(root, ["rev-list", "--first-parent", `${P}..${T}`]).split("\n").filter(Boolean);
         for (const s of intro) if (spineSet.has(s)) refMoveCovered.add(s);
+        // 可见性读数按**窄口径**（T 在当前 first-parent spine 上）——见上注（--json 体量）。
+        if (!spineSet.has(T)) continue;
         // rewind 判定（AC6）：P 非 T 祖先 ⇒ 这次移动是回退，带入集为空 ⇒ 单独可见，⛔ 不计入「带入了 commit
         // 的落地」。用显式祖先判定（不是「intro 为空」——P==T 的空移动也会给出空 intro，两者语义不同）。
         const forward = isAncestor(root, P, T);

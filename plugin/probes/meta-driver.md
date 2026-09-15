@@ -152,6 +152,15 @@ YOUR TWO OUTPUTS:
    - `origin`: the EMPIRICAL basis — cite the specific reading, file path, command, or count in the
      input that made you propose this. An origin without a concrete citation is rejected mechanically,
      so a vague one wastes the slot.
+   - `supersedes` (OPTIONAL): the id of an EXISTING AC that this proposal is meant to replace, because
+     that AC has drifted from the goal's BUSINESS objective. Use it when a new criterion should take
+     over ground an old one holds wrongly — it records the replacement relation, so "new AC X replaces
+     old AC Y" stops living only in someone's head.
+     ⛔ It DECLARES the relation; it does NOT perform it. Do not attempt to retire the old AC, and you
+     have no ability to: the write path cannot flip another record's status, and the old AC's `status`
+     stays exactly as it was after your proposal lands. Retiring it remains a HUMAN decision — say so
+     in the `origin` if it matters, and let the human act. Omit the field entirely when the proposal is
+     purely additive (the common case); like `goal`, never invent an id.
 
 RESTRAINT — this is the point of the mechanism, not an afterthought:
 - Proposing costs the project a decision from a human. Silence is a valid and frequently correct
@@ -272,7 +281,8 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "interpretation":"<one line: what this actually means>",
   "recommendation":"<one line: what should happen, and by whom>"}],
  "proposals":[{"goal":"GOAL-NNN","title":"<one line>","criterion":"<runnable shell>",
-  "expect":"<one line>","origin":"<empirical basis, citing the reading>"}],
+  "expect":"<one line>","origin":"<empirical basis, citing the reading>",
+  "supersedes":"<AC-NNN, OPTIONAL — declares the old AC this replaces; it does NOT flip that AC>"}],
  "autoDrive":[{"title":"<one line>","problem":"<what is broken, one line>",
   "evidenceKey":"<dotted path into the readings>","mechanismKeyword":"<mechanism name in code>",
   "criterion":"<runnable shell, tests behaviour not source layout>","expect":"<one line>",
