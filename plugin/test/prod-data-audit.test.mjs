@@ -231,7 +231,23 @@ test("AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces m
   assert.ok(audit.prodRoot, "production root resolved");
   // 判据6：谓词自检命中非空
   assert.ok(audit.predicateHit, `predicate hit must be present, got ${audit.predicateHit}`);
-  assert.ok(audit.predicateHit.includes("verification-round.jsonl"), audit.predicateHit);
+  // 自检的语义是「find 谓词本身有效 ⇒ 一个 NOT-FOUND 是真缺失而非定位器坏了」。可移植的判法是
+  // 【交叉核对自检命中的载体确实被本次报告标为 found】——这与 checkout 上恰好存在哪些载体无关。
+  // 原断言写死 `includes("verification-round.jsonl")`，那是**载体枚举顺序 + 该载体恰好存在**的
+  // 派生物：全新 checkout 上首个被定位到的载体是别的（CI 实测
+  // `checker-cost.jsonl@/home/runner/work/quay/quay/.quay/checker-cost.jsonl`），本机则是
+  // verification-round（Class A 的失败根因之一）。
+  const hitAt = audit.predicateHit.indexOf("@");
+  const hitName = audit.predicateHit.slice(0, hitAt);
+  const hitPath = audit.predicateHit.slice(hitAt + 1);
+  const hitCarrier = audit.carriers.find((r) => r.name === hitName);
+  assert.ok(hitCarrier, `predicateHit must name a carrier this audit reports: ${hitName}`);
+  // 独立核对（非自证）：自检点名的那个路径必须真的在盘上——这条不依赖报告自己的 found 字段。
+  assert.ok(fs.existsSync(hitPath), `predicateHit must name a path that exists on disk: ${hitPath}`);
+  // 该载体在场时，自检必须仍命中它（长寿命检出上的原有强度不变）。
+  if (fs.existsSync(path.join(audit.prodRoot, ".quay", "verification-round.jsonl"))) {
+    assert.ok(audit.predicateHit.includes("verification-round.jsonl"), audit.predicateHit);
+  }
 
   const byName = (n) => audit.carriers.find((r) => r.name === n);
   // 判据2：三态独立取值
