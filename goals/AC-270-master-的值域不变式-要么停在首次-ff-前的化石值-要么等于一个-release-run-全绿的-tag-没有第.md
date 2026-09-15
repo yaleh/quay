@@ -1,7 +1,7 @@
 ---
 id: AC-270
 title: master 的值域不变式：要么停在首次 ff 前的化石值，要么等于一个 Release run 全绿的 tag——⛔ 没有第三种取值
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -58,5 +58,11 @@ origin: SPEC-release-and-hotfix-branching-2026-09-15 §3.1/§7 甲，人 2026-09
   只能有两个取值」变成每轮可查的不变式，首次 ff 之前它守的是「没有东西直推 master」，首次 ff 之后守的是「master
   没有在半绿发布上前进」——后者正是 v0.6.3 暴露的形态：Release 对象比它自己的 run 早 12 秒诞生，而那次 run 是红的。
 activatedAt: 2026-09-15T14:01:41.510Z
+statusLog:
+  - at: 2026-09-15T14:11:58.529Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
