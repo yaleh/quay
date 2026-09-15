@@ -172,7 +172,19 @@ import { verifyIndependently, type DriverResult } from "./driver-result.ts";
 // AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
 export { verifyIndependently } from "./driver-result.ts";
 export type { DriverResult } from "./driver-result.ts";
-import { listWorktrees, taskIdFromBranch, worktreeMatchesTask, parseWorktreePorcelain } from "./fast-mode-telemetry.ts";
+// 名字→真实任务 id 的绑定（gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption）：本文件
+// 多处把 worktree/分支名【当作任务 id】去查状态或路径。名字掉了后缀（实测 2026-09-15）时逐字相等判据
+// 全数落空 ⇒ 用截断名查真实任务库 ⇒ 判 `unreadable`（"读不懂"的伪装）或找不到路径。resolveTaskName /
+// resolveWorktreeTaskId 是那条绑定的单一实现，⛔ 不在此另写前缀匹配。
+import {
+  listTaskIds,
+  listWorktrees,
+  parseWorktreePorcelain,
+  resolveTaskName,
+  resolveWorktreeTaskId,
+  taskIdFromBranch,
+  worktreeMatchesTask,
+} from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
 // 门②「cwd 在该 worktree 内的活进程」直接量单一真相源（gap-worktree-remove-orphans-probes 的 /proc
 // 枚举器 enumerateProcs + cwdUnder——⛔ 不手搓 /proc 扫描，同 concurrent-batch-scheduler.ts 的 in-flight
@@ -555,22 +567,32 @@ function escapeRegExp(s: string): string {
  *  gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind）。判定收敛到
  *  fast-mode-telemetry 的 worktreeMatchesTask，⛔ 不各自手写 `refs/heads/task/<id>` 正则。
  *  fan-in 成功后 `git worktree remove` + `git branch -d task/<id>` 把该分支删掉 ⇒ 无该 worktree = 无残留。
- *  读失败（非 git 仓库 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无残留）。 */
+ *  读失败（非 git 仓库 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无残留）。
+ *
+ *  名字掉了后缀的 worktree 由逐字相等判据看不见（gap-worktree-task-id-mismatch-defeats-leftover-
+ *  worktree-exemption）⇒ 在逐字相等之外并上 resolveWorktreeTaskId 的后缀截断臂，对真实任务 id 集接地
+ *  （listTaskIds fail-soft ⇒ 空集 ⇒ 该臂贡献为零，逐字相等臂仍照判）。 */
 export function worktreePresentForTask(root: string, taskId: string): boolean | null {
   const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return null;
-  return parseWorktreePorcelain(String(r.stdout ?? "")).some((wt) => worktreeMatchesTask(wt, taskId));
+  const taskIdSet = new Set(listTaskIds(root));
+  return parseWorktreePorcelain(String(r.stdout ?? "")).some(
+    (wt) => worktreeMatchesTask(wt, taskId) || resolveWorktreeTaskId(wt, taskIdSet).taskId === taskId,
+  );
 }
 
-/** 本任务残留 worktree 的路径列表（形状感知，判定同 worktreePresentForTask）。读失败（非 git 仓库 /
- *  git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，用 worktreePresentForTask 区分「读不懂」（null）
- *  与「确认无残留」（false））。 */
+/** 本任务残留 worktree 的路径列表（形状感知，判定同 worktreePresentForTask，含后缀截断臂）。读失败
+ *  （非 git 仓库 / git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，用 worktreePresentForTask 区分
+ *  「读不懂」（null）与「确认无残留」（false））。 */
 export function worktreePathsForTask(root: string, taskId: string): string[] {
   const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return [];
+  const taskIdSet = new Set(listTaskIds(root));
   const paths: string[] = [];
   for (const wt of parseWorktreePorcelain(String(r.stdout ?? ""))) {
-    if (wt.path && worktreeMatchesTask(wt, taskId)) paths.push(wt.path);
+    if (wt.path && (worktreeMatchesTask(wt, taskId) || resolveWorktreeTaskId(wt, taskIdSet).taskId === taskId)) {
+      paths.push(wt.path);
+    }
   }
   return paths;
 }
@@ -580,16 +602,22 @@ export function worktreePathsForTask(root: string, taskId: string): string[] {
 export async function worktreePresentForTaskAsync(root: string, taskId: string): Promise<boolean | null> {
   const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
   if (r.error || r.status !== 0) return null;
-  return parseWorktreePorcelain(r.stdout).some((wt) => worktreeMatchesTask(wt, taskId));
+  const taskIdSet = new Set(listTaskIds(root));
+  return parseWorktreePorcelain(r.stdout).some(
+    (wt) => worktreeMatchesTask(wt, taskId) || resolveWorktreeTaskId(wt, taskIdSet).taskId === taskId,
+  );
 }
 
 /** worktreePathsForTask 的异步版（常驻循环体用）。读失败 ⇒ []（与同步版一致）。 */
 export async function worktreePathsForTaskAsync(root: string, taskId: string): Promise<string[]> {
   const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
   if (r.error || r.status !== 0) return [];
+  const taskIdSet = new Set(listTaskIds(root));
   const paths: string[] = [];
   for (const wt of parseWorktreePorcelain(r.stdout)) {
-    if (wt.path && worktreeMatchesTask(wt, taskId)) paths.push(wt.path);
+    if (wt.path && (worktreeMatchesTask(wt, taskId) || resolveWorktreeTaskId(wt, taskIdSet).taskId === taskId)) {
+      paths.push(wt.path);
+    }
   }
   return paths;
 }
@@ -603,14 +631,40 @@ export async function worktreePathsForTaskAsync(root: string, taskId: string): P
 // 把「worktree 在 ∧ 存活 worker 在」的 task 预先纳入「已在飞」排除集。worktree 复用 fast-mode-
 // telemetry 的 listWorktrees/taskIdFromBranch（单一真相源，⛔ 不另写 porcelain 解析器）。
 
-/** 枚举所有开着的 task worktree 的 task id（`task/<id>` 分支）。git 失败 / 非 git 仓库 ⇒ []。 */
-export function enumerateTaskWorktreeTasks(root: string): string[] {
-  const ids: string[] = [];
+/** 一个 task worktree 的「呈现名 → 真实任务 id」绑定（gap-worktree-task-id-mismatch-defeats-leftover-
+ *  worktree-exemption）。`match` 是 resolveTaskName 的四值判定：exact / prefix（名字掉了后缀，唯一前缀
+ *  指向一个真实任务 id）/ unmatched（接地过、绑不上）/ ungrounded（无任务库可接地——⛔ 与 unmatched 不同形）。 */
+export interface TaskWorktreeRef {
+  /** 分支呈现的名字（`task/<name>` 去掉前缀）——枚举口径与旧 enumerateTaskWorktreeTasks 一致。 */
+  name: string;
+  path: string | null;
+  branch: string | null;
+  /** 绑上的真实任务 id；unmatched / ungrounded ⇒ null（⛔ 不拿名字冒充 id）。 */
+  taskId: string | null;
+  match: "exact" | "prefix" | "unmatched" | "ungrounded";
+}
+
+/** 枚举所有开着的 task worktree 的名字→id 绑定（`task/<name>` 分支口径，同旧 enumerateTaskWorktreeTasks）。
+ *  git 失败 / 非 git 仓库 ⇒ []。名字接地于真实任务库（listTaskIds，fail-soft ⇒ ungrounded）。 */
+export function enumerateTaskWorktreeRefs(root: string): TaskWorktreeRef[] {
+  const taskIdSet = new Set(listTaskIds(root));
+  const refs: TaskWorktreeRef[] = [];
   for (const wt of listWorktrees(root)) {
-    const id = taskIdFromBranch(wt?.branch);
-    if (id != null) ids.push(id);
+    const name = taskIdFromBranch(wt?.branch);
+    if (name == null) continue;
+    const { taskId, match } = resolveTaskName(name, taskIdSet);
+    refs.push({ name, path: wt.path ?? null, branch: wt.branch ?? null, taskId, match });
   }
-  return ids;
+  return refs;
+}
+
+/** 枚举所有开着的 task worktree 的 task id（`task/<id>` 分支）。git 失败 / 非 git 仓库 ⇒ []。
+ *  名字绑不上真实任务时回落到名字本身（⛔ 不丢条目——丢条目会把「有个名字对不上的 worktree」变成
+ *  「没有这个 worktree」，正是本任务要消除的静默）。绑得上时给出【真实】id：名字掉后缀的 worktree
+ *  因此能对上存活 worker 的 cmdline（gap-worker-driver-cold-start-inflight-blind 的方向是「多排除 ⇒
+ *  少重派」，偏安全）。诊断口径见 enumerateTaskWorktreeRefs（不丢名字，`match` 可区分）。 */
+export function enumerateTaskWorktreeTasks(root: string): string[] {
+  return enumerateTaskWorktreeRefs(root).map((r) => r.taskId ?? r.name);
 }
 
 /** 扫描 /proc/<pid>/cmdline，返回所有含 `quay-task-worker` 的存活进程 cmdline（空格 join，读失败跳过）。
@@ -742,14 +796,22 @@ async function listWorktreesAsync(root: string): Promise<Array<{ path: string; b
   return worktrees;
 }
 
-/** enumerateTaskWorktreeTasks 的异步版（常驻循环体用）。 */
-async function enumerateTaskWorktreeTasksAsync(root: string): Promise<string[]> {
-  const ids: string[] = [];
+/** enumerateTaskWorktreeRefs 的异步版（常驻循环体用）。 */
+async function enumerateTaskWorktreeRefsAsync(root: string): Promise<TaskWorktreeRef[]> {
+  const taskIdSet = new Set(listTaskIds(root));
+  const refs: TaskWorktreeRef[] = [];
   for (const wt of await listWorktreesAsync(root)) {
-    const id = taskIdFromBranch(wt?.branch);
-    if (id != null) ids.push(id);
+    const name = taskIdFromBranch(wt?.branch);
+    if (name == null) continue;
+    const { taskId, match } = resolveTaskName(name, taskIdSet);
+    refs.push({ name, path: wt.path ?? null, branch: wt.branch ?? null, taskId, match });
   }
-  return ids;
+  return refs;
+}
+
+/** enumerateTaskWorktreeTasks 的异步版（常驻循环体用）。回落规则同同步版（⛔ 不丢条目）。 */
+async function enumerateTaskWorktreeTasksAsync(root: string): Promise<string[]> {
+  return (await enumerateTaskWorktreeRefsAsync(root)).map((r) => r.taskId ?? r.name);
 }
 
 /** enumerateColdStartInflight 的异步版（常驻循环体用）：git worktree list 改 spawn；/proc 扫进程仍是
@@ -899,8 +961,11 @@ function defaultSupersededReaperCmd(root: string, worktreePath: string): string[
 /** 单个 task worktree 的 superseded 回收结果（可观测：status / 回收 / 双闸跳过 / 分支保留）。 */
 export interface SupersededWorktreeReclaimResult {
   taskId: string;
-  /** 该 task 的 status 读数：superseded / ready / done / needs-human / todo / unreadable（缺失或读不懂）。
-   *  三者两两不等（硬规则 3b）：unreadable 不与可回收（superseded）也不与跳过（任一真 status）同形。 */
+  /** 该 task 的 status 读数：superseded / ready / done / needs-human / todo / unreadable（缺失或读不懂），
+   *  另有 "worktree-name-unmatched"（该 worktree 的名字绑不上任何真实任务 id —— 见 ReclaimSupersededResult.
+   *  mismatchedWorktreeNames）。四者两两不等（硬规则 3b）：unreadable 不与可回收（superseded）也不与跳过
+   *  （任一真 status）同形；worktree-name-unmatched 更不同形——它说的不是「任务读不懂」，而是「这个
+   *  worktree 的名字根本对不上任务库」，旧实现把它伪装成 unreadable（用截断名查真实库自然查不到）。 */
   status: string;
   /** 该 task worktree 路径（worktreePathsForTask 首条）；无 worktree ⇒ null。 */
   worktreePath: string | null;
@@ -931,6 +996,10 @@ export interface ReclaimSupersededResult {
   reclaimed: string[];
   /** 候选（superseded）但被双闸跳过的 task id（存活 worker / 活进程）。 */
   skipped: string[];
+  /** 枚举到的、名字绑不上任何真实任务 id 的 worktree 名（gap-worktree-task-id-mismatch-defeats-
+   *  leftover-worktree-exemption AC2/AC3 诊断载体）。与 perTask 的 status 独立：`candidateCount` 只数
+   *  superseded，这些名字永远不进候选，⛔ 不能靠「候选为 0」推断「没有名字对不上的 worktree」。 */
+  mismatchedWorktreeNames: string[];
 }
 
 /** 测试缝（与 cleanupOrphanWorktree 同款，null ⇒ 用真实 git / /proc / readTaskStatus）。 */
@@ -939,6 +1008,9 @@ export interface SupersededReclaimOpts {
   workerCmdlines?: string[] | null;
   /** 枚举到的 task/<id> worktree 的 task id（null ⇒ enumerateTaskWorktreeTasksAsync(root)）。 */
   worktreeTasks?: string[] | null;
+  /** 名字→真实任务 id 的绑定（null ⇒ enumerateTaskWorktreeRefsAsync(root)）。优先于 worktreeTasks；
+   *  诊断口径（mismatchedWorktreeNames / status:"worktree-name-unmatched"）只在此路径上可测。 */
+  taskWorktreeRefs?: TaskWorktreeRef[] | null;
   /** task id → status 读取（null ⇒ readTaskStatus(root, id)）。 */
   statusOf?: ((taskId: string) => string | null) | null;
   /** task id → worktree 路径列表（null ⇒ worktreePathsForTaskAsync(root, id)）。 */
@@ -978,26 +1050,48 @@ export interface SupersededReclaimOpts {
  * 与「跳过已信号」读成同值，硬规则 3b）。发信号失败（pid 读不到/进程已退/无权限）不致命，记 false。
  * 读不懂（任务文件缺失 / status 解析不出）给独立取值 "unreadable"，不与可回收（superseded）也不与
  * 跳过（任一真 status）同形（硬规则 3b），且一律不清。
+ *
+ * 名字掉了后缀的 worktree（gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption）：
+ * 旧实现把分支名直接当任务 id 去查（statusOf(name)），掉后缀的名字查不到真实任务 ⇒ 记成 "unreadable"
+ * ——「用错误字符串查不到」伪装成了「读不懂」。修法：枚举改走 enumerateTaskWorktreeRefsAsync，名字先经
+ * resolveTaskName 绑回真实任务 id（唯一前缀 ⇒ 正确关联，例：quay-worktrees/gap-worker-driver-counts-
+ * transient-rate-limit → gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-
+ * needs-human，绑不上 ⇒ 独立取值 "worktree-name-unmatched" 并落进 mismatchedWorktreeNames，⛔ 不冒充
+ * unreadable）。
  * best-effort：移除失败（脏树/锁/活进程）不致命，error 落盘供观测，⛔ 不抛。
  */
 export async function reclaimSupersededWorktrees(
   root: string,
   opts: SupersededReclaimOpts = {},
 ): Promise<ReclaimSupersededResult> {
-  const worktreeTasks = opts.worktreeTasks ?? await enumerateTaskWorktreeTasksAsync(root);
-  if (worktreeTasks.length === 0) {
-    return { candidateCount: 0, perTask: [], reclaimed: [], skipped: [] };
+  // 用 refs（名字→id 绑定）而非裸名字：诊断需要「名字」与「绑上的 id」两个值同时在场
+  // （硬规则 3b——`unmatched` 必须与 `unreadable` 可区分）。worktreeTasks 测试缝保留（裸名字 ⇒ 视为
+  // exact，与旧行为逐字一致）。
+  const refs: TaskWorktreeRef[] = opts.taskWorktreeRefs
+    ?? (opts.worktreeTasks
+      ? opts.worktreeTasks.map((name) => ({ name, path: null, branch: null, taskId: name, match: "exact" as const }))
+      : await enumerateTaskWorktreeRefsAsync(root));
+  const mismatchedWorktreeNames = refs.filter((r) => r.match === "unmatched").map((r) => r.name);
+  if (refs.length === 0) {
+    return { candidateCount: 0, perTask: [], reclaimed: [], skipped: [], mismatchedWorktreeNames };
   }
   const statusOf = opts.statusOf ?? ((taskId: string) => readTaskStatus(root, taskId));
-  const pathsOf = opts.pathsOf ?? ((taskId: string) => worktreePathsForTaskAsync(root, taskId));
+  // 路径查找优先用本轮枚举的 refs（它们的 path 就是这次的读数，且【名字对不上时也在场】——⛔ 不再按
+  // 名字重跑一次精确匹配，否则掉后缀的 worktree 永远查不到路径、回收步骤对它形同虚设）；refs 没带路径时
+  // （worktreeTasks 测试缝只给名字）回落到 worktreePathsForTaskAsync（它自己也带后缀截断臂）。
+  const pathsOf = opts.pathsOf ?? (async (taskId: string) => {
+    const fromRefs = refs.filter((r) => (r.taskId ?? r.name) === taskId && r.path).map((r) => r.path as string);
+    return fromRefs.length > 0 ? fromRefs : worktreePathsForTaskAsync(root, taskId);
+  });
 
   // 第一遍：读 status，仅 superseded 进候选。
   const statusByTask = new Map<string, string>();
   const candidates: string[] = [];
-  for (const taskId of worktreeTasks) {
-    const status = statusOf(taskId) ?? "unreadable";
-    statusByTask.set(taskId, status);
-    if (status === TASK_STATUS.SUPERSEDED) candidates.push(taskId);
+  for (const ref of refs) {
+    const key = ref.taskId ?? ref.name;
+    const status = ref.match === "unmatched" ? "worktree-name-unmatched" : (statusOf(key) ?? "unreadable");
+    statusByTask.set(key, status);
+    if (status === TASK_STATUS.SUPERSEDED) candidates.push(key);
   }
 
   // 双闸共享扫 /proc（仅在有候选时；无候选不白扫——同 enumerateColdStartInflight 的 short-circuit）。
@@ -1008,10 +1102,11 @@ export async function reclaimSupersededWorktrees(
   const skipped: string[] = [];
 
   const perTask: SupersededWorktreeReclaimResult[] = [];
-  for (const taskId of worktreeTasks) {
+  for (const ref of refs) {
+    const taskId = ref.taskId ?? ref.name;
     const status = statusByTask.get(taskId)!;
     if (status !== TASK_STATUS.SUPERSEDED) {
-      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: false, branchPreserved: null, error: null });
+      perTask.push({ taskId, status, worktreePath: ref.path ?? null, reclaimed: false, skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: false, branchPreserved: null, error: null });
       continue;
     }
     const paths = await pathsOf(taskId);
@@ -1068,7 +1163,7 @@ export async function reclaimSupersededWorktrees(
     });
   }
 
-  return { candidateCount: candidates.length, perTask, reclaimed, skipped };
+  return { candidateCount: candidates.length, perTask, reclaimed, skipped, mismatchedWorktreeNames };
 }
 
 /** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */

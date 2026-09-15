@@ -62,7 +62,7 @@ export function goalStalenessMark(g: GoalRecord): string {
 //
 // The store-only `write` flags take the same path for the same reason: `--actor`, `--reason`,
 // `--force`, `--dry-run`, `--long-term`, `--expect-absent` / `--expect-existing`, `--dispose-old`
-// / `--dispose-to` and `--fidelity-judge-argv` are goal-STORE semantics with no field in the
+// / `--dispose-to`, `--fidelity-judge-argv` and `--supersedes` are goal-STORE semantics with no field in the
 // Provider ABI's `goal_write` view-model. Forwarding them through the ABI would DROP them silently
 // — and `--actor` is load-bearing (it is recorded in the status log and it is the actor handed to
 // `resolveGoalStaleness` on a transition back into `active`), as is `--fidelity-judge-argv` (the
@@ -70,10 +70,18 @@ export function goalStalenessMark(g: GoalRecord): string {
 // invocation that does not keeps the provider-agnostic ABI path (unchanged).
 
 /** `write` flags the Provider ABI cannot carry — presence of any of them routes the write to the
- *  goal store itself (see the block comment above). Enumerated, ⛔ not a boolean "is it weird". */
+ *  goal store itself (see the block comment above). Enumerated, ⛔ not a boolean "is it weird".
+ *
+ *  `supersedes` belongs here for the reason this list exists, and it was measured, not inferred
+ *  (gap-meta-driver-proposal-lacks-supersedes-field): without `--store` an invocation carrying it
+ *  printed `wrote AC-008` and exited 0 while the field never reached the file — the silent-drop
+ *  failure this comment names, on a field whose whole purpose is to record a declaration. The ABI
+ *  `goal_write` view-model has no `supersedes` (it carries `superseded_by`, a different field with
+ *  different semantics: that one says "I was replaced", and `write()` only acts on it for GOALs). */
 const STORE_ONLY_WRITE_FLAGS = [
   "actor", "reason", "force", "dry-run", "long-term",
   "expect-absent", "expect-existing", "dispose-old", "dispose-to", "fidelity-judge-argv",
+  "supersedes",
 ] as const;
 
 /** The goal store's CLI verbs — store-level BY NATURE: they have no Provider ABI counterpart at all

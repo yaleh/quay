@@ -1159,6 +1159,150 @@ test("AC5 CLI — 括注不越界：reflog 剪掉（expire）后中间 commit �
   }
 });
 
+// ── 括注准入的第三次「前提变更」（gap-ac194-bracket-filter-drops-offspine-landing-tip）─────────────
+// 前两次修的对象与本根**不同**却共用同一个 reason 字符串：① gap-ac194-bypass-check-unclassifiable-window
+// 把全 DAG 扫描换成 first-parent spine 扫描；② gap-ac194-reflog-action-vocabulary-incomplete 把 action
+// 分类从「拼法白名单」改成结构判定。**本次的根是【括注准入的前提】本身**：旧注释写「一次 ref-level 落地
+// 到 develop 必然让 T 成为 develop tip（spine 成员）」——**该前提被实测证伪，且不是边角情形**：任务分支在
+// 工作树里 `git merge develop`（把当时的 develop tip 记成**第二父**）、随后该分支被 ff fan-in ⇒ develop 的
+// first-parent spine 走的变成**任务分支那条线**，先前的落地 tip 落进第二父位置（可达、离脊）。
+// 实测（生产）：reflog 最近 200 条 tip 里只有 4 条在当前 spine 上；6 条已被 fan-in 的提交因此落进
+// unclassifiable ⇒ NOT-EVALUATED ⇒ AC-194 `expect: exit 0` 结构上不可达。
+// 修法：准入换成「T **不是**窗底 baseline 的祖先」（必要条件：T 是 baseline 祖先 ⇒ T 的祖先全是 baseline
+// 的祖先 ⇒ 结构上带入不了窗内 spine 提交）。三条测试钉住三个方向（缺一条就不能取假）：
+//   ① 回归：离脊 tip 的括注**覆盖**其 intro 提交 ⇒ unclassifiable 归零、exit 0（改前必红，读数见任务体）；
+//   ② 负控制①：同一夹具 reflog 剪掉 ⇒ **未被任何括注解释**的 spine 提交仍 NOT-EVALUATED（fail-closed 保持）；
+//   ③ 负控制②：落在**离脊 tip** 括注区间内的**真直投**仍判 direct 并报红（放宽准入不得掩真直投——
+//      `classifySpineLandingMode` 里 `directSet` 先于 `refMoveCovered`，本控制把该顺序钉成常驻证据）。
+
+const FIXED_ENV = { ...process.env, GIT_AUTHOR_DATE: FIXED_PAST, GIT_COMMITTER_DATE: FIXED_PAST };
+
+/** 离脊落地 tip 夹具（形态实测自生产，见上注）。拓扑：
+ *   · lineA: base → a1 → a2 → a3 → a4        （a4 = 离脊落地 tip T）
+ *   · M = merge(firstParent=a2, secondParent=a4)  ⇒ a4 是 develop 祖先但落进第二父位置（离脊）
+ *   · lineB: M → b1 → b2 → b3               （develop 的最终 tip）
+ *   · reflog: [b3, M, a4, base]，全部 `branch: Reset to`（refMove）⇒ 括注 [b3,M] [M,a4] [a4,base]
+ *  关键性质：a1/a2 **只在** 括注 [a4, base] 的 intro 里，而 T=a4 不在窗内 first-parent spine 上
+ *  ⇒ 旧准入（`spineSet.has(T)`）跳过该括注 ⇒ a1/a2 unclassifiable（NOT-EVALUATED）。
+ *  返回 { base, a4, m, b3, a2 }。 */
+function buildOffSpineLandingFixture(dir) {
+  initRepo(dir);
+  const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  gitCmd(dir, "checkout", "-q", "-b", "lineA", base);
+  for (const n of ["a1", "a2", "a3", "a4"]) {
+    fs.writeFileSync(path.join(dir, `a-${n}.md`), `${n}\n`, "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, `feat: ${n}`);
+  }
+  const a4 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  const a2 = gitCmd(dir, "rev-parse", "HEAD~2").stdout.trim();
+  // M：first parent = spine 上的 a2、second parent = a4（a4 是 a2 的后代 ⇒ 必须 --no-ff 才产生 merge 提交）。
+  gitCmd(dir, "checkout", "-q", "-b", "spine", a2);
+  const mg = spawnSync("git", ["-C", dir, "merge", "-q", "--no-ff", "-m", "Merge lineA into spine", a4], { encoding: "utf8", env: FIXED_ENV });
+  assert.equal(mg.status, 0, `merge --no-ff 应成功: ${mg.stdout}${mg.stderr}`);
+  const m = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  for (const n of ["b1", "b2", "b3"]) {
+    fs.writeFileSync(path.join(dir, `b-${n}.md`), `${n}\n`, "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, `feat: ${n}`);
+  }
+  const b3 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  // ⚠️ `git branch -f <b>` 只在 <b> 未被检出时允许 ⇒ 先 detach。
+  gitCmd(dir, "checkout", "-q", "--detach");
+  for (const sha of [a4, m, b3]) {
+    const r = gitCmd(dir, "branch", "-f", "develop", sha);
+    assert.equal(r.status, 0, `branch -f develop ${sha.slice(0, 8)} 应成功: ${r.stderr}`);
+  }
+  return { base, a2, a4, m, b3 };
+}
+
+test("AC3 回归 — 离脊落地 tip 的括注覆盖其 intro 提交：tip 是 develop 祖先、但不在窗内 first-parent spine 上", () => {
+  const dir = makeTmp("cli-offspine");
+  try {
+    const { base, a4, b3 } = buildOffSpineLandingFixture(dir);
+    // 夹具前提（⛔ 前提不成立则本用例空转——硬规则④：先证明夹具真的踩在缺陷形状上）。
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", a4, "develop").status, 0, "a4 必须是 develop 的祖先（AC 要求「祖先」而非不可达）");
+    const spine = gitCmd(dir, "rev-list", "--first-parent", `${base}..develop`).stdout.split("\n").filter(Boolean);
+    assert.equal(spine.includes(a4), false, "a4 必须【不在】窗内 first-parent spine 上（离脊落地 tip）");
+    assert.equal(spine[0], b3, "develop tip 必须是 b3");
+
+    const r = runChecker(["--root", dir, "--baseline", base]);
+    assert.equal(r.status, 0, `离脊 landing tip 的括注须覆盖其 intro 提交 ⇒ exit 0: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.unclassifiableCommits, 0, "a1/a2 必须被判 fan-in delivered（⛔ 不是 unclassifiable）");
+    assert.equal(out.denominator.unclassifiableCommits, 0, "denominator 同步归零");
+    assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+    assert.equal(out.classification.firstParent, spine.length, "first-parent spine 条数");
+    assert.equal(out.classification.offSpine, 2, "离脊条数 = a3 + a4");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC4 负控制① — 离脊夹具 reflog 剪掉后：无括注可解释的 spine 提交仍 NOT-EVALUATED（放宽准入未削弱 fail-closed）", () => {
+  const dir = makeTmp("cli-offspine-gc");
+  try {
+    const { base } = buildOffSpineLandingFixture(dir);
+    gitCmd(dir, "reflog", "expire", "--expire=now", "--all");
+    const r = runChecker(["--root", dir, "--baseline", base]);
+    assert.equal(r.status, 3, `无括注 ⇒ NOT-EVALUATED exit 3（⛔ 不得 exit 0）: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, false, "无括注 ⇒ NOT-EVALUATED（硬规则③b）");
+    assert.equal(out.ok, true);
+    assert.equal(out.reason, "unclassifiable-commits-in-range");
+    assert.ok(out.unclassifiableCommits > 0, "未被任何括注解释的 spine 提交仍 unclassifiable");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC5 负控制② — 落在【离脊 tip】括注区间内的真直投仍判 direct 并报红（放宽准入不得掩真直投）", () => {
+  const dir = makeTmp("cli-offspine-direct");
+  try {
+    initRepo(dir);
+    const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    // D1：develop 上的**直接提交** ∧ 代码面（plugin/test/x.test.mjs）⇒ reflog action = `commit:`。
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "x.test.mjs"), "export const x = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCommitFixed(dir, FIXED_PAST, "test: direct code-surface commit");
+    const d1 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    // lineA(base) → a1,a2 ⇒ develop = a2（D1 离开可达集）；lineB(D1) → b1,b2 ⇒ develop = b2；
+    // lineC(D1) → c1,c2 ⇒ develop = c2（b2 离脊 ⇒ 覆盖 D1 的那条括注 T 正是离脊 tip）。
+    gitCmd(dir, "checkout", "-q", "-b", "lineA", base);
+    for (const n of ["a1", "a2"]) { fs.writeFileSync(path.join(dir, `a-${n}.md`), `${n}\n`, "utf8"); gitCmd(dir, "add", "-A"); gitCommitFixed(dir, FIXED_PAST, `feat: ${n}`); }
+    const a2 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "-b", "lineB", d1);
+    for (const n of ["b1", "b2"]) { fs.writeFileSync(path.join(dir, `b-${n}.md`), `${n}\n`, "utf8"); gitCmd(dir, "add", "-A"); gitCommitFixed(dir, FIXED_PAST, `feat: ${n}`); }
+    const b2 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "-b", "lineC", d1);
+    for (const n of ["c1", "c2"]) { fs.writeFileSync(path.join(dir, `c-${n}.md`), `${n}\n`, "utf8"); gitCmd(dir, "add", "-A"); gitCommitFixed(dir, FIXED_PAST, `feat: ${n}`); }
+    const c2 = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "--detach");
+    for (const sha of [a2, b2, c2]) assert.equal(gitCmd(dir, "branch", "-f", "develop", sha).status, 0);
+
+    // 夹具前提（⛔ 不成立则控制空转）：D1 落在括注 [b2, a2] 的 first-parent intro 内 ∧ b2 离脊。
+    const intro = gitCmd(dir, "rev-list", "--first-parent", `${a2}..${b2}`).stdout.split("\n").filter(Boolean);
+    assert.ok(intro.includes(d1), "D1 必须落在该括注的 intro 内（否则本控制什么也没验到）");
+    const spine = gitCmd(dir, "rev-list", "--first-parent", `${base}..develop`).stdout.split("\n").filter(Boolean);
+    assert.equal(spine.includes(b2), false, "b2 必须离脊（覆盖 D1 的括注 tip 是离脊 tip）");
+    assert.ok(spine.includes(d1), "D1 must stay on the spine");
+
+    const r = runChecker(["--root", dir, "--baseline", base]);
+    assert.equal(r.status, 1, `括注区间内的真直投仍须 RED(exit 1): ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.reason, "direct-commit-bypasses-fan-in");
+    const c = out.candidates.find((x) => x.sha === d1);
+    assert.ok(c, "D1 必须出现在 code-surface candidates 里");
+    assert.equal(c.confirmedBypass, true, "D1 仍判 direct/bypass（⛔ 未被括注覆盖洗成 fan-in）");
+    assert.equal(out.unclassifiableCommits, 0, "本夹具无不可分类提交");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 // ── CLI 集成：ledger 判定（AC2）与 reflog 剪后退 NOT-EVALUATED（AC3）─────────────────────────────
 
 test("AC2 CLI — rev-list 命中的 code-surface commit 在 ledger 里 ⇒ 判 fan-in 落地不算直投（不报 RED）", () => {

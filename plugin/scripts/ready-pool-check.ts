@@ -246,7 +246,20 @@ import { defaultLaneCount } from "./full-suite-runner.ts";
 // enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
 // not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
 // where a MERGE is in flight.
-import { listWorktrees, worktreeExists, worktreeMatchesTask } from "./fast-mode-telemetry.ts";
+// SUFFIX-TRUNCATED WORKTREE NAMES (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption):
+// `resolveWorktreeTaskId` / `mismatchedWorktreeNames` / `isQuayWorktreePath` join the exact-equality
+// judgment. A worktree whose name lost a suffix matched nothing, so the leftover-worktree exemption
+// below never fired and the task sat outside the pool with zero signal — the diagnostic records make
+// that state readable instead of isomorphic to "all names bind".
+import {
+  isQuayWorktreePath,
+  listTaskIds,
+  listWorktrees,
+  mismatchedWorktreeNames,
+  resolveWorktreeTaskId,
+  worktreeExists,
+  worktreeMatchesTask,
+} from "./fast-mode-telemetry.ts";
 // MULTI-PATH TOUCHES GUARD (gap-promotion-driver-commit-bypasses-precommit-touches-guard): the
 // promotion commit path runs `git commit --no-verify` (a mechanical status flip is content-neutral),
 // so the pre-commit hook's Touches「一条目一路径」detector never runs there — a multi-path Touches bullet
@@ -991,6 +1004,17 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   const o = { taskId: task.id };
   if (gitIndex) o.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
   if (opts && !Array.isArray(opts) && opts.ref) o.ref = opts.ref; // landing ref (two-line model)
+  // The once-per-scan open-worktree list. It was DOCUMENTED as threaded in ("enumerated ONCE per
+  // analyze pass and threaded in via o.worktrees", :1023) and `analyzeTasks` has always passed it —
+  // but nothing ever copied it onto `o`, so the injected-list branch below was DEAD and every ready
+  // task re-ran its own `git worktree list --porcelain` (the very O(tasks) subprocess cost the note
+  // says it removed). Copied by PRESENCE: an empty list is a meaningful input (this scan saw no
+  // worktree), not an absent one.
+  if (opts && !Array.isArray(opts) && opts.worktrees) o.worktrees = opts.worktrees;
+  // The real task-id set the truncated-name resolution grounds against (see the exemption below).
+  // Same presence rule as `worktrees`: an EMPTY set means "nothing to ground against" (exact equality
+  // only), which is different from "not supplied" (read the store here).
+  if (opts && !Array.isArray(opts) && opts.taskIds) o.taskIds = opts.taskIds;
   // LEFTOVER-WORKTREE EXEMPTION — HOISTED ABOVE EVERY ARM
   // (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): an OPEN `task/<id>` worktree is
   // the DIRECT "fan-in not yet complete" quantity (ff-merge success is what deletes it) — while it
@@ -1008,9 +1032,25 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // itself, so asking it per ready task re-ran the same subprocess once per task (~40 ms × the ready
   // count, on a host holding 45 worktrees). The MATCH PREDICATE is still the single source
   // `worktreeMatchesTask` (exported by fast-mode-telemetry) — this shares the enumeration, not a copy
-  // of the judgment. Omitted ⇒ the original per-task `worktreeExists` call, unchanged.
+  // of the judgment. Omitted ⇒ the original per-task `worktreeExists` call (which now carries the
+  // truncated-name arm itself). `o.taskIds` is the real task-id set the truncated-name resolution
+  // grounds against (`analyzeTasks` threads ONE set for the whole scan); omitted ⇒ this call reads it
+  // from disk (`listTaskIds`, fail-soft), so the legacy direct-call form gets the same judgment.
+  // The matching arm is `worktreeMatchesTask` (EXACT equality) UNIONED with the suffix-truncated
+  // resolution `resolveWorktreeTaskId` grounded against the real task-id set
+  // (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption). Exact equality alone is
+  // blind to a worktree whose name lost a suffix: measured 2026-09-15, a worktree created as
+  // `…/quay-worktrees/gap-worker-driver-counts-transient-rate-limit` for the task
+  // `…-as-fast-death-and-parks-task-needs-human` matched nothing ⇒ this exemption never fired ⇒ the
+  // task fell through to the arms below, was judged `not-yet-flipped`, and sat outside the pool for
+  // 30+ hours with no signal distinguishing that from "work really is done, only the status flip is
+  // missing" (hard rule 3b). The exact arm stays ALWAYS evaluated — it is the whole judgment when the
+  // task store is unreadable (`resolveWorktreeTaskId` then answers `ungrounded`, never a guess).
+  const taskIdSet = o.taskIds ?? new Set(listTaskIds(repoRoot));
   const hasLeftoverWorktree = o.worktrees
-    ? o.worktrees.some((wt) => worktreeMatchesTask(wt, task.id))
+    ? o.worktrees.some(
+        (wt) => worktreeMatchesTask(wt, task.id) || resolveWorktreeTaskId(wt, taskIdSet).taskId === task.id,
+      )
     : worktreeExists(repoRoot, task.id);
   if (hasLeftoverWorktree) return false;
   const workLanded = taskWorkLanded(task.body, repoRoot, o);
@@ -2919,6 +2959,18 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
   // ONE open-worktree enumeration for the whole ready scan (see notYetFlipped's `o.worktrees`).
   const worktrees = readyCount > 0 ? listWorktrees(root) : [];
+  // The real task-id set the truncated-name resolution grounds against — ONE set for the whole scan
+  // (the sibling of the batched git index / commit-trace index above: never a per-task store read).
+  const taskIdSet = new Set(allTasks.keys());
+  // AC2 (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption): the mismatched-worktree
+  // diagnostic. Enumerated independently of `readyCount` — when the pool is empty `worktrees` above is
+  // [] by construction, and reporting "no mismatched worktree" from an enumeration that never ran is
+  // the silent-green shape (hard rule 4). `evaluated:false` marks the ungrounded case so an
+  // unreadable store can never be read as a clean bill of health (hard rule 3b).
+  const worktreesForDiagnostic = readyCount > 0 ? worktrees : listWorktrees(root);
+  const mismatchedWorktrees = mismatchedWorktreeNames(worktreesForDiagnostic, taskIdSet, {
+    isQuayWorktree: (p) => isQuayWorktreePath(p, root),
+  });
   const ready = [];
   const excluded = [];
   let nyfBacklogCount = 0; // 甲 — not-yet-flipped AND every completion checkbox checked (work done, only the status flip missing)
@@ -2932,7 +2984,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isAcRecord(t)) reasons.push("ac-record");
     let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
     let pendingVerification = false;
-    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees });
+    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees, taskIds: taskIdSet });
     if (nyf) {
       reasons.push("not-yet-flipped");
       // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped
@@ -3278,6 +3330,17 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     // ADR-007 per-milestone predicate — see the `darkAxis` block above. 甲/乙-style enumerated
     // populations (recorded / disclaimed / missing), read by the operator before dispatch.
     dark_axis: darkAxis,
+    // MISMATCHED WORKTREE NAMES (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption
+    // AC2): worktrees under this workspace's worktree namespace (or on a `task/*` branch) whose name
+    // binds to NO real task id. `evaluated:false` = the task store could not be read, so nothing was
+    // judged — deliberately NOT the same shape as `evaluated:true, count:0` (checked, all names
+    // bind), because an unreadable store reported as a clean bill of health is the hard-rule-3b
+    // failure this field exists to prevent.
+    mismatched_worktrees: {
+      evaluated: mismatchedWorktrees.evaluated,
+      count: mismatchedWorktrees.records.length,
+      records: mismatchedWorktrees.records,
+    },
   };
 }
 

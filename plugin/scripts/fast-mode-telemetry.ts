@@ -406,11 +406,140 @@ export function worktreeMatchesTask(worktree, taskId) {
   return short === taskId;
 }
 
-/** Whether the task `<taskId>` is checked out in an open worktree (shape-aware via
- *  `worktreeMatchesTask`; an open worktree is a positive "executor may be mid-flight" signal — the
- *  record is kept). Any git failure → false (listWorktrees is fail-soft). */
+/**
+ * The task-shaped NAMES a worktree presents — the same two slots `worktreeMatchesTask` compares:
+ * first the path basename, then the branch ref with the `refs/heads/` namespace and an optional
+ * `task/` prefix stripped. A detached-HEAD worktree (branch null) presents only its basename.
+ * Deduped, order-preserving. Pure.
+ * @param {{path?:string|null, branch?:string|null}} worktree
+ * @returns {string[]}
+ */
+export function worktreeNames(worktree) {
+  if (!worktree) return [];
+  const names = [];
+  const base = worktree.path ? path.basename(worktree.path) : null;
+  if (base) names.push(base);
+  if (worktree.branch) {
+    let short = worktree.branch.startsWith("refs/heads/") ? worktree.branch.slice("refs/heads/".length) : worktree.branch;
+    if (short.startsWith("task/")) short = short.slice("task/".length);
+    if (short && !names.includes(short)) names.push(short);
+  }
+  return names;
+}
+
+/**
+ * Bind ONE presented worktree name to a REAL task id.
+ *
+ * Four verdicts, pairwise distinct (hard rule 3b — `ungrounded` must not wear `unmatched`'s face, and
+ * neither may wear `exact`'s):
+ *   `exact`      the name IS a real task id.
+ *   `prefix`     the name is a PROPER PREFIX of exactly ONE real task id — the truncation shape
+ *                (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption). Uniqueness is
+ *                what makes the inference safe; an AMBIGUOUS prefix (≥2 candidates) resolves to
+ *                nothing and is reported as `unmatched`, never guessed.
+ *   `unmatched`  grounded (a non-empty task-id set was supplied) and nothing bound.
+ *   `ungrounded` no task-id set to ground against (empty/absent task store) — reporting `unmatched`
+ *                here would be a fabricated diagnosis (hard rule 6: 缺值 = 未查).
+ * Pure; `taskIdSet` injected (`listTaskIds` / `allTasks.keys()` in production).
+ * @param {string|null|undefined} name
+ * @param {Set<string>} taskIdSet
+ * @returns {{taskId:string|null, match:"exact"|"prefix"|"unmatched"|"ungrounded"}}
+ */
+export function resolveTaskName(name, taskIdSet) {
+  if (!name || !taskIdSet || taskIdSet.size === 0) return { taskId: null, match: "ungrounded" };
+  if (taskIdSet.has(name)) return { taskId: name, match: "exact" };
+  const candidates = [];
+  for (const t of taskIdSet) if (t !== name && t.startsWith(name)) candidates.push(t);
+  if (candidates.length === 1) return { taskId: candidates[0], match: "prefix" };
+  return { taskId: null, match: "unmatched" };
+}
+
+/**
+ * Resolve a WORKTREE's presented name(s) to a real task id — the answer `worktreeMatchesTask` cannot
+ * give when the name is off by a suffix.
+ *
+ * WHY THIS EXISTS (measured 2026-09-15): a worktree created as
+ * `…/quay-worktrees/gap-worker-driver-counts-transient-rate-limit` on branch
+ * `task/gap-worker-driver-counts-transient-rate-limit` for the task
+ * `…-as-fast-death-and-parks-task-needs-human` matched NOTHING under exact equality. Both consumers
+ * that read the name as the task id then went silently wrong — the leftover-worktree exemption in
+ * `ready-pool-check.notYetFlipped` never fired (task trapped out of the pool 30+ h with zero signal)
+ * and `worker-driver.reclaimSupersededWorktrees` reported `unreadable` (a wrong string queried
+ * against the real store). Root cause of the truncation itself is NOT assumed here; this binds what
+ * the name CAN be bound to and reports the rest.
+ *
+ * EXACT wins over PREFIX across all presented names (two passes, `worktreeNames` order within each):
+ * a worktree whose basename merely prefixes some task must not shadow its own `task/<id>` branch.
+ * Returns `{ taskId: null, name, match: "ungrounded" }` when there is no task-id set to ground
+ * against — the exact-equality arm is the CALLER's to keep in that case (hard rule 3b: an unreadable
+ * store must not silently widen into a diagnosis).
+ * @param {{path?:string|null, branch?:string|null}} worktree
+ * @param {Set<string>} taskIdSet
+ * @returns {{taskId:string|null, name:string|null, match:"exact"|"prefix"|"unmatched"|"ungrounded"}}
+ */
+export function resolveWorktreeTaskId(worktree, taskIdSet) {
+  const names = worktreeNames(worktree);
+  if (!taskIdSet || taskIdSet.size === 0) return { taskId: null, name: names[0] ?? null, match: "ungrounded" };
+  for (const name of names) if (taskIdSet.has(name)) return { taskId: name, name, match: "exact" };
+  for (const name of names) {
+    const { taskId, match } = resolveTaskName(name, taskIdSet);
+    if (match === "prefix") return { taskId, name, match };
+  }
+  return { taskId: null, name: names[0] ?? null, match: "unmatched" };
+}
+
+/**
+ * Whether the task `<taskId>` is checked out in an open worktree (shape-aware via
+ * `worktreeMatchesTask`; an open worktree is a positive "executor may be mid-flight" signal — the
+ * record is kept). Any git failure → false (listWorktrees is fail-soft).
+ *
+ * The exact-equality arm is ALWAYS evaluated (it is the whole judgment when the store is unreadable);
+ * the suffix-truncated arm is added on top, grounded against the real task-id set
+ * (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption: without it a worktree whose
+ * name lost a suffix is invisible and the callers read "no executor" while one is mid-flight).
+ * `listTaskIds` is fail-soft ([] ⇒ ungrounded ⇒ the truncated arm contributes nothing).
+ */
 export function worktreeExists(root, taskId) {
-  return listWorktrees(root).some((wt) => worktreeMatchesTask(wt, taskId));
+  const taskIdSet = new Set(listTaskIds(root));
+  return listWorktrees(root).some((wt) => worktreeMatchesTask(wt, taskId) || resolveWorktreeTaskId(wt, taskIdSet).taskId === taskId);
+}
+
+/**
+ * AC2 carrier — the `mismatched-worktree-name` diagnostic records for a worktree listing.
+ *
+ * A worktree is IN SCOPE when it presents itself as a task worktree BY CONVENTION — it sits under
+ * this workspace's worktree namespace (`isQuayWorktree`) or checks out a `task/<name>` branch — and
+ * its name binds to no real task id (`unmatched`). A worktree outside that convention (the main
+ * checkout, an analysis worktree under `.claude/worktrees/`, a `/tmp` fixture, a `develop` ref) is
+ * NOT flagged: "is not a task worktree" is a different fact from "is a task worktree whose name is
+ * wrong", and conflating them would bury the real signal in noise.
+ *
+ * Returns `{ evaluated, records }` rather than a bare array: `evaluated: false` (no task-id set to
+ * ground against) is the "could not tell" state and must stay distinguishable from `evaluated: true`
+ * with `records: []` ("checked, all names bind") — a bare `[]` makes an unreadable store look like a
+ * clean bill of health (hard rule 3b).
+ * Pure; `worktrees`, `taskIdSet` and `isQuayWorktree` are injected.
+ * @param {Array<{path:string|null, branch:string|null}>} worktrees
+ * @param {Set<string>} taskIdSet
+ * @param {{isQuayWorktree?: ((worktreePath: string) => boolean) | null}} [opts] — namespace filter;
+ *   omitted ⇒ no namespace constraint (every path passes, the `task/*`-branch convention still applies)
+ * @returns {{evaluated:boolean, records:Array<{type:string, name:string|null, path:string|null, branch:string|null}>}}
+ */
+export function mismatchedWorktreeNames(worktrees, taskIdSet, opts = {}) {
+  const records = [];
+  if (!taskIdSet || taskIdSet.size === 0) return { evaluated: false, records };
+  const isQuayWorktree = typeof opts.isQuayWorktree === "function" ? opts.isQuayWorktree : null;
+  for (const wt of worktrees ?? []) {
+    if (!wt || !wt.path) continue;
+    const names = worktreeNames(wt);
+    if (names.length === 0) continue;
+    const byConvention = (isQuayWorktree ? isQuayWorktree(wt.path) : true) || taskIdFromBranch(wt.branch) != null;
+    if (!byConvention) continue;
+    const { name, match } = resolveWorktreeTaskId(wt, taskIdSet);
+    if (match !== "unmatched") continue;
+    records.push({ type: "mismatched-worktree-name", name, path: wt.path, branch: wt.branch ?? null });
+  }
+  return { evaluated: true, records };
 }
 
 /**

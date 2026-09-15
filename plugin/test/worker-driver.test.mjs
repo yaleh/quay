@@ -2045,6 +2045,57 @@ test("AC5 (superseded-reclaim) — unreadable status is a DISTINCT value and nev
   assert.equal(worktreePresentForTask(root, "gap-sup-e"), true, "worktree survives");
 });
 
+// ── AC3, name mismatch (gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption) ─────────
+// The reclaim path read the WORKTREE/BRANCH NAME as the task id and queried the real store with it. A
+// truncated name (the measured 2026-09-15 shape) found nothing ⇒ `status: "unreadable"` — "queried
+// with a wrong string" wearing the face of "could not read". The resolution binds the name back to the
+// real task first, and a name that binds to nothing gets its OWN value instead of borrowing that face.
+
+const RECLAIM_TRUNCATED_FULL_ID = "gap-sup-mm-as-fast-death-and-parks-task-needs-human";
+const RECLAIM_TRUNCATED_NAME = "gap-sup-mm"; // the full id minus a real suffix
+
+test("AC3 (name mismatch) — a truncated worktree name resolves to the real task; perTask is never `unreadable` (both directions)", async (t) => {
+  const root = makeGitRoot("sup-mm");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  const orphanWt = path.join(root, "..", `wt-${path.basename(root)}-orphan`, "gap-nobody-knows-this-one");
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["worktree", "remove", "--force", orphanWt]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+    fs.rmSync(path.dirname(orphanWt), { recursive: true, force: true });
+  });
+  // The store holds the FULL id; the worktree (path basename AND branch) carries the TRUNCATED one.
+  writeTaskFile(root, RECLAIM_TRUNCATED_FULL_ID, "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${RECLAIM_TRUNCATED_NAME}`, wtPath]);
+  fs.mkdirSync(path.dirname(orphanWt), { recursive: true });
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-nobody-knows-this-one", orphanWt]);
+
+  // No worktreeTasks seam and no statusOf seam: the REAL enumeration + the REAL store are under test.
+  const res = await reclaimSupersededWorktrees(root, { workerCmdlines: [], procs: [] });
+  const byId = new Map(res.perTask.map((p) => [p.taskId, p]));
+
+  const resolved = byId.get(RECLAIM_TRUNCATED_FULL_ID);
+  assert.ok(resolved, `the truncated worktree is enumerated under its REAL task id: ${JSON.stringify(res.perTask)}`);
+  assert.equal(resolved.status, "ready", "AC3: the real task's status is read — ⛔ NOT `unreadable` (the old disguise for «queried with a name the store never had»)");
+  assert.equal(byId.has(RECLAIM_TRUNCATED_NAME), false, "the truncated name is not reported as if it were a task id");
+  assert.equal(resolved.worktreePath, wtPath, "AC3: the worktree PATH is found through the resolved id (reclaim can actually reach it)");
+
+  const unmatched = byId.get("gap-nobody-knows-this-one");
+  assert.ok(unmatched, "the unresolvable worktree is still ENUMERATED (⛔ never dropped — a dropped entry reads as «no such worktree»)");
+  assert.equal(unmatched.status, "worktree-name-unmatched",
+    "AC3: a name binding to nothing gets its OWN value — distinct from `unreadable` AND from every real status (hard rule 3b)");
+  assert.notEqual(unmatched.status, "unreadable");
+  assert.notEqual(unmatched.status, "superseded");
+  assert.deepEqual(res.mismatchedWorktreeNames, ["gap-nobody-knows-this-one"], "AC2/AC3: the diagnostic carrier names it, independently of `candidateCount`");
+
+  // Negative control (bidirectional): the AC5 shape still yields `unreadable` when the store really
+  // cannot be read — the new value must not have swallowed the old one.
+  const unreadable = await reclaimSupersededWorktrees(root, { worktreeTasks: ["gap-sup-mm"], statusOf: () => null, workerCmdlines: [], procs: [] });
+  assert.equal(unreadable.perTask[0].status, "unreadable", "negative control: an unreadable STATUS is still `unreadable` (⛔ not conflated with a name mismatch)");
+  assert.deepEqual(unreadable.mismatchedWorktreeNames, [], "…and it is not reported as a name mismatch");
+});
+
 test("dual-gate ② (superseded-reclaim) — live process anchored in the worktree ⇒ skippedLiveProcess (never removed)", async (t) => {
   const root = makeGitRoot("sup-ac6");
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
