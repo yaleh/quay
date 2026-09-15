@@ -82,15 +82,14 @@ supervisorStaleness              = fresh
 
 ## AC
 
-- [ ] AC1 读数是**直接量**，且指向跑着的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。（⛔ 对 `plugin/scripts/goal-driver.ts` 求值不算——源侧本来就过，是空转形，硬规则 4c 推论三。）——**待激活**：跑着的内核仍加载 07:35 的暂存 bundle（`recheckFrozenFailing`=0、旧句=1）。⛔ 这不是实现缺口，是**引导缺口**：修复的自刷新只在「跑着的内核已含本修复」时才生效，故需要一次外部激活（见 `## Resolution` 的激活配方）；激活后本判据在本修复的基线上自动成立，无需再改代码。**（待外部）**
-- [ ] AC2 **活的内核**上复核：修复后经一轮真实 goal 环，`grep -c 'RE-RAN its criterion directly before filing'` 在该轮实际写出的 gap-filing prompt 载体上 ≥ 1（或在跑内核加载的模块上 ≥ 1，AC1 同口径）。——**待激活**（与 AC1 同一引导缺口、同一配方）。**（待外部）**
+- [ ] AC1 读数是**直接量**，且指向跑着的那份代码：`ps -o cmd= -p $(cat .quay/anchor.pid)` 取出内核路径 → 按 `resolveKernelSibling` 同一口径解析该内核会加载的 goal 模块 → 对该**文件**求值 `grep -c 'recheckFrozenFailing'` ≥ 1 **且** `grep -c 'No other mechanism re-runs it'` = 0。⛔ 对 `plugin/scripts/goal-driver.ts` 求值不算（源侧本来就过，空转形）。**现状：跑着的内核仍加载 07:35 的暂存 bundle（`recheckFrozenFailing`=0、旧句=1）**；这不是实现缺口而是**引导缺口**（自刷新只在「跑着的内核已含本修复」时才生效），激活配方见 `## Resolution`——激活后本判据在本修复的基线上自动成立，无需再改代码。（待外部）
+- [ ] AC2 **活的内核**上复核：修复后经一轮真实 goal 环，`grep -c 'RE-RAN its criterion directly before filing'` 在该轮实际写出的 gap-filing prompt 载体上 ≥ 1（或在跑内核加载的模块上 ≥ 1，AC1 同口径）。**现状：与 AC1 同一引导缺口、同一激活配方**（待外部）
 - [x] AC3 **区分对照**（硬规则 4c 推论四：必须给出「若假设为假则结果会不同」的对照）：对「内核在 gitignored dev-tree 暂存目录」这一输入，两臂预测相反并各有落痕——
   **(a) 源内核未推进** ⇒ 读数/行为 = `fresh`（不自刷新、不报陈旧）；**(b) 源内核已推进** ⇒ 读数/行为 = 陈旧（自刷新到源内核，或以独立取值报出）。只给一臂不算过。
   **落地**：`plugin/test/driver-anchor.test.mjs` 的 `内核源树两臂对照`（同一夹具、只改源树 mtime 这一处）：(a) ⇒ `mirror` + `fresh`；(b) ⇒ `stale`；并显式断言同一输入下**旧读法** = 0（正控制）。(b) 的**行为**半边 = `preferredAnchorKernelIn` 换到源树里更新的那份 bundle（测试 ii/iii 钉住「更旧不换 / 无源树不换」）。**活体读数**（跑着内核的路径，见 Resolution 表）：goal/promotion 均 `mirror` + `stale`。
 - [x] AC4 回归钉子接进常规套件（`plugin/test/driver-anchor.test.mjs` 或 `plugin/test/kernel-sibling-resolution-check.test.mjs`，路径须匹配 `scripts/test.sh` 的 glob），且该测试**能取假**：把修复回退 ⇒ 它必红（⛔ 不许用只断言「函数存在」的形状）。
   **落地**：`plugin/test/driver-anchor.test.mjs` 三个测试（两臂对照 / fail-closed 三态 / `preferredAnchorKernelIn` 三态）。**突变实测 1/1 红**：把 `sourceFilesMaxMtimeMs` 回退成「只 stat 本内核目录」的旧 body ⇒ `内核源树两臂对照` 红（`ℹ fail 1`），恢复 ⇒ 3/3 绿。
-- [ ] AC5 AC-259 的 `--stale-pass` 读数转 `verifiedFresh`：`quay goal check --stale-pass --root /home/yale/work/quay` → **exit 0** 且 `failing` 不含 `AC-259`；**负控制**：`.quay/gate-events.jsonl` 里存在满足 `pipeline_id="AC-259" ∧ gate="goal" ∧ actor ∈ {goal-sweep, goal-amend} ∧ verdict="pass" ∧ timestamp > 2026-09-15T17:35:05.096Z ∧ payload.criterionHash == "8ccfd00300ded08f"` 的事件。（老化不产生新事件；后写的 `goal-cli` pass 判定面不读 ⇒ 这条能区分「轮转真的重取过」与「等它自己掉出去」。）
-  ——**待轮转**：轮转在推进中（18:20 那轮取了 AC-201/205/207/232/234/238），尚未取到 AC-259（当前 `failing: ["AC-259"]`、`frozenScope: 86`）。本条**与本修复无关**（是 Finding ③ 的竞态，靠轮转重取收敛），且**不需要激活**。**（待外部）**
+- [ ] AC5 AC-259 的 `--stale-pass` 读数转 `verifiedFresh`：`quay goal check --stale-pass --root /home/yale/work/quay` → **exit 0** 且 `failing` 不含 `AC-259`；**负控制**：`.quay/gate-events.jsonl` 里存在满足 `pipeline_id="AC-259" ∧ gate="goal" ∧ actor ∈ {goal-sweep, goal-amend} ∧ verdict="pass" ∧ timestamp > 2026-09-15T17:35:05.096Z ∧ payload.criterionHash == "8ccfd00300ded08f"` 的事件（老化不产生新事件；后写的 `goal-cli` pass 判定面不读 ⇒ 这条能区分「轮转真的重取过」与「等它自己掉出去」）。**现状：轮转在推进（18:20 那轮取 AC-201/205/207/232/234/238），尚未取到 AC-259（当前 `failing: ["AC-259"]`）；本条与本修复无关（是 Finding ③ 的竞态，靠轮转重取收敛），且不需要激活**（待外部）
 
 ## DoD
 
@@ -138,7 +137,7 @@ node /home/yale/work/quay/packages/quay/bin/quay.js driver restart --kind promot
 
 激活后 AC1/AC2 在本修复的基线上自动成立（内核换到 `<repo>/plugin/scripts/dist/`，其 goal 模块为 12:39 版：`recheckFrozenFailing` = 3、旧句 = 0），**无需再改代码**；且此后源树产物一旦更新，内核会经 `bundleStale` 自行换过去（不再需要人工）。
 
-**AC5 状态**：与本修复无关（Finding ③ 的竞态靠轮转重取收敛）。实测 18:2xZ：轮转在推进（18:20 那轮 AC-201/205/207/232/234/238），AC-259 未取到 ⇒ `failing: ["AC-259"]`、`frozenScope: 86`。事件 timestamp 待轮转写下（判据条件见 AC5 负控制）。
+**AC5 状态**：与本修复无关（Finding ③ 的竞态靠轮转重取收敛）。实测 18:2xZ：轮转在推进（18:20 那轮 AC-201/205/207/232/234/238），AC-259 未取到 ⇒ `failing: ["AC-259"]`、`frozenScope: 86`。
 
 ## Touches
 
