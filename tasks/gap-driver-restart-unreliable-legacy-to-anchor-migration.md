@@ -1,7 +1,7 @@
 ---
 id: gap-driver-restart-unreliable-legacy-to-anchor-migration
 title: quay driver restart --kind &lt;k&gt; 迁移 legacy→anchor 时优雅关闭旧进程不可靠，常需人工兜底确认/强杀
-status: ready
+status: done
 labels:
   - gap
   - mechanism
