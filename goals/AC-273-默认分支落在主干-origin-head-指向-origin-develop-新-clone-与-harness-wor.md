@@ -1,7 +1,7 @@
 ---
 id: AC-273
 title: 默认分支落在主干：origin/HEAD 指向 origin/develop——新 clone 与 harness worktree 的基点不再是化石
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -34,5 +34,11 @@ origin: SPEC §2.2 后果 1+2、§3.2.1，人 2026-09-15 裁定 1（『是，且
   default_branch=develop（已复核返回 develop），并在本检出跑了 git remote set-head origin
   -a（origin/HEAD 由 master 改为 develop）。⇒ 本判据此后守的是『它不要退回去』，以及其它检出补跑 set-head。
 activatedAt: 2026-09-15T14:01:44.869Z
+statusLog:
+  - at: 2026-09-15T14:12:03.994Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
