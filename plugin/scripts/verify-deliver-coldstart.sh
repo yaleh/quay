@@ -5086,11 +5086,41 @@ write_ac205_record() {
 }
 
 # 找目标会话（~/.claude/sessions/<pid>.json）：输出 "pid\nsessionId\nsocket\ncwd"（4 行），无则空。
-# 判据：messagingSocketPath 存在（-S）∧ 有 <pid>.*.key（peerToken 载体）∧ sessionId 非空。
+# 判据：messagingSocketPath 存在（-S）∧ 有 <pid>.*.key（peerToken 载体）∧ sessionId 非空
+#       ∧ 【该 pid 是活进程】。
+# ⚠️ 活性判据不是可选项（2026-09-15 实测，本条曾因此连烧 5 次 AC-214）：进程死后其 socket 文件
+# 【不会】被自动 unlink ⇒ `existsSync(sock)` 对死会话【同样为真】。实测本机 20+ 个 stale .sock，
+# 且 readdirSync 序把死会话排在有活会话之前 ⇒ 取到死 pid ⇒ 本腿 `send failed to connect` ⇒ 在
+# 【明明有活会话】的机器上白跑，并写成「no live same-host target session」（与真「没有会话」同形）。
+# ⇒ hard rule 4b：socket 文件存在是【代理量】，进程活着才是直接量；两者恰在故障时相反。
+# 活性 = kill(pid,0) 不抛 ESRCH ∧（登记项带 procStart 时）与 /proc/<pid>/stat 第 22 字段逐字相等
+# ——后者防 pid 复用，口径同 peer-identity-probe.ts parseProcStart（⛔ 不另立一份解析）。
+# 测试接缝 = HOME（登记目录由 os.homedir() 派生）：--selfcheck 用夹具 HOME 跑 BEFORE/AFTER 两侧，
+# 所以那条控制不是「新码自己说自己对」，而是【同一夹具下旧码红、新码绿】（prefix-code swap）。
 find_ac205_target_session() {
   "$VC_NODE" --no-warnings -e '
     const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
     const dir = path.join(os.homedir(), ".claude", "sessions");
+    // starttime(字段22) = 最后一个 ")" 之后按空白切分的第 19 项（rest[0] = state = 字段3）。
+    function procStartOf(pid) {
+      let s;
+      try { s = fs.readFileSync("/proc/" + pid + "/stat", "utf8"); } catch { return null; }
+      const close = s.lastIndexOf(")");
+      if (close < 0) return null;
+      const fields = s.slice(close + 1).trim().split(/\s+/);
+      const v = fields[19];
+      return v && /^\d+$/.test(v) ? v : null;
+    }
+    function isLive(pid, wantProcStart) {
+      if (!/^\d+$/.test(pid)) return false;
+      try { process.kill(Number(pid), 0); } catch (e) { if (e.code !== "EPERM") return false; }
+      if (wantProcStart) {
+        const cur = procStartOf(pid);
+        if (cur === null) return false;
+        if (cur !== String(wantProcStart)) return false;   // pid 复用 ⇒ 不是原会话
+      }
+      return true;
+    }
     let out = "";
     try {
       const names = fs.readdirSync(dir);
@@ -5105,6 +5135,8 @@ find_ac205_target_session() {
         if (!sock || !sid) continue;
         if (!fs.existsSync(sock)) continue;
         if (!names.some((k) => k.startsWith(pid + ".") && k.endsWith(".key"))) continue;
+        // 死会话的 registry 与 stale .sock 同时存在 ⇒ 必须跳过；否则本腿被最前面的那个死会话钉死。
+        if (!isLive(pid, j.procStart)) continue;
         out = pid + "\n" + sid + "\n" + sock + "\n" + cwd;
         break;
       }
@@ -6012,6 +6044,64 @@ FAKE_NPM
   echo "selfcheck: ac205-record(shipped=false) refused=$ac205_ship_refused (expect 1 — 安装物出处缺失拒写)"
   echo "selfcheck: ac205-record(transcript_confirmed=false) refused=$ac205_conf_refused (expect 1 — transcript 未物化拒写, AC4 负控制)"
   echo "selfcheck: ac205-record(empty-host) refused=$ac205_host_refused (expect 1 — 缺 host 拒写)"
+
+  # control 55 (AC-205 目标会话选择器的【活性闸】, gap-ac214-fifth-crossing-routine-detects-but-nothing-acts):
+  #   进程死后其 socket 文件【不会】被 unlink ⇒ 旧谓词（socket 存在 ∧ <pid>.*.key ∧ sessionId 非空）
+  #   对【死会话同样为真】。readdir 序把死会话排在前面时，step ⑦ 取到死 pid ⇒ send failed to connect
+  #   ⇒ 本腿在【明明有活会话】的机器上白跑，并写成「no live same-host target session」（与真的没会话
+  #   同形）。2026-09-15 在 host B 实测复现（旧码 picks pid=1003072 alive=false，而同机 1154128 活着
+  #   且 --permission-mode bypassPermissions ⇒ 直投 DELIVERED，2s 内 transcript 物化）。
+  #   夹具 = 【stale socket + 已死 pid】的候选 与 【真 socket + 活 pid】的候选，二者都满足旧谓词；
+  #   fixture_shape=1 断言前者确实满足旧谓词（否则这条控制在验一个不存在的形态）。
+  #   ⛔ 不走 $(...) 捕获后台子进程：后台 child 持有管道写端会让命令替换永不返回（本轮实测挂死）。
+  local ac205s_tmp ac205s_only_dead_empty=0 ac205s_only_live_picked=0 ac205s_both_picked_live=0
+  local ac205s_shape=0 ac205s_pid_dead="" ac205s_pid_live="" ac205s_od="" ac205s_ol="" ac205s_bo=""
+  ac205s_tmp="$(mktemp -d 2>/dev/null)" || ac205s_tmp=""
+  if [ -n "$ac205s_tmp" ]; then
+    mkdir -p "$ac205s_tmp/.claude/sessions"
+    # 起一个真监听（stdio 必须重定向 —— 见上）并回显 pid
+    ac205s_spawn() {
+      "$VC_NODE" --no-warnings -e 'const net=require("net"),fs=require("node:fs");const p=process.argv[1];try{fs.unlinkSync(p)}catch{};net.createServer(()=>{}).listen(p);setInterval(()=>{},1000);' "$1" >/dev/null 2>&1 &
+      echo $!
+    }
+    # procStart 的口径与选择器内相同（/proc/<pid>/stat 最后一个 ")" 之后第 19 项）
+    ac205s_proc_start() {
+      "$VC_NODE" --no-warnings -e 'const fs=require("node:fs");const s=fs.readFileSync("/proc/"+process.argv[1]+"/stat","utf8");const c=s.lastIndexOf(")");process.stdout.write(s.slice(c+1).trim().split(/\s+/)[19]);' "$1" 2>/dev/null
+    }
+    ac205s_reg() {  # $1=pid $2=procStart $3=sock $4=sid
+      printf '{"pid":%s,"procStart":"%s","messagingSocketPath":"%s","sessionId":"%s","cwd":"/x","status":"idle"}\n' "$1" "$2" "$3" "$4" > "$ac205s_tmp/.claude/sessions/$1.json"
+      printf 'k' > "$ac205s_tmp/.claude/sessions/$1.deadbeef.key"
+    }
+    ac205s_sock_dead="$ac205s_tmp/dead.sock"; ac205s_sock_live="$ac205s_tmp/live.sock"
+    ac205s_pid_dead="$(ac205s_spawn "$ac205s_sock_dead")"
+    for _i in $(seq 1 50); do [ -S "$ac205s_sock_dead" ] && break; sleep 0.1; done
+    ac205s_ps_dead="$(ac205s_proc_start "$ac205s_pid_dead")"
+    kill -9 "$ac205s_pid_dead" 2>/dev/null
+    for _i in $(seq 1 50); do [ -d "/proc/$ac205s_pid_dead" ] || break; sleep 0.1; done
+    ac205s_pid_live="$(ac205s_spawn "$ac205s_sock_live")"
+    for _i in $(seq 1 50); do [ -S "$ac205s_sock_live" ] && break; sleep 0.1; done
+    ac205s_ps_live="$(ac205s_proc_start "$ac205s_pid_live")"
+    # fixture_shape：死候选【满足旧谓词】—— socket 文件在、pid 已死
+    if [ -S "$ac205s_sock_dead" ] && [ ! -d "/proc/$ac205s_pid_dead" ] && [ -S "$ac205s_sock_live" ]; then
+      ac205s_shape=1
+    fi
+    ac205s_pick() { rm -f "$ac205s_tmp/.claude/sessions"/*.json "$ac205s_tmp/.claude/sessions"/*.key
+      case "$1" in
+        dead) ac205s_reg "$ac205s_pid_dead" "$ac205s_ps_dead" "$ac205s_sock_dead" "sid-dead" ;;
+        live) ac205s_reg "$ac205s_pid_live" "$ac205s_ps_live" "$ac205s_sock_live" "sid-live" ;;
+        both) ac205s_reg "$ac205s_pid_dead" "$ac205s_ps_dead" "$ac205s_sock_dead" "sid-dead"
+              ac205s_reg "$ac205s_pid_live" "$ac205s_ps_live" "$ac205s_sock_live" "sid-live" ;;
+      esac
+      HOME="$ac205s_tmp" find_ac205_target_session | sed -n '1p'
+    }
+    ac205s_od="$(ac205s_pick dead)"; ac205s_ol="$(ac205s_pick live)"; ac205s_bo="$(ac205s_pick both)"
+    [ -z "$ac205s_od" ] && ac205s_only_dead_empty=1
+    [ "$ac205s_ol" = "$ac205s_pid_live" ] && ac205s_only_live_picked=1
+    [ "$ac205s_bo" = "$ac205s_pid_live" ] && ac205s_both_picked_live=1
+    kill -9 "$ac205s_pid_live" 2>/dev/null
+    rm -rf "$ac205s_tmp"
+  fi
+  echo "selfcheck: ac205-target-session-liveness(dead-stale-sock skipped) fixture_shape=$ac205s_shape only_dead_empty=$ac205s_only_dead_empty only_live_picked=$ac205s_only_live_picked both_picked_live=$ac205s_both_picked_live (expect 1/1/1/1 — 死会话的 stale .sock 对新选择器不再是合格目标；both 必须选活的，⛔ 不是「没有活的才失败」)"
 
   # control 25/26/27 (目标项目 profiles 配置, gap-verify-coldstart-does-not-configure-target-profiles):
   #   单一真相源 = 驱动方 profiles worker-default。正(25)：驱动方有 worker-default 取值 ⇒ 目标 profiles

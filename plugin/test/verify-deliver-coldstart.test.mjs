@@ -242,6 +242,14 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
   assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
     "AC-205 record: empty host ⇒ refused (fail-closed)");
+  // AC-205 target-session LIVENESS gate (gap-ac214-fifth-crossing-routine-detects-but-nothing-acts):
+  // a dead session leaves its .sock behind, so socket-existence alone accepts it. The picker must
+  // skip stale candidates — "both present ⇒ picks the LIVE one", not merely "fails when none live".
+  // fixture_shape=1 fixes the fixture as the production failure shape (dead pid whose .sock exists),
+  // so this control cannot pass vacuously against a fixture without that shape.
+  assert.match(r.stdout,
+    /ac205-target-session-liveness\(dead-stale-sock skipped\) fixture_shape=1 only_dead_empty=1 only_live_picked=1 both_picked_live=1/,
+    "AC-205 picker: stale .sock + dead pid ⇒ skipped; live candidate still picked when a stale one is present");
   // AC-234 (gap-ac234-web-third-party-renders-carriers-and-round-records): the --selfcheck must ALSO
   // exercise the web-render content-count positive/negative controls (three counts derived from
   // rendered HTML content — task/goal anchors + round-row anchors — never an HTTP status code) and the
