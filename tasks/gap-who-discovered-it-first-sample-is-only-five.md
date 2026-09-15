@@ -1,7 +1,7 @@
 ---
 id: gap-who-discovered-it-first-sample-is-only-five
 title: 扩大「谁先发现」的样本——把 n=5 的定性观察变成几百例的分布
-status: ready
+status: done
 labels:
   - gap
   - analysis

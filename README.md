@@ -77,7 +77,9 @@ kinds of artifact:
   quay --help
   ```
 
-  This installs the `quay` binary on your PATH. **It also registers the quay
+  This installs the `quay` binary on your PATH — **one of two ways to get one**,
+  not the only one: the plugin form (Option C below) puts `quay` on the PATH of a
+  Claude Code session with no npm install at all. **It also registers the quay
   Claude Code plugin** (see
   [Using the npm-installed quay with Claude Code](#using-the-npm-installed-quay-with-claude-code-quayinit)
   below) — after a clean install, restart Claude Code and `/quay:init` is
@@ -134,9 +136,11 @@ Opt-out (install the CLI without registering the plugin):
 QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g quay-<version>.tgz
 ```
 
-This is the **only** supported way to install for the CLI alone. (Install scripts
-are what perform the registration; environments that set `--ignore-scripts` or an
-npm `allow-scripts` denylist will skip it — see the fallback above.)
+This installs the CLI **without** registering the plugin. It is not the only way
+to get a `quay` binary: Option C below does too, with no npm install at all.
+(Install scripts are what perform the registration; environments that set
+`--ignore-scripts` or an npm `allow-scripts` denylist will skip it — see the
+fallback above.)
 
 ### Option B — from source (for development or the latest unreleased changes)
 
@@ -193,11 +197,21 @@ branch (a CI-built, self-contained bundle), not `master`; see
 [`plugin/README.md`](plugin/README.md#installation) for how that build/publish
 pipeline works (DIR-108/M172).
 
+**It also covers the CLI.** Claude Code puts every enabled plugin's `bin/`
+directory on the Bash tool's PATH, and the plugin ships a shim there
+(`plugin/bin/quay`) that execs the plugin's own bundled CLI
+(`vendor/quay/dist/quay.js` — self-contained, Node ≥ 20, no dependencies to
+install). So inside a session with the plugin enabled, `quay --help`,
+`quay config validate` and `quay task list` work with **no npm install at all**.
+Outside a Claude Code session, put the plugin's `bin/` directory on your own
+PATH, or use the npm/SEA artifacts above.
+
 This GitHub-source path is distinct from the npm path above: Option A's
 `npm install -g` registers the plugin bundle that ships **inside the npm
 artifact**, whereas Option C installs from the `dist-plugin` branch. Pick one —
-both land the same `/quay:init` entry point. If you installed quay via npm,
-Option C is not needed (and vice-versa).
+both land the same `/quay:init` entry point, and both provide a `quay` binary
+(Option A via npm's global bin, Option C via the plugin's own `bin/quay`). If you
+installed quay via npm, Option C is not needed (and vice-versa).
 
 ## Updating quay
 

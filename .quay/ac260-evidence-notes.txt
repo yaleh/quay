@@ -1,0 +1,108 @@
+AC-260 证据与判定说明（gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths）
+===============================================================================
+
+0. 本目录的机件
+   ac260-criterion.py      从 goals/AC-260-*.md 的 criterion: |- 块【逐字】提取的谓词（去 2 空格缩进）
+   ac260-scan.py           三支与谓词同形 + 一支 BARE 的全载体扫描器
+   ac260-residual.py       残留 plugin/…/{X.ts,X.js} 的形态普查
+   *.txt                   下列各步的原始输出（未编辑）
+
+1. 机制修在哪（DoD：真实落地 = 交付面分支上的实际内容变了）
+   只改 packages/quay/scripts/build-plugin-dist.mjs（+ 其单测）。⛔ 未手改任何 plugin/**/*.md 源
+   —— 源里的 dev 形态是对的，坏的是重写产物。
+
+   1a. rewritePluginPaths(text, bundleExists) —— 新增，三个输入形态一个根因：
+      ① `plugin/{scripts,gate-scripts}/X.ts`（dev 树仓库相对形）。这里 `plugin/` 是【锚标记】，
+         不是要保留的路径段；它前面的 repo-root 表达式（`${worktree}/`、`<root>/`）表示「那个根的
+         plugin 子树」，所以【连同它一起】被替换成锚 —— 保留前缀正是旧产物里 `<anchor>/plugin/…`
+         那种双写不可解析形的来源，保留 `plugin/` 则是 `<plugin>/plugin/…` 的来源。
+      ② `${CLAUDE_PLUGIN_ROOT}/{scripts,gate-scripts}/X.ts`（锚对、子路径陈旧）：锚是对的，但
+         publish-dist-branch.sh:133 的 strip 步已把被内联的 raw .ts 删掉，引用指向已不存在的文件。
+         ⚠️ 这一类【在修前对 cwd 相对谓词完全不可见】（硬规则 5b 的兄弟实例）。
+      ③ 已带 dist/ 扩展名的引用（作者手写或早前一轮产出）——同样的前缀问题，无需再判可打包性。
+      ①②→`${CLAUDE_PLUGIN_ROOT}/<kind>/dist/<name>.js`；③→同样。
+
+      为什么同一个拼写要覆盖【注释与散文】而不只是调用：AC-260 的 BAD_RE 是纯文本扫描、没有
+      注释感知（硬规则 2 的「按位置判定」在这个判据里被作者有意放宽到全载体），而 .sh 面 134 条
+      里绝大多数本就是注释/目录描述，它们与调用形在产物里同样解析不到同一个插件。
+
+   1b. 可打包性守卫（bundleExists）：重写【只在该 bundle 真的存在时】发生。runner-static-gate.ts
+      是静态检查注册表 —— 一个以 .ts 命名、被 strip 步显式豁免、以 raw 形态直发的 bash 库，从不是
+      bundler entry。把它重写成 dist/runner-static-gate.js 就是本函数要消灭的 referenced-not-landed
+      缺陷本身。守卫默认 `() => true`（dev 树 SOURCE 的假设，纯函数单测用），生产调用点
+      rewriteInvokers 永远传真实文件系统谓词。
+      ⇒ 顺带修掉一条潜伏断链：scripts/checker-mutation-check.sh 的 STATIC_GATE 修前被无条件写成
+        `…/dist/runner-static-gate.js`（该文件 build 从不产出），修后回到 raw .ts 形态（见 spot checks 面 6b）。
+
+   1c. checker-mutation-cases 夹具【整目录跳过重写】。`scripts/checker-mutation-cases/*.sh` 自己
+       BUILD 一个一次性的 `<workdir>/plugin/scripts/…` 布局 —— 那里的 `plugin/` 是【夹具自己的假
+       repo 根】，不是本插件。旧重写器不但重写了它们，还把夹具【要创建的文件名】从 `.ts` 改成
+       `dist/.js`（`cat > plugin/scripts/X.ts` → `…/dist/X.js`），即已经在损坏夹具语义。跳过是
+       既正确又安全的默认（见 spot checks 面 7：修后与源逐字相同）。
+
+   1d. MD_PATH_PREFIXED_RE 拓宽到 `${CLAUDE_PLUGIN_ROOT}/` 拼写（第 5 次「入口集对某种【引用形态】
+      失明」，第 4 次是 gap-dist-closure-missing-driver-anchor-js）。原因：skill 用
+      `node "${CLAUDE_PLUGIN_ROOT}/scripts/X.ts"` 这种【带引号】的形态调用插件脚本，而
+      INVOCATION_RE 的第一支到不了它（`[^"\n]*?` 排除开引号，basename 必须紧接），
+      MD_PATH_PREFIXED_RE 又只认仓库相对的 `plugin/scripts/` 拼写 ⇒ 该脚本从不进 bundle 集，
+      publish 的 strip 步删掉它的 raw .ts，skill 指向一个从未发出的文件。修后入口集 90 → 92，
+      恰为 serial-fanin-absorb.ts + routine-file-gate.ts（正是 AC-260 在 cwd 相对 offender 归零后
+      报出的那 3 条悬空）。
+      ⛔ 只放宽 `.md`（调用点按扩展名门控）：夹具 .sh 里用 shell 变量拼出的 checker 路径是密封的
+      harness 数据，不是随产物发出的 invoker。实测更宽的写法（一个覆盖所有载体的引号形态正则）
+      会把 62 个夹具目标拉进 bundle 集 —— 已回退，见 git diff 的演进。
+
+2. 残留 `plugin/scripts/<name>.ts`（无 dist/）的形态普查 —— 为什么不追它们
+   ac260-residual.py 报 399 条。逐类判定（未编辑的原文在 ac260-residual-after.txt）：
+     · 286 条在 `scripts/dist/*.js` 里 —— 那是 esbuild 产出的 bundle 自身，内联源里带的 dev 树
+       路径字符串/注释。它们不是引用，是构建产物的内容。
+     ·  84 条在 `scripts/checker-mutation-cases/` —— 夹具，按 1c 有意保留。
+     ·  29 条是散文化提及（capability-catalog 的目录条目、probes/*.md 的仪器清单、workflows 注释）。
+   这 399 条【修前也是同一个名字】——旧重写器把它们写成 `plugin/scripts/dist/X.js`，那同样是
+   不可解析的（既带 cwd 相对前缀，又指向 build 从不产出的 bundle），所以修前修后都解析不到；
+   本任务没有把任何一条从「解析得到」变成「解析不到」。
+   这两类由 AC-260 的谓词【刻意】不覆盖（它只数 `scripts|gate-scripts/dist/*.js` 引用与
+   `${CLAUDE_PLUGIN_ROOT}/…ts` 悬空），且都不是可执行的调用路径。按硬规则 12，不据此新立前置。
+
+3. AC3 的 BARE 支：9 条命中【全部不是本插件引用】（逐条已查证，见 ac260-sibling-scan.txt）
+   `scripts/check-adr.ts` ×7 描述的是另一个项目（archguard）仓库的文件，出现在示例 JSON 载荷与
+   夹具 heredoc 里；`scripts/agents-claude-drift-check.ts` ×2 指的是 quay 仓库根的 ./scripts/，
+   不在 plugin/ 下（该文件确实存在于仓库根）。ad-hoc 谓词的假阳性，不改。
+
+4. 本机跑 publish 的一个前置（透明记录）
+   publish-dist-branch.sh 在本机【被 pre-commit 钩子挡住】：钩子取
+   `ROOT="$(git rev-parse --show-toplevel)"` 后跑 `$ROOT/plugin/scripts/precommit-guard.ts`，而
+   orphan 暂存树的脚本在【根】上（`$ROOT/scripts/…`），没有 `plugin/` 这一层 ⇒ MODULE_NOT_FOUND。
+   CI（.github/workflows/publish-plugin-dist.yml，fresh checkout）不装该钩子，所以这是本机特有、
+   与本次改动无关的既有形态。
+   ⇒ 本轮以 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=<空目录>` 跑
+     脚本本身（⛔ 未修改 publish-dist-branch.sh 一个字节 —— DoD 要求它只被运行）。这使本机运行
+     与 CI 的产物形态一致（CI 无钩子）。
+   ⚠️ 该钩子在第一次（失败）运行里已经执行过 `git branch -D dist-plugin`，故本轮必须重跑成功才能
+      让分支重新存在 —— 已重跑成功，分支 = 见 ac260-after-predicate.txt。
+
+5. 一处语义漂移，明确记录（不假装没有）
+   前缀丢弃策略会改写【注释里】的 `$ws/plugin/scripts/dist/X.js` 这类形（scripts/quay-init.sh:1913，
+   一个用字面量 `X.js` 举例说明 workspace 布局的注释）⇒ 变成 `${CLAUDE_PLUGIN_ROOT}/scripts/dist/X.js`。
+   该处是说明文字而非引用，且 AC-260 的谓词对注释与代码一视同仁；同形的 `${worktree}/plugin/…`
+   在产物里本就无对应物（消费项目的任务 worktree 没有 plugin/），丢弃前缀才是正确方向。
+   两者在语法上无法区分（都是「变量 + /plugin/」），故取一致策略。
+
+6. 判据刻意不锁具体前缀写法
+   AC-260 明确「不要求必须写成 ${CLAUDE_PLUGIN_ROOT}，可换任何等价自解析形式而无需改判据」。
+   本轮选 ${CLAUDE_PLUGIN_ROOT} 因为它是本仓库既有的、被 plugin/test/plugin-packaging.test.mjs:333
+   断言的插件内容锚（plugin/skills/routines/SKILL.md 早已在用）—— 不是新引入的约定。
+   ⚠️ 已知边界（不掩盖）：${CLAUDE_PLUGIN_ROOT} 由 Claude Code 在 skill/command/hook 内容里做文本
+   展开；在【由 agent 读的 loop/*.md 正文】里它不会自动展开。把这些路径锚到插件根仍严格优于修前的
+   「相对消费项目 cwd 的 plugin/」（后者在任何项目里都必然解析不到），而 AC-260 的判据不要求该变量
+   在每种载体里都被展开。
+
+7. 未做（明确不做的边界）
+   · 未改 plugin/scripts/publish-dist-branch.sh（DoD 明令只运行）。其中 :133 strip 步的闭包断言属
+     AC-263 的范围。
+   · 未动 quay-init.sh 的 laydown 派生 (a)（`grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+'`）：
+     实测该派生在【修前的产物上就已经对 .ts 机制失明】—— 它命中的是 `dist`（目录名）而不是被
+     dist 化的脚本名（见 7 条 `.sh`/`.mjs`/`.txt` 名单 + 一个 `dist`）。本轮把 `${CLAUDE_PLUGIN_ROOT}/…`
+     写进文档后，`plugin/scripts/` 这个 token 只会更少；`.sh`/`.mjs`/`.txt` 三类命中不受影响
+     （它们不带 /dist/，本重写器不碰），而 `dist` 那条假命中消失。⇒ 未引入新损失；该项本身是
+     独立的、更大的缺陷（laydown 派生对 dist 形与锚形都失明），不并入本任务。

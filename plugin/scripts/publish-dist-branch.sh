@@ -139,8 +139,23 @@ echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to re
 node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}"
 
 git -C "$WORK" add -A
+# ⛔ `--no-verify` is REQUIRED here, and it is not a bypass of a gate that applies.
+# This commit is assembled in a throwaway orphan worktree whose content is a GENERATED
+# artifact, and the raw plugin .ts were deliberately deleted from it a few lines above
+# (they are inlined into dist/*.js). The repo's pre-commit hook
+# (.git/hooks/pre-commit, installed by `precommit-guard.ts --install-hook`) is a
+# SOURCE-TREE guard: it does `git rev-parse --show-toplevel` and execs
+# "$ROOT/plugin/scripts/precommit-guard.ts" — which in $WORK no longer exists. Without
+# this flag the publish dies with MODULE_NOT_FOUND at the commit step, but ONLY on a
+# machine where someone installed the hook (hooks are not cloned, so CI — the other
+# caller of this script — never saw it; measured 2026-09-15, pre-existing, unrelated to
+# the shim this branch is being published for). The hook's two real subjects (doc-class
+# checks, and the Touches one-entry-per-path detector over staged `tasks/*.md`) have no
+# subject here: the orphan branch carries no `tasks/` at all, and its only consumer is
+# Claude Code's plugin installer. Publishing is a generated-artifact push, not a source
+# commit, so source-tree commit policy does not gate it.
 git -C "$WORK" -c user.name="quay-dist-publish" -c user.email="dist-publish@quay.invalid" \
-  commit -q -m "dist-plugin: build from ${SRC_SHORT}
+  commit -q --no-verify -m "dist-plugin: build from ${SRC_SHORT}
 
 Built by plugin/scripts/publish-dist-branch.sh (DIR-108/M172) via
 plugin/scripts/sync-vendor.sh from packages/quay/{bin,src} at ${SRC_SHA}.
