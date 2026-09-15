@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-insufficient-has-no-followup-signal
 title: goal-driver 的充分性判"insufficient"持续多轮也不产出任何可见信号——GOAL 静默卡死，无人会注意到
-status: done
+status: ready
 labels:
   - gap
   - mechanism
