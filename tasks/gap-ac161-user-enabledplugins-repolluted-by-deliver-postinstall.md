@@ -16,79 +16,91 @@ goal_ac: AC-161
 ---
 ## Finding
 
-**AC-161 的第五次回归，且这次不是拿 Bash 的 agent 干的 —— 是交付管线自己干的。**
-
-2026-09-15 在 ad-arm1 上跑 AC-257 交付腿（`develop-deliver-tgz.sh --verify-ac257 --hosts C`），远端 heredoc 的第一件事是
-
-```
-npm install -g --prefix "$HOME/.local/opt/quay/0.7.0-dev" "$HOME/quay-0.7.0-dev.tgz" "$HOME/quay-native-0.7.0-dev.tgz"
-```
-
-`packages/quay/package.json` 的 `"postinstall": "node scripts/register-plugin.mjs"` 因此被触发。该脚本自己的头注释逐字声明它**不**写用户级 enabledPlugins（「It does NOT write a user-level enabledPlugins entry — enabling is left to the target project's <repo>/.claude/settings.json (AC-161)」），但它的**materialize 腿**（同文件 `:178` 起 "BEST-EFFORT materialization"）会调 CLI 注册，**缺省按 user scope 走**。
-
-**当场读数（ad-arm1，2026-09-15，非推断）**：
-
-```
-$ stat -c '%y' ~/.claude/settings.json
-2026-09-15 16:57:41.775120247 +0000        <-- 正是那次 npm install 的时刻
-
-$ grep -c 'quay@quay' ~/.claude/settings.json
-1
-$ cat ~/.claude/settings.json
-{ "model": "haiku",
-  "enabledPlugins": { "quay@quay": true },        <-- 用户级 quay 键：AC-161 判据要的形态被违反
-  "extraKnownMarketplaces": { "quay": { "source": { "source": "directory",
-     "path": "/home/yale/.local/opt/quay/0.7.0-dev/lib/node_modules/quay/plugin" } } }, ... }
-```
-
-**后果（可复现、且失败形态误导）**：`verify-deliver-coldstart.sh` 的 `write_ac257_record` 落盘前读一次用户级
-（`ac161_user_scope_quay_state`，三取值 `absent | present:<键> | unreadable:<因>`），读到 `present:quay@quay` 即
+**观察（可核）**：2026-09-15 在 ad-arm1 上跑 AC-257 交付腿时，`write_ac257_record` 落盘前读用户级
+（`ac161_user_scope_quay_state`，三取值 `absent | present:<键> | unreadable:<因>`），读到
+`present:quay@quay` 而拒写，整趟已经真正跑完的 AC-257 一条记录都落不下：
 
 ```
 AC161-USER-SCOPE: GOAL-018-AC-257 record refused — state=present:quay@quay — user-level ~/.claude/settings.json
 enabledPlugins still carries a quay key; this record's project-scope premise is FALSE → nothing written (standing goal AC-161)
 ```
 
-⇒ 一整趟**已经真正跑完**的 AC-257（安装 0.7.0-dev、quay-init 合并语义成立、真实任务被自己的 driver 驱动到 done、
-非记账实现提交 `ef48077a`、`gate_events=4`、`produced_by_driver=1`）**一条记录都落不下**，而表层现象是
-「记录没写出来」，与「机制坏了」同形（硬规则 3b）。
+当场读数（当时）：
 
-**为什么这与既有任务不是同一件事**：`gap-ac161-user-scope-enable-repolluted-by-cli-materialization`（done）
-处理的是**第四次**——「一个拿着 Bash 的在飞 agent 自己选了 `claude plugin install --scope user`」；
-本条是**交付管线自己的 postinstall**（无 agent 参与、无人工选择），且触发点是 `npm install -g` 这一步本身。
-`register-plugin.mjs` 头注释已经声明了自己的 AC-161 契约，**实现与声明不一致**（同族：注释说 not，代码里那条腿会）。
+```
+$ stat -c '%y' ~/.claude/settings.json      -> 2026-09-15 16:57:41.775120247 +0000
+$ grep -c 'quay@quay' ~/.claude/settings.json -> 1
+$ python3 -c "...json...['enabledPlugins']"  -> {"quay@quay": true}
+$ python3 -c "...json...['extraKnownMarketplaces']['quay']" -> {"source":{"source":"directory",
+      "path":"/home/yale/.local/opt/quay/0.7.0-dev/lib/node_modules/quay/plugin"}}
+```
 
-**当下的临时处置（已做，仅记录）**：删除用户级 `enabledPlugins["quay@quay"]`（保留 `extraKnownMarketplaces.quay`
-—— AC-161 的 doctrine 要求用户级只留 marketplace 源），再重跑一次 AC-257 记录写；两次读数都在
-`.quay/ac259-evidence/ac161-depollution.txt`。⛔ 这是**绕**，不是修；根因在 postinstall 的 materialize 腿。
+当时的临时处置（已做）：只删 `enabledPlugins["quay@quay"]`（保留 `extraKnownMarketplaces.quay`，AC-161 的
+doctrine 要求用户级只留 marketplace 源），再重跑一次记录写 ⇒ 记录成功落账
+（`quay_version=0.7.0-dev`、`user_scope_quay_state=absent`）。读数见
+`.quay/ac259-evidence/ac161-depollution.txt`。
+
+## 被证伪的假说（⛔ 不要再按它行动）
+
+**原假说**：这个键是**交付管线自己的** `npm install -g` postinstall（`packages/quay/package.json` 的
+`"postinstall": "node scripts/register-plugin.mjs"`）写的；证据是 `settings.json` 的 mtime `16:57:41`
+恰好是那次 npm install 的时刻。
+
+**若该假说为真则结果会不同的对照（已跑，硬规则 4 推论四）**：在 ad-arm1 上用**沙箱 HOME** 各跑一次
+同名 postinstall，两次的 `enabledPlugins` 命中都是 **0**：
+
+```
+$ command -v claude                        -> /home/yale/.local/bin/claude   (claude_rc=0)
+control A（只换 HOME）:  HOME=/tmp/ac259sbA npm install -g --prefix /tmp/ac259pfA <quay.tgz> <qn.tgz>
+   sandboxA settings.json written=yes ; enabledPlugins 'quay@quay' hits=0
+control B（换 HOME 且带声明的 endpoint 环境，claude 可认证）:
+   sandboxB settings.json written=yes ; enabledPlugins 'quay@quay' hits=0
+   sandboxB settings.json == {"extraKnownMarketplaces":{"quay":{"source":{"source":"directory",
+       "path":"/tmp/ac259pfB/lib/node_modules/quay/plugin"}}}}
+```
+
+⇒ postinstall 只写 marketplace 源，**不写**用户级 `enabledPlugins`，与 `register-plugin.mjs` 自己的头注释
+（「It does NOT write a user-level enabledPlugins entry — enabling is left to the target project's
+`<repo>/.claude/settings.json` (AC-161)」）逐字一致。**原假说被证伪**，本条的 Requested action 随之作废。
+
+完整读数：`.quay/ac259-evidence/ac161-attribution-control.txt`。
+
+## 未决问题（本条真正的可行动部分）
+
+**ad-arm1 上那个用户级 `enabledPlugins["quay@quay"]` 到底是哪个动作写的，目前未识别。**
+已知约束：
+- 写入时刻 `16:57:41` 落在 AC-257 交付腿的 `npm install -g` 窗口内，但 postinstall 已被上面两条对照排除；
+- `[⑨f]`（`claude plugin marketplace add/install --scope project`）在**其后**运行，且运行后 `settings.json`
+  的 mtime 未再变化 ⇒ 也不是它；
+- ad-arm1 上并存着若干**别的** quay 项目（`/home/yale/quay-verify-coldstart-*.npm` 下的前缀，且这些 root
+  有常驻 promotion/goal driver）——「另一个在飞 agent 或另一条交付腿写了它」尚未被排除，但也未被证实。
+
+⚠️ 这正是硬规则 4 推论四说的形态：「一个能【解释】现象的说法，不是一个被【检验】的结论」。
+本条的原文（把成因直接归给 postinstall）已经犯过一次，⛔ 不要再在未做对照的情况下换一个新成因写进来。
 
 ## Requested action
 
-1. 让 `register-plugin.mjs` 的 materialize 腿与它自己的头注释一致：**project-scope 交付不得写用户级
-   `enabledPlugins`**。⚠️ 先确认「谁决定 scope」——调用方（交付脚本）还是脚本缺省；两者择一作为单一真源，
-   ⛔ 不要在两处各写一份判断（硬规则 5b）。
-2. 该行为要有**可证伪的判据**：一次 project-scope 交付之后，`~/.claude/settings.json` 的 `enabledPlugins`
-   键集必须与交付前【逐字相同】（这正是 AC-257 步骤已在项目级做的事，把同一条读数补到用户级）。
-3. 反向控制：AC-258 那条**故意**用 user scope 的交付仍必须能把用户级注册上（⛔ 不要用「一律不写用户级」把它打死）。
+1. **先取证，再下结论**：用与上面同一手法（沙箱 HOME + 逐项放行一个变量）把 `16:57:41` 那个写入者定位到
+   一个**具体动作**上；在此之前不得给出成因。
+2. 判据必须能区分「postinstall 写的」与「别的动作写的」：例如在真实交付腿前后各读一次用户级
+   `enabledPlugins` 键集，并在**跑腿的同时**记录 ad-arm1 上还有哪些 quay 进程在跑（`ps` 读数）。
+3. 若最终定位不到写入者，正确输出是**带原文报到人**（记 `needs-human`），⛔ 不是换一个听起来合理的成因。
 
 ## Acceptance Criteria
 
-- [ ] AC1 贴出「project-scope 交付前后用户级 `enabledPlugins` 键集逐字相同」的一对真实读数（ad-arm1，⛔ 不是夹具）。
-- [ ] AC2 贴出 `register-plugin.mjs` 里决定 scope 的那一处（行号 + 原文），并说明它与头注释的一致性如何被机械保证（⛔ 不是靠注释）。
-- [ ] AC3 负控制：AC-258 的 user-scope 交付之后，用户级 `enabledPlugins["quay@quay"]` 必须仍然出现（证明 AC1 的修法没有把 user-scope 路径打死）。
-- [ ] AC4 复现本条 Finding 的原始失败：在**未修**的实现上跑一次 project-scope 交付，贴 `AC161-USER-SCOPE: … record refused … present:quay@quay` 原文。
+- [ ] AC1 贴出「交付腿前后用户级 `enabledPlugins` 键集」的一对真实读数（ad-arm1），并同时贴出该时刻 ad-arm1 上在跑的 quay 进程清单（`ps`，位置判定）。
+- [ ] AC2 用一个**能区分**的对照把写入者定位到具体动作（对照须给出「若假说为假则结果不同」的方向）；⛔ 不得只贴一条自洽的解释。
+- [ ] AC3 若定位成功：贴出该动作的原文位置与修法所需的读数；若定位不到：贴出已穷尽的候选与各自的排除读数，并记 `needs-human`。
+- [ ] AC4 复现原始现象：在**未修**状态下（用户级带 quay 键）跑一次 AC-257 交付腿，贴 `AC161-USER-SCOPE: … record refused … present:quay@quay` 原文；再证删除该键后同一交付腿能写出记录（两次都贴）。⚠️ 这证明的是**闸门按设计工作**，不是成因。
 
 ## Definition of Done
 
-- [ ] project-scope 交付不再污染用户级 `enabledPlugins`，且该性质有一条会红的机械判据（AC1/AC2）。
-- [ ] AC-257 的记录落在**未被绕**的路径上（即：不需要人工删键就能写出记录）。
-- [ ] AC3 的反向控制贴在记录里。
+- [ ] 用户级那个键的写入者被定位到具体动作，或明确记为 `needs-human` 并附已穷尽的候选与排除读数。
+- [ ] 本条的成因表述有对照支撑（AC2），⛔ 不是「看起来最合理的那一个」。
+- [ ] AC4 的两条读数在记录里（证明闸门工作正常、且绕法确实能解锁记录）。
 
 ## Touches
 
-- packages/quay/scripts/register-plugin.mjs
-- plugin/scripts/verify-deliver-coldstart.sh
-- plugin/test/verify-deliver-coldstart.test.mjs
-- tasks/gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall.md（自身：勾 AC + 贴证据）
+- tasks/gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall.md
 
-Note: filed from the AC-259 re-anchoring worker, where it blocked the AC-257 record write (`.quay/ac259-evidence/ac161-depollution.txt`).
+Note: filed and then corrected by the AC-259 re-anchoring worker. The correction exists because the worker ran the falsifying control after filing (`.quay/ac259-evidence/ac161-attribution-control.txt`).
