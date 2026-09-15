@@ -94,6 +94,8 @@ import {
   isBackedOff,
   recordQuickDeathBackoff,
   QUICK_DEATH_BACKOFF_DEFAULT,
+  classifyQuickDeathCause,
+  parseRateLimitResetAtMs,
   parseQuickDeathMs,
   parseBackoffBaseMs,
   parseBackoffMaxMs,
@@ -1142,6 +1144,187 @@ test("AC4 (三值分流) — isQuickDeath/recordQuickDeathBackoff：只有实测
   assert.equal(third.newlyNeedsHuman, false, "2 < maxRetries ⇒ not yet parked");
 });
 
+// ── gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human ───────────
+// 根因：快速死亡退避把【一切】<quickDeathMs 的非零退出计入【同一个桶】（QUICK_DEATH_FINAL_STATES），
+// 连续 ≥backoffMaxRetries 次即 newlyNeedsHuman。但账号级限流在性质上不同：瞬时的、外部的、自愈的，
+// 且【错误文本自带失效时刻】——被计入同一个桶 ⇒ 任务被永久停摆（终态不自愈），真相却只是「等一会儿」。
+// 实测（2026-09-13，第三方项目 quay-fleet 的 .quay/worker-outcome.jsonl）：连续三条 selector_reason
+// 逐字相同（含 `You've hit your session limit · resets 11:30am (UTC)`），wall_clock_ms = 4643 / 7685 /
+// 5106（三次都 <60s ⇒ 三次都计入上限）⇒ 任务被机械翻 needs-human，成因类记成 human-adjudication。
+// ⛔ 关键点：driver 已经握着能区分的证据（限流原文完整落在 selector_reason 里）——不是看不出来，
+// 是看出来了但不分类。修法只用【已捕获文本】做字面子串匹配（⛔ 不新增探测面、⛔ 无语义判断）。
+
+// 第一手样本的逐字 selector_reason（quay-fleet 生产载体原文；任务体 DoD 要求保留）。
+const RATE_LIMIT_REASON =
+  'selector worker returned no valid pick (exit 1, got "You\'ve hit your session limit · resets 11:30am (UTC)"); fallback to first shuffled candidate';
+// 同一条限流但【不含】重置时刻 ⇒ 回落指数退避（AC3 第二臂）。
+const RATE_LIMIT_NO_RESET_REASON =
+  'selector worker returned no valid pick (exit 1, got "You\'ve hit your session limit"); fallback to first shuffled candidate';
+// 反例输入（⛔ 不命中任何限流签名）。
+const ORDINARY_REASON = "worker exited with code 1";
+
+test("AC1 (能取假, 双输入对照) — classifyQuickDeathCause: 限流文本 ⇒ transient-external；换成普通失败文本 ⇒ 不同取值", () => {
+  const a = classifyQuickDeathCause(RATE_LIMIT_REASON);
+  const b = classifyQuickDeathCause(ORDINARY_REASON);
+  assert.equal(a, "transient-external", "第一手样本（quay-fleet 逐字 selector_reason）⇒ transient-external");
+  assert.notEqual(a, b, "AC1 承重：两个输入必须给出【不同】输出（否则这条判据空转）");
+  assert.equal(b, "ordinary", "反例输入 ⇒ 普通快速死亡（⛔ 不命中任何限流签名）");
+});
+
+test("AC3 (能取假, 双输入) — 退避时刻取自文本自带的重置时刻；解析不出 ⇒ 回落指数退避且 backoffUntil 非空", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  // 固定 nowMs（2026-01-15 11:13:00Z）——正是实测里 11:13:05.897Z 那条的附近。
+  const nowMs = Date.UTC(2026, 0, 15, 11, 13, 0);
+
+  // 臂①：文本自带 `resets 11:30am (UTC)` ⇒ backoffUntil 恰为该时刻（⛔ 不是 now+指数退避）。
+  const s1 = newQuickDeathBackoffState();
+  const r1 = recordQuickDeathBackoff(s1, "gap-rl", "failed", 4643, nowMs, 3, cfg, undefined, RATE_LIMIT_REASON);
+  assert.equal(r1.cause, "transient-external");
+  assert.equal(
+    s1.backoffUntil.get("gap-rl"),
+    Date.UTC(2026, 0, 15, 11, 30, 0),
+    "退避到错误文本自带的重置时刻（2026-01-15T11:30:00Z）",
+  );
+  // 双输入对照：换掉文本里的重置时刻 ⇒ backoffUntil 跟着变（⛔ 非硬编码）。
+  const s1b = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(s1b, "gap-rl", "failed", 4643, nowMs, 3, cfg, undefined,
+    'got "You\'ve hit your session limit · resets 11:47am (UTC)"');
+  assert.equal(s1b.backoffUntil.get("gap-rl"), Date.UTC(2026, 0, 15, 11, 47, 0), "换输入 ⇒ 换读数");
+  assert.notEqual(s1.backoffUntil.get("gap-rl"), s1b.backoffUntil.get("gap-rl"), "AC3 承重：读数随输入变");
+  // 重置时刻已过 ⇒ 次日同时刻（⛔ 不返回一个已过去的时刻 = 静默退化成「立刻重试」）。
+  const s1c = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(s1c, "gap-rl", "failed", 4643, Date.UTC(2026, 0, 15, 12, 0, 0), 3, cfg, undefined, RATE_LIMIT_REASON);
+  assert.equal(s1c.backoffUntil.get("gap-rl"), Date.UTC(2026, 0, 16, 11, 30, 0), "已过 ⇒ 次日同时刻");
+
+  // 臂②：文本【不含】重置时刻 ⇒ 回落指数退避，且 backoffUntil 非空（⛔ 不是"立刻重试"）。
+  const s2 = newQuickDeathBackoffState();
+  const r2 = recordQuickDeathBackoff(s2, "gap-rl2", "failed", 5106, nowMs, 3, cfg, undefined, RATE_LIMIT_NO_RESET_REASON);
+  assert.equal(r2.cause, "transient-external", "无重置时刻不改成因类（仍是限流）");
+  assert.equal(s2.backoffUntil.get("gap-rl2"), nowMs + 1000, "回落到 now + baseBackoffMs（指数退避底数）");
+  assert.ok(r2.backoffUntil != null, "backoffUntil 非空");
+  // 解析器本身的两个取值：读得出 / 读不出，⛔ 不与「不适用」同形。
+  assert.equal(parseRateLimitResetAtMs(RATE_LIMIT_REASON, nowMs), Date.UTC(2026, 0, 15, 11, 30, 0));
+  assert.equal(parseRateLimitResetAtMs(RATE_LIMIT_NO_RESET_REASON, nowMs), null, "无重置时刻 ⇒ null（缺值 = 未查）");
+  assert.equal(parseRateLimitResetAtMs("resets soon (UTC)", nowMs), null, "读不懂 ⇒ null");
+});
+
+test("AC4 (能取假, 硬规则 3b) — 三态互不相同：transient-external / ordinary / unclassifiable（读不懂不得与任一合格态同形）", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  const transient = classifyQuickDeathCause(RATE_LIMIT_REASON);
+  const ordinary = classifyQuickDeathCause(ORDINARY_REASON);
+  const unreadable = classifyQuickDeathCause(null);
+  const unreadableBlank = classifyQuickDeathCause("   ");
+  const unreadableUndef = classifyQuickDeathCause(undefined);
+  assert.equal(transient, "transient-external");
+  assert.equal(ordinary, "ordinary");
+  assert.equal(unreadable, "unclassifiable", "读不懂（null）⇒ 第三取值，⛔ 不落成前两者之一");
+  assert.equal(unreadableBlank, "unclassifiable", "全空白同判");
+  assert.equal(unreadableUndef, "unclassifiable", "undefined 同判");
+  // 三个取值【逐一】断言不相等（AC4 的字面要求）。
+  assert.notEqual(transient, ordinary);
+  assert.notEqual(transient, unreadable);
+  assert.notEqual(ordinary, unreadable);
+
+  // 判别式上按 ordinary 计（fail-safe：读不懂不得无限重派），但取值【如实】为 unclassifiable。
+  const s = newQuickDeathBackoffState();
+  let last = null;
+  for (let i = 0; i < 3; i++) {
+    last = recordQuickDeathBackoff(s, "gap-u", "failed", 5000, 100_000 + i, 3, cfg, undefined, null);
+    assert.equal(last.cause, "unclassifiable", `第 ${i + 1} 次的成因取值如实可区分`);
+  }
+  assert.equal(last.newlyNeedsHuman, true, "unclassifiable 到上限 ⇒ 转 needs-human（⛔ 不无限重派）");
+  // 对照臂：同样 3 次换成 transient-external ⇒ ⛔ 永不 newlyNeedsHuman。
+  const s2 = newQuickDeathBackoffState();
+  let parkedTransient = false;
+  for (let i = 0; i < 3; i++) {
+    parkedTransient = recordQuickDeathBackoff(s2, "gap-t", "failed", 5000, 100_000 + i, 3, cfg, undefined, RATE_LIMIT_NO_RESET_REASON).newlyNeedsHuman || parkedTransient;
+  }
+  assert.equal(parkedTransient, false, "AC4 对照：transient-external 到上限也不停摆");
+  assert.equal(s2.counts.get("gap-t"), undefined, "transient 不进普通连续计数（⛔ 混桶会让限流顶满上限）");
+});
+
+test("AC2 (能取假, 双向对照) — N > maxRetries 次 transient-external 快速死亡 ⇒ ⛔ 不翻 needs-human；同样次数换成普通快速死亡 ⇒ 翻", async (t) => {
+  const MAX_RETRIES = 2;
+  // 退避压到 20/40ms（默认 30s/300s 会让本测试等到天亮）——⛔ 只压时长，不压机制。
+  const FAST_BACKOFF = ["--max-retries", String(MAX_RETRIES), "--backoff-base-ms", "20", "--backoff-max-ms", "40", "--interval", "20"];
+  // selector 输出的 reason 用 \x20/\x27 拼空格与单引号：splitArgs 按空白裸切、无 shell 引号（见 driver-runtime.ts）。
+  const selectorFor = (reason) => `node -e console.log('gap-rl\\x20${reason}')`;
+
+  // ── 臂①（限流）：N=4 > maxRetries=2 次 transient-external 快速死亡 ⇒ 任务【仍不是】needs-human ──
+  const rootA = makeGitRoot("transient-ac2");
+  writeTaskFile(rootA, "gap-rl", "ready");
+  const drvA = spawnResident(rootA, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-rl'],pool:1}))",
+    "--selector-cmd", selectorFor("You\\x27ve\\x20hit\\x20your\\x20session\\x20limit"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(1)",
+    ...FAST_BACKOFF,
+  ]);
+  t.after(() => drvA.stop());
+  t.after(() => rmSafe(rootA));
+
+  await waitFor(() => readOutcomeLines(rootA).length >= 4, 30000);
+  const recsA = readOutcomeLines(rootA);
+  assert.ok(recsA.length >= 4, `AC2 臂①：至少 4 次派发（> maxRetries=${MAX_RETRIES}），实测 ${recsA.length}`);
+  assert.ok(recsA.every((r) => r.final_state === "failed"), "AC2 臂①：每次都是 failed（快速死亡）");
+  // 生产载体字段（硬规则 4 推论三）：真驱动跑 ⇒ quick_death_cause 真的落进 .quay/worker-outcome.jsonl。
+  assert.ok(
+    recsA.slice(0, 4).every((r) => r.quick_death_cause === "transient-external"),
+    "AC2 臂①：载体字段取值为 transient-external（⛔ 不是 fixture 顶替）",
+  );
+  assert.equal(readTaskStatus(rootA, "gap-rl"), "ready", "AC2 承重左臂：N 次限流快速死亡后任务【仍不是】needs-human");
+  const bodyA = fs.readFileSync(path.join(rootA, "tasks", "gap-rl.md"), "utf8");
+  assert.ok(!bodyA.includes("## Needs-Human"), "AC2 承重左臂：⛔ 不写 ## Needs-Human（任务未被停摆）");
+  await drvA.stop();
+
+  // ── 臂②（负控制, 同构）：同样 N 次换成【普通】快速死亡 ⇒ 到 maxRetries 即 needs-human ──
+  const rootB = makeGitRoot("ordinary-ac2");
+  writeTaskFile(rootB, "gap-rl", "ready");
+  const drvB = spawnResident(rootB, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-rl'],pool:1}))",
+    "--selector-cmd", selectorFor("flaky-red"),
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(1)",
+    ...FAST_BACKOFF,
+  ]);
+  t.after(() => drvB.stop());
+  t.after(() => rmSafe(rootB));
+
+  await waitFor(() => readTaskStatus(rootB, "gap-rl") === "needs-human", 30000);
+  assert.equal(readTaskStatus(rootB, "gap-rl"), "needs-human", "AC2 承重右臂：普通快速死亡到上限 ⇒ needs-human");
+  const recsB = readOutcomeLines(rootB);
+  assert.equal(recsB[0].quick_death_cause, "ordinary", "AC2 右臂载体字段 = ordinary（⛔ 与左臂取值不同）");
+  assert.notEqual(recsB[0].quick_death_cause, recsA[0].quick_death_cause, "AC2 承重：两臂成因取值必须不同");
+  await drvB.stop();
+});
+
+test("AC5 (结构性, 负控制) — 非快速死亡（completed / exited-not-landed / timed-out / 慢速失败）⛔ 不发射成因字段（缺键 ≠ 某个取值）", () => {
+  const base = {
+    task: "gap-x", selectorReason: RATE_LIMIT_REASON, exitCode: 0, signal: null,
+    startedAtMs: 0, endedAtMs: 1000, workerPid: 1, runId: "r",
+  };
+  // completed（exit 0 + landed）⇒ 非快速死亡 ⇒ 缺键。
+  const completed = computeOutcome({ ...base, landed: true });
+  assert.equal(completed.final_state, "completed");
+  assert.ok(!("quick_death_cause" in completed), "completed ⇒ ⛔ 无成因字段（缺键，不是某个取值）");
+  // exited-not-landed（exit 0 + 未落地）⇒ 缺键（自有重试上限机制，⛔ 不与其重叠计数）。
+  const notLanded = computeOutcome({ ...base, landed: false, landReason: "x" });
+  assert.equal(notLanded.final_state, "exited-not-landed");
+  assert.ok(!("quick_death_cause" in notLanded), "exited-not-landed ⇒ ⛔ 无成因字段");
+  // timed-out ⇒ 缺键。
+  const timedOut = computeOutcome({ ...base, timedOut: true });
+  assert.equal(timedOut.final_state, "timed-out");
+  assert.ok(!("quick_death_cause" in timedOut), "timed-out ⇒ ⛔ 无成因字段");
+  // 慢速失败（failed 但墙钟 ≥ quickDeathMs）⇒ 缺键（⛔ 不进快速死亡桶，同 isQuickDeath 语义）。
+  const slow = computeOutcome({ ...base, exitCode: 1, endedAtMs: QUICK_DEATH_BACKOFF_DEFAULT.quickDeathMs + 1 });
+  assert.equal(slow.final_state, "failed");
+  assert.ok(!("quick_death_cause" in slow), "慢速失败 ⇒ ⛔ 无成因字段");
+  // 对照：同一条限流文本在【快速死亡】时 ⇒ 字段出现且取值正确（⛔ 证明上面不是恒缺）。
+  const quick = computeOutcome({ ...base, exitCode: 1, endedAtMs: 5000 });
+  assert.equal(quick.quick_death_cause, "transient-external", "快速死亡 ⇒ 字段出现且取值为 transient-external");
+  assert.notEqual(quick.quick_death_cause, completed.quick_death_cause, "两态必须可区分");
+});
+
 // ── AC5 (读生产载体) — 真解析 + 真 /proc + 真 .quay/worker-outcome.jsonl，经常驻环的 reconcile 步 ──
 // ⚠️ 这是【临时 root 的真实驱动跑】而不是 quay 的自然生产样本：实现落地时点之后，主仓/第三方仓的
 // 自然样本数为 0（窗口还开着，见任务体的 AC5 记述）。本条证明的是【字段真的经常驻环落进载体】——
@@ -1219,7 +1402,16 @@ test("AC5 (生产载体, 双臂) — 常驻环 reconcile：确已退出的孤儿
   assert.equal(rec5.orphan_pid_liveness, "exited",
     "AC5 承重: 载体记录带【实测】liveness ⇒ 断言从此可被读者取假（⛔ 此前载体里没有这个字段，声称无法被检验）");
   assert.match(rec5.failure_reason, /already exited/, "AC5 臂①: 实测已退出 ⇒ 保留原措辞");
-  assert.equal(readDispatchStore(dispatchFile)[taskDead], undefined, "AC5 臂①: 记录被清（孤儿有归宿）");
+  // ⚠️ 本断言此前是【立即】`assert.equal(readDispatchStore(...)[taskDead], undefined)`，在满载下偶发红
+  // （`AC5 臂①: 记录被清（孤儿有归宿）`）。根因是【观测时差】，不是记录没被清：驱动的
+  // `finalizeOrphanDispatch` 在同一函数里【先】`appendOutcomeToFile`（= 上面 waitFor 的触发条件）
+  // 【后】`removeDispatchRecord`，两者在驱动进程内同步且相邻；而本测试是从【另一个进程】经文件系统
+  // 观测的 ⇒ 看到 outcome 行的那一刻，清记录可能尚未跑完（fs 延迟随宿主负载增长，窗口随之变宽）。
+  // 判别对照（决定性）：在 append 与 remove 之间注入 400ms 同步延迟 ⇒ 该断言 5/5 必红 ⇒ 这是观测时差，
+  // 不是跨进程 read-modify-write 竞争（无并发写者也能构造出该红）。故改为【等待终态成立】——
+  // 判据语义逐字不变（终态仍必须清记录；`removeDispatchRecord` 若被移除/失效 ⇒ 轮询超时 ⇒ 断言取假）。
+  const clearedOrphan = await waitFor(() => readDispatchStore(dispatchFile)[taskDead] === undefined, 10000);
+  assert.ok(clearedOrphan, "AC5 臂①: 记录被清（孤儿有归宿）");
 
   // AC5 的判据形式：该载体里此类记录数 ≥1 且【假阳性 = 0】（假阳性 = 声称已退出但实测不是已退出）。
   const all = orphanRecords();

@@ -1,7 +1,7 @@
 ---
 id: gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human
 title: worker-driver 把瞬时账号限流计入快速死亡上限并终态停摆任务 —— 区分证据它已经抓到了却不用
-status: ready
+status: done
 labels:
   - gap
   - defect
