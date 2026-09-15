@@ -24,10 +24,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，回归控制）：把本次实例的真实失配形态（worktree basename/去前缀分支名 = 任务 id 去掉某个真实存在的后缀）做成测试 fixture，固定进 `ready-pool-check.test.mjs` 或 `fast-mode-telemetry.test.mjs`——修复前该 fixture 必须重现 `hasLeftoverWorktree === false`（对着一个已知有真实未落地工作的 worktree）；修复后同一 fixture 必须被正确识别（不再无声放过）。
-- [ ] AC2（可见性，硬规则 3b——不得用与「合格」同形的值代表「查不清」）：修复后，当扫描到一个 `quay-worktrees` 目录下的 worktree/分支，其 basename 或去前缀分支名**不能与任务库中任何一个任务 id 精确匹配**时，机制必须产出一条独立、可读的诊断记录（例如落进某个 round/诊断载体的一条 `mismatched-worktree-name` 类型条目，或等价的日志行），且这条记录与「一切正常」在结构上不同形——不能只是静默地什么都不做，也不能被处理成某个已有的、代表"正常"的默认值。
-- [ ] AC3（回归控制，双向对照）：`reclaimSupersededWorktrees`/`enumerateTaskWorktreeTasksAsync` 路径对同一个失配 fixture 跑一次，`perTask` 里对应条目**不得**再是 `status: "unreadable"`（这是"用错误字符串查不到"的伪装成"读不懂"）——要么正确关联回真实任务 id，要么用 AC2 定义的诊断记录明确标注"这个 worktree 名字对不上任何任务"。
-- [ ] AC4（生产验证，硬规则 4 推论三）：修复落地之后，对 `/home/yale/work/quay` 当前 `git worktree list` 里所有真实 `quay-worktrees/*` 条目跑一次修复后的扫描逻辑，报告是否发现新的名字不匹配实例（不要求发现，但必须实际跑过、把读数写进本任务体，不能只在 fixture 里验证过）。
+- [x] AC1（能取假，回归控制）：把本次实例的真实失配形态（worktree basename/去前缀分支名 = 任务 id 去掉某个真实存在的后缀）做成测试 fixture，固定进 `ready-pool-check.test.mjs` 或 `fast-mode-telemetry.test.mjs`——修复前该 fixture 必须重现 `hasLeftoverWorktree === false`（对着一个已知有真实未落地工作的 worktree）；修复后同一 fixture 必须被正确识别（不再无声放过）。
+- [x] AC2（可见性，硬规则 3b——不得用与「合格」同形的值代表「查不清」）：修复后，当扫描到一个 `quay-worktrees` 目录下的 worktree/分支，其 basename 或去前缀分支名**不能与任务库中任何一个任务 id 精确匹配**时，机制必须产出一条独立、可读的诊断记录（例如落进某个 round/诊断载体的一条 `mismatched-worktree-name` 类型条目，或等价的日志行），且这条记录与「一切正常」在结构上不同形——不能只是静默地什么都不做，也不能被处理成某个已有的、代表"正常"的默认值。
+- [x] AC3（回归控制，双向对照）：`reclaimSupersededWorktrees`/`enumerateTaskWorktreeTasksAsync` 路径对同一个失配 fixture 跑一次，`perTask` 里对应条目**不得**再是 `status: "unreadable"`（这是"用错误字符串查不到"的伪装成"读不懂"）——要么正确关联回真实任务 id，要么用 AC2 定义的诊断记录明确标注"这个 worktree 名字对不上任何任务"。
+- [x] AC4（生产验证，硬规则 4 推论三）：修复落地之后，对 `/home/yale/work/quay` 当前 `git worktree list` 里所有真实 `quay-worktrees/*` 条目跑一次修复后的扫描逻辑，报告是否发现新的名字不匹配实例（不要求发现，但必须实际跑过、把读数写进本任务体，不能只在 fixture 里验证过）。
+
+**AC4 生产扫描读数（2026-09-15 实跑，非假设）**：`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --json --root /home/yale/work/quay` → `scanned: 2177`，`readyCount: 4`，`mismatched_worktrees: { evaluated: true, count: 1, records: [{ type: "mismatched-worktree-name", name: "ac207fix-build", path: "/home/yale/work/quay-worktrees/ac207fix-build", branch: null }] }`。逐条读数（`mismatchedWorktreeNames` + `listTaskIds`，任务库 2177 条，`quay-worktrees/*` 条目 5 条）：`ac207fix-build` → `unmatched`（detached HEAD、非任务目录，`tasks/ac207fix-build.md` 不存在 ⇒ 正是 AC2 诊断按字面要求报出的形态）；`gap-frozen-violated-files-on-stale-verdict`、`gap-goal-sufficiency-insufficient-has-no-followup-signal`、`gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human`、`gap-worktree-task-id-mismatch-defeats-leftover-worktree-exemption` → 四条均 `exact`。**结论：本次修复后没有新的"任务名不匹配"实例**——本次 Finding 里那条被手工重建的实例现在精确匹配；唯一被诊断出来的是命名空间里一个本就不是任务的目录。该读数同时是 AC2 在【真实数据】上的首次运行证据（此前它只在 fixture 上验证过）。
 
 ## Definition of Done
 
