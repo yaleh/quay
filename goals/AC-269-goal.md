@@ -1,7 +1,7 @@
 ---
 id: AC-269
 title: CI 红有机械归因：每条 failure 记录带 {real-defect, infrastructure, known-flake} 之一
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -49,6 +49,11 @@ statusLog:
     to: active
     actor: manager
     reason: 激活：判据已当轮干跑验证能取假（AC-266 另做了双向控制）
+  - at: 2026-09-15T13:41:23.213Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
