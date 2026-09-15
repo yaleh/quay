@@ -1,6 +1,6 @@
 ---
 id: AC-266
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -60,5 +60,16 @@ expect: exit 0 = ①静态臂（按位置判定，先剥 YAML 注释）：releas
 origin: 立案实测：v0.6.2/v0.6.3 的 release job 各撞 30m 超时（30m21s/30m17s），hang 在 Run
   tests——mcp-server.test.mjs 无 self-skip 守卫，无 GH_TOKEN 跑挂后泄漏 MCP server 子进程，node
   --test 永不退出，清理时终结 7 个孤儿进程。该 job 按设计绕过 scripts/test.sh，故 runner 的进程回收不适用。
+activatedAt: 2026-09-15T11:32:19.813Z
+statusLog:
+  - at: 2026-09-15T11:32:19.813Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 激活：判据已当轮干跑验证能取假（AC-266 另做了双向控制）
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T11:32:19.812Z
 ---
