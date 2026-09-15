@@ -1,7 +1,7 @@
 ---
 id: AC-268
 title: release 渠道经 workflow_dispatch 真发出一个版本（conclusion=success）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -50,6 +50,11 @@ statusLog:
     to: active
     actor: manager
     reason: 激活：判据当轮干跑取假；已按 release.yml 现为 dispatch-only 的事实写判据
+  - at: 2026-09-15T17:50:42.112Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: false
 fidelity:
   verdict: faithful
