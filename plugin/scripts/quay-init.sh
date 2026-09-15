@@ -2654,9 +2654,15 @@ EOF
   # ⚠️ To merely RE-FILL a shared plugin-cache entry (~/.claude/plugins/cache/<mkt>/<plugin>/<ver> is
   #    keyed by marketplace+plugin+version and SHARED ACROSS SCOPES), do NOT reach for --scope user.
   #    `plugin update` and a re-`install` both short-circuit on an unchanged version (measured
-  #    2026-09-15 / Claude Code 2.1.271: file count 0→0); the two-step at the same scope works (0→1):
-  #      claude plugin uninstall quay@quay --scope project
+  #    2026-09-15 / Claude Code 2.1.271: file count 0→0). The refresh is scope-COMPLETE — and the
+  #    resolve step is NOT optional, because `uninstall --scope project` FAILS outright when the
+  #    record is held at USER scope ("... is installed in user scope, not project. Use --scope user
+  #    to uninstall.") — i.e. the CLI's own error hands you the one command to avoid:
+  #      claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
+  #      claude plugin uninstall quay@quay --scope <the scope just printed>
   #      claude plugin install   quay@quay --scope project -y
+  #    (a USER-scope uninstall is AC-161-safe: it DELETES the user-level key, it never adds one, and
+  #     it does not remove the shared cache payload. Measured 2026-09-15: 0→1, no user key, exit 0.)
 
   # 3. accept the trust dialog the FIRST time you enter this directory, then restart the session.
 After that, the enabledPlugins block below takes effect (a restart is required to apply).

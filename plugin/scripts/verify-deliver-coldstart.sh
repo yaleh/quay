@@ -4122,11 +4122,38 @@ step_ac258_user_scope() {
   # `claude plugin install "quay@quay" -y` **不带 `--scope`** ⇒ 取的是 Claude Code CLI 的**默认
   # user**。对 AC-258 而言 user 正是想要的，但「靠默认值表达意图」这一形态本身就是缺陷类
   # （CLI 默认一旦改动，这里会静默变成**另一个 scope**，而命令行、日志、记录全都看不出变化）。
-  # 显式写出后，本机跑一次仍然会写操作者真实 $HOME——那是 AC-258 的设计（它在**目标机**上跑），
-  # 不是本次修复要消除的东西；本次修复消除的是「隐式默认」这个不可见的耦合。
+  # ⚠️ 上面这条（第四次回归）说「本机跑一次仍然会写操作者真实 $HOME——那是 AC-258 的设计（它在
+  # **目标机**上跑），不是本次修复要消除的东西」。**该论断已被 AC-161 第五次回归实测推翻**：脚本
+  # 确实会在**非目标机**上跑（本机 boheidc 就是），而那时这条腿既拿不到任何 AC-258 价值
+  # （criterion 要求 host=orangevps ∧ project_root=/home/yale/work/meta-cc —— 本机都不成立），
+  # 又留下真实用户级污染 + 陷阱。⇒ 「隐式默认」这个耦合**仍然消除**，但只消除它是不够的：
+  # 真实-HOME 写入本身现在也加了闸（下一条 if）。
   local mat_leg="postinstall(register-plugin.mjs)" rc_ms=0 rc_inst=0
   if [ -z "$(ac258_user_scope_entry "$ip" "$AC258_QUAY_VERSION" 'quay@quay' 2>/dev/null || true)" ]; then
-    if command -v claude >/dev/null 2>&1; then
+    if [ "$AC258_HOST_SOURCE" != "fqdn-verified" ]; then
+      # ⛔ 本腿会把【操作者真实 $HOME】的用户级写脏（`--scope user` 同时写 enabledPlugins 键 +
+      #    installed_plugins.json 的 scope:"user" 记录），且全脚本【零】uninstall/restore
+      #    （`grep -c uninstall` = 0）⇒ 跑完不还原。
+      #
+      # 这在【目标机】上是设计（AC-258 测的就是目标机的 user-scope materialization，本机是它自己的
+      # 操作者）。但在【非目标机】上（例如 quay 自己的开发机 boheidc）它同时是两件事：
+      #   ① 直接打红 STANDING goal AC-161（`enabledPlugins` 出现 quay 键 ⇒ criterion exit 1）；
+      #   ② 留下【陷阱状态】——存在一条 scope:"user" 记录后，共享 cache 刷新配方的第一步
+      #      `claude plugin uninstall quay@quay --scope project` 会【直接失败】并报
+      #      "Use --scope user to uninstall."，即机器亲手把下一个照文档做的 agent 改道到配方
+      #      唯一禁止的那条命令。AC-161 **第五次**回归就是这么发生的
+      #      （gap-ac161-5th-regression-refresh-recipe-not-scope-complete）。
+      #
+      # ⇒ 「已声明并当场核验过目标机」（`fqdn-verified`：`--ac258-host-fqdn` 在本机解析到【本机
+      #    拥有的】地址）是允许写真实用户级的**唯一**条件。生产路径恒满足它——`develop-deliver-tgz.sh`
+      #    调用时逐字传 `--ac258-host-fqdn "${host_target[$hk]}"`（见该脚本 :2698）——而本机裸跑
+      #    （`hostname-fallback`）不满足。
+      #
+      # 取值与「合格」不同形（硬规则 3b）：NOT-EVALUATED，记录不写，⛔ 且【不改动用户级】。
+      # 下游 (d) 段读到空 user-scope 条目 ⇒ 走它既有的 fail-closed NOT-EVALUATED（记录不写）。
+      mat_leg="not-attempted(no-verified-target: AC258_HOST_SOURCE=$AC258_HOST_SOURCE — this leg writes the operator's REAL user level (~/.claude/settings.json enabledPlugins + a scope:\"user\" record) and nothing restores it; on a non-target host that reddens STANDING AC-161 and plants the trap that redirects the cache-refresh recipe onto --scope user. Run it on the target machine with --ac258-host-fqdn.)"
+      echo "  AC258-NOT-EVALUATED: $mat_leg" >&2
+    elif command -v claude >/dev/null 2>&1; then
       set +e
       claude plugin marketplace add "$plugin_root" >"$home/ac258-cli-materialize.log" 2>&1
       rc_ms=$?
