@@ -1,6 +1,6 @@
 ---
 id: AC-267
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -55,5 +55,16 @@ origin: 立案实测：sea-verify-node-free 在三平台全挂，quay serve 一�
   path.dirname(fileURLToPath(import.meta.url)) 在模块顶层求值，而 SEA 的 CJS bundle 里
   import.meta.url 是 undefined；quay --help 不拉该链故看似正常。v0.5.0/v0.6.2/v0.6.3
   反复复现，是发出去的二进制核心功能不可用。
+activatedAt: 2026-09-15T11:39:47.422Z
+statusLog:
+  - at: 2026-09-15T11:39:47.422Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 激活：判据当轮干跑取假，精确命中 plugin-root.ts:33 顶层求值
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T11:39:47.422Z
 ---

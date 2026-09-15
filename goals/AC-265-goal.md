@@ -1,6 +1,6 @@
 ---
 id: AC-265
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -56,5 +56,20 @@ expect: exit 0 = 载体 .quay/ci-runs.jsonl 中存在一次
 origin: 立案实测 2026-09-15：develop 上 92 次 CI run 零成功（52 failure / 40
   cancelled），decisive 绿率 0/52；最后一次任何分支的绿是 2026-08-03（master）。故 develop
   首绿是待达成的新状态。
+activatedAt: 2026-09-15T11:46:20.098Z
+statusLog:
+  - at: 2026-09-15T11:46:20.098Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 激活（--force）：criterion 三次干跑均确定取假(195/198ms,
+      CAUSE=collector-not-landed)；fidelity judge 连续两次 exit 143(SIGTERM/180s
+      超时)不可读，故以人工双向控制替代其保证——隔离 fixture 正控制(files 640>=631)exit 0、负控制(files
+      610<631)exit 1 并指名 green-bought-by-skipping。⛔ force 越过的仅是 judge
+      不可读，criterion 本身已跑且能取真能取假。
 long-term: true
+fidelity:
+  verdict: forced
+  reason: --force override (skipped evaluability + fidelity gates)
+  at: 2026-09-15T11:46:20.097Z
 ---
