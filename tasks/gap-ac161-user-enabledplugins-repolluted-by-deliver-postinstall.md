@@ -3,7 +3,7 @@ id: gap-ac161-user-enabledplugins-repolluted-by-deliver-postinstall
 title: 交付管线的 npm install -g postinstall（register-plugin.mjs 的 materialize 腿）在
   project-scope 交付里也按 user scope 注册 ⇒ 用户级 enabledPlugins 出现 quay 键 ⇒ AC-257 记录被
   AC-161 常设闸拒写
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
