@@ -1,7 +1,7 @@
 ---
 id: EXIST
 title: EXIST 残留对象处置记录（非工作项）
-status: ready
+status: done
 labels: []
 parent: null
 children: []
