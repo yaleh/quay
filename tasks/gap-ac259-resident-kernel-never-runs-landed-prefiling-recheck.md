@@ -1,11 +1,8 @@
 ---
 id: gap-ac259-resident-kernel-never-runs-landed-prefiling-recheck
-title: >-
-  AC-259 台账读数仍为假且每轮被重复立案的真因：常驻 anchor 从未加载 10:17
+title: AC-259 台账读数仍为假且每轮被重复立案的真因：常驻 anchor 从未加载 10:17
   落地的「立案前直接量复核」（recheckFrozenFailing）——它跑的是 packages/quay/plugin/scripts/dist/
   这棵 07:35 的 gitignored 暂存树
-
-  status
 status: todo
 labels:
   - gap
