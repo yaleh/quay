@@ -144,11 +144,17 @@ npm `allow-scripts` denylist will skip it — see the fallback above.)
 git clone https://github.com/yaleh/quay.git
 cd quay
 npm install
+cp .quay/config.yml.example .quay/config.yml   # see below — gitignored, not created by npm install
 ```
 
 This is an npm workspaces monorepo (`package.json` `"workspaces": ["packages/*"]`)
 — one `npm install` at the repo root wires up all three packages and their
 shared dependency tree (`@modelcontextprotocol/sdk`, `yaml`, `zod`).
+
+`.quay/config.yml` (the Provider map `quay` Core reads — see [Configuration](#configuration)
+below) is per-workspace and gitignored, so a fresh clone doesn't have one; `.quay/config.yml.example`
+is this repo's own real, working config, checked in so you don't have to construct one by hand
+just to run `quay serve` or the test suite against your own checkout.
 
 Each package also has its own binary you can invoke directly with `node`,
 which is how every example below is actually run (no global install step
