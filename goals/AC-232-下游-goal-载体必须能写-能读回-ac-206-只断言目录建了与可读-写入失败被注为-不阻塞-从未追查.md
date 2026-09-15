@@ -27,7 +27,9 @@ criterion: >-
       if r.get("goal_read_back_ok") is not True: continue
       if int(r.get("goal_records") or 0)<=0: continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-232 fail - no carrier record ac=GOAL-009-AC-232 with host
+  other than this host, goal_write_ok=true, goal_read_back_ok=true and
+  goal_records>0\n"); sys.exit(1)
 
   P
 expect: >-

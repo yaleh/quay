@@ -10,7 +10,12 @@
 // file's basename and whose `details.duration_ms` is the file's wall duration in the
 // concurrent run. This reporter forwards exactly those events, one line per file:
 //
-//   __PERFILE__ duration_ms=<dur> <full-path> passed=<bool> end_ms=<epoch-ms>
+//   __PERFILE__ duration_ms=<dur> <full-path> passed=<bool> end_ms=<epoch-ms> [cpu_ms=<ms>] [mem_peak_kb=<kb>]
+//
+// `cpu_ms` (gap-perfile-cpu-cost-collection) and `mem_peak_kb`
+// (gap-perfile-memory-cost-collection-missing) are OPTIONAL trailing fields written by the
+// per-file preload seam — present only when that dimension was actually measured for the file
+// (absent ≠ 0; 硬规则 3b). `mem_peak_kb` is the file's OWN process peak RSS, NOT its subprocesses'.
 //
 // on the reporter destination (stderr). The `duration_ms` BEFORE the path makes each
 // per-file line match the suite-cost contract measure
@@ -29,7 +34,7 @@
 //     (serial cc=1 is the EXCEPTION — splitting a file does not change total time at cc1)
 //
 // Output lines (all to stderr):
-//   __PERFILE__ duration_ms=<dur> <path> passed=<bool> end_ms=<epoch-ms>   one per file, streamed live
+//   __PERFILE__ duration_ms=<dur> <path> passed=<bool> end_ms=<epoch-ms> [cpu_ms=] [mem_peak_kb=]   one per file, streamed live
 //   __GROUP__ concurrency=<cc> files=<n> sum_ms=<sum> floor_ms=<floor> capped=<m>
 //   __CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆    per capped file (cc>1)
 //
@@ -128,24 +133,48 @@ function readConcurrency() {
   return 1; // default: serial semantics (cc=1) — safest when unknown
 }
 
-// gap-perfile-cpu-cost-collection — per-file CPU (cost_f) via route (a) 子进程自报.
+// gap-perfile-cpu-cost-collection — per-file machine cost (cost_f) via route (a) 子进程自报.
 // The preload seam (plugin/scripts/per-file-cpu-report.mjs, loaded via NODE_OPTIONS=--require) writes
-// each isolated test-file child's OWN process.cpuUsage() to `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)> .cpu`
-// on the child's exit. This reporter reads that file back at the file's `test:complete` event — the
-// child's exit handler runs BEFORE the parent emits test:complete, so the write is on disk and there is
-// no race. The key (sha256(path.resolve(file))[:16]) MUST match the preload's key byte-for-byte.
-// Returns the CPU milliseconds, or undefined when the dir is unset / the file was never written — the
-// caller then OMITS `cpu_ms` from the line (absent = "not measured", never a fabricated 0; 硬规则 3b).
-// Exported so the unified scheduler (suite-scheduler.ts) REUSES this single reader — ⛔ the
+// each isolated test-file child's OWN readings into `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)>.<ext>` on the
+// child's exit: `.cpu` = process.cpuUsage() (+ reaped children), `.mem` =
+// process.resourceUsage().maxRSS (gap-perfile-memory-cost-collection-missing — the memory mirror).
+// This reporter reads those files back at the file's `test:complete` event — the child's exit handler
+// runs BEFORE the parent emits test:complete, so the writes are on disk and there is no race. The key
+// (sha256(path.resolve(file))[:16]) MUST match the preload's key byte-for-byte.
+// Each returns its number, or undefined when the dir is unset / the file was never written — the
+// caller then OMITS the corresponding field from the line (absent = "not measured", never a
+// fabricated 0; 硬规则 3b).
+// Exported so the unified scheduler (suite-scheduler.ts) REUSES these single readers — ⛔ the
 // __PERFILE__ line has TWO emission points (this reporter's legacy/LPT path + the scheduler's own
 // finishFile), and a second hand-rolled read here would be the exact "two writers only one changed"
-// drift (gap-suite-scheduler-perfile-cpu-emitter-missing). Shared, never duplicated.
+// drift (gap-suite-scheduler-perfile-cpu-emitter-missing). Shared, never duplicated. BOTH dimensions
+// ride every emission point — 禁止只改一边.
 export function readPerFileCpuMs(file) {
+  return readPerFileMetric(file, "cpu");
+}
+
+// gap-perfile-memory-cost-collection-missing — the MEMORY mirror of readPerFileCpuMs, same dir, same
+// key, `<key>.mem` extension. The writer (per-file-cpu-report.mjs) records
+// `process.resourceUsage().maxRSS` (KB) — the kernel's PEAK RSS for that test-file child, NOT an
+// exit-time `memoryUsage().rss` snapshot. COVERAGE BOUNDARY (硬规则 3b — read the writer's header
+// before consuming this): this process only; a subprocess the file spawned is NOT covered. Returns
+// the peak KB, or undefined when the dir is unset / no report was written — the caller then OMITS
+// `mem_peak_kb` from the line (absent = "not measured", never a fabricated 0).
+// Exported so the unified scheduler (suite-scheduler.ts) REUSES this single reader — the same
+// two-emission-points-one-reader contract readPerFileCpuMs carries.
+export function readPerFileMemPeakKb(file) {
+  return readPerFileMetric(file, "mem");
+}
+
+// The ONE reader both exported dimensions delegate to: read `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)>.<ext>`
+// and coerce it to a non-negative finite number, or undefined when absent/unreadable/invalid. Shared
+// so the two dimensions cannot drift in key derivation or in the absent⇒omitted contract.
+function readPerFileMetric(file, ext) {
   const dir = process.env.QUAY_PERFILE_CPU_DIR;
   if (!dir) return undefined;
   try {
     const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
-    const raw = readFileSync(path.join(dir, `${key}.cpu`), "utf8").trim();
+    const raw = readFileSync(path.join(dir, `${key}.${ext}`), "utf8").trim();
     if (!raw) return undefined;
     const n = Number(raw);
     return Number.isFinite(n) && n >= 0 ? n : undefined;
@@ -197,7 +226,12 @@ export default async function* perFileReporter(source) {
       // with no report — not wired / never sampled — omits the field, never emits a fabricated 0).
       const cpuMs = readPerFileCpuMs(d.file);
       const cpuPart = cpuMs !== undefined ? ` cpu_ms=${cpuMs}` : "";
-      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed} end_ms=${endedAtMs}${cpuPart}`);
+      // gap-perfile-memory-cost-collection-missing — the peak-memory dimension, same optional-trailing
+      // contract as cpu_ms (present only when the child wrote a .mem report). ⛔ This is ONE of the TWO
+      // __PERFILE__ emission points; suite-scheduler.ts's finishFile carries the same two fields.
+      const memPeakKb = readPerFileMemPeakKb(d.file);
+      const memPart = memPeakKb !== undefined ? ` mem_peak_kb=${memPeakKb}` : "";
+      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed} end_ms=${endedAtMs}${cpuPart}${memPart}`);
     }
   }
 

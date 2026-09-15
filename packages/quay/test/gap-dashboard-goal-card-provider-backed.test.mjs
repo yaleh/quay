@@ -23,7 +23,17 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { renderGoalCard, readGoalPolicy, renderDashboardPage } from "../src/serve-dashboard.ts";
+import {
+  renderGoalCard,
+  readGoalPolicy,
+  renderDashboardPage,
+  peekDashboardSnapshot,
+  startDashboardSnapshotRefresh,
+  setDashboardSnapshotStepHook,
+  clearDashboardSnapshots,
+  isDashboardSnapshotRebuilding,
+  isDashboardSnapshotFollowUpQueued,
+} from "../src/serve-dashboard.ts";
 import { startServer } from "../src/serve.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -148,6 +158,43 @@ function get(port, urlPath) {
   });
 }
 
+/** Poll until `fn()` is truthy or the deadline passes; returns whether it became true. Asserted on
+ *  the result at every call site — a bare `await` on a timeout-returning helper is a 恒真空转. */
+async function until(fn, ms = 30_000, step = 25) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, step));
+  }
+  return fn();
+}
+
+/** `server.client`, wrapped so the test can READ how many times the build asked the goal ABI.
+ *  A build issues exactly one `goalList()` (first thing `buildDashboardSnapshot` does), so this
+ *  counts builds — the direct quantity for "did a tick stack another build?", not a proxy. */
+function countingClient(real, onGoalList) {
+  return new Proxy(real, {
+    get(t, prop) {
+      if (prop === "goalList") {
+        return async () => { onGoalList(); return t.goalList(); };
+      }
+      const v = Reflect.get(t, prop, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+}
+
+/** Write the three-file goal fixture this file's `before()` installs. */
+function writeGoalFixture() {
+  const now = new Date().toISOString();
+  fs.writeFileSync(path.join(goalsDir, "GOAL-001-goal-mechanism.md"),
+    `---\nid: GOAL-001\ntitle: goal mechanism\nstatus: active\nkind: goal\norigin: test\n---\n## Goal\none target\n`);
+  fs.writeFileSync(path.join(goalsDir, "AC-170-first.md"),
+    `---\nid: AC-170\ntitle: first ac\nstatus: achieved\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: "exit 0"\norigin: test\nevidence:\n  at: ${now}\n  verdict: pass\n  reading: "0"\n---\n## Rationale\nmeasured\n`);
+  fs.writeFileSync(path.join(goalsDir, "AC-171-second.md"),
+    `---\nid: AC-171\ntitle: second ac\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: "exit 0"\norigin: test\n---\n## Rationale\npending\n`);
+}
+
 let server, port, originalCwd, workspaceRoot, goalsDir;
 
 before(async () => {
@@ -170,7 +217,18 @@ before(async () => {
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
   port = server.address().port;
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: /dashboard's request path now serves a
+  // SNAPSHOT built by a background tick (the goal card included — `client.goalList()` costs ~1 s
+  // through the real ABI, so it cannot stay on the request path). Retire the tick here and rebuild
+  // EXPLICITLY (`rebuild()` below) after each fixture change, so the tests keep exercising the
+  // PRODUCTION path instead of racing a 30 s refresh.
+  server.dashboardSnapshot.stop();
 });
+
+/** Make the dashboard snapshot reflect the goal store as it is right now. */
+async function rebuild() {
+  await server.dashboardSnapshot.rebuildNow();
+}
 
 after(async () => {
   await new Promise((r) => server.close(r));
@@ -191,6 +249,7 @@ test("AC1+AC2: a running serve instance serves goal-card AND task-card on /dashb
 
 test("AC4: with no goals the /dashboard still returns 200 and shows the empty state", async () => {
   for (const f of fs.readdirSync(goalsDir)) fs.rmSync(path.join(goalsDir, f));
+  await rebuild();
   try {
     const r = await get(port, "/dashboard");
     assert.equal(r.status, 200);
@@ -200,4 +259,107 @@ test("AC4: with no goals the /dashboard still returns 200 and shows the empty st
   } finally {
     // restore for any later assertion (defensive; this is the last test but keep the fixture valid).
   }
+});
+
+// ── gap-dashboard-snapshot-rebuild-returns-inflight-cold-build ────────────────────────────────────
+// 病灶：`rebuild()`（`rebuildNow()` 的实现）在已有构建 in-flight 时**去重返回那趟旧构建**。冷构建
+// 的 `client.goalList()` 是 `buildDashboardSnapshot` 的第一行就发出去的 ⇒ 调用方在冷构建按住期间
+// 改动 fixture 后 `await rebuildNow()`，拿到的快照带的是**改动前**的数据。
+//
+// 下面两条读数都把「in-flight」**断言**出来（步骤钩子把构建按住 + 计数 client 读到 goalList 已返回），
+// 而不是靠 sleep 赌时序 —— 前提是**读数**（`goalCalls === 1`），不是等待。
+
+test("AC1: rebuildNow() during an in-flight cold build reflects the caller's change (not the incumbent's stale read)", async () => {
+  // Start from a clean snapshot state and let anything already running settle, so the only build this
+  // test reasons about is the one it starts itself.
+  await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
+  clearDashboardSnapshots();
+  writeGoalFixture();
+
+  let goalCalls = 0;
+  const client = countingClient(server.client, () => { goalCalls += 1; });
+
+  // Hold the COLD build open at a cooperative step boundary.
+  let release;
+  const held = new Promise((r) => { release = r; });
+  let entered = false;
+  setDashboardSnapshotStepHook(async () => { entered = true; await held; });
+  const handle = startDashboardSnapshotRefresh(workspaceRoot, client, { intervalMs: 60_000 });
+  try {
+    assert.ok(
+      await until(() => entered && isDashboardSnapshotRebuilding(workspaceRoot)),
+      "the cold build must actually be in flight for this reading to mean anything",
+    );
+    // The PREMISE as a reading, not a sleep: the incumbent has already been handed its goal answer
+    // (the round-trip returned while the build sat held), so it is now provably a pre-change reading.
+    assert.ok(await until(() => goalCalls >= 1), "the cold build must have issued its goalList() round-trip");
+    assert.equal(goalCalls, 1, "premise: exactly the one cold build has read the store thus far");
+
+    // The caller's change, made while the incumbent build is still in flight.
+    for (const f of fs.readdirSync(goalsDir)) fs.rmSync(path.join(goalsDir, f));
+
+    const afterChange = handle.rebuildNow();
+    assert.equal(
+      isDashboardSnapshotFollowUpQueued(workspaceRoot),
+      true,
+      "rebuildNow() must QUEUE a rebuild behind the incumbent — not be satisfied by it",
+    );
+
+    release();
+    await afterChange;
+
+    const snap = peekDashboardSnapshot(workspaceRoot);
+    assert.ok(snap != null, "a snapshot is installed after the on-demand rebuild");
+    assert.deepEqual(
+      snap.goals.map((g) => g.id),
+      [],
+      "the snapshot handed to the caller reflects the store AS OF THE CALL — the incumbent build's pre-change goal answer must not be served as the result of rebuildNow()",
+    );
+
+    // …and the same reading on the real HTTP surface (the path the suite red took).
+    const r = await get(port, "/dashboard");
+    assert.equal(r.status, 200);
+    assert.match(r.body, /暂无 active GOAL/, "empty state shown — the dashboard reads the caller's store, not the stale incumbent");
+  } finally {
+    release();
+    setDashboardSnapshotStepHook(null);
+    handle.stop();
+  }
+});
+
+test("AC3 property: the periodic tick still never stacks — ticks during an in-flight build start no build", async () => {
+  await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
+  clearDashboardSnapshots();
+  writeGoalFixture();
+
+  let goalCalls = 0;
+  const client = countingClient(server.client, () => { goalCalls += 1; });
+
+  let release;
+  const held = new Promise((r) => { release = r; });
+  let entered = 0;
+  setDashboardSnapshotStepHook(async () => { entered += 1; await held; });
+  // A 5 ms tick: many tick opportunities per build, i.e. the "连发" the contract is about.
+  const handle = startDashboardSnapshotRefresh(workspaceRoot, client, { intervalMs: 5 });
+  try {
+    assert.ok(
+      await until(() => entered > 0 && isDashboardSnapshotRebuilding(workspaceRoot)),
+      "the cold build must be in flight for this reading to mean anything",
+    );
+    const atHold = goalCalls;
+    assert.equal(atHold, 1, "only the cold build has run so far");
+    // The stimulus: let the tick fire repeatedly (≈40 opportunities) while the build stays in flight.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(
+      goalCalls,
+      atHold,
+      `a tick landing on an in-flight rebuild must start NO build (goalList calls ${atHold} -> ${goalCalls}); rebuilds must not queue up and land at once`,
+    );
+    assert.equal(isDashboardSnapshotFollowUpQueued(workspaceRoot), false, "and the tick must not queue a follow-up either");
+  } finally {
+    handle.stop(); // retire the interval BEFORE releasing, so no tick starts a build after the hold
+    release();
+    setDashboardSnapshotStepHook(null);
+  }
+  await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
 });

@@ -24,6 +24,14 @@ import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 // the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
 // the sole path into develop from a task worktree).
 import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+// AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify): the judgment that a NEW
+// `delivery-critical` task must declare a top-level `goal_ac`. It lives in the product layer next to
+// store-commit.ts because the PREVIOUS home — the git `pre-commit` hook (precommit-guard.ts ③) — is
+// structurally unreachable for this store: `commitStoreWrite` commits with `--no-verify` by design
+// (store-commit.ts:13-15), and 370/400 of the last 400 `tasks/` commits are store-commit-shaped. The
+// writer's own path is here, so the rule is enforced here (硬规则 4 推论三: a judgment only the hand
+// path can reach proves nothing about the writer path).
+import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
 // sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
@@ -256,6 +264,42 @@ export class ConflictError extends Error {
     this.id = id;
     this.expectedStatus = expectedStatus;
     this.actualStatus = actualStatus;
+  }
+}
+
+/**
+ * gap-quay-native-task-create-duplicate-id-prepends-frontmatter: thrown by
+ * `write()` when the caller opted into CREATE semantics (`{ create: true }`)
+ * and the target file ALREADY EXISTS.
+ *
+ * Why a dedicated class and not a generic Error: the create path's whole job is
+ * to refuse, and a caller must be able to branch on "this id is taken" without
+ * parsing a message string — the same reasoning ConflictError documents above.
+ *
+ * Why the store and not the CLI: `task create` has two front doors (the native
+ * CLI's `task create` and Core's `quay task create`, which reaches this store
+ * through the Provider ABI's `task_write`). The existence check belongs at the
+ * single write chokepoint so the guard is race-free (it runs inside the same
+ * `withLocks()` acquisition as the read-modify-write) rather than a TOCTOU
+ * pre-check each front door would have to re-implement.
+ *
+ * The defect it closes: before this guard, `create` on an existing id fell
+ * through to `write()`'s ordinary read-modify-write and silently MERGED the
+ * caller's patch into the existing task — exit code 0, no stderr — so a settled
+ * `done` task was re-statused to the caller's `todo` and (when the caller also
+ * passed a body) the original document survived only as duplicated text below a
+ * second `---` block. Failure and success were the same shape (exit 0, a
+ * well-formed file), which is why it went unnoticed.
+ */
+export class AlreadyExistsError extends Error {
+  id: string;
+  constructor(id: string) {
+    super(
+      `task "${id}" already exists — refusing to create it (nothing written to disk; ` +
+        `use \`task edit\` / task_write to modify an existing task)`
+    );
+    this.name = "AlreadyExistsError";
+    this.id = id;
   }
 }
 
@@ -898,6 +942,37 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
   }
 
+  /** The list-filter predicate, over a task VIEW-MODEL (so it sees the same status
+   *  coercion / id fallback / label normalisation `toViewModel` gives every other
+   *  reader — never the raw frontmatter, which would let an illegal `status:` filter
+   *  differently here than it renders elsewhere). Shared by the body-aware walk
+   *  (`walkTasks`) AND the frontmatter-only index walk (`queryPage`), so the two can
+   *  never disagree about which tasks match.
+   *
+   *  `sq` is the pre-lowercased `search` needle, or null when no search was asked
+   *  for. `search` is the ONE body-dependent clause: a caller on the index path
+   *  (no body read) MUST pass a task whose `body` it is willing to match against —
+   *  `queryPage` documents why it never combines the two. */
+  function matchesListFilter(
+    t: Task & { updatedAt?: number },
+    filter: { status?: string; label?: string | string[]; prefix?: string },
+    sq: string | null,
+  ): boolean {
+    if (filter.status && t.status !== filter.status) return false;
+    if (filter.label !== undefined) {
+      // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: `label`
+      // accepts a string (single filter, the ABI's original shape) OR an array
+      // (AND-join — the semantics Core's MCP/CLI/Web surfaces have always applied
+      // client-side; the array form lets them push the work down instead).
+      const wanted = Array.isArray(filter.label) ? filter.label : [filter.label];
+      const have = t.labels || [];
+      if (wanted.length > 0 && !wanted.every((l) => have.includes(l))) return false;
+    }
+    if (filter.prefix && !t.id.toUpperCase().startsWith(filter.prefix.toUpperCase())) return false;
+    if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) return false;
+    return true;
+  }
+
   // gap-one-unparseable-task-takes-down-the-whole-board: the per-task walk
   // shared by list() and listWithMalformed(). One file whose frontmatter fails
   // to parse must poison exactly its own entry, never the whole store —
@@ -906,7 +981,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // is a CLEAR error, safe degradation per DIR-001; listWithMalformed()
   // collects it into a machine-readable failure list).
   function walkTasks(
-    filter: { status?: string; label?: string; search?: string },
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string },
     onError: (id: string, err: unknown) => void,
   ): (Task & { updatedAt?: number })[] {
     const tasks: (Task & { updatedAt?: number })[] = [];
@@ -925,15 +1000,13 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         continue;
       }
       if (t === null) continue;
-      if (filter.status && t.status !== filter.status) continue;
-      if (filter.label && !(t.labels || []).includes(filter.label)) continue;
-      if (sq && !((t.title + " " + stripHeadingsForSearch(t.body)).toLowerCase().includes(sq))) continue;
+      if (!matchesListFilter(t, filter, sq)) continue;
       tasks.push(t);
     }
     return tasks;
   }
 
-  function list(filter: { status?: string; label?: string } = {}): (Task & { updatedAt?: number })[] {
+  function list(filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {}): (Task & { updatedAt?: number })[] {
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime in ms)
     // on each task in list results. This lets CLI (--sort updated) and Web UI
     // (?sort=updated) sort by recency without needing a separate fs.stat call
@@ -971,7 +1044,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * partial success, not a call-level failure.
    */
   function listWithMalformed(
-    filter: { status?: string; label?: string; search?: string } = {},
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {},
   ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
     const malformed: Array<{ file: string; error: string }> = [];
     ensurePersistentCacheLoaded();
@@ -980,6 +1053,210 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
     flushPersistentCache();
     return { tasks, malformed };
+  }
+
+  /**
+   * gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: the PAGED
+   * list — the shape every list consumer that renders one screen actually needs.
+   *
+   * WHY THIS EXISTS: `listWithMalformed()` (and `list()`) resolve the WHOLE filtered
+   * set and hand back every matching task WITH ITS BODY. On the live store that is
+   * 2135 tasks / 14.4 MB of bodies; the Provider ABI round-trip of that payload
+   * measured **51.6 s** (MCP) and the Core MCP server is single-threaded, so a
+   * concurrent `task_get` (2 ms of real work) queued behind it and timed out
+   * (-32001) — the head-of-line block that made the ABI-only `quay:quay-task`
+   * subagent structurally unusable. The cost was never the walk (warm: ~40 ms) nor
+   * the serialisation (~200 ms): it was that the RESPONSE carried every body
+   * regardless of how many the caller asked for.
+   *
+   * THE FIX, in two phases so the response cost tracks the PAGE, not the STORE:
+   *   1. resolve the matching ID SET without reading bodies — from the directory
+   *      listing alone when no filter is asked for (zero file reads), otherwise a
+   *      frontmatter-only walk (persistent-cache stat + the same `matchesListFilter`
+   *      predicate the body-aware walk uses, so the two can never disagree);
+   *   2. read the full task (body included) for the page WINDOW only — at most
+   *      `pageSize` files, whatever the store's size.
+   *
+   * ⛔ `search` is the ONE filter that needs a body, so it cannot use phase 1's
+   * index: a search request falls back to the body-aware walk (`walkTasks`, i.e.
+   * every body read once, matches only carrying bodies onward). That keeps the
+   * PRE-EXISTING server-side-search behaviour of `gap-serve-search-timeout-all-
+   * body-fetch` intact — the response still carries only the matches.
+   *
+   * CONTRACT (what the caller may rely on):
+   *   - `tasks` is the requested window of the filtered set, in `listIds()` order.
+   *   - `total` is the filtered count BEFORE paging (== tasks.length when unpaged).
+   *   - `malformed` keeps `listWithMalformed`'s meaning: every file whose frontmatter
+   *     failed to parse, collected during the walk phase 1 performed. It is an advisory
+   *     side-channel (never counted in `total`), not a claim of a whole-store scan: an
+   *     UNFILTERED PAGED query answers from the directory listing, examines no file, and
+   *     therefore has nothing to report. `scannedFiles` says WHICH of the two happened, so
+   *     a caller can tell "no bad files" from "did not look" (硬规则 3b — an un-evaluated
+   *     thing must not read as a clean one).
+   *   - Absent `pageSize` ⇒ no paging (whole filtered set), and the walk always runs, so
+   *     the unpaged answer is byte-compatible with the pre-existing `listWithMalformed`
+   *     result — INCLUDING a complete `malformed` list.
+   *   - `includeBody:false` ⇒ phase 2 builds the window from the frontmatter index instead
+   *     of `get()`, so no task body is read at all.
+   */
+  function queryPage(
+    filter: { status?: string; label?: string | string[]; prefix?: string; search?: string } = {},
+    opts: { page?: number; pageSize?: number; includeBody?: boolean } = {},
+  ): {
+    tasks: (Task & { updatedAt?: number })[];
+    malformed: Array<{ file: string; error: string }>;
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    scannedFiles: boolean;
+  } {
+    const malformed: Array<{ file: string; error: string }> = [];
+    ensurePersistentCacheLoaded();
+    const sq = filter.search ? filter.search.toLowerCase() : null;
+    const hasIndexFilter =
+      Boolean(filter.status) || filter.label !== undefined || Boolean(filter.prefix);
+    const isPaged = opts.pageSize !== undefined && opts.pageSize !== null;
+    const wantBodies = opts.includeBody !== false;
+    const allIds = listIds();
+    let matchedIds: string[];
+    let scannedFiles: boolean;
+    if (sq !== null) {
+      // `search` matches body text, so it is the one filter the frontmatter index
+      // cannot answer — walk with bodies (the persistent cache still spares the
+      // re-parse; only the body read is per-task) and keep the matches' ids.
+      matchedIds = [];
+      scannedFiles = true;
+      for (const id of allIds) {
+        let t: (Task & { updatedAt?: number }) | null;
+        try {
+          t = get(id);
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        if (t === null) continue;
+        if (!matchesListFilter(t, filter, sq)) continue;
+        matchedIds.push(id);
+      }
+    } else if (!hasIndexFilter && isPaged) {
+      // Requested as a PAGE with no filter at all: the matching set IS the id set, so
+      // phase 1 needs no file I/O — not even a stat. This is what makes an unfiltered
+      // page genuinely independent of the store's size for the walk phase; phase 2
+      // still reads exactly `pageSize` entries below.
+      //
+      // ⛔ The no-filter short-circuit is deliberately NOT taken when the request is
+      // UNPAGED: `malformed` is derived from the files the walk examined, and the
+      // pre-existing whole-set contract is that it is COMPLETE (it is what surfaces a
+      // bad task file on the board). Skipping the walk there would turn a complete list
+      // into an empty one — "scanned and clean" would become indistinguishable from
+      // "never looked" for every existing caller (硬规则 3b). A paged caller has opted
+      // into a window, and says so back to the caller via `scannedFiles:false` below.
+      matchedIds = allIds;
+      scannedFiles = false;
+    } else {
+      matchedIds = [];
+      scannedFiles = true;
+      for (const id of allIds) {
+        let frontmatter: Record<string, unknown>;
+        try {
+          const meta = getMeta(id);
+          if (meta === null) continue;
+          frontmatter = meta.frontmatter;
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        // Same predicate as the body-aware walk — via the same view-model
+        // construction, so a coerced status / id fallback / label default can
+        // never make the index path select a different set than the walk would.
+        // `body` is "" here, which is sound because `search` is handled above
+        // (this branch runs only when `sq === null`, so the body clause is dead).
+        if (!matchesListFilter(toViewModel(frontmatter, "", undefined, id), filter, null)) continue;
+        matchedIds.push(id);
+      }
+    }
+    const total = matchedIds.length;
+    const size = isPaged ? Math.max(0, Math.trunc(opts.pageSize as number)) : total;
+    const pageNum = Math.max(1, Math.trunc(opts.page ?? 1));
+    const start = isPaged ? (pageNum - 1) * size : 0;
+    const windowIds = isPaged ? matchedIds.slice(start, start + size) : matchedIds;
+    // Phase 2 — full tasks for the window only. `includeBody:false` builds them from the
+    // frontmatter index instead (no readFileSync at all) — the same projection the
+    // response layer applies anyway, done one step earlier so the body is never read.
+    const tasks: (Task & { updatedAt?: number })[] = [];
+    for (const id of windowIds) {
+      if (!wantBodies) {
+        let fm: Record<string, unknown>;
+        let updatedAt: number | undefined;
+        try {
+          const meta = getMeta(id);
+          if (meta === null) continue;
+          fm = meta.frontmatter;
+          updatedAt = meta.updatedAt;
+        } catch (err) {
+          malformed.push({ file: `${id}.md`, error: (err as Error).message });
+          continue;
+        }
+        tasks.push(toViewModel(fm, "", updatedAt, id));
+        continue;
+      }
+      let t: (Task & { updatedAt?: number }) | null;
+      try {
+        t = get(id);
+      } catch (err) {
+        malformed.push({ file: `${id}.md`, error: (err as Error).message });
+        continue;
+      }
+      if (t === null) continue;
+      tasks.push(t);
+    }
+    flushPersistentCache();
+    return {
+      tasks,
+      malformed,
+      total,
+      page: pageNum,
+      pageSize: size,
+      totalPages: size > 0 ? Math.ceil(total / size) : 0,
+      scannedFiles,
+    };
+  }
+
+  /** Frontmatter-only read: everything `matchesListFilter` needs EXCEPT the body.
+   *  On a persistent-cache hit this is the cache lookup alone — no readFileSync,
+   *  which is the entire point (the walk phase of `queryPage` runs once per task
+   *  in the store; the body read is what phase 2 restricts to the page window).
+   *  A cache MISS falls through to a full parse, which both refreshes the cache
+   *  and is where a malformed file is detected (the caller catches and records it).
+   *
+   *  Correctness note: the persistent cache is keyed on (mtimeMs, size) — the same
+   *  heuristic `get()` already documents and accepts. A hit therefore means "this
+   *  file is byte-unchanged since a parse that SUCCEEDED", so serving its cached
+   *  frontmatter without re-reading cannot invent a match for a file that has since
+   *  become unparseable (its size would have changed). */
+  function getMeta(id: string): { frontmatter: Record<string, unknown>; updatedAt?: number } | null {
+    const taskFile = path.join(tasksDir, `${id}.md`);
+    let stat: fs.Stats | null = null;
+    try {
+      stat = fs.statSync(taskFile);
+    } catch {
+      // stat failed (file absent or a transient race) — fall through; readRaw below
+      // re-asserts absence and returns the same null contract.
+    }
+    if (stat === null) return null;
+    const cached = persistentCache.get(id);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return { frontmatter: cached.frontmatter, updatedAt: stat.mtimeMs };
+    }
+    const raw = readRaw(id);
+    if (raw === null) return null;
+    const { frontmatter } = parse(raw);
+    if (isJsonSafe(frontmatter)) {
+      persistentCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter });
+      persistentCacheDirty = true;
+    }
+    return { frontmatter, updatedAt: stat.mtimeMs };
   }
 
   /**
@@ -1322,10 +1599,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean; create?: boolean }): (Task & { updatedAt?: number }) | null {
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
+    // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: opt-in CREATE semantics.
+    // `write()` is shared by create and edit; only the create path asserts "this id must be free"
+    // (see AlreadyExistsError). Default false keeps every existing `task edit` / task_write call
+    // byte-for-byte unchanged — an edit of an id that does not exist still creates it, exactly as
+    // before (that is `edit`'s documented upsert behavior, not a defect).
+    const create = opts?.create === true;
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1348,6 +1631,17 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
     const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
+      // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: the create guard.
+      // Placed HERE — inside the lock, before any mutation — for two reasons:
+      //   * race-free: a pre-check done by a caller (outside the lock) is TOCTOU — two concurrent
+      //     `task create <same-id>` calls would both observe "absent", both proceed, and the second
+      //     would silently clobber the first. Inside the lock the loser sees the winner's file.
+      //   * zero write: throwing before `fs.writeFileSync` below means the existing file's bytes are
+      //     untouched, which is what makes AC1's byte-identical assertion meaningful (a guard that
+      //     wrote first and rolled back would pass a status check but not a byte check).
+      if (create && existingRaw !== null) {
+        throw new AlreadyExistsError(id);
+      }
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
       let beforeFrontmatter: Record<string, unknown> | null = null;
@@ -1414,8 +1708,32 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       invalidateCache(id);
       try {
         validateWrittenYaml(taskFilePath, id, frontmatter);
+        // ── AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify) ──────────────
+        // `delivery-critical` asserts a LONG-TERM guarantee that only the goal layer can back, so a
+        // task carrying it cannot be BORN without a top-level `goal_ac`. The judgment is the SAME one
+        // the per-round detector and the pre-commit hook run (one function, three moments —
+        // packages/quay/src/goal-ac-write-face.ts); ⛔ no second string comparison here.
+        //   SCOPE = CREATION ONLY (`existingRaw === null`), which IS the grandfather semantics at the
+        //   write face: flipping the status of a pre-existing delivery-critical task without goal_ac
+        //   must never be blocked (this repo alone has 115 such stock tasks).
+        //   ENABLE CONDITION = the workspace actually HAS a goal layer (≥1 GOAL-/AC- record); a
+        //   third-party workspace has no goal layer at all, so `goal_ac` would have nothing to point
+        //   at and the rule's premise does not hold ⇒ it must never be blocked (硬规则 12's mirror: do
+        //   not impose an unmeasured restriction). ⛔ `goals/` merely EXISTING is not the condition —
+        //   quay-init mkdir's it unconditionally, so existence alone is true everywhere.
+        if (existingRaw === null) {
+          const rejection = writeFaceRejectionOnCreate({
+            id,
+            rel: path.join("tasks", `${id}.md`), // the store's own rel convention (see commitTaskWrite)
+            content: raw,
+            goalDir: path.join(path.dirname(tasksDir), GOAL_CARRIER_DIR_NAME),
+          });
+          if (rejection !== null) throw new Error(rejection);
+        }
       } catch (validationErr) {
-        // Rollback: restore prior content if it existed, or remove the new file.
+        // Rollback: restore prior content if it existed, or remove the new file. The AC-190 write-face
+        // rejection above rides the SAME seam — it is only ever raised on a creation (`existingRaw ===
+        // null`), so its rollback is exactly the "new file" arm: the task never lands on disk.
         if (existingRaw !== null) {
           fs.writeFileSync(taskFilePath, existingRaw, "utf8");
         } else {
@@ -1826,6 +2144,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   return {
     list,
     listWithMalformed,
+    queryPage,
     get,
     write,
     delete: deleteTask,

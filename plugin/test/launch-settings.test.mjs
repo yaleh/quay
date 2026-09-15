@@ -270,11 +270,24 @@ test("AC6 — negative control: removing promptSuggestions drops the CLI flag (c
 
 // ── Settings schema conformance ───────────────────────────────────────────────────────────────────
 
-test("AC7 — the settings file loads cleanly under claude --settings (no validation error)", () => {
+test("AC7 — the settings file loads cleanly under claude --settings (no validation error)", (t) => {
   const r = spawnSync("claude", ["--settings", SETTINGS, "--version"], {
     encoding: "utf8",
     timeout: 30000,
   });
+  // 「来源不完备」≠「检查通过」（硬规则 3b / 5）：本判据的被测对象是 claude CLI 对 settings 的
+  // schema 校验能力，而 claude 不是本仓库声明的工具链依赖（package.json 不含
+  // @anthropic-ai/claude-code），全新 checkout / CI runner 上通常根本没有它
+  // ——`spawnSync` 对无法执行的命令返回 `status: null` + `error.code === "ENOENT"`。
+  // 选择 NOT-EVALUATED（而非在 CI 里装 claude）的理由：
+  //   ① 装它会给每次 CI 加网络依赖与版本漂移——被断言的 schema 会随 claude 版本变，
+  //      而 CI 装的那版与 contributor 本地那版可能不同 ⇒ 判据不稳且不反映 contributor 环境；
+  //   ② 装了它并不能增强本仓库的回归防护，只是把「claude 当前版本的 schema 长什么样」钉进 CI。
+  // 关键：**只在二进制缺席时** NOT-EVALUATE；二进制在场却拒绝 settings 仍须红（回归防护保留）。
+  if (r.error && r.error.code === "ENOENT") {
+    t.skip("claude 不在 PATH（非本仓库工具链依赖）——NOT-EVALUATED：无被测对象，不伪装成通过");
+    return;
+  }
   assert.equal(r.status, 0, `claude --settings must exit 0:\n${r.stderr}`);
   assert.match(r.stdout, /Claude Code|claude/);
 });

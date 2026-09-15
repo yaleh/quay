@@ -2,13 +2,15 @@
 id: gap-driver-status-carrier-path-source-label-mismatch
 title: driver status 的 carrier_path 与 last_record_ts 不同源 ⇒ server status 的 §6.10
   source 串谎报自己读的是哪个载体
-status: ready
+status: done
 labels:
   - gap
 parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-ac255-driver-internalization-pid-le2-six-kinds-fresh
 ---
 ## Finding
 

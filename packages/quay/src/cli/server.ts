@@ -70,6 +70,26 @@ interface ServiceReport {
   liveness: ServiceProbe;
 }
 
+/** SPEC §6.10「每服务独立健康读数」对 **driver kind** 的那一半（GOAL-017/AC-255）。
+ *
+ *  合并成「一个 anchor 承载六个 kind 循环」之后，`ps` 只剩一行 ⇒ 「进程活着」与「这个 kind 还在转」
+ *  在外部不再可区分（§6.7 禁止的那种折叠）。故每行给一条**直接量**：该服务**自己的 round 心跳**的
+ *  最后一条记录的 `ts`（⛔ 不是「宿主 pid 活着」这种推导，⛔ 也不是 pid 文件存在性）。
+ *
+ *  ⛔ 本行**不参与**顶层 `status` 的判定（`running`/`degraded` 仍是 AC-251 的 pid 同一性契约）——
+ *  一个工作区里没有 driver 在跑是**常态**（未冷启动 / 已 drain），把它折进 `status` 会让
+ *  「统一 server 不在」与「driver 没起」同形。它有自己的取值：`liveness.alive`。 */
+interface DriverServiceReport {
+  name: string;
+  kind: string;
+  pid: number | null;
+  host: string;
+  liveness: ServiceProbe;
+}
+
+/** 心跳新鲜度窗口（ms）。与 AC-255 的 criterion 同值（60min）——同一个量、同一个阈值，⛔ 不各写一份。 */
+const DRIVER_HEARTBEAT_FRESH_MS = 3600_000;
+
 /** Resolve the workspace root the way every other workspace-scoped command does: `--root` when
  *  given, else an upward walk from the process cwd. Fail-closed — a directory without
  *  `.quay/config.yml` is never silently replaced by cwd (gap-task-list-root-does-not-scope-
@@ -92,16 +112,23 @@ function unevaluated(reason: string): ServiceProbe {
   return { evaluated: false, alive: null, source: null, detail: reason };
 }
 
-/** The four verbs of SPEC §6.9 stage B (plus the stage-A `status`). ONE list, used by the usage
- *  text, the help block and the dispatch — a second copy is how 「能力在而表层说没有」happens. */
-export const SERVER_VERBS = ["start", "add", "stop", "status"] as const;
+/** The five service verbs: SPEC §6.9 stage B's lifecycle四动词 (`start`/`add`/`stop`/`restart`) plus
+ *  the stage-A `status`. ONE list, used by the usage text, the help block and the dispatch — a second
+ *  copy is how 「能力在而表层说没有」happens.
+ *
+ *  ⚠️ `restart` is its OWN verb and ⛔ is NOT served by `start` (GOAL-017/AC-256, SPEC §6.9 不变式 1
+ *  vs 3): starting a service that is already running MUST stay a no-op — never a silent restart —
+ *  while a *requested* restart must exist as a distinct, recordable action. Folding the two together
+ *  is precisely the 硬规则 3b shape: 「未请求的重启」 and 「被请求的重启」 would share one value, and
+ *  `restart` would stop being a reading of anything. */
+export const SERVER_VERBS = ["start", "add", "stop", "restart", "status"] as const;
 
 const USAGE = `usage: quay server <${SERVER_VERBS.join("|")}> [--only <svc,...>] [--without <svc,...>] [--json] [--root <path>]
 services: ${ALL_SERVICE_NAMES.join(", ")}`;
 
 export async function handleServer(ctx: CliCtx) {
   const { sub } = ctx;
-  if (sub === "start" || sub === "add" || sub === "stop") {
+  if (sub === "start" || sub === "add" || sub === "stop" || sub === "restart") {
     await lifecycleCommand(sub, ctx);
     return;
   }
@@ -111,6 +138,88 @@ export async function handleServer(ctx: CliCtx) {
     return;
   }
   await statusCommand(ctx);
+}
+
+/** 一个 driver kind 的健康读数：**直接量** = 它自己 round 心跳载体的最后一条记录的 `ts`。
+ *  三态（硬规则 3b）：fresh(`alive:true`) / stale(`alive:false`) / not-evaluated（读不到载体或 ts
+ *  不可解析 ⇒ `evaluated:false`，⛔ 与「停摆」不同形——「读不懂」不得伪装成「不合格」。 */
+function driverServiceReport(workspaceRoot: string, kind: string): DriverServiceReport {
+  const name = `driver:${kind}`;
+  const r = runDriver("status", kind, ["--kind", kind, "--json"], workspaceRoot);
+  const base: DriverServiceReport = { name, kind, pid: null, host: "local", liveness: unevaluated("driver status unavailable") };
+  if (!r.ok) return { ...base, liveness: unevaluated(r.reason ?? "driver status unavailable") };
+  const line = r.stdout.split("\n").find((l) => l.trim().startsWith("{"));
+  if (!line) return { ...base, liveness: unevaluated(`driver status produced no JSON frame (exit ${r.exitCode})`) };
+  let j: {
+    driver_pid?: number | null;
+    anchor_pid?: number | null;
+    driver_alive?: number | null;
+    carrier_path?: string | null;
+    last_record_carrier?: string | null;
+    last_record_ts?: string | null;
+  };
+  try {
+    j = JSON.parse(line) as typeof j;
+  } catch {
+    return { ...base, liveness: unevaluated("driver status JSON was unparseable") };
+  }
+  const pid = j.driver_pid ?? j.anchor_pid ?? null;
+  const carrier = j.carrier_path;
+  // ⛔ `carrier_path` 是「首个存在的载体」，**不是**这个 ts 的来源——两者在真实工作区上会不同名
+  // （实测 2026-09-13 生产 `promotion`：outcome 存在但末条 ts 停在 2.5h 前、round 每 30s 一条）。
+  // 把 ts 归因给 `carrier_path` 就是让一条真读数声称一个假的来源（硬规则 3b/4b）。来源由 kernel 的
+  // `last_record_carrier` 单列给出；⛔ 它缺失时【不点名任何载体】，而不是退回 `carrier_path` 再谎报一次
+  // （gap-driver-status-carrier-path-source-label-mismatch）。
+  const tsCarrier =
+    typeof j.last_record_carrier === "string" && j.last_record_carrier !== "" ? j.last_record_carrier : null;
+  const tsRaw = j.last_record_ts;
+  // ⚠️ **没有活着的承载进程** 是一个独立的、必须先判的取值（GOAL-017/AC-255 的负控制实测教训）：
+  // 只看心跳新鲜度会让「这个 kind 已经被停掉」在 **60 分钟**内与「一切正常」同形（心跳窗口是 60min，
+  // 而停掉的循环当然不会再写 —— 于是它的最后一条记录在窗口内仍然「新鲜」）。实测：`stop --kind meta`
+  // 之后该行仍报 alive:true，只有 pid 变 null。那不是「服务在转」的读数。
+  // ⇒ 先判承载进程（`driver_alive` = **承载该 kind 常驻循环的那个进程**是否活着——收敛形态下就是
+  // anchor 自己），再判心跳。
+  // ⚠️ 这里的 `driver_alive` 曾一度只在「逐 kind pid 载体恰好写着承载者的 pid」时为 1，于是收敛形态下
+  // 五个 kind 被读成「没有活着的承载进程 ⇒ the loop is not running」（`gap-driver-status-misreports-
+  // anchor-hosted-kind-as-down`：2026-09-15 生产实测，同刻它们的 round 载体都在秒级刷新）。判据已改到
+  // 承载关系本身（见 driver-runtime.ts 的 `anchorHosts`）⇒ 本消费点随之正确，⛔ 不必在这里再判一次。
+  if (j.driver_alive !== 1) {
+    return {
+      ...base,
+      pid,
+      liveness: {
+        evaluated: true,
+        alive: false,
+        source: "driver pid",
+        detail: `no live carrying process for ${name} (pid=${pid ?? "none"}) — the loop is not running`,
+      },
+    };
+  }
+  if (!carrier || !tsRaw) {
+    return { ...base, pid, liveness: unevaluated(`no round heartbeat carrier record yet (carrier=${carrier ?? "null"})`) };
+  }
+  const at = Date.parse(tsRaw);
+  if (!Number.isFinite(at)) {
+    return { ...base, pid, liveness: unevaluated(`carrier ${carrier} last ts is unparseable (${tsRaw})`) };
+  }
+  const ageMs = Date.now() - at;
+  const stale = ageMs > DRIVER_HEARTBEAT_FRESH_MS;
+  return {
+    name,
+    kind,
+    pid,
+    host: "local",
+    liveness: {
+      evaluated: true,
+      alive: !stale,
+      // 点名**真正供这个 ts 的**载体。kernel 没报来源时（旧 kernel/旧 bundle）⇒ 不声称具体载体
+      // （AC2 允许的另一半：只断言实际量到的那个事实），⛔ 不用 `carrier_path` 顶替。
+      source: tsCarrier !== null ? `carrier:${tsCarrier} last ts` : "driver status last_record_ts (carrier not named by the kernel)",
+      detail: stale
+        ? `last round heartbeat ${Math.round(ageMs / 60000)}min ago (> ${DRIVER_HEARTBEAT_FRESH_MS / 60000}min) — this service is NOT turning`
+        : `last round heartbeat ${Math.round(ageMs / 1000)}s ago`,
+    },
+  };
 }
 
 async function statusCommand({ flags, wantsJson }: CliCtx) {
@@ -192,6 +301,10 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
         ? EXIT_NOT_RUNNING
         : EXIT_RUNNING;
 
+  // SPEC §6.10 的另一半（GOAL-017/AC-255）：六个 driver kind 各一行，活性取**该服务自己的 round 心跳**。
+  // ⛔ 不在 `status`/`not-running` 分支里跳过——那正是最需要看「哪个 kind 不转了」的时刻。
+  const drivers = DRIVER_SERVICE_KINDS.map((kind) => driverServiceReport(workspaceRoot, kind));
+
   if (wantsJson) {
     process.stdout.write(
       JSON.stringify(
@@ -205,6 +318,7 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
           pid: hostPid,
           startedAt,
           services,
+          drivers,
         },
         null,
         2,
@@ -226,6 +340,13 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
         `  ${s.name.padEnd(8)} pid ${String(s.pid ?? "—").padEnd(8)} ${s.host}:${s.port}  ${liveness} (${s.liveness.source ?? "no probe"}) — ${s.liveness.detail}\n`,
       );
     }
+    process.stdout.write(`  driver services (§6.10 — 活性取各自 round 心跳的直接量，⛔ 非「进程在」):\n`);
+    for (const d of drivers) {
+      const liveness = d.liveness.evaluated ? (d.liveness.alive === true ? "alive" : "DOWN") : "not-evaluated";
+      process.stdout.write(
+        `  ${d.name.padEnd(18)} pid ${String(d.pid ?? "—").padEnd(8)} ${liveness.padEnd(14)} (${d.liveness.source ?? "no carrier"}) — ${d.liveness.detail}\n`,
+      );
+    }
   }
 
   process.exitCode = exitCode;
@@ -242,17 +363,24 @@ export function carrierExists(workspaceRoot: string): boolean {
 //   start [--only a,b] [--without c]   起（已在跑的服务 ⇒ no-op，⛔ 不是静默重启）
 //   add   a,b                          追加起，⛔ 不动已在跑的
 //   stop  [--only a,b]                 部分停，⛔ 不波及其余（宿主进程不杀）
+//   restart [--only a,b]               显式重启（AC-256）：停该服务再起该服务，⛔ 不碰其余服务；
+//                                      driver 型 kind 组合既有 `quay driver restart --kind X`
+//                                      （= stopKind + startKind ⇒ 在飞 worker 子进程不被杀）
 //   status [--json]                    （阶段 A2，AC-251）
 //
 // ── 可区分取值（硬规则 3b）──────────────────────────────────────────────────────────────────────
 // 每个服务一条 `outcome`，词表里【没有】「合格 / 未评估」共用的取值：
 //   started / already-running      该服务在跑（前者=本趟起的、后者=本来就在跑 ⇒ 幂等，pid 不变）
+//   restarted                      该服务【本趟被重启过】—— 与 `started` 不同形，因为「起了一个没
+//                                  在跑的服务」和「把一个在跑的服务换了一个新进程」是两件事；
+//                                  ⛔ 也绝不用 `started` 兼职（否则 §6.9 不变式 1 的 no-op 读数会被
+//                                  静默重启污染）
 //   stopped / already-stopped      该服务不在跑（前者=本趟停的、后者=本来就没跑）
-//   not-evaluated                  说不出（宿主没起来 / 探针读不懂 / 超时）—— ⛔ 不与上面四个同形
+//   not-evaluated                  说不出（宿主没起来 / 探针读不懂 / 超时 / 重启后 pid 没变）—— ⛔ 不与上面同形
 // `changed` 是**聚合**的可区分位：只有真发生了转换才 true。**「我停掉了」与「它本来就是停的」
 // 由此在记录上不同形** —— 若两者同形，`stop` 的 exit 0 就不再是任何事实的读数。
 
-export type ServiceOutcome = "started" | "already-running" | "stopped" | "already-stopped" | "not-evaluated";
+export type ServiceOutcome = "started" | "already-running" | "restarted" | "stopped" | "already-stopped" | "not-evaluated";
 
 interface ServiceResult {
   name: string;
@@ -340,6 +468,31 @@ function spawnHost(workspaceRoot: string, initial: string[], port: string | unde
   return null;
 }
 
+/**
+ * 一个 kind 是否被【anchor 进程】承载（SPEC §7 阶段 C / AC-255）。
+ *
+ * ⚠️ 为什么服务层必须知道这件事（不是可选的知识，是安全前提）：阶段 C 之后 `.quay/<prefix>.pid`
+ * 的内容是 **anchor 的 pid**（六个 kind 一个 pid），`*-supervisor.pid` 退役。此时对单个 kind 调
+ * `quay driver restart --kind X`，kernel 的 `stopKind` 会 SIGTERM 那个 pid —— **那是 anchor，一次
+ * 会带走全部六个 kind**。而那恰恰违背本动词的全部意义（§6.9：服务是可【独立】起停的单元）与
+ * AC-256 的最小作用面（只碰 `driver:worker`）。⇒ 在动手之前先判形态，⛔ 不比事后补救便宜。
+ *
+ * 判定完全靠**载体**（`.quay/anchor.json`：{pid, startedAt, kinds, host}），⛔ 不解析命令行、⛔ 不猜。
+ * 读不到 / 读不懂 ⇒ 返回 null（= 不是 anchor 形态，走既有组合路径）—— 方向是**保守的**：一个坏掉的
+ * 载体不能让服务层拒绝一切，而它要防的那个动作只在本函数返回命中时才被挡住。
+ */
+function anchorHosting(workspaceRoot: string, kind: string): { pid: number; kinds: string[] } | null {
+  let j: { pid?: unknown; kinds?: unknown };
+  try {
+    j = JSON.parse(fs.readFileSync(path.join(workspaceRoot, ".quay", "anchor.json"), "utf8")) as { pid?: unknown; kinds?: unknown };
+  } catch {
+    return null;
+  }
+  if (!j || !Number.isInteger(j.pid) || !Array.isArray(j.kinds) || !j.kinds.every((k) => typeof k === "string")) return null;
+  const kinds = j.kinds as string[];
+  return kinds.includes(kind) ? { pid: j.pid as number, kinds } : null;
+}
+
 /** Driver-kind service name → kind. Null when `name` is not a driver service. */
 function driverKindOf(name: string): string | null {
   const prefix = "driver:";
@@ -348,27 +501,38 @@ function driverKindOf(name: string): string | null {
   return DRIVER_SERVICE_KINDS.includes(kind as (typeof DRIVER_SERVICE_KINDS)[number]) ? kind : null;
 }
 
-/** Read a driver kind's liveness from the kernel's OWN `status --json` (⛔ 不解析人类可读文本，
- *  ⛔ 不读 pid 文件存在性 —— 那是代理量，CLAUDE.md 硬规则 4b）。 */
-function driverRunning(workspaceRoot: string, kind: string): { evaluated: boolean; running: boolean; pid: number | null; detail: string } {
+/**
+ * Read a driver kind's liveness from the kernel's OWN `status --json` (⛔ 不解析人类可读文本，
+ *  ⛔ 不读 pid 文件存在性 —— 那是代理量，CLAUDE.md 硬规则 4b）。
+ *
+ * ⚠️ 两个**不同**的读数，⛔ 不可互相替代：
+ *   `running`      = supervisor ∧ driver 都活（kernel 的 `running`）。**孤儿 driver**（supervisor 死而
+ *                    driver 进程还在）刻意不算 running —— 那是 kernel 里 AC3(b) 的既定语义，本模块沿用。
+ *   `driverAlive`  = driver **进程**本身活着（kernel 的 `driver_alive`）。
+ * `restart`（AC-256）判「有没有东西可重启、有没有在飞的子进程要保护」用的是后者：孤儿 driver 的
+ * 在飞 worker 子进程**仍然真实存在**，把它们读成「没有可保护的东西」正是 §6.9 不变式 1 要防的那种
+ * 回退。⛔ `start`/`add`/`stop` 三个既有动词的判读**不变**（仍用 `running`），以免改变 AC-254 的语义。
+ */
+function driverRunning(workspaceRoot: string, kind: string): { evaluated: boolean; running: boolean; driverAlive: boolean; pid: number | null; detail: string } {
   const r = runDriver("status", kind, ["--kind", kind, "--json"], workspaceRoot);
-  if (!r.ok) return { evaluated: false, running: false, pid: null, detail: r.reason ?? "driver status unavailable" };
+  if (!r.ok) return { evaluated: false, running: false, driverAlive: false, pid: null, detail: r.reason ?? "driver status unavailable" };
   const line = r.stdout.split("\n").find((l) => l.trim().startsWith("{"));
-  if (!line) return { evaluated: false, running: false, pid: null, detail: `driver status produced no JSON frame (exit ${r.exitCode})` };
+  if (!line) return { evaluated: false, running: false, driverAlive: false, pid: null, detail: `driver status produced no JSON frame (exit ${r.exitCode})` };
   try {
-    const j = JSON.parse(line) as { running?: number; driver_pid?: number | null; supervisor_pid?: number | null };
+    const j = JSON.parse(line) as { running?: number; driver_alive?: number; driver_pid?: number | null; supervisor_pid?: number | null };
     return {
       evaluated: true,
       running: j.running === 1,
+      driverAlive: j.driver_alive === 1,
       pid: j.driver_pid ?? j.supervisor_pid ?? null,
-      detail: `driver status running=${j.running === 1 ? 1 : 0}`,
+      detail: `driver status running=${j.running === 1 ? 1 : 0} driver_alive=${j.driver_alive === 1 ? 1 : 0}`,
     };
   } catch {
-    return { evaluated: false, running: false, pid: null, detail: "driver status JSON was unparseable" };
+    return { evaluated: false, running: false, driverAlive: false, pid: null, detail: "driver status JSON was unparseable" };
   }
 }
 
-async function lifecycleCommand(verb: "start" | "add" | "stop", { flags, positional, wantsJson }: CliCtx): Promise<void> {
+async function lifecycleCommand(verb: "start" | "add" | "stop" | "restart", { flags, positional, wantsJson }: CliCtx): Promise<void> {
   const workspaceRoot = resolveWorkspaceRoot(flags.root);
   if (workspaceRoot === null) {
     process.exitCode = EXIT_NOT_RUNNING;
@@ -415,13 +579,75 @@ async function lifecycleCommand(verb: "start" | "add" | "stop", { flags, positio
     process.exitCode = EXIT_NOT_RUNNING;
     return;
   }
+  // restart 与 stop 同理由：重启「全部服务」不是这个动词的意思（那是重启宿主），且 AC-256 的
+  // 最小作用面恰恰是「一个服务」——默认全量会让一次取证重启波及另外五个 kind。
+  if (verb === "restart" && only.names.length === 0) {
+    process.stderr.write(`Error: \`quay server restart\` requires --only <svc,...> (restarting everything is not what this verb means; restart the host instead).\n${USAGE}\n`);
+    process.exitCode = EXIT_NOT_RUNNING;
+    return;
+  }
 
   const results: ServiceResult[] = [];
 
   // ── 宿主承载的服务（web / control）：期望态 + 宿主 reconcile + 本进程实测确认 ─────────────────
   const hostedWanted = wanted.filter((n) => HOSTED_SERVICE_NAMES.includes(n as (typeof HOSTED_SERVICE_NAMES)[number]));
   if (hostedWanted.length > 0) {
-    if (verb === "stop") {
+    if (verb === "restart") {
+      // ── 显式重启宿主服务（GOAL-017/AC-256）────────────────────────────────────────────────────
+      // 「关面 → 等它【真的】关 → 开面 → 等它【真的】开」。宿主进程【不变】——进程只是宿主（§6.9）；
+      // 宿主 pid 变了就不是「重启一个服务」而是「换了宿主」，那是另一个动词要报的事。
+      // ⚠️ 两次等待都读出直接量（探针实测），⛔ 不靠「写了期望态就算重启过」——写期望态是请求，
+      // 探针读到的面开/关才是结果。
+      const before = new Map<string, boolean>();
+      for (const name of hostedWanted) before.set(name, (await probeHosted(workspaceRoot, name))?.alive === true);
+      let live = readLiveHost(workspaceRoot);
+      if (!live) {
+        // 没宿主 ⇒ 没有「重启」可言：这是一次「起」，且 outcome 用的是 `started` 而不是 `restarted`。
+        const spawnErr = spawnHost(workspaceRoot, hostedWanted, typeof flags.port === "string" ? flags.port : undefined, typeof flags.host === "string" ? flags.host : undefined);
+        if (spawnErr) {
+          for (const name of hostedWanted) results.push({ name, outcome: "not-evaluated", pid: null, detail: spawnErr });
+          emit(verb, workspaceRoot, results, wantsJson);
+          return;
+        }
+        const booted = await waitUntil(async () => readLiveHost(workspaceRoot) !== null, HOST_BOOT_TIMEOUT_MS);
+        live = readLiveHost(workspaceRoot);
+        if (!booted || !live) {
+          for (const name of hostedWanted) results.push({ name, outcome: "not-evaluated", pid: null, detail: `no host carrier appeared within ${HOST_BOOT_TIMEOUT_MS}ms` });
+          emit(verb, workspaceRoot, results, wantsJson);
+          return;
+        }
+      }
+      // 期望态基线：一次读全（⛔ 每服务各写一次会互相覆盖——期望态是整张表，不是单键）。
+      const desiredBase =
+        readDesiredFor(workspaceRoot, live.pid) ??
+        Object.fromEntries(
+          (await Promise.all(HOSTED_SERVICE_NAMES.map(async (n) => [n, (await probeHosted(workspaceRoot, n))?.alive === true] as const))) as Array<[string, boolean]>,
+        );
+      for (const name of hostedWanted) {
+        const was = before.get(name) === true;
+        if (was) {
+          writeServiceState(workspaceRoot, live.pid, { ...desiredBase, [name]: false });
+          const down = await waitUntil(async () => (await probeHosted(workspaceRoot, name))?.alive === false, HOSTED_TRANSITION_TIMEOUT_MS);
+          if (!down) {
+            // 面没关成 ⇒ ⛔ 不去开它（那会把「没停成」读成「重启完成」），且取值是可区分的 not-evaluated。
+            results.push({ name, outcome: "not-evaluated", pid: live.pid, detail: `face did not go down within ${HOSTED_TRANSITION_TIMEOUT_MS}ms — restart aborted, the service was NOT reopened` });
+            continue;
+          }
+        }
+        writeServiceState(workspaceRoot, live.pid, { ...desiredBase, [name]: true });
+        const up = await waitUntil(async () => (await probeHosted(workspaceRoot, name))?.alive === true, HOSTED_TRANSITION_TIMEOUT_MS);
+        results.push(
+          up
+            ? {
+                name,
+                outcome: was ? "restarted" : "started",
+                pid: live.pid,
+                detail: was ? "face closed then reopened inside the SAME host process" : "was not up — restarted into a start (⛔ not a restart)",
+              }
+            : { name, outcome: "not-evaluated", pid: live.pid, detail: `face did not come back within ${HOSTED_TRANSITION_TIMEOUT_MS}ms` },
+        );
+      }
+    } else if (verb === "stop") {
       const live = readLiveHost(workspaceRoot);
       if (!live) {
         // ⛔ 一个「本来就没有宿主在跑」的 stop 必须与「刚刚停掉」可区分（硬规则 3b）。
@@ -499,6 +725,67 @@ async function lifecycleCommand(verb: "start" | "add" | "stop", { flags, positio
       results.push({ name, outcome: "not-evaluated", pid: null, detail: st.detail });
       continue;
     }
+    if (verb === "restart") {
+      // ── 显式重启一个 driver 服务（GOAL-017/AC-256，SPEC §6.9 不变式 3）────────────────────────
+      // ⛔ 组合既有的 `quay driver restart --kind X`（= stopKind + startKind），⛔ 不写第二条杀进程
+      // 路径。`stopKind` 的语义是「杀 supervisor + 驱动自身；⛔ 不扫 in-flight」——**那是被测对象，
+      // 不是可调项**（AC-256 的 DoD 逐字禁止改坏它）。若本动词改成自己 SIGKILL 驱动，在飞 worker
+      // 子进程就会跟着死，而这正是本 AC 要抓的回退。
+      if (!st.running && !st.driverAlive) {
+        // 驱动进程【本身都不在】⇒ 没有可重启的东西，也没有在飞子进程可保护 ⇒ 这是「起」，
+        // ⛔ 不是「重启」（可区分取值：outcome=started）。
+        const r = runDriver("start", kind, ["--kind", kind], workspaceRoot);
+        const ok = r.ok && (await waitUntil(async () => driverRunning(workspaceRoot, kind).running, DRIVER_TRANSITION_TIMEOUT_MS));
+        const after = driverRunning(workspaceRoot, kind);
+        results.push(
+          ok
+            ? { name, outcome: "started", pid: after.pid, detail: "driver was not running — nothing to restart; started it instead (⛔ not a restart)" }
+            : { name, outcome: "not-evaluated", pid: null, detail: `quay driver start did not reach a running state (exit ${r.exitCode})` },
+        );
+        continue;
+      }
+      // ⛔ 安全前置：本 kind 若被 anchor 承载，则它的 pid 文件里那个 pid 是 **anchor**，
+      // `quay driver restart --kind X` 会 SIGTERM anchor ⇒ 一次带走全部六个 kind。这在服务级
+      // 动词里是**不可接受**的（§6.9：独立起停），故在动手之前先判形态并拒绝。
+      const anchor = anchorHosting(workspaceRoot, kind);
+      if (anchor !== null && anchor.pid === st.pid) {
+        results.push({
+          name,
+          outcome: "not-evaluated",
+          pid: st.pid,
+          detail:
+            `kind '${kind}' is hosted by the anchor process pid ${anchor.pid} (SPEC §7 stage C: one anchor runs all of ` +
+            `${JSON.stringify(anchor.kinds)} in one event loop) — \`quay driver restart --kind ${kind}\` would signal that ` +
+            `anchor and take every hosted kind down with it, so no per-kind restart is attempted. A per-kind restart in ` +
+            `this form is a loop respawn inside the anchor, which does NOT replace a process.`,
+        });
+        continue;
+      }
+      const r = runDriver("restart", kind, ["--kind", kind], workspaceRoot);
+      // 判据是【新的活 pid】而不是「命令 exit 0」：一个只改写 pid 文件的 no-op 也能 exit 0。
+      const ok = r.ok && (await waitUntil(async () => {
+        const s = driverRunning(workspaceRoot, kind);
+        return s.running && s.pid !== null && s.pid !== st.pid;
+      }, DRIVER_TRANSITION_TIMEOUT_MS));
+      const after = driverRunning(workspaceRoot, kind);
+      const pidChanged = after.pid !== null && after.pid !== st.pid;
+      results.push(
+        ok && pidChanged
+          ? {
+              name,
+              outcome: "restarted",
+              pid: after.pid,
+              detail: `driver restarted via \`quay driver restart --kind ${kind}\` — pid ${st.pid} → ${after.pid}; in-flight worker children are NOT killed (stopKind does not scan in-flight)`,
+            }
+          : {
+              name,
+              outcome: "not-evaluated",
+              pid: after.pid,
+              detail: `restart did not produce a NEW live driver pid (before ${st.pid}, after ${after.pid}, running=${after.running}, exit ${r.exitCode})`,
+            },
+      );
+      continue;
+    }
     if (verb === "stop") {
       if (!st.running) {
         results.push({ name, outcome: "already-stopped", pid: null, detail: "driver was not running" });
@@ -532,7 +819,11 @@ async function lifecycleCommand(verb: "start" | "add" | "stop", { flags, positio
 }
 
 function emit(verb: string, workspaceRoot: string, results: ServiceResult[], wantsJson: boolean): void {
-  const changed = results.filter((r) => r.outcome === "started" || r.outcome === "stopped").length;
+  // `restarted` counts as changed: the service's process identity really did move (that is the whole
+  // point of AC-256's `driver_pid_before != driver_pid_after` reading). ⛔ `already-running` /
+  // `already-stopped` do NOT — they are the "nothing was asked of me that had not already been done"
+  // values, which is exactly why they must stay distinguishable from a performed transition.
+  const changed = results.filter((r) => r.outcome === "started" || r.outcome === "stopped" || r.outcome === "restarted").length;
   const unevaluated = results.filter((r) => r.outcome === "not-evaluated");
   if (wantsJson) {
     process.stdout.write(

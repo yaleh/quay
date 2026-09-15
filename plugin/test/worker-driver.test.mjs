@@ -40,6 +40,8 @@ import {
   WORKER_OUTCOME_REL,
   WORKER_ROUND_REL,
   FINAL_STATES,
+  isFinalState,
+  assertFinalState,
   defaultControlState,
   readControlState,
   writeControlState,
@@ -228,6 +230,51 @@ test("computeOutcome — exit 0 + landed=true ⇒ completed; landed=false ⇒ ex
   // 终态分支优先于 landed：exit 非零即使 landed=true 仍是 failed（landed 只覆盖 exit 0 路径）。
   const failed = computeOutcome({ task: "g", selectorReason: "r", exitCode: 7, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
   assert.equal(failed.final_state, "failed", "non-zero exit wins over landed");
+});
+
+// ▸ gap-worker-outcome-final-state-landed-is-a-dead-value — final_state 词表闸（AC2 方案②：从【写入面】
+//   移除死取值 `landed`）。判据必须能取假：只断言「词表内取值不抛」是恒真闸（硬规则 4 推论三），
+//   故配一条**负控制**——词表外的取值必须抛，且不得在载体上留痕。
+test("final_state 词表闸 — `landed` 不是 final_state（它是 mechanical_fan_in.outcome 的取值）；成功态是 completed", () => {
+  // 取值表本身：landed ∉ FINAL_STATES（死取值的「移除」在取值表这一侧的判据）。
+  assert.ok(!FINAL_STATES.includes("landed"), "`landed` 不是 final_state 的合法取值");
+  assert.ok(FINAL_STATES.includes("completed"), "成功态是 `completed`");
+
+  // 正臂：词表内**全部**取值都通过（枚举，不是抽查——硬规则 3）。
+  for (const s of FINAL_STATES) {
+    assert.equal(isFinalState(s), true, `${s} 在词表内`);
+    assert.doesNotThrow(() => assertFinalState(s, "test"), `${s} 必须被接受`);
+  }
+
+  // 负控制：词表外的取值必须抛。`landed` 是**实测**那个死取值（生产载体 1 条，2026-08-28），
+  // `red` 是同一 sibling 词表（mechanical_fan_in.outcome）的另一个取值——两者都是这道闸存在的理由。
+  for (const bad of ["landed", "red", "Completed", "done", "", "landed ", 42, null, undefined, {}]) {
+    assert.equal(isFinalState(bad), false, `${JSON.stringify(bad)} 不在词表内`);
+    assert.throws(() => assertFinalState(bad, "test"), /out-of-vocabulary final_state/, `${JSON.stringify(bad)} 必须被拒收`);
+  }
+
+  // 报错文本点名陷阱与正确取值（⛔ 不只是一句 "invalid"——读的人要能当场知道该写什么）。
+  assert.throws(() => assertFinalState("landed", "appendOutcomeToFile → worker-outcome.jsonl"), /mechanical_fan_in\.outcome/);
+  assert.throws(() => assertFinalState("landed", "ctx"), /成功态写 "completed"/);
+});
+
+test("appendOutcomeToFile — 词表闸在唯一落盘点拒收，且不留半条记录 / 不建目录", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wd-finalstate-gate-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, WORKER_OUTCOME_REL);
+
+  // 正臂：一个**真实**构造的 outcome（computeOutcome，落地 ⇒ completed）能落盘。
+  const ok = computeOutcome({ task: "gap-gate", selectorReason: "r", exitCode: 0, signal: null, startedAtMs: 0, endedAtMs: 1, workerPid: 1, runId: "x", landed: true });
+  appendOutcomeToFile(file, ok);
+  assert.equal(readOutcomeLines(root).at(-1).final_state, "completed");
+
+  // 负控制：把同一条记录改成 `landed`（**手工 fan-in 曾经写出的那个取值**）⇒ 必须抛，
+  // 且载体**字节不变**、新目录不建（闸在 mkdir/append 之前）。
+  const before = fs.readFileSync(file, "utf8");
+  assert.throws(() => appendOutcomeToFile(file, { ...ok, final_state: "landed" }), /out-of-vocabulary final_state/);
+  assert.equal(fs.readFileSync(file, "utf8"), before, "拒收后载体逐字节不变（⛔ 不留半条记录）");
+  assert.throws(() => appendOutcomeToFile(path.join(root, "never-created", "worker-outcome.jsonl"), { ...ok, final_state: "landed" }));
+  assert.equal(fs.existsSync(path.join(root, "never-created")), false, "拒收时连目录都不建");
 });
 
 test("computeLandingState — DriverResult 三态：verified = status=done ∧ 无 worktree；failed = 证伪；not-evaluated = 读不到（AC153）", (t) => {

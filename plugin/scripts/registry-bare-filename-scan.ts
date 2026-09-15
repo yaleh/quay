@@ -1090,7 +1090,23 @@ export function main(argv: string[]): number {
   }
   const afterDead = new Set(deadSet.after?.dead ?? []);
   // AC1：四类样本全部命中——任一样本 0 命中 ⇒ 报红（谓词写错），⛔ 不得判「无此类引用」（硬规则 2）。
+  // ⚠️ 2026-09-15 真机实测（GitHub CI 一个干净 checkout，非本仓长期存活的 checkout）：`.quay/config.yml`
+  // 是 gitignored（永不进 git 树），任何全新 `git clone`（含 CI 的 actions/checkout@v4）结构上就没有
+  // 这个文件——这与「文件在、但 collector 扫不到样本（predicate 真坏了）」是两个不同的态，此前共用同一条
+  // `RED: ... predicate broken` 输出 ⇒ 把「读不到输入」判成了「输入不对」（硬规则 3b：缺值≠为假）。
+  // 后果是本检查器在**每一个**从未手工 bootstrap 过 `.quay/config.yml` 的环境里（任何 CI 跑、任何第三方
+  // 新 clone）恒红，而所有长期存活的本地 checkout 因为很久以前手工建过这个 gitignored 文件而恒绿 ⇒ 这一
+  // 分支实际上从未在「真正干净的 checkout」这个唯一要紧的环境里被验证过。
+  // 修法：样本自己声明的载体路径在磁盘上不存在时，报可区分的 NOT-EVALUATED（exit 3，与上面
+  // `resultPath` 缺失同一处置），不当作「predicate broken」判 RED——载体真的在但样本扫不到，才是 RED。
   for (const s of EXTRA_KIND_SAMPLES) {
+    const carrierAbsPath = path.join(root, s.carrier);
+    if (!fs.existsSync(carrierAbsPath)) {
+      process.stderr.write(
+        `NOT-EVALUATED: ${s.kind} known-sample carrier ${s.carrier} absent from this checkout (e.g. gitignored, never bootstrapped here) — cannot exercise this collector, not a predicate failure\n`,
+      );
+      return 3;
+    }
     const hit = result.extraRefs.find((r) => r.script === s.script && r.kind === s.kind && r.carrier.file === s.carrier);
     if (!hit) {
       process.stderr.write(

@@ -10,7 +10,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 2026-09-15 真机实测：这个 job 曾经在 4 核 runner 上、`--test-concurrency=8` 显式覆盖下能在
+    # 10 分钟内跑完；本轮实测（develop tip 017d4f8f4）静态检查阶段本身已通过，真正的 `node --test`
+    # 阶段跑满整整 10 分钟被 GitHub 判超时中止（`The job has exceeded the maximum execution time of
+    # 10m0s`）——套件本身在这几天里长出了大量新测试文件（driver-anchor / fan-in-queueing-model /
+    # server-restart* / verification-marginal-return 等），10 分钟这个字面量已经不够。⛔ 不是回归，
+    # 是套件规模增长追上了预算；把预算调宽，⛔ 不要把并发再往上堆（4 核 runner，堆并发只加剧争用，
+    # 参见下面「Run tests」步骤自己的注释）。
+    timeout-minutes: 25
     permissions:
       contents: read
       issues: read
@@ -40,6 +47,19 @@ jobs:
         run: |
           node --experimental-strip-types scripts/test-coverage-check.ts --selftest
           node --experimental-strip-types scripts/test-coverage-check.ts
+      - name: Bootstrap .quay/config.yml (gap-config-yml-example-and-ci-bootstrap)
+        # `.quay/config.yml` is gitignored (DIR-050, per-workspace) and has never had a committed
+        # template — every long-lived local checkout has one only because it was hand-bootstrapped
+        # once, years ago, and gitignored files never get removed by a re-clone. A bare
+        # `actions/checkout@v4` (this job) has NO `.quay/config.yml` at all, which quay's own CLI/
+        # web ("quay serve" reads it to pick a Provider) and several dozen test files' own
+        # "walk upward looking for .quay/config.yml to find the repo root" helpers treat as fatal —
+        # 2026-09-15 real-machine finding: this silently broke ~26 test files on every fresh
+        # checkout (confirmed via a scratch `git clone` at the exact CI commit, reproducing the
+        # exact CI failure locally). Copying the checked-in, version-controlled reference config
+        # into place fixes this for CI AND matches what README's "Option B — from source" already
+        # promises a human contributor (git clone + npm install, nothing about .quay/config.yml).
+        run: cp .quay/config.yml.example .quay/config.yml
       - name: Run tests
         # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
         # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
@@ -117,7 +137,7 @@ jobs:
 
   # M132 (exp5-M-VERSION-CHECK-CI): fail-closed version consistency gate.
   # Runs version-consistency-check.ts on every push; fails the build if any
-  # of the 8 version-bearing artifacts has drifted from the unified version.
+  # of the 9 version-bearing artifacts has drifted from the unified version.
   version-consistency:
     runs-on: ubuntu-latest
     timeout-minutes: 2

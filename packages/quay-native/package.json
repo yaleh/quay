@@ -1,6 +1,6 @@
 {
   "name": "quay-native",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "The native Provider for Quay: markdown+frontmatter task store, CLI, and MCP ABI transport (v0 walking skeleton).",
   "type": "module",

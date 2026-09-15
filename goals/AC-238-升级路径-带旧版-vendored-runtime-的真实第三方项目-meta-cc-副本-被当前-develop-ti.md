@@ -31,7 +31,10 @@ criterion: >-
       if r.get("task_list_ok") is not True: continue
       if not r.get("build_sha"): continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-238 fail - no carrier record ac=GOAL-009-AC-238 with host
+  other than this host, pre/post_upgrade_task_count equal and >0,
+  pre_upgrade_runtime_age_days>=1, runtime_replaced=true, task_list_ok=true and
+  non-empty build_sha\n"); sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-009-AC-238 的记录，host≠本机 ∧ project_root ∉ 本仓库 ∧

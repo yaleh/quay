@@ -154,6 +154,13 @@ import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 // gap-driver-cli-help-hides-four-of-six-kinds: 帮助文本的 kind/verb 单一真源（零依赖叶模块——⛔ 不要
 // 从 ../src/cli/driver.ts 取，那条路径把 config.ts/plugin-root.ts 拖进来，正是本任务要避免的成本）。
 import { KINDS as DRIVER_KINDS_VOCAB, VERBS as DRIVER_VERBS_VOCAB } from "../src/cli/driver-vocab.ts";
+// gap-ac256: `server <verb>` subs are DERIVED from the single source (cli/server.ts's SERVER_VERBS —
+// the same table the usage line itself is built from), ⛔ not re-listed here. A hand-copied list is
+// exactly what went stale when AC-256 added the `restart` verb: the usage line grew it, this list did
+// not, and the drift gate correctly reported the new verb as `extra`. Deriving closes the class rather
+// than patching one string — the same fix the sibling usage-line assertion got in
+// server-status-web-control-same-pid.test.mjs (which had pinned four verb literals).
+import { SERVER_VERBS } from "../src/cli/server.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source: route CLI spawns through the prebuilt
@@ -1055,6 +1062,7 @@ async function main() {
   await block27();
   await block28();
   await block29();
+  await block30();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -2059,18 +2067,20 @@ function block28() {
   // `server <verb>` joins them: its subcommands live inside src/cli/server.ts (the handler dispatches
   // on `sub` and reports the usage line Served's verb set for anything else), exactly like
   // config/manager — not via `cmd && sub` routes in quay.ts.
-  // ⚠️ AC-254 added the three stage-B verbs. They MUST be listed here or this gate reports them as
-  // `extra` (present in the usage line, absent from the expected set) — which is the correct
+  // ⚠️ AC-254 added the three stage-B verbs. They MUST be accounted for here or this gate reports
+  // them as `extra` (present in the usage line, absent from the expected set) — which is the correct
   // behaviour: a verb nobody declared is drift, whether it was added by accident or on purpose.
+  //
+  // The `server <verb>` half is DERIVED from cli/server.ts's SERVER_VERBS — the same single source the
+  // usage line is built from — so a verb legitimately added there can never be reported as drift by
+  // this gate. That is not hypothetical: AC-256 added `restart`, the usage line grew it, and this
+  // hand-copied list (the only place it was missing) turned the whole file red.
   const handlerSubs = [
     "config validate",
     "config check",
     "manager start",
     "manager arm",
-    "server start",
-    "server add",
-    "server stop",
-    "server status",
+    ...SERVER_VERBS.map((v) => `server ${v}`),
   ];
   const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
 
@@ -2160,4 +2170,85 @@ async function block29() {
     const hits = [...(src.match(/--kind <[a-z-]+\|[a-z|-]+>/g) ?? []), ...(src.match(/quay driver <[a-z|]+>/g) ?? [])];
     assert(hits.length === 0, `${f} carries no hand-copied driver kind/verb union (found: ${hits.join(" ; ") || "none"})`);
   }
+}
+
+// 30. gap-driver-status-carrier-path-source-label-mismatch — `quay server status --json` 的 §6.10
+//     driver 行的 `liveness.source` 必须点名**真正供出这个 ts 的载体**，或干脆不点名。
+//
+//     改前它渲染 `carrier:<carrier_path> last ts`，而 `carrier_path` 是「carriers 里首个【存在】的载体」
+//     ——真实工作区上它与「最大 ts 的载体」不同名。实测 2026-09-13T22:33Z 于生产 /home/yale/work/quay：
+//     promotion-outcome.jsonl 存在但末条 ts 停在 20:01:48.261Z（2.5h 陈旧），promotion-round.jsonl 每
+//     30s 一条、末条 22:33:30.546Z ⇒ 行里报出的 ts 来自 round，而 source 点名的是 outcome
+//     （硬规则 3b/4b：一条读数声称的来源不是它的来源）。
+//
+//     ⛔ 判据是行**实际量到的那个事实**：被点名的载体必须就是供 ts 的那个；点名陈旧的那个即失败
+//     （这正是改前的行为，所以本块改前必红）。
+async function block30() {
+  const assert = makeAssert("driver-status-provenance");
+
+  const wsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-driver-provenance-"));
+  const tasksDir = path.join(wsRoot, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.mkdirSync(path.join(wsRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(wsRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n"),
+  );
+
+  // 判别形态：两个载体**并存**（所以 carrier_path 有得选），只是新旧不同——outcome 陈旧、round 新鲜。
+  // ts 相对当前时刻生成（⛔ 不写死：写死的时间戳会随时间把「新鲜」读成「停摆」，让判据随日历翻面）。
+  const now = Date.now();
+  const staleTs = new Date(now - 3 * 3600_000).toISOString();
+  const freshTs = new Date(now - 30_000).toISOString();
+  fs.writeFileSync(path.join(wsRoot, ".quay", "promotion-outcome.jsonl"), `{"ts":"${staleTs}","task":"older"}\n`);
+  fs.writeFileSync(path.join(wsRoot, ".quay", "promotion-round.jsonl"), `{"ts":"${freshTs}","round":1}\n`);
+  // §6.10 的行先判「承载进程是否活着」；写本测试进程自己的 pid（活着），否则该行会走 "no live carrying
+  // process" 分支、根本走不到 ts/来源那一段（那样本块就在空转，与硬规则 4 推论三同形）。
+  fs.writeFileSync(path.join(wsRoot, ".quay", "promotion-driver.pid"), `${process.pid}\n`);
+
+  // ⛔ QUAY_PLUGIN_ROOT：从 worktree 加载的 Core 会把 plugin root 重定位到**主检出**
+  // （plugin-root.ts 约束①）⇒ 不钉它就会拿主检出的 kernel 去测本 checkout 的 server.ts，
+  // 结论随落点漂。钉住 ⇒ 本块测的永远是**同一 checkout** 的 kernel + CLI。
+  const env = { ...process.env, QUAY_PLUGIN_ROOT: path.join(__dirname, "..", "..", "..", "plugin") };
+  const r = await run(["server", "status", "--json", "--root", wsRoot], { encoding: "utf8", env });
+
+  let j = null;
+  try {
+    j = JSON.parse(r.stdout);
+  } catch {
+    /* 下面的断言把原文打出来 */
+  }
+  assert(j !== null, `server status --json 打印可解析的 JSON（exit ${r.status}）: ${r.stdout.slice(0, 400)}`);
+  const row = (j?.drivers ?? []).find((d) => d && d.kind === "promotion");
+  assert(row !== undefined, `drivers[] 里有 promotion 行: ${JSON.stringify(j?.drivers ?? null)}`);
+  if (!row) {
+    fs.rmSync(wsRoot, { recursive: true, force: true });
+    return;
+  }
+
+  // 行必须真的量到了这个 fixture（否则下面的 source 断言是空转）。
+  assert(row.liveness?.evaluated === true, `promotion 行的活性被评估过: ${JSON.stringify(row)}`);
+  assert(row.liveness?.alive === true, `promotion 行读到新鲜心跳（fixture 30s 前）: ${JSON.stringify(row.liveness)}`);
+
+  const src = String(row.liveness?.source ?? "");
+  assert(
+    src.includes("promotion-round.jsonl"),
+    `source 点名**供 ts 的那个**载体（round）: ${JSON.stringify(src)}`,
+  );
+  assert(
+    !src.includes("promotion-outcome.jsonl"),
+    `source ⛔ 不得点名陈旧的那个载体（outcome）——改前的行为: ${JSON.stringify(src)}`,
+  );
+
+  fs.rmSync(wsRoot, { recursive: true, force: true });
 }

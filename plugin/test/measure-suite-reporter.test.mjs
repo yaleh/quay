@@ -13,10 +13,14 @@
 // present, so removing it flips THIS test red.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readPerFileCpuMs } from "../scripts/measure-suite-reporter.mjs";
+import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { readPerFileCpuMs, readPerFileMemPeakKb } from "../scripts/measure-suite-reporter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -71,4 +75,202 @@ test("readPerFileCpuMs is a shared named export (suite-scheduler.ts reuses it, n
   // (this reporter's legacy/LPT path + suite-scheduler.ts's own finishFile). The scheduler must import
   // THIS function rather than reimplementing the .cpu read, or the two paths drift apart again.
   assert.equal(typeof readPerFileCpuMs, "function", "measure-suite-reporter.mjs must export readPerFileCpuMs");
+});
+
+// ══ gap-perfile-memory-cost-collection-missing — the PEAK-MEMORY dimension (mem_peak_kb) ═══════════
+// The memory mirror of the cpu dimension above. AC1 ("the reading is the kernel's peak, not an
+// exit-time snapshot") and AC4 ("the reading can take different values — not a constant") are
+// behavioural claims about WHICH KERNEL COUNTER the field carries, so they are pinned END-TO-END: a
+// real `node --test` subprocess with the real preload seam wired exactly the way full-suite-runner.ts
+// wires it, running a fixture that allocates a large object and then RELEASES it. Only a real process
+// can be made to have a peak that differs from its exit-time resident set.
+
+/** Spawn `node --test <fixtures...>` with the route (a) preload seam wired the way the runner wires it
+ *  (QUAY_PERFILE_CPU_DIR + NODE_OPTIONS --require), and return the per-file `.mem` readings keyed by
+ *  fixture absolute path, plus whatever each fixture wrote to $FIXTURE_OUT.
+ *
+ *  NODE_TEST_* is SCRUBBED from the child env: node:test stamps NODE_TEST_CONTEXT on nested runners and
+ *  an inherited value makes the child SKIP its files and report green (silent no-op — the child would
+ *  produce no per-file report at all). Same scrub as suite-scheduler.test.mjs's scheduler spawn. */
+function runIsolatedFixtures(dir, fixtures, env = {}) {
+  const cpuDir = join(dir, "cpu");
+  const childEnv = { ...process.env };
+  for (const k of Object.keys(childEnv)) {
+    if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+  }
+  childEnv.QUAY_PERFILE_CPU_DIR = cpuDir;
+  const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
+  childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload} --expose-gc`;
+  Object.assign(childEnv, env);
+  const r = spawnSync(process.execPath, ["--test", ...fixtures], { encoding: "utf8", env: childEnv });
+  assert.equal(r.status, 0, `fixture suite should pass (stderr: ${r.stderr})`);
+  /** key contract, byte-identical to the preload writer + the reporter reader */
+  const memByFile = new Map();
+  for (const f of fixtures) {
+    const key = crypto.createHash("sha256").update(path.resolve(f)).digest("hex").slice(0, 16);
+    const p = join(cpuDir, `${key}.mem`);
+    memByFile.set(f, existsSync(p) ? Number(readFileSync(p, "utf8").trim()) : undefined);
+  }
+  return { memByFile, stderr: r.stderr };
+}
+
+test("AC1/AC4 — mem_peak_kb is the kernel PEAK (not an exit-time rss snapshot) and takes real, differing values", () => {
+  const dir = mkdtempSync(join(os.tmpdir(), "perfile-mem-"));
+  try {
+    // The balloon fixture: allocate ~128MB, hold it (snapshot "during"), RELEASE it, gc, settle.
+    const big = join(dir, "balloon.test.mjs");
+    const bigOut = join(dir, "balloon.json");
+    writeFileSync(
+      big,
+      `import { test } from "node:test";\nimport fs from "node:fs";\n` +
+        `test("balloon", async () => {\n` +
+        `  const rssBeforeKb = Math.round(process.memoryUsage().rss / 1024);\n` +
+        `  let big = Buffer.alloc(128 * 1024 * 1024, 1);\n` +
+        `  big.fill(2);\n` +
+        `  const rssDuringKb = Math.round(process.memoryUsage().rss / 1024);\n` +
+        `  big = null;\n` +
+        `  if (global.gc) { global.gc(); global.gc(); }\n` +
+        `  await new Promise((r) => setTimeout(r, 200));\n` +
+        `  const rssAfterKb = Math.round(process.memoryUsage().rss / 1024);\n` +
+        `  fs.writeFileSync(process.env.FIXTURE_OUT, JSON.stringify({ rssBeforeKb, rssDuringKb, rssAfterKb }));\n` +
+        `});\n`,
+    );
+    // The negative control (AC4): a plain assertion-only file that allocates nothing notable.
+    const tiny = join(dir, "tiny.test.mjs");
+    writeFileSync(
+      tiny,
+      `import { test } from "node:test";\nimport assert from "node:assert/strict";\n` +
+        `test("tiny", () => { const a = []; for (let i = 0; i < 1000; i++) a.push(i); assert.equal(a.length, 1000); });\n`,
+    );
+
+    const { memByFile } = runIsolatedFixtures(dir, [big, tiny], { FIXTURE_OUT: bigOut });
+
+    const bigMem = memByFile.get(big);
+    const tinyMem = memByFile.get(tiny);
+    assert.equal(typeof bigMem, "number", "the balloon fixture must produce a .mem report (else the seam went dark)");
+    assert.equal(typeof tinyMem, "number", "the tiny fixture must produce a .mem report");
+
+    const obs = JSON.parse(readFileSync(bigOut, "utf8"));
+    // (AC1) The field captures the PEAK: it is at least the resident set observed while the 128MB was
+    // still held. A snapshot taken at exit could NOT satisfy this, because by then the memory is gone.
+    assert.ok(
+      bigMem >= obs.rssDuringKb - 4096,
+      `mem_peak_kb (${bigMem}) must be >= the rss observed while the balloon was held (${obs.rssDuringKb}) — it is a peak reading, not a snapshot`,
+    );
+    // (AC1, the differential) The fixture really did release the memory, and the peak reading is
+    // far ABOVE the exit-time resident set. THIS is the assertion that distinguishes
+    // resourceUsage().maxRSS from an exit-time memoryUsage().rss — the latter would under-report here.
+    assert.ok(
+      obs.rssDuringKb - obs.rssAfterKb > 64 * 1024,
+      `fixture precondition: releasing the 128MB must drop rss by >64MB (during=${obs.rssDuringKb}KB after=${obs.rssAfterKb}KB) — got ${obs.rssDuringKb - obs.rssAfterKb}KB`,
+    );
+    assert.ok(
+      bigMem - obs.rssAfterKb > 64 * 1024,
+      `mem_peak_kb (${bigMem}) must sit >64MB above the EXIT-TIME rss (${obs.rssAfterKb}) — otherwise the field is an exit snapshot (memoryUsage().rss), which is the exact under-report this task exists to kill`,
+    );
+    // (AC4) The reading takes DIFFERENT values across files — it is a measurement, not a constant.
+    assert.ok(
+      bigMem - tinyMem > 50 * 1024,
+      `the balloon fixture's peak (${bigMem}KB) must exceed the assertion-only fixture's (${tinyMem}KB) by >50MB — a constant would make this a non-measurement (硬规则 4)`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readPerFileMemPeakKb — shared named export reading <key>.mem; absent ⇒ undefined (never a fabricated 0)", () => {
+  const dir = mkdtempSync(join(os.tmpdir(), "mem-read-"));
+  try {
+    const file = join(dir, "x.test.mjs");
+    // The key MUST be sha256(path.resolve(file))[:16] — byte-identical to per-file-cpu-report.mjs's writer.
+    const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
+    writeFileSync(join(dir, `${key}.mem`), "185728\n", "utf8");
+    process.env.QUAY_PERFILE_CPU_DIR = dir;
+    try {
+      assert.equal(readPerFileMemPeakKb(file), 185728, "a written .mem report reads back as a number");
+      // Absent report ⇒ undefined (the caller then OMITS mem_peak_kb, never fabricates a 0 — 硬规则 3b).
+      assert.equal(readPerFileMemPeakKb(join(dir, "absent.test.mjs")), undefined);
+      // The two dimensions are independent files: a .cpu-only report leaves the memory field absent.
+      writeFileSync(join(dir, `${key}.cpu`), "12.5\n", "utf8");
+      assert.equal(readPerFileCpuMs(file), 12.5, "cpu dimension unaffected");
+    } finally {
+      delete process.env.QUAY_PERFILE_CPU_DIR;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("mem_peak_kb source: the preload reads resourceUsage().maxRSS (the kernel peak), never memoryUsage().rss", () => {
+  // Positional anti-regression (硬规则 2 — 按位置判定,不按关键词): the differential above proves the
+  // BEHAVIOUR; this pins the SOURCE, so a future "simplification" to process.memoryUsage().rss is caught
+  // even if the fixture happens not to diverge on that host.
+  //
+  // ⛔ The file's COMMENTS legitimately NAME `process.memoryUsage().rss` (to explain what the field
+  // deliberately is not) — so this check must strip comment lines FIRST and match the CODE only. A bare
+  // `assert.doesNotMatch(src, /memoryUsage\(\)\.rss/)` reds on the documentation, not on a regression:
+  // the same "命中注释不算命中" distinction 硬规则 2 exists to enforce (it caught this very test).
+  const src = readFileSync(join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs"), "utf8");
+  const code = src
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+  assert.match(code, /process\.resourceUsage\(\)\.maxRSS/, "the memory reading must come from process.resourceUsage().maxRSS");
+  assert.doesNotMatch(
+    code,
+    /memoryUsage\(\)\.rss/,
+    "the preload's CODE must NOT read process.memoryUsage().rss — an exit-time snapshot systematically under-reports the peak (mentions in comments are expected and excluded above)",
+  );
+  assert.match(code, /memPeakKb|\.mem`/, "the preload must be the writer of the .mem report");
+});
+
+test("AC5 — the LEGACY/LPT emission path emits mem_peak_kb end-to-end (real reporter as --test-reporter over a real test file)", () => {
+  // The other half of AC5's two-paths contract, and the half gap-suite-scheduler-perfile-cpu-emitter-
+  // missing proved gets forgotten: the SCHEDULER path's emitter has its own test (suite-scheduler.test.mjs)
+  // and this is the reporter's. Both are wired the way scripts/test.sh wires them: the reporter is passed
+  // as `--test-reporter`, the route (a) preload seam rides NODE_OPTIONS, and the report dir is
+  // QUAY_PERFILE_CPU_DIR. Asserting merely that the source mentions the field would pass even if the
+  // emitter never ran — this runs it.
+  const dir = mkdtempSync(join(os.tmpdir(), "reporter-mem-"));
+  try {
+    const fx = join(dir, "balloon.test.mjs");
+    writeFileSync(
+      fx,
+      'import { test } from "node:test";\n' +
+        'test("balloon", () => { let b = Buffer.alloc(48 * 1024 * 1024, 1); b.fill(2); b = null; });\n',
+    );
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    childEnv.QUAY_PERFILE_CPU_DIR = join(dir, "cpu");
+    const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
+    const reporter = join(repoRoot, "plugin", "scripts", "measure-suite-reporter.mjs");
+    childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload}`;
+    const r = spawnSync(
+      process.execPath,
+      ["--test", `--test-reporter=${reporter}`, fx],
+      { encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 0, `fixture suite should pass (stderr: ${r.stderr})`);
+    const m = r.stderr.match(/__PERFILE__ duration_ms=[0-9.]+ \S+balloon\.test\.mjs passed=true [^\n]*mem_peak_kb=([0-9]+)/);
+    assert.ok(m, `the legacy/LPT reporter path must emit mem_peak_kb on its __PERFILE__ line (stderr: ${r.stderr})`);
+    assert.ok(Number(m[1]) > 70_000, `the reading must reflect the fixture's real peak; got ${m[1]}KB`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("both __PERFILE__ emission points append mem_peak_kb (reporter legacy path + unified scheduler)", () => {
+  // gap-suite-scheduler-perfile-cpu-emitter-missing is the precedent: the __PERFILE__ line has TWO
+  // independent emission points, and fixing only one leaves the PRODUCTION default dark. The scheduler
+  // path (QUAY_SUITE_SCHEDULER=1, default since 2026-08-31) must carry the field too, and must obtain it
+  // from the reporter's shared reader rather than a second hand-rolled read.
+  const reporter = readFileSync(join(repoRoot, "plugin", "scripts", "measure-suite-reporter.mjs"), "utf8");
+  const scheduler = readFileSync(join(repoRoot, "plugin", "scripts", "suite-scheduler.ts"), "utf8");
+  for (const [name, src] of [["measure-suite-reporter.mjs", reporter], ["suite-scheduler.ts", scheduler]]) {
+    assert.match(src, /mem_peak_kb=\$\{/, `${name} must append mem_peak_kb to its __PERFILE__ line`);
+    assert.match(src, /readPerFileMemPeakKb/, `${name} must read it through the shared readPerFileMemPeakKb`);
+  }
+  assert.equal(typeof readPerFileMemPeakKb, "function", "measure-suite-reporter.mjs must export readPerFileMemPeakKb");
 });

@@ -50,8 +50,8 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
-// goal-store CLI 的 argv 单一构造点（所有 goal 读写都经这里，⛔ 不在别处拼路径——同 meta-driver）。
-import { goalStoreArgv } from "./meta-driver.ts";
+// goal 动词的 argv 单一构造点 + 「quay CLI 解析得出吗」的判据（同 meta-driver，⛔ 本文件不另拼路径）。
+import { goalStoreArgv, goalCliResolvable } from "./meta-driver.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
 import { defaultDriverConfig, loadDriverConfig, DRIVERS_CONFIG_REL } from "./driver-config.ts";
 // G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
@@ -69,8 +69,11 @@ import { parse as parseYaml } from "yaml";
 // AC-216 复验域的单一判据定义（`inAchievedReverifyScope`，Core 侧）。本 driver【必须】用它而不是
 // 在本地重推一遍「achieved ∧ long-term ∧ goal 非 active」——存量缺口正是「声明在 Core、只有 I5 接了线，
 // 每轮 gate 集合与缺口立案集合各自另算」：重推一份即第二处定义，正是 gap-meta-computegoalgaps 要关的
-// 那个口（硬规则 5b）。goal-store.ts 的 argv 构造仍走 meta-driver 的 goalStoreArgv（⛔ 不绕过 store）。
-import { inAchievedReverifyScope, readsFrozenPopulation } from "../../packages/quay/src/goal-store.ts";
+// 那个口（硬规则 5b）。goal 动词的 argv 构造仍走 meta-driver 的 goalStoreArgv（⛔ 不绕过 store）。
+//
+// ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
+// 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
+import { inAchievedReverifyScope, readsFrozenPopulation } from "./driver-runtime.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
@@ -165,7 +168,7 @@ export function goalGapWorkerTimeoutMs(root: string, explicit?: number): number 
 //    本 driver 要支持【测试缝】把两者分开：scriptRoot 定位 goal-store.ts，dataRoot 定位 goals/）。──
 
 /** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。 */
-export async function listGoalRecords(scriptRoot: string, dataRoot: string): Promise<Array<Record<string, unknown>>> {
+export async function listGoalRecords(scriptRoot: string | null, dataRoot: string): Promise<Array<Record<string, unknown>>> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["list"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error || r.status !== 0) {
     throw new Error(`goal-store list failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 300)}`);
@@ -180,7 +183,7 @@ export async function listGoalRecords(scriptRoot: string, dataRoot: string): Pro
  *  gap-goal-evidence-cache-should-not-enter-git）。这正是「自动档」允许的那类动作
  *  （观测性、可逆、不改变系统行为）。 */
 export async function gateCriterion(
-  scriptRoot: string,
+  scriptRoot: string | null,
   id: string,
   dataRoot: string,
 ): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string }> {
@@ -209,7 +212,7 @@ export async function gateCriterion(
  *  活性/监控类判据（如「某载体末次写入距今 < N 分钟」）会回退，翻 achieved 后该记录将永久声称
  *  一件已不成立的事。立 AC 的人不得把监控项写成 goal 判据（AC-181 即此类，已由立条人自陈）。 */
 export async function writeGoalStatus(
-  scriptRoot: string,
+  scriptRoot: string | null,
   id: string,
   status: string,
   dataRoot: string,
@@ -244,7 +247,7 @@ export function fidelityJudgeArgvJson(root: string): string {
  *  scopeSize/evaluated 透传 goal-store 的取值（0 active goal ⇒ evaluated:false、scopeSize:0——
  *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。 */
 export async function checkStaleness(
-  scriptRoot: string,
+  scriptRoot: string | null,
   dataRoot: string,
 ): Promise<{ fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; scopeSize: number; evaluated: boolean } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--staleness"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
@@ -268,7 +271,7 @@ export async function checkStaleness(
  *  scopeSize/evaluated 透传 goal-store 的取值（0 作用域 ⇒ evaluated:false、scopeSize:0——
  *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。 */
 export async function checkAchievedFailing(
-  scriptRoot: string,
+  scriptRoot: string | null,
   dataRoot: string,
 ): Promise<{ achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--achieved-failing"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
@@ -356,7 +359,7 @@ export function parseFrozenFailingReading(stdout: unknown, exitStatus: number | 
 /** 读冻结population 的「此刻为假」读数：跑 `check --stale-pass` 的**纯读**模式（⛔ 不传 `--sweep`
  *  ——那才执行判据；本函数零 criterion 执行，与 AC-242 判据同一条命令、同一成本类）。
  *  一条命令/一个台账解析，独立于每轮的轮转（`sweepFrozenAcs` 是【动作】半边，本函数是【判定】输入面）。 */
-export async function readFrozenFailing(scriptRoot: string, dataRoot: string): Promise<FrozenFailingReading> {
+export async function readFrozenFailing(scriptRoot: string | null, dataRoot: string): Promise<FrozenFailingReading> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--stale-pass"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   // ⛔ spawn 错误不是「零条」：parseFrozenFailingReading 收 null 退出码 ⇒ 落 unreadable。
   return parseFrozenFailingReading(r.error ? null : r.stdout, r.error ? null : r.status);
@@ -378,7 +381,7 @@ export async function readFrozenFailing(scriptRoot: string, dataRoot: string): P
  *  读不懂输出 ⇒ null（⛔ 不与「轮转了且全过」同形，硬规则 3b）。退出码 1（存在当前为假的 AC）是
  *  **正常结局**、不是错误：stdout 照样是合法 JSON，故只有 spawn 错误/解析失败才归 null。 */
 export async function sweepFrozenAcs(
-  scriptRoot: string,
+  scriptRoot: string | null,
   dataRoot: string,
 ): Promise<{ eligible: number; ran: Array<{ id: string; verdict: string }>; stoppedBy: string } | null> {
   const r = await runAsync(
@@ -2113,10 +2116,14 @@ export interface GoalRoundReadings {
 }
 
 export interface GoalRoundOptions {
-  /** goal-store.ts 所在的 quay 代码根（缺省 = `resolveQuayCodeRoot()`——从【本 kernel 自身安装
-   *  位置】反推，⛔ 不是 dataRoot/workspaceRoot：第三方项目 root 下没有 packages/，按 root 拼会得到
-   *  `Cannot find module '<project>/packages/quay/src/goal-store.ts'`）。测试缝可显式传，
-   *  使 goals/ 与脚本根分离。 */
+  /** quay CLI 的代码根（缺省 = `resolveQuayCodeRoot()`——从【本 kernel 自身安装位置】反推，⛔ 不是
+   *  dataRoot/workspaceRoot：第三方项目 root 下没有 quay 自己的代码树，按 root 拼会得到
+   *  `Cannot find module '<project>/…goal-store.ts'`）。它现在的唯一用途是定位
+   *  **quay CLI 入口**（`goalStoreArgv` → `resolveCliInvocation`），因为 goal 读写已改经
+   *  `quay goal …` 动词（gap-ac262-…）。测试缝可显式传，使 goals/ 与代码根分离；传一个不存在
+   *  的根 ⇒ 解析不出 ⇒ 逐条读数落 not-evaluated/unreadable（负控制钉的就是这条契约）。
+   *  缺省解析不出（`resolveQuayCodeRoot()` 返回 null）⇒ 回退到本 kernel 自己 plugin root 下的
+   *  vendored bundle（出厂布局）。 */
   scriptRoot?: string;
   /** 覆盖 resource-gate 命令（测试缝；缺省 = 与 worker/promotion 同一 resourceGateCheck 缺省）。 */
   resourceGateArgv?: string[] | null;
@@ -2180,15 +2187,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const scriptRoot = opts.scriptRoot ?? resolveQuayCodeRoot();
   const dataRoot = root;
 
-  if (scriptRoot === null) {
-    // fail-closed 且**可诊断**：报「quay 代码根解析不出」而不是让下游 spawn 一个不存在的路径
+  if (!goalCliResolvable(scriptRoot)) {
+    // fail-closed 且**可诊断**：报「quay CLI 解析不出」而不是让下游 spawn 一个不存在的路径
     // （后者会把「配置/安装布局不对」伪装成 `Cannot find module` 这种像代码缺陷的读数）。
+    // ⚠️ gap-ac262-…：判据换了——不再是「有没有 packages/quay/src 源码树」（出厂布局结构上没有），
+    //    而是「quay CLI 入口解析得出吗」（源检出 = bin/quay.ts；出厂 = <pluginRoot>/vendor/quay/dist/quay.js）。
     return {
       fact: {
         name: "goal-ring",
         value: { phase: "list" },
         state: "failed",
-        reason: "quay code root unresolved (neither <pluginRoot>/../packages/quay/src nor <pluginRoot>/../src)",
+        reason: "quay CLI unresolvable (neither <codeRoot>/packages/quay/bin/quay.ts nor <pluginRoot>/vendor/quay/dist/quay.js)",
       },
       sufficiencyFacts: [],
       objectiveFacts: [],
@@ -3311,6 +3320,7 @@ export async function main(argv: string[]): Promise<number> {
     runId: resolvedRunId,
     json,
     pidFile,
+    kind: "goal",
     controlStateRel: GOAL_CONTROL_STATE_REL,
     routines: goalDriverRoutines(rootDir, roundOpts),
   });

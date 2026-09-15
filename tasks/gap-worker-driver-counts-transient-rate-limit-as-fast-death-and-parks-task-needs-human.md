@@ -9,6 +9,8 @@ parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-worker-driver-selector-api-error-no-backoff
 ---
 **type:** execution
 

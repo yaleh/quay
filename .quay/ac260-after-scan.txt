@@ -1,0 +1,14 @@
+carriers=342 total_dist_refs=168
+per_ext_total={'md': 103, 'sh': 37, 'js': 28}
+BAD(cwd-relative plugin/ prefix)=0 per_ext={}
+DANGLING(plugin-root-anchored raw .ts)=0
+BARE(scripts/X.ts not anchored, target missing on branch)=9
+   BARE: ('scripts/develop-deliver-tgz.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/develop-deliver-tgz.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('scripts/verify-deliver-coldstart.sh', 'scripts/check-adr.ts')
+   BARE: ('skills/quay-task-operator/SKILL.md', 'scripts/agents-claude-drift-check.ts')
+   BARE: ('skills/quay-task-operator/SKILL.md', 'scripts/agents-claude-drift-check.ts')

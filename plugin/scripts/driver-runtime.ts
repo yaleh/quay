@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
-import { mainCheckoutRoot } from "./repo-root.ts";
+import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
 import { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus } from "./driver-filters.ts";
 // Layer 0 · ResultVocab + verify（AC153 单一实现：核心不变式 + 词表强制含 not-evaluated）。
@@ -80,6 +80,7 @@ import { isDue } from "./routine-scheduler.ts";
 // Layer 0 · profile → L2 policy（gap-driver-binding-semantic-kind-to-profile：launchArgv 经 policy 解析
 // 语义 kind → profile，⛔ 不各自解析 profiles.yml / 不硬编码 launcher/model）。
 import { loadProfiles, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
+import { rootsFromEnv, mcpConfigArgvSuffix, type McpConfigRoots } from "./mcp-blacklist-resolve.ts";
 
 // ── Layer 0 · ResultVocab / controlPlane（re-export，单一真相源）────────────────────────────────────
 // 三种 driver 全部经本文件消费这些词表/控制面；⛔ 不得在 kind 里另写一份。
@@ -302,20 +303,55 @@ export function resolveKernelPluginRoot(): string {
   return path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
 }
 
+/** 本 kernel 是否跑在【源检出】里 —— Core 源码就在本 plugin root 旁边
+ *  （`<repo>/plugin/scripts/*.ts` + `<repo>/packages/quay/src/**`）。只有那里 raw `.ts` 才是真相源
+ *  （编辑即生效 + `sourceFilesMaxMtimeMs` 的源码自刷新）。
+ *
+ *  ⛔ 出厂安装一律以自包含 dist bundle 为可运行形态：npm-pack（raw .ts 直接不存在）、plugin
+ *  MARKETPLACE cache（`publish-dist-branch.sh` rsync 整个 plugin/，raw 与 dist 并存、且没有
+ *  node_modules 可解析 raw 的裸 npm import）、第三方 vendored 副本、`package.sh` 的 staged 快照。
+ *  实测 2026-09-14（gap-dist-plugin-missing-node-modules-task-schema-yaml）：在真实的
+ *  `~/.claude/plugins/cache/quay/quay/0.6.2` 上，raw kernel 的 23 文件 import 闭包需要 `yaml` /
+ *  `@modelcontextprotocol/sdk/*` / `zod`，`quay driver start` 对**每一个 kind** 都崩在
+ *  `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from <cache>/scripts/task-schema.ts`，
+ *  而同一目录的 `scripts/dist/driver-runtime.js` 跑同一个 verb 正常。出厂树是静态的（没有源码可
+ *  推进），选 raw 零收益、代价是启动即崩 ⇒ 判据是「是不是源检出」，⛔ 不是「哪个形态存在」。
+ *
+ *  ⛔ 镜像 Core `packages/quay/src/plugin-root.ts::isPluginSourceCheckout`（同一判据，从本 kernel
+ *  自身安装位置解析 —— kernel ⛔ 不能 import Core 模块）。两处必须同改。
+ *
+ *  ⛔ 本函数只做存在性探针，**不在这里第二次拼 `packages/quay/src`**：布局知识必须只存在于单一入口
+ *  （kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则——root 锚点拼法只允许出现在
+ *  `resolveQuayCodeRoot` / `resolveQuaySrcModule` / `quaySrcModuleLegacyShape` 三个函数体内；
+ *  实测 2026-09-14 本函数原先自己 `path.join(codeRoot, "packages", "quay", "src")` 时，
+ *  `kernel-sibling-resolution-check` 报 `driver-root-anchor` ⇒ 整轮 suite `# fail 5`）。
+ *  故取源树形的**目录**（`rel=""` ⇒ `path.join` 的末段空串被规范化掉，得 `<codeRoot>/packages/quay/src`
+ *  本身，与原本的目录级判据逐字等价），⛔ 不要改成探某个具体文件（夹具只建目录、不建文件）。 */
+export function isKernelSourceCheckout(): boolean {
+  const codeRoot = resolveQuayCodeRoot();
+  return !!codeRoot && fs.existsSync(quaySrcModuleLegacyShape(codeRoot, ""));
+}
+
 /** 解析本 kernel 的一个 sibling 脚本到可运行形态：原始 .ts（dev tree，用 --experimental-strip-types 跑）
  *  或 bundled dist/<name>.js（installed artifact，纯 ESM，不带 flag 跑）。两者都不在 ⇒ null（调用方
- *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。 */
+ *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。
+ *
+ *  ⛔ raw 只在【源检出】里胜出（isKernelSourceCheckout）：出厂安装里 raw 与 dist 并存时 dist 优先
+ *  —— 否则 supervisor 会 spawn 一个 import 不到 `yaml`/`zod`/`@modelcontextprotocol/sdk` 的裸 .ts，
+ *  六个 driver kind 全部启动即崩（`runSupervisor` 的 `spec.driver` 正是经本函数解析）。dist 不存在
+ *  ⇒ 退回 raw（保持既有行为，不把可解析的脚本变成 null）。 */
 export function resolveKernelSibling(name: string): { path: string; stripTypes: boolean } | null {
   const dir = resolveKernelScriptsDir();
   const raw = path.join(dir, name);
-  if (fs.existsSync(raw)) return { path: raw, stripTypes: true };
-  if (name.endsWith(".ts")) {
+  const isTs = name.endsWith(".ts");
+  if (fs.existsSync(raw) && (!isTs || isKernelSourceCheckout())) return { path: raw, stripTypes: true };
+  if (isTs) {
     const js = name.replace(/\.ts$/, ".js");
     const bundledDir = path.basename(dir) === "dist" ? dir : path.join(dir, "dist");
     const bundled = path.join(bundledDir, js);
     if (fs.existsSync(bundled)) return { path: bundled, stripTypes: false };
   }
-  return null;
+  return fs.existsSync(raw) ? { path: raw, stripTypes: isTs } : null;
 }
 
 /** 解析本 kernel 的一个 shell sibling（.sh）到 `<pluginRoot>/scripts/<name>`。shipped 下 .sh 以
@@ -405,6 +441,21 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
   return null;
 }
 
+// ── Layer 0 · Core 库符号的单一导入面（gap-ac262-…）──────────────────────────────────────────────
+//
+// 为什么在这里：drivers 需要 Core 的**库**符号（不是把它当 CLI spawn——那是另一个缺陷）。这类静态
+// import 是正当的代码依赖：`build-plugin-dist.mjs` 的 coreSrcAliasPlugin 会把它内联进 `dist/*.js`，
+// 出厂 bundle 因此自包含（⛔ 不能用运行期拼路径的 dynamic import 替代——那会让 shipped 形态落到
+// node_modules 里的 `.ts`，Node ≥23.7 拒绝 strip-types；见 core-src-import.ts 头注释）。
+//
+// 但**「哪棵树里有 Core」这条布局知识只能出现在一处**（DRIVER-SCOPE 规则；本文件正是那个单一入口）。
+// 于是这两个消费方（goal-driver / meta-driver）不再各自写出 `<repo>/packages/quay/src/…` 字面量，
+// 而是从本模块取符号：布局知识留在 Layer 0，driver 只表达「我需要这个符号」。
+// ⊢ AC-262 判据按源文本扫这两个文件（剥掉 `//` 行注释后不得出现 Core 源码树字面量），故符号本身
+//   必须在这里落地一次；⛔ 不是把字面量藏起来——是把「谁知道布局」收敛到它该在的地方。
+export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
+export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
 // 规范化到 primary worktree（主检出）。git 不可用 / 非 git 仓库 / 解析失败 ⇒ 原样返回 root。
@@ -442,6 +493,17 @@ export interface CarrierStats {
    *  ⛔ 不报一个不存在的路径——路径与 records 必须同源同态（硬规则 3b：「读不到」不得与
    *  「正常读数」同形：有路径 + 有计数 + 有时间戳看起来一切正常，实际谁都没读到）。 */
   primaryPath: string | null;
+  /** 【提供 `lastTs` 的那个】载体的绝对路径；`lastTs` 为 null ⇔ 本字段为 null（同态，硬规则 3b）。
+   *
+   *  ⛔ 与 `primaryPath` 是**两个不同的量**：`primaryPath` = carriers 里首个存在的（「谁在盘上」），
+   *  本字段 = 末条 ts 最大的那个（「这个 ts 从哪来」）。真实工作区上两者会不同名——实测
+   *  2026-09-13 生产 `/home/yale/work/quay` 的 `promotion`：`promotion-outcome.jsonl` 存在但末条 ts
+   *  停在 20:01:48Z（2.5h 陈旧），`promotion-round.jsonl` 每 30s 一条、末条 22:33:30Z ⇒ 报出的
+   *  `last_record_ts` 来自后者，而读 `carrier_path` 的人看的是前者。
+   *  ⇒ 「ts 大 ⇒ ts 来自 primaryPath」是一条**只在上游注里成立**的推断，落到渲染面上就是
+   *  「真读数被归因到没供数的载体」（硬规则 3b/4b：一条读数声称的来源不是它的来源）。
+   *  见 gap-driver-status-carrier-path-source-label-mismatch。 */
+  lastTsCarrier: string | null;
   /** 逐载体分解（哪个存在、哪个没有、各自多少行）。 */
   files: CarrierFileStat[];
 }
@@ -462,6 +524,9 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   // ⇒ 一个诊断字段谎报自己的来源。见 gap-driver-status-carrier-path-names-first-entry-not-the-existing-one；
   // 同一现象独立复现于 gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable:73-75）。
   let primaryPath: string | null = null;
+  // 提供 lastTs 的那个载体（⛔ 与 primaryPath 分开跟踪——两者是「谁在盘上」与「ts 从哪来」两个量）。
+  // 比较用严格 `>`（相等不更新）⇒ 并列时保留**首个**供数载体，与 lastTs 的取值规则逐字一致。
+  let lastTsCarrier: string | null = null;
   const files: CarrierFileStat[] = [];
   for (const name of spec.carriers) {
     const file = path.join(root, ".quay", name);
@@ -489,6 +554,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
         for (const k of tsKeys) {
           if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
             lastTs = j[k];
+            lastTsCarrier = file;
           }
         }
       } catch {
@@ -496,7 +562,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       }
     }
   }
-  return { records, lastTs, primaryPath, files };
+  return { records, lastTs, primaryPath, lastTsCarrier, files };
 }
 
 /** 派生状态文件的绝对路径（supervisor 共享的一份路径规则，⛔ kind 差异由 registry 表承载）。 */
@@ -572,6 +638,331 @@ export async function serveKindControlPlane(
     name: opts.name ?? `${spec.prefix}-control`,
   });
   return handle;
+}
+
+// ── Layer 0 · 事件循环层停机登记（SPEC §7 阶段 C：进程边界 → 事件循环边界）──────────────────────────
+//
+// WHY THIS EXISTS（GOAL-017/AC-255）：阶段 C 把六个 kind 的常驻循环收进【一个】anchor 进程后，
+// `kill -TERM <pid>` 不再能只停一个 kind——那会停掉 anchor = 停掉全部六个。逐 kind 的停机必须变成
+// **进程内的一个信号**，而不是 OS 信号。本登记表就是那个信号：驱动在进入常驻循环时
+// `registerKindStop(kind, requestStop)`，anchor 用 `requestKindStop(kind)` 只停它请求的那一个。
+//
+// ⛔ 登记表是**进程内存态**（只有 anchor 与各 kind 同进程时才有效）。跨进程调用 `requestKindStop`
+// 返回 false —— 如实报出「办不到」，⛔ 不静默 no-op（硬规则 3b）。
+
+interface KindStopController {
+  requested: boolean;
+  signalers: Set<() => void>;
+}
+const KIND_STOP = new Map<DriverKind, KindStopController>();
+
+export interface KindStopHandle {
+  /** 本 kind 是否已被请求停机（常驻循环的条件用）。 */
+  requested(): boolean;
+  /** 请求本 kind 停机（登记表内部 + 单元测试用；生产路径用 requestKindStop）。 */
+  stop(): void;
+}
+
+/** 登记一个 kind 的停机控制器（常驻循环进入时调用一次）。进程级 SIGINT/SIGTERM 仍然停该 kind
+ *  （与旧 driver 进程 `process.on(SIGINT/SIGTERM)` 的语义一致——单进程直跑时它就是全部）。 */
+export function registerKindStop(kind: DriverKind, onStop?: () => void): KindStopHandle {
+  const ctl: KindStopController = { requested: false, signalers: new Set<() => void>() };
+  if (onStop) ctl.signalers.add(onStop);
+  KIND_STOP.set(kind, ctl);
+  const stop = (): void => {
+    if (ctl.requested) return;
+    ctl.requested = true;
+    for (const f of ctl.signalers) {
+      try { f(); } catch { /* 停机回调抛错不阻碍其余 signaler */ }
+    }
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  return { requested: () => ctl.requested, stop };
+}
+
+/** 请求【单个】kind 停机。返回 false = 本进程里没有该 kind 的常驻循环（⛔ 不是「停成功了」）。 */
+export function requestKindStop(kind: DriverKind): boolean {
+  const ctl = KIND_STOP.get(kind);
+  if (!ctl) return false;
+  ctl.requested = true;
+  for (const f of ctl.signalers) {
+    try { f(); } catch { /* 同上 */ }
+  }
+  return true;
+}
+
+/** 本进程是否已请求该 kind 停机（缺省 false = 没有该 kind 的循环）。 */
+export function kindStopRequested(kind: DriverKind): boolean {
+  return KIND_STOP.get(kind)?.requested ?? false;
+}
+
+// ── Layer 0 · anchor 载体路径（SPEC §7 阶段 C：一个 anchor 进程承载全部 kind 循环）───────────────
+//
+// ⛔ `.quay/anchor.pid` 刻意【不】叫 `*-driver.pid`：AC-255 的判据数的是「**承载 driver 循环**的
+// 进程数」，它读 `.quay/*-driver.pid` / `.quay/*-driver-supervisor.pid` 的**去重 pid 集合**。anchor
+// 把每个 kind 的 `.quay/<prefix>.pid` 写成自己的 pid ⇒ 六个文件、**一个**去重后的存活 pid——这正是
+// 「一个进程承载六个 kind」这一事实的诚实表示，⛔ 不是把计数改小（进程数另有直接量：`ps`）。
+
+export const ANCHOR_PID_REL = ".quay/anchor.pid";
+export const ANCHOR_DESIRED_REL = ".quay/anchor-desired.json";
+export const ANCHOR_STATE_REL = ".quay/anchor.json";
+export const ANCHOR_LOG_REL = ".quay/anchor.log";
+
+export function anchorPaths(root: string): {
+  pidFile: string;
+  desiredFile: string;
+  stateFile: string;
+  logFile: string;
+} {
+  return {
+    pidFile: path.join(root, ANCHOR_PID_REL),
+    desiredFile: path.join(root, ANCHOR_DESIRED_REL),
+    stateFile: path.join(root, ANCHOR_STATE_REL),
+    logFile: path.join(root, ANCHOR_LOG_REL),
+  };
+}
+
+/** 读 anchor pid（不存在/不可读/非正整数 ⇒ null）。 */
+export function readAnchorPid(root: string): number | null {
+  const raw = readPidFile(anchorPaths(root).pidFile);
+  return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+/** 读 anchor 的**结构化回读面** `.quay/anchor.json`（`{pid, startedAt, kinds, host}`）。⇒
+ *  **anchor 每个 reconcile pass 重写一次**（⛔ 不是「启动时写一次的静态声明」），故 `kinds` 是
+ *  「**此刻实际在跑循环的 kind 集合**」的权威读数——⛔ 与 `readDesired`（期望态）不同：声明了却没能
+ *  起来循环的 kind 不在 `kinds` 里。
+ *  读不到 / 不可解析 / 无 `kinds` 数组 ⇒ null（三态；⛔ 与「一个 kind 都没托管」不同形——那是 `[]`）。 */
+export function readAnchorState(root: string): { pid: number | null; kinds: DriverKind[] } | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).stateFile, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const j = JSON.parse(raw) as { pid?: unknown; kinds?: unknown };
+    if (!Array.isArray(j.kinds)) return null;
+    return {
+      pid: typeof j.pid === "number" && Number.isFinite(j.pid) ? j.pid : null,
+      kinds: j.kinds.filter((k): k is DriverKind => KNOWN_KINDS.includes(k as DriverKind)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 该 kind **自己的常驻循环**是否已就绪 —— 判据 = 逐 kind pid 载体 `.quay/<prefix>.pid` 写着一个
+ *  **活着的**进程（`pidSelf` 类由驱动自己在进入循环体后写；`pidSelf=false` 的 worker 由宿主在起循环时写，
+ *  见 `driverPidIsReadinessMarker`）。
+ *
+ *  ⛔ **只用于 `start` 的就绪确认**（`startKindViaAnchor`），与 `gap-driver-start-false-confirms-
+ *  unsettled-driver` 的纪律一致：「anchor 收下了这个 kind」⛔ 不等于「它的循环真的跑起来了」——
+ *  §6.1 的守卫实测过：一个每轮必抛的 kind 必须让 `start` **不报成功**。
+ *
+ *  ⛔ **不得用于状态判定**（`status`/`liveness`/`server status`）：收敛形态下这张文件**不可靠**——
+ *  它是【循环的产物】而非【托管关系的产物】（写一次、循环收尾时被删、活着期间不重写），生产实测
+ *  6 个 anchor 托管的 kind 里 5 个没有它（见 `anchorHosts` 的注释）。状态判定请用 `aliveness()`。 */
+export function loopReadinessMarker(root: string, kind: DriverKind): boolean {
+  const raw = readPidFile(statePaths(root, kind).driverPidFile);
+  const pid = /^\d+$/.test(raw) ? Number(raw) : null;
+  return pid !== null && pidAlive(pid);
+}
+
+/** 该 kind 是否由 anchor 承载：**anchor 进程活着 ∧ 它把本 kind 收在活跃循环集合里**。
+ *  ⛔ 这是**三态**判定，不是「有没有 supervisor 文件」——anchor 承载（true）与「supervisor 模型」
+ *  （false）必须不同形，否则 `aliveness().running` 会在收敛后恒 false（把「在跑」读成「死了」）。
+ *
+ *  ⛔ **判据不得是「该 kind 的 pid 载体文件恰好写着 anchor 的 pid」**
+ *  （gap-driver-status-misreports-anchor-hosted-kind-as-down，2026-09-15 生产实测：6 个 anchor 托管的
+ *  kind 里 5 个被读成 `host=supervisor, alive=0`，而同刻六个 round 载体都在**秒级**刷新）。
+ *  那张文件是【循环的产物】，不是【托管关系的产物】：
+ *    · 只在 kind 的常驻循环**进入循环体时写一次**（`pidSelf` 类由驱动自己写；`pidSelf=false` 的
+ *      worker 由 anchor 写——见 driver-anchor 的写者分工注释），
+ *    · 而会在**任何一次循环收尾时被删**（anchor 的 loop-cleanup / 退出清理、`stopKind*` 的清理），
+ *      且**只要循环活着就没有任何东西会把它写回来**。
+ *  ⇒ 任意时刻「哪些 kind 有这个文件」是一个**随循环代次漂移的任意子集**（生产实测 6 个里只有
+ *    `promotion` 有；同一机制的两次独立采样给出 4/2 与 1/5 两种**不同**的分裂）。拿它当托管判据必然
+ *    误报，且误报的**子集每次都不一样**——这正是「读不懂输入 ⇒ 报了一个假死亡」的硬规则 3b 镜像。
+ *  （本轮**未**归因出生产实例里那 5 张文件是被哪一次生命周期事件删掉的：同一 shape 的夹具复跑会正常
+ *    产出这 5 张文件 ⇒ 不把猜测写成结论。本判据的修法不依赖那个归因。）
+ *  ⇒ 判据改为 anchor 自己的权威读数：**进程活着**（`pidAlive` 读 `/proc`，外部直接量）+ **回读面点名**
+ *    （每 500ms 重写）。⛔ 回读面是 anchor 自报的，单独**不足以**制造「托管」——本函数要求 `anchor.pid`
+ *    指向的进程真的活着，而 anchor 正常退出会同时删掉回读面与 pid 文件。
+ *  ② 是兼容回退：回读面缺失 / 不可解析 / **换代**（其 `pid` 对不上 `anchor.pid`）时，退回「该 kind 的
+ *    pid 载体写着 anchor 的 pid」这条旧判据——⛔ 读不懂回读面不得变成「报死亡」（硬规则 3b）。 */
+export function anchorHosts(root: string, kind: DriverKind): { hosted: boolean; anchorPid: number | null } {
+  const anchorPid = readAnchorPid(root);
+  if (anchorPid === null || !pidAlive(anchorPid)) return { hosted: false, anchorPid: null };
+  const st = readAnchorState(root);
+  if (st !== null && st.pid === anchorPid && st.kinds.includes(kind)) return { hosted: true, anchorPid };
+  const dpid = readPidFile(statePaths(root, kind).driverPidFile);
+  const driverPid = /^\d+$/.test(dpid) ? Number(dpid) : null;
+  return { hosted: driverPid === anchorPid, anchorPid };
+}
+
+/** 逐 kind 的启动参数（`quay driver start --kind X --cap n --interval ms` 的透传面）。 */
+export interface AnchorDesiredEntry {
+  cap?: string;
+  interval?: string;
+  reconcileInterval?: string;
+  runId?: string;
+}
+
+/** anchor 的声明式期望态（`.quay/anchor-desired.json`）。锚是**文件**而不是进程内变量：
+ *  `quay driver start` / `stop` 是两个短命进程，它们与常驻 anchor 之间只能经盘上载体通话。 */
+export interface AnchorDesired {
+  kinds: DriverKind[];
+  opts?: Record<string, AnchorDesiredEntry>;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** 读期望态。缺失/不可解析 ⇒ null（⛔ 与「空集合」不同形：null = 没人声明过，[] = 声明了一个都不要）。 */
+export function readDesired(root: string): AnchorDesired | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).desiredFile, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const j = JSON.parse(raw) as { kinds?: unknown; opts?: unknown; updatedBy?: unknown; updatedAt?: unknown };
+    const kinds = Array.isArray(j.kinds) ? j.kinds.filter((k): k is DriverKind => KNOWN_KINDS.includes(k as DriverKind)) : [];
+    const opts: Record<string, AnchorDesiredEntry> = {};
+    if (j.opts && typeof j.opts === "object") {
+      for (const [k, v] of Object.entries(j.opts as Record<string, unknown>)) {
+        if (!v || typeof v !== "object") continue;
+        const o = v as Record<string, unknown>;
+        const entry: AnchorDesiredEntry = {};
+        for (const f of ["cap", "interval", "reconcileInterval", "runId"] as const) {
+          if (o[f] != null) entry[f] = String(o[f]);
+        }
+        opts[k] = entry;
+      }
+    }
+    return {
+      kinds,
+      opts,
+      updatedBy: typeof j.updatedBy === "string" ? j.updatedBy : "unknown",
+      updatedAt: typeof j.updatedAt === "string" ? j.updatedAt : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 写期望态（原子替换；调用方传**完整**集合——本函数不做并集，避免把读-改-写竞态藏起来）。 */
+export function writeDesired(root: string, kinds: DriverKind[], updatedBy: string, opts?: Record<string, AnchorDesiredEntry>): void {
+  const file = anchorPaths(root).desiredFile;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify({ kinds: [...new Set(kinds)], opts: opts ?? {}, updatedBy, updatedAt: ts() }, null, 2) + "\n", "utf8");
+  fs.renameSync(tmp, file);
+}
+
+/** 幂等加入 / 移除一个 kind（`quay driver start|stop --kind X` 的写侧）。返回改后的集合。 */
+export function updateDesired(
+  root: string,
+  kind: DriverKind,
+  present: boolean,
+  updatedBy: string,
+  entry?: AnchorDesiredEntry,
+): DriverKind[] {
+  const cur = readDesired(root);
+  const curKinds = cur?.kinds ?? [];
+  const curOpts = { ...(cur?.opts ?? {}) };
+  const next = present ? [...new Set([...curKinds, kind])] : curKinds.filter((k) => k !== kind);
+  if (present && entry) curOpts[kind] = { ...(curOpts[kind] ?? {}), ...entry };
+  if (!present) delete curOpts[kind];
+  writeDesired(root, next, updatedBy, curOpts);
+  return next;
+}
+
+/** 本内核【自身安装位置】在主检出里的对应目录 —— 仅当本内核跑在一个 **linked worktree** 里时才与自身
+ *  目录不同（dev tree 的 worktree 场景：常驻 anchor ⛔ 不应把生存期绑在一个短命的 worktree 路径上 ——
+ *  worktree 被回收后，任何一次 kind 重启都会 import 失败）。
+ *
+ *  ⚠️ 基准是**本内核自己的路径**（`kernelSelfPath()`），⛔ 不是 `--root`（工作区）：`--root` 在第三方项目里
+ *  是**别人的项目**，其下没有 quay 的 `plugin/scripts/` —— 「把 quay 自己的资源拼在 workspace root 下」
+ *  正是 AC-203 / gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root 的缺陷形（症状：
+ *  第三方项目上解析到一个不存在的文件 ⇒ spawn 只得 ENOENT/非零退出，被例程读成「跑过了、没数据」）。
+ *  `kernel-sibling-resolution-check` 的 DRIVER-SCOPE 规则对 driver-runtime.ts 上的这一形态 fail-closed，
+ *  且 **不认** dev-tree-only 豁免（该标记的前提在这些文件上为假）。⛔ 不能靠「在 quay 自己的检出里跑
+ *  测试」发现它：那里 `--root` 与「内核所在仓库」恰好重合 ⇒ 该缺陷形态**结构上无法自测**。
+ *
+ *  非 git / 主检出不可解析 / 本内核不在 worktree 里 / 主检出里没有对应目录 ⇒ 返回本内核自身的目录
+ *  （⇒ 行为与「兄弟文件回退」逐字相同，⛔ 不引入新的失败面）。 */
+function mainCheckoutKernelDir(): string {
+  const here = path.dirname(kernelSelfPath());
+  try {
+    const selfRepo = repoRoot(here);
+    const main = mainCheckoutRoot(here);
+    if (!main || main === selfRepo || !fs.existsSync(main)) return here;
+    const rel = path.relative(selfRepo, here);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return here;
+    const candidate = path.join(main, rel);
+    return fs.existsSync(candidate) ? candidate : here;
+  } catch {
+    return here;
+  }
+}
+
+/** 解析 anchor 内核可执行文件的**优选**路径。
+ *
+ *  优先级（GOAL-017/AC-255）：① **主检出**的 `driver-anchor.{ts,js}` —— 收敛形态的**持久**落点（常驻
+ *  anchor ⛔ 不应把生存期绑在一个短命的 worktree 路径上）；② 本内核的**兄弟文件**（`import.meta.url`
+ *  同目录）。① 的基准见 `mainCheckoutKernelDir` —— **是本内核自己的仓库的主检出**，⛔ 不是 `--root`。
+ *  两者都是「本内核自身安装位置」的派生量，故 ① 只在「本内核跑在 linked worktree 里」时生效；其余情况
+ *  `mainCheckoutKernelDir()` 逐字返回自身目录 ⇒ ① 与 ② 指向同一个文件 ⇒ 直接走 ②（⛔ 不重复加载）。
+ *
+ *  ⛔ **不走 `QUAY_PLUGIN_ROOT`**：那是「第三方项目/夹具的 plugin/ 在哪」的缝，用它会让每个夹具都必须
+ *  复制一份完整内核闭包；而 anchor 要跑的是**内核自己的**代码（只有它托管的 kind 模块才可能来自
+ *  QUAY_PLUGIN_ROOT——那正是 `invokeKindDefault` 用 resolveKernelSibling 的地方）。 */
+export function preferredAnchorKernel(): { path: string; stripTypes: boolean } | null {
+  const here = path.dirname(kernelSelfPath());
+  const selfTs = path.join(here, "driver-anchor.ts");
+  const selfJs = path.join(here, "driver-anchor.js");
+  const mainDir = mainCheckoutKernelDir();
+  if (mainDir !== here) {
+    const mainTs = path.join(mainDir, "driver-anchor.ts");
+    const mainJs = path.join(mainDir, "driver-anchor.js");
+    if (fs.existsSync(mainTs)) return { path: mainTs, stripTypes: true };
+    if (fs.existsSync(mainJs)) return { path: mainJs, stripTypes: false };
+  }
+  if (fs.existsSync(selfTs)) return { path: selfTs, stripTypes: true };
+  if (fs.existsSync(selfJs)) return { path: selfJs, stripTypes: false };
+  return null;
+}
+
+/** 起一个 anchor 子进程（detached，setsid 等价）。返回 {pid, error}。⛔ 不继承调用者 stdout/stderr。 */
+export function spawnAnchor(
+  root: string,
+  opts: { logFile?: string; takeoverPid?: number | null } = {},
+): { pid: number | null; error: string | null } {
+  const sibling = preferredAnchorKernel();
+  if (!sibling) return { pid: null, error: `driver-anchor module not found next to driver-runtime (${path.dirname(kernelSelfPath())})` };
+  const anchorLog = opts.logFile ?? anchorPaths(root).logFile;
+  fs.mkdirSync(path.dirname(anchorLog), { recursive: true });
+  let fd: number;
+  try {
+    fd = fs.openSync(anchorLog, "a");
+  } catch {
+    return { pid: null, error: `cannot open anchor log ${anchorLog}` };
+  }
+  const args = [
+    process.execPath,
+    ...(sibling.stripTypes ? ["--experimental-strip-types"] : []),
+    sibling.path,
+    "__anchor",
+    "--root",
+    root,
+  ];
+  if (opts.takeoverPid) args.push("--takeover", String(opts.takeoverPid));
+  const child = spawn(args[0], args.slice(1), { detached: true, stdio: ["ignore", fd, fd], env: process.env });
+  child.unref();
+  return { pid: child.pid ?? null, error: child.pid ? null : "spawn returned no pid" };
 }
 
 // ── Layer 0 · 判停（stopCondition，SPEC §2.1 共同不变式：halt ∧ resourceGate）──────────────────────
@@ -701,9 +1092,22 @@ function launchSettingsArg(root: string, config: ProfilesConfig, kind: string, r
   return needsJson ? JSON.stringify({ ...settings, env }) : settingsFile;
 }
 
+/** `launchArgv` 的可选缝。全部缺省 ⇒ 生产行为（读真实 profiles.yml / 真实配置根）。 */
+export interface LaunchArgvOpts {
+  /** MCP 配置根覆盖（测试缝，AC7）：`null` = 显式「解析不出」⇒ 不追加任何 mcp flag；
+   *  缺省（undefined）⇒ 生产路径（env 缝 / 真实 `~/.claude*`）。⛔ 用 undefined vs null 区分
+   *  「没传」与「传了、结论是不可用」——两者动作相同但成因不同，测试要能分别钉住。 */
+  mcpRoots?: McpConfigRoots | null;
+}
+
 /** LLM 调用配置解析单一构造点（role ∈ task-worker | selector | fix-worker）。经 L2 policy 解析
- *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。 */
-export function launchArgv(role: string, prompt: string, root: string): string[] {
+ *  语义 kind → profile，再出 argv。profile 缺失 / 非法 ⇒ loadProfiles 抛错（fail-closed，⛔ 不静默）。
+ *
+ *  MCP 黑名单（gap-worker-mcp-blacklist-strict-config）：若该 role 声明了非空 `mcpBlacklist`，
+ *  枚举当前实际配置的 MCP server、减去黑名单，追加 `--strict-mcp-config --mcp-config <inline json>`。
+ *  ⛔ 解析不出（读不懂输入）⇒ 一个 flag 都不加（回退原样派发）——这是资源优化，不是正确性闸。
+ *  空黑名单（如 outer）⇒ 逐字不变的 argv（AC1 负控制：共享 profile 不连坐）。 */
+export function launchArgv(role: string, prompt: string, root: string, opts: LaunchArgvOpts = {}): string[] {
   const config = loadProfiles(root); // L2：读 + 校验 profiles.yml（加载校验 AC2）
   const resolved = resolveRole(config, role); // L2：kind → profile（主备回退 / 继承去重）
   if (!resolved.launcher || !resolved.name) {
@@ -714,6 +1118,10 @@ export function launchArgv(role: string, prompt: string, root: string): string[]
   if (config.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
   if (resolved.model) argv.push("--model", resolved.model);
   if (resolved.bare) argv.push("--bare");
+  if (resolved.mcpBlacklist.length > 0) {
+    const roots = opts.mcpRoots !== undefined ? opts.mcpRoots : rootsFromEnv([root], process.env, resolveKernelPluginRoot());
+    if (roots) argv.push(...mcpConfigArgvSuffix(resolved.mcpBlacklist, roots));
+  }
   argv.push("-n", resolved.name, "-p", prompt);
   return argv;
 }
@@ -1026,6 +1434,9 @@ const SHARED_SOURCE_FILES: readonly string[] = [
   "driver-result.ts",
   "driver-shared.ts",
   "driver-config.ts",
+  // AC-255（SPEC §7 阶段 C）：anchor 是收敛形态的**宿主**，它的源码推进必须同样触发自刷新
+  // （否则改 anchor 自己 = 改了没人重启 —— 与 AC-184 对其它内核文件的处理同形）。
+  "driver-anchor.ts",
 ];
 
 /** 一个 kind 的 driver 进程须监视的源码文件（相对 <root>/plugin/scripts/）。 */
@@ -1345,7 +1756,10 @@ export function driverPidIsReadinessMarker(kind: DriverKind): boolean {
 }
 
 /** 派生一个 kind 的 { supervisor_alive, driver_alive, running, deaths }（status 与 liveness 共用）。
- *  `driverAlive` 的含义取决于写者，见 driverPidIsReadinessMarker 的注释（⛔ 直接量 vs 代理量）。 */
+ *  `driverPid`/`driverAlive` = **承载该 kind 常驻循环的那个进程**：收敛形态（anchor 承载）下就是 anchor
+ *  自己，旧形态下是 pid 载体指向的 driver 进程——两者的活性都是 `/proc` 直接量。
+ *  （`driverPidIsReadinessMarker` 描述的是**旧形态**里 pid 载体的写者分工；收敛形态下那张文件可能不存在，
+ *  见 `anchorHosts` 的注释。） */
 export function aliveness(root: string, kind: DriverKind): {
   supervisorPid: number | null;
   driverPid: number | null;
@@ -1358,25 +1772,53 @@ export function aliveness(root: string, kind: DriverKind): {
   /** supervisor 是否陈旧（其启动时刻早于被监视源码最新 mtime）。true=stale；false=fresh；null=
    *  not-evaluated（supervisor 缺失/已死/读不到启动时刻）。 */
   supervisorStale: boolean | null;
+  /** AC-255：承载该 kind 常驻循环的宿主模型。`anchor` = 收敛形态（一个进程承载全部 kind 循环）；
+   *  `supervisor` = 旧的多进程形态。⛔ 两者必须不同形，否则「收敛了没」在读数上不可见。 */
+  host: "anchor" | "supervisor";
+  /** AC-255：anchor 进程 pid（无活 anchor ⇒ null）。 */
+  anchorPid: number | null;
 } {
   const st = statePaths(root, kind);
   const spidRaw = readPidFile(st.supervisorPidFile);
   const dpidRaw = readPidFile(st.driverPidFile);
   const supervisorPid = /^\d+$/.test(spidRaw) ? Number(spidRaw) : null;
-  const driverPid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
+  const pidFilePid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
   const supervisorAlive = supervisorPid != null && pidAlive(supervisorPid);
+  // AC-255（SPEC §7 阶段 C）：收敛后**没有 supervisor 进程**——该 kind 的常驻循环由 anchor 进程承载，
+  // `.quay/<prefix>.pid` 写的是 anchor 的 pid（六个 kind 同一个 pid）。此时 `running` 的直接量是
+  // 「承载进程活着 ∧ 该 kind 已被 anchor 接管」，⛔ 不是「supervisor ∧ driver 双活」（那会恒 false，
+  // 把收敛后的「在跑」读成「死了」——硬规则 3b 的镜像：读不懂输入 ⇒ 报了一个假死亡）。
+  const host = anchorHosts(root, kind);
+  // **承载该 kind 常驻循环的进程**：anchor 承载时**就是 anchor 自己**（`host.anchorPid`），
+  // ⛔ 不是「pid 载体文件里碰巧写着谁」——那张文件是**循环的产物**，收敛形态下可能压根不存在（生产
+  // 实测 6 个 kind 里 5 个没有它，见 anchorHosts 的注释）。`driver_pid`/`driver_alive` 的语义是
+  // 「跑这个 kind 的进程是谁 / 它活着吗」，故收敛形态下报 anchor 的 pid 与活性——这也正是 driver-anchor
+  // 文档写死的载体约定（`.quay/<prefix>.pid` 六个文件一个 pid）。直接量：`pidAlive` 读 `/proc`。
+  // ⚠️ `gap-driver-status-misreports-anchor-hosted-kind-as-down` 的另一半：`packages/quay/src/cli/
+  //   server.ts` 用 `driver_alive !== 1` 判「这个 kind 的循环没在转」⇒ ⛔ 不能只修 `running` 而让
+  //   `driver_alive` 继续报 0（那只是把一个字段的假死搬到另一个字段）。
+  const driverPid = host.hosted ? host.anchorPid : pidFilePid;
   const driverAlive = driverPid != null && pidAlive(driverPid);
-  const running = supervisorAlive && driverAlive;
+  const running = host.hosted ? driverAlive : supervisorAlive && driverAlive;
   const deaths: string[] = [];
-  // supervisor 死：pid 文件在而进程不在。
-  if (supervisorPid != null && !supervisorAlive) deaths.push("supervisor_dead");
-  // driver 死：pid 文件在而进程不在。
+  if (!host.hosted) {
+    // supervisor 死：pid 文件在而进程不在。
+    if (supervisorPid != null && !supervisorAlive) deaths.push("supervisor_dead");
+    // 孤儿 driver：supervisor 死而 driver 进程还在 —— ⛔ 不算「在跑」（AC3(b)）。
+    if (!supervisorAlive && driverAlive) deaths.push("driver_orphaned");
+  } else if (supervisorPid != null) {
+    // anchor 承载 && 仍有 supervisor pid 文件 ⇒ 残留（阶段 C 已退役 supervisor）。如实报出，⛔ 不静默。
+    deaths.push("stale_supervisor_pidfile");
+  }
+  // driver 死：承载进程不在（收敛形态下 = anchor 不在，而 anchorHosts 已要求 anchor 活着 ⇒ 恒不触发；
+  // 旧形态下 = pid 载体指向一个死进程）。
   if (driverPid != null && !driverAlive) deaths.push("driver_dead");
-  // 孤儿 driver：supervisor 死而 driver 进程还在 —— ⛔ 不算「在跑」（AC3(b)）。
-  if (!supervisorAlive && driverAlive) deaths.push("driver_orphaned");
   // supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）：只对【活着】的 supervisor
   // 有意义；缺失/已死/读不到启动时刻 ⇒ not-evaluated（null），⛔ 不与「新鲜」（false）同形。
-  const staleness = supervisorStaleness(root, kind, supervisorAlive ? supervisorPid : null);
+  // AC-255：anchor 承载时「宿主陈旧」判定的对象是 **anchor 进程**（supervisor 已退役）——同一个直接量
+  // （宿主启动时刻 vs 被监视源码 mtime），换的只是宿主的 pid 从哪来。
+  const hostPidForStaleness = host.hosted ? host.anchorPid : supervisorAlive ? supervisorPid : null;
+  const staleness = supervisorStaleness(root, kind, hostPidForStaleness);
   return {
     supervisorPid,
     driverPid,
@@ -1386,17 +1828,28 @@ export function aliveness(root: string, kind: DriverKind): {
     deaths,
     supervisorStartedAt: staleness.supervisorStartedAt,
     supervisorStale: staleness.state === "stale" ? true : staleness.state === "fresh" ? false : null,
+    host: host.hosted ? "anchor" : "supervisor",
+    anchorPid: host.anchorPid,
   };
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
- *  backward compat）。carrier_path / carrier_records / last_record_ts 三者同源（同一个 carrierStats 读数），
+ *  backward compat）。carrier_path / carrier_records / last_record_ts / last_record_carrier 全部出自
+ *  **同一个 carrierStats 读数**，但⛔ **不是同一个量**：carrier_path = 首个存在的载体（「谁在盘上」）；
+ *  last_record_ts = 全载体末条 ts 最大值；last_record_carrier = **提供该 ts 的那个载体**（「从哪来」）。
+ *  ⛔ 不得把 carrier_path 读成 last_record_ts 的来源——两者在真实工作区上会不同名
+ *  （见 CarrierStats.lastTsCarrier 的实测；gap-driver-status-carrier-path-source-label-mismatch）。
  *  carrier_path 为 null ⇔ 无任何载体存在 ⇔ records=0（⛔ 不报一个不存在的路径——AC1/AC2）。
  *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
   const stats = carrierStats(root, kind);
+  // 人类可读面：ts 与它的【来源】必须相邻出现；来源 ≠ carrier_path 时把「跨载体最大值」标注出来——
+  // 否则读者会把行内先出现的 carrier_path 当成这个 ts 的来源（正是本任务修的缺陷）。
+  // ⛔ 只改打印的并置关系，不改任何取值规则（carrier_path 语义不变，由既有测试钉住）。
+  const crossCarrier =
+    stats.lastTsCarrier !== null && stats.lastTsCarrier !== stats.primaryPath ? " (cross-carrier max)" : "";
   if (json) {
     out(JSON.stringify({
       kind,
@@ -1409,18 +1862,26 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      // ts 的【来源】单列：`carrier_path` 是「首个存在」，⛔ 不是「供这个 ts 的那个」。
+      last_record_carrier: stats.lastTsCarrier,
       carrier_files: stats.files,
       supervisor_started_at: a.supervisorStartedAt,
       supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
+      // AC-255：宿主模型（anchor=收敛形态 / supervisor=旧多进程形态）+ anchor pid。⛔ 两者不同形。
+      host: a.host,
+      anchor_pid: a.anchorPid,
     }) + "\n");
   } else {
     out(
-      `${spec.prefix}: kind=${kind} · supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
+      `${spec.prefix}: kind=${kind} · host=${a.host} anchor_pid=${a.anchorPid ?? "none"} · ` +
+      `supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
       // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
       `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
-      `last_record_ts=${stats.lastTs ?? "null"} · ` +
+      `last_record_ts=${stats.lastTs ?? "null"}${crossCarrier} · ` +
+      // ⛔ 紧邻上面那一项：这就是「这条 ts 从哪来」的答案（`carrier_path` 回答的是另一个问题）。
+      `last_record_carrier=${stats.lastTsCarrier ?? "null"} · ` +
       `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")}\n`,
     );
   }
@@ -1570,6 +2031,81 @@ function reportUnconfirmed(root: string, kind: DriverKind, v: ConfirmResult, con
  *    · `start-pending:` 窗口用尽而 supervisor **仍活着**（慢启动 / 驱动崩溃-重拉循环）⇒ 独立取值，
  *                       ⛔ 不报「死」、⛔ 不打印 `started:`。退出码非 0 = 「未确认」≠「死」。
  */
+/** 阶段 C 的 start 路径（anchor 承载）：声明期望态 → 确保 anchor 在跑 → 等该 kind **自己的循环**就绪。
+ *
+ *  ⛔ 就绪判据 = `loopReadinessMarker()`（**该 kind 自己的** pid 载体写着一个活进程），⛔ **不是**
+ *  `aliveness().running`：后者回答「这个 kind 有没有被一个活着的宿主承载」，而本函数要回答的是
+ *  「它的循环**真的跑起来了**没有」——两者在收敛形态下**必须是取假值不同的两个量**，否则一个每轮必抛的
+ *  kind 会被 `start` 报成成功（§6.1 的守卫实测过这条，见 driver-anchor.test.mjs）。
+ *  ⚠️ `gap-driver-status-misreports-anchor-hosted-kind-as-down` 的残留（如实登记，⛔ 不静默）：生产实例里
+ *  那 5 个「anchor 托管却没有 pid 载体」的 kind，`start --kind <k>` 会等满确认窗口并报 `start-pending`
+ *  （**本任务之前就是这样**，本任务⛔ 未改变它——那需要一个「循环在产出」的直接量，超出本任务 Touches）。
+ *  它的读数取自 `loopReadinessMarker` 的同一张文件；`status` 半边已由本任务修好（host=anchor/alive=1）。 */
+async function startKindViaAnchor(
+  root: string,
+  kind: DriverKind,
+  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
+  out: (s: string) => void,
+  err: (s: string) => void,
+): Promise<number> {
+  const confirmSecs = Math.max(0, opts.confirmTimeoutSecs ?? DEFAULT_CONFIRM_TIMEOUT_SECS);
+  const t0 = Date.now();
+
+  const before = aliveness(root, kind);
+  // ⛔ 判据是「**本 kind 自己的**循环就绪」而不是 `aliveness().running`（承载关系）——理由见本函数的
+  // 文档注释。在 anchor 路径下这条与旧 `before.running`（旧语义 = `hosted ∧ driverAlive`，而 driverAlive
+  // 读的正是同一张 pid 载体）**逐字等价** ⇒ 对 `start` 是无行为变更的改写。
+  if (loopReadinessMarker(root, kind)) {
+    // §6.9 不变式 1：已在跑 ⇒ no-op（⛔ 不是静默重启）。
+    out(`already-running: host=${before.host} anchor pid=${before.anchorPid ?? "none"} driver pid=${before.driverPid ?? "?"}\n`);
+    return statusForKind(root, kind, true, out);
+  }
+
+  // ① 声明期望态（把该 kind 加进集合；⛔ 不覆盖别的 kind —— `quay driver start --kind X` 只加 X）。
+  updateDesired(root, kind, true, "quay-driver-start", {
+    cap: opts.cap,
+    interval: opts.interval,
+    reconcileInterval: opts.reconcileInterval,
+    runId: opts.runId,
+  });
+
+  // ② 确保 anchor 进程在跑（幂等：活着就不重起 —— 那会打断其余 kind 在飞的工作，§6.9 不变式 2）。
+  let anchorPid = readAnchorPid(root);
+  if (anchorPid === null || !pidAlive(anchorPid)) {
+    const r = spawnAnchor(root);
+    if (r.error !== null || r.pid === null) {
+      err(`start-failed: kind=${kind} — cannot spawn driver anchor: ${r.error ?? "no pid"}\n`);
+      return 1;
+    }
+    anchorPid = r.pid;
+  }
+
+  // ③ 等该 kind **自己的循环**就绪（判据 = `loopReadinessMarker`，见本函数的文档注释）；anchor 进程死了
+  //    ⇒ 决断信号。
+  for (;;) {
+    const cur = aliveness(root, kind);
+    if (loopReadinessMarker(root, kind)) {
+      out(`started: anchor pid=${anchorPid} kind=${kind} driver pid=${cur.driverPid ?? "?"} confirmed_ms=${Date.now() - t0}\n`);
+      return statusForKind(root, kind, true, out);
+    }
+    if (!pidAlive(anchorPid)) {
+      err(`start-failed: kind=${kind} — driver anchor pid=${anchorPid} exited before the loop became ready (elapsed_ms=${Date.now() - t0}). 锚日志尾（${anchorPaths(root).logFile}）:\n`);
+      err(`${fileTailLines(anchorPaths(root).logFile) || "(anchor 日志为空/读不到 —— ⛔ 这不等于「无死因」)"}\n`);
+      return 1;
+    }
+    if (Date.now() - t0 >= confirmSecs * 1000) {
+      err(
+        `start-pending: kind=${kind} — 确认窗口 ${confirmSecs}s 用尽，anchor pid=${anchorPid} 仍活着但该 kind 的循环未被确认就绪` +
+        `（readiness_marker=${loopReadinessMarker(root, kind) ? 1 : 0}，host=${cur.host}，carrier_last_ts=${carrierStats(root, kind).lastTs ?? "null"}，elapsed_ms=${Date.now() - t0}）。` +
+        `⛔ 这不是死亡判定（慢启动 / 崩溃-重拉循环与此同形）；复读用 quay driver status --kind ${kind}。锚日志尾:\n`,
+      );
+      err(`${fileTailLines(anchorPaths(root).logFile) || "(anchor 日志为空/读不到 —— ⛔ 这不等于「无死因」)"}\n`);
+      return 1;
+    }
+    await sleep(CONFIRM_POLL_MS);
+  }
+}
+
 export async function startKind(
   root: string,
   kind: DriverKind,
@@ -1614,6 +2150,19 @@ export async function startKind(
     err(`quay driver: ${kind} is halted (halted_by=${ctl.state.halted_by ?? "unknown"}${ctl.state.halted_at ? `, halted_at=${ctl.state.halted_at}` : ""}) — refusing to start; clear the halt first with: quay driver resume --kind ${kind}\n`);
     return 1;
   }
+
+  // ── SPEC §7 阶段 C（GOAL-017/AC-255）：默认走 **anchor 承载** ────────────────────────────────────
+  // 收敛后不再有 per-kind 的 supervisor 进程：六个 kind 的常驻循环住在一个 anchor 进程的事件循环里
+  // （§6.1）。`quay driver start --kind X` 因此变成两件事：①把 X 声明进 `.quay/anchor-desired.json`
+  // （声明式期望态，anchor reconcile 它）；②确保 anchor 进程在跑。⛔ 判定语义一行未动——见
+  // startKindViaAnchor 与 driver-anchor.ts 的头注释。
+  //
+  // 回退开关 `QUAY_DRIVER_LEGACY_SUPERVISOR=1` ⇒ 走下面那段多进程 supervisor 路径（阶段 C 可独立回退，
+  // SPEC §7「每阶段独立可回退」）。⛔ 它不是默认路径。
+  if (process.env.QUAY_DRIVER_LEGACY_SUPERVISOR !== "1") {
+    return await startKindViaAnchor(root, kind, opts, out, err);
+  }
+
   // 无活 supervisor；清掉孤儿驱动（supervisor 已死但驱动还在的中间态）。
   const dpidRaw = readPidFile(st.driverPidFile);
   if (dpidRaw && pidAlive(dpidRaw)) {
@@ -1671,9 +2220,76 @@ export async function startKind(
   return 1;
 }
 
+/** 该 kind 是否由 anchor 形态拥有（决定 stop 走哪条路）。**三态判据**：
+ *  ① driver pid 文件已被 anchor 接管 ⇒ 是；
+ *  ② workspace 已声明 anchor 期望态（`.quay/anchor-desired.json` 存在）**且该 kind 没有活 supervisor** ⇒ 是
+ *     （anchor 可能正崩在重拉间隙，此时仍走 anchor 路径——⛔ 不因「anchor 恰好死了」就回落到杀 supervisor）；
+ *  ③ 其余 ⇒ 否（旧多进程 supervisor 形态）。
+ *  ⛔ 「读不懂期望态」（文件在但 JSON 坏）由 readDesired 返回 null 表达 ⇒ 落 ③，与本函数的语义一致。 */
+function anchorOwns(root: string, kind: DriverKind): boolean {
+  if (anchorHosts(root, kind).hosted) return true;
+  if (readDesired(root) === null) return false;
+  const spid = readPidFile(statePaths(root, kind).supervisorPidFile);
+  return !(spid && pidAlive(spid));
+}
+
+/** 阶段 C 的 stop 路径（anchor 承载）：从期望态里摘掉该 kind ⇒ anchor 只停**那一个**循环。
+ *
+ *  ⛔ 关键语义（§6.9 不变式 2/3，AC6）：停 `worker` 时其余五个 kind 的循环**不受影响**（它们住在同一个
+ *  anchor 进程里，但各有独立的停机信号——`requestKindStop`），而 worker 的在飞子进程是**独立 OS 进程**，
+ *  本函数一行都不碰它们（与旧 `quay driver stop` 的硬停语义逐字相同：杀的是调度者，⛔ 不是在跑的工作）。
+ *  集群里若还有别的 kind 被声明，anchor 进程继续活着；一个 kind 都不剩才停 anchor 自身。 */
+async function stopKindViaAnchor(
+  root: string,
+  kind: DriverKind,
+  out: (s: string) => void,
+): Promise<number> {
+  const st = statePaths(root, kind);
+  const before = aliveness(root, kind);
+  if (!before.running) {
+    // ⛔「本来就没跑」与「刚停掉」必须不同形（硬规则 3b）。
+    // 清理残留的 pid 载体（anchor 崩溃留下的死 pid 文件会让下一次 start 读到假读数）。
+    try { fs.rmSync(st.driverPidFile, { force: true }); } catch { /* ignore */ }
+    out("not-running\n");
+    return 0;
+  }
+  const remaining = updateDesired(root, kind, false, "quay-driver-stop");
+  // 等该 kind 的循环收尾（anchor 摘掉 pid 文件 = 循环已退出的直接量）。
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (!aliveness(root, kind).running) break;
+    await sleep(250);
+  }
+  const stillRunning = aliveness(root, kind).running;
+  // 一个 kind 都不剩 ⇒ anchor 自身也可以停了（⛔ 不与「还有别的 kind 要跑」同形）。
+  const anchorPid = readAnchorPid(root);
+  if (remaining.length === 0 && anchorPid !== null && pidAlive(anchorPid)) {
+    try { process.kill(anchorPid, "SIGTERM"); } catch { /* gone */ }
+    const adl = Date.now() + 30_000;
+    while (pidAlive(anchorPid) && Date.now() < adl) await sleep(200);
+    if (pidAlive(anchorPid)) { try { process.kill(anchorPid, "SIGKILL"); } catch { /* gone */ } }
+    try { fs.rmSync(anchorPaths(root).pidFile, { force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(anchorPaths(root).stateFile, { force: true }); } catch { /* ignore */ }
+  }
+  try { fs.rmSync(st.driverPidFile, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(st.supervisorPidFile, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
+  if (stillRunning) {
+    process.stderr.write(`quay driver: kind=${kind} loop did not stop within 60s (anchor pid=${anchorPid ?? "none"})\n`);
+    out("not-running\n");
+    return 1;
+  }
+  out("stopped\n");
+  return 0;
+}
+
 /** stop（硬停：杀 supervisor + 驱动；⛔ 不杀 worker 在飞子进程）。 */
 export async function stopKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): Promise<number> {
   const st = statePaths(root, kind);
+  // SPEC §7 阶段 C：anchor 承载时，`stop --kind X` 只停 X 的循环（⛔ 不杀 anchor ⇒ 其余 kind 不受影响）。
+  if (process.env.QUAY_DRIVER_LEGACY_SUPERVISOR !== "1" && anchorOwns(root, kind)) {
+    return await stopKindViaAnchor(root, kind, out);
+  }
   const spidRaw = readPidFile(st.supervisorPidFile);
   const dpidRaw = readPidFile(st.driverPidFile);
   let stopped = 0;

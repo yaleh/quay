@@ -135,3 +135,107 @@ test("AC3 — non-JSON `driver status` output ends with a newline (⛔ no output
   const lvj = kernel(["liveness", "--kind", "worker", "--root", root, "--json"]);
   assert.equal(lvj.stdout.at(-1), "\n", `liveness --json 以换行结尾: ${JSON.stringify(lvj.stdout.at(-1))}`);
 });
+
+// ── gap-driver-status-carrier-path-source-label-mismatch：ts 的【来源】必须单列 ──────────────────
+//
+// 缺陷（实测 2026-09-13T22:33Z 于生产 /home/yale/work/quay）：status 同时报
+// `carrier_path` = 首个【存在】的载体、`last_record_ts` = 全载体末条 ts 的【最大值】，下游把它渲染成
+// `carrier:<carrier_path> last ts` —— 声称这个 ts 来自它点名的那一个。它并没有：
+//   promotion-outcome.jsonl 存在但末条 ts = 20:01:48Z（2.5h 陈旧）；promotion-round.jsonl 末条 =
+//   22:33:30Z ⇒ 报出的 ts 来自 round，而读 `carrier_path` 的人看的是 outcome。
+// 上面 AC1b 那条测试**合法地**钉住了这个 juxtaposition（两载体并存 ⇒ 主载体 = outcome），所以修法⛔
+// 不是改 `carrier_path` 的取值规则，而是把**真来源**单列出来（`last_record_carrier`）。
+
+/** 一个载体【自己】的末条 ts（与该 kind 的 tsKey 无关：本文件的 fixture 全是 `ts` 键）。 */
+function lastTsOf(file) {
+  const text = fs.readFileSync(file, "utf8");
+  let max = null;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    const j = JSON.parse(line);
+    if (typeof j.ts === "string" && (max === null || j.ts > max)) max = j.ts;
+  }
+  return max;
+}
+
+/** 「首个存在载体 ≠ 最大 ts 载体」的 fixture —— 本任务的判别形态（两载体并存，只是新旧不同）。
+ *  ⛔ 顺序取 registry 表顺序：outcome 在前 ⇒ primaryPath 必然是 outcome，而 ts 只可能来自 round。 */
+function divergentRoot(t, tag) {
+  const root = emptyRoot(t, tag);
+  fs.writeFileSync(
+    path.join(root, ".quay", "promotion-outcome.jsonl"),
+    '{"ts":"2026-09-13T20:01:48.261Z","task":"older"}\n',
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, ".quay", "promotion-round.jsonl"),
+    '{"ts":"2026-09-13T22:33:30.546Z","round":1}\n{"ts":"2026-09-13T22:34:00.000Z","round":2}\n',
+    "utf8",
+  );
+  return root;
+}
+
+// AC1（本任务）：新字段 `last_record_carrier` 必须点名**真**来源，且它自身末条 ts == 所报 ts。
+// 负控制：只把标签重命名、没把真载体接出来的修法——即在「首个存在载体 ≠ 最大 ts 载体」的 fixture 上
+// 仍指向 outcome（或干脆复制 carrier_path）——在此必红。
+test("provenance AC1 — last_record_carrier is the carrier whose OWN last ts == last_record_ts", (t) => {
+  const root = divergentRoot(t, "prov-ac1");
+
+  const st = statusJson(root, "promotion");
+  // 既有语义不动（否则会撞上面 AC1b）：carrier_path 仍是首个存在者。
+  assert.match(st.carrier_path, /promotion-outcome\.jsonl$/, `carrier_path 语义不变: ${JSON.stringify(st)}`);
+  assert.equal(st.last_record_ts, "2026-09-13T22:34:00.000Z", `ts 仍是全载体最大值: ${JSON.stringify(st)}`);
+  // 本任务的新字段：ts 的真来源。
+  assert.equal(
+    typeof st.last_record_carrier,
+    "string",
+    `status 必须报出 ts 的来源（改前无此字段）: ${JSON.stringify(st)}`,
+  );
+  assert.match(st.last_record_carrier, /promotion-round\.jsonl$/, `来源 = 最大 ts 的载体: ${JSON.stringify(st)}`);
+  assert.notEqual(st.last_record_carrier, st.carrier_path, `来源 ≠ 首个存在载体（这正是缺陷形态）: ${JSON.stringify(st)}`);
+  // 判据对「被点名的载体」本身可核：它的末条 ts 就是所报的 ts（⛔ 不是「另一个文件的」）。
+  assert.equal(lastTsOf(st.last_record_carrier), st.last_record_ts, `被点名的载体自己供出了这个 ts: ${st.last_record_carrier}`);
+  assert.notEqual(lastTsOf(st.carrier_path), st.last_record_ts, `而被 carrier_path 点名的那个【没有】供出它: ${st.carrier_path}`);
+});
+
+// 同态：无载体 ⇒ ts 与来源同为 null（⛔ 不得「有 ts 无来源」或「有来源无 ts」——硬规则 3b）。
+test("provenance AC1b — no carrier at all ⇒ last_record_carrier is null exactly when last_record_ts is", (t) => {
+  const root = emptyRoot(t, "prov-ac1b");
+
+  const st = statusJson(root, "promotion");
+  assert.equal(st.last_record_ts, null, `无载体 ⇒ ts 为 null: ${JSON.stringify(st)}`);
+  assert.equal(st.last_record_carrier, null, `无 ts ⇒ 无来源（同态）: ${JSON.stringify(st)}`);
+});
+
+// AC3（本任务 · 负控制）：**改前必须红**。改前没有这个字段 ⇒ assert 立即抛。
+// 改后：被点名的那个就是最大 ts 的载体，而 carrier_path 仍指着陈旧的 outcome。
+test("provenance AC3 (negative control) — promotion: outcome exists but STALE ⇒ the named carrier is the round carrier", (t) => {
+  const root = divergentRoot(t, "prov-ac3");
+
+  const st = statusJson(root, "promotion");
+  assert.match(st.carrier_path, /promotion-outcome\.jsonl$/, `fixture 成立：carrier_path 指向陈旧的那个: ${JSON.stringify(st)}`);
+  assert.match(st.last_record_carrier, /promotion-round\.jsonl$/, `所报载体 == 最大 ts 载体: ${JSON.stringify(st)}`);
+  assert.equal(lastTsOf(st.last_record_carrier), "2026-09-13T22:34:00.000Z", `来源载体自身末条 ts: ${st.last_record_carrier}`);
+});
+
+// AC4（本任务）：人可读一行形携带**同一修正后的并置关系**——ts 紧邻它的来源；来源 ≠ carrier_path 时
+// 该 ts 标注为「跨载体最大值」。负控制：用与 AC3 相同的 fixture 读非 --json 输出。
+test("provenance AC4 — the one-line form pairs last_record_ts with its OWN carrier (+ cross-carrier marker)", (t) => {
+  const root = divergentRoot(t, "prov-ac4");
+
+  const r = kernel(["status", "--kind", "promotion", "--root", root]);
+  assert.equal(r.status, 0, `status failed: ${r.stdout}\n${r.stderr}`);
+  const m = r.stdout.match(/last_record_carrier=(\S+)/);
+  assert.ok(m, `一行形必须报出 ts 的来源: ${r.stdout}`);
+  assert.match(m[1], /promotion-round\.jsonl$/, `一行形的来源 = 最大 ts 载体（改前只有 carrier_path，指向 outcome）: ${r.stdout}`);
+  assert.match(r.stdout, /\(cross-carrier max\)/, `来源 ≠ carrier_path ⇒ 该 ts 标注为跨载体最大值: ${r.stdout}`);
+  // 同一行里 carrier_path 仍是首个存在者（语义未被这次修改动过）。
+  assert.match(r.stdout, /carrier_path=\S*promotion-outcome\.jsonl/, `carrier_path 语义不变: ${r.stdout}`);
+
+  // 无载体形态：显式 null（⛔ 不与「有来源」同形）。
+  const empty = emptyRoot(t, "prov-ac4-empty");
+  const e = kernel(["status", "--kind", "promotion", "--root", empty]);
+  assert.equal(e.status, 0, `status failed: ${e.stdout}\n${e.stderr}`);
+  assert.match(e.stdout, /last_record_carrier=null\b/, `无载体 ⇒ 来源显式 null: ${e.stdout}`);
+  assert.doesNotMatch(e.stdout, /\(cross-carrier max\)/, `无载体 ⇒ 不出现跨载体标注: ${e.stdout}`);
+});

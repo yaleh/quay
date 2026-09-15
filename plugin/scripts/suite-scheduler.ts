@@ -70,7 +70,7 @@ import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
 import { loadDurationAverages, orderByLpt } from "./suite-lpt-order.ts";
-import { readPerFileCpuMs } from "./measure-suite-reporter.mjs";
+import { readPerFileCpuMs, readPerFileMemPeakKb } from "./measure-suite-reporter.mjs";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
 export const SUITE_GROUPS: SuiteGroup[] = ["serial", "lowconc", "main"];
@@ -299,7 +299,7 @@ function dropRawDiagnostics() {
  * with `dropRawDiagnostics → spec → stdout` composed (spec: the outer runner's 判绿 markers, raw
  * diagnostics dropped) and the per-file verdict read from the ROOT test:summary counts (single
  * source, no driftable exit-code counter). Emits:
- *   __PERFILE__ duration_ms=<d> <path> passed=<bool> end_ms=<epoch>   per file (the LPT input carrier)
+ *   __PERFILE__ duration_ms=<d> <path> passed=<bool> end_ms=<epoch> [cpu_ms=] [mem_peak_kb=]   per file (the LPT input carrier)
  *   __GROUP__ concurrency=<budget> files=<n> sum_ms=<sum> floor_ms=<floor> capped=<m>   per group close
  *   __OVERHEAD__ <serial|lowconc|main>_phase_ms=<n>   per group wall  (the AC4/AC5 cost carriers)
  *   __OVERHEAD__ scheduler_ms=<n>                     total wall
@@ -345,9 +345,15 @@ export function runScheduler(opts: {
       // must carry the SAME per-file CPU the legacy/LPT path emits. Reuse measure-suite-reporter's
       // single reader (readPerFileCpuMs) — ⛔ NOT a second hand-rolled read: absent = "not measured"
       // (field omitted), never a fabricated 0 (硬规则 3b).
+      // gap-perfile-memory-cost-collection-missing — the peak-memory dimension rides the SAME two
+      // readers here. This scheduler path is the PRODUCTION DEFAULT since 2026-08-31, so leaving it
+      // out would repeat gap-suite-scheduler-perfile-cpu-emitter-missing exactly (field dark in
+      // production while the legacy path's tests stay green). ⛔ Both emission points, both fields.
       const cpuMs = readPerFileCpuMs(rec.file);
       const cpuPart = cpuMs !== undefined ? ` cpu_ms=${cpuMs}` : "";
-      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}${cpuPart}\n`);
+      const memPeakKb = readPerFileMemPeakKb(rec.file);
+      const memPart = memPeakKb !== undefined ? ` mem_peak_kb=${memPeakKb}` : "";
+      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}${cpuPart}${memPart}\n`);
       // A group closes when its queue is drained AND nothing of it is still running — emit its
       // __GROUP__ + __OVERHEAD__ <group>_phase_ms once, at close (the downstream accounting reads
       // one __GROUP__ per group, same shape as measure-suite-reporter's per-phase line).

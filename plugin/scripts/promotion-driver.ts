@@ -63,7 +63,7 @@ import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
 // LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
-import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, type LivenessResult } from "./driver-runtime.ts";
+import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, registerKindStop, type LivenessResult } from "./driver-runtime.ts";
 // AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
 // 证「继承 Layer 0 的 profile/liveness 单一实现」。
 export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
@@ -106,9 +106,55 @@ export const MAX_FIX_RETRIES_DEFAULT = RETRY_CAP_DEFAULT;
 /** ready-pool-check 单轮的 wall-clock 上限（spawnSync timeout，毫秒）。 */
 export const ROUND_TIMEOUT_MS = 180_000;
 
-/** fix worker spawn 的 wall-clock 上限（spawnSync timeout，毫秒）——AC142 诊断面：与 ready-pool-check 的
- *  ROUND_TIMEOUT_MS 同值（runPromotionRound 已用该值，⛔ 不为 fix worker 另设阈值——硬规则 4 推论）。 */
-export const FIX_WORKER_TIMEOUT_MS = 180_000;
+/** fix worker spawn 的 wall-clock 上限【缺省】（spawnSync timeout，毫秒）。
+ *
+ *  ⛔ 已与 `ROUND_TIMEOUT_MS` 解耦（gap-fix-worker-timeout-budget-inherited-from-mechanical-round）。
+ *  两者约束的是成本结构不同的对象：`ROUND_TIMEOUT_MS` 约束 `ready-pool-check`——一个零 LLM 的
+ *  机械脚本；`FIX_WORKER_TIMEOUT_MS` 约束一次 `claude -p` **agent** 调用。
+ *
+ *  历史（错，此处原写 = ROUND_TIMEOUT_MS 同值 180_000，理由记作「硬规则 4 推论」）：那条推论要求的是
+ *  「**先分解成本**再谈指标」，把它执行成「复用一个为**别的对象**测过的数」正好是它的反面——
+ *  ⛔ 不分解就借数，与不分解就设数，是同一种错。实证（`.quay/promotion-round.jsonl`，修复后窗口
+ *  2026-09-08T22:51:03Z→2026-09-14T08:03:14Z，32 条带 `durationMs` 的 fix 记录，32/32 argv 带
+ *  `BG_WAIT_CEILING` 键 ⇒ 是干净窗口）：干净返回仅 **11**、超时 **21**（全部截断在 ~180.4s）；
+ *  干净返回时长 63.7→173.0s **连续铺满并顶住上限**——这是阈值切过连续分布中部的形状，不是双峰。
+ *  同族直接量对照：真正的 ready→done worker（同为 claude agent）墙钟中位 **1687s**。
+ *
+ *  缺省 600_000 是【刻意宽松值，⛔ 不是收敛后的值】：180s 那道截断已把分布右尾切掉，现有中位
+ *  149s 是【幸存者的中位】而非真分布的中位 ⇒ 先放宽拿到**未截断**分布，之后才谈收敛（同推论）。
+ *  可覆盖（见 `resolveFixWorkerTimeoutMs`）：CLI `--fix-worker-timeout-ms` > env
+ *  `QUAY_FIX_WORKER_TIMEOUT_MS` > 本缺省——⛔ 不再「换机器/换模型/换 prompt 规模只能改代码」。 */
+export const FIX_WORKER_TIMEOUT_MS = 600_000;
+
+/** 覆盖 fix worker 超时预算的 env 键（缺省之上的声明式覆盖路径：换机器/换模型/换 prompt 规模时
+ *  改环境即可，⛔ 不改代码）。 */
+export const FIX_WORKER_TIMEOUT_ENV = "QUAY_FIX_WORKER_TIMEOUT_MS";
+
+/** 解析 fix worker 超时预算。优先级：explicit（CLI `--fix-worker-timeout-ms`）> env > 缺省。
+ *  返回 source 使「这条读数从哪来」可判（取值面三态：cli / env / default）——⛔ 不把三者折叠成
+ *  一个数字后无法区分。
+ *  非正整数 / 非有限数 ⇒ `{ok:false}`（fail-closed：读不懂的输入不得静默回退成缺省值，硬规则 3b
+ *  ——「没配」与「配错了」动作不同，前者用缺省、后者拒启动）。 */
+export function resolveFixWorkerTimeoutMs(
+  explicit?: string | number | null,
+  env: Record<string, string | undefined> = process.env,
+): { ok: true; value: number; source: "cli" | "env" | "default" } | { ok: false; error: string } {
+  const parse = (raw: string, label: string): { ok: true; value: number } | { ok: false; error: string } => {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) return { ok: false, error: `invalid ${label}: ${raw} (expected a positive integer of milliseconds)` };
+    return { ok: true, value: n };
+  };
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== "") {
+    const p = parse(String(explicit), "--fix-worker-timeout-ms");
+    return p.ok ? { ok: true, value: p.value, source: "cli" } : p;
+  }
+  const rawEnv = env[FIX_WORKER_TIMEOUT_ENV];
+  if (rawEnv !== undefined && String(rawEnv).trim() !== "") {
+    const p = parse(String(rawEnv), FIX_WORKER_TIMEOUT_ENV);
+    return p.ok ? { ok: true, value: p.value, source: "env" } : p;
+  }
+  return { ok: true, value: FIX_WORKER_TIMEOUT_MS, source: "default" };
+}
 
 /** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 `base === "claude"` 字面量）。
  *  形态先落缺省 ["claude"]；后续 AC140-2 把集做成 .quay/config.yml 可配（wrapper 如 claude-fjdac）。 */
@@ -178,16 +224,26 @@ export interface CandidateChecks {
   superseded: boolean;
   compound: boolean;
   prosePrereqGap: string[];
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): `false` ⇒ the gate's
+  // body-derived checks above were computed from a read source measurably behind the write face.
+  // Optional so an older gate output (field absent) keeps the pre-change behavior (`undefined` is
+  // NOT `false` — 缺值 = 未查, 硬规则 6: absent is never read as a positive).
+  bodyEvaluated?: boolean;
+  bodyFreshness?: string;
 }
 
 /** A24 分类结果。fixable = 可修三类之一且【无】不可修五类 ⇒ 该 spawn fix worker；
- *  missing = 结构化可修缺项标识（prompt 输入）；unfixable = 不可修五类的结构化原因（逐条记、不修）。 */
+ *  missing = 结构化可修缺项标识（prompt 输入）；unfixable = 不可修五类的结构化原因（逐条记、不修）。
+ *  notEvaluated = 第三态（gap-ready-pool-body-still-read-from-stale-main-checkout）：闸的读源落后于
+ *  写面 ⇒ 上面那些 body 维度的判定【未被评估】，⛔ 既不 spawn fix worker 也不计入失败上限——
+ *  派 worker 去修一个只存在于陈旧副本里的"缺陷"，正是 2026-09-14 烧满三次重试翻 needs-human 的形状。 */
 export interface FixDecision {
   id: string;
   fixable: boolean;
   missing: string[];
   unfixable: string[];
   prompt: string | null;
+  notEvaluated?: boolean;
 }
 
 /** A24 可修三类 → 结构化缺项标识；不可修五类 → 结构化原因。⛔ 不重新设计分类——
@@ -196,6 +252,22 @@ export interface FixDecision {
  *  进 ## Touches）· touchesResolve=false（Touches 写错 ⇒ 改对）。不可修五类：depsReady=false ·
  *  retiredMechanism · superseded · compound · prosePrereqGap 非空。 */
 export function classifyCandidate(c: CandidateChecks): FixDecision {
+  // BODY-FRESHNESS THIRD STATE — judged BEFORE the A24 classes, and deliberately not merged into
+  // them (硬规则 3b: an "I could not evaluate this" value must not share a shape with a verdict).
+  // 2026-09-14 replay: the gate read a body the write face had already replaced, reported
+  // `touchesResolve=false`, and the fix worker was dispatched for a defect that did not exist in the
+  // current body — it could not fix it (it was not there), timed out, and three rounds of that
+  // flipped the task needs-human. The fix worker is the harm, so the consumer must refuse it here.
+  if (c.bodyEvaluated === false) {
+    return {
+      id: c.id,
+      fixable: false,
+      missing: [],
+      notEvaluated: true,
+      unfixable: [`bodyNotEvaluated=true freshness=${c.bodyFreshness ?? "unknown"} (闸读源落后写面 ⇒ 该体未被评估,⛔ 不派 fix worker)`],
+      prompt: null,
+    };
+  }
   const missing: string[] = [];
   if (!c.fourArtifacts) missing.push(`fourArtifacts=false missing=[${(c.missingArtifacts || []).join(",")}]`);
   if (!c.selfTouchOk) missing.push("selfTouchOk=false");
@@ -286,6 +358,8 @@ export interface FixWorkerSpawnResult {
  *  + ROUND_TIMEOUT_MS）。返回退出码 / spawn 错误 / 捕获面。AC132：spawn 即达成；⛔ 不验证修没修好
  *  （AC133），⛔ 不信 worker 自述。 */
 export function spawnFixWorker(argv: string[], root: string, timeoutMs: number = FIX_WORKER_TIMEOUT_MS): FixWorkerSpawnResult {
+  // 调用方若显式传 timeoutMs（经 resolveFixWorkerTimeoutMs 解析出的预算）⇒ 用它；缺省 ⇒ 常量。
+  // ⛔ 本函数的第三参数此前【全仓库无一调用方传值】——那使 FIX_WORKER_TIMEOUT_MS 事实上不可覆盖。
   if (!Array.isArray(argv) || argv.length === 0) {
     return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false, argv: null, durationMs: null };
   }
@@ -367,6 +441,10 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
           superseded: !!c.superseded,
           compound: !!c.compound,
           prosePrereqGap: Array.isArray(c.prosePrereqGap) ? c.prosePrereqGap.map(String) : [],
+          // BODY-FRESHNESS: `undefined` (an older gate output without the field) must NOT read as
+          // `false` — 缺值 = 未查 (硬规则 6). Only an explicit `false` marks the third state.
+          bodyEvaluated: c.bodyEvaluated === false ? false : true,
+          bodyFreshness: typeof c.bodyFreshness === "string" ? c.bodyFreshness : undefined,
         }),
       );
     return {
@@ -401,6 +479,10 @@ export interface FixOutcome {
   argv: string[] | null;
   /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的墙钟耗时（毫秒）。 */
   durationMs: number | null;
+  /** BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout)：本条是【未评估】态——
+   *  闸读源落后写面 ⇒ 未派 worker、未计入失败上限、也不得记为「仍不合格」。与 spawned:false 的
+   *  其它原因（不可修五类）可区分。 */
+  notEvaluated?: boolean;
 }
 
 export function computeRoundRecord(opts: {
@@ -422,6 +504,10 @@ export function computeRoundRecord(opts: {
   /** AC150-1：本轮资源门判定（起 fix worker 前读；WAIT ⇒ 退避、fixes 为空）。 */
   gate?: { go: boolean; reason: string | null } | null;
   liveness?: LivenessResult | null;
+  /** gap-fix-worker-timeout-budget-inherited-from-mechanical-round：本轮实际使用的 fix worker 预算
+   *  （毫秒）。落进记录使「这批读数是在哪个预算下产生的」可判——⛔ 否则放宽前/后的记录在载体上
+   *  不可区分，AC2/AC3 的「只计落地之后的窗口」就退化成靠时间戳猜。null = 未评估。 */
+  fixWorkerTimeoutMs?: number | null;
 }) {
   const action = opts.error
     ? "error"
@@ -448,18 +534,30 @@ export function computeRoundRecord(opts: {
     halted: opts.halted ?? false,
     gate: opts.gate ?? null,
     liveness: opts.liveness ?? null,
+    // 本轮 fix worker 预算（top-level，grep-able）：使放宽前/后的记录在载体上可区分。
+    fix_worker_timeout_ms: opts.fixWorkerTimeoutMs ?? null,
   };
 }
 
 /** AC132 的 fix pass：对 fixable 决策 spawn 短命 fix worker；对不可修五类逐条记原因不 spawn。
- *  返回每条的 FixOutcome（可修 ⇒ spawned=true + 结构化 missing；不可修 ⇒ spawned=false + unfixable 原因）。 */
-export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
+ *  返回每条的 FixOutcome（可修 ⇒ spawned=true + 结构化 missing；不可修 ⇒ spawned=false + unfixable 原因）。
+ *  timeoutMs = 本次 spawn 的 wall-clock 上限（由 `resolveFixWorkerTimeoutMs` 解析；缺省 = 常量）——
+ *  ⛔ 本参数的存在正是让 FIX_WORKER_TIMEOUT_MS 成为【可覆盖】而非事实常量。 */
+export function runFixPass(
+  fixDecisions: FixDecision[],
+  root: string,
+  fixWorkerCmd: string | null,
+  timeoutMs: number = FIX_WORKER_TIMEOUT_MS,
+): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null };
+      // The third-state marker is written ONLY when it is true, so every pre-existing no-spawn shape
+      // (the five unfixable classes) keeps a byte-identical outcome record — a consumer that
+      // deep-compares the record is not disturbed by a field it never asked for.
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null, ...(d.notEvaluated === true ? { notEvaluated: true } : {}) };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
-    const { exitCode, stderr, timedOut, argv: spawnedArgv, durationMs } = spawnFixWorker(argv, root);
+    const { exitCode, stderr, timedOut, argv: spawnedArgv, durationMs } = spawnFixWorker(argv, root, timeoutMs);
     return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut, argv: spawnedArgv, durationMs };
   });
 }
@@ -468,8 +566,10 @@ export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerC
 
 /** AC133 重验证结果。fixedIds = 本轮被 spawn 过 fix worker 的任务 id；重跑闸后按【闸的新判定】归类：
  *  nowEligibleIds = 闸判合格（fix 生效，已由 --apply 落地晋升）；stillIneligibleIds = 闸仍判不合格
- *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 读不到输入（重跑闸 spawn 失败/输出不可解析 ⇒
- *  无法评估，⛔ 不是「仍不合格」也不是「消失」——AC153 与 verified/failed 分离的第三态）。
+ *  （fix 未生效，⛔ 不得晋升）；notEvaluatedIds = 无法评估——两个来源共用这一桶：重跑闸 spawn
+ *  失败/输出不可解析（读不到输入），或重跑闸判该任务 body 未被评估（读源落后写面，
+ *  gap-ready-pool-body-still-read-from-stale-main-checkout）⛔ 不是「仍不合格」也不是「消失」——
+ *  AC153 与 verified/failed 分离的第三态，且不计入失败上限。
  *  ⛔ 不信 worker 自述「已修好」——worker 的退出码/自述不作为晋升依据。 */
 export interface ReverifyOutcome {
   nowEligibleIds: string[];
@@ -491,11 +591,18 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
   }
   const promoted = new Set(reRound.promotedIds);
   const stillBad = new Set(reRound.fixDecisions.map((d) => d.id));
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout)：重跑闸判「未评估」
+  // （读源落后写面）⇒ 该 id 归 notEvaluatedIds，⛔ 不进 stillIneligibleIds——否则它会被
+  // advanceRetryCap 计入失败上限，而这正是要消灭的形状：worker 无缺陷可修 ⇒ 重跑仍不合格 ⇒ 三次
+  // 翻 needs-human。与 `!reRound.ok` 的「读不到输入」共用同一个第三态桶（AC153 的单一不变式）。
+  const notEvaluated = new Set(reRound.fixDecisions.filter((d) => d.notEvaluated === true).map((d) => d.id));
   const nowEligibleIds: string[] = [];
   const stillIneligibleIds: string[] = [];
+  const notEvaluatedIds: string[] = [];
   for (const id of fixedIds) {
     // vanished（task 不再出现在候选池——被别的 actor 晋升/删除）：三态词表不承载，沿用原行为不计数。
     if (!promoted.has(id) && !stillBad.has(id)) continue;
+    if (notEvaluated.has(id)) { notEvaluatedIds.push(id); continue; }
     const res = verifyIndependently(
       {
         value: id,
@@ -508,7 +615,7 @@ export function computeReverifyOutcome(fixedIds: string[], reRound: PromotionRou
     if (res.state === "verified") nowEligibleIds.push(id);
     else stillIneligibleIds.push(id);
   }
-  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds: [] };
+  return { nowEligibleIds, stillIneligibleIds, notEvaluatedIds };
 }
 
 // AC133 失败上限（RetryState / advanceRetryCap / markNeedsHuman）已上收 driver-filters.ts（单一真相源
@@ -652,6 +759,9 @@ export interface ResidentLoopOptions {
   maxFixRetries: number;
   readyPoolArgv: string[] | null;
   fixWorkerCmd: string | null;
+  /** fix worker spawn 的 wall-clock 上限（毫秒；缺省 = 经 resolveFixWorkerTimeoutMs 解析出的值）。
+   *  gap-fix-worker-timeout-budget-inherited-from-mechanical-round：可覆盖（CLI/env），⛔ 不再是常量。 */
+  fixWorkerTimeoutMs?: number;
   /** 配置声明的 LLM 命令集（--llm-commands，缺省 LLM_COMMAND_SET_DEFAULT；AC140-4）。 */
   llmCommands: string[];
   roundLogFile: string;
@@ -673,7 +783,8 @@ export interface ResidentLoopOptions {
  *  （json 时）stdout 事件行。停机由进程信号驱动（⛔ 不读 .halt，单一真相源）。
  */
 export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promise<number> {
-  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, resourceGateArgv = null, livenessCmd } = opts;
+  const { root, intervalMs, cap, once, maxRounds, maxFixRetries, readyPoolArgv, roundLogFile, outcomeLogFile, runId, json, pidFile, fixWorkerCmd, llmCommands, resourceGateArgv = null, livenessCmd,
+    fixWorkerTimeoutMs = FIX_WORKER_TIMEOUT_MS } = opts;
 
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
@@ -682,8 +793,9 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
   const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  process.on("SIGINT", requestStop);
-  process.on("SIGTERM", requestStop);
+  // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
+  // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
+  registerKindStop("promotion", requestStop);
 
   // 可被信号唤醒的 sleep：SIGINT/SIGTERM 立即 resolve，本轮结束即退出（⛔ 不杀在飞——单轮是同步的，
   // 不存在「在飞轮」）。
@@ -744,6 +856,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       gate.go ? activeDecisions : activeDecisions.filter((d) => !d.fixable),
       root,
       fixWorkerCmd,
+      fixWorkerTimeoutMs,
     );
 
     // AC133 AC1：fix worker 退出后【重新调同一个闸】验证，以闸的新判定为准（⛔ 不信 worker 自述）。
@@ -773,6 +886,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     const record = computeRoundRecord({
       round, runId, pid: process.pid, at: new Date().toISOString(), ...r,
       promotedIds, applied, fixes, reverify, needsHuman: needsHumanResults, gate, liveness,
+      fixWorkerTimeoutMs,
     });
     try { appendRoundRecord(roundLogFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     // AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl，outer 可消费）。
@@ -805,7 +919,7 @@ const HELP = [
   "AC133：fix worker 退出后重跑同一个闸验证（⛔ 不信 worker 自述）+ 连续修满 N 次仍不合格 ⇒ needs-human。",
   "AC134：判定/晋升/修复/needs-human 各写一条 outcome 记录（.quay/promotion-outcome.jsonl）。",
   "  --root <repo> [--interval <ms>] [--cap <n>] [--once] [--max-rounds <n>] [--max-fix-retries <n>]",
-  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--llm-commands <csv>] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--liveness-cmd \"<argv>\"] [--json]",
+  "  [--ready-pool-cmd \"<argv>\"] [--fix-worker-cmd \"<argv>\"] [--fix-worker-timeout-ms <n>] [--llm-commands <csv>] [--round-log <p>] [--outcome-log <p>] [--run-id <id>] [--pid-file <p>] [--liveness-cmd \"<argv>\"] [--json]",
   "  --interval <ms>       轮间隔（缺省 30000；测试缝传小值）",
   "  --cap <n>             传给 ready-pool-check 的并发 cap（缺省 5）",
   "  --once                跑一轮即退出（手动单发 / 测试）",
@@ -813,6 +927,7 @@ const HELP = [
   "  --max-fix-retries <n> AC133 失败上限（缺省 3；连续修满 N 次仍不合格 ⇒ 标 needs-human）",
   "  --ready-pool-cmd <s>  覆盖 ready-pool-check 命令（测试缝）",
   "  --fix-worker-cmd <s>  覆盖 fix worker 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --fix-worker-timeout-ms <n> fix worker spawn 的 wall-clock 上限（毫秒；缺省 600000，env QUAY_FIX_WORKER_TIMEOUT_MS 次之）",
   "  --resource-gate-cmd <s> 覆盖 resource-gate 命令（测试缝；AC150-1 起 fix worker 前判定，exit 0=GO 非 0=WAIT）",
   "  --llm-commands <csv>  配置声明的 LLM 命令集，逗号分隔（缺省 claude；AC140-4 判定读此集合）",
   "  --round-log <path>    轮记录文件（缺省 <root>/.quay/promotion-round.jsonl）",
@@ -832,6 +947,7 @@ export async function main(argv: string[]): Promise<number> {
   let maxFixRetriesRaw: string | undefined;
   let readyPoolCmd: string | undefined;
   let fixWorkerCmd: string | undefined;
+  let fixWorkerTimeoutRaw: string | undefined;
   let resourceGateCmd: string | undefined;
   let roundLogPath: string | undefined;
   let outcomeLogPath: string | undefined;
@@ -851,6 +967,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--max-fix-retries") maxFixRetriesRaw = args[++i];
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--fix-worker-cmd") fixWorkerCmd = args[++i];
+    else if (a === "--fix-worker-timeout-ms") fixWorkerTimeoutRaw = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
     else if (a === "--round-log") roundLogPath = args[++i];
     else if (a === "--outcome-log") outcomeLogPath = args[++i];
@@ -873,6 +990,10 @@ export async function main(argv: string[]): Promise<number> {
     console.error("promotion-driver: --max-rounds must be a positive integer");
     return 2;
   }
+  // gap-fix-worker-timeout-budget-inherited-from-mechanical-round：fix worker 预算解析（CLI > env > 缺省）。
+  // fail-closed：配错的值 ⇒ 拒启动（⛔ 不静默回退成缺省——「没配」与「配错了」动作不同）。
+  const fixWorkerTimeout = resolveFixWorkerTimeoutMs(fixWorkerTimeoutRaw);
+  if (!fixWorkerTimeout.ok) { console.error(`promotion-driver: ${fixWorkerTimeout.error}`); return 2; }
   const maxFixRetries = maxFixRetriesRaw === undefined
     ? MAX_FIX_RETRIES_DEFAULT
     : Number(maxFixRetriesRaw);
@@ -898,6 +1019,7 @@ export async function main(argv: string[]): Promise<number> {
     maxFixRetries,
     readyPoolArgv: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     fixWorkerCmd: fixWorkerCmd ?? null,
+    fixWorkerTimeoutMs: fixWorkerTimeout.value,
     resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
     llmCommands,
     roundLogFile,

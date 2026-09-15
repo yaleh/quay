@@ -260,6 +260,34 @@ test("gap-perfile-cpu-cost-collection AC3 — the runner's verification-round pe
   }
 });
 
+test("gap-perfile-memory-cost-collection-missing AC2 — the runner's verification-round perFile[] carries memPeakKb (writer 之一)", async () => {
+  // The SAME two-writer contract as the cpu sibling above, for the peak-memory dimension: this is the
+  // full-suite-runner.ts half; pre-verified-round-record.ts's half lives in its own test file. Both go
+  // through the shared parsePerFileLines, so a line WITHOUT mem_peak_kb leaves the field ABSENT
+  // (缺键 ≠ 0) rather than landing a fabricated 0.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-perfile-mem-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=123.456 /repo/a.test.mjs passed=true end_ms=1724000000123 cpu_ms=45.6 mem_peak_kb=185728"\n' +
+      'echo "__PERFILE__ duration_ms=9 /repo/b.test.mjs passed=true cpu_ms=7"\n' +
+      'echo "# tests 2"\necho "# pass 2"\necho "# fail 0"\necho "# cancelled 0"\nexit 0'
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec && Array.isArray(rec.perFile), "perFile[] present on the round row");
+    const a = rec.perFile.find((r) => r.file.endsWith("a.test.mjs"));
+    const b = rec.perFile.find((r) => r.file.endsWith("b.test.mjs"));
+    assert.equal(a.memPeakKb, 185728, "mem_peak_kb is parsed into memPeakKb on the runner's writer path");
+    assert.equal(a.cpuMs, 45.6, "the cpu dimension is unaffected by the memory field's presence");
+    assert.equal(b.memPeakKb, undefined, "__PERFILE__ line without mem_peak_kb → memPeakKb absent (缺键 ≠ 0)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — an invalid --runner value fails closed (nothing written), not a silent fallback (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
   // 硬规则 3b: an unreadable/unparseable input must NOT return a value identical to a valid one —
   // a garbage --runner must exit non-zero before any state write, never silently record "outer".

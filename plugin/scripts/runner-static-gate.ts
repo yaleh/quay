@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 59 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 61 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -326,6 +326,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
   run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
+  echo "== freshness-producer coverage check (gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger, AC7) =="
+  # AC-214 要求七个「载体型主体」的证据距 develop tip ≤ K 交付面提交，而**刷新动作曾无触发器**：
+  # 4 次转红 / 5 天，每次一次性人工重跑关闭、每次关闭后重新越界。本检查判的是**刷新机制的完备性**
+  # （不是新鲜度）：载体里出现过的主体是否每一个都在单源映射 plugin/freshness-producers.json 里登记了
+  # 产出者、登记的那些是否真有载体记录，并与 criterion 自己写出的 .quay/goal-freshness-margin.json
+  # 的 subjects 双向对照（那一侧能看见「产出者从未跑过、载体里根本没记录」的主体 —— 09-13 的形态）。
+  # 载体是 gitignored 运行时态：**缺席 ⇒ exit 0 且 evaluated:false**（可区分的 NOT-EVALUATED，⛔ 不与
+  # 合格同形；硬规则 3b），故被动检出（无 .quay/ 载体）照样在代码面绿；映射缺失/损坏 ⇒ exit 2 fail-closed。
+  # @static-tier change
+  # @static-object plugin/freshness-producers.json plugin/scripts/freshness-producer-coverage-check.ts plugin/test/freshness-producer-coverage-check.test.mjs
+  run_checker "freshness-producer-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/freshness-producer-coverage-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
@@ -890,6 +901,20 @@ run_static_checks() {
   # run_checker entries — declared≠measured ⇒ exit 1; annotation/function unreadable ⇒ exit 3
   # (NOT-EVALUATED, never silently PASS; 硬规则 3b).
   run_checker "checker-count-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checker-count-drift-check.ts" --root "${repo_root}"
+  echo "== gate-event-coverage-check — 每日「落地 ⇒ complete GateEvent」覆盖率（PRODUCTION carrier） =="
+  # @static-tier change
+  # @static-object plugin/scripts/gate-event-coverage-check.ts plugin/scripts/checker-mutation-cases/gate-event-coverage-check.sh plugin/test/gate-event-coverage-check.test.mjs plugin/workflows/fan-in-execute.js plugin/scripts/worker-driver.ts
+  # --root main_root + --days 1: BOTH are load-bearing, not defaults (gap-complete-gateevent-coverage-
+  # has-a-residual-gap AC4).
+  #   --root main_root —— 载体 <root>/.quay/gate-events.jsonl 是 MAIN-checkout 的 gitignored 运行时状态，
+  #     一次性 verify worktree 里**不存在**。指向 repo_root 会让它在每个 worktree 轮里恒定 exit 3
+  #     NOT-EVALUATED —— 那正是上面 direct-to-develop-bypass-check 注释点名的缺陷类：「一个永远
+  #     NOT-EVALUATED 的检查器与一个恒绿的检查器在记录上同形」（硬规则 3b/9）。指向 main_root ⇒ 读到
+  #     的是生产那一份，判据**能取假**。
+  #   --days 1 —— AC4 的字面读法是**当日**覆盖率。窗口 3 天会把某一天的漏记变成持续 3 天的红、挡住
+  #     无关任务的 fan-in（本仓已记过这类「成本落在无关任务头上」的缺陷）；1 天把影响面限制在次日。
+  #   无载体 / 零落地 ⇒ exit 3（run_checker 认第三态，不 fail-closed 不 abort 套件）。
+  run_checker "gate-event-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gate-event-coverage-check.ts" --root "${main_root}" --days 1 --gate
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

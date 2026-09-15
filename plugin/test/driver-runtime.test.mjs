@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // driver-runtime.test.mjs — AC151 (tasks/gap-ac151-two-level-driver-layer-landing): the two-level
 // layering (Layer 0 driver-runtime + Layer 1a task-processing / Layer 1b routine) + the supervisor
 // ported from promotion-driver-launch.sh (bash) into TS.
@@ -54,8 +54,12 @@ import {
   collectFacts,
   reportFacts,
   aliveness,
+  anchorHosts,
+  readAnchorState,
   statePaths,
   kernelSelfPath,
+  resolveKernelSibling,
+  kernelSiblingArgv,
   watchedSourceFiles,
   sourceFilesMaxMtimeMs,
   sourceChangedSince,
@@ -93,8 +97,18 @@ const FAKE_WORKER_DRIVER = [
   "setInterval(() => {}, 1000);",
 ].join("\n");
 
+// ⚠️ 本文件测的是**多进程 supervisor 机制**（respawn / --restart-delay / kill -9 supervisor /
+// 源码自刷新杀 child / supervisor 陈旧判定 / spawn 预写 pid 的代理量语义）。GOAL-017/AC-255（SPEC §7
+// 阶段 C）把生产默认路径换成了**单进程 anchor**（六个 kind 的循环住在一个进程的事件循环里，supervisor
+// 退役）——但该路径**被显式保留为可回退形态**（`QUAY_DRIVER_LEGACY_SUPERVISOR=1`，SPEC §7「每阶段独立
+// 可回退」）。本文件的夹具（fake driver 是**独立进程**、只会 `require`+idle，不导出 main）结构上只能跑
+// supervisor 路径，故这里显式钉住回退开关：**它测的是被保留的那条路径**，⛔ 不是生产默认。
+//
+// anchor（生产默认）路径的等价覆盖在新文件 plugin/test/driver-anchor.test.mjs 里（收敛 + 六心跳 +
+// 单 kind 停机 + §6.10 活性负控制）。⛔ 两个文件合起来才是完整覆盖——只看本文件会把一条已退役的路径
+// 误读成「生产在跑的东西」。
 function run(args, opts = {}) {
-  const env = { ...process.env, ...(opts.env || {}) };
+  const env = { QUAY_DRIVER_LEGACY_SUPERVISOR: "1", ...process.env, ...(opts.env || {}) };
   // AC-203：kernel 从自身安装位置（或 QUAY_PLUGIN_ROOT）解析 driver/脚本——测试的 fake driver 住在
   // <tmp>/plugin/scripts/，故经 QUAY_PLUGIN_ROOT 指向 fake plugin root（同 Core plugin-root.ts 手法）。
   if (opts.pluginRoot) env.QUAY_PLUGIN_ROOT = opts.pluginRoot;
@@ -355,6 +369,125 @@ test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not
   assert.deepEqual(a.deaths, ["supervisor_dead"], "stale supervisor pid ⇒ supervisor_dead");
 });
 
+// ── gap-driver-status-misreports-anchor-hosted-kind-as-down ────────────────────────────────────────
+// 生产实测（2026-09-15，`/home/yale/work/quay`，6 个 kind 全由一个 anchor 托管）：`quay driver status
+// --kind <k> --json` 对其中 5 个报 `host=supervisor, driver_pid=null, alive=0, running=0`，而**同刻**这
+// 5 个 kind 的 round 载体都在**秒级**刷新。根因：`anchorHosts()` 要求「逐 kind pid 载体
+// `.quay/<prefix>.pid` 里恰好写着 anchor 的 pid」——而那张文件是**循环的产物**（进循环体时写一次、
+// 循环收尾时被删、活着期间**没有任何东西重写**），⛔ 不是托管关系的产物。⇒ 任意时刻「哪些 kind 有它」
+// 是一个随循环代次漂移的**任意子集**。本测试钉住新判据：**anchor 进程活着 ∧ 回读面 `.quay/anchor.json`
+// 点名了本 kind**，且夹具里**故意不写**那张逐 kind pid 载体（旧判据在它上面必挂）。
+function writeAnchorHostedRoot(tag, kinds, opts = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dr-anchor-${tag}-`));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  const anchorPid = opts.anchorPid ?? process.pid;
+  fs.writeFileSync(path.join(q, "anchor.pid"), `${anchorPid}\n`, "utf8");
+  if (opts.state !== false) {
+    fs.writeFileSync(
+      path.join(q, "anchor.json"),
+      JSON.stringify({ pid: opts.statePid ?? anchorPid, startedAt: "2026-09-15T02:15:14.983Z", kinds, host: "anchor" }) + "\n",
+      "utf8",
+    );
+  }
+  return root;
+}
+
+test("gap-driver-status-misreports — anchor-hosted kind with NO per-kind pid carrier ⇒ host=anchor & alive=1（⛔ 不报假死）", (t) => {
+  const root = writeAnchorHostedRoot("nofile", ["worker", "outer", "promotion"]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⚠️ 夹具的关键：**故意不写** `.quay/<kind>-driver.pid`（旧判据正是读它 ⇒ 旧代码在这里必然报假死）。
+  assert.equal(fs.existsSync(path.join(root, ".quay", "worker-driver.pid")), false, "夹具：逐 kind pid 载体确实不存在");
+
+  for (const kind of ["worker", "outer", "promotion"]) {
+    assert.equal(readAnchorState(root)?.kinds.includes(kind), true, `${kind}: 回读面点名了它`);
+    assert.equal(anchorHosts(root, kind).hosted, true, `${kind}: anchorHosts ⇒ hosted`);
+    const a = aliveness(root, kind);
+    assert.equal(a.host, "anchor", `${kind}: host=anchor`);
+    assert.equal(a.anchorPid, process.pid, `${kind}: anchor_pid`);
+    assert.equal(a.driverPid, process.pid, `${kind}: 承载进程 = anchor（⛔ 不是「pid 载体里碰巧写了谁」）`);
+    assert.equal(a.driverAlive, true, `${kind}: driver_alive=1`);
+    assert.equal(a.running, true, `${kind}: running=1`);
+    assert.equal(a.supervisorAlive, false, `${kind}: 阶段 C 无 supervisor`);
+    assert.deepEqual(a.deaths, [], `${kind}: ⛔ 不得报任何死因`);
+  }
+});
+
+test("gap-driver-status-misreports — 逐 kind pid 载体【陈旧/指向死 pid】而 anchor 托管它 ⇒ 仍报 alive=1", (t) => {
+  const root = writeAnchorHostedRoot("stale", ["outer"]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // AC5 点名的另一半夹具形态：文件在，但内容是**一个死 pid**（旧判据下 `driverPid === anchorPid` 为假
+  // ⇒ 同样报假死）。
+  writePidFile(path.join(root, ".quay", "outer-driver.pid"), Number(deadPid()));
+  const a = aliveness(root, "outer");
+  assert.equal(a.host, "anchor");
+  assert.equal(a.running, true, "承载进程是活着的 anchor ⇒ 在跑");
+  assert.deepEqual(a.deaths, [], "⛔ 不因那张陈旧文件报 driver_dead");
+});
+
+test("gap-driver-status-misreports — 负控制：未被 anchor 点名的 kind / 无活 anchor / 回读面读不到", (t) => {
+  // ① 活 anchor 托管 [worker,outer]，但**没有**点名 goal ⇒ goal 走旧形态（⛔ 「down」必须仍可报出）。
+  const rootA = writeAnchorHostedRoot("neg-unnamed", ["worker", "outer"]);
+  t.after(() => fs.rmSync(rootA, { recursive: true, force: true }));
+  const g = aliveness(rootA, "goal");
+  assert.equal(g.host, "supervisor", "未被点名 ⇒ host=supervisor（legacy 形态）");
+  assert.equal(g.running, false, "未被点名 ⇒ 不报在跑");
+  assert.equal(anchorHosts(rootA, "goal").hosted, false);
+
+  // ② anchor.pid 指向一个**死进程**：回读面照样点名了，⛔ 但不得据此报「在跑」（自报不足以制造托管）。
+  const rootB = writeAnchorHostedRoot("neg-deadanchor", ["worker"], { anchorPid: Number(deadPid()) });
+  t.after(() => fs.rmSync(rootB, { recursive: true, force: true }));
+  const w = aliveness(rootB, "worker");
+  assert.equal(w.host, "supervisor", "anchor 死 ⇒ 回落 legacy 形态，⛔ 不报 anchor");
+  assert.equal(w.anchorPid, null);
+  assert.equal(w.running, false, "anchor 死 ⇒ 不报在跑");
+
+  // ③ 回读面缺失（旧 anchor / 换代窗口）⇒ 兼容回退到逐 kind pid 载体那条旧判据（⛔ 读不懂 ⇒ 不报死亡）。
+  const rootC = writeAnchorHostedRoot("neg-nostate", ["promotion"], { state: false });
+  t.after(() => fs.rmSync(rootC, { recursive: true, force: true }));
+  assert.equal(readAnchorState(rootC), null, "回读面缺失 ⇒ null（三态，⛔ 不是 kinds:[]）");
+  writePidFile(path.join(rootC, ".quay", "promotion-driver.pid"), process.pid);
+  assert.equal(anchorHosts(rootC, "promotion").hosted, true, "回退判据：载体写着活 anchor 的 pid");
+  // ④ 回读面**换代**（其 pid 与 anchor.pid 对不上）⇒ 不采信它的 kinds（那是上一代 anchor 的名单）。
+  fs.writeFileSync(
+    path.join(rootC, ".quay", "anchor.json"),
+    JSON.stringify({ pid: 999999, kinds: ["worker"], host: "anchor" }) + "\n",
+    "utf8",
+  );
+  assert.equal(anchorHosts(rootC, "worker").hosted, false, "换代的回读面不采信");
+});
+
+test("gap-driver-status-misreports — AC2 交叉核对：`status --json` 同时给出 host/alive 与独立的载体新鲜度直接量", (t) => {
+  const root = makeRoot("anchorhosted");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const q = path.join(root, ".quay");
+  fs.mkdirSync(q, { recursive: true });
+  fs.writeFileSync(path.join(q, "anchor.pid"), `${process.pid}\n`, "utf8");
+  fs.writeFileSync(
+    path.join(q, "anchor.json"),
+    JSON.stringify({ pid: process.pid, kinds: ["promotion"], host: "anchor" }) + "\n",
+    "utf8",
+  );
+  // 载体新鲜度 = **独立于 anchor 自报**的直接量（AC2 要求以它交叉核对 host/alive，⛔ 不是只信内部状态）。
+  fs.writeFileSync(
+    path.join(q, "promotion-round.jsonl"),
+    JSON.stringify({ ts: new Date().toISOString(), runId: "dr-anchorhosted" }) + "\n",
+    "utf8",
+  );
+  // ⛔ 夹具不写 .quay/promotion-driver.pid —— 逐 kind 载体缺失正是本缺陷的触发形态。
+  const r = run(["status", "--root", root, "--kind", "promotion", "--json"]);
+  assert.equal(r.status, 0, `status exit 0: ${r.stdout}\n${r.stderr}`);
+  const j = JSON.parse(r.stdout.split("\n").find((l) => l.trim().startsWith("{")));
+  assert.equal(j.host, "anchor", "JSON 契约：host=anchor");
+  assert.equal(j.anchor_pid, process.pid);
+  assert.equal(j.alive, 1, "JSON 契约：alive=1");
+  assert.equal(j.running, 1, "JSON 契约：running=1");
+  // ⚠️ server.ts 用 `driver_alive !== 1` 判「这个 kind 的循环没在转」⇒ 这个字段必须同修，否则只是把假死
+  // 从一个字段搬到另一个（packages/quay/src/cli/server.ts 的 driverServiceReport）。
+  assert.equal(j.driver_alive, 1, "JSON 契约：driver_alive=1（server status 的消费点）");
+  assert.ok(Math.abs(Date.now() - Date.parse(j.last_record_ts)) < 60_000, "载体新鲜度直接量可读（交叉核对面）");
+});
+
 // ── 集成（spawn kernel CLI，与旧 promotion-driver-launch.sh 同形的端到端）────────────────────────
 
 test("AC1 (稳定承载) — start from a worktree ⇒ supervisor/driver carried from MAIN checkout, ⛔ worktree", (t) => {
@@ -612,9 +745,17 @@ test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ no
   assert.equal(typeof fresh.supervisorStartedAt, "number", "supervisorStartedAt 读得（epoch ms）");
   assert.ok(fresh.supervisorStartedAt > 0, "启动时刻非恒 0");
 
-  // procStartTimeMs(自己) 落在 [进程启动, 现在] 之间（epoch ms 上下界）。
+  // procStartTimeMs(自己) == 本测试进程【实际的】启动时刻（epoch ms）。
+  // ⛔ 不写成 `start > Date.now() - 60_000`：那是一个「模块加载 → 走到这一行必须 <60s」的墙钟
+  // 余量，并发负载下本文件耗时 139s（隔离 36s，实测 2026-09-13）⇒ 余量被负载击穿、与任何缺陷
+  // 无关。基准改为 process.uptime()（同一进程的真实存活时长）⇒ 断言与文件跑多久完全解耦。
   const start = procStartTimeMs(process.pid);
-  assert.ok(start != null && start > Date.now() - 60_000 && start <= Date.now(), `procStartTimeMs 合理: ${start}`);
+  const expectedStart = Date.now() - process.uptime() * 1000;
+  assert.ok(start != null && start <= Date.now(), `procStartTimeMs 合理（不晚于现在）: ${start}`);
+  assert.ok(
+    Math.abs(start - expectedStart) <= 10_000,
+    `procStartTimeMs 等于本进程实际启动时刻: start=${start} expected≈${Math.round(expectedStart)}`,
+  );
 });
 
 test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {
@@ -688,6 +829,73 @@ function makeBareRoot(tag) {
   return root;
 }
 
+// ── gap-ac3-live-test-fixture-leaks-supervised-driver-processes：真实被监督 driver 的夹具清理 ──────
+//
+// ⚠️ 下面这一段里的【顺序】就是修法本身，不是代码风格。
+//
+// 实测根因（2026-09-14，本文件 AC3 测试）：泄漏【不是】失败路径特有的——**绿灯路径照样泄漏**。三个
+// 环节缺一不可：
+//   ① `startKind` 以 `detached: true` + `unref()` 起 supervisor（生产需要——`quay driver start` 退出
+//      之后驱动必须活着）⇒ supervisor 与它 fork 出的 driver 【不随测试进程退出而消失】，只能显式杀。
+//   ② `stopKind` 唯一的杀法是从 `<root>/.quay/` 读 pid 文件发信号 ⇒ **root 一旦不在，它一个信号都发
+//      不出去**。实测两种形态（**都静默**）：root 被整个删掉 ⇒ `driver-runtime: invalid --root: …` +
+//      exit 2；root 还在但 pid 文件没了 ⇒ 打印 `not-running` + exit 0。后者是硬规则 3b 的教科书形态
+//      （读不懂输入 ⇒ 与「干净」同形）——**泄漏能长期隐形正是因为 stop 报了「没在跑」**。而残留
+//      supervisor 自己的 `appendLog` 会 `mkdir -p` 把删掉的 `.quay/` 重建出来 ⇒ 同一夹具两种形态都
+//      可能命中。
+//   ③ 本测试原先注册【两个独立的 `t.after`】（先 `fs.rmSync(root)`、后 `run(["stop", …])`），而
+//      node:test 的 `after` 钩子按【注册顺序】FIFO 执行（本机实测：先注册的 A 先跑，后注册的 B 后跑）
+//      ⇒ rmSync 先把 root 删掉 ⇒ ② 空转 ⇒ 泄漏。**实测：跑一次 AC3 测试（绿）即残留 supervisor +
+//      driver 各一个，而 root 目录已不存在**。
+//
+// 发现现场读数（本条立案证据）：同一时刻 4 个不同任务 worktree 下共 7 个存活进程（峰值一次 46 个），
+// 年龄 2.1–6.15 小时（`ps -o etimes=`：7677s / 22138s 等）；`/tmp/dr-ac3-live-*` 目录 141 个——残留
+// supervisor 的 `appendLog` 会 `mkdir -p` 把已删掉的 `.quay/` 重新建出来 ⇒ 「目录还在」不等于
+// 「stop 跑过」，这个读数本身也取不了假。
+//
+// ⇒ 修法 = 【单个】teardown，三段固定顺序 + try/finally（任一段失败都不跳过后面的段）：
+//     ① stop（机制路径）→ ② 按【进程组】兜底 kill → ③ 删 root。
+//   ⛔ 拆成两个 `t.after`、或把 ③ 提到 ①② 之前 ⇒ 当场复现泄漏。这条由 AC2（失败路径）/ AC3（通过
+//   路径）两个【独立跑通的】对照实测守住，⛔ 不靠「读代码相信 finally 会跑」——那是解释不是检验
+//   （硬规则 4 推论四）。
+
+/** 精确残留读数：cmdline 里含 `needle` 的进程行。⛔ 不按 `dr-ac3-live` 通配匹配——套件并发时别的
+ *  任务 worktree 的历史残留会命中，那是与本条无关的**假阳性**；按【本次 root】这条唯一路径匹配，读数
+ *  才是可取假的。⛔ `ps` 读不到时返回 `null`（⛔ 不返回 `[]` 冒充「干净」——硬规则 3b）。 */
+function processesMentioning(needle) {
+  const ps = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" });
+  if (ps.status !== 0 || typeof ps.stdout !== "string") return null;
+  return ps.stdout.split("\n").map((l) => l.trim()).filter((l) => l && l.includes(needle));
+}
+
+/** 只在 pid 【确实是它自己进程组的组长】时才 `kill(-pid)`——否则 `kill(-pgid)` 会打到【别人的】进程组
+ *  （本机同一时刻就有别的任务 worktree 的同类残留，误杀的代价是别人的套件）。`startKind` 以
+ *  `detached: true` 起 supervisor（setsid ⇒ pgid == pid），但这里仍【实测一次 pgid】，⛔ 不假设它成立
+ *  （硬规则 4：「应该成立」的量不是测量）。pid 已死 / 读不到 ⇒ 静默返回。 */
+function killProcessGroupOf(pidRaw) {
+  const pid = Number(pidRaw);
+  if (!pid) return;
+  const r = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" });
+  if (r.status !== 0 || Number((r.stdout || "").trim()) !== pid) return;
+  try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+/** 真实被监督 driver 的夹具清理（唯一定义处；⛔ 别在别处再抄一份顺序）。三段顺序固定，整段在
+ *  try/finally 里：① 走机制路径 stop；② 进程组兜底 kill（supervisor 是它自己进程组的组长 ⇒ 一次覆盖
+ *  supervisor 与它 fork 出的全部 driver 化身——只 kill 直接子进程不够，这正是同仓库
+ *  `detached-test-child-leak-hangs-suite` 的同类模式）；③ 最后才删 root。 */
+function teardownLiveDriver(root, pluginRoot) {
+  try {
+    run(["stop", "--kind", "promotion", "--root", root], { pluginRoot, timeout: 20000 });
+  } catch { /* ① 抛错也必须走到 ②③——清理不能因为机制路径失败而跳过 */ }
+  try {
+    killProcessGroupOf(readPid(root, "promotion-driver-supervisor"));
+    killProcessGroupOf(readPid(root, "promotion-driver"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true }); // ③ 必须最后：root 一没，②的 pid 文件也就读不到了
+  }
+}
+
 test("AC3 (gap-ac203) — 必死启动 ⇒ start 非零退出 + 死因；移除注入 ⇒ 正常启动成功（两态逐字留档）", (t) => {
   // 注入：plugin root 里有 scripts/ 但【没有】driver 脚本（⇒ supervisor 找不到 driver 而退出）。
   const deadRoot = makeBareRoot("ac3-dead");
@@ -704,14 +912,89 @@ test("AC3 (gap-ac203) — 必死启动 ⇒ start 非零退出 + 死因；移除�
 
   // 移除注入：同一个 root 换成带 driver 脚本的 plugin root ⇒ 正常启动成功。
   const liveRoot = makeRoot("ac3-live");
-  t.after(() => fs.rmSync(liveRoot, { recursive: true, force: true }));
-  const live = run(["start", "--kind", "promotion", "--root", liveRoot, "--restart-delay", "1", "--run-id", "dr-ac3-live", "--confirm-timeout", "15"], { pluginRoot: path.join(liveRoot, "plugin") });
+  const livePlugin = path.join(liveRoot, "plugin");
+  // ⚠️ 清理必须在 `start` 【之前】注册，且是【单个】钩子——见 teardownLiveDriver 头注释：拆成两个
+  // t.after 就按注册顺序先删 root、后 stop ⇒ 泄漏。注册在 start 之前 ⇒ start 与注册之间抛错也有人管。
+  t.after(() => teardownLiveDriver(liveRoot, livePlugin));
+  const live = run(["start", "--kind", "promotion", "--root", liveRoot, "--restart-delay", "1", "--run-id", "dr-ac3-live", "--confirm-timeout", "15"], { pluginRoot: livePlugin });
   console.log(`[AC3 正常态] exit=${live.status}\n  stdout: ${live.stdout.trim()}\n  stderr: ${live.stderr.trim()}`);
-  t.after(() => run(["stop", "--kind", "promotion", "--root", liveRoot], { pluginRoot: path.join(liveRoot, "plugin"), timeout: 20000 }));
+  // 机器可读的本次锚点：AC2/AC3 两个对照（父测试）用它做【精确】残留读数。
+  console.log(`[AC3 fixture] root=${liveRoot} run_id=dr-ac3-live`);
+  // AC2 负控制接缝：注入一次「夹具内部的断言失败」，让清理走【失败路径】。默认不生效，只在 AC2 派生的
+  // 子进程里由 env 打开。没有它，AC2 就只能是「读代码相信 finally 会跑」——那是解释不是检验。
+  if (process.env.QUAY_AC3_LIVE_INJECT_FAIL === "1") {
+    assert.fail("AC2 负控制：注入的夹具内部断言失败——清理必须仍然执行（零残留进程 + root 已删）");
+  }
   assert.equal(live.status, 0, `正常启动必须成功：${live.stdout}\n${live.stderr}`);
   assert.match(live.stdout, /^started: /m, `正常态打印 started:：${live.stdout}`);
   assert.match(live.stdout, /confirmed_ms=\d+/, `started: 行带 confirmed_ms（可核的耗时读数）：${live.stdout}`);
   assert.ok(!/start-failed/.test(live.stderr), `正常态不得出现 start-failed：${live.stderr}`);
+});
+
+// ── gap-ac3-live-test-fixture-leaks-supervised-driver-processes AC2/AC3：两个【独立跑通的】对照 ──────
+//
+// 判据要取假，就必须分清「清理真的执行了」与「读数本来就是空的」。做法：把【真实的 AC3 夹具】放进一个
+// 子 `node --test` 进程里跑，等它【整个进程退出】之后再在父进程读数。⛔ 为什么必须隔一层子进程：被测
+// 对象是「夹具是否收掉了它 spawn 的 detached supervisor」——只有在子进程退出之后读数，才不依赖父进程
+// 自己的生命周期与调度（同硬规则 4b：别用会与对象同生共死的代理量判活）。
+//
+// AC2 = 失败路径（夹具内部断言失败）；AC3 = 通过路径（夹具全绿）。两条【各自跑一次、各自读数】，
+// ⛔ 不是「跑一次然后断言应该都清理了」（DoD 明写禁止这种形态）。
+
+/** 在子 `node --test` 里跑真实的 AC3 夹具一次，返回退出码 + 夹具回传的 root 锚点。
+ *  ⛔ 模式串只匹配 `AC3 (gap-ac203)` ⇒ 本文件新增的 AC2/AC3 对照不会被递归跑（结构上无环）。
+ *
+ *  ⚠️ 必须删掉子进程 env 里的 `NODE_TEST_CONTEXT`：node:test 用它识别「我正跑在一个测试文件里」并对
+ *  嵌套 runner 直接**静默跳过**（实测：exit 0、stdout 为空、一行 `Warning: node:test run() is being
+ *  called recursively within a test file. skipping running files.`）——⛔ 那是「读不懂输入 ⇒ 与成功
+ *  同形」（硬规则 3b），本轮实测就踩到了：两条对照都因 root=null 才暴露，否则会被读成「绿」。绕过这个
+ *  守卫在这里是【安全】的，因为它的目的是防自递归，而本函数的模式串把两条对照排除在外 ⇒ 环不存在。
+ *  即便如此，AC2/AC3 仍各自断言子进程【真的跑了】（pass/fail 计数），⛔ 不依赖「它应该跑了」。 */
+function runAc3FixtureOnce(injectFail) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  if (injectFail) env.QUAY_AC3_LIVE_INJECT_FAIL = "1";
+  else delete env.QUAY_AC3_LIVE_INJECT_FAIL;
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--test", "--test-name-pattern=AC3 \\(gap-ac203\\)", path.join(__dirname, "driver-runtime.test.mjs")],
+    { encoding: "utf8", env, timeout: 180000 },
+  );
+  const m = /^\[AC3 fixture\] root=(\S+) run_id=(\S+)$/m.exec(r.stdout || "");
+  return { status: r.status, stdout: r.stdout || "", stderr: r.stderr || "", root: m ? m[1] : null };
+}
+
+/** 一次对照的读数与断言：零残留进程 + root 已删。 */
+function assertNoResidue(child, label) {
+  assert.ok(child.root, `${label}：夹具必须回传 root 锚点才谈得上读数：\n${child.stdout}\n${child.stderr}`);
+  const residue = processesMentioning(child.root);
+  assert.ok(residue !== null, `${label}：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）`);
+  assert.deepEqual(
+    residue, [],
+    `${label}：不得残留任何引用本次 root 的进程（按本次 root 精确匹配；⛔ 不通配 dr-ac3-live——那会把\n别的任务 worktree 的历史残留算进来）：\n${residue.join("\n")}`,
+  );
+  assert.ok(!fs.existsSync(child.root), `${label}：/tmp root 必须已删：${child.root}`);
+}
+
+test("AC2 (gap-ac3-live…) 负控制 — 夹具内部断言失败 ⇒ 清理仍然执行（零残留进程 + root 已删）", (t) => {
+  const child = runAc3FixtureOnce(true);
+  console.log(`[AC2 负控制] child exit=${child.status} root=${child.root}`);
+  // ⛔ 先证明这条控制真的跑在失败路径上——否则它测的是 AC3 那条（两态混淆 = 判据恒真）。
+  assert.notEqual(child.status, 0, `负控制必须真的失败：\n${child.stdout}\n${child.stderr}`);
+  assert.match(`${child.stdout}${child.stderr}`, /fail 1/, `子进程必须真的跑过 AC3（⛔ 不是被静默跳过）：\n${child.stdout}\n${child.stderr}`);
+  assert.ok(
+    `${child.stdout}${child.stderr}`.includes("AC2 负控制：注入的夹具内部断言失败"),
+    `失败必须来自注入的夹具内断言（而不是别的岔路）：\n${child.stdout}\n${child.stderr}`,
+  );
+  assertNoResidue(child, "AC2 失败路径");
+});
+
+test("AC3 (gap-ac3-live…) 正控制 — 通过路径同样零残留（对照 AC2，证明清理没变成「总是不清理」）", (t) => {
+  const child = runAc3FixtureOnce(false);
+  console.log(`[AC3 正控制] child exit=${child.status} root=${child.root}`);
+  assert.equal(child.status, 0, `正控制必须真的绿：\n${child.stdout}\n${child.stderr}`);
+  assert.match(child.stdout, /pass 1/, `子进程必须真的跑过 AC3（⛔ 不是被静默跳过）：\n${child.stdout}`);
+  assertNoResidue(child, "AC3 通过路径");
 });
 
 test("AC4 (gap-ac203) — 慢启动（3s > 窗口）⇒ start-pending（⛔ 非死亡）；给足窗口 ⇒ 确认成功", async (t) => {
@@ -867,4 +1150,144 @@ test("AC1/AC2 (gap-driver-start-false-confirms) — 未进入常驻循环的驱�
     "就绪标记由【驱动自己】写的 kind 清单（= registry 的 pidSelf=true）；worker 是登记在案的残留",
   );
   assert.equal(driverPidIsReadinessMarker("worker"), false, "worker 的 driver pid 文件仍由 supervisor 写（代理量）");
+});
+
+// ── MCP 黑名单接线（gap-worker-mcp-blacklist-strict-config AC1/AC3/AC6）────────────────────────
+// launchArgv 是【唯一 argv 构造点】。AC1 的负控制在这里是「argv 不依赖 MCP 配置」这条可取的假：
+// 若哪天黑名单被误挂到共享 profile 上（outer 连坐），或那个 `length > 0` 的守卫被去掉，
+// 下面第一条就会红——而不是等 outer 真的起不来浏览器才被发现。
+
+const REPO_ROOT_DR = path.resolve(__dirname, "..", "..");
+
+/** 三源 MCP fixture（家目录 + 一个项目目录），⛔ 不读真实 ~/.claude*（AC7 同款缝）。 */
+function mcpFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dr-mcp-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const homeDir = path.join(dir, "home");
+  const projectDir = path.join(dir, "project");
+  const w = (p, v) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(v)); };
+  w(path.join(homeDir, ".claude.json"), {
+    mcpServers: {
+      "chrome-devtools": { command: "npx", args: ["chrome-devtools-mcp@latest"] },
+      playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
+      "user-extra": { command: "node", args: ["user-extra.js"] },
+    },
+  });
+  w(path.join(homeDir, ".claude", "settings.json"), { enabledPlugins: { "quay@quay": true, "archguard@archguard": true } });
+  w(path.join(projectDir, ".mcp.json"), { mcpServers: { "proj-server": { command: "node", args: ["proj.js"] } } });
+  return {
+    roots: { homeDir, projectDirs: [projectDir], kernelPluginRoot: path.join(REPO_ROOT_DR, "plugin") },
+  };
+}
+
+test("AC1/AC6 — an EMPTY blacklist adds no mcp flag and the argv does not depend on MCP config at all", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["outer", "manager", "pool-judge", "meta-driver"]) {
+    const plain = launchArgv(role, "P", REPO_ROOT_DR);
+    const withRoots = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    assert.deepEqual(plain, withRoots, `${role}: argv must be INDEPENDENT of the MCP configuration`);
+    assert.ok(!plain.includes("--strict-mcp-config"), `${role}: no --strict-mcp-config`);
+    assert.ok(!plain.includes("--mcp-config"), `${role}: no --mcp-config`);
+    assert.equal(plain.at(-2), "-p", `${role}: the -n <name> -p <prompt> tail is intact`);
+    assert.equal(plain[plain.indexOf("-n") + 1], `quay-${role}`, `${role}: name resolved from the role`);
+    assert.equal(plain.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC1 wiring — the three code-writing roles carry --strict-mcp-config --mcp-config, blacklist subtracted", (t) => {
+  const fx = mcpFixture(t);
+  for (const role of ["task-worker", "selector", "fix-worker"]) {
+    const argv = launchArgv(role, "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+    const i = argv.indexOf("--strict-mcp-config");
+    assert.ok(i >= 0, `${role}: must carry --strict-mcp-config`);
+    assert.equal(argv[i + 1], "--mcp-config");
+    const table = JSON.parse(argv[i + 2]).mcpServers;
+    assert.equal(table["chrome-devtools"], undefined, `${role}: chrome-devtools dropped`);
+    assert.equal(table["playwright"], undefined, `${role}: playwright dropped`);
+    // ⛔ 负控制：黑名单不得连坐掉 worker 自己要用 quay 工具（AC4）。
+    assert.ok(table["plugin_quay_quay"], `${role}: the quay MCP server must SURVIVE`);
+    assert.ok(table["user-extra"] && table["proj-server"], `${role}: unrelated servers survive`);
+    assert.equal(argv.at(-1), "P", `${role}: prompt stays the last payload`);
+  }
+});
+
+test("AC5 precondition — the emitted plugin entry points at a REAL on-disk command (not a dead path)", (t) => {
+  const fx = mcpFixture(t);
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots });
+  const table = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]).mcpServers;
+  const spec = table["plugin_quay_quay"];
+  assert.ok(spec, "precondition: quay entry present");
+  const cmdPath = spec.args[0];
+  assert.ok(!cmdPath.includes("${CLAUDE_PLUGIN_ROOT}"), "placeholder expanded");
+  assert.ok(fs.existsSync(cmdPath), `the emitted MCP command must exist on disk: ${cmdPath}`);
+});
+
+test("AC3 caller — an unresolvable MCP configuration ⇒ ZERO mcp flags (dispatch is never blocked)", (t) => {
+  const argv = launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: null });
+  assert.ok(!argv.includes("--strict-mcp-config"), "no flag when the config cannot be evaluated");
+  assert.ok(!argv.includes("--mcp-config"));
+  assert.equal(argv.at(-1), "P");
+  // 负控制（对照必须能把结论翻过来）：同一个调用给了可解析的根 ⇒ flag 立刻出现。
+  const fx = mcpFixture(t);
+  assert.ok(launchArgv("task-worker", "P", REPO_ROOT_DR, { mcpRoots: fx.roots }).includes("--strict-mcp-config"));
+});
+
+// ── resolveKernelSibling: raw .ts vs the shipped dist bundle ─────────────────────────────────────────
+// gap-dist-plugin-missing-node-modules-task-schema-yaml (kernel half — mirror of Core
+// `plugin-root.ts::isPluginSourceCheckout`). `runSupervisor` resolves EVERY kind's driver through
+// `resolveKernelSibling(spec.driver)`, and the driver scripts' import closure needs `yaml` /
+// `@modelcontextprotocol/sdk/*` / `zod`, none of which an installed plugin tree carries — so a raw
+// pick there means all six kinds die at spawn with ERR_MODULE_NOT_FOUND, exactly as measured on the
+// real plugin cache. The dist bundle is self-contained and runs without --experimental-strip-types.
+
+/** `<dir>/plugin/scripts/<name>.ts` (+ `dist/<name>.js`) and — when `withCoreSrc` — the
+ *  `<dir>/packages/quay/src` marker that makes `<dir>/plugin` a SOURCE checkout. */
+function kernelLayoutFixture(withCoreSrc) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-kernel-layout-"));
+  const pluginRoot = path.join(dir, "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "scripts", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "promotion-driver.ts"), 'import { parse } from "yaml";\n');
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "dist", "promotion-driver.js"), "// bundled\n");
+  if (withCoreSrc) fs.mkdirSync(path.join(dir, "packages", "quay", "src"), { recursive: true });
+  return { dir, pluginRoot };
+}
+
+function withKernelRoot(root, fn) {
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+  }
+}
+
+test("resolveKernelSibling() — shipped install (raw .ts + dist coexist): the BUNDLE wins, stripTypes false", () => {
+  const fx = kernelLayoutFixture(false);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, false, "no --experimental-strip-types in a shipped install");
+    assert.ok(r.path.endsWith(path.join("scripts", "dist", "promotion-driver.js")), `bundle path: ${r.path}`);
+    // The kernel spawns via this argv, so assert the ARGV too (the flag is what would be wrong).
+    process.env.QUAY_PLUGIN_ROOT = fx.pluginRoot;
+    const argv = kernelSiblingArgv("promotion-driver.ts", ["--root", "/tmp/x"]);
+    delete process.env.QUAY_PLUGIN_ROOT;
+    assert.deepEqual(argv.slice(0, 3), ["node", "--no-warnings", r.path], `argv: ${JSON.stringify(argv)}`);
+  } finally {
+    delete process.env.QUAY_PLUGIN_ROOT;
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveKernelSibling() NEGATIVE CONTROL — the SAME fixture + the source-checkout marker ⇒ raw .ts wins", () => {
+  const fx = kernelLayoutFixture(true);
+  try {
+    const r = withKernelRoot(fx.pluginRoot, () => resolveKernelSibling("promotion-driver.ts"));
+    assert.ok(r, "must resolve");
+    assert.equal(r.stripTypes, true, "source checkout ⇒ raw .ts (edit-visible, source-respawn still works)");
+    assert.ok(r.path.endsWith(path.join("scripts", "promotion-driver.ts")), `raw path: ${r.path}`);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
 });

@@ -19,6 +19,7 @@ import path from "node:path";
 import {
   renderLiveCard,
   renderLiveGanttSvg,
+  renderTaskCard,
   mergeLiveAndHistoryIntervals,
   packLanes,
   FIXED_GANTT_LANES,
@@ -219,4 +220,85 @@ test("DoD: renderLiveCard gantt merges readLive() + worker-outcome.jsonl into on
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
+});
+
+// ── gap-dashboard-taskcard-minilist-cap-too-small-raise-to-10 ─────────────────────────────────────
+// 人裁定 2026-09-14：renderTaskCard 的 MINI_LIST_N 由 3 提到 10。范围仅此一个常量——不引入自适应
+// 阈值、不新增「+N 更多」提示（renderLiveCard 的 live.inFlight.slice(0, 3) 已有溢出徽标，
+// 该不一致已记录在案、留待以后单独立案）。
+//
+//   AC1 — 12 条 ready ⇒ ready mini-list 渲染出 **10** 行（不是 3 行），且是 updatedAt 最新的那 10 条。
+//   AC2 — 5 条 todo（真实小项目场景）⇒ todo mini-list 完整渲染 5 行（真实数 < 新上限时必须全展示）。
+//   AC3 — 负控制：两个终态（done/superseded）本来就只显示计数、无 mini-list；本任务不得给它们加上一个。
+
+/** The mini-list rows are the ONLY `<a href="/task/…">` anchors renderTaskCard emits, so counting
+ *  anchors inside one status's block is an exact row count (no shared-class ambiguity). */
+function miniListBlock(html, status) {
+  const start = html.indexOf(`>${status}（最近 `);
+  assert.ok(start >= 0, `the ${status} mini-list label renders`);
+  const rest = html.slice(start);
+  // The block ends at the next mini-list label, else at the trailing /tasks link.
+  const ends = ["ready", "todo", "needs-human"]
+    .map((s) => rest.indexOf(`>${s}（最近 `, 1))
+    .concat([rest.indexOf("查看任务列表")])
+    .filter((i) => i > 0);
+  return rest.slice(0, ends.length ? Math.min(...ends) : rest.length);
+}
+const miniListRows = (html, status) =>
+  (miniListBlock(html, status).match(/<a href="\/task\//g) ?? []).length;
+
+/** renderTaskCard 只读 id/title/status/updatedAt（updatedAt 必须是 number，否则该行被过滤掉）。 */
+const summary = (id, status, updatedAt) => ({ id, title: `${id} title`, status, updatedAt });
+
+test("AC1: 12 ready tasks ⇒ the ready mini-list renders 10 rows (the newest 10), not 3", () => {
+  const base = Date.parse("2026-09-14T00:00:00.000Z");
+  // r00 is OLDEST, r11 is NEWEST — so the rendered set discriminates sort-then-cap from "any 10".
+  const tasks = Array.from({ length: 12 }, (_, i) =>
+    summary(`r${String(i).padStart(2, "0")}`, "ready", base + i * 60_000));
+
+  const html = renderTaskCard(tasks);
+
+  assert.equal(miniListRows(html, "ready"), 10, "the ready mini-list shows exactly 10 rows (was 3)");
+  // Cap-and-sort, not merely "10 happened to be present": the two OLDEST must be the ones dropped.
+  const block = miniListBlock(html, "ready");
+  assert.ok(!block.includes('/task/r00"'), "the oldest ready task (r00) is the one cut by the cap");
+  assert.ok(!block.includes('/task/r01"'), "the second-oldest ready task (r01) is also cut");
+  assert.ok(block.includes('/task/r11"'), "the newest ready task (r11) survives");
+  assert.ok(block.includes('/task/r02"'), "the 10th-newest ready task (r02) survives");
+});
+
+test("AC2: 5 todo tasks (a real small project) ⇒ the todo mini-list renders all 5, none truncated", () => {
+  const base = Date.parse("2026-09-14T00:00:00.000Z");
+  const tasks = Array.from({ length: 5 }, (_, i) =>
+    summary(`t${i}`, "todo", base + i * 60_000));
+
+  const html = renderTaskCard(tasks);
+
+  assert.equal(miniListRows(html, "todo"), 5, "all 5 todo rows render — nothing silently truncated below the cap");
+  for (let i = 0; i < 5; i++) {
+    assert.ok(miniListBlock(html, "todo").includes(`/task/t${i}"`), `todo row t${i} is present`);
+  }
+});
+
+test("AC3 (negative control): the terminal states done/superseded gain NO mini-list — they stay count-only", () => {
+  const base = Date.parse("2026-09-14T00:00:00.000Z");
+  const tasks = [
+    ...Array.from({ length: 3 }, (_, i) => summary(`d${i}`, "done", base + i * 60_000)),
+    ...Array.from({ length: 3 }, (_, i) => summary(`s${i}`, "superseded", base + i * 60_000)),
+    summary("r0", "ready", base),
+  ];
+
+  const html = renderTaskCard(tasks);
+
+  // No mini-list block for either terminal state (the label is the block's unmistakable marker)…
+  assert.ok(!html.includes(">done（最近 "), "done renders NO mini-list block");
+  assert.ok(!html.includes(">superseded（最近 "), "superseded renders NO mini-list block");
+  // …and no stray anchors leak in for them: the card's ONLY anchors are the single ready row.
+  assert.equal(miniListRows(html, "ready"), 1, "only the ready mini-list renders rows");
+  for (const id of ["d0", "d1", "d2", "s0", "s1", "s2"]) {
+    assert.ok(!html.includes(`/task/${id}"`), `${id} (terminal) must not appear as a mini-list row`);
+  }
+  // The count-only path is intact: both terminal states still report their numeric counts.
+  assert.match(html, /<b>3<\/b> done/, "done is still shown as a count");
+  assert.match(html, /<b>3<\/b> superseded/, "superseded is still shown as a count");
 });

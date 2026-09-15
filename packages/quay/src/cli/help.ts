@@ -38,6 +38,9 @@ Usage:
   quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
+  quay goal gate <id> [--dry-run] [--json] [--root <path>]
+  quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
+  quay goal batch --json '<array>' [--root <path>]
   quay meta list [--status <status>] [--json] [--root <path>]
   quay meta show <id> [--json] [--root <path>]
   quay meta write <id> --title <title> [--status <status>] [--handler <handler>] [--reply <text>] [--body <text>|--body-file <path>] [--json] [--root <path>]
@@ -58,6 +61,7 @@ Usage:
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
   quay server add <svc,...> [--json] [--root <path>]
   quay server stop --only <svc,...> [--json] [--root <path>]
+  quay server restart --only <svc,...> [--json] [--root <path>]
   quay server status [--json] [--root <path>]
   quay mcp
   quay manager start [--dry-run] [--json]
@@ -220,9 +224,19 @@ Examples:
 Usage:
   quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
+  quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
+  --doc-branch-name <name>
+               (with --branch-model-only) Establish the DOC-ONLY work branch: when the main
+               checkout is sitting on the landing baseline 'develop', create <name> at that
+               tip and switch the main checkout to it, so human edits and driver commits stop
+               sharing one branch and one git index. Already off 'develop' => no-op. <name>
+               taken by a branch unrelated to 'develop' => REFUSED (exit 1, nothing moved).
+               Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
+               default for <name>: it is supplied by the caller (the shipped quay-init.sh
+               resolves --doc-branch-name, then loop.doc_branch, then its own default).
   --dry-run    Print the generated config to stdout without writing to disk.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
@@ -258,6 +272,13 @@ Description:
   need the branch model established (the shipped plugin/scripts/quay-init.sh
   upgrade entry calls this): it never rewrites config, so an existing project's
   gates: / loop: / routines: survive.
+
+  Adding --doc-branch-name to that entry also ESTABLISHES the doc-only work
+  branch. 'quay init' REPORTS which branch fills the doc role and never names
+  one itself; the name is the caller's (a CLI parameter, or the project's
+  loop.doc_branch). A project whose main checkout stays on 'develop' has no
+  buffer between human edits and the driver's own commits — they share one
+  branch and one git index.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
@@ -329,6 +350,51 @@ Environment contract — when the default 'acceptance' gate spawns a command:
                     TIMEOUT_MS explicit-override-wins precedence — a pre-set env var is
                     never clobbered).
 `);
+  } else if (sub === "goal") {
+    // ⚠️ This block — NOT any inline text in cli/goal.ts — is what `quay goal --help` prints
+    // (bin/quay.ts routes sub === "--help" here). Adding a verb to cli/goal.ts without adding it
+    // here means the verb does not exist on the surface a user can read
+    // (gap-driver-cli-help-hides-four-of-six-kinds is the same defect one kind over).
+    process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
+
+Usage:
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
+  quay goal show <id> [--json] [--root <path>]
+  quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
+  quay goal gate <id> [--dry-run] [--json] [--root <path>]
+  quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
+  quay goal batch --json '<array-of-records>' [--root <path>]
+
+  list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
+  gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
+                        GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
+                        2 = usage (no such record / bad args). An EMPTY criterion fails closed.
+  check                 Read the goal mechanism's own three-state readings, in the goal store's
+                        single implementation:
+                          --staleness         which GOALs' 'achieved' may be outdated (I3) + divergences (I4)
+                          --achieved-failing  achieved ACs whose criterion is currently FAILING (I5)
+                          --stale-pass        the frozen population's "currently false" reading (AC-242);
+                                              exit 0 = clean, 1 = violated, 3 = NOT-EVALUATED
+                          --stale-pass --sweep  run one BOUNDED rotation first (cost-bounded), then the same read
+                          --reverify-scope    the I5 re-verify scope, enumerated
+                        ⛔ Three-state on purpose: "looked and all clean" and "could not evaluate" are
+                        DIFFERENT exit codes, never the same value.
+  batch --json '<array>'  Write N records in ONE commit (each: id + the write fields).
+
+Options:
+  --store               Run the goal-store dialect instead of the Provider ABI for list/show/write.
+                        Needed when <root> is NOT a quay workspace (no .quay/config.yml) — the store
+                        needs only <root>/goals + <root>/.quay/gate-events.jsonl. The store-level
+                        verbs (gate/check/batch) always run this way. The CLI never switches on its
+                        own: a --root with no workspace fails closed on the ABI route.
+  --actor <who>         write: the actor recorded in the status log (and handed to the staleness
+                        signal on a transition back into 'active'). Implies the store dialect.
+  --reason <why>        write: why. Implies the store dialect.
+  --dry-run             write/gate: execute but persist nothing.
+  --json                Machine-readable output (the store-level verbs always print JSON).
+  --root <path>         The workspace root (ABI route) or the goal store's root (store dialect):
+                        <root>/goals, <root>/.quay/gate-events.jsonl.
+`);
   } else if (sub === "driver") {
     process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
 
@@ -368,6 +434,7 @@ Usage:
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
   quay server add   <svc,...> [--json] [--root <path>]
   quay server stop  --only <svc,...> [--json] [--root <path>]
+  quay server restart --only <svc,...> [--json] [--root <path>]
   quay server status [--json] [--root <path>]
 
   services: ${ALL_SERVICE_NAMES.join(", ")}
@@ -384,6 +451,14 @@ Usage:
            same process's \`control\` face stays reachable — that is what distinguishes a partial
            stop from a whole-process restart (§6.9 不变式 2). \`driver:<kind>\` delegates to the
            existing \`quay driver stop --kind <kind>\`, which does NOT kill in-flight workers.
+  restart  RESTART ONLY the named services (\`--only\` is required), leaving the other five
+           \`driver:<kind>\` services and the host process untouched. \`restart\` is its OWN verb:
+           \`start\` stays a no-op on a running service and ⛔ is never a silent restart (§6.9 不变式 1),
+           so the REQUESTED restart needs its own name. \`driver:<kind>\` delegates to the existing
+           \`quay driver restart --kind <kind>\` (= stop then start), which kills the supervisor and the
+           driver itself but ⛔ does NOT scan in-flight worker children — they orphan and finish
+           (§6.9 不变式 3). The reported outcome is \`restarted\` iff a NEW live driver pid is observed;
+           a restart that left the old pid in place reports \`not-evaluated\`, never \`restarted\`.
   status   Read the workspace's \`.quay/server.json\` carrier and report, PER SERVICE, whether it is
            actually answering. The carrier is published by the \`quay serve\` process and records
            one entry per hosted service (name, pid, bind host, bound port); because stage A2 merged
@@ -407,9 +482,11 @@ Usage:
                                or carries a pid other than the host's
              3  not-evaluated  the carrier exists but could not be read/parsed
 
-  --json   Machine-readable output (start/add/stop: one \`outcome\` per service —
-           started | already-running | stopped | already-stopped | not-evaluated; the last one is
-           NOT conflated with the others, 硬规则 3b).
+  --json   Machine-readable output (start/add/stop/restart: one \`outcome\` per service —
+           started | already-running | restarted | stopped | already-stopped | not-evaluated; the
+           last one is NOT conflated with the others, 硬规则 3b. \`restarted\` is distinct from
+           \`started\` because "brought up a service that was down" and "swapped a running service
+           for a new process" are different facts).
   --root   Workspace root (default: discovered via .quay/config.yml from cwd).
 `);
   } else {
