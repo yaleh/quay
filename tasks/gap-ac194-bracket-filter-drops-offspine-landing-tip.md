@@ -58,18 +58,157 @@ EXIT=1
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root . --baseline develop~100 --json` → `exit 0` 且 `evaluated:true`、`ok:true`、`unclassifiableCommits:0`（贴出完整 JSON 与退出码）。
-- [ ] AC-194 判据逐字（`goals/AC-194-no-direct-to-develop-bypass.md` 的 `criterion`）→ `exit 0`（贴出 stdout/stderr 与退出码）。
-- [ ] 新回归用例：构造一个 **tip T 是 develop 祖先但不在窗内 spine 上**的括注，断言其 `intro ∩ spine` 提交被判 `fan-in`（⛔ 不是 unclassifiable）；该用例在改前**必红**、改后绿（贴出改前红读数）。
-- [ ] 负控制①（fail-closed 保持）：无 ledger / 无 reflog 条目 / 不在任何括注内的 spine 提交仍判 `unclassifiable` ⇒ `evaluated:false`、退出码非 0（贴出读数）。
-- [ ] 负控制②（不掩真直投）：落在某括注区间内但**是直投**的提交仍判 `direct` 并报红（贴出读数）。
-- [ ] 判据墙钟贴出且 ≤ 60s（goal-gate criterion 预算），同时给出改前同命令墙钟作对照。
+- [x] `node --no-warnings --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root . --baseline develop~100 --json` → `exit 0` 且 `evaluated:true`、`ok:true`、`unclassifiableCommits:0`（贴出完整 JSON 与退出码）。
+- [x] AC-194 判据逐字（`goals/AC-194-no-direct-to-develop-bypass.md` 的 `criterion`）→ `exit 0`（贴出 stdout/stderr 与退出码）。
+- [x] 新回归用例：构造一个 **tip T 是 develop 祖先但不在窗内 spine 上**的括注，断言其 `intro ∩ spine` 提交被判 `fan-in`（⛔ 不是 unclassifiable）；该用例在改前**必红**、改后绿（贴出改前红读数）。
+- [x] 负控制①（fail-closed 保持）：无 ledger / 无 reflog 条目 / 不在任何括注内的 spine 提交仍判 `unclassifiable` ⇒ `evaluated:false`、退出码非 0（贴出读数）。
+- [x] 负控制②（不掩真直投）：落在某括注区间内但**是直投**的提交仍判 `direct` 并报红（贴出读数）。
+- [x] 判据墙钟贴出且 ≤ 60s（goal-gate criterion 预算），同时给出改前同命令墙钟作对照。
 
 ## DoD
 
-- [ ] `plugin/scripts/direct-to-develop-bypass-check.ts` 的括注准入改动已 land 到 `develop`（`git merge-base --is-ancestor <commit> develop` → 真）。
-- [ ] `goals/AC-194-no-direct-to-develop-bypass.md` 的判据在**落地后**重跑 `exit 0`；`.quay/gate-events.jsonl` 中 AC-194 的 **goal-sweep 事件尾条** `verdict=pass`（贴出该条事件原文与时间戳）。
-- [ ] 三条测试/负控制读数与 JSON 原文贴进任务体 `## Resolution`（⛔ 无凭记忆字面量）。
+- [ ] `plugin/scripts/direct-to-develop-bypass-check.ts` 的括注准入改动已 land 到 `develop`（`git merge-base --is-ancestor <commit> develop` → 真）。（待外部）
+- [ ] `goals/AC-194-no-direct-to-develop-bypass.md` 的判据在**落地后**重跑 `exit 0`；`.quay/gate-events.jsonl` 中 AC-194 的 **goal-sweep 事件尾条** `verdict=pass`（贴出该条事件原文与时间戳）。（待外部）
+- [x] 三条测试/负控制读数与 JSON 原文贴进任务体 `## Resolution`（⛔ 无凭记忆字面量）。
+
+## Resolution
+
+**实现**（commit `de263fede5304afc769977176bb316186468a181`，分支 `task/gap-ac194-bracket-filter-drops-offspine-landing-tip`）：
+
+`plugin/scripts/direct-to-develop-bypass-check.ts` 的括注准入由 `spineSet.has(T)`（T 在当前 first-parent
+spine 上）改为 **`if (windowAncestors?.has(T)) continue;`**——`windowAncestors` = `git rev-list <baseline>`
+（窗底祖先集，一次 subprocess，代码里在括注循环之前建好）。判据是**必要条件**：T 是窗底祖先 ⇒ T 的祖先全是
+窗底祖先，而窗内 spine commit 按定义不是 ⇒ 该括注结构上带入不了任何窗内提交。
+覆盖集 `refMoveCovered` 用完整候选集；可见性读数 `refMoveIntroduced` / `nonForwardRefMoves` **保持窄口径**
+（`T ∈ spineSet`）以免 `--json` 膨胀（实测 78KB）。`classifySpineLandingMode` 的判定顺序未动
+（`directSet` 先于 `refMoveCovered`）。
+
+### AC1 — 判据 exit 0（工作树内，逐字命令 + 完整 JSON + 退出码）
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts \
+    --root . --baseline develop~100 --json ; echo EXIT=$?
+{
+  "evaluated": true,
+  "ok": true,
+  "reason": "no-direct-commits-in-range",
+  "reasonSecondary": null,
+  "baseline": "develop~100",
+  "develop": "develop",
+  "unclassifiableCommits": 0,
+  "unclassifiableSample": [],
+  "classification": {
+    "classified": 100,
+    "total": 100,
+    "ratio": 1,
+    "firstParent": 100,
+    "offSpine": 1495,
+    ... (refMoveIntroduced / nonForwardRefMoves / unclassifiedActionForms 同前，未改口径)
+  },
+  "denominator": { "totalDirectCommits": 0, "codeSurfaceCommits": 0, "unclassifiableCommits": 0,
+                   "classifiedCommits": 100, "totalScannedCommits": 100, "firstParentCommits": 100,
+                   "offSpineCommits": 1495, ... },
+  "lockWindow": { "evaluated": true, "reason": "no-lock-events (vacuous: no lock holds)" },
+  "candidates": []
+}
+EXIT=0
+```
+
+（改前同命令逐字读数：`{"evaluated":false,"ok":true,"reason":"unclassifiable-commits-in-range",
+"unclassifiableCommits":6,"classification":{"classified":94,"total":100,"ratio":0.94,"firstParent":100}}`
+⇒ `EXIT=3`。6 条样本 `4e93a695 / 18705fb7 / f1a6f49d / a9cde62a / e26fd759 / 3f2384de`。）
+
+### AC2 — AC-194 判据逐字
+
+```
+$ node -e '...goals/AC-194-no-direct-to-develop-bypass.md 的 criterion 逐字...' ; echo CRITERION_EXIT=$?
+no direct-to-develop bypass in recent window (evaluated)
+CRITERION_EXIT=0
+```
+
+（stderr 空。criterion 原文字面来自 `quay-native goal` 的 `AC-194` `criterion` 字段，未改一字。）
+
+### AC3 — 回归用例（改前必红 / 改后绿）
+
+新增用例 `AC3 回归 — 离脊落地 tip 的括注覆盖其 intro 提交`（`plugin/test/direct-to-develop-bypass-check.test.mjs`）。
+夹具（形态实测自生产）：`lineA: base→a1→a2→a3→a4`；`M = merge(firstParent=a2, secondParent=a4)`
+⇒ **a4 是 develop 祖先但落进第二父位置（离脊）**；`lineB: M→b1→b2→b3` 为 develop 最终 tip；
+reflog `[b3, M, a4, base]` 全 `branch: Reset to` ⇒ 括注 `[b3,M] [M,a4] [a4,base]`。
+`a1/a2` **只**落在 `[a4, base]` 的 intro 里，而 T=a4 离脊。
+
+改前（checker 换回 `HEAD` 版本，同一用例）：
+```
+✖ AC3 回归 — 离脊落地 tip 的括注覆盖其 intro 提交  (901ms)
+  AssertionError [ERR_ASSERTION]: 离脊 landing tip 的括注须覆盖其 intro 提交 ⇒ exit 0: {
+    "evaluated": false, "ok": true, "reason": "unclassifiable-commits-in-range",
+    "unclassifiableCommits": 2,
+    "unclassifiableSample": ["3d487bcc6d4ecafda3d8fe591b62614c659d2ab8","967b32101a80c6d06dfc83b63628d2ad52fde6fb"],
+    "classification": { "classified": 4, "total": 6, "ratio": 0.6666666666666666, "firstParent": 6, "offSpine": 2 }
+  ℹ pass 0  ℹ fail 1
+```
+改后（`node --test --test-name-pattern='AC3 回归|AC4 负控制①|AC5 负控制②'`）：
+```
+✔ AC3 回归 — 离脊落地 tip 的括注覆盖其 intro 提交  (590ms)
+✔ AC4 负控制① — 离脊夹具 reflog 剪掉后：无括注可解释的 spine 提交仍 NOT-EVALUATED  (496ms)
+✔ AC5 负控制② — 落在【离脊 tip】括注区间内的真直投仍判 direct 并报红  (602ms)
+ℹ tests 3   ℹ pass 3   ℹ fail 0
+```
+（用例内含夹具前提断言：`a4` 是 develop 祖先 ∧ `a4 不在窗内 first-parent spine 上` ∧
+`D1 落在括注 intro 内` ∧ `b2 离脊` ⇒ 前提不成立时用例自己会红，⛔ 不会空转。）
+
+### AC4 — 负控制①（fail-closed 保持）
+
+同一离脊夹具 + `git reflog expire --expire=now --all` ⇒ 无括注可解释任何 spine 提交：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts \
+    --root <fixture> --baseline <base> --json ; echo EXIT=$?
+{"evaluated":false,"ok":true,"reason":"unclassifiable-commits-in-range","unclassifiableCommits":6,
+ "classification":{"ratio":0, ...}}
+EXIT=3
+```
+⇒ 放宽准入**没有**把判据变成恒绿：读不懂时仍 `evaluated:false` 且退出码非 0（硬规则③b）。
+
+### AC5 — 负控制②（不掩真直投）
+
+夹具：`D1` = develop 上的**直接提交**（reflog `commit:`）∧ 代码面（`plugin/test/x.test.mjs`）；
+`lineA(base)→a1,a2` / `lineB(D1)→b1,b2` / `lineC(D1)→c1,c2`，develop 最终 tip = c2。
+⇒ `b2` 离脊，**覆盖 D1 的括注 `[b2, a2]` 的 T 正是离脊 tip**；用例断言
+`git rev-list --first-parent a2..b2` 含 D1（否则控制空转）：
+```
+  0dc07e9d… feat: b2
+  ec30dd7a… feat: b1
+  a598ef58… test: direct code-surface commit        ← D1 确实落在该括注 intro 内
+$ ... --root <fixture> --baseline <base> --json ; echo EXIT=$?
+{"evaluated":true,"ok":false,"reason":"direct-commit-bypasses-fan-in","unclassifiableCommits":0,
+ "candidates":[{"sha":"a598ef58…","codeSurfaceFiles":["plugin/test/x.test.mjs"],"confirmedBypass":true}]}
+EXIT=1
+```
+⇒ 覆盖集扩大**不能**洗掉真直投（`classifySpineLandingMode` 里 `directSet` 先于 `refMoveCovered`）。
+（该控制改前改后同读数，是把顺序钉成常驻证据，不是回归。）
+
+### AC6 — 判据墙钟（≤ 60s goal-gate criterion 预算）
+
+同一条 `--baseline develop~100 --json` 命令，各跑 3 次（改前 = 把 checker 换回 `HEAD` 版本）：
+```
+改前  run1 real=2.30s exit=3 | run2 real=2.25s exit=3 | run3 real=2.15s exit=3
+改后  run1 real=7.06s exit=0 | run2 real=7.22s exit=0 | run3 real=7.10s exit=0
+```
+⇒ 6.96–7.33s ≤ 60s，**在预算内**；较改前 +~4.9s（准入 27 → 648 条括注，每条一次
+`rev-list --first-parent P..T`）。⛔ 未改滑窗宽度、未改 `--baseline` 语义。
+
+### 回归面（全套 + 兄弟闸）
+
+- `node --test plugin/test/direct-to-develop-bypass-check.test.mjs` ⇒ **58 pass / 0 fail**（170.9s，全套 58 条）。
+- `bash plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh <dir>` ⇒
+  `PASS (code-surface direct commit caught; design-internal restored; refMove landing GREEN; unknown action form NOT-EVALUATED with the form named)`，
+  `MUTATION_EXIT=0` ⇒ 该 checker 的三条既有 mutation 分支**无需同步**（本改动不动它们的路径）。
+- `## Touches` 四条里只动了 2 条（checker + 测试）；mutation case 文件与任务体均按实际需要处理。
+
+### 未做的（⛔ 非本任务范围）
+
+- ⛔ 未碰 fan-in 机制、未改 `direct` 的优先级、未新增机件、未改滑窗宽度。
+- ⛔ 未放松 fail-closed：真 unclassifiable（无 ledger、无 reflog 条目、不在任何括注内）仍 NOT-EVALUATED。
+- ⛔ 未把「时差/落盘顺序」当成立论（本轮的根因是**结构**：T 离脊，不是时序）。
 
 ## Touches
 
