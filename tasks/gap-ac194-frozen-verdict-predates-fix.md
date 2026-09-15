@@ -1,7 +1,7 @@
 ---
 id: gap-ac194-frozen-verdict-predates-fix
 title: AC-194 台账 fail 早于修复 40 分 10 秒：真值已恢复，差额是【读数】——重取并落账，⛔ 勿再找不存在的缺陷
-status: ready
+status: done
 labels:
   - gap
   - defect
