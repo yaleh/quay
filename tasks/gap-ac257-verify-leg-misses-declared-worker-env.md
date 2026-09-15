@@ -88,5 +88,6 @@ driver/worker 继承【同一个】环境 ⇒ 探测对象 == 实际 spawn 对�
 
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
+- tasks/gap-ac257-verify-leg-misses-declared-worker-env.md
 
 Note: this task is filed from the AC-259 re-anchoring worker, where it was discovered (the AC-257 leg had to be driven by invoking the remote verification script directly, with the declared env in the login shell, because this transport leg cannot carry it).
