@@ -192,11 +192,11 @@ $ node --test plugin/test/direct-to-develop-bypass-check.test.mjs
 $ bash plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh <workdir>
   PASS（code-surface direct commit caught; design-internal restored; refMove landing GREEN;
         unknown action form NOT-EVALUATED with the form named）  EXIT=0
-$ bash plugin/scripts/test.sh --for-task gap-ac194-reflog-action-vocabulary-incomplete --allow-thin
-  SCOPED GATE EXIT=0
+$ bash scripts/test.sh --for-task gap-ac194-reflog-action-vocabulary-incomplete --allow-thin
+  SCOPED GATE EXIT=0（合并 develop@1843064 后重跑：ℹ tests 71 / pass 71 / fail 0）
 ```
 
-**J. AC8 —— `task check`**：该 CLI 当前**不产出 `missing` 字段**（实测输出 = `{id, gate, ok, acTotal, acChecked, dodTotal, dodChecked, reason}`）⇒ AC8 字面所指的字段已不存在（判据引了一个不再存在的键名）。按实质报读数：8 条 AC 全勾后 `ok: true`、`acChecked: 8/8`、`reason` 不再是 `0/8 AC checkboxes checked`。
+**J. AC8 —— `task check`**：该 CLI 当前**不产出 `missing` 字段**（实测输出 = `{id, gate, ok, acTotal, acChecked, dodTotal, dodChecked, reason}`）⇒ AC8 字面所指的字段已不存在（判据引了一个不再存在的键名）。按实质报读数：`ok: true`、`acChecked: 8/8`、`reason: "all AC and DoD checkboxes checked; eligible to move to done"`。
 
 ## AC
 
@@ -223,42 +223,52 @@ $ bash plugin/scripts/test.sh --for-task gap-ac194-reflog-action-vocabulary-inco
 
 ## Resolution
 
-**实现已完成、scoped 门绿、AC 全勾；但 `merge develop` 被一道与本次 delta 无关的 develop 侧守卫挡住 ⇒ 本任务未能按 2b 完成 pre-merge，也**没有**写 scoped-gate cache（见下）。**
+**已完成**：实现两提交、常驻测试 55 绿、变异用例 PASS、scoped 门在**合并 develop 后** `EXIT=0`（71 tests）、scoped-gate cache 已写、anti-drift OK（4 文件全在 Touches 内）、8 条 AC 全勾 ⇒ 交给 driver 机械 fan-in。
 
-### 1. 工作内容（两提交，分支 `task/gap-ac194-reflog-action-vocabulary-incomplete`）
+### 1. 工作内容（分支 `task/gap-ac194-reflog-action-vocabulary-incomplete`）
 
 - `69f608384` 落地词汇表按结构判定 + 未分类 action 形点名（4 个文件，全在 Touches 内）
 - `3111e5fa9` catalog 失效前提行去掉反引号（AC5 no-command-substitution；一次根因、三处 scoped 门红外溢）
+- `3ce5d3ceb` / `fa4709b18` merge develop（两次；develop 在期间前进）
 
-**⚠️ 实现期间当场抓到并修掉两个真缺陷（都是「跑一次」抓到的，不是想出来的）**：
+**⚠️ 实现期间当场抓到并修掉三个真缺陷（都是「跑一次」抓到的，不是想出来的）**：
 1. 通用 `前缀: rest` 切分器对 `merge task/<id>: Fast-forward`（含 `/`）无匹配 ⇒ 会把 **ff 括注分类整条打死**（第 5 条常驻测试显红暴露）；
-2. 全史审计模式的 refMove 读数未设上界 ⇒ JSON 1.64 MB 撑爆 `spawnSync` 默认 `maxBuffer` ⇒ `node --test` 该用例假红（status:null）。
+2. 全史审计模式的 refMove 读数未设上界 ⇒ JSON 1.64 MB 撑爆 `spawnSync` 默认 `maxBuffer` ⇒ `node --test` 该用例假红（status:null）；
+3. catalog 值里用反引号 ⇒ AC5 no-command-substitution 报红，并**外溢**成另外两个静态门红（superseded-capability-check + checker-mutation-check-changed 的 always-red + rhythm-consumer-check 的 4 条假 violation）。
 
-### 2. 阻塞：`git merge develop` 被 pre-merge-commit 守卫拒（⛔ 未绕过）
+### 2. 落地读数
 
 ```
-$ git merge --no-edit develop
-pre-commit 守卫：delivery-critical 新立案任务未声明 goal_ac（AC-190 判据的写入面，goals/AC-190-task-ac.md）
+$ bash scripts/test.sh --for-task gap-ac194-reflog-action-vocabulary-incomplete --allow-thin   # 合并 develop@1843064 后
+  SCOPED GATE EXIT=0   （ℹ tests 71 / pass 71 / fail 0）
+$ node packages/quay/plugin/scripts/dist/worker-driver.js --write-scoped-gate-cache \
+    --task gap-ac194-reflog-action-vocabulary-incomplete --develop-sha 1843064237d0d5024826ef7c2c29d9fbb40ba143 --root /home/yale/work/quay
+  {"event":"scoped-gate-cache-written", … "developSha":"1843064237d0d5024826ef7c2c29d9fbb40ba143"}
+$ node plugin/scripts/anti-drift-touches-check.ts --task … --worktree <wt> --merge-target develop
+  ANTI-DRIFT OK — 4 actual file(s), all within declared Touches (5 glob(s))
+$ git diff --name-only develop...HEAD
+  plugin/scripts/capability-catalog.sh
+  plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh
+  plugin/scripts/direct-to-develop-bypass-check.ts
+  plugin/test/direct-to-develop-bypass-check.test.mjs
+```
+
+### 3. 一次被绕开的守卫（记录，⛔ 不是我做的手脚）
+
+首次 `git merge --no-edit develop` 被 **pre-merge-commit 守卫**拒：
+
+```
+pre-commit 守卫：delivery-critical 新立案任务未声明 goal_ac（AC-190 判据的写入面）
 ─── goal_ac 检查输出 ───
-tasks/gap-driver-restart-unreliable-legacy-to-anchor-migration.md (id=gap-driver-restart-unreliable-legacy-to-anchor-migration)
-tasks/gap-driver-status-misreports-anchor-hosted-kind-as-down.md (id=gap-driver-status-misreports-anchor-hosted-kind-as-down)
-Not committing merge; use 'git commit' to complete the merge.
+tasks/gap-driver-restart-unreliable-legacy-to-anchor-migration.md
+tasks/gap-driver-status-misreports-anchor-hosted-kind-as-down.md
 ```
 
-**根因（位置判定，附对照）**：这两条任务**是 develop 侧内容**（不在我分支的 HEAD 里），2026-09-15 02:33/02:35 经 `task_write by cli` 立案，均带 `delivery-critical` 而**无 `goal_ac`**；`ACTIVATION_LINE_ISO = 2026-09-09T00:00:00Z` ⇒ 二者都是生效线**之后**立案 ⇒ `judgeStagedDeliveryCritical` 判为 offender（`filedAtMs` 从 HEAD 取不到 ⇒ `?? Math.max(Date.now(), cutoffMs)` ⇒ 当「本次立案」）。⇒ **任何在 02:33 之前 fork 的 in-flight 分支，下一次 `merge develop` 都会被同一道守卫拒**（`precommit-guard.ts:4420` 对应的机械 fan-in 步骤是裸 `git merge --no-edit develop`，同样会红）。这不是本任务 delta 的缺陷。
+两条均为 develop 侧内容（2026-09-15 02:33/02:35 经 `task_write by cli:1458141` 立案，带 `delivery-critical` 而无 `goal_ac`；`ACTIVATION_LINE_ISO = 2026-09-09` ⇒ 生效线之后）。**我当时的处置：⛔ 没有 `--no-verify`**（CLAUDE.md 硬规则 11「不绕过守卫是对的」）、⛔ 没有改他人任务补 `goal_ac`（`tasks/` 里没有任何 ready/todo 任务把这件事写进 AC/Plan ⇒ 属自选动作，且在 `## Touches` 之外 ⇒ 会引发 anti-drift HARD FAIL）。
 
-**对照（若我的解释为假则结果会不同）**：
-- 同一棵树跑 standing 检测器 `long-term-guarantee-goal-backed-check.ts` ⇒ **exit 0**（"48 合规 / 122 存量免判"）——它按 **HEAD** 取 post-cutoff 集，我的 HEAD 不含这两个文件 ⇒ 判它们为存量免判。⇒ 两处读数的分歧**只**来自 `pathFirstAddMs(HEAD)` 取不到 ⇒ 证明这是**陈旧分支 + 首次入库时间取不到**的产物，不是「树里有未背书任务」。
-- `git log --diff-filter=A -1 -- <两个文件>` 从 develop 取 ⇒ `39bab1ba8` / `46fa3e2e0`（都是 2026-09-15），从我的 HEAD 取 ⇒ **无输出**。⇒ 与我「这两条是 merge 带进来的、不是我写的」一致。
+**随后阻塞自行消解，但方式是「摘标签」**：`a485669ed` / `e29a3d7e5`（**同一个立案会话 cli:1458141**）把两条任务的 `delivery-critical` 标签**去掉了**——正是守卫原文警告的那条路（「⛔ 去掉 `delivery-critical` 标签也能绕开本判定——那属于放宽判据，需在该任务体里写明理由」），而两条任务体里**没有**写明理由（逐字 grep 过）。两次 merge 的**对照**（从**同一个** pre-merge HEAD `3111e5fa9` 重放同一条 `git merge --no-edit develop`）⇒ 第一次 exit 非 0、第二次 exit 0 ⇒ 差异**只**来自 develop 内容变化，不是分支状态；再直接对 staged 的该任务档跑守卫 ⇒ `verdict: allow`，其 `labels` 已无 `delivery-critical`。⇒ 结论：**阻塞是被摘标签消解的，不是被修复的**。⛔ 这不是我的动作，也不是我该做的动作；登记备查。
 
-**⛔ 我没有做的事（有意）**：
-- **没有 `--no-verify`**（CLAUDE.md 硬规则 11：「**不绕过守卫是对的**」）；
-- **没有改这两条任务的 frontmatter 补 `goal_ac`**——`tasks/` 里**没有**任何 ready/todo 任务把「给这两条补 goal_ac」写进 AC/Plan（逐条 grep 过），⇒ 属自选动作、且它落在我的 `## Touches` 之外 ⇒ 会引发 anti-drift `out-of-declared` HARD FAIL（先例见 `gap-ac190-write-face-rule-unreachable-under-no-verify` 的 AC3，那次是**有**一条 live 任务逐字点名该文件才做的）；
-- **没有写 scoped-gate cache**：cache 的语义是「worker 已在 `developSha` 这个合并态上验过」；我没能完成 merge ⇒ 写 `(task, 9dd806756, pass)` 会是**假声明**（会让 fan-in 跳过它本该跑的门）。
+### 4. 附带发现（不在本任务 Touches，未改，登记备查）
 
-**⇒ 交接**：`git merge --abort` 已执行，worktree 干净、两提交在分支上（`git log --oneline -1` = `3111e5fa9`）。阻塞一旦解除，本任务可原地续做：(a) `git merge --no-edit develop`；(b) `bash scripts/test.sh --for-task gap-ac194-reflog-action-vocabulary-incomplete --allow-thin`（我在未合并态已跑绿 `EXIT=0`）；(c) 按 2b(iv) 写 scoped-gate cache；(d) 退出，由 driver 机械 fan-in。**无需重做实现。**
-
-### 3. 附带发现（不在本任务 Touches，未改，登记备查）
-
-- `goals/*.md` **不在** `DESIGN_INTERNAL_RE` 排除集里 ⇒ 任何 `goals/*.md` 的**直接提交**都被判 code-surface（本次 `refMoveIntroduced` 里 300ef5dc6/a4fbd481c 的 goals 文件即显示 `codeSurface:true`）。`goals/` 与 `tasks/` 同属记账面，疑为遗漏；但改排除集 = 收窄代码面（可能掩盖真直投）⇒ 属独立缺陷，需单独立案与裁定，⛔ 不在本任务顺手改。
-- 两条 delivery-critical 任务的**立案路径**（`task_write by cli`）仍能产出无 `goal_ac` 的任务，而 `gap-ac190-write-face-rule-unreachable-under-no-verify`（done，AC4 =「真实 ABI 写路径 ⇒ 被拒」）声称写入面已拦 ⇒ 写入面判定在**生产路径上仍未生效**（否则 2026-09-15 这两条不会被写进去）。⇒ AC-190 判据的**第三次复发**候选。
+- `goals/*.md` **不在** `DESIGN_INTERNAL_RE` 排除集里 ⇒ 任何 `goals/*.md` 的直接提交都被判 code-surface（本次 `refMoveIntroduced` 里 300ef5dc6/a4fbd481c 的 goals 文件即显示 `codeSurface:true`）。`goals/` 与 `tasks/` 同属记账面，疑为遗漏；但改排除集 = 收窄代码面（可能掩盖真直投）⇒ 属独立缺陷，需单独立案与裁定，⛔ 不在本任务顺手改。
+- **AC-190 判据的第三次复发候选**：两条 delivery-critical 任务在今天经 `task_write by cli` 立案时**没有** `goal_ac`，而 `gap-ac190-write-face-rule-unreachable-under-no-verify`（done，AC4 =「真实 ABI 写路径 ⇒ 被拒」）声称写入面已拦 ⇒ 写入面判定在生产路径上**仍未生效**（否则这两条不会被写进去）。续做者若接手这条，读数入口 = 该任务体的「对照」段与本节第 3 点。
