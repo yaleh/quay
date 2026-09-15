@@ -24,8 +24,8 @@ goal_ac: AC-265
 $ ls plugin/scripts/ci-runs-collect.ts        → No such file or directory
 $ ls .quay/ci-runs.jsonl                      → No such file or directory
 $ python3 <AC-265 的 criterion: 块>            → CAUSE=collector-not-landed — no commit touches
-      plugin/scripts/ci-runs-collect.ts => the CI-conclusion collector does not exist, so there
-      is no post-landing window to read …                                            EXIT=1
+      plugin/scripts/ci-runs-collect.ts => the CI-conclusion collector does not exist, so there is
+      no post-landing window to read …                                            EXIT=1
 ```
 
 判据第一步是 `git log -1 --format=%cI -- plugin/scripts/ci-runs-collect.ts`。该文件从未被提交过
@@ -141,6 +141,10 @@ Requested action 第 4 条逐字引用为「由 AC-265 的产出」；两条任�
 - plugin/test/ci-runs-collect.test.mjs (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/goal-driver.ts
+- plugin/test/goal-driver.test.mjs
+- plugin/scripts/drivers.yml
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - .gitignore
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/test/axis-generator.test.mjs
