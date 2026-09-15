@@ -3,6 +3,7 @@ id: gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger
 title: AC-214 第四次转红（升级面 AC-238/239 202/200，margin −2；同一对主体 24h 内第二次）：关闭动作 =
   重跑升级面产出者；并把「刷新动作」机械化——主体↔产出者映射的完备性判定 + 由 margin 载体派生的 routine 触发
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -548,7 +549,7 @@ WORKER_RC=1
 静态引用扫描看不见它 —— 与该文件自己注释里写的「显式枚举可能静默漏掉一处引用」同形）。
 
 **⇒ 依任务 step 9：⛔ 不手写记录、⛔ 不搬旧记录、⛔ 不改 K、⛔ 不自行 `superseded` 该 AC；
-贴 fail-closed 原文 + 可区分的 NOT-EVALUATED，把任务升 `needs-human`。**
+贴 fail-closed 原文 + 可区分的 NOT-EVALUATED，把任务升为 `needs-human`。**
 
 **⚠️ 本任务【不做】的事（⛔ 明确划界）**：修 `driver-anchor` 的打包闭包是**另一个机制**（落点
 `packages/quay/scripts/package.sh` 的 dist 闭包推导，不在本任务 `## Touches` 内，且与「刷新动作的
@@ -911,3 +912,20 @@ flipAcGateVerdict: {"ok":false,"status":"fail","total":8,"checked":3,"unchecked"
 `packages/quay/scripts/package.sh` 的 dist 闭包推导，需另立任务）。
 **后半**：AC7/AC8 已完成且独立可验（分支 `task/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger`
 上 3 个提交，scoped 门绿，scoped-gate cache 已按 `develop-sha ce53bde1` 写入）—— 人裁定后可单独落地。
+## Needs-Human
+
+**执行 2026-09-14T23:46:24.907Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=23735 /home/yale/work/quay-worktrees/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger/packages/quay/test/serve-ac95-views.test.mjs passed=false end_ms=1789429481825 cpu_ms=15770.405 mem_peak_kb=117052
+- run_id：wk-prod-1789367589
+- session_id：b3aa85ed-d236-4d25-8008-2426604f87a7
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger~wk-prod-1789367589~1789429014738-11ebfb.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger-wk-prod-1789367589.log
+
+## Resolution note (追加, 由另一会话诊断, 2026-09-14T23:5xZ)
+
+上面这条 needs-human 的成因描述也有误：不是「归因不出任何失败测试文件」，套件日志里明确指名 `packages/quay/test/serve-ac95-views.test.mjs`（`# tests 8198 / # fail 1`），失败签名是典型的瞬时端口撞车（`EADDRINUSE 127.0.0.1:33205`，已知 flake 类，见 `cli-test-serve-eaddrinuse-tailscaled-port-collision` 同族记录），与本任务自己的改动（`plugin/freshness-producers.json` / `plugin/probes/freshness-refresh.md` / `freshness-producer-coverage-check.ts` 等）完全无关（该测试测的是 `/manager` HTTP 端点）。
+
+⚠️ **这与本任务早先记录的、仍然真实有效的 driver-anchor 打包闭包结构性阻断是两回事**——那个仍未修（另立的 `gap-dist-closure-missing-driver-anchor-js` 还在排队），下一次派发大概率会重新撞见那堵墙并再次正确地升 needs-human，那不是本次退回要处理的对象；本次只是纠正「套件红不可归因」这个具体误判（实为无关瞬时 flake），让任务能正常重跑一次而不是卡在一个错误的成因描述上。
