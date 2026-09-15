@@ -45,7 +45,10 @@ import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 // `.quay/config.yml` 的读取复用既有依赖（同 goal-store.ts / goal-driver.ts 的 `yaml`，⛔ 不手搓 parser）。
 import { parse as YAML } from "yaml";
-import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolveQuaySrcModule, quaySrcModuleLegacyShape, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolveQuayCodeRoot, resolveKernelPluginRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+// quay CLI 入口解析的单一入口（`resolveCliInvocation`）——goal 动词现在经 quay CLI 跑（见
+// goalStoreArgv 的注释），布局知识留在那一个函数里，⛔ 不在本文件第二次拼 `packages/quay/…`。
+import { resolveCliInvocation } from "./start-drivers.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
@@ -53,13 +56,15 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // AC155（gap-drivers-yml-interval-not-honored-for-routine-kinds）：轮询间隔的单一真相源——
 // drivers.yml 经 driver-config 加载，⛔ 不在本文件另写一份字面量（goal/quality/outer 同款接法）。
 import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
-// stripEvidenceTimestamp 的单一真相源在 Core（goal-store.ts）——本文件与 goal-store 的提交决策
+// stripEvidenceTimestamp 的单一真相源在 Core（goal-store）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
-import { stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
 // meta 记录是第五种 store kind（gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label）：
-// 寄给 meta-driver 的消息是 META 记录（不是 task 标签），答复内嵌在同一条记录上。直接 import 读/写
-// （同 goal-store 的 stripEvidenceTimestamp 先例：源树直跑，不经 bundle）。
-import { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+// 寄给 meta-driver 的消息是 META 记录（不是 task 标签），答复内嵌在同一条记录上。
+//
+// ⚠️ 两个核心符号都经 Layer 0（driver-runtime 的 Core 导入面）取，⛔ 不在此处直接写 Core 源码树的
+// import 字面量：「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（AC-262 判据按源文本扫本文件，
+// 正是要求这一点；它仍会被 coreSrcAliasPlugin 内联进 dist bundle ⇒ 出厂形态保持自包含）。
+import { stripEvidenceTimestamp, createMetaStore } from "./driver-runtime.ts";
 // 覆盖段抽取的单一真相源在 dispatch-preference-check.ts——本文件读 meta-driver-focus.md 的覆盖段
 // 必须用同一段标题（OVERRIDE_SECTION）与同一抽取逻辑（extractSectionContent），⛔ 不各写一份
 // （硬规则 5b：同一原则在第二个载体上的适用点必须复用同一判据，否则标题漂移会让检查器与本文件各说各话）。
@@ -175,24 +180,78 @@ export interface MetaRoundReadings {
 
 // ── 机械半 ────────────────────────────────────────────────────────────────────────────────────────
 
-/** goal-store CLI 的 argv（单一构造点——所有 goal 读写都经这里，⛔ 不在别处拼路径）。
- *  `scriptRoot` 定位脚本，`dataRoot` 定位 `goals/` 与 `.quay/gate-events.jsonl`；生产上两者相同。
- *  **总是显式传 `--root`**：goal-store 的缺省是从 cwd 向上找根，driver 从别的 cwd 跑时会找错
- *  （隐式 cwd 依赖，硬规则 4b：别让判定量经过一层未经验证的中间推导）。 */
-export function goalStoreArgv(scriptRoot: string, sub: string[], dataRoot: string = scriptRoot): string[] {
-  // 布局感知（单一入口 resolveQuaySrcModule）：源树 ⇒ <codeRoot>/packages/quay/src/goal-store.ts；
-  // shipped 打平 ⇒ <codeRoot>/src/goal-store.ts。⛔ 不再就地拼 `packages/quay/src`——goal-driver 是
-  // 第三方生产 driver，它的 scriptRoot 现在来自 resolveQuayCodeRoot()（那两个布局都可能），
-  // 就地拼死其中一个会让 shipped 形态静默 MODULE_NOT_FOUND。
-  // gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root.
-  //
-  // ⚠️ 解析不出时【返回旧形路径而不是抛】：本函数的契约是「给出一组 argv，跑不动由调用方按
-  // 『读不懂』处理」（硬规则 3b：读不到输入 ⇒ not-evaluated，⛔ 不与合格同形）——把它升级成异常
-  // 会让所有 `scriptRoot 不存在 ⇒ unreadable` 的负控制（goal-driver.test.mjs 的 AC-242 successor /
-  // 冻结population 两例）从「读不懂」变成「崩溃」，即**改掉了调用方的语义**而不是修了路径解析。
-  const mod = resolveQuaySrcModule("goal-store.ts", scriptRoot)
-    ?? quaySrcModuleLegacyShape(scriptRoot, "goal-store.ts");
-  return ["node", "--no-warnings", "--experimental-strip-types", mod, ...sub, "--root", dataRoot];
+/** goal 动词的 argv（单一构造点——所有 goal 读写都经这里，⛔ 不在别处拼路径）。
+ *  `scriptRoot` 是 quay 代码根（`resolveQuayCodeRoot()` 的取值，测试缝可显式传），`dataRoot` 定位
+ *  `goals/` 与 `.quay/gate-events.jsonl`；生产上两者相同。
+ *  **总是显式传 `--root`**：store 的缺省是从 cwd 向上找根，driver 从别的 cwd 跑时会找错
+ *  （隐式 cwd 依赖，硬规则 4b：别让判定量经过一层未经验证的中间推导）。
+ *
+ *  gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache —— 这里曾返回
+ *  `["node","--no-warnings","--experimental-strip-types", <codeRoot>/…/goal-store.ts, …]`：
+ *  一个**进程边界产物**，而那个文件在出厂布局里【不存在】（npm-pack / plugin marketplace cache /
+ *  第三方 vendored 副本）。goal-store 的【库】确实在——`coreSrcAliasPlugin` 已把它内联进
+ *  `scripts/dist/goal-driver.js`——但它的 CLI 入口不可达：goal-store 的 `isMain` 判的是
+ *  `process.argv[1].endsWith("goal-store.ts")`，在 bundle 里恒 false（注释明说这是刻意设计）。
+ *  **缺的不是代码，是调用方式。** ⇒ 改为调 **quay CLI 的 `goal` 动词**
+ *  （`quay goal list|gate|check|batch|write …`，实现在 Core 的 cli/goal.ts，v1 把 argv
+ *  原样交给 goal-store 自己的 dispatch ⇒ 旗标文法与退出码单一实现）。
+ *
+ *  ⛔ 源检出那支【不自己拼】quay CLI 的路径：布局知识（源检出 ⇒ `packages/quay/bin/quay.ts`）的唯一
+ *  入口是 `start-drivers.ts` 的 `resolveCliInvocation` —— 它正是「quay CLI 在哪」这个问题的既有实现。
+ *  在这里再拼一份就是第二处布局知识（硬规则 5b）。出厂那支只有一条路径可拼（vendored bundle 相对
+ *  本 kernel 的 plugin root，同 `start-drivers.ts` 的 vendor 支路），且**显式不走 PATH**（见下）。
+ *
+ *  ⚠️ 解析不出时【返回一个不存在的路径而不是抛】：本函数的契约是「给出一组 argv，跑不动由调用方按
+ *  『读不懂』处理」（硬规则 3b：读不到输入 ⇒ not-evaluated，⛔ 不与合格同形）——把它升级成异常
+ *  会让所有 `scriptRoot 不存在 ⇒ unreadable` 的负控制（goal-driver.test.mjs 的 AC-242 successor /
+ *  冻结population 两例）从「读不懂」变成「崩溃」，即**改掉了调用方的语义**而不是修了路径解析。
+ *  ⛔ 同理【不回退 PATH 上的 `quay`】——那会让「解析不出」静默变成「跑了一个别处的 quay」。 */
+export function goalStoreArgv(scriptRoot: string | null, sub: string[], dataRoot: string = scriptRoot ?? ""): string[] {
+  const entry = resolveGoalCliEntry(scriptRoot);
+  // `--store` = 「按 goal-store 方言跑」（见 cli/goal.ts 的 STORE_DIALECT_FLAG）。⛔ 对 driver 不是可选
+  // 优化：ABI 路线要求 `--root` 底下一份 `.quay/config.yml`（workspace），而本 driver 的每轮读数跑的正是
+  // 【没有 config 的裸目录】这一形（测试夹具；第三方项目 quay-init 之前的 root）——不选方言就会退化成
+  // "no .quay/config.yml found"，即把「布局不同」伪装成「机制没跑」。
+  return [process.execPath, "--no-warnings", ...entry, "goal", ...sub, "--store", "--root", dataRoot];
+}
+
+/** quay CLI 入口的解析（`goalStoreArgv` 的唯一路径来源）。返回可直接 spawn 的 argv 片段
+ *  （`[--experimental-strip-types, <src>]` 或 `[<vendor bundle>]`）。
+ *
+ *  两种输入：
+ *    `scriptRoot !== null` —— 显式代码根（生产传 `resolveQuayCodeRoot()`；测试缝传夹具根）。
+ *        用它解析 ⇒ 解析不出时**不做任何回退**，返回一个不存在的路径：负控制（夹具根不存在 ⇒
+ *        `readFrozenFailing` 记 `unreadable`）钉的正是这条契约。
+ *    `scriptRoot === null` —— 出厂布局（没有 quay 源码树）。此时唯一的可运行形态是本 kernel 自己
+ *        plugin root 下的 vendored bundle。
+ *  ⛔ 本函数【不接受】`resolveCliInvocation` 的最后一条支路（PATH 上的 `quay`）：
+ *  它把「解析不出」伪装成「跑了一个别处的 quay」（硬规则 3b）。 */
+function resolveGoalCliEntry(scriptRoot: string | null): string[] {
+  if (scriptRoot !== null) {
+    const inv = resolveCliInvocation(scriptRoot, undefined, { pluginRoot: null });
+    if (inv.args.length > 0) return inv.args;
+    return [path.join(scriptRoot, GOAL_CLI_UNRESOLVED_BASENAME)];
+  }
+  // 出厂布局：`resolveQuayCodeRoot()` 为 null ⇔ 本 kernel 不在源检出里（源检出恒非 null）
+  // ⇒ 可运行形态只能是本 kernel 自己 plugin root 下的 vendored bundle。
+  // ⛔ 不在这里走 `resolveCliInvocation` 的 PATH 支路（那会跑一个别处的 quay）；bundle 缺失时
+  // 照原样给出该路径，由 spawn 的 ENOENT 如实报出。
+  return [path.join(resolveKernelPluginRoot(), "vendor", "quay", "dist", "quay.js")];
+}
+
+/** quay CLI 入口的 basename，当**解析不出**时作为「不存在的路径」的末段（见 `resolveGoalCliEntry`）。
+ *  用一个自述性的名字，使 ENOENT 的 stderr 里能读出「解析失败」而不是一个像拼错的普通路径。 */
+const GOAL_CLI_UNRESOLVED_BASENAME = "quay-cli-unresolved";
+
+/** quay CLI 入口此刻【是否解析得出】——给 `runGoalRound` 的 fail-closed 诊断用（硬规则 3b：
+ *  「安装布局不对」要与「模块找不到」可分）。⛔ 源检出那支不做存在性探测：解析规则本身就是判据，
+ *  实际能不能跑由 spawn 结果如实报出；出厂那支必须探测（那一个路径可能是空的，而「解析出一个
+ *  不存在的路径」正是本函数要与之区分的东西）。 */
+export function goalCliResolvable(scriptRoot: string | null): boolean {
+  if (scriptRoot !== null) {
+    return resolveCliInvocation(scriptRoot, undefined, { pluginRoot: null }).args.length > 0;
+  }
+  return fs.existsSync(path.join(resolveKernelPluginRoot(), "vendor", "quay", "dist", "quay.js"));
 }
 
 /** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。 */
