@@ -1,7 +1,7 @@
 ---
 id: gap-ac263-marketplace-channel-has-no-dist-closure-gate
 title: 主发布渠道（marketplace/publish-dist-branch）没有 dist 闭包闸——有闸的是次渠道 npm tarball，主渠道裸奔
-status: todo
+status: ready
 labels:
   - gap
 parent: null
