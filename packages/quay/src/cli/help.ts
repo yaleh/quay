@@ -38,6 +38,9 @@ Usage:
   quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
+  quay goal gate <id> [--dry-run] [--json] [--root <path>]
+  quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
+  quay goal batch --json '<array>' [--root <path>]
   quay meta list [--status <status>] [--json] [--root <path>]
   quay meta show <id> [--json] [--root <path>]
   quay meta write <id> --title <title> [--status <status>] [--handler <handler>] [--reply <text>] [--body <text>|--body-file <path>] [--json] [--root <path>]
@@ -346,6 +349,51 @@ Environment contract — when the default 'acceptance' gate spawns a command:
                     when pre-set (mirrors the QUAY_ACCEPTANCE_CWD / QUAY_ACCEPTANCE_
                     TIMEOUT_MS explicit-override-wins precedence — a pre-set env var is
                     never clobbered).
+`);
+  } else if (sub === "goal") {
+    // ⚠️ This block — NOT any inline text in cli/goal.ts — is what `quay goal --help` prints
+    // (bin/quay.ts routes sub === "--help" here). Adding a verb to cli/goal.ts without adding it
+    // here means the verb does not exist on the surface a user can read
+    // (gap-driver-cli-help-hides-four-of-six-kinds is the same defect one kind over).
+    process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
+
+Usage:
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
+  quay goal show <id> [--json] [--root <path>]
+  quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
+  quay goal gate <id> [--dry-run] [--json] [--root <path>]
+  quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
+  quay goal batch --json '<array-of-records>' [--root <path>]
+
+  list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
+  gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
+                        GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
+                        2 = usage (no such record / bad args). An EMPTY criterion fails closed.
+  check                 Read the goal mechanism's own three-state readings, in the goal store's
+                        single implementation:
+                          --staleness         which GOALs' 'achieved' may be outdated (I3) + divergences (I4)
+                          --achieved-failing  achieved ACs whose criterion is currently FAILING (I5)
+                          --stale-pass        the frozen population's "currently false" reading (AC-242);
+                                              exit 0 = clean, 1 = violated, 3 = NOT-EVALUATED
+                          --stale-pass --sweep  run one BOUNDED rotation first (cost-bounded), then the same read
+                          --reverify-scope    the I5 re-verify scope, enumerated
+                        ⛔ Three-state on purpose: "looked and all clean" and "could not evaluate" are
+                        DIFFERENT exit codes, never the same value.
+  batch --json '<array>'  Write N records in ONE commit (each: id + the write fields).
+
+Options:
+  --store               Run the goal-store dialect instead of the Provider ABI for list/show/write.
+                        Needed when <root> is NOT a quay workspace (no .quay/config.yml) — the store
+                        needs only <root>/goals + <root>/.quay/gate-events.jsonl. The store-level
+                        verbs (gate/check/batch) always run this way. The CLI never switches on its
+                        own: a --root with no workspace fails closed on the ABI route.
+  --actor <who>         write: the actor recorded in the status log (and handed to the staleness
+                        signal on a transition back into 'active'). Implies the store dialect.
+  --reason <why>        write: why. Implies the store dialect.
+  --dry-run             write/gate: execute but persist nothing.
+  --json                Machine-readable output (the store-level verbs always print JSON).
+  --root <path>         The workspace root (ABI route) or the goal store's root (store dialect):
+                        <root>/goals, <root>/.quay/gate-events.jsonl.
 `);
   } else if (sub === "driver") {
     process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
