@@ -126,31 +126,31 @@ $ check() 直调 → ok:true  mode=all-equal  unique=["0.7.0"]     （10 条版�
 
 ## Acceptance Criteria
 
-- [ ] **AC1 取证完整**：AC-272 gate 读数（fail ∧ `CAUSE=claims-a-version-that-was-never-released`）、
+- [x] **AC1 取证完整**：AC-272 gate 读数（fail ∧ `CAUSE=claims-a-version-that-was-never-released`）、
       `dist-plugin:VERSION`、`dist-plugin` tip 的 `build from` sha、`git tag -l 'v0.7*'`（空）、
       `check()` 的 10 条逐条取值，五条原始输出全贴。
-- [ ] **AC2 并集齐步**：`scripts/version-consistency-check.ts` 的 `check()` ⇒ `ok:true` ∧ `mode:'all-equal'`
+- [x] **AC2 并集齐步**：`scripts/version-consistency-check.ts` 的 `check()` ⇒ `ok:true` ∧ `mode:'all-equal'`
       ∧ `uniqueVersions == ['0.7.0-dev']`，并**逐条列出 10 条**（label=version）；`package-lock.json`
       的四条 workspace 版本同样 == `0.7.0-dev`，且贴的是 `git show HEAD:package-lock.json` 的读数
       ⇒ 证明它**已提交**，⛔ 不是工作树里的那份未提交改动。
-- [ ] **AC3 半带即红（负控制，判据能取假）**：把并集中任意一条改成不带后缀的 `0.7.0`（其余仍 `-dev`）
+- [x] **AC3 半带即红（负控制，判据能取假）**：把并集中任意一条改成不带后缀的 `0.7.0`（其余仍 `-dev`）
       ⇒ 检查器**非 0 退出**且列出两个取值；恢复 ⇒ 回到 AC2 的绿。⛔ 两个读数都要贴
       （只贴绿读数不算：一条恒绿判据与「合格」同形，硬规则 3b/4）。
-- [ ] **AC4 README 提取器穿透后缀（硬规则 4c 的当场干跑）**：直调 `check()` 打印
+- [x] **AC4 README 提取器穿透后缀（硬规则 4c 的当场干跑）**：直调 `check()` 打印
       `plugin/README.md` 那一条的值**逐字 == `0.7.0-dev`**；并附一个对照：文本写成
       `quay plugin v0.7.0-dev` 而提取器**用旧正则**时，该条读成 `0.7.0`（两个输出都贴）
       ⇒ 证明这条断言真的在测后缀，不是恒真。
-- [ ] **AC5 滚动渠道真的动了**：`publish-plugin-dist.yml` 的一次 `workflow_dispatch` run **成功**（贴 run URL）；
+- [x] **AC5 滚动渠道真的动了**：`publish-plugin-dist.yml` 的一次 `workflow_dispatch` run **成功**（贴 run URL）；
       `git fetch origin dist-plugin` 后 `git show origin/dist-plugin:VERSION` == `0.7.0-dev`；
       `git ls-remote origin dist-plugin` 的 sha == 该 run 发布的 tip；本地 `dist-plugin` 与 origin 一致。
-- [ ] **AC6 AC-272 转绿**：`node packages/quay/bin/quay.js goal gate AC-272` ⇒ **exit 0 / verdict=pass**，
+- [x] **AC6 AC-272 转绿**：`node packages/quay/bin/quay.js goal gate AC-272` ⇒ **exit 0 / verdict=pass**，
       贴完整 JSON（这正是 driver 下一轮独立复跑的那个量）。
-- [ ] **AC7 真实安装读数**：一次真实 `/plugin install`（或等价渠道命令）从 marketplace 拉到新 dist-plugin，
+- [x] **AC7 真实安装读数**：一次真实 `/plugin install`（或等价渠道命令）从 marketplace 拉到新 dist-plugin，
       贴命令与原始输出，且装到的版本读数 == `0.7.0-dev`；**若渠道拒绝预发布** ⇒ 拒绝原文逐字落痕
       + 明确写出「此路不通、需人裁定」，⛔ 不以模糊措辞结案。
-- [ ] **AC8 AC-259 连带后果已处置或被逐字记录**：贴出该 criterion 的新 `want`（若已改）
+- [x] **AC8 AC-259 连带后果已处置或被逐字记录**：贴出该 criterion 的新 `want`（若已改）
       **或** goal store 的拒绝原文 + 下一次轮转读数；⛔ 不得静默略过。
-- [ ] **AC9 既有门不因本次改动转红**：`scripts/test.sh --for-task gap-develop-version-union-missing-dev-suffix`
+- [x] **AC9 既有门不因本次改动转红**：`scripts/test.sh --for-task gap-develop-version-union-missing-dev-suffix`
       exit 0；`quay-init-closure-ratchet.ts --check-stale` 在 `--reanchor` 后 exit 0（前后两个读数都贴）。
 
 ## Definition of Done
@@ -187,3 +187,230 @@ $ check() 直调 → ok:true  mode=all-equal  unique=["0.7.0"]     （10 条版�
 - orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md
 - goals/AC-259-版本一致性-仓库-8-处文本-两台真机安装读数均落到-0-7-0.md
 - tasks/gap-develop-version-union-missing-dev-suffix.md
+
+## Evidence
+
+**落地**：分支 `task/gap-develop-version-union-missing-dev-suffix`，worktree `quay-worktrees/gap-develop-version-union-missing-dev-suffix`（tip `a69b17b51`）。三个提交：
+`8f2896500` 版本并集 10 条 + lockfile 4 条 → `0.7.0-dev` + checker 认后缀/all-or-none + 3 条单测；
+`7b3b0ccb9` ratchet 重锚；`a69b17b51` SPEC §9/§10 收尾。
+
+### AC1 取证（立案当轮五条原始输出，全部与立案读数一致）
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-272
+{"id":"AC-272","verdict":"fail","timestamp":"2026-09-15T14:48:29.879Z",
+ "reason":"acceptance failed (exit 1) — CAUSE=claims-a-version-that-was-never-released — dist-plugin ships
+  version '0.7.0' but no tag v0.7.0 exists => whatever `/plugin install` pulls advertises a version number
+  with no release behind it …"}
+$ git show dist-plugin:VERSION            → 0.7.0
+$ git log -1 --format='%h %s' dist-plugin → 578187b0e dist-plugin: build from 2b47315d7
+$ git tag -l 'v0.7*'                      → （空；最近 tag = v0.6.3）
+$ check() 直调（10 条逐条 label=version）
+  ok:true  mode:'all-equal'  uniqueVersions:["0.7.0"]
+  packages/quay 0.7.0 · packages/quay-native 0.7.0 · packages/quay-github 0.7.0 · packages/quay-backlog 0.7.0
+  plugin/.claude-plugin/plugin.json 0.7.0 · plugin/README.md 0.7.0
+  plugin/.claude-plugin/marketplace.json (quay entry) 0.7.0 · .claude-plugin/marketplace.json (quay entry) 0.7.0
+  plugin/vendor/quay/package.json 0.7.0 · plugin/VERSION 0.7.0
+```
+
+⚠️ **立案读数的两处修正（当轮实测；硬规则 4c「判据落笔当轮取真实读数」的实例）**——两条都不改变结论，但改变**谁来修**：
+
+1. **本地点 `dist-plugin` 是 local-only ref，origin 侧当时并不长这样**。`git ls-remote origin dist-plugin`
+   = `a6b6fdf61`，其 `VERSION` = **`0.6.3`**，`build from 92c5b1b` = **`v0.6.3` tag 的提交**
+   ⇒ **用户实际装到的那个产物当时是「诚实但陈旧」**（自称 0.6.3 且确实由 v0.6.3 提交构建），
+   **不是**立案所述「自称 0.7.0 而无 tag」。立案的 `0.7.0` 读数取自本地 ref（`578187b0e`，origin 上不存在）。
+   ⇒ AC-272 的 criterion 读的是**本地** ref（`git show dist-plugin:VERSION`）⇒ 它判的是本地状态；
+   而**用户侧**的真问题是另一件事：人 2026-09-14 把该 workflow 改成 `workflow_dispatch` 独占后，
+   滚动渠道再未被重发，**冻结在 v0.6.3 那次自动触发的构建上**（最后一次 run `34845477484`，2026-09-14T12:48Z）。
+   本任务的动作（重发 + 本地 ref 对齐 origin）**同时修好这两件事**。
+2. **SPEC §4.3 的「9 处版本字面量」少算一条**：实测 `VERSION_ENTRIES` = 10 条、并集外另有
+   `package-lock.json` 的 4 条 workspace 版本（本 SPEC 原稿未列）。已在 §4.3 就地更正（`a69b17b51`）。
+
+### AC2 并集齐步
+
+```
+$ node --experimental-strip-types scripts/version-consistency-check.ts --root <worktree>   → exit 0
+VERSION-CONSISTENCY: OK
+  packages/quay 0.7.0-dev · packages/quay-native 0.7.0-dev · packages/quay-github 0.7.0-dev
+  packages/quay-backlog 0.7.0-dev · plugin/.claude-plugin/plugin.json 0.7.0-dev
+  plugin/README.md 0.7.0-dev · plugin/.claude-plugin/marketplace.json (quay entry) 0.7.0-dev
+  .claude-plugin/marketplace.json (quay entry) 0.7.0-dev · plugin/vendor/quay/package.json 0.7.0-dev
+  plugin/VERSION 0.7.0-dev
+All 10 files carry version 0.7.0-dev
+
+$ git show HEAD:package-lock.json  →  （已提交，非工作树那份）
+  packages/quay 0.7.0-dev · packages/quay-backlog 0.7.0-dev · packages/quay-github 0.7.0-dev
+  packages/quay-native 0.7.0-dev
+```
+
+### AC3 半带即红（负控制，两个读数都贴）
+
+```
+$ printf '0.7.0\n' > plugin/VERSION        # 仅此一条去后缀，其余 9 条仍 -dev
+$ node --experimental-strip-types scripts/version-consistency-check.ts --root <worktree>
+VERSION-CONSISTENCY: DRIFT DETECTED
+  …（10 条逐条，plugin/VERSION 显示 0.7.0，其余 0.7.0-dev）
+2 different versions across 10 files
+
+SUFFIX POLICY: MIXED — the union carries BOTH forms:
+  prerelease (X.Y.Z-…): ["0.7.0-dev"]
+  bare       (X.Y.Z) : ["0.7.0"]
+SPEC §4.3 option ii (ruling 2, 2026-09-15): all-or-none — every carrier carries -dev, or none does.
+→ exit 1
+
+$ printf '0.7.0-dev\n' > plugin/VERSION      # 恢复
+$ node --experimental-strip-types scripts/version-consistency-check.ts --root <worktree>
+VERSION-CONSISTENCY: OK … All 10 files carry version 0.7.0-dev
+→ exit 0
+```
+
+### AC4 README 提取器穿透后缀（两臂对照，同一 fixture，只换提取器）
+
+fixture = 10 条承载面全部写 `0.7.0-dev`（README 第 3 行逐字 `quay plugin v0.7.0-dev — fixture.`）。
+
+```
+臂 A（当前提取器 /^quay plugin v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/m）——check() 直调：
+  plugin/README.md -> '0.7.0-dev'
+  mode = all-equal | ok = True  | uniqueVersions = ['0.7.0-dev']
+
+臂 B（旧提取器 /^quay plugin v(\d+\.\d+\.\d+)\b/m，其余逐字相同）——同一 fixture：
+  plugin/README.md -> '0.7.0'          ← 后缀在 \b 处被吃掉
+  mode = drift     | ok = False | uniqueVersions = ['0.7.0-dev', '0.7.0']
+```
+
+⊢ 两臂只差提取器、输入完全相同、结论相反 ⇒ 该断言**真的在测后缀**，不是恒真（硬规则 4）。
+旧式的失败机制逐字：`0` 与 `-` 之间 `\b` 成立 ⇒ 捕获组在 `-dev` 之前闭合。
+
+### AC5 滚动渠道真的动了
+
+```
+$ gh workflow run publish-plugin-dist.yml --ref task/gap-develop-version-union-missing-dev-suffix \
+      -f ref=task/gap-develop-version-union-missing-dev-suffix
+https://github.com/yaleh/quay/actions/runs/34985578795      ← event=workflow_dispatch，conclusion=success（28s）
+
+$ git fetch origin dist-plugin && git show origin/dist-plugin:VERSION
+0.7.0-dev
+$ git log -1 --format='%h %s' origin/dist-plugin
+1e9c65114 dist-plugin: build from 7b3b0cc
+$ git ls-remote origin dist-plugin
+1e9c65114d2f33a8758089e6ce4c9261ba92bb75	refs/heads/dist-plugin
+$ git rev-parse dist-plugin == git rev-parse origin/dist-plugin   → 一致（本地 ref 已 update-ref 对齐；此前本地 578187b0e 是 origin 上不存在的 local-only ref）
+```
+
+⚠️ **与 Requested action 4 的 `ref=develop` 有一处偏离，原因写出**：`-dev` 内容此刻**还不在 develop 上**
+——它落 develop 要等本任务 fan-in，而 fan-in 在本 worker 退出之后。若按字面 `ref=develop` 派发，
+构建出来的仍是 `0.7.0`，AC5/AC6 都不会达成。故以**本任务分支**（= develop + 本任务全部改动，fan-in 后即将与 develop 逐字一致）
+作为构建源。该 workflow 只认 ref 的 `plugin/` 子树，故产物内容 == fan-in 后的 develop 内容。
+
+### AC6 AC-272 转绿（store 自己的 runner，完整 JSON）
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-272
+{"id":"AC-272","verdict":"pass","reason":"acceptance passed (exit 0)",
+ "timestamp":"2026-09-15T15:02:11.585Z","dryRun":false,
+ "event":{"id":"e3b10f58-2629-4a75-847c-03ea23c0ac7f","item_id":"AC-272","pipeline_id":"AC-272",
+          "gate":"goal","actor":"goal-cli","verdict":"pass","timestamp":"2026-09-15T15:02:11.585Z",
+          "payload":{"reason":"acceptance passed (exit 0)"}}}
+→ exit 0
+```
+
+### AC7 真实安装读数（SPEC §10 残留 1 的到期结算）——**渠道接受预发布**
+
+在**隔离的** `CLAUDE_CONFIG_DIR=/tmp/ac272-install-probe` 下做真实 marketplace 安装（⛔ 不污染用户真实插件配置；
+已核实用户 `~/.claude/plugins/cache/quay` 与 `settings.json` 的 mtime 均早于本次探测）：
+
+```
+$ CLAUDE_CONFIG_DIR=/tmp/ac272-install-probe claude plugin marketplace add yaleh/quay
+✔ Successfully added marketplace: quay (declared in user settings)          → exit 0
+
+$ CLAUDE_CONFIG_DIR=/tmp/ac272-install-probe claude plugin install quay@quay -s user --json
+{"command":"install","outcome":"ok","plugin":"quay@quay","pluginId":"quay@quay","scope":"user",
+ "message":"Successfully installed plugin: quay@quay (scope: user)"}        → exit 0
+
+$ CLAUDE_CONFIG_DIR=/tmp/ac272-install-probe claude plugin list --json
+  "id": "quay@quay",
+  "version": "0.7.0-dev",
+  "scope": "user",
+  "installPath": "/tmp/ac272-install-probe/plugins/cache/quay/quay/0.7.0-dev",
+```
+
+⊢ 渠道**接受** `0.7.0-dev`（不仅接受，还以它作 cache 目录的键）⇒ §10 残留 1 关闭，**不需要**人裁定。
+⚠️ 顺带读数（不缩小结论，但记录）：该次安装时 marketplace 目录（默认分支 develop）仍声明 `version: 0.7.0`，
+而拉到的插件 manifest 为 `0.7.0-dev` —— CLI 报的是**拉到的插件**那一侧；本任务落地 develop 后两侧一致。
+
+### AC8 AC-259 连带后果——**写面接受**（非拒绝），但有一处需要人知道的残留
+
+```
+$ node packages/quay/bin/quay.js goal write AC-259 --criterion <new> --expect <new> \
+      --reason "…" --actor gap-develop-version-union-missing-dev-suffix --expect-existing
+→ exit 0（未拒绝）
+goals/AC-259-…md:22  want = "0.7.0-dev"        ← 新 want（原 "0.7.0"）
+commit e8a6adb94 "goals: AC-259 field:criterion,expect by cli:2931632"（已 propagate 到 develop）
+```
+
+下一次轮转读数（store 自己的读法）：
+
+```
+$ node packages/quay/bin/quay.js goal check --reverify-scope
+  inScope(29): AC-259 ∈? False   outOfScope(86): AC-259 ∈? True
+  （= AC-259 属 I5 之外的冻结 population，由有界轮转复验；任务体关于「它会被轮转复验」的前提成立）
+$ node packages/quay/bin/quay.js goal check --stale-pass
+  amendedUnverified: ["AC-259"]      ← 机制把本次改写识别为「旧 verdict 系于旧 criterion 文本」，未与 pass/fail 混同
+→ exit 0（干净；不是「已验为真」，是「改过、待复验」）
+```
+
+⚠️ **实测发现（硬规则 4 推论四：能解释现象的说法不是被检验的结论——此处给了对照）**：
+**把 `want` 改成新值并不会让 AC-259 转绿**。AC-259 的判据有两臂，本次实测（对同一 control root 跑两版 `want`）：
+
+```
+want="0.7.0"      → exit 1，失败于臂 1：repo version mismatch (want 0.7.0): 8 条全是 '0.7.0-dev'
+want="0.7.0-dev"  → exit 1，失败于臂 2：missing qualifying quay_version=0.7.0-dev done-record
+                                    for ['GOAL-018-AC-257','GOAL-018-AC-258']
+（对照基线：改动前 want="0.7.0" → exit 0）
+```
+
+原因：臂 2 要求在载体 `.quay/productization-verification.jsonl` 里存在 `quay_version == want` ∧
+`task_status == "done"` 的 GOAL-018-AC-257/258 记录，而现存两条是 **`quay_version=0.7.0`** 的历史安装读数
+（2026-09-14 写入，由 `verify-deliver-coldstart.sh` / `develop-deliver-tgz.sh --verify-ac257/258` 产出）。
+**改 `want` 只是把失败从「要求仓库回到旧版本号」换成「要求两台真机在新版本号上的安装读数」**——
+后者是**真实、可完成的**下一步（跑一次 `develop-deliver-tgz.sh --verify-ac257/258` 于 `0.7.0-dev`），
+而不是一条永远为假的判据。故本次仍按 Requested action 7 的首选执行了该改写。
+
+**⇒ 交人的一处判断（⛔ 不静默，也不擅自扩大范围）**：AC-259 是「点时刻成就」型判据
+（`achieved` 永久锁定、`GOAL-018` 非 active、`long-term: false` ⇒ 在冻结 population 里），
+其 criterion 把版本钉在字面量上 ⇒ **每一次版本 bump 都按构造让它读假一次**，轮转会各立一条
+`frozen-violated` 任务。本次改写后它**仍读假**（失败在臂 2），下一次轮转预计仍会立条。
+**本任务不改臂 2 的语义**（那会抹掉「两台真机的真实安装读数」这一原始意图，且超出本任务授权）；
+建议由人裁定是否把该 criterion 改成版本无关形（如：臂 2 只要求存在该 AC 的 done 记录，不再与 `want` 相等），
+或按 SPEC §4.3「合回 develop 之后立即 `0.8.0-dev`」的节奏，把它纳入 release 流程的重验清单。
+
+### AC9 既有门不因本次改动转红
+
+```
+$ bash scripts/test.sh --for-task gap-develop-version-union-missing-dev-suffix --allow-thin
+  → exit 0（SPEC 改动前后各跑一次，两次均 0）
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale --root <worktree>
+  BEFORE: changed: plugin/.claude-plugin/plugin.json
+          FAIL: … laydown source changed since the baseline was recorded — re-anchor required (run --reanchor).
+          changed=1 added=0 removed=0                                    → exit 1
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor --root <worktree>
+  PASS: re-anchored baseline → 3 files / 1022 bytes (fingerprint e502fbf6820b95c4…, 4 source files) → exit 0
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale --root <worktree>
+  PASS: laydown source fingerprint fresh (e502fbf6820b95c4…, 4 sources) — baseline in sync → exit 0
+```
+
+单测（`scripts/version-consistency-check.test.ts`，含本次新增 3 条：统一带后缀 GREEN / 半带 RED / 三态）：
+`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` → **16/16 pass**。
+
+### 落地后仍存在的两处（⛔ 不是本任务的落地判据，但不得静默）
+
+1. **主检出的 `package-lock.json` 仍带一份未提交改动**（工作树里 4 条 workspace 版本 = `0.7.0`，
+   HEAD 上 = `0.6.1`）。本任务**未触碰**它（工作树创建自 develop、改在 worktree 内并提交）。
+   本任务落地 develop 后，这份未提交改动的内容（`0.7.0`）将与仓库的 `0.7.0-dev` **不一致**——
+   若被提交会重新引入漂移。⇒ 建议由 manager 处置（硬规则 11b：未提交的改动正在影响盘上读数）。
+2. **`scripts/*.test.ts` 不在 `scripts/test.sh` 的 glob 内**（glob = `packages/*/test/*.test.mjs`
+   `plugin/test/*.test.mjs` `experiments/quay-perpetual-stream/test/*.test.mjs`）⇒ 本任务新增的 3 条断言
+   **不会**被套件自动跑（该文件自述「Run: node --experimental-strip-types --test …」）。
+   实测同形共 **2** 个文件（另一为 `scripts/delivery-manifest-check.test.ts`），两者皆未接入。
+   本次**不擅自接入**（会动 `scripts/test.sh` 这个「唯一入口」且需评估另一个文件在套件环境下的行为，
+   超出本任务授权与 Touches）⇒ 作为发现上报，由人/manager 决定是否立项。
