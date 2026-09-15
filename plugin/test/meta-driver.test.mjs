@@ -115,8 +115,11 @@ test('AC5: goal 动词 argv 不含 packages/quay/src（源码树入口已消失�
   assert.ok(entry && fs.existsSync(entry), `argv 的 quay CLI 入口不存在：${entry}`);
 });
 
-test('AC5 负控制（契约另一半）: 解析不出的代码根 ⇒ 一个【不存在】的路径，⛔ 不抛、不回退 PATH 上的 quay', () => {
+test('AC5 负控制（契约另一半）: 解析不出的代码根 ⇒ 一个【不存在】的路径，⛔ 不抛、不回退 PATH 上的 quay', (t) => {
   const bogus = fs.mkdtempSync(path.join(os.tmpdir(), 'ac262-no-quay-cli-'));
+  // ⚠️ mkdtemp 必须与清理配对（tmp-leak-pairing-check / test-isolation-check R3 按位置扫）——
+  // 用 `after` 载体登记，而不是只写在测试体末尾（断言抛错就没有末尾了）。
+  t.after(() => fs.rmSync(bogus, { recursive: true, force: true }));
   // 前置：夹具根【存在】但是没有 quay CLI —— 这样 ENOENT 归因于「解析不出」，而不是「根本身不存在」。
   assert.equal(fs.existsSync(bogus), true, '前置：夹具根必须存在');
   assert.equal(fs.existsSync(path.join(bogus, 'packages', 'quay', 'bin', 'quay.ts')), false, '前置：夹具里没有源码 CLI');
