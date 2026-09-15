@@ -43,4 +43,5 @@ Landed on develop: `quay driver restart --kind <k>` gives a trustworthy, self-co
 - plugin/test/driver-runtime.test.mjs
 - tasks/gap-driver-restart-unreliable-legacy-to-anchor-migration.md
 
+<!-- dedup-ref -->
 Depends_on: none (independent finding; related-but-not-duplicate of `gap-driver-status-misreports-anchor-hosted-kind-as-down`, filed moments earlier this same session — that one is a read-side status-reporting defect, this one is a write-side restart-execution-reliability defect; do not merge the two).
