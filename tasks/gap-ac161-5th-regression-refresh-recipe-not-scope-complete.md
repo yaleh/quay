@@ -2,7 +2,7 @@
 id: gap-ac161-5th-regression-refresh-recipe-not-scope-complete
 title: AC-161 第五次回归：共享 cache 刷新的「两步配方」在记录实际位于 user scope 时第一步不可执行——CLI 自己的报错把人指到
   `--scope user`，而写出那条 user-scope 记录的正是本仓交付路径自己
-status: todo
+status: ready
 labels:
   - gap
   - defect
