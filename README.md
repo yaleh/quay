@@ -119,8 +119,14 @@ and prints what to run once — you can either restart Claude Code and run
 
 ```sh
 claude plugin marketplace add "$(npm root -g)/quay/plugin"
-claude plugin install quay@quay
+claude plugin install quay@quay --scope project   # scope user only if you mean it — see below
 ```
+
+Registration deliberately does **not** enable the plugin at user scope: the
+user-level `~/.claude/settings.json` carries only the marketplace source, and a
+project opts in through its own `.claude/settings.json`
+(`{"enabledPlugins": {"quay@quay": true}}`). Pass `QUAY_PLUGIN_SCOPE=user` to
+`npm install -g` if you deliberately want a user-scope enable.
 
 Opt-out (install the CLI without registering the plugin):
 
@@ -758,6 +764,7 @@ paths, limits, and behavior overrides. The most commonly needed ones:
 | `QUAY_ACCEPTANCE_ENV` | gate | Override the acceptance env-file path (see above). |
 | `QUAY_SKIP_PLUGIN_REGISTER` | npm postinstall | `1` opts out of Claude Code plugin registration entirely. |
 | `QUAY_SKIP_PLUGIN_CLI` | npm postinstall | `1` skips the `claude plugin` CLI materialization sub-step (settings.json is still written). |
+| `QUAY_PLUGIN_SCOPE` | npm postinstall | Scope for a deliberate plugin ENABLE: `user`, `project`, or `local`. Unset (default) registers the marketplace only — the user level carries no quay `enabledPlugins` entry (AC-161); enable per project instead. |
 | `QUAY_ACTION_MOCK_LOG` | action | Path for deterministic mock/file-log action delivery instead of live delivery (DIR-009). |
 | `QUAY_GLOBAL_DIR` | manager | Cross-project base directory for the manager layer (its session home is `$QUAY_GLOBAL_DIR/manager/`). |
 

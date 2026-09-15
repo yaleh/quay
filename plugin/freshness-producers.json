@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "SINGLE SOURCE for the freshness subject -> producer mapping (AC7/AC8 of",
+    "tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger).",
+    "",
+    "WHY THIS FILE EXISTS: the evidence of the subjects below must stay within K delivery-face",
+    "commits of the develop tip (goal AC-214). Refreshing them is a real cross-machine PRODUCER",
+    "run, and before this file that mapping lived only in the prose of whichever one-off task was",
+    "closing the gap at the time. Cost, measured: the gap re-crossed 4 times in 5 days",
+    "(2026-09-13 x2, 2026-09-14 x2), each crossing closed by a manual re-run with no trigger.",
+    "",
+    "WHO READS IT (one source, two readers -- never a second copy):",
+    "  * plugin/scripts/freshness-producer-coverage-check.ts -- the completeness judge (which",
+    "    subject has no registered producer at all);",
+    "  * plugin/probes/freshness-refresh.md -- the routine probe (which producer to name in a",
+    "    finding, and each producer's wall clock for the threshold arithmetic).",
+    "",
+    "`wallclock_hours` is a MEASURED quantity, not an estimate: it is the end-to-end wall clock of",
+    "one producer run observed on this repo, and it feeds the probe's threshold",
+    "THRESHOLD_fraction = (wallclock_hours + interval_hours) * rate_per_hour / K. A wrong value",
+    "here moves a threshold, so each entry records where its number came from."
+  ],
+  "carrier": ".quay/productization-verification.jsonl",
+  "margin_snapshot": ".quay/goal-freshness-margin.json",
+  "subject_id_pattern": "^GOAL-009-AC-\\d+$",
+  "subject_requires_build_sha": true,
+  "_scope_note": "A carrier record counts as a REFRESHABLE SUBJECT iff its `ac` matches subject_id_pattern AND it carries a top-level 40-hex build_sha. Measured on the real carrier 2026-09-14, that rule yields exactly the seven subjects below: GOAL-009-AC-204/206 match the pattern but carry no build_sha; GOAL-018-AC-257 carries a build_sha but not the GOAL-009 prefix.",
+  "producers": [
+    {
+      "id": "coldstart-face",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts \"B C\" --force --root <main-checkout>",
+      "wallclock_hours": 0.34,
+      "_wallclock_measured": "20m36s end-to-end, measured on this repo (recorded in the AC-214 gap history; the coldstart face is the cheap half of the pair).",
+      "subjects": [
+        "GOAL-009-AC-201",
+        "GOAL-009-AC-203",
+        "GOAL-009-AC-205",
+        "GOAL-009-AC-207",
+        "GOAL-009-AC-232"
+      ]
+    },
+    {
+      "id": "upgrade-face",
+      "command": "bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source <aged-third-party-project> --ac239-e2e --hosts B --force --root <main-checkout>",
+      "wallclock_hours": 2,
+      "_wallclock_measured": "2h, from THREE converging sources, ⚠️ with the honest caveat that a full end-to-end measurement is currently BLOCKED (see below): (a) the AC-214 task text's own worked example ('升级面约 2h'); (b) the measured record in that same text — the coldstart face measured 20m36s end-to-end, and the upgrade face is recorded as 跨机小时级 (the AC-239 half alone drives a real defect fix + fan-in + a full suite); (c) the MECHANICAL bound the producer imposes on itself — verify-deliver-coldstart.sh's AC239_POLL_SECS default 3600s, i.e. the e2e is *declared* to finish within 1h and times out (writing no record) beyond it. ⛔ CAVEAT, stated because an unmeasured input to a threshold is exactly what this task forbids elsewhere: the full end-to-end wall clock could not be MEASURED on 2026-09-14 because the upgrade face's AC-239 half is structurally unreachable — the shipped artifact carries no dist/driver-anchor.js, so `quay driver start` returns rc=1 in every installed layout (reproduced fail-closed text in the task's Resolution). The three sources above therefore BOUND W from below/around; if the true value is larger, the threshold is too small and the probe files too late, so this entry must be re-measured once that defect is fixed. ⚠️ Conservative direction check: W only ever INCREASES the threshold, so an over-estimate files early (safe, mild noise) and an under-estimate files late (loses the window) — re-measure before trusting the margin.",
+      "subjects": [
+        "GOAL-009-AC-238",
+        "GOAL-009-AC-239"
+      ]
+    }
+  ],
+  "_not_registered_note": [
+    "Subjects that appear in the carrier but are deliberately NOT registered here, so a future reader",
+    "does not 'fix' the omission:",
+    "  * GOAL-009-AC-204 / GOAL-009-AC-206 -- written by the coldstart face but carry no build_sha,",
+    "    so they fall outside the declared scope rule (they track driver/state readings, not",
+    "    delivery-face freshness).",
+    "  * GOAL-015-AC-234, GOAL-016-AC-247/248/249/250, GOAL-018-AC-257, AC88/AC107/AC118/... -- other",
+    "    faces (browser render, goal-write, third-party install) writing the same carrier; the",
+    "    AC-214 criterion does not track them and neither does this mapping."
+  ]
+}

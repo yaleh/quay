@@ -30,7 +30,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -197,6 +197,44 @@ test("the tarball ships the postinstall register script + the plugin's .claude-p
   }
 });
 
+test("register-plugin.mjs names the user-level enable key on comment lines only (STANDING AC-162)", () => {
+  // gap-ac162-console-guidance-line-reddens-criterion. AC-162 is a SOURCE-TEXT
+  // criterion, not a behavioural one: strip comment lines, then require the
+  // literal to be absent. Nothing pinned that predicate — so when 86e5c1db4 added
+  // a runtime pointer for the new default (correct in itself; it is the AC-161
+  // direction) it wrote the literal on a console.log line and silently re-reddened
+  // a STANDING criterion no round was re-reading. This guard IS the missing pin:
+  // it runs AC-162's predicate against the very file the criterion names, so the
+  // next such edit fails HERE instead of sitting red unnoticed (硬规则 9 —
+  // visibility is not execution; give the rule a product).
+  //
+  // The pattern below is copied VERBATIM from
+  // goals/AC-162-register-plugin-no-user-enabled.md, and it runs through the real
+  // `grep -E` rather than being re-spelled as a JS regex: the ERE relies on the
+  // POSIX class [[:space:]], which inside a JS character class is just a literal
+  // character list — a JS re-spelling would be a DIFFERENT predicate, and a guard
+  // that merely resembles the criterion it pins is a false guarantee (硬规则 3b).
+  const script = path.join(pkgDir, "scripts", "register-plugin.mjs");
+  assert.ok(fs.existsSync(script), `AC-162 predicate target must exist: ${script}`);
+  const res = spawnSync("grep", ["-vE", "^[[:space:]]*(//|\\*|#)", script], { encoding: "utf8" });
+  // grep exits 1 when it selects NO line (here: a file that is entirely comments).
+  // That still satisfies AC-162, so it is not an error. Any OTHER non-zero means
+  // "could not evaluate", which must not be reported with the same face as
+  // "passes" (硬规则 3b — give "not evaluated" its own value instead of letting a
+  // broken read masquerade as a clean one).
+  assert.ok(
+    res.status === 0 || res.status === 1,
+    `AC-162 predicate could not be evaluated (grep exited ${res.status}): ${res.stderr}`
+  );
+  assert.equal(
+    String(res.stdout).includes("enabledPlugins"),
+    false,
+    `AC-162 RED: ${script} mentions "enabledPlugins" on a NON-comment line. Keep the literal in the ` +
+      `header comments (they document the exact JSON callers must use) and refer to it in prose at ` +
+      `runtime — see goals/AC-162-register-plugin-no-user-enabled.md.`
+  );
+});
+
 test("register-plugin (global-install mode, temp HOME) writes settings.json pointing at the INSTALLED plugin dir", () => {
   // The task's Contract measure: plugin_registered = grep -c "$(npm root -g)/quay/plugin"
   // ~/.claude/settings.json must be >= 1. Run the SHIPPED hook exactly as the postinstall
@@ -211,9 +249,11 @@ test("register-plugin (global-install mode, temp HOME) writes settings.json poin
     fs.writeFileSync(existing, JSON.stringify({ model: "sonnet", extraKnownMarketplaces: { other: { source: { source: "directory", path: "/x/other" } } } }, null, 2));
     const out = execFileSync("node", [register], {
       encoding: "utf8",
-      // QUAY_SKIP_PLUGIN_CLI=1 keeps this a pure settings.json assertion (the claude-CLI
-      // materialization path is proven separately in the task's manual AC evidence and is
-      // environment-heavy — no need to shell out to `claude` on every test run).
+      // QUAY_SKIP_PLUGIN_CLI=1 keeps this a pure settings.json assertion (no need to shell
+      // out to a real `claude` on every test run). ⚠️ That is ALSO why this assertion alone
+      // was not a measurement: it ran with the enable channel shut, so it could never take
+      // false. The channel-open control lives in the next test
+      // (gap-ac161-postinstall-rematerializes-user-scope-enable, 硬规则 4 推论三).
       env: { ...process.env, HOME: tempHome, npm_config_global: "true", QUAY_SKIP_PLUGIN_CLI: "1" },
     });
     const settings = JSON.parse(fs.readFileSync(existing, "utf8"));
@@ -226,6 +266,94 @@ test("register-plugin (global-install mode, temp HOME) writes settings.json poin
     assert.match(out, /Registered the installed quay plugin/, "hook must report success");
   } finally {
     fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("register-plugin's ENABLE channel is off by default (AC-161) — control: a `claude` shim that DOES write user scope is NOT reached", () => {
+  // gap-ac161-postinstall-rematerializes-user-scope-enable. Pre-fix, register-plugin
+  // shelled out to `claude plugin install quay@quay`, whose default `--scope` is user
+  // (measured against Claude Code 2.1.271) — so EVERY real `npm install -g` rewrote the
+  // operator's ~/.claude/settings.json and re-reddened STANDING goal AC-161. The fix
+  // makes the enable opt-in (`QUAY_PLUGIN_SCOPE`).
+  //
+  // The assertion below is only a measurement if the channel it guards can actually
+  // produce the violation, so this runs against a fake `claude` on PATH that replicates
+  // exactly one real behaviour: `plugin install` writes a USER-level enabledPlugins
+  // entry. Two halves, both required:
+  //   (a) QUAY_PLUGIN_SCOPE=user ⇒ the shim IS reached and the key APPEARS (control is live)
+  //   (b) default                ⇒ the shim's install branch is NEVER invoked and the key is ABSENT
+  const scratchRegister = path.join(scratch, "node_modules", "quay", "scripts", "register-plugin.mjs");
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-shim-"));
+  const shimLog = path.join(shimDir, "invocations.log");
+  fs.writeFileSync(
+    path.join(shimDir, "claude"),
+    `#!/usr/bin/env node
+// Fake \`claude\` CLI: replicates ONLY the behaviour under test — \`plugin install\`
+// writes a USER-level enabledPlugins entry (the real CLI's default scope is user).
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.QUAY_SHIM_LOG, args.join(" ") + "\\n");
+if (args[0] === "plugin" && args[1] === "install") {
+  const p = path.join(os.homedir(), ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+  s.enabledPlugins = s.enabledPlugins || {};
+  s.enabledPlugins[args[2]] = true;
+  fs.writeFileSync(p, JSON.stringify(s, null, 2));
+}
+`
+  );
+  fs.chmodSync(path.join(shimDir, "claude"), 0o755);
+  const runThroughShim = (env) => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-home-"));
+    try {
+      fs.mkdirSync(path.join(tempHome, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(tempHome, ".claude", "settings.json"), "{}\n");
+      execFileSync("node", [scratchRegister], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: tempHome,
+          npm_config_global: "true",
+          QUAY_SHIM_LOG: shimLog,
+          PATH: `${shimDir}:${process.env.PATH}`,
+          ...env,
+        },
+      });
+      return JSON.parse(fs.readFileSync(path.join(tempHome, ".claude", "settings.json"), "utf8"));
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  };
+  try {
+    // (a) opt-in: the enable path is reachable and the shim reproduces the AC-161 violation.
+    const opted = runThroughShim({ QUAY_PLUGIN_SCOPE: "user" });
+    assert.equal(
+      opted.enabledPlugins?.["quay@quay"],
+      true,
+      "QUAY_PLUGIN_SCOPE=user must reach the enable step (control: the shim is capable of writing the user-level key)"
+    );
+    const logAfterOptIn = fs.readFileSync(shimLog, "utf8");
+    assert.match(logAfterOptIn, /^plugin marketplace add /m, "marketplace add must always run");
+    assert.match(logAfterOptIn, /^plugin install /m, "the opt-in path must invoke `plugin install`");
+
+    // (b) default: the channel is shut — the shim's install branch is never reached.
+    fs.writeFileSync(shimLog, "");
+    const dflt = runThroughShim({});
+    assert.equal(
+      dflt.enabledPlugins?.["quay@quay"],
+      undefined,
+      "register must NOT enable the plugin at user scope by default — the user level carries only the marketplace source (AC-161)"
+    );
+    assert.equal(dflt.extraKnownMarketplaces?.quay?.source?.source, "directory", "default must still register the marketplace");
+    const logAfterDefault = fs.readFileSync(shimLog, "utf8");
+    assert.match(logAfterDefault, /^plugin marketplace add /m, "marketplace add must run by default");
+    assert.doesNotMatch(logAfterDefault, /^plugin install /m, "default must NOT invoke `plugin install` (that is the AC-161 regression)");
+  } finally {
+    fs.rmSync(shimDir, { recursive: true, force: true });
   }
 });
 

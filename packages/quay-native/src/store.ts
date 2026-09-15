@@ -24,6 +24,14 @@ import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 // the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
 // the sole path into develop from a task worktree).
 import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+// AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify): the judgment that a NEW
+// `delivery-critical` task must declare a top-level `goal_ac`. It lives in the product layer next to
+// store-commit.ts because the PREVIOUS home — the git `pre-commit` hook (precommit-guard.ts ③) — is
+// structurally unreachable for this store: `commitStoreWrite` commits with `--no-verify` by design
+// (store-commit.ts:13-15), and 370/400 of the last 400 `tasks/` commits are store-commit-shaped. The
+// writer's own path is here, so the rule is enforced here (硬规则 4 推论三: a judgment only the hand
+// path can reach proves nothing about the writer path).
+import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
 // sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
@@ -1700,8 +1708,32 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       invalidateCache(id);
       try {
         validateWrittenYaml(taskFilePath, id, frontmatter);
+        // ── AC-190 write face (gap-ac190-write-face-rule-unreachable-under-no-verify) ──────────────
+        // `delivery-critical` asserts a LONG-TERM guarantee that only the goal layer can back, so a
+        // task carrying it cannot be BORN without a top-level `goal_ac`. The judgment is the SAME one
+        // the per-round detector and the pre-commit hook run (one function, three moments —
+        // packages/quay/src/goal-ac-write-face.ts); ⛔ no second string comparison here.
+        //   SCOPE = CREATION ONLY (`existingRaw === null`), which IS the grandfather semantics at the
+        //   write face: flipping the status of a pre-existing delivery-critical task without goal_ac
+        //   must never be blocked (this repo alone has 115 such stock tasks).
+        //   ENABLE CONDITION = the workspace actually HAS a goal layer (≥1 GOAL-/AC- record); a
+        //   third-party workspace has no goal layer at all, so `goal_ac` would have nothing to point
+        //   at and the rule's premise does not hold ⇒ it must never be blocked (硬规则 12's mirror: do
+        //   not impose an unmeasured restriction). ⛔ `goals/` merely EXISTING is not the condition —
+        //   quay-init mkdir's it unconditionally, so existence alone is true everywhere.
+        if (existingRaw === null) {
+          const rejection = writeFaceRejectionOnCreate({
+            id,
+            rel: path.join("tasks", `${id}.md`), // the store's own rel convention (see commitTaskWrite)
+            content: raw,
+            goalDir: path.join(path.dirname(tasksDir), GOAL_CARRIER_DIR_NAME),
+          });
+          if (rejection !== null) throw new Error(rejection);
+        }
       } catch (validationErr) {
-        // Rollback: restore prior content if it existed, or remove the new file.
+        // Rollback: restore prior content if it existed, or remove the new file. The AC-190 write-face
+        // rejection above rides the SAME seam — it is only ever raised on a creation (`existingRaw ===
+        // null`), so its rollback is exactly the "new file" arm: the task never lands on disk.
         if (existingRaw !== null) {
           fs.writeFileSync(taskFilePath, existingRaw, "utf8");
         } else {
