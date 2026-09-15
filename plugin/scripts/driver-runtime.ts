@@ -699,12 +699,74 @@ export function readAnchorPid(root: string): number | null {
   return /^\d+$/.test(raw) ? Number(raw) : null;
 }
 
-/** 该 kind 是否由 anchor 承载：driver pid 文件里的 pid == anchor pid ∧ 该 pid 活着。
+/** 读 anchor 的**结构化回读面** `.quay/anchor.json`（`{pid, startedAt, kinds, host}`）。⇒
+ *  **anchor 每个 reconcile pass 重写一次**（⛔ 不是「启动时写一次的静态声明」），故 `kinds` 是
+ *  「**此刻实际在跑循环的 kind 集合**」的权威读数——⛔ 与 `readDesired`（期望态）不同：声明了却没能
+ *  起来循环的 kind 不在 `kinds` 里。
+ *  读不到 / 不可解析 / 无 `kinds` 数组 ⇒ null（三态；⛔ 与「一个 kind 都没托管」不同形——那是 `[]`）。 */
+export function readAnchorState(root: string): { pid: number | null; kinds: DriverKind[] } | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).stateFile, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const j = JSON.parse(raw) as { pid?: unknown; kinds?: unknown };
+    if (!Array.isArray(j.kinds)) return null;
+    return {
+      pid: typeof j.pid === "number" && Number.isFinite(j.pid) ? j.pid : null,
+      kinds: j.kinds.filter((k): k is DriverKind => KNOWN_KINDS.includes(k as DriverKind)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 该 kind **自己的常驻循环**是否已就绪 —— 判据 = 逐 kind pid 载体 `.quay/<prefix>.pid` 写着一个
+ *  **活着的**进程（`pidSelf` 类由驱动自己在进入循环体后写；`pidSelf=false` 的 worker 由宿主在起循环时写，
+ *  见 `driverPidIsReadinessMarker`）。
+ *
+ *  ⛔ **只用于 `start` 的就绪确认**（`startKindViaAnchor`），与 `gap-driver-start-false-confirms-
+ *  unsettled-driver` 的纪律一致：「anchor 收下了这个 kind」⛔ 不等于「它的循环真的跑起来了」——
+ *  §6.1 的守卫实测过：一个每轮必抛的 kind 必须让 `start` **不报成功**。
+ *
+ *  ⛔ **不得用于状态判定**（`status`/`liveness`/`server status`）：收敛形态下这张文件**不可靠**——
+ *  它是【循环的产物】而非【托管关系的产物】（写一次、循环收尾时被删、活着期间不重写），生产实测
+ *  6 个 anchor 托管的 kind 里 5 个没有它（见 `anchorHosts` 的注释）。状态判定请用 `aliveness()`。 */
+export function loopReadinessMarker(root: string, kind: DriverKind): boolean {
+  const raw = readPidFile(statePaths(root, kind).driverPidFile);
+  const pid = /^\d+$/.test(raw) ? Number(raw) : null;
+  return pid !== null && pidAlive(pid);
+}
+
+/** 该 kind 是否由 anchor 承载：**anchor 进程活着 ∧ 它把本 kind 收在活跃循环集合里**。
  *  ⛔ 这是**三态**判定，不是「有没有 supervisor 文件」——anchor 承载（true）与「supervisor 模型」
- *  （false）必须不同形，否则 `aliveness().running` 会在收敛后恒 false（把「在跑」读成「死了」）。 */
+ *  （false）必须不同形，否则 `aliveness().running` 会在收敛后恒 false（把「在跑」读成「死了」）。
+ *
+ *  ⛔ **判据不得是「该 kind 的 pid 载体文件恰好写着 anchor 的 pid」**
+ *  （gap-driver-status-misreports-anchor-hosted-kind-as-down，2026-09-15 生产实测：6 个 anchor 托管的
+ *  kind 里 5 个被读成 `host=supervisor, alive=0`，而同刻六个 round 载体都在**秒级**刷新）。
+ *  那张文件是【循环的产物】，不是【托管关系的产物】：
+ *    · 只在 kind 的常驻循环**进入循环体时写一次**（`pidSelf` 类由驱动自己写；`pidSelf=false` 的
+ *      worker 由 anchor 写——见 driver-anchor 的写者分工注释），
+ *    · 而会在**任何一次循环收尾时被删**（anchor 的 loop-cleanup / 退出清理、`stopKind*` 的清理），
+ *      且**只要循环活着就没有任何东西会把它写回来**。
+ *  ⇒ 任意时刻「哪些 kind 有这个文件」是一个**随循环代次漂移的任意子集**（生产实测 6 个里只有
+ *    `promotion` 有；同一机制的两次独立采样给出 4/2 与 1/5 两种**不同**的分裂）。拿它当托管判据必然
+ *    误报，且误报的**子集每次都不一样**——这正是「读不懂输入 ⇒ 报了一个假死亡」的硬规则 3b 镜像。
+ *  （本轮**未**归因出生产实例里那 5 张文件是被哪一次生命周期事件删掉的：同一 shape 的夹具复跑会正常
+ *    产出这 5 张文件 ⇒ 不把猜测写成结论。本判据的修法不依赖那个归因。）
+ *  ⇒ 判据改为 anchor 自己的权威读数：**进程活着**（`pidAlive` 读 `/proc`，外部直接量）+ **回读面点名**
+ *    （每 500ms 重写）。⛔ 回读面是 anchor 自报的，单独**不足以**制造「托管」——本函数要求 `anchor.pid`
+ *    指向的进程真的活着，而 anchor 正常退出会同时删掉回读面与 pid 文件。
+ *  ② 是兼容回退：回读面缺失 / 不可解析 / **换代**（其 `pid` 对不上 `anchor.pid`）时，退回「该 kind 的
+ *    pid 载体写着 anchor 的 pid」这条旧判据——⛔ 读不懂回读面不得变成「报死亡」（硬规则 3b）。 */
 export function anchorHosts(root: string, kind: DriverKind): { hosted: boolean; anchorPid: number | null } {
   const anchorPid = readAnchorPid(root);
   if (anchorPid === null || !pidAlive(anchorPid)) return { hosted: false, anchorPid: null };
+  const st = readAnchorState(root);
+  if (st !== null && st.pid === anchorPid && st.kinds.includes(kind)) return { hosted: true, anchorPid };
   const dpid = readPidFile(statePaths(root, kind).driverPidFile);
   const driverPid = /^\d+$/.test(dpid) ? Number(dpid) : null;
   return { hosted: driverPid === anchorPid, anchorPid };
@@ -1664,7 +1726,10 @@ export function driverPidIsReadinessMarker(kind: DriverKind): boolean {
 }
 
 /** 派生一个 kind 的 { supervisor_alive, driver_alive, running, deaths }（status 与 liveness 共用）。
- *  `driverAlive` 的含义取决于写者，见 driverPidIsReadinessMarker 的注释（⛔ 直接量 vs 代理量）。 */
+ *  `driverPid`/`driverAlive` = **承载该 kind 常驻循环的那个进程**：收敛形态（anchor 承载）下就是 anchor
+ *  自己，旧形态下是 pid 载体指向的 driver 进程——两者的活性都是 `/proc` 直接量。
+ *  （`driverPidIsReadinessMarker` 描述的是**旧形态**里 pid 载体的写者分工；收敛形态下那张文件可能不存在，
+ *  见 `anchorHosts` 的注释。） */
 export function aliveness(root: string, kind: DriverKind): {
   supervisorPid: number | null;
   driverPid: number | null;
@@ -1687,14 +1752,23 @@ export function aliveness(root: string, kind: DriverKind): {
   const spidRaw = readPidFile(st.supervisorPidFile);
   const dpidRaw = readPidFile(st.driverPidFile);
   const supervisorPid = /^\d+$/.test(spidRaw) ? Number(spidRaw) : null;
-  const driverPid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
+  const pidFilePid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
   const supervisorAlive = supervisorPid != null && pidAlive(supervisorPid);
-  const driverAlive = driverPid != null && pidAlive(driverPid);
   // AC-255（SPEC §7 阶段 C）：收敛后**没有 supervisor 进程**——该 kind 的常驻循环由 anchor 进程承载，
   // `.quay/<prefix>.pid` 写的是 anchor 的 pid（六个 kind 同一个 pid）。此时 `running` 的直接量是
   // 「承载进程活着 ∧ 该 kind 已被 anchor 接管」，⛔ 不是「supervisor ∧ driver 双活」（那会恒 false，
   // 把收敛后的「在跑」读成「死了」——硬规则 3b 的镜像：读不懂输入 ⇒ 报了一个假死亡）。
   const host = anchorHosts(root, kind);
+  // **承载该 kind 常驻循环的进程**：anchor 承载时**就是 anchor 自己**（`host.anchorPid`），
+  // ⛔ 不是「pid 载体文件里碰巧写着谁」——那张文件是**循环的产物**，收敛形态下可能压根不存在（生产
+  // 实测 6 个 kind 里 5 个没有它，见 anchorHosts 的注释）。`driver_pid`/`driver_alive` 的语义是
+  // 「跑这个 kind 的进程是谁 / 它活着吗」，故收敛形态下报 anchor 的 pid 与活性——这也正是 driver-anchor
+  // 文档写死的载体约定（`.quay/<prefix>.pid` 六个文件一个 pid）。直接量：`pidAlive` 读 `/proc`。
+  // ⚠️ `gap-driver-status-misreports-anchor-hosted-kind-as-down` 的另一半：`packages/quay/src/cli/
+  //   server.ts` 用 `driver_alive !== 1` 判「这个 kind 的循环没在转」⇒ ⛔ 不能只修 `running` 而让
+  //   `driver_alive` 继续报 0（那只是把一个字段的假死搬到另一个字段）。
+  const driverPid = host.hosted ? host.anchorPid : pidFilePid;
+  const driverAlive = driverPid != null && pidAlive(driverPid);
   const running = host.hosted ? driverAlive : supervisorAlive && driverAlive;
   const deaths: string[] = [];
   if (!host.hosted) {
@@ -1706,7 +1780,8 @@ export function aliveness(root: string, kind: DriverKind): {
     // anchor 承载 && 仍有 supervisor pid 文件 ⇒ 残留（阶段 C 已退役 supervisor）。如实报出，⛔ 不静默。
     deaths.push("stale_supervisor_pidfile");
   }
-  // driver 死：pid 文件在而进程不在。
+  // driver 死：承载进程不在（收敛形态下 = anchor 不在，而 anchorHosts 已要求 anchor 活着 ⇒ 恒不触发；
+  // 旧形态下 = pid 载体指向一个死进程）。
   if (driverPid != null && !driverAlive) deaths.push("driver_dead");
   // supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）：只对【活着】的 supervisor
   // 有意义；缺失/已死/读不到启动时刻 ⇒ not-evaluated（null），⛔ 不与「新鲜」（false）同形。
@@ -1913,12 +1988,16 @@ function reportUnconfirmed(root: string, kind: DriverKind, v: ConfirmResult, con
  *    · `start-pending:` 窗口用尽而 supervisor **仍活着**（慢启动 / 驱动崩溃-重拉循环）⇒ 独立取值，
  *                       ⛔ 不报「死」、⛔ 不打印 `started:`。退出码非 0 = 「未确认」≠「死」。
  */
-/** 阶段 C 的 start 路径（anchor 承载）：声明期望态 → 确保 anchor 在跑 → 等该 kind 的循环就绪。
+/** 阶段 C 的 start 路径（anchor 承载）：声明期望态 → 确保 anchor 在跑 → 等该 kind **自己的循环**就绪。
  *
- *  ⛔ 就绪判据（`aliveness().running`）在收敛形态下的含义**没有变弱**：五个 `pidSelf` kind 的
- *  `.quay/<prefix>.pid` 仍由**驱动自己**在进入常驻循环后写（`driverPidIsReadinessMarker`）；收敛只是把
- *  「那个 pid 是独立 driver 进程」换成「那个 pid 是承载它的 anchor 进程」——直接量没有变成代理量。
- *  worker（pidSelf=false）的 pid 文件与旧 supervisor 一样由宿主在起循环时写。 */
+ *  ⛔ 就绪判据 = `loopReadinessMarker()`（**该 kind 自己的** pid 载体写着一个活进程），⛔ **不是**
+ *  `aliveness().running`：后者回答「这个 kind 有没有被一个活着的宿主承载」，而本函数要回答的是
+ *  「它的循环**真的跑起来了**没有」——两者在收敛形态下**必须是取假值不同的两个量**，否则一个每轮必抛的
+ *  kind 会被 `start` 报成成功（§6.1 的守卫实测过这条，见 driver-anchor.test.mjs）。
+ *  ⚠️ `gap-driver-status-misreports-anchor-hosted-kind-as-down` 的残留（如实登记，⛔ 不静默）：生产实例里
+ *  那 5 个「anchor 托管却没有 pid 载体」的 kind，`start --kind <k>` 会等满确认窗口并报 `start-pending`
+ *  （**本任务之前就是这样**，本任务⛔ 未改变它——那需要一个「循环在产出」的直接量，超出本任务 Touches）。
+ *  它的读数取自 `loopReadinessMarker` 的同一张文件；`status` 半边已由本任务修好（host=anchor/alive=1）。 */
 async function startKindViaAnchor(
   root: string,
   kind: DriverKind,
@@ -1930,7 +2009,10 @@ async function startKindViaAnchor(
   const t0 = Date.now();
 
   const before = aliveness(root, kind);
-  if (before.running) {
+  // ⛔ 判据是「**本 kind 自己的**循环就绪」而不是 `aliveness().running`（承载关系）——理由见本函数的
+  // 文档注释。在 anchor 路径下这条与旧 `before.running`（旧语义 = `hosted ∧ driverAlive`，而 driverAlive
+  // 读的正是同一张 pid 载体）**逐字等价** ⇒ 对 `start` 是无行为变更的改写。
+  if (loopReadinessMarker(root, kind)) {
     // §6.9 不变式 1：已在跑 ⇒ no-op（⛔ 不是静默重启）。
     out(`already-running: host=${before.host} anchor pid=${before.anchorPid ?? "none"} driver pid=${before.driverPid ?? "?"}\n`);
     return statusForKind(root, kind, true, out);
@@ -1955,10 +2037,11 @@ async function startKindViaAnchor(
     anchorPid = r.pid;
   }
 
-  // ③ 等该 kind 的循环就绪（直接量：它的 pid 文件 = 活着的 anchor pid）。anchor 进程死了 ⇒ 决断信号。
+  // ③ 等该 kind **自己的循环**就绪（判据 = `loopReadinessMarker`，见本函数的文档注释）；anchor 进程死了
+  //    ⇒ 决断信号。
   for (;;) {
     const cur = aliveness(root, kind);
-    if (cur.running) {
+    if (loopReadinessMarker(root, kind)) {
       out(`started: anchor pid=${anchorPid} kind=${kind} driver pid=${cur.driverPid ?? "?"} confirmed_ms=${Date.now() - t0}\n`);
       return statusForKind(root, kind, true, out);
     }
@@ -1970,7 +2053,7 @@ async function startKindViaAnchor(
     if (Date.now() - t0 >= confirmSecs * 1000) {
       err(
         `start-pending: kind=${kind} — 确认窗口 ${confirmSecs}s 用尽，anchor pid=${anchorPid} 仍活着但该 kind 的循环未被确认就绪` +
-        `（driver pid=${cur.driverPid ?? "none"} alive=${cur.driverAlive ? 1 : 0}，host=${cur.host}，elapsed_ms=${Date.now() - t0}）。` +
+        `（readiness_marker=${loopReadinessMarker(root, kind) ? 1 : 0}，host=${cur.host}，carrier_last_ts=${carrierStats(root, kind).lastTs ?? "null"}，elapsed_ms=${Date.now() - t0}）。` +
         `⛔ 这不是死亡判定（慢启动 / 崩溃-重拉循环与此同形）；复读用 quay driver status --kind ${kind}。锚日志尾:\n`,
       );
       err(`${fileTailLines(anchorPaths(root).logFile) || "(anchor 日志为空/读不到 —— ⛔ 这不等于「无死因」)"}\n`);
