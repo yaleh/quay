@@ -277,16 +277,23 @@ export function collect(opts: CollectOptions): CollectResult {
       }
     }
 
-    // per-job timeout-minutes：优先用离线缝，其次按 head_sha 读 workflow YAML（按 sha 缓存）。
+    // per-job timeout-minutes：优先用离线缝，其次按 head_sha 读该 run **自己那条** workflow 的 YAML。
+    // ⛔ workflow 路径取自 run 自己的 `path`（gh 会给 `.github/workflows/ci.yml`），不是只在传了
+    // `--workflow` 时才查 —— 否则默认那次（不传 --workflow，取全部 workflow 的 run）永远拿不到
+    // timeoutMinutes，`infra:job-timeout-reached` 这条信号在默认调用下是**死的**。
+    // 缓存键 = sha|workflow路径（不同 workflow 可以共用同一个 sha）。
     let timeouts: Record<string, number> = {};
     if (opts.runs) {
       timeouts = {};
     } else {
       const sha = String((r as Record<string, unknown>).head_sha ?? "");
-      if (sha !== "" && opts.workflow) {
-        if (!timeoutsCache.has(sha)) {
+      const wfPath = opts.workflow
+        ? `.github/workflows/${opts.workflow}`
+        : String((r as Record<string, unknown>).path ?? "");
+      const cacheKey = `${sha}|${wfPath}`;
+      if (sha !== "" && wfPath !== "" && wfPath.startsWith(".github/workflows/")) {
+        if (!timeoutsCache.has(cacheKey)) {
           try {
-            const wfPath = `.github/workflows/${opts.workflow}`;
             const body = ghJson<{ content?: string; encoding?: string }>(run, [
               "api",
               `/repos/${opts.repo}/contents/${wfPath}?ref=${sha}`,
@@ -295,13 +302,13 @@ export function collect(opts: CollectOptions): CollectResult {
               body.encoding === "base64" && typeof body.content === "string"
                 ? Buffer.from(body.content, "base64").toString("utf8")
                 : "";
-            timeoutsCache.set(sha, text === "" ? {} : parseJobTimeouts(text));
+            timeoutsCache.set(cacheKey, text === "" ? {} : parseJobTimeouts(text));
           } catch (e) {
-            warnings.push(`workflow-unreadable:${sha}:${e instanceof Error ? e.message : String(e)}`);
-            timeoutsCache.set(sha, {});
+            warnings.push(`workflow-unreadable:${wfPath}@${sha}:${e instanceof Error ? e.message : String(e)}`);
+            timeoutsCache.set(cacheKey, {});
           }
         }
-        timeouts = timeoutsCache.get(sha) ?? {};
+        timeouts = timeoutsCache.get(cacheKey) ?? {};
       }
     }
 
