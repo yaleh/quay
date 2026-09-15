@@ -2,7 +2,7 @@
 id: gap-ci-suite-red-on-fresh-checkout-beyond-config-yml
 title: CI 在真正干净的 checkout 上仍有 10 个测试文件红——不是 .quay/config.yml 问题,是至少 4
   类不同根因(生产数据依赖 / CI 环境缺步骤 / 硬编码路径 / 已知 reflog-baseline 模式)
-status: ready
+status: done
 labels:
   - gap
   - mechanism
