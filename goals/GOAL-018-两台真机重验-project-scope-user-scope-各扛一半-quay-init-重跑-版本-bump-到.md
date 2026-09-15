@@ -1,13 +1,19 @@
 ---
 id: GOAL-018
 title: 两台真机重验：project scope + user scope 各扛一半，quay-init 重跑，版本 bump 到 0.7.0
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-14 裁定（对话中三问三答）：①host×scope 分工 = ad-arm1/archguard 测 project
   scope、orangevps/meta-cc 测 user scope（不是每台各测两种）；②版本直接定 0.7.0（minor，不再按 develop
   领先量重新核算）；③不是"讨论完就停"也不是"现在直接执行"，而是"为这次验证创建一个 GOAL"——预期验证过程中会发现不少新问题，那些问题各自另立
   gap 任务承接，不在本 GOAL 内解决。
 activatedAt: 2026-09-14T04:01:54.269Z
+statusLog:
+  - at: 2026-09-15T02:19:55.522Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景（2026-09-14 实测，动手创建本 GOAL 前直接 ssh 两台机器读到的现状，非推断）
 
@@ -48,6 +54,14 @@ project scope 与 user scope 两种安装/启用方式**，重新执行 `quay-in
 - **orangevps × meta-cc → user scope**：先把现有指向探测目录的 `quay@quay 0.3.20` 那条 marketplace 记录
   **删键**（不是 disable——disable 只置 false 不删键，判据会误判"已注册"，见既往实证），换成指向本次
   0.7.0 交付物持久安装位置的注册。
+
+## 退出条件
+
+**散文版**：两台真实主机上各自独立地、通过 Claude Code 插件系统（不是直接起 driver 二进制）完成一次
+0.7.0 交付物的安装/重跑，且各自都留下一条真实的 `todo→ready→done` 任务与非记账代码提交；同时"版本已
+bump 到 0.7.0"这件事必须能在两台机器各自的实际安装读数上核实，而不只是仓库内的一次文本替换。机器判据在
+AC-257..AC-259，本节只是它们共同要收敛到的那句话——**ad-arm1 扛 project scope 的合并语义、orangevps
+扛 user scope 的删键重注册语义，两条路径都真的走通，且版本读数两边都对得上**。
 
 ## 范围（AC-257..AC-259）
 
