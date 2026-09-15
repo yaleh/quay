@@ -26,7 +26,10 @@ extra: {}
 
 **为什么这构成一个缺陷（而不是「检查太严」）**：`plugin/scripts/transcript-delivery-check.ts` 的三态契约（该文件第 25–40 行）**只**把两类物化形态算作 DELIVERED —— a real USER message（`type==="user"` ∧ `message.role==="user"`）或 `type==="attachment"`，二者都是「被接收方【采纳】了」的形态。「Held peer message」是**待批**形态，判 UNKNOWN(exit 3) 是**正确**的：把它算成 delivered 等于把「排队中」说成「已送达」。⇒ **检查是对的，被检查的对象变了。**
 
-⇒ 根因在**投递方身份**：probe 由短命的 `node …/dist/send-to-session.js` 进程经 unix socket 发出，接收方**认证了 pid**（逐字 `verified pid 157212`）却**识别不出会话身份**（逐字 `from an unidentified session`）⇒ 按平台策略扣下待批，永不物化。
+**根因不在投递方，在【接收方的 settings】**（这是本条最重要的一处更正 —— 第一版归因于「投递方没有身份」，**是错的**）：
+- `plugin/scripts/send-to-session.ts` 的文件头（2026-08-15/2.1.241 实测记录）逐字写着：**「投递不由 token 类型决定，由【接收方 settings】——`permissions.defaultMode=bypassPermissions` 或 `crossSessionInbound:accept` 任一即直通，皆无则 held→expired（项目会话全带前者 ⇒ 直通）」**。
+- ⇒ 本机 probe 被扣下的直接成因是：**目标会话（`/home/yale/work/archguard`，sessionId `dad21301-…`）的 settings 两者皆无**。`from an unidentified session` 是**扣下时的措辞**，不是根因。
+- ⇒ **修投递方（`send-to-session.ts`）不会改变这个结局**；文档里唯一「免 hold」的通道是把**目标会话自己的 childToken** 带出来用（用法③），而该脚本自己的安全边界段落明确禁止这样做（「childToken 是会话密钥——把它带出目标会话 = 把『以该会话身份发消息』的能力给了持有者」），outer 2026-08-15 也已拒绝过该形态。**⇒ 这不是本任务可以自行选择的路径。**
 
 ⇒ **AC-205 的产出前置是环境的，而且是【未登记】的**：验证机上必须有一个会把「未识别身份的 peer 消息」物化的活会话（2026-09-14 那次成功就是在 `orangevps` 上恰好满足了这个前提）。`plugin/freshness-producers.json` 把 `GOAL-009-AC-205` 登记在 `coldstart-face.subjects` 下时**没有记录这个前置**。
 
@@ -36,8 +39,9 @@ extra: {}
 ## Requested action
 
 1. **先把两类失败分开**（这是取假的前提）：`plugin/scripts/verify-deliver-coldstart.sh` 的 AC-205 腿目前把「投递不到」与「投出去但被扣下」都印成「NOT written」。让它在 `send` exit 0 之后**先读一次 transcript 判定记录形态**，把三种结局分别落痕：`delivered`（物化）/ `held`（`Held peer message`，逐字贴出该行）/ `absent`（查无此文本）。⛔ 不改 `transcript-delivery-check.ts` 的三态契约（它是对的）。
-2. **修投递方身份**：让 `plugin/scripts/send-to-session.ts` 发出的 peer 消息**可被接收方识别**（`peer-identity-probe.ts` 是既有的身份探测机件，先查它是否已经提供了接收方认的那个标记）。判据必须能取假：同一台机上，未识别身份时目标 transcript 出现 `Held peer message`；补上身份后同一条命令产生的记录形态变为 `type:"user"` 或 `type:"attachment"`。⛔ 不通过放宽 `transcript-delivery-check` 来达成。
-3. **登记面说实话**：`plugin/freshness-producers.json` 里 AC-205 的条目补上它的产出前置（需要一个会把未识别 peer 消息物化的活会话）。若判定该前置【无法由本仓库保证】⇒ 把 AC-205 从 `coldstart-face.subjects` 拆出、单列一个 `session-delivery` producer 并写明前置；⛔ 不改 K、不改 AC-205 的 `criterion`、不删主体（那是人裁定的事）。
+2. **把「免 hold」变成投递方能【检测】的前置，而不是让它静默失败**：`send-to-session.ts` 在发出之前先读目标 `~/.claude/sessions/<pid>.json` 对应的会话设置，判它是否具备 `permissions.defaultMode=bypassPermissions` 或 `crossSessionInbound:accept`（**这两个键就是文档里那条判据的直接量**）；不具备 ⇒ **在发送前就以一个独立的可区分结局收场**（例如 exit 3 + 一行「target will HOLD (no bypassPermissions/crossSessionInbound)」），⛔ 不要 exit 0 再让下游去猜。判据必须能取假：对今天的 host C 目标 ⇒ 该结局；人为给一个夹具会话加上 `crossSessionInbound:accept` ⇒ 结局翻转为直投。
+   ⛔ **明确不做**：不把目标会话的 childToken 带出来（脚本自己的安全边界禁止）；⛔ 不放宽 `transcript-delivery-check.ts` 的三态契约。
+3. **登记面说实话**：`plugin/freshness-producers.json` 里 AC-205 的条目补上它的产出前置（**验证机上有一个 settings 允许 inbound 的活会话**——不是「有一个活会话」，第一版这么写也是错的）。若判定该前置【无法由本仓库保证】（它取决于别的项目的会话配置）⇒ 把 AC-205 从 `coldstart-face.subjects` 拆出、单列一个 `session-delivery` producer 并写明前置；⛔ 不改 K、不改 AC-205 的 `criterion`、不删主体（那是人裁定的事）。
 
 ## AC
 
@@ -53,8 +57,8 @@ AC-205 腿对「投递不到 / 被扣下 / 已送达」三态**逐条留痕且�
 
 ## Touches
 
-- `plugin/scripts/send-to-session.ts`（投递方：补可识别身份）
-- `plugin/scripts/peer-identity-probe.ts`（既有身份探测机件，先用它）
+- `plugin/scripts/send-to-session.ts`（发送前检测 goal 设置，把「会被扣下」变成可区分结局）
+- `plugin/scripts/peer-identity-probe.ts`（既有身份机件，先查它是否已暴露该判据）
 - `plugin/scripts/verify-deliver-coldstart.sh`（AC-205 腿：三态落痕）
 - `plugin/scripts/transcript-delivery-check.ts`（⛔ 只读，不改其契约）
 - `plugin/freshness-producers.json`（登记面：前置或拆分）
