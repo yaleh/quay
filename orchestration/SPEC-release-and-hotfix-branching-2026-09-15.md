@@ -279,10 +279,19 @@ release.yml → 全绿后 master ff 到新 tag。
 |---|---|---|---|
 | **A 工作流内** | `release.yml` 末尾加一个 job（`needs: [delivery-manifest-verify]`，`contents: write`）执行 `git push origin ${{ inputs.tag }}:master` | 与 ④ 天然同源（job 依赖即条件）；零人工 | 新增一个有写权限的 job；与人 2026-09-14「不要隐式 GitHub 写副作用」的精神需确认边界（此处是**显式 dispatch 的同一次 run 内**，不是隐式触发，应可接受但需裁定） |
 | **B 纯人工** | 人确认全绿后 `git push origin vX.Y.Z:master` | 零实现 | 无留痕、无强制；§2.6 说明这里没有任何兜底 |
-| **C 本地机件** | `plugin/scripts/release-advance-master.ts`：读 `.quay/ci-runs.jsonl` 判 ④ → ff → 写事件 | 与本仓库既有机件范式一致；离线可判；留痕 | 依赖 AC-265 的采集器先落地；多一个机件要进 capability-catalog（六行义务）【转引 memory】 |
+| **C 本地机件** | `plugin/scripts/release-advance-master.ts`：读 `.quay/ci-runs.jsonl` 判 ④ → ff → 写事件 | 与本仓库既有机件范式一致；离线可判；留痕；**不需要给 CI 发新的写权限** | 多一个机件要进 capability-catalog（六行义务）【转引 memory】 |
+
+**⚠️ C 的前置依赖在本 SPEC 撰写当轮已经满足**（2026-09-15 13:15–13:36Z 实测）：
+`plugin/scripts/ci-runs-collect.ts` 于 `854a21c2b` 落到 develop，载体 `.quay/ci-runs.jsonl` 已产出
+**40 条真实记录**（非 fixture）——其中 `workflow="Release"` 的 **2 条**分别是 `v0.6.2`(34843029988) /
+`v0.6.3`(34845477762)，均带 `conclusion` 与**逐 job 清单**【git 实测 + 载体实测】。
+⊢ 即：**"该 tag 的 release run 是否全绿" 今天就能在本地零 `gh` 调用地判定**，
+正好落在 §6 开头那条硬约束（criterion 不得调 gh）的可行侧。
+⛔ 但按硬规则 4 推论三，"载体已产出" ≠ "本机制已验证"——C 仍需一次真实演练才算数（判据戊）。
 
 **倾向 A**（条件：人确认"同一次显式 dispatch 内的后续 job"不违反 ③ 的裁定精神）；
-**A 不可行则 C**；⛔ 不推荐 B（§2.6：没有任何兜底的规矩，在本仓库等于没有规矩）。
+**若人不愿给 CI 增加写权限，则 C 今天即可实施**（依赖已满足，见上）；
+⛔ 不推荐 B（§2.6：没有任何兜底的规矩，在本仓库等于没有规矩）。
 
 **首次 ff 的跨度**：`master..v0.6.3` = **18852** 个提交【git 实测】。
 ⚠️ **但首次 ff 不应该指向 v0.6.3**——v0.6.3 的 run 是红的（§2.3），按 §3.1 的规则它不够格。
@@ -338,7 +347,7 @@ release.yml → 全绿后 master ff 到新 tag。
 | 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ 一次点击/一条 `gh api`，解决 §2.2 后果 1+2 |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ 下一次切版本时即可采用；现存两条 `release-v06x-build` 按判据乙清理 |
 | 3 | 版本号 `-dev` 后缀（§4.3 选项 ii） | 人裁定 | ⚠️ 待裁定 |
-| 4 | master 推进机制（§6 的 A 或 C） | 人裁定 A/C | ⚠️ 待裁定；实现可先行，**生效要等第 5 步** |
+| 4 | master 推进机制（§6 的 A 或 C） | 人裁定 A/C | ⚠️ 待裁定；**C 的依赖已于本 SPEC 撰写当轮满足**（`.quay/ci-runs.jsonl` 已含 Release 记录，§6）⇒ 实现可先行，**生效要等第 5 步** |
 | 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布） |
 | 6 | hotfix 线 | 第 5 步 + 真实触发条件出现（§5） | ❌ 且**不应催化**（发生率 1） |
 
