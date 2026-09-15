@@ -368,8 +368,14 @@ test("AC8: the decorations data layer is unchanged (adopt/serve-handlers asserti
 
   // The adopt test's AC3 data assertion: develop decorates exactly one row — still true, we only changed
   // RENDERING, not the decorations array.
+  // `%D` renders the CHECKED-OUT branch's own decoration as the COMBINED `HEAD -> <name>` form, never a
+  // separate bare `<name>` entry (parseDecorations keeps it as one raw string — AC4 below). A bare
+  // `d === "develop"` match therefore under-counts whenever develop is the checked-out branch — the
+  // fresh-`actions/checkout@v4` shape in CI, and any contributor with develop checked out. Both forms
+  // name the develop label ⇒ still exactly one; the data-layer invariant is unchanged.
+  const namesDevelop = (d) => d === "develop" || /^HEAD\s*->\s*develop$/.test(d);
   let developCount = 0;
-  for (const r of layout.rows) for (const d of r.decorations) if (d === "develop") developCount++;
+  for (const r of layout.rows) for (const d of r.decorations) if (namesDevelop(d)) developCount++;
   assert.equal(developCount, 1, "develop label appears on exactly one commit (data layer unchanged)");
 
   // serve-handlers asserts on `row.decorations.includes(...)` — the array-of-strings shape must survive.
