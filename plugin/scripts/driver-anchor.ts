@@ -39,6 +39,7 @@ import {
   requestKindStop,
   resolveKernelSibling,
   sourceChangedSince,
+  sourceWatch,
   spawnAnchor,
   statePaths,
   ts,
@@ -224,6 +225,20 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   const hostStartedAt = Date.now();
   const active = new Map<DriverKind, KindTask>();
 
+  // **本进程加载的那份 kernel 文件的构建时刻**（gap-ac259-frozen-reading-stale-staging-kernel）：
+  // `sourceWatch(kind).state === "mirror"`（本内核是一份构建产物）时，「本内核陈旧了吗」的直接量是
+  // 「源树最新 mtime > 本文件的 mtime」——⛔ 不是「> hostStartedAt」：后者随重启往后推，于是「重启
+  // 一次就假装新鲜」，而这份 mtime 是不随重启变的常量。读不到 ⇒ 0 ⇒ 该判据不成立（⛔ 不把「读不懂」
+  // 当「陈旧」，硬规则 3b）。
+  let kernelBuiltAt = 0;
+  let kernelPathForLog = "";
+  try {
+    kernelPathForLog = fileURLToPath(import.meta.url);
+    kernelBuiltAt = fs.statSync(kernelPathForLog).mtimeMs;
+  } catch { kernelBuiltAt = 0; }
+  // 「陈旧且换不动」这条读数只在其 kinds 集合变化时打一次（⛔ 每 500ms reconcile 刷屏）。
+  let staleBundleLogged = "";
+
   // 启动集合：显式 kinds > 盘上期望态 > 全部六个（冷启动）。
   const initial = opts.kinds ?? readDesired(opts.root)?.kinds ?? [...KNOWN_KINDS];
   // 盘上没有期望态而我们给了初始集合 ⇒ 落盘，使后续 `start/stop --kind X` 有一个可读改的基底。
@@ -296,7 +311,23 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     // 源码自刷新（AC-184）：被监视源码推进到本 anchor 启动时刻之后 ⇒ 整个 anchor 重启（模块级热重载
     // 会因为双份 driver-runtime 而让停机登记表分裂，见 invokeKindDefault 的注释）。⛔ 只在**确认替换
     // 进程活着**之后才退出——否则一次 spawn 失败 = 六个 driver 一起消失（比不刷新更糟）。
-    const stale = [...active.keys()].filter((k) => sourceChangedSince(opts.root, k, hostStartedAt));
+    // ⛔ 只对 **watched**（本内核目录里就有被监视 .ts = dev 源树直跑）的 kind 用「推进到启动时刻之后」
+    // 这个基准：对 **mirror**（本内核跑的是构建产物）它是个**错的基准**——重启不会换 bundle 里的代码，
+    // 只会把基准往后推（重启一次就「假装新鲜」）。构建产物走下面 bundleStale 那条直接量。
+    const stale = [...active.keys()].filter(
+      (k) => sourceWatch(opts.root, k).state === "watched" && sourceChangedSince(opts.root, k, hostStartedAt),
+    );
+    // **本内核这份 bundle 比它的源树旧**（gap-ac259-frozen-reading-stale-staging-kernel）：`mirror` 态
+    // 下比的是「源树最新 mtime vs **本进程加载的那份 kernel 文件的 mtime**」，⛔ 不是 vs 本进程启动时刻
+    // ——后者在「bundle 早于源码落地、进程却在之后才启动」的形态下报 fresh（本任务的实测形态：
+    // bundle 07:35 / 修复 10:17 / 进程 02:15 起 ⇒ 源树 14:45 > 进程 02:15 ⇒ 其实就是 stale，但换个
+    // 启动更晚的进程就会假新鲜），而 bundle mtime 是**不随重启变**的常量 ⇒ 该读数不会被重启洗掉。
+    // kernelBuiltAt 读不到（文件被删/权限）⇒ 0 ⇒ 该支不成立（⛔ 不把「读不懂」当「陈旧」）。
+    const bundleStale = [...active.keys()].filter((k) => {
+      if (kernelBuiltAt <= 0) return false;
+      const w = sourceWatch(opts.root, k);
+      return w.state === "mirror" && w.mtimeMs > kernelBuiltAt;
+    });
     // AC8 的持久化半边：当**本内核所在仓库的主检出**的 anchor 内核出现（或推进）到本进程启动时刻之后
     // ⇒ 同样自刷新 —— 替换进程经 preferredAnchorKernel 会**优先**加载主检出那一份。这让「实现落地后常驻
     // 形态自动换成主检出版本」不需要任何人工重启，也把常驻 anchor 的生存期从「当前 worktree 路径」上解绑。
@@ -314,9 +345,36 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
         mainKernelStale = fs.statSync(cand.path).mtimeMs > hostStartedAt;
       }
     } catch { /* 读不到 mtime ⇒ 不判 stale（⛔ 不把「读不懂」当作「陈旧」） */ }
-    if ((stale.length > 0 || mainKernelStale) && !stopping) {
+    // ⛔ 重启风暴守卫：`stale`（源码在**我这一生**里推进）与 `mainKernelStale`（主检出内核推进）换过去
+    // 必然是新一版，可无条件换；**只有** bundleStale 触发时，替换目标必须真的是**另一份更晚构建的
+    // bundle**（`preferredAnchorKernel` 已把这条编码进去，这里复核一次），否则换过去还是同一版 ⇒
+    // 每 500ms reconcile 一次 = 风暴。换不动时**如实留痕**并留在原地 —— 这正是「陈旧且换不动」这一
+    // 独立取值（硬规则 3b：⛔ 不静默、⛔ 不假装 fresh）。留痕只在 kinds 集合变化时打一次（⛔ 不刷屏）。
+    let canRefresh = stale.length > 0 || mainKernelStale;
+    if (!canRefresh && bundleStale.length > 0) {
+      try {
+        const me = fileURLToPath(import.meta.url);
+        const cand = preferredAnchorKernel();
+        canRefresh = !!cand && cand.path !== me &&
+          fs.statSync(cand.path).mtimeMs > kernelBuiltAt;
+      } catch { canRefresh = false; /* 读不到 ⇒ 换不动（⛔ 不把「读不懂」当「可换」） */ }
+    }
+    if (bundleStale.length > 0 && !canRefresh) {
+      const key = bundleStale.join(",");
+      if (staleBundleLogged !== key) {
+        staleBundleLogged = key;
+        const srcDir = sourceWatch(opts.root, bundleStale[0]).dir;
+        log(
+          `${ts()} anchor: STALE BUNDLE — source tree is newer than this kernel's build ` +
+          `(kinds=[${key}]; kernel=${kernelPathForLog} builtAt=${new Date(kernelBuiltAt).toISOString()}; ` +
+          `source=${srcDir} — no NEWER kernel resolved, staying up; rebuild the bundle to clear this)`,
+        );
+      }
+    }
+    if (canRefresh && !stopping) {
       log(
         `${ts()} anchor: restarting anchor (AC-184 self-refresh; kinds=[${stale.join(",")}]` +
+        `${bundleStale.length > 0 ? `, stale bundle: kinds=[${bundleStale.join(",")}]` : ""}` +
         `${mainKernelStale ? `, main-checkout kernel advanced: ${mainKernelPath}` : ""})`,
       );
       const r = spawnAnchor(opts.root, { logFile, takeoverPid: process.pid });

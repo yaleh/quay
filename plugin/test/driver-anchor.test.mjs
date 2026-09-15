@@ -25,7 +25,17 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
-import { DRIVER_KINDS, KNOWN_KINDS, preferredAnchorKernel } from "../scripts/driver-runtime.ts";
+import {
+  DRIVER_KINDS,
+  KNOWN_KINDS,
+  kernelSourceScriptsDir,
+  preferredAnchorKernel,
+  preferredAnchorKernelIn,
+  sourceFilesMaxMtimeMs,
+  sourceWatch,
+  supervisorStaleness,
+  watchedSourceFiles,
+} from "../scripts/driver-runtime.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -436,4 +446,145 @@ test("双派发硬闸 — 盘上已有活 anchor（不是我）⇒ 第二个 anc
   // 原 anchor 的循环不受影响（⛔ 第二个进程没有抢走它）。
   assert.equal(anchorPidOf(root), first, "the incumbent still owns anchor.pid");
   await waitFor(() => fs.statSync(carrier).mtimeMs > before, 20_000, "the incumbent's loop to keep beating");
+});
+
+// ── 内核源树 / 陈旧构建产物（gap-ac259-frozen-reading-stale-staging-kernel）──────────────────────────
+//
+// 缺陷形态（2026-09-15 实测，读生产实时状态）：本仓库自宿主 anchor 的 cmdline 是
+//   <repo>/packages/quay/plugin/scripts/dist/driver-anchor.js __anchor --root <repo>
+// 而 `packages/quay/plugin/` 是 `package.sh` 的 **pack-time 暂存快照**（gitignored、0 tracked），
+// 它的 `.ts` 源在 `<repo>/plugin/scripts/`。旧读法 `sourceFilesMaxMtimeMs` 只 stat **本内核目录**，
+// 那里一个 `.ts` 都没有 ⇒ max 恒 0 ⇒「源码从未推进」与「盘上根本没有源」同形（硬规则 3b）⇒
+// 07:35 构建的 bundle 上跑着的内核永远不知道自己陈旧（10:17 落地的修复静默不生效），⛔ 且重启也
+// 不换版本（重启后 resolveKernelScriptsDir() 还是那个目录）。
+//
+// 判据（AC3 两臂 + AC4 取假）：`sourceWatch` 三态把该形态报成 **mirror** 并把 mtime/dir 指向**源树**；
+// 于是「源树未推进 ⇒ fresh」与「源树已推进 ⇒ stale」给出**相反**的预测，两臂都钉在这里。
+// ⛔ 这些是**纯函数/直接 import** 的判据（不经 anchor 子进程）—— 本文件头上的那条已知边界
+// （worktree 里 anchor 子进程跑的是主检出那份 kernel）因此**不适用**于本组测试。
+
+/** 造一个「本内核跑在 gitignored 暂存树里」的夹具：
+ *    <root>/package.json + scripts/test.sh          ← 夹具是个 git 仓库（mainCheckoutRoot 的前提）
+ *    <root>/plugin/scripts/*.ts                     ← **源树**（被监视集齐全）
+ *    <root>/plugin/scripts/dist/driver-anchor.js    ← 源树的构建产物（可造得比暂存树新/旧）
+ *    <root>/packages/quay/plugin/scripts/…          ← 本内核（暂存树；⛔ 无 .ts）
+ *  `QUAY_PLUGIN_ROOT=<root>/packages/quay/plugin` ⇒ `resolveKernelScriptsDir()` 指向暂存树的 scripts。 */
+function makeStagingFixture(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `kernelsrc-${tag}-`));
+  fs.writeFileSync(path.join(root, "package.json"), "{}\n", "utf8");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\n", "utf8");
+  const srcScripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(path.join(srcScripts, "dist"), { recursive: true });
+  for (const rel of watchedSourceFiles("promotion")) fs.writeFileSync(path.join(srcScripts, rel), "// src\n", "utf8");
+  fs.writeFileSync(path.join(srcScripts, "dist", "driver-anchor.js"), "// built\n", "utf8");
+  // 源树 mtime 显式落**过去**（臂 (a) 的基线）：否则刚创建的夹具文件的 mtime 本就晚于本测试进程的
+  // 启动时刻 ⇒ 臂 (a) 会（正确地）报 stale，把「源树未推进」那一臂变成空转。
+  const past = new Date(Date.now() - 600_000);
+  for (const rel of watchedSourceFiles("promotion")) fs.utimesSync(path.join(srcScripts, rel), past, past);
+  const stagingScripts = path.join(root, "packages", "quay", "plugin", "scripts");
+  fs.mkdirSync(path.join(stagingScripts, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(stagingScripts, "dist", "driver-anchor.js"), "// staging\n", "utf8");
+  const init = spawnSync("git", ["init", "-q", root], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(init.status, 0, `fixture is a git repo (mainCheckoutRoot needs it): ${init.stderr}`);
+  return root;
+}
+
+/** 在一个临时 QUAY_PLUGIN_ROOT 下跑 fn（`resolveKernelScriptsDir()` 由它决定）。 */
+function withPluginRoot(pluginRoot, fn) {
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = pluginRoot;
+  try { return fn(); } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = saved;
+  }
+}
+
+test("内核源树两臂对照 — mirror 态比的是【源树】：未推进 ⇒ fresh / 已推进 ⇒ stale（⛔ 只给一臂不算过）", (t) => {
+  const root = makeStagingFixture("arms");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const kernelDir = path.join(root, "packages", "quay", "plugin", "scripts");
+  const srcScripts = path.join(root, "plugin", "scripts");
+
+  withPluginRoot(path.dirname(kernelDir), () => {
+    // ⛔ 取假的正控制：旧读法（只看本内核目录）在这个输入上**恒 0** —— 这正是「未变更」与「无源码」
+    // 同形的输入（硬规则 3b）。若有人把 sourceFilesMaxMtimeMs 回退成只看本内核目录，下面的臂 (a)
+    // 会变成 0、臂 (b) 会变成 fresh ⇒ 本测红。
+    let kernelDirOnlyMax = 0;
+    for (const rel of watchedSourceFiles("promotion")) {
+      try { kernelDirOnlyMax = Math.max(kernelDirOnlyMax, fs.statSync(path.join(kernelDir, rel)).mtimeMs); } catch { /* absent */ }
+    }
+    assert.equal(kernelDirOnlyMax, 0, "本内核目录里没有被监视 .ts（构建产物形态）—— 旧读法在这个输入上恒 0");
+
+    assert.equal(kernelSourceScriptsDir(), srcScripts, "源树解析到 <repo>/plugin/scripts（本内核 plugin 树的同名树）");
+
+    // ── 臂 (a)：源树 mtime 早于本进程启动 ⇒ mirror + 真读数 + fresh（⛔ 不报陈旧、不自刷新）──
+    const a = sourceWatch(root, "promotion");
+    assert.equal(a.state, "mirror", "内核是构建产物而源树在 ⇒ mirror（⛔ 不是 unwatched：那会与「无源可推进」同形）");
+    assert.equal(a.dir, srcScripts, "mirror 态把 dir 指向**源树**，⛔ 不是本内核目录");
+    assert.ok(a.mtimeMs > 0, "mirror 态给的是真读数（⛔ 不是那个恒 0）");
+    assert.equal(sourceFilesMaxMtimeMs(root, "promotion"), a.mtimeMs, "sourceFilesMaxMtimeMs 走同一解析");
+    const before = supervisorStaleness(root, "promotion", process.pid);
+    assert.equal(before.state, "fresh", `臂 (a) 源树未推进到启动时刻之后 ⇒ fresh: ${JSON.stringify(before)}`);
+    assert.equal(before.sourceWatch, "mirror", "陈旧判定同时报出它的输入从哪来（可核，⛔ 不是只给一个布尔）");
+
+    // ── 臂 (b)：只改一处 —— 把源树推到本进程启动时刻之后 ⇒ 预测相反：stale ────────────────────
+    const future = new Date(Date.now() + 120_000);
+    for (const rel of watchedSourceFiles("promotion")) fs.utimesSync(path.join(srcScripts, rel), future, future);
+    const after = supervisorStaleness(root, "promotion", process.pid);
+    assert.equal(after.state, "stale", `臂 (b) 源树已推进 ⇒ stale（两臂预测相反 ⇒ 判据能取假）: ${JSON.stringify(after)}`);
+    assert.ok(after.sourceMtimeMs > before.sourceMtimeMs, "读数确实变了（⛔ 不是同一个常量被读两次）");
+    assert.equal(sourceWatch(root, "promotion").state, "mirror", "态没变，变的是它指向的目录的 mtime");
+  });
+});
+
+test("内核源树 fail-closed — 盘上没有源树（装好的产物）⇒ unwatched（独立取值，⛔ 与「未变更」同形）", (t) => {
+  // 一个**没有**同名 plugin 树的 git 仓库：装好的产物（npm 包 / marketplace cache / 第三方 vendored）
+  // 就是这一形。⛔ 不能把「没有源树」读成「源码没推进」—— 两者必须有独立取值（硬规则 3b）。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kernelsrc-none-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "packages", "quay", "plugin", "scripts");
+  fs.mkdirSync(path.join(scripts, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(scripts, "dist", "driver-anchor.js"), "// installed\n", "utf8");
+  const init = spawnSync("git", ["init", "-q", root], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(init.status, 0, init.stderr);
+
+  withPluginRoot(path.dirname(scripts), () => {
+    assert.equal(kernelSourceScriptsDir(), null, "没有同名源树 ⇒ null（fail-closed，⛔ 不把 cwd 当仓库根）");
+    const w = sourceWatch(root, "promotion");
+    assert.equal(w.state, "unwatched", "无可监视源码是**独立取值**，⛔ 不是 0 冒充的「未变更」");
+    assert.equal(w.mtimeMs, 0, "unwatched 的 mtime 是 0，但取值含义由 state 区分");
+    const s = supervisorStaleness(root, "promotion", process.pid);
+    assert.equal(s.sourceWatch, "unwatched", "陈旧读数把「无源可推进」与「源码未推进」分开报出（硬规则 3b）");
+  });
+});
+
+test("preferredAnchorKernelIn — 构建产物内核只换到**更新的**源树 bundle（⛔ 不换 raw、⛔ 不换更旧的）", (t) => {
+  const root = makeStagingFixture("pref");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stagingScripts = path.join(root, "packages", "quay", "plugin", "scripts");
+  const srcScripts = path.join(root, "plugin", "scripts");
+  const selfJs = path.join(stagingScripts, "dist", "driver-anchor.js");
+  const srcJs = path.join(srcScripts, "dist", "driver-anchor.js");
+  // 「本内核目录」= `path.dirname(kernelSelfPath())` = 那份 driver-anchor.js 所在目录（生产形态里是
+  // `.../scripts/dist` —— 这正是 preferredAnchorKernel 包装传给判定半边的那个值）。
+  const me = path.join(stagingScripts, "dist");
+  const old = new Date(Date.now() - 600_000);
+  const now = new Date(Date.now() - 1_000);
+
+  // (i) 源树 bundle **更新** ⇒ 换过去（同形态：bundle → bundle，⛔ 不换成 raw driver-anchor.ts）。
+  fs.utimesSync(selfJs, old, old);
+  fs.utimesSync(srcJs, now, now);
+  const toNewer = preferredAnchorKernelIn(me, me, srcScripts);
+  assert.equal(toNewer?.path, srcJs, `换到源树那份更新的 bundle: ${JSON.stringify(toNewer)}`);
+  assert.equal(toNewer?.stripTypes, false, "同形态（bundle → bundle）：⛔ 不把 bundle 内核悄悄降成 raw");
+
+  // (ii) 源树 bundle **更旧** ⇒ 不换（否则每次 reconcile 都换到同一版 = 重启风暴）。
+  fs.utimesSync(selfJs, now, now);
+  fs.utimesSync(srcJs, old, old);
+  const toOlder = preferredAnchorKernelIn(me, me, srcScripts);
+  assert.equal(toOlder?.path, selfJs, `更旧的源树 bundle 不被选（⛔ 防重启风暴）: ${JSON.stringify(toOlder)}`);
+
+  // (iii) 没有源树（装好的产物）⇒ 本内核自己（行为与今天逐字相同）。
+  const bare = preferredAnchorKernelIn(me, me, null);
+  assert.equal(bare?.path, selfJs, "无源树 ⇒ 仍是本内核自己");
 });
