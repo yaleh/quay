@@ -1,5 +1,7 @@
 ---
 id: AC-267
+title: SEA 产物的 quay serve 可用：plugin-root.ts 模块顶层求值 import.meta.url 的点数归零 +
+  seaVerify=success
 status: active
 kind: criterion
 goal: GOAL-020
