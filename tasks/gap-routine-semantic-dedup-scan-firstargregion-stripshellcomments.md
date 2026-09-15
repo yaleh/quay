@@ -45,4 +45,9 @@ extract
 - `plugin/scripts/test-isolation-check.ts`
 - `plugin/scripts/adr016-screen-use-check.ts`
 - `plugin/scripts/dead-code-after-return-check.ts`
+- `plugin/scripts/registry-bare-filename-scan.ts`
+- `plugin/scripts/runtime-usage-inventory.ts`
+- `plugin/scripts/source-text-lib.ts`
+- `plugin/scripts/capability-catalog.sh`
+- `plugin/test/source-text-lib.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-firstargregion-stripshellcomments.md`
