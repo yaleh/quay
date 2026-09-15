@@ -276,18 +276,26 @@ release/vX.Y.Z        ← 取代现行的 release-vXXX-build
 
 | 位置 | 版本形态 | 说明 |
 |---|---|---|
-| `develop` 常态 | `0.7.0-dev` | 9 处版本字面量齐步；滚动渠道 B 装到的东西自称 `-dev` ⇒ **自证"不是已发布版本"** |
+| `develop` 常态 | `0.7.0-dev` | **10 处**版本字面量齐步（`VERSION_ENTRIES` 实测 10 条，见「实现要点」）；滚动渠道 B 装到的东西自称 `-dev` ⇒ **自证"不是已发布版本"** |
 | `release/v0.7.0` 上的 bump 提交 | `0.7.0` | 去后缀即定稿；tag 打在合回 develop 的合并点 |
 | 合回 develop 之后 | `0.8.0-dev` | 下一轮开发立即带上新的 `-dev`（⛔ 不要让 develop 停留在无后缀的已发布版本号上，否则 §2.5 的歧义原样复发，只是方向相反） |
 
 **实现要点**【读码】：
-- `scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 是**集中式清单**（9 条），
+- `scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 是**集中式清单**（**实测 10 条**，⛔ 本节原稿写 9 条：本 SPEC 成文时漏数了 `plugin/README.md` 之外的 `plugin/vendor/quay/package.json`，
+  实现期直调 `readVersions()` 取到真实条数后更正），
   改动局部：让比对认 `-dev` 后缀，并断言**要么全带、要么全不带**（⛔ 半带 = 漂移，必须红）
+- **并集之外还有第 11–14 个承载面**：`package-lock.json` 里 `packages/quay{,-native,-github,-backlog}`
+  四条 `version` 同样承载版本号、却不在 `VERSION_ENTRIES` 内（实现期实测发现的缺口，本 SPEC 原稿未列）
+  ⇒ 版本 bump 必须把这 4 条一并改齐并提交。⚠️ 这 4 条**同时**是硬规则 11b 的实例：一个只改工作树、不提交的
+  改动已经在影响盘上读数，却对任何读 git 的人不可见。
 - `0.7.0-dev` 是合法 semver prerelease ⇒ `package.json` / `npm pack` 接受
 - 产物名在非发布构建下会带后缀（`quay-0.7.0-dev.tgz` / `quay-sea-0.7.0-dev-linux-x64.tar.gz`），
   **正式发布产物名不变**（release 分支上已去后缀）
-- ⚠️ **一个需实测的未知**：Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀。
-  ⛔ 不得假定可行——落实前先用一次真实 `/plugin install` 验证（残留项，§10）
+- ✅ **原「需实测的未知」已于 2026-09-15 实测关闭**：Claude Code marketplace **接受** prerelease 后缀。
+  读数（`gap-develop-version-union-missing-dev-suffix`，隔离的 `CLAUDE_CONFIG_DIR` 真实安装）：
+  `claude plugin install quay@quay -s user --json` → `{"outcome":"ok",…}`，
+  `claude plugin list --json` → `"version":"0.7.0-dev"`、`installPath=…/plugins/cache/quay/quay/0.7.0-dev`
+  ⇒ 该字段不仅接受，还以它作为 cache 目录的键。残留 1 已结算（§10 同步）。
 
 ### 4.4 打 tag 与发布：复用已被证过的三点同一判据
 
@@ -476,7 +484,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
 | 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ **已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 其它 clone 需各跑一次 `git remote set-head origin -a`（`AC-273` 守此量） |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ 下一次切版本时即可采用；现存两条 `release-v06x-build` 按判据乙清理 |
-| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ 可实现；⚠️ marketplace 是否接受 prerelease 版本号需先实测（§10 残留 1） |
+| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭） |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
 | 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布）；⚠️ 第 4 步落地后**这一步是自动发生的**，不需要另外的人工动作 |
 | 6 | hotfix 线 | 第 5 步 + 真实触发条件出现（§5） | ❌ 且**不应催化**（发生率 1） |
@@ -495,12 +503,13 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 | # | 残留 | 为什么不能靠推断解决 | 触发点 |
 |---|---|---|---|
-| 1 | Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`） | 官方 schema 未声明该约束；⛔ 「semver 合法」不蕴含「该渠道接受」（同硬规则 5：某来源没说不等于不存在限制） | §9 第 3 步落地前，用一次真实 `/plugin install` 验证 |
+| 1 | ~~Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`）~~ | **已关闭（2026-09-15T15:0xZ，`gap-develop-version-union-missing-dev-suffix`）**：接受。真实安装读数（隔离 `CLAUDE_CONFIG_DIR`）：`claude plugin install quay@quay -s user --json` → `{"outcome":"ok","plugin":"quay@quay","scope":"user"}` exit 0；`claude plugin list --json` → `"version":"0.7.0-dev"`，`installPath=…/plugins/cache/quay/quay/0.7.0-dev` ⇒ 该字段不仅接受 prerelease，还以它作 cache 键。⚠️ 顺带读数：该次安装时 marketplace 目录（默认分支 develop）仍声明 `version: 0.7.0`，而拉到的插件 manifest 为 `0.7.0-dev` —— CLI 报的是**拉到的插件**那一侧；本 SPEC 第 3 步落地 develop 后两侧一致 | — |
 | 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
 | 3 | ~~判据甲–戊的立案时机~~ | **已关闭**：2026-09-15T14:0xZ 全部立案为 `AC-270`..`AC-274`（`--expect-absent`，挂 GOAL-020），见 §7 | — |
 
 ---
 
-**执行状态（2026-09-15T14:1xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
-第 2/3/4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
+**执行状态（2026-09-15T15:1xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
+**第 3 步已完成**（`gap-develop-version-union-missing-dev-suffix`：并集 10 条 + lockfile 4 条齐步 `0.7.0-dev`、checker 认后缀 + all-or-none、`AC-272` pass、`origin/dist-plugin` 重发、marketplace 实测接受 prerelease）；
+第 2/4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
 ⛔ 本文件自身仍不推进任何分支——master 至今未动，且按裁定 4 这正是正确输出。
