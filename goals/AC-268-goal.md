@@ -1,5 +1,6 @@
 ---
 id: AC-268
+title: release 渠道经 workflow_dispatch 真发出一个版本（conclusion=success）
 status: active
 kind: criterion
 goal: GOAL-020
