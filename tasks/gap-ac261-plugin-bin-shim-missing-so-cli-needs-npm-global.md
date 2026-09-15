@@ -122,6 +122,6 @@ chmod 755 plugin/bin/quay -> fail 0 / pass 5   （全绿）
 **途中发现并当场修掉的两处（都会静默丢掉 shim）**
 
 1. `plugin/scripts/publish-dist-branch.sh` 在**装了本仓 pre-commit 钩子**的机器上根本跑不起来：钩子做 `git rev-parse --show-toplevel` 后执行 `$ROOT/plugin/scripts/precommit-guard.ts`，而该文件正是这个脚本自己的「删掉 raw `.ts`」步骤刚从孤儿工作树里删掉的 ⇒ commit 步 `MODULE_NOT_FOUND`。修复前实测 `rc=1` 与上述报错；加 `--no-verify` + 说明（源树提交策略对一个生成型孤儿产物提交没有主体：该分支上根本没有 `tasks/`，其唯一消费者是 Claude Code 的插件安装器）后 `rc=0`。CI 从未见过它——钩子不随 clone 走。既有缺陷，成因与本条无关，但它挡住了 DoD 里的那一步。
-2. `plugin/sync.sh --install-user-scope` 的 **tar 不可用 fallback** 逐目录列举要拷贝的插件子树（`skills scripts workflows agents store… probes loop` → 原为 `skills scripts workflows agents vendor probes loop`），**不含 `bin`** ⇒ 该路径会装出一个 CLI 入口直接消失的插件。已补 `bin`。
+2. `plugin/sync.sh --install-user-scope` 的 **tar 不可用 fallback** 逐目录列举要拷贝的插件子树，原列举为 `skills scripts workflows agents vendor probes loop` —— **不含 `bin`** ⇒ 该路径会装出一个 CLI 入口直接消失的插件。已补 `bin`。
 
 **未测的残余（如实记，⛔ 不与"已验证"混同）**：Claude Code 把 marketplace 插件目录复制进自己的 cache 那一步是否保留 mode 位，本条**没有实测**——那需要一次真的 `/plugin install`（会改写用户插件 cache，且要网络），超出本 worker 的范围。已测的两条渠道覆盖的是**交付物本身**（git 孤儿分支：git 存 100755；npm tarball：0o755 且解包后可执行）；cache 复制是 Claude Code 自身行为，不在本仓的交付面内。
