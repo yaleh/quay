@@ -1,7 +1,7 @@
 ---
 id: AC-260
 title: 缺口A：dist-plugin 交付面上带 cwd 相对 plugin/ 前缀的 dist 引用归零（基线 96/96 全是错形）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: |-
@@ -68,6 +68,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-019 已激活，本 AC 进入在评
+  - at: 2026-09-15T04:42:23.035Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

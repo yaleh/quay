@@ -47,7 +47,7 @@ resume 重跑 publish-dist-branch.sh 与 `bash packages/quay/scripts/package.sh`
 
 - [x] AC1–AC5 全勾；AC1/AC2 的读数来自真实安装形态（孤儿分支 + `npm pack` 产物），不是开发检出里的直接调用（inherited-core 的标准 DoD：REAL LANDING 是门槛）。
 - [x] 实现落地后重跑 `bash plugin/scripts/publish-dist-branch.sh`，让 AC-261 读到的是新交付面而不是旧的。
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global` 绿；全量由 fan-in 机械跑。
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global` 绿；全量由 fan-in 机械跑。
 
 ## Dispatch review
 
@@ -107,7 +107,7 @@ $ tar -tvzf quay-0.7.0.tgz | grep plugin/bin/quay
 
 **AC3 — publish-dist-branch.sh 的 rsync 是否保留 mode 位：保留。** 机制是 `rsync -a --exclude='.git'`（`-a` 含 `-p`），但读数取自 AC2(a) 的 `100755`——**穿过真实发布流程量出来的，不是读旗标推断的**。rsync 本身无需改动。
 
-**AC4 — README 按位置核对**：`:80` 原文「This installs the `quay` binary on your PATH.」→ 补明「**one of two ways to get one**, not the only one」并指向 Option C；`:137` 原文「This is the **only** supported way to install for the CLI alone.」→ 改为「installs the CLI **without** registering the plugin … not the only way to get a `quay` binary」；Option C 段（原 `:190-194`）后新增一段，写明 Claude Code 把每个启用插件的 `bin/` 加进 Bash tool PATH、插件在那里交付 `plugin/bin/quay`、它转调自带 bundle，故 `quay --help` / `quay config validate` / `quay task list` 免 npm 可用；末尾「Pick one」段补一句：两条路都给 `quay` 二进制（A 走 npm 全局 bin，C 走插件自己的 `bin/quay`）。
+**AC4 — README 按位置核对**：`:80` 原文「This installs the `quay` binary on your PATH.」→ 补明「**one of two ways to get one**, not the only one」并指向 Option C；`:137` 原文「This is the **only** supported way to install for the CLI alone.」→ 改为「installs the CLI **without** registering the plugin … not the only way to get a `quay` binary」；Option C 段（原 `:190-194`）后新增一段，写明 Claude Code 把每个启用插件的 `bin/` 加进 Bash tool PATH、插件在那里交付 `plugin/bin/quay`、它转调自带 bundle，故 `quay --help` / `quay config validate` / `quay task list` 免 npm 可用；末尾「Pick one」段补一句：两条路都给 `quay` 二进制（A 走 npm 全局 bin，C 走插件自己的 `bin/quay`）。同类「CLI 只能靠 npm」的表述在 README 之外**全店扫过**，无第二处（`experiments/quay-continuous-bootstrap/**` 的命中是已退役经典循环的历史档案，不在交付面）。
 
 **AC5 — 负控制，红绿两面都实测**（`node --test plugin/test/plugin-bin-shim-npm-free-cli.test.mjs`）：
 ```
@@ -117,7 +117,11 @@ chmod 755 plugin/bin/quay -> fail 0 / pass 5   （全绿）
 另有套件内同轴红绿对（shim 字节复制到临时插件根，644 vs 755）：`644 -> rc=126 "Permission denied"`、`755 -> rc=0`。
 ⚠️ 这里纠正了一个差点让负控制空转的写法：**`command -v quay` 对 mode 644 的文件照样返回路径且 rc=0**（实测），所以「存在性探针」在红绿两半都会绿、什么都证明不了；判据必须**执行**它。
 
+**scoped 门（DoD 第 3 条）**：`bash scripts/test.sh --for-task gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global --allow-thin` ⇒ **rc=0，`✖` 计数 0**；scoped 静态层全部 PASS（含 test-isolation / tmp-leak-pairing / test-file-snapshot / checked-in-write / landing-target / suite-slot-SSoT / quay-init-closure-ratchet 等），测试层本文件 5/5 通过。选择面被标 thin（6 条 Touches 只有 1 条解出对应测试——Touches 里本就只有测试文件自身带测试），`--allow-thin` 正是为此传入；全量由 fan-in 机械跑。scoped-gate cache 已按 develop sha 写入。
+
 **途中发现并当场修掉的两处（都会静默丢掉 shim）**
 
 1. `plugin/scripts/publish-dist-branch.sh` 在**装了本仓 pre-commit 钩子**的机器上根本跑不起来：钩子做 `git rev-parse --show-toplevel` 后执行 `$ROOT/plugin/scripts/precommit-guard.ts`，而该文件正是这个脚本自己的「删掉 raw `.ts`」步骤刚从孤儿工作树里删掉的 ⇒ commit 步 `MODULE_NOT_FOUND`。修复前实测 `rc=1` 与上述报错；加 `--no-verify` + 说明（源树提交策略对一个生成型孤儿产物提交没有主体：该分支上根本没有 `tasks/`，其唯一消费者是 Claude Code 的插件安装器）后 `rc=0`。CI 从未见过它——钩子不随 clone 走。既有缺陷，成因与本条无关，但它挡住了 DoD 里的那一步。
-2. `plugin/sync.sh --install-user-scope` 的 **tar 不可用 fallback** 逐目录列举要拷贝的插件子树（`skills scripts workflows agents vendor probes loop`），**不含 `bin`** ⇒ 该路径会装出一个 CLI 入口直接消失的插件。已补 `bin`。
+2. `plugin/sync.sh --install-user-scope` 的 **tar 不可用 fallback** 逐目录列举要拷贝的插件子树，原列举为 `skills scripts workflows agents vendor probes loop` —— **不含 `bin`** ⇒ 该路径会装出一个 CLI 入口直接消失的插件。已补 `bin`。
+
+**未测的残余（如实记，⛔ 不与"已验证"混同）**：Claude Code 把 marketplace 插件目录复制进自己的 cache 那一步是否保留 mode 位，本条**没有实测**——那需要一次真的 `/plugin install`（会改写用户插件 cache，且要网络），超出本 worker 的范围。已测的两条渠道覆盖的是**交付物本身**（git 孤儿分支：git 存 100755；npm tarball：0o755 且解包后可执行）；cache 复制是 Claude Code 自身行为，不在本仓的交付面内。
