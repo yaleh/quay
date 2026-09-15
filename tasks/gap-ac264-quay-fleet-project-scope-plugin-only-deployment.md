@@ -37,7 +37,7 @@ goal_ac: AC-264
 
 ## Contract
 
-measure ac264_record_fields = `tail -n 1 .quay/productization-verification.jsenl` 形式的载体末条读取（真实文件 `.quay/productization-verification.jsonl`）里 ac 为 GOAL-019-AC-264 那条的十个字段读数：project_root / install_scope / install_channel / npm_global_used / quay_plugin_root_unset / goal_ring_ok / task_status / commit_sha / produced_by_driver / plugin_cache_path
+measure ac264_record_fields = `grep 'GOAL-019-AC-264' .quay/productization-verification.jsonl | tail -n 1` 取到的那条记录的十个字段读数：project_root / install_scope / install_channel / npm_global_used / quay_plugin_root_unset / goal_ring_ok / task_status / commit_sha / produced_by_driver / plugin_cache_path
 band n/a: 字段存在性与取值判据，无数值区间
 invariant fleet_config_not_bound_to_dev_checkout = quay-fleet 的 .quay/config.yml 绑定行含 .claude/plugins/cache/ 且不含 /home/yale/work/quay/plugin 与 /home/yale/work/quay/packages
 invoke `node --experimental-strip-types plugin/scripts/goal-driver.ts --root /home/yale/work/quay-fleet`
@@ -63,7 +63,7 @@ resume 重新读 quay-fleet 的 .claude/settings.json 与 .quay/config.yml 两�
 
 reviewer: human
 at: 2026-09-15
-changed: 无（字段清单、两个文件系统直接量、两条陷阱、现状读数均按人给定原样落盘；Touches 按 ready-pool-check 的真实要求判定为「自身任务体 + 证据载体」两条）
+changed: 立案当轮修正 Contract 的 measure 命令拼写（载体扩展名 .jsonl），其余按人给定原样落盘
 
 ## Touches
 
