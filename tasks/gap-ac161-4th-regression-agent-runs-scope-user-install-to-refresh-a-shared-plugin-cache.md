@@ -2,7 +2,7 @@
 id: gap-ac161-4th-regression-agent-runs-scope-user-install-to-refresh-a-shared-plugin-cache
 title: AC-161 第四次回归：在飞 agent 为了刷新跨 scope 共享的 plugin cache 顺手跑 `--scope
   user`——判据只钉在被声明的通道上，于是「任何拿 Bash 的 agent」这条通道从未被覆盖
-status: ready
+status: done
 labels:
   - gap
   - defect
