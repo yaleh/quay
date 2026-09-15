@@ -87,6 +87,7 @@ exit=1
 - `README.md`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-ac161-4th-regression-agent-runs-scope-user-install-to-refresh-a-shared-plugin-cache.md`
+- `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`
 
 ## Result
 
@@ -242,3 +243,39 @@ bash scripts/test.sh --for-task gap-ac161-4th-regression-agent-runs-scope-user-i
 ### 第 5 个实例观察（⛔ 不作阻塞位）
 
 立案当轮在飞的 `gap-ac264-quay-fleet-project-scope-plugin-only-deployment` 仍存在 worktree、仍有 worker 进程；本任务执行期间与收尾时**复核 criterion 均为 exit 0**（`~/.claude/settings.json` sha 稳定在 `95fa6714…`，predicate = `absent`），**未复现** ⇒ 尚无第 5 个实例可记。该 worker 的任务正需要反复操作 plugin cache，故本条的**新闸**（AC-257 记录在用户级有 quay 键时拒写 + AC-161 criterion 每轮跑）是它下次排污时的可见面。
+
+### 补充（2026-09-15，fan-in 全量套件红 ⇒ 已修）—— ⑥ shipped-set closure 的陈旧字面量
+
+fan-in 全量套件 `# fail 1`，唯一红点 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs:137`：
+`assert.match(r.stdout, /empty-list → violations=5 \(expect ≥1/)`，实测 **6**。
+
+**机械 delta-relatedness 判它 UNRELATED 是错的**（与 `e357db3ad` 同形、同一文件、同一根因类）：该断言不 import 任何东西，
+它 `spawnSync` 跑 `develop-deliver-tgz.sh --selfcheck-transport-closure`，而后者**读 shell 脚本文本**抽取
+「消费者 `verify-deliver-coldstart.sh` 引用的 `$SCRIPT_DIR` 兄弟」（`sed '/^selfcheck() {/,/^}$/d' | grep -oE '…\.(ts|mjs|js|sh)'`）
+⇒ 一跳 import 检查结构上看不见这条依赖。**worktree 内当场复现（6 ≠ 5）⇒ 真因，非环境噪声。**
+
+**根因**：本任务 AC6 的结构性控制引入 `local ac161_self="$SCRIPT_DIR/verify-deliver-coldstart.sh"`（`verify-deliver-coldstart.sh:8234`），
+消费者引用集 5 → 6。⛔ **不是脚本的缺陷**：该文件确实在 `transport_flat_files()` 中，被点名是**正确**行为
+（`positive → violations=0` 未变）；陈旧的只是测试里的字面量。
+
+**修法（照 `e357db3ad` 先例：推导，⛔ 不写字面量）**：期望值改为**由消费者的实际引用集推导** ——
+JS 侧独立镜像同一段 `sed` 范围删除与同一正则，断言 `violations == |refs|`。
+两个**独立实现**（shell 的 sed/grep vs JS）读同一个消费者 ⇒ 这是测量而非回声（硬规则 4），
+且**新增兄弟引用时测试无需改动**。
+
+**取假控制（两组，均在本 worktree 当场跑）**：
+
+```
+控制 A（反陈旧 —— 证明它不再是字面量）：脚本尾部加一行
+  # control probe (temporary): ${SCRIPT_DIR}/repo-root.ts
+  ⇒ 消费者引用 6 → 7，测试**零改动仍绿**（旧字面量 5、或把 5 改成 6 的写法，都会红）
+
+控制 B（能取假 —— 证明它真的在比对）：再把 develop-deliver-tgz.sh:427 的抽取正则
+  \.(ts|mjs|js|sh)  →  \.(ts|mjs|js)
+  ⇒ shell 报 6 / JS 报 7 ⇒ 新断言转红，判词点名推导集：
+  `the empty-list violation count must equal the CONSUMER's own sibling references (7: pane-state-classify.ts, provider-binding-resolvability-check.ts, quay-init-closure-assertion.ts, repo-root.ts, runner-state-write.ts, verify-deliver-coldstart.sh, write-json-atomic.ts)`
+```
+
+两个临时改动均已 `git checkout --` 还原（还原后 `git status` 仅剩本测试文件一处 `M`）。
+修复后 `node --test plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` ⇒ **19/19 pass**。
+`## Touches` 已补 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（同一改动面：改了消费者引用集，钉住该面的守卫必须随之更新）。
