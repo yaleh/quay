@@ -25,6 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 // ── 位置掩码 (comment-only: 只标注释为非代码, 字符串/模板字面量保持代码) ─────────────────────
 // 与 checker-lib.ts 的 buildNonCodeMask 不同: 那个把字符串也标为非代码 (用于「命令位置」判定);
@@ -103,25 +104,17 @@ function maskFor(f: string): (src: string) => Uint8Array {
 const SKIP_DIRS = new Set(["node_modules", "vendor", "fixture", ".git", ".quay", "dist", "coverage"]);
 const CODE_EXTS = new Set([".ts", ".sh", ".mjs", ".js"]);
 
-/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules)。 */
+/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules)。
+ *  遍历用 fs-walk.ts；skip 集与扩展名集仍是本检查器自己的。 */
 export function walkCodeFiles(root: string): string[] {
-  const out: string[] = [];
   const roots = ["plugin", "packages", "experiments", "scripts"].map((d) => path.join(root, d));
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (CODE_EXTS.has(path.extname(e.name))) out.push(p);
-    }
-  };
-  for (const r of roots) if (fs.existsSync(r)) walk(r);
+  const out = roots.flatMap((r) =>
+    walkFiles(r, {
+      absolute: true,
+      prune: (name) => SKIP_DIRS.has(name),
+      include: (name, ext) => CODE_EXTS.has(ext),
+    }),
+  );
   return out.sort();
 }
 

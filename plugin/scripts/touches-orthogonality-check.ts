@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { acquireCoreSrc } from "./core-src-import.ts";
+import { walkFiles as walkFilesShared } from "./fs-walk.ts";
 // The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
 // with fan-in/ff-merge.ts's clean-tree check). tasks/gap-quay-init-gitignore-misses-quay-runtime-
 // artifacts-outside-dot-quay: the `.quay/`-only口径 used to live in BOTH judges; only the ff's half was
@@ -141,26 +142,14 @@ function globToRegExp(glob) {
 // ── walkFiles / expandGlobs ──────────────────────────────────────────────────────────────────────
 // Walk `root` returning repo-relative POSIX paths of every regular file, skipping VCS/dep dirs.
 const SKIP_DIRS = new Set([".git", "node_modules", ".quay"]);
+// Traversal is fs-walk.ts (aliased — this module's own export is also named `walkFiles` and is
+// imported by slot-refill.ts / ready-pool-check.ts, so that name must not move).
 export function walkFiles(root) {
-  const out = [];
-  const walk = (abs, rel) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
-        walk(path.join(abs, e.name), rel ? `${rel}/${e.name}` : e.name);
-      } else if (e.isFile()) {
-        out.push(rel ? `${rel}/${e.name}` : e.name);
-      }
-    }
-  };
-  walk(root, "");
-  return out;
+  return walkFilesShared(root, {
+    sort: false,
+    prune: (name, isDir) => isDir && SKIP_DIRS.has(name),
+    include: (_name, _ext, entry) => entry.isFile(),
+  });
 }
 
 // Expand globs to the concrete set of repo-relative files under `root` that match any of them.

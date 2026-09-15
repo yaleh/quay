@@ -66,6 +66,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildNonCodeMask, isRegexStart } from "./checker-lib.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { scanRoots } from "./fs-walk.ts";
 
 /** Concurrency keywords carried by a value's identifier (P1) or key (P4) — the structural signal
  *  that a numeric literal is a CONCURRENCY value (并发数/槽数/lane 数), as opposed to a timeout,
@@ -257,23 +258,11 @@ const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp }> = [
   { dir: "plugin/workflows", rel: "plugin/workflows", ext: /\.js$/ },
 ];
 
+/** Directories pruned while walking a scan root (traversal lives in fs-walk.ts#scanRoots). */
+const SURFACE_SKIP_DIRS = new Set(["node_modules", ".git", "test", "checker-mutation-cases"]);
+
 export function scanSurface(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string, base: string, ext: RegExp) => {
-    if (!fs.existsSync(dir)) return;
-    for (const f of fs.readdirSync(dir)) {
-      const abs = path.join(dir, f);
-      const s = fs.statSync(abs);
-      if (s.isDirectory()) {
-        if (f === "node_modules" || f === ".git" || f === "test" || f === "checker-mutation-cases") continue;
-        walk(abs, path.join(base, f), ext);
-      } else if (ext.test(f)) {
-        out.push(path.join(base, f));
-      }
-    }
-  };
-  for (const { dir, rel, ext } of SCAN_ROOTS) walk(path.join(root, dir), rel, ext);
-  return out.sort();
+  return scanRoots(root, SCAN_ROOTS, SURFACE_SKIP_DIRS);
 }
 
 /** The marker token appears in the hit line or in the attached declaration comment block (the

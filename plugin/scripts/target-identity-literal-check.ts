@@ -49,6 +49,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
+import { scanRoots } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -185,24 +186,11 @@ const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp; recursive: bool
   { dir: "packages/quay/src", rel: "packages/quay/src", ext: /\.ts$/, recursive: true },
 ];
 
+/** Directories pruned while walking a scan root (traversal lives in fs-walk.ts#scanRoots). */
+const SURFACE_SKIP_DIRS = new Set(["node_modules", ".git", "test", "dist", "ts-demo"]);
+
 export function scanSurface(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string, base: string, ext: RegExp, recursive: boolean) => {
-    if (!fs.existsSync(dir)) return;
-    for (const f of fs.readdirSync(dir)) {
-      const abs = path.join(dir, f);
-      const s = fs.statSync(abs);
-      if (s.isDirectory()) {
-        if (!recursive) continue;
-        if (f === "node_modules" || f === ".git" || f === "test" || f === "dist" || f === "ts-demo") continue;
-        walk(abs, path.join(base, f), ext, recursive);
-      } else if (ext.test(f)) {
-        out.push(path.join(base, f));
-      }
-    }
-  };
-  for (const { dir, rel, ext, recursive } of SCAN_ROOTS) walk(path.join(root, dir), rel, ext, recursive);
-  return out.sort();
+  return scanRoots(root, SCAN_ROOTS, SURFACE_SKIP_DIRS);
 }
 
 /** 组合判定（含扫描面读取）。RED(1) > NOT-EVALUATED(3) > PASS(0)。 */

@@ -63,6 +63,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { buildFileIndex, type FileIndex } from "./fs-walk.ts";
 
 // ── Scan surface (a ## Contract invariant — missing target = ERROR, never silent green) ──────────────
 export const CORES = [
@@ -238,43 +239,11 @@ export function runAnchorChecks(root: string, coresText: Map<string, string>): {
 
 // ── AC4: pointer targets exist ───────────────────────────────────────────────────────────────────────
 
-export interface FileIndex {
-  byBasename: Map<string, string>;
-  byStem: Map<string, Set<string>>;
-}
-
-export function buildFileIndex(root: string): FileIndex {
-  const byBasename = new Map<string, string>();
-  const byStem = new Map<string, Set<string>>();
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        // Exclude hidden / node_modules / TEST-ARTIFACT + WORKTREE dirs: a basename found only in
-        // tmp/worktree/milestone copies must not falsely resolve a genuinely stale reference.
-        if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "tmp"
-          || e.name === "worktrees" || e.name === "milestones") continue;
-        walk(path.join(dir, e.name));
-        continue;
-      }
-      const rel = path.relative(root, path.join(dir, e.name)).split(path.sep).join("/");
-      if (!byBasename.has(e.name)) byBasename.set(e.name, rel);
-      const dot = e.name.lastIndexOf(".");
-      if (dot > 0) {
-        const stem = e.name.slice(0, dot);
-        if (!byStem.has(stem)) byStem.set(stem, new Set());
-        byStem.get(stem)!.add(e.name.slice(dot + 1));
-      }
-    }
-  };
-  walk(root);
-  return { byBasename, byStem };
-}
+// buildFileIndex now lives in fs-walk.ts (it was byte-identical to threshold-scope-check.ts's copy
+// apart from a comment — .quay/routine-findings.jsonl finding `fs-walk-family`). Re-exported so this
+// module's public surface is unchanged.
+export type { FileIndex };
+export { buildFileIndex };
 
 /** Extract path-like candidates from a backtick token (same judgment as threshold-scope-check:
  *  slash-bearing tokens that start at a repo top-level or carry a known extension; bare basenames

@@ -36,6 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 // ── 别名索引 ───────────────────────────────────────────────────────────────────────────────────
 
@@ -91,45 +92,24 @@ const CODE_EXTS = new Set([".ts", ".sh", ".mjs", ".js"]);
 const MD_EXTS = new Set([".md"]);
 
 export function walkDcCodeFiles(root: string): string[] {
-  const out: string[] = [];
   const roots = ["plugin", "packages", "experiments", "scripts", ".claude/workflows"].map((d) => path.join(root, d));
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (CODE_EXTS.has(path.extname(e.name))) out.push(p);
-    }
-  };
-  for (const r of roots) if (fs.existsSync(r)) walk(r);
+  const out = roots.flatMap((r) =>
+    walkFiles(r, {
+      absolute: true,
+      prune: (name) => SKIP_DIRS.has(name),
+      include: (name, ext) => CODE_EXTS.has(ext),
+    }),
+  );
   return out.sort();
 }
 
 /** .md 文档文件 (doc 位置引用的载体)。全仓枚举, 排除 skip 目录。 */
 export function walkDocFiles(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (MD_EXTS.has(path.extname(e.name))) out.push(p);
-    }
-  };
-  walk(root);
-  return out.sort();
+  return walkFiles(root, {
+    absolute: true,
+    prune: (name) => SKIP_DIRS.has(name),
+    include: (name, ext) => MD_EXTS.has(ext),
+  });
 }
 
 function relOf(root: string, f: string): string {

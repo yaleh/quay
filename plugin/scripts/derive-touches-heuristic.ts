@@ -37,6 +37,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 // Recognized file extensions for a BARE token (no "/") to be considered path-shaped at all.
 const EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|md|yml|yaml|sh|json|py|txt|sql|css|html)$/i;
@@ -84,25 +85,12 @@ export function extractPathTokens(text: string): string[] {
 // ── walkRepo ─────────────────────────────────────────────────────────────────────────────────────
 // Repo-relative POSIX paths of every regular file under `root`, skipping SKIP_DIR_NAMES.
 export function walkRepo(root: string): string[] {
-  const out: string[] = [];
-  const walk = (abs: string, rel: string) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        if (SKIP_DIR_NAMES.has(e.name)) continue;
-        walk(path.join(abs, e.name), rel ? `${rel}/${e.name}` : e.name);
-      } else if (e.isFile()) {
-        out.push(rel ? `${rel}/${e.name}` : e.name);
-      }
-    }
-  };
-  walk(root, "");
-  return out;
+  // Unsorted on purpose (callers index this list); traversal is fs-walk.ts, the skip-set local.
+  return walkFiles(root, {
+    sort: false,
+    prune: (name, isDir) => isDir && SKIP_DIR_NAMES.has(name),
+    include: (_name, _ext, entry) => entry!.isFile(),
+  });
 }
 
 // ── resolveBareFilenames ─────────────────────────────────────────────────────────────────────────
