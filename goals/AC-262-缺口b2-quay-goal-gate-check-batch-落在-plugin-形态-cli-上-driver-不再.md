@@ -2,7 +2,7 @@
 id: AC-262
 title: 缺口B2：quay goal gate/check/batch 落在 plugin 形态 CLI 上，driver 不再引用 Core
   源码树，且生产载体里 goal-ring 非 failed
-status: draft
+status: active
 kind: criterion
 goal: GOAL-019
 criterion: |-
@@ -72,4 +72,15 @@ origin: 2026-09-15 实测：goal/meta driver 对
   goal-store.ts；goal-store.ts:3042-3043 的 main 守卫在 bundle 里故意为 false，所以 bundle
   自带 CLI dispatch 不可达。缺的不是代码，是调用方式。人 2026-09-15 裁定采用 B2（补 CLI 动词）而非 B1（改
   in-process）。
+activatedAt: 2026-09-15T04:01:51.228Z
+statusLog:
+  - at: 2026-09-15T04:01:51.228Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-019 已激活，本 AC 进入在评
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T04:01:51.227Z
 ---
