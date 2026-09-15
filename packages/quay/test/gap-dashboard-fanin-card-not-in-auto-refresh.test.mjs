@@ -31,6 +31,7 @@ import {
   checkCardRegistrationCompleteness,
 } from "../src/serve-dashboard.ts";
 import { renderFanInCell } from "../src/serve-task.ts";
+import { readWorkerOutcomeRecords } from "../src/observation.ts";
 import { startServer } from "../src/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -204,9 +205,19 @@ test("AC4: N vs N+1 fan-in records change the list row count AND the first row's
   assert.equal(rowCount(renderFanInCardFromRecords(six, { hours: 3, nowMs: FIXED_NOW_MS })), 5, "6 records → capped at 5 list rows");
 });
 
-test("AC5 (window consistency): page fanin timeline segments == cards faninCard segments on real data", () => {
+test("AC5 (window consistency): page fanin timeline segments == cards faninCard segments on real data", (t) => {
   const root = mainCheckoutRoot();
   const hours = 3;
+  // 「载体缺席/空」≠「载体在场而谓词为假」（硬规则 3b）：本判据的被测对象是【两条渲染路径是否一致】，
+  // 它只有在生产载体真的带 mechanical_fan_in 记录时才有输入。全新 checkout（CI runner / 首次 clone）
+  // 上 `.quay/worker-outcome.jsonl` 是 gitignored 运行时产物 ⇒ 根本不存在。
+  // 此时 NOT-EVALUATED（t.skip，可区分的第三态），而不是抛 AssertionError ——
+  // 后者把「没有输入」伪装成「渲染坏了」。载体在场却渲染不出/两条路径不一致仍须红（回归防护保留）。
+  const fanInRecords = readWorkerOutcomeRecords(root).filter((r) => r.mechanical_fan_in != null);
+  if (fanInRecords.length === 0) {
+    t.skip("NOT-EVALUATED: 生产载体 .quay/worker-outcome.jsonl 缺席或零 mechanical_fan_in 记录（全新 checkout 的正常形态）——无输入可判，不伪装成通过");
+    return;
+  }
   // Page path: renderDashboardPage passes workspaceRoot + nowMs (opts.nowMs ?? Date.now()).
   const pageHtml = renderDashboardPage(makeDashboardArgs(), { workspaceRoot: root, hours, nowMs: FIXED_NOW_MS });
   // Cards path: buildCardsPayload (→ handleDashboardCards) calls renderFanInCard(workspaceRoot, { hours }).

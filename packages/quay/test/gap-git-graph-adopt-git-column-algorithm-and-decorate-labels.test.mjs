@@ -151,7 +151,15 @@ test("AC3: the rendered label set equals the %D-nonempty commit set; develop app
   assert.equal(setMismatch, 0, `the label set matches %D-nonempty commits exactly (mismatch ${setMismatch})`);
 
   let developCount = 0;
-  for (const r of layout.rows) for (const d of r.decorations) if (d === "develop") developCount++;
+  // `%D` renders the CHECKED-OUT branch's own decoration as the COMBINED `HEAD -> <name>` form, never a
+  // separate bare `<name>` entry (parseDecorations keeps it as one raw string — AC4: the HEAD split is
+  // the client renderer's job). So a bare `d === "develop"` under-counts by one whenever `develop` is
+  // the checked-out branch — which is exactly the shape of a fresh `actions/checkout@v4` in CI
+  // (workflow triggers on `push: branches: [develop]`) and of any contributor with develop checked out.
+  // Root cause of the CI failure (`got 0`); measured directly on a fresh clone at a different path.
+  // Both forms name the develop label ⇒ still exactly one, so AC3's invariant is unchanged.
+  const namesDevelop = (d) => d === "develop" || /^HEAD\s*->\s*develop$/.test(d);
+  for (const r of layout.rows) for (const d of r.decorations) if (namesDevelop(d)) developCount++;
   assert.equal(developCount, 1, `develop label appears on exactly one commit (got ${developCount}, was 6)`);
 });
 

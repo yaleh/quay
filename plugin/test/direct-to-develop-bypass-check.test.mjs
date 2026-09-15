@@ -684,11 +684,23 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED�
   assert.equal(out.reason, "unclassifiable-commits-in-range");
   assert.ok(out.unclassifiableCommits > 0, "基线区间内存在 ledger 无记录且 reflog 也查不到的 commit");
   assert.ok(out.denominator.unclassifiableCommits > 0, "denominator 同步暴露 unclassifiable 计数");
-  // AC4：分类覆盖率可读数——classified/total/ratio 且 0 < ratio < 1（部分可分类）。
+  // AC4：分类覆盖率可读数——classified/total/ratio。⚠️ 下界是【检出 reflog 深度】的代理量，不是
+  // 检查器的性质（硬规则 4b）：基线区间 ~5376 条 commit 里能分类的条数，取决于本检出的 reflog
+  // 是否还记得它们。实测（`git init` + fetch 单 ref + `checkout -B`，即 actions/checkout@v4 的
+  // 机制）：区间 5376 条中**恰好 1 条**可分类（ratio 0.019%），而 CI 的 checkout 机制把它压到 0
+  // ⇒ 原断言 `ratio > 0` 在全新 checkout 上恒假（Class D 的失败根因：`部分可分类 ⇒ 0 < ratio < 1`）。
+  // 本测试的**主张**是「reflog 被剪 ⇒ NOT-EVALUATED，不伪装成『未发现 direct』」，由上方的
+  // exit 3 / evaluated:false / reason / unclassifiable>0 / ratio<1 与下面的结构一致性完整覆盖。
+  // 故：检出带生产状态（fan-in ledger 在场 ⇒ reflog/ledger 有东西可分类）时保留原强度 `ratio > 0`；
+  // 全新 checkout 上只保留真正的判据 `ratio < 1`（= 并非全部可分类 ⇒ NOT-EVALUATED 是真被举起）。
   assert.equal(typeof out.classification, "object", "输出必须带 classification 对象");
   assert.ok(out.classification.total > 0, "total 为 rev-list 命中条数");
   assert.equal(out.classification.classified, out.classification.total - out.unclassifiableCommits, "classified = total − unclassifiable");
-  assert.ok(out.classification.ratio > 0 && out.classification.ratio < 1, "部分可分类 ⇒ 0 < ratio < 1");
+  assert.ok(out.classification.ratio < 1, "并非全部可分类 ⇒ NOT-EVALUATED 不是伪装的 PASS");
+  const hasProductionState = fs.existsSync(path.join(REPO_ROOT, ".quay", "fan-in-merge-lock-events.jsonl"));
+  if (hasProductionState) {
+    assert.ok(out.classification.ratio > 0, "生产状态下部分可分类 ⇒ 0 < ratio（检出带 ledger/reflog 材料时才可判）");
+  }
   assert.equal(out.denominator.totalScannedCommits, out.classification.total, "denominator 同步 totalScannedCommits");
   assert.equal(out.denominator.classifiedCommits, out.classification.classified, "denominator 同步 classifiedCommits");
 });

@@ -127,6 +127,34 @@ test("AC1 CLI --criteria emits a JSON report", () => {
 
 // ── AC2: the nightly falsifiable count ────────────────────────────────────────────────────────────
 
+/**
+ * A git identity for THIS fixture's own subprocesses, scoped to the fixture (never `--global`).
+ *
+ * Why env and not just `git config user.email`:
+ * git resolves the committer ident in the order **env var → config → auto-detect**, and an env var
+ * that is present-but-EMPTY is taken as the value (git's `if (!name)` test is a NULL check, not an
+ * emptiness check) — so a repo-scoped `user.name`/`user.email` is *silently defeated* whenever the
+ * environment carries empty `GIT_COMMITTER_NAME`/`GIT_COMMITTER_EMAIL`. Reproduced exactly on this
+ * host: `env GIT_COMMITTER_NAME= GIT_COMMITTER_EMAIL= git commit` ⇒
+ * `fatal: empty ident name (for <>) not allowed` — the same message CI reported. Making the fixture
+ * pass a non-empty identity in the child env beats an empty var AND covers the other shape (a runner
+ * where git's passwd/hostname auto-detection yields nothing), without touching any global config.
+ */
+function fixtureGitEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: "fixture",
+    GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+    GIT_COMMITTER_NAME: "fixture",
+    GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+  };
+}
+
+/** `git -C <dir> <args>` for fixture repos, with a fixture-scoped identity (see fixtureGitEnv). */
+function fixtureGit(dir, args) {
+  return spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", env: fixtureGitEnv() });
+}
+
 function makeGitWorkspace() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pfc-test-"));
   fs.mkdirSync(path.join(dir, "tasks"));
@@ -139,7 +167,7 @@ function makeGitWorkspace() {
     "T2",
     `---\nid: T2\ntitle: clean\n---\n\n## Proposal\n\nObservational: the acceptance gate reports conformance; nothing is red.\n`,
   );
-  const git = (args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const git = (args) => fixtureGit(dir, args);
   git(["init", "-q"]);
   git(["add", "-A"]);
   const c = git(["commit", "-qm", "one", "--author", "t <t@t>"]);
@@ -183,7 +211,7 @@ test("AC2 prefriction-count: a triggered-only window reports 0", () => {
       path.join(dir, "tasks", "T3.md"),
       `---\nid: T3\ntitle: also-triggered\n---\n\n## Proposal\n\ncrash + OOM + timeout in one line.\n`,
     );
-    const git = (args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+    const git = (args) => fixtureGit(dir, args);
     git(["add", "-A"]);
     git(["commit", "-qm", "two", "--author", "t <t@t>"]);
     const res = spawnSync("bash", [PREF_COUNT, "--since", "24 hours ago", "--root", dir], { encoding: "utf8" });
