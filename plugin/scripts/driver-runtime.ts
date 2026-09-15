@@ -1848,7 +1848,11 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   const sourceCheckIntervalMs = Math.max(opts.restartDelaySecs, 1) * 1000;
   const sourceCheck = setInterval(() => {
     if (stopping || !child || driverStartedAt <= 0) return;
-    if (sourceChangedSince(opts.root, opts.kind, driverStartedAt)) {
+    // ⛔ 只对 **watched** 的 kind 重启 child：child 重启只有在它**从盘上源码**重载时才会换版本
+    // （dev 源树直跑）。**mirror**（本内核是构建产物）下 child 重启加载的是**同一个 bundle** ⇒
+    // 换不了版本、只是白重启一轮（gap-ac259-frozen-reading-stale-staging-kernel）。构建产物内核的
+    // 「陈旧」由 `driver-anchor.ts` 的 bundleStale 支处理（目标 = 源树里更新的那份 bundle）。
+    if (sourceWatch(opts.root, opts.kind).state === "watched" && sourceChangedSince(opts.root, opts.kind, driverStartedAt)) {
       appendLog(
         st.supervisorLog,
         `${ts()} supervisor: source changed (mtime=${sourceFilesMaxMtimeMs(opts.root, opts.kind)} > driver_start=${driverStartedAt}); restarting driver`,
