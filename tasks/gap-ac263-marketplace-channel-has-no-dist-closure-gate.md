@@ -7,9 +7,9 @@ labels:
 parent: null
 children: []
 extra:
-  schema: execution
+  schema: v1
 depends_on:
-  - gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix
+  - gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths
 goal_ac: AC-263
 ---
 **type:** execution
@@ -24,7 +24,7 @@ marketplace 渠道走的是 `plugin/scripts/publish-dist-branch.sh`（`:127` 跑
 
 **闸必须能取假，且必须中止发布**：`|| exit` 守卫或 `set -e` 覆盖到该断言——否则闸失败也不中止发布，就成了一个**结构上不可能报红的检查**，而「不产生新红」正是这种检查会给出的结果（硬规则 3b：恒绿的检查是一个假的保证，比没有检查更贵）。
 
-**为什么串行于 AC-260 那条**：本条与 `gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix` 都改 `packages/quay/scripts/build-plugin-dist.mjs` ⇒ 声明 `depends_on` 以免 Touches 争用（两条并发会互相锁）。
+**为什么串行于 AC-260 那条**：本条与 `gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths`（AC-260 的承接条）都改 `packages/quay/scripts/build-plugin-dist.mjs` ⇒ 声明 `depends_on` 以免 Touches 争用（两条并发会互相锁）。⚠️ 2026-09-15 并发立案撞车的结果：原先这条边指向 `gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix`，人复核后保留更全面的那条（覆盖 `rewriteShell()` 同形 + 全载体 260 条 + 11 条悬空 raw `.ts`）并删除重复条，故本条的前置边已换成保留的那一条；**依赖理由未变**。
 
 **查重（按机制）**：全店搜 `verifyDistClosure` 命中 **0** 条任务 ⇒ 没有既存任务承接「publish 路径缺闭包闸」。`gap-delivery-laydown-dist-closure-gap`（done）改的是 quay-init 的闭包正则，属 laydown 侧、不是 publish 侧。
 
@@ -47,14 +47,14 @@ resume 重跑 publish-dist-branch.sh 并读该闸的 exit_code 与 missing_bundl
 ## Definition of Done
 
 - [ ] AC1–AC4 全勾；按 inherited-core 的标准 DoD，REAL LANDING 是门槛——AC4 取自真实交付面，不是只在夹具上绿。
-- [ ] 前置 `gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix` 已落地后再动 `build-plugin-dist.mjs`（两条共享该文件，串行以免争用）。
+- [ ] 前置 `gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths`（AC-260 的承接条）已落地后再动 `build-plugin-dist.mjs`（两条共享该文件，串行以免争用）。
 - [ ] scoped 门 `bash scripts/test.sh --for-task gap-ac263-marketplace-channel-has-no-dist-closure-gate` 绿；全量由 fan-in 机械跑。
 
 ## Dispatch review
 
 reviewer: human
 at: 2026-09-15
-changed: 无（根因、串行前置、目录形态读法要求均按人给定原样落盘）
+changed: 立案当轮：无（根因、串行前置、目录形态读法要求均按人给定原样落盘）。2026-09-15 并发立案撞车修正：`depends_on` 由 gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix 换成人复核保留的 gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths，Proposal 与 DoD 里的同一处 id 引用同步改口（依赖理由未变：两条都改 build-plugin-dist.mjs，必须串行以免 Touches 争用）
 
 ## Touches
 

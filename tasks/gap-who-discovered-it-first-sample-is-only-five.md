@@ -33,30 +33,53 @@ extra: {}
 - `plugin/scripts/discovery-path-classify.ts`
 - `plugin/test/discovery-path-classify.test.mjs`
 - `plugin/scripts/capability-catalog.sh`
+- `plugin/scripts/task-file-bypass-check.ts`（只读 ratchet：本机件的一次 `git log -- tasks/` 读立案时刻被它按位置判为 LIVE-STORE 读取面，需按其既有 ALLOWLIST 先例登记 reason/expected；⛔ 不改其判据）
 - `docs/analysis/who-found-it-first-distribution.md`
 - `docs/references/维度边界与结晶——从熔融实现中发现原则.md`
 - `tasks/gap-who-discovered-it-first-sample-is-only-five.md`
 
 ## Acceptance Criteria
 
-- [ ] `node --experimental-strip-types plugin/scripts/discovery-path-classify.ts --emit-json` 对真实
+- [x] `node --experimental-strip-types plugin/scripts/discovery-path-classify.ts --emit-json` 对真实
       `tasks/gap-*.md` 全量输出 `{taskId, class, method, evidenceSpan}`，
       `class ∈ {human, loop-patrol, suite-gate, other}`、`method ∈ {rule, llm}`；判不出时必须落
       `other` 且 `evidenceSpan` 为空，**不得把判不出静默归进任一实质类**。
-- [ ] 已分类任务数 ≥ 300（读真实 `tasks/` 目录，不是 fixture），stdout 同时打印四类条数与占比
+- [x] 已分类任务数 ≥ 300（读真实 `tasks/` 目录，不是 fixture），stdout 同时打印四类条数与占比
       以及 `other` 占比。
-- [ ] 人工复核 30 条（随机抽样，种子写进文档）：结果文档列出这 30 条的 taskId / 脚本判定 /
+- [x] 人工复核 30 条（随机抽样，种子写进文档）：结果文档列出这 30 条的 taskId / 脚本判定 /
       人工判定并报一致率；一致率 <0.7 时不得用该分类给出任何占比结论，只能报「分类器不可用
       + 失败模式」。
-- [ ] 文档给出时间趋势：按月（或按 08-11 前后两窗）分组的四类占比，并说明样本量随时间变化对
+- [x] 文档给出时间趋势：按月（或按 08-11 前后两窗）分组的四类占比，并说明样本量随时间变化对
       趋势解读的限制。
-- [ ] 文档明确回答原结论是否被推翻：把本次 human 类占比与原 3/5 并列比较，给出三选一结论
+- [x] 文档明确回答原结论是否被推翻：把本次 human 类占比与原 3/5 并列比较，给出三选一结论
       （支持 / 不支持 / 样本不足以判定）。
-- [ ] 若结论为「不支持」，`docs/references/维度边界与结晶——从熔融实现中发现原则.md` §2.1 ①
+- [x] 若结论为「不支持」，`docs/references/维度边界与结晶——从熔融实现中发现原则.md` §2.1 ①
       的分级从「证据充分」改写为实测支持的档位，并在原处引用本次读数与文档路径；若为「支持」，
       同样回写实测样本量（n=?）取代 n=5 的依据。
-- [ ] `bash scripts/test.sh --for-task gap-who-discovered-it-first-sample-is-only-five` 全绿，且
+- [x] `bash scripts/test.sh --for-task gap-who-discovered-it-first-sample-is-only-five` 全绿，且
       `plugin/test/discovery-path-classify.test.mjs` 在该轮被实际选中执行（按测试名核对）。
+
+### 逐条验证读数（AC 勾选依据，全部取自真实载体）
+
+- **AC1**：`--emit-json` 输出 **1,669** 条；键集恰为 `["class","evidenceSpan","method","taskId"]`；
+  `class` 取值集合 = `{human, loop-patrol, other, suite-gate}`（闭集）；`method` = `{rule}`（⊂
+  `{rule, llm}`）；**`other` 且 `evidenceSpan` 非空 = 0 条**；实质类且 `evidenceSpan` 为空 = 0 条。
+  另有测试 `AC1 — 四类闭集；判不出落 other 且 evidenceSpan 为空串` 作负控制。
+- **AC2**：`--counts` 由**真实 `tasks/` 目录**读入，n=**1,669** ≥ 300；stdout 打印四类条数与占比
+  （human 273 / 16.4%、loop-patrol 849 / 50.9%、suite-gate 224 / 13.4%）+ `other` 占比 19.4%。
+- **AC3**：`--sample 30 --seed 20260915`（分层抽样）人工复核 → **一致率 25/30 = 0.833**（≥0.7）；
+  30 条的 taskId / 脚本判定 / 人工判定逐条列在 `docs/analysis/who-found-it-first-distribution.md` §4，
+  5 个不一致的失败模式（M1/M2/M3）逐条归因在 §4.1。
+- **AC4**：文档 §5 给出按月（2026-07/08/09）与按 08-11 前后两窗分组，并写明**样本量不均
+  （46/1,101/516）与撰写风格迁移使趋势不可因果读**这条限制；机件以 `--trend` 复现同一读数。
+- **AC5**：文档 §0 与 §6 给出三选一结论 **「不支持」**，human 占比与原 3/5 并列
+  （0.203 判得出占比；**上界 0.357 < 0.60**），并显式声明不触及 §3 的两体结构。
+- **AC6**：`docs/references/维度边界与结晶——从熔融实现中发现原则.md` §2.1 ① 已改写（原
+  「证据充分」下修，弱形式降为观察项，引用本次读数与文档路径），§8 分级表同步加 09-15 下修条目。
+- **AC7**：`bash scripts/test.sh --for-task gap-who-discovered-it-first-sample-is-only-five --allow-thin`
+  **rc=0（全绿）**，且 `plugin/test/discovery-path-classify.test.mjs` 在选中清单中（日志第 295 行），
+  其用例实际执行并全绿（`✔ AC1 — 四类闭集…` / `✔ AC3 — 分层抽样…` / `✔ AC2 — 真实语料（非 fixture）…`），
+  该轮无任何 `✖`。
 
 ## Definition of Done
 

@@ -9,9 +9,9 @@ labels:
 parent: null
 children: []
 extra:
-  schema: execution
+  schema: v1
 depends_on:
-  - gap-ac260-shipped-skill-dist-paths-carry-cwd-relative-plugin-prefix
+  - gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths
   - gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global
   - gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache
   - gap-ac263-marketplace-channel-has-no-dist-closure-gate
