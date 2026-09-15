@@ -39,6 +39,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listExecutableFiles, EXEC_EXTENSIONS } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -54,8 +55,10 @@ export const SCRIPTS_DIR_REL = "plugin/scripts";
 export const CHECKER_RE = /-check\.(ts|sh)$/;
 /** 显式退役标记：orphan checker 文件头带此 token ⇒ 已处置（非静默孤儿）。 */
 export const RETIRED_MARKER = "RETIRED-WITH-RETIRING-LAYER";
-/** 引用扫描的可执行扩展名（.md 一律排除——SPEC §2.3b「⛔ 已排除 .md 提及」）。 */
-const EXEC_EXTENSIONS = new Set([".ts", ".sh", ".mjs", ".js", ".cjs", ".bash"]);
+/** 引用扫描的可执行扩展名（.md 一律排除——SPEC §2.3b「⛔ 已排除 .md 提及」）。
+ *  值与 listExecutableFiles 一起移入 fs-walk.ts#EXEC_EXTENSIONS（.quay/routine-findings.jsonl
+ *  finding `shell-scan-surface-family`：与 fan-in-workflow-retirement-check.ts 的副本逐字相同）。
+ *  本 checker 的 listScriptBasenames 仍用同一集合，故从那里 import。 */
 /** 不算调用面的元数据/测试文件（测试随 checker 退役；catalog/shipping 是元数据）。
  *  checker-driver-result-ratchet-check.ts（gap-b4-checker-reuse-driver-result）的 REQUIRED_ADOPTERS
  *  是一个【钉住清单】（把已迁移 checker 的 basename 作为字符串数据列出），不是 `import from` 式调用面——
@@ -168,31 +171,11 @@ export function codeOnlyText(src: string): string {
   return chars.join("");
 }
 
-/** 递归列出 `dir` 下的普通文件（绝对路径，排序），跳过 node_modules/.git/.quay 与符号链接。 */
-export function listExecutableFiles(dir: string): string[] {
-  const out: string[] = [];
-  const stack: string[] = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".git" || e.name === ".quay") continue;
-      const full = path.join(current, e.name);
-      if (e.isSymbolicLink()) continue;
-      if (e.isDirectory()) {
-        stack.push(full);
-      } else if (e.isFile() && EXEC_EXTENSIONS.has(path.extname(e.name))) {
-        out.push(full);
-      }
-    }
-  }
-  return out.sort();
-}
+/** 递归列出 `dir` 下的普通文件（绝对路径，排序），跳过 node_modules/.git/.quay 与符号链接。
+ *  实现移入 fs-walk.ts#listExecutableFiles（finding `shell-scan-surface-family`：与
+ *  fan-in-workflow-retirement-check.ts 的副本逐字相同，⛔ 不是本 checker 的私有策略）；
+ *  此处保留本名再导出，本 checker 的公开面不变。 */
+export { listExecutableFiles };
 
 /** 枚举 plugin/scripts 顶层脚本（.ts/.sh/.mjs，非递归——checker-mutation-cases 是子目录）。 */
 export function listScriptBasenames(root: string): string[] {

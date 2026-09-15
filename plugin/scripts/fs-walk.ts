@@ -20,6 +20,13 @@
 //
 // `entryKind` and `prune(name, isDir)` exist to keep those two axes expressible, not to be
 // "unified away". See plugin/test/fs-walk.test.mjs for the control that pins this.
+//
+// A LATER finding from the same routine run (`.quay/routine-findings.jsonl`, finding
+// `shell-scan-surface-family`) landed the *named* surfaces the checkers kept re-writing on top of
+// the traversal: `collectShellScripts` (byte-identical in two checkers), `listExecutableFiles`
+// (byte-identical in two more) and the `scanSurface` table + skip-set of the two identity checkers.
+// Those live here too — see the sections below. The same non-goal applies: their POLICY parameters
+// (the per-caller SKIP_DIRS) stayed with the callers because those genuinely differ.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -115,6 +122,74 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
 }
 
 /**
+ * Extensions of the shell scripts the shell-scan checkers read (`.sh`/`.bash`).
+ *
+ * `.ts` is deliberately NOT in the set (decision record, NOT a silent omission —
+ * gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC2): `stripShellComments` models
+ * only SHELL comments (`#`); a TS file's `//`-comments and string literals would self-match the
+ * whole-screen-hash pattern in adr016-screen-use-check.ts, and no EXECUTABLE .ts instance of that
+ * flow exists in the repo. If one ever appears, add a TS-aware comment/string stripper FIRST.
+ */
+export const SHELL_FILE_EXTENSIONS: ReadonlySet<string> = new Set([".sh", ".bash"]);
+
+/**
+ * Collect the root-relative `.sh`/`.bash` files under `root`, pruning `skipDirNames`.
+ *
+ * Was `collectShellScripts`, a whole-function byte-identical copy in adr016-screen-use-check.ts and
+ * dead-code-after-return-check.ts (.quay/routine-findings.jsonl, finding `shell-scan-surface-family`,
+ * routine `semantic-dedup-scan`). Only the BODY moved here.
+ *
+ * ⛔ The skip-set is a PARAMETER, not a shared constant, because the two callers' sets genuinely
+ * differ: adr016 prunes `dist-sea` but not `vendor`; dead-code prunes `vendor` but not `dist-sea`.
+ * Picking either as "the" set would silently change which files the other checker scans — and a
+ * checker reading the wrong surface returns the pass shape (硬规则 3b). This is the same axis the
+ * module header warns about; do not unify them.
+ *
+ * `prune` is tested BEFORE classification and ignores `isDir` (the originals' shape), so a *file*
+ * whose basename collides with a skip-dir name is dropped along with the directory.
+ */
+export function collectShellScripts(root: string, skipDirNames: ReadonlySet<string>): string[] {
+  return walkFiles(root, {
+    entryKind: "stat",
+    prune: (name) => skipDirNames.has(name),
+    include: (name, ext) => SHELL_FILE_EXTENSIONS.has(ext),
+  });
+}
+
+/** Extensions of the executable-ish source files the reference-surface walkers scan. */
+export const EXEC_EXTENSIONS: ReadonlySet<string> = new Set([".ts", ".sh", ".mjs", ".js", ".cjs", ".bash"]);
+
+/** Names never descended into nor recorded by `listExecutableFiles` (files and dirs alike). */
+const EXEC_SKIP_NAMES: ReadonlySet<string> = new Set(["node_modules", ".git", ".quay"]);
+
+/**
+ * Recursively list the plain executable files under `dir` (ABSOLUTE paths, sorted), skipping
+ * `EXEC_SKIP_NAMES` and symlinks.
+ *
+ * Was a whole-function byte-identical copy in fan-in-workflow-retirement-check.ts and
+ * outer-retirement-precondition-check.ts (finding `shell-scan-surface-family`; only the JSDoc
+ * wording differed). Expressed on `walkFiles` rather than moved verbatim, because a hand-rolled
+ * recursive walker living inside the module whose stated purpose is to replace them would defeat
+ * the point of this file.
+ *
+ * The two axes that had to be preserved explicitly, both pinned by plugin/test/fs-walk.test.mjs:
+ *   • `entry.isFile()` — a SYMLINK is not a regular file, so symlinks are dropped entirely
+ *     (neither recorded nor descended). A bare "not a directory" test would have recorded
+ *     `link.ts`; that is the difference the module header calls out.
+ *   • prune is name-only, tested before classification, so a *file* named `.git` is dropped too.
+ * Equivalence with both originals is not ASSERTED here — it is pinned by a differential control
+ * (the old body vs this one, over four roots incl. a synthetic symlink tree) run as part of the
+ * extraction that landed this function.
+ */
+export function listExecutableFiles(dir: string): string[] {
+  return walkFiles(dir, {
+    absolute: true,
+    prune: (name) => EXEC_SKIP_NAMES.has(name),
+    include: (_name, ext, entry) => entry !== null && entry.isFile() && EXEC_EXTENSIONS.has(ext),
+  });
+}
+
+/**
  * One scan root: `dir` is relative to the repo root, `rel` is the prefix the scan surface reports
  * under (they coincide today, but the hand-rolled walkers kept them separate and so does this).
  * `recursive: false` scans `dir`'s own entries and never descends.
@@ -149,6 +224,39 @@ export function scanRoots(
     }).map((p) => path.join(rel, p)),
   );
   return out.sort();
+}
+
+/**
+ * The kernel source surface the two identity checkers scan: `plugin/scripts` top level (checkers are
+ * not nested — `checker-mutation-cases/` is a subdirectory) plus `packages/quay/src` recursively.
+ *
+ * `SCAN_ROOTS`, the skip-set below and the 3-line `scanSurface` body were byte-identical in
+ * kernel-sibling-resolution-check.ts and target-identity-literal-check.ts (finding
+ * `shell-scan-surface-family` — the two largest members of the 5-member same-named `scanSurface`
+ * family). They are one decision — "what does the kernel identity checkers' surface consist of" —
+ * so they live here together.
+ *
+ * ⛔ The OTHER two `scanRoots` callers reach the traversal directly with their own tables
+ * (concurrency-literal-check.ts / suite-slot-ssot-check.ts). Their roots genuinely differ, so only
+ * the traversal was ever theirs to share. Do not fold them in here.
+ */
+export const KERNEL_SURFACE_SCAN_ROOTS: readonly ScanRoot[] = [
+  { dir: "plugin/scripts", rel: "plugin/scripts", ext: /\.(ts|mjs|js)$/, recursive: false },
+  { dir: "packages/quay/src", rel: "packages/quay/src", ext: /\.ts$/, recursive: true },
+];
+
+/** Directories pruned while walking `KERNEL_SURFACE_SCAN_ROOTS` (see above). */
+export const KERNEL_SURFACE_SKIP_DIRS: ReadonlySet<string> = new Set([
+  "node_modules",
+  ".git",
+  "test",
+  "dist",
+  "ts-demo",
+]);
+
+/** Enumerate `KERNEL_SURFACE_SCAN_ROOTS` — the shared surface of the two identity checkers. */
+export function scanKernelSurface(root: string): string[] {
+  return scanRoots(root, KERNEL_SURFACE_SCAN_ROOTS, KERNEL_SURFACE_SKIP_DIRS);
 }
 
 /** basename -> first repo-relative POSIX path found; stem -> set of extensions seen. */

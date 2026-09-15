@@ -34,6 +34,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { listExecutableFiles } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -82,8 +83,9 @@ export function deriveL1Epoch(root: string): number {
   return 0;
 }
 
-/** 引用扫描的可执行扩展名（.md 一律排除——文档提及不算调用面，硬规则 2）。 */
-const EXEC_EXTENSIONS = new Set([".ts", ".sh", ".mjs", ".js", ".cjs", ".bash"]);
+/** 引用扫描的可执行扩展名（.md 一律排除——文档提及不算调用面，硬规则 2）。
+ *  值随 listExecutableFiles 一起移入 fs-walk.ts#EXEC_EXTENSIONS（.quay/routine-findings.jsonl
+ *  finding `shell-scan-surface-family`：与 outer-retirement-precondition-check.ts 的副本逐字相同）。 */
 
 /** 测试文件不算调用面（测试随 checker 退役，且负控 fixture 必然引用 `fan-in-execute`）。 */
 const TEST_FILE_RE = /\.test\.(mjs|ts|cjs|js)$/;
@@ -215,31 +217,11 @@ export function codeOnlyText(src: string): string {
   return chars.join("");
 }
 
-/** 递归列出 `dir` 下的普通可执行文件（绝对路径，排序），跳过 node_modules/.git/.quay 与符号链接。 */
-export function listExecutableFiles(dir: string): string[] {
-  const out: string[] = [];
-  const stack: string[] = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".git" || e.name === ".quay") continue;
-      const full = path.join(current, e.name);
-      if (e.isSymbolicLink()) continue;
-      if (e.isDirectory()) {
-        stack.push(full);
-      } else if (e.isFile() && EXEC_EXTENSIONS.has(path.extname(e.name))) {
-        out.push(full);
-      }
-    }
-  }
-  return out.sort();
-}
+/** 递归列出 `dir` 下的普通可执行文件（绝对路径，排序），跳过 node_modules/.git/.quay 与符号链接。
+ *  实现移入 fs-walk.ts#listExecutableFiles（finding `shell-scan-surface-family`：与
+ *  outer-retirement-precondition-check.ts 的副本逐字相同，⛔ 不是本 checker 的私有策略）；
+ *  此处保留本名再导出，本 checker 的公开面不变。 */
+export { listExecutableFiles };
 
 /** 路径（已归一化为 / 分隔）是否落在归档白名单目录前缀下。 */
 function isArchived(rel: string): boolean {

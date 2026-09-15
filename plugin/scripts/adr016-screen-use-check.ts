@@ -18,9 +18,9 @@
 // doc set instrument-failure-check scans; gap-adr016-md5-ban-...-scope-gap AC3); the ADR's own
 // prose (.md) is never scanned, so the words "md5(capture-pane)" written in the Amendment can never
 // self-match (this repo has recorded 6 keyword-checker false positives of exactly that shape).
-// `.ts` is also NOT scanned — decision record in the SHELL_EXT comment (AC2). Within a shell script
-// a file is flagged only when a `tmux capture-pane` result actually FLOWS into a hash tool
-// (md5sum / sha1sum / cksum):
+// `.ts` is also NOT scanned — decision record in fs-walk.ts#SHELL_FILE_EXTENSIONS (AC2). Within a
+// shell script a file is flagged only when a `tmux capture-pane` result actually FLOWS into a hash
+// tool (md5sum / sha1sum / cksum):
 //   - same command: `tmux capture-pane -p -t x | md5sum` on one line;
 //   - variable taint: `raw=$(tmux capture-pane …)` → `masked=$(… "$raw" …)` → `… | md5sum`
 //     (the session-liveness.sh shape — capture, mask, hash across separate commands).
@@ -56,7 +56,11 @@ import { helpExit } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
-import { walkFiles } from "./fs-walk.ts";
+// collectShellScripts now lives in fs-walk.ts (it was a whole-function byte-identical copy of
+// dead-code-after-return-check.ts's, apart from the JSDoc — .quay/routine-findings.jsonl finding
+// `shell-scan-surface-family`). The extension set moved with it: fs-walk.ts#SHELL_FILE_EXTENSIONS
+// carries the record of why `.ts` is deliberately NOT scanned. The SKIP_DIRS set stays here.
+import { collectShellScripts as collectShellScriptsShared } from "./fs-walk.ts";
 // stripShellComments now lives in source-text-lib.ts (it was byte-identical to
 // dead-code-after-return-check.ts's copy apart from brace layout — .quay/routine-findings.jsonl
 // finding `firstargregion-stripshellcomments`). Re-exported so this module's public surface is
@@ -99,15 +103,6 @@ const SKIP_DIRS = new Set([
  * on disk. */
 export const RETIRED_FILES = new Set<string>([]);
 
-/** Shell script extensions scanned. `.ts` is deliberately NOT scanned (decision record, NOT a
- * silent omission — gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC2):
- * stripShellComments models only SHELL comments (`#`); a TS file's `//`-comments and string
- * literals would self-match the pattern in this very checker (its selftest embeds the flow),
- * and no EXECUTABLE .ts instance of the whole-screen-hash flow exists in the repo
- * (grep-verified 2026-08-08). If a .ts ever carries the flow, add a TS-aware comment/string
- * stripper first — code-position detection keeps the band honest. */
-const SHELL_EXT = new Set([".sh", ".bash"]);
-
 /** Shipped/live tick docs whose fenced ```bash blocks are INSTRUCTIONS, not prose — same weight
  * as a .sh file (gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC3). The ADR's
  * own prose (adr/ADR-016*.md) and every other .md stay exempt: only this allowlist is scanned,
@@ -137,13 +132,11 @@ export interface ScanResult {
 }
 
 /** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS and non-script files.
- *  Traversal (fs-walk.ts); the skip-set and the extension set stay this checker's own. */
+ *  Walk + extension set live in fs-walk.ts (finding `shell-scan-surface-family`); the SKIP_DIRS set
+ *  stays this checker's own — it prunes `dist-sea`, dead-code-after-return-check.ts's prunes
+ *  `vendor` instead, and merging the two would change which files each scans (硬规则 3b). */
 export function collectShellScripts(root: string): string[] {
-  return walkFiles(root, {
-    entryKind: "stat",
-    prune: (name) => SKIP_DIRS.has(name),
-    include: (name, ext) => SHELL_EXT.has(ext),
-  });
+  return collectShellScriptsShared(root, SKIP_DIRS);
 }
 
 /** True iff `text` references shell variable `name` as `$name` or `${name}`. */

@@ -42,7 +42,11 @@ import { helpExit } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
-import { walkFiles } from "./fs-walk.ts";
+// collectShellScripts now lives in fs-walk.ts (it was a whole-function byte-identical copy of
+// adr016-screen-use-check.ts's, apart from the JSDoc — .quay/routine-findings.jsonl finding
+// `shell-scan-surface-family`). Walk + extension set moved with it; the SKIP_DIRS set stays here
+// (it prunes `vendor`, adr016's prunes `dist-sea` instead — merging them would change the surface).
+import { collectShellScripts as collectShellScriptsShared } from "./fs-walk.ts";
 // stripShellComments now lives in source-text-lib.ts (it was byte-identical to
 // adr016-screen-use-check.ts's copy apart from brace layout — .quay/routine-findings.jsonl finding
 // `firstargregion-stripshellcomments`). Re-exported so this module's public surface is unchanged
@@ -65,9 +69,6 @@ const SKIP_DIRS = new Set([
   "vendor",
 ]);
 
-/** Shell script extensions scanned. */
-const SHELL_EXT = new Set([".sh", ".bash"]);
-
 /** Control-block closers / branch markers — a `return` followed by one of these is the LAST
  *  statement of its block (not dead code). A bare `{` is a block opener, also not "code after". */
 const CLOSERS = new Set(["fi", "done", "esac", "}", "else", "elif", "then", ";;", "in", "{"]);
@@ -81,13 +82,11 @@ export interface Violation {
 }
 
 /** Collect the repo-relative .sh/.bash files under `root`, skipping SKIP_DIRS.
- *  Traversal (fs-walk.ts); the skip-set and the extension set stay this checker's own. */
+ *  Walk + extension set live in fs-walk.ts (finding `shell-scan-surface-family`); the SKIP_DIRS set
+ *  stays this checker's own — it prunes `vendor`, adr016-screen-use-check.ts's prunes `dist-sea`
+ *  instead, and merging the two would change which files each scans (硬规则 3b). */
 export function collectShellScripts(root: string): string[] {
-  return walkFiles(root, {
-    entryKind: "stat",
-    prune: (name) => SKIP_DIRS.has(name),
-    include: (name, ext) => SHELL_EXT.has(ext),
-  });
+  return collectShellScriptsShared(root, SKIP_DIRS);
 }
 
 const BARE_RETURN_RE = /^return(\s+\S+)?\s*$/;

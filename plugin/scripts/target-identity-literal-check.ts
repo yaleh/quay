@@ -49,7 +49,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
-import { scanRoots } from "./fs-walk.ts";
+import { scanKernelSurface } from "./fs-walk.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -180,17 +180,13 @@ export function scanText(src: string): IdentityViolation[] {
 /** 扫描面（可 grep 的枚举清单，非一个 glob 糊过去）：shipped kernel 代码 =
  *  plugin/scripts 顶层 *.ts/*.mjs/*.js（非递归——dist/、test/、checker-mutation-cases/ 子目录不含
  *  手写 shipped 脚本）+ packages/quay/src 递归 *.ts。与 KERNEL 域（kernel-sibling-resolution-check）
- *  同面——三条域检查器共扫同一 shipped kernel 面，⛔ 不各自 glob。 */
-const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp; recursive: boolean }> = [
-  { dir: "plugin/scripts", rel: "plugin/scripts", ext: /\.(ts|mjs|js)$/, recursive: false },
-  { dir: "packages/quay/src", rel: "packages/quay/src", ext: /\.ts$/, recursive: true },
-];
-
-/** Directories pruned while walking a scan root (traversal lives in fs-walk.ts#scanRoots). */
-const SURFACE_SKIP_DIRS = new Set(["node_modules", ".git", "test", "dist", "ts-demo"]);
-
+ *  同面——域检查器共扫同一 shipped kernel 面，⛔ 不各自 glob。
+ *
+ *  该面表、skip 集与那三行 body 已移入 fs-walk.ts#KERNEL_SURFACE_SCAN_ROOTS / scanKernelSurface：
+ *  两份原本逐字相同（.quay/routine-findings.jsonl finding `shell-scan-surface-family`），
+ *  而「同面」若各写一份，正是它们会漂移的形态。 */
 export function scanSurface(root: string): string[] {
-  return scanRoots(root, SCAN_ROOTS, SURFACE_SKIP_DIRS);
+  return scanKernelSurface(root);
 }
 
 /** 组合判定（含扫描面读取）。RED(1) > NOT-EVALUATED(3) > PASS(0)。 */

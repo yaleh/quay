@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { walkFiles, buildFileIndex, scanRoots } from "../scripts/fs-walk.ts";
+import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface } from "../scripts/fs-walk.ts";
 
 // tmp-leak-pairing-check requires the created dirs to live in a module-level ARRAY that the
 // after-hook references (a value returned out of a helper is not seen by the check).
@@ -192,4 +192,75 @@ test("scanRoots: skip-set prunes DIRECTORIES only — a file with a skip-dir NAM
   // …whereas walkFiles with a name-only predicate (the shape-A/C semantics) drops it — the axis is
   // real and the caller, not the traversal, decides which side of it it is on.
   assert.deepEqual(walkFiles(path.join(rootFile, "r"), { prune: (n) => n === "skipped" }), ["top.ts"]);
+});
+
+// ── the named surfaces the checkers kept re-writing (finding `shell-scan-surface-family`) ─────────
+// Same non-goal as above, one level up: what moved is the BODY/surface TABLE. The shell-skip-set
+// stayed with the two callers because theirs genuinely differ, and the assertions below are the
+// control for that — a naive "one SKIP_DIRS for everyone" would silently change which files each
+// checker reads (硬规则 3b: a checker that cannot read its input returns the pass shape).
+
+test("collectShellScripts: .sh/.bash only, and the SKIP SET is the caller's own", () => {
+  const root = mkTree({
+    "a.sh": "x",
+    "b.bash": "x",
+    "c.ts": "x",
+    "d.mjs": "x",
+    "keep/e.sh": "x",
+    "vendor/f.sh": "x",
+    "dist-sea/g.sh": "x",
+  });
+  // the extension axis: neither .ts nor .mjs is a shell script
+  assert.deepEqual(collectShellScripts(root, new Set()), [
+    "a.sh", "b.bash", "dist-sea/g.sh", "keep/e.sh", "vendor/f.sh",
+  ]);
+  // the policy axis: the two real callers' sets give DIFFERENT surfaces — adr016-screen-use-check
+  // prunes `dist-sea`, dead-code-after-return-check prunes `vendor`. Neither set is "the" set.
+  assert.deepEqual(collectShellScripts(root, new Set(["dist-sea"])), ["a.sh", "b.bash", "keep/e.sh", "vendor/f.sh"]);
+  assert.deepEqual(collectShellScripts(root, new Set(["vendor"])), ["a.sh", "b.bash", "dist-sea/g.sh", "keep/e.sh"]);
+  // name-only prune, tested before classification: a FILE named like the skip-dir goes too
+  const rootFile = mkTree({ "dist-sea": "x", "keep.sh": "x" });
+  assert.deepEqual(collectShellScripts(rootFile, new Set(["dist-sea"])), ["keep.sh"]);
+});
+
+test("listExecutableFiles: absolute + recursive, and BOTH exclusion axes are load-bearing", () => {
+  const root = mkTree({
+    "real.ts": "x",
+    "linkfile.ts": "LINK:real.ts", // symlink to a real .ts — must NOT be listed
+    "dangling.ts": "LINK:nowhere.ts",
+    "dirlink": "LINK:sub", // symlink to a dir — neither listed nor descended
+    "sub/inner.ts": "x",
+    ".git": "x", // a FILE named like a skip-name — must NOT be listed
+    "node_modules/n.ts": "x",
+    ".quay/q.ts": "x",
+    "note.md": "x",
+  });
+  assert.deepEqual(listExecutableFiles(root), [path.join(root, "real.ts"), path.join(root, "sub/inner.ts")]);
+  // The `entry.isFile()` guard (not a bare "not a directory" test) is what kills the two symlinks —
+  // a walker that recorded "every non-directory entry" would have listed both. Same axis the module
+  // header names; a dangling symlink named `x.ts` is a FILE to a stat-walker and a non-file here.
+  assert.equal(listExecutableFiles(root).some((p) => p.includes("link")), false);
+  // …and the prune is name-only, so the `.git` FILE is dropped with the directory it names.
+  assert.equal(listExecutableFiles(root).some((p) => path.basename(p) === ".git"), false);
+});
+
+test("scanKernelSurface: plugin/scripts top level + packages/quay/src recursive, build/test pruned", () => {
+  const root = mkTree({
+    "plugin/scripts/a.ts": "x",
+    "plugin/scripts/b.mjs": "x",
+    "plugin/scripts/c.sh": "x", // this surface's ext is /\.(ts|mjs|js)$/ — .sh is NOT on it
+    "plugin/scripts/dist/d.ts": "x", // pruned (build output)
+    "plugin/scripts/nested/e.ts": "x", // non-recursive: the checkers are not nested
+    "packages/quay/src/f.ts": "x",
+    "packages/quay/src/deep/g.ts": "x",
+    "packages/quay/src/deep/h.js": "x", // …but this root takes .ts only
+    "packages/quay/src/test/i.ts": "x", // pruned
+    "other/j.ts": "x", // not on any root
+  });
+  assert.deepEqual(scanKernelSurface(root), [
+    "packages/quay/src/deep/g.ts",
+    "packages/quay/src/f.ts",
+    "plugin/scripts/a.ts",
+    "plugin/scripts/b.mjs",
+  ]);
 });
