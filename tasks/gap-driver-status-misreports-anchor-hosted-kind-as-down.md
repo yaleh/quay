@@ -33,11 +33,11 @@ Dedup check performed (this session, via `task_list` search): `gap-driver-status
 
 ## AC
 
-- [ ] AC1: root cause confirmed — the exact code path in `driver-runtime.ts` (or wherever `quay driver status`/`server status` derives `host`/`alive`/`running` per kind) that produces `host=supervisor, alive=0` for an anchor-hosted kind, and why it differs between kinds that report correctly vs. incorrectly.
-- [ ] AC2: fix lands so `quay driver status --kind <k> --json` correctly reports `host="anchor", alive=1, running=1` for EVERY kind currently hosted by a live anchor process, cross-checked against that kind's own round-file freshness (not just internal state self-report).
-- [ ] AC3: negative control — a kind NOT declared in `anchor.json` (or with no live anchor at all) must still correctly report `alive=0`/legacy form as appropriate; the fix must not make "down" unreportable.
-- [ ] AC4: real-machine verification on `/home/yale/work/quay` (or an isolated fixture reproducing the anchor-hosted shape) — all 6 kinds queried individually report consistently with their actual round-file freshness.
-- [ ] AC5: a regression test exists that would have caught this (asserts `host`/`alive` for an anchor-hosted kind against a fixture where the per-kind legacy pid file is deliberately absent/stale).
+- [x] AC1: root cause confirmed — the exact code path in `driver-runtime.ts` (or wherever `quay driver status`/`server status` derives `host`/`alive`/`running` per kind) that produces `host=supervisor, alive=0` for an anchor-hosted kind, and why it differs between kinds that report correctly vs. incorrectly.
+- [x] AC2: fix lands so `quay driver status --kind <k> --json` correctly reports `host="anchor", alive=1, running=1` for EVERY kind currently hosted by a live anchor process, cross-checked against that kind's own round-file freshness (not just internal state self-report).
+- [x] AC3: negative control — a kind NOT declared in `anchor.json` (or with no live anchor at all) must still correctly report `alive=0`/legacy form as appropriate; the fix must not make "down" unreportable.
+- [x] AC4: real-machine verification on `/home/yale/work/quay` (or an isolated fixture reproducing the anchor-hosted shape) — all 6 kinds queried individually report consistently with their actual round-file freshness.
+- [x] AC5: a regression test exists that would have caught this (asserts `host`/`alive` for an anchor-hosted kind against a fixture where the per-kind legacy pid file is deliberately absent/stale).
 
 ## DoD
 
