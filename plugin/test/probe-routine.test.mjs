@@ -37,10 +37,12 @@ import {
   parseProbeFindings,
   probeRoutinesFromConfig,
   readRoutinesConfig,
+  commitRoutineWrite,
   readLastRunMap,
   selectFilings,
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
+import { renderRoutineTaskBody } from "../scripts/routine-file-gate.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -589,4 +591,64 @@ test("CARRIER AC7 — an uncommitted append IS lost by a checkout; a committed o
   git(["checkout", "--", carrierRel]);
   assert.ok(fs.readFileSync(carrierAbs, "utf8").includes("freshness-goal-009-ac-207"),
     "⛔ after the fix the same checkout can no longer destroy the records");
+});
+
+test("CARRIER AC7 (5b sibling) — the filed TASK file is committed by the same action, not left dirty", () => {
+  // 5b sweep for the AC7 principle: the carrier is not the only thing the routine writes. A filed
+  // `tasks/<id>.md` had exactly the same shape — tracked, written by the routine, never committed —
+  // so it could be taken back by the same checkout. Fixing only the carrier would leave the sibling.
+  const root = makeTmpDir("probe-taskcommit-");
+  const git = (args) => spawnSync("git", ["-C", root, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { encoding: "utf8" });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tasks", "SEED.md"), "---\nid: SEED\nstatus: todo\n---\nbody\n", "utf8");
+  git(["init", "-q"]);
+  git(["add", "-A"]);
+  git(["commit", "-qm", "baseline"]);
+
+  // An UNTRACKED candidate is refused rather than silently half-committed (硬规则 3b).
+  fs.writeFileSync(path.join(root, "tasks", "NEW.md"), "body\n", "utf8");
+  const refused = commitRoutineWrite(root, path.join("tasks", "NEW.md"), "routine(x): file NEW");
+  assert.equal(refused.ok, false);
+  assert.match(refused.reason, /untracked/);
+  assert.equal(git(["status", "--porcelain", "--", "tasks/NEW.md"]).stdout.trim(), "?? tasks/NEW.md",
+    "⛔ a refusal must leave the file exactly as it was (no half-commit)");
+
+  // A written-and-tracked task file IS committed, and HEAD then agrees with the work tree.
+  fs.writeFileSync(path.join(root, "tasks", "FRESH-1.md"), "---\nid: FRESH-1\nstatus: todo\n---\n## Finding\nx\n", "utf8");
+  git(["add", "--", "tasks/FRESH-1.md"]);
+  const ok = commitRoutineWrite(root, path.join("tasks", "FRESH-1.md"), "routine(x): file FRESH-1");
+  assert.equal(ok.ok, true, ok.reason);
+  assert.match(git(["show", "HEAD:tasks/FRESH-1.md"]).stdout, /FRESH-1/, "the filed task must be in HEAD");
+  assert.equal(git(["status", "--porcelain", "--", "tasks/FRESH-1.md"]).stdout.trim(), "",
+    "⛔ HEAD and the work tree must agree — nothing left for a checkout to take back");
+
+  // 「已提交」必须与「提交失败」分开（硬规则 3b）。实测 `quay-native task create` 自己就会提交它写的
+  // 文件 ⇒ 第二次调用必然走到「nothing to stage」这条路，而那是**成功**，不是失败。
+  const again = commitRoutineWrite(root, path.join("tasks", "FRESH-1.md"), "routine(x): file FRESH-1");
+  assert.equal(again.ok, true, `already-committed must report ok, got: ${again.reason}`);
+  assert.match(again.reason, /already committed/);
+});
+
+test("FILING — the filed task must be SHAPE-USABLE: plain `## AC`/`## DoD` and no runtime path in Touches", () => {
+  // Both of these were measured defects in the first version, and both make the mechanism's product
+  // NOISE rather than work — the exact failure this task exists to end:
+  //   (1) `## AC（draft）`: SHAPE_SECTIONS accepts it, but the CHECKBOX gate does not ⇒
+  //       `quay task check` reported "AC section has no checkboxes" for all 6 filed tasks, i.e. they
+  //       were structurally unable to pass the ready/done gate.
+  //   (2) a finding's `files` are OBSERVATION SITES, not write surfaces: `.quay/…` runtime carriers
+  //       were being declared in Touches, which is a false declaration (and the repo has measured
+  //       that declaring `.quay` runtime artifacts in Touches blocks promotion).
+  const body = renderRoutineTaskBody(FRESHNESS_FINDING, {
+    routine: "freshness-refresh", probe: "freshness-refresh", runId: "r1",
+    carrier: ROUTINE_FINDINGS_REL, ts: "2026-09-15T16:35:29Z", taskId: "gap-routine-x",
+  });
+  assert.match(body, /^## AC$/m, "⛔ the checkbox gate only sees a PLAIN `## AC` heading");
+  assert.match(body, /^## DoD$/m, "⛔ the checkbox gate only sees a PLAIN `## DoD` heading");
+  assert.doesNotMatch(body, /## AC（/, "⛔ no `（draft）` suffix on the AC heading");
+  assert.doesNotMatch(body, /## DoD（/, "⛔ no `（draft）` suffix on the DoD heading");
+  assert.match(body, /^- \[ \] /m, "the AC must carry real checkboxes");
+  const touches = body.split(/^## Touches$/m)[1] ?? "";
+  assert.doesNotMatch(touches, /\.quay\//, "⛔ runtime-state paths must not be declared as write surfaces");
+  assert.match(touches, /`plugin\/freshness-producers\.json`/, "but a real source path the finding points at IS a Touches entry");
+  assert.match(body.split(/^## Requested action$/m)[0], /`\.quay\/productization-verification\.jsonl:\d+`/, "and it is still quoted verbatim as evidence in the Finding");
 });

@@ -421,7 +421,18 @@ export function appendRoutineFindings(findingsPath: string, records: readonly Re
   return records.length;
 }
 
-/** 追加即提交（AC7 of gap-ac214-fifth-crossing-routine-detects-but-nothing-acts）。
+/** 写盘即提交 —— 例程对**它自己写下的产物**用同一个动作落库（AC7 的推广）。
+ *
+ *  两个消费者，同一条判据：① 载体 `.quay/routine-findings.jsonl` 的追加（它从不被提交 ⇒ 实测丢过
+ *  25 条记录）；② 立案步新建的 `tasks/<id>.md`。
+ *
+ *  ⚠️ 对 ② 的诚实说明：**实测 `quay-native task create` 自己就会提交**（`tasks: <id> task_write by
+ *  cli:<pid>`，本 worktree 与一个全新的临时仓库里都验过）⇒ 对任务文件本函数通常只是**空转**。它仍
+ *  保留，因为「CLI 会提交」不是本模块能保证的事实（非 git 工作区里它做不到），而保留它的代价只是一次
+ *  空转——**但空转必须与被拒绝区分开**（硬规则 3b）：这正是本函数要判「已提交」而不是「失败」的原因。
+ *  第一版把「nothing to commit」当成失败上报 ⇒ 每一个成功立案都会附一条假 failure。**5b 的扫描结论
+ *  因此是「否」**：任务文件这一侧不存在同形缺陷，声明修了它就是虚报。
+ *
  *
  *  WHY: the carrier is git-TRACKED but its append was never committed ⇒ the working-tree copy was
  *  permanently dirty, and **any** tree-hygiene `git checkout`/`reset` on the shared checkout silently
@@ -444,7 +455,7 @@ export function appendRoutineFindings(findingsPath: string, records: readonly Re
  *  (the pre-commit guard is for human/driver commits, not for an append that already happened on disk),
  *  and on failure `git reset -- <path>` to unstage while keeping the bytes. Returns a reason rather
  *  than throwing ⇒ the caller reports it in the Fact (⛔ never a silent "not committed"). */
-export function commitCarrierAppend(root: string, relPath: string, message: string): { ok: boolean; reason: string } {
+export function commitRoutineWrite(root: string, relPath: string, message: string): { ok: boolean; reason: string } {
   const git = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
   const inside = git(["rev-parse", "--is-inside-work-tree"]);
   if (inside.status !== 0 || String(inside.stdout ?? "").trim() !== "true") {
@@ -456,6 +467,19 @@ export function commitCarrierAppend(root: string, relPath: string, message: stri
   const added = git(["add", "--", relPath]);
   if (added.status !== 0) {
     return { ok: false, reason: `git add failed: ${String(added.stderr ?? "").trim().slice(0, 200)}` };
+  }
+  // 「已提交」与「提交失败」必须分开（硬规则 3b）。实测：`quay-native task create` 自己就提交了它写的
+  // 任务文件 ⇒ 走到这里时往往已经是 HEAD 的内容，`git commit` 会以 exit 1 + "nothing to commit" 收场。
+  // 把它当成失败上报，会让每一个**成功**的立案都附一条假 failure（第一版就是这样）。
+  const staged = String(git(["diff", "--cached", "--name-only", "--", relPath]).stdout ?? "").trim();
+  if (staged === "") {
+    const head = git(["show", `HEAD:${relPath}`]);
+    let work = null;
+    try { work = fs.readFileSync(path.join(root, relPath), "utf8"); } catch { /* unreadable ⇒ 不作合格判定 */ }
+    if (head.status === 0 && work !== null && String(head.stdout ?? "") === work) {
+      return { ok: true, reason: "already committed (nothing to stage)" };
+    }
+    return { ok: false, reason: `${relPath} has no staged change but differs from HEAD ⇒ not trusting it as committed` };
   }
   const committed = git(["commit", "--no-verify", "-m", message, "--", relPath]);
   if (committed.status !== 0) {
@@ -691,7 +715,8 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           if (!d.accepted || !d.taskId) continue;
           const f = parsed.findings.find((x) => x.id === d.findingId);
           if (!f) continue;
-          const title = `${decl.name}: ${f.rationale}`.slice(0, 180);
+          // 单行标题：rationale 里的换行会让 `task create --title` 写出 YAML 折行块（实测），难看且易漂。
+          const title = `${decl.name}: ${String(f.rationale).replace(/\s+/g, " ").trim()}`.slice(0, 180);
           const body = renderRoutineTaskBody({ ...f }, {
             routine: decl.name, probe: decl.probe as string, runId, carrier: path.relative(opts.root, findingsPath),
             ts: new Date(started).toISOString(), taskId: d.taskId,
@@ -699,7 +724,16 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           const w = opts.fileTaskFn
             ? await opts.fileTaskFn(d.taskId, title, body)
             : fileRoutineTask(opts.root, opts.kernelPluginRoot ?? null, d.taskId, title, body, ["gap", "routine-filed", decl.name], tasksDir);
-          if (w.ok) filed.push(d.taskId); else fileErrors.push(`${d.taskId}: ${w.reason}`);
+          if (w.ok) {
+            // 写盘即提交（同 carrierRel 那条判据，5b）：⛔ 不留一个「已立案但没人提交」的任务文件——
+            // 那正是载体丢失 25 条记录的同一形态，只是换了一个文件。
+            const taskRel = path.relative(opts.root, path.join(tasksDir, `${d.taskId}.md`));
+            const tc = commitRoutineWrite(opts.root, taskRel, `routine(${decl.name}): file ${d.taskId} from finding ${d.findingId}`);
+            filed.push(d.taskId);
+            if (!tc.ok) fileErrors.push(`${d.taskId}: filed but not committed — ${tc.reason}`);
+          } else {
+            fileErrors.push(`${d.taskId}: ${w.reason}`);
+          }
         }
       }
       // 立案轮次落痕（rate 窗口的唯一读数来源；⛔ 不另立计数器文件）。
@@ -717,7 +751,7 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       // ⑧ 追加即提交（AC7）：本轮的全部追加（scan-round + finding + filing-round）在**同一次动作**里
       //    落到 HEAD，于是「例程写了、还没人提交」这个丢失窗口长度归零。失败只报不抛（见其注释）。
       const carrierRel = path.relative(opts.root, findingsPath);
-      const commit = commitCarrierAppend(opts.root, carrierRel, `routine(${decl.name}): findings round ${runId}`);
+      const commit = commitRoutineWrite(opts.root, carrierRel, `routine(${decl.name}): findings round ${runId}`);
 
       // last-run 只在**真的产出了记录**之后写回：违约/失败轮不占窗口，下一轮仍会重试。
       try { writeLastRun(lastRunPath, decl.name, started); } catch { /* last-run 写失败 ⇒ 下轮重跑，不致命 */ }

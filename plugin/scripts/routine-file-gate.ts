@@ -245,11 +245,16 @@ export function renderRoutineTaskBody(f: FileableFinding, ctx: { routine: string
     "## Requested action",
     String(f.suggestedAction ?? "").trim() || "（finding 未给出 suggestedAction —— 立案时按 rationale 判定处置）",
     "",
-    "## AC（draft）",
+    // ⛔ 平标题，**不加 `（draft）` 后缀**：`SHAPE_SECTIONS` 两种都认，但 **checkbox 闸只认平标题** ——
+    // 带后缀时 `quay task check` 报 "AC section has no checkboxes"（实测：第一版用 `## AC（draft）`
+    // 立出来的 6 条任务全部 FAIL）⇒ 机械立出来的任务会**结构上无法通过 ready/done 闸**，即又一个
+    // 「看起来立了案、其实动不了」的形态。同一个坑在 meta-driver 的 renderAutoDriveBody 里也在（本文
+    // 只修例程这一侧，⛔ 不动不在 Touches 内的 meta-driver.ts）。
+    "## AC",
     `- [ ] \`${ctx.carrier}\` 中 finding \`${f.id ?? "<no-id>"}\`（routine \`${ctx.routine}\`，runId \`${ctx.runId}\`）所描述的问题被复核并处置`,
     "- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案",
     "",
-    "## DoD（draft）",
+    "## DoD",
     "- [ ] 上面的判据实跑通过",
     "- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑",
     "",
@@ -258,7 +263,12 @@ export function renderRoutineTaskBody(f: FileableFinding, ctx: { routine: string
     // own file (self-touch, which the dispatch gate requires). Directories are dropped: a bare
     // directory is an overbroad declaration (`checkTouchesNarrow`) and would block promotion.
     ...[...new Set([
-      ...f.files.map((x) => String(x).split(":")[0].trim()).filter((p) => p && !p.endsWith("/")),
+      // ⚠️ 运行态路径落入 **证据**、⛔ 不落入 Touches：`files` 是 finding 的**观测位置**，不是可写面。
+      // `.quay/` 是本仓库运行态的家（`.gitignore`/quay-init 用同一条规则）；把一个运行态载体声明成
+      // Touches，等于宣称这道任务会去改它——那是假声明，而且正好撞上「Touches 里声明 .quay 运行时
+      // 产物会挡晋升」那条实测。它们仍然逐字出现在 `## Finding` 的涉及文件里（可核），只是不占声明面。
+      ...f.files.map((x) => String(x).split(":")[0].trim())
+        .filter((p) => p && !p.endsWith("/") && !p.startsWith(".quay/")),
       ...(ctx.taskId ? [`tasks/${ctx.taskId}.md`] : []),
     ])].map((t) => `- \`${t}\``),
   ].join("\n");
