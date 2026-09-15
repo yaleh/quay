@@ -2,7 +2,7 @@
 id: gap-develop-version-union-missing-dev-suffix
 title: develop 版本并集缺 -dev 后缀 ⇒ 滚动渠道（marketplace/dist-plugin）无法自证非发布版：把并集改到
   0.7.0-dev 并重发 dist-plugin，使 AC-272 转绿
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
