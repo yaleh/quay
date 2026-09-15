@@ -264,9 +264,18 @@ test("canonicalRepoRoot: worktree 经 --git-common-dir 归一化到主检出根�
 
 test("registryBaseFor / registryFileFor: 全局 per-layer 路径 + slug 分片 + QUAY_GLOBAL_DIR 覆盖", () => {
   const env = "/tmp/fake-global";
-  assert.equal(registryBaseFor(MAIN_ROOT, env), path.join(env, "-home-yale-work-quay"));
-  assert.equal(registryFileFor(MAIN_ROOT, "inner", path.join(env, "-home-yale-work-quay")), path.join(env, "-home-yale-work-quay", "inner", "loop-registry.txt"));
-  assert.equal(auditFileFor(MAIN_ROOT, path.join(env, "-home-yale-work-quay")), path.join(env, "-home-yale-work-quay", "cron-registry-events.jsonl"));
+  // slug 必须【由实际运行的 repo root 派生】，不能写死作者本机路径
+  // （写死 `/home/yale/work/quay` ⇒ 任何 CI runner / 别的 contributor 的 checkout 都红：
+  //  CI 上 MAIN_ROOT=/home/runner/work/quay/quay ⇒ slug=`-home-runner-work-quay-quay`。
+  //  这正是本测试在 GitHub Actions 上的失败根因——Class C 可移植性缺陷。）
+  const base = path.join(env, repoSlug(MAIN_ROOT));
+  assert.equal(registryBaseFor(MAIN_ROOT, env), base);
+  assert.equal(registryFileFor(MAIN_ROOT, "inner", base), path.join(base, "inner", "loop-registry.txt"));
+  assert.equal(auditFileFor(MAIN_ROOT, base), path.join(base, "cron-registry-events.jsonl"));
+  // 可移植性判据（不依赖本机路径，故在任何 checkout 下都能取假）：
+  // 对【任意】root，基目录随 slug 派生；若实现里写死作者路径，下面的第二行必红。
+  assert.equal(registryBaseFor("/tmp/other/place", env), path.join(env, "-tmp-other-place"));
+  assert.notEqual(registryBaseFor("/tmp/other/place", env), registryBaseFor(MAIN_ROOT, env));
 });
 
 test("parseRegistryText / serializeRegistryText: key=value 往返（loop-registry.txt 形态）", () => {

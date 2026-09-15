@@ -141,6 +141,13 @@ function makeGitWorkspace() {
   );
   const git = (args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
   git(["init", "-q"]);
+  // 身份必须【scoped 到本 fixture repo】，不能用 --global：
+  // 全新 checkout（CI runner / contributor 的首次 clone）没有 committer identity，
+  // `--author` 只设 author 不设 committer ⇒ `git commit` 会以
+  // "Committer identity unknown … empty ident name" 失败。
+  // 写 --global 会把这个潜在缺口对真实 contributor 掩盖掉（AC2 明确禁止）。
+  git(["config", "user.email", "fixture@example.invalid"]);
+  git(["config", "user.name", "fixture"]);
   git(["add", "-A"]);
   const c = git(["commit", "-qm", "one", "--author", "t <t@t>"]);
   assert.equal(c.status, 0, c.stderr);
