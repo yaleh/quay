@@ -1,5 +1,6 @@
 ---
 id: AC-265
+title: develop 上 CI 首次 decisive 绿，且该绿不是靠少跑测试换来的（testFiles ≥ 紧邻前一次 decisive run）
 status: active
 kind: criterion
 goal: GOAL-020

@@ -27,11 +27,11 @@ This is NOT about whether the anchor mechanism itself works (it does, once actua
 
 ## AC
 
-- [ ] AC1: root cause confirmed — why does the CLI's stop-confirmation for the legacy supervisor+driver pair time out / return before the old process tree has actually exited, for some kinds but not others (`promotion` migrated cleanly on the first try; `worker`/`outer`/`quality`/`meta`/`goal` did not).
-- [ ] AC2: fix makes `quay driver restart --kind <k>` either (a) reliably wait for the OLD process tree's actual exit before reporting success/reaching the start phase, with a bounded, honest timeout and a distinguishable "still draining after N seconds, here is what to check" message (not a silent race), or (b) reliably escalate (SIGKILL the old pair, never the in-flight worker children) after a documented grace period so the command's own exit code/output is trustworthy without a human doing `kill -0` by hand.
-- [ ] AC3: negative control — verify a kind with genuinely no old process (already anchor-hosted, or never started) restarts cleanly with no spurious "did not stop" warnings.
-- [ ] AC4: real-machine verification of a legacy→anchor restart on a kind with the same shape as this session's `goal` reproduction (an old standalone driver+supervisor pair actually torn down, confirmed via OS-level pid checks, not just the CLI's own self-report).
-- [ ] AC5: worker's in-flight-child-preservation invariant (children survive, orphan, and finish) must remain intact under whatever fix lands — add/keep a test asserting this specifically for the migration path, not just the steady-state restart path already covered by existing AC-256 tests.
+- [x] AC1: root cause confirmed — why does the CLI's stop-confirmation for the legacy supervisor+driver pair time out / return before the old process tree has actually exited, for some kinds but not others (`promotion` migrated cleanly on the first try; `worker`/`outer`/`quality`/`meta`/`goal` did not).
+- [x] AC2: fix makes `quay driver restart --kind <k>` either (a) reliably wait for the OLD process tree's actual exit before reporting success/reaching the start phase, with a bounded, honest timeout and a distinguishable "still draining after N seconds, here is what to check" message (not a silent race), or (b) reliably escalate (SIGKILL the old pair, never the in-flight worker children) after a documented grace period so the command's own exit code/output is trustworthy without a human doing `kill -0` by hand.
+- [x] AC3: negative control — verify a kind with genuinely no old process (already anchor-hosted, or never started) restarts cleanly with no spurious "did not stop" warnings.
+- [x] AC4: real-machine verification of a legacy→anchor restart on a kind with the same shape as this session's `goal` reproduction (an old standalone driver+supervisor pair actually torn down, confirmed via OS-level pid checks, not just the CLI's own self-report).
+- [x] AC5: worker's in-flight-child-preservation invariant (children survive, orphan, and finish) must remain intact under whatever fix lands — add/keep a test asserting this specifically for the migration path, not just the steady-state restart path already covered by existing AC-256 tests.
 
 ## DoD
 

@@ -1,5 +1,6 @@
 ---
 id: AC-269
+title: CI 红有机械归因：每条 failure 记录带 {real-defect, infrastructure, known-flake} 之一
 status: active
 kind: criterion
 goal: GOAL-020
