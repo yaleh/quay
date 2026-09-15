@@ -146,6 +146,7 @@ Requested action 第 4 条逐字引用为「由 AC-265 的产出」；两条任�
 - plugin/skills/manager/SKILL.md
 - plugin/skills/init/SKILL.md
 - .gitignore
+- .quay/ci-runs.jsonl
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/test/axis-generator.test.mjs
 - plugin/test/launch-settings.test.mjs
