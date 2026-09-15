@@ -42,7 +42,7 @@ Also note: `plugin/test/long-term-guarantee-goal-backed-check.test.mjs` also fai
 
 **查重（本次已做，非关键词，逐机制核对，非重复）**：`gap-config-yml-example-and-ci-bootstrap`（该 id 在任务库中已不存在，可能已被合并/重命名——但其修复内容 `.quay/config.yml` 引导已确认落地于 develop，本 finding 明确是它的下游/独立问题）与 `gap-dist-closure-missing-driver-anchor-js`（已 done，修 dist 打包闭包对 driver-anchor 的动态路径引用盲区，与本 finding 的「CI 测试套件在真实全新 checkout 上的红」完全不同机制）均已核对，非重复。逐个测试文件名（`outer-cron-registry.test.mjs`、`prod-data-audit.test.mjs`、`axis-generator.test.mjs`、`launch-settings.test.mjs`、`direct-to-develop-bypass-check`、git-graph 相关）搜索任务库无同名机制任务命中。`gap-dashboard-fanin-card-not-in-auto-refresh`（已 done）与 `gap-dashboard-fanin-panel-and-timeline-bars`（已 done）是本 finding 中 Class A 两条测试所在的原始实现任务，与本 finding（测试在无生产数据的全新 checkout 上应如何优雅降级）不同机制，非重复，仅作交叉引用。
 
-## AC (draft, implementer refines per class)
+## AC
 
 - [ ] AC1 (Class A): each of the 4 listed production-data-dependent tests distinguishes "carrier absent/empty" from "carrier present but assertion fails" and reports a NOT-EVALUATED-shaped outcome (not a thrown AssertionError) for the former — verified on both a fresh checkout (NOT-EVALUATED) and this repo's own long-lived checkout (still asserts real content, no regression).
 - [ ] AC2 (Class B): `axis-generator.test.mjs`'s own fixture sets a scoped git identity for the repo it creates (not `--global`); `launch-settings.test.mjs` either skips/NOT-EVALUATEs when `claude` isn't on PATH, or CI gets `claude` installed if that's actually a reasonable baseline requirement (implementer decides which, with reasoning).
@@ -50,6 +50,8 @@ Also note: `plugin/test/long-term-guarantee-goal-backed-check.test.mjs` also fai
 - [ ] AC4 (Class D): `direct-to-develop-bypass-check.test.mjs`'s own documented NOT-EVALUATED case (reflog-exhausted-on-fresh-checkout) is verified to actually short-circuit before the ratio assertion, or the frozen baseline is refreshed — implementer's choice, justified.
 - [ ] AC5 (git-graph pair): root cause identified for why `develop`'s decoration is invisible on a fresh `actions/checkout@v4` checkout but present on a long-lived local checkout; fixed or confirmed as a fresh-checkout-specific test precondition that needs its own accommodation.
 - [ ] AC6: full `bash scripts/test.sh` (or the equivalent CI invocation) verified green on a genuinely fresh `git clone` at a path other than any existing long-lived checkout (the standard this whole finding is measured against) — this is the actual DoD, not each file in isolation.
+
+Draft note for the implementer: refine each AC's exact wording per class as work proceeds; the checklist above is the binding contract, not the "Draft note" parenthetical.
 
 ## Definition of Done
 
