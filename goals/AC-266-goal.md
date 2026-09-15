@@ -2,7 +2,7 @@
 id: AC-266
 title: release 的 Run tests 不再因 tokenless 测试泄漏子进程而退化成 hang（静态臂剥注释判定 + 载体臂无超时
   release run）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -69,6 +69,11 @@ statusLog:
     to: active
     actor: manager
     reason: 激活：判据已当轮干跑验证能取假（AC-266 另做了双向控制）
+  - at: 2026-09-15T15:28:41.948Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
