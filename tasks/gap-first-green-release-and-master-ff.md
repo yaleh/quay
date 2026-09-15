@@ -50,7 +50,7 @@ verdict=fail  reason=acceptance failed (exit 1) — CAUSE=no-green-release-in-th
 **顺序上的一条硬约束（影响能不能只发一版就收口）**：`workflow_dispatch` 的一次 run 用的是**被点名 tag 那棵树里的** `release.yml`。⇒ 若 advance-master 未在切 tag 之前进入 develop，那次 run 里就没有推进 master 的 job，master 不会动，AC-274 只能靠**另切一版**满足。
 
 <!-- dedup-ref -->
-同族但机制不同，故不是重复：`gap-release-cut-via-workflow-dispatch`（AC-268）只负责让那次 run 全绿并落进载体，其 AC1–AC12 无一条要求 master 移动；`gap-release-branch-deleted-after-merge`（AC-271）管的是 release 分支合回后删除；`gap-develop-ci-first-decisive-green`（AC-265）产载体与采集器，`gap-release-run-tests-hangs-on-shared-mcp-client-leak`（AC-266）与 `gap-sea-artifact-plugin-root-toplevel-eval`（AC-267）修的是那两个让 release run 变红的缺陷。本任务的机制是 **`advance-master` job 的存在性 + 它真跑成一次 ff**。
+同族但机制不同，故不是重复：`gap-release-cut-via-workflow-dispatch`（AC-268）只负责让那次 run 全绿并落进载体，其 AC1–AC12 无一条要求 master 移动；`gap-release-branch-deleted-after-merge`（AC-271）管的是 release 分支合回后删除；`gap-develop-ci-first-decisive-green`（AC-265）产载体与采集器，`gap-release-run-tests-hangs-on-shared-mcp-client-leak`（AC-266）与`gap-sea-artifact-plugin-root-toplevel-eval`（AC-267）修的是那两个让 release run 变红的缺陷。本任务的机制是 **`advance-master` job 的存在性 + 它真跑成一次 ff**。
 
 ## Requested action
 
@@ -72,17 +72,56 @@ verdict=fail  reason=acceptance failed (exit 1) — CAUSE=no-green-release-in-th
 
 ## Acceptance Criteria
 
-- [ ] **AC1 实现面已落 develop**：`git show develop:.github/workflows/release.yml | grep -c advance-master` ≥ 1；贴出该 job 整块；并**机械**列出 workflow 全部 job 键（用 python 解析 `jobs:`，⛔ 不手抄）与 `advance-master.needs` 求集合差 = ∅；`git show develop:.github/workflows/release.yml | grep -c -- '--force'` = 0。
-- [ ] **AC2 检查器三态可区分（能取假）**：对「新增第 7 个 job 而 `needs:` 未更新」的副本 ⇒ **非零**（贴 exit 码 + 报错行）；对真文件 ⇒ **0**；对读不到的输入 ⇒ **NOT-EVALUATED 且 exit 码与 PASS 不同**。三次运行逐字贴出。⛔ 只有「真文件 ⇒ 0」这一条不算验证（硬规则 4）。
-- [ ] **AC3 检查器已登记**：若为新建 `plugin/scripts/*.ts`，逐条贴出四件义务的读数——`capability-catalog.sh` 六张表各一行、`runner-static-gate.ts` 的 `run_static_checks` 登记行、`checker-mutation-cases/<basename>.sh` 存在、`@checker-count` 的 +1 后取值；`node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .`、`node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check`、`bash plugin/scripts/checker-mutation-check.sh --check` 三条 exit 0。若检查器落在既有文件里，贴出该文件与它覆盖新不变式的判据/单测读数。
-- [ ] **AC4 run 全绿**：`gh run view <runId> --json conclusion,jobs` —— run 的 `conclusion=success` ∧ **每一个** job 的 conclusion 都是 `success`（逐个列出 job 名与结论；⛔ 不许以「主要 job 绿」代替全部）；并给出载体记录里该 run 的逐 job 清单，证明两侧读数一致。
-- [ ] **AC5 `advance-master` 真跑成**：该 run 的 job 列表里 `advance-master` 的 `conclusion=success`，并贴出它的 push 步骤日志行（含 `tag:master`）。
-- [ ] **AC6 master 是 ff 上去的，不是改写**：`git merge-base --is-ancestor master <tag>` 为真；`git rev-list --count master..<tag>` = 0 ∧ `git rev-list --count <tag>..master` = 0；`git rev-parse master` == `git rev-parse <tag>^{commit}`（贴出两个 sha）。
-- [ ] **AC7 本地 master ref 已同步且推进只发生在 CI 侧**：贴出 `git fetch origin master:master` 前后 `git rev-parse master` / `git rev-parse origin/master` 四行读数，同步后本地 master == tag 提交；全轮无 `--force`、无本地直接 `git push origin …:master`。
-- [ ] **AC8 AC-274 判据取真**：`node packages/quay/bin/quay.js goal gate AC-274 --dry-run` ⇒ **exit 0**，贴出 stdout/stderr 与退出码。**负控制 (a)**：复制载体、删掉那条 post-window 全绿行，对副本同法跑 ⇒ **exit 1 ∧ stderr 含 `CAUSE=no-green-release-in-the-post-filing-window`**，逐字贴出。
-- [ ] **AC9 负控制 (b)：绿了但 master 没跟上**：在一个 master 停在非 tag 提交的独立检出（临时 clone/worktree，载体含那条全绿行）里跑同一 criterion ⇒ **exit 1 ∧ stderr 含 `CAUSE=green-release-not-reflected-on-master`**。逐字贴出。⛔ 不做这一步，AC8 的 exit 0 就不是读数而是回声（硬规则 4）。
-- [ ] **AC10 载体行经采集器且 `branch` == tag 名**：贴出 `.quay/ci-runs.jsonl` 新增行逐字（含 `branch` 字段）、产生它的采集器调用命令、前后行数（证明是新追加而非手写）。**负控制**：把该行 `branch` 改成一个非 tag 值（如 `develop`），对副本跑 criterion ⇒ exit 1 且 CAUSE = `green-release-not-reflected-on-master`——证明这条字段约束是真约束。
-- [ ] **AC11 未成功即如实**（条件触发）：若最终没拿到全绿，逐字记录 runId + 失败 job + 首条决定性日志行，并归因到 AC-265/266/267 或 AC-268 的范围，**不**宣告本任务完成。
+- [x] **AC1 实现面已落 develop**：`git show develop:.github/workflows/release.yml | grep -c advance-master` ≥ 1；贴出该 job 整块；并**机械**列出 workflow 全部 job 键（用 python 解析 `jobs:`，⛔ 不手抄）与 `advance-master.needs` 求集合差 = ∅；`git show develop:.github/workflows/release.yml | grep -c -- '--force'` = 0。〔落地读数 2026-09-15：`git show HEAD:.github/workflows/release.yml | grep -c advance-master` = **5**；yaml 解析得 job 键 **7 个** `[release, sea-release, sea-verify-node-free, sea-verify-node-free-cross-platform, dist-verify-node-floor, delivery-manifest-verify, advance-master]`，`advance-master.needs` **6 个**，`others − needs` = **[]**（集合差为空）；`grep -c -- '--force'` = **0**。读数取自本任务分支 tip —— fan-in 的 ff 使 develop 与该 tip 逐字相同，故 AC1 的 develop 口径在 flip 后逐字成立。〕
+
+- [x] **AC2 检查器三态可区分（能取假）**：对「新增第 7 个 job 而 `needs:` 未更新」的副本 ⇒ **非零**（贴 exit 码 + 报错行）；对真文件 ⇒ **0**；对读不到的输入 ⇒ **NOT-EVALUATED 且 exit 码与 PASS 不同**。三次运行逐字贴出。⛔ 只有「真文件 ⇒ 0」这一条不算验证（硬规则 4）。〔落地读数 2026-09-15：(a) **真文件的副本** + 追加一个不进 `needs:` 的第 7 个 job ⇒ `exit 1`，报错行含 `1 job(s) missing: newly-added-seventh-job`；(b) 真文件 ⇒ `exit 0`（`PASS: advance-master.needs covers every other job`）；(c) 读不到 = 三种形态、三个**各自独立**的 reason slug：workflow 缺席 ⇒ `exit 3 / [workflow-absent]`、无 `jobs:` 映射 ⇒ `exit 3 / [jobs-block-unreadable]`、无 `advance-master` job ⇒ `exit 3 / [target-job-absent]`。三条 exit 码 0/1/3 互不相同。另有第四条：`needs:` 值不可读 ⇒ `exit 3 / [target-needs-unreadable]`；而 **`needs:` 整个缺席 ⇒ `exit 1`（RED）不是 exit 3** —— 无依赖的 job 在**任何** run 上都会推进 master，那是可读的、且是最坏读数，不得与「读不懂」同形。全部形态由 `plugin/test/release-master-advance-needs-check.test.mjs` 13/13 绿 + `checker-mutation-cases/release-master-advance-needs-check.sh`（含一个**对真 release.yml 逐字副本**的相）机械复现。〕
+
+- [x] **AC3 检查器已登记**：若为新建 `plugin/scripts/*.ts`，逐条贴出四件义务的读数——`capability-catalog.sh` 六张表各一行、`runner-static-gate.ts` 的 `run_static_checks` 登记行、`checker-mutation-cases/<basename>.sh` 存在、`@checker-count` 的 +1 后取值；`node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .`、`node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check`、`bash plugin/scripts/checker-mutation-check.sh --check` 三条 exit 0。若检查器落在既有文件里，贴出该文件与它覆盖新不变式的判据/单测读数。〔落地读数 2026-09-15：新建 `plugin/scripts/release-master-advance-needs-check.ts`。① 六张表各一行：`QUESTION` / `GUARD_OBJECT` / `CADENCE` / `INVALIDATION` / `LAST_REAFFIRMED` / `MATCHING` 均已登记 —— `capability-catalog.sh --summary` = `337 scripts | 337 declared | 0 unclassified`，`--table` / `--json` 两条 exit 0。② `runner-static-gate.ts` 的 `run_static_checks` 登记行（`# @static-tier change` + `# @static-object .github/workflows/release.yml plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh`，`--root repo_root` 非 main_root，理由同上方 release-test-client-close-check）。③ `plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh` 存在，`checker-mutation-check.sh --check` = `checkers_total: 81 / checkers_with_mutation: 81 / uncovered: 0 / mutations_that_stayed_green: 0` RESULT PASS，exit 0。④ `@checker-count` **62 → 63**，`checker-count-drift-check.ts --root .` 三条 registry 全 ok（`run_static_checks` declared 63 / measured 63）exit 0。⑤ `rhythm-consumer-check.ts --check` exit 0。⑥ 孪生 `experiments/quay-perpetual-stream/scripts/release-master-advance-needs-check.ts` 为符号链接（同其余镜像对），`mirror-pair-drift-check.ts` exit 0。〕
+
+- [ ] **AC4 run 全绿**：`gh run view <runId> --json conclusion,jobs` —— run 的 `conclusion=success` ∧ **每一个** job 的 conclusion 都是 `success`（逐个列出 job 名与结论；⛔ 不许以「主要 job 绿」代替全部）；并给出载体记录里该 run 的逐 job 清单，证明两侧读数一致。（待外部）
+
+- [ ] **AC5 `advance-master` 真跑成**：该 run 的 job 列表里 `advance-master` 的 `conclusion=success`，并贴出它的 push 步骤日志行（含 `tag:master`）。（待外部）
+
+- [ ] **AC6 master 是 ff 上去的，不是改写**：`git merge-base --is-ancestor master <tag>` 为真；`git rev-list --count master..<tag>` = 0 ∧ `git rev-list --count <tag>..master` = 0；`git rev-parse master` == `git rev-parse <tag>^{commit}`（贴出两个 sha）。（待外部）
+
+- [ ] **AC7 本地 master ref 已同步且推进只发生在 CI 侧**：贴出 `git fetch origin master:master` 前后 `git rev-parse master` / `git rev-parse origin/master` 四行读数，同步后本地 master == tag 提交；全轮无 `--force`、无本地直接 `git push origin …:master`。（待外部）
+
+- [ ] **AC8 AC-274 判据取真**：`node packages/quay/bin/quay.js goal gate AC-274 --dry-run` ⇒ **exit 0**，贴出 stdout/stderr 与退出码。**负控制 (a)**：复制载体、删掉那条 post-window 全绿行，对副本同法跑 ⇒ **exit 1 ∧ stderr 含 `CAUSE=no-green-release-in-the-post-filing-window`**，逐字贴出。（待外部）
+
+- [x] **AC9 负控制 (b)：绿了但 master 没跟上**：在一个 master 停在非 tag 提交的独立检出（临时 clone/worktree，载体含那条全绿行）里跑同一 criterion ⇒ **exit 1 ∧ stderr 含 `CAUSE=green-release-not-reflected-on-master`**。逐字贴出。⛔ 不做这一步，AC8 的 exit 0 就不是读数而是回声（硬规则 4）。〔落地读数 2026-09-15，**控制性夹具**：独立 `git clone /home/yale/work/quay /tmp/ac274-ctl`（**不碰主检出**），`git branch master 9316b797d`（本地 master 停在一个**不指向任何 tag** 的提交，`git tag --points-at master` = 0），载体写入**一行合成的 post-window 绿行**（`branch` = 真实 tag `v0.7.0`，`conclusion=success`，`ts=2026-09-15T16:00:00Z`）—— ⛔ 该行是**控制夹具，不是生产读数**（至今不存在真实的全绿 run，这正是 AC4/AC5 未勾的原因）。经 store 自己的 runner 跑 `node /home/yale/work/quay/packages/quay/bin/quay.js goal gate AC-274 --dry-run`（cwd = 该 clone）⇒ `verdict=fail` / **exit 1** / `CAUSE=green-release-not-reflected-on-master — 1 fully green Release run(s) since 2026-09-15T14:00:00Z (v0.7.0) but master is at 9316b797d, which is none of their tags`。**同夹具的两个反向对照**：(i) `git branch -f master v0.7.0^{commit}` ⇒ `verdict=pass` / **exit 0** ⇒ 证明 AC-274 **在机制上是可满足的**，只差一次真实全绿 run；(ii) 把 master 推回非 tag 提交 ⇒ 又红 ⇒ 判据**不是恒绿**。另发现第三种 CAUSE（新 clone 无本地 `master` 分支时）：`CAUSE=no-master-ref`。〕
+
+- [ ] **AC10 载体行经采集器且 `branch` == tag 名**：贴出 `.quay/ci-runs.jsonl` 新增行逐字（含 `branch` 字段）、产生它的采集器调用命令、前后行数（证明是新追加而非手写）。**负控制**：把该行 `branch` 改成一个非 tag 值（如 `develop`），对副本跑 criterion ⇒ exit 1 且 CAUSE = `green-release-not-reflected-on-master`——证明这条字段约束是真约束。（待外部）
+
+- [x] **AC11 未成功即如实**（条件触发）：若最终没拿到全绿，逐字记录 runId + 失败 job + 首条决定性日志行，并归因到 AC-265/266/267 或 AC-268 的范围，**不**宣告本任务完成。〔条件已触发，见下方「落地记录」：`runId=34990408957`（tag `v0.7.0`，`workflow_dispatch`），失败 job = `release`，首条决定性行 = `✖ AC1 — the detector is green on the real repo and its --json reading is OK with no violators`，`release` job 的 `Run tests` 步 exit 1（run 窗口 `15:44:01Z → 15:52:49Z`）。``
+
+## 落地记录（2026-09-15，worker）
+
+### 已闭合：机制落地（AC1–AC3）
+
+`.github/workflows/release.yml` 新增 `advance-master` job（SPEC §6.1 逐字形态），并**同批**落 `plugin/scripts/release-master-advance-needs-check.ts`（不变式 3 的机械断言）+ 四件登记义务 + 13 条单测 + 变异相。三条不变式各有载体：①`needs:` 由 GitHub 默认语义保证 fail-closed；②`git push` 默认拒绝非 ff，全文件 `--force` 计数 **0**（连注释里都没有）；③`needs:` 全集由静态检查断言，且该检查**对真 release.yml 的副本能取假**（AC2）。
+
+### 未闭合：生产真跑（AC4–AC8、AC10）
+
+**AC-274 此刻的真实读数**（主检出，经 store 自己的 runner）：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-274 --dry-run
+verdict=fail   exit 1
+CAUSE=no-green-release-in-the-post-filing-window — carrier holds 12 Release runs (11 decisive),
+      none with conclusion=success and ts > 2026-09-15T14:00:00Z
+```
+
+**阻塞链（三层，每层各有已核的持有者）**：
+
+1. **载体里至今没有一条 post-filing 全绿 Release run。** 最近三次 `v0.7.0` 的 run 全是 failure；历史上最后一次全绿是 2026-07-24 的 `v0.3.13`。这一半正是 `gap-release-cut-via-workflow-dispatch`（AC-268）的交付物，其 status 为 **`needs-human`**（`needs_human_cause: human-adjudication`）。
+2. **本任务第 4 步的「另切一版」分支未触发。** 该分支的前提是「**若此刻已经有一次全绿 run**、但它的 tag 树里没有 advance-master」—— 实测该前提为**假**（没有全绿 run）。⇒ 切新 tag 的动作属 AC-268 的判定范围，本 worker 不代它做（切 tag 会公开发布一个 GitHub Release，是外向且难回退的动作）。
+3. **即便切了新 tag 也不会绿。** `release` job 跑的是 `node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs`；该 glob 内的失败在 **develop 自己的 CI** 上同样存在（`ci.yml` 最近 8 次 run 全 failure，`test` job 内约 12 个测试文件红：`goal-ac-write-face` / 两个 `gap-dashboard-fanin-*` / `gap-git-graph-decoration-labels-as-colored-chips` / `prod-data-audit` / `axis-generator` / `launch-settings` / `outer-cron-registry` / `registry-*` / `serve-handlers` 的 `EADDRINUSE` 等）。让 develop 的 CI 变绿是 **§8 非目标**里逐字排除的一项，归 AC-265/AC-269。
+
+**一条被证否的候选归因（留痕，免得下一个 worker 重走）**：`release` job 的 `Run tests` 曾整体红在 git-graph 一族上。本 worker 当场测出根因是 `actions/checkout@v4` 的**默认浅克隆**（`fetch-depth` 未设 ⇒ depth 1）：`git clone --depth 1 --branch v0.7.0 file://…` 之后 `git log --all | wc -l` = **1**，而该族测试的判据正是「活仓库里某个 task id 跨 ≥2 个 git 列」。合 develop 时实测该缺口**已由 AC-268 的 owner 在 develop 上修掉**（`release` job 现带 `fetch-depth: 0` + 一个 `git fetch origin develop:develop` 步），本 worker 独立复现了同一根因但**未重复修**。⇒ 该候选归因**不再能解释**剩余的 release 红；剩余的归 AC-265/269。
+
+### 未闭合声明
+
+本任务交付的是**机制落地 + 失败归因**。`advance-master` 的定义、它的三条不变式、以及不变式 3 的机械断言都已落地并经双向控制检验；但 **AC-274 本身仍为 `fail`**，master 仍在化石 tip `9316b797d`，AC4–AC8 与 AC10 一条都没有读数。⛔ 本任务**不宣告完成**：AC4–AC8/AC10 保留未勾并标注 `（待外部）`，其兑现条件是 AC-268 产出一个全绿 Release run 且该 tag 的树里含本 job。
 
 ## Definition of Done
 
