@@ -33,12 +33,12 @@ Both pairs have identical algorithms — firstArgRegion differs only in paramete
 extract
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `firstargregion-stripshellcomments`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789322638156`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `firstargregion-stripshellcomments`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789322638156`）所描述的问题被复核并处置 —— 复核结论：finding 描述属实（两对算法完全相同，只有格式/参数序之差）。处置=**修掉（extract）**：`firstArgRegion` / `stripShellComments` / `stripComments` 三大符号全仓（excl. node_modules）各只剩 1 处定义，都在 `plugin/scripts/source-text-lib.ts`；原 4 个具名文件定义数全部为 0（`adr016-screen-use-check` / `dead-code-after-return-check` 改为 re-export，公共面未变）。5b 同载体扫描另发现**同族第三对** `stripComments`（`registry-bare-filename-scan.ts:526` vs `runtime-usage-inventory.ts:590`，逐字节相同）一并抽取。
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案 —— 结论=修掉，证据三条且可复跑：①行为保持（6 个检查器 CLI 在同 `--root` 下前后对拍：stdout 逐字节相同、stderr 相同（仅去掉 node 自带的 MODULE_TYPELESS 行）、退出码相同）；②`plugin/test/source-text-lib.test.mjs` 的对照（两个剥注释器**互不可替代**，双向断言）经突变检验——给 `stripShellComments` 加上 `//` 处理后恰好只有该对照转红；③scoped 门 `scripts/test.sh --for-task <id> --allow-thin` 退出码 0。
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过 —— 上述命令均已实跑：符号定义枚举、6 检查器前后对拍、`node --test plugin/test/source-text-lib.test.mjs`（10/10）、突变对照（红/复原）、scoped 门（EXIT=0）。
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑 —— 本任务的修复由 worker 派发链执行（worktree `quay-worktrees/gap-routine-semantic-dedup-scan-firstargregion-stripshellcomments`，分支 `task/…`，提交 `15e604559`）；例程 `semantic-dedup-scan` 只写了 `.quay/routine-findings.jsonl` 一行 finding 并机械立案，未执行任何修复。
 
 ## Touches
 - `plugin/scripts/task-file-bypass-check.ts`
