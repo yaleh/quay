@@ -27,7 +27,9 @@ extra:
 
 结果是：一个 GOAL 的全部 AC 都做完了,只差"这组 AC 是否真的覆盖了目标"这一个语义判断,而这个判断已经确定地给出了否定答案——却完全没有人知道要去改 AC 集合或者退出条件描述。这个 GOAL 会**永久卡住**,直到有人碰巧手动去查 `.quay/goal-round.jsonl` 才会发现（正是本任务的两个证据来源）。
 
-## AC（draft，implementer refines）
+## AC
+
+implementer refines these before promoting to ready:
 
 - [ ] AC1: 设计一个"insufficient 持续 N 轮/M 分钟"的可见信号机制——具体形态可以是 spawn 一个短命的语义 agent（复用 `computeGoalGaps`/`runGapSpawnPass` 已有的"spawn 一个 fix-worker 角色的 agent 去处理"模式,而不是 driver 自己直接改 AC),职责是读 GOAL 的退出条件/范围/在域 AC 集合,**提议**(不直接写)一条候选的新 AC 或者退出条件修订说明,写进一条新立案的普通 gap 任务里供人审核——⛔ 不自动写 goal-store。
 - [ ] AC2: 该信号只在"充分性确定裁决为 insufficient 且已经持续超过阈值(轮数或时间,复用与 AC-214 freshness routine 同类的推导方式,不要写死魔数)"时触发一次,不是每轮都触发(避免像 244 次运行零指引价值的旧反例那样变成噪音)——同一个 GOAL 的同一个 insufficient 裁决只 file 一次,裁决变化(判官重判出新结果)才重新计时。
