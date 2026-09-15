@@ -221,6 +221,7 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-per-task-suite-verification-2026-08-13.md -->
 <!-- reference-doc: orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md -->
 <!-- reference-doc: orchestration/SPEC-quay-self-hosts-its-own-cold-start.md -->
+<!-- reference-doc: orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md -->
 <!-- reference-doc: orchestration/SPEC-state-crystallization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-store-commit-unification-2026-09-08.md -->
 <!-- reference-doc: orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md -->
