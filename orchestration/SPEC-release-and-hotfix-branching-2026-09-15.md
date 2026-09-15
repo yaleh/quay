@@ -483,7 +483,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ **已完成** |
 | 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
 | 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ **已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 其它 clone 需各跑一次 `git remote set-head origin -a`（`AC-273` 守此量） |
-| 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ 下一次切版本时即可采用；现存两条 `release-v06x-build` 按判据乙清理 |
+| 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ **删除半边已完成**（`gap-release-branch-deleted-after-merge`，2026-09-15T16:4xZ）：落成 fail-closed 命令 `plugin/scripts/release-branch-finish.sh`（只认 `release-*` / `release/*` 名；`develop..<b>` ≠ 0 ⇒ 拒绝；远端删除失败或读不到 ⇒ 独立 `CAUSE=` + 非零退出）；**现存两条 `release-v06x-build` 由该命令在生产仓库删除**——`release-v062-build` tip `158616df7`（= `v0.6.2`）、`release-v063-build` tip `d097f48c7`，两条 `develop..<b>` 实测均为 **0** ⇒ 删除无损；删除后 `AC-271` 由 fail 转 **pass**。⚠️ 命名半边（§4.1 变更点 1）仍未采用——⛔ 它不在判据乙的达标条件内（判据按 tip 是否指向 tag 判定，不解析分支名）
 | 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭） |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
 | 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布）；⚠️ 第 4 步落地后**这一步是自动发生的**，不需要另外的人工动作 |
@@ -509,7 +509,8 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 ---
 
-**执行状态（2026-09-15T15:1xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
+**执行状态（2026-09-15T16:4xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
 **第 3 步已完成**（`gap-develop-version-union-missing-dev-suffix`：并集 10 条 + lockfile 4 条齐步 `0.7.0-dev`、checker 认后缀 + all-or-none、`AC-272` pass、`origin/dist-plugin` 重发、marketplace 实测接受 prerelease）；
-第 2/4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
+**第 2 步的删除半边已完成**（`gap-release-branch-deleted-after-merge`：`plugin/scripts/release-branch-finish.sh` 落成，两条现存 `release-v06x-build` **穿过该命令**删除，`AC-271` 转 pass；命名半边未采用，且不在判据乙的达标条件内）；
+第 4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
 ⛔ 本文件自身仍不推进任何分支——master 至今未动，且按裁定 4 这正是正确输出。
