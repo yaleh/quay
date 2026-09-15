@@ -1,7 +1,7 @@
 ---
 id: gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global
 title: plugin/bin/quay shim 缺席——plugin 形态下 CLI 只能靠 npm 全局安装，而 PATH 里那个目录本来就在
-status: todo
+status: ready
 labels:
   - gap
 parent: null
