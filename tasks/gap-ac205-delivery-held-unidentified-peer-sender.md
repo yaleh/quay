@@ -58,11 +58,11 @@ extra: {}
 
 ## AC
 
-- [ ] 判据能取假①（红）：在一台**只有已死会话**的验证机上跑 AC-205 腿 ⇒ 落痕为 `absent` 或连接失败，且**不写记录**（逐字贴出；⛔ 不再声称「与 host B 同形」—— host B 有活会话，那条记述已作废）。该形态的**选择器侧**已由 `gap-ac214-fifth-crossing-routine-detects-but-nothing-acts` 的 control 55 覆盖，本条只管**落痕形态**。
-- [ ] 判据能取假②（红）：在一台**有活会话但会扣下未识别 peer 消息**的验证机上跑 AC-205 腿 ⇒ 落痕为 `held` 并**逐字贴出那条 `Held peer message` 记录**（与今天 host C 同形）。
-- [ ] 判据能取假③（绿）：目标会话具备 `crossSessionInbound:accept`（夹具会话即可，⛔ 不动真会话的配置）之后，同一台机上落痕变为 `delivered`，且载体出现一条新的 `ac=GOAL-009-AC-205` ∧ `transcript_confirmed=true` 记录。
-- [ ] 生产载体读数：实现落地后，`.quay/productization-verification.jsonl` 里出现 `ts` 晚于落地时刻的 AC-205 记录（⛔ 只由夹具满足不算产出）。
-- [ ] `plugin/freshness-producers.json` 的 AC-205 条目要么写清前置，要么按 3 拆分；两种处置都要贴出改后的条目原文。
+- [x] 判据能取假①（红）：在一台**只有已死会话**的验证机上跑 AC-205 腿 ⇒ 落痕为 `absent` 或连接失败，且**不写记录**（逐字贴出；⛔ 不再声称「与 host B 同形」—— host B 有活会话，那条记述已作废）。该形态的**选择器侧**已由 `gap-ac214-fifth-crossing-routine-detects-but-nothing-acts` 的 control 55 覆盖，本条只管**落痕形态**。
+- [x] 判据能取假②（红）：在一台**有活会话但会扣下未识别 peer 消息**的验证机上跑 AC-205 腿 ⇒ 落痕为 `held` 并**逐字贴出那条 `Held peer message` 记录**（与今天 host C 同形）。
+- [ ] 判据能取假③（绿）：目标会话具备 `crossSessionInbound:accept`（夹具会话即可，⛔ 不动真会话的配置）之后，同一台机上落痕变为 `delivered`，且载体出现一条新的 `ac=GOAL-009-AC-205` ∧ `transcript_confirmed=true` 记录。（待外部）
+- [ ] 生产载体读数：实现落地后，`.quay/productization-verification.jsonl` 里出现 `ts` 晚于落地时刻的 AC-205 记录（⛔ 只由夹具满足不算产出）。（待外部）
+- [x] `plugin/freshness-producers.json` 的 AC-205 条目要么写清前置，要么按 3 拆分；两种处置都要贴出改后的条目原文。
 
 ## DoD
 
@@ -73,6 +73,7 @@ AC-205 腿对「投递不到 / 被扣下 / 已送达」三态**逐条留痕且�
 - `plugin/scripts/send-to-session.ts`（发送前检测 goal 设置，把「会被扣下」变成可区分结局）
 - `plugin/scripts/peer-identity-probe.ts`（既有身份机件，先查它是否已暴露该判据）
 - `plugin/scripts/verify-deliver-coldstart.sh`（AC-205 腿：三态落痕；⚠️ 选择器活性闸已由 `gap-ac214-fifth-crossing-routine-detects-but-nothing-acts` 修，本条只加深三态落痕）
+- `plugin/test/verify-deliver-coldstart.test.mjs`（本条新增的两条 --selfcheck 控件（三态落痕 / 发送前 HOLD 前置）的断言；basename 配对已把该测试拉进本任务的 scoped 门）
 - `plugin/scripts/transcript-delivery-check.ts`（⛔ 只读，不改其契约）
 - `plugin/freshness-producers.json`（登记面：前置或拆分）
 - `tasks/gap-ac205-delivery-held-unidentified-peer-sender.md`（自身文件）
