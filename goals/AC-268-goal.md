@@ -1,6 +1,6 @@
 ---
 id: AC-268
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -42,5 +42,16 @@ origin: "人 2026-09-15 拍板 (b)：接受在本 GOAL 期内经 workflow_dispat
   release.yml 已于 2026-09-14 13:19 改为 on: workflow_dispatch only（带必填 tag 输入），tag
   push 不再自动触发，故任何期待 git push --tags 产生 release run 的判据结构上不可满足。最后一次 release 成功是
   2026-07-24 的 v0.3.13。"
+activatedAt: 2026-09-15T11:42:04.934Z
+statusLog:
+  - at: 2026-09-15T11:42:04.934Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 激活：判据当轮干跑取假；已按 release.yml 现为 dispatch-only 的事实写判据
 long-term: false
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T11:42:04.933Z
 ---
