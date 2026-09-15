@@ -47,6 +47,19 @@ jobs:
         run: |
           node --experimental-strip-types scripts/test-coverage-check.ts --selftest
           node --experimental-strip-types scripts/test-coverage-check.ts
+      - name: Bootstrap .quay/config.yml (gap-config-yml-example-and-ci-bootstrap)
+        # `.quay/config.yml` is gitignored (DIR-050, per-workspace) and has never had a committed
+        # template — every long-lived local checkout has one only because it was hand-bootstrapped
+        # once, years ago, and gitignored files never get removed by a re-clone. A bare
+        # `actions/checkout@v4` (this job) has NO `.quay/config.yml` at all, which quay's own CLI/
+        # web ("quay serve" reads it to pick a Provider) and several dozen test files' own
+        # "walk upward looking for .quay/config.yml to find the repo root" helpers treat as fatal —
+        # 2026-09-15 real-machine finding: this silently broke ~26 test files on every fresh
+        # checkout (confirmed via a scratch `git clone` at the exact CI commit, reproducing the
+        # exact CI failure locally). Copying the checked-in, version-controlled reference config
+        # into place fixes this for CI AND matches what README's "Option B — from source" already
+        # promises a human contributor (git clone + npm install, nothing about .quay/config.yml).
+        run: cp .quay/config.yml.example .quay/config.yml
       - name: Run tests
         # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
         # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
