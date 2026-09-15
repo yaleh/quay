@@ -6,8 +6,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { check, readVersions, suffixPolicyOf } from './version-consistency-check.ts';
@@ -17,8 +18,14 @@ const repoRoot = resolve(__dirname, '..');
 const scriptPath = resolve(__dirname, 'version-consistency-check.ts');
 
 function makeFixture(name: string, versions: Record<string, string>): string {
-  const tmp = resolve(repoRoot, `test/fixtures/version-consistency-${name}`);
-  rmSync(tmp, { recursive: true, force: true });
+  // Fixtures live OUTSIDE the checked-in tree. `checked-in-write-check.ts` interposes on the fs
+  // write verbs and judges the RESOLVED TARGET PATH: a test must not create or delete entries under
+  // a checked-in path (the repository tree is simultaneously another test's/tool's INPUT — a copier
+  // that already readdir'd it then fails stat on an entry removed in between). The earlier
+  // `resolve(repoRoot, 'test/fixtures/…')` form was a live violation: 184 checked-in writes in one
+  // run. os.tmpdir() is process-private and exempt by construction, and mkdtemp gives each call its
+  // own directory so parallel runs cannot collide.
+  const tmp = mkdtempSync(join(tmpdir(), `version-consistency-${name}-`));
   const dirs = new Set<string>();
   for (const p of Object.keys(versions)) {
     dirs.add(resolve(tmp, dirname(p)));
