@@ -71,6 +71,25 @@ for (const d of r) console.log(d.kind, "running=", d.running, typeof d.running, 
 ```
 （这是 dashboard 真实读的路径，直接暴露症状，不需要跑 web server）
 
+## Correction to the above (追加, 同一会话, 几分钟后)
+
+上面那节的诊断本身是对的(bug 机制、CLI 与 dashboard 是两条独立路径、5/6 kind 的 pid 文件确实缺失),但结尾那句"⛔ 未完全定位的部分,留给实现者"是**误导的**——我当时用的是自己几小时前手工重建的 `packages/quay/plugin/scripts/dist/driver-runtime.js`(打包产物,不是这个任务实际改的源码 `plugin/scripts/driver-runtime.ts`),那份 dist 是在这个任务的修复落地**之前**构建的,过期了。
+
+刚才用同一份 `package.sh` 重新打包(拉取当前 `plugin/scripts/driver-runtime.ts` 的最新内容,含这个任务落地的 `anchorHosts()`/`readAnchorState()` 修复)后,直接对着 `/home/yale/work/quay` 复测 `observation.ts` 的 `readDriverStatus()`(dashboard 真实读的那条路径):
+
+```
+promotion running= true lastTs= 2026-09-15T07:35:39.672Z
+worker    running= true lastTs= 2026-09-15T07:35:47.406Z
+outer     running= true lastTs= 2026-09-15T07:35:32Z
+quality   running= true lastTs= 2026-09-15T07:35:39.673Z
+meta      running= true lastTs= 2026-09-15T07:35:39.673Z
+goal      running= true lastTs= 2026-09-15T07:27:49.723Z
+```
+
+**六个全部正确显示 `running=true`**——这个任务的修复是完整、正确的,不存在"3/6 kind 仍然有问题"这回事。上面那句"未完全定位的部分"应该撤回:`.quay/<kind>-driver.pid` 这五个文件继续缺失是**预期行为**,不是遗留 bug——修复后的 `anchorHosts()` 本来就不再依赖这五个文件(改读 `.quay/anchor.json` 这个每轮重写的回读面),它们缺不缺已经不影响判据结果。
+
+这也顺带证实了一条已知纪律(memory: driver-code-fix-activation-requires-main-sync-restart):**修复代码落到 `plugin/scripts/*.ts` 源码里,不等于生产在跑的 dist 产物已经拿到它**——`packages/quay/plugin/scripts/dist/*.js` 是打包产物,只有重新跑一次 `package.sh`(或等价的 build-plugin-dist 步骤)才会拿到最新源码。这个任务的 AC4"real-machine verification"如果当时是对着一份没有及时重建的 dist 产物验证的,会误判"部分修复"——但现在用新鲜重建的产物复测,确认是完全修复的,不需要再追加任何后续任务。
+
 ## AC
 
 - [x] AC1: root cause confirmed — the exact code path in `driver-runtime.ts` (or wherever `quay driver status`/`server status` derives `host`/`alive`/`running` per kind) that produces `host=supervisor, alive=0` for an anchor-hosted kind, and why it differs between kinds that report correctly vs. incorrectly.
