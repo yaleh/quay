@@ -725,8 +725,10 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
             ? await opts.fileTaskFn(d.taskId, title, body)
             : fileRoutineTask(opts.root, opts.kernelPluginRoot ?? null, d.taskId, title, body, ["gap", "routine-filed", decl.name], tasksDir);
           if (w.ok) {
-            // 写盘即提交（同 carrierRel 那条判据，5b）：⛔ 不留一个「已立案但没人提交」的任务文件——
-            // 那正是载体丢失 25 条记录的同一形态，只是换了一个文件。
+            // 写盘即提交（与载体同一条判据）：⛔ 不留一个「已立案但没人提交」的任务文件。
+            // ⚠️ 实测这里通常是**空转**——`quay-native task create` 自己就提交它写的文件（见
+            //    commitRoutineWrite 的注释）。保留它是为了不依赖那个「CLI 会提交」的假设（非 git
+            //    工作区里它做不到），而 commitRoutineWrite 已把「已提交」与「提交失败」分开。
             const taskRel = path.relative(opts.root, path.join(tasksDir, `${d.taskId}.md`));
             const tc = commitRoutineWrite(opts.root, taskRel, `routine(${decl.name}): file ${d.taskId} from finding ${d.findingId}`);
             filed.push(d.taskId);
