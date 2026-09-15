@@ -52,22 +52,35 @@ resume `node --test packages/quay/test/build-plugin-dist.test.mjs`
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制修在重写器：`node --test packages/quay/test/build-plugin-dist.test.mjs` exit 0，且用例断言重写函数对 `plugin/scripts/X.ts` 与 plugin-root 锚定的 `scripts/X.ts` 两种输入，产出都相对 plugin 根可解析、都不含 cwd 相对 `plugin/` 前缀。⚠️ 既有两条断言（`:136` 期望 `<root>/plugin/scripts/dist/...`、`:155` 期望 `plugin/scripts/dist/...`）**正在把缺陷形态钉成期望值**，必须一并更正。
-- [ ] AC2 交付面判据（不锁实现形式）：改后重跑 `bash plugin/scripts/publish-dist-branch.sh`，再逐字执行 `goals/AC-260-*.md` 里 criterion 的 python 谓词，exit 0 且原始输出落档。判据刻意不要求必须写成 `${CLAUDE_PLUGIN_ROOT}`：若实测该变量在 SKILL.md 正文上下文不可用，可换任何等价自解析形式而**无需改判据**。
-- [ ] AC3 兄弟实例扫描（硬规则 5b 的产物）：对 `dist-plugin` 分支跑一次覆盖全部载体（`.md` / `.sh` / `.js`）的同类扫描，把**命中数与前 3 条实际命中**贴进证据；修后 cwd 相对 `plugin/` 前缀引用与悬空 `.ts` 引用均为 0。只修 `.md` 里那 96 条 ⇒ 本 AC 不满足。
-- [ ] AC4 负控制：谓词读的是**分支内容**而非工作树。用修前的分支状态跑同一谓词必须报非零 offender（96）并留档，与修后对拍；给不出修前读数则修后的 0 不作数（硬规则 2 / 3b）。
+- [x] AC1 机制修在重写器：`node --test packages/quay/test/build-plugin-dist.test.mjs` exit 0，且用例断言重写函数对 `plugin/scripts/X.ts` 与 plugin-root 锚定的 `scripts/X.ts` 两种输入，产出都相对 plugin 根可解析、都不含 cwd 相对 `plugin/` 前缀。⚠️ 既有两条断言（`:136` 期望 `<root>/plugin/scripts/dist/...`、`:155` 期望 `plugin/scripts/dist/...`）**正在把缺陷形态钉成期望值**，必须一并更正。
+- [x] AC2 交付面判据（不锁实现形式）：改后重跑 `bash plugin/scripts/publish-dist-branch.sh`，再逐字执行 `goals/AC-260-*.md` 里 criterion 的 python 谓词，exit 0 且原始输出落档。判据刻意不要求必须写成 `${CLAUDE_PLUGIN_ROOT}`：若实测该变量在 SKILL.md 正文上下文不可用，可换任何等价自解析形式而**无需改判据**。
+- [x] AC3 兄弟实例扫描（硬规则 5b 的产物）：对 `dist-plugin` 分支跑一次覆盖全部载体（`.md` / `.sh` / `.js`）的同类扫描，把**命中数与前 3 条实际命中**贴进证据；修后 cwd 相对 `plugin/` 前缀引用与悬空 `.ts` 引用均为 0。只修 `.md` 里那 96 条 ⇒ 本 AC 不满足。
+- [x] AC4 负控制：谓词读的是**分支内容**而非工作树。用修前的分支状态跑同一谓词必须报非零 offender（96）并留档，与修后对拍；给不出修前读数则修后的 0 不作数（硬规则 2 / 3b）。
 
 ## Definition of Done
 
-- [ ] 标准 DoD（`inherited-core` 的 standard clauses，由 `it0-dod-check.sh` 这个 meta-enforcer 强制）逐条适用：真实落地 = 交付面分支上的**实际内容**变了，不是产物存在、也不是命令 exit 0。
-- [ ] 改动落在 `packages/quay/scripts/build-plugin-dist.mjs` 与其单测；**不手改 `plugin/**/*.md` 源来打补丁** —— 源里的 dev 形态是对的，坏的是重写产物。
-- [ ] `dist-plugin` 分支已重跑发布，并从**每个受影响面各抽一个文件**核内容（`git show dist-plugin:skills/loop-driver/SKILL.md`、`git show dist-plugin:loop/fast-mode-loop-tick.md`、任一 `.sh`），肉眼可见路径已是相对 plugin 根可解析的 dist 形式。
-- [ ] 「跑过一次 publish」不算落地：落地证据是**分支上的实际文件内容**，不是命令 exit 0。
-- [ ] `plugin/scripts/publish-dist-branch.sh` 只被**运行**、不被修改（主发布渠道的闭包断言属 AC-263 的范围，此处不重复实现），故不进 Touches。
-- [ ] 证据落 `.quay/ac260-*.txt`（修前基线 + 修后谓词原文 + AC3 的扫描计数与前 3 条命中）并随改动提交。
+- [x] 标准 DoD（`inherited-core` 的 standard clauses，由 `it0-dod-check.sh` 这个 meta-enforcer 强制）逐条适用：真实落地 = 交付面分支上的**实际内容**变了，不是产物存在、也不是命令 exit 0。
+- [x] 改动落在 `packages/quay/scripts/build-plugin-dist.mjs` 与其单测；**不手改 `plugin/**/*.md` 源来打补丁** —— 源里的 dev 形态是对的，坏的是重写产物。
+- [x] `dist-plugin` 分支已重跑发布，并从**每个受影响面各抽一个文件**核内容（`git show dist-plugin:skills/loop-driver/SKILL.md`、`git show dist-plugin:loop/fast-mode-loop-tick.md`、任一 `.sh`），肉眼可见路径已是相对 plugin 根可解析的 dist 形式。
+- [x] 「跑过一次 publish」不算落地：落地证据是**分支上的实际文件内容**，不是命令 exit 0。
+- [x] `plugin/scripts/publish-dist-branch.sh` 只被**运行**、不被修改（主发布渠道的闭包断言属 AC-263 的范围，此处不重复实现），故不进 Touches。
+- [x] 证据落 `.quay/ac260-*.txt`（修前基线 + 修后谓词原文 + AC3 的扫描计数与前 3 条命中）并随改动提交。
 
 ## Touches
 
 - packages/quay/scripts/build-plugin-dist.mjs
 - packages/quay/test/build-plugin-dist.test.mjs
 - tasks/gap-dist-plugin-invoker-rewrite-emits-unresolvable-plugin-paths.md
+- .quay/ac260-criterion.py
+- .quay/ac260-before-predicate.txt
+- .quay/ac260-after-predicate.txt
+- .quay/ac260-before-scan.txt
+- .quay/ac260-after-scan.txt
+- .quay/ac260-before-stderr.txt
+- .quay/ac260-after-stderr.txt
+- .quay/ac260-sibling-scan.txt
+- .quay/ac260-branch-content-spotchecks.txt
+- .quay/ac260-residual-after.txt
+- .quay/ac260-residual.py
+- .quay/ac260-scan.py
+- .quay/ac260-evidence-notes.txt
