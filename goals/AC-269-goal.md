@@ -1,6 +1,6 @@
 ---
 id: AC-269
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -41,5 +41,16 @@ expect: exit 0 = 归因器 plugin/scripts/ci-red-attribute.ts 已落地 ∧ 载�
   carrier-absent / collection-stalled / red-unattributed。
 origin: 立案动因 2026-09-15：为给一批 CI 红定性（真缺陷 / job 超时截断 / 已知负载 flake 三类混在一起），需要人肉读
   15684 行日志并跨 4 次 run 比对失败集合。无机械归因则每次红都要重复这个成本，持续驱动无法成立。
+activatedAt: 2026-09-15T11:34:27.561Z
+statusLog:
+  - at: 2026-09-15T11:34:27.561Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 激活：判据已当轮干跑验证能取假（AC-266 另做了双向控制）
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-15T11:34:27.560Z
 ---
