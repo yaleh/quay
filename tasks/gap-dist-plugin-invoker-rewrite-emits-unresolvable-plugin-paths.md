@@ -59,11 +59,12 @@ resume `node --test packages/quay/test/build-plugin-dist.test.mjs`
 
 ## Definition of Done
 
-- 改动落在 `packages/quay/scripts/build-plugin-dist.mjs` 与其单测；**不手改 `plugin/**/*.md` 源来打补丁** —— 源里的 dev 形态是对的，坏的是重写产物。
-- `dist-plugin` 分支已重跑发布，并从**每个受影响面各抽一个文件**核内容（`git show dist-plugin:skills/loop-driver/SKILL.md`、`git show dist-plugin:loop/fast-mode-loop-tick.md`、任一 `.sh`），肉眼可见路径已是相对 plugin 根可解析的 dist 形式。
-- 「跑过一次 publish」不算落地：落地证据是**分支上的实际文件内容**，不是命令 exit 0。
-- `plugin/scripts/publish-dist-branch.sh` 只被**运行**、不被修改（主发布渠道的闭包断言属 AC-263 的范围，此处不重复实现），故不进 Touches。
-- 证据落 `.quay/ac260-*.txt`（修前基线 + 修后谓词原文 + AC3 的扫描计数与前 3 条命中）并随改动提交。
+- [ ] 标准 DoD（`inherited-core` 的 standard clauses，由 `it0-dod-check.sh` 这个 meta-enforcer 强制）逐条适用：真实落地 = 交付面分支上的**实际内容**变了，不是产物存在、也不是命令 exit 0。
+- [ ] 改动落在 `packages/quay/scripts/build-plugin-dist.mjs` 与其单测；**不手改 `plugin/**/*.md` 源来打补丁** —— 源里的 dev 形态是对的，坏的是重写产物。
+- [ ] `dist-plugin` 分支已重跑发布，并从**每个受影响面各抽一个文件**核内容（`git show dist-plugin:skills/loop-driver/SKILL.md`、`git show dist-plugin:loop/fast-mode-loop-tick.md`、任一 `.sh`），肉眼可见路径已是相对 plugin 根可解析的 dist 形式。
+- [ ] 「跑过一次 publish」不算落地：落地证据是**分支上的实际文件内容**，不是命令 exit 0。
+- [ ] `plugin/scripts/publish-dist-branch.sh` 只被**运行**、不被修改（主发布渠道的闭包断言属 AC-263 的范围，此处不重复实现），故不进 Touches。
+- [ ] 证据落 `.quay/ac260-*.txt`（修前基线 + 修后谓词原文 + AC3 的扫描计数与前 3 条命中）并随改动提交。
 
 ## Touches
 
