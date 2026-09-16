@@ -2,7 +2,7 @@
 id: gap-prose-prereq-negation-window-is-before-keyword-only-and-sibling-markers-are-chinese-only
 title: 'prosePrereqGap 否定词窗口只往关键词前找、sibling 标记词表纯中文——英文"Depends_on: none
   (...related-but-not-duplicate of `gap-x`...)"两处盲区叠加误判为真前置'
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -26,6 +26,7 @@ Depends_on: none (independent finding; related-but-not-duplicate of `gap-driver-
 ```
 直接调用 `declaresPrereq()` 对这句返回 `true`，`prosePrereqGap()` 对整篇正文返回 `['gap-driver-status-misreports-anchor-hosted-kind-as-down']`（该被指认的任务其实早已 `done`，且这句话本意就是"这不是前置依赖"）。`promotion-driver` 因此连续多轮（round 378-382+，日志 `.quay/promotion-round.jsonl`）拒绝把该任务从 `todo` 晋升到 `ready`，理由 `"prosePrereqGap=[gap-driver-status-misreports-anchor-hosted-kind-as-down]"`——一条已经全部四件套齐全、`task_check` 本身判 `ok:true` 的任务，被这条散文误判卡死。
 
+<!-- dedup-ref -->
 **与已有任务的关系（已查重确认不是同一条）**：`gap-prose-prereq-negation-blind-and-paragraph-scoped`（status: done）修的是"关键词在前、否定词也在前但隔太远/跨段落"的形状（该任务自己的 Plan 1/Plan 2 分别是"句子级作用域"和"否定词在关键词前 16 字符内"）——**本任务是它的镜像盲区（否定词在关键词后）+ 一个完全独立的轴（sibling 标记词表是中文专属）**，不是重复，是同一根因下两个此前没被覆盖的方向。另查 `gap-prose-prereq-detector-blind-to-repo-own-conventions`（done）修的是关键词表缺"阻塞"+ 只认 wikilink 不认反引号，与本任务机制不同（那条是漏检扩面，本任务是误报收窄），也非重复。
 
 **已有的官方豁免机制（不是本任务要解决的问题，只是记录旁路存在）**：同文件的 `DEDUP_REF_MARKER = "<!-- dedup-ref -->"` 段落级豁免可以手工绕开这个具体误判（本会话已经用它临时解决了上面那条任务），但这只是个案 workaround，不修检测器本身，任何其他英文撰写的、用类似措辞的任务体还会重蹈覆辙。
