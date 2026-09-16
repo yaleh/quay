@@ -2,7 +2,7 @@
 id: gap-shared-install-fixture-wipe-cannot-remove-readonly-tree
 title: shared install fixture 的清空路径删不掉只读树——一旦夹具落到「只读子目录 + 无就绪 marker」态，后续每次全量套件都
   EACCES 且永久不能自愈；同一文件另有 3 个裸 NUL 字面字节使其对 grep/file 成为非文本
-status: ready
+status: done
 labels:
   - gap
   - defect
