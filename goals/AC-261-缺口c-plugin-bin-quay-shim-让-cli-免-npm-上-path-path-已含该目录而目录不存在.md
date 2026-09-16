@@ -1,7 +1,7 @@
 ---
 id: AC-261
 title: 缺口C：plugin/bin/quay shim 让 CLI 免 npm 上 PATH（PATH 已含该目录而目录不存在）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: >-
@@ -63,6 +63,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-019 已激活，本 AC 进入在评
+  - at: 2026-09-16T04:33:59.234Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
