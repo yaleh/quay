@@ -35,10 +35,10 @@ goal_ac: AC-233
 
 ## AC
 
-- [ ] AC1 正向（能取假）：夹具中让某条常设 AC 的 criterion **首次失败、复核那次通过** ⇒ `computeGoalGaps` 不再产出 `standing-violated`，且 `runGapSpawnPass` 的 `spawned` = 0。⛔ 只断言「干净时 spawned=0」不算（恒绿形）。负控制（区分「复核真的跑了」与「复核被跳过」）：criterion **两次都失败** ⇒ 仍产出 `standing-violated` 且 `spawned` = 1；复核 `not-evaluated` ⇒ 产出独立态，⛔ 既不是 `standing-ok` 也不是 `standing-violated`。
-- [ ] AC2 轮记录里出现立案前复核读数：存在一条轮 fact / `gap_spawns` 元素含 `{ac, outcome, verdict, durationMs, hostFreeBytes|load1}`；**负控制**：改动前的轮记录里该键**缺失**（两者可区分，⛔ 不靠「字段存在」自证）。
-- [ ] AC3 真值不动：`node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs` ⇒ exit 0（2 pass / 0 fail）；`quay goal check --achieved-failing --store --root /home/yale/work/quay` 的 `achievedButFailing` 不含 `AC-233`；`git diff --name-only` 证明本任务**未改** `plugin/test/shipped-entry-runnable.test.mjs` 与 `packages/quay/package.json`。
-- [ ] AC4 `node plugin/scripts/task-schema-check.ts tasks/gap-standing-violated-false-spawn-no-prefiling-recheck.md` ⇒ exit 0。
+- [x] AC1 正向（能取假）：夹具中让某条常设 AC 的 criterion **首次失败、复核那次通过** ⇒ `computeGoalGaps` 不再产出 `standing-violated`，且 `runGapSpawnPass` 的 `spawned` = 0。⛔ 只断言「干净时 spawned=0」不算（恒绿形）。负控制（区分「复核真的跑了」与「复核被跳过」）：criterion **两次都失败** ⇒ 仍产出 `standing-violated` 且 `spawned` = 1；复核 `not-evaluated` ⇒ 产出独立态，⛔ 既不是 `standing-ok` 也不是 `standing-violated`。
+- [x] AC2 轮记录里出现立案前复核读数：存在一条轮 fact / `gap_spawns` 元素含 `{ac, outcome, verdict, durationMs, hostFreeBytes|load1}`；**负控制**：改动前的轮记录里该键**缺失**（两者可区分，⛔ 不靠「字段存在」自证）。
+- [x] AC3 真值不动：`node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs` ⇒ exit 0（2 pass / 0 fail）；`quay goal check --achieved-failing --store --root /home/yale/work/quay` 的 `achievedButFailing` 不含 `AC-233`；`git diff --name-only` 证明本任务**未改** `plugin/test/shipped-entry-runnable.test.mjs` 与 `packages/quay/package.json`。
+- [x] AC4 `node plugin/scripts/task-schema-check.ts tasks/gap-standing-violated-false-spawn-no-prefiling-recheck.md` ⇒ exit 0。
 
 ## DoD
 
@@ -52,3 +52,28 @@ goal_ac: AC-233
 
 <!-- dedup-ref -->
 溯源（⛔ 非前置）：AC-233 的两条既有认领 `gap-shipped-entry-files-not-runnable`（done）与 `gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry`（done）修的都是**判据/产物面**（包的 `files` 装入面、测试的 entry 判定过宽），不是本次的**读数与 spawn 面**。按 driver 规则 done 不算重复、而是「earlier fix 没扛住」的证据——但此处 earlier fix **扛住了**（判据实测为真），故本任务明确写「保证未被破坏、⛔ 不要重修判据」。
+
+## Evidence（实现 2026-09-16T12:0x–12:1xZ，分支 `task/gap-standing-violated-false-spawn-no-prefiling-recheck`）
+
+改动（实现提交 `2ed399621`，两文件，与 `## Touches` 逐条一致）：
+
+- `plugin/scripts/goal-driver.ts`：① 抽出**共用核** `runPrefilingRecheck`（逐条真跑 criterion + `GOAL_ACCEPTANCE_ACTIVE_ENV` 重入闸 + 三态落痕），`recheckFrozenFailing` 与新增 `recheckStandingFailing` 都只做「谁进复核集」（⛔ 不复制第二份跑判据的循环）；② `computeGoalGaps` 新增第 7 入参 `standingRecheck`，分派位置**在派生判据之前**；③ `runGoalRound` 在 I5 之后调 `recheckStandingFailing`，读数写进轮记录**新字段** `standingRecheck`；④ `readHostHealth()` 读 `statfs("/")` 的可用字节 + `os.loadavg()[0]`（读宿主、⛔ 不写字面量；读不出 ⇒ `null`，⛔ 不与 0 同形）。
+- `plugin/test/goal-driver.test.mjs`：新增 6 条（②b 正向 / 负控制 / prompt / 三态互不同形 / `recheckStandingFailing` 自身 / AC2）。
+
+AC 逐条验证（本轮实测读数）：
+
+- **AC1 ✅** `②b 正向`：夹具判据 =「前 2 次调用失败、第 3 次起通过」；端到端 `runGoalRound` 实测该判据被执行 **3 次**（pass 1b → I5 → ②b，断言把这个序钉住 —— 顺序若变则该条立刻红，⛔ 不会静默退化成空转）；`achievedFailing.achievedButFailing` 含 `AC-001`（前提**真的成立**）；`standingRecheck.entries = [[AC-001, cleared, now-true]]`；`gaps` 里 AC-001 **无条目**；`spawned = 0`。负控制 `②b 负控制`：`criterion: exit 1` ⇒ `confirmed-failing` ⇒ `standing-violated` 且 `spawned = 1`、`gap_spawns = [AC-001]`（复核不是恒绿闸）。`②b 三态互不同形`：复核 `not-evaluated` ⇒ `state=not-evaluated`、`taskCount=null`，`≠ standing-ok` 且 `≠ standing-violated` 且不在 spawn 选取面；`cleared` ⇒ 不产读数；漏传复核读数 ⇒ 保守立案（fail-visible）。
+- **AC2 ✅** 端到端轮记录 `value.standingRecheck.entries[0]` 实测键含 `ac / outcome / verdict / durationMs / hostFreeBytes / load1`（`durationMs` 是实测数值、宿主量与同时刻独立重读同量级）。**负控制是改动前的真实旧对象**：逐字摘录自生产载体 `.quay/goal-round.jsonl` round 59 / `2026-09-16T11:42:53.534Z` 的 `frozenRecheck.entries[0]`（原对象只有 `{ac, outcome, cause, reason}` 四项，**无** `verdict`/`durationMs`/宿主量）⇒ 同一个谓词 `hasPrefilingEvidence` 在它上面**为假**（⛔ 不是自造一个必然失败的对象来充数）。
+- **AC3 ✅** 三半各自实测：`node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs` ⇒ exit 0（2 pass / 0 fail；`declared-bin-not-runnable=0 | bin-entry-not-declared=0`）；`quay goal check --achieved-failing --store --root /home/yale/work/quay` ⇒ `achievedButFailing = ["AC-242"]`，**AC-233 不在其中**；`git diff --name-only develop`（merge develop 之后）**恰为两文件** `plugin/scripts/goal-driver.ts` + `plugin/test/goal-driver.test.mjs` ⇒ 未改判据文件与 `packages/quay/package.json`。
+- **AC4 ✅** `node plugin/scripts/task-schema-check.ts tasks/gap-standing-violated-false-spawn-no-prefiling-recheck.md` ⇒ exit 0。
+
+scoped 门（与 fan-in 同一条命令）：`bash scripts/test.sh --for-task gap-standing-violated-false-spawn-no-prefiling-recheck --allow-thin` ⇒ **exit 0，95 tests / 95 pass / 0 fail**，22 条 scoped 静态检查全过（其中 `it0-split-or-commit-check --changed` 落 `NOT-EVALUATED`，⛔ 与 PASS 不同形，非红）。⚠️ 缓存写入有一次自我纠正：首次写缓存时 develop 已从 `84212be44` 前进到 `518787b7c`，那份缓存会对一个**没 gate 过**的 tip 声明 pass ⇒ 已重新 merge develop、重跑 scoped 门、并复核 gate 前后 `git rev-parse develop` 逐字一致（`518787b7c`）才重写缓存。
+
+## DoD 的残余（如实标注：⛔ 不声称已达成的那一半）
+
+DoD 要的是「**跑着的** goal 内核的生产载体里取到该读数」。实现与验证已完成，但**生产载体那一半此刻取不到**——成因是可核的机制事实，不是实现缺陷：
+
+- 五个 driver（goal / promotion / meta / outer / quality）**全部跑在 anchor 进程内**：`.quay/{goal,promotion,meta,outer,quality}-driver.pid` 逐字都等于 `.quay/anchor.pid` = `2345029`，该进程 2026-09-16T01:33:52 启动后一直存活（`ps -eo pid,ppid,lstart,cmd` 实测）。这解释了生产轮记录里 `run_id=gl-prod-anchor` 与 `pid=2345029`。⇒ 它是**常驻**进程，不会逐轮重读磁盘上的 kernel 源码。
+- ⇒ 生产载体出现 `standingRecheck` 需要三步：①本任务 ff 落 develop；②主检出（author）同步 develop（`driver-filters.ts` 的 `syncDevelopToDoc`，promotion-driver 每轮机械调用）；③**anchor 重启**——这是 manager 的常设职权（人 2026-08-24 授权 driver 生命周期），**不是 worker 的**，故本任务不自行重启。
+- 落地后一条命令可核（对准 `.quay/goal-round.jsonl` 末条的 goal-ring fact）：`python3 -c "import json,sys;print([f for f in json.loads(open('.quay/goal-round.jsonl').read().strip().split(chr(10))[-1])['facts'] if f['name']=='goal-ring'][0]['value'].get('standingRecheck'))"` —— 即便 `entries` 是空数组，它也是**测量**（`ran:true, attempted:0` 与「本轮没跑这条」不同形）；当 AC-233 命中 `achievedButFailing` 时该条须带宿主量。
+- ⛔ 本任务**不**为此手工启动一份未落地的驱动副本去写生产载体（手工启动满足形式、进程一换即回退），也**不**自行重启 anchor。
