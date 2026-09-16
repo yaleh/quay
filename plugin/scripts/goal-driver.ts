@@ -41,6 +41,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -453,9 +454,15 @@ export async function readFrozenFailing(scriptRoot: string | null, dataRoot: str
   return parseFrozenFailingReading(r.error ? null : r.stdout, r.error ? null : r.status);
 }
 
-// ── 冻结population 的「立案前直接量复核」（gap-frozen-violated-files-on-stale-verdict）─────────────
+// ── 立案前【直接量复核】（**两个 population 共用一条执行路径**）───────────────────────────────────
+//   ③ 冻结population（gap-frozen-violated-files-on-stale-verdict）——读数是**台账尾**，缺陷是**时差**。
+//   ② AC-216 复验域常设判据（gap-standing-violated-false-spawn-no-prefiling-recheck）——读数是本轮
+//      I5 跑的，缺陷是**单次读数在宿主不健康时失准**（ENOSPC 实测）。
+//   两个 population 互斥（域内 vs 域外，同一处 `inAchievedReverifyScope` 判据的两侧）⇒ 同一轮
+//   ⛔ 不会对同一条 AC 跑两遍；而「立案前真跑一次、三态分派」这条修法是**同一条**，故执行与落痕
+//   单点实现在 `runPrefilingRecheck`，两个包装只各自回答「谁进复核集」。
 //
-// 缺陷（本函数存在的唯一理由）：`frozenReading.failing` 是**台账读数**，而台账尾是一条**轮转
+// ③ 的缺陷（该分支存在的理由）：`frozenReading.failing` 是**台账读数**，而台账尾是一条**轮转
 // verdict**，其新鲜度界是 `DEFAULT_STALE_PASS_MAX_AGE_MS = 4h`，轮转周期实测 13–101 min。
 // ⇒ 一次修复落地之后，那条 AC 的台账尾最长数小时仍写 `fail`，而 `computeGoalGaps` 的 ③ 分支
 // 直接把尾 verdict 当作「此刻为假」立案，且 prompt 逐字告诉下游「the earlier fix did not hold」
@@ -471,60 +478,101 @@ export async function readFrozenFailing(scriptRoot: string | null, dataRoot: str
 // 而缺口是「**读数与立案之间没有直接量**」——台账说的是「最后一次看见它是什么时候」，立案却拿它
 // 当「现在」。⇒ 立案前真跑一次那条 criterion（**直接量**），只有复核后**仍非 0** 才产 frozen-violated。
 //
-// 成本有据：`goal-store.ts` 的设计注释实测 avg **1.31s/criterion**（21 条样本），且只对 `failing`
-// 命中的（通常 0–1 条）跑 ⇒ 每轮增量 ≈ 1.3s × |failing|。
+// 成本有据：`goal-store.ts` 的设计注释实测 avg **1.31s/criterion**（21 条样本），且只对命中的
+// （通常 0–1 条）跑 ⇒ 每轮增量 ≈ 1.3s × |命中集|（两个 population 各算一次，互斥故不叠加同一 AC）。
 //
 // ⛔ 重入闸：跑判据必须参与 `GOAL_ACCEPTANCE_ACTIVE_ENV` 那道闸（2026-09-07 递归事故 host load
-// 41.89，边界逐字写在该闸的注释里）。本函数**照 `checkAchievedFailing` / `sweepFrozen` 的同一形态**：
+// 41.89，边界逐字写在该闸的注释里）。共用核**照 `checkAchievedFailing` / `sweepFrozen` 的同一形态**：
 // 已在跑判据（本进程已有该变量）⇒ **拒绝**，并落一个**独立取值**（`not-evaluated` + cause
 // `guard-refused`），⛔ 绝不与「复核通过」同形（硬规则 3b）。置位本身也让 criterion 的子 shell 继承它，
 // 从而那条判据若回调任何判据执行器，孙进程会看到该变量并拒绝——闸的作用域因此覆盖这条新路径。
 
-/** 一条 AC 的复核结局（**三态 + 成因**，⛔ 不布尔化——硬规则 3/3b）。 */
-export interface FrozenRecheckEntry {
+/** 一条 AC 的复核结局（**三态 + 成因**，⛔ 不布尔化——硬规则 3/3b）。
+ *  ⚠️ 本类型被**两个 population** 共用（域内常设 ② / 域外冻结 ③）——两者互斥、复核路径同一条，
+ *  故只有一个类型（硬规则 8：⛔ 不为「同一件事的第二个调用方」复制一份形状）。 */
+export interface PrefilingRecheckEntry {
   ac: string;
-  /** `confirmed-failing` = 复核后仍非 0（立案照旧）；`cleared` = 复核后 exit 0（台账尾是陈旧读数，
-   *  ⛔ 不立案）；`not-evaluated` = 复核跑不成（独立取值，⛔ 与上面两者都不同形）。 */
+  /** `confirmed-failing` = 复核后仍非 0（立案照旧）；`cleared` = 复核后 exit 0（那条「此刻为假」
+   *  的读数是**失准的读数**，⛔ 不立案）；`not-evaluated` = 复核跑不成（独立取值，⛔ 与上面两者都不同形）。 */
   outcome: "confirmed-failing" | "cleared" | "not-evaluated";
   /** 成因（枚举）：still-false / now-true / guard-refused / unreadable。`unreadable` 与
    *  `guard-refused` **不同形**——前者是「命令跑不出读数」，后者是「闸主动拒绝跑」。 */
   cause: "still-false" | "now-true" | "guard-refused" | "unreadable";
   /** 判据自己的输出原因（截断），供落痕归因。 */
   reason: string;
+  /** 这条判据本次复核的**原始 verdict**（pass / fail / not-evaluated，`gateCriterion` 归一化后的取值）。
+   *  与 `outcome` 同源而出处不同：`outcome` 是本驱动的**分派结论**，`verdict` 是判据执行器的**读数**
+   *  ——分开落痕，使「复核真跑过且回了 pass」与「复核被分派成 cleared」在没有复算映射时也读得出。 */
+  verdict: "pass" | "fail" | "not-evaluated";
+  /** 本次 criterion 执行的墙钟毫秒。⛔ `null` = **没跑**（闸拒绝；⛔ 不与 0 同形——0 会被读成
+   *  「跑得极快」，硬规则 3b/6）。 */
+  durationMs: number | null;
+  /** 复核那一刻**根文件系统**的可用字节（`statfs("/")`）。⛔ 不是指标、不设阈值——它只回答
+   *  「这次复核跑在什么机器状态下」。判据断言的保证与宿主健康无关，而两者在**失败读数**上同形
+   *  （本类型存在的理由：2026-09-16 实测 ENOSPC 时窗内一条常设判据变红，其真值完好）
+   *  ⇒ 把环境量与该次读数钉在一起，事后才可分。读不出 ⇒ null（⛔ 不与 0 同形：0 = 盘满）。 */
+  hostFreeBytes: number | null;
+  /** 复核那一刻的 1 分钟 load average（`os.loadavg()[0]`）。成因同上；非 Linux 宿主该值恒 0
+   *  （=「此平台不提供」而非「机器空闲」），故它**只作旁证**，判读以 `hostFreeBytes` 为主。
+   *  读不出 ⇒ null。 */
+  load1: number | null;
 }
 
 /** 一轮的复核读数（⛔ 恒非 null —— 没跑复核时它是 `ran:false` 的显式读数，不与「复核通过」同形）。 */
-export interface FrozenRecheckReading {
-  /** 本轮是否真的进入了复核循环（`guard-refused` / `failing` 为空 / 未传 = false）。 */
+export interface PrefilingRecheckReading {
+  /** 本轮是否真的进入了复核循环（`guard-refused` / 目标集为空 / 未传 = false）。 */
   ran: boolean;
-  /** 复核对象条数（= 立案前那一刻 `frozenReading.failing` 的规模；语境量，⛔ 不是枚举本身）。 */
+  /** 复核对象条数（= 立案前那一刻目标集的规模；语境量，⛔ 不是枚举本身）。 */
   attempted: number;
   /** 逐条落痕（枚举，⛔ 不布尔化）。 */
-  entries: FrozenRecheckEntry[];
+  entries: PrefilingRecheckEntry[];
   /** 闸拒绝：本进程已在跑判据 ⇒ 本轮一条都没复核（⛔ 与「复核了且全过」不同形）。 */
   guardRefused: boolean;
 }
 
+/** 宿主健康量（复核读数的**环境**半边）。⛔ 读宿主、不写字面量（硬规则 4 推论二：一个恰好等于
+ *  当前机器规格的字面量不是「无限制」，换台机器就变成真限制）。
+ *  读不出 ⇒ `null`（⛔ 不与 0 同形——`hostFreeBytes: 0` 是「盘满」，`null` 是「没读到」）。 */
+export function readHostHealth(): { hostFreeBytes: number | null; load1: number | null } {
+  let hostFreeBytes: number | null = null;
+  try {
+    const st = fs.statfsSync("/");
+    const bytes = Number(st.bavail) * Number(st.bsize);
+    if (Number.isFinite(bytes) && bytes >= 0) hostFreeBytes = bytes;
+  } catch {
+    hostFreeBytes = null;
+  }
+  let load1: number | null = null;
+  try {
+    const l = os.loadavg()[0];
+    if (typeof l === "number" && Number.isFinite(l)) load1 = l;
+  } catch {
+    load1 = null;
+  }
+  return { hostFreeBytes, load1 };
+}
+
 /**
- * 对 `reading.failing` 命中的每条 AC **真跑一次它的 criterion**（复用 goal-store 的 `gate` 动词
- * ——即 pass 1 每轮对 active AC 用的同一条 acceptance 执行路径，单一定义、⛔ 不另写一份跑判据的代码）。
+ * 立案前【直接量复核】的**共用核**（单一实现）：对 `targets` 里每条 AC 真跑一次它的 criterion
+ * （复用 goal-store 的 `gate` 动词——即 pass 1 每轮对 active AC 用的同一条 acceptance 执行路径，
+ * 单一定义、⛔ 不另写一份跑判据的代码）。两个 population 的**选取条件**在各自的包装里
+ * （`recheckFrozenFailing` / `recheckStandingFailing`），**执行与落痕在这里**，⛔ 不复制第二份循环。
  *
- * `reading` 为 null / `judgment !== "violated"` / `failing` 为空 ⇒ 不跑任何判据，返回 `ran:false`
- * 的空读数（零成本，且**不与「复核通过」同形**：`ran` 字段把它们分开）。
+ * `targets` 为空 ⇒ 不跑任何判据，返回 `ran:false` 的空读数（零成本，且**不与「复核通过」同形**：
+ * `ran` 字段把它们分开）。
  *
  * ⛔ 副作用是设计如此（同 `gateCriterion`）：`goal-store gate` 把本次复核的 verdict 追加进
  * `.quay/gate-events.jsonl`（actor=`goal-cli`）——这正是「复核发生过」的**产物**（硬规则 9：
  * 可见性 ≠ 执行；一条没有落痕的复核，读者无法与「没复核」区分）。
  */
-export async function recheckFrozenFailing(
+async function runPrefilingRecheck(
   scriptRoot: string | null,
   dataRoot: string,
-  reading: FrozenFailingReading | null,
-): Promise<FrozenRecheckReading> {
-  const empty: FrozenRecheckReading = { ran: false, attempted: 0, entries: [], guardRefused: false };
-  if (reading === null || reading.judgment !== "violated") return empty;
-  const targets = [...reading.failing];
+  targets: string[],
+): Promise<PrefilingRecheckReading> {
+  const empty: PrefilingRecheckReading = { ran: false, attempted: 0, entries: [], guardRefused: false };
   if (targets.length === 0) return empty;
+  const host = readHostHealth();
   // ⛔ 重入闸（先于任何判据执行）：本进程若已在跑判据，则**不再**跑（同 checkAchievedFailing /
   // sweepFrozen 的拒绝形态）——拒绝是一个**独立结局**，不是「零条违反」。
   if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
@@ -536,27 +584,75 @@ export async function recheckFrozenFailing(
         outcome: "not-evaluated",
         cause: "guard-refused",
         reason: "re-entrancy guard held — this process is already running criteria",
+        verdict: "not-evaluated",
+        // ⛔ 没跑 ⇒ 时长 null（⛔ 不写 0：0 会被读成「跑得极快」）。宿主量照读——它描述的是
+        // 「拒绝发生在什么环境下」，仍然有用。
+        durationMs: null,
+        hostFreeBytes: host.hostFreeBytes,
+        load1: host.load1,
       })),
       guardRefused: true,
     };
   }
   const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
   process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
-  const entries: FrozenRecheckEntry[] = [];
+  const entries: PrefilingRecheckEntry[] = [];
   try {
     for (const ac of targets) {
       // 复用 pass 1 的 acceptance 执行路径（`goal-store gate <id>`）：同一条命令、同一个闸、
       // 同一本台账。⛔ 不在此处直接 spawn criterion 文本（那会绕开 store 的 verdict 语义与落账）。
+      const t0 = Date.now();
       const { verdict, reason } = await gateCriterion(scriptRoot, ac, dataRoot);
-      if (verdict === "fail") entries.push({ ac, outcome: "confirmed-failing", cause: "still-false", reason });
-      else if (verdict === "pass") entries.push({ ac, outcome: "cleared", cause: "now-true", reason });
-      else entries.push({ ac, outcome: "not-evaluated", cause: "unreadable", reason });
+      const entry = { ac, verdict, reason, durationMs: Date.now() - t0, hostFreeBytes: host.hostFreeBytes, load1: host.load1 };
+      if (verdict === "fail") entries.push({ ...entry, outcome: "confirmed-failing", cause: "still-false" });
+      else if (verdict === "pass") entries.push({ ...entry, outcome: "cleared", cause: "now-true" });
+      else entries.push({ ...entry, outcome: "not-evaluated", cause: "unreadable" });
     }
   } finally {
     if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
   }
   return { ran: true, attempted: targets.length, entries, guardRefused: false };
+}
+
+/**
+ * ③（冻结population）的立案前复核：对 `reading.failing` 命中的每条 AC 真跑一次 criterion。
+ * `reading` 为 null / `judgment !== "violated"` / `failing` 为空 ⇒ `ran:false`（零成本）。
+ * 执行与落痕见 `runPrefilingRecheck`（⛔ 本函数只做选取）。
+ */
+export async function recheckFrozenFailing(
+  scriptRoot: string | null,
+  dataRoot: string,
+  reading: FrozenFailingReading | null,
+): Promise<PrefilingRecheckReading> {
+  if (reading === null || reading.judgment !== "violated") return { ran: false, attempted: 0, entries: [], guardRefused: false };
+  return runPrefilingRecheck(scriptRoot, dataRoot, [...reading.failing]);
+}
+
+/**
+ * ②（AC-216 复验域内常设判据）的立案前复核（gap-standing-violated-false-spawn-no-prefiling-recheck）：
+ * 对 `standings.achievedButFailing` 命中的每条 AC **再**跑一次 criterion。
+ *
+ * 与 ③ 的差别是**缺陷形态不同、修法同一条**（⛔ 这两个 population 互斥，故同一轮不会重复跑同一条 AC）：
+ *   · ③ 的读数是**台账尾**（轮转 verdict，新鲜度界 4h ≫ 轮转周期）⇒ 时差可长达小时级。
+ *   · ② 的读数（I5 `check --achieved-failing`）**就是本轮跑的**、没有时差——但它只有**一次**。
+ *     一次读数在宿主进入不健康态时会**失准**：2026-09-16 实测 ENOSPC 时窗内 AC-233（判据为真、
+ *     复跑 11 次全绿）在那一轮被判 fail ⇒ driver 据此 spawn 一个 prompt 逐字断言「the guarantee it
+ *     asserts has regressed」的 agent，给下游指一个**不存在的缺陷**（本 agent 逐条复测才发现前提不成立）。
+ *   ⇒ 立案前再跑一次：两次直接量一致才立案；不一致 ⇒ 那次 fail 是读数失准，不立案。
+ *     **修法不是**给判据加环境门/重试阈值（那是硬规则 4 推论「成本结构未知前不设阈值」），
+ *     也不是动 AC-233 的判据（它断言的保证完好，动它会把尺子从「安装位置可运行」挪走）。
+ *     成本有据：只对 `achievedButFailing` 命中的（通常 0–1 条）跑，同 `gateCriterion` 的 1.31s 量级。
+ * `standings` 为 null（读不到 I5 读数）/ 命中集为空 ⇒ `ran:false`（零成本；缺口分派已在
+ * `computeGoalGaps` 的对应分支落 not-evaluated，⛔ 不在这里重判一次）。
+ */
+export async function recheckStandingFailing(
+  scriptRoot: string | null,
+  dataRoot: string,
+  standings: { achievedButFailing: string[]; evaluated: boolean } | null,
+): Promise<PrefilingRecheckReading> {
+  if (standings === null) return { ran: false, attempted: 0, entries: [], guardRefused: false };
+  return runPrefilingRecheck(scriptRoot, dataRoot, [...standings.achievedButFailing]);
 }
 
 /** AC-242 successor 的【动作】半边（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass）：
@@ -1819,6 +1915,9 @@ export function standingReverifyAcs(
  *  ⚠️ 第四态 `derived-routed`：违反的是**真值派生自 ③ 主体population** 的判据（criterion 读 ③ 的输入面
  *  `check --stale-pass`）且 ③ 本轮已判 `violated` ⇒ ② 让位，不独立立案（见 GapState 的该条注释与
  *  `readsFrozenPopulation`）。
+ *  ⚠️ 第五态 `not-evaluated` 的第二个来源：I5 判违反、而**立案前复核**（`recheckStandingFailing`，
+ *  `standingRecheck` 入参）跑不成 ⇒ 独立取值 not-evaluated（⛔ 既不与 standing-ok 也不与
+ *  standing-violated 同形）；复核 `cleared` ⇒ 不产生读数（那次 fail 是读数失准，⛔ 不立案）。
  *  违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled。⛔ 此前这个域只被 I5 跑、不进本读数：
  *  achievedButFailing 只落轮读数与一行日志，「违规」既无写入者也无执行者
  *  （gap-meta-computegoalgaps）。
@@ -1841,7 +1940,8 @@ export function computeGoalGaps(
   judgment: ReadyPoolJudgment | null = null,
   standings: { achievedButFailing: string[]; evaluated: boolean } | null = null,
   frozen: FrozenFailingReading | null = null,
-  frozenRecheck: FrozenRecheckReading | null = null,
+  frozenRecheck: PrefilingRecheckReading | null = null,
+  standingRecheck: PrefilingRecheckReading | null = null,
 ): Array<GoalGap> {
   const activeGoalIds = activeGoalIdsOf(records);
   // 三类 population 落在同一个 gaps 读数里（⚠️ 但判据不同——见上）：
@@ -1923,6 +2023,26 @@ export function computeGoalGaps(
       }
       if (!standingFailing.has(id)) {
         out.push({ goal, ac: id, state: "standing-ok", taskCount: 0 });
+        continue;
+      }
+      // ── 立案前【直接量复核】（gap-standing-violated-false-spawn-no-prefiling-recheck）────────────
+      // `standingFailing` 是 I5 本轮的读数、**没有时差**（这点与 ③ 相反），但它只有**一次**：宿主进入
+      // 不健康态（2026-09-16 实测 ENOSPC）时那一次为真值为真的常设判据给出 fail，据此 spawn 一个
+      // prompt 逐字断言「保证已回归」的 agent ⇒ 给下游指一个**不存在的缺陷**（那轮之后逐条复测，判据
+      // 11 次全绿）。⇒ 立案前**再跑一次**：两次直接量一致才立案。三态分派，⛔ 三态互不同形（硬规则 3b）：
+      //   · `cleared`（复核后 exit 0）⇒ 那次 fail 是**读数失准** ⇒ ⛔ 不立案，也不产生读数
+      //     （此刻确无工作可立——与 standing-ok 同形的静默是正确的，因为真值为真）。
+      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出）⇒ **独立取值** `not-evaluated`
+      //     （taskCount null）。⛔ 既不与「复核通过」（无读数）也不与「复核后仍为假」（standing-violated）
+      //     同形。
+      //   · `confirmed-failing`（复核后仍非 0）⇒ 立案照旧。
+      //   · 未传复核读数（`null`，既有调用方/单测的缺省）⇒ 照旧立案（fail-visible：漏传不得静默
+      //     变成「复核通过」）。
+      // ⛔ 位置：在**派生判据**之前——若复核已说明此刻为真，则「这条红该由谁消」的问句不成立。
+      const src = standingRecheck === null ? null : standingRecheck.entries.find((e) => e.ac === id) ?? null;
+      if (src !== null && src.outcome === "cleared") continue;
+      if (src !== null && src.outcome === "not-evaluated") {
+        out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
         continue;
       }
       // 派生判据（本任务缺陷①）：这条常设判据读的就是 ③ 的输入面 ⇒ 它的真值是「冻结population 中
@@ -2120,8 +2240,13 @@ export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: s
       // 立案前对这条 AC 跑过一次 criterion（直接量），所以「此刻为假」是**量出来的**，不是台账尾的
       // 陈旧读数（gap-frozen-violated-files-on-stale-verdict）。
       ? "You are a gap-filing agent in the quay repo. An achieved goal criterion (AC) that has LEFT the reverify scope — its GOAL is no longer active and it is NOT declared `long-term: true` — is recorded as CURRENTLY FALSE in the gate ledger. This round RE-RAN its criterion directly before filing (the filing is a direct measurement, not a stale ledger tail), so the criterion is false as of now."
+      // ⛔ 常设口径同样必须陈述**本轮真的做了什么**（同 frozen 半边，gap-standing-violated-false-
+      // spawn-no-prefiling-recheck）：I5 的那次读数是本轮的、没有时差，但它只有**一次** —— 所以
+      // 「此刻为假」是**立案前重跑一次后仍然为假**（两次直接量一致），不是一个孤立的单次读数。
+      // 这句不是修辞：它把「一次环境类失准」与「真的回归」在下游 agent 眼里区分开（本任务立案的
+      // 正是前者被当成后者）。
       : standing
-        ? "You are a gap-filing agent in the quay repo. A STANDING goal criterion (AC) — declared `long-term: true`, already achieved — now FAILS again: the guarantee it asserts has regressed."
+        ? "You are a gap-filing agent in the quay repo. A STANDING goal criterion (AC) — declared `long-term: true`, already achieved — now FAILS again: the guarantee it asserts has regressed. This round RE-RAN the criterion before filing and it failed a SECOND time, so the regression is confirmed by two independent measurements, not by a single reading."
         : "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
     `Repo root: ${root}.`,
     `goal_id=${gap.goal} goal_title=${goalTitle}`,
@@ -2670,7 +2795,14 @@ export interface GoalRoundReadings {
   /** ③b 立案前【直接量复核】的读数（gap-frozen-violated-files-on-stale-verdict）——对
    *  `frozenFailing.failing` 命中的每条 AC 真跑一次 criterion 的逐条三态落痕。⛔ 恒非 null
    *  （没跑时它是 `ran:false` 的显式读数，⛔ 不与「复核了且全过」同形，硬规则 3b）。 */
-  frozenRecheck: FrozenRecheckReading;
+  frozenRecheck: PrefilingRecheckReading;
+  /** ②b 立案前【直接量复核】的读数（gap-standing-violated-false-spawn-no-prefiling-recheck）——对
+   *  `achievedFailing.achievedButFailing` 命中的每条**常设域内** AC 再跑一次 criterion 的逐条三态
+   *  落痕，含 `{ac, outcome, cause, verdict, durationMs, hostFreeBytes, load1}`：前四项回答
+   *  「复核的结论」，后三项回答「复核跑在什么环境下」——**环境类误读与真回归正是靠后者事后可分**
+   *  （2026-09-16 ENOSPC 那次要区分二者只能跨进程取证）。⛔ 恒非 null（同 `frozenRecheck`）。
+   *  ⛔ 与 `frozenRecheck` 是**两个互斥 population** 的两条读数（域内 / 域外），⛔ 不合并。 */
+  standingRecheck: PrefilingRecheckReading;
   /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
   /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */
@@ -3029,6 +3161,18 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const staleness = await checkStaleness(scriptRoot, dataRoot);
   // I5 查 achieved-but-failing：复用 goal-store 的单一真相源（独立子命令，跑判据）。
   const achievedFailing = await checkAchievedFailing(scriptRoot, dataRoot);
+
+  // ②b 立案前【直接量复核】（gap-standing-violated-false-spawn-no-prefiling-recheck）：上一行那次读数
+  // 是**本轮跑的**、没有时差，但它只有**一次**——宿主进入不健康态时（2026-09-16 实测 ENOSPC）它为
+  // 真值为真的常设判据给出 fail，据此 spawn 一个 prompt 逐字断言「保证已回归」的 agent 就是给下游
+  // 指一个不存在的缺陷。⇒ 对 `achievedButFailing` 命中的每条**再跑一次** criterion（第二次直接量，
+  // 复用同一 `runPrefilingRecheck` / 同一道重入闸），只有复核后**仍非 0** 才产 standing-violated。
+  // 产物落两处：`.quay/gate-events.jsonl`（actor=goal-cli 的这次复核）+ 本轮 fact 的 `standingRecheck`
+  // （逐条三态 + `durationMs` + 复核那一刻的宿主健康量 ⇒ 环境类误读与真回归事后可分）。
+  // ⛔ 成本：只对命中的（通常 0–1 条）跑，实测 avg 1.31s/criterion。⛔ 与 ③b 不重叠：两个 population
+  // 互斥（域内 vs 域外），同一轮不会对同一条 AC 跑两遍。
+  const standingRecheck = await recheckStandingFailing(scriptRoot, dataRoot, achievedFailing);
+
   // ③ 冻结population 的「此刻为假」读数（**纯读**：`check --stale-pass` 不传 `--sweep` ⇒ 零 criterion
   // 执行，与 AC-242 判据同一条命令、同一成本类）。⛔ 它【不是】`sweepFrozenAcs` 的结果——那个是【动作】
   // 半边（重跑并落账），这个是【判定】输入面。两者分开：动作失败仍要能读到判定，反之亦然。
@@ -3050,7 +3194,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const taskFacts = await readTaskFacts(dataRoot);
   const hasGoalAcTasks = taskFacts !== null && taskFacts.some((t) => t.goalAc !== null);
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
-  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck);
+  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
@@ -3174,6 +3318,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     achievedFailing,
     frozenFailing,
     frozenRecheck,
+    standingRecheck,
     gaps,
     triage,
     spawned: spawnPass.spawned,

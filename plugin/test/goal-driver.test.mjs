@@ -25,6 +25,9 @@ import {
   checkAchievedFailing,
   readFrozenFailing,
   recheckFrozenFailing,
+  // ②b 常设域内立案前复核（gap-standing-violated-false-spawn-no-prefiling-recheck）
+  recheckStandingFailing,
+  readHostHealth,
   parseFrozenFailingReading,
   isFilingGapState,
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）
@@ -1411,6 +1414,224 @@ test('立案前复核 ④（生产形态端到端）：修复已落地而台账�
     assert.deepEqual(r2.fact.value.gap_spawns.map((s) => s.ac), [], '第 2 轮：不 spawn（不烧 spawn 名额，也不给下游指一个不存在的缺陷）');
     assert.deepEqual(r2.fact.value.frozenRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'cleared', 'now-true']],
       '第 2 轮：复核读数「cleared/now-true」落进轮记录（这就是「修复已落地」的直接量证据）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ②b 常设域内的立案前【直接量复核】（gap-standing-violated-false-spawn-no-prefiling-recheck）──────
+//
+// 缺陷：I5（`check --achieved-failing`）的那次读数是**本轮的**、没有时差（这点与 ③ 相反），但它只有
+// **一次**。宿主进入不健康态时（2026-09-16 实测 ENOSPC：那条 worker 自述 root fs 100% full、
+// 自己的 Bash 调用死于 `No space left on device`）它为**真值为真**的常设判据给出 fail ⇒ driver 据此
+// spawn 一个 prompt 逐字断言「the guarantee it asserts has regressed」的 agent，给下游指一个
+// **不存在的缺陷**（那轮之后逐条复测：判据 11 次全绿、`achievedButFailing` 恒为 `["AC-242"]`）。
+// 修法 = 立案前**再跑一次**那条 criterion（第二次直接量，复用同一 `runPrefilingRecheck`）：两次一致
+// 才立案；并把复核那一刻的**宿主健康量**与该次读数钉在一起，使「环境类误读」与「真回归」事后可分。
+//
+// 下面五组互为控制：①正向（复核 cleared ⇒ 不立案、spawned=0）；②负控制（两次都失败 ⇒ 照旧立案、
+// spawned=1——证明复核不是恒绿闸）；③三态互不同形（含复核跑不成给独立取值）；④复核函数自身的闸拒绝
+// 与零成本路径；⑤轮记录里的复核读数，且**负控制是改动前的真实旧对象**（⛔ 不是自造一个必然失败的对象）。
+
+test('②b 正向：常设判据「单次读数说 fail、复核那次 pass」⇒ 不产 standing-violated、spawned=0', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-'));
+  const counter = path.join(tmp, 'runs');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true }); // 空 tasks ⇒ taskFacts=[]（⛔ 不是 null）
+    // 判据 = 「前两次调用失败、第 3 次起通过」。⚠️ 阈值 2 **不是**随手写的常量：常设 AC 在本轮恰好有
+    // 3 个跑判据的调用点，实测顺序是 pass 1b（每轮 gate 集合）→ I5（achieved-but-failing 读数）→ ②b
+    // （立案前复核，本任务新增）。⇒ 第 1、2 次失败让 I5 把它读进 `achievedButFailing`（前提**真的成立**），
+    // 第 3 次通过让复核判 cleared。**若调用顺序变了**，I5 会落到第 3 次上、读数转 pass，下面那条
+    // `achievedButFailing` 断言会**立刻红** —— ⛔ 这个夹具不会静默退化成空转（硬规则 4c）。
+    const crit = `n=$(cat ${counter} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${counter}; [ "$n" -gt 2 ]`;
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: crit, longTerm: true });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+
+    assert.equal(fs.readFileSync(counter, 'utf8').trim(), '3',
+      '前提（实测轮次）：常设 AC 本轮被判据执行器跑了 3 次（pass 1b → I5 → ②b）——顺序变了这条就红');
+    assert.ok(v.achievedFailing.achievedButFailing.includes('AC-001'),
+      '前提（I5 读数）：那一刻读数说它此刻为假 —— ⛔ 这正是缺陷的**输入**，不是被修好了');
+    assert.deepEqual(v.standingRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-001', 'cleared', 'now-true']],
+      '②b：立案前复核真跑了这条 criterion ⇒ exit 0 ⇒ cleared（第二次直接量推翻了那一次读数）');
+    assert.equal(v.gaps.find((g) => g.ac === 'AC-001'), undefined,
+      '复核 cleared ⇒ 不产生读数（此刻确无工作可立），⛔ 尤其不产 standing-violated');
+    assert.equal(v.spawned, 0, '⛔ 不 spawn —— 本任务要的正是这一条：一次环境类失准不再产生立案');
+    assert.deepEqual(v.gap_spawns.map((s) => s.ac), [], '不烧 spawn 名额，也不给下游指一个不存在的缺陷');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('②b 负控制：criterion 两次都失败 ⇒ 照旧产 standing-violated 并 spawn（复核不是恒绿闸）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-neg-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1', longTerm: true });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+
+    assert.ok(v.achievedFailing.achievedButFailing.includes('AC-001'), 'I5 读数：此刻为假');
+    assert.deepEqual(v.standingRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-001', 'confirmed-failing', 'still-false']],
+      '负控制①：复核**真跑**且回了 fail ⇒ confirmed-failing（⛔ 复核不得是恒绿闸——改坏它这条就红）');
+    assert.equal(v.gaps.find((g) => g.ac === 'AC-001').state, 'standing-violated', '两次直接量一致 ⇒ 立案照旧');
+    assert.equal(v.spawned, 1, '负控制②：真的回归照旧 spawn 1 条（本次改动不得削弱既有行为）');
+    assert.deepEqual(v.gap_spawns.map((s) => s.ac), ['AC-001'], '负控制②（同一读数的另一半）：被 spawn 的正是它');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('②b prompt：常设口径陈述本轮真的做了什么（重跑一次后仍为假），⛔ 不复用冻结口径的措辞', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'standing-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(p.includes('regressed'), '常设口径仍在：这是常设不变式的回归');
+  assert.ok(p.includes('RE-RAN the criterion before filing'),
+    '新增：说明立案前重跑过一次 criterion ⇒「此刻为假」是两次一致，不是一个孤立的单次读数');
+  assert.ok(p.includes('two independent measurements, not by a single reading'),
+    '把「一次环境类失准」与「真的回归」在下游 agent 眼里区分开——本任务立案的正是前者被当成后者');
+  // 既有口径不许被这次改动削弱（同处断言，防止改 A 破 B）。
+  assert.ok(p.includes('IN FLIGHT'), '去重口径仍在：只有在飞任务算重复');
+  // ⛔ 两个 population 的措辞必须可区分（既有 AC5 断言的那条，此处再钉一次）：
+  // 「已离开复验域」是冻结口径的标记，「RE-RAN its criterion」是冻结口径的动作表述 —— 常设分支
+  // ⛔ 一个都不许带（本任务新增的常设表述刻意换了字面：RE-RAN **the** criterion）。
+  assert.ok(!p.includes('LEFT the reverify scope') && !p.includes('RE-RAN its criterion'),
+    '⛔ 常设分支不得复用冻结口径的措辞（两个 population 的成因与处置不同）');
+  assert.ok(p.includes('goal_ac: AC-001'), '顶层 goal_ac 要求仍在（下一轮独立复核的抓手）');
+});
+
+test('②b 三态互不同形：复核 not-evaluated ⇒ 独立取值（⛔ 既不是 standing-ok 也不是 standing-violated）', () => {
+  const recs = [
+    { id: 'GOAL-900', status: 'achieved' },
+    { id: 'AC-900', status: 'achieved', goal: 'GOAL-900', criterion: 'exit 1', longTerm: true },
+  ];
+  const standings = { achievedButFailing: ['AC-900'], evaluated: true };
+  const ev = (outcome, cause) => ({ ran: outcome !== 'not-evaluated', attempted: 1, entries: [{ ac: 'AC-900', outcome, cause, reason: 'x', verdict: outcome === 'cleared' ? 'pass' : 'fail', durationMs: 12, hostFreeBytes: 1, load1: 0 }], guardRefused: outcome === 'not-evaluated' });
+
+  // 改前（未传复核读数 ⇒ 既有行为）：I5 的单次读数直接立案。
+  assert.equal(computeGoalGaps(recs, [], null, standings).find((x) => x.ac === 'AC-900').state, 'standing-violated',
+    '改前：单次读数即产 standing-violated（可立案）');
+
+  // 复核 cleared ⇒ **不产生读数**（此刻确无工作可立；与 standing-ok 同为静默，因为真值为真）。
+  assert.equal(computeGoalGaps(recs, [], null, standings, null, null, ev('cleared', 'now-true')).find((x) => x.ac === 'AC-900'), undefined,
+    '复核 cleared ⇒ 不产任何读数（同一时刻同一 AC 的改前/改后对照）');
+
+  // 复核 not-evaluated ⇒ 独立取值。
+  const ne = computeGoalGaps(recs, [], null, standings, null, null, ev('not-evaluated', 'guard-refused')).find((x) => x.ac === 'AC-900');
+  assert.equal(ne.state, 'not-evaluated', '复核跑不成 ⇒ 独立取值 not-evaluated');
+  assert.equal(ne.taskCount, null, 'not-evaluated 时 taskCount=null（⛔ 不与 0 同形）');
+  assert.notEqual(ne.state, 'standing-ok', '⛔ 复核跑不成不得冒充「查过且成立」');
+  assert.notEqual(ne.state, 'standing-violated', '⛔ 也不得回落成「复核后仍为假」');
+  assert.ok(!isFilingGapState('not-evaluated'), 'not-evaluated 不在 spawn 选取面（复核跑不成 ≠ 判据为假）');
+
+  // 复核 confirmed-failing ⇒ 立案照旧（分派半边）。
+  assert.equal(computeGoalGaps(recs, [], null, standings, null, null, ev('confirmed-failing', 'still-false')).find((x) => x.ac === 'AC-900').state,
+    'standing-violated', '复核后仍非 0 ⇒ standing-violated 照旧立案');
+
+  // 漏传复核读数 ⇒ 照旧立案（fail-visible：调用方漏传不得静默变成「复核通过」）。
+  assert.equal(computeGoalGaps(recs, [], null, standings).find((x) => x.ac === 'AC-900').state, 'standing-violated',
+    '未传复核读数 ⇒ 保守立案（⛔ 不与 cleared 同形）');
+});
+
+test('②b recheckStandingFailing：闸拒绝 ⇒ 独立结局；读数未传/命中集为空 ⇒ ran:false 零成本', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-guard-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1', longTerm: true });
+    const standings = { achievedButFailing: ['AC-900'], evaluated: true };
+
+    // 正控制：不在闸下 ⇒ 真跑判据 ⇒ confirmed-failing，且读数带该次执行的原始 verdict 与实测墙钟。
+    const on = await recheckStandingFailing(repoRoot, tmp, standings);
+    assert.equal(on.ran, true);
+    assert.equal(on.guardRefused, false);
+    assert.deepEqual(on.entries.map((e) => [e.ac, e.outcome, e.cause, e.verdict]), [['AC-900', 'confirmed-failing', 'still-false', 'fail']],
+      '不在闸下 ⇒ 真跑；`exit 1` ⇒ confirmed-failing（verdict = 该次执行的原始读数）');
+    assert.ok(typeof on.entries[0].durationMs === 'number' && on.entries[0].durationMs >= 0, 'durationMs 是本次执行的实测墙钟');
+    for (const k of ['hostFreeBytes', 'load1']) {
+      assert.ok(on.entries[0][k] === null || typeof on.entries[0][k] === 'number',
+        `${k} 随读数落痕（读不出 ⇒ null，⛔ 不与 0 同形）`);
+    }
+
+    // 闸拒绝：本进程已在跑判据 ⇒ **一条都不跑**，且结局是**独立取值**。
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = '1';
+    try {
+      const refused = await recheckStandingFailing(repoRoot, tmp, standings);
+      assert.equal(refused.ran, false, '闸拒绝 ⇒ 没跑');
+      assert.equal(refused.guardRefused, true);
+      assert.equal(refused.attempted, 1);
+      assert.deepEqual(refused.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'not-evaluated', 'guard-refused']],
+        '拒绝是独立结局：not-evaluated + cause=guard-refused（⛔ 与 cleared / confirmed 都不同形）');
+      assert.equal(refused.entries[0].durationMs, null, '⛔ 没跑 ⇒ 时长 null（⛔ 不写 0：0 会被读成「跑得极快」）');
+      assert.notEqual(refused.entries[0].outcome, 'cleared', '⛔ 闸拒绝不得冒充「复核通过」');
+      assert.notEqual(refused.entries[0].outcome, 'confirmed-failing', '⛔ 也不得冒充「复核后仍为假」');
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+
+    // 零成本路径：读不到 I5 读数 / 命中集为空 ⇒ ran:false，不跑任何判据。
+    assert.equal((await recheckStandingFailing(repoRoot, tmp, null)).ran, false, '读不到 I5 读数 ⇒ 不跑');
+    assert.equal((await recheckStandingFailing(repoRoot, tmp, { achievedButFailing: [], evaluated: true })).ran, false, '命中集为空 ⇒ 不跑');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+/** AC2 的**判据**：一条复核读数是否带齐「结论四键 + 宿主健康量」。
+ *  ⛔ 写成函数而不是内联断言，正是为了能在**改动前的真实旧对象**上干跑一次——「字段存在」如果只在新
+ *  对象上跑过，就是自证（硬规则 2 的零计数配套动作：谓词必须对一个已知为假/为真的样本各跑一次）。 */
+function hasPrefilingEvidence(e) {
+  return ['ac', 'outcome', 'verdict', 'durationMs'].every((k) => k in e)
+    && (('hostFreeBytes' in e) || ('load1' in e));
+}
+
+/** 改动前的**真实**读数（⛔ 不是自造的）：逐字摘录自本仓生产载体 `.quay/goal-round.jsonl`
+ *  round 59 / ts=2026-09-16T11:42:53.534Z 的 `facts[goal-ring].value.frozenRecheck.entries[0]`
+ *  （`reason` 原值较长，此处未删改）。它只有 `ac/outcome/cause/reason` 四项
+ *  ——**这正是「环境类误读事后不可分」的载体证据**：读它的人无法知道那次 fail 跑在什么宿主状态下。 */
+const PRE_CHANGE_ENTRY = {
+  ac: 'AC-259',
+  outcome: 'confirmed-failing',
+  cause: 'still-false',
+  reason: "acceptance failed (exit 1) — AC-259: repo version mismatch (want 0.7.0-dev): [('packages/quay/package.json', '0.7.1'), ('packages/quay-native/package.json', '0.7.1'), ('packages/quay-github/package.json', '0.7.1'), ('packages/quay-backlog/package.json', '0.7.1'), ('.claude-plugin/marketplace.json', '0.7.1'), ('plugin/.claude-plugin/marketplace.json', '0.7.1'), ('plugin/.claude-plugin/plugin.json', '0.7.1'), ('plugin/VERSION', '0.7.1')]",
+};
+
+test('AC2：轮记录里出现立案前复核读数（含宿主健康量）；负控制 = 改动前的真实旧对象上谓词为假', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-ac2-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1', longTerm: true });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+    assert.equal(v.standingRecheck.entries.length, 1, '本轮有一条复核读数（AC-001 命中 I5）');
+    const e = v.standingRecheck.entries[0];
+    assert.ok(hasPrefilingEvidence(e), `复核读数带齐 {ac,outcome,verdict,durationMs,hostFreeBytes|load1}，实测键=${Object.keys(e).join(',')}`);
+    assert.equal(e.ac, 'AC-001');
+    assert.equal(e.outcome, 'confirmed-failing');
+    assert.equal(e.verdict, 'fail');
+    assert.ok(typeof e.durationMs === 'number' && e.durationMs >= 0, 'durationMs 实测（⛔ 不是占位常量）');
+    // 宿主健康量必须是**当时**的读数：与此刻独立重读一次同量级（⛔ 不与 0 同形、⛔ 不是写死的字面量）。
+    const now = readHostHealth();
+    if (now.hostFreeBytes !== null && e.hostFreeBytes !== null) {
+      assert.ok(e.hostFreeBytes > 0, 'hostFreeBytes > 0（⛔ 0 = 盘满，null = 没读到，两者与「盘不紧张」不同形）');
+      assert.ok(e.hostFreeBytes <= now.hostFreeBytes * 4, `复核那一刻的可用字节应与此刻同量级（读数=${e.hostFreeBytes} 此刻=${now.hostFreeBytes}）`);
+    }
+
+    // ⛔ 负控制：同一个谓词在**改动前的真实读数**上必须为假 —— 否则本判据只是「字段存在」的自证。
+    assert.equal(hasPrefilingEvidence(PRE_CHANGE_ENTRY), false,
+      '负控制：改动前的真实读数不含 verdict/durationMs/宿主量 ⇒ 新旧可区分（⛔ 不靠「字段存在」自证）');
+    assert.ok(!('durationMs' in PRE_CHANGE_ENTRY) && !('hostFreeBytes' in PRE_CHANGE_ENTRY),
+      '负控制的成因可核：旧对象缺的正是「这次跑在什么环境下」那一半');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
