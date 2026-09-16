@@ -135,11 +135,11 @@ run，且 master 的提交正是其中某个 tag 的提交」。⇒ ②改写后
 
 ## AC
 
-- [ ] **AC1｜退出条件②的旧句已从 store 里消失、新句已在场，且其余节未被误删。** 核法：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get GOAL-020 --json` 取 `body`，断言 ① 该 body **不含**子串 `SEA 产物不再因`；② **含**子串 `release 渠道能发出一个真能起来的产物`；③ `## 背景` 与 `## 非目标` 两节标题仍在（防 `--body` 整体替换时把其它节丢掉）。三条都真 ⇒ exit 0；任一假 ⇒ exit 1 且 stderr 与 failure exit 写在同一物理行，带 `CAUSE=old-clause-still-present` / `CAUSE=new-clause-absent` / `CAUSE=body-sections-lost`。⛔ 改写必须经 goal store 本身（`goal-store.ts write GOAL-020 --expect-existing --body <全文> --actor <…> --reason <…>`，`--body` 是整篇替换、非节合并），**不得手改 `goals/GOAL-020-*.md`**（同 AC-259 的写入纪律）。
-- [ ] **AC2｜范围节的清单条目与在域 AC 集合【集合相等】，且三条退役项被显式登记为退役。** 核法：一条 python3 —— (a) 从 store `body` 抽 `## 范围…` 节（标题前缀匹配），在**节体内只取形如 `- **AC-NNN**` 的清单条目行**得集合 S；⛔ **不按整节文本抽所有 `AC-[0-9]+`**——退役说明那行会提到 AC-266/267/268，按全文抽取会把它们算进集合、使判据**恒假**（硬规则 4c：那个量必须穿过中间层还取得到；这里「中间层」就是退役说明行）；(b) 扫 `goals/AC-*.md`，取 `goal: GOAL-020` 且 `status != superseded` 的 id 得集合 L；(c) 断言 `S == L == {AC-265, AC-269, AC-270, AC-271, AC-272, AC-273, AC-274}`，并把抽到的 S 打印出来；(d) 断言节体内存在一行**同时**含 `AC-266`、`AC-267`、`AC-268` 与 `superseded` 字样。任一条假 ⇒ exit 1，stderr 与 failure exit 同一物理行，带 `CAUSE=scope-list-drifted`（a-c 假，并打印两侧差集）或 `CAUSE=retired-acs-unrecorded`（d 假）。
-- [ ] **AC3｜改完后判官在【新 key】上重判过一次（⛔ 不是缓存命中）。** 核法：改前记下 GOAL-020 的现 key（`.quay/goal-sufficiency-followup.json` 的 `entries["GOAL-020"].key` = `3c73e546246332abc7b6269f34784d20ec61b2550adcdae1f5d032b6be7682e9`）；改后读 `.quay/goal-sufficiency-cache.json`，断言 **原 key 条目仍在**（历史不被改写）**且**出现一个**新** key 条目（`sufficiencyCacheKey` 含退出条件文本与范围节文本 ⇒ body 一改 key 必变）；再断言 `.quay/goal-round.jsonl` 里其后落了一条 `goal-sufficiency` fact。⚠️ **新 verdict 是否翻成 `covered` 不作本任务的成功判据**——若仍是 `insufficient`，把读数与判官理由逐字记进任务体并**停手另立根因**；⛔ 不得为了让判官变绿而反复改文本或改提示词（那会把判官变成回声）。
-- [ ] **AC4｜负控制：AC1/AC2 的谓词能取假。** 把 AC1 的谓词对着**改前**的 body 干跑一次 ⇒ 必须 exit 1 且 `CAUSE=old-clause-still-present`；把 AC2 的谓词对着**改前**的 body 干跑 ⇒ 必须 exit 1 且 `CAUSE=scope-list-drifted`（改前 S 含 266/267/268 而 L 不含）。两次读数（命令 + 逐字 stderr）贴进任务体。硬规则 3b：**一个恒真的检查是假的保证**；没有这一条，AC1/AC2 与「没查」同形。
-- [ ] **AC5｜SPEC §11 的裁定链被补完（硬规则 5b 的当场执行）。** 在 `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` §11 追加一小节，逐字说明：§11.4 只退役了 AC-266/267/268 三条**判据**，**未同步 GOAL-020 自己的退出条件②与范围节**（属 5b 形态：修一个实例≠修完同类），二者由本任务同日修订；并给出修订后的 ② 全文。核法：该 §11 内出现「退出条件」字样且其所在小节里出现 `AC-274`。
+- [x] **AC1｜退出条件②的旧句已从 store 里消失、新句已在场，且其余节未被误删。** 核法：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get GOAL-020 --json` 取 `body`，断言 ① 该 body **不含**子串 `SEA 产物不再因`；② **含**子串 `release 渠道能发出一个真能起来的产物`；③ `## 背景` 与 `## 非目标` 两节标题仍在（防 `--body` 整体替换时把其它节丢掉）。三条都真 ⇒ exit 0；任一假 ⇒ exit 1 且 stderr 与 failure exit 写在同一物理行，带 `CAUSE=old-clause-still-present` / `CAUSE=new-clause-absent` / `CAUSE=body-sections-lost`。⛔ 改写必须经 goal store 本身（`goal-store.ts write GOAL-020 --expect-existing --body <全文> --actor <…> --reason <…>`，`--body` 是整篇替换、非节合并），**不得手改 `goals/GOAL-020-*.md`**（同 AC-259 的写入纪律）。
+- [x] **AC2｜范围节的清单条目与在域 AC 集合【集合相等】，且三条退役项被显式登记为退役。** 核法：一条 python3 —— (a) 从 store `body` 抽 `## 范围…` 节（标题前缀匹配），在**节体内只取形如 `- **AC-NNN**` 的清单条目行**得集合 S；⛔ **不按整节文本抽所有 `AC-[0-9]+`**——退役说明那行会提到 AC-266/267/268，按全文抽取会把它们算进集合、使判据**恒假**（硬规则 4c：那个量必须穿过中间层还取得到；这里「中间层」就是退役说明行）；(b) 扫 `goals/AC-*.md`，取 `goal: GOAL-020` 且 `status != superseded` 的 id 得集合 L；(c) 断言 `S == L == {AC-265, AC-269, AC-270, AC-271, AC-272, AC-273, AC-274}`，并把抽到的 S 打印出来；(d) 断言节体内存在一行**同时**含 `AC-266`、`AC-267`、`AC-268` 与 `superseded` 字样。任一条假 ⇒ exit 1，stderr 与 failure exit 同一物理行，带 `CAUSE=scope-list-drifted`（a-c 假，并打印两侧差集）或 `CAUSE=retired-acs-unrecorded`（d 假）。
+- [x] **AC3｜改完后判官在【新 key】上重判过一次（⛔ 不是缓存命中）。** 核法：改前记下 GOAL-020 的现 key（`.quay/goal-sufficiency-followup.json` 的 `entries["GOAL-020"].key` = `3c73e546246332abc7b6269f34784d20ec61b2550adcdae1f5d032b6be7682e9`）；改后读 `.quay/goal-sufficiency-cache.json`，断言 **原 key 条目仍在**（历史不被改写）**且**出现一个**新** key 条目（`sufficiencyCacheKey` 含退出条件文本与范围节文本 ⇒ body 一改 key 必变）；再断言 `.quay/goal-round.jsonl` 里其后落了一条 `goal-sufficiency` fact。⚠️ **新 verdict 是否翻成 `covered` 不作本任务的成功判据**——若仍是 `insufficient`，把读数与判官理由逐字记进任务体并**停手另立根因**；⛔ 不得为了让判官变绿而反复改文本或改提示词（那会把判官变成回声）。
+- [x] **AC4｜负控制：AC1/AC2 的谓词能取假。** 把 AC1 的谓词对着**改前**的 body 干跑一次 ⇒ 必须 exit 1 且 `CAUSE=old-clause-still-present`；把 AC2 的谓词对着**改前**的 body 干跑 ⇒ 必须 exit 1 且 `CAUSE=scope-list-drifted`（改前 S 含 266/267/268 而 L 不含）。两次读数（命令 + 逐字 stderr）贴进任务体。硬规则 3b：**一个恒真的检查是假的保证**；没有这一条，AC1/AC2 与「没查」同形。
+- [x] **AC5｜SPEC §11 的裁定链被补完（硬规则 5b 的当场执行）。** 在 `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` §11 追加一小节，逐字说明：§11.4 只退役了 AC-266/267/268 三条**判据**，**未同步 GOAL-020 自己的退出条件②与范围节**（属 5b 形态：修一个实例≠修完同类），二者由本任务同日修订；并给出修订后的 ② 全文。核法：该 §11 内出现「退出条件」字样且其所在小节里出现 `AC-274`。
 
 ## DoD
 
@@ -161,3 +161,127 @@ run，且 master 的提交正是其中某个 tag 的提交」。⇒ ②改写后
 ## 人批准（manager 会话，2026-09-16）
 
 草稿按第四节原样批准，无改字。转 `todo` 交自动管线执行——AC1-AC5 都是可机械核验的谓词，不需要再等人判断。
+
+## 证据（AC1–AC5 逐条核验，worker 会话 2026-09-16）
+
+**产物落点**：`goals/GOAL-020-…md` 经 **goal store 本身**改写（`goal-store.ts write GOAL-020
+--expect-existing --body <全文> --actor "worker:gap-goal020-exit-conditions-stale-after-sea-channel-retired"
+--reason "option(b): 退出条件②去掉已退役的 SEA 半句、范围节改为在域 7 条…"`），在任务 worktree
+`/home/yale/work/quay-worktrees/gap-goal020-exit-conditions-stale-after-sea-channel-retired` 内执行
+⇒ 落成提交 `81bfa8f20 goals: GOAL-020 field:body by cli:2493529`（**任务分支**，不是主检出）。
+⛔ 全程未手改 `goals/GOAL-020-*.md`。**goal store 未写任何 status**：write 之后 worktree `git status`
+仅显示该 body 提交 + 任务分支上的 SPEC 改动，`goals/` 无其它 diff ⇒ AC 的 `status`/`criterion`
+（AC-266/267/268 保持 `superseded`，AC-274 保持 `active`）与 GOAL-020 的 `status`（保持 `active`）全部原样。
+
+### AC1｜旧句已消失 / 新句已在场 / 其余节完好
+
+谓词（`bash /tmp/goal020-ac1.sh [<body-file>]`，缺省从 store 读 GOAL-020 的 body）：
+
+```sh
+if [ $# -ge 1 ]; then BODY="$(cat "$1")"; else
+  BODY="$(node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get GOAL-020 --json \
+          | python3 -c 'import json,sys;print(json.load(sys.stdin)["body"],end="")')"
+fi
+case "$BODY" in *"SEA 产物不再因"*) echo "CAUSE=old-clause-still-present" >&2; exit 1;; esac
+case "$BODY" in *"release 渠道能发出一个真能起来的产物"*) : ;; *) echo "CAUSE=new-clause-absent" >&2; exit 1;; esac
+printf '%s\n' "$BODY" | grep -q '^## 背景'   || { echo "CAUSE=body-sections-lost" >&2; exit 1; }
+printf '%s\n' "$BODY" | grep -q '^## 非目标' || { echo "CAUSE=body-sections-lost" >&2; exit 1; }
+echo "AC1 PASS: old-clause absent / new-clause present / sections ## 背景 + ## 非目标 intact"
+```
+
+读数（cwd = 任务 worktree）：`AC1 PASS: old-clause absent / new-clause present / sections ## 背景 + ## 非目标 intact`，**exit 0**。
+节标题实测仍在（`grep -n '^## '` 四条）：`## 背景（2026-09-15 实测，全部为直接量）` /
+`## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-273、AC-274，共 7 条）` /
+`## 非目标 / 与 GOAL-019 的边界` / `## 退出条件` —— 只有范围节标题按提案换了措辞，其余三条逐字未动。
+
+### AC2｜范围节清单条目集合 S == 在域 AC 集合 L，且三条退役项被显式登记
+
+谓词 `python3 /tmp/goal020-ac2.py [<body-file>]`：(a) 从 body 抽 `## 范围…` 节（标题前缀匹配），
+在节体内**只取形如 `- **AC-NNN**` 的清单条目行**得 S；(b) 扫 `goals/AC-*.md` 取
+`goal: GOAL-020` ∧ `status != superseded` 得 L；(c) 断言 `S == L == 7 条` 并打印 S；
+(d) 断言节体内存在一行**同时**含 `AC-266`、`AC-267`、`AC-268` 与 `superseded`。
+
+读数（cwd = 任务 worktree）：
+
+```
+S (范围节清单条目) = ['AC-265', 'AC-269', 'AC-270', 'AC-271', 'AC-272', 'AC-273', 'AC-274']
+L (在域 AC)        = ['AC-265', 'AC-269', 'AC-270', 'AC-271', 'AC-272', 'AC-273', 'AC-274']
+AC2 PASS: S == L == 7 in-scope ACs; retired AC-266/267/268 recorded as superseded
+```
+
+**exit 0**，集合**相等**（不是包含）。
+
+⚠️ 硬规则 4c 的当场处置（两处都在实现前抓到的恒假形态）：退役说明行**故意写成一整条物理行**
+（`⛔ 已退役、不再计入范围：**AC-266 / AC-267 / AC-268**——主体（SEA/npm 产物线）经人 2026-09-16
+裁定取消，已 `superseded`（SPEC §11.4）。`）——因为 (d) 要求四者在**同一行**；若照提案正文那样折行，
+`superseded` 会掉到下一行、**(d) 恒假**。而 (a) 只取清单条目行而不是整节全文抽 `AC-\d+`，是为了不让
+退役行把 266/267/268 算进 S（否则 **(c) 恒假**）——这两条正是 AC 正文点名要求跨越的「中间层」。
+
+### AC3｜判官在**新 key** 上重判过一次（⛔ 不是缓存命中）
+
+改前读数（生产 `.quay/goal-sufficiency-followup.json`）：
+`entries["GOAL-020"].key = 3c73e546246332abc7b6269f34784d20ec61b2550adcdae1f5d032b6be7682e9`，
+它在生产 `.quay/goal-sufficiency-cache.json` 里的条目为
+`{'verdict': 'insufficient', 'ts': '2026-09-16T10:07:18.599Z'}`。
+
+做法：把**生产缓存原样播种**进任务 worktree 的 `.quay/goal-sufficiency-cache.json`（43 条，含旧 key），
+再在 worktree 内跑**真判官**一轮：
+
+```sh
+cd <worktree> && node --no-warnings --experimental-strip-types plugin/scripts/goal-driver.ts \
+    --root <worktree> --once --spawn-cap 0 --json
+```
+
+（`--root <worktree>` ⇒ `dataRoot` / `sufficiencyCacheDir` / `roundLogFile` 全部落在 worktree；
+`--spawn-cap 0` 只关掉 gap-filing / stall-followup 的 LLM spawn，**不影响充分性判官本身**。）
+
+读数 —— 三条子断言全部为真：
+1. **原 key 条目仍在、且逐字未变**：`'3c73e546…' in entries == True`，
+   值仍为 `{'verdict': 'insufficient', 'ts': '2026-09-16T10:07:18.599Z'}`（历史不被改写）；
+2. **出现一个新 key 条目**：`54cdc2a9624197ab9452e238a8ab5695abaf9e7db6acc2b4e9b4d76ea2154fe5`
+   `{'verdict': 'covered', 'ts': '2026-09-16T11:28:11.620Z'}`（entries 43 → 44）；
+3. `.quay/goal-round.jsonl` 其后落了 `goal-sufficiency` fact，逐字：
+   `{"name":"goal-sufficiency","value":{"sufficiency":{"goal":"GOAL-020","verdict":"covered"}},"state":"verified","reason":"sufficiency=covered（在域 AC 7 条）"}`。
+
+⇒ 新 key ≠ 旧 key ⇒ **确实重判了，不是缓存命中**（`sufficiencyCacheKey` 含退出条件文本与范围节文本，
+body 一改 key 必变）。新 verdict 由 `insufficient` 翻成 `covered` —— 按 AC3 的约定这**只是信号、不是本任务的
+成功判据**；它与本任务的前提一致（②改造后逐字等于 AC-274 的 expect，覆盖关系由「不对上」变成「集合相等」）。
+
+⚠️ **落点诚实说明**：这一轮跑在**任务 worktree** 里（改动所在地），所以上面两条读数取自
+`<worktree>/.quay/`。生产 goal-driver（`driver-anchor --root /home/yale/work/quay`，每轮从**主检出**读
+`goals/`）要等本任务经 fan-in 落到 develop、再经 `syncDevelopToDoc` 追上主检出之后，才会自行在新 body 上
+重判——**那是同一段代码、同一个 `semanticSufficiencyVerdictDetail`、同一个 `sufficiencyCacheKey`**，
+本轮的读数就是它的前像；本任务不声称已观测到生产侧那一轮。
+
+### AC4｜负控制：AC1/AC2 的谓词能取假
+
+改前 body 取自**生产 store**（主检出 `node … packages/quay/src/goal-store.ts get GOAL-020 --json`），
+存为 `/tmp/goal020-body-before.md`（4421 字符，`grep -c 'SEA 产物不再因'` = **1**、
+`grep -c 'release 渠道能发出一个真能起来的产物'` = **0**）。
+
+```
+$ bash /tmp/goal020-ac1.sh /tmp/goal020-body-before.md
+CAUSE=old-clause-still-present
+exit=1
+
+$ python3 /tmp/goal020-ac2.py /tmp/goal020-body-before.md
+S (范围节清单条目) = ['AC-265', 'AC-266', 'AC-267', 'AC-268', 'AC-269']
+L (在域 AC)        = ['AC-265', 'AC-269', 'AC-270', 'AC-271', 'AC-272', 'AC-273', 'AC-274']
+CAUSE=scope-list-drifted
+S-L=['AC-266', 'AC-267', 'AC-268']  L-S=['AC-270', 'AC-271', 'AC-272', 'AC-273', 'AC-274']
+S△WANT=['AC-266','AC-267','AC-268','AC-270','AC-271','AC-272','AC-273','AC-274']  L△WANT=[]
+exit=1
+```
+
+两个 `CAUSE=` 与 AC4 要求的逐字一致，**两次都 exit 1** ⇒ AC1/AC2 **不是恒真的检查**（硬规则 3b：
+一个恒真的检查是假的保证）。两向都取了读数：正向（改后 ⇒ exit 0）+ 负向（改前 ⇒ exit 1）；
+非零方向查「命中的是不是我要的」，而 AC 正文里那 7 个 `grep -c` **零命中**的方向，由这条负控制承担
+「同一谓词对一个已知为真的样本确实会命中」（硬规则 2 的两半）。
+
+### AC5｜SPEC §11 裁定链补完（硬规则 5b 的当场执行）
+
+`orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` 内新增 `### 11.5`（提交 `51d4d18ed`），
+逐字说明：§11.4 只退役了 `AC-266/267/268` 三条**判据**，**未同步 GOAL-020 自己的退出条件②与范围节**
+（5b 形态：修一个实例 ≠ 修完同类，且兄弟实例就在同一个 body 里），二者由本任务同日修订；并给出修订后的
+② 全文。核法读数：§11 内含「退出条件」字样的行有 6 行，**逐行取「其所在小节」全部解析为 `### 11.5 …`**，
+且该小节含 `AC-274` ⇒ AC5 PASS。
