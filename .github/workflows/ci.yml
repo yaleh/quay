@@ -26,28 +26,23 @@ jobs:
     # 上面这段全部是 ubuntu-latest 4 核时代的记录，保留是因为回退时（见上）这个 25 分钟预算和
     # --test-concurrency=8 要一起恢复；tokyo-alpha 是 128 核，budget 留宽松值即可，不必收紧。
     timeout-minutes: 25
+    # 2026-09-16 (gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red): the job DECLARES the locale it
+    # runs the suite under instead of inheriting whatever the runner host happens to be. Two
+    # order-sensitive assertions — plugin/test/test-file-snapshot.test.mjs and
+    # plugin/test/develop-deliver-tgz-evidence-transport.test.mjs — compare against the ordering
+    # their producers emit from `sort -u`, and GNU sort's collation is locale-dependent: under
+    # en_US.UTF-8 (what the tokyo-alpha image exports) punctuation is ignored at the primary level,
+    # so the same `sort -u` emits a DIFFERENT order than under C. A/B at one commit, same machine:
+    # LC_ALL=C.UTF-8 ⇒ 27 pass / 0 fail; LC_ALL=en_US.UTF-8 ⇒ 25 pass / 2 fail. C.UTF-8 is also the
+    # configuration the suite is written and was green against (ubuntu-latest runs it), so pinning
+    # it here restores the tested configuration rather than inventing a new one.
+    env:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
     permissions:
       contents: read
       issues: read
     steps:
-      - name: PROBE runner environment (temporary)
-        run: |
-          echo "--- id ---"; id; echo "whoami=$(whoami) HOME=$HOME"
-          echo "--- PATH ---"; echo "$PATH"
-          echo "--- locale ---"; locale 2>&1 | head -5; echo "LANG=${LANG:-unset} LC_ALL=${LC_ALL:-unset}"
-          echo "--- tools ---"
-          for t in python3 pip3 pip jq tmux bash gawk mawk awk git sort node npm sudo; do
-            p="$(command -v "$t" 2>/dev/null || echo MISSING)"; printf '%-8s %s\n' "$t" "$p"
-          done
-          echo "--- python yaml ---"; python3 -c 'import yaml; print("yaml OK", yaml.__version__)' 2>&1 | tail -3
-          echo "--- pip available? ---"; python3 -m pip --version 2>&1 | tail -2
-          echo "--- apt available? ---"; command -v apt-get >/dev/null && echo yes || echo no
-          echo "--- tmux runnable? ---"; tmux -V 2>&1 | tail -1
-          echo "--- sort locale behaviour ---"
-          printf 'cli.test.mjs\ncli-write.test.mjs\n' | sort | tr '\n' ' '; echo
-          echo "--- root check ---"; [ "$(id -u)" = 0 ] && echo "IS ROOT" || echo "not root"
-        shell: bash
-
       - uses: actions/checkout@v4
         with:
           # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
@@ -55,6 +50,24 @@ jobs:
           # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
           # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
           fetch-depth: 0
+      - name: Materialize the `develop` ref the suite reads by name
+        # Three checks resolve this repo's authoritative branch as a LOCAL ref named `develop`:
+        # plugin/scripts/direct-to-develop-bypass-check.ts returns NOT-EVALUATED ("rev-list-unreadable")
+        # when there is no local `develop` branch, and the two git-graph decoration tests count the
+        # develop label in `git log --all --pretty=%D` — which renders `origin/develop` when only the
+        # remote-tracking ref exists, so the label is counted ZERO times. `actions/checkout@v4` leaves
+        # every branch except the checked-out one as remote-tracking, and this job is dispatched on
+        # task branches / master as well as develop. Measured on a scratch clone driven by exactly
+        # `git init` + fetch + `checkout -B` (checkout's own mechanism), at this commit: 3 test files
+        # red without this step, 0 red with it. Same commit, same machine, only the ref set differs.
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify -q refs/heads/develop >/dev/null; then
+            echo "develop is already a local branch ($(git rev-parse --short develop))"
+          else
+            git branch develop refs/remotes/origin/develop
+            echo "created local develop -> $(git rev-parse --short develop)"
+          fi
       - uses: actions/setup-node@v4
         with:
           # M120 (DIR-060): this step SPAWNS the `.ts` CLI bins as subprocesses
@@ -64,6 +77,64 @@ jobs:
           # >=20.0.0, and the distributed tarball's Node-20 floor is proven
           # separately by the dist-verify-node-floor job below.
           node-version: '24'
+      - name: Install suite runtime prerequisites
+        # This suite is NOT self-contained — the PRODUCT's own shell scripts shell out to
+        # `python3 -c 'import yaml, ...'` (plugin/scripts/quay-init.sh, quay-launch.sh,
+        # manager-start.sh, verify-deliver-coldstart.sh), and the tmux cross-session tests
+        # (tmux-leak-scan / supervisor-observe) need a real tmux binary. The tokyo-alpha image ships
+        # python3 WITHOUT PyYAML and no tmux at all: measured on run 35115599539 that reddened 25
+        # test files / 74 assertions, every one of them describing the ENVIRONMENT rather than a
+        # product defect (e.g. `ModuleNotFoundError: No module named 'yaml'` surfacing as
+        # "quay-init must succeed", "profiles.yml must parse as YAML").
+        # Provisioning lives HERE, in the reviewed workflow, and not on the runner host, so it is
+        # reproducible (a rebuilt runner converges on the same environment), auditable (the change
+        # is a diff), and cannot rot as "something someone installed once on that box".
+        run: |
+          set -euo pipefail
+          if python3 -c 'import yaml' >/dev/null 2>&1; then
+            echo "python3 already has PyYAML ($(python3 -c 'import yaml; print(yaml.__version__)'))"
+          elif sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml; then
+            echo "installed PyYAML via apt (python3-yaml)"
+          elif python3 -m pip install --break-system-packages pyyaml; then
+            echo "installed PyYAML via pip (apt unavailable)"
+          else
+            echo "FAIL: could not provision PyYAML by apt or pip"
+            exit 1
+          fi
+          if command -v tmux >/dev/null 2>&1; then
+            echo "tmux already present ($(tmux -V))"
+          else
+            sudo apt-get install -y -qq tmux
+            echo "installed tmux ($(tmux -V))"
+          fi
+      - name: Verify the suite's runtime prerequisites (fail-closed, enumerated)
+        # Hard rule 3b: an unprovisioned runner must produce ONE honest failure naming what is
+        # absent, never a pile of assertion failures inside unrelated test files that read as
+        # product defects. Enumerated rather than boolean: every prerequisite is named and its own
+        # state printed, and the step exits non-zero if any is missing.
+        run: |
+          set -uo pipefail
+          fail=0
+          check() {
+            local label="$1"; shift
+            if "$@" >/dev/null 2>&1; then printf 'ok      %s\n' "$label"
+            else printf 'MISSING %s\n' "$label"; fail=1; fi
+          }
+          check "python3"           command -v python3
+          check "python3 + PyYAML"  python3 -c 'import yaml'
+          check "jq"                command -v jq
+          check "tmux"              command -v tmux
+          check "bash"              command -v bash
+          check "git"               command -v git
+          check "node >= 23"        node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 23 ? 0 : 1)'
+          check "local develop ref" git rev-parse --verify -q refs/heads/develop
+          echo "--- runner environment ---"
+          echo "uid=$(id -u)  LC_ALL=${LC_ALL:-<unset>}  awk=$(command -v awk) [$(awk -W version 2>&1 | head -1)]"
+          if [ "$fail" != 0 ]; then
+            echo "FAIL: the runner is missing suite prerequisites named above"
+            exit 1
+          fi
+          echo "PASS: every suite runtime prerequisite is present"
       - run: npm install
       - name: Test-coverage self-check (DIR-110/ADR-019 decision #4)
         # Early, cheap, fail-fast: catches the DIR-108 failure class (a real test file sitting on

@@ -90,16 +90,31 @@ function _snapshot(root) {
 
 // ── AC2 — the wipe clears a read-only tree, and never leaves it worse ──────────────────────────
 
-test("AC2 — _wipeFixture clears a read-only fixture (no marker): the self-heal the pre-fix path lacked", () => {
+test("AC2 — _wipeFixture clears a read-only fixture (no marker): the self-heal the pre-fix path lacked", (t) => {
   const parent = mkTmp();
   const ws = _makeBrokenFixture(path.join(parent, "fixture"));
-  // Negative control: the PRE-FIX algorithm on this exact shape. If this ever starts succeeding,
-  // the fixture's read-only invariant changed and the rest of this file's premise is void.
-  assert.throws(() => fs.rmSync(ws, { recursive: true, force: true }),
-    (e) => e.code === "EACCES", "pre-fix rmSync must throw EACCES on a read-only tree");
-  assert.ok(fs.existsSync(ws), "pre-fix rmSync deleted nothing (the defect is a hard stall, not a partial wipe)");
+  // A 0o555 tree is only unremovable for a process that lacks CAP_DAC_OVERRIDE. As uid 0 the
+  // PRE-FIX control below cannot fire at all — it would "pass" only by being silently skipped, so
+  // it gets its own NOT-EVALUATED value instead of sharing the passing shape (hard rule 3b: a
+  // judgement whose vocabulary has no "not evaluated" state cannot tell "checked and clean" from
+  // "never ran"). The self-hosted tokyo-alpha runner executes CI as uid 0; ubuntu-latest and local
+  // developer machines do not. Measured at one commit: this test passes as uid 1000 and fails as
+  // uid 0, with this control as the only difference.
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  if (isRoot) {
+    t.diagnostic("pre-fix EACCES control NOT-EVALUATED: uid 0 (CAP_DAC_OVERRIDE removes a 0o555 tree)");
+  } else {
+    // Negative control: the PRE-FIX algorithm on this exact shape. If this ever starts succeeding,
+    // the fixture's read-only invariant changed and the rest of this file's premise is void.
+    assert.throws(() => fs.rmSync(ws, { recursive: true, force: true }),
+      (e) => e.code === "EACCES", "pre-fix rmSync must throw EACCES on a read-only tree");
+    assert.ok(fs.existsSync(ws), "pre-fix rmSync deleted nothing (the defect is a hard stall, not a partial wipe)");
+  }
 
-  // Post-fix: same input, same call site semantics — the wipe clears it.
+  // Post-fix: same input, same call site semantics — the wipe clears a read-only tree. This half is
+  // asserted unconditionally; on the root path the control above already removed `ws`, so the
+  // fixture is rebuilt to the exact same shape rather than leaving the wipe with nothing to do.
+  if (!fs.existsSync(ws)) _makeBrokenFixture(ws);
   _wipeFixture(ws);
   assert.equal(fs.existsSync(ws), false, "the fixed wipe must clear a read-only tree");
 });
