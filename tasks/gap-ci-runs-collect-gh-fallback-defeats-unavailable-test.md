@@ -1,7 +1,7 @@
 ---
 id: gap-ci-runs-collect-gh-fallback-defeats-unavailable-test
 title: resolveGhBin 的硬编码绝对路径回退，让「gh 不可达」测试在真装了 gh 的机器/CI 上失真
-status: todo
+status: ready
 labels:
   - gap
   - defect
