@@ -559,3 +559,37 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **⊢ 与 §1 授权链的关系**：本条不是推翻 §1⑤问3（"master 推进用 A 工作流内机制"）——那条裁定关于**机制**
 （在 release.yml 内一个新 job，fast-forward）仍然有效，本条只是收窄该 job 的**输入依据**（gate 什么），
 是同一份权威链条上的追加裁定，不是另起一份 SPEC。
+
+### 11.5 补完：§11.4 只退役了三条**判据**，GOAL-020 自己的**退出条件②**与**范围节**未同步（同日修订）
+
+**这是硬规则 5b 的形态：修一个实例 ≠ 修完同类。** §11.4 退役的对象是 `AC-266` / `AC-267` / `AC-268`
+三条**判据**，而它们所服务的那份 **GOAL-020 自己的文本**没有跟着改——修的人只盯着被报出来的那三条 AC，
+**兄弟实例（同一 GOAL 的退出条件与范围节）就在同一个 body 里，却一条未动**：
+
+- `## 退出条件` 的第 ② 条**仍逐字**要求「SEA 产物不再因 `plugin-root.ts` 的顶层求值而在 `serve` 上崩」
+  ——它判的那条产物线（SEA/npm）已被本 §11 裁定取消；
+- `## 范围` 节仍写着 `AC-265..AC-269` 五条，其中 266/267/268 **三条已 `superseded`**，
+  而在域的 `AC-270 / AC-271 / AC-272 / AC-273 / AC-274` **一条都没列**——判官被明确要求
+  「judge the AC set against it, not against the exit conditions alone」
+  （`plugin/scripts/goal-driver.ts:938-939` `buildSufficiencyPrompt`），陈旧的范围节
+  **自己就在告诉判官：声明的分解与在域集合对不上**。
+
+⇒ 后果：充分性判官对 GOAL-020 持续给出 DETERMINATE `insufficient`
+（`.quay/goal-sufficiency-cache.json` 的 key `3c73e546…`），**而退出条件②的文本本身在要求一件已不存在的事**。
+⛔ 这个方向上加判据只会让目标更远：新增一条判 SEA 的 AC 等于把刚退役的 AC-267 换个编号复活，
+而退出条件②仍要求它 ⇒ 判官下一轮仍判 `insufficient`，新增的那条则永远是红。
+
+⇒ 由 `gap-goal020-exit-conditions-stale-after-sea-channel-retired`（同日）修订 GOAL-020 的 body：
+退出条件②去掉已退役的 SEA 半句，「产物真能起来」改由 **`AC-274` 已经读的那个量**（Release run 全绿）承载；
+范围节改为在域 7 条，并显式登记 `AC-266 / AC-267 / AC-268` 已 `superseded`。**修订后的 ② 全文**：
+
+> ② **release 渠道能发出一个真能起来的产物**——`.quay/ci-runs.jsonl` 里存在一次
+>    `workflow=Release` 且 `conclusion=success` 的 run，且 master 已 ff 到它的 tag；
+>    「发出去的产物真能起来」由该 run 的**全绿**承载：`advance-master.needs` 必须覆盖
+>    `.github/workflows/release.yml` 内其余每一个 job（`release-master-advance-needs-check.ts`，
+>    每轮跑，见 `plugin/scripts/runner-static-gate.ts:958`），而该 gate job 本身就是 plugin 渠道的
+>    真实安装验证（marketplace 装得上 → `quay-init` → `quay driver start` / `quay serve` 在隔离环境
+>    alive，见本 SPEC §11.2）。
+
+⛔ 本小节与本次修订**不新增任何判据、不改任何 AC 的 `status` / `criterion`**：`AC-266/267/268` 保持
+`superseded`，`AC-274` 保持 `active`，GOAL-020 自身的 `status` 保持 `active`——改的只有 GOAL-020 的文本。

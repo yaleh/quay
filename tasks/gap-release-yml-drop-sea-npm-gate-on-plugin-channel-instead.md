@@ -1,7 +1,7 @@
 ---
 id: gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead
 title: release.yml：取消 sea/npm 产物 job，advance-master 改为消费 plugin 渠道真实安装验证
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical

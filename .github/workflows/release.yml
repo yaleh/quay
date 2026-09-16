@@ -1,673 +1,233 @@
 name: Release
 
-# QX-033 (experiment 4, iteration 9): closes CB-008 (no packaging/distribution).
-# Manually triggered against an EXISTING version tag (v*). Builds a
-# distributable npm pack artifact and publishes it to the GitHub Release for
-# that tag.
+# Manually triggered against an EXISTING version tag (v*).
 #
-# Approach: npm pack (Option B) — produces quay-<version>.tgz installable via
-# `npm install -g quay-<version>.tgz`. No build toolchain required beyond Node.js.
+# ── WHAT THIS WORKFLOW IS, AFTER THE 2026-09-16 RULING ────────────────────────────────────────────
+# Human ruling 2026-09-16, verbatim: 「取消 sea 和 npm release。这些是我们最近没有精力去保障的。」
+# and, on what `advance-master` should gate on instead: 「按照 claude code plugin 发布和安装。
+# CI 应当按此设计。」 (recorded in orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11).
 #
-# gap-github-actions-no-implicit-triggers (2026-09-14, human ruling): this
-# workflow used to auto-run on every `v*` tag push. A tag push is no longer
-# treated as an implicit "please publish" request — publishing must be
-# triggered explicitly (workflow_dispatch, with the tag to release named
-# as an input) so a plain `git push --tags` never has a GitHub-writing side
-# effect on its own. `github.ref_name` (only meaningful for a ref-triggered
-# run) is replaced throughout this file by the `tag` input.
+# So this file no longer builds or publishes npm-pack tarballs or Node-SEA executables. The channel
+# whose health gates `master` is the Claude Code PLUGIN channel, and the gate is a real install of
+# THIS TAG's plugin build — not a build-success reading.
+#
+# The five jobs that used to carry the artifacts (`release`, `sea-release`,
+# `sea-verify-node-free`, `sea-verify-node-free-cross-platform`, `dist-verify-node-floor`) and the
+# `--ci` asset cross-check (`delivery-manifest-verify`) are GONE, together with the workflow-level
+# `SEA_NODE_VERSION` env those jobs were the only consumers of. The npm/SEA artifact line was the
+# only reason any of them existed; leaving one behind would have been a job that verifies something
+# the project no longer ships.
+#
+# ⚠️ `ci.yml` carries a job with the SAME NAME as the deleted `dist-verify-node-floor`. That one is
+# a different job, in a different workflow, building its own artifact — it is NOT in this file's
+# scope and is deliberately untouched.
+#
+# gap-github-actions-no-implicit-triggers (2026-09-14, human ruling): this workflow is
+# `workflow_dispatch` ONLY. A tag push is not an implicit "please release" request — a plain
+# `git push --tags` must never have a GitHub-writing side effect on its own. `github.ref_name`
+# (only meaningful for a ref-triggered run) is replaced throughout this file by the `tag` input.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag to release (e.g. v0.6.3) — must already exist"
+        description: "Existing version tag to release (e.g. v0.7.1) — must already exist"
         required: true
         type: string
 
-# gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the SINGLE declaration of the
-# Node version the SEA channel builds on and must therefore embed. A SEA executable is a byte-copy
-# of the build machine's `node` (build-sea.sh step [4/6]), so "which Node is inside the shipped
-# binary" was previously an implicit property of whatever PATH resolved to — the same script on a
-# Node-25 dev box produced a Node-25 binary while this workflow produced Node 20. Everything that
-# needs this number derives from HERE: the runner's setup-node version, the floor check inside both
-# build-sea.sh runs, and verify-sea-artifact.sh's byte-level cross-check of the produced archives.
-env:
-  SEA_NODE_VERSION: '20'
-
 jobs:
-  release:
+  # ── verify-plugin-channel ─────────────────────────────────────────────────────────────────────
+  # The gate on `master` (replaces the six artifact jobs as `advance-master`'s dependency).
+  #
+  # WHY A REAL INSTALL AND NOT A BUILD READING: `master` is defined as "the tag of the most recent
+  # FULLY GREEN release run" (SPEC §6), so the only thing that makes that definition true is a
+  # check that fails when the delivered channel is broken. A build-success reading cannot: the
+  # npm .tgz and the SEA archives both built successfully for releases that no consumer could
+  # actually use, and nothing in this repo turned red (SPEC §2.2 后果 3). This job therefore
+  # exercises the deliverable end to end, exactly as the 2026-09-16 manual verification did on a
+  # fresh machine: install it through the marketplace, initialize a project from the installed
+  # copy, bring up the drivers, and answer HTTP.
+  #
+  # TAG-PINNING (why the plugin is BUILT here rather than fetched from `dist-plugin`): the
+  # `dist-plugin` orphan branch is a ROLLING channel — it is republished from whatever ref was
+  # named the last time someone dispatched publish-plugin-dist.yml, and its own declared version
+  # need not be the tag under release. Installing it here would gate `master` on an artifact that
+  # is not the tag: master would advance to vX.Y.Z after a green run that never touched vX.Y.Z.
+  # So the plugin subtree is built FROM THE DISPATCHED TAG's tree, through the SAME single
+  # mechanism `publish-dist-branch.yml` uses (`plugin/scripts/publish-dist-branch.sh`, no `--push`)
+  # — so this job adds no second build implementation (the property GOAL-019 AC-275 pins for the
+  # sibling channel), and nothing is published from here. The built tree is extracted from the
+  # orphan commit with `git archive` (the artifact, never a `cp` of the working tree), matching
+  # test/cold-start-e2e.sh --from-build.
+  #
+  # The environment is naturally isolated: a GitHub-hosted runner starts empty, so the marketplace
+  # cache, the Claude Code config and the scratch project below are all fresh per run.
+  verify-plugin-channel:
     runs-on: ubuntu-latest
-    # gap-release-timeout-10min-cancels-npm-tgz (2026-08-16): the "Run tests" step
-    # (96 deterministic test files across packages/quay + packages/quay-native) exceeded
-    # the old `timeout-minutes: 10` on the v0.5.0 run (31958447040) — the job was
-    # cancelled BEFORE "Build release artifact (npm pack)" / "Upload artifact to
-    # GitHub Release" ran, so the npm .tgz was never auto-attached. Widen to 30 to give
-    # cold runners + future test growth a comfortable margin (sea-release, which does
-    # more build work, is already 15).
-    timeout-minutes: 30
+    timeout-minutes: 25
     permissions:
-      contents: write
-      issues: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-          # gap-release-cut-via-workflow-dispatch (2026-09-15): default fetch-depth (1, shallow)
-          # left several git-graph product tests unable to resolve historical commits they assert
-          # against (e.g. `git show <sha>^` for a lane-palette regression fixture) — same root
-          # cause ci.yml already documents for itself ("默认浅克隆缺历史 baseline"). This job never
-          # got the equivalent fix. Full history restores that resolvability.
+          # fetch-depth: 0 — the build below creates an orphan branch + a throwaway worktree off
+          # HEAD, and reads the tag's whole tree. A shallow clone cannot serve that.
           fetch-depth: 0
 
-      - name: Fetch develop (git-graph tests read real branch decorations)
-        # gap-release-cut-via-workflow-dispatch: a tag checkout has no LOCAL `develop` branch ref
-        # even with fetch-depth: 0 (that only guarantees the OBJECTS/history are present, not a
-        # local branch pointer) — several /git-history rendering tests use the real repo's own git
-        # log as their data source and assert on a `develop` decoration existing somewhere in the
-        # window. Verified two-way in-task (worker session, same day): without this step those
-        # tests fail (no `develop` ref to decorate); with it, they pass identically to a normal
-        # branch checkout. This does not touch the checked-out tree — HEAD stays on the tag.
-        run: git fetch origin develop:develop
-
-      - uses: actions/setup-node@v4
-        with:
-          # M120 (DIR-060): the "Run tests" step below spawns the `.ts` CLI bins
-          # as subprocesses, which only Node >=23 runs natively — bumped 20 -> 24.
-          # RUNNER version only; `engines` stays >=20.0.0. The distributed
-          # tarball's actual Node-20 floor is proven by dist-verify-node-floor.
-          # (sea-release stays on '20' — its own separate build path.)
-          node-version: '24'
-
-      - name: Install dependencies
-        run: npm install
-
-      # gap-release-cut-via-workflow-dispatch (AC1, 2026-09-15): `.quay/config.yml` is
-      # gitignored (DIR-050, per-workspace), so a fresh `actions/checkout@v4` of the
-      # TAGGED tree has none — and quay's own "walk upward looking for .quay/config.yml"
-      # root helpers treat its absence as fatal. Observed in release run 34987120091
-      # (tag v0.7.0): the "Run tests" step below failed with 157 test failures, every one
-      # of the shape `Error: no .quay/config.yml found (searched from ... upward)` /
-      # `AssertionError: real .quay/config.yml must exist in this worktree`, NOT a hang
-      # and NOT a SEA failure. `ci.yml` gained this exact step in
-      # gap-config-yml-example-and-ci-bootstrap; this job is a SECOND call site that the
-      # fix missed (hard rule 5b: fixing one instance ≠ it was the only one) — it is a
-      # separate call site because this job deliberately does NOT delegate to
-      # scripts/test.sh (see the rationale on "Run tests" below), so it does not inherit
-      # that entrypoint's own bootstrap.
-      - name: Bootstrap .quay/config.yml (gap-config-yml-example-and-ci-bootstrap)
-        run: cp .quay/config.yml.example .quay/config.yml
-
-      # gap-release-cut-via-workflow-dispatch (AC7, 2026-09-15): `scripts/test.sh` builds the
-      # bundles FIRST — its `build_dist_once()` runs `packages/{quay,quay-native}/scripts/build-dist.mjs`
-      # and then `plugin/scripts/sync-vendor.sh --sync-dist`, and it refuses to run tests against a
-      # possibly-stale bundle (test.sh:953 "refusing to run tests against a possibly-stale bundle").
-      # THIS job deliberately does not delegate to scripts/test.sh (see the rationale on "Run tests"
-      # below), so it also lost that entrypoint's build half — exactly the same second-call-site gap
-      # the .quay/config.yml bootstrap above closed for the OTHER thing test.sh does first. `dist/` is
-      # gitignored, so a fresh `actions/checkout@v4` of the tagged tree has none, and the subset this
-      # job runs is not dist-free: `packages/quay/test/server-status-web-control-same-pid.test.mjs:490`
-      # asserts `QUAY_CLI.endsWith(".js")` — "the CLI entry under test is the prebuilt bundle" — which
-      # `cli-entry.mjs` cannot satisfy when the bundle is missing, because its fallback is `bin/quay.ts`.
-      # Measured locally (worktree, .quay/config.yml present): without the build the step exits non-zero
-      # with that exact AC4 assertion plus a file-level `cli.test.mjs` failure; the build is the missing
-      # half, not a test that needs excluding.
-      - name: Build dist bundles (the build half of scripts/test.sh's build_dist_once)
-        run: |
-          set -euo pipefail
-          node packages/quay/scripts/build-dist.mjs
-          node packages/quay-native/scripts/build-dist.mjs
-          bash plugin/scripts/sync-vendor.sh --sync-dist
-
-      - name: Run tests
-        # QX-056 (experiment 4, iteration 15): DIR-004 publish.
-        # quay-github package tests are excluded (they require broader org perms) —
-        # this job intentionally scopes to packages/quay + packages/quay-native only,
-        # narrower than scripts/test.sh's default glob, so it does NOT delegate to
-        # scripts/test.sh here.
-        #
-        # ADR-019/DIR-109 (M173): live-GitHub tests self-skip unless opted in via
-        # QUAY_TEST_LIVE_GITHUB=1 (in-file `node:test` skip conditions in serve-github /
-        # provider-abi-conformance / cli-edit-parity-conformance, and the same opt-in
-        # gate on cli.test.mjs's live blocks 8/10/11).
-        #
-        # gap-release-postinstall-fallback-breaks-windows-sea-build (AC4): this step
-        # deliberately does NOT set GH_TOKEN (nor QUAY_TEST_LIVE_GITHUB). The v0.4.0
-        # release run set GH_TOKEN here, which ENABLED cli.test.mjs's live blocks against
-        # the real yaleh/quay issue store — and those assertions drift with that store's
-        # current state (E3 adr-001 / M52 delivery-standalone-smoke / AC5 real-store
-        # scan failures in the same run), blocking the release on external state unrelated
-        # to whether the tagged commit's deterministic tests pass. A release gate verifies
-        # the ARTIFACT, not the live store's mutable state; the deterministic subset here
-        # runs without the token. Live-GitHub conformance remains covered by the FULL suite
-        # (scripts/test.sh / ci.yml) under QUAY_TEST_LIVE_GITHUB=1, where drift is triaged.
-        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
-
-      - name: Build release artifact (npm pack)
-        id: pack
-        run: |
-          bash packages/quay/scripts/package.sh
-          # npm pack produces quay-<version>.tgz where version has no 'v' prefix
-          # (git tags use v0.1.0 but package.json version is 0.1.0 — the 'v' must be stripped)
-          ARTIFACT=$(ls -1t packages/quay/quay-*.tgz 2>/dev/null | head -1)
-          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
-          echo "Built: ${ARTIFACT}"
-
-      - name: Upload artifact to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ steps.pack.outputs.artifact }}
-          body: |
-            ## quay ${{ inputs.tag }}
-
-            Install globally with Node.js >= 20:
-
-            ```sh
-            # Download the .tgz from this release page, then:
-            npm install -g quay-*.tgz
-            quay --help
-            quay serve
-            ```
-
-            The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
-            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (built as `dist/quay.js`).
-            Note: the artifact filename uses the package version (e.g. `quay-0.1.0.tgz`), not the git tag (e.g. `v0.1.0`).
-
-  # M01-dist (exp5, iteration 0): DIR-004 remaining scope — single-file
-  # executables via Node SEA, requiring no separately-installed Node.js
-  # runtime on the end user's machine. See packages/quay/scripts/build-sea.sh
-  # and packages/quay-native/scripts/build-sea.sh for the build logic and why
-  # BOTH packages need their own SEA binary (Core spawns the Provider's
-  # mcp_entry as a child process; `quay serve` is not genuinely Node-free
-  # unless mcp_entry also points at a SEA binary, not `node ...`).
-  sea-release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            asset_suffix: linux-x64
-          - os: macos-latest
-            asset_suffix: macos-arm64
-          - os: windows-latest
-            asset_suffix: windows-x64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
-
-      - name: Resolve the declared SEA Node floor (single-sourced from the workflow-level env)
-        id: sea-node-floor
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${SEA_NODE_VERSION:?SEA_NODE_VERSION must be declared at workflow level}"
-          echo "version=${SEA_NODE_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ steps.sea-node-floor.outputs.version }}
-
-      - name: Confirm the runner is really on the declared SEA Node floor
-        # Same standard as ci.yml's dist-verify-node-floor step: if setup-node ever silently fell
-        # back to another version (e.g. an empty/unresolved input), this fails here rather than
-        # producing — and shipping — a SEA binary that embeds the wrong Node.
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --version | grep -E "^v${SEA_NODE_VERSION}\." \
-            || { echo "ERROR: runner is on $(node --version); the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1; }
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build quay (Core) SEA binary
-        shell: bash
-        # SEA_STRICT_NODE_FLOOR=1: build-sea.sh fails closed (instead of warning) when the node it
-        # embedded is not the declared floor. The guard step above should already have caught that.
-        env:
-          SEA_STRICT_NODE_FLOOR: '1'
-        run: bash packages/quay/scripts/build-sea.sh
-
-      - name: Build quay-native (Provider) SEA binary
-        shell: bash
-        env:
-          SEA_STRICT_NODE_FLOOR: '1'
-        run: bash packages/quay-native/scripts/build-sea.sh
-
-      - name: Assemble release bundle (both binaries + packaged .quay/config.yml + plugin sidecar)
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUNDLE_DIR="dist-sea-release"
-          rm -rf "${BUNDLE_DIR}"
-          mkdir -p "${BUNDLE_DIR}/.quay" "${BUNDLE_DIR}/tasks"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp packages/quay/dist-sea/quay.exe "${BUNDLE_DIR}/quay.exe"
-            cp packages/quay-native/dist-sea/quay-native.exe "${BUNDLE_DIR}/quay-native.exe"
-            MCP_ENTRY='["./quay-native.exe", "mcp"]'
-          else
-            cp packages/quay/dist-sea/quay "${BUNDLE_DIR}/quay"
-            cp packages/quay-native/dist-sea/quay-native "${BUNDLE_DIR}/quay-native"
-            MCP_ENTRY='["./quay-native", "mcp"]'
-          fi
-          # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: each binary's
-          # build-runtime provenance (`<exe>.build-node-version`, written by build-sea.sh) travels
-          # WITH the archive, so the claim "this binary embeds Node <floor>" is re-checkable by
-          # anyone holding the released archive — not just inside this CI run's logs.
-          for p in "packages/quay/dist-sea/quay" "packages/quay-native/dist-sea/quay-native"; do
-            if [ "${{ matrix.os }}" = "windows-latest" ]; then SRC="${p}.exe.build-node-version"; DEST="$(basename "${p}").exe.build-node-version"; else SRC="${p}.build-node-version"; DEST="$(basename "${p}").build-node-version"; fi
-            if [ ! -f "${SRC}" ]; then
-              echo "ERROR: ${SRC} missing — build-sea.sh must record the build-time Node version next to the binary." >&2
-              exit 1
-            fi
-            cp "${SRC}" "${BUNDLE_DIR}/${DEST}"
-          done
-          # gap-release-sea-bundle-excludes-plugin-tree (AC16 产物层): the SEA archive is
-          # the RECOMMENDED distribution — it must carry the plugin SIDECAR (the agent
-          # surface that IS the self-evolving loop), staged by the Core build-sea.sh into
-          # packages/quay/dist-sea/plugin/. Fail closed if it is missing (AC1: the release
-          # artifact must contain plugin/).
-          if [ -d "packages/quay/dist-sea/plugin" ]; then
-            cp -R packages/quay/dist-sea/plugin "${BUNDLE_DIR}/plugin"
-            echo "Included plugin sidecar: ${BUNDLE_DIR}/plugin ($(find "${BUNDLE_DIR}/plugin" -type f | wc -l | tr -d ' ') files)"
-          else
-            echo "ERROR: packages/quay/dist-sea/plugin not found — the SEA archive would ship without the plugin bundle (AC1 unmet)." >&2
-            exit 1
-          fi
-          cat > "${BUNDLE_DIR}/.quay/config.yml" <<EOF
-          # Packaged config for the SEA/single-file-executable distribution
-          # (M01-dist). Both quay and quay-native are compiled Node SEA
-          # binaries placed side-by-side in this directory; mcp_entry
-          # invokes the sibling binary directly (no node on PATH required).
-          providers:
-            native:
-              enabled: true
-              path: "."
-              tasks_dir: "./tasks"
-              mcp_entry: ${MCP_ENTRY}
-              env:
-                QUAY_NATIVE_TASKS_DIR: "./tasks"
-          EOF
-
-      - name: Archive release bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./packages/quay/package.json').version")"
-          ARCHIVE_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            # M122 fix (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): bash's bare `*` glob does NOT
-            # match dotfiles/dotdirs, so `./dist-sea-release/*` silently excluded `.quay/config.yml`
-            # (and `.quay/` itself) from every Windows SEA archive — the archived bundle looked
-            # complete (quay.exe/quay-native.exe present) but `quay serve`/most commands crashed at
-            # runtime with "no .quay/config.yml found", a real latent bug never caught because no
-            # runtime-smoke job ever ran the Windows archive before this milestone. `shopt -s dotglob`
-            # makes `*` match dotfiles too, matching tar's `-C dist-sea-release .` behavior below.
-            shopt -s dotglob
-            7z a "${ARCHIVE_NAME}.zip" ./dist-sea-release/*
-            echo "ARCHIVE_PATH=${ARCHIVE_NAME}.zip" >> "$GITHUB_ENV"
-          else
-            tar -czf "${ARCHIVE_NAME}.tar.gz" -C dist-sea-release .
-            echo "ARCHIVE_PATH=${ARCHIVE_NAME}.tar.gz" >> "$GITHUB_ENV"
-          fi
-
-      # gap-release-artifact-missing-plugin-ac16 (AC3 产物层验证): extract the archive THIS job just
-      # built and run the mechanical artifact-level check (verify-sea-artifact.sh) — plugin/ sidecar
-      # present and non-empty AND all 6 mechanism names (dead-loop-check/verify-delivery-surface/
-      # slot-refill/claim-task/self-report-vocab/laydown-set-check) reverse-searchable in the
-      # artifact. This is the exact check archguard report #13 ran against v0.4.0 and found failing
-      # (strings of the 6 names: 0 hits; no plugin/ in the archive). Fail-closed BEFORE upload: a
-      # release artifact that would regress AC16 (artifact-level delivery) never reaches consumers.
-      - name: Verify the release archive carries the plugin sidecar (AC3)
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p archive-check
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z x "${ARCHIVE_PATH}" -oarchive-check >/dev/null
-          else
-            tar -xzf "${ARCHIVE_PATH}" -C archive-check
-          fi
-          # SEA_NODE_VERSION is inherited from the workflow-level env — check (c) inside the script
-          # fails closed without it, and cross-checks each binary's BYTES against both the recorded
-          # build-runtime provenance and that declared floor.
-          bash packages/quay/scripts/verify-sea-artifact.sh archive-check
-
-      - name: Upload SEA archive to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.ARCHIVE_PATH }}
-          body: |
-            ## quay ${{ inputs.tag }} — single-file executables (Node SEA)
-
-            Platform-specific archives (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
-            are the **recommended distribution**: two single-file executables (`quay`,
-            `quay-native`) plus a packaged `.quay/config.yml` wiring them together, AND
-            the full `plugin/` sidecar (the agent surface that IS the self-evolving
-            loop) — no separately installed Node.js runtime required. Extract the
-            archive and run:
-
-            ```sh
-            ./quay --help
-            ./quay serve
-            ```
-
-            Architecture decision (gap-release-sea-bundle-excludes-plugin-tree AC3):
-            the plugin ships as a **sidecar directory inside the same archive** (not
-            embedded into the SEA single-file binary — the plugin is a tree of
-            .sh/.ts/markdown that needs Node+shell at runtime, so embedding would force
-            a runtime unpack with no benefit). `quay-init --loop` (in `plugin/scripts/`)
-            lays the plugin's mechanisms into a target workspace.
-
-  # Independent verification job (M01-dist Done-when clause 4, it0
-  # domain-misfit audit-channel): downloads the Linux SEA archive this same
-  # workflow run just published and runs it in a container image that has
-  # never had Node.js installed, proving the executable is genuinely
-  # Node-free end-to-end — not just "the build succeeded".
-  sea-verify-node-free:
-    needs: sea-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    container:
-      image: debian:stable-slim
-    steps:
-      - name: Install runtime deps (libatomic1; explicitly NOT nodejs, NOT gh)
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq libatomic1 curl tar
-      - name: Confirm no Node.js is present in this verification shell
-        run: |
-          if command -v node >/dev/null 2>&1; then
-            echo "ERROR: node is present — this job does not prove Node-free operation." >&2
-            exit 1
-          fi
-          echo "Confirmed: no node on PATH."
-      - name: Download the SEA archive published by sea-release (this run)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # M01-dist iteration-1: `gh` (the GitHub CLI) is preinstalled on
-          # ubuntu-latest HOST runners but is NOT present in a bare
-          # debian:stable-slim `container:` job — a real "command not found"
-          # (exit 127) was hit here, not assumed. Use the GitHub REST API
-          # directly via curl instead, which only needs curl (already
-          # installed above) and keeps this job's dependency footprint
-          # minimal (no extra apt repo for `gh`).
-          #
-          # This repo is PRIVATE (confirmed: `gh api repos/.../ --jq .private`
-          # -> true), so a plain GET of the release's `browser_download_url`
-          # returns 404 even with a valid bearer token (verified directly,
-          # exit 22/HTTP 404) — private-repo release assets require the
-          # dedicated assets API endpoint with an octet-stream Accept header,
-          # not the public web download URL. Fetch the asset id from the
-          # release-by-tag API, then GET
-          # /releases/assets/{id} with Accept: application/octet-stream.
-          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
-          ASSET_NAME="quay-sea-${VERSION}-linux-x64.tar.gz"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
-          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
-            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
-            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
-          if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
-            exit 1
-          fi
-          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
-            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
-          mkdir -p extracted
-          tar -xzf "${ASSET_NAME}" -C extracted
-      # gap-release-artifact-missing-plugin-ac16 (AC3): the DOWNLOADED consumer-facing asset must
-      # carry the plugin sidecar + all 6 mechanism names — the exact regression archguard #13 found
-      # (v0.4.0 archive had only quay/quay-native binaries, no plugin/). This container has no repo
-      # checkout, so the canonical verify-sea-artifact.sh is not available; this is an inline mirror
-      # of its checks (keep the 6-name list in sync with packages/quay/scripts/verify-sea-artifact.sh).
-      - name: Verify the downloaded archive carries the plugin sidecar (AC3)
-        run: |
-          set -euo pipefail
-          cd extracted
-          if [ ! -d plugin ] || [ -z "$(find plugin -type f 2>/dev/null | head -1)" ]; then
-            echo "ERROR: downloaded SEA archive has no non-empty plugin/ (AC16 regression)." >&2
-            exit 1
-          fi
-          for m in dead-loop-check verify-delivery-surface slot-refill claim-task self-report-vocab laydown-set-check; do
-            if ! grep -rlF -- "$m" . 2>/dev/null | grep -q .; then
-              echo "ERROR: mechanism '$m' not reverse-searchable in the downloaded artifact." >&2
-              exit 1
-            fi
-          done
-          echo "OK: downloaded SEA archive carries plugin/ + all 6 mechanism names (AC3)"
-      # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the DOWNLOADED,
-      # consumer-facing asset must embed the declared Node floor — the same check verify-sea-artifact.sh
-      # (c) runs on the assembled bundle, mirrored here because this job has no repo checkout and so
-      # cannot call the canonical script (hard rule 5b: the sibling call site needs the same fix).
-      # Read from the binary's BYTES: a SEA executable ignores node's own CLI flags (measured
-      # 2026-09-16 — `--version`/`-v`/`-p process.version` all just run the embedded main), so
-      # `./quay --version` says nothing about the Node inside it.
-      - name: Verify the downloaded binary embeds the declared Node floor
-        run: |
-          set -euo pipefail
-          cd extracted
-          EMBEDDED="$(grep -aoE 'node\.js/v[0-9]+\.[0-9]+\.[0-9]+' ./quay | head -1 | sed 's#^node\.js/##' || true)"
-          if [ -z "${EMBEDDED}" ]; then
-            echo "ERROR: could not read an embedded Node version from the downloaded ./quay binary." >&2
-            exit 1
-          fi
-          RECORDED="$(tr -d '[:space:]' < ./quay.build-node-version)"
-          if [ "${EMBEDDED}" != "${RECORDED}" ]; then
-            echo "ERROR: downloaded ./quay embeds ${EMBEDDED} but its recorded provenance says ${RECORDED}." >&2
-            exit 1
-          fi
-          case "${EMBEDDED}" in
-            "v${SEA_NODE_VERSION}."*) ;;
-            *) echo "ERROR: downloaded ./quay embeds ${EMBEDDED}; the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1 ;;
-          esac
-          echo "OK: downloaded ./quay embeds Node ${EMBEDDED} (declared floor ${SEA_NODE_VERSION})"
-      - name: Run quay --help (no Node on PATH)
-        run: |
-          cd extracted
-          chmod +x ./quay ./quay-native
-          ./quay --help
-      - name: Run quay serve and curl it (no Node on PATH)
-        run: |
-          cd extracted
-          ./quay serve --port 18080 &
-          SERVE_PID=$!
-          sleep 2
-          curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18080/
-          kill "$SERVE_PID"
-
-  # M122 (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): the macOS/Windows counterpart to
-  # sea-verify-node-free above. GitHub Actions `container:` (the Linux job's Node-free technique)
-  # only supports Linux runners — macos-latest/windows-latest images ship Node.js preinstalled with
-  # no container isolation available. Proves Node-freeness instead by explicitly stripping every
-  # PATH directory containing a `node`/`node.exe` binary before running the SEA binary, then
-  # confirming `command -v node` genuinely fails under that stripped PATH (same standard of evidence
-  # as the Linux job's "no node on PATH" check, achieved by a different mechanism appropriate to
-  # runners that can't be containerized).
-  sea-verify-node-free-cross-platform:
-    needs: sea-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            asset_suffix: macos-arm64
-            archive_ext: tar.gz
-          - os: windows-latest
-            asset_suffix: windows-x64
-            archive_ext: zip
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    steps:
-      - name: Download the SEA archive published by sea-release (this run)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Same private-repo assets-API fetch technique as sea-verify-node-free above (the public
-          # browser_download_url 404s on a private repo even with a valid token).
-          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
-          ASSET_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
-          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
-            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
-            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
-          if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
-            exit 1
-          fi
-          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
-            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
-          mkdir -p extracted
-          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
-            7z x "${ASSET_NAME}" -oextracted >/dev/null
-          else
-            tar -xzf "${ASSET_NAME}" -C extracted
-          fi
-      # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the downloaded
-      # macOS/Windows asset must embed the declared Node floor too — the same byte-level check
-      # verify-sea-artifact.sh (c) runs on the assembled bundle, mirrored here because this job has
-      # no repo checkout (same reason as the Linux job's mirror above). This is the only place the
-      # macOS/Windows BINARY FORMATS are checked as a consumer receives them.
-      - name: Verify the downloaded binary embeds the declared Node floor
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd extracted
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then BIN=./quay.exe; else BIN=./quay; fi
-          EMBEDDED="$(grep -aoE 'node\.js/v[0-9]+\.[0-9]+\.[0-9]+' "${BIN}" | head -1 | sed 's#^node\.js/##' || true)"
-          if [ -z "${EMBEDDED}" ]; then
-            echo "ERROR: could not read an embedded Node version from the downloaded ${BIN} binary." >&2
-            exit 1
-          fi
-          RECORDED="$(tr -d '[:space:]' < "${BIN}.build-node-version")"
-          if [ "${EMBEDDED}" != "${RECORDED}" ]; then
-            echo "ERROR: downloaded ${BIN} embeds ${EMBEDDED} but its recorded provenance says ${RECORDED}." >&2
-            exit 1
-          fi
-          case "${EMBEDDED}" in
-            "v${SEA_NODE_VERSION}."*) ;;
-            *) echo "ERROR: downloaded ${BIN} embeds ${EMBEDDED}; the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1 ;;
-          esac
-          echo "OK: downloaded ${BIN} embeds Node ${EMBEDDED} (declared floor ${SEA_NODE_VERSION})"
-
-      - name: Strip Node.js from PATH and confirm it is genuinely gone
-        shell: bash
-        run: |
-          set -euo pipefail
-          STRIPPED_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
-            if [ -x "$d/node" ] || [ -x "$d/node.exe" ]; then
-              continue
-            fi
-            printf '%s\n' "$d"
-          done | paste -sd: -)"
-          echo "STRIPPED_PATH=${STRIPPED_PATH}" >> "$GITHUB_ENV"
-          if PATH="${STRIPPED_PATH}" command -v node >/dev/null 2>&1; then
-            echo "ERROR: node is still present under the stripped PATH — this job does not prove Node-free operation." >&2
-            exit 1
-          fi
-          echo "Confirmed: no node on the stripped PATH."
-      - name: Run quay --help (no Node on stripped PATH)
-        shell: bash
-        run: |
-          cd extracted
-          chmod +x ./quay ./quay-native 2>/dev/null || true
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            PATH="${STRIPPED_PATH}" ./quay.exe --help
-          else
-            PATH="${STRIPPED_PATH}" ./quay --help
-          fi
-      - name: Run quay serve and curl it (no Node on stripped PATH)
-        shell: bash
-        run: |
-          cd extracted
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            PATH="${STRIPPED_PATH}" ./quay.exe serve --port 18081 &
-          else
-            PATH="${STRIPPED_PATH}" ./quay serve --port 18081 &
-          fi
-          SERVE_PID=$!
-          sleep 2
-          curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18081/
-          kill "$SERVE_PID"
-
-  # M120 (DIR-060): floor-verification for the npm-pack tarball. Mirrors
-  # sea-verify-node-free's asset-fetch shape (download the asset THIS run just
-  # published, private-repo assets API), but keeps Node PRESENT and PINNED to
-  # the declared floor (Node 20) — the point is proving the distributed `bin`
-  # (dist/quay.js) runs on Node 20, the exact regression the real v0.3.5 release
-  # hit (native `.ts` needs Node >=23). The hard, runnable guard that would have
-  # caught it before a release attempt did.
-  dist-verify-node-floor:
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Confirm the runner is really on the declared floor (Node 20)
-        run: node --version | grep -E '^v20\.'
-      - name: Download the npm-pack tarball published by release (this run)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Same private-repo asset-fetch path as sea-verify-node-free: the
-          # public browser_download_url 404s on a private repo, so resolve the
-          # asset id from the release-by-tag API and GET the assets endpoint
-          # with an octet-stream Accept header.
-          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
-          ASSET_NAME="quay-${VERSION}.tgz"
-          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
-          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
-            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
-            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
-          if [ -z "${ASSET_ID}" ]; then
-            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ inputs.tag }}" >&2
-            exit 1
-          fi
-          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
-            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
-      - name: Install the published tarball on Node 20 and run its packaged bin
-        run: |
-          set -euo pipefail
-          VERSION="$(echo "${{ inputs.tag }}" | sed 's/^v//')"
-          echo "Installing quay-${VERSION}.tgz on $(node --version)"
-          npm install -g "quay-${VERSION}.tgz"
-          quay --help
-          quay --version
-
-  # gap-orphaned-check-scripts-not-wired (M-DIR119-C-CANARY, 2026-07-27): delivery-manifest-check.ts
-  # was real, correct, and never invoked anywhere. `ci.yml` now runs its STATIC mode (no network) on
-  # every push; this job runs its `--ci` mode — the one that needs a real published GitHub Release
-  # tag + token to cross-check delivery-manifest.json's declared artifacts against what THIS release
-  # run actually published — the genuine end-to-end verification the static mode cannot do.
-  delivery-manifest-verify:
-    needs: [release, sea-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify delivery-manifest.json against this release's real published assets
+
+      # The plugin build (esbuild) needs the workspace's dependencies, exactly as
+      # publish-plugin-dist.yml's own job does before it calls the same script.
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build the plugin subtree from this tag (canonical path, no push)
+        run: bash plugin/scripts/publish-dist-branch.sh --branch plugin-channel-verify
+
+      - name: Extract the built plugin from the orphan commit
+        # `git archive` of the orphan commit, NOT a copy of the working tree: the built tree is what
+        # a consumer receives (dist/*.js bundles, raw .ts stripped, closure-verified) — a `cp` of
+        # `plugin/` would carry raw .ts that the plugin cache cannot resolve (no node_modules).
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/plugin-channel-src"
+          git archive plugin-channel-verify | tar -x -C "${RUNNER_TEMP}/plugin-channel-src"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/.claude-plugin/marketplace.json"
+          test -f "${RUNNER_TEMP}/plugin-channel-src/scripts/quay-init.sh"
+
+      - name: Install the Claude Code CLI (the plugin channel's own installer)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Register the built plugin as a marketplace and install it into a scratch project
+        # A SCRATCH project, not this repository: installing quay into the very tree that is being
+        # released would make the gate depend on the repo's own plugin state (and on the repo's own
+        # .claude/settings.json), i.e. self-installation. The scratch dir is empty and permanent
+        # only for this run.
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          rm -rf "$SCRATCH"
+          mkdir -p "$SCRATCH"
+          cd "$SCRATCH"
+          claude plugin marketplace add "${RUNNER_TEMP}/plugin-channel-src"
+          claude plugin install quay@quay --scope project -y
+          echo "--- installed plugin record ---"
+          claude plugin list || true
+
+      - name: Resolve the installed plugin cache directory
+        id: installed
+        # The install above lands the plugin in Claude Code's cache; every later step runs the
+        # INSTALLED copy (quay-init.sh from the cache), not the build directory — the same path the
+        # 2026-09-16 manual verification used. Fail closed if no cache entry carries quay-init.sh:
+        # "could not resolve" must not read as "nothing to check".
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.claude/plugins/cache/quay/quay"
+          test -d "$CACHE_ROOT" || { echo "ERROR: no plugin cache at ${CACHE_ROOT} — the install did not materialise." >&2; exit 1; }
+          INSTALLED=""
+          for d in "$CACHE_ROOT"/*/; do
+            [ -f "${d}scripts/quay-init.sh" ] || continue
+            INSTALLED="${d%/}"
+          done
+          test -n "$INSTALLED" || { echo "ERROR: no cache entry under ${CACHE_ROOT} carries scripts/quay-init.sh." >&2; ls -la "$CACHE_ROOT" >&2 || true; exit 1; }
+          echo "installed plugin: $INSTALLED"
+          echo "version: $(node -p "require('${INSTALLED}/.claude-plugin/plugin.json').version" 2>/dev/null || echo unknown)"
+          echo "dir=${INSTALLED}" >> "$GITHUB_OUTPUT"
+
+      - name: quay-init the scratch project from the installed plugin
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node --experimental-strip-types scripts/delivery-manifest-check.ts --ci
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          test -d "$SCRATCH/.git" || git -C "$SCRATCH" init -q
+          CLAUDE_PLUGIN_ROOT="$INSTALLED" bash "$INSTALLED/scripts/quay-init.sh" \
+            --all --loop \
+            --root "$SCRATCH" \
+            --project scratch-project \
+            --repo-root "$SCRATCH" \
+            --test-command 'node --test' \
+            --tmux-session 'scratch-project-0:0.0'
+          test -f "$SCRATCH/.quay/config.yml"
+
+      - name: Start the promotion + worker drivers and assert both are alive
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          QUAY_BIN="${INSTALLED}/bin/quay"
+          for kind in promotion worker; do
+            ( cd "$SCRATCH" && "$QUAY_BIN" driver start --kind "$kind" --root "$SCRATCH" )
+          done
+          # `--json` is the driver kernel's own structured status face (never a screen scrape):
+          # `alive` is 1 only when the supervisor is up AND the round carrier is being written.
+          fail=0
+          for kind in promotion worker; do
+            status="$( cd "$SCRATCH" && "$QUAY_BIN" driver status --kind "$kind" --root "$SCRATCH" --json )"
+            echo "driver ${kind}: ${status}"
+            alive="$(printf '%s' "$status" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).alive))}catch{process.stdout.write("unreadable")}})')"
+            if [ "$alive" != "1" ]; then
+              echo "ERROR: driver kind '${kind}' is not alive (alive=${alive})." >&2
+              fail=1
+            fi
+          done
+          [ "$fail" = "0" ] || exit 1
+
+      - name: Run quay serve in the scratch project and probe it
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          QUAY_BIN="${INSTALLED}/bin/quay"
+          PORT=$(( 20000 + RANDOM % 20000 ))
+          echo "$PORT" > "${RUNNER_TEMP}/serve-port"
+          # ⛔ No subshell around the backgrounded launch: `( … ) &` makes $! the SUBSHELL's pid, so
+          # the cleanup step would signal a subshell that has already exited and leave the real
+          # server running. cd once, here, so $! IS the server.
+          cd "$SCRATCH"
+          "$QUAY_BIN" serve --host 127.0.0.1 --port "$PORT" > "${RUNNER_TEMP}/serve.log" 2>&1 &
+          echo "$!" > "${RUNNER_TEMP}/serve-pid"
+          # ANY HTTP response proves the process is up — the status code is not the claim being
+          # made. quay serve blocks its event loop for ~10s on cold start (measured; see the
+          # quay-serve-cold-start-blocks-event-loop note), so "no answer yet" is not "failed" and
+          # the probe retries for a generous window instead of sampling once.
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${PORT}/" || true)"
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "serve answered HTTP ${code} after ${i}s on port ${PORT}"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: quay serve did not answer any HTTP response on 127.0.0.1:${PORT} within 60s." >&2
+          echo "--- serve log ---" >&2
+          cat "${RUNNER_TEMP}/serve.log" >&2 || true
+          exit 1
+
+      - name: Stop the drivers and the server
+        if: always()
+        # The runner is destroyed after the run, so this is cleanliness rather than correctness —
+        # but a leftover driver on a re-used runner would make the NEXT run's `alive=1` assertion
+        # pass for the wrong reason.
+        env:
+          INSTALLED: ${{ steps.installed.outputs.dir }}
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/scratch-project"
+          if [ -s "${RUNNER_TEMP}/serve-pid" ]; then
+            kill "$(cat "${RUNNER_TEMP}/serve-pid")" 2>/dev/null || true
+          fi
+          if [ -n "${INSTALLED:-}" ] && [ -x "${INSTALLED}/bin/quay" ]; then
+            for kind in promotion worker; do
+              ( cd "$SCRATCH" && "${INSTALLED}/bin/quay" driver stop --kind "$kind" --root "$SCRATCH" ) || true
+            done
+          fi
+          exit 0
 
   # ── advance-master (orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §6.1) ────────
   # master is redefined as "the tag of the most recent FULLY GREEN release run" and is advanced by
@@ -686,12 +246,13 @@ jobs:
   #      (asserted by release-master-advance-needs-check's sibling grep, AC1). If master was ever
   #      committed to directly, this job goes RED — which is the intended outcome (§3.1).
   #   3. `needs:` must cover EVERY other job in this file. That one is the only new fragility this
-  #      job introduces, and it is precisely the failure mode §6.1 exists to prevent: add a 7th job
-  #      to this workflow and forget to list it here, and master advances on a half-green release.
+  #      job introduces, and it is precisely the failure mode §6.1 exists to prevent: add a job to
+  #      this workflow and forget to list it here, and master advances on a half-green release.
   #      ⛔ Human enumeration drifts, so it is NOT left to review — it is asserted mechanically by
-  #      `plugin/scripts/release-master-advance-needs-check.ts`, landed in the SAME batch as this
-  #      job (§6.1: "与 A 同批落地，不得延后"). That checker is the reason this list is safe to
-  #      read as "the full set" rather than "the set someone remembered".
+  #      `plugin/scripts/release-master-advance-needs-check.ts`. That checker derives the expected
+  #      set from THIS FILE's own job keys on every run (nothing hardcoded), so removing the six
+  #      artifact jobs above and adding `verify-plugin-channel` needed no edit to it — only a
+  #      re-run, which is what proves it is derived rather than a copy.
   #
   # The environment is the tag's own tree (ref: the dispatch input), NOT the dispatching ref: a
   # workflow_dispatch run executes the release.yml carried by the named ref. ⇒ This job only takes
@@ -699,11 +260,10 @@ jobs:
   # master, because that tag's tree does not contain this job at all.
   #
   # First fast-forward is deliberately deferred: it happens automatically the first time every job
-  # below succeeds (§1 ⑤ 问 4 — waiting for a fully green release rather than ff-ing onto the red
-  # v0.6.3). Until then master standing still is the rule's correct output, not a defect.
+  # below succeeds (§1 ⑤ 问 4 — waiting for a fully green release rather than ff-ing onto a red
+  # one). Until then master standing still is the rule's correct output, not a defect.
   advance-master:
-    needs: [release, sea-release, sea-verify-node-free, sea-verify-node-free-cross-platform,
-            dist-verify-node-floor, delivery-manifest-verify]
+    needs: [verify-plugin-channel]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -2,6 +2,7 @@
 id: gap-release-softprops-missing-explicit-tag-name
 title: release.yml 两处 softprops/action-gh-release 都没传 tag_name，隐式依赖 dispatch ref 上下文
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -112,3 +113,28 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 - .github/workflows/release.yml
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-release-softprops-missing-explicit-tag-name.md
+
+## Needs-Human
+
+**执行 2026-09-16T11:08:32.052Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: ✖ AC5 — negative control: the SAME packaged artifact minus dist/driver-anchor.js reproduces the production failure (rc=1 + the exact error) (10279.809185ms)
+- run_id：wk-prod-anchor
+- session_id：407a79d1-cb3a-4d56-9b9c-4bec0808d71a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-release-softprops-missing-explicit-tag-name~wk-prod-anchor~1789556494678-4cc931.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-release-softprops-missing-explicit-tag-name-wk-prod-anchor.log
+
+**人复核（manager 会话，2026-09-16T11:16Z）— 判定为宿主负载相关 flake，退回 ready 重试，不碰 delta：**
+
+- 该失败测试（`plugin/test/driver-anchor.test.mjs` 的 "AC5 — negative control: the SAME packaged
+  artifact minus dist/driver-anchor.js reproduces the production failure"）与本任务 Touches
+  （`release.yml`/`delivery-manifest.json` 等）**完全无关**——本任务不碰任何 driver-anchor 打包逻辑。
+- 命中已知模式 `suite-red-spawn-heavy-driver-tests-load-correlated`（spawn 密集的 driver 测试，宿主
+  contention 下报内部超时，不是断言失败；该 memory 明确点名 driver-anchor/driver-runtime 这类文件）。
+- 现场负控制：复核当下 `uptime` 读数 `load average: 23.63, 13.92, 9.51`（16 核机器，1 分钟负载 23.63
+  ≈ 1.5x 核数，明显过载）、`swap` 用了 5.3/8G——与该 memory 描述的"内部超时而非断言失败"一致的宿主状况。
+- 结论：**不是实现缺陷，不改 delta**。已确认的三条机械 AC（tag_name 落地、结构级 YAML 校验、负控制）
+  均扎实，属误判为 needs-human 的环境噪音。转回 `ready` 让 worker-driver 重新派发一次；若下一轮仍在
+  同一个不相关文件上红、且宿主负载已回落，再重新判断。
