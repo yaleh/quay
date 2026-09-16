@@ -32,6 +32,34 @@ extra:
 1. 补齐 runner 的 Python 依赖（PyYAML）——⛔ 优先做成 CI workflow 里显式的 setup step（可复现、可审计），而不是手工在 runner 宿主上装一次（那样下一个人重建 runner 就复发了）。
 2. 建立「tokyo-alpha 上的 test job 绿」这条基线——在此之前，`runs-on` 切到 self-hosted 等于把 CI 从一个绿的判据换成一个恒红的判据（硬规则 3b：恒红与「没在检查」同形）。
 
+## Evidence — AC1 归类
+
+取证对象：`gh run view 35115599539 --log-failed`（tokyo-alpha 上 `test` job 全量日志）。
+实测 **74 条唯一失败用例，分布 25 个测试文件**（Finding 里的「~80」是估计值）。
+
+归类方法：**逐因子消融对照**——同一 commit、同一台机器，只改一个因子，看哪几条翻红/翻绿。⛔ 不是读日志关键词猜（硬规则 2）；每条对照都给出双向读数。
+
+| # | 成因 | 条数 | 对照（消融该因子 ⇒ 恰好多出这几条红） |
+|---|------|------|----------------------------------------|
+| 1 | **runner 的 python3 缺 PyYAML** | **65** | 全量日志含 27 处 `ModuleNotFoundError: No module named 'yaml'`；本机（有 PyYAML）跑同 25 个文件、其余因子全好 ⇒ 646 pass / 0 fail |
+| 2 | **runner 无 tmux** | **3** | 把 tmux 从 PATH 隐藏 ⇒ 恰好多 3 红（supervisor-observe AC3c、tmux-leak-scan AC2/AC3）；放回 ⇒ 0 红 |
+| 3 | **checkout 里无本地 `develop` ref** | **3** | scratch clone（`git init`+fetch+`checkout -B` = actions/checkout 的机制）⇒ 3 红；补 `git branch develop` ⇒ 0 红 |
+| 4 | **locale = en_US.UTF-8（非 C）** | **2** | 同一 commit：`LC_ALL=C.UTF-8` ⇒ 27 pass / 0 fail；`LC_ALL=en_US.UTF-8` ⇒ 25 pass / 2 fail |
+| 5 | **runner 以 uid 0 执行 CI** | **1** | 同一文件：uid 1000 ⇒ 绿；uid 0 ⇒ 红（quay-init-install-fixture-wipe AC2） |
+
+3+3+2+1 = 9 条互不重叠（分属三个不同测试文件组），余 **65** 条即成因 1。
+
+**成因 1 的定性（影响修法的选择）**：这不是「测试自己的环境依赖」，而是**产品自身**的环境依赖——`plugin/scripts/quay-init.sh` / `quay-launch.sh` / `manager-start.sh` / `verify-deliver-coldstart.sh` 都 shell out 到 `python3 -c 'import yaml, ...'` 来解析 `.quay/config.yml` / `profiles.yml`。所以修法只能是把前提**显式补上**（而不是改测试绕开）。
+
+runner 实测探针读数（在 `test` job 里临时加一步取得）：`uid=0(root)`；`LANG=LC_ALL=en_US.UTF-8`；`python3` 无 `yaml`；`tmux MISSING`；`gawk MISSING`（`awk -> mawk`）；`bash`/`git`/`jq`/`sort` 在。
+
+## Evidence — AC3 其它 runs-on / 环境假设
+
+1. **其它三个 job 仍在 `ubuntu-latest`**（`dist-verify-node-floor` / `version-consistency` / `cold-start-e2e`）——它们绿不构成 `test` job 的证据（不同机器）。且这层差异**掩盖了一个独立缺陷**：`cold-start-e2e` 在 2026-09-16T15:28Z 那次 workflow_dispatch 上**在 ubuntu-latest 上就是红的**（`FAIL: missing file: <tmp>/empty-project/orchestration/orchestrator-loop-tick.md`），与本 runner 迁移无关，是既存红，需另立任务。
+2. **`test` job 自身带 3 条 checkout-shape 假设**（需要**本地** `develop` ref）：在**任何** runner 上都红，只在 `push: develop` 时才绿。迁移前同样存在，迁移把它显式暴露出来。已在本 job 里补 ref（见下面实现）。
+3. **同一 runner 以 uid 0 跑 CI**（ubuntu-latest 是 `runner`）：凡以 EACCES 作负控制的测试在该 runner 上**结构上不可能发火**。已改成三态（NOT-EVALUATED）而不是让它恒红或恒绿（硬规则 3b）。
+4. `gawk` 缺失（只有 `mawk`）属于同一批环境差异，已由 `gap-outer-tick-log-awk-mawk-interval-red` 单独修掉并落在 develop 上（本分支已 merge）。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 逐条归类 ~80 个失败测试的成因（至少给出 top 5 成因各占几条），并把归类结果落进本任务证据。
@@ -46,5 +74,6 @@ extra:
 
 - .github/workflows/ci.yml
 - plugin/test/plugin-bin-shim-npm-free-cli.test.mjs（Finding 点名的 nvm-fallback 宿主 PATH 依赖）
-- plugin/test/ci-runner-env-prereqs.test.mjs (new)（如需为环境前提加判据）
+- plugin/test/ci-runner-env-prereqs.test.mjs (new)（为环境前提加判据）
+- plugin/test/quay-init-install-fixture-wipe.test.mjs（read-only 夹具的 EACCES 负控制按 uid 分态）
 - tasks/gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red.md（自身）
