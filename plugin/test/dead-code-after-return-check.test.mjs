@@ -107,6 +107,10 @@ test("AC1 — a .sh that vanishes between the walk and the read is SKIPPED and R
   try { execFileSync("mkfifo", [fifo]); } catch { return t.skip("mkfifo unavailable on this host"); }
 
   const proc = spawn("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", dir, "--json"]);
+  // If this test fails BEFORE releasing the parked read, the child is still blocked in the FIFO open
+  // and would keep the file's process alive forever (a hung suite file, not a red one). The teardown
+  // hook is the release valve; killing an already-exited child is a no-op.
+  t.after(() => { try { proc.kill("SIGKILL"); } catch { /* already gone */ } });
   let out = "";
   let err = "";
   proc.stdout.on("data", (d) => (out += d));
