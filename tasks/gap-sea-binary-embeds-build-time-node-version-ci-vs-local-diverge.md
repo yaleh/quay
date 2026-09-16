@@ -2,7 +2,7 @@
 id: gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge
 title: SEA 二进制嵌入构建时 PATH 上的 node 本体——CI pin Node 20、本机开发环境 Node
   25，同一脚本两处产出不同运行时（npm/SEA 渠道，按 GOAL-019 origin 裁定暂缓，不阻塞当前工作）
-status: todo
+status: ready
 labels:
   - gap
   - defect
