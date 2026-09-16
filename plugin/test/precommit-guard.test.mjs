@@ -34,9 +34,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+// ④ (gap-closure-ratchet-stale-wire-into-precommit-guard). Both the TRIGGER SET and the guard's own
+// exported helpers are imported, not restated: `LAYDOWN_SOURCES` is the checker's constant (so this
+// test's fixture cannot drift from what the guard actually keys on — 硬规则 5b), and
+// `stagedLaydownSources` is the guard's own trigger function.
+import { stagedLaydownSources } from "../scripts/precommit-guard.ts";
+import { LAYDOWN_SOURCES } from "../scripts/quay-init-closure-ratchet.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const GUARD = path.join(REPO_ROOT, "plugin", "scripts", "precommit-guard.ts");
+const RATCHET_REL = path.join("plugin", "scripts", "quay-init-closure-ratchet.ts");
+const BASELINE_REL = path.join("docs", "analysis", "quay-init-closure-ratchet.baseline.json");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -694,4 +703,263 @@ test("real-repo smoke — guard runs against the real repo (no crash, readable v
   assert.notEqual(res.status, 2, `guard must not crash on the real repo: ${res.stderr} ${res.stdout}`);
   const out = JSON.parse(res.stdout);
   assert.ok(["allow", "reject"].includes(out.verdict), "verdict is allow or reject");
+});
+
+// ── ④ quay-init closure-ratchet freshness at the commit moment ────────────────────────────────────────
+// gap-closure-ratchet-stale-wire-into-precommit-guard. The judgment itself already existed and was
+// correct (`--check-stale`, gap-quay-init-closure-ratchet-manual-reanchor-recurs) — it lived ONLY in
+// the suite's @static-tier change layer, so the 2026-09-16 v0.8.0 release cut changed a laydown source
+// (plugin.json) twice, committed + pushed cleanly, and two CI runs died ~1-2 min later on
+// `STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale`. ④ moves the SAME judgment to the write face.
+//
+// Every e2e below drives a REAL `git commit` through the INSTALLED pre-commit hook (the DoD's demand:
+// a unit assertion on judge() would repeat the旧 task's acceptance shape and prove nothing about the
+// write face). The fixture's laydown is controllable but REAL in every load-bearing sense: the baseline
+// is produced by the checker's own `--reanchor`, and the growth/its classification are measured by the
+// checker's own `runLaydown`.
+
+/** A fake quay-init.sh laying down `layFiles` files × 10 bytes into the `--root` target (the shape
+ *  plugin/test/quay-init-closure-ratchet.test.mjs's AC4 negative control uses), with one addition: it
+ *  appends a line to `sentinel` on every RUN. The sentinel is the AC3 instrument — a DIRECT reading of
+ *  "did a real laydown run for this commit?", not a wall-clock proxy (硬规则 4b: prefer the direct
+ *  quantity). ⛔ A never-firing probe is an instrument failure, not a pass (硬规则 4 推论二), so every
+ *  test that asserts ABSENCE also has a case where the sentinel MUST have fired. */
+function fakeQuayInit(layFiles, sentinel) {
+  return `#!/usr/bin/env bash
+_root=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) _root="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "run" >> "${sentinel}"
+mkdir -p "$_root/laydown"
+_i=1
+while [ "$_i" -le ${layFiles} ]; do
+  printf '0123456789' > "$_root/laydown/f$_i.txt"
+  _i=$((_i + 1))
+done
+exit 0
+`;
+}
+
+function commitCount(root) {
+  return Number(run("git", ["rev-list", "--count", "HEAD"], root).stdout.trim());
+}
+
+/**
+ * A scratch repo carrying the checker's OWN LAYDOWN_SOURCES (imported above, never re-listed) plus a
+ * controllable fake laydown, and an HONEST baseline written by the checker's own `--reanchor` CLI —
+ * not a hand-written JSON (a hand-written baseline would let a broken `runLaydown` still look right).
+ * The guard hook is deliberately installed by the CALLER, after the setup commits: the setup stages
+ * laydown sources while no baseline exists yet.
+ */
+function makeLaydownFixture({ layFiles = 2 } = {}) {
+  const root = makeGitRepo();
+  const sentinel = path.join(root, ".quay", "laydown-runs.log");
+  for (const rel of LAYDOWN_SOURCES) {
+    const abs = path.join(root, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    // quay-init.sh is the controllable fake; the other three are inert content (the checker
+    // fingerprints their BYTES, and the fake laydown ignores them).
+    if (rel === `plugin/scripts/quay-init.sh`) fs.writeFileSync(abs, fakeQuayInit(layFiles, sentinel), { mode: 0o755 });
+    else fs.writeFileSync(abs, `# inert fixture stand-in for ${rel}\n`, "utf8");
+  }
+  copyGuardScripts(root); // source-derived closure ⇒ the new ④ dep (quay-init-closure-ratchet.ts) is included
+  assert.equal(run("git", ["add", "-A"], root).status, 0, "git add setup");
+  assert.equal(run("git", ["commit", "-q", "-m", "setup"], root).status, 0, "setup commit");
+
+  const anchor = run(
+    "node",
+    ["--no-warnings", "--experimental-strip-types", path.join(root, RATCHET_REL), "--reanchor", "--root", root],
+    root,
+  );
+  assert.equal(anchor.status, 0, `--reanchor must succeed on the fixture: ${anchor.stdout}${anchor.stderr}`);
+  const baseline = JSON.parse(fs.readFileSync(path.join(root, BASELINE_REL), "utf8"));
+  // The baseline is the HONEST measurement of the fake laydown (AC2's "真实膨胀" is only real growth
+  // relative to a measured baseline — a hand-set number would prove nothing).
+  assert.equal(baseline.files, layFiles, "the baseline must be the measured laydown file count");
+  assert.equal(baseline.bytes, layFiles * 10, "the baseline must be the measured laydown byte count");
+  assert.equal(run("git", ["add", BASELINE_REL], root).status, 0, "git add baseline");
+  assert.equal(run("git", ["commit", "-q", "-m", "baseline"], root).status, 0, "baseline commit");
+  return { root, sentinel };
+}
+
+test("④ AC3 — an ordinary commit (no laydown source staged) never runs a laydown; a laydown-source commit does", () => {
+  const { root, sentinel } = makeLaydownFixture();
+  try {
+    const install = installHookFromScratch(root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+    // Instrument liveness BEFORE the absence assertion: the fixture's own --reanchor ran the fake
+    // laydown, so the sentinel must exist. Without this, "no sentinel" below could just be a dead probe.
+    assert.ok(fs.existsSync(sentinel), "the fixture's --reanchor must have fired the sentinel (else the probe is dead)");
+    fs.rmSync(sentinel, { force: true });
+
+    // (a) ORDINARY commit — nothing in the laydown source set is staged.
+    stage(root, "README.md", "changed\n");
+    assert.deepEqual(stagedLaydownSources(root), [], "an ordinary commit stages no laydown source");
+    const t0 = Date.now();
+    const res = runGuard(root);
+    const tOrdinaryMs = Date.now() - t0;
+    assert.equal(res.status, 0, `ordinary commit must be allowed, got ${res.status}: ${res.stdout}`);
+    assert.equal(
+      JSON.parse(res.stdout).closureRatchetCheckOutput,
+      null,
+      "the ④ check must produce no output at all for an ordinary commit (nothing was judged)",
+    );
+    assert.ok(
+      !fs.existsSync(sentinel),
+      "静默 = 真静默: the ordinary commit must not spawn quay-init.sh at all — no full laydown per commit",
+    );
+    assert.equal(run("git", ["commit", "-q", "-m", "ordinary"], root).status, 0, "ordinary commit goes through the hook");
+    assert.ok(!fs.existsSync(sentinel), "…and it still did not run a laydown");
+
+    // (b) CONTROL — a commit that DOES stage a laydown source must light the sentinel up, otherwise
+    //     (a)'s silence proved nothing (硬规则 4 推论二: 恒零/恒真的读数携带零信息).
+    stage(root, LAYDOWN_SOURCES[0], `${fs.readFileSync(path.join(root, LAYDOWN_SOURCES[0]), "utf8")}\n# touch\n`);
+    const t1 = Date.now();
+    runGuard(root); // rejected (stale) — the verdict is asserted in the AC1 test; here we only need the cost
+    const tLaydownMs = Date.now() - t1;
+    assert.ok(fs.existsSync(sentinel), "a laydown-source commit must run the real laydown (classification)");
+
+    // AC3's "附前后耗时读数" — recorded, deliberately NOT asserted: the wall clock here is dominated by
+    // process spawn and is load-correlated (硬规则 4 推论: 别把判据钉在一个依赖宿主的量上). The
+    // load-independent statement of the same fact is the sentinel above.
+    console.log(
+      `[④ AC3 readings] ordinary commit judge() ≈ ${tOrdinaryMs} ms; laydown-source commit judge() ≈ ${tLaydownMs} ms ` +
+      `(sentinel: ${fs.readFileSync(sentinel, "utf8").trim().split("\n").length} laydown run(s) — 0 for the ordinary commit)`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("④ AC1/AC4 e2e — a real `git commit` of a changed laydown source with a stale baseline is REJECTED, and the rejection names the --reanchor remedy", () => {
+  const { root, sentinel } = makeLaydownFixture();
+  try {
+    const install = installHookFromScratch(root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+    fs.rmSync(sentinel, { force: true });
+
+    // INJECT: change a laydown source. Content changes ⇒ the fingerprint goes stale; the fake
+    // laydown's OUTPUT does not change ⇒ this is the shrink-only case (the v0.8.0 release-cut shape).
+    // ⛔ No `--reanchor` — that omission is the defect being closed.
+    const initRel = LAYDOWN_SOURCES[0];
+    stage(root, initRel, `${fs.readFileSync(path.join(root, initRel), "utf8")}\n# cosmetic: content changed, laydown output identical\n`);
+
+    const before = commitCount(root);
+    const bad = run("git", ["commit", "-m", "laydown source changed without a re-anchor"], root);
+    assert.notEqual(bad.status, 0, `the commit MUST be rejected at the commit moment, got ${bad.status}`);
+    const out = bad.stdout + bad.stderr;
+    assert.match(out, /closure-ratchet|closure-ratchet-stale/, "the rejection names the closure-ratchet violation");
+    assert.match(out, /shrink-only|指纹已陈旧/, "the rejection says WHICH failure this is (not just 'something is stale')");
+    // AC4 (reject variant): the remedy must be the FULL invocation form, not a hint.
+    assert.ok(
+      out.includes("node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor"),
+      `the rejection must carry the executable remedy command, got:\n${out}`,
+    );
+    assert.equal(commitCount(root), before, "the rejected commit was NOT created");
+    assert.ok(fs.existsSync(sentinel), "the shrink-only classification came from a REAL laydown run, not an assumption");
+
+    // CONTROL (falsifiability): run the named remedy, then commit the SAME content — it must go
+    // through. Without this the rejection above could equally have come from a check that rejects
+    // everything (硬规则 4b).
+    const anchored = run(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", path.join(root, RATCHET_REL), "--reanchor", "--root", root],
+      root,
+    );
+    assert.equal(anchored.status, 0, `the named remedy must work: ${anchored.stdout}${anchored.stderr}`);
+    assert.equal(run("git", ["add", BASELINE_REL], root).status, 0, "stage the re-anchored baseline");
+    const good = run("git", ["commit", "-m", "laydown source + re-anchored baseline"], root);
+    assert.equal(good.status, 0, `after the remedy the same commit must be allowed, got ${good.status}: ${good.stdout}${good.stderr}`);
+    assert.equal(commitCount(root), before + 1, "the remedy commit landed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("④ AC2 e2e — a REAL growth past the baseline is still REJECTED (the ratchet is not relaxed to constant-true)", () => {
+  const { root, sentinel } = makeLaydownFixture({ layFiles: 2 });
+  try {
+    const install = installHookFromScratch(root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+    fs.rmSync(sentinel, { force: true });
+
+    // GROWTH: the laydown now produces 3 files where the committed (measured) baseline allows 2.
+    // This is the direction the ratchet exists to block — 只许降不许升.
+    fs.writeFileSync(path.join(root, LAYDOWN_SOURCES[0]), fakeQuayInit(3, sentinel), { mode: 0o755 });
+    assert.equal(run("git", ["add", LAYDOWN_SOURCES[0]], root).status, 0, "stage the grown laydown");
+
+    const before = commitCount(root);
+    const bad = run("git", ["commit", "-m", "laydown grew"], root);
+    assert.notEqual(bad.status, 0, "a real growth MUST still be rejected — never auto-allowed");
+    const out = bad.stdout + bad.stderr;
+    assert.match(out, /closure-ratchet-grown|GREW past/, "the rejection names the GROWTH, not mere staleness");
+    assert.match(out, /3 files \(baseline 2\)/, `the growth numbers must be named (files/bytes), got:\n${out}`);
+    assert.equal(commitCount(root), before, "the grown commit was NOT created");
+    // The growth verdict must come from a real measurement — a fixture/injected number would make this
+    // an echo (硬规则 4 推论三: 只能被 fixture 满足的判据不是测量).
+    const runs = fs.readFileSync(sentinel, "utf8").trim().split("\n").length;
+    assert.ok(runs >= 1, `the growth was measured by a real laydown run (sentinel=${runs})`);
+
+    // CONTROL: the hook is not stuck in reject-everything — revert, and an ordinary commit passes.
+    run("git", ["reset", "-q", "--", LAYDOWN_SOURCES[0]], root);
+    run("git", ["checkout", "--", LAYDOWN_SOURCES[0]], root);
+    stage(root, "README.md", "control\n");
+    const ok = run("git", ["commit", "-q", "-m", "control"], root);
+    assert.equal(ok.status, 0, `control commit must pass, got ${ok.status}: ${ok.stdout}${ok.stderr}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("④ hard rule 3b — a changed laydown source with NO committed baseline is REJECTED as not-evaluated (never conflated with 合格)", () => {
+  const root = makeGitRepo();
+  try {
+    for (const rel of LAYDOWN_SOURCES) stage(root, rel, "stand-in content\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `an unreadable baseline must fail closed, got ${res.status}: ${res.stdout}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.reason, "closure-ratchet-not-evaluated", "读不懂输入 has its OWN reason word (硬规则 3b)");
+    assert.ok(
+      out.closureRatchetCheckOutput.includes("baseline MISSING"),
+      `the output must say the baseline is missing, got: ${out.closureRatchetCheckOutput}`,
+    );
+    // Negative control: the same repo with nothing in the laydown source set staged ⇒ allowed. The
+    // rejection above therefore comes from the trigger, not from a broken guard.
+    assert.equal(run("git", ["reset", "-q"], root).status, 0, "reset the index");
+    stage(root, "README.md", "ordinary\n");
+    const ok = runGuard(root);
+    assert.equal(ok.status, 0, `an ordinary commit must still be allowed, got ${ok.status}: ${ok.stdout}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("④ AC5 — the trigger set is the checker's own exported LAYDOWN_SOURCES (import, not a second hand-copied list)", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, GUARD_REL), "utf8");
+  assert.match(
+    src,
+    /import\s*\{[^}]*\bLAYDOWN_SOURCES\b[^}]*\}\s*from\s*["']\.\/quay-init-closure-ratchet\.ts["']/s,
+    "precommit-guard.ts must IMPORT LAYDOWN_SOURCES from the checker (硬规则 5b: a second hand-copied list drifts and one side stops checking)",
+  );
+
+  // …and behaviourally: the guard's trigger set IS that constant (not an equal-looking literal).
+  const root = makeGitRepo();
+  try {
+    const [first, ...rest] = LAYDOWN_SOURCES;
+    stage(root, first, "x\n");
+    assert.deepEqual(stagedLaydownSources(root), [first], "a staged laydown source triggers");
+    stage(root, "plugin/scripts/not-a-laydown-source.ts", "x\n");
+    assert.deepEqual(stagedLaydownSources(root), [first], "a staged non-source path never triggers");
+    assert.equal(
+      rest.some((r) => stagedLaydownSources(root).includes(r)),
+      false,
+      "unstaged members of LAYDOWN_SOURCES are not reported (the trigger is the STAGED intersection)",
+    );
+  } finally {
+    cleanup(root);
+  }
 });
