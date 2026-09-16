@@ -1,7 +1,7 @@
 ---
 id: AC-276
 title: README.md 定位段落机械判定：quay=software engineering agent，Claude Code=其基础设施（内蕴，非反向）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -52,7 +52,16 @@ expect: exit 0 = README.md 开头 6000 字符内同时含 'Software Engineering 
   'quay 是让 Claude Code'）。exit 1 且 stderr 带 CAUSE=
   说明具体缺口：positioning-missing（定位词缺失）/ infra-relation-missing（有定位词但没有基础设施语境）/
   reversed-phrasing-detected（命中反向措辞模式）。
-origin: 人 2026-09-16 裁定：Claude Code 是 quay 的基础设施，就像 OS 是 Claude Code
-  的基础设施，这是内蕴的——quay 本身即 software engineering
-  agent，不是反过来。判据用正则做结构性检测，避免散文可以绕过关键词但语义仍然写反的情况（负模式列表覆盖已知的常见反向写法，非穷举，实现时如发现新的反向写法应扩充此列表）。
+origin: manager 2026-09-16 激活，随 GOAL-021 一并生效
+activatedAt: 2026-09-16T23:33:19.664Z
+statusLog:
+  - at: 2026-09-16T23:33:19.664Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-16T23:33:19.664Z
 ---
