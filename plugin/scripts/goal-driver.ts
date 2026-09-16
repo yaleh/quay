@@ -2305,6 +2305,63 @@ export function isFilingGapState(state: GapState): boolean {
   return state === "gap" || state === "standing-violated" || state === "frozen-violated";
 }
 
+/** `goal-gaps` fact 的名字——与 goal-ring / goal-sufficiency / goal-objective / goal-target-health 并列
+ *  落进同一份轮记录（`.quay/goal-round.jsonl`）。 */
+export const GOAL_GAPS_FACT_NAME = "goal-gaps";
+
+/** 视图滤掉的「安静态」——**单一真相源**（⛔ 不在消费方各写一份谓词）。
+ *  `in-progress`（已有人在推进）与 `standing-ok`（常设判据此刻成立）都是「本轮没有信号要给谁看」。
+ *  **其余七态各是一条要被看见的读数**，尤其 `done-unresolved`：它有 done/superseded 任务认领、判据
+ *  依然为假、**且没有任何机制会再碰它**——`isFilingGapState` 有意把它排除在 spawn 之外（见其注释，
+ *  那是防噪音的设计、不是缺陷）：driver 每轮都算出了这个事实，此前却只活在当轮进程内存里，人要看得
+ *  自己写外部脚本把同一套推导重做一遍。 */
+export const GAP_VIEW_QUIET_STATES: readonly GapState[] = ["in-progress", "standing-ok"];
+
+/** 本轮缺口读数的**视图**：只保留非安静态，逐条带出 `{goal, ac, state, taskCount}`。
+ *  ⛔ 这是一条**派生视图**，不是第二处计算：输入就是 `computeGoalGaps` 的同一个返回数组
+ *  （`goal-ring` fact 的 `value.gaps` 仍写全量，meta-driver 等既有消费者不受影响），本函数只做
+ *  过滤 + 投影 ⇒ 两者同一轮同一份来源，不可能互相漂移（硬规则 5b：⛔ 不各自重推一遍口径）。
+ *  ⛔ `taskCount` 原样带出（`not-evaluated` 时是 `null`，⛔ 不与 `0` 同形，硬规则 3）。 */
+export function gapViewEntries(
+  gaps: Array<GoalGap>,
+): Array<{ goal: string; ac: string; state: GapState; taskCount: number | null }> {
+  return gaps
+    .filter((g) => !GAP_VIEW_QUIET_STATES.includes(g.state))
+    .map((g) => ({ goal: g.goal, ac: g.ac, state: g.state, taskCount: g.taskCount }));
+}
+
+/** 组装 `goal-gaps` fact。⛔ 两个半边必须**可分**（硬规则 3b）：
+ *  · 算出过（`evaluated: true`）⇒ `value.gaps` = 非安静态视图；**空数组 = 查过且本轮零条**，是测量。
+ *  · 没算成（`evaluated: false`，成因在 `cause`）⇒ `value.gaps` 恒为 `[]`，由这两个字段把它与
+ *    「查过且零条」分开——⛔ 绝不让「读不到缺口」长得像「没有缺口」。
+ *  ⛔ 本 fact **不参与任何判定**：它由 `gaps` 单向派生，spawn 决策读的仍是原数组
+ *  （`runGapSpawnPass(gaps, …)`）——新增本 fact 前后 spawn 结果逐字节相同（单测的负控制钉的就是这条）。 */
+export function gapViewFact(gaps: Array<GoalGap> | null, cause: string | null = null): Fact<Record<string, unknown>> {
+  if (gaps === null) {
+    return {
+      name: GOAL_GAPS_FACT_NAME,
+      value: { gaps: [], evaluated: false, cause: cause ?? "gaps-not-computed" },
+      state: "not-evaluated",
+      reason: `未评估（cause=${cause ?? "gaps-not-computed"}）——⛔ 不是「零缺口」`,
+    };
+  }
+  const entries = gapViewEntries(gaps);
+  // 逐态计数（按态名排序 ⇒ 同一份输入恒得同一串，便于人读与 diff）。
+  const counts = new Map<GapState, number>();
+  for (const e of entries) counts.set(e.state, (counts.get(e.state) ?? 0) + 1);
+  const summary = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([s, n]) => `${s}=${n}`)
+    .join(" ");
+  return {
+    name: GOAL_GAPS_FACT_NAME,
+    value: { gaps: entries, evaluated: true, cause: null },
+    state: "verified",
+    // 分母（本轮 computeGoalGaps 的总条数）一并带出，使「视图滤掉了多少」当场可核。
+    reason: `非安静态 ${entries.length}/${gaps.length} 条${summary ? `：${summary}` : ""}`,
+  };
+}
+
 /** G9 缺口语义环的 spawn pass：可立案缺口（isFilingGapState）非空 ⇒ 过 halt + 资源门 + 每轮上限，
  *  逐条 spawn 短命 agent（一条 gap AC 一个 agent，经 quay-file-task 立案）。返回 spawned（实际 spawn 数）
  *  与 llmInvoked（派生自真实 argv，⛔ 不硬编码）。⛔ 不验证立没立案（下一轮 readTaskFacts 独立复核）。 */
@@ -2717,6 +2774,12 @@ export interface GoalRoundResult {
    *  ⛔ 与 sufficiencyFacts 是**两条并列的 fact、两个不同的命题**——合并会让「退出条件 ⊆ AC」的绿
    *  遮住「退出条件 ⊭ 业务目标」的红（本任务立案的正是这个形态）。 */
   objectiveFacts: Array<Fact<Record<string, unknown>>>;
+  /** 本轮缺口读数的**可见性 fact**（name="goal-gaps"，恰好 0 或 1 条），`value.gaps` = 非安静态
+   *  （⛔ 不是 `in-progress`/`standing-ok`）的 `{goal, ac, state, taskCount}` 视图。⛔ 纯观测性新增：
+   *  它由 `gaps` 单向派生，⛔ 不进 `runGapSpawnPass`、⛔ 不进 `goalFlipDecision` ⇒ 不改变任何判定。
+   *  零条时**不是空数组**——`value.evaluated:false` + `cause` 与「查过且零条」分开（硬规则 3b）。
+   *  （gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact） */
+  gapFacts: Array<Fact<Record<string, unknown>>>;
 }
 
 /** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 GateEvent（gate 自带；evidence
@@ -2744,6 +2807,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       },
       sufficiencyFacts: [],
       objectiveFacts: [],
+      // ⛔ gaps 从未算出 ⇒ 独立取值（evaluated:false + cause），绝不落成「零缺口」（硬规则 3b）。
+      gapFacts: [gapViewFact(null, "quay-cli-unresolvable")],
     };
   }
 
@@ -2755,6 +2820,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       fact: { name: "goal-ring", value: { phase: "list" }, state: "failed", reason: `list failed: ${(e as Error).message}` },
       sufficiencyFacts: [],
       objectiveFacts: [],
+      gapFacts: [gapViewFact(null, "goal-list-unreadable")],
     };
   }
 
@@ -3116,6 +3182,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     sufficiency_stall: stallPass,
     ciRuns,
   };
+  // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）：`gaps` 在 ⑤ 算出后
+  // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 done-unresolved
+  // 没人管」当场可查。⛔ 单向派生、⛔ 不改任何 spawn/flip 判定（spawn 读的仍是原 gaps）。
+  const gapFacts = [gapViewFact(gaps)];
   if (staleness === null) {
     return {
       fact: {
@@ -3126,6 +3196,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       },
       sufficiencyFacts,
       objectiveFacts,
+      // ⚠️ 本路径上 gaps **已算出**（staleness 读不到不影响 ⑤）⇒ 照常落痕（⛔ 不因旁路读数坏掉而丢弃它）。
+      gapFacts,
     };
   }
   return {
@@ -3149,6 +3221,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     },
     sufficiencyFacts,
     objectiveFacts,
+    gapFacts,
   };
 }
 
@@ -3804,8 +3877,8 @@ export function goalDriverRoutines(root: string, opts: GoalRoundOptions = {}): R
     name: "goal-ring",
     schedule: EVERY_ROUND,
     run: async () => {
-      const { fact, sufficiencyFacts, objectiveFacts } = await runGoalRound(root, opts);
-      return [fact, ...sufficiencyFacts, ...objectiveFacts, targetHealthFact(root, opts)];
+      const { fact, sufficiencyFacts, objectiveFacts, gapFacts } = await runGoalRound(root, opts);
+      return [fact, ...sufficiencyFacts, ...objectiveFacts, ...gapFacts, targetHealthFact(root, opts)];
     },
   }];
 }
