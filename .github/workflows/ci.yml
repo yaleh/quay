@@ -198,7 +198,7 @@ jobs:
         # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
-        run: bash scripts/test.sh --test-concurrency=16
+        run: bash scripts/test.sh
         env:
           GH_TOKEN: ${{ github.token }}
 
