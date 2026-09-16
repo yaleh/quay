@@ -27,7 +27,7 @@ extra:
 
 ## 根因与实现（2026-09-16 实现轮，逐类取证）
 
-三类都不是"阈值太紧"，而是**测试自身的机制错**；封顶只是把错遮住。每类的实测证据、根因、修法如下（实现落在本任务 worktree，分支 `task/gap-suite-not-robust-at-high-derived-concurrency`）：
+三类都不是"阈值太紧"，而是**测试自身的机制错**；封顶只是把错遮住。每类的实测证据、根因、修法如下（实现落在分支 `task/gap-suite-not-robust-at-high-derived-concurrency`，commit `542f453ba`）：
 
 **① 端口分配（`serve-board` + 11 个同族文件）—— 探针-关闭-再绑定是共享资源上的两步 TOCTOU**
 - 取证（CI run 35121096175，tokyo-alpha，128 路，pre-fix 码）：`test at packages/quay/test/serve-board.test.mjs:261` ⇒
@@ -67,13 +67,18 @@ extra:
   `packages/quay/plugin` **不在** `SKIP_DIRS` 里，走树会跟进去。
   **实测**：一个以同规则遍历同一表面的探测器在 24 路并发下跑了若干轮，`READ-FAIL ENOENT` 共 **188 次，其中 186 次在
   `packages/quay/plugin/` 下**（其余 2 次在该目录内自身），**别处 0 次**；`VIOLATION` 0 次（即抖动只产生"消失"，不产生假违规）。
+  **本任务的对照组把它抓了现行**（见 AC2 证据）：pre-fix 码上 `Error: ENOENT … open '/_work/quay/quay/packages/quay/plugin/scripts/verify-installed-executables.sh'`
+  `at scanTree (plugin/scripts/dead-code-after-return-check.ts:149)`。
 - 修法：消失的文件**跳过并在判决里报告**（沿用本仓库既有约定 `plugin/test/loop-shipping.test.mjs`："ENOENT during scan = race, not a crash"），
   使"0 violations"始终可与"只读到部分输入"区分（硬规则 3b）；**非 ENOENT** 的读错误仍然抛出（真读不到不得被静默当干净）。
   取假对照：新增确定性测试——用 **FIFO 做会合点**（`aa.sh` 是 FIFO，checker 读它必阻塞；写端的非阻塞 open 只在 checker
   已阻塞时才成功 ⇒ 走树**可证**已完成，此时删掉排在后面的 `zz.sh`），全程无 sleep、无 flake；把 checker 换回 pre-fix 版本 ⇒ 该测试红（已实测 2 红），换回修复版 ⇒ 绿。
 
-**④ `ci.yml` 封顶移除**：`--test-concurrency=16` 是一个"恰好等于某台机器容量"的字面量（硬规则 4 推论二），
+**④ `ci.yml` 封顶移除 + 它的第二个落脚点（硬规则 5b 的又一次实例）**：`--test-concurrency=16` 是一个"恰好等于某台机器容量"的字面量（硬规则 4 推论二），
 它把上面三个**真缺陷**遮住而不是修掉。已删回 `bash scripts/test.sh`（宿主推导）。
+**但封顶这个假设还有第二个家**：`plugin/test/ci-runner-env-prereqs.test.mjs` 里有一条断言**要求 ci.yml 必须带显式封顶**
+（`AC: the suite concurrency is a declared CAP …`）——本任务 Touches 原先没有它，是本任务自己的对照组（去掉封顶、其余不动）把它炸出来的。
+该断言已**反向**为宿主推导不变量（且自带取假：谓词必须能对重新引入的字面量发火，两种拼写 `=8` / ` 8` 都算）。
 
 ## Requested action
 
@@ -85,12 +90,27 @@ extra:
 ⛔ 不要仅仅"调大超时数字"敷衍——按硬规则 4 的推论，成本结构未知前不要设数值阈值；先搞清楚每类失败的真实机制。
 
 ## Acceptance Criteria
-- [ ] AC1: 三类失败各自的根因机制查清（端口分配策略 / 等待边界来源 / 判据竞态来源），不是"调大数字让它过"。
-- [ ] AC2: 三类测试修复后，在 tokyo-alpha（128 核，真实环境）上，同一 commit 用推导并发（不封顶，即 `default_test_concurrency()` 的原生值）连跑 ≥5 次，`cancelled`/`failed` 恒为 0（取假：修复前同样跑 5 次必须复现至少 1 次失败，作为对照）。
-- [ ] AC3: `.github/workflows/ci.yml` 里 `gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red` 加的并发封顶（16）移除，恢复使用 `default_test_concurrency()` 的宿主推导值（呼应硬规则 4 推论二：不要用一个恰好等于某台机器容量的字面量代替"读宿主"）。
+- [x] AC1: 三类失败各自的根因机制查清（端口分配策略 / 等待边界来源 / 判据竞态来源），不是"调大数字让它过"。
+  三类各自的**机制、取证、两侧对照**见上「根因与实现」①②③；三类都不是调数字：① 删掉探针-再绑这两步、② 把裁决从墙钟换成事件+进程存活、③ 删掉崩溃与真违规同形的那个读路径缺口。② 类的 15s→60s 数字互换被**撤销**（改成事件驱动 + 显式可配置 hang-guard）。
+- [x] AC2: 三类测试修复后，在 tokyo-alpha（128 核，真实环境）上，同一 commit 用推导并发（不封顶，即 `default_test_concurrency()` 的原生值）连跑 ≥5 次，`cancelled`/`failed` 恒为 0（取假：修复前同样跑 5 次必须复现至少 1 次失败，作为对照）。
+  **修复侧**（commit `542f453ba`，branch task/gap-suite-not-robust-at-high-derived-concurrency，tokyo-alpha-1 自托管，`nproc=128` 且日志实测 `__GROUP__ concurrency=128 files=648 capped=0`）**连跑 5 次，`test`/`dist-verify-node-floor`/`cold-start-e2e`/`version-consistency` 四个 job **5/5 全 success**，failed=0、cancelled=0**：
+  runs `35133793806` / `35133796190` / `35133798714` / `35133801345` / `35133803854`。
+  **取假侧**（control 分支 `ci-control-uncapped-prefix`，commit `fbb10e32f` = 同一次封顶移除 + 同一条反向断言，**只差三个修复**；`git diff fbb10e32f 542f453ba` 恰为三个修复 + 任务体 + 一条注释）**同样条件连跑 5 次，`test` job 3/5 failure**：
+  `35133776270` failure（`Error: ENOENT … open '<repo>/packages/quay/plugin/scripts/verify-installed-executables.sh'` at `scanTree`）、
+  `35133779015` failure（`dead-code-after-return-check.test.mjs:85`）、
+  `35133782001` success、
+  `35133784674` failure（AC6 ENOENT + `listen EADDRINUSE 0.0.0.0:44087`）、
+  `35133787363` success。
+  即：**三类里的两类在对照组被逐字复现（① 的 EADDRINUSE、③ 的 ENOENT-on-staging-mirror），修复侧 0/5 复现**。
+  ② 类（fan-in ⑧⑩）在 pre-fix 码上的复现是本任务之前的 CI run `35115599539`（同 128 路，`the waiting suite must acquire the freed slot and write its exit marker`，该测试 18.2s）——它是三者中最稀有的（窗口只落在单个测试的 1.5s 切片里），未在这 5 次对照里再次出现。
+  证据全文（含逐 run 的 job 结论表与本地两侧对照）：`.quay/gap-suite-concurrency-ac2-evidence.md`。
+- [x] AC3: `.github/workflows/ci.yml` 里 `gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red` 加的并发封顶（16）移除，恢复使用 `default_test_concurrency()` 的宿主推导值（呼应硬规则 4 推论二：不要用一个恰好等于某台机器容量的字面量代替"读宿主"）。
+  已删（`run: bash scripts/test.sh`）；AC2 的 10 条 run 日志实测 `nproc=128` / `__GROUP__ concurrency=128 … capped=0` ⇒ 跑的就是宿主推导值。
+  ⛔ 单删字面量不够：`plugin/test/ci-runner-env-prereqs.test.mjs` 里那条**要求封顶存在**的断言是同一假设的第二个落脚点（硬规则 5b），已同批反转为「不得钉 lane 数」并带取假臂。
 
 ## Definition of Done
-- [ ] 并发封顶字面量从 `ci.yml` 移除，套件改回宿主推导并发，且在 tokyo-alpha 上稳定跑绿（AC2 的 5 连跑记录落证据）。
+- [x] 并发封顶字面量从 `ci.yml` 移除，套件改回宿主推导并发，且在 tokyo-alpha 上稳定跑绿（AC2 的 5 连跑记录落证据）。
+  封顶已移除（AC3），tokyo-alpha 上 5 连跑 4 job 全绿（AC2 修复侧 run 列表），证据落在 `.quay/gap-suite-concurrency-ac2-evidence.md`。
 
 ## Touches
 - packages/quay/test/serve-board.test.mjs（端口分配部分——AC 里的 `plugin/test/serve-board*.test.mjs` 是错路径，真实路径在此）
@@ -109,5 +129,6 @@ extra:
 - plugin/test/fan-in-execute-paths.test.mjs（⑧⑩ 等待边界部分）
 - plugin/scripts/dead-code-after-return-check.ts（AC6 判据部分）
 - plugin/test/dead-code-after-return-check.test.mjs（AC6 的两侧对照：FIFO 会合的确定性竞态测试）
+- plugin/test/ci-runner-env-prereqs.test.mjs（封顶假设的第二个落脚点：反向为宿主推导不变量 + 取假臂）
 - .github/workflows/ci.yml（移除并发封顶字面量）
 - tasks/gap-suite-not-robust-at-high-derived-concurrency.md（自身）
