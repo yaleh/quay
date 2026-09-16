@@ -1345,7 +1345,14 @@ const NEGATION_WINDOW = 16;
  *      it is what keeps `nonetheless` / `note` / `now` from reading as `no`, and
  *      `not-yet-landed` from reading as `not`.
  *  The window is the same NEGATION_WINDOW the before-arm uses (no new geometry; `: none` consumes 6
- *  of the 16). */
+ *  of the 16).
+ *
+ *  ⚠️ KNOWN BOUNDARY (documented, deliberately NOT coded around): the idiomatic "depends on nothing
+ *  but `gap-x`" ASSERTES `gap-x` as the sole prereq, yet this arm reads it as negated — a false
+ *  negative. It is left unguarded because the shape has **0 occurrences in all 2202 task files**
+ *  (grepped: `nothing but` appears nowhere in the corpus, and neither does keyword+`none|no|not|
+ *  nothing`+`but`). Per the repo's discipline, a mechanism for a thing that has never happened is a
+ *  liability, not a safeguard — if it ever appears, this is the line to revisit. */
 const NEGATION_MARKER_AFTER_RE = /^[\s:：=]*(?:none|nothing|not|no)(?![A-Za-z0-9_-])/;
 
 /** Is the keyword occurrence spanning `[keywordStart, keywordEnd)` explicitly negated? Both arms are
