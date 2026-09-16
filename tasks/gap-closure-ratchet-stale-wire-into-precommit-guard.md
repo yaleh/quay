@@ -2,7 +2,7 @@
 id: gap-closure-ratchet-stale-wire-into-precommit-guard
 title: quay-init 棘轮陈旧检测（--check-stale）从未接入 precommit-guard——漏改 baseline 能顺利
   commit+push，靠远端 CI 才暴露
-status: todo
+status: ready
 labels:
   - gap
   - defect
