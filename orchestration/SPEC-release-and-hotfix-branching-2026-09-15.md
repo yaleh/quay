@@ -514,3 +514,48 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **第 2 步的删除半边已完成**（`gap-release-branch-deleted-after-merge`：`plugin/scripts/release-branch-finish.sh` 落成，两条现存 `release-v06x-build` **穿过该命令**删除，`AC-271` 转 pass；命名半边未采用，且不在判据乙的达标条件内）；
 第 4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
 ⛔ 本文件自身仍不推进任何分支——master 至今未动，且按裁定 4 这正是正确输出。
+
+---
+
+## 11. 追加裁定（2026-09-16）：`advance-master` 的 gate 从「SEA/npm 产物全绿」改为「plugin 渠道真实装得上」
+
+**背景**：2026-09-16 当晚实测（manager 会话，跟 §6.1 的 `advance-master` 撞了两次真问题）：
+① GitHub 的 `GITHUB_TOKEN` 结构性无法推 `.github/workflows/*`（见 `044f6ab20`，已修：改用
+`RELEASE_PAT` 仓库 secret）；② 修完①、真 dispatch 一次（`v0.7.1`，run `35075347245`→`35076017292`）后，
+`sea-release`（windows-x64）在「Verify the release archive carries the plugin sidecar (AC3)」这一步
+真的红了——这是本仓库近期**没有精力去保障**的一条产物线（SEA 跨平台可执行文件 + npm tgz 发布）。
+
+**人裁定（逐字）**：「取消 sea 和 npm release。这些是我们最近没有精力去保障的。然后按 SPEC 补上正确流程」，
+经追问 `advance-master` 拿什么 gate 后再裁：「按照 claude code plugin 发布和安装。CI 应当按此设计。」
+
+**⊢ 效力**：
+1. **`release` job（npm pack + 挂 GitHub Release 资产）、`sea-release`（×3 平台矩阵）、
+   `sea-verify-node-free`、`sea-verify-node-free-cross-platform`、`dist-verify-node-floor`
+   （release.yml 内那份——依赖 `release` job 已发布的资产，⛔ 不是 ci.yml 里自建产物的同名版本）、
+   `delivery-manifest-verify`（`--ci` 真资产模式）——这 6 个现有 job 里的 5 个（除 advance-master 自身外
+   全部）**从 `advance-master` 的 gate 中移除**，因为它们存在的唯一理由就是验证即将被取消的那条产物线。
+2. **`advance-master` 改为依赖一个新 job**（暂命名 `verify-plugin-channel`，实现时按静态检查器的实际
+   命名对齐）：从 `${{ inputs.tag }}` 构建/复用 `dist-plugin` 分支的产物，在一个**全新、隔离的环境**里
+   真实执行 marketplace 安装链路——`claude plugin marketplace add <this-tag-or-repo>` →
+   `claude plugin install quay@quay --scope project` → `quay-init`（针对一个 scratch 测试项目）→
+   启动 `quay driver start --kind promotion|worker` + `quay serve` → 确认三者都 alive/健康。
+   **这就是今晚在 ad-arm1 archguard 项目上手工做过的那套验证的机器可执行版本**——不是凭空设计，是把
+   人工验证过一遍的步骤原样自动化。
+3. **`plugin/scripts/release-master-advance-needs-check.ts`**（§6.1 不变式 3 的静态检查器）的期望
+   `needs:` 全集**必须**同步改成 `[verify-plugin-channel]`（或该 job 的实际命名）——⛔ 不能只改
+   workflow 文件、漏改检查器，否则检查器会对着一个已经不存在的旧全集报"漂移"或者更糟——静默认为
+   "没有全集要求"（同硬规则 3b 的形态）。
+4. **`AC-266`（release job 30 分钟超时/`mcp-server.test.mjs` 泄漏）、`AC-267`（SEA `plugin-root.ts`
+   顶层求值崩溃）、`AC-268`（release 渠道真发出一个版本——指的是 npm/SEA 那个版本）——三条判据的主体
+   （SEA/npm 产物线）已被本裁定取消，判的东西不再存在，需转 `superseded`，写明"渠道被人裁定取消，
+   非缺陷已修"，⛔ 不是让它们继续挂着变成永久无法达成的红。
+5. **`AC-274`（master ff 到全绿 release，时间窗限定本条立案之后）本身不需要改判据文字**——它读的是
+   `.quay/ci-runs.jsonl` 里 `workflow=Release ∧ conclusion=success` 那一般性逻辑，不点名具体 job；
+   `release.yml` 收窄之后，"全绿"这个门槛本身变低（少了 5 个曾经会红的 job），判据不用动，
+   **实现只需要保证 collector（`ci-runs-collect.ts`）继续如实记录收窄后的 job 清单**。
+6. **不在本次裁定范围内**（保持 §8 原有边界不动）：`publish-plugin-dist.yml` / `dist-plugin` 分支本身
+   的构建机制不变——本裁定只改**谁来 gate `advance-master`**，不改滚动渠道 B 自己的构建触发方式。
+
+**⊢ 与 §1 授权链的关系**：本条不是推翻 §1⑤问3（"master 推进用 A 工作流内机制"）——那条裁定关于**机制**
+（在 release.yml 内一个新 job，fast-forward）仍然有效，本条只是收窄该 job 的**输入依据**（gate 什么），
+是同一份权威链条上的追加裁定，不是另起一份 SPEC。
