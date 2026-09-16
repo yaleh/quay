@@ -9,7 +9,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 2026-09-16: moved off ubuntu-latest onto the self-hosted tokyo-alpha runner (128-core EPYC /
+    # 246G, docker-based ephemeral runner registered via systemd --user gh-runner-quay.service on
+    # that host). This job is the heavy one (full node --test suite) — the labeled box is a single
+    # machine, not GitHub's fleet, so if it's ever offline this job queues indefinitely rather than
+    # falling back to a hosted runner; revert this line to `ubuntu-latest` (and restore the pinned
+    # `--test-concurrency=8` below) to fail back.
+    runs-on: [self-hosted, tokyo-alpha]
     # 2026-09-15 真机实测：这个 job 曾经在 4 核 runner 上、`--test-concurrency=8` 显式覆盖下能在
     # 10 分钟内跑完；本轮实测（develop tip 017d4f8f4）静态检查阶段本身已通过，真正的 `node --test`
     # 阶段跑满整整 10 分钟被 GitHub 判超时中止（`The job has exceeded the maximum execution time of
@@ -17,6 +23,8 @@ jobs:
     # server-restart* / verification-marginal-return 等），10 分钟这个字面量已经不够。⛔ 不是回归，
     # 是套件规模增长追上了预算；把预算调宽，⛔ 不要把并发再往上堆（4 核 runner，堆并发只加剧争用，
     # 参见下面「Run tests」步骤自己的注释）。
+    # 上面这段全部是 ubuntu-latest 4 核时代的记录，保留是因为回退时（见上）这个 25 分钟预算和
+    # --test-concurrency=8 要一起恢复；tokyo-alpha 是 128 核，budget 留宽松值即可，不必收紧。
     timeout-minutes: 25
     permissions:
       contents: read
@@ -63,19 +71,24 @@ jobs:
       - name: Run tests
         # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
         # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
-        # default. This job passes --test-concurrency=8 EXPLICITLY because the derived default
-        # (max(1, floor(nproc/2.1)) = 1 on a 4-core runner) would push the full suite past this
-        # job's 10-minute budget — the explicit override is the documented escape hatch the
-        # resource task preserves ("显式传入永远优先"). The resource gate still applies here
-        # (scripts/test.sh full-suite path), which is fine: a fresh runner's /proc/pressure/cpu
-        # reads ~0. The 3 live/conformance files (serve-github.test.mjs, provider-abi-conformance.test.mjs,
+        # default. 2026-09-16: dropped the explicit --test-concurrency=8 pin now that this job runs
+        # on the self-hosted tokyo-alpha box (128 cores) instead of a 4-core ubuntu-latest runner —
+        # per CLAUDE.md's "don't hardcode a value that only happens to equal current host capacity"
+        # rule, a literal concurrency is exactly wrong here: scripts/test.sh's own
+        # default_test_concurrency() already reads nproc at runtime (plugin/scripts/
+        # runner-concurrency.ts), so leaving the flag off lets the derivation scale to whichever
+        # host actually runs the job (128 here, 4 if this job ever falls back to ubuntu-latest) —
+        # see the runs-on comment above for the rollback pairing. The resource gate still applies
+        # here (scripts/test.sh full-suite path) and is what protects this SHARED multi-user box
+        # from starting a full suite into an already-loaded machine. The 3 live/conformance files
+        # (serve-github.test.mjs, provider-abi-conformance.test.mjs,
         # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
         # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
         # hand-written grep/glob pattern — this job reports them `skipped`, not silently absent.
         # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
-        run: bash scripts/test.sh --test-concurrency=8
+        run: bash scripts/test.sh
         env:
           GH_TOKEN: ${{ github.token }}
 
