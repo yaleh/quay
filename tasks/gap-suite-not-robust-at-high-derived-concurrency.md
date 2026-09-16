@@ -1,7 +1,7 @@
 ---
 id: gap-suite-not-robust-at-high-derived-concurrency
 title: 套件在 nproc 推导的高并发（128路，tokyo-alpha）下不稳定——已临时封顶到16，根因未修
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
