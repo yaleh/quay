@@ -22,6 +22,21 @@ name: Release
 # a different job, in a different workflow, building its own artifact — it is NOT in this file's
 # scope and is deliberately untouched.
 #
+# ── BUT THE GITHUB RELEASE **OBJECT** IS NOT AN ARTIFACT DELIVERY ─────────────────────────────────
+# The ruling cancelled the artifact CHANNELS (npm tarballs, Node-SEA executables). It did not — and
+# could not have meant to — cancel the published release itself. The deleted `release` job carried
+# TWO responsibilities: ① build the npm/SEA artifacts, and ② attach them to a GitHub Release via
+# `softprops/action-gh-release`. Only ① was ruled out; ② is the marking action that makes a release
+# USER-PERCEIVABLE at all, and it went with the job by accident. Measured consequence (2026-09-16,
+# a real v0.8.0 cut): the run went green, `advance-master` really fast-forwarded `master`, and
+# `https://github.com/yaleh/quay/releases` still showed v0.7.1 as Latest — `gh release view v0.8.0`
+# returned "release not found". That is the same 版本号说谎 class this SPEC exists to end, only
+# relocated: the release genuinely happened and the user-visible channel cannot tell.
+# So `create-github-release` below re-adds ② ALONE: a marking GitHub Release with generated notes and
+# NO asset uploads — the channel the human ruling kept (`按照 claude code plugin 发布和安装`) is
+# already verified by `verify-plugin-channel`, and nothing in this file ships a binary.
+# (tasks/gap-release-yml-missing-github-release-object, GOAL-020 AC-274.)
+#
 # gap-github-actions-no-implicit-triggers (2026-09-14, human ruling): this workflow is
 # `workflow_dispatch` ONLY. A tag push is not an implicit "please release" request — a plain
 # `git push --tags` must never have a GitHub-writing side effect on its own. `github.ref_name`
@@ -229,6 +244,116 @@ jobs:
           fi
           exit 0
 
+  # ── create-github-release (tasks/gap-release-yml-missing-github-release-object) ────────────────
+  # Restores the MARKING half of what the deleted `release` job did (see the header note): a GitHub
+  # Release object for `inputs.tag` with generated notes and NO asset uploads — this file ships no
+  # binaries any more, and the channel the human ruling kept (the Claude Code plugin) is what
+  # `verify-plugin-channel` proves works.
+  #
+  # WHY A SEPARATE JOB RATHER THAN A LAST STEP INSIDE `verify-plugin-channel` (the Plan left this to
+  # the implementer, so the reasons are written down):
+  #   1. LEAST PRIVILEGE. Creating a Release needs `contents: write`. `verify-plugin-channel`
+  #      declares `contents: read` and is the job that runs `npm install` and `npm install -g`s a
+  #      third-party CLI — the run's least trusted steps. Widening ITS token so that one late step
+  #      can write would hand write scope to everything before it.
+  #   2. A READABLE GATE. Each name in `advance-master.needs` is an independently-failable claim.
+  #      Folding the write into the verify job would merge "the channel is broken" and "no release
+  #      object could be created" into one red reading on a job whose name asserts only the former.
+  #   The price of that choice is the one thing §6.1 invariant 3 charges for: a new job MUST be named
+  #   in `advance-master.needs`, or master advances on a release nobody can see. That is not left to
+  #   review — `plugin/scripts/release-master-advance-needs-check.ts` derives the expected set from
+  #   this file's own job keys, and its mutation case phase E drives a verbatim copy of this file.
+  #
+  # ORDERING: `needs: [verify-plugin-channel]` places the write AFTER the gate, so a release object
+  # is never created for a tag whose channel does not install, initialise and serve.
+  create-github-release:
+    needs: [verify-plugin-channel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub Release object for this tag (idempotent)
+        id: github-release
+        # ⛔ THE TAG COMES FROM THE DISPATCH INPUT, never `github.ref_name` — same reason as the rest
+        # of this file (gap-github-actions-no-implicit-triggers: `workflow_dispatch` only, so a
+        # ref-triggered expression would be meaningless here).
+        # ⛔ NO CHECKOUT STEP, deliberately: every operation below goes through the REST API via
+        # `gh`, which is why `--repo` is passed explicitly (`gh` cannot infer the repository from a
+        # working tree that is not there) — and the job therefore cannot accidentally act on
+        # whatever the runner's git state happens to be.
+        env:
+          # GITHUB_TOKEN with `contents: write` suffices here: unlike `advance-master`'s push, this
+          # step writes no .github/workflows file, so it does not need RELEASE_PAT.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test -n "${TAG}" || { echo "ERROR: TAG is empty — refusing to guess which release to create." >&2; exit 1; }
+          test -n "${REPO}" || { echo "ERROR: REPO is empty." >&2; exit 1; }
+
+          # The ONE reading that counts as "already released": a Release object whose tag is exactly
+          # ${TAG}. Exit status alone would not do — `gh release view` also exits non-zero on a
+          # transient API/auth error, and treating that as "does not exist" is the wrong direction to
+          # guess in. Comparing the READ-BACK VALUE distinguishes "definitely absent" from "could not
+          # ask" without ever rendering the latter as the former.
+          release_exists() {
+            local got=""
+            got="$(gh release view "${TAG}" --repo "${REPO}" --json tagName --jq '.tagName' 2>/dev/null)" || true
+            [ "${got}" = "${TAG}" ]
+          }
+
+          # ── IDEMPOTENCY (a hard constraint, not a nicety) ──────────────────────────────────────
+          # A tag may legitimately be dispatched twice (a re-run after a network failure, a retry of
+          # a partially-green run). `gh release create` has NO upsert flag — `gh release create
+          # --help` (v2.97.0) offers --draft/--prerelease/--latest/--verify-tag and nothing that
+          # means "already exists ⇒ skip/update" — and it FAILS on a tag that already has a release.
+          # So the guard is explicit, and its outcome is always READ BACK rather than inferred from
+          # an error string.
+          if release_exists; then
+            echo "GitHub Release ${TAG} already exists on ${REPO} — nothing to create (idempotent re-dispatch)."
+            exit 0
+          fi
+
+          # `--verify-tag` IS LOAD-BEARING, not decoration: without it, if the tag does not exist on
+          # the remote, `gh release create` CREATES one from the default branch's current state
+          # (`gh release create --help`, v2.97.0: "If a matching git tag does not yet exist, one will
+          # automatically get created from the latest state of the default branch") — i.e. it would
+          # fabricate a version tag pointing at master, which is precisely the "the version number
+          # lies" failure class this whole SPEC exists to end. `--verify-tag` aborts instead.
+          # `--generate-notes` gives the Release a real changelog, which is what makes the page worth
+          # looking at; it needs no artifacts, so it adds no dependency on the retired channel.
+          set +e
+          create_out="$(gh release create "${TAG}" \
+            --repo "${REPO}" \
+            --verify-tag \
+            --title "${TAG}" \
+            --generate-notes 2>&1)"
+          create_rc=$?
+          set -e
+
+          if [ "${create_rc}" -eq 0 ]; then
+            echo "Created GitHub Release ${TAG} on ${REPO}."
+            printf '%s\n' "${create_out}"
+            exit 0
+          fi
+
+          echo "gh release create exited ${create_rc}:" >&2
+          printf '%s\n' "${create_out}" >&2
+
+          # EXACTLY ONE failure cause is tolerated — the object already exists (a concurrent or
+          # earlier run created it between the check above and here) — and it is tolerated ONLY
+          # after reading that back from the API. ⛔ NOT a blanket `|| true`: a create that failed
+          # for any other reason, with no release present, must stay RED. Rendering "could not
+          # create" as "nothing to do" is the 硬规则 3b shape (a failure that reads as success).
+          if release_exists; then
+            echo "…however a GitHub Release for ${TAG} DOES exist (read back from the API): treating the create failure as an idempotent no-op."
+            exit 0
+          fi
+          echo "ERROR: no GitHub Release exists for ${TAG} on ${REPO}, and it could not be created." >&2
+          exit 1
+
   # ── advance-master (orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §6.1) ────────
   # master is redefined as "the tag of the most recent FULLY GREEN release run" and is advanced by
   # exactly this one event — never by a direct commit. This job is that event. It exists because
@@ -263,7 +388,11 @@ jobs:
   # below succeeds (§1 ⑤ 问 4 — waiting for a fully green release rather than ff-ing onto a red
   # one). Until then master standing still is the rule's correct output, not a defect.
   advance-master:
-    needs: [verify-plugin-channel]
+    # `create-github-release` is listed because invariant 3 is about EVERY other job: master is
+    # "the tag of the most recent FULLY GREEN release run", and a run whose release object was never
+    # created is not a release anyone can see (see the header note). Omitting it would let master
+    # advance onto a release that exists only in `.quay/ci-runs.jsonl`.
+    needs: [verify-plugin-channel, create-github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
