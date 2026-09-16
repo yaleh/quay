@@ -2,7 +2,7 @@
 id: gap-ac259-supersede-frozen-cycle-literal-and-restore-develop-dev
 title: AC-259 台账恒假的收口：判据钉在 0.7.0（-dev）这个周期字面量上，而 SPEC §4.3 的发布切版已把仓库推到 0.7.1 ⇒
   结构上永不可再为真；同一次切版还把 develop 留在无 -dev 后缀的已发布版本号上（§4.3 ⛔ 明令禁止，无闸门拦）
-status: todo
+status: ready
 labels:
   - gap
   - defect
