@@ -54,6 +54,12 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 
 - 实现：`release.yml` 两处 `with:` 均含 `tag_name: ${{ inputs.tag }}`（line 165 / line 354）；两处各带
   解释性注释（为什么不能再依赖 dispatch ref）。
+- **结构级核验（覆盖 grep 覆盖不到的面：key 是否挂在【正确的 step 的 `with:`】下、以及整份 workflow
+  是否仍是合法 YAML——改 workflow 最贵的失败形态就是改坏它）**：用 `python3 -c "import yaml, …"` 解析
+  `.github/workflows/release.yml`，遍历 `jobs[*].steps[*]` 取 `uses` 含 `softprops/action-gh-release` 的项，
+  得 `release.steps[8] 'Upload artifact to GitHub Release' -> with.tag_name = '${{ inputs.tag }}'`、
+  `sea-release.steps[10] 'Upload SEA archive to GitHub Release' -> with.tag_name = '${{ inputs.tag }}'`，
+  且 `jobs = 7`（解析成功）。⇒ 两处 key 的**嵌套位置**正确、文件仍是合法 YAML。
 - **仪器修正（AC2 的负控制原文不可执行，已干跑证伪并改成正则可执行的写法）**：原写法
   `grep -c "tag_name: ${{ inputs.tag }}"` 两种 shell 形态**都失效**——①双引号下 bash 直接报
   `tag_name: ${{ inputs.tag }}: bad substitution`，**grep 根本没跑**（无输出、无计数）；②单引号+BRE 下
@@ -75,6 +81,8 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   baseline 的 diff 仅 `fingerprint` 与 `plugin.json` 的 `sha`。内容由四个源文件唯一决定且幂等
   ⇒ 与 develop 独立重锚所得逐字相同（develop 若自行修复，本分支该改动在三点 diff 中变空操作）。
   故 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一并登记进 `## Touches`（anti-drift 需要）。
+  **事后核对（2026-09-16 本轮）：develop 确已收敛到同一内容** —— 最终 delta 只剩 `release.yml` +
+  本任务文件，baseline 那条已从三点 diff 中消失（正是上面预言的「变空操作」）。
 - **本轮续跑（处置前两轮 exited-not-landed）**：
   - ① 上一轮 suite 红（真因日志 `fan-in-suite-...~1789549690367-23cef8.log`：`STATIC_CHECK_FAILED:
     quay-init-closure-ratchet-stale exit=1`，`# tests 0 / # fail 10` —— 0 个测试跑到，静态面即中止）
@@ -82,11 +90,19 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
     `quay-init-closure-ratchet.ts --check-stale` = `PASS: … laydown source fingerprint fresh
     (233a7b2fd39d5a31…, 4 sources) — baseline in sync`、exit 0。
   - ② 上一轮 `step=ff: fan-in-ff-merge: FF FAILED — not a fast-forward` 是**分支落后**（develop 前进），
-    非代码缺陷：本轮 `git merge --no-edit develop` **无冲突**成功（合入 24 个提交），分支不再落后。
-  - ③ 合并后跑 fan-in 同一条 scoped 门（`scripts/test.sh --for-task gap-release-softprops-missing-explicit-tag-name
-    --allow-thin`）**exit 0**：选择器取 0 个测试文件（thin 允许，全量仍在 fan-in 跑），静态面全 PASS
-    ——含直接读 `release.yml` 的 `advance-master.needs` 检查（7 个 job，6 个被 needs 覆盖，0 个漏）。
-- **AC3 明示取 fallback 分支**：本轮**未安排真实 dispatch**。`.quay/ci-runs.jsonl` 中 `Release` 类记录里，
+    非代码缺陷：本轮 `git merge --no-edit develop` **无冲突**成功（合入 24 个提交），且退出前
+    `git rev-list --left-right --count develop...HEAD` = `0 9`（**0 落后**）⇒ fan-in 复跑时 ff 不再因 lag 失败。
+  - ③ 跑 fan-in 同一条 scoped 门（`scripts/test.sh --for-task gap-release-softprops-missing-explicit-tag-name
+    --allow-thin`）**两次均 exit 0**（合并后一次、最终并集状态一次）：选择器取 0 个测试文件（thin 允许，
+    全量仍在 fan-in 跑），静态面全 PASS——含直接读 `release.yml` 的 `advance-master.needs` 检查
+    （7 个 job，6 个被 needs 覆盖，0 个漏）。
+  - ④ **一次静默的记录丢失与补救（本轮实测，值得记）**：按 prompt 传完整 body 重写时**漏带了本段两条
+    既有 bullet**，而该写入被 store 记为 `self-only`（`.quay/store-commit-propagation.jsonl` 10:54:01
+    `propagated:false`）却仍**迟到**传播进 develop；随后 `git merge develop` **clean、无冲突**地把这两条
+    bullet 的**删除**一并带进分支（「merge 干净」≠「记录没丢」）。补救 = 用【并集】body 再写一次 +
+    **再** merge 一次；判据用**计数** `grep -c '^- ' tasks/<id>.md`（本轮靠它发现 2→0）。
+- **AC3 明示取 fallback 分支**：本轮**未安排真实 dispatch**（真实 dispatch 会创建/改动 GitHub Release，
+    是对外且不可逆的动作，需人授权，不由本 worker 触发）。`.quay/ci-runs.jsonl` 中 `Release` 类记录里，
   本缺陷复现 run = `35075347245`（08:43:26Z, branch=`develop`, cancelled），其后最新一条 =
   `35076017292`（08:50:36Z, branch=`v0.7.1` = 正确传了 ref 的那次, failure，与本事象不同因）。
   修复未落地前**不存在「已修后的真实 dispatch」** ⇒ 依 AC3 自带条款以静态负控制为准，不阻塞落地。
