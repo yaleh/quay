@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-driver-status-card-ci-red
 title: gap-dashboard-driver-status-card.test.mjs 在 GitHub CI 上 5 个断言真实失败，本地未复现过
-status: ready
+status: done
 labels:
   - gap
 parent: null
