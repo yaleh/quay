@@ -2,7 +2,7 @@
 id: AC-267
 title: SEA 产物的 quay serve 可用：plugin-root.ts 模块顶层求值 import.meta.url 的点数归零 +
   seaVerify=success
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -69,6 +69,15 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-09-16T09:37:40.060Z
+    from: achieved
+    to: superseded
+    actor: manager
+    reason: 人 2026-09-16 裁定取消 SEA/npm 产物发布渠道（release.yml 的
+      release/sea-release/sea-verify-node-free(-cross-platform) 等 job），改为让
+      advance-master 消费 Claude Code plugin
+      渠道自己的发布+安装验证——判据主体所依赖的产物线本身被取消，非缺陷已修。见
+      orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11。
 long-term: true
 fidelity:
   verdict: faithful

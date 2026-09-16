@@ -2,7 +2,7 @@
 id: AC-266
 title: release 的 Run tests 不再因 tokenless 测试泄漏子进程而退化成 hang（静态臂剥注释判定 + 载体臂无超时
   release run）
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -74,6 +74,15 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-09-16T09:37:37.380Z
+    from: achieved
+    to: superseded
+    actor: manager
+    reason: 人 2026-09-16 裁定取消 SEA/npm 产物发布渠道（release.yml 的
+      release/sea-release/sea-verify-node-free(-cross-platform) 等 job），改为让
+      advance-master 消费 Claude Code plugin
+      渠道自己的发布+安装验证——判据主体所依赖的产物线本身被取消，非缺陷已修。见
+      orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11。
 long-term: true
 fidelity:
   verdict: faithful
