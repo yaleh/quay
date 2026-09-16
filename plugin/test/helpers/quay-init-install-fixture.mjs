@@ -265,6 +265,71 @@ function _makeReadOnly(dir) {
   }
 }
 
+// _restoreWriteBits(dir) — the inverse of _makeReadOnly: put back the write bits a read-only
+// fixture tree had stripped, so a recursive removal can actually unlink its entries. Recursive rm
+// unlinks each entry, and unlinking requires WRITE permission on the entry's PARENT directory —
+// exactly the bit _makeReadOnly removed (dirs → dr-xr-xr-x, files → -r--r--r--). That is why
+// `fs.rmSync(ws, { recursive: true, force: true })` on a fixture left in the read-only shape throws
+// EACCES and deletes NOTHING (`force` suppresses ENOENT only, never EACCES), which is the defect
+// gap-shared-install-fixture-wipe-cannot-remove-readonly-tree reports. Each directory is made
+// writable BEFORE descending, so its children can be unlinked on the way back up. Symlinks are
+// skipped: chmod follows links, and the fixture's links point into the shared template.
+// Best-effort per entry (a missing/raced entry is not an error here) — _wipeFixture fails loud.
+export function _restoreWriteBits(dir) {
+  let ents;
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  try { fs.chmodSync(dir, fs.statSync(dir).mode | 0o700); } catch { /* best-effort */ }
+  for (const e of ents) {
+    const p = path.join(dir, e.name);
+    if (e.isSymbolicLink()) continue;
+    if (e.isDirectory()) _restoreWriteBits(p);
+    else { try { fs.chmodSync(p, fs.statSync(p).mode | 0o200); } catch { /* best-effort */ } }
+  }
+}
+
+let _wipeSeq = 0;
+
+// _wipeFixture(ws, io) — remove the fixture directory in ANY state it can be left in, without ever
+// leaving that state worse than it was found. Both inputs must take the same path: "absent" and
+// "present but read-only" (the fixture is DELIBERATELY built read-only by _makeReadOnly so one
+// consumer's pollution cannot corrupt it, and a partial/crashed build leaves exactly that shape
+// behind with no ready marker).
+//
+// Why rename-aside rather than chmod-then-rm: the contract is that a wipe failing part-way must not
+// amplify the damage — in particular it must never leave "ready marker gone, read-only tree still
+// there", the state that made the fixture PERMANENTLY unbuildable (every retry re-hit the same
+// EACCES before anything was rebuilt; measured 3/3 attempts, zero entries deleted). rename(2) moves
+// the whole tree with ONE syscall and needs write permission only on the PARENT directory
+// (/var/tmp, world-writable) — never on the tree being moved — so it succeeds on a read-only tree
+// where recursive rm cannot, and its only failure window is BEFORE any content is touched. Deleting
+// the moved-aside tree then happens off the critical path: a failure there can orphan that tree,
+// never block the fixture path (which is already clear, so the rebuild proceeds regardless).
+//
+// `io` is a test seam (the same inject-a-fault shape as the repo's PATH shims) so a mid-wipe
+// failure can be produced deterministically and its end state asserted. Returns null when there was
+// nothing to clear, else the aside path the tree was moved to (so a caller/test can clean up an
+// orphaned aside tree).
+export function _wipeFixture(ws, io = {}) {
+  const renameSync = io.renameSync ?? fs.renameSync;
+  const rmSync = io.rmSync ?? fs.rmSync;
+  try { fs.lstatSync(ws); } catch { return null; } // absent ⇒ nothing to clear
+  const aside = `${ws}.trash-${process.pid}-${Date.now()}-${_wipeSeq++}`;
+  // Critical section: after this returns, ws is gone (the rebuild starts from a clean path);
+  // if it throws, ws is byte-for-byte as it was and the caller's state is unchanged.
+  renameSync(ws, aside);
+  try {
+    _restoreWriteBits(aside);
+    rmSync(aside, { recursive: true, force: true });
+  } catch {
+    // Orphaned aside tree — /var/tmp is disk-backed and reboot-cleaned, the same disposition the
+    // content-addressed fixtures in this file already have by design. Never the fixture path.
+  }
+  if (fs.existsSync(ws)) {
+    throw new Error(`fixture wipe: ${ws} still exists after moving it aside to ${aside}`);
+  }
+  return aside;
+}
+
 function _readFixtureInstall(ws) {
   try {
     const j = JSON.parse(fs.readFileSync(path.join(ws, ".install.json"), "utf8"));
@@ -278,12 +343,14 @@ function _readFixtureInstall(ws) {
 // record the ready marker + the captured install result (so a cache-hit in another file/run can
 // return the same install output that a fresh install would produce). Holds the lock.
 function _buildSharedFixture(ws) {
-  if (fs.existsSync(ws)) fs.rmSync(ws, { recursive: true, force: true });
+  _wipeFixture(ws);
   fs.mkdirSync(ws, { recursive: true });
   const wtRoot = diskWorktreeRoot();
   const install = runInit(ws, [...STANDARD_INIT_ARGS(ws), "--worktree-root", wtRoot]);
   if (install.status !== 0) {
-    fs.rmSync(ws, { recursive: true, force: true });
+    // Best-effort cleanup so a failed install does not leave a half-laid tree at the fixture path;
+    // the install failure stays the thrown cause (that is the reportable defect, not this cleanup).
+    try { _wipeFixture(ws); } catch { /* keep the install error primary */ }
     throw new Error(`shared install fixture build failed:\n${install.stderr}`);
   }
   fs.writeFileSync(path.join(ws, ".install.json"),
@@ -415,7 +482,7 @@ export function laydownWorkspace(prefix = "laydown-") {
 function _variantFixtureHash({ pluginRoot, preFiles, repoRoot, project, tmux, testCommand, worktreeRoot }) {
   const h = createHash("sha1");
   h.update(_pluginSurfaceHash(pluginRoot));
-  h.update(" ");
+  h.update("\0");
   // The worktree-root MODE is part of the key (null = keep the consumer's recorded root vs a fresh
   // root), but a fresh root's actual value is not (it is a per-build mkdtemp — nondeterministic).
   h.update(JSON.stringify({
@@ -426,9 +493,9 @@ function _variantFixtureHash({ pluginRoot, preFiles, repoRoot, project, tmux, te
     worktreeRoot: worktreeRoot === null ? null : (typeof worktreeRoot === "string" ? worktreeRoot : "UNIQUE"),
   }));
   for (const f of preFiles) {
-    h.update(" ");
+    h.update("\0");
     h.update(f.rel);
-    h.update(" ");
+    h.update("\0");
     h.update(String(f.content));
   }
   return h.digest("hex").slice(0, 16);
@@ -444,7 +511,7 @@ function _variantFixturePath(spec) {
 // install (a real product defect, not something to paper over).
 function _buildVariantFixture(ws, spec) {
   const { pluginRoot, preFiles, repoRoot, project, tmux, testCommand, worktreeRoot } = spec;
-  if (fs.existsSync(ws)) fs.rmSync(ws, { recursive: true, force: true });
+  _wipeFixture(ws);
   fs.mkdirSync(ws, { recursive: true });
   for (const f of preFiles) {
     const p = path.join(ws, f.rel);
@@ -462,7 +529,7 @@ function _buildVariantFixture(ws, spec) {
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
   });
   if (install.status !== 0) {
-    fs.rmSync(ws, { recursive: true, force: true });
+    try { _wipeFixture(ws); } catch { /* keep the install error primary */ }
     throw new Error(`parameterized install fixture build failed:\n${install.stderr}`);
   }
   fs.writeFileSync(path.join(ws, ".install.json"),
