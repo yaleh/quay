@@ -35,6 +35,22 @@
 //         PATH lookup, at mode 755 they are. The manual `chmod 644 plugin/bin/quay`
 //         red/green reading is recorded in the task's Evidence.
 //
+// INTERPRETER RESOLUTION (gap-ac261-shim-node-autodetect-nvm-fallback) — three tests
+// at the end of this file. The shim used to treat `command -v node` as the whole
+// check, so on an nvm machine (no /usr/bin/node) it exited 127 with the bundle
+// sitting right there — which is exactly the minimal-PATH reading AC-261 takes, and
+// why that gate read `verdict: fail` until this fix. Their $HOME is a FIXTURE, so
+// they pin the shim's behaviour rather than this host's nvm layout:
+//   (a) no node on PATH + four nvm versions → the shim execs the NEWEST one that
+//       clears the >= 20 floor, and hands it the vendored bundle. The fixture
+//       includes v9.1.0 deliberately: "v9" sorts above "v24" as a string, so a name
+//       sort would run v9 and this reading catches that.
+//   (b) a tree with only v18 → NOT exec'd, and the shim names the version it found
+//       instead of claiming node is absent.
+//   (c) the negative control: with no nvm tree under HOME (empty, and non-existent)
+//       the shim still exits 127 with the friendly message — the fallback must never
+//       turn a genuinely node-less machine into a fake success.
+//
 // Run: node --test plugin/test/plugin-bin-shim-npm-free-cli.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,13 +80,17 @@ function fileMode(p) {
   return fs.statSync(p).mode & 0o777;
 }
 
-function hasExecutableQuay(dir) {
+function isExecutable(p) {
   try {
-    fs.accessSync(path.join(dir, 'quay'), fs.constants.X_OK);
+    fs.accessSync(p, fs.constants.X_OK);
     return true;
   } catch {
     return false;
   }
+}
+
+function hasExecutableQuay(dir) {
+  return isExecutable(path.join(dir, 'quay'));
 }
 
 // Every PATH entry that does NOT itself carry an executable `quay`. Prepending the
@@ -83,6 +103,13 @@ function pathEntriesWithoutACompetingQuay() {
     .filter((d) => d !== SHIM_DIR && !hasExecutableQuay(d));
 }
 
+// ...and additionally carrying no executable `node`, i.e. the configuration the
+// interpreter fallback exists for: the only `quay` reachable is the shim, and the
+// only interpreter the shim can use is one it finds for itself.
+function pathEntriesWithoutQuayOrNode() {
+  return pathEntriesWithoutACompetingQuay().filter((d) => !isExecutable(path.join(d, 'node')));
+}
+
 // QUAY_PLUGIN_ROOT is dropped so the shim resolves the plugin root from its OWN
 // location — the same thing an installed copy on a consumer machine does.
 function npmFreeEnv(pathDirs) {
@@ -93,6 +120,36 @@ function npmFreeEnv(pathDirs) {
 
 function runIn(env, script, cwd) {
   return spawnSync(BASH, ['-c', script], { cwd, env, encoding: 'utf8', timeout: 120_000 });
+}
+
+// A synthetic $HOME holding an nvm tree, one real executable per version — so the
+// shim's `-x` probe and its `exec` meet an actual program, not a stub the test
+// asserts about by proxy. Each fake prints the version it was built for AND its
+// argv, which is how the readings below tell WHICH interpreter the shim chose and
+// WHAT it handed to it.
+function makeNvmHome(versions) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quay-shim-nvm-'));
+  for (const v of versions) {
+    const bin = path.join(home, '.nvm', 'versions', 'node', v, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\necho "FAKE-NODE ${v} $*"\n`);
+    fs.chmodSync(path.join(bin, 'node'), 0o755);
+  }
+  return home;
+}
+
+// A PATH with no `quay` other than the shim AND no `node` at all, plus the given
+// $HOME. NVM_DIR is dropped so the fixture's HOME is the ONLY nvm tree in reach:
+// leaving an inherited NVM_DIR set would let a probe that honours it read the
+// host's real nvm instead, and the fixture would quietly become a no-op that still
+// prints a passing line.
+function noNodeEnv(home) {
+  const dirs = [SHIM_DIR, ...pathEntriesWithoutQuayOrNode()];
+  const env = { ...process.env, PATH: dirs.join(':'), HOME: home };
+  delete env.QUAY_PLUGIN_ROOT;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  delete env.NVM_DIR;
+  return env;
 }
 
 // A minimal, self-contained workspace so the three verbs are read for what the SHIM
@@ -290,5 +347,85 @@ test('AC5 control: the executable bit is what makes the shim RUNNABLE (644 red /
     console.log(`# AC5 control: 644 -> rc=${red.status} (Permission denied) · 755 -> rc=${green.status} (ran)`);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Interpreter resolution (gap-ac261-shim-node-autodetect-nvm-fallback).
+//
+// AC-261 runs `quay --version` on a minimal PATH — `<repo>/plugin/bin:/usr/bin:/bin`
+// — and on a machine whose Node comes from nvm there is no /usr/bin/node at all, so
+// the shim exited 127 with the bundle sitting right there. Measured 2026-09-16 on
+// this host: the goal gate for AC-261 read `verdict: fail … exited 127` before the
+// fix and `verdict: pass` after it.
+//
+// These tests take the same reading with the host's own nvm factored OUT — HOME is a
+// fixture — so they pin the SHIM's behaviour rather than this machine's nvm layout.
+// ---------------------------------------------------------------------------
+
+test('AC1(nvm fallback): with no node on PATH the shim execs the newest Node under ~/.nvm, floor respected', () => {
+  assert.ok(VENDOR_ENTRY_PRESENT, `${VENDOR_ENTRY_REL} is missing — run scripts/test.sh or ` +
+    '`bash plugin/scripts/sync-vendor.sh` before reading the CLI.');
+  // v9.1.0 is the trap, not decoration: a lexicographic compare puts "v9.1.0" ABOVE
+  // "v24.19.0", so a probe that sorted names — or trusted `ls` order — would run v9
+  // and this assertion is what catches it. v18.20.0 is the floor: present, and the
+  // shim must not fall back to it.
+  const home = makeNvmHome(['v9.1.0', 'v18.20.0', 'v20.11.1', 'v24.19.0']);
+  try {
+    const env = noNodeEnv(home);
+
+    // The premise, asserted rather than assumed: if a `node` were reachable on this
+    // PATH the shim would take the PATH branch and the reading below would say
+    // nothing about the fallback at all.
+    const which = runIn(env, 'command -v node', REPO_ROOT);
+    assert.notEqual(which.status, 0, `the fixture PATH must carry NO node, but one resolved at ${which.stdout.trim()}`);
+
+    const r = runIn(env, 'quay --version', REPO_ROOT);
+    assert.equal(r.status, 0, `"quay --version" exited ${r.status}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`);
+    assert.match(r.stdout, /FAKE-NODE v24\.19\.0 /, `the shim must run the NEWEST nvm Node; got:\n${r.stdout}${r.stderr}`);
+    assert.ok(
+      r.stdout.includes(VENDOR_ENTRY),
+      `the interpreter the shim found must receive the vendored bundle; got:\n${r.stdout}`,
+    );
+    console.log(`# AC1(nvm fallback): no node on PATH · picked ${r.stdout.trim().split(' ')[1]} of v9.1.0/v18.20.0/v20.11.1/v24.19.0`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('AC1(nvm fallback): an nvm tree with only an older Node is NOT exec\'d — the shim names what it found', () => {
+  // The floor has to be a floor. Running v18 would swap a clear "needs >= 20" for a
+  // crash inside the bundle, and reporting "not found" would claim a node-less
+  // machine that is not node-less — the exact misdiagnosis this task exists to fix.
+  const home = makeNvmHome(['v18.20.0']);
+  try {
+    const env = noNodeEnv(home);
+    const r = runIn(env, 'quay --version', REPO_ROOT);
+    assert.equal(r.status, 127, `an under-floor Node must not run; got rc=${r.status}, stdout:\n${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /FAKE-NODE/, 'the shim must not exec a Node below the floor');
+    assert.match(r.stderr, /v18\.20\.0/, `the message must name the version it found; got:\n${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not found on PATH/, `"not found" would be false — it was found; got:\n${r.stderr}`);
+    console.log(`# AC1(nvm fallback): only v18 present -> rc=${r.status} · ${r.stderr.trim()}`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('AC3 control: with no nvm tree under HOME either, the shim still exits 127 with the friendly message', () => {
+  // The fallback must not turn a genuinely node-less machine into a fake success.
+  // Two shapes of "no nvm tree": a HOME that exists and is empty (the literal AC3
+  // case) and a HOME that does not exist at all (the shim's own `-d` guard).
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'quay-shim-nonvm-'));
+  try {
+    for (const [label, home] of [['existing empty HOME', emptyHome], ['non-existent HOME', path.join(emptyHome, 'absent')]]) {
+      const env = noNodeEnv(home);
+      const r = runIn(env, 'quay --version', REPO_ROOT);
+      assert.equal(r.status, 127, `${label}: must exit 127, got rc=${r.status}, stdout:\n${r.stdout}`);
+      assert.doesNotMatch(r.stdout, /FAKE-NODE/, `${label}: nothing must be exec'd`);
+      assert.match(r.stderr, /node not found on PATH/, `${label}: friendly diagnosis expected; got:\n${r.stderr}`);
+      console.log(`# AC3 control: ${label} -> rc=${r.status} · ${r.stderr.trim()}`);
+    }
+  } finally {
+    fs.rmSync(emptyHome, { recursive: true, force: true });
   }
 });
