@@ -174,34 +174,131 @@ test("AC4: 进度条百分比用新分母 —— 旧分母下的 25.0% 必须变
 });
 
 // ── AC3 真实生产 store ───────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ 这条读数的对象是【生产 store 本身】，所以它必须对 store 的演化免疫。首版锚在「第一个 active
+// GOAL」上，而 2026-09-16 v0.8.0 release 收掉了最后两个 active GOAL（store 至此 138 achieved /
+// 8 superseded / 7 retired、【active 归零】）⇒ 前提与断言同时当场失效，本任务的 suite 因此红。
+// ⛔ 判据不得依赖一个会随生产数据消失的对象（同 achieved-ac-pinned-to-a-value-literal 族）。
+//
+// 修法 = 【按性质选对象】而不是按状态选：
+//   ① 对象换成「凡挂着 superseded/retired 记录的真 GOAL」——这是本缺陷的定义性形状，且这类记录
+//      是终态（只增不减），比「当前有没有 active GOAL」稳定得多；
+//   ② 渲染面换成 /goal Goals tab（`handleGoalList`）——它渲染【全部】目标，不像 renderGoalCard
+//      只渲染 active 的，于是读数不再随"此刻有没有 active GOAL"起落。它同时正是本任务改的第二
+//      个消费面，比只读卡片更贴题；
+//   ③ 逐条断言每条此类目标，于是真 `retired`（GOAL-001，7 条）与真 `superseded`（GOAL-002/018/
+//      020）被真实数据【同时】覆盖——这正是本任务点名的"最容易复发的坑"的反面。
 
-test("AC3: 真实 store 上，给一个真 active GOAL 注入 superseded+retired，达成数与分母一字不变", () => {
-  const store = createGoalStore(path.join(REPO_ROOT, "goals"));
-  const live = store.list();
+/** 在真实 store 上渲染 /goal Goals tab；`extra` 是注入的合成记录（默认不注）。
+ *  返回 {live, body}：live 是 store 原始记录，body 是渲染出的 HTML。 */
+async function renderLiveGoalsTab(extra = []) {
+  const live = createGoalStore(path.join(REPO_ROOT, "goals")).list();
+  const records = [...live, ...extra];
+  const client = { goalList: async () => records, taskList: async () => ({ tasks: [], malformed: [] }) };
+  const res = {
+    statusCode: 0,
+    headers: {},
+    body: "",
+    writeHead(code, headers) { this.statusCode = code; this.headers = headers; },
+    end(body) { this.body = body || ""; },
+  };
+  await handleGoalList({}, res, new URL("http://localhost/goal"), client, makeTmpDir("ac-rollup-live-"));
+  assert.equal(res.statusCode, 200, "真实 store 的 Goals tab 正常渲染");
+  return { live, body: res.body };
+}
 
-  // 前提作为【读数】而不是假设（硬规则 12）：没有 active GOAL 则这条读数无意义。
-  const liveActive = live.filter((r) => r.kind === "goal" && r.status === "active");
-  assert.ok(liveActive.length > 0, `precondition: 真实 store 有 ${liveActive.length} 个 active GOAL，本读数才有对象`);
+/** 取 Goals tab 里某条 GOAL 那一格的「AC 达成 x/y」读数（"x/y"），取不到时 null。
+ *  锚在该行自己的 `href` 上（`goal=<gid>"`），故不会被别的 GOAL 行误匹配。 */
+function liveRollupFor(body, gid) {
+  const m = body.match(new RegExp(`class="ac-rollup"><a [^>]*goal=${gid}">(\\d+)/(\\d+)<`));
+  return m ? `${m[1]}/${m[2]}` : null;
+}
 
-  const gid = String(liveActive[0].id);
-  const before = acRollupFor(renderGoalCard(live, { cap: 3, staleMs: 7 * DAY, nowMs: NOW }), gid);
-  assert.ok(before != null, `precondition: 真实 store 的 ${gid} 渲染出了一行「AC 达成 x/y」`);
+test("AC3: 真实 store 上，每条挂着已退场记录的真 GOAL 读数 = 在域 achieved/在域总数（分母 < 挂钩数）", async () => {
+  const { live, body } = await renderLiveGoalsTab();
+  const attachedOf = (rs, gid) => rs.filter((r) => String(r.goal ?? "") === gid);
 
-  const attachedLive = live.filter((r) => String(r.goal ?? "") === gid);
-  const inDomainLive = attachedLive.filter((r) => IN_DOMAIN.has(r.status)).length;
-  assert.equal(before, `${attachedLive.filter((r) => r.status === "achieved").length}/${inDomainLive}`,
-    `${gid} 的真实读数必须等于「在域内的 achieved / 在域总数」（此刻 live 数据：${before}）`);
+  // 对象（真实数据）作为【读数】给出；一条都取不到 ⇒ 报红而不是静默跳过（硬规则 3b：读不到对象
+  // 说明这条读数没验到，不得与"验过且合格"同形）。
+  const withTerminal = live
+    .filter((r) => r.kind === "goal")
+    .map((r) => String(r.id))
+    .filter((gid) => attachedOf(live, gid).some((a) => !IN_DOMAIN.has(a.status)));
+  assert.ok(
+    withTerminal.length > 0,
+    `precondition: 真实 store 里至少有 1 条挂着 superseded/retired 的 GOAL，本读数才有对象（此刻 ${withTerminal.length} 条）`,
+  );
 
-  // 两次注入：⛔ 分别注一条 superseded 与一条 retired —— 独立的两个终态都要挡住。
-  const injected = [
-    ...live,
+  const realTerminalStatuses = new Set();
+  let sawOldDenominatorDiffer = false;
+  for (const gid of withTerminal) {
+    const acs = attachedOf(live, gid);
+    const achieved = acs.filter((r) => r.status === "achieved").length;
+    const inDomain = acs.filter((r) => IN_DOMAIN.has(r.status)).length;
+
+    const reading = liveRollupFor(body, gid);
+    assert.ok(reading != null, `真实 store 的 ${gid} 必须在 Goals tab 渲染出「AC 达成」格（取不到 ⇒ 判据没读到输入，硬规则 3b）`);
+    // 用测试侧【独立拼写】的集合重算，⛔ 不调被测谓词（否则判据与被测实现同源、恒真）。
+    assert.equal(reading, `${achieved}/${inDomain}`,
+      `${gid} 的真实读数必须等于「在域内 achieved / 在域总数」（此刻 live 数据：${reading}）`);
+    // 可证伪：真实数据上旧口径确实给出不同的数——否则本用例在真实数据上恒真、什么也没验到。
+    assert.notEqual(reading, `${achieved}/${acs.length}`,
+      `${gid} 的旧口径读数是 ${achieved}/${acs.length}，必须与新口径不同，否则本用例在真实数据上恒真`);
+    sawOldDenominatorDiffer = true;
+    // 分母严格小于挂钩数：这条读数才证明过滤器在【真实】数据形状上生效，不是只对 fixture 生效。
+    assert.ok(inDomain < acs.length,
+      `${gid} 分母必须【严格小于】挂钩记录数（${inDomain} vs ${acs.length}）`);
+
+    for (const r of acs) if (!IN_DOMAIN.has(r.status)) realTerminalStatuses.add(String(r.status));
+  }
+  assert.ok(sawOldDenominatorDiffer, "至少有一条真实 GOAL 的新旧口径读数不同——否则没有可证伪的对照");
+
+  // AC3 具名锚：本任务立案时点名的真实对象 GOAL-020（10 条挂钩、3 条 superseded ⇒ 旧口径分母 10）。
+  // 只锚【分母】这一半：它是本修复的signature（7 ≠ 10）。⛔ 不锚分子 6——AC-274 已在 2026-09-16
+  // 被推进为 achieved，把分子写死会重演本条正要修的那种"判据钉在会变的字面量上"的腐坏。
+  const g020 = attachedOf(live, "GOAL-020");
+  if (g020.length > 0) {
+    const inDomain020 = g020.filter((r) => IN_DOMAIN.has(r.status)).length;
+    const reading020 = liveRollupFor(body, "GOAL-020");
+    assert.equal(reading020, `${g020.filter((r) => r.status === "achieved").length}/${inDomain020}`,
+      `GOAL-020 的真实读数（此刻 live 数据：${reading020}）`);
+    assert.equal(Number(reading020.split("/")[1]), inDomain020,
+      `GOAL-020 的分母必须是 ${inDomain020}（= 10 条挂钩减去 3 条 superseded）【而不是挂钩数 ${g020.length}】`);
+    assert.notEqual(Number(reading020.split("/")[1]), g020.length,
+      "GOAL-020 的分母⛔不得等于挂钩记录数 10——那正是本任务要修掉的旧口径");
+  }
+
+  // ⛔ 本任务点名的坑：只测 superseded 会漏掉语义相同的 retired。真实 store 此刻两种终态都有实例
+  // （retired: GOAL-001 的 7 条；superseded: GOAL-002/018/020），两者【都】必须被真实数据覆盖到。
+  assert.ok(realTerminalStatuses.has("superseded") && realTerminalStatuses.has("retired"),
+    `真实 store 的这批对象必须同时覆盖 superseded 与 retired（此刻命中：${[...realTerminalStatuses].sort().join(", ")}）——` +
+    "只覆盖一个正是本任务最容易复发的坑");
+});
+
+test("AC3: 给真实 GOAL 注入合成的 superseded + retired 各一条，读数一字不变", async () => {
+  const { live, body } = await renderLiveGoalsTab();
+  const attachedOf = (rs, gid) => rs.filter((r) => String(r.goal ?? "") === gid);
+
+  // 取真实数据里最大的一条对象（本轮 = GOAL-001，18 条挂钩 / 11 条在域），注入两个终态各一条。
+  const gid = live
+    .filter((r) => r.kind === "goal")
+    .map((r) => String(r.id))
+    .filter((g) => attachedOf(live, g).some((a) => !IN_DOMAIN.has(a.status)))
+    .sort((a, b) => attachedOf(live, b).length - attachedOf(live, a).length)[0];
+  assert.ok(gid, "precondition: 真实 store 里有一条挂着已退场记录的 GOAL");
+
+  const before = liveRollupFor(body, gid);
+  assert.ok(before != null, `precondition: 真实 store 的 ${gid} 渲染出了「AC 达成 x/y」`);
+
+  // ⛔ 分别注一条 superseded 与一条 retired —— 独立的两个终态都要挡住。
+  const { body: injectedBody } = await renderLiveGoalsTab([
     ac("AC-SYNTH-SUP", gid, "superseded"),
     ac("AC-SYNTH-RET", gid, "retired"),
-  ];
-  const after = acRollupFor(renderGoalCard(injected, { cap: 3, staleMs: 7 * DAY, nowMs: NOW }), gid);
-
+  ]);
+  const after = liveRollupFor(injectedBody, gid);
   assert.equal(after, before, `注入 2 条已退场记录后 ${gid} 的读数必须一字不变（${before} → ${after}）`);
-  const attachedInjected = injected.filter((r) => String(r.goal ?? "") === gid);
+
+  const attachedInjected = [...attachedOf(live, gid), { status: "superseded" }, { status: "retired" }];
   const denominatorAfter = Number(after.split("/")[1]);
   assert.ok(
     denominatorAfter < attachedInjected.length,
