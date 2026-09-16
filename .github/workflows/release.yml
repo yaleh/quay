@@ -24,6 +24,16 @@ on:
         required: true
         type: string
 
+# gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the SINGLE declaration of the
+# Node version the SEA channel builds on and must therefore embed. A SEA executable is a byte-copy
+# of the build machine's `node` (build-sea.sh step [4/6]), so "which Node is inside the shipped
+# binary" was previously an implicit property of whatever PATH resolved to — the same script on a
+# Node-25 dev box produced a Node-25 binary while this workflow produced Node 20. Everything that
+# needs this number derives from HERE: the runner's setup-node version, the floor check inside both
+# build-sea.sh runs, and verify-sea-artifact.sh's byte-level cross-check of the produced archives.
+env:
+  SEA_NODE_VERSION: '20'
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -189,19 +199,43 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      - name: Resolve the declared SEA Node floor (single-sourced from the workflow-level env)
+        id: sea-node-floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${SEA_NODE_VERSION:?SEA_NODE_VERSION must be declared at workflow level}"
+          echo "version=${SEA_NODE_VERSION}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ steps.sea-node-floor.outputs.version }}
+
+      - name: Confirm the runner is really on the declared SEA Node floor
+        # Same standard as ci.yml's dist-verify-node-floor step: if setup-node ever silently fell
+        # back to another version (e.g. an empty/unresolved input), this fails here rather than
+        # producing — and shipping — a SEA binary that embeds the wrong Node.
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version | grep -E "^v${SEA_NODE_VERSION}\." \
+            || { echo "ERROR: runner is on $(node --version); the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1; }
 
       - name: Install dependencies
         run: npm install
 
       - name: Build quay (Core) SEA binary
         shell: bash
+        # SEA_STRICT_NODE_FLOOR=1: build-sea.sh fails closed (instead of warning) when the node it
+        # embedded is not the declared floor. The guard step above should already have caught that.
+        env:
+          SEA_STRICT_NODE_FLOOR: '1'
         run: bash packages/quay/scripts/build-sea.sh
 
       - name: Build quay-native (Provider) SEA binary
         shell: bash
+        env:
+          SEA_STRICT_NODE_FLOOR: '1'
         run: bash packages/quay-native/scripts/build-sea.sh
 
       - name: Assemble release bundle (both binaries + packaged .quay/config.yml + plugin sidecar)
@@ -220,6 +254,18 @@ jobs:
             cp packages/quay-native/dist-sea/quay-native "${BUNDLE_DIR}/quay-native"
             MCP_ENTRY='["./quay-native", "mcp"]'
           fi
+          # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: each binary's
+          # build-runtime provenance (`<exe>.build-node-version`, written by build-sea.sh) travels
+          # WITH the archive, so the claim "this binary embeds Node <floor>" is re-checkable by
+          # anyone holding the released archive — not just inside this CI run's logs.
+          for p in "packages/quay/dist-sea/quay" "packages/quay-native/dist-sea/quay-native"; do
+            if [ "${{ matrix.os }}" = "windows-latest" ]; then SRC="${p}.exe.build-node-version"; DEST="$(basename "${p}").exe.build-node-version"; else SRC="${p}.build-node-version"; DEST="$(basename "${p}").build-node-version"; fi
+            if [ ! -f "${SRC}" ]; then
+              echo "ERROR: ${SRC} missing — build-sea.sh must record the build-time Node version next to the binary." >&2
+              exit 1
+            fi
+            cp "${SRC}" "${BUNDLE_DIR}/${DEST}"
+          done
           # gap-release-sea-bundle-excludes-plugin-tree (AC16 产物层): the SEA archive is
           # the RECOMMENDED distribution — it must carry the plugin SIDECAR (the agent
           # surface that IS the self-evolving loop), staged by the Core build-sea.sh into
@@ -286,6 +332,9 @@ jobs:
           else
             tar -xzf "${ARCHIVE_PATH}" -C archive-check
           fi
+          # SEA_NODE_VERSION is inherited from the workflow-level env — check (c) inside the script
+          # fails closed without it, and cross-checks each binary's BYTES against both the recorded
+          # build-runtime provenance and that declared floor.
           bash packages/quay/scripts/verify-sea-artifact.sh archive-check
 
       - name: Upload SEA archive to GitHub Release
@@ -392,6 +441,32 @@ jobs:
             fi
           done
           echo "OK: downloaded SEA archive carries plugin/ + all 6 mechanism names (AC3)"
+      # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the DOWNLOADED,
+      # consumer-facing asset must embed the declared Node floor — the same check verify-sea-artifact.sh
+      # (c) runs on the assembled bundle, mirrored here because this job has no repo checkout and so
+      # cannot call the canonical script (hard rule 5b: the sibling call site needs the same fix).
+      # Read from the binary's BYTES: a SEA executable ignores node's own CLI flags (measured
+      # 2026-09-16 — `--version`/`-v`/`-p process.version` all just run the embedded main), so
+      # `./quay --version` says nothing about the Node inside it.
+      - name: Verify the downloaded binary embeds the declared Node floor
+        run: |
+          set -euo pipefail
+          cd extracted
+          EMBEDDED="$(grep -aoE 'node\.js/v[0-9]+\.[0-9]+\.[0-9]+' ./quay | head -1 | sed 's#^node\.js/##' || true)"
+          if [ -z "${EMBEDDED}" ]; then
+            echo "ERROR: could not read an embedded Node version from the downloaded ./quay binary." >&2
+            exit 1
+          fi
+          RECORDED="$(tr -d '[:space:]' < ./quay.build-node-version)"
+          if [ "${EMBEDDED}" != "${RECORDED}" ]; then
+            echo "ERROR: downloaded ./quay embeds ${EMBEDDED} but its recorded provenance says ${RECORDED}." >&2
+            exit 1
+          fi
+          case "${EMBEDDED}" in
+            "v${SEA_NODE_VERSION}."*) ;;
+            *) echo "ERROR: downloaded ./quay embeds ${EMBEDDED}; the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1 ;;
+          esac
+          echo "OK: downloaded ./quay embeds Node ${EMBEDDED} (declared floor ${SEA_NODE_VERSION})"
       - name: Run quay --help (no Node on PATH)
         run: |
           cd extracted
@@ -455,6 +530,33 @@ jobs:
           else
             tar -xzf "${ASSET_NAME}" -C extracted
           fi
+      # gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge: the downloaded
+      # macOS/Windows asset must embed the declared Node floor too — the same byte-level check
+      # verify-sea-artifact.sh (c) runs on the assembled bundle, mirrored here because this job has
+      # no repo checkout (same reason as the Linux job's mirror above). This is the only place the
+      # macOS/Windows BINARY FORMATS are checked as a consumer receives them.
+      - name: Verify the downloaded binary embeds the declared Node floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd extracted
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then BIN=./quay.exe; else BIN=./quay; fi
+          EMBEDDED="$(grep -aoE 'node\.js/v[0-9]+\.[0-9]+\.[0-9]+' "${BIN}" | head -1 | sed 's#^node\.js/##' || true)"
+          if [ -z "${EMBEDDED}" ]; then
+            echo "ERROR: could not read an embedded Node version from the downloaded ${BIN} binary." >&2
+            exit 1
+          fi
+          RECORDED="$(tr -d '[:space:]' < "${BIN}.build-node-version")"
+          if [ "${EMBEDDED}" != "${RECORDED}" ]; then
+            echo "ERROR: downloaded ${BIN} embeds ${EMBEDDED} but its recorded provenance says ${RECORDED}." >&2
+            exit 1
+          fi
+          case "${EMBEDDED}" in
+            "v${SEA_NODE_VERSION}."*) ;;
+            *) echo "ERROR: downloaded ${BIN} embeds ${EMBEDDED}; the declared SEA floor is ${SEA_NODE_VERSION}." >&2; exit 1 ;;
+          esac
+          echo "OK: downloaded ${BIN} embeds Node ${EMBEDDED} (declared floor ${SEA_NODE_VERSION})"
+
       - name: Strip Node.js from PATH and confirm it is genuinely gone
         shell: bash
         run: |

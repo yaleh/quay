@@ -48,6 +48,50 @@ if [ "${OS:-}" = "Windows_NT" ]; then
 fi
 EXE="${OUT_DIR}/${EXE_NAME}"
 
+# ── Build-runtime provenance (gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge) ──
+# Sibling of the same block in packages/quay/scripts/build-sea.sh — see that file for the full
+# rationale. Step [4/5] below copies whatever `node` PATH resolves to as the executable's base, so
+# the embedded Node version is a BUILD-MACHINE property; record it into `<exe-name>.build-node-version`
+# so it travels inside the release archive, and check it against the declared floor
+# (SEA_NODE_VERSION, single source: release.yml's workflow-level env) — warning by default,
+# fail-closed under SEA_STRICT_NODE_FLOOR=1 (which CI sets).
+BUILD_NODE_VERSION_SUFFIX=".build-node-version"
+
+record_build_node_version() {
+  local node_bin node_version declared
+  node_bin="$(command -v node)"
+  node_version="$(node --version)"
+  printf '%s\n' "${node_version}" > "${OUT_DIR}/${EXE_NAME}${BUILD_NODE_VERSION_SUFFIX}"
+  echo "Build-time node: ${node_version} (${node_bin}) -> recorded in ${EXE_NAME}${BUILD_NODE_VERSION_SUFFIX}"
+  declared="${SEA_NODE_VERSION:-}"
+  if [ -z "${declared}" ]; then
+    echo "NOTE: SEA_NODE_VERSION is not set — the build-time Node version is recorded, but not" >&2
+    echo "      checked against a declared floor (set it to the declared major, e.g. SEA_NODE_VERSION=20)." >&2
+    return 0
+  fi
+  case "${node_version}" in
+    "v${declared}."*) return 0 ;;
+    *) ;;
+  esac
+  echo "ERROR: this SEA binary embeds ${node_version}, but the declared floor is Node ${declared}." >&2
+  echo "       The embedded version is a property of the BUILD MACHINE (step [4/5] copies the node" >&2
+  echo "       binary PATH resolves to), not of build-sea.sh itself — build on the declared floor." >&2
+  if [ "${SEA_STRICT_NODE_FLOOR:-0}" = "1" ]; then
+    echo "       SEA_STRICT_NODE_FLOOR=1 — failing closed." >&2
+    exit 1
+  fi
+  echo "       Continuing (set SEA_STRICT_NODE_FLOOR=1 to fail closed instead)." >&2
+  return 0
+}
+
+# `--record-build-node-version`: write the build-runtime provenance sidecar (and apply the declared
+# floor check) and exit, skipping the heavy SEA build. Mirrors packages/quay's equivalent flag so the
+# test suite exercises the REAL recording code fast and hermetically.
+if [ "${1:-}" = "--record-build-node-version" ]; then
+  record_build_node_version
+  exit 0
+fi
+
 echo "[1/5] Bundling quay-native with esbuild (ESM -> CJS, manifest.js aliased to build-time embed)..."
 node scripts/esbuild-sea.mjs
 
@@ -79,6 +123,8 @@ echo "[4/5] Copying node binary as the executable base..."
 NODE_BIN="$(command -v node)"
 cp "${NODE_BIN}" "${EXE}"
 chmod +w "${EXE}"
+# Record (and floor-check) which Node this copy embedded — see record_build_node_version above.
+record_build_node_version
 
 echo "[5/5] Injecting blob via postject..."
 if [ "$(uname -s)" = "Darwin" ]; then

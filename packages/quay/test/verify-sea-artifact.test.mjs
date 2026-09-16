@@ -46,14 +46,43 @@ function stagePluginSidecar(base) {
   return path.join(pkg, "dist-sea", "plugin");
 }
 
+// A REAL SEA binary is a byte-copy of `node` plus an injected blob; the extraction anchors below
+// live in node's own .rodata (the V8 inspector user-agent and the config.gypi source-tarball URL),
+// so a fixture only needs those markers to exercise the checker's logic. The extractor's behaviour
+// on an ACTUAL node binary is covered separately, against the running node itself — see the
+// "--extract-node-version" test.
+function fakeSeaBinary(version) {
+  return [
+    "placeholder SEA binary — base is a byte-copy of node",
+    `node.js/${version}Protocol-Version`,
+    `https://nodejs.org/download/release/${version}/node-${version}.tar.gz`,
+    "",
+  ].join("\n");
+}
+
 // bundle(overrides): build a release bundle dir (mirroring release.yml's dist-sea-release layout)
-// with plugin/ staged from the sidecar plus a placeholder SEA binary + .quay/config.yml.
-function assembleBundle({ includePlugin = true, pluginFileCount = null } = {}) {
+// with plugin/ staged from the sidecar, the two SEA binaries (with their build-runtime provenance
+// sidecars, as build-sea.sh + release.yml's assemble step produce them) and .quay/config.yml.
+function assembleBundle({
+  includePlugin = true,
+  pluginFileCount = null,
+  embeddedVersion = "v20.19.0",
+  recordedVersion = null, // defaults to embeddedVersion; pass a different value to break the cross-check
+  omitProvenanceFor = null, // "quay" | "quay-native" — omit that binary's recorded provenance file
+  omitBinaries = false,
+} = {}) {
   const root = path.join(tmpBase, "bundle-" + Math.random().toString(36).slice(2));
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
-  fs.writeFileSync(path.join(root, "quay"), "placeholder (SEA binary — plugin is a sidecar)\n");
+  if (!omitBinaries) {
+    for (const name of ["quay", "quay-native"]) {
+      fs.writeFileSync(path.join(root, name), fakeSeaBinary(embeddedVersion));
+      if (name !== omitProvenanceFor) {
+        fs.writeFileSync(path.join(root, `${name}.build-node-version`), `${recordedVersion ?? embeddedVersion}\n`);
+      }
+    }
+  }
   if (includePlugin) {
     const dest = path.join(root, "plugin");
     fs.cpSync(stagedPlugin, dest, { recursive: true });
@@ -75,8 +104,14 @@ function walkFiles(dir) {
   return out;
 }
 
-function runVerify(bundleDir) {
-  return execFileSync("bash", [verifyScript, bundleDir], { encoding: "utf8", stdio: "pipe" });
+// The declared SEA Node floor (release.yml's workflow-level SEA_NODE_VERSION) is REQUIRED by the
+// bundle form — check (c) fails closed without it, so every bundle test states it explicitly.
+function runVerify(bundleDir, { env = { SEA_NODE_VERSION: "20" } } = {}) {
+  return execFileSync("bash", [verifyScript, bundleDir], {
+    encoding: "utf8",
+    stdio: "pipe",
+    env: { ...process.env, ...env },
+  });
 }
 
 after(() => {
@@ -117,5 +152,91 @@ test("verify-sea-artifact.sh with a missing bundle dir exits 1", () => {
     () => runVerify(path.join(tmpBase, "does-not-exist")),
     /ERROR: bundle dir not found/,
     "missing bundle dir must fail closed"
+  );
+});
+
+// ── gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge ────────────────────────────
+// Check (c): the SEA binaries must embed the declared Node floor. The criterion is able to be
+// FALSE in three distinct ways (wrong version, self-inconsistent artifact, unreadable), and each
+// is exercised below as a negative control — plus the honest-probe test that runs the extractor
+// against the REAL node binary rather than a fixture.
+
+test("--extract-node-version reads the real running node's version from its BYTES", () => {
+  // Non-tautological: the extractor is handed the actual node executable and must return exactly
+  // what `node --version` reports. If the anchors ever stop matching real node builds, this fails
+  // here rather than silently turning check (c) into a no-op.
+  const out = execFileSync("bash", [verifyScript, "--extract-node-version", process.execPath], {
+    encoding: "utf8",
+  });
+  assert.equal(out.trim(), process.version, "extracted version must equal the running node's");
+});
+
+test("--extract-node-version on a non-Node file exits 1 (unreadable must not look readable)", () => {
+  const notNode = path.join(tmpBase, "not-a-binary");
+  fs.writeFileSync(notNode, "this file has no node version in it\n");
+  assert.throws(
+    () => execFileSync("bash", [verifyScript, "--extract-node-version", notNode], { encoding: "utf8", stdio: "pipe" }),
+    /no embedded Node version found/,
+    "an unreadable binary must fail closed, not print an empty version"
+  );
+});
+
+test("a bundle whose binaries embed the declared floor PASSes check (c)", () => {
+  assert.ok(stagedPlugin, "the staging test must have run first");
+  const bundle = assembleBundle();
+  const out = runVerify(bundle);
+  assert.match(out, /quay embeds Node v20\.19\.0/, "must report the embedded version read from bytes");
+  assert.match(out, /all 2 SEA binaries embed the declared Node 20/, "both binaries must be checked");
+});
+
+test("a bundle whose binaries embed a DIFFERENT Node than the declared floor FAILs closed", () => {
+  assert.ok(stagedPlugin, "the staging test must run first");
+  // The exact defect this task records: same build script, built on a Node-25 dev box, shipped
+  // against a Node-20 declaration.
+  const bundle = assembleBundle({ embeddedVersion: "v25.1.0", recordedVersion: "v25.1.0" });
+  assert.throws(
+    () => runVerify(bundle),
+    /embeds Node v25\.1\.0, but release\.yml declares the SEA Node floor as 20/,
+    "an artifact embedding a non-declared Node must never pass the release gate"
+  );
+});
+
+test("a binary whose bytes disagree with its recorded provenance FAILs closed", () => {
+  assert.ok(stagedPlugin, "the staging test must run first");
+  const bundle = assembleBundle({ embeddedVersion: "v20.19.0", recordedVersion: "v22.0.0" });
+  assert.throws(
+    () => runVerify(bundle),
+    /embeds Node v20\.19\.0 but the build recorded v22\.0\.0/,
+    "binary vs provenance disagreement is an unattributable artifact and must fail"
+  );
+});
+
+test("a bundle missing a binary's recorded provenance FAILs closed", () => {
+  assert.ok(stagedPlugin, "the staging test must run first");
+  const bundle = assembleBundle({ omitProvenanceFor: "quay-native" });
+  assert.throws(
+    () => runVerify(bundle),
+    /quay-native' has no recorded build-runtime provenance/,
+    "without the recorded provenance the claim cannot be checked against anything"
+  );
+});
+
+test("a bundle with no SEA binary at all FAILs closed", () => {
+  assert.ok(stagedPlugin, "the staging test must run first");
+  const bundle = assembleBundle({ omitBinaries: true });
+  assert.throws(
+    () => runVerify(bundle),
+    /no SEA binary .* found in/,
+    "a release bundle without its binaries is not verifiable and must not pass"
+  );
+});
+
+test("an undeclared floor (SEA_NODE_VERSION unset) FAILs closed rather than passing unevaluated", () => {
+  assert.ok(stagedPlugin, "the staging test must run first");
+  const bundle = assembleBundle();
+  assert.throws(
+    () => runVerify(bundle, { env: { SEA_NODE_VERSION: "" } }),
+    /SEA_NODE_VERSION is not set/,
+    "a gate that cannot evaluate must not report PASS"
   );
 });
