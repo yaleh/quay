@@ -158,18 +158,25 @@ jobs:
         # promises a human contributor (git clone + npm install, nothing about .quay/config.yml).
         run: cp .quay/config.yml.example .quay/config.yml
       - name: Run tests
-        # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
-        # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
-        # default. 2026-09-16: dropped the explicit --test-concurrency=8 pin now that this job runs
-        # on the self-hosted tokyo-alpha box (128 cores) instead of a 4-core ubuntu-latest runner —
-        # per CLAUDE.md's "don't hardcode a value that only happens to equal current host capacity"
-        # rule, a literal concurrency is exactly wrong here: scripts/test.sh's own
-        # default_test_concurrency() already reads nproc at runtime (plugin/scripts/
-        # runner-concurrency.ts), so leaving the flag off lets the derivation scale to whichever
-        # host actually runs the job (128 here, 4 if this job ever falls back to ubuntu-latest) —
-        # see the runs-on comment above for the rollback pairing. The resource gate still applies
-        # here (scripts/test.sh full-suite path) and is what protects this SHARED multi-user box
-        # from starting a full suite into an already-loaded machine. The 3 live/conformance files
+        # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob.
+        # 2026-09-16 (gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red): the concurrency is CAPPED
+        # again, and the reason is NOT the one the previous note gave for dropping the pin.
+        # Dropping it let scripts/test.sh's own derivation follow nproc (128 here), on the theory
+        # that a literal would only ever happen to equal one machine's capacity. But a cap is a
+        # POLICY about the suite, not a claim about the host, and the policy is measured: at
+        # concurrency=128 this suite is not a stable judge. Three consecutive runs of the same
+        # commit each produced a DIFFERENT extra red set of load-shaped failures —
+        # serve-board.test.mjs "listen EADDRINUSE 0.0.0.0:44203" (two ephemeral ports probed and
+        # bound concurrently), fan-in-execute-paths §⑧⑩ (a 15 s bounded wait for a detached suite's
+        # exit marker), dead-code-after-return-check AC6 (a strict-zero scan of the live tree) — on
+        # top of the two root-caused ones. A judge that flips on scheduling noise is the same
+        # failure this task exists to remove: 恒红与「没在检查」同形. 16 is this suite's daily
+        # configuration — the dev machines it is written and exercised on are 16-core — so the cap
+        # restores the regime the suite is actually validated in, and the host reading still
+        # applies UNDER the cap whenever the host is smaller (a 4-core ubuntu-latest fallback
+        # derives 4; see the runs-on comment above for the rollback pairing). The resource gate
+        # still applies here (scripts/test.sh full-suite path) and is what protects this SHARED
+        # multi-user box from starting a full suite into an already-loaded machine. The 3 live/conformance files
         # (serve-github.test.mjs, provider-abi-conformance.test.mjs,
         # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
         # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
@@ -177,7 +184,7 @@ jobs:
         # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
-        run: bash scripts/test.sh
+        run: bash scripts/test.sh --test-concurrency=16
         env:
           GH_TOKEN: ${{ github.token }}
 

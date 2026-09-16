@@ -1210,7 +1210,20 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
       // real directory by this point, so writeFileSync over it would EISDIR instead.)
       const taskTelemetryDir = path.join(dir, "milestones", "prepare-telemetry", taskId);
       assert.ok(fs.existsSync(taskTelemetryDir), "A.1's earlier write already created this directory");
-      fs.chmodSync(taskTelemetryDir, 0o500);
+      // Sabotage the record write. A read-only DIRECTORY is only sabotage for a uid subject to
+      // DAC: as uid 0 (how the self-hosted tokyo-alpha CI runner executes) CAP_DAC_OVERRIDE makes
+      // the write succeed and `telemetryWriteOk` comes back true — measured, this test passes as
+      // uid 1000 and fails as uid 0 with this as the only difference. So on a root uid the
+      // directory is replaced by a regular file instead: the record write under it then fails with
+      // ENOTDIR for EVERY uid, which is the same AC13/AC14 "root is a FILE" shape the comment below
+      // says is unavailable — it is unavailable only while the directory is still there.
+      const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+      if (isRoot) {
+        fs.rmSync(taskTelemetryDir, { recursive: true, force: true });
+        fs.writeFileSync(taskTelemetryDir, "");
+      } else {
+        fs.chmodSync(taskTelemetryDir, 0o500);
+      }
 
       let decideOut;
       try {
@@ -1218,7 +1231,7 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
         assert.equal(decide.status, 0, decide.stdout);
         decideOut = JSON.parse(decide.stdout.trim());
       } finally {
-        fs.chmodSync(taskTelemetryDir, 0o700);
+        if (!isRoot) fs.chmodSync(taskTelemetryDir, 0o700);
       }
 
       // The core AC15 assertions: the write throw must NOT collapse to the outer catch-all's

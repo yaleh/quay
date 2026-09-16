@@ -106,6 +106,22 @@ test("AC: an unprovisioned runner fails LOUDLY and ONCE, not as ~74 unrelated as
   );
 });
 
+test("AC: the suite concurrency is a declared CAP, not whatever nproc the runner has", () => {
+  // At concurrency=128 (the derivation's value on the 128-core self-hosted box) this suite is not a
+  // stable judge: three consecutive runs at one commit each produced a different set of load-shaped
+  // failures (ephemeral-port EADDRINUSE, a bounded wait for a detached suite's exit marker, a
+  // strict-zero scan of the live tree). The cap is a policy about the suite, so it must be stated
+  // in the workflow; the VALUE may change, its being explicit may not.
+  const job = loadJob(readFileSync(CI_YML, "utf8"));
+  const runStep = (job.steps ?? []).map((s) => s.run ?? "").find((t) => /scripts\/test\.sh/.test(t));
+  assert.ok(runStep, "the `test` job must still invoke scripts/test.sh");
+  const m = runStep.match(/--test-concurrency=(\d+)/);
+  assert.ok(
+    m, `the suite launch must carry an explicit --test-concurrency cap; got: ${JSON.stringify(runStep)}`,
+  );
+  assert.ok(Number(m[1]) > 0, `the cap must be a positive lane count; got ${m[1]}`);
+});
+
 test("AC: the prerequisites are DECLARED, not inherited — mutation control (the predicate can take false)", () => {
   const original = readFileSync(CI_YML, "utf8");
   const job = loadJob(original);
