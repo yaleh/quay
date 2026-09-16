@@ -39,6 +39,49 @@ if [ "${OS:-}" = "Windows_NT" ]; then
 fi
 EXE="${OUT_DIR}/${EXE_NAME}"
 
+# ── Build-runtime provenance (gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge) ──
+# Step [4/6] below does `cp "$(command -v node)" "${EXE}"`: the executable's BASE is a byte-copy of
+# whatever `node` PATH resolves to, so the SEA binary's runtime Node version is a property of the
+# BUILD MACHINE, not of this script. The same script on Node 25 produces a Node-25 binary; CI's
+# sea-release job pins Node 20 via actions/setup-node. That fact used to be implicit and unrecorded
+# (no mechanism pinned "the SEA artifact embeds the Node floor release.yml declares" — the
+# dist-verify-node-floor job checks the npm TARBALL, a different artifact). Now:
+#   - the build-time `node --version` is written next to the executable as
+#     `<exe-name>.build-node-version`, so the claim travels INSIDE the release archive; and
+#   - if SEA_NODE_VERSION (the declared floor — single source: release.yml's workflow-level env) is
+#     set and disagrees, we warn loudly, or fail closed when SEA_STRICT_NODE_FLOOR=1 (CI sets it).
+# verify-sea-artifact.sh re-derives the version from the binary's own BYTES and cross-checks all
+# three readings (bytes vs recorded vs declared floor) — a self-reported file alone would be a
+# tautology; the cross-check is what makes the criterion able to be false.
+BUILD_NODE_VERSION_SUFFIX=".build-node-version"
+
+record_build_node_version() {
+  local node_bin node_version declared
+  node_bin="$(command -v node)"
+  node_version="$(node --version)"
+  printf '%s\n' "${node_version}" > "${OUT_DIR}/${EXE_NAME}${BUILD_NODE_VERSION_SUFFIX}"
+  echo "Build-time node: ${node_version} (${node_bin}) -> recorded in ${EXE_NAME}${BUILD_NODE_VERSION_SUFFIX}"
+  declared="${SEA_NODE_VERSION:-}"
+  if [ -z "${declared}" ]; then
+    echo "NOTE: SEA_NODE_VERSION is not set — the build-time Node version is recorded, but not" >&2
+    echo "      checked against a declared floor (set it to the declared major, e.g. SEA_NODE_VERSION=20)." >&2
+    return 0
+  fi
+  case "${node_version}" in
+    "v${declared}."*) return 0 ;;
+    *) ;;
+  esac
+  echo "ERROR: this SEA binary embeds ${node_version}, but the declared floor is Node ${declared}." >&2
+  echo "       The embedded version is a property of the BUILD MACHINE (step [4/6] copies the node" >&2
+  echo "       binary PATH resolves to), not of build-sea.sh itself — build on the declared floor." >&2
+  if [ "${SEA_STRICT_NODE_FLOOR:-0}" = "1" ]; then
+    echo "       SEA_STRICT_NODE_FLOOR=1 — failing closed." >&2
+    exit 1
+  fi
+  echo "       Continuing (set SEA_STRICT_NODE_FLOOR=1 to fail closed instead)." >&2
+  return 0
+}
+
 # ── Plugin sidecar staging (gap-release-sea-bundle-excludes-plugin-tree) ──────────
 # The SEA release archive (quay-sea-<ver>-<platform>.tar.gz/zip) is the RECOMMENDED
 # distribution; it must carry the plugin dir-tree (the agent surface that IS the
@@ -70,6 +113,14 @@ stage_plugin_sidecar() {
 # no-build sidecar refresh.
 if [ "${1:-}" = "--stage-plugin-only" ]; then
   stage_plugin_sidecar
+  exit 0
+fi
+
+# `--record-build-node-version`: write the build-runtime provenance sidecar (and apply the declared
+# floor check) and exit, skipping the heavy SEA build. Mirrors `--stage-plugin-only` above — the test
+# suite exercises the REAL recording code fast and hermetically instead of re-implementing it.
+if [ "${1:-}" = "--record-build-node-version" ]; then
+  record_build_node_version
   exit 0
 fi
 
@@ -109,6 +160,8 @@ echo "[4/6] Copying node binary as the executable base..."
 NODE_BIN="$(command -v node)"
 cp "${NODE_BIN}" "${EXE}"
 chmod +w "${EXE}"
+# Record (and floor-check) which Node this copy embedded — see record_build_node_version above.
+record_build_node_version
 
 echo "[5/6] Injecting blob via postject..."
 if [ "$(uname -s)" = "Darwin" ]; then
