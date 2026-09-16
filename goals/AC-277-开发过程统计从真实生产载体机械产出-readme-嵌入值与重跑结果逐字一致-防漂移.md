@@ -1,7 +1,7 @@
 ---
 id: AC-277
 title: 开发过程统计从真实生产载体机械产出，README 嵌入值与重跑结果逐字一致（防漂移）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -51,8 +51,16 @@ expect: exit 0 = plugin/scripts/dev-stats-collect.ts 存在且可执行、输出
   stderr 带 CAUSE=：stats-script-absent（脚本还不存在）/
   stats-script-produced-no-output（脚本跑了但没输出）/ readme-marker-absent（README 没有标记块）/
   stats-drift（重新计算的值与 README 里的不一致——真正的防漂移信号）。
-origin: 本次调研已验证真实数据可从 git log / task store / goal store / capability-catalog.sh
-  / .quay/*.jsonl 机械读出（63天/22696提交/2220任务/18GOAL
-  achieved/15个release/339个checker/640测试文件等）。判据不比对具体数值字面量（会随开发推进变化），而是比对'脚本此刻重跑的结果'与'README
-  里写的'是否一致——这样任何未来的开发都会让旧统计自动过期并被检测到，而不是把某一时刻的快照当成永久事实。
+origin: manager 2026-09-16 激活，随 GOAL-021 一并生效
+activatedAt: 2026-09-16T23:33:21.682Z
+statusLog:
+  - at: 2026-09-16T23:33:21.682Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-16T23:33:21.681Z
 ---
