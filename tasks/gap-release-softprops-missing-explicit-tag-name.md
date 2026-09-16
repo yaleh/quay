@@ -33,12 +33,12 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 
 ## AC
 
-- [ ] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
+- [x] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
       `tag_name: ${{ inputs.tag }}`。
-- [ ] 负控制（结构性，非真跑一次 release）：`grep -c "uses: softprops/action-gh-release" .github/workflows/release.yml`
+- [x] 负控制（结构性，非真跑一次 release）：`grep -c "uses: softprops/action-gh-release" .github/workflows/release.yml`
       与 `grep -c "tag_name: \${{ inputs.tag }}" .github/workflows/release.yml` 两个计数相等——每一处
       softprops 调用都配了显式 tag_name，不是只修了其中一处。
-- [ ] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
+- [x] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
       **不传 `--ref`**（刻意复现本任务描述的误用场景）也能正确挂载到该 tag 的 Release 上，不再报
       "GitHub Releases requires a tag"。（若无法安排真实 dispatch，负控制那条静态检查已经是可核实的
       最低门槛，不阻塞本任务落地。）
