@@ -158,8 +158,20 @@ CLI 的 job，为了末尾一步写入而放宽它的 token 会把写权限交�
       不只是存在）；`git ls-remote origin refs/heads/master` → `17cf30678...`，与 `git rev-parse
       v0.9.0^{commit}` 逐字相同（master 真的 ff 到了这次的 tag）。已用
       `plugin/scripts/ci-runs-collect.ts` 采集进 `.quay/ci-runs.jsonl`（`appended=1`，追加语义非手写）。
-- [ ] （外层验证，待外部）`orangevps` 主机 `archguard` 项目 project scope 下真实安装这次新版本的
+- [x] （外层验证，待外部）`orangevps` 主机 `archguard` 项目 project scope 下真实安装这次新版本的
       plugin，版本号核对一致，`quay-init`/driver/serve 验证通过。
+      — 已完成（manager 会话，2026-09-16T22:2xZ）：⚠️ 主机改为 `ad-arm1`（人 2026-09-16 澄清，archguard
+      项目实际部署在 ad-arm1，不在 orangevps——orangevps 上没有 archguard 项目目录）。在 ad-arm1 的
+      `/home/yale/work/archguard` 项目上：① 卸载旧安装（`claude plugin uninstall quay@quay --scope
+      project`，卸载前版本 `0.7.0-dev`，marketplace 源是本地 `directory` 类型，非 GitHub）；② 移除旧
+      marketplace，`claude plugin marketplace add yaleh/quay`（真正的 GitHub 源）；③ 附带发现并修复：
+      `dist-plugin` 滚动渠道当时仍停在 `0.7.0-dev`（最近一次 `publish-plugin-dist.yml` 早于本次 release
+      cut），先 `gh workflow run publish-plugin-dist.yml -f ref=v0.9.0` 同步（run 35156627757，success），
+      确认 `dist-plugin` 分支 `plugin.json` 后为 `0.9.0`；④ `claude plugin install quay@quay --scope
+      project -y`，`claude plugin list --json` 读回 `version: "0.9.0"`（与新 tag 一致）；⑤ `quay-init.sh
+      --all --loop` 跑通（`quay-init complete.`）；⑥ `quay driver start --kind promotion` /
+      `--kind worker` 均 `alive:1, running:1`；⑦ `quay serve --host 100.100.148.48 --port 4173`，
+      `curl` 返回 `http_code=302`（正常响应）。
 
 ## DoD
 
@@ -183,3 +195,10 @@ Latest」+「orangevps 的 archguard 项目真的装到了这个版本并验证�
 `done`（worker 侧交付早已完成，这两条外层 AC 从设计上就不阻塞 worker 的 done 判定——见 DoD 原文
 "worker 侧交付的是'能产出'那一半…等待真实 release cut 与跨主机安装把'已产出'那一半补上"），
 manager 会话会在完成跨主机验证后再补一次记录，不需要因此改动任务生命周期状态。
+
+## 人复核（manager 会话，2026-09-16T22:2xZ）— 外层验证②已完成，本任务全部收口
+
+两条外层 AC 均已真实完成。全链路走通：真实 release cut（v0.9.0）→ GitHub Releases 页面显示
+Latest → dist-plugin 滚动渠道同步 → 跨主机（ad-arm1 archguard）真实安装 → quay-init/driver/serve
+全部验证通过。任务 `status` 保持 `done` 不变（worker 侧交付本就已完成，这两条外层 AC 是补齐
+"已产出"那一半的记录，DoD 原文早已说明不阻塞生命周期状态）。
