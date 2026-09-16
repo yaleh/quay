@@ -1878,6 +1878,18 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
     catch (e) { console.log("DIAG suite log unreadable: " + e.code); }
     try { console.log("DIAG ls worktree scripts=" + JSON.stringify(fs.readdirSync(path.join(dir, "scripts")))); }
     catch (e) { console.log("DIAG worktree scripts unreadable: " + e.code); }
+    try {
+      const pidTxt = fs.readFileSync(`/tmp/fan-in-suite-${task}.pid`, "utf8").trim();
+      let alive = "n/a";
+      try { process.kill(Number(pidTxt), 0); alive = "ALIVE"; } catch (e) { alive = "dead:" + e.code; }
+      console.log(`DIAG pid=${pidTxt} ${alive}`);
+    } catch (e) { console.log("DIAG pid file unreadable: " + e.code); }
+    try { console.log("DIAG log.prev:\n" + fs.readFileSync(`/tmp/fan-in-suite-${task}.log.prev`, "utf8").slice(0, 3000)); }
+    catch (e) { console.log("DIAG log.prev unreadable: " + e.code); }
+    for (const tool of ["flock", "setsid", "nohup", "bash", "sh"]) {
+      const r2 = spawnSync("bash", ["-c", `command -v ${tool} || echo MISSING`], { encoding: "utf8" });
+      console.log(`DIAG tool ${tool}=${(r2.stdout || "").trim()}`);
+    }
   }
   assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
   const markerText = fs.readFileSync(marker, "utf8");
