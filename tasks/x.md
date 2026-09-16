@@ -1,6 +1,6 @@
 ---
 id: x
-status: needs-human
+status: superseded
 needs_human_cause: human-adjudication
 labels: []
 parent: null
