@@ -48,9 +48,9 @@ user.email="routine@quay.local"` 之类，不依赖宿主是否配置），不�
 
 ## AC
 
-- [ ] 在一个显式清空 `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME`/`GIT_AUTHOR_EMAIL`/`GIT_COMMITTER_EMAIL` 且仓库/全局均未配置 `user.name`/`user.email` 的子进程环境下（复现 CI 的真实条件，不是本机那种已经配好身份的环境），`commitRoutineWrite` 修复前 `git commit` 报 `Author identity unknown`，修复后返回 `{ok:true, reason:"committed"}`。
-- [ ] `node --experimental-strip-types --test plugin/test/probe-routine.test.mjs` 全文件在同样"无身份"环境下 `passed=true`（覆盖 `CARRIER AC7` 与 `CARRIER AC7 (5b sibling)` 两条）。
-- [ ] 负控制：宿主本身已配置了 git 身份时，`commitRoutineWrite` 提交记录的 author/committer 是 routine 专用身份（不是宿主用户的身份），确认修复没有引入"悄悄冒用宿主身份"的副作用。
+- [x] 在一个显式清空 `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME`/`GIT_AUTHOR_EMAIL`/`GIT_COMMITTER_EMAIL` 且仓库/全局均未配置 `user.name`/`user.email` 的子进程环境下（复现 CI 的真实条件，不是本机那种已经配好身份的环境），`commitRoutineWrite` 修复前 `git commit` 报 `Author identity unknown`，修复后返回 `{ok:true, reason:"committed"}`。
+- [x] `node --experimental-strip-types --test plugin/test/probe-routine.test.mjs` 全文件在同样"无身份"环境下 `passed=true`（覆盖 `CARRIER AC7` 与 `CARRIER AC7 (5b sibling)` 两条）。
+- [x] 负控制：宿主本身已配置了 git 身份时，`commitRoutineWrite` 提交记录的 author/committer 是 routine 专用身份（不是宿主用户的身份），确认修复没有引入"悄悄冒用宿主身份"的副作用。
 
 ## DoD
 
