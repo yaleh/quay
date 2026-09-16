@@ -34,12 +34,12 @@ FAIL: missing file: /tmp/tmp.h5lIjSnDjC/empty-project/orchestration/orchestrator
 查清 `orchestrator-loop-tick.md` 该由哪一步产出/laydown 到 `orchestration/` 下（`quay-init.sh` 的模板集，还是 `--from-build` 的打包脚本遗漏了它），修复后让 `cold-start-e2e` 在 `workflow_dispatch` 上真正转绿一次。
 
 ## Acceptance Criteria
-- [ ] AC1: 定位 `orchestrator-loop-tick.md` 缺失的根因（laydown 模板漏收 / package 脚本漏打包 / cold-start-e2e.sh 断言的路径本身就不对，三选一，给出确凿依据，不是猜测）。
-- [ ] AC2: 修复后 `bash test/cold-start-e2e.sh --from-build` 本地跑通（exit 0）。
-- [ ] AC3: 用 `gh workflow run ci.yml` 触发一次真实 `workflow_dispatch`，`cold-start-e2e` job 转绿（`gh run view <id>` 链接落证据）——不满足于本地跑通，因为本地环境可能掩盖真实构建产物的缺口。
+- [x] AC1: 定位 `orchestrator-loop-tick.md` 缺失的根因（laydown 模板漏收 / package 脚本漏打包 / cold-start-e2e.sh 断言的路径本身就不对，三选一，给出确凿依据，不是猜测）。
+- [x] AC2: 修复后 `bash test/cold-start-e2e.sh --from-build` 本地跑通（exit 0）。
+- [x] AC3: 用 `gh workflow run ci.yml` 触发一次真实 `workflow_dispatch`，`cold-start-e2e` job 转绿（`gh run view <id>` 链接落证据）——不满足于本地跑通，因为本地环境可能掩盖真实构建产物的缺口。
 
 ## Definition of Done
-- [ ] 一次真实 GitHub Actions `workflow_dispatch` 触发的 `cold-start-e2e` job 转绿记录（run 链接）。
+- [x] 一次真实 GitHub Actions `workflow_dispatch` 触发的 `cold-start-e2e` job 转绿记录（run 链接）。
 
 ## Touches
 - test/cold-start-e2e.sh（或其断言的构建产物路径）
