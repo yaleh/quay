@@ -1,7 +1,8 @@
 ---
 id: gap-release-softprops-missing-explicit-tag-name
 title: release.yml 两处 softprops/action-gh-release 都没传 tag_name，隐式依赖 dispatch ref 上下文
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -112,3 +113,15 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 - .github/workflows/release.yml
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-release-softprops-missing-explicit-tag-name.md
+
+## Needs-Human
+
+**执行 2026-09-16T11:08:32.052Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: ✖ AC5 — negative control: the SAME packaged artifact minus dist/driver-anchor.js reproduces the production failure (rc=1 + the exact error) (10279.809185ms)
+- run_id：wk-prod-anchor
+- session_id：407a79d1-cb3a-4d56-9b9c-4bec0808d71a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-release-softprops-missing-explicit-tag-name~wk-prod-anchor~1789556494678-4cc931.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-release-softprops-missing-explicit-tag-name-wk-prod-anchor.log
