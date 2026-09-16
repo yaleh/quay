@@ -14,6 +14,10 @@
 //      ⇒ 现在有「就地补全」，且**只**填缺失的 testFiles、其余字段逐字保留。
 //   ④ gh 不可达必须**可区分**（硬规则 3b）：driver 的 PATH 不保证含 ~/.local/bin，而 gh 不可达若与
 //      「CI 没有 run」同形，判据的 still-red 就是假读数。⇒ resolveGhBin 显式解析 + gh-unavailable 态。
+//      ④b **「不可达」的模拟不得依赖宿主**（tasks/gap-ci-runs-collect-gh-fallback-defeats-unavailable-test）：
+//      resolveGhBin 末尾四个硬编码绝对路径故意不受 env 覆盖 ⇒ 「把 env 覆写成 PATH=/nonexistent」
+//      在装了系统级 gh 的机器上不成立（2026-09-16 CI run 35054411272 红在这里，实测 actual:'error'）。
+//      ⇒ collectForRound 暴露 ghIsExec 测试缝；本文件另有一条 resolveGhBin 测试专门钉住那个根因。
 //   ⑤ collectForRound 的节流是**一个读数**（throttled），不是静默跳过。
 //   ⑥ seaVerify（AC-267 载体臂，tasks/gap-sea-artifact-plugin-root-toplevel-eval）：release workflow
 //      的 SEA 验证 job 结论派生进记录，词表 {success, failure, incomplete, absent} —— **没有**
@@ -350,11 +354,62 @@ test("collectForRound — gh 不可达 ⇒ status='gh-unavailable'，⛔ 不静�
     throttleMs: 0,
     carrier: path.join(dir, "carrier.jsonl"),
     statePath: path.join(dir, "state.json"),
+    // ⚠️ 光把 env 覆写成 PATH=/nonexistent **不足以**表达「不可达」：resolveGhBin 在 env/PATH 之后还有
+    // 四个**故意不受 env 影响**的硬编码绝对路径（见下面那条 resolveGhBin 测试）。本机 / CI 真装了
+    // 系统级 gh 时它们会命中 ⇒ 这条断言测的就不再是被测逻辑，而是宿主（2026-09-16 CI run 35054411272
+    // 正是这么红的，实测 actual:'error' ≠ expected:'gh-unavailable'）。⇒ 用 ghIsExec 强制不可达。
     env: { PATH: "/nonexistent", HOME: "/nonexistent" },
+    ghIsExec: () => false,
   });
   assert.equal(res.status, "gh-unavailable");
   assert.equal(res.ran, false);
   assert.match(res.reason, /gh/);
+  assert.equal(fs.existsSync(path.join(dir, "carrier.jsonl")), false, "⛔ 不可达时不得写出一个空载体");
+});
+
+test("resolveGhBin — 四个硬编码回退路径【不受】env.PATH/env.HOME 覆盖（2026-09-16 CI 红的根因）", () => {
+  // 上一条 collectForRound 测试为什么必须走 ghIsExec、而不能只覆写 env —— 根因就钉在这里。
+  // 这一段硬编码回退是【故意】的（常驻 driver 的 PATH 不保证含 ~/.local/bin），所以 ⛔ 不能靠删掉它来修。
+  const env = { PATH: "/nonexistent", HOME: "/nonexistent" };
+  const hit = resolveGhBin(env, (p) => p === "/usr/bin/gh");
+  assert.equal(hit.bin, "/usr/bin/gh", "env 覆写挡不住硬编码回退 —— CI 镜像预装的 gh 正是在这一类路径上");
+  assert.equal(hit.source, "fallback:/usr/bin/gh");
+  // 对照（硬规则 4）：同一 env 下该路径不可执行时取值相反 ⇒ 这个量能取假，不是恒等式。
+  assert.equal(resolveGhBin(env, () => false).bin, null);
+  // 枚举四个路径（⛔ 不布尔化成「有没有回退」一条）——少一个都会让「env 覆写就够了」重新变成假前提。
+  for (const p of ["/usr/local/bin/gh", "/opt/homebrew/bin/gh", "/usr/bin/gh", "/bin/gh"]) {
+    assert.ok(hit.candidates.includes(p), `候选清单必须含 ${p}`);
+  }
+});
+
+test("collectForRound — ghIsExec 真的被 consult：宿主上真有一个可执行的 gh 时也能强制不可达", () => {
+  // 这一条的可证伪性不依赖宿主装不装 gh（本机不装、CI 装），也不依赖那四个硬编码路径：
+  // 假 gh 走 PATH，而 PATH 候选**排在最前** ⇒ 任何宿主上都解析得到它。
+  const dir = tmpDir("gh-hook");
+  const fakeRoot = path.join(dir, "repo");
+  const binDir = path.join(dir, "bin");
+  fs.mkdirSync(fakeRoot, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  const fakeGh = path.join(binDir, "gh");
+  fs.writeFileSync(fakeGh, "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(fakeGh, 0o755);
+  const env = { PATH: binDir, HOME: "/nonexistent" };
+
+  // 负控制 / 前提：**不注入** ghIsExec ⇒ 真实文件系统探测 ⇒ 确实解析得到这个可执行的假 gh。
+  // 若实现把 ghIsExec 忽略掉，下面那条断言就会拿到 status:'error'（defaultGhRunner 真去跑它，
+  // 空 stdout ⇒ JSON.parse("") 抛）—— 即【修复前这条测试在任何宿主上都红】，宿主差异不再是变量。
+  assert.equal(resolveGhBin(env).bin, fakeGh, "前提：该 env 下确实存在一个可解析到的可执行 gh");
+
+  const res = collectForRound(fakeRoot, {
+    repo: "o/n",
+    throttleMs: 0,
+    carrier: path.join(dir, "carrier.jsonl"),
+    statePath: path.join(dir, "state.json"),
+    env,
+    ghIsExec: () => false,
+  });
+  assert.equal(res.status, "gh-unavailable", "钩子必须压过「真实存在且可执行」的 gh");
+  assert.equal(res.ran, false);
   assert.equal(fs.existsSync(path.join(dir, "carrier.jsonl")), false, "⛔ 不可达时不得写出一个空载体");
 });
 
