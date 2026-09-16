@@ -155,6 +155,6 @@ run，且 master 的提交正是其中某个 tag 的提交」。⇒ ②改写后
 
 - goals/GOAL-020-ci-与-release-渠道成为可信守门员-develop-首绿-release-能发出三平台可用产物.md
 - orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md
-- tasks/gap-goal020-exit-conditions-stale-after-sea-channel-retired.md (new)
+- tasks/gap-goal020-exit-conditions-stale-after-sea-channel-retired.md
 
 ⛔ 无测试文件：本任务无代码路径（产物是 goal store 里的 body 文本 + 一份 SPEC 记录），其判据是 AC1/AC2 的两条可执行谓词当场干跑（含 AC4 负控制），不进套件。⛔ 本任务不新增 `plugin/scripts/*` 检查器——那会牵动 capability-catalog / outline / laydown 三处登记，而本轮要的是**改文本**不是**造仪器**。
