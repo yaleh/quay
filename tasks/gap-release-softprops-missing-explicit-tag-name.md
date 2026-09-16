@@ -35,9 +35,11 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 
 - [x] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
       `tag_name: ${{ inputs.tag }}`。
-- [x] 负控制（结构性，非真跑一次 release）：`grep -c "uses: softprops/action-gh-release" .github/workflows/release.yml`
-      与 `grep -c "tag_name: ${{ inputs.tag }}" .github/workflows/release.yml` 两个计数相等——每一处
+- [x] 负控制（结构性，非真跑一次 release）：`grep -cF 'uses: softprops/action-gh-release' .github/workflows/release.yml`
+      与 `grep -cF 'tag_name: ${{ inputs.tag }}' .github/workflows/release.yml` 两个计数相等——每一处
       softprops 调用都配了显式 tag_name，不是只修了其中一处。
+      （`-F` 必需，见 Evidence「仪器修正」：该模式含 `$` 与 `{}`，双引号下 bash 报 `bad substitution`
+      使 grep 根本没跑，单引号+BRE 下恒 0——两种写法均已用【已知为真】样本干跑证伪。）
 - [x] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
       **不传 `--ref`**（刻意复现本任务描述的误用场景）也能正确挂载到该 tag 的 Release 上，不再报
       "GitHub Releases requires a tag"。（若无法安排真实 dispatch，负控制那条静态检查已经是可核实的
@@ -50,8 +52,18 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 
 ## Evidence
 
-- 实现：`release.yml` 两处 `with:` 均含 `tag_name: ${{ inputs.tag }}`（line 165 / line 354）；
-  AC2 的结构性负控制实测 `grep -c "uses: softprops/action-gh-release"` = `grep -c "tag_name: ${{ inputs.tag }}"` = 2。
+- 实现：`release.yml` 两处 `with:` 均含 `tag_name: ${{ inputs.tag }}`（line 165 / line 354）；两处各带
+  解释性注释（为什么不能再依赖 dispatch ref）。
+- **仪器修正（AC2 的负控制原文不可执行，已干跑证伪并改成正则可执行的写法）**：原写法
+  `grep -c "tag_name: ${{ inputs.tag }}"` 两种 shell 形态**都失效**——①双引号下 bash 直接报
+  `tag_name: ${{ inputs.tag }}: bad substitution`，**grep 根本没跑**（无输出、无计数）；②单引号+BRE 下
+  **恒 0**：在【已知为真】样本（`printf '%s\n' "          tag_name: \${{ inputs.tag }}"`）上干跑同样得
+  `0`/exit 1，根因是该模式含 `$` 与 `{}`，在 BRE 下属元字符序列。⇒ 改用 `grep -cF`（固定串匹配）。
+  **修正后真实读数**：`grep -cF 'uses: softprops/action-gh-release' .github/workflows/release.yml` = **2**，
+  `grep -cF 'tag_name: ${{ inputs.tag }}'` = **2**（相等 ⇒ AC2 成立）。
+  **负控制（证明该谓词能取假、非空转）**：`grep -cF 'tag_name: ${{ inputs.NOPE }}'` = `0`、exit 1。
+  零计数配套动作亦已做：非零项打印命中的前 3 条实际内容 —— line 165 / line 354 两处 `with:` 下逐字为
+  `tag_name: ${{ inputs.tag }}`。
 - **全局阻塞（非本任务 delta，本轮一并处理）**：`quay-init-closure-ratchet --check-stale` 在 develop 上自
   `eb17c4ac1`（v0.7.1 release cut 把 `plugin/.claude-plugin/plugin.json` 去掉 `-dev` 后缀）起为红，
   而该 checker 是 `@static-tier change` 且 fail-closed，整轮 suite 在静态检查面即中止（本任务前两轮
@@ -63,6 +75,21 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   baseline 的 diff 仅 `fingerprint` 与 `plugin.json` 的 `sha`。内容由四个源文件唯一决定且幂等
   ⇒ 与 develop 独立重锚所得逐字相同（develop 若自行修复，本分支该改动在三点 diff 中变空操作）。
   故 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一并登记进 `## Touches`（anti-drift 需要）。
+- **本轮续跑（处置前两轮 exited-not-landed）**：
+  - ① 上一轮 suite 红（真因日志 `fan-in-suite-...~1789549690367-23cef8.log`：`STATIC_CHECK_FAILED:
+    quay-init-closure-ratchet-stale exit=1`，`# tests 0 / # fail 10` —— 0 个测试跑到，静态面即中止）
+    由本分支既有重锚提交处置；合并 develop 后在本 worktree 复跑
+    `quay-init-closure-ratchet.ts --check-stale` = `PASS: … laydown source fingerprint fresh
+    (233a7b2fd39d5a31…, 4 sources) — baseline in sync`、exit 0。
+  - ② 上一轮 `step=ff: fan-in-ff-merge: FF FAILED — not a fast-forward` 是**分支落后**（develop 前进），
+    非代码缺陷：本轮 `git merge --no-edit develop` **无冲突**成功（合入 24 个提交），分支不再落后。
+  - ③ 合并后跑 fan-in 同一条 scoped 门（`scripts/test.sh --for-task gap-release-softprops-missing-explicit-tag-name
+    --allow-thin`）**exit 0**：选择器取 0 个测试文件（thin 允许，全量仍在 fan-in 跑），静态面全 PASS
+    ——含直接读 `release.yml` 的 `advance-master.needs` 检查（7 个 job，6 个被 needs 覆盖，0 个漏）。
+- **AC3 明示取 fallback 分支**：本轮**未安排真实 dispatch**。`.quay/ci-runs.jsonl` 中 `Release` 类记录里，
+  本缺陷复现 run = `35075347245`（08:43:26Z, branch=`develop`, cancelled），其后最新一条 =
+  `35076017292`（08:50:36Z, branch=`v0.7.1` = 正确传了 ref 的那次, failure，与本事象不同因）。
+  修复未落地前**不存在「已修后的真实 dispatch」** ⇒ 依 AC3 自带条款以静态负控制为准，不阻塞落地。
 
 ## Touches
 
