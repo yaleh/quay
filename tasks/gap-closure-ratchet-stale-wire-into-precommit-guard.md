@@ -99,26 +99,26 @@ precommit-guard.ts 自身已有先例形态可循：③ goal_ac 写入面判定�
 
 ## Acceptance Criteria
 
-- [ ] AC1：构造一个"改了 laydown 内某个源文件（如 `plugin/.claude-plugin/plugin.json`）但未
+- [x] AC1：构造一个"改了 laydown 内某个源文件（如 `plugin/.claude-plugin/plugin.json`）但未
       同步 reanchor"的真实场景，**走一次真实的本地 `git commit`**（安装的 pre-commit 钩子，
       不是单测里直接调用 `judge()` 函数、不是跑 `scripts/test.sh`）——验证这个错误在 commit
       那一刻就被挡住或自动补全，不需要等到测试套件/CI 才发现。这是与旧任务
       `gap-quay-init-closure-ratchet-manual-reanchor-recurs` 的 AC3（单测断言形态）的关键
       区别，必须真跑一次 `git commit` 流程（可参照 `precommit-guard.test.mjs` 里已有的
       `installHookFromScratch` e2e 先例写法）。
-- [ ] AC2（负控制1，可证伪）：构造一个真实膨胀（非 shrink-only）的 laydown 改动，验证提交
+- [x] AC2（负控制1，可证伪）：构造一个真实膨胀（非 shrink-only）的 laydown 改动，验证提交
       依然被拒绝，不能被自动放行——证明这不是把棘轮放宽成恒真。
-- [ ] AC3（负控制2，性能/范围）：一个完全不触碰 laydown 源文件集合的普通提交，
+- [x] AC3（负控制2，性能/范围）：一个完全不触碰 laydown 源文件集合的普通提交，
       precommit-guard 的行为与耗时不受影响——附前后耗时读数（例如用 `Date.now()` 或 `time`
       包一次 judge() 调用），证明没有对所有提交都跑一次全量 laydown 现算。
-- [ ] AC4：若采用"自动重锚并入提交"方案，验证重锚后的 baseline 文件确实进了**同一次**提交
+- [x] AC4：若采用"自动重锚并入提交"方案，验证重锚后的 baseline 文件确实进了**同一次**提交
       （`git show <sha> --stat` 里能看到 `docs/analysis/quay-init-closure-ratchet.baseline.json`
       被改动），不是留下一处未暂存的改动；若采用"拒绝并提示"方案，本条改为验证拒绝信息里含
       可执行的修复命令（`--reanchor` 的完整调用形式）。
-- [ ] AC5：`LAYDOWN_SOURCES`（或其等价派生）在 precommit-guard.ts 与
+- [x] AC5：`LAYDOWN_SOURCES`（或其等价派生）在 precommit-guard.ts 与
       quay-init-closure-ratchet.ts 之间是单源复用（`export` + `import`），不是两份手抄清单——
       证据 = precommit-guard.ts 里对应的 `import` 行。
-- [ ] AC6：`bash scripts/test.sh --for-task gap-closure-ratchet-stale-wire-into-precommit-guard`
+- [x] AC6：`bash scripts/test.sh --for-task gap-closure-ratchet-stale-wire-into-precommit-guard`
       退出 0。
 
 ## Definition of Done
