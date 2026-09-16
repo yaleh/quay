@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import {
@@ -42,15 +41,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -316,8 +309,9 @@ test("regression: /tests renders a broken-key runId round as 200 with no fabrica
   const ws = makeWorkspace("ac95-fallback-reg-");
   const cwd0 = process.cwd();
   process.chdir(ws);
-  const port = await freePort();
-  const server = await startServer({ port, host: "127.0.0.1" });
+  // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+  const server = await startServer({ port: 0, host: "127.0.0.1" });
+  const port = server.address().port;
   try {
     fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
     fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), [
@@ -383,8 +377,9 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
 
   const cwd0 = process.cwd();
   process.chdir(ws);
-  const port = await freePort();
-  const server = await startServer({ port, host: "127.0.0.1" });
+  // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+  const server = await startServer({ port: 0, host: "127.0.0.1" });
+  const port = server.address().port;
   try {
     const routes = [
       ["/dashboard", "Dashboard"],
@@ -425,8 +420,9 @@ test("AC3: empty workspace still returns 200 with honest 未接入 states, never
   const ws = makeWorkspace("ac95-bare-");
   const cwd0 = process.cwd();
   process.chdir(ws);
-  const port = await freePort();
-  const server = await startServer({ port, host: "127.0.0.1" });
+  // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+  const server = await startServer({ port: 0, host: "127.0.0.1" });
+  const port = server.address().port;
   try {
     const testsPage = await get(port, "/tests");
     assert.equal(testsPage.status, 200);
@@ -505,8 +501,9 @@ test("AC2: /manager returns 200 and renders the retired liveness empty state (ne
 
   const cwd0 = process.cwd();
   process.chdir(ws);
-  const port = await freePort();
-  const server = await startServer({ port, host: "127.0.0.1" });
+  // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+  const server = await startServer({ port: 0, host: "127.0.0.1" });
+  const port = server.address().port;
   try {
     const r = await get(port, "/manager");
     assert.equal(r.status, 200, "GET /manager returns 200");

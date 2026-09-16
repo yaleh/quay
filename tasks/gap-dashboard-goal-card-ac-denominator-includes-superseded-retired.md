@@ -135,7 +135,7 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
   active GOAL 注入 `superseded`+`retired` 各一条后，卡片的分子分母**一字不变**，且分母严格小于挂钩
   记录数——证明过滤器在真实数据形状上生效，不是只对 fixture 生效。
 - AC4：1 achieved + 1 active + 2 已退场 ⇒ 进度条 50.0%（旧分母会是 25.0%），且与同行的纯文本「1/2」同源。
-- **AC5（先跑后改，实跑读数）**：受影响的既有测试文件（`gap-dashboard-goal-card-ac-progress-bar` /
+- **AC5（回归验证，实跑读数）**：受影响的既有测试文件（`gap-dashboard-goal-card-ac-progress-bar` /
   `gap-dashboard-goal-card-provider-backed` / `gap-webui-goal-list-tab-split-goal-ac` / `serve-goal-doc`）
   共 35 条全绿。其中 `goal-list-tab-split` 在「把 filter 临时还原成旧口径」的红对照里**也全绿**
   ⇒ 它的 fixture 不含终态记录，故**没有既有断言依赖旧口径**——这是实跑结论，不是"假设没有"。

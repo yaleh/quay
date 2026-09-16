@@ -23,6 +23,16 @@
 // hashes the laydown SOURCE tree and reds when a source file changed but the baseline was NOT
 // re-anchored. The full-tier byte ratchet (`--gate`) still measures the REAL laydown.
 //
+// TWO CONSUMERS, ONE JUDGMENT (gap-closure-ratchet-stale-wire-into-precommit-guard): the suite's
+// @static-tier change layer runs `--check-stale` (scripts/test.sh / runner-static-gate.ts) and the
+// CTIME OF WRITING runs the very same judgment in-process (`precommit-guard.ts` ④, importing
+// `LAYDOWN_SOURCES` / `readBaseline` / `collectSourceEntries` / `fingerprintOf` / `runLaydown` /
+// `checkClosureRatchet` from here). The second consumer exists because the first one is LATE: the
+// 2026-09-16 v0.8.0 release cut changed plugin.json (a laydown source) twice, committed + pushed
+// cleanly, and only the remote CI's full-suite run reported `STATIC_CHECK_FAILED:
+// quay-init-closure-ratchet-stale` (~1-2 min ×2 wasted runs). ⛔ This module stays the single home of
+// the judgment; the guard is a caller, never a second implementation (硬规则 1 / 5b).
+//
 // THE FINGERPRINT SOURCE SET is the precise set that DETERMINES the closed-set laydown output:
 //   plugin/scripts/quay-init.sh          the generator (config.yml / .gitignore / settings.json content)
 //   plugin/.quay/profiles.yml            template laid verbatim
@@ -72,7 +82,12 @@ const BASELINE_FILE_REL = "docs/analysis/quay-init-closure-ratchet.baseline.json
 // quay-init.sh is the generator (its content decides config.yml/.gitignore/.claude/settings.json);
 // the two templates are laid verbatim; plugin.json is read for the plugin name+version. A change to
 // ANY of these must invalidate the baseline (re-anchor).
-const LAYDOWN_SOURCES: readonly string[] = [
+// EXPORTED (gap-closure-ratchet-stale-wire-into-precommit-guard): `precommit-guard.ts` imports this
+// very constant to decide whether a commit touches the laydown source set — the freshness judgment is
+// now ALSO run at the commit moment (④ there), not only at the suite's @static-tier change layer.
+// ⛔ It must stay a single exported constant: a second hand-copied list in the guard would drift and
+// one side would silently stop checking (硬规则 5b).
+export const LAYDOWN_SOURCES: readonly string[] = [
   "plugin/scripts/quay-init.sh",
   "plugin/.quay/profiles.yml",
   "plugin/.claude/launch.settings.json",

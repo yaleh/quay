@@ -19,9 +19,17 @@ const helper = join(repoRoot, "plugin", "scripts", "runner-grouping-metadata.mjs
 
 /** The OLD group_of (grep -m1 -oE | awk) this helper replaced — the byte-compat ground truth. */
 function oldGroupOf(file) {
+  // `-I` (== --binary-files=without-match) is NOT decoration: without it the reference is only
+  // reproducible on the grep IMPLEMENTATION this test happened to be written against. Whether a
+  // binary file's "Binary file <path> matches" notice reaches stdout or stderr is implementation-
+  // defined, and `2>/dev/null` only hides the stderr half: on the tokyo-alpha runner (GNU grep) it
+  // reaches stdout, so `awk '{print $2}'` yields `file` and the binary fixture classifies as
+  // `UNKNOWN:file`, while ugrep/GNU-grep-to-stderr hosts (this repo's dev machines,
+  // ubuntu-latest) yield the documented `engine`. Pinning `-I` makes the oracle state the intent
+  // the fixture is built on — a binary file never contributes a declaration — on every host.
   const r = spawnSync(
     "bash",
-    ["-c", `grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$1" 2>/dev/null | awk '{print $2}' || true`, "_", file],
+    ["-c", `grep -I -m1 -oE '@test-group[[:space:]]+[a-z]+' "$1" 2>/dev/null | awk '{print $2}' || true`, "_", file],
     { encoding: "utf8" },
   );
   const g = r.stdout.trim();

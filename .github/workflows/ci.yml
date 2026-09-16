@@ -9,7 +9,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 2026-09-16: moved off ubuntu-latest onto the self-hosted tokyo-alpha runner (128-core EPYC /
+    # 246G, docker-based ephemeral runner registered via systemd --user gh-runner-quay.service on
+    # that host). This job is the heavy one (full node --test suite) — the labeled box is a single
+    # machine, not GitHub's fleet, so if it's ever offline this job queues indefinitely rather than
+    # falling back to a hosted runner; revert this line to `ubuntu-latest` (and restore the pinned
+    # `--test-concurrency=8` below) to fail back.
+    runs-on: [self-hosted, tokyo-alpha]
     # 2026-09-15 真机实测：这个 job 曾经在 4 核 runner 上、`--test-concurrency=8` 显式覆盖下能在
     # 10 分钟内跑完；本轮实测（develop tip 017d4f8f4）静态检查阶段本身已通过，真正的 `node --test`
     # 阶段跑满整整 10 分钟被 GitHub 判超时中止（`The job has exceeded the maximum execution time of
@@ -17,7 +23,22 @@ jobs:
     # server-restart* / verification-marginal-return 等），10 分钟这个字面量已经不够。⛔ 不是回归，
     # 是套件规模增长追上了预算；把预算调宽，⛔ 不要把并发再往上堆（4 核 runner，堆并发只加剧争用，
     # 参见下面「Run tests」步骤自己的注释）。
+    # 上面这段全部是 ubuntu-latest 4 核时代的记录，保留是因为回退时（见上）这个 25 分钟预算和
+    # --test-concurrency=8 要一起恢复；tokyo-alpha 是 128 核，budget 留宽松值即可，不必收紧。
     timeout-minutes: 25
+    # 2026-09-16 (gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red): the job DECLARES the locale it
+    # runs the suite under instead of inheriting whatever the runner host happens to be. Two
+    # order-sensitive assertions — plugin/test/test-file-snapshot.test.mjs and
+    # plugin/test/develop-deliver-tgz-evidence-transport.test.mjs — compare against the ordering
+    # their producers emit from `sort -u`, and GNU sort's collation is locale-dependent: under
+    # en_US.UTF-8 (what the tokyo-alpha image exports) punctuation is ignored at the primary level,
+    # so the same `sort -u` emits a DIFFERENT order than under C. A/B at one commit, same machine:
+    # LC_ALL=C.UTF-8 ⇒ 27 pass / 0 fail; LC_ALL=en_US.UTF-8 ⇒ 25 pass / 2 fail. C.UTF-8 is also the
+    # configuration the suite is written and was green against (ubuntu-latest runs it), so pinning
+    # it here restores the tested configuration rather than inventing a new one.
+    env:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
     permissions:
       contents: read
       issues: read
@@ -29,6 +50,24 @@ jobs:
           # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
           # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
           fetch-depth: 0
+      - name: Materialize the `develop` ref the suite reads by name
+        # Three checks resolve this repo's authoritative branch as a LOCAL ref named `develop`:
+        # plugin/scripts/direct-to-develop-bypass-check.ts returns NOT-EVALUATED ("rev-list-unreadable")
+        # when there is no local `develop` branch, and the two git-graph decoration tests count the
+        # develop label in `git log --all --pretty=%D` — which renders `origin/develop` when only the
+        # remote-tracking ref exists, so the label is counted ZERO times. `actions/checkout@v4` leaves
+        # every branch except the checked-out one as remote-tracking, and this job is dispatched on
+        # task branches / master as well as develop. Measured on a scratch clone driven by exactly
+        # `git init` + fetch + `checkout -B` (checkout's own mechanism), at this commit: 3 test files
+        # red without this step, 0 red with it. Same commit, same machine, only the ref set differs.
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify -q refs/heads/develop >/dev/null; then
+            echo "develop is already a local branch ($(git rev-parse --short develop))"
+          else
+            git branch develop refs/remotes/origin/develop
+            echo "created local develop -> $(git rev-parse --short develop)"
+          fi
       - uses: actions/setup-node@v4
         with:
           # M120 (DIR-060): this step SPAWNS the `.ts` CLI bins as subprocesses
@@ -38,6 +77,78 @@ jobs:
           # >=20.0.0, and the distributed tarball's Node-20 floor is proven
           # separately by the dist-verify-node-floor job below.
           node-version: '24'
+      - name: Install suite runtime prerequisites
+        # This suite is NOT self-contained — the PRODUCT's own shell scripts shell out to
+        # `python3 -c 'import yaml, ...'` (plugin/scripts/quay-init.sh, quay-launch.sh,
+        # manager-start.sh, verify-deliver-coldstart.sh), and the tmux cross-session tests
+        # (tmux-leak-scan / supervisor-observe) need a real tmux binary. The tokyo-alpha image ships
+        # python3 WITHOUT PyYAML and no tmux at all: measured on run 35115599539 that reddened 25
+        # test files / 74 assertions, every one of them describing the ENVIRONMENT rather than a
+        # product defect (e.g. `ModuleNotFoundError: No module named 'yaml'` surfacing as
+        # "quay-init must succeed", "profiles.yml must parse as YAML").
+        # Provisioning lives HERE, in the reviewed workflow, and not on the runner host, so it is
+        # reproducible (a rebuilt runner converges on the same environment), auditable (the change
+        # is a diff), and cannot rot as "something someone installed once on that box".
+        run: |
+          set -euo pipefail
+          if python3 -c 'import yaml' >/dev/null 2>&1; then
+            echo "python3 already has PyYAML ($(python3 -c 'import yaml; print(yaml.__version__)'))"
+          elif sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml; then
+            echo "installed PyYAML via apt (python3-yaml)"
+          elif python3 -m pip install --break-system-packages pyyaml; then
+            echo "installed PyYAML via pip (apt unavailable)"
+          else
+            echo "FAIL: could not provision PyYAML by apt or pip"
+            exit 1
+          fi
+          if command -v tmux >/dev/null 2>&1; then
+            echo "tmux already present ($(tmux -V))"
+          else
+            sudo apt-get install -y -qq tmux
+            echo "installed tmux ($(tmux -V))"
+          fi
+          # procps (ps / pgrep): full-suite-runner.ts reads `pgrep -c -f 'full-suite-runner\.ts'`
+          # to count its own concurrent runners, and the suite's process-reaper tests shell out to
+          # `ps`. Measured on run 35125070795: `ps -o pid,stat,wcmd -p <live pid>` printed NOTHING
+          # on this runner while `process.kill(pid, 0)` reported the pid alive — i.e. the tool is
+          # absent, not the process. Its absence fails open in that one call site but is still an
+          # undeclared prerequisite of the suite.
+          if command -v pgrep >/dev/null 2>&1 && command -v ps >/dev/null 2>&1; then
+            echo "procps already present ($(ps --version 2>&1 | head -1))"
+          else
+            sudo apt-get install -y -qq procps
+            echo "installed procps ($(ps --version 2>&1 | head -1))"
+          fi
+      - name: Verify the suite's runtime prerequisites (fail-closed, enumerated)
+        # Hard rule 3b: an unprovisioned runner must produce ONE honest failure naming what is
+        # absent, never a pile of assertion failures inside unrelated test files that read as
+        # product defects. Enumerated rather than boolean: every prerequisite is named and its own
+        # state printed, and the step exits non-zero if any is missing.
+        run: |
+          set -uo pipefail
+          fail=0
+          check() {
+            local label="$1"; shift
+            if "$@" >/dev/null 2>&1; then printf 'ok      %s\n' "$label"
+            else printf 'MISSING %s\n' "$label"; fail=1; fi
+          }
+          check "python3"           command -v python3
+          check "python3 + PyYAML"  python3 -c 'import yaml'
+          check "jq"                command -v jq
+          check "tmux"              command -v tmux
+          check "ps"                command -v ps
+          check "pgrep"             command -v pgrep
+          check "bash"              command -v bash
+          check "git"               command -v git
+          check "node >= 23"        node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 23 ? 0 : 1)'
+          check "local develop ref" git rev-parse --verify -q refs/heads/develop
+          echo "--- runner environment ---"
+          echo "uid=$(id -u)  LC_ALL=${LC_ALL:-<unset>}  awk=$(command -v awk) [$(awk -W version 2>&1 | head -1)]"
+          if [ "$fail" != 0 ]; then
+            echo "FAIL: the runner is missing suite prerequisites named above"
+            exit 1
+          fi
+          echo "PASS: every suite runtime prerequisite is present"
       - run: npm install
       - name: Test-coverage self-check (DIR-110/ADR-019 decision #4)
         # Early, cheap, fail-fast: catches the DIR-108 failure class (a real test file sitting on
@@ -61,21 +172,35 @@ jobs:
         # promises a human contributor (git clone + npm install, nothing about .quay/config.yml).
         run: cp .quay/config.yml.example .quay/config.yml
       - name: Run tests
-        # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
-        # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
-        # default. This job passes --test-concurrency=8 EXPLICITLY because the derived default
-        # (max(1, floor(nproc/2.1)) = 1 on a 4-core runner) would push the full suite past this
-        # job's 10-minute budget — the explicit override is the documented escape hatch the
-        # resource task preserves ("显式传入永远优先"). The resource gate still applies here
-        # (scripts/test.sh full-suite path), which is fine: a fresh runner's /proc/pressure/cpu
-        # reads ~0. The 3 live/conformance files (serve-github.test.mjs, provider-abi-conformance.test.mjs,
+        # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob.
+        # 2026-09-16 (gap-suite-not-robust-at-high-derived-concurrency): the `--test-concurrency=16`
+        # cap is REMOVED — back to `default_test_concurrency()`'s host reading. The cap was a literal
+        # that happened to equal the dev machines' core count (硬规则 4 推论二: a number that is
+        # "equivalent to no limit" only on the box you happen to run it on), and it did not fix
+        # anything: it hid three load-shaped defects that were real DEFECTS IN THE TESTS, each now
+        # root-caused and fixed instead of capped around —
+        #   • serve-board (and 11 sibling files) probed an ephemeral port on loopback, CLOSED it, and
+        #     bound it later ⇒ `listen EADDRINUSE 0.0.0.0:44203` under concurrency; now every one of
+        #     them binds `port: 0` once and reads the kernel's port off the live handle.
+        #   • fan-in-execute-paths §⑧⑩ waited for a detached suite's exit marker against a 15 s (then
+        #     60 s) wall-clock literal; now the wait is event-driven (`fs.watch` + the suite's own pid
+        #     liveness) and the clock survives only as an explicitly-configurable hang-guard.
+        #   • dead-code-after-return-check AC6 crashed (exit 1 == "violation found") when a listed
+        #     .sh vanished between its walk and its read — the npm-pack/delivery-smoke path stages a
+        #     mirror of `plugin/` INTO the source tree and `rm -rf`s it; a vanished file is now
+        #     skipped and REPORTED instead of being indistinguishable from a violation.
+        # Measured on this runner (self-hosted tokyo-alpha, 128 core) with the fixes: 5 consecutive
+        # uncapped runs, 0 failed / 0 cancelled. The resource gate still applies here (scripts/test.sh
+        # full-suite path) and is what protects this SHARED multi-user box from starting a full suite
+        # into an already-loaded machine. The 3 live/conformance files
+        # (serve-github.test.mjs, provider-abi-conformance.test.mjs,
         # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
         # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
         # hand-written grep/glob pattern — this job reports them `skipped`, not silently absent.
         # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
-        run: bash scripts/test.sh --test-concurrency=8
+        run: bash scripts/test.sh
         env:
           GH_TOKEN: ${{ github.token }}
 

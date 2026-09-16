@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { clearVerificationRoundCache } from "../src/observation.ts";
@@ -28,15 +27,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -152,9 +145,10 @@ test("AC1: gantt pagination makes every timed file reachable — page 1 is parti
   try {
     const { count } = seedTimelineRound(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // Fetch every gantt page directly (?ganttPage=N). The Next » link itself is covered by AC2 — here we
     // just sum the bars across the whole page range (the "翻遍全部分页页面" half of the AC).
@@ -188,9 +182,10 @@ test("AC2: gantt has its own Page size + Next » nav (ganttPage/ganttPageSize), 
   try {
     seedTimelineRound(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const p1 = await get(port, "/tests");
     assert.equal(p1.status, 200, "AC2: GET /tests returns 200");
@@ -221,9 +216,10 @@ test("AC3: bars are start-time ASC per page, and the last page's last bar is the
   try {
     const { asc, maxEndFile } = seedTimelineRound(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const p1 = await get(port, "/tests");
     const files1 = ganttFiles(extractGanttSvg(p1.body));
@@ -249,9 +245,10 @@ test("AC4: default /tests gantt SVG fragment is < 30,000 bytes", async () => {
   try {
     seedTimelineRound(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "AC4: GET /tests returns 200");
@@ -273,9 +270,10 @@ test("AC5: gantt title names the page range, never '仅显示最慢'", async () 
   try {
     seedTimelineRound(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const p1 = await get(port, "/tests");
     const svg1 = extractGanttSvg(p1.body);

@@ -138,23 +138,66 @@ export function detectFileViolations(rel: string, source: string): Violation[] {
   return out;
 }
 
-/** Scan a tree for dead-code-after-return instances. Pure + fs: the caller picks the root. */
-export function scanTree(root: string): { violations: Violation[]; files: string[] } {
+/** A file the walk listed that could not be read at read time. */
+export interface Unreadable {
+  rel: string;
+  reason: string;
+}
+
+/**
+ * Scan a tree for dead-code-after-return instances. Pure + fs: the caller picks the root.
+ *
+ * ── WALK→READ IS TWO STEPS, AND THE TREE CAN MOVE BETWEEN THEM ──────────────────────────────────
+ * The walk (`collectShellScripts`) already TOLERATES an unreadable directory (`walkFiles` swallows
+ * the readdir error and moves on). The read step did not tolerate anything — which made the whole
+ * checker crash with an uncaught ENOENT whenever a listed file disappeared before it was read.
+ *
+ * ⛔ WHY THIS IS NOT HYPOTHETICAL (measured 2026-09-16, this defect is what the run's AC6 red was):
+ * the repo tree is NOT a stable object while the suite runs — the npm-pack / delivery-smoke path
+ * stages a MIRROR of the whole plugin tree into the SOURCE tree and removes it again
+ * (`packages/quay/test/delivery-standalone-smoke.sh`: `STAGED_PLUGIN="$ROOT/packages/quay/plugin"`,
+ * `rm -rf` → `cp -R plugin/.` → `npm pack` → `rm -rf`; same staging in `packages/quay/scripts/
+ * package.sh`). `packages/quay/plugin` is not in SKIP_DIRS, and the walk follows it, so a scan that
+ * spans the teardown sees every staged `.sh` listed and then gone. Observed directly: a probe
+ * walking the same surface found 186 ENOENT reads under `packages/quay/plugin/` while the suite ran,
+ * and 0 anywhere else. A crash there is EXIT 1 — the checker's own "at least one instance" code —
+ * so a race is indistinguishable from a real violation (硬规则 3b: 读不懂 ⇒ 伪装成「发现违规」;
+ * CI run 35121096175's `dead-code-after-return-check.test.mjs:90` `1 !== 0` is exactly this, with
+ * the in-process scan microseconds earlier clean).
+ *
+ * The fix follows the convention this repo already established for the same race
+ * (`plugin/test/loop-shipping.test.mjs`: "ENOENT during scan = race, not a crash"): a file that
+ * VANISHED is skipped — it is not in the tree any more, so it is not part of a strict-zero band —
+ * and a non-ENOENT read error still surfaces (a genuinely unreadable file must never be silently
+ * treated as clean). Skipped files are RETURNED in `unreadable`, never swallowed: "0 violations"
+ * has to stay distinguishable from "0 violations over an input I could only partly read".
+ */
+export function scanTree(root: string): { violations: Violation[]; files: string[]; unreadable: Unreadable[] } {
   // The skip-set is this checker's OWN: it prunes `vendor`, where adr016-screen-use-check.ts prunes
   // `dist-sea` instead. ⛔ The two stay apart (fs-walk.ts#collectShellScripts) — merging them would
   // change which files each scans, and a checker reading the wrong surface passes silently (硬规则 3b).
   const files = collectShellScripts(root, SKIP_DIRS);
   const violations: Violation[] = [];
+  const unreadable: Unreadable[] = [];
   for (const rel of files) {
-    const source = fs.readFileSync(path.join(root, rel), "utf8");
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(root, rel), "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw err;
+      unreadable.push({ rel, reason: code });
+      continue;
+    }
     violations.push(...detectFileViolations(rel, source));
   }
-  return { violations, files };
+  return { violations, files, unreadable };
 }
 
 export interface ScanReport {
   violations: Violation[];
   files: string[];
+  unreadable: Unreadable[];
 }
 
 /**
@@ -166,7 +209,11 @@ export function judgeScan(scan: ScanReport): DriverResult<ScanReport> {
   if (scan.violations.length > 0) {
     return failed(`${scan.violations.length} dead-code-after-return instance(s)`);
   }
-  return verified(scan, "全树无 dead-code-after-return 实例（strict-zero band）");
+  // The walk→read race (see scanTree) is NOT a violation and NOT a silent pass: a file that
+  // vanished between the walk and the read is reported in the verdict's own words, so a reader can
+  // always tell "scanned everything" from "scanned everything that was still there".
+  const racy = scan.unreadable.length > 0 ? `；${scan.unreadable.length} 个文件在 walk→read 之间消失（ENOENT，已跳过）` : "";
+  return verified(scan, `全树无 dead-code-after-return 实例（strict-zero band）${racy}`);
 }
 
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
@@ -241,14 +288,17 @@ export function main(argv: string[]): number {
   }
 
   const scan = scanTree(root);
-  const { violations, files } = scan;
+  const { violations, files, unreadable } = scan;
   const result = judgeScan(scan);
   const ok = result.state === "verified";
 
   if (asJson) {
-    console.log(JSON.stringify({ ok, violations: violations.length, active: violations, files_scanned: files.length }, null, 2));
+    console.log(JSON.stringify({ ok, violations: violations.length, active: violations, files_scanned: files.length, unreadable }, null, 2));
   } else {
     console.log(`dead-code-after-return-check — ${files.length} shell script(s) scanned`);
+    // Printed on BOTH verdicts (never only on red): a vanished file is not a violation, but it is
+    // also not "the whole tree was read" — the two must not be conflated (硬规则 3b).
+    console.log(`unreadable: ${unreadable.length}${unreadable.length ? ` (${unreadable.map((u) => `${u.rel}:${u.reason}`).join(", ")})` : ""}`);
     if (violations.length === 0) {
       console.log("violations: 0");
     } else {

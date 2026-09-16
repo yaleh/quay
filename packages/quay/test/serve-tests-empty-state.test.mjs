@@ -28,7 +28,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { clearVerificationRoundCache, detectRoundWriterPath, readTests } from "../src/observation.ts";
@@ -71,15 +70,9 @@ function writeRound(ws, fields) {
   );
 }
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -96,8 +89,9 @@ function get(port, urlPath) {
 async function renderTestsPage(ws) {
   const cwd0 = process.cwd();
   process.chdir(ws);
-  const port = await freePort();
-  const server = await startServer({ port, host: "127.0.0.1" });
+  // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+  const server = await startServer({ port: 0, host: "127.0.0.1" });
+  const port = server.address().port;
   try {
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "/tests returned 200");

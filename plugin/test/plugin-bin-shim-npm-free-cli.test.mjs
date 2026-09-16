@@ -52,7 +52,7 @@
 //       turn a genuinely node-less machine into a fake success.
 //
 // Run: node --test plugin/test/plugin-bin-shim-npm-free-cli.test.mjs
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -106,8 +106,42 @@ function pathEntriesWithoutACompetingQuay() {
 // ...and additionally carrying no executable `node`, i.e. the configuration the
 // interpreter fallback exists for: the only `quay` reachable is the shim, and the
 // only interpreter the shim can use is one it finds for itself.
+//
+// ⚠️ "No `node` on PATH" must not be implemented by DROPPING the whole directory that carries
+// `node`: a directory holding `node` is usually the system bin dir, and it is also what holds
+// `bash` (the shim's `#!/usr/bin/env bash` shebang) and the coreutils the shim calls (`dirname`,
+// `readlink`). On ubuntu-latest and on developer machines `/usr/bin` has a `bash` and no `node`, so
+// dropping it was harmless; the self-hosted tokyo-alpha image ships a `/usr/bin/node`, so `/usr/bin`
+// was dropped and every reading below died before reaching the logic under test — with
+// `/usr/bin/env: 'bash': No such file or directory` (exit 127) when bash went missing, or with
+// `/…/plugin/bin/quay: line 43: dirname: command not found` once it was restored by hand.
+// Measured at one commit: this file is green where `/usr/bin` has no `node`, and 3 of its tests are
+// red where it does. So the fixture MIRRORS each such directory minus `node`/`quay` instead of
+// removing it: the premise (`command -v node` must fail — asserted, not assumed, below) still holds
+// while the interpreter and the coreutils the shim needs stay reachable.
+const _mirrorDirs = new Map();
+const _mirrorHandles = [];
+// The carrier-array + after() shape the tmp-leak-pairing-check recognises (a process.on("exit")
+// handler is not a cleanup region to that checker, even though it does clean up).
+after(() => {
+  for (const d of _mirrorHandles) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
+});
+
+function dirWithoutNode(dir) {
+  if (_mirrorDirs.has(dir)) return _mirrorDirs.get(dir);
+  const mirror = fs.mkdtempSync(path.join(os.tmpdir(), "quay-shim-shadow-"));
+  for (const entry of fs.readdirSync(dir)) {
+    if (entry === "node" || entry === "quay") continue;
+    try { fs.symlinkSync(path.join(dir, entry), path.join(mirror, entry)); } catch { /* unreadable entry: not needed */ }
+  }
+  _mirrorHandles.push(mirror);
+  _mirrorDirs.set(dir, mirror);
+  return mirror;
+}
+
 function pathEntriesWithoutQuayOrNode() {
-  return pathEntriesWithoutACompetingQuay().filter((d) => !isExecutable(path.join(d, 'node')));
+  return pathEntriesWithoutACompetingQuay()
+    .map((d) => (isExecutable(path.join(d, "node")) ? dirWithoutNode(d) : d));
 }
 
 // QUAY_PLUGIN_ROOT is dropped so the shim resolves the plugin root from its OWN

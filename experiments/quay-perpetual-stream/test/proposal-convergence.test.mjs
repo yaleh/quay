@@ -1210,7 +1210,20 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
       // real directory by this point, so writeFileSync over it would EISDIR instead.)
       const taskTelemetryDir = path.join(dir, "milestones", "prepare-telemetry", taskId);
       assert.ok(fs.existsSync(taskTelemetryDir), "A.1's earlier write already created this directory");
-      fs.chmodSync(taskTelemetryDir, 0o500);
+      // Sabotage the record write. A read-only DIRECTORY is only sabotage for a uid subject to
+      // DAC: as uid 0 (how the self-hosted tokyo-alpha CI runner executes) CAP_DAC_OVERRIDE makes
+      // the write succeed and `telemetryWriteOk` comes back true — measured, this test passes as
+      // uid 1000 and fails as uid 0 with this as the only difference. So on a root uid the
+      // directory is replaced by a regular file instead: the record write under it then fails with
+      // ENOTDIR for EVERY uid, which is the same AC13/AC14 "root is a FILE" shape the comment below
+      // says is unavailable — it is unavailable only while the directory is still there.
+      const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+      if (isRoot) {
+        fs.rmSync(taskTelemetryDir, { recursive: true, force: true });
+        fs.writeFileSync(taskTelemetryDir, "");
+      } else {
+        fs.chmodSync(taskTelemetryDir, 0o500);
+      }
 
       let decideOut;
       try {
@@ -1218,7 +1231,7 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
         assert.equal(decide.status, 0, decide.stdout);
         decideOut = JSON.parse(decide.stdout.trim());
       } finally {
-        fs.chmodSync(taskTelemetryDir, 0o700);
+        if (!isRoot) fs.chmodSync(taskTelemetryDir, 0o700);
       }
 
       // The core AC15 assertions: the write throw must NOT collapse to the outer catch-all's
@@ -2954,12 +2967,18 @@ fixture proposal text v1
     const { dir, charterFile } = makeCliScratch(taskId);
     try {
       runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
-      // Force the kill-timeout deterministically: a 50ms deadline is far below node's own spawn +
-      // --experimental-strip-types startup cost, so the child CANNOT finish the epoch logic — the
-      // timeout path (SIGKILL) fires, never a real completion or a fast-fail. This is the Contract
-      // measure: "并发 --new-epoch child 超时被 kill 时 CLI 返回的 code".
+      // Force the kill-timeout deterministically. It has to be forced, because the deadline only
+      // fires if the child cannot finish inside it, and that is a claim about the MACHINE, not
+      // about the code: the original 50ms was chosen on the theory that it sits "far below node's
+      // own spawn + --experimental-strip-types startup cost". Measured on the self-hosted tokyo-alpha
+      // CI runner (128-core EPYC), a bare `node --no-warnings --experimental-strip-types -e
+      // 'process.exit(0)'` child starts AND exits in **19 ms** — so the epoch logic could finish
+      // inside 50ms and the timeout never fired (res.timeout=false on that runner, green on slower
+      // dev machines). 1ms is below the process-spawn floor on every machine, so the deadline is
+      // structurally unreachable rather than probably-unreachable. This is the Contract measure:
+      // "并发 --new-epoch child 超时被 kill 时 CLI 返回的 code".
       const res = await spawnNewEpoch(dir, taskId, charterFile, {
-        reason: "forced-timeout", owner: "owner-timeout", confirmUnchangedScope: true, timeoutMs: 50,
+        reason: "forced-timeout", owner: "owner-timeout", confirmUnchangedScope: true, timeoutMs: 1,
       });
       assert.equal(res.timeout, true, "the child must be killed by the kill-timeout guard (res.timeout=true)");
       const parsed = parseCliJson(res);
