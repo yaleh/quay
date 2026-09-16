@@ -4,7 +4,23 @@
  * that release.yml produces the artifacts it declares. Fail-closed: any
  * discrepancy → non-zero exit.
  *
- * Usage: node --experimental-strip-types scripts/delivery-manifest-check.ts [--json] [--ci]
+ * THE ARTIFACT SET IS NOW THE PLUGIN CHANNEL ONLY. The npm-pack (.tgz) and Node-SEA lines were
+ * cancelled by the human ruling of 2026-09-16 (orchestration/SPEC-release-and-hotfix-branching-
+ * 2026-09-15.md §11 — 「取消 sea 和 npm release」), and release.yml's six artifact jobs were removed
+ * with them. `npm-tarballs` / `sea-binaries` are therefore OPTIONAL manifest sections, and an empty
+ * one is a READING, not a defect: it is exactly what "the artifact line is cancelled" looks like.
+ * ⛔ The alignment rule itself is unchanged and still runs in BOTH directions — an artifact
+ * release.yml produces but the manifest does not declare (or vice versa) is still RED — so the
+ * sections cannot silently reappear on one side only.
+ *
+ * ⛔ THE `--ci` MODE IS GONE, and that is not a weakening: it cross-checked the manifest's declared
+ * artifacts against the assets a real GitHub Release had published, and the `delivery-manifest-verify`
+ * job that ran it was removed by the same ruling. With no published assets there is nothing left for
+ * it to judge — a mode that fetched a release and compared zero declarations against it would pass
+ * always, which is the shape 硬规则 3b warns about (a check that cannot take the value false reads
+ * as "everything is fine"). Its subject is gone, so the mode goes rather than turn vacuous.
+ *
+ * Usage: node --experimental-strip-types scripts/delivery-manifest-check.ts [--json]
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -37,8 +53,11 @@ export interface DeliveryManifest {
   description: string;
   version: string;
   artifacts: {
-    'npm-tarballs': ManifestArtifact[];
-    'sea-binaries': ManifestArtifact[];
+    /** OPTIONAL since the 2026-09-16 ruling cancelled the npm-pack line (see the header): absent or
+     *  empty means "this project no longer publishes npm tarballs", which is the current truth. */
+    'npm-tarballs'?: ManifestArtifact[];
+    /** OPTIONAL for the same reason (the Node-SEA line was cancelled alongside npm). */
+    'sea-binaries'?: ManifestArtifact[];
     plugin: ManifestPlugin;
   };
 }
@@ -52,12 +71,6 @@ export interface ManifestCheckResult {
   npmTarballsDeclared: number;
   seaPackagesDeclared: number;
   issues: string[];
-}
-
-export interface CiCheckResult extends ManifestCheckResult {
-  ciMode: boolean;
-  releaseTag: string | null;
-  publishedAssetCount: number;
 }
 
 export function readManifest(root: string): DeliveryManifest | null {
@@ -104,37 +117,37 @@ export function check(root: string): ManifestCheckResult {
     };
   }
 
-  // Validate manifest structure
+  // Validate manifest structure. npm-tarballs / sea-binaries are OPTIONAL sections (see the
+  // header): an ABSENT section is the readable statement "this project no longer produces that
+  // artifact", so it is not a malformed manifest. A section that is present must still be an array.
+  const npmDeclared = manifest.artifacts?.['npm-tarballs'];
+  const seaDeclared = manifest.artifacts?.['sea-binaries'];
   const manifestValid =
     manifest.$schema === 'delivery-manifest-v1' &&
     typeof manifest.version === 'string' &&
     manifest.version.length > 0 &&
-    Array.isArray(manifest.artifacts?.['npm-tarballs']) &&
-    Array.isArray(manifest.artifacts?.['sea-binaries']) &&
+    (npmDeclared === undefined || Array.isArray(npmDeclared)) &&
+    (seaDeclared === undefined || Array.isArray(seaDeclared)) &&
     manifest.artifacts?.plugin != null;
 
   if (!manifestValid) {
-    issues.push('manifest structure invalid — missing required fields ($schema, version, artifacts.*)');
+    issues.push('manifest structure invalid — missing required fields ($schema, version, artifacts.plugin)');
   }
 
   const npmTarballs = manifest.artifacts?.['npm-tarballs'] ?? [];
   const seaBinaries = manifest.artifacts?.['sea-binaries'] ?? [];
   const plugin = manifest.artifacts?.plugin;
 
-  // Check npm tarballs
-  if (npmTarballs.length === 0) {
-    issues.push('no npm tarballs declared in manifest');
-  }
+  // ⛔ NO "the section must be non-empty" rule. That rule was correct while the npm/SEA lines
+  // existed (an empty section meant entries had been lost); it is now backwards — it would redden
+  // the manifest for correctly recording that the line is cancelled. What still has to be present
+  // is the plugin entry below, so a manifest stripped of ALL its content is still caught.
   for (const t of npmTarballs) {
     if (!t.package || !t.artifactPattern) {
       issues.push(`npm tarball entry missing required fields: ${JSON.stringify(t)}`);
     }
   }
 
-  // Check SEA binaries
-  if (seaBinaries.length === 0) {
-    issues.push('no SEA binaries declared in manifest');
-  }
   for (const s of seaBinaries) {
     if (!s.package || !Array.isArray(s.platforms) || s.platforms.length === 0) {
       issues.push(`SEA binary entry missing required fields: ${JSON.stringify(s)}`);
@@ -185,7 +198,7 @@ export function check(root: string): ManifestCheckResult {
   }
 
   // ── Result ────────────────────────────────────────────────────────
-  const structureOk = manifestValid && npmTarballs.length > 0 && seaBinaries.length > 0 && !!plugin?.id;
+  const structureOk = manifestValid && !!plugin?.id;
   const alignmentOk = issues.length === 0;
 
   return {
@@ -200,292 +213,27 @@ export function check(root: string): ManifestCheckResult {
   };
 }
 
-// ── CI mode: verify manifest entries against actual published GitHub Release assets ──
-
-interface GitHubReleaseAsset {
-  name: string;
-  content_type: string;
-  size: number;
-}
-
-interface GitHubReleaseResponse {
-  tag_name: string;
-  assets: GitHubReleaseAsset[];
-}
-
-/**
- * Build a set of published asset names from a GitHub Release API response.
- * Lowercased for case-insensitive matching.
- */
-function extractPublishedAssetNames(assets: GitHubReleaseAsset[]): Set<string> {
-  return new Set(assets.map(a => a.name.toLowerCase()));
-}
-
-/**
- * Check whether a manifest entry's npm-tarball artifactPattern matches any
- * published asset name.  The pattern is a template like "quay-{version}.tgz";
- * we convert it to a regex by escaping literal chars and replacing {version}
- * with [^-]+ (anything between hyphens).
- */
-function npmPatternMatchesAsset(pattern: string, assetName: string): boolean {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp('^' + escaped.replace(/\\\{version\\\}/g, '[^-]+') + '$', 'i');
-  return re.test(assetName);
-}
-
-/**
- * Check whether a manifest SEA binary entry is covered by published assets.
- * If the entry has `bundled-with`, it is satisfied iff the bundled package's
- * SEA asset exists. Otherwise, each platform must have a matching asset.
- */
-function seaEntryHasPublishedAsset(
-  entry: ManifestArtifact,
-  version: string,
-  publishedAssets: Set<string>,
-  seaPublished: Set<string> // package names that have published SEA assets
-): boolean {
-  if (entry['bundled-with']) {
-    return seaPublished.has(entry['bundled-with']);
-  }
-  // Direct SEA entry: expect quay-sea-{version}-{platform}.{ext} for each platform
-  for (const plat of entry.platforms ?? []) {
-    const base = `quay-sea-${version}-${plat}`.toLowerCase();
-    const hasZip = publishedAssets.has(`${base}.zip`);
-    const hasTgz = publishedAssets.has(`${base}.tar.gz`);
-    if (!hasZip && !hasTgz) return false;
-  }
-  return true;
-}
-
-/**
- * Check whether the plugin entry is covered by published assets.
- * The plugin is bundled inside the npm-pack tarball per the manifest note.
- */
-function pluginEntryHasPublishedAsset(
-  _plugin: ManifestPlugin,
-  _version: string,
-  publishedAssets: Set<string>,
-  npmTarballPublished: boolean
-): boolean {
-  // Plugin is inside the npm tarball — satisfied iff npm tarball is published
-  return npmTarballPublished;
-}
-
-/**
- * checkCi — verify manifest entries against actual published GitHub Release
- * assets. Fetches release metadata via the GitHub REST API using `GITHUB_TOKEN`.
- * Fail-closed: any API error produces non-zero exit.
- */
-export async function checkCi(
-  root: string,
-  githubToken: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<CiCheckResult> {
-  const issues: string[] = [];
-  const manifest = readManifest(root);
-
-  if (!manifest) {
-    return {
-      ok: false, manifestFound: false, manifestValid: false, manifestVersion: '',
-      releaseYmlFound: false, npmTarballsDeclared: 0, seaPackagesDeclared: 0,
-      ciMode: true, releaseTag: null, publishedAssetCount: 0,
-      issues: ['delivery-manifest.json not found'],
-    };
-  }
-
-  const repo = process.env.GITHUB_REPOSITORY;
-  const tag = process.env.GITHUB_REF_NAME;
-
-  if (!repo || !tag) {
-    return {
-      ok: false, manifestFound: true, manifestValid: true, manifestVersion: manifest.version,
-      releaseYmlFound: false, npmTarballsDeclared: manifest.artifacts['npm-tarballs']?.length ?? 0,
-      seaPackagesDeclared: manifest.artifacts['sea-binaries']?.length ?? 0,
-      ciMode: true, releaseTag: tag ?? null, publishedAssetCount: 0,
-      issues: ['CI mode requires GITHUB_REPOSITORY and GITHUB_REF_NAME environment variables (are we running in a GitHub Actions release workflow?)'],
-    };
-  }
-
-  // Validate manifest structure
-  const manifestValid =
-    manifest.$schema === 'delivery-manifest-v1' &&
-    typeof manifest.version === 'string' &&
-    manifest.version.length > 0 &&
-    Array.isArray(manifest.artifacts?.['npm-tarballs']) &&
-    Array.isArray(manifest.artifacts?.['sea-binaries']) &&
-    manifest.artifacts?.plugin != null;
-
-  if (!manifestValid) {
-    issues.push('manifest structure invalid — missing required fields ($schema, version, artifacts.*)');
-  }
-
-  const npmTarballs = manifest.artifacts?.['npm-tarballs'] ?? [];
-  const seaBinaries = manifest.artifacts?.['sea-binaries'] ?? [];
-  const plugin = manifest.artifacts?.plugin;
-
-  let publishedAssetCount = 0;
-  let publishedAssets: Set<string> = new Set();
-  let releaseTag: string | null = null;
-
-  // Fetch release assets from GitHub API
-  try {
-    const [owner, repoName] = repo.split('/');
-    const url = `https://api.github.com/repos/${owner}/${repoName}/releases/tags/${encodeURIComponent(tag)}`;
-    const resp = await fetchImpl(url, {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    });
-
-    if (!resp.ok) {
-      issues.push(`GitHub API returned ${resp.status} for release tag '${tag}': ${resp.statusText}`);
-      return {
-        ok: false, manifestFound: true, manifestValid, manifestVersion: manifest.version,
-        releaseYmlFound: false,
-        npmTarballsDeclared: npmTarballs.length, seaPackagesDeclared: seaBinaries.length,
-        ciMode: true, releaseTag: tag, publishedAssetCount: 0,
-        issues,
-      };
-    }
-
-    const release: GitHubReleaseResponse = await resp.json();
-    releaseTag = release.tag_name;
-    publishedAssets = extractPublishedAssetNames(release.assets);
-    publishedAssetCount = release.assets.length;
-  } catch (err: any) {
-    issues.push(`Failed to fetch release assets: ${err.message ?? String(err)}`);
-    return {
-      ok: false, manifestFound: true, manifestValid, manifestVersion: manifest.version,
-      releaseYmlFound: false,
-      npmTarballsDeclared: npmTarballs.length, seaPackagesDeclared: seaBinaries.length,
-      ciMode: true, releaseTag: tag, publishedAssetCount: 0,
-      issues,
-    };
-  }
-
-  // ── Determine which packages have published SEA assets ──────────
-  const seaPublished = new Set<string>();
-  for (const s of seaBinaries) {
-    if (!s['bundled-with'] && seaEntryHasPublishedAsset(s, manifest.version, publishedAssets, seaPublished)) {
-      seaPublished.add(s.package);
-    } else if (s['bundled-with'] && seaPublished.has(s['bundled-with'])) {
-      seaPublished.add(s.package);
-    }
-  }
-
-  // ── Check npm tarballs against published assets ──────────────────
-  let npmTarballPublished = false;
-  for (const t of npmTarballs) {
-    let found = false;
-    for (const assetName of publishedAssets) {
-      if (npmPatternMatchesAsset(t.artifactPattern ?? '', assetName)) {
-        found = true;
-        npmTarballPublished = true;
-        break;
-      }
-    }
-    if (!found) {
-      issues.push(`manifest declares npm tarball '${t.package}' (pattern: ${t.artifactPattern}) but no matching published asset found in GitHub Release '${tag}'`);
-    }
-  }
-
-  // ── Check SEA binaries against published assets ──────────────────
-  for (const s of seaBinaries) {
-    if (s['bundled-with']) {
-      // Bundled: check that the bundled-with package has published assets
-      const bundledPkg = seaBinaries.find(sb => sb.package === s['bundled-with']);
-      if (!bundledPkg) {
-        issues.push(`manifest SEA entry '${s.package}' declares bundled-with '${s['bundled-with']}' but that package is not declared in the manifest`);
-        continue;
-      }
-      if (!seaEntryHasPublishedAsset(bundledPkg, manifest.version, publishedAssets, seaPublished)) {
-        issues.push(`manifest SEA entry '${s.package}' is bundled with '${s['bundled-with']}' but '${s['bundled-with']}' has no published SEA assets in GitHub Release '${tag}'`);
-      }
-    } else if (!s['bundled-with']) {
-      if (!seaEntryHasPublishedAsset(s, manifest.version, publishedAssets, seaPublished)) {
-        issues.push(`manifest declares SEA binary '${s.package}' for platforms [${(s.platforms ?? []).join(', ')}] but no matching published assets found in GitHub Release '${tag}'`);
-      }
-    }
-  }
-
-  // ── Check plugin against published assets ────────────────────────
-  if (plugin?.id) {
-    if (!pluginEntryHasPublishedAsset(plugin, manifest.version, publishedAssets, npmTarballPublished)) {
-      issues.push(`manifest declares plugin '${plugin.id}' but the npm tarball (which bundles it) is not published in GitHub Release '${tag}'`);
-    }
-  }
-
-  // ── Result ────────────────────────────────────────────────────────
-  return {
-    ok: manifestValid && issues.length === 0,
-    manifestFound: true,
-    manifestValid,
-    manifestVersion: manifest.version,
-    releaseYmlFound: existsSync(resolve(root, RELEASE_YML)),
-    npmTarballsDeclared: npmTarballs.length,
-    seaPackagesDeclared: seaBinaries.length,
-    ciMode: true,
-    releaseTag,
-    publishedAssetCount,
-    issues,
-  };
-}
-
 // ── CLI ────────────────────────────────────────────────────────────────
 const isMain = process.argv[1]?.endsWith('delivery-manifest-check.ts');
 if (isMain) {
-  const ciMode = process.argv.includes('--ci');
   const jsonMode = process.argv.includes('--json');
+  const result = check(process.cwd());
 
-  if (ciMode) {
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) {
-      console.error('DELIVERY-MANIFEST-CHECK: FAIL');
-      console.error('  - GITHUB_TOKEN not set — --ci mode requires a GitHub token');
-      process.exit(1);
-    }
-
-    checkCi(process.cwd(), token).then(result => {
-      if (jsonMode) {
-        console.log(JSON.stringify(result, null, 2));
-        process.exit(0);
-      }
-
-      if (!result.ok) {
-        console.error('DELIVERY-MANIFEST-CHECK (--ci): FAIL');
-        for (const i of result.issues) console.error(`  - ${i}`);
-        process.exit(1);
-      }
-
-      console.error('DELIVERY-MANIFEST-CHECK (--ci): OK');
-      console.error(`  manifest: ${MANIFEST_PATH} (v${result.manifestVersion})`);
-      console.error(`  release: ${result.releaseTag}`);
-      console.error(`  published assets: ${result.publishedAssetCount}`);
-      console.error(`  npm tarballs declared: ${result.npmTarballsDeclared}`);
-      console.error(`  SEA packages declared: ${result.seaPackagesDeclared}`);
-      process.exit(0);
-    });
-  } else {
-    const result = check(process.cwd());
-
-    if (jsonMode) {
-      console.log(JSON.stringify(result, null, 2));
-      process.exit(0);
-    }
-
-    if (!result.ok) {
-      console.error('DELIVERY-MANIFEST-CHECK: FAIL');
-      for (const i of result.issues) console.error(`  - ${i}`);
-      process.exit(1);
-    }
-
-    console.error('DELIVERY-MANIFEST-CHECK: OK');
-    console.error(`  manifest: ${MANIFEST_PATH} (v${result.manifestVersion})`);
-    console.error(`  npm tarballs declared: ${result.npmTarballsDeclared}`);
-    console.error(`  SEA packages declared: ${result.seaPackagesDeclared}`);
-    console.error(`  release.yml: ${result.releaseYmlFound ? 'found' : 'NOT FOUND'}`);
+  if (jsonMode) {
+    console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
+
+  if (!result.ok) {
+    console.error('DELIVERY-MANIFEST-CHECK: FAIL');
+    for (const i of result.issues) console.error(`  - ${i}`);
+    process.exit(1);
+  }
+
+  console.error('DELIVERY-MANIFEST-CHECK: OK');
+  console.error(`  manifest: ${MANIFEST_PATH} (v${result.manifestVersion})`);
+  console.error(`  npm tarballs declared: ${result.npmTarballsDeclared}`);
+  console.error(`  SEA packages declared: ${result.seaPackagesDeclared}`);
+  console.error(`  release.yml: ${result.releaseYmlFound ? 'found' : 'NOT FOUND'}`);
+  process.exit(0);
 }

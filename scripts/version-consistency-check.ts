@@ -135,16 +135,23 @@ const VERSION_ENTRIES: VersionEntry[] = [
     // Added by gap-release-cut-via-workflow-dispatch (2026-09-15). `delivery-manifest.json` was the
     // ONE version-bearing file outside this set, and it drifted exactly the way this checker exists to
     // prevent: bumped through `08e8ec55f` (0.4.0 -> 0.5.0) and then left at `0.5.0` across the 0.6.x/0.7.x
-    // bumps. The drift was invisible here but fatal on the release path —
-    // `scripts/delivery-manifest-check.ts:252` builds the expected asset name as
-    // `quay-sea-${manifest.version}-${platform}` and EXACT-matches it against the assets a run really
-    // published, so against release `v0.7.0` (assets `quay-sea-0.7.0-*`) it matched nothing. Measured
-    // two-way in the task worktree with the real GitHub Release: manifest 0.5.0 => 4 failures
-    // (2 SEA + 2 npm/plugin); manifest 0.7.0 => only the 2 npm/plugin failures that were there because
-    // that run's `release` job had failed and never uploaded `quay-0.7.0.tgz`. Same shape as the
-    // plugin/README.md and plugin/VERSION additions above (hard rule 5b: fixing the one instance that
-    // was reported does not mean it was the only one — the sweep over the other version-bearing files
-    // returned this single remaining point).
+    // bumps. The drift was invisible here but fatal on the release path — `delivery-manifest-check.ts`
+    // then built the expected asset name as `quay-sea-${manifest.version}-${platform}` and EXACT-matched
+    // it against the assets a run really published, so against release `v0.7.0` (assets
+    // `quay-sea-0.7.0-*`) it matched nothing. Measured two-way in the task worktree with the real GitHub
+    // Release: manifest 0.5.0 => 4 failures (2 SEA + 2 npm/plugin); manifest 0.7.0 => only the 2
+    // npm/plugin failures that were there because that run's `release` job had failed and never uploaded
+    // `quay-0.7.0.tgz`. Same shape as the plugin/README.md and plugin/VERSION additions above (hard rule
+    // 5b: fixing the one instance that was reported does not mean it was the only one — the sweep over
+    // the other version-bearing files returned this single remaining point).
+    // ⚠️ 2026-09-16: that asset-name cross-check no longer exists — the npm-pack and Node-SEA release
+    // lines were cancelled by the human ruling recorded in
+    // orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11, and `delivery-manifest-check`'s
+    // `--ci` asset-verification mode was removed with them. `delivery-manifest.json` STAYS in this union
+    // regardless: it is still a version-bearing release artifact (its `version` field tracks the release
+    // the manifest describes, and `delivery-manifest-check.test.ts` asserts it equals
+    // packages/quay/package.json's), and the original drift — the reason it was added — is a property of
+    // the file, not of the checker that happened to catch it.
     // The extractor THROWS when the field is absent: an unparseable manifest must land in mode:'error',
     // never be shaped like a version that agrees (hard rule 3b).
     label: 'delivery-manifest.json',
