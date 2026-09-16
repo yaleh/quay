@@ -187,6 +187,24 @@ jobs:
         run: bash scripts/test.sh --test-concurrency=16
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: DIAGNOSTIC (temporary) — residual reds in isolation + the spawn under test
+        if: always()
+        run: |
+          echo "=== node/version ==="; node --version; command -v node
+          echo "=== the two residual files ALONE, concurrency 1 ==="
+          node --test --test-reporter=spec --test-concurrency=1 \
+            experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs \
+            plugin/test/fan-in-execute-paths.test.mjs 2>&1 | tail -60
+          echo "=== how fast does a node child start+exit here? (the kill-timeout premise) ==="
+          node -e '
+            const {spawn} = require("child_process");
+            const t0 = Date.now();
+            const c = spawn("node", ["--no-warnings","--experimental-strip-types","-e","process.exit(0)"]);
+            c.on("close", (code) => console.log("bare node --experimental-strip-types child: code="+code+" ms="+(Date.now()-t0)));
+            setTimeout(()=>{c.kill("SIGKILL");console.log("SIGKILLed at 50ms-ish: ms="+(Date.now()-t0))}, 50);
+          '
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # M120 (DIR-060): floor-verification. The distributed npm-pack tarball's `bin`
   # is dist/quay.js and MUST run on the DECLARED floor (Node 20) — native `.ts`
