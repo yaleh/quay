@@ -1,7 +1,7 @@
 ---
 id: AC-265
 title: develop 上 CI 首次 decisive 绿，且该绿不是靠少跑测试换来的（testFiles ≥ 紧邻前一次 decisive run）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: |-
@@ -68,6 +68,11 @@ statusLog:
       超时)不可读，故以人工双向控制替代其保证——隔离 fixture 正控制(files 640>=631)exit 0、负控制(files
       610<631)exit 1 并指名 green-bought-by-skipping。⛔ force 越过的仅是 judge
       不可读，criterion 本身已跑且能取真能取假。
+  - at: 2026-09-16T08:25:47.127Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: forced
