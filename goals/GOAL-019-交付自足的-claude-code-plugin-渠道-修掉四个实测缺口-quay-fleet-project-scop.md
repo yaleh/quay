@@ -1,7 +1,7 @@
 ---
 id: GOAL-019
 title: 交付自足的 Claude Code plugin 渠道：修掉四个实测缺口 + quay-fleet project scope 纯插件部署验证
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-15 裁定（对话中三条）：①正常安装和使用 quay 不应使用 QUAY_PLUGIN_ROOT 这个环境变量；②优先遵循
   Claude Code plugin 分发和部署实践，在这一目标实现前不考虑 npm（除非 Claude Code plugin 分发和部署依赖 npm
@@ -15,6 +15,11 @@ statusLog:
     to: active
     actor: manager
     reason: 5 条 AC（AC-260..264）已落盘，激活本 GOAL
+  - at: 2026-09-16T04:39:40.543Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景（2026-09-15 实测，全部为直接量，非推断）
 
