@@ -64,6 +64,17 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   **负控制（证明该谓词能取假、非空转）**：`grep -cF 'tag_name: ${{ inputs.NOPE }}'` = `0`、exit 1。
   零计数配套动作亦已做：非零项打印命中的前 3 条实际内容 —— line 165 / line 354 两处 `with:` 下逐字为
   `tag_name: ${{ inputs.tag }}`。
+- **全局阻塞（非本任务 delta，本轮一并处理）**：`quay-init-closure-ratchet --check-stale` 在 develop 上自
+  `eb17c4ac1`（v0.7.1 release cut 把 `plugin/.claude-plugin/plugin.json` 去掉 `-dev` 后缀）起为红，
+  而该 checker 是 `@static-tier change` 且 fail-closed，整轮 suite 在静态检查面即中止（本任务前两轮
+  exited-not-landed 的真因：`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`，0 个测试跑到）。
+  核实为 develop 侧而非本任务 delta：`git rev-parse author develop HEAD` 三者同为 `f29dbe30a`，
+  两侧 `plugin.json` 逐字相同，主检出（= develop 内容）跑同一 checker 同样 exit 1。
+- 修法为机械重锚（shrink-only 未被洗白）：`--gate` PASS `3 files / 1022 bytes ≤ baseline 3/1022`（未增长）
+  ⇒ `--reanchor` 得 `3 files / 1022 bytes`（footprint 一字未变）⇒ `--check-stale` exit 0；
+  baseline 的 diff 仅 `fingerprint` 与 `plugin.json` 的 `sha`。内容由四个源文件唯一决定且幂等
+  ⇒ 与 develop 独立重锚所得逐字相同（develop 若自行修复，本分支该改动在三点 diff 中变空操作）。
+  故 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一并登记进 `## Touches`（anti-drift 需要）。
 - **本轮续跑（处置前两轮 exited-not-landed）**：
   - ① 上一轮 suite 红（真因日志 `fan-in-suite-...~1789549690367-23cef8.log`：`STATIC_CHECK_FAILED:
     quay-init-closure-ratchet-stale exit=1`，`# tests 0 / # fail 10` —— 0 个测试跑到，静态面即中止）
@@ -75,7 +86,6 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   - ③ 合并后跑 fan-in 同一条 scoped 门（`scripts/test.sh --for-task gap-release-softprops-missing-explicit-tag-name
     --allow-thin`）**exit 0**：选择器取 0 个测试文件（thin 允许，全量仍在 fan-in 跑），静态面全 PASS
     ——含直接读 `release.yml` 的 `advance-master.needs` 检查（7 个 job，6 个被 needs 覆盖，0 个漏）。
-    并按 develop sha `e440e8f61e7b8c933222bb6a53c23a7458551e3c` 写入 scoped-gate cache。
 - **AC3 明示取 fallback 分支**：本轮**未安排真实 dispatch**。`.quay/ci-runs.jsonl` 中 `Release` 类记录里，
   本缺陷复现 run = `35075347245`（08:43:26Z, branch=`develop`, cancelled），其后最新一条 =
   `35076017292`（08:50:36Z, branch=`v0.7.1` = 正确传了 ref 的那次, failure，与本事象不同因）。
