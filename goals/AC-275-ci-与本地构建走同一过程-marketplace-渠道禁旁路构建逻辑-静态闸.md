@@ -1,7 +1,7 @@
 ---
 id: AC-275
 title: CI 与本地构建走同一过程：marketplace 渠道禁旁路构建逻辑（静态闸）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-019
 criterion: 'grep -q "publish-dist-branch.sh"
@@ -25,4 +25,10 @@ origin: 人 2026-09-16 追问：要求确认 GitHub CI 与本地手工构建走�
   sea-release pin node-version 20，本机开发环境是 Node 25——同一份脚本在两处运行会嵌入不同的 Node
   运行时，说明脚本相同不能当然推出产出一致，必须逐条核实，不可一概而论。
 activatedAt: 2026-09-16T00:25:58.075Z
+statusLog:
+  - at: 2026-09-16T01:36:12.155Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
