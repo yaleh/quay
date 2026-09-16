@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import {
@@ -40,15 +39,31 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const DRIFT_CHECKER = path.join(__dirname, "..", "..", "..", "plugin", "scripts", "task-status-drift-check.ts");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// ⛔ `freePort()` (probe an ephemeral port on 127.0.0.1, CLOSE it, return the number) is DELETED from
+// this file, together with the 9 call sites that fed its result to `startServer({ port })`.
+//
+// THE DEFECT (measured, CI run 35121096175, tokyo-alpha at suite concurrency 128):
+//   `✖ AC7/execution column … Error: listen EADDRINUSE: address already in use 0.0.0.0:44203`
+// Probe-then-bind is a two-step TOCTOU over a SHARED resource: the probe's socket is closed before
+// it returns, so between the probe and the real `listen()` the port belongs to nobody — and at 128
+// concurrent test files, several processes are running exactly this dance, so the same ephemeral
+// port can be handed to two of them. (The probe also bound loopback while `startServer` binds
+// 0.0.0.0, so it was not even asking about the same interface — that half is the `tailscaled`-class
+// false negative recorded in `cli-test-serve-eaddrinuse-tailscaled-port-collision`.)
+//
+// THE FIX is not a retry or a bigger port range — it is to stop guessing: bind `port: 0` and read the
+// port the KERNEL actually bound off the live handle. `startServer` resolves only after the
+// 'listening' event (serve.ts#listenWeb), so `server.address().port` is authoritative and the socket
+// is held continuously — the window is structurally zero. `port: 0` is the repo's own documented
+// test convention for exactly this (`serve.ts`: "`--port 0` is the test convention for an ephemeral
+// port").
+//
+// 硬规则 5b: the same defect lived in the sibling files that fed a probed port to an IN-PROCESS
+// `startServer` (serve-handlers / gap-webui-tests-page-* / gap-dashboard-* / serve-live-implcomplete
+// / serve-ac95-views / serve-tests-empty-state / live-state) — all fixed in the same commit. The
+// residue is the files that hand the port to a SEPARATE PROCESS (`build-dist`, `plugin/test/
+// start-drivers`), where port 0 cannot be read back in-process; that residue is recorded in the
+// task's Finding rather than left implicit.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -157,9 +172,12 @@ test("AC2: /board data-flag agrees with the drift checker per-task (reuse by con
     assert.ok(!checker.suspects.includes("BD-3") && !checker.reverse.includes("BD-3"), "AC2: checker flags neither for BD-3");
     assert.equal(checker.scanned, 3, `AC2: checker scanned the 3 fixture tasks (got ${checker.scanned})`);
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC2: GET /board returns 200");
     assert.ok(board.body.includes("data-flag=\"done-unlanded\""), "AC2: board marks a done-unlanded task");
@@ -193,9 +211,12 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
   let server;
   try {
     seed(tasksDir, "NC-1", { title: "Negative control", status: "done", body: BD_BODY("ncNeverSymbol", "packages/quay/src/never-created.ts") });
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const board1 = await get(port, "/board");
     const checker1 = runChecker(ws);
@@ -239,9 +260,12 @@ test("AC5/AC6: three data sources visible; a missing source degrades to 200 (nev
   const cwd0 = process.cwd();
   let server;
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC6: /board still 200 when observation sources are missing");
     assert.ok(board.body.includes("意图") && board.body.includes("执行") && board.body.includes("落地"),
@@ -286,9 +310,12 @@ test("AC7/execution column: live run (process present) renders in-flight + timeo
     fs.writeFileSync(path.join(eventsDir, "fm-EX-1.jsonl"), startEvent(orphanRunId, "EX-1", startedAt));
     fs.writeFileSync(path.join(eventsDir, "fm-EX-2.jsonl"), startEvent(liveRunId, "EX-2", startedAt));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC7: /board 200 with telemetry present");
     // EX-2 (live process) is in-flight: renders 在飞 minutes + timeout flag.
@@ -352,9 +379,12 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
     fs.writeFileSync(path.join(eventsDir, "fm-AL-1.jsonl"),
       startEvent(alRunId, "AL-1", now - 20 * 60_000) + implCompleteEvent(alRunId, "AL-1", now - 5 * 60_000));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC8: /board 200 with the two-segment telemetry present");
     // The two INDEPENDENT counts render (1 implementing + 1 awaiting-land), not a single "2 在飞".
@@ -424,9 +454,12 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     assert.ok(!(lvFlags && lvFlags.has("in-flight-timeout")), "AC2: an orphan is not also in-flight-timeout");
 
     // 2) The process-liveness reading is effective against the REAL /board output.
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC2: /board 200");
     const lvRow = board.body.split("</tr>").find((r) => r.includes(">LV-1<"));
@@ -473,9 +506,12 @@ test("gap-webui-board-no-pagination: /board supports server-side ?page=N paginat
       seed(tasksDir, id, { title: `Pagination fixture ${id}`, status, labels, body: BD_BODY(`pg${id}Sym`, "packages/quay/src/pg-never-exists.ts") });
     }
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const countRows = (body) => body.split("</tr>").filter((r) => r.includes(">PGT-")).length;
 
@@ -555,9 +591,12 @@ test("AC1: /board cold load completes in single-digit seconds (TTL + 秒级 time
     fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const clSymbol = 1;\n");
     assert.ok(LANDING_CACHE_TTL_MS > 0 && LANDING_CACHE_TTL_MS <= 60_000,
       `AC1: the landing TTL (${LANDING_CACHE_TTL_MS}ms) is a short bounded window`);
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     clearLandingCache();
     const t0 = Date.now();
     const board = await get(port, "/board");
@@ -583,9 +622,12 @@ test("AC2 negative control: a cache-hit /board request does NOT cold-run the che
     seed(tasksDir, "CC-1", { title: "Cache control", status: "todo", body: BD_BODY("ccSymbol", "packages/quay/src/board-symbol.ts") });
     fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
     fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const ccSymbol = 1;\n");
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
+    // kernel-assigned port is read back from the live handle — there is no window for another test
+    // process to be handed the same port.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     clearLandingCache();
     const before = getLandingColdRunCount();
 

@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
+import net from "node:net"; // used by captureSocketFrames' UDS probe — NOT by the deleted freePort()
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
@@ -33,15 +33,9 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
 
 const DAY = 86400;
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -126,9 +120,12 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     // seed a task so startServer (which talks to the provider) has a store to read
     createStore(tasksDir).write("GH-1", { title: "git-history task", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "GET /git-history returns 200");
@@ -186,9 +183,12 @@ test("?view=task routing: /git-history serves the task view; default = ?view=git
     gitCommit(ws, "tasks: 翻 gap-1 done（driver 机械 fan-in）", { t: nowSec - 200 });
     createStore(tasksDir).write("gap-1", { title: "view task", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const def = await get(port, "/git-history");
     const gitView = await get(port, "/git-history?view=git");
@@ -223,9 +223,12 @@ test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (
   try {
     // NO git init — the workspace is not a git repo
     createStore(tasksDir).write("GH-DEG", { title: "degraded", status: "todo" });
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "non-git workspace still returns 200 (never 500)");
     assert.ok(r.body.includes("无数据"), "page renders 「无数据」 for a non-git workspace");
@@ -256,9 +259,12 @@ test("AC127: GET /tests renders the buckets column — a bucket row shows its la
 
     createStore(tasksDir).write("AC127-T", { title: "bucket web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -354,9 +360,12 @@ test("load curve: GET /tests renders the server-side load curve for the latest r
       ].join("\n"),
     );
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -493,9 +502,12 @@ test("AC2: GET /tests renders the timeline SVG when the latest perFile row carri
 
     createStore(tasksDir).write("TIMELINE", { title: "timeline web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -527,9 +539,12 @@ test("AC2: GET /tests renders the perFile table (sorted, failed red) — a legac
 
     createStore(tasksDir).write("AC2-PF", { title: "perfile web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -565,9 +580,12 @@ test("AC1/AC2: GET /tests renders a startedAt column per history row (carrier-so
 
     createStore(tasksDir).write("AC-STARTED-T", { title: "startedAt web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -628,9 +646,12 @@ test("AC1: the three sections each render their OWN referenced round (load curve
     seedDriftFixture(ws);
     createStore(tasksDir).write("RD-AC1", { title: "round drift web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -659,9 +680,12 @@ test("AC2: latest run without perFile shows the explicit 「最新一轮无 perF
     seedDriftFixture(ws);
     createStore(tasksDir).write("RD-AC2", { title: "round drift no-perfile notice", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -694,9 +718,12 @@ test("AC3: negative control — all three sections reference the same round cons
     ].join("\n"));
     createStore(tasksDir).write("RD-AC3", { title: "round consistency web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -793,9 +820,12 @@ test("AC1/AC2: GET /tests/file?path= returns a single-file detail page with cros
     seedFileDetailFixture(ws);
     createStore(tasksDir).write("FILEDETAIL", { title: "file detail web tests", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
     assert.equal(r.status, 200, "GET /tests/file returns 200");
@@ -827,9 +857,12 @@ test("AC2 falsifiability: a file appearing in only ONE round shows the explicit 
     seedFileDetailFixture(ws);
     createStore(tasksDir).write("FILEDETAIL-S", { title: "file detail single-round", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fonlyonce.test.mjs");
     assert.equal(r.status, 200, "GET /tests/file returns 200 even for a single-round file");
@@ -856,9 +889,12 @@ test("AC1 falsifiability: an unknown path (or absent path) renders the not-found
     seedFileDetailFixture(ws);
     createStore(tasksDir).write("FILEDETAIL-NF", { title: "file detail not-found", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const unknown = await get(port, "/tests/file?path=does%2Fnot%2Fexist.test.mjs");
     assert.equal(unknown.status, 200, "unknown path still returns 200 (never 500)");
@@ -888,9 +924,12 @@ test("AC3: GET /tests perFile table rows link each file to its /tests/file detai
     ].join("\n"));
     createStore(tasksDir).write("FILEDETAIL-L", { title: "file detail link", status: "todo" });
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -945,9 +984,12 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
       JSON.stringify({ t: start511 + 5000, loadavg: 8.0, cpu_stall: 55.0, mem_avail: 4800.0 }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r510 = await get(port, "/tests?round=510");
     assert.equal(r510.status, 200, "GET /tests?round=510 returns 200");
@@ -985,9 +1027,12 @@ test("AC2: GET /tests history #NNN cells are clickable links to /tests?round=N (
       JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests returns 200");
@@ -1014,9 +1059,12 @@ test("AC1 falsifiability: /tests?round=<absent> renders an explicit not-found no
       JSON.stringify({ round: 511, startedAt: "2026-08-23T02:00:00.000Z", durationMs: 400000, state: "green", runner: "outer", scope: "worktree", commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f", pass: 2, fail: 0, cancelled: 0, tests: 2, failures: [] }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests?round=999");
     assert.equal(r.status, 200, "GET /tests?round=999 returns 200");
@@ -1071,9 +1119,12 @@ test("AC1: GET /tests?round=N clips the load curve to [startedAt, startedAt+dura
       JSON.stringify({ t: start + durationMs + 100_000, loadavg: 9.5, cpu_stall: null, mem_avail: null }), // after window
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests?round=560");
     assert.equal(r.status, 200, "GET /tests?round=560 returns 200");
@@ -1113,9 +1164,12 @@ test("AC2: /tests/file and /tests?round=N both clip through the SAME shared filt
       JSON.stringify({ t: t0 + 600_000, loadavg: 4.0, cpu_stall: null, mem_avail: null }), // after both windows
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // The FILE page clips to the file's [startedAtMs, endedAtMs] = [t0+290, t0+500] → keeps 2 samples.
     const filePage = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
@@ -1162,9 +1216,12 @@ test("AC1: a broken-key round (runId ≠ load-file key) still shows its load cur
       JSON.stringify({ t: start + 30000, loadavg: 5.5, cpu_stall: null, mem_avail: null }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests?round=692");
     assert.equal(r.status, 200, "GET /tests?round=692 returns 200");
@@ -1209,9 +1266,12 @@ test("AC2: runId exact hit wins over the window fallback (priority — no regres
       JSON.stringify({ t: start + 25000, loadavg: 9.5, cpu_stall: null, mem_avail: null }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests?round=700");
     assert.equal(r.status, 200, "GET /tests?round=700 returns 200");
@@ -1245,9 +1305,12 @@ test("AC3: a broken-key round with NO matching load file (and a legacy no-durati
       JSON.stringify({ t: Date.parse("2026-08-20T00:00:00.000Z") + 10000, loadavg: 9.0, cpu_stall: null, mem_avail: null }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r710 = await get(port, "/tests?round=710");
     assert.equal(r710.status, 200, "GET /tests?round=710 returns 200 (no 500)");
@@ -1284,9 +1347,12 @@ test("AC1 (file page): /tests/file recovers a broken-key round's load fragment v
       JSON.stringify({ t: t0 + 95000, loadavg: 3.0, cpu_stall: null, mem_avail: null }),
     ].join("\n"));
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
     assert.equal(r.status, 200, "GET /tests/file returns 200");
@@ -1558,9 +1624,12 @@ test("AC3 (integration) — /session/<id>/download serves raw JSONL (attachment)
   fs.mkdirSync(transcriptDir, { recursive: true });
   fs.writeFileSync(transcriptPath, '{"type":"user","message":{"role":"user","content":"hello"}}\n');
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const ok = await getRes(port, `/session/${sid}/download`);
     assert.equal(ok.status, 200, "valid UUID download → 200");
@@ -1658,9 +1727,12 @@ test("AC3 (integration) — /fan-in-log/<task>/<file> serves inline + download, 
     const q = path.join(ws, ".quay");
     fs.mkdirSync(q, { recursive: true });
     fs.writeFileSync(path.join(q, "fan-in-gap-runs-1-r1.log"), '{"ts":"x","step":"merge-develop","exit":0,"wall_ms":1,"ok":true}\n');
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const ok = await getRes(port, "/fan-in-log/gap-runs-1/fan-in-gap-runs-1-r1.log");
     assert.equal(ok.status, 200, "valid fan-in log view → 200");
@@ -1794,9 +1866,12 @@ test("AC3 (integration) — POST /sessions/driver rejects interactive kinds + no
   const cwd0 = process.cwd();
   let server;
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     for (const kind of ["manager", "outer", "inner"]) {
       const r = await postJson(port, "/sessions/driver", { verb: "stop", kind });
@@ -1837,9 +1912,12 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
     fs.writeFileSync(path.join(scriptDir, "driver-runtime.ts"), "process.stdout.write(process.argv.slice(2).join(' '));\n");
     process.env.QUAY_PLUGIN_ROOT = path.join(ws, "plugin");
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await postJson(port, "/sessions/driver", { verb: "stop", kind: "worker" });
     assert.equal(r.status, 200, "valid driver action → 200 (delegated, not 400)");
@@ -2013,9 +2091,12 @@ test("AC2 (integration) — /session/<id> renders the /send form; POST /send ret
   let server;
   const sid = "066a1382-fde0-410b-bee1-78a4b5886132";
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header): bind 0 ONCE and
+    // read the port the kernel assigned off the live handle — a probed+closed port can be handed to a
+    // sibling test process before this bind, which is the suite-concurrency-128 EADDRINUSE flake.
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const page = await getRes(port, `/session/${sid}`);
     assert.equal(page.status, 200, "session view renders");

@@ -16,7 +16,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { readLive, decideLiveState } from "../src/observation.ts";
@@ -33,16 +32,9 @@ const VALID_SECTIONS =
   "## AC\n- [x] an acceptance criterion line\n" +
   "## DoD\n- [x] a definition-of-done line\n";
 
-/** Reserve a free TCP port (avoids pid-based collisions between concurrently-run test files). */
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -68,9 +60,10 @@ function makeWorkspace(prefix) {
 }
 
 /** Start a serve server bound to `ws` (chdir is restored by the caller). */
-async function startFor(ws, port) {
+/** ⛔ never probe-then-bind (see serve-board.test.mjs header): bind 0 and read the kernel's port back. */
+async function startFor(ws) {
   process.chdir(ws);
-  return startServer({ port });
+  return startServer({ port: 0 });
 }
 
 test("decideLiveState pins the contract decision rule (any activity ⇒ running-unwired; none ⇒ not-running)", () => {
@@ -96,8 +89,8 @@ test("AC2 negative control: telemetry absent + activity present ⇒ /live says �
     fs.writeFileSync(path.join(wsObj.ws, "orchestration", "tick-log.md"), "# tick\n| 时刻 | 动作 |\n|---|---|\n| now | fresh |\n");
     // NO .workflow-events/ — telemetry is empty.
 
-    const port = await freePort();
-    server = await startFor(wsObj.ws, port);
+    server = await startFor(wsObj.ws);
+    const port = server.address().port;
     const live = await get(port, "/live");
     assert.equal(live.status, 200, "AC2: /live still 200");
     assert.ok(live.body.includes("在跑但未接遥测"), "AC2: page says 「在跑但未接遥测」");
@@ -127,8 +120,8 @@ test("AC3 negative control: telemetry absent + NO activity ⇒ /live says 「未
   const cwd0 = process.cwd();
   let server;
   try {
-    const port = await freePort();
-    server = await startFor(wsObj.ws, port);
+    server = await startFor(wsObj.ws);
+    const port = server.address().port;
     const live = await get(port, "/live");
     assert.equal(live.status, 200, "AC3: /live still 200");
     assert.ok(live.body.includes("未在运行"), "AC3: page says 「未在运行」");
@@ -163,8 +156,8 @@ test("positive + AC4 no-regression: telemetry present ⇒ running; unreadable st
       JSON.stringify({ stage: "Fast", runId: "fm-LV-1", taskId: "LV-1", eventKind: "start", timing: { startedAtMs: Date.now() - 60_000 } }) + "\n"
     );
 
-    const port = await freePort();
-    server = await startFor(wsObj.ws, port);
+    server = await startFor(wsObj.ws);
+    const port = server.address().port;
 
     // Positive: telemetry records exist ⇒ live_state=running.
     const live = await get(port, "/live");

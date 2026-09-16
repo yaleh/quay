@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { renderTestsCard } from "../src/serve-dashboard.ts";
 import { renderTestsTimelineBar, buildTestsTimelineSegments } from "../src/serve-tests.ts";
@@ -33,15 +32,9 @@ const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for w
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -111,9 +104,10 @@ test("AC1: GET /tests renders a svg with aria-label=\"过去 3 小时时间轴\"
   try {
     seedRounds(ws, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const res = await get(port, "/tests");
     assert.equal(res.status, 200, "GET /tests returns 200");

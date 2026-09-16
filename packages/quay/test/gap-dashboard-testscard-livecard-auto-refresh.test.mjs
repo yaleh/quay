@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { renderDashboardPage, renderDashboardCardRefreshScript, DASHBOARD_CARD_REFRESH_MS } from "../src/serve-dashboard.ts";
@@ -79,15 +78,9 @@ test("AC3: the script pauses polling when hidden and resumes on visibilitychange
 
 // ── Integration: the /dashboard/cards route is wired and returns the two swappable fragments ──────
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function request(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -119,9 +112,10 @@ test("AC4: /dashboard/cards returns both card fragments as no-store JSON (the sc
   const cwd0 = process.cwd();
   let server;
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const dash = await request(port, "/dashboard");
     assert.equal(dash.status, 200, "AC1: GET /dashboard returns 200");

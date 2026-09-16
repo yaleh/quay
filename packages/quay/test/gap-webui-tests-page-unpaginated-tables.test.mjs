@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { clearVerificationRoundCache } from "../src/observation.ts";
@@ -31,15 +30,9 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const REPO_ROOT = path.join(__dirname, "..", "..", "..");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// `freePort()` DELETED — probe-then-bind is a TOCTOU over the shared ephemeral-port space, and its
+// loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
+// port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -131,9 +124,10 @@ test("AC2: /tests history table is paginated — Page size links + Next » prese
   try {
     seedRounds(ws, 60, 60);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const p1 = await get(port, "/tests?pageSize=5");
     assert.equal(p1.status, 200, "AC2: GET /tests?pageSize=5 returns 200");
@@ -163,9 +157,10 @@ test("AC3: server-side slicing — pageSize=20 leaves ≤ 20 history + ≤ 20 pe
   try {
     const seeded = seedRounds(ws, 120, 120);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests?pageSize=20");
     const trCount = (r.body.match(/<tr/g) || []).length;
@@ -191,9 +186,10 @@ test("AC5: default /tests response is < 120,000 bytes (pre-fix 665,105)", async 
   try {
     seedRounds(ws, 200, 200);
     clearVerificationRoundCache();
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    // ⛔ never probe-then-bind (see packages/quay/test/serve-board.test.mjs header)
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "AC5: GET /tests returns 200");

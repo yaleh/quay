@@ -18,8 +18,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn, execFileSync } from "node:child_process";
 
 import { detectFileViolations, scanTree, stripShellComments, judgeScan } from "../scripts/dead-code-after-return-check.ts";
 import { driverResultToExit } from "../scripts/checker-io.ts";
@@ -81,6 +82,58 @@ test("AC6: a comment mentioning the pattern is NOT a violation (comment-vs-code)
   assert.equal(vs.length, 0);
 });
 
+// ── AC1 (gap-suite-not-robust-at-high-derived-concurrency): the walk→read race ──────────────────────
+//
+// THE DEFECT (this file's own `AC6: the real repo scan is clean` was the CI red): `scanTree` WALKS
+// (collectShellScripts) and then READS each listed path. A file that disappears in between made the
+// read throw an uncaught ENOENT ⇒ the CLI exits 1 — which is the SAME exit code as "at least one
+// instance found", so a race was indistinguishable from a violation (硬规则 3b). The tree really does
+// move under the scan: the npm-pack / delivery-smoke path stages a MIRROR of `plugin/` into the
+// SOURCE tree and `rm -rf`s it again (`packages/quay/test/delivery-standalone-smoke.sh`
+// STAGED_PLUGIN="$ROOT/packages/quay/plugin"), which is not in SKIP_DIRS. Measured while the suite
+// ran at concurrency 24: 186 ENOENT reads under `packages/quay/plugin/`, 0 elsewhere.
+//
+// This test places the deletion INSIDE that window DETERMINISTICALLY (no sleep, no load, no flake):
+// `aa.sh` is a FIFO, so the checker's read of it BLOCKS until a writer opens it; the writer's
+// non-blocking open only succeeds once the checker is parked there ⇒ the walk is provably over and
+// `zz.sh` is provably on its list when we delete it. (collectShellScripts returns SORTED paths, so
+// `aa.sh` is always read before `zz.sh`.)
+test("AC1 — a .sh that vanishes between the walk and the read is SKIPPED and REPORTED (exit 0), never a crash (exit 1 == 'violation found')", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcar-vanish-"));
+  t.after(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  const fifo = path.join(dir, "aa.sh");
+  const victim = path.join(dir, "zz.sh");
+  fs.writeFileSync(victim, 'f() {\n  echo a\n  return 0\n}\n'); // a CLEAN script — the only reason
+  try { execFileSync("mkfifo", [fifo]); } catch { return t.skip("mkfifo unavailable on this host"); }
+
+  const proc = spawn("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", dir, "--json"]);
+  let out = "";
+  let err = "";
+  proc.stdout.on("data", (d) => (out += d));
+  proc.stderr.on("data", (d) => (err += d));
+
+  // Park point: O_WRONLY|O_NONBLOCK on a FIFO with NO reader fails ENXIO; it can only succeed once
+  // the checker is blocked in its own (blocking) open ⇒ the walk has finished.
+  const O = fs.constants;
+  let wfd = null;
+  for (let i = 0; i < 1000 && wfd === null; i++) {
+    try { wfd = fs.openSync(fifo, O.O_WRONLY | O.O_NONBLOCK); }
+    catch { await new Promise((r) => setTimeout(r, 20)); }
+  }
+  assert.ok(wfd !== null, "the checker never reached the FIFO read (the walk did not complete) — this test proved nothing");
+
+  fs.rmSync(victim);   // ← the vanish, provably inside the walk→read window
+  fs.closeSync(wfd);   // release the parked read (EOF); `zz.sh` is read next and is gone
+
+  const code = await new Promise((r) => proc.on("exit", r));
+  const parsed = JSON.parse(out);
+  assert.equal(code, 0, `a vanished file must be skipped, not fatal — exit ${code}; stderr=${err}`);
+  assert.deepEqual(parsed.active, [], "the vanished file had no violation to report");
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.unreadable.map((u) => u.rel), ["zz.sh"],
+    `the skip must be REPORTED (0 violations over a partly-read input must stay distinguishable): ${out}`);
+});
+
 // ── CLI + real-repo strict-zero band ────────────────────────────────────────────────────────────────
 test("AC6: the real repo scan is clean — strict-zero band on the current tree", () => {
   const { violations, files } = scanTree(repoRoot);
@@ -109,14 +162,22 @@ test("stripShellComments: comments stripped, string literals preserved (quote-aw
 // ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
 
 test("B4 AC3: judgeScan maps clean⇒verified / violations⇒failed (DriverResult, exit 0/1)", () => {
-  const clean = judgeScan({ violations: [], files: ["a.sh", "b.sh"] });
+  const clean = judgeScan({ violations: [], files: ["a.sh", "b.sh"], unreadable: [] });
   assert.equal(clean.state, "verified");
   assert.equal(driverResultToExit(clean), 0);
 
   const dirty = judgeScan({
     violations: [{ rel: "evil.sh", line: 2, fn: "f", returnStmt: "return 0", after: "echo never" }],
     files: ["evil.sh"],
+    unreadable: [],
   });
   assert.equal(dirty.state, "failed");
   assert.equal(driverResultToExit(dirty), 1);
+});
+
+test("AC1 — judgeScan: a vanished file is NOT a violation, but the verdict SAYS it happened (0-violations ≠ fully-read)", () => {
+  const partial = judgeScan({ violations: [], files: ["a.sh", "gone.sh"], unreadable: [{ rel: "gone.sh", reason: "ENOENT" }] });
+  assert.equal(partial.state, "verified", "a vanished file is not a violation (it is not in the tree)");
+  assert.match(partial.verifiedBy ?? "", /1 个文件/,
+    "the verdict must name the skip — '0 violations' over a partly-read input must not read as a clean full scan");
 });
