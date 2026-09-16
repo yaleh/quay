@@ -69,6 +69,39 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
 实现落点局限在 `renderGoalCard` 内部（分母计算 + `acBar` 百分比计算两处需同步改，不留一处新口径、一处
 旧口径的不一致）。
 
+**实施者核实结论（2026-09-16，动手前实查 goal-store 写入路径与仓库既有口径，不是想当然）**：
+
+1. **`draft` 确实可能、而且【常态】地出现在 active GOAL 的挂钩下**——写入面默认值就是 draft
+   （`goal-store.ts` 写入面 `status ?? frontmatter.status ?? "draft"`），且 store 自己的出生路径就是
+   `GOAL 建为 draft → 把 AC 以 draft 写入 → 把 GOAL 翻成 active`（零 AC 激活闸的报错原文就在教
+   `--status draft`）。**结论：排除出分母**，与倾向性判断一致，但依据不是"提案未裁定"这个自洽说法，
+   而是**仓库里已有的、被人裁定过的口径**：`plugin/scripts/goal-driver.ts` 的 `inScopeAcsOf` 把在域
+   集合定义为 `{active, achieved, needs-human}`，draft/superseded/retired 均不在域（裁定 3：激活是人的
+   动作），且其注释明确警告「口径分叉会重演 draft 三头不占」。显示面若自造第二套口径，会出现「卡片显示
+   2/3 而驱动已判定该 GOAL 达成」这种自相矛盾。**已知后果（记录在案，不掩盖）**：一个 AC 全是 draft 的
+   GOAL 会渲染成 `0/0`，与「真正没有 AC」同形——区分这两者是 `/goal` 的 draft 横幅那条载体的事，
+   ⛔ 不靠重新定义分母来解决。
+2. **`needs-human` 计入分母、不计入分子。** 它是 ABI 里的合法状态，且是最高频的重开来源
+   （`needs-human → active`）。人 2026-09-09 裁定 2 明确把它计入在域，理由比倾向性判断更硬：
+   「一条要人裁定的 AC 若不计数，就与 draft 完全同形——既不挡 GOAL 达成、也不计缺口，等于白加一个状态」。
+
+**口径分叉的守卫（产物，不是提醒）**：显示面新增单一谓词 `isAcRollupCounted`（集合常量
+`AC_ROLLUP_IN_DOMAIN_STATUSES`），两个消费面（dashboard 卡片 + `/goal` Goals tab 的「AC 达成」列）都调它；
+测试侧另有一条**独立拼写**的集合做双向对照，并有一条守卫**直接读 `goal-driver.ts` 的 `inScopeAcsOf`
+函数体**断言两侧集合逐字一致——口径一旦分叉就报红。
+
+**硬规则 5b 的扫描结果（同一载体 = 全仓 web 端的 AC-达成口径；`grep` 命中 4 处，逐条判定）**：
+① `serve-dashboard.ts` `renderGoalCard` —— 本任务主目标，**已修**；
+② `serve-goal.ts:238` `rollupFor` —— 自述「renderGoalCard's own formula」，同一个数、同一个 GOAL 的
+另一个面，**已一并修**（否则两个面会并排显示 6/7 与 6/10），这正是「实现落点局限在 renderGoalCard 内部」
+那句被有意扩展的地方：局限的是【口径不一致】的消除范围，不是禁止修同一个缺陷的兄弟实例；
+③ `serve-goal.ts:245` `criteriaIdsFor` —— 供「挂靠任务」列，数的是**任务挂靠**而非达成比例，是另一个量，
+⛔ 不改；
+④ `goal-store.ts:1451` `isGoalAchieved` —— GOAL 层达成判定（`every(status === "achieved")`），**另一案，
+且已被仓库自己记录在案**：`goal-driver.ts:757` 原文「⚠️ 与 goal-store.isGoalAchieved 的差异：后者仍是
+`every(status === "achieved")`……store 侧同款死角，另案处理」。改它等于改 GOAL 达成语义，需另行裁定，
+故本任务⛔ 不动它。
+
 ## AC
 
 - [ ] 构造一个测试 fixture：一个 GOAL 下挂钩 N 条记录，覆盖 `active`/`achieved`/`superseded`/`retired`
@@ -95,5 +128,7 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
+- packages/quay/src/serve-goal.ts
 - packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs
 - tasks/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.md
