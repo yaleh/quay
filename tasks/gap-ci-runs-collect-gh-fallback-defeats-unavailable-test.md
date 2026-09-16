@@ -41,10 +41,10 @@ gh 的位置"来模拟不可达。
 
 ## AC
 
-- [ ] 在一台/一个环境里把 `gh` 放在 `resolveGhBin` 的某个硬编码回退路径上（真机没有权限就用等价 fixture：临时在 `/usr/bin/gh` 等路径放一个可执行占位文件，或改造测试注入层）复现"测试期望 gh-unavailable 但实际找到了 gh"，确认这就是 CI 红的根因，不是别的偶发因素。
-- [ ] `collectForRound`（或 `resolveGhBin` 的调用点）暴露一个测试可控的钩子，让「gh 判定为不可达」不依赖真实文件系统当前状态。
-- [ ] 用该钩子重写 `plugin/test/ci-runs-collect.test.mjs:344` 那条测试，在装了 gh 的环境（覆盖上面第一条的复现场景）下验证：修复前红、修复后绿。
-- [ ] `node --experimental-strip-types --test plugin/test/ci-runs-collect.test.mjs` 全文件在本机以及（如可行）任一装有系统级 `gh` 的环境下都是 `passed=true`。
+- [x] 在一台/一个环境里把 `gh` 放在 `resolveGhBin` 的某个硬编码回退路径上（真机没有权限就用等价 fixture：临时在 `/usr/bin/gh` 等路径放一个可执行占位文件，或改造测试注入层）复现"测试期望 gh-unavailable 但实际找到了 gh"，确认这就是 CI 红的根因，不是别的偶发因素。
+- [x] `collectForRound`（或 `resolveGhBin` 的调用点）暴露一个测试可控的钩子，让「gh 判定为不可达」不依赖真实文件系统当前状态。
+- [x] 用该钩子重写 `plugin/test/ci-runs-collect.test.mjs:344` 那条测试，在装了 gh 的环境（覆盖上面第一条的复现场景）下验证：修复前红、修复后绿。
+- [x] `node --experimental-strip-types --test plugin/test/ci-runs-collect.test.mjs` 全文件在本机以及（如可行）任一装有系统级 `gh` 的环境下都是 `passed=true`。
 
 ## DoD
 
