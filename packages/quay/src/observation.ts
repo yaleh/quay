@@ -3166,16 +3166,40 @@ interface DriverRuntimeSurface {
 /** 动态 import 的缓存 promise（进程内一次；零 subprocess —— AC4）。 */
 let driverRuntimePromise: Promise<DriverRuntimeSurface | null> | null = null;
 
+/** kernel 解析/载入**为什么**没能产出（null = 已载入，或还从未尝试）。
+ *
+ * ⛔ 硬规则 3b（gap-dashboard-driver-status-card-ci-red）：`loadDriverRuntime` 的两种失败——
+ * ①产品安装下根本没有 kernel（正常，卡片该显示「未接入」）与 ②有 kernel 但**载入抛了**
+ * （异常，卡片同样显示「未接入」）——原本都只 return null ⇒ 两者与「查过且正常」共用一个取值。
+ * 2026-09-16 CI 实证代价：`readDriverStatus` 返回长度 0（而非某个 kind 缺失），5 条断言红，
+ * 而唯一的读数是一条 `0 !== 6` 与一条「Driver 状态未接入」的 HTML——**看不出是哪种**，
+ * 于是被读成「非确定性的 kind 缺失」并去查负载与并发。区分取值即可当场定位。
+ *
+ * 独立取值，⛔ 不与「载入成功」共用输出；空读数的**形状**不变（DriversReading 仍是数组，
+ * 照旧渲染「未接入」），只是失败从此**可诊断**。 */
+let driverRuntimeLoadError: string | null = null;
+
+/** 上一次 kernel 解析/载入失败的原因（null = 已载入或未尝试）。诊断用，⛔ 不参与判定。 */
+export function getDriverRuntimeLoadError(): string | null { return driverRuntimeLoadError; }
+
 /** 懒加载 driver-runtime kernel（in-process，⛔ 不 spawn 子进程）。resolvePluginScriptExec 应用
- *  dev/dist fallback；kernel 缺失（产品安装无 methodology 层）⇒ null（诚实空读数，⛔ 不抛）。 */
+ *  dev/dist fallback；kernel 缺失（产品安装无 methodology 层）⇒ null（诚实空读数，⛔ 不抛）。
+ *  两种 null 记进 `driverRuntimeLoadError`（见上）。 */
 function loadDriverRuntime(): Promise<DriverRuntimeSurface | null> {
   if (!driverRuntimePromise) {
     driverRuntimePromise = (async () => {
       const resolved = resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"));
-      if (!resolved) return null;
+      if (!resolved) {
+        driverRuntimeLoadError = "kernel-unresolved: no plugin root carries scripts/driver-runtime.ts (or its dist bundle)";
+        return null;
+      }
       try {
         return (await import(pathToFileURL(resolved.path).href)) as DriverRuntimeSurface;
-      } catch {
+      } catch (err) {
+        // ⛔ 不是无声的 return null：这条读数就是「有 kernel 但载入失败」与「没有 kernel」之间
+        // 唯一的分界（上面注释里的 2026-09-16 CI 事故）。
+        const e = err as { code?: string; message?: string };
+        driverRuntimeLoadError = `kernel-load-failed: ${e?.code ?? "no-code"}: ${String(e?.message ?? err).split("\n")[0]} (${resolved.path})`;
         return null;
       }
     })();

@@ -21,11 +21,18 @@
 //         文件）渲染「未运行」而非被静默省略；负控制：删 pid 文件 ⇒ 该 kind 从「运行中」变「未运行」
 //         但仍出现在卡片上（不是从卡片消失）。
 //
+// gap-dashboard-driver-status-card-ci-red 补（AC2 诊断臂，见文件末节）：本文件的 fixture 是自足的，
+// 唯一的外部依赖是 observation.ts 的 kernel 载入。2026-09-16 CI 上它返回**长度 0**（而非某个 kind
+// 缺失），5 条断言红，而唯一读数是一条 `0 !== 6` —— 于是被读成「非确定性的 kind 缺失」。真因是
+// `plugin-root.ts` 的 walk-up 在 pack-time 暂存窗口里选中了 `packages/quay/plugin/`（见该文件注释），
+// 而 `loadDriverRuntime` 把载入异常吞成 null ⇒ 与「产品安装下没有 kernel」共用一个取值（硬规则 3b）。
+// 两条控制：resolver 侧在 plugin-root.test.mjs，载入失败可诊断侧在本文件末节。
+//
 // Run (scoped): node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { readDriverStatus, clearDriverStatusCache } from "../src/observation.ts";
@@ -270,4 +277,59 @@ test("AC7 负控制: 删 pid 文件 ⇒ 该 kind 从「运行中」变「未运�
   const after = renderMgrCard({ drivers: await readDriverStatus(root) });
   assert.match(after, /<b>quality<\/b>: 未运行/, "quality must flip to 未运行 after pid removal");
   assert.doesNotMatch(after, /<b>quality<\/b>: 运行中/, "quality must NOT stay 运行中");
+});
+
+// ── AC2 (gap-dashboard-driver-status-card-ci-red): 载入失败必须与「无 kernel」可区分 ────────────────
+// 硬规则 3b：两个不同的量不得共用同一个输出取值。pre-fix 时 `loadDriverRuntime` 把「解析不到 kernel」
+// （产品安装，正常）与「解析到了但 import 抛了」（异常）都吞成 `null` ⇒ `readDriverStatus` 两种情形
+// 都返回长度 0 ⇒ 卡片两种情形都渲染「未接入」。CI 事故的读数因此只有一条 `0 !== 6`，看不出是哪一种。
+//
+// 用**子进程**做控制：`driverRuntimePromise` 是进程内一次性的模块级缓存，同进程里注坏 root 不会重新
+// 解析；fresh process 才测得准。QUAY_PLUGIN_ROOT 是 resolver 的显式优先分支（plugin-root.ts ①），
+// 故这一对控制与节点环境无关（driver 派生的会话本来就把该键设成主检出的 plugin，两臂都显式传，
+// ⛔ 不靠 delete 该键来制造「无」）。
+test("AC2 控制对: kernel 载入失败（异常）vs 载入成功，读数与原因都不同形", () => {
+  // 臂①的 root 形状 = 出事时那个 pack-time 暂存快照：一个 plugin 树，其父目录旁没有
+  // packages/quay/src（⛔ 不是 source checkout），raw .ts 在、dist bundle 不在，且 import 必抛。
+  const brokenBase = makeTmpDir("quay-dash-drv-loaderr-");
+  const brokenPlugin = path.join(brokenBase, "plugin");
+  fs.mkdirSync(path.join(brokenPlugin, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(brokenPlugin, "scripts", "driver-runtime.ts"),
+    'import "./no-such-sibling-in-the-staged-tree.ts";\n',
+  );
+
+  const probeDir = makeTmpDir("quay-dash-drv-probe-");
+  const probe = path.join(probeDir, "probe.mjs");
+  fs.writeFileSync(
+    probe,
+    [
+      `import { readDriverStatus, getDriverRuntimeLoadError } from ${JSON.stringify(pathToFileURL(OBSERVATION_SRC).href)};`,
+      "const d = await readDriverStatus(process.argv[2]);",
+      "process.stdout.write(JSON.stringify({ readings: d.length, loadError: getDriverRuntimeLoadError() }));",
+    ].join("\n"),
+  );
+  const probeRoot = makeTmpDir("quay-dash-drv-probe-root-");
+  const runProbe = (pluginRoot) =>
+    JSON.parse(
+      execFileSync(process.execPath, ["--experimental-strip-types", probe, probeRoot], {
+        encoding: "utf8",
+        env: { ...process.env, QUAY_PLUGIN_ROOT: pluginRoot },
+      }),
+    );
+
+  // 臂①（异常）：读数仍为空（形状不变 ⇒ ⛔ 不动 DriversReading 的类型与渲染），但**原因被记下**。
+  const bad = runProbe(brokenPlugin);
+  assert.equal(bad.readings, 0, "a kernel that throws to load yields no readings (honest empty)");
+  assert.match(
+    bad.loadError ?? "",
+    /^kernel-load-failed:/,
+    "⛔ 不是无声的 return null：载入异常必须留下可诊断的原因（硬规则 3b）——pre-fix 这里是 null，与臂②的「没有 kernel」同形",
+  );
+
+  // 臂②（正常，唯一差别 = 指向真 source checkout）：读数齐、原因必须为空 —— 否则臂①的断言只是在
+  // 断言一个恒真量（硬规则 4：一个结构上不可能取假的读数不是测量）。
+  const good = runProbe(path.resolve(__dirname, "..", "..", "..", "plugin"));
+  assert.equal(good.readings, KNOWN_KINDS.length, "the real source-checkout kernel still yields every kind");
+  assert.equal(good.loadError, null, "a successful load must NOT carry a load reason (⛔ 非恒值)");
 });

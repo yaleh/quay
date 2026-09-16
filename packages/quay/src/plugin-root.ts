@@ -132,18 +132,41 @@ export function resolvePluginRoot(): string | null {
  * not the source repo). Two install layouts per level: npm-global (`<dir>/plugin` IS the root) and
  * marketplace / vendored (`<dir>` itself is the root) — the kernel anchor matches raw source AND the
  * bundled dist form (installed packages delete raw .ts).
+ *
+ * ⛔ NEAREST-ANCHOR IS NOT ENOUGH — a SOURCE CHECKOUT candidate WINS over a nearer derived tree.
+ *
+ * Why (gap-dashboard-driver-status-card-ci-red; measured on a fresh CI-like clone, 5/5 runs):
+ * `packages/quay/scripts/package.sh` stages `plugin/` → `packages/quay/plugin/` (`rm -rf` + `mkdir`
+ * + `cp -R`) and only afterwards builds `scripts/dist/*.js` and deletes the raw `.ts`. So for the
+ * whole staging window the tree `packages/quay/plugin/` carries `scripts/driver-runtime.ts` AND no
+ * `scripts/dist/driver-runtime.js`. A walk-up from `packages/quay/src` anchors on it at level 1 —
+ * ABOVE the real source `<repo>/plugin` at level 3 — and the staged raw `.ts` cannot be imported
+ * (`ERR_MODULE_NOT_FOUND` on the sibling `.mjs` / the `../../packages/quay/src/*.ts` re-exports the
+ * staged layout does not carry). `resolvePluginScriptExec` then hands that dead path to every
+ * caller, `observation.ts::loadDriverRuntime` catches the throw and reports "no kernel" — so the
+ * dashboard silently reads 未接入 while the real kernel sits three levels up, intact.
+ *
+ * The discriminator is already in this module: `isPluginSourceCheckout(root)` — a derived snapshot
+ * is by construction NOT a source checkout (`<root>/../packages/quay/src` does not exist for
+ * `packages/quay/plugin`). So: collect anchored candidates up the walk, return the first one that
+ * IS a source checkout; when none is (shipped installs: npm-global, marketplace, vendored — no
+ * source tree anywhere above), fall back to the NEAREST anchored candidate, i.e. exactly the
+ * behaviour before this change.
  */
 export function resolvePluginRootFrom(startDir: string): string | null {
   let dir = startDir;
+  let nearest: string | null = null;
   for (let i = 0; i < 8; i++) {
-    const pluginSubdir = path.join(dir, "plugin");
-    if (kernelAnchorExists(pluginSubdir)) return pluginSubdir;
-    if (kernelAnchorExists(dir)) return dir;
+    for (const cand of [path.join(dir, "plugin"), dir]) {
+      if (!kernelAnchorExists(cand)) continue;
+      if (nearest === null) nearest = cand;
+      if (isPluginSourceCheckout(cand)) return cand;
+    }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return null;
+  return nearest;
 }
 
 /**

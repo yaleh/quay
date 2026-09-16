@@ -400,3 +400,68 @@ test("AC4 path ③ walk-up — resolvePluginRootFrom(startDir) climbs to an ANCE
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// ── the pack-time staging snapshot must NOT outrank the source checkout it was derived from ─────────
+// gap-dashboard-driver-status-card-ci-red (2026-09-16 CI). `packages/quay/scripts/package.sh` stages
+// `plugin/` → `packages/quay/plugin/` (rm -rf + mkdir + cp -R) and only AFTERWARDS builds
+// `scripts/dist/*.js` and deletes the raw `.ts`. So for the whole staging window that snapshot
+// carries `scripts/driver-runtime.ts` with NO `scripts/dist/` beside it — one level NEARER the
+// `packages/quay/src` module than the real source `<repo>/plugin` is. Measured on a fresh CI-like
+// clone (5/5 runs): the walk-up anchored on the snapshot, its raw `.ts` import threw
+// (`ERR_MODULE_NOT_FOUND` on a sibling the staged layout does not carry), `observation.ts` swallowed
+// the throw into "no kernel", and the dashboard rendered 未接入 for every kind.
+//
+// The two arms below are the SAME fixture ± the source-checkout sibling, so a pass on the first is
+// evidence that the discriminator — not some other difference — flips the choice.
+
+/** `<base>/plugin/scripts/driver-runtime.ts` (source) + `<base>/packages/quay/src` (its marker)
+ *  + the NEARER in-flight snapshot `<base>/packages/quay/plugin/scripts/driver-runtime.ts`. */
+function makeStagingSnapshotFixture() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-stagesnap-"));
+  fs.mkdirSync(path.join(base, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(base, "plugin", "scripts", "driver-runtime.ts"), "// source kernel\n");
+  const moduleDir = path.join(base, "packages", "quay", "src");
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.mkdirSync(path.join(base, "packages", "quay", "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(base, "packages", "quay", "plugin", "scripts", "driver-runtime.ts"),
+    'import "./sibling-the-staged-copy-does-not-carry-yet.ts";\n'
+  );
+  return { base, moduleDir, snapshot: path.join(base, "packages", "quay", "plugin") };
+}
+
+test("resolvePluginRootFrom() prefers the source checkout over a NEARER in-flight staging snapshot", () => {
+  const fx = makeStagingSnapshotFixture();
+  try {
+    assert.equal(
+      resolvePluginRootFrom(fx.moduleDir),
+      path.resolve(fx.base, "plugin"),
+      "an in-flight pack snapshot is nearer AND anchored, but it is a DERIVED tree whose raw .ts cannot load — the source checkout must win"
+    );
+    assert.notEqual(
+      resolvePluginRootFrom(fx.moduleDir),
+      path.resolve(fx.snapshot),
+      "returning the snapshot is the defect: every kind reads as 未接入 while the real kernel sits above"
+    );
+  } finally {
+    fs.rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginRootFrom() NEGATIVE CONTROL — no source checkout anywhere ⇒ the nearest anchor still wins", () => {
+  // Removes ONE thing from the fixture above (the `<base>/plugin` source tree). This is what keeps
+  // the change from meaning "always walk to the FARTHEST anchor" — that would break every shipped
+  // install (npm-global / marketplace / vendored have no source tree above them, so the nearest
+  // anchored candidate IS the answer).
+  const fx = makeStagingSnapshotFixture();
+  try {
+    fs.rmSync(path.join(fx.base, "plugin"), { recursive: true, force: true });
+    assert.equal(
+      resolvePluginRootFrom(fx.moduleDir),
+      path.resolve(fx.snapshot),
+      "with no source checkout above it, the nearest anchored candidate is still returned (shipped-install behaviour unchanged)"
+    );
+  } finally {
+    fs.rmSync(fx.base, { recursive: true, force: true });
+  }
+});
