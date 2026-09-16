@@ -1,8 +1,8 @@
 ---
 id: gap-release-softprops-missing-explicit-tag-name
 title: release.yml 两处 softprops/action-gh-release 都没传 tag_name，隐式依赖 dispatch ref 上下文
-status: ready
-needs_human_cause: human-adjudication
+status: superseded
+needs_human_cause: unclassified
 labels:
   - gap
   - defect
@@ -196,3 +196,20 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   以为 softprops→tag_name 补丁跑过的记录。
 - 三条 AC 已由本 worker 从 `[x]` 改回 `[ ]` 并附注解（硬规则 3b；⛔ 未蹭 pass-external 标记，故 fan-in
   的 ac-precheck 会如实报红 —— 这是本态应有的可区分取值，不是待修的缺陷）。
+## Needs-Human
+
+**执行 2026-09-16T12:14:53.131Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 0/3，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：440a59af-2984-4037-af45-9495c7f3557f
+
+## 人裁定（manager 会话，2026-09-16T12:30Z）
+
+按本任务自己 Evidence 末条与「worker 第 3 次续跑」建议，转 superseded：要修的 `release`/`sea-release`
+两个 job 已被 `gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead`（done）按人 2026-09-16
+裁定（`orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` §11，取消 sea 和 npm release）
+整段删除；本任务对 develop 的实际改动面 = 0 个文件（anti-drift 检查器已确认）。不判 `done`——避免把
+develop 侧的删除+重写记成本任务补丁的落地功劳；本任务的 tag_name 补丁从未真正应用/运行过。
