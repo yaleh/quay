@@ -2,7 +2,7 @@
 id: gap-ac261-shim-node-autodetect-nvm-fallback
 title: plugin/bin/quay shim 只查 `command -v node`：nvm-only 环境下最小 PATH 仍 exit
   127，AC-261 未真正达标
-status: todo
+status: ready
 labels:
   - gap
   - defect
