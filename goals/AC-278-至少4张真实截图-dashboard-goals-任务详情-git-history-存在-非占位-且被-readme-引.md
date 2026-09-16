@@ -1,7 +1,7 @@
 ---
 id: AC-278
 title: 至少4张真实截图（Dashboard/Goals/任务详情/Git History）存在、非占位、且被 README 引用
-status: draft
+status: active
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -51,7 +51,16 @@ expect: exit 0 = docs/screenshots/ 下存在匹配 dashboard/goals/task-detail/g
   带 CAUSE=：screenshots-dir-absent（目录不存在）/ screenshots-missing（缺具体某张）/
   screenshots-too-small（疑似失败截图）/ readme-references-incomplete（截图存在但 README
   没引用全）。
-origin: 本次调研已用 chrome-devtools MCP 对正在运行的 quay serve（100.78.206.100:4173）实测截图
-  Dashboard 页可行，效果良好，但发现一处渲染缺陷（页面中段灰色空白区块，疑似组件懒加载未完成）——正式产出前必须先排查修复，不得带缺陷截图。5000
-  字节门槛是从这次实测截图（远大于此）反推的保守下限，用于排除明显失败/空白的产物，不是精确的质量判定。
+origin: manager 2026-09-16 激活，随 GOAL-021 一并生效
+activatedAt: 2026-09-16T23:33:23.618Z
+statusLog:
+  - at: 2026-09-16T23:33:23.618Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-16T23:33:23.617Z
 ---
