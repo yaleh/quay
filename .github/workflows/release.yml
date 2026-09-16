@@ -716,6 +716,16 @@ jobs:
           # cut the tag used the same depth for the same reason.
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+          # github-token-cannot-push-workflow-file-changes (2026-09-15, measured): the default
+          # GITHUB_TOKEN is a GitHub App installation token and `workflows` is NOT a grantable
+          # `permissions:` key, so a push that updates .github/workflows/* is unconditionally
+          # rejected ("refusing to allow a GitHub App to create or update workflow ... without
+          # `workflows` permission") regardless of what this job's own `permissions:` block says.
+          # RELEASE_PAT is a PAT with `workflow` scope (repo secret) — the only credential class
+          # that can push a workflow-file-touching commit. `contents: write` above stays as the
+          # least-privilege declaration for the job's OWN GITHUB_TOKEN (unused for the push now,
+          # kept so a future step that doesn't touch workflow files still has it).
+          token: ${{ secrets.RELEASE_PAT }}
       - name: Fast-forward master to this release's tag
         env:
           TAG: ${{ inputs.tag }}
