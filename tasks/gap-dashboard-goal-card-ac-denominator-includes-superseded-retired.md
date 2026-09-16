@@ -122,16 +122,18 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
 **AC 验证读数（本任务实测，非推定）**：
 
 - 新测试文件 `packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs`
-  共 12 条，全绿。AC1 覆盖 `active`/`achieved`/`needs-human`/`superseded`/`retired` 五态同挂一个 GOAL，
-  断言「AC 达成 1/3」且**同时否定**旧口径的「1/6」；另有专门一条只挂 `retired` 的目标（分母 0）与一条
-  `superseded+retired` 各一条的混合——`retired` 被两条独立用例覆盖，不是只测了 `superseded`。
+  共 **11** 条（`node --test` 报 tests 11 / pass 11 / fail 0）。AC1 覆盖
+  `active`/`achieved`/`needs-human`/`superseded`/`retired` 五态同挂一个 GOAL，断言「AC 达成 1/3」且
+  **同时否定**旧口径的「1/6」；另有专门一条只挂 `retired` 的目标（分母 0）与一条 `superseded+retired`
+  各一条的混合——`retired` 被两条独立用例覆盖，不是只测了 `superseded`。
 - AC2 负控制：4 组「只有 active/achieved/needs-human」的输入逐个断言「新分母 == 旧分母 `acs.length`」，
   并断言两种口径的读数逐字相同。
 - **AC3（真实数据，2026-09-16 实测）**：`GOAL-020` 挂钩 10 条 = achieved 6 + superseded 3 + active 1；
   卡片实际渲染 **「AC 达成 6/7」**（旧口径会是 6/10），进度条 **85.7%**（旧口径 60.0%）。
   achieved = AC-265/269/270/271/272/273，superseded = AC-266/267/268，唯一真正待办 = AC-274。
-  占位读法：真实 store 上给一个真 active GOAL 注入 `superseded`+`retired` 各一条后，卡片的分子分母
-  **一字不变**——证明过滤器在真实数据形状上生效，不是只对 fixture 生效。
+  同一条 AC 还带一个**机制面读数**（不依赖此刻 GOAL-020 的偶然数据）：在真实 store 上给一个真
+  active GOAL 注入 `superseded`+`retired` 各一条后，卡片的分子分母**一字不变**，且分母严格小于挂钩
+  记录数——证明过滤器在真实数据形状上生效，不是只对 fixture 生效。
 - AC4：1 achieved + 1 active + 2 已退场 ⇒ 进度条 50.0%（旧分母会是 25.0%），且与同行的纯文本「1/2」同源。
 - **AC5（先跑后改，实跑读数）**：受影响的既有测试文件（`gap-dashboard-goal-card-ac-progress-bar` /
   `gap-dashboard-goal-card-provider-backed` / `gap-webui-goal-list-tab-split-goal-ac` / `serve-goal-doc`）
