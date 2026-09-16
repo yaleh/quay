@@ -6,11 +6,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { check, checkCi, readManifest, parseReleaseYmlNpmTarballs, parseReleaseYmlSeaBinaries } from './delivery-manifest-check.ts';
+import { check, readManifest, parseReleaseYmlNpmTarballs, parseReleaseYmlSeaBinaries } from './delivery-manifest-check.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -55,7 +56,7 @@ test('check passes on real repo — GREEN (manifest matches release.yml)', () =>
 });
 
 test('check detects manifest/release.yml divergence — RED', () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-diverged');
+  const tmp = mkdtempSync(join(tmpdir(), 'delivery-manifest-diverged-'));
   mkdirSync(tmp, { recursive: true });
   try {
     // Copy release.yml
@@ -85,11 +86,16 @@ test('check detects manifest/release.yml divergence — RED', () => {
   }
 });
 
-test('manifest has required artifact types', () => {
+test('manifest declares the plugin artifact set and NO cancelled npm/SEA sections', () => {
+  // The 2026-09-16 ruling cancelled the npm-pack and Node-SEA lines (SPEC §11). The manifest is
+  // still the single source of truth for the artifact set, and the set is now the plugin channel
+  // alone — so this asserts the CANCELLATION is recorded, not merely that the fields parse. A
+  // manifest that quietly re-grew an npm-tarballs array would be exactly the drift the alignment
+  // half of this checker exists to catch, and this test catches it one step earlier.
   const m: any = readManifest(repoRoot);
-  assert.ok(Array.isArray(m.artifacts['npm-tarballs']));
-  assert.ok(Array.isArray(m.artifacts['sea-binaries']));
-  assert.ok(m.artifacts.plugin != null);
+  assert.ok(m.artifacts.plugin != null, 'the plugin entry is the required artifact declaration');
+  assert.equal(m.artifacts['npm-tarballs'], undefined, 'npm-pack line was cancelled — no npm-tarballs section');
+  assert.equal(m.artifacts['sea-binaries'], undefined, 'Node-SEA line was cancelled — no sea-binaries section');
 });
 
 test('manifest version matches quay package version', () => {
@@ -108,7 +114,12 @@ test('CLI exits 0 on real repo (GREEN)', () => {
 });
 
 test('CLI exits 1 on divergence (RED)', () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-cli-red');
+  // ⛔ os.tmpdir(), NOT <repoRoot>/test/fixtures/…: this fixture is written and deleted, but the
+  // checked-in-write-check static gate counts the write VERBS against in-tree paths and does not
+  // care that the `finally` removes it (measured 2026-09-16: touching this file put 10 in-tree
+  // writes into the delta and FAILED the full static set). Every other fixture in this file was
+  // already tmpdir-based; these two were the outliers.
+  const tmp = mkdtempSync(join(tmpdir(), 'delivery-manifest-cli-red-'));
   mkdirSync(tmp, { recursive: true });
   try {
     mkdirSync(resolve(tmp, '.github/workflows'), { recursive: true });
@@ -145,200 +156,4 @@ test('CLI --json returns valid JSON', () => {
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.ok, 'boolean');
   assert.equal(typeof parsed.npmTarballsDeclared, 'number');
-});
-
-// ── CI mode tests (Stage 2: GitHub Release asset verification) ────────────
-
-/** Build a mock fetch that returns a given status and JSON body. */
-function mockFetch(status: number, body: object): typeof fetch {
-  return (async (_url: string | URL | Request, _init?: RequestInit) => {
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      statusText: status === 200 ? 'OK' : status === 401 ? 'Unauthorized' : 'Error',
-      json: async () => body,
-    } as Response;
-  }) as typeof fetch;
-}
-
-const CI_FIXTURE_MANIFEST = {
-  '$schema': 'delivery-manifest-v1',
-  version: '0.3.13',
-  description: 'test',
-  artifacts: {
-    'npm-tarballs': [
-      { package: 'quay', path: 'packages/quay', artifactPattern: 'quay-{version}.tgz' },
-    ],
-    'sea-binaries': [
-      { package: 'quay', platforms: ['linux-x64', 'macos-arm64', 'windows-x64'] },
-      { package: 'quay-native', platforms: ['linux-x64', 'macos-arm64', 'windows-x64'], 'bundled-with': 'quay', note: 'bundled inside quay SEA archive' },
-    ],
-    plugin: { id: 'quay', 'bundle-type': 'marketplace', note: 'Included in the npm-pack tarball' },
-  },
-};
-
-function writeCiFixture(dir: string, overrides?: object) {
-  const manifest = overrides ? { ...CI_FIXTURE_MANIFEST, ...overrides } : CI_FIXTURE_MANIFEST;
-  writeFileSync(resolve(dir, 'delivery-manifest.json'), JSON.stringify(manifest, null, 2));
-}
-
-test('checkCi GREEN — all manifest entries match published assets', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-green');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    process.env.GITHUB_REPOSITORY = 'yaleh/quay';
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    const mockResponse = {
-      tag_name: 'v0.3.13',
-      assets: [
-        { name: 'quay-0.3.13.tgz', content_type: 'application/gzip', size: 1024 },
-        { name: 'quay-sea-0.3.13-linux-x64.tar.gz', content_type: 'application/gzip', size: 2048 },
-        { name: 'quay-sea-0.3.13-macos-arm64.tar.gz', content_type: 'application/gzip', size: 2048 },
-        { name: 'quay-sea-0.3.13-windows-x64.zip', content_type: 'application/zip', size: 2048 },
-      ],
-    };
-
-    const result = await checkCi(tmp, 'fake-token', mockFetch(200, mockResponse));
-    assert.equal(result.ok, true, `issues: ${result.issues.join('; ')}`);
-    assert.equal(result.ciMode, true);
-    assert.equal(result.releaseTag, 'v0.3.13');
-    assert.equal(result.publishedAssetCount, 4);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('checkCi RED — published assets missing a declared npm tarball', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-red-npm');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    process.env.GITHUB_REPOSITORY = 'yaleh/quay';
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    // Published assets have NO matching npm tarball
-    const mockResponse = {
-      tag_name: 'v0.3.13',
-      assets: [
-        { name: 'quay-sea-0.3.13-linux-x64.tar.gz', content_type: 'application/gzip', size: 2048 },
-        { name: 'quay-sea-0.3.13-macos-arm64.tar.gz', content_type: 'application/gzip', size: 2048 },
-        { name: 'quay-sea-0.3.13-windows-x64.zip', content_type: 'application/zip', size: 2048 },
-      ],
-    };
-
-    const result = await checkCi(tmp, 'fake-token', mockFetch(200, mockResponse));
-    assert.equal(result.ok, false, 'should fail when npm tarball is missing');
-    assert.ok(result.issues.some(i => i.includes('npm tarball')), `expected npm tarball issue, got: ${result.issues.join('; ')}`);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('checkCi RED — bundled-with entry when bundled package has no published SEA assets', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-red-bundle');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    process.env.GITHUB_REPOSITORY = 'yaleh/quay';
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    // Published assets include npm tarball but NO SEA archives at all
-    const mockResponse = {
-      tag_name: 'v0.3.13',
-      assets: [
-        { name: 'quay-0.3.13.tgz', content_type: 'application/gzip', size: 1024 },
-      ],
-    };
-
-    const result = await checkCi(tmp, 'fake-token', mockFetch(200, mockResponse));
-    assert.equal(result.ok, false, 'should fail when SEA assets are missing');
-    // Should report both quay SEA entries as missing (quay-native is bundled with quay, which is also missing)
-    assert.ok(result.issues.some(i => i.includes('quay-native')), `expected quay-native issue, got: ${result.issues.join('; ')}`);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('checkCi fail-closed — network error (fetch throws)', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-network-error');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    process.env.GITHUB_REPOSITORY = 'yaleh/quay';
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    const throwingFetch = async () => { throw new Error('connect ECONNREFUSED'); };
-    const result = await checkCi(tmp, 'fake-token', throwingFetch as any);
-    assert.equal(result.ok, false, 'should fail on network error');
-    assert.ok(result.issues.some(i => i.includes('Failed to fetch')), `expected fetch failure, got: ${result.issues.join('; ')}`);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('checkCi fail-closed — GitHub API returns 401', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-401');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    process.env.GITHUB_REPOSITORY = 'yaleh/quay';
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    const result = await checkCi(tmp, 'fake-token', mockFetch(401, { message: 'Bad credentials' }));
-    assert.equal(result.ok, false, 'should fail on 401');
-    assert.ok(result.issues.some(i => i.includes('401')), `expected 401 issue, got: ${result.issues.join('; ')}`);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('checkCi RED — missing GITHUB_REPOSITORY env var', async () => {
-  const tmp = resolve(repoRoot, 'test/fixtures/delivery-manifest-ci-no-repo');
-  mkdirSync(tmp, { recursive: true });
-  const origEnv = { ...process.env };
-  try {
-    writeCiFixture(tmp);
-    delete process.env.GITHUB_REPOSITORY;
-    process.env.GITHUB_REF_NAME = 'v0.3.13';
-
-    const result = await checkCi(tmp, 'fake-token');
-    assert.equal(result.ok, false, 'should fail without GITHUB_REPOSITORY');
-    assert.ok(result.issues.some(i => i.includes('GITHUB_REPOSITORY')), `expected env issue, got: ${result.issues.join('; ')}`);
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-    process.env = origEnv;
-  }
-});
-
-test('CLI --ci without GITHUB_TOKEN exits non-zero', () => {
-  const origEnv = { ...process.env };
-  try {
-    delete process.env.GITHUB_TOKEN;
-    try {
-      execSync(`node --experimental-strip-types ${scriptPath} --ci 2>&1`, {
-        encoding: 'utf-8', cwd: repoRoot, stdio: 'pipe',
-      });
-      assert.fail('expected non-zero exit when GITHUB_TOKEN is missing');
-    } catch (e: any) {
-      assert.equal(e.status, 1);
-      assert.ok(
-        e.stdout.includes('FAIL') || e.stdout.includes('GITHUB_TOKEN'),
-        'should report missing GITHUB_TOKEN',
-      );
-    }
-  } finally {
-    process.env = origEnv;
-  }
 });

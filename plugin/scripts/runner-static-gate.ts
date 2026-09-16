@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 63 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 62 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -915,28 +915,21 @@ run_static_checks() {
   #     无关任务的 fan-in（本仓已记过这类「成本落在无关任务头上」的缺陷）；1 天把影响面限制在次日。
   #   无载体 / 零落地 ⇒ exit 3（run_checker 认第三态，不 fail-closed 不 abort 套件）。
   run_checker "gate-event-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gate-event-coverage-check.ts" --root "${main_root}" --days 1 --gate
-  echo "== release-glob MCP-client close check (gap-release-run-tests-hangs-on-shared-mcp-client-leak, GOAL-020 AC-266) =="
-  # The release job's `Run tests` step runs a hand-scoped glob with NO GH_TOKEN. A test file in that
-  # glob that closes its `quay mcp` client on the happy path only leaks the child on any throwing
-  # block, and `node --test` then never exits — measured in the release channel as 30m21s / 30m17s
-  # against `timeout-minutes: 30`, i.e. the gate degraded from "reports red" to "reports nothing".
-  # Code-class, not operational: it reads ONLY checked-in files (the workflow + the glob's test
-  # files), no live loop state — so it belongs here, not in run_operational_checks.
-  # The object is the RELEASE surface itself: the glob is DERIVED from release.yml's `Run tests` step
-  # (never hardcoded), and the predicate is per-binding (`const { client: X } = await connectStdio(…)`
-  # must have X.close() inside a `finally`), position-based with `//` comments stripped.
-  # 0 = every binding closed on the throwing path; 1 = a leak, named by file:line; 3 = NOT-EVALUATED
-  # for an unreadable workflow / step / zero-file glob / zero bindings — never 0 (硬规则 3b:
-  # "nothing was checked" must not render as "all clients are closed"). The non-destructuring
-  # bindings it deliberately does NOT judge are printed as a count on every run.
-  # @static-tier change
-  # @static-object .github/workflows/release.yml packages/quay/test/ packages/quay-native/test/ plugin/scripts/release-test-client-close-check.ts plugin/scripts/checker-mutation-cases/release-test-client-close-check.sh
-  # --root repo_root, NOT main_root: every input is a CHECKED-IN file (the workflow + the glob's test
-  # files), so the verdict must be about the tree under test. Pointing it at main_root would make the
-  # fan-in/verify worktree judge the MAIN checkout's copy instead — measured 2026-09-15: the first
-  # wiring used main_root and this very check went RED inside its own task's worktree, because the
-  # main checkout (branch `author`) had not yet received the fix the worktree was carrying.
-  run_checker "release-test-client-close-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-test-client-close-check.ts" --root "${repo_root}"
+  # ── RETIRED 2026-09-16: release-test-client-close-check ─────────────────────────────────────────
+  # Its object was release.yml's `release` job and the test glob that job's `Run tests` step ran —
+  # and that job was one of the six removed by the 2026-09-16 human ruling cancelling the npm-pack /
+  # Node-SEA release lines (SPEC §11; GOAL-020 AC-266, whose subject was that same job, is
+  # superseded). With the job gone there is no `Run tests` step, no glob, and no release channel to
+  # bound the check to, so the checker could only report NOT-EVALUATED (exit 3) — and run_checker
+  # counts exit 3 as a failure. A checker whose subject no longer exists is not a check; leaving it
+  # registered would have made this whole static gate permanently red for a reason unrelated to any
+  # tree under test. The checker file, its mutation case and its six capability-catalog rows were
+  # removed with it.
+  # ⚠️ KNOWN GAP, recorded rather than silently dropped: the property it asserted (an MCP client
+  # opened via connectStdio must be closed on the THROWING path, or `node --test` never exits) is
+  # now unguarded repo-wide — it was only ever wired to the release glob, so nothing else inherits
+  # it. Re-pointing it at the full-suite glob (scripts/test.sh) is a real option and a separate
+  # decision with its own blast radius; it is deliberately NOT done here.
   # gap-first-green-release-and-master-ff (GOAL-020 AC-274, SPEC §6.1 invariant 3): `advance-master`
   # is the ONE job allowed to move `master`, and its `needs:` list is the only thing that keeps that
   # from happening on a half-green release — GitHub skips a job whose dependency did not succeed, so

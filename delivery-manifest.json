@@ -1,39 +1,12 @@
 {
   "$schema": "delivery-manifest-v1",
-  "description": "Single source of truth for quay release artifacts. release.yml must produce exactly this set — no more, no less.",
+  "description": "Single source of truth for quay release artifacts. release.yml must produce exactly this set — no more, no less. The npm-pack (.tgz) and Node-SEA (single-file executable) lines were CANCELLED by the human ruling of 2026-09-16 (orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11: 「取消 sea 和 npm release。这些是我们最近没有精力去保障的。」), so no npm-tarballs / sea-binaries entries are declared: release.yml no longer produces them, and a manifest that still declared them would be the drift this checker exists to catch. The release channel is the Claude Code plugin channel, gated by a real marketplace install of the released tag (release.yml job verify-plugin-channel).",
   "version": "0.7.1",
   "artifacts": {
-    "npm-tarballs": [
-      {
-        "package": "quay",
-        "path": "packages/quay",
-        "artifactPattern": "quay-{version}.tgz"
-      }
-    ],
-    "sea-binaries": [
-      {
-        "package": "quay",
-        "platforms": [
-          "linux-x64",
-          "macos-arm64",
-          "windows-x64"
-        ]
-      },
-      {
-        "package": "quay-native",
-        "platforms": [
-          "linux-x64",
-          "macos-arm64",
-          "windows-x64"
-        ],
-        "bundled-with": "quay",
-        "note": "quay-native SEA binary is bundled inside the quay SEA archive (assembled together in the sea-release job). One archive per platform carries both binaries. The release.yml check validates the build steps exist, not archive separation."
-      }
-    ],
     "plugin": {
       "id": "quay",
       "bundle-type": "marketplace",
-      "note": "Distributed via marketplace JSON files (.claude-plugin/marketplace.json + plugin/.claude-plugin/marketplace.json) checked into the repo and version-bumped with each release. Included in the npm-pack tarball. Not a separate GitHub Release asset."
+      "note": "Distributed via marketplace JSON files (.claude-plugin/marketplace.json + plugin/.claude-plugin/marketplace.json) checked into the repo and version-bumped with each release. Not a GitHub Release asset — consumers install it with `claude plugin marketplace add` + `claude plugin install quay@quay`."
     }
   },
   "capabilities": [
