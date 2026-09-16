@@ -79,8 +79,8 @@ runner 实测探针读数（在 `test` job 里临时加一步取得）：`uid=0(
 
 ## Definition of Done
 
-- [ ] `origin/develop` 上有一次真实 GitHub Actions `test` job（`runs-on: [self-hosted, tokyo-alpha]`）跑绿的记录。
-  ⚠️ **本条故意保持未勾**：AC2 的绿跑发生在**本任务分支**上（run 35126145957，已在 AC2 落证据）。develop 上的绿跑只会在本分支被 fan-in 快进到 develop、GitHub 因 `push: develop` 自动触发之后才存在——**在勾选这一刻它还没有被观测到**，按硬规则 3b 不拿「预期会发生」当「已发生」。落地后由 `gh run list --branch develop` 复核。
+- [ ] `origin/develop` 上有一次真实 GitHub Actions `test` job（`runs-on: [self-hosted, tokyo-alpha]`）跑绿的记录——该 run 由落地后的 `push: develop` 触发，本条在 flip 之前结构上无读数，属外层验证（待外部）
+  ⚠️ **本条故意保持未勾**：AC2 的绿跑发生在**本任务分支**上（run 35126145957，已在 AC2 落证据）。develop 上的绿跑只会在本分支被 fan-in 快进到 develop、GitHub 因 `push: develop` 自动触发之后才存在——**在勾选这一刻它还没有被观测到**，按硬规则 3b 不拿「预期会发生」当「已发生」。落地后由 `gh run list --branch develop` 复核。按 `ready-pool-check.ts` 的 `isExternalVerificationItem` 声明式注解族，条末已标注 `（待外部）`（同行含字面 `外层验证`）⇒ fan-in flip 闸判 `pass-external` 而非 `pass`，两态取值可区分（硬规则 3b），因此**不需要**也不得把它勾上。
 
 ## Touches
 
