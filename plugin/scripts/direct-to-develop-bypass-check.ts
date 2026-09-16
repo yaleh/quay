@@ -379,6 +379,14 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "带上新的 -dev 后缀，⛔ 不留在无后缀的已发布版本号上）——与 ae28758aa 同一次发布操作的直接延续，" +
       "同一裁定依据（先例 08e8ec55/a388ca38/cddc55e2）。manager 2026-09-16 裁定 ruled one-off。",
   },
+  {
+    sha: "cf4f9bd9e",
+    reason:
+      "ruling-add 提交自身豁免（同 8dfd2967/fd1de6a0 形）——cf4f9bd9e 把 ae28758aa/806fee934 加入 ruled 表，" +
+      "本身是 manager 直接提交（改 checker 源码）⇒ bypass 自指死锁（给 cf4f9bd9e 加 ruled = 又一个直接提交）。" +
+      "解：本条目把 cf4f9bd9e 入表（ae28758aa/806fee934 已按 ruledHistorical 分类）。" +
+      "manager 2026-09-16 裁定 ruled one-off（先例 8dfd2967/fd1de6a0）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
