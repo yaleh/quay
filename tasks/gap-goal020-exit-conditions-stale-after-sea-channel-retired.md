@@ -3,7 +3,7 @@ id: gap-goal020-exit-conditions-stale-after-sea-channel-retired
 title: GOAL-020 退出条件②与范围节已被 SEA 渠道退役甩下：在域 7 条 AC 零条提到
   SEA/serve/plugin-root，而退出条件仍逐字要求「SEA 产物不再因 plugin-root.ts 的顶层求值而在 serve 上崩」⇒
   修文本（option b），不是加判据
-status: ready
+status: done
 labels:
   - gap
   - defect
