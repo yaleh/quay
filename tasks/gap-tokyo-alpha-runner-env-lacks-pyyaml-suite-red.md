@@ -2,7 +2,7 @@
 id: gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red
 title: tokyo-alpha self-hosted runner 环境缺 PyYAML 等依赖——CI test job 上该 runner
   从未绿过，~80 个套件测试因环境而红
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
