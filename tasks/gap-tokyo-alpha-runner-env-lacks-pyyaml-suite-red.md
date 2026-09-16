@@ -45,5 +45,6 @@ extra:
 ## Touches
 
 - .github/workflows/ci.yml
-- plugin/test/（如需为环境差异加判据）
+- plugin/test/plugin-bin-shim-npm-free-cli.test.mjs（Finding 点名的 nvm-fallback 宿主 PATH 依赖）
+- plugin/test/ci-runner-env-prereqs.test.mjs (new)（如需为环境前提加判据）
 - tasks/gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red.md（自身）
