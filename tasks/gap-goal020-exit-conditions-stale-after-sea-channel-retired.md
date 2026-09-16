@@ -3,7 +3,7 @@ id: gap-goal020-exit-conditions-stale-after-sea-channel-retired
 title: GOAL-020 退出条件②与范围节已被 SEA 渠道退役甩下：在域 7 条 AC 零条提到
   SEA/serve/plugin-root，而退出条件仍逐字要求「SEA 产物不再因 plugin-root.ts 的顶层求值而在 serve 上崩」⇒
   修文本（option b），不是加判据
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -78,7 +78,7 @@ SPEC §11.4 逐字要求「⛔ 不是让它们继续挂着变成永久无法达�
 等于把刚退役的 AC-267 换个编号复活；而**退出条件②的文本仍然要求它** ⇒ 判官下一轮仍判
 `insufficient`，新增的那条则永远是红。**在这个方向上，加判据只会让目标更远。**
 
-### 四、提案：改这两处文本（⛔ 具体字样是待批草稿，人以任何措辞批准即以人的措辞为准）
+### 四、提案：改这两处文本（人已批准，具体字样以下方为准）
 
 **(1) 退出条件② → 去掉已退役的 SEA 半句，把「产物真能起来」保留在「全绿」这个读数上：**
 
@@ -149,7 +149,6 @@ run，且 master 的提交正是其中某个 tag 的提交」。⇒ ②改写后
 - 可核事实②（AC2）：范围节的清单条目 id 集合 == 在域 AC 集合，**集合相等**。
 - 可核事实③（AC3）：`.quay/goal-sufficiency-cache.json` 出现新 key 条目，且 `.quay/goal-round.jsonl` 在其后落一条 `goal-sufficiency` fact。
 - ⛔ **本任务只改 GOAL-020 的 body 文本**：不动任何 AC 的 `status` / `criterion`（AC-266/267/268 保持 `superseded`，AC-274 保持 `active`），不动 GOAL-020 的 `status`（保持 `active`），⛔ 不写 goal store 的 status。
-- ⛔ 本任务为**提案**，落 `needs-human` 等人工批准；第四节给出的改写字样是**待批草稿**。
 
 ## Touches
 
@@ -158,3 +157,7 @@ run，且 master 的提交正是其中某个 tag 的提交」。⇒ ②改写后
 - tasks/gap-goal020-exit-conditions-stale-after-sea-channel-retired.md
 
 ⛔ 无测试文件：本任务无代码路径（产物是 goal store 里的 body 文本 + 一份 SPEC 记录），其判据是 AC1/AC2 的两条可执行谓词当场干跑（含 AC4 负控制），不进套件。⛔ 本任务不新增 `plugin/scripts/*` 检查器——那会牵动 capability-catalog / outline / laydown 三处登记，而本轮要的是**改文本**不是**造仪器**。
+
+## 人批准（manager 会话，2026-09-16）
+
+草稿按第四节原样批准，无改字。转 `todo` 交自动管线执行——AC1-AC5 都是可机械核验的谓词，不需要再等人判断。
