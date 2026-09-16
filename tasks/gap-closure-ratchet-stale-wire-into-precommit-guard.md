@@ -2,7 +2,7 @@
 id: gap-closure-ratchet-stale-wire-into-precommit-guard
 title: quay-init 棘轮陈旧检测（--check-stale）从未接入 precommit-guard——漏改 baseline 能顺利
   commit+push，靠远端 CI 才暴露
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -155,3 +155,17 @@ precommit-guard.ts 自身已有先例形态可循：③ goal_ac 写入面判定�
 - session_id：920f20cd-25f9-488f-89c6-43bd4736dc9c
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-closure-ratchet-stale-wire-into-precommit-guard~wk-prod-anchor~1789568420859-a84a66.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-closure-ratchet-stale-wire-into-precommit-guard-wk-prod-anchor.log
+
+## 人复核（manager 会话，2026-09-16T14:3xZ）— 仓库级阻塞已解除，转回 ready 重试
+
+进 needs-human 的真因是仓库级阻塞，非本任务实现缺陷：`direct-to-develop-bypass-check` 把 manager
+2026-09-16 的 v0.8.0 release cut 两条直提（ae28758aa/806fee934，未走 fan-in）判定为未裁定 bypass，
+static-tier fail-closed 挡住了全仓所有任务的完整套件（不只是这个任务）。
+
+已裁定并落地修复（commit 5d937823a，已推送 origin/develop）：把这两条按先例 08e8ec55/a388ca38
+（release 版本 bump 类直提）加入 RULED_HISTORICAL_COMMITS。已用生产命令验证转绿：
+`node --no-warnings --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts
+--root . --baseline develop~100 --json` => ok:true, reason:"ac65-authorized-or-ruled-historical-only"。
+
+本任务自己之前的实现（precommit-guard.ts 改动、30/30 precommit-guard.test.mjs、scoped gate 已过）
+未受影响，未碰 delta，转回 ready 让 worker-driver 重新派发即可。
