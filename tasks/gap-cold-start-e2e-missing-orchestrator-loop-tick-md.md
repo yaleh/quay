@@ -41,6 +41,45 @@ FAIL: missing file: /tmp/tmp.h5lIjSnDjC/empty-project/orchestration/orchestrator
 ## Definition of Done
 - [x] 一次真实 GitHub Actions `workflow_dispatch` 触发的 `cold-start-e2e` job 转绿记录（run 链接）。
 
+## Evidence
+
+**AC1 — root cause (option 3 of 3): the e2e's asserted paths were themselves stale.**
+`quay-init` no longer writes `orchestration/` at all. SPEC-plugin-lifecycle-single-bundle-2026-09-02
+§6 (裁定 6, `:187`) puts 「`orchestration/` tick 文档」and `docs/analysis/` under **⛔ 不再写入**, landed
+in `6358b2cd6` ("AC168 收缩本体", 2026-09-08) — quay-init is a project initializer, not an installer.
+The other two options are ruled out by measurement, not assumption:
+- **(a) laydown template missed it** — `plugin/scripts/quay-init.sh` has NO `orchestration/` laydown code
+  path left (`grep -E '^ *(write_template|cp|install|copy_one|mkdir -p).*orchestration'` → 0 hits).
+- **(b) package script did not pack it** — the build artifact DOES carry it: `packages/quay/scripts/package.sh:39-40`
+  ("The release tarball must carry the loop tick docs"), and in BOTH the red baseline and the green run the
+  AC3 install-source assertion passes (`install source has quay-init.sh + orchestrator-loop-tick.md`).
+- Baseline red is independent of the tokyo-alpha self-hosted runner migration: run `35119940633`, job
+  `cold-start-e2e`, `runner_group_name="GitHub Actions"`, labels `["ubuntu-latest"]` — GitHub-HOSTED. The
+  failing step is `Cold-start e2e (install the plugin from build artifacts, no --push)` with
+  `FAIL: missing file: /tmp/tmp.h5lIjSnDjC/empty-project/orchestration/orchestrator-loop-tick.md`.
+  It stayed invisible because the job is `workflow_dispatch`-gated and had never really run.
+
+**AC2** — `bash test/cold-start-e2e.sh --from-build` → **exit 0** locally (wall-clock 13s; re-run on the
+final commit → exit 0 again).
+
+**AC3** — real `workflow_dispatch` on the task branch: run **`35126883036`**
+(https://github.com/yaleh/quay/actions/runs/35126883036), job `cold-start-e2e` → `conclusion: success`,
+GitHub-hosted `ubuntu-latest`, 17:14:01Z → 17:14:35Z, in-job `wall-clock: 11s (from-build=true)`, job
+https://github.com/yaleh/quay/actions/runs/35126883036/job/104898003585. Two earlier dispatches were also
+green (`35126406873` on `7903c12a2`, `35126702003` on `d2593375d`).
+
+**Bidirectional negative controls (run before landing — the new assertions CAN fail):**
+- `--sabotage loop/orchestrator-loop-tick.md` → AC3 fails naming the file (retained AC4 fail direction).
+- a doctored install source whose quay-init also writes `orchestration/orchestrator-loop-tick.md` → LEG 2b
+  fails naming it as outside the closed set.
+- a doctored `CLOSED_SET_ITEMS` that regrows to include that path → LEG 2b PASSES and LEG 2c fails,
+  proving 2c is not shadowed by 2b (the retired-surface control is independently live).
+
+**hard rule 5b sweep** — the same dead premise survives in two more carriers: `test/cold-start-oneliner-e2e.sh`
+(4 hits: `:142`, `:247`, `:248`, `:147/:162/:256`; DORMANT — in neither `scripts/test.sh` nor any CI job) and
+`plugin/skills/cold-start/SKILL.md:36`. Recorded in the carrier (`test/cold-start-e2e.sh` header), NOT fixed
+here: both are outside this task's `## Touches`.
+
 ## Touches
 - test/cold-start-e2e.sh（或其断言的构建产物路径）
 - packages/quay/scripts/package.sh（若根因是打包脚本漏收模板）
