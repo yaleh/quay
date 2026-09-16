@@ -1,7 +1,7 @@
 ---
 id: gap-commit-routine-write-no-git-identity-fallback
 title: commitRoutineWrite 不带 git 身份兜底：CI/无 global git config 环境下 routine 提交必然失败
-status: todo
+status: ready
 labels:
   - gap
   - defect
