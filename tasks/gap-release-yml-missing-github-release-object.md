@@ -95,20 +95,61 @@ GitHub Releases 页面真的出现了新版本（`gh release view <tag>` 存在�
 `quay-init` 能跑通、driver/serve 能正常起来（复用 SPEC §11 第 2 点里"2026-09-16 在 ad-arm1
 archguard 项目上手工做过的那套验证"同一套流程，这次换成 `orangevps` 主机）。
 
+**实现落点（worker 已执行）**：新增独立 job `create-github-release`（`needs: [verify-plugin-channel]`，
+`permissions: contents: write`），并把新 job 加入 `advance-master.needs`。选独立 job 而非
+`verify-plugin-channel` 的最后一步，两条理由写在 `release.yml` 该 job 的注释里：①最小权限——
+`verify-plugin-channel` 声明 `contents: read`，而它是要跑 `npm install` 与 `npm install -g` 第三方
+CLI 的 job，为了末尾一步写入而放宽它的 token 会把写权限交给这条最不可信的路径；②闸的可读性——
+`advance-master.needs` 里的每个名字都是一条独立可失败的断言，把写入折进去会让"渠道坏了"与"Release
+对象建不出来"合并成同一条红。代价是 §6.1 invariant 3 的那一条（新 job 必须进 needs），而它由
+`release-master-advance-needs-check` 机械派生，不靠人记。幂等守卫用"读回 API 的值"判定（退出码单用
+不行——瞬时错误也是非 0），只容忍"对象已存在"这一种失败成因且必须读回确认；create 带
+`--verify-tag`（**载荷性**：`gh release create --help` 明确写"tag 不存在时会从默认分支当前状态自动
+创建 tag"——那会凭空造一个指向 `master` 的版本 tag，正是本 SPEC 要消灭的"版本号说谎"）。
+
 ## AC
 
-- [ ] `.github/workflows/release.yml` 新增的创建 GitHub Release 步骤，结构级验证（YAML 解析成功、
-      step 挂在正确的 job 下、依赖顺序正确——即在 `verify-plugin-channel` 之后）。
-- [ ] 负控制：新增步骤不引用任何已被 ① 删除的 sea/npm 相关变量/路径（`grep` 该步骤的具体内容，
-      确认不含 `SEA_`/`quay-sea-`/`npm pack` 等已退役的字面量）。
-- [ ] 幂等性验证：构造一个"tag 已存在 Release 对象"的场景（或读 `gh release create --help` 找到
-      等价机制），验证重复 dispatch 不会在这一步失败。
-- [ ] 若新增独立 job：`node --experimental-strip-types plugin/scripts/release-master-advance-needs-check.ts
+- [x] `.github/workflows/release.yml` 新增的创建 GitHub Release 步骤，结构级验证（YAML 解析成功、
+      step 挂在正确的 job 下、依赖顺序正确——即在 `verify-plugin-channel` 之后）。— 载体
+      `plugin/test/release-github-release-step.test.mjs`（三条 AC1 测试，全绿）：YAML 经 `yaml` 包
+      解析；job `create-github-release` 的 `needs` 含 `verify-plugin-channel`（⇒ 写在验证之后）；
+      step `id: github-release` 存在且是非空 `run`（含 `gh release create`）；job 声明
+      `permissions: contents: write`；`advance-master.needs` 含新 job；job 集恰为
+      {verify-plugin-channel, create-github-release, advance-master} 且除 master 外全部被 needs 覆盖。
+      **负控制**：把 release.yml 换回 HEAD 的 pre-fix 版本 ⇒ 9/10 红（唯一保持绿的是合成串的
+      positive control，符合预期）。
+- [x] 负控制：新增步骤不引用任何已被 ① 删除的 sea/npm 相关变量/路径（`grep` 该步骤的具体内容，
+      确认不含 `SEA_`/`quay-sea-`/`npm pack` 等已退役的字面量）。— 测试对 step 的 `run` 体与
+      整个 job（含注释）两个层面断言命中数为 `[]`；**并带 positive control**：同一个谓词对
+      `"run: npm pack ./packages/quay"` 返回 `["npm pack"]`、对 `"SEA_NODE_VERSION"` 返回
+      `["SEA_"]`——没有这个控制它就是一条不可取假的断言（硬规则 4）。**mutation 控制**：往 run 体
+      注入 `npm pack` ⇒ 恰好该条测试变红。`grep -nE 'SEA_|quay-sea-|npm pack' .github/workflows/release.yml`
+      仅命中 :17——那是既有的、记录"这些 job 已被删除"这一事实的头部注释，**在本步骤之外**（AC2 的字面
+      范围是"新增步骤的具体内容"）。
+- [x] 幂等性验证：构造一个"tag 已存在 Release 对象"的场景（或读 `gh release create --help` 找到
+      等价机制），验证重复 dispatch 不会在这一步失败。— 先读 `gh release create --help`（本机 gh
+      2.97.0）：**不存在 upsert 类选项**（只有 --draft/--prerelease/--latest/--verify-tag 等），故
+      "存在则跳过"必须自建。再用 `gh` 的 PATH shim 驱动**从 shipped YAML 中抽出的该步骤自己的 run
+      体**（不是另写一份实现）跑五例：A 已存在 ⇒ exit 0 且 `create` **从未被调用**；B 不存在而 create
+      成功 ⇒ exit 0、argv 含 `--verify-tag`/`--repo`；C create 失败且读回仍为空 ⇒ **非 0**（证明它
+      不是 blanket `|| true`）；D create 失败但对象已被并发创建 ⇒ exit 0（唯一被容忍的成因）；E 存在
+      的是**别的** tag ⇒ 仍创建（守卫比对读回值，不是退出码）。**mutation 控制**：删掉 `--verify-tag` ⇒
+      恰好 B 红；把 create 换成 blanket `|| true` ⇒ 恰好 C 红。
+- [x] 若新增独立 job：`node --experimental-strip-types plugin/scripts/release-master-advance-needs-check.ts
       --root . --json` 重跑，确认它的结构性派生逻辑是否已经/需要覆盖这个新 job（读代码判断，不要
-      凭空假设结论——本任务撰写时已确认该检查器结构派生 job 集合，若不新增 job 则无需改动它）。
-- [ ]（外层验证，待外部）真实 dispatch 一次完整 SPEC §4.1 分支纪律切出的新版本，`gh release view
+      凭空假设结论——本任务撰写时已确认该检查器结构派生 job 集合，若不新增 job 则无需改动它）。—
+      **实现选择了新增独立 job**，故本条适用。重跑得 `state:"pass"`：job 集由**文件自身**派生为 3
+      [verify-plugin-channel, create-github-release, advance-master]，needs 声明 2，missing/unknownNeeds
+      均 0，**检查器脚本零改动**（已读 :126-155 确认其 job 键集来自 YAML 顶层 `jobs:`）。**负控制**：
+      把 `advance-master.needs` 收窄回单 job ⇒ 该检查器 exit 1，且恰好两条 needs-覆盖测试变红；其
+      mutation case（含 phase E：对真实 release.yml 的逐字拷问）rc=0。⚠️ 本条与下一条原本写作
+      `- [ ]（外层验证…`（`]` 与 `（` 之间**缺空格**），而 `uncheckedItems` 的谓词是
+      `/^\s*-\s+\[[^xX]\]\s+(.+)$/`——缺空格使这两项**在结构上取不到文本**，于是 flip 闸把"已注解的
+      待外部项"读成"未注解项"判 FAIL（会白烧一整轮 fan-in）。补一个空格后 `flipAcGateVerdict` 返回
+      `status:"pass-external", ok:true`（已**干跑**验证，非按约定推断）。
+- [ ] （外层验证，待外部）真实 dispatch 一次完整 SPEC §4.1 分支纪律切出的新版本，`gh release view
       <新tag>` 存在，`gh release list` 显示它是 `Latest`。
-- [ ]（外层验证，待外部）`orangevps` 主机 `archguard` 项目 project scope 下真实安装这次新版本的
+- [ ] （外层验证，待外部）`orangevps` 主机 `archguard` 项目 project scope 下真实安装这次新版本的
       plugin，版本号核对一致，`quay-init`/driver/serve 验证通过。
 
 ## DoD
@@ -116,7 +157,8 @@ archguard 项目上手工做过的那套验证"同一套流程，这次换成 `o
 验收对象是「GitHub Releases 页面（`https://github.com/yaleh/quay/releases`）真实显示这次新版本为
 Latest」+「orangevps 的 archguard 项目真的装到了这个版本并验证可用」——不是「release.yml 加了一段
 创建 Release 的 YAML」就算完成（同硬规则 4 推论三：实现了但没真正跑过一次，证明的是"能产出"不是
-"已产出"）。
+"已产出"）。**worker 侧交付的是"能产出"那一半**（结构 + 幂等性 + 负控制，均有可失效的对照）；上面
+两条外层项保持未勾，等待真实 release cut 与跨主机安装把"已产出"那一半补上。
 
 ## Touches
 
