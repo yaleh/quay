@@ -629,6 +629,122 @@ test("CARRIER AC7 (5b sibling) — the filed TASK file is committed by the same 
   assert.match(again.reason, /already committed/);
 });
 
+// ── 例程的提交不依赖宿主是否配过 git 身份（gap-commit-routine-write-no-git-identity-fallback）──────
+//
+// 实测缺陷（CI run 35065126553，job `test`）：`commitRoutineWrite` 裸跑 `git` ⇒ 在**没有**全局身份的宿主
+// 上 `git commit` 报 `Author identity unknown`，append 永远提交不了。本机复现不出来，因为本机恰好配好了
+// 身份 —— **「本机全绿」正是这个缺陷最好的伪装**（也正是它只被 CI 抓到的原因）。
+//
+// 所以这三条用例**自己造宿主环境**（⛔ 不改本进程、⛔ 不动真 config）：子进程 env 里清掉四个 `GIT_*` 身份
+// 变量、`GIT_CONFIG_GLOBAL` 指向一个临时配置文件、`GIT_CONFIG_SYSTEM=/dev/null`。
+//   · 无身份宿主 = 全局配置只有 `user.useConfigOnly = true`（**关掉自动探测**）
+//   · 有身份宿主 = 全局配置带 `user.name`/`user.email`（负控制：⛔ 不许悄悄冒用宿主身份）
+//
+// ⚠️ 诚实说明：这是**复现失败形态**，不是逐位复刻 runner —— 本机 git 能从 gecos/hostname 自动探测出身份，
+//    runner 上探测不出来。`useConfigOnly` 是把「探测不出来」这个**效果**表达出来的配置层开关，它产出的
+//    文本与 CI 日志逐字一致（`Author identity unknown` + `*** Please tell me who you are.`）。
+// ⚠️ 另一个已知形态（runner 就带这两个变量）：宿主导出**空的** `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` 时报的是
+//    `fatal: empty ident name`，**不是**上面那段 —— 单列一条，⛔ 不把两种形态混成一条对照。
+/** 子进程脚本：真建一个仓库，先跑**不带身份**的裸 `git commit`（环境对照），再跑 `commitRoutineWrite`。 */
+const IDENTITY_CHILD = `
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const [root, modUrl, relR, relN] = process.argv.slice(2);
+const SEED = { GIT_AUTHOR_NAME: "seed", GIT_AUTHOR_EMAIL: "seed@example.invalid",
+               GIT_COMMITTER_NAME: "seed", GIT_COMMITTER_EMAIL: "seed@example.invalid" };
+// 建库自己用 seed 身份（放 env —— 空的 GIT_* 变量会击穿 -c config，见 sha 5b 的教训）；
+// 只有对照组那次调用用 process.env 原样，**那正是被测的宿主形态**。
+const git = (args, seeded) => spawnSync("git", ["-C", root, ...args],
+  { encoding: "utf8", env: seeded ? { ...process.env, ...SEED } : process.env });
+
+fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+// 两个文件都先进库：commitRoutineWrite 的契约要求目标是**已跟踪**的（见 5b sibling 用例）。
+fs.writeFileSync(path.join(root, relN), "# N baseline\\n", "utf8");
+fs.writeFileSync(path.join(root, relR), "# R baseline\\n", "utf8");
+git(["init", "-q"], true);
+git(["add", "-A"], true);
+const baseline = git(["commit", "-qm", "baseline"], true);
+
+// (1) 环境对照：同一次暂存、同一个文件，**不带身份**的裸 commit —— 修前 commitRoutineWrite 走的正是这一步。
+fs.writeFileSync(path.join(root, relN), "# N changed\\n", "utf8");
+git(["add", "--", relN], true);
+const naive = git(["commit", "--no-verify", "-m", "naive", "--", relN], false);
+git(["reset", "--", relN], true);
+
+// (2) 待测：函数自己的提交（一个相对 HEAD 有改动的新文件）。
+fs.writeFileSync(path.join(root, relR), "## Finding\\nx\\n", "utf8");
+const { commitRoutineWrite } = await import(modUrl);
+const commit = commitRoutineWrite(root, relR, "routine(x): file FRESH");
+const ident = git(["log", "-1", "--format=%an|%ae|%cn|%ce"], true).stdout.trim();
+const show = git(["show", "HEAD:" + relR], true);
+const dirty = git(["status", "--porcelain", "--", relR], true).stdout.trim();
+
+console.log(JSON.stringify({
+  baselineStatus: baseline.status,
+  naiveStatus: naive.status, naiveStderr: String(naive.stderr ?? ""),
+  commit, ident, dirty, inHead: show.status === 0 && show.stdout.includes("## Finding"),
+}));
+`;
+const ROUTINE_IDENT = "quay-routine|routine@quay.local|quay-routine|routine@quay.local";
+
+test("CARRIER AC7 (identity) — on a host with NO git identity (CI-shaped) the routine still commits its own write", () => {
+  const work = makeTmpDir("probe-gitident-");
+  const noIdentity = path.join(work, "global-no-identity.gitconfig");
+  const hostIdentity = path.join(work, "global-host-identity.gitconfig");
+  // 「探测不出身份」= 全局配置只声明 useConfigOnly（⛔ 没有 user.name/user.email，与 AC 的措辞一致）。
+  fs.writeFileSync(noIdentity, "[user]\n\tuseConfigOnly = true\n", "utf8");
+  fs.writeFileSync(hostIdentity, "[user]\n\tname = Host User\n\temail = host@example.invalid\n", "utf8");
+  const script = path.join(work, "identity-child.mjs");
+  fs.writeFileSync(script, IDENTITY_CHILD, "utf8");
+  const modUrl = pathToFileURL(path.join(REPO_ROOT, "plugin", "scripts", "probe-routine.ts")).href;
+
+  /** 每个用例一个全新仓库 + 一个全新的、受控的子进程 env（清掉四个 GIT_* 身份变量 = AC 说的「显式清空」）。 */
+  const runChild = (extraEnv) => {
+    const repo = makeTmpDir("probe-gitident-repo-");
+    const env = { ...process.env, GIT_CONFIG_SYSTEM: "/dev/null", ...extraEnv };
+    for (const k of ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"]) {
+      if (!(k in extraEnv)) delete env[k];
+    }
+    const r = spawnSync(process.execPath, ["--experimental-strip-types", script, repo, modUrl, "tasks/FRESH.md", "tasks/NAIVE.md"],
+      { encoding: "utf8", env });
+    assert.equal(r.status, 0, `child must run: ${r.stderr}`);
+    return JSON.parse(r.stdout.trim().split("\n").pop());
+  };
+
+  // (A) 无身份宿主 —— 复现 CI。对照那一步必须**真的**以 CI 那段文本失败，否则这条用例是空转的。
+  const a = runChild({ GIT_CONFIG_GLOBAL: noIdentity });
+  assert.equal(a.baselineStatus, 0, "precondition: the child's own baseline commit works (seed identity)");
+  assert.notEqual(a.naiveStatus, 0, "precondition: on this host an identity-less commit really does fail");
+  assert.match(a.naiveStderr, /Author identity unknown/,
+    "⛔ the emulated host must fail with the CI's own text — otherwise this case proves nothing");
+  assert.deepEqual(a.commit, { ok: true, reason: "committed" },
+    "⛔ the routine must carry its own identity instead of depending on the host");
+  assert.equal(a.inHead, true, "the write must really be in HEAD");
+  assert.equal(a.dirty, "", "⛔ HEAD and the work tree must agree — nothing left for a checkout to take back");
+  assert.equal(a.ident, ROUTINE_IDENT, "the commit must be by the routine identity, not by auto-detection");
+
+  // (B) 宿主导出**空的** GIT_* 身份变量（GH runner 的真实形态）—— 报错文本与 (A) 不同，单列。
+  const b = runChild({
+    GIT_CONFIG_GLOBAL: noIdentity,
+    GIT_AUTHOR_NAME: "", GIT_AUTHOR_EMAIL: "", GIT_COMMITTER_NAME: "", GIT_COMMITTER_EMAIL: "",
+  });
+  assert.notEqual(b.naiveStatus, 0, "precondition: empty-but-present identity vars also break a naive commit");
+  assert.match(b.naiveStderr, /empty ident name/,
+    "（这个形态的报错与 CI 那段不同 —— 单列，⛔ 不混为一谈）");
+  assert.equal(b.commit.ok, true, `empty-but-present GIT_* vars must not defeat the routine identity: ${b.commit.reason}`);
+  assert.equal(b.ident, ROUTINE_IDENT, "the env layer is why this case passes — ⛔ do not 'simplify' it away");
+
+  // (C) 负控制：宿主**自己**配好了身份 ⇒ 裸 commit 本来就会成功，而例程的提交仍必须是例程身份。
+  const c = runChild({ GIT_CONFIG_GLOBAL: hostIdentity });
+  assert.equal(c.naiveStatus, 0, "precondition: on a host WITH identity a naive commit succeeds (so the next assert is not vacuous)");
+  assert.equal(c.commit.ok, true, c.commit.reason);
+  assert.equal(c.ident, ROUTINE_IDENT,
+    "⛔ the fix must not have introduced a side effect where the routine silently borrows the HOST's identity");
+  assert.equal(c.dirty, "", "and the tree is still clean of this file");
+});
+
 test("FILING — the filed task must be SHAPE-USABLE: plain `## AC`/`## DoD` and no runtime path in Touches", () => {
   // Both of these were measured defects in the first version, and both make the mechanism's product
   // NOISE rather than work — the exact failure this task exists to end:

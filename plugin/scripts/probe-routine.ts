@@ -421,6 +421,43 @@ export function appendRoutineFindings(findingsPath: string, records: readonly Re
   return records.length;
 }
 
+/** 例程提交身份 —— **常量，⛔ 不读宿主**（gap-commit-routine-write-no-git-identity-fallback）。
+ *
+ *  WHY 不读宿主：这一条与「别在本机等价于无限制」同族（硬规则 4 推论二）——「宿主已配好身份」是一个
+ *  **依赖宿主的常量**，换台机器（GH runner/容器/新机器）就变成**没有身份**，而失败是静默能力缺失：
+ *  函数照常返回、错误照常上报，只是 append 永远提交不了。要用「例程提交」这个能力，就在机制上带身份，
+ *  不要依赖一个恰好成立的 ambient 配置。
+ *
+ *  ⛔ 不写 `--global`、也不改仓库/全局 config（那会永久污染宿主与共享检出，且改的是别人的东西）；
+ *  身份只作用于本模块 spawn 的那一次 git 进程。 */
+export const ROUTINE_COMMIT_IDENTITY = { name: "quay-routine", email: "routine@quay.local" } as const;
+
+/** 一次【带例程身份】的 git 调用 —— `commitRoutineWrite` 的全部 git 动作都经它。
+ *
+ *  ⚠️ 为什么**两层都设**（`-c` 配置层 + `GIT_*` env 层），而不是只设一层 —— git 解析 ident 的顺序是
+ *  **env → config → 自动探测**，且「存在但为空」的 env 变量**被当作取值**（git 判的是 NULL 不是长度）：
+ *  - 只设 `-c` ⇒ 宿主若导出了**空的** `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME`，env 层先命中空值 ⇒
+ *    `fatal: empty ident name (for <>) not allowed`（GH runner 的环境就带这两个空变量）；
+ *  - 只设 env ⇒ 一旦将来有人 unwrap 这一层就退回原缺陷，而 `-c` 让「这次提交是谁」在 commit 那一行
+ *    自己读得出来。
+ *  ⇒ 两层同源（同一个常量），**改一处即可**；⛔ 不要「简化」掉任何一层。 */
+function routineGit(root: string, args: string[]) {
+  return spawnSync(
+    "git",
+    ["-C", root, "-c", `user.name=${ROUTINE_COMMIT_IDENTITY.name}`, "-c", `user.email=${ROUTINE_COMMIT_IDENTITY.email}`, ...args],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: ROUTINE_COMMIT_IDENTITY.name,
+        GIT_AUTHOR_EMAIL: ROUTINE_COMMIT_IDENTITY.email,
+        GIT_COMMITTER_NAME: ROUTINE_COMMIT_IDENTITY.name,
+        GIT_COMMITTER_EMAIL: ROUTINE_COMMIT_IDENTITY.email,
+      },
+    },
+  );
+}
+
 /** 写盘即提交 —— 例程对**它自己写下的产物**用同一个动作落库（AC7 的推广）。
  *
  *  两个消费者，同一条判据：① 载体 `.quay/routine-findings.jsonl` 的追加（它从不被提交 ⇒ 实测丢过
@@ -454,9 +491,15 @@ export function appendRoutineFindings(findingsPath: string, records: readonly Re
  *  limited add+commit back-to-back (hard rule 11 — never leave the shared index staged), `--no-verify`
  *  (the pre-commit guard is for human/driver commits, not for an append that already happened on disk),
  *  and on failure `git reset -- <path>` to unstage while keeping the bytes. Returns a reason rather
- *  than throwing ⇒ the caller reports it in the Fact (⛔ never a silent "not committed"). */
+ *  than throwing ⇒ the caller reports it in the Fact (⛔ never a silent "not committed").
+ *
+ *  ⛔ **身份必须自己带**（gap-commit-routine-write-no-git-identity-fallback）：本函数的每一个 git 调用
+ *  都经 `routineGit` 注入 `ROUTINE_COMMIT_IDENTITY`，**不靠宿主 ambient 配置**。修前它裸跑 `git`，
+ *  于是「能不能提交」取决于宿主是否恰好配过 user.name/user.email —— 在没有的宿主（GH runner、容器、
+ *  刚装好的机器）上 `git commit` 报 `Author identity unknown`，append 永远提交不了 ⇒ 例程在这些环境里
+ *  必然退化成「写了但被下一次 checkout 吃掉」，即本函数存在的理由整个失效（实测 CI run 35065126553）。 */
 export function commitRoutineWrite(root: string, relPath: string, message: string): { ok: boolean; reason: string } {
-  const git = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const git = (args: string[]) => routineGit(root, args);
   const inside = git(["rev-parse", "--is-inside-work-tree"]);
   if (inside.status !== 0 || String(inside.stdout ?? "").trim() !== "true") {
     return { ok: false, reason: "not a git work tree — append left uncommitted" };
