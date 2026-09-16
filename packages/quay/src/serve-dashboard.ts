@@ -964,6 +964,50 @@ function goalStaleness(goalId: string, goals: GoalRecord[], staleMs: number, now
   return nowMs - lastProgressAt > staleMs ? "stale" : "fresh";
 }
 
+/** gap-dashboard-goal-card-ac-denominator-includes-superseded-retired: which AC records still hang on
+ *  their goal's accounting, i.e. belong in the 「AC 达成 x/y」 denominator.
+ *
+ *  Measured cost (2026-09-16): GOAL-020 carries 10 attached criteria, 3 of them `superseded` ⇒ the
+ *  card read 「6/10」 and the reader concluded "4 ACs left" (10−6), when only AC-274 was genuinely
+ *  open — the 3 superseded ones were already ruled done-with. The true reading is 「6/7」.
+ *
+ *  ⛔ NOT a `!== "superseded"` check. `retired` is equally real in this store (7 criterion records at
+ *  the time of writing) with the SAME "已退场" semantics; excluding only the status that happened to
+ *  trigger the report would leave the identical misreading on every goal carrying a retired AC.
+ *
+ *  ⛔ This deliberately REPLICATES an existing 口径 rather than inventing one. The canonical in-domain
+ *  set is `plugin/scripts/goal-driver.ts` `inScopeAcsOf` = `{active, achieved, needs-human}`, and for
+ *  good reasons this display surface must not diverge from:
+ *   - `draft` is OUT. A draft AC is a written-down proposal awaiting a HUMAN activation (裁定 3:
+ *     激活是人的动作) — it is not yet in force, so it is not outstanding work the goal is judged by.
+ *     It is also the ordinary state of a goal's ACs right after birth (the store's own birth path is
+ *     `create GOAL as draft → file its ACs as draft → flip the GOAL to active`, and the zero-AC
+ *     activation gate's error message literally prescribes `--status draft`). Consequence, accepted
+ *     and recorded here rather than left to be discovered: a goal whose ACs are all still draft
+ *     renders 「0/0」, the same as a goal with no criteria — telling "3 proposals await a ruling" apart
+ *     from "nothing here" is a separate concern with its own carrier (the /goal draft banner), not
+ *     something to solve by re-defining the denominator.
+ *   - `needs-human` is IN — 人 2026-09-09 裁定 2, precisely because a needs-human AC that is not
+ *     counted becomes indistinguishable from a draft one ("既不挡 GOAL 达成、也不计缺口，等于白加一个
+ *     状态").
+ *  ⚠️ 口径分叉会重演「draft 三头不占」 — the driver's own comment's warning. The card's X/Y must agree
+ *  with the mechanism's achievement judgment, otherwise a goal can read 「2/3」 on the dashboard while
+ *  the loop already considers it achieved.
+ *
+ *  An unrecognised/absent status is OUT (positive membership, matching `inScopeAcsOf`'s own
+ *  `status === "active" || ...` shape). ⚠️ That means a NEW status added to `GOAL_STATUSES` would
+ *  silently default to out-of-domain — the same shape this task exists to fix. The guard is the
+ *  exhaustiveness test in `gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs`:
+ *  every ABI status must be classified explicitly, so adding a 7th forces a decision here. */
+export const AC_ROLLUP_IN_DOMAIN_STATUSES: ReadonlySet<string> = new Set(["active", "achieved", "needs-human"]);
+
+/** Is this record in its goal's AC-达成 accounting (⇒ belongs in the denominator)?
+ *  The single source for the rule: the dashboard goal card AND the /goal Goals-tab rollup column both
+ *  call it, so the two surfaces cannot drift into different 口径. */
+export function isAcRollupCounted(status: unknown): boolean {
+  return AC_ROLLUP_IN_DOMAIN_STATUSES.has(typeof status === "string" ? status : "");
+}
+
 /** The dashboard goalCard. Pure render over the already-read `goals` array (GOAL + AC records as
  *  returned by `client.goalList()`); `cap`/`staleMs`/`nowMs` are injectable for deterministic tests.
  *  Renders an explicit empty state when there are no ACTIVE goals (AC4: the card shows 空态 rather
@@ -990,7 +1034,12 @@ export function renderGoalCard(
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
-    const acs = goals.filter((r) => String(r.goal ?? "") === gid);
+    // Denominator = the goal's ACs that are still IN its accounting, via `isAcRollupCounted`
+    // (`{active, achieved, needs-human}` — the same in-domain 口径 goal-driver's `inScopeAcsOf` uses;
+    // see the predicate's doc for the measured GOAL-020 「6/10」 misreading and for why `draft`
+    // `superseded`/`retired` are out). Both the plain text AND the bar percentage below read this ONE
+    // value, so the 口径 cannot split between them.
+    const acs = goals.filter((r) => String(r.goal ?? "") === gid && isAcRollupCounted(r.status));
     const achieved = acs.filter((r) => r.status === "achieved").length;
     const state = goalStaleness(gid, goals, staleMs, nowMs);
     // gap-dashboard-goal-card-ac-progress-bar: 「AC 达成 x/y」旁加一条 mini 进度条——复用

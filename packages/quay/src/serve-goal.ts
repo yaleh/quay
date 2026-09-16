@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import type { ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle } from "./serve-render.ts";
-import { readTaskSummary, type TaskSummary } from "./serve-dashboard.ts";
+import { readTaskSummary, isAcRollupCounted, type TaskSummary } from "./serve-dashboard.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
 // (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the
@@ -229,8 +229,13 @@ function renderGoalsTable(
 ): string {
   // AC rollup over the UNFILTERED array (renderGoalCard's own formula: acs = goal==gid, achieved =
   // status=="achieved") — so a goal with 0 criteria shows 0/0, never a hard-rule-6 "—".
+  // gap-dashboard-goal-card-ac-denominator-includes-superseded-retired: the denominator drops the
+  // 已退场 terminal states (`superseded`/`retired`) through the SAME `isAcRollupCounted` predicate the
+  // dashboard goal card uses — this column is the same 「AC 达成」 number for the same goal, so fixing
+  // only the card would leave this surface reporting 「6/10」 for GOAL-020 beside a card saying 「6/7」.
+  // ⛔ one predicate, two callers — never a second, looser copy of the rule.
   const rollupFor = (gid: string): { achieved: number; total: number } => {
-    const acs = all.filter((r) => String(r.goal ?? "") === gid);
+    const acs = all.filter((r) => String(r.goal ?? "") === gid && isAcRollupCounted(r.status));
     const achieved = acs.filter((r) => r.status === "achieved").length;
     return { achieved, total: acs.length };
   };
