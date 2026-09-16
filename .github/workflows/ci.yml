@@ -30,6 +30,24 @@ jobs:
       contents: read
       issues: read
     steps:
+      - name: PROBE runner environment (temporary)
+        run: |
+          echo "--- id ---"; id; echo "whoami=$(whoami) HOME=$HOME"
+          echo "--- PATH ---"; echo "$PATH"
+          echo "--- locale ---"; locale 2>&1 | head -5; echo "LANG=${LANG:-unset} LC_ALL=${LC_ALL:-unset}"
+          echo "--- tools ---"
+          for t in python3 pip3 pip jq tmux bash gawk mawk awk git sort node npm sudo; do
+            p="$(command -v "$t" 2>/dev/null || echo MISSING)"; printf '%-8s %s\n' "$t" "$p"
+          done
+          echo "--- python yaml ---"; python3 -c 'import yaml; print("yaml OK", yaml.__version__)' 2>&1 | tail -3
+          echo "--- pip available? ---"; python3 -m pip --version 2>&1 | tail -2
+          echo "--- apt available? ---"; command -v apt-get >/dev/null && echo yes || echo no
+          echo "--- tmux runnable? ---"; tmux -V 2>&1 | tail -1
+          echo "--- sort locale behaviour ---"
+          printf 'cli.test.mjs\ncli-write.test.mjs\n' | sort | tr '\n' ' '; echo
+          echo "--- root check ---"; [ "$(id -u)" = 0 ] && echo "IS ROOT" || echo "not root"
+        shell: bash
+
       - uses: actions/checkout@v4
         with:
           # list-files=0 CI 根因 (2026-08-28): 默认浅克隆 (depth 1) 缺
