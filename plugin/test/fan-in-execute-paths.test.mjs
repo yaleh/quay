@@ -1869,7 +1869,14 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   // gap-fan-in-red-bucket-run-not-recorded: the runner's post-verdict teardown (measure-history append,
   // post-suite sweep, registered-server kill) adds a ~0.6-1.4s tail after test.sh exits — widen the
   // marker wait so the runner's teardown is not mistaken for a stuck flock wait under load.
-  for (let i = 0; i < 150 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
+  // 2026-09-16 (gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red): widened 15s -> 60s. The bound is
+  // NOT the property under test — the property is the NEGATIVE control asserted above (the suite
+  // WAITS instead of fail-closing) plus the slot-acquisition line asserted below; a machine that is
+  // merely slower must not be read as a broken lock. Measured: the waiter acquires within ~2s on a
+  // dev machine, and had not acquired within 15s on the self-hosted tokyo-alpha runner (the whole
+  // test took 18.2s there, vs ~2s locally). 60s also clears the 30s `sleep 30` the holder below
+  // leaves behind, so the wait cannot be starved by a surviving holder descendant either.
+  for (let i = 0; i < 600 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
   assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
   const markerText = fs.readFileSync(marker, "utf8");
   const log = fs.readFileSync(`/tmp/fan-in-suite-${task}.log`, "utf8");
