@@ -2,7 +2,7 @@
 id: gap-outer-tick-log-awk-mawk-interval-red
 title: outer-tick-log-check 的 awk 正则用了 mawk 不支持的 {n} 区间表达式——self-hosted runner
   docker 镜像下必红
-status: ready
+status: done
 labels:
   - gap
   - mechanism
