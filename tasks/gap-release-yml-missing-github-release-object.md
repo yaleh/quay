@@ -2,7 +2,7 @@
 id: gap-release-yml-missing-github-release-object
 title: release.yml 重设计后无任何步骤创建 GitHub Release 对象——v0.8.0 real cut 后 Releases
   页面仍显示 v0.7.1
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
