@@ -69,22 +69,83 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
 实现落点局限在 `renderGoalCard` 内部（分母计算 + `acBar` 百分比计算两处需同步改，不留一处新口径、一处
 旧口径的不一致）。
 
+**实施者核实结论（2026-09-16，动手前实查 goal-store 写入路径与仓库既有口径，不是想当然）**：
+
+1. **`draft` 确实可能、而且【常态】地出现在 active GOAL 的挂钩下**——写入面默认值就是 draft
+   （`goal-store.ts` 写入面 `status ?? frontmatter.status ?? "draft"`），且 store 自己的出生路径就是
+   `GOAL 建为 draft → 把 AC 以 draft 写入 → 把 GOAL 翻成 active`（零 AC 激活闸的报错原文就在教
+   `--status draft`）。**结论：排除出分母**，与倾向性判断一致，但依据不是"提案未裁定"这个自洽说法，
+   而是**仓库里已有的、被人裁定过的口径**：`plugin/scripts/goal-driver.ts` 的 `inScopeAcsOf` 把在域
+   集合定义为 `{active, achieved, needs-human}`，draft/superseded/retired 均不在域（裁定 3：激活是人的
+   动作），且其注释明确警告「口径分叉会重演 draft 三头不占」。显示面若自造第二套口径，会出现「卡片显示
+   2/3 而驱动已判定该 GOAL 达成」这种自相矛盾。**已知后果（记录在案，不掩盖）**：一个 AC 全是 draft 的
+   GOAL 会渲染成 `0/0`，与「真正没有 AC」同形——区分这两者是 `/goal` 的 draft 横幅那条载体的事，
+   ⛔ 不靠重新定义分母来解决。
+2. **`needs-human` 计入分母、不计入分子。** 它是 ABI 里的合法状态，且是最高频的重开来源
+   （`needs-human → active`）。人 2026-09-09 裁定 2 明确把它计入在域，理由比倾向性判断更硬：
+   「一条要人裁定的 AC 若不计数，就与 draft 完全同形——既不挡 GOAL 达成、也不计缺口，等于白加一个状态」。
+
+**口径分叉的守卫（产物，不是提醒）**：显示面新增单一谓词 `isAcRollupCounted`（集合常量
+`AC_ROLLUP_IN_DOMAIN_STATUSES`），两个消费面（dashboard 卡片 + `/goal` Goals tab 的「AC 达成」列）都调它；
+测试侧另有一条**独立拼写**的集合做双向对照，并有一条守卫**直接读 `goal-driver.ts` 的 `inScopeAcsOf`
+函数体**断言两侧集合逐字一致——口径一旦分叉就报红。
+
+**硬规则 5b 的扫描结果（同一载体 = 全仓 web 端的 AC-达成口径；`grep` 命中 4 处，逐条判定）**：
+① `serve-dashboard.ts` `renderGoalCard` —— 本任务主目标，**已修**；
+② `serve-goal.ts:238` `rollupFor` —— 自述「renderGoalCard's own formula」，同一个数、同一个 GOAL 的
+另一个面，**已一并修**（否则两个面会并排显示 6/7 与 6/10），这正是「实现落点局限在 renderGoalCard 内部」
+那句被有意扩展的地方：局限的是【口径不一致】的消除范围，不是禁止修同一个缺陷的兄弟实例；
+③ `serve-goal.ts:245` `criteriaIdsFor` —— 供「挂靠任务」列，数的是**任务挂靠**而非达成比例，是另一个量，
+⛔ 不改；
+④ `goal-store.ts:1451` `isGoalAchieved` —— GOAL 层达成判定（`every(status === "achieved")`），**另一案，
+且已被仓库自己记录在案**：`goal-driver.ts:757` 原文「⚠️ 与 goal-store.isGoalAchieved 的差异：后者仍是
+`every(status === "achieved")`……store 侧同款死角，另案处理」。改它等于改 GOAL 达成语义，需另行裁定，
+故本任务⛔ 不动它。
+
 ## AC
 
-- [ ] 构造一个测试 fixture：一个 GOAL 下挂钩 N 条记录，覆盖 `active`/`achieved`/`superseded`/`retired`
+- [x] 构造一个测试 fixture：一个 GOAL 下挂钩 N 条记录，覆盖 `active`/`achieved`/`superseded`/`retired`
       四种状态各至少一条，验证新的分母只统计"有效"状态（按实现者最终确定的集合），`superseded`/`retired`
       的记录**都**不计入分母——⛔ 不能只测 `superseded` 漏测 `retired`（这是本任务最容易复发的坑，见上文）。
-- [ ] 负控制：一个 GOAL 下所有挂钩记录都是 `active`/`achieved`（没有任何 `superseded`/`retired`）的
+- [x] 负控制：一个 GOAL 下所有挂钩记录都是 `active`/`achieved`（没有任何 `superseded`/`retired`）的
       场景，新逻辑与旧逻辑（`acs.length` 作为分母）结果完全一致——证明这不是引入了另一种偏差，只是排除
       了已退场状态。
-- [ ] 复算 GOAL-020 的真实数据（此刻）：验证卡片对 GOAL-020 显示的分母是 7（不是 10），分子是 6
+- [x] 复算 GOAL-020 的真实数据（此刻）：验证卡片对 GOAL-020 显示的分母是 7（不是 10），分子是 6
       （AC-265/269/270/271/272/273 achieved），即「AC 达成 6/7」。这是本任务修复效果的直接、真实印证，
       不是构造的 fixture。
-- [ ] 进度条 `acBar` 的百分比计算（`(achieved / acs.length) * 100`）同步改用新分母，不要留一处用旧
+- [x] 进度条 `acBar` 的百分比计算（`(achieved / acs.length) * 100`）同步改用新分母，不要留一处用旧
       分母、一处用新分母的不一致。
-- [ ] 若仓库里已有依赖当前 `achieved/acs.length` 语义（旧口径）的既有测试断言，找出并相应更新（先跑
+- [x] 若仓库里已有依赖当前 `achieved/acs.length` 语义（旧口径）的既有测试断言，找出并相应更新（先跑
       一次现有测试确认哪些会因本次改动而红，不要假设没有）。
-- [ ] `bash scripts/test.sh --for-task gap-dashboard-goal-card-ac-denominator-includes-superseded-retired` 退出码 0。
+- [x] `bash scripts/test.sh --for-task gap-dashboard-goal-card-ac-denominator-includes-superseded-retired` 退出码 0。
+
+**AC 验证读数（本任务实测，非推定）**：
+
+- 新测试文件 `packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs`
+  共 **11** 条（`node --test` 报 tests 11 / pass 11 / fail 0）。AC1 覆盖
+  `active`/`achieved`/`needs-human`/`superseded`/`retired` 五态同挂一个 GOAL，断言「AC 达成 1/3」且
+  **同时否定**旧口径的「1/6」；另有专门一条只挂 `retired` 的目标（分母 0）与一条 `superseded+retired`
+  各一条的混合——`retired` 被两条独立用例覆盖，不是只测了 `superseded`。
+- AC2 负控制：4 组「只有 active/achieved/needs-human」的输入逐个断言「新分母 == 旧分母 `acs.length`」，
+  并断言两种口径的读数逐字相同。
+- **AC3（真实数据，2026-09-16 实测）**：`GOAL-020` 挂钩 10 条 = achieved 6 + superseded 3 + active 1；
+  卡片实际渲染 **「AC 达成 6/7」**（旧口径会是 6/10），进度条 **85.7%**（旧口径 60.0%）。
+  achieved = AC-265/269/270/271/272/273，superseded = AC-266/267/268，唯一真正待办 = AC-274。
+  同一条 AC 还带一个**机制面读数**（不依赖此刻 GOAL-020 的偶然数据）：在真实 store 上给一个真
+  active GOAL 注入 `superseded`+`retired` 各一条后，卡片的分子分母**一字不变**，且分母严格小于挂钩
+  记录数——证明过滤器在真实数据形状上生效，不是只对 fixture 生效。
+- AC4：1 achieved + 1 active + 2 已退场 ⇒ 进度条 50.0%（旧分母会是 25.0%），且与同行的纯文本「1/2」同源。
+- **AC5（先跑后改，实跑读数）**：受影响的既有测试文件（`gap-dashboard-goal-card-ac-progress-bar` /
+  `gap-dashboard-goal-card-provider-backed` / `gap-webui-goal-list-tab-split-goal-ac` / `serve-goal-doc`）
+  共 35 条全绿。其中 `goal-list-tab-split` 在「把 filter 临时还原成旧口径」的红对照里**也全绿**
+  ⇒ 它的 fixture 不含终态记录，故**没有既有断言依赖旧口径**——这是实跑结论，不是"假设没有"。
+- AC6：`bash scripts/test.sh --for-task gap-dashboard-goal-card-ac-denominator-includes-superseded-retired
+  --allow-thin` 退出码 **0**（116 tests / 116 pass / 0 fail），在 merge 了 develop 之后的树上跑出。
+- **可证伪对照**：把两个消费面的 filter 临时还原成旧口径重跑 ⇒ 新增测试里 **6 条转红**
+  （AC1×3 / AC3 / AC4 / 逐状态穷举），而负控制与两条守卫保持绿 ⇒ 判据可假，不是恒真。
+- **口径分叉守卫**：测试直接读 `goal-driver.ts` 的 `inScopeAcsOf` 函数体，断言其 `status === "..."`
+  字面量集合与显示面 `AC_ROLLUP_IN_DOMAIN_STATUSES` 逐字一致；另有 ABI 全状态穷举守卫（`GOAL_STATUSES`
+  新增第 7 个状态会报红，不静默落进某一桶）。
 
 ## DoD
 
@@ -95,5 +156,7 @@ export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
+- packages/quay/src/serve-goal.ts
 - packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs
 - tasks/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.md
