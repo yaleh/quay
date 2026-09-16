@@ -1,10 +1,16 @@
 ---
 id: GOAL-021
 title: README.md 体现 quay 的 software engineering agent 定位、自举开发过程统计与真实截图
-status: draft
+status: active
 kind: goal
-origin: 人 2026-09-16 裁定：项目定位=Software Engineering Agent；关键澄清「Claude Code 是 quay
-  的基础设施，就像 OS 是 Claude Code 的基础设施，这是内蕴的」；要求体现自举开发统计+真实截图；要求创建 GOAL 系统执行。
+origin: manager 2026-09-16 激活：3 条 AC 已就位
+activatedAt: 2026-09-16T23:33:26.425Z
+statusLog:
+  - at: 2026-09-16T23:33:26.425Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景（2026-09-16，人裁定 + manager 会话实测数据）
 
