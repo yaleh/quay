@@ -39,9 +39,9 @@ quay: node not found on PATH — the plugin CLI needs Node.js >= 20.
 
 ## AC
 
-- [ ] `PATH="<repo>/plugin/bin:/usr/bin:/bin" QUAY_PLUGIN_ROOT= CLAUDE_PLUGIN_ROOT= <repo>/plugin/bin/quay --version` 在一台 node 只经 nvm 安装（不在 `/usr/bin` 下）的机器上 exit 0 并打印 semver ——本机（$HOME 下有 `~/.nvm/versions/node/*`）就是这个负控制场景，此刻会真的失败，修完须真的转 0。
-- [ ] `node plugin/scripts/*.ts` 里驱动 AC-261 判据的那条 acceptance 脚本重跑一遍，verdict=pass（不是手敲同样三条命令模拟）。
-- [ ] 负控制：临时让 nvm 目录也探测不到（例如覆盖 `HOME` 指到一个没有 `.nvm` 的目录）时，shim 仍然 exit 127 并打印现有的友好提示——证明新增的探测逻辑不会在"真的没有任何 node"时伪装成成功。
+- [x] `PATH="<repo>/plugin/bin:/usr/bin:/bin" QUAY_PLUGIN_ROOT= CLAUDE_PLUGIN_ROOT= <repo>/plugin/bin/quay --version` 在一台 node 只经 nvm 安装（不在 `/usr/bin` 下）的机器上 exit 0 并打印 semver ——本机（$HOME 下有 `~/.nvm/versions/node/*`）就是这个负控制场景，此刻会真的失败，修完须真的转 0。
+- [x] `node plugin/scripts/*.ts` 里驱动 AC-261 判据的那条 acceptance 脚本重跑一遍，verdict=pass（不是手敲同样三条命令模拟）。
+- [x] 负控制：临时让 nvm 目录也探测不到（例如覆盖 `HOME` 指到一个没有 `.nvm` 的目录）时，shim 仍然 exit 127 并打印现有的友好提示——证明新增的探测逻辑不会在"真的没有任何 node"时伪装成成功。
 
 ## DoD
 
