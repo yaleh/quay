@@ -75,13 +75,17 @@ CI 日志自带 `__GROUP__ concurrency=8 files=631` 读数。按 `test-file-base
 （只比相邻一次 ⇒ 不引入窗口大小魔数，且恰好抓住「为了绿而删/跳测试」这个动作发生的区间）。
 ⛔ 永不写 `== 631` 这类快照形态。
 
-## 范围（AC-265..AC-269）
+## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-273、AC-274，共 7 条）
 
 - **AC-265** develop 首绿，且绿不是靠少跑测试换来的（long-term）
-- **AC-266** release 的 `Run tests` 不再因子进程泄漏退化成 hang（long-term）
-- **AC-267** SEA 产物的 `quay serve` 可用：`plugin-root.ts` 不在模块顶层求值 `import.meta.url`（long-term）
-- **AC-268** release 渠道真能发出一个版本（一次性）
-- **AC-269** CI 红有机械归因，区分真缺陷 / 基础设施 / 已知 flake（long-term）
+- **AC-269** CI 红有机械归因：真缺陷 / 基础设施 / 已知 flake（long-term）
+- **AC-270** master 的值域不变式：化石值，或一个 Release 全绿的 tag（long-term）
+- **AC-271** release 分支 tip 逐字停在同名 tag 上（long-term）
+- **AC-272** 滚动渠道自证版本：`-dev` 后缀，或等于同名 tag 的构建（long-term）
+- **AC-273** origin/HEAD 指向 origin/develop（long-term）
+- **AC-274** 首次真实全绿发布 + master 已 ff 到它（一次性，时间窗限定立案之后）
+
+⛔ 已退役、不再计入范围：**AC-266 / AC-267 / AC-268**——主体（SEA/npm 产物线）经人 2026-09-16 裁定取消，已 `superseded`（SPEC §11.4）。
 
 ## 非目标 / 与 GOAL-019 的边界
 
@@ -98,7 +102,12 @@ GOAL-020 管 SEA bundle 里的**顶层求值时机**（`MODULE_DIR` 在 import �
 
 ① **develop 上的 CI 能绿，且该次绿不是靠少跑测试换来的**——存在一次 decisive 的 `success`，
    且其跑过的测试文件数不低于紧邻的前一次 decisive run。
-② **release 渠道能发出一个 `quay serve` 真能起来的产物**——release run 成功，
-   且 SEA 产物不再因 `plugin-root.ts` 的顶层求值而在 `serve` 上崩。
+② **release 渠道能发出一个真能起来的产物**——`.quay/ci-runs.jsonl` 里存在一次
+   `workflow=Release` 且 `conclusion=success` 的 run，且 master 已 ff 到它的 tag；
+   「发出去的产物真能起来」由该 run 的**全绿**承载：`advance-master.needs` 必须覆盖
+   `.github/workflows/release.yml` 内其余每一个 job（`release-master-advance-needs-check.ts`，
+   每轮跑，见 `plugin/scripts/runner-static-gate.ts:958`），而该 gate job 本身就是 plugin 渠道的
+   真实安装验证（marketplace 装得上 → `quay-init` → `quay driver start` / `quay serve` 在隔离环境
+   alive，见 SPEC §11.2）。
 ③ **红有机械归因**——CI 转红时，载体里有一条区分「真缺陷 / 基础设施 / 已知 flake」的记录，
    不需要人肉读 15000 行日志来定性（2026-09-15 为定性这一批红花掉的人力，正是立本 GOAL 的直接动因）。
