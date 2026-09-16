@@ -111,20 +111,35 @@ test("AC: an unprovisioned runner fails LOUDLY and ONCE, not as ~74 unrelated as
   );
 });
 
-test("AC: the suite concurrency is a declared CAP, not whatever nproc the runner has", () => {
-  // At concurrency=128 (the derivation's value on the 128-core self-hosted box) this suite is not a
-  // stable judge: three consecutive runs at one commit each produced a different set of load-shaped
-  // failures (ephemeral-port EADDRINUSE, a bounded wait for a detached suite's exit marker, a
-  // strict-zero scan of the live tree). The cap is a policy about the suite, so it must be stated
-  // in the workflow; the VALUE may change, its being explicit may not.
+/** A lane-count pin in a suite-launch command, in either spelling. `=8` and ` 8` are both real
+ *  (`runner-concurrency.ts` splices both), and a bare `--test-concurrency` with no number is still
+ *  a pin attempt. Returns the matched text or null. */
+function pinnedConcurrency(runStep) {
+  return (/--test-concurrency(=\s*\d+|\s+\d+)?/.exec(runStep) ?? [])[0] ?? null;
+}
+
+test("AC: the suite concurrency is HOST-DERIVED — the workflow must not pin a lane count", () => {
+  // REVERSED 2026-09-16 (gap-suite-not-robust-at-high-derived-concurrency). The previous task capped
+  // this at 16 to dodge three load-shaped failures at concurrency=128. That cap was a literal that
+  // only "equalled no limit" on a 16-core dev box (硬规则 4 推论二), and it hid three real DEFECTS IN
+  // THE TESTS rather than fixing them: probe-then-bind ephemeral ports (EADDRINUSE), a wall-clock
+  // literal waiting for a detached suite's exit marker, and a walk→read race in the dead-code
+  // checker's strict-zero scan. All three are now root-caused and fixed at the mechanism (see
+  // tasks/gap-suite-not-robust-at-high-derived-concurrency), so the invariant inverts: the launch
+  // must NOT state a lane count, and `default_test_concurrency()` reads the host.
   const job = loadJob(readFileSync(CI_YML, "utf8"));
   const runStep = (job.steps ?? []).map((s) => s.run ?? "").find((t) => /scripts\/test\.sh/.test(t));
   assert.ok(runStep, "the `test` job must still invoke scripts/test.sh");
-  const m = runStep.match(/--test-concurrency=(\d+)/);
-  assert.ok(
-    m, `the suite launch must carry an explicit --test-concurrency cap; got: ${JSON.stringify(runStep)}`,
+  assert.equal(
+    pinnedConcurrency(runStep), null,
+    `the suite launch must NOT pin a lane count (host-derived is the invariant); got: ${JSON.stringify(runStep)}`,
   );
-  assert.ok(Number(m[1]) > 0, `the cap must be a positive lane count; got ${m[1]}`);
+
+  // 能取假 — the SAME predicate must fire on a re-introduced pin, in both spellings. Without this the
+  // assertion above would pass on a parser that returns null for everything.
+  assert.equal(pinnedConcurrency("bash scripts/test.sh --test-concurrency=16"), "--test-concurrency=16");
+  assert.equal(pinnedConcurrency("bash scripts/test.sh --test-concurrency 4"), "--test-concurrency 4");
+  assert.equal(pinnedConcurrency("bash scripts/test.sh --groups main"), null);
 });
 
 test("AC: the prerequisites are DECLARED, not inherited — mutation control (the predicate can take false)", () => {
