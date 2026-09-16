@@ -2,7 +2,7 @@
 id: gap-prose-prereq-negation-window-is-before-keyword-only-and-sibling-markers-are-chinese-only
 title: 'prosePrereqGap 否定词窗口只往关键词前找、sibling 标记词表纯中文——英文"Depends_on: none
   (...related-but-not-duplicate of `gap-x`...)"两处盲区叠加误判为真前置'
-status: ready
+status: done
 labels:
   - gap
   - defect

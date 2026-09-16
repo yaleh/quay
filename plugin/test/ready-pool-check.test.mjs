@@ -4199,6 +4199,96 @@ test("AC4 — a paragraph OPENED with <!-- dedup-ref --> is traceability, not a 
   );
 });
 
+test("AC3c — the negation guard's MIRROR arm: a denial AFTER the keyword disarms it (能取假, 双向对照)", () => {
+  // Blind spot ① of gap-prose-prereq-negation-window-is-before-keyword-only-and-sibling-markers-are-
+  // chinese-only: NEGATION_MARKER_RE only ever looked BEFORE the keyword, so the English order
+  // ("Depends_on: none …") was structurally unseeable — `Depends_on` opens the sentence, the
+  // before-window has nothing to match, and the sentence reads as a DECLARATION.
+  // ① the verbatim production sentence (tasks/gap-driver-restart-unreliable-legacy-to-anchor-
+  //    migration.md:48). Pre-fix this returned TRUE and refused that task promotion for rounds
+  //    378-382+ on `prosePrereqGap=[gap-driver-status-…]`, naming an already-`done` task.
+  assert.equal(
+    declaresPrereq(
+      "Depends_on: none (independent finding; related-but-not-duplicate of `gap-driver-status-misreports-anchor-hosted-kind-as-down`, filed moments earlier this same session — that one is a read-side status-reporting defect, this one is a write-side restart-execution-reliability defect; do not merge the two).",
+    ),
+    false,
+    "① the production 'Depends_on: none (…)' sentence is a DENIAL, not a declaration",
+  );
+  assert.equal(declaresPrereq("Depends on nothing; DIR-110 follows"), false, "① 'Depends on nothing' denies");
+  assert.equal(declaresPrereq("depends_on: none"), false, "① 'depends_on: none' denies");
+  // ② 取假 (the other direction) — the SAME shapes with the denial removed re-arm:
+  assert.equal(declaresPrereq("Depends_on: `gap-x`"), true, "② 'Depends_on: `gap-x`' declares");
+  assert.equal(declaresPrereq("Depends on nothing else in this split"), false, "① 'nothing else' still denies");
+  // ③ NEGATIVE CONTROLS — a qualifier after the keyword is NOT a denial of it. The first is a REAL
+  //    corpus line (tasks/gap-unified-frontmatter-parser.md:30); `(` is not a field separator, so the
+  //    parenthetical is not read as disarming `depends_on`.
+  assert.equal(
+    declaresPrereq("- [x] task_write MCP schema explicitly lists depends_on (not just via extra escape hatch)"),
+    true,
+    "③ a parenthetical qualifier after the keyword does not disarm it (real corpus line)",
+  );
+  assert.equal(declaresPrereq("先完成 `gap-x` not optional。"), true, "③ a genuine prereq + trailing 'not' is not disarmed");
+  assert.equal(declaresPrereq("先完成 `gap-x`；none of the other tasks matter。"), true, "③ a denial in a LATER clause cannot reach back");
+  // ④ word boundaries: `no`/`not` must not be read out of these
+  assert.equal(declaresPrereq("depends on `gap-x` nonetheless we proceed."), true, "④ 'nonetheless' is not 'no'");
+  assert.equal(declaresPrereq("阻塞 not-yet-landed 的 `gap-x`。"), true, "④ 'not-yet-landed' is not 'not'");
+  assert.equal(declaresPrereq("阻塞 note 里的 `gap-x`。"), true, "④ 'note' is not 'no'");
+});
+
+test("AC3d — sibling markers are not English-blind: `related-but-not-duplicate of` etc. (能取假, 双向对照)", (t) => {
+  // Blind spot ② of the same task: SIBLING_MENTION_RE's vocabulary was Chinese-only, so an English
+  // traceability phrase ("related-but-not-duplicate of `gap-x`") — semantically identical to
+  // "同族于 `gap-x`" — was read as a genuine prereq.
+  const root = makeWorkspace("prereq-sibling-en");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of ["gap-real-prereq", "gap-sib-en", "gap-cross-binds-next"]) {
+    writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  }
+  const tasksDir = path.join(root, "tasks");
+  // Each body is ONE sentence (`；` does not split) carrying a NON-negated 阻塞 keyword, so the REF-
+  // level sibling guard is the only thing that can drop the sibling id: `gap-real-prereq` is the
+  // always-kept control, `gap-sib-en` the id the marker introduces.
+  const cases = [
+    ["related-but-not-duplicate of", "阻塞 `gap-real-prereq`；related-but-not-duplicate of `gap-sib-en`。"],
+    ["not a duplicate of", "阻塞 `gap-real-prereq`；not a duplicate of `gap-sib-en`。"],
+    ["sibling of", "阻塞 `gap-real-prereq`；sibling of `gap-sib-en`。"],
+    ["counterpart", "阻塞 `gap-real-prereq`；the INTERNAL counterpart to `gap-sib-en`。"],
+    ["see also", "阻塞 `gap-real-prereq`；see also `gap-sib-en`。"],
+    ["unrelated to", "阻塞 `gap-real-prereq`；unrelated to `gap-sib-en`。"],
+  ];
+  for (const [marker, body] of cases) {
+    assert.deepEqual(
+      prosePrereqRefs(body, tasksDir),
+      ["gap-real-prereq"],
+      `① the English marker \`${marker}\` filters the id it introduces, keeping the genuine prereq`,
+    );
+  }
+  // ② 取假: drop the marker ⇒ the same sentence harvests BOTH ids again (the fixture is not
+  //    vacuously empty, and the filter is what does the work).
+  assert.deepEqual(
+    prosePrereqRefs("阻塞 `gap-real-prereq`；`gap-sib-en` 与本条同期立案。", tasksDir),
+    ["gap-real-prereq", "gap-sib-en"],
+    "② without the marker both ids are harvested",
+  );
+  // ③ CROSS-BIND SAFETY — the English arm looks BEFORE the span only. A marker sitting AFTER one id
+  //    must not drop a DIFFERENT id: here `unrelated to` follows `gap-sib-en`, and the id after it
+  //    (`gap-cross-binds-next`) must survive. Under a symmetric ±window it would be a false negative.
+  assert.deepEqual(
+    prosePrereqRefs("阻塞 `gap-real-prereq`；unrelated to `gap-sib-en`, then 阻塞 `gap-cross-binds-next`。", tasksDir),
+    ["gap-real-prereq", "gap-cross-binds-next"],
+    "③ a marker after id A must not drop id B (before-only arm — no false negative)",
+  );
+  // ④ REGRESSION — the Chinese arm keeps its pre-existing behaviour (the ±16 window and word list are
+  //    untouched by this task; the pre-existing `同族于 / 参见` and `sibling / heritage` tests above
+  //    cover the rest). Concrete discriminable value: the 同族于 marker drops exactly the id it
+  //    introduces and the genuine prereq survives.
+  assert.deepEqual(
+    prosePrereqRefs("同族于 `gap-sib-en`，阻塞 `gap-real-prereq`。", tasksDir),
+    ["gap-real-prereq"],
+    "④ the Chinese 同族于 marker is unchanged: drops its own id, keeps the genuine prereq",
+  );
+});
+
 test("AC6 negative control — a GENUINE prose prereq with no edge is STILL caught and still blocks promotion", (t) => {
   const root = makeWorkspace("prereq-ac6");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

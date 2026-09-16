@@ -1240,6 +1240,24 @@ export function relationEdges(frontmatterRaw) {
  *  "depends on X") carry no such marker. Corpus-derived from the AC-207 body + this task's own Proposal. */
 const SIBLING_MENTION_RE = /同族于|已另立|另立|此外|参见|类似|参照|产物|实证对象|架构性任务|遗漏的调用点|遗漏调用点/;
 
+/** The ENGLISH half of the table above — corpus-derived the same way (`grep` of `tasks/*.md`,
+ *  2026-09-16), ⛔ NOT a translation of the Chinese list. The Chinese table was blind to English
+ *  prose, so "related-but-not-duplicate of `gap-x`" — semantically identical to "同族于 `gap-x`" —
+ *  was read as a genuine prereq (production, 2026-09-15). Every entry below was OBSERVED introducing
+ *  a task-id in this repo's prose while carrying no prerequisite claim:
+ *    - `duplicate of`  6 adjacent-id hits — covers all three observed spellings ("related-but-not-
+ *                      duplicate of `…`", "not a duplicate of `…`", "not duplicates: `…`"), because
+ *                      13 chars is the fragment that fits a 16-char window of the 28-char phrase;
+ *    - `sibling of`    4 hits, all wikilink-form heritage notes ("Sibling of [[DIR-031]]");
+ *    - `counterpart`   4 hits ("the INTERNAL counterpart to [[DIR-043]]");
+ *    - `see also`      2 hits;   `unrelated to`  1 hit.
+ *  ⛔ Deliberately NOT included, though they read like translations of the Chinese table, because the
+ *  corpus says otherwise: `distinct from` (12 adjacent-id hits, but every one of them compares a
+ *  string / temp dir / commit — never a task relation) and `child of` (9 hits — a CHILD relation is a
+ *  real relation edge, so filtering it would HIDE a genuine mechanism-invisible gap rather than
+ *  remove a false positive). Corpus evidence decides the vocabulary, not vocabulary symmetry. */
+const SIBLING_MENTION_EN_RE = /duplicate of|sibling of|counterpart|see also|unrelated to/i;
+
 /** A ref is a sibling/heritage mention when a sibling marker sits within this many chars of the span
  *  (before or after). Tight enough that "阻塞 X；此外还…" does not bleed, wide enough for "已另立 X". */
 const SIBLING_MENTION_WINDOW = 16;
@@ -1247,6 +1265,18 @@ function isSiblingMention(para, start, end) {
   const before = para.slice(Math.max(0, start - SIBLING_MENTION_WINDOW), start);
   const after = para.slice(end, end + SIBLING_MENTION_WINDOW);
   if (SIBLING_MENTION_RE.test(before) || SIBLING_MENTION_RE.test(after)) return true;
+  // ENGLISH arm — BEFORE the span ONLY (⛔ not the Chinese arm's ±16). Two reasons, both measured:
+  //   ① every marker above is a construction that INTRODUCES the id it names ("… of `x`"). Measured
+  //      id-THEN-marker occurrences in the corpus: 0 for `duplicate of` / `sibling of` / `see also` /
+  //      `unrelated to`, and 1 for `counterpart` — and that single hit (`sea-verify-node-free` …
+  //      `counterpart sea-verify-node-free-cross-platform`) names a workflow JOB, not a task id, so it
+  //      never reaches this guard. A ±window would therefore buy nothing here;
+  //   ② a symmetric window is what makes the arm UNSAFE. "阻塞 `gap-a`；unrelated to `gap-b`"-shaped
+  //      prose puts a marker AFTER `gap-a`; under a ±window that marker would filter `gap-a` — a
+  //      FALSE NEGATIVE, i.e. a genuine prereq silently dropped. One-directional, a marker can only
+  //      ever bind the id that follows it, which is exactly what the English construction means.
+  // (The 16-char window is shared with the Chinese arm: same discipline, no new geometry.)
+  if (SIBLING_MENTION_EN_RE.test(before)) return true;
   // List continuation: "另立两任务 `A`（ready）与 `B`（ready）" — the second item is introduced by
   // "与" and inherits sibling-ness from the "另立" list-opener earlier in the same clause. Genuine
   // "阻塞 `A` 与 `B`" lists are untouched (no "另立" opener, so the second item is still flagged).
@@ -1293,12 +1323,48 @@ const AFFIRMATIVE_IDIOM_RE = /不得不/g;
 /** How far before a keyword occurrence the negation window reaches. */
 const NEGATION_WINDOW = 16;
 
-/** Is the keyword occurrence at `keywordStart` explicitly negated? */
-function isNegatedPrereqKeyword(sentence, keywordStart) {
+/** MIRROR arm — the negation sitting IMMEDIATELY AFTER the keyword occurrence, which the
+ *  before-only window above is structurally incapable of seeing. English writes the same denial in
+ *  the opposite order: `Depends_on: none (…)`, `Depends on nothing;`. There `Depends_on` matches
+ *  PREREQ_KEYWORD_RE and it opens the sentence, so the before-window has nothing to match against and
+ *  the sentence reads as a DECLARATION (production, 2026-09-15: one fully four-artifact-complete task
+ *  was refused promotion for rounds 378-382+ on `prosePrereqGap=[gap-driver-status-…]`, where the
+ *  named task was already `done` and the sentence's whole point was that it is NOT a prereq).
+ *
+ *  Shape: `^` — between the keyword and the marker only FIELD-SEPARATOR chars may sit (`[\s:：=]*`),
+ *  then the marker, then a trailing word boundary. Concretely:
+ *    - the separator class is what makes `Depends_on: none` match (`: ` is two of its chars) while
+ *      keeping `depends_on (not just via extra escape hatch)` — a real AC line in
+ *      `gap-unified-frontmatter-parser` — AFFIRMATIVE: `(` is not a separator, so a qualifier in the
+ *      parenthetical is not read as a denial OF the keyword. It is deliberately tiny: `，`/`；`/`。`
+ *      are NOT in it, so a denial in a LATER clause cannot reach back and disarm this occurrence
+ *      (the mirror of the before-arm's no-clause-crossing rule).
+ *    - `^` makes the leading lookbehind unnecessary (nothing precedes position 0 of the slice): the
+ *      marker always sits either at the slice start or right after a non-word separator.
+ *    - the TRAILING `(?![A-Za-z0-9_-])` is the load-bearing one, and `-` is in that class on purpose:
+ *      it is what keeps `nonetheless` / `note` / `now` from reading as `no`, and
+ *      `not-yet-landed` from reading as `not`.
+ *  The window is the same NEGATION_WINDOW the before-arm uses (no new geometry; `: none` consumes 6
+ *  of the 16).
+ *
+ *  ⚠️ KNOWN BOUNDARY (documented, deliberately NOT coded around): the idiomatic "depends on nothing
+ *  but `gap-x`" ASSERTES `gap-x` as the sole prereq, yet this arm reads it as negated — a false
+ *  negative. It is left unguarded because the shape has **0 occurrences in all 2202 task files**
+ *  (grepped: `nothing but` appears nowhere in the corpus, and neither does keyword+`none|no|not|
+ *  nothing`+`but`). Per the repo's discipline, a mechanism for a thing that has never happened is a
+ *  liability, not a safeguard — if it ever appears, this is the line to revisit. */
+const NEGATION_MARKER_AFTER_RE = /^[\s:：=]*(?:none|nothing|not|no)(?![A-Za-z0-9_-])/;
+
+/** Is the keyword occurrence spanning `[keywordStart, keywordEnd)` explicitly negated? Both arms are
+ *  per-OCCURRENCE (a sentence that denies one construction and declares another still declares) and
+ *  neither may look past a clause boundary. */
+function isNegatedPrereqKeyword(sentence, keywordStart, keywordEnd) {
   const before = sentence
     .slice(Math.max(0, keywordStart - NEGATION_WINDOW), keywordStart)
     .replace(AFFIRMATIVE_IDIOM_RE, "...");
-  return NEGATION_MARKER_RE.test(before);
+  if (NEGATION_MARKER_RE.test(before)) return true;
+  const after = sentence.slice(keywordEnd, keywordEnd + NEGATION_WINDOW);
+  return NEGATION_MARKER_AFTER_RE.test(after);
 }
 
 /** Does this SENTENCE assert a prerequisite — i.e. carry ≥1 prereq-keyword occurrence that is not
@@ -1308,7 +1374,7 @@ export function declaresPrereq(sentence) {
   PREREQ_KEYWORD_SCAN_RE.lastIndex = 0;
   let m;
   while ((m = PREREQ_KEYWORD_SCAN_RE.exec(sentence)) !== null) {
-    if (!isNegatedPrereqKeyword(sentence, m.index)) return true;
+    if (!isNegatedPrereqKeyword(sentence, m.index, m.index + m[0].length)) return true;
   }
   return false;
 }
