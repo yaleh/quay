@@ -7,10 +7,10 @@ goal: GOAL-019
 criterion: 'grep -q "publish-dist-branch.sh"
   .github/workflows/publish-plugin-dist.yml || { echo "FAIL:
   publish-plugin-dist.yml no longer calls publish-dist-branch.sh" >&2; exit 1;
-  }; grep -Eq "esbuild|rsync -a|node .*build-dist|cp .*vendor/quay/dist"
-  .github/workflows/publish-plugin-dist.yml && { echo "FAIL:
-  publish-plugin-dist.yml has inlined build logic bypassing
-  publish-dist-branch.sh" >&2; exit 1; }; exit 0'
+  }; grep -v "^[[:space:]]*#" .github/workflows/publish-plugin-dist.yml | grep
+  -Eq "esbuild|rsync -a|node .*build-dist|cp .*vendor/quay/dist" && { echo
+  "FAIL: publish-plugin-dist.yml has inlined build logic (outside comments)
+  bypassing publish-dist-branch.sh" >&2; exit 1; }; exit 0'
 expect: CI 的 publish-plugin-dist.yml 只调用 publish-dist-branch.sh 完成构建+发布，不得在 YAML
   内内联 esbuild/rsync/cp dist 等旁路构建逻辑——保证 CI 与本地手工发布走同一条脚本路径，不产生第二份实现
 origin: 人 2026-09-16 追问：要求确认 GitHub CI 与本地手工构建走的是同一条流程（允许少量环境设置 wrapper），且产出的
