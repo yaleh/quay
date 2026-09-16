@@ -34,14 +34,14 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 
 ## AC
 
-- [x] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
+- [ ] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
       `tag_name: ${{ inputs.tag }}`。
-- [x] 负控制（结构性，非真跑一次 release）：`grep -cF 'uses: softprops/action-gh-release' .github/workflows/release.yml`
+- [ ] 负控制（结构性，非真跑一次 release）：`grep -cF 'uses: softprops/action-gh-release' .github/workflows/release.yml`
       与 `grep -cF 'tag_name: ${{ inputs.tag }}' .github/workflows/release.yml` 两个计数相等——每一处
       softprops 调用都配了显式 tag_name，不是只修了其中一处。
       （`-F` 必需，见 Evidence「仪器修正」：该模式含 `$` 与 `{}`，双引号下 bash 报 `bad substitution`
       使 grep 根本没跑，单引号+BRE 下恒 0——两种写法均已用【已知为真】样本干跑证伪。）
-- [x] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
+- [ ] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
       **不传 `--ref`**（刻意复现本任务描述的误用场景）也能正确挂载到该 tag 的 Release 上，不再报
       "GitHub Releases requires a tag"。（若无法安排真实 dispatch，负控制那条静态检查已经是可核实的
       最低门槛，不阻塞本任务落地。）
@@ -107,6 +107,46 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
   本缺陷复现 run = `35075347245`（08:43:26Z, branch=`develop`, cancelled），其后最新一条 =
   `35076017292`（08:50:36Z, branch=`v0.7.1` = 正确传了 ref 的那次, failure，与本事象不同因）。
   修复未落地前**不存在「已修后的真实 dispatch」** ⇒ 依 AC3 自带条款以静态负控制为准，不阻塞落地。
+- **🔴 2026-09-16 第 3 次续跑：三条 AC 由 `[x]` 改回 `[ ]` —— 目标代码已被 develop 整体删除，本修复成为空操作。**
+  这不是实现回退，是 develop 侧裁定的后果。读数如下（全部为机械读数，非自述）：
+  - **develop 侧事实**：`gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead`（done，已在 develop tip
+    `518787b7c`）按人 2026-09-16 裁定重写了 `release.yml` —— 裁定逐字：「取消 sea 和 npm release。这些是
+    我们最近没有精力去保障的。」该重写**整段删除了 `release` 与 `sea-release` 两个 job**（即本任务唯一的
+    两个 softprops 调用点），连同 `sea-verify-node-free*` / `dist-verify-node-floor` /
+    `delivery-manifest-verify`。合并后本 worktree 的 `release.yml` 只剩
+    `verify-plugin-channel` + `advance-master` **两个 job**（`grep -nE '^  [a-z][a-z0-9_-]*:$'` 读数：
+    line 31 `workflow_dispatch:` / line 65 `verify-plugin-channel:` / line 265 `advance-master:`）。
+  - **三条独立机械读数（互校，均指向同一结论）**：① `git grep -nE 'action-gh-release|upload-release-asset|
+    gh release (create|upload|edit)' develop -- .github/workflows` = **空**（`.github/workflows` 全域已无
+    任何 release 上传面；`publish-plugin-dist.yml` 走 dist 分支，`ci.yml` 无上传）；② 本轮 scoped 门里
+    直接读 `release.yml` 的那个检查器自报 `PASS: advance-master.needs covers every other job in
+    .github/workflows/release.yml — jobs in .github/workflows/release.yml: 2 [verify-plugin-channel,
+    advance-master]`（旧版是 7 个 job）；③ 本任务在 fan-in 里要过的 **anti-drift 检查器**自报
+    `ANTI-DRIFT OK: task gap-release-softprops-missing-explicit-tag-name — 0 actual file(s), all within
+    declared Touches (3 glob(s))` ⇒ 本分支对 merge target 的**实际改动面 = 0 个文件**。
+  - **冲突怎么解的**：`git merge develop` 在 `release.yml` 报 CONFLICT（HEAD 侧 614 行 vs develop 侧空 =
+    develop 删了整段）。按「develop 删、我改同一段」处理：**接受 develop 的删除**
+    （`git checkout develop -- .github/workflows/release.yml`），⛔ **不是取 union** —— union 会把这批
+    被人裁定退役的 job 加回去（prompt 规则 (5)：不得静默复活退役实现）。merge 提交 `de12affd5`。
+  - **为何 AC 保持未勾（这是硬规则 3b，不是犯懒）**：三条 AC 如今**结构上不可满足** —— AC1「两处 softprops
+    步骤均含 tag_name」现在是对**空集**成立；AC2 的负控制退化为 **0 == 0**（本轮实测
+    `softprops=0`、`tag_name=0`，「两个计数相等」不再证明任何一处被配了 tag_name，且它恰恰会以
+    「检查通过」的形态出现 —— 这正是 3b 点名的「把『对象没了』伪装成检查通过」）；AC3 的 fallback 以
+    「调用点存在」为前提。⇒ 保持未勾 + 本节注解，**且刻意不蹭** `（待外部）`/`外层验证`/`全量套件绿`
+    三个 pass-external 标记 —— 本态不属于「待外部验证」，属「对象已退役」，不该走 flip 放行。
+  - **develop 是否已独立获得本任务想要的性质**：**是，且是构造性的** —— 重写后 `verify-plugin-channel`
+    与 `advance-master` 的 checkout 均为 `ref: ${{ inputs.tag }}`，`advance-master` 用
+    `git rev-parse "${TAG}^{commit}"`，全文不再有任何依赖 dispatch ref 上下文之处；且 `release.yml` 已无
+    任何 release 上传步骤 ⇒ 本缺陷的用户可见症状（"GitHub Releases requires a tag"）**结构上无法再发生**。
+    但 ⛔ 该性质来自**删除 + 重写**，**不是**本任务补丁带来的，**不得记为本任务 delta 的功劳**（硬规则 4
+    推论三：实现了、测试绿了、但生产没跑过 ⇒ 与「没实现」同形；此处更进一步：功能已被移除）。
+  - **分支现状**：`git diff develop...HEAD` = **空**（内容与 develop 逐字相同）、`git status` 干净、无
+    unmerged path；scoped 门 `scripts/test.sh --for-task gap-release-softprops-missing-explicit-tag-name
+    --allow-thin` = **exit 0**（选择器取 0 个测试文件；两个 NOT-EVALUATED 均因其为 delta-scoped 判据、
+    本 delta 无载体，⛔ 不与 PASS 同形）。
+  - **期望的终态 = `superseded`，理由指向人 2026-09-16 裁定与
+    `gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead`**；⛔ **不建议 `done`**（那会把 develop 的
+    删除记成本任务的修复落地）。转态是生命周期决定，由 driver/人执行 —— 本 worker 不改 `status`。
 
 ## Touches
 
@@ -138,3 +178,21 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 - 结论：**不是实现缺陷，不改 delta**。已确认的三条机械 AC（tag_name 落地、结构级 YAML 校验、负控制）
   均扎实，属误判为 needs-human 的环境噪音。转回 `ready` 让 worker-driver 重新派发一次；若下一轮仍在
   同一个不相关文件上红、且宿主负载已回落，再重新判断。
+
+**worker 第 3 次续跑（2026-09-16T12:1xZ）— ⛔ 建议不要再派 worker，请裁定 `superseded`：**
+
+- **manager 上一条的两个条件都已满足，但结论要改**：宿主负载确已回落（复核当下
+  `load average: 4.91, 11.90, 11.10`，1 分钟负载 4.91 < 16 核），且本轮**不会再撞那个 flake** —— 因为
+  本任务 delta 已空，fan-in 的 delta 判定走 **doc-only ⇒ 跳过全量 suite**（`worker-driver.ts:4651`
+  「doc-only 跳过 suite」；`merge-base(develop,HEAD)` = develop tip `518787b7c`，`git diff --name-only
+  <fork> HEAD` 为空）。⇒ 「再跑一轮看 flake 是否复现」这个实验已无对象。
+- **真因（比 flake 严重，且与实现无关）**：本任务要修的那两处代码已在 develop 上被人裁定删除
+  （详见 Evidence 末条）。本分支现在对 develop 的实际改动 = **0 个文件**。
+- **⛔ 不要重派 worker**：没有任何可实现的缺陷 —— 要修的 `release`/`sea-release` 两个 job 已不存在，
+  把 `tag_name:` 加回去等于复活一条退役渠道。派 worker 只会重复得出同一结论。
+- **请裁定**：本任务转 **`superseded`**（理由指向人 2026-09-16 裁定「取消 sea 和 npm release」与
+  `gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead`）。若判 `done`，请连同
+  「本任务补丁从未落地、性质由 develop 的删除+重写构造性获得」一并写入理由 —— ⛔ 不要留一个会让人
+  以为 softprops→tag_name 补丁跑过的记录。
+- 三条 AC 已由本 worker 从 `[x]` 改回 `[ ]` 并附注解（硬规则 3b；⛔ 未蹭 pass-external 标记，故 fan-in
+  的 ac-precheck 会如实报红 —— 这是本态应有的可区分取值，不是待修的缺陷）。
