@@ -36,7 +36,7 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 - [x] `release` job 与 `sea-release` job 的两处 `softprops/action-gh-release@v2` 步骤，`with:` 均含
       `tag_name: ${{ inputs.tag }}`。
 - [x] 负控制（结构性，非真跑一次 release）：`grep -c "uses: softprops/action-gh-release" .github/workflows/release.yml`
-      与 `grep -c "tag_name: \${{ inputs.tag }}" .github/workflows/release.yml` 两个计数相等——每一处
+      与 `grep -c "tag_name: ${{ inputs.tag }}" .github/workflows/release.yml` 两个计数相等——每一处
       softprops 调用都配了显式 tag_name，不是只修了其中一处。
 - [x] 若本任务着陆时机允许一次真实 dispatch 验证：`gh workflow run release.yml -f tag=<existing-tag>`
       **不传 `--ref`**（刻意复现本任务描述的误用场景）也能正确挂载到该 tag 的 Release 上，不再报
@@ -48,7 +48,24 @@ tag" 而失败——即使 `inputs.tag=v0.7.1` 本身填得完全正确。
 `.github/workflows/release.yml` 落地后，即便未来有人（人或脚本）dispatch 时漏传 `--ref`，release 产物
 依然会挂到 `inputs.tag` 指定的那个 tag 上，不再需要调用方自己记得两个参数都要传对。
 
+## Evidence
+
+- 实现：`release.yml` 两处 `with:` 均含 `tag_name: ${{ inputs.tag }}`（line 165 / line 354）；
+  AC2 的结构性负控制实测 `grep -c "uses: softprops/action-gh-release"` = `grep -c "tag_name: ${{ inputs.tag }}"` = 2。
+- **全局阻塞（非本任务 delta，本轮一并处理）**：`quay-init-closure-ratchet --check-stale` 在 develop 上自
+  `eb17c4ac1`（v0.7.1 release cut 把 `plugin/.claude-plugin/plugin.json` 去掉 `-dev` 后缀）起为红，
+  而该 checker 是 `@static-tier change` 且 fail-closed，整轮 suite 在静态检查面即中止（本任务前两轮
+  exited-not-landed 的真因：`STATIC_CHECK_FAILED: quay-init-closure-ratchet-stale exit=1`，0 个测试跑到）。
+  核实为 develop 侧而非本任务 delta：`git rev-parse author develop HEAD` 三者同为 `f29dbe30a`，
+  两侧 `plugin.json` 逐字相同，主检出（= develop 内容）跑同一 checker 同样 exit 1。
+- 修法为机械重锚（shrink-only 未被洗白）：`--gate` PASS `3 files / 1022 bytes ≤ baseline 3/1022`（未增长）
+  ⇒ `--reanchor` 得 `3 files / 1022 bytes`（footprint 一字未变）⇒ `--check-stale` exit 0；
+  baseline 的 diff 仅 `fingerprint` 与 `plugin.json` 的 `sha`。内容由四个源文件唯一决定且幂等
+  ⇒ 与 develop 独立重锚所得逐字相同（develop 若自行修复，本分支该改动在三点 diff 中变空操作）。
+  故 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一并登记进 `## Touches`（anti-drift 需要）。
+
 ## Touches
 
 - .github/workflows/release.yml
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-release-softprops-missing-explicit-tag-name.md
