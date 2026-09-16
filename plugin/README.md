@@ -1,6 +1,6 @@
 # quay plugin
 
-quay plugin v0.8.0 — distributes the quay MCP server, skills, vendored agent types, and distributable workflows and gate scripts.
+quay plugin v0.9.0-dev — distributes the quay MCP server, skills, vendored agent types, and distributable workflows and gate scripts.
 
 ## Installation
 
