@@ -122,4 +122,5 @@ Latest」+「orangevps 的 archguard 项目真的装到了这个版本并验证�
 
 - .github/workflows/release.yml
 - plugin/scripts/release-master-advance-needs-check.ts（若判断需要，只读或按需修改）
+- plugin/test/release-github-release-step.test.mjs (new)
 - tasks/gap-release-yml-missing-github-release-object.md
