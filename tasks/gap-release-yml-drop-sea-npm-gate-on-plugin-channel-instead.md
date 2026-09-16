@@ -57,18 +57,49 @@ goal_ac: AC-274
   与 release.yml 无关。
 - `publish-plugin-dist.yml` / `dist-plugin` 分支的构建触发方式——SPEC §11 第 6 点明确排除，本任务不碰。
 
+**⑤ 实现期新增：取消一条产物线会带走它的**检查器**（硬规则 5b，落地时才暴露，非范围蔓延）**。
+Plan ①–④ 是按"只有 release.yml 会变"写的，实测有 **3 处**消费者以**已删除的 job** 为对象，
+不改就恒红（不是"应该顺手改"，是"不改就落不了地"）：
+- `plugin/scripts/release-test-client-close-check.ts`（静态门 `run_static_checks` 内）：对象 = `release`
+  job 的 `Run tests` 步骤所跑 glob。job 没了 ⇒ 读不到 step ⇒ 恒定 `NOT-EVALUATED`(exit 3)，而
+  `run_checker` 把 exit 3 计为失败 ⇒ **整道静态门永久红**。已**退役**：删检查器 + 其 mutation case +
+  capability-catalog 六行，`@checker-count` 63→62。（⚠️ 它断言的属性——`connectStdio` 打开的 MCP client
+  必须在**抛错路径**上关闭——是 release 专属接线，退役后**全仓无守卫**，已在 `runner-static-gate.ts`
+  就地记明为已知缺口。）
+- `scripts/delivery-manifest-check.ts`：对象 = manifest 声明的 npm/SEA 产物集 vs release.yml 实际产出的
+  集合，且**结构上要求两个数组非空** ⇒ 取消产物线后它把"正确记录取消"判成红。已改：两节改为可选、
+  去掉"必须非空"，**双向对齐判据原样保留**（重新长出产物仍会红）；其 `--ci` 资产核对模式（唯一调用者
+  `delivery-manifest-verify` 已被 ① 删除）**已移除**——没有已发布资产可核对，留着只能恒真通过
+  （硬规则 3b）。连带 `delivery-manifest.json` 去掉两节、`scripts/version-consistency-check.ts` 里那句
+  指向 `delivery-manifest-check.ts:252` 的注释更新（该行已不存在）。
+- 未改但记为**观察项**：`plugin/scripts/ci-runs-collect.ts` 的 `seaVerify` 字段——它的 job 基名
+  （`sea-verify-node-free*`）已从 release.yml 消失，此后每条 Release run 上它恒读 `absent`。该取值**本来
+  就是**"没评估成 ≠ 通过"的独立态，不产生假绿；退役它是另一次决定（会连带 ci-runs-collect 的测试面），
+  本任务不做。
+
 ## AC
 
-- [ ] `.github/workflows/release.yml` 里 `grep -c "^  release:\|^  sea-release:\|^  sea-verify-node-free:\|^  sea-verify-node-free-cross-platform:\|^  dist-verify-node-floor:\|^  delivery-manifest-verify:"` = 0（六个旧 job 全部移除，用精确的行首缩进匹配，不是子串匹配）。
-- [ ] `advance-master` 的 `needs:` 字面量就是 `[verify-plugin-channel]`（或落地时确定的实际命名，需与本任务体和 SPEC §11 保持一致更新）。
-- [ ] `node --experimental-strip-types plugin/scripts/release-master-advance-needs-check.ts --root . --json` 在改动落地后重跑，`exit 0`（PASS），且打印的"job 集合"只剩 `verify-plugin-channel` + `advance-master` 两项——证明检查器确实是结构性派生的，不需要本任务去改它。
-- [ ] 一次真实 dispatch（`gh workflow run release.yml --ref <tag> -f tag=<tag>`，⛔ 记得同时传 `--ref`，见 `gap-release-softprops-missing-explicit-tag-name` 的前车之鉴——虽然本任务已经不再有 softprops 步骤了，但仍要传对 `--ref` 让 workflow 定义本身取对版本）验证 `verify-plugin-channel` 真的跑通、`advance-master` 真的把 `master` ff 上去。
+- [x] `.github/workflows/release.yml` 里 `grep -c "^  release:\|^  sea-release:\|^  sea-verify-node-free:\|^  sea-verify-node-free-cross-platform:\|^  dist-verify-node-floor:\|^  delivery-manifest-verify:"` = 0（六个旧 job 全部移除，用精确的行首缩进匹配，不是子串匹配）。〔落地读数 2026-09-16：该命令输出 `0`（rc=1 = grep 无命中行，正常）；对照 `grep -n "^  [a-z][a-z0-9-]*:$"` 打印该文件现在**恰好两个** job 键：`verify-plugin-channel`（:65）与 `advance-master`（:261）。同时删掉了 workflow 级 `env: SEA_NODE_VERSION`——它唯一的消费者就是这六个 job（`verify-sea-artifact.sh` 随 job 一起没了）。〕
+- [x] `advance-master` 的 `needs:` 字面量就是 `[verify-plugin-channel]`（或落地时确定的实际命名，需与本任务体和 SPEC §11 保持一致更新）。〔落地读数：`needs: [verify-plugin-channel]` 单元素列表；由 AC3 的检查器独立读出 `advance-master.needs declares 1 [verify-plugin-channel]`、`unknownNeeds` 0。命名沿用 SPEC §11 第 2 点的暂定名，无需"更贴切"的改名。〕
+- [x] `node --experimental-strip-types plugin/scripts/release-master-advance-needs-check.ts --root . --json` 在改动落地后重跑，`exit 0`（PASS），且打印的"job 集合"只剩 `verify-plugin-channel` + `advance-master` 两项——证明检查器确实是结构性派生的，不需要本任务去改它。〔落地读数：exit 0；`{"state":"pass","jobs":["verify-plugin-channel","advance-master"],"others":["verify-plugin-channel"],"needs":["verify-plugin-channel"],"unknownNeeds":[]}`。**检查器文件零改动**（`git status` 里没有它）——它每次运行从 release.yml 自身的 job 键派生全集，所以删 6 个 job + 加 1 个 job 自动被认。SPEC §11 第 3 点担心的「只改 workflow、漏改检查器 ⇒ 静默认为没有全集要求」在这个实现上不成立：它不是硬编码全集。〕
+- [ ] 一次真实 dispatch（`gh workflow run release.yml --ref <tag> -f tag=<tag>`，⛔ 记得同时传 `--ref`，见 `gap-release-softprops-missing-explicit-tag-name` 的前车之鉴——虽然本任务已经不再有 softprops 步骤了，但仍要传对 `--ref` 让 workflow 定义本身取对版本）验证 `verify-plugin-channel` 真的跑通、`advance-master` 真的把 `master` ff 上去。〔**未勾，记未评估**：本条在落地那一刻**结构上取不到输入**——被 dispatch 的 ref 上必须先存在这份新 workflow（本任务的分支尚未合入 develop），且 master 的 ff 由 run 内 job 在远端完成。⛔ 不勾是硬规则 3b 的要求（把"没验成"记成"通过"正是一条 AC 能犯的最贵的错），也不是放任：job 的**每一条命令**都已在本地以隔离 HOME + scratch 项目的等价 harness 逐条真跑过一遍（见 `## Plan` ⑤ 之外的下述读数），残余风险只剩 GitHub runner 的环境差异。**外层验证（待外部）**：落地后由外层从 develop `gh workflow run release.yml --ref develop -f tag=<该次要发布的 tag>`，核对 run conclusion=success ∧ job 列表只含 `verify-plugin-channel`/`advance-master` ∧ `git rev-parse master` == 该 tag 的 commit。〕
+- [x] **实现期补的本地可执行证据（Plan ⑤ 的对照；本条不属于原 AC 集，是 AC4 未勾的降险读数）**：把 `verify-plugin-channel` 的**全部命令**在隔离 HOME + 全新 scratch 项目里按序真跑（等价 harness，非模拟）——`publish-dist-branch.sh`（no-push）→ `git archive` 取产物树（含 `.claude-plugin/marketplace.json` 与 `scripts/quay-init.sh`，raw `.ts` 只剩 `runner-static-gate.ts` 这一个有据的例外）→ `claude plugin marketplace add <产物树>` → `claude plugin install quay@quay --scope project -y`（`✔ Successfully installed plugin: quay@quay (scope: project)`，cache 落在 `~/.claude/plugins/cache/quay/quay/0.7.1`）→ 从**装好的 cache** 跑 `quay-init --all --loop`（exit 0，`.quay/config.yml` 落地）→ 两个 kind 的 `driver start` + `driver status --json`（两者 `"alive":1`）→ `quay serve` + curl（**3 秒**内拿到 HTTP 302）。收尾 `driver stop` 在两个 kind 上各报"60s 内未收尾"但锚日志显示 131s/138s 后确实 `remaining loops=0`——job 的收尾步骤用 `|| true`，不影响判定。
 
 ## DoD
 
 `AC-274`（master ff 到全绿 release）在一次真实 dispatch 之后转 pass——不是本地读代码"看起来对"就收工；`.quay/ci-runs.jsonl` 里能看到一条 `workflow=Release conclusion=success` 且 job 列表只含 `verify-plugin-channel`（不再含任何 SEA/npm 相关 job 名）的记录，`master` 的提交正是那次 dispatch 的 tag。
 
+〔**未达成，且落地时结构上不可达**：DoD 的两个子句都要求一次真实 dispatch 的产物（远端 run + master 的 ff），与 AC4 同源、同一个外层动作兑现。⛔ 不勾（勾了就是把"没发生"写成"已发生"）。⛔ 也不把 `master` 提前 ff：SPEC §1 ⑤ 问 4 的裁定是"等全绿"，而"全绿"的判据在本次改动之后才成立。落地后由**外层**补这一步，读数与 AC4 的核对项相同。〕
+
 ## Touches
 
 - .github/workflows/release.yml
+- delivery-manifest.json
+- scripts/delivery-manifest-check.ts
+- scripts/delivery-manifest-check.test.ts
+- scripts/version-consistency-check.ts
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/release-test-client-close-check.ts（删除：它的对象是被 ① 移除的 `release` job，见 Plan ⑤）
+- plugin/scripts/checker-mutation-cases/release-test-client-close-check.sh（随上一条一起删除）
 - tasks/gap-release-yml-drop-sea-npm-gate-on-plugin-channel-instead.md
