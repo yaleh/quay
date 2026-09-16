@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-goal-card-ac-denominator-includes-superseded-retired
 title: Dashboard GOAL 卡「AC 达成 X/Y」分母未排除 superseded/retired 等已退场状态，误导用户高估待办量
-status: todo
+status: ready
 labels:
   - gap
 parent: null
