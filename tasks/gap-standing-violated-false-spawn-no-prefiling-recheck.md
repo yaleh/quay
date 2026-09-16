@@ -2,7 +2,7 @@
 id: gap-standing-violated-false-spawn-no-prefiling-recheck
 title: AC-233 常设判据真值为真却被 standing-violated 立案——单次环境类（ENOSPC）误读即
   spawn「保证已回归」agent：给 standing 分支补立案前直接量复核 + 读数环境留痕
-status: todo
+status: ready
 labels:
   - gap
   - defect
