@@ -2967,12 +2967,18 @@ fixture proposal text v1
     const { dir, charterFile } = makeCliScratch(taskId);
     try {
       runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
-      // Force the kill-timeout deterministically: a 50ms deadline is far below node's own spawn +
-      // --experimental-strip-types startup cost, so the child CANNOT finish the epoch logic — the
-      // timeout path (SIGKILL) fires, never a real completion or a fast-fail. This is the Contract
-      // measure: "并发 --new-epoch child 超时被 kill 时 CLI 返回的 code".
+      // Force the kill-timeout deterministically. It has to be forced, because the deadline only
+      // fires if the child cannot finish inside it, and that is a claim about the MACHINE, not
+      // about the code: the original 50ms was chosen on the theory that it sits "far below node's
+      // own spawn + --experimental-strip-types startup cost". Measured on the self-hosted tokyo-alpha
+      // CI runner (128-core EPYC), a bare `node --no-warnings --experimental-strip-types -e
+      // 'process.exit(0)'` child starts AND exits in **19 ms** — so the epoch logic could finish
+      // inside 50ms and the timeout never fired (res.timeout=false on that runner, green on slower
+      // dev machines). 1ms is below the process-spawn floor on every machine, so the deadline is
+      // structurally unreachable rather than probably-unreachable. This is the Contract measure:
+      // "并发 --new-epoch child 超时被 kill 时 CLI 返回的 code".
       const res = await spawnNewEpoch(dir, taskId, charterFile, {
-        reason: "forced-timeout", owner: "owner-timeout", confirmUnchangedScope: true, timeoutMs: 50,
+        reason: "forced-timeout", owner: "owner-timeout", confirmUnchangedScope: true, timeoutMs: 1,
       });
       assert.equal(res.timeout, true, "the child must be killed by the kill-timeout guard (res.timeout=true)");
       const parsed = parseCliJson(res);
