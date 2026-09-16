@@ -61,6 +61,19 @@
 # EXECUTOR (gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it): a real executor — the
 #   `cold-start-e2e` job in .github/workflows/ci.yml, workflow_dispatch-gated so it is
 #   milestone-cadence, not per-push. The assertions below are IN EFFECT from that task onward.
+#
+# ── hard rule 5b sweep (2026-09-16): the SAME dead premise survives elsewhere ────────────────────────
+# Fixing this file does not fix the class. A same-carrier grep (`test/`) for the retired-laydown
+# assertion found 4 more hits, all in ONE sibling file, plus one outside the carrier:
+#   test/cold-start-oneliner-e2e.sh:142      required-file list names orchestration/orchestrator-loop-tick.md
+#   test/cold-start-oneliner-e2e.sh:247      assert_file "$PROJECT/orchestration/orchestrator-loop-tick.md"
+#   test/cold-start-oneliner-e2e.sh:248      assert_file "$PROJECT/docs/analysis/fast-mode-loop-tick.md"
+#   test/cold-start-oneliner-e2e.sh:147/:162/:256  runs $PROJECT/plugin/scripts/* (the retired copy)
+#   plugin/skills/cold-start/SKILL.md:36     precondition "tick docs laid down → <root>/orchestration/…"
+# Neither is repaired here: both are outside this task's `## Touches`, and cold-start-oneliner-e2e.sh is
+# DORMANT (wired into neither scripts/test.sh nor any CI job), so neither can red a gate on its own.
+# They are the follow-up for whoever next touches the cold-start path — recorded, not hidden under
+# this fix (a "fixed the one that was reported" fix is the failure mode this note exists to prevent).
 
 set -euo pipefail
 
