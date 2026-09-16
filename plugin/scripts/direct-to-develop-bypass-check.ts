@@ -361,6 +361,24 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "针对 runtime-usage-inventory.test.mjs 的 AC4 host-corpus liveness 断言做直接 suite-red 修复。" +
       "非偷懒绕过 fan-in（性质同 cddc55e2/6c46304b7 类：直接修复而非绕过流程）。用户 2026-09-04 裁定 ruled one-off。",
   },
+  {
+    sha: "ae28758aa",
+    reason:
+      "release v0.8.0 分支合回 develop 的合并提交（SPEC §4.1 release 分支规程：release/vX.Y.Z 版本 bump 后" +
+      "合回 develop、在合并点打 tag）——manager 2026-09-16 按人「推进 AC-274」指令直接执行的一次真实发布操作" +
+      "（切 release/v0.8.0 → 15 处版本字面量去 -dev 后缀 → 合回 develop → 打 tag v0.8.0），非 manager 自发起" +
+      "代码直改，也非偷懒绕过 fan-in——release 分支的切/合/删/打 tag 是 outer/manager 职责范围内的一次性" +
+      "分支生命周期操作，不适合塞进 task-branch fan-in 这一为「改代码」设计的机制。" +
+      "先例 08e8ec55（release 0.5.0 版本 bump）/a388ca38（release 0.6.1 版本 bump），本次是同一类事件的第三次。" +
+      "manager 2026-09-16 裁定 ruled one-off（先例 08e8ec55/a388ca38/cddc55e2）。",
+  },
+  {
+    sha: "806fee934",
+    reason:
+      "release v0.8.0 合回 develop 之后的下一轮 -dev bump 提交（SPEC §4.3 落实口径：合回 develop 之后立即" +
+      "带上新的 -dev 后缀，⛔ 不留在无后缀的已发布版本号上）——与 ae28758aa 同一次发布操作的直接延续，" +
+      "同一裁定依据（先例 08e8ec55/a388ca38/cddc55e2）。manager 2026-09-16 裁定 ruled one-off。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
