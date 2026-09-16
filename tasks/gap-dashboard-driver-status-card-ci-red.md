@@ -44,16 +44,16 @@ KNOWN_KINDS 都会 `execFileSync` 起一个 `driver-runtime.ts status --json` �
 
 ## AC
 
-- [ ] 在人为限制 CPU/并发的本地环境（例如 `cpulimit`、Docker `--cpus`，或干脆并发跑多份同一测试文件制造资源争用）下重跑该测试 ≥5 次，统计"某个 kind 读数缺失"是否可复现，用来区分负载相关 flake 与确定性回归。
-- [ ] 若确定性复现：定位 `readDriverStatus`（`packages/quay/src/observation.ts`）遍历 `KNOWN_KINDS` 时哪一步会漏掉某个 kind（例如子进程调用失败被吞掉却没有让对应 kind 落入返回数组），修复它。
-- [ ] 若判定为负载相关 flake：不能只凭这一次 CI 红下结论——必须给出"同一份代码在低负载下必过"的负控制读数，并按仓库已有 flake 处理惯例登记（不是简单加 retry 掩盖）。
-- [ ] 无论走哪条分支，`node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs` 单独重跑需要给出至少 5 次连续绿的读数（而不是 1 次）。
+- [x] 在人为限制 CPU/并发的本地环境（例如 `cpulimit`、Docker `--cpus`，或干脆并发跑多份同一测试文件制造资源争用）下重跑该测试 ≥5 次，统计"某个 kind 读数缺失"是否可复现，用来区分负载相关 flake 与确定性回归。 —— 已做：**8 份并发**同跑（干净树、pre-fix 代码）⇒ **8/8 全绿**（负载/争用假设被否）；暂存快照态 ⇒ **5/5 红**；状态逐轮交替 6 轮 ⇒ 绿/红**严格交替 3+3**。**⚠️ 该 AC 的前提本身有误**：缺的不是"某个 kind"，是**全部** kind（`0 !== 6`）——机制见 ## Root cause。
+- [x] 若确定性复现：定位 `readDriverStatus`（`packages/quay/src/observation.ts`）遍历 `KNOWN_KINDS` 时哪一步会漏掉某个 kind（例如子进程调用失败被吞掉却没有让对应 kind 落入返回数组），修复它。 —— 已做：确定性复现成立（含 CI 同路径的全量套件 `--test-concurrency=8` 复现同一 `0 !== 6`）；漏读的那一步是 **kernel 整体载入失败被 `catch {}` 吞成 `null`**（不是逐 kind 分支）——AC 里"被吞掉却没有落入返回数组"这个形状说对了，位置在遍历**之前**。修在两处：`plugin-root.ts` walk-up 优先 source checkout（⛔ 不被更近的 pack-time 暂存快照压过）、`observation.ts` 记录载入失败原因。两处各有 1/1 red 的 mutation 控制。
+- [x] 若判定为负载相关 flake：不能只凭这一次 CI 红下结论——必须给出"同一份代码在低负载下必过"的负控制读数，并按仓库已有 flake 处理惯例登记（不是简单加 retry 掩盖）。 —— **分支未取**：判定为**状态相关确定性失败**（见 ## Root cause），非负载 flake。但该 AC 要的**负控制**已给出（干净树 + 8 份并发 8/8 绿；干净树单跑 5/5 绿），且**未加任何 retry**。
+- [x] 无论走哪条分支，`node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs` 单独重跑需要给出至少 5 次连续绿的读数（而不是 1 次）。 —— 已做：fresh clone @ CI 同一 commit 上 **5/5 连续绿**（干净树）；同一份状态（暂存快照在，pre-fix 为 5/5 红）**5/5 连续绿**。
 
 ## DoD
 
 下一次 `develop` 分支触发的 GitHub CI `test` job 日志里，`gap-dashboard-driver-status-card.test.mjs`
 以 `passed=true` 出现；若判定为已知负载相关 flake，则任务体/载体里留一条可核的判定依据（复现率、负控制读数），
-而不是仅凭一次绿就视为解决。
+而不是仅凭一次绿就视为解决。 —— 判定依据已留在下方 ## Root cause（复现率、负控制读数、全量套件复现）。
 
 ## Root cause（实测，2026-09-16）
 
