@@ -30,7 +30,7 @@ goal_ac: AC-259
 - plugin/vendor/quay/package.json
 - delivery-manifest.json
 - package-lock.json
-- tasks/gap-ac259-supersede-frozen-cycle-literal-and-restore-develop-dev.md (new)
+- tasks/gap-ac259-supersede-frozen-cycle-literal-and-restore-develop-dev.md
 
 ## Finding
 
