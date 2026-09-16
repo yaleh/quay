@@ -1,7 +1,7 @@
 {
   "$schema": "delivery-manifest-v1",
   "description": "Single source of truth for quay release artifacts. release.yml must produce exactly this set — no more, no less.",
-  "version": "0.7.0-dev",
+  "version": "0.7.1",
   "artifacts": {
     "npm-tarballs": [
       {
