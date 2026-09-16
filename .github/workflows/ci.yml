@@ -107,6 +107,18 @@ jobs:
             sudo apt-get install -y -qq tmux
             echo "installed tmux ($(tmux -V))"
           fi
+          # procps (ps / pgrep): full-suite-runner.ts reads `pgrep -c -f 'full-suite-runner\.ts'`
+          # to count its own concurrent runners, and the suite's process-reaper tests shell out to
+          # `ps`. Measured on run 35125070795: `ps -o pid,stat,wcmd -p <live pid>` printed NOTHING
+          # on this runner while `process.kill(pid, 0)` reported the pid alive — i.e. the tool is
+          # absent, not the process. Its absence fails open in that one call site but is still an
+          # undeclared prerequisite of the suite.
+          if command -v pgrep >/dev/null 2>&1 && command -v ps >/dev/null 2>&1; then
+            echo "procps already present ($(ps --version 2>&1 | head -1))"
+          else
+            sudo apt-get install -y -qq procps
+            echo "installed procps ($(ps --version 2>&1 | head -1))"
+          fi
       - name: Verify the suite's runtime prerequisites (fail-closed, enumerated)
         # Hard rule 3b: an unprovisioned runner must produce ONE honest failure naming what is
         # absent, never a pile of assertion failures inside unrelated test files that read as
@@ -124,6 +136,8 @@ jobs:
           check "python3 + PyYAML"  python3 -c 'import yaml'
           check "jq"                command -v jq
           check "tmux"              command -v tmux
+          check "ps"                command -v ps
+          check "pgrep"             command -v pgrep
           check "bash"              command -v bash
           check "git"               command -v git
           check "node >= 23"        node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 23 ? 0 : 1)'
@@ -185,15 +199,6 @@ jobs:
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
         run: bash scripts/test.sh --test-concurrency=16
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: DIAGNOSTIC (temporary) — residual reds in isolation
-        if: always()
-        run: |
-          echo "=== node/version ==="; node --version; command -v node
-          node --test --test-reporter=spec --test-concurrency=1 \
-            experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs \
-            plugin/test/fan-in-execute-paths.test.mjs 2>&1 | grep -aE "DIAG |✖ |^ℹ (pass|fail)|not ok" | head -60
         env:
           GH_TOKEN: ${{ github.token }}
 

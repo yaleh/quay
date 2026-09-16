@@ -1870,36 +1870,6 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   // post-suite sweep, registered-server kill) adds a ~0.6-1.4s tail after test.sh exits — widen the
   // marker wait so the runner's teardown is not mistaken for a stuck flock wait under load.
   for (let i = 0; i < 150 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
-  if (!seen) {
-    // TEMP DIAGNOSTIC — remove once the mechanism is known.
-    console.log("DIAG launchOut=" + JSON.stringify(launchOut));
-    console.log("DIAG ls /tmp/fan-in*=" + JSON.stringify(fs.readdirSync("/tmp").filter((f) => f.includes("fan-in"))));
-    try { console.log("DIAG suite log:\n" + fs.readFileSync(`/tmp/fan-in-suite-${task}.log`, "utf8").slice(0, 4000)); }
-    catch (e) { console.log("DIAG suite log unreadable: " + e.code); }
-    try { console.log("DIAG ls worktree scripts=" + JSON.stringify(fs.readdirSync(path.join(dir, "scripts")))); }
-    catch (e) { console.log("DIAG worktree scripts unreadable: " + e.code); }
-    try {
-      const pidTxt = fs.readFileSync(`/tmp/fan-in-suite-${task}.pid`, "utf8").trim();
-      const pid = Number(pidTxt.split(/\s+/)[0]);
-      let alive = "n/a";
-      try { process.kill(pid, 0); alive = "ALIVE"; } catch (e) { alive = "dead:" + e.code; }
-      console.log(`DIAG pidRaw=${JSON.stringify(pidTxt)} pid=${pid} ${alive}`);
-      const ps = spawnSync("bash", ["-c", `ps -o pid,ppid,stat,wchan:20,etime,cmd -p ${pid} 2>&1 | head -5`], { encoding: "utf8" });
-      console.log("DIAG ps:\n" + (ps.stdout || ""));
-      const holders = spawnSync("bash", ["-c",
-        `for p in /proc/[0-9]*/fd; do for f in $p/*; do t=$(readlink $f 2>/dev/null); case "$t" in *full-suite.lock*) echo "$p -> $t";; esac; done; done 2>/dev/null | head -10`],
-        { encoding: "utf8" });
-      console.log("DIAG lock holders:\n" + (holders.stdout || "(none)"));
-      const alls = spawnSync("bash", ["-c", "ps -eo pid,ppid,stat,etime,cmd | grep -aE 'test.sh|full-suite-runner|sleep 30' | grep -av grep | head -10"], { encoding: "utf8" });
-      console.log("DIAG ps-all:\n" + (alls.stdout || ""));
-    } catch (e) { console.log("DIAG pid file unreadable: " + e.code); }
-    try { console.log("DIAG log.prev:\n" + fs.readFileSync(`/tmp/fan-in-suite-${task}.log.prev`, "utf8").slice(0, 3000)); }
-    catch (e) { console.log("DIAG log.prev unreadable: " + e.code); }
-    for (const tool of ["flock", "setsid", "nohup", "bash", "sh"]) {
-      const r2 = spawnSync("bash", ["-c", `command -v ${tool} || echo MISSING`], { encoding: "utf8" });
-      console.log(`DIAG tool ${tool}=${(r2.stdout || "").trim()}`);
-    }
-  }
   assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
   const markerText = fs.readFileSync(marker, "utf8");
   const log = fs.readFileSync(`/tmp/fan-in-suite-${task}.log`, "utf8");

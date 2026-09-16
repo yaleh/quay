@@ -42,6 +42,11 @@ const PREREQUISITES = [
     re: /install[^\n]*\btmux\b/i,
   },
   {
+    id: "procps",
+    what: "procps (ps/pgrep) — full-suite-runner.ts counts its own runners with `pgrep -c -f`, and the reaper tests shell out to `ps`",
+    re: /install[^\n]*\bprocps\b/i,
+  },
+  {
     id: "develop-ref",
     what: "a LOCAL `develop` ref — direct-to-develop-bypass-check.ts and the two git-graph decoration tests resolve it by branch name, and actions/checkout leaves it remote-tracking",
     re: /git branch develop|refs\/heads\/develop/,
