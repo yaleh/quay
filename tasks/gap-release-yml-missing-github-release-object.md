@@ -147,8 +147,17 @@ CLI 的 job，为了末尾一步写入而放宽它的 token 会把写权限交�
       `/^\s*-\s+\[[^xX]\]\s+(.+)$/`——缺空格使这两项**在结构上取不到文本**，于是 flip 闸把"已注解的
       待外部项"读成"未注解项"判 FAIL（会白烧一整轮 fan-in）。补一个空格后 `flipAcGateVerdict` 返回
       `status:"pass-external", ok:true`（已**干跑**验证，非按约定推断）。
-- [ ] （外层验证，待外部）真实 dispatch 一次完整 SPEC §4.1 分支纪律切出的新版本，`gh release view
+- [x] （外层验证，待外部）真实 dispatch 一次完整 SPEC §4.1 分支纪律切出的新版本，`gh release view
       <新tag>` 存在，`gh release list` 显示它是 `Latest`。
+      — 已完成（manager 会话，2026-09-16T16:3xZ）：真实走完整 SPEC §4.1 分支纪律切出 v0.9.0（release/v0.9.0
+      分支 → 15 处版本字面量去 -dev 后缀 → 合回 develop（merge commit 17cf30678）→ 在合并点打 tag v0.9.0
+      → `release-branch-finish.sh` 删分支 → develop bump 到 0.10.0-dev），真实 dispatch（`gh workflow run
+      release.yml --ref v0.9.0 -f tag=v0.9.0`，run 35122071080）。三个 job 全部 `success`：
+      `verify-plugin-channel`/`create-github-release`/`advance-master`。逐字读数：
+      `gh release list --limit 3` → `v0.9.0  Latest  v0.9.0  2026-09-16T16:31:25Z`（确认是 Latest，
+      不只是存在）；`git ls-remote origin refs/heads/master` → `17cf30678...`，与 `git rev-parse
+      v0.9.0^{commit}` 逐字相同（master 真的 ff 到了这次的 tag）。已用
+      `plugin/scripts/ci-runs-collect.ts` 采集进 `.quay/ci-runs.jsonl`（`appended=1`，追加语义非手写）。
 - [ ] （外层验证，待外部）`orangevps` 主机 `archguard` 项目 project scope 下真实安装这次新版本的
       plugin，版本号核对一致，`quay-init`/driver/serve 验证通过。
 
@@ -166,3 +175,11 @@ Latest」+「orangevps 的 archguard 项目真的装到了这个版本并验证�
 - plugin/scripts/release-master-advance-needs-check.ts（若判断需要，只读或按需修改）
 - plugin/test/release-github-release-step.test.mjs (new)
 - tasks/gap-release-yml-missing-github-release-object.md
+
+## 人复核（manager 会话，2026-09-16T16:3xZ）— 外层验证①已完成，②待跨主机验证
+
+上一条外层 AC（真实 dispatch + GitHub Releases 页面反映为 Latest）已真实完成，详见该 AC 条目本身
+追加的证据。第二条（orangevps 的 archguard 项目 project scope 安装验证）尚未执行，本任务保持
+`done`（worker 侧交付早已完成，这两条外层 AC 从设计上就不阻塞 worker 的 done 判定——见 DoD 原文
+"worker 侧交付的是'能产出'那一半…等待真实 release cut 与跨主机安装把'已产出'那一半补上"），
+manager 会话会在完成跨主机验证后再补一次记录，不需要因此改动任务生命周期状态。
