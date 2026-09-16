@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact
 title: goal-driver 每轮算出的 GoalGap（含 done-unresolved）从不落痕，只用于内部 spawn 过滤
-status: todo
+status: ready
 labels:
   - gap
 parent: null
