@@ -56,10 +56,11 @@ runner 实测探针读数（在 `test` job 里临时加一步取得）：`uid=0(
 ## Evidence — AC3 其它 runs-on / 环境假设
 
 1. **其它三个 job 仍在 `ubuntu-latest`**（`dist-verify-node-floor` / `version-consistency` / `cold-start-e2e`）——它们绿不构成 `test` job 的证据（不同机器）。且这层差异**掩盖了一个独立缺陷**：`cold-start-e2e` 在 2026-09-16T15:28Z / 16:08Z 两次 workflow_dispatch 上**在 ubuntu-latest 上就是红的**（`FAIL: missing file: <tmp>/empty-project/orchestration/orchestrator-loop-tick.md`），与本 runner 迁移无关，是既存红，需另立任务。
-2. **`test` job 自身带 3 条 checkout-shape 假设**（需要**本地** `develop` ref）：在**任何** runner 上都红，只在 `push: develop` 时才绿。迁移前同样存在，迁移把它显式暴露出来。已在本 job 里补 ref（见下面实现）。
-3. **同一 runner 以 uid 0 跑 CI**（ubuntu-latest 是 `runner`）：凡以 EACCES 作负控制的测试在该 runner 上**结构上不可能发火**。已改成三态（NOT-EVALUATED）而不是让它恒红或恒绿（硬规则 3b）。
+2. **`test` job 自身带 3 条 checkout-shape 假设**（需要**本地** `develop` ref）：在**任何** runner 上都红，只在 `push: develop` 时才绿。迁移前同样存在，迁移把它显式暴露出来。已在本 job 里补 ref。
+3. **同一 runner 以 uid 0 跑 CI**（ubuntu-latest 是 `runner`）：凡以「把目录 chmod 成只读／依赖 EACCES」作负控制的测试在该 runner 上**结构上不可能发火**。已实测两处：`quay-init-install-fixture-wipe` AC2、`proposal-convergence` AC15（后者的对照是「同一文件 uid 1000 绿 / uid 0 红」）。两处都改成 uid 无关的三态/替换写法，而不是让它们恒红或恒绿（硬规则 3b）。
 4. `gawk` 缺失（只有 `mawk`）属于同一批环境差异，已由 `gap-outer-tick-log-awk-mawk-interval-red` 单独修掉并落在 develop 上（本分支已 merge）。
-5. **`grep` 实现差异**：`plugin/test/runner-grouping-metadata.test.mjs` 的参考实现（`old group_of`）用宿主 `grep` 判 binary 文件，而「Binary file … matches」这条提示走 stdout 还是 stderr 是**实现定义的**——tokyo-alpha 的 GNU grep 走 stdout（⇒ `awk '{print $2}'` 得 `file` ⇒ `UNKNOWN:file`），本机 ugrep / ubuntu-latest 走 stderr（⇒ 文档化的 `engine`）。已用 `grep -I` 把该参考实现钉成宿主无关（显式声明意图：binary 文件不贡献声明）。
+5. **`grep` 实现差异**：`plugin/test/runner-grouping-metadata.test.mjs` 的参考实现（`old group_of`）用宿主 `grep` 判 binary 文件，而「Binary file … matches」这条提示走 stdout 还是 stderr 是**实现定义的**——tokyo-alpha 的 GNU grep 走 stdout（⇒ `awk '{print $2}'` 得 `file` ⇒ `UNKNOWN:file`），本机 ugrep / ubuntu-latest 走 stderr（⇒ 文档化的 `engine`）。已用 `grep -I` 把该参考实现钉成宿主无关。
+6. **并发制度也是被迁移改掉的环境假设**：并发由 `scripts/test.sh` 读 nproc 派生（4 核 ubuntu-latest ⇒ 小并发；128 核 tokyo-alpha ⇒ 128 路）。**实测：128 路下这个套件不是稳定判据**——同一 commit 连跑三次，每次多出的红集都**不同**且都是负载形状（`serve-board` 的 `EADDRINUSE 0.0.0.0:44203`、`fan-in-execute-paths` ⑧⑩ 的 15s 有界等待、`dead-code-after-return-check` AC6 的 live-tree 严格零扫描）。已在 workflow 里把并发重新**显式封顶**（16 = 本套件日常被开发/验证的那台 16 核机器的制度），理由写在 `Run tests` 步骤注释里。
 
 ## Acceptance Criteria
 
@@ -78,4 +79,5 @@ runner 实测探针读数（在 `test` job 里临时加一步取得）：`uid=0(
 - plugin/test/ci-runner-env-prereqs.test.mjs (new)（为环境前提加判据）
 - plugin/test/quay-init-install-fixture-wipe.test.mjs（read-only 夹具的 EACCES 负控制按 uid 分态）
 - plugin/test/runner-grouping-metadata.test.mjs（old group_of 参考实现的 grep 实现依赖）
+- experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs（AC15 的只读目录破坏按 uid 分态）
 - tasks/gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red.md（自身）
