@@ -1,7 +1,7 @@
 ---
 id: gap-release-softprops-missing-explicit-tag-name
 title: release.yml 两处 softprops/action-gh-release 都没传 tag_name，隐式依赖 dispatch ref 上下文
-status: todo
+status: ready
 labels:
   - gap
   - defect
