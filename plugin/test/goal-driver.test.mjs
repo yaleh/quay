@@ -45,6 +45,7 @@ import {
   GAP_WORKER_TIMEOUT_MS_DEFAULT,
   GOAL_SPAWN_CAP_DEFAULT,
   GOAL_ROUND_REL,
+  GOAL_CONTROL_STATE_REL,
   goalCloseBlockFromRecords,
   probeLedger,
   goalFlipDecision,
@@ -2571,6 +2572,42 @@ test('goal-gaps ③（E2E）: 轮记录里出现 goal-gaps fact，done-unresolve
     assert.ok(gf.value.gaps.some((e) => !isFilingGapState(e.state)),
       '视图必须比 spawn 面宽：它含【不立案】的态（done-unresolved）——那正是此前看不见的那一半');
     assert.ok(!gf.value.gaps.some((e) => !full.has(e.ac)), '视图里不存在全量读数里没有的条目');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('goal-gaps ④（载体级）: 常驻循环写出的 .quay/goal-round.jsonl 那条 record 里真的含 goal-gaps fact', async () => {
+  // AC-1 的字面主张是「**轮记录**里新增一条 fact」——前三条测的是 `runGoalRound` 的返回值，
+  // 这条走例程 + 常驻循环，测的是**写进载体**的那一条（⛔ 返回值有、载体没有即 AC-1 不成立）。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-gapview-carrier-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
+    writeStandingGoalFile(tmp, { id: 'AC-002', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
+    // AC-001：关联任务全部 done ⇒ done-unresolved（本任务立案的那个形态）；AC-002：零关联 ⇒ gap。
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-a.md'), '---\nid: gap-a\nstatus: done\ngoal_ac: AC-001\n---\nbody\n', 'utf8');
+
+    const roundLog = path.join(tmp, GOAL_ROUND_REL);
+    const code = await runResidentQualityGateLoop({
+      root: tmp, intervalMs: 1, once: true, maxRounds: null, roundLogFile: roundLog,
+      runId: 'goal-gaps-carrier', json: false, controlStateRel: GOAL_CONTROL_STATE_REL,
+      // spawnCap 0 ⇒ 本轮不 spawn（本测试只问 fact 落没落进载体，⛔ 不烧名额、不起 LLM）。
+      routines: goalDriverRoutines(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 0 }),
+    });
+    assert.equal(code, 0);
+    const rec = JSON.parse(fs.readFileSync(roundLog, 'utf8').trim().split('\n')[0]);
+    const gf = rec.facts.find((f) => f.name === GOAL_GAPS_FACT_NAME);
+    assert.ok(gf, `轮记录里必须有 goal-gaps fact（实测 facts=${rec.facts.map((f) => f.name).join(',')}）`);
+    assert.equal(gf.state, 'verified');
+    assert.equal(gf.value.evaluated, true);
+    const byAc = new Map(gf.value.gaps.map((e) => [e.ac, e.state]));
+    assert.equal(byAc.get('AC-001'), 'done-unresolved', '载体里能看到 done-unresolved');
+    assert.equal(byAc.get('AC-002'), 'gap', '载体里能看到 gap');
+    assert.equal(byAc.get('AC-002') !== undefined && gf.value.gaps.find((e) => e.ac === 'AC-002').taskCount, 0, 'taskCount 是 0 而不是 null（枚举，⛔ 非布尔化）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
