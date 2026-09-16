@@ -1,7 +1,7 @@
 ---
 id: AC-274
 title: 首次真实全绿发布，且 master 已 ff 到它——⛔ 时间窗限定在本条立案之后，不得被历史绿run满足
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -63,5 +63,11 @@ origin: SPEC §6/§9 第 5 步 + §7 戊，人 2026-09-15 裁定 4（首次 ff �
   在 v0.4.0..v0.6.3 六个版本里只在 v0.5.0 出现过一次，而 README 与 release note 模板都在教用户装
   tgz。本条是一次性判据：它依赖 AC-268（release 渠道真发出一个版本），并在其之上多要一步——那次绿必须反映到 master 上。
 activatedAt: 2026-09-15T14:02:16.910Z
+statusLog:
+  - at: 2026-09-16T14:33:01.667Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: false
 ---
