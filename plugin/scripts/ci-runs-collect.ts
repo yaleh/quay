@@ -738,6 +738,19 @@ export interface CollectForRoundOptions {
   /** 注入的「现在」（测试缝；缺省 Date.now()）。 */
   now?: number;
   env?: NodeJS.ProcessEnv;
+  /**
+   * 注入的「该路径是可执行的 gh」判定（测试缝；缺省 = 真实文件系统探测，见 `resolveGhBin`）。
+   *
+   * 为什么需要它（tasks/gap-ci-runs-collect-gh-fallback-defeats-unavailable-test）：`resolveGhBin` 在
+   * env / PATH / `~/.local/bin` 之后还有**四个硬编码绝对路径**（`/usr/local/bin/gh`、`/opt/homebrew/bin/gh`、
+   * `/usr/bin/gh`、`/bin/gh`），那一段**故意不受 `env.PATH`/`env.HOME` 影响**（常驻 driver 的 PATH 不保证
+   * 含 `~/.local/bin`）。副作用是：靠「把 env 覆写成 `PATH=/nonexistent`」来模拟「gh 不可达」的测试，
+   * 在**真装了系统级 gh 的机器**（GitHub Actions 的 ubuntu 镜像预装 gh）上完全不生效 —— 实测 2026-09-16
+   * CI run 35054411272：该测试红在与被测逻辑无关的**宿主环境差异**上（解析到了真实的 gh，于是落到
+   * `defaultGhRunner`，API 调用失败 ⇒ `status:'error'` ≠ `'gh-unavailable'`）。
+   * ⇒ 把判定穿透出来，让「gh 不可达」不再依赖真实文件系统当前状态。
+   */
+  ghIsExec?: (p: string) => boolean;
 }
 
 interface CollectState {
@@ -808,7 +821,8 @@ export function collectForRound(root: string, opts: CollectForRoundOptions = {})
     return { ...base, status: "error", reason: `从 ${root} 的 origin remote 推不出 owner/name` };
   }
 
-  const ghRes = resolveGhBin(opts.env ?? process.env);
+  // 第二个参数只在测试缝注入时才非 undefined —— 缺省实参（真实文件系统探测）照旧生效。
+  const ghRes = resolveGhBin(opts.env ?? process.env, opts.ghIsExec);
   if (ghRes.bin === null && opts.run === undefined) {
     return {
       ...base,

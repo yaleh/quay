@@ -55,8 +55,55 @@ KNOWN_KINDS 都会 `execFileSync` 起一个 `driver-runtime.ts status --json` �
 以 `passed=true` 出现；若判定为已知负载相关 flake，则任务体/载体里留一条可核的判定依据（复现率、负控制读数），
 而不是仅凭一次绿就视为解决。
 
+## Root cause（实测，2026-09-16）
+
+**判定：不是负载相关 flake，是【状态相关】的确定性失败**——`readDriverStatus` 返回的是**空数组**
+（不是"某个 kind 缺失"），CI 断言原文即 `0 !== 6`（`actual: 0, expected: 6`）。
+
+失败的**直接量**是整个 kernel 没能载入，链条如下（每一步都有实测读数）：
+
+1. `packages/quay/test/delivery-standalone-smoke.sh:51-56`（由 `delivery-standalone-smoke-gate.test.mjs`
+   驱动，该文件在 CI 失败窗口内**正在运行**：`__PERFILE__` 显示其生命周期 140428ms 覆盖了 04:20:27–30）
+   在**共享检出**里把 `plugin/` 拷成 `<repo>/packages/quay/plugin` —— raw `.ts` 齐全，**没有 `scripts/dist/`**，
+   pack 完再 `rm -rf` 删掉。CI 日志里看不到这一步的输出（该脚本 55 行把 `npm pack` 重定向掉了）。
+2. 该窗口内 `plugin-root.ts::resolvePluginRootFrom(<repo>/packages/quay/src)` 在**第 1 层**就锚定到
+   `packages/quay/plugin`（比第 3 层的真 source checkout `<repo>/plugin` **更近**）。
+3. 暂存树不是 source checkout ⇒ `resolvePluginScriptExec` 先找 `scripts/dist/driver-runtime.js`（不存在）
+   ⇒ 回落到那份 raw `.ts`；而暂存树缺它的兄弟 `.mjs` 与 `../../packages/quay/src/*.ts` 再导出 ⇒
+   `import()` 抛 `ERR_MODULE_NOT_FOUND`（实测原文：`Cannot find module
+   '<…>/packages/quay/plugin/scripts/workflow-event-schema.mjs' imported from <…>/fast-workflow-event…`）。
+4. `observation.ts::loadDriverRuntime` 的 `catch {}` 把它吞成 `null` ⇒ `readDriverStatus` 返回 `[]`
+   ⇒ 卡片渲染「Driver 状态未接入」⇒ 就是那 5 条断言。
+
+**读数（全部本地实测，fresh clone @ CI 同一 commit `52de0abb4d`，`mainCheckoutRoot` 为 null 故走 walk-up）**：
+
+| 条件 | pre-fix | post-fix |
+|---|---|---|
+| 暂存快照在（`packages/quay/plugin`，无 dist） | **5/5 红**（`pass 6 / fail 5`，与 CI 同签名） | 5/5 绿 |
+| 干净树 | 绿（8/8 并发下亦全绿） | 5/5 绿 |
+| 状态逐轮交替（clean/snapshot 交替 6 轮） | 绿/红/**严格交替 3+3** | — |
+| 全量套件 `--test-concurrency=8`（CI 同一路径） | **复现**（同一文件、同一 `0 !== 6`） | — |
+
+**负控制（反驳"负载/并发"假设）**：pre-fix 代码 + 干净树 + **8 份并发**同跑该文件 ⇒ **8/8 全绿**
+（`ℹ pass 11 ℹ fail 0`）。故资源争用本身不产生该失败；"间歇"来自那个**暂存窗口本身是瞬时的**
+（谁并发跑到窗口里谁红），这也解释了为什么单文件本地重跑从不复现。
+
+**修法两处**（Touches 已列）：
+- `packages/quay/src/plugin-root.ts`：walk-up 优先**source checkout** 候选，⛔ 不再让更近的**派生快照**
+  （pack-time staging snapshot）压过它；八个层级内无 source checkout（npm-global / marketplace / vendored
+  等出厂布局）时回落到**最近的锚定候选**，即改动前的行为不变。
+- `packages/quay/src/observation.ts`：`loadDriverRuntime` 的两种失败不再共用 `null` 一个取值——记入
+  `driverRuntimeLoadError`（硬规则 3b：「读不懂 ⇒ 伪装成合格」）。形状与渲染（`DriversReading` 数组、
+  「未接入」）不变，只是失败从此**可诊断**；本任务因此不再需要"从一条 `0 !== 6` 反推是哪种失败"。
+
+**遗留（本任务不修）**：`delivery-standalone-smoke.sh` 往**共享检出**写 `packages/quay/plugin` 属
+test-isolation R2 类（共享构建产物写）——它已被 `plugin/test-isolation-violations.txt` 记为已知项一族，
+本任务只消除它对**读取方**的杀伤（resolver 不再被派生快照误导），staging 侧是否改为临时树另案。
+
 ## Touches
 
 - packages/quay/src/observation.ts
+- packages/quay/src/plugin-root.ts
 - packages/quay/test/gap-dashboard-driver-status-card.test.mjs
+- packages/quay/test/plugin-root.test.mjs
 - tasks/gap-dashboard-driver-status-card-ci-red.md
