@@ -2,7 +2,8 @@
 id: gap-closure-ratchet-stale-wire-into-precommit-guard
 title: quay-init 棘轮陈旧检测（--check-stale）从未接入 precommit-guard——漏改 baseline 能顺利
   commit+push，靠远端 CI 才暴露
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -142,3 +143,15 @@ precommit-guard.ts 自身已有先例形态可循：③ goal_ac 写入面判定�
 - plugin/test/precommit-guard.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-closure-ratchet-stale-wire-into-precommit-guard.md
+
+## Needs-Human
+
+**执行 2026-09-16T14:24:06.280Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 10
+- run_id：wk-prod-anchor
+- session_id：920f20cd-25f9-488f-89c6-43bd4736dc9c
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-closure-ratchet-stale-wire-into-precommit-guard~wk-prod-anchor~1789568420859-a84a66.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-closure-ratchet-stale-wire-into-precommit-guard-wk-prod-anchor.log
