@@ -2,7 +2,7 @@
 id: gap-cold-start-e2e-missing-orchestrator-loop-tick-md
 title: cold-start-e2e 在 ubuntu-latest 上本身就是红的——缺
   orchestration/orchestrator-loop-tick.md（与 self-hosted runner 迁移无关，既存缺陷）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
