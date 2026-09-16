@@ -52,7 +52,7 @@
 //       turn a genuinely node-less machine into a fake success.
 //
 // Run: node --test plugin/test/plugin-bin-shim-npm-free-cli.test.mjs
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -121,7 +121,9 @@ function pathEntriesWithoutACompetingQuay() {
 // while the interpreter and the coreutils the shim needs stay reachable.
 const _mirrorDirs = new Map();
 const _mirrorHandles = [];
-process.on("exit", () => {
+// The carrier-array + after() shape the tmp-leak-pairing-check recognises (a process.on("exit")
+// handler is not a cleanup region to that checker, even though it does clean up).
+after(() => {
   for (const d of _mirrorHandles) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
 });
 
