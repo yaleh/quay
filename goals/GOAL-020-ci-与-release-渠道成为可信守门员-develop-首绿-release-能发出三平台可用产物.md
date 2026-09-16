@@ -1,7 +1,7 @@
 ---
 id: GOAL-020
 title: CI 与 release 渠道成为可信守门员：develop 首绿 + release 能发出三平台可用产物
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-15 裁定：以 GitHub CI 与 release 为目标建 GOAL 并持续驱动；并逐条拍板 (a) 接受 5 条
   AC 的范围、(b) 接受 AC-268 需在本 GOAL 期内真发一次版本（workflow_dispatch）。立案读数见 body：develop
@@ -13,6 +13,11 @@ statusLog:
     to: active
     actor: manager
     reason: AC-265..269 五条已全部 active（265 经人工双向控制后 --force，judge 超时不可读）；退出条件三项由这五条覆盖
+  - at: 2026-09-16T14:36:10.963Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景（2026-09-15 实测，全部为直接量）
 
