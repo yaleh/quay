@@ -1,7 +1,7 @@
 ---
 id: AC-273
 title: 默认分支落在主干：origin/HEAD 指向 origin/develop——新 clone 与 harness worktree 的基点不再是化石
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -40,5 +40,13 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-09-17T06:03:55.072Z
+    from: achieved
+    to: superseded
+    actor: goal-cli
+    reason: ""
+superseded-by:
+  - AC-285
+  - AC-284
 long-term: true
 ---
