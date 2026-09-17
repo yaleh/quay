@@ -594,7 +594,9 @@ export function renderTestsCard(
 //   • The server's own cost is NOT this endpoint. A 120 s window in which exactly ONE poll arrived
 //     still burned 53.8 s CPU (44.9% of a core) — that is the 30 s snapshot-rebuild tick
 //     (startDashboardSnapshotRefresh; ~1.8 s of subprocess CPU per rebuild). Optimising the poll
-//     would cut REQUESTS without cutting SERVER COST.
+//     would cut REQUESTS without cutting SERVER COST. Corroborated by a controlled burst at
+//     ~1.4 req/s — ~190× the observed rate — which did NOT raise self-CPU measurably over an idle
+//     window of equal background work (0.347 vs 0.387 s/s; the difference is within noise).
 //   • ETag/304 is structurally unavailable here, not merely unimplemented: the payload is
 //     non-deterministic between two polls (the liveCard gantt's x/width derive from wall-clock `now`,
 //     testsCard carries "55m ago"→"56m ago", sysRaw.ts is a live sample stamp) — verified: two live
