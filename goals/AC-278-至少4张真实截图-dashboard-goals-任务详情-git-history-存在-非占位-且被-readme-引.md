@@ -1,7 +1,7 @@
 ---
 id: AC-278
 title: 至少4张真实截图（Dashboard/Goals/任务详情/Git History）存在、非占位、且被 README 引用
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -59,6 +59,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-17T00:52:08.675Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
