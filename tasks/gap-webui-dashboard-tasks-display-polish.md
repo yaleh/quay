@@ -59,10 +59,34 @@ extra:
 
 **同时登记（未做，超出本任务范围）**：`renderTopRow`（同文件 `:1217`）是**同形缺陷**——右列（系统资源+DRIVER）比左列（循环脉搏）矮，容器仍 full-bleed divider ⇒ 顶部那一行仍有同一个灰块（上面的 A/B 截图里可见）。未随本任务一并修的原因是可机械验证的：`gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs`（**不在本任务 `## Touches` 里**）用 `top.content.indexOf('<div style="display:flex;flex-direction:column;gap:2px">')` 精确匹配右列容器的整串属性，把 divider 背景移到列上就会打红那条断言，而改它又会撞 anti-drift HARD FAIL。⇒ 需要单独立案（连同该测试的更新）。
 
+### 续做轮（2026-09-17）：修 fan-in 全量 suite 红
+
+上一轮 fan-in 的全量 suite **只红一个文件**：`packages/quay/test/web-ui-browser.test.mjs`（`# fail 1`）。真因是**本任务 ② 的预期契约变更本身**，不是环境抖动，也不是本任务无关的 flake：
+
+该文件有 **8 条**断言隐含以「`/tasks` 无 `?sort=` ⇒ 插入序 ⇒ 第 1 页含 WUI-*」为前提。② 把默认视图改为 updatedAt DESC 后，fixture 中**最后播种**的 ZPG-01..25 成了"最近更新"、占满第 1 页（`PAGE_SIZE=20`），WUI-*/SORT-*/LBL-* 全部落到第 2 页 ⇒ 8 条全红（`# fail 1` 是文件级计数）。
+
+**修法：改输入，不改谓词**——把这 8 条断言的**主语**还原成它们本来要测的东西（"该 fixture 可见"/"过滤语义"），给它们一个显式确定性排序，使其不再把"默认序 = 插入序"当隐含契约：
+
+- 新增 `const listById = await get(port, "/tasks?sort=id")`，清单页的"行/标题/href"断言（5 条）改用它；原 `const list = await get(port, "/tasks")` **保留原样**给页面 chrome（title/h1/筛选与排序导航）断言 —— 那部分零改动、零风险。
+- `listTodo`：`/tasks?status=todo` → `/tasks?status=todo&sort=id`（32 条 todo fixture 远超 `PAGE_SIZE=20`）。
+- 两处**已失效的注释**同步修正：本文件 `:221`（原文 "Seeded LAST so that in insertion-order (default, no sort)…"）与 `packages/quay/test/serve.test.mjs:287`（原文 "Default (?sort=id) alphabetical order would be…"）。
+- 默认序契约本身**不在本文件重复**——由本任务自己的用例（断言 `/tasks` 与 `/tasks?sort=updated` 同序）单点钉住，符合"单一正本"原则。
+
+**负控制（区分性，⛔ 非恒绿）**：只把 `listById` 的 URL 从 `?sort=id` 改回 `/tasks`、**谓词一字不动** ⇒ 8 条里**恰好 6 条**重新变红（另 2 条的修复在 `listTodo` 那处，该控制有意不涉及）⇒ 证明"绿"来自输入排序，而不是谓词被放宽。三文件复跑：`web-ui-browser.test.mjs` EXIT=0、`serve.test.mjs` EXIT=0、`gap-webui-dashboard-tasks-display-polish.test.mjs` EXIT=0。
+
+**5b 扫描（修一个 ≠ 只此一个；以"默认序"为谓词扫全仓 test/src，命中 6 处）**：
+- **仍为真（CLI 面，本变更未触及）**：`packages/quay/src/cli/help.ts:75`、`packages/quay/src/cli/task-list.ts:116`、`packages/quay/test/cli.test.mjs:1408` —— 本变更只动 web 面 `serve-task.ts`，CLI `--sort` 的默认仍是插入序，这三处不是漂移。
+- **已失效（web 面，本变更的尾部）**：`packages/quay/test/web-ui-browser.test.mjs:221`、`packages/quay/test/serve.test.mjs:287` —— 两条均已在本轮修正。
+- 另逐一核对全部 11 个含 `await get(port, "/tasks")`（无 sort）的文件：其余 9 个只断言"存在性/导航/CSS 偏移"，不断言顺序；唯二对顺序敏感的是 `serve.test.mjs:295`（显式 `?sort=updated`）与 `:842`（排的是**标签导航** `freq-common` vs `zzz-rare-*`，不是任务行）⇒ 均不受本变更影响。
+- 声明纪律：本轮新增修改的两个测试文件已同步登记进 `## Touches`（anti-drift 要求"声明 = 实际"，否则视为 declaration too narrow）。
+⇒ 该缺陷类在本仓**全量清完**，无剩余未处理的 web 面"默认序"断言。
+
 ## Touches
 
 - packages/quay/src/serve.ts
 - packages/quay/src/serve-task.ts
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/gap-webui-dashboard-tasks-display-polish.test.mjs
+- packages/quay/test/web-ui-browser.test.mjs
+- packages/quay/test/serve.test.mjs
 - tasks/gap-webui-dashboard-tasks-display-polish.md
