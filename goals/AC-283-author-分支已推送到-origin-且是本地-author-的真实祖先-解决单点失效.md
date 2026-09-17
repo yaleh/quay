@@ -1,7 +1,7 @@
 ---
 id: AC-283
 title: author 分支已推送到 origin，且是本地 author 的真实祖先（解决单点失效）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -34,4 +34,15 @@ criterion: >-
   CRIT
 expect: criterion exits 0 once origin/author exists and is an ancestor of local author
 origin: author 分支从未被推送过（git ls-remote --heads origin author 为空），只存在于这台机器本地
+activatedAt: 2026-09-17T04:07:15.635Z
+statusLog:
+  - at: 2026-09-17T04:07:15.635Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-023 激活，同步激活
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T04:07:15.634Z
 ---
