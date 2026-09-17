@@ -284,7 +284,10 @@ async function main() {
       const sortPort = sortServer.address().port;
 
       // ?sort=updated: SRT-C (most recent) should appear before SRT-A (oldest).
-      // Default (?sort=id) alphabetical order would be SRT-A, SRT-B, SRT-C.
+      // `?sort=id` alphabetical order would be SRT-A, SRT-B, SRT-C — but that is NOT the default
+      // view any more: gap-webui-dashboard-tasks-display-polish made the no-`?sort=` web view
+      // share this very updatedAt-DESC branch. The assertion below pins `?sort=updated`
+      // explicitly, so it tests the sort branch rather than whatever the default happens to be.
       const sortedByUpdated = await get(sortPort, "/tasks?sort=updated");
       assert(sortedByUpdated.status === 200, "GET /tasks?sort=updated returns 200");
       assert(
