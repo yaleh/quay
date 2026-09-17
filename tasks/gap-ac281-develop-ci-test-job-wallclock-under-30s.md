@@ -284,20 +284,23 @@ Plan 第 2 步清单必须换成 CI 自己的 `__PERFILE__`（当前真值：只
       `durationSec`，以及同一 run 的 `testFiles`。⛔ 不许靠「改宽判据」达成——`goals/AC-281-*.md` 的
       `criterion` / `expect` / `origin` / `activatedAt` **四处均不得改动**（举证：`git diff develop -- goals/`
       对本 AC 文件零命中）。
-- [ ] **AC2（判据读的是【最新一条】post-filing develop run——可分辨对照）**：把载体复制到 scratch cwd，
+- [x] **AC2（判据读的是【最新一条】post-filing develop run——可分辨对照）**：把载体复制到 scratch cwd，
       构造 5 种合成载体，各跑一次**逐字提取**的 criterion（提取方式：`goal-store get AC-281` 的
       `criterion` 字段，round-trip 保真、`python3 -` 逐行可还原），逐条贴 exit code：
       ① 最新 = post-SINCE 绿 10s ⇒ **0**；② 最新 = post-SINCE 但 `conclusion=failure` ⇒ **1**；
       ③ 最新 = post-SINCE 绿 45s ⇒ **1**（= 立案时的生产态）；④ 在绿 10s 之后追加一条 post-SINCE 慢记录
       ⇒ **1**（证明取的是 `rows[-1]`，不是「存在一条快的就算数」）；⑤ 最新 = **pre**-SINCE 绿 10s ⇒ **1**。
       ⛔ 不得改生产载体来做这组对照。
+      **【2026-09-17 执行轮 2 实测：5/5 与规格相符，exit code 逐条 = 0 / 1 / 1 / 1 / 1】** 见 `## Evidence` §2。
 - [ ] **AC3（不是靠少跑换来的）**：收口 run 的 `testFiles` ≥ 立案读数 **650**（同一命令从载体读）；
       若低于，给出被合并/移走文件的完整映射与理由，并说明为什么套件覆盖没有下降。
 - [ ] **AC4（残余墙钟有归因，不是猜）**：给出收口 run 的**相位级**耗时分解（来源：run 日志自身的
       `__GROUP__` / `__PERFILE__` 行，以及 GitHub 侧 step 时间），逐项命名并给出数值；对 Plan 第 3 步
       每一项给出「改前 → 改后」对照读数（⛔ 无对照的项如实记为**未处置**，不得写成已处置）。
-- [ ] **AC5（生产触发路径真跑过）**：贴出触发命令原文与 run id / url；证明该 run 的 `head_branch` 是
+- [x] **AC5（生产触发路径真跑过）**：贴出触发命令原文与 run id / url；证明该 run 的 `head_branch` 是
       `develop`（载体记录的 `branch` 字段即由此来）。⛔ 任务分支上的绿跑不作数。
+      **【2026-09-17 执行轮 2 实测：`gh workflow run ci.yml --ref develop` ⇒ run 35229453772，
+      `head_branch=develop`、`event=workflow_dispatch`】** 见 `## Evidence` §3。
 - [ ] **AC6（载体由唯一写面产生）**：贴出 `ci-runs-collect.ts` 的调用与它打印的
       `appended= / skipped= / testFilesDerived=` 读数，证明收口那条记录是**采集器**写的；
       并证明没有手写：`git diff -- .quay/ci-runs.jsonl` 为空（该载体是 gitignored 运行时载体，手改不进
@@ -330,3 +333,93 @@ Plan 第 2 步清单必须换成 CI 自己的 `__PERFILE__`（当前真值：只
 - plugin/test/ci-runner-env-prereqs.test.mjs
 - scripts/test.sh
 - tasks/gap-ac281-develop-ci-test-job-wallclock-under-30s.md
+
+## Evidence（执行轮 2，2026-09-17）
+
+**结论：AC-281 的 30s 阈值低于 `test` job 自身的【不可约开销】—— 该判据结构上不可满足，不是「本轮没做完」。**
+完整取证（含逐条复算命令）：`.quay/ac281-floor-evidence.md`。
+
+### §0 job 墙钟的逐段分解（真实 CI，tokyo-alpha 128 核，`gh api …/jobs` 的 step 时间戳）
+
+| run | job 总 | pre（checkout/setup-node/npm install/coverage） | **Run tests** | **runner 收尾** |
+|---|---|---|---|---|
+| **35229453772**（本轮 dispatch） | **87s** | **16s** | **60s** | **11s** |
+| 35227553148 | 94s | 22s | 60s | 11s |
+| 35228548244 | 96s | 23s | 60s | 12s |
+| 35225478541 | 95s | 25s | 60s | 10s |
+| 35215970607 | 104s | 33s | 60s | 11s |
+
+⇒ **job 的方差全部来自 pre 段**（`npm install` 2→15s）；`Run tests` 与 runner 收尾是常数。
+`Run tests` 在 **9 连跑**上是 60/61s（`35214296126 60 35214586703 60 35215002986 60 35215586532 61
+35215970607 60 35225478541 60 35226449580 60 35227553148 60 35228548244 60`）。
+
+**⇒ 下界**：把 pre 段与 runner 收尾**全部假想成 0**（绝大多数不在 `ci.yml` 能力内），
+`0 + 60 + 0 = 60s` —— **正好是 30s 目标的两倍**。即使套件耗时归零，job 仍是
+`16 + 0 + 11 = 27s`… 但套件耗时**不可能**归零：`Run tests` = 静态段 ~6.7s + `scheduler_ms` 53.5s。
+**⇒ `job = pre(≥16) + suite(≥53.5) + tail(≥10) ≥ 79.5s`，判据要求 ≤30s。**
+
+### §1 suite 内部：长杆是单文件，不是容量（run 35227553148 的 `__OVERHEAD__` / `__GROUP__` 行）
+
+```
+__OVERHEAD__ lock_wait_ms=1          ← 锁不是瓶颈（runner 独占）
+__OVERHEAD__ lock_hold_ms=57731      ← 持锁 ≈ 整个 suite 时长
+__OVERHEAD__ main_phase_ms=51092  serial_phase_ms=19098  lowconc_phase_ms=18912
+__OVERHEAD__ scheduler_ms=53507   build_dist_ms=202   resource_gate_ms=59
+__GROUP__ concurrency=128 files=728 sum_ms=1572369 floor_ms=43058
+```
+816 文件 `sum_ms=1 995 479`（1995.5s）⇒ 128 并发理想 makespan 15.6s；实测 main 相位 51.1s，
+因为 `plugin/test/driver-anchor.test.mjs` 单文件 43.1s。**LPT 模拟：并发 64/128/256/512 的 makespan
+全部 = 43.1s** ⇒ 抬并发无用，唯一杠杆是压低最长单文件。CI 上 >30s 的只有 2 个：
+`driver-anchor.test.mjs` 43.1s、`fan-in-execute-paths-s07.test.mjs` 41.6s（后者不在任何既有清单里）。
+
+### §2 AC2 —— 5 条对照逐条实跑（criterion 经 `goal-store get AC-281` 逐字取出：55 行 / 2106 字节；scratch cwd，⛔ 未改生产载体）
+
+```
+case 1  latest = post-SINCE green 10s                       exit 0  ✔ (stdout: "OK — … took 10s <= 30s target")
+case 2  latest = post-SINCE but conclusion=failure           exit 1  ✔ CAUSE=latest-run-not-green
+case 3  latest = post-SINCE green 45s（立案时的生产态）      exit 1  ✔ CAUSE=too-slow
+case 4  green 10s，其后追加一条 post-SINCE 慢记录(90s)      exit 1  ✔ CAUSE=too-slow，报的是后追加的那条
+                                                                      ⇒ 证明确实取 rows[-1]，不是「存在快记录就算数」
+case 5  latest = pre-SINCE green 10s                        exit 1  ✔ CAUSE=no-post-filing-run
+ALL 5 CONTROLS AS EXPECTED: True
+```
+
+### §3 AC5 —— 生产触发路径真跑过
+
+```
+$ gh workflow run ci.yml --ref develop --repo yaleh/quay
+⇒ run 35229453772   head_branch=develop   event=workflow_dispatch
+   test job: 2026-09-17T13:48:47Z → 13:50:14Z = 87s  conclusion=success
+```
+（⛔ 载体里此刻**最新**的 post-filing develop run 就是它：`ts=2026-09-17T13:48:43Z`，success，87s，
+`testFiles=728`。）
+
+### §4 AC6 的机制臂（⛔ 其「收口那条记录」子句因无收口 run 而不成立，故 AC6 未勾）
+
+```
+$ node --experimental-strip-types plugin/scripts/ci-runs-collect.ts --branch develop --workflow ci.yml --limit 5
+carrier=/home/yale/work/quay/.quay/ci-runs.jsonl appended=1 skipped=4 attributed=0 enrichedPrereq=0
+logRunsFetched=1 testFilesDerived=5 prereqProvisionDerived=1
+```
+（两趟：一趟追加 35228548244，一趟追加 35229453772；`git diff -- .quay/ci-runs.jsonl` 为空 —— 载体 gitignored。）
+
+### §5 AC7① —— 兄弟判据未被绕开
+
+`gate AC-279` = `pass`；`gate AC-280` = `pass`。
+
+### §6 未做的事（如实记录）
+
+- **AC1 未达成**：`gate AC-281` 仍 `fail`（最新 = 35229453772，success，**87s**）。
+- **AC3 / AC4 / AC7②③ 的观测对象是「收口 run」，该 run 不存在** ⇒ 未勾。
+  可核的替代读数：最新 develop test job 的 **`testFiles=728 ≥ 650`**，即**套件覆盖没有下降**。
+- **未拆 `driver-anchor.test.mjs`**：它是唯一能把 job 从 ~94s 压到 ~64s 的杠杆，但**拆了也仍 >30s**
+  （§0 的下界），且该文件不在 `## Touches` 内、有回归风险 ⇒ 留给重定范围后的轮次，不在此轮押上。
+
+### §7 给重定范围的建议（⛔ 本 worker 不改判据）
+
+判据量的是 **job 墙钟**，而其中 ≥27s 与套件无关，且 `GOAL-022` 的「范围与非目标」逐字写着
+「不追求"绝对30秒"是数学精确值」—— 与该 AC 的硬阈值 `durationSec <= 30` 直接矛盾。
+⇒ 建议（按强度）：① 改用只量套件的 `scheduler_ms`（当前 53.5s，拆 driver-anchor 后可达 ~23s）
+作判据，或把阈值改为「与套件无关的固定开销 + 可达套件预算」；② 把「测试执行」从 `test` job 拆成
+独立 job，判据改读那个 job；③ 拆 `driver-anchor.test.mjs`（43.1s）+ 抬高有效并发上限
+（当前 `reliability cap: total ≤ min budget of active groups` = 64）。**⛔ 单靠 ③ 到不了 30s。**
