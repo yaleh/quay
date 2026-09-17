@@ -1,7 +1,7 @@
 ---
 id: AC-286
 title: worker 机械 fan-in 的合并目标仍然是 develop（回归防护）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -32,4 +32,15 @@ criterion: >-
 expect: criterion exits 0 as long as worker-driver.ts's mechanical fan-in path
   still references develop as the merge target
 origin: 本方案不改变 fan-in 目标，需要一条判据防止未来意外漂移
+activatedAt: 2026-09-17T04:11:33.576Z
+statusLog:
+  - at: 2026-09-17T04:11:33.576Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-023 激活，同步激活；判据已收紧为对 mergeTarget 默认赋值语句的位置判定
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T04:11:33.575Z
 ---
