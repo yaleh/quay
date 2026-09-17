@@ -22,8 +22,9 @@
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
 //   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
-//   /journal (AC-296), /git-history (AC-297) and /tests (AC-298); the remaining 5 pages'
-//   page-chrome is AC-299~303, and each adds its own tokens as it lands.
+//   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299) and /adr
+//   (AC-300); the remaining 3 pages' page-chrome is AC-301~303, and each adds its own tokens as it
+//   lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -268,6 +269,33 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   "Sessions — 会话观测": { en: "Sessions — 会话观测", zh: "会话 — 会话观测" },
   "Sessions — 会话观测（运行中 + 已结束）": { en: "Sessions — 会话观测（运行中 + 已结束）", zh: "会话 — 会话观测（运行中 + 已结束）" },
   sessions: { en: "sessions", zh: "会话" },
+  // AC-300 (/adr page): this page's own TWO tokens — and they differ ONLY IN CASE, which is why
+  // they are two independent lookups rather than one.
+  //   `ADRs` — the token `serve-adr.ts` passes to `pageTitle`, which is ALSO the token its `<h1>`
+  //     carries (the two call sites happen to be byte-equal here, so unlike AC-291's / AC-292's /
+  //     AC-293's / AC-296's / AC-298's / AC-299's two- or three-entry pairs, ONE entry serves both).
+  //     ⚠️ The `<h1>` is a DYNAMIC string — `<h1>${pageNameFor("ADRs", lang)} (${adrs.length})</h1>`.
+  //     Only this constant part goes through the dictionary; the record count is interpolated raw.
+  //     Registering a finished string such as `"ADRs (36)"` would both go stale as ADRs are added and
+  //     be a lookup miss (i.e. an English `<h1>` under zh) — the exact defect AC-300 removes.
+  //   `adrs` — the LOWERCASE token the MOBILE header carries, i.e. the AC-290 `"task list"` /
+  //     AC-297 `"git history"` / AC-298 `tests` / AC-299 `sessions` shape (a page's own chrome token
+  //     that is not a `pageTitle` token). It renders into `<span class="mobile-header-page">`, which
+  //     sits BEFORE the first `<nav>` and is therefore neither inside the criterion's nav region nor
+  //     a nav label — AC-300's AC1b asserts it anyway, deliberately stricter than AC-291's landed
+  //     form, so that "this page's own chrome" switches as a whole.
+  // ⚠️ CASE IS PART OF THE KEY. `pageNameFor` is an EXACT-token lookup, so `ADRs` does NOT serve
+  //     `adrs` and vice versa: dropping either entry leaves exactly one of the two sites English,
+  //     and which one is a question only the call sites answer. ⛔ Do not "merge the duplicate".
+  // Neither zh value may carry the ASCII literal "ADRs"/"adrs" in ANY case: AC-300's criterion fails
+  //     the page on that literal inside the nav region — where this page's CURRENT item label comes
+  //     from NAV_LABELS's `adr` row (「架构决策」, ROW 1) — and the same literal is what the en
+  //     baseline's `<title>` and `<h1>` carry, i.e. what the criterion's `title-unchanged` arm
+  //     compares the zh title against. 「架构决策」 satisfies "non-empty" without it. The two entries
+  //     landing on the same zh word is a coincidence of vocabulary, ⛔ not a shared source — a later
+  //     re-wording of one must not be assumed to move the other (same note as AC-295's row).
+  ADRs: { en: "ADRs", zh: "架构决策" },
+  adrs: { en: "adrs", zh: "架构决策" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
