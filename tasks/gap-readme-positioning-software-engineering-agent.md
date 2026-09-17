@@ -2,7 +2,7 @@
 id: gap-readme-positioning-software-engineering-agent
 title: README.md 缺 GOAL-021/AC-276 要求的定位陈述：quay = software engineering
   agent，Claude Code = 其基础设施（内蕴，非反向）——判据真跑 exit 1 CAUSE=positioning-missing
-status: done
+status: ready
 labels:
   - gap
   - docs
