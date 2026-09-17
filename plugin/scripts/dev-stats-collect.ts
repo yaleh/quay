@@ -341,9 +341,11 @@ const USAGE = `用法:
   node --experimental-strip-types ${SCRIPT_REL} --json [--ref <commit>] [--root <dir>]
   node --experimental-strip-types ${SCRIPT_REL} --write [--ref <commit>] [--root <dir>] [--readme <path>]
   node --experimental-strip-types ${SCRIPT_REL} --check [--json] [--root <dir>] [--readme <path>]
-说明: --json 打印扁平标量统计 JSON（快照点 = README 块里写的那个提交，无块时取 HEAD）；
-      --write 把标记块重写成当前快照（人不得手填）；--check 比对「重算值 vs 块内值」，
-      漂移时 exit 1 且 stderr 带 CAUSE=stats-drift；--ref 显式钉快照点（--write 缺省 HEAD）。`;
+说明: 快照点 = README 块里写的那个提交（无块时取 HEAD）；--ref <commit> 显式指定（移动快照点
+      到当前点用 --ref HEAD，这是唯一会让数字随仓库前进的写法）。
+      --json 打印扁平标量统计 JSON；--write 在快照点上重生成标记块（人不得手填；同一快照点重复
+      生成逐字节相同）；--check 比对「重算值 vs 块内值」，漂移时 exit 1 且 stderr 带
+      CAUSE=stats-drift。`;
 
 function parseCli(argv: string[]): Cli {
   let mode: Cli["mode"] | null = null;
@@ -393,10 +395,14 @@ function main(argv: string[]): number {
   const readmeText = readmeExists ? fs.readFileSync(readmePath, "utf8") : "";
   const block = readmeExists ? parseBlock(readmeText) : EMPTY_BLOCK;
 
-  // 快照点解析：显式 --ref > 块里写的提交 > HEAD。
-  // `--write` 是**刷新**语义（缺省重新钉当前 HEAD），⛔ 不沿用块里的旧提交——否则刷新无从发生；
-  // `--json`/`--check` 沿用块里的提交，这正是「读的与写的是同一个快照点」。
-  const wantRef = cli.ref ?? (cli.mode === "write" ? null : block.found ? block.commit : null);
+  // 快照点解析：显式 --ref > 块里写的提交 > HEAD。三个模式**用同一条规则**：
+  //   • 块已在 ⇒ 一律读块里那个提交 ⇒ `--write` 是**重生成**（同一个快照点上重复生成必须逐字节
+  //     相同；若 `--write` 缺省改钉当前 HEAD，那么提交一次 README 之后再跑 `--write` 就会因为
+  //     commits_total 多 1 而改文件 —— 「连续两次 --write 第二次 diff 为空」这条判据就永远不成立）；
+  //   • 块不在 ⇒ 钉 HEAD（首次建立）。
+  // **移动快照点是显式动作**：`--ref <commit>`（刷新到当前点 = `--ref HEAD`）。这是刻意的：
+  // 一个防漂移机制的写面必须是「在具名快照上重生成」的纯函数，而不是「顺手把快照往前推」。
+  const wantRef = cli.ref ?? (block.found ? block.commit : null);
   const chosen = wantRef ?? "HEAD";
   let commit: string;
   let stats: Stats;

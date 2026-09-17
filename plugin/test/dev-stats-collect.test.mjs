@@ -288,6 +288,36 @@ test("CLI — --write is idempotent, --check is green, a tampered value exits 1 
   assert.equal(cli(["--check"]).status, 0);
 });
 
+test("CLI — --write regenerates at the block's OWN snapshot; moving it is the explicit --ref", () => {
+  // AC5 的字面性质：块一旦落地并提交，再跑 --write 必须**一个字节都不改**。若 --write 缺省改钉
+  // 当前 HEAD，那么提交一次之后再跑它就会因为 commits_total 多 1 而改文件 —— AC5 永远不成立。
+  const { dir } = makeFixture();
+  const readmePath = path.join(dir, README);
+  const cli = (args) =>
+    spawnSync("node", ["--no-warnings", "--experimental-strip-types", SCRIPT, ...args, "--root", dir], {
+      encoding: "utf8",
+    });
+
+  assert.equal(cli(["--write"]).status, 0);
+  const first = fs.readFileSync(readmePath, "utf8");
+  const pinned = parseBlock(first).commit;
+  assert.equal(pinned, run("git", ["rev-parse", "HEAD"], dir).trim());
+
+  // HEAD moves on (a new commit) — the pinned block must NOT follow it.
+  fs.writeFileSync(path.join(dir, "notes", "later.txt"), "later\n");
+  commitAll(dir, "later", day(20));
+  assert.equal(cli(["--write"]).status, 0);
+  assert.equal(fs.readFileSync(readmePath, "utf8"), first, "a plain --write must not repin");
+  assert.equal(cli(["--check"]).status, 0, "and the untouched block must still be consistent");
+
+  // Moving the snapshot point is explicit and IS a real change.
+  assert.equal(cli(["--write", "--ref", "HEAD"]).status, 0);
+  const moved = fs.readFileSync(readmePath, "utf8");
+  assert.notEqual(moved, first);
+  assert.equal(parseBlock(moved).commit, run("git", ["rev-parse", "HEAD"], dir).trim());
+  assert.equal(cli(["--check"]).status, 0);
+});
+
 test("CLI — a missing or malformed block exits 2, never conflated with 'consistent'", () => {
   const { dir } = makeFixture();
   const readmePath = path.join(dir, README);

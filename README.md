@@ -791,6 +791,26 @@ paths, limits, and behavior overrides. The most commonly needed ones:
 | `QUAY_ACTION_MOCK_LOG` | action | Path for deterministic mock/file-log action delivery instead of live delivery (DIR-009). |
 | `QUAY_GLOBAL_DIR` | manager | Cross-project base directory for the manager layer (its session home is `$QUAY_GLOBAL_DIR/manager/`). |
 
+## Development process statistics
+
+Machine-generated from this repository's **tracked** development carriers (git history,
+`tasks/*.md`, `goals/*.md`, `plugin/scripts/*.ts`) by
+[`plugin/scripts/dev-stats-collect.ts`](plugin/scripts/dev-stats-collect.ts). The block is a
+snapshot pinned to the commit it names, so the values are stable and any hand-edited number
+stops matching — `--check` fails on that drift. Regenerate with `--write`; never edit by hand.
+
+<!-- dev-stats:start -->
+Snapshot commit: 4abbe18d912e61033ae7aba9757a03391f432c82
+- snapshot_date: 2026-09-17
+- history_days: 63
+- tasks_total: 2223
+- tasks_done: 2149
+- tasks_superseded: 71
+- commits_total: 22711
+- scripts_total: 254
+- goals_total: 157
+<!-- dev-stats:end -->
+
 ## Deeper design and methodology material
 
 The [`docs/proposals/`](docs/proposals/) directory is **internal experiment
