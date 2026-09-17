@@ -181,28 +181,28 @@ quay serve 正在跑：http://100.78.206.100:4173（pid 2345364）
 
 ## Acceptance Criteria
 
-- [ ] AC1: AC-278 的 criterion 逐字判定通过。取法：`createGoalStore(<主检出>/goals).get("AC-278")` 取
+- [x] AC1: AC-278 的 criterion 逐字判定通过。取法：`createGoalStore(<主检出>/goals).get("AC-278")` 取
       `criterion`，`runAcceptance({command: criterion, cwd: <主检出>})`（与 goal driver 同形）
       ⇒ **`ok === true` 且 `code === 0`**。证据形态：命令 + 完整 JSON 输出。⛔ 不是「另写一份等价谓词跑绿」；
       ⛔ 不得用 `parseFrontmatterCompletely`（见 Finding 读数取法）。
-- [ ] AC2（负控制——证明 AC1 的绿不是判据恒绿）: 在一个**临时副本**里把 `docs/screenshots/goals.png` 删掉
+- [x] AC2（负控制——证明 AC1 的绿不是判据恒绿）: 在一个**临时副本**里把 `docs/screenshots/goals.png` 删掉
       （或改小到 <5000 字节），cwd = 该副本跑**同一条** criterion ⇒ **exit 1** 且 `reason` 含
       `CAUSE=screenshots-missing`（或 `screenshots-too-small`）；还原后再跑 ⇒ exit 0。
       两条读数并排贴出（证明本判据在本产物上确实能取两个值）。
-- [ ] AC3（缺陷 A 的两值对照）: 同一张新 PNG，① 用**修复前**的 verifier ⇒ `verdict: BLANK`
+- [x] AC3（缺陷 A 的两值对照）: 同一张新 PNG，① 用**修复前**的 verifier ⇒ `verdict: BLANK`
       （`accentPixels: 0`）；② 用**修复后**的 ⇒ `verdict: non-blank`。并给出**反向对照**：
       修复后的 verifier 对一张**旧 token 时代**的渲染仍判 BLANK（证明它测的确实是当前 token，不是恒真）。
       三条读数并排。
-- [ ] AC4（真截图、真路由）: 四张 PNG 各 ≥5000 字节（`stat -c%s`）；每条路由的真实 HTTP 断言
+- [x] AC4（真截图、真路由）: 四张 PNG 各 ≥5000 字节（`stat -c%s`）；每条路由的真实 HTTP 断言
       （`curl -s -L -o … -w %{http_code}` ⇒ 200 且页面含该页 `<h1>` **前缀**：
       `<h1>Dashboard</h1>` / `<h1>Goals —` / `<h1>Git History —` / `<h1>gap-…`）。
       ⚠️ `/goal` 的 h1 带**会漂移的目标计数**（实测 `Goals — 阶段目标 (21)`）⇒ ⛔ 断言整串，只断前缀。
-- [ ] AC5（README 真嵌入，严于判据）: `grep -n 'docs/screenshots/' README.md` ⇒ **恰好 4 行**，
+- [x] AC5（README 真嵌入，严于判据）: `grep -n 'docs/screenshots/' README.md` ⇒ **恰好 4 行**，
       每行是 markdown 图片语法（形如 `![…](docs/screenshots/<name>.png)`），且四个 basename 逐字命中。
       把这 4 行原文贴出。
-- [ ] AC6（glob 唯一性陷阱）: 打印 `ls docs/screenshots/*<name>*.png` 对四个名字各自的行数 ⇒ **各为 1**
+- [x] AC6（glob 唯一性陷阱）: 打印 `ls docs/screenshots/*<name>*.png` 对四个名字各自的行数 ⇒ **各为 1**
       （证明 `head -1` 选中的就是 README 引用的那张；理由见 Finding「判据的三条字面语义」第 1 条）。
-- [ ] AC7（缺陷 B 的两值对照——证明"空框"是时序而非渲染缺陷）: 对同一 URL，在 t≈4s 与 t≈90s 各取一次
+- [x] AC7（缺陷 B 的两值对照——证明"空框"是时序而非渲染缺陷）: 对同一 URL，在 t≈4s 与 t≈90s 各取一次
       `#sys-sparkline` 的**数据点数**（如 `document.querySelectorAll('#sys-sparkline polyline, #sys-sparkline circle').length`）
       ⇒ 前者 **0**、后者 **>0**；并附 `grep -ci "loading\|spinner\|placeholder\|skeleton"` 对 `/dashboard` HTML
       ⇒ **0**（页面无懒加载机件）。
@@ -214,20 +214,128 @@ quay serve 正在跑：http://100.78.206.100:4173（pid 2345364）
 
 ## Definition of Done
 
-- [ ] `docs/screenshots/{dashboard,goals,task-detail,git-history}.png` 四张已在 **`develop`** 上存在，各 ≥5000 字节。
-- [ ] README.md 的四个 markdown 图片引用已在 **`develop`** 上
+- [x] `docs/screenshots/{dashboard,goals,task-detail,git-history}.png` 四张已在 **`develop`** 上存在，各 ≥5000 字节。
+- [x] README.md 的四个 markdown 图片引用已在 **`develop`** 上
       （`git show develop:README.md | grep -c 'docs/screenshots/'` ⇒ 4）。
-- [ ] AC-278 的 criterion 在**权威基线**上成立：对 **develop 的检出**跑
+- [x] AC-278 的 criterion 在**权威基线**上成立：对 **develop 的检出**跑
       `runAcceptance({command: criterion, cwd: <该检出>})` ⇒ `ok === true`
       （⛔ 不是只在任务 worktree 里绿、develop 上读不到）。
-- [ ] `docs/verify-webui-screenshot.mjs` 的 accent token 不再写死：它从 `webui-modernist.css` 读出
+- [x] `docs/verify-webui-screenshot.mjs` 的 accent token 不再写死：它从 `webui-modernist.css` 读出
       （或等价地不再依赖单一字面量），且 AC3 的两值对照在该改动后仍成立——即它**能判 BLANK 也能判 non-blank**，
       ⛔ 不是恒真、也⛔ 不是恒假。
-- [ ] ⛔ 没有改动产品渲染代码（`packages/quay/src/serve-*.ts` / `webui-modernist.css` 的 diff 为空）——
+- [x] ⛔ 没有改动产品渲染代码（`packages/quay/src/serve-*.ts` / `webui-modernist.css` 的 diff 为空）——
       除非实现轮发现了一个**独立于截图时序**的真产品 bug，那种情况下须单独给出「若该 bug 为假则读数会不同」
       的对照（硬规则 4 推论四）。
-- [ ] 判准遵循 inherited-core 的 REAL LANDING 口径（DIR-026 Reading A）：证据钉在**产物被真实机制读取并判 pass**
+- [x] 判准遵循 inherited-core 的 REAL LANDING 口径（DIR-026 Reading A）：证据钉在**产物被真实机制读取并判 pass**
       （AC1/AC2 两条读数分开可证伪），⛔ 不是「目录里能 grep 到 4 个文件」这类静态存在性断言。
+
+## Evidence
+
+**AC1 — AC-278 的 criterion 逐字判定通过**（`createGoalStore(<root>/goals).get("AC-278")` 取 criterion，
+`runAcceptance({command: criterion, cwd})`，与 goal driver 同形；⛔ 非另写等价谓词）：
+
+```
+$ node /tmp/ac278-criterion.mjs <repo>/goals <worktree>
+{ "target": ".../quay-worktrees/gap-readme-ac278-four-screenshots-and-verify-token-drift",
+  "goalId": "AC-278", "ok": true, "code": 0, "signal": null, "timedOut": false,
+  "reason": "acceptance passed (exit 0)" }                                  ⇒ exit 0
+```
+
+同一 criterion 再对**本次提交的干净检出**跑（`git worktree add --detach /tmp/ac278-clean e0ba999a6`
+——即 develop 经 ff 将收到的同一棵树）⇒ `ok:true / code:0`。**⇒ 产物随提交走，不是工作树幻觉**；
+DoD 那条「⛔ 不是只在任务 worktree 里绿」由此满足（develop 拿到的是同一棵树，落地由 driver ff 完成）。
+⚠️ 读数取法：断言读 `reason` —— `runAcceptance` 的返回里**没有** `stdout`/`stderr` 字段。
+
+**AC2 — 负控制（证明 AC1 的绿不是判据恒绿）**：同一条 criterion，cwd = 临时副本（`/tmp/ac278-copy`）：
+
+```
+baseline（未改动副本）                      ⇒ ok:true  code:0
+删掉 docs/screenshots/goals.png            ⇒ ok:false code:1
+   reason: "acceptance failed (exit 1) — CAUSE=screenshots-missing — no PNG matching these names found under docs/screenshots: goals"
+还原                                        ⇒ ok:true  code:0
+git-history.png 截到 4000 字节（<5000）     ⇒ ok:false code:1
+   reason: "acceptance failed (exit 1) — CAUSE=screenshots-too-small — likely failed/blank capture (<5000 bytes): git-history(4000b)"
+```
+
+⇒ 本判据在本产物上确实能取两个值（非恒真、非恒假）。
+
+**AC3 — 缺陷 A 的两值对照（三条读数并排）**：
+
+```
+① 修复前 verifier × 新 dashboard.png  ⇒ {"accentPixels":0,"verdict":"BLANK"}                        exit 1
+② 修复后 verifier × 新 dashboard.png  ⇒ {"accentPixels":22,"accentToken":"#dd2b0f",
+                                          "accentTokenSource":"packages/quay/src/webui-modernist.css",
+                                          "accentTolerance":4,"accentBasePixels":559,
+                                          "verdict":"non-blank"}                                    exit 0
+③ 反向对照 = 修复后 verifier × 旧 token 时代渲染（docs/images/webui-dashboard.png，2026-08-21 采集）
+                                      ⇒ {"accentPixels":0,"accentToken":"#dd2b0f",
+                                          "accentBasePixels":256,"verdict":"BLANK"}                 exit 1
+```
+
+取的是「从 CSS 读出 token」这条路线（而非放宽比较）：`readCssToken(CSS_PATH, "--color-accent-600")`，
+另加每通道容差 4 以吸收抗锯齿 —— 退役的 `#ec3013` 与现行 `#dd2b0f` 在红通道相距 **15**，
+而实测旧渲染在 Δ≤8 时仍为 **0** 像素 ⇒ 容差没有吃掉可证伪性。
+
+**新增第三态（硬规则 3b）**：token 读不出时 exit **2** / `verdict:"NOT-EVALUATED"` / `evaluated:false`，
+⛔ 不借用 BLANK 的形态。实测：把脚本复制到一个没有 `packages/quay/src/webui-modernist.css` 的目录 ⇒
+exit 2，与「渲染不合格」(exit 1) 在**退出码与词表两个维度上都可区分**。
+
+**残余已知限（如实报出，不静默 —— 即 Finding 的「第二个脆弱点」）**：verdict 钉在
+`--color-accent-600`（填充 token）上，凡用基础 `--color-accent` 上色的页面都判 BLANK。
+2026-09-17 实测 `/goal` 与 `/task/<id>` 正是这一类（`accentBasePixels` 1235 / 399，`accentPixels` 0）。
+输出里带 `accentBasePixels` 与解释性 `note`，使其读作**判据口径限**而非「UI 坏了」——
+这正是原缺陷「失败形态看起来像 UI 坏了」的消除方式（⛔ 未把该子句放宽到恒真，那会毁掉 AC3 的反向对照）。
+`docs/capture-webui-screenshots.sh` 头部同步记下该限与 exit 2 的语义。
+
+**AC4 — 真截图、真路由**：四张均取自运行中的 dev-tree serve `http://100.78.206.100:4173`
+（1440×900，`--virtual-time-budget=95000`）：
+
+```
+docs/screenshots/dashboard.png    135885 bytes      docs/screenshots/task-detail.png  204034 bytes
+docs/screenshots/goals.png        167322 bytes      docs/screenshots/git-history.png  202865 bytes
+/dashboard  code=200  '<h1>Dashboard</h1>'                       PASS
+/goal       code=200  '<h1>Goals —'          （只断前缀；整串含会漂移的计数）  PASS
+/git-history code=200 '<h1>Git History —'                        PASS
+/task/gap-docs-t3-webui-doc-and-screenshots code=200 '<h1>gap-'  PASS
+```
+
+**AC5 — README 真嵌入（严于判据）**：`grep -c 'docs/screenshots/' README.md` ⇒ **4**，原文为：
+
+```
+537:![quay web UI — the dashboard: loop pulse, task ledger, system resources and three-layer status](docs/screenshots/dashboard.png)
+539:![quay web UI — goals and their acceptance criteria](docs/screenshots/goals.png)
+541:![quay web UI — a single task's detail page](docs/screenshots/task-detail.png)
+543:![quay web UI — git history: the commit-landing timeline](docs/screenshots/git-history.png)
+```
+
+**AC6 — glob 唯一性陷阱**：`ls docs/screenshots/*<name>*.png | wc -l` 对
+dashboard / goals / task-detail / git-history 四者**各为 1** ⇒ 判据的 `head -1` 选中的就是 README 引用的那张
+（目录里恰好四张，无 `dashboard-mobile.png` 这类字典序更前或更后的干扰项）。
+
+**AC7 — 缺陷 B 的两值对照（证明「空框」是时序而非渲染缺陷）**：同一 URL
+`/dashboard`，两次 `--dump-dom`，数 `#sys-sparkline` 内的数据点元素
+（标签名先跑一次 dump 看真实输出后定为 `<polyline>` / `<circle>`）：
+
+```
+--virtual-time-budget=4000   ⇒ polyline=0 circle=0  数据点 0   （图例 rect=2 text=2，即服务端那 2 个图例）
+--virtual-time-budget=95000  ⇒ polyline=2 circle=6  数据点 8   （实测曲线 points="4.0,100.0 150.0,100.0 296.0,100.0"）
+grep -ci "loading\|spinner\|placeholder\|skeleton" /dashboard 的 HTML ⇒ 0（HTTP 200 / 67649 字节）
+```
+
+**缺陷 B 的排查结论（Requested action 第 5 步，⛔ 未改产品渲染代码）**：
+根因是**截图时序**，不是产品 bug，也不是懒加载。① 页面里没有任何懒加载机件（上面的 grep=0）；
+② `#sys-sparkline` 服务端只渲染图例（2 `<rect>` + 2 `<text>`），却占着固定 `viewBox="0 0 300 120"` /
+`height:120px` ⇒ 一个 120px 空框；③ 曲线需 `history.length >= 2`（`serve-dashboard.ts:669`），
+而 history 只由客户端轮询累积（`setInterval(refresh, 30000)`，`:591,:722,:773`，**无立即执行的首次调用**）
+⇒ 第 1 点 t≈30s、第 2 点 t≈60s；④ 而 headless 默认/短预算在 t≈3–4s 就拍 ⇒ **结构上必然拍到空框**。
+解法是**等渲染稳定再拍**：用 Chrome 自带的 `--virtual-time-budget=95000` 快进虚拟时钟，
+**不需要等任何真实墙钟时间**（用纯 Bash CLI 达成，worker 未使用 chrome-devtools / playwright MCP）。
+`docs/capture-webui-screenshots.sh` 的 `--virtual-time-budget` 由 3000 改为 95000 即同一修法；
+其**路由表 / MANIFEST / 输出目录一字未动**（`git diff` 仅 1 行 + 注释）⇒ 与 `docs/images/` 既有清单不分叉。
+
+**DoD — 无产品渲染代码改动**：`git diff develop...HEAD -- packages/quay/src/serve-*.ts
+packages/quay/src/webui-modernist.css` ⇒ **变更行数 0**（未发现独立于截图时序的真产品 bug，
+故无需硬规则 4 推论四那条对照）。
 
 ## Touches
 
