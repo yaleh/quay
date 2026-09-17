@@ -3,7 +3,8 @@ id: gap-spec-release-hotfix-branching-2026-09-17-revision
 title: orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md 未按 GOAL-023
   修订 ⇒ AC-287 判据 exit 1（CAUSE=spec-not-amended）——§3.2.1 补 2026-09-17
   追加裁定（反转默认分支到 master）+ AC-273 转 superseded + 三条线设计补第四条 author
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -248,3 +249,14 @@ prerequisite，任意一条的完成都不被另一条拉黑**；本条判据的
 `touches-glob-on-quay-runtime-artifacts-blocks-promotion`，未跟踪运行时产物不进 `anti-drift-touches-check` 的
 `actualFiles`，声明它们反而是噪声且会挡晋升；⛔ 若确要把某个 `.quay/ac287-*` 文件**提交**，必须把它的
 **精确路径**（⛔ 不是通配形）加进本节。）
+## Needs-Human
+
+**执行 2026-09-17T07:40:47.615Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite log content is byte-identical to a prior unattributable round for this task (sha256 e3b0c44298fc…) — a retry provably cannot change the result
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: suite hung: silence watchdog killed the suite (no output ≥ silence timeout)
+- run_id：wk-prod-anchor
+- session_id：33f65acf-5de6-4646-87b7-6e0fbe0dc871
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-spec-release-hotfix-branching-2026-09-17-revision~wk-prod-anchor~1789629746897-d63c98.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-spec-release-hotfix-branching-2026-09-17-revision-wk-prod-anchor.log
