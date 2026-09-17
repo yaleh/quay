@@ -218,7 +218,11 @@ async function main() {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   // QW-007: seed 25 pagination test tasks (ZPG-01..ZPG-25).
-  // Seeded LAST so that in insertion-order (default, no sort), non-ZPG tasks appear on page 1.
+  // NOTE (gap-webui-dashboard-tasks-display-polish): the web DEFAULT view is no longer insertion
+  // order — `/tasks` with no `?sort=` now shares the updatedAt-DESC branch with `?sort=updated`,
+  // so seeding these LAST makes them the most recently updated and they fill page 1 of the
+  // default view. The pagination assertions below therefore pin an explicit `?sort=id`, which is
+  // what places the non-ZPG fixtures on page 1 (see the NOTE on the list-page block further down).
   // ZPG- prefix sorts after W alphabetically — with ?sort=id and 36 total tasks (11 non-ZPG
   // + 25 ZPG): page 1 (20 tasks) = LBL-1..3 + PC-CHILD + PC-PARENT + SORT-A/B/C +
   // WUI-1/2/ACT + ZPG-01..ZPG-09; page 2 (16 tasks) = ZPG-10..ZPG-25.
@@ -282,23 +286,35 @@ async function main() {
       'GET /tasks <h1> heading contains "task list" text (browser-observed: "Quay — task list (native provider)")');
 
     // Table structure: both tasks appear as linked rows.
-    assert(list.body.includes("WUI-1") && list.body.includes("WUI-2"),
-      "GET /tasks body contains both seeded task ids (WUI-1, WUI-2)");
-    assert(list.body.includes("todo") && list.body.includes("done"),
-      "GET /tasks body contains both seeded tasks' statuses (todo, done)");
-    assert(list.body.includes("Web UI browser test task one"),
-      "GET /tasks body contains seeded WUI-1 title");
-    assert(list.body.includes("Web UI browser test task two"),
-      "GET /tasks body contains seeded WUI-2 title");
+    //
+    // NOTE (gap-webui-dashboard-tasks-display-polish): `/tasks` with no `?sort=` is NO LONGER
+    // insertion order — the default view and `?sort=updated` now share ONE branch (updatedAt
+    // DESC). This fixture seeds ZPG-01..25 LAST, so under the new default they are the most
+    // recently updated and fill page 1 (PAGE_SIZE=20); the WUI-*/SORT-*/LBL-* fixtures fall to
+    // page 2. Every assertion below whose SUBJECT is "this seeded fixture is visible" — not
+    // "the default order is X" — therefore requests an explicit deterministic sort, so it stays
+    // independent of the default-sort contract instead of silently re-encoding it. That
+    // contract itself is pinned by gap-webui-dashboard-tasks-display-polish.test.mjs (which
+    // asserts `/tasks` and `/tasks?sort=updated` yield the same id order) — not duplicated here.
+    const listById = await get(port, "/tasks?sort=id");
+    assert(listById.status === 200, `GET /tasks?sort=id returns 200 (got ${listById.status})`);
+    assert(listById.body.includes("WUI-1") && listById.body.includes("WUI-2"),
+      "GET /tasks?sort=id body contains both seeded task ids (WUI-1, WUI-2)");
+    assert(listById.body.includes("todo") && listById.body.includes("done"),
+      "GET /tasks?sort=id body contains both seeded tasks' statuses (todo, done)");
+    assert(listById.body.includes("Web UI browser test task one"),
+      "GET /tasks?sort=id body contains seeded WUI-1 title");
+    assert(listById.body.includes("Web UI browser test task two"),
+      "GET /tasks?sort=id body contains seeded WUI-2 title");
 
     // Links: task ids are clickable links to detail pages (browser-observed:
     // link "WUI-1" -> /task/WUI-1, link "WUI-2" -> /task/WUI-2).
     // QX-011 (iteration 3): links now include ?from= for back-link context preservation.
     // Check that /task/WUI-1 appears somewhere in the href (may have ?from= appended).
-    assert(list.body.includes('href="/task/WUI-1'),
-      'GET /tasks body contains link href starting with "/task/WUI-1" (task id is a clickable link, QX-011 may add ?from=)');
-    assert(list.body.includes('href="/task/WUI-2'),
-      'GET /tasks body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
+    assert(listById.body.includes('href="/task/WUI-1'),
+      'GET /tasks?sort=id body contains link href starting with "/task/WUI-1" (task id is a clickable link, QX-011 may add ?from=)');
+    assert(listById.body.includes('href="/task/WUI-2'),
+      'GET /tasks?sort=id body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
 
     // ── GET /task/:id (detail page — todo) ────────────────────────────────
     // Browser-rendered observation (playwright MCP, iteration 1):
@@ -439,17 +455,22 @@ async function main() {
     // query param in GET /tasks. Three tasks are seeded: WUI-1 (todo), WUI-2 (done),
     // WUI-ACT (todo). Filter navigation links must be present in GET /tasks.
 
-    // GET /tasks (no param) — all tasks visible (baseline, re-verified)
-    assert(list.body.includes("WUI-1") && list.body.includes("WUI-2") && list.body.includes("WUI-ACT"),
-      "GET /tasks (no param) shows all three seeded tasks (QW-003: unfiltered baseline)");
+    // GET /tasks?sort=id — all three seeded fixture tasks visible (baseline, re-verified).
+    // Explicit sort for the same reason as the NOTE above: under the (now updatedAt-DESC)
+    // default view, these older fixtures sit on page 2 behind the 25 ZPG-* tasks.
+    assert(listById.body.includes("WUI-1") && listById.body.includes("WUI-2") && listById.body.includes("WUI-ACT"),
+      "GET /tasks?sort=id shows all three seeded tasks (QW-003: unfiltered baseline; see NOTE)");
 
     // Filter nav is present in the list page
     assert(list.body.includes("/tasks?status=todo") || list.body.includes("/tasks?status=done"),
       "GET /tasks body includes filter navigation links for status values (QW-003: filter nav)");
 
-    // GET /?status=todo — only todo tasks (WUI-1, WUI-ACT); done task (WUI-2) excluded
-    const listTodo = await get(port, "/tasks?status=todo");
-    assert(listTodo.status === 200, `GET /?status=todo returns 200 (got ${listTodo.status})`);
+    // GET /?status=todo&sort=id — only todo tasks (WUI-1, WUI-ACT); done task (WUI-2) excluded.
+    // Explicit sort: 32 todo fixtures exceed PAGE_SIZE=20, so the default view would push the
+    // older WUI-* fixtures to page 2 and the "includes" assertions below would fail on paging
+    // rather than on the filter semantics they are actually about.
+    const listTodo = await get(port, "/tasks?status=todo&sort=id");
+    assert(listTodo.status === 200, `GET /?status=todo&sort=id returns 200 (got ${listTodo.status})`);
     assert(listTodo.body.includes("WUI-1"),
       "GET /?status=todo includes WUI-1 (todo task) (QW-003: filter includes matching)");
     assert(listTodo.body.includes("WUI-ACT"),

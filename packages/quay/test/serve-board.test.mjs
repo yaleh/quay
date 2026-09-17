@@ -75,6 +75,45 @@ function get(port, urlPath) {
   });
 }
 
+/** AC-292: the SAME GET, with request headers. The locale switch is exercised through
+ *  `Cookie: lang=zh` — the exact header AC-292's criterion sends — rather than `?lang=`, because the
+ *  cookie is the arm the criterion asserts on and it needs no redirect to take effect. */
+function getWithHeaders(port, urlPath, headers) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    }).on("error", reject);
+  });
+}
+
+/** The `<nav>…</nav>` region of a response, extracted the SAME way AC-292's criterion does it
+ *  (`tr '\n' ' '` then a greedy `<nav.*</nav>`): from the first `<nav` to the last `</nav>`, which
+ *  on this page spans the mobile menu AND the desktop site nav and nothing inside `<main>`.
+ *  Reproducing the criterion's own extraction is the point — a test that narrowed the scope
+ *  differently could pass while the criterion stayed red. */
+function navRegion(body) {
+  const m = body.replace(/\n/g, " ").match(/<nav.*<\/nav>/);
+  return m ? m[0] : "";
+}
+
+/** The first `<title>…</title>` text, exactly as AC-292's `title_of` extracts it. */
+function titleOf(body) {
+  const m = body.replace(/\n/g, " ").match(/<title>([^<]*)<\/title>/);
+  return m ? m[1] : "";
+}
+
+/** The visible label of a nav current-item span, by its own class — the two places a page's nav
+ *  label appears (`nav-item` desktop / `mobile-menu-item` mobile). Captured up to the first `<` so
+ *  the `nav-badge` NEW span that follows on /board is not part of the label. */
+function currentItemLabels(body) {
+  return {
+    desktop: (body.match(/<span class="nav-item nav-current"[^>]*>([^<]*)/) || [])[1] ?? null,
+    mobile: (body.match(/<span class="mobile-menu-item nav-current"[^>]*>([^<]*)/) || [])[1] ?? null,
+  };
+}
+
 /** Run the real drift checker CLI against a workspace root, return { suspects, reverse, scanned }. */
 function runChecker(wsRoot) {
   const out = execFileSync("node", ["--experimental-strip-types", DRIFT_CHECKER, "--json"], {
@@ -752,4 +791,99 @@ test("AC1 — /board 意图 column renders the develop status (done), not the st
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
+});
+
+// ── AC-292 (gap-ac292-board-page-zh-chrome-nav-current-and-own-title): /board's OWN chrome is
+// wired to AC-288's locale switch — not just the shared nav bar. BEFORE this change the page read
+// `handleBoard`'s `cfg.lang` and dropped it: `renderBoardPage` was called with `cfg.identity` only,
+// so the page's `<html lang>`, its `<title>` and its `<h1>` were byte-identical under `lang=zh`.
+//
+// WHY THESE ASSERTIONS LOOK LIKE THE GOAL CRITERION: the criterion is a live HTTP probe, so a test
+// that only called `renderBoardPage({...}, identity, "zh")` would prove the FUNCTION can produce zh
+// while saying nothing about the RESPONSE — the exact "fixture-only" shape of 硬规则 4 推论三. These
+// drive a real `startServer` over real HTTP and read the bytes off the wire, reusing the criterion's
+// own `navRegion` / `titleOf` extraction, so a green here and a red criterion cannot coexist for
+// extraction reasons.
+//
+// The en arm is a NEGATIVE CONTROL, not decoration: ② and ③ are "the zh value differs", and a bug
+// that made the page render zh for EVERY request (e.g. `pageNameFor` ignoring its `lang` argument)
+// would satisfy them while breaking every English reader. Only the en literals rule that out.
+test("AC-292 — /board's own chrome switches under Cookie: lang=zh; en baseline unchanged", async () => {
+  const { ws, tasksDir, parent } = makeWorkspace("board-ac292-i18n-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "BD-ZH", { title: "Board i18n fixture", status: "ready", body: BD_BODY("bdZhSymbol", "packages/quay/src/board-symbol.ts") });
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
+
+    const en = await get(port, "/board");
+    const zh = await getWithHeaders(port, "/board", { Cookie: "lang=zh" });
+    assert.equal(en.status, 200, "AC-292: GET /board returns 200 (en)");
+    assert.equal(zh.status, 200, "AC-292: GET /board returns 200 (zh)");
+
+    // ── NEGATIVE CONTROL (first, so a broken en baseline is read as such rather than as a zh bug):
+    // the default-locale response is exactly what this page rendered before the wiring.
+    assert.ok(en.body.includes('<html lang="en"'), "control: en response is <html lang=\"en\"");
+    assert.equal(currentItemLabels(en.body).desktop, "Board", "control: en desktop nav current item is Board");
+    assert.equal(currentItemLabels(en.body).mobile, "Board", "control: en mobile nav current item is Board");
+    assert.ok(navRegion(en.body).includes("Board"),
+      "control: the en NAV REGION carries the literal Board — the same predicate ② reverses for zh");
+    assert.equal(titleOf(en.body).endsWith(" — Board — 三源 join 看板"), true,
+      `control: en <title> keeps its pre-change token (got ${JSON.stringify(titleOf(en.body))})`);
+    assert.ok(en.body.includes("<h1>Board — 意图 / 执行 / 落地</h1>"), "control: en <h1> keeps its pre-change token");
+
+    // ── ① the document's own lang attribute (AC-288's mechanism reaching THIS page).
+    assert.ok(zh.body.includes('<html lang="zh"'),
+      "AC-292 ①: zh response is <html lang=\"zh\" — a page that dropped cfg.lang renders lang=\"en\" here");
+
+    // ── ② BOTH nav current items — asserted separately (硬规则 3: enumerate, do not boolean-ify).
+    const zhLabels = currentItemLabels(zh.body);
+    assert.equal(zhLabels.desktop, "看板", `AC-292 ②a: desktop nav current item is the zh label (got ${JSON.stringify(zhLabels.desktop)})`);
+    assert.equal(zhLabels.mobile, "看板", `AC-292 ②b: mobile nav current item is the zh label (got ${JSON.stringify(zhLabels.mobile)})`);
+    assert.ok(!navRegion(zh.body).includes("Board"),
+      "AC-292 ②: the zh NAV REGION no longer carries the literal Board");
+
+    // ── ③ this page's OWN <title> (the arm that separates "the nav switched" from "THIS page
+    //    switched" — the criterion's CAUSE=title-unchanged).
+    const tEn = titleOf(en.body);
+    const tZh = titleOf(zh.body);
+    assert.notEqual(tZh, "", "AC-292 ③: the zh response HAS a <title> to compare (never blank)");
+    assert.notEqual(tZh, tEn, `AC-292 ③: zh <title> differs from en (en=${JSON.stringify(tEn)} zh=${JSON.stringify(tZh)})`);
+    assert.ok(tZh.includes("看板") && !tZh.includes("Board"),
+      `AC-292 ③: the zh <title> is translated, not merely different (got ${JSON.stringify(tZh)})`);
+
+    // ── the page's <h1> is chrome too (the criterion does not read it; the wiring covers it).
+    assert.ok(zh.body.includes("<h1>看板 — 意图 / 执行 / 落地</h1>"),
+      "AC-292: the page <h1> uses its own zh token — pageNameFor, not the shared NAV_LABELS lookup");
+  } finally {
+    process.chdir(cwd0);
+    // ⛔ NOT `await new Promise((r) => server.close(r))`. `startServer` spawns the provider as a
+    // child MCP subprocess and hands it back on `server.client`; closing only the HTTP listener
+    // leaves that child alive, so the test's event loop has an open handle and node:test never
+    // exits — the file hangs instead of failing. Every other live-server test in this file tears
+    // down with this exact pair for this reason.
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// AC-292's second arm is a LIVE probe; the dictionary half is a pure function and is pinned
+// DIRECTLY, so a future edit that renames the token at the call site (`serve-board.ts`) without
+// renaming the PAGE_LABELS key fails HERE, with the reason, instead of silently degrading the live
+// page back to an English <title> (which the criterion would then report as `title-unchanged`).
+test("AC-292 — the PAGE_LABELS tokens serve-board.ts passes to pageTitle/pageNameFor resolve in zh", async () => {
+  const { pageNameFor } = await import("../src/serve-i18n.ts");
+  // The FULL token `pageTitle` receives (em dash + subtitle included) — ROW 3's key shape.
+  assert.equal(pageNameFor("Board — 三源 join 看板", "zh"), "看板 — 三源 join 看板",
+    "AC-292: the whole <title> token is registered (a `Board`-only key misses it ⇒ title-unchanged)");
+  assert.equal(pageNameFor("Board", "zh"), "看板", "AC-292: the <h1> token is registered");
+  // `en` is the identity for EVERY token (ROW 3) — this is what keeps the en baseline byte-identical.
+  assert.equal(pageNameFor("Board — 三源 join 看板", "en"), "Board — 三源 join 看板", "AC-292: en is the identity");
+  assert.equal(pageNameFor("Board", "en"), "Board", "AC-292: en is the identity");
+  // The gate-gameability guard the criterion's second arm exists for: a zh value that merely LOOKS
+  // translated while still carrying the English literal would satisfy "non-empty" and stay red live.
+  assert.ok(!pageNameFor("Board — 三源 join 看板", "zh").includes("Board"), "AC-292: zh <title> token carries no ASCII Board");
+  assert.ok(!pageNameFor("Board", "zh").includes("Board"), "AC-292: zh <h1> token carries no ASCII Board");
 });

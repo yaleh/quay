@@ -25,7 +25,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { readNeedsHumanLedger } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 
@@ -55,11 +55,24 @@ interface LedgerRow {
   ts: string | null;
 }
 
+/** AC-295: `lang` is the request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher as `cfg.lang`). It reaches FOUR points on this page and nothing else — the
+ *  `<html lang>` attribute, the shared desktop nav bar, the MOBILE nav, and this page's OWN chrome
+ *  (`<title>` token + `<h1>` token, both via `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
+ *  The last two are the whole point: a shared nav bar that switches while THIS page's own `<title>`
+ *  stays English is precisely what the criterion's `title-unchanged` arm rejects.
+ *
+ *  ⛔ The `"needs human"` literal passed to `renderMobileChrome` below is deliberately NOT routed
+ *  through `pageNameFor`: it renders into `<span class="mobile-header-page">`, which sits BEFORE the
+ *  first `<nav>` and is therefore neither inside the criterion's nav region nor a nav label. It keeps
+ *  the raw ASCII token, matching AC-289's `/dashboard` handling (`renderMobileChrome("dashboard",
+ *  "dashboard", lang)`) and AC-291's / AC-296's — ⛔ not a per-page convention to re-invent here. */
 export function renderNeedsHumanPage(
   active: ActiveRow[],
   ledger: LedgerRow[],
   manifest: Manifest,
   identity: ServeIdentity | null = null,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   const activeRows = active.length === 0
     ? html`<tr><td colspan="3">当前无 needs-human 任务（升级台账见下）。</td></tr>`
@@ -78,9 +91,9 @@ export function renderNeedsHumanPage(
       </tr>`).join("\n");
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>${pageTitle("Needs Human", identity)}</title></head>
-    <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main id="main">
-      <h1>Needs Human — 待人类决定</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>${pageTitle("Needs Human", identity, lang)}</title></head>
+    <body>${renderMobileChrome("needs-human", "needs human", lang)}${renderSiteNav("needs-human", lang)}<main id="main">
+      <h1>${pageNameFor("Needs Human", lang)} — 待人类决定</h1>
       <p class="meta">人机接口的显式承接者：一条 <code>needs-human</code> 产生后，无需读任何 transcript，在此页即可看到。上面是「当前待办」，下面是「升级台账」（含状态已流转的历史样本）。</p>
 
       <h2>当前待办（<code>status: needs-human</code>）</h2>
@@ -131,5 +144,5 @@ export async function handleNeedsHuman(
     .map((r) => ({ taskId: r.task_id as string, detail: r.detail, ts: r.ts }));
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderNeedsHumanPage(active, ledger, manifest, cfg.identity));
+  res.end(renderNeedsHumanPage(active, ledger, manifest, cfg.identity, cfg.lang));
 }

@@ -3,7 +3,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import type { ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle } from "./serve-render.ts";
+import {
+  html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle,
+  // AC-301 (gap-ac301-goal-page-zh-chrome-nav-current-and-own-title): the /goal LIST page consumes
+  // the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionary (`pageNameFor`) through this one
+  // import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie (a
+  // second parse is a second decision table, and it would also read a different request's inputs than
+  // the one `Vary`/the cookie was declared for) and never re-derives a label.
+  htmlLangTag, pageNameFor,
+} from "./serve-render.ts";
 import { readTaskSummary, isAcRollupCounted, type TaskSummary } from "./serve-dashboard.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
@@ -315,6 +323,13 @@ export async function handleGoalList(
   // the anonymous pre-task title (硬规则 3b: "not read" must not look like "read, and fine").
   const pageCfg: ServePageCfg | undefined = typeof cfg === "string" ? { workspaceRoot: cfg } : cfg;
   const workspaceRoot = pageCfg?.workspaceRoot;
+  // AC-301: the per-request language AC-288 resolved (`reqCfg.lang`, assembled in serve-handlers.ts)
+  // rides on the SAME object as the workspace root, so the LIST page reads it off `pageCfg` rather
+  // than re-parsing `?lang=`/the cookie. It stays `undefined` for the legacy call shapes above, and
+  // every consumer below has a `DEFAULT_LANG` default parameter — so "no lang was passed" falls back
+  // to the pre-AC-301 bytes BY CONSTRUCTION, not by remembering, and ⛔ no `?? "en"` fallback is
+  // written here (that would make "not passed" and "passed en" the same value — 硬规则 3b).
+  const lang = pageCfg?.lang;
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
   const goalFilter = url.searchParams.get("goal");
@@ -371,9 +386,16 @@ export async function handleGoalList(
   ].join(" · ");
   // Tab nav (proposal 1): two pure server-rendered links (no client JS), reusing the kindNav styling
   // discipline. Goals = `/goal` (no kind, the default tab); Criteria = `/goal?kind=criterion`.
+  // AC-301: the `Goals` tab label is this page's OWN chrome and goes through `pageNameFor` on BOTH
+  // branches (the active `<strong>` and the inactive `<a>`) — they are the same token, and wiring
+  // only the branch the criterion happens to read would leave the tab bar visibly half-English on
+  // `?kind=criterion` under zh. The `Criteria` label is ⛔ deliberately NOT wired: the task's scope
+  // is this page's two registered tokens, and `Criteria` would need a third `PAGE_LABELS` entry. It
+  // is registered as NAMED RESIDUE in this file's AC-301 note below rather than silently counted as
+  // bilingual.
   const tabNav = html`${tab === "goal"
-    ? `<strong>Goals</strong>`
-    : `<a href="${goalListHref({ status: statusFilter, goal: goalFilter })}">Goals</a>`} · ${tab === "criterion"
+    ? `<strong>${pageNameFor("Goals", lang)}</strong>`
+    : `<a href="${goalListHref({ status: statusFilter, goal: goalFilter })}">${pageNameFor("Goals", lang)}</a>`} · ${tab === "criterion"
       ? `<strong>Criteria</strong>`
       : `<a href="${goalListHref({ kind: "criterion", status: statusFilter, goal: goalFilter })}">Criteria</a>`}`;
   // Sortable column headers (M2): each is a link that toggles asc↔desc, preserving all filters.
@@ -396,10 +418,43 @@ export async function handleGoalList(
   const otherTabLabel = tab === "goal" ? "Criteria" : "Goals";
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  // AC-301: this page's chrome sites take the per-request language resolved by AC-288 (`lang`, read
+  // off `pageCfg` above) and the AC-289 dictionary. Each call site passes `lang` rather than
+  // defaulting, so `undefined` still falls back to `DEFAULT_LANG` — the default-locale bytes are
+  // unchanged by construction, not by remembering.
+  //
+  // ⚠️ TWO tokens for this page's OWN chrome, and they differ IN CASE, so they are two independent
+  // lookups: `"Goals"` (the `pageTitle` token, the `<h1>`'s constant prefix, AND the tab-nav label —
+  // three call sites, one entry, because they are byte-equal) and the LOWERCASE `"goals"` the mobile
+  // header carries. `pageNameFor` is an EXACT-token lookup, so `"Goals"` does NOT serve `"goals"` —
+  // registering only the capitalised key would leave the mobile header English while the <title>
+  // switched, and the criterion's own arms (nav region + <title>) would stay green.
+  //
+  // ⚠️ The `<h1>` is a DYNAMIC string: `<token> — <subtitle> (<n>)`. Only its CONSTANT prefix goes
+  // through the dictionary; the tab subtitle and the row count are interpolated raw. Registering a
+  // finished string such as `"Goals — 阶段目标 (3)"` would go stale the moment a goal is added (and
+  // would be a lookup that misses, i.e. an English `<h1>` under zh).
+  //
+  // ⛔ NAMED RESIDUE, deliberately out of scope and registered rather than silently counted as
+  // bilingual:
+  //  ① the `Criteria` tab label (the sibling of the `Goals` token wired just above) and the
+  //     `otherTabLabel` banner link below — ⚠️ the latter renders ONLY when the OTHER tab has drafts
+  //     (`statusFilter !== "draft" && otherDraft > 0`), so it is structurally unreachable on the
+  //     default URL the goal criterion reads; wiring it would need a THIRD `PAGE_LABELS` entry,
+  //     which this task's two-token scope does not grant;
+  //  ② `handleGoalDetail` below (`/goal/<id>` — NOT one of `SITE_NAV_ROUTES`' 15 nav views, and its
+  //     `<title>` is the bare entity id, which `pageTitle`'s contract says detail pages
+  //     intentionally do not route) keeps its own hard-coded English html-lang attribute and its
+  //     lang-less `renderMobileChrome`/`renderSiteNav`. GOAL-024's scope limits this task to the nav
+  //     route; AC-301's AC5④ therefore reads 2→1, ⛔ not 2→0.
+  // ⚠️ This comment deliberately SPELLS OUT no html-lang literal: AC-301's AC5④ counts the
+  // occurrences of that literal in THIS FILE, and a mention inside a comment is not an occurrence
+  // (hard rule 2 — judge by position, not by keyword). Writing it here would inflate the count and
+  // make the residue look twice as large as it is.
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>${pageTitle("Goals", pageCfg?.identity)}</title></head>
-    <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main id="main">
-      <h1>Goals — ${tab === "goal" ? "阶段目标" : "AC / criterion"} (${rows.length})</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>${pageTitle("Goals", pageCfg?.identity, lang)}</title></head>
+    <body>${renderMobileChrome("goal", pageNameFor("goals", lang), lang)}${renderSiteNav("goal", lang)}<main id="main">
+      <h1>${pageNameFor("Goals", lang)} — ${tab === "goal" ? "阶段目标" : "AC / criterion"} (${rows.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${statusFilter !== "draft" && (ownDraft > 0 || otherDraft > 0)
         ? html`<div class="info-banner" role="status">

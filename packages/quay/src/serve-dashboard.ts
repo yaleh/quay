@@ -7,8 +7,8 @@ import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
-import type { Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard } from "./serve-render.ts";
+import type { Lang, Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 import { renderFanInCell } from "./serve-task.ts";
 
@@ -584,6 +584,41 @@ export function renderTestsCard(
 // endpoint (which re-renders ONLY those two cards) and swaps each card's own DOM node — never
 // location.reload. The period is aligned with TASK_SUMMARY_CACHE_TTL_MS (30s) so the client does not
 // poll faster than the backend's own freshness; polling pauses while the tab is hidden.
+//
+// ── WHY THIS STAYS POLLING (gap-webui-dashboard-cards-poll-cost-eval, 2026-09-17) ──────────────────
+// DECISION: keep the 30 s poll; do NOT move to ETag/304 or SSE/WebSocket. Measured, not assumed:
+//   • This endpoint was 66–78% of ALL requests in a rolling 7-day window — but that is a SHARE of a
+//     tiny denominator (the whole server served only ~6.8k requests in the same window). The rate is what
+//     the decision turns on: ~4.5k polls = ~0.007 req/s, ~19 ms of server time each (measured TTFB)
+//     ≈ 12 s of CPU per day.
+//   • The server's own cost is NOT this endpoint. A 120 s window in which exactly ONE poll arrived
+//     still burned 53.8 s CPU (44.9% of a core) — background tick work, not request handling. The 30 s
+//     snapshot-rebuild tick (startDashboardSnapshotRefresh) is one measured contributor: its two
+//     mechanism shell-outs cost ~1.8 s of SUBPROCESS CPU per rebuild (7.36 s of reaped-child CPU over
+//     4 rebuilds). The remaining self-CPU was not attributed per-tick — this decision does not need
+//     that breakdown, because the direction is settled by the reverse control below. Optimising the
+//     poll would cut REQUESTS without cutting SERVER COST. Corroborated by a controlled burst at
+//     ~1.4 req/s — ~190× the observed rate — which did NOT raise self-CPU measurably over an idle
+//     window of equal background work (0.347 vs 0.387 s/s; the difference is within noise).
+//   • ETag/304 is structurally unavailable here, not merely unimplemented: the payload is
+//     non-deterministic between two polls (the liveCard gantt's x/width derive from wall-clock `now`,
+//     testsCard carries "55m ago"→"56m ago", sysRaw.ts is a live sample stamp) — verified: two live
+//     probes 4 s apart differed, with only 5 of 8 keys (~52% of bytes) byte-stable. A whole-payload
+//     validator therefore NEVER matches, so adding one would be a dead mechanism that reads as an
+//     optimisation. `Cache-Control: no-store` is also deliberate here (a stale card is exactly what
+//     this endpoint exists to fix). Per-card validators would work, but that is a new
+//     request/response protocol for a 0.007 req/s load.
+//   • SSE/WebSocket would trade that rate for a socket held open per viewer plus heartbeat/reconnect/
+//     buffering surface — more mechanism, no measured benefit. /live is NOT a reusable precedent: it
+//     has no push at all (serve-live.ts renders a plain page; zero <script>/EventSource in src).
+//   • Freshness is already optimal: this period matches the server's own
+//     DASHBOARD_SNAPSHOT_REFRESH_MS (30 s), so polling faster cannot yield fresher data, and a hidden
+//     tab already skips the poll.
+// ⟳ RE-EVALUATE when the resident-viewer count V stops being negligible. The cost is linear per
+//   viewer: a tab open 8 h/day makes ~960 polls/day ≈ 31 MB/day at today's 32.6 KB payload, so
+//   V≈30 ⇒ ~1 GB/day — the point at which per-card conditional responses (the ~52% byte-stable
+//   keys) start to earn their complexity. Re-measure from `.quay/quay-access.log` path frequency
+//   plus this endpoint's TTFB.
 
 /** Auto-refresh period for the dashboard liveCard/testsCard (ms). Configurable here; the test pins the
  *  value domain [30s, 60s] (AC2). Aligned with TASK_SUMMARY_CACHE_TTL_MS so the client never polls
@@ -1232,7 +1267,28 @@ export function renderTopRow(liveCard: string, sysCard: string, mgrCard: string)
  *  class so the ≤600px single-column media query still collapses it (each column becomes a full-width
  *  row; the inner flex stacks are unaffected). */
 export function renderWorkProgressRow(goalCard: string, taskCard: string, testsCard: string, fanCard: string): string {
-  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem;"><div style="display:flex;flex-direction:column;gap:2px">${goalCard}${taskCard}</div><div style="display:flex;flex-direction:column;gap:2px">${testsCard}${fanCard}</div></div>`;
+  // gap-webui-dashboard-tasks-display-polish ③: two changes, and BOTH are needed — either alone is a
+  // no-op, which is why they are one edit:
+  //
+  // (a) `align-items:start` — stop the grid from stretching the shorter column's flex stack to the
+  //     row height (CSS Grid's default is `stretch`). This is what the reported defect names.
+  // (b) the divider colour moves OFF the container and ONTO the two column stacks. With (a) alone
+  //     the void would look EXACTLY the same: a grid row is as tall as its TALLEST item whatever
+  //     `align-items` says, so the container's own background still paints the whole row box —
+  //     including the region the short column no longer covers. It was that full-bleed
+  //     `--color-divider` fill showing through the gap that read as "卡片没渲染完/挂了". Painting the
+  //     divider on the column stacks instead keeps every intra-column 2px separator (the stacks are
+  //     still `gap:2px` over the divider colour) while leaving the container transparent, so the
+  //     uncovered area is page background — ordinary empty space, not a dark rectangle.
+  //
+  // The container keeps `gap:2px` + `border:1px solid var(--color-divider)` unchanged (the row's
+  // outer outline and the 2px column gutter), so this stays the same .dash-grid shape the ≤600px
+  // single-column media query collapses. The 变更记录 row / renderCardGrid() are untouched: their
+  // cards are direct grid items with no stacked-column wrapper, so they have no short-column void to
+  // begin with. renderTopRow() is likewise left alone (it is not in this task's scope and its own
+  // right-column void is a separate, already-recorded open item), so the two rows differ in this one
+  // respect until that one is taken up.
+  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:2px;background:transparent;border:1px solid var(--color-divider);margin-bottom:1.5rem;"><div style="display:flex;flex-direction:column;gap:2px;background:var(--color-divider)">${goalCard}${taskCard}</div><div style="display:flex;flex-direction:column;gap:2px;background:var(--color-divider)">${testsCard}${fanCard}</div></div>`;
 }
 
 /** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
@@ -1260,7 +1316,7 @@ export function renderDashboardPage(
     tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
-  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[] } = {},
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[]; lang?: Lang } = {},
 ): string {
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
@@ -1300,10 +1356,13 @@ export function renderDashboardPage(
     .map((n) => html`<a href="/dashboard?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
     .join(" · ");
 
+  // gap-ac288-webui-lang-switch-mechanism: the language tag comes from the dispatcher-resolved
+  // `opts.lang` (undefined ⇒ DEFAULT_LANG `en`, so the direct-render unit tests that predate this
+  // field are unchanged). This is the whole per-page cost of consuming the mechanism — one line.
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity)}</title></head>
-    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
-      <h1>Dashboard</h1>
+    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity, opts.lang)}</title></head>
+    <body>${renderMobileChrome("dashboard", "dashboard", opts.lang)}${renderSiteNav("dashboard", opts.lang)}<main id="main">
+      <h1>${pageNameFor("Dashboard", opts.lang)}</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
       ${opts.identity ? renderIdentityCard(opts.identity) : ""}
@@ -1816,7 +1875,7 @@ export async function handleDashboard(
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderDashboardPage(
       { live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun, history: snapshot.history, tasks: snapshot.tasks, goals: snapshot.goals },
-      { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes },
+      { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes, lang: cfg.lang },
     ));
     return;
   }
@@ -1853,7 +1912,7 @@ export async function handleDashboard(
   const [sys, mgr, tasks, goals] = await asyncProbes;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   const hours = timelineHoursFromRequest(req);
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours, identity: cfg.identity }));
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours, identity: cfg.identity, lang: cfg.lang }));
 }
 
 /** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls

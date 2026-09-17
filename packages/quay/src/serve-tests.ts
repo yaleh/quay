@@ -5,7 +5,15 @@ import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } fr
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle } from "./serve-render.ts";
+import {
+  html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle,
+  // AC-298 (gap-ac298-tests-page-zh-chrome-nav-current-and-own-title): the /tests LIST page consumes
+  // the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionaries (`pageNameFor`) through this one
+  // import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie (a
+  // second parse is a second decision table, and it would also read a different request's inputs than
+  // the one Vary/Cookie was declared for) and never re-derives a label.
+  htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
+} from "./serve-render.ts";
 import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
@@ -712,6 +720,10 @@ function renderTestsPage(
   opts: TestsPagingOpts = {},
   hours: number = DEFAULT_TIMELINE_HOURS,
   identity: ServeIdentity | null = null,
+  // AC-298: the page's OWN chrome language. Defaulted to `DEFAULT_LANG` so the pre-existing call
+  // sites (and the direct-render unit tests) keep rendering their English bytes verbatim; the live
+  // handler threads the per-request `cfg.lang` in below.
+  lang: Lang = DEFAULT_LANG,
 ): string {
   const latest = tests.runs[0] ?? null;
   // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
@@ -859,9 +871,9 @@ function renderTestsPage(
         ${roundsTimelineBar}`
     : "";
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tests — 验证轮记录", identity)}</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
-      <h1>Tests — 验证轮记录</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tests — 验证轮记录", identity, lang)}</title></head>
+    <body>${renderMobileChrome("tests", pageNameFor("tests", lang), lang)}${renderSiteNav("tests", lang)}<main id="main">
+      <h1>${pageNameFor("Tests — 验证轮记录", lang)}</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
       ${focusNote}
@@ -939,7 +951,7 @@ export async function handleTests(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum, {
     page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid, ganttPage, ganttPageSize, ganttPageSizeInvalid,
-  }, hours, cfg.identity));
+  }, hours, cfg.identity, cfg.lang));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────

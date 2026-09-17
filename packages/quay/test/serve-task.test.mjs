@@ -8,18 +8,26 @@
 // must use the batched reader + TTL cache, not per-task git show (AC4).
 //
 // Run (scoped): node --test packages/quay/test/serve-task.test.mjs
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { handleTaskList, handleTaskDetail } from "../src/serve-task.ts";
 import { readTaskStatusMapAtRef, readTaskStatusAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, refreshDevelopRefCaches, resetSingleTaskGitSpawnCount, getSingleTaskGitSpawnCount, clearTaskStatusRefCache } from "../src/observation.ts";
+// AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): the /tasks LIST page's zh chrome.
+import { startServer } from "../src/serve.ts";
+import { renderSiteNav } from "../src/serve-render.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = path.join(__dirname, "..", "src");
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 /** Build a repo where the develop ref and the working tree DISAGREE on `gap-stale`'s status:
  *  develop = done (landed + flip-done), working tree = ready (stale manager branch). `gap-fresh`
@@ -297,4 +305,154 @@ test("AC3 — /task/<id> detail reuses the batch cache: cache hit spawns 0 git; 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── AC-290: the /tasks LIST page's zh chrome, read off the wire ────────────────────────────────
+//
+// gap-ac290-tasks-page-zh-shell-lang-title-nav-current. At filing the list page hard-coded
+// `<html lang="en">`, passed no `lang` to `renderSiteNav` / `renderMobileChrome` / `pageTitle`, and
+// so answered `Cookie: lang=zh` with a response BYTE-IDENTICAL to the en one (measured: 63176 bytes
+// both ways — the defect was NOT "translated wrongly", it was "not wired at all").
+//
+// Every assertion below reads a REAL server over raw HTTP, never a render function's return value:
+// a render function tests the function, not the live behaviour (DoD 1). The three AC1 clauses are
+// INDEPENDENT `test()` runs hitting different bytes (hard rule 3 — report an enumeration, not the
+// boolean "the page looks translated"). ⛔ `/task/<id>` is out of scope and is asserted NOWHERE
+// here: it is not one of the 15 nav routes (see the wiring note in serve-task.ts).
+
+let zhServer, zhPort, zhWorkspace, zhTasks, zhOriginalCwd;
+
+/** Raw HTTP GET returning the RESPONSE. No cookie jar: each call carries exactly the headers the
+ *  caller spelled out, so the zh readings can only be green because of the `Cookie` this test sent
+ *  and not because an earlier call left one behind. */
+function request(port, urlPath, headers = {}) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    }).on("error", reject);
+  });
+}
+
+/** The nav region, extracted by the SAME method the goal criterion uses (flatten newlines, then
+ *  `/<nav.*<\/nav>/`) so this file and the criterion cannot drift on what "the nav region" means. */
+function navRegion(body) {
+  const m = /<nav.*<\/nav>/.exec(body.replace(/\n/g, " "));
+  return m ? m[0] : "";
+}
+
+/** This page's OWN `<title>` text. */
+function headTitle(body) {
+  const m = /<title>([^<]*)<\/title>/.exec(body.replace(/\n/g, " "));
+  return m ? m[1] : "";
+}
+
+before(async () => {
+  zhTasks = makeTmpDir("ac290-tasks-");
+  zhWorkspace = makeTmpDir("ac290-ws-");
+  fs.writeFileSync(
+    path.join(zhTasks, "AC290-001.md"),
+    "---\nid: AC290-001\ntitle: serve-task zh fixture\ntodo: false\nstatus: todo\nlabels: []\n---\n\n## Proposal\na\n## Plan\nb\n## Acceptance Criteria\n- [ ] c\n## Definition of Done\n- [x] d\n",
+  );
+  fs.mkdirSync(path.join(zhWorkspace, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(zhWorkspace, ".quay", "config.yml"),
+    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${zhTasks.replaceAll("\\", "\\\\")}"\n`,
+  );
+  execFileSync("git", ["init", "-q"], { cwd: zhWorkspace });
+  fs.writeFileSync(path.join(zhWorkspace, "README.md"), "ac290 /tasks zh fixture workspace\n");
+  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: zhWorkspace });
+  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "commit", "-qm", "fixture init"], { cwd: zhWorkspace });
+  zhOriginalCwd = process.cwd();
+  process.chdir(zhWorkspace);
+  // `port: 0` — let the KERNEL pick. Probing for a free port ourselves races other workers, and a
+  // bind collision here leaks the provider child and hangs the whole suite (serve-bind-failure-no-leak).
+  zhServer = await startServer({ port: 0 });
+  zhPort = zhServer.address().port;
+});
+
+after(async () => {
+  if (zhServer) {
+    await new Promise((r) => zhServer.close(r));
+    if (zhServer.client) await zhServer.client.close();
+  }
+  if (zhOriginalCwd) process.chdir(zhOriginalCwd);
+});
+
+test("AC1① (live /tasks): `Cookie: lang=zh` ⇒ `<html lang=\"zh\"`", async () => {
+  const zh = await request(zhPort, "/tasks", { Cookie: "lang=zh" });
+  assert.equal(zh.status, 200, `GET /tasks (zh) returns 200 (got ${zh.status})`);
+  console.log(`  [ac290] zh <html …> = ${JSON.stringify(/<html lang="[^"]*">/.exec(zh.body)?.[0])}`);
+  assert.ok(zh.body.includes('<html lang="zh"'), 'AC1① the zh /tasks response is <html lang="zh"');
+  assert.ok(!zh.body.includes('<html lang="en"'), "AC1① the zh response must not ALSO carry the en tag");
+  // Control — the reading CAN take the other value: the same URL without the cookie is still en.
+  const en = await request(zhPort, "/tasks");
+  assert.ok(en.body.includes('<html lang="en"'), 'control: the bare /tasks response is still <html lang="en"');
+});
+
+test("AC1② (live /tasks): the nav CURRENT ITEM — desktop AND mobile — is not `Tasks` under zh", async () => {
+  const en = await request(zhPort, "/tasks");
+  const zh = await request(zhPort, "/tasks", { Cookie: "lang=zh" });
+
+  const navEn = navRegion(en.body);
+  const navZh = navRegion(zh.body);
+  assert.ok(navEn.length > 0, "the en response exposes a <nav>…</nav> region to assert on");
+  assert.ok(navZh.length > 0, "the zh response exposes a <nav>…</nav> region to assert on");
+
+  // (a) the en baseline still carries the literal — otherwise "absent under zh" would be vacuous.
+  assert.ok(navEn.includes("Tasks"), 'control: the en nav region carries the literal "Tasks"');
+
+  // (b) ENUMERATE both current items separately (hard rule 3). The desktop span and the mobile-menu
+  //     span are different bytes emitted by different functions; one passing is never evidence for
+  //     the other.
+  const desktopEn = /<span class="nav-item nav-current"[^>]*>([^<]*)<\/span>/.exec(navEn)?.[1];
+  const desktopZh = /<span class="nav-item nav-current"[^>]*>([^<]*)<\/span>/.exec(navZh)?.[1];
+  const mobileEn = /<span class="mobile-menu-item nav-current"[^>]*>([^<]*)<\/span>/.exec(navEn)?.[1];
+  const mobileZh = /<span class="mobile-menu-item nav-current"[^>]*>([^<]*)<\/span>/.exec(navZh)?.[1];
+  console.log(`  [ac290] desktop current item: en=${JSON.stringify(desktopEn)} zh=${JSON.stringify(desktopZh)}`);
+  console.log(`  [ac290] mobile  current item: en=${JSON.stringify(mobileEn)} zh=${JSON.stringify(mobileZh)}`);
+  assert.equal(desktopEn, "Tasks", `desktop current item is the en baseline (got ${JSON.stringify(desktopEn)})`);
+  assert.equal(mobileEn, "Tasks", `mobile current item is the en baseline (got ${JSON.stringify(mobileEn)})`);
+  assert.notEqual(desktopZh, "Tasks", 'AC1② the desktop current item is NOT the literal "Tasks" under zh');
+  assert.notEqual(mobileZh, "Tasks", 'AC1② the mobile current item is NOT the literal "Tasks" under zh');
+  assert.equal(desktopZh, "任务", `desktop current item is 任务 (got ${JSON.stringify(desktopZh)})`);
+  assert.equal(mobileZh, "任务", `mobile current item is 任务 (got ${JSON.stringify(mobileZh)})`);
+
+  // (c) and the region as a whole carries no ASCII "Tasks" under zh — the criterion's own assertion.
+  assert.ok(!navZh.includes("Tasks"), 'the zh nav region carries no literal "Tasks"');
+});
+
+test("AC1③ (live /tasks): this page's OWN `<title>` differs verbatim from the en baseline", async () => {
+  const en = await request(zhPort, "/tasks");
+  const zh = await request(zhPort, "/tasks", { Cookie: "lang=zh" });
+  const tEn = headTitle(en.body);
+  const tZh = headTitle(zh.body);
+  // Side by side, as the AC requires — the pair IS the evidence, not a "differs" boolean.
+  console.log(`  [ac290] en <title> = ${JSON.stringify(tEn)}`);
+  console.log(`  [ac290] zh <title> = ${JSON.stringify(tZh)}`);
+  assert.ok(tEn.endsWith(" — Tasks"), `en <title> ends with the page token " — Tasks" (got ${JSON.stringify(tEn)})`);
+  assert.ok(tZh.endsWith(" — 任务"), `zh <title> ends with the translated token " — 任务" (got ${JSON.stringify(tZh)})`);
+  assert.notEqual(tZh, tEn, "AC1③ the page's OWN <title> is not byte-identical across the two languages");
+});
+
+test("AC-290 control: the helpers are language-parameterised, and the default locale is unmoved", async () => {
+  // Unit-level falsifier: if `renderSiteNav` ignored its `lang` argument, the live zh reading above
+  // could not have moved — so this is the mechanism the black-box results are attributed to.
+  const navEn = renderSiteNav("tasks", "en");
+  const navZh = renderSiteNav("tasks", "zh");
+  assert.notEqual(navEn, navZh, "renderSiteNav's output depends on `lang`");
+  assert.ok(navEn.includes(">Tasks<"), 'the en render carries the literal "Tasks"');
+  assert.ok(!navZh.includes("Tasks"), "the zh render does not");
+
+  // The default locale must be BYTE-IDENTICAL with and without an explicit `?lang=en`, and the
+  // wired sites must still carry their pre-AC-290 English literals (`en` is the identity for every
+  // dictionary lookup) — otherwise wiring this page would have moved the criterion's own baseline.
+  const bare = await request(zhPort, "/tasks");
+  const explicit = await request(zhPort, "/tasks?lang=en");
+  assert.equal(headTitle(bare.body), headTitle(explicit.body), "the default <title> is identical with and without ?lang=en");
+  assert.equal(navRegion(bare.body), navRegion(explicit.body), "the default nav region is identical with and without ?lang=en");
+  assert.match(bare.body, /<h1>Quay — task list \([^)]* provider\)<\/h1>/,
+    "the en <h1> is still the pre-AC-290 literal");
 });

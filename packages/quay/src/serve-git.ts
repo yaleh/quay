@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).
@@ -896,12 +896,27 @@ function renderTaskGroupsHtml(history: GitHistoryResult): string {
  * `remotes` (the workspace's `git remote` names) ride along in the embedded `#git-graph-data` payload so
  * the client can tell a remote-tracking ref from a slash-containing LOCAL branch (gap-git-graph-
  * decoration-labels-as-colored-chips AC1); defaults to [] for pure-history callers.
+ *
+ * `lang` (AC-297) is the request's resolved language (AC-288's mechanism, threaded in by the
+ * dispatcher as `cfg.lang`). It reaches FOUR points on this page and nothing else — the
+ * `<html lang>` attribute, the shared desktop nav bar, the MOBILE nav, and this page's OWN chrome
+ * (`<title>` tokens + the `<h1>` token, both via `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
+ * The last two are the whole point: a shared nav bar that switches while THIS page's own `<title>`
+ * stays English is precisely what the criterion's `title-unchanged` arm rejects.
+ *
+ * ⚠️ There are TWO view branches below and BOTH are wired. The criterion requests the bare
+ * `/git-history`, i.e. `gitHistoryViewOf` resolves `"git"` — the DEFAULT branch — so wiring only
+ * the `?view=task` branch would leave the criterion red on `html-lang-not-zh`. Each branch carries
+ * its OWN `<title>` token (`"Git history — vertical commit timeline"` vs `"Git history — 任务分组"`),
+ * and `pageNameFor` looks tokens up byte-exactly, so a branch whose token is not registered would
+ * render its English title under zh — the same `title-unchanged` arm, one branch over.
  */
 export function renderGitHistoryPage(
   history: GitHistoryResult,
   view: GitGraphView = "git",
   remotes: string[] = [],
   identity: ServeIdentity | null = null,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   if (view === "task") {
     const statusNote = history.status === "error"
@@ -916,9 +931,9 @@ export function renderGitHistoryPage(
     const groupsHtml = renderTaskGroupsHtml(history);
     const guide = html`<p class="meta"><strong>任务分组 = 按 commit subject 里的 task id 聚合（项目特定启发式，非 git 语义）。</strong> 一组 = 一个任务从立案、晋升、实现到 fan-in 的完整轨迹；无法归属任何 task id 的提交计入「未归属」组（<strong>${unattributedCount}</strong> 条）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并。默认视图仍是 git 拓扑，切换回来不会丢任何信息。</p>`;
     return html`<!doctype html>
-      <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>${pageTitle("Git history — 任务分组", identity)}</title></head>
-      <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
-        <h1>Git History — 任务分组时间轴</h1>
+      ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>${pageTitle("Git history — 任务分组", identity, lang)}</title></head>
+      <body>${renderMobileChrome("git", pageNameFor("git history", lang), lang)}${renderSiteNav("git", lang)}<main id="main">
+        <h1>${pageNameFor("Git History", lang)} — 任务分组时间轴</h1>
         ${gitHistoryViewToggle(view)}
         ${guide}
         ${statusNote}
@@ -960,9 +975,9 @@ export function renderGitHistoryPage(
   const laneTokenStyle = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>${pageTitle("Git history — vertical commit timeline", identity)}</title></head>
-    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
-      <h1>Git History — 提交纵向时间轴</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>${pageTitle("Git history — vertical commit timeline", identity, lang)}</title></head>
+    <body>${renderMobileChrome("git", pageNameFor("git history", lang), lang)}${renderSiteNav("git", lang)}<main id="main">
+      <h1>${pageNameFor("Git History", lang)} — 提交纵向时间轴</h1>
       ${gitHistoryViewToggle(view)}
       <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。在图表容器内滚动到底部自动加载更早的提交（加载较多后改为点击加载）。</p>
       ${statusNote}
@@ -987,7 +1002,12 @@ export async function handleGitHistory(
   }
   const remotes = readGitRemotes(cfg.workspaceRoot);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes, cfg.identity));
+  // AC-297: `cfg.lang` is the per-request language the dispatcher (`handleAllRoutes`) already
+  // resolved once and carried in as a per-request copy. It was previously dropped right here, which
+  // is why this page rendered its whole shell in English under `Cookie: lang=zh`. ⛔ Never re-read
+  // the cookie or `?lang=` at this point: a second parse is a second decision table, and it would
+  // read different request inputs than the one `Vary: Cookie` was declared for.
+  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes, cfg.identity, cfg.lang));
 }
 
 function writeJson(res: ServerResponse, status: number, obj: unknown): void {

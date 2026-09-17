@@ -9,7 +9,7 @@
 // and handler logic live in serve-handlers.ts; this file holds only setup
 // and server lifecycle.
 
-import http, { type Server } from "node:http";
+import http, { type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -291,6 +291,37 @@ export function logAccess(accessLogPath: string, method: string | undefined, url
   }
 }
 
+// ── Site icon (gap-webui-dashboard-tasks-display-polish ①) ──────────────────
+// Browsers request /favicon.ico on every page load. There was NO route for it, so every dashboard
+// view fell through to handleAllRoutes' 404 tail and the browser logged a console error (the 7-day
+// access log showed /favicon.ico as a standing 404 source). The icon is not part of the task
+// view-model and has no Provider semantics, so it is answered HERE beside /health, not in the
+// routing facade — a page-chrome asset, not a route family.
+//
+// Why an inline constant rather than a file on disk: this repo has no build step, so a static asset
+// file would be a second copy of the same bytes living at a path the source has to keep in sync
+// (single-source rule). The SVG is small enough that the source IS the asset.
+//
+// Why 200 + image/svg+xml rather than the 204 the task allowed: a decode-able icon costs nothing
+// extra, and /favicon.svg — the canonical name for this MIME type — is served from the same branch
+// so the asset stays addressable by its own name if a <link rel="icon"> is added later.
+export const FAVICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="quay">` +
+  `<rect width="32" height="32" rx="6" fill="#201e1d"/>` +
+  `<circle cx="16" cy="15" r="8" fill="none" stroke="#f3f2f2" stroke-width="3"/>` +
+  `<path d="M21 21 L28 28" stroke="#f3f2f2" stroke-width="3" stroke-linecap="round"/>` +
+  `</svg>`;
+
+/** Answer the site-icon request. Content-Type carries the explicit MIME so the browser does not
+ *  have to sniff an `.ico` URL whose body is SVG. */
+export function serveFavicon(res: ServerResponse): void {
+  res.writeHead(200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=86400",
+  });
+  res.end(FAVICON_SVG);
+}
+
 /**
  * Close the provider client and re-throw `cause` — the "setup failed after the
  * provider was connected" exit.
@@ -429,6 +460,13 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
       const url = new URL(req.url as string, `http://${req.headers.host}`);
       if (url.pathname === "/health") {
         await handleHealth(res, cfg.workspaceRoot);
+        return;
+      }
+      // gap-webui-dashboard-tasks-display-polish ①: the browser's site-icon probe, served beside
+      // /health (same "page chrome / process status, not a task route" shelf). Before this it fell
+      // through to the 404 tail and every page load logged one console error.
+      if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
+        serveFavicon(res);
         return;
       }
       await handleAllRoutes(req, res, client, manifest, routeCfg);
