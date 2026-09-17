@@ -187,6 +187,16 @@ CRIT
 - **`absent` 是独立取值，⛔ 绝不回落成 `already-present`**（硬规则 3b：读不懂不得冒充合格）。「日志拉到了但三条 marker 一条都没有」也必须是 `absent`，**不是**通过。
 - 为了让派生不被散文措辞绑死，workflow 那一步应打印机器可读的一行（house 形：`__GROUP__` / `__PERFILE__`），例如 `__PREREQ__ pyyaml=already-present`；那一步今天已经在 `gap-ac281-develop-ci-test-job-wallclock-under-30s` 的 Touches 里（`.github/workflows/ci.yml`）。⛔ 但**不要求**为此新增或删除 workflow 步骤：`plugin/test/ci-runner-env-prereqs.test.mjs` 断言那一步的 install 配方必须**仍在**（删掉会立刻红），本提案只要求它**不再被执行**（走 `already-present` 分支）。
 
+**立案当轮实测（⛔ 不是推测：这一跑就是为了证明判据不是恒真的）** —— 把上面这段 criterion 从任务体里逐字提取后交给 `bash` 跑，cwd = 主检出：
+
+```
+exit = 1
+stderr = CAUSE=no-post-filing-run — no CI run on develop with ts > 2026-09-17T00:45:02Z exists yet in .quay/ci-runs.jsonl
+```
+
+⇒ 判据今天取到的是**「还没有 post-filing 的 develop run」**这一态，**不是**「合格」。载体里最新那条 develop run（`ts=2026-09-17T00:40:37Z`）**早于** GOAL-022 的 `activatedAt`（`00:45:02Z`），被 `SINCE` 正确地排除掉了。
+⚠️ **正因为这一态，AC1 的谓词必须接受 criterion 自己的【全部】CAUSE 词表**，而不是只接受 `prereq-provision-*`：写窄了会让一条**正确**的实现被判失败（硬规则 4c：判据点名的量必须穿得过中间层还取得到）。
+
 **备选载体形状（人可改判，二选一）**：把 `jobs[].steps[]` 补上 `durationSec`（GitHub 的 jobs API 本来就返回每个 step 的 `started_at`/`completed_at`，`ci-runs-collect.ts` 的 `GhJob.steps` 类型目前只留了 name/conclusion/number），判据改读「install 步的时长」。⛔ 我不推荐它做**主**判据：那要为一个尚未测量的快路时长设一个阈值（硬规则 4 推论一：成本结构未知前不设数值阈值），而 `already-present` / `installed-*` 是**有名字的两种观测**，不需要数字。
 
 ### 五、退出条件句的配套改字（最小改动；范围节不动）
@@ -215,13 +225,19 @@ CRIT
 
 ### 七、一条已知的、必须让人先看到的取舍
 
-AC-282 落地后，它的 criterion 在今天**仍会 exit 1**，但成因是 `CAUSE=prereq-provision-not-recorded`（载体还没有这个字段）—— 这是**诚实的 NOT-EVALUATED**，不是「没通过」。要让这条 AC **可被判定**需要两次落地：① 载体侧派生 `prereqProvision`（写面 `ci-runs-collect.ts`）；② runner 环境真的预置了三个前置（范围节第三条的本体）。⛔ 只有 ① 不会变绿（三条 marker 全 `absent` ⇒ 仍 exit 1），这正是判据「把量挪到产物上」的意图（硬规则 4 推论三）。
+AC-282 的 criterion **今天就已经能跑并 exit 1**（§四末的实测），但成因是 `CAUSE=no-post-filing-run` —— 这是**诚实的 NOT-EVALUATED**，不是「没通过」。它要变绿需要三次落地，且每一步的读数**彼此可区分**：
 
-**人若认为这条耦合不可接受，那就是改判 option (b)（把范围节第三条删掉）的理由** —— 我不推荐：第三节给的算术使它成为 AC-281 的必要条件。
+1. **下一次 develop CI run 进载体** —— 否则恒停在 `CAUSE=no-post-filing-run`；
+2. **载体侧派生 `prereqProvision`**（写面 `ci-runs-collect.ts`）—— 否则读到 `CAUSE=prereq-provision-not-recorded`；
+3. **runner 环境真的预置了三个前置**（范围节第三条的本体）—— 否则读到 `CAUSE=still-reinstalling-every-job`。
+
+⛔ **只做第 2 步不会变绿**（三条 marker 全 `absent` ⇒ `prereq-provision-underivable` ⇒ 仍 exit 1），这正是判据「把量挪到产物上」的意图（硬规则 4 推论三）。
+
+**人若认为这条耦合（一条 AC 要等三次落地才可能变绿）不可接受，那就是改判 option (b)（把范围节第三条删掉）的理由** —— 我不推荐：第三节给的算术使它成为 AC-281 的必要条件。
 
 ## AC
 
-- [ ] **AC1｜AC-282 已由 goal store 写入，且其 criterion 能被逐字提取并当场干跑。** 核法：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get AC-282 --json` 取出 `criterion`，把该字符串**逐字**交给 `bash`（⛔ 不手抄、⛔ 不朴素 join 折叠块 —— 见 `goals/AC-161-*.md` 的提取先例），**在今天的载体上逐字跑**：必须 **exit 1** 且 stderr 的 `CAUSE=` ∈ {`prereq-provision-not-recorded`, `still-reinstalling-every-job`}（两者都可，取决于载体是否已补派生字段）。**exit 0 视为本 AC 失败**（今天不可能为真 ⇒ 若为真说明判据是恒真的）。贴出：提取命令、criterion 全文、exit code、逐字 stderr。写入必须用 `goal-store.ts write AC-282 --expect-absent …`（⛔ 手改 `goals/AC-282-*.md` 不算；`--expect-absent` 防并发立案互相覆盖）。
+- [ ] **AC1｜AC-282 已由 goal store 写入，且其 criterion 能被逐字提取并当场干跑。** 核法：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get AC-282 --json` 取出 `criterion`，把该字符串**逐字**交给 `bash`（⛔ 不手抄、⛔ 不朴素 join 折叠块 —— 见 `goals/AC-161-*.md` 的提取先例），**在今天的载体上逐字跑**：必须 **exit 1**，且 stderr 的 `CAUSE=` ∈ criterion 自己的词表 {`carrier-absent`, `no-post-filing-run`, `no-test-job-in-latest-run`, `prereq-provision-not-recorded`, `prereq-provision-incomplete`, `prereq-provision-underivable`, `still-reinstalling-every-job`}（**立案当轮实测读数是 `no-post-filing-run`**，见 §四末）。⚠️ **exit 0 视为本 AC 失败**（今天取不到「合格」这个值 ⇒ 若为真说明判据是恒真的）；且**必须把取到的是哪一个 CAUSE 逐字记下来** —— 「卡在哪一层」正是这个读数携带的信息，折叠成一句「已干跑」就丢掉了它。贴出：提取命令、criterion 全文、exit code、逐字 stderr。写入必须用 `goal-store.ts write AC-282 --expect-absent …`（⛔ 手改 `goals/AC-282-*.md` 不算；`--expect-absent` 防并发立案互相覆盖）。
 - [ ] **AC2｜退出条件句已改完且其余节逐字未动。** 核法：`goal-store.ts get GOAL-022 --json` 取 `body`，四条子断言全真 ⇒ exit 0：① **不含**子串 `三条 AC 全部 achieved`；② **含**子串 `四条 AC 全部 achieved` 与 `AC-282`；③ `AC-279` / `AC-280` / `AC-281` 三个串仍各在场；④ `## 背景` / `## 范围与非目标` / `## 执行主机` / `## 退出条件` 四个节标题仍在（防整篇替换时丢节）。任一假 ⇒ exit 1，stderr 与 failure exit **写在同一物理行**，带 `CAUSE=old-clause-still-present` / `CAUSE=new-clause-absent` / `CAUSE=ac-ids-lost` / `CAUSE=body-sections-lost`。并贴出 `git diff` 证明 `## 范围与非目标` 节正文**逐字未改**（范围节不改是本提案的一部分）。
 - [ ] **AC3｜判官在【新 key】上重判过一次（⛔ 不是缓存命中）。** 核法：改前记下 `entries["GOAL-022"].key = a2c80835e429d04191d4370a159f135b20672c4be1a3452531e4282c41775c65`；改后断言 ① `.quay/goal-sufficiency-cache.json` 里**原 key 条目仍在且逐字未变**（`{'verdict':'insufficient','ts':'2026-09-17T00:55:37.997Z'}`，历史不被改写）② 出现一个**新** key 条目（`sufficiencyCacheKey` 含退出条件文本与范围节文本 ⇒ body 一改 key 必变）③ `.quay/goal-round.jsonl` 其后落一条 `goal-sufficiency` fact。⚠️ **新 verdict 是否翻成 `covered` 不作本任务的成功判据** —— 若仍是 `insufficient`，把读数与判官输入（title / 退出条件 / 范围节 / in-scope ACs）逐字记进任务体并**停手另立根因**；⛔ 不得为了让判官变绿而反复改文本或改提示词（那会把判官变成回声）。
 - [ ] **AC4｜负控制（两向都取读数，硬规则 2 的两半）。** ① **零计数的方向**：把 AC1 里那组 `grep -c -iE '镜像|install|装包|prereq'` 谓词对着 `.github/workflows/ci.yml` 的 `Install suite runtime prerequisites` 步干跑 ⇒ 必须取到**非零**（证明「三条 AC 全 0」不是谓词读不懂输入）；② **谓词能取假的方向**：把 AC2 的谓词对着**改前**的 body 干跑 ⇒ 必须 exit 1 且 `CAUSE=old-clause-still-present`（改前 `三条 AC 全部 achieved` 在场、`AC-282` 不在场）。两次读数（命令 + 逐字输出 + exit code）贴进任务体。硬规则 3b：没有这一条，AC1/AC2 与「没查」同形。
@@ -231,7 +247,7 @@ AC-282 落地后，它的 criterion 在今天**仍会 exit 1**，但成因是 `C
 **真实落地 = goal store 里 AC-282 真的在、GOAL-022 的退出条件句真的改了、判官真的在新 key 上重判过一次，且 AC-282 的 criterion 被逐字提取后在**今天的载体上**当场干跑过（今天必须红，且红在一个可区分的 `CAUSE=` 上）** —— ⛔ 不是「任务体里写了一段待批的建议文本」。
 
 1. **落地对象**：`goal-store.ts get AC-282 --json` 返回该 AC，`goal=GOAL-022`、`kind=criterion`、`status=active`（写入经 goal store，⛔ 未手改任何 `goals/*.md`）。
-2. **可被打红**：AC1 的干跑 exit 1 + 可区分的 `CAUSE=`；AC4 的两向读数都在。
+2. **可被打红**：AC1 的干跑 exit 1 + 可区分的 `CAUSE=`（并逐字记下是哪一个）；AC4 的两向读数都在。
 3. **文本最小改动**：AC2 的四条子断言 + `## 范围与非目标` 节逐字未改的 diff。
 4. **判据不空转**：AC3 的新 key 条目 + 轮记录 fact（⛔ 不是缓存命中；⛔ 不以 verdict 变绿为成功判据）。
 5. **证据留痕**：上述读数落成 `.quay/ac282-*` 证据文件或写进任务体，**可被下一轮独立复算**。
