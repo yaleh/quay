@@ -20,6 +20,32 @@ import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, build
 // joined board view and rendered server-side — no client JS (AC3). The page nav mirrors the
 // /tasks handler's QW-007 pagination pattern.
 
+// ── gap-webui-board-transient-columns-drowned-by-history: the transient default view ──────────────
+// 「执行」(.workflow-events/) and 「落地」 (task-status-drift-check.ts) are TRANSIENT signals: a row is
+// non-empty only while its task is actually in flight, awaiting fan-in, or carrying a drift flag.
+// Painted across the WHOLE store (production: 2248 rows, 2171 of them done and mostly 57+ days idle)
+// the default view is near-necessarily a wall of 「—」 whatever the sampling luck — the page's own
+// counters said 「0 实现中 · 0 待落地」 while it paged 113 pages of dashes. The default view (no
+// status/label filter, no ?all=1) therefore shows ONLY the rows where either transient column is
+// non-empty; the full store stays one click away (?all=1, or any explicit status/label filter).
+//
+// The filter is applied ONLY when BOTH transient sources actually READ (`status === "ok"`). A source
+// that is absent (`empty`) or unreadable (`error`) is NOT a source that says "nothing": hiding rows
+// on its authority would assert ABSENCE from an INCOMPLETE source (硬规则 5 来源完备性), turning
+// 「无法判定哪些任务在飞」 into 「没有任务在飞」 — a false claim rendered as a confident one
+// (硬规则 3b: a judge that cannot read its input must not return a value shaped like "passed").
+// The off-state is therefore its own rendered text, never silent.
+export type BoardTransientView = "applied" | "off-source-incomplete" | "off-explicit-all";
+
+/** True when a joined row carries a live transient signal in either column. */
+export function isTransientRow(r: {
+  landingFlag: string | null;
+  execFlags: string[];
+  inFlightMinutes: number | null;
+}): boolean {
+  return r.landingFlag != null || r.execFlags.length > 0 || r.inFlightMinutes != null;
+}
+
 // Build /board query links preserving active status/label filters and page size while changing
 // the page. Mirrors buildHref (/tasks) scoped to the board's params. Zero client JS — the links
 // are plain server-rendered <a href>.
@@ -28,10 +54,12 @@ function buildBoardHref(
   label: string[],
   pg: number | null,
   pageSizeOverride: number,
+  showAll = false,
 ): string {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   for (const l of label) params.append("label", l);
+  if (showAll) params.set("all", "1");
   if (pg && pg > 1) params.set("page", String(pg));
   if (pageSizeOverride !== DEFAULT_PAGE_SIZE) params.set("pageSize", String(pageSizeOverride));
   const qs = params.toString();
@@ -64,6 +92,13 @@ export function renderBoardPage(board: {
   labelFilters?: string[];
   pageSize?: number;
   pageSizeInvalid?: boolean;
+  /** Default-view transient filter state (gap-webui-board-transient-columns-drowned-by-history).
+   *  OMITTED (direct renderBoardPage callers) = legacy rendering: no filter, the whole joined set. */
+  transientView?: BoardTransientView;
+  /** Joined rows BEFORE the transient filter — the N in 「显示全部 N 行」. Defaults to totalRows. */
+  joinedTotal?: number;
+  /** Human labels of the transient sources that are not `ok` (rendered by "off-source-incomplete"). */
+  incompleteSources?: string[];
 }, identity: ServeIdentity | null = null): string {
   const landingNote = board.landing.status === "ok"
     ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
@@ -130,6 +165,41 @@ export function renderBoardPage(board: {
   const filterNav = filterParts.length > 0
     ? html`<p class="meta list-nav">Filter: ${filterParts.join(" · ")}</p>`
     : "";
+  // ── the transient default view's own explanation block ────────────────────────────────────────
+  // FOUR DISTINCT states, each with its own text — 「判定过且为空」 and 「无法判定」 must never share
+  // wording (硬规则 3b: the un-evaluated state needs its own value, or the page cannot be told apart
+  // from a passing one). `transientView == null` is the legacy direct-caller path: no note at all.
+  const transientView = board.transientView;
+  const joinedTotal = board.joinedTotal ?? totalRows;
+  const showAllHref = buildBoardHref(statusFilter, labelFilters, null, pageSize, true);
+  const hasRows = board.rows.length > 0;
+  const allRowsHref = html`<a href="${showAllHref}">显示全部 ${joinedTotal} 行（含历史任务）</a>`;
+  let viewNote = "";
+  if (transientView === "applied" && !hasRows) {
+    // AC1's explicit empty state: NOT an empty table, NOT a dash wall — the page says why it is empty
+    // and how to get the full list back.
+    viewNote = html`<div class="info-banner" role="status">
+      <p><strong>当前没有在飞 / 待落地的任务</strong> <code>board_default_view=transient-empty</code></p>
+      <p>默认视图只显示「执行」或「落地」列非空的行 —— 全部 ${joinedTotal} 行里没有一行处于在飞 / 待落地 / 落地异常，故不铺开历史任务。</p>
+      <p>${allRowsHref}，或用上方的 status / label 筛选查看指定子集。</p>
+    </div>`;
+  } else if (transientView === "applied") {
+    viewNote = html`<p class="meta list-nav" role="status">默认视图：只显示「执行」或「落地」列非空的行 —— ${totalRows} 行（全部 ${joinedTotal} 行）。${allRowsHref}</p>`;
+  } else if (transientView === "off-source-incomplete") {
+    // The filter could NOT be applied: at least one transient source did not read. Say so, and show
+    // everything — an unread source is not evidence of absence (硬规则 5).
+    const why = (board.incompleteSources ?? []).join(" · ");
+    viewNote = html`<div class="info-banner" role="status">
+      <p><strong>默认过滤未生效</strong> <code>board_default_view=unfiltered-source-incomplete</code></p>
+      <p>${escapeHtml(why)} 读不到（无数据 / 读失败 / 读取超时），无法判定哪些任务当前在飞或待落地 —— 因此下面显示全部 ${joinedTotal} 行，而不是把「无法判定」渲染成「没有」。</p>
+    </div>`;
+  } else if (transientView === "off-explicit-all") {
+    viewNote = html`<p class="meta list-nav" role="status">已显示全部 ${joinedTotal} 行（含历史任务）。<a href="${buildBoardHref(statusFilter, labelFilters, null, pageSize, false)}">只看当前在飞 / 待落地</a></p>`;
+  }
+  // An "applied" view whose filtered set is empty renders the note INSTEAD of an empty table (AC1 /
+  // DoD: 「而非空表格/空横杠墙」); the legacy direct-caller path (transientView omitted) always renders
+  // its table, so no existing single-purpose caller changes shape.
+  const showTable = hasRows || transientView == null;
   const filterForm = html`<form method="GET" style="margin:0.5rem 0 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
     <input name="status" type="text" placeholder="status (e.g. done)" value="${escapeHtml(statusFilter || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
     <input name="label" type="text" placeholder="label (e.g. gap)" value="${escapeHtml(labelFilters[0] || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
@@ -164,11 +234,12 @@ export function renderBoardPage(board: {
       ${filterForm}
       ${filterNav}
       ${pageSizeNav}
-      ${pageNav}
-      ${tableWrap(html`<table>
+      ${viewNote}
+      ${showTable ? pageNav : ""}
+      ${showTable ? tableWrap(html`<table>
         <tr><th>id</th><th>意图</th><th>执行</th><th>落地</th></tr>
         ${rows}
-      </table>`)}
+      </table>`) : ""}
     </main></body></html>`;
 }
 
@@ -227,8 +298,17 @@ export async function handleBoard(
       });
     }
   }
+  // The transient sources join too, for the same reason: a run that is in flight (or an orphan
+  // flagged by the execution read) MUST have a row to render — otherwise the default view, whose
+  // whole purpose is to show those rows, would drop exactly them when the intent read diverges.
   for (const taskId of landing.flags.keys()) {
     if (!byId.has(taskId)) byId.set(taskId, { title: "", status: "", labels: [] });
+  }
+  for (const taskId of execution.flags.keys()) {
+    if (!byId.has(taskId)) byId.set(taskId, { title: "", status: "", labels: [] });
+  }
+  for (const t of execution.inFlight) {
+    if (!byId.has(t.taskId)) byId.set(t.taskId, { title: "", status: "", labels: [] });
   }
 
   const rows = [...byId.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, meta]) => {
@@ -254,12 +334,45 @@ export async function handleBoard(
   // invalid values silently fall back to defaults. Everything below is server-side — no client JS.
   const statusFilter = url.searchParams.get("status");
   const labelFilters = url.searchParams.getAll("label").filter(Boolean);
-  const filteredRows = (statusFilter || labelFilters.length > 0)
+  const explicitFilter = Boolean(statusFilter) || labelFilters.length > 0;
+  const filteredRows = explicitFilter
     ? rows.filter((r) =>
         (!statusFilter || r.status === statusFilter) &&
         (labelFilters.length === 0 || labelFilters.every((l) => r.labels.includes(l)))
       )
     : rows;
+
+  // gap-webui-board-transient-columns-drowned-by-history: the DEFAULT view shows only rows with a
+  // live transient signal — but ONLY when both transient sources actually read. An absent/unreadable
+  // source gets its own view state ("off-source-incomplete") instead of being silently read as
+  // 「nothing is in flight」 (硬规则 3b/5: never render 「无法判定」 as a confident 「没有」).
+  const allParam = (url.searchParams.get("all") ?? "").trim().toLowerCase();
+  const showAll = allParam === "1" || allParam === "true" || allParam === "yes";
+  const incompleteSources: string[] = [];
+  if (execution.status !== "ok") {
+    incompleteSources.push(execution.status === "empty"
+      ? "执行源（.workflow-events/）无数据"
+      : "执行源（.workflow-events/）读失败");
+  }
+  if (landing.status !== "ok") {
+    incompleteSources.push(landing.timedOut === true
+      ? "落地源（task-status-drift-check.ts）读取超时"
+      : landing.status === "empty"
+        ? "落地源（task-status-drift-check.ts）不可用"
+        : "落地源（task-status-drift-check.ts）读失败");
+  }
+  // An explicit status/label filter is the user asking for a NAMED set — the transient default must
+  // not narrow it further (AC2: the manual filters stay, and they are one of the two ways back to
+  // the full store; ?all=1 is the other). No note renders for that path: the filter chip + row count
+  // already say what is on screen.
+  const transientView: BoardTransientView | undefined = explicitFilter
+    ? undefined
+    : showAll
+      ? "off-explicit-all"
+      : incompleteSources.length === 0
+        ? "applied"
+        : "off-source-incomplete";
+  const visibleRows = transientView === "applied" ? filteredRows.filter(isTransientRow) : filteredRows;
   const pageSizeParam = parseInt(url.searchParams.get("pageSize") || "", 10);
   const pageSizeInvalid = url.searchParams.has("pageSize") &&
     (!Number.isFinite(pageSizeParam) || pageSizeParam < 1);
@@ -268,11 +381,11 @@ export async function handleBoard(
     : DEFAULT_PAGE_SIZE;
   const pageParam = parseInt(url.searchParams.get("page") || "1", 10);
   const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
-  const totalRows = filteredRows.length;
+  const totalRows = visibleRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const safePage = Math.min(page, totalPages);
   const offset = (safePage - 1) * pageSize;
-  const pageRows = filteredRows.slice(offset, offset + pageSize);
+  const pageRows = visibleRows.slice(offset, offset + pageSize);
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderBoardPage({
@@ -285,6 +398,9 @@ export async function handleBoard(
     labelFilters,
     pageSize,
     pageSizeInvalid,
+    transientView,
+    joinedTotal: rows.length,
+    incompleteSources,
   }, cfg.identity));
 }
 
