@@ -160,28 +160,46 @@ for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink
    ⛔ **不重启主检出上的那个实例**（pid 3696699）—— 见 Proposal 的「操作前提」，本任务只报告它的 `/health`。
 8. **收口**：红/绿两条读数 + 因果对照 + 全量残留枚举 + scoped 门绿。
 
+### 实施记录（落地时补，⛔ 非事后补记）
+
+- **步骤 2 实测：前置全部已在 develop 上**，签名与 Plan 预写的**一致**（`renderSiteNav(current, lang=DEFAULT_LANG)`、
+  `renderMobileChrome(current, pageLabel, lang=DEFAULT_LANG)`、`pageTitle(pageName, id, lang=DEFAULT_LANG)`、
+  `pageNameFor(pageName, lang=DEFAULT_LANG)`、`htmlLangTag(lang=DEFAULT_LANG)`）。**无「停下报缺」触发。**
+- **步骤 3 的一处偏差（如实记）**：AC-293 已先落地，其 `serve-system.ts` 里那段「⛔ `/manager` 是另一页、
+  故意不接线、所以该文件的 `html lang="en"` 由 2→1」的**文档注释在本任务落地后变成假的**，一并改写为
+  「2→1（AC-293）→**0**（AC-294）」。⛔ 只改注释，未改 `/system` 的任何代码行（`git diff` 可核）。
+  ⚠️ 该注释与本任务的注释都**故意不拼出那个属性字面量**（硬规则 2：注释里的字面量是 `grep -c` 的假阳性）。
+- **步骤 5 的一处 Touches 偏差（已在 Touches 节声明）**：`packages/quay/test/serve-system.test.mjs` 的
+  `AC-scope` 那一档断言「`/manager` 在 zh 下仍是 `<html lang="en">` —— 本任务没有接线它」，
+  该断言在 AC-293 下为**真**、在本任务下**由构造即假**（本任务正是退役该边界的那一个）⇒ 不替换它则
+  `serve-*.test.mjs` **永久红**、AC5② 不可达。替换后的档断言「同文件两页在两种语言下各自保有**不同**的
+  页 token」（共享文件最容易出的复制粘贴失效形态），**是替换不是削弱**。
+- **键形状（Proposal 的 ⚠️）落地选择**：采用**解法 ①**——以整串 `Manager / Outer / Inner` 为键登记**一条**。
+  该页是首个 `<title>` token 与 `<h1>` page token **同一个串**的页面（`<h1>` = 页名 + `— 三层状态` 副标题），
+  故一条词条覆盖两个调用点，⛔ 没有第二处短 token。
+
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/manager` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Manager`
   （同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**
   （并排贴 en/zh 两条 `<title>`）。⛔ 三处分开断言、分开贴原始片段 —— 只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
+- [x] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
   （一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。
   更窄的形态（更强）：**只把字典钳到 `en`**（`navLabelsFor`/`pageNameFor` 首行强制 `lang="en"`），
   此时 `<html lang>` 仍正确、判据自报的 `CAUSE=nav-label-untranslated` 或 `CAUSE=title-unchanged`
   ⇒ 成因被单独钉在字典接线上。⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言（硬规则 4 推论四）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'Manager'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'Manager'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个载体），
   并给出 **nav 区块内**与 **nav 区块外**两个计数。⛔ 禁止只报一个总数（硬规则 3）。
   预期：zh 下 nav 区块内 `Manager` 计数 = **0**，而同一谓词在 **en** 上 = **2**；
   若 `<h1>` 一并接线则区块外计数由 **5→4**（`<head>` meta 描述那条**预期保留**，见 Proposal 的作用域说明）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-294 --dry-run --json`
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-294 --dry-run --json`
   完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。
   ⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-294-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、
   把 zh 值写成含英文 `Manager` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac294-manager-page-zh-chrome-nav-current-and-own-title` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac294-manager-page-zh-chrome-nav-current-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿 —— 其中 `serve-ac95-views.test.mjs` 对 `/manager` 的既有断言
   测的是 **en 基线**，必须**原样绿**；
   ③ **作用域举证**：`grep -c 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照
@@ -189,11 +207,92 @@ for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink
   本任务后 **`serve-system.ts` 的 `/manager` 那条消失**（AC-293 若已落地则该文件由 1→0），
   **其余 12 个文件计数一字未动**；⛔ 兄弟任务（AC-290~293）可能已先落地，故本条是**逐文件差量**，不是绝对值。
   ④ `git diff --name-only <base>...HEAD` 只含本任务 Touches 的路径。
-- [ ] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个；
+- [x] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个；
   立案时为 `pid=3696699`、`--host 0.0.0.0 --port 4173`）的 `curl -sf http://<addr>/health` 原始读数，
   并写明 `processStartedAt` / `latestCodeCommitAt` / `stale`。
   若其 `stale:true`，**明写**「驱动侧仍会红在 `CAUSE=html-lang-not-zh`，成因是该实例陈旧（AC-288 落地前的进程），
   与 `/manager` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。
+
+### Evidence（未跟踪 scratch：`.quay/ac294-evidence/`，含 `EVIDENCE.md` 与本文件）
+
+**AC1 — 三段各自独立（en / zh 并排，原始片段）**
+
+| 段 | 抽取方式 | en | zh（`Cookie: lang=zh`） |
+|---|---|---|---|
+| ① 文档语言 | `grep -o '<html lang="[^"]*"'` | `<html lang="en"` | `<html lang="zh"` |
+| ② nav 区块字面量 | `tr '\n' ' ' \| grep -o '<nav.*</nav>' \| grep -o 'Manager' \| wc -l` | **2** | **0** |
+| ③ 本页自己的 `<title>` | `grep -oE '<title>[^<]*</title>'` | `… — Manager / Outer / Inner` | `… — 管理器 / 外层 / 内层` |
+
+② 是可取假的那个量：同一谓词在 en 上读 **2**，故「zh = 0」是测量而非空断言。`<h1>` 一并接线：
+en `<h1>Manager / Outer / Inner — 三层状态</h1>` / zh `<h1>管理器 / 外层 / 内层 — 三层状态</h1>`。
+
+**AC2 — 两个对照都跑过（钳制后重启实例再读，⛔ 非推断）**
+
+| 对照 | 钳制位置 | ① | ② | ③ | 判据自报 |
+|---|---|---|---|---|---|
+| A | 语言层（`serve-handlers.ts` 强制 `lang="en"`，仍读 cookie） | `<html lang="en"` **红** | **2** **红** | `… Manager / Outer / Inner` **红** | `CAUSE=html-lang-not-zh` |
+| B（更窄、更强） | **只钳字典**（`navLabelsFor`/`pageNameFor` 强制 `en`） | `<html lang="zh"` **仍绿** | **2** **红** | `… Manager / Outer / Inner` **红** | `CAUSE=nav-label-untranslated` |
+
+B 是那个把成因**单独钉在字典接线上**的对照：语言层仍正确，只有字典臂红 ⇒「是本页接线造成的」不再是一句未被检验的断言。
+两个钳制均已还原（`grep -rn 'AC2 CONTROL' packages/quay/src/` ⇒ **0**），并在**还原后的源码**上重启实例复读绿（见 AC4）。
+
+**AC3 — zh 响应全量枚举（`grep -n 'Manager'` ⇒ 恰 1 条），逐条归属**
+
+| | 总数 | nav 区块**内** | nav 区块**外** |
+|---|---|---|---|
+| en | 5 | 2 | 3 |
+| zh | **1** | **0** | **1** |
+
+en 的 5 条逐条归属：`:2` `<head>` meta 描述（源 `serve-system.ts:169`）→ **zh 下原样保留（预期）**，它在判据断言面外、
+改它会让 en 基线漂移；`:636` 本页 `<title>`（`pageTitle("Manager / Outer / Inner", …)`）→ zh 翻；`:652` 移动端 nav 当前项
+（`renderMobileChrome` → `NAV_LABELS.manager`）→ zh 翻；`:664` 桌面 nav 当前项（`renderSiteNav` → `NAV_LABELS.manager`）→ zh 翻；
+`:667` 本页 `<h1>`（`pageNameFor("Manager / Outer / Inner", …)`）→ zh 翻。
+⚠️ **AC3 预写的「区块外 5→4」被实测推翻：真值 5→1**。因 `<title>` 与 `<h1>` **都**接了线，唯一残留就是那条
+Proposal 自己标注「预期保留」的 `<head>` meta。**报实测值，不报预写值。**
+
+**AC4 — 实现后判据裁决，原样**
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-294 --dry-run --json
+GATE_EXIT=0
+{
+  "id": "AC-294",
+  "verdict": "pass",
+  "reason": "acceptance passed (exit 0)",
+  "timestamp": "2026-09-17T19:17:13.330Z",
+  "dryRun": true,
+  "event": { "id": "5da4d066-7c7c-40eb-b4cb-1a00ee33c594", "item_id": "AC-294",
+             "pipeline_id": "AC-294", "gate": "goal", "actor": "goal-cli",
+             "verdict": "pass", "timestamp": "2026-09-17T19:17:13.330Z",
+             "payload": { "reason": "acceptance passed (exit 0)" } }
+}
+```
+
+⚠️ **本任务 worktree 内的红基线是 `CAUSE=no-running-serve-instance`（19:12:02Z），⛔ 不是立案时那条 `html-lang-not-zh`**：
+探针从 worktree 派生 root，worktree 内当时没有实例。两者是同一事实（`/manager` 从未接线）的**不同臂**，如实分列，⛔ 不混为一谈。
+
+**AC5 — 不回归 + 作用域**
+
+② `node --test packages/quay/test/serve-*.test.mjs` ⇒ `tests 218 / pass 217 / fail 0 / skipped 1`，`SERVE_TESTS_EXIT=0`；
+`serve-ac95-views.test.mjs`（`/manager` 既有 en 面）在其中，原样绿。
+③ 逐文件 `html lang="en"` 计数（base = 本任务 fork 点 `09f931256`）：**仅 `serve-system.ts` 1→0**，其余 11 个文件**一字未动**，
+总数 18→17。即该文件 **2 → 1（AC-293）→ 0（AC-294）**。立案基线 22 是**本任务 fork 之前**的值（22→18 由 AC-290~293 各减 1 造成）
+—— 本条按 AC 的要求是**逐文件差量**而非绝对值。
+④ 改动路径：`serve-i18n.ts`、`serve-system.ts`、`serve-manager.test.mjs`（均在本 Touches）＋
+`serve-system.test.mjs`（**本任务新增声明，见 Touches 说明**）。
+
+**AC6 — 驱动侧实例原样读数（⛔ 未重启、未干扰）**
+
+```
+$ curl -sf http://127.0.0.1:4173/health
+{"ok":true,"stale":true,"evaluated":true,"processStartedAt":"2026-09-17T16:21:45.405Z",
+ "latestCodeCommitAt":"2026-09-17T18:49:20.000Z","source":"git"}
+```
+
+`pid=3696699`、`cwd=/home/yale/work/quay`、`--host 0.0.0.0 --port 4173`，**`stale:true`**（起于 AC-288 落 develop 之前）。
+⇒ **驱动侧评估 AC-294 仍会红在 `CAUSE=html-lang-not-zh`，成因是该进程陈旧、与 `/manager` 的接线无关。**
+这是 AC-288 落地后 15 个页面 AC 的**公共前提**，⛔ 不是本任务引入的回归。**未重启它**：它不属本任务、为多层共用，
+重启它是**销毁读数**而不是产生读数；AC4 的绿取自本任务 worktree 内**跑本任务代码**的实例。
 
 ## DoD
 
@@ -211,15 +310,38 @@ for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink
 6. **证据留痕**：红/绿判据输出、en/zh 两条原始响应片段、因果对照两次读数、全量残留枚举、逐文件计数、
    驱动侧 `/health` 读数，落成**任务体内联**或**未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
 
+### DoD 逐条落实
+
+1. **落地对象** —— AC1 三段 + AC4 判据 `pass`（`GATE_EXIT=0`），读数全部取自 worktree 内**运行中的实例的响应体**，⛔ 未用 render 函数返回值代替。
+2. **可被打红** —— AC2 的 A/B 两个对照**实际执行**并各留两次读数（见上表）；B 把成因单独钉在字典臂上。
+3. **裁决诚实** —— AC4 原样贴出且为 `pass`；⛔ 未改判据（`goals/AC-294-*.md` 一行未动）、⛔ 未改任何其他任务 title、
+   ⛔ zh 值为 `管理器 / 外层 / 内层`，不含 ASCII `Manager`（判据的 nav 字面量臂在 zh 下读 0，见 AC3）。
+   驱动侧仍红一事已在 AC6 **具名**报告，⛔ 未据此把 AC1 改写为「已达成」。
+4. **作用域** —— AC5③ 逐文件计数（仅 `serve-system.ts` 1→0）＋ AC5④ 改动路径清单；同文件的 `/system` 代码行 Δ=0
+   （仅其**已失效的文档注释**被改写，见「实施记录」）。
+5. **可回滚** —— 见 `.quay/ac294-evidence/EVIDENCE.md` §8：还原 `serve-system.ts` 的 `/manager` 接线 + 删 `PAGE_LABELS`
+   的 `Manager / Outer / Inner` 词条 + 还原 `serve-system.test.mjs` 的 `AC-scope` 档 + 删 `serve-manager.test.mjs`
+   + `npm run build -w quay` + 重启实例。**纯本地代码、无迁移、无持久状态**；字典 `en` 列对每个 token 都是 identity
+   ⇒ 回滚不影响 `/manager` 以外任何消费者。
+6. **证据留痕** —— `.quay/ac294-evidence/`（**未跟踪**）：`EVIDENCE.md`、`en.html`、`zh.html`、`zh-controlA.html`、
+   `zh-controlB.html`、`gate-final.json`、`gate-final-exit.txt`、`scoped-gate.txt`；并**内联**于本任务体（上节 Evidence）。
+
 ## Touches
 
 - tasks/gap-ac294-manager-page-zh-chrome-nav-current-and-own-title.md
 - packages/quay/src/serve-system.ts
 - packages/quay/src/serve-i18n.ts
 - packages/quay/test/serve-manager.test.mjs
+- packages/quay/test/serve-system.test.mjs
 
 （说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物、四个共享渲染函数与 `NAV_LABELS` 属 AC-289 的产物，
 ⛔ 均不在本 Touches 的**改动**意图内（`serve-i18n.ts` 只追加本页 `PAGE_LABELS` 词条）；
 `packages/quay/src/serve-render.ts` 同理**不声明** —— 本任务对它 Δ=0；
 `goals/AC-294-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明 ——
 `anti-drift-touches-check` 只比对已跟踪文件。）
+
+⚠️ **`packages/quay/test/serve-system.test.mjs` 是本任务立案后才追加声明的**（先例：`gap-ac290-…` 同样在实现时
+才发现并追加了 `serve-i18n.test.mjs`）。**理由是它不改不行**：该文件的 `AC-scope` 档断言「`/manager` 在 zh 下仍是
+`<html lang="en">` —— 本任务没有接线它」，这在 AC-293 下为真、在本任务下**由构造即假**（本任务正是退役该边界的那个）
+⇒ 不改则 `serve-*.test.mjs` **永久红**，AC5② 的绿**不可达**。替换后的档断言「同文件两页在两种语言下各自保有**不同**
+的页 token」（共享文件最容易出的复制粘贴失效形态）——**是替换而非削弱**。⛔ 未借该文件改动触碰 `/system` 的任何断言。
