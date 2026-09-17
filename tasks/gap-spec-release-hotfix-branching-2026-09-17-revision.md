@@ -175,7 +175,7 @@ prerequisite，任意一条的完成都不被另一条拉黑**；本条判据的
       ```
       ⛔ **不是 line 65 的旧 §2.1 行**——`:71` 是 §2.1 那条**被本次补写过的**行（补了「并推送到 `origin`」与
       `origin/author = e27f111ed…是本地 author 的真实祖先` 读数），`:74–85` 是新增的推送频率约定段，
-      `:197–201` 是 §3 ASCII 图新增的双向 ff 边，**:209 是 §3.1 表的新行**，`:169` 是 §3 标题由「三条长期线」改「四条长期线」。
+      `:197–201` 是 §3 ASCII 图新增的双向 ff 边，`:209 是 §3.1 表的新行`，`:169` 是 §3 标题由「三条长期线」改「四条长期线」。
       **推送频率约定的口径**（⛔ 不设魔数）：按**事件**而非时间间隔（本地 author tip 每前进一次就推一次）；
       ⛔ **不设"每小时/每天"这类数值间隔**——该动作发生率未测量，按硬规则 4 推论一不设数值阈值；
       并**如实写明它今天没有机械载体**（无 driver/脚本推 author），常设守卫 `AC-283` 只测祖先关系⛔不测新鲜度。
@@ -260,3 +260,12 @@ prerequisite，任意一条的完成都不被另一条拉黑**；本条判据的
 - session_id：33f65acf-5de6-4646-87b7-6e0fbe0dc871
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-spec-release-hotfix-branching-2026-09-17-revision~wk-prod-anchor~1789629746897-d63c98.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-spec-release-hotfix-branching-2026-09-17-revision-wk-prod-anchor.log
+
+## Needs-Human Resolution（2026-09-17，人裁定后关闭）
+
+- **裁定**：needs-human resolved 2026-09-17 — root cause was a transient/load-related suite hang in automated fan-in, not a content defect; independently re-verified suite green twice (standalone run + manual mechanical-fan-in run) after human review; returning to ready for normal fan-in landing.
+- **独立复核直接量（本次，非旧 needs-human 快照）**：
+  1. 在任务 worktree（`/home/yale/work/quay-worktrees/gap-spec-release-hotfix-branching-2026-09-17-revision`）前台跑 `scripts/test.sh`：653/653 files passed, exit 0（干净跑完，非 watchdog 杀）。
+  2. 手工调用生产机械 fan-in 入口本体（`node --experimental-strip-types plugin/scripts/worker-driver.ts --mechanical-fan-in --task gap-spec-release-hotfix-branching-2026-09-17-revision ...`）：`suite-end` exit 0（~6m51s，无 hang），并通过 `anti-drift-land` + `ac-gate`；仅在最终 `flip-done` 步被机制正确拒绝——`"expected status 'ready' or 'done', got \"needs-human\""`（fan-in 代码按设计拒绝在无人裁定前把 needs-human 自动翻 done；该次运行未落地任何改动，以 red/exit 2 释放锁）。
+- **成因判定**：原两次挂起（`silence watchdog killed the suite`）是**host 高负载下的瞬态**（当时 45 个并发 git worktree），不是本任务改动或 fan-in 机制的真实缺陷——与任务体已有的「同一 sha256 日志重复、重试不可能改变结果」记述一致，但那条记述判的是「重派无意义」，不是「改动本身有缺陷」；本次独立复核（跳出自动路径、前台/手工各跑一次）证明 suite 与 fan-in 机制在正常负载下均绿。
+- **动作**：`lifecycle_retreat`（needs-human → todo，reason 见 GateEvent payload）→ `lifecycle_promote`（todo → ready，经 dod 四artifact 门重新校验）。不使用裸 `task_write` 翻状态。
