@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-cards-poll-cost-eval
 title: /dashboard/cards 30s 轮询占近 7 天总请求量 78%——评估改推送/条件请求是否值得，而非默认继续加频率
-status: ready
+status: done
 labels:
   - gap
   - webui
