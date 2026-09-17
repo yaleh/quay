@@ -13,6 +13,7 @@ extra:
 depends_on:
   - gap-suite-split-15-over-30s-test-files
   - gap-checker-mutation-parallel-case-loop
+  - gap-ac282-runner-prereqs-already-present
 goal_ac: AC-281
 ---
 **type:** execution
