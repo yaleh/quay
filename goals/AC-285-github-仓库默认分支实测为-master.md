@@ -1,7 +1,7 @@
 ---
 id: AC-285
 title: GitHub 仓库默认分支实测为 master
-status: draft
+status: active
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -24,4 +24,15 @@ criterion: >-
 expect: criterion exits 0 once git ls-remote --symref origin HEAD resolves to
   refs/heads/master
 origin: 当前默认分支是 develop（人 2026-09-15 裁定），本方案要求改回 master 作为对外门面
+activatedAt: 2026-09-17T04:08:01.222Z
+statusLog:
+  - at: 2026-09-17T04:08:01.222Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-023 激活，同步激活
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T04:08:01.221Z
 ---
