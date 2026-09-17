@@ -2,7 +2,7 @@
 id: gap-checker-mutation-parallel-case-loop
 title: checker-mutation-check.sh 的 82 用例循环真正并行化——父 shell 累加器会在子 shell
   里丢，朴素加后台符即恒绿（AC-280）
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
