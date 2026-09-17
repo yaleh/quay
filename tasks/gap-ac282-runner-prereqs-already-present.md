@@ -3,7 +3,7 @@ id: gap-ac282-runner-prereqs-already-present
 title: AC-282｜把 prereqProvision 派生进 .quay/ci-runs.jsonl 唯一写面 + tokyo-alpha 预置
   pyyaml/tmux（自定义 runner 镜像）——今天实测 criterion exit 1 停在
   CAUSE=prereq-provision-not-recorded
-status: todo
+status: ready
 labels:
   - gap
   - test-wall-clock
