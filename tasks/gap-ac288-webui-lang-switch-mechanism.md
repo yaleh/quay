@@ -108,7 +108,8 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 
 ## AC
 
-- [x] **AC1（goal 判据红→绿，判据一字未动）**：`node packages/quay/bin/quay.js goal gate AC-288` 逐字重跑 `verdict: pass` 并贴完整输出，**并排**贴第 1 步的红基线（同一条命令、同一个对象，取值由 fail 变 pass ⇒ 判据可被打红且这次改动是那个变化的因）。⛔ `goals/AC-288-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处**一字未动**（举证：`git diff develop -- goals/AC-288-*.md` 零命中 + 两侧 blob sha 相同）。
+- [x] **AC1（goal 判据红→绿；⛔ 判据不是我改的）**：`node packages/quay/bin/quay.js goal gate AC-288` 在**现行判据**上 `verdict: pass`（exit 0），并排贴**同一条现行判据**的红读数——两次红与一次绿之间**唯一的变量是被服务的代码**（证据 §1 / §8）。
+  ⚠️ **判据在实现期间被改过，但改的人不是我**：`615e2270c`（人 2026-09-17 裁定的「选项 A」）把它从「自启服务器的 python 脚本」改成「**探询一个已在运行的 `quay.ts serve`**（cwd = 仓库根）」的 shell 探针。⇒ 本条的举证因此不是「criterion 一字未动」，而是两件事**分别**成立：① 我的实现提交对 `goals/` **零命中**（`git show --stat e778958bf -- 'goals/AC-288-*.md'` ⇒ 空）；② 现行判据在**实现前**的代码上 fail、在**实现后**的代码上 pass，两次读数都由判据自己写下的具名 `CAUSE=` 区分。
 - [x] **AC2（纯函数层正/负控制——判据可被打红）**：直接 import `resolveLang` 单测，**至少**覆盖四态且取值**互不同形**：`{query:"zh"}`→`zh` / `source:"query"` / `setCookie ≠ null`；`{cookie:"zh"}`→`zh` / `"cookie"` / `setCookie === null`；`{}`→`en` / `"default"`；`{query:"fr"}`→`source:"invalid"` 且其返回值与 `"default"` 那一态**不相等**。⛔ 只测「绿」不测「红」不算（恒绿读数携带零信息，硬规则 4）。
 - [x] **AC3（黑盒三断言各自独立，贴原始响应）**：`startServer({port:0})` 起真服务，三条**分别**断言：① 无 query/cookie ⇒ body 含 `<html lang="en"`；② `?lang=zh` ⇒ body 含 `<html lang="zh"` **且** 响应头 `Set-Cookie` 逐字含 `lang=zh`；③ 只带 `Cookie: lang=zh`（URL 无 `?lang=`）⇒ body 含 `<html lang="zh"`。⛔ ② 的 body 与 Set-Cookie 是**两条**断言（判据里它们也是两条独立检查）。⛔ 不得只跑 ③ 就宣称 ② 成立。
 - [x] **AC4（机制不是 /dashboard 特例——因果对照）**：在 `handleAllRoutes` 处把解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC3 的 ②/③ 变红；恢复后复绿。两次读数并排贴出。⛔ 无此对照 ⇒ 「机制在派发器上生效」只是一句未被检验的断言（硬规则 4 推论四）。并列出传导面证据：`resolveLang` 的调用点**只有** `handleAllRoutes` 一处——贴 `grep -rn 'resolveLang' packages/quay/src/` 的**全部命中行**（⛔ 不是只报一个总数，硬规则 2）。
@@ -166,36 +167,33 @@ UI 偏好它挡不住任何真实攻击面；而它的代价是真实的：`Http
 **同理不设 `Secure`**：web 面跑在明文 HTTP 上（`quay serve --host <ip>`，典型是 127.0.0.1 或局域网地址），
 而 `Secure` cookie 在 `http://` 源上会被浏览器直接丢弃 —— 那会让「持久化」在这个机制瞄准的部署形态上**静默失效**。
 
-**位置**：`packages/quay/src/serve-lang.ts` 的 `LANG_COOKIE_ATTRS`，是这些属性的唯一正本；`All langCookie()`
-与它同源，`resolveLang` 与派生自它的 `setCookie` 都不再重复书写属性串。
+**位置**：`packages/quay/src/serve-lang.ts` 的 `LANG_COOKIE_ATTRS`，是这些属性的唯一正本；`langCookie()`
+与它同源，`resolveLang` 派生出的 `setCookie` 不再重复书写属性串。
 
 ## 证据（DoD 7 —— 内联摘要 + `.quay/ac288-*` 未跟踪 scratch，可被下一轮独立复算）
 
-载体：`.quay/ac288-raw-http-probe.py`（探针本体）、`.quay/ac288-raw-http-evidence.txt`（原始响应），
-均为**未跟踪**文件（`packages/quay/test/serve-lang.test.mjs` 为可复跑的判据本体，随分支提交）。
+载体：`.quay/ac288-raw-http-probe.py`（原始 HTTP 探针）、`.quay/ac288-raw-http-evidence.txt`（其输出）、
+`.quay/ac288-serve-restarted.log`（现行判据所需的常驻实例日志）；前三者与
+`packages/quay/test/serve-lang.test.mjs`（可复跑的判据本体，随分支提交）互为独立读法。
 
 ### 1. 判据红 → 绿（AC1）
 
-红基线（`timeout 300 node packages/quay/bin/quay.js goal gate AC-288`，cwd = 本任务 worktree，2026-09-17T15:48:48.141Z）：
+判据在实现期间被**人**改过（`615e2270c`，2026-09-17，选项 A）：新形态不自己启服务，而是
+`pgrep -f 'quay.ts serve'` 找**第一个** cwd = `git rev-parse --show-toplevel` 的进程，从它的 cmdline 派生
+`--host/--port` 再 curl；`origin` 明写操作前提是「有一个 cwd=仓库根的 serve 在跑；实现落地后须**重启**该实例才能翻绿」。
+⇒ 本条的对照因此取**同一条现行判据**在两种**被服务代码**上的读数（持久载体 `.quay/gate-events.jsonl`，逐条可复算）：
 
 ```
-{"id":"AC-288","verdict":"fail",
- "reason":"acceptance failed (exit 1) — CAUSE=query-param-not-honored -- /dashboard?lang=zh did not respond <html lang=\"zh\">",
- "timestamp":"2026-09-17T15:48:48.141Z","dryRun":false, ...}
-GATE_EXIT=1
+2026-09-17T15:04:02.268Z fail | CAUSE=query-param-not-honored …        ← 立案基线（旧判据形态）
+2026-09-17T15:08:52.489Z fail | CAUSE=query-param-not-honored …
+2026-09-17T15:09:22.133Z fail | CAUSE=query-param-not-honored …
+2026-09-17T16:05:03.207Z fail | CAUSE=query-param-not-honored …        ← 现行判据，打在【实现前】的常驻实例上
+2026-09-17T16:05:31.567Z fail | CAUSE=default-fetch-failed -- GET http://127.0.0.1:45083/dashboard returned nothing (addr=127.0.0.1:45083)
+2026-09-17T16:06:46.367Z pass | acceptance passed (exit 0)             ← 现行判据，打在【实现后】的常驻实例上
 ```
 
-绿（同一条命令、同一个 worktree，merge develop 之后复跑，2026-09-17T15:57:08.157Z）：
-
-```
-{"id":"AC-288","verdict":"pass","reason":"acceptance passed (exit 0)",
- "timestamp":"2026-09-17T15:57:08.157Z","dryRun":false, ...}
-GATE_EXIT=0
-```
-
-判据一字未动（硬规则 2 的两个方向都证）：`git diff develop --stat -- 'goals/AC-288-*.md'` ⇒ **零命中**；
-两侧 blob sha 相同 ⇒ `develop:` = `4081340344774420d60f2c83e934840089bdc024` = worktree 工作树
-`git hash-object` = `4081340344774420d60f2c83e934840089bdc024`。
+⛔ **我的提交对 `goals/` 零命中**：`git show --stat e778958bf -- 'goals/AC-288-*.md'` ⇒ **空**。
+判据的两侧读数由它自己写下的具名 `CAUSE=` 区分，不是靠人工解释。
 
 ### 2. 纯函数正/负控制（AC2）
 
@@ -218,13 +216,13 @@ AC2③ query 压过 cookie 且非法 query 让位给合法 cookie、AC2④ `pars
    status 200 | Set-Cookie None | Vary 'Cookie' | body tag '<html lang="zh">'
 ④ GET /dashboard?lang=fr（非法）
    status 200 | Set-Cookie None | Vary 'Cookie' | body tag '<html lang="en">'
-⑤ GET /dashboard?lang=en  headers={'Cookie': 'lang=zh'}（query 压过 cookie）
+⑤ GET /dashboard?lang=en  headers={'Cookie': 'zh'}（query 压过 cookie）
    status 200 | Set-Cookie 'lang=en; …' | Vary 'Cookie' | body tag '<html lang="en">'
 ```
 
-②的三条检查是**两条独立断言**（body 的标签 / 响应头的 Set-Cookie）—— 在测试文件里分列，在判据里也分列；
+②是**两条独立断言**（body 的标签 / 响应头的 Set-Cookie）—— 在测试文件里分列，在判据里也分列；
 ③ 的绿灯来自它自己的请求头，而不是②留下的 cookie（`request()` 不带 cookie jar，这是刻意的）。
-④⑤ 是两条判据里没有、但契约明写的边界：非法值既不渲染也不种 cookie；`?lang=en` 与 `?lang=zh` 走同一条路（都写 cookie）。
+④⑤ 是判据没写、但契约明写的边界：非法值既不渲染也不种 cookie；`?lang=en` 与 `?lang=zh` 走同一条路（都写 cookie）。
 
 ### 4. 因果对照：机制在**派发器**上，不是 /dashboard 特例（AC4）
 
@@ -273,7 +271,7 @@ serve-dashboard.ts 0                                            ← 本次唯一
 ### 6. 不回归（AC5①②）
 
 - `bash scripts/test.sh --for-task gap-ac288-webui-lang-switch-mechanism --allow-thin` ⇒ `tests 167 / pass 167 / fail 0`，`SCOPED_EXIT=0`
-  （新测试确实被选中并执行：输出中含 `✔ AC3⑤ …`）。
+  （merge develop 之后**复跑一次同样 167/167**；新测试确实被选中并执行：输出中含 `✔ AC3⑤ …`）。
 - `node --test packages/quay/test/serve-*.test.mjs`（21 个文件）⇒ `tests 195 / pass 194 / fail 0 / skipped 1`，`SERVE_EXIT=0`。
 - `tsc --noEmit`（`.quay/config.yml` 里 `ts-typecheck` 门逐字的那条 per-package 循环）⇒ `TSC_EXIT=0`。
 - `npm run build -w quay` ⇒ 产物里 `resolveLang` 命中 2、`htmlLangTag` 命中 2（新模块确实进了 bundle，
@@ -287,6 +285,24 @@ serve-dashboard.ts 0                                            ← 本次唯一
 回滚后 `/dashboard` 回到恒 `en`（即 AC-288 判据回到 fail），影响面仅限 web 面的语言标签与一个响应头，
 不涉及任何持久化数据的形态。
 
+### 8. 现行判据的操作前提 + 一个实测到的判据缺陷（⛔ 属于判据，不属于本任务）
+
+**操作前提（`origin` 明写，实测确认）**：现行 AC-288 判据要求**已有一个 cwd = 仓库根的 `quay.ts serve` 在跑**。
+本 task 落地后已在本任务 worktree 内起了一个常驻实例供判据读取：
+`pid 3338896 · cwd = /home/yale/work/quay-worktrees/gap-ac288-webui-lang-switch-mechanism · --host 127.0.0.1 --port 51921`
+（`setsid nohup node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port <N>`，
+日志 `.quay/ac288-serve-restarted.log`）。⛔ **改完代码必须重启它**，否则判据读的是旧代码。
+
+**实测到的缺陷（硬规则 3 的「枚举 vs 首个」形态）**：判据用 `pgrep -f 'quay.ts serve'` 取**第一个** cwd 匹配的进程
+就 `break`，即在一个**无序集合**上取首个元素，且不校验它是否还活着：16:05:03 那次红正是它挑中了
+`pid 3004043`（15:48:35 启动、承载**实现前**代码的孤儿，port 45083）——两次红读数（`query-param-not-honored`
+与随后的 `default-fetch-failed -- addr=127.0.0.1:45083`）都指向同一个孤儿。孤儿来自**旧判据形态**自己：
+它自启的 `quay.js serve` 只 kill 了 shim，`spawnSync` 出来的 `quay.ts serve` 子进程留了下来（实测同 cwd 下积了 4 个）。
+⇒ 影响面不止本任务：**任何 cwd 下有陈旧实例的仓库，该判据都会静默地测旧代码**（新旧实例同时存在时更是随机取一个）。
+处置（本任务采取的）：只 kill **cwd = 本任务 worktree** 的 4 个孤儿（`pgrep` + `readlink /proc/<pid>/cwd` 逐个判，
+⛔ 主检出 `/home/yale/work/quay` 的实例一个未动），再起一个承载新代码的实例。**判据本身的修法不在本任务 Touches 内**
+（`goals/AC-288-*.md` 属人/驱动维护面），此处只留证据供其所有者决定。
+
 ## Touches
 
 - tasks/gap-ac288-webui-lang-switch-mechanism.md
@@ -299,4 +315,5 @@ serve-dashboard.ts 0                                            ← 本次唯一
 （说明：本任务只碰**机制 + /dashboard 这一个消费者**。其余 13 个 serve-*.ts 的 22 个 `html lang="en"` 硬编码点**刻意不在本 Touches 内**——
 它们各自属于 AC-289~303 的页面任务，列入会把那 15 条任务的并发面锁死。`packages/quay/src/serve.ts` 也不在列：
 解析与 `Set-Cookie` 都落在 `handleAllRoutes`（`serve-handlers.ts`），`routeCfg` 只需保持只读、不必改动。
-取证用 scratch（`.quay/ac288-raw-http-probe.py` / `.quay/ac288-raw-http-evidence.txt`）为未跟踪文件，不进交付面。）
+取证用 scratch（`.quay/ac288-raw-http-probe.py` / `.quay/ac288-raw-http-evidence.txt` / `.quay/ac288-serve-restarted.log`）
+为未跟踪文件，不进交付面。）
