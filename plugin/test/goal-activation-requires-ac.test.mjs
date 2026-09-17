@@ -10,7 +10,13 @@
 // 断言的是【写面行为】（真 spawn goal-store CLI，读退出码 / stderr / 落盘状态），⛔ 不读源码版式：
 //   ① 零 AC 的 GOAL 激活 ⇒ fail-closed 拒绝（非 0 退出 + stderr 枚举名下 AC 数 = 0 + 盘上仍 draft）
 //   ② 名下有 ≥1 AC 的 GOAL 激活 ⇒ 正常放行（取假控制：证明实现不是「恒拒 GOAL 激活」）
-//   ③ 零 AC 的 draft GOAL 仍可创建（闸只作用于激活，⛔ 不是一律禁止无 AC 的目标存在）
+//   ③ 取假控制·作用域精确：闸的射程是 `{draft, active}` 这个【上界】，⛔ 不是「凡新 GOAL 一律要 AC」——
+//      零 AC 的 GOAL 以 `--status superseded`（作用域之外）出生 ⇒ 仍放行
+//      ⚠️ 2026-09-17 本条翻转（tasks/gap-goal-born-draft-zero-ac-escapes-standing-invariant）：它此前
+//      断言「零 AC 的 draft GOAL 仍可创建、闸只卡在激活那一步」。AC-217 的作用域逐字是
+//      `{draft, active}`，写面谓词扩到该作用域后，禁态在出生的第一步就不可达 ⇒ 旧断言的前提消失。
+//      本文件仍测【转换】路径（它用先落盘 draft 文件再转换的形态布置前置，正是为旧载体/手写记录
+//      保留的那条路径）；出生路径由 goal-create-as-active-requires-ac.test.mjs 覆盖。
 //   ④ 取假控制：AC 的状态不参与计数（achieved 的 AC 也算「有 AC」——与读数同一条谓词，
 //      ⛔ 实现不得自行收窄到「draft AC 才算」）
 //   ⑤ 取假控制：计数按 `goal:` 名匹配，⛔ 不是「仓库里有 AC 就算」（别的 goal 的 AC 不算数）
@@ -99,20 +105,25 @@ test('② 名下有 1 条 AC 的 GOAL 激活 ⇒ 放行（exit 0，盘上 active
   }
 });
 
-// ── ③ 零 AC 的 draft GOAL 仍可创建（闸只作用于激活，⛔ 不是禁止无 AC 的目标存在）───────────────
+// ── ③ 取假控制·作用域精确：射程止于 {draft, active}，⛔ 不是「凡新 GOAL 一律要 AC」──────────────
 
-test('③ 零 AC 的 draft GOAL 仍可创建 ⇒ exit 0，且随后激活同一条 ⇒ 被拒', () => {
+test('③ 零 AC 的 GOAL 以 --status superseded 出生 ⇒ 仍放行（⛔ 闸的射程没有溢出作用域）', () => {
   const tmp = makeWorkspace();
   try {
+    // ⚠️ 本条曾断言「零 AC 的 draft GOAL 仍可创建 ⇒ exit 0」——那是写面谓词只读 active 时的读数。
+    //     作用域扩到 AC-217 自己声明的 {draft, active} 之后该断言的前提消失，故改用一个【在作用域
+    //     之外】的状态来钉同一件事：闸没有顺手把「所有新 GOAL 都要 AC」也一并关上。
+    //     实测同一命令行在 `achieved` / `retired` 上也是 exit 0；这里取 `superseded`——一条被否决的
+    //     目标不需要退出条件，语义上最干净，且它一旦被过度收窄就会红。
     const r = goalStoreWrite(tmp, [
-      'GOAL-002', '--status', 'draft', '--title', 'new', '--origin', 'test fixture', '--body', GOAL_BODY,
+      'GOAL-002', '--status', 'superseded', '--title', 'new', '--origin', 'test fixture', '--body', GOAL_BODY,
     ]);
-    assert.equal(r.status, 0, `零 AC 的 draft GOAL 创建必须放行（stderr: ${r.stderr}）`);
-    assert.ok(/^status: draft$/m.test(readRecordFile(tmp, 'GOAL-002')), '创建落成 draft');
-    // 同一条记录：draft 放行 ≠ 激活放行——闸卡在激活那一步。
+    assert.equal(r.status, 0, `作用域外的状态仍须放行（stderr: ${r.stderr}）`);
+    assert.ok(/^status: superseded$/m.test(readRecordFile(tmp, 'GOAL-002')), '创建落成 superseded');
+    // 同一条记录：出生放行 ≠ 能变 active——闸仍卡在进入 {draft, active} 那一步。
     const a = goalStoreWrite(tmp, ['GOAL-002', '--status', 'active']);
     assert.notEqual(a.status, 0, '同一条零 AC 记录激活仍必须被拒（证明 ③ 不是把闸整个关掉）');
-    assert.ok(/^status: draft$/m.test(readRecordFile(tmp, 'GOAL-002')), '仍 draft');
+    assert.ok(/^status: superseded$/m.test(readRecordFile(tmp, 'GOAL-002')), '仍 superseded');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
