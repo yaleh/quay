@@ -1,7 +1,7 @@
 ---
 id: AC-284
 title: worker 任务 worktree 的分叉点被 merge-base 结构性校验，不再只查分支名
-status: draft
+status: active
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -28,4 +28,15 @@ criterion: >-
 expect: criterion exits 0 once dispatch-worktree-setup.sh contains a
   merge-base/is-ancestor check against develop
 origin: dispatch-worktree-setup.sh 现在只检查分支名是不是 task/*，不检查分叉点，2026-09-08 已有一次相关事故先例
+activatedAt: 2026-09-17T04:07:48.616Z
+statusLog:
+  - at: 2026-09-17T04:07:48.616Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-023 激活，同步激活
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T04:07:48.616Z
 ---
