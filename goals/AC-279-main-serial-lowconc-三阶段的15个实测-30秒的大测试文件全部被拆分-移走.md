@@ -1,7 +1,7 @@
 ---
 id: AC-279
 title: main/serial/lowconc 三阶段的15个实测>30秒的大测试文件全部被拆分/移走
-status: draft
+status: active
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -72,4 +72,15 @@ criterion: >-
 expect: criterion exits 0 once none of the 15 named offender files still exist
   at their original monolithic path
 origin: GOAL-022 背景：15个文件实测 __PERFILE__ duration_ms 均 >30000，逐个点名
+activatedAt: 2026-09-17T00:45:33.490Z
+statusLog:
+  - at: 2026-09-17T00:45:33.490Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T00:45:33.489Z
 ---
