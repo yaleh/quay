@@ -1,7 +1,7 @@
 ---
 id: AC-290
 title: /tasks 页面在 zh 下真实切换——导航当前项标签与该页面自己的 <title> 都相对英文基线发生变化
-status: draft
+status: active
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -82,4 +82,15 @@ expect: "criterion exits 0 once /tasks's en baseline contains the literal nav
 origin: 人 2026-09-17 讨论裁定：GOAL-024 达成范围 = 全部 15 个 SITE_NAV_ROUTES
   页面之一（/tasks，nav key 对应标签 'Tasks'）；判据用真实 HTTP 请求差分探测（en 基线 vs zh
   cookie），不是字符串比对/源码 grep（硬规则 2/4）。
+activatedAt: 2026-09-17T15:53:10.474Z
+statusLog:
+  - at: 2026-09-17T15:53:10.474Z
+    from: draft
+    to: active
+    actor: user
+    reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」——draft 记录已确认写入并可读，这是该指示对应的激活动作。
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T15:53:10.473Z
 ---
