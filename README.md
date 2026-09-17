@@ -96,6 +96,21 @@ tarball survives only as something you build yourself from a source checkout
 
 ### Option A — as a Claude Code plugin (recommended)
 
+**Prerequisite: `yaleh/quay` is a private repository.** Both commands below fetch the
+plugin over HTTPS, so `git` must already be able to authenticate to GitHub without
+prompting. `gh auth login` on its own is **not** enough — it stores an OAuth token for
+the `gh` CLI, but it does **not** register a git credential helper, so the clone aborts
+with `fatal: could not read Username for 'https://github.com': terminal prompts disabled`.
+Register `gh` as git's HTTPS credential helper first:
+
+```sh
+gh auth login        # skip if you are already logged in
+gh auth setup-git    # registers `gh auth git-credential` as a git credential helper
+```
+
+With that in place the two commands below work as written: Claude Code notices that SSH
+is not configured on the machine and falls back to cloning over HTTPS on its own.
+
 ```
 /plugin marketplace add yaleh/quay
 /plugin install quay
@@ -118,6 +133,9 @@ PATH — or, if the plugin channel is unavailable to you, build the npm tarball
 yourself (Option C below).
 
 ### Option B — from source (for development or the latest unreleased changes)
+
+The same private-repository prerequisite applies here — if `git clone` stops at a
+username prompt, do the `gh auth setup-git` step under Option A first.
 
 ```sh
 git clone https://github.com/yaleh/quay.git
