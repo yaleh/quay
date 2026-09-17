@@ -9,14 +9,19 @@ import os from "node:os";
 import path from "node:path";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
-import type { Lang } from "./serve-lang.ts";
+import { DEFAULT_LANG, type Lang } from "./serve-lang.ts";
+// AC-289: the label dictionary is imported for the render functions here and re-exported for pages,
+// for the SAME reason `htmlLangTag` is (above) — a page's consumption stays one line against the
+// module it already imports from, and no page ever re-reads the dictionary.
+import { navLabelsFor, navLabel, pageNameFor, type NavKey } from "./serve-i18n.ts";
 
 // gap-ac288-webui-lang-switch-mechanism: pages consume the language mechanism from ONE import —
 // `htmlLangTag` (the `<html lang="…">` opening tag) is re-exported here so a page's consumption is
 // a single line (`${htmlLangTag(lang)}<head>`) against a module it already imports from, never a
 // second parse of `?lang=` / the cookie. The resolver itself lives in serve-lang.ts; the dispatcher
-// is its only caller.
-export { htmlLangTag, type Lang, type LangSource, type LangResolution } from "./serve-lang.ts";
+// is its only caller. AC-289's label dictionary (serve-i18n.ts) rides the same seam.
+export { htmlLangTag, DEFAULT_LANG, type Lang, type LangSource, type LangResolution } from "./serve-lang.ts";
+export { navLabel, navLabelsFor, pageNameFor, NAV_KEYS, NAV_LABELS, type NavKey } from "./serve-i18n.ts";
 
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
 // two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
@@ -827,11 +832,16 @@ export function isMissingIdTask(t: { id?: unknown; title?: unknown; extra?: Reco
 // handler is wrapped defensively so ANY unexpected throw degrades to a 200 page with an error note
 // (never a 500), and every data source renders its own 未接入/无数据/读失败 state (AC3 — never blank/0).
 
-const SITE_NAV_GROUPS: Array<{ label: string; items: Array<[string, string]> }> = [
-  { label: "核心", items: [["dashboard", "Dashboard"], ["tasks", "Tasks"]] },
-  { label: "观测", items: [["live", "Live"], ["board", "Board"], ["system", "System"], ["manager", "Manager"], ["needs-human", "Needs Human"]] },
-  { label: "记录", items: [["journal", "Journal"], ["git", "Git History"], ["tests", "Tests"], ["sessions", "Sessions"]] },
-  { label: "知识", items: [["adr", "ADRs"], ["goal", "Goals"], ["doc", "Docs"], ["architecture", "Architecture"]] },
+// AC-289: this table carries nav KEYS only — the 15 view labels live in serve-i18n.ts's
+// `NAV_LABELS`, which is their single source. A literal label here would be a SECOND copy that the
+// zh dictionary could not reach: exactly the shape that left the nav English under `lang=zh`.
+// The `label` field is the GROUP heading (核心/观测/记录/知识) and is not a per-view label — it is
+// out of AC-289's scope and is rendered verbatim in both languages.
+const SITE_NAV_GROUPS: Array<{ label: string; items: NavKey[] }> = [
+  { label: "核心", items: ["dashboard", "tasks"] },
+  { label: "观测", items: ["live", "board", "system", "manager", "needs-human"] },
+  { label: "记录", items: ["journal", "git", "tests", "sessions"] },
+  { label: "知识", items: ["adr", "goal", "doc", "architecture"] },
 ];
 
 const SITE_NAV_ROUTES: Record<string, string> = {
@@ -865,12 +875,13 @@ export function renderSkipLink(): string {
   return html`<a class="skip-link" href="#main">跳到主要内容</a>`;
 }
 
-export function renderSiteNav(current: string): string {
+export function renderSiteNav(current: string, lang: Lang = DEFAULT_LANG): string {
+  const labels = navLabelsFor(lang);
   return html`${renderSkipLink()}<nav class="site-nav" aria-label="Site navigation">
     <div class="nav">
       <span class="nav-brand">Quay</span>
       ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${
-        g.items.map(([key, label]) => navItem(key, label, current, "nav-")).join("")
+        g.items.map((key) => navItem(key, labels[key], current, "nav-")).join("")
       }</span>`).join("")}
     </div>
   </nav>`;
@@ -878,10 +889,11 @@ export function renderSiteNav(current: string): string {
 
 /** Mobile full-screen menu content (the sc-if design's isMobile form): the SAME navGroupDefs
  *  as the desktop bar, but as block links under per-group section labels. */
-function renderMobileMenu(current: string): string {
+function renderMobileMenu(current: string, lang: Lang = DEFAULT_LANG): string {
+  const labels = navLabelsFor(lang);
   return SITE_NAV_GROUPS.map((g) => html`<div class="mobile-menu-group">
     <div class="mobile-menu-group-label">${escapeHtml(g.label)}</div>
-    ${g.items.map(([key, label]) => navItem(key, label, current, "mobile-menu-")).join("")}
+    ${g.items.map((key) => navItem(key, labels[key], current, "mobile-menu-")).join("")}
   </div>`).join("");
 }
 
@@ -893,7 +905,7 @@ function renderMobileMenu(current: string): string {
  * cost; on mobile the header is sticky and the menu carries the FULL 15-view site nav so the
  * hamburger is the "go anywhere" affordance the design provides. Page label shown at right.
  */
-export function renderMobileChrome(current: string, pageLabel: string): string {
+export function renderMobileChrome(current: string, pageLabel: string, lang: Lang = DEFAULT_LANG): string {
   return html`<div class="mobile-chrome">
     <input type="checkbox" id="mobile-menu-toggle" class="mobile-menu-toggle-input" aria-hidden="true">
     <header class="mobile-header">
@@ -904,7 +916,7 @@ export function renderMobileChrome(current: string, pageLabel: string): string {
       <span class="mobile-header-page">${escapeHtml(pageLabel)}</span>
     </header>
     <nav class="mobile-menu" aria-label="Site navigation">
-      ${renderMobileMenu(current)}
+      ${renderMobileMenu(current, lang)}
     </nav>
   </div>`;
 }
@@ -1058,9 +1070,14 @@ export function projectLabel(id: Pick<ServeIdentity, "projectName" | "projectRoo
  * When `id` is null the title says so — it does NOT silently fall back to the bare page name,
  * because that output would be indistinguishable from a resolved single-project identity
  * (硬规则 3b: a judgment that cannot distinguish "checked and fine" from "never checked").
+ *
+ * `lang` (AC-289) resolves the page's own token through the label dictionary. It defaults to
+ * `DEFAULT_LANG`, so the 22 call sites that predate it keep rendering their English token
+ * byte-for-byte, and a `zh` request gets the page's own chrome translated — which is the
+ * difference between "the shared nav bar switched" and "THIS page switched".
  */
-export function pageTitle(pageName: string, id: ServeIdentity | null | undefined): string {
-  const safe = escapeHtml(pageName);
+export function pageTitle(pageName: string, id: ServeIdentity | null | undefined, lang: Lang = DEFAULT_LANG): string {
+  const safe = escapeHtml(pageNameFor(pageName, lang));
   // A caller that never went through startServer (a direct render-function unit test, a future
   // handler that forgot to thread `cfg`) leaves `id` absent or malformed — both are "no identity
   // resolved", and both must render the same distinguishable label rather than an anonymous title

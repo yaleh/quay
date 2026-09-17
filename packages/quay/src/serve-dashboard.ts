@@ -8,7 +8,7 @@ import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Lang, Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 import { renderFanInCell } from "./serve-task.ts";
 
@@ -1304,9 +1304,9 @@ export function renderDashboardPage(
   // `opts.lang` (undefined ⇒ DEFAULT_LANG `en`, so the direct-render unit tests that predate this
   // field are unchanged). This is the whole per-page cost of consuming the mechanism — one line.
   return html`<!doctype html>
-    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity)}</title></head>
-    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
-      <h1>Dashboard</h1>
+    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity, opts.lang)}</title></head>
+    <body>${renderMobileChrome("dashboard", "dashboard", opts.lang)}${renderSiteNav("dashboard", opts.lang)}<main id="main">
+      <h1>${pageNameFor("Dashboard", opts.lang)}</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
       ${opts.identity ? renderIdentityCard(opts.identity) : ""}
