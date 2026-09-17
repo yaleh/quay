@@ -28,6 +28,12 @@
 //                 | absent`；⛔ 没有「读不懂 ⇒ already-present」的路径（硬规则 3b）。
 //                 **日志压根没拉** ⇒ **不写该键**（缺 ≠ 0）；**拉到了但一条 marker 都没有** ⇒ 三键全
 //                 `absent`（一个独立取值：「没评估成」，⛔ 不是「从来没装过」）。AC-282 载体臂读它。
+//   schedulerMs   **在 job 级读数上**（判据 AC-281 读 `jobs[]` 里 `name == "test"` 那条）：该 job
+//                 自己的日志里 `__OVERHEAD__ scheduler_ms=<n>` 行（`suite-scheduler.ts` 在套件队列
+//                 排空那一刻往 stderr 打一次）⇒ 套件**自身调度器**的墙钟（毫秒）。
+//                 ⛔ 它**不是** job 总墙钟：GitHub 的 `durationSec` 含 checkout / npm install /
+//                 coverage self-check / runner 收尾（实测 ≥27s 的不可约开销），而 AC-281 只量套件自身。
+//                 **日志压根没拉 / 日志里没有这一行** ⇒ **不写该键**（缺 ≠ 0，硬规则 6）。
 //   seaVerify     **只在 release workflow 的记录上**出现（`workflow ∈ {Release, release.yml}`）：
 //                 release.yml 的 SEA 验证 job（`sea-verify-node-free` +
 //                 matrix 形态的 `sea-verify-node-free-cross-platform (…)`）的结论派生 ——
@@ -180,6 +186,51 @@ export function hasPrereqProvision(reading: { prereqProvision?: unknown }): bool
   return p !== null && typeof p === "object" && !Array.isArray(p);
 }
 
+// ── schedulerMs：**套件自身调度器**的墙钟（AC-281 判据读的字段）───────────────────────────────
+// 为什么需要它（tasks/gap-ac281-scheduler-ms-carrier-field）：AC-281 原量的是 CI `test` job 的**总
+// 墙钟**（`durationSec`），而其中不可约的固定开销（checkout / npm install / coverage self-check /
+// runner 收尾）实测 ≥27s ⇒ 那条判据在当前 job 结构下**数学不可达成**。2026-09-17 人裁定改为只量
+// 套件自身的调度器时长 —— 那条读数此前只在日志里，载体没有采集它 ⇒ 判据永久停在
+// `CAUSE=scheduler-ms-not-recorded`（NOT-EVALUATED，硬规则 4 推论三的形态：明明打了，但没落进载体）。
+//
+// 这个读数**只能**从 job 自己的日志得到：GitHub 的 jobs API 只给 job 级 started/completed_at（固定
+// 开销一起算进去），不拆分套件内部。故 `suite-scheduler.ts` 在**所有文件跑完、三个队列都排空**那一刻
+// 往 stderr 打一行 house marker（与 `__GROUP__` / `__PREREQ__` 同族），本组函数只读该行。
+//
+// ⛔ 正则**刻意不锚 `^`**：GitHub 的 job 日志给**每一行**都加了 `<ISO 时间戳> ` 前缀（实测 2026-09-17
+// run 35233095902 / job 105242006545 的原始字节：
+//   `2026-09-17T14:23:32.6759493Z __OVERHEAD__ scheduler_ms=53460`）
+// ⇒ `^`-锚定会让命中**恒为 0**，而"检查恒不命中"与"套件没打印"同形（硬规则 4c：判据点名的量必须
+// 穿过所有中间层还取得到 —— 这里的中间层就是 GitHub 的行前缀）。同文件既有的 `GROUP_FILES_RE` /
+// `PREREQ_MARKER_RE` 也正是**不锚**的，这是同一条实测结论的第二个受益者。
+
+/** marker 行的形态：`__OVERHEAD__ scheduler_ms=<n>`（单位毫秒）。 */
+export const SCHEDULER_MS_RE = /__OVERHEAD__[ \t]+scheduler_ms=(\d+)/g;
+
+/**
+ * 从**一个 job 自己的日志**里派生 `schedulerMs`（毫秒）。命中 ⇒ 取**最后一个**；无命中 / 读不懂
+ * ⇒ `null`（调用方据此**不写**该键 —— 缺 ≠ 0，硬规则 6，⛔ 不回落成 `0`/`-1` 这类"看起来像失败"
+ * 的假值：一个恒值字段会让 AC-281 的判据退化成恒真的回声，硬规则 4）。
+ *
+ * 为什么取**最后一个**：该 marker 在同一份日志里**结构上只出现一次**（调度器只在队列排空那一刻打
+ * 一次；实测上述真实日志里 `scheduler_ms=` 的命中数 = 1），故"第一个"与"最后一个"在真实日志上等价；
+ * 但一旦哪天出现第二行，**最后一行才是调度器自己的终态读数**（它必然排在所有测试输出之后），而第一行
+ * 可能是某个测试回显的字符串。与 `derivePrereqProvision` 的「同一前置多行 ⇒ 后者胜」同款。
+ */
+export function deriveSchedulerMs(logText: string): number | null {
+  let last: number | null = null;
+  for (const m of logText.matchAll(SCHEDULER_MS_RE)) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n)) last = n;
+  }
+  return last;
+}
+
+/** 一条 job 读数是否已经带了 schedulerMs（载体侧判「这条 run 派生过了」用的）。 */
+export function hasSchedulerMs(reading: { schedulerMs?: unknown }): boolean {
+  return typeof reading.schedulerMs === "number" && Number.isFinite(reading.schedulerMs);
+}
+
 // ── seaVerify：SEA 产物「真的能在无 Node 环境跑起来吗」的载体字段（AC-267 载体臂）──────────────
 // 为什么需要它：AC-267 的判据静态臂只证明**源码里**再没有模块顶层求值 `import.meta.url` 的点；
 // 「发出去的二进制真的能起 `quay serve`」这件事只能由**一次真实 release run** 证明。在此之前载体里
@@ -278,6 +329,7 @@ export function toJobReadings(
   jobs: GhJob[],
   timeouts: Record<string, number> = {},
   prereqByJob?: ReadonlyMap<GhJob, Record<string, string>>,
+  schedulerByJob?: ReadonlyMap<GhJob, number>,
 ): JobReading[] {
   return jobs.map((j) => {
     const name = String(j.name ?? "");
@@ -291,6 +343,8 @@ export function toJobReadings(
     if (typeof to === "number" && to > 0) reading.timeoutMinutes = to;
     const prov = prereqByJob?.get(j);
     if (prov !== undefined) reading.prereqProvision = prov;
+    const sched = schedulerByJob?.get(j);
+    if (sched !== undefined) reading.schedulerMs = sched;
     if (Array.isArray(j.steps)) {
       reading.steps = j.steps.map((s) => ({
         name: String(s.name ?? ""),
@@ -309,6 +363,8 @@ export interface BuildRecordOptions {
   failedTests?: string[];
   /** 这次真的拉到过日志的 job → 它日志里派生出的 `prereqProvision`（见 `toJobReadings`）。 */
   prereqByJob?: ReadonlyMap<GhJob, Record<string, string>>;
+  /** 这次真的拉到过日志的 job → 它日志里派生出的 `schedulerMs`（见 `toJobReadings`）。 */
+  schedulerByJob?: ReadonlyMap<GhJob, number>;
 }
 
 /**
@@ -329,7 +385,9 @@ export function buildRecord(run: GhRun, opts: BuildRecordOptions = {}): RunRecor
   if (dur !== undefined) rec.durationSec = dur;
 
   const jobs = opts.jobs ?? [];
-  if (jobs.length > 0) rec.jobs = toJobReadings(jobs, opts.timeouts ?? {}, opts.prereqByJob);
+  if (jobs.length > 0) {
+    rec.jobs = toJobReadings(jobs, opts.timeouts ?? {}, opts.prereqByJob, opts.schedulerByJob);
+  }
   // seaVerify：**只在 release workflow 的记录上**派生（AC-267 载体臂读的是
   // `workflow ∈ {release.yml, Release}` 的记录）。派生自本条记录自己的 job 读数 —— 与 `rec.jobs`
   // 同源，两者不会各说各话。⛔ jobs 为空（API 读失败 / 离线缝没喂）⇒ `absent`，⛔ 不是 `success`。
@@ -473,6 +531,12 @@ export interface CollectOptions {
    *  只按前者放行，会让一条 testFiles 已派生过的 run **永远不再读日志** ⇒ 它的 prereqProvision
    *  结构性不可派生（这正是 AC-282 停在 `prereq-provision-not-recorded` 的成因之一）。 */
   knownPrereqRuns?: ReadonlySet<string>;
+  /** 已经派生过 `schedulerMs` 的 runId（由载体现有记录喂入）⇒ 不重复拉日志。
+   *  ⛔ **第三个**独立闸门，与 knownTestFiles / knownPrereqRuns 同款理由：三个量共用**同一次**下载
+   *  （同一条 job 日志同时承载 `__GROUP__` / `__PREREQ__` / `__OVERHEAD__ scheduler_ms`）。只按前两者
+   *  放行，会让一条两个旧量都已派生过的 run **永远不再读日志** ⇒ 它的 schedulerMs 结构性不可派生
+   *  （AC-281 恒停 `scheduler-ms-not-recorded`）。 */
+  knownSchedulerRuns?: ReadonlySet<string>;
   /** 已知**派生不出** testFiles 的 runId（负缓存）：跳过拉日志且**不重复告警**。
    *  ⛔ 与 knownTestFiles 是两个方向：那个说「已经知道值了」，这个说「试过，拿不到」。 */
   skipLogRuns?: ReadonlySet<string>;
@@ -598,17 +662,21 @@ export function collect(opts: CollectOptions): CollectResult {
     const alreadyKnown = testFiles !== null;
     const knownUnderivable = opts.skipLogRuns?.has(runId) === true;
     const prereqKnown = opts.knownPrereqRuns?.has(runId) === true;
+    const schedulerKnown = opts.knownSchedulerRuns?.has(runId) === true;
     // 闸门（tasks/gap-ac282-runner-prereqs-already-present §三.1）：**testFiles 未知（且未负缓存）
     // 或 prereqProvision 未派生** ⇒ 这一条 run 就要读日志。原来是 `!alreadyKnown && …` —— 只由
     // testFiles 决定 ⇒ 一条 testFiles 已派生过的 run 永远不再读日志，它的 prereqProvision 结构性
-    // 不可派生。两个量共用**同一次**下载（同一条 job 日志同时承载 `__GROUP__` 与 `__PREREQ__`）。
+    // 不可派生。多个量共用**同一次**下载（同一条 job 日志同时承载 `__GROUP__` / `__PREREQ__` /
+    // `__OVERHEAD__ scheduler_ms`）—— **每一个后派生字段各要一个闸门**，缺哪个哪个就结构性不可派生。
     const needsTestFiles = !alreadyKnown && !knownUnderivable;
     const needsPrereq = !prereqKnown;
+    const needsSchedulerMs = !schedulerKnown;
     const prereqByJob = new Map<GhJob, Record<string, string>>();
-    if ((needsTestFiles || needsPrereq) && wantsLogs(r) && !offlineSeam && runId !== "") {
+    const schedulerByJob = new Map<GhJob, number>();
+    if ((needsTestFiles || needsPrereq || needsSchedulerMs) && wantsLogs(r) && !offlineSeam && runId !== "") {
       if (logRunsUsed >= maxLogRuns) {
         // ⛔ 预算耗尽要留痕：静默少拉会让「没派生出来」与「派生不出」同形（硬规则 3b）。
-        // 它现在同时覆盖 testFiles 与 prereqProvision 两条派生路径。
+        // 它现在同时覆盖 testFiles / prereqProvision / schedulerMs 三条派生路径。
         warnings.push(`log-budget-exhausted:${runId}:maxLogRuns=${maxLogRuns}`);
       } else {
         logRunsUsed += 1;
@@ -630,6 +698,10 @@ export function collect(opts: CollectOptions): CollectResult {
             // 日志**拉到了** ⇒ 就该给这个 job 落一个 prereqProvision（一条 marker 都没有 ⇒ 三键全
             // `absent`，那是「没评估成」这个独立取值，⛔ 不是「没写」）。没拉到日志的 job 不落键。
             prereqByJob.set(j, derivePrereqProvision(log));
+            // 同一次下载、第三个派生量：schedulerMs 只在跑测试那个 job 的日志里（marker 由
+            // `suite-scheduler.ts` 在队列排空那一刻打一次）。派不出 ⇒ **不 set**（缺 ≠ 0）。
+            const sched = deriveSchedulerMs(log);
+            if (sched !== null) schedulerByJob.set(j, sched);
           } catch (e) {
             warnings.push(`job-log-unreadable:${j.id}:${e instanceof Error ? e.message : String(e)}`);
           }
@@ -638,7 +710,7 @@ export function collect(opts: CollectOptions): CollectResult {
       }
     }
 
-    records.push(buildRecord(r, { jobs, timeouts, testFiles, prereqByJob }));
+    records.push(buildRecord(r, { jobs, timeouts, testFiles, prereqByJob, schedulerByJob }));
   }
 
   return { records, warnings, logRunsFetched: logRunsUsed };
@@ -722,6 +794,36 @@ export function knownPrereqRunsFromCarrier(carrierPath: string): Set<string> {
   return out;
 }
 
+/**
+ * 载体现有记录里**已经派生过 `schedulerMs`** 的 runId（任一条 job 读数带该键即算）。
+ * 喂给 `collect(knownSchedulerRuns:)` ⇒ 已派生过的 run 不重复下载日志。
+ * ⛔ 缺 ≠ 0（硬规则 6）：没有该键的 run 不参与，否则「缺失」会被当成「已知」，从此永不补拉
+ * —— 而 AC-281 读的正是**最新**那条记录，它可能恰好在飞窗口里。
+ */
+export function knownSchedulerRunsFromCarrier(carrierPath: string): Set<string> {
+  const out = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(carrierPath, "utf8");
+  } catch {
+    return out;
+  }
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (t === "") continue;
+    try {
+      const r = JSON.parse(t) as RunRecord;
+      const id = r.runId === undefined || r.runId === null ? "" : String(r.runId);
+      if (id === "") continue;
+      const jobs = Array.isArray(r.jobs) ? r.jobs : [];
+      if (jobs.some((j) => hasSchedulerMs(j))) out.add(id);
+    } catch {
+      // 读不懂的行跳过（写面只追加，⛔ 从不重写别人的行）
+    }
+  }
+  return out;
+}
+
 export interface WriteResult {
   appended: number;
   skipped: number;
@@ -730,6 +832,8 @@ export interface WriteResult {
   enriched: number;
   /** 就地补全 `prereqProvision` 的条数（同一条边界：只填缺失的那个键）。 */
   enrichedPrereq: number;
+  /** 就地补全 `schedulerMs` 的条数（同一条边界：只填缺失的那个键）。 */
+  enrichedScheduler: number;
 }
 
 /** 一条既有记录的 job 列表里，哪些 job 需要被 `incoming` 补上 `prereqProvision`（其余字段逐字保留）。 */
@@ -752,26 +856,66 @@ function prereqPatch(existingJobs: unknown, incomingJobs: unknown): RunRecord["j
   return changed ? (out as RunRecord["jobs"]) : null;
 }
 
+/** 既有记录的 job 列表里，哪些 job 需要被 `incoming` 补上 `schedulerMs`（其余字段逐字保留）。 */
+function schedulerPatch(existingJobs: unknown, incomingJobs: unknown): RunRecord["jobs"] | null {
+  if (!Array.isArray(existingJobs) || !Array.isArray(incomingJobs)) return null;
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const j of incomingJobs) {
+    const rec = j !== null && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+    if (rec && hasSchedulerMs(rec)) byName.set(String(rec.name ?? ""), rec);
+  }
+  let changed = false;
+  const out = existingJobs.map((j) => {
+    const rec = j !== null && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+    if (!rec || hasSchedulerMs(rec)) return j;
+    const src = byName.get(String(rec.name ?? ""));
+    if (!src) return j;
+    changed = true;
+    return { ...rec, schedulerMs: src.schedulerMs };
+  });
+  return changed ? (out as RunRecord["jobs"]) : null;
+}
+
+/** `enrichable` 的读数：要合并进去的键 + **哪几个 job 级补全真的动了**（各自的计数分开报）。 */
+interface Enrichment {
+  patch: Record<string, unknown>;
+  /** 本次补上了 `prereqProvision`。 */
+  prereqPatched: boolean;
+  /** 本次补上了 `schedulerMs`。 */
+  schedulerPatched: boolean;
+}
+
 /**
  * 一条既有记录能否被 `incoming` **补全**。返回要合并进去的键（没有可补的 ⇒ null）。
  *
  * 边界与 `testFiles` 那一条**逐字同款**（刻意收窄到不可能改语义）：只补**既有行缺、新记录有**的
  * 派生字段，既有行其余字段逐字保留。
  *
- * 为什么 `prereqProvision` 也要纳入（tasks/gap-ac282-runner-prereqs-already-present §三.2）：去重键
- * 是 `workflow|runId`，而该键是**后派生**的（要下载 job 日志）。一条在派生落地**之前**已落盘的记录
- * 走纯追加路径**永远补不上** ⇒ 在飞窗口里那条会永久缺这个读数，而判据读「最新一条」，正好可能读到它。
+ * 为什么 `prereqProvision` / `schedulerMs` 也要纳入（tasks/gap-ac282-runner-prereqs-already-present
+ * §三.2；tasks/gap-ac281-scheduler-ms-carrier-field）：去重键是 `workflow|runId`，而这两个键都是
+ * **后派生**的（要下载 job 日志）。一条在派生落地**之前**已落盘的记录走纯追加路径**永远补不上**
+ * ⇒ 在飞窗口里那条会永久缺这个读数，而判据读「最新一条」，正好可能读到它。
+ *
+ * 两个 job 级补全**串联**（不是一个盖掉另一个）：它们写在同一个 `jobs` 数组的**不同键**上，串联后
+ * 两条都能落到同一次落盘里；各自动没动分别用独立读数报（⛔ 不合并成一个 `jobs` 布尔，那样「补了
+ * 哪个」就不可区分了 —— 硬规则 3b）。
  */
-function enrichable(existing: RunRecord, incoming: RunRecord): Record<string, unknown> | null {
+function enrichable(existing: RunRecord, incoming: RunRecord): Enrichment | null {
   const patch: Record<string, unknown> = {};
   if (!(typeof existing.testFiles === "number" && Number.isInteger(existing.testFiles))) {
     if (typeof incoming.testFiles === "number" && Number.isInteger(incoming.testFiles)) {
       patch.testFiles = incoming.testFiles;
     }
   }
-  const jobs = prereqPatch(existing.jobs, incoming.jobs);
+  const prereqJobs = prereqPatch(existing.jobs, incoming.jobs);
+  const prereqPatched = prereqJobs !== null;
+  const baseJobs = prereqJobs ?? existing.jobs;
+  const schedJobs = schedulerPatch(baseJobs, incoming.jobs);
+  const schedulerPatched = schedJobs !== null;
+  const jobs = schedJobs ?? prereqJobs;
   if (jobs !== null) patch.jobs = jobs;
-  return Object.keys(patch).length > 0 ? patch : null;
+  if (Object.keys(patch).length === 0) return null;
+  return { patch, prereqPatched, schedulerPatched };
 }
 
 /**
@@ -822,6 +966,7 @@ export function writeCarrier(
   // 就地补全（见上）；任何 IO 失败都只是「这轮没补上」，⛔ 不影响已经追加的行。
   let enriched = 0;
   let enrichedPrereq = 0;
+  let enrichedScheduler = 0;
   let existingText: string | null = null;
   try {
     existingText = fs.readFileSync(carrierPath, "utf8");
@@ -843,11 +988,12 @@ export function writeCarrier(
       const key = `${String(rec.workflow ?? "")}|${String(rec.runId ?? "")}`;
       const incoming = byKey.get(key);
       if (!incoming) continue;
-      const patch = enrichable(rec, incoming);
-      if (patch === null) continue;
-      if ("testFiles" in patch) enriched += 1;
-      if ("jobs" in patch) enrichedPrereq += 1;
-      lines[i] = JSON.stringify({ ...rec, ...patch });
+      const enr = enrichable(rec, incoming);
+      if (enr === null) continue;
+      if ("testFiles" in enr.patch) enriched += 1;
+      if (enr.prereqPatched) enrichedPrereq += 1;
+      if (enr.schedulerPatched) enrichedScheduler += 1;
+      lines[i] = JSON.stringify({ ...rec, ...enr.patch });
       changed = true;
     }
     if (changed) {
@@ -856,7 +1002,7 @@ export function writeCarrier(
       fs.renameSync(tmp, carrierPath);
     }
   }
-  return { appended: out.length, skipped, attributed, enriched, enrichedPrereq };
+  return { appended: out.length, skipped, attributed, enriched, enrichedPrereq, enrichedScheduler };
 }
 
 // ── 生产接线面（goal-driver 每轮调用）────────────────────────────────────────────────────────
@@ -885,12 +1031,16 @@ export interface CiRunsRoundReading {
   enriched: number;
   /** 本次就地补全 prereqProvision 的条数。 */
   enrichedPrereq: number;
-  /** 本次真的下载了多少条 run 的 job 日志（testFiles/prereqProvision 派生的成本直接量）。 */
+  /** 本次就地补全 schedulerMs 的条数。 */
+  enrichedScheduler: number;
+  /** 本次真的下载了多少条 run 的 job 日志（testFiles/prereqProvision/schedulerMs 派生的成本直接量）。 */
   logsFetched: number;
   /** 本次从日志里派生出的 testFiles 条数（⛔ 不是「写了多少条记录」）。 */
   testFilesDerived: number;
   /** 本次从日志里派生出的 prereqProvision 条数（载体里带该键的记录数）。 */
   prereqProvisionDerived: number;
+  /** 本次从日志里派生出的 schedulerMs 条数（载体里带该键的记录数）。 */
+  schedulerMsDerived: number;
   /** 采集过程中读不懂的东西（⛔ 不静默吞）。 */
   warnings: string[];
 }
@@ -973,9 +1123,11 @@ export function collectForRound(root: string, opts: CollectForRoundOptions = {})
     attributed: 0,
     enriched: 0,
     enrichedPrereq: 0,
+    enrichedScheduler: 0,
     logsFetched: 0,
     testFilesDerived: 0,
     prereqProvisionDerived: 0,
+    schedulerMsDerived: 0,
     warnings: [],
   };
 
@@ -1021,6 +1173,7 @@ export function collectForRound(root: string, opts: CollectForRoundOptions = {})
       maxLogRuns: opts.maxLogRuns ?? DEFAULT_MAX_LOG_RUNS,
       knownTestFiles: knownTestFilesFromCarrier(carrier),
       knownPrereqRuns: knownPrereqRunsFromCarrier(carrier),
+      knownSchedulerRuns: knownSchedulerRunsFromCarrier(carrier),
       skipLogRuns: new Set(Object.keys(state.underivable ?? {})),
       ...(opts.run ? { run: opts.run } : {}),
     });
@@ -1031,7 +1184,14 @@ export function collectForRound(root: string, opts: CollectForRoundOptions = {})
   }
   warnings.push(...result.warnings);
 
-  let res: WriteResult = { appended: 0, skipped: 0, attributed: 0, enriched: 0, enrichedPrereq: 0 };
+  let res: WriteResult = {
+    appended: 0,
+    skipped: 0,
+    attributed: 0,
+    enriched: 0,
+    enrichedPrereq: 0,
+    enrichedScheduler: 0,
+  };
   try {
     const knownFlakes = loadKnownFlakes(defaultKnownFlakesPath());
     if (knownFlakes === null) warnings.push("known-flakes-unreadable:本次判不出 known-flake");
@@ -1058,16 +1218,19 @@ export function collectForRound(root: string, opts: CollectForRoundOptions = {})
     ran: true,
     reason:
       `采集 ${result.records.length} 条，追加 ${res.appended} 条，` +
-      `补全 testFiles ${res.enriched} 条 / prereqProvision ${res.enrichedPrereq} 条`,
+      `补全 testFiles ${res.enriched} 条 / prereqProvision ${res.enrichedPrereq} 条 / ` +
+      `schedulerMs ${res.enrichedScheduler} 条`,
     carrier,
     appended: res.appended,
     skipped: res.skipped,
     attributed: res.attributed,
     enriched: res.enriched,
     enrichedPrereq: res.enrichedPrereq,
+    enrichedScheduler: res.enrichedScheduler,
     logsFetched: result.logRunsFetched,
     testFilesDerived: result.records.filter((r) => typeof r.testFiles === "number").length,
     prereqProvisionDerived: result.records.filter((r) => (r.jobs ?? []).some((j) => hasPrereqProvision(j))).length,
+    schedulerMsDerived: result.records.filter((r) => (r.jobs ?? []).some((j) => hasSchedulerMs(j))).length,
     warnings,
   };
 }
@@ -1179,9 +1342,11 @@ export function main(argv: string[]): number {
       ...(branch ? { branch } : {}),
       logFetch: logFetchArg,
       maxLogRuns,
-      // 增量回填：载体现有 testFiles / prereqProvision 喂进来 ⇒ 已派生过的 run 不重复下载日志。
+      // 增量回填：载体现有 testFiles / prereqProvision / schedulerMs 喂进来 ⇒ 已派生过的 run 不重复
+      // 下载日志。⛔ 三个闸门都要接上：漏掉哪个，那个字段对「已派生过前两个量的 run」就结构性不可派生。
       knownTestFiles: knownTestFilesFromCarrier(carrier),
       knownPrereqRuns: knownPrereqRunsFromCarrier(carrier),
+      knownSchedulerRuns: knownSchedulerRunsFromCarrier(carrier),
       ...(runs ? { runs } : {}),
     });
   } catch (e) {
@@ -1197,9 +1362,11 @@ export function main(argv: string[]): number {
     const res = writeCarrier(carrier, result.records, knownFlakes);
     console.log(
       `carrier=${carrier} appended=${res.appended} skipped=${res.skipped} attributed=${res.attributed} ` +
-        `enrichedPrereq=${res.enrichedPrereq} logRunsFetched=${result.logRunsFetched} ` +
+        `enriched=${res.enriched} enrichedPrereq=${res.enrichedPrereq} enrichedScheduler=${res.enrichedScheduler} ` +
+        `logRunsFetched=${result.logRunsFetched} ` +
         `testFilesDerived=${result.records.filter((r) => typeof r.testFiles === "number").length} ` +
-        `prereqProvisionDerived=${result.records.filter((r) => (r.jobs ?? []).some((j) => hasPrereqProvision(j))).length}`,
+        `prereqProvisionDerived=${result.records.filter((r) => (r.jobs ?? []).some((j) => hasPrereqProvision(j))).length} ` +
+        `schedulerMsDerived=${result.records.filter((r) => (r.jobs ?? []).some((j) => hasSchedulerMs(j))).length}`,
     );
     if (argv.includes("--print")) {
       for (const r of result.records) console.log(JSON.stringify(withAttribution(r, knownFlakes)));
