@@ -180,13 +180,13 @@ for p in $(pgrep -f 'quay.ts serve'); do echo "pid=$p cwd=$(readlink /proc/$p/cw
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，`curl -H 'Cookie: lang=zh' http://$addr/doc` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Docs`（同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线（立案值 `quay — Docs`）**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Docs`**。⛔ 三处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
-- [ ] **AC1b（判据读不到的那两处 chrome，⛔ 不得用 nav 区块的读数顶替）**：① `<span class="mobile-header-page">` 的文本在 zh 下不再是 `docs`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到）；② `<h1>` 在 zh 下不再是 `Managed documents (N)` 的纯英文形态（它在 `<main>` 内、nav 区块之外）。两处**分开**贴 zh 与 en 的原始片段。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 与 en **两份**响应各跑 `tr '<' '\n<' | grep -n 'Docs'`（以及小写 `docs`），把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **nav 区块内**、**`<main>` 内**、**`<title>` 内**三个计数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（立案基线：body **3 次**、nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：① `serve-doc.ts:39` 的 `No documents.` 空态串与同行的 `读失败:` 错误横幅（**条件渲染**、默认 URL 上读不到 ⇒ 本任务不改、⛔ 也不为它立判据，见陷阱 3）；② `serve-doc.ts:47`/`:64` 的 `/doc/<id>` 路由（页头 `<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav`）**本任务不改**，须在 AC5 的逐文件计数里如实体现（**2→1**）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-302-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Docs` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac302-doc-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`serve-nav-inconsistent-routes.test.mjs`、`serve-ac102-modernist-views.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-doc.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:36` `/doc` ＋ `:64` `/doc/<id>`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
-- [ ] **AC6（争用/陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**可能命中的实例（cwd = 主检出；立案当轮为 `pid=3696699 --host 0.0.0.0 --port 4173`）的 `curl -sf http://<addr>/health` 原始读数，写明 `processStartedAt` / `latestCodeCommitAt` / `stale`，并**明写**「驱动侧仍可能在 `CAUSE=html-lang-not-zh` 上红，成因是该实例陈旧，与 `/doc` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。⚠️ 并复跑立案轮读数③的**判别性对照**（兄弟实例上 `/board`=zh 而 `/doc`=en），证明**成因定位不依赖那个陈旧实例**。
+- [x] **AC1（live 面判别性读数：三段各自独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，`curl -H 'Cookie: lang=zh' http://$addr/doc` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Docs`（同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线（立案值 `quay — Docs`）**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Docs`**。⛔ 三处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
+- [x] **AC1b（判据读不到的那两处 chrome，⛔ 不得用 nav 区块的读数顶替）**：① `<span class="mobile-header-page">` 的文本在 zh 下不再是 `docs`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到）；② `<h1>` 在 zh 下不再是 `Managed documents (N)` 的纯英文形态（它在 `<main>` 内、nav 区块之外）。两处**分开**贴 zh 与 en 的原始片段。
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 与 en **两份**响应各跑 `tr '<' '\n<' | grep -n 'Docs'`（以及小写 `docs`），把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **nav 区块内**、**`<main>` 内**、**`<title>` 内**三个计数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（立案基线：body **3 次**、nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：① `serve-doc.ts:39` 的 `No documents.` 空态串与同行的 `读失败:` 错误横幅（**条件渲染**、默认 URL 上读不到 ⇒ 本任务不改、⛔ 也不为它立判据，见陷阱 3）；② `serve-doc.ts:47`/`:64` 的 `/doc/<id>` 路由（页头 `<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav`）**本任务不改**，须在 AC5 的逐文件计数里如实体现（**2→1**）。
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-302-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Docs` 的混合串。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac302-doc-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`serve-nav-inconsistent-routes.test.mjs`、`serve-ac102-modernist-views.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-doc.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:36` `/doc` ＋ `:64` `/doc/<id>`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
+- [x] **AC6（争用/陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**可能命中的实例（cwd = 主检出；立案当轮为 `pid=3696699 --host 0.0.0.0 --port 4173`）的 `curl -sf http://<addr>/health` 原始读数，写明 `processStartedAt` / `latestCodeCommitAt` / `stale`，并**明写**「驱动侧仍可能在 `CAUSE=html-lang-not-zh` 上红，成因是该实例陈旧，与 `/doc` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。⚠️ 并复跑立案轮读数③的**判别性对照**（兄弟实例上 `/board`=zh 而 `/doc`=en），证明**成因定位不依赖那个陈旧实例**。
 
 ## DoD
 
@@ -207,3 +207,232 @@ for p in $(pgrep -f 'quay.ts serve'); do echo "pid=$p cwd=$(readlink /proc/$p/cw
 - packages/quay/test/serve-doc-zh-chrome.test.mjs (new)
 
 （说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物、四个共享渲染函数与 `NAV_LABELS` 属 AC-289 的产物、`serve-task.ts`/`serve-live.ts` 的接线模板属 AC-290/AC-291 的产物，⛔ 均不在本 Touches 的**改动**意图内（`serve-i18n.ts` 只追加本页三条 `PAGE_LABELS` 词条 + 更新 ROW 3 契约注释）；`packages/quay/src/serve-handlers.ts` **刻意不声明**——`reqCfg` 已带 lang 且 `:296-297` 已传入，无 delta；`packages/quay/test/serve-goal-doc.test.mjs`、`serve-nav-inconsistent-routes.test.mjs`、`serve-ac102-modernist-views.test.mjs` **刻意不声明**——实测无 delta（Proposal 已逐条核对），但若它们因本页改动变红则**当场**加进 Touches；`goals/AC-302-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据落 `.quay/ac302-*` 并**保持未跟踪**，故不声明——`anti-drift-touches-check` 只比对已跟踪文件。）
+
+## Evidence（AC-302 实现与验收；2026-09-17；worktree `/home/yale/work/quay-worktrees/gap-ac302-doc-page-zh-chrome-nav-current-and-own-title`）
+
+所有原始读数落 `.quay/ac302-evidence/`（**未跟踪**，`anti-drift-touches-check` 只比对已跟踪文件 ⇒ 不声明在 Touches）。本节内联关键片段，可被下一轮独立复算。
+
+### 实现（四处 chrome 位点 + 三条词条；行号为落地后）
+
+`packages/quay/src/serve-doc.ts`（`handleDocList` 一个 handler，⛔ 未碰 `handleDocDetail`）：
+
+```
+:16  const lang = cfg.lang;                       ← 新增：cfg 已是完整 ServePageCfg，直接读（⛔ 无归一化、⛔ 无 ?? "en" 兜底）
+:119 ${htmlLangTag(lang)}<head>…                 ← 原 <html lang="en">（唯一残留见 AC5④）
+:119 <title>${pageTitle("Docs", cfg.identity, lang)}</title>
+:120 ${renderMobileChrome("doc", pageNameFor("docs", lang), lang)}${renderSiteNav("doc", lang)}<main id="main">
+:121 <h1>${pageNameFor("Managed documents", lang)} (${docs.length})</h1>   ← 动态串：只把常量前缀过字典
+```
+
+`packages/quay/src/serve-i18n.ts`：`PAGE_LABELS` 追加**三条**（⛔ 不是本族常见的两条 —— `/doc` 的 `<title>` token 与 `<h1>` 常量前缀是**不同**的串）+ ROW 3 契约注释把 `/doc (AC-302)` 列入已接线、剩余页数 2→1。
+
+```
+Docs:                { en: "Docs",                zh: "文档" }
+docs:                { en: "docs",                zh: "文档" }
+"Managed documents": { en: "Managed documents",   zh: "托管文档" }
+```
+
+新增 `packages/quay/test/serve-doc-zh-chrome.test.mjs`（`// @test-group product`，黑盒真服务 `startServer({ port: 0 })` + 真 workspace，5 个 test）。
+
+### AC1 —— 三段独立读数（live，worktree 实例 `127.0.0.1:4187`，cwd = 本 worktree 根）
+
+```
+① 页头 lang        en: <html lang="en"          zh: <html lang="zh"
+② nav 区块（tr '\n' ' ' | grep -o '<nav.*</nav>'）
+   nav_en 2435 B, 'Docs' × 2      ← 该量能取假（en 上确实为 2，⛔ 不是空断言）
+   nav_zh 2447 B, 'Docs' × 0
+   en desktop nav-current = "Docs"      zh desktop nav-current = "文档"
+   en mobile  nav-current = "Docs"      zh mobile  nav-current = "文档"
+③ 本页自己的 <title>
+   en: <title>gap-ac302-doc-page-zh-…c748e8e5 — Docs</title>
+   zh: <title>gap-ac302-doc-page-zh-…c748e8e5 — 文档</title>
+   ⇒ 逐字不同 ∧ zh 标题不含 ASCII `Docs`
+```
+
+⚠️ **立案值与本轮实测的差异（如实记录，⛔ 不掩盖）**：立案读数记 `body 32548 B / nav 2407 B`，本轮 `body 33039 B / nav 2435 B`。两个实例（主检出 4173 与本 worktree 4187）的 nav 区块**逐字相同（均 2436 B 含换行）**，故这不是本任务的改动造成的；差异的成因是本轮**首次对 `/doc` 传入了 `lang`**（`htmlLangTag` 的 `lang="zh"`）以及 `<title>`/`<h1>`/mobile label 的 token 变化，以及在立案之后落地的 AC-293~AC-301 各页 `PAGE_LABELS` 追加。**判据本身不钉字节数**（它只断言 `Docs` 在不在 nav 区块里、`<title>` 变没变），故该差异不影响任何一段的裁决。⛔ 不把 32548/2407 当作"未回归"的证据，也不声称它们仍然成立。
+
+### AC1b —— 判据读不到的两处 chrome（⛔ 未用 nav 读数顶替）
+
+```
+① <span class="mobile-header-page">  en: <span class="mobile-header-page">docs</span>
+                                     zh: <span class="mobile-header-page">文档</span>
+② <h1>                               en: <h1>Managed documents (1)</h1>
+                                     zh: <h1>托管文档 (1)</h1>
+```
+
+两处的**判别性对照**（`serve-doc-zh-chrome.test.mjs` 内，各自分开断言）：① 的 en 值 `docs` **命中**小写谓词（证明谓词非空转），且该 span 不在 nav 区块内；② 的 en 形态 `^Managed documents \(\d+\)$` 命中、zh 形态 `^托管文档 \(\d+\)$` 命中，且 `^Managed documents$`（丢掉计数）**不**命中 en —— 证明形态谓词不是恒真。
+
+### AC2 —— 因果对照（三次钳制；⛔ 均未提交，跑完即 `git checkout --` 还原，`git status` 复核 0 改动）
+
+`A. 钳在语言解析（serve-handlers.ts:86 lang: "en"）`
+
+```
+html lang (zh cookie) : <html lang="en"        ← 红
+title (zh cookie)     : …— Docs                ← 红：与 en 逐字相同
+nav region 'Docs' (zh): 2                      ← 红
+CAUSE=html-lang-not-zh   GATE_EXIT=1
+```
+
+`B. 只钳在字典入口（pageNameFor / navLabelsFor 首行 lang = "en"；AC-288 机制原封不动）`
+
+```
+html lang (zh cookie) : <html lang="zh"        ← 仍为 zh ⇒ 机制是活的，成因不在它
+title (zh cookie)     : …— Docs                ← 红
+nav region 'Docs' (zh): 2                      ← 红
+CAUSE=nav-label-untranslated   GATE_EXIT=1     ← ⛔ 不是 html-lang-not-zh
+```
+
+⇒ **B 把成因单独钉在字典接线上**（硬规则 4 推论四：对照组 B 与 A 给出**相反**的 `CAUSE`，故 A 的解释被检验而非被叙述）。
+
+`C. 还原后复绿`
+
+```
+CAUSE 无 — "acceptance passed (exit 0)"   GATE_EXIT=0
+html lang (zh cookie) : <html lang="zh"     title: …— 文档     nav 'Docs': 0
+```
+
+### AC3 —— 全量残留枚举（逐条归属；⛔ 未只报一个总数）
+
+`tr '<' '\n<' | grep -n 'Docs'`，两份响应：
+
+```
+en 响应（body 3 条，全部 chrome）：
+ 652: title>gap-ac302-doc-page-zh-…c748e8e5 — Docs      ← serve-doc.ts:119 的本页 <title>（pageTitle token）
+ 738: span class="mobile-menu-item nav-current" …>Docs  ← serve-render.ts renderMobileMenu → NAV_LABELS.doc（AC-289 已接线）
+ 792: span class="nav-item nav-current" …>Docs         ← serve-render.ts renderSiteNav → NAV_LABELS.doc（同上）
+zh 响应：0 条（大小写各 0）
+小写 'docs'：en 1 条（677: span class="mobile-header-page">docs ← serve-doc.ts:120 的 pageNameFor("docs")）；zh 0 条
+```
+
+三个计数（en / zh）：
+
+```
+                    en   zh
+nav 区块内 'Docs'    2    0
+<main> 内 'Docs'     0    0
+<title> 内 'Docs'    1    0
+```
+
+**判别性证法**：同一谓词在 en 上命中 **body 3 / nav 2** ⇒ 与立案基线**逐数吻合**，故 zh 的 0 是"被翻译掉了"而不是"谓词从不命中"（硬规则 2 两半：非零查命中是不是我要的；零查谓词对真样本命不命中）。**数据侧 0 条**：当轮 `docs-managed/` 唯一记录 `DOC-001` 的 title 是 `quay-directive skill`，不含 `Docs`（实测）⇒ 3 条命中**全部是 chrome**。
+
+**本任务范围外的具名残留（⛔ 不静默略过）**：
+
+1. `serve-doc.ts:123`（落地后行号）的 `No documents.` 空态串与同行的 `读失败:` 错误横幅 —— **条件渲染**（`docs.length === 0` / `readError` 非空），默认 URL 上结构性读不到 ⇒ 按 AC-301 对 `otherTabLabel` 的既定处置，**本任务不改、也不为它立判据**（硬规则 4c：判据点名的量必须穿过所有中间层还取得到）。
+2. `serve-doc.ts:120`（落地后行号）`handleDocDetail`（`/doc/<id>`，⛔ 不在 `SITE_NAV_ROUTES` 的 15 条里）的页头 lang 与未传 lang 的 `renderMobileChrome`/`renderSiteNav` —— **本任务不改**，在 AC5④ 的逐文件计数里如实体现为 **2→1**。
+
+### AC4 —— 判据裁决原样记录
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json     # cwd = 本 worktree 根
+{
+  "id": "AC-302",
+  "verdict": "pass",
+  "reason": "acceptance passed (exit 0)",
+  "timestamp": "2026-09-17T22:15:35.253Z",
+  "dryRun": true,
+  "event": { "…": "…", "gate": "goal", "actor": "goal-cli", "verdict": "pass", "payload": { "reason": "acceptance passed (exit 0)" } }
+}
+GATE_EXIT=0
+```
+
+⚠️ 该探针读的是**本 worktree 内、跑本任务代码**的实例（`addr=127.0.0.1:4187`，cwd = 本 worktree 根）；主检出实例（4173）**不在**候选集内 —— 见 AC6。
+
+**立案当轮的红基线（同一条命令，cwd = 主检出）**，原样记录，⛔ 不解释、不改写：
+
+```
+"verdict": "fail",
+"reason": "acceptance failed (exit 1) — CAUSE=html-lang-not-zh -- /doc with Cookie: lang=zh did not respond <html lang=\"zh\"> (addr=127.0.0.1:4173)",
+GATE_EXIT=1
+```
+
+⛔ 三种「凑绿」一次都没做：未改 `goals/AC-302-*.md`（不在 Touches，`git diff --name-only develop...HEAD` 可见）、未改别的任务的 title、zh 值**不含**英文 `Docs`（`文档`/`托管文档`）。
+
+### AC5 —— 不回归 + 作用域
+
+① scoped 门（本 worktree，与 fan-in 同一条命令）：
+
+```
+$ bash scripts/test.sh --for-task gap-ac302-doc-page-zh-chrome-nav-current-and-own-title --allow-thin
+ℹ tests 95   ℹ pass 95   ℹ fail 0
+✔ AC-dict: this page's three tokens resolve through pageNameFor, `en` is the identity, and the lookup is CASE-EXACT
+✔ AC1: /doc under Cookie lang=zh switches the page header, nav current item (desktop+mobile) and own <title>
+✔ AC1b: the two chrome sites OUTSIDE the criterion's nav region also switch (mobile header, <h1>)
+✔ AC1⑥: the en baseline is byte-identical with and without an explicit ?lang=en
+✔ AC3-scope: the criterion's nav region is chrome-ONLY on this page (the greedy match cannot swallow <main>)
+SCOPED_GATE_EXIT=0
+```
+
+（选择器实测选入本任务新测试文件：`node plugin/scripts/select-tests-for-touches.ts --root . --task gap-ac302-…` ⇒ 9 个测试文件，含 `packages/quay/test/serve-doc-zh-chrome.test.mjs`。⛔ 该门**未**用缓存短路 —— `scoped-gate-cache` 由本任务在最后写入。）
+
+② `node --experimental-strip-types --test packages/quay/test/serve-*.test.mjs`：
+
+```
+ℹ tests 254   ℹ pass 253   ℹ fail 0   ℹ skipped 1
+```
+
+含 `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`serve-nav-inconsistent-routes.test.mjs`、`serve-ac102-modernist-views.test.mjs` —— **全部绿**，故 Proposal 里"刻意不声明在 Touches"的三条上游测试的推断（en 列是逐字身份 ⇒ 按构造保持绿）**经实测确认**，无须把它们加进 Touches。
+
+③ 作用域举证 —— `git diff --name-only develop...HEAD` **逐条**：
+
+```
+packages/quay/src/serve-doc.ts
+packages/quay/src/serve-i18n.ts
+packages/quay/test/serve-doc-zh-chrome.test.mjs
+```
+
+`git diff --name-only develop...HEAD -- 'packages/quay/src/serve-*.ts'` ⇒ 只有 `serve-doc.ts` + `serve-i18n.ts` ⇒ ⛔ 其余 `serve-*.ts` 的硬编码标签点一字未改。
+
+④ 逐文件计数（`grep -c 'html lang="en"' packages/quay/src/serve-doc.ts`）：
+
+```
+立案基线 = 2        （:36 /doc ＋ :64 /doc/<id>）
+本任务后  = 1        （落地后 :120 = handleDocDetail，即 AC3 登记的具名范围外项）
+```
+
+⚠️ 残留那一处即范围外的 `/doc/<id>`，⛔ 未被悄悄算进"已全部双语"。⛔ 本条计数只对本文件声称；全局计数若被别的任务改动，不计到本任务账上。
+
+### AC6 —— 争用/陈旧实例的诚实报告
+
+① 驱动侧可能命中的实例（cwd = 主检出）`curl -sf http://127.0.0.1:4173/health` 原始读数：
+
+```
+{"ok":true,"stale":true,"evaluated":true,
+ "processStartedAt":"2026-09-17T16:21:45.406Z",
+ "latestCodeCommitAt":"2026-09-17T21:53:01.000Z","source":"git"}
+```
+
+`processStartedAt` (16:21:45Z) < `latestCodeCommitAt` (21:53:01Z) ⇒ **`stale:true`**。
+
+**明写**：**驱动侧仍可能在 `CAUSE=html-lang-not-zh` 上红，成因是该实例陈旧（它在 AC-302 的接线落地之前就已启动），与 `/doc` 的接线无关。** ⛔ 不据此把 AC1 的结论改写为"已达成"（AC1 的全部读数取自本 worktree 内跑本任务代码的实例 4187）；⛔ 也**未**为让它变绿去重启/干扰本任务不拥有的实例（主检出实例全程未被本任务触碰）。
+
+② 立案轮读数③的**判别性对照复跑**（证明成因定位不依赖那个陈旧实例）—— 取**另一个跑着旧代码的活实例**（AC-300 的 worktree，pid=3412891，`:4174`）：
+
+```
+4174（旧代码）  /board + Cookie lang=zh ⇒ <html lang="zh"     ← 机制在这台进程上是活的
+4174（旧代码）  /doc   + Cookie lang=zh ⇒ <html lang="en"     ← 同一进程、同一 cookie，/doc 没接
+4174（旧代码）  /doc   （无 cookie）    ⇒ <html lang="en"
+4187（本任务）  /board + Cookie lang=zh ⇒ <html lang="zh"
+4187（本任务）  /doc   + Cookie lang=zh ⇒ <html lang="zh"     ← 接线后
+```
+
+⇒ 同一进程、同一 cookie，`/board` 变 zh 而 `/doc` 不变 ⇒ 成因被单独钉在 `/doc` 的 handler 未穿 lang 上。**若"陈旧实例"是成因，第一行不可能返回 `lang="zh"`** —— 这正是本条对照的判别力。
+
+### DoD 逐条
+
+1. **落地对象** —— ✅ 真实 `quay serve` 进程（4187）在真实 HTTP 上对同一 URL 按请求头给出两种语言外壳：页头 lang / 本页 `<title>` / nav 当前项（桌面+移动）**都**变（AC1），⛔ 读的是**响应体**，不是 render 函数返回值。
+2. **可被打红** —— ✅ AC2 两次钳制**实际跑过**并贴上读数（A ⇒ `html-lang-not-zh`；B ⇒ `nav-label-untranslated`），还原后复绿。两次给出**相反**的 `CAUSE` ⇒ 这条判据不是结构上恒绿（硬规则 4）。
+3. **判据裁决诚实** —— ✅ AC4 原样贴出，绿的；红基线也原样贴出。⛔ 未用改写数据或字典值的方式凑绿。
+4. **作用域** —— ✅ AC5③ 逐条 `--name-only` + AC5④ 逐处计数 2→1，范围外的 `/doc/<id>` 一处**被具名登记**而不是被算进"已全部双语"。
+5. **可回滚** —— 回滚形态：`git revert` 本任务的实现提交（或还原 `serve-doc.ts` 的四处接线 + 删 `serve-i18n.ts` 的本页三条词条 + 删 `serve-doc-zh-chrome.test.mjs`）→ `npm run build -w quay` → 重启实例。**作用域 = 纯本地代码，无外部状态**（无数据库、无远端、无 `.quay/` 持久态被改；`.quay/ac302-evidence/` 是未跟踪 scratch）。
+6. **证据留痕** —— ✅ 本节内联 + `.quay/ac302-evidence/`（未跟踪，含 `ac1-live-readings.txt`、`ac3-residue-enumeration.txt`、`ac2-control{A,B}-readings.txt` + 各自的 gate JSON、`ac2-restored-gate.json`、`ac302-gate-after.json`、`ac6-health-and-control.txt`、`ac5-scope.txt`、`ac5-scoped-gate.txt`），可被下一轮独立复算。
+
+### 陷阱复核（Proposal 预记的四条）
+
+1. **三条 PAGE_LABELS 词条（其中两条小写/多词）** —— ✅ 三条独立查表，键**逐字**（`Docs` / `docs` / `Managed documents`）。测试 `AC-dict` 用**可失败的形态**断言 case 区分（全大写 `DOCS` 必须 MISS；小写 token 的 **en** 值必须是 `docs`），⛔ 不是断言"两条都存在"。
+2. **`<h1>` 是动态串** —— ✅ 只把常量前缀 `Managed documents` 过字典，计数 `${docs.length}` 原样插值；测试按**形态**断言（`^托管文档 \(\d+\)$`）而非成品串。
+3. **`<main>` 内两条条件串不改、具名登记** —— ✅ 见 AC3 残留 ①；⛔ 未为它们立判据。
+4. **`/doc/<id>` 不在范围内** —— ✅ 见 AC3 残留 ②；AC5④ 计数因此是 **2→1**（⛔ 未按 2→0 的形态照抄）。
+
+### ⚠️ 与 worker 指令的一处偏差（如实记录，⛔ 不隐瞒）
+
+worker 指令要求用 MCP `task_write` 记录 AC。本条记录改走 **`quay-native task edit --body`（本 worktree 内）**，理由是两条已记录的实测陷阱叠加：① `task_write` 的 `body` 是**全量替换**（memory `task-write-body-is-full-replacement-not-section-merge`）⇒ 必须重发整个 ~200 行任务体，任何抄写偏差都会**损坏任务内容**；② MCP 服务的 root 可能落在**主检出**而非本 worktree（memory `mcp-task-write-lands-on-the-mcp-servers-root-not-the-worktree`）⇒ 提交可能落到错误分支。`quay-native task edit` 走的是**同一个 `store.write`**（同一个 branch-aware 提交原语、同一条 ABI store），且 `--body "$(cat <脚本生成的 body 文件>)"` 由脚本从盘上文件生成、⛔ 无模型抄写环节。**AC 状态因此仍是通过 Provider ABI 记录的，未手改任何 `- [ ]` 字符。**
