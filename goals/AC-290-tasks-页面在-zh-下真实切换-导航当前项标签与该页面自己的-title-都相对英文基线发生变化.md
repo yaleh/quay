@@ -1,7 +1,7 @@
 ---
 id: AC-290
 title: /tasks 页面在 zh 下真实切换——导航当前项标签与该页面自己的 <title> 都相对英文基线发生变化
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -106,6 +106,11 @@ statusLog:
     to: active
     actor: user
     reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」——draft 记录已确认写入并可读，这是该指示对应的激活动作。
+  - at: 2026-09-17T23:45:56.462Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
