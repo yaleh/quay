@@ -58,6 +58,14 @@ export interface JobReading {
   durationSec?: number;
   /** 该 job 的 `timeout-minutes`（workflow 声明值；GitHub 默认 360）。 */
   timeoutMinutes?: number;
+  /**
+   * 套件运行前置在**该 job 自己的日志**里的状态（AC-282 载体臂读的字段，判据读 `jobs[]` 里
+   * `name == "test"` 那条）：`{pyyaml, tmux, procps}`，值域
+   * `already-present | installed-apt | installed-pip | absent`（见 ci-runs-collect.ts 的
+   * `derivePrereqProvision`）。⛔ **派生不出（没拉日志）就不写这个键** —— 缺 ≠ `absent`
+   * （硬规则 6），照 `durationSec` / `timeoutMinutes` 的先例。
+   */
+  prereqProvision?: Record<string, string>;
   steps?: JobStepReading[];
 }
 
