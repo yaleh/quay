@@ -133,23 +133,23 @@ curl -sf 'http://100.78.206.100:4173/tasks?sort=updated' | tr '<' '\n<' | grep -
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/tasks` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）
   的文本都**不是** `Tasks`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）。
   ⛔ 三处分开断言、分开贴原始片段——只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
   证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。⛔ 无此对照 ⇒「是接线造成的」只是一句未被检验的断言
   （硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Tasks'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Tasks'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个 `tasks/*.md`），
   并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止把总数报成 0，也禁止只报一个总数（硬规则 3）。
-- [ ] **AC4（判据裁决原样记录 + 交给判据所有者）**：贴出**实现后**的
+- [x] **AC4（判据裁决原样记录 + 交给判据所有者）**：贴出**实现后**的
   `node packages/quay/bin/quay.js goal gate AC-290 --dry-run --json` 完整输出（⛔ 不解释、不改写它的 `CAUSE`），
   并写明：若它仍红且残留**全部来自数据**（AC3 的数据计数 > 0），那是**判据的整段子串谓词比它自述的「nav label」更宽**
   ⇒ **判据缺陷，归其所有者**（`goals/AC-290-*.md` ⛔ 不在本 Touches 内）。⛔ **明令禁止**的三种「凑绿」：
   改判据、改别的任务的 title、改排序任务。**这三种做法若出现，本任务视为失败。**
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac290-tasks-page-zh-shell-lang-title-nav-current` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac290-tasks-page-zh-shell-lang-title-nav-current` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿；③ **作用域举证**：
   `grep -rc 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出，与立案基线（总数 **23**，逐文件上方实测）对照：
   **`serve-task.ts` 从 2 降到 1**（留下的那 1 处是 `:668` 详情页，出作用域，见 Plan 4），**其余 13 个文件的计数一字未动**。
@@ -175,9 +175,16 @@ curl -sf 'http://100.78.206.100:4173/tasks?sort=updated' | tr '<' '\n<' | grep -
 
 - tasks/gap-ac290-tasks-page-zh-shell-lang-title-nav-current.md
 - packages/quay/src/serve-task.ts
+- packages/quay/src/serve-i18n.ts
 - packages/quay/test/serve-task.test.mjs
+- packages/quay/test/serve-i18n.test.mjs
 
-（说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物、`packages/quay/src/serve-i18n.ts` 与
-`packages/quay/test/serve-i18n.test.mjs` 属 AC-289 的产物，⛔ 均不在本 Touches；`goals/AC-290-*.md`
-属人与驱动维护面，⛔ 不在本 Touches。运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明——
-`anti-drift-touches-check` 只比对已跟踪文件。）
+（说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物，⛔ 不在本 Touches。
+`packages/quay/src/serve-i18n.ts` 与 `packages/quay/test/serve-i18n.test.mjs` 原属 AC-289 的产物，
+**本任务声明它们，是因为立案时的 Touches 漏写了本页接线必需的落点**（实现时才发现，非事后补记）：
+① ROW 3 的设计注释写明「其余 14 页的 page-chrome 属 AC-290~303」，三个同族任务（AC-291/292/293）的
+Touches 都已按「只追加本页两条 `PAGE_LABELS` 词条」声明了 `serve-i18n.ts`，本任务漏了同一行；
+② AC-289 的测试把 `Tasks` 当作「未映射 token」的样本，本任务把它映射掉后那条断言必红。两处 delta 都
+只到本页接线所需的程度（新增两条词条；把样本 token 换成一个无页拥有的 token，使该性质不再随
+AC-291~303 逐页重新失效）。`goals/AC-290-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据落
+`.quay/` **保持未跟踪**，故不声明——`anti-drift-touches-check` 只比对已跟踪文件。）
