@@ -1,7 +1,7 @@
 ---
 id: gap-webui-board-transient-columns-drowned-by-history
 title: /board 的"执行/落地"列是瞬时信号，默认视图混排 2243 条历史任务后几乎永远清一色"—"，NEW 标签名不副实
-status: todo
+status: ready
 labels:
   - gap
   - webui
