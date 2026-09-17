@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data
@@ -67,7 +67,16 @@ export function suiteSuffix(suite: SuiteStateView | null): string {
   return ` · suite ${suite.state}`;
 }
 
-export function renderLivePage(live: LiveResult, identity: ServeIdentity | null = null): string {
+/** AC-291: `lang` is the request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher). It reaches FOUR things on this page and nothing else: the `<html lang>` attribute,
+ *  the shared nav bar (`renderSiteNav` — whose `live` entry already exists in NAV_LABELS),
+ *  the MOBILE nav, and this page's OWN chrome (`<title>` token + `<h1>` token, both via
+ *  `pageNameFor` against serve-i18n.ts's PAGE_LABELS). The last two are the whole point: wiring
+ *  only the shared nav would leave this page's own `<title>` English, and "the shared bar switched
+ *  but THIS page did not" is precisely the defect the criterion's `title-unchanged` arm rejects.
+ *  ⛔ `/journal` (renderJournalPage below) is deliberately NOT wired here — it is another nav route
+ *  and another task's page (AC-296). */
+export function renderLivePage(live: LiveResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
   // renders as comma-joined links; an empty list renders the 「无」 placeholder so "no relation" is
@@ -147,9 +156,9 @@ export function renderLivePage(live: LiveResult, identity: ServeIdentity | null 
     : html`<p class="meta">无跨任务阻塞关系。</p>`;
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>${pageTitle("Live — loop activity", identity)}</title></head>
-    <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main id="main">
-      <h1>Live — 循环此刻在做什么</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>${pageTitle("Live — loop activity", identity, lang)}</title></head>
+    <body>${renderMobileChrome("live", "live", lang)}${renderSiteNav("live", lang)}<main id="main">
+      <h1>${pageNameFor("Live", lang)} — 循环此刻在做什么</h1>
       ${statusNote}
       ${summary}
       ${blockingSection}
@@ -189,7 +198,7 @@ export async function handleLive(
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderLivePage(live, cfg.identity));
+  res.end(renderLivePage(live, cfg.identity, cfg.lang));
 }
 
 export async function handleJournal(
