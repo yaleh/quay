@@ -5,6 +5,8 @@ status: draft
 kind: criterion
 goal: GOAL-022
 criterion: >-
+  python3 - <<'CRIT'
+
   import json, os, sys
 
 
@@ -73,6 +75,8 @@ criterion: >-
   THRESHOLD_SEC))
 
   sys.exit(0)
+
+  CRIT
 expect: criterion exits 0 once .quay/ci-runs.jsonl shows a post-SINCE develop CI
   test job that is success and durationSec<=30
 origin: GOAL-022 退出条件：.quay/ci-runs.jsonl 的 develop test job 立案之后 success 且 <=30s
