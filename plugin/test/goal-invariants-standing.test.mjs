@@ -253,11 +253,14 @@ test("AC3 常设 — update 清空 criterion 被拒；status-only 放行（机�
   const dir = tmpDir("gi-ac3-");
   const s = createGoalStore(path.join(dir, "goals"));
   const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
-  // ⚠️ `status: "draft"`: a GOAL born `active` now needs a naming AC first
-  // (gap-goal-create-as-active-skips-zero-ac-gate). The subject here is the CRITERION write surface
-  // (blanking refused / status-only flip allowed), which does not depend on the GOAL's own status.
-  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
+  // ⚠️ AC-FIRST (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): the write face
+  // refuses a GOAL born into {draft, active} with zero ACs — the invariant's own scope (AC-217) — so
+  // the naming AC is written before its GOAL. ⛔ The point of the reorder is exactly that the GOAL-001
+  // write below really lands: before it, that write was silently refused and this fixture ran against
+  // a store with no GOAL at all (the subject — the CRITERION write surface — still passed, which is
+  // the shape hard rule 3b warns about: a fixture that no longer carries what it claims).
   s.write("AC-001", { title: "a", status: "active", goal: "GOAL-001", criterion: "true", expect: "expected", origin: "o" });
+  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
   assert.throws(() => s.write("AC-001", { criterion: "" }), /criterion/);
   // status-only 写入不碰内容字段 ⇒ 不校验内容，机械 flip 放行。
   s.write("AC-001", { status: "achieved" });

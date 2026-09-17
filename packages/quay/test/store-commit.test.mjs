@@ -150,11 +150,13 @@ const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions �
 test("AC1 goal-store: a create and a status flip produce distinguishable, subtyped subjects", () => {
   const { dir, run } = gitRepo("ac1");
   const s = createGoalStore(path.join(dir, "goals"));
-  // ⚠️ `status: "draft"`: a GOAL born `active` now needs a naming AC first
-  // (gap-goal-create-as-active-skips-zero-ac-gate); the subject under test here is the commit
-  // SUBJECT SHAPE (create vs status flip), which is independent of which status the create lands.
-  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY }); // create
+  // ⚠️ AC-first (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): the write face
+  // now refuses a GOAL born into {draft, active} with zero ACs — the invariant's own scope (AC-217) —
+  // so the naming AC is written BEFORE its GOAL. The subject under test is the commit SUBJECT SHAPE
+  // (create vs status flip) and the ORDER does not touch it: the AC write is a `create` commit and the
+  // GOAL write below is the second `create` commit, so the `create` subject is found either way.
   s.write("AC-001", { title: "a", status: "draft", goal: "GOAL-001", criterion: "true", expect: "e", origin: "o" }); // create
+  s.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY }); // create
   s.write("AC-001", { status: "active" }); // status draft→active
   const subs = run("log", "--format=%s", "--", "goals").trim().split("\n");
   const create = subs.find((s) => s.includes(" create by "));

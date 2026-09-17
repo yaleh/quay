@@ -58,11 +58,12 @@ function carrierLines(root) {
 
 /** GOAL-001 (active) + AC-010 (active) — then GOAL-001 is closed, the precondition for the defect. */
 function achievedGoalWithAc(store) {
-  // ⚠️ Two-step (draft → file the AC → close): a GOAL born `active` now needs a naming AC first
-  // (gap-goal-create-as-active-skips-zero-ac-gate). The precondition this helper establishes — a
-  // CLOSED goal carrying a live child — is unchanged.
-  store.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
+  // ⚠️ AC-FIRST (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): a GOAL cannot be
+  // born into {draft, active} with zero ACs — the invariant's own scope (AC-217) — so the AC is filed
+  // before its GOAL. The precondition this helper establishes — a CLOSED goal carrying a live child —
+  // is unchanged.
   store.write("AC-010", { title: "ac", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
+  store.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("GOAL-001", { title: "g", status: "achieved", origin: "o", body: GOAL_BODY });
 }
 
@@ -142,10 +143,11 @@ test("AC2 (store) — a stale achieved GOAL and a clean achieved GOAL are DIFFER
   store.write("AC-020", { title: "new child", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
 
   // A genuinely closed GOAL, built the same way but with its child discharged BEFORE closure.
-  // ⚠️ `draft` at birth (gap-goal-create-as-active-skips-zero-ac-gate) — the goal is closed at :141
-  // either way, and the 「clean」 half measures the carrier, not the path it took to `achieved`.
-  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
+  // ⚠️ AC-first (2026-09-17): the GOAL cannot be born into {draft, active} with zero ACs (AC-217's own
+  // scope), so its AC is written before it. The goal is closed at the next line either way, and the
+  // 「clean」 half measures the carrier, not the path it took to `achieved`.
   store.write("AC-030", { title: "ac", status: "achieved", goal: "GOAL-002", criterion: "true", expect: EXPECT, origin: "o" });
+  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("GOAL-002", { title: "clean", status: "achieved", origin: "o", body: GOAL_BODY });
 
   const byId = new Map(store.list().map((g) => [String(g.id), g]));
@@ -247,8 +249,9 @@ test("AC2 (end-to-end) — `quay goal list` marks the stale achieved GOAL and NO
   const store = createGoalStore(path.join(ws, "goals"));
   achievedGoalWithAc(store);
   store.write("AC-020", { title: "new child", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
-  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
+  // ⚠️ AC-first (2026-09-17): a GOAL cannot be born into {draft, active} with zero ACs (AC-217's scope).
   store.write("AC-030", { title: "ac", status: "achieved", goal: "GOAL-002", criterion: "true", expect: EXPECT, origin: "o" });
+  store.write("GOAL-002", { title: "clean", status: "draft", origin: "o", body: GOAL_BODY });
   store.write("GOAL-002", { title: "clean", status: "achieved", origin: "o", body: GOAL_BODY });
 
   const r = runQuay(["goal", "list"], ws);

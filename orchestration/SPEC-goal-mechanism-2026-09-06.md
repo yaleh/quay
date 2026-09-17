@@ -128,6 +128,22 @@ evidence: { at, verdict, reading }   # 由 gate 写回
 「未切换、未启动、不得据此派发」。⇒ 加 `draft`，并把 `write()` 的默认 status 由 `active` 改为 **`draft`**
 （**默认不激活**，与裁定 3「不自动晋升」同向）。
 
+**撰写顺序：AC 先、GOAL 后**（2026-09-17 补，`gap-goal-born-draft-zero-ac-escapes-standing-invariant`）。
+P6-goal 的 AC 覆盖闸（§4 的 I1′ 同族）作用域 = 不变式 AC-217 自己的 `{draft, active}`：一条 GOAL
+**不得以这两个状态之一出生/存在而名下零 AC**。⇒ 「写好但未启动」的三步顺序是：
+
+```
+① goal-store write AC-NNN --goal GOAL-NNN --status draft --criterion '<…>' --expect '<…>' --origin '<…>'
+② goal-store write GOAL-NNN --status draft --title … --origin … --body '<≥40 非空白>'
+③ goal-store write GOAL-NNN --status active          ← 人裁定（裁定 3）
+```
+
+⚠️ ① **不构成循环**：AC 记录的完整性契约只要求 `goal:` 是**非空字符串**，⛔ 不要求被指名的 GOAL
+已经存在（`goal-store.ts` 的 criterion 完整性分支只查 `criterion`/`expect`）。**这条曾经被写反**：
+旧正文与旧闸的拒绝讯息都教「先建 draft GOAL、再补 AC」，而那正是被禁态本身 —— 2026-09-17
+GOAL-022 走的正是这条被推荐的路径，以 draft ∧ 零 AC 流通 ≥101 秒，并烧掉一个无物可修的 gap-filing
+worker。⛔ 判据未收窄：窗口是**被关掉**的（状态不可达），不是被合法化的。
+
 ### 3.3 正文 section（新增能力）
 
 **GOAL 记录正文必需**，单点校验、fail-closed、每节 ≥40 非空白字符（沿用 task 的 `MIN_SECTION_CHARS` 约定）：

@@ -5377,17 +5377,25 @@ step_ac234_web_render() {
   #      一直以 `invalid goal id` exit 1 被这里的 `if` 吞成一句 NOTE，故本分支自建立起就没写进过任何 goal。
   #      改为合法且在本步骤作用域内唯一的 `GOAL-234`。
   #   ② `--status draft`（⛔ 不是 active）：goal-store 的 P6-goal 闸现在也覆盖【出生路径】——一条新 GOAL
-  #      名下 0 条 AC 时不得出生即 active（gap-goal-create-as-active-skips-zero-ac-gate），而本步骤补的这条
-  #      goal 恰恰一条 AC 都没有（补 AC 又要先有 goal，正是该闸禁止的循环）。本步骤要的读数只是
-  #      `goals_rendered>0`（`/goal` 列出真实 goal 载体，draft 与 active 一样是一行），故以 draft 播种。
+  #      名下 0 条 AC 时不得出生即 active（gap-goal-create-as-active-skips-zero-ac-gate）。本步骤要的读数
+  #      只是 `goals_rendered>0`（`/goal` 列出真实 goal 载体，draft 与 active 一样是一行），故以 draft 播种。
+  #   ③ AC 先、GOAL 后（2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant）：P6-goal 的
+  #      谓词已扩到不变式 AC-217 自己的作用域 {draft, active} ⇒ **draft 出生路径同样要求 ≥1 条 AC**。
+  #      ⛔ 旧注释说「补 AC 又要先有 goal，正是该闸禁止的循环」——那个前提不成立：写 AC 只要求 `goal:`
+  #      是非空字符串，被指名的 GOAL 可以先不存在。故这里先落 AC-234（指名 GOAL-234），再落 GOAL-234。
   # 该分支在正常流程里通常【不执行】：同段的 step_ac232_goal_carrier_write（步骤⑨，先于本步骤）已写
   # 入一条 draft GOAL-001 ⇒ goals/ 非空；此处是它写失败时的兜底，兜底同样不许伪造读数。
   if [ -d "$root/goals" ] && [ -z "$(find "$root/goals" -maxdepth 1 -name '*.md' -print -quit 2>/dev/null)" ]; then
     goal_body="第三方项目 web 渲染验证用 goal——由 verify-deliver-coldstart AC-234 步骤经 Provider ABI 写入（背景：证明 /goal 渲染真实 goal 载体，非空壳页）。"
-    if node "$qrl" goal write GOAL-234 --title "web 渲染验证 goal (AC-234)" --status draft \
+    if node "$qrl" goal write AC-234 --title "web 渲染验证 goal (AC-234) — 退出条件" --status draft \
+        --goal GOAL-234 --criterion "true" \
+        --expect "GOAL-234 的退出条件已被写下（web 渲染验证的 /goal 夹具）" \
+        --origin "verify-deliver-coldstart AC-234 步骤经 Provider ABI 写入——AC-first 写序（AC-217 作用域）" \
+        --root "$root" >/dev/null 2>&1 \
+       && node "$qrl" goal write GOAL-234 --title "web 渲染验证 goal (AC-234)" --status draft \
         --origin "verify-deliver-coldstart AC-234 步骤经 Provider ABI 写入——证明 /goal 渲染真实载体" \
         --body "$goal_body" --root "$root" >/dev/null 2>&1; then
-      echo "  seeded goal via ABI: GOAL-234 --status draft (quay-init does not create goal records — goals_rendered>0 前置)"
+      echo "  seeded goal via ABI: AC-234 → GOAL-234 --status draft (quay-init does not create goal records — goals_rendered>0 前置)"
     else
       echo "  NOTE: goal seed via ABI failed — goals_rendered 可能为 0（空 /goal 状态如实计数，不伪造）"
     fi
@@ -5457,9 +5465,23 @@ probe_ac232_goal_write_readback() {
   goal_body="第三方项目 goal 载体写读回验证用 GOAL——由 verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入（背景：AC-206 只断言 goals/ 目录建了与可读，本步骤证明下游 goal 载体真的能写、能读回）。"
   # (a) 写：经 Provider ABI（quay goal write），body ≥40 非空白（goal-store MIN_GOAL_BODY_CHARS=40），
   #     id GOAL-001 匹配 GOAL-\d{3,}（goal-store.ts:86）。⛔ 不传 body 的 write 是 09-10 goal write failed 的根因。
-  if node "$qrl" goal write GOAL-001 --title "$goal_title" \
-      --origin "verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入——证明下游 goal 载体能写" \
-      --body "$goal_body" --root "$root" >/dev/null 2>&1 \
+  #     ⚠️ AC 先、GOAL 后（2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant）：写面拒绝
+  #     「出生即 draft/active 而名下零 AC」的 GOAL——那正是不变式 AC-217 自己的作用域 {draft, active}，
+  #     而本步骤原先「只写 GOAL、零 AC」正是被拒的那一形。⛔ 旧注释里「补 AC 又要先有 goal，是循环」这个
+  #     前提是错的：AC 记录只要求 `goal:` 是**非空字符串**，⛔ 不要求被指名的 GOAL 已存在（完整性契约
+  #     在写 AC 时只看 criterion/expect，不看目标存在性）⇒ 先写 AC 不构成循环，也不是绕过闸。
+  ac_seed_ok=0
+  if node "$qrl" goal write AC-001 --title "$goal_title — 退出条件" --status draft \
+      --goal GOAL-001 --criterion "true" \
+      --expect "GOAL-001 的退出条件已被写下（本步骤的写+读回夹具）" \
+      --origin "verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入——AC-first 写序（AC-217 作用域）" \
+      --root "$root" >/dev/null 2>&1; then
+    ac_seed_ok=1
+  fi
+  if [ "$ac_seed_ok" = "1" ] \
+     && node "$qrl" goal write GOAL-001 --title "$goal_title" \
+        --origin "verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入——证明下游 goal 载体能写" \
+        --body "$goal_body" --root "$root" >/dev/null 2>&1 \
      && [ -n "$(find "$root/goals" -maxdepth 1 -name 'GOAL-*.md' -print -quit 2>/dev/null)" ]; then
     AC232_GOAL_WRITE_OK=1
   fi
