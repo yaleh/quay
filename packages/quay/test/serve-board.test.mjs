@@ -859,7 +859,12 @@ test("AC-292 — /board's own chrome switches under Cookie: lang=zh; en baseline
       "AC-292: the page <h1> uses its own zh token — pageNameFor, not the shared NAV_LABELS lookup");
   } finally {
     process.chdir(cwd0);
-    if (server) await new Promise((r) => server.close(r));
+    // ⛔ NOT `await new Promise((r) => server.close(r))`. `startServer` spawns the provider as a
+    // child MCP subprocess and hands it back on `server.client`; closing only the HTTP listener
+    // leaves that child alive, so the test's event loop has an open handle and node:test never
+    // exits — the file hangs instead of failing. Every other live-server test in this file tears
+    // down with this exact pair for this reason.
+    if (server) { server.close(); if (server.client) await server.client.close(); }
     fs.rmSync(parent, { recursive: true, force: true });
   }
 });
