@@ -1,7 +1,7 @@
 ---
 id: AC-283
 title: author 分支已推送到 origin，且是本地 author 的真实祖先（解决单点失效）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -41,6 +41,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-023 激活，同步激活
+  - at: 2026-09-17T05:00:44.924Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
