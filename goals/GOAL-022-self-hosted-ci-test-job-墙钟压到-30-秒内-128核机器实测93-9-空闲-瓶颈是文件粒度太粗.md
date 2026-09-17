@@ -42,6 +42,21 @@ mutation-check 并行化 + 自定义 runner 镜像消除重复装包。
 非目标：不追求"绝对30秒"是数学精确值——AC-281 用真实 CI 一次 ≤30s 的绿跑作收口证据，不设更严的
 连续N次要求（后续 goal-driver 自己的 I5 achieved-but-failing 复检机制会持续盯着有没有退化）。
 
+## 执行主机（人 2026-09-17 裁定）
+
+开发活动（拆分15个文件、并行化 checker-mutation-check.sh）在本机 boheidc 执行，走既有的
+worker-driver/promotion-driver 自动化流水线（`/home/yale/work/quay-worktrees/<task-id>`）——
+不在 tokyo-alpha 上开发。依据：①boheidc 已经是这套流水线的常驻宿主（promotion-driver/
+worker-driver 已在跑，且前两条相关任务 gap-outer-tick-log-awk-mawk-interval-red /
+gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red 都是被这条流水线在 boheidc 上接走做完的）；
+②boheidc 是16核，正是 `gap-suite-not-robust-at-high-derived-concurrency` 证据里"这个套件日常
+被开发/验证的那台16核机器"，本地跑 `scripts/test.sh` 验证拆分正确性天然吻合这个惯例；
+③tokyo-alpha 只是 AC-281 的真实执行靶子——CI 的 `runs-on: [self-hosted, tokyo-alpha]` 由
+push develop 或 `gh workflow run` 自动触发派发，这两件事在 boheidc 上就能做，不需要登录
+tokyo-alpha 开发，tokyo-alpha 上也没有这个仓库的任务/worktree 基础设施。
+
+⛔ 不要因为任务标题含"self-hosted runner"字样就假定要 SSH 到 tokyo-alpha 上直接改代码。
+
 ## 退出条件
 
 三条 AC 全部 achieved：AC-279（15个原地大文件全部被拆分/移走）、AC-280（checker-mutation-check.sh
