@@ -1,7 +1,7 @@
 ---
 id: gap-readme-plugin-install-private-repo-gh-auth
 title: README Option A 安装步骤缺少私有仓库 gh 认证前置（gh auth setup-git）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
