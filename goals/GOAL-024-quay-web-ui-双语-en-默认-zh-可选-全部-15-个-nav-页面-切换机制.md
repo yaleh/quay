@@ -1,11 +1,19 @@
 ---
 id: GOAL-024
 title: quay web UI 双语（EN 默认 / ZH 可选），全部 15 个 nav 页面 + 切换机制
-status: draft
+status: active
 kind: goal
 origin: 人 2026-09-17 在对话中裁定：新增 quay web UI 双语（EN 默认 / ZH 可选）目标；达成范围 = 全部 15 个
   SITE_NAV_ROUTES 页面 + 切换机制本身（用户在 AskUserQuestion 中选择「全部 15 个页面」而非「机制 + 3
   个代表页」或「拆两个 GOAL」）。
+activatedAt: 2026-09-17T16:18:04.200Z
+statusLog:
+  - at: 2026-09-17T16:18:04.201Z
+    from: draft
+    to: active
+    actor: user
+    reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」；16 条 AC（AC-288~AC-303）已就位且判据为 0.345s/条
+      的探针形态，退出条件已可判定，进入执行阶段。
 ---
 ## 背景
 
