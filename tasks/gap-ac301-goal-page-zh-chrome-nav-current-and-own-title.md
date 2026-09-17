@@ -166,13 +166,13 @@ for p in $(pgrep -f 'quay.ts serve'); do echo "pid=$p cwd=$(readlink /proc/$p/cw
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，`curl -H 'Cookie: lang=zh' http://$addr/goal` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Goals`（同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线（立案值 `quay — Goals`）**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Goals`**。⛔ 三处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
-- [ ] **AC1b（判据读不到的那两处 chrome，⛔ 不得用 nav 区块的读数顶替）**：① `<span class="mobile-header-page">` 的文本在 zh 下不再是 `goals`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到）；② `<h1>` 在 zh 下不再是 `Goals — …`（它在 `<main>` 内、nav 区块之外）；③ `<p class="meta">Tab: <strong>…</strong>` 的 `<strong>` 文本在 zh 下不再是 `Goals`（陷阱 3）。三处**分开**贴 zh 与 en 的原始片段。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 与 en **两份**响应各跑 `tr '<' '\n<' | grep -n 'Goals'`（以及小写 `goals`），把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **nav 区块内**、**`<main>` 内**、**`<title>` 内**三个计数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（立案基线：body **5 次**、nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：① `serve-goal.ts:390` 的 `otherTabLabel`（`"Criteria"`/`"Goals"`，**只在 info-banner 条件渲染**、默认 URL 上读不到 ⇒ 本任务不改、⛔ 也不为它立判据）；② `serve-goal.ts:492`/`:493` 的 `/goal/<id>` 路由（`<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav`）**本任务不改**，须在 AC5 的逐文件计数里如实体现（**2→1**）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-301 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-301-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Goals` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac301-goal-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`gap-webui-goal-list-tab-split-goal-ac.test.mjs`、`gap-webui-goal-list-sort-and-column-set.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-goal.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:400` `/goal` ＋ `:492` `/goal/<id>`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
-- [ ] **AC6（争用/陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**可能命中的实例（cwd = 主检出；立案当轮为 `pid=3696699 --host 0.0.0.0 --port 4173` 与 4192 上的若干 churn 进程）的 `curl -sf http://<addr>/health` 原始读数，写明 `processStartedAt` / `latestCodeCommitAt` / `stale`，并**明写**「驱动侧仍可能在 `CAUSE=html-lang-not-zh` 上红，成因是该实例陈旧或 4192 端口争用，与 `/goal` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。
+- [x] **AC1（live 面判别性读数：三段各自独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，`curl -H 'Cookie: lang=zh' http://$addr/goal` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Goals`（同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线（立案值 `quay — Goals`）**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Goals`**。⛔ 三处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
+- [x] **AC1b（判据读不到的那两处 chrome，⛔ 不得用 nav 区块的读数顶替）**：① `<span class="mobile-header-page">` 的文本在 zh 下不再是 `goals`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到）；② `<h1>` 在 zh 下不再是 `Goals — …`（它在 `<main>` 内、nav 区块之外）；③ `<p class="meta">Tab: <strong>…</strong>` 的 `<strong>` 文本在 zh 下不再是 `Goals`（陷阱 3）。三处**分开**贴 zh 与 en 的原始片段。
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 与 en **两份**响应各跑 `tr '<' '\n<' | grep -n 'Goals'`（以及小写 `goals`），把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **nav 区块内**、**`<main>` 内**、**`<title>` 内**三个计数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（立案基线：body **5 次**、nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：① `serve-goal.ts:390` 的 `otherTabLabel`（`"Criteria"`/`"Goals"`，**只在 info-banner 条件渲染**、默认 URL 上读不到 ⇒ 本任务不改、⛔ 也不为它立判据）；② `serve-goal.ts:492`/`:493` 的 `/goal/<id>` 路由（`<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav`）**本任务不改**，须在 AC5 的逐文件计数里如实体现（**2→1**）。
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-301 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-301-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Goals` 的混合串。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac301-goal-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`gap-webui-goal-list-tab-split-goal-ac.test.mjs`、`gap-webui-goal-list-sort-and-column-set.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-goal.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:400` `/goal` ＋ `:492` `/goal/<id>`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
+- [x] **AC6（争用/陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**可能命中的实例（cwd = 主检出；立案当轮为 `pid=3696699 --host 0.0.0.0 --port 4173` 与 4192 上的若干 churn 进程）的 `curl -sf http://<addr>/health` 原始读数，写明 `processStartedAt` / `latestCodeCommitAt` / `stale`，并**明写**「驱动侧仍可能在 `CAUSE=html-lang-not-zh` 上红，成因是该实例陈旧或 4192 端口争用，与 `/goal` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。
 
 ## DoD
 
@@ -193,3 +193,139 @@ for p in $(pgrep -f 'quay.ts serve'); do echo "pid=$p cwd=$(readlink /proc/$p/cw
 - packages/quay/test/serve-goal-zh-chrome.test.mjs (new)
 
 （说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物、四个共享渲染函数与 `NAV_LABELS` 属 AC-289 的产物、`serve-task.ts`/`serve-live.ts` 的接线模板属 AC-290/AC-291 的产物，⛔ 均不在本 Touches 的**改动**意图内（`serve-i18n.ts` 只追加本页两条 `PAGE_LABELS` 词条 + 更新 ROW 3 契约注释）；`packages/quay/src/serve-handlers.ts` **刻意不声明**——`reqCfg` 已带 lang 且 `:284` 已传入，无 delta；`packages/quay/test/serve-goal-doc.test.mjs` **刻意不声明**——只走 HTTP、无 delta（Proposal 已实测核对），但若它因本页改动变红则**当场**加进 Touches；`goals/AC-301-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据落 `.quay/ac301-*` 并**保持未跟踪**，故不声明——`anti-drift-touches-check` 只比对已跟踪文件。）
+
+## Evidence（AC-301 实现与验收；2026-09-17；worktree `/home/yale/work/quay-worktrees/gap-ac301-goal-page-zh-chrome-nav-current-and-own-title`）
+
+实现提交 `f58ad13d1`（3 个路径：`serve-goal.ts` / `serve-i18n.ts` / `test/serve-goal-zh-chrome.test.mjs`；`develop` 侧 `f2f7968d7`，pre-merge `git merge --no-edit develop` ⇒ `Already up to date.`）。
+**所有 live 读数取自【本任务 worktree 内、跑本任务代码】的实例**（`--host 127.0.0.1 --port 4301`，cwd = 本 worktree）—— ⛔ 未触碰主检出实例。
+
+### 实现（六个 chrome 位点 + 两条词条；行号为落地后）
+
+- `serve-goal.ts:332` `const lang = pageCfg?.lang;`（⛔ 无 `?? "en"` 兜底 —— 默认参数即回落）
+- `:455` `${htmlLangTag(lang)}` + `pageTitle("Goals", pageCfg?.identity, lang)`
+- `:456` `renderMobileChrome("goal", pageNameFor("goals", lang), lang)` + `renderSiteNav("goal", lang)`
+- `:457` `<h1>${pageNameFor("Goals", lang)} — … (${rows.length})</h1>`（仅常量前缀过字典；subtitle 与计数原样插值）
+- `:397-398` Tab 指示器**两个分支**（`<strong>` 与 `<a>`，同一 token）
+- `serve-i18n.ts` `PAGE_LABELS` 追加 `Goals: {en:"Goals", zh:"目标"}` + `goals: {en:"goals", zh:"目标"}`；ROW 3 契约注释把 /goal 列入已接线页（剩余 2 页 = AC-302~303）
+- ⛔ 未改 `NAV_LABELS` / `serve-render.ts` / `serve-handlers.ts` / `handleGoalDetail`
+
+### AC1 —— 三段独立读数（live 4301）
+
+| 段 | en | zh |
+|---|---|---|
+| ① 页头 lang | `<html lang="en"` | `<html lang="zh"` |
+| ② nav 区块内字面量 `Goals` | **2** | **0** |
+| ③ 本页 `<title>` | `gap-ac301-goal-page-zh…bdf20891 — Goals` | `gap-ac301-goal-page-zh…bdf20891 — 目标` |
+
+③：两条**逐字不同**；zh 标题内 ASCII `Goals` 计数 = **0**。响应体 49494 → 49510 bytes（⛔ 不再逐字节相同）。
+
+nav 当前项（桌面 / 移动**分开**断言）：
+```
+en desktop: <span class="nav-item nav-current" aria-current="page">Goals</span>
+zh desktop: <span class="nav-item nav-current" aria-current="page">目标</span>
+en mobile : <span class="mobile-menu-item nav-current" aria-current="page">Goals</span>
+zh mobile : <span class="mobile-menu-item nav-current" aria-current="page">目标</span>
+```
+
+### AC1b —— 判据读不到的三处 chrome（⛔ 未用 nav 读数顶替）
+
+```
+① <span class="mobile-header-page">   en "goals"                → zh "目标"          （在 <nav class="mobile-menu"> 之外）
+② <h1>                                en "Goals — 阶段目标 (24)" → zh "目标 — 阶段目标 (24)"（在 <main> 内）
+③ <p class="meta">Tab: <strong>…      en "Goals"                → zh "目标"
+```
+
+### AC2 —— 因果对照（三次钳制；⛔ 均未提交，跑完即 `git checkout --` 还原，`git status` 复核 0 改动）
+
+| 钳制点 | `<html lang>` | nav 当前项 | 本页 `<title>` | 判据 `CAUSE=` |
+|---|---|---|---|---|
+| A：`resolveLang()` 首行强制 `en` | `en` | `Goals` | `… — Goals` | `html-lang-not-zh` |
+| B：`pageNameFor` + `navLabelsFor` 首行强制 `en` | **`zh`** | `Goals` | `… — Goals` | `nav-label-untranslated` |
+| C：**仅** `pageNameFor` 首行强制 `en` | **`zh`** | **`目标`** | `… — Goals` | `title-unchanged` |
+| 还原后 | `zh` | `目标` | `… — 目标` | **pass**（`GATE_EXIT=0`） |
+
+⇒ **B 把成因单独钉在【字典接线】上**（AC-288 的语言机制原封不动、html lang 仍为 zh，而 nav/title 回退英文）；**C 再把它钉在【本页 `pageNameFor`】**（nav 已中文而 title 仍英文）。⛔ 判据不是结构上恒绿。
+
+### AC3 —— 全量残留枚举（逐条归属）
+
+`tr '<' '\n<' | grep -n 'Goals'` ⇒ **en body 合计 5**：nav 区块 **2** · `<title>` **1** · `<main>` **2**：
+
+```
+654: title>…— Goals                                   ← serve-goal.ts:455 pageTitle  —— 本页 <title>（本任务接线）
+738: span class="mobile-menu-item nav-current"…>Goals   ← serve-render.ts renderMobileChrome → NAV_LABELS.goal（AC-289 产物）
+792: span class="nav-item nav-current"…>Goals           ← serve-render.ts renderSiteNav      → NAV_LABELS.goal（AC-289 产物）
+805: h1>Goals — 阶段目标 (24)                        ← serve-goal.ts:457 <h1> 常量前缀 —— 本任务接线
+811: strong>Goals                                    ← serve-goal.ts:397-398 Tab 指示器 —— 本任务接线
+```
+zh：**body 0**（nav 0 · title 0 · main 0）。小写 `goals`：en **1**（那 1 条 = `<span class="mobile-header-page">`）→ zh **0**。
+**数据侧 0 条**（当轮 `goals/` 无一记录的独立字面量含 `Goals`）⇒ en 的 5 条**全部是 chrome**；判别性由「同一谓词在 en 命中 5、nav 区间命中 2」提供（⛔ 不是「数出来是 0」）。
+
+**具名范围外残留（⛔ 未改、也⛔未为它们立判据）**：
+① `serve-goal.ts:418` `otherTabLabel`（`"Criteria"`/`"Goals"`）—— 只在 info-banner 条件渲染（`statusFilter!=="draft" && otherDraft>0`），默认 URL 结构性读不到；
+② `serve-goal.ts:547` `handleGoalDetail`（`/goal/<id>`，⛔ 不在 `SITE_NAV_ROUTES` 的 15 条内）—— 保留裸 `html lang` 属性与未传 lang 的 `renderMobileChrome`/`renderSiteNav`；见 AC5④ 的 2→1；
+③ `serve-goal.ts:397-398` Tab 的 **`Criteria`** 半 —— 需第三条 `PAGE_LABELS` 词条，超出本任务两条 token 的作用域；已登记在源码注释，测试以 `residue:` 臂钉住「它现在仍是英文」（将来接线会主动打红该臂）。
+
+### AC4 —— 判据裁决原样记录
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-301 --dry-run --json    （cwd = 本任务 worktree）
+{
+  "id": "AC-301",
+  "verdict": "pass",
+  "reason": "acceptance passed (exit 0)",
+  "timestamp": "2026-09-17T21:52:45.645Z",
+  "dryRun": true,
+  "event": { … "gate": "goal", "actor": "goal-cli", "verdict": "pass" … }
+}
+GATE_EXIT=0
+```
+⛔ 未改判据（`goals/AC-301-*.md` 未动）、⛔ 未改别的任务 title、zh 值不含英文 `Goals`（「目标」）。
+
+### AC5 —— 不回归 + 作用域
+
+① `bash scripts/test.sh --for-task gap-ac301-goal-page-zh-chrome-nav-current-and-own-title --allow-thin` ⇒ **exit 0**（`tests 95 / pass 95 / fail 0 / skipped 0`）。selector 选中 9 个测试文件，**含 `packages/quay/test/serve-goal-zh-chrome.test.mjs` 与 `serve-i18n.test.mjs`**（输出第 352-369 行即本任务新测试的 5 条臂全绿）。
+② `node --test packages/quay/test/serve-*.test.mjs` ⇒ **exit 0**（`tests 249 / pass 248 / fail 0 / skipped 1`），含 `serve-goal-doc.test.mjs`、`serve-i18n.test.mjs`、`serve-live-zh-chrome.test.mjs`、`gap-webui-goal-list-tab-split-goal-ac.test.mjs`、`gap-webui-goal-list-sort-and-column-set.test.mjs`（后两者**未被 selector 选中** —— `serve-goal.ts` 没有同名测试文件，故单独跑；这也是它们**不需要**进 Touches 的实测依据）。
+③ `git diff --name-only develop...HEAD` ⇒ **恰好 3 条，全部在本任务 Touches 内**：
+```
+packages/quay/src/serve-goal.ts
+packages/quay/src/serve-i18n.ts
+packages/quay/test/serve-goal-zh-chrome.test.mjs
+```
+其余 **16** 个 `serve-*.ts` 一字未改（`git diff --name-only develop...HEAD -- 'packages/quay/src/serve-*.ts'` 只列出上面两个）。
+④ `grep -c 'html lang="en"' packages/quay/src/serve-goal.ts`：立案基线 **2** → 现在 **1**，残留即 `:547`（AC3 具名范围外项 ②）。注释内 0 处（⛔ 不虚增计数；同 AC-300 的做法）。
+
+### AC6 —— 争用/陈旧实例的诚实报告
+
+```
+$ bash .quay/ac301/ac301-health-scan.sh      （只读；⛔ 未重启、未干扰不拥有的实例）
+pid=867922  cwd=.../gap-ac291-…(deleted)  addr=127.0.0.1:51931  health: {"ok":true,"stale":null,"evaluated":false,…}
+pid=3338894 cwd=.../gap-ac288-…(deleted)  addr=127.0.0.1:51921  health: {"ok":true,"stale":null,"evaluated":false,…}
+pid=3412891 cwd=.../gap-ac300-…(deleted)  addr=127.0.0.1:4174   health: {"ok":true,"stale":null,"evaluated":false,…}
+pid=3696699 cwd=/home/yale/work/quay      addr=127.0.0.1:4173
+  health: {"ok":true,"stale":true,"evaluated":true,
+           "processStartedAt":"2026-09-17T16:21:45.406Z",
+           "latestCodeCommitAt":"2026-09-17T21:32:13.000Z","source":"git"}
+  GET /goal          → <html lang="en"
+  GET /goal lang=zh  → <html lang="en" ; <title>quay — Goals</title> ; nav-current "Goals"
+```
+该实例 `stale:true`（起于 `16:21:45Z`，**早于** AC-288/AC-301 落 develop）。实测：在主检出跑判据 —— `cd /home/yale/work/quay && node packages/quay/bin/quay.js goal gate AC-301 --dry-run --json` ⇒ `verdict=fail, CAUSE=html-lang-not-zh`（探针命中 `pid=3696699`）。**⇒ 驱动侧若从主检出跑判据，仍可能在 `CAUSE=html-lang-not-zh` 上红；成因是该实例陈旧（未重启加载新代码），与 `/goal` 的接线无关。** ⛔ 本任务不据此改写 AC1 的结论，⛔ 也不为让它变绿去重启它（那是外部操作面，见 Proposal「操作前提」）。
+（立案当轮 4192 端口上的若干 churn 进程本轮**已不存在**；现存 3 个 `(deleted)` cwd 的实例属已退役的兄弟 worktree，同样未被触碰。）
+
+### DoD 逐条
+
+1. **落地对象** —— AC1 三段 + AC1b 三处均在**真实 HTTP 响应体**上直读（⛔ 未把 render 函数返回值当「响应」）。en 基线未变由测试 `AC1⑥` 钉住：无 cookie ≡ `?lang=en`，**整响应体逐字节相同**。
+2. **可被打红** —— AC2 的 A/B/C 三次钳制实际跑过并留下具名 `CAUSE=`（⛔ 判据非结构恒绿）。
+3. **判据裁决诚实** —— AC4 原样贴出；pass 即 pass，⛔ 未用改写数据/字典值的方式凑绿；AC6 的陈旧实例红读数如实保留。
+4. **作用域** —— AC5③ 逐条 + ④ 逐处计数；`/goal/<id>` 与 Tab 的 `Criteria` 半、`otherTabLabel` 三处具名登记（⛔ 未悄悄算进「已全部双语」）。
+5. **可回滚** —— 还原 `serve-goal.ts` 六处接线 + 删除 `serve-i18n.ts` 两条词条 + `npm run build -w quay` + 重启 serve 实例；纯本地代码，无外部状态。
+6. **证据留痕** —— 原始读数落 `.quay/ac301/`（**未跟踪**）：`en.html` / `zh.html` / `ac301-AC2-clamp{A,B,C}.txt` / `ac301-AC2-restored.txt` / `ac301-AC3-enumeration.txt` / `ac301-AC4-gate-post.txt` / `ac301-AC5-scope.txt` / `ac301-AC5-serve-tests.txt` / `ac301-AC6-health.txt` / `ac301-AC6-driver-side.txt` / `ac301-scoped-gate.txt` / `ac301-scoped-gate-cache.txt` / `ac301-premerge.txt`，以及可复算脚本 `ac301-enumerate.sh` / `ac301-health-scan.sh` / `ac301-serve.sh` / `ac301-serve-stop.sh`。
+
+### 陷阱复核（Proposal 预记的四条 + 实测新增的两条）
+
+- 陷阱 1（两条词条 / 第二条小写）**命中** —— `Goals` 与 `goals` 两次独立查表；`AC-dict` 臂以全大写 `GOALS` 必须 MISS 来**度量**大小写敏感（⛔ 不是断言「两条都在」）。
+- 陷阱 2（`<h1>` 动态串）**命中** —— 只把常量前缀过字典；测试按 `<token> — <subtitle> (<n>)` **形状**断言（⛔ 不钉 `目标 — 阶段目标 (24)`，那会随计数陈旧）。
+- 陷阱 3（Tab 指示器 / `otherTabLabel`）**命中** —— 前者两分支已接线（同一 token），后者登记为具名残留。
+- 陷阱 4（`/goal/<id>` 不改、2→1）**命中** —— AC5④ 实测 2→1。
+- **新增发现 ①（AC3 的 `<main>` 区间不能用朴素贪心）**：`shellStyles()` 的 skip-link **CSS 注释**里含字面量 `<main id="main">` ⇒ 贪心 `<main.*</main>` 从 `<head>` 起匹配、吞掉 nav 与 `<title>`（实测报 **5**，即全页命中）。改用**最后一次**出现的 `<main id="main">` 起切。
+- **新增发现 ②（字符 vs 字节）**：`${var:OFFSET}` 按**字符**计数而 `grep -b` 按**字节**，本页中文多 ⇒ 首次切片偏 33 字节，落在 nav 项中间（读数变成 nav=1 / main=0）。改用 `tail -c +N`（字节）后为 nav=2 / main=2。
+  两条均写进 `ac301-enumerate.sh` 的注释，AC3 的读数即由该脚本产出（硬规则 4b/4c：代理量会偏离 —— 「按构造」的读数正是最容易静默失效的那类）。
