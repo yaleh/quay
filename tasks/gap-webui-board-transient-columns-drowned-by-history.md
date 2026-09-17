@@ -61,4 +61,15 @@ extra:
 - **DoD 后半（人工注入）**：同一实例注入活进程 runId + start 无 end 遥测 ⇒ 默认视图 `1 行（全部 3 行）`、`Page 1 of 1 (1 rows)`、只有 `dod-history-2` 一行（`在飞 5.1 分钟`），另两条历史行不渲染；`?all=1` ⇒ `已显示全部 3 行（含历史任务）`，三条全在。
 - **反例控制（"读不到 ≠ 没有"）**：无 `.workflow-events/` 的工作区 ⇒ `board_default_view=unfiltered-source-incomplete` + 「默认过滤未生效…因此下面显示全部 N 行」，**不出现**空态文案（两种 0 行状态文本可区分，硬规则 3b）。
 - **既有回归面**：`serve-board.test.mjs` 11/11 绿（含分页 25 行、冷加载、缓存负控制、读超时 fail-open、漂移逐任务一致、孤儿/在飞判定）——**该文件未改一字**；另 `/board` 的其余消费者（`gap-webui-detail-page-head-drops-pagestyles` / `gap-webui-list-table-no-overflow-container` / `serve-nav-inconsistent-routes` / `serve-ac102-modernist-views`）29/29 绿；`npx tsc --noEmit -p packages/quay` exit 0。
-- **留待 fan-in**：全量套件（`scripts/test.sh` 默认面）由 driver 的机械 fan-in 执行；本任务已 `--write-scoped-gate-cache`（developSha `50e7bb21a`），fan-in 侧不再重复 scoped 门。
+
+### 第 2 轮（2026-09-17，续做 exited-not-landed 之后）
+
+- **pre-merge**：`git merge develop` 无损（HEAD `b54cada9c`，diff 仍为 2 文件 `+401 −6`）；**scoped 门重跑 exit 0 / 99 tests / 0 fail**；**重写 scoped-gate cache**（developSha 由 `50e7bb21a` 更新为 `888010338`）。
+- **⚠️ 上一轮 fan-in 的 suite 红已诊断为【宿主资源饥饿】，不是本任务的代码缺陷**（三条证据）：
+  1. **隔离复跑同一批失败文件 ⇒ 全绿，且快一个量级**：`scripts/test.sh <那 4 个文件>` = **exit 0 / 125 tests / 0 fail / 58.5s**。逐文件对照（同一份代码）：`worker-driver.test.mjs` 174s✖ → 通过；`driver-anchor.test.mjs` 176s✖ → 通过（其中 `双派发硬闸` 89s✖ ⇒ **1.0s ✔**）；`cli.test.mjs` 146s✖ → 通过；`server-status-web-control-same-pid.test.mjs` 203s✖ → 通过（其中 `AC3 ps -p <pid>` 88s✖ ⇒ **3.9s ✔**；`AC1 dispatch 持久记录`✖ ⇒ ✔）。四个失败**全部是超时形**（22–89s、stderr 为空 ⇒ 子进程在测试内部窗口内没跑完），墙钟总差 ~12×。
+  2. **独立复现（同 anchor 的邻居任务）**：`gap-webui-dashboard-tasks-display-polish` 在其后一个窗口（同 `wk-prod-anchor`、不同分支、14:57–15:01）**同样 `exited-not-landed @ step=suite`**，失败在 `packages/quay/test/web-ui-browser.test.mjs`（1 fail / 3081）⇒ `step=suite` 红不是本分支特有。
+  3. **无交集、无可共享状态**：4 个失败文件都不在 Touches/diff 内；本改动是 `/board` 渲染的**纯增补**（三个可选入参，缺省 = legacy）；新增测试用**进程内** `startServer({port:0})`（无外部服务/端口争用）、只写自己的 `mkdtemp` 私有工作区，退出后实测**零残留进程**（`ps` 中 `setInterval` 签名计数 = 0）。
+  - 现场读数：该窗口宿主 **loadavg 18.4 / 16 核**、6 个在飞 worktree；同日另有 `gap-spec-release-hotfix-branching-…` 两次被 **silence watchdog** 杀掉套件（06:47、07:40）。
+  - **未再跑全量套件**（判别性证据已由上面第 1 条对照给出）：宿主已过载，再叠一条 16 路并发的全量套件会自己诱发同类超时、并可能把别的 worker 的套件推红——属自败动作。
+  - **范围外（留给另立任务）**：这 4 个文件都是 child-spawn 形却**未**登记 `@load-sensitive`（`plugin/scripts/known-load-sensitive.ts --list` 无它们），因此落在 16 路 main 桶；但该注册表只喂续做提示文案（`worker-driver.ts:2043/2075` 的 `relatednessSignalsFor`/`formatRelatednessNote`），**既不驱动分桶、也不会触发自动重试**，故本任务无机械杠杆可用。修它不在本任务 Touches 内。
+- **留待 fan-in**：全量套件（`scripts/test.sh` 默认面）由 driver 的机械 fan-in 执行；scoped-gate cache 已按 developSha `888010338` 重写，fan-in 侧不重复 scoped 门。
