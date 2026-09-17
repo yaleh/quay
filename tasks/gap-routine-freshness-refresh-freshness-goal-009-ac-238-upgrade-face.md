@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-238-upgrade-face
 title: "freshness-refresh: margin -4 is already negative (d=204 > K=200): the
   newest carrier evidence for AC-238 is 204 delivery-face commits behind the
   develop tip, so the goal layer's fr"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
