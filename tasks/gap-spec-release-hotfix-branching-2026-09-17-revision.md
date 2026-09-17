@@ -3,7 +3,7 @@ id: gap-spec-release-hotfix-branching-2026-09-17-revision
 title: orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md 未按 GOAL-023
   修订 ⇒ AC-287 判据 exit 1（CAUSE=spec-not-amended）——§3.2.1 补 2026-09-17
   追加裁定（反转默认分支到 master）+ AC-273 转 superseded + 三条线设计补第四条 author
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
