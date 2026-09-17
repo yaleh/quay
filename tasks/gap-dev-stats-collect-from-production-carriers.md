@@ -2,7 +2,7 @@
 id: gap-dev-stats-collect-from-production-carriers
 title: README 开发过程统计无机械产出面：plugin/scripts/dev-stats-collect.ts 与 dev-stats
   标记块双双缺席，AC-277 判据真跑 CAUSE=stats-script-absent
-status: ready
+status: done
 labels:
   - gap
   - docs
