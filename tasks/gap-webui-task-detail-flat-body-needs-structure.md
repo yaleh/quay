@@ -2,7 +2,7 @@
 id: gap-webui-task-detail-flat-body-needs-structure
 title: /task/&lt;id&gt; 详情页把整个任务体 markdown 摊平渲染，长任务体（Proposal/Finding/Verdict
   等）无法折叠/锚点跳转
-status: todo
+status: ready
 labels:
   - gap
   - webui
