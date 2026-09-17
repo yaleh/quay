@@ -242,6 +242,32 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // 「测试 — 验证轮记录」 satisfies "non-empty" without either literal.
   "Tests — 验证轮记录": { en: "Tests — 验证轮记录", zh: "测试 — 验证轮记录" },
   tests: { en: "tests", zh: "测试" },
+  // AC-299 (/sessions page): this page needs THREE tokens, not the usual two — its `<h1>` carries a
+  // LOUDER token than its `<title>`, so unlike /tests (AC-298) a single entry cannot serve both.
+  //   `"Sessions — 会话观测"` — the FULL token `serve-sessions.ts` passes to `pageTitle`, em dash and
+  //     the (already-Chinese) subtitle included, byte-equal to the call site. `pageNameFor` is an
+  //     EXACT-token lookup, so registering only the bare nav word `Sessions` would leave this page's
+  //     `<title>` English while the shared nav bar switched — i.e. exactly the `title-unchanged` arm
+  //     this task exists to remove.
+  //   `"Sessions — 会话观测（运行中 + 已结束）"` — the token the page's `<h1>` carries, with the
+  //     full-width parens and the parenthetical included. It is NOT the title token above: the two
+  //     differ by the trailing `（运行中 + 已结束）`, so the title entry does not serve it and vice
+  //     versa. This is the one deviation from the AC-291~298 two-token shape.
+  //   `sessions` — the lowercase token the MOBILE header carries, i.e. the AC-290 `"task list"` /
+  //     AC-297 `"git history"` / AC-298 `tests` shape (a page's own chrome token that is not a
+  //     `pageTitle` token). It renders into `<span class="mobile-header-page">`, which sits BEFORE
+  //     the first `<nav>` and is therefore neither inside the criterion's nav region nor a nav label.
+  //     It is spelled identically to the nav KEY `sessions`, but it is a separate lookup on purpose:
+  //     the nav label resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through
+  //     `pageNameFor` (this page's chrome, ROW 3), and ROW 3's whole point is that the two are peers.
+  // Neither zh value may carry the ASCII literal "Sessions" or "sessions": AC-299's second arm fails
+  // the page on that literal inside the nav region — where this page's CURRENT item label comes from
+  // NAV_LABELS's `sessions` row (「会话」, ROW 1) — and the same literal is what the en baseline's
+  // `<title>` and `<h1>` carry, i.e. what the criterion's `title-unchanged` arm compares the zh title
+  // against. 「会话」/「会话观测」 satisfy "non-empty" without either literal.
+  "Sessions — 会话观测": { en: "Sessions — 会话观测", zh: "会话 — 会话观测" },
+  "Sessions — 会话观测（运行中 + 已结束）": { en: "Sessions — 会话观测（运行中 + 已结束）", zh: "会话 — 会话观测（运行中 + 已结束）" },
+  sessions: { en: "sessions", zh: "会话" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline

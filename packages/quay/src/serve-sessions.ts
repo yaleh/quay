@@ -7,7 +7,16 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readSessions, readSession, readTranscript, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type TranscriptTurn } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
+import {
+  html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle,
+  // AC-299 (gap-ac299-sessions-page-zh-chrome-nav-current-and-own-title): the /sessions LIST page
+  // consumes the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionaries (`pageNameFor`)
+  // through this one import — `serve-render.ts` re-exports both, so the page never re-parses
+  // `?lang=`/the cookie (a second parse is a second decision table, and it would also read a
+  // different request's inputs than the one Vary/Cookie was declared for) and never re-derives a
+  // label.
+  htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
+} from "./serve-render.ts";
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
 import { resolvePluginScript } from "./plugin-root.ts";
@@ -32,7 +41,14 @@ function sessionStateLine(s: SessionDetail): string {
   return "";
 }
 
-export function renderSessionsPage(sessions: SessionsResult, identity: ServeIdentity | null = null): string {
+export function renderSessionsPage(
+  sessions: SessionsResult,
+  identity: ServeIdentity | null = null,
+  // AC-299: the page's OWN chrome language. Defaulted to `DEFAULT_LANG` so the pre-existing call
+  // sites (and `serve-sessions.test.mjs`'s direct single-argument renders) keep producing their
+  // English bytes verbatim; the live handler threads the per-request `cfg.lang` in below.
+  lang: Lang = DEFAULT_LANG,
+): string {
   // AC1 (gap-sessions-page-slow-unclickable-flat-render): the card is an <a href="/session/<id>"> —
   // the detail page already exists, the list just never linked to it. sessionId is a strict UUID
   // ([0-9a-f-]), so the href is a lookup key, never a path-traversal vector.
@@ -87,9 +103,9 @@ export function renderSessionsPage(sessions: SessionsResult, identity: ServeIden
     </section>`;
   }).join("");
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>${pageTitle("Sessions — 会话观测", identity)}</title></head>
-    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
-      <h1>Sessions — 会话观测（运行中 + 已结束）</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>${pageTitle("Sessions — 会话观测", identity, lang)}</title></head>
+    <body>${renderMobileChrome("sessions", pageNameFor("sessions", lang), lang)}${renderSiteNav("sessions", lang)}<main id="main">
+      <h1>${pageNameFor("Sessions — 会话观测（运行中 + 已结束）", lang)}</h1>
       <p class="meta">数据源：<code>claude agents --json</code>（运行中 · 交互式 + <code>-p</code>）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部</p>
       ${obsNote(sessions.status, sessions.reason)}
       ${renderLifecycleSection()}
@@ -109,7 +125,7 @@ export async function handleSessions(
     sessions = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessions: [] };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderSessionsPage(sessions, cfg.identity));
+  res.end(renderSessionsPage(sessions, cfg.identity, cfg.lang));
 }
 
 // ── /session/<sessionId> ──────────────────────────────────────────────────────────────────────────
