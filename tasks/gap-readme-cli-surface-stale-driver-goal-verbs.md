@@ -1,7 +1,7 @@
 ---
 id: gap-readme-cli-surface-stale-driver-goal-verbs
 title: README.md 的 CLI 用法说明（顶层子命令行 + quay driver 用法）已随代码演进漂移，且"已知缺口"提示引用了已 done 的任务
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -47,14 +47,14 @@ README 在 Driver processes 一节写道（原文）：
 
 ## Acceptance Criteria
 
-- [ ] AC1: README:480 的顶层 `quay` 用法行更新为与当前 `node packages/quay/bin/quay.ts`（无参数）实际打印的字面输出一致。取假判据：`diff <(node --experimental-strip-types packages/quay/bin/quay.ts 2>&1 | head -1) <(README 里那一行加上 "usage: " 前缀抽出来的字符串)` 必须为空。
-- [ ] AC2: README:554 的 `quay driver` 用法行更新为与 `quay driver --help` 实际输出一致（动词含 `resume`，`--kind` 含全部6种）。取假判据同款 diff 对照。
-- [ ] AC3: README:565-569 的"Known gap"提示删除或改写为反映 `gap-worker-driver-cold-start-inflight-blind` 已 done 的现状（若该任务记录了替代读法，一并引用）。
-- [ ] AC4: 排查 README 里是否还有其它地方引用了同一批"字面打印的用法行"或已经 done 的任务作为"未解决缺口"（硬规则 5b：改好一处不等于只有那一处）——至少 grep 一遍 README 全文里所有 `usage: quay` 出现处 和所有 `` `gap-`` 反引号任务id引用，逐条核对状态。
+- [x] AC1: README:480 的顶层 `quay` 用法行更新为与当前 `node packages/quay/bin/quay.ts`（无参数）实际打印的字面输出一致。取假判据：`diff <(node --experimental-strip-types packages/quay/bin/quay.ts 2>&1 | head -1) <(README 里那一行加上 "usage: " 前缀抽出来的字符串)` 必须为空。
+- [x] AC2: README:554 的 `quay driver` 用法行更新为与 `quay driver --help` 实际输出一致（动词含 `resume`，`--kind` 含全部6种）。取假判据同款 diff 对照。
+- [x] AC3: README:565-569 的"Known gap"提示删除或改写为反映 `gap-worker-driver-cold-start-inflight-blind` 已 done 的现状（若该任务记录了替代读法，一并引用）。
+- [x] AC4: 排查 README 里是否还有其它地方引用了同一批"字面打印的用法行"或已经 done 的任务作为"未解决缺口"（硬规则 5b：改好一处不等于只有那一处）——至少 grep 一遍 README 全文里所有 `usage: quay` 出现处 和所有 `` `gap-`` 反引号任务id引用，逐条核对状态。
 
 ## Definition of Done
 
-- [ ] README.md 里所有被 AC1-AC4 点名的位置都已更新，且更新后的字面文本经 diff 对照与真实命令输出/任务状态一致。
+- [x] README.md 里所有被 AC1-AC4 点名的位置都已更新，且更新后的字面文本经 diff 对照与真实命令输出/任务状态一致。
 
 ## Touches
 
