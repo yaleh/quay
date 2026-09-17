@@ -176,6 +176,8 @@ builtAt=2026-09-15T19:05:17.881Z; source=/home/yale/work/quay/plugin/scripts
   ✔ 陈旧 bundle ④ — 反例对照：**不陈旧** ⇒ 不触发补救（无 marker、无 `bundle rebuild` 行、state = fresh）—— 区分「补救在工作」与「恒有输出」
   ✔ 陈旧 bundle ⑤ — 没有源树（装好的产物）⇒ fail-closed：`resolveQuayKernelBuildScript()`=null 且 `attempted=false`
   ```
+  **scoped 门（fan-in 跑的那一条）：`bash scripts/test.sh --for-task <本任务> --allow-thin` ⇒ EXIT=0**（`ℹ tests 80 / pass 80 / fail 0`，`0` 条 `✖`；24 条 scoped 静态检查全 PASS；上面 5 条判据在门里逐条 `✔`）。
+  ⚠️ **该门第一次跑是红的，抓到的正是我自己夹具的一个「空转形态」——如实记下**：反例对照臂原本用 `Date.now() - 600s` 当「比内核更旧」，而本夹具的「内核」= worktree 里那份 `driver-anchor.ts`，其 mtime 是**检出/最后一次编辑时刻**；套件并行负载下 `Date.now()` 已推进很多 ⇒ 算出的源 mtime **比内核还新** ⇒ 该臂静默变成 stale、反例对照空转（单跑绿、门里 30s 超时：`timed out waiting for the anchor to publish the expected bundle reading`）。修法 = 两臂都相对 `ANCHOR_SCRIPT` 自己的 mtime 定（`+120s` / `−600s`），与 `kernelBuiltAt` **同基准**（提交 `e46da70d0`）。⇒ 这本身就是硬规则 4b 的又一实例：**「反例对照」若不钉在与被测判据同一个基准上，它会与「对照通过」同形**。
   **生产读数（修复落地 → 立案步真的执行）**：
   - 修复落地时刻：机械重建完成 = `plugin/scripts/dist/{probe-routine,driver-anchor,quality-gate-driver}.js` mtime `2026-09-17 04:42:35/38/39Z`（改前 `probe-routine.js` mtime `2026-09-15 19:05:16` 且 `filing-round` grep=0；改后 grep=**2**）；anchor 开始**加载重建出来的那一份** = `2026-09-17T04:48:48Z`（新 pid 3821426，`ps` 逐字 `node .../plugin/scripts/dist/driver-anchor.js __anchor --root /home/yale/work/quay`）。
   - 生产载体：`.quay/routine-findings.jsonl` 出现 **`kind:"filing-round"` 记录 2 条**（改前 0）。其中 **resident driver 自己那一轮**（runId `freshness-refresh-1789621383770`，`ts=2026-09-17T05:03:03.770Z` **晚于** 04:42:39/04:48:48）逐字：
@@ -186,14 +188,14 @@ builtAt=2026-09-15T19:05:17.881Z; source=/home/yale/work/quay/plugin/scripts
   - 该轮的驱动侧读数（`.quay/quality-round.jsonl`，`2026-09-17T05:07:02.206Z`）：`freshness-refresh` state=**verified**、`fired: true`、`durationMs: 235543`、`exit: 0`、`runId freshness-refresh-1789621383770` —— 即**常驻 quality driver 自己调度并跑成**的那一轮（⛔ 不是夹具、⛔ 不是 `--selfcheck`）。
   - ⚠️ 如实披露的动作面：该轮之所以立刻 due，是因为 anchor 为加载重建产物而**整进程重启**（driver 的 `lastRun` 是进程内存态，重启 ⇒ 首轮例程均 due），叠加我把 `.quay/routine-last-run.json` 里 `freshness-refresh` 的持久窗口游标清空（该文件 gitignored；改前全文已存档）。两处都是**调度游标的复位**，⛔ 不伪造任何读数：探针、立案、任务写盘全部由产物自己在生产 root 上真实完成。
 - [x] AC7 未修 `goals/` 且判据本体只读：`git diff --exit-code -- goals/` 为空；只跑 criterion 前后 `md5sum .quay/productization-verification.jsonl` 相同。
-  **证据**：`git -C <worktree> diff --exit-code -- goals/` ⇒ **rc=0**（空）。`md5sum .quay/productization-verification.jsonl` 在 `node .qay/ac214-6th/run-criterion.mjs /home/yale/work/quay` 前后同为 `ec731e1d0722bd47f2847c591e2c842b`（criterion rc=0）⇒ 判据本体只读。
+  **证据**：`git -C <worktree> diff --exit-code -- goals/` ⇒ **rc=0**（空）。`md5sum .quay/productization-verification.jsonl` 在 `node .quay/ac214-6th/run-criterion.mjs /home/yale/work/quay` 前后同为 `ec731e1d0722bd47f2847c591e2c842b`（criterion rc=0）⇒ 判据本体只读。
   ⛔ **本任务对 `goals/` 零改动**：`git diff --name-only develop...HEAD -- goals/` 为空；criterion / `expect` / K / 主体集合 / 正文一字未动。
 
 ## Definition of Done
 
 主检出载体上 AC-238/239 的证据回到窗口内且 **AC-214 判据本体干跑 exit 0**（七行 margin 全正）；**在跑的 anchor 加载的内核不再早于其源树**（`STALE BUNDLE` 不再出现，或该条件已有一个会动作的消费者）；**立案步在生产载体上真的执行过**——`.quay/routine-findings.jsonl` 里出现由它产出的 `filing-round` 记录并对应到任务文件，`ts` 晚于修复落地时刻；且在「不陈旧」的对照下**不**触发补救（⛔ 不是恒有输出）。
 
-**达成读数**：① 七行 margin 全正（`AC-238/239 = 0/200 margin 200`），判据 exit 0，`goal gate AC-214 --root .` exit 0；② 在跑的 anchor（`pid=3821426`，`.quay/anchor.json`）加载的是**重建于 04:42:39 的那份 dist**，而它的源树最新 mtime 早于它 ⇒ `bundleStale` 不再成立——**并且**该条件现在有一个会动作的消费者（`rebuildKernelBundle` + 整进程重启，见 AC6 落点）；③ `filing-round` 记录 2 条、其中 resident driver 那一条为 AC-238/239 立案出两个真实任务文件；④ 「不陈旧」对照下不触发（AC6 测试 ④ + 本轮生产形态本身：重建后不再有新的 STALE BUNDLE 行）。
+**达成读数**：① 七行 margin 全正（`AC-238/239 = 0/200 margin 200`），判据 exit 0，`goal gate AC-214 --root .` exit 0；② 在跑的 anchor（`pid=3821426`，`.quay/anchor.json`）加载的是**重建于 04:42:39 的那份 dist**，而它的源树最新 mtime 早于它 ⇒ `bundleStale` 不再成立——**并且**该条件现在有一个会动作的消费者（`rebuildKernelBundle` + 整进程重启，见 AC6 落点）；③ `filing-round` 记录 2 条、其中 resident driver 那一条为 AC-238/239 立案出两个真实任务文件；④ 「不陈旧」对照下不触发（AC6 测试 ④ + 本轮生产形态本身：重建后不再有新的 STALE BUNDLE 行）；⑤ scoped 门 EXIT=0（AC6）。
 ⚠️ **残留（如实标注，⛔ 不声称已闭合）**：本轮把「陈旧 bundle」从「只喊不做」变成「检测 + 机械重建 + 整进程重启」的是**主检出 dist 的手工重建 + 手工重启**——即那条日志一直在要求的**人工动作**，本轮由本条任务执行；**消费者本身（新代码）此刻只在任务分支上**，要等本分支经 fan-in 落到 develop、主检出同步到 develop、且**下一次**该条件出现时，才会由 anchor 自己执行。另：诊断中发现当前 anchor 在「常驻例程跑 LLM 探针」期间**收不到 SIGTERM**（事件循环被阻塞，两次实测：SIGTERM 后 100s/180s 未进入停机；`/proc/<pid>/wchan=ep_poll`）——本条**未**处理该形态，另行记录。
 
 ⛔ 不接受的替代物：改 K / 删主体 / 改 `expect` / `criterion`；手写或搬运证据记录；**只读源码文件就宣称「在跑」**；只把记录写进任务 worktree 的 `.quay/`（判据读主检出 ⇒ 空转）；把 AC6 降格成又一条观察项（只报不接消费者）；用「日志里有 STALE BUNDLE 行」冒充「陈旧已被处理」——**这正是本条的全部要点**。
