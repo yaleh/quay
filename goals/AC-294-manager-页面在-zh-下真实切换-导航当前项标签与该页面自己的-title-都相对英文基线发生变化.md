@@ -1,7 +1,7 @@
 ---
 id: AC-294
 title: /manager 页面在 zh 下真实切换——导航当前项标签与该页面自己的 <title> 都相对英文基线发生变化
-status: draft
+status: active
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -84,4 +84,16 @@ origin: 人 2026-09-17 讨论裁定：GOAL-024 达成范围 = 全部 15 个 SITE
   goal-driver pass 1 对 active GOAL 下每条 AC 每轮无条件执行、meta-driver 再执行一遍同群体，16
   条会让每轮增加 7–16 分钟且付两遍；改为探针后 ~1s/条。操作前提：需有一个 cwd=仓库根的 `quay serve`
   实例在跑；实现落地后须重启该实例才能让判据翻绿。
+activatedAt: 2026-09-17T16:03:20.428Z
+statusLog:
+  - at: 2026-09-17T16:03:20.455Z
+    from: draft
+    to: active
+    actor: user
+    reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」；判据已按人裁定改为 AC-179 探针形态（探已在运行的 serve
+      实例），激活动作对应该指示。
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T16:03:20.346Z
 ---
