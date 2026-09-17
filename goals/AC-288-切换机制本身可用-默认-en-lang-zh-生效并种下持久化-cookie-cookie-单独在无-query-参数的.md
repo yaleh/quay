@@ -1,7 +1,7 @@
 ---
 id: AC-288
 title: 切换机制本身可用——默认 en、?lang=zh 生效并种下持久化 cookie、cookie 单独在无 query 参数的后续请求里继续生效
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -82,6 +82,11 @@ statusLog:
     to: active
     actor: user
     reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」——draft 记录已确认写入并可读，这是该指示对应的激活动作。
+  - at: 2026-09-17T23:44:46.995Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
