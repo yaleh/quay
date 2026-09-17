@@ -79,85 +79,43 @@ from — not this repo's live backlog.
 Requires Node.js >= 20 (this repo is developed against Node v25; see each
 package's `package.json` `engines` field for the exact floor).
 
-### Option A — global install from a release artifact (recommended for most users)
+### Install channels: what changed on 2026-09-16
 
-Every [GitHub Release](https://github.com/yaleh/quay/releases) publishes two
-kinds of artifact:
+Human ruling 2026-09-16 retired the **npm and SEA release channels** (verbatim:
+「取消 sea 和 npm release。这些是我们最近没有精力去保障的。」 and, on what the
+release CI should gate on instead: 「按照 claude code plugin 发布和安装。CI 应当按此
+设计。」). `.github/workflows/release.yml` no longer builds or uploads either
+artifact — its header comment is the record of that ruling — and a GitHub
+Release is now a **marking-only** object that carries no assets at all.
 
-- **npm package** (`quay-*.tgz`) — requires Node.js >= 20 already installed:
+⇒ The Claude Code plugin (Option A) is the **sole supported install path** and
+the **sole release gate**. There is no prebuilt tarball or executable to
+download from [GitHub Releases](https://github.com/yaleh/quay/releases). The npm
+tarball survives only as something you build yourself from a source checkout
+(Option C), for developers and for environments the plugin channel cannot reach.
 
-  ```sh
-  npm install -g quay-<version>.tgz   # replace <version> with the actual release version
-  quay --help
-  ```
+### Option A — as a Claude Code plugin (recommended)
 
-  This installs the `quay` binary on your PATH — **one of two ways to get one**,
-  not the only one: the plugin form (Option C below) puts `quay` on the PATH of a
-  Claude Code session with no npm install at all. **It also registers the quay
-  Claude Code plugin** (see
-  [Using the npm-installed quay with Claude Code](#using-the-npm-installed-quay-with-claude-code-quayinit)
-  below) — after a clean install, restart Claude Code and `/quay:init` is
-  available in any session.
-
-- **single-file executables** (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
-  — no Node.js install required at all. See
-  [Distribution: single-file executables (SEA)](#distribution-single-file-executables-sea)
-  below.
-
-### Using the npm-installed quay with Claude Code (`/quay:init`)
-
-The canonical way to onboard a project onto quay-driven development is the
-`/quay:init` slash command in a Claude Code session (human ruling 2026-08-07).
-The `npm install -g quay-*.tgz` path **registers the plugin automatically**:
-
-- The package's `postinstall` hook (`packages/quay/scripts/register-plugin.mjs`)
-  adds the **installed** plugin directory (`$(npm root -g)/quay/plugin`, a legal
-  Claude Code *directory marketplace* containing `.claude-plugin/marketplace.json`
-  and `plugin.json`) to `~/.claude/settings.json` as `extraKnownMarketplaces.quay`.
-  It deliberately does **not** write `enabledPlugins["quay@quay"]` at user scope —
-  the user level carries only the marketplace *source* (STANDING goal AC-161); a
-  project opts in through its own `.claude/settings.json`.
-- When the `claude` CLI is on `PATH`, the hook then runs
-  `claude plugin marketplace add <installed-plugin-dir> --scope user`, which
-  materializes the marketplace into `~/.claude/plugins/`. The enable step is
-  **opt-in** (`QUAY_PLUGIN_SCOPE=user|project|local`) because `claude plugin install`
-  defaults to `--scope user`.
-- **After installing, restart Claude Code**, then run `/quay:init` in a session.
-
-Verify the registration (the task's contract measure, must be `>= 1`):
-
-```sh
-grep -c "$(npm root -g)/quay/plugin" ~/.claude/settings.json
-# 1
+```
+/plugin marketplace add yaleh/quay
+/plugin install quay
 ```
 
-If the `claude` CLI was not on your `PATH` at install time (or a later Claude
-Code version blocks install scripts), the hook still writes `~/.claude/settings.json`
-and prints what to run once — you can either restart Claude Code and run
-`/plugin install quay` in a session, or run:
+This installs the quay MCP server + skills as a Claude Code plugin — no
+separate `npm install` needed. The installed bytes come from the `dist-plugin`
+branch (a CI-built, self-contained bundle), not `master`; see
+[`plugin/README.md`](plugin/README.md#installation) for how that build/publish
+pipeline works (DIR-108/M172).
 
-```sh
-claude plugin marketplace add "$(npm root -g)/quay/plugin"
-claude plugin install quay@quay --scope project   # scope user only if you mean it — see below
-```
-
-Registration deliberately does **not** enable the plugin at user scope: the
-user-level `~/.claude/settings.json` carries only the marketplace source, and a
-project opts in through its own `.claude/settings.json`
-(`{"enabledPlugins": {"quay@quay": true}}`). Pass `QUAY_PLUGIN_SCOPE=user` to
-`npm install -g` if you deliberately want a user-scope enable.
-
-Opt-out (install the CLI without registering the plugin):
-
-```sh
-QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g quay-<version>.tgz
-```
-
-This installs the CLI **without** registering the plugin. It is not the only way
-to get a `quay` binary: Option C below does too, with no npm install at all.
-(Install scripts are what perform the registration; environments that set
-`--ignore-scripts` or an npm `allow-scripts` denylist will skip it — see the
-fallback above.)
+**It also covers the CLI.** Claude Code puts every enabled plugin's `bin/`
+directory on the Bash tool's PATH, and the plugin ships a shim there
+(`plugin/bin/quay`) that execs the plugin's own bundled CLI
+(`vendor/quay/dist/quay.js` — self-contained, Node ≥ 20, no dependencies to
+install). So inside a session with the plugin enabled, `quay --help`,
+`quay config validate` and `quay task list` work with **no npm install at all**.
+Outside a Claude Code session, put the plugin's `bin/` directory on your own
+PATH — or, if the plugin channel is unavailable to you, build the npm tarball
+yourself (Option C below).
 
 ### Option B — from source (for development or the latest unreleased changes)
 
@@ -201,39 +159,97 @@ reports `stale: false`, since each restart starts a fresh process). This is a
 plain Node feature — deliberately there is **no** `--dev`/`--watch` flag on
 `quay serve`; the built-in mechanism needs no product surface of its own.
 
-### Option C — as a Claude Code plugin
+### Option C — npm global install (build the tarball yourself)
 
+> **There is no downloadable artifact.** The npm tarball is no longer published
+> to GitHub Releases (see
+> [Install channels: what changed on 2026-09-16](#install-channels-what-changed-on-2026-09-16)
+> above) — a release page carries only a tag, never a `.tgz`. Every command
+> below builds the package **locally from a source checkout**, and this option
+> is for developers and for environments where the plugin channel (Option A) is
+> unavailable.
+
+From a source checkout (Option B), pack and install:
+
+```sh
+npm install                              # from the repo root, once (npm workspaces)
+bash packages/quay/scripts/package.sh    # -> packages/quay/quay-<version>.tgz
+npm install -g packages/quay/quay-<version>.tgz
+quay --help
 ```
-/plugin marketplace add yaleh/quay
-/plugin install quay
+
+This installs the `quay` binary on your PATH, and **it also registers the quay
+Claude Code plugin** (see
+[Using the npm-installed quay with Claude Code](#using-the-npm-installed-quay-with-claude-code-quayinit)
+below) — after a clean install, restart Claude Code and `/quay:init` is
+available in any session.
+
+This source-built path is distinct from Option A: Option A installs from the
+`dist-plugin` branch directly, whereas this tarball registers the plugin bundle
+that ships **inside the npm artifact**. Both land the same `/quay:init` entry
+point and both provide a `quay` binary (Option A via the plugin's own
+`bin/quay`, here via npm's global bin). If you installed via Option A, you do
+not need this one (and vice-versa).
+
+### Using the npm-installed quay with Claude Code (`/quay:init`)
+
+The canonical way to onboard a project onto quay-driven development is the
+`/quay:init` slash command in a Claude Code session (human ruling 2026-08-07).
+The `npm install -g` path **registers the plugin automatically**:
+
+- The package's `postinstall` hook (`packages/quay/scripts/register-plugin.mjs`)
+  adds the **installed** plugin directory (`$(npm root -g)/quay/plugin`, a legal
+  Claude Code *directory marketplace* containing `.claude-plugin/marketplace.json`
+  and `plugin.json`) to `~/.claude/settings.json` as `extraKnownMarketplaces.quay`.
+  It deliberately does **not** write `enabledPlugins["quay@quay"]` at user scope —
+  the user level carries only the marketplace *source* (STANDING goal AC-161); a
+  project opts in through its own `.claude/settings.json`.
+- When the `claude` CLI is on `PATH`, the hook then runs
+  `claude plugin marketplace add <installed-plugin-dir> --scope user`, which
+  materializes the marketplace into `~/.claude/plugins/`. The enable step is
+  **opt-in** (`QUAY_PLUGIN_SCOPE=user|project|local`) because `claude plugin install`
+  defaults to `--scope user`.
+- **After installing, restart Claude Code**, then run `/quay:init` in a session.
+
+Verify the registration (the task's contract measure, must be `>= 1`):
+
+```sh
+grep -c "$(npm root -g)/quay/plugin" ~/.claude/settings.json
+# 1
 ```
 
-This installs the quay MCP server + skills as a Claude Code plugin — no
-separate `npm install` needed. The installed bytes come from the `dist-plugin`
-branch (a CI-built, self-contained bundle), not `master`; see
-[`plugin/README.md`](plugin/README.md#installation) for how that build/publish
-pipeline works (DIR-108/M172).
+If the `claude` CLI was not on your `PATH` at install time (or a later Claude
+Code version blocks install scripts), the hook still writes `~/.claude/settings.json`
+and prints what to run once — you can either restart Claude Code and run
+`/plugin install quay` in a session, or run:
 
-**It also covers the CLI.** Claude Code puts every enabled plugin's `bin/`
-directory on the Bash tool's PATH, and the plugin ships a shim there
-(`plugin/bin/quay`) that execs the plugin's own bundled CLI
-(`vendor/quay/dist/quay.js` — self-contained, Node ≥ 20, no dependencies to
-install). So inside a session with the plugin enabled, `quay --help`,
-`quay config validate` and `quay task list` work with **no npm install at all**.
-Outside a Claude Code session, put the plugin's `bin/` directory on your own
-PATH, or use the npm/SEA artifacts above.
+```sh
+claude plugin marketplace add "$(npm root -g)/quay/plugin"
+claude plugin install quay@quay --scope project   # scope user only if you mean it — see below
+```
 
-This GitHub-source path is distinct from the npm path above: Option A's
-`npm install -g` registers the plugin bundle that ships **inside the npm
-artifact**, whereas Option C installs from the `dist-plugin` branch. Pick one —
-both land the same `/quay:init` entry point, and both provide a `quay` binary
-(Option A via npm's global bin, Option C via the plugin's own `bin/quay`). If you
-installed quay via npm, Option C is not needed (and vice-versa).
+Registration deliberately does **not** enable the plugin at user scope: the
+user-level `~/.claude/settings.json` carries only the marketplace source, and a
+project opts in through its own `.claude/settings.json`
+(`{"enabledPlugins": {"quay@quay": true}}`). Pass `QUAY_PLUGIN_SCOPE=user` to
+`npm install -g` if you deliberately want a user-scope enable.
+
+Opt-out (install the CLI without registering the plugin):
+
+```sh
+QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g packages/quay/quay-<version>.tgz
+```
+
+This installs the CLI **without** registering the plugin. It is not the only way
+to get a `quay` binary: Option A does too, with no npm install at all.
+(Install scripts are what perform the registration; environments that set
+`--ignore-scripts` or an npm `allow-scripts` denylist will skip it — see the
+fallback above.)
 
 ## Updating quay
 
-If you update quay (by installing a new release artifact or pulling from source)
-while a Claude Code session that registered the `quay` MCP server is already open,
+If you update quay (by reinstalling a locally-built tarball, or pulling from
+source) while a Claude Code session that registered the `quay` MCP server is open,
 **restart the Claude Code session** for the MCP server to pick up the changes.
 The MCP server process is started once when Claude Code launches and does not
 auto-restart when the underlying files change. After a restart, the updated tool
@@ -399,8 +415,8 @@ absorbed into the manager's direct subagent dispatch
 (`orchestration/SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3a).
 
 ```
-# 1. install quay (one-time, session-independent):
-npm install -g quay-<version>.tgz        # registers the plugin + the quay CLI (see Install above)
+# 1. install quay once — Claude Code plugin channel, the only supported one (see Option A above).
+#    Requires a Claude Code session; the plugin then persists across sessions.
 
 # 2. in the target project, start a Claude Code session yourself — HOW is your choice.
 
@@ -694,18 +710,29 @@ as the legal backward path. `quay task check <id>` remains the ABI's gate
 assertion — it reports whether every AC checkbox is honestly backed and the
 task is in a gate-passing status, without mutating anything.
 
-## Distribution: single-file executables (SEA)
+## Distribution: single-file executables (SEA) — **no longer published**
 
-In addition to the npm-installable `quay-*.tgz` package (Option A above),
-every tagged release also publishes **platform-specific single-file
-executables** built with
-[Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html) —
-these require **no separately-installed Node.js runtime** on the end user's
-machine at all.
+> **Retired, like the npm channel.** The 2026-09-16 ruling cancelled SEA
+> publishing too, and `.github/workflows/release.yml` no longer builds these
+> archives or attaches them to any release — the `sea-release` and
+> `sea-verify-node-free` jobs are gone. **No release page carries a
+> `quay-sea-*.tar.gz` or `.zip`.** See
+> [Install channels: what changed on 2026-09-16](#install-channels-what-changed-on-2026-09-16).
 
-Each release's GitHub Release page includes archives named
-`quay-sea-<version>-<platform>.{tar.gz,zip}` for `linux-x64`, `macos-arm64`,
-and `windows-x64`. Each archive bundles:
+The SEA build itself still works locally, and is documented here for anyone who
+wants a Node-free binary. Built with
+[Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html),
+a single-file executable requires **no separately-installed Node.js runtime** on
+the target machine at all.
+
+Build one yourself from a source checkout (Option B):
+
+```sh
+bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
+bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
+```
+
+An archive you assemble for distribution bundles:
 
 - `quay` (`quay.exe` on Windows) — the Core CLI/web-UI/MCP binary
   (`packages/quay/scripts/build-sea.sh`).
@@ -714,30 +741,19 @@ and `windows-x64`. Each archive bundles:
   because Core spawns the active Provider's `mcp_entry` as a child process
   — `quay serve` is only genuinely Node-free end-to-end if `mcp_entry` also
   points at a compiled binary, not `node ...`.
-- A packaged `.quay/config.yml` wiring the two binaries together and a
-  `tasks/` directory.
+- A `.quay/config.yml` wiring the two binaries together and a `tasks/`
+  directory.
 
 ```sh
-tar xzf quay-sea-<version>-linux-x64.tar.gz
-cd <extracted-dir>
 ./quay --help
 ./quay serve
 ```
 
-No `npm install`, no Node.js on `PATH`, nothing beyond the extracted
-archive is required. This is verified on every release by a dedicated CI
-job (`sea-verify-node-free` in `.github/workflows/release.yml`) that
-downloads the just-published Linux archive into a `debian:stable-slim`
-container that has never had Node.js installed, and runs the extracted
-binary directly — proving the executable is genuinely self-contained, not
-merely "the build succeeded locally."
-
-Build the SEA binaries yourself from source:
-
-```sh
-bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
-bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
-```
+No `npm install`, no Node.js on `PATH`, nothing beyond the extracted directory
+is required. `packages/quay/scripts/verify-sea-artifact.sh` exists for
+verifying an artifact you built (the retired CI job used it to install and run
+the binary in a Node-free `debian:stable-slim` container); nothing runs it on a
+release any more.
 
 See [`packages/quay/README.md`](packages/quay/README.md#distribution-single-file-executables-sea)
 for the package-level version of this section.
