@@ -2,7 +2,7 @@
 id: gap-readme-option-a-npm-release-artifact-retired
 title: README 把已被人裁定取消的 npm release 产物标为"推荐给大多数用户"的 Option A——直接违反"以 Claude Code
   plugin 为主"的明确裁定
-status: ready
+status: done
 labels:
   - gap
   - mechanism
