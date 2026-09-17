@@ -23,7 +23,8 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 故降为有条件备用通道，⛔ 不作为落地前置。**
 
 **人 2026-09-15 裁定后的四条确定动作**（§1 ⑤）：
-**①默认分支即刻切 `develop`（不等 master）｜②develop 携带 `X.Y.Z-dev`，release 分支去后缀｜
+**①默认分支即刻切 `develop`（不等 master）〔⚠️ 已被 §3.2.1′〈2026-09-17 追加裁定〉反转：默认分支回到 `master`，
+理由与效力见该节〕｜②develop 携带 `X.Y.Z-dev`，release 分支去后缀｜
 ③master 推进落在 `release.yml` 内一个新 job（`needs:` 枚举其余全部 6 个 job，ff-only，⛔ 永不 `--force`）｜
 ④首次 ff 等 v0.7.0 全绿——在此之前 master 不动是规则的正确输出，不是缺陷。**
 
@@ -43,7 +44,7 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 
 | 问 | 裁定 | 落点 | 效力 |
 |---|---|---|---|
-| 1 默认分支是否现在切 `develop` | **「是，且与 master 改造无冲突」** | §3.2、§9 第 1 步 | 解除 §2.2 后果 1+2；**不等 master 修好** |
+| 1 默认分支是否现在切 `develop` | **「是，且与 master 改造无冲突」**〔⚠️ **这条裁定已于 2026-09-17 被 §3.2.1′ 追加裁定反转**（默认分支回到 `master`）——本行保留为历史，效力不再〕 | §3.2、§9 第 1 步 | 解除 §2.2 后果 1+2；**不等 master 修好** |
 | 2 版本 bump 落 develop（带 `-dev`）还是落 release 分支 | **「`-dev` 后缀」** | §4.3 选项 ii | develop 携带 `X.Y.Z-dev`，release 分支去后缀 |
 | 3 master 推进用 A 还是 C | **「A 工作流内」** | §6 | ⊢ 人由此同时裁定：**同一次显式 dispatch 内的后续 job 写 GitHub，不违反 ③ 的裁定精神**（③ 禁的是隐式触发，不是显式 run 内的后续步骤） |
 | 4 首次 ff 等 v0.7.0 全绿还是接受红着的 v0.6.3 | **「等 v0.7.0 全绿」** | §6 末、§9 第 5 步 | master 在此之前**保持不动是正确输出** |
@@ -56,14 +57,32 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 
 ## 2. 现状盘点（全部为直接量，2026-09-15）
 
+> ⚠️ **本节的读数是 2026-09-15 的快照，⛔ 不是当前状态。** 其中「默认分支 = `master`」这一项
+> 于 2026-09-15 当日被 §3.2.1 原裁定切成 `develop`，又于 2026-09-17 被 §3.2.1′ 追加裁定**反转回 `master`**
+> ⇒ 它今天**恰好又等于本节记录的那个值**，但那是**两次裁定**的结果，⛔ 不是「本节读数一直没变」。
+> 其余各项（master 化石、三条交付渠道的缺口、release 分支现状、版本号三处互相说不通）**仍然有效**。
+
 ### 2.1 四条线的实际角色
 
 | 线 | tip | 谁在写 | 实际角色 | 读数 |
 |---|---|---|---|---|
 | `master` | `9316b797d` 2026-08-03 22:38Z | **无人** | **化石**：ADR-015「循环直接跑在 master 上」那套经典循环的终点，ADR-022 同日退役该循环后再无人碰 | `master..develop` = **19548**；`develop..master` = **0** ⇒ master 是 develop 的祖先，**可 ff**【git 实测】 |
 | `develop` | 随时前进（今日 13:18Z 仍在动） | promotion-driver / worker-driver / fan-in / 三层 | **真正的主干**：任务状态权威源、worktree 分叉点、fan-in 汇入点 | — |
-| `author` | 与 develop 逐字相同 | 主检出（doc-only 写面） | develop 的活跃工作副本，非权威 | `develop..author` = `author..develop` = **0**【git 实测】 |
+| `author` | 与 develop 逐字相同 | 主检出（doc-only 写面），**并推送到 `origin`** | develop 的活跃工作副本，非权威；**第四条长期线**（§3.1） | `develop..author` = `author..develop` = **0**【git 实测】；`origin/author` = `e27f111ed4b8a5feca7b8579d831c2d95f8aa476`，实测**是本地 `author` 的真实祖先**【git 实测 2026-09-17】 |
 | `task/<id>` | 每任务一条 | worker | per-task 隔离（②的现行模型） | — |
+
+**`author` → `origin` 的推送频率约定**（2026-09-17 起，单点失效防护，见
+`gap-ac283-author-pushed-to-origin-and-ancestor-of-local`）：`author` 只增不改
+（`syncDevelopToDoc` 走 `git merge --ff-only develop`，非快进时显式报「无法 ff-only 同步」而不是改写历史）
+⇒ 每次推送都是 fast-forward，**约定按事件而不是按时间间隔**：本地 `author` tip 每前进一次
+（= 主检出上的一次 doc 侧提交），就应推一次 `git push origin author`。
+⛔ **不设数值间隔**（「每小时 / 每天」这类）：该动作的发生率今天没有被测量过，
+按硬规则 4 推论一，成本结构未知前不设数值阈值。
+⚠️ **这个约定今天没有机械载体**——没有任何 driver / 脚本会推 `author`，它是纪律不是机制。
+常设守卫只有 `AC-283` 的判据（`origin/author` 存在 ∧ 是本地 `author` 的真实祖先），
+**而它测的是祖先关系、不是新鲜度**：一次推送之后远端停在旧点仍然 pass
+⇒ 「远端确实是一份**新鲜**备份」这半边今天**没有判据**（该缺口记在
+`tasks/gap-ac283-author-pushed-to-origin-and-ancestor-of-local.md` 自己的 AC2，⛔ 不在此处补判据）。
 
 ### 2.2 master 是化石这件事，有三个被放大的后果（不是"不好看"，是实际代价）
 
@@ -145,7 +164,10 @@ nvie 模型在现代实践里默认靠分支保护兜底，**这里必须全部�
 
 ---
 
-## 3. 设计：三条长期线 + 一条临时线
+## 3. 设计：四条长期线 + 一条临时线
+
+（⚠️ 本节标题原为「三条长期线」；第四条 `author` 由 2026-09-17 追加补入 §3.1 表与上图，
+理由与效力见 §3.2.1′〈2026-09-17 追加裁定〉。）
 
 ```
                       ┌─────────────────────────────────────────────┐
@@ -171,6 +193,12 @@ nvie 模型在现代实践里默认靠分支保护兜底，**这里必须全部�
 
    dist-plugin（orphan）：滚动渠道 B 的产物分支，由人显式触发从任意 ref 构建
                           ⛔ 不纳入上述晋升链（人 2026-09-14 裁定它是独立的显式动作）
+
+   author（第四条长期线，2026-09-17 补入本图）：
+   ┌────────────────────────────────┐
+   │  本地 doc-only 写面（非权威）    │◀──── ⇅ 双向 ff 同步（doc 侧）────▶ develop
+   │  也推送 origin 作备份（§2.1）    │       ─── git push origin author ───▶ origin/author
+   └────────────────────────────────┘
 ```
 
 ### 3.1 每条线的唯一权威角色
@@ -178,6 +206,7 @@ nvie 模型在现代实践里默认靠分支保护兜底，**这里必须全部�
 | 线 | 唯一角色 | 前进事件（**有且仅有一个**） | 禁止 |
 |---|---|---|---|
 | `develop` | 分叉基线 + 汇入点 | fan-in merge / driver 的状态提交 | — |
+| `author` | **本地 doc-only 写面**（⛔ 非权威） | 主检出上的人工 doc 编辑 ⇒ **与 `develop` 双向 ff 同步**（`syncDevelopToDoc` 快进追 develop；doc 侧提交由 `propagateDocBranchToDevelop` 回推 develop）；**并推送 `origin/author` 作单点失效备份**（约定见 §2.1） | ⛔ 不作为 worktree 的分叉点；⛔ 不承载任何权威状态（任务状态以 `develop` 为准）；⛔ 不得被 rebase / `--force` / 删除远端 ref（三者都会让 `AC-283` 转红） |
 | `release/vX.Y.Z` | 版本定稿 | 版本 bump、changelog、**仅**发布路径的修复 | ⛔ 功能提交；⛔ 合回后继续存活 |
 | `master` | **最近一次全绿发布** | release.yml 该 tag 的 run 全绿之后 ff 到该 tag | ⛔ 直接提交；⛔ 作为 merge 目标；⛔ 任何 non-ff 更新 |
 | `hotfix/vX.Y.Z+1` | 已发布版本的紧急修复 | 见 §5 触发条件 | ⛔ 在 master 有实义之前使用（无基可切） |
@@ -194,6 +223,10 @@ nvie 模型在现代实践里默认靠分支保护兜底，**这里必须全部�
 **而 B 解决的是后果 3（半截发布不可见）**——两者治的是不同的病。
 nvie 原文时代"默认分支 = master"是因为默认分支同时承担"门面"和"PR 目标"；
 本仓库的 PR/worktree 目标应当是主干，**发布线不需要当默认分支**。
+
+⚠️ **本段后半句已于 2026-09-17 被反转**：它把「默认分支」当成了**一个**目的（PR/worktree 目标），
+而 marketplace 的对外门面**复用了同一个量** ⇒ 一个量承担两个目的。观察（默认分支同时承担门面与 PR 目标）
+今天仍然对，**反转的是目的排序**。逐字见 §3.2.1′〈2026-09-17 追加裁定〉。
 
 ### 3.2.1 已裁定：默认分支即刻切 `develop`（人 2026-09-15，§1 ⑤ 问 1）
 
@@ -216,6 +249,7 @@ gh api repos/yaleh/quay -X PATCH -f default_branch=develop
 ⚠️ **本地那一半是每个检出各自要跑一次的**——`origin/HEAD` 是本地缓存，GitHub 侧改了不会自动同步。
 worktree 与主检出共享 `refs/remotes/`，故本轮这一次覆盖了它们；**其它机器/其它 clone 仍需各跑一次**。
 ⊢ `AC-273` 守的就是这个量（§7 丁）。
+⚠️ **2026-09-17 追加**：`AC-273` 已转 `superseded`，该量改由 `AC-285` 守——见 §3.2.1′〈2026-09-17 追加裁定〉。
 
 **⚠️ 不等 master 改造完成**——理由是两者治的病不同（见上），且 §9 第 5 步（首次 ff）被 `AC-268` 阻塞中，
 **若把默认分支的修复绑在它后面，§2.2 后果 1+2 会一直存在到第一次全绿发布为止**。
@@ -227,6 +261,77 @@ worktree 与主检出共享 `refs/remotes/`，故本轮这一次覆盖了它们�
 - **受影响且正是目的**：新 `git clone` 的检出分支、新 PR 的默认 base、`EnterWorktree` 的默认基点
   （`origin/HEAD` 随默认分支走 ⇒ §2.2 后果 2 消失）
 - ⚠️ 切换后 `origin/HEAD` 的本地缓存不会自动更新，各检出需 `git remote set-head origin -a` 一次
+
+### 3.2.1′ 追加裁定（2026-09-17）：默认分支**反转**回 `master`；`AC-273` 转 `superseded`；`author` 列为第四条长期线
+
+> 本节沿用 §11 的追加裁定写法（背景 → 人裁定 → ⊢ 效力 → 与既有授权链的关系），
+> 并遵 §7 头的既有纪律：**本 SPEC 不自行写 goal store**——反转的判据由 `GOAL-023` 的 `AC-285` / `AC-284` 承载。
+
+**背景（本 SPEC 自己的 §3.2.1 原裁定 + 2026-09-17 直接量）**：
+
+§3.2.1 于 2026-09-15 裁定并执行了「默认分支 `master` → `develop`」。2026-09-17 人提出：**这个方向反了**——
+本地开发继续以 `develop` 为主**不变**，但 **GitHub 默认分支 / marketplace 的对外展示应当是 `master`（已发布版）**。
+
+**理由（人 2026-09-17 提议中给出的直接量）**：`claude plugin marketplace add yaleh/quay`（**不带 ref**）
+读的是 GitHub 仓库**默认分支**上的 `.claude-plugin/marketplace.json` ⇒ 当前 `default = develop` 使
+**外部访客 / marketplace 浏览面看到 `-dev` 版本号**，而实际装出来的字节是已发布版
+（人报告：装出来是 `0.9.0` 的字节、显示却是 `-dev` 的版本号）。
+⚠️ **这条是「提议中的理由」**（`gap-ac285-github-default-branch-master` 的立案读数与它同源），
+⛔ 本 SPEC **未独立复测该 CLI 行为**——它在此作为**裁定的依据**被引用，不作为本文件自己的实测断言。
+
+**佐证读数（本 SPEC 复测，2026-09-17，【git 实测】）**——三条，逐条可复算：
+
+```
+① origin HEAD symref（git ls-remote --symref origin HEAD）  → ref: refs/heads/develop   HEAD
+② 默认分支(develop)的浏览面  .claude-plugin/marketplace.json → "version": "0.10.0-dev", "ref": "dist-plugin"
+③ master 上的浏览面          .claude-plugin/marketplace.json → "version": "0.9.0",      "ref": "dist-plugin"
+   （origin/master tip = 17cf30678da6fd4a56daf9750adf87179f49f58d；实测是 origin/develop 的祖先，落后 291 个提交）
+```
+
+⇒ **② 与 ③ 的 `ref` 都是 `dist-plugin`** ⇒ **装出来的字节不变**（`ref` 是钉死的分支名，⛔ 不随默认分支走）；
+变的只有**浏览时**从默认分支读到的那一行版本声明 ⇒ **这是元数据展示层的问题，不是产物错误。**
+
+**原裁定哪一半失效（⚠️ 这是「一个量承担两个目的」的形态，不是原判断错了）**：
+§3.2 那段（"nvie 原文时代『默认分支 = master』是因为默认分支同时承担『门面』和『PR 目标』；
+本仓库的 PR/worktree 目标应当是主干，**发布线不需要当默认分支**"）的**观察今天仍然对**，
+但它**没料到 marketplace 的对外门面复用「默认分支」这同一个量**：
+PR/worktree 目标要 `develop`，而门面要 `master`——两者在 2026-09-15 被当成了**一件事**。
+⇒ **反转的是目的排序，不是观察本身。**
+
+**人裁定（2026-09-17）**：**默认分支改为 `master`；本地开发仍以 `develop` 为主**。
+⚠️ 本 SPEC **未持有该裁定的逐字原文**——本行由 GOAL-023 的任务记录转述，形态与
+`gap-ac285-github-default-branch-master`、以及本 SPEC 本次修订任务（`gap-spec-release-hotfix-branching-2026-09-17-revision`）
+的 Proposal 一致。⛔ 因此它是**转述**，⛔ 不按 §1 ⑤ 那种「逐字引文」对待（硬规则 5：搜不到逐字原文 ⇒ 不得冒充逐字）。
+
+**⊢ 效力（三条，逐条可核）**：
+
+1. **默认分支方向反转** `develop` → `master`。执行动作与 §3.2.1 原动作同形、只是取值相反
+   （`gh api repos/yaleh/quay -X PATCH -f default_branch=master`），本地那一半是各检出 `git remote set-head origin -a`。
+   ⛔ **本 SPEC 不执行它**——落地由 `gap-ac285-github-default-branch-master`（`goal_ac: AC-285`）持有。
+   ⚠️ 执行之后，**下方 §3.2.1 原裁定与 §9 第 1 步的「已完成」记录会变成历史陈述**：它们记录的是
+   2026-09-15 那一次执行的事实（当时确实切成 develop），**不是当前配置**。
+2. **`AC-273` 转 `superseded`，被 `AC-285` + `AC-284` 取代**（已执行：goal store 实测 `status: superseded`，
+   `superseded-by: [AC-285, AC-284]`）。**取代关系**：原 `AC-273` 一条判据**混合检查了两件正交的事**——
+   「GitHub 默认分支对不对」与隐含地「worktree 会不会跟着分叉对」。拆成两条正交判据：
+   **`AC-285`**（`git ls-remote --symref origin HEAD` 实测 = `refs/heads/master`）
+   ＋ **`AC-284`**（worktree 分叉点被 `merge-base` / `is-ancestor` 结构性校验，不再只查分支名）。
+   ⚠️ `AC-273` 的判据文字**一字未改**（它照旧能取假），改的只有 `status`——
+   ⛔ 不是「判据写错了」，是**它守的那件事被拆开、由两条更窄的判据守**。
+   ⛔ **另一个必须处理的后果**：默认分支一旦真翻到 `master`，`AC-273` 的判据会**从 pass 翻成 fail**，
+   而它当时的 `status` 是 `achieved` ⇒ 它会以「achieved 但判据正在失败」的形态出现在 I5 读数里。
+   转 `superseded` 正是为消掉这个**必然会发生的红**，⛔ 不是为了「让数字好看」。
+3. **`author` 列为第四条长期线**（§2.1 表 + §3 ASCII 图 + §3.1 表三处同步补入）：
+   `author` = **本地 doc-only 写面**（⛔ 非权威）、与 `develop` **双向 ff 同步**、
+   **并推送 `origin/author` 作单点失效备份**（§2.1 有推送频率约定；远端 ref 的落地由
+   `gap-ac283-author-pushed-to-origin-and-ancestor-of-local` 持有，`goal_ac: AC-283`，已 done）。
+
+**⊢ 与既有授权链的关系**：本条**不是**推翻 §1 ⑤ 问 1 的**机制**（"默认分支这个量要不要现在动"），
+而是**反转它的取值**；§3.2 的论证结构（A 归档 vs B 改造 master 的取舍、两者治不同的病）**全部保持有效**——
+本条动的不是"该不该有默认分支这回事"，是"这一个量服务于哪个目的"。
+⇒ 与 §11 同形：**同一份权威链条上的追加裁定，不是另起一份 SPEC。**
+
+**⚠️ 本条不做的（⛔ 边界）**：本 SPEC **不自行写 goal store**、**不改任何 AC 的 `criterion`**、
+**不改 `CLAUDE.md` 的「分支同步」节**（task 状态写入面，由 `GOAL-023` 的范围与非目标排除）。
 
 ---
 
@@ -422,6 +527,8 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 用一条新的线重新制造一遍。
 ⚠️ 这也意味着 §2.2 的后果 1+2（默认分支/worktree 基点）**不能等 master 修好**，
 已由 §3.2.1 那条独立动作（默认分支即刻切 develop）先行解决。
+〔⚠️ **2026-09-17 追加**：该独立动作的**取值**已被 §3.2.1′ 追加裁定反转为 `master`；
+本段"不能等 master 修好"的**结构**（默认分支与 master 改造是两件事）保持有效。〕
 
 ---
 
@@ -442,7 +549,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | **甲** | `AC-270` | `master` ∈ {`9316b797d`（首次 ff 前的化石 tip，裁定 4 允许）, 某个 tag}；若等于某 tag，则该 tag 在 `.quay/ci-runs.jsonl` 里的 Release run `conclusion=success` | **PASS**（守卫型）。⚠️ **本行原稿写作"今天取假"，那是裁定 4 之前的口径**——裁定 4 把化石值列为允许取值后，它今天就必然是 PASS。⇒ 改判为**守卫**：首次 ff 前守"没有东西直推 master"，首次 ff 后守"没有在半绿发布上前进"。**负控制（已跑）**：把判据指向 `develop`（既非化石也非 tag）⇒ `exit 1 / CAUSE=master-moved-to-a-non-tag-commit` ⇒ **能取假** | ✅ |
 | **乙** | `AC-271` | 本地 `release-*` / `release/*` 分支不存在，或每条的 tip 都 `points-at` 某个 tag | **FAIL**：`1 of 2` 违规——`release-v063-build` 的 tip 不指向任何 tag（比 `v0.6.3` 多 15 个提交）。⊢ 判据按"tip 是否指向 tag"判，⛔ 不解析分支名里的版本号 ⇒ 新旧命名都适用 | ✅ |
 | **丙** | `AC-272` | `dist-plugin` 声明的版本以 `-dev` 结尾（自证非发布版），**或**存在同名 tag 且其 `build from <sha>` 正是该 tag 的提交 | **FAIL**：`CAUSE=claims-a-version-that-was-never-released` —— 声明 `0.7.0` 而 `v0.7.0` 不存在（§2.5）。⊢ 这条把裁定 2 的目的编码成判据：`-dev` 一旦落实，此臂自动转绿 | ✅ |
-| **丁** | `AC-273` | `git symbolic-ref refs/remotes/origin/HEAD` == `refs/remotes/origin/develop` | **PASS**（守卫型）——**因为裁定 1 已于本轮执行**（见 §3.2.1 执行记录）。跑 `set-head` 之前它是红的。**负控制（已跑）**：把期望值换成 `origin/master` ⇒ `exit 1 / CAUSE=default-branch-not-the-trunk` ⇒ **能取假**。⊢ 读本地 ref 而非调 `gh`：criterion 只有 pass/fail 两态、60s 预算，`gh` 不在 driver 的 PATH 上 | ✅ |
+| **丁** | `AC-273` | `git symbolic-ref refs/remotes/origin/HEAD` == `refs/remotes/origin/develop` | ~~**PASS**（守卫型）~~**⛔ 本行已 superseded（2026-09-17）**——**被 `AC-285` + `AC-284` 取代**：本条判据混合检查了两件正交的事（「GitHub 默认分支对不对」＋隐含地「worktree 会不会跟着分叉对」），拆为 `AC-285`（默认分支实测 = `master`）与 `AC-284`（worktree 分叉点由 `merge-base` 结构性校验）。⚠️ goal store 侧 `AC-273.status` 已实测为 `superseded`、`superseded-by: [AC-285, AC-284]`；**fidelity/负控制读数保留为历史**：它原为 PASS（本条"因为裁定 1 已于本轮执行"，见 §3.2.1 执行记录）、其负控制（期望值换成 `origin/master` ⇒ `exit 1 / CAUSE=default-branch-not-the-trunk`）证明它当时能取假。⛔ 判据文字一字未改。逐字理由见 §3.2.1′〈2026-09-17 追加裁定〉 | ~~✅~~ **superseded** |
 | **戊** | `AC-274` | 载体里存在 `workflow=Release ∧ conclusion=success ∧ ts > 2026-09-15T14:00:00Z` 的 run，**且** master 正是其 tag 的提交 | **FAIL**：`CAUSE=no-green-release-in-the-post-filing-window` —— 载体 2 条 Release run 全 failure。⛔ 时间窗是硬规则 4 推论三的要求：能被立案**之前**的绿满足的判据，证明的是"能产出"不是"已产出" | ❌（一次性） |
 
 **⊢ 两条守卫型判据（甲/丁）今天是 PASS，这不是空判据**——判别标准不是"今天红不红"，而是**能不能取假**，
@@ -482,7 +589,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 |---|---|---|---|
 | 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ **已完成** |
 | 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
-| 1 | **GitHub 默认分支 `master` → `develop`** | 无（纯 GitHub 设置，可逆） | ✅ **已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 其它 clone 需各跑一次 `git remote set-head origin -a`（`AC-273` 守此量） |
+| 1 | **GitHub 默认分支 `master` → `develop`** ⛔ **本行已 superseded（2026-09-17）**：方向被 §3.2.1′ 追加裁定**反转**回 `master`，由 **`AC-285`**（默认分支实测 = `master`）+ **`AC-284`**（worktree 分叉点结构性校验）接替原 **`AC-273`** | 无（纯 GitHub 设置，可逆） | ✅ **当时已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 该记录是**历史事实**（那一次确实切成了 `develop`），**不是当前配置**——反转后的落地见 `gap-ac285-github-default-branch-master`（`goal_ac: AC-285`） |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ **删除半边已完成**（`gap-release-branch-deleted-after-merge`，2026-09-15T16:4xZ）：落成 fail-closed 命令 `plugin/scripts/release-branch-finish.sh`（只认 `release-*` / `release/*` 名；`develop..<b>` ≠ 0 ⇒ 拒绝；远端删除失败或读不到 ⇒ 独立 `CAUSE=` + 非零退出）；**现存两条 `release-v06x-build` 由该命令在生产仓库删除**——`release-v062-build` tip `158616df7`（= `v0.6.2`）、`release-v063-build` tip `d097f48c7`，两条 `develop..<b>` 实测均为 **0** ⇒ 删除无损；删除后 `AC-271` 由 fail 转 **pass**。⚠️ 命名半边（§4.1 变更点 1）仍未采用——⛔ 它不在判据乙的达标条件内（判据按 tip 是否指向 tag 判定，不解析分支名）
 | 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭） |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
@@ -496,7 +603,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 ## 10. 开放问题：**已全部裁定**（人 2026-09-15）＋ 实现期残留
 
-**原 5 个开放问题的裁定见 §1 ⑤ 表**（1 默认分支即刻切 develop｜2 `-dev` 后缀｜3 方案 A｜4 等 v0.7.0 全绿｜5 挂 GOAL-020）。
+**原 5 个开放问题的裁定见 §1 ⑤ 表**（1 默认分支即刻切 develop〔⚠️ 已被 §3.2.1′ 反转为 `master`〕｜2 `-dev` 后缀｜3 方案 A｜4 等 v0.7.0 全绿｜5 挂 GOAL-020）。
 ⛔ 本节**不再保留**这 5 条为开放项。
 
 **实现期残留（不是裁定问题，是必须实测才能回答的未知）**：
@@ -509,7 +616,9 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 ---
 
-**执行状态（2026-09-15T16:4xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）；
+**执行状态（2026-09-15T16:4xZ）**：§9 第 0/0b/1 步**已完成**（SPEC 落盘、`AC-270`..`AC-274` 立案、默认分支切换含本地 set-head）
+〔⚠️ **2026-09-17 追加**：第 1 步的**方向已反转**（§3.2.1′），`AC-273` 已 `superseded` 并由 `AC-285` + `AC-284` 接替；
+以下这段是 **2026-09-15 当日的历史执行状态**，⛔ 不代表当前配置〕；
 **第 3 步已完成**（`gap-develop-version-union-missing-dev-suffix`：并集 10 条 + lockfile 4 条齐步 `0.7.0-dev`、checker 认后缀 + all-or-none、`AC-272` pass、`origin/dist-plugin` 重发、marketplace 实测接受 prerelease）；
 **第 2 步的删除半边已完成**（`gap-release-branch-deleted-after-merge`：`plugin/scripts/release-branch-finish.sh` 落成，两条现存 `release-v06x-build` **穿过该命令**删除，`AC-271` 转 pass；命名半边未采用，且不在判据乙的达标条件内）；
 第 4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
@@ -570,6 +679,8 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
   ——它判的那条产物线（SEA/npm）已被本 §11 裁定取消；
 - `## 范围` 节仍写着 `AC-265..AC-269` 五条，其中 266/267/268 **三条已 `superseded`**，
   而在域的 `AC-270 / AC-271 / AC-272 / AC-273 / AC-274` **一条都没列**——判官被明确要求
+  ⚠️ **2026-09-17 追加**：其中 `AC-273` 本身也已 `superseded`（被 `AC-285` + `AC-284` 取代）——
+  见 §3.2.1′〈2026-09-17 追加裁定〉。本节引用它时，它是**"当时在域"**的历史陈述。
   「judge the AC set against it, not against the exit conditions alone」
   （`plugin/scripts/goal-driver.ts:938-939` `buildSufficiencyPrompt`），陈旧的范围节
   **自己就在告诉判官：声明的分解与在域集合对不上**。
