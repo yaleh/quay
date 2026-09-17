@@ -403,6 +403,35 @@ installed package:
 quay-native init --dry-run
 ```
 
+### The branches `quay init` establishes — and why you should not work on `develop`
+
+`quay init` (and the `/quay:init` skill) does more than write `.quay/config.yml`: it
+establishes quay's **branch model** in your repository. Alongside your project's own
+default branch — which quay never renames, moves or duplicates — you get:
+
+- **`develop`** — quay's *landing baseline*. Task worktrees are forked from it, and every
+  finished task is merged back into it. Treat it as automation-owned.
+- **a doc-only work branch** — named `author` by default (`--doc-branch-name <name>`, or
+  `loop.doc_branch` in `.quay/config.yml`, overrides it). `quay init` creates this branch
+  and **switches your main checkout onto it**. That is deliberate, not a quirk: it is the
+  one place you can edit that is *not* the line the automation lands on.
+
+**Do not move your main checkout back to `develop` for day-to-day work.** `develop` is the
+fork point for task worktrees and the fast-forward target of every task's fan-in — the merge
+that lands a finished task. If you edit and commit on `develop` directly (the normal habit on
+a single-branch project), your commits accumulate on the branch the fan-in expects to be
+clean and strictly ahead of its worktrees, and the next task's `--ff-only` merge is refused
+as a non-fast-forward. One blocked merge stalls the whole automated pipeline until the branch
+is reconciled by hand, and the failure looks like a task problem rather than a branch-hygiene
+problem. The doc branch exists exactly so this cannot happen: your edits accumulate where the
+fan-in topology does not depend on them, and quay propagates them to `develop` for you.
+
+You do not have to manage either branch by hand. But if a sync does go wrong, the mechanism —
+which direction each branch propagates, and how a divergence is reconciled — is specified in
+this repository's [`CLAUDE.md`](CLAUDE.md), section **"分支同步（author ↔ develop）"**. Read
+that before diagnosing; this README deliberately carries only the "why" a user needs to avoid
+causing a divergence in the first place.
+
 ## Enablement flow: in-session skills (the methodology, not just the task board)
 
 quay is also a Claude Code **plugin** that lays the autonomous loop mechanism into
