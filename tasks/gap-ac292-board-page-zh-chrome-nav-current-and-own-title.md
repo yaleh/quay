@@ -153,26 +153,26 @@ curl -sf -H 'Cookie: lang=zh'  http://127.0.0.1:4173/board  ⇒ 37445 bytes, <ht
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/board` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）
   的文本都**不是** `Board`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）。
   ⛔ 三处分开断言、分开贴原始片段 —— 只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：在**第一段检查之前**的那一层把语言**临时**钳到 `"en"`
+- [x] **AC2（可被打红——因果对照）**：在**第一段检查之前**的那一层把语言**临时**钳到 `"en"`
   （一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。
   若想更窄（AC-289 的更强形态）：**只把字典钳到 `en`**（`navLabel`/`pageNameFor` 首行强制 `lang="en"`），
   此时 `<html lang>` 仍正确、判据自报的 `CAUSE=nav-label-untranslated` 或 `CAUSE=title-unchanged`
   ⇒ 成因被单独钉在字典接线上。⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言（硬规则 4 推论四）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Board'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Board'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个 `tasks/*.md`），
   并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。
   预期：zh 下 nav 区块（`grep -o '<nav.*</nav>'`）内 `Board` 计数 = **0**，而同一谓词在 **en** 上 = **2**
   ⇒ 「zh 的 nav 里没有这个字面量」是一个**能取假的量**，不是空断言。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json`
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json`
   完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。
   ⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-292-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、
   把 zh 值写成含英文 `Board` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-board-page-zh-chrome-nav-current-and-own-title` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-board-page-zh-chrome-nav-current-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿；
   ③ **作用域举证**：`grep -rc 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照
   （立案基线：总数 **22**，其中 `serve-board.ts` **1**）：本任务后 **`serve-board.ts` 1→0**、总数 **22→21**，
@@ -193,6 +193,13 @@ curl -sf -H 'Cookie: lang=zh'  http://127.0.0.1:4173/board  ⇒ 37445 bytes, <ht
    + 重跑 `npm run build -w quay` + 重启实例）与它的作用域（纯本地代码、无外部状态）。
 6. **证据留痕**：红/绿判据输出、en/zh 两条原始响应片段、因果对照两次读数、全量残留枚举、逐文件计数，
    落成**任务体内联**或**未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
+
+**本轮证据落点（未跟踪 scratch，`<worktree>/.quay/ac292/`）**：`evidence.md`（汇总，含逐条归属与回滚形态）、
+`ac1-live-readings.txt`（三段 live 读数）、`ac2-cause-control.txt` + `ac2-clamped.txt` / `ac2-restored.txt`
+（因果对照两次读数并排）、`ac3-residual-enum.txt`（残留枚举 + nav 区块计数）、
+`ac4-gate-after.txt` / `ac4-gate-after-postmerge.txt`（判据裁决原样输出）、
+`ac5-scope-counts.txt`（逐文件 `html lang="en"` 计数 base vs now）、`ac5-serve-tests.txt`、
+`scoped-gate-run2.txt`（scoped 门全量输出）、`en.html` / `zh.html`（两条原始响应体）。
 
 ## Touches
 
