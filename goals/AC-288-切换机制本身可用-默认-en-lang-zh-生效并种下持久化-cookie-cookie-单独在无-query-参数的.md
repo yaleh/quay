@@ -13,6 +13,7 @@ criterion: >-
     [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
     a=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
     [ -n "$a" ] || continue
+    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; esac
     addr="$a"
     break
   done
@@ -68,11 +69,12 @@ expect: criterion exits 0 once a running quay.ts serve (cwd = repo root) answers
   with only that cookie (no ?lang= in the URL) still resolves to <html
   lang="zh">.
 origin: 人 2026-09-17 讨论裁定的切换机制契约（本 AC 本身即该契约的可执行规格）：query 参数名/值 =
-  lang=en|zh，cookie 名/值 = lang=en|zh，默认 en。判据走 AC-179 既定探针形态：从【已在运行】的 `quay.ts
-  serve` 进程（cwd = 仓库根）派生地址再 curl，⛔ 不自己启服务。2026-09-17 人裁定此设计（选项 A）：原设计每条判据自启 web
-  服务器（实测 27–60s/条），而 goal-driver pass 1 对 active GOAL 下每条 AC 每轮无条件执行、meta-driver
-  再执行一遍同群体，16 条会让每轮增加 7–16 分钟且付两遍；改为探针后 ~1s/条。操作前提：需有一个 cwd=仓库根的 `quay serve`
-  实例在跑；实现落地后须重启该实例才能让判据翻绿。
+  lang=en|zh，cookie 名/值 = lang=en|zh，默认 en。判据走 AC-179 既定探针形态（探【已在运行】的 quay.ts
+  serve，cwd=仓库根；⛔ 不自己启服务），并在【chrome 作用域】上断言：导航标签只对 `<nav>…</nav>` 区块匹配、页面标题只对
+  `<title>` 匹配。⛔ 不对整段响应体做子串匹配 —— 2026-09-17 实测两处非 chrome 命中会让判据不可满足：① `/board`
+  的页内 CSS 注释含 "Board"（`...and the Board NEW badge. */`），永远不会被翻译；② `/dashboard`
+  的活动流会渲出含 "Dashboard"/"Tasks" 的**任务标题**（数据）。操作前提：需有一个 cwd=仓库根的 `quay serve`
+  实例在跑；实现落地后须重启该实例。
 activatedAt: 2026-09-17T14:48:26.158Z
 statusLog:
   - at: 2026-09-17T14:48:26.158Z
