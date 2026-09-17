@@ -52,13 +52,15 @@ EXIT=2          ← 闸只关了 active 那一半
 | 00:42:59 | 本次 gap-filing agent 被 anchor pid 2345029 spawn（彼时 GOAL-022 的 AC 尚未落盘） | 本 agent 的父进程链 + 启动时刻 |
 | 00:43:07 / :14 / :21 | AC-279 / AC-280 / AC-281 落盘 ⇒ 不变式重新为真 | `git log -1 --date=iso-strict -- goals/AC-28*.md` |
 
-`.quay/goal-round.jsonl` 末条是 round 189 @ `00:30:43Z`，此后不再追加 ⇒ 该轮**阻塞在 spawnGapWorker**（同族任务 `gap-goal-create-as-active-skips-zero-ac-gate` 的 Finding 第 3 条已逐字描述过这条链：常设 AC 判据 exit 1 ⇒ `achievedButFailing` ⇒ `computeGoalGaps` 出 `standing-violated` ⇒ spawn）。
+`.quay/goal-round.jsonl` 末条是 round 189 @ `00:30:43Z`，此后不再追加 ⇒ 该轮**阻塞在 spawnGapWorker**，即本轮确实卡在派发这一步。
+
+<!-- dedup-ref --> 追溯（不是依赖声明）：上述这条链（常设 AC 判据 exit 1 ⇒ `achievedButFailing` ⇒ `computeGoalGaps` 出 `standing-violated` ⇒ spawn）在同族任务 `gap-goal-create-as-active-skips-zero-ac-gate` 的 Finding 第 3 条里已被逐字描述过。本任务是同一个缺陷形态换到 draft 半边重演，不是它的重复。
 
 **为什么上一次修复没兜住（硬规则 5b：修好一个 ≠ 没有别的）**：
 
 - `gap-goal-create-as-active-skips-zero-ac-gate`（done）把闸的判别子从 `activating` 换成 `goalActivating`，而 `goalActivating := nextStatus === "active" && prevStatus !== "active"`（`packages/quay/src/goal-store.ts:2038`，闸体在 `:2232`）。它的 Finding 标题写的是「出生路径无人覆盖」，**但落地的谓词只到 `active` 为止**——AC-217 的作用域是 `{draft, active}`，**draft 那一半原样留着**。
 - 更要命的是 `:2238-2241` 的出生路径提示把这条通道**明文推荐**了出去（上引 EXIT=2 讯息），而 `packages/quay/src/serve-dashboard.ts:983-989` 又把这条出生序列记录成**常态**：「the store's own birth path is `create GOAL as draft → file its ACs as draft → flip the GOAL to active`, and the zero-AC activation gate's error message literally prescribes `--status draft`」。⇒ 两条机制此刻**互相矛盾**：写面说「先 draft、再补 AC」，不变式说「draft 里不许零 AC」。GOAL-022 走的正是写面这条明文路径。
-- 代价是**每次走这条路径出生都烧掉一个 gap-filing subagent（`GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000`），而它到场时无物可修**——同族任务已经记过一次这个形态（「GOAL-018 零 AC 流通 60s」），这次是同一个形态换到 draft 半边重演。
+- 代价是**每次走这条路径出生都会烧掉一个 gap-filing subagent（`GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000`），而它到场时无物可修**——同族任务已经记过一次这个形态（「GOAL-018 零 AC 流通 60s」），这次是同一个形态换到 draft 半边重演。
 - **覆盖面比「一条测试的写法」宽**：多处夹具与**一条生产 e2e 步骤**依赖「draft GOAL 零 AC」这一态（枚举见 Requested action）。⇒ 这是**写面契约本身**的缺口，不是某个测试的偶然写法。
 
 **判据收窄不是本任务的选项**：AC-217 的 expect 逐字写着「任何无 AC 的 GOAL 一旦进入 draft/active 即报红」，且它是人 2026-09-09 裁定②所立、已落成 `long-term: true` 的常设不变式。⇒ **关掉窗口**，⛔ 不是把窗口合法化（弱化判据、加宽限期、给 spawn 加豁免，三者都属于后者）。
