@@ -9,6 +9,14 @@ import os from "node:os";
 import path from "node:path";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
+import type { Lang } from "./serve-lang.ts";
+
+// gap-ac288-webui-lang-switch-mechanism: pages consume the language mechanism from ONE import —
+// `htmlLangTag` (the `<html lang="…">` opening tag) is re-exported here so a page's consumption is
+// a single line (`${htmlLangTag(lang)}<head>`) against a module it already imports from, never a
+// second parse of `?lang=` / the cookie. The resolver itself lives in serve-lang.ts; the dispatcher
+// is its only caller.
+export { htmlLangTag, type Lang, type LangSource, type LangResolution } from "./serve-lang.ts";
 
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
 // two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
@@ -997,6 +1005,12 @@ export interface ServeIdentity {
 export interface ServePageCfg {
   workspaceRoot: string;
   identity?: ServeIdentity | null;
+  /** The language this REQUEST resolved to, resolved exactly once by the dispatcher
+   *  (`handleAllRoutes`) and carried here as a per-request copy. A page renders `${htmlLangTag(lang)}`
+   *  and nothing else — it must never re-read `?lang=` or the cookie (a second parse is a second
+   *  decision table). Absent ⇒ `DEFAULT_LANG` (a page rendered by a caller that predates this field,
+   *  e.g. a direct `renderXPage()` unit test, stays `en` rather than becoming undefined-rendered). */
+  lang?: Lang;
 }
 
 /** Longest project label the <title> will carry before the project name is the thing that gives. */
