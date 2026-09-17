@@ -1,7 +1,7 @@
 ---
 id: gap-suite-split-15-over-30s-test-files
 title: 拆分 main/serial/lowconc 三阶段 15 个实测 >30s 的单体测试文件——每个分片 <30s 且全部离开原路径（AC-279）
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
