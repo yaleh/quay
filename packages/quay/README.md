@@ -13,22 +13,25 @@ and the monorepo-wide install/dev instructions.
 
 ## Install
 
-### Option A — global install from a release artifact (recommended)
+> **The npm and SEA release channels are retired** (human ruling 2026-09-16:
+> 「取消 sea 和 npm release。这些是我们最近没有精力去保障的。」 /
+> 「按照 claude code plugin 发布和安装。CI 应当按此设计。」). No GitHub Release
+> carries a `.tgz` or a SEA archive any more. The **Claude Code plugin is the sole
+> supported install path**; both retired artifacts remain buildable locally from a
+> source checkout. Full ruling text and history:
+> [repo root README § Install](../../README.md#install).
 
-Download the latest release from the
-[GitHub Releases page](https://github.com/yaleh/quay/releases) and either:
+### Option A — as a Claude Code plugin (recommended)
 
-- **npm package** (`quay-<version>.tgz`, requires a local Node.js >= 20):
+```
+/plugin marketplace add yaleh/quay
+/plugin install quay
+```
 
-  ```sh
-  npm install -g quay-0.3.4.tgz   # replace with the actual filename from the release
-  quay --version
-  quay --help
-  ```
-
-- **single-file executable** (no Node.js install required at all — see
-  [Distribution: single-file executables (SEA)](#distribution-single-file-executables-sea)
-  below).
+The plugin ships this package's bundled CLI (`vendor/quay/dist/quay.js`, a
+self-contained esbuild output on Node ≥ 20) behind a `bin/quay` shim, so
+`quay --version`, `quay --help` and `quay config validate` all work inside any
+session with the plugin enabled — no `npm install` at all.
 
 ### Option B — from source
 
@@ -38,6 +41,24 @@ cd quay
 npm install
 node --experimental-strip-types packages/quay/bin/quay.ts --version
 ```
+
+### Option C — npm global install (build the tarball yourself)
+
+There is no published tarball to download. `scripts/package.sh` packs one
+**locally** from a source checkout (Option B) — run it from the repo root:
+
+```sh
+npm install                              # from the repo root, once (npm workspaces)
+bash packages/quay/scripts/package.sh    # -> packages/quay/quay-<version>.tgz
+npm install -g packages/quay/quay-<version>.tgz
+quay --version
+quay --help
+```
+
+Installing from the tarball also runs this package's `postinstall` hook
+(`scripts/register-plugin.mjs`), which registers the bundled Claude Code plugin
+— see the [repo root README § Using the npm-installed quay with Claude
+Code](../../README.md#using-the-npm-installed-quay-with-claude-code-quayinit).
 
 ## Configuration
 
@@ -370,17 +391,26 @@ from `.quay/config.yml` behind a single MCP endpoint — the binding an agent
 (e.g. Claude Code) registers once instead of registering each Provider's
 own `<provider> mcp` separately.
 
-## Distribution: single-file executables (SEA)
+## Distribution: single-file executables (SEA) — **no longer published**
 
-In addition to the npm-installable package (Option A above), every tagged
-release also publishes **platform-specific single-file executables** built
-with [Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html) —
-these require **no separately-installed Node.js runtime** on the end user's
-machine at all.
+> **Retired with the npm channel** by the 2026-09-16 ruling. `.github/workflows/release.yml`
+> no longer builds these archives or attaches them to a release — the
+> `sea-release` and `sea-verify-node-free` jobs are gone, and no release page
+> carries a `quay-sea-*.tar.gz` or `.zip`. The build still works locally; that is
+> all this section documents.
 
-Each release's GitHub Release page includes archives named
-`quay-sea-<version>-<platform>.{tar.gz,zip}` for `linux-x64`, `macos-arm64`,
-and `windows-x64`. Each archive bundles:
+[Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html)
+produces a single-file executable that requires **no separately-installed
+Node.js runtime** on the target machine at all.
+
+Build one yourself from a source checkout:
+
+```sh
+bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
+bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
+```
+
+An archive you assemble for distribution bundles:
 
 - `quay` (or `quay.exe` on Windows) — the Core CLI/web-UI/MCP binary, built
   via `packages/quay/scripts/build-sea.sh`.
@@ -389,30 +419,18 @@ and `windows-x64`. Each archive bundles:
   because Core spawns the active Provider's `mcp_entry` as a child process;
   `quay serve` is only genuinely Node-free end-to-end if `mcp_entry` also
   points at a compiled binary, not `node ...`.
-- A packaged `.quay/config.yml` wiring the two binaries together
+- A `.quay/config.yml` wiring the two binaries together
   (`mcp_entry: ["./quay-native", "mcp"]`) and a `tasks/` directory.
 
 ```sh
-tar xzf quay-sea-0.3.4-linux-x64.tar.gz
-cd <extracted-dir>
 ./quay --help
 ./quay serve
 ```
 
-No `npm install`, no Node.js on `PATH`, nothing beyond the extracted
-archive is required. This is verified on every release by a dedicated CI
-job (`sea-verify-node-free` in `.github/workflows/release.yml`) that
-downloads the just-published Linux archive into a `debian:stable-slim`
-container that has never had Node.js installed, and runs the extracted
-binary directly — proving the executable is genuinely self-contained, not
-merely "the build succeeded locally."
-
-Build the SEA binaries yourself from source:
-
-```sh
-bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
-bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
-```
+No `npm install`, no Node.js on `PATH`, nothing beyond the extracted directory
+is required. `scripts/verify-sea-artifact.sh` verifies an artifact you built (the
+retired CI job used it to install and run the binary in a Node-free
+`debian:stable-slim` container); nothing runs it on a release any more.
 
 ## Running the test suite
 
