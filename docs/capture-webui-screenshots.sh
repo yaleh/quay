@@ -7,6 +7,15 @@
 # bare curl 200 probe). Every screenshot is pixel-verified non-blank by
 # docs/verify-webui-screenshot.mjs (light Modernist bg + dark text + accent token).
 #
+# ⚠️ The pixel verdict keys on the `--color-accent-600` FILL token (read live from
+# webui-modernist.css). Pages that style their accent with the base `--color-accent`
+# token instead carry no accent-600 pixels and are reported BLANK with an explanatory
+# `note` — on 2026-09-17 that is /goal and /task/<id>. Read the JSON's `note` and
+# `accentBasePixels` before concluding "the UI broke": exit 1 with a note means the
+# page is outside this criterion's lens, not that the render failed. The verifier
+# exits 2 (verdict NOT-EVALUATED) when it cannot read the token at all — a broken
+# instrument, which must never be mistaken for a blank render.
+#
 # ⛔ Dev-tree serve only: `quay serve --host <ip> --port <p>` from the source tree.
 #    Packaged-bundle screenshots are NOT valid until gap-webui-modernist-css-missing-in-tgz
 #    lands (packaged build renders without the Modernist CSS).
@@ -90,8 +99,16 @@ for entry in "${ROUTES[@]}"; do
   fi
 
   # ── 2. Screenshot (AC100 flow) ─────────────────────────────────────────────
+  # --virtual-time-budget fast-forwards Chrome's virtual clock so the page is
+  # captured at rendering-stable time, NOT at t≈4s. The dashboard's #sys-sparkline
+  # only draws a curve once history.length >= 2, and history is accumulated
+  # client-side by setInterval(refresh, 30000) with no immediate first call
+  # (serve-dashboard.ts:591,:669,:722,:773) ⇒ the first data point lands at
+  # t≈30s and the second at t≈60s. A short budget captures a structurally-empty
+  # 120px box, which reads as a UI defect but is a capture-timing artifact
+  # (gap-readme-ac278-four-screenshots-and-verify-token-drift, defect B).
   "$CHROME_BIN" --headless=new --disable-gpu --hide-scrollbars --window-size=1440,900 \
-    --virtual-time-budget=3000 --screenshot="$png" "$BASE_URL$path" >/dev/null 2>&1 \
+    --virtual-time-budget=95000 --screenshot="$png" "$BASE_URL$path" >/dev/null 2>&1 \
     || { echo "  ✗ chrome screenshot failed for $path" >&2; FAILED=1; }
 
   # ── 3. Pixel-verify non-blank (AC100) ──────────────────────────────────────

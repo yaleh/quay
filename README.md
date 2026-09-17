@@ -527,6 +527,24 @@ not merely that the checkboxes are ticked.
 aggregating every `enabled: true` Provider from `.quay/config.yml` behind
 a single MCP endpoint for an agent (e.g. Claude Code) to register once.
 
+### Web UI
+
+`quay serve` renders the board as server-rendered HTML (no client framework
+and no build step). The four screenshots below are real captures of a live
+dev-tree `quay serve` at 1440×900 — dashboard, goals, task detail, and the
+commit timeline:
+
+![quay web UI — the dashboard: loop pulse, task ledger, system resources and three-layer status](docs/screenshots/dashboard.png)
+
+![quay web UI — goals and their acceptance criteria](docs/screenshots/goals.png)
+
+![quay web UI — a single task's detail page](docs/screenshots/task-detail.png)
+
+![quay web UI — git history: the commit-landing timeline](docs/screenshots/git-history.png)
+
+Reproduce them against a running server with `docs/capture-webui-screenshots.sh`,
+and pixel-verify any capture with `docs/verify-webui-screenshot.mjs`.
+
 ### Driver processes (`quay driver`)
 
 The promotion and worker drivers are resident daemons kept alive by a single
