@@ -757,6 +757,50 @@ export function readAnchorState(root: string): { pid: number | null; kinds: Driv
   }
 }
 
+/** `.quay/anchor.json` 里 anchor 自报的**内核 bundle 同步读数**（每个 reconcile pass 重写）。
+ *
+ *  为什么它是一个**独立字段**而不是一行日志（硬规则 3b）：日志行只有人读得到，而「本内核比源树旧」
+ *  在**任何结构化读数**里此前都与「一切正常」同形 —— 那正是它静默持续 2 天的形态。取值见
+ *  `KernelBundleSyncState`（⛔ `not-evaluated` / `stale-no-action` 各自独立，⛔ 不与 `fresh` 同形）。 */
+export interface AnchorBundleReading {
+  state: KernelBundleSyncState;
+  /** 本内核内核文件的绝对路径（读不出 ⇒ null）。 */
+  kernel: string | null;
+  /** 该文件的构建时刻（ISO；读不出 ⇒ null）。 */
+  builtAt: string | null;
+  /** 被比较的源树 scripts 目录（不是 mirror 形态 ⇒ null）。 */
+  sourceDir: string | null;
+  /** 源树被监视文件的最新 mtime（ISO；不是 mirror 形态 ⇒ null）。 */
+  sourceMtime: string | null;
+  /** 陈旧时，哪些 kind 参与了这个判定（KernelBundleSyncState 的 stale-* 三态才有意义）。 */
+  kinds: DriverKind[];
+  /** 最近一次机械重建的读数（没试过 ⇒ null）。 */
+  rebuild: { attempted: boolean; ok: boolean; reason: string | null; command: string | null; at: string } | null;
+  /** 本读数被写入的时刻（ISO）。 */
+  at: string | null;
+}
+
+/** 读 anchor 自报的 bundle 同步读数（`.quay/anchor.json` 的 `bundle` 字段）。
+ *  ⛔ 读不出 / 不是三态里的取值 ⇒ **null**（调用方 fail-closed；⛔ 不把「读不懂」当 `fresh`）。 */
+export function readAnchorBundleReading(root: string): AnchorBundleReading | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).stateFile, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const j = JSON.parse(raw) as { bundle?: unknown };
+    const b = j.bundle as AnchorBundleReading | undefined;
+    if (!b || typeof b.state !== "string") return null;
+    const known: readonly string[] = ["fresh", "stale-swappable", "stale-rebuilt", "stale-rebuild-failed", "stale-no-action", "not-evaluated"];
+    if (!known.includes(b.state)) return null;
+    return b;
+  } catch {
+    return null;
+  }
+}
+
 /** 该 kind **自己的常驻循环**是否已就绪 —— 判据 = 逐 kind pid 载体 `.quay/<prefix>.pid` 写着一个
  *  **活着的**进程（`pidSelf` 类由驱动自己在进入循环体后写；`pidSelf=false` 的 worker 由宿主在起循环时写，
  *  见 `driverPidIsReadinessMarker`）。
@@ -968,6 +1012,123 @@ export function preferredAnchorKernelIn(
   }
   if (fs.existsSync(selfJs)) return { path: selfJs, stripTypes: false };
   return null;
+}
+
+// ── Layer 0 · 内核 bundle 陈旧的动作面（gap-ac214-sixth-crossing-stale-bundle-detected-but-no-remediation）──
+//
+// 缺陷（2026-09-17 实测，AC-214 第六次转红的成因，全部直接读数）：
+//   `driver-anchor.ts` 的 `bundleStale` 支**会检测**「本内核 bundle 比它的源树旧」，并把
+//   `rebuild the bundle to clear this` 写进 `.quay/anchor.log`（≥3 条带时刻的行，最新 2026-09-17T04:03:49Z）。
+//   而**全仓没有任何机件执行那个动词** ⇒ 该条件静默持续 2 天：第五次转红落地的修复（立案步
+//   `fileRoutineTask`，提交 4c7e5c23）落在**源**里、跑的却是早它 22 分钟的**产物**
+//   （`dist/probe-routine.js` 有 `scan-round`、没有 `filing-round`）⇒ 生产载体
+//   `.quay/routine-findings.jsonl` 里 `kind:"filing-round"` 的记录数 = **0**，AC-238/239 的 act-now
+//   finding 三次落进载体、三次没有对应任务。
+//   ⇒ 与硬规则 3b 同形：**一个「检测到了」的条件，若没有会动作的消费者，就与「一切正常」同形**。
+//   ⇒ 与硬规则 4 推论三同形：实现了、测试绿了，而**生产没跑过**。
+//
+// 本段交付的是那个**动作面**（两件事，缺一不可）：
+//   ① `resolveQuayKernelBuildScript()` —— 找到把本内核的**源树**编译成 dist bundle 的那个构建脚本
+//      （**单一入口**：布局知识只住在这里，⛔ 调用方不各自拼 `packages/quay/scripts/…`）。
+//   ② `rebuildKernelBundle()` —— 机械重建，且**只写产物**（`<pluginRoot>/scripts/dist/`），
+//      ⛔ 不碰任何被 git 跟踪的源文件、⛔ 不碰 `--root` 工作区。
+//
+// ⛔ 重建**不是**「换得动」的替代品：重建后本进程内存里仍是旧代码（Node 的 ESM 缓存按 URL，
+//   见 driver-anchor.ts 头注释），所以调用方**必须**再走一次整进程重启才能让新产物真的执行
+//   ——「重建 + 重启」是**一个**动作的两个半边，⛔ 只做前一半等于把日志里的建议照抄一遍。
+
+/** 把一个 `KernelBundleRebuildResult` 的**取值**（硬规则 3b：⛔ 不同形态不共用取值）。 */
+export type KernelBundleSyncState =
+  /** 本内核不比源树旧（或压根没有源可推进）—— 无需动作。 */
+  | "fresh"
+  /** 陈旧，且本内核之外**存在**一份更新的内核 ⇒ 走既有的整进程自刷新（⛔ 不重建）。 */
+  | "stale-swappable"
+  /** 陈旧且换不动 ⇒ 机械重建**成功**（下一步是整进程重启把它加载进来）。 */
+  | "stale-rebuilt"
+  /** 陈旧且换不动 ⇒ 重建**尝试过但失败**（如实留痕，⛔ ⛔ 不静默降级成 fresh）。 */
+  | "stale-rebuild-failed"
+  /** 陈旧且换不动 ⇒ **没有可用动作**（找不到构建脚本 / 被 kill switch 关掉）。⛔ 三态之一，不与 fresh 同形。 */
+  | "stale-no-action"
+  /** 读不出内核/源树读数 —— ⛔ 与 fresh 不同形（硬规则 3b）。 */
+  | "not-evaluated";
+
+/** 一次机械重建的读数（⛔ 不只是布尔：失败原因与命令都要可核）。 */
+export interface KernelBundleRebuildResult {
+  /** 是否真的调用了构建脚本。 */
+  attempted: boolean;
+  /** 构建脚本退出码为 0。 */
+  ok: boolean;
+  /** `attempted=false` 时说明为什么没做 / `ok=false` 时说明失败原因；`ok=true` ⇒ null。 */
+  reason: string | null;
+  /** 实际运行的完整 argv（可复跑；`attempted=false` ⇒ null）。 */
+  command: string | null;
+  durationMs: number;
+  /** 构建脚本 stdout+stderr 的**尾部**（⛔ 不吞掉，失败时可诊断）。 */
+  outputTail: string;
+}
+
+/** 本内核的**源树**被编译成 dist bundle 时用的那个构建脚本的绝对路径。
+ *
+ *  本内核不是跑在构建产物形态上 / 找不到源树 / 找不到构建脚本 ⇒ **null**（调用方 fail-closed，
+ *  ⛔ 不把「读不懂」当「换得动」）。
+ *
+ *  ⛔ **单一入口**：`packages/quay/scripts/…` 这一布局段只在本函数体内出现
+ *  （kernel-sibling-resolution-check 的 DRIVER-SCOPE 规则；该规则把本函数与
+ *  `resolveQuayCodeRoot` / `resolveQuaySrcModule` / `quaySrcModuleLegacyShape` 并列为合法落点）。
+ *  ⛔ 先要求 `kernelSourceScriptsDir()` 非空：没有源树 = 装好的产物（npm-pack / marketplace cache /
+ *  第三方 vendored），那里**没有**可重建的源，重建它们只会把静态产物写成半成品。 */
+export function resolveQuayKernelBuildScript(): string | null {
+  if (!kernelSourceScriptsDir()) return null;
+  const codeRoot = resolveQuayCodeRoot();
+  if (!codeRoot) return null;
+  const script = path.join(codeRoot, "packages", "quay", "scripts", "build-plugin-dist.mjs");
+  return fs.existsSync(script) ? script : null;
+}
+
+/** 机械重建本内核的 bundle（**唯一**动作面：跑源树自己的构建脚本，只写产物目录）。
+ *
+ *  退出条件全部**取值可区分**（硬规则 3b）：`attempted=false`（没动作可用 / 被关掉）与
+ *  `attempted=true, ok=false`（动作做了但失败）与 `ok=true` 是三态，⛔ 不共用一个「没成功」。
+ *
+ *  kill switch：`QUAY_ANCHOR_NO_BUNDLE_REBUILD=1` ⇒ 直接 `attempted=false`（机器上不想让常驻进程
+ *  evoking esbuild 时用；⛔ 关掉它**不**等于「不陈旧」——调用方仍须报出陈旧，只是取值变成
+ *  `stale-no-action`）。 */
+export function rebuildKernelBundle(opts: { timeoutMs?: number; scriptPath?: string | null } = {}): KernelBundleRebuildResult {
+  const t0 = Date.now();
+  const deny = (reason: string): KernelBundleRebuildResult =>
+    ({ attempted: false, ok: false, reason, command: null, durationMs: Date.now() - t0, outputTail: "" });
+  if (process.env.QUAY_ANCHOR_NO_BUNDLE_REBUILD === "1") {
+    return deny("disabled by QUAY_ANCHOR_NO_BUNDLE_REBUILD=1");
+  }
+  const script = opts.scriptPath === undefined ? resolveQuayKernelBuildScript() : opts.scriptPath;
+  if (!script) return deny("no plugin-dist build script resolvable from this kernel's source tree");
+  const srcScripts = kernelSourceScriptsDir();
+  if (!srcScripts) return deny("no source tree for this kernel (installed artifact — nothing to rebuild)");
+  const pluginRoot = path.dirname(srcScripts);
+  const timeoutMs = Math.max(1_000, opts.timeoutMs ?? 600_000);
+  const argv = [process.execPath, script, pluginRoot];
+  let r: ReturnType<typeof spawnSync>;
+  try {
+    r = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8",
+      timeout: timeoutMs,
+      // cwd = 源树的**仓库根**（构建脚本按相对路径找 packages/quay/… 的兄弟；⛔ 不是 --root 工作区）。
+      cwd: path.dirname(pluginRoot),
+      env: { ...process.env },
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (e) {
+    return { attempted: true, ok: false, reason: `spawn threw: ${e instanceof Error ? e.message : String(e)}`, command: argv.join(" "), durationMs: Date.now() - t0, outputTail: "" };
+  }
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  const tail = out.length > 4000 ? out.slice(-4000) : out;
+  if (r.error) {
+    return { attempted: true, ok: false, reason: `spawn error: ${r.error.message}`, command: argv.join(" "), durationMs: Date.now() - t0, outputTail: tail };
+  }
+  if (r.status !== 0) {
+    return { attempted: true, ok: false, reason: `build script exited ${r.status}`, command: argv.join(" "), durationMs: Date.now() - t0, outputTail: tail };
+  }
+  return { attempted: true, ok: true, reason: null, command: argv.join(" "), durationMs: Date.now() - t0, outputTail: tail };
 }
 
 /** 起一个 anchor 子进程（detached，setsid 等价）。返回 {pid, error}。⛔ 不继承调用者 stdout/stderr。 */

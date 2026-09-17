@@ -153,7 +153,12 @@ export const DRIVER_SCOPE_FILES: readonly string[] = [
  *  （保证调用方的「读不懂 ⇒ not-evaluated」契约不变）。 */
 export const DRIVER_ANCHOR_SINGLE_ENTRY = {
   file: "plugin/scripts/driver-runtime.ts",
-  fns: ["resolveQuayCodeRoot", "resolveQuaySrcModule", "quaySrcModuleLegacyShape"],
+  // ⚠️ 这是一个**枚举**，不是一个白名单：每加一条 = 「这个函数体内拼 `packages/…` 是**该布局的唯一落点**」。
+  // gap-ac214-sixth-crossing-…（2026-09-17）加了 `resolveQuayKernelBuildScript`：内核 bundle 陈旧时
+  // 要**机械重建**（跑源树自己的 `packages/quay/scripts/build-plugin-dist.mjs`），而这条布局知识必须
+  // 与 `resolveQuayCodeRoot` 同处一文件——⛔ 不是在 driver-anchor.ts 里再拼一次（那会让「谁知道布局」
+  // 变成两处，正是 DRIVER-SCOPE 规则存在的理由）。
+  fns: ["resolveQuayCodeRoot", "resolveQuaySrcModule", "quaySrcModuleLegacyShape", "resolveQuayKernelBuildScript"],
 } as const;
 
 /** 检测面：`path.(join|resolve)(<rootExpr>, "plugin"|"packages", …)` —— 第一参是标识符或单层调用。
