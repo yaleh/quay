@@ -3,7 +3,7 @@ id: gap-goal022-scope-item3-prereq-reinstall-uncovered
 title: GOAL-022 充分性判官判 insufficient 跨一整个 judge+look 周期未变：范围节第三条「自定义 runner
   镜像消除重复装包」在在域 AC 集合里零覆盖，而实测它是 ≤30s 目标的 26.7%（8s/30s）⇒ 提 option (a)：加一条 AC-282 +
   退出条件句「三条 AC」改「四条 AC」
-status: todo
+status: needs-human
 labels:
   - gap
   - goal-sufficiency
