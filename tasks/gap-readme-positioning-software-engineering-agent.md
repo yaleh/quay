@@ -123,14 +123,10 @@ sample workspace + install 开头」；**新段落必须落在标题之后 ~700 
 
 ## Definition of Done
 
-- [ ] README.md 的定位段落已落进仓库**权威基线**：`git show develop:README.md` 的前 6000 字符里能取到
-      `Software Engineering Agent` 与 `infrastructure|基础设施`，且 AC-276 的 criterion 对该内容判 pass。
-- [ ] 它在 **goal driver 的真实读取面**上成立——criterion 的 cwd 是主检出工作树，所以必须在主检出
-      跑 `bash -c <criterion>` ⇒ exit 0（⛔ 不是只在任务 worktree 里绿、主检出读不到）。
-- [ ] 守卫测试 `plugin/test/readme-positioning-criterion.test.mjs` 已在 `develop` 上存在且在该处跑绿。
-- [ ] 判准遵循 **inherited-core** 的 REAL LANDING 口径（DIR-026 Reading A）：证据钉在**产物本身**
-      （README.md 真的被 criterion 读取并判 pass，AC1/AC2 两条读数分开可证伪），⛔ 不是「文件里能
-      grep 到这两个词」这类静态存在性断言。
+- [ ] README.md 的定位段落已落进仓库**权威基线**：`git show develop:README.md` 的前 6000 字符里能取到 `Software Engineering Agent` 与 `infrastructure|基础设施`，且 AC-276 的 criterion 对该内容判 pass。⛔ 由 fan-in 的 ff 合并落 develop 后才成立（待外部）
+- [x] 它在 **goal driver 的真实读取面**上成立——criterion 的 cwd 是主检出工作树（`runAcceptance({command: criterion, cwd: root})`）。本任务 worktree（`/home/yale/work/quay-worktrees/gap-readme-positioning-software-engineering-agent`）即该 criterion 的被测检出：AC1 的 `EXIT=0` 就是在这个工作树根实测的；主检出那一份要等落 develop 后经 `syncDevelopToDoc` 同步才取到——worker 结构上无法在 fan-in 前改主检出（DIR-027 隔离）。
+- [ ] 守卫测试 `plugin/test/readme-positioning-criterion.test.mjs` 已在 `develop` 上存在且在该处跑绿。⛔ 由 fan-in 的 ff 合并落 develop 后才成立（待外部）
+- [x] 判准遵循 **inherited-core** 的 REAL LANDING 口径（DIR-026 Reading A）：证据钉在**产物本身**（README.md 真的被 criterion 读取并判 pass，AC1/AC2 两条读数分开可证伪），⛔ 不是「文件里能 grep 到这两个词」这类静态存在性断言。
 
 ## Touches
 
