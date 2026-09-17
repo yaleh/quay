@@ -2,7 +2,7 @@
 id: gap-readme-ac278-four-screenshots-and-verify-token-drift
 title: docs/screenshots/ 四张真实截图缺席且 README 零 PNG 引用（AC-278 真跑
   CAUSE=screenshots-dir-absent）；既有截图链的像素核验因 accent token 漂移恒判 BLANK，须一并修复
-status: ready
+status: done
 labels:
   - gap
   - docs
