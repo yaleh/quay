@@ -161,14 +161,21 @@ export async function handleTaskList(
       const ib = String(b.id ?? "");
       return ia < ib ? -1 : ia > ib ? 1 : 0;
     });
-  } else if (sortKey === "updated") {
+  } else {
+    // gap-webui-dashboard-tasks-display-polish ②: this branch is BOTH `?sort=updated` AND the
+    // no-`?sort=` DEFAULT. It used to be `tasks = filtered` — the Provider's raw order, which is
+    // ≈ id order, so the page led with the oldest historical tasks (57-day-old ones at the top of a
+    // 2243-task board) and answered neither "what changed recently" nor anything else a reader wants
+    // first. The two spellings share ONE branch on purpose: the nav's "Default" entry links to the
+    // param-less URL, so having them be separate code paths is exactly how "Default 链接" and the
+    // actual default would drift apart. `id`/`status` above are untouched, and an unrecognized
+    // ?sort= value falls here too (same convention as the other filter params: a bad value degrades
+    // to the default view rather than erroring).
     tasks = filtered.slice().sort((a, b) => {
       const ta = typeof (a as unknown as Record<string, unknown>).updatedAt === "number" ? (a as unknown as Record<string, unknown>).updatedAt as number : -Infinity;
       const tb = typeof (b as unknown as Record<string, unknown>).updatedAt === "number" ? (b as unknown as Record<string, unknown>).updatedAt as number : -Infinity;
       return tb - ta; // descending: most-recently-modified first
     });
-  } else {
-    tasks = filtered;
   }
   // QW-007 (experiment 3, iteration 4): pagination — 20 tasks per page
   // by default. ?page=N selects the page (1-based, default 1). Applied
@@ -303,6 +310,11 @@ export async function handleTaskList(
   // QW-004: sort navigation links — Default, id, status.
   // QX-008: added "Updated ↓" sort link (sort by mtime descending).
   // Active sort shown as plain text; others as links (preserving active status, label, and prefix filters).
+  // gap-webui-dashboard-tasks-display-polish ②: after the default view became recent-first, "Default"
+  // and "Updated ↓" point at the SAME ordering (they are two URL spellings of it — the param-less one
+  // and the explicit one), so their two nav entries stay but must never be read as two different
+  // orders. "Default" is the bold one exactly when the URL carries no ?sort=, which is what keeps the
+  // label truthful about the URL rather than about the order.
   const sortNav = [
     !sortKey ? html`<strong>Default</strong>` : html`<a href="${bh(statusFilter, null, labelFilters, null, prefixFilter, qFilter)}">Default</a>`,
     sortKey === "id"
