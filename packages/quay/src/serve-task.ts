@@ -609,6 +609,116 @@ export function taskRunsBlock(
     </table>`;
 }
 
+// ── gap-webui-task-detail-flat-body-needs-structure ────────────────────────────────────────────
+// The /task/<id> page funnelled the WHOLE body through ONE renderMarkdown() call, so a real task
+// body — several thousand chars of Proposal + verdict JSON blocks + a dozen ⚠️/⛔ paragraphs —
+// became a single un-navigable wall: no table of contents, nothing foldable, scroll-only scanning.
+// The Sessions detail page already solved the same shape with native zero-JS
+// <details><summary> (serve-sessions.ts); this applies that pattern to the task body, split on the
+// body's OWN top-level `## ` headings.
+//
+// Short bodies are deliberately left FLAT: wrapping a two-line body in fold UI + a one-entry nav
+// makes the page worse to read, not better (AC2). The `class="body"` wrapper is emitted VERBATIM on
+// BOTH paths — other suites assert that exact string and the `.body` CSS rules hang off it; what
+// changes is what goes INSIDE it.
+
+/** One top-level (`## `) section of a task body. `heading` is the text after the marker — `null`
+ *  for the preamble (content before the first `## `), which is never foldable. `md` is the
+ *  section's content with its own `## ` line REMOVED: the <summary> carries the heading, so
+ *  re-rendering it inside the fold would show the title twice. */
+export interface BodySection {
+  heading: string | null;
+  md: string;
+}
+
+/** Split a body on its top-level `## ` headings. Fence-aware — a `## ` line inside a ``` block is
+ *  content, not a boundary (the verdict-JSON blocks in real task bodies contain `##`-looking
+ *  text). `# ` / `### ` are NOT boundaries: the task schema's section level is exactly `## `.
+ *  A whitespace-only preamble is dropped rather than emitted as an empty section. */
+export function splitBodySections(body: string | undefined | null): BodySection[] {
+  const sections: BodySection[] = [];
+  let heading: string | null = null;
+  let buf: string[] = [];
+  let inFence = false;
+  const flush = (): void => {
+    const md = buf.join("\n");
+    if (heading !== null || md.trim()) sections.push({ heading, md });
+    buf = [];
+  };
+  for (const line of String(body ?? "").split(/\r?\n/)) {
+    // Same fence toggle as renderMarkdown itself (``` opens AND closes) so the split can never
+    // disagree with the renderer about what is code.
+    if (/^```/.test(line)) inFence = !inFence;
+    if (!inFence) {
+      const hm = /^##\s+(.*)$/.exec(line);
+      if (hm) {
+        flush();
+        heading = hm[1].trim();
+        continue;
+      }
+    }
+    buf.push(line);
+  }
+  flush();
+  return sections;
+}
+
+/** Below EITHER bound the page renders flat (the legacy single-pass path). Both bounds are needed:
+ *  section count alone would fold a 3-line body that happens to have 3 headings, and length alone
+ *  would fold a single 2000-char paragraph into a one-entry "table of contents". */
+export const BODY_STRUCTURE_MIN_SECTIONS = 3;
+export const BODY_STRUCTURE_MIN_CHARS = 1200;
+/** Inside an already-structured body, a section longer than this folds by default; shorter ones
+ *  stay open — the AC2 principle ("short content must not be forced into fold UI") applied
+ *  per-section, so a long Finding folds while a 2-line Touches list stays readable. */
+export const BODY_SECTION_FOLD_CHARS = 800;
+
+/** The pure structure/no-structure predicate — exported so the test can drive BOTH directions
+ *  (a real long body structures, a short one does not) without going through the HTTP route. */
+export function shouldStructureBody(
+  body: string | undefined | null,
+  sections: BodySection[],
+): boolean {
+  return sections.length >= BODY_STRUCTURE_MIN_SECTIONS
+    && String(body ?? "").trim().length >= BODY_STRUCTURE_MIN_CHARS;
+}
+
+/** Render the task body. Flat path = the historical `<div class="body">${renderMarkdown(body)}</div>`.
+ *  Structured path = a jump nav (one anchor per `## ` section) + one native `<details>` per section
+ *  whose `<summary>` IS the section title, so every section title is visible without scrolling past
+ *  the sections themselves. Anchor ids are index-based (`body-sec-<i>`) — heading text is
+ *  arbitrary markdown and may repeat, so it is not a usable id source. Zero JS, like serve-sessions. */
+export function renderTaskBody(body: string | undefined | null): string {
+  const sections = splitBodySections(body);
+  if (!shouldStructureBody(body, sections)) {
+    return `<div class="body">${renderMarkdown(body)}</div>`;
+  }
+  const toc: string[] = [];
+  const blocks: string[] = [];
+  sections.forEach((s, i) => {
+    const id = `body-sec-${i}`;
+    const md = renderMarkdown(s.md);
+    if (s.heading === null) {
+      blocks.push(`<div class="body-preamble">${md}</div>`);
+      return;
+    }
+    const open = s.md.trim().length <= BODY_SECTION_FOLD_CHARS;
+    toc.push(`<a href="#${id}">${escapeHtml(s.heading)}</a>`);
+    blocks.push(
+      `<details class="body-section" id="${id}"${open ? " open" : ""}>`
+      + `<summary style="cursor:pointer;font-size:0.95rem;font-weight:600;color:var(--color-neutral-800);padding:0.2rem 0">${escapeHtml(s.heading)}</summary>`
+      + `<div class="body-section-content">${md}</div>`
+      + `</details>`,
+    );
+  });
+  return `<div class="body">`
+    + `<nav class="body-toc" aria-label="Task body sections" style="margin:0.75rem 0;padding:0.5rem 0.75rem;background:var(--color-neutral-100);border-left:3px solid var(--color-neutral-500);font-size:0.85rem">`
+    + `<span style="color:var(--color-neutral-700)">Sections: </span>${toc.join(" · ")}`
+    + `</nav>`
+    + blocks.join("\n")
+    + `</div>`;
+}
+
 export async function handleTaskDetail(
   req: IncomingMessage,
   res: ServerResponse,
@@ -679,6 +789,6 @@ export async function handleTaskDetail(
       ${childrenMeta}
       ${taskRunsBlock(cfg.workspaceRoot, taskId)}
       <h2 class="sr-only">Details</h2>
-      <div class="body">${renderMarkdown(t.body)}</div>
+      ${renderTaskBody(t.body)}
     </main></body></html>`);
 }
