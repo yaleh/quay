@@ -22,6 +22,7 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { parsePromotionOutcomeRecords, readNeedsHumanLedger } from "../src/observation.ts";
 import { extractNeedsHumanReason } from "../src/serve-needs-human.ts";
+import { pageNameFor } from "../src/serve-i18n.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -38,9 +39,12 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
 // — the convention established by gap-serve-pid-derived-port-collision-family, which
 // converted the 12 pid-derived-port sites to it.
 
-function get(port, urlPath) {
+// AC-295: `headers` is optional and unused by the AC-146 tests above, so the default request they
+// issue is byte-identical to the one they issued before — the zh tests below are the only callers
+// that pass it.
+function get(port, urlPath, headers) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -185,6 +189,211 @@ test("degradation: no needs-human tasks and no ledger still renders 200 (never a
     assert.equal(page.status, 200, "empty workspace still returns 200");
     assert.ok(page.body.includes("当前无 needs-human 任务"), "empty active table renders the none note");
     assert.ok(page.body.includes("无 needs-human 升级记录"), "empty ledger renders the none note");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC-295 (GOAL-024) — /needs-human's OWN zh chrome.
+//
+// AC-288 built the language MECHANISM (which language is this request?) and AC-289 built the label
+// DICTIONARY plus the four shared render functions. `handleNeedsHuman` already RECEIVED `cfg.lang`
+// from the dispatcher (serve-handlers.ts passes AC-288's `reqCfg`) and dropped it — it called
+// `renderNeedsHumanPage(active, ledger, manifest, cfg.identity)` and the page hard-coded
+// `<html lang="en">`, rendering its `<title>`/`<h1>`/nav from the English columns.
+//
+// Why the assertions are SPLIT the way they are: the goal criterion fails this page on two
+// INDEPENDENT chrome arms — the nav region still carrying the English nav label
+// (`CAUSE=nav-label-untranslated`) and this page's OWN `<title>` being byte-identical across the two
+// languages (`CAUSE=title-unchanged`). The two arms resolve through two DIFFERENT dictionaries:
+//   · the nav current item      → NAV_LABELS["needs-human"] (shared chrome, ROW 1) — already present
+//   · this page's <title>/<h1>  → PAGE_LABELS["Needs Human"] (this page's chrome, ROW 3) — added here
+// and /needs-human is the case where the SAME literal string is the input to BOTH. Wiring one and
+// not the other is therefore a real, reachable half-fix, and each half reds a different CAUSE. The
+// separation below is what keeps those two arms from being collapsed into one "the page looks
+// translated" boolean (hard rule 3: enumerate, do not report a boolean).
+//
+// The `<h1>` and the `<title>` share ONE token here (`Needs Human`) — the AC-294 /manager shape —
+// because this page passes the same string to both call sites; AC-291's / AC-292's / AC-293's /
+// AC-296's pages each had a separate short token, this one does not.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The page-chrome token, pinned as the literal the call site passes. ⛔ Not imported from
+ *  serve-i18n.ts: deriving the expectation from the thing under test would make the assertion a
+ *  tautology. Note it is the FULL string WITH ITS INTERNAL SPACE — registering the bare `Needs`, or
+ *  the nav key `needs-human`, MISSES the lookup and leaves the title English, which IS the
+ *  criterion's `title-unchanged` arm. */
+const NH_TOKEN = "Needs Human";
+const NH_TOKEN_ZH = "待人工";
+
+/** The nav current item's zh label — NAV_LABELS's `needs-human` row (shared chrome, ROW 1). Pinned
+ *  separately from NH_TOKEN_ZH even though both are 待人工 today: they are two independent lookups
+ *  (see the AC-dict test), and a re-wording of one must not silently move the other's expectation. */
+const NH_NAV_CURRENT_ZH = "待人工";
+
+/** The nav region, extracted EXACTLY as the AC-295 goal criterion extracts it (flatten newlines,
+ *  then greedy `/<nav.*<\/nav>/`) so this file and the criterion cannot drift on what "the nav
+ *  region" means. The greediness matters: it spans the mobile menu's `<nav>` through the desktop
+ *  bar's `</nav>`, so BOTH current-item renderings sit inside the region under assertion. */
+function navRegion(body) {
+  const m = /<nav.*<\/nav>/.exec(body.replace(/\n/g, " "));
+  return m ? m[0] : "";
+}
+
+function headTitle(body) {
+  const m = /<title>([^<]*)<\/title>/.exec(body.replace(/\n/g, " "));
+  return m ? m[1] : "";
+}
+
+function h1Of(body) {
+  const m = /<h1>([^<]*)<\/h1>/.exec(body.replace(/\n/g, " "));
+  return m ? m[1] : "";
+}
+
+/** The nav item the page marks as CURRENT — one match per rendering (desktop / mobile). */
+function currentItem(region, prefix) {
+  const m = new RegExp(`<span class="${prefix}item nav-current"[^>]*>([^<]*)</span>`).exec(region);
+  return m ? m[1] : null;
+}
+
+test("AC-295 AC-dict: the /needs-human page token translates under zh and is the identity under en", () => {
+  // (0) THE TRAP, asserted first: the PAGE_LABELS key must be byte-equal to the token the call site
+  //     passes. Keyed by the bare "Needs", or by the nav key "needs-human", pageNameFor() returns
+  //     the English string here — the `title-unchanged` arm — so this is the assertion that fails
+  //     when the entry is mis-keyed, before any HTTP is involved.
+  assert.equal(pageNameFor(NH_TOKEN, "en"), NH_TOKEN, "en is the identity for the page token");
+  assert.equal(pageNameFor(NH_TOKEN, "zh"), NH_TOKEN_ZH,
+    `the zh page token is ${JSON.stringify(NH_TOKEN_ZH)} (a bare "Needs" / "needs-human" key misses this lookup)`);
+
+  // (a) the criterion's own literal, asserted absent from the zh value directly. A zh value of e.g.
+  //     "Needs Human 待人工" would satisfy "non-empty" while leaving the criterion's nav-literal arm
+  //     red — the gate-gameability shape the dictionary's own WHY note calls out.
+  assert.ok(!pageNameFor(NH_TOKEN, "zh").includes(NH_TOKEN),
+    `the zh page token must not carry the ASCII literal ${JSON.stringify(NH_TOKEN)}`);
+  // (b) control — that same predicate DOES fire on the en value, so (a) is not vacuous.
+  assert.ok(pageNameFor(NH_TOKEN, "en").includes(NH_TOKEN),
+    "control: the \"no ASCII literal\" predicate fires on the en token it must reject");
+  // (c) control — the function is not constant across languages for this token.
+  assert.notEqual(pageNameFor(NH_TOKEN, "zh"), pageNameFor(NH_TOKEN, "en"),
+    "control: pageNameFor is not constant across languages for the page token");
+  // (d) control — NEAR-MISS tokens are NOT mapped: the lookup is byte-exact, not fuzzy. Each of
+  //     these is a plausible mis-key, and each would leave the title English.
+  for (const nearMiss of ["Needs", "needs-human", "Needs  Human", "needs human", "Needs humans"]) {
+    assert.equal(pageNameFor(nearMiss, "zh"), nearMiss,
+      `control: the near-miss token ${JSON.stringify(nearMiss)} is NOT mapped — the lookup is byte-exact`);
+  }
+});
+
+test("AC-295 AC-black-box: /needs-human under Cookie lang=zh switches html lang, both nav current items, and its OWN <title>", async () => {
+  const { ws, tasksDir } = makeWorkspace("nh-zh-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // A real DATA hit carrying the literal, seeded DELIBERATELY: this page's <main> renders task
+    // titles, and a title containing the literal is the exact false-failure shape the criterion's
+    // own origin note records for /dashboard ("the activity stream renders task TITLES containing
+    // Dashboard/Tasks"). The criterion matches only `<title>` and `<nav>…</nav>`, so this title must
+    // NOT red it — and the assertions below pin that scoping claim rather than assuming it.
+    seed(tasksDir, "NH-ZH-DATA", {
+      title: `${NH_TOKEN} 数据面的任务标题不是本判据的对象`,
+      status: "needs-human",
+      body: needsHumanBody("数据面命中，用于证明本判据只对 chrome 作用域断言"),
+    });
+
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
+    const en = await get(port, "/needs-human");
+    const zh = await get(port, "/needs-human", { Cookie: "lang=zh" });
+    assert.equal(en.status, 200, `GET /needs-human (en) returns 200 (got ${en.status})`);
+    assert.equal(zh.status, 200, `GET /needs-human (zh) returns 200 (got ${zh.status})`);
+
+    // (0) the mechanism itself, restated so a regression in AC-288 reds THIS file too.
+    assert.ok(en.body.includes('<html lang="en">'), 'the en response is <html lang="en">');
+    assert.ok(zh.body.includes('<html lang="zh"'), 'the zh response is <html lang="zh">');
+
+    const navEn = navRegion(en.body);
+    const navZh = navRegion(zh.body);
+    assert.ok(navEn.length > 0, "the en response exposes a <nav>…</nav> region to assert on");
+    assert.ok(navZh.length > 0, "the zh response exposes a <nav>…</nav> region to assert on");
+
+    // (1a) the en baseline still carries the literal — otherwise "absent under zh" would be vacuous.
+    assert.ok(navEn.includes(NH_TOKEN),
+      `the en nav region carries the literal ${JSON.stringify(NH_TOKEN)} (the baseline the criterion asserts on)`);
+
+    // (1b) THE NAV CURRENT ITEM, desktop and mobile, asserted SEPARATELY (hard rule 3).
+    const desktopEn = currentItem(navEn, "nav-");
+    const desktopZh = currentItem(navZh, "nav-");
+    const mobileEn = currentItem(navEn, "mobile-menu-");
+    const mobileZh = currentItem(navZh, "mobile-menu-");
+    console.log(`  [ac295] en desktop/mobile current nav item = ${JSON.stringify(desktopEn)} / ${JSON.stringify(mobileEn)}`);
+    console.log(`  [ac295] zh desktop/mobile current nav item = ${JSON.stringify(desktopZh)} / ${JSON.stringify(mobileZh)}`);
+    assert.equal(desktopEn, NH_TOKEN, `the en desktop current item is the baseline ${JSON.stringify(NH_TOKEN)}`);
+    assert.equal(mobileEn, NH_TOKEN, `the en mobile current item is the baseline ${JSON.stringify(NH_TOKEN)}`);
+    assert.equal(desktopZh, NH_NAV_CURRENT_ZH, `the desktop current item is ${JSON.stringify(NH_NAV_CURRENT_ZH)} under zh`);
+    assert.equal(mobileZh, NH_NAV_CURRENT_ZH, `the mobile current item is ${JSON.stringify(NH_NAV_CURRENT_ZH)} under zh`);
+    assert.notEqual(desktopZh, NH_TOKEN, "the zh desktop current item is not the English literal");
+    assert.notEqual(mobileZh, NH_TOKEN, "the zh mobile current item is not the English literal");
+
+    // (1c) the whole nav region is free of the English label under zh — the criterion's own assertion.
+    assert.ok(!navZh.includes(NH_TOKEN), `the zh nav region carries no literal ${JSON.stringify(NH_TOKEN)}`);
+
+    // (1d) THE SCOPING CLAIM, pinned rather than assumed: this page's DATA area DOES carry the
+    //      literal (the seeded task title) in the SAME zh response, while the nav region does not.
+    //      Without this pair, (1c) could be satisfied by a page that had simply stopped rendering
+    //      its data — and the criterion's nav-only scoping would then be untested.
+    assert.ok(zh.body.includes(NH_TOKEN),
+      "control: the zh response DOES carry the literal OUTSIDE the nav region (the seeded task title) — so (1c) is a scoping claim, not a page-wide one");
+    assert.ok(en.body.includes(NH_TOKEN),
+      "control: the en response carries that same data hit, so (1d) is not an artifact of the zh request");
+
+    // (2) THIS PAGE'S OWN <title> — the arm the criterion's `title-unchanged` CAUSE exists for.
+    const tEn = headTitle(en.body);
+    const tZh = headTitle(zh.body);
+    console.log(`  [ac295] en <title> = ${JSON.stringify(tEn)}`);
+    console.log(`  [ac295] zh <title> = ${JSON.stringify(tZh)}`);
+    assert.ok(tEn.endsWith(` — ${NH_TOKEN}`), `the en <title> ends with " — ${NH_TOKEN}" (got ${JSON.stringify(tEn)})`);
+    assert.ok(tZh.endsWith(` — ${NH_TOKEN_ZH}`), `the zh <title> ends with " — ${NH_TOKEN_ZH}" (got ${JSON.stringify(tZh)})`);
+    assert.notEqual(tZh, tEn, "this page's OWN <title> is not byte-identical across the two languages");
+
+    // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it).
+    assert.equal(h1Of(en.body), `${NH_TOKEN} — 待人类决定`, "the en <h1> is the baseline");
+    assert.equal(h1Of(zh.body), `${NH_TOKEN_ZH} — 待人类决定`, "the zh <h1> is translated");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC-295 AC-en-baseline: the en response is the pre-AC-295 page verbatim", async () => {
+  const { ws, tasksDir } = makeWorkspace("nh-zh-en-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "NH-EN-BASE", { title: "en baseline fixture", status: "needs-human", body: needsHumanBody("en 基线夹具") });
+
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
+    const en = await get(port, "/needs-human");
+    assert.equal(en.status, 200, "GET /needs-human (en) returns 200");
+    const body = en.body.replace(/\n/g, " ");
+
+    // The pre-AC-295 literals, pinned. Each one is something this change COULD have moved — in
+    // particular the two substitutions that replaced a hard-coded literal with a lang-driven call.
+    assert.ok(body.includes('<html lang="en"><head>'),
+      'the en page still opens <html lang="en"><head> — htmlLangTag(DEFAULT_LANG) must be byte-identical to the literal it replaced');
+    assert.ok(headTitle(body).endsWith(` — ${NH_TOKEN}`), "the en <title> token is unchanged");
+    assert.equal(h1Of(body), `${NH_TOKEN} — 待人类决定`, "the en <h1> is unchanged");
+    assert.equal(currentItem(navRegion(body), "nav-"), NH_TOKEN, "the en desktop nav current item is unchanged");
+    assert.equal(currentItem(navRegion(body), "mobile-menu-"), NH_TOKEN, "the en mobile nav current item is unchanged");
+    assert.ok(!body.includes(NH_TOKEN_ZH), "the en page carries no zh label anywhere");
+    assert.ok(body.includes("当前待办") && body.includes("升级台账"),
+      "the en page still renders both data sections (the lang plumbing did not disturb them)");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }

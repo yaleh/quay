@@ -21,9 +21,9 @@
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
-//   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294) and /journal (AC-296);
-//   the remaining 8 pages' page-chrome is AC-295 and AC-297~303, and each adds its own tokens as
-//   it lands.
+//   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295)
+//   and /journal (AC-296); the remaining 7 pages' page-chrome is AC-297~303, and each adds its
+//   own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -176,6 +176,22 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // without it.
   "Journal — recent loop record": { en: "Journal — recent loop record", zh: "日志 — 循环最近记录" },
   Journal: { en: "Journal", zh: "日志" },
+  // AC-295 (/needs-human page): this page's own token — and, like AC-294's /manager row and unlike
+  // AC-291's / AC-292's / AC-293's / AC-296's two-entry pairs, ONE entry serves BOTH call sites.
+  // /needs-human's `<title>` is `pageTitle("Needs Human")` and its `<h1>` is `pageNameFor("Needs
+  // Human")` followed by the ` — 待人类决定` subtitle, so there is no separate short token to
+  // register. The key is the FULL string `pageTitle` receives — the internal SPACE included;
+  // registering the bare `Needs`, or the nav key `needs-human`, would MISS the lookup and leave the
+  // title English, which IS the `title-unchanged` arm of AC-295's criterion (that miss is the exact
+  // defect AC-295 exists to remove).
+  // Neither zh value may carry the ASCII literal "Needs Human": AC-295's second arm fails the page on
+  // that literal inside the nav region — where this page's CURRENT item label comes from NAV_LABELS's
+  // `needs-human` row (「待人工」, ROW 1) — and "待人工" satisfies "non-empty" without it. Note the nav
+  // label and this page name stay separate lookups: the nav resolves through `navLabel` (shared
+  // chrome, ROW 1) while this resolves through `pageNameFor` (this page's chrome, ROW 3). Both land
+  // on the same zh word here, but that is a coincidence of vocabulary, ⛔ not a shared source — a
+  // later re-wording of one must not be assumed to move the other.
+  "Needs Human": { en: "Needs Human", zh: "待人工" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
