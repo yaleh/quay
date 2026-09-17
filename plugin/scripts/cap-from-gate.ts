@@ -273,6 +273,67 @@ export function readBudgetFromGate(
   return { total_budget: total, in_use: inUse, available: avail };
 }
 
+/** ONE resource-gate.sh invocation answers ALL THREE readings the cap observation needs —
+ *  `cpu_stall(some avg10)`, `loadavg` (1-min) and the cross-layer budget totals. The gate already
+ *  shells out to process-budget.sh itself and prints its numbers on a
+ *  `total_budget=… budget_in_use=… budget_available=…` line, so there is nothing the three
+ *  separate readers below can obtain that this one call cannot.
+ *
+ *  ⛔ WHY THIS EXISTS (gap-ac281-develop-ci-test-job-wallclock-under-30s): `computeEffectiveCap`
+ *  used to reach these three readings by calling readCpuStallFromGate + readLoadAvgFromGate +
+ *  readBudgetFromGate, i.e. it spawned resource-gate.sh TWICE and process-budget.sh ONCE — asking
+ *  the same authority the same question three times inside a single call. Measured 2026-09-17 on an
+ *  idle 16-core dev box: readCpuStallFromGate 1518 ms / readLoadAvgFromGate 1774 ms /
+ *  readBudgetFromGate 1209 ms ⇒ computeEffectiveCap 4207 ms, i.e. essentially 100% subprocess
+ *  spawn. `plugin/test/cap-from-gate-stale.test.mjs` calls computeEffectiveCap 7 times (the
+ *  hysteresis samples are injected, so the calls are microseconds of logic), which is exactly why
+ *  that file measured 24.3 s of CI wall clock for ONE `test()` — the largest single-file floor in
+ *  the main phase after the two >30 s files. Spawn count is 3 → 1; the READINGS ARE UNCHANGED.
+ *
+ *  ⛔ NOT a cache. Every call still takes a FRESH reading — no memoization, no TTL, no shared
+ *  state. The only thing removed is asking one authority the same question repeatedly within one
+ *  call. A stale reading would be a worse defect than the cost this fixes.
+ *
+ *  Returns null when the gate script cannot be resolved (third-party project without
+ *  plugin/scripts/) or exits non-zero — the same fail-closed shape readCpuStallFromGate uses. */
+export interface GateReport {
+  cpu_stall: number | null;
+  load_avg: number | null;
+  budget: BudgetSnapshot | null;
+}
+
+export function readGateReport(repoRoot: string, env: NodeJS.ProcessEnv = process.env): GateReport | null {
+  const gate = resolveResourceGateScript(env);
+  if (!gate) return null;
+  const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
+  // report mode always exits 0 — a non-zero means the script itself is broken; fail closed.
+  if (res.status !== 0) return null;
+  const out = `${res.stdout}\n${res.stderr}`;
+  const stallM = out.match(/cpu_stall\(some avg10\)=([0-9.]+|UNMEASURABLE)/);
+  const stall = stallM && stallM[1] !== "UNMEASURABLE" ? Number(stallM[1]) : null;
+  const loadM = out.match(/loadavg=([0-9.]+|UNMEASURABLE)/);
+  const load = loadM && loadM[1] !== "UNMEASURABLE" ? Number(loadM[1]) : null;
+  // ⛔ Anchored on `budget_in_use=`/`budget_available=`, NOT bare `in_use=`/`available=`: the gate's
+  // line prefixes both, and process-budget.sh's own bare spellings are a DIFFERENT contract (this
+  // reader must never silently accept one for the other).
+  const num = (re: RegExp): number => {
+    const m = out.match(re);
+    const v = m ? Number(m[1]) : NaN;
+    return Number.isFinite(v) ? v : NaN;
+  };
+  const total = num(/total_budget=([0-9]+)/);
+  const inUse = num(/budget_in_use=([0-9]+)/);
+  const avail = num(/budget_available=([0-9]+)/);
+  return {
+    cpu_stall: stall !== null && Number.isFinite(stall) ? stall : null,
+    load_avg: load !== null && Number.isFinite(load) ? load : null,
+    budget:
+      Number.isFinite(total) && Number.isFinite(inUse) && Number.isFinite(avail)
+        ? { total_budget: total, in_use: inUse, available: avail }
+        : null,
+  };
+}
+
 /** Read the cpu `some avg10` signal from resource-gate.sh REPORT mode (single source — the gate
  *  owns the /proc/pressure/cpu read + its test seams). Returns null when UNMEASURABLE.
  *  NB: reads `some avg10`, NOT `some avg300` — the avg300 field is churn-dominated and structurally
@@ -342,8 +403,12 @@ export function computeEffectiveCap(opts: {
   const stateFile = opts.stateFile ?? path.join(repoRoot, ".quay", STATE_FILE_NAME);
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
   const now = opts.now ?? Date.now();
-  const cpuStall = readCpuStallFromGate(repoRoot, env);
-  const loadAvg = readLoadAvgFromGate(repoRoot, env);
+  // ONE gate invocation supplies all three readings (see readGateReport — spawn count 3 → 1).
+  // Fallback only when the gate script is unresolvable/unreadable: then the three readers below
+  // reproduce the pre-existing degraded path byte-for-byte (that path is not the hot path).
+  const report = readGateReport(repoRoot, env);
+  const cpuStall = report ? report.cpu_stall : readCpuStallFromGate(repoRoot, env);
+  const loadAvg = report ? report.load_avg : readLoadAvgFromGate(repoRoot, env);
   const desired = computeDesiredBand(cpuStall);
   const loaded = loadState(stateFile);
   const { band, consecutive, switched } = applyHysteresis(loaded, desired, samples, now);
@@ -358,7 +423,7 @@ export function computeEffectiveCap(opts: {
   // many node --test processes the whole repo may still start (process-budget.sh — the single
   // authority). RETIRED as a decision input (gap-fixed-cap-5-dynamic-cap-retired): the budget is read
   // ONLY for the observation line — a saturated host no longer drops the cap; effective_cap is fixed.
-  const budget = readBudgetFromGate(repoRoot, env);
+  const budget = report ? report.budget : readBudgetFromGate(repoRoot, env);
   // FIXED-CAP RETIREMENT (AC2, human ruling 2026-08-09): the cap is a constant 5, NOT
   // min(bandCap, available). The band/budget above are pure observation.
   // AC155: 单一真相源 —— 值经 driverCap 现读 drivers.yml（缺省 = 缺省配置 5）。

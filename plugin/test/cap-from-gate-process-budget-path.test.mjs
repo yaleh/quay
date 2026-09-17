@@ -14,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { readBudgetFromGate } from "../scripts/cap-from-gate.ts";
+import { readBudgetFromGate, computeEffectiveCap } from "../scripts/cap-from-gate.ts";
 
 /** 一个临时 plugin root：其 scripts 子目录下按 opts.withScript 决定放不放 process-budget.sh。 */
 function makePluginRoot(opts = {}) {
@@ -76,5 +76,71 @@ test("readBudgetFromGate — kernel 侧无 process-budget.sh ⇒ null（fail-ope
   } finally {
     fs.rmSync(pluginRoot, { recursive: true, force: true });
     fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+// ── gap-ac281-develop-ci-test-job-wallclock-under-30s ────────────────────────────────────────────
+// The spawn-count regression. computeEffectiveCap used to obtain its three readings by spawning
+// resource-gate.sh TWICE (readCpuStallFromGate + readLoadAvgFromGate) plus process-budget.sh ONCE —
+// three subprocess spawns, for three readings that the gate's OWN report already prints side by
+// side (resource-gate.sh shells out to process-budget.sh itself and prints
+// `total_budget=… budget_in_use=… budget_available=…`).
+//
+// This is not a micro-optimization: measured 2026-09-17, one computeEffectiveCap cost 4207 ms, of
+// which the subprocess spawns were essentially all of it, and
+// plugin/test/cap-from-gate-stale.test.mjs calls it 7 times — 24.3 s of CI wall clock for ONE
+// `test()`, the largest single-file floor in the main phase after the two >30 s files. After the
+// fix the same file measured 11.5 s and one computeEffectiveCap 539 ms.
+//
+// The counter file is what makes this 能取假: a fake plugin root whose resource-gate.sh APPENDS to
+// it on every run. On the pre-fix code this assertion reads 2, so it is exactly the regression the
+// change fixes — ⛔ not a test that would have passed before and after alike. The three readings are
+// asserted from the SAME invocation, and the fake root deliberately has NO process-budget.sh: if the
+// code ever fell back to reading the budget separately, budget_total would come back null and the
+// test fails rather than silently re-introducing the extra spawn.
+function makeCountingPluginRoot(countFile) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cap-gate-count-"));
+  const scripts = path.join(root, "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.writeFileSync(
+    path.join(scripts, "resource-gate.sh"),
+    [
+      "#!/bin/sh",
+      `echo x >> ${JSON.stringify(countFile)}`,
+      "echo 'cpu_stall(some avg10)=12.50  [limit 60]   ok'",
+      "echo 'loadavg=3.25             [limit nproc×2≈32] ok'",
+      "echo 'total_budget=40  budget_in_use=2  budget_available=38  [cross-layer budget authority: process-budget.sh]'",
+      "exit 0",
+    ].join("\n"),
+    "utf8",
+  );
+  return root;
+}
+
+test("computeEffectiveCap — ONE resource-gate.sh invocation supplies all three readings（spawn 3 → 1）", () => {
+  const countDir = fs.mkdtempSync(path.join(os.tmpdir(), "cap-gate-n-"));
+  const countFile = path.join(countDir, "invocations");
+  fs.writeFileSync(countFile, "", "utf8");
+  const pluginRoot = makeCountingPluginRoot(countFile);
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cap-onecall-"));
+  try {
+    const r = computeEffectiveCap({
+      repoRoot,
+      stateFile: path.join(repoRoot, "state.json"),
+      env: { ...process.env, QUAY_PLUGIN_ROOT: pluginRoot },
+      now: Date.now(),
+    });
+    const calls = fs.readFileSync(countFile, "utf8").trim().split("\n").filter(Boolean).length;
+    assert.equal(calls, 1, `resource-gate.sh must be invoked exactly ONCE per computeEffectiveCap; got ${calls}`);
+    // The single invocation must really be the SOURCE of all three readings.
+    assert.equal(r.cpu_stall, 12.5, "cpu_stall must come from the gate report");
+    assert.equal(r.load_avg, 3.25, "load_avg must come from the gate report");
+    assert.equal(r.budget_total, 40, "budget must come from the SAME gate report (⛔ not a second spawn)");
+    assert.equal(r.budget_in_use, 2);
+    assert.equal(r.budget_available, 38);
+  } finally {
+    fs.rmSync(pluginRoot, { recursive: true, force: true });
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(countDir, { recursive: true, force: true });
   }
 });

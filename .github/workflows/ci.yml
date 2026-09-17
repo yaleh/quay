@@ -164,7 +164,28 @@ jobs:
             exit 1
           fi
           echo "PASS: every suite runtime prerequisite is present"
-      - run: npm install
+      # gap-ac281-develop-ci-test-job-wallclock-under-30s (GOAL-022 scope item 3 ②): `npm install`
+      # measured 11 s of the test job on run 35225478541 (13:11:12Z→13:11:23Z, per-step timestamps
+      # from the gh jobs API — per-step wall clock is NOT derivable from the carrier), the 3rd
+      # largest step after `Run tests`. The runner container is EPHEMERAL (`--rm` + `EPHEMERAL=true`
+      # in gh-runner-quay.service, see .github/runner/Dockerfile), so it starts with an EMPTY ~/.npm
+      # on every job and re-downloads every tarball every time. Caching ~/.npm keyed on the
+      # lockfile's hash removes the download half of that; `--prefer-offline` lets npm use a cached
+      # tarball instead of revalidating it against the registry.
+      # ⛔ `continue-on-error: true` is deliberate: the cache is an OPTIMIZATION, and a cache-service
+      # outage must never turn a green suite red. `npm install` itself stays fail-closed, and its
+      # resolution is unchanged — the lockfile is still authoritative (no version is floated).
+      # ⛔ This does NOT remove the step: a runner whose image lacks a warm cache still installs
+      # everything. The durable form of this fix is the runner IMAGE (bake ~/.npm into
+      # quay-ci-runner), which needs a host-side rebuild on tokyo-alpha — out of a workflow's reach.
+      - name: Cache the npm tarball cache (gap-ac281-develop-ci-test-job-wallclock-under-30s)
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+      - run: npm install --prefer-offline --no-audit --no-fund
       - name: Test-coverage self-check (DIR-110/ADR-019 decision #4)
         # Early, cheap, fail-fast: catches the DIR-108 failure class (a real test file sitting on
         # `master`, invisible to scripts/test.sh's glob) BEFORE paying for the full suite below.
