@@ -5,6 +5,8 @@ status: draft
 kind: criterion
 goal: GOAL-022
 criterion: >-
+  bash <<'CRIT'
+
   set -euo pipefail
 
   SRC="plugin/scripts/checker-mutation-check.sh"
@@ -63,6 +65,8 @@ criterion: >-
   backgrounding it (backgrounded=${BACKGROUNDED},
   wait-found-within-40-lines=${HAS_WAIT}); the 80-case mutation-check loop is
   still single-threaded" >&2; exit 1
+
+  CRIT
 expect: criterion exits 0 once the run_one_case call site is backgrounded and
   reaped with a wait
 origin: GOAL-022 背景：checker-mutation-check.sh 的80个用例单独占静态检查阶段18秒，无backgrounding
