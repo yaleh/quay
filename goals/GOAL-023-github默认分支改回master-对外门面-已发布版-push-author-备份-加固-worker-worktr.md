@@ -2,9 +2,16 @@
 id: GOAL-023
 title: GitHub默认分支改回master（对外门面=已发布版）+ push author 备份 + 加固 worker worktree
   分叉不变量——反转 SPEC-release-and-hotfix-branching-2026-09-15 §3.2.1 的一次裁定
-status: draft
+status: active
 kind: goal
 origin: 人 2026-09-17 提议：本地开发继续以develop为主，但GitHub默认分支/marketplace对外展示应为master（已发布版）
+activatedAt: 2026-09-17T04:06:32.630Z
+statusLog:
+  - at: 2026-09-17T04:06:32.631Z
+    from: draft
+    to: active
+    actor: manager
+    reason: AC-283..287 五条已就位，退出条件已可判定，进入执行阶段
 ---
 ## 背景
 
