@@ -111,6 +111,9 @@ EXIT=2          ← 闸只关了 active 那一半
 - packages/quay/test/gap-frontmatter-slugify-drops-non-ascii.test.mjs
 - packages/quay/test/goal-born-draft-zero-ac-gate.test.mjs (new)
 - plugin/scripts/verify-deliver-coldstart.sh
+- plugin/scripts/meta-driver.ts
+- plugin/test/meta-driver.test.mjs
+- plugin/test/goal-invariants-standing.test.mjs
 - packages/quay/plugin/scripts/verify-deliver-coldstart.sh
 - orchestration/SPEC-goal-mechanism-2026-09-06.md
 - tasks/gap-goal-born-draft-zero-ac-escapes-standing-invariant.md（自身）
