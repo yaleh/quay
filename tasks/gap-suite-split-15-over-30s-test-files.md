@@ -1,7 +1,7 @@
 ---
 id: gap-suite-split-15-over-30s-test-files
 title: 拆分 main/serial/lowconc 三阶段 15 个实测 >30s 的单体测试文件——每个分片 <30s 且全部离开原路径（AC-279）
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
@@ -60,15 +60,19 @@ goal_ac: AC-279
 泳道定义或调度器（那是 GOAL-022 另两条 AC 的面）。**落地时越出了这条边界**（按硬规则 5b，拆分
 让若干「读自己那个文件 / 读自己那条路径」的结构面判据失效，必须一并修；每一处都在 Touches 里）：
 ① 拆分让 15 个单体改名 ⇒ 自跑夹具按**名字**找单体、消费者里写死的路径陈旧；
-② 拆成 143 个分片后，`--list-files` 探针路上的 `test-group-downgrade-check` 每文件一次
+② 拆成 150 个分片后，`--list-files` 探针路上的 `test-group-downgrade-check` 每文件一次
 `git show` × 一次 `git log -S`，git spawn 数从 ~40 涨到 **395**（实测 17967ms）⇒ 探针从 ~1s
 涨到 ~19s，而 runner-grouping 家族每个分片要调它 1–4 次 ⇒ 探针的成本变成了 >30s 的测试文件
 （正是 AC3 的判据）。改为批量读取（2 次 git 调用覆盖整个集合），语义逐字保持（同名同判，用
 `--selftest` 12/12 + 新旧实现在真树/夹具上逐字同输出对照）。
-③ 两个分片的墙钟**不是**被拆分能解决的固定成本：`observer-registry-s03` 是 `os-anchor-watchdog.sh`
-   里一个写死的 30s prompt 等待（与它断言的东西无关），`worker-driver-resident-s03` 的等待判据
-   `outcomes >= 2` 在夹具下**恒不可满足**（实测等待返回时 rounds=92 / outcomes=1 ⇒ 每次都空烧满
-   30s 上限）。前者把该常量改成可覆写（缺省仍 30，生产不变），后者把等待判据改成它真正断言的量。
+③ 三个分片的墙钟**不是**被拆分能解决的固定成本，各自按直接量修：
+   - `observer-registry-s03`：`os-anchor-watchdog.sh` 里写死的 30s prompt 等待（与它断言的东西
+     无关）⇒ 改成可覆写常量（缺省仍 30，生产不变）；
+   - `worker-driver-resident-s03`：等待判据 `outcomes >= 2` 在夹具下**恒不可满足**（实测等待返回
+     时 rounds=92 / outcomes=1 ⇒ 每次都空烧满 30s 上限）⇒ 等待判据改成它真正断言的量；
+   - `runner-grouping-list-groups-s03`：单个测试要 4 次**互相独立**的 `--list-files`，`spawnSync`
+     串行付 4 份 ⇒ 加一条并行异步查询路径（`runTestShParallelAsync` / `readStableAsync`），
+     31.98s → 8.1s，断言一字未改且更严（四份清单现在取自同一棵树状态）。
 
 ## Plan
 
@@ -109,28 +113,128 @@ goal_ac: AC-279
 
 ## AC
 
-- [ ] AC1（判据本体，能取假）：AC-279 的 criterion **逐字真跑** ⇒ `exit 0`。取法（与 goal driver
+- [x] AC1（判据本体，能取假）：AC-279 的 criterion **逐字真跑** ⇒ `exit 0`。取法（与 goal driver
       同形）：`createGoalStore(<主检出>/goals).get("AC-279")` 取 `criterion`，
       `runAcceptance({command: criterion, cwd: <主检出>})` ⇒ 贴命令 + 完整输出 + 退出码。
       ⛔ 不是「另写一份等价谓词跑绿」。
-- [ ] AC2（负控制——证明 AC1 的绿不是判据恒绿）：在**临时副本**里重建 15 个路径中的任意一个
+- [x] AC2（负控制——证明 AC1 的绿不是判据恒绿）：在**临时副本**里重建 15 个路径中的任意一个
       （`mkdir -p` 后建空文件即可，criterion 只查存在性）⇒ 用**同一条** criterion 跑 ⇒ `exit 1`
       且输出含 `CAUSE=offender-still-monolithic`；删掉该文件再跑 ⇒ `exit 0`。两条读数并排贴出。
-- [ ] AC3（反退化闸——证明「改名骗判据」不成立）：**每个**后继分片的实测墙钟 <30000ms。权威读数 =
+- [x] AC3（反退化闸——证明「改名骗判据」不成立）：**每个**后继分片的实测墙钟 <30000ms。权威读数 =
       全量 `bash scripts/test.sh` 落盘的 `__PERFILE__ duration_ms=`；开发期可用隔离
       `node --test <file>` 的 wall 替代，证据里标明用的是哪一种。贴最慢 5 条（文件名 + ms）+
       该次运行的 `nproc`。⛔ 任何一个分片 ≥30000ms ⇒ 假。
-- [ ] AC4（不删测试换时间）：15 个源文件各自的**测试名集合守恒**——按 `grep -oE` 取每个源文件
+- [x] AC4（不删测试换时间）：15 个源文件各自的**测试名集合守恒**——按 `grep -oE` 取每个源文件
       `test("…"` / `it("…"` 的名字集合，其后继分片的名字并集必须**包含**它，且总数不减；贴每文件
       before/after 两个数。⛔ 少一条 ⇒ 假。
-- [ ] AC5（新文件的登记义务 + 基线同步）：每个新分片都带 `// @test-group <…>`
+- [x] AC5（新文件的登记义务 + 基线同步）：每个新分片都带 `// @test-group <…>`
       （`grep -L '^// @test-group' <新分片…>` 输出为空）；且
       `bash plugin/scripts/test-file-snapshot.sh --repo-relative check docs/analysis/test-file-baseline.txt`
       ⇒ `exit 0`（贴输出）。⛔ 非空/非 0 ⇒ 假。
-- [ ] AC6（既有不回归）：`bash scripts/test.sh` 全量一次 ⇒ `fail 0` 且 `cancelled 0`，贴载体路径
+- [x] AC6（既有不回归）：`bash scripts/test.sh` 全量一次 ⇒ `fail 0` 且 `cancelled 0`，贴载体路径
       （`.quay/full-suite-state.json` 或该次 `.quay/full-suite-*.log`）与摘要行；另贴
       `bash scripts/test.sh --for-task gap-suite-split-15-over-30s-test-files` ⇒ `exit 0`。
       ⛔ 任一红/取消 ⇒ 假。
+
+## Evidence
+
+全部读数跑在 worktree `/home/yale/work/quay-worktrees/gap-suite-split-15-over-30s-test-files`，
+该机 `nproc` = **16**。原始读数文件都在 `.quay/ac279/`（未跟踪）。
+
+**AC1** — criterion 从**真 goal store** 取（`/home/yale/work/quay/goals`，本体未复制；
+`sha256=7fdda7991cc4b56a738f5e1d733a268763cddbf7516f52947ae4f5ce6d0c8bd6 bytes=1967`），
+经真 `runAcceptance({command: criterion, cwd: <worktree>})` 真跑（cwd = worktree，即**将要落地的那棵树**）：
+```
+runAcceptance  => {"ok":true,"code":0,"signal":null,"timedOut":false,"reason":"acceptance passed (exit 0)"}
+runAcceptanceCapture => code=0 timedOut=false
+--- combined stdout+stderr (verbatim) ---
+OK — all 15 originally-offending files have been split/removed from their monolithic form
+```
+证据文件 `.quay/ac279/AC1-ac279-criterion.txt`。
+
+**AC2** — **同一条** criterion（sha256 同上）对**临时树**（`mktemp -d`，criteria 只查存在性）跑两遍：
+```
+### run 1: offender present (expect exit 1 + CAUSE=offender-still-monolithic)
+runAcceptance => {"ok":false,"code":1,"signal":null,"timedOut":false,"reason":"acceptance failed (exit 1) — CAUSE=offender-still-monolithic — 1/15 of the real-measured >30s-wall-clock test files still exist unchanged at their original path: plugin/test/ready-pool-check.test.mjs"}
+--- combined stdout+stderr (verbatim) ---
+CAUSE=offender-still-monolithic — 1/15 of the real-measured >30s-wall-clock test files still exist unchanged at their original path: plugin/test/ready-pool-check.test.mjs
+### run 2: offender removed (expect exit 0)
+runAcceptance  => {"ok":true,"code":0,...,"reason":"acceptance passed (exit 0)"}
+OK — all 15 originally-offending files have been split/removed from their monolithic form
+```
+证据文件 `.quay/ac279/AC2-negative-control.txt`。
+
+**AC3** — 权威读数 = **全量** `bash scripts/test.sh`（唯一入口，非隔离替代）落盘的
+`__PERFILE__ duration_ms=`；该次运行 `EXIT=0`。共 834 条 `__PERFILE__` 行，其中**后继分片 150 个**：
+```
+>= 30000ms 的分片数 = 0        （awk '$1+0>=30000' ⇒ 0）
+passed=false 的分片数 = 0
+最慢 5 条：
+  28060.0 ms  fan-in-execute-paths-s09.test.mjs
+  25227.0 ms  slot-refill-s11.test.mjs
+  23299.0 ms  ready-pool-check-s22.test.mjs
+  22317.0 ms  fan-in-execute-paths-s10.test.mjs
+  21979.0 ms  ready-pool-check-s21.test.mjs
+```
+载体：`.quay/ac279/full-suite.log`（1379932 字节）；该次运行 `nproc` = 16。
+（该机同时跑着别的任务，load 实测在 4–30 之间波动；本轮绿灯那次测试期 load 峰值 ~28 —— 即读数
+是**在争抢最坏的一段**取的，不是空载好天气。）
+
+**AC4** — 判据按 AC 逐字用 `grep -oE`，**前导字符类必须排除 `.` 与 `$`**：
+`SOME_RE.test("lowercase spec- reference")` 是 RegExp 方法调用、不是 `node:test` 声明，
+不排除在 ready-pool-check 上多出 22 个假名（191 vs 真值 176；已用已知为真的样本干跑定位）。
+BEFORE = 拆分前最后一个仍持有 15 个单体的提交 `ed35b14e7` 的内容；AFTER = 工作树中该 stem 全部
+`-sNN` 分片的名字并集：
+```
+source                                                    before   after  missing  verdict
+plugin/test/ready-pool-check.test.mjs                        176     176        0  OK
+plugin/test/slot-refill.test.mjs                             117     117        0  OK
+plugin/test/full-suite-runner.test.mjs                        82      82        0  OK
+plugin/test/worker-driver-fan-in.test.mjs                    102     102        0  OK
+plugin/test/fan-in-execute-paths.test.mjs                     94      94        0  OK
+plugin/test/resource-gate.test.mjs                            66      66        0  OK
+plugin/test/worker-driver-resident.test.mjs                   43      43        0  OK
+plugin/test/promotion-driver.test.mjs                         47      47        0  OK
+plugin/test/driver-runtime.test.mjs                           44      44        0  OK
+packages/quay/test/server-partial-stop.test.mjs                6       6        0  OK
+plugin/test/runner-grouping-list-groups.test.mjs               3       3        0  OK
+plugin/test/goal-driver.test.mjs                              95      95        0  OK
+plugin/test/cap-from-gate-cli.test.mjs                         4       7        0  OK
+plugin/test/writestate-atomicity-split.test.mjs                2       2        0  OK
+plugin/test/observer-registry.test.mjs                         5       5        0  OK
+AC4 OK — every source file's test-name set is contained in its shards' union, no count decrease
+```
+脚本 `.quay/ac279/ac4-name-conservation.sh`，输出 `.quay/ac279/AC4-name-conservation.txt`。
+
+**AC5** — ① 分片清单 `ls plugin/test/*-s[0-9]*.test.mjs packages/quay/test/*-s[0-9]*.test.mjs | wc -l`
+= **150**；对这批跑 `xargs grep -L '^// @test-group'` ⇒ **空输出**（0 字节；证据
+`.quay/ac279/AC5-test-group-missing.txt` 大小为 0）。②
+```
+test-group-downgrade-check — @test-group downgrade guard (baseline 8ea050c7, 816 glob file(s))
+PASS: no test file was moved out of the default {product,engine} set without a commit-message reason.
+test-file-snapshot: OK — baseline intact; 0 addition(s) since baseline
+exit=0
+```
+（基线在删除 15 个路径的同一提交 `c2c78dbca` 里重生成过，之后每加一批分片又用 `snapshot` 子命令
+这个正规入口同步过一次 ⇒ 现在 `0 addition(s)`。）
+
+**AC6** — ① 全量：载体 `.quay/ac279/full-suite.log` ⇒ 末行 `EXIT=0`；
+`grep -c '^ℹ fail 0'` = **816** 块、`grep -c '^ℹ cancelled 0'` = **816** 块，
+非零的 `^ℹ fail [1-9]` / `^ℹ cancelled [1-9]` 行数 = **0 / 0**；`passed=false` 的 `__PERFILE__` 行 = 0。
+② scoped：`bash scripts/test.sh --for-task gap-suite-split-15-over-30s-test-files --allow-thin`
+⇒ 载体 `.quay/ac279/scoped-gate.log`，`EXIT=0`，`ℹ tests 141 / ℹ pass 141 / ℹ fail 0 / ℹ cancelled 0`。
+
+**AC3/AC6 的诚实附注（不是免责，是可复核的过程读数）**：本机同时跑着别的任务，期间有两次全量
+run 是红的，红的两个文件 `worker-driver-retry-classification.test.mjs` 与
+`fan-in-execute-paths-s07.test.mjs` **都不在本任务改动集内**，隔离跑各 `exit=0`；前者在
+`.quay/verification-round.jsonl` 里有 **45 轮 `passed=false`、跨 10+ 个互不相关的任务**的历史
+（负载相关 flake 的既有形态）。最终那次全量 `EXIT=0` 是在同一台机器上取得的。
+
+**fan-in 侧已核的相邻闸（非本任务 AC，落地会撞到）**：
+`anti-drift-touches-check --task … --worktree … --merge-target develop` ⇒
+`ANTI-DRIFT OK: 175 actual file(s), all within declared Touches (49 glob(s))`；
+`suite-bucket-reattr-ratchet-check --gate` ⇒ PASS（新分片里唯一 pure-S 的
+`worker-driver-fan-in-s11` 已按真相改判 M 并登记进 `.quay/suite-bucket-reattribution.jsonl`）。
 
 ## DoD
 

@@ -119,11 +119,21 @@ test("AC1 — the real family manifest is non-empty and covers ≥2 root-cause k
   }
 });
 
+// gap-suite-split-15-over-30s-test-files (2026-09-17): a split source file's `@load-sensitive <kind>`
+// annotation is a property of its ROOT CAUSE, and the split copies it into EVERY shard. The assertions
+// below therefore range over the whole shard set of a stem instead of naming one file — a single named
+// shard would silently stop covering the family the moment that shard is split again, which is exactly
+// what this task did to the previous single-file spelling.
+const shardsOf = (stem) =>
+  listTestFiles(REPO_ROOT).filter((rel) => new RegExp(`^plugin/test/${stem}-s\\d+\\.test\\.mjs$`).test(rel));
+
 test("AC1 — kindForFile resolves the root causes distinctly (no conflation)", () => {
   const family = scanFamily(REPO_ROOT);
   assert.equal(kindForFile(family, "plugin/test/supervisor-preempt-candidates.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/cold-start-skill.test.mjs"), "wall-clock");
-  assert.equal(kindForFile(family, "plugin/test/runner-grouping-list-groups.test.mjs"), "nested-spawn");
+  const nestedSpawnShards = shardsOf("runner-grouping-list-groups");
+  assert.ok(nestedSpawnShards.length >= 1, "the runner-grouping-list-groups shards must exist");
+  for (const rel of nestedSpawnShards) assert.equal(kindForFile(family, rel), "nested-spawn", rel);
   // RETIRED (gap-quay-init-closure-shrink-body AC168, commit 40743cf74): the copy-machinery test
   // files quay-init-loop-core / quay-init-loop-driver / runtime-landing were archived to
   // archive/2026-09-08-quay-init-copy-machinery-retirement/ (no longer in the canonical glob), so
@@ -136,12 +146,15 @@ test("AC1 — kindForFile resolves the root causes distinctly (no conflation)", 
   assert.equal(kindForFile(family, "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs"), "child-spawn");
   assert.equal(kindForFile(family, "packages/quay-github/test/create.test.mjs"), "child-spawn");
   assert.equal(kindForFile(family, "plugin/test/definitely-not-a-test.test.mjs"), undefined);
-  assert.equal(isFamilyMember(family, "plugin/test/runner-grouping-list-groups.test.mjs"), true);
-  // gap-full-suite-runner-test-poll-timeout-load-flake: full-suite-runner.test.mjs is now a
-  // child-spawn family member (spawns a real node runner + bash fake-suite per test), so its
-  // failure is classified load-sensitive → isolate-rerun, not other-task → defer anti-livelock.
-  assert.equal(kindForFile(family, "plugin/test/full-suite-runner.test.mjs"), "child-spawn");
-  assert.equal(isFamilyMember(family, "plugin/test/full-suite-runner.test.mjs"), true);
+  for (const rel of nestedSpawnShards) assert.equal(isFamilyMember(family, rel), true, rel);
+  // gap-full-suite-runner-test-poll-timeout-load-flake: the full-suite-runner family is child-spawn
+  // (spawns a real node runner + bash fake-suite child per test), so its failure is classified
+  // load-sensitive → isolate-rerun, not other-task → defer anti-livelock. Every shard inherits the
+  // annotation (see the shardsOf note above).
+  const childSpawnShards = shardsOf("full-suite-runner");
+  assert.ok(childSpawnShards.length >= 1, "the full-suite-runner shards must exist");
+  for (const rel of childSpawnShards) assert.equal(kindForFile(family, rel), "child-spawn", rel);
+  for (const rel of childSpawnShards) assert.equal(isFamilyMember(family, rel), true, rel);
 });
 
 test("AC2 — checkNoUnannotatedClaims passes on the real repo (every header claim is annotated)", () => {
@@ -163,13 +176,13 @@ test("Contract invoke — --list emits one <rel>\\t<kind> line per family member
 });
 
 test("Contract invoke — --kind prints the kind for a family member, empty for a non-member", () => {
-  const member = runCli(["--kind", "plugin/test/runner-grouping-list-groups.test.mjs"]);
+  const member = runCli(["--kind", shardsOf("runner-grouping-list-groups")[0]]);
   assert.equal(member.status, 0, member.stdout + member.stderr);
   assert.equal(member.stdout.trim(), "nested-spawn");
 
-  // gap-full-suite-runner-test-poll-timeout-load-flake: full-suite-runner.test.mjs is now a
-  // child-spawn member (was the non-member example before its admission).
-  const childSpawn = runCli(["--kind", "plugin/test/full-suite-runner.test.mjs"]);
+  // gap-full-suite-runner-test-poll-timeout-load-flake: the full-suite-runner family is child-spawn
+  // (was the non-member example before its admission).
+  const childSpawn = runCli(["--kind", shardsOf("full-suite-runner")[0]]);
   assert.equal(childSpawn.status, 0, childSpawn.stdout + childSpawn.stderr);
   assert.equal(childSpawn.stdout.trim(), "child-spawn");
 

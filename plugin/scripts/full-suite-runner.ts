@@ -673,7 +673,12 @@ export function extractNotEvaluatedChecker(line: string): NotEvaluatedChecker | 
 // manifest: it must be extended whenever a NEW test file starts reading the shared suite-state and
 // asserting on its in-flight shape.
 const STATE_ASSERTING_TEST_FILES = new Set([
-  "plugin/test/full-suite-runner.test.mjs",
+  // gap-suite-split-15-over-30s-test-files (2026-09-17): the monolith was split into `<stem>-sNN`
+  // shards; the in-flight-state assertion (AC1 — `state ∈ {running, red}` with finishedAt null while
+  // the round runs) now lives in `full-suite-runner-s02.test.mjs`. The set is a manifest of the test
+  // FILES that read the shared state, so the entry must name the shard that actually holds the test —
+  // naming the removed monolith would silently retire the cascade classification for this family.
+  "plugin/test/full-suite-runner-s02.test.mjs",
   "plugin/test/laydown-set-check.test.mjs",
 ]);
 

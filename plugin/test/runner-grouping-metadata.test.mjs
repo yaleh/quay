@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, symlinkSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync, realpathSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,8 +117,18 @@ test("binary file (NUL in first 32 KiB) is classified engine even with a @test-g
 // binary 检测把它恒分类为 engine——只改泳道声明不够，须同时把 NUL 换成 \x00 转义（运行时字符串
 // 不变），否则本断言恒红。本断言同时钉住这一点。
 
+// gap-suite-split-15-over-30s-test-files (2026-09-17): worker-driver-resident was split into
+// `<stem>-sNN` shards; the lane declaration is copied into every shard, so the whole shard set is
+// asserted rather than the one path that no longer exists (a hardcoded old path made `realpathSync`
+// throw ENOENT — a red that says nothing about routing).
+const RESIDENT_SHARDS = readdirSync(join(repoRoot, "plugin", "test"))
+  .filter((f) => /^worker-driver-resident-s\d+\.test\.mjs$/.test(f))
+  .sort()
+  .map((f) => `plugin/test/${f}`);
+assert.ok(RESIDENT_SHARDS.length >= 1, "worker-driver-resident shards must exist");
+
 const LOAD_SENSITIVE_FILES = [
-  "plugin/test/worker-driver-resident.test.mjs",
+  ...RESIDENT_SHARDS,
   "packages/quay/test/observation.test.mjs",
   "packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs",
 ];

@@ -1,0 +1,128 @@
+// Shared harness for the writestate-atomicity-split shards (split of writestate-atomicity-split.test.mjs by
+// gap-suite-split-15-over-30s-test-files). ONE copy of every depth-0 helper — the shards import the
+// names they use; ⛔ no shard re-declares a fixture.
+//
+// SRC_URL re-establishes the ORIGINAL directory so the moved code's own
+// __dirname / import.meta.url-relative paths keep resolving from helpers/.
+const SRC_URL = new URL("../writestate-atomicity-split.test.mjs", import.meta.url).href;
+
+// @test-group engine
+// writestate-atomicity-split.test.mjs — the negative-control test for the atomic state write
+// (tasks/gap-writestate-atomicity-split).
+//
+// AC2: for one of the three pre-migration non-atomic writers, construct a CONCURRENT read that
+// pre-migration could observe a torn (half-written) state file and post-migration cannot — the
+// tmp+rename atomicity guarantee. The two writers exercised here are the exact two shapes the task
+// split: an in-place same-fd write of a large JSON value (the pre-migration non-atomic shape)
+// vs `writeJsonAtomic` (tmp + renameSync, the post-migration shape).
+//
+// Two tests:
+//   1. atomic — a concurrent reader never observes a torn file while writeJsonAtomic repeatedly
+//      overwrites a large state file. rename(2) atomicity makes this a HARD guarantee (not a
+//      timing bet); it goes RED if writeJsonAtomic regresses to an in-place write.
+//   2. negative control — the SAME reader DOES observe a torn file against an in-place
+//      same-fd write, proving the reader can bite (the pre-migration premise). Without this,
+//      test 1's zero-torn assertion would be vacuous (it could pass only because the reader cannot
+//      detect tearing at all).
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { writeJsonAtomic } from "../../scripts/write-json-atomic.ts";
+
+const __dirname = path.dirname(fileURLToPath(SRC_URL));
+
+const MOD = path.resolve(__dirname, "..", "scripts", "write-json-atomic.ts");
+
+// Child writer: overwrites `file` in a tight loop for `durationMs` with a large, alternating value.
+// mode "atomic" uses writeJsonAtomic (tmp + rename); mode "nonatomic" uses an in-place same-fd
+// write (the pre-migration shape). The non-atomic branch truncates the file, then writes the JSON
+// in small chunks over the same fd, so a concurrent reader observes a partial JSON prefix (a torn
+// state) for a wide window — unlike a single fs.writeFileSync, whose only torn window is the narrow
+// truncate→write gap that a fast machine can hide (the source of this negative control's flakiness).
+// The two alternating payloads are serialized ONCE up front: JSON.stringify of a multi-MB value is
+// the loop's dominant cost, and doing it inline (as the pre-fix writer did) widens the COMPLETE-file
+// gap between torn windows — under load the reader then lands mostly on a fully-written file and
+// misses every tear. Precomputing keeps the chunked same-fd write (the torn window) the dominant
+// phase, so a concurrent reader that is merely scheduled during the write window is almost certain
+// to bite.
+const WRITER = `
+import fs from "node:fs";
+import { writeJsonAtomic } from ${JSON.stringify(MOD)};
+const [file, mode, size, durationMs] = process.argv.slice(2);
+const payload = "y".repeat(Number(size));
+const end = Date.now() + Number(durationMs);
+const bufB = Buffer.from(JSON.stringify({ marker: "B", payload, n: 1 }) + "\\n", "utf8");
+const bufC = Buffer.from(JSON.stringify({ marker: "C", payload, n: 2 }) + "\\n", "utf8");
+let i = 0;
+while (Date.now() < end) {
+  if (mode === "atomic") {
+    writeJsonAtomic(file, { marker: i % 2 ? "B" : "C", payload, n: i });
+  } else {
+    const buf = i % 2 ? bufB : bufC;
+    const fd = fs.openSync(file, "w");
+    const CHUNK = 64 * 1024;
+    for (let off = 0; off < buf.length; off += CHUNK) {
+      fs.writeSync(fd, buf, off, Math.min(CHUNK, buf.length - off), off);
+    }
+    fs.closeSync(fd);
+  }
+  i++;
+}
+`;
+
+async function runConcurrentRead(mode) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wjsa-"));
+  const file = path.join(dir, "state.json");
+  writeJsonAtomic(file, { marker: "A", payload: "init", n: -1 });
+  const writerPath = path.join(dir, "writer.mjs");
+  fs.writeFileSync(writerPath, WRITER, "utf8");
+
+  const size = 4 * 1024 * 1024; // 4MB — large enough that an in-place write is observably torn
+  // The write window is deliberately LONG (10s — 10× the old 1s) and the reader overlaps it
+  // end-to-end. The old 1s window plus a 20s stable tail meant a reader descheduled during that
+  // single short window (full-suite load ~45) caught zero tears and the negative control flipped
+  // (gap-writestate-torn-read-assertion-load-sensitive-flaky). A 10s window with no stable tail
+  // removes the single-race dependency: the reader is almost certain to be scheduled during some
+  // torn write.
+  const durationMs = 10000;
+  const readGraceMs = 5000; // reader tail past the writer's window — covers child startup latency under load
+  const child = spawn(
+    process.execPath,
+    ["--experimental-strip-types", writerPath, file, mode, String(size), String(durationMs)],
+    { stdio: "ignore" }
+  );
+
+  const readEnd = Date.now() + durationMs + readGraceMs;
+  let reads = 0;
+  let torn = 0;
+  const seen = new Set();
+  while (Date.now() < readEnd) {
+    let raw;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      continue; // transient: only reachable if the target is momentarily absent (rename race)
+    }
+    try {
+      const v = JSON.parse(raw);
+      seen.add(v.marker);
+      reads += 1;
+    } catch {
+      torn += 1;
+    }
+  }
+
+  const code = await new Promise((resolve) => {
+    if (child.exitCode !== null) resolve(child.exitCode);
+    else child.once("exit", (c) => resolve(c));
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { reads, torn, seen, code };
+}
+
+export { MOD, WRITER, __dirname, assert, fileURLToPath, fs, os, path, runConcurrentRead, spawn, test, writeJsonAtomic };

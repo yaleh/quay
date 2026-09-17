@@ -135,6 +135,15 @@ pane_has_claude() {
   return 0
 }
 
+# PROMPT_WAIT_S — how long launch_in_window waits for the relaunched TUI's prompt. A DEFAULT, not a
+# law: the number only has to exceed the real cold-start latency of a claude TUI on the slowest host
+# we run on, and 硬规则4推论二's rule applies — a bare literal that "happens to fit this host"
+# silently becomes a hard constraint everywhere else. Overridable so a caller that is exercising a
+# DIFFERENT path (a test asserting the stale-detection verdict, not launch timing) is not forced to
+# spend 30 wall-clock seconds inside a timer it is not testing. Production callers set nothing and
+# get 30, unchanged.
+PROMPT_WAIT_S="${QUAY_WATCHDOG_PROMPT_WAIT_S:-30}"
+
 # wait_for_prompt <target> <timeout_s> — poll capture-pane for the Claude Code prompt
 # glyph (❯). Works for a real claude TUI AND for the AC2 fixture TUI (which renders
 # the same glyph). Exit 0 when the prompt appears, 1 on timeout.
@@ -231,11 +240,11 @@ launch_in_window() {
   "${_os_tmux[@]}" send-keys -t "$target" C-c 2>/dev/null || true
   sleep 0.5
   "${_os_tmux[@]}" send-keys -t "$target" "cd $root && $launch" Enter 2>/dev/null || true
-  if wait_for_prompt "$target" 30; then
+  if wait_for_prompt "$target" "$PROMPT_WAIT_S"; then
     log "$name: relaunch/launch OK — $target prompt up (re-spawned)"
     return 0
   fi
-  log "$name: WARN launch did not show a prompt in 30s on $target"
+  log "$name: WARN launch did not show a prompt in ${PROMPT_WAIT_S}s on $target"
   return 1
 }
 

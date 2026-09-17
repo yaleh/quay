@@ -96,6 +96,21 @@ tarball survives only as something you build yourself from a source checkout
 
 ### Option A — as a Claude Code plugin (recommended)
 
+**Prerequisite: `yaleh/quay` is a private repository.** Both commands below fetch the
+plugin over HTTPS, so `git` must already be able to authenticate to GitHub without
+prompting. `gh auth login` on its own is **not** enough — it stores an OAuth token for
+the `gh` CLI, but it does **not** register a git credential helper, so the clone aborts
+with `fatal: could not read Username for 'https://github.com': terminal prompts disabled`.
+Register `gh` as git's HTTPS credential helper first:
+
+```sh
+gh auth login        # skip if you are already logged in
+gh auth setup-git    # registers `gh auth git-credential` as a git credential helper
+```
+
+With that in place the two commands below work as written: Claude Code notices that SSH
+is not configured on the machine and falls back to cloning over HTTPS on its own.
+
 ```
 /plugin marketplace add yaleh/quay
 /plugin install quay
@@ -118,6 +133,9 @@ PATH — or, if the plugin channel is unavailable to you, build the npm tarball
 yourself (Option C below).
 
 ### Option B — from source (for development or the latest unreleased changes)
+
+The same private-repository prerequisite applies here — if `git clone` stops at a
+username prompt, do the `gh auth setup-git` step under Option A first.
 
 ```sh
 git clone https://github.com/yaleh/quay.git
@@ -402,6 +420,35 @@ installed package:
 ```sh
 quay-native init --dry-run
 ```
+
+### The branches `quay init` establishes — and why you should not work on `develop`
+
+`quay init` (and the `/quay:init` skill) does more than write `.quay/config.yml`: it
+establishes quay's **branch model** in your repository. Alongside your project's own
+default branch — which quay never renames, moves or duplicates — you get:
+
+- **`develop`** — quay's *landing baseline*. Task worktrees are forked from it, and every
+  finished task is merged back into it. Treat it as automation-owned.
+- **a doc-only work branch** — named `author` by default (`--doc-branch-name <name>`, or
+  `loop.doc_branch` in `.quay/config.yml`, overrides it). `quay init` creates this branch
+  and **switches your main checkout onto it**. That is deliberate, not a quirk: it is the
+  one place you can edit that is *not* the line the automation lands on.
+
+**Do not move your main checkout back to `develop` for day-to-day work.** `develop` is the
+fork point for task worktrees and the fast-forward target of every task's fan-in — the merge
+that lands a finished task. If you edit and commit on `develop` directly (the normal habit on
+a single-branch project), your commits accumulate on the branch the fan-in expects to be
+clean and strictly ahead of its worktrees, and the next task's `--ff-only` merge is refused
+as a non-fast-forward. One blocked merge stalls the whole automated pipeline until the branch
+is reconciled by hand, and the failure looks like a task problem rather than a branch-hygiene
+problem. The doc branch exists exactly so this cannot happen: your edits accumulate where the
+fan-in topology does not depend on them, and quay propagates them to `develop` for you.
+
+You do not have to manage either branch by hand. But if a sync does go wrong, the mechanism —
+which direction each branch propagates, and how a divergence is reconciled — is specified in
+this repository's [`CLAUDE.md`](CLAUDE.md), section **"分支同步（author ↔ develop）"**. Read
+that before diagnosing; this README deliberately carries only the "why" a user needs to avoid
+causing a divergence in the first place.
 
 ## Enablement flow: in-session skills (the methodology, not just the task board)
 

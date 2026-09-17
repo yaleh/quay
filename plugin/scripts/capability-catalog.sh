@@ -1915,7 +1915,7 @@ declare -A CONSUMER=(
   [direct-to-develop-bypass-check.ts]="谁按：run_static_checks 每轮自动按（code-class gate）；条件=要判定 develop 是否有直接提交绕过三道闸（ff-lock/anti-drift/AC 完成闸）且不进差集"
   [test-group-downgrade-check.ts]="谁按：run_static_checks 每轮自动按 + check_group_declarations 前置/元数据模式按（code-class gate）；条件=要判定是否有测试被合法改标移出默认集（product/engine→serial/lowconc）而无 commit message 理由"
   [drivable-workspace-check.ts]="谁按：同上（canonical fail-closed 判定面）；条件=workspace 可驱动性判定"
-  [eligible-no-goal-source-check.ts]="谁按：套件每轮经 plugin/test/ready-pool-check.test.mjs 按（双向负控制：真仓库必须绿 ∧ 注入 goal 来源夹具必须红 ∧ 读不懂给 NOT-EVALUATED），也可直接 node --experimental-strip-types plugin/scripts/eligible-no-goal-source-check.ts 按；条件=要判定晋升准入集合是否混入了 goal 层来源的量（防僵尸任务回归，人 2026-09-11 裁定）"
+  [eligible-no-goal-source-check.ts]="谁按：套件每轮经 plugin/test/ready-pool-check-s09.test.mjs 按（双向负控制：真仓库必须绿 ∧ 注入 goal 来源夹具必须红 ∧ 读不懂给 NOT-EVALUATED），也可直接 node --experimental-strip-types plugin/scripts/eligible-no-goal-source-check.ts 按；条件=要判定晋升准入集合是否混入了 goal 层来源的量（防僵尸任务回归，人 2026-09-11 裁定）"
   [external-dogfooding-check.ts]="谁按：external-dogfooding 例程调度器按；条件=外部 dogfooding 契约要判定"
   [fan-in-runid-check.ts]="谁按：fan-in merge 复核者在核验 merge commit 时按；条件=要判定 commit 是否带 runId 遥测"
   [fan-in-ts-typecheck-gate.ts]="谁按：派发器在任务 Touches 含新增/移动 .ts 时按；条件=新 .ts 要过 ts-typecheck"

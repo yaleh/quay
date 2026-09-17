@@ -115,7 +115,6 @@ packages/quay-native/test/yaml-frontmatter-colon.test.mjs:fixed-path-write
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:process-exit-1
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
 plugin/test/runner-grouping-flags-only.test.mjs:spawns-test-sh
-plugin/test/runner-grouping-list-groups.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-serial-anti-stomp.test.mjs:spawns-test-sh
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
 plugin/test/test-coverage-check.test.mjs:spawns-test-sh

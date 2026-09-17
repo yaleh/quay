@@ -55,7 +55,8 @@
 //
 // ── Not wired into scripts/test.sh ─────────────────────────────────────────────────────────────────
 //   The bidirectional control (real repo green ∧ injected fixture red) runs from
-//   plugin/test/ready-pool-check.test.mjs, the basename-pair test file of the object it judges.
+//   plugin/test/ready-pool-check-s09.test.mjs, the basename-pair test file of the object it judges
+//   (split from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files, 2026-09-17).
 //
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/eligible-no-goal-source-check.ts

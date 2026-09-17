@@ -18,7 +18,7 @@
 // mechanism's reference-closure judgment). A group mismatch (wrong count, or any file attributed to
 // the wrong bucket) fails the test:
 //   (a) 8 `packages/quay/test/*` files that touch `plugin/scripts`  → cross-bucket P AND M
-//   (b) 21 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P)
+//   (b) 20 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P)
 //   (c) statically-unlocatable `plugin/test/*` files                   → UNRESOLVED
 //
 // Note on (c): the phase-goal baseline names "11 不可定位" as a COUNT, not a list. The strict
@@ -65,7 +65,17 @@ const GROUP_A = [
   "serve.test.mjs",
 ];
 
-// (b) 19 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
+// (b) 20 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
+// gap-suite-split-15-over-30s-test-files (2026-09-17): three entries here were split into `<stem>-sNN`
+// shards. The list names the SHARD(s) that still carry the cross-bucket reference, because the bucket is
+// a property of a file's own text — the other shards of the same stem legitimately carry no P (they
+// hold the tests that never touch packages/), and naming a shard without P would assert a falsehood.
+// The shard that carries P is NOT predictable from the stem, so it is MEASURED, not guessed:
+//   node --experimental-strip-types -e 'import {bucketSetOf} from "./plugin/scripts/suite-bucket-attribution.ts"; …'
+// over every `<stem>-s*` (the same `bucketSetOf` this test asserts with).
+// 2026-09-17 re-measurement: fan-in-execute-paths → s01+s04; resource-gate → s05; slot-refill → s16.
+// (The first cut of this list named s03/s03/s10, which the mechanism denies — the file was split after
+// that guess was made, so the entries went stale and AC2(b) failed. Re-measured, not re-guessed.)
 const GROUP_B = [
   "branch-model.test.mjs",
   "build-evidence-manifest.test.mjs",
@@ -73,14 +83,15 @@ const GROUP_B = [
   "codex-stage1-adapter.test.mjs",
   "direct-to-develop-bypass-check.test.mjs",
   "execute-suite-fix-scope-gate.test.mjs",
-  "fan-in-execute-paths.test.mjs",
+  "fan-in-execute-paths-s01.test.mjs",
+  "fan-in-execute-paths-s04.test.mjs",
   "fan-in-ts-typecheck-gate.test.mjs",
   "prepare-admission-check.test.mjs",
   "provision-verify-worktree.test.mjs",
-  "resource-gate.test.mjs",
+  "resource-gate-s05.test.mjs",
   "retreat-ac-uncheck.test.mjs",
   "select-tests-for-touches.test.mjs",
-  "slot-refill.test.mjs",
+  "slot-refill-s16.test.mjs",
   "task-contract-check.test.mjs",
   "task-status-drift-check.test.mjs",
   "test-isolation-check.test.mjs",
@@ -123,8 +134,8 @@ test("AC2(a): the 8 packages/quay/test files touching plugin/scripts are cross-b
 
 // ── AC2(b) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(b): the 19 plugin/test files touching packages src are cross-bucket (contain P)", () => {
-  assert.equal(GROUP_B.length, 19, "group (b) must be exactly 19 files");
+test("AC2(b): the 20 plugin/test files touching packages src are cross-bucket (contain P)", () => {
+  assert.equal(GROUP_B.length, 20, "group (b) must be exactly 20 files (3 monoliths → 4 P-carrying shards, 2026-09-17)");
   for (const f of GROUP_B) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);

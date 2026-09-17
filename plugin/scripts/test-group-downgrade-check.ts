@@ -102,54 +102,113 @@ function gitFilesAtRev(root: string, rev: string, files: string[]): Set<string> 
   return new Set(r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
 }
 
-/** The subset of `files` whose DECLARED group at `rev` is a target (serial|lowconc). The git grep is
- *  a pre-filter (any occurrence of a target token — ONE command over the whole set); each candidate is
- *  then VERIFIED via `groupAt` (the first `@test-group` occurrence — the same semantics as
- *  `groupOfSource`). The grep alone over-matches: an origin-declared file whose BODY writes an
- *  "@test-group serial" fixture literal (gap-suite-classification-lpt-scheduler-ts-ization's
- *  suite-scheduler.test.mjs) was falsely judged a downgrade ("engine → engine") because its DECLARED
- *  group is engine, not a target. */
-function gitTargetFiles(root: string, rev: string, files: string[]): Set<string> {
-  if (files.length === 0) return new Set();
-  const r = git(root, ["grep", "-l", "-E", "@test-group[[:space:]]+(serial|lowconc)", rev, "--", ...files], true);
-  if (r.status !== 0) return new Set(); // exit 1 = no matches → empty set
-  const candidates = new Set<string>();
-  for (const line of r.stdout.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t) continue;
-    // `git grep -l <rev>` prefixes each line with `<rev>:`.
-    const idx = t.indexOf(":");
-    candidates.add(idx === -1 ? t : t.slice(idx + 1));
+/** A rev's `files` snapshot: which exist there, and each one's DECLARED group.
+ *
+ *  ⚡ BATCHED (gap-suite-split-15-over-30s-test-files): this replaces a per-file `git show <rev>:<f>`
+ *  fan-out. The split of 15 monoliths into 133 shards took the check's git-spawn count from ~40 to
+ *  **395** (measured: 395 spawns / 17967ms on the 16-core dev host, ~45ms each), which pushed
+ *  `scripts/test.sh --list-files` from ~1s to ~19s — and the runner-grouping family shells out to
+ *  that probe 1-4x per shard, so the probe's cost surfaced as >30s test files (AC3). TWO git calls
+ *  now cover the whole set, with byte-identical judgment:
+ *    presence — one `git ls-tree` (unchanged, was already batched);
+ *    group    — one `git grep`, NOT one `git show` per file. `groupOfSource` takes the FIRST
+ *               `@test-group <name>` occurrence in the file; `git grep` emits matches in path order
+ *               then line order, so the first hit per path IS that occurrence.
+ *  The old code's separate `git grep -l` pre-filter is subsumed: a file whose DECLARED group is a
+ *  target necessarily contains a target token, so "grep any target token, then verify the declared
+ *  group" and "read every declared group, then keep the targets" select exactly the same set — while
+ *  the latter needs no per-candidate verification. The over-match the pre-filter guarded against (an
+ *  engine-declared file whose BODY writes an "@test-group serial" fixture literal,
+ *  gap-suite-classification-lpt-scheduler-ts-ization's suite-scheduler.test.mjs) is still rejected,
+ *  because `GROUP_RE` only ever reads the FIRST occurrence. */
+function presenceAndGroupsAtRev(
+  root: string,
+  rev: string,
+  files: string[]
+): { present: Set<string>; groups: Map<string, string> } {
+  const present = gitFilesAtRev(root, rev, files);
+  const groups = new Map<string, string>();
+  if (present.size === 0) return { present, groups };
+  const r = git(root, ["grep", "-n", "-I", "-E", "@test-group[[:space:]]+[A-Za-z]+", rev, "--", ...files], true);
+  if (r.status === 0) {
+    const prefix = `${rev}:`;
+    for (const raw of r.stdout.split(/\r?\n/)) {
+      if (!raw) continue;
+      // `git grep -n <rev>` emits `<rev>:<path>:<lineno>:<content>`.
+      const line = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+      const c1 = line.indexOf(":");
+      if (c1 === -1) continue;
+      const f = line.slice(0, c1);
+      if (groups.has(f)) continue; // first hit per path wins — git grep is ordered by line number
+      const c2 = line.indexOf(":", c1 + 1);
+      const m = (c2 === -1 ? "" : line.slice(c2 + 1)).match(GROUP_RE);
+      if (m) groups.set(f, m[1]);
+    }
   }
+  return { present, groups };
+}
+
+/** The declared group of `file` from a `presenceAndGroupsAtRev` snapshot, or `null` when the file is
+ *  ABSENT at that rev — `groupAt()`'s exact contract, without its per-file `git show`. An absent file
+ *  and a present-but-undeclared file are different judgments (null vs the `engine` default of AC7). */
+function groupFrom(pg: { present: Set<string>; groups: Map<string, string> }, file: string): string | null {
+  if (!pg.present.has(file)) return null;
+  return pg.groups.get(file) ?? "engine";
+}
+
+/** The subset of `files` whose DECLARED group at `rev` is a target (serial|lowconc). */
+function gitTargetFiles(root: string, rev: string, files: string[]): Set<string> {
+  const pg = presenceAndGroupsAtRev(root, rev, files);
   const out = new Set<string>();
-  for (const f of candidates) {
-    const g = groupAt(root, f, rev);
-    if (g !== null && (TARGET_GROUPS as readonly string[]).includes(g)) out.add(f);
+  for (const [f, g] of pg.groups) {
+    if ((TARGET_GROUPS as readonly string[]).includes(g)) out.add(f);
   }
   return out;
 }
 
-/** The declared @test-group of `file` at `rev`, or `null` when the file is absent at `rev`. */
-function groupAt(root: string, file: string, rev: string): string | null {
-  const r = git(root, ["show", `${rev}:${file}`], true);
-  if (r.status !== 0) return null;
-  return groupOfSource(r.stdout);
-}
-
-/** Commits in <baseline>..HEAD that changed any target-group token's occurrence count in `file`.
- * git's multiple -S are ANDed (a commit changing ALL three tokens is impossible), so each token is
- * queried separately and the results merged/deduped. */
-function gitLogTargetTokenCommits(root: string, baseline: string, file: string): { sha: string; subject: string }[] {
-  const out: { sha: string; subject: string }[] = [];
+/** Commits in <baseline>..HEAD that changed any target-group token's occurrence count in ANY of
+ *  `files`, with the paths that commit touched.
+ *
+ *  ⚡ BATCHED: the old form spawned `git log -S` PER FILE PER TOKEN (3 × every candidate — 147 of the
+ *  395 spawns measured). git's multiple `-S` are ANDed, so one call per TOKEN over the whole path set
+ *  is the batched equivalent. `--name-only` lists every path the commit touched (a SUPERSET of the
+ *  paths whose token count changed) — `detectDowngrades` narrows it back down exactly, by keeping
+ *  only the (commit, file) pairs whose DECLARED GROUP actually changed. That filter is what makes the
+ *  superset safe: a commit that merely touched a file without moving its group is dropped, so no
+ *  violation can be attributed to the wrong commit. */
+function targetTokenCommits(
+  root: string,
+  baseline: string,
+  files: string[]
+): Map<string, { subject: string; touched: Set<string> }> {
+  const out = new Map<string, { subject: string; touched: Set<string> }>();
+  if (files.length === 0) return out;
   for (const token of TARGET_GROUPS) {
-    const r = git(root, ["log", `${baseline}..HEAD`, "--format=%H%x09%s", "-S", `@test-group ${token}`, "--", file], true);
+    const r = git(
+      root,
+      // %x01 (SOH) is the record separator — NOT a literal NUL: node's spawnSync refuses argv
+      // elements containing NUL bytes.
+      ["log", `${baseline}..HEAD`, "--format=%x01%H%x09%s", "--name-only", "-S", `@test-group ${token}`, "--", ...files],
+      true
+    );
     if (r.status !== 0) continue;
-    for (const line of r.stdout.split(/\r?\n/)) {
-      const t = line.trim();
-      if (!t) continue;
-      const tab = t.indexOf("\t");
-      if (tab === -1) continue;
-      out.push({ sha: t.slice(0, tab), subject: t.slice(tab + 1) });
+    let cur: { subject: string; touched: Set<string> } | null = null;
+    for (const raw of r.stdout.split(/\r?\n/)) {
+      if (raw.startsWith("\x01")) {
+        const t = raw.slice(1);
+        const tab = t.indexOf("\t");
+        const sha = tab === -1 ? t.trim() : t.slice(0, tab);
+        const subject = tab === -1 ? "" : t.slice(tab + 1);
+        if (!sha) {
+          cur = null;
+          continue;
+        }
+        cur = out.get(sha) ?? { subject, touched: new Set<string>() };
+        out.set(sha, cur);
+        continue;
+      }
+      const p = raw.trim();
+      if (p && cur) cur.touched.add(p);
     }
   }
   return out;
@@ -184,9 +243,11 @@ export function detectDowngrades(root: string, baseline: string): DowngradeResul
   }
   const wtTarget = new Set(files.filter((f) => (TARGET_GROUPS as readonly string[]).includes(wtGroups.get(f)!)));
 
-  const headFiles = gitFilesAtRev(root, "HEAD", files);
-  const headTarget = gitTargetFiles(root, "HEAD", [...headFiles]);
-  const baseTarget = gitTargetFiles(root, baseline, [...headFiles]);
+  const headPG = presenceAndGroupsAtRev(root, "HEAD", files);
+  const headFiles = headPG.present;
+  const headList = [...headFiles];
+  const headTarget = gitTargetFiles(root, "HEAD", headList);
+  const baseTarget = gitTargetFiles(root, baseline, headList);
 
   const violations: DowngradeViolation[] = [];
 
@@ -198,26 +259,46 @@ export function detectDowngrades(root: string, baseline: string): DowngradeResul
   for (const f of wtTarget) {
     if (headTarget.has(f)) continue; // committed state is already target → judged by path 2
     if (!headFiles.has(f)) continue; // new file created with a target group → allowed
-    const from = groupAt(root, f, "HEAD") ?? "engine";
+    const from = groupFrom(headPG, f) ?? "engine";
     if (!(ORIGIN_GROUPS as readonly string[]).includes(from)) continue; // lateral move, not a downgrade
     violations.push({ kind: "uncommitted", file: f, fromGroup: from, toGroup: wtGroups.get(f)! });
   }
 
   // 2) Committed downgrades: HEAD group is a target, baseline group was product/engine (or absent),
   //    and some commit after baseline moved it out of the default set without the marker.
-  for (const f of headTarget) {
-    if (baseTarget.has(f)) continue; // already a target at baseline → historical, no re-scan
-    const to = groupAt(root, f, "HEAD") ?? "engine";
-    const seen = new Set<string>();
-    for (const { sha, subject } of gitLogTargetTokenCommits(root, baseline, f)) {
-      if (seen.has(sha)) continue;
-      seen.add(sha);
-      const parentGroup = groupAt(root, f, `${sha}^`);
-      if (parentGroup !== null && (ORIGIN_GROUPS as readonly string[]).includes(parentGroup)) {
-        // parent declared product/engine → this commit is the default-set escape.
-        if (!subject.includes(MARKER)) {
-          violations.push({ kind: "committed", file: f, fromGroup: parentGroup, toGroup: to, commit: sha, subject });
-        }
+  const committedCandidates = [...headTarget].filter((f) => !baseTarget.has(f)); // already-target at baseline → historical, no re-scan
+  if (committedCandidates.length > 0) {
+    const commits = targetTokenCommits(root, baseline, committedCandidates);
+    // Snapshot cache keyed by (rev, path-subset): a rev is re-read only when a DIFFERENT commit
+    // touches a different set of files. Snapshotting each rev over the WHOLE candidate list instead
+    // was measured slower (the `git grep` output grows with the path list) — keep the narrow reads.
+    const snapCache = new Map<string, { present: Set<string>; groups: Map<string, string> }>();
+    const snapAt = (rev: string, list: string[]) => {
+      const key = `${rev}\0${list.join(",")}`;
+      const hit = snapCache.get(key);
+      if (hit) return hit;
+      const pg = presenceAndGroupsAtRev(root, rev, list);
+      snapCache.set(key, pg);
+      return pg;
+    };
+    for (const [sha, { subject, touched }] of commits) {
+      const candidates = [...touched].filter((f) => headTarget.has(f) && !baseTarget.has(f)).sort();
+      if (candidates.length === 0) continue;
+      const before = snapAt(`${sha}^`, candidates);
+      const after = snapAt(sha, candidates);
+      for (const f of candidates) {
+        const gBefore = groupFrom(before, f);
+        const gAfter = groupFrom(after, f);
+        // Created (or deleted) by this commit → not a move out of the default set (a NEW file may
+        // declare any group, C3 in test-framework-policy-check — the same rule path 1 applies).
+        if (gBefore === null || gAfter === null) continue;
+        if (gBefore === gAfter) continue; // this commit touched the file but did not move its group
+        // The batched `-S --name-only` over-selects (it lists every path the commit touched); these
+        // two filters restore the per-file `-S` judgment exactly: the move must be ORIGIN → TARGET.
+        if (!(ORIGIN_GROUPS as readonly string[]).includes(gBefore)) continue;
+        if (!(TARGET_GROUPS as readonly string[]).includes(gAfter)) continue;
+        if (subject.includes(MARKER)) continue;
+        violations.push({ kind: "committed", file: f, fromGroup: gBefore, toGroup: groupFrom(headPG, f) ?? gAfter, commit: sha, subject });
       }
     }
   }
