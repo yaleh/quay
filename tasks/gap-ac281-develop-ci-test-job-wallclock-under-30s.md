@@ -101,6 +101,60 @@ runner 缺 PyYAML/tmux 导致的环境性红，与本条「每次 job 重装约 
 2. **取一次改动后的真实 per-file 剖面**：在落地后的 develop（或任务分支）上跑一次全量套件，读它自己
    打印的 `__PERFILE__ duration_ms=` 与 `__GROUP__ … floor_ms=`。⛔ 不拿立案时的 15 个名字当唯一清单——
    拆分后要**重新测**；任何仍 >30s 的文件（含拆分出来的分片本身、以及不在原名单里的）都是本任务对象。
+
+## Plan 第 2 步执行证据（2026-09-17，收集者：human + assistant，非本任务自身执行轮）
+
+**来源**：`.quay/verification-round.jsonl` 第 **1858** 行（该载体的第 1858 条记录，非估算/非采样）。这一轮恰好是
+`gap-spec-release-hotfix-branching-2026-09-17-revision` 任务的一次手动机械 fan-in 重跑产生的真实 suite round
+（`runId: mfi-gap-spec-release-hotfix-branching-2026-09-17-revision-1789642850267-18e3a7`，`startedAt:
+2026-09-17T11:02:48.376Z`，`durationMs: 397008`，`state: "green"`，`pass: 8678`，`fail: 0`，`tests: 8678`），
+不是本任务自己触发的轮次，但其 `perFile`（816 个测试文件的逐文件耗时）是当前 develop 分支状态下
+（AC-279/AC-280 均已落地之后）的真实、当轮、绿跑剖面，可直接作为 Plan 第 2 步「取一次改动后的真实
+per-file 剖面」的起点数据，⛔ 不是本任务自己已完成第 2 步——仍需由执行者在自己的验证轮上复核。
+
+**该轮 `perFile` 中仍 >30s 的文件，共 29 个（总 816 个测试文件中）**，按耗时降序：
+
+| 耗时 | 文件 |
+|---|---|
+| 162.6s | `plugin/test/direct-to-develop-bypass-check.test.mjs` |
+| 123.0s | `plugin/test/driver-anchor.test.mjs` |
+| 120.3s | `plugin/test/verify-deliver-coldstart.test.mjs` |
+| 68.2s | `packages/quay/test/branch-model.test.mjs` |
+| 64.7s | `packages/quay/test/goal-store.test.mjs` |
+| 62.6s | `packages/quay/test/npm-pack-e2e.test.mjs` |
+| 61.1s | `packages/quay/test/server-status-web-control-same-pid.test.mjs` |
+| 60.7s | `plugin/test/inner-wakeup-heartbeat.test.mjs` |
+| 59.0s | `plugin/test/prod-data-audit.test.mjs` |
+| 58.8s | `plugin/test/inner-wakeup-heartbeat-check.test.mjs` |
+| 52.5s | `plugin/test/capability-catalog.test.mjs` |
+| 50.9s | `plugin/test/full-suite-runner-phases.test.mjs` |
+| 50.8s | `plugin/test/runtime-usage-inventory.test.mjs` |
+| 50.2s | `plugin/test/cap-from-gate-bands.test.mjs` |
+| 48.8s | `plugin/test/checker-mutation-check.test.mjs` |
+| 46.9s | `plugin/test/fast-mode-telemetry.test.mjs` |
+| 43.2s | `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` |
+| 41.3s | `packages/quay/test/delivery-standalone-smoke-gate.test.mjs` |
+| 40.0s | `packages/quay/test/observation.test.mjs` |
+| 38.1s | `plugin/test/cap-from-gate-config-budget.test.mjs` |
+| 38.1s | `plugin/test/cap-from-gate-hysteresis.test.mjs` |
+| 37.7s | `plugin/test/cap-from-gate-stale.test.mjs` |
+| 35.9s | `plugin/test/full-suite-runner-cgroup.test.mjs` |
+| 33.6s | `experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs` |
+| 32.9s | `plugin/test/supervisor-deliver.test.mjs` |
+| 32.3s | `packages/quay/test/build-plugin-dist.test.mjs` |
+| 31.8s | `packages/quay/test/cli.test.mjs` |
+| 31.4s | `plugin/test/worker-driver.test.mjs` |
+| 30.6s | `plugin/test/fan-in-ff-merge.test.mjs` |
+
+**核对**：以上 29 个文件均**不在** AC-279（`gap-suite-split-15-over-30s-test-files`）原先点名的 15 个文件清单中
+——按逐文件名比对，`gap-suite-split-15-over-30s-test-files.md` 与本任务体全文均无 `grep` 命中这些文件名（本次
+核对时 `direct-to-develop-bypass-check` 在两份任务体里都是零命中）。⇒ 印证本任务 Proposal 里的预判
+（"拆分后才暴露出来的 >30s 文件（15 个是某一次运行测出来的，不是全集）"）：这些是 AC-279/AC-280 落地
+**之后**才暴露的新地板，是本任务（而非 AC-279/AC-280）的对象，⛔ 不应被当成 AC-279 的遗留缺口去重新指派。
+
+**⚠️ 待执行者复核，本节不构成 AC2/AC4 的完成**：这是起点数据，不是收口 run；执行者仍需在自己的验证轮
+（Plan 第 4-6 步的真实 develop CI 触发）上重新采集，且逐项归因（AC4 要求相位级分解，不是只列文件名+耗时）。
+
 3. **压实 test job 里非测试相位的残余**（第 3 项起**无既有任务认领**）：按测得的比例逐项取证——
    ① `Install suite runtime prerequisites`（apt PyYAML/tmux/procps，每次 job 重装）——**已由 `gap-ac282-runner-prereqs-already-present` 处置（2026-09-17）**：tokyo-alpha 的 runner 已换上预置了这三个前置的镜像 `quay-ci-runner:ac282`（可复现定义 `.github/runner/Dockerfile`），该步在它上面走 no-op 分支；读数可从载体的 `jobs[].prereqProvision` 直接读（机器可读 marker `__PREREQ__ <name>=<state>` 随该条落进 `.github/workflows/ci.yml`）⇒ ⛔ 不要重复做镜像预置；
    ② `npm install`；③ 静态检查相位里非 mutation 的部分；④ job 启动固定开销（checkout / setup-node /
