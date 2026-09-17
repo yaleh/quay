@@ -415,8 +415,8 @@ absorbed into the manager's direct subagent dispatch
 (`orchestration/SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3a).
 
 ```
-# 1. install quay (one-time, session-independent):
-/plugin marketplace add yaleh/quay && /plugin install quay   # see Option A above
+# 1. install quay once — Claude Code plugin channel, the only supported one (see Option A above).
+#    Requires a Claude Code session; the plugin then persists across sessions.
 
 # 2. in the target project, start a Claude Code session yourself — HOW is your choice.
 
