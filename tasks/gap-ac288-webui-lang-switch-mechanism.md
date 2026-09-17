@@ -2,7 +2,7 @@
 id: gap-ac288-webui-lang-switch-mechanism
 title: 语言切换机制整体不存在 ⇒ AC-288 判据 exit 1（CAUSE=query-param-not-honored）：新增 lang
   解析器（?lang= 优先 / Cookie 兜底 / 默认 en，合法 query 写持久化 cookie）并在 /dashboard 落地首个消费者
-status: todo
+status: ready
 labels:
   - gap
   - webui
