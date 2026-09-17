@@ -2,7 +2,7 @@
 id: gap-ac281-develop-ci-test-job-wallclock-under-30s
 title: 真实 develop CI test job 一次 success 且 durationSec≤30（AC-281）——立案后实测
   209s/206s，15 文件拆分与 82 用例并行化落地后仍须压实 test job 的非测试相位残余墙钟
-status: todo
+status: ready
 labels:
   - gap
   - test-wall-clock
