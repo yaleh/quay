@@ -2,7 +2,8 @@
 id: gap-ac281-develop-ci-test-job-wallclock-under-30s
 title: 真实 develop CI test job 一次 success 且 durationSec≤30（AC-281）——立案后实测
   209s/206s，15 文件拆分与 82 用例并行化落地后仍须压实 test job 的非测试相位残余墙钟
-status: ready
+status: needs-human
+needs_human_cause: unclassified
 labels:
   - gap
   - test-wall-clock
@@ -423,3 +424,13 @@ logRunsFetched=1 testFilesDerived=5 prereqProvisionDerived=1
 作判据，或把阈值改为「与套件无关的固定开销 + 可达套件预算」；② 把「测试执行」从 `test` job 拆成
 独立 job，判据改读那个 job；③ 拆 `driver-anchor.test.mjs`（43.1s）+ 抬高有效并发上限
 （当前 `reliability cap: total ≤ min budget of active groups` = 64）。**⛔ 单靠 ③ 到不了 30s。**
+
+## Needs-Human
+
+**执行 2026-09-17T14:16:01.657Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 2/7，剩余未勾 5）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：435ec84b-6ac1-4bfe-b4c1-af9ebe0b39df
