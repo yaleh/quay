@@ -1,7 +1,7 @@
 ---
 id: AC-287
 title: SPEC-release-and-hotfix-branching-2026-09-15.md 完成对应修订
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-023
 criterion: |-
@@ -31,6 +31,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-023 激活，补齐AC-287
+  - at: 2026-09-17T11:24:26.275Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
