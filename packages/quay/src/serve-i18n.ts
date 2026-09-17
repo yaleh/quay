@@ -21,9 +21,9 @@
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
-//   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295)
-//   and /journal (AC-296); the remaining 7 pages' page-chrome is AC-297~303, and each adds its
-//   own tokens as it lands.
+//   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
+//   /journal (AC-296) and /git-history (AC-297); the remaining 6 pages' page-chrome is AC-298~303,
+//   and each adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -192,6 +192,34 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // on the same zh word here, but that is a coincidence of vocabulary, ⛔ not a shared source — a
   // later re-wording of one must not be assumed to move the other.
   "Needs Human": { en: "Needs Human", zh: "待人工" },
+  // AC-297 (/git-history page): this page's own tokens — FOUR of them, because `renderGitHistoryPage`
+  // has TWO view branches (`"git"`, the default, and `?view=task`) and each branch carries its OWN
+  // `<title>` token. The two title keys therefore differ only in their subtitle, and a branch whose
+  // token is not registered renders its English title under zh — which IS the `title-unchanged` arm
+  // of AC-297's criterion (that miss is the exact defect AC-297 exists to remove). ⚠️ The criterion
+  // requests the bare `/git-history`, i.e. the DEFAULT branch: registering only the task view's token
+  // would leave it red.
+  //   `"Git history — vertical commit timeline"` — the default (git) view's FULL `pageTitle` token,
+  //     em dash and whole phrase included, byte-equal to the `serve-git.ts` call site.
+  //   `"Git history — 任务分组"` — the task view's FULL `pageTitle` token, same byte-equality rule
+  //     (its subtitle was already Chinese in the en baseline; only `Git history` moves).
+  //   `"Git History"` — the token BOTH branches' `<h1>` carries. It has a CAPITAL H: the `<h1>` is
+  //     spelled like the nav label while the two `<title>` tokens above are lowercase, and these are
+  //     separate lookups on purpose — registering the capitalised key does NOT serve the lowercase
+  //     title tokens, and vice versa.
+  //   `"git history"` — the lowercase token the MOBILE header carries, i.e. the AC-290 `"task list"`
+  //     shape (a page's own chrome token that is not a `pageTitle` token). It renders into
+  //     `<span class="mobile-header-page">`, which sits BEFORE the first `<nav>` and is therefore
+  //     neither inside the criterion's nav region nor a nav label.
+  // Neither zh value may carry the ASCII literal "Git History" or "Git history": AC-297's criterion
+  // fails the page on the capitalised literal inside the nav region — where this page's CURRENT item
+  // label comes from NAV_LABELS's `git` row (「Git 历史」, ROW 1) — and the lowercase literal is what
+  // the en baseline's two title tokens carry, i.e. what the criterion's `title-unchanged` arm
+  // compares the zh title against. 「Git 历史」 satisfies "non-empty" without either.
+  "Git history — vertical commit timeline": { en: "Git history — vertical commit timeline", zh: "Git 历史 — 提交纵向时间轴" },
+  "Git history — 任务分组": { en: "Git history — 任务分组", zh: "Git 历史 — 任务分组" },
+  "Git History": { en: "Git History", zh: "Git 历史" },
+  "git history": { en: "git history", zh: "Git 历史" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
