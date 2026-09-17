@@ -33,10 +33,15 @@
 //                  measurement).
 //
 //   AC-scope     — /system and /manager live in the SAME source file (serve-system.ts). Wiring the
-//                  wrong one of the two, or both, would still pass every assertion above, so the
-//                  scope boundary is asserted rather than assumed: /manager keeps its hard-coded
-//                  `<html lang="en">` and its English page token (it belongs to its own AC) — which
-//                  is also what makes AC-293's `serve-system.ts` `html lang="en"` count go 2 → 1.
+//                  wrong one of the two, or copy-pasting one page's tokens onto the other, would
+//                  still pass every assertion above, so the scope boundary is asserted rather than
+//                  assumed: the two pages keep DISTINCT page tokens under BOTH languages.
+//                  ⚠️ Under AC-293 this tier additionally asserted that /manager kept its hard-coded
+//                  `<html lang="en">` and its English page token. AC-294 wired /manager, so that
+//                  half is gone — it was TRUE then and is FALSE now, and leaving it would have made
+//                  the suite permanently red for a state the repo deliberately moved past. What
+//                  survives is the part that stays true for every later page: the shared file did
+//                  not collapse the two pages' chrome into one.
 //
 // ⛔ `renderSystemPage` is deliberately NOT exported (it never was), so the en-baseline tier reads
 // the page over HTTP like the criterion does rather than importing a private renderer: widening the
@@ -238,19 +243,40 @@ test("AC-en-baseline: the en chrome is the pre-AC-293 rendering verbatim", async
   assert.equal(currentItem(navEn, "mobile-menu-"), H1_TOKEN, "the en mobile current nav item is the baseline \"System\"");
 });
 
-test("AC-scope: the /manager page in the SAME source file is untouched by this task", async () => {
-  // ⛔ /system and /manager share serve-system.ts. Wiring both (or the wrong one) would still pass
-  // every assertion above, so the boundary is asserted rather than assumed: /manager belongs to its
-  // own AC and must keep its hard-coded `<html lang="en">` plus its English page token. This is the
-  // runtime counterpart of AC-293's file-level count (`serve-system.ts`: `html lang="en"` 2 → 1).
-  const en = await request(port, "/manager");
-  const zh = await request(port, "/manager", { Cookie: "lang=zh" });
-  assert.equal(en.status, 200, "GET /manager (en) returns 200");
-  assert.equal(zh.status, 200, "GET /manager (zh) returns 200");
-  assert.ok(zh.body.includes('<html lang="en">'),
-    "/manager is still <html lang=\"en\"> under the zh cookie — this task did NOT wire it");
-  assert.equal(headTitle(zh.body), headTitle(en.body),
-    "/manager's own <title> is unchanged by this task (it is not AC-293's page)");
-  assert.ok(headTitle(en.body).endsWith(" — Manager / Outer / Inner"),
-    "the /manager <title> still carries its English page token");
+test("AC-scope: /system and /manager keep DISTINCT page tokens across both languages", async () => {
+  // ⛔ /system and /manager share serve-system.ts. Wiring the wrong one of the two, or letting the
+  // edit that wired the second page copy the first page's tokens into it, would still pass every
+  // assertion above (they only look at /system), so the boundary is asserted rather than assumed.
+  //
+  // ⚠️ This tier USED to assert that /manager was still <html lang="en"> under the zh cookie and
+  // that its <title> was byte-identical across languages. AC-294 wired /manager; that assertion is
+  // now false by construction and was replaced (not weakened) by the distinctness check below —
+  // which stays meaningful for every further page wired into this file.
+  const sysEn = await request(port, "/system");
+  const mgrEn = await request(port, "/manager");
+  const mgrZh = await request(port, "/manager", { Cookie: "lang=zh" });
+  assert.equal(mgrEn.status, 200, "GET /manager (en) returns 200");
+  assert.equal(mgrZh.status, 200, "GET /manager (zh) returns 200");
+
+  // /manager is now wired by its own AC (AC-294) — the runtime counterpart of the file-level count
+  // (`serve-system.ts`: `html lang="en"` 2 → 1 under AC-293, → 0 under AC-294).
+  assert.ok(mgrZh.body.includes('<html lang="zh"'),
+    "/manager is <html lang=\"zh\"> under the zh cookie — AC-294 wired it");
+  assert.notEqual(headTitle(mgrZh.body), headTitle(mgrEn.body),
+    "/manager's own <title> moves with the locale");
+  assert.ok(headTitle(mgrEn.body).endsWith(" — Manager / Outer / Inner"),
+    "the en /manager <title> still carries its English page token (its en baseline did not move)");
+
+  // THE surviving scope assertion: the two pages sharing this file did not collapse into one
+  // another. Under en AND under zh, each page's own <title> token is its own.
+  assert.ok(headTitle(mgrEn.body).endsWith(" — Manager / Outer / Inner"),
+    "the /manager <title> token is /manager's own");
+  assert.ok(headTitle(sysEn.body).endsWith(" — System — 系统状态"),
+    "the /system <title> token is /system's own");
+  assert.notEqual(headTitle(mgrEn.body), headTitle(sysEn.body),
+    "the two pages in the shared file do not render the same <title>");
+  assert.ok(mgrZh.body.replace(/\n/g, " ").includes("<h1>管理器 / 外层 / 内层 — 三层状态</h1>"),
+    "the /manager <h1> carries /manager's own zh token, not /system's");
+  assert.ok(!mgrZh.body.replace(/\n/g, " ").includes("系统状态"),
+    "the /manager page carries none of /system's page chrome");
 });

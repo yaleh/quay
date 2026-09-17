@@ -21,8 +21,8 @@
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
-//   /live (AC-291), /board (AC-292) and /system (AC-293); the remaining 10 pages' page-chrome is
-//   AC-294~303, and each adds its own tokens as it lands.
+//   /live (AC-291), /board (AC-292), /system (AC-293) and /manager (AC-294); the remaining 9
+//   pages' page-chrome is AC-295~303, and each adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -145,6 +145,20 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // that literal inside the nav region, and "系统 — 系统状态" satisfies "non-empty" without it.
   "System — 系统状态": { en: "System — 系统状态", zh: "系统 — 系统状态" },
   System: { en: "System", zh: "系统" },
+  // AC-294 (/manager page): this page's own token — and, uniquely among the pages wired so far,
+  // ONE entry serves BOTH call sites. /manager's `<title>` is `pageTitle("Manager / Outer / Inner")`
+  // and its `<h1>` is that same page name plus the ` — 三层状态` subtitle, so unlike AC-291's /
+  // AC-292's / AC-293's two-entry pairs there is no separate short token to register. The key is the
+  // FULL string `pageTitle` receives — spaces and slashes included; registering the bare `Manager`
+  // would miss the lookup and leave the title English, which IS the `title-unchanged` arm of
+  // AC-294's criterion.
+  // Neither zh value may carry the ASCII literal "Manager": AC-294's second arm fails the page on
+  // that literal inside the nav region — where this page's CURRENT item label comes from
+  // NAV_LABELS's `manager` row (「管理器」, ROW 1) — and "管理器 / 外层 / 内层" satisfies "non-empty"
+  // without it. Note the nav label and this page name are separate lookups on purpose: the nav
+  // resolves through `navLabel` (shared chrome, ROW 1) while this resolves through `pageNameFor`
+  // (this page's chrome, ROW 3), which is ROW 3's whole point.
+  "Manager / Outer / Inner": { en: "Manager / Outer / Inner", zh: "管理器 / 外层 / 内层" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
