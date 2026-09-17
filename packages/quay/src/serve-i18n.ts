@@ -20,9 +20,9 @@
 //
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
-//   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290) and
-//   /live (AC-291); the remaining 12 pages' page-chrome is AC-292~303, and each adds its own tokens
-//   as it lands.
+//   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
+//   /live (AC-291) and /board (AC-292); the remaining 11 pages' page-chrome is AC-293~303, and each
+//   adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -120,6 +120,18 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // above for why neither zh value may carry the ASCII literal "Live".
   "Live — loop activity": { en: "Live — loop activity", zh: "实时 — 循环活动" },
   Live: { en: "Live", zh: "实时" },
+  // AC-292 (/board page): this page's own TWO tokens, same shape as AC-291's pair. `Board — 三源
+  // join 看板` is the FULL token `serve-board.ts` passes to `pageTitle` — em dash and the
+  // (already-Chinese) subtitle included, because AC-292's third arm compares this page's `<title>`
+  // against its en baseline and a token that is not byte-equal to the call site misses the lookup
+  // (that miss IS the `title-unchanged` arm). `Board` is the token the `<h1>` carries; it is spelled
+  // like the nav KEY `board`, but like AC-290's `Tasks` it is a separate lookup on purpose — the nav
+  // label resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through
+  // `pageNameFor` (this page's chrome, ROW 3).
+  // Neither zh value may carry the ASCII literal "Board": AC-292's second arm fails the page on that
+  // literal inside the nav region, and "看板 — 三源 join 看板" satisfies "non-empty" without it.
+  "Board — 三源 join 看板": { en: "Board — 三源 join 看板", zh: "看板 — 三源 join 看板" },
+  Board: { en: "Board", zh: "看板" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline

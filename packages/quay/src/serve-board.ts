@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
@@ -66,6 +66,20 @@ function buildBoardHref(
   return qs ? `/board?${qs}` : "/board";
 }
 
+/** AC-292: `lang` is this request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher via `handleBoard`'s `cfg.lang`). It reaches FOUR things on this page and nothing else:
+ *  the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile chrome
+ *  (`renderMobileChrome`) — whose `board` entry already exists in NAV_LABELS (ROW 1) — the page's
+ *  own `<title>` (through `pageTitle`), and the `<h1>`'s page-name token (through `pageNameFor`
+ *  against serve-i18n.ts's PAGE_LABELS). The last two are the whole point: wiring only the SHARED
+ *  nav bar would leave the `<title>` at its English token, which is the difference between "the nav
+ *  switched" and "THIS page switched" — and AC-292's third arm fails the page on exactly that
+ *  (CAUSE=title-unchanged).
+ *
+ *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: the direct `renderBoardPage()` callers that predate
+ *  it (unit tests, the load-120s AC3 fail-open test) keep rendering byte-for-byte what they rendered
+ *  before, and `pageNameFor`'s en column is the identity for every token — so the en baseline the
+ *  goal criterion reads off the live page cannot move as this page is wired. */
 export function renderBoardPage(board: {
   landing: BoardLanding;
   execution: BoardExecution;
@@ -99,7 +113,7 @@ export function renderBoardPage(board: {
   joinedTotal?: number;
   /** Human labels of the transient sources that are not `ok` (rendered by "off-source-incomplete"). */
   incompleteSources?: string[];
-}, identity: ServeIdentity | null = null): string {
+}, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   const landingNote = board.landing.status === "ok"
     ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
     : board.landing.status === "empty"
@@ -227,9 +241,9 @@ export function renderBoardPage(board: {
     </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalRows} rows)</p>`;
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>${pageTitle("Board — 三源 join 看板", identity)}</title></head>
-    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main id="main">
-      <h1>Board — 意图 / 执行 / 落地</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>${pageTitle("Board — 三源 join 看板", identity, lang)}</title></head>
+    <body>${renderMobileChrome("board", "board", lang)}${renderSiteNav("board", lang)}<main id="main">
+      <h1>${pageNameFor("Board", lang)} — 意图 / 执行 / 落地</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       ${filterForm}
       ${filterNav}
@@ -401,7 +415,7 @@ export async function handleBoard(
     transientView,
     joinedTotal: rows.length,
     incompleteSources,
-  }, cfg.identity));
+  }, cfg.identity, cfg.lang));
 }
 
 // ── /git-history — vertical commit timeline (gap-git-history-vertical-graph-thirdparty-lib) ──
