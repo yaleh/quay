@@ -1,7 +1,7 @@
 ---
 id: AC-289
 title: /dashboard 页面在 zh 下真实切换——导航当前项标签与该页面自己的 <title> 都相对英文基线发生变化
-status: draft
+status: active
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -83,4 +83,15 @@ expect: "criterion exits 0 once /dashboard's en baseline contains the literal
 origin: 人 2026-09-17 讨论裁定：GOAL-024 达成范围 = 全部 15 个 SITE_NAV_ROUTES
   页面之一（/dashboard，nav key 对应标签 'Dashboard'）；判据用真实 HTTP 请求差分探测（en 基线 vs zh
   cookie），不是字符串比对/源码 grep（硬规则 2/4）。
+activatedAt: 2026-09-17T15:49:44.403Z
+statusLog:
+  - at: 2026-09-17T15:49:44.403Z
+    from: draft
+    to: active
+    actor: user
+    reason: 人 2026-09-17 指示激活该 goal（setsid 脱离会话进程组后的复现对照）
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T15:49:44.402Z
 ---
