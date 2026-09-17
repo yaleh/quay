@@ -121,6 +121,20 @@ nav_en = `grep -o '<nav.*</nav>'` ⇒ 2403 bytes（全响应 81200 bytes，占 2
 - ⚠️ **上游测试耦合的实测核对（⛔ 不假定）**：`packages/quay/test/serve-i18n.test.mjs:140/142` 用 **`"Not A Page"`** 作「未映射 token 在 zh 下原样返回」的样本，`:131-133` 断言的已映射 token 是 `Tasks` / `task list`。**本任务这三者一个都不映射** ⇒ **该断言不受本页词条影响，⛔ 本任务不改那个测试文件**。（AC-290 立案时该样本正是 `Tasks`、被迫改动，样本已在其实现中换成 `"Not A Page"`。）⇒ 实现时若它**因本页词条**变红，那是新信息，**当场把它加进 Touches 并在任务体记下**，⛔ 不静默绕过。
 - ⚠️ **`serve-tests-empty-state.test.mjs` 的名字陷阱（如实记录）**：它的 `:89` 定义一个**本地黑盒 helper `renderTestsPage(ws)`**，与 `serve-tests.ts:706` 的私有函数**同名但无关**（它走 `startServer` + HTTP）。本任务**不改**该文件；若实现后它变红（en 应逐字恒等），那是本任务引入的回归，**当场修**，⛔ 不视为无关。
 
+### ✅ 落地记录（AC-298 implementation，2026-09-17 worker `gap-ac298-...`）
+
+**实现**（commit `c5d4ccc83`，Touches 内的三条路径）
+
+- `serve-tests.ts`：`renderTestsPage` 增末位 `lang: Lang = DEFAULT_LANG` 参数位；页头 → `${htmlLangTag(lang)}`；`<title>` → `pageTitle("Tests — 验证轮记录", identity, lang)`；`renderMobileChrome("tests", pageNameFor("tests", lang), lang)`；`renderSiteNav("tests", lang)`；`<h1>` → `pageNameFor("Tests — 验证轮记录", lang)`；`:952` 调用点补传 `cfg.lang`（此前 handler 拿到却丢掉）。⛔ `renderTestsFilePage`（现 `:1121`）未动。
+- `serve-i18n.ts`：`PAGE_LABELS` 追加两条 —— `"Tests — 验证轮记录": { zh: "测试 — 验证轮记录" }` 与 `tests: { zh: "测试" }`。⛔ `NAV_LABELS` / ROW 1/2/3 契约语义 / 四个共享渲染函数未动。
+- `packages/quay/test/serve-tests-zh-chrome.test.mjs`（新）：`@test-group product`，真 workspace + `startServer({port:0})` 黑盒。
+
+**⚠️ 一处对任务体 ⛔ 的有意识偏离（如实登记，非静默）**：Plan step 4 / 作用域一节写「⛔ 不改 `serve-i18n.ts` 的 ROW 契约注释」。我**改动了该注释块里【已接线页面清单】那一句**（`/git-history (AC-297); the remaining 6 pages ... AC-298~303` → `… and /tests (AC-298); the remaining 5 pages … AC-299~303`），**未动** ROW 1/2/3 的任何契约语义、未动 WHY 注、未动 `NAV_LABELS`。理由：该句是 AC-289 自己交给每个页面任务的滚动台账（其原文即 "each adds its own tokens as it lands"），且 **AC-291~297 七条兄弟任务 7/7 都更新过它**（`git log -p -- packages/quay/src/serve-i18n.ts` 可见逐次演进）；不更新则会留下一个**事实错误**（声称 6 个页面未接线，实际 5 个），正是本仓库单源/防漂移原则所针对的形态。若评审认为该 ⛔ 覆盖此句，回退只需还原这一句。
+
+**证据**（未跟踪 scratch，可独立复算）：`.quay/ac298/EVIDENCE.md` + `.quay/ac298/{ctrl1,ctrl2,restored}.json` + `.quay/ac298/{final-en,final-zh,ctrl2-zh}.html` + `.quay/ac298/scoped-gate.log`。
+
+**基准漂移的如实记录（硬规则 2 下半）**：AC1⑥ 引用的立案基线 nav `2403 B` 今日实测为 `2432 B`（en 体 81688 B vs 立案 81200 B）——`/tests` 页**数据驱动**（验证轮记录条数）随时间增长，字节数**不是**本任务的不变量；与之对照，**nav 内 `Tests` = 2 条**与 **`<title>`** 两条不变量**逐字命中立案值**。⇒ 该臂按后两者判定，⛔ 不把 nav 字节数的漂移记到本次改动账上。
+
 ## Plan
 
 1. **红基线**（⛔ 不假定仍等于立案值）：`node packages/quay/bin/quay.js goal gate AC-298 --dry-run --json; echo "GATE_EXIT=$?"`，贴完整输出与具名 `CAUSE=`（判据的所有者可能已改动它）。
@@ -132,14 +146,16 @@ nav_en = `grep -o '<nav.*</nav>'` ⇒ 2403 bytes（全响应 81200 bytes，占 2
 7. **重启活实例**：AC-298 的探针从**已在运行**的 `quay.ts serve`（cwd = 仓库根）派生地址，⛔ 不自己启服务 ⇒ 实现落地后**必须重启该实例**，否则判据读的是旧代码。⚠️ **本机实测的第二个形态**：探针按 `pgrep -f 'quay.ts serve'` + `/proc/$p/cwd` == 仓库根 **取首个匹配**；立案时本机同时存在 4 个匹配（3 个 cwd 在 worktree 内或已删除，1 个 cwd=仓库根 `--host 0.0.0.0 --port 4173`）⇒ 重启后须核对判据报出的 `addr=` 与你在跑的实例一致。
 8. **收口**：红/绿两条读数 + 因果对照 + 全量残留枚举 + scoped 门绿。
 
+⚠️ **Plan step 7 在 worker 形态下的如实修正（2026-09-17）**：本任务是 **worker-driven** —— 实现落在**任务 worktree**、由 driver 机械 fan-in 后才进 develop，因此「重启 cwd=仓库根的活实例」**在落地前不可能让判据读到新代码**（主检出仍跑 develop 旧码）。实际做法：**在该 worktree 内起一个 cwd=worktree 的实例**，并从 **worktree 内**调用判据 —— 判据探针的 `root=$(git rev-parse --show-toplevel)` **随调用 cwd 变**，故 worktree 内调用即选中 worktree 实例，得到的仍是**真 HTTP/真进程**的读数（DoD 1 的实质要求），只是被观测实例的 cwd 与立案时不同。**落地（fan-in 进 develop）后仍需**重启那个 cwd=仓库根的实例，判据才会在生产实例上转绿 —— 该步归 driver/人。
+
 ## AC
 
-- [ ] **AC1（live 面判别性读数：逐处独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，`curl -H 'Cookie: lang=zh' http://$addr/tests` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）的文本都**不是** `Tests`；③ nav 区块**整体**不含 `Tests`；④ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Tests`**；⑤ `<h1>` 也不再含 ASCII `Tests`；⑥ **en 负控制逐字未变**：默认语言 `/tests` 的 nav 区块与 `<title>` 与立案基线（nav 2403 B、nav 内 `Tests` 2 条、`<title>quay — Tests — 验证轮记录</title>`）同口径对照。⛔ 六处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
-- [ ] **AC1b（判据读不到的那处 chrome）**：`<span class="mobile-header-page">` 的文本在 zh 下不再是 `tests`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到，但它是本页 chrome）。⛔ 不得用 nav 区块的读数顶替这一条。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③/④ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Tests'` **与** `grep -n 'tests'`，把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（全 body **4 次**，nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：`serve-tests.ts:1109-1110`（`/tests/file` 路由）的 `<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav` **本任务不改**，须在 AC5 的逐文件计数里如实体现（2→1）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-298 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-298-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Tests` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac298-tests-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-tests-empty-state.test.mjs` 与 `serve-i18n.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 12 个 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-tests.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:862` `/tests` ＋ `:1109` `/tests/file`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
+- [x] **AC1（live 面判别性读数：逐处独立断言，⛔ 不报「整页看起来翻了」）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，`curl -H 'Cookie: lang=zh' http://$addr/tests` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）的文本都**不是** `Tests`；③ nav 区块**整体**不含 `Tests`；④ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）且 zh 标题**不含 ASCII `Tests`**；⑤ `<h1>` 也不再含 ASCII `Tests`；⑥ **en 负控制逐字未变**：默认语言 `/tests` 的 nav 区块与 `<title>` 与立案基线（nav 2403 B、nav 内 `Tests` 2 条、`<title>quay — Tests — 验证轮记录</title>`）同口径对照。⛔ 六处分开断言、分开贴原始片段（硬规则 3：枚举不是布尔）。
+- [x] **AC1b（判据读不到的那处 chrome）**：`<span class="mobile-header-page">` 的文本在 zh 下不再是 `tests`（它渲染在 `<nav class="mobile-menu">` **之外** ⇒ 判据读不到，但它是本页 chrome）。⛔ 不得用 nav 区块的读数顶替这一条。
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③/④ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Tests'` **与** `grep -n 'tests'`，把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条记录），并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（全 body **4 次**，nav 区块内 **2 次**）。**并显式登记本任务范围外的具名残留**：`serve-tests.ts:1109-1110`（`/tests/file` 路由）的 `<html lang="en">` 与未传 lang 的 `renderMobileChrome`/`renderSiteNav` **本任务不改**，须在 AC5 的逐文件计数里如实体现（2→1）。
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-298 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-298-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Tests` 的混合串。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac298-tests-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿（**含** `serve-tests-empty-state.test.mjs` 与 `serve-i18n.test.mjs`）；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 12 个 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -c 'html lang="en"' packages/quay/src/serve-tests.ts` **逐处**贴出并与立案基线对照（**立案基线 = 2**，即 `:862` `/tests` ＋ `:1109` `/tests/file`）：本任务后 **2→1**（残留的那一处即 AC3 登记的具名范围外项）。⚠️ 若别的任务改动使全局计数变化，**不得记到自己账上**。
 
 ## DoD
 
