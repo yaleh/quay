@@ -1,7 +1,7 @@
 ---
 id: gap-readme-drivers-cold-start-dev-loop-drift
 title: README 的「启动 drivers/serve」「冷启动」「实际开发」三节与真实运维机制/仍在分发的 skill 不一致
-status: todo
+status: ready
 labels:
   - gap
 parent: null
