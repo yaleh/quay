@@ -2,7 +2,7 @@
 id: gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title
 title: "AC-297 缺口 —— /git-history 页面的 zh 切换完全未接线：页头 lang、本页 title 标签与导航当前项在
   cookie: lang=zh 下与 en 逐字节相同"
-status: ready
+status: done
 labels:
   - gap
   - webui
