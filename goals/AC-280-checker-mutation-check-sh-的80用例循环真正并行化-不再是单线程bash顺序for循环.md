@@ -1,7 +1,7 @@
 ---
 id: AC-280
 title: checker-mutation-check.sh 的80用例循环真正并行化，不再是单线程bash顺序for循环
-status: draft
+status: active
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -70,4 +70,15 @@ criterion: >-
 expect: criterion exits 0 once the run_one_case call site is backgrounded and
   reaped with a wait
 origin: GOAL-022 背景：checker-mutation-check.sh 的80个用例单独占静态检查阶段18秒，无backgrounding
+activatedAt: 2026-09-17T00:46:12.705Z
+statusLog:
+  - at: 2026-09-17T00:46:12.705Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T00:46:12.704Z
 ---
