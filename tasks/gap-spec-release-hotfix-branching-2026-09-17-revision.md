@@ -106,15 +106,123 @@ prerequisite，任意一条的完成都不被另一条拉黑**；本条判据的
    scratch 文件（⛔ 不是只写「已修订」）。
 8. **核作用域**：`git diff --stat` 中无 `plugin/**`、`packages/**`、`.github/**` 条目。
 
+## Execution log（2026-09-17T06:02Z–06:13Z）
+
+**执行者**：worker `gap-spec-release-hotfix-branching-2026-09-17-revision`；
+**worktree**：`/home/yale/work/quay-worktrees/gap-spec-release-hotfix-branching-2026-09-17-revision`（branch `task/gap-spec-release-hotfix-branching-2026-09-17-revision`，fork 自 develop `1a7b30648`）。
+
+**Plan 1（改前基线，⛔ 未事后重建）**：存档到 `.quay/ac287-baseline-before.txt`，
+`sha256(SPEC) = 535b4ab107e6f6cccf3b6269d40f9c53294800e0ff7566833629b430dcf4f778`（595 行）；
+三臂改前读数逐字：`2026-09-17` **0 命中（exit 1）** / `AC-273` 命中 `218, 445, 485, 572` / `author` 命中 `65`。
+
+**Plan 2–4（三处修订）**：见下方 AC 与 DoD 4 的行级对照。⚠️ 追加裁定块落成 `### 3.2.1′`
+（`′` 标记它是 §3.2.1 的追加件，⛔ 不是另起一节）。
+
+**Plan 5（goal store）**：走 **ABI 路由**执行（⛔ 不是 `--store` store 方言——只有 ABI 路由的
+`--superseded-by` 会按 `,` 拆成数组，store 方言的 `opts[key]=v` 是**后者覆盖**，实测传两个只活下来最后一个）。
+`quay goal write AC-273 --status superseded --superseded-by "AC-285,AC-284"`，回读见 AC2。
+⚠️ 顺带读数：goal store 提示「AC-273 was filed superseded under GOAL-020 which reads achieved — recorded a goal-staleness signal」——
+这是**预期的**（GOAL-020 自身 status 未动，重开与否是人的决定）；本条**不因此改 GOAL-020**。
+
+**Plan 6（判据复跑）**：AC5（修订后 pass）与 AC6（修订前 fail）并排，见下。
+
+**Plan 7–8（留痕与作用域）**：证据落 `.quay/ac287-evidence.txt` + `.quay/ac287-baseline-before.txt`
+（**未跟踪** scratch，⛔ 未提交——按 `touches-glob-on-quay-runtime-artifacts-blocks-promotion`）；
+作用域实测见 DoD 5。
+
 ## AC
 
-- [ ] AC1 **§3.2.1 含 2026-09-17 追加裁定**：`grep -n "2026-09-17" orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` 命中 ≥1，**且打印命中行内容证明它是 §3.2.1 区间（line 198-231 附近）内的裁定条目**，⛔ 不是正文别处顺带出现的日期
-- [ ] AC2 **AC-273 在 goal store 转 superseded**：`node packages/quay/bin/quay.js goal show AC-273 --json` 的 `status == "superseded"`（⛔ 不是任务体里一句声称）
-- [ ] AC3 **SPEC 内旧裁定就地标注**：`grep -n "superseded"` 命中 ≥2，且命中包含 §7 丁 行与 §9 第 1 行；每处点名 **AC-285 + AC-284** 的接替关系
-- [ ] AC4 **`author` 作为第四条线写入 §3.1 表**：`grep -n "author"` 命中 ≥3，**且命中行包含 §3.1 表的新行与推送备份约定行**（⛔ 不只是 line 65 的旧 §2.1 表行）；打印全部命中行内容
-- [ ] AC5 **AC-287 criterion 逐字重跑 exit 0**：贴完整输出（走 store 自己的 runner `quay goal gate AC-287`，⛔ 不是本地重写的副本）
-- [ ] AC6 **负控制（判据能取假）**：修订**前**的读数已实测为 exit 1 / `CAUSE=spec-not-amended`（见 Proposal 逐字），贴出；证明 AC-287 不是恒绿
-- [ ] AC7 **防「旧文本冒充新修订」**（硬规则 2 配套动作）：打印三臂各自命中的**行号 + 行内容**，逐条核对——`author` 命中含 §3.1 新行、`AC-273` 命中含 445/485 的 superseded 标注行、`2026-09-17` 命中含 §3.2.1 裁定块；⛔ 只贴 `grep -c` 计数不算
+- [x] AC1 **§3.2.1 含 2026-09-17 追加裁定**：`grep -n "2026-09-17" orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` 命中 ≥1，**且打印命中行内容证明它是 §3.2.1 区间（line 198-231 附近）内的裁定条目**，⛔ 不是正文别处顺带出现的日期
+
+      **实测（修订后，25 命中）**：裁定条目 = **line 265** 的标题
+      `### 3.2.1′ 追加裁定（2026-09-17）：默认分支**反转**回 master；AC-273 转 superseded；author 列为第四条长期线`，
+      块体 line 267–337（背景/理由/佐证读数/效力三条/授权链关系/边界）。
+      **区间核对（⛔ 不是"附近"这种模糊话）**：`### 3.2.1 已裁定…` 在 **line 231**、`## 4. release 分支规程`
+      在 **line 338** ⇒ 追加裁定块**完整落在 §3.2.1 区间内**。
+      另 24 处命中都是**指向该块的短注**（:26 §0 ①／:47 §1⑤／:61 §2 快照说明／:71,:74 §2.1 author 行与推送约定／
+      :169,:170 §3 标题／:197 图／:227,:229 §3.2／:252 §3.2.1 原节／:530 §6／:552 §7 丁／:592 §9 第1步／
+      :620 执行状态／:682 §11.5），⛔ 不是"正文别处顺带出现的日期"。
+
+- [x] AC2 **AC-273 在 goal store 转 superseded**：`node packages/quay/bin/quay.js goal show AC-273 --json` 的 `status == "superseded"`（⛔ 不是任务体里一句声称）
+
+      **实测（读 goal store 本体，`--root <worktree>`）**：
+      ```json
+      {"id":"AC-273","status":"superseded","supersededBy":["AC-285","AC-284"],"longTerm":true}
+      ```
+      文件侧同时可见 `status: superseded` 与 `superseded-by:\n  - AC-285\n  - AC-284`
+      （`goals/AC-273-默认分支落在主干-…-harness-wor.md`，由 `goal write` 自行提交为 `d7c5d6436`）。
+      ⚠️ **取代关系是双向可读的**：`superseded-by` 点名两条接替者；`AC-273` 的 `criterion` / `expect` /
+      `origin` / `activatedAt` 四个字段**一字未动**（改的只有 `status` 与新增的 `superseded-by`）。
+
+- [x] AC3 **SPEC 内旧裁定就地标注**：`grep -n "superseded"` 命中 ≥2，且命中包含 §7 丁 行与 §9 第 1 行；每处点名 **AC-285 + AC-284** 的接替关系
+
+      **实测（修订后 13 命中，其中 4 处是本次新增的 superseded 标注）**——要求的两处：
+      ```
+      :552  | **丁** | `AC-273` | … | ~~**PASS**（守卫型）~~**⛔ 本行已 superseded（2026-09-17）**——**被 `AC-285` + `AC-284` 取代**：… | ~~✅~~ **superseded** |     ← §7 丁 行
+      :592  | 1 | **GitHub 默认分支 `master` → `develop`** ⛔ **本行已 superseded（2026-09-17）**：方向被 §3.2.1′ 追加裁定**反转**回 `master`，由 **`AC-285`**（默认分支实测 = `master`）+ **`AC-284`**（worktree 分叉点结构性校验）接替原 **`AC-273`** | …   ← §9 第 1 行
+      ```
+      ⇒ **两处都逐字点名 AC-285 + AC-284**。另 **硬规则 5b**：SPEC 内该裁定的其余落点也一并标注，⛔ 不只改被报出来的那一条——
+      转引处加短注（:252 §3.2.1 原节指向新裁定；:682 §11.5），方向性处加标注
+      （:26 §0 四条动作①／:47 §1⑤ 裁定表／:61 §2 快照说明／:227,:229 §3.2／:530 §6／:620 执行状态）。
+
+- [x] AC4 **`author` 作为第四条线写入 §3.1 表**：`grep -n "author"` 命中 ≥3，**且命中行包含 §3.1 表的新行与推送备份约定行**（⛔ 不只是 line 65 的旧 §2.1 表行）；打印全部命中行内容
+
+      **实测（修订后 25 命中；改前仅 1 命中 = line 65）**。两处要求的新增：
+      ```
+      :209  | `author` | **本地 doc-only 写面**（⛔ 非权威） | 主检出上的人工 doc 编辑 ⇒ **与 `develop` 双向 ff 同步**（`syncDevelopToDoc` 快进追 develop；doc 侧提交由 `propagateDocBranchToDevelop` 回推 develop）；**并推送 `origin/author` 作单点失效备份**（约定见 §2.1） | ⛔ 不作为 worktree 的分叉点；⛔ 不承载任何权威状态；⛔ 不得被 rebase / `--force` / 删除远端 ref（三者都会让 `AC-283` 转红） |     ← §3.1 表新行
+      :74   **`author` → `origin` 的推送频率约定**（2026-09-17 起，单点失效防护，见…）：`author` 只增不改…     ← 推送备份约定行
+      ```
+      ⛔ **不是 line 65 的旧 §2.1 行**——`:71` 是 §2.1 那条**被本次补写过的**行（补了「并推送到 `origin`」与
+      `origin/author = e27f111ed…是本地 author 的真实祖先` 读数），`:74–85` 是新增的推送频率约定段，
+      `:197–201` 是 §3 ASCII 图新增的双向 ff 边，**:209 是 §3.1 表的新行**，`:169` 是 §3 标题由「三条长期线」改「四条长期线」。
+      **推送频率约定的口径**（⛔ 不设魔数）：按**事件**而非时间间隔（本地 author tip 每前进一次就推一次）；
+      ⛔ **不设"每小时/每天"这类数值间隔**——该动作发生率未测量，按硬规则 4 推论一不设数值阈值；
+      并**如实写明它今天没有机械载体**（无 driver/脚本推 author），常设守卫 `AC-283` 只测祖先关系⛔不测新鲜度。
+
+- [x] AC5 **AC-287 criterion 逐字重跑 exit 0**：贴完整输出（走 store 自己的 runner `quay goal gate AC-287`，⛔ 不是本地重写的副本）
+
+      **实测（cwd = worktree，2026-09-17T06:08:19.841Z）**：
+      ```json
+      {"id":"AC-287","verdict":"pass","reason":"acceptance passed (exit 0)","timestamp":"2026-09-17T06:08:19.841Z",
+       "dryRun":false,"event":{"id":"eb290971-36ab-44d0-a4d7-454dfe25aa88","item_id":"AC-287","pipeline_id":"AC-287",
+       "gate":"goal","actor":"goal-cli","verdict":"pass","timestamp":"2026-09-17T06:08:19.841Z",
+       "payload":{"reason":"acceptance passed (exit 0)"}}}
+      GATE_EXIT=0
+      ```
+      ⛔ 未用本地 python 重写判据——走的是 store 自己的 runner（`quay goal gate`，store-level verb）。
+      ⚠️ **这条 run 的 cwd 是本任务的 worktree**（判据的 `grep` 用相对路径 `orchestration/SPEC-…md`）——
+      这正是"修订真的发生了"的读数；**修订落到 develop 上**这半边的读数见 DoD 1。
+      早先一次同形复跑（06:06:46.564Z，event `b8372660-27b1-4653-9dae-b259939ea4c7`）同为 pass。
+
+- [x] AC6 **负控制（判据能取假）**：修订**前**的读数已实测为 exit 1 / `CAUSE=spec-not-amended`（见 Proposal 逐字），贴出；证明 AC-287 不是恒绿
+
+      **实测（修订前，2026-09-17T06:02:21.110Z，cwd = 主检出，⛔ 是"修订前"的真实读数不是事后断言）**：
+      ```
+      $ node packages/quay/bin/quay.js goal gate AC-287
+      {"id":"AC-287","verdict":"fail",
+       "reason":"acceptance failed (exit 1) — CAUSE=spec-not-amended — orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md is missing: no-2026-09-17-addendum",
+       "timestamp":"2026-09-17T06:02:21.110Z","dryRun":false,
+       "event":{"id":"b3b701df-d403-47cf-880e-ad152d7b75a6","item_id":"AC-287","pipeline_id":"AC-287","gate":"goal",
+                "actor":"goal-cli","verdict":"fail","timestamp":"2026-09-17T06:02:21.110Z",
+                "payload":{"reason":"acceptance failed (exit 1) — CAUSE=spec-not-amended — … is missing: no-2026-09-17-addendum"}}}
+      GATE_EXIT=1
+      ```
+      ⇒ **同一条命令、同一个对象，本次修订前后取值由 `fail` 变 `pass`**，
+      且失败报文是**具名 `CAUSE=` 并点名缺哪一臂**（⛔ 不是硬规则 3b 那种"读不懂却返回与合格同形"的静默值）。
+      ⇒ 修订是那个变化的因，判据**不是恒绿**。
+
+- [x] AC7 **防「旧文本冒充新修订」**（硬规则 2 配套动作）：打印三臂各自命中的**行号 + 行内容**，逐条核对——`author` 命中含 §3.1 新行、`AC-273` 命中含 445/485 的 superseded 标注行、`2026-09-17` 命中含 §3.2.1 裁定块；⛔ 只贴 `grep -c` 计数不算
+
+      **三臂逐条核对（行号 + 内容，⛔ 不是 `grep -c` 计数）**：
+      | 臂 | 改前 | 改后（行号 → 内容，节选） | 核对结论 |
+      |---|---|---|---|
+      | `2026-09-17` | **0 命中** | `:265` `### 3.2.1′ 追加裁定（2026-09-17）…`；`:272` 背景；`:282` 佐证读数；`:301` 人裁定；`:305` 效力② | ✅ 命中含 §3.2.1′ 裁定块本体（区间 231–337 内），⛔ 非顺带日期 |
+      | `AC-273` | `218/445/485/572`（旧文本） | `:552` `**⛔ 本行已 superseded（2026-09-17）**——**被 AC-285 + AC-284 取代**`；`:592` 同形标注；`:252`/`:682` 短注 | ✅ 含两条 superseded 标注行（旧 445/485 号位已因插入而下移为 552/592） |
+      | `author` | `65`（仅旧 §2.1 行） | `:209` §3.1 表新行；`:74` 推送频率约定；`:197–201` ASCII 图双向 ff 边；`:71` 补写后的 §2.1 行 | ✅ 含 §3.1 新行与推送约定行，⛔ 不止旧 §2.1 行 |
+      **(θ) 零计数半边也做了**（硬规则 2 配套动作的另一半，防"谓词对真样本不命中"）：
+      改前 `grep -n "2026-09-17"` 计数为 0 —— 按该纪律本应**把谓词对着一个已知为真的样本干跑一次**。
+      这里对应的动作是 **AC6 的负控制**：谓词在同一对象上**已知为假**时给出 `exit 1` + 具名 CAUSE，
+      且失败报文**点名了缺的是哪一臂**（`no-2026-09-17-addendum`）⇒ 谓词确实在检查这三臂，⛔ 不是恒真/恒假的空转。
 
 ## DoD
 
