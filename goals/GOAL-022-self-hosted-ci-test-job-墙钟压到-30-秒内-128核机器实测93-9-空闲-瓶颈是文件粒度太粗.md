@@ -3,7 +3,9 @@ id: GOAL-022
 title: self-hosted CI test job 墙钟压到 30 秒内——128核机器实测93.9%空闲，瓶颈是文件粒度太粗+重复装包
 status: active
 kind: goal
-origin: 人 2026-09-17 要求：分析 self-hosted CI 负载并建 GOAL 驱动优化
+origin: manager 2026-09-17 采纳 goal-sufficiency-followup 提案
+  gap-goal022-scope-item3-prereq-reinstall-uncovered option (a)：新增
+  AC-282，退出条件句「三条 AC」改「四条 AC」，范围节与非目标节逐字未动。
 activatedAt: 2026-09-17T00:45:02.249Z
 statusLog:
   - at: 2026-09-17T00:45:02.249Z
@@ -59,6 +61,7 @@ tokyo-alpha 开发，tokyo-alpha 上也没有这个仓库的任务/worktree 基�
 
 ## 退出条件
 
-三条 AC 全部 achieved：AC-279（15个原地大文件全部被拆分/移走）、AC-280（checker-mutation-check.sh
-的用例循环真正并行化）、AC-281（.quay/ci-runs.jsonl 里本 GOAL 立案之后的最新一次 develop CI
-test job 是 success 且 durationSec ≤30）。
+四条 AC 全部 achieved：AC-279（15个原地大文件全部被拆分/移走）、AC-280（checker-mutation-check.sh
+的用例循环真正并行化）、AC-282（"Install suite runtime prerequisites" 不再每次 job 重复装包——
+post-filing 最新一次 develop CI test job 的日志派生出三个前置全部 already-present）、AC-281
+（.quay/ci-runs.jsonl 里本 GOAL 立案之后的最新一次 develop CI test job 是 success 且 durationSec ≤30）。
