@@ -139,6 +139,27 @@ packages/quay/test/goal-store.test.mjs:149    s.write("GOAL-010", { title: "p10"
 `bash scripts/test.sh --for-task gap-goal-born-draft-zero-ac-escapes-standing-invariant --allow-thin` ⇒ **exit 0**（ℹ tests 384 / pass 384 / fail 0），在 develop tip `3f149c29b` 上跑。
 `anti-drift-touches-check --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK — 13 actual file(s), all within declared Touches (15 glob(s))`。
 
+**AC5 补（2026-09-17 第二次进入本任务 —— 上一轮的枚举漏了 4 处，由全量 fan-in 套件报出）**：上一轮的调用点扫描是**模式匹配**（找 `\.write(` / `goalStore write` 这类字面形态），**看不见藏在辅助函数后面的写法**（如 `createArgs(id, 'draft')`）。全量 suite 报出 **4 红 / 3 个文件**，全部是「以 draft 出生且彼时名下零 AC」这一**前置**的断言面：
+```
+plugin/test/goal-create-as-active-requires-ac.test.mjs  ② 两步路径（draft 创建 → 补 AC → active）、④「新 GOAL 以 --status draft 创建仍放行」
+plugin/test/goal-activation-requires-ac.test.mjs        ③「零 AC 的 draft GOAL 仍可创建 ⇒ exit 0」
+packages/quay/test/provider-abi-conformance.test.mjs    goal ABI native leg（GOAL-001 以 draft 且零 AC 写入）
+```
+处置（逐条**语义反转**，⛔ 不是把测试改软）：② 改为 AC-first 三步；④ 拆成「零 AC 的 draft 出生被拒（枚举 0、盘上无记录）+ 补一条点名它的 AC 后同一命令行放行」，仍是「闸不是一律拒绝创建」的取假控制；③ 改用**作用域之外**的 `--status superseded` 钉「射程没有溢出作用域」（实测 `achieved` / `retired` 亦 exit 0）；ABI 那条先经 `goalWrite` 落 `AC-001` 再落 `GOAL-001`——合法写序，且顺带把 CRITERION 种类的 round-trip 也纳进来。三个文件已补进 `## Touches`（此前 `anti-drift-touches-check` 因此报 `HARD FAIL: 3 violation(s) → out-of-declared`，正是本次 Touches 变更的负控制读数）。
+**运行时枚举（取代静态扫描，硬规则 5b）**：全仓 25 个「写 GOAL 记录」的候选文件逐个**真跑**，逐文件 `# pass/# fail` 读数（全部 fail 0）：
+```
+packages/quay-native/test/document-cli 6/0 · gap-dashboard-goal-card-provider-backed 10/0 · gap-dashboard-status-tag-badges 8/0
+gap-frontmatter-slugify-drops-non-ascii 4/0 · gap-goal-record-completeness-undefined 5/0 · gap-goal-status-stale-… 8/0
+goal-gate 6/0 · goal-store 72/0 · store-commit 13/0 · gap-dashboard-goal-card-ac-denominator-… 12/0
+gap-dashboard-goal-card-ac-progress-bar 3/0 · gap-webui-goal-detail-no-entity-links 8/0 · gap-webui-goal-list-sort-and-column-set 11/0
+gap-webui-goal-list-tab-split-goal-ac 11/0 · gap-webui-goal-task-rollup-via-shared-summary-cache 9/0
+criterion-fidelity-default-wiring 4/0 · criterion-fidelity-gate 10/0 · goal-driver 95/0 · goal-invariants-standing 19/0
+goal-sufficiency-determinism 9/0 · goal-sufficiency-gate 4/0 · goal-sufficiency-not-evaluated 2/0 · meta-driver 131/0
+本次修好的 3 个：goal-create-as-active-requires-ac 6/0 · goal-activation-requires-ac 5/0 · provider-abi-conformance 1 pass + 1 skip/0
+新增：goal-born-draft-zero-ac-gate 6/0
+```
+⇒ 合计 **27 个文件、479 条（478 pass / 1 skip）**，fail 全 0。**一般形态**：写面谓词的作用域一变，**断言面**要跟着扫；而扫断言面必须**跑**，⛔ 不能 grep——间接写法（辅助函数、参数化的 id/status）在字面扫描里不可见，这正是上一轮漏掉这 4 处的原因。
+
 **AC6 — 负控制（实现可证伪）**：备份 `goal-store.ts` → 把谓词改回 `nextStatus === "active"` → 跑新测试文件 ⇒ **6 条中 4 条红**（AC1 CLI、AC1 library、AC3 unreachable、AC6 双向），另 2 条恰是 active 半边（本就已关上）→ 还原后 `git status` 干净。⇒ 判据随实现翻转，不是恒绿。
 
 **DoD③（主检出读取面）**：`cd /home/yale/work/quay && bash -c "<AC-217 criterion 原文>"` ⇒ **exit 0**（stderr 空）。落地后 goal-driver 每轮读的就是这个面。
@@ -159,6 +180,9 @@ packages/quay/test/goal-store.test.mjs:149    s.write("GOAL-010", { title: "p10"
 - plugin/scripts/meta-driver.ts
 - plugin/test/meta-driver.test.mjs
 - plugin/test/goal-invariants-standing.test.mjs
+- plugin/test/goal-create-as-active-requires-ac.test.mjs
+- plugin/test/goal-activation-requires-ac.test.mjs
+- packages/quay/test/provider-abi-conformance.test.mjs
 - packages/quay/plugin/scripts/verify-deliver-coldstart.sh
 - orchestration/SPEC-goal-mechanism-2026-09-06.md
 - tasks/gap-goal-born-draft-zero-ac-escapes-standing-invariant.md（自身）

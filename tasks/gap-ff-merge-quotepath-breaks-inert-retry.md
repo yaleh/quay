@@ -59,16 +59,54 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `packages/quay/src/fan-in/ff-merge.ts` 的增量读取命令带 `core.quotepath=false`（**按位置判定**——读该语句的 argv 数组，⛔ 不是注释/字符串里的命中）。
-- [ ] AC2（可证伪，负控制）: 新增的守卫测试在**修复前**至少一条转红、**修复后**全绿；两条读数并排贴出（证明该用例不是恒绿）。
-- [ ] AC3: 对 `5fee678b3`（本条实测样本）真实重放：关闭 quotepath 后 `classifyDelta` 对该增量判**惰性**（空输出），且 in-lock 重试分支可达。
-- [ ] AC4: 同族扫描产物落进提交：命中数 + 前 3 条实际内容（硬规则 5b）。
+- [x] AC1: `packages/quay/src/fan-in/ff-merge.ts` 的增量读取命令带 `core.quotepath=false`（**按位置判定**——读该语句的 argv 数组，⛔ 不是注释/字符串里的命中）。
+- [x] AC2（可证伪，负控制）: 新增的守卫测试在**修复前**至少一条转红、**修复后**全绿；两条读数并排贴出（证明该用例不是恒绿）。
+- [x] AC3: 对 `5fee678b3`（本条实测样本）真实重放：关闭 quotepath 后 `classifyDelta` 对该增量判**惰性**（空输出），且 in-lock 重试分支可达。
+- [x] AC4: 同族扫描产物落进提交：命中数 + 前 3 条实际内容（硬规则 5b）。
 
 ## Definition of Done
 
-- [ ] ff-merge 的 inert 重试在「增量只含非 ASCII 文件名」这一形态下**真实可达**，且有能在修复前转红的用例守着。
-- [ ] 同族扫描完成且留痕。
-- [ ] 判准遵循 REAL LANDING 口径（DIR-026 Reading A）：证据钉在重试分支**真的被走到**（⛔ 不是「flag 在文件里」这类静态存在性断言）。
+- [x] ff-merge 的 inert 重试在「增量只含非 ASCII 文件名」这一形态下**真实可达**，且有能在修复前转红的用例守着。
+- [x] 同族扫描完成且留痕。
+- [x] 判准遵循 REAL LANDING 口径（DIR-026 Reading A）：证据钉在重试分支**真的被走到**（⛔ 不是「flag 在文件里」这类静态存在性断言）。
+
+## Evidence
+
+**落地提交**：`c8359f300`（task 分支 `task/gap-ff-merge-quotepath-breaks-inert-retry`）。
+argv 数组按位置核过，共 4 处（全部在 `packages/quay/src/fan-in/ff-merge.ts`，均在 ## Touches 内）：
+`:446` suiteCertGate 增量读取、`:661` in-lock 重试增量读取（本条正主）、
+`:199`/`:233` cleanTreeCheck 的 `status --porcelain`（porcelain 同样 C-quote，其解析路径喂 3 个谓词）。
+
+**AC2 两条读数并排（同一用例、同一夹具，唯一变量 = 代码是否带 flag）**：
+
+```
+POST-FIX  ✔ AC2 非 ASCII-only 惰性增量 ⇒ 重试触发、ff 落地        pass 2 / fail 0
+PRE-FIX   ✖ AC2 … exit 1 + `FF FAILED … not a fast-forward` + retry record
+PRE-FIX   ✖ porcelain 用例 … exit 2 + `working tree not clean`
+```
+
+PRE-FIX 的 ff 报错与生产签名逐字相同（`Diverging branches can't be fast-forwarded` / attempt 1）。
+负控制手法 = prefix-code swap（换回 pre-fix 文件跑新测试，再换回），换回后 argv flag 计数回 4。
+
+**AC3 真实重放**（shared clone 复刻仓库，develop=5fee678b3 / task=401dfaedf，与生产几何一致）：
+
+```
+PRE-FIX  exit code = 1        （retry record 写出 attempt 1，与生产同形）
+FIXED    exit code = 0        （develop 被重试折进 1 个 merge 提交后 ff 落地）
+```
+
+⇒ 判据钉在**重试分支真的被走到**（merge 提交数 = 1），不是静态存在性。
+
+**AC4 同族扫描**（完整产物在提交信息里）：命中 **37 个调用点 / 19 个文件**；
+非 A 类：7 处只做计数/空串判定、3 处已用 `-z`（结构性免疫）。
+⛔ 未在本条一并修这 37 处——它们横跨 19 个文件，远超本条 ## Touches 的三文件写面
+（scoped 门与 anti-drift 会因此报红），产物留给后续任务机械展开。
+
+**扫描时自身踩到同一个坑（留痕）**：用 `git ls-files | grep -P '[^\x00-\x7F]'` 数非 ASCII 路径得 **0**，
+真值 **91** —— ls-files 自己也 C-quote；零计数是假零，不是「没有」（硬规则 2 的「零查谓词对真样本干跑」）。
+
+**scoped 门**：`scripts/test.sh --for-task gap-ff-merge-quotepath-breaks-inert-retry --allow-thin`
+⇒ exit 0，130/130 绿，两条新用例在其中（log 行 425/426）。
 
 ## Touches
 
