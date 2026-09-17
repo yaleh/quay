@@ -1387,6 +1387,104 @@ test("AC2 — install layout: the delta classifier resolves to the shipped dist 
   }
 });
 
+// ── core.quotepath vs the inert-increment retry (gap-ff-merge-quotepath-breaks-inert-retry) ──────────
+// git C-quotes non-ASCII pathnames in `diff --name-only` output BY DEFAULT (core.quotepath=true), so an
+// increment containing a Chinese filename — this repo's goals/ and tasks/ are full of them, written
+// constantly by promotion-driver and goal writes — reached the path classifier as the STRING
+// `"goals/AC-278-\350\207\263…md"`, which is not a real path. The classifier fail-closes an unjudgeable
+// path to NON-INERT ⇒ `classifyDelta !== ""` ⇒ the in-lock inert retry never fired ⇒ the ff failed
+// `not a fast-forward` for every such advance, and ff-merge's own anti-livelock recovery was
+// structurally unreachable in production (the task burned its 3-attempt budget and escalated).
+//
+// NEGATIVE CONTROL BY CONSTRUCTION: this case was RED before the fix (the retry did not fire ⇒ exit 1
+// `not a fast-forward`) and GREEN after. Its single variable is the FILENAME ENCODING — the fixture also
+// asserts git's default spelling IS C-quoted, so the case cannot silently degenerate into "the increment
+// happened to be ASCII" (hard rule 4: a case that cannot fail is not a measurement).
+
+test("gap-ff-merge-quotepath-breaks-inert-retry AC2 (negative control) — a NON-ASCII-only inert increment still triggers the in-lock retry and the ff LANDS", () => {
+  const dir = makeTmp("quotepath");
+  const st = stateDir("quotepath");
+  const fx = shippedLayoutFixture("quotepath");
+  const wt = makeTmp("quotepathwt");
+  try {
+    initRepo(dir);
+    plantRegistryAtRepoRoot(dir); // the classifier's registry at the merge root (develop C2)
+    const { base, tip } = makeTaskBranchWith(dir, "qp-1", "tasks/qp-1.md", "---\nid: qp-1\n---\n");
+    // develop advances AFTER suite_head with ONE doc-only commit whose FILENAME IS NON-ASCII ONLY.
+    const nonAscii = "goals/AC-278-至少4张真实截图-非占位-且被-readme-引.md";
+    fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+    fs.writeFileSync(path.join(dir, nonAscii), "goal\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "goal doc (non-ASCII name)");
+    const developTip = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    assert.notEqual(developTip, base, "fixture premise: develop advanced past suite_head (the ONLY ff-failure reason)");
+
+    // Premise guard: the increment is exactly this one path, and git's DEFAULT spelling of it is C-quoted.
+    // ⛔ Without this the case could pass vacuously on an ASCII increment (hard rule 4 推论三: a criterion
+    // satisfiable only by a fixture is not a measurement of production).
+    const rawInc = gitCmd(dir, "diff", "--name-only", `${base}...${developTip}`).stdout.trim();
+    assert.match(rawInc, /^"goals\//, "fixture premise: git C-quotes the non-ASCII name by default — that quoted string IS the defect's input");
+    assert.equal(gitCmd(dir, "-c", "core.quotepath=false", "diff", "--name-only", `${base}...${developTip}`).stdout.trim(), nonAscii,
+      "fixture premise: with quotepath off the increment is the REAL path");
+
+    gitCmd(dir, "worktree", "add", "-q", wt, "task/qp-1"); // the in-lock retry's merge target
+    const cap = ["--suite-capture", writeSuiteCapture(st, "qp-1", base)];
+    const r = runMerge(["--task", "qp-1", "--root", dir, "--worktree", wt, "--scripts-dir", fx.scriptsDir, ...cap]);
+    // PRE-FIX reading on this same fixture: exit 1 + `FF FAILED … not a fast-forward` + a retry record
+    // (the increment was misjudged non-inert, so the retry branch was never entered).
+    assert.equal(r.status, 0, `a non-ASCII inert increment must still take the in-lock retry and land:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not a fast-forward/, "the ff must have been retried after the inert re-merge, not failed");
+    // The retry really ran: develop merged into the task branch (a merge commit) and the re-ff landed it.
+    const landed = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    assert.equal(landed, gitCmd(dir, "rev-parse", "refs/heads/task/qp-1").stdout.trim(), "develop fast-forwarded to the task tip after the retry");
+    assert.notEqual(landed, tip, "the landed tip is the POST-merge commit (develop was folded in by the retry), not the pre-retry task tip");
+    assert.equal(gitCmd(dir, "rev-list", "--count", "--merges", `${tip}..${landed}`).stdout.trim(), "1", "exactly one merge commit — the in-lock `merge develop` of the retry branch");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(fx.dir); cleanup(wt);
+  }
+});
+
+// SAME-FILE SIBLING (hard rule 5b): `git status --porcelain` C-quotes non-ASCII pathnames too, and all
+// three of cleanTreeCheck's predicates test the PARSED path (`^tasks/[^/]+\.md$` converge, `^\.quay($|/)`
+// benign, `isRuntimeArtifactPath` manifest). A quoted name therefore misjudges to "working tree not clean"
+// — and note the refusal is FAIL-CLOSED but WRONG: a legitimately benign file blocks the ff.
+// Reachability differs from the two `--name-only` sites: 0 non-ASCII files under tasks/ or .quay/ today
+// (goals/ carries 91), so this one is LATENT, not live. It is fixed and guarded anyway — the class is one
+// defect, and a future non-ASCII task file would silently reintroduce it.
+// PRE-FIX reading: exit 2 + `not clean` (the converge never fires — the path never matches).
+
+test("gap-ff-merge-quotepath-breaks-inert-retry — same-file sibling: a NON-ASCII task filename converges and the ff LANDS (porcelain parse)", () => {
+  const dir = makeTmp("qpconv");
+  const st = stateDir("qpconv");
+  const wt = makeTmp("qpconvwt");
+  try {
+    initRepo(dir);
+    const taskFile = "任务-中文名"; // non-ASCII FILENAME — the defect's input
+    writeTaskFile(dir, taskFile, "todo");
+    const tip = makeTaskBranch(dir, "fanin-x"); // task/fanin-x = that commit + work
+    gitCmd(dir, "worktree", "add", "-q", wt, "task/fanin-x");
+    flipStatusOnDisk(dir, taskFile, "ready"); // dirty: status-only flip of a NON-ASCII name
+    // Premise guard: git's default porcelain spelling of this path IS C-quoted (⛔ without this the case
+    // could pass vacuously if a future git stopped quoting — hard rule 4 推论三).
+    const rawPorcelain = gitCmd(dir, "status", "--porcelain").stdout;
+    assert.match(rawPorcelain, /^ M "/m, "fixture premise: porcelain C-quotes the non-ASCII path by default — that quoted string IS the defect's input");
+
+    const capArgs = captureArgs(st, "fanin-x", tip);
+    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, ...capArgs]);
+    assert.equal(r.status, 0, `a non-ASCII status-only dirty tree must converge and land:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not clean/, "the converge must remove the dirty-tree refusal, not report it");
+    assert.match(r.stderr, /converged a status-only dirty tree/, "the converge is attributed and observable");
+    // The converge commit carries the REAL path (raw bytes), not the C-quoted spelling.
+    const convHash = gitCmd(dir, "log", "--format=%H", "--grep=promotion-driver 翻转").stdout.trim().split("\n")[0];
+    assert.ok(convHash, "the converge commit landed");
+    const convFiles = gitCmd(dir, "-c", "core.quotepath=false", "show", "--name-only", "--format=", convHash).stdout.trim().split("\n").filter(Boolean);
+    assert.deepEqual(convFiles, [`tasks/${taskFile}.md`], "the converge commit touches the REAL non-ASCII task path");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), gitCmd(dir, "rev-parse", "refs/heads/task/fanin-x").stdout.trim(), "develop fast-forwarded to the task tip");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(wt);
+  }
+});
+
 test("AC3 — negative control, SAME install-layout fixture, single variable = the delta path: a checker-covered path ⇒ non-inert REFUSAL; a doc path ⇒ proceeds", () => {
   // The covered path is DERIVED from the real registry (never hand-picked): a candidate is covered iff
   // the real classifier prints it. ⛔ If none is covered the fixture is broken — say so, do not pass.

@@ -101,7 +101,7 @@ runner 缺 PyYAML/tmux 导致的环境性红，与本条「每次 job 重装约 
    打印的 `__PERFILE__ duration_ms=` 与 `__GROUP__ … floor_ms=`。⛔ 不拿立案时的 15 个名字当唯一清单——
    拆分后要**重新测**；任何仍 >30s 的文件（含拆分出来的分片本身、以及不在原名单里的）都是本任务对象。
 3. **压实 test job 里非测试相位的残余**（第 3 项起**无既有任务认领**）：按测得的比例逐项取证——
-   ① `Install suite runtime prerequisites`（apt PyYAML/tmux/procps，每次 job 重装）；
+   ① `Install suite runtime prerequisites`（apt PyYAML/tmux/procps，每次 job 重装）——**已由 `gap-ac282-runner-prereqs-already-present` 处置（2026-09-17）**：tokyo-alpha 的 runner 已换上预置了这三个前置的镜像 `quay-ci-runner:ac282`（可复现定义 `.github/runner/Dockerfile`），该步在它上面走 no-op 分支；读数可从载体的 `jobs[].prereqProvision` 直接读（机器可读 marker `__PREREQ__ <name>=<state>` 随该条落进 `.github/workflows/ci.yml`）⇒ ⛔ 不要重复做镜像预置；
    ② `npm install`；③ 静态检查相位里非 mutation 的部分；④ job 启动固定开销（checkout / setup-node /
    bootstrap config / coverage self-check）。处置方向按 GOAL-022 范围第三条：**把重复装包移出每次 job**
    （runner 侧预置 / 镜像 / 缓存）。⛔ **不是把某一步删掉**——`.github/workflows/ci.yml` 里每一步都有它
