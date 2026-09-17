@@ -2,7 +2,7 @@
 id: gap-ac293-system-page-zh-chrome-nav-current-and-own-title
 title: "AC-293 缺口 —— /system 页面的 zh 切换完全未接线：页头 lang、本页 <title> 与导航当前项在 Cookie:
   lang=zh 下与 en 逐字相同"
-status: ready
+status: done
 labels:
   - gap
   - webui
