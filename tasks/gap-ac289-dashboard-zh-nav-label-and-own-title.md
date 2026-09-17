@@ -1,7 +1,7 @@
 ---
 id: gap-ac289-dashboard-zh-nav-label-and-own-title
 title: AC-289 缺口 —— /dashboard 的 zh 切换只翻了页头 lang 属性，nav 当前项标签与页面自身 title 仍是英文硬编码
-status: todo
+status: ready
 labels:
   - gap
   - webui
