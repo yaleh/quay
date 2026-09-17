@@ -86,19 +86,64 @@ EXIT=2          ← 闸只关了 active 那一半
 
 ## AC
 
-- [ ] **AC1（真 CLI：禁止态已不可达）**：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts write GOAL-997 --status draft --title … --origin … --body "<≥40 非空白字符>" --dry-run` ⇒ **exit ≠ 0**，且 stderr 枚举「ACs naming GOAL-997: 0」。**今天的读数是 exit 0**（见 Finding 第一段），故本条今天红。
-- [ ] **AC2（自然顺序仍可用，三段读数）**：①`goal-store write AC-997 --goal GOAL-997 --status draft --criterion 'true' --expect … --origin …` ⇒ exit 0；②随后 `write GOAL-997 --status draft …` ⇒ exit 0；③再 `write GOAL-997 --status active` ⇒ exit 0，且 `list` 能看到该 GOAL 与它的 AC。
-- [ ] **AC3（窗口在盘上真的不存在，⛔ 不是「测试够快」）**：在 AC2 的**每一步之后**各跑一次 AC-217 的判据原文（`goal-store.ts list | <python>`，`--root` 指向该 store）⇒ **三次全 exit 0**；并给出**改前**同一序列的对照读数（改前第 ② 步后那一次 exit 1）。⛔ 不接受「时间窗太短所以测不到」——本条要的是**状态不可达**，不是时序侥幸。
-- [ ] **AC4（⛔ 判据未被弱化，双向控制）**：逐字重跑 `goals/AC-217-*.md` 的 criterion 原文（从文件读出，⛔ 不另抄谓词）：①对本仓 store ⇒ exit 0；②对注入了零 AC **active** GOAL 的临时 `--root` ⇒ exit 1；③对注入了零 AC **draft** GOAL 的临时 `--root` ⇒ exit 1。③是关键：改后判据的作用域一个字都没动。
-- [ ] **AC5（调用点枚举，硬规则 5b）**：把 Requested action 里列的**每一个**调用点逐条核过，贴出「命中数 + 前 3 条实际内容」；改后 `bash scripts/test.sh --for-task <本任务 id>` ⇒ exit 0，并贴出受影响测试文件单独跑绿的读数。⛔ 只修被报出来的那一个不算完成。
-- [ ] **AC6（负控制·实现可证伪）**：把实现改回「出生放行」（谓词退回只覆盖 `nextStatus === "active"`）⇒ AC1 必须红；贴出改前/改后两次读数对照。
+- [x] **AC1（真 CLI：禁止态已不可达）**：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts write GOAL-997 --status draft --title … --origin … --body "<≥40 非空白字符>" --dry-run` ⇒ **exit ≠ 0**，且 stderr 枚举「ACs naming GOAL-997: 0」。**今天的读数是 exit 0**（见 Finding 第一段），故本条今天红。
+- [x] **AC2（自然顺序仍可用，三段读数）**：①`goal-store write AC-997 --goal GOAL-997 --status draft --criterion 'true' --expect … --origin …` ⇒ exit 0；②随后 `write GOAL-997 --status draft …` ⇒ exit 0；③再 `write GOAL-997 --status active` ⇒ exit 0，且 `list` 能看到该 GOAL 与它的 AC。
+- [x] **AC3（窗口在盘上真的不存在，⛔ 不是「测试够快」）**：在 AC2 的**每一步之后**各跑一次 AC-217 的判据原文（`goal-store.ts list | <python>`，`--root` 指向该 store）⇒ **三次全 exit 0**；并给出**改前**同一序列的对照读数（改前第 ② 步后那一次 exit 1）。⛔ 不接受「时间窗太短所以测不到」——本条要的是**状态不可达**，不是时序侥幸。
+- [x] **AC4（⛔ 判据未被弱化，双向控制）**：逐字重跑 `goals/AC-217-*.md` 的 criterion 原文（从文件读出，⛔ 不另抄谓词）：①对本仓 store ⇒ exit 0；②对注入了零 AC **active** GOAL 的临时 `--root` ⇒ exit 1；③对注入了零 AC **draft** GOAL 的临时 `--root` ⇒ exit 1。③是关键：改后判据的作用域一个字都没动。
+- [x] **AC5（调用点枚举，硬规则 5b）**：把 Requested action 里列的**每一个**调用点逐条核过，贴出「命中数 + 前 3 条实际内容」；改后 `bash scripts/test.sh --for-task <本任务 id>` ⇒ exit 0，并贴出受影响测试文件单独跑绿的读数。⛔ 只修被报出来的那一个不算完成。
+- [x] **AC6（负控制·实现可证伪）**：把实现改回「出生放行」（谓词退回只覆盖 `nextStatus === "active"`）⇒ AC1 必须红；贴出改前/改后两次读数对照。
 
 ## DoD
 
-- [ ] AC1–AC6 全部实跑通过，每条带命令 + 完整输出 + exit code，⛔ 不是自述结论。
-- [ ] 修的是**已有的那一道** P6-goal 闸（`goal-store.ts:2232`）并覆盖到 draft 出生路径，⛔ 不新建并行机制。
-- [ ] **在 goal driver 的真实读取面上成立**：AC-217 是常设不变式，goal-driver 每轮在**主检出**跑它的判据 ⇒ 落地后在主检出跑一次判据原文并贴读数（⛔ 不是只在任务 worktree 里绿）。
-- [ ] **替代收口路径（唯一合法的一种）**：若实现者得出「**draft 作用域本身**才是缺陷」的结论，⛔ **不得静默收窄 AC-217**（它是人 2026-09-09 裁定②的常设不变式、expect 逐字覆盖 draft）——把证据写进任务体、升级到人裁定，并说明为何不是写面问题。⛔ 不得以「加宽限期 / 给 spawn 加豁免」代替关窗。
+- [x] AC1–AC6 全部实跑通过，每条带命令 + 完整输出 + exit code，⛔ 不是自述结论。
+- [x] 修的是**已有的那一道** P6-goal 闸（`goal-store.ts:2232`）并覆盖到 draft 出生路径，⛔ 不新建并行机制。
+- [x] **在 goal driver 的真实读取面上成立**：AC-217 是常设不变式，goal-driver 每轮在**主检出**跑它的判据 ⇒ 落地后在主检出跑一次判据原文并贴读数（⛔ 不是只在任务 worktree 里绿）。
+- [x] **替代收口路径（唯一合法的一种）**：若实现者得出「**draft 作用域本身**才是缺陷」的结论，⛔ **不得静默收窄 AC-217**（它是人 2026-09-09 裁定②的常设不变式、expect 逐字覆盖 draft）——把证据写进任务体、升级到人裁定，并说明为何不是写面问题。⛔ 不得以「加宽限期 / 给 spawn 加豁免」代替关窗。
+
+## Evidence
+
+全部为本回合实跑读数（cwd = 任务 worktree，⛔ 非自述）。AC-217 的判据一律**从 `goals/AC-217-*.md` 用 store 自己的 frontmatter parser 读出后逐字执行**（⛔ 不另抄谓词；临时 root 里放一份 `packages/quay/src` 副本并以 cwd 选根，criterion 文本一字未改）。
+
+**AC1 — 禁止态已不可达**：
+```
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts \
+    write GOAL-997 --status draft --title "probe draft" --origin "probe" --body "…" --dry-run
+goal-store: write failed: cannot write GOAL-997 as draft: 0 AC records name it — a GOAL in {draft, active}
+must carry at least one AC (… ACs naming GOAL-997: 0). Write the AC first — an AC may name a GOAL that
+does not exist yet …
+EXIT=2
+```
+同一条经 Provider ABI（`quay goal write GOAL-002 …`，装好的 CLI 面）⇒ **exit 1**，同一条讯息（枚举句逐字相同）。`--force` 不放行（exit 2）。
+
+**AC2 — 自然顺序三段全 0**：① `write AC-997 --goal GOAL-997 --status draft --criterion 'true' --expect … --origin probe` ⇒ **exit 0**；② `write GOAL-997 --status draft --title … --body …` ⇒ **exit 0**；③ `write GOAL-997 --status active` ⇒ **exit 0**；`list` ⇒ `[('AC-997','draft'),('GOAL-997','active')]`。
+
+**AC3 — 2×2 矩阵（写序 × 实现），每步之后跑一次判据原文**：
+```
+PRE-FIX  × GOAL-first ：GOAL draft exit 0 → 判据 exit 1（stderr「active GOAL(s) with zero ACs: GOAL-997」）→ AC exit 0 → 判据 exit 0   ← 改前对照：窗口存在
+PRE-FIX  × AC-first   ：判据 exit 0 / 0 / 0
+POST-FIX × GOAL-first ：GOAL draft exit 2（被拒）→ 判据 exit 0（禁态从未落盘）→ AC exit 0 → 判据 exit 0
+POST-FIX × AC-first   ：B2/B4/B6 三次判据全 exit 0
+```
+⇒ 改后 GOAL-first 这条路径**连第一步都执行不了**（exit 2）：要的是**状态不可达**，不是「窗口更短」。两条 store 跑的是**同一串 shell 命令**，唯一差别是那个 `goal-store.ts`。
+
+**AC4 — 判据未弱化（criterion 原文逐字）**：① 主检出 `/home/yale/work/quay` ⇒ **exit 0**；② 注入零 AC **active** GOAL 的临时 root ⇒ **exit 1**（stderr `active GOAL(s) with zero ACs: GOAL-999`）；③ 注入零 AC **draft** GOAL ⇒ **exit 1**（同一条 stderr）。③ 是「作用域一个字没动」那一格。
+
+**AC5 — 调用点枚举 + 套件**：改前全仓「创建 GOAL 且此前无 AC 指名」的严格序扫描命中 **12** 条，前 3 条实际内容：
+```
+packages/quay/test/gap-frontmatter-slugify-drops-non-ascii.test.mjs:80  goal.write("GOAL-900", {
+packages/quay/test/gap-goal-status-stale-…:64  store.write("GOAL-001", { title: "g", status: "draft", origin: "o", body: GOAL_BODY });
+packages/quay/test/goal-store.test.mjs:149    s.write("GOAL-010", { title: "p10", status: "draft", origin: "o1", body: GOAL_BODY });
+```
+⚠️ **本任务清单没列、但同属该形态的一处生产调用点**：`plugin/scripts/meta-driver.ts` 的决策路由（`decisionGoalWriteArgv`，写的是 GOAL 而旧谓词只管 active）——闸扩到 draft 后每次决策路由都会 exit 2，故一并修（先落「退出条件 AC」再落 draft GOAL，3 条新测试钉住）。改后同一扫描剩 **5** 条，全部逐条核为良性：同行 `seedAc` 先行 1、`invalid goal id` 负控制 1、`--expect-existing` 负控制 1、`--status achieved` 2（`achieved` 不在作用域）。
+受影响测试文件逐个跑绿（rc 全 0）：goal-store 72/72、store-commit 13/13、gap-goal-status-stale… 8/8、gap-goal-record-completeness… 5/5、gap-frontmatter-slugify… 4/4、goal-gate 6/6、goal-born-draft-zero-ac-gate 6/6（新）、goal-invariants-standing 19/19、meta-driver 131/131。
+`bash scripts/test.sh --for-task gap-goal-born-draft-zero-ac-escapes-standing-invariant --allow-thin` ⇒ **exit 0**（ℹ tests 384 / pass 384 / fail 0），在 develop tip `3f149c29b` 上跑。
+`anti-drift-touches-check --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK — 13 actual file(s), all within declared Touches (15 glob(s))`。
+
+**AC6 — 负控制（实现可证伪）**：备份 `goal-store.ts` → 把谓词改回 `nextStatus === "active"` → 跑新测试文件 ⇒ **6 条中 4 条红**（AC1 CLI、AC1 library、AC3 unreachable、AC6 双向），另 2 条恰是 active 半边（本就已关上）→ 还原后 `git status` 干净。⇒ 判据随实现翻转，不是恒绿。
+
+**DoD③（主检出读取面）**：`cd /home/yale/work/quay && bash -c "<AC-217 criterion 原文>"` ⇒ **exit 0**（stderr 空）。落地后 goal-driver 每轮读的就是这个面。
+
+**一处如实说明**：`## Touches` 里的 `packages/quay/plugin/scripts/verify-deliver-coldstart.sh` 是 **pack-time 暂存快照**（`.gitignore:26`：由 `package.sh` 在 `npm pack` 前从仓库根 `plugin/` 生成，从不入 git）。它不在任何 fresh worktree 里 ⇒ 不在本次 delta 内；我修的是它的**源**（`plugin/scripts/verify-deliver-coldstart.sh`：AC-232 写读回探针与 AC-234 兜底播种两处），下次 pack 时镜像随源同步。
 
 ## Touches
 
