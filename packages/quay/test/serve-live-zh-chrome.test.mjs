@@ -225,17 +225,24 @@ test("AC-black-box: /live under Cookie lang=zh switches html lang, both nav curr
   assert.equal(h1Of(zh.body), `${H1_TOKEN_ZH} — 循环此刻在做什么`, "the zh <h1> is translated");
 });
 
-test("AC-black-box: /journal is untouched by this task (its <title> is the same in both languages)", async () => {
+test("AC-black-box: /journal is ALSO wired — both routes of serve-live.ts switch, neither left behind", async () => {
   // ⛔ /live and /journal share serve-live.ts. Wiring the wrong one of the two would still pass
-  // every assertion above, so the scope boundary is asserted rather than assumed: /journal belongs
-  // to AC-296 and must render its English token under zh for now — a VISIBLE degradation (ROW 3),
-  // never a blank title.
+  // every assertion above, so the scope boundary is asserted rather than assumed.
+  //
+  // AC-291 wrote this test the OTHER way round: /journal belonged to AC-296 and was required to
+  // render its English token under zh. AC-296 has since landed (it wired /journal in the same
+  // four-point shape), so the boundary this shared file now needs is the mirror one — a change that
+  // wired ONE route and silently left the other English would satisfy the /live assertions above.
+  // AC-296's own file (serve-journal-zh-chrome.test.mjs) asserts /journal in full; this line keeps
+  // the PAIR honest at the file they share.
   const en = await request(port, "/journal");
   const zh = await request(port, "/journal", { Cookie: "lang=zh" });
   assert.equal(en.status, 200, "GET /journal (en) returns 200");
   assert.equal(zh.status, 200, "GET /journal (zh) returns 200");
-  assert.equal(headTitle(zh.body), headTitle(en.body),
-    "/journal's own <title> is unchanged by this task (it is AC-296's page, not AC-291's)");
   assert.ok(headTitle(en.body).endsWith(" — Journal — recent loop record"),
-    "the /journal <title> still carries its English page token");
+    "the /journal en <title> still carries its English page token");
+  assert.ok(headTitle(zh.body).endsWith(" — 日志 — 循环最近记录"),
+    `the /journal zh <title> is translated (AC-296) — got ${JSON.stringify(headTitle(zh.body))}`);
+  assert.notEqual(headTitle(zh.body), headTitle(en.body),
+    "/journal's own <title> differs across the two languages — the shared file's second route is wired");
 });

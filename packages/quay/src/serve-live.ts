@@ -74,8 +74,8 @@ export function suiteSuffix(suite: SuiteStateView | null): string {
  *  `pageNameFor` against serve-i18n.ts's PAGE_LABELS). The last two are the whole point: wiring
  *  only the shared nav would leave this page's own `<title>` English, and "the shared bar switched
  *  but THIS page did not" is precisely the defect the criterion's `title-unchanged` arm rejects.
- *  ⛔ `/journal` (renderJournalPage below) is deliberately NOT wired here — it is another nav route
- *  and another task's page (AC-296). */
+ *  ⛔ `/journal` (renderJournalPage below) is NOT wired by THIS task — it is another nav route and
+ *  AC-296's page; AC-296 wired it there with the identical four-point shape. */
 export function renderLivePage(live: LiveResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
@@ -166,11 +166,17 @@ export function renderLivePage(live: LiveResult, identity: ServeIdentity | null 
     </main></body></html>`;
 }
 
-function renderJournalPage(journal: JournalResult, identity: ServeIdentity | null = null): string {
+/** AC-296: `lang` is the request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher). Same four-point shape as renderLivePage above and for the same reason — the
+ *  `<html lang>` attribute, the shared nav bar, the MOBILE nav, and this page's OWN chrome
+ *  (`<title>` token + `<h1>` token via `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
+ *  The last two are the whole point: a shared nav bar that switches while THIS page's own
+ *  `<title>` stays English is precisely what the criterion's `title-unchanged` arm rejects. */
+function renderJournalPage(journal: JournalResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>${pageTitle("Journal — recent loop record", identity)}</title></head>
-    <body>${renderMobileChrome("journal", "journal")}${renderSiteNav("journal")}<main id="main">
-      <h1>Journal — 循环最近记录</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>${pageTitle("Journal — recent loop record", identity, lang)}</title></head>
+    <body>${renderMobileChrome("journal", "journal", lang)}${renderSiteNav("journal", lang)}<main id="main">
+      <h1>${pageNameFor("Journal", lang)} — 循环最近记录</h1>
       ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
       ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
       ${renderSectionBlock(journal.commits, "最近提交 (git log)")}
@@ -218,5 +224,5 @@ export async function handleJournal(
     journal = { escalations: degraded, tickLog: degraded, commits: degraded };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderJournalPage(journal, cfg.identity));
+  res.end(renderJournalPage(journal, cfg.identity, cfg.lang));
 }

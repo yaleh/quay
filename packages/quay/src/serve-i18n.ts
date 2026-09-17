@@ -21,8 +21,9 @@
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
-//   /live (AC-291), /board (AC-292), /system (AC-293) and /manager (AC-294); the remaining 9
-//   pages' page-chrome is AC-295~303, and each adds its own tokens as it lands.
+//   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294) and /journal (AC-296);
+//   the remaining 8 pages' page-chrome is AC-295 and AC-297~303, and each adds its own tokens as
+//   it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -159,6 +160,22 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // resolves through `navLabel` (shared chrome, ROW 1) while this resolves through `pageNameFor`
   // (this page's chrome, ROW 3), which is ROW 3's whole point.
   "Manager / Outer / Inner": { en: "Manager / Outer / Inner", zh: "管理器 / 外层 / 内层" },
+  // AC-296 (/journal page): this page's own TWO tokens, same shape as AC-291's / AC-292's /
+  // AC-293's pairs. `Journal — recent loop record` is the FULL token `serve-live.ts` passes to
+  // `pageTitle` — the em dash and the whole phrase included, byte-equal to that call site, because
+  // AC-296's third arm compares this page's `<title>` against its en baseline and a token that is
+  // not byte-equal MISSES the lookup (that miss IS the `title-unchanged` arm, i.e. the exact defect
+  // AC-296 exists to remove — registering the bare `Journal` here would leave the title English).
+  // `Journal` is the token the `<h1>` carries; it is spelled like the nav KEY `journal`, but like
+  // AC-290's `Tasks` it is a separate lookup on purpose — the nav label resolves through
+  // `NAV_LABELS` (shared chrome, ROW 1) while this resolves through `pageNameFor` (this page's
+  // chrome, ROW 3).
+  // Neither zh value may carry the ASCII literal "Journal": AC-296's second arm fails the page on
+  // that literal inside the nav region — where this page's CURRENT item label comes from
+  // NAV_LABELS's `journal` row (「日志」, ROW 1) — and "日志 — 循环最近记录" satisfies "non-empty"
+  // without it.
+  "Journal — recent loop record": { en: "Journal — recent loop record", zh: "日志 — 循环最近记录" },
+  Journal: { en: "Journal", zh: "日志" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
