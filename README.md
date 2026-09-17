@@ -437,9 +437,35 @@ session". The session's lifecycle belongs to the human; quay only turns an
 already-running session into a role. The retired `outer`/`inner` two-session tmux
 model (`session-liveness.sh` / `quay-topology.sh` / `outer-session-check.sh` /
 `topology-check.sh`) was **deleted, not migrated** — see
-`orchestration/SPEC-tmux-retirement-2026-09-03.md`. The cold-start skill that
-re-created the "outer cron + drive inner" model is likewise retired; the drivers +
-manager skills above are its successors.
+`orchestration/SPEC-tmux-retirement-2026-09-03.md`. The **model** the
+`quay-cold-start` skill described — "create an outer cron, then drive an inner
+session" — is retired, and the `drivers` + `manager` skills above are its
+successors. The skill **file itself is still shipped and still invocable**
+(`plugin/skills/cold-start/SKILL.md`, listed in the session skill set as
+`quay:cold-start`), but it opens with a `⛔ RETIRED` banner and the procedure it
+describes must not be followed; it is retained for historical reference pending a
+rewrite. Read it as history, not as the current cold-start procedure.
+
+**Proving the loop is live is a one-shot reading; staying live is a cron.** Two
+different things — only the first is a step you perform:
+
+- **Liveness (once, right after ③④⑤):** ask the drivers, don't inspect the process
+  table — `quay driver status --kind promotion --json` (and `--kind worker`) reports
+  `{supervisor_pid, driver_pid, alive, …}`, and each driver appends its own heartbeat
+  to `.quay/<kind>-driver-liveness.log`. The strongest reading is a *direct* artefact:
+  a task worktree appearing under the worktree root with real commits in it. Something
+  that merely *exists* is not evidence — a driver can be up while nothing is dispatched.
+- **Continuous dispatch (afterwards, unattended):** the resident drivers keep
+  dispatching on their own, and the manager layer re-evaluates on a **cron** tick —
+  `/quay:manager` arms exactly one `CronCreate` job (sentinel `[manager-tick]`, via
+  `plugin/scripts/manager-arm-loop.sh`), and the session's cron re-fires the tick.
+  Dispatch is therefore periodic and unattended, **not** a human re-running a
+  command; if the cron is gone the board stops moving while every process is still up.
+
+> An older liveness reading — a `--task-start` **telemetry** record under
+> `.workflow-events/*.jsonl` — belongs to the retired `inner` layer and to the
+> retained `quay-cold-start` skill that asserts it. The live driver pipeline writes
+> the readings in the first bullet above, not that directory; prefer them.
 
 What `--loop` lays into the target project (from the plugin bundle — nothing is
 copied out of the quay development tree):
@@ -584,6 +610,33 @@ supervisor. The unified entry point:
 quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer|quality|meta|goal> [--root <path>] [flags]
 ```
 
+**A running deployment is three independent resident processes, not one.** The
+enablement flow's step ④ (`/quay:drivers`) starts all three in one idempotent
+in-session call; `/quay:drivers` is a convenience wrapper, and the start logic
+lives in exactly one executable (`plugin/scripts/start-drivers.ts`) rather than
+in the skill body. What it wraps — the hand-run equivalent, for any host with no
+slash-skill channel (bare CLI, a non-Claude-Code host):
+
+```sh
+# 1. promotion driver — advances todo → ready by applying the author gate
+quay driver start --kind promotion [--root <path>]
+
+# 2. worker driver — dispatches ready tasks into per-task worktrees,
+#    runs them to a gate verdict, and lands them (see "Task lifecycle" below)
+quay driver start --kind worker [--root <path>]
+
+# 3. the web UI — a SEPARATE process, with no supervisor of its own
+quay serve --host <ip> --port <p>          # default 0.0.0.0:4173
+```
+
+All three have **independent lifecycles**: restarting one does not restart the
+others, and `quay serve` is *not* supervised by the driver supervisor — the start
+script backgrounds it itself (and reloads it when its `/health` reports
+`stale:true`, i.e. the code in memory is older than the code on disk). The driver
+kernel knows the kinds `promotion | worker | outer | quality | meta | goal`; a
+project's enablement flow starts **promotion + worker**, the two that make a board
+progress (`outer` the session role is retired — see the enablement-flow section).
+
 | verb | semantics |
 |---|---|
 | `start` | Start the resident driver under the supervisor (respawn on exit/kill/crash) |
@@ -709,6 +762,21 @@ A task's status transitions are: `todo → ready → done` forward (via
 as the legal backward path. `quay task check <id>` remains the ABI's gate
 assertion — it reports whether every AC checkbox is honestly backed and the
 task is in a gate-passing status, without mutating anything.
+
+**What the status machine does not show: the landing path.** `done` is a task
+state, not a landed change. Between `ready` and a landed change the worker driver:
+
+- **isolates every dispatched task in its own `git worktree`** — one worktree per
+  task (branched off `develop`), where it implements → self-audits → gates. The
+  shared checkout is never edited in place, so concurrent tasks cannot collide;
+- **may park a task in `needs-human`** — a terminal hold for work that needs a human
+  decision — whose only legal way back is `retreat` to `todo`. A task can therefore
+  move `ready → needs-human → todo → ready` more than once before it ever lands;
+- **lands it through fan-in**, which happens *after* the status flip: merge
+  `develop` into the task's worktree, run typecheck + the scoped gate + the full
+  suite on the merged result, and only then fast-forward-merge the task branch into
+  `develop`. A `done` task whose fan-in has not run is a claim, not a landed change
+  — its code is still only on its own branch.
 
 ## Distribution: single-file executables (SEA) — **no longer published**
 

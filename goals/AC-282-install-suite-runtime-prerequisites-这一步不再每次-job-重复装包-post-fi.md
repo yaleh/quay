@@ -2,7 +2,7 @@
 id: AC-282
 title: Install suite runtime prerequisites 这一步不再每次 job 重复装包——post-filing 最新一次
   develop CI test job 的日志派生出三个前置全部 already-present（零 per-job install）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -115,6 +115,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-17T05:30:46.211Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
