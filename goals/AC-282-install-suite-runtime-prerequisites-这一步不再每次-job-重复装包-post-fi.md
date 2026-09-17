@@ -2,7 +2,7 @@
 id: AC-282
 title: Install suite runtime prerequisites 这一步不再每次 job 重复装包——post-filing 最新一次
   develop CI test job 的日志派生出三个前置全部 already-present（零 per-job install）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -107,7 +107,16 @@ criterion: >-
 expect: criterion exits 0 once .quay/ci-runs.jsonl 里本 GOAL 立案之后最新一次 develop CI
   test job 的 prereqProvision 读数显示三个前置全部为 already-present；任一为 installed-* ⇒ exit
   1；读数缺失/派生不出 ⇒ exit 1 且带独立 CAUSE（不与通过同形）。
-origin: GOAL-022 范围节第三条『自定义 runner 镜像消除重复装包』；实测该步每次 job 重装 PyYAML/tmux/procps
-  ~8s；该步占 30s 目标的 26.7%。人 2026-09-17 裁定采纳 goal-sufficiency-followup 提案 option
-  (a)。
+origin: manager 2026-09-17 激活，随 GOAL-022 退出条件更新一并生效
+activatedAt: 2026-09-17T02:12:35.567Z
+statusLog:
+  - at: 2026-09-17T02:12:35.567Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-17T02:12:35.567Z
 ---
