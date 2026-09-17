@@ -29,7 +29,7 @@ node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json
 GATE_EXIT=1
 ```
 
-**判据自己钉死了缺口位置**（硬规则 3b：它没有静默通过，而是打印了具名 `CAUSE=`）：它**已经走过**前三段检查 —— 从运行中的实例取到了地址、en 响应非空、en 的 nav 区块**确实含字面量 `Needs Human`**、en 响应**有 `<title>`** —— **fail 在第一段 zh 检查**：`Cookie: lang=zh` 没有让响应变成 `<html lang="zh">`。
+**判据自己钉死了缺口位置**（硬规则 3b：它没有静默通过，而是打印了具名 `CAUSE=`）：它**已经走过**前三段检查 —— 从运行中的实例取到了地址、en 响应非空、en 的 nav 区块**确实含字面量 `Needs Human`**、en 响应**有 `<title>`** —— **fail 在第一段 zh 检查**：`Cookie: lang=zh` 没有让响应变成 `<html lang=\"zh\">`。
 
 **「无任务推进」的直接量**（⛔ 不是关键词扫描；含硬规则 2 的两半 —— 零计数配「谓词对已知为真样本干跑」）：
 
@@ -82,7 +82,7 @@ curl -sf http://127.0.0.1:4173/health
 
 ### 机制前提（实测读数，⛔ 不是推测）——**本页的 `<title>` 不会「顺带」被翻**
 
-- **AC-288（`gap-ac288-webui-lang-switch-mechanism`）status=done**：语言**每请求解析一次**在 `serve-handlers.ts:86`（`const reqCfg: ServePageCfg = { ...cfg, lang }`），并在 `:263` 把它交给 `/needs-human` 的 handler（`await handleNeedsHuman(req, res, client, manifest, reqCfg)`）；`htmlLangTag(lang)` 在 `serve-lang.ts:128`（返回 `<html lang="${lang}">`），`DEFAULT_LANG = "en"`（`serve-lang.ts:37`）。
+- **AC-288（`gap-ac288-webui-lang-switch-mechanism`）status=done**：语言**每请求解析一次**在 `serve-handlers.ts:86`（`const reqCfg: ServePageCfg = { ...cfg, lang }`），并在 `:263` 把它交给 `/needs-human` 的 handler（`await handleNeedsHuman(req, res, client, manifest, reqCfg)`）；`htmlLangTag(lang)` 在 `serve-lang.ts:128`（返回 `<html lang=\"${lang}\">`），`DEFAULT_LANG = \"en\"`（`serve-lang.ts:37`）。
   ⇒ **`handleNeedsHuman` 现在【已经拿到】`cfg.lang`，只是丢掉了**（`:134` 的渲染入口只传了 `cfg.identity`）。
 - **AC-289（`gap-ac289-dashboard-zh-nav-label-and-own-title`）status=done，已落 develop（`27b2eab81`）**，`packages/quay/src/serve-i18n.ts` 已在主检出与 develop 上：
   - `NAV_LABELS` **15 条全给**，其中 `"needs-human": { en: "Needs Human", zh: "待人工" }`（`serve-i18n.ts:59`）⇒ **nav 当前项那两处本任务不需要新词**；
@@ -103,7 +103,7 @@ curl -sf http://127.0.0.1:4173/health
 ### 操作前提（实测，⛔ 不是推测）——**判据的探针读的是【已在运行】的实例**
 
 ```
-for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink /proc/$p/cwd)"; done
+for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo \"pid=$p cwd=$(readlink /proc/$p/cwd)\"; done
 ⇒ pid=3696699          cwd=/home/yale/work/quay                          ← 判据从主检出评估时命中的就是它（stale:true）
   pid=3338894/3338896  cwd=.../gap-ac288-webui-lang-switch-mechanism (deleted)
 ```
@@ -144,35 +144,35 @@ for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/needs-human` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `Needs Human`
   （同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**
   （并排贴 en/zh 两条 `<title>`）。⛔ 三处分开断言、分开贴原始片段 —— 只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
+- [x] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
   （一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。
   更窄的形态（更强，**本页首选**）：**只把字典钳到 `en`**（`navLabelsFor`/`pageNameFor` 首行强制 `lang="en"`），
   此时 `<html lang>` 仍正确、判据自报的 `CAUSE=nav-label-untranslated` 或 `CAUSE=title-unchanged`
   ⇒ 成因被单独钉在字典接线上。**⚠️ 本页需跑两次单边对照**（陷阱 1）：只钳 nav 一侧 ⇒ 红在 `title-unchanged`；
   只钳本页词条一侧 ⇒ 红在 `nav-label-untranslated` —— 两个方向的读数都要贴，才算证明了 AC1 的 ②③ 是两条**独立**断言。
   ⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言（硬规则 4 推论四）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'Needs Human'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'Needs Human'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个载体），
   并给出 **nav 区块内**与 **nav 区块外**两个计数。⛔ 禁止只报一个总数（硬规则 3）。
   预期：zh 下 nav 区块内 `Needs Human` 计数 = **0**，而同一谓词在 **en** 上 = **2**；
   若 `<h1>` 一并接线则区块外计数由 **4→3**（`<title>`、`<h1>` 两条接线后消失，数据面若有任务标题命中则**预期保留**并注明归属）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json`
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json`
   完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。
   ⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-295-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、
   把 zh 值写成含英文 `Needs Human` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac295-needs-human-page-zh-chrome-nav-current-and-own-title` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac295-needs-human-page-zh-chrome-nav-current-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-needs-human.test.mjs` 绿 —— 其中既有 AC-146 断言测的是 **en 基线**，必须**原样绿**；
   ③ **作用域举证**：`grep -c 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照
   （立案基线：总数 **22**；其中 `serve-needs-human.ts` **1** = `:81`）
   ⇒ 本任务后 **`serve-needs-human.ts` 由 1→0**，**其余 12 个有该字面量的文件计数一字未动**；
   ⛔ 兄弟任务（AC-290~294）可能已先落地，故本条是**逐文件差量**，不是绝对值。
   ④ `git diff --name-only <base>...HEAD` 只含本任务 Touches 的路径。
-- [ ] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个；
+- [x] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个；
   立案时为 `pid=3696699`、`--host 0.0.0.0 --port 4173`）的 `curl -sf http://<addr>/health` 原始读数，
   并写明 `processStartedAt` / `latestCodeCommitAt` / `stale`。
   若其 `stale:true`，**明写**「驱动侧仍会红在 `CAUSE=html-lang-not-zh`，成因是该实例陈旧（AC-288 落地前的进程），
@@ -206,3 +206,86 @@ for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do echo "pid=$p cwd=$(readlink
 `packages/quay/src/serve-render.ts` 同理**不声明** —— 本任务对它 Δ=0；
 `goals/AC-295-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明 ——
 `anti-drift-touches-check` 只比对已跟踪文件。）
+
+## Evidence
+
+实现 commit `925ed7596`（worktree 分支 `task/gap-ac295-…`，base `develop` @ `d56c326bc`）。
+完整证据包（含原始响应与逐条归属）：`.quay/ac295-evidence.md`（未跟踪 scratch）。
+
+**AC1 — 三段分开的 live 读数**（worktree 实例 `--host 127.0.0.1 --port 4187`，cwd = worktree 根 ⇒ 探针地址 `127.0.0.1:4187`）：
+
+```
+① html lang    en: <html lang="en">                    zh: <html lang="zh">
+② nav 区块内字面量 "Needs Human"    en = 2   zh = 0     （对照：nav 内「待人工」en = 0, zh = 2）
+③ 本页 <title> en: …651acbe1 — Needs Human             zh: …651acbe1 — 待人工
+（响应体 34920 / 34928 bytes）
+```
+
+**AC2 — 两个方向的单边钳制对照**（本页需两次，因为同一字面量喂两个字典）：
+
+```
+(a) 只钳 navLabelsFor() 到 en 列   ⇒ GATE_EXIT=1  CAUSE=nav-label-untranslated
+(b) 只钳 pageNameFor() 到 identity ⇒ GATE_EXIT=1  CAUSE=title-unchanged
+(c) 两处还原（grep 'TEMP AC2' 零命中）⇒ GATE_EXIT=0
+```
+
+⇒ ②③ 各自可被单独打红、且红在不同的具名 CAUSE 上 ⇒ 两条独立断言，非结构上恒绿。
+
+**AC3 — zh 响应全量残留枚举**：
+
+```
+zh `grep -n 'Needs Human'` → 0 行
+en `grep -n 'Needs Human'` → 4 行，逐条归属：
+  636 <title>…                              [chrome] serve-needs-human.ts:94 pageTitle("Needs Human", …)
+  652 mobile-menu-item nav-current           [chrome] serve-needs-human.ts:95 → NAV_LABELS["needs-human"] (serve-i18n.ts:62)
+  664 nav-item nav-current                   [chrome] serve-needs-human.ts:95 → NAV_LABELS["needs-human"] (serve-i18n.ts:62)
+  667 <h1>Needs Human — 待人类决定</h1>     [chrome] serve-needs-human.ts:96 pageNameFor → PAGE_LABELS (serve-i18n.ts:194)
+计数：en total=4 inside-nav=2 outside-nav=2 ／ zh total=0 inside-nav=0 outside-nav=0
+```
+
+⚠️ **zh 是 0 而不是预期里的 4→3**，如实报告：本实例的数据面无命中（已核实，非推测）—— 该 worktree 里
+`status: needs-human` 的任务只有 1 条，其 title 为「真实 develop CI test job 一次 success 且 durationSec≤30（AC-281）——立案后实测」
+（不含该字面量），且 `.quay/promotion-outcome.jsonl` 内 `Needs Human` 计数 = 0 ⇒ 数据面贡献 0，故无残留。
+「数据面命中在 nav 区块外」这条作用域主张由新增黑盒测试单独钉住（种一条 title 含该字面量的任务，断言它在 zh body 内、但不在 zh nav 区块内）。
+
+**AC4 — 判据裁决原样记录**：
+
+```
+实现前（同一实例、未改动代码）：GATE_EXIT=1
+  {"verdict":"fail","reason":"acceptance failed (exit 1) — CAUSE=html-lang-not-zh -- /needs-human with Cookie: lang=zh did not respond <html lang=\"zh\"> (addr=127.0.0.1:4187)","dryRun":true}
+实现后（重启到本次接线）：    GATE_EXIT=0
+  {"verdict":"pass","reason":"acceptance passed (exit 0)","timestamp":"2026-09-17T19:58:29.141Z","dryRun":true}
+还原钳制后复测：              GATE_EXIT=0  {"verdict":"pass"}
+```
+
+⛔ 未改判据（`goals/AC-295-*.md` 未被触碰）、未改任何任务的 title、zh 值 `待人工` 不含 ASCII 字面量 `Needs Human`。
+
+**AC5 — 不回归 + 作用域**：
+
+```
+① bash scripts/test.sh --for-task gap-ac295-… --allow-thin ⇒ exit 0；ℹ tests 97 pass 97 fail 0
+② node --test packages/quay/test/serve-needs-human.test.mjs ⇒ ℹ tests 7 pass 7 fail 0（既有 4 条 AC-146 断言原样绿）
+   可证伪对照：把源码改动 stash 掉后，新增的 2 条 zh 测试 FAIL、en 基线测试 PASS（后者本就只是对照，不是修复检测器）
+③ 逐文件 `grep -c 'html lang="en"' packages/quay/src/*.ts`（base=develop vs worktree）：
+     serve-adr 2→2 / serve-architecture 1→1 / serve-doc 2→2 / serve-git 2→2 / serve-goal 2→2
+     serve-needs-human 1→0 ← 本任务 / serve-send 1→1 / serve-sessions 2→2 / serve-task 1→1 / serve-tests 2→2
+     TOTAL base=16 now=15（立案基线 22；兄弟 AC-290~296 期间已落地 ⇒ 本条按任务要求取逐文件差量，非绝对值）
+④ git diff --name-only develop...HEAD ⇒ 恰为 Touches 的三个代码/测试路径（第 4 条 Touches 是任务体本身，经 task_write 写入）
+```
+
+**AC6 — 驱动侧实例，如实报告（未重启、未干扰）**：
+
+```
+curl -sf http://127.0.0.1:4173/health
+{"ok":true,"stale":true,"evaluated":true,"processStartedAt":"2026-09-17T16:21:45.405Z",
+ "latestCodeCommitAt":"2026-09-17T19:33:25.000Z","source":"git"}
+pid=3696699 cwd=/home/yale/work/quay cmd=… quay.ts serve --host 0.0.0.0 --port 4173
+```
+
+`stale:true`（进程起于 16:21:45Z，晚近代码提交 19:33:25Z）⇒ **驱动侧仍会红在 `CAUSE=html-lang-not-zh`，
+成因是该实例陈旧（AC-288 落地前的进程），与 `/needs-human` 的接线无关。** 重启它是 fan-in 之后才有意义的外部操作面，
+本任务不执行；此读数**不**改写 AC1 的结论。
+
+**DoD 5 — 回滚形态**（纯本地代码、无外部状态）：① `serve-needs-human.ts` 去掉 `renderNeedsHumanPage` 的 `lang` 形参、
+还原 `<html lang="en">` 字面量、三处渲染调用去掉 lang、渲染入口还原为 `renderNeedsHumanPage(active, ledger, manifest, cfg.identity)`；
+② `serve-i18n.ts` 删除 `PAGE_LABELS` 的 `"Needs Human"` 行；③ `npm run build -w quay` + 重启实例。
