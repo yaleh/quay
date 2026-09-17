@@ -1,7 +1,7 @@
 ---
 id: AC-277
 title: 开发过程统计从真实生产载体机械产出，README 嵌入值与重跑结果逐字一致（防漂移）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -59,6 +59,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-17T00:25:44.214Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
