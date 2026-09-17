@@ -54,6 +54,11 @@ function readState(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+// gap-suite-split-15-over-30s-test-files (2026-09-17): `runner-grouping-list-groups.test.mjs` was split
+// into `<stem>-sNN` shards. These fixtures call scanFamily(REPO_ROOT) — the REAL manifest — so the
+// in-family sample must name a path that still exists AND still carries `@load-sensitive nested-spawn`;
+// the shard does (the annotation is copied into every shard).
+
 // ── partition (AC3/AC4) ─────────────────────────────────────────────────────────────────────────────
 test("AC3 — partitionFailure marks an in-family file with in_family + kind, and only the right kind", () => {
   const family = scanFamily(REPO_ROOT);
@@ -61,7 +66,7 @@ test("AC3 — partitionFailure marks an in-family file with in_family + kind, an
   assert.equal(wall.in_family, true);
   assert.equal(wall.kind, "wall-clock");
 
-  const nested = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups.test.mjs" }, family);
+  const nested = partitionFailure({ line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups-s01.test.mjs" }, family);
   assert.equal(nested.in_family, true);
   assert.equal(nested.kind, "nested-spawn");
 
@@ -84,12 +89,12 @@ test("AC4 negative control — a real non-family cross-file race (test-file-snap
   const family = scanFamily(REPO_ROOT);
   const { inFamily, notInFamily } = partitionFailures(
     [
-      { line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups.test.mjs" },
+      { line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups-s01.test.mjs" },
       { line: "not ok 1 - baseline test file(s) REMOVED", file: "plugin/test/test-file-snapshot.test.mjs" },
     ],
     family,
   );
-  assert.deepEqual(inFamily, ["plugin/test/runner-grouping-list-groups.test.mjs"]);
+  assert.deepEqual(inFamily, ["plugin/test/runner-grouping-list-groups-s01.test.mjs"]);
   assert.ok(notInFamily.some((f) => f.includes("test-file-snapshot")), "the cross-file race is not-in-family");
 });
 
@@ -177,7 +182,7 @@ test("Contract --partition — partitions a red state and writes in_family/kind/
     state: "red",
     reason: "failed",
     failures: [
-      { line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups.test.mjs" },
+      { line: "not ok 1 - x", file: "plugin/test/runner-grouping-list-groups-s01.test.mjs" },
       { line: "not ok 1 - y", file: "plugin/test/known-load-sensitive.test.mjs" },
     ],
   });

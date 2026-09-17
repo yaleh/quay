@@ -2325,11 +2325,11 @@ test("AC1 — green round-record reason stays null; infra-error keeps reason='in
 
 test("AC1 unit — segmentFailures: cascade entries (state-asserting test files) → derived, NOT failures[]", () => {
   const seg = segmentFailures([
-    { line: "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564ms)", file: "plugin/test/full-suite-runner.test.mjs" },
+    { line: "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564ms)", file: "plugin/test/full-suite-runner-s02.test.mjs" },
     { line: "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564ms)", file: "plugin/test/laydown-set-check.test.mjs" },
     { line: "__PERFILE__ .../plugin/test/checker-cost.test.mjs passed=false", file: "plugin/test/checker-cost.test.mjs", in_family: true, kind: "child-spawn" },
   ]);
-  assert.equal(isStateAssertingTestFile("plugin/test/full-suite-runner.test.mjs"), true, "full-suite-runner is a state-asserting test file");
+  assert.equal(isStateAssertingTestFile("plugin/test/full-suite-runner-s02.test.mjs"), true, "full-suite-runner is a state-asserting test file");
   assert.equal(isStateAssertingTestFile("plugin/test/checker-cost.test.mjs"), false, "checker-cost is NOT state-asserting");
   assert.equal(seg.derived.length, 2, "both cascade entries land in derived");
   assert.ok(seg.derived.every((f) => f.derived === "cascade"), "derived entries are marked derived: 'cascade'");
@@ -2353,7 +2353,7 @@ test("AC1/AC2 e2e — a fake suite that fails ONLY a state-asserting test file (
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-seg-"));
   const { f, dir } = fakeSuite(
     'echo "not ok 1 - boom"\n' +
-      'echo "  location: plugin/test/full-suite-runner.test.mjs:1119:1"\n' +
+      'echo "  location: plugin/test/full-suite-runner-s02.test.mjs:1119:1"\n' +
       'echo "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564.34609ms)"\n' +
       "exit 1",
   );
@@ -2367,11 +2367,11 @@ test("AC1/AC2 e2e — a fake suite that fails ONLY a state-asserting test file (
     // runner.test.mjs` → a STATE-ASSERTING file ⇒ cascade ⇒ derived. The `✖ AC1 — ...` line carries
     // no file ⇒ unattributed. failures[] main set is EMPTY (both populations segmented out).
     assert.ok(Array.isArray(s.derived) && s.derived.length >= 1, `derived carries the cascade entry; got ${JSON.stringify(s.derived)}`);
-    assert.ok(s.derived.some((f) => f.file === "plugin/test/full-suite-runner.test.mjs"), "the derived entry names the state-asserting file");
+    assert.ok(s.derived.some((f) => f.file === "plugin/test/full-suite-runner-s02.test.mjs"), "the derived entry names the state-asserting file");
     assert.ok(Array.isArray(s.unattributed) && s.unattributed.length >= 1, `unattributed carries the no-file entry; got ${JSON.stringify(s.unattributed)}`);
     assert.ok(s.unattributed.some((f) => /AC1 — while the suite runs/.test(f.line)), "the unattributed entry is the no-file cascade line");
     // Both populations are OUT of the failures[] main set (the round-130 "三数一致" property).
-    assert.ok(!(s.failures || []).some((f) => f.file === "plugin/test/full-suite-runner.test.mjs"), "failures[] main set excludes the cascade entry");
+    assert.ok(!(s.failures || []).some((f) => f.file === "plugin/test/full-suite-runner-s02.test.mjs"), "failures[] main set excludes the cascade entry");
     // The round record mirrors the SAME segmentation (byte-identical to the state write).
     const rec = lastRoundRecord(root);
     assert.equal(redPayload(rec).length, redPayload(s).length, "round-record payload mirrors the suite-state payload");

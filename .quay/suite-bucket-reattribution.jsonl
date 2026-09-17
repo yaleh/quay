@@ -20,7 +20,6 @@
 {"file":"plugin/test/build-evidence-manifest.test.mjs","judgment":"M","mechanism":"P+S","signal":[]}
 {"file":"plugin/test/cap-counts-subagents-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/cap-from-gate-bands.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/cap-from-gate-cli.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/cap-from-gate-config-budget.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/cap-from-gate-hysteresis.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/cap-from-gate-stale.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
@@ -47,7 +46,6 @@
 {"file":"plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/execute-suite-fix-scope-gate.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task"]}
 {"file":"plugin/test/execution-policy.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/fan-in-execute-paths.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["__GROUP__","--for-task","--static-checks","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/fan-in-ff-protocol-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-materialize-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/fan-in-runid-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -57,7 +55,6 @@
 {"file":"plugin/test/fast-mode-telemetry-halt.test.mjs","judgment":"S","mechanism":"S","signal":["--group"]}
 {"file":"plugin/test/fast-mode-telemetry.test.mjs","judgment":"S","mechanism":"S","signal":["--group","concurrency"]}
 {"file":"plugin/test/finding-backpropagate.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/full-suite-runner.test.mjs","judgment":"S","mechanism":"S+M","signal":["__GROUP__","--test-concurrency","lane","concurrency"]}
 {"file":"plugin/test/gate-dispatch-coverage.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/gitignore.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/inner-blocked-signal.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
@@ -111,7 +108,6 @@
 {"file":"plugin/test/quay-init-laydown-closure.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/quay-init-tmux-detection.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/quay-init.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/ready-pool-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","lane","concurrency"]}
 {"file":"plugin/test/ready-pool-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/reanchor-prompt.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/red-on-omission-audit.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task"]}
@@ -119,7 +115,6 @@
 {"file":"plugin/test/red-window-triage.test.mjs","judgment":"S","mechanism":"S+M","signal":["--test-concurrency","runner-grouping","concurrency"]}
 {"file":"plugin/test/refresh-worktree-quay.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/relative-baseline.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
-{"file":"plugin/test/resource-gate.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--group","--test-concurrency","--for-task","--scoped","--test-name-pattern","lane","concurrency"]}
 {"file":"plugin/test/restart-readiness-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/retired-clause-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/rhythm-consumer-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -127,7 +122,6 @@
 {"file":"plugin/test/ruling-required-wiring.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/run-identity.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/runner-grouping-flags-only.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--group","--test-concurrency","--experimental-test-coverage","runner-grouping","concurrency"]}
-{"file":"plugin/test/runner-grouping-list-groups.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-serial-anti-stomp.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","--test-concurrency","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/runtime-usage-inventory.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task"]}
 {"file":"plugin/test/scoped-static-checks.test.mjs","judgment":"S","mechanism":"S+M","signal":["--list-files","--group"]}
@@ -139,7 +133,6 @@
 {"file":"plugin/test/semantic-observer-judge.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/send-keys-reliable.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/slot-refill-heartbeat.test.mjs","judgment":"M","mechanism":"S","signal":[]}
-{"file":"plugin/test/slot-refill.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task","runner-grouping","lane","concurrency"]}
 {"file":"plugin/test/slot-visibility.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
 {"file":"plugin/test/stage-receipt.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/state-worded-clause-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -188,3 +181,11 @@
 {"file":"plugin/test/workflow-metadata-conformance.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/workflow-replay.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/worktree-root-fs-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
+{"file": "plugin/test/full-suite-runner-s02.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
+{"file": "plugin/test/full-suite-runner-s04.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
+{"file": "plugin/test/full-suite-runner-s05.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
+{"file": "plugin/test/full-suite-runner-s06.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
+{"file": "plugin/test/runner-grouping-list-groups-s01.test.mjs", "judgment": "S", "mechanism": "S", "signal": ["--list-files", "--list-groups", "runner-grouping", "concurrency"]}
+{"file": "plugin/test/runner-grouping-list-groups-s02.test.mjs", "judgment": "S", "mechanism": "S", "signal": ["--list-files", "--list-groups", "runner-grouping", "concurrency"]}
+{"file": "plugin/test/runner-grouping-list-groups-s03.test.mjs", "judgment": "S", "mechanism": "S", "signal": ["--group", "--list-files", "--list-groups", "runner-grouping", "concurrency"]}
+{"file": "plugin/test/worker-driver-fan-in-s06.test.mjs", "judgment": "M", "mechanism": "S+M", "signal": ["concurrency"]}

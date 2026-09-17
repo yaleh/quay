@@ -113,11 +113,20 @@ const MIN_RUN_DELAY_NS = 1_000_000;    // 1ms floor — below this the absolute 
 // extension (--include-all-groups), never a hard requirement. The earlier design ("full serial/lowconc
 // + extras", minute-scale load windows) was the needs-human 复盘's root cause — scale far beyond a
 // single worker session's budget.
+// gap-suite-split-15-over-30s-test-files (2026-09-17): three of these candidates were split into
+// `<stem>-sNN` shards. The known-flaky TEST was located in the source and mapped to the shard that now
+// holds it (writestate → s02 = the torn-read negative control; fan-in → s02 = the AC3 slow-selector
+// test). worker-driver-resident's flake was registered at FILE level with no test-level attribution
+// ("// lowconc, 7x"), so every shard of that stem is listed rather than guessing one.
 const CORE_CANDIDATES = [
   "plugin/test/help-contract-incompatible-behaviors.test.mjs", // serial, 15x
-  "plugin/test/writestate-atomicity-split.test.mjs",           // engine, 14x
-  "plugin/test/worker-driver-fan-in.test.mjs",                 // lowconc, 11x — 订正④ confirmed positive
-  "plugin/test/worker-driver-resident.test.mjs",               // lowconc, 7x
+  "plugin/test/writestate-atomicity-split-s02.test.mjs",       // engine, 14x — torn-read negative control
+  "plugin/test/worker-driver-fan-in-s02.test.mjs",             // lowconc, 11x — 订正④ confirmed positive
+  "plugin/test/worker-driver-resident-s01.test.mjs",           // lowconc, 7x — file-level flake, all shards below
+  "plugin/test/worker-driver-resident-s02.test.mjs",
+  "plugin/test/worker-driver-resident-s03.test.mjs",
+  "plugin/test/worker-driver-resident-s04.test.mjs",
+  "plugin/test/worker-driver-resident-s05.test.mjs",
   "plugin/test/suite-bucket-reattr-ratchet-check.test.mjs",    // engine, 5x
   "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs", // 订正④ confirmed positive
   "plugin/test/full-suite-runner-phases.test.mjs",             // 订正④ confirmed positive
@@ -140,7 +149,7 @@ const DEFAULT_TEST_TIMEOUT_MS = 180_000;
 const CANDIDATE_CONFIG: Record<string, CandidateConfig> = {
   // 订正⑥: real failures cluster at 128~188s; 240s covers the upper bound. Of the three candidates the
   // only credible real reproduction — run_delay mechanism confirmation must target it first.
-  "plugin/test/worker-driver-fan-in.test.mjs": { timeoutMs: 240_000, histFailMs: [128_000, 188_000] },
+  "plugin/test/worker-driver-fan-in-s02.test.mjs": { timeoutMs: 240_000, histFailMs: [128_000, 188_000] },
   // 订正⑥: real failures at 386~407s; observing one needs ~450s which exceeds the <=10min total budget
   // combined with the other candidates — skip it (report 未验证), never run it under a shorter timeout.
   "plugin/test/full-suite-runner-phases.test.mjs": { timeoutMs: 450_000, histFailMs: [386_000, 407_000], unverifiableInBudget: true },
