@@ -62,13 +62,13 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 - **`packages/quay/src/serve-lang.ts`（新）**：纯函数核——`parseCookieHeader(header)`、
   `resolveLang({queryLang, cookieLang})` → `{lang, source: "query"|"cookie"|"default"|"invalid", setCookie: string|null}`、
   `htmlLangTag(lang)`。做成纯函数是为了能被**直接 import 单测**（本仓库既有形态：分支密集的决策函数都有直接 import 单测）。
-- **`serve-render.ts:997` `ServePageCfg`** 增一个可选 `lang`；`htmlLangTag` 从这里 re-export（页面只 import 一处）。
-- **`serve-handlers.ts:49` `handleAllRoutes`**：**每请求解析一次**，写 `Set-Cookie`（仅当 query 给了**合法**值时），
+- **`serve-render.ts` `ServePageCfg`** 增一个可选 `lang`；`htmlLangTag` 从这里 re-export（页面只 import 一处）。
+- **`serve-handlers.ts` `handleAllRoutes`**：**每请求解析一次**，写 `Set-Cookie`（仅当 query 给了**合法**值时），
   然后把 `{...cfg, lang}` 作为**每请求副本**传给下游 handler。
   ⛔ **不得原地改 `cfg`**——`routeCfg`（`serve.ts:410`）是**服务生命周期共享对象**，
   原地写会把一个请求的语言**泄漏到并发/后续请求里**（那正是 AC3「三条断言各自独立」要挡的形态）。
-- **`serve-dashboard.ts`**：`renderDashboardPage` 的 opts 增 `lang`；**两个**调用点（`:1817` 快照路径 / `:1856` 旧路径）都传 `cfg.lang`；
-  `:1304` 的 `<html lang="en">` 改为 `${htmlLangTag(lang)}`。
+- **`serve-dashboard.ts`**：`renderDashboardPage` 的 opts 增 `lang`；**两个**调用点都传 `cfg.lang`；
+  `<html lang="en">` 改为 `${htmlLangTag(lang)}`。
   ⚠️ **两条路径都必须改**：快照路径是**生产默认路径**（`peekDashboardSnapshot` 命中即 `return`），
   只改旧路径 ⇒ 生产形态下判据仍红，而某些测试可能恰好走旧路径 ⇒ **假绿**。
 
@@ -98,8 +98,8 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 4. **`serve-render.ts`**：`ServePageCfg` 增 `lang?: Lang`；re-export `htmlLangTag`。
 5. **`serve-dashboard.ts`**：`renderDashboardPage` opts 增 `lang`；**两处**调用点传 `cfg.lang`；`:1304` 用 `${htmlLangTag(lang)}`。
 6. **新测试 `packages/quay/test/serve-lang.test.mjs`**（`// @test-group product`，`node:test`）：
-   ① 纯函数正/负控制；② 黑盒：`makeTmpDir` 建真 workspace（`.quay/config.yml` + native provider，
-   形态照抄 `packages/quay/test/gap-webui-detail-page-head-drops-pagestyles.test.mjs:100-135`）+ `startServer({port:0})`，三条断言各自独立。
+   ① 纯函数正/负控制；② 黑盒：`makeTmpDir` 建真 workspace（`.quay/config.yml` + native provider，形态照抄既有黑盒测试）+
+   `startServer({port:0})`，三条断言各自独立。
    ⚠️ `startServer` 默认 bind `0.0.0.0`；端口冲突会让 provider 子进程泄漏并**挂住整个套件**
    （`packages/quay/test/serve-bind-failure-no-leak.test.mjs:2-11` 实测 23.5 分钟教训）⇒ 用 `port: 0` 让内核选端口，⛔ 不自己探端口。
 7. **构建产物**：`packages/quay/scripts/build-dist.mjs` 需要知道新模块 ⇒ 跑一次 `npm run build -w quay`，
@@ -108,12 +108,12 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 
 ## AC
 
-- [ ] **AC1（goal 判据红→绿，判据一字未动）**：`node packages/quay/bin/quay.js goal gate AC-288` 逐字重跑 `verdict: pass` 并贴完整输出，**并排**贴第 1 步的红基线（同一条命令、同一个对象，取值由 fail 变 pass ⇒ 判据可被打红且这次改动是那个变化的因）。⛔ `goals/AC-288-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处**一字未动**（举证：`git diff develop -- goals/AC-288-*.md` 零命中 + 两侧 blob sha 相同）。
-- [ ] **AC2（纯函数层正/负控制——判据可被打红）**：直接 import `resolveLang` 单测，**至少**覆盖四态且取值**互不同形**：`{query:"zh"}`→`zh` / `source:"query"` / `setCookie ≠ null`；`{cookie:"zh"}`→`zh` / `"cookie"` / `setCookie === null`；`{}`→`en` / `"default"`；`{query:"fr"}`→`source:"invalid"` 且其返回值与 `"default"` 那一态**不相等**。⛔ 只测「绿」不测「红」不算（恒绿读数携带零信息，硬规则 4）。
-- [ ] **AC3（黑盒三断言各自独立，贴原始响应）**：`startServer({port:0})` 起真服务，三条**分别**断言：① 无 query/cookie ⇒ body 含 `<html lang="en"`；② `?lang=zh` ⇒ body 含 `<html lang="zh"` **且** 响应头 `Set-Cookie` 逐字含 `lang=zh`；③ 只带 `Cookie: lang=zh`（URL 无 `?lang=`）⇒ body 含 `<html lang="zh"`。⛔ ② 的 body 与 Set-Cookie 是**两条**断言（判据里它们也是两条独立检查）。⛔ 不得只跑 ③ 就宣称 ② 成立。
-- [ ] **AC4（机制不是 /dashboard 特例——因果对照）**：在 `handleAllRoutes` 处把解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC3 的 ②/③ 变红；恢复后复绿。两次读数并排贴出。⛔ 无此对照 ⇒ 「机制在派发器上生效」只是一句未被检验的断言（硬规则 4 推论四）。并列出传导面证据：`resolveLang` 的调用点**只有** `handleAllRoutes` 一处——贴 `grep -rn 'resolveLang' packages/quay/src/` 的**全部命中行**（⛔ 不是只报一个总数，硬规则 2）。
-- [ ] **AC5（不回归 + 作用域）**：① `scripts/test.sh --for-task gap-ac288-webui-lang-switch-mechanism` 绿；② `packages/quay/test/serve-*.test.mjs` 全部绿；③ **作用域举证**：`grep -rc 'html lang="en"' packages/quay/src/*.ts` 的总数为 **22**（23 − 1，只少了 dashboard 那一个），**逐文件**贴出计数，证明其余 14 个文件一字未动（那 22 个点属于 AC-289~303）。
-- [ ] **AC6（三个决定被记录，且可区分）**：把 ① `Vary: Cookie` 的设置位置与理由、② 非法值的 `source:"invalid"` 独立取值、③ `setCookie` 不带 `HttpOnly` 的理由，写进任务体内联。⛔ 三者都是「当时做了决定但没留痕就等于没做」的形态（硬规则 9）。
+- [x] **AC1（goal 判据红→绿，判据一字未动）**：`node packages/quay/bin/quay.js goal gate AC-288` 逐字重跑 `verdict: pass` 并贴完整输出，**并排**贴第 1 步的红基线（同一条命令、同一个对象，取值由 fail 变 pass ⇒ 判据可被打红且这次改动是那个变化的因）。⛔ `goals/AC-288-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处**一字未动**（举证：`git diff develop -- goals/AC-288-*.md` 零命中 + 两侧 blob sha 相同）。
+- [x] **AC2（纯函数层正/负控制——判据可被打红）**：直接 import `resolveLang` 单测，**至少**覆盖四态且取值**互不同形**：`{query:"zh"}`→`zh` / `source:"query"` / `setCookie ≠ null`；`{cookie:"zh"}`→`zh` / `"cookie"` / `setCookie === null`；`{}`→`en` / `"default"`；`{query:"fr"}`→`source:"invalid"` 且其返回值与 `"default"` 那一态**不相等**。⛔ 只测「绿」不测「红」不算（恒绿读数携带零信息，硬规则 4）。
+- [x] **AC3（黑盒三断言各自独立，贴原始响应）**：`startServer({port:0})` 起真服务，三条**分别**断言：① 无 query/cookie ⇒ body 含 `<html lang="en"`；② `?lang=zh` ⇒ body 含 `<html lang="zh"` **且** 响应头 `Set-Cookie` 逐字含 `lang=zh`；③ 只带 `Cookie: lang=zh`（URL 无 `?lang=`）⇒ body 含 `<html lang="zh"`。⛔ ② 的 body 与 Set-Cookie 是**两条**断言（判据里它们也是两条独立检查）。⛔ 不得只跑 ③ 就宣称 ② 成立。
+- [x] **AC4（机制不是 /dashboard 特例——因果对照）**：在 `handleAllRoutes` 处把解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC3 的 ②/③ 变红；恢复后复绿。两次读数并排贴出。⛔ 无此对照 ⇒ 「机制在派发器上生效」只是一句未被检验的断言（硬规则 4 推论四）。并列出传导面证据：`resolveLang` 的调用点**只有** `handleAllRoutes` 一处——贴 `grep -rn 'resolveLang' packages/quay/src/` 的**全部命中行**（⛔ 不是只报一个总数，硬规则 2）。
+- [x] **AC5（不回归 + 作用域）**：① `scripts/test.sh --for-task gap-ac288-webui-lang-switch-mechanism` 绿；② `packages/quay/test/serve-*.test.mjs` 全部绿；③ **作用域举证**：`grep -rc 'html lang="en"' packages/quay/src/*.ts` 的总数为 **22**（23 − 1，只少了 dashboard 那一个），**逐文件**贴出计数，证明其余文件一字未动（那 22 个点属于 AC-289~303）。
+- [x] **AC6（三个决定被记录，且可区分）**：把 ① `Vary: Cookie` 的设置位置与理由、② 非法值的 `source:"invalid"` 独立取值、③ `setCookie` 不带 `HttpOnly` 的理由，写进任务体内联。⛔ 三者都是「当时做了决定但没留痕就等于没做」的形态（硬规则 9）。
 
 ## DoD
 
@@ -124,9 +124,168 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 2. **不被冒名**：AC3 的三条断言各自**从响应头 / 响应体直接读**（⛔ 不读进程内中间变量、不把 render 函数的返回值当「响应」——那测的是函数，不是线上行为）。
 3. **可被打红**：AC2（纯函数正/负控制）+ AC4（派发器钳制的因果对照）**实际跑过**并贴上两次读数 ⇒ 证明这条判据不是结构上恒绿。
 4. **机制可被下游消费**：AC4 的传导面清单（`resolveLang` 唯一调用点 + `ServePageCfg.lang` 字段存在）——让 AC-289~303 的页面任务**只需一行**（把该页 opts 串上 `cfg.lang`），不需要重新实现解析。
-5. **作用域**：AC5 的逐文件 `html lang="en"` 计数（总数 22），证明没有越界改其它 14 页。
+5. **作用域**：AC5 的逐文件 `html lang="en"` 计数（总数 22），证明没有越界改其它页。
 6. **可回滚**：写明回滚形态（删 `serve-lang.ts` + 还原 4 处接线）与它的作用域（纯本地代码，无外部状态）。
 7. **证据留痕**：红/绿判据输出、纯函数正负控制、黑盒三断言原始响应、因果对照两次读数、逐文件计数，落成**任务体内联**或 `.quay/ac288-*` **未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
+
+## 决定记录（AC6 —— 三个当时做了、但不留痕就等于没做的决定）
+
+### ① `Vary: Cookie` 的设置位置与理由
+
+**位置**：`packages/quay/src/serve-handlers.ts` 的 `handleAllRoutes`，紧跟语言解析之后、**任何 handler 派发之前**；
+**无条件设置**（⛔ 不是只在「这次写了 cookie」的那类请求上）。
+
+**理由（是正确性要求，不是卫生习惯）**：加上本机制后，响应**体**依赖请求的 `Cookie` 头，而 URL 可以逐字相同——
+同一个裸 `/dashboard` 对 A 客户端渲染 `en`、对 B 客户端渲染 `zh`。没有 `Vary: Cookie`，中间缓存**有权**把先到的
+那份响应喂给后到的请求，即「发一个用户根本没要的语言」。放在派发之前 ⇒ 它落在**所有**路由上（含 `/` 的 302 与
+POST 路由），因为「响应依赖 cookie」这件事对每条路由都成立。`/health` 是唯一例外：它在 `serve.ts` 里于
+`handleAllRoutes` 之前返回，且它的体与语言无关。
+
+⛔ **不附带 `Vary: Accept-Language`**：本机制从不读该头，声明一个自己不读的头，只会为一个不存在的理由碎片化缓存。
+
+### ② 非法值的 `source:"invalid"` 是独立取值（⛔ 不与 `"default"` 同形）
+
+若判定器的输出词表里没有「读不懂输入」这一态，`?lang=fr` 就会与「没给语言偏好」折叠成同一个值、二者不可区分
+（硬规则 3b / 6）。因此四态并存：`query` / `cookie` / `default` / `invalid`，其中 `invalid` **不与 `default` 同形**：
+`lang` 同样落回 cookie/default，但 `source` 不同，且 `setCookie` 恒为 `null` —— **一个读不懂的值绝不被持久化成
+用户的选择**。
+
+`?lang=`（present-but-empty）归 `invalid` 而非「缺席」：`URLSearchParams.get` 对「参数不存在」返回 `null`、
+对「存在但为空」返回 `""`，把两者当同一件事会抹掉 `source` 这个字段存在的理由。
+
+**可被判红**：`packages/quay/test/serve-lang.test.mjs` 的 AC2① 里 `assert.notDeepEqual(byInvalid, byDefault)`
+—— 谁把这两态合并，这条断言当场红（不是靠注释里写「我们区分了」）。
+
+### ③ `setCookie` 不带 `HttpOnly` 的理由（以及为什么也不带 `Secure`）
+
+`lang` **不携带任何权限**（不是凭据、不是身份）。`HttpOnly` 保护的是「凭据 cookie 不被 XSS 读走」，对零权限的
+UI 偏好它挡不住任何真实攻击面；而它的代价是真实的：`HttpOnly` 会禁止**第一方**客户端代码读用户自己的语言选择，
+从而堵死一类后续消费者（客户端控件无需往返地回显当前选择、或按语言做客户端格式化）。关掉它，这些消费者将来
+不必改服务端。**真正在这里干活的是 `SameSite=Lax`**（挡跨站发送与跨站设置）。
+
+**同理不设 `Secure`**：web 面跑在明文 HTTP 上（`quay serve --host <ip>`，典型是 127.0.0.1 或局域网地址），
+而 `Secure` cookie 在 `http://` 源上会被浏览器直接丢弃 —— 那会让「持久化」在这个机制瞄准的部署形态上**静默失效**。
+
+**位置**：`packages/quay/src/serve-lang.ts` 的 `LANG_COOKIE_ATTRS`，是这些属性的唯一正本；`All langCookie()`
+与它同源，`resolveLang` 与派生自它的 `setCookie` 都不再重复书写属性串。
+
+## 证据（DoD 7 —— 内联摘要 + `.quay/ac288-*` 未跟踪 scratch，可被下一轮独立复算）
+
+载体：`.quay/ac288-raw-http-probe.py`（探针本体）、`.quay/ac288-raw-http-evidence.txt`（原始响应），
+均为**未跟踪**文件（`packages/quay/test/serve-lang.test.mjs` 为可复跑的判据本体，随分支提交）。
+
+### 1. 判据红 → 绿（AC1）
+
+红基线（`timeout 300 node packages/quay/bin/quay.js goal gate AC-288`，cwd = 本任务 worktree，2026-09-17T15:48:48.141Z）：
+
+```
+{"id":"AC-288","verdict":"fail",
+ "reason":"acceptance failed (exit 1) — CAUSE=query-param-not-honored -- /dashboard?lang=zh did not respond <html lang=\"zh\">",
+ "timestamp":"2026-09-17T15:48:48.141Z","dryRun":false, ...}
+GATE_EXIT=1
+```
+
+绿（同一条命令、同一个 worktree，merge develop 之后复跑，2026-09-17T15:57:08.157Z）：
+
+```
+{"id":"AC-288","verdict":"pass","reason":"acceptance passed (exit 0)",
+ "timestamp":"2026-09-17T15:57:08.157Z","dryRun":false, ...}
+GATE_EXIT=0
+```
+
+判据一字未动（硬规则 2 的两个方向都证）：`git diff develop --stat -- 'goals/AC-288-*.md'` ⇒ **零命中**；
+两侧 blob sha 相同 ⇒ `develop:` = `4081340344774420d60f2c83e934840089bdc024` = worktree 工作树
+`git hash-object` = `4081340344774420d60f2c83e934840089bdc024`。
+
+### 2. 纯函数正/负控制（AC2）
+
+`node --test packages/quay/test/serve-lang.test.mjs` ⇒ **9 tests / 9 pass / 0 fail**，四个纯函数用例逐条：
+AC2① 四态互不同形（含 `notDeepEqual(invalid, default)` 的负控制）、AC2② `en`/`zh` 同一条代码路径、
+AC2③ query 压过 cookie 且非法 query 让位给合法 cookie、AC2④ `parseCookieHeader`/`isLang`/`htmlLangTag`
+的边界（首个 `=` 切分、空名丢弃、大小写敏感、`undefined` ⇒ 默认标签）。
+
+### 3. 黑盒三断言 + 非法值，从**响应头 / 响应体**直读（AC3）
+
+`.quay/ac288-raw-http-probe.py` 起**真** `quay serve`（source 入口），逐条打印 status / `Set-Cookie` / `Vary` / body 里的 `<html …>` 标签：
+
+```
+① GET /dashboard（无 query 无 cookie）
+   status 200 | Set-Cookie None | Vary 'Cookie' | body tag '<html lang="en">'
+② GET /dashboard?lang=zh
+   status 200 | Set-Cookie 'lang=zh; Path=/; Max-Age=31536000; SameSite=Lax' | Vary 'Cookie' | body tag '<html lang="zh">'
+   ↳ 紧接一次不带 cookie 的 GET /dashboard ⇒ '<html lang="en">'（同一请求序列内，无跨请求泄漏）
+③ GET /dashboard  headers={'Cookie': 'lang=zh'}（URL 无 ?lang=）
+   status 200 | Set-Cookie None | Vary 'Cookie' | body tag '<html lang="zh">'
+④ GET /dashboard?lang=fr（非法）
+   status 200 | Set-Cookie None | Vary 'Cookie' | body tag '<html lang="en">'
+⑤ GET /dashboard?lang=en  headers={'Cookie': 'lang=zh'}（query 压过 cookie）
+   status 200 | Set-Cookie 'lang=en; …' | Vary 'Cookie' | body tag '<html lang="en">'
+```
+
+②的三条检查是**两条独立断言**（body 的标签 / 响应头的 Set-Cookie）—— 在测试文件里分列，在判据里也分列；
+③ 的绿灯来自它自己的请求头，而不是②留下的 cookie（`request()` 不带 cookie jar，这是刻意的）。
+④⑤ 是两条判据里没有、但契约明写的边界：非法值既不渲染也不种 cookie；`?lang=en` 与 `?lang=zh` 走同一条路（都写 cookie）。
+
+### 4. 因果对照：机制在**派发器**上，不是 /dashboard 特例（AC4）
+
+一次性本地改动（**未提交**，取证后已还原、已 grep 确认无残留）：把 `handleAllRoutes` 里的解析结果钳成
+`{ lang: "en", setCookie: null }`，再跑黑盒五条：
+
+```
+钳制后：✔ AC3①  ✖ AC3②  ✖ AC3③  ✖ AC3④  ✔ AC3⑤     （tests 5 / pass 2 / fail 3）
+还原后：✔ AC3①  ✔ AC3②  ✔ AC3③  ✔ AC3④  ✔ AC3⑤     （tests 5 / pass 5 / fail 0）
+```
+
+②③④ 随钳制变红 ⇒ 它们的绿是**派发器解析**造成的，而不是渲染函数或 /dashboard 自己的分支造成的；
+①⑤ 仍绿是**正确的**（它们断言的正是 `en`），也说明这五条断言各自有区分力，不是整组恒绿。
+
+传导面（AC4 要求的**全部命中行**，不是总数）：`grep -rn 'resolveLang' packages/quay/src/`
+
+```
+packages/quay/src/serve-lang.ts:32: *  a dedicated branch anywhere in this module (see `resolveLang`). */
+packages/quay/src/serve-lang.ts:104:export function resolveLang(
+packages/quay/src/serve-handlers.ts:15:// transmission-surface claim; `grep -rn resolveLang packages/quay/src/` returns this line + the one
+packages/quay/src/serve-handlers.ts:17:import { resolveLang, parseCookieHeader, LANG_COOKIE_NAME } from "./serve-lang.ts";
+packages/quay/src/serve-handlers.ts:69:  const { lang, setCookie } = resolveLang({
+packages/quay/src/serve-handlers.ts:73:  // Set-Cookie only when the query named a legal language (see resolveLang's `setCookie` contract).
+```
+
+⇒ 唯一的**调用点**是 `serve-handlers.ts:69`（另两行是文件内的注释与 import，`serve-lang.ts` 的命中是定义与自身文档）；
+下游页面的消费面 = `ServePageCfg.lang?: Lang`（`serve-render.ts`）+ `htmlLangTag`（同文件 re-export）——
+AC-289~303 的页面任务只需把本页的 `opts`/`cfg.lang` 串上，**不需要重新实现解析**。
+
+### 5. 作用域：逐文件 `html lang="en"`（AC5③，硬规则 3 —— 枚举不是布尔）
+
+`grep -rc 'html lang="en"' packages/quay/src/*.ts`（改动后），**逐文件**：
+
+```
+serve-adr.ts 2 · serve-architecture.ts 1 · serve-board.ts 1 · serve-doc.ts 2 · serve-git.ts 2 ·
+serve-goal.ts 2 · serve-live.ts 2 · serve-needs-human.ts 1 · serve-send.ts 1 · serve-sessions.ts 2 ·
+serve-system.ts 2 · serve-task.ts 2 · serve-tests.ts 2          （13 个文件）
+serve-dashboard.ts 0                                            ← 本次唯一减少的文件
+------------------------------------------------------------------------------
+合计 22          （立案基线 23，差 1 = dashboard 那一个）
+```
+
+⚠️ 更正任务体早先的一处措辞：立案时是「23 处 / **14** 个文件」（含 dashboard），故改动后未被触碰的是
+**13** 个文件 22 处，而不是先写的「其余 14 个文件」。上面的清单是**枚举**结果，不是从那个数字推的。
+
+### 6. 不回归（AC5①②）
+
+- `bash scripts/test.sh --for-task gap-ac288-webui-lang-switch-mechanism --allow-thin` ⇒ `tests 167 / pass 167 / fail 0`，`SCOPED_EXIT=0`
+  （新测试确实被选中并执行：输出中含 `✔ AC3⑤ …`）。
+- `node --test packages/quay/test/serve-*.test.mjs`（21 个文件）⇒ `tests 195 / pass 194 / fail 0 / skipped 1`，`SERVE_EXIT=0`。
+- `tsc --noEmit`（`.quay/config.yml` 里 `ts-typecheck` 门逐字的那条 per-package 循环）⇒ `TSC_EXIT=0`。
+- `npm run build -w quay` ⇒ 产物里 `resolveLang` 命中 2、`htmlLangTag` 命中 2（新模块确实进了 bundle，
+  ⛔ 不是「源码有、产物没有」的假红形态）。
+
+### 7. 回滚形态（DoD 6）
+
+纯本地代码，**无外部状态**（不写数据库、不改配置、不动 git ref）。回滚 = 删 `packages/quay/src/serve-lang.ts`
++ 还原三处接线（`serve-handlers.ts` 的 import 与解析块、`serve-render.ts` 的 re-export 与 `ServePageCfg.lang`、
+`serve-dashboard.ts` 的两处调用点与页头标签），并重跑 `npm run build -w quay`。
+回滚后 `/dashboard` 回到恒 `en`（即 AC-288 判据回到 fail），影响面仅限 web 面的语言标签与一个响应头，
+不涉及任何持久化数据的形态。
 
 ## Touches
 
@@ -137,6 +296,7 @@ GOAL-024 的 16 条 AC 是两层：**AC-288 = 机制本身**；**AC-289~303 = 15
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/serve-lang.test.mjs (new)
 
-（说明：本任务只碰**机制 + /dashboard 这一个消费者**。其余 14 个 serve-*.ts 的 22 个 `html lang="en"` 硬编码点**刻意不在本 Touches 内**——
+（说明：本任务只碰**机制 + /dashboard 这一个消费者**。其余 13 个 serve-*.ts 的 22 个 `html lang="en"` 硬编码点**刻意不在本 Touches 内**——
 它们各自属于 AC-289~303 的页面任务，列入会把那 15 条任务的并发面锁死。`packages/quay/src/serve.ts` 也不在列：
-解析与 `Set-Cookie` 都落在 `handleAllRoutes`（`serve-handlers.ts`），`routeCfg` 只需保持只读、不必改动。）
+解析与 `Set-Cookie` 都落在 `handleAllRoutes`（`serve-handlers.ts`），`routeCfg` 只需保持只读、不必改动。
+取证用 scratch（`.quay/ac288-raw-http-probe.py` / `.quay/ac288-raw-http-evidence.txt`）为未跟踪文件，不进交付面。）
