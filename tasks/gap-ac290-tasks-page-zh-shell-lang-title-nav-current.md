@@ -2,7 +2,7 @@
 id: gap-ac290-tasks-page-zh-shell-lang-title-nav-current
 title: "AC-290 缺口 —— /tasks 页面的 zh 切换完全未接线：页头 lang、本页 <title> 与导航当前项在 Cookie:
   lang=zh 下与 en 逐字相同"
-status: todo
+status: ready
 labels:
   - gap
   - webui
