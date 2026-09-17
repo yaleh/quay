@@ -64,7 +64,9 @@
 # SCOPED STATIC-CHECK TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6):
 #   A task-scoped run (`--for-task` / `--scoped`) runs the change-relevant static-check subset —
 #   checkers whose object intersects the task's `## Touches` plus the ## Contract consumer on the
-#   TOUCHED task files — SKIPPING checker-mutation-check (~13s) and unrelated repo-level ratchets.
+#   TOUCHED task files — SKIPPING checker-mutation-check (the whole-store mutation pass; its own
+#   reported `duration_ms` is the only current cost reading — never a hardcoded seconds literal here,
+#   which is host-dependent and silently wrong on any other machine) and unrelated repo-level ratchets.
 #   The COMPLETE set (run_static_checks) is unchanged and always runs in full-suite mode (the outer
 #   verification-round gate is NOT weakened); a scoped skip is DEFERRED to the full gate, never
 #   dropped. Trade-off: scoped = fast feedback on the change; full = complete gate (AC4-ii:
@@ -360,7 +362,7 @@ run_doc_checks() {
 
 # run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs
 # (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC3/AC6). A per-task scoped run used to pay
-# the FULL run_static_checks fixed overhead (~16s, ~13s of it checker-mutation-check) even when it
+# the FULL run_static_checks fixed overhead (the bulk of it checker-mutation-check) even when it
 # ran 1-2 test files. Scoped mode runs ONLY the checkers whose object intersects the task's
 # `## Touches` (e.g. test-framework-policy/isolation when a test file is touched, the code/shell
 # ratchets when their objects are touched) PLUS the always-relevant ## Contract consumer on the
@@ -1519,7 +1521,7 @@ elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
   # the explicit-file form are unchanged. `--allow-thin` passes through to the selector.
   #
   # Scoped static-check tier: instead of the FULL run_static_checks (which scoped runs used to pay,
-  # ~16s, 13s of it checker-mutation-check), a task-scoped run runs the change-relevant subset —
+  # the bulk of it checker-mutation-check), a task-scoped run runs the change-relevant subset —
   # checks whose object intersects the touches + the ## Contract consumer on the touched task files
   # (run_scoped_static_checks_sel below). The full set is deferred to the full-suite gate, not dropped.
   scoped_flag="${1}"
