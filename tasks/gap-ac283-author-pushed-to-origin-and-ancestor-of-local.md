@@ -2,7 +2,7 @@
 id: gap-ac283-author-pushed-to-origin-and-ancestor-of-local
 title: origin 上不存在 author 分支 ⇒ AC-283 判据 exit 1（CAUSE=origin-author-absent）——本地
   author 只活在 boheidc 单机、从未推送；推送到 origin 并以判据收口
-status: todo
+status: ready
 labels:
   - gap
   - single-point-of-failure
