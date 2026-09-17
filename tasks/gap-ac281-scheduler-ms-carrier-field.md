@@ -2,7 +2,7 @@
 id: gap-ac281-scheduler-ms-carrier-field
 title: ci-runs-collect.ts 派生 jobs[].schedulerMs（AC-281 判据可评估性——从 __OVERHEAD__
   scheduler_ms= 行落进载体）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
