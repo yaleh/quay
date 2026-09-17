@@ -1,7 +1,7 @@
 ---
 id: AC-298
 title: /tests 页面在 zh 下真实切换——导航当前项标签与该页面自己的 <title> 都相对英文基线发生变化
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
@@ -107,6 +107,11 @@ statusLog:
     actor: user
     reason: 人 2026-09-17 对话中明确指示「创建并激活该 goal」；判据已按人裁定改为 AC-179 探针形态（探已在运行的 serve
       实例），激活动作对应该指示。
+  - at: 2026-09-17T23:48:46.549Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
