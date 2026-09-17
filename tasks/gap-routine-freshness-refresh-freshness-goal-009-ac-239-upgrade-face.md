@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-239-upgrade-face
 title: "freshness-refresh: margin -4 is already negative (d=204 > K=200): AC-239
   shares the upgrade-face run with AC-238 and its evidence has aged past the
   window; the mapping records that"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
