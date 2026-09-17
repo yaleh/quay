@@ -1,7 +1,7 @@
 ---
 id: AC-279
 title: main/serial/lowconc 三阶段的15个实测>30秒的大测试文件全部被拆分/移走
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -79,6 +79,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+  - at: 2026-09-17T09:08:05.236Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
