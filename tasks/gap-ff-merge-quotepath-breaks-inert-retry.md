@@ -2,7 +2,7 @@
 id: gap-ff-merge-quotepath-breaks-inert-retry
 title: ff-merge 的 inert 重试被 git C-quote 击穿：develop 推进含非 ASCII 文件名时 ff 恒失败（fan-in
   反活锁恢复从不触发）
-status: ready
+status: done
 labels:
   - gap
 parent: null

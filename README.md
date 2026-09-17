@@ -491,7 +491,7 @@ invented examples.
 unrecognized/missing subcommand):
 
 ```
-usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager arm> ...
+usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver> ...
 Run `quay --help` for full usage documentation.
 ```
 
@@ -565,22 +565,27 @@ The promotion and worker drivers are resident daemons kept alive by a single
 supervisor. The unified entry point:
 
 ```
-quay driver <start|stop|drain|status|restart> --kind <promotion|worker>
+quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer|quality|meta|goal> [--root <path>] [flags]
 ```
 
 | verb | semantics |
 |---|---|
 | `start` | Start the resident driver under the supervisor (respawn on exit/kill/crash) |
 | `stop` | Hard stop: terminate the supervisor + driver. For worker, in-flight workers are **not** killed — they orphan and finish |
-| `drain` | (worker only) Halt new dispatch **without** killing in-flight workers (`worker-control.json halted=true`). `promotion` does not support `drain` |
+| `drain` | Halt new dispatch **without** killing in-flight workers (each kind writes its own `<kind>-control.json`, `halted=true`) — `worker` and `promotion` alike |
+| `resume` | `drain`'s inverse: clear the halt (`halted=false`) so new dispatch resumes |
 | `status` | Report `{kind, supervisor_pid, driver_pid, alive, …}` |
 | `restart` | `stop` then `start` |
 
-> **Known gap** (until `gap-worker-driver-cold-start-inflight-blind` lands): a
-> cold start (explicit `restart`, or the supervisor's 5s auto-respawn after a
-> crash) rebuilds the in-flight set from memory, so a driver restarted while
-> tasks are in flight may **duplicate-dispatch** them. Prefer `drain` over
-> `restart` when in-flight workers must be preserved.
+> **Cold-start in-flight handling is fixed** (was `gap-worker-driver-cold-start-inflight-blind`,
+> now **done**): a cold start — an explicit `restart`, or the supervisor's auto-respawn after a
+> crash — no longer **duplicate-dispatches** tasks whose workers survived it. The in-flight
+> exclusion set is rebuilt by *probing* live workers and their worktrees, not from memory. The
+> opposite residual (a cold-start worker that exits leaving its task pinned in-flight forever) is
+> fixed too (`gap-worker-driver-cold-start-inflight-refresh`, **done**): cold in-flight entries are
+> re-scanned on every pass and drop out as soon as the worker exits or its worktree disappears.
+> A manual `restart` therefore needs no rescue step; `drain` remains the graceful-stop choice
+> because it does not kill in-flight workers.
 
 ### `quay-native` (the reference Provider)
 

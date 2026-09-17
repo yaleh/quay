@@ -40,16 +40,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: README 的三个安装选项重新排序/标注，使 Claude Code plugin（现 Option C）成为标注为"推荐"的首选项，与两条裁定（GOAL-019 origin ②、release.yml:6-8）一致。
-- [ ] AC2: Option A（npm 全局安装）的描述改为如实反映现状——要么明确说明"release 不再附带预构建 tarball，需自行 `npm install` + `packages/quay/scripts/package.sh` 本地打包"，要么把它降级为"面向开发者的备选路径"而非"推荐给大多数用户"；⛔ 不得继续暗示 GitHub Release 上有现成 `.tgz` 可下载。取假判据：`gh release view <最新tag> --json assets --jq '.assets | length'` 为 0 时，README 不得出现"download the release artifact"这类暗示存在下载产物的措辞。
-- [ ] AC3: README 补一句简短说明 npm/SEA release 渠道已于 2026-09-16 被人裁定取消、CI/发布现在以 Claude Code plugin 渠道为唯一 gate（可引用 release.yml 头注释或直接引用裁定原文），避免下次有人重新问"为什么还是有 npm 安装的说明"。
-- [ ] AC4: 检查 `plugin/README.md`、`docs/` 下是否有同款"npm release artifact"过时引用（硬规则 5b）。
+- [x] AC1: README 的三个安装选项重新排序/标注，使 Claude Code plugin（现 Option C）成为标注为"推荐"的首选项，与两条裁定（GOAL-019 origin ②、release.yml:6-8）一致。
+- [x] AC2: Option A（npm 全局安装）的描述改为如实反映现状——要么明确说明"release 不再附带预构建 tarball，需自行 `npm install` + `packages/quay/scripts/package.sh` 本地打包"，要么把它降级为"面向开发者的备选路径"而非"推荐给大多数用户"；⛔ 不得继续暗示 GitHub Release 上有现成 `.tgz` 可下载。取假判据：`gh release view <最新tag> --json assets --jq '.assets | length'` 为 0 时，README 不得出现"download the release artifact"这类暗示存在下载产物的措辞。
+- [x] AC3: README 补一句简短说明 npm/SEA release 渠道已于 2026-09-16 被人裁定取消、CI/发布现在以 Claude Code plugin 渠道为唯一 gate（可引用 release.yml 头注释或直接引用裁定原文），避免下次有人重新问"为什么还是有 npm 安装的说明"。
+- [x] AC4: 检查 `plugin/README.md`、`docs/` 下是否有同款"npm release artifact"过时引用（硬规则 5b）。
 
 ## Definition of Done
 
-- [ ] README.md（及 AC4 排查出的其它文件）里不再有"npm release artifact 是推荐安装方式"或"GitHub Release 上有现成 tarball"这类与当前实现矛盾的表述。
+- [x] README.md（及 AC4 排查出的其它文件）里不再有"npm release artifact 是推荐安装方式"或"GitHub Release 上有现成 tarball"这类与当前实现矛盾的表述。
 
 ## Touches
 
 - README.md
+- packages/quay/README.md
 - tasks/gap-readme-option-a-npm-release-artifact-retired.md（自身）
