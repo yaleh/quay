@@ -2,7 +2,7 @@
 id: gap-ac296-journal-page-zh-chrome-nav-current-and-own-title
 title: "AC-296 缺口 —— /journal 页面的 zh 切换完全未接线：页头 lang、本页 <title> 与导航当前项在 cookie:
   lang=zh 下与 en 逐字相同"
-status: todo
+status: ready
 labels:
   - gap
   - webui
