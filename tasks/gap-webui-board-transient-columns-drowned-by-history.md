@@ -22,19 +22,43 @@ extra:
 
 **不是要重新做 join 逻辑**（那部分已经在生产上正确工作），**是默认呈现方式没有过滤到"当前值得看"的那个子集**。
 
+**实现取向（同一次读页面得出的第二条判断）**：过滤只在**两个瞬时时源都真读到**（`status === "ok"`）时生效。源 `empty`/`error` **不是**一个说"没有"的源——凭它隐藏行就是把「无法判定哪些任务在飞」渲染成「没有任务在飞」（硬规则 5 来源完备性 / 硬规则 3b：读不懂的输入不得与合格同形）。该路径有自己的取值 `board_default_view=unfiltered-source-incomplete`，说明原因并显示全部行，绝不静默。这也是既有 /board 测试（分页、冷加载、漂移一致、降级）一行未改仍全绿的原因。
+
 ## AC
 
-- [ ] `/board` 默认视图（无 status/label 筛选参数时）只展示"执行"或"落地"列非空的行，或在两列全空时页面给出明确的空态提示（如"当前没有在飞/待落地的任务"），而不是渲染一整页历史任务配一堵横杠
-- [ ] 保留现有的手工 status/label 筛选能力，可让用户主动切回"看全部 2243 条"的视图（不是彻底删除该能力，只改默认）
-- [ ] `node --experimental-strip-types --test packages/quay/test/gap-webui-board-transient-columns-drowned-by-history.test.mjs` 覆盖：默认视图在 0 个任务命中执行/落地时的空态渲染 + 至少 1 个任务命中时默认视图只显示该任务（不显示其余 2242 条纯历史行）
-- [ ] `scripts/test.sh` 全绿
+- [x] `/board` 默认视图（无 status/label 筛选参数时）只展示"执行"或"落地"列非空的行，或在两列全空时页面给出明确的空态提示（如"当前没有在飞/待落地的任务"），而不是渲染一整页历史任务配一堵横杠
+      （`handleBoard` 新增 `transientView` 三态 + `visibleRows`；判定谓词 `isTransientRow`（`landingFlag != null || execFlags.length > 0 || inFlightMinutes != null`）。两列全空 ⇒ 渲染 info-banner 空态「当前没有在飞 / 待落地的任务」`board_default_view=transient-empty` 并**不渲染任何表格**（真浏览器 `document.querySelectorAll('table').length == 0`）。真实 2248 行生产库：默认视图 12 行一页，全部有信号）
+- [x] 保留现有的手工 status/label 筛选能力，可让用户主动切回"看全部 2243 条"的视图（不是彻底删除该能力，只改默认）
+      （`?status=`/`?label=` 语义不变，且**显式筛选不再叠瞬时过滤**（用户点名要的集合就是他要的）；新增 `?all=1` 为显式"看全部"入口，空态与默认视图上都带该链接；`buildBoardHref` 携带 `all`，翻页/改 pageSize 不丢该视图）
+- [x] `node --experimental-strip-types --test packages/quay/test/gap-webui-board-transient-columns-drowned-by-history.test.mjs` 覆盖：默认视图在 0 个任务命中执行/落地时的空态渲染 + 至少 1 个任务命中时默认视图只显示该任务（不显示其余 2242 条纯历史行）
+      （4/4 绿：空态（含"未渲染表格"断言）；1 个 in-flight ⇒ 只显示该行、`Page 1 of 1 (1 rows)`；`?status=`/`?all=1` 恢复全库；**外加**「源读不到 ⇒ 显示全部且不冒充空态」这条独立的不可评估态，以及 `renderBoardPage` 直调的 legacy 路径保持表格）
+- [x] `scripts/test.sh` 全绿
+      （worker 面：`scripts/test.sh --for-task gap-webui-board-transient-columns-drowned-by-history --allow-thin` = **exit 0 / 99 tests, 0 fail**，其中含本任务新增 4 条、`serve-board.test.mjs` 既有 11 条（**未改一字**）、以及交叉集 `adr-gate`/`adr-store`/`build-dist`/`npm-pack-e2e`/`plugin-packaging`；scoped 静态检查全 PASS。**全量套件由 driver 的机械 fan-in 执行**（worker 不跑全量），已写 scoped-gate cache 供其跳过冗余 scoped 门）
 
 ## DoD
 
 在真实运行的 `quay serve` 实例上用浏览器复核：系统 0 在飞时 `/board` 默认视图显示明确的空态说明（而非空表格/空横杠墙）；人为让至少一个任务进入 in-flight 或 awaiting-land 状态时，`/board` 默认视图能直接看到这一行，不需要翻页。是否保留"NEW"导航标签，视这次改动后的实际可用性由实现者一并判断并在 PR/commit 里说明理由。
+
+**已复核**（本机无 chrome-devtools / playwright MCP，故用仓库已装的 chromium 经 CDP 直接驱动真浏览器，脚本与截图见 Evidence）：
+- 0 在飞 ⇒ 空态说明、0 个表格（真 `quay serve` + 真浏览器，`board-dod-empty.png`）；
+- 人工注入 1 个 in-flight（活进程 + start 无 end 遥测）⇒ 默认视图直接看到该行、单页、其余 2 条历史行不渲染（`board-dod-inflight.png`）；
+- **真实生产库**（2248 行 / 3 在飞 / 9 条落地异常）⇒ 默认视图 12 行一页、全是真信号（`board-real-default.png`）。
+- **"NEW" 导航标签：保留**，理由写在 commit message（affordance 作用不受本次改动影响、无 AC 要求动它、且它住在 serve-render.ts —— 15 个视图共用的渲染文件，为纯装饰性标签扩大爆炸半径不划算；若将来要改成语义标签，应另立一条有自己的证据的改动）。
 
 ## Touches
 
 - packages/quay/src/serve-board.ts
 - packages/quay/test/gap-webui-board-transient-columns-drowned-by-history.test.mjs
 - tasks/gap-webui-board-transient-columns-drowned-by-history.md
+
+## Evidence
+
+**实现 `853e580c8`**（serve-board.ts +132 −14；新增测试 4 条 232 行）；**scoped 门验于 HEAD `80152da5b`**（= `853e580c8` + `git merge develop` 无损合并，仅带进一条无关任务文件改动）。证据包 `.quay/board-transient-view/`（截图 4 张 + `board-scoped-gate.log` + 本次浏览器驱动脚本 `board-cdp.mjs` + 夹具脚本 `board-dod-setup.sh`）。
+
+- **改动本体**（`packages/quay/src/serve-board.ts`）：`renderBoardPage` 增 `transientView`/`joinedTotal`/`incompleteSources` 三个**可选**入参（缺省 = legacy 单页全渲染，直调者零变化）；`handleBoard` 增 `?all=1` 解析、`incompleteSources` 归集、`transientView` 三态判定与 `visibleRows` 过滤；`execution.flags`/`execution.inFlight` 的 taskId 也并入行并集（在飞/孤儿行在意图读分歧时也必须有一行可渲染——否则默认视图恰好藏掉它存在的理由）。零客户端 JS 不变（无 `<script>`，既有 AC3 断言仍绿）。
+- **AC1 真实数据（生产库，真浏览器）**：`quay serve`（worktree 源码）指向 `/home/yale/work/quay`，Chromium CDP 取回：`默认视图：只显示「执行」或「落地」列非空的行 —— 12 行（全部 2248 行）`、`Page 1 of 1 (12 rows)`、12 行 id 全部命中（3 在飞 + 9 落地异常 + …），`tableCount=1`。对照缺陷：改前同一视图是 `page 1/113` 的 20 行全 `—`。
+- **AC1 空态 + DoD 前半**：真 `quay serve` + 真工作区（3 条纯历史行 + 1 条已结束遥测使执行源 `ok`）⇒ `当前没有在飞 / 待落地的任务 board_default_view=transient-empty`、`tableCount=0`、`rowCount=0`（非空表格/非空横杠墙）。
+- **DoD 后半（人工注入）**：同一实例注入活进程 runId + start 无 end 遥测 ⇒ 默认视图 `1 行（全部 3 行）`、`Page 1 of 1 (1 rows)`、只有 `dod-history-2` 一行（`在飞 5.1 分钟`），另两条历史行不渲染；`?all=1` ⇒ `已显示全部 3 行（含历史任务）`，三条全在。
+- **反例控制（"读不到 ≠ 没有"）**：无 `.workflow-events/` 的工作区 ⇒ `board_default_view=unfiltered-source-incomplete` + 「默认过滤未生效…因此下面显示全部 N 行」，**不出现**空态文案（两种 0 行状态文本可区分，硬规则 3b）。
+- **既有回归面**：`serve-board.test.mjs` 11/11 绿（含分页 25 行、冷加载、缓存负控制、读超时 fail-open、漂移逐任务一致、孤儿/在飞判定）——**该文件未改一字**；另 `/board` 的其余消费者（`gap-webui-detail-page-head-drops-pagestyles` / `gap-webui-list-table-no-overflow-container` / `serve-nav-inconsistent-routes` / `serve-ac102-modernist-views`）29/29 绿；`npx tsc --noEmit -p packages/quay` exit 0。
+- **留待 fan-in**：全量套件（`scripts/test.sh` 默认面）由 driver 的机械 fan-in 执行；本任务已 `--write-scoped-gate-cache`（developSha `50e7bb21a`），fan-in 侧不再重复 scoped 门。
