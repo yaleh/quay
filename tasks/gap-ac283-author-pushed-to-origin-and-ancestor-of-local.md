@@ -119,24 +119,168 @@ AC-287 SPEC 修订），本任务只做 AC-283 这一面。
 6. **留痕**：读数写进任务体（或 `.quay/ac283-*` 未跟踪 scratch 文件），可被下一轮独立复算。
 7. **收口**：确认 `gate AC-283` 为 pass ∧ 第 5 步的等值成立后收口。⛔ 收口之后不要再对 author 做任何改写。
 
+## Execution log（2026-09-17T04:56Z–05:00Z，worktree
+`/home/yale/work/quay-worktrees/gap-ac283-author-pushed-to-origin-and-ancestor-of-local`，action=`push`，
+actor=worker `gap-ac283-author-pushed-to-origin-and-ancestor-of-local`）
+
+**Plan 1 — push 前的现场读数**（⛔ 未假定仍等于立案值；实际已前进：立案 tip `609dd4677` → 执行时 `e27f111ed`）：
+
+```
+$ date -u +%Y-%m-%dT%H:%M:%SZ                 -> 2026-09-17T04:56:12Z
+$ git ls-remote --heads origin author         -> (空输出)  exit=0
+$ git rev-parse author                        -> e27f111ed4b8a5feca7b8579d831c2d95f8aa476
+$ git rev-parse develop                       -> e27f111ed4b8a5feca7b8579d831c2d95f8aa476
+$ git ls-remote --heads origin develop        -> e27f111ed4b8a5feca7b8579d831c2d95f8aa476  refs/heads/develop
+$ git rev-list --left-right --count develop...author -> 0	0
+$ ls .git/hooks/ | grep -v sample             -> pre-commit, pre-merge-commit   (⛔ 无 pre-push)
+$ git config --get core.hooksPath             -> (未设, rc=1)
+```
+
+**push 前的红基线**（同一 worktree，`2026-09-17T04:56:31Z`）—— 证明这条判据不是恒绿：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-283
+{"id":"AC-283","verdict":"fail",
+ "reason":"acceptance failed (exit 1) — CAUSE=origin-author-absent — origin has no 'author' branch yet; push it first (git push -u origin author)",
+ "timestamp":"2026-09-17T04:56:31.266Z","dryRun":false,
+ "event":{"id":"a666857d-480f-4d82-8c90-339fb7945ef6", ... "verdict":"fail" ...}}
+GATE_EXIT=1
+```
+
+**Plan 2 — push 的 dry-run 先核作用域**（⛔ 只推一个 ref）：
+
+```
+$ git push --dry-run -u origin author
+To https://github.com/yaleh/quay
+ * [new branch]          author -> author
+Would set upstream of 'author' to 'author' of 'origin'
+DRYRUN_EXIT=0
+```
+
+**Plan 2 — 真 push**（`2026-09-17T04:57:01Z`）：`git push -u origin author` ⇒ `* [new branch] author -> author`，
+`branch 'author' set up to track 'origin/author'.`，`PUSH_EXIT=0`。⛔ 无 `--force`。
+
 ## AC
 
-- [ ] **AC1（goal 判据）**：`gate AC-283` 逐字重跑 `verdict: pass`，贴出完整输出。
+- [x] **AC1（goal 判据）**：`gate AC-283` 逐字重跑 `verdict: pass`，贴出完整输出。
       ⛔ 不得改宽判据——`goals/AC-283-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处**一字未动**
       （举证：`git diff develop -- goals/` 对该文件零命中）。
-- [ ] **AC2（新鲜度对照——判据盲区的那一半）**：push 那一刻 `origin/author` 的 sha == 本地 `author` tip，
+
+      **收口实测（2026-09-17T04:57:28Z）**：
+      ```
+      $ node packages/quay/bin/quay.js goal gate AC-283
+      {
+        "id": "AC-283",
+        "verdict": "pass",
+        "reason": "acceptance passed (exit 0)",
+        "timestamp": "2026-09-17T04:57:28.407Z",
+        "dryRun": false,
+        "event": {
+          "id": "3edb95fe-57ef-4d58-ac42-73a451dcb1c3",
+          "item_id": "AC-283", "pipeline_id": "AC-283", "gate": "goal",
+          "actor": "goal-cli", "verdict": "pass",
+          "timestamp": "2026-09-17T04:57:28.407Z",
+          "payload": { "reason": "acceptance passed (exit 0)" }
+        }
+      }
+      GATE_EXIT=0
+      ```
+      ⚠️ criterion 自己打印的 `OK — origin/author exists (…)` 被 `gate` 的 JSON 封装吸收（只回传
+      `reason`）；**远端 sha 的独立读数见 AC3**，⛔ 本条不靠 `reason` 里没出现的字符串。
+      **AC1b（判据未被改宽）**：`git diff develop -- goals/` ⇒ 空输出（`DIFF_EXIT=0`）；
+      `goals/AC-283-*.md` 的 blob sha 两侧相同：`develop` = `199ad2d797c6afb1fbdf6de60897bd14f6b8d692`，
+      工作树 = `199ad2d797c6afb1fbdf6de60897bd14f6b8d692`。
+      ⇒ **同一条命令在本次改动前后取值不同（fail → pass），判据可被打红。**
+
+- [x] **AC2（新鲜度对照——判据盲区的那一半）**：push 那一刻 `origin/author` 的 sha == 本地 `author` tip，
       两个完整 sha 并排贴出且**逐字相等**。⛔「曾经推过一次 / 远端有个落后的 author」不满足本条。
-- [ ] **AC3（push 真的落地，不靠 push 命令的退出码）**：`git ls-remote --heads origin author` 返回非空 sha，
+
+      **实测（2026-09-17T04:57:09Z，push 返回后 8 秒）**：
+      ```
+      local  author = e27f111ed4b8a5feca7b8579d831c2d95f8aa476
+      origin author = e27f111ed4b8a5feca7b8579d831c2d95f8aa476
+      AC2: EQUAL ✅
+      ```
+      ⇒ 远端不是「落后的旧点」，是 push 那一刻本地 tip 的**逐字镜像**。
+
+- [x] **AC3（push 真的落地，不靠 push 命令的退出码）**：`git ls-remote --heads origin author` 返回非空 sha，
       且 `git cat-file -e <sha>^{commit}` 退出 0；贴出两条命令与输出。
-- [ ] **AC4（作用域未被越界）**：并排贴出 push **前**（Plan 第 1 步存下的）与 push **后**的
+
+      ```
+      $ git ls-remote --heads origin author | awk '{print $1}'
+      e27f111ed4b8a5feca7b8579d831c2d95f8aa476        # AC3a: 非空 ✅
+      $ git cat-file -e e27f111ed4b8a5feca7b8579d831c2d95f8aa476^{commit}
+      CATFILE_EXIT=0                                  # AC3b: 对象在本检出可解析 ✅
+      ```
+      ⛔ 这是**直查远端**（`ls-remote` 走网络问 origin），不是 `git rev-parse origin/author`。
+      佐证这条区别是实的：push 之后本地**也**存在 remote-tracking ref，
+      `git rev-parse --verify refs/remotes/origin/author` ⇒ `e27f111ed…`（`rt_rc=0`）——
+      两个读法本次同值，但**本条判据采信的是直查那一个**（未 fetch 时 remote-tracking 可能是陈旧值，
+      与「已推送」同形）。
+
+- [x] **AC4（作用域未被越界）**：并排贴出 push **前**（Plan 第 1 步存下的）与 push **后**的
       `git ls-remote --heads origin`，证明**只有** `refs/heads/author` 是新增的，
       `develop` / `master` / 任何 `task/*` 的 sha 均未变化。⛔ 用了 `--force` 或推了别的 ref ⇒ 本条红。
-- [ ] **AC5（判据可被打红——负控制实跑）**：对一个合成远端（`mktemp -d` 里的裸仓库，
+
+      ```
+      $ diff .quay/ac283-pre-push-remote-heads.txt .quay/ac283-post-push-remote-heads.txt
+      0a1
+      > e27f111ed4b8a5feca7b8579d831c2d95f8aa476	refs/heads/author
+      DIFF_EXIT=1   (差异恰好是这一行)
+      $ comm -13 <(sort PRE) <(sort POST)   # 新增 ref
+      e27f111ed4b8a5feca7b8579d831c2d95f8aa476	refs/heads/author
+      $ comm -23 <(sort PRE) <(sort POST)   # 删除 ref
+      (空)
+      $ join -j 2 <(sort -k2 PRE) <(sort -k2 POST) | awk '$2!=$3'   # 同名改 sha
+      (空)
+      $ wc -l PRE POST                       -> 27 / 28
+      ```
+      ⇒ **27 → 28 个 ref，唯一新增是 `refs/heads/author`**；`develop`
+      （`e27f111ed…`）/ `master`（`17cf3067…`）/ 全部 25 条 `task/*` 与其余分支 sha 逐字未变。
+      **push 后 2 分钟复跑一次**（`04:59Z`）结果仍与 push 后快照逐字相同（`DIFF2_EXIT=0`）。
+
+- [x] **AC5（判据可被打红——负控制实跑）**：对一个合成远端（`mktemp -d` 里的裸仓库，
       `refs/heads/author` 指向 `1a6b904fc764587ce624c47a6bb7c313ea8a4cf0`，立案时实测**不是**本地 author 的祖先）
       跑一次 criterion 的判定段：**exit 1 且 `CAUSE=remote-not-ancestor-of-local`**。
       ⛔ 为做这条对照不得触碰 origin。立案时已跑过正/负控制（见 Proposal 表），收口时复跑一次并贴出。
-- [ ] **AC6（判据读的数在收口时刻仍取得到）**：收口后**再跑一次** `gate AC-283`
+
+      **判据原文逐字提取**（`quay goal show AC-283 --json` ⇒ `criterion` 字段，md5
+      `e6d5bcda31b3d67fad062e0569b16ccc`）后**原样执行**，⛔ 不是凭记忆重写。
+      **前提先验**（避免硬规则 2 的「反例恒真」）：`git merge-base --is-ancestor 1a6b904f… author` ⇒ `rc=1`
+      （确认它确实不是祖先）。
+      **负控制（合成裸仓库 `synth-neg.git`，`refs/heads/author` = `1a6b904f…`）**：
+      ```
+      $ git ls-remote --heads origin author   -> 1a6b904fc764587ce624c47a6bb7c313ea8a4cf0
+      $ bash /tmp/ac283-criterion-extracted.sh
+      CAUSE=remote-not-ancestor-of-local — origin/author (1a6b904fc764587ce624c47a6bb7c313ea8a4cf0)
+        is not an ancestor of the local author branch; it may be a different/diverged history,
+        not a real backup of this branch
+      CRIT_EXIT=1
+      ```
+      **正控制（同一 harness，`refs/heads/author` = 本地 author tip）** —— 证明这套 harness
+      **不是结构上恒红**（⛔ 没有它，「exit 1」什么也没证明）：
+      ```
+      $ bash /tmp/ac283-criterion-extracted.sh
+      OK — origin/author exists (e27f111ed4b8a5feca7b8579d831c2d95f8aa476) and is an ancestor of local author
+      CRIT_EXIT=0
+      ```
+      **第三段（`CAUSE=origin-author-absent`）** 由本任务 push 前的红基线就地覆盖（见上方 `04:56:31Z` 那条）。
+      ⇒ 三段取值各不相同（`origin-author-absent` / `remote-not-ancestor-of-local` / `exit 0`），判据可区分。
+      ⛔ **全程未触碰 origin**：两个对照跑在 `mktemp -d` 的独立 repo 中，其 `origin` 指向各自合成的裸仓库。
+
+- [x] **AC6（判据读的数在收口时刻仍取得到）**：收口后**再跑一次** `gate AC-283`
       （与 AC1 之间至少隔一次别的 git 操作）仍 `pass`；证明这个 pass 不是恰好夹在某个瞬态窗口里。
+
+      **AC1（04:57:28Z）与本次之间插入的 git 操作**：`git rev-parse author`、`git ls-remote --heads origin | wc -l`
+      （⇒ 28）、`git rev-parse --verify refs/remotes/origin/author`（⇒ `e27f111ed…`）、
+      以及 AC5 两个合成 repo 的全部 git 操作。**本次 `gate AC-283`（04:59:15.736Z）**：
+      ```
+      "verdict": "pass", "reason": "acceptance passed (exit 0)",
+      "event": { "id": "525ccd0b-4b23-4cec-87a2-b43ddc4ffb9c", ... "verdict": "pass" ... }
+      GATE_EXIT=0
+      ```
+      ⇒ 两次 pass 相隔约 107 秒且中间有真实读写，不是同一瞬态窗口里的重复读数。
+      ⛔ 收口之后未再对 `author` 做任何改写（本 worker 只 push，未 rebase / 未 force / 未删远端 ref）。
 
 ## DoD
 
