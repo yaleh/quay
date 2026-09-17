@@ -29,9 +29,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: README.md「Option A — as a Claude Code plugin (recommended)」一节（`:97` 附近）在安装命令前或后补充：`yaleh/quay` 是私有仓库，需要 `gh auth login`（若未登录）+ `gh auth setup-git`（把 `gh` 注册为 git 的 HTTPS 凭证助手）作为前置步骤。取假判据（改前/改后对照）：`grep -c "gh auth setup-git" README.md` 改前 0 → 改后 ≥ 1。
-- [ ] AC2: 新增文字须说明**为什么** `gh auth login` 单独不够（git 侧无 credential helper，直接 HTTPS clone 会报 `terminal prompts disabled`），不能只给命令不给原因。取假判据：`grep -c "terminal prompts disabled\|credential" README.md` 改前 0 → 改后 ≥ 1。
-- [ ] AC3: 不得在新增文字中引入具体第三方主机名（负控制）：`grep -iE "tokyo-alpha|VM-16-5" README.md` 必须为 0 命中（改前改后均需为 0，验证改动没有夹带调试环境细节）。
+- [x] AC1: README.md「Option A — as a Claude Code plugin (recommended)」一节（`:97` 附近）在安装命令前或后补充：`yaleh/quay` 是私有仓库，需要 `gh auth login`（若未登录）+ `gh auth setup-git`（把 `gh` 注册为 git 的 HTTPS 凭证助手）作为前置步骤。取假判据（改前/改后对照）：`grep -c "gh auth setup-git" README.md` 改前 0 → 改后 ≥ 1。
+- [x] AC2: 新增文字须说明**为什么** `gh auth login` 单独不够（git 侧无 credential helper，直接 HTTPS clone 会报 `terminal prompts disabled`），不能只给命令不给原因。取假判据：`grep -c "terminal prompts disabled\|credential" README.md` 改前 0 → 改后 ≥ 1。
+- [x] AC3: 不得在新增文字中引入具体第三方主机名（负控制）：`grep -iE "tokyo-alpha|VM-16-5" README.md` 必须为 0 命中（改前改后均需为 0，验证改动没有夹带调试环境细节）。
 
 ## Definition of Done
 
