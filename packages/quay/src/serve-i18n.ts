@@ -23,8 +23,10 @@
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
 //   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
 //   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299), /adr (AC-300),
-//   /goal (AC-301) and /doc (AC-302); the remaining 1 page's page-chrome is AC-303, and it adds its
-//   own tokens as it lands.
+//   /goal (AC-301), /doc (AC-302) and /architecture (AC-303). With /architecture wired, ALL FIFTEEN
+//   `SITE_NAV_ROUTES` pages have their own page-chrome in this table — the roster is now COMPLETE for
+//   the GOAL-024 page set (⛔ but the table stays open by type: it is `Record<string, …>`, keyed by
+//   exact token, so a future page still adds its own rows rather than editing a shared one).
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -359,6 +361,46 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   Docs: { en: "Docs", zh: "文档" },
   docs: { en: "docs", zh: "文档" },
   "Managed documents": { en: "Managed documents", zh: "托管文档" },
+  // AC-303 (/architecture page): this page's own THREE tokens — the AC-302 count, for the same
+  //   reason (⛔ do not copy the family's usual two): the `<title>` token, the `<h1>`'s name token and
+  //   the mobile header's label are three DIFFERENT strings.
+  //   `Architecture — 系统组件图` — the FULL token `serve-architecture.ts` passes to `pageTitle`, em
+  //     dash and the (already-Chinese) subtitle included, byte-equal to that call site. `pageNameFor`
+  //     is an EXACT-token lookup, so registering only the bare `Architecture` would leave this page's
+  //     `<title>` English while the shared nav bar switched — i.e. exactly the `title-unchanged` arm
+  //     of AC-303's criterion, the defect this task exists to remove. ⚠️ This key is NOT reused by the
+  //     `<h1>`: the two strings differ by the trailing subtitle, so the title entry does not serve it
+  //     and vice versa. (Same shape as AC-292's `Board — 三源 join 看板` / `Board`, AC-293's
+  //     `System — 系统状态` / `System` and AC-298's `Tests — 验证轮记录`.)
+  //   `Architecture` — the token the page's `<h1>` carries, i.e. the page NAME with the subtitle
+  //     appended raw at the call site. It is spelled like the nav KEY `architecture`, but it is a
+  //     separate lookup on purpose — the nav label resolves through `NAV_LABELS` (shared chrome,
+  //     ROW 1, 「架构」, already in place before this task) while this resolves through `pageNameFor`
+  //     (this page's chrome, ROW 3), and ROW 3's whole point is that the two are peers.
+  //   `architecture` — the LOWERCASE token the MOBILE header carries, i.e. the AC-290 `"task list"` /
+  //     AC-297 `"git history"` / AC-298 `tests` / AC-299 `sessions` / AC-300 `adrs` / AC-301 `goals` /
+  //     AC-302 `docs` shape (a page's own chrome token that is not a `pageTitle` token). It renders
+  //     into `<span class="mobile-header-page">`, which sits BEFORE the first `<nav>` and is therefore
+  //     neither inside the criterion's nav region nor a nav label; AC-303's AC1b asserts it anyway, so
+  //     that "this page's own chrome" switches as a whole. ⚠️ This is the deliberately STRICTER
+  //     reading: AC-291 (`/live`) and AC-292 (`/board`) left their mobile page label English, while
+  //     AC-302 (`/doc`) wired it — this task follows AC-302, because GOAL-024's scope is "this page's
+  //     own UI shell copy really changes under zh". Recorded as a judgement, not a derivation.
+  // ⚠️ CASE IS PART OF THE KEY. `pageNameFor` is an EXACT-token lookup, so `Architecture` does NOT
+  //     serve `architecture` and vice versa: collapsing them would leave one of the two sites English
+  //     — and, worse, would move the en baseline of the mobile header from `architecture` to
+  //     `Architecture`. ⛔ Do not "merge the duplicate".
+  // Neither zh value may carry the ASCII literal `Architecture`/`architecture` in ANY case: AC-303's
+  //     criterion fails the page on that literal inside the nav region — where this page's CURRENT
+  //     item label comes from NAV_LABELS's `architecture` row (「架构」, ROW 1) — and the same literal
+  //     is what the en baseline's `<title>` and `<h1>` carry, i.e. what the criterion's
+  //     `title-unchanged` arm compares the zh title against. 「架构」 satisfies "non-empty" without it.
+  //     The two entries landing on the same zh word (and on the same word as the nav row) is a
+  //     coincidence of vocabulary, ⛔ not a shared source — a later re-wording of one must not be
+  //     assumed to move the others (same note as AC-295's / AC-300's / AC-301's / AC-302's rows).
+  "Architecture — 系统组件图": { en: "Architecture — 系统组件图", zh: "架构 — 系统组件图" },
+  Architecture: { en: "Architecture", zh: "架构" },
+  architecture: { en: "architecture", zh: "架构" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline

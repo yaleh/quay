@@ -3,13 +3,33 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readArchitecture, type ArchitectureResult } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
 // ── /architecture ──────────────────────────────────────────────────────────────────────────────────
 
 interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
 
-function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentity | null = null): string {
+/** AC-303: `lang` is this request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher via `handleArchitecture`'s `cfg.lang`). It reaches FIVE things on this page and nothing
+ *  else: the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile chrome
+ *  (`renderMobileChrome`) — whose `architecture` entry already exists in NAV_LABELS (ROW 1, 「架构」),
+ *  so the nav's current item needs no new word — this page's own `<title>` (through `pageTitle`), its
+ *  `<h1>`'s page-name token (through `pageNameFor`), and the mobile header's page label (the THIRD,
+ *  lowercase token). The last three are the whole point: wiring only the SHARED nav bar would leave
+ *  the `<title>` at its English token, which is the difference between "the nav switched" and "THIS
+ *  page switched" — and AC-303's criterion fails the page on exactly that (CAUSE=title-unchanged).
+ *
+ *  ⚠️ The `<title>` token is the FULL string `Architecture — 系统组件图`, em dash and (already-Chinese)
+ *  subtitle included, because `pageNameFor` is an EXACT-token lookup: registering the bare
+ *  `Architecture` would MISS this call site. That bare token is a SEPARATE key, consumed by the
+ *  `<h1>`; the lowercase `architecture` is a THIRD, consumed only by the mobile header. Three
+ *  independent lookups — see serve-i18n.ts's ROW 3 block for why they are not collapsed.
+ *
+ *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: any direct `renderArchitecturePage()` caller that
+ *  predates it keeps rendering byte-for-byte what it rendered before, and `pageNameFor`'s en column
+ *  is the identity for every token — so the en baseline the goal criterion reads off the live page
+ *  cannot move as this page is wired. */
+function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   // Fixed diagram layout; node highlights derive from git facts (recent commits / open worktrees).
   const names = arch.components.map((c) => c.name);
   const nodeDefs: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
@@ -69,9 +89,9 @@ function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentit
     <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> 稳定</span>
   </div>`;
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — 系统组件图", identity)}</title></head>
-    <body>${renderMobileChrome("architecture", "architecture")}${renderSiteNav("architecture")}<main id="main">
-      <h1>Architecture — 系统组件图</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — 系统组件图", identity, lang)}</title></head>
+    <body>${renderMobileChrome("architecture", pageNameFor("architecture", lang), lang)}${renderSiteNav("architecture", lang)}<main id="main">
+      <h1>${pageNameFor("Architecture", lang)} — 系统组件图</h1>
       <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
       ${obsNote(arch.status, arch.reason)}
       ${arch.status === "ok" ? legend : ""}
@@ -92,5 +112,5 @@ export async function handleArchitecture(
     arch = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, components: [], inDevelopment: false };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderArchitecturePage(arch, cfg.identity));
+  res.end(renderArchitecturePage(arch, cfg.identity, cfg.lang));
 }
