@@ -30,9 +30,12 @@ const SRC_URL = new URL("../runner-grouping-list-groups.test.mjs", import.meta.u
 // scripts/test.sh (the single source of truth), not a copy of its logic.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(SRC_URL));
 
@@ -92,6 +95,64 @@ function runTestShRefresh(...args) {
   return out;
 }
 
+// ── async / PARALLEL metadata queries (gap-suite-split-15-over-30s-test-files, AC3) ──────────────────
+// `runTestSh` is `spawnSync` ⇒ BLOCKING, so a test that needs several INDEPENDENT metadata queries pays
+// their costs one after another. Shard runner-grouping-list-groups-s03 needs four (no-args + the three
+// group lists of the partition relationship); sequentially it measured **31.98s in the full suite**,
+// past the 30s per-file ceiling this task enforces, purely from four × ~8s of blocking `--list-files`.
+// The four queries do not depend on each other, so running them concurrently is both faster AND
+// stricter: they now observe ONE tree state instead of four successive ones.
+//
+// Same contract as the sync twin: NODE_TEST_* scrubbed from the child env, 120s deadline, and the
+// bounded exit-3 retry (exit 3 = a sibling's transient unknown-group fixture; a GENUINE fail-closed
+// fails every re-read and still surfaces via the assert).
+async function runTestShAsync(...args) {
+  const cleanEnv = { ...process.env };
+  for (const k of Object.keys(cleanEnv)) {
+    if (k.startsWith("NODE_TEST_")) delete cleanEnv[k];
+  }
+  for (let attempt = 0; ; attempt++) {
+    let status = 0;
+    let stdout = "";
+    let stderr = "";
+    try {
+      const r = await execFileAsync("bash", [testSh, ...args], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 120000,
+        env: cleanEnv,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      stdout = r.stdout;
+    } catch (e) {
+      status = typeof e.code === "number" ? e.code : 1;
+      stdout = e.stdout ?? "";
+      stderr = e.stderr ?? "";
+    }
+    if (status === 0) return stdout;
+    if (status !== 3 || attempt >= 3) {
+      assert.equal(status, 0, `scripts/test.sh ${args.join(" ")} exited ${status}\nstdout: ${stdout}\nstderr: ${stderr}`);
+    }
+  }
+}
+
+/** Run several INDEPENDENT metadata queries CONCURRENTLY; outputs come back in the given order.
+ *  `queryList` is an array of argv arrays, e.g. [["--list-files"], ["--group","serial","--list-files"]]. */
+function runTestShParallelAsync(queryList) {
+  return Promise.all(queryList.map((argv) => runTestShAsync(...argv)));
+}
+
+/** Async twin of `readStable` — same bounded re-read against a transient sibling fixture, with
+ *  `refresh=true` on every retry (there is no cache on the async path: every read is live). */
+async function readStableAsync(read, relationship) {
+  let values = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    values = await read(attempt > 0);
+    if (relationship(values)) break;
+  }
+  return values;
+}
+
 // Ground truth is COMPUTED at runtime, never snapshotted. A hardcoded `EXPECTED_ENGINE = 58`
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
@@ -132,4 +193,4 @@ function readStable(read, relationship) {
   return values;
 }
 
-export { __dirname, assert, dirname, fileURLToPath, join, metaCache, parseGroups, readStable, repoRoot, runTestSh, runTestShCached, runTestShRefresh, spawnSync, test, testSh };
+export { __dirname, assert, dirname, fileURLToPath, join, metaCache, parseGroups, readStable, readStableAsync, repoRoot, runTestSh, runTestShAsync, runTestShCached, runTestShParallelAsync, runTestShRefresh, spawnSync, test, testSh };

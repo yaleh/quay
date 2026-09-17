@@ -185,6 +185,7 @@ packages/quay/test/gate-diagnostics.test.mjs
 packages/quay/test/gate-ergonomics.test.mjs
 packages/quay/test/gate-list-verbose.test.mjs
 packages/quay/test/gate.test.mjs
+packages/quay/test/goal-born-draft-zero-ac-gate.test.mjs
 packages/quay/test/goal-gate.test.mjs
 packages/quay/test/goal-store.test.mjs
 packages/quay/test/init.test.mjs
@@ -410,6 +411,8 @@ plugin/test/driver-runtime-s07.test.mjs
 plugin/test/driver-runtime-s08.test.mjs
 plugin/test/driver-runtime-s09.test.mjs
 plugin/test/driver-runtime-s10.test.mjs
+plugin/test/driver-runtime-s11.test.mjs
+plugin/test/driver-runtime-s12.test.mjs
 plugin/test/driver-shared.test.mjs
 plugin/test/driver-status-carrier-path.test.mjs
 plugin/test/driver-third-party-fixture.test.mjs
@@ -433,6 +436,7 @@ plugin/test/fan-in-execute-paths-s10.test.mjs
 plugin/test/fan-in-ff-merge.test.mjs
 plugin/test/fan-in-ff-protocol-check.test.mjs
 plugin/test/fan-in-materialize-check.test.mjs
+plugin/test/fan-in-push-lag-check.test.mjs
 plugin/test/fan-in-queueing-model.test.mjs
 plugin/test/fan-in-runid-check.test.mjs
 plugin/test/fan-in-ts-typecheck-gate.test.mjs
@@ -477,6 +481,13 @@ plugin/test/goal-driver-s03.test.mjs
 plugin/test/goal-driver-s04.test.mjs
 plugin/test/goal-driver-s05.test.mjs
 plugin/test/goal-driver-s06.test.mjs
+plugin/test/goal-driver-s07.test.mjs
+plugin/test/goal-driver-s08.test.mjs
+plugin/test/goal-driver-s09.test.mjs
+plugin/test/goal-driver-s10.test.mjs
+plugin/test/goal-driver-s11.test.mjs
+plugin/test/goal-driver-s12.test.mjs
+plugin/test/goal-driver-s13.test.mjs
 plugin/test/goal-driver-task-boundary-check.test.mjs
 plugin/test/goal-invariants-standing.test.mjs
 plugin/test/goal-needs-human-blocking.test.mjs
@@ -600,6 +611,7 @@ plugin/test/quay-init-loop.test.mjs
 plugin/test/quay-init-tmux-detection.test.mjs
 plugin/test/quay-init.test.mjs
 plugin/test/quay-session.test.mjs
+plugin/test/readme-positioning-criterion.test.mjs
 plugin/test/ready-pool-check-s01.test.mjs
 plugin/test/ready-pool-check-s02.test.mjs
 plugin/test/ready-pool-check-s03.test.mjs
@@ -773,6 +785,14 @@ plugin/test/worker-driver-fan-in-s07.test.mjs
 plugin/test/worker-driver-fan-in-s08.test.mjs
 plugin/test/worker-driver-fan-in-s09.test.mjs
 plugin/test/worker-driver-fan-in-s10.test.mjs
+plugin/test/worker-driver-fan-in-s11.test.mjs
+plugin/test/worker-driver-fan-in-s12.test.mjs
+plugin/test/worker-driver-fan-in-s13.test.mjs
+plugin/test/worker-driver-fan-in-s14.test.mjs
+plugin/test/worker-driver-fan-in-s15.test.mjs
+plugin/test/worker-driver-fan-in-s16.test.mjs
+plugin/test/worker-driver-fan-in-s17.test.mjs
+plugin/test/worker-driver-fan-in-s18.test.mjs
 plugin/test/worker-driver-resident-s01.test.mjs
 plugin/test/worker-driver-resident-s02.test.mjs
 plugin/test/worker-driver-resident-s03.test.mjs

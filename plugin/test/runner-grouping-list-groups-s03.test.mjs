@@ -23,9 +23,9 @@
 // SPLIT from runner-grouping-list-groups.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/3 (1 test). Shared fixtures: ./helpers/runner-grouping-list-groups-harness.mjs (single source).
 
 import { test } from "node:test";
-import { assert, readStable, runTestSh, runTestShCached, runTestShRefresh } from "./helpers/runner-grouping-list-groups-harness.mjs";
+import { assert, readStableAsync, runTestShParallelAsync } from "./helpers/runner-grouping-list-groups-harness.mjs";
 
-test("AC6: --group product,engine ∪ --group serial ∪ --group lowconc selects the same files as no-args", () => {
+test("AC6: --group product,engine ∪ --group serial ∪ --group lowconc selects the same files as no-args", async () => {
   // The default run = the product,engine body PLUS the
   // serial phase (concurrency-1 load-sensitive files) PLUS the lowconc phase (concurrency-3
   // hermetic-but-load-sensitive files). The no-args selection is the concatenation of
@@ -35,19 +35,23 @@ test("AC6: --group product,engine ∪ --group serial ∪ --group lowconc selects
   // exposure than AC3's two), and the assertion is byte-exact concatenation equality —
   // serial-anti-stomp landing in ANY window makes it unequal. Bounded re-read until the
   // concatenation holds stably, same as AC3 (readStable above).
-  const { noArgs, body, serial, low } = readStable(
-    (refresh) => {
-      // noArgs reuses AC3's cached --list-files (文件内去重); on refresh it re-queries live.
-      // body/serial/low are unique to this test (no redundant twin), so they always query fresh.
-      const query = refresh ? runTestShRefresh : runTestShCached;
-      const noArgs = query("--list-files");
-      const body = runTestSh("--group", "product,engine", "--list-files");
-      const serial = runTestSh("--group", "serial", "--list-files");
-      const low = runTestSh("--group", "lowconc", "--list-files");
-      // each group's output ends with a trailing newline after its last file; splice trailing
-      // newlines so the concatenation is byte-identical to no-args.
-      return { noArgs, body, serial, low };
-    },
+  // The four queries are INDEPENDENT, so they run CONCURRENTLY (runTestShParallelAsync) rather than
+  // as four blocking spawnSync calls. Sequentially this one file measured 31.98s in the full suite —
+  // over the 30s per-file ceiling this task enforces (AC3) — purely from four × ~8s `--list-files`.
+  // Concurrency also makes the assertion STRICTER: the four lists now come from one tree state
+  // instead of four successive ones. Order of the returned outputs == order of the argv arrays.
+  const { noArgs, body, serial, low } = await readStableAsync(
+    () =>
+      runTestShParallelAsync([
+        ["--list-files"],
+        ["--group", "product,engine", "--list-files"],
+        ["--group", "serial", "--list-files"],
+        ["--group", "lowconc", "--list-files"],
+      ]).then(([noArgs, body, serial, low]) => {
+        // each group's output ends with a trailing newline after its last file; splice trailing
+        // newlines so the concatenation is byte-identical to no-args.
+        return { noArgs, body, serial, low };
+      }),
     ({ noArgs, body, serial, low }) =>
       body.replace(/\n$/, "") + "\n" + serial.replace(/\n$/, "") + "\n" + low === noArgs,
   );

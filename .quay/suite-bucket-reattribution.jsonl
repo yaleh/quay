@@ -195,3 +195,4 @@
 {"file": "plugin/test/full-suite-runner-s08.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
 {"file": "plugin/test/full-suite-runner-s09.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
 {"file": "plugin/test/worker-driver-fan-in-s10.test.mjs", "judgment": "M", "mechanism": "S+M", "signal": ["concurrency"]}
+{"file": "plugin/test/worker-driver-fan-in-s11.test.mjs", "judgment": "M", "mechanism": "S+M", "signal": []}

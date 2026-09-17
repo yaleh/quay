@@ -40,7 +40,18 @@ test("audit exit 1 + stale flags when a consumer cannot reach the registry (stal
     const reg = writeRegistry(dir, "registry.conf",
       "test-target|offline|/tmp/observer-test-root|test-sess|decommissioned\n");
     const a = run(join(scriptsDir, "observer-registry.sh"), ["--audit", "--json"], {
-      env: { ...process.env, OBSERVER_REGISTRY_FILE: reg },
+      env: {
+        ...process.env,
+        OBSERVER_REGISTRY_FILE: reg,
+        // The audit spawns the real os-anchor-watchdog.sh, which — on this stale path — decides to
+        // RELAUNCH and then sits in its prompt-wait window. That window is 30s by default and has
+        // nothing to do with what this test asserts (the audit's stale VERDICT, which is derived
+        // from the watchdog's output text, not from how long it waited). Left at 30 the file's wall
+        // clock is 31.4s — over the 30s per-file ceiling this task (AC3) enforces. 1s keeps the
+        // verdict identical: the fixture has no real TUI, so BOTH values end in "did not show a
+        // prompt", just with a different number in the message.
+        QUAY_WATCHDOG_PROMPT_WAIT_S: "1",
+      },
     });
     assert.equal(a.status, 1, "audit exits 1 when a consumer is stale");
     const audit = JSON.parse(a.stdout);

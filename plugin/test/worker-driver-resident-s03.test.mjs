@@ -115,11 +115,17 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  // 这一步等的是 2 次 worker 落地（每次含一个真 liveness 子进程 spawn + 落地 git 读）——实测空载即
-  // ~30s，故取 2×基网：上限 = WAIT_BASE_MS × 2 × 本机当下的抢占因子（⛔ 不再是裸 30000）。
-  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, WAIT_BASE_MS * 2);
+  // 等的是【本测试真正断言的量】：至少一轮 + liveness 命令真被 spawn 过（下面两条 assert 的正是它）。
+  // ⛔ 原判据是 `readOutcomeLines(root).length >= 2` —— 实测该条件在夹具下【恒不可满足】：
+  // 等待返回时 rounds=92 而 outcomes=1（92 轮里 worker 只落地 1 次）。恒假的等待条件 + 后面恒真的
+  // 较弱断言（rounds>=1 / livenessCount>=1）⇒ 每次都空烧满 30s 上限（WAIT_BASE_MS×2）再通过；
+  // 文件墙钟因此被钉在 30.2s，越过本任务的每文件 30s 上限（AC3）。原注释把这 30s 读成「2 次落地的
+  // 实测成本」，实为等待超时（硬规则 4：一个结构上不可满足的量不是测量；硬规则 3b 的孪生形态——
+  // 「永远等不到」与「等到了」都返回同一个值）。
+  const readLivenessCount = () => (fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0);
+  await waitFor(() => readRoundLines(root).length >= 1 && readLivenessCount() >= 1, WAIT_BASE_MS);
   const rounds = readRoundLines(root);
-  const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
+  const livenessCount = readLivenessCount();
   // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
   // ① counter ≥ 1 ⇒ liveness 命令被真实 spawn 过（零调用者 Finding 的根已修）；② 每轮 round 都带
   // 非 null 的 liveness 结果（接线存在）。⛔ 不做 livenessCount ≥ rounds.length / 每轮 checked===true：
