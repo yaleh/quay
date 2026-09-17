@@ -318,8 +318,12 @@ GATE_EXIT=0
 ### 6. AC5 —— 不回归 + 作用域
 
 ```
-① bash scripts/test.sh --for-task gap-ac296-… --allow-thin   ⇒ EXIT=0；94 tests / 94 pass / 0 fail
-   （本任务的 4 条测试都在被选中的集合里跑过：AC-dict ✔ / AC-black-box ✔ / AC-en-baseline ✔ / AC-scope ✔）
+① bash scripts/test.sh --for-task gap-ac296-…（**AC5① 的逐字形态，⛔ 不带 `--allow-thin`**）⇒ **EXIT=0**；
+   98 tests / 98 pass / 0 fail，**无 thin-selection 提示**（⇒ 选择器不 thin；`--allow-thin` 形态同形同结果 98/98/0）。
+   （本任务的 4 条测试都在被选中的集合里跑过：AC-dict ✔ / AC-black-box ✔ / AC-en-baseline ✔ / AC-scope ✔；
+    另有一条 AC-291 文件里被本任务改写的 `AC-black-box: /journal is ALSO wired` ✔ —— 见 §7。
+    ⚠️ 收尾前先跑过一次 94 tests 的 scoped 门，那次 `## Touches` 尚未扩到 AC-291 的测试文件；
+    扩了之后选择集变大 ⇒ 以 98 为准。）
 ② node --test packages/quay/test/serve-*.test.mjs             ⇒ 222 tests / 221 pass / 1 skipped / 0 fail
 ③ git diff --name-only develop...HEAD
    packages/quay/src/serve-i18n.ts
