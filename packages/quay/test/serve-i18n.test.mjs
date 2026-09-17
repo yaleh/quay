@@ -126,10 +126,21 @@ test("AC-dict: an unknown key THROWS (never a silent English fallback)", () => {
 test("AC-dict: pageNameFor translates the page's own token, `en` is the identity, unmapped stays English", () => {
   assert.equal(pageNameFor("Dashboard", "en"), "Dashboard", "en is the identity for the mapped token");
   assert.equal(pageNameFor("Dashboard", "zh"), "仪表盘", "zh translates the page's own token");
-  assert.equal(pageNameFor("Tasks", "zh"), "Tasks",
-    "an unmapped page token under zh keeps its English token (AC-290~303 own the other pages) — never blank");
-  assert.equal(pageNameFor("Tasks", "en"), "Tasks", "unmapped tokens are the identity under en too");
-  // Control — the function CAN take a different value; otherwise the two asserts above are noise.
+  // AC-290 mapped the /tasks page's two tokens. Asserted here, in the DICTIONARY's own test, so the
+  // handoff is checked where the words live and not only at the page that consumes them.
+  assert.equal(pageNameFor("Tasks", "en"), "Tasks", "en is the identity for the /tasks <title> token (AC-290)");
+  assert.equal(pageNameFor("Tasks", "zh"), "任务", "zh translates the /tasks <title> token (AC-290)");
+  assert.equal(pageNameFor("task list", "zh"), "任务列表",
+    "zh translates the /tasks <h1> + mobile-header token (AC-290)");
+  // The UNMAPPED-token example below used to be `"Tasks"`. A real page token stops being unmapped
+  // the moment that page's task lands, so the old line would have turned this assertion into a
+  // claim about AC-290's progress rather than about the function's behaviour. The token below is
+  // named by no page, so the property (unmapped ⇒ English identity, never blank) stays measurable
+  // across the whole AC-291~303 series instead of re-staling at each page.
+  assert.equal(pageNameFor("Not A Page", "zh"), "Not A Page",
+    "an unmapped page token under zh keeps its English token (AC-291~303 own the other pages) — never blank");
+  assert.equal(pageNameFor("Not A Page", "en"), "Not A Page", "unmapped tokens are the identity under en too");
+  // Control — the function CAN take a different value; otherwise the identity asserts above are noise.
   assert.notEqual(pageNameFor("Dashboard", "zh"), pageNameFor("Dashboard", "en"),
     "control: pageNameFor is not constant across languages for the mapped token");
 });

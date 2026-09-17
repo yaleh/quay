@@ -20,8 +20,9 @@
 //
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
-//   whose OWN chrome has actually been wired are here — /dashboard (AC-289) and /live (AC-291);
-//   the remaining pages' page-chrome is AC-290~303, and each adds its own tokens as it lands.
+//   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290) and
+//   /live (AC-291); the remaining 12 pages' page-chrome is AC-292~303, and each adds its own tokens
+//   as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -106,6 +107,17 @@ export function navLabelsFor(lang: Lang = DEFAULT_LANG): Record<NavKey, string> 
  *  "non-empty" while leaving the assertion red (see the WHY note above). */
 const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   Dashboard: { en: "Dashboard", zh: "仪表盘" },
+  // AC-290 (/tasks list page): this page's own TWO tokens. `Tasks` is the token `pageTitle`
+  // receives; it is spelled like the nav KEY `tasks`, but it is a separate lookup on purpose — the
+  // nav label resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through
+  // `pageNameFor` (this page's chrome, ROW 3), and ROW 3's whole point is that the two are peers.
+  // `"task list"` is the token the <h1> and the mobile header carry. `en` is the identity for both,
+  // so the en baseline — the bytes the goal criterion reads off the live page — cannot move.
+  Tasks: { en: "Tasks", zh: "任务" },
+  "task list": { en: "task list", zh: "任务列表" },
+  // AC-291 (/live page): this page's own TWO tokens — the full `pageTitle` token (em dash included,
+  // it must be byte-equal to the call site) and the token its `<h1>` carries. See the block comment
+  // above for why neither zh value may carry the ASCII literal "Live".
   "Live — loop activity": { en: "Live — loop activity", zh: "实时 — 循环活动" },
   Live: { en: "Live", zh: "实时" },
 };
