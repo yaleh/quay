@@ -4,7 +4,7 @@ title: AC-214 第六次转红（升级面 AC-238/239 = 204/200，margin −4）�
   有检测、有如实日志，**没有消费者** —— 第五次的立案步落了源、没落进【在跑的产物】（anchor 加载的 dist builtAt
   2026-09-15T19:05:17Z，早于该步落地 22 分钟、2 天未重建）⇒ 生产上 0 条 filing-round、AC-238/239 的
   finding 三次无人接
-status: todo
+status: ready
 labels:
   - gap
   - defect
