@@ -136,21 +136,21 @@ curl -sf -H 'Cookie: lang=zh'  http://127.0.0.1:4173/live  ⇒ 34943 bytes, <htm
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/live` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）
   的文本都**不是** `Live`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）。
   ⛔ 三处分开断言、分开贴原始片段——只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
   证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言
   （硬规则 4 推论四）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Live'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Live'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个 `tasks/*.md`），
   并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。预期：zh 下 nav 区块内 `Live` 计数 = 0。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-291 --dry-run --json`
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-291 --dry-run --json`
   完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。
   ⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-291-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Live` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac291-live-page-zh-chrome-nav-current-and-own-title` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac291-live-page-zh-chrome-nav-current-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿；③ **作用域举证**：`grep -rc 'html lang="en"' packages/quay/src/*.ts`
   **逐文件**贴出并与立案基线对照（总数 **23**，`serve-live.ts` **2**）：本任务后 **`serve-live.ts` 2→1**
   （留下的那 1 处是 `:162` 的 `/journal`，出作用域），**其余 12 个文件计数一字未动**。
