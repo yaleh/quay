@@ -144,11 +144,13 @@ test("AC6 — an existing origin survives a later write that omits it; blanking 
 // ── AC4: active set DERIVED from goal status (change the goal, the set follows) ──────────────────
 test("AC4 — listActiveCriteria() derives the active set from goal status, not a hand-maintained checklist", () => {
   const s = createGoalStore(tmpDir("ac4"));
-  // ⚠️ 「出生即 active」不再是可写状态（gap-goal-create-as-active-skips-zero-ac-gate）⇒ 走两步：
-  // 非 active 建 → 落 AC → 激活。⛔ 不用 seedAc：本测试逐条 deepEqual 活跃集，多一条 AC 就是噪声。
-  s.write("GOAL-010", { title: "p10", status: "draft", origin: "o1", body: GOAL_BODY });
+  // ⚠️ AC-FIRST（2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant）：写面现在拒绝
+  // 「出生即 draft/active 而名下零 AC」的 GOAL——这正是不变式自己的作用域（AC-217），而原先的
+  // 「非 active 建 → 落 AC → 激活」把 draft 那一半留成了开放的窗口。故 AC 先落，GOAL 后建。
+  // ⛔ 仍不用 seedAc（本测试逐条 deepEqual 活跃集，多一条 AC 就是噪声）——AC 先写不等于要多写。
   s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o2", expect: EXPECT });
   s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o3", expect: EXPECT });
+  s.write("GOAL-010", { title: "p10", status: "draft", origin: "o1", body: GOAL_BODY });
   s.write("GOAL-010", { status: "active" });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-010", "AC-011"]);
 
@@ -156,8 +158,8 @@ test("AC4 — listActiveCriteria() derives the active set from goal status, not 
   // GOAL-011 is filed draft with its own AC first: the `supersedes` disposition fires at ACTIVATION
   // (goal-store.ts's cap block reads the PARAM, not the stored field), so the「old ACs left」half is
   // observed against the ids that must be gone and the「new AC entered」half against the new id.
-  s.write("GOAL-011", { title: "p11", status: "draft", origin: "o4", body: GOAL_BODY });
   s.write("AC-012", { title: "a3", status: "active", goal: "GOAL-011", criterion: "true", origin: "o5", expect: EXPECT });
+  s.write("GOAL-011", { title: "p11", status: "draft", origin: "o4", body: GOAL_BODY });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-010", "AC-011"], "GOAL-011 尚未激活 ⇒ 活跃集不变");
   s.write("GOAL-011", { status: "active", supersedes: ["GOAL-010"] });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-012"], "new goal's AC enters the active set");
@@ -262,6 +264,10 @@ test("write rejects malformed ids (GOAL-1, PHASE-001, path traversal)", () => {
 // ── draft: write() defaults to draft (not active); draft records are absent from the active set ──
 test("draft — write() without an explicit status lands `status: draft` (default NOT active)", () => {
   const s = createGoalStore(tmpDir("draft-default"));
+  // ⚠️ AC-first: `draft` is not a way around the AC-coverage gate (AC-217's scope is {draft, active}),
+  // so the fixture files the naming AC before the GOAL — the default-status question below is
+  // unaffected (the AC defaults to draft too, and the assertion is about the GOAL's own status).
+  seedAc(s, "GOAL-001");
   const g = s.write("GOAL-001", { title: "unstarted goal", origin: "o", body: GOAL_BODY });
   assert.equal(g.status, "draft");
   assert.equal(s.get("GOAL-001").status, "draft");
@@ -269,8 +275,11 @@ test("draft — write() without an explicit status lands `status: draft` (defaul
 
 test("draft — a draft GOAL is absent from activeGoals(); its ACs absent from listActiveCriteria() even when the AC is active", () => {
   const s = createGoalStore(tmpDir("draft-neg"));
-  s.write("GOAL-001", { title: "unstarted goal", origin: "o", body: GOAL_BODY }); // defaults to draft
+  // ⚠️ AC-first (2026-09-17): a GOAL cannot be born into {draft, active} with zero ACs (AC-217's own
+  // scope). The AC is `active` while its GOAL is `draft` — activeness derives from the GOAL, which is
+  // exactly what the second assertion below measures.
   s.write("AC-001", { title: "a draft goal's AC", status: "active", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("GOAL-001", { title: "unstarted goal", origin: "o", body: GOAL_BODY }); // defaults to draft
   assert.deepEqual(s.activeGoals().map((g) => g.id), [], "draft GOAL is not active");
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), [], "activeness derives from the GOAL, not the AC's own status");
 });
@@ -334,13 +343,21 @@ test("goal-store list/get/write round-trip through the CLI (invoke surface)", ()
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  // ⚠️ `--status draft`: this test counts records (list.length === 1), and a live GOAL now needs a
-  // naming AC first (gap-goal-create-as-active-skips-zero-ac-gate) — the round-trip v1 surface is
-  // the subject here, not activation legality.
-  n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  // ⚠️ AC-first (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): the write face
+  // now refuses a GOAL born into {draft, active} with zero ACs — the invariant's own scope (AC-217).
+  // So the fixture files the naming AC first, exactly as production now must; the round-trip v1
+  // surface is the subject here, not activation legality.
+  const ac = n(["write", "AC-901", "--title", "seeded exit condition", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "test fixture", "--expect", EXPECT]);
+  assert.equal(ac.status, 0, "the naming AC must write:\n" + ac.stdout + ac.stderr);
+  const gw = n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(gw.status, 0, "the GOAL must write once its AC exists:\n" + gw.stdout + gw.stderr);
+  // Both records are real carriers, so `list` returns two rows — the GOAL round-trip is asserted on
+  // the GOAL row, ⛔ not on a count that would silently depend on the AC being absent.
   const list = JSON.parse(n(["list"]).stdout);
-  assert.equal(list.length, 1);
-  assert.equal(list[0].id, "GOAL-001");
+  assert.equal(list.length, 2, `list must return the AC and the GOAL: ${JSON.stringify(list.map((r) => r.id))}`);
+  const goalRow = list.find((r) => r.id === "GOAL-001");
+  assert.ok(goalRow, "the GOAL record must be listed");
+  assert.equal(goalRow.title, "p");
   const got = JSON.parse(n(["get", "GOAL-001"]).stdout);
   assert.equal(got.title, "p");
 });
@@ -899,12 +916,14 @@ test("AC5 (P3) — draft→active 写 activatedAt + statusLog；title-only 不�
 test("AC6 (P9) — write --dry-run exit 0 ∧ goals/ 无新增变化 ∧ 记录内容未变", () => {
   const { root, run } = gitRepo("ac6-dryrun");
   const n = (cmd) => runCli([...cmd, "--root", root]);
-  n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
-  // gap-meta-goal-store-activation-gate: the activation gate now requires ≥1 AC naming the GOAL, so a
-  // zero-AC fixture would be rejected for THAT reason and this test would stop measuring P9. Give the
-  // goal its exit condition (a real AC record) so the dry-run below is a gate-PASSING activation —
-  // the subject here stays dry-run semantics (exit 0, nothing persisted), not activation legality.
-  n(["write", "AC-001", "--title", "a", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  // gap-meta-goal-store-activation-gate + AC-217's scope: the GATE requires ≥1 AC naming the GOAL, and
+  // since 2026-09-17 that gate covers the birth-into-{draft, active} path too — so the AC is written
+  // FIRST and the GOAL second. A zero-AC fixture would be rejected for THAT reason and this test would
+  // stop measuring P9; the subject here stays dry-run semantics (exit 0, nothing persisted).
+  const ac = n(["write", "AC-001", "--title", "a", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(ac.status, 0, "the naming AC must write:\n" + ac.stdout + ac.stderr);
+  const gw = n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(gw.status, 0, "the GOAL must write once its AC exists:\n" + gw.stdout + gw.stderr);
   const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("GOAL-001-"));
   const before = fs.readFileSync(path.join(root, "goals", file), "utf8");
   const dry = n(["write", "GOAL-001", "--status", "active", "--dry-run"]);
@@ -982,7 +1001,13 @@ test("AC3 — 未声明意图时 create/update 的落痕可区分（提交 subje
   const { root, run } = gitRepo("intent-ac3");
   const n = (cmd) => runCli([...cmd, "--root", root]);
   // 方向①（反之）：调用方以为存在（update 式写）实则不存在 ⇒ store 创建 ⇒ 落痕 `create`。
-  n(["write", "GOAL-001", "--title", "fresh", "--origin", "o", "--body", GOAL_BODY]);
+  // ⚠️ AC-first（2026-09-17）：GOAL-001 出生即 draft ⇒ 名下须先有一条 AC（AC-217 的作用域 = {draft,
+  // active}）。该 AC 自己的提交是仓库的第一条提交（subject 亦为 create），故下面读的是**紧邻的那条**，
+  // 判据（`create` 形）不受影响。
+  const ac = n(["write", "AC-901", "--title", "seeded exit condition", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "test fixture", "--expect", EXPECT]);
+  assert.equal(ac.status, 0, "the naming AC must write:\n" + ac.stdout + ac.stderr);
+  const gw = n(["write", "GOAL-001", "--title", "fresh", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(gw.status, 0, "the GOAL must write once its AC exists:\n" + gw.stdout + gw.stderr);
   const createSubj = run("log", "--oneline", "-1", "--format=%s").trim();
   assert.match(createSubj, /create/, `a no-intent write to an absent id must trace as create, got: ${createSubj}`);
   // 方向②（正向）：调用方以为不存在（create 式写）实则存在 ⇒ store 更新 ⇒ 落痕 `field:…`。
@@ -1089,15 +1114,16 @@ test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subje
 test("AC-reverify-1 — checkReverifyScope annotates each in-scope AC with goal / goalStatus / longTerm", () => {
   const s = createGoalStore(tmpDir("reverify1"));
   // GOAL-001 stays ACTIVE ⇒ its achieved AC is in scope via the FIRST branch of the predicate.
-  // ⚠️ Two-step (draft → AC → activate): born-active is no longer writable, and ⛔ no `seedAc` here —
-  // this test deepEquals the whole scope, so an extra AC would be noise.
-  s.write("GOAL-001", { title: "active goal", status: "draft", origin: "o", body: GOAL_BODY });
+  // ⚠️ AC-first (2026-09-17): a GOAL cannot be born into {draft, active} with zero ACs (AC-217's own
+  // scope), so each GOAL is named by its AC before it is written. ⛔ no `seedAc` here — this test
+  // deepEquals the whole scope, so an extra AC would be noise.
   s.write("AC-001", { title: "under an active goal", status: "achieved", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("GOAL-001", { title: "active goal", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("GOAL-001", { status: "active" });
   // GOAL-002 is CLOSED ⇒ its ACs leave the scope unless each carries `long-term: true`.
-  s.write("GOAL-002", { title: "closed goal", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("AC-002", { title: "leaves with its GOAL", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
   s.write("AC-003", { title: "standing guarantee", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("GOAL-002", { title: "closed goal", status: "draft", origin: "o", body: GOAL_BODY });
   s.write("GOAL-002", { status: "achieved" });
   s.write("AC-003", { longTerm: true });
 
@@ -1194,10 +1220,16 @@ test("AC-reverify-5 — the CLI reports NOT-EVALUATED (exit 3) when the scope is
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const n = (cmd) => runCli(["--root", root, ...cmd]);
-  // ⚠️ `--status draft`, ⛔ no seeded AC: this test asserts scopeSize === 0, and a live GOAL now
-  // requires a naming AC first — the subject here is the EMPTY-scope reading, not activation legality.
-  n(["write", "GOAL-001", "--title", "active", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
-  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  // ⚠️ AC-first (2026-09-17): the GOAL is born `draft` and the write face now requires its naming AC
+  // first (AC-217's scope = {draft, active}), so the AC is written before the GOAL. The AC is also
+  // `draft`: the reading below is the EMPTY-scope one, and `checkReverifyScope` counts only `achieved`
+  // ACs — a non-achieved AC is out of I5's scope by its own predicate, ⛔ not by the fixture being
+  // degenerate (before this fix the GOAL write was silently refused and the scope was 0 for the WRONG
+  // reason — the fixture is hydrated here so the reading is about the scope, not about a missing goal).
+  const ac = n(["write", "AC-001", "--title", "a", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(ac.status, 0, "the naming AC must write:\n" + ac.stdout + ac.stderr);
+  const gw = n(["write", "GOAL-001", "--title", "draft goal", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(gw.status, 0, "the GOAL must write once its AC exists:\n" + gw.stdout + gw.stderr);
   const r = n(["check", "--reverify-scope"]);
   // An unachieved AC is not in the I5 scope at all, so nothing was evaluated: "empty" must be
   // distinguishable from "read and all fine" (hard rule 3b).

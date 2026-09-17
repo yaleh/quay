@@ -57,9 +57,18 @@ goal_ac: AC-279
 ② **⛔ 不删测试换时间**：每条测试承载一条 AC（`flip-no-ac` 闸守着），AC4 用测试名集合守恒证伪它。
 
 **职责边界**：本任务只做「文件拆分 + 分片登记 + 基线同步」，**不改** `scripts/test.sh` 的并发推导、
-泳道定义或调度器（那是 GOAL-022 另两条 AC 的面）。**落地时越出了这条边界的一处**：拆分让若干
-「读自己那个文件」的结构面判据失效（自跑夹具按名字找单体、「所有 after 钩子走 rmSafe」读单文件）、
-并让消费者里写死的路径变陈旧——这些按硬规则 5b 一并修，已列入 Touches。
+泳道定义或调度器（那是 GOAL-022 另两条 AC 的面）。**落地时越出了这条边界**（按硬规则 5b，拆分
+让若干「读自己那个文件 / 读自己那条路径」的结构面判据失效，必须一并修；每一处都在 Touches 里）：
+① 拆分让 15 个单体改名 ⇒ 自跑夹具按**名字**找单体、消费者里写死的路径陈旧；
+② 拆成 143 个分片后，`--list-files` 探针路上的 `test-group-downgrade-check` 每文件一次
+`git show` × 一次 `git log -S`，git spawn 数从 ~40 涨到 **395**（实测 17967ms）⇒ 探针从 ~1s
+涨到 ~19s，而 runner-grouping 家族每个分片要调它 1–4 次 ⇒ 探针的成本变成了 >30s 的测试文件
+（正是 AC3 的判据）。改为批量读取（2 次 git 调用覆盖整个集合），语义逐字保持（同名同判，用
+`--selftest` 12/12 + 新旧实现在真树/夹具上逐字同输出对照）。
+③ 两个分片的墙钟**不是**被拆分能解决的固定成本：`observer-registry-s03` 是 `os-anchor-watchdog.sh`
+   里一个写死的 30s prompt 等待（与它断言的东西无关），`worker-driver-resident-s03` 的等待判据
+   `outcomes >= 2` 在夹具下**恒不可满足**（实测等待返回时 rounds=92 / outcomes=1 ⇒ 每次都空烧满
+   30s 上限）。前者把该常量改成可覆写（缺省仍 30，生产不变），后者把等待判据改成它真正断言的量。
 
 ## Plan
 
@@ -157,6 +166,7 @@ goal_ac: AC-279
 - plugin/test/promotion-driver-*.test.mjs (new)
 - plugin/test/driver-runtime-*.test.mjs (new)
 - packages/quay/test/server-partial-stop-*.test.mjs (new)
+- packages/quay/test/helpers/server-partial-stop-harness.mjs (new)
 - plugin/test/runner-grouping-list-groups-*.test.mjs (new)
 - plugin/test/goal-driver-*.test.mjs (new)
 - plugin/test/cap-from-gate-cli-*.test.mjs (new)
@@ -169,6 +179,8 @@ goal_ac: AC-279
 - plugin/scripts/psi-failure-correlation-check.ts
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/eligible-no-goal-source-check.ts
+- plugin/scripts/test-group-downgrade-check.ts
+- plugin/scripts/os-anchor-watchdog.sh
 - plugin/test/known-load-sensitive.test.mjs
 - plugin/test/red-window-triage.test.mjs
 - plugin/test/runner-grouping-metadata.test.mjs

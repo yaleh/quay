@@ -47,6 +47,8 @@ import {
   renderDecisionOrigin,
   renderDecisionBody,
   decisionGoalWriteArgv,
+  decisionAcWriteArgv,
+  decisionAcCriterion,
   decisionQuality,
   collectDriverReadings,
   collectInertCheckers,
@@ -1004,6 +1006,80 @@ test('fileDecisions: carrier=goal 经真 goal-store 落地（非 mock、非 dry-
     const body = segs.length >= 3 ? segs.slice(2).join('---') : '';
     assert.ok(body.replace(/\s/g, '').length >= 40, `落盘的 body 非空白字符 ≥40，实得 ${body.replace(/\s/g, '').length}`);
     assert.ok(body.includes('## 背景') && body.includes('## 范围与非目标') && body.includes('## 退出条件'), 'body 必须含三段');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 决策通道的【写序】：AC 先、GOAL 后（gap-goal-born-draft-zero-ac-escapes-standing-invariant）──
+// 缺陷：决策 GOAL 按设计出生即 `draft`，而写面【现在】拒绝「出生即 {draft, active} 而名下零 AC」——
+// 那正是不变式 AC-217 自己的作用域。旧写法只写 GOAL ⇒ 落进被禁态；闸一扩到 draft 半边，每次决策
+// 路由都会 exit 2。这三条把新写序钉住，并让「AC 那一步”被删掉”立刻报红（⛔ 不是恒绿）。
+test('fileDecisions: carrier=goal 先落退出条件 AC、再落 draft GOAL（AC-first，两条载体都出现）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-dec-acfirst-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const dec = { ...goodDecision, scope: 'plugin/scripts, packages/quay/src, tasks' };
+    const r = await fileDecisions(repoRoot, [dec], ecoReadings, [{ id: 'GOAL-003' }],
+      { cap: 2, dryRun: false, at: 'now', dataRoot: tmp });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+    assert.equal(r[0].id, 'GOAL-004');
+    const files = fs.readdirSync(path.join(tmp, 'goals')).sort();
+    const acFile = files.find((f) => f.startsWith('AC-'));
+    const goalFile = files.find((f) => f.startsWith('GOAL-004'));
+    assert.ok(acFile, `退出条件必须先作为 AC 载体落盘，实际目录: ${files.join(', ')}`);
+    assert.ok(goalFile, `应写出 GOAL-004 文件，实际目录: ${files.join(', ')}`);
+    const acText = fs.readFileSync(path.join(tmp, 'goals', acFile), 'utf8');
+    assert.match(acText, /^goal: GOAL-004$/m, '该 AC 必须指名它守护的决策 GOAL');
+    assert.match(acText, /^criterion: /m, '该 AC 必须带判据（退出条件可判定，⛔ 不是空白载体）');
+    assert.match(fs.readFileSync(path.join(tmp, 'goals', goalFile), 'utf8'), /^status: draft$/m,
+      '决策 GOAL 仍落为 draft（AC 先落 ⛔ 不改这条语义）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('决策 AC 的判据能取假：draft 期间 exit 1（写出成因），裁定后 exit 0', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-dec-crit-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const origin = renderDecisionOrigin(goodDecision, 41, 'now');
+    const body = renderDecisionBody(goodDecision);
+    const run = (argv) => execFileSync(argv[0], argv.slice(1), { encoding: 'utf8', stdio: 'pipe' });
+    run(decisionAcWriteArgv(repoRoot, 'AC-001', 'GOAL-004', goodDecision, origin, tmp));
+    run(decisionGoalWriteArgv(repoRoot, 'GOAL-004', goodDecision, origin, body, tmp)); // draft
+    const criterion = decisionAcCriterion(repoRoot, 'GOAL-004', tmp);
+    // 方向①：GOAL 仍是 draft ⇒ 判据为假（1），且成因在 stderr（可归因 —— 否则写面自己就会拒这条 AC）。
+    let draftRc = 0, draftErr = '';
+    try { execFileSync('bash', ['-c', criterion], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }); }
+    catch (err) { draftRc = err.status; draftErr = String(err.stderr ?? ''); }
+    assert.equal(draftRc, 1, `draft 期间判据必须为假，实得 rc=${draftRc}`);
+    assert.match(draftErr, /GOAL-004/, '失败路径必须点名该 GOAL');
+    // 方向②：裁定（激活）后 ⇒ 判据为真（0）。同一命令、同一对象，只改状态。
+    const goalArgv = decisionGoalWriteArgv(repoRoot, 'GOAL-004', goodDecision, origin, body, tmp);
+    assert.ok(goalArgv.includes('--body'), '前置：GOAL argv 是完整的一条写');
+    // `--status active` appended (the argv carries no other --status): the ONLY difference from the
+    // draft write above is the state, so the two readings below isolate it.
+    run([...goalArgv, '--status', 'active']);
+    assert.equal(execFileSync('bash', ['-c', criterion], { cwd: tmp, encoding: 'utf8', stdio: 'pipe' }), '');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('突变负控制：只写 GOAL 不写 AC（旧写序）⇒ 写面必须拒（exit 2），决策不会被静默落进被禁态', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-dec-noac-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const origin = renderDecisionOrigin(goodDecision, 41, 'now');
+    const body = renderDecisionBody(goodDecision);
+    const argv = decisionGoalWriteArgv(repoRoot, 'GOAL-004', goodDecision, origin, body, tmp);
+    assert.throws(
+      () => execFileSync(argv[0], argv.slice(1), { encoding: 'utf8', stdio: 'pipe' }),
+      (err) => err.status === 2 && /ACs naming GOAL-004: 0/.test(String(err.stderr ?? '')),
+      '缺 AC 的 draft GOAL 必须 exit 2 且枚举「ACs naming GOAL-004: 0」',
+    );
+    assert.deepEqual(fs.readdirSync(path.join(tmp, 'goals')), [], '被拒的写不得留下任何载体');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

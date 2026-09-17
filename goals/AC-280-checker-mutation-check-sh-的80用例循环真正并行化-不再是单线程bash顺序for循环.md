@@ -1,7 +1,7 @@
 ---
 id: AC-280
 title: checker-mutation-check.sh 的80用例循环真正并行化，不再是单线程bash顺序for循环
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -77,6 +77,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+  - at: 2026-09-17T03:21:48.880Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

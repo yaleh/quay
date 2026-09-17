@@ -77,6 +77,18 @@ test("AC2: all four stores emit readable CJK filenames", () => {
   // GOAL/AC records require a non-empty `origin` (SPEC §2.4, write-time fail-closed), and a
   // `kind: goal` record additionally requires a `body` (gap-goal-record-completeness-undefined
   // — this test exercises slugify, not the completeness gate, so supply a scope body).
+  // ⚠️ AC-first (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): the write face
+  // also refuses a GOAL born into {draft, active} with zero ACs (AC-217's own scope), so the naming AC
+  // is written first. ⛔ The AC is a SECOND slugified carrier, not the subject: the four assertions
+  // below still read ADR/META/GOAL/DOC — the goal's own filename is what this test is about.
+  goal.write("AC-900", {
+    title: TITLE,
+    status: "draft",
+    goal: "GOAL-900",
+    criterion: "true",
+    expect: "验证 slugify 对非 ASCII 标题保持可读文件名",
+    origin: "gap-frontmatter-slugify-drops-non-ascii test",
+  });
   goal.write("GOAL-900", {
     title: TITLE,
     origin: "gap-frontmatter-slugify-drops-non-ascii test",

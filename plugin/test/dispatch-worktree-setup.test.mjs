@@ -23,6 +23,14 @@
 //         (scripts/test.sh) — asserted by the checker-wiring test.
 //   AC5 — this file uses node:test + `// @test-group engine`.
 //
+// AC-284 / GOAL-023 — step 0b, the fork-point self-check (a branch NAME check cannot see where the
+// branch forked from; `git worktree add -b task/<id> <path>` silently forks from the invoking HEAD,
+// so changing the GitHub default branch to master would silently base every worker worktree on
+// master). Negative control (worktree cut from master ⇒ exit 2), positive control (cut from develop
+// ⇒ exit 0), the two false-positive shapes that must NOT be refused (develop advanced after the
+// fork / worktree has its own commits — 5/5 live worktrees have exactly these shapes), and
+// NOT-EVALUATED as an independent value when there is no develop ref to judge against.
+//
 // Run:
 //   scripts/test.sh plugin/test/dispatch-worktree-setup.test.mjs
 
@@ -187,6 +195,162 @@ t("branch self-check — a task/<id>-branch worktree still provisions (negative 
     const r = bash(SETUP, [wt, "--root", root]);
     assert.equal(r.status, 0, `task/<id>-branch worktree must exit 0, got ${r.status}: ${r.stdout} ${r.stderr}`);
     assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "task/<id> branch must still get node_modules");
+  } finally {
+    rmrf(root);
+  }
+});
+
+// ── 0b. fork-point self-check (AC-284 / GOAL-023) ───────────────────────────────────────────────
+// 靶子：worker 从 **master**（发布/默认线）而不是 develop 分叉出的 worktree。派发 prompt 的第 1 步
+// 逐字不指名 base ⇒ `git worktree add -b task/<id> <path>` 从调用方当时的 HEAD 分叉；默认分支一旦由
+// develop 改成 master，worktree 就静默从更旧的 master 分叉，而步骤 0 只查分支名 ⇒ 放行。
+//
+// 夹具复现本仓库 2026-09-17 的实测形态：**master 是 develop 的祖先**（merge-base(master, develop) ==
+// master tip、`--is-ancestor master develop` exit 0）——正是让「HEAD 落在 develop 历史上」这类弱谓词
+// 全部失效的那一形态。默认分支显式钉成 master，⛔ 不让宿主的 init.defaultBranch 决定夹具形状。
+
+/**
+ * Throwaway REAL git repo in which `master` is a strict ANCESTOR of `develop`, plus a task worktree
+ * on `branch` cut from `from` (`"master"`/`"develop"`, or `null` ⇒ NO start point, i.e. an implicit
+ * fork from the invoking HEAD — the `git worktree add -b X <path>` form the dispatch prompt's step 1
+ * literally describes). Returns { root, wt, git, wtGit }.
+ */
+function makeForkpointRepo({ branch, from }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-forkpoint-"));
+  const run = (cwd) => (...args) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} (cwd ${cwd}) failed: ${r.stderr ?? ""}`);
+    return r.stdout.trim();
+  };
+  const git = run(root);
+  git("init", "-q");
+  git("symbolic-ref", "HEAD", "refs/heads/master"); // pin the default branch — host-independent
+  git("config", "user.email", "t@test");
+  git("config", "user.name", "t");
+  fs.writeFileSync(path.join(root, "README.md"), "# repo\n");
+  git("add", "README.md");
+  git("commit", "-q", "-m", "baseline"); // master = baseline
+  git("checkout", "-q", "-b", "develop");
+  fs.writeFileSync(path.join(root, "d1.txt"), "d1\n");
+  git("add", "d1.txt");
+  git("commit", "-q", "-m", "d1"); // ⇒ develop is now strictly AHEAD of master
+  git("checkout", "-q", "master");
+  fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
+  const wt = path.join(root, "wt");
+  if (from === null) {
+    git("worktree", "add", "-q", "-b", branch, wt); // no start point ⇒ forks from HEAD (= master here)
+  } else {
+    git("worktree", "add", "-q", "-b", branch, wt, from);
+  }
+  // Premise assertion (AC-284 constraint 1): master really is an ancestor of develop here, so HEAD
+  // of a master-forked worktree IS a node of develop's own history — the shape that defeats
+  // "merge-base HEAD develop is non-empty" / "--is-ancestor HEAD develop" / "develop..HEAD == 0".
+  assert.equal(
+    git("merge-base", "master", "develop"),
+    git("rev-parse", "master"),
+    "fixture premise: merge-base(master, develop) must equal master's tip",
+  );
+  return { root, wt, git, wtGit: run(wt) };
+}
+
+t("AC-284 AC2 — a worktree cut from master (master is an ancestor of develop) is REFUSED (exit 2)", () => {
+  const { root, wt } = makeForkpointRepo({ branch: "task/gap-ac284-from-master", from: "master" });
+  try {
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 2, `a master-forked worktree must exit 2, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /fork-point REFUSED/, "the refusal must come from the fork-point check, not the branch-name check");
+    assert.match(r.stderr, /from 'master'/, "the wrong base must be named");
+    assert.match(r.stderr, /behind develop/, "the reason must name develop as the base it is behind");
+    assert.ok(!fs.existsSync(path.join(wt, "node_modules")), "nothing must be provisioned on refusal");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("AC-284 AC2b — an IMPLICIT fork (no start point) while HEAD is master is refused too", () => {
+  // The implicit form is what the dispatch prompt's step 1 literally says (`create an isolated git
+  // worktree`, no base). Its creation record reads `Created from HEAD`, which names no base — so the
+  // refusal here can only come from the STRUCTURAL half (fork point == a candidate line's tip),
+  // never from a name match.
+  const { root, wt } = makeForkpointRepo({ branch: "task/gap-ac284-implicit", from: null });
+  try {
+    const rec = spawnSync("git", ["-C", wt, "reflog", "show", "--format=%gs", "task/gap-ac284-implicit"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    assert.match(rec, /branch: Created from HEAD/, `fixture premise: implicit fork records HEAD, got '${rec}'`);
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 2, `an implicit master fork must exit 2, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stderr, /fork-point REFUSED/);
+    assert.match(r.stderr, /exactly the tip of 'master'/, "the structural half must name the line it recognised");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("AC-284 AC3 — the SAME fixture cut from develop still provisions (exit 0 + node_modules)", () => {
+  const { root, wt } = makeForkpointRepo({ branch: "task/gap-ac284-from-develop", from: "develop" });
+  try {
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 0, `a develop-forked worktree must exit 0, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, /fork-point PASS/);
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "develop-forked worktree must be provisioned");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("AC-284 AC4a — cut from develop, then develop ADVANCES ⇒ not refused (the false-positive shape)", () => {
+  const { root, wt, git } = makeForkpointRepo({ branch: "task/gap-ac284-advanced", from: "develop" });
+  try {
+    git("checkout", "-q", "develop");
+    fs.writeFileSync(path.join(root, "d2.txt"), "d2\n");
+    git("add", "d2.txt");
+    git("commit", "-q", "-m", "d2");
+    git("checkout", "-q", "master");
+    const lr = spawnSync("git", ["-C", wt, "rev-list", "--left-right", "--count", "develop...HEAD"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    assert.match(lr, /^1\t0$/, `fixture premise: develop must be 1 ahead of HEAD (got '${lr}')`);
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 0, `a legitimately stale develop fork must NOT be refused, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, /fork-point PASS/);
+    assert.doesNotMatch(r.stderr, /REFUSED/);
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("AC-284 AC4b — cut from develop, the worktree has its OWN commits ⇒ not refused", () => {
+  const { root, wt, wtGit } = makeForkpointRepo({ branch: "task/gap-ac284-owncommits", from: "develop" });
+  try {
+    fs.writeFileSync(path.join(wt, "mine.txt"), "mine\n");
+    wtGit("add", "mine.txt");
+    wtGit("commit", "-q", "-m", "mine");
+    const lr = spawnSync("git", ["-C", wt, "rev-list", "--left-right", "--count", "develop...HEAD"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    assert.match(lr, /^0\t1$/, `fixture premise: HEAD must carry 1 commit develop lacks (got '${lr}')`);
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 0, `a develop fork with its own commits must NOT be refused, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, /fork-point PASS/);
+    assert.doesNotMatch(r.stderr, /REFUSED/);
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("AC-284 AC5 — no develop ref ⇒ fork-point NOT-EVALUATED (a distinct value), provisioning still exits 0", () => {
+  // 第三方 quay-init workspace / plain fixtures have no develop ref at all: the check must give an
+  // INDEPENDENT value and must not block (hard rule 3b — "cannot evaluate" must not be shaped like
+  // "checked and fine", and must not be shaped like a refusal either).
+  const { root, wt } = makeRepoWithBranchWorktree("task/gap-ac284-nodevelop");
+  try {
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 0, `a repo with no develop ref must not be blocked, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, /fork-point NOT-EVALUATED/, "the independent value must be grep-able");
+    assert.doesNotMatch(r.stdout, /fork-point PASS/, "NOT-EVALUATED must not be shaped like PASS");
+    assert.doesNotMatch(r.stderr, /REFUSED/, "NOT-EVALUATED must not be shaped like a refusal");
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "NOT-EVALUATED must not block provisioning");
   } finally {
     rmrf(root);
   }
