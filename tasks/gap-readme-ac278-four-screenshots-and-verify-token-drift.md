@@ -87,13 +87,26 @@ GOAL-021 立案时记「疑似某组件懒加载未完成，正式产出截图�
 5. 同屏的「循环脉搏」甘特是服务端渲染、`aria-label="循环脉搏甘特图（固定 5 泳道）"`；
    当前 `在飞 0 / 上限 5` ⇒ **5 条泳道本来就是空的**，同样不是缺陷。
 
-⇒ **解法是"等渲染稳定再拍"（GOAL-021 点名的 chrome-devtools / playwright MCP 都能等），不是改产品代码。**
-GOAL-021 的**非目标**明确：⛔ 本 GOAL 不改产品功能/代码逻辑（除非缺陷本身是真产品 bug）——**本 Finding 已证否该前提**。
+⇒ **解法是"等渲染稳定再拍"（GOAL-021 原文点名 chrome-devtools / playwright MCP 作为"能等"的工具类别），
+不是改产品代码。** GOAL-021 的**非目标**明确：⛔ 本 GOAL 不改产品功能/代码逻辑（除非缺陷本身是真产品 bug）——
+**本 Finding 已证否该前提**。**⚠️ 本任务的实际执行路径见下方 Requested action 第 2 步的纯 CLI 方案——
+执行本任务的 worker 不持有这两个 MCP，"等渲染稳定"这个目标改用 Chrome 自带的 `--virtual-time-budget`
+虚拟时钟快进达成，效果已用两次真实截图对照验证（见下）。**
 
 ### 环境读数（立案当轮实测，供实现轮直接用）
 
 ```
-chrome-devtools MCP 已配置（~/.claude.json global mcpServers）    playwright MCP 已配置
+chrome-devtools MCP 已配置（~/.claude.json global mcpServers，仅 manager 会话可用）
+playwright MCP 已配置（同上，仅 manager 会话可用）
+```
+
+**⚠️ 这两条 MCP 只在 manager 会话（人交互的这个会话）配置，执行本任务的 worker（`worker-driver` 派发出去的
+fix-worker 子会话）不挂载它们**——worker 的工具集只有 Bash/Read/Edit/Write 等，找不到
+chrome-devtools/playwright 的 MCP 工具。**本任务必须走纯 Bash CLI 路径完成截图与 DOM 读数
+（见 Requested action 第 2 步 / AC7），⛔ 不要在 worker 里尝试寻找或调用这两条 MCP 工具**——
+找不到会卡住任务。
+
+```
 /usr/bin/google-chrome 存在
 quay serve 正在跑：http://100.78.206.100:4173（pid 2345364）
 路由可达：/dashboard 200 · /goal 200 · /git-history 200 · /task/<id> 200
@@ -131,9 +144,27 @@ quay serve 正在跑：http://100.78.206.100:4173（pid 2345364）
    `dashboard.png` · `goals.png` · `task-detail.png` · `git-history.png`，各 ≥5000 字节。
 2. **从【正在运行的 dev-tree `quay serve`】采集**（`http://100.78.206.100:4173`；⛔ 不是打包产物——
    `capture-webui-screenshots.sh:10-12` 记的 `gap-webui-modernist-css-missing-in-tgz` 未落地前，
-   打包构建渲染不出 Modernist CSS）。用 GOAL-021 点名的 **chrome-devtools MCP 或 playwright MCP**，
-   **拍前等到渲染稳定**：`#sys-sparkline` 里出现 ≥2 个数据点（或等价地等过 2 个 30s 轮询 / 固定等 ≥90s），
-   ⛔ 不要用 `--virtual-time-budget` 的短预算直接拍（那正是缺陷 B 的成因）。
+   打包构建渲染不出 Modernist CSS）。
+   **⚠️ 不要用 chrome-devtools MCP 或 playwright MCP**——这两条 MCP 只在 manager 会话配置，
+   执行本任务的 worker 没有这两个工具（见「环境读数」）。改用下面这条纯 Bash 命令，
+   用 Chrome 自带的 `--virtual-time-budget` 把虚拟时钟快进到渲染稳定，
+   **拍前不需要等待任何真实墙钟时间**：
+
+   ```bash
+   google-chrome --headless --disable-gpu --no-sandbox --window-size=<w>,<h> \
+     --virtual-time-budget=95000 \
+     --screenshot=docs/screenshots/<name>.png \
+     "http://100.78.206.100:4173/<路由>"
+   ```
+
+   `--virtual-time-budget=95000` 让 Chrome 的虚拟时钟快进到 95 秒虚拟时间，触发页面
+   `setInterval(refresh, 30000)`（`serve-dashboard.ts:591,:722,:773`）的至少 2 次轮询——
+   sparkline 需要 `history.length >= 2` 才画曲线（`serve-dashboard.ts:669`）——从而解决缺陷 B。
+   **manager 会话已用两次真实截图对照验证**：不带 `--virtual-time-budget`（默认，t≈3-4s 拍）
+   ⇒ `#sys-sparkline` 卡片是空的；带 `--virtual-time-budget=95000` ⇒ 同一张截图里
+   `#sys-sparkline` 已经画出数据点曲线。
+   ⛔ 仍然不要用【短】`--virtual-time-budget`（默认或 3000–4000 这类，t≈3-4s 就拍）直接拍——
+   那正是缺陷 B 的成因；95000 这个量级本身就是"等到渲染稳定"的等价形态，不在此项禁止之列。
 3. **修 `docs/verify-webui-screenshot.mjs` 的 accent token 漂移**（缺陷 A）：⛔ 不要再写死一个字面量
    （硬规则 4 推论二：写死的、依赖当前代码的常量，下次漂移时会**静默**变恒假）。
    从 `packages/quay/src/webui-modernist.css` **读出** `--color-accent-600` 的值来用（或等价地：
@@ -175,6 +206,11 @@ quay serve 正在跑：http://100.78.206.100:4173（pid 2345364）
       `#sys-sparkline` 的**数据点数**（如 `document.querySelectorAll('#sys-sparkline polyline, #sys-sparkline circle').length`）
       ⇒ 前者 **0**、后者 **>0**；并附 `grep -ci "loading\|spinner\|placeholder\|skeleton"` 对 `/dashboard` HTML
       ⇒ **0**（页面无懒加载机件）。
+      **不依赖 MCP 的等价取法（worker 用这条）**：`google-chrome --headless --disable-gpu --no-sandbox
+      --virtual-time-budget=<N> --dump-dom "<url>"` 把渲染后的 DOM 输出到文件，再用 grep/python 数
+      数据点元素个数；具体选择器（`<polyline>`/`<circle>` 等）由实现者先跑一次 `--dump-dom` 看真实渲染
+      输出后再定，不要凭空假设标签名。t≈4s（不带 `--virtual-time-budget`，或给一个很小的值如 4000）
+      与 t≈95000 两次 dump 各做一次，对比数据点元素数量。
 
 ## Definition of Done
 
