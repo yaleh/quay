@@ -592,9 +592,12 @@ export function renderTestsCard(
 //     the decision turns on: ~4.5k polls = ~0.007 req/s, ~19 ms of server time each (measured TTFB)
 //     ≈ 12 s of CPU per day.
 //   • The server's own cost is NOT this endpoint. A 120 s window in which exactly ONE poll arrived
-//     still burned 53.8 s CPU (44.9% of a core) — that is the 30 s snapshot-rebuild tick
-//     (startDashboardSnapshotRefresh; ~1.8 s of subprocess CPU per rebuild). Optimising the poll
-//     would cut REQUESTS without cutting SERVER COST. Corroborated by a controlled burst at
+//     still burned 53.8 s CPU (44.9% of a core) — background tick work, not request handling. The 30 s
+//     snapshot-rebuild tick (startDashboardSnapshotRefresh) is one measured contributor: its two
+//     mechanism shell-outs cost ~1.8 s of SUBPROCESS CPU per rebuild (7.36 s of reaped-child CPU over
+//     4 rebuilds). The remaining self-CPU was not attributed per-tick — this decision does not need
+//     that breakdown, because the direction is settled by the reverse control below. Optimising the
+//     poll would cut REQUESTS without cutting SERVER COST. Corroborated by a controlled burst at
 //     ~1.4 req/s — ~190× the observed rate — which did NOT raise self-CPU measurably over an idle
 //     window of equal background work (0.347 vs 0.387 s/s; the difference is within noise).
 //   • ETag/304 is structurally unavailable here, not merely unimplemented: the payload is
