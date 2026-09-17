@@ -1,7 +1,7 @@
 ---
 id: AC-284
 title: worker 任务 worktree 的分叉点被 merge-base 结构性校验，不再只查分支名
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -35,6 +35,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-023 激活，同步激活
+  - at: 2026-09-17T05:58:03.931Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
