@@ -588,7 +588,7 @@ export function renderTestsCard(
 // ── WHY THIS STAYS POLLING (gap-webui-dashboard-cards-poll-cost-eval, 2026-09-17) ──────────────────
 // DECISION: keep the 30 s poll; do NOT move to ETag/304 or SSE/WebSocket. Measured, not assumed:
 //   • This endpoint was 66–78% of ALL requests in a rolling 7-day window — but that is a SHARE of a
-//     tiny denominator (the whole server served ~9k requests in 7 days). The absolute rate is what
+//     tiny denominator (the whole server served only ~6.8k requests in the same window). The rate is what
 //     the decision turns on: ~4.5k polls = ~0.007 req/s, ~19 ms of server time each (measured TTFB)
 //     ≈ 12 s of CPU per day.
 //   • The server's own cost is NOT this endpoint. A 120 s window in which exactly ONE poll arrived
