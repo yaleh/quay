@@ -22,6 +22,13 @@
 //   ⑥ seaVerify（AC-267 载体臂，tasks/gap-sea-artifact-plugin-root-toplevel-eval）：release workflow
 //      的 SEA 验证 job 结论派生进记录，词表 {success, failure, incomplete, absent} —— **没有**
 //      「读不懂 ⇒ success」的路径（硬规则 3b/4）。没有它，AC-267 永久停在 CAUSE=carrier-absent。
+//   ⑦ prereqProvision（AC-282 载体臂，tasks/gap-ac282-runner-prereqs-already-present）：套件运行
+//      前置在 **job 自己的日志** 里的预置状态（`__PREREQ__ <name>=<state>`），词表
+//      `already-present | installed-apt | installed-pip | absent`。它只能从日志得到 —— `already-present`
+//      与 `installed-apt` 的 step conclusion **都是 success**（jobs API 结构上不可派生）。
+//      **缺 ≠ absent**：没拉日志 ⇒ 不写键；拉了但一条 marker 都没有 ⇒ 三键全 `absent`（独立取值）。
+//      另有一条**闸门**测试：testFiles 已知的 run 仍会为 prereqProvision 拉日志（旧闸门只认
+//      testFiles ⇒ 这类 run 的 prereqProvision 结构性不可派生，判据恒停 not-recorded）。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -33,7 +40,9 @@ import {
   buildRecord,
   collect,
   collectForRound,
+  derivePrereqProvision,
   deriveTestFilesFromLog,
+  knownPrereqRunsFromCarrier,
   knownTestFilesFromCarrier,
   resolveGhBin,
   writeCarrier,
@@ -67,11 +76,11 @@ function ghRun(over = {}) {
 }
 
 /** 一份真实形状的 job（名字含 test ⇒ 命中日志拉取筛选）。 */
-function ghJob(id = 55, name = "test") {
+function ghJob(id = 55, name = "test", conclusion = "failure") {
   return {
     id,
     name,
-    conclusion: "failure",
+    conclusion,
     started_at: "2026-09-15T02:38:40Z",
     completed_at: "2026-09-15T02:56:40Z",
     steps: [{ name: "Run tests", conclusion: "failure", number: 5 }],
@@ -249,22 +258,33 @@ test("collect — maxLogRuns 是上界，超出【留痕】而不是静默少拉
   );
 });
 
-test("collect — 已经知道的 runId 不再拉日志（增量回填的成本上界）", () => {
+test("collect — 增量回填的成本上界：两个派生都已知时才不拉日志（闸门由 testFiles【与】prereqProvision 共同决定）", () => {
+  // ⚠️ 2026-09-17 本条断言的**契约变了**（tasks/gap-ac282-runner-prereqs-already-present §三.1）：
+  // 原来只喂 knownTestFiles，闸门是 `!alreadyKnown && …` —— 一条 testFiles 已派生过的 run **永远
+  // 不再读日志**，于是它的 prereqProvision 结构性不可派生（AC-282 恒停 not-recorded 的成因之一）。
+  // 现在闸门是「testFiles 未知（且未负缓存）**或** prereqProvision 未派生」。成本上界本身不变，只是
+  // 它现在按**两个**派生量记账：两者都已知 ⇒ 零次下载。
   const calls = [];
   const run = (args) => {
     calls.push(args.join(" "));
     return LOG_WITH_GROUPS;
   };
-  const { records } = collect({
+  const base = {
     repo: "o/n",
     run,
     limit: 1,
     runs: [ghRun()],
     jobsByRun: { "1001": [ghJob()] },
-    knownTestFiles: { "1001": 631 },
-  });
-  assert.equal(calls.length, 0, "已知 ⇒ 不重复拉日志");
-  assert.equal(records[0].testFiles, 631);
+  };
+  // testFiles 已知、prereqProvision 未知 ⇒ 仍要读一次日志（读的是同一条 job 日志，两个量共用）。
+  const partial = collect({ ...base, knownTestFiles: { "1001": 631 } });
+  assert.equal(calls.length, 1, "testFiles 已知但 prereqProvision 未派生 ⇒ 这一次日志省不掉");
+  assert.equal(partial.records[0].testFiles, 631);
+  // 两个派生都已知 ⇒ 零次下载（这就是原来的成本上界，逐字保留）。
+  const callsBefore = calls.length;
+  const both = collect({ ...base, knownTestFiles: { "1001": 631 }, knownPrereqRuns: new Set(["1001"]) });
+  assert.equal(calls.length, callsBefore, "两个派生都已知 ⇒ 不重复拉日志");
+  assert.equal(both.records[0].testFiles, 631);
 });
 
 // ── ⑤ 就地补全（去重键与后派生字段的结构性缺口）──────────────────────────────────────────────
@@ -577,4 +597,194 @@ test("seaVerify — 经真实 CLI 形状的 buildRecord 也派生（--from-file 
   assert.equal(rec.seaVerify, "success");
   // 同一位置：不给 job ⇒ absent（⛔ 不是 success）。
   assert.equal(buildRecord({ id: 7, name: "Release", conclusion: "failure" }, {}).seaVerify, "absent");
+});
+
+// ── ⑨ prereqProvision：AC-282 载体臂（tasks/gap-ac282-runner-prereqs-already-present）──────────
+//
+// 这条读数**只能**从 job 自己的日志得到：`GhJob.steps` 只有 {name, conclusion, number}，而
+// `already-present` 与 `installed-apt` 两个分支的 step conclusion **都是 `success`**，jobs API 也不给
+// per-step 时长 ⇒ 在 API 那一层结构上不可派生。故 workflow 每个「走通了」的分支打印一行
+// `__PREREQ__ <name>=<state>`，派生器只读该行。
+//
+// ⛔ 断言的全是**关系**（换一个 marker 值 ⇒ 读数跟着变；日志在但没 marker ⇒ 三个 absent），不是
+// 「值等于 already-present」这一类单点断言 —— 单点断言在一个恒为 already-present 的实现上同样通过
+// （硬规则 4：一个结构上不可能取假的量不是测量）。
+
+/** 一份预置好的 runner 上的真实形状日志（三条 marker 全 already-present）。 */
+const LOG_PREREQ_ALL_PRESENT =
+  "2026-09-17T02:00:00.0000000Z ##[group]Run Install suite runtime prerequisites\n" +
+  "python3 already has PyYAML (6.0.1)\n" +
+  "__PREREQ__ pyyaml=already-present\n" +
+  "tmux already present (tmux 3.4)\n" +
+  "__PREREQ__ tmux=already-present\n" +
+  "procps already present (procps-ng 4.0.4)\n" +
+  "__PREREQ__ procps=already-present\n" +
+  "##[endgroup]\n";
+
+/** 一份**还没预置**的 runner 上的日志（改了 tmux 那一行，其余逐字不动）。 */
+const LOG_PREREQ_TMUX_JUST_INSTALLED =
+  LOG_PREREQ_ALL_PRESENT.replace("__PREREQ__ tmux=already-present", "__PREREQ__ tmux=installed-apt");
+
+test("prereqProvision — 三条 marker 全 already-present ⇒ 三键全 already-present", () => {
+  assert.deepEqual(derivePrereqProvision(LOG_PREREQ_ALL_PRESENT), {
+    pyyaml: "already-present",
+    tmux: "already-present",
+    procps: "already-present",
+  });
+});
+
+test("prereqProvision — 负控制①（谓词能取假）：marker 说 installed-apt ⇒ 该键 ≠ already-present", () => {
+  const got = derivePrereqProvision(LOG_PREREQ_TMUX_JUST_INSTALLED);
+  assert.notEqual(got.tmux, "already-present", "「本 job 内装了一遍」不得被读成「本来就有的」");
+  assert.equal(got.tmux, "installed-apt", "逐字取 marker 说的那个状态");
+  // 同一次读数里三个键**彼此可分**：翻一行只动一个键，另两个逐字不变。
+  assert.equal(got.pyyaml, "already-present");
+  assert.equal(got.procps, "already-present");
+});
+
+test("prereqProvision — 负控制②（零命中方向）：日志在、marker 一条都没有 ⇒ 三键全 absent", () => {
+  // ⛔ 这一格最容易写错成 already-present（「没看见问题」）；absent 是「没评估成」这个**独立取值**。
+  const got = derivePrereqProvision(LOG_WITHOUT_GROUPS);
+  assert.deepEqual(got, { pyyaml: "absent", tmux: "absent", procps: "absent" });
+  for (const k of ["pyyaml", "tmux", "procps"]) assert.notEqual(got[k], "already-present");
+  // 空日志同款（不是「读不懂就回落」）。
+  assert.deepEqual(derivePrereqProvision(""), { pyyaml: "absent", tmux: "absent", procps: "absent" });
+});
+
+test("prereqProvision — 未知取值/marker 名不进入词表（⛔ 不让「读不懂」伪装成某个状态）", () => {
+  const got = derivePrereqProvision("__PREREQ__ pyyaml=whatever\n__PREREQ__ gawk=already-present\n");
+  assert.equal(got.pyyaml, "absent", "未声明的取值 ⇒ 回落 absent（没评估成），不是一个编出来的状态");
+  assert.equal("gawk" in got, false, "未声明的前置名不进词表");
+});
+
+test("collect — testFiles 已知的 run 仍会为 prereqProvision 拉日志（闸门不再只由 testFiles 决定）", () => {
+  // 这是 AC-282 停在 `CAUSE=prereq-provision-not-recorded` 的成因之一：旧闸门是
+  // `!alreadyKnown && …`，一条 testFiles 已派生过的 run **永远不再读日志** ⇒ 后派的
+  // prereqProvision 结构性不可派生。
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(" "));
+    return LOG_PREREQ_ALL_PRESENT;
+  };
+  const { records } = collect({
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+    knownTestFiles: { 1001: 631 }, // ← testFiles 已知（旧闸门在这里就把整段跳过了）
+  });
+  assert.equal(calls.length, 1, "testFiles 已知不足以跳过 —— prereqProvision 还没派生");
+  const testJob = records[0].jobs.find((j) => j.name === "test");
+  assert.deepEqual(testJob.prereqProvision, {
+    pyyaml: "already-present",
+    tmux: "already-present",
+    procps: "already-present",
+  });
+  assert.equal(calls[0].includes("/actions/jobs/55/logs"), true, "拉的是 test job 自己的日志");
+});
+
+test("collect — prereqProvision 已派生的 run ⇒ 不重复拉日志（成本上界，且缺 ≠ 已知）", () => {
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(" "));
+    return LOG_PREREQ_ALL_PRESENT;
+  };
+  const base = {
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+    knownTestFiles: { 1001: 631 },
+  };
+  collect({ ...base, knownPrereqRuns: new Set(["1001"]) });
+  assert.equal(calls.length, 0, "两个派生都已知道 ⇒ 不拉日志");
+  // 对照（硬规则 4）：把 knownPrereqRuns 去掉，同一个夹具立刻拉一次 ⇒ 这个量能取值相反。
+  collect(base);
+  assert.equal(calls.length, 1);
+});
+
+test("collect — 没拉日志的 run【不写】prereqProvision 键（缺 ≠ absent，硬规则 6）", () => {
+  // 离线缝（喂 runs 又不给 runner）⇒ 整条路径零 gh ⇒ 没有任何日志被拉过。
+  const { records } = collect({
+    repo: "o/n",
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+  });
+  const testJob = records[0].jobs.find((j) => j.name === "test");
+  assert.equal("prereqProvision" in testJob, false, "没拉日志 ⇒ 不写这个键");
+  // 正控制（同一夹具）：给了 runner ⇒ 日志拉到了 ⇒ 同一个位置出现该键（内容此时是 absent 之外的
+  // 真实读数）。两者可区分 ⇒ 上面那条不是「字段永远不出现」的恒真断言。
+  const withLog = collect({
+    repo: "o/n",
+    run: () => LOG_PREREQ_ALL_PRESENT,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+  });
+  assert.equal("prereqProvision" in withLog.records[0].jobs.find((j) => j.name === "test"), true);
+});
+
+test("knownPrereqRunsFromCarrier — 只收【带该键】的 runId（缺 ≠ 已知，否则永远不再补拉）", () => {
+  const dir = tmpDir("known-prereq");
+  const carrier = path.join(dir, "ci-runs.jsonl");
+  fs.writeFileSync(
+    carrier,
+    [
+      JSON.stringify({ workflow: "CI", runId: 1, jobs: [{ name: "test", prereqProvision: { pyyaml: "absent" } }] }),
+      JSON.stringify({ workflow: "CI", runId: 2, jobs: [{ name: "test" }] }),
+      JSON.stringify({ workflow: "CI", runId: 3 }),
+      JSON.stringify({ workflow: "CI", runId: 4, jobs: [{ name: "test", prereqProvision: null }] }),
+      "not json at all",
+      "",
+    ].join("\n") + "\n",
+  );
+  assert.deepEqual([...knownPrereqRunsFromCarrier(carrier)].sort(), ["1"]);
+});
+
+test("writeCarrier — 就地补全 prereqProvision：只补缺失的那个键，既有 job 字段逐字保留", () => {
+  const dir = tmpDir("enrich-prereq");
+  const carrier = path.join(dir, "ci-runs.jsonl");
+  const stored = {
+    ts: "2026-09-17T02:15:29Z",
+    branch: "develop",
+    workflow: "CI",
+    conclusion: "success",
+    runId: 1001,
+    jobs: [
+      { name: "version-consistency", conclusion: "success", durationSec: 12 },
+      { name: "test", conclusion: "success", durationSec: 243, steps: [{ name: "Run tests", conclusion: "success", number: 9 }] },
+    ],
+  };
+  fs.writeFileSync(carrier, JSON.stringify(stored) + "\n");
+
+  const incoming = {
+    ...stored,
+    jobs: [
+      { name: "version-consistency", conclusion: "success", durationSec: 12 },
+      {
+        name: "test",
+        conclusion: "success",
+        durationSec: 243,
+        steps: [{ name: "Run tests", conclusion: "success", number: 9 }],
+        prereqProvision: { pyyaml: "already-present", tmux: "already-present", procps: "already-present" },
+      },
+    ],
+  };
+  const res = writeCarrier(carrier, [incoming], null);
+  assert.equal(res.appended, 0, "同一个 key ⇒ 不追加");
+  assert.equal(res.enrichedPrereq, 1);
+  const lines = fs.readFileSync(carrier, "utf8").trim().split("\n");
+  assert.equal(lines.length, 1, "补全走原地替换，行数不变");
+  const got = JSON.parse(lines[0]);
+  const testJob = got.jobs.find((j) => j.name === "test");
+  assert.deepEqual(testJob.prereqProvision, {
+    pyyaml: "already-present",
+    tmux: "already-present",
+    procps: "already-present",
+  });
+  assert.equal(testJob.durationSec, 243, "既有 job 字段逐字保留（⛔ 不重算）");
+  assert.deepEqual(testJob.steps, [{ name: "Run tests", conclusion: "success", number: 9 }]);
+  assert.equal(got.jobs.find((j) => j.name === "version-consistency").durationSec, 12);
+  assert.equal("prereqProvision" in got.jobs.find((j) => j.name === "version-consistency"), false);
 });
