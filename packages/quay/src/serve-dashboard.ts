@@ -7,8 +7,8 @@ import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
-import type { Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard } from "./serve-render.ts";
+import type { Lang, Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 import { renderFanInCell } from "./serve-task.ts";
 
@@ -1260,7 +1260,7 @@ export function renderDashboardPage(
     tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
-  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[] } = {},
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[]; lang?: Lang } = {},
 ): string {
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
@@ -1300,8 +1300,11 @@ export function renderDashboardPage(
     .map((n) => html`<a href="/dashboard?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
     .join(" · ");
 
+  // gap-ac288-webui-lang-switch-mechanism: the language tag comes from the dispatcher-resolved
+  // `opts.lang` (undefined ⇒ DEFAULT_LANG `en`, so the direct-render unit tests that predate this
+  // field are unchanged). This is the whole per-page cost of consuming the mechanism — one line.
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity)}</title></head>
+    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity)}</title></head>
     <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
@@ -1816,7 +1819,7 @@ export async function handleDashboard(
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderDashboardPage(
       { live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun, history: snapshot.history, tasks: snapshot.tasks, goals: snapshot.goals },
-      { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes },
+      { workspaceRoot: cfg.workspaceRoot, hours: timelineHoursFromRequest(req), identity: cfg.identity, workerOutcomes: snapshot.workerOutcomes, lang: cfg.lang },
     ));
     return;
   }
@@ -1853,7 +1856,7 @@ export async function handleDashboard(
   const [sys, mgr, tasks, goals] = await asyncProbes;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   const hours = timelineHoursFromRequest(req);
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours, identity: cfg.identity }));
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours, identity: cfg.identity, lang: cfg.lang }));
 }
 
 /** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls

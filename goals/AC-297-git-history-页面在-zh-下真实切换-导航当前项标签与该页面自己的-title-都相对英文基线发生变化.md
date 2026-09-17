@@ -17,6 +17,7 @@ criterion: >-
     [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
     a=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
     [ -n "$a" ] || continue
+    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; esac
     addr="$a"
     break
   done
@@ -36,10 +37,22 @@ criterion: >-
   if [ -z "$zh" ]; then echo "CAUSE=zh-fetch-failed -- GET http://$addr$ROUTE
   with Cookie: lang=zh returned nothing (addr=$addr)" >&2; exit 1; fi
 
-  case "$en" in *"$LABEL_EN"*) ;; *) echo "CAUSE=english-baseline-missing --
-  default-locale $ROUTE does not contain the nav label \"$LABEL_EN\" at all;
-  this probe's assumption about today's baseline is stale, re-derive it against
-  the live page" >&2; exit 1 ;; esac
+  nav_en=$(printf '%s' "$en" | tr '\n' ' ' | grep -o '<nav.*</nav>' | head -c
+  60000)
+
+  nav_zh=$(printf '%s' "$zh" | tr '\n' ' ' | grep -o '<nav.*</nav>' | head -c
+  60000)
+
+  if [ -z "$nav_en" ]; then echo "CAUSE=no-nav-region -- default-locale $ROUTE
+  exposes no <nav>...</nav> region to assert on" >&2; exit 1; fi
+
+  if [ -z "$nav_zh" ]; then echo "CAUSE=no-nav-region-zh -- $ROUTE under Cookie:
+  lang=zh exposes no <nav>...</nav> region" >&2; exit 1; fi
+
+  case "$nav_en" in *"$LABEL_EN"*) ;; *) echo "CAUSE=english-baseline-missing --
+  the default-locale nav region of $ROUTE does not contain \"$LABEL_EN\"; this
+  probe's baseline assumption is stale, re-derive it against the live page" >&2;
+  exit 1 ;; esac
 
   title_of() { printf '%s' "$1" | tr '\n' ' ' | grep -oE '<title>[^<]*</title>'
   | head -1 | sed -e 's|^<title>||' -e 's|</title>$||'; }
@@ -53,9 +66,10 @@ criterion: >-
   $ROUTE with Cookie: lang=zh did not respond <html lang=\"zh\"> (addr=$addr)"
   >&2; exit 1 ;; esac
 
-  case "$zh" in *"$LABEL_EN"*) echo "CAUSE=nav-label-untranslated -- $ROUTE with
-  Cookie: lang=zh still renders the literal English nav label \"$LABEL_EN\";
-  this page is not wired to the zh dictionary yet" >&2; exit 1 ;; esac
+  case "$nav_zh" in *"$LABEL_EN"*) echo "CAUSE=nav-label-untranslated -- the nav
+  region of $ROUTE under Cookie: lang=zh still renders the literal English nav
+  label \"$LABEL_EN\"; the nav is not wired to the zh dictionary" >&2; exit 1 ;;
+  esac
 
   t_zh=$(title_of "$zh")
 
@@ -67,23 +81,24 @@ criterion: >-
   bar changed, so this page's own chrome was never wired to the locale switch"
   >&2; exit 1; fi
 
-  echo "OK -- $ROUTE: en <title>=\"$t_en\" with nav label \"$LABEL_EN\"; under
-  Cookie: lang=zh the response is <html lang=zh>, that literal English nav label
-  is gone, and this page's own <title> became \"$t_zh\""
+  echo "OK -- $ROUTE: default nav region carries \"$LABEL_EN\" and
+  <title>=\"$t_en\"; under Cookie: lang=zh the response is <html lang=zh>, that
+  English nav label is gone from the nav region, and this page's own <title>
+  became \"$t_zh\""
 
   exit 0
-expect: "criterion exits 0 once /git-history's default-locale response contains
-  the literal nav label \"Git History\", and under Cookie: lang=zh the response
-  is <html lang=\"zh\">, that literal English nav label is absent, and this
-  page's OWN <title> text differs from the default-locale <title> (so a change
-  confined to the shared nav bar does not satisfy it)."
+expect: "criterion exits 0 once the default-locale NAV REGION of /git-history
+  carries the literal nav label \"Git History\", and under Cookie: lang=zh the
+  response is <html lang=\"zh\">, that literal is absent from the nav region,
+  and this page's OWN <title> differs from its default-locale <title>."
 origin: 人 2026-09-17 讨论裁定：GOAL-024 达成范围 = 全部 15 个 SITE_NAV_ROUTES
   页面之一（/git-history，nav 标签 "Git History"）；断言做在【运行中的服务】上而非源码（硬规则 4 推论三：grep
-  源码只证明能产出，不证明已产出）。判据走 AC-179 既定探针形态：从【已在运行】的 `quay.ts serve` 进程（cwd = 仓库根）派生地址再
-  curl，⛔ 不自己启服务。2026-09-17 人裁定此设计（选项 A）：原设计每条判据自启 web 服务器（实测 27–60s/条），而
-  goal-driver pass 1 对 active GOAL 下每条 AC 每轮无条件执行、meta-driver 再执行一遍同群体，16
-  条会让每轮增加 7–16 分钟且付两遍；改为探针后 ~1s/条。操作前提：需有一个 cwd=仓库根的 `quay serve`
-  实例在跑；实现落地后须重启该实例才能让判据翻绿。
+  源码只证明能产出，不证明已产出）。判据走 AC-179 既定探针形态（探【已在运行】的 quay.ts serve，cwd=仓库根；⛔
+  不自己启服务），并在【chrome 作用域】上断言：导航标签只对 `<nav>…</nav>` 区块匹配、页面标题只对 `<title>` 匹配。⛔
+  不对整段响应体做子串匹配 —— 2026-09-17 实测两处非 chrome 命中会让判据不可满足：① `/board` 的页内 CSS 注释含
+  "Board"（`...and the Board NEW badge. */`），永远不会被翻译；② `/dashboard` 的活动流会渲出含
+  "Dashboard"/"Tasks" 的**任务标题**（数据）。操作前提：需有一个 cwd=仓库根的 `quay serve`
+  实例在跑；实现落地后须重启该实例。
 activatedAt: 2026-09-17T16:12:07.907Z
 statusLog:
   - at: 2026-09-17T16:12:07.907Z
