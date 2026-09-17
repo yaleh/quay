@@ -2,7 +2,7 @@
 id: gap-quay-init-doc-branch-noop-when-fresh-develop-not-checked-out
 title: quay-init 为默认分支非 develop 的全新项目建出 develop 后不切换检出，doc-branch 判定恒为
   no-op，author 永不出现
-status: ready
+status: done
 labels:
   - gap
   - mechanism
