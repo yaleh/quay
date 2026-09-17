@@ -148,17 +148,17 @@ GOAL-023 的其余四条 AC 各有其面（AC-283 author push / AC-284 分叉点
 
 ## AC
 
-- [ ] **AC1（goal 判据红→绿）**：`node packages/quay/bin/quay.js goal gate AC-285` 逐字重跑 `verdict: pass`，
+- [x] **AC1（goal 判据红→绿）**：`node packages/quay/bin/quay.js goal gate AC-285` 逐字重跑 `verdict: pass`，
       贴完整输出；并**并排贴出第 2 步的红基线**（同一条命令、同一个对象，取值由 fail 变 pass ⇒ 判据可被打红、
       且这次改动是那个变化的因）。⛔ 不得改宽判据——`goals/AC-285-*.md` 的 `criterion` / `expect` / `origin` /
       `activatedAt` 四处**一字未动**（举证：`git diff develop -- goals/` 对该文件零命中 + blob sha 两侧相同）。
 
-- [ ] **AC2（直查远端回读，⛔ 不信命令退出码）**：两个**独立仪器**同时指向 master 并并排贴出：
+- [x] **AC2（直查远端回读，⛔ 不信命令退出码）**：两个**独立仪器**同时指向 master 并并排贴出：
       ① `git ls-remote --symref origin HEAD | head -1` ⇒ 逐字含 `ref: refs/heads/master`；
       ② `gh repo view yaleh/quay --json defaultBranchRef` ⇒ `{"defaultBranchRef":{"name":"master"}}`。
       ⛔ 本条的读数**不得**取本地 `refs/remotes/origin/HEAD`（缓存，与远端设置不同源、与 AC-285 判据也不同源）。
 
-- [ ] **AC3（判据可被打红——负控制实跑）**：把 criterion 原文**逐字提取**
+- [x] **AC3（判据可被打红——负控制实跑）**：把 criterion 原文**逐字提取**
       （`node packages/quay/bin/quay.js goal show AC-285 --json` 的 `criterion` 字段，贴出 md5）后原样执行，
       对**两个合成远端**（`mktemp -d` 里的裸仓库，`git symbolic-ref HEAD` 分别指向 master / develop）各跑一次：
       正控制（HEAD→master）⇒ `exit 0`；负控制（HEAD→develop）⇒ `exit 1` 且 `CAUSE=default-branch-not-master`。
@@ -166,17 +166,17 @@ GOAL-023 的其余四条 AC 各有其面（AC-283 author push / AC-284 分叉点
       （第三段 `CAUSE=symref-unreadable` 由条件本身覆盖：只剩它时 `ls-remote` 返回空 ⇒ 该分支的取值与其他两态不同形。）
       ⛔ 没有正控制时，"exit 1"什么也没证明（判据可能结构上恒红）。
 
-- [ ] **AC4（分叉面探针：起点 × 闸判定二元组，实测不是推断）**：贴出探针 worktree 的
+- [x] **AC4（分叉面探针：起点 × 闸判定二元组，实测不是推断）**：贴出探针 worktree 的
       ① 创建记录（`branch: Created from <起点>`）与 ② `dispatch-worktree-setup.sh --base develop --dry-run` 的判定，
       并明确写下它落在 Proposal 列出的 (a) / (b) 哪一种；若落在 (b)（起点 = master 且被 `exit 2` 拒），
       记录它对 worker 派发面的实际影响。⛔ 探针用真实默认起点，⛔ 收尾已 `git worktree remove`（贴出清理后
       `git worktree list` 不含该路径）。
 
-- [ ] **AC5（作用域：只有仓库设置变了）**：并排贴出翻转**前**（Plan 第 1 步存下的）与翻转**后**的
+- [x] **AC5（作用域：只有仓库设置变了）**：并排贴出翻转**前**（Plan 第 1 步存下的）与翻转**后**的
       `git ls-remote --heads origin`，证明**所有 ref 的 sha 逐字未变**（`develop` / `master` / `dist-plugin` /
       全部 `task/*` / `author`）。⛔ 有任何 ref 变化、用了 `--force`、或改动了分支内容 ⇒ 本条红。
 
-- [ ] **AC6（本地 set-head 的决定被显式记录，且判据读的数在收口时刻仍取得到）**：
+- [x] **AC6（本地 set-head 的决定被显式记录，且判据读的数在收口时刻仍取得到）**：
       ① 贴出收口时刻的 `git symbolic-ref refs/remotes/origin/HEAD`，并写明**本任务决定不动它**及理由
       （`branch-model.ts:227` → `anti-drift-touches-check.ts:175` 的落地基线角色是 develop；见 Proposal 末段）；
       ② 收口后再跑一次 `gate AC-285`（与 AC1 之间至少隔一次别的 git 操作）仍 `pass` ⇒ 证明这个 pass 不是
@@ -210,5 +210,110 @@ GOAL-023 的其余四条 AC 各有其面（AC-283 author push / AC-284 分叉点
 证据一律**内联在任务体**或写进 `.quay/` 下的**未跟踪** scratch 文件——按
 `touches-glob-on-quay-runtime-artifacts-blocks-promotion`，未跟踪运行时产物不进
 `anti-drift-touches-check` 的 `actualFiles`，声明它们反而是噪声且会挡晋升；⛔ 若确要把某个 `.quay/ac285-*` 文件
-**提交**，必须把它的**精确路径**（⛔ 不是通配形）加进本节。`gh` 的凭据落在 `~/.config/gh/`、
-本地 upstream 配置落在 `.git/config`，都不是被跟踪文件，同样不声明。）
+**提交**，必须把它的**精确路径**（⛔ 不是通配形）加进本节。`gh` 的凭据落在 `~/.config/gh/`、本地 upstream 配置落在
+`.git/config`，都不是被跟踪文件，同样不声明。）
+
+## Evidence（收口轮 2026-09-17T06:0xZ，worktree `quay-worktrees/gap-ac285-github-default-branch-master`）
+
+**唯一实质改动**：`gh repo edit yaleh/quay --default-branch master`（exit 0，无 stdout）。
+作用域 = 一个 GitHub 仓库设置；不推/不删任何 ref、无 `--force`、不改任何分支内容、**不跑** `git remote set-head`。
+回滚形态（本任务**不执行**，执行会把判据打回红）：`gh repo edit yaleh/quay --default-branch develop`（同样只改一个设置）。
+
+### AC1 — 红 → 绿，判据一字未动
+
+```
+BEFORE 2026-09-17T06:05:45.340Z  verdict: fail  exit 1
+  reason: acceptance failed (exit 1) — CAUSE=default-branch-not-master —
+          origin HEAD symref is: ref: refs/heads/develop HEAD (expected refs/heads/master)
+AFTER  2026-09-17T06:06:04.062Z  verdict: pass  exit 0
+  reason: acceptance passed (exit 0)
+```
+
+同一条命令、同一个对象，取值由 fail 变 pass ⇒ 判据可被打红，且这次改动是那个变化的因。
+未改宽判据的举证：`git diff develop -- goals/` ⇒ **0 行**；blob sha 两侧同为
+`db567d0ef3344b41c96301d0d65dc8b4e0c72d6a`；`git status --porcelain goals/` 空。
+
+### AC2 — 两个独立仪器（都直查远端）
+
+```
+① git ls-remote --symref origin HEAD | head -1
+   ref: refs/heads/master	HEAD
+② gh repo view yaleh/quay --json defaultBranchRef
+   {"defaultBranchRef":{"name":"master"}}
+```
+
+两个都不读本地缓存。同一时刻本地 `refs/remotes/origin/HEAD` 仍为 `refs/remotes/origin/develop`
+（⇒ 它确实**没有**随远端设置自动更新，反过来印证它不是同源读数）。
+
+### AC3 — 合成远端上的正/负控制（criterion 逐字提取，md5 `049dd74d5aebc3bb566cd6cc4f67991e`）
+
+取法：`node packages/quay/bin/quay.js goal show AC-285 --json | jq -r '.criterion'` ⇒ 529 字节，
+md5 `049dd74d5aebc3bb566cd6cc4f67991e`，**未凭记忆重写**。
+
+| 合成远端 `HEAD` | stdout / stderr | exit |
+|---|---|---|
+| `refs/heads/master` | `OK — origin's default branch (HEAD symref) is master: ref: refs/heads/master	HEAD` | **0** |
+| `refs/heads/develop` | `CAUSE=default-branch-not-master — origin HEAD symref is: ref: refs/heads/develop	HEAD (expected refs/heads/master)` | **1** |
+| origin 不可达（第三态） | stdout/stderr 皆空 | **128** |
+
+正控制存在 ⇒ 那个 `exit 1` 证明了东西（判据不是结构上恒红）。**全程不触碰 origin**（合成远端是 `mktemp -d` 里的裸仓库）。
+第三态实测为 **exit 128（空输出）**，与 `exit 0` / `exit 1 + CAUSE=` 三者取值互不相同形 ⇒ 可区分。
+
+### AC4 — 分叉面探针：二元组 = (起点, 闸判定)
+
+```
+① 创建记录  git reflog show --format='%gs' task/zzz-ac285-probe | tail -1
+            branch: Created from HEAD      ← 本地 HEAD = 1a7b30648b62ae1521df73cc617316649cade6f5
+② 闸判定    bash plugin/scripts/dispatch-worktree-setup.sh /tmp/ac285-probe --base develop --dry-run
+            fork-point PASS — HEAD contains develop (1a7b30648b62ae1521df73cc617316649cade6f5)
+            SETUP_GATE_EXIT=0
+```
+
+**落在 (a)**：分叉点取自**本地** HEAD，不是 GitHub 默认分支。⇒ 翻转**没有**改变派发分叉面：
+新 worktree 不会从 master（落后 285 提交）分叉，AC-284 的 fail-closed 闸不会被触发，
+**派发面无负面影响**（Proposal 里列为可能 (b) 的那个运维后果，实测未发生）。
+
+探针用**真实默认起点**（`git worktree add` **未指定** commit-ish / `--base`）。
+清理：`git worktree remove /tmp/ac285-probe`（exit 0）+ `git branch -D task/zzz-ac285-probe`（was `1a7b30648`）；
+清理后 `git worktree list | grep ac285-probe` ⇒ **无命中**，`/tmp/ac285-probe` 不存在。
+探针建在 `/tmp` 下（⛔ 从不落在 `quay-worktrees/`），故从未被当成在飞任务计数。
+
+### AC5 — 作用域：只有仓库设置变了
+
+翻转前 vs 翻转后的 `git ls-remote --heads origin | sort`：
+
+```
+diff refs-before.txt refs-after.txt        ⇒ 空（exit 0）
+md5sum 两侧                                ⇒ 同为 da79fb2094fa4ba110ec74c61faddcb2
+refs 条数                                  ⇒ 各 28（含 develop / master / dist-plugin / author / 全部 task/*）
+```
+
+**零 ref 变化**，无 `--force`，未改动任何分支内容。
+
+### AC6 — 本地 set-head 的决定 + 收口时刻判据仍取得到
+
+```
+① git symbolic-ref refs/remotes/origin/HEAD
+   refs/remotes/origin/develop                （sha 1a7b30648b62ae1521df73cc617316649cade6f5）
+```
+
+**决定：本任务刻意不跑 `git remote set-head origin -a`。** 本地"默认分支"这个角色服务的是
+**落地基线**（`packages/quay/src/branch-model.ts:227` `detectDefaultBranch()` → `classifyBranch()` `:258`
+→ `plugin/scripts/anti-drift-touches-check.ts:175`），其正解是 develop；而 GitHub 的默认分支服务的是
+**对外门面 / marketplace 展示**（GOAL-023 的真实靶子）。两者是不同对象的同一名称，混同会把**每个** worktree 的
+落地基线分类从 develop 挪到 master（今天恰好等价，将来一条只落 master 的 hotfix 就会让 develop 侧被判
+`divergent` ⇒ anti-drift 假红）。⇒ ⛔「顺手刷一下保持一致」不作为清理动作，本任务明确不做。
+
+```
+② 收口时刻重跑（与 AC1 之间已隔 worktree add / worktree remove / branch -D 三次别的 git 操作）
+   2026-09-17T06:07:02.677Z  verdict: pass  exit 0
+```
+
+⇒ 这个 pass 不是恰好夹在某个瞬态窗口里。
+
+### 证据落点
+
+上列读数的原始输出存于 **未跟踪** scratch 目录 `.quay/ac285/`（`refs-before.txt` / `refs-after.txt` /
+`gate-before.txt` / `gate-after.txt` / `readback-after.txt` / `criterion-verbatim.txt` / `ac3-controls.txt` /
+`ac4-probe.txt` / `ac1-goals-untouched.txt` / `ac6-closing.txt` / `evidence-bundle.md`），
+按 Touches 说明**未提交**，可被下一轮独立复算。
