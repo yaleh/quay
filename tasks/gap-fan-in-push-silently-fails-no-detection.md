@@ -2,7 +2,7 @@
 id: gap-fan-in-push-silently-fails-no-detection
 title: worker-driver fan-in 完成后 push 到 origin/develop
   悄悄失败——已发生两次，均靠人工/偶然核实发现，无任何机制主动检测
-status: todo
+status: ready
 labels:
   - gap
   - defect
