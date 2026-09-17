@@ -2,7 +2,7 @@
 id: gap-ac285-github-default-branch-master
 title: GitHub 仓库默认分支仍为 develop ⇒ AC-285 判据 exit
   1（CAUSE=default-branch-not-master）——把仓库设置翻到 master，直查远端回读 + 分叉面探针实测
-status: todo
+status: ready
 labels:
   - gap
 parent: null
