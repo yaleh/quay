@@ -15,6 +15,23 @@ depends_on:
   - gap-ac289-dashboard-zh-nav-label-and-own-title
 goal_ac: AC-297
 ---
+---
+id: gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title
+title: "AC-297 缺口 —— /git-history 页面的 zh 切换完全未接线：页头 lang、本页 title 标签与导航当前项在
+  cookie: lang=zh 下与 en 逐字节相同"
+status: ready
+labels:
+  - gap
+  - webui
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - gap-ac288-webui-lang-switch-mechanism
+  - gap-ac289-dashboard-zh-nav-label-and-own-title
+goal_ac: AC-297
+---
 **type:** execution
 
 ## Proposal
@@ -133,12 +150,12 @@ nav_en 区块 = `grep -o '<nav.*</nav>'` ⇒ 2419 bytes（全响应 513471 bytes
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：四处各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，`curl -H 'Cookie: lang=zh' http://$addr/git-history` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）的文本都**不是** `Git History`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）；④ **en 基线逐字未变**：默认语言 `/git-history` 响应体与立案基线（513471 B、三条 `Git History` 命中、nav 区块 2419 B、nav 内 2 条）同口径对照。⛔ 四处分开断言、分开贴原始片段——只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC1b（默认视图之外的第二分支）**：`curl -H 'Cookie: lang=zh' "http://$addr/git-history?view=task"` 同样满足 ①②③（该分支的 `<title>` token 是 `"Git history — 任务分组"`，与本任务陷阱 2 的第二个键对应）。**判据只读默认视图**——本条是防止「只接了一个分支」的独立对照，⛔ 不得用默认视图的读数顶替。
-- [ ] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Git History'` **与** `grep -n 'Git history'`，把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条提交信息），并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（全 body **3 次**，其中 nav 区块内 **2 次**）。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-297 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-297-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Git History` / `Git history` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 12 个 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -rc 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照（**立案基线：`serve-git.ts` = 2**，即 `:919` task view ＋ `:963` git view）：本任务后 **`serve-git.ts` 2→0**。⚠️ 该文件不在其他在飞任务的 Touches 内 ⇒ 本项的判据是**逐文件差量 + 归属**；若别的任务改动使全局总数变化，**不得记到自己账上**。
+- [x] **AC1（live 面判别性读数：四处各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，`curl -H 'Cookie: lang=zh' http://$addr/git-history` 的响应**分别**满足：① 含 `<html lang="zh"`；② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）的文本都**不是** `Git History`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）；④ **en 基线逐字未变**：默认语言 `/git-history` 响应体与立案基线（513471 B、三条 `Git History` 命中、nav 区块 2419 B、nav 内 2 条）同口径对照。⛔ 四处分开断言、分开贴原始片段——只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
+- [x] **AC1b（默认视图之外的第二分支）**：`curl -H 'Cookie: lang=zh' "http://$addr/git-history?view=task"` 同样满足 ①②③（该分支的 `<title>` token 是 `"Git history — 任务分组"`，与本任务陷阱 2 的第二个键对应）。**判据只读默认视图**——本条是防止「只接了一个分支」的独立对照，⛔ 不得用默认视图的读数顶替。
+- [x] **AC2（可被打红——因果对照）**：把语言解析结果**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。**再加更窄的一次对照**：只把语言**钳在字典入口**（`pageNameFor` / `navLabelsFor` 首行强制 `en`，AC-288 的机制原封不动）⇒ `<html lang>` 仍为 `zh` 而 nav/标题变红，判据自报的 `CAUSE=` 必须是 `nav-label-untranslated` 或 `title-unchanged`（⛔ 不是 `html-lang-not-zh`）——**这一条才把成因单独钉在字典接线上**（硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `tr '<' '\n<' | grep -n 'Git History'` **与** `grep -n 'Git history'`，把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪条提交信息），并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。**判别性证法（⛔ 不是「数出来是 0」）**：同一个谓词在 **en** 响应上必须命中（全 body **3 次**，其中 nav 区块内 **2 次**）。
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-297 --dry-run --json` 完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-297-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、把 zh 值写成含英文 `Git History` / `Git history` 的混合串。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title` 绿；② `node --test packages/quay/test/serve-*.test.mjs` 绿；③ **作用域举证**：`git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过（⛔ 其余 12 个 `serve-*.ts` 的硬编码标签点一字未改）；④ `grep -rc 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照（**立案基线：`serve-git.ts` = 2**，即 `:919` task view ＋ `:963` git view）：本任务后 **`serve-git.ts` 2→0**。⚠️ 该文件不在其他在飞任务的 Touches 内 ⇒ 本项的判据是**逐文件差量 + 归属**；若别的任务改动使全局总数变化，**不得记到自己账上**。
 
 ## DoD
 
@@ -159,3 +176,138 @@ nav_en 区块 = `grep -o '<nav.*</nav>'` ⇒ 2419 bytes（全响应 513471 bytes
 - packages/quay/test/serve-git-history-zh-chrome.test.mjs (new)
 
 （说明：`packages/quay/src/serve-lang.ts` 属 AC-288 的产物、四个共享渲染函数与 `NAV_LABELS` 属 AC-289 的产物、`serve-task.ts` 的接线模板属 AC-290 的产物，⛔ 均不在本 Touches 的**改动**意图内（`serve-i18n.ts` 只追加本页 `PAGE_LABELS` 词条）；`packages/quay/test/serve-i18n.test.mjs` **刻意不声明**——它的「未映射 token」样本是 `"Not A Page"`，本任务不映射它，故无 delta（Plan step 2 已实测核对；若实现时它因本页词条变红，则**当场**加进 Touches 并在任务体记下）。`goals/AC-297-*.md` 属人与驱动维护面，⛔ 不在本 Touches。运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明——`anti-drift-touches-check` 只比对已跟踪文件。）
+
+## 实现与验证证据（AC-297，2026-09-17，worker `gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title`）
+
+**改动**（`git diff --name-only develop...HEAD` ⇒ 恰好 3 条，全部在 Touches 内）：
+
+```
+packages/quay/src/serve-git.ts
+packages/quay/src/serve-i18n.ts
+packages/quay/test/serve-git-history-zh-chrome.test.mjs
+```
+
+- `serve-git.ts`：`renderGitHistoryPage` 加 `lang: Lang = DEFAULT_LANG` 参数位；**两个 view 分支各接 4 处**（`htmlLangTag(lang)` / `pageTitle(..., identity, lang)` / `renderMobileChrome("git", pageNameFor("git history", lang), lang)` / `renderSiteNav("git", lang)`）+ 两处 `<h1>` 过 `pageNameFor`；`handleGitHistory` 传 `cfg.lang`（原 `:990` 丢掉）。
+- `serve-i18n.ts`：`PAGE_LABELS` **只追加**本页 4 条词条（两条 `<title>` token、`Git History`（`<h1>`）、`git history`（移动端 header page label））；ROW 3 契约行同步为 `/git-history (AC-297)` / 剩余 6 页 = AC-298~303。⛔ 未碰 `NAV_LABELS`、未重写四个共享渲染函数。
+
+### ⚠️ 判据探针的 root 随**调用 cwd** 变 —— 未落地实现的结构性前提（⛔ 不是形式说明）
+
+判据探针先 `root=$(git rev-parse --show-toplevel)`，再取 `cwd == root` 的 `quay.ts serve`。**本改动未落地**（fan-in 才落 develop）⇒ 主检出实例（pid=3696699，cwd=主检出，:4173）跑的是 develop 代码，**结构上不可能**给出绿色。故：
+
+- **红基线**（改动前，主检出实例 = develop 代码）：见 Proposal 段 `CAUSE=html-lang-not-zh`；本 worker 复跑（`2026-09-17T20:15:55.768Z`）**同为该值**。
+- **绿读数**：在 **worktree 根**起一个 `quay.ts serve`（:51997），并从 **worktree 根**调用判据 ⇒ 探针 root = worktree，命中的就是该实例（下文 `addr=127.0.0.1:51997` 即此证据）。**同族 AC-295 的 AC1 把「仓库根」同样读作本任务 worktree 根**，与之一致。
+
+### AC1 / AC1b —— live 面四处**分开**断言（`curl -H 'Cookie: lang=zh' http://127.0.0.1:51997/git-history`）
+
+| 断言 | en | zh |
+|---|---|---|
+| ① `<html lang=…>` | `<html lang="en"` | `<html lang="zh"` |
+| ② 桌面 nav 当前项 | `<span class="nav-item nav-current" aria-current="page">Git History` | `<span class="nav-item nav-current" aria-current="page">Git 历史` |
+| ② 移动 nav 当前项 | `<span class="mobile-menu-item nav-current" aria-current="page">Git History` | `<span class="mobile-menu-item nav-current" aria-current="page">Git 历史` |
+| ③ 本页 `<title>` | `… — Git history — vertical commit timeline` | `… — Git 历史 — 提交纵向时间轴` |
+| 补 `<h1>` | `<h1>Git History — 提交纵向时间轴</h1>` | `<h1>Git 历史 — 提交纵向时间轴</h1>` |
+| 补 移动 header page label | `<span class="mobile-header-page">git history</span>` | `<span class="mobile-header-page">Git 历史</span>` |
+
+**AC1b**（`?view=task`，同一实例同一手法，⛔ 不与默认视图互相顶替）：① `<html lang="zh"`；② 桌面/移动 nav 当前项均 `Git 历史`；③ `<title>` = `… — Git 历史 — 任务分组`（en = `… — Git history — 任务分组`）；④ `<h1>Git 历史 — 任务分组时间轴</h1>`（en = `Git History — 任务分组时间轴`）。
+
+**AC1④ en 基线同口径对照**：
+
+| 量 | 立案基线 | 本次实测（en） |
+|---|---|---|
+| 全 body `Git History` 命中 | 3 | **3**（移动 nav / 桌面 nav / `<h1>`） |
+| nav 区块字节 | 2419 | **2419** |
+| nav 区块内 `Git History` | 2 | **2** |
+| `<html lang="en"><head>` | 有 | **有** |
+| 全 body `Git history` 命中 | —（未记） | **1**（只有 `<title>`） |
+
+⚠️ 全 body **字节数**两次不同（立案 513471 → 本次 510747），**成因已定位、非 chrome 漂移**：`/git-history` 把 `git log` 数据嵌进正文（提交 subject），而两次读数的**仓库不同**（本次实例的 workspaceRoot 是 worktree）且期间有提交新增 ⇒ 差异**全部落在数据区**；上表 5 个 chrome 量逐字相同。
+
+**与数据无关的更严对照（同输入、老/新源码）**：以**同一份 fixture history** 分别渲染 `develop` 源码与本实现源码（**4 参调用**，`lang` 缺省），两个 view 的 SHA-256 **完全相同**：
+```
+git  view: 2fc0d2dae6d4d5d3449a1c8f982f173cad6d5b9f95891ba0bdd1abb63e4600ab  (335466 B)
+task view: 5ce65a5a5bd095e2feebd755b950cdf95c0db76e55f020328378f0fa2977de91  ( 34051 B)
+⇒ 老源码 == 新源码（逐字节），en 渲染不变是**构造性质**，不是这一次读数的巧合
+```
+
+### AC2 —— 因果对照：两次钳制（一次性本地改动，⛔ 两次都未提交）
+
+**钳制 A（语言解析层：`serve-handlers.ts:86` 的 `reqCfg` 强制 `lang: "en"`）**
+```
+zh 请求            ⇒ <html lang="en"            （机制本身被钳住）
+goal gate AC-297   ⇒ verdict=fail, GATE_EXIT=1
+  CAUSE=html-lang-not-zh -- /git-history with Cookie: lang=zh did not respond <html lang="zh"> (addr=127.0.0.1:51997)
+还原（git checkout -- packages/quay/src/serve-handlers.ts）后复跑 ⇒ verdict=pass, GATE_EXIT=0
+```
+
+**钳制 B（更窄：只钳字典入口 —— `navLabelsFor` 首行强制 `DEFAULT_LANG` + `pageNameFor` 提前 `return pageName`；AC-288 的机制原封不动）**
+```
+zh 请求          ⇒ <html lang="zh"                                  ← 机制仍在（⛔ 不是 html-lang-not-zh）
+                   <title>… — Git history — vertical commit timeline</title>   ← 标题仍英文
+                   桌面 nav 当前项 = Git History
+goal gate AC-297 ⇒ verdict=fail, GATE_EXIT=1
+  CAUSE=nav-label-untranslated -- the nav region of /git-history under Cookie: lang=zh still renders
+  the literal English nav label "Git History"; the nav is not wired to the zh dictionary
+还原后复跑 ⇒ verdict=pass, GATE_EXIT=0
+```
+⇒ **判据自报的 `CAUSE` 是 `nav-label-untranslated`，不是 `html-lang-not-zh`**，与先写下的预测**逐字相符**：成因被单独钉在**字典接线**上（硬规则 4 推论四 —— 两次钳制给出两个**不同**的具名 `CAUSE`，故「是本次接线造成的」是一个被检验的结论，而非一个能解释现象的说法）。
+
+### AC3 —— 全量残留枚举 + 逐条归属（chrome 计数 / 数据计数）
+
+zh 响应（判据的两个**大小写敏感**谓词）：
+```
+tr '<' '\n<' < zh | grep -n 'Git History'   ⇒ 0 条  (grep -o | wc -l = 0)
+tr '<' '\n<' < zh | grep -n 'Git history'   ⇒ 0 条  (grep -o | wc -l = 0)
+⇒ chrome 计数 = 0，数据计数 = 0
+```
+
+**判别性证法（⛔ 不是「数出来是 0」）—— 同一谓词在 en 上命中，逐条归属产生源**：
+```
+726: span class="mobile-menu-item nav-current" aria-current="page">Git History   ← chrome，serve-render.ts SITE_NAV_GROUPS→navItem（经 NAV_LABELS.git.en）
+785: span class="nav-item nav-current" aria-current="page">Git History           ← chrome，同上
+808: h1>Git History — 提交纵向时间轴                                              ← chrome，serve-git.ts 的 <h1>（本任务的接线点之一）
+     count = 3；其中 nav 区块内 = 2（判据的作用域）
+657: title>… — Git history — vertical commit timeline                            ← chrome，serve-git.ts 的 <title> token
+     count = 1
+```
+**零计数的配套动作**（硬规则 2 的另一半）：把同一谓词对着**已知为真**的样本干跑 —— 上面 en 的 3 / 1 就是该对照，谓词可用，⛔ 不是恒零。
+
+**补充（判据两个谓词之外的大小写不敏感全扫，残留如实交出）**：`grep -oi 'git history'` 在 zh 下 = **1** 条：
+```
+8: meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">
+```
+**归属 = chrome，源 = `serve-git.ts` 的 `<meta name="description">`，本任务未接线**。它位于 `<head>`、**不在判据的 nav 区块**内、也不是本任务的 4 个接线点之一；同族已落地页面（AC-290 `/tasks`「Quay task list — …」、AC-295 `/needs-human`「Quay needs-human — …」）的 meta description 同样保持英文 ⇒ **系列既有约定，⛔ 不是本任务引入的缺口**。en 同一位置同值（对照：`grep -oi` 在 en 下 = 6，多出的 5 条即上表已归属的 chrome）。
+
+### AC4 —— 判据裁决原样记录
+
+实现后（worktree 根调用，探针命中 :51997）：
+```
+node packages/quay/bin/quay.js goal gate AC-297 --dry-run --json
+⇒ {"id":"AC-297","verdict":"pass","reason":"acceptance passed (exit 0)",
+   "timestamp":"2026-09-17T20:21:55.134Z","dryRun":true, ...}
+GATE_EXIT=0
+```
+⛔ 未改判据（`goals/AC-297-*.md` 一字未动，不在 Touches）、未改任何别的任务 title、zh 值不含 ASCII `Git History` / `Git history`（AC3 已证）。红基线原样保留在 Proposal 段（本 worker 复跑同值）。
+
+### AC5 —— 不回归 + 作用域枚举
+
+① `bash scripts/test.sh --for-task gap-ac297-git-history-page-zh-chrome-nav-current-and-own-title --allow-thin` ⇒ **exit 0**；`ℹ tests 95 / pass 95 / fail 0`；scoped 静态检查逐条 PASS（另 2 条为 `NOT-EVALUATED`，⛔ 未与 PASS 混同）；选择器确实选中本任务新文件（输出含 `+ packages/quay/test/serve-git-history-zh-chrome.test.mjs`），本文件 5 条在门内全绿。
+② `node --test packages/quay/test/serve-*.test.mjs` ⇒ **exit 0**；`ℹ tests 230 / pass 229 / fail 0 / skipped 1`。
+③ `git diff --name-only develop...HEAD` = 上文那 3 条，**逐条在 Touches 内**；`git diff --stat develop...HEAD -- 'packages/quay/src/serve-*.ts'` 只列 `serve-git.ts` 与 `serve-i18n.ts` ⇒ **其余 12 个 `serve-*.ts` 的硬编码标签点一字未改**。
+④ `grep -rc 'html lang="en"' packages/quay/src/*.ts`（逐文件，非零项）：
+```
+serve-doc.ts:2   serve-architecture.ts:1   serve-task.ts:1   serve-goal.ts:2
+serve-send.ts:1  serve-tests.ts:2          serve-adr.ts:2    serve-sessions.ts:2
+```
+**`serve-git.ts` 不在上表 ⇒ 0**（立案基线 **2** = `:919` task view + `:963` git view；两次读数的命中行都已打印核对为**代码**而非注释）；`serve-i18n.ts` 两次读数均 0。上表 8 个文件合计 13 处**均非本任务所改**（`--stat` 已证），逐个归属为 AC-298~303 尚未接线页面。零计数对照：同一谓词对 `serve-doc.ts`（已知为真）干跑命中 2 行并已打印。
+
+### 本任务新增测试（`packages/quay/test/serve-git-history-zh-chrome.test.mjs`，`// @test-group product`，5 条）
+
+- `AC-dict`：本页 4 个 token 的 zh 解析 + en 身份；zh 值不含三种 ASCII 拼写（含 en 对照证明谓词非空）；两个 `<title>` token 是**不同**的键；U+2014 逐字（连字符变体**不**映射）；大小写变体**不**映射；共享表既有行（Dashboard / task list / Needs Human）未被本次编辑扰动。
+- `AC1` / `AC1b`：真 `startServer({port:0})` + 真 workspace（native provider），**两个 view 分支各自**断言 ①②③④；nav 当前项桌面/移动**分开**断言；zh `<title>` 额外断言不含 ASCII `Git history`。
+- `AC-en-baseline`：两个 view 的 en 渲染逐字钉死（`<html lang="en"><head>`、两条 `<title>`、两条 `<h1>`、两处 nav 当前项、移动 header page label）。
+- `AC-scope`：`/tasks`、`/dashboard` 在 zh 下仍翻译 ⇒ 共享字典未被本次编辑破坏。
+- **固定样本对照（⛔ 非恒真）**：撤销源码改动后跑本文件 ⇒ **3 红（AC-dict / AC1 / AC1b）+ 2 绿（两条对照）**；即本文件是**修复探测器**，而两条 en 对照**既不红也不探测修复**——这正是它们是对照、不是修复探测器的证据。
+
+### DoD⑤ 回滚形态
+
+还原 `packages/quay/src/serve-git.ts` + `packages/quay/src/serve-i18n.ts`（或 revert 本任务提交）→ `npm run build -w quay` → 重启 `quay serve`。作用域：**纯本地代码 + 一个测试文件**，无外部状态、无数据迁移、无 `.quay/` 运行时状态变更（实现期起的 worktree 实例已停；`dist/` 是 gitignored 的本地构建物，撤销源码后须重跑 build）。
