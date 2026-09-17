@@ -48,7 +48,7 @@ extra:
 - [x] AC5（重试路径）：构造一个可通过简单机械重试解决的滞后场景（如短暂 non-fast-forward，重新 fetch 后可 ff），验证机械重试确实成功把本地 develop 推送到 origin/develop。
 - [x] AC6（升级路径）：构造一个机械重试无法解决的真实 non-fast-forward 场景（如两个仓库对同一父提交产生了不同的后续提交），验证检测流程正确识别"重试不可解"并触发/移交既有语义同步兜底机制（不要求本任务重新实现该机制本身，只要求触发点被真实调用到）。
 - [x] AC7（挂载与告警形态）：给出检测器实际挂载点的 file:line 证据（driver 轮转脚本 / `.quay/config.yml` routines 等），以及告警形态的落地证据（`.quay/*.jsonl` 追加记录，或 needs-human 触发，或其它），并说明选择理由。
-- [ ] AC8：`bash scripts/test.sh --for-task gap-fan-in-push-silently-fails-no-detection` 退出 0。
+- [x] AC8：`bash scripts/test.sh --for-task gap-fan-in-push-silently-fails-no-detection` 退出 0。
 
 ## Definition of Done
 
@@ -70,27 +70,36 @@ extra:
 - **告警有年龄门**：只有"领先扛过阈值而推送仍未成功"才报。年轻的领先是正常瞬时窗口（下一轮就推掉了），报它就是噪音（AC2 的假阳性方向）。
 - 读数 verdict 枚举 `in-sync | within-threshold | lagging | pushed | escalated | not-evaluated`；`not-evaluated`（git 读失败）是**独立取值**，⛔ 不落进 `in-sync`（硬规则 3b）。CLI 退出码同构 0/1/2/3。
 
+### 立案现场的真实读数（证明缺口是真的，且本检测器能读出来）
+
+```
+$ node --experimental-strip-types plugin/scripts/fan-in-push-lag-check.ts --root /home/yale/work/quay --measure-only --json
+{"verdict":"within-threshold","branch":"develop","remote":"origin","ahead":22,"behind":0,
+ "oldestAheadSha":"23a9e14bd80cc8a33f937c6580a5fa836a315dd6","oldestAheadEpochMs":1789605686000,
+ "lagMs":2373784,"thresholdMs":3600000,"thresholdSource":"default:12x300000ms","diverged":false,...}
+exit=0
+```
+即：**本仓库此刻 `develop` 领先 `origin/develop` 22 个提交、最老一条 39.6 分钟**——正是事故 1/2 的形态，只是年龄还在阈值内。稍后复核（01:2xZ）领先数升到 25、`origin/develop` 仍停在 `886bc16fa`（= 本会话开始时的 develop tip）⇒ 该领先在持续增长、没有任何机制在推它。落到生产后，这一形态会在**下一个 driver pass**（p95 ≈ 5 min）被 upsync 掉；若推不动，则在超过阈值后报警。
+
 ### AC1（正例，真实构造）—— 报出滞后，含三个字段
 
 夹具：`plugin/test/fan-in-push-lag-check.test.mjs` 的 `makeWorld()` = 真 bare origin + 真 clone（`git init --bare` / `git clone`）；两个真实提交，committer date 各取 2 小时前（`GIT_COMMITTER_DATE`）。阈值取 1h。
 
 ```
 $ node --experimental-strip-types plugin/scripts/fan-in-push-lag-check.ts --root <wt> --measure-only --json
-{"verdict":"lagging","branch":"develop","remote":"origin","ahead":2,"behind":0,
- "oldestAheadSha":"<c1|c2 之一>","oldestAheadEpochMs":...,"lagMs":>=7200000,
- "thresholdMs":3600000,"thresholdSource":"env:…","diverged":false,"retry":"not-attempted",...}
+{"verdict":"lagging","ahead":2,"behind":0,"oldestAheadSha":"<c1|c2 之一>",
+ "lagMs":>=7200000,"thresholdMs":3600000,"diverged":false,"retry":"not-attempted",...}
 exit=1
 ```
-三个字段齐备：领先提交数 `ahead=2`、最老提交 sha `oldestAheadSha ∈ {c1,c2}`、领先时长 `lagMs ≥ 2h`。
+三个字段齐备：领先提交数 `ahead=2`、最老提交 sha `oldestAheadSha ∈ {c1,c2}`、领先时长 `lagMs ≥ 2h`（且 `lagMs` 与 `oldestAheadEpochMs` 同源，容差 2s）。
 
-**滞后事件落载体**（把 origin 指到一个不存在的路径 ⇒ 机械重试不可解 ⇒ 触发告警，`runPushLagCheck` 的完整路径）：
+**滞后事件落载体**（把 origin 指到一个不存在的路径 ⇒ 机械重试不可解 ⇒ 触发告警）：
 ```
 .quay/fan-in-push-lag.jsonl 追加一条：
-{"ts":..., "event":"push-lag","verdict":"lagging","ahead":2,"behind":0,
- "oldestAheadSha":"...","oldestAheadEpochMs":...,"lagMs":...,"thresholdMs":3600000,
- "thresholdSource":"test:ac1","laggingAtMeasure":true,"retry":"error",...}
+{"event":"push-lag","verdict":"lagging","ahead":2,"behind":0,"oldestAheadSha":"...",
+ "lagMs":...,"thresholdMs":3600000,"thresholdSource":"test:ac1","laggingAtMeasure":true,"retry":"error",...}
 ```
-测试断言 13 项（含事件里三个字段 + thresholdSource），`node --test plugin/test/fan-in-push-lag-check.test.mjs` ⇒ **14 pass / 0 fail**。
+`node --test plugin/test/fan-in-push-lag-check.test.mjs` ⇒ **14 pass / 0 fail**。
 
 ### AC2（负控制1：假阳性方向）—— 领先但在阈值内 ⇒ 不报警
 
@@ -158,8 +167,8 @@ runPushLagCheck(...) ⇒ retry="non-ff-escalate", verdict="escalated"
 ### AC7（挂载点与告警形态）
 
 **挂载点（file:line）**：
-- `plugin/scripts/worker-driver.ts:5587` `step = "push-lag";` / `:5588` `pushLagReading = runPushLagPass(rootDir, pushBranch, pushRemote, reconcileMs);` —— 在 `runResidentLoop` 的**每轮 pass** 内，与 `liveness` / `reconcile` / `reclaim-superseded` 同族（每轮无条件跑，⛔ 不依赖任何完成事件）。
-- 辅助 `runPushLagPass` — `worker-driver.ts:1330`；读数投影进 round 载体 `push_lag` — `worker-driver.ts:1421`。
+- `plugin/scripts/worker-driver.ts` `runResidentLoop` 的**每轮 pass** 内 `step = "push-lag"` / `pushLagReading = runPushLagPass(rootDir, pushBranch, pushRemote, reconcileMs);` —— 与 `liveness` / `reconcile` / `reclaim-superseded` 同族（每轮无条件跑，⛔ 不依赖任何完成事件）。
+- 辅助 `runPushLagPass`；读数投影进 round 载体 `push_lag`（`computeWorkerRoundRecord`）。
 - 被推分支 = 机械 fan-in 的 merge target（`pushBranch`，缺省 develop），⛔ 不硬编码在检测器里。
 
 **为什么挂在这里（而不是 `.quay/config.yml` routines / probe 轨道）**：唯一真的会"做 fan-in"的常驻进程就是 worker-driver 主检出的常驻环，所以它是唯一能在事故窗口内闭合的落点。既有 tick 心跳（`plugin/loop/fast-mode-tick-core.md` A17 的 `sync-lag-check.sh --push`）属**已退役的两层 tick**，生产上没有执行者；probe 轨道经 `probe-routine.ts` spawn 一个 **LLM agent** 且最短可用节奏 `interval:<N>m`（现网 120m/1440m）远慢于每轮 pass（p95≈5min）。
@@ -176,11 +185,36 @@ runPushLagCheck(...) ⇒ retry="non-ff-escalate", verdict="escalated"
 - `plugin/probes/fan-in-push-lag.md` **未创建**：probe 规格的唯一消费者是 `.quay/config.yml loop.routines` 的 `probe:` 条目 + `probe-routine.ts`（spawn LLM agent）。本检查是纯机械的，且上面的挂点已覆盖每轮；造一份无人声明的 probe 规格 = 死文件（硬规则 9）。真相源只有一处。
 - `plugin/scripts/sync-lag-check.sh` **未修改**：push 改为**委托既有原语** `periodic-push-backup.sh`（`pushOnce` — `fan-in-push-lag-check.ts:370`，经 `resolveKernelShellSibling` 解析）——never-force 纪律与跨机 verify 记录钩子都住在那一份实现里，第二份实现就是漂移源（`sync-lag-check.sh` 自己也是同一个委托形态）。缺该原语时返回独立的 `unavailable` 取值，⛔ 不与"推成功"同形。
 
-### AC8
-见下方"AC8 证据"（scoped 门读数）。
+### AC8 —— scoped 门退出 0（真实读数）
+
+```
+$ bash scripts/test.sh --for-task gap-fan-in-push-silently-fails-no-detection
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+...（static 门全过）...
+  + plugin/test/fan-in-push-lag-check.test.mjs        ← 本次新测试【在选集中】（⛔ 不是「选了 0 个」的假绿）
+✔ AC6: a TRUE non-fast-forward is recognised as retry-unsolvable and hands off to the existing semantic-sync mechanism
+✔ the push is delegated to the existing never-force primitive, and an unresolvable one is `unavailable` (⛔ not `ok`)
+ℹ tests 130
+ℹ pass 130
+ℹ fail 0
+EXIT=0
+```
+同一门带 `--allow-thin` 跑一遍也是 130/130/0/EXIT=0。另核：
+- `fan-in-ts-typecheck-gate.ts`（Touches 含新 .ts ⇒ fan-in 的类型图闸）⇒ `typecheck GREEN — ADMITTED (exit 0)`
+- `anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK — 4 actual file(s), all within declared Touches (5 glob(s))`
+- `plugin/test/worker-driver-fan-in.test.mjs` ⇒ 102 pass / 0 fail；`plugin/test/worker-driver-resident.test.mjs` ⇒ 43 pass / 0 fail（常驻环挂点未破坏既有行为）。
+
+**过程中的一条真读数（记下来供后来者）**：第一次跑 scoped 门时它红在
+`scripts/test.sh: scoped static-check selection FAILED — not silently skipping the gate`——
+日志里没有 checker 名、没有缺哪个文件。直接跑
+`select-static-checks-for-touches.ts --task … --root .` 才看到真因：
+`touches-missing-registration — task declares new plugin/scripts file "plugin/scripts/fan-in-push-lag-check.ts"
+but its ## Touches do not authorize the registration file(s): plugin/scripts/capability-catalog.sh`。
+⇒ 这正是 `plugin/scripts/capability-catalog.sh` 进 Touches 的原因。
 
 ### 边界（诚实记录，⛔ 不粉饰）
 
 - 本检测器覆盖 **develop → origin/develop** 一条线（机械 fan-in 的落点）。`author` 分支的 push 不在其内。
 - 重试**不做 rebase / merge**：那属于"合并策略"，本任务明令不重新发明。真分歧一律移交既有语义同步兜底（AC6）。
 - 告警是**机械可读**的（载体 + 退出码），⛔ 不新增推送通知渠道（任务 ④ 明令"不发明新通知渠道"）。
+- `.quay/fan-in-push-lag.jsonl` 未加 `.gitignore`：ff-merge 的 benign-runtime-dirty 分支已显式放行未跟踪的 `?? .quay/…`（`packages/quay/src/fan-in/ff-merge.ts` "benign runtime dirty" 段），且同族先例 `.quay/routine-findings.jsonl` 也刻意不忽略 ⇒ 不为此改 `.gitignore`。
