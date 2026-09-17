@@ -1,7 +1,7 @@
 ---
 id: AC-286
 title: worker 机械 fan-in 的合并目标仍然是 develop（回归防护）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -39,6 +39,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-023 激活，同步激活；判据已收紧为对 mergeTarget 默认赋值语句的位置判定
+  - at: 2026-09-17T04:27:19.863Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
