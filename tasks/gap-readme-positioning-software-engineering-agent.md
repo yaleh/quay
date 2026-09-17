@@ -85,27 +85,41 @@ sample workspace + install 开头」；**新段落必须落在标题之后 ~700 
 
 ## Acceptance Criteria
 
-- [ ] AC1: AC-276 的 criterion 逐字判定通过。取法：用仓库自己的 `parseFrontmatterCompletely`
+- [x] AC1: AC-276 的 criterion 逐字判定通过。取法：用仓库自己的 `parseFrontmatterCompletely`
       (`plugin/scripts/task-schema.ts`) 解析 `goals/AC-276-*.md` 的 frontmatter 取 `criterion`，
       以 `bash -c <criterion>`、cwd = 主检出运行（与 `goal-store` 的
       `runAcceptance({command: criterion, cwd: root})` 同形）⇒ **exit 0 且 stderr 为空**。
       证据形态：命令 + 完整输出 + `echo EXIT=$?`。⛔ 不是「另写一份等价谓词跑绿」。
-- [ ] AC2（负控制——证明 AC1 的绿不是判据恒绿）: 把**同一个** criterion 在一个临时目录里对一份
+      【读数】criterion 从 `goals/AC-276-*.md` 经 `parseFrontmatterCompletely` 取出后原样存为
+      `/tmp/ac276-criterion.sh`，在工作树根运行 ⇒ `EXIT=0`，stderr 空。修前同一命令在同一树上
+      `EXIT=1 CAUSE=positioning-missing`（该读数即 AC2 的对照）。
+- [x] AC2（负控制——证明 AC1 的绿不是判据恒绿）: 把**同一个** criterion 在一个临时目录里对一份
       **不含定位词**的 `README.md` 跑（cwd = 该临时目录）⇒ **exit 1 且 stderr 含
       `CAUSE=positioning-missing`**。两条读数并排贴出（AC1 的 exit 0 与 AC2 的 exit 1）——
       判据在本产物上确实能取两个值。
-- [ ] AC3: 全 README（⛔ 不限前 6000 字符）对三条反向正则 **0 命中**：用与 criterion 中
+      【读数】`(cd "$(mktemp -d)" && bash /tmp/ac276-criterion.sh)`（该目录只有一份
+      `# quay\n\nA provider-agnostic task board: a small Core CLI plus a pluggable Provider ABI.\n`）
+      ⇒ `CAUSE=positioning-missing — README.md head (first 6000 chars) does not contain "Software Engineering Agent"`，
+      `EXIT=1`。
+- [x] AC3: 全 README（⛔ 不限前 6000 字符）对三条反向正则 **0 命中**：用与 criterion 中
       `NEG_PATTERNS` 逐字相同的三条正则（`re.IGNORECASE`）扫 `open("README.md").read()`，
       打印命中数 = 0。
-- [ ] AC4: 新增守卫测试 `plugin/test/readme-positioning-criterion.test.mjs` 跑绿：
+      【读数】全 README 40301 字节：`0 / 0 / 0`，`TOTAL_NEG_HITS = 0`。
+- [x] AC4: 新增守卫测试 `plugin/test/readme-positioning-criterion.test.mjs` 跑绿：
       `node --no-warnings --experimental-strip-types --test plugin/test/readme-positioning-criterion.test.mjs`
       ⇒ exit 0。该测试从 `goals/AC-276-*.md` 读出 criterion（⛔ 不抄副本），对仓库根的 `README.md`
       跑 ⇒ 断言 exit 0；并**自带一条负控制**：在临时目录放一份不含定位词的 `README.md`，跑同一
       criterion ⇒ 断言 exit 1 且 stderr 带 `CAUSE=positioning-missing`（测试自己就能证伪，不靠人读）。
-- [ ] AC5（反关键词充数）: 定位段落的形态读数：取 `# quay` 之后的**第一个 `##` 标题之前**的文本，
+      【读数】`tests 2 / pass 2 / fail 0`，`EXIT=0`；该文件亦进入 `--for-task` scoped 门的
+      测试选择集（scoped 门 `SCOPED_EXIT=0`）。
+- [x] AC5（反关键词充数）: 定位段落的形态读数：取 `# quay` 之后的**第一个 `##` 标题之前**的文本，
       该区间非空白字符数 ≥150 且其中出现 `Claude Code`；并打印 `README.md[:6000]` 中
       `Software Engineering Agent`（大小写不敏感）与 `infrastructure|基础设施` 的命中偏移。
       证据形态：一条命令 + 输出。
+      【读数】区间 = `# quay` 之后至首个 `## `（偏移 1624）；非空白字符数 **1364**（≥150 成立）；
+      含 `Claude Code` = True；`README.md[:6000]` 内命中偏移：`software engineering agent` @29、
+      `infrastructure` @471 与 @556（标题形 `Software Engineering Agent` 与中文 `基础设施` 各 0，
+      判据取 `any()`，两种写法任一成立即可）。
 
 ## Definition of Done
 
