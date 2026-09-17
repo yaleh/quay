@@ -449,16 +449,23 @@ rewrite. Read it as history, not as the current cold-start procedure.
 **Proving the loop is live is a one-shot reading; staying live is a cron.** Two
 different things — only the first is a step you perform:
 
-- **Liveness (once, right after ③④⑤):** read a real dispatch record — a
-  `--task-start` telemetry entry under `.workflow-events/*.jsonl`. A resident
-  process that merely *exists* is not evidence: a driver can be up while its events
-  reach nobody. The check is the record, not the PID.
+- **Liveness (once, right after ③④⑤):** ask the drivers, don't inspect the process
+  table — `quay driver status --kind promotion --json` (and `--kind worker`) reports
+  `{supervisor_pid, driver_pid, alive, …}`, and each driver appends its own heartbeat
+  to `.quay/<kind>-driver-liveness.log`. The strongest reading is a *direct* artefact:
+  a task worktree appearing under the worktree root with real commits in it. Something
+  that merely *exists* is not evidence — a driver can be up while nothing is dispatched.
 - **Continuous dispatch (afterwards, unattended):** the resident drivers keep
   dispatching on their own, and the manager layer re-evaluates on a **cron** tick —
   `/quay:manager` arms exactly one `CronCreate` job (sentinel `[manager-tick]`, via
   `plugin/scripts/manager-arm-loop.sh`), and the session's cron re-fires the tick.
   Dispatch is therefore periodic and unattended, **not** a human re-running a
   command; if the cron is gone the board stops moving while every process is still up.
+
+> An older liveness reading — a `--task-start` **telemetry** record under
+> `.workflow-events/*.jsonl` — belongs to the retired `inner` layer and to the
+> retained `quay-cold-start` skill that asserts it. The live driver pipeline writes
+> the readings in the first bullet above, not that directory; prefer them.
 
 What `--loop` lays into the target project (from the plugin bundle — nothing is
 copied out of the quay development tree):
