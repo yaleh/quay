@@ -1283,12 +1283,6 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
 // 单一真相源从「bash promotion-driver-launch.sh liveness」改为「node driver-runtime.ts liveness」——
 // supervisor 港进 TS 后 liveness 子命令随 kernel 一起（AC151）。
 
-/**
- * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
- * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
- * 「死亡」；round 每轮循环无条件写一条（含池空/判停轮），作 liveness 直接量。ts 是首字段
- * （supervisor _carrier_stats 的 `"ts"` grep 依赖）。
- */
 /** 本轮的 push 滞后检查读数（gap-fan-in-push-silently-fails-no-detection AC7 的**生产可观测载体**：
  *  生产 driver argv 无 `--json`，round 记录是它唯一每轮必写的载体——检测器的结论必须落在这里，否则
  *  「报出来了」只在测试里成立，硬规则 4 推论三的读生产载体半边缺席）。 */
@@ -1342,6 +1336,12 @@ export function runPushLagPass(root: string, branch: string, remote: string, rou
   }
 }
 
+/**
+ * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
+ * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
+ * 「死亡」；round 每轮循环无条件写一条（含池空/判停轮），作 liveness 直接量。ts 是首字段
+ * （supervisor _carrier_stats 的 `"ts"` grep 依赖）。
+ */
 export function computeWorkerRoundRecord(opts: {
   round: number;
   runId: string;
