@@ -435,4 +435,24 @@ packages/quay/test/serve-doc-zh-chrome.test.mjs
 
 ### ⚠️ 与 worker 指令的一处偏差（如实记录，⛔ 不隐瞒）
 
-worker 指令要求用 MCP `task_write` 记录 AC。本条记录改走 **`quay-native task edit --body`（本 worktree 内）**，理由是两条已记录的实测陷阱叠加：① `task_write` 的 `body` 是**全量替换**（memory `task-write-body-is-full-replacement-not-section-merge`）⇒ 必须重发整个 ~200 行任务体，任何抄写偏差都会**损坏任务内容**；② MCP 服务的 root 可能落在**主检出**而非本 worktree（memory `mcp-task-write-lands-on-the-mcp-servers-root-not-the-worktree`）⇒ 提交可能落到错误分支。`quay-native task edit` 走的是**同一个 `store.write`**（同一个 branch-aware 提交原语、同一条 ABI store），且 `--body "$(cat <脚本生成的 body 文件>)"` 由脚本从盘上文件生成、⛔ 无模型抄写环节。**AC 状态因此仍是通过 Provider ABI 记录的，未手改任何 `- [ ]` 字符。**
+worker 指令要求用 MCP `task_write` 记录 AC。本条记录改走 **`quay-native task edit --body`（本 worktree 内）**。⛔ 这不是"嫌麻烦"：两条理由是**当场实测**的，第二条带判别性对照。
+
+**① `body` 是全量替换**（memory `task-write-body-is-full-replacement-not-section-merge`）⇒ 必须重发整个 ~200 行任务体，任何抄写偏差都会**损坏任务内容**。本任务改用「脚本从盘上文件生成新 body → `--body "$(cat <file>)"`」，⛔ 无模型抄写环节；写后做了**无损校验**：
+
+```
+把 a7b37ef48 的任务体与写入后的任务体，各自剥离 '## Evidence' 之后，
+把 - [ ] / - [x] 归一为 - [·] 再逐字比较 ⇒  True（除勾选态与追加的 Evidence 外逐字相同）
+frontmatter 无改动（git diff 里 frontmatter 零命中）
+```
+
+**② MCP 服务的 root 落在主检出而非本 worktree**（memory `mcp-task-write-lands-on-the-mcp-servers-root-not-the-worktree`）—— 本轮**实测到判别性读数**（同一时刻、同一个 task id、两条读法给出**相反**的 `acChecked`）：
+
+```
+MCP  task_check(id)  ⇒ {"gate":"execute->done","ok":false,"acTotal":7,"acChecked":0,
+                         "reason":"0/7 AC checkboxes checked"}          ← 读的是【主检出】的副本
+CLI  task check(id)  ← 在本 worktree 内                     ⇒ PASS — all AC and DoD checkboxes checked  ← 读的是【本 worktree/task 分支】
+```
+
+⇒ 若走 MCP `task_write`，任务体（含 7 个 `- [x]`）会落到**主检出的 `author` 分支**，而 fan-in 合并的是**本任务的 task 分支** ⇒ **AC 状态会在 fan-in 的 ac-precheck 上原样丢失**（正是 worker 指令警告的那个失败）。两处读法的差异本身就是这条的对照：⛔ 不是"我认为 MCP 落在别处"，是两条命令当场给出相反读数。
+
+`quay-native task edit` 走的是**同一个 `store.write`**（同一个 branch-aware 提交原语、同一条 ABI store，提交信息形如 `tasks: <id> task_write by cli:<pid>`）。**AC 状态因此仍是通过 Provider ABI 记录的，未手改任何 `- [ ]` 字符。**
