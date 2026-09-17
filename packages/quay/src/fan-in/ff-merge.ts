@@ -187,7 +187,15 @@ function agentIdGate(args: FfMergeArgs, root: string): FfMergeResult | null {
 
 function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrLines: string[] } {
   const stderrLines: string[] = [];
-  let porcelain = git(root, "status", "--porcelain").stdout;
+  // ⚠️ `-c core.quotepath=false` — `status --porcelain` C-quotes non-ASCII pathnames exactly like
+  // `diff --name-only` does, and the three predicates below (`^tasks/[^/]+\.md$` converge, `^\.quay($|/)`
+  // benign, `isRuntimeArtifactPath` manifest) all test the parsed path. A quoted name is not a path, so a
+  // non-ASCII dirty file would misjudge to "working tree not clean" (fail-closed, but the WRONG refusal —
+  // a legitimately benign `.quay/` runtime file would block the ff). REACHABILITY READING (hard rule 12):
+  // 0 non-ASCII files under tasks/ or .quay/ today ⇒ LATENT here, unlike the two `--name-only` sites above
+  // where goals/ carries 91 non-ASCII paths and the failure is live. Fixed anyway — same class, same file,
+  // and verified byte-identical output for ASCII-only trees.
+  let porcelain = git(root, "-c", "core.quotepath=false", "status", "--porcelain").stdout;
   // The runtime-artifact manifest (may be null = unreadable ⇒ whitelist stays .quay/-only).
   const rtPatterns = loadRuntimeArtifactPatterns(scriptsDirOf(args));
   const rtManifestPath = runtimeArtifactManifestPath(scriptsDirOf(args));
@@ -221,7 +229,7 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
         stderrLines.push(`fan-in-ff-merge: converged a status-only dirty tree (promotion-driver flip) — committed ${paths.join(" ")}`);
       }
     }
-    porcelain = git(root, "status", "--porcelain").stdout;
+    porcelain = git(root, "-c", "core.quotepath=false", "status", "--porcelain").stdout;
   }
 
   // benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path): porcelain ALL
@@ -439,7 +447,11 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   if (git(root, "merge-base", "--is-ancestor", suiteHead, suiteTip).status !== 0) {
     return { ok: false, reason: `suite_head=${suiteHead} is NOT an ancestor of 待 ff tip=${suiteTip}` };
   }
-  const delta = git(root, "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
+  // ⚠️ `-c core.quotepath=false` — same class as the in-lock retry below (hard rule 5b: the sibling was
+  // in the SAME file). C-quoted non-ASCII names would reach `classifyDeltaVerdict` as nonexistent paths,
+  // fail-closing THIS gate to non-inert ⇒ the suite certificate is refused and the ff never even reaches
+  // the lock. Same flag, same reason; raw bytes are what the classifier's registry match expects.
+  const delta = git(root, "-c", "core.quotepath=false", "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
     const scriptsDir = scriptsDirOf(args) ?? "";
     const verdict = classifyDeltaVerdict(root, scriptsDir, delta.split("\n").filter(Boolean));
@@ -646,7 +658,15 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     const wtBranch = args.worktree ? git(args.worktree, "branch", "--show-current").stdout.trim() : "";
     const suiteHead = readCaptureField(suiteCapture, "suite_head");
     if (args.worktree && wtBranch === `task/${args.task}` && suiteHead && developTip) {
-      const incFiles = git(root, "diff", "--name-only", `${suiteHead}...${developTip}`).stdout.trim();
+      // ⚠️ `-c core.quotepath=false` (gap-ff-merge-quotepath-breaks-inert-retry): git C-quotes non-ASCII
+      // pathnames by DEFAULT, so this increment reached the path classifier as `"goals/AC-278-\350\207\263…md"`
+      // — a string that is not a real path. The classifier fail-closes an unjudgeable path to non-inert ⇒
+      // `classifyDelta !== ""` ⇒ this retry never fired for ANY develop advance containing one non-ASCII
+      // name (this repo's goals/ and tasks/ are full of them) ⇒ ff failed `not a fast-forward`, and the
+      // anti-livelock recovery below was structurally unreachable in production. Raw bytes restore the
+      // verdict; same flag as anti-drift-touches-check.ts / direct-to-develop-bypass-check.ts /
+      // dev-stats-collect.ts (hard rule 5b: the 4th site of a class already fixed in three).
+      const incFiles = git(root, "-c", "core.quotepath=false", "diff", "--name-only", `${suiteHead}...${developTip}`).stdout.trim();
       if (incFiles !== "") {
         const codeDelta = classifyDelta(args, root, incFiles.split("\n").filter(Boolean));
         if (codeDelta !== "__CLASSIFY_FAILED__" && codeDelta === "") {

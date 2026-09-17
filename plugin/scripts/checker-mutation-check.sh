@@ -264,6 +264,55 @@ run_one_case() {
   return "$exit_code"
 }
 
+# ── bounded-parallel case pool ─────────────────────────────────────────────────────────────────────
+# run_cases() backgrounds each case, so results MUST travel through a FILE: a backgrounded subshell
+# is a separate process and every assignment it makes to a parent variable is DISCARDED. That is why
+# backgrounding the per-case call WITHOUT a results channel is a FAIL-OPEN — `$?` then reads the
+# status of the `&` itself (always 0), every counter and every `_results_json` write is lost, and the gate prints
+# `RESULT: PASS` unconditionally: a checker that can never redden, which is the exact defect this
+# whole script exists to catch. scripts/test.sh:291-297 already records this shape for the doc-check
+# tier ("backgrounded checkers would return 0 immediately and mask a doc-check failure").
+# The shape below is copied from checker-cost-lib.sh's run_checker parallel branch (:110-158) rather
+# than reinvented (hard rule 1) — exit codes come back through a results file, attribution is done
+# AFTER the reap, and the pool cap is host-derived.
+
+_case_par_max=""
+_case_par_results_file=""
+_case_par_launched=0
+
+_case_par_done_count() {
+  if [ -n "$_case_par_results_file" ] && [ -f "$_case_par_results_file" ]; then
+    wc -l < "$_case_par_results_file" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
+# Host-derived pool size — NEVER a literal: a number that merely happens to equal "no limit" on
+# today's host is a real cap on the next one, silently (hard rule 4 推论二; scripts/test.sh:453-455
+# says the same). CHECKER_MUTATION_PARALLEL overrides; STATIC_CHECK_CONCURRENCY is the existing
+# sibling knob and is reused before falling back to nproc. A non-numeric / zero value degrades to
+# the HOST READ, never to "no throttle" — a garbage value must not silently launch all 82 at once.
+_case_par_resolve_max() {
+  _case_par_max="${CHECKER_MUTATION_PARALLEL:-${STATIC_CHECK_CONCURRENCY:-}}"
+  case "$_case_par_max" in
+    ''|*[!0-9]*) _case_par_max="$(nproc 2>/dev/null || echo 4)" ;;
+  esac
+  [ "$_case_par_max" -ge 1 ] 2>/dev/null || _case_par_max=1
+}
+
+# Block while the pool is at capacity: `wait -n` frees a slot the moment ANY backgrounded case
+# exits, and which job that was is irrelevant (attribution happens after the final `wait`, from the
+# results file). The `jobs -rp` check is a safety valve: a subshell killed before it appended its
+# line would leave the file-derived count permanently short of _case_par_launched and spin this loop
+# forever — with no running children the pool cannot be at capacity.
+_case_par_wait_slot() {
+  while [ "$((_case_par_launched - $(_case_par_done_count)))" -ge "$_case_par_max" ]; do
+    wait -n 2>/dev/null || true
+    [ -n "$(jobs -rp)" ] || break
+  done
+}
+
 run_cases() {
   _json_mode="$1"
   _stayed_green=0; _always_red=0; _errors=0; _uncovered_count=0; _regression_green=0
@@ -322,12 +371,40 @@ run_cases() {
   local start_ms end_ms
   start_ms="$(now_ms)"
   _executed_names=(${case_list[@]+"${case_list[@]}"})
+  # The 82 cases run BOUNDED-PARALLEL (see the _case_par_* pool above). Each case owns its workdir
+  # and its own subshell; its exit code comes back through the results FILE, never through a parent
+  # variable, and the NAME/ORDER stay in the parent's `case_list` — so the classification below reads
+  # a channel the child actually controls, not the child's self-report. Empty case_list (--meta-inject)
+  # stays a no-op: the loop body never runs and the bare `wait` below has no children.
+  _case_par_resolve_max
+  local _res_dir _case_rc_name _case_rc_val
+  _res_dir="$(mktemp -d "${TMPDIR:-/tmp}/cmc-results-XXXXXX")"
+  _case_par_results_file="${_res_dir}/results"
+  : > "$_case_par_results_file"
+  _case_par_launched=0
   for name in "${case_list[@]}"; do
-    local workdir exit_code res
+    local workdir
     workdir="$(mktemp -d "${TMPDIR:-/tmp}/cmc-case-XXXXXX")"
-    run_one_case "$name" "$workdir"
-    exit_code=$?
-    rm -rf "$workdir"
+    _case_par_wait_slot
+    _case_par_launched=$((_case_par_launched + 1))
+    ( if run_one_case "$name" "$workdir"; then _rc=0; else _rc=$?; fi; printf '%s|%s\n' "$name" "$_rc" >> "$_case_par_results_file"; rm -rf "$workdir" ) &
+  done
+  # Reap EVERY case before reading the channel — after this line every appended line is complete and
+  # every workdir has been removed. (This `wait` is also what makes the loop's `&` a real
+  # parallelization rather than a fire-and-forget: it is the join point the classification needs.)
+  wait
+  declare -A _case_rc=()
+  while IFS='|' read -r _case_rc_name _case_rc_val; do
+    [ -n "$_case_rc_name" ] || continue
+    _case_rc["$_case_rc_name"]="$_case_rc_val"
+  done < "$_case_par_results_file"
+  rm -rf "$_res_dir"
+  for name in "${case_list[@]}"; do
+    local exit_code res
+    # A name with NO line means its subshell died before reporting (killed / infra failure). That is
+    # an ERROR, never a pass: fail-closed on a missing channel entry (hard rule 3b — "读不懂输入"
+    # must not share the output shape of "合格"). exit 2 is the case-script infra-error code.
+    if [ -n "${_case_rc[$name]+set}" ]; then exit_code="${_case_rc[$name]}"; else exit_code=2; fi
     case "$exit_code" in
       0) res="pass"; case "$name" in regression-*) _regression_green=$((_regression_green + 1));; esac ;;
       3) res="stayed-green"; _stayed_green=$((_stayed_green + 1)); _stayed_names+=("$name") ;;

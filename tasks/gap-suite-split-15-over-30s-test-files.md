@@ -57,7 +57,9 @@ goal_ac: AC-279
 ② **⛔ 不删测试换时间**：每条测试承载一条 AC（`flip-no-ac` 闸守着），AC4 用测试名集合守恒证伪它。
 
 **职责边界**：本任务只做「文件拆分 + 分片登记 + 基线同步」，**不改** `scripts/test.sh` 的并发推导、
-泳道定义或调度器（那是 GOAL-022 另两条 AC 的面）。
+泳道定义或调度器（那是 GOAL-022 另两条 AC 的面）。**落地时越出了这条边界的一处**：拆分让若干
+「读自己那个文件」的结构面判据失效（自跑夹具按名字找单体、「所有 after 钩子走 rmSafe」读单文件）、
+并让消费者里写死的路径变陈旧——这些按硬规则 5b 一并修，已列入 Touches。
 
 ## Plan
 
@@ -162,4 +164,17 @@ goal_ac: AC-279
 - plugin/test/observer-registry-*.test.mjs (new)
 - plugin/test/helpers/*-harness.mjs (new)
 - docs/analysis/test-file-baseline.txt
+- plugin/scripts/full-suite-runner.ts
+- plugin/scripts/known-flakes.json
+- plugin/scripts/psi-failure-correlation-check.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/eligible-no-goal-source-check.ts
+- plugin/test/known-load-sensitive.test.mjs
+- plugin/test/red-window-triage.test.mjs
+- plugin/test/runner-grouping-metadata.test.mjs
+- plugin/test/suite-bucket-attribution.test.mjs
+- plugin/test/full-suite-runner-phases.test.mjs
+- plugin/test-isolation-violations.txt
+- plugin/loop/fast-mode-loop-tick.md
+- .quay/suite-bucket-reattribution.jsonl
 - tasks/gap-suite-split-15-over-30s-test-files.md（自身）
