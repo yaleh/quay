@@ -1,10 +1,24 @@
 # quay
 
-`quay` is a provider-agnostic task board: a small **Core** CLI/MCP client
-plus a pluggable **Provider ABI** for where tasks actually live. A task can
-be stored as local markdown+frontmatter files, mirrored to GitHub Issues,
-or (in principle) backed by any other tracker that implements the same
-ABI — `quay` Core doesn't know or care which.
+`quay` is itself a **software engineering agent** — the same category of system as
+Claude Code or Codex, not a task-board framework, a wire protocol, or an editor
+plug-in. Given a goal, it decomposes the goal into tasks, dispatches workers to
+implement them, judges each result against runnable acceptance criteria, and lands
+the ones that pass.
+
+What `quay` runs *on* is **Claude Code**, and that relation is intrinsic rather than
+optional: Claude Code is the **infrastructure** underneath `quay` in the same sense
+that an operating system is the infrastructure underneath the programs running on
+it. `quay` consumes the LLM inference, tool invocation, and subagent dispatch that
+Claude Code provides, and builds the task model, the lifecycle gates, and the driver
+loop on top of them. The direction is one-way: Claude Code is the ground `quay`
+stands on, not an artifact `quay` produces.
+
+Concretely, the surface `quay` exposes is a provider-agnostic task board: a small
+**Core** CLI/MCP client plus a pluggable **Provider ABI** for where tasks
+actually live. A task can be stored as local markdown+frontmatter files, mirrored
+to GitHub Issues, or (in principle) backed by any other tracker that implements
+the same ABI — `quay` Core doesn't know or care which.
 
 This repository is also the live workspace for a BAIME (Bootstrapped AI
 Methodology Engineering) research experiment in which `quay-native`'s own
