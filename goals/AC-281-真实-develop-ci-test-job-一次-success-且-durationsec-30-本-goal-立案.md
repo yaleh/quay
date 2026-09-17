@@ -1,7 +1,7 @@
 ---
 id: AC-281
 title: 真实 develop CI test job 一次 success 且 durationSec <= 30（本 GOAL 立案之后的读数）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-022
 criterion: >-
@@ -80,4 +80,15 @@ criterion: >-
 expect: criterion exits 0 once .quay/ci-runs.jsonl shows a post-SINCE develop CI
   test job that is success and durationSec<=30
 origin: GOAL-022 退出条件：.quay/ci-runs.jsonl 的 develop test job 立案之后 success 且 <=30s
+activatedAt: 2026-09-17T00:46:47.629Z
+statusLog:
+  - at: 2026-09-17T00:46:47.630Z
+    from: draft
+    to: active
+    actor: manager
+    reason: GOAL-022 激活，三条 AC 同步激活为可判定态
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-17T00:46:47.629Z
 ---
