@@ -584,6 +584,36 @@ export function renderTestsCard(
 // endpoint (which re-renders ONLY those two cards) and swaps each card's own DOM node — never
 // location.reload. The period is aligned with TASK_SUMMARY_CACHE_TTL_MS (30s) so the client does not
 // poll faster than the backend's own freshness; polling pauses while the tab is hidden.
+//
+// ── WHY THIS STAYS POLLING (gap-webui-dashboard-cards-poll-cost-eval, 2026-09-17) ──────────────────
+// DECISION: keep the 30 s poll; do NOT move to ETag/304 or SSE/WebSocket. Measured, not assumed:
+//   • This endpoint was 66–78% of ALL requests in a rolling 7-day window — but that is a SHARE of a
+//     tiny denominator (the whole server served ~9k requests in 7 days). The absolute rate is what
+//     the decision turns on: ~4.5k polls = ~0.007 req/s, ~19 ms of server time each (measured TTFB)
+//     ≈ 12 s of CPU per day.
+//   • The server's own cost is NOT this endpoint. A 120 s window in which exactly ONE poll arrived
+//     still burned 53.8 s CPU (44.9% of a core) — that is the 30 s snapshot-rebuild tick
+//     (startDashboardSnapshotRefresh; ~1.8 s of subprocess CPU per rebuild). Optimising the poll
+//     would cut REQUESTS without cutting SERVER COST.
+//   • ETag/304 is structurally unavailable here, not merely unimplemented: the payload is
+//     non-deterministic between two polls (the liveCard gantt's x/width derive from wall-clock `now`,
+//     testsCard carries "55m ago"→"56m ago", sysRaw.ts is a live sample stamp) — verified: two live
+//     probes 4 s apart differed, with only 5 of 8 keys (~52% of bytes) byte-stable. A whole-payload
+//     validator therefore NEVER matches, so adding one would be a dead mechanism that reads as an
+//     optimisation. `Cache-Control: no-store` is also deliberate here (a stale card is exactly what
+//     this endpoint exists to fix). Per-card validators would work, but that is a new
+//     request/response protocol for a 0.007 req/s load.
+//   • SSE/WebSocket would trade that rate for a socket held open per viewer plus heartbeat/reconnect/
+//     buffering surface — more mechanism, no measured benefit. /live is NOT a reusable precedent: it
+//     has no push at all (serve-live.ts renders a plain page; zero <script>/EventSource in src).
+//   • Freshness is already optimal: this period matches the server's own
+//     DASHBOARD_SNAPSHOT_REFRESH_MS (30 s), so polling faster cannot yield fresher data, and a hidden
+//     tab already skips the poll.
+// ⟳ RE-EVALUATE when the resident-viewer count V stops being negligible. The cost is linear per
+//   viewer: a tab open 8 h/day makes ~960 polls/day ≈ 31 MB/day at today's 32.6 KB payload, so
+//   V≈30 ⇒ ~1 GB/day — the point at which per-card conditional responses (the ~52% byte-stable
+//   keys) start to earn their complexity. Re-measure from `.quay/quay-access.log` path frequency
+//   plus this endpoint's TTFB.
 
 /** Auto-refresh period for the dashboard liveCard/testsCard (ms). Configurable here; the test pins the
  *  value domain [30s, 60s] (AC2). Aligned with TASK_SUMMARY_CACHE_TTL_MS so the client never polls
