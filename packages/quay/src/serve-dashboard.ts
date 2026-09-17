@@ -1232,7 +1232,28 @@ export function renderTopRow(liveCard: string, sysCard: string, mgrCard: string)
  *  class so the ≤600px single-column media query still collapses it (each column becomes a full-width
  *  row; the inner flex stacks are unaffected). */
 export function renderWorkProgressRow(goalCard: string, taskCard: string, testsCard: string, fanCard: string): string {
-  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem;"><div style="display:flex;flex-direction:column;gap:2px">${goalCard}${taskCard}</div><div style="display:flex;flex-direction:column;gap:2px">${testsCard}${fanCard}</div></div>`;
+  // gap-webui-dashboard-tasks-display-polish ③: two changes, and BOTH are needed — either alone is a
+  // no-op, which is why they are one edit:
+  //
+  // (a) `align-items:start` — stop the grid from stretching the shorter column's flex stack to the
+  //     row height (CSS Grid's default is `stretch`). This is what the reported defect names.
+  // (b) the divider colour moves OFF the container and ONTO the two column stacks. With (a) alone
+  //     the void would look EXACTLY the same: a grid row is as tall as its TALLEST item whatever
+  //     `align-items` says, so the container's own background still paints the whole row box —
+  //     including the region the short column no longer covers. It was that full-bleed
+  //     `--color-divider` fill showing through the gap that read as "卡片没渲染完/挂了". Painting the
+  //     divider on the column stacks instead keeps every intra-column 2px separator (the stacks are
+  //     still `gap:2px` over the divider colour) while leaving the container transparent, so the
+  //     uncovered area is page background — ordinary empty space, not a dark rectangle.
+  //
+  // The container keeps `gap:2px` + `border:1px solid var(--color-divider)` unchanged (the row's
+  // outer outline and the 2px column gutter), so this stays the same .dash-grid shape the ≤600px
+  // single-column media query collapses. The 变更记录 row / renderCardGrid() are untouched: their
+  // cards are direct grid items with no stacked-column wrapper, so they have no short-column void to
+  // begin with. renderTopRow() is likewise left alone (it is not in this task's scope and its own
+  // right-column void is a separate, already-recorded open item), so the two rows differ in this one
+  // respect until that one is taken up.
+  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:2px;background:transparent;border:1px solid var(--color-divider);margin-bottom:1.5rem;"><div style="display:flex;flex-direction:column;gap:2px;background:var(--color-divider)">${goalCard}${taskCard}</div><div style="display:flex;flex-direction:column;gap:2px;background:var(--color-divider)">${testsCard}${fanCard}</div></div>`;
 }
 
 /** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
