@@ -22,9 +22,9 @@
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
 //   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
-//   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299), /adr (AC-300)
-//   and /goal (AC-301); the remaining 2 pages' page-chrome is AC-302~303, and each adds its own
-//   tokens as it lands.
+//   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299), /adr (AC-300),
+//   /goal (AC-301) and /doc (AC-302); the remaining 1 page's page-chrome is AC-303, and it adds its
+//   own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -326,6 +326,39 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   //     the others (same note as AC-295's and AC-300's rows).
   Goals: { en: "Goals", zh: "目标" },
   goals: { en: "goals", zh: "目标" },
+  // AC-302 (/doc list page): this page's own THREE tokens — ⚠️ three, not the family's usual two
+  // (AC-300/AC-301's `ADRs`/`adrs` and `Goals`/`goals` pairs), because /doc's `<title>` token and its
+  // `<h1>` constant prefix are DIFFERENT strings. ⛔ Do not copy the two-token shape.
+  //   `Docs` — the token `serve-doc.ts` passes to `pageTitle`. ⚠️ It is NOT the `<h1>`'s prefix
+  //     (that is `Managed documents`, below) and NOT the nav's current item (that resolves through
+  //     NAV_LABELS's `doc` row, 「文档」, ROW 1 — shared chrome, already in place before this task).
+  //     Registering only the other two would leave exactly this site English, which IS the
+  //     `title-unchanged` arm of AC-302's criterion.
+  //   `docs` — the LOWERCASE token the MOBILE header carries, i.e. AC-290's `"task list"` / AC-297's
+  //     `"git history"` / AC-298's `tests` / AC-299's `sessions` / AC-300's `adrs` / AC-301's `goals`
+  //     shape. It renders into `<span class="mobile-header-page">`, which sits BEFORE the first
+  //     `<nav>` and is therefore neither inside the criterion's nav region nor a nav label; AC-302's
+  //     AC1b asserts it anyway, so that "this page's own chrome" switches as a whole.
+  //   `Managed documents` — the `<h1>`'s CONSTANT prefix. ⚠️ The `<h1>` is a DYNAMIC string —
+  //     `<prefix> (<n>)`. Only this prefix goes through the dictionary; the row count is interpolated
+  //     raw at the call site. Registering a finished string such as `"Managed documents (1)"` would
+  //     both go stale as documents are added and be a lookup miss (i.e. an English `<h1>` under zh) —
+  //     the exact defect AC-302 removes.
+  // ⚠️ CASE IS PART OF THE KEY. `pageNameFor` is an EXACT-token lookup, so `Docs` does NOT serve
+  //     `docs` and vice versa: collapsing them would leave one of the two sites English — and, worse,
+  //     would move the en baseline of the mobile header from `docs` to `Docs` (AC-302's AC2 reddens
+  //     on exactly that). ⛔ Do not "merge the duplicate".
+  // Neither zh value may carry the ASCII literal "Docs"/"docs" in ANY case: AC-302's criterion fails
+  //     the page on that literal inside the nav region — where this page's CURRENT item label comes
+  //     from NAV_LABELS's `doc` row (「文档」, ROW 1) — and the same literal is what the en baseline's
+  //     `<title>` carries, i.e. what the criterion's `title-unchanged` arm compares the zh title
+  //     against. 「文档」/「托管文档」 satisfy "non-empty" without it. The `Docs` entry landing on the
+  //     same zh word as the nav row (and as its own lowercase peer) is a coincidence of vocabulary,
+  //     ⛔ not a shared source — a later re-wording of one must not be assumed to move the others
+  //     (same note as AC-295's / AC-300's / AC-301's rows).
+  Docs: { en: "Docs", zh: "文档" },
+  docs: { en: "docs", zh: "文档" },
+  "Managed documents": { en: "Managed documents", zh: "托管文档" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline

@@ -4,7 +4,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { createDocumentStore } from "./document-store.ts";
 import type { ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle } from "./serve-render.ts";
+import {
+  html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle,
+  // AC-302 (gap-ac302-doc-page-zh-chrome-nav-current-and-own-title): the /doc LIST page consumes the
+  // AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionary (`pageNameFor`) through this one
+  // import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie (a
+  // second parse is a second decision table, and it would also read a different request's inputs than
+  // the one `Vary`/the cookie was declared for) and never re-derives a label.
+  htmlLangTag, pageNameFor,
+} from "./serve-render.ts";
 
 export async function handleDocList(
   req: IncomingMessage,
@@ -12,6 +20,15 @@ export async function handleDocList(
   url: URL,
   cfg: ServePageCfg,
 ): Promise<void> {
+  // AC-302: the per-request language AC-288 resolved (`reqCfg.lang`, assembled in serve-handlers.ts
+  // and already handed to this handler) rides on the SAME object as the workspace root, so the LIST
+  // page reads it off `cfg` rather than re-parsing `?lang=`/the cookie. Unlike `serve-goal.ts:305`
+  // this parameter is a full `ServePageCfg` (not a `ServePageCfg | string` union), so no
+  // normalisation is needed here. Every consumer below has a `DEFAULT_LANG` default parameter — so
+  // "no lang was passed" falls back to the pre-AC-302 bytes BY CONSTRUCTION, not by remembering, and
+  // ⛔ no `?? "en"` fallback is written here (that would make "not passed" and "passed en" the same
+  // value — 硬规则 3b).
+  const lang = cfg.lang;
   const statusFilter = url.searchParams.get("status");
   const docDir = path.join(cfg.workspaceRoot, "docs-managed");
   let docs;
@@ -32,10 +49,49 @@ export async function handleDocList(
     </tr>`;
   }).join("\n");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  // AC-302: this page's chrome sites take the per-request language resolved by AC-288 (`lang`, read
+  // off `cfg` above) and the AC-289 dictionary. Each call site passes `lang` rather than defaulting,
+  // so `undefined` still falls back to `DEFAULT_LANG` — the default-locale bytes are unchanged by
+  // construction, not by remembering.
+  //
+  // ⚠️ THREE tokens for this page's OWN chrome, and they are three INDEPENDENT exact-token lookups
+  // (⚠️ unlike AC-300/AC-301's TWO-token shape — ⛔ do not copy the count):
+  //   `"Docs"`  — the `pageTitle` token. ⛔ It is NOT reused by the `<h1>`, whose constant prefix is
+  //               a different string entirely (see below), and the nav's current item does not use
+  //               it either (that is `NAV_LABELS.doc`, shared chrome, ROW 1 — already 「文档」).
+  //   `"docs"`  — the LOWERCASE label the mobile header carries. It renders into
+  //               `<span class="mobile-header-page">`, which sits BEFORE the first `<nav>` and is
+  //               therefore outside the criterion's nav region — asserted anyway (AC1b), so that
+  //               "this page's own chrome" switches as a whole. `pageNameFor` is an EXACT-token
+  //               lookup, so `"Docs"` does NOT serve `"docs"`; mapping the lowercase call site onto
+  //               the capitalised entry would ALSO change the en baseline from `docs` to `Docs`.
+  //   `"Managed documents"` — the `<h1>`'s CONSTANT prefix (see the dynamic-string note below).
+  // ⚠️ The `<h1>` is a DYNAMIC string: `<token> (${docs.length})`. Only its constant prefix goes
+  // through the dictionary; the row count is interpolated raw. Registering a finished string such as
+  // `"Managed documents (1)"` would go stale the moment a document is added (and would be a lookup
+  // miss, i.e. an English `<h1>` under zh) — the exact defect AC-302 removes.
+  //
+  // ⛔ NAMED RESIDUE in THIS FILE, deliberately out of scope and registered rather than silently
+  // counted as bilingual:
+  //  ① the `No documents.` empty-state string and the `读失败:` error banner below — both are
+  //     CONDITIONALLY rendered (`docs.length === 0` / `readError` non-empty) and are structurally
+  //     unreachable on the default URL a criterion reads, so no criterion can name them (硬规则 4c:
+  //     a criterion's quantity must survive every intermediate layer to the point it is read). ⛔ Not
+  //     translated here and ⛔ no criterion is invented for them; they are registered by name so a
+  //     later task can pick them up deliberately.
+  //  ② `handleDocDetail` below (`/doc/<id>` — NOT one of `SITE_NAV_ROUTES`' 15 nav views) keeps its
+  //     own hard-coded English html-lang attribute and its lang-less
+  //     `renderMobileChrome`/`renderSiteNav`. GOAL-024's scope limits this task to the nav route;
+  //     AC-302's AC5④ therefore reads 2→1, ⛔ not 2→0 (the same shape as AC-300's serve-adr.ts and
+  //     AC-301's serve-goal.ts).
+  // ⚠️ This comment deliberately SPELLS OUT no html-lang literal: AC-302's AC5④ counts the
+  // occurrences of that literal in THIS FILE, and a mention inside a comment is not an occurrence
+  // (hard rule 2 — judge by position, not by keyword). Writing it here would inflate the count and
+  // make the residue look twice as large as it is.
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>${pageTitle("Docs", cfg.identity)}</title></head>
-    <body>${renderMobileChrome("doc", "docs")}${renderSiteNav("doc")}<main id="main">
-      <h1>Managed documents (${docs.length})</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>${pageTitle("Docs", cfg.identity, lang)}</title></head>
+    <body>${renderMobileChrome("doc", pageNameFor("docs", lang), lang)}${renderSiteNav("doc", lang)}<main id="main">
+      <h1>${pageNameFor("Managed documents", lang)} (${docs.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
         <tr><th>id</th><th>status</th><th>kind</th><th>title</th></tr>
