@@ -5,6 +5,8 @@ status: draft
 kind: criterion
 goal: GOAL-022
 criterion: >-
+  bash <<'CRIT'
+
   set -euo pipefail
 
   # The 15 files below are the REAL measured >30s wall-clock files from two
@@ -65,6 +67,8 @@ criterion: >-
   split/removed from their monolithic form"
 
   exit 0
+
+  CRIT
 expect: criterion exits 0 once none of the 15 named offender files still exist
   at their original monolithic path
 origin: GOAL-022 背景：15个文件实测 __PERFILE__ duration_ms 均 >30000，逐个点名
