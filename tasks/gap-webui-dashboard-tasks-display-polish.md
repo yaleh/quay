@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-tasks-display-polish
 title: Web UI 展示层三处小修复合并（favicon 缺失 / Tasks 默认排序 / Dashboard 双列不等高拉伸留白）
-status: ready
+status: done
 labels:
   - gap
   - webui
