@@ -22,8 +22,8 @@
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
 //   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
-//   /journal (AC-296) and /git-history (AC-297); the remaining 6 pages' page-chrome is AC-298~303,
-//   and each adds its own tokens as it lands.
+//   /journal (AC-296), /git-history (AC-297) and /tests (AC-298); the remaining 5 pages'
+//   page-chrome is AC-299~303, and each adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -220,6 +220,28 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   "Git history — 任务分组": { en: "Git history — 任务分组", zh: "Git 历史 — 任务分组" },
   "Git History": { en: "Git History", zh: "Git 历史" },
   "git history": { en: "git history", zh: "Git 历史" },
+  // AC-298 (/tests page): this page's own TWO tokens, same shape as AC-291's / AC-292's / AC-293's /
+  // AC-296's pairs. `Tests — 验证轮记录` is the FULL token `serve-tests.ts` passes to `pageTitle` AND
+  // to the `<h1>` — em dash and the (already-Chinese) subtitle included, byte-equal to BOTH call
+  // sites, because AC-298's third arm compares this page's `<title>` against its en baseline and a
+  // token that is not byte-equal MISSES the lookup (that miss IS the `title-unchanged` arm, i.e. the
+  // exact defect AC-298 exists to remove — registering the bare `Tests` here would leave the title
+  // English). This page is one of the few whose `<h1>` carries the FULL title token rather than a
+  // short one, so a single entry serves both.
+  // `tests` is the lowercase token the MOBILE header carries, i.e. the AC-290 `"task list"` /
+  // AC-297 `"git history"` shape (a page's own chrome token that is not a `pageTitle` token). It
+  // renders into `<span class="mobile-header-page">`, which sits BEFORE the first `<nav>` and is
+  // therefore neither inside the criterion's nav region nor a nav label. It is spelled like the nav
+  // KEY `tests`, but it is a separate lookup on purpose — the nav label resolves through
+  // `NAV_LABELS` (shared chrome, ROW 1) while this resolves through `pageNameFor` (this page's
+  // chrome, ROW 3), and ROW 3's whole point is that the two are peers.
+  // Neither zh value may carry the ASCII literal "Tests": AC-298's second arm fails the page on that
+  // literal inside the nav region — where this page's CURRENT item label comes from NAV_LABELS's
+  // `tests` row (「测试」, ROW 1) — and the lowercase literal is what the en baseline's `<title>` and
+  // `<h1>` carry, i.e. what the criterion's `title-unchanged` arm compares the zh title against.
+  // 「测试 — 验证轮记录」 satisfies "non-empty" without either literal.
+  "Tests — 验证轮记录": { en: "Tests — 验证轮记录", zh: "测试 — 验证轮记录" },
+  tests: { en: "tests", zh: "测试" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
