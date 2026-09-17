@@ -31,6 +31,9 @@ import {
   kernelSourceScriptsDir,
   preferredAnchorKernel,
   preferredAnchorKernelIn,
+  readAnchorBundleReading,
+  rebuildKernelBundle,
+  resolveQuayKernelBuildScript,
   sourceFilesMaxMtimeMs,
   sourceWatch,
   supervisorStaleness,
@@ -587,4 +590,206 @@ test("preferredAnchorKernelIn — 构建产物内核只换到**更新的**源树
   // (iii) 没有源树（装好的产物）⇒ 本内核自己（行为与今天逐字相同）。
   const bare = preferredAnchorKernelIn(me, me, null);
   assert.equal(bare?.path, selfJs, "无源树 ⇒ 仍是本内核自己");
+});
+
+// ── 陈旧 bundle 的**动作面**（gap-ac214-sixth-crossing-stale-bundle-detected-but-no-remediation）────────
+//
+// 缺陷形态（2026-09-17 实测，AC-214 第六次转红的成因）：`bundleStale` 支会**检测**「本内核 bundle 比
+// 它的源树旧」并把 `rebuild the bundle to clear this` 写进 anchor 日志（生产 `.quay/anchor.log` 有 ≥3 条
+// 带时刻的行），而**全仓没有任何机件执行那个动词** ⇒ 该条件静默 2 天：第五次转红落地的立案步
+// （`fileRoutineTask`）在**源**里、不在**跑的那个产物**里 ⇒ 生产载体
+// `.quay/routine-findings.jsonl` 的 `kind:"filing-round"` 记录数 = 0。
+//
+// 判据（双向 + 独立取值，⛔ 只给一臂不算过）：
+//   ① 陈旧 ⇒ **机械重建被调用**（不是只打一行日志），且结果落成 `.quay/anchor.json` 的 `bundle.state`
+//      独立取值 `stale-rebuilt` / `stale-rebuild-failed`；
+//   ② 补救 seam 关掉（kill switch）⇒ 陈旧**仍被报出**（STALE BUNDLE 行在场、取值 `stale-no-action`），
+//      ⛔ 不静默降级成 `fresh`；
+//   ③ **不陈旧**（bundle 不早于源树）⇒ **不**触发补救（无 marker、state = `fresh`）—— 用于区分
+//      「补救在工作」与「恒有输出」；
+//   ④ 没有源树（装好的产物）⇒ `resolveQuayKernelBuildScript()` = null + `attempted=false`
+//      （fail-closed，⛔ 不把静态产物写成半成品）。
+
+/** 造一个「本内核是**构建产物**、而它的源树在盘上且更旧/更新」的夹具：
+ *    <root>/plugin/scripts/*.ts                     ← **源树**（被监视集齐全；镜像态比较的对象）
+ *    <root>/staging/plugin/scripts/                 ← 本内核（QUAY_PLUGIN_ROOT；⛔ 目录里一个 .ts 都没有）
+ *    <root>/staging/packages/quay/src/              ← resolveQuayCodeRoot 的判据（本内核的代码根）
+ *    <root>/staging/packages/quay/scripts/build-plugin-dist.mjs  ← 假构建脚本（写 marker / 可失败）
+ *  这是生产形态的逐字镜像：本内核跑 `<repo>/plugin/scripts/dist/*.js`，源树在 `<repo>/plugin/scripts/`。 */
+function makeBundleStaleFixture(tag, { sourceNewerThanKernel = true } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `bundlestale-${tag}-`));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), "{}\n", "utf8");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\n", "utf8");
+
+  // 源树（镜像态比较的对象）：被监视集齐全。
+  const srcScripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(path.join(srcScripts, "dist"), { recursive: true });
+  for (const rel of watchedSourceFiles("outer")) fs.writeFileSync(path.join(srcScripts, rel), "// src\n", "utf8");
+  const when = new Date(Date.now() + (sourceNewerThanKernel ? 120_000 : -600_000));
+  for (const rel of watchedSourceFiles("outer")) fs.utimesSync(path.join(srcScripts, rel), when, when);
+
+  // 本内核：plugin root 的 basename 与源树同名（`plugin`），才让 kernelSourceScriptsDir 找到源树。
+  const kernelScripts = path.join(root, "staging", "plugin", "scripts");
+  fs.mkdirSync(path.join(kernelScripts, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(kernelScripts, "dist", "driver-anchor.js"), "// built\n", "utf8");
+
+  // 本内核的代码根（resolveQuayCodeRoot 的判据）+ 假构建脚本（**真实路径**，⛔ 不注入测试缝路径）。
+  const codeRoot = path.join(root, "staging");
+  fs.mkdirSync(path.join(codeRoot, "packages", "quay", "src"), { recursive: true });
+  const buildScript = path.join(codeRoot, "packages", "quay", "scripts", "build-plugin-dist.mjs");
+  fs.mkdirSync(path.dirname(buildScript), { recursive: true });
+  fs.writeFileSync(
+    buildScript,
+    `import fs from "node:fs";\n` +
+    `const marker = process.env.QUAY_FAKE_BUILD_MARKER;\n` +
+    `if (marker) fs.appendFileSync(marker, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + "\\n", "utf8");\n` +
+    `process.exit(Number(process.env.QUAY_FAKE_BUILD_EXIT ?? "0"));\n`,
+    "utf8",
+  );
+  const init = spawnSync("git", ["init", "-q", root], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(init.status, 0, `fixture is a git repo (mainCheckoutRoot needs it): ${init.stderr}`);
+  return { root, pluginRoot: path.join(root, "staging", "plugin"), marker: path.join(root, ".quay", "rebuild-marker.txt"), buildScript };
+}
+
+/** 直接起一个常驻 anchor（⛔ 不经 `start` CLI 的就绪闸——本组测的是 reconcile 里的判定与动作），
+ *  轮询到 `predicate` 成立后停机。
+ *
+ *  ⚠️ 必须**在它活着的时候**读 `.quay/anchor.json`：正常退出时 anchor 会主动删掉 pid / state 载体
+ *  （「已经在跑」与「已经停了」不得同形，硬规则 3b）—— 所以本夹具不能等它退出再读。 */
+async function runAnchorUntil(root, pluginRoot, predicate, extraEnv = {}) {
+  const child = spawn(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", ANCHOR_SCRIPT, "__anchor", "--root", root,
+      "--kinds", "outer", "--reconcile-ms", "150"],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        QUAY_PLUGIN_ROOT: pluginRoot,
+        QUAY_ANCHOR_SHUTDOWN_GRACE_MS: "3000",
+        // 测试缝：只验「重建发生了」，⛔ 不让它 spawn 一个替换 anchor（那会把夹具的假 driver 当真拉起）。
+        QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART: "1",
+        ...extraEnv,
+      },
+    },
+  );
+  let stderr = "";
+  child.stderr.on("data", (d) => { stderr += String(d); });
+  // ⚠️ 读数必须在**它活着的时候**抓下来：正常退出会删掉 `.quay/anchor.json`（见上）。
+  let captured = null;
+  try {
+    await waitFor(() => { const v = predicate(); if (v) { captured = v; return true; } return false; }, 30_000, "the anchor to publish the expected bundle reading");
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((r) => {
+      const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } r(); }, 20_000);
+      child.on("exit", () => { clearTimeout(t); r(); });
+    });
+  }
+  return { stderr, reading: captured };
+}
+
+/** 轮询谓词：`bundle.state` 等于期望值时把**那一份读数**交出来（⛔ 不是事后重读一个已被删的文件）。 */
+function bundleStateIs(root, state) {
+  return () => {
+    const r = readAnchorBundleReading(root);
+    return r?.state === state ? r : null;
+  };
+}
+
+const anchorLogOf = (root) => {
+  const p = path.join(root, ".quay", "anchor.log");
+  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+};
+
+test("陈旧 bundle ① — 陈旧且换不动 ⇒ **机械重建被调用**，结果落成 bundle.state 的独立取值", async (t) => {
+  const f = makeBundleStaleFixture("stale-rebuilt");
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  // 正控制：这个夹具确实处在「本内核是产物 + 源树更新」的输入上（否则本测会空转）。
+  withPluginRoot(f.pluginRoot, () => {
+    assert.equal(sourceWatch(f.root, "outer").state, "mirror", "夹具处在 mirror 态（旧读法在这里恒 0）");
+    assert.equal(resolveQuayKernelBuildScript(), f.buildScript, "构建脚本解析到**真实推导出的**那个路径（⛔ 不是测试注入的路径）");
+  });
+
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-rebuilt"),
+    { QUAY_FAKE_BUILD_MARKER: f.marker });
+  assert.ok(fs.existsSync(f.marker), `the mechanical rebuild WAS invoked (stderr: ${r.stderr}, log: ${anchorLogOf(f.root)})`);
+  const calls = fs.readFileSync(f.marker, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(calls.length, 1, `rebuilt exactly ONCE (冷却生效，⛔ 不是每趟 reconcile 一次): ${JSON.stringify(calls)}`);
+  assert.match(calls[0].cwd, /bundlestale-stale-rebuilt-/, "cwd = 源树的仓库根（⛔ 不是 --root 工作区）");
+
+  const log = anchorLogOf(f.root);
+  assert.match(log, /bundle rebuild OK in \d+ms/, "重建结果如实落进 anchor 日志");
+  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "陈旧**仍被报出**（⛔ 检测没有因为有了动作面而消失）");
+
+  const reading = r.reading;
+  assert.ok(reading, ".quay/anchor.json 里有结构化的 bundle 读数（⛔ 不再只有一行日志）");
+  assert.equal(reading.state, "stale-rebuilt", `陈旧 + 重建成功 = 独立取值 stale-rebuilt: ${JSON.stringify(reading)}`);
+  assert.equal(reading.rebuild?.attempted, true, "读数里带着「动作被调用过」");
+  assert.equal(reading.rebuild?.ok, true, "读数里带着动作的结果");
+  assert.ok(reading.kinds.includes("outer"), "读数点名了参与判定的 kind（⛔ 不是一个笼统的「有陈旧」）");
+});
+
+test("陈旧 bundle ② — 补救 seam 关掉 ⇒ 陈旧**仍被报出**（⛔ 不静默降级成 fresh）", async (t) => {
+  const f = makeBundleStaleFixture("no-action");
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-no-action"),
+    { QUAY_ANCHOR_NO_BUNDLE_REBUILD: "1", QUAY_FAKE_BUILD_MARKER: f.marker });
+  assert.ok(!fs.existsSync(f.marker), `kill switch ⇒ 构建脚本没有被调用 (stderr: ${r.stderr})`);
+
+  const log = anchorLogOf(f.root);
+  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "陈旧条件**仍被报出**");
+  assert.match(log, /bundle rebuild SKIPPED \(disabled by QUAY_ANCHOR_NO_BUNDLE_REBUILD=1\)/, "跳过原因如实留痕（⛔ 不静默）");
+
+  const reading = r.reading;
+  assert.equal(reading?.state, "stale-no-action", `无动作可用是**独立取值**，⛔ 不与 fresh 同形: ${JSON.stringify(reading)}`);
+  assert.notEqual(reading?.state, "fresh", "⛔ 补救被关掉**不**等于「不陈旧」");
+});
+
+test("陈旧 bundle ③ — 构建失败 ⇒ 独立取值 stale-rebuild-failed（⛔ 不与「无动作」/「新鲜」同形）", async (t) => {
+  const f = makeBundleStaleFixture("rebuild-failed");
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-rebuild-failed"),
+    { QUAY_FAKE_BUILD_MARKER: f.marker, QUAY_FAKE_BUILD_EXIT: "7" });
+  assert.ok(fs.existsSync(f.marker), `the rebuild WAS attempted (stderr: ${r.stderr})`);
+  const log = anchorLogOf(f.root);
+  assert.match(log, /bundle rebuild FAILED in \d+ms .*reason=build script exited 7/, "失败原因（退出码）如实落进日志");
+  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "失败时陈旧仍被报出");
+  const reading = r.reading;
+  assert.equal(reading?.state, "stale-rebuild-failed", `试过但失败是**独立取值**: ${JSON.stringify(reading)}`);
+});
+
+test("陈旧 bundle ④ — 反例对照：**不陈旧**（源树早于本内核）⇒ 不触发补救，state = fresh", async (t) => {
+  const f = makeBundleStaleFixture("fresh", { sourceNewerThanKernel: false });
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "fresh"),
+    { QUAY_FAKE_BUILD_MARKER: f.marker });
+  assert.ok(!fs.existsSync(f.marker), `源树更旧 ⇒ 构建脚本**没有**被调用 (stderr: ${r.stderr})`);
+  const log = anchorLogOf(f.root);
+  assert.doesNotMatch(log, /bundle rebuild/, "⛔ 没有任何重建行（用于区分「补救在工作」与「恒有输出」）");
+  assert.doesNotMatch(log, /STALE BUNDLE/, "⛔ 不陈旧就不该报陈旧");
+  const reading = r.reading;
+  assert.equal(reading?.state, "fresh", `不陈旧 ⇒ fresh: ${JSON.stringify(reading)}`);
+});
+
+test("陈旧 bundle ⑤ — 没有源树（装好的产物）⇒ fail-closed：解析不到构建脚本且不冒认「可重建」", (t) => {
+  // 装好的产物形态（npm-pack / marketplace cache / 第三方 vendored）：盘上**没有**同名源树。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bundlestale-nosrc-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "pkg", "plugin", "scripts");
+  fs.mkdirSync(path.join(scripts, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(scripts, "dist", "driver-anchor.js"), "// installed\n", "utf8");
+  fs.mkdirSync(path.join(root, "pkg", "packages", "quay", "src"), { recursive: true });
+  const init = spawnSync("git", ["init", "-q", root], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(init.status, 0, init.stderr);
+
+  withPluginRoot(path.join(root, "pkg", "plugin"), () => {
+    assert.equal(kernelSourceScriptsDir(), null, "没有源树 ⇒ null（fail-closed）");
+    assert.equal(resolveQuayKernelBuildScript(), null, "没有源树 ⇒ 不给构建脚本（⛔ 不把静态产物当真源树重建）");
+    const r = rebuildKernelBundle();
+    assert.equal(r.attempted, false, `attempted=false（⛔ 不是 attempted-but-failed）: ${JSON.stringify(r)}`);
+    assert.match(r.reason ?? "", /no plugin-dist build script|no source tree/, "失败原因可诊断");
+  });
 });
