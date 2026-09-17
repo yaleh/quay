@@ -22,9 +22,9 @@
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
 //   /live (AC-291), /board (AC-292), /system (AC-293), /manager (AC-294), /needs-human (AC-295),
-//   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299) and /adr
-//   (AC-300); the remaining 3 pages' page-chrome is AC-301~303, and each adds its own tokens as it
-//   lands.
+//   /journal (AC-296), /git-history (AC-297), /tests (AC-298), /sessions (AC-299), /adr (AC-300)
+//   and /goal (AC-301); the remaining 2 pages' page-chrome is AC-302~303, and each adds its own
+//   tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -296,6 +296,36 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   //     re-wording of one must not be assumed to move the other (same note as AC-295's row).
   ADRs: { en: "ADRs", zh: "架构决策" },
   adrs: { en: "adrs", zh: "架构决策" },
+  // AC-301 (/goal page): this page's own TWO tokens, and — like AC-300's `ADRs`/`adrs` pair, the
+  // family's other case-split — they differ ONLY IN CASE, so they are two INDEPENDENT lookups.
+  //   `Goals` — the token `serve-goal.ts` passes to `pageTitle` AND uses as the `<h1>`'s constant
+  //     prefix AND renders as the tab-nav label. Three call sites, ONE entry, because all three are
+  //     byte-equal here (the AC-294/AC-295/AC-298/AC-300 one-entry shape).
+  //     ⚠️ The `<h1>` is a DYNAMIC string — `<token> — <subtitle> (<n>)`. Only this constant prefix
+  //     goes through the dictionary; the tab subtitle and the row count are interpolated raw.
+  //     Registering a finished string such as `"Goals — 阶段目标 (24)"` would both go stale as goals
+  //     are added and be a lookup miss (i.e. an English `<h1>` under zh) — the exact defect AC-301
+  //     removes.
+  //   `goals` — the LOWERCASE token the MOBILE header carries, i.e. the AC-290 `"task list"` /
+  //     AC-297 `"git history"` / AC-298 `tests` / AC-299 `sessions` / AC-300 `adrs` shape (a page's
+  //     own chrome token that is not a `pageTitle` token). It renders into
+  //     `<span class="mobile-header-page">`, which sits BEFORE the first `<nav>` and is therefore
+  //     neither inside the criterion's nav region nor a nav label — AC-301's AC1b asserts it anyway,
+  //     deliberately stricter than AC-291's landed form, so that "this page's own chrome" switches
+  //     as a whole.
+  // ⚠️ CASE IS PART OF THE KEY. `pageNameFor` is an EXACT-token lookup, so `Goals` does NOT serve
+  //     `goals` and vice versa: dropping either entry leaves exactly one of the two sites English,
+  //     and which one is a question only the call sites answer. ⛔ Do not "merge the duplicate".
+  // Neither zh value may carry the ASCII literal "Goals"/"goals" in ANY case: AC-301's criterion
+  //     fails the page on that literal inside the nav region — where this page's CURRENT item label
+  //     comes from NAV_LABELS's `goal` row (「目标」, ROW 1) — and the same literal is what the en
+  //     baseline's `<title>` and `<h1>` carry, i.e. what the criterion's `title-unchanged` arm
+  //     compares the zh title against. 「目标」 satisfies "non-empty" without it. The two entries
+  //     landing on the same zh word (and on the same word as the nav row) is a coincidence of
+  //     vocabulary, ⛔ not a shared source — a later re-wording of one must not be assumed to move
+  //     the others (same note as AC-295's and AC-300's rows).
+  Goals: { en: "Goals", zh: "目标" },
+  goals: { en: "goals", zh: "目标" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
