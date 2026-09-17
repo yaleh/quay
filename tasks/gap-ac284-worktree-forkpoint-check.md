@@ -2,7 +2,7 @@
 id: gap-ac284-worktree-forkpoint-check
 title: dispatch-worktree-setup.sh 只校验分支名 task/*、不校验分叉点 ⇒ GitHub 默认分支改成 master 后
   worker worktree 会静默从 master 分叉（AC-284）
-status: ready
+status: done
 labels:
   - gap
 parent: null
