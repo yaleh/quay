@@ -24,7 +24,10 @@ import {
   detectDefaultBranch,
   ensureBranchModel,
   ensureDocBranch,
+  formatBaselineCheckoutReport,
   formatDocBranchReport,
+  landingBaselineEstablishedNow,
+  moveCheckoutOntoLandingBaseline,
   resolveCheckedOutBranch,
   resolveDocBranchRole,
   verifyBranchModel,
@@ -824,4 +827,206 @@ test("AC3: the default literal did not turn target-identity-literal-check RED", 
   assert.equal(parsed.status, "pass");
   const src = fs.readFileSync(checker, "utf8");
   assert.match(src, /LEGAL_IDENTITY_VALUES = new Set\(\["develop", "integration", "master", "HEAD", "tasks"\]\)/);
+});
+
+// ── the baseline→checkout handoff ────────────────────────────────────────────────────────────────
+// (gap-quay-init-doc-branch-noop-when-fresh-develop-not-checked-out)
+//
+// The scenario pinned here is the one MOST real projects meet quay in: `git init -b main`, so
+// `develop` does NOT exist and `ensureBranchModel` CREATES it. Creating a ref does not move the main
+// checkout, and the doc-branch judgment reads the CHECKOUT — so before this task the entry printed a
+// truthful `[NOOP] doc-branch … the invariant already holds` and the doc branch was never created,
+// leaving the user's edits on the one branch fan-in must fast-forward.
+//
+// FALSIFIABILITY: drop the `moveCheckoutOntoLandingBaseline` call site in `cli/init.ts` and every
+// `[SWITCHED] baseline-checkout` assertion below goes red (the AC1 negative-control arm reconstructs
+// the pre-fix call order and pins the old reading directly).
+
+/** Scenario B: a brand-new project whose DEFAULT branch is `main` — `develop` does not exist yet. */
+function freshMainRepo(tag) {
+  const dir = newRepo(tag);
+  fs.writeFileSync(path.join(dir, "a.txt"), "1\n");
+  commit(dir, "base");
+  assert.equal(git(dir, ["branch", "--list", "develop"]), "", "premise: develop does not exist");
+  return dir;
+}
+
+const HANDOFF_ARGS = ["init", "--branch-model-only", "--doc-branch-name", "author"];
+
+test("AC1: default branch `main` with no develop ⇒ develop is created, the checkout moves, `author` appears", () => {
+  const dir = freshMainRepo("handoff-ac1");
+  const mainTip = git(dir, ["rev-parse", "main"]);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main", "premise: the checkout starts on main");
+
+  const r = runQuayInit([...HANDOFF_ARGS, "--root", dir], dir);
+
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /\[CREATED\] landing-baseline -> develop/);
+  assert.match(r.stdout, /\[SWITCHED\] baseline-checkout/, "the freshly created baseline must be handed to the checkout");
+  assert.match(r.stdout, /\[CREATED\] doc-branch -> author/);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author", "the main checkout ends on the doc branch");
+  assert.equal(git(dir, ["rev-parse", "develop"]), mainTip, "develop sits at the pre-run main tip");
+  assert.equal(git(dir, ["rev-parse", "author"]), mainTip, "and so does author — no content was created or moved");
+});
+
+test("AC1 negative control: the SAME fixture through the PRE-handoff call order still reads as the no-op", () => {
+  // The exact sequence the CLI ran before this task — `ensureBranchModel` then `ensureDocBranch`,
+  // nothing in between — on the exact fixture AC1 uses. It must reproduce the defect, otherwise
+  // AC1 above would be measuring something other than the handoff.
+  const dir = freshMainRepo("handoff-ac1-nc");
+  const mainTip = git(dir, ["rev-parse", "main"]);
+
+  const result = runInit({ root: dir, force: false, dryRun: false, branchModelOnly: true });
+  assert.equal(landingBaselineEstablishedNow(result.branchModel), true, "premise: develop was CREATED by this run");
+  assert.equal(result.branchModel.entries.find((e) => e.role === "landing-baseline").action, "created");
+
+  const doc = ensureDocBranch(dir, { name: "author" }); // ← no handoff in between: the pre-fix order
+  assert.equal(doc.state, "independent", "the judgment reads the UNMOVED checkout and calls the invariant satisfied");
+  assert.equal(doc.action, "noop");
+  assert.equal(doc.ok, true, "and it is not an error — it is the silent no-op the task reports");
+  assert.equal(git(dir, ["branch", "--list", "author"]), "", "⛔ the doc branch is NOT created");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main", "⛔ and the checkout never moved");
+  assert.equal(git(dir, ["rev-parse", "develop"]), mainTip, "develop exists — it simply has no checkout on it");
+});
+
+test("AC2: default branch IS `develop` ⇒ unchanged (no handoff line, doc branch created exactly as before)", () => {
+  const dir = onDevelopRepo("handoff-ac2");
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+  const beforeHead = git(dir, ["rev-parse", "HEAD"]);
+
+  const r = runQuayInit([...HANDOFF_ARGS, "--root", dir], dir);
+
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /\[REUSED\] landing-baseline -> develop/);
+  assert.doesNotMatch(r.stdout, /baseline-checkout/, "a REUSED baseline is not a fact this run established — nothing to hand off");
+  assert.match(r.stdout, /\[CREATED\] doc-branch -> author/);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author");
+  assert.equal(git(dir, ["rev-parse", "author"]), beforeDevelop, "still created at the baseline tip");
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop);
+  assert.equal(beforeHead, beforeDevelop, "premise: the fixture started ON develop");
+});
+
+test("AC3: the entry is idempotent — a second run on the same repo changes nothing", () => {
+  const dir = freshMainRepo("handoff-ac3");
+  const first = runQuayInit([...HANDOFF_ARGS, "--root", dir], dir);
+  assert.equal(first.exitCode, 0, first.stderr);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author", "premise: run 1 landed on the doc branch");
+
+  const refs = refsOf(dir);
+  const head = git(dir, ["rev-parse", "HEAD"]);
+  const status = git(dir, ["status", "--porcelain"]);
+
+  // No state is cleaned between the runs — that is the point of the AC.
+  const second = runQuayInit([...HANDOFF_ARGS, "--root", dir], dir);
+
+  assert.equal(second.exitCode, 0, `⛔ the second run must not error: ${second.stderr}`);
+  assert.match(second.stdout, /\[REUSED\] landing-baseline -> develop/);
+  assert.doesNotMatch(second.stdout, /baseline-checkout/, "nothing was established this run ⇒ nothing to hand off");
+  assert.doesNotMatch(second.stdout, /\[CREATED\] doc-branch/, "⛔ no second creation");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author", "the checkout stays on the doc branch");
+  assert.equal(refsOf(dir), refs, "⛔ no branch created, renamed or re-pointed");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), head);
+  assert.equal(git(dir, ["status", "--porcelain"]), status, "⛔ and no file may change");
+});
+
+test("sibling (hard rule 5b): an ADOPTED baseline is handed off too — the same gap, the same fix", () => {
+  // `adopted` leaves exactly the state `created` does (baseline re-pointed at the tip of the branch
+  // the checkout is on) and produced the same measured symptom through the shipped entry: the
+  // doc-branch bootstrap reported `[NOOP]` and never created the branch.
+  const dir = thirdPartyShapedRepo();
+  const mainTip = git(dir, ["rev-parse", "main"]);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main", "premise: the checkout starts on main");
+
+  const r = runQuayInit(["init", "--branch-model-only", "--adopt-branch-model", "--doc-branch-name", "author", "--root", dir], dir);
+
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /\[ADOPTED\] landing-baseline -> develop/);
+  assert.match(r.stdout, /\[SWITCHED\] baseline-checkout/);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author");
+  assert.equal(git(dir, ["rev-parse", "author"]), mainTip);
+});
+
+test("handoff predicate: `created`/`adopted` are handed off; `reused`/`blocked`/`unreadable` are not", () => {
+  const report = (action) => ({
+    ok: action !== "blocked",
+    skipped: false,
+    defaultBranch: "main",
+    entries: [{ role: "landing-baseline", ref: "develop", action, sha: "0".repeat(40), backupRef: null, detail: "" }],
+    remedy: null,
+  });
+  assert.equal(landingBaselineEstablishedNow(report("created")), true);
+  assert.equal(landingBaselineEstablishedNow(report("adopted")), true);
+  // `reused` is the common case (scenario ①/②) and the one `--branch-model-only` must stay
+  // byte-identical on: the ref predates this run, so the checkout's position is the operator's own.
+  assert.equal(landingBaselineEstablishedNow(report("reused")), false);
+  assert.equal(landingBaselineEstablishedNow(report("blocked")), false);
+  assert.equal(landingBaselineEstablishedNow(report("unreadable")), false);
+  // The SKIPPED report carries no entries at all — not a handoff either (缺值 ≠ 为真).
+  assert.equal(landingBaselineEstablishedNow({ ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null }), false);
+});
+
+test("the handoff is METADATA-ONLY: a `develop` that is not the checked-out commit is left alone", () => {
+  const dir = freshMainRepo("handoff-guard");
+  fs.writeFileSync(path.join(dir, "b.txt"), "2\n");
+  commit(dir, "a second commit on main");
+  git(dir, ["branch", "develop", "main~1"]); // exists, but one commit BEHIND the checkout
+  const headBefore = git(dir, ["rev-parse", "HEAD"]);
+
+  const r = moveCheckoutOntoLandingBaseline(dir);
+
+  assert.equal(r.action, "not-evaluated", "switching here would change the working tree — not this step's job");
+  assert.equal(r.notEvaluated, true);
+  assert.equal(r.ok, true, "a withheld verdict is NOT a failure (hard rule 3b)");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), headBefore);
+});
+
+test("the handoff switches when `develop` IS the checked-out commit — and no-ops when already there", () => {
+  const dir = freshMainRepo("handoff-switch");
+  const tip = git(dir, ["rev-parse", "main"]);
+  git(dir, ["branch", "develop"]);
+
+  const r = moveCheckoutOntoLandingBaseline(dir);
+  assert.equal(r.action, "switched");
+  assert.equal(r.ok, true);
+  assert.equal(r.from, "main");
+  assert.equal(r.to, "develop");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "develop");
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), tip, "zero tree change — both point at the same commit");
+
+  const again = moveCheckoutOntoLandingBaseline(dir);
+  assert.equal(again.action, "already-on-baseline");
+  assert.equal(again.ok, true);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "develop");
+});
+
+test("the handoff withholds its verdict on a detached HEAD (never 'already there')", () => {
+  const dir = freshMainRepo("handoff-detached");
+  git(dir, ["branch", "develop"]);
+  git(dir, ["checkout", "-q", "--detach", "main"]);
+
+  const r = moveCheckoutOntoLandingBaseline(dir);
+
+  assert.equal(r.action, "not-evaluated");
+  assert.equal(r.notEvaluated, true);
+  assert.equal(r.from, null, "a detached HEAD has no branch position to report");
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "HEAD");
+});
+
+test("the shipped entry relays the SAME marker the report prints (a rename must not desync them)", () => {
+  // ⛔ The shell matches a literal, so the two spellings are one contract in two files. If this fails
+  // the failure falls through to the entry's "cannot judge the branch model" arm — exit 3 with a
+  // message naming the wrong cause, which is worse than no arm at all.
+  const failed = formatBaselineCheckoutReport({
+    action: "failed",
+    ok: false,
+    notEvaluated: false,
+    from: "main",
+    to: "develop",
+    detail: "boom",
+  });
+  assert.match(failed, /\[FAILED\] baseline-checkout/);
+  const sh = fs.readFileSync(SHIPPED_INIT, "utf8");
+  assert.match(sh, /\*"\[FAILED\] baseline-checkout"\*\)/, "quay-init.sh must relay this exact token");
+  assert.doesNotMatch(sh, /\*"\[NOOP\] baseline-checkout"\*\)/, "the success/no-op markers are not refusals");
 });

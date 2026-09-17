@@ -36,6 +36,7 @@ import {
   preferredAnchorKernel,
   readAnchorPid,
   readDesired,
+  rebuildKernelBundle,
   requestKindStop,
   resolveKernelSibling,
   sourceChangedSince,
@@ -44,8 +45,11 @@ import {
   statePaths,
   ts,
   writeDesired,
+  type AnchorBundleReading,
   type AnchorDesiredEntry,
   type DriverKind,
+  type KernelBundleRebuildResult,
+  type KernelBundleSyncState,
 } from "./driver-runtime.ts";
 
 /** 一个 kind 循环的运行记录。 */
@@ -239,6 +243,28 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // 「陈旧且换不动」这条读数只在其 kinds 集合变化时打一次（⛔ 每 500ms reconcile 刷屏）。
   let staleBundleLogged = "";
 
+  // ── 陈旧 bundle 的**动作面**（gap-ac214-sixth-crossing-stale-bundle-detected-but-no-remediation）──
+  //
+  // 在这条之前，「本内核比源树旧」只有**一条日志行**：检测在、读数诚实、**没有消费者** ⇒ 静默 2 天，
+  // 期间落地的修复（立案步）在源里、不在跑的那个产物里。本段给它两样东西：
+  //   ① **机械重建**（+ 整进程重启把它加载进来）—— 那正是日志行一直在喊、而没有人执行的那个动词；
+  //   ② 一个**结构化的独立取值**（`.quay/anchor.json` 的 `bundle` 字段，见 `KernelBundleSyncState`）
+  //      —— 让「陈旧且换不动」在机器可读面上⛔ 不再与「新鲜」同形（硬规则 3b）。
+  //
+  // ⚠️ 重建**有冷却**：重建成功后本进程内存里仍是旧代码，若不重启，`bundleStale` 会一直为真 ⇒
+  // 每趟 reconcile 重建一次 = 重建风暴。冷却 + 「成功过就不再重试」两道一起挡。
+  const rebuildCooldownMs = Math.max(0, Number(process.env.QUAY_ANCHOR_BUNDLE_REBUILD_COOLDOWN_MS ?? 600_000));
+  // 测试缝/运维：重建成功后**不**重启（默认重启——⛔ 只重建不重启等于把日志里的建议照抄一遍，
+  // 因为本进程的 ESM 缓存按 URL，重建的文件不会被已加载的进程看见）。
+  const rebuildNoRestart = process.env.QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART === "1";
+  let lastRebuildAtMs = 0;
+  let lastRebuildResult: KernelBundleRebuildResult | null = null;
+  let lastRebuildIso: string | null = null;
+  let bundleReading: AnchorBundleReading = {
+    state: "not-evaluated", kernel: null, builtAt: null, sourceDir: null, sourceMtime: null,
+    kinds: [], rebuild: null, at: null,
+  };
+
   // 启动集合：显式 kinds > 盘上期望态 > 全部六个（冷启动）。
   const initial = opts.kinds ?? readDesired(opts.root)?.kinds ?? [...KNOWN_KINDS];
   // 盘上没有期望态而我们给了初始集合 ⇒ 落盘，使后续 `start/stop --kind X` 有一个可读改的基底。
@@ -248,7 +274,14 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     try {
       fs.writeFileSync(
         paths.stateFile,
-        JSON.stringify({ pid: process.pid, startedAt: new Date(hostStartedAt).toISOString(), kinds: [...active.keys()], host: "anchor" }) + "\n",
+        JSON.stringify({
+          pid: process.pid,
+          startedAt: new Date(hostStartedAt).toISOString(),
+          kinds: [...active.keys()],
+          host: "anchor",
+          // 内核 bundle 同步读数（每趟 pass 重写；`KernelBundleSyncState` 六态各自独立，⛔ 不与 fresh 同形）。
+          bundle: bundleReading,
+        }) + "\n",
         "utf8",
       );
     } catch { /* 回读面写失败不致命（日志行仍在） */ }
@@ -359,7 +392,78 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           fs.statSync(cand.path).mtimeMs > kernelBuiltAt;
       } catch { canRefresh = false; /* 读不到 ⇒ 换不动（⛔ 不把「读不懂」当「可换」） */ }
     }
-    if (bundleStale.length > 0 && !canRefresh) {
+    // ── bundle 同步读数（`.quay/anchor.json.bundle`）：六态各自独立，⛔ 不与 fresh 同形 ──────────
+    //
+    // ⚠️ 这里就是「陈旧且换不动」的**动作面**：它不再只打一行日志——`!canRefresh` 时**机械重建**
+    // 本内核的 bundle（跑源树自己的构建脚本），成功后把 `canRefresh` 置真 ⇒ 复用下面那条既有的
+    // 整进程自刷新把**重建出来的**那一份加载进来（⛔ 只重建不重启 = 本进程仍跑旧代码，等于把日志里
+    // 的建议照抄一遍）。重建失败/无动作可做 ⇒ **如实留痕**并留在原地，取值分别是
+    // `stale-rebuild-failed` / `stale-no-action`（⛔ 都不与 `fresh` 同形）。
+    {
+      const srcDir = bundleStale.length > 0 ? sourceWatch(opts.root, bundleStale[0]).dir : null;
+      const srcMtime = bundleStale.length > 0 ? sourceWatch(opts.root, bundleStale[0]).mtimeMs : 0;
+      let state: KernelBundleSyncState;
+      // 本读数的**适用面** = `mirror` 形态（本内核是一份构建产物、而它的源树在盘上）。源树直跑的
+      // 内核（`watched`）与装好的产物（`unwatched`）都没有「bundle 比源树旧」这个量 ⇒ 独立取值
+      // `not-evaluated`，⛔ 不与 `fresh` 同形（硬规则 3b；那正是旧形态里它与「一切正常」同形的地方）。
+      const anyMirror = [...active.keys()].some((k) => sourceWatch(opts.root, k).state === "mirror");
+      if (kernelBuiltAt <= 0 || !anyMirror) {
+        state = "not-evaluated";
+      } else if (bundleStale.length === 0) {
+        state = "fresh";
+      } else if (canRefresh) {
+        state = "stale-swappable";
+      } else {
+        // 冷却之外只重试一次成功的重建（成功后本进程内存里仍是旧代码 ⇒ bundleStale 会一直为真；
+        // ⛔ 不重试 = 不重建风暴；重启由下面那条既有支路负责）。
+        const recent = lastRebuildResult && Date.now() - lastRebuildAtMs < rebuildCooldownMs;
+        const succeededBefore = lastRebuildResult?.ok === true;
+        if (recent || succeededBefore) {
+          state = lastRebuildResult?.ok ? "stale-rebuilt" : "stale-rebuild-failed";
+        } else {
+          lastRebuildAtMs = Date.now();
+          const r = rebuildKernelBundle();
+          lastRebuildResult = r;
+          lastRebuildIso = new Date(lastRebuildAtMs).toISOString();
+          if (r.attempted) {
+            log(
+              `${ts()} anchor: bundle rebuild ${r.ok ? "OK" : "FAILED"} in ${r.durationMs}ms ` +
+              `(kinds=[${bundleStale.join(",")}]; builtAt was ${new Date(kernelBuiltAt).toISOString()}; ` +
+              `cmd=${r.command ?? "-"}${r.ok ? "" : `; reason=${r.reason ?? "-"}`})`,
+            );
+            if (!r.ok && r.outputTail) log(`${ts()} anchor: bundle rebuild output tail:\n${r.outputTail}`);
+          } else {
+            log(
+              `${ts()} anchor: bundle rebuild SKIPPED (${r.reason ?? "no reason given"}) — ` +
+              `the stale condition is still true and is reported as such`,
+            );
+          }
+          // 三态可区分（硬规则 3b）：没试过（无动作可用 / 被 kill switch 关掉）与试过但失败
+          // ⛔ 不共用「没成功」这一个取值。
+          state = r.ok ? "stale-rebuilt" : r.attempted ? "stale-rebuild-failed" : "stale-no-action";
+          // ⛔ 重建成功后走既有的整进程自刷新：替换进程加载的**就是**刚重建出来的这一份
+          // （`preferredAnchorKernel()` 在本内核就是产物时返回本路径）。
+          // ⛔ 测试缝：`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 只验「重建发生了」，不 spawn 替换进程。
+          if (r.ok && !rebuildNoRestart) canRefresh = true;
+        }
+      }
+      bundleReading = {
+        state,
+        kernel: kernelPathForLog || null,
+        builtAt: kernelBuiltAt > 0 ? new Date(kernelBuiltAt).toISOString() : null,
+        sourceDir: srcDir,
+        sourceMtime: srcMtime > 0 ? new Date(srcMtime).toISOString() : null,
+        kinds: bundleStale,
+        rebuild: lastRebuildResult
+          ? { attempted: lastRebuildResult.attempted, ok: lastRebuildResult.ok, reason: lastRebuildResult.reason, command: lastRebuildResult.command, at: lastRebuildIso ?? new Date(lastRebuildAtMs).toISOString() }
+          : null,
+        at: new Date().toISOString(),
+      };
+    }
+    // 「陈旧」这条**检测**读数：只要陈旧就留痕，⛔ 与「消费者这一趟做成了没有」无关
+    // （硬规则 3b —— 补救 seam 被关掉时，陈旧条件必须**仍被报出**，不得静默降级成 fresh）。
+    // 只在 kinds 集合变化时打一次（⛔ 不刷屏）；动作结果另有一条 `bundle rebuild …` 行。
+    if (bundleStale.length > 0) {
       const key = bundleStale.join(",");
       if (staleBundleLogged !== key) {
         staleBundleLogged = key;
@@ -367,7 +471,8 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
         log(
           `${ts()} anchor: STALE BUNDLE — source tree is newer than this kernel's build ` +
           `(kinds=[${key}]; kernel=${kernelPathForLog} builtAt=${new Date(kernelBuiltAt).toISOString()}; ` +
-          `source=${srcDir} — no NEWER kernel resolved, staying up; rebuild the bundle to clear this)`,
+          `source=${srcDir} — no NEWER kernel resolved; the bundle-rebuild consumer below is acting on it ` +
+          `(state=${bundleReading.state}, see .quay/anchor.json bundle)`,
         );
       }
     }

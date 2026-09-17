@@ -4,7 +4,13 @@
 
 import { parseFlags } from "./shared.ts";
 import { runInit, printNextSteps } from "../init.ts";
-import { ensureDocBranch, formatDocBranchReport } from "../branch-model.ts";
+import {
+  ensureDocBranch,
+  formatBaselineCheckoutReport,
+  formatDocBranchReport,
+  landingBaselineEstablishedNow,
+  moveCheckoutOntoLandingBaseline,
+} from "../branch-model.ts";
 import type { CliCtx } from "./context.ts";
 
 // DIR-098: quay init — scaffold a new workspace (.quay/config.yml + tasks/ dir).
@@ -149,6 +155,36 @@ Description:
         process.exitCode = 1;
         return;
       }
+      // ── the baseline→checkout handoff (gap-quay-init-doc-branch-noop-when-fresh-develop-…) ───
+      // The gap this closes: `ensureBranchModel` CREATES `develop` when it is absent — the normal
+      // shape of a project whose default branch is `main`/`master`, i.e. most real projects meeting
+      // quay for the first time — and creating a ref does not move the main checkout. The doc-branch
+      // bootstrap below judges by ONE fact (which branch the main checkout is on), reads the UNMOVED
+      // state, lands on its `independent` arm and truthfully reports a NO-OP ⇒ the doc branch is
+      // never created and the user keeps working on the branch fan-in must fast-forward.
+      // ⛔ `ensureDocBranch`'s judgment is NOT taught about this: the moved checkout simply IS the
+      // input its already-working `default == develop` case has always received. The handoff runs
+      // only when the baseline was (re)established by THIS run AND points at the very commit the
+      // checkout is on, so it is a ref rename with zero tree effect (branch-model.ts owns both
+      // conditions). Placed AFTER the divergence refusal above: a refused project must not have its
+      // checkout moved. Not in `--dry-run` — a plan says what WOULD happen.
+      if (!dryRun && landingBaselineEstablishedNow(result.branchModel)) {
+        const checkout = moveCheckoutOntoLandingBaseline(targetRoot);
+        console.log(formatBaselineCheckoutReport(checkout));
+        if (!checkout.ok) {
+          // Fail-closed: continuing would fall straight back into the silent no-op this step exists
+          // to end (the doc-branch judgment would read the unmoved checkout). The detail line above
+          // names the cause for the shell entry, which relays it instead of mislabelling it.
+          console.error(
+            "quay init: could not move the main checkout onto the landing baseline it just " +
+              "established — refusing to continue, because the doc-branch bootstrap would then " +
+              "silently report a no-op.",
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
+
       // ── the doc-branch bootstrap (gap-quay-init-no-doc-branch-bootstrap-…) ──────────────────
       // Runs AFTER the landing baseline was judged (and after a divergence refusal above returned
       // early — never move the main checkout onto a doc branch for a project whose baseline is

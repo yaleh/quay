@@ -2870,6 +2870,23 @@ ensure_target_branch_model() {
       return 1
       ;;
     *"[BLOCKED] landing-baseline"*) ;;
+    *"[FAILED] baseline-checkout"*)
+      # The baseline→checkout handoff failed (gap-quay-init-doc-branch-noop-when-fresh-develop-…):
+      # `develop` was created/re-pointed at the checked-out commit, but the main checkout could not be
+      # moved onto it. Continuing is NOT safe: the doc-branch judgment reads the UNMOVED checkout, so
+      # it would report "the invariant already holds" and the doc-only work branch would be skipped
+      # silently — exactly the defect that handoff exists to end. Its own detail line is above; this
+      # branch names the consequence, and does NOT re-judge (branch-model.ts owns the verdict).
+      echo "" >&2
+      echo "ERROR: quay-init could not switch the main checkout onto the landing baseline 'develop'" >&2
+      echo "       it had just established — the doc-only work branch would then be silently skipped" >&2
+      echo "       and your edits would land on the branch fan-in fast-forwards." >&2
+      echo "       NOTHING WAS WRITTEN — .quay/config.yml is byte-for-byte unchanged." >&2
+      echo "       Move the checkout by hand and re-run:" >&2
+      echo "           git -C $WORKSPACE_ROOT checkout develop" >&2
+      echo "           bash $0 --root $WORKSPACE_ROOT <same flags as before>" >&2
+      return 1
+      ;;
     *"doc branch (name:"*)
       # The doc-branch step RAN and reported something other than a name collision (a failed
       # `git checkout`, say). Its own line carries the reason; this is NOT "cannot judge the branch

@@ -1,7 +1,7 @@
 ---
 id: AC-285
 title: GitHub 仓库默认分支实测为 master
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-023
 criterion: >-
@@ -31,6 +31,11 @@ statusLog:
     to: active
     actor: manager
     reason: GOAL-023 激活，同步激活
+  - at: 2026-09-17T06:29:18.232Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

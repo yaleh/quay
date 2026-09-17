@@ -410,7 +410,7 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
   );
 
   const roles: Array<{ role: string; name: string }> = [
-    { role: "landing-baseline", name: LANDING_BASELINE_ROLE },
+    { role: LANDING_BASELINE_ENTRY_ROLE, name: LANDING_BASELINE_ROLE },
   ];
 
   for (const { role, name } of roles) {
@@ -829,6 +829,185 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
         ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`
         : `could not switch to the existing branch '${name}': git checkout returned non-zero: ${r.err}`,
   };
+}
+
+/**
+ * One-line-per-state rendering for the operator (and the shell entry's `[BLOCKED] doc-branch`
+ * relay token). The `doc-branch` role token is what `quay-init.sh` matches on — it is a POSITION in
+ * the output, not a verdict recomputed downstream (the shell never re-judges; branch-model.ts owns
+ * the judgment — ADR-004).
+ */
+// ── the baseline→checkout handoff (gap-quay-init-doc-branch-noop-when-fresh-develop-not-checked-out)
+//
+// ============================ WHY THIS EXISTS ============================
+// `ensureBranchModel` ESTABLISHES `develop` by CREATING the ref (`git branch develop <default>`) when
+// it is absent — and that is the shape of a project meeting quay for the first time, because a
+// project whose default branch is already `develop` does not have this problem at all. Creating a ref
+// does NOT move the main checkout. The doc-branch bootstrap that runs next (`ensureDocBranch`, driven
+// from `cli/init.ts`) judges the world by exactly ONE fact: which branch the main checkout is on. It
+// therefore reads the UNMOVED state, lands on its `independent` arm ("the main checkout is not on the
+// landing baseline ⇒ the invariant already holds") and truthfully reports a NO-OP.
+//
+// Measured 2026-09-17 through the shipped entry on a fresh `git init -b main` repository:
+//   [CREATED] landing-baseline -> develop — created 'develop' at main (79f24d7f)
+//   [NOOP]    doc-branch       -> author  — the main checkout is on 'main', which is not the landing
+//                                           baseline 'develop' — the doc-branch invariant already holds
+// ⇒ the doc branch is never created and the user's main checkout keeps sitting on the branch quay's
+// own landing path treats as the baseline: every subsequent human commit lands on `develop`, which is
+// the one ref the fan-in path must fast-forward. Both steps are individually correct; the gap is
+// BETWEEN them — "`develop` came into being DURING THIS RUN" is a fact the doc-branch judgment cannot
+// see, because it reads the checkout, not the history.
+//
+// ============================ WHERE THE DECISION LIVES ============================
+// ⛔ NOT inside `ensureDocBranch`. That four-state judgment is left byte-identical: it answers "is the
+// main checkout on the landing baseline?", and moving HEAD is not its job. The handoff below is a
+// SEPARATE step the CALLER runs BETWEEN the two, which is what makes the fresh-`main` scenario
+// degenerate into the already-working `default == develop` scenario instead of teaching the judgment
+// to guess how `develop` came to be.
+//
+// ⛔ The switch is PURE METADATA and refuses to be anything else: it runs only while the landing
+// baseline points at the very commit the main checkout is already on, so no file can change. A
+// `develop` that does NOT resolve to the checked-out commit is reported NOT-EVALUATED and left alone
+// — moving a user's working tree is a different operation with different authorization, and it is not
+// this one.
+
+/** The report-entry role this handoff keys on — the SAME token `ensureBranchModel` emits and
+ *  `plugin/scripts/quay-init.sh` relays as a POSITION in the report, not a second judgment. */
+export const LANDING_BASELINE_ENTRY_ROLE = "landing-baseline";
+
+/**
+ * True iff the landing baseline was (RE)ESTABLISHED by the run that produced `report`: `created`
+ * (the ref was absent) or `adopted` (a divergent ref was preserved and re-pointed).
+ *
+ * Both leave the baseline sitting at the tip of the branch the main checkout is on, which is the fact
+ * `ensureDocBranch` structurally cannot see — hence this predicate exists to hand that fact to the
+ * caller. `reused` is deliberately EXCLUDED: the ref predates this run, so where the main checkout
+ * sits relative to it is the operator's own state (and scenario ①/② of the doc-branch judgment — the
+ * common case, and the one `--branch-model-only` must stay byte-identical on — is exactly a `reused`
+ * baseline). `blocked` / `unreadable` never established anything to hand off.
+ */
+export function landingBaselineEstablishedNow(report: BranchModelReport): boolean {
+  return report.entries.some(
+    (e) => e.role === LANDING_BASELINE_ENTRY_ROLE && (e.action === "created" || e.action === "adopted"),
+  );
+}
+
+/** What the handoff did (or refused to do). A CLASSIFICATION, never a boolean (hard rule 3). */
+export type BaselineCheckoutAction = "switched" | "already-on-baseline" | "not-evaluated" | "failed";
+
+export interface BaselineCheckoutReport {
+  action: BaselineCheckoutAction;
+  /** False ONLY for a failed mutation — `not-evaluated` is a WITHHELD verdict, not a failure. */
+  ok: boolean;
+  /** True iff `action === "not-evaluated"` — distinct from `ok === true` (hard rule 3b). */
+  notEvaluated: boolean;
+  /** The branch the main checkout was on (null when HEAD is detached/unborn). */
+  from: string | null;
+  /** Always `LANDING_BASELINE_ROLE` — the ref the checkout was to be moved onto. */
+  to: string;
+  detail: string;
+}
+
+/**
+ * Move the MAIN CHECKOUT onto the landing baseline, but ONLY when that baseline already points at the
+ * commit the checkout is on — i.e. when the move is provably a ref rename with zero tree effect.
+ *
+ * Call this AFTER `ensureBranchModel` reported the baseline as freshly established and BEFORE
+ * `ensureDocBranch` judges the checkout; see this section's header for the gap it closes. It is
+ * deliberately NOT folded into either of those two functions: `ensureBranchModel` is also run by the
+ * full `quay init` (which has no doc-branch step, so it must not move the user's HEAD), and
+ * `ensureDocBranch`'s judgment must stay blind to how `develop` came to be.
+ */
+export function moveCheckoutOntoLandingBaseline(root: string): BaselineCheckoutReport {
+  const to = LANDING_BASELINE_ROLE;
+  const notEvaluated = (detail: string): BaselineCheckoutReport => ({
+    action: "not-evaluated",
+    ok: true,
+    notEvaluated: true,
+    from: null,
+    to,
+    detail,
+  });
+
+  const insideRepo = git(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!insideRepo.ok || insideRepo.out.trim() !== "true") {
+    return notEvaluated(`${root} is not inside a git work tree — there is no checkout to move`);
+  }
+
+  const from = resolveCheckedOutBranch(root);
+  if (from === null) {
+    return notEvaluated(
+      "HEAD is detached (or the repository is unborn): no branch is checked out, so there is no " +
+        "main-checkout position to move onto the landing baseline — ⛔ NOT treated as 'already there'.",
+    );
+  }
+  if (from === to) {
+    return {
+      action: "already-on-baseline",
+      ok: true,
+      notEvaluated: false,
+      from,
+      to,
+      detail: `the main checkout is already on '${to}' — nothing to switch`,
+    };
+  }
+
+  const headSha = resolveSha(root, "HEAD");
+  const baselineSha = resolveSha(root, to);
+  if (headSha === null || baselineSha === null) {
+    return notEvaluated(
+      `the checked-out commit or '${to}' does not resolve — the switch cannot be shown to be ` +
+        `metadata-only, so it is not attempted (the main checkout stays on '${from}')`,
+    );
+  }
+  if (headSha !== baselineSha) {
+    return notEvaluated(
+      `'${to}' (${baselineSha.slice(0, 8)}) does not point at the checked-out commit ` +
+        `(${headSha.slice(0, 8)}) — switching would move the main checkout onto a DIFFERENT tree, ` +
+        `which is not this step's job (the main checkout stays on '${from}')`,
+    );
+  }
+
+  const r = git(root, ["checkout", to]);
+  if (r.ok !== true) {
+    return {
+      action: "failed",
+      ok: false,
+      notEvaluated: false,
+      from,
+      to,
+      detail: `could not switch the main checkout from '${from}' to '${to}': git checkout returned non-zero: ${r.err}`,
+    };
+  }
+  return {
+    action: "switched",
+    ok: true,
+    notEvaluated: false,
+    from,
+    to,
+    detail:
+      `switched the main checkout from '${from}' to the landing baseline '${to}' — both point at ` +
+      `${headSha.slice(0, 8)}, so the working tree is unchanged; the doc-branch judgment that runs ` +
+      `next now sees the position it needs to establish the doc branch`,
+  };
+}
+
+/**
+ * One-line rendering for the operator (and the shell entry's failure relay token). The role token is
+ * deliberately `baseline-checkout`, NOT `landing-baseline`: `verify-deliver-coldstart.sh`'s
+ * `ac239_baseline_state` classifies the project by `grep -m1 'landing-baseline'` over the init
+ * report, and a second line carrying that substring would make the classifier depend on line order
+ * for no gain.
+ */
+export function formatBaselineCheckoutReport(report: BaselineCheckoutReport): string {
+  const mark = report.notEvaluated
+    ? "NOT-EVALUATED"
+    : report.action === "failed"
+      ? "FAILED"
+      : report.action === "switched"
+        ? "SWITCHED"
+        : "NOOP";
+  return `landing-baseline checkout (from: ${report.from ?? "(detached HEAD)"}, to: ${report.to}):\n  [${mark}] baseline-checkout — ${report.detail}`;
 }
 
 /**
