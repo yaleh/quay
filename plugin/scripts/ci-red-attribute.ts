@@ -66,6 +66,19 @@ export interface JobReading {
    * （硬规则 6），照 `durationSec` / `timeoutMinutes` 的先例。
    */
   prereqProvision?: Record<string, string>;
+  /**
+   * 该 job 日志里**套件自身调度器**的墙钟（毫秒）—— AC-281 判据读的字段，判据读 `jobs[]` 里
+   * `name == "test"` 那条：`__OVERHEAD__ scheduler_ms=<n>`（`suite-scheduler.ts` 在队列排空那一刻
+   * 打一次，见 ci-runs-collect.ts 的 `deriveSchedulerMs`）。
+   *
+   * 为什么量的是它而不是 `durationSec`：`durationSec` 是 GitHub 给的 job 总墙钟，含 checkout /
+   * npm install / coverage self-check / runner 收尾等**固定开销**（实测 ≥27s），2026-09-17 人裁定
+   * 改为只量套件自身的调度器时长。
+   * ⛔ **只在跑测试的那个 job 的读数里出现**（marker 只在那份日志里）；**派生不出（没拉日志 / 日志里
+   * 没有这一行）就不写这个键** —— 缺 ≠ `0`（硬规则 6），照 `durationSec` / `timeoutMinutes` /
+   * `prereqProvision` 的先例。一个恒为 0 的字段会让 AC-281 的判据变成恒真的回声（硬规则 4）。
+   */
+  schedulerMs?: number;
   steps?: JobStepReading[];
 }
 

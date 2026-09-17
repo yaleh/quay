@@ -7,6 +7,11 @@ import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
   renderSiteNav, renderMobileChrome, pageTitle,
+  // AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): the /tasks LIST page consumes
+  // the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionaries (`pageNameFor`) through this
+  // one import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie
+  // (a second parse is a second decision table) and never re-derives a label.
+  htmlLangTag, pageNameFor,
 } from "./serve-render.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
@@ -475,12 +480,23 @@ export async function handleTaskList(
     ? html`<p class="meta" style="color:var(--color-accent)">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;${totalPages > 1 ? ` · Page ${safePage} of ${totalPages}` : ""}</p>`
     : "";
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  // AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): this page's own chrome is wired
+  // to the language mechanism — the four sites below are the LIST page's ENTIRE zh surface.
+  // `cfg.lang` is the per-request copy `handleAllRoutes` resolved once; this page must never
+  // re-read `?lang=` or the cookie (a second parse is a second decision table, and it would also
+  // read a different request's inputs than the one Vary/Cookie was declared for).
+  //
+  // ⛔ The DETAIL page below (`/task/<id>`) is deliberately NOT wired: it is not one of the 15 nav
+  // routes and is out of this task's scope (its `<title>` is the bare entity id by existing
+  // contract). Its page-header language attribute stays hard-coded to the default on purpose —
+  // AC5③'s per-file count is a measure of EXACTLY that, so this note deliberately does not spell
+  // the attribute out (a comment mentioning a literal is not a hit — 硬规则 2).
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity)}</title></head>
-    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main id="main">
+    ${htmlLangTag(cfg.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity, cfg.lang)}</title></head>
+    <body>${renderMobileChrome("tasks", pageNameFor("task list", cfg.lang), cfg.lang)}${renderSiteNav("tasks", cfg.lang)}<main id="main">
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
-      <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+      <h1>Quay — ${pageNameFor("task list", cfg.lang)} (${escapeHtml(manifest.id)} provider)</h1>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta list-nav">Prefix: ${prefixNav}</p>` : ""}
@@ -621,6 +637,116 @@ export function taskRunsBlock(
     </table>`;
 }
 
+// ── gap-webui-task-detail-flat-body-needs-structure ────────────────────────────────────────────
+// The /task/<id> page funnelled the WHOLE body through ONE renderMarkdown() call, so a real task
+// body — several thousand chars of Proposal + verdict JSON blocks + a dozen ⚠️/⛔ paragraphs —
+// became a single un-navigable wall: no table of contents, nothing foldable, scroll-only scanning.
+// The Sessions detail page already solved the same shape with native zero-JS
+// <details><summary> (serve-sessions.ts); this applies that pattern to the task body, split on the
+// body's OWN top-level `## ` headings.
+//
+// Short bodies are deliberately left FLAT: wrapping a two-line body in fold UI + a one-entry nav
+// makes the page worse to read, not better (AC2). The `class="body"` wrapper is emitted VERBATIM on
+// BOTH paths — other suites assert that exact string and the `.body` CSS rules hang off it; what
+// changes is what goes INSIDE it.
+
+/** One top-level (`## `) section of a task body. `heading` is the text after the marker — `null`
+ *  for the preamble (content before the first `## `), which is never foldable. `md` is the
+ *  section's content with its own `## ` line REMOVED: the <summary> carries the heading, so
+ *  re-rendering it inside the fold would show the title twice. */
+export interface BodySection {
+  heading: string | null;
+  md: string;
+}
+
+/** Split a body on its top-level `## ` headings. Fence-aware — a `## ` line inside a ``` block is
+ *  content, not a boundary (the verdict-JSON blocks in real task bodies contain `##`-looking
+ *  text). `# ` / `### ` are NOT boundaries: the task schema's section level is exactly `## `.
+ *  A whitespace-only preamble is dropped rather than emitted as an empty section. */
+export function splitBodySections(body: string | undefined | null): BodySection[] {
+  const sections: BodySection[] = [];
+  let heading: string | null = null;
+  let buf: string[] = [];
+  let inFence = false;
+  const flush = (): void => {
+    const md = buf.join("\n");
+    if (heading !== null || md.trim()) sections.push({ heading, md });
+    buf = [];
+  };
+  for (const line of String(body ?? "").split(/\r?\n/)) {
+    // Same fence toggle as renderMarkdown itself (``` opens AND closes) so the split can never
+    // disagree with the renderer about what is code.
+    if (/^```/.test(line)) inFence = !inFence;
+    if (!inFence) {
+      const hm = /^##\s+(.*)$/.exec(line);
+      if (hm) {
+        flush();
+        heading = hm[1].trim();
+        continue;
+      }
+    }
+    buf.push(line);
+  }
+  flush();
+  return sections;
+}
+
+/** Below EITHER bound the page renders flat (the legacy single-pass path). Both bounds are needed:
+ *  section count alone would fold a 3-line body that happens to have 3 headings, and length alone
+ *  would fold a single 2000-char paragraph into a one-entry "table of contents". */
+export const BODY_STRUCTURE_MIN_SECTIONS = 3;
+export const BODY_STRUCTURE_MIN_CHARS = 1200;
+/** Inside an already-structured body, a section longer than this folds by default; shorter ones
+ *  stay open — the AC2 principle ("short content must not be forced into fold UI") applied
+ *  per-section, so a long Finding folds while a 2-line Touches list stays readable. */
+export const BODY_SECTION_FOLD_CHARS = 800;
+
+/** The pure structure/no-structure predicate — exported so the test can drive BOTH directions
+ *  (a real long body structures, a short one does not) without going through the HTTP route. */
+export function shouldStructureBody(
+  body: string | undefined | null,
+  sections: BodySection[],
+): boolean {
+  return sections.length >= BODY_STRUCTURE_MIN_SECTIONS
+    && String(body ?? "").trim().length >= BODY_STRUCTURE_MIN_CHARS;
+}
+
+/** Render the task body. Flat path = the historical `<div class="body">${renderMarkdown(body)}</div>`.
+ *  Structured path = a jump nav (one anchor per `## ` section) + one native `<details>` per section
+ *  whose `<summary>` IS the section title, so every section title is visible without scrolling past
+ *  the sections themselves. Anchor ids are index-based (`body-sec-<i>`) — heading text is
+ *  arbitrary markdown and may repeat, so it is not a usable id source. Zero JS, like serve-sessions. */
+export function renderTaskBody(body: string | undefined | null): string {
+  const sections = splitBodySections(body);
+  if (!shouldStructureBody(body, sections)) {
+    return `<div class="body">${renderMarkdown(body)}</div>`;
+  }
+  const toc: string[] = [];
+  const blocks: string[] = [];
+  sections.forEach((s, i) => {
+    const id = `body-sec-${i}`;
+    const md = renderMarkdown(s.md);
+    if (s.heading === null) {
+      blocks.push(`<div class="body-preamble">${md}</div>`);
+      return;
+    }
+    const open = s.md.trim().length <= BODY_SECTION_FOLD_CHARS;
+    toc.push(`<a href="#${id}">${escapeHtml(s.heading)}</a>`);
+    blocks.push(
+      `<details class="body-section" id="${id}"${open ? " open" : ""}>`
+      + `<summary style="cursor:pointer;font-size:0.95rem;font-weight:600;color:var(--color-neutral-800);padding:0.2rem 0">${escapeHtml(s.heading)}</summary>`
+      + `<div class="body-section-content">${md}</div>`
+      + `</details>`,
+    );
+  });
+  return `<div class="body">`
+    + `<nav class="body-toc" aria-label="Task body sections" style="margin:0.75rem 0;padding:0.5rem 0.75rem;background:var(--color-neutral-100);border-left:3px solid var(--color-neutral-500);font-size:0.85rem">`
+    + `<span style="color:var(--color-neutral-700)">Sections: </span>${toc.join(" · ")}`
+    + `</nav>`
+    + blocks.join("\n")
+    + `</div>`;
+}
+
 export async function handleTaskDetail(
   req: IncomingMessage,
   res: ServerResponse,
@@ -691,6 +817,6 @@ export async function handleTaskDetail(
       ${childrenMeta}
       ${taskRunsBlock(cfg.workspaceRoot, taskId)}
       <h2 class="sr-only">Details</h2>
-      <div class="body">${renderMarkdown(t.body)}</div>
+      ${renderTaskBody(t.body)}
     </main></body></html>`);
 }

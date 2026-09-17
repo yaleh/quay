@@ -29,6 +29,14 @@
 //      **缺 ≠ absent**：没拉日志 ⇒ 不写键；拉了但一条 marker 都没有 ⇒ 三键全 `absent`（独立取值）。
 //      另有一条**闸门**测试：testFiles 已知的 run 仍会为 prereqProvision 拉日志（旧闸门只认
 //      testFiles ⇒ 这类 run 的 prereqProvision 结构性不可派生，判据恒停 not-recorded）。
+//   ⑧ seaVerify（AC-267 载体臂）—— 见下方 ⑧ 段的标题块。
+//   ⑨ prereqProvision（AC-282 载体臂）—— 见下方 ⑨ 段的标题块。
+//   ⑩ schedulerMs（AC-281 载体臂，tasks/gap-ac281-scheduler-ms-carrier-field）：**套件自身调度器**的
+//      墙钟（`__OVERHEAD__ scheduler_ms=<n>`，`suite-scheduler.ts` 在队列排空那一刻打一次）。AC-281
+//      原量的是 job 总墙钟（含 checkout / npm install / runner 收尾等 ≥27s 不可约开销 ⇒ 数学不可
+//      达成），2026-09-17 人裁定改量这一个。⛔ 缺 ≠ 0：没拉日志 / 日志没有该行 ⇒ **不写这个键**。
+//      另有一条**闸门**测试：testFiles 与 prereqProvision 都已知的 run 仍会为 schedulerMs 拉日志
+//      （漏掉第三个闸门 ⇒ 这类 run 的 schedulerMs 结构性不可派生，AC-281 恒停 not-recorded）。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -41,8 +49,10 @@ import {
   collect,
   collectForRound,
   derivePrereqProvision,
+  deriveSchedulerMs,
   deriveTestFilesFromLog,
   knownPrereqRunsFromCarrier,
+  knownSchedulerRunsFromCarrier,
   knownTestFilesFromCarrier,
   resolveGhBin,
   writeCarrier,
@@ -258,12 +268,16 @@ test("collect — maxLogRuns 是上界，超出【留痕】而不是静默少拉
   );
 });
 
-test("collect — 增量回填的成本上界：两个派生都已知时才不拉日志（闸门由 testFiles【与】prereqProvision 共同决定）", () => {
-  // ⚠️ 2026-09-17 本条断言的**契约变了**（tasks/gap-ac282-runner-prereqs-already-present §三.1）：
-  // 原来只喂 knownTestFiles，闸门是 `!alreadyKnown && …` —— 一条 testFiles 已派生过的 run **永远
-  // 不再读日志**，于是它的 prereqProvision 结构性不可派生（AC-282 恒停 not-recorded 的成因之一）。
-  // 现在闸门是「testFiles 未知（且未负缓存）**或** prereqProvision 未派生」。成本上界本身不变，只是
-  // 它现在按**两个**派生量记账：两者都已知 ⇒ 零次下载。
+test("collect — 增量回填的成本上界：后派生量【全部】已知时才不拉日志（闸门由 testFiles 与另两个共同决定）", () => {
+  // ⚠️ 本条断言的**契约变过两次**，两次都是「新增一个后派生量、忘了给它开闸门」这同一个形状：
+  // ① tasks/gap-ac282-runner-prereqs-already-present §三.1 —— 原来只喂 knownTestFiles，闸门是
+  //    `!alreadyKnown && …`：一条 testFiles 已派生过的 run **永远不再读日志** ⇒ 它的 prereqProvision
+  //    结构性不可派生（AC-282 恒停 not-recorded 的成因之一）。
+  // ② tasks/gap-ac281-scheduler-ms-carrier-field —— 同一形状第三次：只按前两者放行，会让一条
+  //    testFiles+prereqProvision 都已派生过的 run 永远不再读日志 ⇒ schedulerMs 结构性不可派生
+  //    （AC-281 恒停 scheduler-ms-not-recorded）。
+  // 闸门现在是「testFiles 未知（且未负缓存）**或** 另任一后派生量未派生」。成本上界本身不变，
+  // 只是它按**每一个**后派生量记账：全部已知 ⇒ 零次下载（同一条 job 日志承载全部三个量）。
   const calls = [];
   const run = (args) => {
     calls.push(args.join(" "));
@@ -276,15 +290,20 @@ test("collect — 增量回填的成本上界：两个派生都已知时才不�
     runs: [ghRun()],
     jobsByRun: { "1001": [ghJob()] },
   };
-  // testFiles 已知、prereqProvision 未知 ⇒ 仍要读一次日志（读的是同一条 job 日志，两个量共用）。
+  // testFiles 已知、后两个未派生 ⇒ 仍要读一次日志（读的是同一条 job 日志，多个量共用）。
   const partial = collect({ ...base, knownTestFiles: { "1001": 631 } });
-  assert.equal(calls.length, 1, "testFiles 已知但 prereqProvision 未派生 ⇒ 这一次日志省不掉");
+  assert.equal(calls.length, 1, "testFiles 已知但后两个派生未派生 ⇒ 这一次日志省不掉");
   assert.equal(partial.records[0].testFiles, 631);
-  // 两个派生都已知 ⇒ 零次下载（这就是原来的成本上界，逐字保留）。
+  // 三个派生都已知 ⇒ 零次下载（这就是原来的成本上界，逐字保留）。
   const callsBefore = calls.length;
-  const both = collect({ ...base, knownTestFiles: { "1001": 631 }, knownPrereqRuns: new Set(["1001"]) });
-  assert.equal(calls.length, callsBefore, "两个派生都已知 ⇒ 不重复拉日志");
-  assert.equal(both.records[0].testFiles, 631);
+  const all = collect({
+    ...base,
+    knownTestFiles: { "1001": 631 },
+    knownPrereqRuns: new Set(["1001"]),
+    knownSchedulerRuns: new Set(["1001"]),
+  });
+  assert.equal(calls.length, callsBefore, "后派生量全部已知 ⇒ 不重复拉日志");
+  assert.equal(all.records[0].testFiles, 631);
 });
 
 // ── ⑤ 就地补全（去重键与后派生字段的结构性缺口）──────────────────────────────────────────────
@@ -698,10 +717,12 @@ test("collect — prereqProvision 已派生的 run ⇒ 不重复拉日志（成�
     jobsByRun: { 1001: [ghJob(55, "test", "success")] },
     knownTestFiles: { 1001: 631 },
   };
-  collect({ ...base, knownPrereqRuns: new Set(["1001"]) });
-  assert.equal(calls.length, 0, "两个派生都已知道 ⇒ 不拉日志");
+  // ⚠️ 要传**两个** known* 闸门才省得掉这次下载（schedulerMs 也是后派生量，见 ⑩ 段与上面那条
+  // 成本上界测试）。只传 knownPrereqRuns 现在是**故意**还会拉一次的。
+  collect({ ...base, knownPrereqRuns: new Set(["1001"]), knownSchedulerRuns: new Set(["1001"]) });
+  assert.equal(calls.length, 0, "后派生量全部已知 ⇒ 不拉日志");
   // 对照（硬规则 4）：把 knownPrereqRuns 去掉，同一个夹具立刻拉一次 ⇒ 这个量能取值相反。
-  collect(base);
+  collect({ ...base, knownSchedulerRuns: new Set(["1001"]) });
   assert.equal(calls.length, 1);
 });
 
@@ -787,4 +808,266 @@ test("writeCarrier — 就地补全 prereqProvision：只补缺失的那个键�
   assert.deepEqual(testJob.steps, [{ name: "Run tests", conclusion: "success", number: 9 }]);
   assert.equal(got.jobs.find((j) => j.name === "version-consistency").durationSec, 12);
   assert.equal("prereqProvision" in got.jobs.find((j) => j.name === "version-consistency"), false);
+});
+
+// ── ⑩ schedulerMs：AC-281 载体臂（tasks/gap-ac281-scheduler-ms-carrier-field）────────────────────
+//
+// AC-281 原量的是 CI `test` job 的**总墙钟**（`durationSec`），而其中不可约的固定开销（checkout /
+// npm install / coverage self-check / runner 收尾）实测 ≥27s ⇒ 那条判据在当前 job 结构下**数学不可
+// 达成**。2026-09-17 人裁定改为只量**套件自身调度器**的墙钟 —— 这个读数只活在 job 自己的日志里
+// （`suite-scheduler.ts` 在队列排空那一刻打一次 `__OVERHEAD__ scheduler_ms=<n>`），此前没有任何
+// 载体采集它 ⇒ 判据永久停在 `CAUSE=scheduler-ms-not-recorded`（NOT-EVALUATED，硬规则 4 推论三：
+// 生产上确实打了，但没落进载体 ⇒ 与「没实现」同形）。
+//
+// ⛔ 断言的全是**关系**：换一行 marker ⇒ 读数跟着变；日志在但没有该行 ⇒ 键**不存在**（⛔ 不是 0）。
+// 单点断言（「等于 53507」）在一个恒返回常量的实现上同样通过（硬规则 4：结构上不可能取假的量不是测量）。
+
+/** 一段**真实**的 CI job 日志片段（run 35227553148 / job 105222883455，2026-09-17 13:32Z 的 develop
+ *  全量套件，`gh api .../jobs/105222883455/logs` 的原始字节）。⛔ **不是编造的样本**。
+ *
+ *  两件必须逐字保留的东西：
+ *  ① GitHub 给**每一行**加的 `<ISO 时间戳> ` 前缀 —— 那正是本派生的中间层（硬规则 4c）。锚 `^` 的
+ *     正则在它上面命中恒为 0，而「检查恒不命中」与「套件没打印」同形。
+ *  ② 同一片段里的 `main_phase_ms` / `lock_overhead_ms` 也是 `__OVERHEAD__` 家族 ⇒ 谓词必须具体到
+ *     `scheduler_ms`，只认前缀会读到别人的读数。 */
+const LOG_WITH_SCHEDULER =
+  "2026-09-17T13:32:21.3476587Z __GROUP__ concurrency=128 files=728 sum_ms=1572369 floor_ms=43058 capped=0\n" +
+  "2026-09-17T13:32:21.3476871Z __OVERHEAD__ main_phase_ms=51092\n" +
+  "2026-09-17T13:32:21.3477076Z __OVERHEAD__ scheduler_ms=53507\n" +
+  "2026-09-17T13:32:21.3676976Z __OVERHEAD__ lock_overhead_ms=8\n";
+
+test("schedulerMs — 真实日志片段（run 35227553148）派生出 53507，是 number 不是 string", () => {
+  const got = deriveSchedulerMs(LOG_WITH_SCHEDULER);
+  assert.equal(got, 53507);
+  assert.equal(typeof got, "number", "判据要拿它做 `/ 1000.0` 的算术 —— 字符串会静默变成别的意思");
+});
+
+test("schedulerMs — 中间层：日志每一行都带 GitHub 的时间戳前缀 ⇒ 正则必须【不】锚 `^`", () => {
+  // ① 上面那段真实片段里，一个 `^`-锚定的同形谓词命中数必须是 0 —— 这一条钉的是**夹具的保真度**：
+  //    哪天有人把时间戳前缀从夹具里抹掉，本测试就红，而不是让那个陷阱悄悄失去覆盖。
+  assert.equal(
+    [...LOG_WITH_SCHEDULER.matchAll(/^__OVERHEAD__[ \t]+scheduler_ms=(\d+)/gm)].length,
+    0,
+    "夹具丢了 GitHub 的行前缀 ⇒ 4c 陷阱不再被覆盖（夹具不再等于生产形态）",
+  );
+  // ② 被测谓词（不锚）在同一份夹具上必须命中 ⇒ 两者可区分，上面那条不是「谓词永远不命中」的恒真断言。
+  assert.equal(deriveSchedulerMs(LOG_WITH_SCHEDULER), 53507);
+  // ③ 顺带钉住②里那个前缀**真的**是前缀而不是装饰：去掉它之后锚定谓词就能命中了。
+  const stripped = LOG_WITH_SCHEDULER.split("\n").map((l) => l.replace(/^[0-9T:.\-]+Z /, "")).join("\n");
+  assert.equal([...stripped.matchAll(/^__OVERHEAD__[ \t]+scheduler_ms=(\d+)/gm)].length, 1);
+});
+
+test("schedulerMs — 谓词能取假：换一行 marker ⇒ 读数跟着变（⛔ 不是一个常量）", () => {
+  assert.equal(deriveSchedulerMs(LOG_WITH_SCHEDULER.replace("scheduler_ms=53507", "scheduler_ms=1")), 1);
+  // 兄弟 marker 不被误读（`main_phase_ms=51092` 与 `lock_overhead_ms=8` 同在这份夹具里）。
+  assert.equal(deriveSchedulerMs("__OVERHEAD__ main_phase_ms=51092\n"), null);
+  assert.equal(deriveSchedulerMs("__OVERHEAD__ lock_overhead_ms=8\n"), null);
+});
+
+test("schedulerMs — 负控制（零命中方向）：日志在、没有该行 ⇒ null，⛔ 不是 0（硬规则 6）", () => {
+  assert.equal(deriveSchedulerMs(LOG_WITHOUT_GROUPS), null);
+  assert.equal(deriveSchedulerMs(""), null);
+  // ⛔ 明确排除「看起来像失败」的假值：AC-281 的判据读 `schedulerMs is None` 才报 NOT-EVALUATED，
+  // 一个 0 会让它判成「0 秒，飞快」——比缺失更贵。
+  assert.notEqual(deriveSchedulerMs(LOG_WITHOUT_GROUPS), 0);
+});
+
+test("collect — 日志里的 schedulerMs 落到 `test` job 的读数上（AC-281 判据读的就是这条）", () => {
+  const { records } = collect({
+    repo: "o/n",
+    run: () => LOG_WITH_SCHEDULER,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+  });
+  const testJob = records[0].jobs.find((j) => j.name === "test");
+  assert.equal(testJob.schedulerMs, 53507);
+});
+
+test("collect — 没拉日志的 run【不写】schedulerMs 键（缺 ≠ 0，硬规则 6）", () => {
+  // 离线缝（喂 runs 又不给 runner）⇒ 整条路径零 gh ⇒ 没有任何日志被拉过。
+  const { records } = collect({
+    repo: "o/n",
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+  });
+  const testJob = records[0].jobs.find((j) => j.name === "test");
+  assert.equal("schedulerMs" in testJob, false, "没拉日志 ⇒ 不写这个键");
+  // 正控制（同一夹具）：给了 runner ⇒ 日志拉到了 ⇒ 同一个位置出现该数字。
+  // 两者可区分 ⇒ 上面那条不是「字段永远不出现」的恒真断言。
+  const withLog = collect({
+    repo: "o/n",
+    run: () => LOG_WITH_SCHEDULER,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+  });
+  assert.equal(withLog.records[0].jobs.find((j) => j.name === "test").schedulerMs, 53507);
+});
+
+test("collect — testFiles 与 prereqProvision 都已知的 run 仍会为 schedulerMs 拉日志（第三个闸门）", () => {
+  // AC-281 恒停 `scheduler-ms-not-recorded` 的成因此前与 AC-282 同形：闸门只认前两个量 ⇒ 一条前
+  // 两者都已派生过的 run **永远不再读日志** ⇒ 后派的 schedulerMs 结构性不可派生。
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(" "));
+    return LOG_WITH_SCHEDULER;
+  };
+  const { records } = collect({
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+    knownTestFiles: { 1001: 728 },
+    knownPrereqRuns: new Set(["1001"]),
+  });
+  assert.equal(calls.length, 1, "前两个量已知不足以跳过 —— schedulerMs 还没派生");
+  assert.equal(records[0].jobs.find((j) => j.name === "test").schedulerMs, 53507);
+  assert.equal(calls[0].includes("/actions/jobs/55/logs"), true, "拉的是 test job 自己的日志");
+});
+
+test("collect — schedulerMs 已派生的 run ⇒ 不重复拉日志（成本上界，且缺 ≠ 已知）", () => {
+  const calls = [];
+  const run = () => {
+    calls.push("x");
+    return LOG_WITH_SCHEDULER;
+  };
+  const base = {
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 1001, conclusion: "success" })],
+    jobsByRun: { 1001: [ghJob(55, "test", "success")] },
+    knownTestFiles: { 1001: 728 },
+    knownPrereqRuns: new Set(["1001"]),
+  };
+  collect({ ...base, knownSchedulerRuns: new Set(["1001"]) });
+  assert.equal(calls.length, 0, "三个派生都已知道 ⇒ 不拉日志");
+  // 对照（硬规则 4）：把 knownSchedulerRuns 去掉，同一个夹具立刻拉一次 ⇒ 这个量能取值相反。
+  collect(base);
+  assert.equal(calls.length, 1);
+});
+
+test("knownSchedulerRunsFromCarrier — 只收【带该键】的 runId（缺 ≠ 已知，否则永远不再补拉）", () => {
+  const dir = tmpDir("known-sched");
+  const carrier = path.join(dir, "ci-runs.jsonl");
+  fs.writeFileSync(
+    carrier,
+    [
+      JSON.stringify({ workflow: "CI", runId: 1, jobs: [{ name: "test", schedulerMs: 53507 }] }),
+      JSON.stringify({ workflow: "CI", runId: 2, jobs: [{ name: "test" }] }),
+      JSON.stringify({ workflow: "CI", runId: 3 }),
+      JSON.stringify({ workflow: "CI", runId: 4, jobs: [{ name: "test", schedulerMs: null }] }),
+      JSON.stringify({ workflow: "CI", runId: 5, jobs: [{ name: "test", schedulerMs: "53507" }] }),
+      "not json at all",
+      "",
+    ].join("\n") + "\n",
+  );
+  // ⛔ 4 是 `null`、5 是字符串 —— 两者都不是一个可判定的读数 ⇒ 都不得进「已知」集合
+  // （否则那条记录**永远不会**被补拉，硬规则 6：缺 ≠ 已知）。
+  assert.deepEqual([...knownSchedulerRunsFromCarrier(carrier)].sort(), ["1"]);
+});
+
+test("writeCarrier — 就地补全 schedulerMs：只补缺失的那个键，既有 job 字段逐字保留", () => {
+  const dir = tmpDir("enrich-sched");
+  const carrier = path.join(dir, "ci-runs.jsonl");
+  const stored = {
+    ts: "2026-09-17T13:30:56Z",
+    branch: "develop",
+    workflow: "CI",
+    conclusion: "success",
+    runId: 35227553148,
+    jobs: [
+      { name: "version-consistency", conclusion: "success", durationSec: 12 },
+      {
+        name: "test",
+        conclusion: "success",
+        durationSec: 99,
+        steps: [{ name: "Run tests", conclusion: "success", number: 10 }],
+      },
+    ],
+  };
+  fs.writeFileSync(carrier, JSON.stringify(stored) + "\n");
+  const before = fs.readFileSync(carrier, "utf8");
+
+  const incoming = {
+    ...stored,
+    jobs: [
+      { name: "version-consistency", conclusion: "success", durationSec: 12 },
+      {
+        name: "test",
+        conclusion: "success",
+        durationSec: 99,
+        steps: [{ name: "Run tests", conclusion: "success", number: 10 }],
+        schedulerMs: 53507,
+      },
+    ],
+  };
+  const res = writeCarrier(carrier, [incoming], null);
+  assert.equal(res.appended, 0, "同一个 key ⇒ 不追加");
+  assert.equal(res.enrichedScheduler, 1);
+  assert.equal(res.enrichedPrereq, 0, "本次没有 prereq 可补 ⇒ 两个计数彼此可分（⛔ 不合并成一个 jobs 布尔）");
+
+  const lines = fs.readFileSync(carrier, "utf8").trim().split("\n");
+  assert.equal(lines.length, 1, "补全走原地替换，行数不变");
+  const got = JSON.parse(lines[0]);
+  const testJob = got.jobs.find((j) => j.name === "test");
+  assert.equal(testJob.schedulerMs, 53507);
+  assert.equal(testJob.durationSec, 99, "既有 job 字段逐字保留（⛔ 不重算）");
+  assert.deepEqual(testJob.steps, [{ name: "Run tests", conclusion: "success", number: 10 }]);
+  assert.equal(got.jobs.find((j) => j.name === "version-consistency").durationSec, 12);
+  assert.equal("schedulerMs" in got.jobs.find((j) => j.name === "version-consistency"), false);
+  // 完整的 JSON 差异：**只多一个键**（不是重写整条记录）。
+  const a = JSON.parse(before.trim());
+  const b = { ...got };
+  b.jobs = got.jobs.map((j) => ({ ...j }));
+  b.jobs[1] = { ...b.jobs[1] };
+  delete b.jobs[1].schedulerMs;
+  assert.deepEqual(b, a, "改前改后的完整 JSON 差异只应有 schedulerMs 这一个键");
+});
+
+test("writeCarrier — 两个 job 级补全在同一行上【串联】：缺 prereqProvision 又缺 schedulerMs 时两个都补", () => {
+  const dir = tmpDir("enrich-both");
+  const carrier = path.join(dir, "ci-runs.jsonl");
+  const stored = {
+    ts: "2026-09-17T13:30:56Z",
+    branch: "develop",
+    workflow: "CI",
+    conclusion: "success",
+    runId: 35227553148,
+    jobs: [{ name: "test", conclusion: "success", durationSec: 99 }],
+  };
+  fs.writeFileSync(carrier, JSON.stringify(stored) + "\n");
+  const incoming = {
+    ...stored,
+    jobs: [
+      {
+        name: "test",
+        conclusion: "success",
+        durationSec: 99,
+        prereqProvision: { pyyaml: "already-present", tmux: "already-present", procps: "already-present" },
+        schedulerMs: 53507,
+      },
+    ],
+  };
+  const res = writeCarrier(carrier, [incoming], null);
+  assert.equal(res.enrichedPrereq, 1);
+  assert.equal(res.enrichedScheduler, 1, "两个补全互相不遮蔽（串联，不是一个盖掉另一个）");
+  const got = JSON.parse(fs.readFileSync(carrier, "utf8").trim());
+  assert.deepEqual(got.jobs[0].prereqProvision, {
+    pyyaml: "already-present",
+    tmux: "already-present",
+    procps: "already-present",
+  });
+  assert.equal(got.jobs[0].schedulerMs, 53507);
+  assert.equal(got.jobs[0].durationSec, 99);
+});
+
+test("buildRecord — schedulerByJob 里没有这个 job ⇒ 该 job 读数上【没有】schedulerMs 键", () => {
+  const jobs = [ghJob(55, "test", "success"), ghJob(56, "version-consistency", "success")];
+  const rec = buildRecord(ghRun({ id: 1001, conclusion: "success" }), {
+    jobs,
+    schedulerByJob: new Map([[jobs[0], 53507]]),
+  });
+  assert.equal(rec.jobs.find((j) => j.name === "test").schedulerMs, 53507);
+  assert.equal("schedulerMs" in rec.jobs.find((j) => j.name === "version-consistency"), false);
 });
