@@ -184,32 +184,32 @@ worktree 内 `git rev-parse --show-toplevel` = worktree 根，探针因此命中
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
+- [x] **AC1（live 面判别性读数：三段各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 本任务 worktree 根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/system` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 区块（`tr '\n' ' ' | grep -o '<nav.*</nav>'`）内**不再**含字面量 `System`
   （同一谓词在 **en** 上 = **2** ⇒ 该量能取假，不是空断言）；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**
   （并排贴 en/zh 两条 `<title>`）。⛔ 三处分开断言、分开贴原始片段 —— 只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
+- [x] **AC2（可被打红——因果对照）**：把语言在**第一段检查之前**的那一层**临时**钳到 `"en"`
   （一次性本地改动，⛔ 不提交），证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。
   更窄的形态（更强）：**只把字典钳到 `en`**（`navLabelsFor`/`pageNameFor` 首行强制 `lang="en"`），
   此时 `<html lang>` 仍正确、判据自报的 `CAUSE=nav-label-untranslated` 或 `CAUSE=title-unchanged`
   ⇒ 成因被单独钉在字典接线上。⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言（硬规则 4 推论四）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'System'`，
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -n 'System'`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个 `tasks/*.md`），
   并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止只报一个总数（硬规则 3）。
   预期：zh 下 nav 区块内 `System` 计数 = **0**，而同一谓词在 **en** 上 = **2**。
-- [ ] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-293 --dry-run --json`
+- [x] **AC4（判据裁决原样记录）**：贴出**实现后**的 `node packages/quay/bin/quay.js goal gate AC-293 --dry-run --json`
   完整输出 + `GATE_EXIT=`（⛔ 不解释、不改写它的 `CAUSE`）。**红就是红**：若仍红，把它具名 `CAUSE` 与 AC3 的归属一并交出。
   ⛔ **明令禁止**的三种「凑绿」：改判据（`goals/AC-293-*.md` ⛔ 不在本 Touches 内）、改别的任务的 title、
   把 zh 值写成含英文 `System` 的混合串。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac293-system-page-zh-chrome-nav-current-and-own-title` 绿；
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac293-system-page-zh-chrome-nav-current-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿 —— 其中 `serve-ac95-views.test.mjs` 对 `/system` 的既有断言
   `["/system", "System — 系统状态"]`（`:386`）测的是 **en 基线**，必须**原样绿**；
   ③ **作用域举证**：`grep -c 'html lang="en"' packages/quay/src/*.ts` **逐文件**贴出并与立案基线对照
   （立案基线：总数 **22**，其中 `serve-system.ts` **2**）：本任务后 **`serve-system.ts` 2→1**（只剩 `/manager` 那条）、
   总数 **22→21**，**其余 12 个文件计数一字未动**；⛔ 若兄弟任务（AC-289/290/291/292…）已落地，总数会相应更小
   —— 本条的判据是**逐文件差量**，不是绝对值。④ `git diff --name-only <base>...HEAD` 只含本任务 Touches 的路径。
-- [ ] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个）的
+- [x] **AC6（陈旧实例的诚实报告，⛔ 不掩盖）**：贴出**驱动侧**实例（cwd = 主检出、判据探针会命中的那一个）的
   `curl -sf http://<addr>/health` 原始读数，并写明 `processStartedAt` / `latestCodeCommitAt` / `stale`。
   若其 `stale:true`，**明写**「驱动侧仍会红在 `CAUSE=html-lang-not-zh`，成因是该实例陈旧（AC-288 落地前的进程），
   与 `/system` 的接线无关」—— ⛔ 不得据此把 AC1 的结论改写为「已达成」，⛔ 也不得为让它变绿而去重启/干扰本任务不拥有的实例。
@@ -229,6 +229,98 @@ worktree 内 `git rev-parse --show-toplevel` = worktree 根，探针因此命中
    + 重跑 `npm run build -w quay` + 重启实例）与它的作用域（纯本地代码、无外部状态）。
 6. **证据留痕**：红/绿判据输出、en/zh 两条原始响应片段、因果对照两次读数、全量残留枚举、逐文件计数、
    驱动侧 `/health` 读数，落成**任务体内联**或**未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
+
+## Evidence
+
+**台账形态**：完整读数（含逐条归属表、钳制前后并排、逐文件计数、回滚步骤）另存**未跟踪** scratch 文件
+`<worktree>/.quay/ac293-evidence.md`（本任务 worktree 内，⛔ 未提交）。下面内联的是可独立复算的最小集。
+
+**实现**：`serve-system.ts` 的 `renderSystemPage(sys, identity, lang = DEFAULT_LANG)`；
+`<html lang="en">` → `${htmlLangTag(lang)}`；`pageTitle("System — 系统状态", identity, lang)`；
+`renderMobileChrome("system", "system", lang)` / `renderSiteNav("system", lang)`；
+`<h1>${pageNameFor("System", lang)} — 系统状态</h1>`；`handleSystem` 的渲染入口传 `cfg.lang`。
+`serve-i18n.ts` 的 `PAGE_LABELS` 追加两条本页词条：`"System — 系统状态": {en, zh: "系统 — 系统状态"}`、
+`System: {en: "System", zh: "系统"}`（**键是 `pageTitle` 收到的整串**，按 ROW 3；两个 zh 值都不含 ASCII `System`）。
+
+**AC1（live，实例 pid cwd = 本任务 worktree、`--host 127.0.0.1 --port 4174`）**：
+
+```
+① en <html lang="en"   | zh <html lang="zh"
+② nav 区块 'System' 计数：en = 2   zh = 0                     ← 同一谓词在 en 上非零 ⇒ 该量能取假
+   桌面/移动当前项：en "System"/"System"  →  zh "系统"/"系统"   ← 两处分开断言
+③ <title> en = gap-ac293-…e88b1f27 — System — 系统状态
+         zh = gap-ac293-…e88b1f27 — 系统 — 系统状态            ← 逐字不同
+```
+
+**AC2（因果对照，⛔ 未提交）**：`serve-i18n.ts` 的 `navLabelsFor`/`pageNameFor` 首行各插 `lang = "en";`
+（只钳字典，⛔ 不碰 `<html lang>` 的产生器），重建 + 重启同一实例：
+
+```
+① <html lang> under zh : 恢复后 "<html lang=\"zh\""   钳制后 "<html lang=\"zh\""  ← 不变（证明①与字典无关）
+② nav 'System' 计数    : 0                           →  2                        ← 红
+③ <title> under zh     : … — 系统 — 系统状态           →  … — System — 系统状态      ← 红（与 en 基线逐字相同）
+判据自报：CAUSE=nav-label-untranslated -- the nav region of /system under Cookie: lang=zh still
+renders the literal English nav label "System"; the nav is not wired to the zh dictionary   GATE_EXIT=1
+```
+
+⇒ 红被单独钉在**字典接线**上（① 保持正确），即「是本次接线导致的」这一句是被检验的结论。
+`git checkout -- serve-i18n.ts` 还原，`grep -c 'AC2 CONTROL' serve-i18n.ts` ⇒ `0`，复绿（见 AC4）。
+
+**AC3（全量残留枚举，含零计数的对照）**：zh 响应 `grep -n 'System'` ⇒ **0 条命中**。
+零计数按硬规则 2 补「谓词对已知为真样本干跑」：同一谓词在 **en** 响应上 = **4** 条，逐条归属 ——
+`:636` `<title>`（本页 chrome）/ `:652` 移动端 nav 当前项（nav chrome）/ `:664` 桌面 nav 当前项（nav chrome）/
+`:667` `<h1>`（本页 chrome）。⇒ **chrome 计数 4 = nav 2 + 本页 2；数据计数 0**；nav 区块子计数 en 2 → zh 0。
+
+**AC4（判据裁决原样）**：
+
+```
+实现前（本 worktree）：{"verdict":"fail","reason":"acceptance failed (exit 1) — CAUSE=no-running-serve-instance …"}
+                                                                                              GATE_EXIT=1
+实现后（最终代码）：  {"verdict":"pass","reason":"acceptance passed (exit 0)",
+                      "timestamp":"2026-09-17T18:49:54.836Z","dryRun":true}                    GATE_EXIT=0
+```
+
+⛔ 未改判据、未改任何任务 title、未把 zh 值写成含 `System` 的混合串。
+
+**AC5（不回归 + 作用域）**：
+① `bash scripts/test.sh --for-task gap-ac293-… --allow-thin` ⇒ **EXIT=0**（scoped 门：94/94 pass，0 fail）。
+② `node --test packages/quay/test/serve-*.test.mjs` ⇒ **215 tests / 214 pass / 0 fail / 1 skipped**；
+其中 `serve-ac95-views.test.mjs` **21/21 pass**，含 `["/system", "System — 系统状态"]`（`:386`）的 en 基线断言。
+新建 `packages/quay/test/serve-system.test.mjs` **4/4 pass**（AC-dict / AC-black-box / AC-en-baseline / AC-scope）。
+③ 逐文件 `html lang="en"` 计数（fork point `e7ca35637` → 现在；立案基线 22 是 AC-290~292 落地**前**的值，
+本条判据是**逐文件差量**）：
+
+| 文件 | develop | now | Δ |
+|---|---|---|---|
+| `serve-system.ts` | 2 | **1** | **−1** |
+| 其余 11 个 `serve-*.ts` | — | — | **0** |
+| **总计** | **19** | **18** | **−1** |
+
+⚠️ **此处抓到并修掉一个假阳性**（记录它，因为它差点产出一个错数）：doc 注释初稿**引用了**那个属性字面量来解释
+2→1，`grep -c` 因此报 **2**（硬规则 2：注释里提到不算命中）⇒ 作用域举证会读成「没动」。改写注释为**描述**而非拼出该字面量。
+该计数的运行时对应物是 `serve-system.test.mjs` 的 `AC-scope` —— 它断言 `/manager` 在 zh cookie 下仍发英文属性，
+⇒ 作用域结论不依赖注释卫生。
+④ `git diff --name-only e7ca35637...HEAD` ⇒ 恰好 `packages/quay/src/serve-i18n.ts`、`packages/quay/src/serve-system.ts`、
+`packages/quay/test/serve-system.test.mjs` 三条（本任务 Touches 的源码/测试路径；任务文件本身经 Provider ABI 写）。
+`serve-render.ts` / `serve-lang.ts` / `NAV_LABELS` / `goals/AC-293-*.md` 全部 Δ=0。
+
+**AC6（驱动侧陈旧实例，如实报告）**：
+
+```
+curl -sf http://127.0.0.1:4173/health
+⇒ {"ok":true,"stale":true,"evaluated":true,"processStartedAt":"2026-09-17T16:21:45.406Z",
+   "latestCodeCommitAt":"2026-09-17T18:18:49.000Z","source":"git"}
+```
+
+`stale` = **true**（进程起于 16:21:45Z，最新代码提交 18:18:49Z）；它在 zh cookie 下仍答 `<html lang="en"`。
+**按驱动侧口径**（从主检出跑判据）⇒ `CAUSE=html-lang-not-zh … (addr=127.0.0.1:4173)`、`GATE_EXIT=1`。
+⇒ **驱动侧会一直红到该实例被重启为止，成因是它的陈旧（AC-288 落地后 15 个页面 AC 的公共前提），不是 `/system` 的接线。**
+按 Proposal 的「操作前提」，该实例**未被重启、未被干扰**（它属外部操作面，且只有在本分支落到 develop、主检出同步后重启才有意义）。
+**AC1 的结论⛔ 未被改写成「驱动侧已达成」** —— AC1 立在跑本任务代码的 worktree 实例上。
+
+**回滚形态（DoD 5）**：纯本地代码、无外部状态 —— 还原 `serve-system.ts` 的三处接线（含 `handleSystem` 的渲染入口）
++ 删除 `serve-i18n.ts` 里 `System — 系统状态` / `System` 两条词条 + `npm run build -w quay` + 重启实例。
+不会留半态：该页要么两个词条都走字典，要么都不走。
 
 ## Touches
 
