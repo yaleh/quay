@@ -19,8 +19,9 @@
 //   exact defect AC-289 exists to remove).
 //
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
-//   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only /dashboard
-//   is wired here, because that is AC-289's scope; the other 14 pages' page-chrome is AC-290~303.
+//   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
+//   whose OWN chrome has actually been wired are here — /dashboard (AC-289) and /live (AC-291);
+//   the remaining pages' page-chrome is AC-290~303, and each adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -92,9 +93,21 @@ export function navLabelsFor(lang: Lang = DEFAULT_LANG): Record<NavKey, string> 
   return out;
 }
 
-/** Page-chrome names, keyed by the English token `pageTitle` receives — see ROW 3. */
+/** Page-chrome names, keyed by the English token `pageTitle` receives — see ROW 3.
+ *
+ *  `Live — loop activity` is the FULL token /live passes to `pageTitle` (the em dash included —
+ *  it must be byte-equal to the call site or the lookup misses and the page renders its English
+ *  title under zh, which is exactly the `title-unchanged` arm of AC-291's criterion).
+ *  `Live` is the same page's OWN name token, used for its `<h1>`.
+ *
+ *  ⛔ The zh column of neither entry may carry the ASCII literal "Live": AC-291's criterion fails
+ *  the page on that literal inside the nav region, and the page's own `<title>` difference is the
+ *  second half of the same criterion — a value that merely LOOKS translated would satisfy
+ *  "non-empty" while leaving the assertion red (see the WHY note above). */
 const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   Dashboard: { en: "Dashboard", zh: "仪表盘" },
+  "Live — loop activity": { en: "Live — loop activity", zh: "实时 — 循环活动" },
+  Live: { en: "Live", zh: "实时" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
