@@ -1,9 +1,16 @@
 ---
 id: GOAL-022
 title: self-hosted CI test job 墙钟压到 30 秒内——128核机器实测93.9%空闲，瓶颈是文件粒度太粗+重复装包
-status: draft
+status: active
 kind: goal
 origin: 人 2026-09-17 要求：分析 self-hosted CI 负载并建 GOAL 驱动优化
+activatedAt: 2026-09-17T00:45:02.249Z
+statusLog:
+  - at: 2026-09-17T00:45:02.249Z
+    from: draft
+    to: active
+    actor: manager
+    reason: AC-279/280/281 三条已就位，退出条件（三条 AC 均 achieved）已可判定；进入执行阶段
 ---
 ## 背景（2026-09-16/17 实测，全部为直接量）
 
