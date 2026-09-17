@@ -558,12 +558,30 @@ test("provider-abi-conformance: goal ABI — native goal_list non-empty via goal
     env: { QUAY_NATIVE_TASKS_DIR: tasksDir, QUAY_NATIVE_GOAL_DIR: goalDir },
   });
   try {
+    // ⚠️ AC FIRST. gap-goal-create-as-active-skips-zero-ac-gate put the CREATE path behind the
+    // P6-goal gate; gap-goal-born-draft-zero-ac-escapes-standing-invariant widened that gate's
+    // predicate from `{active}` to the invariant's own scope `{draft, active}`. So a brand-new GOAL
+    // no AC names cannot be born in EITHER status now, and the natural authoring order is AC-first —
+    // an AC may name a GOAL that does not exist yet (the completeness contract requires only that
+    // `goal:` be a non-empty string). Writing the AC first is therefore both the legal order and a
+    // strictly stronger exercise of the ABI round-trip: it covers the CRITERION kind too
+    // (AC-001 below names GOAL-001 BEFORE GOAL-001 exists).
+    const acWritten = await coreClient.goalWrite({
+      id: "AC-001",
+      title: "goal ABI conformance — exit condition",
+      status: "draft",
+      goal: "GOAL-001",
+      criterion: "exit 0",
+      expect: "the goal ABI round-trip works end-to-end",
+      origin: "provider-abi-conformance (AC-176 goal group)",
+    });
+    assert.ok(acWritten && acWritten.id === "AC-001", `goalWrite created AC-001 (got ${JSON.stringify(acWritten?.id)})`);
+
     const written = await coreClient.goalWrite({
       id: "GOAL-001",
       title: "goal ABI conformance",
-      // gap-goal-create-as-active-skips-zero-ac-gate: the P6-goal gate now covers the CREATE path, so
-      // a brand-new GOAL no AC names cannot be born `active`. The subject here is the ABI round-trip
-      // (goal_write → goal_list), which is status-agnostic — `draft` exercises it identically.
+      // The subject here is the ABI round-trip (goal_write → goal_list), which is status-agnostic —
+      // `draft` exercises it identically, and it is the status the AC above was filed against.
       status: "draft",
       origin: "provider-abi-conformance (AC-176 goal group)",
       // gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 chars) —

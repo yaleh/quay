@@ -59,9 +59,22 @@ function storeVerdict(store, id, fields) {
   }
 }
 
+/** 夹具前提（2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant）：写面现在拒绝
+ *  「出生即 draft/active 而名下零 AC」的 GOAL（AC-217 自己的作用域 = {draft, active}）。CASES 的
+ *  (b) 量的是**完整性契约**（goal 有 body ⇒ 接受），要让它仍然量那一条，GOAL-902 必须先有一条
+ *  指名的 AC——否则 (b) 会被另一道闸拒，本测试就不再量它自己声明的那条契约了（硬规则 3b：一个
+ *  结构上不再量它所称对象的用例，与「量过了」同形）。⛔ 只对 (b) 的 goal 播种：其余三例是
+ *  criterion 记录或本就被完整性闸拒的记录，(a) 连完整性闸都过不去。 */
+function seedNamingAc(store, goalId) {
+  store.write(`AC-9${String(Number(String(goalId).replace(/\D/g, "")))}`, {
+    title: "seeded exit condition", status: "draft", goal: goalId, criterion: "true", expect: "=0", origin: "o",
+  });
+}
+
 // ── AC1: kind-split contract is falsifiable — all four directions asserted ─────────────────────
 test("AC1 — goal+origin-without-body and criterion-without-criterion are REJECTED; goal+body and criterion-complete are ACCEPTED", () => {
   const store = createGoalStore(tmpDir("ac1"));
+  seedNamingAc(store, "GOAL-902");
   const byName = Object.fromEntries(CASES.map((c) => [c.name, storeVerdict(store, c.id, c.fields)]));
 
   assert.equal(byName["goal-no-body"].verdict, "reject", "(a) goal + origin without body must be rejected:\n" + byName["goal-no-body"].detail);
@@ -100,6 +113,7 @@ test("AC3 — MCP goal_write and the store write() return the SAME accept/reject
   await client.connect(transport);
   try {
     const store = createGoalStore(goalDir);
+    seedNamingAc(store, "GOAL-902"); // same fixture precondition as AC1 — both sides see it (same dir)
     const divergences = [];
     for (const c of CASES) {
       const viaMcp = await client.callTool({ name: "goal_write", arguments: { id: c.id, ...c.fields } });

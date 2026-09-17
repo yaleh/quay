@@ -2,7 +2,7 @@
 id: gap-goal-born-draft-zero-ac-escapes-standing-invariant
 title: AC-217 常设不变式在【出生路径】仍可被违反：GOAL 出生即 draft 且零 AC（写面 exit 0），而该路径正是 P6-goal
   闸自己的拒绝讯息所教——GOAL-022 零 AC 流通 ≥101 秒，烧掉一次无物可修的 gap-filing agent
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -2032,10 +2032,29 @@ export function createGoalStore(
       // nothing to fix. The window's distance to an irreversible false `achieved` was one guard
       // (`goal-driver.ts:466`, GOAL has no reverse flip).
       // This is the SAME shape the cap gate two blocks below already uses (`nextStatus === "active"`,
-      // birth included) — one invariant, one predicate, ⛔ not a second gate. active→active is still
-      // not an activation, and a create-as-active that genuinely has an AC already naming it (an AC
-      // may be filed before its GOAL) still passes — the count is measured, not assumed.
-      const goalActivating = nextStatus === "active" && prevStatus !== "active";
+      // birth included) — one invariant, one predicate, ⛔ not a second gate. A create-as-active that
+      // genuinely has an AC already naming it (an AC may be filed before its GOAL) still passes — the
+      // count is measured, not assumed.
+      //
+      // ⚠️ 2026-09-17 (gap-goal-born-draft-zero-ac-escapes-standing-invariant) — THE PREDICATE IS NOW
+      // THE INVARIANT'S OWN SCOPE, not half of it. It used to read `nextStatus === "active"`, i.e. the
+      // ACTIVE half only, while AC-217's declared scope is `status ∈ {draft, active}`. The other half
+      // was open: GOAL-022 was born `draft` with ZERO ACs (2026-09-17T00:41:26Z, no `statusLog` ⇒ never
+      // transitioned) and stayed that way for ≥101s — the invariant false the whole time — and the one
+      // signal it should have raised spawned a gap-filing worker with nothing to fix. Worse, the two
+      // mechanisms CONTRADICTED each other: the rejection message on the active half literally
+      // prescribed the open door (`create ⋯ as draft first ('--status draft')`, and
+      // `serve-dashboard.ts` recorded that sentence as the store's birth path verbatim). This is the
+      // 5b shape — the previous fix (gap-goal-create-as-active-skips-zero-ac-gate) closed the half its
+      // predicate named and left its sibling open in the same expression.
+      //
+      // ⛔ NO `prevStatus !== …` exemption (the active half used to carry one). The quantity judged is
+      // the STATE THE WRITE LEAVES BEHIND, not "did a status change happen": after any GOAL write
+      // returns, a record in {draft, active} carries ≥1 AC. Dropping the exemption costs nothing real
+      // (an active GOAL already carries ACs — it could not have got there otherwise) and closes the
+      // case the exemption would otherwise leave open: a rewrite of an ALREADY-draft zero-AC GOAL
+      // (legacy carrier, or one hand-written into `goals/`) would otherwise be re-admitted silently.
+      const goalInAcScope = nextStatus === "draft" || nextStatus === "active";
 
       // A criterion record MUST point at a goal (its activeness derives from that goal).
       if (!isGoalRecord && (typeof frontmatter.goal !== "string" || frontmatter.goal.trim() === "")) {
@@ -2220,31 +2239,36 @@ export function createGoalStore(
       // own carrier files; there is nothing in it to override, and an override here would land
       // exactly the silent zero-AC active goal this gate exists to make impossible.
       //
-      // ⚠️ `goalActivating`, NOT `activating` — this gate covers the CREATE path too
-      // (gap-goal-create-as-active-skips-zero-ac-gate). Because an AC names a goal that must already
-      // exist, a brand-new GOAL born `active` has zero ACs by construction ⇒ this gate refuses it
-      // (fail-closed) and the birth path is closed. The invariant is therefore a WRITE-SURFACE
-      // constraint — 「GOAL 不得出生即 active」, create as draft → file the ACs → flip to active —
-      // ⛔ NOT a new mechanism layered beside this one. It does not conflict with the reopen behavior
-      // ruled on 2026-09-10 (achieved / needs-human / superseded / retired → active stays ALLOWED,
-      // unchanged: the reopen path already had ACs, that is precisely why it is separable). The
-      // narrowing that `activating` still carries is a statement about the two CRITERION gates only.
-      if (goalActivating && isGoalRecord) {
+      // ⚠️ `goalInAcScope`, NOT `activating` — this gate covers the CREATE path too
+      // (gap-goal-create-as-active-skips-zero-ac-gate), and since 2026-09-17 it covers the whole scope
+      // the invariant declares (draft AND active), not just the active half. The invariant is therefore
+      // a WRITE-SURFACE constraint over the pair: 「GOAL 不得以 draft/active 出生而名下零 AC」.
+      // ⛔ NOT a new mechanism layered beside this one — one gate, widened to its own declared scope.
+      // It does not conflict with the reopen behavior ruled on 2026-09-10 (achieved / needs-human /
+      // superseded / retired → active stays ALLOWED, unchanged: the reopen path already had ACs, that
+      // is precisely why it is separable). The narrowing that `activating` still carries is a statement
+      // about the two CRITERION gates only.
+      if (goalInAcScope && isGoalRecord) {
         const namingAcs = list().filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === id);
         if (namingAcs.length === 0) {
-          // The birth path gets one extra actionable sentence: on a transition the fix is "write the
-          // AC, then re-run this"; on a create the caller has to go back a step, and saying so beats
-          // letting them retry the same command.
-          const birthPath = prevStatus === undefined
-            ? ` This is a NEW record and no AC can name a goal that does not exist yet — create ${id} as ` +
-              `draft first ('--status draft'), file its AC(s), then flip it to active.`
-            : "";
+          // The rejection must teach the ORDER THAT WORKS, because the order that used to be taught
+          // here (create as draft → file the ACs → flip to active) is now refused at its first step and
+          // was itself an instance of the forbidden state. AC-first is legal — the completeness
+          // contract one block below requires only that `goal:` be a NON-EMPTY STRING, never that the
+          // named GOAL exist — so the natural authoring order is still a single-records-at-a-time order
+          // (⛔ no batch/transaction mechanism was added for this; hard rule 12).
+          const acFirst =
+            `Write the AC first — an AC may name a GOAL that does not exist yet (this store requires only ` +
+            `that \`goal:\` be a non-empty string, ⛔ not that the named GOAL exist), so this order is legal ` +
+            `at every instant: goal-store write AC-NNN --goal ${id} --status draft ` +
+            `--criterion '<runnable command>' --expect '<expected outcome>' --origin '<empirical basis>', ` +
+            `then run THIS write again. AC-first is what makes the invariant unobservable-as-false for any ` +
+            `length of time (⛔ not a shorter window — an unreachable state).`;
           throw new Error(
-            `cannot activate ${id}: 0 AC records name it — an active GOAL must carry at least one AC ` +
-            `(a goal is judged by the conjunction of its ACs, so a goal with none has no exit condition ` +
-            `and its achievement is undecidable; ACs naming ${id}: ${namingAcs.length}).${birthPath} Write one first: ` +
-            `goal-store write AC-NNN --goal ${id} --status draft --criterion '<runnable command>' ` +
-            `--expect '<expected outcome>' --origin '<empirical basis>'`
+            `cannot write ${id} as ${nextStatus}: 0 AC records name it — a GOAL in {draft, active} must ` +
+            `carry at least one AC (a goal is judged by the conjunction of its ACs, so a goal with none ` +
+            `has no exit condition and its achievement is undecidable; ACs naming ${id}: ${namingAcs.length}). ` +
+            acFirst
           );
         }
       }

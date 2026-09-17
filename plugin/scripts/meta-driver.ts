@@ -1926,6 +1926,38 @@ export function decisionGoalWriteArgv(
   return goalStoreArgv(scriptRoot, ["write", id, "--title", item.title, "--origin", origin, "--body", body], dataRoot);
 }
 
+/** 决策 AC 的判据：退出条件 = 该决策已被裁定，即 GOAL 离开 `draft`（active = 认可某选项；
+ *  superseded = 否决）。⛔ 不是恒真式：draft 期间判据为假，且**在同一行写出成因**（写面的 attribution
+ *  闸要求失败可归因——裸 `exit 1` 会被 `goal-store write` 直接拒掉，这正是本仓库 2026-09-11 那条实测）。
+ *  ⛔ 构造自 `goalStoreArgv`（单一来源）：入口/方言/--root 与写路径同源 ⇒ 不会分叉成两份入口解析。
+ *  ⚠️ 这条判据由【人裁定】这一动作使其为真，⛔ 不是机器能替人做的判断——它只把「裁没裁」变成可判定的。 */
+export function decisionAcCriterion(scriptRoot: string | null, goalId: string, dataRoot: string): string {
+  const cli = goalStoreArgv(scriptRoot, ["get", goalId], dataRoot).map(shellQuoteArg).join(" ");
+  const cause = `'${goalId} 仍未裁定（draft）—— 认可某选项 ⇒ goal write ${goalId} --status active；否决 ⇒ --status superseded'`;
+  return `${cli} | grep -Eq '"status": "(active|superseded)"' || { echo ${cause} >&2; exit 1; }`;
+}
+
+/** 供判据字符串用的最小 shell 引用（判据是**文本**，将来由 shell 跑；⛔ 不是本进程的 argv）。 */
+function shellQuoteArg(a: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 决策 AC 的 write argv——**必须先于** decisionGoalWriteArgv 执行（AC-first）。 */
+export function decisionAcWriteArgv(
+  scriptRoot: string | null, acId: string, goalId: string, item: DecisionItem, origin: string,
+  dataRoot: string = scriptRoot ?? "",
+): string[] {
+  return goalStoreArgv(scriptRoot, [
+    "write", acId,
+    "--title", `${item.title} — 退出条件`,
+    "--status", "draft",
+    "--goal", goalId,
+    "--criterion", decisionAcCriterion(scriptRoot, goalId, dataRoot),
+    "--expect", `该决策已被裁定：${goalId} 离开 draft（active = 认可某选项；superseded = 否决）。draft 期间判据为假并写出成因。`,
+    "--origin", origin,
+  ], dataRoot);
+}
+
 /** 决策自己的质量判据。⛔ 不复用 gateFinding 的 quality 闸——那个 EVIDENCE 正则是为【缺陷发现】
  *  调的（要求正文含文件路径/sha/`exit N` 这类代码形 token），而一个架构方向问题合理地可以不含
  *  这种 token。实测误杀：「变化检测是否上升为平台能力」被拒，理由 "no actionable ## Finding with
@@ -2103,10 +2135,23 @@ export async function fileDecisions(
     }
 
     const id = nextGoalId(known);
+    const acId = nextAcId(known);
     if (opts.dryRun) {
-      out.push({ item, id, accepted: true, reason: "dry-run: would file as draft GOAL" });
+      out.push({ item, id, accepted: true, reason: `dry-run: would file AC ${acId} (the decision's exit condition), then draft GOAL ${id}` });
     } else {
+      // ⚠️ AC-FIRST（2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant）：决策 GOAL
+      // 按设计出生即 `draft`（待裁定面 /goal?status=draft 就是读它的地方），而写面现在拒绝「出生即
+      // draft/active 而名下零 AC」——那正是不变式 AC-217 自己的作用域 {draft, active}。旧写法只写 GOAL
+      // ⇒ 落进被禁态、且从此**每次决策路由都 exit 2**（本文件此前从未被该闸覆盖过：它写的是 GOAL，
+      // 而旧谓词只管 active 那一半）。决策的退出条件（人裁定）因此作为一条真 AC 先落盘。
+      // ⛔ 不是新机制：仍是「先 AC 后 GOAL」这一个写序，与 CLI 和 e2e 走的是同一条。
       const body = renderDecisionBody(item);
+      const acArgv = decisionAcWriteArgv(root, acId, id, item, origin, opts.dataRoot ?? root);
+      const acRes = await runAsync(acArgv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+      if (acRes.error || acRes.status !== 0) {
+        out.push({ item, id, accepted: false, reason: `decision AC write failed (exit ${acRes.status}): ${(acRes.stderr || "").trim().slice(0, 200)}` });
+        continue;
+      }
       const argv = decisionGoalWriteArgv(root, id, item, origin, body, opts.dataRoot ?? root);
       const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
       if (r.error || r.status !== 0) {
@@ -2115,10 +2160,11 @@ export async function fileDecisions(
       }
       // 写盘即提交：goal-store 的 write 自己写盘后立即提交（gap-meta-commitgoalfile）——
       // ⛔ 这里不再二次提交（不新建并行机制）。
-      out.push({ item, id, accepted: true, reason: `routed as draft ${id}（可在 /goal?status=draft 看到）` });
+      out.push({ item, id, accepted: true, reason: `routed as draft ${id}（可在 /goal?status=draft 看到；退出条件已作为 draft AC ${acId} 先落）` });
     }
     keys.add(findingKey(candidate));
     known.push({ id, title: item.title, origin });
+    known.push({ id: acId, title: `${item.title} — 退出条件`, origin, goal: id });
     filed++;
   }
   return out;

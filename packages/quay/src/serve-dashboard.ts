@@ -981,8 +981,10 @@ function goalStaleness(goalId: string, goals: GoalRecord[], staleMs: number, now
  *   - `draft` is OUT. A draft AC is a written-down proposal awaiting a HUMAN activation (裁定 3:
  *     激活是人的动作) — it is not yet in force, so it is not outstanding work the goal is judged by.
  *     It is also the ordinary state of a goal's ACs right after birth (the store's own birth path is
- *     `create GOAL as draft → file its ACs as draft → flip the GOAL to active`, and the zero-AC
- *     activation gate's error message literally prescribes `--status draft`). Consequence, accepted
+ *     `file the AC(s) as draft → create GOAL as draft → flip the GOAL to active` — AC-FIRST since
+ *     2026-09-17: the write face refuses a GOAL born into {draft, active} with zero ACs, the full
+ *     scope of the invariant AC-217, so the AC that names a not-yet-existing GOAL is what makes the
+ *     first write legal). Consequence, accepted
  *     and recorded here rather than left to be discovered: a goal whose ACs are all still draft
  *     renders 「0/0」, the same as a goal with no criteria — telling "3 proposals await a ruling" apart
  *     from "nothing here" is a separate concern with its own carrier (the /goal draft banner), not
