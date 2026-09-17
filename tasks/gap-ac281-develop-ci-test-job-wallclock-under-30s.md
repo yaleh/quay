@@ -3,7 +3,7 @@ id: gap-ac281-develop-ci-test-job-wallclock-under-30s
 title: 真实 develop CI test job 一次 success 且套件 schedulerMs≤30s（AC-281）——人
   2026-09-17 裁定改口径（原 job 墙钟 ≤30s 经实测不可达）；现 scheduler 54.1s / main floor
   43.0s，须压低最长单文件
-status: ready
+status: needs-human
 needs_human_cause: unclassified
 labels:
   - gap
@@ -255,3 +255,13 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 - .quay/ac281-evidence.md
 - .quay/ac281-floor-evidence.md
 - tasks/gap-ac281-develop-ci-test-job-wallclock-under-30s.md
+
+## Needs-Human
+
+**执行 2026-09-17T23:56:34.854Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 2/7，剩余未勾 5）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：b5860af0-3efe-4ab9-b1c8-977aea755583
