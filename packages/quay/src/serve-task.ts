@@ -7,6 +7,11 @@ import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
   renderSiteNav, renderMobileChrome, pageTitle,
+  // AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): the /tasks LIST page consumes
+  // the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionaries (`pageNameFor`) through this
+  // one import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie
+  // (a second parse is a second decision table) and never re-derives a label.
+  htmlLangTag, pageNameFor,
 } from "./serve-render.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
@@ -463,12 +468,23 @@ export async function handleTaskList(
     ? html`<p class="meta" style="color:var(--color-accent)">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;${totalPages > 1 ? ` · Page ${safePage} of ${totalPages}` : ""}</p>`
     : "";
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  // AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): this page's own chrome is wired
+  // to the language mechanism — the four sites below are the LIST page's ENTIRE zh surface.
+  // `cfg.lang` is the per-request copy `handleAllRoutes` resolved once; this page must never
+  // re-read `?lang=` or the cookie (a second parse is a second decision table, and it would also
+  // read a different request's inputs than the one Vary/Cookie was declared for).
+  //
+  // ⛔ The DETAIL page below (`/task/<id>`) is deliberately NOT wired: it is not one of the 15 nav
+  // routes and is out of this task's scope (its `<title>` is the bare entity id by existing
+  // contract). Its page-header language attribute stays hard-coded to the default on purpose —
+  // AC5③'s per-file count is a measure of EXACTLY that, so this note deliberately does not spell
+  // the attribute out (a comment mentioning a literal is not a hit — 硬规则 2).
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity)}</title></head>
-    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main id="main">
+    ${htmlLangTag(cfg.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity, cfg.lang)}</title></head>
+    <body>${renderMobileChrome("tasks", pageNameFor("task list", cfg.lang), cfg.lang)}${renderSiteNav("tasks", cfg.lang)}<main id="main">
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
-      <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+      <h1>Quay — ${pageNameFor("task list", cfg.lang)} (${escapeHtml(manifest.id)} provider)</h1>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta list-nav">Prefix: ${prefixNav}</p>` : ""}

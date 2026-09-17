@@ -19,8 +19,8 @@
 //   exact defect AC-289 exists to remove).
 //
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
-//   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only /dashboard
-//   is wired here, because that is AC-289's scope; the other 14 pages' page-chrome is AC-290~303.
+//   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: /dashboard was
+//   AC-289's scope and /tasks is AC-290's; the remaining 12 pages' page-chrome is AC-291~303.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -95,6 +95,14 @@ export function navLabelsFor(lang: Lang = DEFAULT_LANG): Record<NavKey, string> 
 /** Page-chrome names, keyed by the English token `pageTitle` receives — see ROW 3. */
 const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   Dashboard: { en: "Dashboard", zh: "仪表盘" },
+  // AC-290 (/tasks list page): this page's own TWO tokens. `Tasks` is the token `pageTitle`
+  // receives; it is spelled like the nav KEY `tasks`, but it is a separate lookup on purpose — the
+  // nav label resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through
+  // `pageNameFor` (this page's chrome, ROW 3), and ROW 3's whole point is that the two are peers.
+  // `"task list"` is the token the <h1> and the mobile header carry. `en` is the identity for both,
+  // so the en baseline — the bytes the goal criterion reads off the live page — cannot move.
+  Tasks: { en: "Tasks", zh: "任务" },
+  "task list": { en: "task list", zh: "任务列表" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
