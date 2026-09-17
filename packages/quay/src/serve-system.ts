@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readSystem, readManager, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
 // ── /system ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -52,7 +52,28 @@ export function renderBar(label: string, val: number | null, numericLimit: numbe
   </div>${pct != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
 }
 
-function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = null): string {
+/** AC-293: `lang` is this request's resolved language (AC-288's mechanism, threaded in by the
+ *  dispatcher via `handleSystem`'s `cfg.lang`). It reaches FOUR things on this page and nothing
+ *  else: the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile chrome
+ *  (`renderMobileChrome`) — whose `system` entry already exists in NAV_LABELS (ROW 1) — the page's
+ *  own `<title>` (through `pageTitle`), and the `<h1>`'s page-name token (through `pageNameFor`
+ *  against serve-i18n.ts's PAGE_LABELS). The last two are the whole point: wiring only the SHARED
+ *  nav bar would leave the `<title>` at `System — 系统状态` under zh, which is the difference
+ *  between "the nav switched" and "THIS page switched" — and AC-293's third arm fails the page on
+ *  exactly that (CAUSE=title-unchanged).
+ *
+ *  ⛔ `/manager` below is a DIFFERENT page and is deliberately NOT wired here (it belongs to its
+ *  own AC). Only `renderSystemPage` takes `lang`; `renderManagerPage` keeps its hard-coded English
+ *  document-language attribute (spelled the same way this one used to be), which is why counting
+ *  the hard-coded attribute in this file goes 2 → 1. (This comment deliberately does NOT spell that
+ *  attribute out: a doc-comment quoting it is a false positive for a `grep -c` on the literal —
+ *  hard rule 2's comment-vs-position split — and the scope proof for AC5 reads a count.)
+ *
+ *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: a direct `renderSystemPage()` caller that predates
+ *  it keeps rendering byte-for-byte what it rendered before, and `pageNameFor`'s en column is the
+ *  identity for every token — so the en baseline the goal criterion reads off the live page cannot
+ *  move as this page is wired. */
+function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   const rg = sys.resourceGate;
   const pb = sys.processBudget;
   const bothOk = rg.status === "ok" && pb.status === "ok";
@@ -61,9 +82,9 @@ function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = nu
     ? html`<div class="${goVerdict ? "success-banner" : "error-banner"}" role="status"><strong>⇒ ${goVerdict ? "GO" : "WAIT"}</strong>：${goVerdict ? "资源充足，可以跑" : "资源受限，等待"}</div>`
     : "";
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>${pageTitle("System — 系统状态", identity)}</title></head>
-    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main id="main">
-      <h1>System — 系统状态</h1>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>${pageTitle("System — 系统状态", identity, lang)}</title></head>
+    <body>${renderMobileChrome("system", "system", lang)}${renderSiteNav("system", lang)}<main id="main">
+      <h1>${pageNameFor("System", lang)} — 系统状态</h1>
       <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
       ${banner}
       ${obsNote(rg.status, rg.reason)}
@@ -103,7 +124,7 @@ export async function handleSystem(
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderSystemPage(sys, cfg.identity));
+  res.end(renderSystemPage(sys, cfg.identity, cfg.lang));
 }
 
 // ── /manager ───────────────────────────────────────────────────────────────────────────────────────

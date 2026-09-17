@@ -21,8 +21,8 @@
 // ROW 3 — `PAGE_LABELS` is the PAGE-CHROME dictionary, keyed by the page's OWN English token (the
 //   same token `pageTitle` receives). It is deliberately SMALLER than NAV_LABELS: only the pages
 //   whose OWN chrome has actually been wired are here — /dashboard (AC-289), /tasks (AC-290),
-//   /live (AC-291) and /board (AC-292); the remaining 11 pages' page-chrome is AC-293~303, and each
-//   adds its own tokens as it lands.
+//   /live (AC-291), /board (AC-292) and /system (AC-293); the remaining 10 pages' page-chrome is
+//   AC-294~303, and each adds its own tokens as it lands.
 //   `en` is the identity for EVERY token (so the en baseline is byte-identical by construction);
 //   an unmapped token under `zh` renders its English token unchanged — a VISIBLE degradation (the
 //   page reads English), never a blank or undefined title.
@@ -132,6 +132,19 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // literal inside the nav region, and "看板 — 三源 join 看板" satisfies "non-empty" without it.
   "Board — 三源 join 看板": { en: "Board — 三源 join 看板", zh: "看板 — 三源 join 看板" },
   Board: { en: "Board", zh: "看板" },
+  // AC-293 (/system page): this page's own TWO tokens, same shape as AC-291's and AC-292's pairs.
+  // `System — 系统状态` is the FULL token `serve-system.ts` passes to `pageTitle` — em dash and the
+  // (already-Chinese) subtitle included, because AC-293's third arm compares this page's `<title>`
+  // against its en baseline and a token that is not byte-equal to the call site misses the lookup
+  // (that miss IS the `title-unchanged` arm, i.e. the exact defect AC-293 exists to remove).
+  // `System` is the token the `<h1>` carries; it is spelled like the nav KEY `system`, but like
+  // AC-290's `Tasks` and AC-292's `Board` it is a separate lookup on purpose — the nav label
+  // resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through `pageNameFor`
+  // (this page's chrome, ROW 3).
+  // Neither zh value may carry the ASCII literal "System": AC-293's second arm fails the page on
+  // that literal inside the nav region, and "系统 — 系统状态" satisfies "non-empty" without it.
+  "System — 系统状态": { en: "System — 系统状态", zh: "系统 — 系统状态" },
+  System: { en: "System", zh: "系统" },
 };
 
 /** The page's OWN name in `lang` (ROW 3). `en` is the identity for every token, so the en baseline
