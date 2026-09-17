@@ -1,7 +1,7 @@
 ---
 id: gap-readme-cli-surface-stale-driver-goal-verbs
 title: README.md 的 CLI 用法说明（顶层子命令行 + quay driver 用法）已随代码演进漂移，且"已知缺口"提示引用了已 done 的任务
-status: ready
+status: done
 labels:
   - gap
   - mechanism
