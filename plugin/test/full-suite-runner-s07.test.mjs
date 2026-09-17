@@ -10,313 +10,187 @@
 //   other-task (defer anti-livelock).
 
 // full-suite-runner.test.mjs — runner verdict / state machine / red detection / reason axis / kill-hang / control. Split from gap-suite-file-split-two-longest; harness shared via ./helpers/full-suite-runner-harness.mjs.
-// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 7/8 (10 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
+// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 7/12 (7 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GREEN_SUITE, RUNNER, after, assert, execSync, fakeSuite, fakeTestShRecordingArgs, fs, isGitWorktree, os, path, poll, read, readState, readStateRunId, releaseGate, runCli, runRunner, sharedGreenShape, spawn, statePath, waitExit, writeStateGuarded } from "./helpers/full-suite-runner-shards-harness.mjs";
+import { after, assert, fakeSuite, fs, os, path, poll, readState, redPayload, releaseGate, runCli, runRunner, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
 
-test("AC2 Contract invoke — `full-suite-runner.ts --static-check-check` proves: static-check violations => red reason=static-check => machine-readable counts + failures[] => stopSignal", async () => {
-  const { code, out, err } = await runCli(RUNNER, ["--static-check-check"]);
-  assert.equal(code, 0, `--static-check-check exits 0 when the static-check chain works; got ${code}\n${out}\n${err}`);
-  assert.match(out, /static-check-check OK/, "verification line present");
-  assert.match(out, /reason=static-check/, "reason is static-check (AC3, distinguishable from failed)");
-  assert.match(out, /violations=11/, "violation count recorded (AC2)");
-  assert.match(out, /ceiling=6/, "ceiling recorded (AC2)");
-  assert.match(out, /newSinceBaseline=6/, "new-since-baseline recorded (AC2)");
-  assert.match(out, /failures=2/, "failures[] carries the two violation details (AC4 candidate B)");
-  assert.match(out, /stopSignal=true/, "static-check red stops dispatch (shared-gate failure)");
-});
-
-
-// ── gap-worktree-scoped-runs-consume-resources-but-produce-no-signal: AC1 scope + AC2 priority ──────
-
-
-test("AC1 unit — isGitWorktree distinguishes the main repo (false) from a linked worktree (true)", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wtrepo-u-"));
-  const worktree = path.join(os.tmpdir(), `fsr-wt-u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  try {
-    execSync("git init -b main", { cwd: repo, stdio: "ignore" });
-    execSync("git config user.email t@example.com", { cwd: repo, stdio: "ignore" });
-    execSync("git config user.name t", { cwd: repo, stdio: "ignore" });
-    fs.writeFileSync(path.join(repo, "a.txt"), "x");
-    execSync("git add a.txt && git commit -m init", { cwd: repo, stdio: "ignore" });
-    assert.equal(isGitWorktree(repo), false, "the primary checkout is NOT a worktree");
-    assert.equal(isGitWorktree(path.join(repo, "does-not-exist")), false, "a non-git dir is NOT a worktree");
-    execSync(`git worktree add -b feature ${worktree}`, { cwd: repo, stdio: "ignore" });
-    assert.equal(isGitWorktree(worktree), true, "a linked worktree IS a worktree");
-  } finally {
-    try {
-      execSync(`git worktree remove --force ${worktree}`, { cwd: repo, stdio: "ignore" });
-    } catch {
-      // worktree may not exist if the test failed early
-    }
-    fs.rmSync(repo, { recursive: true, force: true });
-  }
-});
-
-
-test("AC1 — a real git-worktree run writes scope=worktree to its OWN .quay/full-suite-state.json (the observable signal)", async () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wtrepo-"));
-  const worktree = path.join(os.tmpdir(), `fsr-wt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  try {
-    execSync("git init -b main", { cwd: repo, stdio: "ignore" });
-    execSync("git config user.email t@example.com", { cwd: repo, stdio: "ignore" });
-    execSync("git config user.name t", { cwd: repo, stdio: "ignore" });
-    fs.writeFileSync(path.join(repo, "a.txt"), "x");
-    execSync("git add a.txt && git commit -m init", { cwd: repo, stdio: "ignore" });
-    execSync(`git worktree add -b feature ${worktree}`, { cwd: repo, stdio: "ignore" });
-
-    const child = runRunner({ root: worktree, command: `bash ${f}`, laneCount: 8 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `runner exits 0 on green in a worktree, got ${code}`);
-    const s = readState(worktree);
-    assert.ok(s, "the worktree's own state file is written (AC1 signal — waiters can read it)");
-    assert.equal(s.scope, "worktree", "scope tags the worktree-origin suite (deferrable, not the main signal)");
-    assert.equal(s.state, "green");
-  } finally {
-    try {
-      execSync(`git worktree remove --force ${worktree}`, { cwd: repo, stdio: "ignore" });
-    } catch {
-      // worktree may not exist if the test failed early
-    }
-    fs.rmSync(repo, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("AC2 — for a MAIN-scope root the runner passes --main-repo-priority: the gate lets the main-repo suite proceed over worktree load (cpu=70 would normally WAIT)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2p-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  try {
-    // cpu=70 is above the base limit (60) ⇒ WAIT normally. caller_scope=main + worktree_node_tests=6
-    // ⇒ the AC2 priority override fires ONLY IF the runner passed --main-repo-priority (it does for a
-    // non-worktree root). If the flag were absent the gate would WAIT and the suite would never spawn.
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "70",
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
-        RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
-      },
-    });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `AC2 priority: main-repo suite proceeds over worktree load; got ${code}`);
-    assert.equal(readState(root).state, "green");
-    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned (priority override let it through)");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC2 negative control — a WORKTREE-scope caller is NOT let through the WAIT even when the runner passes the flag (worktree full-suite is deferrable)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2n-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  try {
-    // Same seams but caller_scope=worktree ⇒ the override requires caller_scope=main ⇒ WAIT stands.
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "70",
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
-        RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
-      },
-    });
-    const { code } = await waitExit(child);
-    assert.notEqual(code, 0, "worktree-scope caller stays WAIT (deferrable — no priority override)");
-    assert.ok(!fs.existsSync(argsLog), "the suite was NOT spawned (worktree full-suite yields to the machine)");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-// ── GENERATION GUARD (gap-full-suite-state-race-last-write-wins-no-generation-guard) ───────────────
-// writeState() was last-write-wins with NO generation check: if two runners overlap briefly (even a
-// superseded runner still finishing its cleanup), the older runner's red terminal state could land
-// AFTER the newer runner's running write and silently clobber it — the 2026-08-06 06:27 v5 / 06:28 v6
-// double-launch incident (stale red from the prior runner overwrote the current running state). The
-// fix: every state write carries a per-run `runId`; the initial `running` write ESTABLISHES the
-// generation, every later write is GUARDED and dropped if a different run now owns the file. These
-// tests construct the race (AC1), prove the read side can distinguish the current round (AC2), and
-// prove a single runner's normal writes are unaffected (AC4, negative control).
-
-
-test("AC1 unit — the generation guard rejects a stale runner's write (stale runId ≠ current runId)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-guard-"));
-  const file = path.join(dir, "full-suite-state.json");
-  const iso = () => new Date().toISOString();
-  const mk = (state, runId, extra = {}) => ({
-    state,
-    runId,
-    runner: "outer",
-    startedAt: iso(),
-    finishedAt: null,
-    durationMs: null,
-    laneCount: 4,
-    scope: "main",
-    ...extra,
-  });
-  try {
-    // Runner A establishes the generation (its running write).
-    fs.writeFileSync(file, JSON.stringify(mk("running", "run-A"), null, 2) + "\n", "utf8");
-    // Runner B takes over (its running write is the NEW generation).
-    fs.writeFileSync(file, JSON.stringify(mk("running", "run-B"), null, 2) + "\n", "utf8");
-    // A's stale terminal write is REFUSED — it must not clobber B's current state.
-    writeStateGuarded(file, { ...mk("red", "run-A", { reason: "failed" }) });
-    let cur = JSON.parse(fs.readFileSync(file, "utf8"));
-    assert.equal(cur.state, "running", "stale red did NOT overwrite the current running state (AC1)");
-    assert.equal(cur.runId, "run-B", "the state still belongs to B's generation");
-    // B's own terminal write SUCCEEDS — its generation is still current.
-    writeStateGuarded(file, { ...mk("green", "run-B", { finishedAt: iso(), durationMs: 1 }) });
-    cur = JSON.parse(fs.readFileSync(file, "utf8"));
-    assert.equal(cur.state, "green", "the current runner's write lands");
-    assert.equal(cur.runId, "run-B");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("AC1 — real two-runner race: a stale runner finishing red does NOT overwrite the newer runner's green", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-race-"));
-  const staleStarted = path.join(root, "stale-started");
-  // Runner A is the one that will be SUPERSEDED: it runs a slow suite that turns red at the end.
-  // gap-fake-suite-release-gate-sleep-zero — A's fixed 3s in-flight window is a release gate: A blocks
-  // after touching `staleStarted` until the test releases it (after B has taken over), zeroing the
-  // runner's hard wait while keeping A "in flight" during B's takeover.
-  const gate = releaseGate(root, "stale");
-  const { f: staleF, dir: staleDir } = fakeSuite(
-    `touch "${staleStarted}"; ${gate.wait}; echo "not ok 1 - stale red (superseded runner)"; exit 1`,
+test("AC2 — a vitest structured failure line flips red EARLY, before the run completes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-vit-"));
+  const marker = path.join(root, "post-failure-marker");
+  // A real failing vitest run prints the structured per-file line (`❯ <file> (N tests | M failed)`)
+  // BEFORE its summary and exit. Red must be marked on that line, not at exit — the same early-red
+  // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects). The suite blocks on
+  // a release gate after the failure line; the test touches it after observing the early red
+  // (gap-fake-suite-release-gate-sleep-zero — the fixed 10s marker window is zeroed).
+  const gate = releaseGate(root, "earlyred-vitest");
+  const { f, dir } = fakeSuite(
+    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\n' +
+      gate.wait +
+      '\necho done > "' +
+      marker +
+      '"\nexit 1',
   );
-  // Runner B is the CURRENT runner: a fast green suite.
-  const { f: freshF, dir: freshDir } = fakeSuite(GREEN_SUITE);
   try {
-    // A starts first and establishes the generation.
-    const childA = runRunner({ root, command: `bash ${staleF}`, laneCount: 4 });
-    await poll(() => fs.existsSync(staleStarted), { timeoutMs: 8000 });
-    await poll(() => readState(root)?.state === "running", { timeoutMs: 8000 });
-    const runIdA = readState(root).runId;
-    assert.ok(runIdA, "runner A's running state carries a runId");
-
-    // B starts LATER and takes over (its running write is the new generation).
-    const childB = runRunner({ root, command: `bash ${freshF}`, laneCount: 4 });
-    const { code: codeB } = await waitExit(childB);
-    assert.equal(codeB, 0, "the fresh runner exits 0 (green)");
-    const afterB = readState(root);
-    assert.equal(afterB.state, "green", "B's green is the current state");
-    assert.ok(afterB.runId && afterB.runId !== runIdA, "B is a NEW generation (different runId)");
-    const runIdB = afterB.runId;
-
-    // A finishes RED — its stale red write must be dropped by the guard. Release A's suite now that B
-    // has established its generation (A was held in flight the whole time).
-    fs.writeFileSync(gate.release, "go", "utf8");
-    const { code: codeA } = await waitExit(childA);
-    assert.equal(codeA, 1, "the stale runner exits 1 (its suite was red)");
-
-    const finalState = readState(root);
-    assert.equal(finalState.state, "green", "the stale red did NOT overwrite the newer runner's green (AC1 two-runner race)");
-    assert.equal(finalState.runId, runIdB, "the state still belongs to B's generation");
-    assert.notEqual(finalState.runId, runIdA, "A's stale runId is gone from the state");
+    const child = runRunner({ root, command: `bash ${f}` });
+    // The 20s poll timeout stays (runner node bootstrap under load can exceed seconds — early-red is
+    // judged on the marker, not on a runner-bootstrap race).
+    const redObserved = await poll(() => {
+      const s = readState(root);
+      return s && s.state === "red" ? s : null;
+    }, { timeoutMs: 20000 });
+    assert.equal(redObserved.state, "red");
+    assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
+    assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
+    assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
+    fs.writeFileSync(gate.release, "go", "utf8"); // release — the post-failure step (marker) runs now
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(staleDir, { recursive: true, force: true });
-    fs.rmSync(freshDir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
+// ── gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed: AC2/AC3/AC5 e2e ────────────────
+// The round-149 defect (state=red reason=failed but failures=[] / redAt=null): the runner's
+// FAILURE_PATTERNS missed the reporter's info-glyph / per-file failure forms. Each e2e below
+// constructs the real reporter shape and asserts red + a non-empty failures[] (the AC3 "red with
+// detail" property) — the measure `failures_nonempty_on_info_red >= 1` band.
 
-test("AC2 — the read side can tell 'is this red/green the current round' by its runId", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2-"));
-  const file = path.join(dir, "full-suite-state.json");
-  const iso = () => new Date().toISOString();
-  const mk = (state, runId, extra = {}) => ({
-    state,
-    runId,
-    runner: "outer",
-    startedAt: iso(),
-    finishedAt: null,
-    durationMs: null,
-    laneCount: 4,
-    scope: "main",
-    ...extra,
-  });
+
+test("AC2/AC3 e2e — an `ℹ fail 1` (info-glyph summary) suite flips red with a non-empty failures[] and a non-null redAt", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-infofail-"));
+  const { f, dir } = fakeSuite('echo "ℹ tests 1"\necho "ℹ pass 0"\necho "ℹ fail 1"\necho "ℹ cancelled 0"\nexit 1');
   try {
-    // The CURRENT round is round-B (the newest runner established it).
-    fs.writeFileSync(file, JSON.stringify(mk("running", "round-B"), null, 2) + "\n", "utf8");
-    // A stale runner (round-A) attempts its red — the guard drops it.
-    writeStateGuarded(file, { ...mk("red", "round-A", { reason: "failed" }) });
-    // A reader can verify the state on disk is CURRENT: its runId == the round it is waiting on.
-    const waitingOnRound = "round-B"; // what the dispatch site observed at round start
-    assert.equal(
-      readStateRunId(file),
-      waitingOnRound,
-      "the state on disk carries the CURRENT round's runId — a reader can distinguish current vs stale (AC2)",
-    );
-    assert.notEqual(readStateRunId(file), "round-A", "the stale round's write never landed");
-    // The current round's own terminal write still lands and reads back as the current round.
-    writeStateGuarded(file, { ...mk("green", "round-B", { finishedAt: iso(), durationMs: 1 }) });
-    assert.equal(readStateRunId(file), "round-B");
-    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).state, "green");
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "ℹ fail 1 flips state to red (AC2 — the reporter glyph form is recognized)");
+    assert.equal(s.reason, "failed", "ℹ fail 1 is a REAL test failure (stop-dispatch signal)");
+    assert.ok(redPayload(s).length >= 1, `the red payload must be non-empty (measure failures_nonempty_on_info_red >= 1); got ${JSON.stringify(s)}`);
+    // redAt is carried on the verification-round record (the early-RED detection-latency axis) —
+    // the round-149 record had redAt=null; a recognized failure line must timestamp it.
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    const rounds = fs.existsSync(roundFile)
+      ? fs.readFileSync(roundFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+    assert.ok(rounds.length >= 1, "a verification-round record is appended");
+    assert.ok(rounds[rounds.length - 1].redAt, `redAt must have a value (round-149 had null); got ${rounds[rounds.length - 1].redAt}`);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 
-test("AC4 — negative control: a single runner's normal writes are unaffected by the guard", async () => {
-  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / green-log / pid
-  // shape tests (4 spawns → 1). It asserts only the read-side generation-guard consistency, so the
-  // shared green round satisfies it identically.
-  const { root, s } = await sharedGreenShape();
-  assert.equal(s.state, "green", "single-runner terminal write lands normally (AC4)");
-  const runId = s.runId;
-  assert.ok(runId, "runId present on the single-runner state");
-  // read-side consistency: the state's runId matches the current round (nothing was rejected)
-  assert.equal(readStateRunId(statePath(root)), runId, "read-side sees the same single generation");
-});
+// ── gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3 ─────────────────────────────────
+// The runner previously waited for a HUNG suite child forever (round-164 leaked 20+ min holding the
+// single-flight flock). The max-runtime / silence / red-grace guards kill the child TREE and produce
+// reason=timeout / reason=hung / a prompt red exit. Tests use the env seams to make the guards fire fast.
 
 
-test("AC4 — a write over a legacy state (no runId on disk) is NOT blocked (fail-open, no conflict)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac4l-"));
-  const file = path.join(dir, "full-suite-state.json");
-  const iso = () => new Date().toISOString();
+test("AC3 e2e — a HANGING suite is killed at the max-runtime seam (reason=timeout, no indefinite leak)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-timeout-"));
+  const { f, dir } = fakeSuite('sleep 30'); // hangs far beyond the 800ms seam
   try {
-    // legacy state written before the generation guard existed: no runId field.
-    fs.writeFileSync(
-      file,
-      JSON.stringify(
-        { state: "green", runner: "outer", startedAt: iso(), finishedAt: iso(), durationMs: 1, laneCount: 8, scope: "main" },
-        null,
-        2,
-      ) + "\n",
-      "utf8",
-    );
-    // A new run's terminal write is not blocked — a legacy file has no generation to protect.
-    writeStateGuarded(file, {
-      state: "red",
-      reason: "failed",
-      runId: "run-1",
-      runner: "outer",
-      startedAt: iso(),
-      finishedAt: iso(),
-      durationMs: 1,
-      laneCount: 4,
-      scope: "main",
-    });
-    const cur = JSON.parse(fs.readFileSync(file, "utf8"));
-    assert.equal(cur.state, "red", "a run writing over a legacy state is not blocked (fail-open, AC4)");
-    assert.equal(cur.runId, "run-1", "the new run's generation is established");
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_SUITE_MAX_RUNTIME_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "a max-runtime kill is a red (no correctness conclusion)");
+    assert.equal(s.reason, "timeout", `max-runtime kill must be reason=timeout, got ${s.reason}`);
+    assert.ok(code !== 0, "runner exits non-zero on a timeout kill");
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 
-// ── AC6: runner-died terminal state (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
+test("AC3 e2e — a SILENT suite is killed at the silence seam (reason=hung)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-hung-"));
+  const { f, dir } = fakeSuite('echo "start"; sleep 30'); // one line, then silence far beyond the seam
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_SUITE_SILENCE_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "a silence kill is a red (no correctness conclusion)");
+    assert.equal(s.reason, "hung", `silence kill must be reason=hung, got ${s.reason}`);
+    assert.ok(code !== 0, "runner exits non-zero on a hung kill");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC2 e2e — a RED suite whose test.sh hangs is killed after the red-grace seam (prompt exit, red conclusion stands)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-killonred-"));
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"; sleep 30'); // red detected, then hangs
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800", QUAY_TEST_KILL_ON_RED: "1" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red conclusion stands");
+    assert.equal(s.reason, "failed", `a REAL failure (not ok) is never downgraded to timeout/hung: got ${s.reason}`);
+    assert.ok(redPayload(s).length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s)}`);
+    assert.ok(code !== 0, "runner exits non-zero on the red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace; it runs to completion (report-all-failures, manager 2026-08-10 15:1x)", async () => {
+  // round-95 AC3 principle: phases run EVEN IF a later phase fails. The runner's kill-on-red must
+  // only kill a HUNG child (silent for RED_GRACE_MS), not one still emitting results — otherwise a
+  // serial/lowconc red (which runs FIRST per test.sh phase order) kills the whole tree before the
+  // main phase (281 files, 89%) ever runs. This fake suite reds early, then keeps producing output
+  // (simulating main still running) and exits on its own — the runner must NOT escalate the kill.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-stillprod-"));
+  const { f, dir } = fakeSuite(
+    'echo "not ok 1 - boom"; for i in $(seq 1 30); do echo "line $i - still running"; sleep 0.1; done; exit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800", QUAY_TEST_KILL_ON_RED: "1" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red conclusion stands");
+    assert.equal(s.reason, "failed", `a real failure is never downgraded to timeout/hung: got ${s.reason}`);
+    assert.ok(redPayload(s).length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s)}`);
+    // The suite ran its full body (all 30 'still running' lines) and exited itself — the runner did
+    // NOT kill it at the red-grace seam (a kill would cut the output short).
+    assert.ok(code !== 0, "runner exits non-zero on the red");
+    // Assert the suite body completed: the last 'still running' line reached the log (not killed mid-way).
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    assert.match(log, /line 30 - still running/, "the suite's final line must appear — NOT killed at red-grace");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC1 e2e — a stream __ENVFAIL__ marker (runCli helper's environment-failure throw) from a TEST's INTERNAL kill does NOT flip the suite — exit 0 ⇒ green (gap-infra-error-false-positive-from-test-internal-kill)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-envfail-"));
+  // The fake suite's stderr carries the runCli helper's ENV_FAIL_MARKER throw (killed by SIGKILL) —
+  // the exact round-18 false-positive shape: resource-gate.test.mjs kills an INTERNAL child to test
+  // the resource gate and prints `__ENVFAIL__ killed by SIGKILL`, while ALL its tests pass (exit 0).
+  // The kill classification must come from the DIRECT test.sh child's EXIT STATUS (childKilledBySignal),
+  // NOT from stream content — a stream marker a test's internal subprocess printed is not evidence the
+  // suite was torn down. exit 0 + no failure line ⇒ state=green (NOT infra-error).
+  const { f, dir } = fakeSuite('echo "__ENVFAIL__ killed by SIGKILL: ./bin/quay.js x" >&2; exit 0');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "green", `a passing suite whose only oddity is a test-internal __ENVFAIL__ stream marker must be GREEN, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

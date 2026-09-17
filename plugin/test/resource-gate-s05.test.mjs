@@ -22,349 +22,215 @@
 //   scripts/test.sh plugin/test/resource-gate.test.mjs
 //   node --test plugin/test/resource-gate.test.mjs
 
-// SPLIT from resource-gate.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/5 (13 tests). Shared fixtures: ./helpers/resource-gate-harness.mjs (single source).
+// SPLIT from resource-gate.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/8 (9 tests). Shared fixtures: ./helpers/resource-gate-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GATE, PROCESS_BUDGET, REPO_ROOT, assert, defaultLaneCount, fs, os, path, runGate, spawn, spawnSync, withSeams } from "./helpers/resource-gate-harness.mjs";
+import { REPO_ROOT, TEST_SH, assert, defaultLaneCount, defaultTestConcurrency, derivedConcurrency, fs, path, runnerLaneCount, spawn, spawnSync, withSeams } from "./helpers/resource-gate-harness.mjs";
 
-test("AC2 negative — a WORKTREE caller passing --main-repo-priority stays WAIT (a worktree full-suite is itself deferrable)", () => {
-  const r = runGate(
-    {
-      RESOURCE_GATE_TEST_CPU_AVG10: "70",
-      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-      RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
-      RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
-      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
-    },
-    ["--for", "full-suite", "--main-repo-priority"],
-  );
-  assert.equal(r.status, 1, `a worktree caller must NOT get the main-repo override; got ${r.status}\n${r.stdout}`);
+test("AC4 — direct path and runner path BOTH subtract in_use (set in_use back to 0 ⇒ full value)", () => {
+  // The DIRECT path (defaultTestConcurrency) and RUNNER path (defaultLaneCount) stay equal under the
+  // SAME seams (判据4), and both respond to in_use.
+  const busyDirect = derivedConcurrency(16, 2, 1, 4);   // (16−4)/2 = 6
+  const busyRunner = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_MAX_OVERSUBSCRIPTION: "1", RESOURCE_GATE_TEST_NODE_PROCS: "4" });
+  assert.equal(busyDirect, 6, "direct in_use=4 → (16−4)/2 = 6");
+  assert.equal(busyRunner, 6, "runner in_use=4 → 6 (equal to direct)");
+  // Set in_use back to 0 ⇒ back to nproc×oversub/S (bidirectional falsifiable).
+  assert.equal(derivedConcurrency(16, 2, 1, 0), 8, "in_use=0 → back to 16×1/2 = 8");
+  assert.equal(runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_MAX_OVERSUBSCRIPTION: "1" }), 8, "runner in_use=0 → back to 8");
 });
 
 
-test("AC2 negative — CPU above the priority ceiling (>=85) stays WAIT even with worktree load + priority (machine too loaded for ANY heavy op)", () => {
-  const r = runGate(
-    {
-      RESOURCE_GATE_TEST_CPU_AVG10: "90",
-      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-      RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
-      RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
-      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
-    },
-    ["--for", "full-suite", "--main-repo-priority"],
-  );
-  assert.equal(r.status, 1, `cpu=90 above the ceiling must stay WAIT; got ${r.status}\n${r.stdout}`);
+test("AC6 — oversub code default is 1 (not 1.75): QUAY_MAX_OVERSUBSCRIPTION unset ⇒ defaultLaneCount uses 1", () => {
+  // The production config's 1.75 was an experiment residue (already ops-changed to 1 by the human);
+  // the CODE default must be 1 so a fresh host/install never oversubscribes by 1.75×.
+  const defaultOversub = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "1" });
+  // withSeams clears QUAY_MAX_OVERSUBSCRIPTION ⇒ the code default 1 applies (not 1.75 ⇒ not 28).
+  assert.equal(defaultOversub, 16, "oversub unset → default 1 → nproc×1/1 = 16 (not 16×1.75=28)");
 });
 
+// ── COUNTING SCOPE (gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1, AC2/AC3/AC4) ──
+// The old `in_use = pgrep -xc node-MainThread` counted EVERY node main process as a test worker. On
+// this box that was 17 processes — 14 MCP + 2 web serve + 1 suite-state monitor + 0 test workers —
+// so on a 4-core box (total_budget=4) available=0 and effective_cap was structurally pinned at 1
+// even in the GO band. in_use now counts ONLY throttle-able TEST processes: a node cmdline carrying
+// `--test` (node --test runner AND its child workers, whose flags are --test-concurrency /
+// --test-coverage-* / --test-name-pattern / --test-isolation / --test-timeout) or a direct test-file
+// run (…test.mjs / …test.ts / …_test.mjs). Resident infrastructure (quay.js mcp / quay.ts mcp /
+// quay-native mcp / quay serve / suite-state-trigger.ts --monitor) is a CONSTANT, not throttle-able.
+//
+// The RESOURCE_GATE_TEST_PROC_CMDLINES seam feeds a cmdline list (newline- or semicolon-separated)
+// to the SAME classifier process-budget.sh runs over /proc, so the classification is pinned
+// deterministically without needing real node --test processes.
 
-test("AC2 negative — worktree load below the min threshold (4) does NOT trigger the override", () => {
-  const r = runGate(
-    {
-      RESOURCE_GATE_TEST_CPU_AVG10: "70",
-      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-      RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
-      RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "2",
-      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
-    },
-    ["--for", "full-suite", "--main-repo-priority"],
-  );
-  assert.equal(r.status, 1, `only 2 worktree procs is not dominant load; got ${r.status}\n${r.stdout}`);
-});
-
-
-test("AC2 negative — mem_wait is NEVER overridden: low memory stays WAIT even with worktree load + priority (OOM is a cliff, not deferrable)", () => {
-  const r = runGate(
-    {
-      RESOURCE_GATE_TEST_CPU_AVG10: "10", // calm CPU — only mem blocks, so the verdict names memory alone
-      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "1000",
-      RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
-      RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
-    },
-    ["--for", "full-suite", "--main-repo-priority"],
-  );
-  assert.equal(r.status, 1, `mem_wait must remain a hard blocker; got ${r.status}\n${r.stdout}`);
-  assert.match(r.stdout, /=> WAIT: 内存不足/);
-  assert.doesNotMatch(r.stdout, /worktree_priority: ON/, "the override must NOT announce when memory is the blocker");
-});
-
-
-test("AC3 — negative control: the worktree load is OBSERVABLE via the gate even when the worktree writes no state file (the 'no signal' half is closed)", () => {
-  // The deadlock's second half: a worktree scoped run writes no .quay/full-suite-state.json, so its
-  // completion updates nothing anyone waits on. The gate's worktree_node_tests line is a LIVE
-  // observable that exists regardless of any state file — a waiter reads `resource-gate.sh` and sees
-  // the worktree is consuming the machine.
-  const r = runGate({
-    RESOURCE_GATE_TEST_CPU_AVG10: "30",
-    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-    RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
-    RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "12",
+test("AC2 — process-budget in_use classifies by cmdline: infra (mcp/serve/monitor) is NOT counted, test workers ARE", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  // The measured 2026-08-08 19:1xZ host classification: 17 node-MainThread, of which 14 MCP + 2
+  // serve + 1 monitor are INFRA (never throttle-able) and 0 are test workers. Excluding infra must
+  // give in_use=0, available=4 on a 4-core box — the GO band restored (AC3).
+  const infraCmds = [
+    "node /home/yale/.local/share/quay-plugin//vendor/quay/dist/quay.js mcp",
+    "node packages/quay/bin/quay.ts mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay-native mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay serve --host 100.87.141.82 --port 4174",
+    "node --experimental-strip-types packages/quay/bin/quay.ts serve --host 100.87.141.82 --port 4173",
+    "node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/suite-state-trigger.ts --monitor",
+  ];
+  const infraOnly = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: infraCmds.join(";") },
   });
-  assert.equal(r.status, 0, "report mode exits 0 (read-only)");
-  assert.match(r.stdout, /worktree_node_tests=12\s+caller_scope=main/, "the worktree signal is readable without any state file");
-  assert.doesNotMatch(r.stdout, /full-suite-state/, "the gate itself needs no state file to report the worktree load");
-});
+  assert.equal(infraOnly.status, 0, `process-budget.sh must exit 0\n${infraOnly.stderr}`);
+  assert.match(infraOnly.stdout, /in_use=0/, "infra cmdlines (mcp/serve/monitor) must NOT count against the test budget");
+  assert.match(infraOnly.stdout, /available=4/, "4-core GO band with no test workers → available=4 (no longer pinned to 0)");
+  assert.match(infraOnly.stdout, /verdict=GO/, "no throttle-able test workers ⇒ GO, cap NOT pinned to 1");
 
-// ── AC99 (gap-ac99-webui-machine-readable-json): the --json machine-readable interface ─────────────
-// Every System/Manager view field traces to a mechanism emitting a stable JSON document. These tests
-// read the PRODUCTION carrier — the real script's --json stdout — not a fixture (硬规则④推论三:
-// 关掉 fixture/注入 seam 后判据仍能通过才算测量；fixture 只用于驱动确定性读数，判据读的是真输出).
-
-
-
-test("AC99 — resource-gate.sh --json emits ONE valid JSON document carrying verdict + nproc-derived load_threshold (AC3)", () => {
-  const env = {
-    ...process.env,
-    RESOURCE_GATE_TEST_CPU_AVG10: "30",
-    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-    RESOURCE_GATE_TEST_LOAD_OVERRIDE: "3",
-    RESOURCE_GATE_TEST_NPROC: "4",
-  };
-  const res = spawnSync("bash", [GATE, "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
-  assert.equal(res.status, 0, `report mode --json exits 0; got ${res.status}: ${res.stderr}`);
-  const out = res.stdout.trim();
-  const nl = out.indexOf("\n");
-  const first = nl === -1 ? out : out.slice(0, nl);
-  let j;
-  assert.doesNotThrow(() => { j = JSON.parse(first); }, "stdout's first line must be one JSON document");
-  assert.equal(j.verdict, "GO");
-  // AC3 — load_threshold is nproc × load_over_factor computed INSIDE the mechanism (nproc=4 ⇒ 8),
-  // never a host-derived literal the UI would have to hardcode.
-  assert.equal(j.load_threshold, 8);
-  assert.equal(j.load_over_factor, 2);
-  assert.equal(j.nproc, 4);
-  assert.equal(j.cpu_stall_avg10, 30);
-  assert.equal(j.loadavg, 3);
-  assert.equal(typeof j.reason, "string");
-  assert.match(j.reason, /^=> GO/);
+  // Real node --test workers (top-level runner + child worker, measured 2026-08-08) ARE counted.
+  const testCmds = [
+    "node --test --test-concurrency=2 /tmp/budget-control.mjs",                                    // top-level runner
+    "/home/yale/.nvm/versions/node/v26.5.0/bin/node --test-coverage-functions=0 --test-concurrency=1 --test-isolation=process /tmp/budget-control.mjs", // child worker
+    "node --test --test-name-pattern=flag /tmp/budget-control.mjs",
+    "node --experimental-strip-types packages/quay/test/foo.test.mjs",                             // direct test-file run
+  ];
+  const testsRunning = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: testCmds.join(";") },
+  });
+  assert.equal(testsRunning.status, 0, `process-budget.sh must exit 0\n${testsRunning.stderr}`);
+  assert.match(testsRunning.stdout, /in_use=4/, "all 4 test-worker cmdlines must count against the budget");
+  assert.match(testsRunning.stdout, /available=0/, "4 test workers on 4 cores → available=0");
 });
 
 
-test("AC99 — resource-gate.sh --json carries the WAIT verdict + reason for a full-suite overload window", () => {
-  const env = {
-    ...process.env,
-    RESOURCE_GATE_TEST_CPU_AVG10: "30",
-    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-    RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
-    RESOURCE_GATE_TEST_NPROC: "4",
-  };
-  const res = spawnSync("bash", [GATE, "--for", "full-suite", "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
-  assert.equal(res.status, 1, "full-suite --json must keep the WAIT exit code (1)");
-  const j = JSON.parse(res.stdout.trim());
-  assert.equal(j.verdict, "WAIT");
-  assert.equal(j.load_wait, 1);
-  assert.equal(j.load_threshold, 8);
-  assert.match(j.reason, /过载窗口/);
+test("AC4 — overload protection RETAINED: injecting test workers drops available and flips verdict to WAIT", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const worker = "node --test --test-concurrency=1 /tmp/spawn-test.mjs";
+  // nproc=4. 1 worker → available=3, still GO (throttled but not exhausted).
+  const one = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: worker },
+  });
+  assert.equal(one.status, 0);
+  assert.match(one.stdout, /in_use=1/);
+  assert.match(one.stdout, /available=3/);
+  assert.match(one.stdout, /verdict=GO/);
+  // 5 workers (one more than nproc) → available=0, WAIT — the budget still prevents over-subscription.
+  const five = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: Array(5).fill(worker).join(";") },
+  });
+  assert.equal(five.status, 0);
+  assert.match(five.stdout, /in_use=5/);
+  assert.match(five.stdout, /available=0/);
+  assert.match(five.stdout, /verdict=WAIT/);
+});
+
+// ── COUNTING ACCURACY (gap-fixed-cap-5-dynamic-cap-retired AC4) ────────────────────────────────────
+// The human ruling's measured defect: process-budget.sh reported `in_use=5` while only 1 node
+// MainThread test process actually ran (infra — mcp/serve/monitor — was being counted as a
+// throttle-able test worker). The fix (f126c087) counts ONLY throttle-able TEST procs; THIS test pins
+// the exact reported scenario — 1 real test worker among the resident infra cmdlines ⇒ in_use=1,
+// never 5. `budget_count_accurate` invariant.
+
+test("AC4 — in_use matches the ACTUAL test-worker count: 1 test worker among infra ⇒ in_use=1 (not 5) — the 报5实1 reproduction", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  // The measured host infra set (2026-08-08 19:1xZ / the manager's 2026-08-09 ruling): MCP servers,
+  // web serve, suite-state monitor — NOT throttle-able. Plus exactly ONE real test worker.
+  const infraCmds = [
+    "node /home/yale/.local/share/quay-plugin//vendor/quay/dist/quay.js mcp",
+    "node packages/quay/bin/quay.ts mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay-native mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay serve --host 100.87.141.82 --port 4174",
+    "node --experimental-strip-types packages/quay/bin/quay.ts serve --host 100.87.141.82 --port 4173",
+    "node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/suite-state-trigger.ts --monitor",
+  ];
+  const oneWorker = "node --test --test-concurrency=1 /tmp/budget-control.mjs";
+  const cmds = [...infraCmds, oneWorker];
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: cmds.join(";") },
+  });
+  assert.equal(r.status, 0, `process-budget.sh must exit 0\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /in_use=1/, `6 infra + 1 test worker ⇒ in_use=1, got:\n${r.stdout}`);
+  assert.match(r.stdout, /available=3/, "1 test worker on 4 cores ⇒ available=3");
+  assert.match(r.stdout, /verdict=GO/, "1 worker leaves the budget GO");
+  // Every infra cmdline alone (no test worker) ⇒ in_use=0 — infra is NEVER throttle-able.
+  const infraOnly = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: infraCmds.join(";") },
+  });
+  assert.equal(infraOnly.status, 0);
+  assert.match(infraOnly.stdout, /in_use=0/, "pure infra ⇒ in_use=0 (infra is a resident constant, not test concurrency)");
+});
+
+// ── DUAL-READ SELF-CHECK (gap-node-mainthread-comm-literal-host-dependent, AC1b/AC4) ────────────────
+// The comm literal (`node-MainThread`) is host/Node-version-dependent: on boheidc (Node v24.19.0) the
+// node comm is `MainThread`, so a comm-literal enumeration silently reads 0. process-budget.sh now
+// enumerates via CMDLINE (never the literal) and cross-reads the comm count: comm=0 && cmdline>0 ⇒
+// INSTRUMENT FAILURE (never "machine idle").
+
+test("AC1b/AC4 — process-budget reports instrument_failure when comm=0 but cmdline>0 (the boheidc shape)", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_COMM_COUNT: "0", RESOURCE_GATE_TEST_CMDLINE_COUNT: "5" },
+  });
+  assert.equal(r.status, 0, `process-budget.sh must exit 0\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /node_comm_mainthread=0/, "the comm cross-count must be reported");
+  assert.match(r.stdout, /node_cmdline_procs=5/, "the cmdline candidate count must be reported");
+  assert.match(r.stdout, /instrument_failure=1/, "comm=0 with cmdline=5 must report instrument failure, not machine idle");
 });
 
 
-test("AC99 — process-budget.sh --json emits ONE valid JSON document carrying the budget numbers", () => {
-  const env = {
-    ...process.env,
-    RESOURCE_GATE_TEST_NPROC: "4",
-    RESOURCE_GATE_TEST_NODE_PROCS: "2",
-  };
-  const res = spawnSync("bash", [PROCESS_BUDGET, "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
-  assert.equal(res.status, 0, `process-budget --json exits 0; got ${res.status}: ${res.stderr}`);
-  const j = JSON.parse(res.stdout.trim());
-  assert.equal(j.total_budget, 4);
-  assert.equal(j.in_use, 2);
-  assert.equal(j.available, 2);
-  assert.equal(j.verdict, "GO");
+test("AC1b/AC4 — process-budget with a matching comm literal (comm>0) is NOT instrument failure", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_COMM_COUNT: "2", RESOURCE_GATE_TEST_CMDLINE_COUNT: "2" },
+  });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /instrument_failure=0/, "comm>0 is a normal reading");
 });
 
 
-test("AC99 — no --json ⇒ report text output is byte-identical (cap-from-gate back-compat)", () => {
-  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "30", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" });
-  assert.match(r.stdout, /cpu_stall\(some avg10\)=30\.00  \[limit 60\]   ok/, "text cpu_stall line unchanged");
-  assert.match(r.stdout, /=> GO/, "text verdict line unchanged");
-  assert.doesNotMatch(r.stdout, /^\s*\{/m, "text mode must not emit a JSON object on its own");
-});
-
-// ── gap-process-budget-counts-hung-test-processes-as-in-use: the LIVENESS axis ──────────────────────
-// THE DEFECT: `in_use` classified by CMDLINE ALONE counts a HUNG suite tree — a process whose cmdline
-// still says `node --test …` but whose parent already died (reparented orphan, PPID=1), alive for days
-// and burning ~0 CPU. Measured 2026-09-11 on the live host: `in_use=12` of which 10 were hung (6 dead
-// suite trees, oldest 85 h; 2 CPU-seconds over a 30 s window against 17,666 s of historical CPU). The
-// consumer (`defaultLaneCount` = max(1, floor((nproc − in_use) × oversub / S))) was pinned to its FLOOR
-// of 1 lane for the whole run — `--test-concurrency` is spliced into the command at spawn and never
-// recomputed, so a 570-file suite ran strictly serially (~3 h instead of ~20 min).
-// THE FIX: count a candidate only if it CONSUMED CPU during a sampling window. The discriminant is the
-// process's /proc/<pid>/stat CPU-time delta (utime+stime, fields 14+15) — a DIRECT host-observable
-// quantity (硬规则 4b), never the process's own self-report; never an age threshold; never a
-// process-count literal (硬规则 4 推论二 — a literal whose plausibility depends on this host's specs
-// silently becomes a wrong limit on another host). Measured separation: a blocked node --test-shaped
-// process = 0 ticks/s, a running one = 104 ticks/s.
-
-
-test("AC2 — the LIVENESS axis is pinned independently of the CLASSIFICATION axis (`liveness_source` names which one was evaluated)", () => {
-  const cmds = ["node --test a.test.mjs", "node --test b.test.mjs", "node --test c.test.mjs", "node --test d.test.mjs"];
-  // A provided cmdline list carries no pid, so the liveness axis CANNOT be sampled from it.
-  const run = (extra) =>
-    spawnSync("bash", [PROCESS_BUDGET, "--json"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: cmds.join(";"), ...extra },
-    });
-
-  // Classification-only (the PRE-FIX semantics): every cmdline-matching entry counts, AND the output
-  // says so — 硬规则 3b: "无法评估" must not share the shape of "合格", so an un-sampled liveness axis
-  // gets its own value in `liveness_source` instead of silently defaulting to "all live".
-  const cls = run({});
-  assert.equal(cls.status, 0, cls.stderr);
-  const cj = JSON.parse(cls.stdout.trim());
-  assert.equal(cj.in_use, 4, "classification-only seam counts every cmdline-matching entry");
-  assert.equal(cj.excluded_count, 0, "nothing is dropped on the classification axis");
-  assert.deepEqual(cj.excluded, []);
-  assert.equal(cj.liveness_source, "classification-only-seam", "the output must name the axis it actually exercised");
-
-  // Both axes pinned: the aligned `hung|live` tokens decide in_use and the excluded set enumerates
-  // exactly WHICH entries were dropped.
-  const both = run({ RESOURCE_GATE_TEST_PROC_LIVENESS: "hung;live;hung;live" });
-  assert.equal(both.status, 0, both.stderr);
-  const bj = JSON.parse(both.stdout.trim());
-  assert.equal(bj.in_use, 2, "only the `live` tokens count");
-  assert.equal(bj.excluded_count, 2, "the two `hung` tokens are excluded");
-  assert.deepEqual(bj.excluded.map((e) => e.cmdline), [cmds[0], cmds[2]], "the excluded set enumerates WHICH entries were dropped");
-  assert.ok(bj.excluded.every((e) => e.reason === "seam:hung" && e.cpu_delta_ticks === 0));
-  assert.equal(bj.liveness_source, "seam", "a pinned liveness axis reports its own source");
+test("AC5 — process-budget.sh header documents the counting scope (test procs only; infra is a resident constant)", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh"), "utf8");
+  assert.match(src, /COUNTING SCOPE/, "the header must carry a COUNTING SCOPE section (AC5)");
+  assert.match(src, /THROTTLE-ABLE TEST processes|node --test worker|throttle-able/, "the header must state that in_use counts test processes only");
+  assert.match(src, /MUST NOT count|NOT counted against the test budget/, "the header must state infra is excluded from the budget");
+  assert.match(src, /OVERLOAD PROTECTION RETAINED|RESOURCE_GATE_TEST_PROC_CMDLINES/, "the header must document the retained overload protection / new seam");
 });
 
 
-test("AC2 — the sampling window is a read-host KNOB (ms), clamped; never a caller literal and never an age threshold", () => {
-  const runWindow = (ms) =>
-    JSON.parse(
-      spawnSync("bash", [PROCESS_BUDGET, "--json"], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          RESOURCE_GATE_TEST_NPROC: "4",
-          RESOURCE_GATE_TEST_PROC_CMDLINES: "node --test a.test.mjs",
-          RESOURCE_GATE_TEST_SAMPLE_WINDOW_MS: ms,
-        },
-      }).stdout.trim(),
-    );
-  assert.equal(runWindow("2000").sample_window_ms, 2000, "the knob is honoured");
-  assert.equal(runWindow("1").sample_window_ms, 200, "clamped UP — a 1 ms window has no tick resolution");
-  assert.equal(runWindow("999999").sample_window_ms, 2000, "clamped DOWN so the read stays inside testProcessesInUse()'s 5 s child timeout (measured: 3000 ms ran 4.47 s end-to-end)");
-  assert.equal(runWindow("abc").sample_window_ms, 1000, "a non-numeric knob degrades to the default, never wedges the budget");
+test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  // FIVE `node --test --test-concurrency="$(default_test_concurrency)"` sites remain: 4
+  // `exec node --test ...` lines (run_selected, --group-explicit, explicit-file, --scoped
+  // <file...>) + 1 `node --test ...` line (--for-task, no exec). The --buckets site
+  // (gap-ac124-suite-bucket-production-carrier-benefit) now hands its LPT-ordered list to
+  // suite-lpt-runner.mjs via `node --test-concurrency="$(bucket_test_concurrency ...)"`
+  // (gap-m-bucket-long-tail-lpt-scheduling: run({files}) preserves order) — the derived default
+  // STILL governs it (bucket_test_concurrency falls back to default_test_concurrency when no
+  // explicit --test-concurrency flag is passed), only delivered through execArgv instead of the
+  // node --test CLI flag.
+  const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
+  assert.equal(allSites.length, 5, `expected 5 derived-concurrency node --test sites, got ${allSites.length}`);
+  // The --buckets runner derives its concurrency from the SAME default (no hardcoded literal).
+  assert.match(src, /node --test-concurrency="\$\(bucket_test_concurrency/, "the --buckets runner must derive concurrency via bucket_test_concurrency");
+  // bucket_test_concurrency thin-forwards to runner-concurrency.ts bucketTestConcurrency, whose fallback
+  // is defaultTestConcurrency (SPEC P4 — the derivation moved out of bash, so the fallback is now
+  // asserted structurally on the TS source, not a bash `default_test_concurrency\n}` line).
+  assert.match(src, /bucket_test_concurrency\(\) \{\n  node --no-warnings --experimental-strip-types "\$\{repo_root\}\/plugin\/scripts\/runner-concurrency\.ts" --bucket-test-concurrency "\$@"/, "bucket_test_concurrency must thin-forward to runner-concurrency.ts");
+  const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
+  assert.match(rc, /return defaultTestConcurrency\(\);/, "bucketTestConcurrency must fall back to defaultTestConcurrency");
+  assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 
-
-test("AC1/AC3/AC4/AC6 — REAL host, ONE run: hung (0-CPU) test-shaped processes are EXCLUDED, a running one is COUNTED, and the excluded set is enumerable", () => {
-  // K = 3 REAL hung processes: the cmdline carries `--test-concurrency` (so is_test_cmdline matches ⇒
-  // the CLASSIFICATION axis counts them — the pre-fix semantics), while the body blocks on a stdin read
-  // it never receives ⇒ ~0 CPU forever (the field shape: a reparented orphan burning no CPU). The
-  // parent holds the write end, so when this test exits the pipe closes and every child exits on its
-  // own — no orphan is left behind on disk.
-  const HUNG_BODY = "process.stdin.resume();process.stdin.on('end',()=>process.exit(0))";
-  const BUSY_BODY = "const t=Date.now();while(Date.now()-t<120000){Math.sqrt(Math.random())}";
-  const kids = [];
-  const hungPids = [];
-  try {
-    for (let i = 0; i < 3; i++) {
-      const c = spawn(process.execPath, ["--test-concurrency=1", "-e", HUNG_BODY], {
-        stdio: ["pipe", "ignore", "ignore"],
-        detached: true,
-      });
-      c.unref();
-      kids.push(c);
-      hungPids.push(c.pid);
-    }
-    // The AC4 positive control: a genuinely RUNNING test-shaped process (burns a core the whole run).
-    const busy = spawn(process.execPath, ["--test-concurrency=1", "-e", BUSY_BODY], {
-      stdio: ["ignore", "ignore", "ignore"],
-      detached: true,
-    });
-    busy.unref();
-    kids.push(busy);
-    // Let every child exec and settle into its steady state before the snapshot (a not-yet-exec'd
-    // child still carries its parent's cmdline and would otherwise race the classifier).
-    spawnSync("sleep", ["1.5"]);
-
-    const r = spawnSync("bash", [PROCESS_BUDGET, "--json"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "64" },
-    });
-    assert.equal(r.status, 0, `process-budget --json must exit 0\n${r.stderr}`);
-    const j = JSON.parse(r.stdout.trim());
-    const excludedPids = j.excluded.map((e) => e.pid);
-
-    assert.equal(j.liveness_source, "sampled", "the real-host path must report the SAMPLED axis");
-    // AC6 — the exclusion is VISIBLE and enumerable (硬规则 3b: "excluded N" and "excluded none" must
-    // be distinguishable in the output).
-    assert.ok(Array.isArray(j.excluded), "--json must carry an enumerable `excluded` array");
-    assert.equal(j.excluded_count, j.excluded.length, "excluded_count must equal the enumerable `excluded` length");
-    // AC1 + AC3 — every hung pid was CLASSIFIED (that is the ONLY way it can appear in `excluded`,
-    // which is built strictly from classified candidates) and is now EXCLUDED with a zero CPU delta.
-    // `excluded ⊆ classified candidates` by construction, so their presence here IS the pre-fix
-    // classification axis having counted them — the pre-fix script (whose only axis was
-    // classification) reported in_use=30 on this same host with these same 3 processes alive.
-    for (const pid of hungPids) {
-      assert.ok(excludedPids.includes(pid), `hung pid ${pid} must be listed in \`excluded\` (age + cpu delta enumerable)`);
-      const rec = j.excluded.find((x) => x.pid === pid);
-      assert.equal(rec.cpu_delta_ticks, 0, `hung pid ${pid} must carry a ZERO CPU delta over the window`);
-      assert.equal(rec.reason, "no_cpu_delta", `hung pid ${pid} exclusion reason`);
-      assert.ok(Number.isInteger(rec.age_s), `hung pid ${pid} record must carry the process age in seconds`);
-      assert.ok(rec.cmdline.includes("--test"), "the excluded record keeps enough cmdline to identify the process");
-    }
-    // AC4 — the bidirectional control in the SAME run and the SAME environment: the running process is
-    // NOT excluded ⇒ it is counted. A fix that dropped live processes too would fail this line.
-    assert.ok(!excludedPids.includes(busy.pid), `the RUNNING pid ${busy.pid} must NOT be excluded (AC4: live processes stay counted)`);
-    assert.ok(j.in_use >= 1, `a running test process must keep in_use ≥ 1 (got ${j.in_use})`);
-  } finally {
-    for (const c of kids) {
-      try {
-        if (c.stdin) c.stdin.destroy();
-      } catch {
-        /* best-effort cleanup */
-      }
-      try {
-        process.kill(c.pid, "SIGKILL");
-      } catch {
-        /* already gone */
-      }
-    }
-  }
-});
-
-
-test("AC5 — the CONSUMER lane count leaves its FLOOR once the hung candidates stop counting (enumerated, not a boolean)", () => {
-  // The SAME environment — nproc=4, S=2, oversub=1, and a pinned full-suite lock base so S cannot be
-  // shadowed by a live `<base>.concurrency` file (the 判据4 pattern) — with the ONLY difference being
-  // whether the liveness axis drops the 3 hung candidates. `RESOURCE_GATE_TEST_NODE_PROCS` is left as
-  // the EMPTY STRING (read as unset) so the lane count really goes through the CONSUMER path
-  // defaultLaneCount() → testProcessesInUse() → the real process-budget.sh, not a pinned shortcut.
-  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-hung-lane-"));
-  const pinBase = path.join(pinTmp, "full-suite.lock");
-  fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
-  try {
-    const nproc = 4;
-    const slots = 2;
-    const oversub = 1;
-    const hungCmds = ["node --test h1.test.mjs", "node --test h2.test.mjs", "node --test h3.test.mjs"];
-    const seamEnv = {
-      RESOURCE_GATE_NPROC: String(nproc),
-      QUAY_MAX_CONCURRENT_SUITES: String(slots),
-      QUAY_MAX_OVERSUBSCRIPTION: String(oversub),
-      FULL_SUITE_LOCK_FILE: pinBase,
-      RESOURCE_GATE_TEST_NODE_PROCS: "",
-      RESOURCE_GATE_TEST_PROC_CMDLINES: hungCmds.join(";"),
-    };
-    // Pre-fix axis (classification only): all 3 hung candidates count ⇒ in_use=3 ⇒ floor((4−3)×1/2)=0
-    // ⇒ clamped to the floor 1.
-    const before = withSeams(seamEnv, () => defaultLaneCount());
-    // Post-fix axis (liveness pinned): all 3 dropped ⇒ in_use=0 ⇒ floor((4−0)×1/2) = 2.
-    const after = withSeams({ ...seamEnv, RESOURCE_GATE_TEST_PROC_LIVENESS: "hung;hung;hung" }, () => defaultLaneCount());
-    const enumeration =
-      `nproc=${nproc} S=${slots} oversub=${oversub} | in_use=3 ⇒ laneCount=${before} | in_use=0 ⇒ laneCount=${after}`;
-    assert.equal(before, Math.max(1, Math.floor(((nproc - 3) * oversub) / slots)), `pre-fix lane count = the formula on in_use=3 — ${enumeration}`);
-    assert.equal(after, Math.max(1, Math.floor(((nproc - 0) * oversub) / slots)), `post-fix lane count = the formula on in_use=0 — ${enumeration}`);
-    assert.equal(before, 1, `the pre-fix reading sits ON the floor — ${enumeration}`);
-    assert.equal(after, 2, `the post-fix reading is the host-derived value — ${enumeration}`);
-    assert.ok(after > before, `the consumer must move off the floor — ${enumeration}`);
-  } finally {
-    fs.rmSync(pinTmp, { recursive: true, force: true });
-  }
-});
+// ── AC7: test.sh integration — gate on the full-suite default, skip on scoped runs ─────────────────

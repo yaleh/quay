@@ -26,230 +26,108 @@
 //
 // Run: scripts/test.sh plugin/test/promotion-driver.test.mjs
 
-// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 4/5 (9 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
+// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 4/8 (6 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { FIX_WORKER_TIMEOUT_MS, MAX_FIX_RETRIES_DEFAULT, OUTCOME_LOG_REL, appendOutcomeRecord, assert, computeOutcomeRecords, computeReverifyOutcome, fixWorkerCaptureCmd, fs, makeRoot, makeSelfContainedRoot, path, readOutcomeLines, readRoundLines, readStatus, realReadyPoolCmd, runDriver, spawn, writeDepBlockedTask, writeDodShortTask, writeTask } from "./helpers/promotion-driver-harness.mjs";
+import { REPO_ROOT, advanceRetryCap, assert, buildFixWorkerArgv, buildFixWorkerPrompt, computeReverifyOutcome, fs, makeRoot, runFixPass, spawn } from "./helpers/promotion-driver-harness.mjs";
 
-test("gap-fix-worker-timeout-budget — --fix-worker-timeout-ms reaches the round record (end-to-end through the real CLI)", (t) => {
-  const root = makeRoot("timeout-cli");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-budget-cli");
-
-  // A misconfigured value is rejected at the CLI boundary (exit 2, fail-closed — never a silent default).
-  assert.throws(
-    () => runDriver(root, ["--once", "--fix-worker-timeout-ms", "nope"]),
-    (e) => e.status === 2,
-    "an unparseable --fix-worker-timeout-ms must exit 2",
-  );
-
-  // The effective budget is recorded per round, so a reading is attributable to the budget that
-  // produced it (⛔ otherwise pre-/post-widening records are indistinguishable in the carrier).
-  runDriver(root, [
-    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--fix-worker-timeout-ms", "5000",
-    "--once",
-  ]);
-  const lines = readRoundLines(root);
-  assert.equal(lines.length, 1, `one round record expected, got ${lines.length}`);
-  assert.equal(lines[0].fix_worker_timeout_ms, 5000, "the CLI override must reach the round record verbatim");
-
-  // Control: a run with no override records the module default — i.e. the field is a real reading
-  // of the effective budget, not a constant echo of whatever the test passed.
-  const root2 = makeRoot("timeout-cli-default");
-  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
-  writeTask(root2, "gap-budget-cli-2");
-  runDriver(root2, [
-    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--once",
-  ]);
-  assert.equal(readRoundLines(root2)[0].fix_worker_timeout_ms, FIX_WORKER_TIMEOUT_MS);
+test("runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)", () => {
+  // The override command keeps the negative control hermetic: `node -e 0` exits 0 without an LLM.
+  const INERT = "node -e 0";
+  const notEval = runFixPass(
+    [{ id: "gap-a", fixable: false, missing: [], notEvaluated: true, unfixable: ["bodyNotEvaluated=true freshness=stale-suspected"], prompt: null }],
+    REPO_ROOT, INERT,
+  )[0];
+  assert.equal(notEval.spawned, false, "⛔ no worker spawned");
+  assert.equal(notEval.notEvaluated, true, "…and the outcome record says WHICH kind of no-spawn this is");
+  assert.equal(notEval.argv, null);
+  // Negative control: the same id with a fixable decision DOES spawn (so the assertion above is about
+  // this decision, not about runFixPass being inert).
+  const fixable = runFixPass(
+    [{ id: "gap-a", fixable: true, missing: ["touchesResolve=false"], unfixable: [], prompt: "p" }],
+    REPO_ROOT, INERT,
+  )[0];
+  assert.equal(fixable.spawned, true, "control: a fixable decision still spawns");
+  assert.equal(!!fixable.notEvaluated, false, "control: a spawn is never marked not-evaluated");
 });
 
 
-test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured missing identifier (falsifiable)", (t) => {
-  const root = makeRoot("ac132-ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeDodShortTask(root, "gap-ac132-dodshort");
-
-  const capture = path.join(root, "fix-prompt.txt");
-  runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--once",
-  ]);
-
-  const records = readRoundLines(root);
-  assert.equal(records.length, 1, "exactly one round record");
-  const fix = records[0].fixes.find((f) => f.id === "gap-ac132-dodshort");
-  assert.ok(fix, "the ineligible todo produced a fix outcome");
-  assert.equal(fix.spawned, true, "AC132 AC1: an ineligible (DoD<40) todo spawns a fix worker");
-  assert.ok(fix.missing.includes("fourArtifacts=false missing=[dod]"), `structured missing list carried: ${JSON.stringify(fix.missing)}`);
-
-  // AC2 falsifiable: the prompt the fix worker RECEIVED carries the structured identifier — not just the id.
-  const prompt = fs.readFileSync(capture, "utf8");
-  assert.ok(prompt.includes("task_id=gap-ac132-dodshort"), "prompt carries the task id");
-  assert.ok(prompt.includes("fourArtifacts=false missing=[dod]"), `AC2: prompt carries the structured missing identifier (prompt=${JSON.stringify(prompt)})`);
-});
-
-// ── AC134 (falsifiable): 判定/晋升/修复各落一条 outcome（.quay/promotion-outcome.jsonl） ──────────
-
-
-
-
-test("computeOutcomeRecords — applied⇒promote, spawned⇒fix, unfixable⇒skip (fields task_id/gate/action/result/ts)", () => {
-  const at = "2026-08-22T00:00:00.000Z";
-  const applied = [{ id: "gap-a", ok: true, from: "todo", to: "ready", deliveryCritical: false }];
-  const fixes = [
-    { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0 },
-    { id: "gap-skip", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null },
-    { id: "gap-mixed", spawned: false, missing: ["selfTouchOk=false"], unfixable: ["superseded=true"], exitCode: null },
-  ];
-  const recs = computeOutcomeRecords({ at, applied, fixes });
-  assert.equal(recs.length, 4);
-  const [prom, fix, skip, mixed] = recs;
-
-  assert.equal(prom.task_id, "gap-a");
-  assert.equal(prom.action, "promote");
-  assert.deepEqual(prom.gate, { eligible: true, missing: [] }, "promote gate: eligible, no missing");
-  assert.deepEqual(prom.result, { ok: true, detail: "todo->ready" });
-  assert.equal(prom.ts, at);
-
-  assert.equal(fix.task_id, "gap-fix");
-  assert.equal(fix.action, "fix");
-  assert.equal(fix.gate.eligible, false);
-  assert.deepEqual(fix.gate.missing, ["fourArtifacts=false missing=[dod]"], "AC134: fix gate carries the structured missing list");
-  assert.deepEqual(fix.result, { ok: true, detail: "spawned exit=0" });
-
-  assert.equal(skip.task_id, "gap-skip");
-  assert.equal(skip.action, "skip");
-  assert.equal(skip.gate.eligible, false);
-  assert.deepEqual(skip.gate.missing, ["depsReady=false"], "skip gate.missing = the unfixable blocker");
-
-  assert.equal(mixed.action, "skip", "a fixable item plus an unfixable blocker ⇒ skip (not fix)");
-  assert.deepEqual(mixed.gate.missing, ["selfTouchOk=false", "superseded=true"], "mixed skip carries fixable missing + unfixable blocker");
-});
-
-
-test("gap-fix-worker-edit-exit-4 — exit=4 但重闸判落地 ⇒ result.ok=true（⛔ result.ok 不再 = 裸 exitCode===0）", () => {
-  const at = "2026-08-23T00:00:00.000Z";
-  // exit=4（编辑成功后的事后非零退出）+ stderr 空（同 AC142 观测：stdout/stderr 均空）。
-  const fixes = [{ id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 4, stderr: null, timedOut: false }];
-
-  // 无 reverify ⇒ 退回 exitCode===0 ⇒ ok=false（旧行为；⛔ 不硬编码「exit-4=成功」——那是猜）。
-  const noReverify = computeOutcomeRecords({ at, applied: [], fixes });
-  assert.equal(noReverify.find((o) => o.action === "fix").result.ok, false, "无 reverify 时仍以退出码为准");
-
-  // 有 reverify 且闸判 nowEligible ⇒ ok=true（fix landed，⛔ 不信 exit-4 这个事后非零退出码）。
-  const reverify = { nowEligibleIds: ["gap-fix"], stillIneligibleIds: [] };
-  const withReverify = computeOutcomeRecords({ at, applied: [], fixes, reverify });
-  const fix = withReverify.find((o) => o.action === "fix");
-  assert.equal(fix.result.ok, true, "重闸判落地 ⇒ ok=true（exit-4 不把 result.ok 打 false）");
-  assert.ok(fix.result.detail.includes("fix landed"), `detail 标注落地: ${fix.result.detail}`);
-});
-
-
-test("gap-fix-worker-edit-exit-4 — exit=0 但重闸判仍不合格 ⇒ result.ok=false（⛔ 不信 exit-0 自述）", () => {
-  const fixes = [{ id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0, stderr: null, timedOut: false }];
-  const reverify = { nowEligibleIds: [], stillIneligibleIds: ["gap-fix"] };
-  const recs = computeOutcomeRecords({ at: "t", applied: [], fixes, reverify });
-  const fix = recs.find((o) => o.action === "fix");
-  assert.equal(fix.result.ok, false, "exit=0 但闸判仍不合格 ⇒ ok=false（AC133 ⛔ 不信 worker 自述）");
-});
-
-
-test("appendOutcomeRecord — pure append, never truncates (two lines survive)", (t) => {
-  const root = makeRoot("outcome-append");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const file = path.join(root, OUTCOME_LOG_REL);
-  const rec = (id, action) => ({ task_id: id, gate: { eligible: action === "promote", missing: [] }, action, result: { ok: true, detail: null }, ts: "t" });
-  appendOutcomeRecord(file, rec("gap-1", "promote"));
-  appendOutcomeRecord(file, rec("gap-2", "skip"));
-  const lines = readOutcomeLines(root);
-  assert.equal(lines.length, 2, "two appended outcome lines");
-  assert.deepEqual(lines.map((l) => l.task_id), ["gap-1", "gap-2"]);
-});
-
-
-test("AC134 AC2 — real gate + real tasks ⇒ outcome ledger holds real promote/skip records (seam OFF)", (t) => {
-  const root = makeSelfContainedRoot("ac134-ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-ac134-eligible", "todo");
-  writeDepBlockedTask(root, "gap-ac134-depblocked");
-
-  // DEFAULT argv — no --ready-pool-cmd, no --fix-worker-cmd (the injection seams are OFF). The only
-  // difference from production is the temp root + symlinked plugin/ (real ready-pool-check).
-  runDriver(root, ["--cap", "5", "--once"]);
-
-  const lines = readOutcomeLines(root);
-  assert.ok(lines.length >= 2, `AC134 AC2: ≥2 real outcome records, got ${lines.length} (${lines.map((l) => l.action).join(",")})`);
-
-  const promote = lines.find((l) => l.task_id === "gap-ac134-eligible");
-  assert.ok(promote, "the eligible task produced a promote outcome record");
-  assert.equal(promote.action, "promote");
-  assert.deepEqual(promote.gate, { eligible: true, missing: [] });
-  assert.equal(promote.result.ok, true);
-
-  const skip = lines.find((l) => l.task_id === "gap-ac134-depblocked");
-  assert.ok(skip, "the dep-blocked task produced a skip outcome record");
-  assert.equal(skip.action, "skip");
-  assert.equal(skip.gate.eligible, false);
-  assert.ok(skip.gate.missing.includes("depsReady=false"), `skip gate carries the blocker: ${JSON.stringify(skip.gate.missing)}`);
-
-  // Every record carries the AC134 required fields (task_id · gate(含 missing) · action · result · ts).
-  for (const l of lines) {
-    assert.ok(l.task_id, "task_id present");
-    assert.ok(l.gate && typeof l.gate.eligible === "boolean" && Array.isArray(l.gate.missing), "gate{eligible,missing} present");
-    assert.ok(["promote", "fix", "skip", "needs-human"].includes(l.action), `action ∈ promote|fix|skip|needs-human (got ${l.action})`);
-    assert.ok(l.result && typeof l.result.ok === "boolean", "result present");
-    assert.ok(l.ts, "ts present");
-  }
-
-  // The promotion actually landed (real gate, not fixture): status flipped todo → ready.
-  assert.equal(readStatus(root, "gap-ac134-eligible"), "ready", "the real gate promoted the eligible task");
-});
-
-// ── AC133 (falsifiable): 修完重跑同一个闸验证（⛔ 不信 worker 自述）+ 失败上限 needs-human ─────────
-
-
-test("AC133 MAX_FIX_RETRIES_DEFAULT — 与 fan-in 侧 attempt>=3 同值，非新设阈值", () => {
-  assert.equal(MAX_FIX_RETRIES_DEFAULT, 3, "default retry cap = 3 (gap-fan-in-relaunch-retry-cap 同值)");
-});
-
-
-test("computeReverifyOutcome — 闸的新判定归类：nowEligible / stillIneligible / notEvaluated / neither（纯函数）", () => {
-  // gate now says eligible (promotions contains the id) ⇒ fix took
-  const eligible = { ok: true, error: null, pool: 1, shouldApply: true, promotedIds: ["gap-a"], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
-  const r1 = computeReverifyOutcome(["gap-a", "gap-b"], eligible);
-  assert.deepEqual(r1.nowEligibleIds, ["gap-a"], "闸判合格 ⇒ nowEligible");
-  assert.deepEqual(r1.stillIneligibleIds, []);
-  assert.deepEqual(r1.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
-
-  // gate still says ineligible (fixDecisions contains eligible=false) ⇒ fix did NOT take
-  const stillBad = {
+test("computeReverifyOutcome — a re-run that judges the body NOT EVALUATED lands in notEvaluatedIds, ⛔ not stillIneligible (so it never advances the retry cap)", () => {
+  const re = {
     ok: true, error: null, pool: 1, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false,
     fixDecisions: [
-      { id: "gap-a", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" },
+      { id: "gap-stale", fixable: false, missing: [], notEvaluated: true, unfixable: ["bodyNotEvaluated=true freshness=stale-suspected"], prompt: null },
+      { id: "gap-real", fixable: true, missing: ["touchesResolve=false"], unfixable: [], prompt: "p" },
     ],
   };
-  const r2 = computeReverifyOutcome(["gap-a"], stillBad);
-  assert.deepEqual(r2.nowEligibleIds, [], "闸仍判不合格 ⇒ ⛔ 不得晋升");
-  assert.deepEqual(r2.stillIneligibleIds, ["gap-a"], "闸仍判不合格 ⇒ stillIneligible（⛔ 不信 worker 自述「已修好」）");
-  assert.deepEqual(r2.notEvaluatedIds, [], "ok=true ⇒ 无 not-evaluated");
+  const r = computeReverifyOutcome(["gap-stale", "gap-real"], re);
+  assert.deepEqual(r.notEvaluatedIds, ["gap-stale"], "the unvouched-for body ⇒ third bucket");
+  assert.deepEqual(r.stillIneligibleIds, ["gap-real"], "a genuine still-ineligible stays counted (⛔ the third state did not swallow it)");
+  assert.deepEqual(r.nowEligibleIds, []);
+  // The consequence that matters: only the genuine failure advances the cap.
+  const state = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(state, r.stillIneligibleIds, 1), ["gap-real"], "the real failure counts");
+  assert.equal(state.counts.has("gap-stale"), false, "⛔ the unvouched-for body never advances the retry cap — this is the needs-human flip's root");
+});
 
-  // neither (task left the todo pool) ⇒ not counted either way
-  const gone = { ok: true, error: null, pool: 0, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
-  const r3 = computeReverifyOutcome(["gap-z"], gone);
-  assert.deepEqual(r3, { nowEligibleIds: [], stillIneligibleIds: [], notEvaluatedIds: [] }, "task vanished from the pool ⇒ neither");
 
-  // ⛔ AC153：读不到输入（重跑闸 ok=false）⇒ 全部 notEvaluatedIds（不是 neither 静默丢弃，也不是
-  // stillIneligible 误计入失败上限）。
-  const unreadable = { ok: false, error: "ready-pool-check spawn failed", pool: null, shouldApply: false, promotedIds: [], applied: [], promotePathLlmInvoked: false, fixDecisions: [] };
-  const r4 = computeReverifyOutcome(["gap-a", "gap-b"], unreadable);
-  assert.deepEqual(r4.notEvaluatedIds, ["gap-a", "gap-b"], "重跑闸读不到 ⇒ notEvaluatedIds（⛔ 不是 neither/不是 stillIneligible）");
-  assert.deepEqual(r4.nowEligibleIds, [], "读不到 ⇒ ⛔ 不晋升");
-  assert.deepEqual(r4.stillIneligibleIds, [], "读不到 ⇒ ⛔ 不计失败上限");
+test("buildFixWorkerPrompt — task id + structured missing list, ⛔ not a prose directive", () => {
+  const p = buildFixWorkerPrompt("gap-a", ["fourArtifacts=false missing=[dod]"]);
+  assert.ok(p.includes("task_id=gap-a"), "the prompt carries the task id");
+  assert.ok(p.includes("fourArtifacts=false missing=[dod]"), "the structured missing identifier is in the prompt");
+  assert.ok(p.includes("structured_missing:"), "the prompt names the structured list (not 'go look what's wrong')");
+});
+
+
+test("buildFixWorkerArgv — default policy-resolved fix-worker; override prefix appends the prompt as the last arg", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac",
+    "AC140-1/L3: fix worker resolves via policy to the profile launcher (⛔ bash quay-launch.sh)");
+  assert.equal(def[def.indexOf("-n") + 1], "quay-fix-worker");
+  assert.ok(def[def.length - 1].includes("fourArtifacts=false missing=[dod]"), "the prompt is the argv payload");
+
+  const over = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT, "node -e capture");
+  assert.deepEqual(over.slice(0, 3), ["node", "-e", "capture"]);
+  assert.ok(over[over.length - 1].includes("fourArtifacts=false missing=[dod]"), "override keeps the prompt as the last arg");
+});
+
+
+test("gap-fix-worker-spawn-inherits-unrecognized-model — fix-worker argv aligns ANTHROPIC_DEFAULT_*_MODEL with --model (AC1 结构保证)", () => {
+  const def = buildFixWorkerArgv("gap-a", ["fourArtifacts=false missing=[dod]"], REPO_ROOT);
+  const si = def.indexOf("--settings");
+  assert.notEqual(si, -1, "fix-worker argv must carry --settings");
+  const settingsRaw = def[si + 1];
+  assert.ok(settingsRaw.startsWith("{"), `worker-default profile env must make --settings JSON (carries aligned env), got: ${String(settingsRaw).slice(0, 48)}`);
+  const settings = JSON.parse(settingsRaw);
+  const mi = def.indexOf("--model");
+  const model = def[mi + 1];
+  // AC1/AC4 结构保证：SDK 只在 --model 命中 ANTHROPIC_DEFAULT_*_MODEL 时才认自定义 model id（否则
+  // unrecognized_model sdk、回退到 wrapper 的无后缀值）；且 -anthropic 后缀必须保留到 litellm（fallback
+  // group，AC4 不回归）。
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, model, "HAIKU default must match --model (else unrecognized_model)");
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL, model, "SONNET default must match --model (else unrecognized_model)");
+  assert.equal(settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL, model, "OPUS default must match --model (else unrecognized_model)");
+  assert.equal(model, "deepseek-v4-pro-anthropic", "the model must keep the -anthropic suffix (litellm fallback group)");
+});
+
+
+test("runFixPass — fixable spawns (exit 0), unfixable records reason without spawning", (t) => {
+  const root = makeRoot("fixpass");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const decisions = [
+    { id: "gap-fix", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" },
+    { id: "gap-nofix", fixable: false, missing: [], unfixable: ["depsReady=false"], prompt: null },
+  ];
+  const outcomes = runFixPass(decisions, root, "node -e process.exit(0)");
+  assert.equal(outcomes[0].id, "gap-fix");
+  assert.equal(outcomes[0].spawned, true);
+  assert.deepEqual(outcomes[0].missing, ["fourArtifacts=false missing=[dod]"]);
+  assert.equal(outcomes[0].exitCode, 0);
+  assert.equal(outcomes[0].stderr, null);
+  assert.equal(outcomes[0].timedOut, false);
+  // gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的 argv + durationMs 落进 outcome。
+  assert.deepEqual(outcomes[0].argv.slice(0, 3), ["node", "-e", "process.exit(0)"], "AC4: argv prefix recorded verbatim");
+  assert.ok(outcomes[0].argv.length > 3 && outcomes[0].argv[3].includes("structured_missing"), "AC4: argv carries the appended fix prompt (last arg)");
+  assert.ok(Number.isFinite(outcomes[0].durationMs) && outcomes[0].durationMs >= 0, `AC4: durationMs recorded: ${outcomes[0].durationMs}`);
+  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null });
 });

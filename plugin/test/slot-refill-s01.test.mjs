@@ -24,10 +24,10 @@
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
-// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/12 (10 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
+// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { __dirname, analyzeSlotRefill, assert, computeSlotsFree, dispatchableBody, execFileSync, fs, inFlightTask, makeWorkspace, path, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { __dirname, analyzeSlotRefill, assert, computeSlotsFree, dispatchableBody, execFileSync, fs, makeWorkspace, path, writeTask } from "./helpers/slot-refill-harness.mjs";
 
 test("computeSlotsFree = max(0, cap − in_flight), never negative (AC1)", () => {
   assert.equal(computeSlotsFree(3, 0), 3);
@@ -144,71 +144,4 @@ test("B9 FORCE-DISPATCH — negative control: non-empty queue but recommended em
   assert.equal(r.recommended.length, 0, "but no dispatchable recommendation passes step-4");
   assert.equal(r.should_refill, false, "recommended empty ⇒ should_refill=false ⇒ no force dispatch (无此场景不误报)");
   assert.match(r.no_refill_reason, /no dispatchable candidate/);
-});
-
-
-test("recommended is capped at slots_free (AC3)", (t) => {
-  const root = makeWorkspace("cap-rec");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const id of ["gap-r1", "gap-r2", "gap-r3", "gap-r4"]) {
-    writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
-  }
-  // Only 1 slot free (cap 3, 2 in-flight).
-  const inFlight = [inFlightTask("gap-in1", ["- code/in1.ts (new)"]), inFlightTask("gap-in2", ["- code/in2.ts (new)"])];
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
-  assert.equal(r.slots_free, 1);
-  assert.equal(r.recommended.length, 1, "recommended never exceeds slots_free");
-});
-
-// ── AC5: the cap bound — in-flight ≥ cap ⇒ no refill ───────────────────────────────────────────────
-
-
-test("in-flight ≥ cap ⇒ should_refill=false, no_refill_reason names the bound (AC5)", (t) => {
-  const root = makeWorkspace("cap-bound");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  const inFlight = [
-    inFlightTask("gap-f1", ["- code/f1.ts (new)"]),
-    inFlightTask("gap-f2", ["- code/f2.ts (new)"]),
-    inFlightTask("gap-f3", ["- code/f3.ts (new)"]),
-  ];
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
-  assert.equal(r.slots_free, 0);
-  assert.equal(r.should_refill, false);
-  assert.match(r.no_refill_reason, /no free slots/);
-  assert.deepEqual(r.recommended, []);
-});
-
-
-test("cap is an INPUT — a smaller cap reduces free slots (AC5 mechanism/strategy separation)", (t) => {
-  const root = makeWorkspace("cap-input");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  const r1 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  const r2 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 1 });
-  assert.equal(r1.slots_free, 3);
-  assert.equal(r2.slots_free, 1, "a cap of 1 leaves exactly 1 free slot");
-  assert.equal(r1.should_refill, true);
-  assert.equal(r2.should_refill, true);
-});
-
-// ── REVERSE DIRECTION (gap-closed-bracket-leaves-live-agent-consuming-slots): a CLOSED bracket whose
-//    executor is still present occupies a slot — slots_free must not read it as free ─────────────────
-
-
-test("closedButLive occupies a slot: slots_free reduced, can flip should_refill (AC3 reverse)", (t) => {
-  const root = makeWorkspace("cbl");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  // cap 1; 1 running + 1 closed-but-live ⇒ occupied 2 ⇒ 0 free ⇒ no refill into a busy slot.
-  const inFlight = [inFlightTask("gap-run", ["- code/run.ts (new)"])];
-  const closedButLive = [inFlightTask("gap-ghost", ["- code/ghost.ts (new)"])];
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 1, inFlight, closedButLive });
-  assert.equal(r.in_flight_count, 1);
-  assert.equal(r.closed_but_live_count, 1);
-  assert.equal(r.occupied_slots, 2);
-  assert.equal(r.slots_free, 0);
-  assert.equal(r.should_refill, false);
-  assert.match(r.no_refill_reason, /closed-but-live 1/);
-  assert.deepEqual(r.recommended, []);
 });

@@ -10,89 +10,98 @@
 //   other-task (defer anti-livelock).
 
 // full-suite-runner.test.mjs — runner verdict / state machine / red detection / reason axis / kill-hang / control. Split from gap-suite-file-split-two-longest; harness shared via ./helpers/full-suite-runner-harness.mjs.
-// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 6/8 (10 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
+// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 6/12 (6 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
 
 import { test } from "node:test";
-import { CLOSURE_DECOMP_TASK_ID, CLOSURE_TASK, INNER_TICK, OUTER_TICK, RUNNER, after, assert, classifyFailure, fakeSuite, fs, os, path, read, readState, redPayload, runCli, runRunner, shouldDispatchOnRed, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
+import { after, assert, fakeSuite, fs, os, path, poll, readState, redPayload, runOnce, runRunner, sharedGreenShape, spawn, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
 
-test("AC2 e2e negative control — a SHARED-GATE red and a SPECIFIC-TEST red produce distinguishable failures[] payloads (the dispatch rule can decide)", async () => {
-  // gap-suite-red-verdict-carries-empty-failures-payload AC2 — the SUITE-RED failures payload must
-  // carry enough WHERE for the inner dispatch rule to distinguish a SHARED-GATE failure (run_static_checks
-  // — every scoped run pays it ⇒ stop dispatch) from a SPECIFIC-TEST failure unrelated to a candidate's
-  // touch-set (⇒ dispatch continues). Construct BOTH through the real runner and assert the two
-  // failures[] payloads classify differently (shared-gate vs specific-test) — the empty-payload defect
-  // would make this impossible (failures=[] has no location to classify).
-  const runBoth = async (scriptBody) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2neg-"));
-    const { f, dir } = fakeSuite(scriptBody);
-    try {
-      const child = runRunner({ root, command: `bash ${f}` });
-      const { code } = await waitExit(child);
-      assert.notEqual(code, 0, "the red suite exits non-zero");
-      const s = readState(root);
-      assert.equal(s.state, "red");
-      assert.ok(s.failures && s.failures.length >= 1, `failures[] must be non-empty (payload not empty); got ${JSON.stringify(s.failures)}`);
-      return { s, root };
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  };
-
-  // shared-gate red: a static-check checker fails (task-contract ratchet growth) — the shared gate
-  const shared = await runBoth(
-    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
-      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0 — see --json for details"\n' +
-      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
-      "exit 1",
-  );
-  // specific-test red: a real test file failure (TAP not ok with a file in the detail block) — the
-  // file is repo-relative (absolute paths OUTSIDE the temp root would normalize away, see
-  // normalizeFailureFile); the runner captures it from the detail block's `location:` line. The
-  // detail line must be ECHOED (a bare `location: ...` line would be treated as a bash command).
-  const specific = await runBoth("echo \"not ok 1 - something failed\"\necho \"  location: 'plugin/test/foo.test.mjs:3:1'\"\nexit 1");
-
+test("AC5 — a child killed by a signal (SIGKILL) writes reason=infra-error (environment), NOT failed", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sigkill-"));
+  // A SIGKILL'd suite exits with code=null + signal=SIGKILL: the DIRECT test.sh child was torn down
+  // mid-run ⇒ an environment problem (reason=infra-error, no correctness conclusion), NOT a code
+  // failure. Previously this was labelled aborted; gap-infra-error-false-positive-from-test-internal-
+  // kill AC2 re-classifies a signal-killed DIRECT child as infra-error (the EXIT STATUS is the only
+  // reliable kill signal — a stream `Killed`/`__ENVFAIL__` marker from a test's internal subprocess
+  // is NOT).
+  const { f, dir } = fakeSuite('echo "about to die"\nkill -9 $$\necho "unreachable"');
   try {
-    const sharedLoc = classifyFailure(shared.s.failures[0]);
-    const specificLoc = classifyFailure(specific.s.failures[0]);
-    assert.equal(sharedLoc.kind, "shared-gate", `the static-check failure classifies shared-gate; got ${JSON.stringify(sharedLoc)}`);
-    assert.equal(specificLoc.kind, "specific-test", `the test-file failure classifies specific-test; got ${JSON.stringify(specificLoc)}`);
-    // The dispatch rule reads the payloads differently: a shared-gate red blocks an unrelated
-    // candidate; a specific-test red unrelated to the candidate's touches does NOT.
-    assert.equal(
-      shouldDispatchOnRed(shared.s, "## Touches\n- plugin/test/other.test.mjs\n"),
-      true,
-      "shared-gate red stops dispatch even for an unrelated candidate (every scoped run pays it)",
-    );
-    assert.equal(
-      shouldDispatchOnRed(specific.s, "## Touches\n- plugin/test/other.test.mjs\n"),
-      false,
-      "a specific-test red unrelated to the candidate's touch-set does NOT stop dispatch (dispatch continues)",
-    );
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on a killed suite");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
+    }, { timeoutMs: 20000 });
+    assert.ok(s, "signal-killed child is final state=red reason=infra-error");
   } finally {
-    fs.rmSync(shared.root, { recursive: true, force: true });
-    fs.rmSync(specific.root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 
-test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red and carries the failed file in failures[]", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pf-"));
+test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=infra-error, NOT failed (the 07:08→07:21 shape)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-137-"));
+  // gap-suite-cutoff-what-tears-test-process-at-session-topology (confirmed 2026-08-07): in the real
+  // full-suite path test.sh runs `node --test` as a CHILD and bash reports a SIGKILL'd child as its
+  // OWN exit code 128+N (137 for SIGKILL). The runner's child is `bash -c <test.sh>`, so it sees
+  // exit.code=137, exit.signal=null — the pre-fix childKilledBySignal (`exitCode === null`) missed
+  // this and mislabelled it reason=failed (a stop-dispatch signal). Reproduce the bash shape:
+  //   bash runs a child, the child is SIGKILL'd externally, bash `wait`s it (→137) and exits 137.
+  // gap-infra-error-false-positive-from-test-internal-kill AC2: the DIRECT child exiting 128+N
+  // (a signal-killed descendant) is an environment problem ⇒ reason=infra-error (the runner's own
+  // test.sh child was torn down mid-run), NOT aborted.
   const { f, dir } = fakeSuite(
-    'echo "__PERFILE__ duration_ms=3580.991183 packages/quay/test/verify-delivery-surface.test.mjs passed=false"\nexit 1',
+    'echo "simulating a SIGKILL\'d node --test child"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "code=$?\n" +
+      'echo "bash observed child killed, exiting $code"\n' +
+      "exit \"$code\"",
   );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on an infra-error suite");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
+    }, { timeoutMs: 20000 });
+    assert.ok(s, `bash-exits-137 signal-kill is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
+    // And the stop-dispatch consumer (runOnce) reports NO stop signal for infra-error-red (AC5 —
+    // infra-error, like aborted, does NOT stop dispatch).
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "bash-137 infra-error-red must NOT trigger stop-dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC5 — a generic non-zero exit with NO failure/abort marker stays reason=failed (fail-closed catch-all)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-catch-"));
+  // The reason-axis boundary: an unmatched non-zero exit could be a real failure no structured line
+  // matched. Failing CLOSED (reason=failed) preserves the stop-dispatch signal for that class; only a
+  // recognised NO-conclusion shape (abort marker / signal kill / spawn error) is relaxed to aborted.
+  const { f, dir } = fakeSuite('echo "something went wrong"\nexit 3');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
     assert.equal(code, 1, "runner exits 1 on red");
     const s = readState(root);
-    assert.equal(s.state, "red", "__PERFILE__ passed=false flips state to red (AC2)");
-    assert.equal(s.reason, "failed");
-    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the per-file failure (AC3); got ${JSON.stringify(s.failures)}`);
-    assert.equal(
-      s.failures[0].file,
-      "packages/quay/test/verify-delivery-surface.test.mjs",
-      "the per-file line's path is the failure's file (AC3 — red with detail, no more failures=[])",
-    );
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed", "an unmatched non-zero exit stays fail-closed failed");
+    // gap-suite-red-verdict-carries-empty-failures-payload AC1 — a red verdict must NEVER carry an
+    // EMPTY failure payload: the fail-closed catch-all used to write failures=[] (the SUITE-RED
+    // event's dispatch rule has no input). Now the runner synthesizes one best-effort entry from the
+    // last stream line so the red-window dispatch rule has a failure to classify. The synthesized
+    // entry carries no file (the line `something went wrong` has no path), so it rides
+    // `unattributed[]` — the payload lives in failures[] OR unattributed[] (AC1/AC2 segmentation).
+    assert.ok(redPayload(s).length >= 1, `a red verdict carries a non-empty failure payload (failures[] or unattributed[]); got ${JSON.stringify(s)}`);
+    assert.ok(redPayload(s)[0].line, "the synthesized failure carries a line (the last stream output)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -100,87 +109,21 @@ test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red a
 });
 
 
-test("AC2 e2e — a GREEN round archives stderr __OVERHEAD__ phase lines (stderr is teed, not dropped)", async () => {
-  // test.sh's _oh_emit writes the fixed-overhead decomposition to STDERR (>&2). The runner must
-  // archive those lines into .quay/full-suite.log — the outer's verification round greps that log
-  // for `__OVERHEAD__`. This fake suite emits one line to stdout and one to STDERR on a green run;
-  // both must land in the archived log (gap-red-round-loses-overhead-phase-decomposition AC2).
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-green-"));
-  const { f, dir } = fakeSuite(
-    'echo "__OVERHEAD__ lock_overhead_ms=42"\n' +
-      'echo "__OVERHEAD__ main_phase_ms=650104" >&2\n' +
-      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
-  );
-  try {
-    const child = runRunner({ root, command: `bash ${f}` });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `green suite exits 0, got ${code}`);
-    assert.equal(readState(root).state, "green");
-    const log = read(path.join(root, ".quay", "full-suite.log"));
-    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42/, "stdout __OVERHEAD__ line reached the archived log");
-    assert.match(
-      log,
-      /__OVERHEAD__ main_phase_ms=650104/,
-      "STDERR __OVERHEAD__ line reached the archived log (stderr is teed, not dropped)",
-    );
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("AC2/AC3 e2e — a RED/killed round's archived log still carries stderr __OVERHEAD__ phase lines (red round OVERHEAD non-zero)", async () => {
-  // gap-red-round-loses-overhead-phase-decomposition: kill-on-red truncates the main phase BEFORE
-  // test.sh's full 9-segment emit, so a red round historically archived ZERO __OVERHEAD__ lines.
-  // With the partial fallback, test.sh emits the COMPLETED segments (serial/lowconc) with partial=1
-  // to stderr BEFORE the kill; the runner must archive those lines even though the round is red and
-  // the child is killed. This fake suite writes the partial-phase lines to stderr, reds early, then
-  // goes silent so the runner's red-grace kill fires — the __OVERHEAD__ count must be non-zero.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
-  const { f, dir } = fakeSuite(
-    'echo "__OVERHEAD__ lock_overhead_ms=42 partial=1"\n' +
-      'echo "__OVERHEAD__ serial_phase_ms=639986 partial=1" >&2\n' +
-      'echo "__OVERHEAD__ lowconc_phase_ms=271616 partial=1" >&2\n' +
-      'echo "not ok 1 - boom"\n' +
-      "sleep 5\n",
-  );
-  try {
-    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "300", QUAY_TEST_KILL_ON_RED: "1" } });
-    const { code } = await waitExit(child);
-    assert.notEqual(code, 0, "runner exits non-zero on the red");
-    const s = readState(root);
-    assert.equal(s.state, "red", "the failure flipped red");
-    const log = read(path.join(root, ".quay", "full-suite.log"));
-    // The red round's phase decomposition is present DESPITE the kill — the whole point of AC2/AC3.
-    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42 partial=1/, "stderr partial line reached the archived log");
-    assert.match(log, /__OVERHEAD__ serial_phase_ms=639986 partial=1/, "completed serial phase present on the red round");
-    assert.match(log, /__OVERHEAD__ lowconc_phase_ms=271616 partial=1/, "completed lowconc phase present on the red round");
-    assert.ok((log.match(/__OVERHEAD__/g) || []).length >= 3, "the red round's __OVERHEAD__ count is non-zero");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
-  // Candidate C merge semantics: the suite-tail leak scan reports a residual to the stream
-  // (unconditional, no `&&` short-circuit in test.sh); the runner must recognize that FAIL line
-  // as a REAL failure (not swallow it into the failures=[] catch-all).
-  const { f, dir } = fakeSuite(
-    'echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs after the run (delta vs the before-run snapshot; prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2\nexit 1',
-  );
+test("AC3 — a red suite's full-suite.log ends with a `# fail` summary line (gap-suite-red-verdict-carries-empty-failures-payload)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-logsump-"));
+  // The observed defect: full-suite.log ran 9251 lines with ZERO `# fail`/`# pass` summary lines,
+  // ending mid-assertion. The runner now appends its OWN TAP-form summary after the verdict so the
+  // log is always mechanically queryable for a fail count — even when the child was killed mid-assert.
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"\nexit 1');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
     assert.equal(code, 1, "runner exits 1 on red");
-    const s = readState(root);
-    assert.equal(s.state, "red", "tmux-leak-scan FAIL flips state to red (candidate C — leak is a real residual)");
-    assert.equal(s.reason, "failed");
-    assert.ok(redPayload(s).length >= 1, `the red payload carries the leak-scan residual (AC5); got ${JSON.stringify(s)}`);
-    assert.match(redPayload(s)[0].line, /tmux-leak-scan: FAIL/, "the leak-scan FAIL line is the recorded failure");
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    // The runner's own summary line carries the red verdict as a fail count (TAP form so
+    // `grep -cE '^# (tests|pass|fail|cancelled)'` finds it).
+    assert.match(log, /^# fail [1-9]\d*$/m, `log has a '# fail N' summary line; got:\n${log}`);
+    assert.match(log, /^# suite red failed$/m, "log summary names the red verdict");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -188,88 +131,32 @@ test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red
 });
 
 
-
-test("AC3 — the inner stop-condition reads the outer suite-state; the inner doc has ZERO scripts/test.sh self-run literal", () => {
-  const inner = read(INNER_TICK);
-  // Inner reads the suite-state file and its `state` field (running/green => proceed, red => stop).
-  assert.ok(inner.includes(".quay/full-suite-state.json"), "inner doc reads .quay/full-suite-state.json");
-  assert.ok(inner.includes("`state`"), "inner doc reads the `state` field");
-  assert.ok(inner.includes("running"), "inner doc handles running");
-  assert.ok(inner.includes("green"), "inner doc handles green");
-  assert.ok(inner.includes("red"), "inner doc handles red");
-  // DoD grep: inner side has NO full-suite self-run literal.
-  assert.ok(
-    !inner.includes("scripts/test.sh"),
-    "inner doc has NO scripts/test.sh literal (inner 零全量套件自跑 — DoD grep proof)",
-  );
+test("AC1/AC3 e2e — a GREEN suite's full-suite.log ends with a `# fail 0` summary (summary is verdict-accurate)", async () => {
+  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / generation-guard /
+  // pid shape tests (4 spawns → 1). The green log summary is written on the shared green run.
+  const { log } = await sharedGreenShape();
+  assert.match(log, /^# fail 0$/m, `a green run logs '# fail 0'; got:\n${log}`);
+  assert.match(log, /^# suite green$/m, "green summary names the green verdict");
 });
 
 
-test("AC4 — the red-window ruling is explicit in the loop docs: RED => stop dispatch + hold fan-in", () => {
-  const outer = read(OUTER_TICK);
-  const inner = read(INNER_TICK);
-  // The red state IS the stop-dispatch signal (outer writes it via the runner; inner reads it).
-  assert.ok(outer.includes("stop-dispatch 信号"), "outer doc names the stop-dispatch signal (AC4)");
-  assert.ok(outer.includes("红窗分诊"), "outer doc has the red-window triage section (AC4)");
-  // GREEN/RUNNING => optimistic merge/dispatch (the point of eliminating the sync point).
-  assert.ok(inner.includes("RUNNING 不等套件"), "inner doc proceeds on RUNNING (optimistic, AC4)");
-  // RED => stop new dispatch AND hold completed-agent fan-in.
-  assert.ok(
-    inner.includes("暂缓已完成 agent 的 fan-in"),
-    "inner doc holds fan-in on red (AC4) — only stopping dispatch lets a red tree keep accumulating",
+test("AC1 — a passing vitest-style suite logging a bare-X console line stays GREEN (no false early-red)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1x-"));
+  // archguard TASK-67 shape: a PASSING negative-control test logs `✖ Diagram test failed` to
+  // console.error; the vitest summary is 0 failed / exit 0. The old bare-✖ FAILURE_PATTERN turned
+  // this GREEN suite red. With structured matching it must stay green (AC1).
+  const { f, dir } = fakeSuite(
+    'echo "✖ Diagram test failed" >&2\n' +
+      'echo "# tests 5"\necho "# pass 5"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
   );
-});
-
-
-test("AC5 — the >=3min/<3min threshold rule + durationMs measurement hook are in both loop docs", () => {
-  for (const [name, doc] of [
-    ["outer", read(OUTER_TICK)],
-    ["inner", read(INNER_TICK)],
-  ]) {
-    assert.ok(doc.includes("3 分钟"), `${name} doc has the 3-minute threshold`);
-    assert.ok(doc.includes("durationMs"), `${name} doc names durationMs as the measurement hook`);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.equal(s.state, "green", "bare ✖ console noise must NOT flip state to red (AC1)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-
-test("AC7 — the three batch-eliminating blocks (a/b/c) are cross-annotated in the closure-sync task and loop docs", () => {
-  const closure = read(CLOSURE_TASK);
-  assert.ok(
-    closure.includes("gap-full-suite-belongs-to-outer-background-above-3-min"),
-    "closure-sync task names the (a) suite block (cross-annotation)",
-  );
-  assert.ok(
-    closure.includes(CLOSURE_DECOMP_TASK_ID),
-    "closure-sync task names the (c) AC/evidence block",
-  );
-  for (const [name, doc] of [
-    ["outer", read(OUTER_TICK)],
-    ["inner", read(INNER_TICK)],
-  ]) {
-    assert.ok(
-      doc.includes(CLOSURE_DECOMP_TASK_ID),
-      `${name} loop doc references the (c) closure-decomposition task id (AC7)`,
-    );
-  }
-});
-
-// ── Contract invoke (gap-full-suite-runner-marks-test-sh-gate-wait-as-failed) ──────────
-// --wait-check is the ABORT-side twin of --fail-fast-check: it proves the gate-WAIT ⇒ aborted ⇒
-// NO-stop-dispatch chain end-to-end via a runnable CLI control (the Contract's `measure` surface).
-
-
-
-test("AC1 Contract invoke — `full-suite-runner.ts --wait-check` proves: test.sh gate-WAIT => red reason=aborted => NO stopSignal", async () => {
-  const { code, out, err } = await runCli(RUNNER, ["--wait-check"]);
-  assert.equal(code, 0, `--wait-check exits 0 when the ABORT chain works; got ${code}\n${out}\n${err}`);
-  assert.match(out, /wait-check OK/, "verification line present");
-  assert.match(out, /reason=aborted/, "gate-WAIT is reason=aborted (no correctness conclusion)");
-  assert.match(out, /stopSignal=false/, "aborted-red must NOT stop dispatch (AC1)");
-  assert.match(out, /SUITE-RED/, "SUITE-RED event still recorded (red noticed, routed by reason)");
-});
-
-// ── gap-full-suite-state-red-no-failure-detail-static-check-invisible Contract invoke ───────────────
-// --static-check-check is the STATIC-CHECK-side twin of --fail-fast-check (test-failure chain) and
-// --wait-check (abort chain): it proves the 20:48Z shape (task-contract-check ratchet violations ⇒
-// the suite aborts before tests with violations=N / ceiling=C / newSinceBaseline=K in the log) now
-// lands in the state file as machine-readable fields consumers read WITHOUT hand-digging the log.

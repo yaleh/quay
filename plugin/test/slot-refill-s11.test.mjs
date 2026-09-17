@@ -24,242 +24,152 @@
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
-// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 11/12 (10 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
+// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 11/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeSlotRefill, assert, dispatchableBody, fs, hasLandedImplementation, inFlightTask, isLandedCodeComplete, judgeEndInvariant, landedAllCheckedBody, landedStuckWorkBody, makeLandedWorkspace, makeWorkspace, path, runSlotRefillJson, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { __dirname, analyzeSlotRefill, assert, dispatchableBody, execFileSync, fs, makeGitWorkspace, makeWorkspace, path, writeRounds, writeState, writeTask } from "./helpers/slot-refill-harness.mjs";
 
-test("CLIQUE-LANDED — AC1/AC2: a landed-but-not-flipped task's touches leave the mutex clique (phase-overlap shape); the real task touching the same file is recommended; the stuck-work landed task stays dispatchable", (t) => {
-  const root = makeLandedWorkspace("clique-pos", "gap-overlap");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // The shared file BOTH conflicting tasks touch must EXIST (a non-(new) touch resolves to the tree).
-  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/bin/sh\necho test\n");
-  // gap-overlap: implementation LANDED (plugin/scripts/impl.ts merged into develop — hasLandedImplementation
-  // fires) but 2/5 open implementation ACs ⇒ isLandedCodeComplete=false — the exact phase-overlap
-  // pre-flip shape (landed-but-not-code-complete, e.g. a DoD meta box not annotated （待外部）). Touches
-  // scripts/test.sh (the shared file) — and it is NOT not-yet-flipped (2/5 ≤ 50%), NOT deferred by the
-  // recommendation exclusion (not code-complete), so it reaches the candidate list.
-  writeTask(root, "gap-overlap", {
-    status: "ready", labels: ["gap"],
-    body: landedStuckWorkBody(2, 5).replace("- plugin/scripts/impl.ts", "- scripts/test.sh"),
-  });
-  // gap-p1: a genuinely-dispatchable NEW task touching the SAME file (the measured 2-slot task P1).
-  writeTask(root, "gap-p1", {
-    status: "ready", labels: ["gap"],
-    body: dispatchableBody(["- scripts/test.sh", "- code/p1.ts (new)"]),
-  });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
-  // AC1/AC2 primary: P1 IS recommended — its clique collision with the landed task's touches is ignored
-  // (pre-fix the landed task's touches blocked it in the batch: neither recommended nor deferred).
-  assert.ok(r.recommended.includes("gap-p1"), "AC2: the real new task is NOT crowded out by the landed task's touches");
-  // AC1/stuck-work parity: the landed-but-not-code-complete task stays a candidate and is recommended —
-  // it is NOT deferred; only its touches leave the clique (gap-ready-pool-worklanded-traps-stuck-work).
-  assert.ok(r.recommended.includes("gap-overlap"), "AC1: the landed stuck-work task stays dispatchable (only its touches are clique-exempt)");
-  // AC56 去序: `recommended` is de-ordered (lexicographic) — the batch's internal "real work first,
-  // landed re-appended after" priority is no longer an OUTPUT property. The AC1/AC2 guarantee (real
-  // work NOT crowded out of the SET — landed touches never displace real work) is the membership
-  // assertion above; the dispatch array itself must not encode a priority order.
-  assert.deepEqual(
-    r.recommended,
-    ["gap-overlap", "gap-p1"],
-    "recommended is de-ordered (lexicographic: overlap < p1) — the dispatch array no longer encodes the landed-vs-real priority (AC56)",
-  );
-});
-
-
-test("CLIQUE-LANDED — AC2 guard: the recommendation exclusion (landed && code-complete) still holds — a code-complete landed task is not re-recommended even in the same fixture", (t) => {
-  const root = makeLandedWorkspace("clique-guard", "gap-complete");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // gap-complete: implementation LANDED (merged into develop) AND all completion boxes checked ⇒
-  // code-complete. The recommendation exclusion must still keep it out of recommended (AC2: 不重新推荐
-  // landed 任务) — it is pool-excluded (allChecked) and/or deferred landed-implementation, never in the
-  // batch clique.
-  writeTask(root, "gap-complete", { status: "ready", labels: ["gap"], body: landedAllCheckedBody() });
-  // gap-fresh: a genuinely-new ready task (no landing record) — must still be recommended.
-  writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/fresh.ts (new)"]) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(!r.recommended.includes("gap-complete"), "AC2: a code-complete landed task is still excluded from recommendation");
-  assert.ok(r.recommended.includes("gap-fresh"), "AC2: a genuinely-new ready task is still recommended");
-});
-
-
-test("CLIQUE-LANDED — AC4: two NON-landed tasks touching the same file remain mutually exclusive (the change never relaxes real-overlap serialization)", (t) => {
-  const root = makeWorkspace("clique-ac4");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // Neither task is landed (makeWorkspace is a non-git temp dir ⇒ hasLandedImplementation fails safe to
-  // false) and BOTH touch the same file — the batch clique must still serialize them (AC4).
-  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
-  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
-  const hasA = r.recommended.includes("gap-a");
-  const hasB = r.recommended.includes("gap-b");
-  assert.ok(!(hasA && hasB), "AC4: two non-landed tasks touching the same file are never both recommended");
-  assert.equal(r.recommended.length, 1, "AC4: exactly one of the colliding non-landed pair is recommended");
-});
-
-// ── C8 SELF-TOUCH / BACKFILL (tasks/gap-slot-refill-c8-reject-no-backfill) ──────────────────────────
-// slot-refill's candidate loop used to apply only its OWN step-4 checks (touches-resolve / deps /
-// concurrency / nyf) and NOT the inner dispatch side's C8 self-touch gate. It therefore recommended
-// candidates that the inner rejected one-by-one at dispatch (C8: `## Touches` must contain
-// `tasks/<id>.md` without `(new)`), with NO backfill from later-in-sort candidates — the measured
-// "17 本可派 + 本 tick 无可派" deadlock (22 ready, 5 missing self-touch). AC2: the candidate loop now
-// rejects C8-MISSING candidates and BACKFILLS from later-in-sort candidates until cap filled or
-// candidates exhausted. AC4: all candidates rejected ⇒如实无可派 (no fabrication). The injected
-// `dispatchGate` callback gives the inner a per-candidate gate extension point with the same backfill.
-
-
-test("C8 BACKFILL — the first 3 id-sorted candidates lack self-touch; the 4th+ have it ⇒ recommended backfills the 4th+ (AC2, c8_rejected_candidate_backfilled)", (t) => {
-  const root = makeWorkspace("c8-backfill");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // id-sorted order: c8-a, c8-b, c8-c rank FIRST but are C8-MISSING (selfTouch: false) — the inner
-  // would reject each at dispatch. c8-d, c8-e rank LATER and ARE C8-clean — they must backfill.
-  writeTask(root, "gap-c8-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]), selfTouch: false });
-  writeTask(root, "gap-c8-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]), selfTouch: false });
-  writeTask(root, "gap-c8-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]), selfTouch: false });
-  writeTask(root, "gap-c8-d", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/d.ts (new)"]) });
-  writeTask(root, "gap-c8-e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e.ts (new)"]) });
-
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
-  assert.equal(r.pool, 5, "all 5 are ready and in the pool");
-  assert.equal(r.should_refill, true);
-  assert.ok(r.recommended.includes("gap-c8-d"), "4th candidate (C8-clean) BACKFILLS into recommended");
-  assert.ok(r.recommended.includes("gap-c8-e"), "5th candidate (C8-clean) BACKFILLS into recommended");
-  for (const id of ["gap-c8-a", "gap-c8-b", "gap-c8-c"]) {
-    assert.ok(!r.recommended.includes(id), `C8-MISSING candidate ${id} is NOT recommended (rejected ⇒ later candidate backfills)`);
-  }
-});
-
-
-test("C8 ALL-REJECTED — every candidate lacks self-touch ⇒ recommended empty, should_refill=false, no fabricated dispatch (AC4, all_rejected_no_fake)", (t) => {
-  const root = makeWorkspace("c8-all-rejected");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-c8-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/x.ts (new)"]), selfTouch: false });
-  writeTask(root, "gap-c8-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]), selfTouch: false });
-  writeTask(root, "gap-c8-z", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/z.ts (new)"]), selfTouch: false });
-
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
-  assert.equal(r.pool, 3, "3 ready candidates in the pool");
-  assert.equal(r.slots_free, 5, "slots exist");
-  assert.equal(r.recommended.length, 0, "all C8-MISSING ⇒ nothing recommended — 如实无可派 (no fabrication from backfill)");
-  assert.equal(r.should_refill, false, "recommended empty ⇒ should_refill=false");
-  assert.match(r.no_refill_reason, /no dispatchable candidate/);
-});
-
-
-test("C8 BACKFILL — injected dispatchGate rejects a mid-rank candidate ⇒ later candidate backfills (AC2, dispatch-gate callback)", (t) => {
-  const root = makeWorkspace("c8-gate");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // id-sorted: gate-a, gate-b, gate-c — all C8-clean. The INJECTED gate rejects gate-b (mid-ranked);
-  // the loop must skip it and BACKFILL gate-c into recommended (never recommend gate-b).
-  writeTask(root, "gap-gate-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ga.ts (new)"]) });
-  writeTask(root, "gap-gate-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/gb.ts (new)"]) });
-  writeTask(root, "gap-gate-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/gc.ts (new)"]) });
-  const r = analyzeSlotRefill({
-    tasksDir: path.join(root, "tasks"),
-    root,
-    cap: 3,
-    dispatchGate: ({ id }) => (id === "gap-gate-b" ? { ok: false, reason: "test gate rejects gap-gate-b" } : { ok: true }),
-  });
-  assert.ok(r.recommended.includes("gap-gate-a"), "unrejected candidate still recommended");
-  assert.ok(r.recommended.includes("gap-gate-c"), "later candidate BACKFILLS the rejected slot");
-  assert.ok(!r.recommended.includes("gap-gate-b"), "gate-rejected candidate is not recommended (no fabrication)");
-});
-
-// ── DIRECT IN-FLIGHT COUNT (AC115, SPEC-worker-driven-inner-2026-08-16 §5 阶段 1) ────────────────────
-// The telemetry-bracket "在飞" measurement (parseImplementingReport / measureImplementingFromTelemetry)
-// and the --in-flight/--closed-but-live/--running CLI parameter passing are RETIRED. In-flight is now
-// the worker driver's DIRECT child-process count, passed as --in-flight-count <n>. A bare CLI invocation
-// (no --in-flight-count) reports measurement_source="not-measured" and NULLS the slot family (fail-closed,
-// never a silent 0). The pure analyzeSlotRefill still accepts the inFlight/closedButLive/subagentsInFlight
-// arrays for the touches-disjointness + slot arithmetic (the AC53 gate's library consumer path).
-
-
-/** Run the slot-refill CLI with `--root` + `--cap 5` + extra args, parse the JSON. */
-
-
-test("AC115 — bare CLI (no --in-flight-count) is NOT a silent 0: measurement_source=not-measured + slot family NULL (fail-closed)", (t) => {
-  const root = makeWorkspace("not-meas");
+test("ARBITRATION — no red window keeps full cap even with high backlog; red state alone is not the trigger; absent state proceeds (AC2 invariants)", (t) => {
+  const root = makeWorkspace("arb-green");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-
-  const r = runSlotRefillJson(root);
-  assert.equal(r.measurement_source, "not-measured", "bare CLI no longer measures in-flight from telemetry brackets");
-  assert.equal(r.in_flight_count, null, "not-measured ⇒ in_flight_count null (never a silent 0)");
-  assert.equal(r.slots_free, null, "not-measured ⇒ slots_free null (never a silently-computed '5 empty slots')");
-  assert.equal(r.occupied_slots, null, "not-measured ⇒ occupied_slots null");
-  assert.equal(r.should_refill, false, "not-measured ⇒ fail-closed: no refill");
-  assert.ok(r.no_refill_reason && /NOT measured/.test(r.no_refill_reason), "no_refill_reason names the not-measured state");
+  // green window + high backlog ⇒ cap stays full (backlog is NO LONGER part of the trigger)
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 260 + i, state: "green", reason: "pass", fail: 0 })));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", fail: 0 }));
+  const green = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
+  assert.equal(green.effective_cap, 5, "green window ⇒ cap stays full (backlog 80 is irrelevant — not a trigger)");
+  assert.equal(green.arbitration.cap_narrowed, false);
+  assert.equal(green.arbitration.red_window_active, false);
+  // red STATE file but green ROUNDS (no consecutive-red window) ⇒ no narrowing — the state alone is
+  // not the trigger, the WINDOW is
+  writeState(root, [{ file: "code/a.ts" }]);
+  const redNoWindow = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
+  assert.equal(redNoWindow.effective_cap, 5, "suite state red but no consecutive-red window ⇒ no narrowing");
+  assert.equal(redNoWindow.arbitration.cap_narrowed, false);
+  assert.equal(redNoWindow.arbitration.red_window_active, false);
+  assert.equal(redNoWindow.arbitration.suite_red, true, "suite_red is still reported as a diagnostic");
+  // absent state + no rounds ⇒ not red-blocked ⇒ proceed
+  fs.rmSync(path.join(root, ".quay", "full-suite-state.json"));
+  fs.rmSync(path.join(root, ".quay", "per-task-suite-records.jsonl"));
+  const noState = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
+  assert.equal(noState.effective_cap, 5, "absent suite state + no window ⇒ no narrowing");
 });
 
 
-test("AC115 — --in-flight-count is the driver's DIRECT child count (driver-count provenance), byte-consistent arithmetic", (t) => {
-  const root = makeWorkspace("driver-count");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-in", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/in.ts (new)"]) });
-  writeTask(root, "gap-out", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/out.ts (new)"]) });
-
-  const r = runSlotRefillJson(root, ["--in-flight-count", "1"]);
-  assert.equal(r.measurement_source, "driver-count", "the in-flight count is the driver's direct child count");
-  assert.equal(r.in_flight_count, 0, "the wide Consumer-A set is empty in the CLI (the driver does disjointness in memory)");
-  assert.equal(r.running_subagent_count, 1, "Consumer B = the direct child count 1");
-  assert.equal(r.occupied_slots, 1);
-  assert.equal(r.slots_free, 4, "5 − 1 worker = 4 free slots");
-});
-
-
-test("MEASURED — subagentsInFlight occupies a slot in the pure function (occupied_slots/slots_free)", (t) => {
-  const root = makeWorkspace("subagents");
+test("ARBITRATION — CLI with a real git repo: a red window narrows the cap; green window restores (AC4)", (t) => {
+  const root = makeGitWorkspace("redbacklog", 55);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  // 1 in-flight + 2 investigation subagents (no task id — count only, never in the disjointness check).
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, subagentsInFlight: 2 });
-  assert.equal(r.subagents_in_flight, 2);
-  assert.equal(r.occupied_slots, 2, "occupied = 0 in-flight + 2 subagents");
-  assert.equal(r.slots_free, 3);
-  assert.ok(r.recommended.includes("gap-a"), "subagents don't block the disjointness check (no task id to overlap)");
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 270 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/a.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/a.ts" }]); // state red
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // AC115: --in-flight-count 0 = the driver's measured zero, so the exact slots_free/effective_cap
+  // assertions are hermetic without any telemetry/process scan.
+  const redOut = JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--json", "--in-flight-count", "0"],
+    { encoding: "utf8" },
+  ));
+  assert.equal(redOut.arbitration.integration_backlog, 55, "git-read backlog (develop..integration) still reported as a diagnostic");
+  assert.equal(redOut.arbitration.red_window_active, true);
+  assert.equal(redOut.arbitration.cap_narrowed, true);
+  assert.equal(redOut.effective_cap, 2, "red window (3 consecutive red rounds) ⇒ narrowed to redBacklogCap");
+  assert.equal(redOut.slots_free, 2);
+  // green window ⇒ cap restores to full
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 273 + i, state: "green", reason: "pass", fail: 0 })));
+  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", fail: 0 }));
+  const greenOut = JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--json", "--in-flight-count", "0"],
+    { encoding: "utf8" },
+  ));
+  assert.equal(greenOut.arbitration.cap_narrowed, false);
+  assert.equal(greenOut.effective_cap, 5, "green window ⇒ effective cap restored");
 });
 
-// AC6 / AC115 DUAL-MEASUREMENT NEGATIVE CONTROL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name,
-// 判据5 修法 (a), manager 13:2xZ; AC115 broadened the unmeasured family to include "not-measured"):
-// mock measurement_source non-measured ⇒ the measured slot-family fields are null; the SAME call with a
-// measured source ⇒ they stay numbers (negative control — the null is keyed to unmeasured, not to
-// "empty in-flight").
 
-
-test("AC6 — unmeasured source nulls in_flight_count/slots_free/subagents_in_flight; measured source keeps numbers (负控制)", (t) => {
-  const root = makeWorkspace("ac6-degraded");
+test("ARBITRATION — default (no red window/backlog) is byte-forward-compatible: cap stays the base cap (AC5 no-regress)", (t) => {
+  const root = makeWorkspace("arb-default");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const tasksDir = path.join(root, "tasks");
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  const base = { tasksDir, root, cap: 5, inFlight: [inFlightTask("gap-a", ["- code/a.ts (new)"])] };
-
-  // 负控制 mock: measurement_error non-empty + degraded source (the 2026-08-14 13:2xZ 现场 shape:
-  // spawnSync ETIMEDOUT ⇒ measurement_source='degraded-no-telemetry').
-  const degraded = analyzeSlotRefill({ ...base, measurementSource: "degraded-no-telemetry", measurementError: "spawnSync fast-mode-telemetry.ts ETIMEDOUT (load1=18.58)" });
-  assert.equal(degraded.measurement_source, "degraded-no-telemetry");
-  assert.ok(degraded.measurement_error, "measurement_error is non-empty (the mock)");
-  assert.equal(degraded.in_flight_count, null, "degraded → in_flight_count null (never a silent 0)");
-  assert.equal(degraded.slots_free, null, "degraded → slots_free null (never a silently-computed '5 empty slots')");
-  assert.equal(degraded.subagents_in_flight, null, "degraded → subagents_in_flight null");
-  assert.equal(degraded.occupied_slots, null, "degraded → occupied_slots null");
-  assert.equal(degraded.running_subagent_count, null, "degraded → running_subagent_count null");
-  assert.equal(degraded.should_refill, false, "degraded → fail-closed no-refill");
-  assert.ok(degraded.no_refill_reason && /NOT measured/.test(degraded.no_refill_reason),
-    "no_refill_reason names the not-measured state, not a fake 'no free slots'");
-
-  // Negative control: the SAME inputs with a HEALTHY source (explicit-input) ⇒ numbers, not null.
-  const healthy = analyzeSlotRefill({ ...base, measurementSource: "explicit-input" });
-  assert.equal(healthy.in_flight_count, 1, "healthy → in_flight_count stays a number");
-  assert.equal(healthy.slots_free, 4, "healthy → slots_free stays a number");
-  assert.equal(healthy.occupied_slots, 1, "healthy → occupied_slots stays a number");
-  assert.equal(healthy.subagents_in_flight, 0, "healthy → subagents_in_flight stays a number");
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.cap, 5, "no red window + no git backlog ⇒ fixed cap unchanged");
+  assert.equal(r.effective_cap, 5);
+  assert.equal(r.arbitration.cap_narrowed, false);
+  assert.equal(r.arbitration.red_window_active, false);
+  assert.equal(r.arbitration.integration_backlog, 0, "non-git temp root fails safe to 0");
+  assert.equal(r.slots_free, 5);
 });
 
-// ── IN-FLIGHT WORKTREE DIRECT QUANTITY (gap-scheduler-inflight-detection-misses-fan-in-worktree) ────
-// AC2: in an overlap scenario (in-flight fan-in worktree A touches X + hold candidate B touches X), the
-// worktree A is INVISIBLE to the snapshot in-flight set (its subagent is a workflow, not a standalone
-// Agent) — so without the direct quantity, B is recommended and no_refill_reason stays null, and the
-// AC53 gate falsely refuses the round end. With the worktree supplement, B must be deferred (reason
-// touches-overlap-in-flight) ⇒ recommended empty ⇒ should_refill=false ⇒ no_refill_reason non-empty ⇒
-// the gate ACCEPTS (judgeEndInvariant.violated === false).
+// ── DELIVERY-CRITICAL MECHANICAL AXIS — RETIRED (gap-delivery-critical-mechanical-axis-orphaned-
+// needs-ruling, 人 2026-09-07 裁定) ────────────────────────────────────────────────────────────────
+// The AC36 mechanical sort axis (blocking_suite, delivery_critical, id) is RETIRED: candidates.sort
+// is back to (blocking_suite, id), and `ranking` no longer carries a `deliveryCritical` field.
+// delivery-critical priority is now carried ENTIRELY by the selector's semantic judgment
+// (orchestration/dispatch-preference.md). The tests below assert the NEW shape: labeling a task
+// delivery-critical does NOT reorder the ranking, and the `delivery_critical_in_flight` negative
+// control (gap-delivery-critical-label-at-promote-not-after-dispatch, a DIFFERENT task's product)
+// is unchanged.
+
+
+test("DELIVERY-CRITICAL — RETIRED: a delivery-critical label does NOT reorder the ranking (no mechanical axis) while recommended stays de-ordered", (t) => {
+  const root = makeWorkspace("ac36-rank");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
+
+  const before = analyzeSlotRefill(opts);
+  assert.deepEqual(before.recommended, ["ac36-a", "ac36-b"], "no label ⇒ de-ordered (lexicographic)");
+  assert.equal(before.ranking[0].id, "ac36-a", "no label ⇒ id tie-break order in the ranking");
+
+  // After the axis retirement the label is NOT a mechanical axis: the ranking stays id-ordered.
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const after = analyzeSlotRefill(opts);
+  assert.deepEqual(after.recommended, ["ac36-a", "ac36-b"], "recommended stays de-ordered (lexicographic)");
+  assert.deepEqual(after.ranking.map((e) => e.id), ["ac36-a", "ac36-b"], "no mechanical DC axis ⇒ ranking stays id-ordered (the label does NOT reorder)");
+  assert.ok(!("deliveryCritical" in after.ranking[0]), "ranking entries no longer expose a deliveryCritical field (AC36 axis retired)");
+  assert.match(after.recommended_order, /order meaningless/, "the de-ordered output is explicitly annotated");
+});
+
+
+test("blocking_suite axis stays the TOP ranking axis (invariant, DC axis retired)", (t) => {
+  const root = makeWorkspace("ac36-suite");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  writeTask(root, "ac36-critical", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/crit.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // 3 consecutive red rounds implicating the watchdog task's Touches ⇒ watchdog is a suite-blocker.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 300 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.deepEqual(r.recommended, ["ac36-critical", "ac36-watchdog"], "recommended is de-ordered (lexicographic: critical < watchdog) — the dispatch array does NOT encode blocking_suite priority");
+  assert.equal(r.ranking[0].id, "ac36-watchdog", "in the ranking the suite-blocker ranks above plain id order (blocking_suite is the sole top axis)");
+  assert.equal(r.ranking[1].id, "ac36-critical", "non-suite-blocker ranks second by id order");
+});
+
+
+test("a false-positive dir-glob suite-blocker does NOT demote an id-first task (AC4 — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  const root = makeWorkspace("glob-dc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The crystallization shape: Touches carry concrete scripts AND the `plugin/test/` directory glob.
+  writeTask(root, "gap-crystal-dir", { status: "ready", labels: ["gap"], body: dispatchableBody(["- plugin/test/", "- plugin/scripts/capability-catalog.sh (new)"]) });
+  // ac37-dc must rank #1 when nothing is a true suite-blocker (id order puts it before gap-crystal-dir).
+  writeTask(root, "ac37-dc", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the dir glob must NOT
+  // implicate gap-crystal-dir, so ac37-dc keeps the top of the ranking (before the fix, the dir
+  // glob made gap-crystal-dir a false suite-blocker and pushed it to #1).
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 310 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.ok(!r.suite_blocking.tasks.includes("gap-crystal-dir"), "the dir-glob task is NOT a suite-blocker (AC2 negative control)");
+  assert.equal(r.ranking[0].id, "ac37-dc", "no suite-blocker ⇒ id order puts ac37-dc first in the ranking");
+  assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable");
+  assert.deepEqual(r.recommended, ["ac37-dc", "gap-crystal-dir"], "recommended is de-ordered (lexicographic: ac37-dc < gap-crystal-dir)");
+});

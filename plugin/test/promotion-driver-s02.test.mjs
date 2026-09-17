@@ -26,10 +26,79 @@
 //
 // Run: scripts/test.sh plugin/test/promotion-driver.test.mjs
 
-// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 2/5 (9 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
+// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 2/8 (6 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER, REPO_ROOT, assert, classifyCandidate, counterNodeE, defaultPromotionCheckArgv, fs, isLlmInvocation, makeRoot, path, readRoundLines, readStatus, realReadyPoolCmd, runDriver, runFixPass, runPromotionRound, spawn, writeTask } from "./helpers/promotion-driver-harness.mjs";
+import { ROUND_LOG_REL, appendRoundRecord, assert, computeRoundRecord, counterNodeE, fs, makeRoot, path, prosePrereqGapReading, readRoundLines, runDriver } from "./helpers/promotion-driver-harness.mjs";
+
+test("Plan 4 — prose_prereq_gap is a NAMED round-level reading, not only a nested fixes[].unfixable string", () => {
+  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-09-11T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], promotePathLlmInvoked: false };
+  // A round whose one ineligible candidate is prose-prereq-blocked: the task id + the refs must be
+  // readable from the round record directly (pre-Plan-4 they existed only inside
+  // fixes[].unfixable as the string "prosePrereqGap=[…]").
+  const fixes = [
+    { id: "gap-stuck", spawned: false, missing: [], unfixable: ["prosePrereqGap=[gap-a,gap-b]"], exitCode: null },
+    { id: "gap-other", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null },
+  ];
+  const rec = computeRoundRecord({ ...base, promotedIds: [], error: null, fixes });
+  assert.deepEqual(rec.prose_prereq_gap, [{ id: "gap-stuck", refs: ["gap-a", "gap-b"] }], "names the task AND the refs");
+  assert.deepEqual(computeRoundRecord({ ...base, promotedIds: [], error: null, fixes: [] }).prose_prereq_gap, [], "no prose-prereq block ⇒ empty, never absent");
+  // Unit: the two miss-forms must not invent an entry.
+  assert.deepEqual(prosePrereqGapReading([{ id: "gap-ok", unfixable: [] }]), [], "an unfixable-free candidate contributes nothing");
+  assert.deepEqual(prosePrereqGapReading([{ id: "gap-no-unfixable" }]), [], "a missing unfixable field contributes nothing (缺值 = 未查, never a fabricated ref)");
+});
+
+
+test("appendRoundRecord — pure append, never truncates (two lines survive)", (t) => {
+  const root = makeRoot("append");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, ROUND_LOG_REL);
+  const rec = (r) => computeRoundRecord({ round: r, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, promotePathLlmInvoked: false, fixes: [] });
+  appendRoundRecord(file, rec(1));
+  appendRoundRecord(file, rec(2));
+  assert.equal(readRoundLines(root).length, 2, "two appended lines");
+});
+
+// ── AC1: resident loop (does not exit after one round; enters next round after interval) ────────────
+
+
+test("AC1 — resident loop runs N rounds without exiting (--max-rounds bounds it; interval between rounds)", (t) => {
+  const root = makeRoot("ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const counter = path.join(root, "rpc.cnt");
+  const out = runDriver(root, [
+    "--ready-pool-cmd", counterNodeE(counter, "JSON.stringify({pool:1,should_apply:false,promotions:[],applied_promotions:[]})"),
+    "--interval", "5",
+    "--max-rounds", "3",
+    "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const rounds = events.filter((e) => e.event === "round");
+  assert.equal(rounds.length, 3, "AC1: three rounds emitted — the loop kept going after the first, never exited");
+  assert.deepEqual(rounds.map((r) => r.round), [1, 2, 3]);
+  assert.equal(Number(fs.readFileSync(counter, "utf8")), 3, "ready-pool-check invoked exactly 3 times (one full-pool call per round)");
+  const records = readRoundLines(root);
+  assert.equal(records.length, 3, "one round record per round");
+  assert.deepEqual(records.map((r) => r.action), ["none", "none", "none"]);
+});
+
+
+test("AC1 — --once runs exactly one round then exits (single-shot seam)", (t) => {
+  const root = makeRoot("once");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const out = runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({pool:0,should_apply:false,promotions:[],applied_promotions:[]}))",
+    "--once", "--json",
+  ]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.filter((e) => e.event === "round").length, 1, "--once runs one round");
+});
+
+// ── liveness 接线（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺「driver/supervisor 死时有机件在窗口内检测并报告」，但此前没有任何东西调 liveness 子命令
+// （log 13h 无更新）。修法 = driver 自身 round 循环每轮顺手调一次（promotion 侧接线）。本组验证：
+// ①resident loop 每轮真调 liveness（counter 缝）、②检出的死亡进 round record（⛔ 不静默丢）。
+
 
 test("liveness wiring — resident loop calls the liveness checker each round + round record carries it", (t) => {
   const root = makeRoot("liveness-wire");
@@ -71,192 +140,3 @@ test("liveness death surfacing — a death reported by the checker is carried in
 });
 
 // ── AC2 (falsifiable): stop the driver ⇒ a newly-eligible todo is NOT promoted ─────────────────────
-
-
-test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted; alive driver promotes it", async (t) => {
-  const root = makeRoot("ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-eligible-1", "todo");
-
-  const pidFile = path.join(root, "driver.pid");
-  const driver = spawn(process.execPath, [
-    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--interval", "25", "--cap", "5", "--pid-file", pidFile, "--json",
-  ], { stdio: ["ignore", "pipe", "ignore"] });
-  let buf = "";
-  driver.stdout.on("data", (d) => { buf += d; });
-
-  // Positive control: while the driver is ALIVE, the eligible todo gets promoted (todo → ready).
-  let promoted = false;
-  for (let i = 0; i < 300 && !promoted; i++) {
-    if (readStatus(root, "gap-eligible-1") === "ready") promoted = true;
-    else await new Promise((r) => setTimeout(r, 50));
-  }
-  assert.equal(promoted, true, "AC2 positive: the living driver promoted the eligible todo via full-pool --apply");
-
-  // Stop the driver and wait for it to fully exit.
-  driver.kill("SIGTERM");
-  const exitCode = await new Promise((resolve) => { driver.on("close", (c) => resolve(c)); });
-  assert.equal(exitCode, 0, "SIGTERM ⇒ clean exit (0)");
-  const events = buf.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.ok(events.some((e) => e.event === "stop" && e.reason === "signal"), "the signal stop is recorded, not silent");
-
-  // Negative control: AFTER the driver is dead, a NEW eligible todo appears in the pool…
-  writeTask(root, "gap-eligible-2", "todo");
-  await new Promise((r) => setTimeout(r, 500)); // ≫ interval — any live driver round would have run by now
-
-  // …and it is NOT promoted (proving promotion is driven by the driver, not some outer tick).
-  assert.equal(readStatus(root, "gap-eligible-2"), "todo", "AC2 falsifiable: after stop, the newly-eligible todo stays todo");
-
-  // Non-vacuous guard: the SAME task IS genuinely eligible — a single driver round (--once) promotes it.
-  runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
-  assert.equal(readStatus(root, "gap-eligible-2"), "ready", "guard: gap-eligible-2 was eligible all along — only the stopped driver held it back");
-});
-
-// ── AC131 (falsifiable): qualified todo promoted via A22 --apply, zero LLM, promote_path_llm_invoked=false ─────
-
-
-test("isLlmInvocation — falsifiable SET-based derivation (AC140-4 AC1 + AC2；⛔ not a claude literal)", () => {
-  assert.equal(isLlmInvocation(["claude", "-p", "fix task X"]), true, "claude -p is an LLM invocation (default set)");
-  assert.equal(isLlmInvocation(["/usr/local/bin/claude", "print"]), true, "absolute claude path is an LLM invocation");
-  assert.equal(isLlmInvocation(["node", "--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--apply"]), false, "ready-pool-check is mechanical, not an LLM");
-  assert.equal(isLlmInvocation([]), false, "empty argv is not an LLM invocation");
-  // AC140-4 AC1: the judgment reads the CONFIGURED set, not the literal `claude`.
-  // AC140-4 AC2 (能取假): 配 wrapper（claude-fjdac 进集合）后，isLlmInvocation(<wrapper argv>) 必须返回 true。
-  assert.equal(isLlmInvocation(["claude-fjdac", "-p", "fix task X"], ["claude", "claude-fjdac"]), true, "AC2: claude-fjdac in the configured set ⇒ isLlmInvocation(<wrapper argv>)=true");
-  assert.equal(isLlmInvocation(["claude-fjdac", "-p", "fix task X"]), false, "取假对照: claude-fjdac NOT in the default set ⇒ false (the SET decides, not the literal)");
-});
-
-
-test("AC131 AC1 — the promotion path spawns no LLM: default argv mechanical + round promotePathLlmInvoked=false", (t) => {
-  const root = makeRoot("ac131-ac1");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-
-  // The default promotion command is the mechanical ready-pool-check, never an LLM CLI.
-  const argv = defaultPromotionCheckArgv(root, 5);
-  assert.equal(argv[0], "node");
-  assert.equal(isLlmInvocation(argv), false, "AC131: default promotion argv is not an LLM invocation");
-
-  // A mechanical round reports promotePathLlmInvoked=false — and isLlmInvocation is falsifiable (claude ⇒ true),
-  // so this is a DERIVED measurement of the spawned argv, not a hardcoded false (hard rule 4).
-  const r = runPromotionRound(root, ["node", "-e", "console.log(JSON.stringify({pool:1,should_apply:true,promotions:[{id:'gap-x'}],applied_promotions:[{id:'gap-x',ok:true,from:'todo',to:'ready',deliveryCritical:false}]}))"], 5);
-  assert.equal(r.ok, true);
-  assert.equal(r.promotePathLlmInvoked, false, "AC131 AC1: the mechanical promotion round reports promotePathLlmInvoked=false");
-});
-
-
-test("AC131 AC2 — four-artifact + empty-deps todo promoted to ready in one round, outcome promote_path_llm_invoked=false", (t) => {
-  const root = makeRoot("ac131-ac2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // four artifacts (Proposal/Contract/AC/DoD) + Touches self-touch, frontmatter has no depends_on ⇒ deps empty.
-  writeTask(root, "gap-ac131-eligible", "todo");
-
-  // One driver round (--once) with the REAL ready-pool-check --apply against the temp workspace.
-  runDriver(root, ["--ready-pool-cmd", realReadyPoolCmd(root), "--cap", "5", "--once"]);
-
-  assert.equal(readStatus(root, "gap-ac131-eligible"), "ready", "AC131 AC2: eligible todo promoted to ready within one round");
-
-  const records = readRoundLines(root);
-  assert.equal(records.length, 1, "exactly one round record");
-  const rec = records[0];
-  assert.equal(rec.action, "promote");
-  assert.ok(rec.promoted_ids.includes("gap-ac131-eligible"), "the promoted id is recorded in the outcome");
-  assert.equal(rec.promote_path_llm_invoked, false, "AC131 AC2: the outcome record carries promote_path_llm_invoked=false (the falsifiable half)");
-});
-
-// ── AC132 (falsifiable): ineligible todo → short-lived fix worker with the gate's STRUCTURED input ──
-
-
-test("classifyCandidate — A24 classification (三可修 / 五不可修), ⛔ not re-designed", () => {
-  const base = {
-    id: "gap-a", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
-    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
-  };
-  // fixable: DoD missing (fourArtifacts=false)
-  const dod = classifyCandidate({ ...base, fourArtifacts: false, missingArtifacts: ["dod"] });
-  assert.equal(dod.fixable, true);
-  assert.deepEqual(dod.missing, ["fourArtifacts=false missing=[dod]"], "structured identifier verbatim from the gate");
-  assert.equal(dod.unfixable.length, 0);
-  assert.ok(dod.prompt.includes("fourArtifacts=false missing=[dod]"), "fixable ⇒ prompt carries the structured identifier");
-
-  // fixable: self-touch + touches (two fixable items)
-  const st = classifyCandidate({ ...base, selfTouchOk: false, touchesResolve: false });
-  assert.equal(st.fixable, true);
-  assert.deepEqual(st.missing, ["selfTouchOk=false", "touchesResolve=false"]);
-
-  // unfixable: deps not ready ⇒ no spawn, reason recorded
-  const deps = classifyCandidate({ ...base, depsReady: false });
-  assert.equal(deps.fixable, false);
-  assert.deepEqual(deps.unfixable, ["depsReady=false"]);
-  assert.equal(deps.prompt, null, "unfixable ⇒ no fix worker prompt");
-
-  // each of the other four unfixable classes records its own reason
-  assert.deepEqual(classifyCandidate({ ...base, retiredMechanism: true }).unfixable, ["retiredMechanism=true"]);
-  assert.deepEqual(classifyCandidate({ ...base, superseded: true }).unfixable, ["superseded=true"]);
-  assert.deepEqual(classifyCandidate({ ...base, compound: true }).unfixable, ["compound=true"]);
-  assert.deepEqual(classifyCandidate({ ...base, prosePrereqGap: ["gap-z"] }).unfixable, ["prosePrereqGap=[gap-z]"]);
-
-  // mixed: fixable AND unfixable ⇒ NOT fixable (the unfixable blocker is the real obstacle)
-  const mixed = classifyCandidate({ ...base, fourArtifacts: false, missingArtifacts: ["dod"], depsReady: false });
-  assert.equal(mixed.fixable, false, "a fixable item plus an unfixable blocker ⇒ no spawn");
-  assert.deepEqual(mixed.unfixable, ["depsReady=false"]);
-});
-
-// ── BODY-FRESHNESS third state (tasks/gap-ready-pool-body-still-read-from-stale-main-checkout) ─────
-// The consumer half. The defect: the gate's read source was behind the write face, so it reported a
-// body defect that no longer existed; the driver spawned a fix worker for it, the worker could not
-// fix what was not there, timed out, and 3 rounds of that flipped the task needs-human
-// (2026-09-14 gap-rework-multiplier-predictors). The fix worker IS the harm — so the consumer must
-// refuse it on an unvouched-for body, with a value that cannot be confused with a verdict.
-
-
-test("classifyCandidate — bodyEvaluated=false is its OWN class: ⛔ no fix worker for a body the gate could not vouch for", () => {
-  const base = {
-    id: "gap-a", fourArtifacts: true, missingArtifacts: [], selfTouchOk: true, touchesResolve: true,
-    depsReady: true, retiredMechanism: false, superseded: false, compound: false, prosePrereqGap: [],
-  };
-  // THE FALSIFIABLE PAIR — same body-derived input (`touchesResolve=false`, a fixable class), the
-  // ONLY difference is whether the body was evaluated. Body fresh ⇒ spawn; body unvouched-for ⇒ ⛔ no.
-  const fresh = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: true, bodyFreshness: "fresh" });
-  assert.equal(fresh.fixable, true, "control: a fresh body with touchesResolve=false IS the fixable class");
-  assert.deepEqual(fresh.missing, ["touchesResolve=false"]);
-  assert.ok(fresh.prompt, "control: a fix worker prompt is built");
-
-  const stale = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: false, bodyFreshness: "stale-suspected" });
-  assert.equal(stale.fixable, false, "same input + an unvouched-for body ⇒ ⛔ NO spawn (this is the 3-retry burn closed)");
-  assert.deepEqual(stale.missing, [], "⛔ the fixable identifier is NOT carried — it was judged on a body we cannot vouch for");
-  assert.equal(stale.prompt, null, "⛔ no fix worker prompt");
-  assert.equal(stale.notEvaluated, true, "the third state is carried as its own value, separate from `missing`/`unfixable` (硬规则 3b)");
-  assert.deepEqual(stale.unfixable, ["bodyNotEvaluated=true freshness=stale-suspected (闸读源落后写面 ⇒ 该体未被评估,⛔ 不派 fix worker)"],
-    "the reason names the freshness value — distinct from every A24 class");
-
-  // `unknown` (unmeasurable direction) is its own reason too, never collapsed into stale-suspected.
-  const unknown = classifyCandidate({ ...base, touchesResolve: false, bodyEvaluated: false, bodyFreshness: "unknown" });
-  assert.equal(unknown.notEvaluated, true);
-  assert.match(unknown.unfixable[0], /freshness=unknown/, "unknown is distinguishable from stale-suspected in the word list");
-
-  // 缺值 = 未查 (硬规则 6): an OLDER gate output without the field must NOT be read as `false`.
-  assert.equal(classifyCandidate({ ...base, touchesResolve: false }).fixable, true, "field absent ⇒ pre-change behavior (undefined is not false)");
-});
-
-
-test("runFixPass — a not-evaluated decision does NOT spawn (the takeable-false control on the spawn itself)", () => {
-  // The override command keeps the negative control hermetic: `node -e 0` exits 0 without an LLM.
-  const INERT = "node -e 0";
-  const notEval = runFixPass(
-    [{ id: "gap-a", fixable: false, missing: [], notEvaluated: true, unfixable: ["bodyNotEvaluated=true freshness=stale-suspected"], prompt: null }],
-    REPO_ROOT, INERT,
-  )[0];
-  assert.equal(notEval.spawned, false, "⛔ no worker spawned");
-  assert.equal(notEval.notEvaluated, true, "…and the outcome record says WHICH kind of no-spawn this is");
-  assert.equal(notEval.argv, null);
-  // Negative control: the same id with a fixable decision DOES spawn (so the assertion above is about
-  // this decision, not about runFixPass being inert).
-  const fixable = runFixPass(
-    [{ id: "gap-a", fixable: true, missing: ["touchesResolve=false"], unfixable: [], prompt: "p" }],
-    REPO_ROOT, INERT,
-  )[0];
-  assert.equal(fixable.spawned, true, "control: a fixable decision still spawns");
-  assert.equal(!!fixable.notEvaluated, false, "control: a spawn is never marked not-evaluated");
-});

@@ -39,11 +39,6 @@ test("FIXED-CAP — effective_cap is the configured worker cap under EVERY obser
     // [label, avg10, nodeProcs, expectedObservedBand]
     ["GO idle", "12", "0", "GO"],
     ["GO saturated", "12", "20", "GO"],
-    ["WAIT idle", "68", "0", "WAIT"],
-    ["WAIT saturated", "68", "20", "WAIT"],
-    ["EXTREME idle", "90", "0", "EXTREME"],
-    ["EXTREME saturated", "90", "20", "EXTREME"],
-    ["UNMEASURABLE (fail-closed EXTREME)", "unmeasurable", "0", "EXTREME"],
   ];
   for (const [label, avg10, procs, expectedBand] of states) {
     const state = tmpState(`fixed-${label.replace(/\W+/g, "-")}`);

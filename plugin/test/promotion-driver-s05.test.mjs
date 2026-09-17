@@ -26,237 +26,186 @@
 //
 // Run: scripts/test.sh plugin/test/promotion-driver.test.mjs
 
-// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/5 (9 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
+// SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/8 (6 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { PROMOTION_CONTROL_STATE_REL, __dirname, advanceRetryCap, applyHalt, assert, defaultControlState, fixWorkerCaptureCmd, fixWorkerNoopCounter, fs, makeRoot, markNeedsHuman, path, readControlState, readOutcomeLines, readRoundLines, readStatus, realReadyPoolCmd, runDriver, sharedIsHalted, sharedResourceGateCheck, spawn, workerIsHalted, workerResourceGateCheck, writeControlState, writeDoDFixer, writeDodShortTask, writeTask } from "./helpers/promotion-driver-harness.mjs";
+import { FIX_WORKER_TIMEOUT_ENV, FIX_WORKER_TIMEOUT_MS, ROUND_TIMEOUT_MS, assert, buildFixWorkerArgv, computeOutcomeRecords, computeRoundRecord, fs, makeRoot, path, readRoundLines, resolveFixWorkerTimeoutMs, runDriver, runFixPass, spawn, spawnFixWorker, writeTask } from "./helpers/promotion-driver-harness.mjs";
 
-test("advanceRetryCap — 连续失败达 N 次 ⇒ newlyNeedsHuman；去重不重复返回（纯函数）", () => {
-  const state = { counts: new Map(), needsHuman: new Set() };
-  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "1st failure < N ⇒ not yet needs-human");
-  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), ["gap-a"], "2nd failure ≥ N ⇒ needs-human");
-  assert.deepEqual(advanceRetryCap(state, ["gap-a"], 2), [], "already marked ⇒ no duplicate");
-  assert.equal(state.counts.get("gap-a"), 3, "count keeps accumulating (3 attempts)");
-  assert.ok(state.needsHuman.has("gap-a"), "needsHuman set records the id");
+test("gap-fix-worker-spawn-timeout-persists-post-fix AC4 — failure record carries argv + durationMs + exitCode", (t) => {
+  const root = makeRoot("ac4-diag");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 非零退出（失败）：argv 逐字、durationMs 有限、exitCode 落盘。
+  // 超时用生产默认值（FIX_WORKER_TIMEOUT_MS，gap-fix-worker-timeout-budget-inherited-from-mechanical-round
+  // 后为 600s），⛔ 不再传硬字面 5000：本断言要测的是「非零退出被记录」，而 5000ms 是「模块加载后
+  // spawn 一个 node 必须 <5s」的墙钟余量——并发负载下本文件耗时 222s（隔离 70s，实测 2026-09-13）
+  // ⇒ 子进程起不来、exitCode 变成 null，余量被负载击穿。默认值余量更大，与相邻 runFixPass 测试
+  // （也断言 timedOut===false）一致。
+  const argv = ["node", "-e", "process.stderr.write('boom');process.exit(3)"];
+  const r = spawnFixWorker(argv, root, FIX_WORKER_TIMEOUT_MS);
+  assert.equal(r.timedOut, false, `a fast exit must NOT be reported as a timeout (timeoutMs=${FIX_WORKER_TIMEOUT_MS})`);
+  assert.equal(r.exitCode, 3, "exit code recorded");
+  assert.deepEqual(r.argv, argv, "argv recorded verbatim");
+  assert.ok(Number.isFinite(r.durationMs) && r.durationMs >= 0, `durationMs recorded: ${r.durationMs}`);
+  // 超时（失败）：同样带 argv + durationMs（AC4 点名「失败时」——超时是失败的一种，此前只留 stderr 首行）。
+  const rt = spawnFixWorker(["sleep", "5"], root, 200);
+  assert.equal(rt.timedOut, true);
+  assert.deepEqual(rt.argv, ["sleep", "5"], "timeout path also records argv");
+  assert.ok(Number.isFinite(rt.durationMs) && rt.durationMs >= 0, `timeout path also records durationMs: ${rt.durationMs}`);
+  // 失败记录序列化进 round 记录（promotion-round.jsonl 的 fixes[] 可 grep 到三项）。
+  const rec = computeRoundRecord({
+    round: 1, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, promotePathLlmInvoked: false,
+    fixes: [{ id: "gap-x", spawned: true, missing: ["selfTouchOk=false"], unfixable: [], exitCode: r.exitCode, stderr: r.stderr, timedOut: false, argv: r.argv, durationMs: r.durationMs }],
+  });
+  const j = JSON.stringify(rec);
+  assert.ok(j.includes('"argv"'), "round record JSON carries argv key (grep-able)");
+  assert.ok(j.includes('"durationMs"'), "round record JSON carries durationMs key (grep-able)");
+  assert.ok(j.includes('"exitCode"'), "round record JSON carries exitCode key (grep-able)");
 });
 
 
-test("markNeedsHuman — status todo→needs-human + ## Needs-Human 审计记录；非 todo 拒写（fail-closed）", (t) => {
-  const root = makeRoot("mark-nh");
+test("AC142 AC1 — spawnFixWorker captures stderr; outcome result.detail carries it (spawn 失败不再零诊断)", (t) => {
+  const root = makeRoot("ac142-ac1");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-nh", "todo");
+  // 一个写 stderr + exit 1 的 fix worker（模拟认证失败/报错——之前 10 条 spawned exit=1 零 stderr 不可诊断）。
+  const r = spawnFixWorker(["node", "-e", "process.stderr.write('AUTH-ERROR: no credentials');process.exit(1)"], root);
+  assert.equal(r.exitCode, 1, "spawn exit 1 is still captured");
+  assert.equal(r.timedOut, false);
+  assert.ok(r.stderr && r.stderr.includes("AUTH-ERROR"), `stderr captured (⛔ 不再 ignore): ${JSON.stringify(r.stderr)}`);
 
-  const ok = markNeedsHuman(root, "gap-nh", "test reason");
-  assert.equal(ok.ok, true, "todo task marked needs-human");
-  assert.equal(readStatus(root, "gap-nh"), "needs-human", "status flipped todo → needs-human");
-  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
-  assert.ok(body.includes("## Needs-Human"), "grep-able ## Needs-Human audit record written");
-  assert.ok(body.includes("test reason"), "the reason is recorded in the body");
-
-  // fail-closed on a non-todo task (needs-human is not todo) ⇒ no double-mark
-  const again = markNeedsHuman(root, "gap-nh", "again");
-  assert.equal(again.ok, false, "needs-human task is not todo ⇒ refused");
-  assert.equal(again.reason, "not-todo");
-  assert.equal(readStatus(root, "gap-nh"), "needs-human", "status unchanged on refusal");
-
-  // fail-closed on a missing task
-  const missing = markNeedsHuman(root, "gap-ghost", "x");
-  assert.equal(missing.ok, false);
-  assert.equal(missing.reason, "missing");
+  // 诊断面落进可查载体（promotion-outcome.jsonl 的 result.detail）：spawn 失败时带 stderr 截断。
+  const recs = computeOutcomeRecords({
+    at: "t",
+    applied: [],
+    fixes: [{ id: "gap-x", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 1, stderr: r.stderr, timedOut: false }],
+  });
+  const fix = recs.find((o) => o.action === "fix");
+  assert.equal(fix.result.ok, false);
+  assert.ok(fix.result.detail.includes("stderr=AUTH-ERROR"), `detail carries stderr: ${fix.result.detail}`);
 });
 
 
-test("AC133 AC2 — worker 声称修好（exit 0）但实际未改 ⇒ 驱动仍判不合格、⛔ 不得晋升（能取假）", (t) => {
-  const root = makeRoot("ac133-ac2");
+test("AC142 AC1 — spawnFixWorker timeout ⇒ timedOut=true + error (ETIMEDOUT), exitCode null", (t) => {
+  const root = makeRoot("ac142-timeout");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeDodShortTask(root, "gap-ac133-dodshort");
+  const r = spawnFixWorker(["sleep", "5"], root, 300);
+  assert.equal(r.timedOut, true, "timeout fired ⇒ timedOut=true");
+  assert.ok(r.error, "timeout produces an error");
+  assert.equal(r.exitCode, null, "no exit code on timeout");
+});
 
-  // fix worker = `node -e process.exit(0)` — exits 0 (claims success) but changes NOTHING.
+// ── gap-fix-worker-timeout-budget-inherited-from-mechanical-round ──────────────────────────────────
+// AC1: the fix worker's budget is DECOUPLED from the mechanical round's and is OVERRIDABLE. The two
+// halves are separately falsifiable: (a) the constants differ AND the resolver's three states are
+// distinguishable; (b) a REAL spawn honours a passed override near that value (not near the default).
+
+test("gap-fix-worker-timeout-budget AC1 — budget decoupled from ROUND_TIMEOUT_MS and resolvable (CLI > env > default)", () => {
+  // (a) Decoupling: the two constants constrain objects with different cost structures — a zero-LLM
+  // mechanical script vs. a `claude -p` agent call. Equal values were the inherited-budget defect.
+  assert.notEqual(
+    FIX_WORKER_TIMEOUT_MS, ROUND_TIMEOUT_MS,
+    "FIX_WORKER_TIMEOUT_MS must NOT equal ROUND_TIMEOUT_MS (the inherited-budget defect)",
+  );
+  assert.ok(
+    FIX_WORKER_TIMEOUT_MS > ROUND_TIMEOUT_MS,
+    `the agent budget must exceed the mechanical script's (got ${FIX_WORKER_TIMEOUT_MS} vs ${ROUND_TIMEOUT_MS})`,
+  );
+
+  // (b) Three resolvable states, each distinguishable (⛔ a single number would collapse them).
+  const none = resolveFixWorkerTimeoutMs(undefined, {});
+  assert.equal(none.ok, true);
+  assert.equal(none.source, "default", "no override ⇒ default");
+  assert.equal(none.value, FIX_WORKER_TIMEOUT_MS);
+
+  const viaEnv = resolveFixWorkerTimeoutMs(undefined, { [FIX_WORKER_TIMEOUT_ENV]: "5000" });
+  assert.equal(viaEnv.ok, true);
+  assert.equal(viaEnv.source, "env", "env override is a distinct state");
+  assert.equal(viaEnv.value, 5000);
+
+  // CLI wins over env (two different override paths ⇒ precedence is observable, not assumed).
+  const viaCli = resolveFixWorkerTimeoutMs("7000", { [FIX_WORKER_TIMEOUT_ENV]: "5000" });
+  assert.equal(viaCli.ok, true);
+  assert.equal(viaCli.source, "cli");
+  assert.equal(viaCli.value, 7000);
+
+  // Fail-closed: an unparseable / non-positive override is REJECTED (hard rule 3b — "misconfigured"
+  // must not be indistinguishable from "not configured", which is the state that takes the default).
+  // (An empty string means "not set" — the same convention mergeEnv uses — so it takes the default;
+  // only a NON-empty unparseable value is a misconfiguration and is rejected.)
+  assert.equal(resolveFixWorkerTimeoutMs("", {}).source, "default", "empty ⇒ not set ⇒ default");
+  for (const bad of ["0", "-1", "abc", "1.5"]) {
+    const r = resolveFixWorkerTimeoutMs(bad, {});
+    assert.equal(r.ok, false, `invalid override ${JSON.stringify(bad)} must be rejected, got ${JSON.stringify(r)}`);
+  }
+  const badEnv = resolveFixWorkerTimeoutMs(undefined, { [FIX_WORKER_TIMEOUT_ENV]: "not-a-number" });
+  assert.equal(badEnv.ok, false, "an unparseable env override must be rejected, not silently defaulted");
+});
+
+// AC1 取假 (the half that matters): a REAL spawn must time out NEAR the passed value. The control is
+// the sibling `--fix-worker-cmd` round-trip test above, where the same shape of command exits fast
+// under the default — so a pass here is not "everything times out".
+
+test("gap-fix-worker-timeout-budget AC1 — a real fix-worker spawn honours a passed override (times out near 1500ms, not at the 600s default)", (t) => {
+  const root = makeRoot("timeout-budget");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const decided = [{ id: "gap-budget", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" }];
+
+  // NOTE the command shape: runFixPass appends the structured prompt as the LAST argv element
+  // (buildFixWorkerArgv), so the command must tolerate a trailing argument — `sleep 30 <prompt>`
+  // makes sleep reject two operands and exit instantly. A space-free `node -e` that just waits does.
+  const started = Date.now();
+  const outs = runFixPass(decided, root, "node -e setTimeout(()=>{},30000)", 1500);
+  const elapsed = Date.now() - started;
+
+  assert.equal(outs[0].spawned, true);
+  assert.equal(outs[0].timedOut, true, "a command outliving the budget must be reported as a timeout");
+  assert.equal(outs[0].exitCode, null);
+  assert.ok(
+    Number.isFinite(outs[0].durationMs) && outs[0].durationMs >= 1400 && outs[0].durationMs < 10000,
+    `durationMs must sit near the 1500ms override, got ${outs[0].durationMs}`,
+  );
+  assert.ok(elapsed < 15000, `the spawn must end near the override, not at the default budget: ${elapsed}ms`);
+  // Negative control, read from the constant rather than by waiting it out: the default is far above
+  // both the override and the budget it was inherited from (180_000) — so the timeout above cannot be
+  // the default firing. (Actually spawning to the default would take 10 minutes; the reading is the
+  // honest, cheap control here.)
+  assert.ok(FIX_WORKER_TIMEOUT_MS > 180_000, `the default must be looser than the inherited 180_000, got ${FIX_WORKER_TIMEOUT_MS}`);
+  assert.ok(elapsed < FIX_WORKER_TIMEOUT_MS / 10, `elapsed ${elapsed}ms is nowhere near the default ${FIX_WORKER_TIMEOUT_MS}ms`);
+});
+
+
+test("gap-fix-worker-timeout-budget — --fix-worker-timeout-ms reaches the round record (end-to-end through the real CLI)", (t) => {
+  const root = makeRoot("timeout-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-budget-cli");
+
+  // A misconfigured value is rejected at the CLI boundary (exit 2, fail-closed — never a silent default).
+  assert.throws(
+    () => runDriver(root, ["--once", "--fix-worker-timeout-ms", "nope"]),
+    (e) => e.status === 2,
+    "an unparseable --fix-worker-timeout-ms must exit 2",
+  );
+
+  // The effective budget is recorded per round, so a reading is attributable to the budget that
+  // produced it (⛔ otherwise pre-/post-widening records are indistinguishable in the carrier).
   runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", "node -e process.exit(0)",
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--once",
+    "--fix-worker-timeout-ms", "5000",
+    "--once",
   ]);
+  const lines = readRoundLines(root);
+  assert.equal(lines.length, 1, `one round record expected, got ${lines.length}`);
+  assert.equal(lines[0].fix_worker_timeout_ms, 5000, "the CLI override must reach the round record verbatim");
 
-  const records = readRoundLines(root);
-  assert.equal(records.length, 1, "exactly one round record");
-  const rec = records[0];
-
-  // AC1: the driver RE-RAN the gate after the worker exited (reverify is present, not null).
-  assert.ok(rec.reverify, "AC1: driver re-ran the gate after fix worker exit (reverify present)");
-  assert.deepEqual(rec.reverify.stillIneligibleIds, ["gap-ac133-dodshort"],
-    `AC2: the gate still judges it ineligible — worker's "success" was NOT trusted (reverify=${JSON.stringify(rec.reverify)})`);
-  assert.deepEqual(rec.reverify.nowEligibleIds, [], "nothing promoted on the worker's empty claim");
-
-  // AC2 falsifiable: the task is NOT promoted (status stays todo).
-  assert.equal(readStatus(root, "gap-ac133-dodshort"), "todo", "AC2: worker claimed fixed but didn't ⇒ NOT promoted");
-
-  // The fix outcome recorded a spawned worker (exit 0) but no promote outcome for this id.
-  const outcomes = readOutcomeLines(root);
-  assert.ok(outcomes.some((o) => o.task_id === "gap-ac133-dodshort" && o.action === "fix"), "a fix outcome was written");
-  assert.ok(!outcomes.some((o) => o.task_id === "gap-ac133-dodshort" && o.action === "promote"), "⛔ no promote outcome for the unfixed task");
-});
-
-
-test("AC133 AC3 — 连续修 N 次仍不合格 ⇒ 标 needs-human 并停止修复循环（能取假）", (t) => {
-  const root = makeRoot("ac133-ac3");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeDodShortTask(root, "gap-ac133-capped");
-
-  const counter = path.join(root, "fix.cnt");
-  // max-fix-retries 2: round 1 spawn(1) → round 2 spawn(2) ≥ N ⇒ needs-human → rounds 3-4 no spawn.
-  runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", fixWorkerNoopCounter(counter),
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--max-fix-retries", "2", "--max-rounds", "4", "--interval", "5",
-  ]);
-
-  // AC3 falsifiable: the driver stopped after N (2) fix attempts, not 4.
-  assert.equal(Number(fs.readFileSync(counter, "utf8")), 2,
-    "AC3: fix worker spawned exactly N=2 times, then the loop stopped spawning (⛔ 无限重修)");
-
-  // The task was marked needs-human on disk (status flip + audit record).
-  assert.equal(readStatus(root, "gap-ac133-capped"), "needs-human", "AC3: task marked needs-human after N failed fixes");
-  const body = fs.readFileSync(path.join(root, "tasks", "gap-ac133-capped.md"), "utf8");
-  assert.ok(body.includes("## Needs-Human"), "AC3: ## Needs-Human audit record written");
-
-  // The round that hit the cap recorded the needs-human decision.
-  const records = readRoundLines(root);
-  const capRound = records.find((r) => r.needs_human && r.needs_human.includes("gap-ac133-capped"));
-  assert.ok(capRound, "the needs-human decision is recorded in the round ledger");
-
-  // An outcome record with action=needs-human is written (outer-consumable).
-  const outcomes = readOutcomeLines(root);
-  assert.ok(outcomes.some((o) => o.task_id === "gap-ac133-capped" && o.action === "needs-human"),
-    "a needs-human outcome record is written for the capped task");
-});
-
-
-test("AC133 AC1 positive — fix worker 真的修好 ⇒ 重验证轮的闸判合格并晋升（重闸验证的非空证据）", (t) => {
-  const root = makeRoot("ac133-pos");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeDodShortTask(root, "gap-ac133-fixed");
-
-  // A REAL fixer rewrites the short DoD ⇒ the re-verify round's gate now judges it eligible and --apply
-  // promotes it (status → ready). Proves the re-verify path can PROMOTE, not just detect failure.
-  runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", writeDoDFixer(root),
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--once",
-  ]);
-
-  assert.equal(readStatus(root, "gap-ac133-fixed"), "ready",
-    "AC1 positive: worker actually fixed the DoD ⇒ re-verify gate promoted it (todo → ready)");
-
-  const rec = readRoundLines(root)[0];
-  assert.ok(rec.reverify, "reverify present");
-  assert.deepEqual(rec.reverify.nowEligibleIds, ["gap-ac133-fixed"],
-    `the gate's new judgment (now eligible) is what counts, not the worker's self-report (reverify=${JSON.stringify(rec.reverify)})`);
-  assert.deepEqual(rec.reverify.stillIneligibleIds, [], "a genuinely-fixed task is not still-ineligible");
-});
-
-// ── AC150（falsifiable）：promotion 资源门 + 控制面 halt 与 worker-driver 共用同一份实现 ──────────
-
-
-test("AC150-1 — resource gate WAIT ⇒ 本轮不 spawn fix worker（退避，⛔ 无 action=\"fix\" outcome）", (t) => {
-  const root = makeRoot("ac150-1");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeDodShortTask(root, "gap-ac150-rg");
-
-  const capture = path.join(root, "fix-prompt.txt");
-  runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
-    "--resource-gate-cmd", "node -e process.exit(1)",
-    "--cap", "5", "--once",
-  ]);
-
-  // WAIT ⇒ 退避：fix worker 未被 spawn（capture 文件不存在）、无 action="fix" outcome（AC150-1 取假）。
-  assert.ok(!fs.existsSync(capture), "WAIT ⇒ no fix worker spawned (capture file absent)");
-  const records = readRoundLines(root);
-  assert.equal(records.length, 1, "exactly one round record");
-  assert.equal(records[0].gate.go, false, "round record carries the resource-gate WAIT verdict");
-  const outcomes = readOutcomeLines(root);
-  assert.ok(!outcomes.some((o) => o.action === "fix"), `AC150-1 取假：WAIT 期间无 action="fix" outcome (${JSON.stringify(outcomes)})`);
-
-  // Positive control：同一 fixture、gate GO ⇒ fix worker 被 spawn（证明该任务本可修，退避是资源门拦的）。
-  const root2 = makeRoot("ac150-1-go");
+  // Control: a run with no override records the module default — i.e. the field is a real reading
+  // of the effective budget, not a constant echo of whatever the test passed.
+  const root2 = makeRoot("timeout-cli-default");
   t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
-  writeDodShortTask(root2, "gap-ac150-rg-go");
-  const capture2 = path.join(root2, "fix-prompt.txt");
+  writeTask(root2, "gap-budget-cli-2");
   runDriver(root2, [
-    "--ready-pool-cmd", realReadyPoolCmd(root2),
-    "--fix-worker-cmd", fixWorkerCaptureCmd(capture2),
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--once",
+    "--once",
   ]);
-  assert.ok(fs.existsSync(capture2), "gate GO ⇒ fix worker spawned (positive control)");
-  assert.ok(readOutcomeLines(root2).some((o) => o.action === "fix"), "gate GO ⇒ action=\"fix\" outcome written");
-});
-
-
-test("AC150-2 — 控制态 pre-halted ⇒ 驱动停止晋升与 fix spawn（运行期 halt，⛔ 非只能 kill）", (t) => {
-  const root = makeRoot("ac150-2");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-ac150-eligible", "todo");
-  // 预置 halt（走 driver-shared 的同一 writer，写 promotion-control.json）。
-  writeControlState(root, applyHalt(defaultControlState(), "outer", true), PROMOTION_CONTROL_STATE_REL);
-
-  const capture = path.join(root, "fix-prompt.txt");
-  runDriver(root, [
-    "--ready-pool-cmd", realReadyPoolCmd(root),
-    "--fix-worker-cmd", fixWorkerCaptureCmd(capture),
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--cap", "5", "--once",
-  ]);
-
-  // AC150-2 取假：halt 后下一轮仍晋升/仍 spawn fix worker ⇒ 假。这里 halted ⇒ 不晋升、不 spawn。
-  assert.equal(readStatus(root, "gap-ac150-eligible"), "todo", "AC150-2 取假：halt 后不晋升（eligible todo 仍为 todo）");
-  assert.ok(!fs.existsSync(capture), "halt ⇒ no fix worker spawned");
-  const records = readRoundLines(root);
-  assert.equal(records.length, 1, "exactly one (halted) round record");
-  assert.equal(records[0].action, "halted", "round record action=halted");
-  assert.equal(records[0].halted, true, "round record carries halted=true");
-  const outcomes = readOutcomeLines(root);
-  assert.equal(outcomes.length, 0, "halt ⇒ no promote/fix outcome written");
-
-  // 正控制：同 fixture、未 halt ⇒ 驱动会晋升它（证明该任务本可晋，halt 才是拦住它的量）。
-  const root2 = makeRoot("ac150-2-go");
-  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
-  writeTask(root2, "gap-ac150-eligible-go", "todo");
-  runDriver(root2, ["--ready-pool-cmd", realReadyPoolCmd(root2), "--cap", "5", "--once"]);
-  assert.equal(readStatus(root2, "gap-ac150-eligible-go"), "ready", "guard: eligible todo promoted when NOT halted");
-});
-
-
-test("AC150-3 — 资源门/halt 判定只有 driver-shared.ts 一份实现（⛔ 无复制粘贴）", () => {
-  // 函数级同一份：worker-driver re-export 与 driver-shared 是同一个函数引用。
-  assert.equal(sharedResourceGateCheck, workerResourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
-  assert.equal(sharedIsHalted, workerIsHalted, "isHalted 同一份实现（worker re-export = shared）");
-
-  // 取假（grep 形）：三个源文件里，resourceGateCheck / isHalted 只定义在 driver-shared.ts 一份；
-  // worker-driver.ts 与 promotion-driver.ts 都只 import（⛔ 不各写一份独立实现）。
-  const sharedSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "driver-shared.ts"), "utf8");
-  const workerSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "worker-driver.ts"), "utf8");
-  const promoSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "promotion-driver.ts"), "utf8");
-  assert.match(sharedSrc, /export function resourceGateCheck/, "resourceGateCheck defined in driver-shared.ts");
-  assert.match(sharedSrc, /export function isHalted/, "isHalted defined in driver-shared.ts");
-  assert.doesNotMatch(workerSrc, /export function resourceGateCheck/, "worker-driver.ts does NOT define resourceGateCheck");
-  assert.doesNotMatch(workerSrc, /export function isHalted/, "worker-driver.ts does NOT define isHalted");
-  assert.doesNotMatch(promoSrc, /export function resourceGateCheck/, "promotion-driver.ts does NOT define resourceGateCheck");
-  assert.doesNotMatch(promoSrc, /export function isHalted/, "promotion-driver.ts does NOT define isHalted");
-});
-
-
-test("AC150-2 — promotion 控制态文件独立于 worker（halting one 不杀 another）", (t) => {
-  const root = makeRoot("ac150-indep");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // promotion 读 promotion-control.json；worker 读 worker-control.json（driver-shared 参数化 rel）。
-  writeControlState(root, applyHalt(defaultControlState(), "outer", true), PROMOTION_CONTROL_STATE_REL);
-  // promotion 控制态 = halted（用同一 isHalted 实现读 promotion 文件）。
-  assert.equal(readControlState(root, process.env, PROMOTION_CONTROL_STATE_REL).state.halted, true, "promotion control file halted");
-  assert.equal(sharedIsHalted(root, process.env, PROMOTION_CONTROL_STATE_REL), true, "shared isHalted reads promotion-control.json");
+  assert.equal(readRoundLines(root2)[0].fix_worker_timeout_ms, FIX_WORKER_TIMEOUT_MS);
 });

@@ -10,457 +10,241 @@
 //   other-task (defer anti-livelock).
 
 // full-suite-runner.test.mjs — runner verdict / state machine / red detection / reason axis / kill-hang / control. Split from gap-suite-file-split-two-longest; harness shared via ./helpers/full-suite-runner-harness.mjs.
-// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/8 (10 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
+// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/12 (7 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GREEN_SUITE, REPO_ROOT, RUNNER, SUITE_NOT_RUN, SUITE_RUN_START, after, assert, fakeSuite, fakeTestShRecordingArgs, fs, lastRoundRecord, os, path, read, readState, releaseGate, runCli, runRunner, sharedGreenShape, spawn, statePath, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
+import { assert, classifyFailure, fakeSuite, fs, os, path, poll, read, readState, redPayload, runOnce, runRunner, shouldDispatchOnRed, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
 
-test("AC6 — every state write carries the runner PID (the crash-watchdog's liveness anchor)", async () => {
-  // gap-shape-assert-share-round: shares ONE runner round with the state-shape / green-log /
-  // generation-guard shape tests (4 spawns → 1). It asserts only the pid field (and pid === the
-  // shared round's runner child), so the shared green round satisfies it identically.
-  const { s, child } = await sharedGreenShape();
-  assert.equal(s.state, "green");
-  assert.equal(typeof s.pid, "number", "the state carries the runner PID (AC6)");
-  assert.ok(Number.isInteger(s.pid) && s.pid > 0, "pid is a positive integer");
-  assert.equal(s.pid, child.pid, "pid is the RUNNER process's pid — the watchdog's liveness anchor");
-});
-
-
-test("AC6 — a runner that dies mid-run from an uncaughtException writes state=red reason=crashed (never stuck at running)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-crash-"));
-  // The fake suite BLOCKS (sleep 3) so the child CANNOT close before the crash seam fires — a fast
-  // suite would let the runner reach its green verdict and remove the crash handlers first (the
-  // flake: under load the child's close raced the 30ms seam and the runner exited 0/green).
-  const { f, dir } = fakeSuite('echo "running"; sleep 3; exit 0');
+test("AC1 e2e — a `Killed node --test` bash job-status line + green TAP tally + exit 0 ⇒ GREEN, NOT infra-error (the round-18 `suite log shows 1 SIGKILL/Killed marker(s)` shape)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-killedline-"));
+  // round 18 (2026-08-12): tests=3977 pass=3977 fail=0 cancelled=0 but the round was mislabelled
+  // infra-error because the log carried a SIGKILL/Killed marker. The marker is a TEST's internal
+  // subprocess being killed (resource-gate.test.mjs kills a child to test the resource gate) — the
+  // DIRECT test.sh child exited 0 with all tests passing. Reproduce the exact shapes: a bash
+  // job-status `Killed node --test` line AND a green TAP summary, then exit 0. The runner must mark
+  // GREEN (kill detection is the DIRECT child's exit status, never a stream marker).
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "__ENVFAIL__ killed by SIGKILL: ./bin/quay.js x" >&2\n' +
+      'echo "# tests 3977"\necho "# pass 3977"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "exit 0",
+  );
   try {
-    // QUAY_TEST_CRASH_AFTER_RUNNING is a hermetic test seam: it throws an uncaught exception ~30ms
-    // after the `running` write, exercising the AC6 in-process crash-terminal path deterministically.
-    const child = runRunner({
-      root,
-      command: `bash ${f}`,
-      laneCount: 8,
-      env: { QUAY_TEST_CRASH_AFTER_RUNNING: "1" },
-    });
+    const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
-    assert.equal(code, 1, "a crashed runner exits 1");
     const s = readState(root);
-    assert.equal(s.state, "red", "the runner died -> the state is terminal red, NOT running (AC6)");
-    assert.equal(s.reason, "crashed", "the terminal reason is crashed (AC6) — distinguishable from aborted/failed");
-    assert.equal(typeof s.pid, "number", "the crashed state still carries the runner pid");
-    assert.ok(s.finishedAt !== null && s.finishedAt !== undefined, "crashed state has a finishedAt (terminal, not early)");
-    assert.equal(typeof s.durationMs, "number", "crashed state has a durationMs");
+    assert.equal(s.state, "green", `all-pass suite with only Killed/__ENVFAIL__ stream markers must be GREEN, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite");
   } finally {
-    // gap-full-suite-runner-crash-test-rmSync-enotempty-flaky — the runner spawns a DETACHED
-    // suite-load-sampler that writes <root>/.quay/suite-load-<runId>.jsonl.pid at startup and is never
-    // reaped on the crash path (process.exit). Under load the sampler's delayed .pid write lands
-    // DURING this teardown rmSync — it mkdirs `.quay` back into `root` after rmSync already rmdir'd it,
-    // so `rmdir(root)` fails ENOTEMPTY. (A detached child's cwd does NOT block rmdir; the cause is the
-    // .pid write, not the orphan suite child — leftover evidence: /tmp/fsr-crash-* each hold exactly
-    // one suite-load-*.jsonl.pid.) maxRetries/retryDelay re-list and delete the recreated `.quay` + .pid;
-    // the sampler exits on its first state check (state=red), so the .pid write is one-shot.
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 
-
-test("gap-test-detail-load-timeseries — the runner spawns a load sampler that writes a per-run timeseries and stops when the suite ends", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-"));
-  // gap-fake-suite-release-gate-sleep-zero — the fixed 1.5s sampler window is a release gate: the
-  // suite blocks until the test has observed the sampler's first sample, then the test releases it.
-  const gate = releaseGate(root, "loadsampler");
+test("AC1/manager-semantic e2e — a FULLY-GREEN test result (pass>0 fail=0 cancelled=0 failures=[]) + a signal-killed DIRECT child (exit 137) ⇒ GREEN, NOT infra-error red (fully-green test result wins over infra-error)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-greenwins-"));
+  // Manager semantic (2026-08-12, round-18 shape): when the TEST RESULT is fully green — pass>0,
+  // fail=0, cancelled=0, failures=[] — every test that ran passed. An infra-error teardown signal
+  // (here the DIRECT child exits 137: a descendant was SIGKILL'd) must NOT turn that into a
+  // state=red that blocks the batch-merge freshness gate. The fully-green test result is evidence
+  // the TESTS ALL PASSED ⇒ state=green (the reason axis never sees it as red).
   const { f, dir } = fakeSuite(
-    gate.wait +
-      '\n' +
-      'echo "# tests 1"\n' +
-      'echo "# pass 1"\n' +
-      'echo "# fail 0"\n' +
-      'echo "# cancelled 0"\n' +
-      "exit 0",
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "# tests 3977"\necho "# pass 3977"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "exit $?",
   );
-  const loadDir = path.join(root, ".quay");
-  const loadFiles = () => {
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "green", `a fully-green test result must win over the infra-error teardown signal, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite (fully-green test result)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC2 e2e — a REAL signal-killed DIRECT test.sh child torn down MID-RUN (no full green TAP summary) is infra-error red, NOT green (AC2 non-regression)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-realkill-"));
+  // AC2 (gap-infra-error-false-positive-from-test-internal-kill): a REAL environment failure — the
+  // runner's DIRECT test.sh child killed by a signal (bash exits 128+N) BEFORE producing a full green
+  // result — must STILL be infra-error. This fake suite prints a `Killed node --test` line and exits
+  // 137 but emits NO full green TAP summary (torn down mid-run): the test result is NOT fully green
+  // (tapPass=0), so infra-error is a red, not green. Distinguishes the two directions: a fully-green
+  // test result wins (previous test); a mid-run teardown with no green evidence stays infra-error red.
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "partial output before teardown"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "exit $?",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on the infra-error");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
+    }, { timeoutMs: 20000 });
+    assert.ok(s, `signal-killed DIRECT child torn down mid-run is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "infra-error-red must NOT trigger stop-dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC2 e2e — MULTIPLE failure lines each push into failures[] (manager 2026-08-10 15:2x: structurally capped at 1 before; now every failure records)", async () => {
+  // r240 TAP reported fail=7 but failures[] held only the FIRST failure's name — the push sat inside
+  // the !redDetected guard that flips true on line 1. This fake suite emits THREE not-ok lines; all
+  // three must be recorded (capped at MAX_RECORDED_FAILURES only for pathological rounds).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-multifail-"));
+  const { f, dir } = fakeSuite(
+    'echo "not ok 1 - alpha"; echo "not ok 2 - beta"; echo "not ok 3 - gamma"; exit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed");
+    assert.ok(redPayload(s).length >= 3, `all 3 failure lines must be recorded; got ${JSON.stringify(s)}`);
+    const names = redPayload(s).map((x) => x.line).join(" ");
+    assert.match(names, /alpha/, "first failure recorded");
+    assert.match(names, /beta/, "second failure recorded (was dropped by the !redDetected cap)");
+    assert.match(names, /gamma/, "third failure recorded");
+    assert.ok(code !== 0, "runner exits non-zero on the red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("AC2 e2e negative control — a SHARED-GATE red and a SPECIFIC-TEST red produce distinguishable failures[] payloads (the dispatch rule can decide)", async () => {
+  // gap-suite-red-verdict-carries-empty-failures-payload AC2 — the SUITE-RED failures payload must
+  // carry enough WHERE for the inner dispatch rule to distinguish a SHARED-GATE failure (run_static_checks
+  // — every scoped run pays it ⇒ stop dispatch) from a SPECIFIC-TEST failure unrelated to a candidate's
+  // touch-set (⇒ dispatch continues). Construct BOTH through the real runner and assert the two
+  // failures[] payloads classify differently (shared-gate vs specific-test) — the empty-payload defect
+  // would make this impossible (failures=[] has no location to classify).
+  const runBoth = async (scriptBody) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2neg-"));
+    const { f, dir } = fakeSuite(scriptBody);
     try {
-      return fs.readdirSync(loadDir).filter((n) => n.startsWith("suite-load-") && n.endsWith(".jsonl"));
-    } catch {
-      return [];
+      const child = runRunner({ root, command: `bash ${f}` });
+      const { code } = await waitExit(child);
+      assert.notEqual(code, 0, "the red suite exits non-zero");
+      const s = readState(root);
+      assert.equal(s.state, "red");
+      assert.ok(s.failures && s.failures.length >= 1, `failures[] must be non-empty (payload not empty); got ${JSON.stringify(s.failures)}`);
+      return { s, root };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   };
-  try {
-    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, env: { QUAY_SUITE_LOAD_SAMPLER_INTERVAL: "0.2" } });
 
-    // Wait (bounded) for the sampler to write its first sample while the run is in flight.
-    let name = null;
-    let lines = [];
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      const files = loadFiles();
-      if (files.length > 0) {
-        name = files[0];
-        lines = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean);
-        if (lines.length >= 1) break;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(name, "the sampler wrote .quay/suite-load-<runId>.jsonl during the run");
-    assert.ok(lines.length >= 1, `the timeseries has >=1 sample (got ${lines.length})`);
-
-    for (const line of lines) {
-      const o = JSON.parse(line);
-      assert.equal(typeof o.t, "number", "every sample carries a numeric timestamp");
-      assert.ok("loadavg" in o, "every sample carries loadavg");
-      assert.ok("cpu_stall" in o, "every sample carries cpu_stall");
-      assert.ok("mem_avail" in o, "every sample carries mem_avail");
-    }
-
-    // The file is keyed by the runner's runId (read from the state the runner wrote).
-    const s = readState(root);
-    assert.ok(s && typeof s.runId === "string" && s.runId, "state carries the run's runId");
-    assert.equal(name, `suite-load-${s.runId}.jsonl`, "timeseries file name = suite-load-<runId>.jsonl");
-
-    // Suite ends → the runner writes a terminal state → the detached sampler stops (never resident).
-    fs.writeFileSync(gate.release, "go", "utf8"); // release — the sampler has already logged its first sample
-    await waitExit(child);
-    const pidFile = path.join(loadDir, `${name}.pid`);
-    assert.ok(fs.existsSync(pidFile), "sampler wrote its pid sidecar");
-    const samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim());
-    assert.ok(Number.isInteger(samplerPid) && samplerPid > 0, "pid sidecar holds a real pid");
-
-    let gone = false;
-    const stopDeadline = Date.now() + 10_000;
-    while (Date.now() < stopDeadline) {
-      try {
-        process.kill(samplerPid, 0);
-      } catch {
-        gone = true;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(gone, "the sampler exited after the suite ended (never a resident idle process)");
-
-    // The timeseries stops growing once sampling stops.
-    const countAfter = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean).length;
-    await new Promise((r) => setTimeout(r, 500));
-    const countLater = fs.readFileSync(path.join(loadDir, name), "utf8").trim().split("\n").filter(Boolean).length;
-    assert.equal(countLater, countAfter, "the timeseries stops growing once sampling stops");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("gap-mechanical-fan-in-per-suite-runid-unified AC3 — --run-id is honored verbatim; default falls back to a fresh randomUUID", async () => {
-  // OVERRIDE: an explicit --run-id (the mechanical fan-in per-suite id) becomes the canonical runId
-  // in BOTH the state and the round record (the record ↔ suite-load-<runId>.jsonl join key). The fake
-  // suite also captures the QUAY_RUN_ID env the runner delivers, to pin the shortRunId truncation
-  // (a LONG --run-id must still deliver a ≤8-char short id — the tmux socket sun_path length constraint).
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-override-"));
-  const { f, dir } = fakeSuite(
-    'printf "%s" "$QUAY_RUN_ID" > quay-run-id.txt\n' +
-      'echo "# tests 1"\n' +
-      'echo "# pass 1"\n' +
-      'echo "# fail 0"\n' +
-      'echo "# cancelled 0"\n' +
-      "exit 0",
+  // shared-gate red: a static-check checker fails (task-contract ratchet growth) — the shared gate
+  const shared = await runBoth(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0 — see --json for details"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
+      "exit 1",
   );
+  // specific-test red: a real test file failure (TAP not ok with a file in the detail block) — the
+  // file is repo-relative (absolute paths OUTSIDE the temp root would normalize away, see
+  // normalizeFailureFile); the runner captures it from the detail block's `location:` line. The
+  // detail line must be ECHOED (a bare `location: ...` line would be treated as a bash command).
+  const specific = await runBoth("echo \"not ok 1 - something failed\"\necho \"  location: 'plugin/test/foo.test.mjs:3:1'\"\nexit 1");
+
   try {
-    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: "mfi-gap-test-1788022868-abc123" });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "runner exits 0 on a green suite");
-    const s = readState(root);
-    assert.equal(s.runId, "mfi-gap-test-1788022868-abc123", "--run-id is used verbatim as the state runId (not a fresh randomUUID)");
-    const rec = lastRoundRecord(root);
-    assert.equal(rec.runId, "mfi-gap-test-1788022868-abc123", "the round record carries the SAME canonical runId (record ↔ telemetry join key)");
-    // shortRunId length constraint: the runner derives its per-run namespace id by truncating the runId
-    // to 8 chars — a LONG --run-id must not leak a long id into QUAY_RUN_ID (tmux socket sun_path bound).
-    const delivered = fs.readFileSync(path.join(root, "quay-run-id.txt"), "utf8");
-    assert.equal(delivered, "mfigapte", `the child received the 8-char truncated short id (got ${JSON.stringify(delivered)})`);
-    assert.ok(delivered.length <= 8, "the delivered QUAY_RUN_ID is ≤8 chars (tmux socket sun_path length constraint)");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-
-  // DEFAULT: no --run-id ⇒ a fresh randomUUID (an independent run stays self-naming — no regression).
-  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runid-default-"));
-  const faked = fakeSuite(
-    'echo "# tests 1"\n' +
-      'echo "# pass 1"\n' +
-      'echo "# fail 0"\n' +
-      'echo "# cancelled 0"\n' +
-      "exit 0",
-  );
-  try {
-    const child = runRunner({ root: root2, command: `bash ${faked.f}`, laneCount: 2 });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "runner exits 0 on a green suite");
-    const s = readState(root2);
-    assert.ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.runId), `default runId is a randomUUID (got ${s.runId})`);
-  } finally {
-    fs.rmSync(root2, { recursive: true, force: true });
-    fs.rmSync(faked.dir, { recursive: true, force: true });
-  }
-});
-
-
-test("gap-suite-load-sampler-orphan-process AC2 — an UNCLEAN host exit (SIGKILL, no terminal state) reaps the sampler via host-death detection", async () => {
-  // The state-driven stop only fires when SOMEONE writes a terminal state / removes the state file.
-  // A host that dies UNCLEANLY (SIGKILL — uncatchable; worker mid-exit exception; fan-in wrapper
-  // killed before its `rm -f`) leaves the state file stuck at "running" and the sampler must still
-  // stop. This test drives that branch directly: the host backgrounds the sampler then never writes
-  // a terminal state — the host is SIGKILLed, and the sampler must detect the host's death (its
-  // ppid changes when the kernel reparents the orphan) and exit on its own.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-orphan-"));
-  const stateFile = path.join(root, "sampler.state.json");
-  const outFile = path.join(root, "suite-load-orphan.jsonl");
-  const samplerPath = path.join(REPO_ROOT, "plugin", "scripts", "suite-load-sampler.ts");
-  fs.writeFileSync(stateFile, JSON.stringify({ state: "running" }), "utf8");
-  // Host = a bash wrapper that backgrounds the sampler then sleeps, modeling the suite host the
-  // sampler must follow. It has NO terminal-state / rm -f step — the unclean-exit branch.
-  const host = spawn(
-    "bash",
-    [
-      "-c",
-      `node --no-warnings --experimental-strip-types "${samplerPath}" --state-file "${stateFile}" --out-file "${outFile}" --run-id "orphan-test" --interval 0.2 & sleep 60`,
-    ],
-    { stdio: "ignore", detached: true },
-  );
-  host.unref();
-  const pidFile = `${outFile}.pid`;
-  try {
-    // Wait (bounded) for the sampler to write its first sample + pid sidecar while the host is alive.
-    let samplerPid = 0;
-    let lines = [];
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
-      try { samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim()); } catch { samplerPid = 0; }
-      if (lines.length >= 1 && samplerPid > 0) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(lines.length >= 1, "the sampler wrote >=1 sample while its host was alive");
-    assert.ok(samplerPid > 0, "the sampler wrote its pid sidecar");
-
-    // Unclean host death: SIGKILL the host wrapper (no terminal state, no rm -f). The sampler must
-    // detect the host's death (ppid change) and exit on its own — the AC2 orphan-reaping invariant.
-    process.kill(host.pid, "SIGKILL");
-
-    let gone = false;
-    const stopDeadline = Date.now() + 10_000;
-    while (Date.now() < stopDeadline) {
-      try { process.kill(samplerPid, 0); } catch { gone = true; break; }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(gone, "the sampler exited after its host was SIGKILLed (host-death reaping, never an orphan)");
-
-    // The timeseries stops growing once the host is dead (no post-mortem pollution).
-    const countAfter = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
-    await new Promise((r) => setTimeout(r, 500));
-    const countLater = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
-    assert.equal(countLater, countAfter, "the timeseries stops growing once the host is dead");
-  } finally {
-    try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("gap-suite-load-sampler-early-red-truncates-load-curve AC2/AC3 — the sampler keeps sampling through an EARLY-RED state (finishedAt null) and stops only once finishedAt is written", async () => {
-  // The finishedAt-driven stop (gap-suite-load-sampler-early-red-truncates-load-curve): the runner
-  // writes state="red" + finishedAt:null on the FIRST failure line while the suite keeps running to
-  // its natural end. The old state-driven stop (`state !== "running"`) truncated a red round's load
-  // curve at first-failure. This test drives that branch directly: a state file stuck at early-red
-  // (state="red", finishedAt:null) must NOT stop the sampler — it keeps sampling (AC2, the fix) —
-  // and stops cleanly once finishedAt is written (AC3, 结束即停 / no idle-spin, green-round parity).
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-earlyred-"));
-  const stateFile = path.join(root, "sampler.state.json");
-  const outFile = path.join(root, "suite-load-earlyred.jsonl");
-  const samplerPath = path.join(REPO_ROOT, "plugin", "scripts", "suite-load-sampler.ts");
-  // Early-red: state=red but finishedAt=null — the suite is still running to its natural end.
-  fs.writeFileSync(
-    stateFile,
-    JSON.stringify({ state: "red", reason: "failed", runId: "early-red-test", finishedAt: null }),
-    "utf8",
-  );
-  // Host = a bash wrapper that backgrounds the sampler then sleeps, modeling the suite host.
-  const host = spawn(
-    "bash",
-    [
-      "-c",
-      `node --no-warnings --experimental-strip-types "${samplerPath}" --state-file "${stateFile}" --out-file "${outFile}" --run-id "early-red-test" --interval 0.2 & sleep 60`,
-    ],
-    { stdio: "ignore", detached: true },
-  );
-  host.unref();
-  const pidFile = `${outFile}.pid`;
-  try {
-    // AC2 — the sampler must KEEP sampling while finishedAt is null even though state=red (the
-    // early-red continuation). Wait (bounded) for >=2 samples: the old state-driven stop would exit
-    // on first sight of the red state and write ZERO samples, so this assertion is the regression
-    // fence (it fails on the pre-fix code, passes on the fix).
-    let samplerPid = 0;
-    let lines = [];
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      try { lines = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean); } catch { lines = []; }
-      try { samplerPid = Number(fs.readFileSync(pidFile, "utf8").trim()); } catch { samplerPid = 0; }
-      if (lines.length >= 2 && samplerPid > 0) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(samplerPid > 0, "the sampler wrote its pid sidecar");
-    assert.ok(lines.length >= 2, "the sampler kept sampling through the early-red state (finishedAt null, state=red)");
-
-    // AC3 — the terminal write sets finishedAt; the sampler must then stop (结束即停 / no idle-spin).
-    fs.writeFileSync(
-      stateFile,
-      JSON.stringify({ state: "red", reason: "failed", runId: "early-red-test", finishedAt: Date.now() / 1000 }),
-      "utf8",
+    const sharedLoc = classifyFailure(shared.s.failures[0]);
+    const specificLoc = classifyFailure(specific.s.failures[0]);
+    assert.equal(sharedLoc.kind, "shared-gate", `the static-check failure classifies shared-gate; got ${JSON.stringify(sharedLoc)}`);
+    assert.equal(specificLoc.kind, "specific-test", `the test-file failure classifies specific-test; got ${JSON.stringify(specificLoc)}`);
+    // The dispatch rule reads the payloads differently: a shared-gate red blocks an unrelated
+    // candidate; a specific-test red unrelated to the candidate's touches does NOT.
+    assert.equal(
+      shouldDispatchOnRed(shared.s, "## Touches\n- plugin/test/other.test.mjs\n"),
+      true,
+      "shared-gate red stops dispatch even for an unrelated candidate (every scoped run pays it)",
     );
-
-    let stopped = false;
-    const stopDeadline = Date.now() + 10_000;
-    while (Date.now() < stopDeadline) {
-      try { process.kill(samplerPid, 0); } catch { stopped = true; break; }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(stopped, "the sampler exited after finishedAt was written (terminal stop, no idle-spin)");
-
-    // No post-terminal samples: the timeseries stops growing once finishedAt is set.
-    const countAfter = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
-    await new Promise((r) => setTimeout(r, 500));
-    const countLater = fs.readFileSync(outFile, "utf8").trim().split("\n").filter(Boolean).length;
-    assert.equal(countLater, countAfter, "the timeseries stops growing once finishedAt is set");
+    assert.equal(
+      shouldDispatchOnRed(specific.s, "## Touches\n- plugin/test/other.test.mjs\n"),
+      false,
+      "a specific-test red unrelated to the candidate's touch-set does NOT stop dispatch (dispatch continues)",
+    );
   } finally {
-    try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-// ── gap-fan-in-suite-refusal-reports-as-suite-red（AC1 可观测性 / AC3 结构量替代代理量）─────────────
-// 病（2026-09-13 08:14:57Z 实测）：fan-in suite log 0 字节 + `suite-end reason:"suite red"` —— runner
-// 的「未跑就返回」分支只写 stderr，而 suite-driver 只 tee stdout ⇒ 「没跑」与「跑了且失败」同形。
-// 修法：每条未跑就返回的分支在 suite log 写一行 SUITE-NOT-RUN（含 branch 名与原因）；进了执行段则写
-// SUITE-RUN-START（AC3）⇒ 0 字节从此只表示「runner 连写入点都没到」。
-// ⛔ 本组测试只走【真实的 runner 进程】（runCli/runRunner 真 spawn），断言发生在【盘上的 suite log】上。
-
-
-
-test("AC1 — 单飞拒绝在 suite log 留【非空、含分支名与原因】的一行（⛔ 0 字节日志 = 与「跑了且红」同形）", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-notrun-"));
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  // 在飞 runner：live pid（本测试进程自身）+ 非 terminal state。suite log 走 fan-in 的真实命名形状。
-  fs.writeFileSync(
-    statePath(root),
-    JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "inflight" }, null, 2),
-  );
-  const logFile = path.join(root, ".quay", "fan-in-suite-probe~run~1.log");
-  try {
-    const res = await runCli(RUNNER, ["--root", root, "--state-dir", path.join(root, ".quay"), "--log-file", logFile]);
-    assert.notEqual(res.code, 0, "拒绝 ⇒ 非零退出（本轮没跑）");
-    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
-    assert.notEqual(log.trim(), "", "suite log 非空（⛔ 0 字节 ⇒ 与「跑了且失败」同形，硬规则 3b）");
-    assert.ok(log.includes(SUITE_NOT_RUN), `suite log 含 SUITE-NOT-RUN 标记行:\n${log}`);
-    assert.match(log, /branch=single-flight-refusal/, "标记行指名【哪条分支】（可归因，⛔ 不是「不知道」）");
-    assert.match(log, /reason=/, "标记行携带原因");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(shared.root, { recursive: true, force: true });
+    fs.rmSync(specific.root, { recursive: true, force: true });
   }
 });
 
 
-test("AC1 — 资源闸 WAIT 同样留标记（第二条「未跑就返回」分支），且标记行有界（⛔ 不是 4KB 单行）", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-gatewait-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    statePath(root),
-    JSON.stringify({ state: "green", pid: 999999999, finishedAt: Date.now(), runId: "old" }, null, 2) + "\n",
-    "utf8",
+test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red and carries the failed file in failures[]", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pf-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=3580.991183 packages/quay/test/verify-delivery-surface.test.mjs passed=false"\nexit 1',
   );
   try {
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT（cpu 饥饿）
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
-      },
-    });
+    const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
-    assert.notEqual(code, 0, "WAIT ⇒ 本轮没跑");
-    assert.ok(!fs.existsSync(argsLog), "suite 从未被 spawn");
-    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
-    const line = log.split("\n").find((l) => l.includes(SUITE_NOT_RUN));
-    assert.ok(line, `WAIT ⇒ suite log 有 SUITE-NOT-RUN 行:\n${log}`);
-    assert.match(line, /branch=resource-gate-wait/, "WAIT 分支名可辨（⛔ 与单飞拒绝同形）");
-    assert.ok(line.length <= 500, `标记行有界（实测 ${line.length} 字符）——可读性正是这条标记的存在理由`);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "__PERFILE__ passed=false flips state to red (AC2)");
+    assert.equal(s.reason, "failed");
+    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the per-file failure (AC3); got ${JSON.stringify(s.failures)}`);
+    assert.equal(
+      s.failures[0].file,
+      "packages/quay/test/verify-delivery-surface.test.mjs",
+      "the per-file line's path is the failure's file (AC3 — red with detail, no more failures=[])",
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC1 负控制 — 闸 GO 且无在飞 runner ⇒ suite log 里【没有】SUITE-NOT-RUN（标记可取假）", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-neg-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  try {
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "10", // GO
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
-      },
-    });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "GO ⇒ 真跑");
-    assert.ok(fs.existsSync(argsLog), "suite 被 spawn（负控制的前提：这一轮是真的跑了）");
-    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
-    assert.ok(!log.includes(SUITE_NOT_RUN), `跑了的那一轮 ⛔ 不得出现拒绝标记:\n${log}`);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC3 — 两个标记在两态间可取假：非拒绝轮有 RUN-START 无 NOT-RUN，拒绝轮反之", async () => {
-  // 非拒绝轮（真跑）。
-  const goRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-go-"));
-  const { f, dir } = fakeSuite(GREEN_SUITE);
-  let goLog = "";
-  try {
-    const child = runRunner({ root: goRoot, command: `bash ${f}` });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "非拒绝轮退出 0");
-    goLog = fs.readFileSync(path.join(goRoot, ".quay", "full-suite.log"), "utf8");
-  } finally {
-    fs.rmSync(goRoot, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  assert.ok(goLog.includes(SUITE_RUN_START), "非拒绝轮：suite log 有 RUN-START（本轮确实进了执行段）");
-  assert.ok(!goLog.includes(SUITE_NOT_RUN), "非拒绝轮：⛔ 无 NOT-RUN");
+});
 
-  // 拒绝轮。
-  const rejRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-rej-"));
-  fs.mkdirSync(path.join(rejRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    statePath(rejRoot),
-    JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "inflight" }, null, 2),
+
+test("AC2 e2e — a GREEN round archives stderr __OVERHEAD__ phase lines (stderr is teed, not dropped)", async () => {
+  // test.sh's _oh_emit writes the fixed-overhead decomposition to STDERR (>&2). The runner must
+  // archive those lines into .quay/full-suite.log — the outer's verification round greps that log
+  // for `__OVERHEAD__`. This fake suite emits one line to stdout and one to STDERR on a green run;
+  // both must land in the archived log (gap-red-round-loses-overhead-phase-decomposition AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-green-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42"\n' +
+      'echo "__OVERHEAD__ main_phase_ms=650104" >&2\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
   );
-  let rejLog = "";
   try {
-    const res = await runCli(RUNNER, ["--root", rejRoot, "--state-dir", path.join(rejRoot, ".quay")]);
-    assert.notEqual(res.code, 0, "拒绝轮退出非零");
-    rejLog = fs.readFileSync(path.join(rejRoot, ".quay", "full-suite.log"), "utf8");
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `green suite exits 0, got ${code}`);
+    assert.equal(readState(root).state, "green");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42/, "stdout __OVERHEAD__ line reached the archived log");
+    assert.match(
+      log,
+      /__OVERHEAD__ main_phase_ms=650104/,
+      "STDERR __OVERHEAD__ line reached the archived log (stderr is teed, not dropped)",
+    );
   } finally {
-    fs.rmSync(rejRoot, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  assert.ok(rejLog.includes(SUITE_NOT_RUN), "拒绝轮：有 NOT-RUN");
-  assert.ok(!rejLog.includes(SUITE_RUN_START), "拒绝轮：⛔ 无 RUN-START（它没进执行段——这正是 0 字节的旧歧义所在）");
 });

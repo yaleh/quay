@@ -15,257 +15,221 @@
 //
 // Run: scripts/test.sh plugin/test/ready-pool-check.test.mjs
 
-// SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/13 (14 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
+// SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
-import { __dirname, analyzeTasks, applyPromotions, assert, buildTargetedPromotion, ensureDeliveryCriticalLabel, execFileSync, fourArtifactBody, fs, gapTask, makeWorkspace, os, parseTask, path, setTaskStatus, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+import { BLOCKING_WEIGHT, CONSOLIDATION_WEIGHT, STRATEGIC_REF_RE, STRATEGIC_WEIGHT, __dirname, analyzeTasks, assert, computeDependedOnCount, computeRelevance, execFileSync, fourArtifactBody, fs, gapTask, makeWorkspace, parseTask, path, readConsolidates, touchesScale, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 
-test("setTaskStatus judges todo from develop — a dirty ready leftover re-commits, develop converges (AC1 能取假)", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-poison-${Date.now()}-`));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
-  fs.mkdirSync(path.join(root, "code"), { recursive: true });
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  git("init", "-q", "-b", "develop", ".");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Test");
-  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
-  git("add", ".");
-  git("commit", "-q", "-m", "init todo");
-  git("checkout", "-q", "-b", "author");
-  // The poison: the flip landed on disk (ready) but the commit failed — develop/HEAD stay todo.
-  writeTask(root, "gap-candidate", { ...gapTask("gap-candidate"), status: "ready" });
-  assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*todo$/m,
-    "precondition: develop still todo (the poison)");
-  assert.match(git("status", "--porcelain"), /M tasks\/gap-candidate\.md/,
-    "precondition: worktree dirty — ready uncommitted");
+test("value-degradation AC1: strategic axis取数 bug — `SPEC §11`-style reference (pilot's form) reads strategic Y", () => {
+  // The pilot references "SPEC §11 阶段 2" — a reference to the strategic SPEC doc by section number,
+  // not the hyphenated filename `SPEC-per-task-suite-verification-2026-08-13.md`. The old
+  // /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/ required a literal hyphen after SPEC, so the pilot —
+  // the stage's single strategic priority — read strategic N. Word-boundary matching catches BOTH.
+  assert.equal(STRATEGIC_REF_RE.test("SPEC §11 阶段 2 (per-task 全量试点)"), true, "SPEC §N (space+section) must match");
+  assert.equal(STRATEGIC_REF_RE.test("SPEC-per-task-suite-verification-2026-08-13.md"), true, "hyphenated doc name still matches");
+  assert.equal(STRATEGIC_REF_RE.test("FINDING-roadmap-predates-ADR-022-retirement"), true);
+  assert.equal(STRATEGIC_REF_RE.test("SYNTHESIS-four-gaps-2026-08-05.md"), true);
+  assert.equal(STRATEGIC_REF_RE.test("REVIEW-cadence mechanism"), true);
+  // negative control: case-sensitivity preserved (a lowercase `spec` in prose is NOT a strategic ref).
+  assert.equal(STRATEGIC_REF_RE.test("lowercase spec- reference"), false, "case-sensitive prefix match");
+  assert.equal(STRATEGIC_REF_RE.test("just a normal task"), false);
 
-  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, taskReadRef: "develop" };
-  const r = applyPromotions(opts);
-  assert.equal(r.should_apply, true);
-  assert.equal(r.applied_promotions.length, 1);
-  assert.equal(r.applied_promotions[0].id, "gap-candidate");
-  assert.equal(r.applied_promotions[0].ok, true, "AC1: develop-todo ⇒ re-flip, ⛔ not a not-todo skip");
-  assert.equal(r.applied_promotions[0].committed, true, "AC1: the leftover ready is re-committed");
-  assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*ready$/m,
-    "AC1: develop converges to ready");
+  // end-to-end: a todo whose body references the pilot's actual strategic-doc form gets strategic Y
+  // and a value well above its 1/cost — NOT structurally bottomed out.
+  const strategic = computeRelevance("gap-spec-11-pilot", {
+    body: "references SPEC §11 阶段 2 per-task 全量试点\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts",
+  });
+  assert.equal(strategic.strategic, true, "SPEC §11 reference ⇒ strategic traceable");
+  assert.equal(strategic.value, Number((STRATEGIC_WEIGHT + 1 / 3).toFixed(3)), "value = strategic(4) + costBenefit(1/3), NOT 1/3");
+  assert.match(strategic.reason, /strategic Y/);
 });
 
 
-test("setTaskStatus still no-ops when develop is already ready — no duplicate flip (AC2 负控制)", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-poison-neg-${Date.now()}-`));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  git("init", "-q", "-b", "develop", ".");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Test");
-  writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  git("add", ".");
-  git("commit", "-q", "-m", "init ready");
-  git("checkout", "-q", "-b", "author");
-
-  const out = setTaskStatus(root, "gap-ready", "ready");
-  assert.equal(out.ok, false, "AC2: develop already ready ⇒ no duplicate flip");
-  assert.equal(out.reason, "not-todo");
-  assert.equal(git("status", "--porcelain"), "", "AC2: no write, tree stays clean");
+test("value-degradation AC1: blocking axis取数 gap — a task others `depends_on` is blocking", () => {
+  const childrenByTask = new Map();
+  const parentRefCount = new Map();
+  // two tasks list `gap-prereq` in their depends_on — its landing unblocks both (same semantic as
+  // being named parent, but the edge family is `depends_on`, which the blocking axis never read).
+  const dependedOnCount = new Map([["gap-prereq", 2]]);
+  const r = computeRelevance(
+    "gap-prereq",
+    { body: "plain\n## Touches\n- code/a.ts" },
+    childrenByTask,
+    parentRefCount,
+    null,
+    dependedOnCount,
+  );
+  assert.equal(r.blocking, true, "a task others depends_on is blocking");
+  assert.equal(r.value, BLOCKING_WEIGHT + 1, "value = blocking(2) + costBenefit(1)");
+  assert.match(r.reason, /depends-on 2/);
+  // negative: a task NO ONE depends_on stays non-blocking on this axis.
+  const isolated = computeRelevance("gap-isolated", { body: "plain\n## Touches\n- code/a.ts" }, childrenByTask, parentRefCount, null, dependedOnCount);
+  assert.equal(isolated.blocking, false);
 });
 
 
-test("default analyzeTasks never writes tasks/ (pure detector preserved — no --apply = byte-unchanged)", (t) => {
-  const root = makeWorkspace("pure");
+test("computeDependedOnCount — the depends_on reverse-edge index, single source shared with the ff-starvation relief (gap-ff-starvation-no-dynamic-cap-relief)", () => {
+  const fm = (extra) => parseTask(`---\nid: gap-x\nstatus: ready\n${extra}---\nbody\n`);
+  const a = fm("");
+  const b = fm("depends_on:\n  - gap-a\n");
+  const c = fm("depends_on:\n  - gap-a\n  - gap-b\n");
+  const allTasks = new Map([["gap-a", a], ["gap-b", b], ["gap-c", c]]);
+  const m = computeDependedOnCount(allTasks);
+  assert.equal(m.get("gap-a"), 2, "two tasks list gap-a in depends_on");
+  assert.equal(m.get("gap-b"), 1);
+  assert.equal(m.get("gap-c"), undefined, "no one depends_on gap-c ⇒ absent (never a fabricated 0)");
+});
+
+
+test("value-degradation AC2/AC3: a large-touches strategic task floats above a small plain task; composite not 1/cost (--top ordering)", (t) => {
+  const root = makeWorkspace("val-nondeg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The pilot shape: a LARGE touches task (many files) that is strategic — under the old pure-1/cost
+  // signal it bottomed out (value = 1/8 for 8 touches); with the strategic axis restored it outranks a
+  // tiny plain task.
+  writeTask(root, "gap-pilot", gapTask("gap-pilot", {
+    body: fourArtifactBody({
+      touches: Array.from({ length: 8 }, (_, i) => `- code/file${i}.ts`),
+      extra: "\nproposal references SPEC §11 阶段 2 (per-task 全量试点)",
+    }),
+  }));
+  writeTask(root, "gap-plain", gapTask("gap-plain", {
+    body: fourArtifactBody({ touches: ["- code/one.ts"] }),
+  }));
+  // a blocking-via-depends_on todo also ranks above the plain one.
+  writeTask(root, "gap-dep", gapTask("gap-dep", {
+    body: fourArtifactBody({ touches: ["- code/dep.ts"] }),
+  }));
+  writeTask(root, "gap-dependent", gapTask("gap-dependent", {
+    body: fourArtifactBody({ touches: ["- code/other.ts"] }),
+  }));
+
+  // inject a depends_on edge gap-dependent → gap-dep by appending to the frontmatter.
+  const depFile = path.join(root, "tasks", "gap-dependent.md");
+  const depRaw = fs.readFileSync(depFile, "utf8");
+  fs.writeFileSync(depFile, depRaw.replace(/^(extra:)/m, "depends_on:\n  - gap-dep\nextra:"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 4 });
+  assert.equal(r.top_relevance[0].id, "gap-pilot", "large-touches strategic task must rank FIRST (not bottom out)");
+  assert.equal(r.top_relevance[0].strategic, true);
+  // AC1 (gap-ac46-pool-criteria-in-gate): gapTask now injects the C8 self-touch (`- tasks/<id>.md`),
+  // which touchesScale counts as a declared touch — gap-pilot's 8 real touches become 9 (8 + self-touch)
+  // ⇒ cost = 1/9, value = STRATEGIC_WEIGHT + 1/9.
+  assert.equal(r.top_relevance[0].value, Number((STRATEGIC_WEIGHT + 1 / 9).toFixed(3)));
+  // the blocking-via-depends_on task ranks above the plain ones (blocking 2 + costBenefit 1 = 3 > 1).
+  assert.equal(r.top_relevance[1].id, "gap-dep", "depends_on-blocking task ranks above plain");
+  assert.equal(r.top_relevance[1].blocking, true);
+  // both plain 1-touch tasks (gap-dependent, gap-plain) tie at value 1; the alphabetical tie-break
+  // puts gap-dependent before gap-plain — the plain pair ranks LAST, after pilot and gap-dep.
+  const plainIdx = r.top_relevance.map((e) => e.id).filter((id) => id === "gap-dependent" || id === "gap-plain");
+  assert.deepEqual(plainIdx, ["gap-dependent", "gap-plain"], "plain pair last of the four");
+  // AC3: the value sequence is NOT a monotone 1/cost curve — the strategic large task (4.125) tops
+  // the plain tiny task (1), inverting the pure-cost ordering.
+  assert.ok(r.top_relevance[0].value > r.top_relevance[2].value, "strategic large task outranks plain small");
+  const vals = r.top_relevance.map((e) => e.value);
+  assert.deepEqual(vals, [...vals].sort((a, b) => b - a), "top_relevance sorted by value desc");
+});
+
+
+test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC2/Contract measure)", (t) => {
+  const root = makeWorkspace("cli-top");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
-
-  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
-  const before = fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8");
-  const r = analyzeTasks(opts);
-  assert.equal(r.promotions.length, 1, "read mode still recommends the candidate");
-  const after = fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8");
-  assert.equal(after, before, "no writes without --apply");
-  assert.equal(Object.hasOwn(r, "should_apply"), false, "read mode has no apply fields");
-  assert.equal(Object.hasOwn(r, "applied_promotions"), false);
-});
-
-
-test("CLI --apply smoke: --root/--cap/--floor-mult/--apply lands promotions + emits JSON (exit 0)", (t) => {
-  const root = makeWorkspace("apply-cli");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
-
+  writeTask(root, "gap-strategic", gapTask("gap-strategic", {
+    body: fourArtifactBody({ extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-small", gapTask("gap-small", { body: fourArtifactBody({ touches: ["- code/a.ts"] }) }));
   const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
   const out = execFileSync(
     process.execPath,
-    ["--experimental-strip-types", script, "--root", root, "--cap", "3", "--floor-mult", "1", "--apply"],
+    ["--experimental-strip-types", script, "--root", root, "--top", "5"],
     { encoding: "utf8" },
   );
   const parsed = JSON.parse(out);
-  assert.equal(parsed.should_apply, true);
-  assert.equal(parsed.applied_promotions.length, 1);
-  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
-  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "CLI --apply lands the promotion on disk");
+  assert.ok(Array.isArray(parsed.top_relevance), "band: top_n_relevance is an array");
+  assert.ok(parsed.top_relevance.length >= 1, "band: at least one relevance-sorted entry");
+  assert.equal(parsed.top_relevance[0].strategic, true, "control: strategic candidate ranks front");
+  assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
 });
 
-// ── DELIVERY-CRITICAL AT PROMOTE (tasks/gap-delivery-critical-label-at-promote-not-after-dispatch) ─
-// The delivery-critical label's effect point is the dispatch-time sort key; it was being applied
-// AFTER dispatch (the guard task dispatched 21:21:10, labeled 21:26:17 — 5min7s late), so the task
-// entered the ready pool unlabeled and self-excluded from the ranking once in flight. AC1 fix: the
-// promote gate DETERMINES delivery-critical at promote (todo→ready) and writes the label together
-// with the ready status ("标签与 ready 同现") — so the sort key is in place for the NEXT selection.
+// ── CONSOLIDATION AXIS (gap-dispatch-value-has-no-consolidation-axis) ──────────────────────────────
+// The three original merit axes (strategic / blocking / suite-blocking) had NO axis for
+// SUBTRACTION/CONSOLIDATION merit — a task that deletes 119 duplicate implementations was billed
+// only by its Touches width (costBenefit 1/120 ≈ 0.008), 40× below a 3-touch guard (1/3), so wide
+// consolidation tasks were structurally starved in the dispatch queue. The fix adds a fourth axis
+// whose value comes from a MECHANICAL frontmatter declaration `extra.consolidates: N` (NOT body
+// prose — the negative control that keeps it from becoming a second STRATEGIC_REF_RE keyword match).
 
 
-test("ensureDeliveryCriticalLabel — adds delivery-critical to a block-list labels field (AC1)", () => {
-  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels:\n  - gap\n  - defect\nparent: null\n";
-  const r = ensureDeliveryCriticalLabel(fm);
-  assert.equal(r.deliveryCritical, true);
-  assert.equal(r.added, true);
-  assert.match(r.fm, /labels:\n  - gap\n  - defect\n  - delivery-critical/);
-  assert.match(r.fm, /^parent: null$/m, "next top-level key preserved");
-});
-
-
-test("ensureDeliveryCriticalLabel — adds delivery-critical to a flow-list labels field (AC1)", () => {
-  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels: [gap, defect]\nparent: null\n";
-  const r = ensureDeliveryCriticalLabel(fm);
-  assert.equal(r.deliveryCritical, true);
-  assert.equal(r.added, true);
-  assert.match(r.fm, /labels: \[gap, defect, delivery-critical\]/);
+test("readConsolidates: mechanical extra.consolidates declaration; prose-only / absent / non-numeric read 0 (AC2/AC3)", () => {
+  // parseTask's `extra` projection (the single YAML parser readDependsOn uses) carries the number.
+  const declared = parseTask("---\nid: x\nextra:\n  schema: v1\n  consolidates: 119\n---\nbody");
+  assert.equal(readConsolidates(declared), 119, "extra.consolidates: 119 ⇒ 119");
+  assert.equal(readConsolidates({ extra: { consolidates: "12" } }), 12, "string N coerces to number");
+  assert.equal(readConsolidates({ extra: { consolidates: 0 } }), 0, "0 ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: -3 } }), 0, "negative ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: {} }), 0, "absent ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: "not-a-number" } }), 0, "non-numeric ⇒ 0 (fail-open)");
+  // negative control (AC3): a task that only SAYS it consolidates in prose, with NO declaration, reads 0.
+  assert.equal(readConsolidates({ body: "we consolidate 119 duplicate checker implementations into one template" }), 0,
+    "prose-only consolidation claim ⇒ no declaration ⇒ 0");
 });
 
 
-test("ensureDeliveryCriticalLabel — appends a labels block when the frontmatter has none (AC1)", () => {
-  const fm = "id: gap-x\ntitle: x\nstatus: todo\nparent: null\n";
-  const r = ensureDeliveryCriticalLabel(fm);
-  assert.equal(r.deliveryCritical, true);
-  assert.equal(r.added, true);
-  assert.match(r.fm, /labels:\n  - delivery-critical/);
-  assert.match(r.fm, /^parent: null$/m, "existing frontmatter preserved");
+test("computeRelevance: consolidation axis adds weight from the declaration; prose-only gets nothing (AC2/AC3)", () => {
+  // A WIDE consolidation task (120 touches → costBenefit 1/120) with the mechanical declaration.
+  const wide = computeRelevance("gap-consolidate-checkers", {
+    body: "plain\n## Touches\n" + Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`).join("\n"),
+    extra: { consolidates: 119 },
+  });
+  assert.equal(wide.consolidating, true);
+  assert.equal(wide.consolidates, 119);
+  assert.equal(wide.value, Number((CONSOLIDATION_WEIGHT + 1 / 120).toFixed(3)),
+    "value = consolidation(1) + costBenefit(1/120), NOT 1/120");
+  assert.match(wide.reason, /consolidating Y\(119\)/);
+
+  // negative control: prose-only consolidation claim (no extra.consolidates) gets NO weight.
+  const proseOnly = computeRelevance("gap-prose-consolidation", {
+    body: "we consolidate 119 duplicate checker implementations into one template\n## Touches\n- code/a.ts",
+  });
+  assert.equal(proseOnly.consolidating, false);
+  assert.equal(proseOnly.value, 1, "prose-only ⇒ pure costBenefit (1 touch) = 1");
+
+  // the starvation fix: the wide consolidation task outranks a narrow non-consolidation guard.
+  const narrowGuard = computeRelevance("gap-narrow-guard", {
+    body: "plain\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts",
+  });
+  assert.equal(narrowGuard.value, Number((1 / 3).toFixed(3)));
+  assert.ok(wide.value > narrowGuard.value, "wide consolidation task outranks a narrow guard (AC4)");
 });
 
 
-test("ensureDeliveryCriticalLabel — idempotent when delivery-critical is already present (AC1)", () => {
-  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels:\n  - gap\n  - delivery-critical\nparent: null\n";
-  const r = ensureDeliveryCriticalLabel(fm);
-  assert.equal(r.deliveryCritical, true);
-  assert.equal(r.added, false, "no duplicate item added");
-  assert.equal(r.fm, fm, "frontmatter byte-unchanged when the label is already present");
-});
-
-
-test("setTaskStatus with ensureDeliveryCritical writes status AND the delivery-critical label at promote (AC1 — 标签与 ready 同现)", (t) => {
-  const root = makeWorkspace("sts-dc");
+test("analyzeTasks --top: wide consolidation todo ranks above a narrow guard (AC4 end-to-end)", (t) => {
+  const root = makeWorkspace("consolidate-top");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const body = "**type:** execution\n\n## Proposal\nA real proposal paragraph long enough to be counted.\n\n## Plan\nA real plan paragraph long enough to be counted.\n";
-  writeTask(root, "gap-crit", { status: "todo", labels: ["gap"], body });
+  writeTask(root, "gap-narrow-guard", gapTask("gap-narrow-guard", {
+    body: fourArtifactBody({ touches: ["- code/a.ts", "- code/b.ts", "- code/c.ts"] }),
+  }));
+  writeTask(root, "gap-consolidate-checkers", gapTask("gap-consolidate-checkers", {
+    body: fourArtifactBody({ touches: Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`) }),
+  }));
+  // Inject the mechanical declaration into the consolidation task's frontmatter `extra` block.
+  const f = path.join(root, "tasks", "gap-consolidate-checkers.md");
+  fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("  schema: v1\n", "  schema: v1\n  consolidates: 119\n"));
 
-  const out = setTaskStatus(root, "gap-crit", "ready", { ensureDeliveryCritical: true });
-  assert.equal(out.ok, true);
-  assert.equal(out.to, "ready");
-  assert.equal(out.deliveryCritical, true, "the promote record exposes the determination");
-
-  const raw = fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8");
-  assert.match(raw, /^status:\s*ready$/m, "status flipped to ready");
-  assert.match(raw, /^\s+- delivery-critical$/m, "delivery-critical label co-occurs with ready");
-  assert.match(raw, /^\s+- gap$/m, "existing label preserved");
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 2 });
+  assert.equal(r.top_relevance.length, 2, "exactly the two todos");
+  assert.equal(r.top_relevance[0].id, "gap-consolidate-checkers", "consolidation todo ranks first (AC4)");
+  assert.equal(r.top_relevance[0].consolidating, true, "the mechanical declaration flips consolidating");
+  assert.equal(r.top_relevance[0].consolidates, 119);
+  assert.equal(r.top_relevance[1].id, "gap-narrow-guard", "narrow guard ranks second");
+  assert.equal(r.top_relevance[1].consolidating, false, "narrow guard has no declaration ⇒ not consolidating");
+  assert.ok(r.top_relevance[0].value > r.top_relevance[1].value,
+    "consolidation value strictly above the narrow guard (AC4)");
 });
 
-
-test("setTaskStatus WITHOUT ensureDeliveryCritical does NOT add the label (AC1 negative control)", (t) => {
-  const root = makeWorkspace("sts-dc-neg");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const body = "**type:** execution\n\n## Proposal\nA real proposal paragraph long enough to be counted.\n\n## Plan\nA real plan paragraph long enough to be counted.\n";
-  writeTask(root, "gap-plain", { status: "todo", labels: ["gap"], body });
-
-  const out = setTaskStatus(root, "gap-plain", "ready");
-  assert.equal(out.ok, true);
-  assert.equal(out.deliveryCritical, false, "a non-determined promotion exposes deliveryCritical:false");
-
-  const raw = fs.readFileSync(path.join(root, "tasks", "gap-plain.md"), "utf8");
-  assert.match(raw, /^status:\s*ready$/m, "status flipped to ready");
-  assert.doesNotMatch(raw, /delivery-critical/, "no label was invented for a non-delivery-critical task");
-});
-
-
-test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1 — label co-occurs with ready)", (t) => {
-  const root = makeWorkspace("apply-dc");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"], goal_ac: "AC-190" }));
-
-  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
-  const r = applyPromotions(opts);
-  assert.equal(r.should_apply, true);
-  assert.equal(r.applied_promotions.length, 1);
-  assert.equal(r.applied_promotions[0].id, "gap-crit");
-  assert.equal(r.applied_promotions[0].deliveryCritical, true, "the applied record exposes the delivery-critical determination");
-
-  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
-  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status landed on disk");
-  assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry (标签与 ready 同现)");
-});
-
-// ── GOAL LAYER IS NOT AN ADMISSION INPUT (人 2026-09-11 裁定) ──────────────────────────────────────
-// The removed `goalAcMissing` conjunct made a delivery-critical todo WITHOUT `goal_ac` structurally
-// unpromotable (a zombie). The admission set is decided ONLY by the task's own self-sufficient
-// properties; the goal-layer half of the same rule lives in
-// long-term-guarantee-goal-backed-check.ts (per-round re-evaluation, WITH an activation line that
-// grandfathers the pre-cutoff stock — the admission gate had no such line, which is why the
-// half-patched simulation produced the zombie). Invariant is mechanically guarded by
-// plugin/scripts/eligible-no-goal-source-check.ts.
-
-test("applyPromotions: a delivery-critical todo WITHOUT goal_ac IS promoted (goal layer is not an admission input)", (t) => {
-  const root = makeWorkspace("apply-dc-no-goal-ac");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
-
-  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
-  const r = applyPromotions(opts);
-  assert.equal(r.should_apply, true, "a self-sufficient candidate is eligible regardless of goal_ac");
-  assert.equal(r.applied_promotions.length, 1);
-  assert.equal(r.applied_promotions[0].id, "gap-crit");
-  assert.equal(
-    r.applied_promotions[0].deliveryCritical,
-    true,
-    "the label is still a TASK-layer fact (co-occurs with ready) — it just is not an admission term",
-  );
-
-  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
-  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status flipped todo→ready — no goal-layer admission term");
-  assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry");
-});
-
-
-test("buildTargetedPromotion: a delivery-critical todo WITHOUT goal_ac is targeted-promotable (both paths agree)", (t) => {
-  const root = makeWorkspace("targeted-dc-no-goal-ac");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(root, "code", "crit.ts"), "export const crit = 1;\n");
-  const body = fourArtifactBody({ touches: ["- code/crit.ts", "- tasks/gap-crit.md"] });
-  writeTask(root, "gap-crit", { status: "todo", labels: ["gap", "delivery-critical"], body });
-  const raw = fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8");
-  // parseTask carries the body/frontmatter; `id` and `status` are supplied by the caller (the
-  // analyzeTasks map does the same — same fixture shape as the AC1 bulk-gate test above).
-  const task = { ...parseTask(raw), id: "gap-crit", status: "todo" };
-
-  const r = buildTargetedPromotion("gap-crit", task, root, new Map([["gap-crit", task]]), "develop");
-  assert.equal(r.eligible, true, "the targeted path must not carry a goal-layer admission term either");
-  assert.equal(r.checks.goalAcMissing, undefined, "the removed check field is not re-introduced");
-});
-
-
-test("READY-POOL candidate: no goal-source field on the candidate (the removed goalAcMissing is gone, not renamed)", (t) => {
-  const root = makeWorkspace("no-goal-field");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
-  const c = r.candidates.find((x) => x.id === "gap-crit");
-  assert.ok(c, "the candidate is in the pool report");
-  assert.equal(c.eligible, true, "delivery-critical + no goal_ac is promotion-eligible");
-  const goalish = Object.keys(c).filter((k) => /goal/i.test(k));
-  assert.deepEqual(goalish, [], `no goal-source field may appear on the candidate (found: ${goalish.join(",")})`);
-});
+// ── Cross-machine merge regression (AC17 catch-up): computeRelevance arity — blocking must work ──
+// The merge left a 3-arg call to the 4-param computeRelevance; the default empty Map silently
+// zeroed blocking (allTasks landed in childrenByTask, .get() → task object, .length undefined).
+// Fix: buildCandidate threads childrenByTask/parentRefCount; a parent with a child must report
+// blocking=true (the manager's counterexample: Y has child X → 4-arg blocking=true, 3-arg false).

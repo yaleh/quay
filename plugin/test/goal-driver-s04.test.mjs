@@ -8,712 +8,549 @@
 //
 // Run: node --test plugin/test/goal-driver.test.mjs
 
-// SPLIT from goal-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 4/4 (23 tests). Shared fixtures: ./helpers/goal-driver-harness.mjs (single source).
+// SPLIT from goal-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 4/6 (16 tests). Shared fixtures: ./helpers/goal-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { ALL_GAP_STATES, GOAL_CONTROL_STATE_REL, GOAL_GAPS_FACT_NAME, GOAL_ROUND_REL, OBJECTIVE_ACS, OBJECTIVE_ASSERTION_FIELDS, OBJECTIVE_EVIDENCE_CARRIERS, OBJECTIVE_GOAL, QUIET_GAP_STATES, assert, collectObjectiveEvidence, computeGoalGaps, derivedByAc, derivedCriterionRecords, evRecord, fs, gapViewEntries, gapViewFact, goalCiRunsCollect, goalCiRunsThrottleMs, goalCliResolvable, goalDriverRoutines, goalFlipDecision, goalStoreArgv, goalSufficiencyVerdict, isFilingGapState, judgeCmd, objectiveAssertionCommand, objectiveCacheKey, objectiveEvidenceProfile, objectiveSufficiencyVerdictDetail, os, parseFrozenFailingReading, path, readsFrozenPopulation, repoRoot, resetObjectiveTestState, runGapSpawnPass, runGoalRound, runResidentQualityGateLoop, spawn, spawnSync, verifyObjectiveAssertion, writeEvidenceCarrier, writeGoalFile, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
+import { DELIVERED_VERSION, GOAL_ACCEPTANCE_ACTIVE_ENV, PRE_CHANGE_ENTRY, assert, buildGapWorkerPrompt, computeGoalGaps, fs, goalFlipDecision, hasPrefilingEvidence, isFilingGapState, mkTargetRoot, os, path, readFrozenFailing, readHostHealth, recheckFrozenFailing, recheckStandingFailing, repoRoot, runGoalRound, spawn, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, waitForProcessVisible, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
 
-test('AC2: unsubstantiated 携带指认，且指认能被一条命令复核（命令真的跑出 matched=total）', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac2-'));
-  try {
-    writeEvidenceCarrier(tmp, [
-      evRecord('GOAL-001-AC-001'),
-      evRecord('GOAL-001-AC-002', { task_id: 'T-2' }),
-    ]);
-    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    const detail = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' }),
-    });
-
-    const a = detail.assertion;
-    assert.ok(a !== null, 'unsubstantiated 必须带指认（⛔ 不可复核的判决不得冒充结论）');
-    assert.equal(a.kind, 'single-value-field');
-    assert.equal(a.field, 'project_root');
-    assert.equal(a.value, '/p/one');
-    assert.equal(a.matched, 2, 'matched 由产出侧机械算出（判定器不提供）');
-    assert.equal(a.total, 2, 'total 由产出侧机械算出（判定器不提供）');
-    assert.deepEqual(a.acs, ['GOAL-001-AC-001', 'GOAL-001-AC-002']);
-    assert.deepEqual(a.carriers, ['.quay/productization-verification.jsonl'], '载体是 repo-root-relative 路径（命令要能直接跑）');
-    assert.ok(a.command.includes('python3'), '指认携带一条可复核命令');
-
-    // 真的跑那条命令（在仓库根语义下：cwd = tmp，载体在 .quay/ 下）。
-    const ok = spawnSync('bash', ['-c', a.command], { cwd: tmp, encoding: 'utf8' });
-    assert.equal(ok.status, 0, `复核命令应 exit 0，实际 ${ok.status}：${ok.stderr}`);
-    assert.match(ok.stdout, /matched=2 total=2/, '命令输出与指认的 matched/total 一致');
-
-    // 负控制（同一条命令的能取假半边）：换一个值 ⇒ matched 归零、exit 1。
-    const bad = spawnSync('bash', ['-c', objectiveAssertionCommand(a.acs, a.field, '/p/NOT-THERE', a.carriers)], {
-      cwd: tmp, encoding: 'utf8',
-    });
-    assert.equal(bad.status, 1, '指认为假 ⇒ 命令 exit 1（⛔ 不是恒绿）');
-    assert.match(bad.stdout, /matched=0 total=2/);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ── AC3 ⛔ 不默认 covered ─────────────────────────────────────────────────────────────────
-
-
-test('AC3: 无指认的 unsubstantiated ⇒ not-evaluated（⛔ 不是 covered 也不是 unsubstantiated）', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3a-'));
-  try {
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
-    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    const d = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      // 判定器说「不充分」但【不给指认】——这正是「能解释的说法 ≠ 被检验的结论」的形态。
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated' }),
-    });
-    assert.equal(d.verdict, 'not-evaluated', '无指认 ⇒ not-evaluated');
-    assert.notEqual(d.verdict, 'substantiated', '⛔ 不默认 covered/substantiated');
-    assert.notEqual(d.verdict, 'unsubstantiated', '⛔ 也不接受这条不可复核的结论');
-    assert.equal(d.cause, 'assertion-missing', '成因可区分：指认缺失');
-    assert.equal(d.assertion, null, '⛔ 不携带一条未复核通过的指认');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('AC3: 指认复核不成立（值与记录不符 / 字段在词表外 / 断言本身为假）⇒ not-evaluated', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3b-'));
-  try {
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
-    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-
-    // (a) 值编错了 ⇒ 逐字比对失败。
-    const wrongValue = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/INVENTED' }),
-    });
-    assert.equal(wrongValue.verdict, 'not-evaluated');
-    assert.equal(wrongValue.cause, 'assertion-unverifiable');
-
-    // (b) 字段不在白名单（自由文本字段名 ⇒「一条命令复核」无从谈起）。
-    const badField = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'some_narrative_field', value: 'x' }),
-    });
-    assert.equal(badField.verdict, 'not-evaluated');
-    assert.equal(badField.cause, 'assertion-unverifiable');
-
-    // (c) 指认一个「并非取同一值」的字段：让 task_id 出现两个取值 ⇒ 全称断言不成立。
-    writeEvidenceCarrier(tmp, [
-      evRecord('GOAL-001-AC-001'),
-      evRecord('GOAL-001-AC-002', { task_id: 'T-2' }),
-    ]);
-    const multiEvidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    assert.equal(verifyObjectiveAssertion('task_id', 'T-1', multiEvidence).ok, false, '前置：task_id 非单一取值');
-    const multi = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, multiEvidence, tmp, {
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'task_id', value: 'T-1' }),
-    });
-    assert.equal(multi.verdict, 'not-evaluated');
-    assert.equal(multi.cause, 'assertion-unverifiable');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('AC3: 判定器不可用 / 读不懂 / 两次不一致 ⇒ not-evaluated，⛔ 绝不回落 substantiated', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3c-'));
-  try {
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001')]);
-    const evidence = collectObjectiveEvidence(tmp, ['AC-001'], OBJECTIVE_EVIDENCE_CARRIERS);
-
-    const empty = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, { objectiveCmd: [] });
-    assert.equal(empty.verdict, 'not-evaluated');
-    assert.equal(empty.cause, 'judge-unavailable');
-
-    const gone = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: ['/nonexistent/definitely-not-a-binary'],
-    });
-    assert.equal(gone.verdict, 'not-evaluated');
-    assert.equal(gone.cause, 'judge-unavailable');
-
-    const gibberish = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: ['node', '-e', 'process.stdout.write("I think it is probably fine")'],
-    });
-    assert.equal(gibberish.verdict, 'not-evaluated');
-    assert.equal(gibberish.cause, 'judge-unparseable');
-
-    // 两次取样不一致：第一个样本建计数器文件并答 unsubstantiated，第二个样本见到它改答 substantiated。
-    // ⛔ 不取多数票、⛔ 不回落 substantiated（硬规则：判不出有独立取值）。
-    const counter = path.join(tmp, 'judge-counter');
-    const flip = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
-      objectiveCmd: ['sh', '-c', `if [ -f ${counter} ]; then echo substantiated; else : > ${counter}; echo unsubstantiated; fi`],
-    });
-    assert.equal(flip.verdict, 'not-evaluated');
-    assert.equal(flip.cause, 'samples-disagree');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ── AC4 证据来源真的被消费（⛔ 不是「参数被读到」）──────────────────────────────────────────
-
-
-test('AC4: 改变载体记录会改变结论（同一判定器输出、同一 goal）', async () => {
-  resetObjectiveTestState();
-  const sameJudge = { verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' };
-  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4a-'));
-  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4b-'));
-  try {
-    // A：两条记录同源（同一 project_root）⇒ 指认成立 ⇒ unsubstantiated。
-    writeEvidenceCarrier(dirA, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
-    // B：**只多了一条**来自另一个 project_root 的记录，其余一切相同。
-    writeEvidenceCarrier(dirB, [
-      evRecord('GOAL-001-AC-001'),
-      evRecord('GOAL-001-AC-002'),
-      evRecord('GOAL-001-AC-002', { project_root: '/p/two', task_id: 'T-3' }),
-    ]);
-    const evA = collectObjectiveEvidence(dirA, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    const evB = collectObjectiveEvidence(dirB, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-
-    // 先证明输入真的不同（否则下面的「结论不同」是空转）。
-    assert.equal(objectiveEvidenceProfile(evA).distinctProjectRoots.length, 1);
-    assert.equal(objectiveEvidenceProfile(evB).distinctProjectRoots.length, 2);
-    assert.notEqual(
-      objectiveCacheKey(OBJECTIVE_GOAL, OBJECTIVE_ACS, evA),
-      objectiveCacheKey(OBJECTIVE_GOAL, OBJECTIVE_ACS, evB),
-      '载体记录进缓存 key ⇒ 记录一变必重判（⛔ 不拿旧证据下的裁决继续用）',
-    );
-
-    const dA = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evA, dirA, { objectiveCmd: judgeCmd(sameJudge) });
-    const dB = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evB, dirB, { objectiveCmd: judgeCmd(sameJudge) });
-
-    assert.equal(dA.verdict, 'unsubstantiated', 'A：证据同源 ⇒ 指认成立');
-    assert.equal(dB.verdict, 'not-evaluated', 'B：证据变成两个 project_root ⇒ 同一条指认不再成立');
-    assert.notEqual(dA.verdict, dB.verdict, '★ AC4：同一判定器输出下，结论随载体记录改变');
-    assert.equal(dB.cause, 'assertion-unverifiable', '成因说明是「指认被记录否证」，⛔ 不是判定器换了话');
-  } finally {
-    fs.rmSync(dirA, { recursive: true, force: true });
-    fs.rmSync(dirB, { recursive: true, force: true });
-  }
-});
-
-
-test('AC4: 零证据记录 ⇒ not-evaluated(no-evidence-records)，profile 是机械读出而非常量', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4z-'));
-  try {
-    // 载体里有一条**不属于本 GOAL** 的记录 ⇒ 对 GOAL-001 而言证据为零（来源完备性：过滤按 AC 归属）。
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-002-AC-009')]);
-    const none = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    assert.equal(none.length, 0, '不属本 GOAL 的记录不计入证据');
-    const d = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, none, tmp, {
-      // 判定器即使说「成立」，零证据也不得采信（⛔ 不是「判定器说了算」）。
-      objectiveCmd: judgeCmd({ verdict: 'substantiated' }),
-    });
-    assert.equal(d.verdict, 'not-evaluated', '零证据 ⇒ not-evaluated（⛔ 不默认 substantiated）');
-    assert.equal(d.cause, 'no-evidence-records');
-    assert.equal(d.profile.records, 0, 'profile 仍被产出（「查过且零条」与「没查」不同形）');
-    assert.deepEqual(d.profile.distinctProjectRoots, []);
-
-    // 同一条记录换成属于本 GOAL ⇒ 证据为 1 条（profile 是机械读出，不是一个恒常量）。
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001')]);
-    const one = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
-    assert.equal(one.length, 1);
-    assert.deepEqual(objectiveEvidenceProfile(one).distinctProjectRoots, ['/p/one']);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('AC4: verifyObjectiveAssertion 的机械复核能取假（同源 ⇒ ok；一条不同源 ⇒ 不 ok）', () => {
-  resetObjectiveTestState();
-  const same = [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')];
-  const mixed = [...same, evRecord('GOAL-001-AC-002', { project_root: '/p/two' })];
-  const strip = ({ ok, matched, total }) => ({ ok, matched, total });
-  assert.deepEqual(strip(verifyObjectiveAssertion('project_root', '/p/one', same)), { ok: true, matched: 2, total: 2 });
-  assert.deepEqual(strip(verifyObjectiveAssertion('project_root', '/p/one', mixed)), { ok: false, matched: 2, total: 3 });
-  // 空集上的全称命题恒真 → 本复核显式判不通过（硬规则 4：结构上不可能取假的量不是测量）。
-  assert.equal(verifyObjectiveAssertion('project_root', '/p/one', []).ok, false, '零记录不算通过');
-  assert.equal(verifyObjectiveAssertion('nope', '/p/one', same).ok, false, '字段在词表外 ⇒ 不通过');
-  assert.ok(OBJECTIVE_ASSERTION_FIELDS.includes('project_root'));
-});
-
-// ── DoD: 第一层判定不得因新增提问层而退化 ──────────────────────────────────────────────────
-
-
-test('DoD: 第一层三态与 goalFlipDecision 原样不变（新层是并列读数，⛔ 不接进关闸）', () => {
-  // 与 goal-sufficiency-gate.test.mjs 逐条同断言：新层不得让这三条结论漂移。
-  resetObjectiveTestState();
-  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## body\nx' }, [{ id: 'AC-001' }]), 'insufficient');
-  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n1. 条件一\n' }, []), 'insufficient');
-  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n1. 条件一\n' }, [{ id: 'AC-001' }]), 'not-evaluated');
-  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n## 风险\n' }, [{ id: 'AC-001' }]), 'insufficient');
-  // 关闸判据只看第一层 verdict（第二层不进 goalFlipDecision）。
-  const records = [
-    { id: 'GOAL-001', status: 'active' },
-    { id: 'AC-001', goal: 'GOAL-001', status: 'achieved' },
-  ];
-  assert.equal(goalFlipDecision(records, 'GOAL-001', { verdict: 'covered' }), true);
-  assert.equal(goalFlipDecision(records, 'GOAL-001', { verdict: 'not-evaluated' }), false);
-});
-
-
-test('DoD: runGoalRound 同时产出两层 fact（goal-sufficiency 与 goal-objective 并列，⛔ 互不含对方的键）', async () => {
-  resetObjectiveTestState();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-round-'));
+test('立案前复核：闸拒绝 ⇒ 独立结局 guard-refused（⛔ 不与「复核通过」同形）；未传/非 violated ⇒ ran:false 零成本', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-guard-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    writeGoalFile(tmp, {
-      id: 'GOAL-001', status: 'active', kind: 'goal',
-      body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n',
-    });
-    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
-    writeGoalFile(tmp, { id: 'AC-002', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
-    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1' });
+    const reading = { failing: ['AC-900'], judgment: 'violated', cause: null, frozenScope: 1 };
 
-    const { sufficiencyFacts, objectiveFacts } = await runGoalRound(tmp, {
-      scriptRoot: repoRoot,
-      gapWorkerCmd: 'true',
-      resourceGateArgv: ['true'],
-      sufficiencyCmd: judgeCmd({ verdict: 'covered' }),
-      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' }),
-    });
+    // 正控制：不在闸下 ⇒ 真跑判据 ⇒ confirmed-failing（`exit 1` 此刻仍为假）。
+    const on = await recheckFrozenFailing(repoRoot, tmp, reading);
+    assert.equal(on.ran, true);
+    assert.equal(on.guardRefused, false);
+    assert.deepEqual(on.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'confirmed-failing', 'still-false']],
+      '不在闸下 ⇒ 真跑；`exit 1` ⇒ confirmed-failing（判据此刻仍为假）');
 
-    assert.equal(sufficiencyFacts.length, 1, '一条 active GOAL ⇒ 一条 sufficiency fact');
-    assert.equal(objectiveFacts.length, 1, '一条 active GOAL ⇒ 一条 objective fact');
-    assert.equal(sufficiencyFacts[0].name, 'goal-sufficiency');
-    assert.equal(objectiveFacts[0].name, 'goal-objective');
-
-    // 第一层：原形不变（AC-212 判据读的正是 value.sufficiency）。
-    const s = sufficiencyFacts[0].value.sufficiency;
-    assert.equal(s.verdict, 'covered', '第一层结论不被新层改变（同输入 ⇒ 仍 covered）');
-
-    // 第二层：独立取值 + 指认 + 证据概况。
-    const o = objectiveFacts[0].value.objective;
-    assert.equal(o.goal, 'GOAL-001');
-    assert.equal(o.verdict, 'unsubstantiated');
-    assert.equal(o.assertion.field, 'project_root');
-    assert.equal(o.profile.records, 2);
-    assert.deepEqual(o.profile.distinctProjectRoots, ['/p/one']);
-
-    // ⛔ 不合并：两条 fact 各带自己的键，互不冒充对方。
-    assert.equal(o.sufficiency, undefined, 'objective fact ⛔ 不含 sufficiency 键');
-    assert.equal(s.objective, undefined, 'sufficiency fact ⛔ 不含 objective 键');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ── 派生判据：② 不得对【真值派生自 ③ 主体population】的常设判据独立立案 ──────────────────────────
-// gap-ac242-derived-criterion-double-judged-and-amendment-unguarded 缺陷①。
-//
-// 同一条真相——「冻结population 中有一条 AC 此刻为假」——被**两个判官**判成两个主体、两个结论：
-//   ③ 冻结population 分支：主体 = **那条为假的 AC**（AC-203），态 = frozen-violated / in-progress
-//      ⇒ 正确路由（有 owner 就不重复立案）；
-//   ② AC-216 常设不变式分支：主体 = **AC-242**（它自己的 criterion 读的正是 ③ 的输入面），
-//      态 = standing-violated（没有任何在飞任务持 `goal_ac: AC-242`）⇒ 为 AC-242 立案。
-// 而 AC-242 的复绿条件**不在它自己的域内**：它的 expect 逐字要求「冻结population 中不存在此刻为假的
-// AC」，当前为假的那条是 AC-203 ⇒ 任何 AC-242 域内的改动都不能使它转绿；唯一出口是把 AC-203 变真，
-// 而那是 AC-203 的域、且已有 owner 在飞。⇒ ② 为它立的每一条任务，其 DoD 都结构上只能由【另一条 AC
-// 的 owner】关闭 —— 每轮一条、永远关不掉。
-//
-// 修法：② 对**真值派生自 ③ 主体population** 的判据（criterion 读 ③ 的输入面 `check --stale-pass`）
-// 让位给 ③ —— ③ 是那个命题的唯一判据、且已在本轮为那条为假的 AC 产出了路由。判据 AC-242 本身**不动**
-// （它保持诚实）；让位只发生在 ③ 本轮**确实判了 violated**（派生条件成立）时，读不到 / 未评估 ⇒ 照旧
-// 立案（⛔ 闸不恒开，见下面的负控制 c）。
-
-/** 一份最小的 ②/③ 夹具：GOAL-900 已关闭（achieved ⇒ 非 active）。三条 achieved AC：
- *  AC-203 未声明 long-term ⇒ **冻结population**（③ 的主体）；AC-242 声明 long-term 且 criterion 读
- *  `check --stale-pass` ⇒ ② 的**派生判据**；AC-214 声明 long-term 而 criterion 与 ③ 无关 ⇒ ② 的
- *  **普通常设判据**（用来证明让位不是「所有常设判据都不再立案」）。 */
-
-
-
-test('派生判据 (a)：无 owner ⇒ ③ 产 frozen-violated，② ⛔ 不产 goal_ac: AC-242 立案', () => {
-  const records = derivedCriterionRecords();
-  // I5 的读数：AC-242 的判据此刻为假（冻结population 里有一条为假），AC-214 不受影响。
-  const standings = { achievedButFailing: ['AC-242'], evaluated: true };
-  // ③ 的读数：那条冻结 AC 此刻为假。
-  const frozen = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
-  assert.equal(frozen.judgment, 'violated');
-  const gaps = computeGoalGaps(records, [], null, standings, frozen);
-  const by = derivedByAc(gaps);
-
-  assert.equal(by.get('AC-203').state, 'frozen-violated', '③ 的主体仍被立案（让位⛔ 不波及 ③ 自己）');
-  assert.ok(isFilingGapState(by.get('AC-203').state), 'frozen-violated 在 spawn 选取面内');
-  assert.equal(by.get('AC-242').state, 'derived-routed', '② 让位：红归 ③ 的主体 AC，不归这条元判据');
-  assert.equal(isFilingGapState(by.get('AC-242').state), false, '⛔ derived-routed 不消耗 spawn 名额');
-  assert.notEqual(by.get('AC-242').state, 'standing-ok', '⛔ 不是 standing-ok：它此刻确实为假（说它成立即假绿）');
-  assert.notEqual(by.get('AC-242').state, 'not-evaluated', '⛔ 不是 not-evaluated：读数在、违反也在，只是成因已由另一个判官接管');
-  assert.equal(by.get('AC-242').taskCount, null, '⛔ 与 0 不同形：本态回答的不是「有几条任务是它的」');
-  assert.equal(by.get('AC-214').state, 'standing-ok', '对照组：非派生的常设判据此刻成立 ⇒ 仍走原判定');
-
-  // 端到端：spawn 选取面只挑 AC-203 一条。
-  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
-  assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-203'], '只有 ③ 的主体 AC 消耗名额（AC-242 不再每轮一条）');
-});
-
-
-test('派生判据 (b)：有 owner（现状）⇒ ③ 产 in-progress，② 同样⛔ 不产立案', () => {
-  const records = derivedCriterionRecords();
-  const standings = { achievedButFailing: ['AC-242'], evaluated: true };
-  const frozen = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
-  // 一条在飞任务持 goal_ac: AC-203（这正是生产上 gap-ac203-two-distinct-kinds-no-production-run 的形态）。
-  const tasks = [{ id: 'gap-ac203-owner', status: 'ready', goalAc: 'AC-203' }];
-  const gaps = computeGoalGaps(records, tasks, null, standings, frozen);
-  const by = derivedByAc(gaps);
-
-  assert.equal(by.get('AC-203').state, 'in-progress', '③ 认得 owner ⇒ 不再重复立案');
-  assert.equal(by.get('AC-242').state, 'derived-routed', '② 仍让位（有主更要让位）');
-  assert.equal(isFilingGapState(by.get('AC-242').state), false);
-  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
-  assert.deepEqual(r.outcomes, [], '两条都不该消耗名额');
-});
-
-
-test('派生判据 (c) 负控制：闸不恒开 —— ③ 说不了话时仍立案；非派生的违反也仍立案', () => {
-  const records = derivedCriterionRecords();
-
-  // (c1) ③ 未评估（台账读不到 / 轮转从未跑过）⇒ 派生条件不成立 ⇒ 回落 standing-violated（成因不明
-  //      时仍要有人看，硬规则 6：缺值 = 未查 ≠ 为假）。
-  const standings0 = { achievedButFailing: ['AC-242'], evaluated: true };
-  const notEval = parseFrozenFailingReading('not json at all', null);
-  assert.equal(notEval.judgment, 'not-evaluated');
-  const g1 = derivedByAc(computeGoalGaps(records, [], null, standings0, notEval));
-  assert.equal(g1.get('AC-242').state, 'standing-violated', '③ 说不了话 ⇒ ⛔ 不静默放行，照旧立案');
-  assert.ok(isFilingGapState(g1.get('AC-242').state));
-  // 对照：③ 读到了但【判 clean】（无违反）⇒ 同样不满足派生条件（派生量按定义为假，二者矛盾）⇒ 仍立案。
-  const clean = parseFrozenFailingReading(JSON.stringify({ failing: [], frozenScope: 1 }), 0);
-  const g2 = derivedByAc(computeGoalGaps(records, [], null, standings0, clean));
-  assert.equal(g2.get('AC-242').state, 'standing-violated', '③ 判 clean ⇒ 派生条件不成立 ⇒ 仍立案（⛔ 不静默吞掉一条红）');
-
-  // (c2) 非派生的常设判据此刻违反 ⇒ ② **仍**立案（证明让位是逐条的，不是「常设判据一律不立」）。
-  const standings214 = { achievedButFailing: ['AC-214'], evaluated: true };
-  const g3 = derivedByAc(computeGoalGaps(records, [], null, standings214, clean));
-  assert.equal(g3.get('AC-214').state, 'standing-violated', '普通常设判据的违反照旧立案');
-  assert.ok(isFilingGapState(g3.get('AC-214').state));
-  const r3 = runGapSpawnPass(computeGoalGaps(records, [], null, standings214, clean), records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
-  assert.deepEqual(r3.outcomes.map((o) => o.ac), ['AC-214'], '让位没有把整个 ② 分支关掉（闸不恒开）');
-
-  // (c3) ③ 的违反对象无主 ⇒ 立案**仍然发生**（只是发生在 ③ 的主体 AC 上）。
-  const violated = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
-  const g4 = computeGoalGaps(records, [], null, standings0, violated);
-  assert.ok(g4.some((g) => isFilingGapState(g.state)), '让位后仍有一条可立案的读数（③ 的主体 AC）');
-});
-
-// ── AC5：goal 动词 argv 的形态（gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache）──
-//
-// 缺陷原样：goalStoreArgv 曾把 `<codeRoot>/packages/quay/src/goal-store.ts` 当【子进程入口】返回。
-// 那个文件在出厂布局（plugin marketplace cache / npm-pack / 第三方 vendored 副本）里【不存在】：
-// goal-store 的【库】已被 coreSrcAliasPlugin 内联进 scripts/dist/goal-driver.js，而它的 CLI 入口不可达
-// （`isMain` 判 `process.argv[1].endsWith("goal-store.ts")`，bundle 里恒 false）。⇒ 每轮 spawn 一个
-// 不存在的文件，读数全线落 unreadable，而进程 alive=1、载体仍在写（静默失效）。
-
-test('AC5: goal 动词 argv 不含 packages/quay/src（源码树入口已消失），且非空转', () => {
-  const dataRoot = '/tmp/ac262-data-root';
-  const argv = goalStoreArgv(repoRoot, ['gate', 'AC-001'], dataRoot);
-  const line = argv.join(' ');
-
-  // ① 判据本体。⛔ 负控制：把 argv 构造改回旧形（spawn packages/quay/src/goal-store.ts）⇒ 本行必红。
-  assert.doesNotMatch(line, /packages\/quay\/src/, `argv 仍指向源码树：${line}`);
-  // ② 空转防线（硬规则 3b）：一个空 argv、或一个缺动词的 argv，同样「不含 packages/quay/src」——
-  //    不钉住形态，本条就与「什么也没验」同形。故逐项断言它是一条真命令。
-  assert.ok(argv.length >= 5, `argv 太短，没构造出真命令：${line}`);
-  assert.ok(argv.includes('goal'), `argv 缺 goal 动词：${line}`);
-  assert.ok(argv.includes('gate') && argv.includes('AC-001'), `argv 缺子命令/位置参数：${line}`);
-  assert.ok(argv.includes('--store'), `argv 缺 --store（driver 跑的是无 config 的裸 root，见 cli/goal.ts）：${line}`);
-  assert.ok(argv.includes('--root') && argv.includes(dataRoot), `argv 缺 --root <dataRoot>：${line}`);
-  // ③ 入口必须真的【存在】：一个不存在的路径在负控制里也「不含 packages/quay/src」，却跑不动。
-  //    ⚠️ 入口段按【前缀】定位（它解析不出时叫 `quay-cli-unresolved`、没有扩展名 —— 用 `.ts/.js`
-  //    后缀找会在负控制上恒找不着，把判据写成恒假）。
-  const entry = argv.find((a) => a.startsWith(repoRoot));
-  assert.ok(entry && fs.existsSync(entry), `argv 的 quay CLI 入口不存在：${entry}`);
-});
-
-
-test('AC5 负控制（契约另一半）: 解析不出的代码根 ⇒ 一个【不存在】的路径，⛔ 不抛、不回退 PATH 上的 quay', () => {
-  const bogus = fs.mkdtempSync(path.join(os.tmpdir(), 'ac262-no-quay-cli-'));
-  try {
-    // 前置：夹具根【存在】但是没有 quay CLI —— 这样 ENOENT 归因于「解析不出」，而不是「根本身不存在」。
-    assert.equal(fs.existsSync(bogus), true, '前置：夹具根必须存在');
-    assert.equal(fs.existsSync(path.join(bogus, 'packages', 'quay', 'bin', 'quay.ts')), false, '前置：夹具里没有源码 CLI');
-    const argv = goalStoreArgv(bogus, ['check', '--staleness'], '/tmp/ac262-data-root');
-    // 入口段 = 以该代码根开头的那个 argv 元素（解析不出时它是 `<bogus>/quay-cli-unresolved`）。
-    const entry = argv.find((a) => a.startsWith(bogus));
-    assert.ok(entry, `argv 缺入口段：${argv.join(' ')}`);
-    assert.equal(fs.existsSync(entry), false, `解析不出时必须给出不存在的路径（调用方按 unreadable 处理）：${entry}`);
-    assert.doesNotMatch(argv.join(' '), /packages\/quay\/src/, '⛔ 解析不出也不得回落到源码树形');
-    // 端到端半边：真跑一次 —— 它必须是「解析不出 ⇒ 读不懂」，而⛔ 不是「跑通了、零条」。
-    assert.equal(goalCliResolvable(bogus), false, '解析判据本身必须能取假');
-  } finally {
-    fs.rmSync(bogus, { recursive: true, force: true });
-  }
-});
-
-
-test('派生判据的识别式：按【位置】（判据里成词出现）判定，⛔ 不按子串/散文提及', () => {
-  assert.equal(readsFrozenPopulation('node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts check --stale-pass'), true);
-  assert.equal(readsFrozenPopulation('quay goal check --stale-pass --sweep'), true);
-  assert.equal(readsFrozenPopulation('exit 0'), false);
-  assert.equal(readsFrozenPopulation(''), false);
-  assert.equal(readsFrozenPopulation(null), false);
-  // ⛔ 子串不算（成词判定）：`--stale-pass-notes` 不是那个旗标。
-  assert.equal(readsFrozenPopulation('echo --stale-pass-notes'), false);
-  // 双向控制：与 ③ 无关的常设判据（AC-214 形态：读交付面载体）不得被误判。
-  assert.equal(readsFrozenPopulation('python3 - <<\'P\'\nimport json\nP'), false);
-});
-
-// ── ⑨ 每轮 CI run 载体采集的生产调用点（tasks/gap-develop-ci-first-decisive-green）──────────────
-//
-// 这一节钉的是「采集器有生产消费者」这件事实本身：判据 AC-265 读的是本地载体 `.quay/ci-runs.jsonl`，
-// 没有调用点时它只能报 carrier-absent / collection-stalled —— 而那与「CI 真红」在读法上同形（硬规则 3b）。
-// ⛔ 同时钉住「没采集」与「采集了零条」不同形：round 记录里的 `ciRuns` **恒存在**，缺省是显式的
-// `disabled`，⛔ 不是一个被省略的键。
-
-
-test('⑨ ciRuns — 开关未置位时轮记录里仍是显式的 disabled（⛔ 不是缺键、不是 ok(0)）', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ciruns-off-'));
-  try {
-    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
-    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
-    const { fact } = await runGoalRound(tmp, {
-      scriptRoot: repoRoot,
-      gapWorkerCmd: 'true',
-      resourceGateArgv: ['true'],
-      ciRunsCollect: false,
-    });
-    const v = fact.value;
-    assert.ok(v.ciRuns && typeof v.ciRuns === 'object', 'value.ciRuns 必须存在（缺键即判假）');
-    assert.equal(v.ciRuns.status, 'disabled');
-    assert.equal(v.ciRuns.ran, false);
-    assert.match(v.ciRuns.reason, /ci_runs_collect/);
-    assert.match(fact.reason, /ciRuns=disabled/, '轮记录 reason 带调用痕（人可读的那一半）');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('⑨ ciRuns — 置位时注入的采集函数被真调用，读数落进轮记录（这就是「由该路径写入」的证据形态）', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ciruns-on-'));
-  try {
-    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
-    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
-    const seen = [];
-    const { fact } = await runGoalRound(tmp, {
-      scriptRoot: repoRoot,
-      gapWorkerCmd: 'true',
-      resourceGateArgv: ['true'],
-      ciRunsCollect: true,
-      ciRunsCollectFn: (root, o) => {
-        seen.push({ root, throttleMs: o.throttleMs });
-        return {
-          status: 'ok',
-          ran: true,
-          reason: '采集 3 条，追加 2 条，补全 1 条',
-          carrier: path.join(root, '.quay', 'ci-runs.jsonl'),
-          appended: 2,
-          skipped: 1,
-          attributed: 2,
-          enriched: 1,
-          logsFetched: 3,
-          testFilesDerived: 2,
-          warnings: [],
-        };
-      },
-    });
-    assert.equal(seen.length, 1, '每轮恰好调一次');
-    assert.equal(seen[0].root, tmp, '调用点是本 driver 的 root（载体就落在它的 .quay/ 下）');
-    const v = fact.value;
-    assert.equal(v.ciRuns.status, 'ok');
-    assert.equal(v.ciRuns.appended, 2);
-    assert.equal(v.ciRuns.enriched, 1, '补全数也是读数的一部分（它是「回填补上了」的直接量）');
-    assert.match(fact.reason, /ciRuns=ok\(appended=2,enriched=1,attributed=2,logs=3\)/, '调用痕逐字进 reason');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('⑨ ciRuns — 采集抛错不掀翻整轮（旁路读数），且折算成可区分的 error 读数', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ciruns-err-'));
-  try {
-    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
-    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
-    const { fact } = await runGoalRound(tmp, {
-      scriptRoot: repoRoot,
-      gapWorkerCmd: 'true',
-      resourceGateArgv: ['true'],
-      ciRunsCollect: true,
-      ciRunsCollectFn: () => {
-        throw new Error('boom-gh');
-      },
-    });
-    assert.equal(fact.state, 'verified', '采集坏掉不得把整轮判失败');
-    assert.equal(fact.value.ciRuns.status, 'error');
-    assert.match(fact.value.ciRuns.reason, /boom-gh/);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-
-test('⑨ ciRuns — 开关与节流从 drivers.yml 就地读（代码缺省 false / 采集器常量缺省）', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ciruns-cfg-'));
-  try {
-    assert.equal(goalCiRunsCollect(tmp), false, 'drivers.yml 不在 ⇒ 代码缺省 false（⛔ 不默认打开网络采集）');
-    assert.equal(goalCiRunsCollect(tmp, true), true, '显式 true 压过缺省（测试缝/CLI）');
-    fs.mkdirSync(path.join(tmp, 'plugin', 'scripts'), { recursive: true });
-    fs.writeFileSync(
-      path.join(tmp, 'plugin', 'scripts', 'drivers.yml'),
-      'version: 1\nkinds:\n  goal:\n    ci_runs_collect: true\n    ci_runs_collect_throttle_ms: 1234\n',
-      'utf8',
-    );
-    assert.equal(goalCiRunsCollect(tmp), true, '配置真源置位 ⇒ 开');
-    assert.equal(goalCiRunsThrottleMs(tmp), 1234, '节流从配置读');
-    assert.equal(goalCiRunsThrottleMs(tmp, 0), 0, '0 是合法值（= 不节流），⛔ 不被当成「未指定」');
-    // 缺字段 ⇒ 回落到采集器自己的常量（⛔ 不在这里再写一个字面量）
-    fs.writeFileSync(path.join(tmp, 'plugin', 'scripts', 'drivers.yml'), 'version: 1\nkinds:\n  goal:\n    cap: 5\n', 'utf8');
-    assert.equal(goalCiRunsThrottleMs(tmp), 600000, '回落 DEFAULT_COLLECT_THROTTLE_MS');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ── ⑥c goal-gaps fact：缺口读数的可见性 ────────────────────────────────────────────────────
-// （gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）
-//
-// 立案形态：`computeGoalGaps` 每轮算出的读数此前只喂 `runGapSpawnPass`（决定要不要 spawn 立案 agent），
-// 而一条 AC 卡在 `done-unresolved`（有 done/superseded 任务认领、判据依然为假、**且没有任何机制会再碰
-// 它**——`isFilingGapState` 有意把它排除在 spawn 之外）这个事实上，人要看得自己写外部脚本把同一套推导
-// 重做一遍。本 fact 把它（连同其余六种非安静态）落进轮记录。
-//
-// ⛔ 纯观测性新增：`goal-gaps` 由 `gaps` 单向派生，不进 `runGapSpawnPass`、不进 `goalFlipDecision`
-// ⇒ 不改变任何判定（落地前后各跑一轮本文件的负控制，见任务的 AC2 证据）。
-// 四条互为负控制：①视图滤错态 ⇒ 第一条红；②把「读不到」写成空数组 ⇒ 第二条红；③视图与 spawn 选取面
-// 混同 ⇒ 第三条的「视图 ⊋ spawn 面」与「spawn 面 = isFilingGapState 子集」两句必有一句红。
-
-/** `GapState` 的九个取值（枚举，⛔ 不布尔化）与其中被视图滤掉的「安静态」。 */
-
-
-test('goal-gaps ①: gapViewEntries 只滤安静态（in-progress/standing-ok），其余七态逐条带出且保序', () => {
-  const gaps = ALL_GAP_STATES.map((state, i) => ({
-    goal: 'GOAL-001', ac: `AC-00${i}`, state, taskCount: state === 'not-evaluated' ? null : i,
-  }));
-  const view = gapViewEntries(gaps);
-  assert.deepEqual(view.map((e) => e.state), ALL_GAP_STATES.filter((s) => !QUIET_GAP_STATES.includes(s)),
-    '恰好滤掉 in-progress/standing-ok 两态，其余七态全部出现（⛔ 不是只挑 done-unresolved 一种）');
-  assert.deepEqual(Object.keys(view[0]), ['goal', 'ac', 'state', 'taskCount'], '每条恰好四键 {goal, ac, state, taskCount}');
-  assert.deepEqual(view.map((e) => e.ac), gaps.filter((g) => !QUIET_GAP_STATES.includes(g.state)).map((g) => g.ac), '保序（与 computeGoalGaps 的 records 序一致）');
-  const ne = view.find((e) => e.state === 'not-evaluated');
-  assert.equal(ne.taskCount, null, 'taskCount 原样带出：not-evaluated 时是 null（⛔ 不与 0 同形，硬规则 3）');
-  assert.equal(gapViewEntries([]).length, 0, '空输入 ⇒ 空视图（⛔ 不抛、不返回 null）');
-});
-
-
-test('goal-gaps ②: 「读不到」与「查过且零条」不同形（硬规则 3b）', () => {
-  const zero = gapViewFact([]);
-  assert.equal(zero.name, GOAL_GAPS_FACT_NAME);
-  assert.equal(zero.state, 'verified', '算出来且零条 ⇒ verified（空数组是一个测量）');
-  assert.deepEqual(zero.value.gaps, []);
-  assert.equal(zero.value.evaluated, true);
-  assert.equal(zero.value.cause, null);
-
-  const unread = gapViewFact(null, 'goal-list-unreadable');
-  assert.equal(unread.state, 'not-evaluated', '没算成 ⇒ fact state not-evaluated');
-  assert.equal(unread.value.evaluated, false, 'evaluated:false 把它与「零条」分开');
-  assert.equal(unread.value.cause, 'goal-list-unreadable', '成因可区分（⛔ 不是 null/缺键）');
-  assert.deepEqual(unread.value.gaps, [], 'gaps 恒为数组（jq 形态稳定），靠 evaluated/cause 区分两态');
-  assert.notEqual(unread.state, zero.state, '两态必须不同形（⛔ 绝不让「读不到」长得像「没有缺口」）');
-  assert.equal(gapViewFact(null).value.cause, 'gaps-not-computed', '漏传成因也有可区分的缺省值');
-});
-
-
-test('goal-gaps ③（E2E）: 轮记录里出现 goal-gaps fact，done-unresolved 与 gap 在内、in-progress 在外', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-gapview-'));
-  try {
-    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
-    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
-    writeStandingGoalFile(tmp, { id: 'AC-002', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
-    writeStandingGoalFile(tmp, { id: 'AC-003', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
-    // AC-001：有关联任务但全部非牵引（done）⇒ done-unresolved（有信号、没人管——本任务的立案形态）
-    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-a.md'), '---\nid: gap-a\nstatus: done\ngoal_ac: AC-001\n---\nbody\n', 'utf8');
-    // AC-002：零关联任务 ⇒ gap（可立案，进 spawn 面）
-    // AC-003：有 ready 任务 ⇒ in-progress（安静态，⛔ 不进视图）
-    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-c.md'), '---\nid: gap-c\nstatus: ready\ngoal_ac: AC-003\n---\nbody\n', 'utf8');
-
-    const r = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
-    const { fact, gapFacts } = r;
-    assert.equal(gapFacts.length, 1, '本轮恰好一条 goal-gaps fact（每轮必落，⛔ 不是「有缺口才写」）');
-    const gf = gapFacts[0];
-    assert.equal(gf.name, GOAL_GAPS_FACT_NAME);
-    assert.equal(gf.state, 'verified');
-    assert.equal(gf.value.evaluated, true);
-    const byAc = new Map(gf.value.gaps.map((e) => [e.ac, e]));
-    assert.equal(byAc.get('AC-001')?.state, 'done-unresolved', 'done-unresolved 必须可见（这就是本任务立案的那个事实）');
-    assert.equal(byAc.get('AC-001')?.taskCount, 1, 'taskCount 枚举关联数（⛔ 非布尔化，硬规则 3）');
-    assert.equal(byAc.get('AC-002')?.state, 'gap', 'gap 在视图内');
-    assert.equal(byAc.has('AC-003'), false, 'in-progress 是安静态 ⇒ ⛔ 不进视图');
-
-    // 派生视图不变式：视图 ⊆ 全量读数，逐条同态同 taskCount（⛔ 不是第二处计算，硬规则 5b）
-    const full = new Map(fact.value.gaps.map((g) => [g.ac, g]));
-    assert.ok(gf.value.gaps.length > 0, '视图非空（负控制：滤成空也能过 ⇒ 判据空转）');
-    for (const e of gf.value.gaps) {
-      assert.deepEqual(full.get(e.ac), e, `视图条目 ${e.ac} 必须与 goal-ring.value.gaps 里的同一条逐字相同`);
+    // 闸拒绝：本进程已在跑判据 ⇒ **一条都不跑**，且结局是**独立取值**（⛔ 不是 cleared，也不是 confirmed）。
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = '1';
+    try {
+      const refused = await recheckFrozenFailing(repoRoot, tmp, reading);
+      assert.equal(refused.ran, false, '闸拒绝 ⇒ 没跑');
+      assert.equal(refused.guardRefused, true);
+      assert.equal(refused.attempted, 1);
+      assert.deepEqual(refused.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'not-evaluated', 'guard-refused']],
+        '拒绝是独立结局：not-evaluated + cause=guard-refused（⛔ 与 cleared / confirmed 都不同形）');
+      assert.notEqual(refused.entries[0].outcome, 'cleared', '⛔ 闸拒绝不得冒充「复核通过」');
+      assert.notEqual(refused.entries[0].outcome, 'confirmed-failing', '⛔ 也不得冒充「复核后仍为假」');
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
 
-    // spawn 决策仍是【全量 gaps 的立案子集】的函数，⛔ 与视图无关（负控制的决策半边）
-    const filingSet = fact.value.gaps.filter((g) => isFilingGapState(g.state)).map((g) => g.ac);
-    assert.deepEqual(fact.value.gap_spawns.map((s) => s.ac), filingSet,
-      'spawn 面 = 全量 gaps 里 isFilingGapState 的子集（AC-002），⛔ 不含 done-unresolved（AC-001）');
-    assert.ok(gf.value.gaps.some((e) => !isFilingGapState(e.state)),
-      '视图必须比 spawn 面宽：它含【不立案】的态（done-unresolved）——那正是此前看不见的那一半');
-    assert.ok(!gf.value.gaps.some((e) => !full.has(e.ac)), '视图里不存在全量读数里没有的条目');
+    // 零成本路径：读数不适用（未传 / clean / 空 failing）⇒ ran:false，不跑任何判据。
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, null)).ran, false, '未传读数 ⇒ 不跑');
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, { failing: [], judgment: 'clean', cause: null, frozenScope: 1 })).ran, false,
+      'clean ⇒ 不跑');
+    assert.equal((await recheckFrozenFailing(repoRoot, tmp, { failing: [], judgment: 'not-evaluated', cause: 'unreadable', frozenScope: -1 })).ran, false,
+      '读数本身 not-evaluated ⇒ 不跑（缺口分派已在该分支落 not-evaluated）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 
-test('goal-gaps ④（载体级）: 常驻循环写出的 .quay/goal-round.jsonl 那条 record 里真的含 goal-gaps fact', async () => {
-  // AC-1 的字面主张是「**轮记录**里新增一条 fact」——前三条测的是 `runGoalRound` 的返回值，
-  // 这条走例程 + 常驻循环，测的是**写进载体**的那一条（⛔ 返回值有、载体没有即 AC-1 不成立）。
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-gapview-carrier-'));
+test('立案前复核 ②：台账尾说 fail 而判据此刻 exit 0 ⇒ cleared —— 台账读数是【陈旧】的直接量证据', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-cleared-'));
+  const marker = path.join(tmp, 'fix-landed');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    // 判据 = 「修复已落地」的代理：`test -f <marker>`。⛔ 判据文本全程不变 ⇒ criterionHash 不变
+    // ⇒ 台账尾的那条 `fail` 说的**正是当前这条判据**（否则会被判 amendedUnverified，测不到本形态）。
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: `test -f ${marker}` });
+
+    // 轮转跑一次（marker 不在）⇒ 台账写下 actor=goal-sweep 的 fail。
+    await sweepFrozenAcs(repoRoot, tmp);
+    const stale = await readFrozenFailing(repoRoot, tmp);
+    assert.equal(stale.judgment, 'violated');
+    assert.deepEqual(stale.failing, ['AC-900'], 'marker 不在 ⇒ 轮转记 fail');
+
+    // 「修复落地」：marker 出现。台账**没有**因此改变——这正是本任务要修的时差。
+    fs.writeFileSync(marker, '', 'utf8');
+    const stillStale = await readFrozenFailing(repoRoot, tmp);
+    assert.equal(stillStale.judgment, 'violated', '台账尾仍是 fail（轮转 verdict 在 4h 内 ⇒ 优先级高于尾事件）——缺陷形态：读数陈旧');
+    assert.deepEqual(stillStale.failing, ['AC-900']);
+
+    // 直接量复核：真跑判据 ⇒ exit 0 ⇒ cleared。
+    const rc = await recheckFrozenFailing(repoRoot, tmp, stillStale);
+    assert.equal(rc.ran, true);
+    assert.deepEqual(rc.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'cleared', 'now-true']],
+      '复核是直接量：判据此刻 exit 0 ⇒ cleared（⛔ 台账尾说的不算）');
+
+    // 反方向（负控制①）：marker 撤掉 ⇒ 同一判据此刻为假 ⇒ confirmed-failing，立案照旧。
+    fs.rmSync(marker, { force: true });
+    const rc2 = await recheckFrozenFailing(repoRoot, tmp, stillStale);
+    assert.deepEqual(rc2.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'confirmed-failing', 'still-false']],
+      '负控制①：真为假 ⇒ confirmed-failing（复核不是恒绿闸）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+
+test('立案前复核 ③：同一时刻同一 AC 的改前/改后对照 —— 改前 frozen-violated，改后无读数', () => {
+  const recs = [
+    { id: 'GOAL-900', status: 'achieved' },
+    { id: 'AC-900', status: 'achieved', goal: 'GOAL-900', criterion: 'exit 1' },
+  ];
+  const staleReading = { failing: ['AC-900'], judgment: 'violated', cause: null, frozenScope: 1 };
+  // 改前（未传复核读数 ⇒ 既有行为）：台账尾 fail 直接被当「此刻为假」⇒ 立案。
+  const before = computeGoalGaps(recs, [], null, null, staleReading).find((x) => x.ac === 'AC-900');
+  assert.equal(before.state, 'frozen-violated', '改前：产 frozen-violated（台账尾被当直接量）');
+  assert.ok(isFilingGapState('frozen-violated'));
+
+  // 改后（复核 cleared）：**不产 frozen-violated**，也不产任何读数（此刻确无工作可立）。
+  const cleared = { ran: true, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'cleared', cause: 'now-true', reason: 'exit 0' }], guardRefused: false };
+  const after = computeGoalGaps(recs, [], null, null, staleReading, cleared).find((x) => x.ac === 'AC-900');
+  assert.equal(after, undefined, '改后：复核 cleared ⇒ 不产 frozen-violated（同一时刻同一 AC 的对照）');
+
+  // 复核 not-evaluated ⇒ **独立取值**（⛔ 既不是 cleared 的「无读数」，也不是 confirmed 的 frozen-violated）。
+  const notEv = { ran: false, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'not-evaluated', cause: 'guard-refused', reason: 'guard' }], guardRefused: true };
+  const ne = computeGoalGaps(recs, [], null, null, staleReading, notEv).find((x) => x.ac === 'AC-900');
+  assert.equal(ne.state, 'not-evaluated', '复核不可评估 ⇒ 独立取值 not-evaluated');
+  assert.equal(ne.taskCount, null, 'not-evaluated 时 taskCount=null（⛔ 不与 0 同形）');
+  assert.notEqual(ne.state, 'frozen-violated', '⛔ 不得回落成「复核后仍为假」');
+  assert.ok(!isFilingGapState('not-evaluated'), 'not-evaluated 不在 spawn 选取面（复核跑不成 ≠ 判据为假）');
+
+  // 复核 confirmed-failing ⇒ 立案照旧（负控制①的分派半边）。
+  const confirmed = { ran: true, attempted: 1, entries: [{ ac: 'AC-900', outcome: 'confirmed-failing', cause: 'still-false', reason: 'exit 1' }], guardRefused: false };
+  assert.equal(computeGoalGaps(recs, [], null, null, staleReading, confirmed).find((x) => x.ac === 'AC-900').state, 'frozen-violated',
+    '负控制①（分派）：复核后仍非 0 ⇒ frozen-violated 照旧立案');
+
+  // 漏传复核读数 ⇒ 照旧立案（fail-visible：调用方漏传不得静默变成「复核通过」）。
+  assert.equal(computeGoalGaps(recs, [], null, null, staleReading).find((x) => x.ac === 'AC-900').state, 'frozen-violated',
+    '未传复核读数 ⇒ 保守立案（⛔ 不与 cleared 同形）');
+});
+
+
+test('立案前复核 ④（生产形态端到端）：修复已落地而台账尾尚未轮转 ⇒ 下一轮不再产生 gap 立案', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-recheck-e2e-'));
+  const marker = path.join(tmp, 'fix-landed');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true }); // 空 tasks ⇒ taskFacts=[]（⛔ 不是 null）
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: `test -f ${marker}` });
+
+    // 第 1 轮：判据为假（marker 不在）⇒ 复核 confirmed-failing ⇒ 立案（既有行为不许被削弱）。
+    const r1 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const g1 = new Map(r1.fact.value.gaps.map((g) => [g.ac, g.state]));
+    assert.equal(g1.get('AC-900'), 'frozen-violated', '第 1 轮：真为假 ⇒ 照旧立案');
+    assert.deepEqual(r1.fact.value.gap_spawns.map((s) => s.ac), ['AC-900'], '第 1 轮：进 spawn 立案路径');
+    assert.deepEqual(r1.fact.value.frozenRecheck.entries.map((e) => [e.ac, e.outcome]), [['AC-900', 'confirmed-failing']],
+      '第 1 轮：复核读数落进轮记录（产物可查）');
+
+    // 「修复落地」：marker 出现。⛔ 不动判据文本 ⇒ criterionHash 不变 ⇒ 台账尾的那条 fail 仍描述当前判据。
+    fs.writeFileSync(marker, '', 'utf8');
+
+    // 第 2 轮：台账尾**仍然**是 fail（轮转 verdict 在 4h 内、且 fail 的再查窗口 10 min 未到）⇒ 缺陷形态
+    // 必须仍在读数里，而复核必须把它按下去 ⇒ 不立案。
+    const r2 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    assert.deepEqual(r2.fact.value.frozenFailing.failing, ['AC-900'],
+      '第 2 轮：台账读数**仍然**说此刻为假（轮转尚未轮到它）——这正是缺陷的输入，⛔ 不是被修好了');
+    const g2 = new Map(r2.fact.value.gaps.map((g) => [g.ac, g.state]));
+    assert.notEqual(g2.get('AC-900'), 'frozen-violated', '第 2 轮：复核 cleared ⇒ 不产 frozen-violated');
+    assert.equal(g2.get('AC-900'), undefined, '第 2 轮：也不产任何读数（此刻确无工作可立）');
+    assert.deepEqual(r2.fact.value.gap_spawns.map((s) => s.ac), [], '第 2 轮：不 spawn（不烧 spawn 名额，也不给下游指一个不存在的缺陷）');
+    assert.deepEqual(r2.fact.value.frozenRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'cleared', 'now-true']],
+      '第 2 轮：复核读数「cleared/now-true」落进轮记录（这就是「修复已落地」的直接量证据）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ②b 常设域内的立案前【直接量复核】（gap-standing-violated-false-spawn-no-prefiling-recheck）──────
+//
+// 缺陷：I5（`check --achieved-failing`）的那次读数是**本轮的**、没有时差（这点与 ③ 相反），但它只有
+// **一次**。宿主进入不健康态时（2026-09-16 实测 ENOSPC：那条 worker 自述 root fs 100% full、
+// 自己的 Bash 调用死于 `No space left on device`）它为**真值为真**的常设判据给出 fail ⇒ driver 据此
+// spawn 一个 prompt 逐字断言「the guarantee it asserts has regressed」的 agent，给下游指一个
+// **不存在的缺陷**（那轮之后逐条复测：判据 11 次全绿、`achievedButFailing` 恒为 `["AC-242"]`）。
+// 修法 = 立案前**再跑一次**那条 criterion（第二次直接量，复用同一 `runPrefilingRecheck`）：两次一致
+// 才立案；并把复核那一刻的**宿主健康量**与该次读数钉在一起，使「环境类误读」与「真回归」事后可分。
+//
+// 下面五组互为控制：①正向（复核 cleared ⇒ 不立案、spawned=0）；②负控制（两次都失败 ⇒ 照旧立案、
+// spawned=1——证明复核不是恒绿闸）；③三态互不同形（含复核跑不成给独立取值）；④复核函数自身的闸拒绝
+// 与零成本路径；⑤轮记录里的复核读数，且**负控制是改动前的真实旧对象**（⛔ 不是自造一个必然失败的对象）。
+
+
+test('②b 正向：常设判据「单次读数说 fail、复核那次 pass」⇒ 不产 standing-violated、spawned=0', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-'));
+  const counter = path.join(tmp, 'runs');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true }); // 空 tasks ⇒ taskFacts=[]（⛔ 不是 null）
+    // 判据 = 「前两次调用失败、第 3 次起通过」。⚠️ 阈值 2 **不是**随手写的常量：常设 AC 在本轮恰好有
+    // 3 个跑判据的调用点，实测顺序是 pass 1b（每轮 gate 集合）→ I5（achieved-but-failing 读数）→ ②b
+    // （立案前复核，本任务新增）。⇒ 第 1、2 次失败让 I5 把它读进 `achievedButFailing`（前提**真的成立**），
+    // 第 3 次通过让复核判 cleared。**若调用顺序变了**，I5 会落到第 3 次上、读数转 pass，下面那条
+    // `achievedButFailing` 断言会**立刻红** —— ⛔ 这个夹具不会静默退化成空转（硬规则 4c）。
+    const crit = `n=$(cat ${counter} 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${counter}; [ "$n" -gt 2 ]`;
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: crit, longTerm: true });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+
+    assert.equal(fs.readFileSync(counter, 'utf8').trim(), '3',
+      '前提（实测轮次）：常设 AC 本轮被判据执行器跑了 3 次（pass 1b → I5 → ②b）——顺序变了这条就红');
+    assert.ok(v.achievedFailing.achievedButFailing.includes('AC-001'),
+      '前提（I5 读数）：那一刻读数说它此刻为假 —— ⛔ 这正是缺陷的**输入**，不是被修好了');
+    assert.deepEqual(v.standingRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-001', 'cleared', 'now-true']],
+      '②b：立案前复核真跑了这条 criterion ⇒ exit 0 ⇒ cleared（第二次直接量推翻了那一次读数）');
+    assert.equal(v.gaps.find((g) => g.ac === 'AC-001'), undefined,
+      '复核 cleared ⇒ 不产生读数（此刻确无工作可立），⛔ 尤其不产 standing-violated');
+    assert.equal(v.spawned, 0, '⛔ 不 spawn —— 本任务要的正是这一条：一次环境类失准不再产生立案');
+    assert.deepEqual(v.gap_spawns.map((s) => s.ac), [], '不烧 spawn 名额，也不给下游指一个不存在的缺陷');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+
+test('②b 负控制：criterion 两次都失败 ⇒ 照旧产 standing-violated 并 spawn（复核不是恒绿闸）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-neg-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
     fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
-    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
-    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
-    writeStandingGoalFile(tmp, { id: 'AC-002', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
-    // AC-001：关联任务全部 done ⇒ done-unresolved（本任务立案的那个形态）；AC-002：零关联 ⇒ gap。
-    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-a.md'), '---\nid: gap-a\nstatus: done\ngoal_ac: AC-001\n---\nbody\n', 'utf8');
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1', longTerm: true });
 
-    const roundLog = path.join(tmp, GOAL_ROUND_REL);
-    const code = await runResidentQualityGateLoop({
-      root: tmp, intervalMs: 1, once: true, maxRounds: null, roundLogFile: roundLog,
-      runId: 'goal-gaps-carrier', json: false, controlStateRel: GOAL_CONTROL_STATE_REL,
-      // spawnCap 0 ⇒ 本轮不 spawn（本测试只问 fact 落没落进载体，⛔ 不烧名额、不起 LLM）。
-      routines: goalDriverRoutines(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 0 }),
-    });
-    assert.equal(code, 0);
-    const rec = JSON.parse(fs.readFileSync(roundLog, 'utf8').trim().split('\n')[0]);
-    const gf = rec.facts.find((f) => f.name === GOAL_GAPS_FACT_NAME);
-    assert.ok(gf, `轮记录里必须有 goal-gaps fact（实测 facts=${rec.facts.map((f) => f.name).join(',')}）`);
-    assert.equal(gf.state, 'verified');
-    assert.equal(gf.value.evaluated, true);
-    const byAc = new Map(gf.value.gaps.map((e) => [e.ac, e.state]));
-    assert.equal(byAc.get('AC-001'), 'done-unresolved', '载体里能看到 done-unresolved');
-    assert.equal(byAc.get('AC-002'), 'gap', '载体里能看到 gap');
-    assert.equal(byAc.get('AC-002') !== undefined && gf.value.gaps.find((e) => e.ac === 'AC-002').taskCount, 0, 'taskCount 是 0 而不是 null（枚举，⛔ 非布尔化）');
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+
+    assert.ok(v.achievedFailing.achievedButFailing.includes('AC-001'), 'I5 读数：此刻为假');
+    assert.deepEqual(v.standingRecheck.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-001', 'confirmed-failing', 'still-false']],
+      '负控制①：复核**真跑**且回了 fail ⇒ confirmed-failing（⛔ 复核不得是恒绿闸——改坏它这条就红）');
+    assert.equal(v.gaps.find((g) => g.ac === 'AC-001').state, 'standing-violated', '两次直接量一致 ⇒ 立案照旧');
+    assert.equal(v.spawned, 1, '负控制②：真的回归照旧 spawn 1 条（本次改动不得削弱既有行为）');
+    assert.deepEqual(v.gap_spawns.map((s) => s.ac), ['AC-001'], '负控制②（同一读数的另一半）：被 spawn 的正是它');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+
+test('②b prompt：常设口径陈述本轮真的做了什么（重跑一次后仍为假），⛔ 不复用冻结口径的措辞', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'standing-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(p.includes('regressed'), '常设口径仍在：这是常设不变式的回归');
+  assert.ok(p.includes('RE-RAN the criterion before filing'),
+    '新增：说明立案前重跑过一次 criterion ⇒「此刻为假」是两次一致，不是一个孤立的单次读数');
+  assert.ok(p.includes('two independent measurements, not by a single reading'),
+    '把「一次环境类失准」与「真的回归」在下游 agent 眼里区分开——本任务立案的正是前者被当成后者');
+  // 既有口径不许被这次改动削弱（同处断言，防止改 A 破 B）。
+  assert.ok(p.includes('IN FLIGHT'), '去重口径仍在：只有在飞任务算重复');
+  // ⛔ 两个 population 的措辞必须可区分（既有 AC5 断言的那条，此处再钉一次）：
+  // 「已离开复验域」是冻结口径的标记，「RE-RAN its criterion」是冻结口径的动作表述 —— 常设分支
+  // ⛔ 一个都不许带（本任务新增的常设表述刻意换了字面：RE-RAN **the** criterion）。
+  assert.ok(!p.includes('LEFT the reverify scope') && !p.includes('RE-RAN its criterion'),
+    '⛔ 常设分支不得复用冻结口径的措辞（两个 population 的成因与处置不同）');
+  assert.ok(p.includes('goal_ac: AC-001'), '顶层 goal_ac 要求仍在（下一轮独立复核的抓手）');
+});
+
+
+test('②b 三态互不同形：复核 not-evaluated ⇒ 独立取值（⛔ 既不是 standing-ok 也不是 standing-violated）', () => {
+  const recs = [
+    { id: 'GOAL-900', status: 'achieved' },
+    { id: 'AC-900', status: 'achieved', goal: 'GOAL-900', criterion: 'exit 1', longTerm: true },
+  ];
+  const standings = { achievedButFailing: ['AC-900'], evaluated: true };
+  const ev = (outcome, cause) => ({ ran: outcome !== 'not-evaluated', attempted: 1, entries: [{ ac: 'AC-900', outcome, cause, reason: 'x', verdict: outcome === 'cleared' ? 'pass' : 'fail', durationMs: 12, hostFreeBytes: 1, load1: 0 }], guardRefused: outcome === 'not-evaluated' });
+
+  // 改前（未传复核读数 ⇒ 既有行为）：I5 的单次读数直接立案。
+  assert.equal(computeGoalGaps(recs, [], null, standings).find((x) => x.ac === 'AC-900').state, 'standing-violated',
+    '改前：单次读数即产 standing-violated（可立案）');
+
+  // 复核 cleared ⇒ **不产生读数**（此刻确无工作可立；与 standing-ok 同为静默，因为真值为真）。
+  assert.equal(computeGoalGaps(recs, [], null, standings, null, null, ev('cleared', 'now-true')).find((x) => x.ac === 'AC-900'), undefined,
+    '复核 cleared ⇒ 不产任何读数（同一时刻同一 AC 的改前/改后对照）');
+
+  // 复核 not-evaluated ⇒ 独立取值。
+  const ne = computeGoalGaps(recs, [], null, standings, null, null, ev('not-evaluated', 'guard-refused')).find((x) => x.ac === 'AC-900');
+  assert.equal(ne.state, 'not-evaluated', '复核跑不成 ⇒ 独立取值 not-evaluated');
+  assert.equal(ne.taskCount, null, 'not-evaluated 时 taskCount=null（⛔ 不与 0 同形）');
+  assert.notEqual(ne.state, 'standing-ok', '⛔ 复核跑不成不得冒充「查过且成立」');
+  assert.notEqual(ne.state, 'standing-violated', '⛔ 也不得回落成「复核后仍为假」');
+  assert.ok(!isFilingGapState('not-evaluated'), 'not-evaluated 不在 spawn 选取面（复核跑不成 ≠ 判据为假）');
+
+  // 复核 confirmed-failing ⇒ 立案照旧（分派半边）。
+  assert.equal(computeGoalGaps(recs, [], null, standings, null, null, ev('confirmed-failing', 'still-false')).find((x) => x.ac === 'AC-900').state,
+    'standing-violated', '复核后仍非 0 ⇒ standing-violated 照旧立案');
+
+  // 漏传复核读数 ⇒ 照旧立案（fail-visible：调用方漏传不得静默变成「复核通过」）。
+  assert.equal(computeGoalGaps(recs, [], null, standings).find((x) => x.ac === 'AC-900').state, 'standing-violated',
+    '未传复核读数 ⇒ 保守立案（⛔ 不与 cleared 同形）');
+});
+
+
+test('②b recheckStandingFailing：闸拒绝 ⇒ 独立结局；读数未传/命中集为空 ⇒ ran:false 零成本', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-guard-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1', longTerm: true });
+    const standings = { achievedButFailing: ['AC-900'], evaluated: true };
+
+    // 正控制：不在闸下 ⇒ 真跑判据 ⇒ confirmed-failing，且读数带该次执行的原始 verdict 与实测墙钟。
+    const on = await recheckStandingFailing(repoRoot, tmp, standings);
+    assert.equal(on.ran, true);
+    assert.equal(on.guardRefused, false);
+    assert.deepEqual(on.entries.map((e) => [e.ac, e.outcome, e.cause, e.verdict]), [['AC-900', 'confirmed-failing', 'still-false', 'fail']],
+      '不在闸下 ⇒ 真跑；`exit 1` ⇒ confirmed-failing（verdict = 该次执行的原始读数）');
+    assert.ok(typeof on.entries[0].durationMs === 'number' && on.entries[0].durationMs >= 0, 'durationMs 是本次执行的实测墙钟');
+    for (const k of ['hostFreeBytes', 'load1']) {
+      assert.ok(on.entries[0][k] === null || typeof on.entries[0][k] === 'number',
+        `${k} 随读数落痕（读不出 ⇒ null，⛔ 不与 0 同形）`);
+    }
+
+    // 闸拒绝：本进程已在跑判据 ⇒ **一条都不跑**，且结局是**独立取值**。
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = '1';
+    try {
+      const refused = await recheckStandingFailing(repoRoot, tmp, standings);
+      assert.equal(refused.ran, false, '闸拒绝 ⇒ 没跑');
+      assert.equal(refused.guardRefused, true);
+      assert.equal(refused.attempted, 1);
+      assert.deepEqual(refused.entries.map((e) => [e.ac, e.outcome, e.cause]), [['AC-900', 'not-evaluated', 'guard-refused']],
+        '拒绝是独立结局：not-evaluated + cause=guard-refused（⛔ 与 cleared / confirmed 都不同形）');
+      assert.equal(refused.entries[0].durationMs, null, '⛔ 没跑 ⇒ 时长 null（⛔ 不写 0：0 会被读成「跑得极快」）');
+      assert.notEqual(refused.entries[0].outcome, 'cleared', '⛔ 闸拒绝不得冒充「复核通过」');
+      assert.notEqual(refused.entries[0].outcome, 'confirmed-failing', '⛔ 也不得冒充「复核后仍为假」');
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+
+    // 零成本路径：读不到 I5 读数 / 命中集为空 ⇒ ran:false，不跑任何判据。
+    assert.equal((await recheckStandingFailing(repoRoot, tmp, null)).ran, false, '读不到 I5 读数 ⇒ 不跑');
+    assert.equal((await recheckStandingFailing(repoRoot, tmp, { achievedButFailing: [], evaluated: true })).ran, false, '命中集为空 ⇒ 不跑');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+/** AC2 的**判据**：一条复核读数是否带齐「结论四键 + 宿主健康量」。
+ *  ⛔ 写成函数而不是内联断言，正是为了能在**改动前的真实旧对象**上干跑一次——「字段存在」如果只在新
+ *  对象上跑过，就是自证（硬规则 2 的零计数配套动作：谓词必须对一个已知为假/为真的样本各跑一次）。 */
+
+/** 改动前的**真实**读数（⛔ 不是自造的）：逐字摘录自本仓生产载体 `.quay/goal-round.jsonl`
+ *  round 59 / ts=2026-09-16T11:42:53.534Z 的 `facts[goal-ring].value.frozenRecheck.entries[0]`
+ *  （`reason` 原值较长，此处未删改）。它只有 `ac/outcome/cause/reason` 四项
+ *  ——**这正是「环境类误读事后不可分」的载体证据**：读它的人无法知道那次 fail 跑在什么宿主状态下。 */
+
+
+test('AC2：轮记录里出现立案前复核读数（含宿主健康量）；负控制 = 改动前的真实旧对象上谓词为假', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-standing-recheck-ac2-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1', longTerm: true });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+    assert.equal(v.standingRecheck.entries.length, 1, '本轮有一条复核读数（AC-001 命中 I5）');
+    const e = v.standingRecheck.entries[0];
+    assert.ok(hasPrefilingEvidence(e), `复核读数带齐 {ac,outcome,verdict,durationMs,hostFreeBytes|load1}，实测键=${Object.keys(e).join(',')}`);
+    assert.equal(e.ac, 'AC-001');
+    assert.equal(e.outcome, 'confirmed-failing');
+    assert.equal(e.verdict, 'fail');
+    assert.ok(typeof e.durationMs === 'number' && e.durationMs >= 0, 'durationMs 实测（⛔ 不是占位常量）');
+    // 宿主健康量必须是**当时**的读数：与此刻独立重读一次同量级（⛔ 不与 0 同形、⛔ 不是写死的字面量）。
+    const now = readHostHealth();
+    if (now.hostFreeBytes !== null && e.hostFreeBytes !== null) {
+      assert.ok(e.hostFreeBytes > 0, 'hostFreeBytes > 0（⛔ 0 = 盘满，null = 没读到，两者与「盘不紧张」不同形）');
+      assert.ok(e.hostFreeBytes <= now.hostFreeBytes * 4, `复核那一刻的可用字节应与此刻同量级（读数=${e.hostFreeBytes} 此刻=${now.hostFreeBytes}）`);
+    }
+
+    // ⛔ 负控制：同一个谓词在**改动前的真实读数**上必须为假 —— 否则本判据只是「字段存在」的自证。
+    assert.equal(hasPrefilingEvidence(PRE_CHANGE_ENTRY), false,
+      '负控制：改动前的真实读数不含 verdict/durationMs/宿主量 ⇒ 新旧可区分（⛔ 不靠「字段存在」自证）');
+    assert.ok(!('durationMs' in PRE_CHANGE_ENTRY) && !('hostFreeBytes' in PRE_CHANGE_ENTRY),
+      '负控制的成因可核：旧对象缺的正是「这次跑在什么环境下」那一半');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+
+test('AC5：frozen 分支的 prompt 不再断言「No other mechanism re-runs it」——改为可核的「本轮已复核」表述', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'frozen-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(!p.includes('No other mechanism re-runs it'),
+    '⛔ 该断言自【有界轮转】落地后为假，且与 checkStalePass 自己的设计注释互相矛盾');
+  assert.ok(!p.includes('stays false forever'), '⛔ 同句的结论半边一并去掉');
+  assert.ok(p.includes('RE-RAN its criterion directly before filing'),
+    '改为陈述本轮真的做了什么：立案前跑过一次 criterion（直接量，⛔ 不是台账尾的陈旧读数）');
+  // 既有口径不许被这次改动削弱（同处断言，防止改 A 破 B）。
+  assert.ok(p.includes('LEFT the reverify scope'), '口径仍在：已离开复验域');
+  assert.ok(p.includes('IN FLIGHT') && !p.includes('ANY status'), '去重口径仍在：只有在飞任务算重复');
+  assert.ok(p.includes('make the criterion TRUE again') && p.includes('superseded') && p.includes('long-term: true'),
+    '三条合法终态仍在');
+  // 常设不变式（standing）分支不受影响：⛔ 不得把 frozen 的新措辞漏进那一支。
+  const s = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'standing-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(!s.includes('LEFT the reverify scope') && !s.includes('RE-RAN its criterion'), 'standing 分支不带 frozen 的措辞');
+});
+
+// ── 被驱动系统（目标项目）健康度 —— gap-goal-driver-blind-to-driven-system-health ────────────────
+//
+// 症状：本 driver 6 天 5308 轮只产出**内省**读数（goal-ring / goal-sufficiency），它驱动的目标项目
+// 两小时内 fan-in 失败 9 次（其中一轮 277 秒全量 suite 全绿、唯独最后一步失败 ⇒ 白烧），而 driver
+// 全程无感。本组测的就是补上的那条**外部视角**读数（fact name = goal-target-health）。
+//
+// ⛔ **口径边界（人 2026-09-07 DIR-131 + `goal-driver-task-boundary-check.ts` Detector 3）**：本 fact
+// **不读 task 落地指标**（fan-in 成败 / 落地率 / ready 池积压 / full-suite-state）——那归 task 机制。
+// 立案任务体点名的「fan-in 失败步骤分布」因此不在本 fact 内（该维度的去向是人裁，见任务 `## 阻塞`）。
+// 本组测的两条信号都是**被驱动系统自身的结构量**：它在不在跑、它的配置形状落不落后。
+//
+// 夹具是**真实文件系统**（探针脚本读的就是它，⛔ 不注入读数本身）。只有「传输失败」与「进程表读不到」
+// 用 argv 前缀缝注入 —— 换的是**传输层**，⛔ 不是答案（硬规则 4 推论三）。
+
+/** 造一个「目标项目」夹具根（真实 .quay/ 载体）。 */
+
+/** 交付物 plugin 版本（本仓 plugin/.claude-plugin/plugin.json）——夹具「配置形状一致」态用它。 */
+
+/** 起一个**真在跑**的「目标项目 driver 进程」夹具：cmdline 带 `worker-driver.js --root <目标根>`
+ *  ⇒ 探针的 `ps` 扫描能真读到它（⛔ 不是注入答案：读的还是真进程表、真 cmdline，夹具只造环境）。
+ *  ⚠️ 必须 spawn（异步）：探针要在它活着的时候跑；调用方负责 kill。 */
+
+/** 等夹具进程的 cmdline 真的出现在进程表里（spawn 是异步的：立刻探针会读到「还没起来」= 假红）。
+ *  判据是**进程表**（探针读的同一来源），⛔ 不是子进程自述 —— 与探针同一直接量。 */
+
+/** 「进程表读不到」夹具：transport 缝换成「先吃干 stdin、再打一份 driverProcesses:null 的探针输出」。
+ *  ⛔ 这不是注入答案——它造的是**环境**（ps 不可用/被沙箱挡时探针就是这个形态），verdict 仍由
+ *  被测代码从这份读数推出（本组其余用例正是它的对照）。 */
+
+// ── AC1：能取假 —— 两条被驱动系统自身的 categorical 信号（⛔ 无阈值、无落地指标）──────────────
+
+
+test('AC1: not-driving 信号能取假 —— 目标零 driver 进程 ⇒ unhealthy[not-driving]；有 ⇒ 该信号消失', async () => {
+  const idle = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const running = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc = spawnTargetDriverFixture(running);
+  try {
+    assert.ok(waitForProcessVisible(proc.pid), '夹具进程已上进程表（否则下面的对照是假红）');
+    const fIdle = targetHealthFact(repoRoot, { targetRoot: idle });
+    const fRun = targetHealthFact(repoRoot, { targetRoot: running });
+    assert.equal(fIdle.value.liveness.count, 0, '夹具无目标进程 ⇒ 进程计数 0（真读数）');
+    assert.deepEqual(fIdle.value.signals, ['not-driving'], '零进程 ⇒ 信号 not-driving');
+    assert.equal(fIdle.value.verdict, 'unhealthy', '有信号 ⇒ unhealthy');
+    assert.ok(fRun.value.liveness.count >= 1, `目标 driver 进程被真读到（实为 ${fRun.value.liveness.count}）`);
+    assert.ok(!fRun.value.signals.includes('not-driving'), '有进程 ⇒ not-driving 消失（信号能取假）');
+    // 两态输出逐字贴出做对照（AC1 的留档要求）。
+    console.log(`AC1[unhealthy] ${fIdle.reason}`);
+    console.log(`AC1[对照·有进程] ${fRun.reason}`);
+    assert.equal(fIdle.state, 'verified', '⛔ 取到读数就是 verified（unhealthy 不是「本轮失败」，AC2）');
+  } finally {
+    proc.kill('SIGKILL');
+    fs.rmSync(idle, { recursive: true, force: true });
+    fs.rmSync(running, { recursive: true, force: true });
+  }
+});
+
+
+test('AC1: plugin-version-mismatch 信号能取假 —— 落后 ⇒ unhealthy[plugin-version-mismatch]；一致 ⇒ 该信号消失', () => {
+  const stale = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
+  const same = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  try {
+    const fStale = targetHealthFact(repoRoot, { targetRoot: stale });
+    const fSame = targetHealthFact(repoRoot, { targetRoot: same });
+    // 两者都无目标 driver 进程 ⇒ 都带 not-driving；差异必须在版本信号上，且**只有**它变化。
+    assert.ok(fStale.value.signals.includes('plugin-version-mismatch'), '落后 ⇒ 该信号在');
+    assert.ok(!fSame.value.signals.includes('plugin-version-mismatch'), '一致 ⇒ 该信号不在（能取假）');
+    assert.equal(fStale.value.pluginVersion.equal, false, '并排读数：不等');
+    assert.equal(fSame.value.pluginVersion.equal, true, '并排读数：相等');
+    console.log(`AC1[stale] ${fStale.reason}`);
+    console.log(`AC1[一致] ${fSame.reason}`);
+  } finally {
+    fs.rmSync(stale, { recursive: true, force: true });
+    fs.rmSync(same, { recursive: true, force: true });
+  }
+});
+
+
+test('AC1 负控制: 两条信号之外的一切都是**读数**不是判据（陈旧度/条数不进 signals）', () => {
+  const dir = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: [] });
+  try {
+    const f = targetHealthFact(repoRoot, { targetRoot: dir });
+    assert.deepEqual(f.value.signals, ['not-driving'], '只有 not-driving（round 类载体的条数/龄都不产生信号）');
+    // `verification-round.jsonl` **也是** `*-round.jsonl` ⇒ 计入 roundRecords，且读数点名它（否则
+    // 「driver 在跳」与「只有复验轮在写」会被读成同一个数——硬规则 4b 的代理量陷阱）。
+    assert.equal(f.value.roundRecords.count, 1, 're 里只有 verification-round.jsonl 一条（mkTargetRoot 不写 driver round 载体）');
+    assert.equal(f.value.roundRecords.newestRel, '.quay/verification-round.jsonl', '点名最新那条是谁');
+    assert.ok(f.value.roundRecords.newestAgeSec <= 5, '龄可读（刚写）');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('AC1: fan-in-failing 信号能取假 —— 目标项目自己的 fan-in-step-trace.jsonl 窗口内有 ok:false ⇒ unhealthy[fan-in-failing]；全 ok:true ⇒ 该信号消失（人 2026-09-12 DIR-131 AC6 口径补充裁定）', () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const writeTrace = (dir, lines) => fs.writeFileSync(path.join(dir, '.quay', 'fan-in-step-trace.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+
+  const failing = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc = spawnTargetDriverFixture(failing);
+  const passing = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc2 = spawnTargetDriverFixture(passing);
+  try {
+    assert.ok(waitForProcessVisible(proc.pid) && waitForProcessVisible(proc2.pid), '两个夹具都已上进程表（否则下面的对照被 not-driving 污染）');
+    writeTrace(failing, [
+      { event: 'step-end', step: 'ff', task: 'TASK-89', epoch: nowSec - 60, ok: false },
+      { event: 'step-end', step: 'merge-develop', task: 'TASK-90', epoch: nowSec - 30, ok: true },
+      { event: 'other', step: 'ignored', epoch: nowSec - 10, ok: false }, // 非 step-end ⇒ 不计
+    ]);
+    writeTrace(passing, [
+      { event: 'step-end', step: 'ff', task: 'TASK-91', epoch: nowSec - 30, ok: true },
+    ]);
+    const fFail = targetHealthFact(repoRoot, { targetRoot: failing });
+    const fPass = targetHealthFact(repoRoot, { targetRoot: passing });
+    assert.deepEqual(fFail.value.signals, ['fan-in-failing'], '窗口内 1 个 ok:false ⇒ 信号 fan-in-failing（⛔ not-driving 不在，因为进程真在跑）');
+    assert.equal(fFail.value.verdict, 'unhealthy', '有信号 ⇒ unhealthy');
+    assert.equal(fFail.value.fanIn.failed, 1, '失败步骤数');
+    assert.deepEqual(fFail.value.fanIn.failedByStep, { ff: 1 }, '按步骤名归类');
+    assert.deepEqual(fFail.value.fanIn.failedTasks, ['TASK-89'], '点名失败任务');
+    assert.equal(fFail.value.fanIn.steps, 2, '窗口内 step-end 计 2 条（非 step-end 的第三行不计入）');
+    assert.ok(!fPass.value.signals.includes('fan-in-failing'), '全 ok:true ⇒ 该信号消失（能取假）');
+    assert.equal(fPass.value.fanIn.failed, 0, '零失败');
+    assert.equal(fPass.value.verdict, 'healthy', '零信号 ⇒ healthy');
+    console.log(`AC1[fan-in-failing] ${fFail.reason}`);
+    console.log(`AC1[fan-in 对照·全绿] ${fPass.reason}`);
+  } finally {
+    proc.kill('SIGKILL');
+    proc2.kill('SIGKILL');
+    fs.rmSync(failing, { recursive: true, force: true });
+    fs.rmSync(passing, { recursive: true, force: true });
+  }
+});
+
+
+test('AC1: fan-in-failing 读不懂时不与「零失败」同形（trace-unreadable / trace-unparseable，硬规则 3b）', () => {
+  const badJson = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  const dirTrace = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  try {
+    fs.writeFileSync(path.join(badJson, '.quay', 'fan-in-step-trace.jsonl'), 'not json at all\n', 'utf8');
+    const fBad = targetHealthFact(repoRoot, { targetRoot: badJson });
+    assert.equal(fBad.value.verdict, 'not-evaluated', 'JSON 坏行 ⇒ not-evaluated（⛔ 不是 healthy/0 failed）');
+    assert.equal(fBad.value.cause, 'trace-unparseable', '成因点名是解析问题');
+
+    fs.rmSync(path.join(dirTrace, '.quay', 'fan-in-step-trace.jsonl'));
+    fs.mkdirSync(path.join(dirTrace, '.quay', 'fan-in-step-trace.jsonl')); // 载体其实是个目录 ⇒ 读不出来
+    const fDirAsFile = targetHealthFact(repoRoot, { targetRoot: dirTrace });
+    assert.equal(fDirAsFile.value.verdict, 'not-evaluated', '载体读不出来 ⇒ not-evaluated（⛔ 不是 0 failed）');
+    assert.equal(fDirAsFile.value.cause, 'trace-unreadable', '成因点名是「在但读不出来」，⛔ 与 carrier-missing 不同形');
+  } finally {
+    fs.rmSync(badJson, { recursive: true, force: true });
+    fs.rmSync(dirTrace, { recursive: true, force: true });
+  }
+});
+
+// ── AC2：不阻塞 —— 健康度为红不进入达成判定（goalFlipDecision 输入/输出逐字一致）───────────────

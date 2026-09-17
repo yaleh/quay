@@ -24,257 +24,158 @@
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
-// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/12 (10 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
+// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { __dirname, analyzeSlotRefill, analyzeTasks, assert, computeArbitratedCap, computeFfFailureCounts, computeFfStarvationCap, computeFfStarvationRelief, computeUnresolvedEscalationTaskIds, dispatchableBody, execFileSync, fs, inFlightTask, makeWorkspace, path, writeRounds, writeState, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { __dirname, analyzeSlotRefill, assert, dispatchableBody, execFileSync, fs, inFlightTask, makeWorkspace, path, writeTask } from "./helpers/slot-refill-harness.mjs";
 
-test("AC5 — runningSubagentCount splits Consumer B (slots) from Consumer A (touches): two denominators may differ (判据 ⊢)", (t) => {
-  const root = makeWorkspace("ac5-split");
+test("DIR-GLOB LOCK FIX (AC1) — negative: a candidate declaring tasks/*.md collides with an in-flight tasks/*.md declarer (two genuine global writers serialize)", (t) => {
+  const root = makeWorkspace("dirglob-neg");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const tasksDir = path.join(root, "tasks");
-  // 5 WIDE un-landed tasks (the real 2026-08-14 in-flight set).
-  const wide = [
-    "gap-ac63-judgment2-no-carrier",
-    "gap-fan-in-flip-no-ac-completion-check",
-    "gap-in-flight-resolve-by-task-id",
-    "gap-test-isolation-backlog-44-violations-unmeasured",
-    "gap-workflows-dual-copy-drift-unchecked",
-  ];
-  for (const id of wide) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
-  const inFlight = wide.map((id) => inFlightTask(id, [`- code/${id}.ts (new)`]));
-  const base = { tasksDir, root, cap: 5 };
-
-  // Consumer B narrow: only 3 of the 5 are ACTUALLY-RUNNING subagents (ac63 + in-flight-resolve impl
-  // + workflows-dual-copy — the 2026-08-14 empirical split: 5 worktrees, 3 live subagents).
-  const narrow = analyzeSlotRefill({ ...base, inFlight, runningSubagentCount: 3 });
-  assert.equal(narrow.in_flight_count, 5, "Consumer A denominator stays WIDE (all un-landed tasks)");
-  assert.equal(narrow.running_subagent_count, 3, "Consumer B denominator is the NARROW running-subagent count");
-  assert.equal(narrow.slot_denominator_source, "running-subagents");
-  assert.equal(narrow.slots_free, 2, "true slots_free = cap 5 − 3 running subagents = 2");
-
-  // Backward compat: no runningSubagentCount ⇒ Consumer B falls back to the wide set.
-  const fallback = analyzeSlotRefill({ ...base, inFlight });
-  assert.equal(fallback.running_subagent_count, 5, "fallback Consumer B = wide set");
-  assert.equal(fallback.slot_denominator_source, "in-flight-fallback");
-  assert.equal(fallback.slots_free, 0, "fallback slots_free = cap 5 − 5 wide = 0 (the old shared-denominator shape)");
-
-  // ⊢ 判据: the two denominators are allowed to differ — 5 (wide, Consumer A) vs 3 (narrow, Consumer B).
-  assert.notEqual(narrow.in_flight_count, narrow.running_subagent_count,
-    "判据: dispatchable_disjoint 分母 (5) 与 slots_free 分母 (3) 允许不等");
-  assert.equal(narrow.dispatchable_disjoint, fallback.dispatchable_disjoint,
-    "Consumer A (dispatchable_disjoint) is UNCHANGED by the Consumer-B split");
+  // The candidate itself declares the directory glob — it genuinely claims ALL task files, so it is
+  // NOT exempt from another tasks/*.md in-flight task (the exemption is self-file-only).
+  writeTask(root, "gap-glob-cand", { status: "ready", labels: ["gap"], body: dispatchableBody(["- tasks/*.md"]) });
+  const inFlight = [inFlightTask("gap-glob-in", ["- tasks/*.md"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.ok(!r.recommended.includes("gap-glob-cand"), "a tasks/*.md candidate is NOT exempt from another tasks/*.md in-flight task");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-glob-cand");
+  assert.ok(deferred.length === 1 && /touches-overlap-in-flight/.test(deferred[0].reason),
+    `deferred with touches-overlap-in-flight, got: ${JSON.stringify(deferred)}`);
 });
 
+// ── DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): slot-refill is a PURE
+// recommender (never writes brackets), but it must SURFACE which candidates were deferred and why so
+// the tick can mechanically close their open brackets (closure-lag-check.sh --close-task --outcome
+// deferred) — the queue segment then never counts toward OVER90. ─────────────────────────────────────
 
-test("AC5/AC115 — CLI --in-flight-count: the driver's DIRECT child count feeds Consumer B (slots) via driver-count provenance", (t) => {
-  const root = makeWorkspace("ac5-cli");
+
+test("DEFER — slot-refill exposes deferred candidates with reasons (touches-overlap / deps / majority-missing / self-touch)", (t) => {
+  const root = makeWorkspace("defer");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const ids = [
-    "gap-ac63-judgment2-no-carrier",
-    "gap-fan-in-flip-no-ac-completion-check",
-    "gap-in-flight-resolve-by-task-id",
-    "gap-test-isolation-backlog-44-violations-unmeasured",
-    "gap-workflows-dual-copy-drift-unchecked",
-  ];
-  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  // Recommended: a clean disjoint candidate.
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  // Deferred (touches-overlap with in-flight): must be surfaced with the overlap reason.
+  writeTask(root, "gap-blocked", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/inflight.ts (new)"]) });
+  // Deferred (deps not ready): parent not done.
+  writeTask(root, "gap-dep", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/dep.ts (new)"]) });
+  // Deferred (majority-missing touches): absent files without (new).
+  writeTask(root, "gap-missing", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/absent-1.ts", "- code/absent-2.ts"]) });
+  // Deferred (C8 self-touch missing): own task file not in Touches.
+  writeTask(root, "gap-selftouch", { status: "ready", labels: ["gap"], selfTouch: false, body: dispatchableBody(["- code/st.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-in1", ["- code/inflight.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, inFlight });
+
+  assert.ok(r.recommended.includes("gap-free"), "the disjoint candidate is still recommended");
+  const byId = Object.fromEntries(r.deferred.map((d) => [d.id, d.reason]));
+  assert.ok(r.deferred.length >= 4, `expected ≥4 deferred candidates, got ${r.deferred.length}`);
+  assert.ok(byId["gap-blocked"] && /touches-overlap-in-flight/.test(byId["gap-blocked"]),
+    `touches-overlap defer surfaced with reason, got: ${JSON.stringify(byId["gap-blocked"])}`);
+  assert.ok(byId["gap-dep"] && /deps-not-ready/.test(byId["gap-dep"]), "deps-not-ready defer surfaced");
+  assert.ok(byId["gap-missing"] && /touches-majority-missing/.test(byId["gap-missing"]), "touches-majority-missing defer surfaced");
+  assert.ok(byId["gap-selftouch"] && /self-touch-missing-c8/.test(byId["gap-selftouch"]), "self-touch defer surfaced");
+  // None of the deferred ids may appear in recommended.
+  for (const d of r.deferred) assert.ok(!r.recommended.includes(d.id), `deferred ${d.id} must not be recommended`);
+});
+
+// ── ASSEMBLEBATCH-DEFERRED (gap-slot-refill-discards-assemblebatch-deferred): slot-refill only
+// destructured assembleBatch's `batch`, DISCARDING its `deferred` — so a candidate that passed all
+// step-4 checks yet was serialized by assembleBatch (shared-state / learning-type /
+// non-capability-growth) reported `deferred=[]` + the misleading "no dispatchable candidate passes
+// step-4" no_refill_reason. AC1: the assembleBatch deferred reasons must be merged into the output's
+// `deferred`. AC2: no_refill_reason must report the REAL rejection face (assembleBatch serialization)
+// instead of "no dispatchable candidate passes step-4" when candidates DID pass step-4. ───────────────
+
+// AC1 + AC3 negative control: a ready task whose `## Touches` hits SHARED_STATE_PATHS is deferred by
+// assembleBatch with a readable "touches shared exp5 state" reason (NOT deferred=[] + misleading
+// no_refill_reason). Real CLI output (DoD: 真实输出，非 fixture).
+
+test("ASSEMBLEBATCH-DEFERRED (AC1/AC3) — a shared-state-touch ready task surfaces the assembleBatch rejection reason in `deferred` and a non-misleading no_refill_reason", (t) => {
+  const root = makeWorkspace("batch-defer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The candidate passes EVERY step-4 check (touches-resolve / deps-ready / disjoint / self-touch C8)
+  // but its `## Touches` declares a SHARED_STATE_PATHS path — assembleBatch serializes it.
+  writeTask(root, "gap-shared", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- experiments/quay-perpetual-stream/dashboard.md (new)"]),
+  });
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
-  const run = (args) => JSON.parse(execFileSync(
+  const r = JSON.parse(execFileSync(
     process.execPath,
-    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", ...args],
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", "--in-flight-count", "0"],
     { encoding: "utf8" },
   ));
-
-  // AC115: in-flight = 驱动子进程数（直接量）——the driver passes its own child count as a NUMBER.
-  // 3 running workers ⇒ Consumer B = 3 ⇒ slots_free = 5 − 3 = 2.
-  const withCount = run(["--in-flight-count", "3"]);
-  assert.equal(withCount.measurement_source, "driver-count", "the in-flight count is the driver's direct child count");
-  assert.equal(withCount.running_subagent_count, 3, "Consumer B denominator = the direct count");
-  assert.equal(withCount.slots_free, 2, "true slots_free = 5 − 3 = 2");
-
-  // Zero is a MEASURED zero (not "absent"): --in-flight-count 0 ⇒ 5 free slots.
-  const zeroCount = run(["--in-flight-count", "0"]);
-  assert.equal(zeroCount.slots_free, 5, "0 is a measured zero ⇒ all 5 slots free");
-  assert.equal(zeroCount.measurement_source, "driver-count");
+  // AC1: the assembleBatch rejection reason is visible in the output's `deferred`.
+  const d = (r.deferred || []).find((x) => x.id === "gap-shared");
+  assert.ok(d, `gap-shared deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/touches shared exp5 state/.test(d.reason),
+    `reason names the shared-state serialization, got: ${d.reason}`);
+  // AC2: no_refill_reason reports the REAL rejection face, NOT the misleading step-4 message.
+  assert.ok(!/no dispatchable candidate passes step-4/.test(r.no_refill_reason || ""),
+    `no_refill_reason must not misreport step-4 emptiness, got: ${r.no_refill_reason}`);
+  assert.ok(/assembleBatch/.test(r.no_refill_reason || "") && /touches shared exp5 state/.test(r.no_refill_reason || ""),
+    `no_refill_reason names the assembleBatch rejection face, got: ${r.no_refill_reason}`);
+  assert.deepEqual(r.recommended, [], "the shared-state candidate is not recommended");
 });
 
+// AC1: a `learning`-typed candidate is serialized by assembleBatch — the reason must be visible.
 
-test("AC5 — Consumer A stays WIDE: a candidate colliding with a wide-but-not-running task is still blocked (awaiting-retry worktree occupies files)", (t) => {
-  const root = makeWorkspace("ac5-wide");
+test("ASSEMBLEBATCH-DEFERRED (AC1) — a learning-type candidate surfaces the 'learning-type' rejection reason", (t) => {
+  const root = makeWorkspace("batch-learn");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const tasksDir = path.join(root, "tasks");
-  // 3 WIDE in-flight tasks; only 2 (A, B) are running — C is awaiting-retry (no subagent).
-  writeTask(root, "gap-if-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  writeTask(root, "gap-if-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
-  writeTask(root, "gap-if-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]) });
-  // A ready candidate X touches the SAME file as awaiting-retry C (wide but NOT running).
-  writeTask(root, "gap-cand-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)", "- code/x.ts (new)"]) });
-  // A disjoint candidate Y touches a fresh file — should be free to recommend.
-  writeTask(root, "gap-cand-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]) });
-  const inFlight = [
-    inFlightTask("gap-if-a", ["- code/a.ts (new)"]),
-    inFlightTask("gap-if-b", ["- code/b.ts (new)"]),
-    inFlightTask("gap-if-c", ["- code/c.ts (new)"]),
-  ];
-  const r = analyzeSlotRefill({ tasksDir, root, cap: 5, inFlight, runningSubagentCount: 2 });
-  assert.equal(r.running_subagent_count, 2, "Consumer B narrow = 2 running subagents");
-  assert.equal(r.slots_free, 3, "true slots_free = 5 − 2 = 3");
-  assert.ok(r.recommended.includes("gap-cand-y"), "disjoint candidate Y recommended (slots are free)");
-  assert.ok(!r.recommended.includes("gap-cand-x"),
-    "X collides with awaiting-retry C (wide Consumer-A set) ⇒ blocked even though C is NOT running (its worktree still occupies code/c.ts)");
-  const deferredX = (r.deferred || []).find((d) => d.id === "gap-cand-x");
-  assert.ok(deferredX && /touches-overlap-in-flight/.test(deferredX.reason),
-    "X deferred with touches-overlap-in-flight — the WIDE Consumer-A denominator still applies");
+  writeTask(root, "gap-learn", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/learn.ts (new)"]).replace("**type:** execution", "**type:** learning"),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const d = (r.deferred || []).find((x) => x.id === "gap-learn");
+  assert.ok(d, `gap-learn deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/learning-type/.test(d.reason), `reason names learning-type, got: ${d.reason}`);
+  assert.deepEqual(r.recommended, [], "the learning candidate is not recommended");
 });
 
-// ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
-// AC3: a task the consecutive-red-window signal implicates (pool.suite_blocking.tasks, the
-// ready-pool-check blocking_suite axis) is ranked FIRST into `recommended` — the inner's slot-refill
-// picks the suite-blocker before any other work. Negative control: no red window ⇒ recommended keeps
-// the pre-signal (id) ordering.
+// AC1: a non-capability-growth value-type candidate is serialized by assembleBatch — the reason must
+// be visible.
 
-/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): slot-refill's suite-blocking
- *  (via analyzeTasks) now reads per-task-suite-records.jsonl — the ONLY ongoing suite source after
- *  AC84 (verification-round is NO LONGER a throttling input). This helper writes the per-task-suite-
- *  record shape, converting the round-shaped fixture rows ({round,state,reason,fail,failures}) into
- *  it. Every fixture row is a REAL full-suite result (fullSuiteRan:true) — a green row breaks the
- *  window, a red row counts. */
-
-
-
-test("slot-refill recommends the suite-blocking task first; no red window ⇒ unchanged (AC3/negative)", (t) => {
-  const root = makeWorkspace("suiteblock");
+test("ASSEMBLEBATCH-DEFERRED (AC1) — a non-capability-growth candidate surfaces the 'non-capability-growth' rejection reason", (t) => {
+  const root = makeWorkspace("batch-value");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/plain.ts (new)"]) });
-  writeTask(root, "gap-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
-  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
-
-  // AC4 negative control FIRST: no suite history ⇒ recommended keeps the de-ordered (lexicographic) form.
-  const before = analyzeSlotRefill(opts);
-  assert.equal(before.suite_blocking.window_active, false);
-  assert.deepEqual(before.recommended, ["gap-plain-ready", "gap-watchdog"], "no red window ⇒ de-ordered (lexicographic)");
-  assert.ok(/order meaningless/.test(before.recommended_order), "the de-ordered output is explicitly annotated");
-
-  // AC3: 3 consecutive red rounds whose failures hit the watchdog task's Touches ⇒ the suite-blocker
-  // is picked first BY THE PRIORITY SORT (exposed in `ranking`, the AC36 diagnostic) while the
-  // dispatch-facing `recommended` array stays de-ordered (AC56 去锚).
-  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
-  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
-  const after = analyzeSlotRefill(opts);
-  assert.equal(after.suite_blocking.window_active, true);
-  assert.deepEqual(after.suite_blocking.tasks, ["gap-watchdog"]);
-  assert.equal(after.recommended[0], "gap-plain-ready", "recommended is de-ordered (lexicographic) — the suite-blocker is NOT first in the dispatch-facing array");
-  assert.equal(after.recommended.length, 2, "both dispatchable candidates still recommended (cap 2)");
-  assert.equal(after.ranking[0].id, "gap-watchdog", "the suite-blocker is first in the ranking (the priority-sorted AC36 diagnostic)");
-
-  // negative: last round green clears the window ⇒ recommended stays de-ordered (lexicographic).
-  writeRounds(root, [
-    ...Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts" }] })),
-    { round: 223, state: "green", fail: 0 },
-  ]);
-  const green = analyzeSlotRefill(opts);
-  assert.equal(green.suite_blocking.window_active, false);
-  assert.deepEqual(green.recommended, ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ de-ordered (lexicographic)");
-  assert.equal(green.ranking[0].id, "gap-plain-ready", "no suite-blocker ⇒ id-tie-break order in the ranking");
+  writeTask(root, "gap-disc", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/disc.ts (new)"]).replace("**type:** execution", "**type:** execution\n**Value type:** discovery"),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const d = (r.deferred || []).find((x) => x.id === "gap-disc");
+  assert.ok(d, `gap-disc deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/non-capability-growth/.test(d.reason), `reason names non-capability-growth, got: ${d.reason}`);
+  assert.deepEqual(r.recommended, [], "the non-capability-growth candidate is not recommended");
 });
 
-// ── B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog) ─────────────────────────────────────
-// ① (in_flight<cap ⇒ dispatch) conflicts with ④ (integration ahead + suite green ⇒ batch-merge): ④ is a
-// DOWNSTREAM constraint on ①. When the delivery gate is blocked by a red suite AND the integration
-// backlog exceeds the threshold, the effective dispatch cap narrows to "just enough to fix red"; the cap
-// restores on green; an empty backlog has no effect (AC2/AC4, the Contract's band + invariants).
+// AC2: distinguish the two "empty recommended" shapes. (a) NO candidate passed step-4 ⇒ the original
+// "no dispatchable candidate passes step-4" message is kept. (b) candidates PASSED step-4 but
+// assembleBatch serialized them ⇒ the real rejection face is reported.
 
-/** Run a git command in a temp repo. MODULE-LEVEL on purpose: a nested function def between a
- *  mkdtemp and its `return` misdirects test-isolation-check's nearestFuncName association (the
- *  returned dir's funcName resolves to the NESTED fn, whose call sites never capture+clean it), which
- *  would false-flag a mkdtemp-no-cleanup ratchet violation on an otherwise-cleaned helper. */
-
-/** Build a REAL temp git repo where `integration` is `ahead` commits ahead of `develop`, so the
- *  git-read backlog (`git rev-list --count develop..integration`) is exercised, not injected. */
-
-
-test("computeArbitratedCap — red window active narrows to redBacklogCap; inactive keeps base (AC1 pure)", () => {
-  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true }), 2, "red window active ⇒ redBacklogCap (2)");
-  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false }), 5, "no red window ⇒ base cap unchanged");
-  // custom redBacklogCap honored; an inactive window still keeps base
-  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, redBacklogCap: 3 }), 3);
-  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false, redBacklogCap: 3 }), 5);
-});
-
-// ── FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief) ───────────────────────────────────
-// The second trigger on computeArbitratedCap: a LIVE task that has failed ff repeatedly in its current
-// round (develop advanced during its merge→ff window) narrows the dispatch cap so it lands with no NEW
-// competitor. Tiered (k=1 no / k=2→2 / k≥3→1), stateless (recomputed every round — AC8), the cause is
-// distinguishable from suite-red / worker-round-end (AC5), and the perpetrator is distinguishable as
-// layer-commit (delayable) vs task-landing (not delayable) (AC7).
-
-
-
-
-test("computeFfStarvationCap — k=1 no narrow, k=2→2, k≥3→1: three distinguishable tiers (AC2)", () => {
-  assert.equal(computeFfStarvationCap(0), null, "no failure ⇒ no intervention");
-  assert.equal(computeFfStarvationCap(1), null, "k=1 retry genuinely helps ⇒ no intervention");
-  assert.equal(computeFfStarvationCap(2), 2, "k=2 ⇒ mild throttle");
-  assert.equal(computeFfStarvationCap(3), 1, "k=3 ⇒ deterministic landing");
-  assert.equal(computeFfStarvationCap(8), 1, "k≥3 ⇒ 1");
-  assert.equal(computeFfStarvationCap(null), null);
-});
-
-
-test("computeArbitratedCap — ff-starvation second trigger narrows; absent trigger keeps base (AC1/AC8 stateless)", () => {
-  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 1 }), 1, "k≥3 ⇒ cap 1");
-  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 2 }), 2, "k=2 ⇒ cap 2");
-  assert.equal(computeArbitratedCap({ baseCap: 5 }), 5, "no trigger ⇒ base (self-recovery, AC8)");
-  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, ffStarvationCap: 1 }), 1, "both triggers ⇒ min (the more urgent k≥3 relief wins)");
-  assert.equal(computeArbitratedCap({ baseCap: 1, redWindowActive: true }), 1, "never widens — a cap-1 caller stays ≤1 under a red window");
-});
-
-
-test("computeFfFailureCounts — the most recent retry record's attempt is the live task's current-round k", () => {
-  const recs = [
-    { taskId: "gap-a", attempt: 1, epoch: 100 },
-    { taskId: "gap-a", attempt: 2, epoch: 200 },
-    { taskId: "gap-b", attempt: 3, epoch: 100 },
-    { taskId: "gap-stale", attempt: 8, epoch: 500 }, // not live ⇒ ignored
-  ];
-  const counts = computeFfFailureCounts(recs, ["gap-a", "gap-b"]);
-  assert.equal(counts.get("gap-a"), 2, "latest record (epoch 200) attempt 2");
-  assert.equal(counts.get("gap-b"), 3);
-  assert.equal(counts.has("gap-stale"), false, "a non-live task's historical failures never count");
-});
-
-
-test("computeUnresolvedEscalationTaskIds — an ff-escalation without a newer resolution = starved k≥3", () => {
-  const recs = [
-    { taskId: "gap-a", event: "ff-escalation", epoch: 100 },
-    { taskId: "gap-b", event: "ff-escalation", epoch: 100 },
-    { taskId: "gap-b", event: "ff-escalation-resolved", epoch: 200 },
-  ];
-  const ids = computeUnresolvedEscalationTaskIds(recs);
-  assert.ok(ids.has("gap-a"), "unresolved escalation ⇒ still starved");
-  assert.ok(!ids.has("gap-b"), "a newer resolution clears the escalation");
-});
-
-
-test("computeFfStarvationRelief — k=1 no relief, k=2 narrows to 2, k≥3 narrows to 1 (AC1/AC2)", () => {
-  const live = ["gap-a"];
-  const k1 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 1, epoch: 100 }], live);
-  const r1 = computeFfStarvationRelief({ ffCounts: k1 });
-  assert.equal(r1.active, false);
-  assert.equal(r1.tier, 1);
-  assert.equal(r1.narrowedCap, null);
-  assert.deepEqual(r1.starvedTaskIds, []);
-
-  const k2 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 2, epoch: 100 }], live);
-  const r2 = computeFfStarvationRelief({ ffCounts: k2 });
-  assert.equal(r2.active, true);
-  assert.equal(r2.tier, 2);
-  assert.equal(r2.narrowedCap, 2);
-
-  const k3 = computeFfFailureCounts([{ taskId: "gap-a", attempt: 3, epoch: 100 }], live);
-  const r3 = computeFfStarvationRelief({ ffCounts: k3 });
-  assert.equal(r3.active, true);
-  assert.equal(r3.tier, 3);
-  assert.equal(r3.narrowedCap, 1);
-  assert.deepEqual(r3.starvedTaskIds, ["gap-a"]);
+test("ASSEMBLEBATCH-DEFERRED (AC2) — no_refill_reason distinguishes 'step-4 empty' from 'assembleBatch serialized'", (t) => {
+  const root = makeWorkspace("batch-emptyshape");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // (a) step-4 empty: a candidate deferred by deps-not-ready (never reaches assembleBatch).
+  writeTask(root, "gap-dep", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/dep.ts (new)"]) });
+  const rStep4Empty = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.deepEqual(rStep4Empty.recommended, []);
+  assert.match(rStep4Empty.no_refill_reason || "", /no dispatchable candidate passes step-4/,
+    "step-4-empty keeps the original no_refill_reason");
+  // (b) assembleBatch-serialized: a candidate that PASSES step-4 but touches shared state.
+  writeTask(root, "gap-shared", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- experiments/quay-perpetual-stream/dashboard.md (new)"]),
+  });
+  const rBatchEmpty = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.deepEqual(rBatchEmpty.recommended, []);
+  assert.ok(!/no dispatchable candidate passes step-4/.test(rBatchEmpty.no_refill_reason || ""),
+    "assembleBatch-empty must NOT use the step-4 message");
+  assert.match(rBatchEmpty.no_refill_reason || "", /passed step-4 but assembleBatch deferred/,
+    "assembleBatch-empty names the serialization face");
 });

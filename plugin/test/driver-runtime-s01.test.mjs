@@ -15,10 +15,10 @@
 //
 // Run: scripts/test.sh plugin/test/driver-runtime.test.mjs
 
-// SPLIT from driver-runtime.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/4 (11 tests). Shared fixtures: ./helpers/driver-runtime-harness.mjs (single source).
+// SPLIT from driver-runtime.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/10 (5 tests). Shared fixtures: ./helpers/driver-runtime-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER_KINDS, KNOWN_KINDS, TASK_FILTERS, aliveness, anchorHosts, appendHeartbeatLine, applyTaskFilters, assert, carrierStats, collectFacts, deadPid, defaultReadyPoolArgv, defaultSelectorArgv, driverArgvForKind, fs, isDue, launchArgv, makeStopCondition, notifyManager, os, parseSelectorOutput, path, pidAlive, promotion, readAnchorState, readPidFile, readyPoolCheck, reportFacts, resourceGateCheck, run, runAsync, runLivenessCheck, runSelectorWorker, scheduleIsDue, shuffle, spawn, verifyIndependently, worker, writeAnchorHostedRoot, writePidFile } from "./helpers/driver-runtime-harness.mjs";
+import { DRIVER_KINDS, KNOWN_KINDS, TASK_FILTERS, appendHeartbeatLine, applyTaskFilters, assert, carrierStats, collectFacts, defaultReadyPoolArgv, defaultSelectorArgv, isDue, launchArgv, makeStopCondition, notifyManager, parseSelectorOutput, pidAlive, promotion, readyPoolCheck, reportFacts, resourceGateCheck, run, runAsync, runLivenessCheck, runSelectorWorker, scheduleIsDue, shuffle, spawn, verifyIndependently, worker } from "./helpers/driver-runtime-harness.mjs";
 
 test("AC1 — Layer 0 (driver-runtime) exposes the shared runtime machinery (supervisor/loop/stopCondition/heartbeat/controlPlane/notify/profile/ResultVocab)", () => {
   assert.equal(typeof DRIVER_KINDS, "object", "registry table");
@@ -124,103 +124,4 @@ test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () 
   assert.equal(DRIVER_KINDS.goal.pidSelf, true);
   assert.deepEqual(DRIVER_KINDS.goal.carriers, ["goal-round.jsonl"]);
   assert.equal(DRIVER_KINDS.goal.controlFile, "goal-control.json");
-});
-
-
-test("AC2 — driverArgvForKind maps --cap → per-kind cap flag (worker --concurrency)", () => {
-  const promo = driverArgvForKind("/r", "promotion", { cap: "2", pidFile: "/r/.quay/p.pid", runId: "x" });
-  assert.ok(promo.includes("--cap") && promo.includes("2"), "promotion --cap 2");
-  const wk = driverArgvForKind("/r", "worker", { cap: "2", pidFile: "/r/.quay/w.pid", runId: "x" });
-  assert.ok(wk.includes("--concurrency") && wk.includes("2"), "worker --concurrency 2");
-  assert.ok(!wk.includes("--cap"), "worker argv carries --concurrency, ⛔ not --cap");
-});
-
-
-test("AC2 — carrierStats reads ALL carriers; last_record_ts = max across outcome + round", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, ".quay", "worker-outcome.jsonl"),
-    '{"ts":"2026-08-23T10:00:00Z","task":"a","final_state":"completed"}\n', "utf8",
-  );
-  fs.writeFileSync(
-    path.join(root, ".quay", "worker-round.jsonl"),
-    '{"ts":"2026-08-23T10:00:00Z","round":1}\n{"ts":"2026-08-23T11:30:00Z","round":2}\n', "utf8",
-  );
-  const st = carrierStats(root, "worker");
-  assert.equal(st.records, 3, "both carriers summed (1 outcome + 2 round)");
-  assert.equal(st.lastTs, "2026-08-23T11:30:00Z", "max across BOTH carriers — round wins");
-  assert.match(st.primaryPath, /worker-outcome\.jsonl$/, "primary carrier is outcome");
-});
-
-
-test("gap-meta-carrierstats — quality carrier timestamp key is judgedAt (⛔ not ts)", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-q-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  // quality 判词载体记录的时间戳键是 judgedAt（pool-quality-judge.ts buildQualityRoundRecord），
-  // ⛔ 不是 ts。键不匹配会把 15 条真实记录读成 lastTs=null ⇒ 停摆与健康同形。
-  fs.writeFileSync(
-    path.join(root, ".quay", "quality-round.jsonl"),
-    '{"round":1,"judgedAt":"2026-09-05T15:41:19.134Z","state":"failed"}\n' +
-      '{"round":2,"judgedAt":"2026-09-05T15:44:02.000Z","state":"judged","distribution":{},"shouldRemoveIds":[],"verdicts":[]}\n',
-    "utf8",
-  );
-  const st = carrierStats(root, "quality");
-  assert.equal(st.records, 2, "both quality records counted");
-  assert.equal(st.lastTs, "2026-09-05T15:44:02.000Z", "lastTs = max judgedAt, ⛔ null");
-});
-
-
-test("gap-meta-round-log-rel — quality carrier reads BOTH ts (heartbeat) and judgedAt, freshest wins", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-qmix-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  // quality-round.jsonl 混两种键：心跳（ts，每 30s 一条 liveness 直接量）+ 判词（judgedAt，间歇量）。
-  // 修复前只读 judgedAt ⇒ 心跳不可见 ⇒ 池不触发就假报 stall；修复后两者较新者作 lastTs。
-  fs.writeFileSync(
-    path.join(root, ".quay", "quality-round.jsonl"),
-    '{"round":1,"judgedAt":"2026-09-06T10:00:00.000Z","state":"failed"}\n' +
-      '{"round":2,"run_id":"qg-x","pid":1,"ts":"2026-09-06T10:00:30.000Z","halted":false,"facts":[]}\n',
-    "utf8",
-  );
-  const st = carrierStats(root, "quality");
-  assert.equal(st.records, 2, "both heartbeat + judgment counted");
-  assert.equal(st.lastTs, "2026-09-06T10:00:30.000Z", "lastTs = fresher heartbeat ts (⛔ judgedAt-only ⇒ stale)");
-});
-
-
-test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not carrier-stall)", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-alive-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  assert.equal(pidAlive(deadPid()), false, "dead pid ⇒ not alive");
-  assert.equal(pidAlive(process.pid), true, "self pid ⇒ alive");
-  assert.equal(readPidFile(path.join(root, ".quay", "missing.pid")), "", "missing ⇒ empty");
-  writePidFile(path.join(root, ".quay", "promotion-driver-supervisor.pid"), Number(deadPid()));
-  const a = aliveness(root, "promotion");
-  assert.equal(a.supervisorAlive, false);
-  assert.deepEqual(a.deaths, ["supervisor_dead"], "stale supervisor pid ⇒ supervisor_dead");
-});
-
-
-
-test("gap-driver-status-misreports — anchor-hosted kind with NO per-kind pid carrier ⇒ host=anchor & alive=1（⛔ 不报假死）", (t) => {
-  const root = writeAnchorHostedRoot("nofile", ["worker", "outer", "promotion"]);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // ⚠️ 夹具的关键：**故意不写** `.quay/<kind>-driver.pid`（旧判据正是读它 ⇒ 旧代码在这里必然报假死）。
-  assert.equal(fs.existsSync(path.join(root, ".quay", "worker-driver.pid")), false, "夹具：逐 kind pid 载体确实不存在");
-
-  for (const kind of ["worker", "outer", "promotion"]) {
-    assert.equal(readAnchorState(root)?.kinds.includes(kind), true, `${kind}: 回读面点名了它`);
-    assert.equal(anchorHosts(root, kind).hosted, true, `${kind}: anchorHosts ⇒ hosted`);
-    const a = aliveness(root, kind);
-    assert.equal(a.host, "anchor", `${kind}: host=anchor`);
-    assert.equal(a.anchorPid, process.pid, `${kind}: anchor_pid`);
-    assert.equal(a.driverPid, process.pid, `${kind}: 承载进程 = anchor（⛔ 不是「pid 载体里碰巧写了谁」）`);
-    assert.equal(a.driverAlive, true, `${kind}: driver_alive=1`);
-    assert.equal(a.running, true, `${kind}: running=1`);
-    assert.equal(a.supervisorAlive, false, `${kind}: 阶段 C 无 supervisor`);
-    assert.deepEqual(a.deaths, [], `${kind}: ⛔ 不得报任何死因`);
-  }
 });

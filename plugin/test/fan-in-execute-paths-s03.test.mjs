@@ -34,340 +34,209 @@
 //   scripts/test.sh --for-task gap-fan-in-execute-three-unverified-paths --allow-thin
 //   node --test plugin/test/fan-in-execute-paths.test.mjs
 
-// SPLIT from fan-in-execute-paths.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/6 (15 tests). Shared fixtures: ./helpers/fan-in-execute-paths-harness.mjs (single source).
+// SPLIT from fan-in-execute-paths.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/10 (10 tests). Shared fixtures: ./helpers/fan-in-execute-paths-harness.mjs (single source).
 
 import { test } from "node:test";
-import { REPO_ROOT, SEL_CLI, assert, bootstrapBlockFor, bracketCloseBlockFor, cleanup, extractBlockFromPrompts, fs, makeRepoWithDelta, makeStaleBootstrapRepo, makeTelemetryFakeRoot, path, promptContaining, runBash, runSyncCli, runWorkflow, spawn, spawnSync, startBracket, symlinkRuntimeTrees, vm } from "./helpers/fan-in-execute-paths-harness.mjs";
+import { REPO_ROOT, antiDriftBlockFor, antiDriftLandBlockFor, assert, buildTaskManifest, checkTaskAntiDrift, cleanup, commitFiles, extractBlockFromPrompts, flipBlockFor, fs, makeAntiDriftRepo, makeFlipDir, path, promptContaining, runBash, runWorkflow, symlinkPluginForGit } from "./helpers/fan-in-execute-paths-harness.mjs";
 
-test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no write)", async (t) => {
-  const root = makeTelemetryFakeRoot();
-  t.after(() => cleanup(root));
-  const runIdA = startBracket(root, "gap-test-close-a");
-  const block = await bracketCloseBlockFor("gap-test-close-a", root, root, runIdA);
-  // Close once (writes the end event)…
-  assert.equal(runBash(block, { cwd: REPO_ROOT }).status, 0);
-  // …then close again: no open bracket ⇒ --close-task exits 0, no second end event.
-  assert.equal(runBash(block, { cwd: REPO_ROOT }).status, 0, "second close must be an idempotent no-op");
-  const rep = runBash(`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json --root "${root}"`, { cwd: REPO_ROOT });
-  const report = JSON.parse(rep.stdout);
-  assert.ok(!(report.inProgress || []).some((p) => p.taskId === "gap-test-close-a"), "bracket must stay closed");
-  assert.equal((report.tasks || []).filter((c) => c.taskId === "gap-test-close-a").length, 1, "exactly one completed pair");
+test("④ 剩余未勾均为（待外部）⇒ 翻 done (established awaiting-verification done-flip shape)", async (t) => {
+  const dir = makeFlipDir("fan-in-flipacext-");
+  t.after(() => cleanup(dir));
+  const taskFile = path.join(dir, "tasks", "gap-test-ext.md");
+  fs.writeFileSync(taskFile, [
+    "---",
+    "id: gap-test-ext",
+    "status: ready",
+    "---",
+    "## Acceptance Criteria",
+    "- [x] AC1 impl done",
+    "- [ ] AC2 等全量套件绿（待外部）",
+    "## Definition of Done",
+    "- [ ] 外层验证（待外部）",
+  ].join("\n") + "\n", "utf8");
+  const r = runBash(await flipBlockFor("gap-test-ext", dir), { cwd: dir });
+  assert.equal(r.status, 0, `待外部-only must flip (exit 0), got ${r.status}: ${r.stderr}`);
+  assert.match(fs.readFileSync(taskFile, "utf8"), /^status: done$/m, "frontmatter flipped to done");
 });
 
-// ── ⑦ verification-round 入账统一 (gap-fan-in-red-bucket-run-not-recorded) ──────────────────────────
-// The fan-in bucket path now runs through full-suite-runner.ts --buckets (SUITE_LAUNCH), which is the
-// single writer of verification-round.jsonl (green AND red), full-suite-state.json, measure-history.jsonl
-// and suite-load-<runId>.jsonl. The OLD step-4.5 mirror writers (pre-verified-round-record.ts /
-// mirror-full-suite-state.ts / mirror-measure-history.ts) — a green-only parallel harness grafted onto the
-// bypassed runner — are REMOVED (两套平行机制收敛为一). A red bucket round is now recorded by the runner
-// at suite exit (state=red in verification-round.jsonl), not left unrecorded (硬规则 3b).
 
-
-test("⑦ wiring — the fan-in prompt no longer carries the green-only mirror writers (the runner writes verification-round green+red)", async () => {
+test("④ AC 完成闸与承重点③ 行形检查并列 — 两检查都过才翻（AC 闸在行形检查之后、sed 之前）", async (t) => {
   const { prompts } = await runWorkflow({
-    args: { task: "gap-test-pvr", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-pvr", mergeTarget: "develop" },
+    args: { task: "gap-test-both", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-both", mergeTarget: "develop" },
   });
-  // The phase-2 prompt (step 4.5) must NOT invoke any of the three mirror writers — the runner already
-  // wrote verification-round.jsonl / full-suite-state.json / measure-history.jsonl at suite exit (green+red).
-  const p2 = promptContaining(prompts, "per-task-suite-record.ts");
-  assert.ok(!p2.includes("pre-verified-round-record.ts"), "phase-2 must NOT call pre-verified-round-record.ts (the green-only writer is retired from the fan-in path)");
-  assert.ok(!p2.includes("mirror-full-suite-state.ts"), "phase-2 must NOT call mirror-full-suite-state.ts (the runner writes full-suite-state.json)");
-  assert.ok(!p2.includes("mirror-measure-history.ts"), "phase-2 must NOT call mirror-measure-history.ts (the runner writes measure-history.jsonl)");
-  // per-task-suite-record stays: it writes per-task-suite-records.jsonl (a SEPARATE ledger the runner does not write).
-  assert.ok(p2.includes("per-task-suite-record.ts"), "phase-2 must still write the per-task-suite record (a separate ledger)");
+  const flip = extractBlockFromPrompts(prompts, "# flip-block-start", "# flip-block-end");
+  assert.ok(flip.includes("fan-in-ac-completion-gate.ts"), "flip block must run the AC completion gate (判据3 兼容不互斥)");
+  assert.ok(flip.includes("flip_count=$(grep -c '^status: ready$'"), "flip block must still run the ③ line-shape pre-check");
+  assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") > flip.indexOf("flip_count="), "AC gate must come AFTER the line-shape pre-check");
+  assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") < flip.indexOf("sed -i"), "AC gate must come BEFORE the sed flip");
 });
 
-// ── ⑦ fan-in orchestration bootstrap (gap-fan-in-orchestration-bootstrap-self-fix) ───────────────────
-// THE DEFECT: fan-in orchestration files resolve from the MAIN checkout, so a task that modifies one of
-// them (fan-in-execute.js / select-static-checks-for-touches.ts / fan-in-ff-merge.sh / per-task-suite-
-// record.ts / full-suite-runner.ts) has its own fan-in run by the OLD main version — its fix is never
-// exercised (self-reference). FIX: (a) the A6 dispatch rule uses the WORKTREE scriptPath when the branch
-// modifies an orchestration file (driven by --bootstrap-orchestration, tested below); (b) every fan-in
-// orchestration script call in the prompt resolves from ${worktree} (not cwd, not ${root}).
+// ── ⑤ anti-drift-touches 守卫（gap-anti-drift-touches-zero-coverage-fast-mode, REAL git + REAL prompt）──
+
+/** A real temp git repo replaying the fan-in workflow's step-1 post-merge state: `develop` is the
+ *  landing baseline with a doc-only commit, the task branch (`task/<id>`) FORKS FROM `develop` and
+ *  holds the task file + the task's changed files, `develop` advances while the task runs, and it is
+ *  then MERGED into the task branch (so `git diff --name-only develop...HEAD` = exactly the files the
+ *  fan-in would land — develop's own doc change excluded). The REAL `plugin/` tree is symlinked in
+ *  AFTER the final commit/merge so it is never part of the git diff.
+ *
+ *  ⚠️ BRANCH MODEL (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing): the
+ *  topology is part of what the check under test judges. `anti-drift-touches-check` classifies the
+ *  merge target against the project's default branch BEFORE computing the diff, and a target that is
+ *  NOT a continuation of it is reported as `BASELINE-MISMATCH` (exit 3 — a verdict about the REPO's
+ *  shape, deliberately never folded into "N violation(s)"). Committing the task's work on `main` and
+ *  merging `develop` INTO `main` builds exactly that divergent shape (main is then no longer an
+ *  ancestor of develop), so the anti-drift judgment these tests assert would never be reached. This
+ *  fixture must therefore model a quay-initialized repo: `main` stays an ancestor of `develop`, and
+ *  the work is committed on a branch forked from `develop`. */
 
 
 
-test("⑦ worktree-resolution — every fan-in orchestration script call is ${worktree}-rooted (not cwd, not ${root})", async (t) => {
-  const WT = "/tmp/wt"; // the interpolated worktree value in the emitted prompts
+test("⑤ wiring — step 1 runs anti-drift-touches-check with the actual diff after the merge", async (t) => {
   const { prompts } = await runWorkflow({
-    args: { task: "gap-test-bs", worktree: WT, root: REPO_ROOT, runId: "fm-bs", mergeTarget: "develop" },
+    args: { task: "gap-test-ad-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ad-wire", mergeTarget: "develop" },
   });
-  const all = prompts.join("\n\n----PROMPT----\n\n");
-  // The orchestration scripts a task can modify MUST resolve from the worktree — the branch's own fix
-  // must be what the fan-in runs (gap-fan-in-orchestration-bootstrap-self-fix). Across the split fan-in,
-  // some live in phase 1 (classify/anti-drift/ts-typecheck) and some in phase 2 (record/flip/ff/bracket).
-  const mustBeWorktreeRooted = [
-    "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
-    "per-task-suite-record.ts",                             // step 4.5 (phase 2)
-    "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
-    "closure-lag-check.sh",                                 // step 5.5 (phase 2)
-    "anti-drift-touches-check.ts",                          // step 1 (phase 1)
-    "fan-in-ts-typecheck-gate.ts",                          // step 3 (phase 1)
-  ];
-  for (const frag of mustBeWorktreeRooted) {
-    // Match the EXECUTABLE line (not a comment that merely mentions the frag): the line must carry
-    // both the frag and the worktree-rooted path.
-    const line = all.split("\n").find((l) => l.includes(frag) && l.includes(`${WT}/plugin/scripts/`));
-    assert.ok(line, `a prompt must carry a ${WT}-rooted call to ${frag}`);
-    assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
-  }
-  // The ff-merge moved to the TS module (gap-fan-in-ff-merge-sh-retire-dead-shell-still-registered-
-  // live): it is worktree-rooted at packages/quay/src/fan-in/ff-merge.ts — a DIFFERENT path prefix
-  // than the plugin/scripts orchestration scripts above, so it is asserted separately.
-  const ffLine = all.split("\n").find((l) => l.includes("ff-merge.ts --task"));
-  assert.ok(ffLine, "a prompt must carry a worktree-rooted ff-merge.ts call");
-  assert.ok(ffLine.includes(`${WT}/packages/quay/src/fan-in/ff-merge.ts`), `ff-merge must be ${WT}-rooted at packages/quay/src/fan-in, not plugin/scripts: ${ffLine}`);
-  // The scoped gate (step 4) still runs `cd ${worktree} && bash scripts/test.sh --for-task` (worktree-rooted);
-  // the full-suite bucket path is the SUITE_LAUNCH `cd "$1" && node plugin/scripts/full-suite-runner.ts` —
-  // also worktree-rooted (the runner resolves through the worktree's plugin tree).
-  assert.ok(all.includes(`cd ${WT} && bash scripts/test.sh --for-task`), "step-4 scoped run must cd into the worktree");
-  // step-2 classify carries the worktree-rooted registry (--root <worktree>) so a branch-modified
-  // scripts/test.sh @static-object annotation is what the classification reads.
-  const classifyLine = all.split("\n").find((l) => l.includes("--classify-delta") && l.includes(`--root ${WT}`));
-  assert.ok(classifyLine, `classify must carry the worktree-rooted --root, got none among:\n${all.split("\n").filter((l) => l.includes("--classify-delta")).join("\n")}`);
-  assert.ok(classifyLine.includes(`${WT}/plugin/scripts/`), `classify must be ${WT}-rooted, got: ${classifyLine}`);
-});
-
-
-test("⑦ 取假一 — a branch modifying plugin/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
-  const repo = makeRepoWithDelta({ "plugin/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
-  t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/workflows/fan-in-execute.js": "" });
-  const block = await bootstrapBlockFor("gap-test-bs-hit", repo, REPO_ROOT);
-  const r = runBash(block, { cwd: repo });
-  assert.equal(r.status, 0, `step-0 bash failed: ${r.stderr}`);
-  assert.match(r.stdout, /FAN-IN-BOOTSTRAP=hit/, `branch modifying fan-in-execute.js must be detected as a hit, got stdout:\n${r.stdout}`);
-  assert.match(r.stdout, /plugin\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
-  // 取假一 WARN (falsifiable): the running workflow is the ROOT version (REPO_ROOT), which differs from
-  // the branch's committed fan-in-execute.js ⇒ the self-bootstrap gap is detected at runtime (if the A6
-  // dispatcher followed the hit and used the worktree scriptPath, this WARN would NOT fire).
-  assert.match(r.stderr, /FAN-IN-BOOTSTRAP-WARN/, `root workflow running against a modified branch copy must warn, got stderr:\n${r.stderr}`);
-});
-
-
-test("⑦ 取假一 negative — a branch modifying only tasks/*.md ⇒ step-0 verdict MISS (main-checkout scriptPath is correct)", async (t) => {
-  const repo = makeRepoWithDelta({ "tasks/gap-test-bs-miss.md": "status: ready\n" });
-  t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "tasks/gap-test-bs-miss.md": "" });
-  const block = await bootstrapBlockFor("gap-test-bs-miss", repo, REPO_ROOT);
-  const r = runBash(block, { cwd: repo });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /FAN-IN-BOOTSTRAP=miss/, `doc-only branch must be a miss, got stdout:\n${r.stdout}`);
-  assert.doesNotMatch(r.stdout, /FAN-IN-BOOTSTRAP=hit/, "a doc-only branch must NOT be a hit");
-  assert.doesNotMatch(r.stderr, /FAN-IN-BOOTSTRAP-WARN/, "a doc-only branch must not warn");
-});
-
-
-test("⑦ 取假二 — a branch modifying an orchestration script AND carrying a checker-read .md ⇒ HIT + the .md classifies as CODE (old regex called it doc)", async (t) => {
-  // The branch modifies plugin/scripts/fan-in-ff-merge.sh (an orchestration file, not the classify
-  // script — so the symlinked REAL classify runs) AND carries orchestration/manager-tick-core.md in
-  // its delta. 取假二: the OLD hand-written `[.]md$` regex called that .md doc ⇒ the fan-in skipped the
-  // full suite; the worktree-resolved registry classify must call it CODE.
-  const repo = makeRepoWithDelta({
-    "plugin/scripts/fan-in-ff-merge.sh": "export const x = 1\n",
-    "orchestration/manager-tick-core.md": "## (src:N) violation\n",
-  });
-  t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "orchestration/manager-tick-core.md": "" });
-  // step 0: the branch modifies an orchestration file ⇒ HIT (dispatcher must use the worktree scriptPath).
-  const block = await bootstrapBlockFor("gap-test-bs-two", repo, REPO_ROOT);
-  const r0 = runBash(block, { cwd: repo });
-  assert.equal(r0.status, 0, r0.stderr);
-  assert.match(r0.stdout, /FAN-IN-BOOTSTRAP=hit/, `orchestration-script modification must be a hit, got stdout:\n${r0.stdout}`);
-  assert.match(r0.stdout, /fan-in-ff-merge\.sh/, "the hit must name the modified orchestration file");
-  // step 2: the worktree-resolved classify (--root ${worktree}) must classify the checker-read .md as CODE.
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-bs-two", worktree: repo, root: REPO_ROOT, runId: "fm-bs-two", mergeTarget: "develop" },
-  });
-  const step2 = extractBlockFromPrompts(prompts, "【无锁段 step 2", "【无锁段 step 3");
-  const bashLines = step2.split("\n").filter((l) => /^(fork=|delta=|code_delta=)/.test(l));
-  const r2 = runBash(bashLines.join("\n") + '\necho "RESULT_CODE_DELTA=[$code_delta]"', { cwd: REPO_ROOT });
-  assert.equal(r2.status, 0, `step-2 bash failed: ${r2.stderr}`);
-  const m = r2.stdout.match(/RESULT_CODE_DELTA=\[([\s\S]*)\]/);
-  assert.ok(m, `code_delta echo missing:\n${r2.stdout}`);
-  assert.match(m[1], /orchestration\/manager-tick-core\.md/, `checker-read .md must classify as code (取假二), got: ${m[1]}`);
-  assert.match(m[1], /plugin\/scripts\/fan-in-ff-merge\.sh/, `the modified orchestration script must also be code, got: ${m[1]}`);
-});
-
-
-/** A hermetic repo modeling the stale-bootstrap shape: develop carries an OLD fan-in-execute.js, then
- *  advances with the POLL-BOUNDED fix; a task branch forks from the OLD base and modifies a DIFFERENT
- *  orchestration file (bootstrap-HIT) — so its own fan-in-execute.js is stale. Returns the dir. */
-
-
-
-test("⑦b wiring — the step-0 prompt carries the --bootstrap-sync call (worktree-first, root fallback) BEFORE step-1 merge develop", async (t) => {
-  const WT = "/tmp/wt-bs-sync";
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-bs-sync", worktree: WT, root: REPO_ROOT, runId: "fm-bs-sync", mergeTarget: "develop" },
-  });
-  const step0 = extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
-  const syncLines = step0.split("\n").filter((l) => l.includes("--bootstrap-sync"));
-  assert.ok(syncLines.length >= 1, `step-0 prompt must carry a --bootstrap-sync call, got none among:\n${step0}`);
-  // worktree-first with root fallback (a worktree forked before this mode landed cannot run it from itself)
-  const assignLine = step0.split("\n").find((l) => l.trim().startsWith("sync_helper="));
-  assert.ok(assignLine, `step-0 must resolve the sync helper (sync_helper=...), got none among:\n${step0}`);
-  assert.ok(assignLine.includes(`${WT}/plugin/scripts/select-static-checks-for-touches.ts`),
-    `the sync helper must resolve worktree-first, got: ${assignLine}`);
-  const fallbackLine = step0.split("\n").find((l) => l.includes('[ -f "$sync_helper" ]'));
-  assert.ok(fallbackLine && fallbackLine.includes(path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts")),
-    `the sync helper must fall back to root, got: ${fallbackLine ?? "(missing)"}`);
-  const execLine = syncLines.find((l) => l.includes("--bootstrap-sync --worktree"));
-  assert.ok(execLine, "the sync executable line must be present");
-  assert.ok(execLine.includes(`--worktree ${WT}`) && execLine.includes("--merge-target develop"),
-    `the sync call must carry the worktree + merge-target, got: ${execLine}`);
-  // It must precede step-1's `git merge develop` (the "在 merge develop 前先同步" requirement)
   const step1 = extractBlockFromPrompts(prompts, "【无锁段 step 1", "【无锁段 step 2");
-  assert.ok(step0.includes("--bootstrap-sync") && step0.length > 0, "sync must live in step 0 (before merge develop)");
-  assert.ok(step1.includes("git merge ${mergeTarget}") || step1.includes("git merge develop") || step1.includes("git merge"),
-    "step 1 must still carry the merge-develop step");
+  assert.ok(step1.includes("# anti-drift-block-start"), "anti-drift check must run inside step 1 (after the merge)");
+  assert.ok(step1.includes("anti-drift-touches-check.ts --task"), "prompt must invoke the anti-drift driver");
+  assert.ok(step1.includes("--merge-target develop"), "driver must receive the merge target");
 });
 
 
-test("⑦b REAL stale sync — a bootstrap-HIT worktree forked before the poll-bounded fix lands: --bootstrap-sync merges develop ⇒ fan-in-execute.js becomes the latest", async (t) => {
-  const repo = makeStaleBootstrapRepo();
+test("⑤ driver unit — buildTaskManifest extracts declared Touches as globs (ONE touches-parser)", () => {
+  const body = "---\nid: x\n---\n## Touches\n- tasks/x.md\n- plugin/test/**\n";
+  const builds = buildTaskManifest(body, ["tasks/x.md", "plugin/test/a.test.mjs"]);
+  assert.equal(builds.length, 1);
+  assert.deepEqual(builds[0].declaredGlobs, ["tasks/x.md", "plugin/test/**"]);
+  assert.deepEqual(builds[0].actualFiles, ["tasks/x.md", "plugin/test/a.test.mjs"]);
+});
+
+
+test("⑤ driver unit — a legitimately scoped task build is OK; a stray write is HARD-FAIL (judgment unchanged)", () => {
+  const ok = checkTaskAntiDrift("## Touches\n- pkg/a/**\n", ["pkg/a/x.js", "pkg/a/y.js"]);
+  assert.equal(ok.ok, true, "actual ⊆ declared must be clean");
+  const stray = checkTaskAntiDrift("## Touches\n- pkg/a/**\n", ["pkg/a/x.js", "pkg/OTHER/stray.js"]);
+  assert.equal(stray.ok, false, "out-of-declared write must be a violation");
+  assert.ok(stray.violations.find((v) => v.type === "out-of-declared" && v.file === "pkg/OTHER/stray.js"));
+});
+
+
+test("⑤ REAL negative control — a task whose ACTUAL diff touches a file OUTSIDE its declared Touches ⇒ HARD-FAIL (AC2)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-ad",
+    body: "---\nid: gap-test-ad\nstatus: ready\n---\n## Touches\n- tasks/gap-test-ad.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/OTHER/stray.js": "stray\n" },
+  });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
-  // Before: the worktree's fan-in-execute.js is the OLD (fork-time) version.
-  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "OLD-fan-in-execute");
-  const r = runSyncCli(repo, ["--merge-target", "develop"]);
-  assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
-  assert.match(r.stdout, /merged=1/, `the stale worktree must merge develop, got stdout:\n${r.stdout}`);
-  assert.doesNotMatch(r.stdout, /conflict=1/, "a non-overlapping merge must not conflict");
-  // After: the worktree's fan-in-execute.js is the develop-latest (POLL-BOUNDED).
-  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "POLL-BOUNDED-fan-in-execute");
-  // The branch's OWN orchestration modification is preserved (self-validation survives the sync).
-  assert.equal(fs.readFileSync(path.join(repo, "plugin", "scripts", "fan-in-ff-merge.sh"), "utf8").trim(), "branch-modified-ff-merge");
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(repo, "plugin"), "dir");
+  const block = await antiDriftBlockFor("gap-test-ad", repo);
+  const r = runBash(block, { cwd: repo });
+  assert.notEqual(r.status, 0, `out-of-scope touch must HARD-FAIL (exit non-zero), got ${r.status}`);
+  assert.match(r.stdout, /ANTI-DRIFT HARD FAIL/, "driver must print ANTI-DRIFT HARD FAIL");
+  assert.match(r.stdout, /pkg\/OTHER\/stray\.js/, "the out-of-declared file must be named");
+  assert.match(r.stderr, /FATAL/, "the block must FATAL on the guardrail bite");
 });
 
 
-test("⑦b REAL conflict — branch AND develop both modify fan-in-execute.js ⇒ conflict=1 + abort (worktree clean, branch version preserved; step-1 will resolve)", async (t) => {
-  const repo = makeStaleBootstrapRepo();
+test("⑤ REAL positive — a task whose ACTUAL diff is fully within its declared Touches ⇒ stays green (AC3)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-ad-ok",
+    body: "---\nid: gap-test-ad-ok\nstatus: ready\n---\n## Touches\n- tasks/gap-test-ad-ok.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
-  // Branch also modifies fan-in-execute.js (overlapping with develop's poll-bounded fix ⇒ conflict)
-  fs.writeFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "BRANCH-CHANGED-fan-in-execute\n");
-  runBash("git add plugin/workflows/fan-in-execute.js && git commit -qm 'branch also changes fan-in-execute'", { cwd: repo });
-  const r = runSyncCli(repo, ["--merge-target", "develop"]);
-  assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
-  assert.match(r.stdout, /conflict=1/, `overlapping fan-in-execute.js edits must conflict, got stdout:\n${r.stdout}`);
-  assert.doesNotMatch(r.stdout, /merged=1/, "a conflicting merge must not report merged");
-  // Abort left the worktree clean and the branch version intact.
-  const status = runBash("git status --porcelain --untracked-files=no", { cwd: repo });
-  assert.equal(status.stdout.trim(), "", `worktree must be clean after abort, got: ${status.stdout}`);
-  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "BRANCH-CHANGED-fan-in-execute");
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(repo, "plugin"), "dir");
+  const block = await antiDriftBlockFor("gap-test-ad-ok", repo);
+  const r = runBash(block, { cwd: repo });
+  assert.equal(r.status, 0, `legitimate scoped change must stay green, got ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
+});
+
+// ── ⑨ land 前 anti-drift 重跑（gap-fan-in-fix-commit-delta-escapes-touches-coverage）────────────────
+// THE DEFECT: step-1's anti-drift check runs right after the merge; fix-agent commits (suite red → fix
+// patch → re-run) land AFTER it, so their touched files are never re-checked against ## Touches (real:
+// gap-worktree-remove-orphans-probes's fix commit c2917261 modified full-suite-runner.test.mjs — outside
+// Touches — and landed unnoticed). FIX: re-run the SAME driver at land time (持锁段 step 5, before flip
+// done / ff), where `git diff --name-only ${mergeTarget}...HEAD` now includes the fix commits. Judgment
+// logic UNCHANGED (AC3); only a call site is added. Normal fan-in (no fix, or fix within Touches) must
+// not false-positive (AC2).
+
+
+/** Symlink the REAL plugin/ tree into a temp repo as a RUNTIME-ONLY tree, and keep it OUT of git.
+ *  The real fan-in worktree has plugin/ as a TRACKED real dir; here it is only a runtime-resolution
+ *  symlink (the driver resolves ${worktree}/plugin/scripts/…). Without the .git/info/exclude entry a
+ *  later `git add -A` (a fix-agent commit) would stage the symlink and pollute `git diff`.
+ *  ⛔ HAZARD: because this symlink points at the REAL repo's plugin/, any test that WRITES a file under
+ *  <temp>/plugin/… writes through the symlink into the real worktree (the recorded
+ *  full-suite-runner.test.mjs truncation, 2026-08-17). Fix-agent commit fixtures in this file must use
+ *  a NON-plugin path (e.g. packages/quay/test/…) to model the out-of-scope file. */
+
+
+
+test("⑨ wiring — the phase-2 prompt carries a land-time anti-drift block BEFORE flip done / ff (持锁段 step 5)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-adland-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-adland-wire", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# anti-drift-land-block-start", "# anti-drift-land-block-end");
+  assert.ok(block.includes("anti-drift-touches-check.ts --task"), "land block must invoke the anti-drift driver");
+  assert.ok(block.includes("--merge-target develop"), "land block must pass the merge target");
+  assert.ok(block.includes("exit 2"), "land block must fail closed (exit 2) on violation");
+  // Placement: the block runs in the phase-2 prompt, in the持锁段 step 5, BEFORE the flip done and the ff.
+  const p2 = promptContaining(prompts, "# anti-drift-land-block-start");
+  const step5Idx = p2.indexOf("【持锁段 step 5");
+  const landIdx = p2.indexOf("# anti-drift-land-block-start");
+  const flipIdx = p2.indexOf("# flip-block-start");
+  const ffIdx = p2.indexOf("ff-merge.ts --task");
+  assert.ok(step5Idx !== -1, "phase-2 prompt must carry 持锁段 step 5");
+  assert.ok(landIdx > step5Idx, "land block must be inside step 5 (持锁段)");
+  assert.ok(flipIdx > landIdx, "land block must come BEFORE the flip block (flip done)");
+  assert.ok(ffIdx > landIdx, "land block must come BEFORE the ff-merge");
 });
 
 
-test("⑦b REAL dirty — a worktree with a tracked modification ⇒ skipped (step-1 merge handles it; never clobbers local work)", async (t) => {
-  const repo = makeStaleBootstrapRepo();
+test("⑨ REAL fix commit out-of-bounds ⇒ HARD FAIL — step-1 passes, the land re-check bites (AC1 取假)", async (t) => {
+  // The falsifiable case: step-1's anti-drift (the ONLY check in the pre-fix flow) passes on the pre-fix
+  // state; the fix agent then commits a file OUTSIDE Touches (the c2917261 shape: a test file not
+  // declared); the land-time re-check must HARD-FAIL (no flip done, no ff).
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-adland",
+    body: "---\nid: gap-test-adland\nstatus: ready\n---\n## Touches\n- tasks/gap-test-adland.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
-  fs.writeFileSync(path.join(repo, "README.md"), "uncommitted local edit\n");
-  const r = runSyncCli(repo, ["--merge-target", "develop"]);
-  assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
-  assert.match(r.stdout, /skipped=1/, `a dirty worktree must be skipped, got stdout:\n${r.stdout}`);
-  assert.doesNotMatch(r.stdout, /merged=1/, "a dirty worktree must not be merged by the sync");
+  symlinkPluginForGit(repo);
+  // 1. The step-1 anti-drift check (the pre-fix flow's only guard) passes on the in-scope state.
+  const step1 = await antiDriftBlockFor("gap-test-adland", repo);
+  const r1 = runBash(step1, { cwd: repo });
+  assert.equal(r1.status, 0, `step-1 anti-drift must pass pre-fix, got ${r1.status}: ${r1.stderr}`);
+  assert.match(r1.stdout, /ANTI-DRIFT OK/, "step-1 must print ANTI-DRIFT OK pre-fix");
+  // 2. The fix agent commits a file OUTSIDE Touches (the recorded defect shape: a test file not
+  // declared). NOTE: NOT under plugin/ — the temp repo's plugin/ is a runtime-only symlink excluded
+  // from git; the out-of-declared falsifiability is path-independent (the c2917261 shape = a test file
+  // outside the declared Touches).
+  commitFiles(repo, { "packages/quay/test/full-suite-runner.test.mjs": "import { test } from 'node:test'\n" }, "fix: hermetic seam");
+  // 3. The land-time re-check must now HARD-FAIL (the fix commit's file is out-of-declared).
+  const land = await antiDriftLandBlockFor("gap-test-adland", repo);
+  const r2 = runBash(land, { cwd: repo });
+  assert.notEqual(r2.status, 0, `land re-check must HARD-FAIL on the fix commit's out-of-scope file, got ${r2.status}`);
+  assert.match(r2.stdout, /ANTI-DRIFT HARD FAIL/, "driver must print ANTI-DRIFT HARD FAIL");
+  assert.match(r2.stdout, /packages\/quay\/test\/full-suite-runner\.test\.mjs/, "the fix commit's out-of-declared file must be named");
+  assert.match(r2.stderr, /FATAL/, "the block must FATAL (no flip done, no ff)");
 });
 
 
-test("⑦b REAL json — the sync reports a machine-readable outcome (merged/conflict/skipped) for the dispatch rule", async (t) => {
-  const repo = makeStaleBootstrapRepo();
+test("⑨ AC2 idempotent — a fix commit fully WITHIN Touches does not false-positive (land re-check passes)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-adland-ok",
+    body: "---\nid: gap-test-adland-ok\nstatus: ready\n---\n## Touches\n- tasks/gap-test-adland-ok.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
-  const r = spawnSync("node", ["--experimental-strip-types", SEL_CLI, "--bootstrap-sync", "--worktree", repo, "--merge-target", "develop", "--json"], {
-    encoding: "utf8", timeout: 30_000,
-  });
-  assert.equal(r.status, 0, r.stderr);
-  const parsed = JSON.parse(r.stdout);
-  assert.equal(parsed.merged, true, JSON.stringify(parsed));
-  assert.equal(parsed.conflict, false, JSON.stringify(parsed));
-  assert.ok(parsed.head, `merged result must carry the new HEAD, got: ${JSON.stringify(parsed)}`);
-});
-
-// ── ⑧ suite 等待 + 阶段 2 承载 (gap-fan-in-turn-budget-suite-timeout → gap-subagent-turn-budget-13min-falsified) ──
-// AC1 取假: 构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
-// 2026-08-20 证伪: 旧设计假设「subagent ~13min 回合预算硬超时」⇒ 每轮起一个新短命轮询 agent + 脚本
-// setTimeout。该数字是假的（真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）⇒ 修复: suite 交给
-// 【长生命周期载体】(detached setsid 进程)，【等待】由【单个阶段 2 agent】在本回合内多次 <600s Bash
-// 循环承担（有界阻塞等待 timeout 540 + sleep 15，最多 maxSuitePolls 次），suite 绿后执行机械步骤；
-// suite 红 ⇒ 返回 suite-red，脚本派 Fix agent 重启动后重派阶段 2。这些测试用脚本化的 agent 序列驱动
-// vm 实执行的工作流, 断言控制流 (绿/红→修/轮询上限/ff-retry) 与 phase 1/2 的 prompt 结构。
-
-
-test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + disown), NOT foreground, NOT Bash(run_in_background:true)", async (t) => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-tb-detach", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-detach", mergeTarget: "develop" },
-  });
-  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  assert.ok(launch.includes("setsid"), "suite-launch must use setsid (detached session — survives subagent exit)");
-  assert.ok(launch.includes("& disown"), "suite-launch must background + disown (long-lived carrier)");
-  assert.ok(launch.includes("suite_exit_marker"), "suite-launch must define the exit marker (the script-owned wait signal)");
-  assert.ok(launch.includes('rc=$?'), "the detached wrapper must capture the suite exit code");
-  assert.ok(launch.includes('printf "exit=%s'), "the detached wrapper must write the exit code to the marker");
-  // gap-suite-wait-bash-stale-pid-poll：suite_pid 必须是 wrapper 自写的真实 PID（pidfile），NOT 瞬态
-  // setsid 父进程（$! fork 即退——kill -0 恒失败误报死进程，生产实测 2026-08-21，负控制 3 行确认）。
-  assert.ok(launch.includes("suite_pid_file="), "suite-launch must write the wrapper PID to a pidfile (kill -0 polls a live process — gap-suite-wait-bash-stale-pid-poll)");
-  assert.ok(launch.includes('printf "%s %s\\n" "$$"'), "the detached wrapper must self-record its PID + start timestamp (`pid started_ms`) into the pidfile (kill -0 polls a live process + the cross-relaunch stuck-holder detector needs the held duration — gap-suite-lock-holder-stuck-detection)");
-  assert.ok(launch.includes('suite_pid=$(cut -d\' \' -f1 "$suite_pid_file"'), "suite-launch must parse the pid from the 2-field pidfile record (pid = field 1, gap-suite-lock-holder-stuck-detection)");
-  assert.ok(!launch.includes("suite_pid=$!"), "suite-launch must NOT record the transient setsid parent PID ($! is dead — fork-and-exit)");
-  // ⛔ NOT the two forbidden forms (f6b824b5 实证: Bash(run_in_background:true) 死于 subagent 退出; 前台 bash 超 10min 上限).
-  // Only the EXECUTABLE lines matter — the comments legitimately name the forbidden form to forbid it.
-  const execLines = launch.split("\n").filter((l) => !l.trim().startsWith("#"));
-  assert.ok(!execLines.some((l) => l.includes("run_in_background")), "suite-launch executable lines must NOT use Bash(run_in_background:true)");
-  // Phase 1 must instruct immediate return (no suite wait in the subagent turn).
-  const phase1 = prompts[0];
-  assert.ok(phase1.includes("不等待 suite") || phase1.includes("立即返回"), "phase-1 must instruct the agent NOT to wait for the suite (立即返回)");
-  assert.ok(phase1.includes("bash scripts/test.sh --for-task"), "scoped gate stays in phase 1");
-  assert.ok(phase1.includes("bash scripts/test.sh --static-checks-doc"), "doc check stays in phase 1");
-});
-
-
-test("⑧ turn-budget 取假 — suite-launch block decides by code_delta: non-empty ⇒ full suite starts; empty ⇒ doc-only skip", async (t) => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-tb-delta", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-delta", mergeTarget: "develop" },
-  });
-  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  // step 2 hands code_delta to step 4 via a file (bash vars don't persist across Bash calls).
-  assert.ok(launch.includes("/tmp/fan-in-code-delta-"), "launch must read the code_delta handoff written by step 2");
-  assert.ok(launch.includes('[ "$code_delta" != "" ]'), "launch must branch on code_delta non-empty ⇒ start the full suite");
-  assert.ok(launch.includes("full_suite_ran=true"), "the full-suite branch must write full_suite_ran=true");
-  assert.ok(launch.includes("skip_reason=doc-only-delta"), "the doc-only branch must write skip_reason=doc-only-delta");
-  assert.ok(launch.includes("PRE-VERIFIED-SUITE"), "the pre-verified reuse branch must be present (suite_head-pinned)");
-});
-
-
-test("AC126 AC1 — the fan-in suite launch runs full-suite-runner.ts --buckets <task-id> (bucket-execution wiring, unified onto the correct runner)", async () => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-ac126-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ac126", mergeTarget: "develop" },
-  });
-  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  // The suite-launch command string must carry `--buckets <task-id>` — the task id is interpolated at
-  // workflow-build time, so the literal task id must appear (AC1: 生产 suite 路径真正传).
-  assert.ok(launch.includes("--buckets gap-ac126-wiring"), "suite-launch must pass --buckets <task-id> (the interpolated task id)");
-  const setsidLine = launch.split("\n").find((l) => l.includes("setsid bash -c"));
-  assert.ok(setsidLine, "suite-launch must contain the detached setsid launch line");
-  // gap-fan-in-red-bucket-run-not-recorded AC2 — the bucket path runs through the CORRECT runner
-  // (full-suite-runner.ts --buckets), the single writer of verification-round.jsonl green AND red — NOT a
-  // parallel `bash scripts/test.sh` harness + green-only writer (the human ruling: 定义正确机制并实现).
-  assert.ok(setsidLine.includes("full-suite-runner.ts"), "the detached launch command must run full-suite-runner.ts (the correct runner)");
-  assert.ok(setsidLine.includes("--buckets gap-ac126-wiring"), "the runner must be passed --buckets <task-id>");
-  assert.ok(setsidLine.includes("--state-dir"), "the runner must be passed --state-dir (writes state/ledgers into the shared checkout)");
-  assert.ok(setsidLine.includes("--runner inner"), "the runner must be passed --runner inner (explicit layer identity)");
-  assert.ok(setsidLine.includes("--log-file"), "the runner must be passed --log-file (tees the suite stream into the fan-in log)");
-  assert.ok(!setsidLine.includes("bash scripts/test.sh --buckets"), "the detached launch must NOT run a parallel bash scripts/test.sh harness");
-});
-
-
-test("gap-fan-in-red-bucket-run-not-recorded AC2 — the detached suite-launch no longer hand-spawns a suite-load-sampler (the runner spawns its own state-driven sampler)", async () => {
-  const { prompts } = await runWorkflow({
-    args: { task: "gap-test-sampler-wiring", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-sampler-wiring", mergeTarget: "develop" },
-  });
-  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
-  // The old detached direct run (setsid bash scripts/test.sh) bypassed full-suite-runner.ts (the ONLY
-  // spawner of suite-load-sampler.ts), so it hand-spawned the sampler + a per-task state file. Now the
-  // bucket path runs THROUGH the runner, which spawns its OWN state-driven sampler — the manual spawn is
-  // gone (two parallel mechanisms converged to one: the runner is the single sampler spawner again).
-  assert.ok(!launch.includes("suite-load-sampler.ts"), "suite-launch must NOT hand-spawn suite-load-sampler.ts (the runner spawns it)");
-  assert.ok(!launch.includes("fan-in-suite-sampler-"), "suite-launch must NOT manage a per-task sampler state file (the runner owns the sampler lifecycle)");
+  symlinkPluginForGit(repo);
+  // The fix agent commits a file WITHIN Touches (a legit in-scope fix — must NOT false-positive).
+  commitFiles(repo, { "pkg/a/z.js": "z\n" }, "fix: in-scope");
+  const land = await antiDriftLandBlockFor("gap-test-adland-ok", repo);
+  const r = runBash(land, { cwd: repo });
+  assert.equal(r.status, 0, `legitimate in-scope fix must stay green, got ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
 });

@@ -1,183 +1,133 @@
 // @test-group lowconc
 // worker-driver-resident.test.mjs — resident driver loop (selector/heartbeat/liveness/wrapper) + continue/fan-in-merge mechanics. Split from gap-suite-file-split-two-longest.
-// SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/5 (8 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
+// SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/8 (5 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER, WORKER_OUTCOME_REL, WORKER_ROUND_REL, __dirname, after, assert, branchHeadSubject, buildContinueWorkerPrompt, exitedNotLandedAttempts, fs, lastExitedNotLandedReason, makeRoot, markNeedsHuman, path, readOutcomeLines, readRoundLines, rmSafe, waitFor } from "./helpers/worker-driver-resident-harness.mjs";
+import { REPO_ROOT, after, assert, branchHeadSubject, buildContinueWorkerPrompt, continueStateForTask, dryRunLaunch, launchArgv, makeGitRoot, path, readProfiles, rmSafe, runGit, spawn, workerArgvForTask, workerPromptForTask, writeTaskFile } from "./helpers/worker-driver-resident-harness.mjs";
 
-test("gap-fan-in-continue-resolution-dual-copy-and-ff-not-fast-forward — 结构面 (能取假): worker-driver.ts 三型消解指令无残留/无遗漏", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  // 三型各自的关键指令都在（改掉任一 ⇒ 红）。
-  assert.match(src, /byte-identical/, "dual-copy sync instruction present in source");
-  assert.match(src, /not fast-forward/, "ff-not-fast-forward instruction present in source");
-  assert.match(src, /modify\/delete/, "modify/delete instruction present in source");
-  assert.match(src, /judge WHICH side deleted/, "modify/delete deletion-side judgment present in source");
+test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
+  const p = readProfiles();
+  const roles = p.roles;
+  const profileOf = (role) => p.profiles[roles[role].profile];
+  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）；AC154 后三者共享同一 profile。
+  for (const role of ["task-worker", "selector", "fix-worker"]) {
+    assert.equal(profileOf(role).launcher, "claude-fjdac", `${role} profile launcher must be the wrapper (not bare claude)`);
+    assert.ok(profileOf(role).model, `${role} profile model must be configured (not null)`);
+    assert.ok(roles[role].name && roles[role].name.startsWith("quay-") && roles[role].name !== "quay-inner",
+      `${role} needs a distinct -n name (concurrent-worker ListAgents collision)`);
+  }
+  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh 只查非空不查取值，无任何机件报错）。
+  assert.equal(profileOf("manager").launcher, "claude");
+  assert.equal(profileOf("manager").model, null);
+
+  // dry-run 实测：wrapper/model 确实出现在 spawn 命令行（launcher=claude-fjdac ⇒ wrapper 在链 ⇒ ANTHROPIC_BASE_URL 注入）。
+  const taskWorker = dryRunLaunch("task-worker", "-p", "TEST");
+  assert.match(taskWorker, /^claude-fjdac /, `task-worker launcher is the wrapper: ${taskWorker}`);
+  assert.match(taskWorker, /--model \S+/, `task-worker carries --model <m>: ${taskWorker}`);
+  assert.match(taskWorker, /-n quay-task-worker/, "task-worker has its own -n name");
+  assert.doesNotMatch(taskWorker, / --bare( |$)/, "task-worker (long chain) does NOT use --bare");
+
+  const selector = dryRunLaunch("selector", "-p", "TEST");
+  assert.match(selector, /^claude-fjdac /, `selector launcher is the wrapper: ${selector}`);
+  // AC142 根因：selector/fix-worker 曾设 bare=true ⇒ claude --bare 不读 ANTHROPIC_AUTH_TOKEN 而
+  // wrapper 置空 ANTHROPIC_API_KEY ⇒ 认证失败 exit 1（生产 13/13 全败）。修法 = 三者均 bare=false。
+  assert.doesNotMatch(selector, / --bare( |$)/, "selector does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
+
+  const fixWorker = dryRunLaunch("fix-worker", "-p", "TEST");
+  assert.match(fixWorker, /^claude-fjdac /, `fix-worker launcher is the wrapper: ${fixWorker}`);
+  assert.doesNotMatch(fixWorker, / --bare( |$)/, "fix-worker does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
+
+  // 取假对照：manager（launcher=claude，无 wrapper）⇒ 无 --model，argv0 是裸 claude（wrapper 不在链）。
+  const manager = dryRunLaunch("manager");
+  assert.match(manager, /^claude /, `manager is bare claude: ${manager}`);
+  assert.doesNotMatch(manager, /--model/, "manager has no --model (wrapper not in chain ⇒ no ANTHROPIC_BASE_URL)");
 });
 
-// ── gap-continue-conflict-rule-missing-task-files ─────────────────────────────────────────────
-// 冲突消解协议 6 条 + 1 FF 段无一点名 tasks/*.md，相邻 3 条（outline / dual-copy / tick doc）逐字教
-// 「取 develop 版」——worker 把任务文件类比成 doc 会静默抹掉自己这一轮勾上的 - [x] AC 与 ## Evidence，
-// 且抹掉后与正确解同形（下一轮 ac-precheck 才红，理由误导为「AC 未勾」而非「合并把它抹了」）。
-// 修法：新增 (2b) 任务文件规则——per-hunk 取并集（保留 develop 侧 Touches/Needs-Human/status: +
-// 分支侧 AC 勾选/Evidence），⛔ 不取 develop 版、⛔ 不手写 status: frontmatter（status: 冲突取 develop
-// 值）。删掉该规则 ⇒ 测试红（AC5 能取假）。
+
+test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-cmd-exact is whole-replacement", () => {
+  // exact（整体替换，测试专用）：prompt 不进 argv。
+  assert.deepEqual(workerArgvForTask("gap-x", "/r", { prefix: null, exact: "node -e capture" }),
+    ["node", "-e", "capture"], "--worker-cmd-exact replaces the whole command (no prompt)");
+
+  // prefix（前缀 + prompt）：prompt 作为末参数追加（wrapper/测试前缀可用）。
+  const prefix = workerArgvForTask("gap-x", "/r", { prefix: "claude-fjdac --model deepseek-v4-pro", exact: null });
+  assert.deepEqual(prefix.slice(0, 3), ["claude-fjdac", "--model", "deepseek-v4-pro"]);
+  assert.match(prefix[prefix.length - 1], /gap-x/,
+    "prefix semantics: the task prompt is appended as the last arg (exact would drop it ⇒ falsifiable)");
+
+  // 缺省 ⇒ launchArgv("task-worker", prompt)：经 policy 解析，argv[0] 是 profile launcher。
+  const def = workerArgvForTask("gap-x", REPO_ROOT);
+  assert.equal(def[0], "claude-fjdac", "default worker resolves via policy (⛔ bash quay-launch.sh)");
+  assert.match(def[def.length - 1], /gap-x/, "the task prompt is the last argv payload");
+});
+
+// ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
+// destroy-path 修复后 exited-not-landed 的 worktree 被【保留】但没人接着做：派发 prompt 仍是「create」
+// ⇒ 重派 worker 一上来 `git worktree add` 撞已存在对象 fatal。AC1（复用不撞死）：保留 worktree 在 ⇒
+// 续做 prompt（复用，⛔ 不含 create）。AC2（续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC
+// 勾选 / 失败原因）。
 
 
-test("gap-continue-conflict-rule-missing-task-files — AC1/AC2/AC3 (能取假): buildContinueWorkerPrompt teaches per-hunk union for tasks/<id>.md (⛔ not take-develop, ⛔ not write status:)", () => {
+test("AC1 (能取假) — workerPromptForTask / continueStateForTask: preserved worktree ⇒ continue prompt (reuse, ⛔ create); no worktree ⇒ create prompt", (t) => {
+  const root = makeGitRoot("continue");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    try { runGit(root, ["branch", "-D", "task/gap-cr"]); } catch { /* best-effort */ }
+    rmSafe(root);
+    rmSafe(wtPath);
+  });
+  writeTaskFile(root, "gap-cr", "ready");
+
+  // 无 worktree ⇒ 创建 prompt（旧行为）。
+  const createPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(createPrompt, /create an isolated git worktree/, "no worktree ⇒ create prompt");
+  assert.doesNotMatch(createPrompt, /CONTINUE \(reuse/, "create prompt does not say reuse");
+  assert.equal(continueStateForTask(root, "gap-cr"), null, "no worktree ⇒ no continue state (create path)");
+
+  // 模拟 exited-not-landed 保留的 worktree ⇒ 续做 prompt。
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cr", wtPath]);
+  const contPrompt = workerPromptForTask("gap-cr", root);
+  assert.match(contPrompt, /CONTINUE \(reuse/, "preserved worktree ⇒ continue prompt");
+  assert.doesNotMatch(contPrompt, /create an isolated git worktree/, "AC1: continue prompt must NOT say create (create ⇒ git worktree add fatal)");
+  assert.match(contPrompt, /do NOT run `git worktree add`/, "AC1: reuse not create");
+  assert.ok(continueStateForTask(root, "gap-cr") != null, "worktree present ⇒ continue state gathered");
+});
+
+
+test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (branch commits / AC check / failure reason)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
     branchHeadSubject: "implement gap-x",
     acChecked: 2,
     acTotal: 5,
-    failureReason: "mechanical fan-in red at merge develop (CONFLICT in tasks/gap-x.md)",
+    failureReason: "worker exited 0 but task did not land",
   });
-  // AC1 (规则落地): prompt 点名任务文件类。
-  assert.match(p, /tasks\/<id>\.md/, "AC1: prompt names the task-file type (tasks/<id>.md)");
-  // AC2 (并集 + 保留 AC/Evidence + 禁取 develop 版)。
-  assert.match(p, /per-hunk union/, "AC2: task-file conflict ⇒ per-hunk union of both sides");
-  assert.match(p, /keep your branch's edits/, "AC2: keep the branch's edits (its - [x] AC ticks + ## Evidence additions)");
-  assert.match(p, /## Evidence/, "AC2: keep the branch's ## Evidence additions");
-  assert.match(p, /do NOT "take the develop version"/, "AC2: ⛔ explicitly forbids take the develop version");
-  // AC3 (status: 例外 + 写所有权一致)。
-  assert.match(p, /frontmatter yourself/, "AC3: ⛔ do not write status: frontmatter (worker doesn't own frontmatter)");
-  assert.match(p, /take develop's value verbatim/, "AC3: status: conflict ⇒ take develop's value (write-ownership separation)");
+  assert.match(p, /3 commits/, "AC2: branch commit count carried");
+  assert.match(p, /head: "implement gap-x"/, "AC2: branch head subject carried");
+  assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
+  assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
+  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
 });
 
 
-test("gap-continue-conflict-rule-missing-task-files — 结构面 (能取假): worker-driver.ts 任务文件规则无残留/无遗漏", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.match(src, /tasks\/<id>\.md/, "task-file rule present in source (grep tasks/ in function body)");
-  assert.match(src, /per-hunk union/, "per-hunk union instruction present in source");
-  assert.match(src, /frontmatter yourself/, "status: write-ownership exception present in source");
-  assert.match(src, /take develop's value verbatim/, "status: take-develop-value exception present in source");
-});
-
-// ── gap-fan-in-merge-develop-derived-recompute-and-reason（B；A 已退役）─────────────────────────────
-// 机械 fan-in step 2 `git merge develop` 冲突的【具体文件】没传回下一轮 worker——CONTINUE prompt 的 reason
-// 读通用 failure_reason（「task status=ready not done」），⛔ 不含冲突文件 ⇒ worker 无从精准 resolve。
-// 修法（原 B）：lastExitedNotLandedReason 改读 mechanical_fan_in（step + reason 拼接「step=merge-develop:
-// CONFLICT in <file>」）。原 A（driver 对 derived 文件机械重算）已退役：outline §6 DELIVERY-INVENTORY 快照被
-// gap-delivery-inventory-check-time-computation 删除（计数改 check-time 计算），无 derived 文件可重算。
-
-
-test("B (能取假) — lastExitedNotLandedReason reads mechanical_fan_in (step + reason) ⛔ not generic failure_reason", () => {
-  const root = makeRoot("mech-reason");
-  const mech = { outcome: "red", step: "merge-develop", reason: "CONFLICT (content): Merge conflict in plugin/scripts/worker-driver.ts" };
-  fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
-    ts: new Date().toISOString(), task: "gap-dv", final_state: "exited-not-landed",
-    failure_reason: "task status=ready not done", mechanical_fan_in: mech,
-  }) + "\n", "utf8");
-  const reason = lastExitedNotLandedReason(root, "gap-dv");
-  assert.match(reason, /step=merge-develop/, "B: reason leads with the mechanical_fan_in step");
-  assert.match(reason, /CONFLICT/, "B: reason carries the conflict marker");
-  assert.match(reason, /plugin\/scripts\/worker-driver\.ts/, "B: reason carries the specific conflicting file");
-  assert.doesNotMatch(reason, /status=ready not done/, "B: ⛔ not the generic failure_reason");
-  // fallback：无 mechanical_fan_in ⇒ 回退 failure_reason（旧行为保留）。
-  fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
-    ts: new Date().toISOString(), task: "gap-dv", final_state: "exited-not-landed",
-    failure_reason: "worker exited 0 but task did not land (status≠done or leftover worktree)",
-  }) + "\n", "utf8");
-  assert.match(lastExitedNotLandedReason(root, "gap-dv"), /did not land/, "B: no mechanical_fan_in ⇒ fall back to failure_reason");
-});
-
-
-test("B (能取假, 结构面) — reason 读 mechanical_fan_in（已上收 driver-filters.ts）；A 的 derived 重算逻辑无残留", () => {
-  // 读法已上收 driver-filters.ts（gap-needs-human-note-carries-step-verdict：markNeedsHuman 注记与 worker
-  // 续做 prompt 共用同一读法）。worker-driver.ts 只 re-export，⛔ 不残留第二份实现。
-  const src = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "driver-filters.ts"), "utf8");
-  assert.match(src, /formatExitedNotLandedReason/, "B: reason formatting reads mechanical_fan_in");
-  assert.match(src, /mechanical_fan_in/, "B: lastExitedNotLandedReason reads the mechanical_fan_in field");
-  const wsrc = fs.readFileSync(DRIVER, "utf8");
-  // A 已退役（superseded by gap-delivery-inventory-check-time-computation）：⛔ 不残留 derived 重算逻辑
-  // （OUTLINE_DOC_REL 常量 / resolveDerivedMergeConflict / DERIVED_CONFLICT_FILES 会引用已删除的 §6 快照 + 退役 flag）。
-  assert.doesNotMatch(wsrc, /OUTLINE_DOC_REL/, "A retired: no OUTLINE_DOC_REL import");
-  assert.doesNotMatch(wsrc, /resolveDerivedMergeConflict/, "A retired: no derived-recompute resolver");
-  assert.doesNotMatch(wsrc, /DERIVED_CONFLICT_FILES/, "A retired: no derived file set");
-});
-
-// ── gap-worker-execution-history-index-not-reachable-from-task（B：续做历史 + suite 日志路径）──────
-// B 缺口的病根：续做 prompt 只带一句 reason（lastExitedNotLandedReason 只取最后一条）⇒ 重跑 worker 看不到
-// 前两次栽在哪、也看不到日志路径。修法：exitedNotLandedAttempts 收集全部尝试；buildContinueWorkerPrompt
-// 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径。
-
-
-test("B (能取假) — exitedNotLandedAttempts 收集全部尝试（⛔ 只取最后一条 ⇒ 假）", () => {
-  const root = makeRoot("history-b");
-  const suiteLogName = "fan-in-suite-gap-hb-run2.log";
-  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "suite true-cause\n", "utf8");
-  fs.appendFileSync(path.join(root, WORKER_OUTCOME_REL), [
-    JSON.stringify({ ts: "2026-09-01T03:44:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-1", mechanical_fan_in: { outcome: "red", step: "anti-drift", reason: "8 violations", fanInLog: "fan-in-gap-hb-run2.log" } }),
-    JSON.stringify({ ts: "2026-09-01T04:21:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-2", mechanical_fan_in: { outcome: "red", step: "ac-precheck", reason: "0/3 fail-fast", fanInLog: "fan-in-gap-hb-run2.log" } }),
-    JSON.stringify({ ts: "2026-09-01T04:57:00.000Z", task: "gap-hb", final_state: "exited-not-landed", run_id: "wk-prod-1788218643", session_id: "sess-3", mechanical_fan_in: { outcome: "red", step: "suite", reason: "suite red", fanInLog: "fan-in-gap-hb-run2.log", suiteLog: suiteLogName } }),
-  ].join("\n") + "\n", "utf8");
-
-  const attempts = exitedNotLandedAttempts(root, "gap-hb");
-  assert.equal(attempts.length, 3, "全部 3 次 exited-not-landed 都在清单里（⛔ 只取最后一条 ⇒ 假）");
-  assert.deepEqual(attempts.map((a) => a.step), ["anti-drift", "ac-precheck", "suite"], "三次的失败步都在");
-  assert.equal(attempts[2].suiteLog, path.join(root, ".quay", suiteLogName), "suite 日志还原成绝对路径");
-  assert.equal(attempts[2].runId, "wk-prod-1788218643", "run_id 读数");
-  assert.equal(attempts[2].sessionId, "sess-3", "session_id 读数");
-  assert.ok(attempts.slice(0, 2).every((a) => a.suiteLog === null), "非 suite 步 suiteLog null（⛔ 误设 ⇒ 假）");
-  assert.equal(attempts[0].fanInLog, path.join(root, ".quay", "fan-in-gap-hb-run2.log"), "fan-in 日志还原成绝对路径");
-});
-
-
-test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 清单 + .quay/fan-in-suite- 绝对路径（在盘）", () => {
-  const root = makeRoot("history-prompt");
-  const suiteLogName = "fan-in-suite-gap-hp-r9.log";
-  fs.writeFileSync(path.join(root, ".quay", suiteLogName), "true cause\n", "utf8");
-  const suiteAbs = path.join(root, ".quay", suiteLogName);
-  const attempts = [
-    { ts: "2026-09-01T03:44:00.000Z", runId: "r", sessionId: "s1", step: "anti-drift", reason: "step=anti-drift: 8 violations", fanInLog: null, suiteLog: null },
-    { ts: "2026-09-01T04:57:00.000Z", runId: "r", sessionId: "s2", step: "suite", reason: "step=suite: suite red", fanInLog: null, suiteLog: suiteAbs },
-  ];
-  const p = buildContinueWorkerPrompt("gap-hp", root, {
+test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC1: buildContinueWorkerPrompt is mechanical too (worker exits, driver takes over; ⛔ no fan-in-execute.js / generateRunId / scriptPath)", () => {
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
-    branchCommits: 1,
-    branchHeadSubject: null,
-    acChecked: 0,
-    acTotal: 3,
-    failureReason: "step=suite: suite red",
-    attempts,
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: "worker exited 0 but task did not land",
   });
-  assert.match(p, /step=anti-drift: 8 violations/, "清单含第 1 次 (step,reason)（剥掉重复 step= 前缀）");
-  assert.match(p, /step=suite: suite red/, "清单含第 2 次 (step,reason)");
-  assert.doesNotMatch(p, /step=anti-drift: step=anti-drift/, "⛔ 清单不重复 step= 前缀");
-  assert.match(p, /\.quay\/fan-in-suite-/, "含 .quay/fan-in-suite- 字面路径");
-  assert.ok(p.includes(suiteAbs), `含 suite 日志绝对路径 ${suiteAbs}`);
-  assert.ok(fs.existsSync(suiteAbs), "该路径在盘上存在（AC2 判据）");
-});
-
-// ── negative control（gap-driver-test-fixture-json-read-before-write-complete-race AC3）────────────
-// 故意制造 "文件存在但最后一行只写了一半" 的中间态（常驻 driver 另一进程正在追加写 JSONL）：旧的
-// readFileSync→split→JSON.parse 读法会在半行上报错，新的 readRoundLines/readOutcomeLines 把半行当
-// "还没写完" 丢弃、只返回完整行；补完后该行出现（调用方的 waitFor 重轮询即读到）。
-
-
-test("negative control — torn trailing JSONL line is treated as not-yet-written, then read once completed", (t) => {
-  const root = makeRoot("nc-torn-jsonl");
-  t.after(() => rmSafe(root));
-  const line1 = JSON.stringify({ action: "stop", stop_reason: "pool-empty", in_flight: 0, ts: "2026-09-06T00:00:00Z" });
-  const line2 = JSON.stringify({ action: "dispatch", task: "gap-a", in_flight: 1, ts: "2026-09-06T00:00:01Z" });
-  const roundFile = path.join(root, WORKER_ROUND_REL);
-  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
-
-  // torn：完整一行 + 第二行只写了开头（另一进程正在追加写入）。
-  const torn = '{"action":"dispatch","task":"gap-';
-  fs.writeFileSync(roundFile, line1 + "\n" + torn, "utf8");
-  fs.writeFileSync(outcomeFile, line1 + "\n" + torn, "utf8");
-
-  // (a) 旧逻辑（split→JSON.parse）在半行上报错——先证负控制非空。
-  const naive = (f) => fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.throws(() => naive(roundFile), "old readRoundLines throws on a torn trailing line");
-  assert.throws(() => naive(outcomeFile), "old readOutcomeLines throws on a torn trailing line");
-
-  // (b) 新逻辑把半行当 "还没写完" 丢弃，只返回完整行，不抛错。
-  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop"], "readRoundLines returns only the complete line");
-  assert.deepEqual(readOutcomeLines(root).map((r) => r.action), ["stop"], "readOutcomeLines returns only the complete line");
-
-  // (c) 补完该行后，调用方重轮询即可读到——半行不是被永久吞掉，只是 "还没写完"。
-  fs.writeFileSync(roundFile, line1 + "\n" + line2, "utf8");
-  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop", "dispatch"], "completed line now read");
+  // 续做 prompt 与创建 prompt 同源 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in，
+  // ⛔ 不再写旧 workflow 兜底签名（fan-in-execute.js / generateRunId / scriptPath）。
+  assert.match(p, /exit — the worker-driver takes over/, "AC1: continue prompt also lets the driver take over fan-in");
+  assert.match(p, /mechanically runs fan-in/, "AC1: names the mechanical fan-in");
+  assert.match(p, /do NOT call the fan-in workflow/, "AC1: worker never calls the workflow (driver decision)");
+  assert.doesNotMatch(p, /fan-in-execute\.js/, "⛔ no fan-in-execute.js path (workflow retired from the worker prompt)");
+  assert.doesNotMatch(p, /generateRunId/, "⛔ no generateRunId (worker no longer dispatches the workflow)");
+  assert.doesNotMatch(p, /scriptPath/, "⛔ no scriptPath placeholder");
+  assert.match(p, /\/wt/, "continue prompt still embeds the concrete worktree path (reuse, not a placeholder)");
 });

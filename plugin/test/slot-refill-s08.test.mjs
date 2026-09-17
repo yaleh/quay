@@ -24,198 +24,151 @@
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
-// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/12 (9 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
+// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 8/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeSlotRefill, analyzeTasks, assert, dispatchableBody, execFileSync, fannedInBody, fs, hasFanInMerge, hasLandedImplementation, isNotYetFlippedSkip, legacyAllRefsHasFanInMerge, makeFannedInWorkspace, makePreFanInMergeWorkspace, makeWorkspace, os, path, runGit, writeRounds, writeState, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { analyzeSlotRefill, analyzeTasks, assert, computeArbitratedCap, computeFfFailureCounts, computeFfStarvationCap, dispatchableBody, fs, inFlightTask, makeWorkspace, path, writeRounds, writeState, writeTask } from "./helpers/slot-refill-harness.mjs";
 
-test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (blocking_suite axis exposed) (AC2)", (t) => {
-  const root = makeWorkspace("ranking-sb");
+test("AC5 — Consumer A stays WIDE: a candidate colliding with a wide-but-not-running task is still blocked (awaiting-retry worktree occupies files)", (t) => {
+  const root = makeWorkspace("ac5-wide");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
-  writeTask(root, "ac36-critical", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/crit.ts (new)"]) });
-  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 400 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  const tasksDir = path.join(root, "tasks");
+  // 3 WIDE in-flight tasks; only 2 (A, B) are running — C is awaiting-retry (no subagent).
+  writeTask(root, "gap-if-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-if-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  writeTask(root, "gap-if-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]) });
+  // A ready candidate X touches the SAME file as awaiting-retry C (wide but NOT running).
+  writeTask(root, "gap-cand-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)", "- code/x.ts (new)"]) });
+  // A disjoint candidate Y touches a fresh file — should be free to recommend.
+  writeTask(root, "gap-cand-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]) });
+  const inFlight = [
+    inFlightTask("gap-if-a", ["- code/a.ts (new)"]),
+    inFlightTask("gap-if-b", ["- code/b.ts (new)"]),
+    inFlightTask("gap-if-c", ["- code/c.ts (new)"]),
+  ];
+  const r = analyzeSlotRefill({ tasksDir, root, cap: 5, inFlight, runningSubagentCount: 2 });
+  assert.equal(r.running_subagent_count, 2, "Consumer B narrow = 2 running subagents");
+  assert.equal(r.slots_free, 3, "true slots_free = 5 − 2 = 3");
+  assert.ok(r.recommended.includes("gap-cand-y"), "disjoint candidate Y recommended (slots are free)");
+  assert.ok(!r.recommended.includes("gap-cand-x"),
+    "X collides with awaiting-retry C (wide Consumer-A set) ⇒ blocked even though C is NOT running (its worktree still occupies code/c.ts)");
+  const deferredX = (r.deferred || []).find((d) => d.id === "gap-cand-x");
+  assert.ok(deferredX && /touches-overlap-in-flight/.test(deferredX.reason),
+    "X deferred with touches-overlap-in-flight — the WIDE Consumer-A denominator still applies");
+});
+
+// ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
+// AC3: a task the consecutive-red-window signal implicates (pool.suite_blocking.tasks, the
+// ready-pool-check blocking_suite axis) is ranked FIRST into `recommended` — the inner's slot-refill
+// picks the suite-blocker before any other work. Negative control: no red window ⇒ recommended keeps
+// the pre-signal (id) ordering.
+
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): slot-refill's suite-blocking
+ *  (via analyzeTasks) now reads per-task-suite-records.jsonl — the ONLY ongoing suite source after
+ *  AC84 (verification-round is NO LONGER a throttling input). This helper writes the per-task-suite-
+ *  record shape, converting the round-shaped fixture rows ({round,state,reason,fail,failures}) into
+ *  it. Every fixture row is a REAL full-suite result (fullSuiteRan:true) — a green row breaks the
+ *  window, a red row counts. */
+
+
+
+test("slot-refill recommends the suite-blocking task first; no red window ⇒ unchanged (AC3/negative)", (t) => {
+  const root = makeWorkspace("suiteblock");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/plain.ts (new)"]) });
+  writeTask(root, "gap-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // AC4 negative control FIRST: no suite history ⇒ recommended keeps the de-ordered (lexicographic) form.
+  const before = analyzeSlotRefill(opts);
+  assert.equal(before.suite_blocking.window_active, false);
+  assert.deepEqual(before.recommended, ["gap-plain-ready", "gap-watchdog"], "no red window ⇒ de-ordered (lexicographic)");
+  assert.ok(/order meaningless/.test(before.recommended_order), "the de-ordered output is explicitly annotated");
+
+  // AC3: 3 consecutive red rounds whose failures hit the watchdog task's Touches ⇒ the suite-blocker
+  // is picked first BY THE PRIORITY SORT (exposed in `ranking`, the AC36 diagnostic) while the
+  // dispatch-facing `recommended` array stays de-ordered (AC56 去锚).
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
   writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const after = analyzeSlotRefill(opts);
+  assert.equal(after.suite_blocking.window_active, true);
+  assert.deepEqual(after.suite_blocking.tasks, ["gap-watchdog"]);
+  assert.equal(after.recommended[0], "gap-plain-ready", "recommended is de-ordered (lexicographic) — the suite-blocker is NOT first in the dispatch-facing array");
+  assert.equal(after.recommended.length, 2, "both dispatchable candidates still recommended (cap 2)");
+  assert.equal(after.ranking[0].id, "gap-watchdog", "the suite-blocker is first in the ranking (the priority-sorted AC36 diagnostic)");
 
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2 });
-  assert.equal(r.suite_blocking.window_active, true);
-  assert.deepEqual(r.recommended, ["ac36-critical", "ac36-watchdog"], "recommended is de-ordered (lexicographic) — the dispatch array does NOT encode blocking_suite priority (AC56)");
-  const wd = r.ranking.find((e) => e.id === "ac36-watchdog");
-  assert.equal(wd.suiteBlocking, true, "suiteBlocking axis exposed for the suite-blocker");
-  assert.equal(wd.rank, 0, "suite-blocker ranks first in the ranking (blocking_suite is the sole top axis)");
-  const crit = r.ranking.find((e) => e.id === "ac36-critical");
-  assert.equal(crit.suiteBlocking, false);
-  assert.equal(crit.rank, 1);
+  // negative: last round green clears the window ⇒ recommended stays de-ordered (lexicographic).
+  writeRounds(root, [
+    ...Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts" }] })),
+    { round: 223, state: "green", fail: 0 },
+  ]);
+  const green = analyzeSlotRefill(opts);
+  assert.equal(green.suite_blocking.window_active, false);
+  assert.deepEqual(green.recommended, ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ de-ordered (lexicographic)");
+  assert.equal(green.ranking[0].id, "gap-plain-ready", "no suite-blocker ⇒ id-tie-break order in the ranking");
 });
 
-// ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
-// slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
-// at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
-// (fan-in merged into the two-line model's integration line — invisible to the master-only git-history
-// signal) but whose status is still `ready` was re-recommended every round, re-dispatching a subagent
-// to re-verify already-landed work (25 re-dispatch commits self-described on 2026-08-10). AC2: the 4th
-// step-4 check skips not-yet-flipped tasks; AC4: it never touches AC5's strictness (the task still
-// waits for the green round to flip done, it is just not re-dispatched).
+// ── B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog) ─────────────────────────────────────
+// ① (in_flight<cap ⇒ dispatch) conflicts with ④ (integration ahead + suite green ⇒ batch-merge): ④ is a
+// DOWNSTREAM constraint on ①. When the delivery gate is blocked by a red suite AND the integration
+// backlog exceeds the threshold, the effective dispatch cap narrows to "just enough to fix red"; the cap
+// restores on green; an empty backlog has no effect (AC2/AC4, the Contract's band + invariants).
+
+/** Run a git command in a temp repo. MODULE-LEVEL on purpose: a nested function def between a
+ *  mkdtemp and its `return` misdirects test-isolation-check's nearestFuncName association (the
+ *  returned dir's funcName resolves to the NESTED fn, whose call sites never capture+clean it), which
+ *  would false-flag a mkdtemp-no-cleanup ratchet violation on an otherwise-cleaned helper. */
+
+/** Build a REAL temp git repo where `integration` is `ahead` commits ahead of `develop`, so the
+ *  git-read backlog (`git rev-list --count develop..integration`) is exercised, not injected. */
 
 
-test("NOT-YET-FLIPPED — a fanned-in (merged) task with >50% ACs is NOT recommended; an unfanned ready task still is (AC2/nyf_task_not_recommended/unfanned_ready_still_recommended)", (t) => {
-  const root = makeFannedInWorkspace("canonical");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // gap-fanned: work fanned in (merge record), 4/5 ACs ⇒ "已 fan-in 待翻 done" — must NOT be re-dispatched.
-  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(4, 5) });
-  // gap-unfanned: no merge record, real work ⇒ must still be recommended.
-  writeTask(root, "gap-unfanned", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/unfanned.ts (new)"]) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(r.recommended.includes("gap-unfanned"), "unfanned ready task is still recommended (unfanned_ready_still_recommended)");
-  assert.ok(!r.recommended.includes("gap-fanned"), "fanned-in ready task (4/5 ACs) is not re-dispatched (nyf_task_not_recommended)");
+test("computeArbitratedCap — red window active narrows to redBacklogCap; inactive keeps base (AC1 pure)", () => {
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true }), 2, "red window active ⇒ redBacklogCap (2)");
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false }), 5, "no red window ⇒ base cap unchanged");
+  // custom redBacklogCap honored; an inactive window still keeps base
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, redBacklogCap: 3 }), 3);
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false, redBacklogCap: 3 }), 5);
 });
 
-
-test("NOT-YET-FLIPPED — the adhoc `merge: <id>` fan-in format is also caught (bare-id arm of hasFanInMerge)", (t) => {
-  const root = makeFannedInWorkspace("bare", { mergeFormat: "bare" });
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(4, 5) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(!r.recommended.includes("gap-fanned"), "bare-id-format fan-in is also skipped");
-});
+// ── FF-STARVATION RELIEF (gap-ff-starvation-no-dynamic-cap-relief) ───────────────────────────────────
+// The second trigger on computeArbitratedCap: a LIVE task that has failed ff repeatedly in its current
+// round (develop advanced during its merge→ff window) narrows the dispatch cap so it lands with no NEW
+// competitor. Tiered (k=1 no / k=2→2 / k≥3→1), stateless (recomputed every round — AC8), the cause is
+// distinguishable from suite-red / worker-round-end (AC5), and the perpetrator is distinguishable as
+// layer-commit (delayable) vs task-landing (not delayable) (AC7).
 
 
-test("NOT-YET-FLIPPED — a fanned-in task with ACs at/under 50% stays dispatchable (stuck-work not trapped, gap-ready-pool-worklanded-traps-stuck-work parity)", (t) => {
-  const root = makeFannedInWorkspace("stuck");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // 2/5 = 40% — the merge record fired, but the AC-completeness gate (>50% or all) keeps it dispatchable:
-  // an AC-incomplete fan-in is genuinely stuck-work with real remaining implementation, not done-work.
-  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(2, 5) });
-  writeTask(root, "gap-stuck", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/stuck.ts (new)"]) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(r.recommended.includes("gap-fanned"), "fanned-in but AC-incomplete task stays dispatchable (stuck-work)");
-  assert.ok(r.recommended.includes("gap-stuck"));
-});
 
 
-test("NOT-YET-FLIPPED — a task ready-pool-check already excluded as not-yet-flipped is never in recommended (AC2 pool.excluded arm)", (t) => {
-  const root = makeWorkspace("excluded-arm");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // All ACs checked ⇒ ready-pool-check's notYetFlipped all_acs_checked branch fires ⇒ pool.excluded.
-  writeTask(root, "gap-excluded", { status: "ready", labels: ["gap"], body: fannedInBody(3, 3) });
-  writeTask(root, "gap-open", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/open.ts (new)"]) });
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(!r.recommended.includes("gap-excluded"), "already-excluded not-yet-flipped task is never recommended");
-  assert.ok(r.recommended.includes("gap-open"), "dispatchable sibling still recommended");
+test("computeFfStarvationCap — k=1 no narrow, k=2→2, k≥3→1: three distinguishable tiers (AC2)", () => {
+  assert.equal(computeFfStarvationCap(0), null, "no failure ⇒ no intervention");
+  assert.equal(computeFfStarvationCap(1), null, "k=1 retry genuinely helps ⇒ no intervention");
+  assert.equal(computeFfStarvationCap(2), 2, "k=2 ⇒ mild throttle");
+  assert.equal(computeFfStarvationCap(3), 1, "k=3 ⇒ deterministic landing");
+  assert.equal(computeFfStarvationCap(8), 1, "k≥3 ⇒ 1");
+  assert.equal(computeFfStarvationCap(null), null);
 });
 
 
-test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate, total=0 (AC2)", (t) => {
-  const root = makeFannedInWorkspace("unit");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const body4of5 = fannedInBody(4, 5);
-  // (a) excludedNyfIds arm — true regardless of merge/AC state.
-  assert.equal(isNotYetFlippedSkip({ id: "gap-any", body: body4of5, root, excludedNyfIds: new Set(["gap-any"]) }), true);
-  // (b) no merge record ⇒ false (even with complete ACs — the pool.excluded arm is the only way).
-  assert.equal(isNotYetFlippedSkip({ id: "gap-nomerge", body: body4of5, root, excludedNyfIds: new Set() }), false);
-  // (c) merge record + 4/5 ACs ⇒ true.
-  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: body4of5, root, excludedNyfIds: new Set() }), true);
-  // (d) merge record + 2/5 ACs ⇒ false (stuck-work stays dispatchable).
-  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: fannedInBody(2, 5), root, excludedNyfIds: new Set() }), false);
-  // (e) merge record + zero AC boxes ⇒ false (total=0 ⇒ no gate).
-  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: fannedInBody(0, 0), root, excludedNyfIds: new Set() }), false);
-  // (f) hasFanInMerge itself: merge record fires, and a plain (non-merge) commit never does.
-  assert.equal(hasFanInMerge(root, "gap-fanned"), true, "the fan-in merge record is durable evidence");
-  assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
-});
-
-// ── LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) ──
-// slot-refill's `excludedNyfIds` is DERIVED from ready-pool-check.analyzeTasks' pool.excluded (reason
-// "not-yet-flipped") — single source. Before the fix, an allChecked task whose fan-in FAILED (a leftover
-// `task/<id>` worktree, no merge record) was excluded by the allChecked arm ⇒ excludedNyfIds ⇒
-// isNotYetFlippedSkip true ⇒ deferred forever. After the fix, the leftover worktree exempts the
-// allChecked arm ⇒ the task stays in pool.ready (dispatchable) ⇒ NOT in excludedNyfIds ⇒ not skipped.
-// AC5: the slot-refill consumer is correct with NO slot-refill change.
-
-
-test("NOT-YET-FLIPPED — a leftover task/<id> worktree exempts the allChecked arm ⇒ task NOT in excludedNyfIds ⇒ isNotYetFlippedSkip false (leftover-worktree exemption, AC5)", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-leftover-`));
-  const wtPath = path.join(dir, "..", `${path.basename(dir)}-leftover`);
-  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
-  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
-  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
-  runGit(dir, "init", "-q");
-  runGit(dir, "config", "user.email", "t@t");
-  runGit(dir, "config", "user.name", "t");
-  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
-  runGit(dir, "add", "-A");
-  runGit(dir, "commit", "-qm", "base");
-  runGit(dir, "branch", "-M", "develop");
-
-  const id = "gap-nyf-leftover";
-  // All 3 ACs checked; `code/touched.ts` is an existing (non-(new)) touch ⇒ taskWorkLanded stays false;
-  // no merge record ⇒ the ONLY not-yet-flipped candidate signal is the allChecked arm.
-  writeTask(dir, id, { status: "ready", labels: ["gap"], body: fannedInBody(3, 3) });
-  // The leftover task/<id> worktree (the fan-in-failed shape — branch present, never merged).
-  runGit(dir, "worktree", "add", "-q", "-b", `task/${id}`, wtPath);
-
-  // Single source: analyzeTasks keeps the task in ready (not excluded) ⇒ excludedNyfIds is empty.
-  const pool = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
-  const excludedNyfIds = new Set(
-    (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
-  );
-  assert.equal(pool.ready.includes(id), true, "leftover-worktree allChecked task stays in pool.ready — dispatchable (AC5)");
-  assert.equal(excludedNyfIds.has(id), false, "leftover-worktree allChecked task is NOT in excludedNyfIds (AC5)");
-  assert.equal(isNotYetFlippedSkip({ id, body: fannedInBody(3, 3), root: dir, excludedNyfIds }), false,
-    "isNotYetFlippedSkip false — not deferred as not-yet-flipped (AC5)");
-
-  // Negative control: removing the worktree restores the 2026-08-08 allChecked exclusion.
-  runGit(dir, "worktree", "remove", "--force", wtPath);
-  const pool2 = analyzeTasks({ tasksDir: path.join(dir, "tasks"), root: dir });
-  const excludedNyfIds2 = new Set(
-    (pool2.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
-  );
-  assert.equal(excludedNyfIds2.has(id), true, "without the worktree the allChecked task is excluded again (AC5 negative control)");
-});
-
-// ── FAN-IN REACHABILITY, NOT EXISTENCE (tasks/gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks) ──
-// `hasFanInMerge` used `git log --all --merges --grep <id>`, which counts the TASK BRANCH ITSELF: every
-// worker runs `git merge develop` on its task branch BEFORE fan-in, producing a `Merge branch 'develop'
-// into task/<id>` merge whose message carries the task id. So a worker that reached the merge step and
-// then FAILED to land (exited-not-landed) looked permanently "fanned in" — isNotYetFlippedSkip deferred
-// it as not-yet-flipped forever (its remaining ACs are usually "全量绿" and nothing would ever run them)
-// ⇒ structurally stranded at both ends. The predicate that was always meant is REACHABILITY from the
-// integration line — the read the sibling `hasLandedImplementation` already used (`git log develop`).
-// Measured in this repo 2026-09-11: 7 ready tasks had an id-matching merge, none reachable from develop.
-
-/** The PRE-FIX read, verbatim (`git log --all --merges --grep <id>`), kept as a fixture control: it is
- *  what "改前返回 true" means mechanically, so the AC1 red direction is asserted by EXECUTING the old
- *  command, not by asserting it in prose. Never used by production code. */
-
-/** The REAL stranded shape (形态 A), built with real git — no mocks. `landed:false` ⇒ the task branch
- *  carries a `Merge branch 'develop' into task/<id>` merge (the worker's pre-fan-in develop sync) and
- *  the branch was NEVER merged back ⇒ that merge is reachable only from the task branch itself.
- *  `landed:true` ⇒ the fan-in actually happened as an ff of develop onto the task branch (the
- *  two-line model's landing) ⇒ the SAME merge commit becomes an ancestor of develop. One fixture,
- *  one flag, so A and B differ by exactly the landing event and nothing else (AC4's control). */
-
-
-test("FAN-IN REACHABILITY AC1 — 形态 A：任务分支上有一条 `Merge branch 'develop' into task/<id>` 且从未合回 develop，该 merge 对 --all 可见（缺陷复现：改前 hasFanInMerge 返回 true）", (t) => {
-  const { dir, id } = makePreFanInMergeWorkspace("ac1");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  // premise: the merge commit exists and its message carries the task id…
-  const merges = execFileSync("git", ["-C", dir, "log", "--all", "--format=%s", "--merges", "--grep", id], { encoding: "utf8" }).trim();
-  assert.equal(merges, `Merge branch 'develop' into task/${id}`, "fixture premise: the pre-fan-in develop-sync merge is the ONLY id-matching merge");
-  // …and the PRE-FIX read fires on it (this is the red direction AC1 names).
-  assert.equal(legacyAllRefsHasFanInMerge(dir, id), true, "改前读法（--all）对形态 A 返回 true — 缺陷复现");
-  // …while it is NOT an ancestor of develop (the branch never landed).
-  const reachable = execFileSync("git", ["-C", dir, "log", "develop", "--format=%H", "--merges", "--grep", id], { encoding: "utf8" }).trim();
-  assert.equal(reachable, "", "fixture premise: no id-matching merge is reachable from develop");
+test("computeArbitratedCap — ff-starvation second trigger narrows; absent trigger keeps base (AC1/AC8 stateless)", () => {
+  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 1 }), 1, "k≥3 ⇒ cap 1");
+  assert.equal(computeArbitratedCap({ baseCap: 5, ffStarvationCap: 2 }), 2, "k=2 ⇒ cap 2");
+  assert.equal(computeArbitratedCap({ baseCap: 5 }), 5, "no trigger ⇒ base (self-recovery, AC8)");
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, ffStarvationCap: 1 }), 1, "both triggers ⇒ min (the more urgent k≥3 relief wins)");
+  assert.equal(computeArbitratedCap({ baseCap: 1, redWindowActive: true }), 1, "never widens — a cap-1 caller stays ≤1 under a red window");
 });
 
 
-test("FAN-IN REACHABILITY AC3 — 修后 hasFanInMerge 对形态 A 返回 false（只数可达集成分支的 merge）", (t) => {
-  const { dir, id } = makePreFanInMergeWorkspace("ac3");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  assert.equal(hasFanInMerge(dir, id), false,
-    "a task-branch-only pre-fan-in `Merge branch 'develop' into task/<id>` is NOT fan-in evidence (AC3)");
-  // Negative control on the SAME fixture: a genuinely different id is also false (the false is not a
-  // blanket false-everything from a broken read), and the predicated id is the only difference.
-  assert.equal(hasFanInMerge(dir, "gap-nonexistent-xyz"), false);
+test("computeFfFailureCounts — the most recent retry record's attempt is the live task's current-round k", () => {
+  const recs = [
+    { taskId: "gap-a", attempt: 1, epoch: 100 },
+    { taskId: "gap-a", attempt: 2, epoch: 200 },
+    { taskId: "gap-b", attempt: 3, epoch: 100 },
+    { taskId: "gap-stale", attempt: 8, epoch: 500 }, // not live ⇒ ignored
+  ];
+  const counts = computeFfFailureCounts(recs, ["gap-a", "gap-b"]);
+  assert.equal(counts.get("gap-a"), 2, "latest record (epoch 200) attempt 2");
+  assert.equal(counts.get("gap-b"), 3);
+  assert.equal(counts.has("gap-stale"), false, "a non-live task's historical failures never count");
 });

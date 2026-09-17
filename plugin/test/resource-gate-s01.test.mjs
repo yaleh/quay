@@ -22,10 +22,10 @@
 //   scripts/test.sh plugin/test/resource-gate.test.mjs
 //   node --test plugin/test/resource-gate.test.mjs
 
-// SPLIT from resource-gate.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/5 (14 tests). Shared fixtures: ./helpers/resource-gate-harness.mjs (single source).
+// SPLIT from resource-gate.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/8 (9 tests). Shared fixtures: ./helpers/resource-gate-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GATE, WAIT_THRESHOLD, assert, defaultCpuLimit, fs, runGate } from "./helpers/resource-gate-harness.mjs";
+import { GATE, WAIT_THRESHOLD, assert, fs, runGate } from "./helpers/resource-gate-harness.mjs";
 
 test("AC2 — gate reads /proc/pressure/cpu `some avg10` as PRIMARY; load average is a SUPPLEMENTARY overload-window criterion", () => {
   const src = fs.readFileSync(GATE, "utf8");
@@ -146,53 +146,4 @@ test("AC4 negative control — the old comm literal is reported as INSTRUMENT FA
   assert.match(r.stdout, /node_comm_mainthread=0/, "the comm cross-count must be reported");
   assert.match(r.stdout, /node_cmdline_procs=5/, "the cmdline candidate count must be reported");
   assert.match(r.stdout, /INSTRUMENT-FAILURE/, "comm=0 with cmdline=5 must report instrument failure, not machine idle");
-});
-
-
-test("AC4 negative control — a matching comm literal (comm>0) is NOT instrument failure", () => {
-  const r = runGate({
-    RESOURCE_GATE_TEST_CPU_AVG10: "10",
-    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-    RESOURCE_GATE_TEST_COMM_COUNT: "2",
-    RESOURCE_GATE_TEST_CMDLINE_COUNT: "2",
-  });
-  assert.match(r.stdout, /node_comm_mainthread=2/, "the comm cross-count must be reported");
-  assert.doesNotMatch(r.stdout, /INSTRUMENT-FAILURE/, "comm>0 is a normal reading");
-});
-
-// ── AC3: GO ↔ WAIT both directions via deterministic seams ─────────────────────────────────────────
-
-test("AC3 — gate returns GO (exit 0) when cpu some avg10 < 60 and mem ok", () => {
-  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
-  assert.equal(r.status, 0, `expected GO (exit 0), got ${r.status}\n${r.stdout}`);
-  assert.match(r.stdout, /=> GO/);
-  assert.match(r.stdout, /cpu_stall\(some avg10\)=10\.00  \[limit 60\]   ok/);
-  assert.match(r.stdout, /mem_avail=4000MB             \[limit 2048\] ok/);
-});
-
-
-test("AC3 — gate returns WAIT (exit 1) when cpu some avg10 >= 60 (busy-loop control is the live form)", () => {
-  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
-  assert.equal(r.status, 1, `expected WAIT (exit 1), got ${r.status}\n${r.stdout}`);
-  assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
-  assert.match(r.stdout, /cpu_stall\(some avg10\)=84\.77  \[limit 60\]   WAIT/);
-});
-
-
-test("AC3 — report mode always exits 0 even under a WAIT verdict (scoped operator can always read)", () => {
-  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77" }, []);
-  assert.equal(r.status, 0, `report mode must exit 0, got ${r.status}\n${r.stdout}`);
-  assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
-});
-
-// ── gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate: AC2/AC4 threshold alignment ─────────
-
-test("AC2 — the full-suite gate's CPU_LIMIT default is UNIFIED with cap-from-gate's WAIT_THRESHOLD (drift invariant)", () => {
-  // cap-from-gate.ts owns the mechanism constant (WAIT_THRESHOLD = 60, the GO/WAIT boundary).
-  // resource-gate.sh's binary full-suite gate must refuse a suite EXACTLY when dispatch leaves the
-  // GO band — a load in the old 40-60 dead-zone made the suite WAIT (limit 40) while dispatch kept
-  // GO, the "suite refuses + dispatch continues" loop risk. This import-time invariant makes the two
-  // thresholds unable to silently diverge again.
-  assert.equal(defaultCpuLimit(), WAIT_THRESHOLD,
-    `resource-gate CPU_LIMIT (${defaultCpuLimit()}) must equal cap-from-gate WAIT_THRESHOLD (${WAIT_THRESHOLD})`);
 });

@@ -1,9 +1,9 @@
 // @test-group serial
 // worker-driver-fan-in.test.mjs — mechanical fan-in (locks/merge/trace) + dispatch filters + cold-start + retry/backoff. Split from gap-suite-file-split-two-longest.
-// SPLIT from worker-driver-fan-in.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/6 (17 tests). Shared fixtures: ./helpers/worker-driver-fan-in-harness.mjs (single source).
+// SPLIT from worker-driver-fan-in.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/10 (11 tests). Shared fixtures: ./helpers/worker-driver-fan-in-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER, RECONCILE_INTERVAL_SECS_DEFAULT, RESIDENT_INTERVAL_MS_DEFAULT, WORKER_PROCESS_NAME, after, assert, branchHeadSubjectAsync, cleanupOrphanWorktree, continueStateForTask, continueStateForTaskAsync, countBranchCommitsAsync, counterNodeE, enumerateColdStartInflight, enumerateLiveWorkerCmdlines, enumerateTaskWorktreeTasks, fileURLToPath, fs, hasLiveWorkerForTask, isHalted, makeGitRoot, makeRoot, parseIntervalMs, parseReconcileIntervalSecs, path, readOutcomeLines, readRoundLines, resourceGateCheck, rmSafe, runGit, runMechanicalFanIn, spawn, spawnResident, spawnSync, waitFor, workerArgvForTask, workerArgvForTaskAsync, workerPromptForTaskAsync, worktreePathsForTaskAsync, worktreePresentForTask, worktreePresentForTaskAsync, writeTaskFile, writeTouchedTask, FAMILY_SRC } from "./helpers/worker-driver-fan-in-harness.mjs";
+import { WORKER_PROCESS_NAME, after, assert, cleanupOrphanWorktree, counterNodeE, enumerateColdStartInflight, enumerateLiveWorkerCmdlines, enumerateTaskWorktreeTasks, fileURLToPath, fs, hasLiveWorkerForTask, isHalted, makeGitRoot, makeRoot, path, readOutcomeLines, readRoundLines, resourceGateCheck, rmSafe, runGit, spawn, spawnResident, waitFor, worktreePresentForTask, writeTaskFile, FAMILY_SRC } from "./helpers/worker-driver-fan-in-harness.mjs";
 
 test("结构面（能取假）— after 钩子里的删除一律走 rmSafe（裸 fs.rmSync 抛错会跳过后续 drv.stop()）", () => {
   const HOOK = "t." + "after(";
@@ -309,120 +309,4 @@ test("AC2 (cold-start-refresh) — survivor finishes ⇒ its task leaves the exc
   assert.equal(spawned.length, 1, "AC2: exactly one re-dispatch after the survivor finished (concurrency 1 + long-running worker ⇒ no re-dispatch loop)");
   assert.equal(spawned[0].task, "gap-cs-a", "the re-dispatched task is the former cold-start survivor");
   drv.stop(); // 先停驱动再让 after 钩 rmSync 删目录（rmSync 先注册会先于 drv.stop 运行 ⇒ ENOTEMPTY 跳过 drv.stop ⇒ 驱动泄漏挂死）
-});
-
-
-test("AC3 (cold-start-refresh) — per-pass observation: no one-time `const coldInflight` snapshot outside the loop; reassigned each pass", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.doesNotMatch(src, /const\s+coldInflight\s*=/, "AC3: the one-time `const coldInflight` snapshot is gone (⛔ frozen snapshot ⇒ fake in-flight forever)");
-  assert.match(src, /let\s+coldInflight\s*=\s*new Set/, "coldInflight is a mutable per-pass binding, not a frozen snapshot");
-  assert.match(src, /coldInflight\s*=\s*await\s+enumerateColdStartInflightAsync\(rootDir\)/, "coldInflight is re-observed via enumerateColdStartInflightAsync each pass (async — 不阻塞地板)");
-});
-
-// ── gap-fan-in-remove-archguard-gate：archguard 结构闸已从机械 fan-in 移除（降级为按需命令）──────
-// 源面负控制见 archguard-structural-gate-fan-in.test.mjs（engine 组）；本文件只保证 runMechanicalFanIn
-// 的 step 序列里不再有 archguard-structure（⛔ 不在此重复 worker-driver.ts 的接点断言）。
-
-// ── gap-worker-driver-stopreason-latch-permanent-stop ──────────────────────────────────────────────
-// stopReason 一旦赋值永不复位 ⇒ 瞬时闸拒绝（resource-gate-wait）被永久 latch ⇒ 同一 driver 进程内
-// 恢复不可能 ⇒ 1h48m 零派发（234 槽·分钟）。修法：WAIT（瞬时）不 latch、下一轮重读 stopCondition；
-// 终态（mcp-halt）才 latch；running.length===0 且瞬时 WAIT 时不退出、等 --interval 重读。AC1-3 逐条取假。
-
-
-test("parseIntervalMs — default 30000; small value; invalid ⇒ default (fail-closed to the default cadence)", () => {
-  assert.equal(RESIDENT_INTERVAL_MS_DEFAULT, 30000);
-  assert.equal(parseIntervalMs(undefined), RESIDENT_INTERVAL_MS_DEFAULT);
-  assert.equal(parseIntervalMs("25"), 25);
-  assert.equal(parseIntervalMs("abc"), RESIDENT_INTERVAL_MS_DEFAULT, "invalid ⇒ default");
-  assert.equal(parseIntervalMs("-5"), RESIDENT_INTERVAL_MS_DEFAULT, "negative ⇒ default");
-});
-
-// ── gap-worker-driver-reconcile-interval：协调地板（SPEC §5.5）───────────────────────────────────────
-// 边沿触发（worker 退出）+ 存储决策 = 1h48m 停摆形态。地板 = 至少每 reconcileMs 协调一次，边沿事件全丢
-// 也降级「慢但正确」而非「静默停摆」。AC1（地板触发 + 生产载体）/ AC2（全边沿失效仍派发）逐条取假。
-
-
-test("parseReconcileIntervalSecs — default 300s (conservative); small; invalid ⇒ default", () => {
-  assert.equal(RECONCILE_INTERVAL_SECS_DEFAULT, 300);
-  assert.equal(parseReconcileIntervalSecs(undefined), 300_000, "default = 300s → 300000ms");
-  assert.equal(parseReconcileIntervalSecs("5"), 5_000, "5s → 5000ms");
-  assert.equal(parseReconcileIntervalSecs("abc"), 300_000, "invalid ⇒ default");
-  assert.equal(parseReconcileIntervalSecs("-3"), 300_000, "negative ⇒ default");
-});
-
-
-test("AC1 (gap-worker-driver-reconcile-interval) — in-process timer re-coordinates every ≤N s with zero worker-exit edge events (carrier = worker-round.jsonl, ⛔ not --json)", async (t) => {
-  const root = makeGitRoot("reconcile-ac1");
-  t.after(() => rmSafe(root));
-  writeTaskFile(root, "gap-r", "done");
-  // ⛔ spawn WITHOUT --json: the floor's observable carrier must be .quay/worker-round.jsonl
-  // (writeRound → appendRoundToFile 无条件写文件，与 --json 无关——生产 argv 无 --json，硬规则 3b）。
-  const child = spawn(process.execPath, [
-    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
-    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-r'],pool:1}))",
-    "--selector-cmd", "node -e console.log('gap-r\\x20pick')",
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)", // 挂起：worker 退出这个边沿事件永不发生
-    "--concurrency", "1",
-    "--reconcile-interval", "1",  // 地板每 1s
-    "--interval", "100",          // idle 轮询（在飞时不走这条，无害）
-  ], { stdio: ["ignore", "ignore", "ignore"] });
-  t.after(() => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* gone */ } } });
-
-  // 挂起的 worker 只派发一次；之后地板每 ~1s 唤醒循环 ⇒ round 记录持续累积（无 worker 退出边沿事件）。
-  await waitFor(() => readRoundLines(root).length >= 3, 10000);
-  const rounds = readRoundLines(root);
-  assert.ok(rounds.length >= 3, "AC1: floor wrote ≥3 round records with zero worker-exit edge events (production carrier, ⛔ not --json)");
-  assert.ok(rounds.some((r) => r.in_flight >= 1), "the round records carry an in-flight worker (the floor is exercised in the in-flight branch, ⛔ not the idle poll)");
-  child.kill("SIGKILL");
-});
-
-
-test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worker hangs) ⇒ floor still re-runs ready pool and dispatches within N s", async (t) => {
-  const root = makeGitRoot("reconcile-ac2");
-  writeTouchedTask(root, "gap-a", "plugin/scripts/aa.ts");
-  writeTouchedTask(root, "gap-b", "plugin/scripts/bb.ts"); // disjoint from gap-a
-  const rpcFile = path.join(root, "rpc.cnt");
-  const selFile = path.join(root, "sel.cnt");
-  const drv = spawnResident(root, [
-    // ready-pool: pass1 的两次调用（派发 gap-a + pool-empty）都只给 gap-a；pass2 地板唤醒才给 gap-b。
-    // 用计数器而非 marker 文件——marker 的写入时刻与 pass1 第二次 ready-pool 的 spawn 竞态（gap-b 会提前在 pass1 派发）。
-    "--ready-pool-cmd", counterNodeE(rpcFile, "n>=2?JSON.stringify({ready:['gap-a','gap-b'],pool:2}):JSON.stringify({ready:['gap-a'],pool:1})"),
-    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first':'gap-b\\x20second'"),
-    "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd-exact", "node -e setTimeout(()=>{},60000)", // 两个 worker 都挂起：worker 退出边沿事件永不发生
-    "--concurrency", "2",
-    "--reconcile-interval", "1",
-    "--interval", "100",
-  ]);
-  t.after(() => drv.stop());
-  t.after(() => rmSafe(root));
-
-  // gap-a 先派发（挂起）。此后无任何 worker 退出边沿事件。
-  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-a"), 15000);
-  // 地板（⛔ 不是 worker 退出）唤醒循环 ⇒ 重读 ready 池 ⇒ 派发 gap-b。
-  await waitFor(() => drv.events().some((e) => e.event === "selector-picked" && e.task === "gap-b"), 10000);
-  const picks = drv.events().filter((e) => e.event === "selector-picked").map((e) => e.task);
-  assert.ok(picks.includes("gap-b"), `AC2: floor re-ran ready pool and dispatched gap-b with zero worker-exit edge events (picks=${picks.join(",")})`);
-  await drv.stop();
-});
-
-// ── gap-worker-driver-async-selector-readypool：循环体 spawnSync→spawn（selector/readyPool/liveness/git）──
-// 常驻循环体里任何 spawnSync 都会冻住协调地板（一个卡住的 selector / git 会连 setTimeout 地板一起冻住，
-// SPEC §5.7）。AC1（循环体异步化，能取假 = 源面静态检查 + 慢 selector 下地板仍触发）/ AC2（child exit 唤醒
-// 循环 = 异步版在子进程退出后 resolve）/ AC3（协调一趟有界，慢 selector 不冻住地板）逐条取假。
-
-
-test("AC1 (gap-worker-driver-async-selector-readypool) — loop body's worker-argv construction is async (⛔ sync workerArgvForTask → continueStateForTask spawnSync git freezes the floor)", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  // spawnSelected 是 async 且 await 异步 argv 构造（workerArgvForTaskAsync），⛔ 不再是同步 workerArgvForTask。
-  assert.match(src, /const spawnSelected = async \(sel: \{ task: string; reason: string \}\): Promise<void>/, "spawnSelected is async");
-  assert.match(src, /await workerArgvForTaskAsync\(sel\.task, rootDir, workerCmdOpts\)/, "spawnSelected awaits workerArgvForTaskAsync");
-  assert.doesNotMatch(src, /workerArgv: workerArgvForTask\(sel\.task, rootDir, workerCmdOpts\)/, "the sync workerArgvForTask (continueStateForTask spawnSync git) is gone from the loop body");
-  // 异步变体齐全，且 git 读走 runAsync（spawn，⛔ 非 spawnSync）。
-  for (const name of ["worktreePresentForTaskAsync", "worktreePathsForTaskAsync", "countBranchCommitsAsync", "branchHeadSubjectAsync", "continueStateForTaskAsync", "workerPromptForTaskAsync", "workerArgvForTaskAsync"]) {
-    assert.match(src, new RegExp(`export async function ${name}`), `${name} is defined`);
-  }
-  assert.match(src, /const r = await runAsync\(\["git", "-C", root, "worktree", "list", "--porcelain"\]/, "worktree async variants route through runAsync (spawn), not spawnSync");
-  assert.match(src, /await continueStateForTaskAsync\(/, "continueStateForTaskAsync gathers state via async git reads (awaited)");
 });

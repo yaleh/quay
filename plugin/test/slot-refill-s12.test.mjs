@@ -24,223 +24,184 @@
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
-// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 12/12 (9 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
+// SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 12/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeSlotRefill, assert, computeExitedNotLandedContinueIds, dispatchableBody, fs, inFlightTask, judgeEndInvariant, makeGitWorkspace, makeWorkspace, os, parseTouches, path, readTaskStatusAtRef, runGit, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { __dirname, analyzeSlotRefill, applyPromotions, assert, dispatchableBody, execFileSync, fannedInBody, fs, inFlightTask, makeFannedInWorkspace, makeWorkspace, path, writeRounds, writeState, writeTask } from "./helpers/slot-refill-harness.mjs";
 
-test("IN-FLIGHT WORKTREE (AC2) — a hold candidate overlapping a fan-in worktree is deferred ⇒ no_refill_reason non-empty and the AC53 gate accepts", (t) => {
-  const root = makeWorkspace("inflight-worktree");
+test("DELIVERY-CRITICAL — end-to-end: a delivery-critical task promoted (todo→ready) enters the next refill WITHOUT a mechanical rank boost (AC2 promote-time semantics, DC axis retired)", (t) => {
+  const root = makeWorkspace("ac36-e2e");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // In-flight fan-in worktree A declares X (the same file the hold candidate B will declare).
-  const faninTouches = parseTouches(dispatchableBody(["- code/shared.ts (new)"]));
-  // Hold candidate B — the ONLY ready task — declares the SAME X (and, via C8, its own self-file).
-  writeTask(root, "gap-hold", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  // ac36-aaa is READY unlabeled; ac36-e2e is a TODO carrying the delivery-critical label. The promote
+  // gate flips it to ready WITH the label ("标签与 ready 同现") — the label still exists when the task
+  // enters the ready pool (selector-semantic input), but it is no longer a mechanical sort axis.
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  // dispatchableBody's stock AC item is 36 non-whitespace chars — BELOW the author→ready gate's 40-char
+  // MIN_SECTION_CHARS. The todo task must pass the four-artifacts gate to be promoted, so give it an
+  // AC section that clears the threshold (a real ready-pool candidate would carry a full AC item).
+  const todoBody = dispatchableBody(["- code/e2e.ts (new)"]).replace(
+    "- [ ] an AC item that is long enough",
+    "- [ ] a sufficiently long acceptance criterion item that clears the four-artifact author gate",
+  );
+  writeTask(root, "ac36-e2e", { status: "todo", labels: ["gap", "delivery-critical"], goal_ac: "AC-190", body: todoBody });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // AC115: --in-flight-count 0 = the driver's measured zero, so the exact recommended window is
+  // hermetic without any telemetry/process scan.
+  const run = () => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json", "--in-flight-count", "0"],
+    { encoding: "utf8" },
+  ));
 
-  // The snapshot in-flight set is EMPTY (the fan-in worktree is invisible to it — its subagent is a
-  // workflow). Only the injected direct-quantity worktree entry carries it.
+  // Before promotion the task is TODO — not in the ready pool / recommended at all.
+  const before = run();
+  assert.deepEqual(before.recommended, ["ac36-aaa"], "a TODO task is not in recommended (not in the ready pool)");
+
+  // Promote ac36-e2e todo→ready, carrying the label (the promote gate's --apply write).
+  const promoted = applyPromotions({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(promoted.should_apply, true);
+  assert.equal(promoted.applied_promotions[0].deliveryCritical, true, "the promote record exposes the delivery-critical determination");
+  const raw = fs.readFileSync(path.join(root, "tasks", "ac36-e2e.md"), "utf8");
+  assert.match(raw, /^status:\s*ready$/m, "status landed on disk");
+  assert.match(raw, /delivery-critical/, "the label co-occurs with ready in the frontmatter");
+
+  // The next refill: the promoted delivery-critical task enters the set; recommended stays de-ordered
+  // and the ranking stays id-ordered (no mechanical DC axis — delivery-critical is selector-semantic).
+  const after = run();
+  assert.deepEqual(after.recommended, ["ac36-aaa", "ac36-e2e"], "recommended is de-ordered (lexicographic)");
+  const afterRank = after.ranking.find((e) => e.id === "ac36-e2e").rank;
+  assert.equal(afterRank, 1, "no mechanical DC axis ⇒ id order: ac36-aaa (rank 0) before ac36-e2e (rank 1)");
+});
+
+
+test("DELIVERY-CRITICAL — negative control: a post-dispatch label is NOT recorded as AC36 triggered; the in-flight DC task surfaces in delivery_critical_in_flight (AC2/AC3)", (t) => {
+  const root = makeWorkspace("ac36-inflight-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The exact defect timing: the task is READY and DISPATCHED (in-flight) BEFORE the label lands.
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  // AC115: the CLI --in-flight flag is retired; the touches-disjointness self-exclusion is exercised
+  // via the pure analyzeSlotRefill (the in-flight task's file is read AFTER the label lands — the
+  // post-dispatch-label timing the negative control models).
+  const run = (inFlightId) => {
+    const tasksDir = path.join(root, "tasks");
+    const inFlight = inFlightId
+      ? [{ id: inFlightId, body: fs.readFileSync(path.join(tasksDir, `${inFlightId}.md`), "utf8") }]
+      : [];
+    return analyzeSlotRefill({ tasksDir, root, cap: 3, inFlight });
+  };
+
+  // Before dispatch: both ready, id order (no label yet).
+  const before = run("");
+  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "id order before the label");
+
+  // Dispatch ac36-e2e (in-flight), THEN apply the delivery-critical label (post-dispatch).
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  const after = run("ac36-e2e");
+  // The in-flight DC task is legitimately ABSENT from recommended (touches-overlap-in-flight
+  // self-exclusion — AC2: 已在飞任务不要求出现在 recommended).
+  assert.ok(!after.recommended.includes("ac36-e2e"), "in-flight DC task is NOT recommended (self-excluded)");
+  assert.deepEqual(after.recommended, ["ac36-aaa"], "only the dispatchable non-DC task is recommended");
+  // The post-dispatch label did NOT move the task into the ranking — the negative control is
+  // mechanically visible in delivery_critical_in_flight (in-flight, NOT ranked ⇒ NOT AC36 triggered).
+  assert.ok(Array.isArray(after.delivery_critical_in_flight), "delivery_critical_in_flight field is exposed");
+  assert.ok(after.delivery_critical_in_flight.includes("ac36-e2e"), "the post-dispatch-labeled in-flight task is surfaced as in-flight, not ranked");
+  assert.equal(after.ranking.length, 1, "ranking holds only the dispatchable task — no false AC36 trigger for the in-flight task");
+});
+
+
+test("DELIVERY-CRITICAL — pure: a delivery-critical in-flight task is excluded from recommended AND named in delivery_critical_in_flight (AC2/AC3)", (t) => {
+  const root = makeWorkspace("ac36-inflight-pure");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+
+  // The inner tick's authoritative path: inFlight is passed as the running-subagent set (the dispatch
+  // already happened — the label landed AFTER the task was picked).
   const r = analyzeSlotRefill({
     tasksDir: path.join(root, "tasks"),
     root,
-    cap: 5,
-    inFlight: [],
-    inFlightWorktrees: [{ id: "gap-fanin", touches: faninTouches }],
+    cap: 3,
+    inFlight: [inFlightTask("ac36-e2e", ["- code/e2e.ts (new)"])],
   });
+  assert.ok(!r.recommended.includes("ac36-e2e"), "in-flight DC task is not recommended (self-excluded)");
+  assert.deepEqual(r.delivery_critical_in_flight, ["ac36-e2e"], "the in-flight DC task is surfaced, NOT ranked — the negative control");
+  assert.ok(!r.ranking.some((e) => e.id === "ac36-e2e"), "the in-flight DC task has no ranking entry — not a false AC36 trigger");
 
-  assert.equal(r.should_refill, false, "the only candidate overlaps the fan-in worktree ⇒ not dispatchable");
-  assert.equal(r.recommended.length, 0, "recommended must be empty (B is deferred)");
-  assert.ok(r.no_refill_reason, `no_refill_reason must be non-empty, got ${JSON.stringify(r.no_refill_reason)}`);
-  const deferredB = (r.deferred || []).filter((d) => d.id === "gap-hold");
-  assert.equal(deferredB.length, 1, "the hold candidate is deferred");
-  assert.match(deferredB[0].reason, /touches-overlap-in-flight/, "deferred with the in-flight overlap reason");
-
-  // The AC53 gate accepts: judgeEndInvariant on the machine's fresh output must NOT be violated.
-  const inv = judgeEndInvariant(r);
-  assert.equal(inv.violated, false, "the AC53 gate must accept (no false refusal)");
+  // Negative control: NO in-flight DC task ⇒ the field is empty.
+  const r2 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.deepEqual(r2.delivery_critical_in_flight, [], "no in-flight DC task ⇒ empty");
+  assert.deepEqual(r2.recommended, ["ac36-aaa", "ac36-e2e"], "recommended is de-ordered (lexicographic)");
+  assert.equal(r2.ranking[0].id, "ac36-aaa", "no mechanical DC axis ⇒ ranking is id-ordered (ac36-aaa first)");
 });
 
+// ── RANKING EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2) ───────────────────────────────
+// The `recommended` STRING array is the dispatch-facing set — since AC56 (去锚) it is de-ordered
+// (lexicographic) + annotated; every consumer above reads ids, never a priority order. The parallel
+// `ranking` array exposes each recommended id's suite-blocking axis ({id, suiteBlocking, rank}) in
+// PRIORITY order. The deliveryCritical field this array used to carry was RETIRED
+// (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07 裁定). rank = position
+// within the priority-ordered ranking, NOT the de-ordered recommended array's position.
 
-test("IN-FLIGHT WORKTREE (AC2) — negative control: a disjoint candidate is still recommended despite the fan-in worktree", (t) => {
-  const root = makeWorkspace("inflight-worktree-disjoint");
+
+test("RANKING — the priority-ordered diagnostic carries {id, suiteBlocking, rank} for every recommended id (AC2 + AC56)", (t) => {
+  const root = makeWorkspace("ranking-expose");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const faninTouches = parseTouches(dispatchableBody(["- code/shared.ts (new)"]));
-  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
 
-  const r = analyzeSlotRefill({
-    tasksDir: path.join(root, "tasks"),
-    root,
-    cap: 5,
-    inFlight: [],
-    inFlightWorktrees: [{ id: "gap-fanin", touches: faninTouches }],
-  });
-
-  assert.ok(r.recommended.includes("gap-free"), "a disjoint candidate is still recommended (the worktree only blocks its own conflict surface)");
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.deepEqual(r.recommended, ["ac36-a", "ac36-b"], "recommended is de-ordered (lexicographic)");
+  assert.ok(/order meaningless/.test(r.recommended_order), "the de-ordered output is explicitly annotated");
+  assert.ok(Array.isArray(r.ranking), "--json exposes the ranking array");
+  assert.equal(r.ranking.length, r.recommended.length, "ranking holds one entry per recommended id");
+  assert.deepEqual(r.ranking.map((e) => e.id), ["ac36-a", "ac36-b"], "ranking is id-ordered (no mechanical DC axis) — the AC36 diagnostic is retired");
+  const b = r.ranking.find((e) => e.id === "ac36-b");
+  assert.ok(!("deliveryCritical" in b), "ranking entries no longer expose a deliveryCritical field (AC36 axis retired)");
+  assert.equal(b.suiteBlocking, false);
+  assert.equal(b.rank, 1, "rank = position within the priority-ordered ranking");
+  const a = r.ranking.find((e) => e.id === "ac36-a");
+  assert.equal(a.rank, 0);
 });
 
 
-test("IN-FLIGHT WORKTREE (AC2) — the default (no injection) reads the live worktree list and is a no-op in a non-git workspace", (t) => {
-  const root = makeWorkspace("inflight-worktree-live");
+test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (blocking_suite axis exposed) (AC2)", (t) => {
+  const root = makeWorkspace("ranking-sb");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  // A non-git temp workspace has no `git worktree list` ⇒ computeInFlightWorktreeTouches returns []
-  // (fail-soft) ⇒ behavior is byte-identical to the pre-fix path.
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, inFlight: [] });
-  assert.ok(r.recommended.includes("gap-a"), "no worktree in flight ⇒ the candidate is recommended as before");
+  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  writeTask(root, "ac36-critical", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/crit.ts (new)"]) });
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 400 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2 });
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.deepEqual(r.recommended, ["ac36-critical", "ac36-watchdog"], "recommended is de-ordered (lexicographic) — the dispatch array does NOT encode blocking_suite priority (AC56)");
+  const wd = r.ranking.find((e) => e.id === "ac36-watchdog");
+  assert.equal(wd.suiteBlocking, true, "suiteBlocking axis exposed for the suite-blocker");
+  assert.equal(wd.rank, 0, "suite-blocker ranks first in the ranking (blocking_suite is the sole top axis)");
+  const crit = r.ranking.find((e) => e.id === "ac36-critical");
+  assert.equal(crit.suiteBlocking, false);
+  assert.equal(crit.rank, 1);
 });
 
-// ── EXITED-NOT-LANDED CONTINUE EXEMPTION (gap-slot-refill-continue-touches-overlap-redundant-
-// exemption): an exited-not-landed CONTINUE candidate (residual task/<id> worktree + worker-outcome
-// final_state=exited-not-landed) is already worktree-isolated and its landing serialization is
-// enforced by the fan-in lock — so the dispatch-level touches-overlap defer is redundant and must be
-// SKIPPED (AC1); a fresh candidate (no worktree) keeps the defer (AC2 regression); the exemption must
-// NOT mask any other step-4 gate. ──────────────────────────────────────────────────────────────────
+// ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
+// slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
+// at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
+// (fan-in merged into the two-line model's integration line — invisible to the master-only git-history
+// signal) but whose status is still `ready` was re-recommended every round, re-dispatching a subagent
+// to re-verify already-landed work (25 re-dispatch commits self-described on 2026-08-10). AC2: the 4th
+// step-4 check skips not-yet-flipped tasks; AC4: it never touches AC5's strictness (the task still
+// waits for the green round to flip done, it is just not re-dispatched).
 
 
-test("CONTINUE EXEMPTION (AC1) — an exited-not-landed continue candidate overlapping an in-flight peer is NOT deferred ⇒ enters recommended", (t) => {
-  const root = makeWorkspace("continue-exempt");
+test("NOT-YET-FLIPPED — a fanned-in (merged) task with >50% ACs is NOT recommended; an unfanned ready task still is (AC2/nyf_task_not_recommended/unfanned_ready_still_recommended)", (t) => {
+  const root = makeFannedInWorkspace("canonical");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // The continue candidate declares the SAME file as the in-flight peer (a genuine overlap).
-  writeTask(root, "gap-cont", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
-  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
-
-  const r = analyzeSlotRefill({
-    tasksDir: path.join(root, "tasks"),
-    root,
-    cap: 5,
-    inFlight,
-    continueExemptIds: ["gap-cont"],
-  });
-
-  assert.ok(r.recommended.includes("gap-cont"), "the continue candidate is recommended (exempt from touches-overlap defer)");
-  const deferred = (r.deferred || []).filter((d) => d.id === "gap-cont");
-  assert.equal(deferred.length, 0, `gap-cont must NOT be deferred, got: ${JSON.stringify(deferred)}`);
-});
-
-
-test("CONTINUE EXEMPTION (AC2) — regression: a fresh candidate (NOT exempt) with the same overlap is still deferred", (t) => {
-  const root = makeWorkspace("continue-fresh");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
-  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
-
-  const r = analyzeSlotRefill({
-    tasksDir: path.join(root, "tasks"),
-    root,
-    cap: 5,
-    inFlight,
-    continueExemptIds: [], // fresh (no worktree) ⇒ not exempt
-  });
-
-  assert.ok(!r.recommended.includes("gap-fresh"), "the fresh candidate stays deferred");
-  const deferred = (r.deferred || []).filter((d) => d.id === "gap-fresh");
-  assert.equal(deferred.length, 1, "the fresh candidate is deferred");
-  assert.match(deferred[0].reason, /touches-overlap-in-flight/, "deferred with the touches-overlap-in-flight reason");
-});
-
-
-test("CONTINUE EXEMPTION — the exemption skips ONLY the overlap defer; other gates still apply (deps-not-ready)", (t) => {
-  const root = makeWorkspace("continue-gate");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // A continue-exempt candidate whose PARENT is not done must still be deferred (deps-not-ready) —
-  // the exemption must not mask a genuine defect.
-  writeTask(root, "gap-cont", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/shared.ts (new)"]) });
-  const inFlight = [inFlightTask("gap-other", ["- code/shared.ts (new)"])];
-
-  const r = analyzeSlotRefill({
-    tasksDir: path.join(root, "tasks"),
-    root,
-    cap: 5,
-    inFlight,
-    continueExemptIds: ["gap-cont"],
-  });
-
-  assert.ok(!r.recommended.includes("gap-cont"), "a continue candidate with an unmet dep is still deferred");
-  const deferred = (r.deferred || []).filter((d) => d.id === "gap-cont");
-  assert.equal(deferred.length, 1, "deferred once");
-  assert.match(deferred[0].reason, /deps-not-ready/, "deferred with deps-not-ready (not the skipped overlap reason)");
-});
-
-
-test("CONTINUE EXEMPTION — computeExitedNotLandedContinueIds: exited-not-landed record + residual task/<id> worktree ⇒ id present", (t) => {
-  const root = makeGitWorkspace("continue-live", 0);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // A real residual task/<id> worktree (the worktree-isolated half).
-  const wtDir = fs.mkdtempSync(path.join(os.tmpdir(), "slot-refill-cont-wt-"));
-  t.after(() => fs.rmSync(wtDir, { recursive: true, force: true }));
-  runGit(root, "worktree", "add", "-b", "task/gap-cont", wtDir, "develop");
-  // worker-outcome final_state=exited-not-landed (the other half).
-  fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-cont", final_state: "exited-not-landed" }) + "\n");
-
-  const ids = computeExitedNotLandedContinueIds(root);
-  assert.ok(ids.has("gap-cont"), `exited-not-landed + residual worktree ⇒ continue-exempt, got ${JSON.stringify([...ids])}`);
-});
-
-
-test("CONTINUE EXEMPTION — computeExitedNotLandedContinueIds negative controls: no worktree / completed record / no record ⇒ absent", (t) => {
-  // (a) record WITHOUT a residual worktree ⇒ not continue (fresh task keeps the conservative defer).
-  {
-    const root = makeGitWorkspace("continue-neg-a", 0);
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-cont", final_state: "exited-not-landed" }) + "\n");
-    assert.equal(computeExitedNotLandedContinueIds(root).has("gap-cont"), false, "record without worktree ⇒ not exempt");
-  }
-  // (b) a COMPLETED record + residual worktree ⇒ not continue (only exited-not-landed is continue).
-  {
-    const root = makeGitWorkspace("continue-neg-b", 0);
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    const wtDir = fs.mkdtempSync(path.join(os.tmpdir(), "slot-refill-cont-wtb-"));
-    t.after(() => fs.rmSync(wtDir, { recursive: true, force: true }));
-    runGit(root, "worktree", "add", "-b", "task/gap-done", wtDir, "develop");
-    fs.writeFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), JSON.stringify({ task: "gap-done", final_state: "completed" }) + "\n");
-    assert.equal(computeExitedNotLandedContinueIds(root).has("gap-done"), false, "completed record ⇒ not exempt");
-  }
-  // (c) NO record at all ⇒ empty (fail-soft, the exemption restores the pre-existing conservative defer).
-  {
-    const root = makeGitWorkspace("continue-neg-c", 0);
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    assert.equal(computeExitedNotLandedContinueIds(root).size, 0, "no worker-outcome.jsonl ⇒ empty set");
-  }
-});
-
-// ── STALE MAIN-CHECKOUT STATUS (tasks/gap-dispatch-reads-stale-main-checkout-task-status, AC1/AC3) ──
-// A task landed on develop as `status: done` but the manager working branch's disk still says
-// `status: ready` (the main checkout behind-develop shape). analyzeSlotRefill's status read must come
-// from the develop REF (default taskReadRef="develop"), not the stale disk — otherwise the done task
-// is re-recommended until the retry cap. The read source is asserted directly via readTaskStatusAtRef.
-
-
-test("analyzeSlotRefill reads status from the develop ref, not the stale working tree (AC1/AC3)", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-stale-${Date.now()}-`));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
-  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
-  runGit(dir, "init", "-q", "-b", "develop", ".");
-  runGit(dir, "config", "user.email", "t@t");
-  runGit(dir, "config", "user.name", "t");
-  // develop: the task is done (landed + flip-done).
-  writeTask(dir, "gap-stale-status", { status: "done", labels: ["gap"], body: dispatchableBody(["- code/stale.ts (new)"]) });
-  runGit(dir, "add", "-A");
-  runGit(dir, "commit", "-qm", "gap-stale-status: flip done");
-  // Stale manager branch: rewrite the same task back to `ready` and STAY on it (disk=ready, develop=done).
-  runGit(dir, "checkout", "-q", "-b", "manager-stale");
-  writeTask(dir, "gap-stale-status", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/stale.ts (new)"]) });
-  runGit(dir, "add", "-A");
-  runGit(dir, "commit", "-qm", "gap-stale-status: stale reset to ready");
-
-  // AC3 read-source assertion: the develop ref carries `done`; the stale working tree carries `ready`.
-  assert.equal(readTaskStatusAtRef(dir, "develop", "gap-stale-status"), "done", "readTaskStatusAtRef reads develop → done");
-  assert.match(fs.readFileSync(path.join(dir, "tasks", "gap-stale-status.md"), "utf8"), /^status:\s*ready/m, "stale working tree carries ready");
-
-  const tasksDir = path.join(dir, "tasks");
-  // AC1: default taskReadRef="develop" ⇒ the done task is judged done → NOT recommended.
-  const r = analyzeSlotRefill({ tasksDir, root: dir, cap: 3, runningSubagentCount: 0 });
-  assert.equal(r.pool, 0, "develop-read: the stale-ready task is judged done → empty ready pool");
-  assert.equal(r.recommended.includes("gap-stale-status"), false, "done task not recommended for dispatch");
-  assert.equal(r.should_refill, false, "no dispatchable candidate from the develop source of truth");
-
-  // Negative control: WITHOUT the develop read (taskReadRef=null → the old disk read), the stale
-  // `ready` IS seen and the task is recommended — the exact defect this task removes.
-  const rDisk = analyzeSlotRefill({ tasksDir, root: dir, cap: 3, runningSubagentCount: 0, taskReadRef: null });
-  assert.equal(rDisk.recommended.includes("gap-stale-status"), true, "the stale working tree alone would still recommend it (the defect)");
+  // gap-fanned: work fanned in (merge record), 4/5 ACs ⇒ "已 fan-in 待翻 done" — must NOT be re-dispatched.
+  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(4, 5) });
+  // gap-unfanned: no merge record, real work ⇒ must still be recommended.
+  writeTask(root, "gap-unfanned", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/unfanned.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-unfanned"), "unfanned ready task is still recommended (unfanned_ready_still_recommended)");
+  assert.ok(!r.recommended.includes("gap-fanned"), "fanned-in ready task (4/5 ACs) is not re-dispatched (nyf_task_not_recommended)");
 });

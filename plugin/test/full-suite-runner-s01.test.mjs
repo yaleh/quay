@@ -10,10 +10,10 @@
 //   other-task (defer anti-livelock).
 
 // full-suite-runner.test.mjs — runner verdict / state machine / red detection / reason axis / kill-hang / control. Split from gap-suite-file-split-two-longest; harness shared via ./helpers/full-suite-runner-harness.mjs.
-// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/8 (11 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
+// SPLIT from full-suite-runner.test.mjs by gap-suite-split-15-over-30s-test-files — shard 1/12 (7 tests). Shared fixtures: ./helpers/full-suite-runner-shards-harness.mjs (single source).
 
 import { test } from "node:test";
-import { GREEN_SUITE, RUNNER, assert, fakeSuite, fakeTestShRecordingArgs, fs, lastRoundRecord, os, path, poll, readState, runCli, runRunner, sharedGreenShape, spawn, statePath, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
+import { GREEN_SUITE, assert, fakeSuite, fs, lastRoundRecord, os, path, poll, readState, runRunner, sharedGreenShape, spawn, waitExit } from "./helpers/full-suite-runner-shards-harness.mjs";
 
 test("negative control — waitExit resolves bounded when the child ALREADY exited before the listener is mounted (exit event is NOT replayed)", async () => {
   // The load race (gap-full-suite-runner-test-waitExit-load-race): under load 15-25 a spawned child
@@ -183,110 +183,5 @@ test("AC1 — an invalid --runner value fails closed (nothing written), not a si
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-test("AC3 — resource gate WAIT ⇒ the runner does NOT start and leaves the state file untouched", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  // A prior GREEN suite verdict that MUST survive a WAIT byte-untouched (AC3: state stays running/green).
-  const prior = {
-    state: "green",
-    runner: "outer",
-    startedAt: "2026-08-05T06:00:00.000Z",
-    finishedAt: "2026-08-05T06:05:00.000Z",
-    durationMs: 300000,
-    laneCount: 1,
-  };
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(statePath(root), JSON.stringify(prior, null, 2) + "\n", "utf8");
-  try {
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0", // force the REAL gate path, with seams
-        RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT (cpu stalled)
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        // Determinism for the OVERLOAD-WINDOW load seam (same convention as resource-gate.test.mjs
-        // runGate): the real /proc/loadavg on a busy host under the full suite's own 4-lane load
-        // would nondeterministically flip the new load_wait verdict and make this WAIT test
-        // attributable to load instead of CPU. Pin the load LOW so the WAIT verdict is exactly the
-        // CPU stall the test title names. gap-r274-flake-ac3-go-load-seam-unpinned.
-        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
-      },
-    });
-    const { code } = await waitExit(child);
-    assert.notEqual(code, 0, "WAIT ⇒ the runner exits non-zero (did not run)");
-    const s = readState(root);
-    assert.equal(s.state, "green", "state stays green (untouched) on WAIT");
-    assert.equal(s.durationMs, 300000, "the prior state object is byte-untouched");
-    assert.ok(!fs.existsSync(argsLog), "the suite was NEVER spawned on WAIT");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC3 — resource gate GO ⇒ the runner starts (state=running then green)", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3go-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  try {
-    const child = runRunner({
-      root,
-      env: {
-        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "10", // GO (cpu calm)
-        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-        // Determinism for the OVERLOAD-WINDOW load seam (same convention as resource-gate.test.mjs
-        // runGate): the real /proc/loadavg on a busy host under the full suite's own 4-lane load
-        // would nondeterministically flip the new load_wait verdict and make this GO test WAIT
-        // (round r274 flake: the suite's own load pushed loadavg >= nproc×2, the gate returned WAIT,
-        // the runner exited 1, assert.equal(code, 0) failed). Pin the load LOW so GO is a real GO.
-        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
-      },
-    });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "GO ⇒ the runner runs and exits 0 on green");
-    assert.equal(readState(root).state, "green");
-    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned on GO");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC1 — runner REFUSES to start when another runner is in flight (state=running + live pid) — round 131/132 storm fix", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inflight-"));
-  // A live pid: this test process itself (process.kill(pid,0) succeeds for our own pid).
-  const statePathFile = path.join(root, ".quay", "full-suite-state.json");
-  fs.mkdirSync(path.dirname(statePathFile), { recursive: true });
-  fs.writeFileSync(statePathFile, JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "existing-run" }, null, 2));
-  try {
-    const res = await runCli(RUNNER, ["--root", root, "--state-dir", path.join(root, ".quay")]);
-    assert.notEqual(res.code, 0, "runner must refuse to start when a live runner is in flight");
-    assert.match(res.err, /another runner is already in flight/, `refusal message must name the in-flight runner:\n${res.err}`);
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "fake-test.log")), "must NOT spawn the suite");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-
-test("AC1 — runner STARTS when state is terminal (green) even with a pid — no in-flight false positive", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inflight-terminal-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
-  const statePathFile = path.join(root, ".quay", "full-suite-state.json");
-  fs.mkdirSync(path.dirname(statePathFile), { recursive: true });
-  // terminal green: finishedAt set. The pid is stale/dead — but finishedAt != null means the round
-  // is OVER regardless of pid, so isRunnerInFlight returns false.
-  fs.writeFileSync(statePathFile, JSON.stringify({ state: "green", pid: 999999999, finishedAt: Date.now(), runId: "old-run" }, null, 2));
-  try {
-    const child = runRunner({ root });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, "terminal state ⇒ the runner starts normally");
-    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned on a terminal state");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
   }
 });

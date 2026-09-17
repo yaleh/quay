@@ -1,249 +1,163 @@
 // @test-group lowconc
 // worker-driver-resident.test.mjs — resident driver loop (selector/heartbeat/liveness/wrapper) + continue/fan-in-merge mechanics. Split from gap-suite-file-split-two-longest.
-// SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/5 (8 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
+// SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/8 (6 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
 
 import { test } from "node:test";
-import { REPO_ROOT, WORKER_PROCESS_NAME, after, assert, branchHeadSubject, buildContinueWorkerPrompt, continueStateForTask, defaultSelectorArgv, defaultWorkerArgv, dryRunLaunch, fs, hasLiveWorkerForTask, launchArgv, makeGitRoot, makeRoot, path, readProfiles, readRoundLines, readTaskStatus, rmSafe, runGit, spawn, spawnResident, waitFor, workerArgvForTask, workerPromptForTask, worktreePresentForTask, writeTaskFile } from "./helpers/worker-driver-resident-harness.mjs";
+import { WAIT_BASE_MS, after, assert, computeWorkerRoundRecord, counterNodeE, defaultLivenessCheckArgv, fs, makeGitRoot, makeRoot, path, readOutcomeLines, readRoundLines, rmSafe, runLivenessCheck, spawn, spawnResident, waitFor, writeTaskFile } from "./helpers/worker-driver-resident-harness.mjs";
 
-test("AC5/AC6 (superseded-mid-flight wiring + production carrier) — a live worker on a superseded task is SIGTERM'd by the reconcile step; round record carries liveWorkerSignaled", async (t) => {
-  const root = makeGitRoot("sup-mf-wire");
-  const taskId = "gap-sup-mf-wire";
-  writeTaskFile(root, taskId, "superseded");
-  runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
-  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
-  // ⚠️ 顺序承重，同 AC6 end-to-end：驱动先死、目录后删（理由是那里的注释；本条 2026-09-12 实测
-  // 因顺序反了而泄漏驱动 ⇒ 整个套件被静默看门狗杀掉）。holder 让 stop 注册在清理之前。
-  let drv = null;
-  t.after(async () => { if (drv) await drv.stop(); });
-  t.after(() => {
-    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
-    rmSafe(root);
-    rmSafe(wtPath);
+test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervisor _carrier_stats greps \"ts\")", () => {
+  const rec = computeWorkerRoundRecord({
+    round: 1, runId: "wk-prod-x", pid: 42, at: "2026-08-23T12:00:00.000Z",
+    action: "stop", inFlight: 0, pool: 0, stopReason: "pool-empty (no dispatchable candidate in the ready pool)",
+    coldStartInflight: ["gap-cs-a"],
   });
-  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
-  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: superseded worktree present");
+  assert.equal(rec.ts, "2026-08-23T12:00:00.000Z");
+  assert.equal(rec.round, 1);
+  assert.equal(rec.run_id, "wk-prod-x");
+  assert.equal(rec.action, "stop");
+  assert.equal(rec.in_flight, 0);
+  assert.equal(rec.pool, 0);
+  assert.match(rec.stop_reason, /pool-empty/);
+  assert.deepEqual(rec.cold_start_inflight, ["gap-cs-a"], "cold-start observation lands in the round record (production-visible carrier)");
+  // ts 首字段：JSON.stringify 后 `"ts":"…"` 是记录的第一个键（supervisor 的 grep 依赖该形状）。
+  const json = JSON.stringify(rec);
+  assert.ok(json.startsWith('{"ts":"'), `ts is the first JSON field: ${json.slice(0, 20)}…`);
+});
 
-  // 存活 worker：cmdline 含 quay-task-worker + task id（hasLiveWorkerForTask / findLiveWorkerPid 命中）。
-  const fake = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
-  t.after(() => { try { fake.kill("SIGKILL"); } catch { /* gone */ } });
-  const fakeExited = new Promise((resolve) => fake.once("exit", (code, signal) => resolve(signal)));
-  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
 
-  drv = spawnResident(root, [
+test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", async (t) => {
+  const root = makeRoot("ac138-round");
+  // ready-pool returns empty ⇒ resident loop records a stop round then polls (no worker spawned; it no
+  // longer exits on pool-empty — pool-empty is transient, promotion-driver keeps filling it).
+  const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--interval", "20",
   ]);
-
-  await waitFor(() =>
-    readRoundLines(root).some((rec) =>
-      rec.superseded_reclaim &&
-      Array.isArray(rec.superseded_reclaim.perTask) &&
-      rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true)
-    ), 30000);
-
+  t.after(() => drv.stop());
+  t.after(() => rmSafe(root));
+  await waitFor(() => readRoundLines(root).length >= 1);
   const rounds = readRoundLines(root);
-  const signaledRound = rounds.find((rec) =>
-    rec.superseded_reclaim && rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true));
-  assert.ok(signaledRound, "AC5: a round record shows the reconcile step reached the mid-flight signal path (liveWorkerSignaled true)");
-  const entry = signaledRound.superseded_reclaim.perTask.find((p) => p.taskId === taskId);
-  assert.equal(entry.liveWorkerSignaled, true, "AC6: production carrier perTask entry carries liveWorkerSignaled=true");
-  assert.equal(entry.skippedLiveWorker, true, "still skippedLiveWorker this round (disk reclaim deferred to next round)");
-  assert.equal(await fakeExited, "SIGTERM", "AC6: default process.kill delivered SIGTERM to the live worker (⛔ not just a flag)");
+  assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
+  const last = rounds[rounds.length - 1];
+  assert.equal(last.action, "stop", "pool-empty round is recorded as stop (not dispatch)");
+  assert.match(last.stop_reason, /pool-empty/);
+  assert.equal(last.in_flight, 0);
+  assert.ok(last.ts, "round record carries a ts field (the supervisor's last_record_ts reads it)");
+  // ⛔ 取假对照组：outcome 在池空轮【不写】——正是 round 存在的理由（outcome 停更 ≠ 死亡）。
+  assert.equal(readOutcomeLines(root).length, 0, "no outcome on a pool-empty round; round is the unconditional carrier");
 });
 
-// ── gap-worker-driver-resident-loop-intermittent-hang：挂起复现负控制 ───────────────────────────────
-// 根因（实测 RUN 8 ENOTEMPTY）：常驻测试 after 钩按注册序 FIFO 运行，`fs.rmSync(root)` 先注册先运行、
-// 此刻驱动仍活（每轮写 root/.quay/worker-round.jsonl）⇒ rmSync ENOTEMPTY ⇒ 抛错跳过后续 `drv.stop()`
-// ⇒ 驱动泄漏（spinning、持 stdout pipe）⇒ node --test 等不到 EOF 挂死。修法 = ① spawnResident 用
-// detached:true 让驱动成进程组组长、stop() 杀整组（⛔ 只杀驱动会留孤儿 worker 持 pipe + 孤儿 counter
-// 子进程与 rmSync 竞态）；② 常驻测试统一「先 drv.stop 再 rmSync」的 after 钩顺序（或 body 末 inline
-// drv.stop）。本负控制只验①：长命 worker（sleep 100，stdio:"inherit"）在 stop 后【不得】持 pipe——
-// stop 杀整组 ⇒ 孤儿 worker 一起死 ⇒ stdout pipe 界内关闭；旧只杀驱动 ⇒ 孤儿 worker 持 pipe 到 100s。
+// ── liveness 接线（gap-resident-driver-stable-carrier-liveness Finding：liveness 子命令零调用者）──
+// AC2 承诺「driver/supervisor 死时有机件在窗口内检测并报告」，但此前没有任何东西调 liveness 子命令
+// （log 13h 无更新）。修法 = driver 自身 round 循环每轮顺手调一次。本组验证：①defaultLivenessCheckArgv
+// 复用 launch 脚本 liveness 子命令（⛔ 不重写存活判定）、②runLivenessCheck 的 checked/deaths 语义
+// （checked=false = 未查成，⛔ 不是健康）、③resident loop 每轮真调它（counter 缝）。
 
-test("negative control — drv.stop kills the whole process group: a long-lived worker does NOT hold the stdout pipe open", async (t) => {
-  const root = makeGitRoot("group-kill");
-  writeTaskFile(root, "gap-gk", "done");
+
+test("defaultLivenessCheckArgv — reuse the TS kernel liveness subcommand; kind from file identity", () => {
+  // AC151：supervisor 港进 TS 后，liveness 子命令 = `node … driver-runtime.ts liveness --kind … --root …`。
+  const argv = defaultLivenessCheckArgv("/r", "worker");
+  assert.equal(argv[0], process.execPath, "spawn the node binary (⛔ not bash — kernel is TS)");
+  assert.equal(argv[1], "--experimental-strip-types");
+  assert.ok(argv[2].endsWith("driver-runtime.ts"), `kernel path = driver-runtime.ts, got ${argv[2]}`);
+  assert.equal(argv[3], "liveness");
+  assert.deepEqual(argv.slice(argv.indexOf("--kind"), argv.indexOf("--kind") + 2), ["--kind", "worker"]);
+  assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
+  assert.ok(argv.includes("--json"), "machine-readable verdict (the driver parses deaths/running)");
+  // 同一函数传不同 kind（promotion-driver.ts 传 promotion）。
+  const promo = defaultLivenessCheckArgv("/r", "promotion");
+  assert.deepEqual(promo.slice(promo.indexOf("--kind"), promo.indexOf("--kind") + 2), ["--kind", "promotion"]);
+});
+
+
+test("runLivenessCheck — checked/deaths/running semantics (checked=false = NOT evaluated, ⛔ not healthy)", () => {
+  // 健康：deaths=none ⇒ deaths 归一为 null + checked=true。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'none',running:true}))"]),
+    { checked: true, deaths: null, running: true },
+  );
+  // 检出死亡：deaths 非空 ⇒ 原样带上（supervisor_dead 是 AC3 的真实告警）。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'supervisor_dead,driver_orphaned',running:false}))"]),
+    { checked: true, deaths: "supervisor_dead,driver_orphaned", running: false },
+  );
+  // 退出 1（liveness 子命令检出死亡的退出码）仍算「查过」——stdout 有 deaths JSON。
+  const exit1 = runLivenessCheck("/r", "worker", ["node", "-e", "console.log(JSON.stringify({deaths:'driver_dead',running:false}));process.exit(1)"]);
+  assert.deepEqual(exit1, { checked: true, deaths: "driver_dead", running: false });
+  // 脚本缺失 ⇒ checked=false（未查成），⛔ 不是「健康」（硬规则 3b：无法评估 ≠ 合格）。
+  assert.deepEqual(
+    runLivenessCheck("/r", "worker", ["bash", "/nonexistent/promotion-driver-launch.sh", "liveness"]),
+    { checked: false, deaths: null, running: false },
+  );
+});
+
+
+test("liveness wiring — resident loop calls the liveness checker each round (Finding AC2 no-caller fix)", async (t) => {
+  // 用 git root + done 任务（镜像 AC1 resident-loop 测试），worker 落地 → 驱动继续轮询（池空不退出）。
+  const root = makeGitRoot("liveness-wire");
+  writeTaskFile(root, "gap-a", "done");
+  writeTaskFile(root, "gap-b", "done");
+  const rpcFile = path.join(root, "rpc.cnt");
+  const selFile = path.join(root, "sel.cnt");
+  const livenessCnt = path.join(root, "liveness.cnt");
+  // ready-pool 返回 2 个候选 → 选择环起 2 个 worker → 每轮一个 liveness 检查。
   const drv = spawnResident(root, [
-    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-gk'],pool:1}))",
-    "--selector-cmd", "node -e console.log('gap-gk\\x20pick')",
+    "--ready-pool-cmd", counterNodeE(rpcFile, "JSON.stringify({ready:n<=1?['gap-a','gap-b']:[],pool:n<=1?2:0})"),
+    "--selector-cmd", counterNodeE(selFile, "n===0?'gap-a\\x20first-pick':n===1?'gap-b\\x20second-pick':'gap-a\\x20again'"),
     "--resource-gate-cmd", "node -e process.exit(0)",
-    "--worker-cmd-exact", "sleep 100", // 长命 worker：若 stop 不杀整组，孤儿 worker 持 stdout pipe 写端
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--concurrency", "2",
+    "--liveness-cmd", counterNodeE(livenessCnt, "JSON.stringify({kind:'worker',deaths:'none',running:true})"),
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"));
-  const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
-  drv.stop();
-  await Promise.race([
-    closed,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("stdout pipe still open after stop — an orphaned worker held it (group-kill not applied)")), 10000)),
-  ]);
-});
-
-// ── AC140（可配 wrapper + model + 按 role；单一真相源；覆盖语义统一）+ L3（driver 消费 policy）─────
-// 驱动的 LLM spawn 不再硬编码 `["claude","-p",prompt]`——单一构造 launchArgv 现在【经 L2 policy
-// （profile-policy.ts loadProfiles + resolveRole）解析语义 kind → profile】后直接出 argv（L3
-// gap-driver-binding-semantic-kind-to-profile），⛔ 不再 `bash quay-launch.sh <role>` 把解析交给 bash 里
-// 的第二份实现。wrapper/model/--bare 由 .quay/profiles.yml 的 profiles/roles 承载（AC154 profile 抽层）。
-// 取假靠读【启动语义】字段（launcher / --model），⛔ 不靠 argv0（claude-fjdac 末行 exec claude 使
-// argv0 恒为 claude）。quay-launch.sh 保留给非驱动路径（manager/outer/inner），AC140-2 仍经它 dry-run。
-
-
-
-
-
-test("AC140-1 — single constructor: launchArgv resolves kind → profile via policy (launcher from profile, ⛔ not bash quay-launch.sh)", () => {
-  const tw = launchArgv("task-worker", "WPROMPT", REPO_ROOT);
-  assert.equal(tw[0], "claude-fjdac", "launcher resolved from profile (⛔ bash quay-launch.sh)");
-  assert.equal(tw[1], "--settings");
-  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro-anthropic");
-  assert.equal(tw[tw.indexOf("-n") + 1], "quay-task-worker");
-  assert.equal(tw[tw.length - 1], "WPROMPT", "prompt is the last argv payload");
-  assert.ok(!tw.includes("quay-launch.sh"), "no bash quay-launch.sh in the spawn argv (⛔ bash 第二份实现)");
-
-  const sel = launchArgv("selector", "SPROMPT", REPO_ROOT);
-  assert.equal(sel[0], "claude-fjdac");
-  assert.equal(sel[sel.indexOf("-n") + 1], "quay-selector");
-
-  const fix = launchArgv("fix-worker", "FPROMPT", REPO_ROOT);
-  assert.equal(fix[0], "claude-fjdac");
-  assert.equal(fix[fix.indexOf("-n") + 1], "quay-fix-worker");
-
-  // 单一真相源：default* 都经同一构造（argv[0] = profile launcher，调用点只传语义 kind）。
-  assert.equal(defaultWorkerArgv("gap-x", REPO_ROOT)[0], "claude-fjdac");
-  assert.equal(defaultSelectorArgv(["a"], REPO_ROOT)[0], "claude-fjdac");
-});
-
-
-test("AC140-1b — L3 由 policy 解析（能取假）：合成 profile 的 launcher/model 流进 argv（⛔ 非硬编码）", (t) => {
-  const root = makeRoot("profile");
-  t.after(() => rmSafe(root));
-  // 合成 profiles.yml：launcher=claude（⛔ 非 claude-fjdac）+ model=synth-model——若 launchArgv 硬编码
-  // claude-fjdac/deepseek-v4-pro 或绕过 policy，这些字段不会照合成值流进 argv ⇒ 取假。
-  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
-    "version: 1\n" +
-    "profiles:\n  w:\n    launcher: claude\n    model: synth-model\n    bare: false\n    auth: key\n" +
-    "roles:\n  task-worker:\n    profile: w\n    name: quay-synth\n");
-  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
-  const settingsPath = path.join(root, ".claude", "launch.settings.json");
-  fs.writeFileSync(settingsPath, JSON.stringify({ $schema: "x", permissions: {}, env: { KEEP: "1" } }));
-
-  const a = launchArgv("task-worker", "P", root);
-  assert.equal(a[0], "claude", "launcher from the SYNTHETIC profile (⛔ hardcoded claude-fjdac)");
-  assert.equal(a[a.indexOf("--model") + 1], "synth-model", "model from the SYNTHETIC profile");
-  assert.equal(a[a.indexOf("-n") + 1], "quay-synth", "name from the SYNTHETIC profile");
-  assert.equal(a[a.length - 1], "P");
-  // 无 unset / 无 role env ⇒ --settings 直接是文件路径（非合并 JSON）。
-  assert.equal(a[a.indexOf("--settings") + 1], settingsPath);
-});
-
-
-test("AC140-2 — configurable: worker roles carry wrapper+model via shared profile (falsifiable vs manager)", () => {
-  const p = readProfiles();
-  const roles = p.roles;
-  const profileOf = (role) => p.profiles[roles[role].profile];
-  // 正控制：新 worker 角色照 outer/inner 抄（⛔ 不照 manager 的裸 claude + model null）；AC154 后三者共享同一 profile。
-  for (const role of ["task-worker", "selector", "fix-worker"]) {
-    assert.equal(profileOf(role).launcher, "claude-fjdac", `${role} profile launcher must be the wrapper (not bare claude)`);
-    assert.ok(profileOf(role).model, `${role} profile model must be configured (not null)`);
-    assert.ok(roles[role].name && roles[role].name.startsWith("quay-") && roles[role].name !== "quay-inner",
-      `${role} needs a distinct -n name (concurrent-worker ListAgents collision)`);
+  // 这一步等的是 2 次 worker 落地（每次含一个真 liveness 子进程 spawn + 落地 git 读）——实测空载即
+  // ~30s，故取 2×基网：上限 = WAIT_BASE_MS × 2 × 本机当下的抢占因子（⛔ 不再是裸 30000）。
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, WAIT_BASE_MS * 2);
+  const rounds = readRoundLines(root);
+  const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
+  // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
+  // ① counter ≥ 1 ⇒ liveness 命令被真实 spawn 过（零调用者 Finding 的根已修）；② 每轮 round 都带
+  // 非 null 的 liveness 结果（接线存在）。⛔ 不做 livenessCount ≥ rounds.length / 每轮 checked===true：
+  // 满载 scoped suite 并行时 liveness spawn 偶发失败——counter 不增但 round 照写、checked=false 是合法
+  // 「没查成」态（硬规则 3b，≠ 没接线）。把「没查成」当「没接线」= 该断言 flaky（3 轮机械 fan-in 全红）。
+  assert.ok(livenessCount >= 1, "liveness was called (zero-caller fix): counter is non-zero");
+  assert.ok(rounds.length >= 1, "at least one round ran");
+  for (const rec of rounds) {
+    assert.ok(rec.liveness !== null, `round carries a liveness result (wiring exists): ${JSON.stringify(rec.liveness)}`);
   }
-  // 负控制：manager 仍裸 claude + model null（照它抄就是错——quay-launch.sh 只查非空不查取值，无任何机件报错）。
-  assert.equal(profileOf("manager").launcher, "claude");
-  assert.equal(profileOf("manager").model, null);
-
-  // dry-run 实测：wrapper/model 确实出现在 spawn 命令行（launcher=claude-fjdac ⇒ wrapper 在链 ⇒ ANTHROPIC_BASE_URL 注入）。
-  const taskWorker = dryRunLaunch("task-worker", "-p", "TEST");
-  assert.match(taskWorker, /^claude-fjdac /, `task-worker launcher is the wrapper: ${taskWorker}`);
-  assert.match(taskWorker, /--model \S+/, `task-worker carries --model <m>: ${taskWorker}`);
-  assert.match(taskWorker, /-n quay-task-worker/, "task-worker has its own -n name");
-  assert.doesNotMatch(taskWorker, / --bare( |$)/, "task-worker (long chain) does NOT use --bare");
-
-  const selector = dryRunLaunch("selector", "-p", "TEST");
-  assert.match(selector, /^claude-fjdac /, `selector launcher is the wrapper: ${selector}`);
-  // AC142 根因：selector/fix-worker 曾设 bare=true ⇒ claude --bare 不读 ANTHROPIC_AUTH_TOKEN 而
-  // wrapper 置空 ANTHROPIC_API_KEY ⇒ 认证失败 exit 1（生产 13/13 全败）。修法 = 三者均 bare=false。
-  assert.doesNotMatch(selector, / --bare( |$)/, "selector does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
-
-  const fixWorker = dryRunLaunch("fix-worker", "-p", "TEST");
-  assert.match(fixWorker, /^claude-fjdac /, `fix-worker launcher is the wrapper: ${fixWorker}`);
-  assert.doesNotMatch(fixWorker, / --bare( |$)/, "fix-worker does NOT use --bare (AC142: --bare 不读 AUTH_TOKEN ⇒ 认证失败)");
-
-  // 取假对照：manager（launcher=claude，无 wrapper）⇒ 无 --model，argv0 是裸 claude（wrapper 不在链）。
-  const manager = dryRunLaunch("manager");
-  assert.match(manager, /^claude /, `manager is bare claude: ${manager}`);
-  assert.doesNotMatch(manager, /--model/, "manager has no --model (wrapper not in chain ⇒ no ANTHROPIC_BASE_URL)");
 });
 
-
-test("AC140-3 — override semantics unified: --worker-cmd is prefix, --worker-cmd-exact is whole-replacement", () => {
-  // exact（整体替换，测试专用）：prompt 不进 argv。
-  assert.deepEqual(workerArgvForTask("gap-x", "/r", { prefix: null, exact: "node -e capture" }),
-    ["node", "-e", "capture"], "--worker-cmd-exact replaces the whole command (no prompt)");
-
-  // prefix（前缀 + prompt）：prompt 作为末参数追加（wrapper/测试前缀可用）。
-  const prefix = workerArgvForTask("gap-x", "/r", { prefix: "claude-fjdac --model deepseek-v4-pro", exact: null });
-  assert.deepEqual(prefix.slice(0, 3), ["claude-fjdac", "--model", "deepseek-v4-pro"]);
-  assert.match(prefix[prefix.length - 1], /gap-x/,
-    "prefix semantics: the task prompt is appended as the last arg (exact would drop it ⇒ falsifiable)");
-
-  // 缺省 ⇒ launchArgv("task-worker", prompt)：经 policy 解析，argv[0] 是 profile launcher。
-  const def = workerArgvForTask("gap-x", REPO_ROOT);
-  assert.equal(def[0], "claude-fjdac", "default worker resolves via policy (⛔ bash quay-launch.sh)");
-  assert.match(def[def.length - 1], /gap-x/, "the task prompt is the last argv payload");
-});
-
-// ── gap-worker-worktree-continue-reuse ───────────────────────────────────────────────────────────
-// destroy-path 修复后 exited-not-landed 的 worktree 被【保留】但没人接着做：派发 prompt 仍是「create」
-// ⇒ 重派 worker 一上来 `git worktree add` 撞已存在对象 fatal。AC1（复用不撞死）：保留 worktree 在 ⇒
-// 续做 prompt（复用，⛔ 不含 create）。AC2（续做不重做）：续做 prompt 携带前一轮状态（分支提交 / AC
-// 勾选 / 失败原因）。
+// ── gap-superseded-task-residual-worktree-never-reclaimed：reconcile 步接线 + 端到端回收 ─────────────
+// AC6（接线，非「函数存在」）：常驻循环 reconcile 步实际调用 reclaimSupersededWorktrees（⛔ 仅导出函数而
+// reconcile 步不调 ⇒ round 记录无 superseded_reclaim 字段 ⇒ 该 AC 假）。AC7（读生产载体）：候选数为 0
+// 也记 0（⛔ 不省略）——「跑过且无候选」与「压根没跑」在载体上可区分；关掉注入缝（spawnResident 不注入
+// 任何 reclaim 缝，走真实 git//proc）后仍通过（否则它只是回声）。
 
 
-test("AC1 (能取假) — workerPromptForTask / continueStateForTask: preserved worktree ⇒ continue prompt (reuse, ⛔ create); no worktree ⇒ create prompt", (t) => {
-  const root = makeGitRoot("continue");
-  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
-  t.after(() => {
-    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
-    try { runGit(root, ["branch", "-D", "task/gap-cr"]); } catch { /* best-effort */ }
-    rmSafe(root);
-    rmSafe(wtPath);
-  });
-  writeTaskFile(root, "gap-cr", "ready");
-
-  // 无 worktree ⇒ 创建 prompt（旧行为）。
-  const createPrompt = workerPromptForTask("gap-cr", root);
-  assert.match(createPrompt, /create an isolated git worktree/, "no worktree ⇒ create prompt");
-  assert.doesNotMatch(createPrompt, /CONTINUE \(reuse/, "create prompt does not say reuse");
-  assert.equal(continueStateForTask(root, "gap-cr"), null, "no worktree ⇒ no continue state (create path)");
-
-  // 模拟 exited-not-landed 保留的 worktree ⇒ 续做 prompt。
-  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-cr", wtPath]);
-  const contPrompt = workerPromptForTask("gap-cr", root);
-  assert.match(contPrompt, /CONTINUE \(reuse/, "preserved worktree ⇒ continue prompt");
-  assert.doesNotMatch(contPrompt, /create an isolated git worktree/, "AC1: continue prompt must NOT say create (create ⇒ git worktree add fatal)");
-  assert.match(contPrompt, /do NOT run `git worktree add`/, "AC1: reuse not create");
-  assert.ok(continueStateForTask(root, "gap-cr") != null, "worktree present ⇒ continue state gathered");
-});
-
-
-test("AC2 (能取假) — buildContinueWorkerPrompt carries prior-round state (branch commits / AC check / failure reason)", () => {
-  const p = buildContinueWorkerPrompt("gap-x", "/r", {
-    worktreePath: "/wt",
-    branchCommits: 3,
-    branchHeadSubject: "implement gap-x",
-    acChecked: 2,
-    acTotal: 5,
-    failureReason: "worker exited 0 but task did not land",
-  });
-  assert.match(p, /3 commits/, "AC2: branch commit count carried");
-  assert.match(p, /head: "implement gap-x"/, "AC2: branch head subject carried");
-  assert.match(p, /checked 2\/5/, "AC2: AC check state carried (checked X/Y)");
-  assert.match(p, /because: worker exited 0 but task did not land/, "AC2: failure reason carried");
-  assert.doesNotMatch(p, /create an isolated git worktree/, "AC1: continue prompt never says create");
+test("AC6 (superseded-reclaim wiring) — reconcile step actually calls reclaimSupersededWorktrees (round carries superseded_reclaim, candidate 0 recorded)", async (t) => {
+  const root = makeGitRoot("sup-wire");
+  writeTaskFile(root, "gap-a", "done");
+  // 池空 ⇒ 无派发，但 reconcile 步每轮照跑 ⇒ round 记录必须带 superseded_reclaim（候选 0 记 0，⛔ 省略）。
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => rmSafe(root));
+  await waitFor(() => readRoundLines(root).length >= 1);
+  const rounds = readRoundLines(root);
+  assert.ok(rounds.length >= 1, "at least one round ran");
+  for (const rec of rounds) {
+    assert.ok(rec.superseded_reclaim !== null && rec.superseded_reclaim !== undefined,
+      `round carries a superseded_reclaim result (reconcile wiring exists): ${JSON.stringify(rec.superseded_reclaim)}`);
+    assert.equal(rec.superseded_reclaim.candidateCount, 0, "AC7: candidate 0 is recorded (⛔ not omitted)");
+  }
 });
