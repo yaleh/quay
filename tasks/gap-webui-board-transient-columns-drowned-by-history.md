@@ -73,3 +73,18 @@ extra:
   - **未再跑全量套件**（判别性证据已由上面第 1 条对照给出）：宿主已过载，再叠一条 16 路并发的全量套件会自己诱发同类超时、并可能把别的 worker 的套件推红——属自败动作。
   - **范围外（留给另立任务）**：这 4 个文件都是 child-spawn 形却**未**登记 `@load-sensitive`（`plugin/scripts/known-load-sensitive.ts --list` 无它们），因此落在 16 路 main 桶；但该注册表只喂续做提示文案（`worker-driver.ts:2043/2075` 的 `relatednessSignalsFor`/`formatRelatednessNote`），**既不驱动分桶、也不会触发自动重试**，故本任务无机械杠杆可用。修它不在本任务 Touches 内。
 - **留待 fan-in**：全量套件（`scripts/test.sh` 默认面）由 driver 的机械 fan-in 执行；scoped-gate cache 已按 developSha `888010338` 重写，fan-in 侧不重复 scoped 门。
+
+### 第 3 轮（2026-09-17，第二次续做 exited-not-landed 之后）
+
+- **⚠️ 上一轮 `step=merge-develop: exit null` 的真因已定位：worktree 索引里卡着 3 个 staged 文件**（内容 = develop 版）⇒ `git merge develop` 硬拒：
+  ```
+  error: Your local changes to the following files would be overwritten by merge:
+    .quay/routine-findings.jsonl tasks/gap-ac288-webui-lang-switch-mechanism.md tasks/gap-webui-board-transient-columns-drowned-by-history.md
+  Merge with strategy ort failed.
+  ```
+  **处置**：三个文件先用 `git hash-object <path>` vs `git rev-parse develop:<path>` 逐字核对，**确认与 develop 完全一致**（`e83256d0` / `eb698ae3` / `45e7f60a`）⇒ `git reset HEAD -- <3>` + 将两个 tracked 文件恢复为 HEAD 版、删掉那个 develop 侧的未跟踪新增文件（**内容由紧接着的 merge 原样带回，零丢失**）。
+  **⚠️ 给下一次续做的判据**：`merge-develop` 报错时**先看索引干不干净**（`git status --short` 第一列），别急着怀疑分支或代码——本次 `exit null` 就是这么来的，且它**不会**留下 `MERGE_HEAD`（merge 从未开始），所以从「分支落后/无进行中 merge」两个角度都看不出问题。
+- **pre-merge + scoped 门（本轮一次性重做，全部在 post-merge HEAD 上取值）**：`git merge develop` 无损通过（develop 已前进 13 提交，两边无共同改动文件 ⇒ 无冲突；新 merge commit，`behind=0`）；`scripts/test.sh --for-task gap-webui-board-transient-columns-drowned-by-history --allow-thin` = **exit 0 / 99 tests / 0 fail / 45.3s**，本任务新增 4 条逐条在场：`✔ AC1: default view with 0 in-flight…` / `✔ AC1/AC3: with 1 in-flight…` / `✔ guard: an unread transient source…` / `✔ render: transientView=applied…`。
+- **对上一轮 suite 红的独立对照（本轮亲自重跑，不引用第 2 轮的转述）**：那 4 个失败文件隔离复跑 = **exit 0 / 125 tests / 0 fail / 61.0s**（同一批文件在 16 路全量里是 `fail 4`、单文件 146–203s）⇒ **不重现**，与第 2 轮的「宿主资源饥饿」诊断一致，且这次是在**更靠后的 HEAD**（已含 develop 那 13 提交）上取的。现场 `loadavg 5.7 / 16 核`（上一轮该窗口是 18.4）。
+- **AC1 回归面本轮亲验**：`scripts/test.sh packages/quay/test/serve-board.test.mjs` = **exit 0 / 11 tests / 0 fail**（该文件**不在** scoped 选集内，故单列一条控制，不靠第 2 轮的转述）。
+- **仍未跑全量套件**：worker 不跑全量、由 driver 的机械 fan-in 跑；且宿主当时仍有在飞同侪，叠一条 16 路全量属自败动作（同第 2 轮理由）。
