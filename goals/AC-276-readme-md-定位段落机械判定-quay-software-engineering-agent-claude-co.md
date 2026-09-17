@@ -1,7 +1,7 @@
 ---
 id: AC-276
 title: README.md 定位段落机械判定：quay=software engineering agent，Claude Code=其基础设施（内蕴，非反向）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-021
 criterion: >-
@@ -60,6 +60,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-17T02:11:48.196Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
