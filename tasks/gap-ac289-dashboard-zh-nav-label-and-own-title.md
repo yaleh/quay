@@ -78,6 +78,13 @@ English nav label "Dashboard"`（**nav 标签**），而实现匹配的是**整�
 `/dashboard` 的 ready 卡上**。⇒ 本任务的 title 因此**刻意不含大写 `Dashboard`**（判据是大小写敏感的），
 否则它会亲手把 AC-289 的判据钉死。**这条约束对 AC-290~303 的后续立案同样成立。**
 
+> **✅ 立案后更新（2026-09-17，判据所有者已修，本任务落地时实测）**：上面这条缺陷**已被其所有者修好**——
+> `goals/AC-289-*.md` 现行版本把两处断言都收窄到了 **chrome 作用域**：nav 标签只对 `<nav>…</nav>` 区块匹配
+> （`nav_zh=$(printf '%s' "$zh" | tr '\n' ' ' | grep -o '<nav.*</nav>' | head -c 60000)`），
+> `<title>` 只对 `<title>` 匹配。origin 里明写了这正是为了避开两处非 chrome 命中。
+> ⇒ **本任务落地时该判据已可满足**，AC4 因此记录的是 `pass` 而非预期的 `fail`。
+> 上面这段「判据缺陷」的记述**保留**，因为它是判据演进的历史与理由，但它**不再是本任务的残留**。
+
 ### 作用域：本任务做 `/dashboard`，但 nav 字典是**一张**共享结构
 
 - **必须一次做完的**：`SITE_NAV_GROUPS`（`serve-render.ts:822`）是**15 个页共用的一个数组**，
@@ -95,6 +102,10 @@ English nav label "Dashboard"`（**nav 标签**），而实现匹配的是**整�
 主检出 `ls packages/quay/src/serve-lang.ts` ⇒ `No such file`。而判据**先**查 `<html lang="zh">`
 （现行红读数 `CAUSE=html-lang-not-zh` 正是它）。⇒ zh 面的达成以该机制落地为前提，故顶层 `depends_on` 指向它
 （机制化的声明，⛔ 不靠文风上的「先做」）。
+
+> **✅ 落地时实测**：AC-288 已 fan-in 到 develop（`git cat-file -e develop:packages/quay/src/serve-lang.ts` ⇒ exit 0；
+> `packages/quay/src/serve-dashboard.ts` 已有 `htmlLangTag(opts.lang)` 与两处 `lang: cfg.lang`）。
+> 前置满足，**未重写解析器**（Plan step 2 的两条命中都成立）。
 
 <!-- dedup-ref -->
 去重核对：顶层 `goal_ac: AC-289` **零命中**（`grep -rn '^goal_ac: AC-289' tasks/*.md` ⇒ 无输出）。
@@ -129,27 +140,35 @@ English nav label "Dashboard"`（**nav 标签**），而实现匹配的是**整�
 
 ## AC
 
-- [ ] **AC1（live 面判别性读数：三处 chrome 各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
+- [x] **AC1（live 面判别性读数：三处 chrome 各自独立断言）**：在**运行中的** `quay.ts serve`（cwd = 仓库根）上，
   `curl -H 'Cookie: lang=zh' http://$addr/dashboard` 的响应**分别**满足：① 含 `<html lang="zh"`；
   ② nav 当前项**两处**（桌面 `class="nav-item nav-current"` 与移动 `class="mobile-menu-item nav-current"`）
   的文本都**不是** `Dashboard`；③ 该页**自己的** `<title>` 与 en 基线**逐字不同**（并排贴 en/zh 两条 `<title>`）。
   ⛔ 三处分开断言、分开贴原始片段——只报「整页看起来翻了」不算（硬规则 3：枚举不是布尔）。
-- [ ] **AC2（可被打红——因果对照）**：在 `handleAllRoutes` 处把语言**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
+  ⇒ 证据 §2（三处分开的 en/zh 原始片段）。
+- [x] **AC2（可被打红——因果对照）**：在 `handleAllRoutes` 处把语言**临时**钳到 `"en"`（一次性本地改动，⛔ 不提交），
   证明 AC1 的 ②/③ 变红；还原后复绿。**两次读数并排贴出**。⛔ 无此对照 ⇒「是字典接线造成的」只是一句未被检验的断言
   （硬规则 4 推论四：一个能解释现象的说法不是一个被检验的结论）。
-- [ ] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -o 'Dashboard' | wc -l`，
+  ⇒ 证据 §3（**跑了两次对照**：钳 `handleAllRoutes` 与更窄的「只钳字典」——后者把成因单独钉在字典接线上）。
+- [x] **AC3（全量残留枚举 + 逐条归属，⛔ 不报「零」）**：对 zh 响应跑 `grep -o 'Dashboard' | wc -l`，
   把**每一条**命中的 HTML 片段与它的**产生源**贴出（chrome 出自哪一行源码 / 数据出自哪个 `tasks/*.md`），
   并给出 **chrome 计数**与**数据计数**两个数。⛔ 禁止把总数报成 0，也禁止只报一个总数（硬规则 3）。
-- [ ] **AC4（判据裁决原样记录 + 交给判据所有者）**：贴出**实现后**的
+  ⇒ 证据 §4：总数 **1**，chrome **0** / 数据 **1**，逐条归属。
+- [x] **AC4（判据裁决原样记录 + 交给判据所有者）**：贴出**实现后**的
   `node packages/quay/bin/quay.js goal gate AC-289 --dry-run --json` 完整输出（⛔ 不解释、不改写它的 `CAUSE`），
   并在任务体写明：若它仍红，其唯一残留是 AC3 里的**数据**命中，判据的整段子串谓词比它自述的「nav label」更宽
   ⇒ **判据缺陷，归其所有者**（`goals/AC-289-*.md` ⛔ 不在本 Touches 内）。⛔ **明令禁止**的两种「凑绿」：
   改判据、改别的任务的 title。**这两种做法若出现，本任务视为失败。**
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac289-dashboard-zh-nav-label-and-own-title` 绿；
+  ⇒ 证据 §1 + §5：判据已由**其所有者**收窄到 chrome 作用域（非本任务所改），故实现后裁决为 `pass`；
+  本条仍按原样记录，且「未改判据、未改他人 title」有 AC5③ 的 `git diff --name-only` 为证。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac289-dashboard-zh-nav-label-and-own-title` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs` 绿；③ **作用域举证**：
   `grep -rc 'renderSiteNav(' packages/quay/src/*.ts` **逐文件**贴出，证明其余 12 个文件的调用点**一字未动**；
   ④ `grep -rn 'html lang="en"' packages/quay/src/*.ts` 的总数相对立案基线（**23**）**只减少 dashboard 那 1 处**
   （其余 22 处属 AC-290~303）——若 AC-288 尚未落地，此项以「同口径前后对照」形式给出，⛔ 不假装它已减。
+  ⇒ 证据 §6：① scoped 门 101/0 绿；② `serve-*.test.mjs` 200 pass / 0 fail / 1 skip；
+  ③ 逐文件计数 + `git diff --name-only` 只有本任务 3 个文件；④ 23→22 那 1 处的减少**是 AC-288 的提交 `e778958bf` 做的**
+  （已用 `git grep` 在三个 ref 上同口径实测），**本任务 Δ=0**，如实记录、⛔ 不冒充。
 
 ## DoD
 
@@ -166,6 +185,189 @@ English nav label "Dashboard"`（**nav 标签**），而实现匹配的是**整�
    + 重跑 `npm run build -w quay`）与它的作用域（纯本地代码、无外部状态）。
 6. **证据留痕**：红/绿判据输出、en/zh 两条原始响应片段、因果对照两次读数、全量残留枚举、逐文件计数，
    落成**任务体内联**或**未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
+
+## 证据（DoD 6 —— 内联，可被下一轮独立复算）
+
+所有读数取自**运行中的 `quay.ts serve`**（`--host 127.0.0.1 --port 43189`，进程 cwd = 本任务 worktree
+`/home/yale/work/quay-worktrees/gap-ac289-dashboard-zh-nav-label-and-own-title`，即本任务运行时的
+`git rev-parse --show-toplevel`）。⛔ 不读 render 函数返回值当「响应」——以下每条都是从**响应体**直读的原始片段
+（硬规则 4 推论三：fixture / 函数返回值只证明「能产出」，不证明「已产出」）。最终读数在**合并 develop 之后**的树上采集。
+
+### 1. 判据裁决：红 → 绿 →（对照）红 → 绿（AC4）
+
+**红基线（实现前，2026-09-17T16:32:30Z，cwd = 主检出）**——⛔ 注意：主检出上那个实例（pid 3696699）是
+AC-288 落地**之前**启动的陈旧进程，所以它连 `<html lang="zh">` 都还没有；这正是 origin 里那句
+「实现落地后须重启该实例」所指的操作前提：
+
+```json
+{"id":"AC-289","verdict":"fail","reason":"acceptance failed (exit 1) — CAUSE=html-lang-not-zh -- /dashboard with Cookie: lang=zh did not respond <html lang=\"zh\"> (addr=127.0.0.1:4173)","timestamp":"2026-09-17T16:32:30.008Z","dryRun":true}
+GATE_EXIT=1
+```
+
+**绿（实现后 + 合并 develop 后，2026-09-17T16:45:36Z 采集，判据时间戳 16:45:39.755Z）**：
+
+```json
+{"id":"AC-289","verdict":"pass","reason":"acceptance passed (exit 0)","timestamp":"2026-09-17T16:45:39.755Z","dryRun":true}
+GATE_EXIT=0
+```
+
+### 2. AC1 —— 三处 chrome 各自独立的原始响应片段（en / zh 并排）
+
+```
+(0) 机制本身
+en : <html lang="en"
+zh : <html lang="zh"
+
+(1a) 桌面导航当前项（class="nav-item nav-current"）
+en : <span class="nav-item nav-current" aria-current="page">Dashboard</span>
+zh : <span class="nav-item nav-current" aria-current="page">仪表盘</span>
+
+(1b) 移动端菜单当前项（class="mobile-menu-item nav-current"）
+en : <span class="mobile-menu-item nav-current" aria-current="page">Dashboard</span>
+zh : <span class="mobile-menu-item nav-current" aria-current="page">仪表盘</span>
+
+(2) 该页【自己的】<title>
+en : <title>gap-ac289-dashboard-zh…cdc728f9 — Dashboard</title>
+zh : <title>gap-ac289-dashboard-zh…cdc728f9 — 仪表盘</title>
+
+(3) 该页【自己的】<h1>
+en : <h1>Dashboard</h1>
+zh : <h1>仪表盘</h1>
+```
+
+三处**分开断言、分开贴**（硬规则 3：枚举不是布尔）。④ 非 chrome 对照：en 响应体大小 58455 B / zh 58467 B，
+两者除上述 chrome 外**同构**——zh 不是「整页重渲染」。
+
+### 3. AC2 —— 因果对照，**跑了两次**（硬规则 4 推论四：一个能解释现象的说法不是被检验的结论）
+
+**对照 ①（题面要求的那一个）：在 `handleAllRoutes` 把解析出的语言临时钳到 `"en"`**，一次性本地改动、未提交、
+用后删除（`git diff --name-only` 事后为空，见 §6）：
+
+```
+html lang : <html lang="en"
+desktop   : <span class="nav-item nav-current" aria-current="page">Dashboard</span>
+mobile    : <span class="mobile-menu-item nav-current" aria-current="page">Dashboard</span>
+title     : <title>gap-ac289-dashboard-zh…cdc728f9 — Dashboard</title>
+h1        : <h1>Dashboard</h1>
+
+criterion : {"verdict":"fail","reason":"...CAUSE=html-lang-not-zh -- /dashboard with Cookie: lang=zh did not respond <html lang=\"zh\"> (addr=127.0.0.1:43189)"}
+```
+
+⇒ AC1 的 ②/③ **确实变红**。但这条对照在**第一段**就红了，因此它**没有把成因单独钉在本任务的接线上**。
+
+**对照 ②（更窄、判别力更强，本次额外做的）：只把字典钳到 `en`**（`navLabelsFor` / `pageNameFor` 首行强制
+`lang="en"`），**AC-288 的机制原封不动**——于是 `<html lang>` 仍然正确：
+
+```
+html lang : <html lang="zh"          ← AC-288 的机制仍然工作
+desktop   : <span class="nav-item nav-current" aria-current="page">Dashboard</span>
+mobile    : <span class="mobile-menu-item nav-current" aria-current="page">Dashboard</span>
+title     : <title>gap-ac289-dashboard-zh…cdc728f9 — Dashboard</title>
+
+criterion : {"verdict":"fail","reason":"...CAUSE=nav-label-untranslated -- the nav region of /dashboard under Cookie: lang=zh still renders the literal English nav label \"Dashboard\"; the nav is not wired to the zh dictionary"}
+```
+
+⇒ **成因被单独证实为字典接线**：`<html lang>` 正常而 nav 标签变红，判据自报的 `CAUSE=` 正是
+`nav-label-untranslated` —— **不是**别的东西。**还原后复绿**（§1 的绿读数，16:45:39Z）。
+
+### 4. AC3 —— 全量残留枚举 + 逐条归属（⛔ 不报「零」）
+
+zh 响应体上 `grep -o 'Dashboard' | wc -l` ⇒ **总数 = 1**。逐条（行号取自 `grep -n`）：
+
+| # | 位置 | HTML 片段 | 产生源 | 归属 |
+|---|---|---|---|---|
+| 1 | zh 响应 `:768` | `<div style="color:var(--color-text);font-size:0.75rem">Web UI 展示层三处小修复合并（favicon 缺失 / Tasks 默认排序 / Dashboard 双列不等高拉伸留白）</div>` | `tasks/gap-webui-dashboard-tasks-display-polish.md:3` 的 `title:`（`status: ready`，故进 `/dashboard` 的 ready 卡） | **数据**（不是 chrome） |
+
+**两个数**：**chrome 计数 = 0**，**数据计数 = 1**。
+
+chrome 侧的判别性证法（⛔ 不是「数出来是 0」）：按判据自己的口径抽出 nav 区块再数 ——
+`tr '\n' ' ' < zh | grep -o '<nav.*</nav>' | grep -c 'Dashboard'` ⇒ **0**（nav 区块 2436 B），
+而同一个谓词在 **en** 响应上 ⇒ **1**（命中 `nav-current` 那一处）。
+⇒ 「zh 的 nav 里没有这个字面量」是一个**能取假的量**，不是空断言。
+
+### 5. AC4 —— 判据裁决诚实记录
+
+- §1 的绿读数（`verdict: "pass"`, `exit 0`）**原样**贴出，未改写其 `reason`。
+- **裁决为什么是 pass 而不是预期中的 fail**：判据**已被其所有者**（`goals/AC-289-*.md`，⛔ 不在本任务 Touches 内）
+  收窄到 **chrome 作用域**（nav 只匹配 `<nav>…</nav>`、标题只匹配 `<title>`），origin 明写这正是为了避开
+  「`/board` 的 CSS 注释含 Board」与「`/dashboard` 渲出含 Dashboard 的任务标题」两处非 chrome 命中。
+  ⇒ 立案当轮那条「判据结构性不可满足」的缺口**已由判据所有者消除**，**⛔ 不是本任务改的**。
+- **⛔ 两种明令禁止的「凑绿」均未发生**，可查：① 判据文件未被本任务改动——`git diff --name-only develop...HEAD`
+  只有本任务 Touches 里的 4 条路径（§6③）；② 未改任何别的任务的 `title`——`tasks/gap-webui-dashboard-tasks-display-polish.md`
+  的 title 逐字未动，且 §4 证明它**仍然**出现在 zh 响应里（若被改掉，§4 的「数据计数 = 1」会变成 0）。
+- **遗留（归判据所有者，不是本任务残留）**：该判据现在是**时间敏感**的——`/dashboard` 的 ready 卡只取最近 10 条，
+  §4 的那条数据命中在不在取决于当时池里有哪些任务。**但它已不进 nav 区块**，故不再影响裁决。
+
+### 6. AC5 —— 不回归 + 作用域枚举
+
+**① scoped 门（合并 develop 后重跑）**：`bash scripts/test.sh --for-task gap-ac289-dashboard-zh-nav-label-and-own-title --allow-thin`
+⇒ `EXIT=0`，`tests 101 / pass 101 / fail 0`，且本任务新测试被选中（输出第 164 行 `+ packages/quay/test/serve-i18n.test.mjs`）。
+
+**② `node --test packages/quay/test/serve-*.test.mjs`** ⇒ `tests 201 / pass 200 / fail 0 / skipped 1`。
+
+**③ 作用域 —— 逐文件调用点计数（非零项；其余 33 个 `packages/quay/src/*.ts` 全部为 0）**：
+
+```
+serve-adr.ts:2          serve-architecture.ts:1   serve-board.ts:1
+serve-dashboard.ts:1    serve-doc.ts:2            serve-git.ts:2
+serve-goal.ts:2         serve-live.ts:2           serve-needs-human.ts:1
+serve-send.ts:1         serve-sessions.ts:2       serve-system.ts:2
+serve-task.ts:2         serve-tests.ts:2          serve-render.ts:1 (定义处)
+```
+
+`renderMobileChrome(` 的逐文件分布与上表**逐格相同**。
+
+**更强的证法（计数是代理量，diff 是直接量）**：`git diff --name-only develop...HEAD` ⇒
+
+```
+packages/quay/src/serve-dashboard.ts
+packages/quay/src/serve-render.ts
++ 新增 packages/quay/src/serve-i18n.ts
++ 新增 packages/quay/test/serve-i18n.test.mjs
+```
+
+⇒ **其余 12 个 `serve-*.ts` 的 23 个调用点一字未动**，靠的是四个渲染函数的**默认参数**，⛔ 不是靠「不要去改」。
+
+**④ 硬编码 `html lang="en"` 的同口径前后对照**（AC5④ 要求的「⛔ 不假装它已减」）：
+
+| 时点 | 全仓库 `packages/quay/src/*.ts` 命中总数 |
+|---|---|
+| `e778958bf^`（AC-288 落地前） | **23** |
+| `e778958bf`（AC-288 落地） | 22 |
+| `develop`（本任务 base） | 22 |
+| 本任务工作树 | **22** |
+
+⇒ 立案基线的 **23 → 22 那 1 处减少是 AC-288 的提交 `e778958bf` 做的**（它把 `serve-dashboard.ts` 的
+`html lang="en"` 换成了 `htmlLangTag(opts.lang)`），**本任务 Δ = 0** —— 因为本任务 Touches 里的文件
+已无该字面量。**如实记录，⛔ 不冒充成自己的减量。** 其余 22 处属 AC-290~303。
+
+### 7. 回滚形态（DoD 5）
+
+纯本地代码，无外部状态：
+
+```bash
+git revert <本任务 squash 提交>            # 或手工：
+rm packages/quay/src/serve-i18n.ts
+rm packages/quay/test/serve-i18n.test.mjs
+git checkout <base> -- packages/quay/src/serve-render.ts packages/quay/src/serve-dashboard.ts
+npm run build -w quay                      # dist/ 是 gitignored 的本地产物，必须重建
+```
+
+作用域：仅 `packages/quay/src/serve-{i18n,render,dashboard}.ts` + 一个新测试文件；
+**无** `.quay/` 运行时状态、**无** frontmatter/任务状态、**无**外部服务。回滚后 en 页面行为逐字还原
+（`lang` 的默认值就是 `en`），zh 页面退回「只有 `<html lang>` 是中文」的 AC-288 状态。
+
+### 8. 落地时未做 / 明确排除（避免下一轮误读为遗漏）
+
+- ⛔ 未改 `goals/AC-289-*.md`（属人与驱动的维护面）。
+- ⛔ 未改其余 14 页的 `<title>`/`<h1>`（属 AC-290~303）。
+- ⛔ 未翻译 nav 的**分组标题**（`核心/观测/记录/知识`）——它们两种语言下**已经是中文**，且不是 per-view 标签，
+  不在 AC-289 断言范围内；改动会移动 en 基线。
+- ⛔ 未翻译 `renderMobileChrome` 的 `pageLabel`（`/dashboard` 传的是 `"dashboard"`，渲染在
+  `<header class="mobile-header">` 里，**不在 `<nav>` 区块内**、不被任何断言触及）；它是**既有**的下游小缺口，
+  与本任务的三处 chrome 无关，留给其所有者。
+- ⛔ 未重启主检出 `/home/yale/work/quay` 上的陈旧实例（pid 3696699，AC-288 之前启动）——本任务不拥有
+  `develop` 上的代码，fan-in 落地后才谈得上重启；本任务的全部 live 读数取自**运行本任务代码**的 worktree 实例。
 
 ## Touches
 
