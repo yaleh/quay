@@ -265,6 +265,7 @@ export {
   type LivenessResult,
 } from "./driver-runtime.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
+import { runPushLagCheck, resolvePushLagThresholdMs, type PushLagOutcome } from "./fan-in-push-lag-check.ts";
 import { parse as parseYaml } from "yaml";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -1282,6 +1283,59 @@ export function appendOutcome(root: string, outcome: ReturnType<typeof computeOu
 // 单一真相源从「bash promotion-driver-launch.sh liveness」改为「node driver-runtime.ts liveness」——
 // supervisor 港进 TS 后 liveness 子命令随 kernel 一起（AC151）。
 
+/** 本轮的 push 滞后检查读数（gap-fan-in-push-silently-fails-no-detection AC7 的**生产可观测载体**：
+ *  生产 driver argv 无 `--json`，round 记录是它唯一每轮必写的载体——检测器的结论必须落在这里，否则
+ *  「报出来了」只在测试里成立，硬规则 4 推论三的读生产载体半边缺席）。 */
+export interface PushLagRoundRecord {
+  verdict: string;
+  ahead: number | null;
+  behind: number | null;
+  oldestAheadSha: string | null;
+  lagMs: number | null;
+  /** null = 阈值没解析出来（本步自己抛错的那一支）——⛔ 不与「阈值 = 0」共用取值。 */
+  thresholdMs: number | null;
+  thresholdSource: string;
+  retry: string | null;
+  laggingAtMeasure: boolean;
+  eventFile: string | null;
+}
+
+/** 把一次 push 滞后判定投影成 round 载体的字段（⛔ 不整个 PushLagOutcome 塞进去：round 记录每轮写，
+ *  reading 里的大对象会让载体无谓膨胀；投影保留全部【判定取值】字段，⛔ 不丢可区分性）。 */
+export function projectPushLag(outcome: PushLagOutcome): PushLagRoundRecord {
+  const r = outcome.reading;
+  return {
+    verdict: outcome.verdict,
+    ahead: r.ahead, behind: r.behind,
+    oldestAheadSha: r.oldestAheadSha,
+    lagMs: r.lagMs,
+    thresholdMs: r.thresholdMs,
+    thresholdSource: r.thresholdSource,
+    retry: outcome.retry,
+    laggingAtMeasure: outcome.laggingAtMeasure,
+    eventFile: outcome.eventFile,
+  };
+}
+
+/** 常驻环每轮跑一次 push 滞后检查（gap-fan-in-push-silently-fails-no-detection AC7 的挂点实现）。
+ *  **⛔ 本步抛错绝不冒泡**：远端不可达 / 凭据失效 / 瞬时 fs 异常都是「下一轮重试」而不是「整轮 error」。
+ *  但也不返回 null——null 的语义是「本轮没跑该步」，与「跑了但炸了」混同就是硬规则 3b 的镜像半边
+ *  （读不懂伪装成没这回事）。⇒ 返回一条 verdict=not-evaluated 的读数，来源串带上真因。 */
+export function runPushLagPass(root: string, branch: string, remote: string, roundIntervalMs: number): PushLagRoundRecord {
+  try {
+    const th = resolvePushLagThresholdMs({ root, roundIntervalMs });
+    return projectPushLag(runPushLagCheck({ root, branch, remote, thresholdMs: th.ms, thresholdSource: th.source }));
+  } catch (e) {
+    return {
+      verdict: "not-evaluated",
+      ahead: null, behind: null, oldestAheadSha: null, lagMs: null,
+      thresholdMs: null,
+      thresholdSource: `error:${(e as Error)?.message ?? "unknown"}`,
+      retry: null, laggingAtMeasure: false, eventFile: null,
+    };
+  }
+}
+
 /**
  * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
  * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
@@ -1337,6 +1391,9 @@ export function computeWorkerRoundRecord(opts: {
    *  且无候选」与「压根没跑」在载体上可区分，硬规则 4 推论三的读生产载体半边）。缺省 null = 没跑该步
    *  （⛔ 与 candidateCount=0 区分）。 */
   supersededReclaim?: ReclaimSupersededResult | null;
+  /** 本轮 push 滞后检查的读数（gap-fan-in-push-silently-fails-no-detection AC7）。缺省 null = 本轮
+   *  **没跑**该步（⛔ 与「跑了且 in-sync」可区分——同 supersededReclaim 的约定，硬规则 4 推论三）。 */
+  pushLag?: PushLagRoundRecord | null;
 }) {
   return {
     ts: opts.at,
@@ -1359,6 +1416,9 @@ export function computeWorkerRoundRecord(opts: {
     retry_exemptions: opts.retryExemptions ?? [],
     exited_not_landed_stops: opts.exitedNotLandedStops ?? [],
     superseded_reclaim: opts.supersededReclaim ?? null,
+    // gap-fan-in-push-silently-fails-no-detection AC7：本轮 push 滞后检查读数（in-sync 也记，
+    // ⛔ 不省略——「跑过且无滞后」与「没跑该步」在载体上可区分；后者为 null）。
+    push_lag: opts.pushLag ?? null,
   };
 }
 
@@ -5097,6 +5157,11 @@ export interface ResidentOptions {
   /** 快速死亡退避配置（gap-worker-driver-selector-api-error-no-backoff）：quickDeathMs / backoffThreshold /
    *  baseBackoffMs / maxBackoffMs。退避上限（markNeedsHuman 阈值）复用上面的 maxRetries。 */
   backoffCfg: QuickDeathBackoffConfig;
+  /** push 滞后检查的被推分支（gap-fan-in-push-silently-fails-no-detection）：缺省 = 机械 fan-in 的
+   *  merge target（develop）。⛔ 不硬编码在检查器里——第三方项目的基线分支不叫 develop。 */
+  pushBranch?: string;
+  /** push 滞后检查的远端名；缺省 origin。 */
+  pushRemote?: string;
 }
 
 /**
@@ -5111,6 +5176,10 @@ export interface ResidentOptions {
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries, backoffCfg } = opts;
+  // push 滞后检查的被推分支/远端（gap-fan-in-push-silently-fails-no-detection）：缺省 = 机械 fan-in 的
+  // merge target（develop）/ origin —— 该分支正是本驱动 ff 落地的那条线，也是「领先 orgin 就该推」的对象。
+  const pushBranch = opts.pushBranch ?? "develop";
+  const pushRemote = opts.pushRemote ?? "origin";
 
   // 主检出脏状态观察（阶段 2 ③，gap-worker-driver-stashifdirty-stashes-others-uncommitted）：⛔ 不 stash
   // 共享主检出（脏改动属他人）。stash 事件仍发射供观测（stashed=false + files 列出脏文件）。非 git no-op。
@@ -5160,6 +5229,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 硬规则 6 来源不完备）。这些 task 不占内存 running（无 promise 可 await），但作为「已在飞」参与
   // ready-pool 减项 / active 过滤 / Touches 互斥，⛔ 不阻塞其它 task 的派发。
   let coldInflight = new Set<string>();
+  // 本轮 push 滞后检查读数（gap-fan-in-push-silently-fails-no-detection AC7）。⚠️ 声明在 while 之外
+  // （与 coldInflight 同族）⇒ writeRound / writeErrorRound 直接从闭包读它，两处调用的签名逐字不变；
+  // 每轮开头显式复位 ⇒ ⛔ 上一轮的读数不会漏进本轮（尤其不会把「上一轮跑过」伪装成本轮跑过，硬规则 3b）。
+  let pushLagReading: PushLagRoundRecord | null = null;
   const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
   // gap-live-fan-in-window-elapsed-zero：每任务派发时刻（task id → ISO 起始）。只覆盖内存 running
   // （driver 派发时已知 startedAtMs）；冷启动在飞 task 无起点 ⇒ 不入图（readLive 对缺起点回退 nowMs，
@@ -5204,6 +5277,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-superseded-task-residual-worktree-never-reclaimed AC7：本轮 superseded worktree 回收结果
       // （候选数 0 也记 0，⛔ 不省略——「跑过且无候选」与「没跑」可区分）。
       supersededReclaim,
+      // gap-fan-in-push-silently-fails-no-detection AC7（闭包读，见 pushLagReading 的声明注释）。
+      pushLag: pushLagReading,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -5233,6 +5308,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       reconciledNeedsHuman: [],
       retryExemptions: [],
       exitedNotLandedStops: [],
+      // 抛错发生在 push-lag 步【之后】时，本轮确实跑过该步 ⇒ 把它带上（⛔ 不因「本轮以 error 收尾」
+      // 就抹成 null——那会让「跑过且无滞后」与「没跑」在错误轮上不可区分，硬规则 3b）。
+      pushLag: pushLagReading,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -5445,6 +5523,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     let liveness: LivenessResult | null = null;
     let reconciled: string[] = [];
     let supersededReclaimResult: ReclaimSupersededResult | null = null;
+    pushLagReading = null; // 每轮复位（见上面的声明注释）
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -5494,6 +5573,21 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         process.stdout.write(
           `${JSON.stringify({ event: "superseded-reclaim", candidate_count: supersededReclaimResult.candidateCount, reclaimed: supersededReclaimResult.reclaimed, skipped: supersededReclaimResult.skipped })}\n`,
         );
+      }
+
+      // 1c. push 滞后检查（gap-fan-in-push-silently-fails-no-detection AC7 的挂点）。
+      //   **这一条修的是事故本身**：`runMechanicalFanIn` 全段零 push（只有 ff-merge 的本地
+      //   `git push . task/X:develop`），于是「任务 done」与「代码到达 origin/develop」脱钩——实测
+      //   两次（2026-09-16 / 09-17），两次都靠人/别的 Monitor 偶然发现。
+      //   ⛔ 不新造循环/驱动 kind：唯一真会做 fan-in 的常驻进程就是本循环，所以挂在这里（与上一步
+      //   reclaim-superseded 同族：都是「每轮顺手做的机械家务」）。
+      //   读数是【每轮必记】的（pushLagReading 进 round，见 AC7——生产 driver argv 无 --json，
+      //   round 记录是它唯一的可观测载体）；检测器自己只在【有信号】时写 .quay/fan-in-push-lag.jsonl。
+      //   ⛔ 本步失败绝不能让整轮抛错（net 抖动/凭据问题 ⇒ 下一轮重试，不是错误轮）。
+      step = "push-lag";
+      pushLagReading = runPushLagPass(rootDir, pushBranch, pushRemote, reconcileMs);
+      if (json && pushLagReading && pushLagReading.verdict !== "in-sync") {
+        process.stdout.write(`${JSON.stringify({ event: "push-lag", ...pushLagReading })}\n`);
       }
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
