@@ -11,6 +11,7 @@ children: []
 extra:
   schema: plan
 ---
+
 **type:** execution
 
 ## Proposal
@@ -55,7 +56,9 @@ extra:
 
 ## Touches
 
-- plugin/scripts/fan-in-push-lag-check.ts（或实现者确定的实际文件名，new）
-- plugin/test/fan-in-push-lag-check.test.mjs（或对应实际文件名，new）
-- 挂载点文件（driver 轮转脚本 / `.quay/config.yml` routines，由实现者读代码后确定，须在 AC7 证据中给出具体 file:line）
+- plugin/scripts/fan-in-push-lag-check.ts (new)
+- plugin/test/fan-in-push-lag-check.test.mjs (new)
+- plugin/probes/fan-in-push-lag.md (new)
+- plugin/scripts/sync-lag-check.sh（既有的本地-vs-origin 滞后测量 + push 实现，检测器复用/扩展它）
+- plugin/scripts/worker-driver.ts（机械 fan-in 的 driver 轮转，挂载候选）
 - tasks/gap-fan-in-push-silently-fails-no-detection.md（自身）
