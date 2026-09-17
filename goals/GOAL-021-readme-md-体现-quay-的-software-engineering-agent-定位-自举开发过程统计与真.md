@@ -1,7 +1,7 @@
 ---
 id: GOAL-021
 title: README.md 体现 quay 的 software engineering agent 定位、自举开发过程统计与真实截图
-status: active
+status: achieved
 kind: goal
 origin: manager 2026-09-16 激活：3 条 AC 已就位
 activatedAt: 2026-09-16T23:33:26.425Z
@@ -11,6 +11,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-17T02:26:48.639Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景（2026-09-16，人裁定 + manager 会话实测数据）
 
