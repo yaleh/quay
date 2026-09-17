@@ -130,31 +130,31 @@ AC-280 的 `grep -n` 是**逐物理行**的，`case "$CALL_LINE_TEXT" in *"&"*)`
 
 ## AC
 
-- [ ] **AC1（goal 判据）**：AC-280 判据逐字重跑 exit 0。把 `goals/AC-280-*.md` 的 `criterion:` 块原样
+- [x] **AC1（goal 判据）**：AC-280 判据逐字重跑 exit 0。把 `goals/AC-280-*.md` 的 `criterion:` 块原样
       放进 `bash <<'CRIT' … CRIT` 跑一次，贴出 `backgrounded=1 wait_found_within_40=1` 与退出码。
-- [ ] **AC2（真判据，位置判定 + 可分辨）**：调用行的 `&` 与它之后的 `wait` 搬运的是**用例自己的退出码**，
+- [x] **AC2（真判据，位置判定 + 可分辨）**：调用行的 `&` 与它之后的 `wait` 搬运的是**用例自己的退出码**，
       不是 `&` 的状态。做法：用 `plugin/test/checker-mutation-check.test.mjs` 里那个现成 fixture
       （零依赖探针 `fake-zerodep-check` ⇒ 必须被报 `stayed-green`），跑
       `bash plugin/scripts/checker-mutation-check.sh --repo-root <tmp> --run --json`，
       断言 `results["fake-zerodep-check"] == "stayed-green"` ∧ `mutations_that_stayed_green >= 1`。
       **贴出实际 JSON 片段。**
-- [ ] **AC3（负控制，必须能取假）**：把「朴素后台符、无结果通道」这一形态做成一份脚本副本
+- [x] **AC3（负控制，必须能取假）**：把「朴素后台符、无结果通道」这一形态做成一份脚本副本
       （`sed` 或补丁），对同一 fixture 跑 AC2 的断言 ⇒ **必须失败**（该形态会把 `fake-zerodep-check`
       记成 `pass`）。贴出该失败输出。⛔ 不做这一步，AC2 无法与「恒绿」区分（硬规则 4）。
-- [ ] **AC4（等价性，Plan 5）**：并行 `--run --json` 与串行（改前脚本，`git show` 取旧版即可）的
+- [x] **AC4（等价性，Plan 5）**：并行 `--run --json` 与串行（改前脚本，`git show` 取旧版即可）的
       `results` 映射**逐键相等**——键集相同且每个值相同。贴出两份提取片段与 `diff` 结果。
       任一例不同 ⇒ 定位到该用例的共享状态并处置（隔离或串行化），⛔ 不得靠放宽比对通过。
-- [ ] **AC5（并发宿主推导，无字面量）**：贴出推导那一行的原文（含 `nproc` / `STATIC_CHECK_CONCURRENCY`）
+- [x] **AC5（并发宿主推导，无字面量）**：贴出推导那一行的原文（含 `nproc` / `STATIC_CHECK_CONCURRENCY`）
       与本机 `nproc` 读数；`grep -n` 证明脚本里没有把并发数写成裸字面量。
-- [ ] **AC6（before/after 墙钟）**：贴出改前与改后的 `duration_ms`（或 `/usr/bin/time` 的 WALL）
+- [x] **AC6（before/after 墙钟）**：贴出改前与改后的 `duration_ms`（或 `/usr/bin/time` 的 WALL）
       **与本机 `nproc`**。⛔ 不设阈值（硬规则 4 推论一：端到端耗时依赖外生变量），只报前后对照。
-- [ ] **AC7（回归）**：① `bash scripts/test.sh plugin/test/checker-mutation-check.test.mjs` 全绿；
+- [x] **AC7（回归）**：① `bash scripts/test.sh plugin/test/checker-mutation-check.test.mjs` 全绿；
       ② `bash plugin/scripts/checker-mutation-check.sh --selftest` exit 0；
       ③ `--list --json` 的键与 `checkers_total: 80` / `checkers_with_mutation: 80` / `uncovered: []` 不变；
       ④ 三种 `--meta-inject` 仍非 0 退出。逐条贴退出码。
-- [ ] **AC8（本 delta 自己的静态门）**：`bash plugin/scripts/checker-mutation-check.sh --check-changed --repo-root <root>`
+- [x] **AC8（本 delta 自己的静态门）**：`bash plugin/scripts/checker-mutation-check.sh --check-changed --repo-root <root>`
       在改后为绿（本 delta 命中的 carrier 就是该脚本自身），且全量 `--check` 为绿。贴输出。
-- [ ] **AC9（散文不再漂移，范围已收窄）**：`scripts/test.sh` 的 `:67`、`:363`、`:1522` 三处
+- [x] **AC9（散文不再漂移，范围已收窄）**：`scripts/test.sh` 的 `:67`、`:363`、`:1522` 三处
       `~13s` 已改成实测值、或已删掉裸数字；`grep -n '13s' scripts/test.sh` 贴出改动后的命中。
       **⛔ 负向断言**：`plugin/scripts/runner-static-gate.ts` 必须**未被改动**——
       跑 `node --test plugin/test/select-static-checks-for-touches.test.mjs` 全绿即证。
@@ -177,6 +177,74 @@ AC-280 的 `grep -n` 是**逐物理行**的，`case "$CALL_LINE_TEXT" in *"&"*)`
 6. **before/after**：AC6 的两个数与宿主核数。
 7. **证据留痕**：判据输出、负控制失败输出、等价性 diff、前后 duration 落成 `.quay/` 下的证据文件
    或写进任务体，**可被下一轮独立复算**（⛔ 不是只写一句「已绿」）。
+
+## Evidence
+
+**改动**：`run_cases()` 的 82 用例循环 —— 串行 `for` ⇒ **有界并行池**（退出码经**文件**回传，归因在
+父进程 `wait` 之后做；名字/顺序仍由父进程的 `case_list` 持有）。宿主 `nproc=16`；实现提交 `259c6b2f1`。
+完整可复算证据文件：`.quay/ac280-evidence.md`（工作树内；合并后随 worktree 回收，故本节保留全部读数与命令）。
+
+1. **AC1（AC-280 判据逐字重跑）**：`OK — run_one_case is backgrounded (line 390) and reaped via a wait
+   within 40 lines after it`，**exit 0**。调用行 `:390` 带 `&`，`wait` 在 `:395`。
+   ⚠️ **过程中发现的判据脆弱性（已处置）**：判据用 `grep -n … | head -1` 取**第一条**命中。初版实现里
+   我写的一句**注释**恰好含字面 `run_one_case "$name" "$workdir"` 与 `&`，排在真实调用行之前
+   ⇒ 当时判据是对**注释行**（`:270`）判定，而不是对代码。已改写该注释使 grep 只命中真实调用行。
+   ⛔ 不处置的话：将来把 `&` 从代码里删掉，AC-280 仍会 exit 0（注释还在）。
+2. **AC2（真判据 / 可分辨）**：`--repo-root <fixture> --run --json` ⇒
+   `"results": {"fake-quaydep-check":"pass","fake-zerodep-check":"stayed-green"}`、
+   `mutations_that_stayed_green: 1`、exit 1（零依赖探针**被报出来**）。
+3. **AC3（负控制，必须能取假）**：develop 版 + 只加 `&` 与 `wait`（**无结果通道**）⇒
+   ① 对同一 fixture：`fake-zerodep-check` 记成 `"pass"`、`stayed_green: 0`，AC2 断言**失败**；
+   ② 对「全用例」fixture：**84/84 全 `pass`、exit 0**，而同一输入下并行版给出
+   `{always-red:68, error:13, pass:2, stayed-green:1}` / `exit 1`（同输入、相反判决）；
+   ③ **AC-280 判据本身在该负控制上 exit 0** —— 位置判据无法区分「真并行」与「恒绿」。
+4. **AC4（等价性）**：串行（`git show develop:…`）vs 并行（本 delta 最终版）——`results` **键集相同
+   （82/82）且逐值相同**，`diff` 无输出。⇒ **没有任何用例需要隔离或串行化**。
+5. **AC5（宿主推导，无字面量）**：`_case_par_max="${CHECKER_MUTATION_PARALLEL:-${STATIC_CHECK_CONCURRENCY:-}}"`；
+   空/非数字 ⇒ `"$(nproc 2>/dev/null || echo 4)"`；`0` ⇒ 下限 1。本机 `nproc=16`。
+   脚本里没有把并发数写成裸字面量（唯一数字是「垃圾输入的下限 1」与「nproc 不可用时的 fallback 4」，
+   两者都不是对宿主容量的断言，且后者与既有 `checker-cost-lib.sh:134` 同形）。
+6. **AC6（before/after，⛔ 不设阈值）**：同一宿主、背靠背、同一输入：
+
+| 版本 | 脚本自身 `duration_ms` | `/usr/bin/time` WALL | results 键数 | stayed_green / errors |
+|---|---|---|---|---|
+| 串行（`git show develop:…`） | 131101 ms | 131.33 s | 82 | 0 / 0 |
+| 并行（本 delta 最终版） | 31137 ms | 31.46 s | 82 | 0 / 0 |
+
+   （更早一次在较空载的宿主上：串行 110616 ms / 110.6 s，并行 27916 ms / 28.1 s。）
+7. **AC7（回归）**：① `bash scripts/test.sh plugin/test/checker-mutation-check.test.mjs` **exit 0**
+   （11/11 pass）；② `--selftest` **exit 0**；③ `--list --json` 键为
+   `checkers_total,checkers_with_mutation,uncovered,checkers`，`80 / 80 / []` 不变；
+   ④ 三种 `--meta-inject` 依次 **exit 1 / 1 / 1**（仍非 0）。
+8. **AC8（本 delta 的静态门）**：`--check-changed --repo-root <worktree>` **exit 0**（本 delta 的
+   carrier = 该脚本自身，1 个；`scripts/test.sh` 属 manifest source ⇒ manifest 覆盖度复验
+   `uncovered = 0`）；全量 `--check` **exit 0**、`mutations_that_stayed_green: 0`、`errors: 0`。
+   另：`--only checker-mutation-check` 的收窄语义、`--check-changed --only x` ⇒ exit 2 均不变
+   （`--only <未注册名>` 在 develop 与本 delta 上**都** exit 1 —— 是 `run_json` 早退时
+   `_run_duration_ms` 未绑定的既存 `set -u` 习性，非本次引入）。
+9. **AC9（散文不再漂移）**：`grep -n '13s' scripts/test.sh` **零命中**（三处裸数字改为
+   "the bulk of it checker-mutation-check" / 指向该脚本自己的 `duration_ms`）；
+   `plugin/scripts/runner-static-gate.ts` 的 `git diff` **为空**；
+   `node --test plugin/test/select-static-checks-for-touches.test.mjs` **22/22 pass**（负向断言成立）。
+10. **DoD 1/2（落地对象）在落地前的状态**：develop 上此刻仍是串行版（本分支尚未合并，fan-in 负责 ff）。
+    本分支从 develop tip 分出、期间未 rebase，fan-in 走 **ff 合并** ⇒ 落地后
+    `git show develop:plugin/scripts/checker-mutation-check.sh` 与本节所判定的工作树内容**逐字节相同**，
+    故 AC-280 对 `git show develop:…` 重跑的结果与 §1 相同。⛔ 这是本节唯一无法在落地前当场取证的
+    DoD 项，登记在此而不是假装已验。
+
+### 偏离 Plan 第 2 步处方形状（必须记，因为它会打红 AC8）
+
+Plan 给的单行形是 `… || _rc=$?`。该 `||` 会让 `plugin/scripts/instrument-failure-check.ts` 的
+**FAMILY-3**（`$?` 出现在 `|` 之后）**新增一条命中**，而该族基线是 **shrink-only**
+（`FAMILY_BASELINE[3]=15`，新命中即 exit 1）⇒ 会打红 AC8 的全量 `--check`。
+已改用语义等价且不触发的形：`if run_one_case "$name" "$workdir"; then _rc=0; else _rc=$?; fi`。
+实测（直接 import `detectFamily3`）：`|| _rc=$?` 形 ⇒ `true`；`if/else` 形 ⇒ `false`。
+
+### 新增的 fail-closed 分支（合成 fixture 上实测可分辨）
+
+结果文件里**没有**某用例的行（其上报子 shell 被杀）⇒ 记 **`error`**，⛔ 不是 `pass`（硬规则 3b：
+「读不懂输入」不得与「合格」同形）。实证：`fake-subshelldie-check`（用例内 `kill -9 "$PPID"`）
+⇒ `results: {…,"fake-subshelldie-check":"error"}`、`errors: 1`、`exit 1`。
 
 ## Touches
 
