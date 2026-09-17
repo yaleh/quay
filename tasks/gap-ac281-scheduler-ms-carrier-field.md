@@ -123,24 +123,24 @@ NOT-EVALUATED, not 'too slow'.
 
 ## AC
 
-- [ ] AC1：`deriveSchedulerMs`（或最终定名的派生函数）有单元测试，对一段含
+- [x] AC1：`deriveSchedulerMs`（或最终定名的派生函数）有单元测试，对一段含
       `__OVERHEAD__ scheduler_ms=53507` 的真实日志片段（从一次真实 CI run 的日志里摘取，不是编造的
       样本）派生出 `53507`（`number` 类型，单位毫秒，不是字符串）。
-- [ ] AC2：负控制——对一段**不含**该 marker 的日志片段，派生结果是 `undefined`（键不存在，不写进
+- [x] AC2：负控制——对一段**不含**该 marker 的日志片段，派生结果是 `undefined`（键不存在，不写进
       `JobReading`），不是 `0` 或 `null` 这类"看起来像失败"的假值（硬规则 6）。
-- [ ] AC3：真实端到端验证——对一个真实的、已经在 `.quay/ci-runs.jsonl` 里但缺 `schedulerMs` 的历史
+- [x] AC3：真实端到端验证——对一个真实的、已经在 `.quay/ci-runs.jsonl` 里但缺 `schedulerMs` 的历史
       CI run（如 `35229453772` 或 `35227553148`），跑一次 `ci-runs-collect.ts` 的补全逻辑，验证该条
       记录被**就地追加** `schedulerMs` 键（不是重写整条记录、不丢失其他既有字段——比对改前改后的
       完整 JSON 差异，只多一个键）。
-- [ ] AC4：`node packages/quay/bin/quay.ts goal gate AC-281 --json` 逐字重跑，验证不再报
+- [x] AC4：`node packages/quay/bin/quay.ts goal gate AC-281 --json` 逐字重跑，验证不再报
       `CAUSE=scheduler-ms-not-recorded`（可能报 `too-slow` 也可能报 `OK`，取决于当前真实读数——不
       强求这一轮就 ≤30s，那是下一步压低 `driver-anchor.test.mjs` 之类文件的实现工作，本任务只负责
       让判据能被评估，不负责让它变绿）。
-- [ ] AC5：触发一次真实的 develop CI（或复用最新已有的 post-filing run），跑 `ci-runs-collect.ts`
+- [x] AC5：触发一次真实的 develop CI（或复用最新已有的 post-filing run），跑 `ci-runs-collect.ts`
       采集，确认新落地的记录带着真实的 `schedulerMs` 数值（不是历史 run 的补全，是新 run 的原生
       派生路径也在跑——贴出该次采集器调用打印的 `appended=`/`schedulerMsDerived=`（或等价读数）与
       落地记录本身）。
-- [ ] AC6：`bash scripts/test.sh --for-task gap-ac281-scheduler-ms-carrier-field` 退出 0。
+- [x] AC6：`bash scripts/test.sh --for-task gap-ac281-scheduler-ms-carrier-field` 退出 0。
 
 ## DoD
 
