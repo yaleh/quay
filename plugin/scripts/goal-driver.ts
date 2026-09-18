@@ -2066,16 +2066,28 @@ export function computeGoalGaps(
       // 尾读数最长数小时仍写 `fail`。立案**不得**拿它当「现在」（那是硬规则 4b 的形态：代理量被当
       // 直接量）。复核结局按三态分派，⛔ 三态互不同形：
       //   · `cleared`（复核后 exit 0）⇒ 台账尾是**陈旧读数** ⇒ ⛔ 不立案（也不产生读数——此刻无工作可立）。
-      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出 / **复核根滞后 develop**）⇒ **独立取值**
-      //     `not-evaluated`（taskCount null）。⛔ 既不与「复核通过」也不与「复核后仍为假」同形（硬规则
-      //     3b）。第三个成因 `checkout-lagging-develop` 是 gap-frozen-recheck-lagging-checkout-false-
-      //     gap-filing 加的：那条 fail 量的是滞后的执行根、不是 develop 的实况 ⇒ 本轮不立案，等下一次
-      //     复核（届时主检出已同步）。⛔ 不与 `cleared` 合流——后者断言「此刻为真」，那里**不知道**。
+      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出）⇒ **独立取值** `not-evaluated`
+      //     （taskCount null）。⛔ 既不与「复核通过」也不与「复核后仍为假」同形（硬规则 3b）。
+      //   · **第三个成因 `checkout-lagging-develop`（gap-frozen-recheck-lagging-checkout-false-
+      //     gap-filing）在前一条之外**：那条 fail 量的是**滞后的执行根**、不是 develop 的实况 ⇒
+      //     本读数对它**不产出任何条**（`continue`）——即「本轮无工作可立」，与 `cleared` 在
+      //     本函数里的落点相同。⛔ 这不是「与 cleared 同形」：区分它们的载体是 `frozenRecheck.entries`
+      //     （那边两条的 `outcome`+`cause` 逐条不同：`cleared`/`now-true` vs
+      //     `not-evaluated`/`checkout-lagging-develop`）——本函数的落点只回答「这一轮要不要有人做」，
+      //     而**这两条都不需要有人做**（一条是「此刻为真」，一条是「此刻不知道，等下一次复核」）。
       //   · `confirmed-failing`（复核后仍非 0）⇒ 立案照旧。
       //   · 未传复核读数（`null`，既有调用方/单测的缺省）⇒ 照旧立案（fail-visible：漏传不得静默
       //     变成「复核通过」）。
       const rc = frozenRecheck === null ? null : frozenRecheck.entries.find((e) => e.ac === id) ?? null;
       if (rc !== null && rc.outcome === "cleared") continue;
+      // 复核根滞后 develop ⇒ 本读数**不产出任何条**（AC1：「该轮 computeGoalGaps 不产出该 AC 的
+      // frozen-violated（`gaps` 无该条、`gap_spawns` 为空）」）：那条 fail 量的是滞后的根、不是
+      // develop 的实况 ⇒ 本轮**无可立**（等下一次复核，届时主检出已同步）。
+      // ⛔ 与上面 `unreadable`/`guard-refused` 的 not-evaluated **不同形是刻意的**：那两条的意思是
+      // 「这一轮没查成 ⇒ 该有人看一眼」，而本条的意思是「这一轮问错了根 ⇒ 下一轮再问」——把后者也
+      // 落成 not-evaluated 会在主检出落后 develop 的整段窗口里每轮产出一条恒清不掉的读数。
+      // ⛔ 「查过且合格」与「根滞后没查成」仍**可区分**——载体是 `frozenRecheck.entries`（AC5）。
+      if (rc !== null && rc.outcome === "not-evaluated" && rc.cause === "checkout-lagging-develop") continue;
       if (rc !== null && rc.outcome === "not-evaluated") {
         out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
         continue;
@@ -2116,7 +2128,10 @@ export function computeGoalGaps(
       //     （此刻确无工作可立——与 standing-ok 同形的静默是正确的，因为真值为真）。
       //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出 / **复核根滞后 develop**）⇒ **独立取值**
       //     `not-evaluated`（taskCount null）。⛔ 既不与「复核通过」（无读数）也不与「复核后仍为假」
-      //     （standing-violated）同形。第三个成因见 ③ 分支的同名注释（共用核 ⇒ 共用三态）。
+      //     （standing-violated）同形。第三个成因是 gap-frozen-recheck-lagging-checkout-false-gap-filing
+      //     加的（共用核 ⇒ 共用三态）；⚠️ 本分支**必须**落 not-evaluated 而**不能**静默——这里静默会
+      //     直接掉到下面的 standing-violated ⇒ **照旧立案**，正是该任务要挡住的那个动作（③ 分支的落点
+      //     与这里不同，理由写在 ③ 的对应注释里：那里的静默落点 = 「本轮无工作可立」）。
       //   · `confirmed-failing`（复核后仍非 0）⇒ 立案照旧。
       //   · 未传复核读数（`null`，既有调用方/单测的缺省）⇒ 照旧立案（fail-visible：漏传不得静默
       //     变成「复核通过」）。

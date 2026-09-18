@@ -74,7 +74,10 @@ test('AC1+AC2+AC5：复核根滞后 develop ⇒ 独立取值 checkout-lagging-de
     assert.equal(e2.behindDevelop, 1, 'AC5：落后 1 个提交（develop 上那条 fix），实测落痕');
     assert.equal(e2.headSha, baseSha, 'AC5：HEAD 仍是 main 的 base（复核量的是这个根，不是 develop）');
     const g2 = new Map(r2.fact.value.gaps.map((g) => [g.ac, g.state]));
-    assert.notEqual(g2.get('AC-900'), 'frozen-violated', '第 2 轮：⛔ 不产出 frozen-violated（该条 fail 量的是滞后的根）');
+    assert.equal(g2.get('AC-900'), undefined,
+      '第 2 轮：AC1「不产出该 AC 的 frozen-violated（gaps 无该条）」—— 本轮**该 AC 一条读数都不产出**'
+      + '（既不 frozen-violated、也不落别的态：那条 fail 量的是滞后的根 ⇒ 本轮无可立）；'
+      + `实测 gaps=${JSON.stringify(r2.fact.value.gaps.map((g) => [g.ac, g.state]))}`);
     assert.deepEqual(r2.fact.value.gap_spawns.map((s) => s.ac), [],
       '第 2 轮：不 spawn（⛔ 不给下游指一个可能不存在的缺陷）');
   } finally {
