@@ -48,14 +48,14 @@ GOAL-024 AC-289~303 与 `gap-webui-lang-switcher-control` 落地后，`?lang=en`
 
 ## AC
 
-- [ ] **AC1（红基线，枚举不是布尔）**：贴 `lang=en` 下 `/dashboard` 的界面文案中文行**完整清单与条数**（本任务的待清零集合）；⛔ 不得只报总数，也不得把任务标题等数据行混进来。
-- [ ] **AC2（en 清零）**：同一判据在改后 `lang=en` 下，界面文案中文行 **= 0**；剩余含中文的行经逐条核对**全部是用户数据**（任务标题/提交信息/AC 文本），贴出剩余行及归类。⛔ 判据先对红基线干跑一次确认能命中（零计数必须先对已知真样本验证谓词，否则 0 不携带信息）。
-- [ ] **AC3（zh 零变化）**：`lang=zh` 下 `/dashboard` 的**界面文案**与改前逐字一致——在改前 commit 与改后各抓一次 zh 响应，去除动态数据后 diff 为空（或差异逐条解释）。⛔ 不得只测 en。
-- [ ] **AC4（字典完备且被强制）**：`DASHBOARD_LABELS` 为 `Record<DashboardKey,{en,zh}>`；测试断言每键两列非空、`en` 列无 CJK；删掉任一列 `tsc --noEmit` 报错（贴一次删列后的 tsc 红读数，再恢复）。
-- [ ] **AC5（两条渲染路径都改）**：快照路径与旧路径分别触发并断言 en 输出无界面中文（`peekDashboardSnapshot` 命中与未命中各一次）。
-- [ ] **AC6（因果对照）**：`dashboardLabelsFor` 钳成恒 zh 后 en 黑盒断言变红，恢复后复绿，两次读数并排贴出。
-- [ ] **AC7（既有测试迁移）**：改造前先跑 Touches 内与 dashboard 相关的全部既有测试，贴出**实际变红的清单**；逐个迁移后全绿；`scripts/test.sh --for-task gap-webui-dashboard-body-copy-en-zh` 绿；`node --test packages/quay/test/serve-*.test.mjs` 全绿；`tsc --noEmit` 绿。
-- [ ] **AC8（真实浏览器形态）**：落地后重启常驻 serve，用 headless Chrome 截图 `/dashboard?lang=en` 与 `?lang=zh`，贴截图路径；en 图上无界面中文。
+- [x] **AC1（红基线，枚举不是布尔）**：贴 `lang=en` 下 `/dashboard` 的界面文案中文行**完整清单与条数**（本任务的待清零集合）；⛔ 不得只报总数，也不得把任务标题等数据行混进来。
+- [x] **AC2（en 清零）**：同一判据在改后 `lang=en` 下，界面文案中文行 **= 0**；剩余含中文的行经逐条核对**全部是用户数据**（任务标题/提交信息/AC 文本），贴出剩余行及归类。⛔ 判据先对红基线干跑一次确认能命中（零计数必须先对已知真样本验证谓词，否则 0 不携带信息）。
+- [x] **AC3（zh 零变化）**：`lang=zh` 下 `/dashboard` 的**界面文案**与改前逐字一致——在改前 commit 与改后各抓一次 zh 响应，去除动态数据后 diff 为空（或差异逐条解释）。⛔ 不得只测 en。
+- [x] **AC4（字典完备且被强制）**：`DASHBOARD_LABELS` 为 `Record<DashboardKey,{en,zh}>`；测试断言每键两列非空、`en` 列无 CJK；删掉任一列 `tsc --noEmit` 报错（贴一次删列后的 tsc 红读数，再恢复）。
+- [x] **AC5（两条渲染路径都改）**：快照路径与旧路径分别触发并断言 en 输出无界面中文（`peekDashboardSnapshot` 命中与未命中各一次）。
+- [x] **AC6（因果对照）**：`dashboardLabelsFor` 钳成恒 zh 后 en 黑盒断言变红，恢复后复绿，两次读数并排贴出。
+- [x] **AC7（既有测试迁移）**：改造前先跑 Touches 内与 dashboard 相关的全部既有测试，贴出**实际变红的清单**；逐个迁移后全绿；`scripts/test.sh --for-task gap-webui-dashboard-body-copy-en-zh` 绿；`node --test packages/quay/test/serve-*.test.mjs` 全绿；`tsc --noEmit` 绿。
+- [x] **AC8（真实浏览器形态）**：落地后重启常驻 serve，用 headless Chrome 截图 `/dashboard?lang=en` 与 `?lang=zh`，贴截图路径；en 图上无界面中文。
 
 ## DoD
 
@@ -114,13 +114,16 @@ en 时存在（如 live_state 的 `running`），因此「误写成英文的 zh 
 
 ## 证据（改后读数）
 
-- **AC1 红基线**：`lang=en` 含 CJK 文本行 **60**；分类 —— 界面文案 **51**（正文 46 + 共享外壳 5：`跳到主要内容`、`核心`/`观测`/`记录`/`知识`）、切换控件 endonym `中文` ×2（既定设计）、用户数据 7（3 条任务标题 + 1 条提交信息 + 3 条 reader/goal 诊断串）。
-- **AC2 改后**：同一判据 **8** 条 —— `中文` ×2（endonym）+ 6 条用户数据；**界面文案 = 0**。零计数对照：同一谓词对 zh 响应命中 **92 > 20**。
-- **AC3 zh 零变化**：`lang=zh` 改前/改后可见文本 diff 仅 6 处、raw HTML diff 27 行，全部是动态数据（监听端口、cpu/load 实时采样、4 处 `5m ago`→`10m ago`、提交列表随 develop 前进）或新增的客户端脚本管道（`THRESHOLD_LABEL` 常量 + 序列化函数多一个形参），**界面文案无一处变化**。
-- **AC4 因果**：删掉 `loopPulse` 的 `zh` 列 ⇒ `tsc` 报 `TS2741: Property 'zh' is missing … but required in type '{ en: string; zh: string; }'`；恢复后 `tsc` 干净。
-- **AC6 因果**：`dashboardLabelsFor`/`dashboardLabel`/`chromeLabel` 三处钳成恒 zh ⇒ 新测试 **6 条转红**（含 AC2 黑盒、两条 AC5 路径、cards payload）；恢复后 **12/12 绿**。
-- **AC7 迁移**：Touches 内 5 个文件改造后先红 **8** 条（A/B 对照：同一命令在原始源码上 49/49 绿）；扩面到「所有可能受影响的测试」（导入 serve-* 或含被移动文案的 105 个文件）后共 **33 条**转红，逐个迁移后仅余 2 条**与本次改动无关的既存红**（`cli.test.mjs`、`server-status-web-control-same-pid.test.mjs` 的 dist bundle 断言 —— 两者在**原始源码**的 A/B 对照里同样红，因为 worktree 无 `dist/`）。
-- **AC8**：见 `quay serve`（worktree，port 4319）+ headless Chrome 截图。
+- **AC1 红基线**：`lang=en` 含 CJK 文本行 **60**；分类 —— 界面文案 **51**（正文 46 + 共享外壳 5：`跳到主要内容`、`核心`/`观测`/`记录`/`知识`）、切换控件 endonym `中文` ×2（既定设计）、用户数据 7（3 条任务标题 + 1 条提交信息 + 3 条 reader/goal 诊断串）。逐条清单见 `/tmp/dash-i18n/en-before.cjk.txt`（`status=200 lang=en path=/dashboard totalTextLines=153 cjkLines=60`）。
+- **AC2 改后**：同一判据 **8** 条 —— `中文` ×2（endonym）+ 6 条用户数据；**界面文案 = 0**。零计数对照：同一谓词对 zh 响应命中 **92 > 20**。清单见 `/tmp/dash-i18n/en-after.cjk.txt`。
+- **AC3 zh 零变化**：`lang=zh` 改前/改后可见文本 diff 仅 6 处、raw HTML diff 27 行，全部是动态数据（监听端口、cpu/load 实时采样、4 处 `5m ago`→`10m ago`、提交列表随 develop 前进）或新增的客户端脚本管道（`THRESHOLD_LABEL` 常量 + 序列化函数多一个形参），**界面文案无一处变化**。读数：`/tmp/dash-i18n/zh-before.text.txt` vs `zh-after.text.txt`。
+- **AC4 因果**：删掉 `loopPulse` 的 `zh` 列 ⇒ `tsc` 报 `TS2741: Property 'zh' is missing … but required in type '{ en: string; zh: string; }'`（`serve-i18n.ts:540`，指向 `:522` 的 `Record<DashboardKey, {en,zh}>`）；恢复后 `tsc` 干净。
+- **AC6 因果**：`dashboardLabelsFor`/`dashboardLabel`/`chromeLabel` 三处钳成恒 zh（**先 grep 确认 mutant 真的落进文件：3 处**，否则「对照」不生效 —— 第一次尝试就因锚点写错而**没落盘**，那次绿读数无效）⇒ 新测试 **6 条转红**（含 AC2 黑盒、两条 AC5 路径、cards payload）；恢复后 **12/12 绿**。
+- **AC7 迁移**：Touches 内 5 个文件改造后先红 **8** 条（A/B 对照：同一命令在原始源码上 49/49 绿）；扩面到「所有可能受影响的测试」（导入 serve-* 或含被移动文案的 105 个文件）后共 **33 条**转红，逐个迁移后仅余 2 条**与本次改动无关的既存红**（`cli.test.mjs`、`server-status-web-control-same-pid.test.mjs` 的 dist bundle 断言 —— 两者在**原始源码**的 A/B 对照里同样红，因为 worktree 无 `dist/`；scoped 门跑前会先 build dist，故门下不红）。**scoped 门 263/263 绿、exit 0**；`tsc --noEmit` 干净。
+- **AC8 真实浏览器**：worktree 起 `quay serve --host 127.0.0.1 --port 4319`（真实进程，加载的是本分支的 `serve-*.ts`），headless Chrome 1500×3200 截图：
+  `/tmp/dash-i18n/dashboard-en.png`（394867 B）与 `/tmp/dash-i18n/dashboard-zh.png`（396075 B）。
+  en 图上界面文案全英文（`Work progress` / `Loop pulse` / `In flight 2 / cap 5` / `Project identity` / `View Live →` …），仅余用户数据（任务标题、提交信息）与切换控件的 `中文` endonym；zh 图与改前逐页一致。
+  ⛔ **未重启 :4173 常驻 serve**：它服务的是**共享主检出**，把未落地的 worktree 指过去会改掉其他层正在读的工作区（且落地发生在 fan-in 之后）。落地后重启常驻 serve 属收尾步骤，已记录为待办。
 
 ## Touches
 
