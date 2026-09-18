@@ -1,7 +1,7 @@
 ---
 id: gap-serve-same-root-admission-lock
 title: quay serve 启动准入锁（同-root pidfile）+ 默认临时端口 + start-drivers 探测收编进 startServer
-status: todo
+status: ready
 labels:
   - gap
   - defect
