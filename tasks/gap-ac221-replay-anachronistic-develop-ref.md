@@ -69,6 +69,25 @@ reflog 覆盖深度实测：4481 条、最早 `2026-08-23T03:25:46Z` ⇒ 覆盖�
 
 ⚠️ 本任务**不覆盖、也⛔ 不得静默收窄**的残留（如实记录，另需裁定）：本事件暴露的**另一个**真问题——AC 勾选写在 11:11:34 提交、直到 11:12:57 才到达 develop（**83 秒传播延迟**），而 worker 在 11:12:40 被短路 ⇒ 烧掉一个 worker 轮次。按 AC-221 自己写下的判据（develop 侧）它不算复发；但它与 09-07 事故**共享代价形状**（勾完了却被短路）。⛔ 本任务**不**把它塞进 AC-221 的判据里（那会重新引入 AC-221 于 2026-09-09 由人明确要求拆掉的 confound）——它需要**自己的一条 AC/裁定**。
 
+### 本轮续做（2026-09-18）：fan-in `step=suite` 的两条红，逐条都不是本任务的 delta
+
+上轮 `exited-not-landed` 于 `step=suite`，失败行 `AssertionError [ERR_ASSERTION]: the window contains merge second parents to verify (non-vacuous)`（`packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs:77`）；全量 suite `# tests 8816 / # pass 8814 / # fail 2`。
+
+**对照（硬规则 4 推论四 —— 能区分）**：两条红在【主检出】（`author`，不含本任务任何改动）**逐字同样失败**；且 `git diff --stat develop...本分支` 对这两个测试文件**为空**（develop 与本分支逐字相同）⇒ **归因不成立，两条都不是本任务的 delta。**
+
+| 红 | 归因（直接量） | 处置 |
+|---|---|---|
+| `…pagination-mainline-lane-empty-before-page.test.mjs` AC3 | `git log --all --topo-order -n 200` 被 `refs/notes/quay-cmv-merge` 的线性链**整段占满**（窗口 200/200 是 notes 提交）⇒ 窗内第二父边缘 = 0 ⇒ 非空判据恒红 | **⛔ 不是本任务**：在飞兄弟 `gap-git-history-window-notes-ref-dominates` 已诊断并实现（生产侧 `GIT_HISTORY_REF_SCOPE = ["--exclude=refs/notes/*", "--all"]`）。本轮 `git merge develop` 已把其 10 文件 delta 带入本 worktree ⇒ AC3 复测 **3/3 绿，连跑 12 次 0 失败** |
+| `loop-shipping-necessity-check.test.mjs` AC1/AC2 | AC168（`6358b2cd6 feat(quay-init): 收缩本体`）把 `plugin/scripts/quay-init.sh` 的写入面收敛到**六项闭集**、移除退休 tick-doc 旧路径引用 ⇒ 其排除条目变 inert（5 个 oldPath 命中 = 0）且无 `retainedNote` ⇒ 违反契约「无惰性条目」 | **跨层 clear-defect，本轮已修**（见下） |
+
+**跨层 clear-defect 的修法（⛔ 不是加 `retainedNote`）**：删除 `loop-shipping-exclusion-data.mjs` 里 `plugin/scripts/quay-init.sh` 的惰性条目——同先例 `d29523fd4`（`verify-deliver-coldstart.sh`：**同一失败文本、同一成因=闭集重写**，且该先例同样把它归入「跨层 clear-defect」并**同步扩 Touches**）。
+判据（同一命令，改前/改后）：`inert_exclusions` ⇒ 改前 **1**（`violations=['plugin/scripts/quay-init.sh']`）、改后 **0**；`scanned file-level exclusion entries: 37`；`inert-but-retained: 6`（**均为运行时 ledger 的振荡类**——`batch2-queue-state.md` / `tick-log.md` / `manager-pending.md` 等，其 `retainedNote` 逐条写明「为什么保留」，仍落在契约的「**或写明为何保留**」分支内；本次**未动**）。
+**提交**：`ccab981da fix(loop-shipping): 清 AC168 闭集重写后残留的惰性排除条目（suite 红根因）`。
+
+**扫同类（硬规则 5b：修好一处 ≠ 只有一处）**：判断不是靠 grep，而是**该 checker 自身的全量枚举**——它逐条扫过**全部 37 条 file-level 排除条目**后只报出这 1 条 violation ⇒ 同一成因（AC168 闭集重写致条目惰性）在本表内**没有第二个实例**。
+
+**残留（如实记录，⛔ 不写成已解决）**：`…pagination-appends-page-relative-col-and-torow.test.mjs` 一族仍**独立地读两次实时 ref 集**，两次读之间只要有 ref 前进即计数失配——本轮 merge 后**第一次**跑 AC3 曾红，随后 3/3 与 12/12 全绿。该族缺陷由 `gap-git-history-window-notes-ref-dominates` 作为「**既有**缺陷、不在其任务范围」记录在案（其 AC1/AC2 不比较装饰，故不受影响）⇒ ⛔ 本任务**不动它**，如实留作另行裁定。
+
 ## Plan
 
 1. `developTipAt()` 改为忠实重建：读 `git reflog show develop --date=iso --format=<sha>\t<gd>`，取**时间戳 ≤ 事件 ts 的最新一条**条目的 sha；全无可用条目 ⇒ 返回 null（下游 fail-closed）。
@@ -82,7 +101,7 @@ reflog 覆盖深度实测：4481 条、最早 `2026-08-23T03:25:46Z` ⇒ 覆盖�
 - [x] AC1（能取假）：`developTipAt` 对 `2026-09-18T11:12:40.533Z` 返回的 commit 的 `tasks/gap-goal-batch-dry-run-noop.md`，`flipAcGateVerdict` 判 `ok=false`（0/6）；⛔ 仍返回 `ca1a8276d` / `ok=true` ⇒ 假。
 - [x] AC2（正控制，判据自身保留取假能力）：判据里存在一条**读真实历史**的断言，对已知真复发样本（`gap-cli-write-surface-lacks-toplevel-fields@2026-09-07T03:37:36.503Z` → ref `8d8e353db` = 8/8）判为复发；**双向对照**：同一断言换成已知真阴性样本（`gap-ac207` 2026-09-09T14:26:02.187Z）时判非复发（两臂都要实测，缺一臂不算）。
 - [x] AC3（fail-closed 三态）：reflog 读不到 / 最早条目晚于事件 ts / 最新条目 ≠ 当前 develop tip 这三种情形下，`developTipAt` 返回 null，主判据走 `unclassified` 分支 **FAIL**（⛔ 不当作「没复发」）。用带窄时间窗的构造输入或临时仓库实测该三态。
-- [x] AC4（端到端）：`QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs` 退出码 0、`fail 0`。
+- [x] AC4（端到端）：`QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs` 退出码 0、`fail 0`。本轮复跑实测 **`tests 7 / pass 7 / fail 0`**（含 AC3 三态 ①②③ 各自绿）。
 - [x] AC5（不静默收窄范围）：判据头注如实写明「本判据的 develop 侧口径不覆盖『写已提交但尚未到达 develop』的传播竞态」+ 上面那份 83 秒实测读数；⛔ 不得把该残留写成已解决。
 - [x] AC6：`bash scripts/test.sh --for-task gap-ac221-replay-anachronistic-develop-ref` 绿（含改动/新增测试）。
 - [x] AC7（真阴性样本不被误伤）：负控制二（`gap-ac207` 2026-09-09T14:26:02.187Z）仍判 `recurrence === false`。
@@ -95,4 +114,5 @@ reflog 覆盖深度实测：4481 条、最早 `2026-08-23T03:25:46Z` ⇒ 覆盖�
 ## Touches
 
 - plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs
+- plugin/scripts/loop-shipping-exclusion-data.mjs
 - tasks/gap-ac221-replay-anachronistic-develop-ref.md
