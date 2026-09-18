@@ -116,6 +116,63 @@ function runWriter(root, args) {
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", WRITER, "--root", root, ...args], { encoding: "utf8" });
 }
 
+// ── "the writer REFUSED" vs "the writer never STARTED" ───────────────────────────────────────────────
+// gap-inner-wakeup-heartbeat-refusal-shard-ci-red (硬规则 5b: the same carrier, the same principle).
+// A child that FAILED TO START is not a child that REFUSED — and exit code cannot tell them apart: this
+// writer exits 1 for a deliberate fail-closed refusal, and Node ALSO exits 1 for an uncaught
+// module-load/instantiation failure. Measured on this very file: CI run 35296761204 (task branch)
+// reddened `AC2 fail-closed — writer REFUSES (exit 1) a heartbeat missing blocked[]` with
+//     actual: "file:///_work/quay/quay/plugin/scripts/fast-mode-telemetry.ts:129 …
+//              SyntaxError: The requested module './workflow-event-schema.mjs' does not provide an
+//              export named 'IMPL_COMPLETE_EVENT_KIND'"
+// i.e. the writer died instantiating its module graph and never reached checkFieldContract — the same
+// shape as the sibling shard's run 35294113108, only a different module pair. 硬规则 3b: a verdict whose
+// word-list has no "did not evaluate" cannot distinguish "checked and refused" from "never ran".
+
+/**
+ * The writer's own diagnostics ALL begin a line with this prefix (every `console.error` in
+ * inner-wakeup-heartbeat.ts's main() starts with `inner-wakeup-heartbeat: `). Anchored to line start so
+ * a CRASH AFTER the writer started — whose stack frames merely contain the filename — is not mistaken
+ * for the writer speaking.
+ */
+const WRITER_DIAGNOSTIC = /^inner-wakeup-heartbeat:/m;
+
+/** Returns a short signature when the child never ran the writer, else null. */
+function writerStartupFailure(w) {
+  if (w.status === 0) return null;
+  const err = w.stderr || "";
+  if (WRITER_DIAGNOSTIC.test(err)) return null; // the writer spoke ⇒ it ran; its exit is its own verdict
+  const m =
+    err.match(/^(SyntaxError|ReferenceError|TypeError|Error):.*$/m) ||
+    err.match(/ERR_MODULE_NOT_FOUND|ERR_UNKNOWN_FILE_EXTENSION|Cannot find module/m) ||
+    (/at .*node:internal\/(modules|process)/.test(err) ? ["uncaught failure inside node:internal"] : null);
+  return m ? m[0] : null;
+}
+
+/**
+ * Spawn the writer and guarantee the CALLER's verdict is about a writer that actually ran. A startup
+ * failure is re-measured once (the measured trigger is transient); if the retry also fails to start the
+ * test fails LOUDLY with the real cause, carrying both stderr streams — a persistent startup failure is
+ * a genuine defect and MUST stay red. A writer that ran is returned untouched, so every assertion below
+ * sees exactly the process it always saw.
+ */
+function runWriterChecked(root, args, what) {
+  const first = runWriter(root, args);
+  const firstFail = writerStartupFailure(first);
+  if (!firstFail) return first;
+  const retry = runWriter(root, args);
+  const retryFail = writerStartupFailure(retry);
+  if (retryFail) {
+    assert.fail(
+      `${what}: the writer FAILED TO START on BOTH attempts — it never ran, so this is NOT a refusal.\n` +
+      `(exit code 1 is shared by a deliberate refusal and a module-load crash)\n` +
+      `--- attempt 1: ${firstFail}\n${first.stderr}` +
+      `--- attempt 2: ${retryFail}\n${retry.stderr}`,
+    );
+  }
+  return retry;
+}
+
 function runChecker(root, extraArgs = []) {
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs], { encoding: "utf8" });
 }
@@ -228,7 +285,7 @@ test("parseJsonArg — rejects malformed JSON", () => {
 test("AC2 CLI — writer writes a full-shape heartbeat (>= 7 keys + AC53 dispatch-state) and exits 0", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-w-"));
   try {
-    const r = runWriter(tmp, FULL_ARGS);
+    const r = runWriterChecked(tmp, FULL_ARGS, "AC2 write");
     assert.equal(r.status, 0, `writer must exit 0:\n${r.stdout}\n${r.stderr}`);
     const hb = JSON.parse(fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
     assert.ok(Object.keys(hb).length >= 7, `field count ${Object.keys(hb).length} must be >= 7`);
@@ -244,13 +301,13 @@ test("AC2 CLI — writer writes a full-shape heartbeat (>= 7 keys + AC53 dispatc
 test("AC3 CLI — the writer APPENDS: two writes produce two jsonl lines, last line read wins", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-app-"));
   try {
-    const r1 = runWriter(tmp, FULL_ARGS);
+    const r1 = runWriterChecked(tmp, FULL_ARGS, "first append write");
     assert.equal(r1.status, 0, `first write must exit 0:\n${r1.stdout}\n${r1.stderr}`);
     // Second write with a different delaySeconds — proves append, not overwrite.
     const idxDelay = FULL_ARGS.indexOf("--delay-seconds");
     const secondArgs = [...FULL_ARGS];
     secondArgs[idxDelay + 1] = "1800";
-    const r2 = runWriter(tmp, secondArgs);
+    const r2 = runWriterChecked(tmp, secondArgs, "second append write");
     assert.equal(r2.status, 0, `second write must exit 0:\n${r2.stdout}\n${r2.stderr}`);
     const lines = fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8")
       .split("\n").filter(Boolean);
@@ -268,7 +325,7 @@ test("AC3 CLI — the writer APPENDS: two writes produce two jsonl lines, last l
 test("AC2 round-trip — a heartbeat the WRITER writes passes the CHECKER (exit 0 ALIVE)", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-rt-"));
   try {
-    const w = runWriter(tmp, FULL_ARGS);
+    const w = runWriterChecked(tmp, FULL_ARGS, "round-trip write");
     assert.equal(w.status, 0, `writer must exit 0:\n${w.stdout}\n${w.stderr}`);
     // Round-trip consistency: the writer recorded an empty in-flight set (FULL_ARGS' --in-flight ""),
     // so the checker is given that same set to keep the END invariant judgeable (no in-flight ⇒
@@ -289,7 +346,7 @@ test("AC2 fail-closed — writer REFUSES (exit 1) a heartbeat missing blocked[],
   try {
     // Drop "--blocked" AND its value (FULL_ARGS[0] / FULL_ARGS[1]).
     const args = FULL_ARGS.filter((_, i) => i !== 0 && i !== 1);
-    const r = runWriter(tmp, args);
+    const r = runWriterChecked(tmp, args, "missing blocked[] refusal");
     assert.equal(r.status, 1, `missing blocked must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /心跳字段缺失/, "the refusal must name 心跳字段缺失");
     assert.match(r.stderr, /blocked\(缺失\)/, "blocked must be named as missing");
@@ -304,7 +361,7 @@ test("AC2 fail-closed — writer REFUSES a wrong-typed blocked (string), writes 
   try {
     const args = [...FULL_ARGS];
     args[1] = '"not-an-array"'; // JSON string literal → parseJsonArg yields the string "not-an-array"
-    const r = runWriter(tmp, args);
+    const r = runWriterChecked(tmp, args, "wrong-typed blocked refusal");
     assert.equal(r.status, 1, `wrong-typed blocked must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /blocked\(类型错\)/, "blocked must be named as wrong-type");
     assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing must be written on refusal");
@@ -319,7 +376,7 @@ test("AC53 AC1 fail-closed — writer REFUSES a heartbeat missing the dispatch-s
     // Drop "--slots-free" and its value (the 5 dispatch-state flags come after --delay-seconds).
     const idx = FULL_ARGS.indexOf("--slots-free");
     const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 10);
-    const r = runWriter(tmp, args);
+    const r = runWriterChecked(tmp, args, "missing dispatch-state keys refusal");
     assert.equal(r.status, 1, `missing dispatch-state must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /派发状态五键缺失/, "the refusal must name 派发状态五键缺失");
     assert.match(r.stderr, /slots_free\(缺失\)/, "slots_free must be named as missing");
@@ -340,7 +397,7 @@ test("A13 (乙) — a refused END-invariant write ALSO updates the legacy .json 
     violatingArgs[idxShould + 1] = "true";
     const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
     violatingArgs[idxReason + 1] = "null";
-    const w = runWriter(root, violatingArgs);
+    const w = runWriterChecked(root, violatingArgs, "AC53 end-invariant refusal");
     assert.equal(w.status, 1, `writer must REFUSE:\n${w.stdout}\n${w.stderr}`);
     assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
     // The legacy .json snapshot now carries the refusal — the main product shows "active but refused".
@@ -367,7 +424,7 @@ test("A13 (乙) — the --in-flight-omitted refusal ALSO updates the legacy .jso
   try {
     const idx = FULL_ARGS.indexOf("--in-flight");
     const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
-    const r = runWriter(tmp, args);
+    const r = runWriterChecked(tmp, args, "--in-flight-omitted refusal");
     assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /--in-flight 必填/, "the refusal must name --in-flight 必填");
     const legacyPath = path.join(tmp, ".quay", LEGACY_HEARTBEAT_FILE);

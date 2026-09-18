@@ -448,6 +448,51 @@ function runCli(root, extra = []) {
   return spawnSync("node", args, { encoding: "utf8" });
 }
 
+// ── "the checker RETURNED a verdict" vs "the checker never STARTED" ──────────────────────────────────
+// gap-inner-wakeup-heartbeat-refusal-shard-ci-red (硬规则 5b: the same carrier, the same principle).
+// The checker exits 1 for a real violation AND Node exits 1 for an uncaught module-load/instantiation
+// failure, so `assert.equal(r.status, 1, …)` cannot tell a verdict from a crash — the assertion that
+// follows it then reds with a message blaming the verdict. Measured on this family: the sibling
+// `inner-wakeup-heartbeat.test.mjs` reddened CI run 35296761204 exactly that way
+// (`actual:` = `SyntaxError: The requested module './workflow-event-schema.mjs' does not provide an
+// export named 'IMPL_COMPLETE_EVENT_KIND'`), and `inner-wakeup-heartbeat-refusal.test.mjs` reddened
+// run 35294113108 with the same shape. 硬规则 3b: a verdict whose word-list has no "did not evaluate"
+// cannot distinguish "checked" from "never ran".
+
+/** Returns a short signature when the child never ran the checker, else null. */
+function cliStartupFailure(r) {
+  if (r.status === 0) return null;
+  const out = `${r.stdout || ""}\n${r.stderr || ""}`;
+  if (/^inner-wakeup-heartbeat-check:/m.test(out)) return null; // the checker spoke ⇒ it ran
+  const m =
+    out.match(/^(SyntaxError|ReferenceError|TypeError|Error):.*$/m) ||
+    out.match(/ERR_MODULE_NOT_FOUND|ERR_UNKNOWN_FILE_EXTENSION|Cannot find module/m);
+  return m ? m[0] : null;
+}
+
+/**
+ * Spawn the checker and guarantee the caller's verdict is about a checker that actually ran. A startup
+ * failure is re-measured once (the measured trigger is transient); if the retry also fails to start the
+ * test fails LOUDLY with the real cause, carrying both streams — a persistent startup failure is a
+ * genuine defect and MUST stay red. A checker that ran is returned untouched.
+ */
+function runCliChecked(root, extra, what) {
+  const first = runCli(root, extra);
+  const firstFail = cliStartupFailure(first);
+  if (!firstFail) return first;
+  const retry = runCli(root, extra);
+  const retryFail = cliStartupFailure(retry);
+  if (retryFail) {
+    assert.fail(
+      `${what}: the checker FAILED TO START on BOTH attempts — it never ran, so this is NOT a verdict.\n` +
+      `(exit code 1 is shared by a real violation and a module-load crash)\n` +
+      `--- attempt 1: ${firstFail}\n${first.stderr}` +
+      `--- attempt 2: ${retryFail}\n${retry.stderr}`,
+    );
+  }
+  return retry;
+}
+
 function makeRootWithHeartbeat(heartbeatObjOrText) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-"));
   const quayDir = path.join(tmp, ".quay");
@@ -765,7 +810,7 @@ test("I1 CLI --json — the 07:41 absence replay (all three stale) exits 1 with 
   // Replay the 07:41–12:2x absence window: heartbeat 4.7h, ready-pool 4.2h, slot-refill 2.7h stale.
   const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
   try {
-    const r = runCli(root, ["--json"]);
+    const r = runCliChecked(root, ["--json"], "07:41 absence replay");
     assert.equal(r.status, 1, `07:41 absence replay must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -783,7 +828,7 @@ test("I1 CLI --json — the 07:41 absence replay (all three stale) exits 1 with 
 test("I1 CLI — the 07:41 absence replay names 派发评估未跑 in human output", () => {
   const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
   try {
-    const r = runCli(root);
+    const r = runCliChecked(root, [], "human-output absence replay");
     assert.equal(r.status, 1, `human output must exit 1:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /inner 派发评估未跑/, "the human verdict must name 派发评估未跑");
   } finally {
@@ -796,7 +841,7 @@ test("I1 CLI --json — fresh all three (heartbeat + ready-pool + slot-refill) e
   try {
     // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
     // NOT-EVALUATED (AC1).
-    const r = runCli(root, ["--json", "--in-flight", ""]);
+    const r = runCliChecked(root, ["--json", "--in-flight", ""], "fresh assessment");
     assert.equal(r.status, 0, `fresh assessment must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -813,7 +858,7 @@ test("I1 CLI --json — heartbeat FRESH but ready-pool call record STALE exits 1
   // fresh) but the ready-pool assessment stopped 4.2h ago.
   const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 90 });
   try {
-    const r = runCli(root, ["--json"]);
+    const r = runCliChecked(root, ["--json"], "fresh-heartbeat-but-stale-ready-pool");
     assert.equal(r.status, 1, `fresh-heartbeat-but-stale-ready-pool must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -834,7 +879,7 @@ test("I1 CLI --json — a fresh heartbeat with NO checker-cost ledger is GREEN w
   try {
     // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
     // NOT-EVALUATED (AC1) — the "NOT-EVALUATED" this test asserts is the I1 assessment-step signals.
-    const r = runCli(root, ["--json", "--in-flight", ""]);
+    const r = runCliChecked(root, ["--json", "--in-flight", ""], "no-ledger must not fake a fail");
     assert.equal(r.status, 0, `no ledger must not fake a fail:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -851,7 +896,7 @@ test("I1 CLI --json — an existing ledger with a stale ready-pool but NO slot-r
   // not self-record yet). ready-pool staleness alone must fire even with slot-refill not-recorded.
   const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: null });
   try {
-    const r = runCli(root, ["--json"]);
+    const r = runCliChecked(root, ["--json"], "stale ready-pool with absent slot-refill rows");
     assert.equal(r.status, 1, `stale ready-pool with absent slot-refill rows must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.status, "assessment-steps-stale");
