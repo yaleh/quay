@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-check-harness-three-incompatible-shapes
 title: "semantic-dedup-scan: 26 copies of one selftest harness split across
   three mutually incompatible shapes: counters-only (11),
   allPassed+required-detail (10), allPassed+failures[] acc"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
