@@ -387,6 +387,15 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "解：本条目把 cf4f9bd9e 入表（ae28758aa/806fee934 已按 ruledHistorical 分类）。" +
       "manager 2026-09-16 裁定 ruled one-off（先例 8dfd2967/fd1de6a0）。",
   },
+  {
+    sha: "2d3a6fa35",
+    reason:
+      "人 2026-09-18 04:11:28Z 直接提交 develop 的 serve host 泄漏链修复（--orphan-serves 回收模式 + serve 堆上限，6 文件 459 插入）未登记 ⇒ 该静态检查 exit 1、scripts/test.sh 静态层 fail-closed，" +
+      "使四条在飞 code-delta 任务的机械 fan-in 在 step=suite 恒红。裁定 ruled one-off：判据要抓的是「loop 偷懒绕过 fan-in」，而本提交作者是人（calvino.huang@gmail.com）、" +
+      "内容是 serve 泄漏修复，属人的编辑而非 loop 绕 fan-in 的代码直改，不属于 detector 要抓的那一类。" +
+      "落地机制：条目加在任务分支上经 fan-in 正规 land，⛔ 不需要再一次直投、也不需要自指豁免（先例 37746907c/cf4f9bd9e 的自指死锁在此不发生）。" +
+      "人 2026-09-18 裁定 ruled one-off（先例 cddc55e2/6c46304b7/08e8ec55/ae28758aa）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
