@@ -394,7 +394,11 @@ test("AC3: `Cookie: lang=zh` still renders the pre-existing Chinese body copy, a
     assert.ok(!en.body.includes(zhWord), `en render must not carry ${JSON.stringify(zhWord)}`);
   }
   for (const enWord of [
-    "Source:", "(git log commit facts) · ", "(in-flight development)",
+    // ⚠️ `"Source: "` — WITH the trailing space. The full-width zh `：` separates the label from the
+    // `<code>` that follows on its own; the ASCII colon does not, so the en value carries the space
+    // deliberately (ROW 12 ①) and this literal is pinned so a future "tidy the trailing space" edit
+    // shows up here instead of silently rendering `Source:packages/*`.
+    "Source: ", "(git log commit facts) · ", "(in-flight development)",
     "In development", "Recently changed", "Flagged issue", "Stable",
     "Recently changed components (git-verifiable, past 7 days)",
     "Component", "Path", "Commits in the past 7 days", "Last commit",

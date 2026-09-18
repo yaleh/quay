@@ -1106,8 +1106,12 @@ export const ARCHITECTURE_LABELS: Record<ArchitectureKey, { en: string; zh: stri
   // ── the source note (①) ─────────────────────────────────────────────────────────────────────
   // `数据源：` is its own row because a `<code>` immediately follows it. ⚠️ The en value keeps the
   // full-width-looking role of the colon as an ASCII `:` — the zh `：` is a full-width glyph, and the
-  // en column is independent prose (ROW 1's peer-columns rule), ⛔ not a transliteration.
-  sourceLabel: { en: "Source:", zh: "数据源：" },
+  // en column is independent prose (ROW 1's peer-columns rule), ⛔ not a transliteration. ⚠️ The en
+  // value therefore ENDS WITH A SPACE (like fragments 2 and 3): a full-width `：` separates the two
+  // halves optically on its own, an ASCII `:` does not — without it the page renders
+  // `Source:packages/*`, which is what the AC8 screenshot showed before this was corrected. The zh
+  // column is byte-identical to the pre-extraction literal either way.
+  sourceLabel: { en: "Source: ", zh: "数据源：" },
   // Fragments 2 and 3 START WITH A SPACE in en (see ①) and end with the pre-existing zh bytes. The
   // `· ` inside fragment 2 is part of the LITERAL, not a concatenation done at the call site.
   sourceGitLog: { en: " (git log commit facts) · ", zh: "（git log 提交事实）· " },
