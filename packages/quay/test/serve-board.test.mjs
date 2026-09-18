@@ -30,7 +30,7 @@ import {
   clearTaskStatusRefCache,
 } from "../src/observation.ts";
 import { renderBoardPage } from "../src/serve-handlers.ts";
-import { handleBoard } from "../src/serve-board.ts";
+import { handleBoard, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve-board.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -250,6 +250,11 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
   let server;
   try {
     seed(tasksDir, "NC-1", { title: "Negative control", status: "done", body: BD_BODY("ncNeverSymbol", "packages/quay/src/never-created.ts") });
+    // gap-ac292-criterion-cold-miss-30s-ttl-always-expired: this test drives the PRE-SNAPSHOT
+    // in-request path — it mutates the fixture BETWEEN two requests and requires the second to
+    // reflect the mutation. `/board` now serves a background-built snapshot, so the tick is switched
+    // off here; that is exactly the fallback `clearLandingCache()` below was reaching for.
+    process.env[BOARD_SNAPSHOT_DISABLED_ENV] = "1";
     process.chdir(ws);
     // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
     // kernel-assigned port is read back from the live handle — there is no window for another test
@@ -278,6 +283,7 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
     assert.ok(ncRow2 && !/data-flag="done-unlanded"/.test(ncRow2),
       "AC3: board stops flagging NC-1 after the touch exists");
   } finally {
+    delete process.env[BOARD_SNAPSHOT_DISABLED_ENV];
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
     fs.rmSync(parent, { recursive: true, force: true });
@@ -661,6 +667,12 @@ test("AC2 negative control: a cache-hit /board request does NOT cold-run the che
     seed(tasksDir, "CC-1", { title: "Cache control", status: "todo", body: BD_BODY("ccSymbol", "packages/quay/src/board-symbol.ts") });
     fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
     fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const ccSymbol = 1;\n");
+    // gap-ac292-criterion-cold-miss-30s-ttl-always-expired: this test measures `readBoardLanding`'s
+    // TTL cache THROUGH the HTTP path — it requires the first request to pay the subprocess and the
+    // second not to. With the /board snapshot on, NEITHER request pays it, so the assertion below
+    // would be measuring the snapshot instead. Switch the tick off to keep testing the pre-snapshot
+    // in-request path deterministically (without this it is a race against the tick's first build).
+    process.env[BOARD_SNAPSHOT_DISABLED_ENV] = "1";
     process.chdir(ws);
     // ⛔ NEVER probe-then-bind (see the header note): `startServer({ port: 0 })` binds ONCE and the
     // kernel-assigned port is read back from the live handle — there is no window for another test
@@ -688,6 +700,7 @@ test("AC2 negative control: a cache-hit /board request does NOT cold-run the che
     assert.ok(board2.body.includes("CC-1"), "AC2: the cache-hit response still renders the task");
     assert.ok(board2.body.includes("task-status-drift-check.ts"), "AC2: the landing column still renders");
   } finally {
+    delete process.env[BOARD_SNAPSHOT_DISABLED_ENV];
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
     fs.rmSync(parent, { recursive: true, force: true });
