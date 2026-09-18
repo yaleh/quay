@@ -2,7 +2,7 @@
 id: gap-mirror-mechanical-fanin-fail-open-posture-undocumented
 title: mirrorMechanicalFanInSuiteState 的 fail-open 姿态缺一份写下来的理由——形状与硬规则 3b
   同形（void + 静默 return + 空 catch），而它成立靠下游 fail-closed；补说明、零行为改动
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
