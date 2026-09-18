@@ -34,8 +34,12 @@ import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // product-side import of a plugin script is the sanctioned pattern
 // (packages/quay-native/src/store.ts imports plugin/scripts/shape-sections.ts the same way).
 import { serveControlPlane, type ControlPlaneHandle } from "../../../plugin/scripts/driver-shared.ts";
-import { writeServerState, removeServerState, CONTROL_PLANE_NAME } from "./server-state.ts";
+import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "./server-state.ts";
 import { writeJsonAtomic } from "../../../plugin/scripts/write-json-atomic.ts";
+// The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is
+// alive but is NOT a `quay serve` must be judged STALE, not "held". Both predicates already exist
+// and are single-sourced in the reaper — ⛔ not reimplemented here (second copy = drift).
+import { readProcCmdline, isQuayServe } from "../../../plugin/scripts/worktree-process-reaper.ts";
 // The service inventory is a ZERO-IMPORT leaf module (cli/driver-vocab.ts) because the same names
 // appear in `quay --help`'s statically-imported help text — this file's graph must not be pulled in
 // just to print them. One list, two consumers.
@@ -162,6 +166,9 @@ export {
 } from "./serve-handlers.ts";
 
 export interface StartServerOptions {
+  /** Port to bind. **Default `0`** — the kernel picks an ephemeral port (read back from the handle
+   *  and published in the carrier). An explicit value is honored exactly: a genuine collision
+   *  rejects loudly instead of silently moving to another port. */
   port?: number;
   /** Host to bind to. Defaults to "0.0.0.0" (all interfaces). */
   host?: string;
@@ -359,8 +366,206 @@ async function closeSetupFailure(client: ProviderClient, cause: unknown): Promis
   throw cause;
 }
 
-export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
+// ══ Same-root admission lock (gap-serve-same-root-admission-lock) ══════════════════════════════
+//
+// 触发：`startServer()` 对「同一个 workspace root 是否已经有一个活着的宿主」没有任何准入检查 ——
+// 每次启动都无条件覆盖 `.quay/server.json`。默认端口是固定 4173 时，第二个实例只是【偶然】因
+// EADDRINUSE 失败；默认端口改为内核分配的临时端口（`port = 0`）之后这层偶然护栏消失：第二个实例
+// 会安静地绑到另一个临时端口上、顶掉 carrier，把第一个实例变成孤儿 —— 而
+// `worktree-process-reaper.ts --orphan-serves` 的注释早已把「carrier 被顶掉后活体与泄漏者不可区分」
+// 这个后果写在案（2026-09-17 全局 OOM 的成因）。
+//
+// 为什么是 pidfile 而不是真 OS flock：Node 没有 flock 绑定；仓库现有的 flock 先例
+// （suite-slot-lib.sh / full-suite-runner.ts）是「spawn 一个子进程持锁」的形状，与「进程为自身
+// 生命周期持锁」不匹配，且正是「子进程 fork 出孙进程继承 fd ⇒ kill 持锁者不释放锁」那个坑的形状。
+// 这里要的语义就是「宿主进程活着 ⇔ 锁在」，pidfile + pidAlive 是它的直接实现。
+//
+// 为什么与 `.quay/server.json` 分开（而不是复用同一个文件）：两者职责不同 —— 一个互斥，一个供
+// 外部读者观察（`quay server status` 的 pid、staleness 判定要读的 port）。合并会让「读到的
+// server.json 是不是当前活体」依赖于锁自身的回收时机，而这两个问题的答案可以合理地不同。
+//
+// 三分法（硬规则 3b）：EEXIST 时既有 pid 有三种【可区分】的状态，⛔ 绝不压成一个布尔 ——
+//   live          pid 活着 ∧ cmdline 确认是 quay serve      ⇒ 拒绝（幂等「已在运行」，exit 0）
+//   stale         pid 已死 / pid 活着但 cmdline 是别的进程（pid 复用）⇒ unlink 后【重试一次】
+//   unidentified  pid 活着但 cmdline 读不到；或锁文件里不是一个可用 pid ⇒ 拒绝（fail-closed）
+// 「读不懂」归入【拒绝】而不是【陈旧】：按陈旧处理会 unlink 掉一个可能是活宿主的锁 —— 那正是本
+// 任务要消灭的形态；而误拒的代价是一个响亮的报错 + 一行手工 `rm`，两个代价不对称。
+
+/** 准入锁的 workspace-relative 路径。运行时状态 —— 从不提交（untracked `.quay/`）。 */
+export const SERVE_LOCK_REL = ".quay/server.lock";
+
+/** 被拒绝的启动在 stdout 上留下的机器可读标记。
+ *
+ *  `quay serve` 拒绝时【exit 0】（幂等「已在运行」不是错误），所以调用者（start-drivers.ts）无法
+ *  用退出码区分「被锁拒绝」与「正常退出」—— 这个标记就是那个区分。⛔ 它带上 `self=<自己的 pid>`：
+ *  调用者只读「自己那次 spawn 之后追加的字节」，而 self 让两条并发 spawn 的拒绝不会互相冒充。
+ *  ⚠️ start-drivers.ts 里有同一个字面量的副本（它必须零闭包依赖，见该文件的 direct-entry guard），
+ *  改这里就要同时改那里。 */
+export const SERVE_ADMISSION_REFUSED_MARKER = "quay-serve-admission-refused";
+
+/** 准入锁文件的路径（单一 owner 在这里，调用者不自己拼）。 */
+export function serveLockPath(workspaceRoot: string): string {
+  return path.join(workspaceRoot, SERVE_LOCK_REL);
+}
+
+/** 「锁里那个 pid 现在是什么」——三分法的读数。`detail` 永远是可读的取证文字。 */
+export type AdmissionLockHolder =
+  | { kind: "live"; pid: number; detail: string }
+  | { kind: "stale"; pid: number | null; detail: string }
+  | { kind: "unidentified"; pid: number | null; detail: string };
+
+/**
+ * 读一个**已存在**的锁文件，判定它的持有者处于三分法中的哪一格。⛔ 永不抛：每一种失败都是一个
+ * 显式取值（硬规则 3b —— 一个读不出来的锁不得与「没有锁」同形）。
+ *
+ * pid 复用是本函数的第二个判据（不只是 pidAlive）：一个被回收的 pid 可能指向另一个完全无关的
+ * 进程，若只看 `kill(pid,0)`，那个进程会被误读成「我们的宿主还活着」⇒ 永久假拒绝。
+ */
+export function inspectAdmissionLock(lockPath: string): AdmissionLockHolder {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(lockPath, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    // 不存在的锁 = 没有持有者（调用者会据此重试 O_EXCL）—— 这是【陈旧】这一格，不是「读不懂」。
+    if (code === "ENOENT") return { kind: "stale", pid: null, detail: `${lockPath} vanished` };
+    return { kind: "unidentified", pid: null, detail: `cannot read ${lockPath}: ${String(code ?? (err as Error)?.message ?? err)}` };
+  }
+  const pid = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    // 内容不是一个可用 pid。⛔ 不判陈旧：这可能正是另一个进程「O_EXCL 已创建、pid 还没写进去」
+    // 的那个微秒窗口，unlink 它会让我们和它同时持锁。说不清 ⇒ 拒绝（fail-closed）。
+    return { kind: "unidentified", pid: null, detail: `${lockPath} holds no usable pid (content=${JSON.stringify(raw.slice(0, 40))})` };
+  }
+  if (!pidAlive(pid)) return { kind: "stale", pid, detail: `pid ${pid} is not alive` };
+  const cmdline = readProcCmdline(pid);
+  if (cmdline === null) {
+    return { kind: "unidentified", pid, detail: `pid ${pid} is alive but its /proc cmdline is unreadable — cannot tell whether it is a quay serve` };
+  }
+  if (!isQuayServe(cmdline)) {
+    return { kind: "stale", pid, detail: `pid ${pid} is alive but is not a quay serve (argv=${cmdline.join(" ").slice(0, 120) || "<empty>"})` };
+  }
+  return { kind: "live", pid, detail: `pid ${pid} is a live quay serve holding this workspace root` };
+}
+
+/** 准入判定：拿到了 / 被活体持有 / 被一个说不清的锁挡住。`detail` 供 report 与 stderr 直接引用。 */
+export type ServeAdmission =
+  | { state: "acquired"; path: string }
+  | { state: "held"; path: string; holderPid: number; detail: string }
+  | { state: "held-unidentified"; path: string; holderPid: number | null; detail: string };
+
+/**
+ * 取同-root 准入锁：`O_CREAT|O_EXCL` 创建 → 立刻写自己的 pid；EEXIST ⇒ 读既有持有者 ⇒
+ * 【陈旧 ⇒ unlink 后重试一次】（有限重试，⛔ 不死循环）／【活体或读不懂 ⇒ 拒绝】。
+ *
+ * ⛔ 调用点必须是 `startServer()` 的第一条语句（loadConfig 之后：锁路径由 workspace root 派生），
+ * 早于 `connectProvider` —— 一次被拒绝的启动不该先 spawn 一个 provider 子进程再收尾清理。
+ */
+export function acquireServeAdmissionLock(workspaceRoot: string): ServeAdmission {
+  const p = serveLockPath(workspaceRoot);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(p, "wx"); // O_CREAT|O_EXCL|O_WRONLY —— 创建这一步的原子性由内核给
+      try {
+        fs.writeSync(fd, `${process.pid}\n`);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return { state: "acquired", path: p };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | undefined)?.code !== "EEXIST") throw err;
+      const holder = inspectAdmissionLock(p);
+      if (holder.kind === "live") return { state: "held", path: p, holderPid: holder.pid, detail: holder.detail };
+      if (holder.kind === "unidentified") {
+        return { state: "held-unidentified", path: p, holderPid: holder.pid, detail: holder.detail };
+      }
+      // stale ⇒ 回收并重试一次（第二次仍 EEXIST ⇒ 落回下面的拒绝分支：那是并发竞争者赢了这个窗口）
+      try {
+        fs.unlinkSync(p);
+      } catch (unlinkErr) {
+        if ((unlinkErr as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+          return {
+            state: "held-unidentified",
+            path: p,
+            holderPid: holder.pid,
+            detail: `stale lock could not be reclaimed: ${String((unlinkErr as NodeJS.ErrnoException)?.code ?? unlinkErr)}`,
+          };
+        }
+      }
+    }
+  }
+  const after = inspectAdmissionLock(p);
+  if (after.kind === "live") return { state: "held", path: p, holderPid: after.pid, detail: after.detail };
+  return {
+    state: "held-unidentified",
+    path: p,
+    holderPid: after.pid,
+    detail: after.kind === "unidentified" ? after.detail : `lock reappeared after a stale reclaim (${after.detail})`,
+  };
+}
+
+/**
+ * 释放准入锁 —— ⛔ 只在锁上写的是【本进程的 pid】时 unlink。
+ *
+ * 无条件的 unlink 会制造一个新缺陷：一个启动失败后正要清理的自己，可能删掉刚刚回收了这个锁的
+ * 另一个宿主。幂等（没有锁 / 不是自己的锁 ⇒ 什么也不做），失败静默（best-effort：调用点在
+ * shutdown 的 finally 里，清理失败不得改变退出行为）。
+ */
+export function releaseServeAdmissionLock(workspaceRoot: string): void {
+  const p = serveLockPath(workspaceRoot);
+  try {
+    const raw = fs.readFileSync(p, "utf8");
+    if (Number.parseInt(raw.trim(), 10) !== process.pid) return;
+    fs.unlinkSync(p);
+  } catch {
+    /* best-effort: 没有锁 / 读不到 / 已经被别人回收 —— 都不是本函数要报的错 */
+  }
+}
+
+/** 「同-root 已有活体宿主」的拒绝 —— 一个【可区分】的错误类型，⛔ 不与启动失败同形（硬规则 3b）。
+ *  `handleServe` 靠它把 CLI 的退出码钉在 0（幂等「已在运行」不是错误），start-drivers 靠 stdout
+ *  上的标记把它读成 `already-running`。 */
+export class ServeAdmissionRefusedError extends Error {
+  readonly code = "QUAY_SERVE_ADMISSION_HELD";
+  readonly holderPid: number | null;
+  constructor(admission: Extract<ServeAdmission, { state: "held" | "held-unidentified" }>) {
+    super(`quay serve: already running${admission.holderPid != null ? ` (pid=${admission.holderPid})` : ""} — ${admission.detail}`);
+    this.name = "ServeAdmissionRefusedError";
+    this.holderPid = admission.holderPid;
+  }
+}
+
+/** 拒绝行 —— stdout 上的人读文字 + 机器读标记（`SERVE_ADMISSION_REFUSED_MARKER`，带 self pid）。 */
+export function formatAdmissionRefusal(err: ServeAdmissionRefusedError): string {
+  return `${err.message} [${SERVE_ADMISSION_REFUSED_MARKER} self=${process.pid} holder=${err.holderPid ?? "?"}]\n`;
+}
+
+/** 这个错误是不是「同-root 已有活体」的拒绝？调用者据此把它与启动失败分开处理。 */
+export function isServeAdmissionRefused(err: unknown): err is ServeAdmissionRefusedError {
+  return !!err && typeof err === "object" && (err as { code?: unknown }).code === "QUAY_SERVE_ADMISSION_HELD";
+}
+
+/**
+ * `quay serve` 的入口：**先取同-root 准入锁**，再走原有的启动序列。
+ *
+ * ⛔ 锁的取放都在这一层（`startServerUnderLock` 完全不感知锁），这样「被拒绝的启动」在结构上就
+ * 到不了 `connectProvider`/`listen`，而不是靠顺序记得对。启动失败（provider 连不上 / bind 失败 /
+ * 控制面失败）必须释放锁 —— 一个失败启动留下的锁会把下一次启动永久挡在门外。
+ */
+export async function startServer(options: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   const cfg = loadConfig();
+  const admission = acquireServeAdmissionLock(cfg.workspaceRoot);
+  if (admission.state !== "acquired") throw new ServeAdmissionRefusedError(admission);
+  try {
+    return await startServerUnderLock(cfg, options);
+  } catch (err) {
+    releaseServeAdmissionLock(cfg.workspaceRoot);
+    throw err;
+  }
+}
+
+async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port = 0, host = "0.0.0.0", accessLogPath }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   // gap-web-server-access-logging (AC2): resolve the access-log path (default
   // <workspaceRoot>/.quay/quay-access.log) and ensure its parent dir exists
   // before the first request, so appendFileSync never fails on a missing dir.
@@ -407,9 +612,9 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // server down.
   // gap-web-ui-pages-carry-no-host-project-identity: the page identity is ASSEMBLED ONCE, here,
   // and handed to the route dispatcher — never re-derived per page. It is filled in AFTER the
-  // listen resolves because the authoritative port is the one the kernel actually bound (`--port
-  // 0` is the test convention for an ephemeral port, so the requested port is not a reading of
-  // anything). `identity` stays null only in the window before `listen` — no request can be
+  // listen resolves because the authoritative port is the one the kernel actually bound (the
+  // default `port` is 0 = kernel-assigned, so the REQUESTED port is not a reading of anything).
+  // `identity` stays null only in the window before `listen` — no request can be
   // dispatched then, and a page that ever did see null renders the explicit 「未接入项目身份」
   // title instead of a silently anonymous one.
   // ── MCP control plane, IN THIS PROCESS (GOAL-017/AC-251, SPEC §7 stage A2) ────────────────────
@@ -514,9 +719,13 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // clean rejection. Both are fixed here: the promise resolves only once the
   // 'listening' event fires (so `server.address().port` is valid immediately after
   // `await startServer({ port: 0 })`), and a persistent 'error' handler turns bind
-  // failures into logged rejections. An explicit, user-supplied `port` is still
-  // honored exactly — `port: 0` is only the internal/test convention for asking the
-  // kernel to pick an ephemeral port.
+  // failures into logged rejections.
+  //
+  // Port contract (gap-serve-same-root-admission-lock): the DEFAULT is now `0` — an ephemeral port
+  // picked by the kernel — so two hosts on two roots can never collide on a hardcoded number, and
+  // the same-root admission lock (not an accidental EADDRINUSE) is what keeps one host per root.
+  // An explicit, user-supplied `port` is still honored EXACTLY: a genuine collision on it fails
+  // loudly (the rejected `listen` below) and never silently falls back to another port.
   /** Bind ONE web face and resolve with the port the KERNEL actually bound. */
   async function listenWeb(s: http.Server, requestedPort: number): Promise<number> {
     await new Promise<void>((resolve, reject) => {
@@ -728,6 +937,11 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
       await stopControlFace();
     } finally {
       removeServerState(root);
+      // The host's own end releases the SAME-ROOT ADMISSION LOCK too — the lock's whole meaning is
+      // 「宿主进程活着 ⇔ 锁在」, so a clean shutdown that left it behind would block the next start
+      // until someone killed a pid that no longer exists. (A SIGKILLed host leaves the lock; the
+      // next start reclaims it through `inspectAdmissionLock`'s stale branch.)
+      releaseServeAdmissionLock(root);
     }
   }
 

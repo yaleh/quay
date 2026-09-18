@@ -8,17 +8,24 @@
 //   - pure helpers: parseDriverStatus (alive/dead/unreadable are three distinguishable values),
 //     resolveWorkspaceRoot, resolveCliInvocation (explicit/source-tree/vendor-bundle/PATH
 //     precedence — the vendor-bundle branch and its own coverage live in
-//     start-drivers-cli-resolution.test.mjs), planActions (the idempotency decision, INCLUDING its
-//     staleness dimension), probeUrl, probeServeStaleness + readServeHostPid (the two three-valued
-//     readings the stale-reload path is built on).
-//   - full flow (hermetic): a fake `quay` CLI scripts `driver status`/`driver start` and actually
-//     listens for `serve`, proving run#1 starts everything and run#2 starts nothing (idempotent).
-//   - stale reload (gap-serve-stale-signal-has-no-consumer): a REAL separate server process answers
-//     /health with `stale:true`; the script must SIGTERM it (identified from `.quay/server.json`),
-//     wait for the port, and start a fresh one — then SKIP on the next run because it is now fresh.
-//     Mirror half: an unreadable /health is NOT-EVALUATED — its own literal, host untouched.
+//     start-drivers-cli-resolution.test.mjs), planServeAction (the serve decision),
+//     probeServeStaleness + readServeHostPid (the three-valued readings the reload path is built on),
+//     readAdmissionRefusal (the marker reader that tells 「refused」 from 「exited」).
+//   - full flow (hermetic): a fake `quay` CLI scripts `driver status`/`driver start` and, for
+//     `serve`, behaves as a MINIATURE FAITHFUL HOST — it takes the same same-root admission lock
+//     (O_EXCL + stale reclaim), publishes a carrier naming itself and its bound port, and answers
+//     `/health`. run#1 starts everything; run#2 SPAWNS AGAIN and is refused by the lock, which is
+//     the point (gap-serve-same-root-admission-lock): there is no pre-flight liveness probe left to
+//     short-circuit with, so the "already running" verdict comes from the host process itself.
+//   - stale reload (gap-serve-stale-signal-has-no-consumer): the live host answers /health with
+//     `stale:true` ⇒ the script must SIGTERM it (identified from `.quay/server.json`), WAIT FOR ITS
+//     PID TO DIE, and start a fresh host — which reclaims the dead host's lock. Mirror half: an
+//     unreadable /health is NOT-EVALUATED — its own literal, host untouched. Third half: a refusal
+//     with no readable carrier is NOT-EVALUATED with its own reason, and is not a failure.
 //   - failure relay: a fake CLI whose `driver start` exits 1 with a "halted" message — the script
 //     must relay that verbatim (not swallow / not misreport), and fail non-zero.
+//   - stopServeHost: waits for the PID (not a port), and a SIGTERM-ignoring host is reported
+//     `still-alive` — never `stopped`.
 //   - structural: plugin/skills/drivers/SKILL.md references plugin/scripts/start-drivers.ts (the
 //     laydown rule-(a) derivation anchor).
 //
@@ -37,10 +44,12 @@ import {
   parseDriverStatus,
   resolveWorkspaceRoot,
   resolveCliInvocation,
-  planActions,
-  probeUrl,
+  planServeAction,
   probeServeStaleness,
   readServeHostPid,
+  readAdmissionRefusal,
+  stopServeHost,
+  SERVE_ADMISSION_REFUSED_MARKER,
 } from "../scripts/start-drivers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,11 +63,11 @@ function runScript(args, opts = {}) {
   return spawnSync(process.execPath, ["--experimental-strip-types", SCRIPT, ...args], {
     encoding: "utf8",
     env: { ...process.env, ...(opts.env || {}) },
-    timeout: opts.timeout || 30000,
+    timeout: opts.timeout || 60000,
   });
 }
 
-/** Bind an ephemeral port and release it — a mostly-safe free-port source for the serve probe. */
+/** Bind an ephemeral port and release it — a mostly-safe free-port source for the explicit-port case. */
 function freePort() {
   return new Promise((resolve, reject) => {
     const srv = http.createServer();
@@ -70,7 +79,34 @@ function freePort() {
   });
 }
 
-/** A fake `quay` CLI (CommonJS) — scripts driver status/start, actually listens for `serve`. */
+/** Does a TCP port answer an HTTP request? (The tests' OWN reading of 「the host is up」 — ⛔ not a
+ *  helper the script under test has: since gap-serve-same-root-admission-lock the script never
+ *  probes a port itself.) */
+function portAnswers(port, host = "127.0.0.1", timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const req = http.request({ host, port, path: "/health", method: "GET", timeout: timeoutMs }, (res) => {
+      res.resume();
+      resolve(true);
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+async function waitForPort(port, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await portAnswers(port)) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(200);
+  }
+}
+
+/** The fake `quay` CLI (CommonJS) — scripts driver status/start, and for `serve` acts as a
+ *  MINIATURE FAITHFUL HOST: same-root admission lock (O_EXCL create + stale reclaim by pid liveness),
+ *  a carrier naming itself and the port it actually bound, `/health` from env. Recording:
+ *  ["serve","listening"] for a host that bound, ["serve","refused"] for one the lock turned away. */
 function writeFakeQuay(dir) {
   const fake = path.join(dir, "fake-quay.js");
   const src = `const fs = require("node:fs");
@@ -82,8 +118,35 @@ const startExit = Number(process.env.FAKE_QUAY_START_EXIT || 0);
 const startStderr = process.env.FAKE_QUAY_START_STDERR || "";
 const startAlive = Number(process.env.FAKE_QUAY_START_ALIVE || 1);
 const statusGarbage = Number(process.env.FAKE_QUAY_STATUS_GARBAGE || 0);
+const serveRoot = process.env.FAKE_QUAY_ROOT || "";
 function rec(a) { if (log) fs.appendFileSync(log, JSON.stringify(a) + "\\n"); }
 function state() { return (stateFile && fs.existsSync(stateFile)) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {}; }
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+// Mirrors packages/quay/src/serve.ts:acquireServeAdmissionLock (minus the cmdline pid-reuse check,
+// which a node -e fake cannot satisfy). Returns true when the lock was taken.
+function tryLock(root) {
+  const lock = root + "/.quay/server.lock";
+  fs.mkdirSync(root + "/.quay", { recursive: true });
+  for (let i = 0; i < 2; i++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid) + "\\n", { flag: "wx" });
+      return true;
+    } catch (e) {
+      if (e.code !== "EEXIST") return true;
+      let holder = NaN;
+      try { holder = parseInt(fs.readFileSync(lock, "utf8").trim(), 10); } catch (e2) { /* unreadable */ }
+      if (Number.isInteger(holder) && holder > 0 && pidAlive(holder)) {
+        process.stdout.write("quay serve: already running (pid=" + holder + ") [" +
+          "${SERVE_ADMISSION_REFUSED_MARKER} self=" + process.pid + " holder=" + holder + "]\\n");
+        return false;
+      }
+      try { fs.unlinkSync(lock); } catch (e2) { /* gone */ }
+    }
+  }
+  return false;
+}
 const cmd = argv[0];
 if (cmd === "driver") {
   const verb = argv[1];
@@ -105,61 +168,45 @@ if (cmd === "driver") {
   }
   process.exit(2);
 } else if (cmd === "serve") {
-  rec(["serve"]);
-  const port = Number(argv[argv.indexOf("--port") + 1]);
+  const wantPort = Number(argv[argv.indexOf("--port") + 1]);
   const host = argv[argv.indexOf("--host") + 1];
-  const rootArg = argv[argv.indexOf("--root") + 1];
-  const health = process.env.FAKE_QUAY_HEALTH || '{"ok":true,"stale":false,"evaluated":true}';
-  if (rootArg && process.env.FAKE_QUAY_WRITE_SERVER_JSON === "1") {
-    try {
-      fs.mkdirSync(rootArg + "/.quay", { recursive: true });
-      fs.writeFileSync(rootArg + "/.quay/server.json", JSON.stringify({ schemaVersion: 1, pid: process.pid, startedAt: new Date().toISOString(), services: [] }));
-    } catch (e) { /* best-effort, mirrors the real host */ }
+  const healthFile = process.env.FAKE_QUAY_HEALTH_FILE || "";
+  // The body is read PER REQUEST when a file is named, so a test can change what the LIVE host says
+  // about its own freshness between runs (that is exactly the reload scenario).
+  function healthBody() {
+    if (healthFile) { try { return fs.readFileSync(healthFile, "utf8"); } catch (e) { return ""; } }
+    return process.env.FAKE_QUAY_HEALTH || '{"ok":true,"stale":false,"evaluated":true}';
   }
-  http.createServer((req, res) => {
+  if (serveRoot && !tryLock(serveRoot)) { rec(["serve", "refused"]); process.exit(0); }
+  const srv = http.createServer((req, res) => {
     if (req.url && req.url.indexOf("/health") === 0) {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(health);
-    } else {
-      res.end("ok");
+      res.end(healthBody());
+    } else { res.end("ok"); }
+  });
+  srv.listen(wantPort, host, () => {
+    const bound = srv.address().port;
+    // Record BEFORE publishing the carrier: the caller (start-drivers) returns as soon as the
+    // carrier names this pid, so a test reading the log right after that return must not race us.
+    rec(["serve", "listening"]);
+    if (serveRoot) {
+      try {
+        fs.writeFileSync(serveRoot + "/.quay/server.json", JSON.stringify({
+          schemaVersion: 1, pid: process.pid, startedAt: new Date().toISOString(),
+          services: [{ name: "web", pid: process.pid, host: host, port: bound, up: true }],
+        }));
+      } catch (e) { /* best-effort, mirrors the real host */ }
     }
-  }).listen(port, host);
+    // The real host announces its bound port on stdout; the fake keeps that shape so a human reading
+    // .quay/serve.log sees the same thing.
+    console.log("quay serve: listening on http://" + host + ":" + bound);
+  });
 } else {
   process.exit(2);
 }
 `;
   fs.writeFileSync(fake, src, "utf8");
   return fake;
-}
-
-/** A standalone HTTP server PROCESS (not an in-test server) — so the reload path's SIGTERM has a
- *  real target and "the old host is gone" is observable. Answers `healthBody` on /health, "ok"
- *  elsewhere. Resolves once it actually answers. */
-async function startForeignServer(dir, healthBody) {
-  const f = path.join(dir, "foreign-server.js");
-  fs.writeFileSync(f, `const http = require("node:http");
-const port = Number(process.argv[2]);
-const host = process.argv[3];
-const body = process.env.HEALTH_BODY || "";
-http.createServer((req, res) => {
-  if (req.url && req.url.indexOf("/health") === 0) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(body); }
-  else { res.end("ok"); }
-}).listen(port, host);
-`, "utf8");
-  const port = await freePort();
-  const child = spawn(process.execPath, [f, String(port), "127.0.0.1"], {
-    env: { ...process.env, HEALTH_BODY: healthBody },
-    stdio: "ignore",
-  });
-  let exited = false;
-  child.on("exit", () => { exited = true; });
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (await probeUrl("127.0.0.1", port, 300)) return { child, pid: child.pid, port, exited: () => exited };
-    await sleep(50);
-  }
-  try { child.kill("SIGKILL"); } catch { /* gone */ }
-  throw new Error(`foreign server never answered on ${port}`);
 }
 
 /** Is the process RUNNING — i.e. still serving? ⛔ `kill(pid, 0)` is true for a reaped-but-unwaited
@@ -174,26 +221,15 @@ function pidRunning(pid) {
   }
 }
 
-/** Poll until the port answers, within a deadline — the SAME contract `startServe` itself offers.
- *  ⛔ A single immediate probe is the wrong reading: a freshly-spawned listener can be briefly
- *  unresponsive right after its parent exits (measured here: the first probe after the reload
- *  returned false, every probe from +200ms returned true), so a one-shot probe measures the test's
- *  timing rather than the script's behavior. */
-async function waitForProbe(host, port, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (await probeUrl(host, port, 1000)) return true;
-    if (Date.now() >= deadline) return false;
-    await sleep(200);
-  }
-}
-
 /** Publish the `.quay/server.json` carrier `quay serve` writes about itself — the reload path's ONLY
- *  pid source (⛔ not `.quay/serve.pid`, which goes stale). */
-function writeServeCarrier(root, pid) {
+ *  pid+port source (⛔ not `.quay/serve.pid`, which goes stale). */
+function writeServeCarrier(root, pid, port = 1234) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, pid, startedAt: new Date().toISOString(), services: [] }));
+    JSON.stringify({
+      schemaVersion: 1, pid, startedAt: new Date().toISOString(),
+      services: [{ name: "web", pid, host: "127.0.0.1", port, up: true }],
+    }));
 }
 
 function makeWorkspaceRoot(parent) {
@@ -203,9 +239,24 @@ function makeWorkspaceRoot(parent) {
   return root;
 }
 
+/** The `--json` report from a run's stdout. ⛔ Not `JSON.parse(stdout)`: the relayed driver-start
+ *  output ("started: kind=…") shares that stream, so the report is the LAST line. */
+function jsonReport(stdout) {
+  const lines = String(stdout).trim().split("\n").filter(Boolean);
+  return JSON.parse(lines[lines.length - 1]);
+}
+
 function readLogLines(log) {
   if (!fs.existsSync(log)) return [];
   return fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+/** Kill the host the fake wrote into the carrier (and its lock file), so a test never leaks one. */
+function reapFakeHost(root) {
+  try {
+    const carrier = JSON.parse(fs.readFileSync(path.join(root, ".quay", "server.json"), "utf8"));
+    if (carrier && Number.isInteger(carrier.pid)) { try { process.kill(carrier.pid, "SIGKILL"); } catch { /* gone */ } }
+  } catch { /* no carrier */ }
 }
 
 // ── pure helpers ─────────────────────────────────────────────────────────────────────────────
@@ -255,44 +306,51 @@ test("resolveCliInvocation — explicit .ts / explicit .js / source-tree / PATH 
   fs.rmSync(bare, { recursive: true, force: true });
 });
 
-test("planActions — the idempotency decision is pure", () => {
-  assert.deepEqual(
-    planActions({ promotionAlive: true, workerAlive: true, outerAlive: true, goalAlive: true, serveListening: true }),
-    { startPromotion: false, startWorker: false, startOuter: false, startGoal: false, startServe: false },
-  );
-  assert.deepEqual(
-    planActions({ promotionAlive: false, workerAlive: false, outerAlive: false, goalAlive: false, serveListening: false }),
-    { startPromotion: true, startWorker: true, startOuter: true, startGoal: true, startServe: true },
-  );
-  assert.deepEqual(
-    planActions({ promotionAlive: true, workerAlive: false, outerAlive: true, goalAlive: true, serveListening: true }),
-    { startPromotion: false, startWorker: true, startOuter: false, startGoal: false, startServe: false },
-  );
+// gap-serve-same-root-admission-lock — the serve decision is now driven by the HOST's own admission
+// verdict plus the staleness reading of the host it names. BIDIRECTIONAL: the staleness dimension
+// must move the action in BOTH directions, otherwise the dimension is decoration.
+test("planServeAction — a verdict of `started` needs no decision; otherwise staleness decides, and NOT-EVALUATED never becomes a restart", () => {
+  assert.equal(planServeAction({ admission: "started" }), "started",
+    "a host that bound is started — the staleness input is not consulted (there is no other host)");
+  assert.equal(planServeAction({ admission: "started", staleness: true }), "started",
+    "⛔ even a stale-looking input cannot turn a just-bound host into a reload");
+  // (a) live host + STALE ⇒ MUST reload. Before gap-serve-stale-signal-has-no-consumer this was
+  //     "already listening" — the defect that left a pre-fix server up for 8.5h / 3h.
+  assert.equal(planServeAction({ admission: "already-running", staleness: true }), "reload");
+  // (b) live host + FRESH ⇒ skip (the negative control: (a) is not just "always reload").
+  assert.equal(planServeAction({ admission: "already-running", staleness: false }), "already-listening");
+  // (c) live host + NOT-EVALUATED (null/undefined) ⇒ skip — 硬規則 3b: a reading we could not take is
+  //     not a verdict in either direction; the caller reports it as its own literal.
+  assert.equal(planServeAction({ admission: "already-running", staleness: null }), "already-listening");
+  assert.equal(planServeAction({ admission: "already-running" }), "already-listening");
 });
 
-// AC3 (gap-serve-stale-signal-has-no-consumer) — BIDIRECTIONAL: the staleness dimension must move
-// `startServe` in BOTH directions, otherwise the dimension is decoration.
-test("AC3 — planActions: listening+STALE ⇒ start (reload); listening+FRESH ⇒ skip; NOT-EVALUATED ⇒ skip", () => {
-  const base = { promotionAlive: true, workerAlive: true, outerAlive: true, goalAlive: true, serveListening: true };
-  // (a) stale-but-reachable ⇒ MUST start. Before this task this was `false` — the defect.
-  assert.equal(planActions({ ...base, serveStale: true }).startServe, true,
-    "a listening-but-STALE server is not 'already running' — it must be reloaded");
-  // (b) fresh-and-reachable ⇒ MUST skip (the negative control: (a) is not just "always true").
-  assert.equal(planActions({ ...base, serveStale: false }).startServe, false,
-    "a listening-and-FRESH server must NOT be restarted");
-  // (c) listening but NOT-EVALUATED ⇒ skip (AC4: a reading we could not take is not a verdict in
-  //     either direction) — and distinctly from (b): the caller reports the two differently.
-  assert.equal(planActions({ ...base, serveStale: null }).startServe, false,
-    "an unevaluated reading must not become a restart");
-  assert.equal(planActions({ ...base }).startServe, false, "omitted staleness is not-evaluated, not stale");
-  // (d) nothing listening ⇒ start regardless of staleness value.
-  assert.equal(planActions({ ...base, serveListening: false, serveStale: false }).startServe, true);
-  assert.equal(planActions({ ...base, serveListening: false, serveStale: null }).startServe, true);
+test("readAdmissionRefusal — the marker is bound to OUR child, and only bytes appended after OUR spawn count", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-marker-"));
+  try {
+    const log = path.join(dir, "serve.log");
+    // A marker from a PREVIOUS run must not answer for this one.
+    fs.writeFileSync(log, `quay serve: already running (pid=11) [${SERVE_ADMISSION_REFUSED_MARKER} self=999 holder=11]\n`);
+    const offset = fs.statSync(log).size;
+    assert.equal(readAdmissionRefusal(log, offset, 4242), null,
+      "⛔ a marker already in the log before our spawn answers for a LATER spawn only if offset is ignored");
+    // Our own child's marker, after the offset.
+    fs.appendFileSync(log, `quay serve: already running (pid=11) [${SERVE_ADMISSION_REFUSED_MARKER} self=4242 holder=11]\n`);
+    assert.deepEqual(readAdmissionRefusal(log, offset, 4242), { holderPid: 11 });
+    // A CONCURRENT process's refusal (same window, different self) is not ours — the `self=` binding.
+    assert.equal(readAdmissionRefusal(log, offset, 7777), null,
+      "⛔ another spawn's refusal in the same byte window must not be read as ours");
+    // A marker that names no readable holder still counts as a refusal (the verdict is the marker).
+    fs.appendFileSync(log, `[$marker self=8888 holder=?]\n`.replace("$marker", SERVE_ADMISSION_REFUSED_MARKER));
+    assert.deepEqual(readAdmissionRefusal(log, offset, 8888), { holderPid: null });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-// AC3/AC4 — the reading itself. Every "could not read" mode is a SEPARATE value from "fresh"
-// (硬規則 3b), and none of them is "stale".
-test("AC4 — probeServeStaleness: boolean stale is evaluated; every unreadable mode is NOT-EVALUATED with its own token", async () => {
+// AC4 (硬規則 3b) — the reading itself. Every "could not read" mode is a SEPARATE value from "fresh",
+// and none of them is "stale".
+test("probeServeStaleness: boolean stale is evaluated; every unreadable mode is NOT-EVALUATED with its own token", async () => {
   const port = await freePort();
   let body = JSON.stringify({ ok: true, stale: true, evaluated: true });
   let status = 200;
@@ -337,15 +395,24 @@ test("AC4 — probeServeStaleness: boolean stale is evaluated; every unreadable 
     { evaluated: false, stale: null, reason: "unreachable" });
 });
 
-test("readServeHostPid — present / absent / unreadable are three distinguishable values (硬規則 3b)", () => {
+test("readServeHostPid — present / absent / unreadable are three distinguishable values, and the present one carries the WEB PORT", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-carrier-"));
   try {
     assert.deepEqual(readServeHostPid(root), { state: "absent" }, "no carrier at all");
-    writeServeCarrier(root, 4242);
+    writeServeCarrier(root, 4242, 45678);
     const present = readServeHostPid(root);
     assert.equal(present.state, "present");
     assert.equal(present.pid, 4242);
     assert.equal(typeof present.startedAt, "string", "the carrier's startedAt is carried through when present");
+    assert.equal(present.port, 45678,
+      "the web port is read back from the carrier — with an ephemeral default it is the only knowable address of the host");
+    // A carrier with no usable web entry is still present (the host is live) but reports NO port — its
+    // own value, never port 0 / never a guess.
+    writeServeCarrier(root, 5, 0);
+    assert.equal(readServeHostPid(root).port, null, "no usable web port ⇒ null (NOT-EVALUATED input), never 0");
+    fs.writeFileSync(path.join(root, ".quay", "server.json"),
+      JSON.stringify({ schemaVersion: 1, pid: 9, startedAt: new Date().toISOString(), services: [] }));
+    assert.equal(readServeHostPid(root).port, null, "a carrier with no web service at all ⇒ null");
     // A carrier that exists but cannot be used is NOT "no server" — the reload path acts on the
     // difference (absent ⇒ nothing to kill; unreadable ⇒ refuse to guess).
     fs.writeFileSync(path.join(root, ".quay", "server.json"), "{ not json");
@@ -357,108 +424,127 @@ test("readServeHostPid — present / absent / unreadable are three distinguishab
   }
 });
 
-test("probeUrl — false with nothing listening, true once a server answers", async () => {
-  const port = await freePort();
-  assert.equal(await probeUrl("127.0.0.1", port, 500), false);
-  const srv = http.createServer((req, res) => res.end("ok"));
-  await new Promise((resolve) => srv.listen(port, "127.0.0.1", resolve));
-  assert.equal(await probeUrl("127.0.0.1", port, 500), true);
-  await new Promise((resolve) => srv.close(resolve));
+// ── stopServeHost: the wait is on the PID, not on a port (AC6) ───────────────────────────────
+test("AC6 — stopServeHost waits for the PID: a cooperative host ⇒ `stopped` and the pid is really gone", async () => {
+  const child = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)"], { stdio: "ignore" });
+  await sleep(300);
+  assert.equal(pidRunning(child.pid), true, "setup: the host is running before the stop");
+  const res = await stopServeHost(child.pid, 8000);
+  assert.equal(res.state, "stopped");
+  assert.equal(pidRunning(child.pid), false, "⛔ `stopped` must mean the pid is GONE, not merely signalled");
+});
+
+test("AC6 — a SIGTERM-ignoring host is reported `still-alive`, never `stopped` (硬規則 3b)", async () => {
+  const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setTimeout(()=>{},60000)"], { stdio: "ignore" });
+  await sleep(300);
+  const res = await stopServeHost(child.pid, 1200);
+  assert.equal(res.state, "still-alive",
+    "⛔ a host that did not die must not share an output with one that did — the caller would spawn a second host on top of it");
+  assert.equal(pidRunning(child.pid), true, "the SIGTERM-ignoring host is in fact still alive (the verdict is a reading)");
+  // Control: the same call on a pid that dies ⇒ `stopped` (so `still-alive` is not just "always").
+  try { child.kill("SIGKILL"); } catch { /* gone */ }
+  await sleep(400);
+  assert.equal((await stopServeHost(child.pid, 3000)).state, "stopped",
+    "AC6 control: an already-dead pid is `stopped` (idempotent), so the two literals are distinguishable");
 });
 
 // ── full flow (hermetic, fake quay CLI) ──────────────────────────────────────────────────────
 
-test("full flow — run#1 starts drivers + serve, run#2 starts nothing (idempotent)", async () => {
+test("full flow — run#1 starts drivers + serve; run#2 SPAWNS AGAIN and is refused by the host's own lock (no pre-flight probe)", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-flow-"));
   try {
     const root = makeWorkspaceRoot(tmp);
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    const port = await freePort();
-    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile };
-    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "10000"];
+    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root };
+    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"];
 
     const first = runScript(args, { env });
     assert.equal(first.status, 0, `first run must exit 0:\n${first.stdout}\n${first.stderr}`);
-    assert.match(first.stdout, /promotion: started/);
-    assert.match(first.stdout, /worker: started/);
-    assert.match(first.stdout, /outer: started/);
-    assert.match(first.stdout, /goal: started/);
-    assert.match(first.stdout, /serve: started/);
-    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve"]]);
+    const report = jsonReport(first.stdout);
+    assert.equal(report.serve.state, "started", "run#1 binds the host");
+    assert.ok(Number.isInteger(report.serve.port) && report.serve.port > 0,
+      `run#1 reports the port the host ACTUALLY bound (got ${JSON.stringify(report.serve.port)})`);
+    assert.equal(await waitForPort(report.serve.port), true, "the reported port really answers");
+    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve", "listening"]]);
 
     const second = runScript(args, { env });
-    assert.equal(second.status, 0, `second run must exit 0:\n${second.stdout}\n${second.stderr}`);
-    assert.match(second.stdout, /promotion: already running/);
-    assert.match(second.stdout, /worker: already running/);
-    assert.match(second.stdout, /outer: already running/);
-    assert.match(second.stdout, /goal: already running/);
-    assert.match(second.stdout, /serve: already listening/);
-    assert.match(second.stdout, /code fresh/, "run#2 must have READ /health and seen a fresh code state");
-    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve"]],
-      "second run must not re-start anything");
-
-    // Reap the detached fake serve (pid written to .quay/serve.pid).
-    const pidFile = path.join(root, ".quay", "serve.pid");
-    if (fs.existsSync(pidFile)) {
-      try { process.kill(Number(fs.readFileSync(pidFile, "utf8").trim()), "SIGKILL"); } catch { /* gone */ }
-    }
+    assert.equal(second.status, 0, `second run must exit 0 (already-running is not a failure):\n${second.stdout}\n${second.stderr}`);
+    const report2 = jsonReport(second.stdout);
+    assert.equal(report2.serve.state, "already-listening");
+    assert.equal(report2.serve.staleness, "fresh", "run#2 read /health from the LIVE host's carrier port and saw fresh code");
+    assert.equal(report2.serve.port, report.serve.port, "the live host's port is reported from its carrier, not re-derived");
+    // ⛔ THE POINT of this task's mechanism: run#2 DOES spawn the CLI (there is no pre-flight liveness
+    // probe left to short-circuit with) — and the host's OWN lock is what turns it away.
+    assert.deepEqual(readLogLines(log).slice(5), [["serve", "refused"]],
+      "run#2 ATTEMPTED a serve start and was refused by the lock — idempotency comes from the host, not from a probe");
+    assert.equal(readLogLines(log).filter((l) => l[0] === "serve" && l[1] === "listening").length, 1,
+      "⛔ exactly ONE host ever bound — the refusal is what keeps a second host off this root");
   } finally {
+    reapFakeHost(path.join(tmp, "ws"));
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-// AC3 (gap-serve-stale-signal-has-no-consumer) — the END-TO-END half: a listening-but-STALE server
-// must actually be REPLACED. Before this task the script saw "reachable" and skipped, leaving the
-// pre-fix process serving forever (2026-08-23: 8.5h; 2026-09-14: 3h+, AC-179 oscillating 6/20) —
-// every remedy was a human restart. This test pins the successor: the old host is gone AND a fresh
-// one answers, with the second run proving the reload is not a loop (fresh ⇒ skip).
-test("AC3 — listening-but-STALE serve is RELOADED (old host killed, fresh one started); then fresh ⇒ skip", async () => {
+// AC3 (gap-serve-stale-signal-has-no-consumer) — the END-TO-END half: a live-but-STALE host must
+// actually be REPLACED. Before that task the script saw "reachable" and skipped, leaving the pre-fix
+// process serving forever (2026-08-23: 8.5h; 2026-09-14: 3h+, AC-179 oscillating 6/20) — every
+// remedy was a human restart. This pins the successor: the old host is gone AND a fresh one answers,
+// with the second run proving the reload is not a loop (fresh ⇒ skip).
+test("AC3 — a live-but-STALE host is RELOADED (old host killed, fresh one started); then fresh ⇒ skip", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-stale-"));
-  let foreign = null;
   try {
     const root = makeWorkspaceRoot(tmp);
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    // The pre-existing, STALE listener: a real separate process, answering /health with stale:true.
-    foreign = await startForeignServer(tmp, JSON.stringify({ ok: true, stale: true, evaluated: true, source: "git" }));
-    writeServeCarrier(root, foreign.pid);
-    assert.ok(pidRunning(foreign.pid), "the foreign (stale) host is really running before the run");
-    // Pre-alive drivers so the fake CLI prints nothing on stdout — the `--json` report is the only
-    // stdout output, which is what the assertions below parse.
     fs.writeFileSync(stateFile, JSON.stringify({ promotion: true, worker: true, outer: true, goal: true }));
-    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_HEALTH: JSON.stringify({ ok: true, stale: false, evaluated: true, source: "git" }) };
-    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(foreign.port), "--serve-timeout", "10000", "--json"];
 
-    const first = runScript(args, { env });
-    assert.equal(first.status, 0, `stale reload run must exit 0:\n${first.stdout}\n${first.stderr}`);
-    const report = JSON.parse(first.stdout);
-    assert.equal(report.serve.state, "reloaded-stale", "the listening-but-stale server must be RELOADED, not skipped");
-    assert.equal(report.serve.staleness, "stale");
-    assert.equal(report.serve.previousPid, foreign.pid, "the stale host is identified from .quay/server.json");
-    assert.match(first.stderr, /STALE \(code on disk newer than pid=/, "the reload is announced, not silent");
-    // The old host is GONE (not merely reported gone) and a fresh one answers the probe.
-    assert.equal(pidRunning(foreign.pid), false, "the stale host process must actually be gone (⛔ a zombie is gone too)");
-    assert.equal(await waitForProbe("127.0.0.1", foreign.port), true, "a fresh server must be answering the port it freed");
-    assert.deepEqual(readLogLines(log), [["serve"]], "exactly ONE serve spawn — the reload — and no driver churn (they were pre-alive)");
+    // The LIVE host answers /health from this FILE (read per request), so run#2 can change what the
+    // already-running process says about its own freshness — that IS the reload scenario.
+    const healthFile = path.join(tmp, "health.json");
+    fs.writeFileSync(healthFile, JSON.stringify({ ok: true, stale: false, evaluated: true, source: "git" }));
 
-    // Second run: the replacement answers stale:false ⇒ NO reload, no second spawn (negative control).
-    const second = runScript(args, { env });
-    assert.equal(second.status, 0, `second run must exit 0:\n${second.stdout}\n${second.stderr}`);
-    const report2 = JSON.parse(second.stdout);
-    assert.equal(report2.serve.state, "already-listening");
-    assert.equal(report2.serve.staleness, "fresh");
-    assert.deepEqual(readLogLines(log), [["serve"]],
-      "a FRESH listening server must not be restarted — reload is not a loop (still exactly one serve spawn)");
+    // run#1 — the fake starts a REAL host for this root (it takes the lock, publishes a carrier).
+    const envFresh = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root, FAKE_QUAY_HEALTH_FILE: healthFile };
+    const first = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], { env: envFresh });
+    assert.equal(first.status, 0, `run#1 must exit 0:\n${first.stdout}\n${first.stderr}`);
+    const rep1 = jsonReport(first.stdout);
+    assert.equal(rep1.serve.state, "started");
+    const oldPid = readServeHostPid(root).pid;
+    assert.equal(pidRunning(oldPid), true, "the live host is really running before the reload");
 
-    const pidFile = path.join(root, ".quay", "serve.pid");
-    if (fs.existsSync(pidFile)) {
-      try { process.kill(Number(fs.readFileSync(pidFile, "utf8").trim()), "SIGKILL"); } catch { /* gone */ }
-    }
+    // run#2 — the SAME live host now answers /health with stale:true ⇒ RELOAD.
+    fs.writeFileSync(healthFile, JSON.stringify({ ok: true, stale: true, evaluated: true, source: "git" }));
+    const second = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], { env: envFresh });
+    assert.equal(second.status, 0, `stale reload run must exit 0:\n${second.stdout}\n${second.stderr}`);
+    const rep2 = jsonReport(second.stdout);
+    assert.equal(rep2.serve.state, "reloaded-stale", "the live-but-stale host must be RELOADED, not skipped");
+    assert.equal(rep2.serve.staleness, "stale");
+    assert.equal(rep2.serve.previousPid, oldPid, "the stale host is identified from .quay/server.json");
+    assert.match(second.stderr, /STALE \(code on disk newer than pid=/, "the reload is announced, not silent");
+    // The old host is GONE (not merely reported gone) and a fresh one answers on a port.
+    assert.equal(pidRunning(oldPid), false, "the stale host process must actually be gone (⛔ a zombie is gone too)");
+    const newPid = readServeHostPid(root).pid;
+    assert.notEqual(newPid, oldPid, "the replacement is a NEW process (the lock names it, not the dead one)");
+    assert.equal(await waitForPort(rep2.serve.port), true, "the fresh host answers the port its carrier names");
+    // The dead host's lock was reclaimed by the new one — the wait-on-pid is what makes that safe.
+    assert.equal(fs.readFileSync(path.join(root, ".quay", "server.lock"), "utf8").trim(), String(newPid),
+      "the replacement reclaimed the dead host's same-root lock (no second host was ever started on top of a live one)");
+
+    // run#3 — the replacement now answers stale:false ⇒ NO reload, no third host (negative control).
+    fs.writeFileSync(healthFile, JSON.stringify({ ok: true, stale: false, evaluated: true, source: "git" }));
+    const third = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], { env: envFresh });
+    assert.equal(third.status, 0);
+    const rep3 = jsonReport(third.stdout);
+    assert.equal(rep3.serve.state, "already-listening");
+    assert.equal(rep3.serve.staleness, "fresh");
+    assert.equal(readServeHostPid(root).pid, newPid, "a FRESH host is not restarted — reload is not a loop");
+    assert.equal(readLogLines(log).filter((l) => l[0] === "serve" && l[1] === "listening").length, 2,
+      "exactly TWO hosts ever bound (run#1's and the reload's) across three runs");
   } finally {
-    if (foreign && !foreign.exited()) { try { foreign.child.kill("SIGKILL"); } catch { /* gone */ } }
+    reapFakeHost(path.join(tmp, "ws"));
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
@@ -468,33 +554,64 @@ test("AC3 — listening-but-STALE serve is RELOADED (old host killed, fresh one 
 // no "fresh" either — its own literal, said loudly.
 test("AC4 — /health unreadable ⇒ NOT-EVALUATED literal, the host is left alone, and it is said loudly", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-noteval-"));
-  let foreign = null;
   try {
     const root = makeWorkspaceRoot(tmp);
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    // Listening, answers GET / with 200 — but its /health carries no boolean `stale` at all.
-    foreign = await startForeignServer(tmp, JSON.stringify({ ok: true }));
-    writeServeCarrier(root, foreign.pid);
     fs.writeFileSync(stateFile, JSON.stringify({ promotion: true, worker: true, outer: true, goal: true }));
-    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_HEALTH: JSON.stringify({ ok: true }) };
-    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(foreign.port), "--serve-timeout", "3000", "--json"];
+    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root, FAKE_QUAY_HEALTH: JSON.stringify({ ok: true }) };
+    const args = ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"];
+
+    const first = runScript(args, { env });
+    assert.equal(first.status, 0, `run#1:\n${first.stdout}\n${first.stderr}`);
+    const livePid = readServeHostPid(root).pid;
+    assert.equal(pidRunning(livePid), true, "setup: a live host exists");
 
     const r = runScript(args, { env });
     assert.equal(r.status, 0, `an unreadable /health is not a start failure:\n${r.stdout}\n${r.stderr}`);
-    const report = JSON.parse(r.stdout);
+    const report = jsonReport(r.stdout);
     assert.equal(report.serve.state, "already-listening");
     assert.equal(report.serve.staleness, "not-evaluated", "NOT-EVALUATED is its own value — ⛔ not 'fresh'");
     assert.equal(report.serve.stalenessReason, "no-stale-field");
     assert.ok(!("stale" in report.serve), "⛔ the not-evaluated case must not carry a stale verdict at all");
     assert.match(r.stderr, /staleness NOT-EVALUATED \(reason: no-stale-field\)/, "the non-reading is SAID, not silent");
     assert.match(r.stderr, /NOT restarting/, "⛔ a reading we could not take must not become a restart");
-    // Concretely: the host is untouched and no replacement was spawned.
-    assert.equal(pidRunning(foreign.pid), true, "the unreadable-health host must NOT be killed");
-    assert.equal(readLogLines(log).filter((l) => l[0] === "serve").length, 0, "⛔ no serve spawn on a reading we could not take");
+    assert.equal(pidRunning(livePid), true, "the unreadable-health host must NOT be killed");
+    assert.equal(readServeHostPid(root).pid, livePid, "and no replacement host took the root");
   } finally {
-    if (foreign && !foreign.exited()) { try { foreign.child.kill("SIGKILL"); } catch { /* gone */ } }
+    reapFakeHost(path.join(tmp, "ws"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// gap-serve-same-root-admission-lock — the third occurrence mode: the host refuses (so a live host
+// exists) but the CARRIER cannot be read, so freshness is unknowable. That is not an error: the
+// requested end state holds. It must be its own literal, and it must not be laundered into a restart.
+test("AC5 — a refusal with no readable carrier ⇒ NOT-EVALUATED (its own reason), exit 0, no restart", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-nocarrier-"));
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    fs.writeFileSync(stateFile, JSON.stringify({ promotion: true, worker: true, outer: true, goal: true }));
+    // A LIVE holder owns the lock (this test process), and no carrier exists at all.
+    fs.writeFileSync(path.join(root, ".quay", "server.lock"), `${process.pid}\n`);
+    const env = { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root };
+    const r = runScript(["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "15000", "--json"], { env });
+    assert.equal(r.status, 0, `a refusal is not a failure (the requested end state holds):\n${r.stdout}\n${r.stderr}`);
+    const report = jsonReport(r.stdout);
+    assert.equal(report.serve.state, "already-listening");
+    assert.equal(report.serve.staleness, "not-evaluated");
+    assert.equal(report.serve.stalenessReason, "carrier-absent",
+      "the reason names WHY freshness could not be read (its own token), not a generic 'not evaluated'");
+    assert.equal(report.serve.pid, process.pid, "the refusal still reports the holder the lock named");
+    assert.match(r.stderr, /staleness NOT-EVALUATED \(reason: carrier-absent\)/);
+    assert.match(r.stderr, /NOT restarting/);
+    // The refusal path never binds, so the fake's host never listened and nothing was killed.
+    assert.equal(readLogLines(log).filter((l) => l[1] === "listening").length, 0, "⛔ no host was bound for this root");
+  } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
@@ -506,11 +623,10 @@ test("halted start failure is relayed verbatim, not swallowed (exit non-zero)", 
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    const port = await freePort();
     const haltMsg = "quay driver: promotion is halted (halted_by=test) — refusing to start; clear the halt first with: quay driver resume --kind promotion\n";
     const r = runScript(
-      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "2000"],
-      { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_START_EXIT: "1", FAKE_QUAY_START_STDERR: haltMsg } },
+      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "5000"],
+      { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_ROOT: root, FAKE_QUAY_START_EXIT: "1", FAKE_QUAY_START_STDERR: haltMsg } },
     );
     assert.notEqual(r.status, 0, "a halted driver start must fail the script");
     assert.match(r.stderr, /halted/, "the CLI's halted reason is relayed verbatim");
@@ -529,10 +645,9 @@ test("AC-203 — start exit 0 but status says NOT alive ⇒ the script exits non
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    const port = await freePort();
     // start 退出码 0（打印 started），但 status 报 alive:0（driver 没真活）——正是 AC-203 的死因形态。
     const r = runScript(
-      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "2000"],
+      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "2000"],
       { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_START_ALIVE: "0" } },
     );
     assert.notEqual(r.status, 0, "start exit 0 + not alive must fail the script");
@@ -550,9 +665,8 @@ test("AC-203 — start exit 0 but status unreadable ⇒ the script exits non-zer
     const fake = writeFakeQuay(tmp);
     const log = path.join(tmp, "log.jsonl");
     const stateFile = path.join(tmp, "state.json");
-    const port = await freePort();
     const r = runScript(
-      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "2000"],
+      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--serve-timeout", "2000"],
       { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_STATUS_GARBAGE: "1" } },
     );
     assert.notEqual(r.status, 0, "unreadable status after start must fail the script");
@@ -567,4 +681,6 @@ test("the drivers skill references plugin/scripts/start-drivers.ts (the ONE dele
   assert.match(skill, /plugin\/scripts\/start-drivers\.ts/,
     "SKILL.md must reference the delegate script by path (laydown rule-(a) derivation + skill correctness)");
   assert.match(skill, /^name: quay-drivers$/m, "the skill is named quay-drivers");
+  assert.ok(!/4173/.test(skill),
+    "⛔ the skill must not document a hardcoded default port — the default is the kernel's ephemeral port");
 });

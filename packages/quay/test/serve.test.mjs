@@ -27,13 +27,25 @@
 //
 // Run: node test/serve.test.mjs
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer, computeStaleStatus, isStale, processStartMs } from "../src/serve.ts";
+import {
+  startServer,
+  computeStaleStatus,
+  isStale,
+  processStartMs,
+  isServeAdmissionRefused,
+  inspectAdmissionLock,
+  acquireServeAdmissionLock,
+  releaseServeAdmissionLock,
+  serveLockPath,
+  SERVE_ADMISSION_REFUSED_MARKER,
+  shutdownHost,
+} from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
 import { readLive, readJournal } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
@@ -2302,6 +2314,291 @@ async function main() {
     } finally {
       fs.rmSync(rootA, { recursive: true, force: true });
       fs.rmSync(rootB, { recursive: true, force: true });
+    }
+  }
+
+  // ══ gap-serve-same-root-admission-lock: the same-root admission lock ═════════════════════════
+  //
+  // The lock's whole job is 「same workspace root ⇒ at most ONE live host」, and its only judge is
+  // the host process itself. These blocks exercise it at two levels:
+  //   · END-TO-END (AC1): a REAL `quay serve` child is the holder — the only way to get a pid whose
+  //     /proc cmdline genuinely is a quay serve (the lock's pid-reuse guard reads exactly that) —
+  //     and the second start (in-process AND as a real CLI child) must be refused without binding.
+  //   · IN-PROCESS (AC2/AC3/AC4): stale / pid-reuse / unreadable locks, the default ephemeral port,
+  //     and the explicit-port contract, all against `startServer` itself.
+  {
+    const cliEntry = QUAY_CLI; // prebuilt bundle when fresh, else the .ts source (Node ≥22.6 runs both)
+
+    /** Write the provider fixture the rest of this file uses into an EXISTING temp root pair.
+     *  ⛔ The mkdtemp() calls stay at each block's own code position (never inside a returning
+     *  helper): the isolation ratchet pairs every mkdtemp result with a cleanup path it can see, and
+     *  a dir created inside a helper is exactly the shape it cannot follow. */
+    function writeWorkspaceFixture(r, t) {
+      fs.mkdirSync(path.join(r, ".quay"), { recursive: true });
+      fs.writeFileSync(
+        path.join(r, ".quay", "config.yml"),
+        `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${t.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${t.replaceAll("\\", "\\\\")}"\n`
+      );
+    }
+    const readCarrier = (r) => {
+      try { return JSON.parse(fs.readFileSync(path.join(r, ".quay", "server.json"), "utf8")); } catch { return null; }
+    };
+    const readLockRaw = (r) => {
+      try { return fs.readFileSync(path.join(r, ".quay", "server.lock"), "utf8").trim(); } catch { return null; }
+    };
+    /** The direct children of THIS test process — the reading behind 「the refused start spawned no
+     *  provider child」 (a successful startServer() always spawns one). */
+    function ownChildPids() {
+      const out = new Set();
+      let tids = [];
+      try { tids = fs.readdirSync(`/proc/${process.pid}/task`); } catch { return out; }
+      for (const tid of tids) {
+        try {
+          for (const p of fs.readFileSync(`/proc/${process.pid}/task/${tid}/children`, "utf8").trim().split(/\s+/)) {
+            if (p) out.add(Number(p));
+          }
+        } catch { /* per-thread children file may be absent */ }
+      }
+      return out;
+    }
+    /** Spawn a REAL `quay serve` on `root` and wait until its carrier names IT (that carrier is
+     *  published only after the bind succeeded, so this is 「the host is up」, not a port guess). */
+    async function spawnRealHost(root) {
+      const child = spawn("node", [cliEntry, "serve", "--host", "127.0.0.1", "--port", "0"], {
+        cwd: root, stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "", err = "";
+      child.stdout.on("data", (c) => (out += c));
+      child.stderr.on("data", (c) => (err += c));
+      const deadline = Date.now() + 90000;
+      while (Date.now() < deadline) {
+        const c = readCarrier(root);
+        if (c && c.pid === child.pid) return { child, out: () => out, err: () => err, carrier: c };
+        if (child.exitCode !== null) throw new Error(`spawned host exited early (${child.exitCode})\nstdout: ${out}\nstderr: ${err}`);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      try { process.kill(child.pid, "SIGKILL"); } catch { /* gone */ }
+      throw new Error(`spawned host never published a carrier naming itself\nstdout: ${out}\nstderr: ${err}`);
+    }
+
+    const origCwd = process.cwd();
+    // ── AC1: a second start on the SAME root is refused (live holder named by the lock) ──────────
+    {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-"));
+      const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-tasks-"));
+      writeWorkspaceFixture(root, tasksDir);
+      let host = null;
+      try {
+        host = await spawnRealHost(root);
+        assert(readLockRaw(root) === String(host.child.pid),
+          `AC1: the live host's pid is the lock's content (lock=${readLockRaw(root)}, host=${host.child.pid})`);
+
+        // (a) the CLI path: a second real `quay serve` must exit 0 (idempotent 「already running」)
+        //     with the machine-readable marker naming the holder — and must not touch the carrier.
+        const second = spawn("node", [cliEntry, "serve", "--host", "127.0.0.1", "--port", "0"], {
+          cwd: root, stdio: ["ignore", "pipe", "pipe"],
+        });
+        let sOut = "", sErr = "";
+        second.stdout.on("data", (c) => (sOut += c));
+        second.stderr.on("data", (c) => (sErr += c));
+        const secondExit = await new Promise((res) => second.on("exit", (code) => res(code)));
+        assert(secondExit === 0, `AC1: the refused second CLI start exits 0 (idempotent, not an error) — got ${secondExit}; stderr=${sErr.slice(0, 300)}`);
+        assert(sOut.includes(SERVE_ADMISSION_REFUSED_MARKER),
+          `AC1: the refusal carries the machine-readable marker start-drivers reads; stdout=${JSON.stringify(sOut.slice(0, 300))}`);
+        assert(new RegExp(`holder=${host.child.pid}\\b`).test(sOut) && new RegExp(`self=${second.pid}\\b`).test(sOut),
+          `AC1: the marker names BOTH the holder (${host.child.pid}) and the refused process itself (${second.pid})`);
+        assert(readCarrier(root)?.pid === host.child.pid,
+          "AC1: the refused CLI start did not overwrite the carrier (the live host is still its owner)");
+        assert(readLockRaw(root) === String(host.child.pid), "AC1: the refused CLI start did not steal the lock");
+
+        // (b) the in-process path: startServer() must REJECT with its own distinguishable error, and
+        //     must not bind a port nor spawn a provider child (it is refused before connectProvider).
+        process.chdir(root);
+        const before = ownChildPids();
+        let thrown = null;
+        try { await startServer({ port: 0 }); } catch (e) { thrown = e; }
+        const after = ownChildPids();
+        assert(thrown !== null, "AC1: an in-process startServer() on a root with a live host is REFUSED (it must not silently become a second host)");
+        assert(isServeAdmissionRefused(thrown),
+          `AC1: the refusal is its own error type (not an undifferentiated failure); got ${thrown && thrown.constructor && thrown.constructor.name}: ${String(thrown && thrown.message).slice(0, 160)}`);
+        assert(thrown.holderPid === host.child.pid, `AC1: the refusal names the live holder pid (${thrown.holderPid} vs ${host.child.pid})`);
+        const newChildren = [...after].filter((p) => !before.has(p));
+        assert(newChildren.length === 0,
+          `AC1: the refused start spawned NO provider child (new direct children of this process: ${newChildren.join(", ") || "none"})`);
+        assert(readCarrier(root)?.pid === host.child.pid,
+          "AC1: the refused in-process start did not bind a web face (the carrier still names the live host)");
+        // Control: the SAME reading detects a provider child when a start DOES proceed — otherwise
+        // "no new children" could just be a predicate that never fires.
+        const ctl = spawn(process.execPath, ["-e", "setTimeout(()=>{},4000)"], { stdio: "ignore" });
+        const ctlAfter = ownChildPids();
+        assert(ctlAfter.has(ctl.pid),
+          "AC1 control: `ownChildPids()` DOES see a freshly spawned child (so the empty diff above is a measurement)");
+        try { ctl.kill("SIGKILL"); } catch { /* gone */ }
+      } finally {
+        process.chdir(origCwd);
+        if (host) { try { process.kill(host.child.pid, "SIGKILL"); } catch { /* gone */ } }
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── AC2: a STALE lock (dead pid / recycled pid / unreadable) is reclaimed, and only then is a
+    //        new host allowed; an unreadable lock is a REFUSAL, never a silent steal. ─────────────
+    {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-"));
+      const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-tasks-"));
+      writeWorkspaceFixture(root, tasksDir);
+      try {
+        const deadChild = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+        await new Promise((res) => deadChild.on("exit", res));
+        const deadPid = deadChild.pid;
+
+        // (a) dead pid ⇒ reclaimed, the new host starts and takes the lock over.
+        fs.writeFileSync(serveLockPath(root), `${deadPid}\n`);
+        process.chdir(root);
+        const s1 = await startServer({ port: 0 });
+        assert(s1.hostedServices.portOf("web") > 0, "AC2: after reclaiming a dead-pid lock the new instance binds a web port");
+        assert(readLockRaw(root) === String(process.pid), `AC2: the reclaimed lock now names the new host (${readLockRaw(root)})`);
+        await shutdownHost(s1);
+        assert(readLockRaw(root) === null, "AC2: a clean host shutdown releases the lock (no stale lock left by the happy path)");
+
+        // (b) pid REUSE: a live pid whose cmdline is NOT a quay serve is NOT a holder ⇒ reclaimed.
+        const sleepChild = spawn("sleep", ["30"], { stdio: "ignore" });
+        fs.writeFileSync(serveLockPath(root), `${sleepChild.pid}\n`);
+        const s2 = await startServer({ port: 0 });
+        assert(s2.hostedServices.portOf("web") > 0, "AC2: a live-but-not-a-quay-serve pid (recycled) is treated as STALE, so the new host starts");
+        await shutdownHost(s2);
+        try { sleepChild.kill("SIGKILL"); } catch { /* gone */ }
+
+        // (c) a live pid whose cmdline IS a quay serve lookalike ⇒ HELD (the positive control for
+        //     (b): the two cases differ only by cmdline, and they get OPPOSITE verdicts).
+        const lookalike = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", path.join(__dirname, "..", "bin", "quay.ts"), "serve"], { stdio: "ignore" });
+        await new Promise((r) => setTimeout(r, 300));
+        fs.writeFileSync(serveLockPath(root), `${lookalike.pid}\n`);
+        const held = acquireServeAdmissionLock(root);
+        assert(held.state === "held" && held.holderPid === lookalike.pid,
+          `AC2 control: a live pid whose cmdline IS a quay serve is HELD (state=${held.state}, pid=${held.holderPid})`);
+        assert(fs.readFileSync(serveLockPath(root), "utf8").trim() === String(lookalike.pid),
+          "AC2 control: a refused acquisition leaves the holder's lock intact");
+        try { lookalike.kill("SIGKILL"); } catch { /* gone */ }
+
+        // (d) an UNREADABLE lock (no usable pid) is fail-closed: refused, and NOT unlinked — treating
+        //     it as stale would steal the lock from a process that may be mid-acquisition.
+        fs.writeFileSync(serveLockPath(root), "not-a-pid\n");
+        const weird = acquireServeAdmissionLock(root);
+        assert(weird.state === "held-unidentified",
+          `AC2: a lock carrying no usable pid is REFUSED (fail-closed), not reclaimed — got ${weird.state}`);
+        assert(fs.readFileSync(serveLockPath(root), "utf8").trim() === "not-a-pid",
+          "AC2: the fail-closed branch does not delete the lock it could not read");
+        fs.rmSync(serveLockPath(root), { force: true });
+
+        // Three-way inspection of the same file paths, pinned directly (硬規則 3b at the unit level).
+        assert(inspectAdmissionLock(serveLockPath(root)).kind === "stale",
+          "AC2: a missing lock file reads as STALE (nothing holds it), not as 'unidentified'");
+        fs.writeFileSync(serveLockPath(root), `${process.pid}\n`);
+        assert(inspectAdmissionLock(serveLockPath(root)).kind === "stale",
+          "AC2: this test process's own pid is alive but is NOT a quay serve ⇒ stale (pid-reuse guard)");
+        fs.writeFileSync(serveLockPath(root), "\n");
+        assert(inspectAdmissionLock(serveLockPath(root)).kind === "unidentified",
+          "AC2: whitespace/no-pid content is UNIDENTIFIED (its own value), never 'stale'");
+        fs.rmSync(serveLockPath(root), { force: true });
+      } finally {
+        process.chdir(origCwd);
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── AC3: with NO --port the host binds a kernel-assigned ephemeral port and REPORTS the port it
+    //        actually bound (read back, not the requested 0). ─────────────────────────────────────
+    {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-"));
+      const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-tasks-"));
+      writeWorkspaceFixture(root, tasksDir);
+      let s = null;
+      try {
+        process.chdir(root);
+        s = await startServer({});
+        const bound = s.address().port;
+        const carrier = readCarrier(root);
+        const webEntry = carrier?.services?.find((x) => x.name === "web");
+        assert(Number.isInteger(bound) && bound > 0, `AC3: the default (no --port) bind is a real ephemeral port (got ${bound})`);
+        assert(webEntry?.port === bound,
+          `AC3: the carrier reports the port the KERNEL bound (${webEntry?.port} vs ${bound})`);
+        assert(s.hostedServices.portOf("web") === bound, "AC3: the in-process reading agrees with the carrier");
+        const body = await new Promise((resolve, reject) => {
+          http.get({ host: "127.0.0.1", port: bound, path: "/health" }, (res) => {
+            let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => resolve(b));
+          }).on("error", reject);
+        });
+        assert(JSON.parse(body).ok === true, "AC3: the ephemeral port actually serves /health (the port is a reading, not a number in a log line)");
+      } finally {
+        if (s) await shutdownHost(s);
+        process.chdir(origCwd);
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── AC4: an explicit --port is still honored EXACTLY, and a genuine collision still fails
+    //        loudly (it must NOT become the admission refusal, and must not leak the lock). ───────
+    {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-"));
+      const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-tasks-"));
+      writeWorkspaceFixture(root, tasksDir);
+      let s = null;
+      let blocker = null;
+      try {
+        const port = await new Promise((resolve, reject) => {
+          const probe = http.createServer();
+          probe.once("error", reject);
+          probe.listen(0, "0.0.0.0", () => { const p = probe.address().port; probe.close(() => resolve(p)); });
+        });
+        process.chdir(root);
+        s = await startServer({ port });
+        assert(s.address().port === port, `AC4: an explicit --port is honored exactly (asked ${port}, bound ${s.address().port})`);
+        assert(readCarrier(root)?.services?.find((x) => x.name === "web")?.port === port, "AC4: the carrier names the explicit port");
+        await shutdownHost(s);
+        s = null;
+
+        blocker = http.createServer((req, res) => res.end("not quay"));
+        await new Promise((resolve) => blocker.listen(port, "0.0.0.0", resolve));
+        let thrown = null;
+        try { await startServer({ port }); } catch (e) { thrown = e; }
+        assert(thrown !== null, "AC4: a genuine port collision still REJECTS (the pre-existing loud-failure contract)");
+        assert(!isServeAdmissionRefused(thrown),
+          "AC4: a real collision must NOT masquerade as the admission refusal (the two states stay distinguishable)");
+        assert(/EADDRINUSE/i.test(String(thrown.message)),
+          `AC4: the collision is reported as EADDRINUSE (got: ${String(thrown.message).slice(0, 140)})`);
+        assert(!fs.existsSync(serveLockPath(root)),
+          "AC4: a start that FAILED after taking the lock releases it (a failed start must not block the next one)");
+      } finally {
+        if (s) await shutdownHost(s);
+        if (blocker) await new Promise((r) => blocker.close(r));
+        process.chdir(origCwd);
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+      }
+    }
+
+    // releaseServeAdmissionLock is pid-guarded: it must NOT delete a lock that is not ours.
+    {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-"));
+      const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-lock-tasks-"));
+      writeWorkspaceFixture(root, tasksDir);
+      try {
+        fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+        fs.writeFileSync(serveLockPath(root), `${process.pid + 1}\n`);
+        releaseServeAdmissionLock(root);
+        assert(fs.existsSync(serveLockPath(root)),
+          "AC2: release() leaves a lock naming ANOTHER pid alone (a cleanup must not disarm someone else's host)");
+        fs.writeFileSync(serveLockPath(root), `${process.pid}\n`);
+        releaseServeAdmissionLock(root);
+        assert(!fs.existsSync(serveLockPath(root)), "AC2: release() does remove our own lock");
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(tasksDir, { recursive: true, force: true });
+      }
     }
   }
 
