@@ -2,7 +2,7 @@
 id: gap-webui-journal-body-copy-en-zh
 title: /journal 界面文案在 lang=en 下仍是硬编码中文（标题后缀、升级项区头、陈旧记录提示）——en 下 239 行含中文行绝大多数是
   tick-log/escalations 数据，须先分离再翻译
-status: ready
+status: done
 labels:
   - gap
   - webui
