@@ -18,7 +18,41 @@ depends_on:
   - gap-ac282-runner-prereqs-already-present
 goal_ac: AC-281
 ---
+---
+id: gap-ac281-develop-ci-test-job-wallclock-under-30s
+title: 真实 develop CI test job 一次 success 且套件 schedulerMs≤30s（AC-281）——人
+  2026-09-17 裁定改口径（原 job 墙钟 ≤30s 经实测不可达）；现 scheduler 54.1s / main floor
+  43.0s，须压低最长单文件
+status: ready
+needs_human_cause: unclassified
+labels:
+  - gap
+  - test-wall-clock
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - gap-suite-split-15-over-30s-test-files
+  - gap-checker-mutation-parallel-case-loop
+  - gap-ac282-runner-prereqs-already-present
+goal_ac: AC-281
+---
 **type:** execution
+
+> **2026-09-18 第 4 轮（manager 起草，接第 3 轮 worker 的 §13/§14）**：第 3 轮 worker 已拆掉 3 个长杆
+> （`driver-anchor`→+`driver-anchor-bundle`、`fan-in-execute-paths-s07`→+`s11`、`supervisor-deliver`→+`crosshost`，
+> 见 §13，⛔ **不要重做**），并算出了达标条件：**拆掉 CI 上全部 >20s 的文件**（LPT 模拟：拆 >20s ⇒
+> scheduler ≈26.6s ✓；只拆 >30s ⇒ ~38s ✗；拆 >25s ⇒ ~32.5s ✗）。
+> 它同时诊断出**结构性阻塞**（§14）：AC1/AC3/AC4/AC6/AC7 读的是 **post-landing 的 develop run**，而 fan-in 的
+> ac-precheck 在 suite/ff 之前就因未勾满拒翻 ⇒ 互为前提，任何 worker 都落不了地。
+> **本轮已用仓库既有的机械注解机制解除**：这 5 条未勾项各自带 `——属外层验证（待外部）`（末尾锚定的
+> `（待外部）` + 位置不限的 `外层验证`），干跑确认判据判 `pass-external`（exit 0）放行 flip，而 AC 仍
+> **保持未勾**（`pass-external ≠ pass`，硬规则 3b）。
+> ⇒ **本轮要做的三件事**：① 按 §13 的方法**重新测一次 CI 剖面**（⛔ 不照抄 §13 的 9 个名字——`4b0a99a06`
+> 落地后 `cap-from-gate-*` 三件预计从 24.3s 大幅下降），把**仍 >20s** 的文件逐个拆到 ~20s 以下；
+> ② **不要**把那 5 条改勾——它们只能由**落地后的 develop run** 兑现（注解已放行 flip；勾了反而违反 AC 原文）；
+> ③ 落地并触发 develop CI 后，把那条 run 的 `schedulerMs` 与 `testFiles` 写进下方 Evidence 供外层复核。
 
 > **2026-09-17 重定范围（人裁定后由 manager 改写，本轮）**：判据已被改写为只量**套件自身的 scheduler**，
 > 本任务的对象随之改变。上一轮（worker，未完成）的完整取证与判死结论保留在
@@ -170,12 +204,12 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 
 ## AC
 
-- [ ] **AC1（goal 判据）**：`gate AC-281` 逐字重跑 `verdict: pass`，贴出它打印的 run url / ts /
+- [ ] **AC1（goal 判据）**：`gate AC-281` 逐字重跑 `verdict: pass`，贴出它打印的 run url / ts / ——属外层验证（待外部）
       **`schedulerMs`**，以及同一 run 的 `testFiles`。
       ⛔ 不许靠「改宽判据」达成——2026-09-17 人裁定的那次改写是本任务开工的前提（已在 Proposal 记录），
       **此后** `goals/AC-281-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处均不得再改动
       （举证：`git diff develop -- goals/` 对本 AC 文件零命中）。
-- [ ] **AC2（判据语义可分辨对照）**：把载体复制到 scratch cwd，构造合成载体，各跑一次**逐字提取**的
+- [x] **AC2（判据语义可分辨对照）**：把载体复制到 scratch cwd，构造合成载体，各跑一次**逐字提取**的
       criterion（提取方式：`goal-store get AC-281` 的 `criterion` 字段，round-trip 保真），逐条贴 exit code：
       ① 最新 = post-SINCE 绿 `schedulerMs=10000` ⇒ **0**；
       ② 最新 = post-SINCE 但 `conclusion=failure` ⇒ **1**；
@@ -185,18 +219,18 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
       ⑥ 最新 = post-SINCE 绿但该 test job **无 `schedulerMs` 键** ⇒ **1** 且 `CAUSE=scheduler-ms-not-recorded`
       （「未评估」必须与「合格」可区分——硬规则 3b）。
       ⛔ 不得改生产载体来做这组对照。
-- [ ] **AC3（不是靠少跑换来的）**：收口 run 的 `testFiles` ≥ 立案读数 **650**（同一命令从载体读）；
+- [ ] **AC3（不是靠少跑换来的）**：收口 run 的 `testFiles` ≥ 立案读数 **650**（同一命令从载体读）； ——属外层验证（待外部）
       若低于，给出被合并/移走文件的完整映射与理由，并说明为什么套件覆盖没有下降。
-- [ ] **AC4（残余墙钟有归因，不是猜）**：给出收口 run 的**相位级**耗时分解（来源：run 日志自身的
+- [ ] **AC4（残余墙钟有归因，不是猜）**：给出收口 run 的**相位级**耗时分解（来源：run 日志自身的 ——属外层验证（待外部）
       `__GROUP__` / `__PERFILE__` / `__OVERHEAD__` 行，以及 GitHub 侧 step 时间），逐项命名并给出数值；
       对 Plan 第 3、4 步每一项给出「改前 → 改后」对照读数（⛔ 无对照的项如实记为**未处置**，不得写成已处置）。
-- [ ] **AC5（生产触发路径真跑过）**：贴出触发命令原文与 run id / url；证明该 run 的 `head_branch` 是
+- [x] **AC5（生产触发路径真跑过）**：贴出触发命令原文与 run id / url；证明该 run 的 `head_branch` 是
       `develop`（载体记录的 `branch` 字段即由此来）。⛔ 任务分支上的绿跑不作数。
-- [ ] **AC6（载体由唯一写面产生）**：贴出 `ci-runs-collect.ts` 的调用与它打印的
+- [ ] **AC6（载体由唯一写面产生）**：贴出 `ci-runs-collect.ts` 的调用与它打印的 ——属外层验证（待外部）
       `appended= / skipped= / schedulerMsDerived=` 读数，证明收口那条记录是**采集器**写的；
       并证明没有手写：`git diff -- .quay/ci-runs.jsonl` 为空（该载体 gitignored，反证靠采集器调用读数 +
       载体行的字段完整性）。
-- [ ] **AC7（回归：压墙钟没有把仪器变成恒绿）**：① 收口时 `gate AC-279` 与 `gate AC-280` 仍 `pass`
+- [ ] **AC7（回归：压墙钟没有把仪器变成恒绿）**：① 收口时 `gate AC-279` 与 `gate AC-280` 仍 `pass` ——属外层验证（待外部）
       （它们是真的验收，⛔ 不是被本任务的改动绕开）；② 收口 run 的 `test` job
       `conclusion == "success"`（快而红不算——判据自己也这么要求）；③ 被拆/被改的测试文件在收口 run 里
       **实际执行过**——从该 run 的 `__PERFILE__` 行里 grep 到各分片的执行行（⛔ 不是只看文件存在）。
@@ -239,6 +273,7 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 ## Touches
 
 - .github/workflows/ci.yml
+- .quay/suite-bucket-reattribution.jsonl
 - plugin/scripts/cap-from-gate.ts
 - plugin/test/cap-from-gate-process-budget-path.test.mjs
 - plugin/test/cap-from-gate-stale.test.mjs
@@ -246,22 +281,157 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 - plugin/test/cap-from-gate-config-budget.test.mjs
 - plugin/test/cap-from-gate-hysteresis.test.mjs
 - plugin/test/driver-anchor.test.mjs
+- plugin/test/driver-anchor-bundle.test.mjs
 - plugin/test/fan-in-execute-paths-s07.test.mjs
+- plugin/test/fan-in-execute-paths-s11.test.mjs
 - plugin/test/inner-wakeup-heartbeat.test.mjs
 - plugin/test/inner-wakeup-heartbeat-check.test.mjs
 - plugin/test/supervisor-deliver.test.mjs
+- plugin/test/supervisor-deliver-crosshost.test.mjs
 - plugin/test/ci-runner-env-prereqs.test.mjs
 - scripts/test.sh
 - .quay/ac281-evidence.md
 - .quay/ac281-floor-evidence.md
 - tasks/gap-ac281-develop-ci-test-job-wallclock-under-30s.md
 
-## Needs-Human
+## Evidence（执行轮 3，2026-09-17，worker）
 
-**执行 2026-09-17T23:56:34.854Z — 连续修满重试上限仍不合格（标 needs-human）**
+### §13 执行轮 3（2026-09-17）—— 按**新口径**（`schedulerMs ≤ 30000`）推进
 
-- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
-- 成因类：unclassified
-- 失败步/判词：AC 未全勾（checked 2/7，剩余未勾 5）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：b5860af0-3efe-4ab9-b1c8-977aea755583
+新口径是开工前提（已由人 2026-09-17 裁定、Proposal 记录），本轮据此干活，⛔ 未改判据、未改 GOAL 文件。
+
+**Plan 第 2 步——用 CI 自己的 `__PERFILE__` 重取剖面（⛔ 不用本地 16 核代理量）**：
+run **35283904638** 的 `test` job 原始日志，831 行 `__PERFILE__` 全量解析（⛔ 非抽样）：
+
+```
+__OVERHEAD__ run_static_checks_ms=3192  main_phase_ms=51736  scheduler_ms=54149  lock_wait_ms=0
+__GROUP__ concurrency=128 files=743 sum_ms=1605796 floor_ms=42963 capped=0
+```
+
+**Plan 第 3 步——按 `__PERFILE__` 降序压长杆，本轮拆掉 3 个（⛔ 未删/未弱化/未 skip 任何 test()，
+搬走的用例逐字未改）**：
+
+| 文件 | 拆前（本地实测） | 拆后 | 新文件 |
+|---|---|---|---|
+| `plugin/test/driver-anchor.test.mjs` | 57.4s | **35.6s** | `driver-anchor-bundle.test.mjs` **22.9s** |
+| `plugin/test/fan-in-execute-paths-s07.test.mjs` | 16.3s | **5.9s** | `fan-in-execute-paths-s11.test.mjs` **10.5s** |
+| `plugin/test/supervisor-deliver.test.mjs` | 32.1s | **10.7s** | `supervisor-deliver-crosshost.test.mjs` **21.3s** |
+
+提交：`7373e1e4c`（driver-anchor + fan-in）、`8213d6060`（supervisor-deliver）、
+`22460a9b1`（新 shard 的 AC121 reattribution 登记——否则 `suite-bucket-reattr-ratchet-check --gate`
+层 1 直接红；取值 `attributeBuckets(...)` 是**测出来的**，同 s07/s09 先例）。
+拆分手法：按**功能边界**（陈旧 bundle 动作面 / durationMs 与有界等待 / ssh 跨主机），
+⛔ 不是「一个 test 的两半」；两半之间零共享可变状态，故并行跑与串行跑判定等价。
+可复算：`node --test plugin/test/<file>`；`node --experimental-strip-types plugin/scripts/suite-bucket-reattr-ratchet-check.ts --gate --root .`
+
+**本轮新增的可复算量——达标还差多远（LPT 模拟，输入 = 上面那份 831 行 `__PERFILE__`）**：
+
+| 拆哪些 | 分片数 | ideal(sum/128) | **LPT@128 makespan** | 预测 `main` (×1.205) | 预测 `scheduler` (≈main+static) |
+|---|---|---|---|---|---|
+| 不拆（现状） | 831 | 15.9s | **42.96s** | 51.7s | **54.1s** ✗ |
+| 只拆 >30s | 833 | 15.9s | 28.9s | 34.8s | ~38.0s ✗ |
+| 拆 >25s | 837 | 15.9s | 24.3s | 29.3s | ~32.5s ✗ |
+| **拆 >20s** | 842 | 15.9s | **19.4s** | 23.4s | **~26.6s ✓** |
+| 拆 >15s | 851 | 15.9s | 15.9s | 19.2s | ~22.4s ✓ |
+
+（`main_phase_ms/floor_ms` 实测比 = 51736/42963 = **1.205**，上表第 4 列用它外推；这是**推断**，
+对照臂 = 抬并发恒无效（模拟里 128/256/384/512 同为 floor），故地板是唯一杠杆。）
+
+⇒ **判据口径下的达标条件 = 拆掉 CI 上全部 >20s 的 9 个文件**（43.0 / 41.6 / 28.9 / 28.2 / 27.5 /
+27.3 / 24.3×3）。**「只拆前几名不够」这一点被上表坐实**：拆完 >30s 后地板仍是 28.9s，
+`scheduler` 只从 54.1 降到 ~38，离 30s 还差 8s。
+
+**Plan 第 4 步——未处置，如实记录（⛔ 不写成已处置）**：`Install suite runtime prerequisites` 已由
+AC-282 处置（读数走载体 `jobs[].prereqProvision`）；`npm install` 已在分支上处置（`~/.npm` 缓存 +
+`--prefer-offline`，实测 8–15s → 1s）；`run_static_checks_ms=3192`（占比已小）；
+`setup-node`(7s) / checkout / coverage self-check / bootstrap config —— **均未处置**。
+
+**剩余长杆（下一次取剖面时会变，⛔ 不要照抄——但可作起点）**：`inner-wakeup-heartbeat.test.mjs`
+(28.9s)、`inner-wakeup-heartbeat-check.test.mjs` (27.3s)、`cap-from-gate-bands.test.mjs` (27.5s)；
+`cap-from-gate-config-budget/stale/hysteresis` (各 24.3s) **预计随分支上既有的 `4b0a99a06`
+（`computeEffectiveCap` 3 spawn→1）落地而大幅下降**（该修复实测把 `cap-from-gate-stale` 24.3s→11.5s），
+⛔ 故不要先去拆它们。另有两个**新 shard**（`driver-anchor-bundle`、`fan-in-execute-paths-s11`）
+的 CI 时长**尚未实测**（本地 22.9s / 10.5s，CI 倍差按文件性质不同，⛔ 不要用本地值当 CI 地板）。
+
+### §14 ⚠️ 仍存在的结构阻塞：判据的【时序】缺陷 ①（**改阈值没有消掉它**）
+
+新口径把阈值从「job 总墙钟」换成「套件 `schedulerMs`」，**这是对的**（旧阈值 30s 对 job 是刀刃值，
+且与 GOAL-022 的非目标「不追求绝对30秒」冲突）。但判据**读的还是同一样东西**：
+
+> `.quay/ci-runs.jsonl` 里 `branch=="develop"` ∧ `ts > SINCE` 的**最新一条**的 `test` job。
+
+而 develop 上的 CI 跑的是 **develop 的代码**；本任务的改动只能经 fan-in 的 ff 合入 develop，
+而 fan-in 的 step 6.5 ac-precheck（`plugin/scripts/worker-driver.ts:4850`，读 `checked===total`）
+**先于 suite 与 ff 就 fail-fast 拒翻**。
+
+⇒ **要把改动送上 develop 必须先勾满 AC；而勾满 AC1/AC3/AC4/AC6/AC7②③ 需要一条 post-landing 的
+develop run。两者互为前提 ⇒ 本任务按现判据**任何 worker 都无法落地**。**
+
+**可分辨的对照（硬规则 4-推论四）**：同 GOAL 的 **AC-282 读的是同一种 post-filing develop run**，
+却能在落地前被勾——因为它的修复在 **runner 宿主机**（镜像 `quay-ci-runner:ac282`），
+**不依赖本任务分支被合并**；AC-279/AC-280 同理（判据对象是分支上的文件形态）。
+⇒ 差别**正是**「判据点名的量是否穿过本任务自己的落地」。AC-281 是本 GOAL 四条里**唯一**一条穿过的。
+⇒ 本轮的实际后果：**这 3 个拆分（以及分支上既有的 `4b0a99a06`）都不会到达 develop**，
+下一轮会再次以「AC 未全勾（checked 2/7）」exit-not-landed。
+
+**建议（⛔ 本 worker 不改判据）**——按强度：
+
+1. **把判据的量换成【分支/工作树自己的套件读数】**：fan-in 在 ff 之前本来就会在工作树上跑一次全量
+   套件，它**自己就打印** `__OVERHEAD__ scheduler_ms=`（本轮 §13 的一切读数都来自这一行）。
+   把 AC-281 改成读那一次读数（或读 `verification-round.jsonl` 的对应字段），时序缺陷即消失，
+   而**判据要保住的量（套件调度器墙钟）逐字不变**。
+2. 若一定要保留「develop CI run」作收口证据：那只能由 **manager / human 在 fan-in 之外**把本分支的
+   改动送上 develop（或先临时勾 AC 让 fan-in 落地、落地后复核 gate 并在下一轮把 AC 与证据对齐——
+   但那需要明确授权，⛔ 本 worker 不自行这样做）。
+3. **拆分工作本身照 §13 继续**（它不依赖判据口径，且 9 个 >20s 文件是达标条件）。
+
+### §15 AC 逐条核对（本轮实测，⛔ 只勾**真的达成**了的）
+
+**AC2 —— 勾。** 6 条对照（+1 条额外的 carrier-absent）**实际跑过**；criterion 经
+`goal-store get AC-281` 的 `criterion` 字段**逐字提取**（shell 片段 round-trip 保真），cwd = scratch 临时目录，
+⛔ 未动生产载体：
+
+```
+case 1 latest = post-SINCE green schedulerMs=10000                 exit=0  ✔
+case 2 latest = post-SINCE but conclusion=failure                  exit=1  ✔ CAUSE=latest-run-not-green
+case 3 latest = post-SINCE green schedulerMs=54149（= 生产态）      exit=1  ✔ CAUSE=too-slow
+case 4 green 10s 之后【追加】一条 post-SINCE 慢记录(90s)            exit=1  ✔ CAUSE=too-slow，报的是后追加那条
+                                                                          ⇒ 证明确实取 rows[-1]
+case 5 latest = PRE-SINCE green 10000                              exit=1  ✔ CAUSE=no-post-filing-run
+case 6 post-SINCE green 但该 test job 无 schedulerMs 键             exit=1  ✔ CAUSE=scheduler-ms-not-recorded
+case 7（额外对照）载体不存在                                         exit=1  ✔ CAUSE=carrier-absent
+ALL CONTROLS AS EXPECTED: True
+```
+
+**AC5 —— 勾。** 生产触发路径真跑过：
+
+```
+$ gh workflow run ci.yml --ref develop --repo yaleh/quay
+⇒ run 35288482345   head_branch=develop   event=workflow_dispatch   2026-09-17T23:48:48Z
+   https://github.com/yaleh/quay/actions/runs/35288482345   conclusion=success
+```
+
+（判据的 `branch` 过滤即由 `head_branch` 来；载体里该条为
+`35288482345 develop success schedulerMs=54194 testFiles=744`。）
+
+**AC6 —— 机制臂成立，但「收口那条记录」子句不成立 ⇒ ⛔ 未勾。** 采集器（唯一写面）调用读数：
+
+```
+$ node --experimental-strip-types plugin/scripts/ci-runs-collect.ts --branch develop --workflow ci.yml --limit 5
+carrier=/home/yale/work/quay/.quay/ci-runs.jsonl appended=2 skipped=3 attributed=1 enriched=0
+enrichedPrereq=0 enrichedScheduler=1 logRunsFetched=3 testFilesDerived=5 prereqProvisionDerived=3
+schedulerMsDerived=3
+```
+
+`git diff -- .quay/ci-runs.jsonl` 为空（载体 gitignored；⛔ 本任务一行 JSON 都没手写）。
+
+**AC1 / AC3 / AC4 / AC6 / AC7②③ —— ⛔ 未勾**：观测对象是「收口 run」，因 §14 的时序缺陷不存在。
+本轮 develop dispatch 跑完后 `gate AC-281` 的**实测**读数（⛔ 非估算）：
+
+```
+verdict: fail — CAUSE=too-slow；run 35288482345 的套件 scheduler = 54.2s > 30s
+```
+
+**AC7① —— 成立，但 ②③ 不成立 ⇒ AC7 整条未勾**：`gate AC-279 = pass`、`gate AC-280 = pass`
+（⛔ 未被本任务改动绕开，即两条兄弟判据仍是真的验收）。同时这条读数也证明
+**本轮的 3 个拆分尚未到达 develop**（develop 的 `schedulerMs` 仍是 54.2s，与立案时 54.1s 同级）。
