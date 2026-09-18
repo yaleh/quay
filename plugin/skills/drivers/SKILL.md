@@ -24,7 +24,8 @@ The three commands the script wraps (per `quay driver --help` / `quay serve`, 20
 ```
 quay driver start --kind promotion [--root <path>]
 quay driver start --kind worker    [--root <path>]
-quay serve --host <ip> --port <p>            # web UI (default host 0.0.0.0, port 4173)
+quay serve --host <ip> --port <p>            # web UI (default host 0.0.0.0; --port omitted ⇒ kernel-assigned
+                                             # ephemeral port, read back from .quay/server.json)
 ```
 
 The script is **idempotent** — safe to call repeatedly:
@@ -56,12 +57,23 @@ With an explicit workspace root / non-default web binding:
 
 ```bash
 node --experimental-strip-types plugin/scripts/start-drivers.ts \
-  --root <path> --host 0.0.0.0 --port 4173
+  --root <path> --host 0.0.0.0
+
+# ⛔ `--port` is optional and defaults to 0 =「让内核分配临时端口」. Pass it only to PIN an exact port
+# (a deployment that must be addressable at a fixed number); a real collision then fails loudly rather
+# than silently moving to another port.
 ```
 
 On success the script prints, per component, whether it was already running or was started (e.g.
 `promotion: started`, `worker: already running (alive)`, `serve: started (pid=…) on
-http://0.0.0.0:4173`).
+http://0.0.0.0:<the port the kernel bound>`).
+
+`serve`'s verdict comes from the host process ITSELF, not from a probe this script runs: `quay serve`
+holds a same-root admission lock, so it either binds (`serve: started`) or REFUSES because a live host
+already owns this workspace root (`serve: already running (pid=…) … (code fresh)`). When a live host is
+reported, `GET /health` on the port its carrier names decides whether it is kept (fresh), RELOADED
+(stale — the old host is SIGTERM'd and its pid awaited), or LEFT ALONE and reported as
+`staleness: "not-evaluated"`.
 
 ### 3. Verify (optional, independent)
 

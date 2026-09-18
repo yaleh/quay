@@ -13,19 +13,29 @@
 //     kernel (driver-runtime.ts startKind) is itself idempotent (`already-running`), so a race
 //     between two invocations cannot double-spawn — the status pre-check is a fast path, not the
 //     only guard.
-//   - For the web server the decision reads TWO signals, not one: `GET /` (reachability) AND
-//     `GET /health` (freshness — its `stale` field). Reachable-but-STALE ⇒ the code in memory is
-//     older than the code on disk ⇒ RELOAD (SIGTERM the host named by `.quay/server.json`, wait for
-//     the port to stop answering, then spawn a fresh one); reachable-and-fresh ⇒ skip; not reachable
-//     ⇒ spawn. ⛔ gap-serve-stale-signal-has-no-consumer: before this, "reachable" WAS the whole
-//     decision, so a live-but-stale server was skipped forever and kept serving pre-fix code until a
-//     human restarted it by hand — measured twice (2026-08-23: 8.5h stale, 11 UI tasks invisible;
-//     2026-09-14: 3h+ stale, AC-179 criterion verdict oscillating 6/20). The detector that reports
-//     `stale:true` has existed since gap-webui-server-stale-code-no-restart-detection (2026-08-23,
-//     `packages/quay/src/serve.ts:229 computeStaleStatus`); what was missing is a CONSUMER, and this
-//     script owns the only decision point that decides whether a server runs. `quay serve` has no
-//     supervisor (unlike the drivers), so backgrounding — and now reloading — is THIS script's job,
-//     not a second copy of the driver supervisor.
+//   - For the web server this script performs NO pre-flight liveness probe at all
+//     (gap-serve-same-root-admission-lock): it SPAWNS `quay serve` and reads the verdict from the
+//     child itself. The child owns a same-root admission lock (`.quay/server.lock`) and either binds
+//     (exit-less, carrier published ⇒ `started`) or REFUSES because a live host already owns this
+//     root (exit 0 + a machine-readable marker on stdout ⇒ `already-running`). ⛔ A `GET /` probe
+//     used to answer "is something there", and that answer was WRONG in the case that motivated this
+//     change: an unrelated process squatting the hardcoded port answered 200, so the script reported
+//     "already running" for a server that was not ours. There is exactly ONE admission judge now
+//     (the lock, inside the host), and it is not duplicated here.
+//   - The STALENESS decision is unchanged and still lives HERE (it is an orchestration policy, not
+//     an admission judgment): once the child reports `already-running`, the live host is identified
+//     from `.quay/server.json` (its pid + its web port — the default port is now kernel-assigned, so
+//     the carrier is the only place the port is knowable) and `GET /health` decides
+//     fresh / stale / not-evaluated. STALE ⇒ RELOAD (SIGTERM that host, wait for its PID to die, then
+//     spawn a fresh one). ⛔ gap-serve-stale-signal-has-no-consumer: before that task, "reachable" WAS
+//     the whole decision, so a live-but-stale server was skipped forever and kept serving pre-fix code
+//     until a human restarted it by hand — measured twice (2026-08-23: 8.5h stale, 11 UI tasks
+//     invisible; 2026-09-14: 3h+ stale, AC-179 criterion verdict oscillating 6/20). The detector that
+//     reports `stale:true` has existed since gap-webui-server-stale-code-no-restart-detection
+//     (2026-08-23, `packages/quay/src/serve.ts:229 computeStaleStatus`); what was missing is a
+//     CONSUMER, and this script owns the only decision point that decides whether a server runs.
+//     `quay serve` has no supervisor (unlike the drivers), so backgrounding — and now reloading — is
+//     THIS script's job, not a second copy of the driver supervisor.
 //   - A `/health` that cannot be reached / parsed / carries no boolean `stale` is NOT-EVALUATED: a
 //     SEPARATE value from "fresh" (硬規則 3b — a reading we could not take must not share a shape
 //     with a passing one) and never silently "stale" either (⛔ no restart on a reading we could not
@@ -44,6 +54,10 @@
 // Run:
 //   node --experimental-strip-types plugin/scripts/start-drivers.ts [--root <path>] [--host <ip>]
 //     [--port <p>] [--cli <path>] [--serve-timeout <ms>] [--json]
+//
+//   ⛔ `--port` is OPTIONAL and defaults to 0 =「让内核分配临时端口」. Only pass it to pin a host to
+//   an exact port (a deployment that must be addressable at a fixed number); the pinned value is
+//   then honored exactly and a real collision fails loudly.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -75,13 +89,38 @@ function withServeHeapCap(existing: string | undefined): string {
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 const DEFAULT_SERVE_HOST = "0.0.0.0";
-const DEFAULT_SERVE_PORT = 4173;
+/** The web port's default: **0 = let the kernel assign an ephemeral port** (read back from the
+ *  carrier). A hardcoded 4173 was a second, silently-diverging default that also made two hosts on
+ *  two roots collide, and it made an unrelated process squatting the number look like our server —
+ *  the exact misreading this task closes. ⛔ The default belongs to ONE place (`startServer`'s own
+ *  `port = 0`); this literal exists only for the `--port` help text and the argument parser. */
+const DEFAULT_SERVE_PORT = 0;
 const DEFAULT_SERVE_TIMEOUT_MS = 30000;
-/** `GET /health` budget. Short: this is a local liveness+freshness read, not a build. */
+/** `GET /health` budget. Short: this is a local freshness read, not a build. */
 const HEALTH_PROBE_TIMEOUT_MS = 2000;
-/** How long to wait for a SIGTERM'd serve host to release its port before giving up (reported, not
+/** How long to wait for a SIGTERM'd serve host's PID to die before giving up (reported, not
  *  swallowed — "could not stop it" must never read as "stopped"). */
 const SERVE_STOP_TIMEOUT_MS = 10000;
+
+/** The marker `quay serve` prints on stdout when its same-root admission lock refused the start.
+ *  ⚠️ Deliberately duplicated with `packages/quay/src/serve.ts:SERVE_ADMISSION_REFUSED_MARKER` —
+ *  this file is a self-contained plugin entry (rule (a) laydown, zero closure deps: see the
+ *  direct-entry guard at the bottom) and must not import Core's source. Both copies must move
+ *  together; the `self=<pid>` field is what binds a marker line to the spawn that produced it. */
+export const SERVE_ADMISSION_REFUSED_MARKER = "quay-serve-admission-refused";
+
+/** Direct quantity: is this pid a live process? Same semantics as `server-state.ts:pidAlive`
+ *  (`kill(pid, 0)`; EPERM = exists but not ours = still alive). Duplicated for the same laydown
+ *  reason as the marker above. */
+function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
 
 /** The exact JSON the `quay driver status --json` emits; we read only `alive` (AC139-3). */
 export interface DriverStatus {
@@ -258,60 +297,35 @@ export function runCli(
   });
 }
 
-/** Synchronous-ish HTTP probe (returns a Promise; `GET /` with a short timeout). */
-export function probeUrl(host: string, port: number, timeoutMs = 2000): Promise<boolean> {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (ok: boolean) => {
-      if (done) return;
-      done = true;
-      resolve(ok);
-    };
-    const req = http.request({ host, port, path: "/", method: "GET", timeout: timeoutMs }, (res) => {
-      res.resume();
-      finish(true);
-    });
-    req.on("error", () => finish(false));
-    req.on("timeout", () => {
-      req.destroy();
-      finish(false);
-    });
-    req.end();
-  });
-}
-
-/** Pure decision: given the current live state, which start actions are needed? Idempotency is
- *  this function's whole point — nothing already-running is re-started.
+/** What to do about the web server, given (a) the verdict the HOST PROCESS returned and (b) — only
+ *  when a live host was reported — the staleness reading of that host's `/health`.
  *
- *  ⛔ `serveListening` is deliberately NOT the whole serve condition (gap-serve-stale-signal-has-no-
- *  consumer): a LISTENING-but-STALE server is not "already running" in any useful sense — it is
- *  serving code older than the code on disk, and skipping it is exactly how the stale process
- *  survived two incidents. `serveStale === true` therefore also demands a (re)start, which the
- *  caller performs as a reload.
+ *  ⚠️ This REPLACES the old `planActions` (gap-serve-same-root-admission-lock): that function's
+ *  only production caller was the serve decision, and its `startServe` field was computed from a
+ *  `GET /` pre-probe that no longer exists. Its four driver fields were never read by anything (the
+ *  driver loop uses `aliveByKind` directly), so keeping it would leave a pure decision function that
+ *  decides nothing behind — deleted rather than kept as decoration.
  *
- *  `serveStale` is three-valued, and only one of the three is a boolean:
- *    · `true`  — evaluated: the running code is STALE  ⇒ start (reload)
- *    · `false` — evaluated: the running code is FRESH  ⇒ skip when listening
- *    · `null`/`undefined` — NOT-EVALUATED (listening but /health unreadable) or not listening at
- *      all ⇒ skip. ⛔ An unevaluated reading must NOT become "restart" here (硬規則 3b: a reading we
+ *  Pure, and pinned by the unit tests, because this is the ONE decision point that decides whether a
+ *  server runs: the two inputs are readings, the output is the action.
+ *
+ *  `staleness` is three-valued and only one of the three is a boolean:
+ *    · `true`  — evaluated: the running code is STALE ⇒ reload (stop the host, spawn a fresh one)
+ *    · `false` — evaluated: the running code is FRESH ⇒ leave it alone
+ *    · `null`/`undefined` — NOT-EVALUATED (no carrier to identify the host /health unreadable)
+ *      ⇒ leave it alone. ⛔ An unevaluated reading must NOT become a restart (硬規則 3b: a reading we
  *      could not take must not be laundered into an action that looks like a verdict); the caller
- *      reports the not-evaluated case as its own state. */
-export function planActions(opts: {
-  promotionAlive: boolean;
-  workerAlive: boolean;
-  outerAlive: boolean;
-  goalAlive: boolean;
-  serveListening: boolean;
-  /** See above. Omitted/`null` = not evaluated (never "fresh", never "stale"). */
-  serveStale?: boolean | null;
-}) {
-  return {
-    startPromotion: !opts.promotionAlive,
-    startWorker: !opts.workerAlive,
-    startOuter: !opts.outerAlive,
-    startGoal: !opts.goalAlive,
-    startServe: !opts.serveListening || opts.serveStale === true,
-  };
+ *      reports the not-evaluated case as its own literal.
+ *
+ *  `admission` is the child's own verdict: `started` ⇒ this run bound a fresh host (nothing to
+ *  decide); `already-running` ⇒ a live host owns this root, so the only remaining question is
+ *  whether its code is stale. */
+export function planServeAction(opts: {
+  admission: "started" | "already-running";
+  staleness?: boolean | null;
+}): "started" | "already-listening" | "reload" {
+  if (opts.admission === "started") return "started";
+  return opts.staleness === true ? "reload" : "already-listening";
 }
 
 // ── Stale-serve consumption (gap-serve-stale-signal-has-no-consumer) ──────────────────────────
@@ -388,7 +402,7 @@ export function probeServeStaleness(
  *  how a reload becomes a no-op. */
 export function readServeHostPid(
   root: string,
-): { state: "present"; pid: number; startedAt: string | null } | { state: "absent" } | { state: "unreadable"; reason: string } {
+): { state: "present"; pid: number; startedAt: string | null; port: number | null } | { state: "absent" } | { state: "unreadable"; reason: string } {
   const p = path.join(root, ".quay", "server.json");
   let raw: string;
   try {
@@ -407,18 +421,34 @@ export function readServeHostPid(
   const pid = (obj as { pid?: unknown } | null)?.pid;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return { state: "unreadable", reason: "no-usable-pid" };
   const startedAt = typeof (obj as { startedAt?: unknown }).startedAt === "string" ? (obj as { startedAt: string }).startedAt : null;
-  return { state: "present", pid, startedAt };
+  // The `web` face's port — the ONLY knowable address of the host now that the default port is
+  // kernel-assigned, so /health can be read back from it. `null` when the carrier names no usable
+  // web entry: that is a NOT-EVALUATED staleness reading (own literal), never port 0 / never a guess.
+  const services = (obj as { services?: unknown }).services;
+  const webEntry = Array.isArray(services)
+    ? (services as Array<{ name?: unknown; port?: unknown }>).find((s) => s && s.name === "web")
+    : undefined;
+  const port = webEntry && typeof webEntry.port === "number" && Number.isInteger(webEntry.port) && webEntry.port > 0
+    ? webEntry.port
+    : null;
+  return { state: "present", pid, startedAt, port };
 }
 
-/** SIGTERM the serve host, then wait for its port to stop answering. Discriminated result — "could
- *  not stop it" is NEVER reported as "stopped" (硬規則 3b); the caller must not spawn a replacement
- *  onto a port that is still held. */
+/** SIGTERM the serve host, then wait for ITS PID to die. Discriminated result — "could not stop it"
+ *  is NEVER reported as "stopped" (硬規則 3b); the caller must not spawn a replacement on top of a
+ *  host that is still running.
+ *
+ *  Why PID death and not "the port stopped answering" (gap-serve-same-root-admission-lock): the port
+ *  was a PROXY for 「宿主结束了」, and it is a proxy that goes stale in both directions — with an
+ *  ephemeral-port default the caller would not even know which port to watch, an unrelated process
+ *  holding that port would look like "still running", and a host that released its listener while
+ *  staying alive would look like "stopped". `pidAlive` is the direct reading of the thing we act on.
+ *  It is also what makes the new host's own stale-lock reclaim compatible with this wait: by the time
+ *  we spawn, the old pid is gone, so a lock it left behind is unambiguously reclaimable. */
 export async function stopServeHost(
   pid: number,
-  host: string,
-  port: number,
   timeoutMs = SERVE_STOP_TIMEOUT_MS,
-): Promise<{ state: "stopped" | "still-answering" | "kill-failed"; error?: string }> {
+): Promise<{ state: "stopped" | "still-alive" | "kill-failed"; error?: string }> {
   try {
     process.kill(pid, "SIGTERM");
   } catch (err) {
@@ -430,10 +460,10 @@ export async function stopServeHost(
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!(await probeUrl(host, port, 500))) return { state: "stopped" };
+    if (!pidAlive(pid)) return { state: "stopped" };
     await sleep(200);
   }
-  return { state: "still-answering" };
+  return { state: "still-alive" };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -441,15 +471,63 @@ function sleep(ms: number): Promise<void> {
 }
 
 export interface ServeStartResult {
-  state: "started" | "already-listening" | "exited" | "timeout" | "spawn-failed";
+  state: "started" | "already-running" | "exited" | "timeout" | "spawn-failed";
   pid?: number;
   exitCode?: number | null;
+  /** The port the kernel actually bound, read back from the carrier the child published. Only for
+   *  `started`; null when the carrier named no usable web port (the host is up — we just did not
+   *  read its port). */
+  port?: number | null;
+  /** The live host that already owns this root (the admission lock's holder). Only for
+   *  `already-running`. */
+  holderPid?: number | null;
   /** Set only for `spawn-failed`: the errno of the never-started process (e.g. "ENOENT"). */
   error?: string;
 }
 
+/** Did the bytes this spawn appended to the log carry OUR child's admission-refusal marker?
+ *
+ *  Read from `startOffset` (the log's size BEFORE the spawn) so a marker left by an earlier run in
+ *  the same file can never answer for this one, and require `self=<our child pid>` so a concurrent
+ *  start-drivers' refusal cannot answer either. Returns the holder pid the marker names, or null. */
+export function readAdmissionRefusal(logPath: string, startOffset: number, childPid: number | undefined): { holderPid: number | null } | null {
+  if (typeof childPid !== "number") return null;
+  let chunk: string;
+  try {
+    const size = fs.statSync(logPath).size;
+    if (size <= startOffset) return null;
+    const fd = fs.openSync(logPath, "r");
+    try {
+      const buf = Buffer.alloc(size - startOffset);
+      fs.readSync(fd, buf, 0, buf.length, startOffset);
+      chunk = buf.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  for (const line of chunk.split("\n")) {
+    const at = line.indexOf(SERVE_ADMISSION_REFUSED_MARKER);
+    if (at === -1) continue;
+    const rest = line.slice(at);
+    const self = /self=(\d+)/.exec(rest);
+    if (!self || Number(self[1]) !== childPid) continue;
+    const holder = /holder=(\d+)/.exec(rest);
+    return { holderPid: holder ? Number(holder[1]) : null };
+  }
+  return null;
+}
+
 /** Start `quay serve` detached (setsid-equivalent: spawn(detached)+unref, stdio → log file), write
- *  `.quay/serve.pid`, then poll the probe until it answers or the timeout elapses.
+ *  `.quay/serve.pid`, then wait for the CHILD's OWN verdict.
+ *
+ *  The verdict is read from two direct quantities, never from a probe this script runs itself:
+ *    · the child is alive AND `.quay/server.json` names it (it publishes the carrier only AFTER the
+ *      bind succeeded) ⇒ `started`, with the port read back from that carrier;
+ *    · the child exited and appended its admission-refusal marker ⇒ `already-running` — a live host
+ *      already owns this root. ⛔ Deliberately its OWN state: folding it into `exited` would report
+ *      an idempotent no-op as a crash.
  *
  *  `spawn` failures arrive as an async 'error' EVENT, not a throw and not an exit code — without
  *  the listener below an unresolvable argv0 becomes an unhandled 'error' (process-level crash with
@@ -465,11 +543,14 @@ export async function startServe(
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   const logPath = path.join(root, ".quay", "serve.log");
   let logFd: number;
+  let startOffset = 0;
   try {
     logFd = fs.openSync(logPath, "a");
+    startOffset = fs.statSync(logPath).size; // before the spawn: only OUR child's bytes are read
   } catch {
     logFd = fs.openSync("/dev/null", "w");
   }
+  const spawnedAtMs = Date.now();
   const child = spawn(
     inv.argv0,
     [...inv.args, "serve", "--host", host, "--port", String(port)],
@@ -492,10 +573,18 @@ export async function startServe(
       return { state: "spawn-failed", pid: child.pid, error: (spawnError as Error & { code?: string }).code ?? "SPAWN-ERROR" };
     }
     if (child.exitCode !== null) {
+      const refusal = readAdmissionRefusal(logPath, startOffset, child.pid);
+      if (refusal) return { state: "already-running", pid: child.pid, exitCode: child.exitCode, holderPid: refusal.holderPid };
       return { state: "exited", pid: child.pid, exitCode: child.exitCode };
     }
-    if (await probeUrl(host, port)) {
-      return { state: "started", pid: child.pid };
+    // Both readings must agree: the carrier names THIS child, and its recorded start instant is not
+    // older than this spawn (a recycled pid could otherwise inherit a dead host's carrier entry).
+    const carrier = readServeHostPid(root);
+    if (carrier.state === "present" && carrier.pid === child.pid) {
+      const startedMs = carrier.startedAt ? Date.parse(carrier.startedAt) : NaN;
+      if (!Number.isFinite(startedMs) || startedMs >= spawnedAtMs - 2000) {
+        return { state: "started", pid: child.pid, port: carrier.port };
+      }
     }
     await sleep(250);
   }
@@ -535,15 +624,20 @@ Usage:
 Flags:
   --root <path>          Workspace root (default: discovered via .quay/config.yml from cwd).
   --host <ip>            Web server bind host (default: ${DEFAULT_SERVE_HOST}).
-  --port <p>             Web server port (default: ${DEFAULT_SERVE_PORT}).
+  --port <p>             Web server port (default: ${DEFAULT_SERVE_PORT} = kernel-assigned ephemeral).
+                         Pass it only to pin an exact port; a real collision then fails loudly.
   --cli <path>           Explicit quay CLI path (default: auto-resolve source-tree → plugin vendor bundle → PATH).
-  --serve-timeout <ms>   How long to wait for the serve process to answer the probe (default: ${DEFAULT_SERVE_TIMEOUT_MS}).
+  --serve-timeout <ms>   How long to wait for the spawned serve host to report its verdict (default: ${DEFAULT_SERVE_TIMEOUT_MS}).
   --json                 Machine-readable summary on stdout.
 
-Web server semantics: a listening server is kept when \`GET /health\` says it is FRESH, RELOADED when
-it says STALE (SIGTERM the host named by .quay/server.json, wait for the port, spawn a fresh one),
-and LEFT ALONE but reported as \`staleness: "not-evaluated"\` when /health cannot be read — ⛔ a
-reading we could not take is never laundered into either "fresh" or "stale".
+Web server semantics (gap-serve-same-root-admission-lock): this script performs NO pre-flight
+liveness probe — it spawns \`quay serve\` and reads the verdict from that child. The child owns a
+same-root admission lock, so it either binds (\`started\`) or refuses because a live host already owns
+this root (\`already-running\` — reported, ⛔ not folded into a failure). When a live host is reported,
+\`GET /health\` on the port its carrier names decides: FRESH ⇒ kept; STALE ⇒ RELOADED (SIGTERM that
+host, wait for its pid to die, spawn a fresh one); unreadable ⇒ LEFT ALONE and reported as
+\`staleness: "not-evaluated"\` — ⛔ a reading we could not take is never laundered into either
+\"fresh\" or \"stale\".
 `);
       return null;
     } else {
@@ -557,7 +651,8 @@ reading we could not take is never laundered into either "fresh" or "stale".
 async function main(argv: string[]): Promise<number> {
   const opts = parseArgs(argv);
   if (opts === null) return 2;
-  if (!Number.isFinite(opts.port) || opts.port < 1 || opts.port > 65535) {
+  // 0 is the DEFAULT and a legal value (kernel-assigned); ⛔ it is not "unset" — see the help text.
+  if (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535) {
     process.stderr.write(`start-drivers: invalid --port: ${opts.port}\n`);
     return 2;
   }
@@ -582,9 +677,6 @@ async function main(argv: string[]): Promise<number> {
 
   const report: Record<string, unknown> = { root, cli: formatInvocation(inv), drivers: {} as Record<string, unknown>, serve: {} as Record<string, unknown> };
   const drv = report.drivers as Record<string, unknown>;
-  // Driver aliveness as the loop below ESTABLISHES it (alive only when proven alive — either already
-  // running, or started AND re-verified). `planActions` reads this; nothing else does.
-  const aliveByKind: Record<string, boolean> = { promotion: false, worker: false, outer: false, goal: false };
 
   // 1. Drivers — status pre-check (fast path) + start (the kernel is itself idempotent).
   for (const kind of DRIVER_KINDS) {
@@ -608,7 +700,6 @@ async function main(argv: string[]): Promise<number> {
     }
     if (parsed.alive) {
       drv[kind] = { state: "already-running" };
-      aliveByKind[kind] = true;
       if (!opts.json) process.stdout.write(`${kind}: already running (alive)\n`);
       continue;
     }
@@ -654,107 +745,130 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
     drv[kind] = { state: "started", alive: true };
-    aliveByKind[kind] = true;
     if (!opts.json) process.stdout.write(`${kind}: started\n`);
   }
 
-  // 2. Web server — TWO signals, then planActions decides (gap-serve-stale-signal-has-no-consumer).
-  //    `GET /` answers "is something there"; `GET /health` answers "is what is there the code on
-  //    disk". Reading only the first was the defect: a live-but-stale server is reachable, so it was
-  //    skipped forever. The decision now goes through `planActions` — the same pure function the unit
-  //    tests pin — so the staleness dimension is not a second, parallel judgment that could drift.
-  const listening = await probeUrl(opts.host, opts.port);
-  let staleness: ServeStaleness = { evaluated: false, stale: null, reason: "not-listening" };
-  if (listening) staleness = await probeServeStaleness(opts.host, opts.port);
+  // 2. Web server — the ADMISSION verdict comes from the host process ITSELF (its same-root lock);
+  //    this script performs no pre-flight liveness probe and owns no second liveness judge
+  //    (gap-serve-same-root-admission-lock). What remains HERE is the staleness POLICY, applied only
+  //    once the host has told us a live host exists.
+  //
+  //    ⛔ The old `GET /` pre-probe is deleted, not moved: it answered "is something answering this
+  //    port", which was wrong in exactly the incident that motivated this task (an unrelated process
+  //    squatting the hardcoded port answered 200 ⇒ reported as "our server is already running").
+  //    With an ephemeral default there is no single port to probe any more, either.
+  const admission = await startServe(inv, root, opts.host, opts.port, opts.serveTimeoutMs);
 
-  const plan = planActions({
-    promotionAlive: aliveByKind.promotion,
-    workerAlive: aliveByKind.worker,
-    outerAlive: aliveByKind.outer,
-    goalAlive: aliveByKind.goal,
-    serveListening: listening,
-    // `null` for not-evaluated ⇒ planActions must not turn "could not read" into "restart".
-    serveStale: staleness.evaluated ? staleness.stale : null,
-  });
-
-  if (!plan.startServe) {
-    // Listening AND fresh ⇒ nothing to do. The two non-start cases carry DIFFERENT literals: a
-    // not-evaluated reading is reported as such, never as "fresh" (硬規則 3b)...
-    const kind = staleness.evaluated ? "fresh" : "not-evaluated";
-    report.serve = { state: "already-listening", host: opts.host, port: opts.port, staleness: kind, stalenessReason: staleness.reason };
-    if (staleness.evaluated) {
-      if (!opts.json) process.stdout.write(`serve: already listening on http://${opts.host}:${opts.port} (code fresh)\n`);
-    } else {
-      // ...and is LOUD, because the alternative reading is "no signal at all" — the 2026-08-23 state
-      // this task exists to close. ⛔ Still no restart: we do not tear down a working server on a
-      // reading we could not take.
-      process.stderr.write(
-        `serve: already listening on http://${opts.host}:${opts.port} — ⛔ staleness NOT-EVALUATED ` +
-        `(reason: ${staleness.reason}); NOT restarting (a reading we could not take is not a verdict). ` +
-        `Check \`curl http://${opts.host}:${opts.port}/health\` by hand.\n`,
-      );
-      if (!opts.json) process.stdout.write(`serve: already listening on http://${opts.host}:${opts.port} (staleness NOT-EVALUATED: ${staleness.reason})\n`);
-    }
-  } else if (listening) {
-    // RELOAD — the case that used to be silently skipped. Identify the host first: without a usable
-    // carrier we cannot stop it, and spawning onto a held port would "succeed" against the OLD
-    // process (startServe's probe cannot tell the two apart).
-    const carrier = readServeHostPid(root);
-    if (carrier.state !== "present") {
-      // Three-way carrier: "exists but unusable" is its own state, never folded into "no server".
-      const why = carrier.state === "unreadable" ? ` — ${carrier.reason}` : "";
-      process.stderr.write(
-        `serve: listening server on http://${opts.host}:${opts.port} is STALE but its host cannot be identified ` +
-        `(.quay/server.json: ${carrier.state}${why}); ` +
-        `refusing to start a second server onto a held port — stop it by hand and re-run.\n`,
-      );
-      report.serve = { state: "reload-host-unknown", host: opts.host, port: opts.port, staleness: "stale", carrier: carrier.state };
-      if (opts.json) process.stdout.write(JSON.stringify(report));
-      return 1;
-    }
-    const stopped = await stopServeHost(carrier.pid, opts.host, opts.port);
-    if (stopped.state !== "stopped") {
-      process.stderr.write(
-        `serve: stale serve host pid=${carrier.pid} could not be stopped (${stopped.state}` +
-        `${stopped.error ? `: ${stopped.error}` : ""}) — the port is still held; ⛔ not spawning on top of it.\n`,
-      );
-      report.serve = { state: "reload-stop-failed", host: opts.host, port: opts.port, staleness: "stale", previousPid: carrier.pid, detail: stopped.state };
-      if (opts.json) process.stdout.write(JSON.stringify(report));
-      return 1;
-    }
-    process.stderr.write(`serve: STALE (code on disk newer than pid=${carrier.pid}) — reloading\n`);
-    const res = await startServe(inv, root, opts.host, opts.port, opts.serveTimeoutMs);
-    report.serve = { ...res, state: res.state === "started" ? "reloaded-stale" : res.state, host: opts.host, port: opts.port, staleness: "stale", previousPid: carrier.pid };
-    if (res.state !== "started") {
-      process.stderr.write(`serve: reload failed after stopping pid=${carrier.pid} (${res.state}); see .quay/serve.log\n`);
-      if (opts.json) process.stdout.write(JSON.stringify(report));
-      return 1;
-    }
+  if (admission.state === "started") {
+    const boundPort = admission.port ?? null;
+    report.serve = { state: "started", pid: admission.pid, host: opts.host, port: boundPort };
     if (!opts.json) {
-      process.stdout.write(`serve: reloaded (was stale pid=${carrier.pid} → pid=${res.pid ?? "?"}) on http://${opts.host}:${opts.port}\n`);
+      process.stdout.write(
+        `serve: started (pid=${admission.pid ?? "?"}) on http://${opts.host}:${boundPort ?? "?"}` +
+        `${boundPort == null ? " (port not read back from the carrier)" : ""}\n`,
+      );
+    }
+  } else if (admission.state === "already-running") {
+    // A live host owns this root (the child's lock refused). Identify it from the carrier IT
+    // published — that carrier is also the ONLY knowable address of the web face now that the
+    // default port is kernel-assigned, which is what makes the freshness read possible at all.
+    const carrier = readServeHostPid(root);
+    const livePort = carrier.state === "present" ? carrier.port : null;
+    let staleness: ServeStaleness;
+    if (carrier.state !== "present") {
+      // Three-way carrier (硬規則 3b): "exists but unusable" is its own literal, never folded into
+      // "no server" — we know a host is live (the lock said so) but cannot read its freshness.
+      staleness = { evaluated: false, stale: null, reason: `carrier-${carrier.state}${carrier.state === "unreadable" ? `:${carrier.reason}` : ""}` };
+    } else if (livePort == null) {
+      staleness = { evaluated: false, stale: null, reason: "carrier-no-web-port" };
+    } else {
+      staleness = await probeServeStaleness(opts.host, livePort);
+    }
+
+    const action = planServeAction({ admission: "already-running", staleness: staleness.evaluated ? staleness.stale : null });
+
+    if (action === "already-listening") {
+      // Live host, code FRESH (or a freshness reading we could not take) ⇒ nothing to do. The two
+      // cases carry DIFFERENT literals: a not-evaluated reading is reported as such, never as
+      // "fresh" (硬規則 3b)...
+      const kind = staleness.evaluated ? "fresh" : "not-evaluated";
+      report.serve = {
+        state: "already-listening",
+        host: opts.host,
+        port: livePort,
+        pid: carrier.state === "present" ? carrier.pid : (admission.holderPid ?? null),
+        staleness: kind,
+        stalenessReason: staleness.reason,
+      };
+      if (staleness.evaluated) {
+        if (!opts.json) process.stdout.write(`serve: already running (pid=${carrier.state === "present" ? carrier.pid : "?"}) on http://${opts.host}:${livePort} (code fresh)\n`);
+      } else {
+        // ...and is LOUD, because the alternative reading is "no signal at all" — the 2026-08-23
+        // state this task exists to close. ⛔ Still no restart: we do not tear down a running server
+        // on a reading we could not take.
+        process.stderr.write(
+          `serve: already running (pid=${carrier.state === "present" ? carrier.pid : "?"}) — ⛔ staleness NOT-EVALUATED ` +
+          `(reason: ${staleness.reason}); NOT restarting (a reading we could not take is not a verdict).\n`,
+        );
+        if (!opts.json) process.stdout.write(`serve: already running on http://${opts.host}:${livePort ?? "?"} (staleness NOT-EVALUATED: ${staleness.reason})\n`);
+      }
+    } else {
+      // RELOAD — the case that used to be silently skipped. The host to stop is the one the lock
+      // named (the carrier's pid and the lock holder are the same host by construction; the carrier
+      // is preferred only because it also carries the port for the report).
+      if (carrier.state !== "present") {
+        const why = carrier.state === "unreadable" ? ` — ${carrier.reason}` : "";
+        process.stderr.write(
+          `serve: a live host owns this root but its carrier does not name a usable host ` +
+          `(carrier=${carrier.state}${why}) — refusing to act on a host that cannot be identified; ` +
+          `stop it by hand and re-run.\n` +
+          `  carrier file: .quay/server.json\n`,
+        );
+        report.serve = { state: "reload-host-unknown", host: opts.host, port: null, staleness: "stale", carrier: carrier.state };
+        if (opts.json) process.stdout.write(JSON.stringify(report));
+        return 1;
+      }
+      const stopped = await stopServeHost(carrier.pid);
+      if (stopped.state !== "stopped") {
+        process.stderr.write(
+          `serve: stale serve host pid=${carrier.pid} could not be stopped (${stopped.state}` +
+          `${stopped.error ? `: ${stopped.error}` : ""}) — it is still alive; ⛔ not spawning a second host on top of it.\n`,
+        );
+        report.serve = { state: "reload-stop-failed", host: opts.host, port: livePort, staleness: "stale", previousPid: carrier.pid, detail: stopped.state };
+        if (opts.json) process.stdout.write(JSON.stringify(report));
+        return 1;
+      }
+      process.stderr.write(`serve: STALE (code on disk newer than pid=${carrier.pid}) — reloading\n`);
+      const res = await startServe(inv, root, opts.host, opts.port, opts.serveTimeoutMs);
+      const boundPort = res.state === "started" ? (res.port ?? null) : livePort;
+      report.serve = { ...res, state: res.state === "started" ? "reloaded-stale" : res.state, host: opts.host, port: boundPort, staleness: "stale", previousPid: carrier.pid };
+      if (res.state !== "started") {
+        process.stderr.write(
+          `serve: reload failed after stopping pid=${carrier.pid} (${res.state}${res.state === "already-running" ? " — another host took this root in the window" : ""}); see .quay/serve.log\n`,
+        );
+        if (opts.json) process.stdout.write(JSON.stringify(report));
+        return 1;
+      }
+      if (!opts.json) {
+        process.stdout.write(`serve: reloaded (was stale pid=${carrier.pid} → pid=${res.pid ?? "?"}) on http://${opts.host}:${res.port ?? "?"}\n`);
+      }
     }
   } else {
-    const res = await startServe(inv, root, opts.host, opts.port, opts.serveTimeoutMs);
-    report.serve = { ...res, host: opts.host, port: opts.port };
-    if (res.state !== "started") {
-      // The failure verdict is computed OUTSIDE the `--json` guard: a serve that never came up is a
-      // failed start on both surfaces (before this, `--json` reached the `return 0` below and
-      // reported success for a server that was not running).
-      if (res.state === "spawn-failed") {
-        const diag = formatCliFailure(inv, { status: null, error: Object.assign(new Error(`spawn ${inv.argv0}: ${res.error}`), { code: res.error }) });
-        process.stderr.write(`serve: the quay CLI could not be executed (${res.error}); argv0=${inv.argv0}; argv=${formatInvocation(inv)}\n`);
-        if (diag) process.stderr.write(diag);
-      } else if (res.state === "exited") {
-        process.stderr.write(`serve: process exited before answering the probe (exit=${res.exitCode}); see .quay/serve.log\n`);
-      } else {
-        process.stderr.write(`serve: did not answer the probe within ${opts.serveTimeoutMs}ms; see .quay/serve.log\n`);
-      }
-      if (opts.json) process.stdout.write(JSON.stringify(report));
-      return 1;
+    // The child never delivered a verdict: spawn failure (never started), exit, or timeout. All
+    // three are failures of THIS run — ⛔ `already-running` is NOT among them (it is handled above
+    // as an idempotent outcome), which is the whole point of the extra state.
+    report.serve = { ...admission, host: opts.host, port: null };
+    if (admission.state === "spawn-failed") {
+      const diag = formatCliFailure(inv, { status: null, error: Object.assign(new Error(`spawn ${inv.argv0}: ${admission.error}`), { code: admission.error }) });
+      process.stderr.write(`serve: the quay CLI could not be executed (${admission.error}); argv0=${inv.argv0}; argv=${formatInvocation(inv)}\n`);
+      if (diag) process.stderr.write(diag);
+    } else if (admission.state === "exited") {
+      process.stderr.write(`serve: process exited before becoming a host (exit=${admission.exitCode}); see .quay/serve.log\n`);
+    } else {
+      process.stderr.write(`serve: did not report a verdict within ${opts.serveTimeoutMs}ms; see .quay/serve.log\n`);
     }
-    if (!opts.json) {
-      process.stdout.write(`serve: started (pid=${res.pid ?? "?"}) on http://${opts.host}:${opts.port}\n`);
-    }
+    if (opts.json) process.stdout.write(JSON.stringify(report));
+    return 1;
   }
 
   if (opts.json) process.stdout.write(JSON.stringify(report));

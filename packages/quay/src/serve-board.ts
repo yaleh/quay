@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, type BoardLanding, type BoardExecution } from "./observation.ts";
+import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
@@ -257,37 +257,127 @@ export function renderBoardPage(board: {
     </main></body></html>`;
 }
 
-export async function handleBoard(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  client: ProviderClient,
-  manifest: Manifest,
-  cfg: ServePageCfg,
-): Promise<void> {
-  let landing: BoardLanding;
-  try {
-    landing = await readBoardLanding(cfg.workspaceRoot);
-  } catch (err) {
-    landing = { status: "error", timedOut: false, reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), scanned: 0 };
-  }
-  let execution: BoardExecution;
-  try {
-    execution = await readBoardExecution(cfg.workspaceRoot);
-  } catch (err) {
-    execution = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), inFlight: [] };
-  }
+// ══ gap-ac292-criterion-cold-miss-30s-ttl-always-expired: the /board SNAPSHOT ═══════════════════
+// AC-292's criterion is a probe over the LIVE server (`curl --max-time 10` on /board), re-run once
+// per goal-sweep — structurally further apart than every TTL on this page, and it does TWO fetches
+// (en + zh) per run. Measured on the unmodified code at this repo's size (2274 tasks): the cold
+// path cost 9.17 / 9.62 / 9.78 s against that fixed 10 s budget — i.e. it STRADDLES the budget, so
+// the same correct implementation flips red/green per run. That is the ledger's intermittent
+// `CAUSE=en-fetch-failed`, not a broken zh wiring (the other three arms passed 61 s later).
+//
+// The cost is per-request and SCALES WITH THE STORE, so neither "raise the 8 s timeout" nor "lengthen
+// the 30 s TTL" can fix it (both were tried — see the task body's table; the consumer's interval is
+// structurally > TTL, so a longer TTL never gets hit). The fix is the one AC-179 already landed for
+// /dashboard's structurally identical defect: the build moves to a BACKGROUND TICK and the request
+// path reads a SNAPSHOT — a synchronous Map lookup, zero readers, zero subprocesses, zero scans.
+//
+// What the request path used to pay, per request (measured on this worktree):
+//   readBoardLanding        → spawns `node task-status-drift-check.ts --json`, a FULL scan: 6.46 s
+//   readTaskStatusMapAtRef  → `git ls-tree` + `cat-file --batch` over EVERY task file:     1.41 s
+//   client.taskList()       → a provider round-trip over every task file
+//   readBoardExecution      → readLive over .workflow-events/                             0.04 s
+// All four are snapshotted, so the request path does ZERO work whose cost grows with the store
+// (AC3). The tick re-builds every BOARD_SNAPSHOT_REFRESH_MS, matching the 30 s freshness contract
+// every other card on this page already had.
+//
+// A reader that fails is snapshotted AS a failure (its honest「读失败」/「读取超时」shape): the page
+// keeps rendering the same four landing states it always did, and the transient default view keeps
+// refusing to read an unreadable source as "nothing is in flight" (硬规则 3b/5).
+//
+// ⊢ DELIBERATE DEVIATION from the AC-179 正本, and why: the dashboard publishes an INTERIM snapshot
+// between its cheap and its shell-out readers, to shrink the window right after `listen` where no
+// snapshot exists yet. The board does NOT, because the interim's own required inputs are what make
+// it useless here: the landing subprocess is started first but the cheap half still costs a provider
+// round-trip (~1 s) plus the develop-ref scan (~1.4 s), so an interim can only appear ~2.5 s in —
+// and an interim published EARLIER than that would carry an EMPTY task list, rendering a board with
+// no rows, which is 硬规则 5's cardinal sin (「无法判定」 painted as 「没有」). The un-snapshotted
+// window is therefore the first build only (one ~7 s window per process start), during which the
+// request path takes the legacy in-request build below — byte-for-byte today's behaviour, so that
+// window is never WORSE than the pre-fix server. Every steady-state request, and every request
+// while a refresh is in flight, reads the previous snapshot.
+export const BOARD_SNAPSHOT_REFRESH_MS = 30_000;
 
-  let tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown }> = [];
-  let intentStatus: "ok" | "error" = "ok";
-  let intentReason: string | null = null;
+/** Kill switch for the whole mechanism. Setting it to "1" makes BOTH the tick and the request-path
+ *  lookup inert, so `/board` falls back to the legacy in-request build. That fallback is not
+ *  dead code: it is also the unwired-state path during the first build after startup. */
+export const BOARD_SNAPSHOT_DISABLED_ENV = "QUAY_BOARD_SNAPSHOT_DISABLED";
+
+/** The provider's task row as the board consumes it. Kept structurally identical to what
+ *  `client.taskList()` returns so the join below is unchanged. */
+type BoardTaskRow = { id?: unknown; title?: unknown; status?: unknown; labels?: unknown };
+
+/** Everything `/board` joins at one instant: the three sources (意图 / 执行 / 落地) plus the
+ *  intent read's own degraded-state. Holding the VALUES (not a rendered page) keeps the render
+ *  pure and lets `?status=/?label=/?page=` stay per-request without rebuilding. */
+export interface BoardSnapshot {
+  builtAt: number;
+  landing: BoardLanding;
+  execution: BoardExecution;
+  /** Provider tasks, each status already overridden from the develop ref (see readBoardIntent). */
+  tasks: BoardTaskRow[];
+  intentStatus: "ok" | "error";
+  intentReason: string | null;
+}
+
+const boardSnapshots = new Map<string, BoardSnapshot>();
+const boardSnapshotRebuilds = new Map<string, Promise<void>>();
+
+/** Test seam: an optional hook awaited BETWEEN the build's cooperative steps. Production never sets
+ *  it. It lets a test hold a build open and observe what concurrent requests see WHILE it runs,
+ *  rather than racing a fixture build that finishes in microseconds. */
+let boardSnapshotStepHook: (() => Promise<void>) | null = null;
+export function setBoardSnapshotStepHook(hook: (() => Promise<void>) | null): void {
+  boardSnapshotStepHook = hook;
+}
+
+/** True when the snapshot mechanism is switched off. Read at CALL time, not at module load, so a
+ *  test can flip it per test (mirrors `dashboardSnapshotDisabled`). */
+export function boardSnapshotDisabled(): boolean {
+  return process.env[BOARD_SNAPSHOT_DISABLED_ENV] === "1";
+}
+
+/** The snapshot for `root`, or null when none has been built yet. **Sync and non-building** — this
+ *  is the request path's whole lookup, and it never awaits, so a request can never be made to wait
+ *  for a rebuild. */
+export function peekBoardSnapshot(root: string): BoardSnapshot | null {
+  if (boardSnapshotDisabled()) return null;
+  return boardSnapshots.get(root) ?? null;
+}
+
+/** Test-hygiene handle: drop every snapshot, in-flight build marker and step hook. */
+export function clearBoardSnapshots(): void {
+  boardSnapshots.clear();
+  boardSnapshotRebuilds.clear();
+  boardSnapshotStepHook = null;
+}
+
+/** True while a build for `root` is in flight — a direct reading of the mechanism's own state, not
+ *  an inference from a timestamp. */
+export function isBoardSnapshotRebuilding(root: string): boolean {
+  return boardSnapshotRebuilds.has(root);
+}
+
+/** Await the build for `root`, if any (test seam — the request path never does this). */
+export function awaitBoardSnapshotRebuild(root: string): Promise<void> {
+  return boardSnapshotRebuilds.get(root) ?? Promise.resolve();
+}
+
+const EMPTY_LANDING: BoardLanding = { status: "error", timedOut: false, reason: "internal: board snapshot build failed before the landing read", flags: new Map(), scanned: 0 };
+const EMPTY_EXECUTION: BoardExecution = { status: "error", reason: "internal: board snapshot build failed before the execution read", flags: new Map(), inFlight: [] };
+
+/** The 意图 read: provider tasks with each status overridden from the develop ref
+ *  (gap-web-task-status-reads-stale-main-checkout — the 意图 column's status face is the develop git
+ *  ref, not the manager working branch's disk, which is a stale agent-proxy per 硬规则 4b; a task
+ *  absent from develop keeps its disk status). Returns the degraded shape instead of throwing, so a
+ *  failed intent read is snapshotted AS a failed read — never as an empty store (硬规则 3b). */
+async function readBoardIntent(
+  root: string,
+  client: ProviderClient,
+): Promise<{ tasks: BoardTaskRow[]; intentStatus: "ok" | "error"; intentReason: string | null }> {
   try {
     const r = await client.taskList({ includeBody: false });
-    tasks = r.tasks ?? [];
-    // gap-web-task-status-reads-stale-main-checkout: the board's 意图 column status read face is
-    // the develop git ref, not the manager working branch's disk (a stale agent-proxy — 硬规则 4b).
-    // Override each task's status from develop; a task absent from develop keeps its disk status.
-    const devStatus = readTaskStatusMapAtRef(cfg.workspaceRoot, "develop");
+    let tasks: BoardTaskRow[] = r.tasks ?? [];
+    const devStatus = readTaskStatusMapAtRef(root, "develop");
     if (devStatus.size > 0) {
       tasks = tasks.map((t) => {
         const id = typeof t.id === "string" ? t.id : "";
@@ -295,10 +385,81 @@ export async function handleBoard(
         return atRef != null ? { ...t, status: atRef } : t;
       });
     }
+    return { tasks, intentStatus: "ok", intentReason: null };
   } catch (err) {
-    intentStatus = "error";
-    intentReason = err instanceof Error ? err.message : String(err);
+    return { tasks: [], intentStatus: "error", intentReason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Build one snapshot. Cooperative by construction: the landing SUBPROCESS is started first so it
+ *  runs in the OS while the two blocking steps below each get their OWN macrotask (a single
+ *  blocking build would stall every concurrent request — `/health` included). Never throws: a
+ *  failing reader yields the same honest degraded shape the request path already used. */
+export async function buildBoardSnapshot(root: string, client: ProviderClient): Promise<BoardSnapshot> {
+  // Long poles first. The landing read is an async subprocess (6.46 s measured) and the provider
+  // round-trip is async too, so neither blocks the loop while the sync steps below yield.
+  const landingPromise = readBoardLanding(root).catch(() => EMPTY_LANDING);
+  const intentPromise = readBoardIntent(root, client);
+
+  // Blocking step #1 — `readLive` over .workflow-events/.
+  await yieldToEventLoop();
+  if (boardSnapshotStepHook) await boardSnapshotStepHook();
+  let execution: BoardExecution;
+  try { execution = await readBoardExecution(root); } catch { execution = EMPTY_EXECUTION; }
+
+  const [landing, intent] = await Promise.all([landingPromise, intentPromise]);
+  return { builtAt: Date.now(), landing, execution, tasks: intent.tasks, intentStatus: intent.intentStatus, intentReason: intent.intentReason };
+}
+
+/** Start the background rebuild tick for `root`. Runs one build immediately (the cold build lives
+ *  HERE, after `listen`, not in a request — the same shape as the dashboard's and the develop-ref
+ *  ticks), then re-builds every `intervalMs`. The interval is unref'd so it never keeps the process
+ *  alive.
+ *
+ *  Rebuilds never stack: while one is in flight the periodic tick is SKIPPED, so a slow store cannot
+ *  queue up work that all lands at once. A FAILED rebuild keeps the previous snapshot rather than
+ *  blanking the page — a stale board is honest, an empty one would be a fabricated absence. */
+export function startBoardSnapshotRefresh(
+  root: string,
+  client: ProviderClient,
+  { intervalMs = BOARD_SNAPSHOT_REFRESH_MS }: { intervalMs?: number } = {},
+): { stop: () => void; rebuildNow: () => Promise<void> } {
+  if (boardSnapshotDisabled()) return { stop: () => {}, rebuildNow: () => Promise.resolve() };
+  // Only ever called when nothing is in flight for `root` (its own `finally` keeps a stale build
+  // from deleting a newer build's marker).
+  const start = (): Promise<void> => {
+    const p = buildBoardSnapshot(root, client)
+      .then((snap) => { boardSnapshots.set(root, snap); })
+      .catch(() => { /* keep the previous snapshot — see the contract above */ })
+      .finally(() => { if (boardSnapshotRebuilds.get(root) === p) boardSnapshotRebuilds.delete(root); });
+    boardSnapshotRebuilds.set(root, p);
+    return p;
+  };
+  const tick = (): Promise<void> => {
+    const inFlight = boardSnapshotRebuilds.get(root);
+    return inFlight ?? start();
+  };
+  /** Explicit caller: wait out any incumbent FIRST, so the build this returns post-dates the call.
+   *  (The tick's "skip" policy would return a build that started before the caller's change and is
+   *  therefore structurally incapable of reflecting it.) */
+  const rebuildNow = async (): Promise<void> => {
+    const inFlight = boardSnapshotRebuilds.get(root);
+    if (inFlight) await inFlight;
+    return start();
+  };
+  const handle = setInterval(() => { void tick(); }, intervalMs);
+  // unref'd — the tick must never be the reason the process stays alive.
+  if (typeof handle.unref === "function") handle.unref();
+  void start();
+  return { stop: () => clearInterval(handle), rebuildNow };
+}
+
+/** The request path's join + filter + paginate + render, PURE and SYNCHRONOUS: every input is
+ *  already in the snapshot, so nothing here waits on I/O. Split out so the snapshot path and the
+ *  legacy fallback below render through ONE implementation (a second copy would be a second
+ *  behaviour). */
+function renderBoardResponse(res: ServerResponse, snap: BoardSnapshot, url: URL, cfg: ServePageCfg): void {
+  const { landing, execution, tasks, intentStatus, intentReason } = snap;
 
   // Union of provider tasks + landing-flagged taskIds, so every drift-flagged task renders a row
   // even if the provider's view diverges (the Contract's invariant: the scanned set must match).
@@ -416,6 +577,34 @@ export async function handleBoard(
     joinedTotal: rows.length,
     incompleteSources,
   }, cfg.identity, cfg.lang));
+}
+
+/** `/board`'s route handler. The request path is a synchronous snapshot lookup whose cost does NOT
+ *  depend on the store's size or on when the last refresh ran (AC3) — the property the pre-fix
+ *  version could not have, because its readers were TTL caches whose window the criterion's own
+ *  consumption interval always outlived.
+ *
+ *  The legacy in-request build survives as TWO things, and both matter:
+ *   - the unwired state (no snapshot yet — the first build after startup, one ~7 s window per
+ *     process), and
+ *   - `QUAY_BOARD_SNAPSHOT_DISABLED=1`, the negative control that makes the fast reading
+ *     attributable to this mechanism rather than to the host.
+ *  So it is neither dead code nor a race: it is the same `buildBoardSnapshot` the tick runs, which
+ *  is why the two paths can never diverge. */
+export async function handleBoard(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  client: ProviderClient,
+  _manifest: Manifest,
+  cfg: ServePageCfg,
+): Promise<void> {
+  const snapshot = peekBoardSnapshot(cfg.workspaceRoot);
+  if (snapshot) {
+    renderBoardResponse(res, snapshot, url, cfg);
+    return;
+  }
+  renderBoardResponse(res, await buildBoardSnapshot(cfg.workspaceRoot, client), url, cfg);
 }
 
 // ── /git-history — vertical commit timeline (gap-git-history-vertical-graph-thirdparty-lib) ──

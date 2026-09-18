@@ -8,10 +8,14 @@
 //   writer      — buildMirrorState emits a full-suite-runner SuiteState-compatible state (state/runner/
 //                 startedAt/finishedAt(epoch)/durationMs/laneCount/scope/commit); writeMirrorState
 //                 OVERWRITES the single-state file (never appends).
-//   fail-closed — a missing/invalid required field exits 2 and writes NOTHING (硬规则 3b); a red state
-//                 without --reason is refused.
+//   fail-closed — a missing/invalid required field returns {error} and the caller writes NOTHING
+//                 (硬规则 3b); a red state without a reason is refused.
 //   finishedAt  — explicit ISO/epoch, or derived (startedAt + durationMs) when absent; always EPOCH
 //                 SECONDS (the full-suite-runner convention the freshness gate parses).
+//
+// ⛔ MODULE-ONLY since gap-mirror-full-suite-state-retire-dead-cli-face (2026-09-18): the file's CLI
+// entry was retired (its only caller was the deleted fan-in step 4.5). Every case below calls the
+// module IN-PROCESS — no case launches the file as a subprocess, because there is no CLI to launch.
 //
 // Run:
 //   scripts/test.sh plugin/test/mirror-full-suite-state.test.mjs
@@ -22,12 +26,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
-import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite } from "../scripts/mirror-full-suite-state.ts";
+import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "../scripts/mirror-full-suite-state.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const _tmpDirs = [];
 function tmpDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -120,20 +120,16 @@ test("AC1 — shouldSkipMirrorWrite: an in-flight round (finishedAt null) SKIPS;
   assert.equal(shouldSkipMirrorWrite({ state: "red", finishedAt: 1789000000 }), false, "terminal red ⇒ write (a newer fan-in green legitimately overwrites a COMPLETED red)");
 });
 
-test("AC1 — a running on-disk state makes the CLI mirror SKIP (exit 0, no clobber)", () => {
+test("AC1 — a running on-disk state makes the mirror SKIP (in-process: disk → readCurrentState → shouldSkipMirrorWrite)", () => {
   const dir = tmpDir("mirror-skip-");
   const file = path.join(dir, "full-suite-state.json");
   fs.writeFileSync(file, JSON.stringify({ state: "running", finishedAt: null, runId: "outer-gen", pid: 1 }) + "\n", "utf8");
-  const r = spawnSync("node", [
-    "--no-warnings", "--experimental-strip-types",
-    path.join(REPO_ROOT, "plugin", "scripts", "mirror-full-suite-state.ts"),
-    "--state", "green", "--started-at", "2026-08-18T04:30:00.000Z",
-    "--duration-ms", "936519", "--lane-count", "8", "--commit", BASE.commit,
-    "--state-file", file, "--json",
-  ], { encoding: "utf8" });
-  assert.equal(r.status, 0, `skip must exit 0: ${r.stderr}`);
-  const out = JSON.parse(r.stdout.trim().split("\n").filter((l) => l.trim().startsWith("{")).pop());
-  assert.equal(out.skipped, true, "the mirror reports skipped (running-in-flight)");
-  const onDisk = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.equal(onDisk.state, "running", "the in-flight running state is NOT overwritten");
+  // The skip decision on a REAL on-disk state (not a hand-built literal): the caller's sequence is
+  // readCurrentState(file) → shouldSkipMirrorWrite(current) ⇒ no write. The round-trip through the
+  // disk is the part the literal-object case above cannot cover (an unparseable/garbled state must
+  // also read as "safe to overwrite", and a running one must not).
+  const onDisk = readCurrentState(file);
+  assert.equal(onDisk.state, "running", "readCurrentState parses the on-disk state");
+  assert.equal(shouldSkipMirrorWrite(onDisk), true, "a non-terminal on-disk state ⇒ the mirror must SKIP (no clobber)");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).state, "running", "the in-flight running state is NOT overwritten");
 });
