@@ -11,6 +11,8 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-git-history-window-notes-ref-dominates
 ---
 ## Finding
 ~60 copies of the same indexOf+next-arg idiom across 50+ checker/driver scripts under 9 different names; gate-script-base.ts is imported by 246 files yet exports no arg helper, and parseJsonArg has 5 copies total (2 more found ad hoc in stage-receipt.ts:833 and workflow-journal.ts:620).
@@ -143,6 +145,46 @@ console.log(`${rev}: ${hits.length} declaration(s) in ${new Set(hits.map(h=>h.f)
 - 内联 `--root` 形态（28 文件 / 16 处 `--root`）——**独立任务**，需先裁定「缺省值 vs fail-closed」策略。
   两件都**不在本任务范围内**，此处只登记量与理由，不冒充已做。
 
+### 8. 第二次 fan-in（merge develop，40 提交）的三个红：两个由本改动触发且已修，第三个⛔不是本任务的
+
+merge develop 后与另一条**已落地**的同类抽取（`ed9016eab extract createSelftest`，task
+`gap-routine-semantic-dedup-scan-check-harness-three-incompatible-shapes`）**改到了同一批文件**
+（两条都把 `pane-state-classify.ts` 等接到 `gate-script-base.ts`）⇒ 7 个 content 冲突。
+**6 个是 import 列表**（我方 `flagValue` vs 它方 `createSelftest`）⇒ 处置 = **逐文件取语义并集**
+（同一行 import 同时保留两个符号），⛔ 不是二选一：另一侧的函数体已 auto-merge 进来并**调用**它的符号，
+删任一符号都会留下 ReferenceError。**第 7 个**是 `plugin/test/gate-script-base.test.mjs`：双方各在文件末尾
+**追加了一节测试**，git 把两侧共有的结尾 `});` 对齐成公共上下文 ⇒ 并集要**补一个 `});`**
+（我方 CONTROL 用例与它方最后一个用例各需一个）。并集后 **24/24 绿**（我方 7 个 flagValue 用例 +
+它方 17 个 createSelftest 用例都在）。
+
+**（i）`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` ⑥ shipped-set closure —— 已由 develop 修掉，⛔ 不是我修的。**
+把 `pane-state-classify.ts` 接到共享 `flagValue` ⇒ 冷启动 shipped set 里 **value-import
+`./gate-script-base.ts` 的文件由 2 个变 3 个**，而该用例把 `drop-gate-script-base → violations=2`
+**钉成字面量** ⇒ 报 `violations=3`，**失败形态与真违规完全同形**（正是那个用例存在的唯一理由）。
+develop `ffb184f3f` 已改为**从 consumer 派生**（读 `transport_flat_files()` 的 shipped `.ts` 集、逐个
+mirror `transport_imports_of` 的谓词），带负控制。**⇒ 我没有改这个文件，merge develop 即绿**（实跑 20/20）。
+**这是「钉字面量」的第三次实例**，与该文件内 `consumerRefs` 的注释自述同源。
+
+**（ii）`packages/quay/test/build-plugin-dist.test.mjs` AC1(AC-205) —— 确由本改动触发，修的是 fixture。**
+该用例把 `send-to-session.ts` **单独一个文件**拷进 `/tmp` 的临时 plugin root 再 esbuild 打包，用来证明
+dev-tree 动态 import 被 inline、产物自足。我方给该文件加了 `import { flagValue } from "./gate-script-base.ts"`
+⇒ 临时根里没有这个兄弟 ⇒ `ERROR: Could not resolve "./gate-script-base.ts"`（bundle 阶段，早于断言）。
+**⛔ 这不是生产缺陷**：真构建从**完整** `plugin/scripts/` 打包、兄弟可解析 —— 实测
+`bundleEntries("plugin", ["scripts/send-to-session.ts"])` ⇒ **OK, files=1**。
+真实分歧是 **fixture 比它模拟的 staged layout 少了兄弟文件**（staged layout 本就带全套 `scripts/*.ts`）：
+「只拷入口」让该用例**在测另一条性质**（「入口没有兄弟」），而那条性质是**被一份拷贝静默钉住的**。
+修法 = **从真 plugin root 机械拷入全部 `scripts/*.ts`**（⛔ 不列出那一个兄弟，否则下次再有人加兄弟又红）。
+实跑 **36/36 绿**。⇒ 该文件因此进 `## Touches`（anti-drift 曾报 `out-of-declared`，1 条）。
+
+**（iii）⛔ 一个【不是】本任务的红，记下来以免下次误判：**
+`packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs` 的 AC3 非空性断言
+`the window contains merge second parents to verify (non-vacuous)` **在本机主检出（未改动的 `author`）上同样红**，
+且本任务 delta 不含任何 git-graph 代码。根因已由他人定位并立案（`meta/META-008`：「全仓 code-delta fan-in
+恒红的新根因：git-history 窗口被 refs/notes/quay-* 主导」；另有 `gap-git-history-window-notes-ref-dominates`
+任务与同名分支）：`git log --all --topo-order -n 200` **包含 `refs/notes/quay-cmv-merge`**，该 notes 链的提交
+时刻最新（12:11/12:22/12:45Z）⇒ 200 个窗口位被 notes 提交占满、真 merge 被挤出 ⇒ 实测窗口内 3 个 merge、
+**0 个窗口内第二父**。⇒ 属**已知的仓级状态**，不在本任务范围。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `arg-parsing-helper-family`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789723686226`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -157,6 +199,7 @@ console.log(`${rev}: ${hits.length} declaration(s) in ${new Set(hits.map(h=>h.f)
 - `experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts`
 - `experiments/quay-perpetual-stream/scripts/gate-script-base.ts`
 - `experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts`
+- `packages/quay/test/build-plugin-dist.test.mjs`
 - `plugin/scripts/allowed-tools-plugin-prefix-check.ts`
 - `plugin/scripts/anti-drift-touches-check.ts`
 - `plugin/scripts/anti-gaming-guard.ts`

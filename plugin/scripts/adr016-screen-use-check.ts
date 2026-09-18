@@ -52,7 +52,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createSelftest } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
@@ -281,15 +281,8 @@ export function judgeScreenHashScan(scan: ScanResult): DriverResult<ScanResult> 
 
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "adr016-screen-use-check" });
+  const check = st.check;
 
   // GREEN: a clean script with no hash is not a violation.
   check("green-clean-script", detectFileViolations("ok.sh", 'raw=$(cat file)\ncat "$raw"\n').length === 0);
@@ -332,8 +325,7 @@ export function selftest(): boolean {
   const mdCompliant = ["```bash", "tmux capture-pane -p -t x | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle", "```"].join("\n");
   check("green-md-compliant-block", detectTickDocViolations("plugin/loop/t.md", mdCompliant).length === 0);
 
-  console.log(`\nadr016-screen-use-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 function usage(): never {

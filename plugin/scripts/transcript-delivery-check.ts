@@ -52,7 +52,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createSelftest } from "./gate-script-base.ts";
 
 export type DeliveryState = "delivered" | "failed" | "unknown";
 
@@ -404,15 +404,8 @@ export function main(argv: string[]): number {
 // ── in-file selfcheck (ADR-018: prove BOTH the RED and GREEN paths without the test runner) ───────
 
 export function selfcheck(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "transcript-delivery-check", verb: "selfcheck" });
+  const check = st.check;
 
   const green = `{"type":"user","message":{"role":"user","content":"send-keys-marker-123 hello"}}\n{"type":"assistant","message":{"role":"assistant","content":"ok"}}\n`;
   check("green-string-content", checkTranscriptDelivered(green, "send-keys-marker-123").state === "delivered");
@@ -463,9 +456,7 @@ export function selfcheck(): boolean {
   check("fresh-assistant-only", hasUserMessages(redAssistantOnly) === false);
   check("fresh-tool-result-only-is-not-typed-input", hasUserMessages(redToolResultOnly) === false);
   check("fresh-real-user-message", hasUserMessages(green) === true);
-
-  console.log(`\ntranscript-delivery-check --selfcheck: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "transcript-delivery-check";

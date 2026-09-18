@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createSelftest } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -131,15 +131,8 @@ export function checkPaths(targetPaths: string[], registry: Registry): CheckResu
 // ── selftest — embedded RED+GREEN fixture suite (mirrors chart2-s1-distribution-reliability.ts's
 // own selftest() convention). ───────────────────────────────────────────────────────────────────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases-period" });
+  const check = st.check;
 
   const registry: Registry = {
     authorizedRoot: "/home/yale/work",
@@ -190,13 +183,7 @@ export function selftest(): boolean {
   check("real-registry-has-authorized-root", real.authorizedRoot === "/home/yale/work", `authorizedRoot=${real.authorizedRoot}`);
   check("real-registry-covers-archguard", isCovered("/home/yale/work/archguard", real) === true, "real archguard entry covered");
   check("real-registry-rejects-tmp", isCovered("/tmp/x", real) === false, "real registry correctly rejects /tmp/x");
-
-  if (allPassed) {
-    console.log("SELFTEST: all fixture cases PASS.");
-    return true;
-  }
-  console.error("SELFTEST: one or more fixture cases FAILED.");
-  return false;
+  return st.report();
 }
 
 // ── Thin CLI ─────────────────────────────────────────────────────────────────────────────────────

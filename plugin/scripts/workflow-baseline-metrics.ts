@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────────────
 
@@ -1036,16 +1037,8 @@ function main(): void {
 // ── selftest ───────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   const tmpDir = fs.mkdtempSync("workflow-baseline-metrics-selftest-");
 
@@ -1409,9 +1402,7 @@ Other occurrences:
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 // Only run main() when this file is the entry point, not when imported as a module

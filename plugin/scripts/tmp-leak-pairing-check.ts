@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectMkdtempNoCleanup } from "./test-isolation-check.ts";
-import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./test-framework-policy-check.ts";
 
 /** Scan the given repo-relative test files for unpaired mkdtemp results. */
@@ -100,15 +100,8 @@ export function main(argv: string[]): number {
 
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ────────
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  function check(name: string, cond: boolean, detail = "") {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  }
+  const st = createSelftest({ flavor: "counters", label: "tmp-leak-pairing-check" });
+  const check = st.check;
 
   // RED — the negative control: an unpaired mkdtemp (created, never removed) MUST report.
   const leaky =
@@ -164,9 +157,7 @@ export function runSelftest(): boolean {
     "  }\n" +
     "});\n";
   check("GREEN: helper return captured-and-cleaned does NOT report", detectMkdtempNoCleanup(callerClean, "caller.test.mjs").length === 0);
-
-  console.log(`\ntmp-leak-pairing-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

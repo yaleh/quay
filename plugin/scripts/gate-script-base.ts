@@ -273,3 +273,115 @@ export function isDirectEntry(importMeta: ImportMeta, argv1: string | undefined,
   if (!entry) return false;
   return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
 }
+
+// ── Selftest harness (ADR-018 selfcheck-fixture pattern) ─────────────────────────────────────────────
+// The ONE implementation of the per-gate `--selftest` fixture harness. Every ADR-018 selfcheck needs the
+// same four things — a `check(name, condition, detail)` assertion, a pass/fail tally, the verdict, and a
+// one-line summary — and before this export the whole surface carried its own copy of that bookkeeping
+// (semantic-dedup-scan routine, finding `check-harness-three-incompatible-shapes`, runId
+// semantic-dedup-scan-1789723686226, verdict real-duplication, suggestedAction extract; ADR-018 itself
+// names DIR-091 as the extraction mandate, which M152 executed for parseArgs / verdict emission /
+// requireArg / isDirectEntry but NOT for this harness).
+//
+// ⚠️ `flavor` is NOT a gratuitous knob — it is the CENSUS of the summary spellings the copies had, and
+// the copies' outputs are load-bearing (a gate's selftest line is read by humans and, in at least one
+// case, asserted by a test: `plugin/test/external-dogfooding-check.test.mjs` matches
+// /SELFTEST: all fixture cases PASS\./ — WITH the period). Extracting the harness must therefore NOT
+// silently re-word any gate's output; each spelling is preserved verbatim and named here.
+//   • "counters"      — per-failure `FAIL: <name>[ — <detail>]` on STDERR; summary
+//                       `\n<label> --selftest: N passed, M failed` on STDOUT; verdict `fail === 0`.
+//   • "cases"         — `SELFTEST PASS: <name> — <detail>` on STDOUT / `SELFTEST FAIL: …` on STDERR;
+//                       summary `\nSELFTEST: all fixture cases PASS` | `SOME FIXTURES FAILED` on STDOUT.
+//   • "cases-period"  — same per-case lines; summary `SELFTEST: all fixture cases PASS.` on STDOUT |
+//                       `SELFTEST: one or more fixture cases FAILED.` on STDERR (no leading newline).
+//
+// `detail` is deliberately NOT defaulted: the copies disagreed here by omission, and `${detail}` renders
+// an omitted detail as the literal `undefined` under "cases" (matching the copies) while the falsy test
+// under "counters" renders it as no suffix at all (also matching). A `detail = ""` default would have
+// changed the "cases" output of any call site that omitted it.
+//
+// `collectFailures` / `dumpFailuresJson` are the shape the five accumulator copies had (execution-policy /
+// finding-backpropagate / run-identity / stage-receipt / workflow-journal): the same lines plus
+// `JSON.stringify({ ok: false, failures })` on STDOUT when the verdict is fail.
+export interface SelftestFailure {
+  name: string;
+  detail?: string;
+}
+
+export type SelftestFlavor = "counters" | "cases" | "cases-period";
+
+export interface SelftestOptions {
+  flavor: SelftestFlavor;
+  /** "counters" only: the label in `<label> --<verb>: N passed, M failed` (the script's own name). */
+  label?: string;
+  /** "counters" only: the summary verb. The family has TWO observed spellings — `--selftest` (24 copies)
+   *  and `--selfcheck` (pane-state-classify / transcript-delivery-check); the flag each script accepts is
+   *  unchanged, only the published summary word is declared here. */
+  verb?: "selftest" | "selfcheck";
+  /** "cases"/"cases-period": keep every failure's {name, detail} in `failures`. */
+  collectFailures?: boolean;
+  /** "cases"/"cases-period": print `JSON.stringify({ ok: false, failures })` when the verdict is fail. */
+  dumpFailuresJson?: boolean;
+}
+
+export interface Selftest {
+  /** Assert one fixture case. `detail` is rendered verbatim (see the note above). */
+  check(name: string, condition: boolean, detail?: string): void;
+  readonly pass: number;
+  readonly fail: number;
+  readonly allPassed: boolean;
+  readonly failures: ReadonlyArray<SelftestFailure>;
+  /** Print the flavor's summary line(s) and return the verdict (true = every fixture case passed). */
+  report(): boolean;
+}
+
+export function createSelftest(opts: SelftestOptions): Selftest {
+  const { flavor, label, verb = "selftest", collectFailures = false, dumpFailuresJson = false } = opts;
+  let pass = 0;
+  let fail = 0;
+  let allPassed = true;
+  const failures: SelftestFailure[] = [];
+
+  const check = (name: string, condition: boolean, detail?: string): void => {
+    if (condition) {
+      pass++;
+      if (flavor !== "counters") console.log(`SELFTEST PASS: ${name} — ${detail}`);
+      return;
+    }
+    fail++;
+    allPassed = false;
+    if (flavor === "counters") {
+      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
+      return;
+    }
+    console.error(`SELFTEST FAIL: ${name} — ${detail}`);
+    if (collectFailures) failures.push({ name, detail });
+  };
+
+  const report = (): boolean => {
+    if (flavor === "counters") {
+      console.log(`\n${label} --${verb}: ${pass} passed, ${fail} failed`);
+      return fail === 0;
+    }
+    if (flavor === "cases-period") {
+      if (allPassed) {
+        console.log("SELFTEST: all fixture cases PASS.");
+        return true;
+      }
+      console.error("SELFTEST: one or more fixture cases FAILED.");
+      return false;
+    }
+    console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
+    if (dumpFailuresJson && !allPassed) console.log(JSON.stringify({ ok: false, failures }));
+    return allPassed;
+  };
+
+  return {
+    check,
+    get pass() { return pass; },
+    get fail() { return fail; },
+    get allPassed() { return allPassed; },
+    get failures() { return failures; },
+    report,
+  };
+}

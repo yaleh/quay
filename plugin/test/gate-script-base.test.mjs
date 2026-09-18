@@ -20,6 +20,7 @@ import {
   emitVerdict,
   verdictExitCode,
   VERDICT_EXIT_CODE,
+  createSelftest,
 } from "../scripts/gate-script-base.ts";
 
 function captureStream(stream, fn) {
@@ -30,6 +31,22 @@ function captureStream(stream, fn) {
     return { value: fn(), out: () => chunks.join("") };
   } finally {
     process[stream].write = orig;
+  }
+}
+
+/** Capture BOTH streams around fn — the selftest harness splits PASS (stdout) from FAIL (stderr). */
+function captureBoth(fn) {
+  const so = process.stdout.write;
+  const se = process.stderr.write;
+  const out = [];
+  const err = [];
+  process.stdout.write = (c) => { out.push(c); return true; };
+  process.stderr.write = (c) => { err.push(c); return true; };
+  try {
+    return { value: fn(), out: () => out.join(""), err: () => err.join("") };
+  } finally {
+    process.stdout.write = so;
+    process.stderr.write = se;
   }
 }
 
@@ -112,4 +129,127 @@ test("emitVerdict: detail wins over no conflicting status/ok/message keys (base 
 test("emitVerdict: stream=stderr routes the verdict line to stderr", () => {
   const { out } = captureStream("stderr", () => emitFail("to stderr", undefined, { stream: "stderr" }));
   assert.equal(out().trim(), "FAIL: to stderr");
+});
+
+// ── createSelftest ──────────────────────────────────────────────────────────────────────────────────
+// The harness that replaced the 24 hand-written per-gate copies
+// (semantic-dedup-scan finding `check-harness-three-incompatible-shapes`). Every assertion below is a
+// VERBATIM output contract, because those outputs are what the copies produced and at least one is
+// asserted by another test in the suite — a "cleaner" re-wording here would silently change a gate's
+// published output. `flavor` names the observed spellings; it is a census, not a preference knob.
+
+test("createSelftest flavor=counters: pass is silent, fail prints to STDERR, summary to STDOUT", () => {
+  const st = createSelftest({ flavor: "counters", label: "demo-check" });
+  const good = captureBoth(() => st.check("a-ok", true, "detail-that-passes-is-not-printed"));
+  assert.equal(good.out(), "", "counters: a passing case prints nothing");
+  assert.equal(good.err(), "");
+  const bad = captureBoth(() => st.check("b-bad", false, "why"));
+  assert.equal(bad.out(), "", "counters: FAIL goes to stderr, not stdout");
+  assert.equal(bad.err(), "FAIL: b-bad — why\n");
+  assert.deepEqual([st.pass, st.fail], [1, 1]);
+  const rep = captureBoth(() => st.report());
+  assert.equal(rep.value, false, "verdict is fail===0");
+  assert.equal(rep.out(), "\ndemo-check --selftest: 1 passed, 1 failed\n");
+  assert.equal(rep.err(), "", "the summary is a stdout line even when the verdict is fail");
+});
+
+test("createSelftest flavor=counters: an OMITTED detail renders as a bare FAIL line (no ' — ' suffix)", () => {
+  const st = createSelftest({ flavor: "counters", label: "demo-check" });
+  const { err } = captureBoth(() => st.check("no-detail", false));
+  assert.equal(err(), "FAIL: no-detail\n");
+});
+
+test("createSelftest flavor=cases: PASS on stdout, FAIL on stderr, '\\nSELFTEST: …' summary on stdout", () => {
+  const st = createSelftest({ flavor: "cases" });
+  const good = captureBoth(() => st.check("g", true, "because"));
+  assert.equal(good.out(), "SELFTEST PASS: g — because\n");
+  assert.equal(good.err(), "");
+  const bad = captureBoth(() => st.check("f", false, "nope"));
+  assert.equal(bad.out(), "", "cases: a failing case does not also print a PASS line");
+  assert.equal(bad.err(), "SELFTEST FAIL: f — nope\n");
+  assert.equal(st.allPassed, false);
+  const rep = captureBoth(() => st.report());
+  assert.equal(rep.value, false);
+  assert.equal(rep.out(), "\nSELFTEST: SOME FIXTURES FAILED\n");
+});
+
+test("createSelftest flavor=cases: the all-pass summary spelling is 'all fixture cases PASS'", () => {
+  const st = createSelftest({ flavor: "cases" });
+  st.check("g", true, "");
+  const rep = captureBoth(() => st.report());
+  assert.equal(rep.value, true);
+  assert.equal(rep.out(), "\nSELFTEST: all fixture cases PASS\n");
+});
+
+test("createSelftest flavor=cases-period: summary carries the period AND the fail sentence goes to STDERR", () => {
+  // external-dogfooding-check.ts / drivable-workspace-check.ts spell it this way, and
+  // plugin/test/external-dogfooding-check.test.mjs matches /SELFTEST: all fixture cases PASS\./ —
+  // so the period is load-bearing, not cosmetic.
+  const pass = createSelftest({ flavor: "cases-period" });
+  pass.check("g", true, "");
+  const p = captureBoth(() => pass.report());
+  assert.equal(p.value, true);
+  assert.equal(p.out(), "SELFTEST: all fixture cases PASS.\n");
+
+  const fail = createSelftest({ flavor: "cases-period" });
+  fail.check("f", false, "x");
+  const f = captureBoth(() => fail.report());
+  assert.equal(f.value, false);
+  assert.equal(f.out(), "", "cases-period: the fail sentence is NOT on stdout");
+  assert.equal(f.err(), "SELFTEST: one or more fixture cases FAILED.\n");
+});
+
+test("createSelftest collectFailures/dumpFailuresJson: {name,detail} accumulated and dumped only on fail", () => {
+  const st = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  st.check("ok", true, "");
+  st.check("bad-1", false, "first");
+  st.check("bad-2", false, "second");
+  assert.deepEqual(st.failures, [{ name: "bad-1", detail: "first" }, { name: "bad-2", detail: "second" }]);
+  const rep = captureBoth(() => st.report());
+  assert.equal(rep.value, false);
+  assert.equal(
+    rep.out(),
+    "\nSELFTEST: SOME FIXTURES FAILED\n" + JSON.stringify({ ok: false, failures: [{ name: "bad-1", detail: "first" }, { name: "bad-2", detail: "second" }] }) + "\n",
+  );
+
+  const clean = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  clean.check("ok", true, "");
+  const c = captureBoth(() => clean.report());
+  assert.equal(c.value, true);
+  assert.equal(c.out(), "\nSELFTEST: all fixture cases PASS\n", "no JSON line when everything passed");
+  assert.deepEqual(clean.failures, []);
+});
+
+// CONTROL — the one input where the retired copies DISAGREED. Two of the three shapes rendered an
+// omitted `detail` differently: "cases" printed the literal `undefined` (the interpolated value of a
+// missing argument), "counters" printed no suffix at all. A harness that "tidied" this into one
+// spelling would change the published output of whichever shape it did not come from, so the two are
+// asserted to be provably NON-interchangeable on this input and identical everywhere else.
+test("CONTROL: an omitted detail is NOT a shared spelling — 'cases' says undefined, 'counters' says nothing", () => {
+  const cases = createSelftest({ flavor: "cases" });
+  const c = captureBoth(() => cases.check("omitted", false));
+  const counters = createSelftest({ flavor: "counters", label: "demo" });
+  const k = captureBoth(() => counters.check("omitted", false));
+  assert.equal(c.err(), "SELFTEST FAIL: omitted — undefined\n");
+  assert.equal(k.err(), "FAIL: omitted\n");
+  assert.notEqual(c.err(), k.err(), "the two shapes must stay distinguishable on an omitted detail");
+  // …and on a PRESENT detail the same input produces each shape's own (also different) spelling —
+  // the divergence is in the prefix, not in the detail handling alone.
+  const c2 = createSelftest({ flavor: "cases" });
+  const c2o = captureBoth(() => c2.check("present", false, "d"));
+  const k2 = createSelftest({ flavor: "counters", label: "demo" });
+  const k2o = captureBoth(() => k2.check("present", false, "d"));
+  assert.equal(c2o.err(), "SELFTEST FAIL: present — d\n");
+  assert.equal(k2o.err(), "FAIL: present — d\n");
+});
+
+test("createSelftest: the verdict is a function of the INPUT, not the harness (RED control)", () => {
+  // A harness whose verdict is constant would be structurally incapable of taking a false value
+  // (hard rule 4). Both directions are asserted on the SAME harness instance shape.
+  const failing = createSelftest({ flavor: "cases" });
+  failing.check("x", false, "");
+  assert.equal(captureBoth(() => failing.report()).value, false);
+  const passing = createSelftest({ flavor: "cases" });
+  passing.check("x", true, "");
+  assert.equal(captureBoth(() => passing.report()).value, true);
 });

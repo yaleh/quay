@@ -26,6 +26,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -428,21 +429,8 @@ export async function* parseEventStream(jsonlPath) {
  * @returns {boolean} — true if all checks pass
  */
 export function selftest() {
-  let allPassed = true;
-
-  /**
-   * @param {string} name
-   * @param {boolean} condition
-   * @param {string} detail
-   */
-  function check(name, condition, detail) {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   // ── Minimal valid event ──
   /** @type {StageEvent} */
@@ -620,12 +608,10 @@ export function selftest() {
 
   const passedCount = (() => {
     // Count passes from the output we just logged
-    // We can't easily introspect, so we just return allPassed
-    return allPassed;
+    // We can't easily introspect, so we just return the harness verdict
+    return st.allPassed;
   })();
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 // ── Repo-root detection ──────────────────────────────────────────────────────────────────────────────
