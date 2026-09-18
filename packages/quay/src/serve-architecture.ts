@@ -1,7 +1,8 @@
 // serve-architecture.ts — /architecture route handler, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readArchitecture, type ArchitectureResult } from "./observation.ts";
+import { readArchitecture, ARCH_RECENT_WINDOW_DAYS, type ArchitectureResult } from "./observation.ts";
+import { architectureLabelsFor, fillLabel } from "./serve-i18n.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 
@@ -9,27 +10,44 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMob
 
 interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
 
-/** AC-303: `lang` is this request's resolved language (AC-288's mechanism, threaded in by the
- *  dispatcher via `handleArchitecture`'s `cfg.lang`). It reaches FIVE things on this page and nothing
- *  else: the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile chrome
- *  (`renderMobileChrome`) — whose `architecture` entry already exists in NAV_LABELS (ROW 1, 「架构」),
- *  so the nav's current item needs no new word — this page's own `<title>` (through `pageTitle`), its
- *  `<h1>`'s page-name token (through `pageNameFor`), and the mobile header's page label (the THIRD,
- *  lowercase token). The last three are the whole point: wiring only the SHARED nav bar would leave
- *  the `<title>` at its English token, which is the difference between "the nav switched" and "THIS
- *  page switched" — and AC-303's criterion fails the page on exactly that (CAUSE=title-unchanged).
+/** AC-303 wired this page's CHROME; gap-webui-architecture-body-copy-en-zh wired its BODY COPY.
+ *  `lang` is this request's resolved language (AC-288's mechanism, threaded in by the dispatcher via
+ *  `handleArchitecture`'s `cfg.lang`). It now reaches TWO groups of things and nothing else:
  *
- *  ⚠️ The `<title>` token is the FULL string `Architecture — 系统组件图`, em dash and (already-Chinese)
+ *  • CHROME (AC-303): the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile
+ *    chrome (`renderMobileChrome`) — whose `architecture` entry already exists in NAV_LABELS
+ *    (ROW 1, 「架构」), so the nav's current item needs no new word — this page's own `<title>`
+ *    (through `pageTitle`), its `<h1>`'s page-name token (through `pageNameFor`), and the mobile
+ *    header's page label (the THIRD, lowercase token). Those three are why AC-303 exists: wiring only
+ *    the SHARED nav bar would leave the `<title>` at its English token, which is the difference
+ *    between "the nav switched" and "THIS page switched" (CAUSE=title-unchanged).
+ *
+ *  • BODY COPY (this task): every word this page authors below `<main>` — the `<h1>`'s subtitle, the
+ *    three source-note fragments, the four legend words and the table's heading + four column
+ *    headers — taken ONCE as a roster (`architectureLabelsFor`, the ROW 5/10/11 idiom) rather than
+ *    re-read per call site. ⛔ The component NAMES and PATHS stay verbatim: they are DATA.
+ *
+ *  ⚠️ The `<title>` token is the FULL string `Architecture — system component map`, em dash and
  *  subtitle included, because `pageNameFor` is an EXACT-token lookup: registering the bare
  *  `Architecture` would MISS this call site. That bare token is a SEPARATE key, consumed by the
  *  `<h1>`; the lowercase `architecture` is a THIRD, consumed only by the mobile header. Three
- *  independent lookups — see serve-i18n.ts's ROW 3 block for why they are not collapsed.
+ *  independent lookups — see serve-i18n.ts's ROW 3 block for why they are not collapsed. The token
+ *  was `Architecture — 系统组件图` before this task; re-keying it to English is the only way to move
+ *  an en baseline that ROW 3's identity-en column pins by construction (ROW 3's RE-KEYED note).
  *
  *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: any direct `renderArchitecturePage()` caller that
  *  predates it keeps rendering byte-for-byte what it rendered before, and `pageNameFor`'s en column
  *  is the identity for every token — so the en baseline the goal criterion reads off the live page
- *  cannot move as this page is wired. */
+ *  cannot move as this page is wired. ⚠️ That property holds for CHROME only now: the body copy is
+ *  the en column of ARCHITECTURE_LABELS, and under `zh` the roster's zh column is what the page
+ *  rendered BEFORE this task, byte for byte (so `lang=zh` output does not move — this task's AC3). */
 function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
+  // The whole body-copy roster, taken once (serve-i18n.ts ROW 12).
+  const L = architectureLabelsFor(lang);
+  // The window the reader below actually used: `handleArchitecture` calls `readArchitecture(root)`
+  // with no `windowDays`, i.e. the reader's own default. Both count-bearing rows interpolate THIS
+  // value rather than a literal `7`, so the copy cannot drift from the query (ROW 12 ②).
+  const windowDays = ARCH_RECENT_WINDOW_DAYS;
   // Fixed diagram layout; node highlights derive from git facts (recent commits / open worktrees).
   const names = arch.components.map((c) => c.name);
   const nodeDefs: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
@@ -72,9 +90,9 @@ function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentit
     ${nodes.map((n) => html`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" style="fill:${n.fill};stroke:${n.stroke}" stroke-width="2" rx="4"></rect>`).join("")}
     ${nodes.map((n) => html`<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="11" text-anchor="middle" dominant-baseline="middle" style="fill:var(--color-text)">${escapeHtml(n.label)}</text>`).join("")}
   </svg>`;
-  const componentTable = arch.components.length > 0 ? html`<h2>组件最近变更（git 可证，近 ${7} 天）</h2>
+  const componentTable = arch.components.length > 0 ? html`<h2>${fillLabel(L.tableHeading, { days: windowDays })}</h2>
     <table>
-      <tr><th>组件</th><th>路径</th><th>近 7 天提交</th><th>末次提交</th></tr>
+      <tr><th>${L.colComponent}</th><th>${L.colPath}</th><th>${fillLabel(L.colRecentCommits, { days: windowDays })}</th><th>${L.colLastCommit}</th></tr>
       ${arch.components.map((c) => html`<tr>
         <td>${escapeHtml(c.name)}</td>
         <td><code>${escapeHtml(c.path)}</code></td>
@@ -82,17 +100,20 @@ function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentit
         <td>${c.lastCommitAt != null ? escapeHtml(new Date(c.lastCommitAt * 1000).toISOString().slice(0, 16)) : "—"}</td>
       </tr>`).join("\n")}
     </table>` : "";
+  // ⚠️ The four swatches are ordered dev / recent / stale / plain — the SAME order as the
+  // `highlightFor` arms above and the `fillStroke` map, and the words come from ROW 12's rows keyed
+  // by that same role, so a re-ordering cannot silently pair a swatch with another state's word.
   const legend = html`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.75rem;color:var(--color-neutral-700)">
-    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent)"></span> 正在开发</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent-700)"></span> 最近变更</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-neutral-200);border:2px solid var(--color-neutral-700)"></span> 已标记问题</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> 稳定</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent)"></span> ${L.stateDev}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent-700)"></span> ${L.stateRecent}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-neutral-200);border:2px solid var(--color-neutral-700)"></span> ${L.stateStale}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> ${L.stateStable}</span>
   </div>`;
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — 系统组件图", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — system component map", identity, lang)}</title></head>
     <body>${renderMobileChrome("architecture", pageNameFor("architecture", lang), lang)}${renderSiteNav("architecture", lang)}<main id="main">
-      <h1>${pageNameFor("Architecture", lang)} — 系统组件图</h1>
-      <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
+      <h1>${pageNameFor("Architecture", lang)} — ${L.titleSuffix}</h1>
+      <p class="meta">${L.sourceLabel}<code>packages/*</code>${L.sourceGitLog}<code>git worktree list</code>${L.sourceWorktrees}</p>
       ${obsNote(arch.status, arch.reason)}
       ${arch.status === "ok" ? legend : ""}
       ${arch.status === "ok" ? svg : ""}
