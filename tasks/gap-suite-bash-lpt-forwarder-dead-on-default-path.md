@@ -95,10 +95,10 @@ goal_ac: AC-281
 - [x] **AC5（钉住位置的四个测试全绿）**：
       `bash scripts/test.sh plugin/test/suite-lpt-order.test.mjs plugin/test/test-phases-order.test.mjs plugin/test/suite-bucket-load-sensitive-isolation.test.mjs plugin/test/runner-grouping-serial-anti-stomp.test.mjs`
       ⇒ `0 fail`（贴出每个文件的 `ℹ fail 0` 行）。
-- [ ] **AC6（Phase-2 闸，⛔ 本任务不得勾）**：把 Phase 2 的前置读数**记进任务体**（42 份日志 0 命中、
-      最新 legacy 标记 2026-08-31、`QUAY_TEST_LPT_ORDER=0` 退役后仍有效），并明确
+- [ ] **AC6（Phase-2 闸，⛔ 本任务不得勾）** —— 本条属外层验证（待外部）
+      把 Phase 2 的前置读数**记进任务体**（窗口重测 57 份日志 0 命中、最新 legacy 标记 2026-08-31、
+      `QUAY_TEST_LPT_ORDER=0` 退役后仍有效；全部在 ## Evidence 的「Phase 2 的前置读数」节），并明确
       **本任务不执行 Phase 2**。⛔ 若本条被勾成"已完成"，说明越界做了未经裁定的删除。
-      —— 本条属**外层验证**（待外部）
 
 ## DoD
 
