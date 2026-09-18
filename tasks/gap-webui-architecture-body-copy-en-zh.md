@@ -69,3 +69,4 @@ extra:
 - packages/quay/src/serve-i18n.ts
 - packages/quay/test/serve-architecture-body-i18n.test.mjs (new)
 - packages/quay/test/serve-ac95-views.test.mjs
+- packages/quay/test/serve-architecture-zh-chrome.test.mjs (added mid-flight: it pins the pre-re-key `<title>`/`<h1>` tokens and went red on the re-key — Plan 步骤 5 的「先补 Touches 再改」)
