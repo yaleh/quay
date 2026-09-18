@@ -2,7 +2,7 @@
 id: gap-suite-main-phase-scheduling-slack-after-floor-drop
 title: 套件 main 相位余量 16s 无归因：地板已降到 20.4s 而相位仍 36.4s（main/floor 1.20→1.78，理想
   makespan 仅 11.7s）——先量启动时刻再归因
-status: ready
+status: done
 labels:
   - gap
   - test-wall-clock
