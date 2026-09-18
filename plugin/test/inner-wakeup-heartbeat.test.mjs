@@ -108,6 +108,39 @@ function makeDispatchableWorkspace(tag) {
 
 // ── pure: buildHeartbeat ──────────────────────────────────────────────────────────────────────────────
 
+
+
+// ── CLI: write + fail-closed ─────────────────────────────────────────────────────────────────────────
+
+function runWriter(root, args) {
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", WRITER, "--root", root, ...args], { encoding: "utf8" });
+}
+
+function runChecker(root, extraArgs = []) {
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs], { encoding: "utf8" });
+}
+
+const FULL_ARGS = [
+  "--blocked", "[]",
+  "--run-ids", '["run-1"]',
+  "--effective-cap", "3",
+  "--agent-dispatches", "1",
+  "--budget-hit", "false",
+  // AC53 AC1 (gap-ac53-end-invariant-gate): the session's in-flight set is REQUIRED. The bare temp
+  // dirs below have no tasks/ store ⇒ the writer's DIRECT slot-refill re-run reads an empty pool ⇒
+  // should_refill=false ⇒ the end-invariant gate passes (no dispatchable work) and the write proceeds.
+  "--in-flight", "",
+  "--delay-seconds", "1500",
+  // AC53 AC1: the five dispatch-state keys (should_refill=false ⇒ the round-trip checker verdict is
+  // ALIVE — no AC2 end-invariant violation).
+  "--slots-free", "3",
+  "--dispatchable-disjoint", "2",
+  "--pool", "12",
+  "--should-refill", "false",
+  "--no-refill-reason", "no dispatchable candidate passes step-4 checks",
+  "--reason", "tick heartbeat",
+];
+
 test("buildHeartbeat — builds the full structured shape with ts = nowSec", () => {
   const hb = buildHeartbeat({
     nowSec: 1000,
@@ -180,8 +213,6 @@ test("AC53 AC1 — buildHeartbeat carries the five dispatch-state keys when prov
   assert.equal(hb.no_refill_reason, null);
 });
 
-// ── pure: parseJsonArg ───────────────────────────────────────────────────────────────────────────────
-
 test("parseJsonArg — parses JSON arrays/numbers/booleans", () => {
   assert.deepEqual(parseJsonArg("[]", "--blocked"), []);
   assert.deepEqual(parseJsonArg('["a","b"]', "--run-ids"), ["a", "b"]);
@@ -193,37 +224,6 @@ test("parseJsonArg — rejects malformed JSON", () => {
   assert.throws(() => parseJsonArg("not-json", "--blocked"), /must be valid JSON/);
   assert.throws(() => parseJsonArg("", "--blocked"), /requires a value/);
 });
-
-// ── CLI: write + fail-closed ─────────────────────────────────────────────────────────────────────────
-
-function runWriter(root, args) {
-  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", WRITER, "--root", root, ...args], { encoding: "utf8" });
-}
-
-function runChecker(root, extraArgs = []) {
-  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs], { encoding: "utf8" });
-}
-
-const FULL_ARGS = [
-  "--blocked", "[]",
-  "--run-ids", '["run-1"]',
-  "--effective-cap", "3",
-  "--agent-dispatches", "1",
-  "--budget-hit", "false",
-  // AC53 AC1 (gap-ac53-end-invariant-gate): the session's in-flight set is REQUIRED. The bare temp
-  // dirs below have no tasks/ store ⇒ the writer's DIRECT slot-refill re-run reads an empty pool ⇒
-  // should_refill=false ⇒ the end-invariant gate passes (no dispatchable work) and the write proceeds.
-  "--in-flight", "",
-  "--delay-seconds", "1500",
-  // AC53 AC1: the five dispatch-state keys (should_refill=false ⇒ the round-trip checker verdict is
-  // ALIVE — no AC2 end-invariant violation).
-  "--slots-free", "3",
-  "--dispatchable-disjoint", "2",
-  "--pool", "12",
-  "--should-refill", "false",
-  "--no-refill-reason", "no dispatchable candidate passes step-4 checks",
-  "--reason", "tick heartbeat",
-];
 
 test("AC2 CLI — writer writes a full-shape heartbeat (>= 7 keys + AC53 dispatch-state) and exits 0", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-w-"));
@@ -328,274 +328,6 @@ test("AC53 AC1 fail-closed — writer REFUSES a heartbeat missing the dispatch-s
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
-
-test("AC53 AC2 (gap-ac53-end-invariant-gate) — the 7th-same-shape replay: WRITER REFUSES (exit 1) an END heartbeat while dispatchable work waits, writes NOTHING", () => {
-  // The 7th-same-shape (task Proposal): should_refill=true ∧ slots_free=5 ∧ dispatchable>0 ∧
-  // no_refill_reason=null — the tick "记录 reason 然后睡" shape. Recording a reason never stopped the
-  // sleep; the structural gate must refuse the WRITE itself (exit non-zero), so the caller has NO
-  // LEGAL EXIT to reschedule sleep.
-  const root = makeDispatchableWorkspace("iwuh-viol-");
-  try {
-    // Direct re-run MUST see a dispatchable candidate (should_refill=true) — the precondition that
-    // makes this a true negative-control replay.
-    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
-    assert.equal(direct.ok, true, "direct slot-refill must succeed");
-    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
-    const violatingArgs = [...FULL_ARGS];
-    const idxShould = FULL_ARGS.indexOf("--should-refill");
-    violatingArgs[idxShould + 1] = "true";
-    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
-    violatingArgs[idxReason + 1] = "null";
-    // --in-flight '' (the fixture's empty in-flight set) is already in FULL_ARGS.
-    const w = runWriter(root, violatingArgs);
-    assert.equal(w.status, 1, `writer must REFUSE the violating end heartbeat:\n${w.stdout}\n${w.stderr}`);
-    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
-    assert.match(w.stderr, /inner-round-ended-with-dispatchable-work/, "the refusal reason must be end-invariant-violated");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53 AC2 (gap-ac53-end-invariant-gate) — NEGATIVE CONTROL: a prose --no-refill-reason self-report CANNOT shield a writer refusal when the machine says no mechanism reason", () => {
-  // Outer 2026-08-13 ruling (AC53 判据① bypass): the heartbeat's recorded no_refill_reason is
-  // SELF-REPORT — the judged party (inner) writes it, so a prose reason could always be written to make
-  // the OLD gate's noReason=false. The writer judges the DIRECT machine slot-refill (runDirectSlotRefill
-  // with --in-flight), NEVER the args' --no-refill-reason prose: a dispatchable workspace + empty
-  // in-flight ⇒ machine says should_refill=true + no_refill_reason=null ⇒ the writer REFUSES regardless
-  // of the prose passed — the direct measurement's five keys overwrite the args and nothing is written.
-  const root = makeDispatchableWorkspace("iwuh-negprose-");
-  try {
-    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
-    assert.equal(direct.ok, true, "direct slot-refill must succeed");
-    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
-    assert.equal(direct.refill.no_refill_reason, null, "the machine must say no mechanism reason");
-    const proseArgs = [...FULL_ARGS];
-    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
-    proseArgs[idxReason + 1] = "ac51 subagent in flight, next dispatch after they land"; // prose SELF-REPORT
-    const idxShould = FULL_ARGS.indexOf("--should-refill");
-    proseArgs[idxShould + 1] = "true";
-    const w = runWriter(root, proseArgs);
-    assert.equal(w.status, 1, `writer must REFUSE despite the prose reason:\n${w.stdout}\n${w.stderr}`);
-    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53 EXIT:0 捕获（manager 2026-08-13 裁定）— 构造一次拒绝 ⇒ 调用方（spawnSync）看到写入方的非零退出码，未被吞掉", () => {
-  // The writer's non-zero exit IS the structural enforcement (gap-ac53-end-invariant-gate): a refusal
-  // must be OBSERVABLE by the caller, or the tick could swallow it (`|| true` / pipe / set +e) and
-  // sleep anyway. This negative control constructs a rejection (dispatchable work waiting → the
-  // end-invariant is violated) and asserts the CALLER sees the child's ACTUAL exit — non-zero, and
-  // exactly 1 (the writer's refusal code), with the refusal reason on stderr. The paired control
-  // proves the harness distinguishes: the same spawn sees 0 for a legitimate write.
-  const root = makeDispatchableWorkspace("iwuh-exit-");
-  try {
-    // Precondition: the direct slot-refill must see dispatchable work (should_refill=true) so this
-    // is a true refusal, not a trivial write.
-    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
-    assert.equal(direct.ok, true, "direct slot-refill must succeed");
-    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
-    // Construct the rejection: an END heartbeat while dispatchable work waits, with an empty
-    // no_refill_reason (the exact 有货不派 shape the AC2 end-invariant flags).
-    const violatingArgs = [...FULL_ARGS];
-    const idxShould = FULL_ARGS.indexOf("--should-refill");
-    violatingArgs[idxShould + 1] = "true";
-    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
-    violatingArgs[idxReason + 1] = "null";
-    const w = runWriter(root, violatingArgs);
-    // THE ASSERTION THE RULING ASKS FOR: the caller sees a NON-ZERO exit — not 0, not swallowed.
-    assert.notEqual(w.status, 0, `the caller must observe a non-zero exit on a writer refusal:\n${w.stdout}\n${w.stderr}`);
-    assert.equal(w.status, 1, `the refusal exit must be exactly 1 (the writer's refusal code):\n${w.stdout}\n${w.stderr}`);
-    assert.match(w.stderr, /结束不变式违例/, "the caller must also see the refusal reason on stderr");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
-    // CONTROL (proves the harness is not forcing non-zero): the SAME spawn sees 0 for a legitimate
-    // write (bare temp dir → no dispatchable work → should_refill=false → the write proceeds).
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-exitctl-"));
-    try {
-      const ok = runWriter(tmp, FULL_ARGS);
-      assert.equal(ok.status, 0, `the same harness must see 0 for a legitimate write:\n${ok.stdout}\n${ok.stderr}`);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53 AC2 (gap-ac53-end-invariant-gate) — a legitimately-ending tick (full in-flight, no free slots) WRITES exit 0", () => {
-  // Negative control: should_refill=false (no free slots — all 5 slots held by in-flight) is a
-  // legitimate end condition; the writer must WRITE (exit 0) with the DIRECT measurement's keys.
-  const root = makeWorkspace("iwuh-full-");
-  try {
-    const inflight = [];
-    for (let i = 1; i <= 5; i++) {
-      const id = `gap-fixture-inflight-${i}`;
-      writeTask(root, id, { status: "ready", body: dispatchableBody([`- tasks/${id}.md`, `- code/f${i}.ts (new)`]) });
-      inflight.push(id);
-    }
-    const args = [...FULL_ARGS];
-    const idxInf = args.indexOf("--in-flight");
-    args[idxInf + 1] = inflight.join(",");
-    const idxSlots = args.indexOf("--slots-free");
-    args[idxSlots + 1] = "0";
-    const idxShould = args.indexOf("--should-refill");
-    args[idxShould + 1] = "false";
-    const w = runWriter(root, args);
-    assert.equal(w.status, 0, `writer must write a legitimately-ending heartbeat:\n${w.stdout}\n${w.stderr}`);
-    const hb = JSON.parse(fs.readFileSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
-    assert.equal(hb.should_refill, false, "written dispatch-state must be the DIRECT measurement (should_refill=false)");
-    assert.equal(hb.slots_free, 0, "written slots_free must be the DIRECT measurement (0 — all slots held)");
-    assert.match(hb.no_refill_reason, /no free slots/, "the written reason must be the mechanism's no-free-slots reason");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53 AC1 (gap-ac53-end-invariant-gate) — writer REFUSES (exit 1) when --in-flight is omitted (cannot verify the end-invariant)", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-noinf-"));
-  try {
-    // Drop "--in-flight" and its value (the pair right after --budget-hit / before --delay-seconds).
-    const idx = FULL_ARGS.indexOf("--in-flight");
-    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
-    const r = runWriter(tmp, args);
-    assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stderr, /--in-flight 必填/, "the refusal must name --in-flight 必填");
-    assert.match(r.stderr, /end-invariant-gate-requires-in-flight/, "the refusal reason must be end-invariant-gate-requires-in-flight");
-    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("AC53 AC1 (gap-ac53-end-invariant-gate) — runDirectSlotRefill returns the DIRECT measurement from a real workspace", () => {
-  const root = makeDispatchableWorkspace("iwuh-direct-");
-  try {
-    const r = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
-    assert.equal(r.ok, true);
-    assert.equal(r.refill.should_refill, true, "a free-slot + dispatchable fixture must say should_refill=true");
-    assert.ok(r.refill.slots_free > 0, `slots_free must be > 0 (got ${r.refill.slots_free})`);
-    assert.ok(r.refill.dispatchable_disjoint >= 1, `dispatchable_disjoint must be >= 1 (got ${r.refill.dispatchable_disjoint})`);
-    assert.equal(r.refill.no_refill_reason, null, "should_refill=true carries no reason (the mechanism's null)");
-    // judgeEndInvariant on the DIRECT result must report the violation.
-    const inv = judgeEndInvariant(r.refill);
-    assert.equal(inv.violated, true, "the direct result must violate the end-invariant");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-// ── AC53-gate running-set wiring (tasks/gap-ac53-gate-not-wired-to-running-set) ───────────────────────
-// 判据1: the END-invariant gate now reads the NARROW --running set (Consumer B) — an awaiting-retry
-// task occupies the wide set (Consumer A, dispatchable_disjoint) but no subagent ⇒ does not occupy cap.
-// 判据4: a REFUSED round leaves a {written:false, refuse_reason} trace on the side-carrier — "被拒"
-// is no longer same-shaped as "没跑" on the jsonl (the 3-hour misdiagnosis carrier cause).
-
-test("AC53-gate 判据1 — passing --running makes the gate PASS when the real running subagents fill the cap (awaiting-retry no longer occupies slots)", () => {
-  const root = makeDispatchableWorkspace("iwuh-fix-");
-  try {
-    // The direct re-run at the writer's effective cap (3, from FULL_ARGS) must be dispatchable.
-    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 3 });
-    assert.equal(direct.ok, true, "direct slot-refill must succeed");
-    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable at cap 3:\n${JSON.stringify(direct.refill)}`);
-    // The violating end-shape: dispatchable work waits + no mechanism reason.
-    const violatingArgs = [...FULL_ARGS];
-    const idxShould = FULL_ARGS.indexOf("--should-refill");
-    violatingArgs[idxShould + 1] = "true";
-    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
-    violatingArgs[idxReason + 1] = "null";
-    // WITHOUT --running the gate REFUSES (the pre-fix state — Consumer B reads the wide set).
-    const w1 = runWriter(root, violatingArgs);
-    assert.equal(w1.status, 1, `without --running the gate must REFUSE:\n${w1.stdout}\n${w1.stderr}`);
-    assert.match(w1.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing written on refusal");
-    // WITH --running (3 real running subagents fill the effective cap 3 ⇒ slots_free=0 ⇒
-    // should_refill=false) the gate PASSES — the heartbeat is written (判据2: 传真集放行).
-    const passingArgs = [...violatingArgs, "--running", "r-1,r-2,r-3"];
-    const w2 = runWriter(root, passingArgs);
-    assert.equal(w2.status, 0, `with --running the gate must PASS:\n${w2.stdout}\n${w2.stderr}`);
-    const hb = JSON.parse(fs.readFileSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
-    assert.equal(hb.should_refill, false, "the written heartbeat carries the DIRECT measurement's should_refill=false");
-    assert.equal(hb.slots_free, 0, "the written heartbeat carries slots_free=0 (cap 3 − 3 running)");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53-gate 判据4 — a refused write leaves a {written:false, refuse_reason} trace on the side-carrier", () => {
-  const root = makeDispatchableWorkspace("iwuh-ac4-");
-  try {
-    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 3 });
-    assert.equal(direct.ok, true, "direct slot-refill must succeed");
-    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
-    const violatingArgs = [...FULL_ARGS];
-    const idxShould = FULL_ARGS.indexOf("--should-refill");
-    violatingArgs[idxShould + 1] = "true";
-    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
-    violatingArgs[idxReason + 1] = "null";
-    // Negative control (判据4 ⊢): BEFORE the refused write the side-carrier has ZERO rows.
-    const refusalPath = path.join(root, ".quay", REFUSAL_FILE);
-    assert.ok(!fs.existsSync(refusalPath), "pre-fix: zero written:false rows");
-    const w = runWriter(root, violatingArgs);
-    assert.equal(w.status, 1, `writer must REFUSE:\n${w.stdout}\n${w.stderr}`);
-    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
-    // Post-refusal: the side-carrier has exactly ONE {written:false, refuse_reason} row.
-    assert.ok(fs.existsSync(refusalPath), "the refusal must leave a trace on the side-carrier");
-    const rows = fs.readFileSync(refusalPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    assert.equal(rows.length, 1, "exactly one refusal row");
-    assert.equal(rows[0].written, false, "the refusal row must carry written:false");
-    assert.equal(rows[0].refuse_reason, "inner-round-ended-with-dispatchable-work", "the refusal reason must be recorded");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "the heartbeat jsonl still has NO write (refusal ≠ heartbeat)");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("AC53-gate 判据4 — the --in-flight-omitted refusal ALSO leaves a written:false trace (end-invariant-gate-requires-in-flight)", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-ac4b-"));
-  try {
-    const idx = FULL_ARGS.indexOf("--in-flight");
-    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
-    const r = runWriter(tmp, args);
-    assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
-    const refusalPath = path.join(tmp, ".quay", REFUSAL_FILE);
-    assert.ok(fs.existsSync(refusalPath), "the --in-flight-omitted refusal must also leave a trace");
-    const rows = fs.readFileSync(refusalPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    assert.equal(rows.length, 1, "exactly one refusal row");
-    assert.equal(rows[0].written, false, "the refusal row must carry written:false");
-    assert.equal(rows[0].refuse_reason, "end-invariant-gate-requires-in-flight", "the refusal reason must be recorded");
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("AC53 AC2 (gap-ac53-end-invariant-gate) — judgeEndInvariant rejects a heartbeat the writer OVERRIDES away (writer + checker stay consistent)", () => {
-  // The writer writes the DIRECT measurement's five keys, so a written heartbeat is checker-ALIVE.
-  // On a bare temp dir (no tasks) the DIRECT measurement is should_refill=false — the writer writes
-  // it, and the CHECKER must accept it (no false RED).
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-rt2-"));
-  try {
-    const w = runWriter(tmp, FULL_ARGS);
-    assert.equal(w.status, 0, `writer must write on a bare temp dir (no dispatchable work):\n${w.stdout}\n${w.stderr}`);
-    // Round-trip consistency (AC53 AC2): mirror the writer's empty in-flight set to the checker so the
-    // END invariant is judgeable (no in-flight ⇒ NOT-EVALUATED per gap-inner-heartbeat-check-not-evaluated-when-no-inflight AC1).
-    const c = runChecker(tmp, ["--in-flight", ""]);
-    assert.equal(c.status, 0, `checker must accept the writer's DIRECT-measured heartbeat:\n${c.stdout}\n${c.stderr}`);
-    const out = JSON.parse(c.stdout);
-    assert.equal(out.verdict, "ALIVE");
-    assert.equal(out.endInvariant.violated, false);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// ── A13 (gap-a13-heartbeat-refusal-write-invisible, 乙) — 拒写也更新主 .json 快照（带 written:false） ─
-// The refusal must be visible on the MAIN heartbeat product too, not only in the side-carrier: the
-// legacy .json snapshot is mirrored with {written:false, refuse_reason, fresh ts} (jsonl stays pure —
-// append-only for SUCCESSFUL writes). Legacy readers (e.g. the semantic-observer judge) keep seeing a
-// complete structured heartbeat and tolerate the new fields.
 
 test("A13 (乙) — a refused END-invariant write ALSO updates the legacy .json snapshot (written:false + refuse_reason), jsonl stays pure", () => {
   const root = makeDispatchableWorkspace("iwuh-a13w-");

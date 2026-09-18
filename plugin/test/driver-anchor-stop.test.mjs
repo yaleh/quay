@@ -1,3 +1,39 @@
+// @test-group engine
+
+// driver-anchor-stop.test.mjs — the STOPPING half of the driver-anchor contract, split out of
+
+// driver-anchor.test.mjs by FUNCTIONAL BOUNDARY (gap-ac281-develop-ci-test-job-wallclock-under-30s).
+
+//
+
+// WHY SPLIT: `node --test` parallelises only ACROSS files — inside one file every test() is serial, so a
+
+// file is the smallest schedulable unit and therefore the suite's floor. The parent file measured 22.3 s on
+
+// the real CI run (35290919973 `__PERFILE__`), still above the ~20 s band the AC-281 target needs.
+
+// Raising concurrency cannot help (LPT simulation: makespan == longest file at 64/128/256/512 alike).
+
+//
+
+// ⛔ SPLIT BY BOUNDARY, NOT BY HALVING A TEST: every test here is about what happens when an anchor is
+
+// asked to STOP — `stop --kind X` must not disturb the other kinds or kill X's in-flight children; a loop
+
+// that ignores the stop must not hang the anchor for ever; and a second dispatch must refuse to start a
+
+// second anchor. The kept file holds the convergence / criterion / error-boundary half. The two share NO
+
+// mutable state (each builds its own tmp fixture and its own anchor process), so parallel and serial runs
+
+// give byte-identical verdicts.
+
+//
+
+// Run:
+
+//   node --test plugin/test/driver-anchor-stop.test.mjs
+
 // driver-anchor.test.mjs — GOAL-017/AC-255（SPEC-unified-quay-server §7 阶段 C + §6.1 + §6.9 + §6.10）。
 //
 // 本文件覆盖的是**生产默认路径**（单进程 anchor 承载六个 kind 的常驻循环）。
@@ -213,123 +249,93 @@ function cleanup(root) {
 // ── AC1 / AC2 / AC4：收敛 + criterion 逐字 exit 0 + 六心跳仍被写 ──────────────────────────────────
 
 
-test("AC1/AC2/AC4 — 六个 kind 收进**一个** anchor：去重存活 pid = 1，且 AC-255 的 criterion 逐字 exit 0", async (t) => {
-  const root = makeFixture("conv");
+test("AC6 — `stop --kind X` 只停 X：其余 kind 的心跳不中断（§6.9 不变式 2），且 X 的在飞子进程不被杀（不变式 3）", async (t) => {
+  const root = makeFixture("partial");
   t.after(() => cleanup(root));
+  // ⚠️ worker **先**起：anchor 进程的 env 在它被 spawn 的那一刻固定，之后再 start 别的 kind 不会重新读
+  // env ⇒ 夹具的在飞子进程钩子（FAKE_CHILD_CMD）必须挂在**拉起 anchor 的那一次** start 上。
+  assert.equal(
+    kernel(["start", "--kind", "worker", "--root", root, "--confirm-timeout", "20"], root, { FAKE_CHILD_CMD: "sleep 120" }).status,
+    0,
+    "start worker (spawns the anchor, carrying the in-flight-child hook)",
+  );
   for (const kind of KNOWN_KINDS) {
-    const r = kernel(["start", "--kind", kind, "--root", root, "--confirm-timeout", "20"], root);
-    assert.equal(r.status, 0, `start --kind ${kind} exits 0 (stderr: ${r.stderr})`);
+    if (kind === "worker") continue;
+    assert.equal(kernel(["start", "--kind", kind, "--root", root, "--confirm-timeout", "20"], root).status, 0, `start ${kind}`);
   }
-  // AC1 直接量：**一个**承载进程（anchor），六个 pid 文件全指向它。
-  const pids = distinctLiveDriverPids(root);
-  assert.equal(pids.size, 1, `exactly ONE live process carries all six loops (got ${[...pids].join(",")})`);
+  const carrierOf = (k) => {
+    const c = DRIVER_KINDS[k].carriers.find((x) => x.endsWith("-round.jsonl")) ?? DRIVER_KINDS[k].carriers[0];
+    return path.join(root, ".quay", c);
+  };
+  const mtimeOf = (k) => fs.statSync(carrierOf(k)).mtimeMs;
+  const childPidFile = path.join(root, ".quay", "worker-child.pid");
+  await waitFor(() => fs.existsSync(childPidFile), 20_000, "the worker's in-flight child pid file");
+  const childPid = Number(fs.readFileSync(childPidFile, "utf8").trim());
+  assert.ok(Number.isInteger(childPid) && childPid > 0, "in-flight child pid recorded");
+  const others = ["outer", "goal", "quality", "meta", "promotion"];
+  const before = Object.fromEntries(others.map((k) => [k, mtimeOf(k)]));
+
+  assert.equal(kernel(["stop", "--kind", "worker", "--root", root], root).status, 0, "stop --kind worker");
+
+  // 不变式 3：杀的是调度者，⛔ 不是它在跑的工作。
+  assert.doesNotThrow(() => process.kill(childPid, 0), "the in-flight worker child SURVIVES `stop --kind worker`");
+  // 不变式 2：其余五个 kind 的循环没有被打断（它们的载体继续被写）。
+  await waitFor(() => others.every((k) => mtimeOf(k) > before[k]), 20_000, "the other five kinds' heartbeats to keep advancing");
+  // 而且它们仍由**同一个** anchor 承载（⛔ 不是「anchor 被杀了、别的 kind 也一起没了」）。
+  assert.equal(distinctLiveDriverPids(root).size, 1, "still exactly one carrying process after the partial stop");
+});
+
+test("§6.9 inv.3（有界半边）— 循环不响应停机 ⇒ anchor 在停机宽限后如实记一条并退出（⛔ 不无界挂死）", async (t) => {
+  const root = makeFixture("bounded-stop", ["outer"]);
+  t.after(() => cleanup(root));
+  assert.equal(
+    kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root, { FAKE_IGNORE_STOP: "1" }).status,
+    0,
+    "start outer (its loop will ignore the stop signal)",
+  );
   const anchorPid = anchorPidOf(root);
-  assert.equal([...pids][0], anchorPid, "the carrying pid is the anchor's own pid");
-  for (const kind of KNOWN_KINDS) {
-    const pf = path.join(root, ".quay", `${DRIVER_KINDS[kind].prefix}.pid`);
-    assert.ok(fs.existsSync(pf), `${kind}: per-kind pid carrier exists`);
-    assert.equal(Number(fs.readFileSync(pf, "utf8").trim()), anchorPid, `${kind}: pid carrier names the anchor`);
-  }
-  // ⛔ 阶段 C 退役了 supervisor：⛔ 不得残留 supervisor pid 文件（残留会让 aliveness 报 stale_supervisor_pidfile）。
-  for (const kind of KNOWN_KINDS) {
-    assert.ok(!fs.existsSync(path.join(root, ".quay", `${DRIVER_KINDS[kind].prefix}-supervisor.pid`)), `${kind}: no supervisor pid file`);
-  }
-  // 一个 OS 进程（直接量）：`ps` 只有 anchor 一行带 driver-anchor。
-  // ⛔ 按**本工作区**过滤（`--root <root>`）：宿主上可能还有别的工作区的 anchor（测试并行时尤其），
-  // 数它们会把「本工作区收敛成几个进程」这个量污染成机器全局量（硬规则 4b）。
-  const ps = spawnSync("bash", ["-c", `ps -eo args | grep -c "[d]river-anchor.ts __anchor --root ${root}"`], { encoding: "utf8" });
-  assert.equal(Number(ps.stdout.trim()), 1, `exactly one anchor process carries THIS workspace (ps said ${ps.stdout.trim()})`);
-
-  // AC4：六个 kind 的心跳**都被写过**（产物读数，⛔ 不从「进程在」推导）。
-  await waitFor(
-    () => KNOWN_KINDS.every((k) => {
-      const carrier = DRIVER_KINDS[k].carriers.find((c) => c.endsWith("-round.jsonl")) ?? DRIVER_KINDS[k].carriers[0];
-      return fs.existsSync(path.join(root, ".quay", carrier));
-    }),
-    20_000,
-    "all six round heartbeat carriers to exist",
-  );
-
-  // AC2：criterion 逐字跑 ⇒ exit 0（两个条件同时成立）。
-  const r = runCriterion(root);
-  assert.equal(r.code, 0, `AC-255 criterion exits 0 on the converged form (stderr: ${r.stderr})`);
-});
-
-test("AC3① — 心跳半边可取假：停掉一个 kind 的循环并把它的载体推旧到 >60min ⇒ exit 1 且 stderr 报出该 kind；恢复 ⇒ exit 0", async (t) => {
-  const root = makeFixture("neg-hb", ["outer", "goal"]);
-  t.after(() => cleanup(root));
-  assert.equal(kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root).status, 0, "start outer");
-  assert.equal(kernel(["start", "--kind", "goal", "--root", root, "--confirm-timeout", "20"], root).status, 0, "start goal");
-  // criterion 要求**六个**载体都在（缺一个 = exit 3 仪器问题）⇒ 补齐另外四个（内容任意，只需有 ts）。
-  for (const kind of KNOWN_KINDS) {
-    if (kind === "outer" || kind === "goal") continue;
-    const carrier = DRIVER_KINDS[kind].carriers.find((c) => c.endsWith("-round.jsonl")) ?? DRIVER_KINDS[kind].carriers[0];
-    fs.writeFileSync(path.join(root, ".quay", carrier), JSON.stringify({ ts: new Date().toISOString().slice(0, 19) + "Z" }) + "\n", "utf8");
-  }
-  await waitFor(() => fs.existsSync(path.join(root, ".quay", "goal-round.jsonl")), 20_000, "goal heartbeat");
-  assert.equal(runCriterion(root).code, 0, "baseline: converged + all six fresh ⇒ exit 0");
-
-  // ① 真停掉 goal 的循环（⇒ 它的心跳停写）② 把最后一条 ts 推旧到 61min。
-  assert.equal(kernel(["stop", "--kind", "goal", "--root", root], root).status, 0, "stop --kind goal");
-  ageCarrier(root, "goal", 61);
-  const bad = runCriterion(root);
-  assert.equal(bad.code, 1, `stale heartbeat for one kind ⇒ exit 1 (stderr: ${bad.stderr})`);
-  assert.match(bad.stderr, /goal/, `stderr names the stalled kind (got: ${bad.stderr})`);
-  // ⛔ 命名的是 goal，而 outer 仍新鲜 ⇒ 该读数**区分得出来**（不是一个笼统的「有不新鲜的」）。
-  assert.doesNotMatch(bad.stderr, /outer/, `outer is still fresh and must NOT be named (got: ${bad.stderr})`);
-
-  ageCarrier(root, "goal", 0);
-  assert.equal(runCriterion(root).code, 0, "restored ⇒ exit 0");
-});
-
-test("AC3② — pid 半边可取假：多两个匹配 glob 的**活** pid ⇒ exit 1 且报出正确数；删除 ⇒ exit 0", async (t) => {
-  const root = makeFixture("neg-pid", ["outer"]);
-  t.after(() => cleanup(root));
-  assert.equal(kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root).status, 0, "start outer");
-  for (const kind of KNOWN_KINDS) {
-    const carrier = DRIVER_KINDS[kind].carriers.find((c) => c.endsWith("-round.jsonl")) ?? DRIVER_KINDS[kind].carriers[0];
-    const p2 = path.join(root, ".quay", carrier);
-    if (!fs.existsSync(p2)) fs.writeFileSync(p2, JSON.stringify({ ts: new Date().toISOString().slice(0, 19) + "Z" }) + "\n", "utf8");
-  }
-  assert.equal(runCriterion(root).code, 0, "baseline: ONE carrying process ⇒ exit 0");
-
-  // 两个**活着的**多余进程，其 pid 记进匹配 `*-driver.pid` 的文件（⛔ 不是「改个文件名」——本控制注入的
-  // 是真进程，正是 criterion 该挡的形态）。1 (anchor) + 2 = 3 > 2 ⇒ 必须红。
-  const extra = [];
-  t.after(() => { for (const c of extra) { try { c.kill("SIGKILL"); } catch { /* gone */ } } });
-  for (const n of ["a", "b"]) {
-    const child = spawn("sleep", ["60"], { stdio: "ignore" });
-    extra.push(child);
-    fs.writeFileSync(path.join(root, ".quay", `bogus-${n}-driver.pid`), String(child.pid), "utf8");
-  }
-  const bad = runCriterion(root);
-  assert.equal(bad.code, 1, `a second/third live driver process ⇒ exit 1 (stderr: ${bad.stderr})`);
-  assert.match(bad.stderr, /3 LIVE driver process/, `stderr reports the correct count (got: ${bad.stderr})`);
-
-  for (const n of ["a", "b"]) fs.rmSync(path.join(root, ".quay", `bogus-${n}-driver.pid`), { force: true });
-  assert.equal(runCriterion(root).code, 0, "removed ⇒ exit 0");
-});
-
-test("§6.1 — 一个 kind 的循环抛错不波及其余 kind（独立错误边界），且重启计数落在 anchor 日志里（⛔ 不静默）", async (t) => {
-  const root = makeFixture("boundary", ["outer", "goal"]);
-  t.after(() => cleanup(root));
-  // goal 的 fake 改成「第一轮就抛」——它的进程内循环必须被 catch 住并重启，而 outer 照常转。
-  const goalFile = path.join(root, "plugin", "scripts", DRIVER_KINDS.goal.driver);
-  fs.writeFileSync(
-    goalFile,
-    `export async function main() { throw new Error("boom from the goal loop"); }\n`,
-    "utf8",
-  );
-  assert.equal(kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root).status, 0, "start outer");
-  assert.equal(kernel(["start", "--kind", "goal", "--root", root, "--confirm-timeout", "5"], root).status !== 0, true, "goal never becomes ready");
-
+  assert.ok(anchorPid, "anchor pid recorded");
+  // 让 anchored 的循环永不返回（模拟「在飞 worker 无超时」）：直接 SIGTERM 给 anchor 的**停机宽限**路径。
+  process.kill(anchorPid, "SIGTERM");
   const logFile = path.join(root, ".quay", "anchor.log");
-  await waitFor(() => fs.existsSync(logFile) && /goal loop THREW/.test(fs.readFileSync(logFile, "utf8")), 20_000, "the goal loop's throw to be logged");
+  // 宽限 3s（测试缝），断言：宽限之内 anchor 仍在；超宽限后它退出且日志里那句话在场。
+  const ok = await (async () => {
+    const deadline = Date.now() + 40_000;
+    while (Date.now() < deadline) {
+      const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      if (/shutdown grace .* exceeded with loop\(s\) still draining/.test(log)) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  })();
+  assert.ok(ok, "the anchor LOGS a bounded-shutdown line when a loop outlives the grace window");
   const log = fs.readFileSync(logFile, "utf8");
-  assert.match(log, /goal loop THREW after \d+ms: boom from the goal loop/, "the throw is logged with its message");
-  assert.match(log, /event-loop respawn #1/, "a restart COUNT is recorded (⛔ not a silent restart)");
-  // outer 的心跳仍在推进 ⇒ 一个 kind 的崩溃没有冻结其余 kind（这就是事件循环层边界买到的那部分隔离）。
-  const outerCarrier = path.join(root, ".quay", "outer-round.jsonl");
-  const m1 = fs.statSync(outerCarrier).mtimeMs;
-  await waitFor(() => fs.statSync(outerCarrier).mtimeMs > m1, 20_000, "outer to keep beating while goal crash-loops");
+  assert.match(log, /independent OS processes and are NOT killed/, "the log states the in-flight children are not killed");
+  await waitFor(() => { try { process.kill(anchorPid, 0); return false; } catch { return true; } }, 30_000, "the anchor to exit");
+});
+
+test("双派发硬闸 — 盘上已有活 anchor（不是我）⇒ 第二个 anchor 拒绝起循环并留痕", async (t) => {
+  const root = makeFixture("dup-guard", ["outer"]);
+  t.after(() => cleanup(root));
+  assert.equal(kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root).status, 0, "first anchor starts");
+  const first = anchorPidOf(root);
+  const carrier = path.join(root, ".quay", "outer-round.jsonl");
+  const before = fs.statSync(carrier).mtimeMs;
+
+  // 直接起第二个 anchor（同 root，⛔ 不带 --takeover —— 模拟「两条起法撞在一起」）。
+  const second = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", ANCHOR_SCRIPT, "__anchor", "--root", root, "--kinds", "outer"],
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, QUAY_PLUGIN_ROOT: path.join(root, "plugin"), QUAY_ANCHOR_SHUTDOWN_GRACE_MS: "3000" },
+    },
+  );
+  assert.equal(second.status, 1, `the second anchor refuses (got status ${second.status}, stderr ${second.stderr})`);
+  const log = fs.readFileSync(path.join(root, ".quay", "anchor.log"), "utf8");
+  assert.match(log, /another anchor is live \(pid=\d+/, "the refusal is logged with the incumbent pid (⛔ not silent)");
+  // 原 anchor 的循环不受影响（⛔ 第二个进程没有抢走它）。
+  assert.equal(anchorPidOf(root), first, "the incumbent still owns anchor.pid");
+  await waitFor(() => fs.statSync(carrier).mtimeMs > before, 20_000, "the incumbent's loop to keep beating");
 });

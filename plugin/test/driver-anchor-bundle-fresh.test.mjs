@@ -1,3 +1,39 @@
+// @test-group engine
+
+// driver-anchor-bundle-fresh.test.mjs — the 'NO remediation happened' half of the stale-bundle contract,
+
+// split out of driver-anchor-bundle.test.mjs by FUNCTIONAL BOUNDARY
+
+// (gap-ac281-develop-ci-test-job-wallclock-under-30s).
+
+//
+
+// WHY SPLIT: `node --test` parallelises only ACROSS files — inside one file every test() is serial, so a
+
+// file is the smallest schedulable unit and therefore the suite's floor. The parent file measured 20.9 s on
+
+// the real CI run (35290919973 `__PERFILE__`). Raising concurrency cannot help (LPT simulation: makespan ==
+
+// longest file at 64/128/256/512 alike).
+
+//
+
+// ⛔ SPLIT BY BOUNDARY, NOT BY HALVING A TEST: every test here is a path on which the kernel must NOT
+
+// rebuild — the remediation seam is off, the source tree is NOT stale (the counter-example control), or
+
+// there is no source tree at all (fail-closed). The kept file holds the source-tree state judgments plus
+
+// the two outcomes where a rebuild IS attempted (rebuilt / rebuild-failed). The two share NO mutable state
+
+// (each builds its own tmp fixture), so parallel and serial runs give byte-identical verdicts.
+
+//
+
+// Run:
+
+//   node --test plugin/test/driver-anchor-bundle-fresh.test.mjs
+
 // driver-anchor-bundle.test.mjs — 从 driver-anchor.test.mjs 按**功能边界**拆出的「内核 bundle / 源树陈旧」
 // 半边（gap-ac281-develop-ci-test-job-wallclock-under-30s）。
 //
@@ -186,133 +222,51 @@ const anchorLogOf = (root) => {
 // ── 内核源树：态与陈旧判定（两臂对照 + fail-closed） ─────────────────────────────────────────────
 
 
-test("内核源树两臂对照 — mirror 态比的是【源树】：未推进 ⇒ fresh / 已推进 ⇒ stale（⛔ 只给一臂不算过）", (t) => {
-  const root = makeStagingFixture("arms");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const kernelDir = path.join(root, "packages", "quay", "plugin", "scripts");
-  const srcScripts = path.join(root, "plugin", "scripts");
+test("陈旧 bundle ② — 补救 seam 关掉 ⇒ 陈旧**仍被报出**（⛔ 不静默降级成 fresh）", async (t) => {
+  const f = makeBundleStaleFixture("no-action");
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-no-action"),
+    { QUAY_ANCHOR_NO_BUNDLE_REBUILD: "1", QUAY_FAKE_BUILD_MARKER: f.marker });
+  assert.ok(!fs.existsSync(f.marker), `kill switch ⇒ 构建脚本没有被调用 (stderr: ${r.stderr})`);
 
-  withPluginRoot(path.dirname(kernelDir), () => {
-    // ⛔ 取假的正控制：旧读法（只看本内核目录）在这个输入上**恒 0** —— 这正是「未变更」与「无源码」
-    // 同形的输入（硬规则 3b）。若有人把 sourceFilesMaxMtimeMs 回退成只看本内核目录，下面的臂 (a)
-    // 会变成 0、臂 (b) 会变成 fresh ⇒ 本测红。
-    let kernelDirOnlyMax = 0;
-    for (const rel of watchedSourceFiles("promotion")) {
-      try { kernelDirOnlyMax = Math.max(kernelDirOnlyMax, fs.statSync(path.join(kernelDir, rel)).mtimeMs); } catch { /* absent */ }
-    }
-    assert.equal(kernelDirOnlyMax, 0, "本内核目录里没有被监视 .ts（构建产物形态）—— 旧读法在这个输入上恒 0");
+  const log = anchorLogOf(f.root);
+  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "陈旧条件**仍被报出**");
+  assert.match(log, /bundle rebuild SKIPPED \(disabled by QUAY_ANCHOR_NO_BUNDLE_REBUILD=1\)/, "跳过原因如实留痕（⛔ 不静默）");
 
-    assert.equal(kernelSourceScriptsDir(), srcScripts, "源树解析到 <repo>/plugin/scripts（本内核 plugin 树的同名树）");
-
-    // ── 臂 (a)：源树 mtime 早于本进程启动 ⇒ mirror + 真读数 + fresh（⛔ 不报陈旧、不自刷新）──
-    const a = sourceWatch(root, "promotion");
-    assert.equal(a.state, "mirror", "内核是构建产物而源树在 ⇒ mirror（⛔ 不是 unwatched：那会与「无源可推进」同形）");
-    assert.equal(a.dir, srcScripts, "mirror 态把 dir 指向**源树**，⛔ 不是本内核目录");
-    assert.ok(a.mtimeMs > 0, "mirror 态给的是真读数（⛔ 不是那个恒 0）");
-    assert.equal(sourceFilesMaxMtimeMs(root, "promotion"), a.mtimeMs, "sourceFilesMaxMtimeMs 走同一解析");
-    const before = supervisorStaleness(root, "promotion", process.pid);
-    assert.equal(before.state, "fresh", `臂 (a) 源树未推进到启动时刻之后 ⇒ fresh: ${JSON.stringify(before)}`);
-    assert.equal(before.sourceWatch, "mirror", "陈旧判定同时报出它的输入从哪来（可核，⛔ 不是只给一个布尔）");
-
-    // ── 臂 (b)：只改一处 —— 把源树推到本进程启动时刻之后 ⇒ 预测相反：stale ────────────────────
-    const future = new Date(Date.now() + 120_000);
-    for (const rel of watchedSourceFiles("promotion")) fs.utimesSync(path.join(srcScripts, rel), future, future);
-    const after = supervisorStaleness(root, "promotion", process.pid);
-    assert.equal(after.state, "stale", `臂 (b) 源树已推进 ⇒ stale（两臂预测相反 ⇒ 判据能取假）: ${JSON.stringify(after)}`);
-    assert.ok(after.sourceMtimeMs > before.sourceMtimeMs, "读数确实变了（⛔ 不是同一个常量被读两次）");
-    assert.equal(sourceWatch(root, "promotion").state, "mirror", "态没变，变的是它指向的目录的 mtime");
-  });
+  const reading = r.reading;
+  assert.equal(reading?.state, "stale-no-action", `无动作可用是**独立取值**，⛔ 不与 fresh 同形: ${JSON.stringify(reading)}`);
+  assert.notEqual(reading?.state, "fresh", "⛔ 补救被关掉**不**等于「不陈旧」");
 });
 
-test("内核源树 fail-closed — 盘上没有源树（装好的产物）⇒ unwatched（独立取值，⛔ 与「未变更」同形）", (t) => {
-  // 一个**没有**同名 plugin 树的 git 仓库：装好的产物（npm 包 / marketplace cache / 第三方 vendored）
-  // 就是这一形。⛔ 不能把「没有源树」读成「源码没推进」—— 两者必须有独立取值（硬规则 3b）。
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kernelsrc-none-"));
+test("陈旧 bundle ④ — 反例对照：**不陈旧**（源树早于本内核）⇒ 不触发补救，state = fresh", async (t) => {
+  const f = makeBundleStaleFixture("fresh", { sourceNewerThanKernel: false });
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "fresh"),
+    { QUAY_FAKE_BUILD_MARKER: f.marker });
+  assert.ok(!fs.existsSync(f.marker), `源树更旧 ⇒ 构建脚本**没有**被调用 (stderr: ${r.stderr})`);
+  const log = anchorLogOf(f.root);
+  assert.doesNotMatch(log, /bundle rebuild/, "⛔ 没有任何重建行（用于区分「补救在工作」与「恒有输出」）");
+  assert.doesNotMatch(log, /STALE BUNDLE/, "⛔ 不陈旧就不该报陈旧");
+  const reading = r.reading;
+  assert.equal(reading?.state, "fresh", `不陈旧 ⇒ fresh: ${JSON.stringify(reading)}`);
+});
+
+test("陈旧 bundle ⑤ — 没有源树（装好的产物）⇒ fail-closed：解析不到构建脚本且不冒认「可重建」", (t) => {
+  // 装好的产物形态（npm-pack / marketplace cache / 第三方 vendored）：盘上**没有**同名源树。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bundlestale-nosrc-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const scripts = path.join(root, "packages", "quay", "plugin", "scripts");
+  const scripts = path.join(root, "pkg", "plugin", "scripts");
   fs.mkdirSync(path.join(scripts, "dist"), { recursive: true });
   fs.writeFileSync(path.join(scripts, "dist", "driver-anchor.js"), "// installed\n", "utf8");
+  fs.mkdirSync(path.join(root, "pkg", "packages", "quay", "src"), { recursive: true });
   const init = spawnSync("git", ["init", "-q", root], { encoding: "utf8", timeout: 20_000 });
   assert.equal(init.status, 0, init.stderr);
 
-  withPluginRoot(path.dirname(scripts), () => {
-    assert.equal(kernelSourceScriptsDir(), null, "没有同名源树 ⇒ null（fail-closed，⛔ 不把 cwd 当仓库根）");
-    const w = sourceWatch(root, "promotion");
-    assert.equal(w.state, "unwatched", "无可监视源码是**独立取值**，⛔ 不是 0 冒充的「未变更」");
-    assert.equal(w.mtimeMs, 0, "unwatched 的 mtime 是 0，但取值含义由 state 区分");
-    const s = supervisorStaleness(root, "promotion", process.pid);
-    assert.equal(s.sourceWatch, "unwatched", "陈旧读数把「无源可推进」与「源码未推进」分开报出（硬规则 3b）");
+  withPluginRoot(path.join(root, "pkg", "plugin"), () => {
+    assert.equal(kernelSourceScriptsDir(), null, "没有源树 ⇒ null（fail-closed）");
+    assert.equal(resolveQuayKernelBuildScript(), null, "没有源树 ⇒ 不给构建脚本（⛔ 不把静态产物当真源树重建）");
+    const r = rebuildKernelBundle();
+    assert.equal(r.attempted, false, `attempted=false（⛔ 不是 attempted-but-failed）: ${JSON.stringify(r)}`);
+    assert.match(r.reason ?? "", /no plugin-dist build script|no source tree/, "失败原因可诊断");
   });
-});
-
-test("preferredAnchorKernelIn — 构建产物内核只换到**更新的**源树 bundle（⛔ 不换 raw、⛔ 不换更旧的）", (t) => {
-  const root = makeStagingFixture("pref");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const stagingScripts = path.join(root, "packages", "quay", "plugin", "scripts");
-  const srcScripts = path.join(root, "plugin", "scripts");
-  const selfJs = path.join(stagingScripts, "dist", "driver-anchor.js");
-  const srcJs = path.join(srcScripts, "dist", "driver-anchor.js");
-  // 「本内核目录」= `path.dirname(kernelSelfPath())` = 那份 driver-anchor.js 所在目录（生产形态里是
-  // `.../scripts/dist` —— 这正是 preferredAnchorKernel 包装传给判定半边的那个值）。
-  const me = path.join(stagingScripts, "dist");
-  const old = new Date(Date.now() - 600_000);
-  const now = new Date(Date.now() - 1_000);
-
-  // (i) 源树 bundle **更新** ⇒ 换过去（同形态：bundle → bundle，⛔ 不换成 raw driver-anchor.ts）。
-  fs.utimesSync(selfJs, old, old);
-  fs.utimesSync(srcJs, now, now);
-  const toNewer = preferredAnchorKernelIn(me, me, srcScripts);
-  assert.equal(toNewer?.path, srcJs, `换到源树那份更新的 bundle: ${JSON.stringify(toNewer)}`);
-  assert.equal(toNewer?.stripTypes, false, "同形态（bundle → bundle）：⛔ 不把 bundle 内核悄悄降成 raw");
-
-  // (ii) 源树 bundle **更旧** ⇒ 不换（否则每次 reconcile 都换到同一版 = 重启风暴）。
-  fs.utimesSync(selfJs, now, now);
-  fs.utimesSync(srcJs, old, old);
-  const toOlder = preferredAnchorKernelIn(me, me, srcScripts);
-  assert.equal(toOlder?.path, selfJs, `更旧的源树 bundle 不被选（⛔ 防重启风暴）: ${JSON.stringify(toOlder)}`);
-
-  // (iii) 没有源树（装好的产物）⇒ 本内核自己（行为与今天逐字相同）。
-  const bare = preferredAnchorKernelIn(me, me, null);
-  assert.equal(bare?.path, selfJs, "无源树 ⇒ 仍是本内核自己");
-});
-
-test("陈旧 bundle ① — 陈旧且换不动 ⇒ **机械重建被调用**，结果落成 bundle.state 的独立取值", async (t) => {
-  const f = makeBundleStaleFixture("stale-rebuilt");
-  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
-  // 正控制：这个夹具确实处在「本内核是产物 + 源树更新」的输入上（否则本测会空转）。
-  withPluginRoot(f.pluginRoot, () => {
-    assert.equal(sourceWatch(f.root, "outer").state, "mirror", "夹具处在 mirror 态（旧读法在这里恒 0）");
-    assert.equal(resolveQuayKernelBuildScript(), f.buildScript, "构建脚本解析到**真实推导出的**那个路径（⛔ 不是测试注入的路径）");
-  });
-
-  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-rebuilt"),
-    { QUAY_FAKE_BUILD_MARKER: f.marker });
-  assert.ok(fs.existsSync(f.marker), `the mechanical rebuild WAS invoked (stderr: ${r.stderr}, log: ${anchorLogOf(f.root)})`);
-  const calls = fs.readFileSync(f.marker, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.equal(calls.length, 1, `rebuilt exactly ONCE (冷却生效，⛔ 不是每趟 reconcile 一次): ${JSON.stringify(calls)}`);
-  assert.match(calls[0].cwd, /bundlestale-stale-rebuilt-/, "cwd = 源树的仓库根（⛔ 不是 --root 工作区）");
-
-  const log = anchorLogOf(f.root);
-  assert.match(log, /bundle rebuild OK in \d+ms/, "重建结果如实落进 anchor 日志");
-  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "陈旧**仍被报出**（⛔ 检测没有因为有了动作面而消失）");
-
-  const reading = r.reading;
-  assert.ok(reading, ".quay/anchor.json 里有结构化的 bundle 读数（⛔ 不再只有一行日志）");
-  assert.equal(reading.state, "stale-rebuilt", `陈旧 + 重建成功 = 独立取值 stale-rebuilt: ${JSON.stringify(reading)}`);
-  assert.equal(reading.rebuild?.attempted, true, "读数里带着「动作被调用过」");
-  assert.equal(reading.rebuild?.ok, true, "读数里带着动作的结果");
-  assert.ok(reading.kinds.includes("outer"), "读数点名了参与判定的 kind（⛔ 不是一个笼统的「有陈旧」）");
-});
-
-test("陈旧 bundle ③ — 构建失败 ⇒ 独立取值 stale-rebuild-failed（⛔ 不与「无动作」/「新鲜」同形）", async (t) => {
-  const f = makeBundleStaleFixture("rebuild-failed");
-  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
-  const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-rebuild-failed"),
-    { QUAY_FAKE_BUILD_MARKER: f.marker, QUAY_FAKE_BUILD_EXIT: "7" });
-  assert.ok(fs.existsSync(f.marker), `the rebuild WAS attempted (stderr: ${r.stderr})`);
-  const log = anchorLogOf(f.root);
-  assert.match(log, /bundle rebuild FAILED in \d+ms .*reason=build script exited 7/, "失败原因（退出码）如实落进日志");
-  assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "失败时陈旧仍被报出");
-  const reading = r.reading;
-  assert.equal(reading?.state, "stale-rebuild-failed", `试过但失败是**独立取值**: ${JSON.stringify(reading)}`);
 });
