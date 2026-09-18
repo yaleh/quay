@@ -2,7 +2,7 @@
 id: gap-bypass-ruled-2d3a6fa35
 title: bypass-ruled 表加 2d3a6fa35——人 2026-09-18 裁定 ruled one-off；它使全 loop
   代码任务在静态层 fail-closed（四条在飞任务被挡），落地走任务分支 fan-in（⛔ 不直投）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
