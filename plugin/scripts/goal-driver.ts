@@ -98,6 +98,10 @@ export const INTERVAL_MS_DEFAULT = defaultDriverConfig().goal.intervalMs;
 /** 机械 spawn（跑一条 criterion / 一次 check）的 wall-clock 上限（毫秒）——全部是快速机械 node 调用。 */
 export const CRITERION_TIMEOUT_MS = 120_000;
 
+/** 读【复核执行根新鲜度】的两条本地只读 git 命令的 wall-clock 上界（毫秒）。⛔ 不是性能阈值
+ *  （硬规则 4 推论：不设与机器规格相关的字面量）——它只防「git 挂住把整轮拖住」，取值与宿主无关。 */
+export const GIT_READ_TIMEOUT_MS = 10_000;
+
 /** gap-filing agent spawn 的 wall-clock 上限【缺省回退值】（毫秒，spawnSync timeout）。正源 = drivers.yml
  *  goal.gap_worker_timeout_ms（goalGapWorkerTimeoutMs 就地读，⛔ 不写死字面量——硬规则 4 推论二）。
  *  值由实测导出（⛔ 硬规则 4 推论：成本结构未知前不设数值阈值；此处结构已知，必须引用测量）：
@@ -495,9 +499,13 @@ export interface PrefilingRecheckEntry {
   /** `confirmed-failing` = 复核后仍非 0（立案照旧）；`cleared` = 复核后 exit 0（那条「此刻为假」
    *  的读数是**失准的读数**，⛔ 不立案）；`not-evaluated` = 复核跑不成（独立取值，⛔ 与上面两者都不同形）。 */
   outcome: "confirmed-failing" | "cleared" | "not-evaluated";
-  /** 成因（枚举）：still-false / now-true / guard-refused / unreadable。`unreadable` 与
-   *  `guard-refused` **不同形**——前者是「命令跑不出读数」，后者是「闸主动拒绝跑」。 */
-  cause: "still-false" | "now-true" | "guard-refused" | "unreadable";
+  /** 成因（枚举）：still-false / now-true / guard-refused / unreadable / checkout-lagging-develop。
+   *  `unreadable` 与 `guard-refused` **不同形**——前者是「命令跑不出读数」，后者是「闸主动拒绝跑」。
+   *  ⛔ `checkout-lagging-develop` 是**第五个独立取值**（硬规则 3b/8）：复核**跑了且回了 fail**，
+   *  但那个 fail 量的是**滞后的执行根**、不是 develop 的实况 ⇒ 既⛔不落 `confirmed-failing`（那是
+   *  把一个不存在的缺陷立案），也⛔不落 `cleared`（那会把「不知道 develop 上真不真」说成「为真」）
+   *  ——两者都会让「读不懂输入」伪装成一个有结论的读数。 */
+  cause: "still-false" | "now-true" | "guard-refused" | "unreadable" | "checkout-lagging-develop";
   /** 判据自己的输出原因（截断），供落痕归因。 */
   reason: string;
   /** 这条判据本次复核的**原始 verdict**（pass / fail / not-evaluated，`gateCriterion` 归一化后的取值）。
@@ -516,6 +524,12 @@ export interface PrefilingRecheckEntry {
    *  （=「此平台不提供」而非「机器空闲」），故它**只作旁证**，判读以 `hostFreeBytes` 为主。
    *  读不出 ⇒ null。 */
   load1: number | null;
+  /** 复核执行根的 `HEAD` sha（见 `RecheckRootFreshness`）。读不出（非 git 根 / 无 git）⇒ null。 */
+  headSha: string | null;
+  /** 复核执行根落后 `develop` 的提交数。`0` = 齐平；`> 0` = 滞后（**本条判据因此改判**）；
+   *  读不出（非 git 根 / 无 `develop` ref）⇒ null ⇒ **行为与改动前一致**（照旧 `still-false`）。
+   *  ⛔ 与 `0` 不同形（硬规则 3b/6）。 */
+  behindDevelop: number | null;
 }
 
 /** 一轮的复核读数（⛔ 恒非 null —— 没跑复核时它是 `ran:false` 的显式读数，不与「复核通过」同形）。 */
@@ -552,6 +566,49 @@ export function readHostHealth(): { hostFreeBytes: number | null; load1: number 
   return { hostFreeBytes, load1 };
 }
 
+/** 复核执行根的**新鲜度读数**（复核读数的**版本**半边；⛔ 旁证量——不设阈值、不参与判据语义、
+ *  不改变任何判据的真假，只回答「这次复核跑在哪个根上」）。
+ *
+ *  为什么必须有（gap-frozen-recheck-lagging-checkout-false-gap-filing，2026-09-18 实测一例）：
+ *  复核的执行根 = `<dataRoot>` = **主检出工作树**，而修复落地在 `develop`；主检出要等下一次
+ *  ff 同步才拿到它（实测窗口 67 秒，最长可到「落后 develop 数十提交」）。⇒ 当修复任务恰在这段
+ *  窗口内翻 done 时，复核量的**不是 develop 上的实况，而是主检出工作树上的实况**，一条**已修复**
+ *  的判据被复核成 `confirmed-failing` ⇒ 立案成 `frozen-violated` ⇒ spawn 一个 prompt 逐字断言
+ *  「the earlier fix did not hold」的 agent，给下游指一个**不存在的缺陷**。
+ *  ⛔ 与 `hostFreeBytes` / `load1` 的分工：那两个描述「跑在什么机器状态下」（宿主），本条描述
+ *  「跑在哪个版本的世界里」（输入面）。三者都不改判据真假，都只为事后可归因。 */
+export interface RecheckRootFreshness {
+  /** 复核执行根的 `HEAD` sha（`git -C <root> rev-parse HEAD`）。读不出 ⇒ null。 */
+  headSha: string | null;
+  /** 复核执行根**落后** `develop` 的提交数（`git -C <root> rev-list --count HEAD..develop`）。
+   *  `0` = 与 develop 齐平（或领先）；`> 0` = 滞后。读不出（非 git 根 / 无 `develop` ref /
+   *  git 不可用）⇒ **null**——⛔ 与 `0` **不同形**（硬规则 3b/6）：`0` 是「齐平」，
+   *  `null` 是「读不到」。把「读不到」读成「不滞后」会让一条**未知**的读数冒充「已查过且根是新的」。 */
+  behindDevelop: number | null;
+}
+
+/** 读复核执行根的新鲜度（两条**本地只读** git 命令，⛔ 零 criterion 执行、零写、无副作用）。
+ *  ⛔ 读不出 ⇒ 各字段 null（⛔ 不回退到 `0`/空串：那会把「不知道」伪装成「齐平」）。
+ *  ⛔ 只在**复核对象非空**时被调用（`runPrefilingRecheck` 内）⇒ 每轮至多两次（两个 population
+ *  互斥、各一次），成本 = 两条 git 只读命令。 */
+export function readRecheckRootFreshness(root: string): RecheckRootFreshness {
+  const git = (args: string[]): string | null => {
+    try {
+      const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: GIT_READ_TIMEOUT_MS });
+      if (r.error || r.status !== 0) return null;
+      const out = String(r.stdout ?? "").trim();
+      return out === "" ? null : out;
+    } catch {
+      return null;
+    }
+  };
+  const headSha = git(["rev-parse", "HEAD"]);
+  const behindRaw = git(["rev-list", "--count", "HEAD..develop"]);
+  const behindNum = behindRaw === null ? null : Number(behindRaw);
+  const behindDevelop = behindNum !== null && Number.isInteger(behindNum) && behindNum >= 0 ? behindNum : null;
+  return { headSha, behindDevelop };
+}
+
 /**
  * 立案前【直接量复核】的**共用核**（单一实现）：对 `targets` 里每条 AC 真跑一次它的 criterion
  * （复用 goal-store 的 `gate` 动词——即 pass 1 每轮对 active AC 用的同一条 acceptance 执行路径，
@@ -573,6 +630,10 @@ async function runPrefilingRecheck(
   const empty: PrefilingRecheckReading = { ran: false, attempted: 0, entries: [], guardRefused: false };
   if (targets.length === 0) return empty;
   const host = readHostHealth();
+  // 复核执行根的新鲜度（**版本半边**，见 `RecheckRootFreshness`）：本函数跑判据的根就是 `dataRoot`
+  // ——生产里即主检出工作树，它可能滞后 `develop`（修复落在 develop 而主检出要等下一次 ff）。
+  // ⛔ 只读一次：本函数内所有 entry 描述的是**同一刻、同一个根**。
+  const rootFreshness = readRecheckRootFreshness(dataRoot);
   // ⛔ 重入闸（先于任何判据执行）：本进程若已在跑判据，则**不再**跑（同 checkAchievedFailing /
   // sweepFrozen 的拒绝形态）——拒绝是一个**独立结局**，不是「零条违反」。
   if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
@@ -586,10 +647,12 @@ async function runPrefilingRecheck(
         reason: "re-entrancy guard held — this process is already running criteria",
         verdict: "not-evaluated",
         // ⛔ 没跑 ⇒ 时长 null（⛔ 不写 0：0 会被读成「跑得极快」）。宿主量照读——它描述的是
-        // 「拒绝发生在什么环境下」，仍然有用。
+        // 「拒绝发生在什么环境下」，仍然有用。根新鲜度同理照读（拒绝发生在哪个版本的世界里）。
         durationMs: null,
         hostFreeBytes: host.hostFreeBytes,
         load1: host.load1,
+        headSha: rootFreshness.headSha,
+        behindDevelop: rootFreshness.behindDevelop,
       })),
       guardRefused: true,
     };
@@ -603,9 +666,25 @@ async function runPrefilingRecheck(
       // 同一本台账。⛔ 不在此处直接 spawn criterion 文本（那会绕开 store 的 verdict 语义与落账）。
       const t0 = Date.now();
       const { verdict, reason } = await gateCriterion(scriptRoot, ac, dataRoot);
-      const entry = { ac, verdict, reason, durationMs: Date.now() - t0, hostFreeBytes: host.hostFreeBytes, load1: host.load1 };
-      if (verdict === "fail") entries.push({ ...entry, outcome: "confirmed-failing", cause: "still-false" });
-      else if (verdict === "pass") entries.push({ ...entry, outcome: "cleared", cause: "now-true" });
+      const entry = {
+        ac, verdict, reason, durationMs: Date.now() - t0,
+        hostFreeBytes: host.hostFreeBytes, load1: host.load1,
+        headSha: rootFreshness.headSha, behindDevelop: rootFreshness.behindDevelop,
+      };
+      if (verdict === "fail") {
+        // ⛔ 三态分派的关键一格（gap-frozen-recheck-lagging-checkout-false-gap-filing）：`fail` 只说
+        // 「在这个根上非 0」，而**这个根是不是 develop 的实况**是另一个问题——根滞后 develop 时，
+        // 那条 fail 可能正是「修复已在 develop 落地、而本地工作树还没拿到」的产物。⇒ 落**独立取值**
+        // `not-evaluated` + `checkout-lagging-develop`，本轮**不立案**，等下一次复核（届时根已同步）。
+        // ⛔ 不是「一律放过」：`behindDevelop` 为 `0`（齐平）或 `null`（读不到 ⇒ ⛔ 不得当成滞后，
+        // 硬规则 3b/6）时**照旧** `confirmed-failing` ⇒ 立案照旧（正控制见 AC2）。
+        // ⛔ 也不收紧任何阈值：判据是**结构性的**（「复核根 ≠ 权威基线」），不是「落后 N 个提交」。
+        if (rootFreshness.behindDevelop !== null && rootFreshness.behindDevelop > 0) {
+          entries.push({ ...entry, outcome: "not-evaluated", cause: "checkout-lagging-develop" });
+        } else {
+          entries.push({ ...entry, outcome: "confirmed-failing", cause: "still-false" });
+        }
+      } else if (verdict === "pass") entries.push({ ...entry, outcome: "cleared", cause: "now-true" });
       else entries.push({ ...entry, outcome: "not-evaluated", cause: "unreadable" });
     }
   } finally {
@@ -1987,8 +2066,11 @@ export function computeGoalGaps(
       // 尾读数最长数小时仍写 `fail`。立案**不得**拿它当「现在」（那是硬规则 4b 的形态：代理量被当
       // 直接量）。复核结局按三态分派，⛔ 三态互不同形：
       //   · `cleared`（复核后 exit 0）⇒ 台账尾是**陈旧读数** ⇒ ⛔ 不立案（也不产生读数——此刻无工作可立）。
-      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出）⇒ **独立取值** `not-evaluated`
-      //     （taskCount null）。⛔ 既不与「复核通过」也不与「复核后仍为假」同形（硬规则 3b）。
+      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出 / **复核根滞后 develop**）⇒ **独立取值**
+      //     `not-evaluated`（taskCount null）。⛔ 既不与「复核通过」也不与「复核后仍为假」同形（硬规则
+      //     3b）。第三个成因 `checkout-lagging-develop` 是 gap-frozen-recheck-lagging-checkout-false-
+      //     gap-filing 加的：那条 fail 量的是滞后的执行根、不是 develop 的实况 ⇒ 本轮不立案，等下一次
+      //     复核（届时主检出已同步）。⛔ 不与 `cleared` 合流——后者断言「此刻为真」，那里**不知道**。
       //   · `confirmed-failing`（复核后仍非 0）⇒ 立案照旧。
       //   · 未传复核读数（`null`，既有调用方/单测的缺省）⇒ 照旧立案（fail-visible：漏传不得静默
       //     变成「复核通过」）。
@@ -2032,9 +2114,9 @@ export function computeGoalGaps(
       // 11 次全绿）。⇒ 立案前**再跑一次**：两次直接量一致才立案。三态分派，⛔ 三态互不同形（硬规则 3b）：
       //   · `cleared`（复核后 exit 0）⇒ 那次 fail 是**读数失准** ⇒ ⛔ 不立案，也不产生读数
       //     （此刻确无工作可立——与 standing-ok 同形的静默是正确的，因为真值为真）。
-      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出）⇒ **独立取值** `not-evaluated`
-      //     （taskCount null）。⛔ 既不与「复核通过」（无读数）也不与「复核后仍为假」（standing-violated）
-      //     同形。
+      //   · `not-evaluated`（复核跑不成：闸拒绝 / 命令读不出 / **复核根滞后 develop**）⇒ **独立取值**
+      //     `not-evaluated`（taskCount null）。⛔ 既不与「复核通过」（无读数）也不与「复核后仍为假」
+      //     （standing-violated）同形。第三个成因见 ③ 分支的同名注释（共用核 ⇒ 共用三态）。
       //   · `confirmed-failing`（复核后仍非 0）⇒ 立案照旧。
       //   · 未传复核读数（`null`，既有调用方/单测的缺省）⇒ 照旧立案（fail-visible：漏传不得静默
       //     变成「复核通过」）。

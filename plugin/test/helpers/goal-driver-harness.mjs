@@ -36,6 +36,8 @@ import {
   // ②b 常设域内立案前复核（gap-standing-violated-false-spawn-no-prefiling-recheck）
   recheckStandingFailing,
   readHostHealth,
+  // 复核执行根的新鲜度（gap-frozen-recheck-lagging-checkout-false-gap-filing）：版本半边读数
+  readRecheckRootFreshness,
   parseFrozenFailingReading,
   isFilingGapState,
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）
@@ -122,6 +124,30 @@ function writeStandingGoalFile(tmp, { id, status, kind, goal, criterion, longTer
   if (longTerm) lines.push('long-term: true');
   lines.push('origin: test fixture', '---', '', '## body', 'x', '');
   fs.writeFileSync(path.join(tmp, 'goals', `${id}-t.md`), lines.join('\n'), 'utf8');
+}
+
+/** 造一个**真 git 仓库**夹具根，返回一个有界 git 运行器（`git(args) => stdout`，非零退出即抛）。
+ *
+ *  为什么需要真仓库（gap-frozen-recheck-lagging-checkout-false-gap-filing）：立案前复核读数的**版本
+ *  半边**（`headSha` / `behindDevelop`）量的是「复核跑在哪个根上」——只有真 git 根才有 `HEAD` 与
+ *  `develop` 可比。裸 tmp 根上这两个量恒读不出（⛔ 那条路径的既有行为由 s10 的裸根用例守着，不得
+ *  被本夹具取代）。另外：criterion 的执行 cwd 由 goal-store 的 `resolveGitRoot(goalDir)` 决定
+ *  （goal-store.ts），仓库根就是它 ⇒ 夹具可以用「某个提交里有没有这个文件」直接控制判据真假。
+ *  ⛔ git 身份走**子进程 env**，⛔ 不写 repo config（memory: fixture-git-identity-in-child-env）。 */
+function mkGitFixtureRoot(tmp, { branch = 'main' } = {}) {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+  };
+  const must = (args) => {
+    const r = spawnSync('git', ['-C', tmp, ...args], { encoding: 'utf8', env });
+    if (r.error) throw new Error(`git ${args.join(' ')} spawn error: ${r.error.message}`);
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} exit ${r.status}: ${String(r.stderr || '').trim().slice(0, 300)}`);
+    return String(r.stdout ?? '').trim();
+  };
+  must(['init', '-b', branch]);
+  return must;
 }
 
 function hasPrefilingEvidence(e) {
@@ -223,4 +249,4 @@ const ALL_GAP_STATES = ['gap', 'done-unresolved', 'stalled', 'not-evaluated', 's
 
 const QUIET_GAP_STATES = ['in-progress', 'standing-ok'];
 
-export { ALL_GAP_STATES, DELIVERED_VERSION, DRIVER_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_ACCEPTANCE_ACTIVE_ENV, GOAL_CONTROL_STATE_REL, GOAL_GAPS_FACT_NAME, GOAL_ROUND_REL, GOAL_SPAWN_CAP_DEFAULT, HEALTH_OBSERVED_CARRIERS, HEALTH_REQUIRED_CARRIERS, HEALTH_WINDOW_SEC_DEFAULT, KINDS, KNOWN_KINDS, OBJECTIVE_ACS, OBJECTIVE_ASSERTION_FIELDS, OBJECTIVE_EVIDENCE_CARRIERS, OBJECTIVE_GOAL, PRE_CHANGE_ENTRY, QUIET_GAP_STATES, TARGET_HEALTH_FACT_NAME, assert, buildGapWorkerPrompt, buildHealthProbeArgv, cannedProbePrefix, checkAchievedFailing, checkStaleness, collectObjectiveEvidence, computeGoalGaps, declaredTargetBinding, deriveTargetHealth, derivedByAc, derivedCriterionRecords, evRecord, fileURLToPath, fs, gapViewEntries, gapViewFact, goalAchievedFromRecords, goalCiRunsCollect, goalCiRunsThrottleMs, goalCliResolvable, goalCloseBlockFromRecords, goalDriverRoutines, goalFlipDecision, goalGapWorkerTimeoutMs, goalSpawnCap, goalStoreAbs, goalStoreArgv, goalSufficiencyVerdict, hasPrefilingEvidence, isFilingGapState, isTaskStuck, judgeCmd, mkTargetRoot, objectiveAssertionCommand, objectiveCacheKey, objectiveEvidenceProfile, objectiveSufficiencyVerdict, objectiveSufficiencyVerdictDetail, os, parseFrozenFailingReading, parseHealthProbe, path, probeLedger, readDeliveredPluginVersion, readFrozenFailing, readHostHealth, readReadyPoolJudgment, readTaskFacts, readsFrozenPopulation, recheckFrozenFailing, recheckStandingFailing, repoRoot, resetObjectiveCacheForTest, resetObjectiveTestState, resetSufficiencyCacheForTest, resolveTargetBinding, runGapSpawnPass, runGoalRound, runResidentQualityGateLoop, semanticSufficiencyVerdict, spawn, spawnSync, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, test, verifyObjectiveAssertion, waitForProcessVisible, writeEvidenceCarrier, writeGoalFile, writeStandingGoalFile };
+export { ALL_GAP_STATES, DELIVERED_VERSION, DRIVER_KINDS, mkGitFixtureRoot, readRecheckRootFreshness, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_ACCEPTANCE_ACTIVE_ENV, GOAL_CONTROL_STATE_REL, GOAL_GAPS_FACT_NAME, GOAL_ROUND_REL, GOAL_SPAWN_CAP_DEFAULT, HEALTH_OBSERVED_CARRIERS, HEALTH_REQUIRED_CARRIERS, HEALTH_WINDOW_SEC_DEFAULT, KINDS, KNOWN_KINDS, OBJECTIVE_ACS, OBJECTIVE_ASSERTION_FIELDS, OBJECTIVE_EVIDENCE_CARRIERS, OBJECTIVE_GOAL, PRE_CHANGE_ENTRY, QUIET_GAP_STATES, TARGET_HEALTH_FACT_NAME, assert, buildGapWorkerPrompt, buildHealthProbeArgv, cannedProbePrefix, checkAchievedFailing, checkStaleness, collectObjectiveEvidence, computeGoalGaps, declaredTargetBinding, deriveTargetHealth, derivedByAc, derivedCriterionRecords, evRecord, fileURLToPath, fs, gapViewEntries, gapViewFact, goalAchievedFromRecords, goalCiRunsCollect, goalCiRunsThrottleMs, goalCliResolvable, goalCloseBlockFromRecords, goalDriverRoutines, goalFlipDecision, goalGapWorkerTimeoutMs, goalSpawnCap, goalStoreAbs, goalStoreArgv, goalSufficiencyVerdict, hasPrefilingEvidence, isFilingGapState, isTaskStuck, judgeCmd, mkTargetRoot, objectiveAssertionCommand, objectiveCacheKey, objectiveEvidenceProfile, objectiveSufficiencyVerdict, objectiveSufficiencyVerdictDetail, os, parseFrozenFailingReading, parseHealthProbe, path, probeLedger, readDeliveredPluginVersion, readFrozenFailing, readHostHealth, readReadyPoolJudgment, readTaskFacts, readsFrozenPopulation, recheckFrozenFailing, recheckStandingFailing, repoRoot, resetObjectiveCacheForTest, resetObjectiveTestState, resetSufficiencyCacheForTest, resolveTargetBinding, runGapSpawnPass, runGoalRound, runResidentQualityGateLoop, semanticSufficiencyVerdict, spawn, spawnSync, spawnTargetDriverFixture, sweepFrozenAcs, targetHealthFact, test, verifyObjectiveAssertion, waitForProcessVisible, writeEvidenceCarrier, writeGoalFile, writeStandingGoalFile };
