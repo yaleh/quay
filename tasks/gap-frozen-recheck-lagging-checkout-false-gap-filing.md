@@ -2,7 +2,7 @@
 id: gap-frozen-recheck-lagging-checkout-false-gap-filing
 title: 冻结AC的立案前复核在【滞后 develop 的主检出】上执行判据——已落 develop 的修复被读作仍为假 ⇒ 假 gap
   立案（2026-09-18T14:42:07Z 实测一例）；改落独立取值 checkout-lagging-develop
-status: ready
+status: done
 labels:
   - gap
   - defect
