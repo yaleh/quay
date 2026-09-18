@@ -2053,6 +2053,16 @@ export async function run(argv: string[]): Promise<number> {
         ? (reaper.stripTypes ? ["--experimental-strip-types", reaper.path] : [reaper.path])
         : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "worktree-process-reaper.ts")];
       execFileSync("node", ["--no-warnings", ...reaperArgs, "--orphans", "--root", root, "--json"], { stdio: "ignore" });
+      // Leaked `quay … serve` HOSTS (2026-09-17 global-OOM remediation): each holds 0.65–1.7 GB RSS
+      // and the suite needs that memory back. Its OWN skip seam, ⛔ not the one above — the two
+      // sweeps cover independent residue classes and a hermetic test may need either one suppressed
+      // without the other. Unlike the probe sweep this one is cwd-SCOPED to `root` (see
+      // classifyOrphanServes), so a concurrent test's servers are out of reach unless they live
+      // under this same root, and it REFUSES outright when `.quay/server.json` cannot vouch for the
+      // live host — so a run that cannot tell leaked from legitimate kills nothing.
+      if (process.env.QUAY_TEST_SKIP_PRE_SUITE_SERVE_REAPER !== "1") {
+        execFileSync("node", ["--no-warnings", ...reaperArgs, "--orphan-serves", "--root", root, "--json"], { stdio: "ignore" });
+      }
     } catch (e) {
       process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
     }

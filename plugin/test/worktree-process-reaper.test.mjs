@@ -30,6 +30,9 @@ import {
   killProcs,
   selfAndAncestors,
   enumerateProcsFromSeam,
+  isQuayServe,
+  readServeRegistration,
+  classifyOrphanServes,
 } from "../scripts/worktree-process-reaper.ts";
 import { suiteLockSlotCount } from "../scripts/suite-lock-slots.ts";
 
@@ -62,6 +65,12 @@ function writeSeam(dir, lines) {
   const seam = join(dir, "ps.txt");
   writeFileSync(seam, lines.join("\n") + "\n");
   return seam;
+}
+
+/** Seam record with the OPTIONAL 7th field (full argv as JSON) that `--orphan-serves` needs —
+ *  argv0 alone is just the node binary, so it cannot identify a `quay … serve` host. */
+function seamLineCmd(pid, cwd, argv0, state, ppid, fds, cmdline) {
+  return [...seamLine(pid, cwd, argv0, state, ppid, fds).split("\0"), JSON.stringify(cmdline)].join("\0");
 }
 
 // ── 纯函数：cwd / argv0 分类 ─────────────────────────────────────────────────────────
@@ -341,6 +350,129 @@ test("enumerateProcsFromSeam — parses the NUL-separated seam records (cwd dele
     assert.equal(procs[0].cwdDeleted, true);
     assert.equal(procs[1].cwdDeleted, false);
     assert.deepEqual(procs[1].openFiles, [lock0]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── --orphan-serves：泄漏的 quay serve host（2026-09-17 全局 OOM 善后）────────────────
+//
+// 每个泄漏的 host 约占 0.65–1.7 GB RSS，几个就能把 16 GB 机器压进全局 OOM（实测：内核杀了
+// dbus-daemon/systemd 与一批无关的 chrome）。根因（`bin/quay.js` shim 阻塞在 `spawnSync`，
+// 因而永远无法转发那个杀掉它自己的信号）已在 shim 侧修掉；本模式是对其它来源的残留做防御性清扫。
+
+test("isQuayServe — 认两个 serve 入口（quay.ts / quay.js），拒绝其它 node 程序与 null cmdline", () => {
+  const entry = "/x/packages/quay/bin/quay.ts";
+  assert.equal(isQuayServe(["node", "--experimental-strip-types", entry, "serve", "--port", "4173"]), true);
+  assert.equal(isQuayServe(["node", "/x/packages/quay/bin/quay.js", "serve", "--port", "1"]), true);
+  // serve 不是该入口的子命令 ⇒ 不是 host
+  assert.equal(isQuayServe(["node", entry, "task", "list"]), false);
+  // 有 serve 参数但入口不是 quay.{ts,js}
+  assert.equal(isQuayServe(["node", "/x/other.js", "serve"]), false);
+  // 读不到 argv 是「无法判断」——调用方必须给它独立取值，⛔ 不得折叠进这里的 false
+  assert.equal(isQuayServe(null), false);
+  assert.equal(isQuayServe([]), false);
+});
+
+test("readServeRegistration — 三态；载体指向已死的 pid 是 present 但 !alive", async () => {
+  const dir = tmp("serve-reg");
+  try {
+    assert.equal(readServeRegistration(dir).state, "absent", "无载体 = absent");
+
+    mkdirSync(join(dir, ".quay"), { recursive: true });
+    writeFileSync(join(dir, ".quay", "server.json"), "{ not json");
+    assert.equal(readServeRegistration(dir).state, "unreadable", "解析不了 = unreadable，⛔ 不是 absent");
+
+    writeFileSync(join(dir, ".quay", "server.json"), JSON.stringify({ pid: process.pid }));
+    const live = readServeRegistration(dir);
+    assert.equal(live.state, "present");
+    assert.equal(live.alive, true, "自己的 pid 必然存活");
+
+    // 用一个【真实死掉】的 pid，而不是编一个大概率不存在的数字
+    const child = spawn("sleep", ["0.05"]);
+    const deadPid = child.pid;
+    await sleep(400);
+    writeFileSync(join(dir, ".quay", "server.json"), JSON.stringify({ pid: deadPid }));
+    const dead = readServeRegistration(dir);
+    assert.equal(dead.state, "present");
+    assert.equal(dead.alive, false, "载体在、pid 死了 —— 这正是被瞬时 host 顶掉后的状态");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("classifyOrphanServes — 只回收【本仓库】的孤儿；登记不能担保时一律拒判", () => {
+  const root = "/repo";
+  const serve = ["node", "/repo/packages/quay/bin/quay.ts", "serve", "--host", "127.0.0.1", "--port", "37145"];
+  const mk = (pid, cwd, ppid, cmdline) => ({
+    pid, cwd, cwdDeleted: false, argv0: "node", state: "R", ppid, openFiles: [], cmdline,
+  });
+  const procs = [
+    mk(100, root, 1, serve),                  // 登记在案的 host
+    mk(101, root, 1, serve),                  // 本仓库孤儿            → 回收
+    mk(102, "/other/repo", 1, serve),         // ⭐ 其它仓库的合法 serve → 绝不回收
+    mk(103, root, 1, ["node", "/x/o.js"]),    // 不是 serve            → 不回收
+    mk(104, root, 5, serve),                  // 父进程尚在（非孤儿）  → 不回收
+  ];
+
+  const ok = classifyOrphanServes(procs, { state: "present", pid: 100, alive: true }, new Set(), root);
+  assert.equal(ok.notEvaluated, false);
+  assert.deepEqual(
+    ok.serves.map((p) => p.pid),
+    [101],
+    "只有同仓库的孤儿；102 是回归守卫 —— 它的缺席曾导致本工具杀掉线上 Web UI",
+  );
+
+  // 登记不能担保的三种形态：一律拒判 + 零目标（⛔ 与「判过且干净」不同形）
+  for (const reg of [
+    { state: "absent", pid: null, alive: false },
+    { state: "unreadable", pid: null, alive: false },
+    { state: "present", pid: 100, alive: false },
+  ]) {
+    const r = classifyOrphanServes(procs, reg, new Set(), root);
+    assert.equal(r.notEvaluated, true, `${reg.state}/alive=${reg.alive} 必须拒判`);
+    assert.deepEqual(r.serves, []);
+    assert.ok(r.reason && r.reason.length > 0, "拒判必须给出可读原因");
+  }
+});
+
+test("CLI --orphan-serves --list — 只报本仓库泄漏的 host（seam，不触碰真实进程）", () => {
+  const dir = tmp("serve-reap");
+  try {
+    mkdirSync(join(dir, ".quay"), { recursive: true });
+    writeFileSync(join(dir, ".quay", "server.json"), JSON.stringify({ pid: process.pid }));
+    const serve = ["node", "/x/quay.ts", "serve", "--port", "1"];
+    const seam = writeSeam(dir, [
+      seamLineCmd(101, dir, "node", "R", 1, "", serve),
+      seamLineCmd(102, "/other/repo", "node", "R", 1, "", serve),
+    ]);
+    const res = run(["--orphan-serves", "--root", dir, "--list", "--json"], {
+      WORKTREE_PROCESS_REAPER_PS_SOURCE: seam,
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.equal(payload.mode, "orphan-serves");
+    assert.equal(payload.found, 1);
+    assert.deepEqual(payload.pids, [101]);
+    assert.equal(payload.serveNotEvaluated, false);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI --orphan-serves — 登记陈旧时打印 NOT-EVALUATED 且零杀（seam）", () => {
+  const dir = tmp("serve-stale");
+  try {
+    mkdirSync(join(dir, ".quay"), { recursive: true });
+    writeFileSync(join(dir, ".quay", "server.json"), JSON.stringify({ pid: 4194305 }));
+    const serve = ["node", "/x/quay.ts", "serve", "--port", "1"];
+    const seam = writeSeam(dir, [seamLineCmd(101, dir, "node", "R", 1, "", serve)]);
+    const res = run(["--orphan-serves", "--root", dir], {
+      WORKTREE_PROCESS_REAPER_PS_SOURCE: seam,
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /NOT-EVALUATED/, "拒判必须与「判过且干净」输出不同形（硬规则 3b）");
+    assert.match(res.stdout, /0 reaped/);
   } finally {
     cleanup(dir);
   }

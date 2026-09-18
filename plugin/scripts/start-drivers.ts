@@ -47,9 +47,31 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+
+/** In-memory ceiling for the serve host this skill starts (2026-09-17 global-OOM remediation).
+ *
+ *  WHY: a `quay serve` host was measured at 0.65–1.7 GB RSS (plus a ~0.33 GB `quay-native mcp`
+ *  child); several of them on this 16 GB box exhausted RAM and the kernel went global-OOM, killing
+ *  dbus-daemon/systemd and an unrelated chrome batch. Uncapped, one leaked host grows unbounded.
+ *
+ *  ⛔ NOT a literal (硬规则 4 推论二): DERIVED from the host's MemTotal, so it stays a real ceiling
+ *  (or a real absence of one) on a different machine instead of silently meaning something else.
+ *  Floor 512 MB, cap 4 GB. A host that trips it aborts ITSELF (V8 OOM) rather than dragging the
+ *  kernel into an unattributable global OOM.
+ *
+ *  ⚠️ Deliberately duplicated with `packages/quay/src/cli/server.ts:serveHeapCapMb` — this file is
+ *  the kernel side of the kernel↔target boundary (GOAL-012) and must not import Core's source. */
+function serveHeapCapMb(): number {
+  return Math.min(4096, Math.max(512, Math.round(os.totalmem() / (1024 * 1024) / 5)));
+}
+
+function withServeHeapCap(existing: string | undefined): string {
+  return [existing, `--max-old-space-size=${serveHeapCapMb()}`].filter(Boolean).join(" ");
+}
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 const DEFAULT_SERVE_HOST = "0.0.0.0";
@@ -451,7 +473,12 @@ export async function startServe(
   const child = spawn(
     inv.argv0,
     [...inv.args, "serve", "--host", host, "--port", String(port)],
-    { detached: true, stdio: ["ignore", logFd, logFd], cwd: root, env: process.env },
+    {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      cwd: root,
+      env: { ...process.env, NODE_OPTIONS: withServeHeapCap(process.env.NODE_OPTIONS) },
+    },
   );
   let spawnError: (Error & { code?: string }) | null = null;
   child.on("error", (err) => { spawnError = err as Error & { code?: string }; });
