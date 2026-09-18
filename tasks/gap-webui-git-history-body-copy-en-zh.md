@@ -68,3 +68,9 @@ extra:
 - packages/quay/src/serve-git.ts
 - packages/quay/src/serve-i18n.ts
 - packages/quay/test/serve-git-history-body-i18n.test.mjs (new)
+- packages/quay/test/serve-git-history-zh-chrome.test.mjs
+- packages/quay/test/gap-git-graph-no-bounded-scroll-panel.test.mjs
+- packages/quay/test/gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs
+- packages/quay/test/gap-git-graph-scroll-panel-no-visual-affordance.test.mjs
+- packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs
+- packages/quay/test/serve-handlers.test.mjs
