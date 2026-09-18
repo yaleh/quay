@@ -132,6 +132,20 @@ const logOf = (root) => {
 };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
+/** 等某个 anchor 的 kind 循环**真的在跑**。⛔ 不等 `.quay/anchor.pid` 就发信号：那个文件在
+ *  `process.on("SIGTERM", requestAnchorStop)` **之前**就被写（runAnchor：写 pid → 记 host 行 → 起 kind
+ *  → 才注册处理器）⇒ pid 一到就 SIGTERM，撞上的是 **Node 缺省处理**（进程直接死、不 drain），
+ *  形态与「旧 anchor drain 完就退」**同形**（实测：scoped 门并行负载下 AC3① 因此假绿/假红过一次）。
+ *  本夹具用的直接量是**循环自己写的** round 心跳载体（只有进入循环体才会出现）。 */
+async function waitForLoopRunning(root, kind, ms = 30_000) {
+  const spec = DRIVER_KINDS[kind];
+  const carrier = spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
+  const hb = path.join(root, ".quay", carrier);
+  await waitFor(() => fs.existsSync(hb), ms, `kind=${kind}'s loop to actually run (round carrier ${carrier})`);
+  // 载体出现 ⇒ 循环体已执行过一次 ⇒ 处理器一定已注册（注册在起 kind 的**同一个同步块**末尾）。
+  assert.ok(alive(anchorPid(root)), "载体出现时 anchor 仍活着");
+}
+
 async function waitFor(fn, ms, what) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -177,6 +191,8 @@ test("AC3① — 旧 anchor 的循环 drain 到**宽限边界**才退 ⇒ 替换
   const a = spawnAnchor(root, [], env);
   t.after(() => { killAll(root, [a.pid]); fs.rmSync(root, { recursive: true, force: true }); });
   await waitFor(() => anchorPid(root) === a.pid && alive(a.pid), 20_000, `the old anchor to own anchor.pid (stderr: ${a.stderrText})`);
+  // ⛔ 必须等它的循环**真的在跑**再发信号（见 waitForLoopRunning 的注释：只等 anchor.pid 会撞上缺省处理器）。
+  await waitForLoopRunning(root, HEARTBEAT_KIND);
 
   // 旧 anchor 的循环**只**在宽限边界退出（FAKE_IGNORE_STOP=1）⇒ 它的真实退出时间落在「宽限 + 收尾等待」
   // 这条最坏路径上——正是修复前会撞破预算的那个形态。
@@ -186,12 +202,18 @@ test("AC3① — 旧 anchor 的循环 drain 到**宽限边界**才退 ⇒ 替换
   t.after(() => killAll(root, [b.pid]));
 
   await waitFor(() => anchorPid(root) === b.pid && alive(b.pid), 40_000, `the replacement to take over (stderr: ${b.stderrText})`);
+  // ⚠️ anchor.pid 是**先于**循环被写的（runAnchor：写 pid 文件 → 记 host 行 → 起各 kind）⇒ 断言日志前
+  //    必须**等**那行出现，⛔ 不能在 anchor.pid 一到就断言（scoped 门并行负载下实测踩过一次）。
+  await waitFor(
+    () => logOf(root).includes(`kind=${HEARTBEAT_KIND} loop started (pid=${b.pid})`),
+    20_000,
+    "the replacement's kind loop to start",
+  );
   const waited = Date.now() - t0;
   const log = logOf(root);
   assert.ok(!log.includes("REFUSING to start"), `⛔ 不得出现 REFUSING（预算必须覆盖真实最坏退出）:\n${log.slice(-2000)}`);
   assert.ok(!log.includes("STILL ALIVE after"), "⛔ 也不该退化成「超预算但继续等」那条降级路（旧 anchor 是**正确但慢**，预算该容得下它）");
   assert.match(log, /takeover \d+ exited — taking over/, "走的是**正常**交接那条路");
-  assert.match(log, new RegExp(`kind=${HEARTBEAT_KIND} loop started \\(pid=${b.pid}\\)`), "替换进程真的起了循环");
   assert.ok(waited > 1_000, `旧 anchor 确实 drain 了一段时间才退（实测 ${waited}ms——⛔ 不是「它早就没了」的空过）`);
 });
 
@@ -245,11 +267,16 @@ test("AC4 (D3) — 接管被放弃之后旧 pid 才退出 ⇒ 替换进程**接�
   //    **零 anchor**（实测 27 分钟）；修复后：它必须接管。
   old.kill("SIGKILL");
   await waitFor(() => anchorPid(root) === b.pid && alive(b.pid), 30_000, `the replacement to take over once the old pid is gone (stderr: ${b.stderrText})`);
+  // anchor.pid 先于循环被写（同上）⇒ 等那行，⛔ 不在 pid 一到就断言日志。
+  await waitFor(
+    () => logOf(root).includes(`kind=${HEARTBEAT_KIND} loop started (pid=${b.pid})`),
+    20_000,
+    "the replacement's kind loop to start",
+  );
   const log = logOf(root);
   assert.match(log, /exited at last \(after \d+ms, \d+ms past the budget\) — taking over/, "走的是「晚到但接管」那条路");
   assert.ok(!log.includes("REFUSING to start"), "⛔ 不该走到放弃那条路");
   assert.equal(readTakeoverRecord(root)?.state, "taken-over-after-abandon", "异常已收敛：记录取**另一个**值（⛔ 不是留在 abandoned）");
-  assert.match(log, new RegExp(`kind=${HEARTBEAT_KIND} loop started \\(pid=${b.pid}\\)`), "替换进程真的起了 kind 循环");
 
   // ③ 回读面：同一个记录也出现在 manager/外层已经在读的 `.quay/anchor.json` 上（⛔ 不是只给本文件看的载体）。
   await waitFor(() => anchorJson(root)?.takeover?.state === "taken-over-after-abandon", 20_000, "the takeover reading to reach anchor.json");
