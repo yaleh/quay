@@ -622,7 +622,6 @@
   "plugin/test/mechanism-vitality-check.test.mjs": 15875,
   "plugin/test/meta-driver.test.mjs": 11749,
   "plugin/test/mirror-full-suite-state.test.mjs": 485,
-  "plugin/test/mirror-measure-history.test.mjs": 900,
   "plugin/test/mirror-pair-drift-check.test.mjs": 1628,
   "plugin/test/monitor-mount-check.test.mjs": 6395,
   "plugin/test/needs-human-recheck.test.mjs": 10270,
