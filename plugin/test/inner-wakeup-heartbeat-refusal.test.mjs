@@ -137,8 +137,13 @@ function runWriter(root, args) {
 // the next develop run 35294796640, and in the failing run the sibling tests in this very file passed),
 // re-take the measurement once instead of reporting a verdict the child never produced.
 
-/** The writer's own diagnostic lines all start with this prefix; a crashed child prints none of them. */
-const WRITER_DIAGNOSTIC = /inner-wakeup-heartbeat/;
+/**
+ * The writer's own diagnostics ALL begin a line with this prefix (every `console.error` in
+ * inner-wakeup-heartbeat.ts's main() starts with `inner-wakeup-heartbeat: `). Anchored to line start
+ * so a CRASH AFTER the writer started — whose stack frames merely contain the filename, e.g.
+ * `    at file:///…/inner-wakeup-heartbeat.ts:1:1` — is not mistaken for the writer speaking.
+ */
+const WRITER_DIAGNOSTIC = /^inner-wakeup-heartbeat:/m;
 
 /** Returns a short signature when the child never ran the writer, else null. */
 function writerStartupFailure(w) {
