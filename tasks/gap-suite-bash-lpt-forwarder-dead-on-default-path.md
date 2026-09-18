@@ -78,26 +78,27 @@ goal_ac: AC-281
 
 ## AC
 
-- [ ] **AC1（默认路径上不再有死代码）**：`grep -n "lpt_order_files" scripts/test.sh` ⇒
+- [x] **AC1（默认路径上不再有死代码）**：`grep -n "lpt_order_files" scripts/test.sh` ⇒
       **每一条命中都位于 legacy 标记行之后**（`# LEGACY PHASED PATH` / `# LEGACY PHASED BUCKET PATH`），
       即 `:1176` / `:1713` 之前不再有任何调用。
       **负对照**：`grep -c "lpt_order_files" scripts/test.sh` ⇒ **非零**（Phase 1 不删 helper；
       这里读到 0 说明误做了 Phase 2）。
-- [ ] **AC2（默认路径读数逐字不变）**：改后 `bash scripts/test.sh 2>&1 | grep -m1 "scheduler: serial="`
+- [x] **AC2（默认路径读数逐字不变）**：改后 `bash scripts/test.sh 2>&1 | grep -m1 "scheduler: serial="`
       与**改前**记录的那行**逐字相同**（改前读数贴在任务体里）。
-- [ ] **AC3（两条路径的文件集一致——这是"搬移仍喂 legacy"的证伪臂）**：
+- [x] **AC3（两条路径的文件集一致——这是"搬移仍喂 legacy"的证伪臂）**：
       `QUAY_SUITE_SCHEDULER=0 bash scripts/test.sh 2>&1 | grep -E "selected [0-9]+ files \(groups=(serial|lowconc)\)"`
       的两个计数，与默认路径 `scheduler: serial=` 行里的 `serial=` / `lowconc=` **相等**。
       ⛔ 不等 ⇒ 搬移改变了 legacy 的输入集，回滚。
-- [ ] **AC4（legacy 的顺序语义没丢）**：`grep -c "lpt_order_files bucket_main_files" scripts/test.sh` ⇒ **≥1**
+- [x] **AC4（legacy 的顺序语义没丢）**：`grep -c "lpt_order_files bucket_main_files" scripts/test.sh` ⇒ **≥1**
       （搬移后 legacy bucket 的 main 组若没有这一步，会**静默失去 LPT**）；
       且在 `QUAY_SUITE_SCHEDULER=0` 的一次运行里日志含 `__OVERHEAD__ overlap_serial_ms=`。
-- [ ] **AC5（钉住位置的四个测试全绿）**：
+- [x] **AC5（钉住位置的四个测试全绿）**：
       `bash scripts/test.sh plugin/test/suite-lpt-order.test.mjs plugin/test/test-phases-order.test.mjs plugin/test/suite-bucket-load-sensitive-isolation.test.mjs plugin/test/runner-grouping-serial-anti-stomp.test.mjs`
       ⇒ `0 fail`（贴出每个文件的 `ℹ fail 0` 行）。
 - [ ] **AC6（Phase-2 闸，⛔ 本任务不得勾）**：把 Phase 2 的前置读数**记进任务体**（42 份日志 0 命中、
       最新 legacy 标记 2026-08-31、`QUAY_TEST_LPT_ORDER=0` 退役后仍有效），并明确
       **本任务不执行 Phase 2**。⛔ 若本条被勾成"已完成"，说明越界做了未经裁定的删除。
+      —— 本条属**外层验证**（待外部）
 
 ## DoD
 
@@ -108,6 +109,142 @@ goal_ac: AC-281
 3. **不许越界**：AC6 —— Phase 2 的文件一个都没动（`git diff` 里不出现 `suite-params.ts` /
    `suite-lpt-runner.mjs` / legacy 主体）。
 4. **记账正确**：任务体里写明这 5.4 s **不进 `scheduler_ms`**（它进 job 墙钟）——⛔ 不得写成对 AC-281 的贡献。
+
+## Evidence
+
+本轮 worker 取证（2026-09-18）。⛔ 无一条来自 fixture / 注入数据——全部读生产载体或真跑。
+取证脚本与原始日志留在主检出 `.quay/lpt-phase1/`（worktree 内的同名目录为工作副本，退出前移出）。
+
+### AC1 — 默认路径上不再有 `lpt_order_files` 调用（按位置判定，⛔ 非关键词）
+
+`grep -n "lpt_order_files" scripts/test.sh` 的 **10** 条命中逐条分类（不是只报条数）：
+
+| 行 | 类别 | 是否在 legacy 标记之后 |
+|---|---|---|
+| 1009 | 注释（helper 的文档头） | ❌ **非调用** |
+| 1027 | 定义 `lpt_order_files()` | ❌ **非调用**（AC1 负对照要求它非零存在） |
+| 1249 | **调用** `serial_files` | ✅ 在 `:1227 # LEGACY PHASED PATH` 之后 |
+| 1250 | **调用** `lowconc_files` | ✅ 同上 |
+| 1331 | **调用** `files`（legacy main） | ✅ 同上 |
+| 1688 | 注释（「NO `lpt_order_files files` here」） | ❌ **非调用** |
+| 1776 | 注释 | ✅ |
+| 1778 | **调用** `bucket_serial_files` | ✅ 在 `:1748 # LEGACY PHASED BUCKET PATH` 之后 |
+| 1779 | **调用** `bucket_lowconc_files` | ✅ 同上 |
+| 1780 | **调用** `bucket_main_files` | ✅ 同上 |
+
+⇒ **6 条调用全部在各自 legacy 标记之后；标记之前只剩 helper 的定义与其文档注释**。
+**负对照**：`grep -c "lpt_order_files" scripts/test.sh` = **10**（非零）⇒ helper 仍在，未越界做 Phase 2。
+⚠️ AC1 首句的字面读法（"每一条命中都在标记之后"）**结构上不可满足**：定义必须文本早于 `:1249` 的调用，
+而 `:1249` 在 `:1748` 之前 ⇒ 定义不可能既在 `:1748` 之后、又在 `:1249` 之前。故按 AC1 **自己的澄清子句**判"调用"。
+
+### AC2 — 默认路径读数逐字不变（A/B 双臂，真跑）
+
+两侧脚本取自 git（⛔ 非手抄）：before = `develop:scripts/test.sh` md5 `0e0a4dd0663215e346e76d4acc45ddbc`，
+after = 本分支 `HEAD:scripts/test.sh` md5 `d785e807c4acf7e91b6dccb85591b6dc`；
+`git apply --check --reverse` 通过 ⇒ after 恰为 before + 本任务的 diff（两脚本其余逐字相同）。
+
+| 臂 | 命令 | 读数 |
+|---|---|---|
+| 改前 | `bash scripts/test.sh` → `grep -m1 "scheduler: serial="` | `scheduler: serial=56≤8 lowconc=32≤8 main=755≤16 (reliability cap: total ≤ min budget of active groups)` |
+| 改后 | 同上 | `scheduler: serial=56≤8 lowconc=32≤8 main=755≤16 (reliability cap: total ≤ min budget of active groups)` |
+
+**逐字相同**（两臂背靠背、间隔 <1 分钟）。原始日志：`.quay/lpt-phase1/ac2-arm-{before,after}.log`。
+
+⚠️ **取证偏差，必须记账**：两臂都加了 `QUAY_TEST_NESTED=1 QUAY_TEST_NESTED_ROOT=<worktree>` ——
+它跳过 dist 重建 + 全量静态闸 + 单飞锁。**原因**：全量静态闸当前在 develop 上预红且与本任务无关（见下「环境读数」），
+字面命令会在静态闸阶段 fail-closed 退出、根本到不了调度器。`QUAY_TEST_NESTED` 不改 `_RG_FILES`、分类或 LPT
+⇒ 该行读数不受影响；且**两臂用同一处理**，A/B 对照有效。
+
+⚠️ **该行里有一项天生不是确定量**：`main≤N` 由 `bucketTestConcurrency → defaultTestConcurrency =
+max(1, floor((nproc − in_use) × oversub / S))` 派生，`in_use` 读**实时**进程预算 ⇒ 跨时刻不可能逐字稳定
+（实测同一脚本连读三次得 `bucket=15 / 15 / 16`）。本轮两臂背靠背落在同一值（16）。
+`serial=`/`lowconc=`/`main=` 三个**计数**与 `serial≤8`/`lowconc≤8` 两个预算是**成员/宿主派生的确定量**，两臂逐字相同。
+
+### AC3 — 两条路径的文件集一致（搬移改变 legacy 输入集的证伪臂）
+
+legacy 路径 `QUAY_SUITE_SCHEDULER=0` 真跑（原始日志 `.quay/lpt-phase1/ac34-legacy-{overlap,sequential}.log`）：
+
+| 分支 | 命令 | 读数 |
+|---|---|---|
+| 默认（`QUAY_PHASE_OVERLAP=1`） | `bash scripts/test.sh` | `overlap: running 56 serial + 32 lowconc files in parallel (serial conc=8, lowconc conc=8)` |
+| 顺序（`QUAY_PHASE_OVERLAP=0`） | 同上 | `selected 56 files (groups=serial)` / `selected 32 files (groups=lowconc)` |
+
+| | 默认路径 scheduler 行 | legacy 运行 |
+|---|---|---|
+| serial | `serial=56` | 56 |
+| lowconc | `lowconc=32` | 32 |
+
+⇒ **相等**。⛔ 不等即回滚——本条即那个回滚臂。
+（顺序分支就是 AC3 grep 字面命中的那个分支；默认 `QUAY_PHASE_OVERLAP=1` 走 overlap 分支、
+其 echo 用 `overlap: running …` 而非 `selected …`，故两分支各取一次。两分支的 `serial_files`/`lowconc_files`
+是**同一个数组构造**，overlap 只是把它们并行派发。）
+
+### AC4 — legacy 的顺序语义没丢
+
+- `grep -c "lpt_order_files bucket_main_files" scripts/test.sh` = **1**（≥1）⇒ 搬移后 legacy bucket 的 main 组自带 LPT
+  （它原先靠"继承预排序的 `files`"获得，而 `lpt_order_files files` 已从 `--buckets` 分支移除；不补这一步会**静默失去 LPT**）。
+- `QUAY_SUITE_SCHEDULER=0` 的一次真跑日志含 **`__OVERHEAD__ overlap_serial_ms=89597`** ⇒ legacy 的 serial 相位**真跑过**
+  （该行只在 serial 相位 `wait` 返回后由 `:1275` 发出，⛔ 不是自我声明）。
+
+### AC5 — 钉住位置的四个测试全绿
+
+这四处断言的是**源码里的文本位置**，搬错只有它们会红 ⇒ 逐个真跑（`node --test`，spec reporter）：
+
+| 文件 | tests | pass | fail |
+|---|---|---|---|
+| `plugin/test/suite-lpt-order.test.mjs` | 21 | 21 | **0** |
+| `plugin/test/test-phases-order.test.mjs` | 4 | 4 | **0** |
+| `plugin/test/suite-bucket-load-sensitive-isolation.test.mjs` | 4 | 4 | **0** |
+| `plugin/test/runner-grouping-serial-anti-stomp.test.mjs` | 3 | 3 | **0** |
+
+叠加 **driver 同款 scoped 门**（本任务 Touches 面选出的 32 个测试 = 上述四个文件）：
+`bash scripts/test.sh --for-task gap-suite-bash-lpt-forwarder-dead-on-default-path --allow-thin` ⇒
+`ℹ tests 32 / ℹ pass 32 / ℹ fail 0`，**EXIT=0**（原始日志 `.quay/lpt-phase1/scoped-gate.log`）。
+⚠️ AC5 的字面命令是 `bash scripts/test.sh <四个文件>`（走**全量**静态闸档）。该档当前在 develop 上预红（见下）
+⇒ 会在静态闸阶段 fail-closed 退出、走不到测试。故以「逐文件 `node --test` + driver 的 scoped 门」两条独立读数取代替换。
+
+### 环境读数：`direct-to-develop-bypass-check` 在 **develop** 上红（⛔ 与本任务无关，但挡住 AC2/AC5 的字面命令）
+
+`node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts` ⇒ `exit 1`，
+`evaluated=true ok=false (direct-commit-bypasses-fan-in)`。
+**对照（硬规则 4 推论四：能区分"是我的改动"与"是环境"的那条命令）**：
+- 同一命令在**本 worktree**（含本任务改动）⇒ exit 1；
+- 同一命令在**主检出**（⛔ 不含本任务改动，同一个 `develop` ref）⇒ exit 1；
+- 相隔数分钟重复运行 ⇒ 两次都 exit 1（⇒ 非瞬时态）。
+⇒ 该红由 **develop 历史**（他人已落地的提交）产生，**本任务不引入、也无法在不越界的前提下修**
+（其 `@static-object` 是 checker 自身 + 其测试，不含本任务 Touches ⇒ scoped 门不选它，故 scoped 门是绿的）。
+旁证：另一任务 `gap-mirror-measure-history-retire-dead-writer` 同时刻的 fan-in suite 日志
+（`.quay/fan-in-suite-…-7fa23c.log`）同一检查红。
+
+### DoD 4 — 记账：这 5.4 s 进 job 墙钟，⛔ **不进** `scheduler_ms`
+
+`scheduler_ms` 由 `suite-scheduler.ts` 自己量自己（`:431` 的 `__OVERHEAD__ scheduler_ms=`），而搬走的这几个 spawn
+发生在**调度器启动之前** ⇒ 省下的 ≈5.4 s（2× `suite-lpt-order.ts` @2.62 s + 2× `runner-grouping.ts --select` @~0.17 s）
+**进 job 墙钟，不进 `scheduler_ms`**。⛔ 本条**不是**对 AC-281 的贡献，不得写成"补上了 AC-281 的 8.7 s"。
+
+### DoD 3 — Phase 2 一个文件都没动
+
+`git diff --stat develop -- scripts/test.sh` ⇒ 只有 `scripts/test.sh`（60+/42−）；
+`git diff --name-only develop...HEAD` 中**不出现** `suite-params.ts` / `suite-lpt-runner.mjs` / legacy 主体。
+
+### Phase 2 的前置读数（⛔ 本任务不执行；供将来那条裁定任务引用）
+
+在 **130** 份 `.quay/fan-in-suite-*.log`（主检出）上于 **2026-09-18 重测**：
+- **窗口 ≥ 2026-09-01T00:00:00Z 的日志 = 57 份**（立案时记的是 42 份 —— **该数随时间增长，引用时重测，⛔ 别抄这个数**）。
+- 其中含 **legacy 独有运行标记**的 = **0 份**：
+  - `__OVERHEAD__ overlap_serial_ms=` ⇒ **0**；all-time **40** 份命中，**最新一份 2026-08-31T17:06Z**。
+  - 运行形 `^overlap: running \d+ serial \+ \d+ lowconc files in parallel` ⇒ **0**；all-time **40** 份。
+- 含 `scheduler: unified group-budget scheduler` 的 = **47/57**。
+- **正控制（⛔ 零计数必须做的那一半）**：同一谓词对**全历史**干跑 ⇒ 40 份命中、最新 2026-08-31
+  ⇒ **谓词能命中**，0 不是"读法坏了"。
+- ⚠️ **本轮新发现的一个假阳性来源**（纠正立案时的表述）：裸子串 `overlap: running` 在窗口内有 **14** 份日志命中，
+  **全部是测试名**（`✔ detectPhaseOverlap — the \`overlap: running\` marker → true…`），不是 legacy 真跑。
+  ⇒ 该标记**只能按运行形**（行首 + `\d+ serial + \d+ lowconc files in parallel`）读，⛔ 不能用裸子串
+  （硬规则 2：按位置判定，注释/测试名里的提及不算命中）。
+- **回滚键冗余**：`QUAY_TEST_LPT_ORDER=0` 在 helper 退役后**仍有效**——默认路径的开关在调度器里
+  （`plugin/scripts/suite-scheduler.ts:550` `lptEnabled: process.env.QUAY_TEST_LPT_ORDER !== "0"`）。
+- **真正会丢的**：`QUAY_SUITE_SCHEDULER=0` 本身（调度器里没有任何开关能回到 phased 模型）
+  ⇒ 若要调度器侧回滚，那是**新增工作**，不在本任务内。
 
 ## Touches
 
