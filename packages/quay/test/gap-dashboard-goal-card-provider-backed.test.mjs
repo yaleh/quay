@@ -38,6 +38,12 @@ import { startServer } from "../src/serve.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
+// gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and
+// the module default is `en` (DEFAULT_LANG). Every render below is therefore made EXPLICITLY
+// `zh` — the assertions in this file were written against the zh baseline and keep their exact
+// original meaning as that baseline's regression guard.
+
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
 const nativeBin = QUAY_NATIVE_CLI;
@@ -64,7 +70,7 @@ test("AC5: three content elements — AC 达成 x/y + one of fresh/stale/NOT-EVA
     ac("AC-171", "GOAL-001", { status: "active" }),
     ac("AC-172", "GOAL-001", { status: "achieved", evidence: { at: new Date(NOW - 2 * DAY).toISOString() } }),
   ];
-  const html = renderGoalCard(goals, { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  const html = renderGoalCard(goals, { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" });
 
   assert.match(html, /id="goal-card"/, "card carries the goal-card DOM id");
   assert.match(html, /AC 达成 2\/3/, "per-goal AC progress x/y (2 achieved of 3)");
@@ -78,7 +84,7 @@ test("AC5: three-state never collapses — fresh / stale / NOT-EVALUATED are dis
   // fresh: latest evidence.at within the window.
   const fresh = renderGoalCard(
     [goal("GOAL-001"), ac("AC-170", "GOAL-001", { status: "achieved", evidence: { at: new Date(NOW - DAY).toISOString() } })],
-    { cap: 3, staleMs, nowMs: NOW },
+    { cap: 3, staleMs, nowMs: NOW, lang: "zh" },
   );
   assert.match(fresh, /fresh/, "recent evidence → fresh");
   assert.doesNotMatch(fresh, /NOT-EVALUATED/, "fresh goal is not NOT-EVALUATED");
@@ -86,13 +92,13 @@ test("AC5: three-state never collapses — fresh / stale / NOT-EVALUATED are dis
   // stale: latest evidence.at older than the window.
   const stale = renderGoalCard(
     [goal("GOAL-001"), ac("AC-170", "GOAL-001", { status: "achieved", evidence: { at: new Date(NOW - 8 * DAY).toISOString() } })],
-    { cap: 3, staleMs, nowMs: NOW },
+    { cap: 3, staleMs, nowMs: NOW, lang: "zh" },
   );
   assert.match(stale, /stale/, "old evidence → stale");
 
   // NOT-EVALUATED: an active GOAL with NO ACs at all — cannot compute lastProgressAt, so judging it
   // "fresh" would record a never-measured object as healthy (hard rule 3b).
-  const notEval = renderGoalCard([goal("GOAL-002")], { cap: 3, staleMs, nowMs: NOW });
+  const notEval = renderGoalCard([goal("GOAL-002")], { cap: 3, staleMs, nowMs: NOW, lang: "zh" });
   assert.match(notEval, /NOT-EVALUATED/, "goal with no ACs → NOT-EVALUATED");
   assert.doesNotMatch(notEval, /fresh/, "never-evaluated goal is never judged fresh");
 });
@@ -103,7 +109,7 @@ test("layout regression: 8-char id + zero ACs (NOT-EVALUATED) keeps id <a> flex:
   // The fix gives the id <a> flex:none (never shrinks) and drops the ellipsis trio, and lets the label
   // wrap onto its own line via the row's flex-wrap:wrap. This is a pure string/regex regression (no
   // browser) — it can't measure flexbox squeeze, so it asserts the two style tokens that guard against it.
-  const html = renderGoalCard([goal("GOAL-011")], { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  const html = renderGoalCard([goal("GOAL-011")], { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" });
   assert.match(html, /NOT-EVALUATED/, "zero ACs trigger the longest (13-char) three-state label");
   const idAnchor = html.match(/<a href="\/goal\/GOAL-011"[^>]*>/);
   assert.ok(idAnchor, "the active goal's id <a> is rendered");
@@ -114,7 +120,7 @@ test("layout regression: 8-char id + zero ACs (NOT-EVALUATED) keeps id <a> flex:
 });
 
 test("AC4: goalList degraded to [] renders an empty state, never throws and never disappears", () => {
-  const html = renderGoalCard([], { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  const html = renderGoalCard([], { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" });
   assert.match(html, /id="goal-card"/, "the card still renders when the goal list is empty");
   assert.match(html, /暂无 active GOAL/, "empty state is shown");
   assert.match(html, /active 0 \/ cap 3/, "activeCount is honestly 0");
@@ -237,7 +243,7 @@ after(async () => {
 });
 
 test("AC1+AC2: a running serve instance serves goal-card AND task-card on /dashboard (three elements rendered)", async () => {
-  const r = await get(port, "/dashboard");
+  const r = await get(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.match(r.body, /id="goal-card"/, "goal-card is present (AC1)");
   assert.match(r.body, /id="task-card"/, "task-card is present (AC2 negative control: the pipeline itself works)");
@@ -251,7 +257,7 @@ test("AC4: with no goals the /dashboard still returns 200 and shows the empty st
   for (const f of fs.readdirSync(goalsDir)) fs.rmSync(path.join(goalsDir, f));
   await rebuild();
   try {
-    const r = await get(port, "/dashboard");
+    const r = await get(port, "/dashboard?lang=zh");
     assert.equal(r.status, 200);
     assert.match(r.body, /id="goal-card"/, "card still renders (not disappears)");
     assert.match(r.body, /暂无 active GOAL/, "empty state shown");
@@ -317,7 +323,7 @@ test("AC1: rebuildNow() during an in-flight cold build reflects the caller's cha
     );
 
     // …and the same reading on the real HTTP surface (the path the suite red took).
-    const r = await get(port, "/dashboard");
+    const r = await get(port, "/dashboard?lang=zh");
     assert.equal(r.status, 200);
     assert.match(r.body, /暂无 active GOAL/, "empty state shown — the dashboard reads the caller's store, not the stale incumbent");
   } finally {

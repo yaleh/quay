@@ -27,6 +27,7 @@ import {
   DEFAULT_TIMELINE_HOURS,
 } from "../src/serve-dashboard.ts";
 import { relativeTime } from "../src/serve-render.ts";
+import { dashboardLabelsFor } from "../src/serve-i18n.ts";
 import { readTests, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { startServer } from "../src/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -127,7 +128,7 @@ test("AC3 (G): testsCard timeline <rect> count == in-window parseable records", 
     // unparseable durationMs (null) → no rect
     { round: 5, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 20 * 60_000).toISOString(), durationMs: null },
   ];
-  const html = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs: FIXED_NOW_MS });
+  const html = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   const rects = (html.match(/<rect/g) || []).length;
   assert.equal(rects, 2, "only the 2 in-window parseable records render a <rect> (not merely 'SVG exists')");
 });
@@ -139,7 +140,7 @@ test("AC4 (H list): sorted by lockAcquireEpoch desc, renders outcome+task, drops
     { ts: null, task: "task-high", mechanical_fan_in: mfi(300, 305, "landed") },
     { ts: null, task: "task-mid", mechanical_fan_in: mfi(200, 204, "landed") },
   ];
-  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   assert.ok(html.includes("task-high") && html.includes("task-mid") && html.includes("task-low"), "each row carries its task id");
   assert.ok(html.indexOf("task-high") < html.indexOf("task-mid"), "desc order: lockAcquireEpoch 300 before 200");
   assert.ok(html.indexOf("task-mid") < html.indexOf("task-low"), "desc order: lockAcquireEpoch 200 before 100");
@@ -164,7 +165,7 @@ test("AC5② (H bar): fan-in card SVG <rect> count == in-window parseable lock i
     // unparseable (null lock epochs) → no rect
     { ts: null, task: "t4", mechanical_fan_in: mfi(null, null, "landed") },
   ];
-  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   const rects = (html.match(/<rect/g) || []).length;
   assert.equal(rects, 2, "only the 2 in-window parseable lock intervals render a <rect>");
 });
@@ -196,7 +197,7 @@ test("AC7 (window actually filters): hours=3 vs hours=6 produce different segmen
     { round: 1, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 30_000).toISOString(), durationMs: 30_000 },
     { round: 2, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 4 * 3_600_000).toISOString(), durationMs: 30_000 },
   ];
-  const h3 = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs: FIXED_NOW_MS });
+  const h3 = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   const h6 = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 6, nowMs: FIXED_NOW_MS });
   const rect3 = (h3.match(/<rect/g) || []).length;
   const rect6 = (h6.match(/<rect/g) || []).length;
@@ -227,7 +228,7 @@ test("AC1 (fan-in timestamp): each row renders relativeTime(key*1000) verbatim",
     { ts: null, task: "t-recent", mechanical_fan_in: mfi(acquireEpoch, acquireEpoch + 4, "landed") },
     { ts: null, task: "t-older", mechanical_fan_in: mfi(acquireEpoch - 2 * 86_400, acquireEpoch - 2 * 86_400 + 4, "red") },
   ];
-  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   // Verbatim compare against relativeTime(fixedEpoch*1000) — NOT a fuzzy /ago|前/ match. The two keys
   // are 2 days apart so each row's expected string is distinct (each assertion proves ITS row's key).
   assert.ok(html.includes(relativeTime(acquireEpoch * 1000)), "recent row renders relativeTime(lockAcquireEpoch*1000) verbatim");
@@ -243,7 +244,7 @@ test("AC2 (tests bar anchor): windowEnd=latest end → non-empty; windowEnd=now 
     { round: 2, state: "red", pass: 0, tests: 2, startedAt: new Date(nowMs - 7 * 3_600_000).toISOString(), durationMs: 30_000 },
   ];
   // ① new implementation: windowEnd = latest record end (nowMs - 7h + 30s) → both records intersect.
-  const html = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs });
+  const html = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs, lang: "zh" });
   const rects = (html.match(/<rect/g) || []).length;
   assert.ok(rects >= 1, "anchored to the latest end, the 3h bar is non-empty");
 
@@ -266,7 +267,7 @@ test("AC3 (fan-in bar anchor): windowEnd=latest release → non-empty; windowEnd
     { ts: null, task: "t-latest", mechanical_fan_in: mfi(nowSec - 7 * 3600, nowSec - 7 * 3600 + 60, "landed") },
     { ts: null, task: "t-older", mechanical_fan_in: mfi(nowSec - 8 * 3600, nowSec - 8 * 3600 + 60, "red") },
   ];
-  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS, lang: "zh" });
   const rects = (html.match(/<rect/g) || []).length;
   assert.ok(rects >= 1, "anchored to the latest release, the 3h fan-in bar is non-empty");
 
@@ -295,9 +296,19 @@ test("AC4 (windowEndMs naming/role): signature params are segments, windowHours,
 });
 
 test("AC5 (copy): the window hint names 结束时刻为终点 / 最近一次运行/fan-in", () => {
-  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
-  assert.ok(src.includes("结束时刻为终点"), "the window hint states the anchor is the event end time");
-  assert.ok(src.includes("最近一次运行/fan-in"), "the window hint names both the tests and fan-in anchors");
+  // ⚠️ gap-webui-dashboard-body-copy-en-zh: this copy MOVED out of serve-dashboard.ts into
+  // serve-i18n.ts's DASHBOARD_LABELS (its single source, which is the point of the move). Asserting
+  // the SOURCE TEXT of one file would now fail for a reason that has nothing to do with the copy
+  // being right, so the assertion reads the RESOLVED string through the dictionary instead — which is
+  // stronger: it survives any future re-layout, and it fails if the value is dropped from the table
+  // even when some other file still happens to contain the words.
+  const zh = dashboardLabelsFor("zh");
+  assert.ok(zh.timelineWindow.includes("结束时刻为终点"), "the window hint states the anchor is the event end time");
+  assert.ok(zh.timelineWindow.includes("最近一次运行/fan-in"), "the window hint names both the tests and fan-in anchors");
+  // …and the pre-move source file no longer carries a SECOND copy of it (that duplicate is what the
+  // move removed — asserting its absence is the half that makes the move a measurement).
+  assert.ok(!fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8").includes("结束时刻为终点"),
+    "serve-dashboard.ts no longer holds its own copy of the window hint (one source)");
 });
 
 test("AC7 (production regression): real .quay data renders ≥1 <rect> in BOTH cards", (t) => {
@@ -399,15 +410,15 @@ test("AC7 (HTTP): illegal/missing hours → HTTP 200 with the default-3 window; 
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    for (const p of ["/dashboard", "/dashboard?hours=abc", "/dashboard?hours=0", "/dashboard?hours=999"]) {
+    for (const p of ["/dashboard?lang=zh", "/dashboard?lang=zh&hours=abc", "/dashboard?lang=zh&hours=0", "/dashboard?lang=zh&hours=999"]) {
       const res = await request(port, p);
       assert.equal(res.status, 200, `GET ${p} returns 200 (illegal/missing hours never error)`);
       assert.ok(res.body.includes("结束时刻为终点的过去 3h"), `GET ${p} falls back to the default 3h window`);
     }
 
-    const six = await request(port, "/dashboard?hours=6");
+    const six = await request(port, "/dashboard?lang=zh&hours=6");
     assert.equal(six.status, 200, "GET /dashboard?hours=6 returns 200");
-    assert.ok(six.body.includes("结束时刻为终点的过去 6h"), "GET /dashboard?hours=6 reflects the 6h window");
+    assert.ok(six.body.includes("结束时刻为终点的过去 6h"), "GET /dashboard?lang=zh&hours=6 reflects the 6h window");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }

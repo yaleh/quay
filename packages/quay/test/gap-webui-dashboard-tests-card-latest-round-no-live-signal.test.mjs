@@ -110,7 +110,7 @@ test("AC1: a live-running suite (no taskId field, real writer shape) renders 运
     runId: "mfi-some-task-1700000000000-abcdef", pid: 12345,
   }));
   await rebuild();
-  const r = await request(port, "/dashboard");
+  const r = await request(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("运行中"), "testsCard shows 运行中 while a suite is live");
   assert.ok(/已运行 1m3\ds|已运行 \d+s/.test(r.body), "testsCard shows an elapsed-time reading");
@@ -121,7 +121,7 @@ test("AC2: no live suite + gate-blocked latest round names the gate, never a bar
   fs.writeFileSync(roundsFile(), MIXED_ROUNDS.map((r) => JSON.stringify(r)).join("\n") + "\n");
   // no full-suite-state.json — nothing currently running
   await rebuild();
-  const r = await request(port, "/dashboard");
+  const r = await request(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("gate 未过"), "gate-blocked latest round is labeled, not shown as bare pass 0/0");
   assert.ok(r.body.includes("static-check"), "the specific gate name is surfaced");
@@ -131,7 +131,7 @@ test("AC2: no live suite + gate-blocked latest round names the gate, never a bar
 test("AC3: the recent-run list (round chips) distinguishes gate-blocked from real green/red", async () => {
   fs.writeFileSync(roundsFile(), MIXED_ROUNDS.map((r) => JSON.stringify(r)).join("\n") + "\n");
   await rebuild();
-  const r = await request(port, "/dashboard");
+  const r = await request(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.ok(/#2/.test(r.body) && /#3/.test(r.body), "the recent-run list renders round chips for a green and a gate-blocked round (the single latest row is not the only signal)");
   assert.ok(r.body.includes("未执行测试"), "a gate-blocked round's tooltip says tests never ran (not 0/0 fail)");
@@ -140,7 +140,7 @@ test("AC3: the recent-run list (round chips) distinguishes gate-blocked from rea
 
 test("AC3b: an empty ledger (no verification-round.jsonl) still renders 200 with an honest empty state", async () => {
   await rebuild();
-  const r = await request(port, "/dashboard");
+  const r = await request(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("未接入") || r.body.includes("无验证轮记录"), "empty ledger → honest empty state, not a crash");
 });

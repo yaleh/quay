@@ -58,6 +58,10 @@ function makeDashboardArgs(tasks) {
   };
 }
 
+// gap-webui-dashboard-body-copy-en-zh: this file's assertions were written against the zh baseline;
+// the dashboard's body copy is now language-dependent and the module default is `en`, so the render
+// below asks for `zh` (production always threads the request's own language).
+
 /** Extract `function <name>(...) { ... }` (balanced parens + braces) from a source file — the same
  *  structural-pin helper gap-dashboard-parallelize.test.mjs uses for its source-shape assertions. */
 function fnBody(src, fnName) {
@@ -111,7 +115,7 @@ test("AC1/AC4: four-status fixture renders ready/todo/needs-human mini lists (ca
     { id: "D-2", title: "done two",    status: "done",        labels: [], updatedAt: 998 },
     { id: "S-1", title: "sup one",     status: "superseded",  labels: [], updatedAt: 500 },
   ];
-  const html = renderDashboardPage(makeDashboardArgs(tasks));
+  const html = renderDashboardPage(makeDashboardArgs(tasks), { lang: "zh" });
 
   // Each non-terminal status renders its own block heading, labelled with the source's cap.
   for (const s of ["ready", "todo", "needs-human"]) {
@@ -150,7 +154,7 @@ test("AC2: a status with 0 tasks renders no mini-list block (no empty-placeholde
     { id: "R-1", title: "ready one", status: "ready", labels: [], updatedAt: 100 },
     { id: "D-1", title: "done one", status: "done", labels: [], updatedAt: 999 },
   ];
-  const html = renderDashboardPage(makeDashboardArgs(tasks));
+  const html = renderDashboardPage(makeDashboardArgs(tasks), { lang: "zh" });
 
   assert.ok(html.includes(`ready（最近 ${MINI_LIST_N} 条）`), "ready (1 task) still renders its block");
   assert.ok(html.includes("/task/R-1"), "ready lists its single task");

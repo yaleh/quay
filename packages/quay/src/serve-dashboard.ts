@@ -7,10 +7,15 @@ import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
-import type { Lang, Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
+import { DEFAULT_LANG, type Lang, type Manifest, type ServeIdentity, type ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 import { renderFanInCell } from "./serve-task.ts";
+// gap-webui-dashboard-body-copy-en-zh: the page's BODY copy resolves through serve-i18n.ts's
+// DASHBOARD_LABELS (ROW 5~8) — the same ONE-dictionary seam the nav/page chrome already uses.
+// `dashboardLabelsFor(lang)` is taken ONCE per render (each card takes its own table), never
+// re-read per label.
+import { dashboardLabelsFor, fillLabel } from "./serve-i18n.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -60,7 +65,9 @@ export function renderLiveCard(
   tasks?: Array<{ id?: unknown; title?: unknown }>,
   records?: WorkerOutcomeRecord[],
   hours?: number,
+  lang: Lang = DEFAULT_LANG,
 ): string {
+  const L = dashboardLabelsFor(lang);
   // gap-dashboard-fanin-panel-and-timeline-bars I: join the in-flight taskId to the task summary
   // (already fetched on the same /dashboard + /dashboard/cards requests) so each row can carry its
   // title — reusing the taskCard miniList's "id + body-colour title" vertical idiom.
@@ -68,15 +75,15 @@ export function renderLiveCard(
   for (const t of tasks ?? []) {
     if (typeof t.id === "string" && typeof t.title === "string" && t.title.length > 0) titleById.set(t.id, t.title);
   }
-  const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
+  const liveStateText = live.status === "error" ? L.readFailed : live.liveState === "running" ? L.liveStateRunning : live.liveState === "running-unwired" ? L.liveStateRunningUnwired : live.liveState === "not-running" ? L.liveStateNotRunning : "—";
   const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
     const tag = t.phase === "awaiting-land"
-      ? `待落地 ${formatAwaitingDuration(awaitingLandMs(t))}`
+      ? fillLabel(L.awaitingLandWithDuration, { duration: formatAwaitingDuration(awaitingLandMs(t)) })
       : t.phase === "fan-in"
         ? `fan-in${suiteSuffix(t.suite)}`
         : t.phase === "landed"
-          ? "已落地"
-          : "实现中";
+          ? L.phaseLanded
+          : L.phaseImplementing;
     const emphasis = t.phase === "awaiting-land" || t.phase === "fan-in" || t.phase === "landed";
     // gap-dashboard-visual-review-batch-fixes AC2: every in-flight row carries its elapsed since
     // startedAtMs (the same formatSuiteElapsed formatter the testsCard uses, via an ISO round-trip).
@@ -96,7 +103,7 @@ export function renderLiveCard(
   // as missing data. Link to /live, which lists every in-flight task. (The slice(0, 3) cap itself stays:
   // concurrencyCap can be higher in other workspaces, and a hint scales better than widening the cap.)
   const liveMiniListOverflow = live.inFlight.length > 3
-    ? html`<a href="/live" style="font-size:0.78rem;color:var(--color-accent);text-decoration:none">+${live.inFlight.length - 3} 更多 →</a>`
+    ? html`<a href="/live" style="font-size:0.78rem;color:var(--color-accent);text-decoration:none">${escapeHtml(fillLabel(L.moreWithArrow, { n: live.inFlight.length - 3 }))}</a>`
     : "";
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: the once in-flight-only swimlane is now a
   // fixed-5-lane gantt that ALSO renders history (worker-outcome.jsonl) — merge the two sources and
@@ -108,15 +115,15 @@ export function renderLiveCard(
     ? mergeLiveAndHistoryIntervals(live.inFlight, records ?? [], nowMs - windowHours * 3_600_000, nowMs)
     : [];
   const gantt = ganttIntervals.length > 0
-    ? renderLiveGanttSvg(ganttIntervals, windowHours, nowMs)
+    ? renderLiveGanttSvg(ganttIntervals, windowHours, nowMs, lang)
     : "";
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.loopPulse)}</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
-    <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} / 上限 ${live.concurrencyCap}</p>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">${escapeHtml(fillLabel(L.inFlightCap, { inFlight: live.inFlight.length, cap: live.concurrencyCap }))}</p>
     ${gantt}
     ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}${liveMiniListOverflow}</div>` : ""}
-    <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
+    <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewLive)}</a>
   </div>`;
 }
 
@@ -187,6 +194,7 @@ export function renderTimelineBarSvg(
   segments: Array<{ startMs: number; endMs: number; colorVar: string }>,
   windowHours: number,
   windowEndMs: number,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   const windowStartMs = windowEndMs - windowHours * 3_600_000;
   const spanMs = windowHours * 3_600_000;
@@ -226,7 +234,8 @@ export function renderTimelineBarSvg(
   const leftLabel = `<text x="${pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
   const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(windowEndMs)}</text>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="过去 ${windowHours} 小时时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
+  const aria = escapeHtml(fillLabel(dashboardLabelsFor(lang).timelineAriaPastHours, { hours: windowHours }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}" style="width:100%;height:auto;margin-top:4px;display:block">
 ${axis}
 ${bars}
 ${leftLabel}
@@ -245,6 +254,7 @@ export function renderLiveSwimlaneSvg(
   inFlight: Array<{ taskId: string; startedAtMs: number; phase: string }>,
   windowHours: number,
   nowMs: number,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   const rows = inFlight.filter((t) => Number.isFinite(t.startedAtMs) && t.startedAtMs <= nowMs);
   if (rows.length === 0) return "";
@@ -277,6 +287,8 @@ export function renderLiveSwimlaneSvg(
     })
     .join("");
 
+  const aria = escapeHtml(dashboardLabelsFor(lang).liveSwimlaneAria);
+
   const labels = rows
     .map((t, i) => {
       const id = t.taskId.length > 22 ? `${t.taskId.slice(0, 21)}…` : t.taskId;
@@ -288,7 +300,7 @@ export function renderLiveSwimlaneSvg(
   const leftLabel = `<text x="${plotL}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
   const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="在飞任务泳道时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}" style="width:100%;height:auto;margin-top:4px;display:block">
 ${axis}
 ${bars}
 ${labels}
@@ -411,8 +423,9 @@ function ganttIntervalColorVar(iv: LiveGanttInterval): string {
 
 /** In-flight execution phase → the short label a block's `<title>` carries (mirrors renderLiveCard's
  *  tag wording, so hover text and the mini-list tag never drift apart). */
-function phaseLabel(phase: string | null): string {
-  return phase === "landed" ? "已落地" : phase === "awaiting-land" ? "待落地" : phase === "fan-in" ? "fan-in" : "实现中";
+function phaseLabel(phase: string | null, lang: Lang = DEFAULT_LANG): string {
+  const L = dashboardLabelsFor(lang);
+  return phase === "landed" ? L.phaseLanded : phase === "awaiting-land" ? L.phaseAwaitingLand : phase === "fan-in" ? "fan-in" : L.phaseImplementing;
 }
 
 /** Fixed-5-lane gantt SVG for the liveCard (replaces renderLiveSwimlaneSvg as the card's swimlane):
@@ -426,8 +439,10 @@ export function renderLiveGanttSvg(
   intervals: LiveGanttInterval[],
   windowHours: number,
   nowMs: number,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   if (intervals.length === 0) return "";
+  const L = dashboardLabelsFor(lang);
   const { lanes, overflow } = packLanes(intervals, FIXED_GANTT_LANES);
 
   const windowStartMs = nowMs - windowHours * 3_600_000;
@@ -461,7 +476,7 @@ export function renderLiveGanttSvg(
       const x1 = X(Math.min(iv.endMs, nowMs));
       const w = Math.max(x1 - x0, 1.5);
       const duration = formatDurationMs(Math.max(0, iv.endMs - iv.startMs));
-      const state = iv.phase != null ? phaseLabel(iv.phase) : (iv.finalState ?? "unknown");
+      const state = iv.phase != null ? phaseLabel(iv.phase, lang) : (iv.finalState ?? "unknown");
       const startIso = new Date(iv.startMs).toISOString();
       const endIso = new Date(iv.endMs).toISOString();
       bars.push(`<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${ganttIntervalColorVar(iv)})"><title>${escapeHtml(`${iv.taskId} · ${state} · ${duration} · ${startIso} → ${endIso}`)}</title></rect>`);
@@ -469,14 +484,15 @@ export function renderLiveGanttSvg(
   }
 
   const overflowLabel = overflow > 0
-    ? `<text x="${W - pad}" y="${top}" font-size="9" font-weight="700" fill="var(--color-accent-800)" text-anchor="end">+${overflow} 更多</text>`
+    ? `<text x="${W - pad}" y="${top}" font-size="9" font-weight="700" fill="var(--color-accent-800)" text-anchor="end">${escapeHtml(fillLabel(L.moreBadge, { n: overflow }))}</text>`
     : "";
 
   const axis = `<line x1="${plotL}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
   const leftLabel = `<text x="${plotL}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
   const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="循环脉搏甘特图（固定 ${FIXED_GANTT_LANES} 泳道）" style="width:100%;height:auto;margin-top:4px;display:block">
+  const aria = escapeHtml(fillLabel(L.liveGanttAria, { lanes: FIXED_GANTT_LANES }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}" style="width:100%;height:auto;margin-top:4px;display:block">
 ${laneLines.join("\n")}
 ${bars.join("\n")}
 ${overflowLabel}
@@ -498,24 +514,27 @@ ${rightLabel}
 export function renderTestsCard(
   tests: TestsResult,
   suiteRun: CurrentSuiteRun | null,
-  opts: { hours?: number; nowMs?: number } = {},
+  opts: { hours?: number; nowMs?: number; lang?: Lang } = {},
 ): string {
+  const L = dashboardLabelsFor(opts.lang);
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   const latestRun = tests.runs[0] ?? null;
   const suiteRunning = suiteRun && suiteRun.state === "running" ? suiteRun : null;
   const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
   const statusLine = suiteRunning
-    ? html`<span style="color:var(--color-accent-700)">运行中</span>`
-    : escapeHtml(latestRun ? (latestRun.state ?? "—") : "未接入");
+    ? html`<span style="color:var(--color-accent-700)">${escapeHtml(L.running)}</span>`
+    : escapeHtml(latestRun ? (latestRun.state ?? "—") : L.notWired);
   const elapsed = suiteRunning ? formatSuiteElapsed(suiteRunning.startedAt, Date.now()) : null;
   const detailLine = suiteRunning
-    ? `已运行 ${elapsed ?? "—"}${suiteRunning.runner ? ` · runner ${escapeHtml(suiteRunning.runner)}` : ""}${suiteRunning.scope ? ` · scope ${escapeHtml(suiteRunning.scope)}` : ""}`
+    ? `${fillLabel(L.suiteRunningElapsed, { elapsed: elapsed ?? "—" })}${suiteRunning.runner ? ` · runner ${escapeHtml(suiteRunning.runner)}` : ""}${suiteRunning.scope ? ` · scope ${escapeHtml(suiteRunning.scope)}` : ""}`
     : latestRun
       ? (gateBlocked
-        ? `gate 未过${latestRun.gate ? `（${escapeHtml(latestRun.gate)}）` : ""}，未执行测试`
+        ? (latestRun.gate
+          ? fillLabel(L.gateNotPassedNamed, { gate: latestRun.gate })
+          : L.gateNotPassedUnnamed)
         : `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}`)
-      : (tests.reason ? escapeHtml(tests.reason) : "无验证轮记录");
+      : (tests.reason ? escapeHtml(tests.reason) : L.noVerificationRounds);
   const recentRuns = tests.runs.slice(0, 5);
   // gap-dashboard-cards-layout-and-livecard-swimlane AC1: the hover-only colour strip is gone — the
   // default-visible list below already renders the same recentRuns, so the strip was zero information
@@ -526,7 +545,7 @@ export function renderTestsCard(
   // and buckets — absent fields render NO sub-item (the absent-field contract, never a "—").
   const recentList = recentRuns.filter((r) => r.state !== "running").map((r) => {
     const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
-    const rDetail = rGateBlocked ? `gate:${r.gate ?? "?"} 未执行测试` : `pass ${r.pass ?? "—"}/${r.tests ?? "—"}`;
+    const rDetail = rGateBlocked ? fillLabel(L.roundGateNotRun, { gate: r.gate ?? "?" }) : `pass ${r.pass ?? "—"}/${r.tests ?? "—"}`;
     const rDur = r.durationMs != null ? formatDurationMs(r.durationMs) : "—";
     const startedMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
     const startedLine = Number.isFinite(startedMs)
@@ -566,14 +585,14 @@ export function renderTestsCard(
     const endMs = startMs + r.durationMs;
     if (windowEndMs == null || endMs > windowEndMs) windowEndMs = endMs;
   }
-  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, windowEndMs ?? nowMs);
+  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, windowEndMs ?? nowMs, opts.lang);
   return html`<div id="tests-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.tests)}</div>
     <div style="font-weight:800">${statusLine}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
     ${timelineBar}
     ${recentList.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:2px">${recentList}</div>` : ""}
-    <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
+    <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewTests)}</a>
   </div>`;
 }
 
@@ -638,7 +657,7 @@ export const DASHBOARD_CARD_REFRESH_MS = 30_000;
  *  module-level helpers (the browser has none) — pad2/escapeHtml/etc. must NOT be referenced here.
  *  It returns only SVG markup whose text content is hard-coded literals or `String(number)` output,
  *  so no HTML escaping is required. */
-export function sparklineSvg(history, loadThreshold) {
+export function sparklineSvg(history, loadThreshold, thresholdLabel) {
   var W = 300, H = 120, P = 4;
   var plotTop = 24, plotBottom = 100;
 
@@ -731,7 +750,13 @@ export function sparklineSvg(history, loadThreshold) {
         var labelY = lineY - 3;
         if (labelY < plotTop + 8) labelY = lineY + 9;
         out.push('<line class="spark-threshold" x1="' + P + '" x2="' + (W - P) + '" y1="' + lineY.toFixed(1) + '" y2="' + lineY.toFixed(1) + '" stroke="var(--color-neutral-400)" stroke-dasharray="3 3"></line>');
-        out.push('<text x="' + (W - P) + '" y="' + labelY.toFixed(1) + '" font-size="8" fill="var(--color-neutral-500)" text-anchor="end">阈 ' + num(loadThreshold) + '</text>');
+        // gap-webui-dashboard-body-copy-en-zh: the threshold word comes in as a PARAMETER, not from
+        // a module-level dictionary — this function's source is serialized into the client script
+        // (Function#toString) and the browser has no dictionary to look one up in. The caller passes
+        // an already-resolved template carrying `{value}`; an absent one degrades to the bare number
+        // (never to an English word chosen on the client's behalf).
+        var thrTpl = (thresholdLabel == null) ? "{value}" : String(thresholdLabel);
+        out.push('<text x="' + (W - P) + '" y="' + labelY.toFixed(1) + '" font-size="8" fill="var(--color-neutral-500)" text-anchor="end">' + thrTpl.replace("{value}", num(loadThreshold)) + '</text>');
       }
     }
 
@@ -751,12 +776,18 @@ export function sparklineSvg(history, loadThreshold) {
 
 /** The inline auto-refresh <script> injected into the dashboard page. Pure — returns a string, so a
  *  unit test can grep it for setInterval/fetch/visibilityState and prove no location.reload (AC1/AC3). */
-export function renderDashboardCardRefreshScript(): string {
+export function renderDashboardCardRefreshScript(lang: Lang = DEFAULT_LANG): string {
+  // The sparkline's threshold word is resolved SERVER-side and embedded as a literal: the client
+  // re-renders the sparkline from in-memory history (sparklineSvg is serialized into this script),
+  // so without this the redraw would drop back to a language it cannot know (gap-webui-dashboard-
+  // body-copy-en-zh). JSON.stringify (not a raw `"${…}"`) so a label containing a quote or a
+  // backslash cannot break out of the string literal it is being written into.
   return `<script>
 (function () {
   var REFRESH_MS = ${DASHBOARD_CARD_REFRESH_MS};
   var SYS_HISTORY_MAX = 60;
   var sysHistory = [];
+  var THRESHOLD_LABEL = ${JSON.stringify(dashboardLabelsFor(lang).sparkThreshold)};
   var loadThreshold = null;
 
   // The sparkline renderer (legend + two polylines + min/max/latest labels + optional threshold
@@ -769,7 +800,7 @@ export function renderDashboardCardRefreshScript(): string {
   function redrawSparkline() {
     var svg = document.getElementById("sys-sparkline");
     if (!svg) { return; }
-    svg.innerHTML = sparklineSvg(sysHistory, loadThreshold);
+    svg.innerHTML = sparklineSvg(sysHistory, loadThreshold, THRESHOLD_LABEL);
   }
 
   var refresh = function () {
@@ -818,15 +849,16 @@ export function renderDashboardCardRefreshScript(): string {
  *  Carries a `#sys-sparkline` SVG pre-populated with the legend (sparklineSvg([])); the client-side
  *  poll then fills the history lines + labels in-memory (gap-dashboard-visual-review-batch-fixes AC6 —
  *  the SERVER persists nothing). */
-export function renderSysCard(sys: SystemResult): string {
+export function renderSysCard(sys: SystemResult, lang: Lang = DEFAULT_LANG): string {
+  const L = dashboardLabelsFor(lang);
   const sysGo = sys.resourceGate.status === "ok" && sys.processBudget.status === "ok" &&
     sys.resourceGate.verdict === "GO" && sys.processBudget.verdict === "GO";
   return html`<div id="sys-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">系统资源</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.sysResources)}</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${sys.resourceGate.loadAvg != null ? escapeHtml(String(sys.resourceGate.loadAvg)) : "—"}</p>
-    <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
-    <svg id="sys-sparkline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" role="img" aria-label="系统负载历史（页面停留期间）" style="width:100%;height:120px;margin-top:4px">${sparklineSvg([], sys.resourceGate.loadThreshold)}</svg>
-    <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看系统状态 →</a>
+    <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : sys.resourceGate.status === "ok" ? "WAIT" : escapeHtml(L.notWired)}</div>
+    <svg id="sys-sparkline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" role="img" aria-label="${escapeHtml(L.sysSparklineAria)}" style="width:100%;height:120px;margin-top:4px">${sparklineSvg([], sys.resourceGate.loadThreshold, L.sparkThreshold)}</svg>
+    <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewSystem)}</a>
   </div>`;
 }
 
@@ -840,23 +872,25 @@ export function renderSysCard(sys: SystemResult): string {
  *  absence, not a hidden hole (AC7). When the whole reading is absent/empty (dashboard error
  *  fallback / product install without the driver kernel), the card reads 「Driver 状态未接入」 — the
  *  honest empty state, not a fabricated per-kind row. */
-export function renderMgrCard(mgr: ManagerResult): string {
+export function renderMgrCard(mgr: ManagerResult, lang: Lang = DEFAULT_LANG): string {
+  const L = dashboardLabelsFor(lang);
   const rows = mgr.drivers ?? [];
   return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Driver</div>
-    ${rows.length > 0 ? rows.map(renderDriverStatusRow).join("") : html`<div style="margin:0;font-size:0.8rem;line-height:1.5">Driver 状态未接入</div>`}
-    <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
+    ${rows.length > 0 ? rows.map((d) => renderDriverStatusRow(d, lang)).join("") : html`<div style="margin:0;font-size:0.8rem;line-height:1.5">${escapeHtml(L.driverStatusNotWired)}</div>`}
+    <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewManager)}</a>
   </div>`;
 }
 
 /** Render one driver kind's alive-status row: `<kind>: <运行中|未运行> · 末条记录 <relativeTime>`.
  *  A dead reading renders 「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules
  *  3b/4b). */
-function renderDriverStatusRow(d: Pick<DriverKindReading, "kind" | "running" | "lastTs">): string {
-  const aliveText = d.running === true ? "运行中" : "未运行";
+function renderDriverStatusRow(d: Pick<DriverKindReading, "kind" | "running" | "lastTs">, lang: Lang = DEFAULT_LANG): string {
+  const L = dashboardLabelsFor(lang);
+  const aliveText = d.running === true ? L.running : L.driverNotRunning;
   const lastMs = d.lastTs ? Date.parse(d.lastTs) : Number.NaN;
   const lastText = Number.isFinite(lastMs) ? relativeTime(lastMs) : "—";
-  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(d.kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
+  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(d.kind)}</b>: ${escapeHtml(aliveText)} · ${escapeHtml(fillLabel(L.driverLastRecord, { time: lastText }))}</div>`;
 }
 
 /** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
@@ -874,7 +908,9 @@ function renderDriverStatusRow(d: Pick<DriverKindReading, "kind" | "running" | "
  *  dimension (which used to be the weakest line) reads stronger than the id. */
 export function renderTaskCard(
   tasks: TaskSummary[],
+  lang: Lang = DEFAULT_LANG,
 ): string {
+  const L = dashboardLabelsFor(lang);
   const counts = new Map<string, number>();
   for (const t of tasks) {
     const s = typeof t.status === "string" ? t.status : "unknown";
@@ -901,7 +937,7 @@ export function renderTaskCard(
       .slice(0, MINI_LIST_N);
     if (rows.length === 0) return "";
     return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:6px">
-      <div style="align-self:flex-start;font-size:0.7rem;font-weight:700;color:var(--color-text);background:var(--color-neutral-200);padding:2px 8px;border-radius:999px">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
+      <div style="align-self:flex-start;font-size:0.7rem;font-weight:700;color:var(--color-text);background:var(--color-neutral-200);padding:2px 8px;border-radius:999px">${escapeHtml(fillLabel(L.miniListHeader, { status: s, n: MINI_LIST_N }))}</div>
       ${rows.map((t, i) => {
         const sep = i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : "";
         const updatedAt = (t as { updatedAt?: unknown }).updatedAt as number;
@@ -915,13 +951,13 @@ export function renderTaskCard(
   };
 
   return html`<div id="task-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">任务台账速览</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.taskLedger)}</div>
     <div style="display:flex;height:14px;width:100%;overflow:hidden">${statuses.map(bar).join("")}</div>
     <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:var(--color-neutral-700)">
       ${statuses.map((s) => html`<span><b>${counts.get(s) ?? 0}</b> ${escapeHtml(s)}</span>`).join("")}
     </div>
     ${miniStatuses.map(miniList).join("")}
-    <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
+    <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewTaskList)}</a>
   </div>`;
 }
 
@@ -1051,8 +1087,9 @@ export function isAcRollupCounted(status: unknown): boolean {
  *  than disappearing when a goal-less provider degrades goalList to []). */
 export function renderGoalCard(
   goals: GoalRecord[],
-  opts: { cap?: number; staleMs?: number; nowMs?: number } = {},
+  opts: { cap?: number; staleMs?: number; nowMs?: number; lang?: Lang } = {},
 ): string {
+  const L = dashboardLabelsFor(opts.lang);
   const nowMs = opts.nowMs ?? Date.now();
   const cap = opts.cap ?? DEFAULT_GOAL_CAP;
   const staleMs = opts.staleMs ?? DEFAULT_GOAL_STALE_MS;
@@ -1092,20 +1129,20 @@ export function renderGoalCard(
         <span class="tag ${stalenessClass(state)}" style="flex:none">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
-      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}${acBar}</div>
+      <div style="color:var(--color-neutral-700)">${escapeHtml(fillLabel(L.acAchieved, { achieved, total: acs.length }))}${acBar}</div>
     </div>`;
   }).join("");
 
   const emptyState = activeGoals.length === 0
-    ? html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 active GOAL</p>`
+    ? html`<p style="margin:0;font-size:0.8rem;opacity:0.8">${escapeHtml(L.noActiveGoal)}</p>`
     : "";
 
   return html`<div id="goal-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">阶段目标</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.stageGoals)}</div>
     <div style="font-weight:800">active ${activeCount} / cap ${cap}</div>
     ${emptyState}
     ${rows}
-    <a href="/goal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Goals →</a>
+    <a href="/goal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewGoals)}</a>
   </div>`;
 }
 
@@ -1115,7 +1152,7 @@ export function renderGoalCard(
  *  lock-acquire time (desc), reusing renderFanInCell for each row (no second field-join). */
 export function renderFanInCard(
   root: string | undefined,
-  opts: { hours?: number; nowMs?: number } = {},
+  opts: { hours?: number; nowMs?: number; lang?: Lang } = {},
 ): string {
   const records = root != null ? readWorkerOutcomeRecords(root) : [];
   return renderFanInCardFromRecords(records, opts);
@@ -1126,8 +1163,9 @@ export function renderFanInCard(
  *  disk fixture. */
 export function renderFanInCardFromRecords(
   records: WorkerOutcomeRecord[],
-  opts: { hours?: number; nowMs?: number } = {},
+  opts: { hours?: number; nowMs?: number; lang?: Lang } = {},
 ): string {
+  const L = dashboardLabelsFor(opts.lang);
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   const fanIns = records.filter((r) => r.mechanical_fan_in != null);
@@ -1168,7 +1206,7 @@ export function renderFanInCardFromRecords(
     });
   const list = rows.length > 0
     ? html`<div style="display:flex;flex-direction:column;gap:4px">${rows.join("")}</div>`
-    : html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 fan-in 记录</p>`;
+    : html`<p style="margin:0;font-size:0.8rem;opacity:0.8">${escapeHtml(L.noFanInRecords)}</p>`;
 
   const segments = fanIns.map((r) => {
     const mfi = r.mechanical_fan_in!;
@@ -1191,11 +1229,11 @@ export function renderFanInCardFromRecords(
     const endSec = mfi.lockReleaseEpoch ?? mfi.lockAcquireEpoch;
     if (endSec != null && Number.isFinite(endSec)) windowEndMs = endSec * 1000;
   }
-  const bar = renderTimelineBarSvg(segments, hours, windowEndMs ?? nowMs);
+  const bar = renderTimelineBarSvg(segments, hours, windowEndMs ?? nowMs, opts.lang);
 
   return html`<div id="fanin-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Fan-in</div>
-    <p style="margin:0;font-size:0.8rem;opacity:0.8">最近 ${rows.length} 次机械 fan-in（landed/red · 锁持有区间）</p>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">${escapeHtml(fillLabel(L.recentFanIns, { n: rows.length }))}</p>
     ${bar}
     ${list}
   </div>`;
@@ -1207,10 +1245,11 @@ export function renderFanInCardFromRecords(
  * and appends a bounded, HTML-escaped reason so the specific cause (e.g. a deleted worktree path)
  * is visible rather than collapsed to three characters. gap-git-history-lane-identity-and-row-layout-overlap.
  */
-export function gitReadFailureSummary(reason: string | null | undefined): string {
+export function gitReadFailureSummary(reason: string | null | undefined, lang: Lang = DEFAULT_LANG): string {
+  const L = dashboardLabelsFor(lang);
   const r = String(reason ?? "").replace(/\s+/g, " ").trim();
   const cap = r.length > 160 ? `${r.slice(0, 157)}…` : r;
-  return cap ? `读失败 — ${escapeHtml(cap)}` : "读失败";
+  return cap ? fillLabel(L.gitReadFailedWithReason, { reason: escapeHtml(cap) }) : L.readFailed;
 }
 
 // ── Dashboard card grid (gap-dashboard-grid-autofit-columns-vs-card-count) ───────────────────────
@@ -1318,6 +1357,7 @@ export function renderDashboardPage(
   },
   opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null; workerOutcomes?: WorkerOutcomeRecord[]; lang?: Lang } = {},
 ): string {
+  const L = dashboardLabelsFor(opts.lang);
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: read the worker-outcome history ONCE and
@@ -1326,27 +1366,27 @@ export function renderDashboardPage(
   // already-read records in, so the request path performs NO reader I/O (the disk read stays on the
   // background rebuild). Absent ⇒ read here, i.e. the legacy in-request behaviour, unchanged.
   const workerOutcomes = opts.workerOutcomes ?? (opts.workspaceRoot != null ? readWorkerOutcomeRecords(opts.workspaceRoot) : []);
-  const liveCard = renderLiveCard(d.live, nowMs, d.tasks, workerOutcomes, hours);
-  const sysCard = renderSysCard(d.sys);
-  const mgrCard = renderMgrCard(d.mgr);
-  const taskCard = renderTaskCard(d.tasks);
-  const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
-  const fanInCard = renderFanInCardFromRecords(workerOutcomes, { hours, nowMs });
+  const liveCard = renderLiveCard(d.live, nowMs, d.tasks, workerOutcomes, hours, opts.lang);
+  const sysCard = renderSysCard(d.sys, opts.lang);
+  const mgrCard = renderMgrCard(d.mgr, opts.lang);
+  const taskCard = renderTaskCard(d.tasks, opts.lang);
+  const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs, lang: opts.lang });
+  const fanInCard = renderFanInCardFromRecords(workerOutcomes, { hours, nowMs, lang: opts.lang });
   const { cap, staleMs } = readGoalPolicy(opts.workspaceRoot);
-  const goalCard = renderGoalCard(d.goals ?? [], { cap, staleMs, nowMs });
+  const goalCard = renderGoalCard(d.goals ?? [], { cap, staleMs, nowMs, lang: opts.lang });
 
   const recentCommits = d.history.status === "ok"
     ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>")
-    : (d.history.status === "empty" ? "无提交" : gitReadFailureSummary(d.history.reason));
+    : (d.history.status === "empty" ? escapeHtml(L.noCommits) : gitReadFailureSummary(d.history.reason, opts.lang));
   const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">最近提交</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(L.recentCommits)}</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
-    <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
+    <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewJournal)}</a>
   </div>`;
   const gitHistoryCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
-    <p style="margin:0;font-size:0.8rem">提交纵向时间轴（develop 主干 + task 分支，第三方库客户端渲染）。</p>
-    <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Git History →</a>
+    <p style="margin:0;font-size:0.8rem">${escapeHtml(L.gitHistoryTimelineBody)}</p>
+    <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">${escapeHtml(L.viewGitHistory)}</a>
   </div>`;
 
   // gap-dashboard-fanin-panel-and-timeline-bars (window presets): a small set of page-reload links that
@@ -1360,18 +1400,18 @@ export function renderDashboardPage(
   // `opts.lang` (undefined ⇒ DEFAULT_LANG `en`, so the direct-render unit tests that predate this
   // field are unchanged). This is the whole per-page cost of consuming the mechanism — one line.
   return html`<!doctype html>
-    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity, opts.lang)}</title></head>
+    ${htmlLangTag(opts.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.metaDescription)}">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity, opts.lang)}</title></head>
     <body>${renderMobileChrome("dashboard", "dashboard", opts.lang)}${renderSiteNav("dashboard", opts.lang)}<main id="main">
       <h1>${pageNameFor("Dashboard", opts.lang)}</h1>
-      <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
-      <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
-      ${opts.identity ? renderIdentityCard(opts.identity) : ""}
+      <p class="meta">${escapeHtml(L.subtitle)}</p>
+      <p class="meta">${escapeHtml(fillLabel(L.timelineWindow, { hours }))}${hourLinks}</p>
+      ${opts.identity ? renderIdentityCard(opts.identity, opts.lang) : ""}
       ${renderTopRow(liveCard, sysCard, mgrCard)}
-      <h2>工作进展</h2>
+      <h2>${escapeHtml(L.workProgress)}</h2>
       ${renderWorkProgressRow(goalCard, taskCard, testsCard, fanInCard)}
-      <h2>变更记录</h2>
+      <h2>${escapeHtml(L.changeLog)}</h2>
       ${renderCardGrid([commitsCard, gitHistoryCard])}
-    </main>${renderDashboardCardRefreshScript()}</body></html>`;
+    </main>${renderDashboardCardRefreshScript(opts.lang)}</body></html>`;
 }
 
 /** Build the `/dashboard/cards` JSON payload object (before `JSON.stringify`), extracted so the AC3
@@ -1393,19 +1433,24 @@ export function buildCardsPayload(args: {
   /** Pre-read worker-outcome history (a snapshot caller passes it in so this path does no reader
    *  I/O). Absent ⇒ read from disk here — the legacy in-request behaviour, unchanged. */
   workerOutcomes?: WorkerOutcomeRecord[];
+  /** The language THIS request resolved to. ⚠️ Not optional-with-a-default at the CALL SITE: the
+   *  cards this payload re-renders are swapped over the ALREADY-RENDERED page every 30 s, so a
+   *  mixed-up language here would flip a zh page's cards to English a few seconds after load —
+   *  a defect no single-response probe can see (the page's own HTML is correct). */
+  lang: Lang;
 }): Record<string, unknown> {
-  const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs } = args;
+  const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs, lang } = args;
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: same single-read worker-outcome history fed
   // to both the liveCard gantt and the fan-in card (the /dashboard/cards auto-refresh path).
   const workerOutcomes = args.workerOutcomes ?? (workspaceRoot != null ? readWorkerOutcomeRecords(workspaceRoot) : []);
   return {
-    liveCard: renderLiveCard(live, Date.now(), tasks, workerOutcomes, hours),
-    testsCard: renderTestsCard(tests, suiteRun, { hours }),
-    sysCard: renderSysCard(sys),
-    mgrCard: renderMgrCard(mgr),
-    taskCard: renderTaskCard(tasks),
-    goalCard: renderGoalCard(goals, { cap, staleMs }),
-    faninCard: renderFanInCardFromRecords(workerOutcomes, { hours }),
+    liveCard: renderLiveCard(live, Date.now(), tasks, workerOutcomes, hours, lang),
+    testsCard: renderTestsCard(tests, suiteRun, { hours, lang }),
+    sysCard: renderSysCard(sys, lang),
+    mgrCard: renderMgrCard(mgr, lang),
+    taskCard: renderTaskCard(tasks, lang),
+    goalCard: renderGoalCard(goals, { cap, staleMs, lang }),
+    faninCard: renderFanInCardFromRecords(workerOutcomes, { hours, lang }),
     sysRaw: {
       cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
       loadAvg: sys.resourceGate.loadAvg,
@@ -1927,7 +1972,11 @@ export async function handleDashboardCards(
   req: IncomingMessage,
   res: ServerResponse,
   client: ProviderClient,
-  cfg: { workspaceRoot: string },
+  // gap-webui-dashboard-body-copy-en-zh: was `{ workspaceRoot: string }` — widened to the dispatcher's
+  // per-request cfg so the re-rendered cards carry the SAME resolved language as the page that polls
+  // for them (the dispatcher already passes `reqCfg`, i.e. a full ServePageCfg; only this annotation
+  // was narrower than what it was handed).
+  cfg: ServePageCfg,
 ): Promise<void> {
   // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: this endpoint is polled by every open tab
   // every 30s, so it is the OTHER hot reader of the same build. It shares the snapshot with
@@ -1940,7 +1989,7 @@ export async function handleDashboardCards(
     const payload = JSON.stringify(buildCardsPayload({
       live: snapshot.live, sys: snapshot.sys, mgr: snapshot.mgr, tests: snapshot.tests, suiteRun: snapshot.suiteRun,
       tasks: snapshot.tasks, goals: snapshot.goals, workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
-      workerOutcomes: snapshot.workerOutcomes,
+      workerOutcomes: snapshot.workerOutcomes, lang: cfg.lang,
     }));
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
     res.end(payload);
@@ -1975,7 +2024,7 @@ export async function handleDashboardCards(
   const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
   const payload = JSON.stringify(buildCardsPayload({
     live, sys, mgr, tests, suiteRun, tasks, goals,
-    workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
+    workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs, lang: cfg.lang,
   }));
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(payload);

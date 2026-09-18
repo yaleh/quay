@@ -313,8 +313,13 @@ export function latestRoundEndMs(runs: TestRunRecord[]): number | null {
 /** /tests 的最近测试记录分段 bar —— 复用 dashboard 的 renderTimelineBarSvg（import），输入
  *  tests.runs、hours 窗口、nowMs 兜底（windowEnd 不可计算时）。返回 "" 表示无分段（页面省略该节，
  *  绝不 500）。 */
-export function renderTestsTimelineBar(runs: TestRunRecord[], hours: number, nowMs: number): string {
-  return renderTimelineBarSvg(buildTestsTimelineSegments(runs), hours, latestRoundEndMs(runs) ?? nowMs);
+export function renderTestsTimelineBar(runs: TestRunRecord[], hours: number, nowMs: number, lang: Lang = DEFAULT_LANG): string {
+  // gap-webui-dashboard-body-copy-en-zh: renderTimelineBarSvg is SHARED with /dashboard and its
+  // aria-label now resolves through the language dictionary — so this consumer must pass its own page
+  // language rather than let the module default decide. ⛔ Omitting it does not fail loudly: the
+  // default is `en`, which under `?lang=zh` would render an ENGLISH aria-label on a Chinese page
+  // (hard rule 3b — a silently-defaulted language is indistinguishable from a wired one).
+  return renderTimelineBarSvg(buildTestsTimelineSegments(runs), hours, latestRoundEndMs(runs) ?? nowMs, lang);
 }
 
 // ── /tests ─────────────────────────────────────────────────────────────────────────────────────────
@@ -860,7 +865,7 @@ function renderTestsPage(
   // gap-webui-tests-page-missing-rounds-timeline-bar — 最近测试记录分段时间轴（复用 dashboard 的
   // renderTimelineBarSvg）。放在 suite 状态摘要（latestBanner）之下、负载曲线之上。窗口档位与
   // dashboard 一致（1h·3h·6h·12h，页面重载链接）；?hours= 另可设 1..24 的更长档（parseTimelineHours）。
-  const roundsTimelineBar = renderTestsTimelineBar(tests.runs, hours, Date.now());
+  const roundsTimelineBar = renderTestsTimelineBar(tests.runs, hours, Date.now(), lang);
   const hourLinks = [1, 3, 6, 12]
     .map((n) => html`<a href="/tests?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
     .join(" · ");

@@ -24,9 +24,12 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
 // loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
 // port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
-function get(port, urlPath) {
+// `headers` is optional and defaults to none, so every pre-existing call site is unchanged
+// (gap-webui-dashboard-body-copy-en-zh added it: the dashboard's body copy is now
+// language-dependent, so a test that asserts a particular language must be able to ASK for it).
+function get(port, urlPath, headers = {}) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -133,7 +136,12 @@ test("AC2: dashboard liveCard renders a mini in-flight list with state tags (not
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const dash = await get(port, "/dashboard");
+    // ⚠️ gap-webui-dashboard-body-copy-en-zh: the liveCard's tag words now resolve through
+    // serve-i18n.ts's DASHBOARD_LABELS and the DEFAULT language is `en` — so the original zh
+    // assertions below are made against an EXPLICIT `Cookie: lang=zh` request (they keep their
+    // original meaning as the zh regression guard) and the en arm is pinned right after them. A bare
+    // `/dashboard` would now render English and these assertions would fail for the wrong reason.
+    const dash = await get(port, "/dashboard", { Cookie: "lang=zh" });
     assert.equal(dash.status, 200, "AC2: GET /dashboard returns 200");
     // The mini list links to the in-flight tasks and tags each with its state — "实现中" and
     // "待落地 <duration>" appear ONLY in the liveCard on the dashboard (the taskCard renders
@@ -144,6 +152,16 @@ test("AC2: dashboard liveCard renders a mini in-flight list with state tags (not
     assert.ok(dash.body.includes("待落地 5m"), "AC2: liveCard tags the awaiting-land task with 待落地 5m");
     // The count line is still present (not removed), but the card is no longer ONLY that count.
     assert.ok(dash.body.includes("在飞 2"), "AC2: liveCard still shows the in-flight count");
+
+    // …and the SAME card under the default language. Asserting only the zh arm would leave the
+    // language every user actually gets unwatched.
+    const dashEn = await get(port, "/dashboard");
+    assert.equal(dashEn.status, 200, "AC2: GET /dashboard (en, the default) returns 200");
+    assert.ok(dashEn.body.includes('href="/task/IM-1"'), "AC2 (en): mini list links to IM-1");
+    assert.ok(dashEn.body.includes("Implementing"), "AC2 (en): liveCard tags the implementing task");
+    assert.ok(dashEn.body.includes("Awaiting land 5m"), "AC2 (en): liveCard tags the awaiting-land task with its dwell time");
+    assert.ok(dashEn.body.includes("In flight 2"), "AC2 (en): liveCard still shows the in-flight count");
+    assert.ok(!dashEn.body.includes("实现中"), "AC2 (en): no zh tag word leaks into the en card");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
