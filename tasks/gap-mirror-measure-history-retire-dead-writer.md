@@ -2,7 +2,7 @@
 id: gap-mirror-measure-history-retire-dead-writer
 title: mirror-measure-history.ts 是死写入器（唯一调用者 fan-in-execute step 4.5
   已删）却仍在册——catalog 6 行（含指着已不存在块的「谁按」）+ 编排文件清单 + 自带测试待连带处置
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -160,3 +160,9 @@ extra:
 - session_id：80c0efec-e8f4-41b7-8c43-0e37cf01ccb1
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-measure-history-retire-dead-writer~wk-prod-anchor~1789723917464-d2559f.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-measure-history-retire-dead-writer-wk-prod-anchor.log
+
+## Note
+
+**2026-09-18 — needs-human → ready 复位（人工核实，非本任务实现缺陷）**
+
+上面两条 needs-human 记录（含最近一次 09:35:06Z）的失败签名均为 `step=suite: # fail 45` + "suite 红但归因不出任何失败测试文件"。经驱动 Claude 会话独立核实，真因是 develop HEAD 当时存在的系统性阻断：`plugin/scripts/spec-declaration-point-check.ts` 因提交 `516a5485c`（2026-09-18T08:29:32Z，新增 `orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md`）未在两个声明点（`plugin/skills/manager/SKILL.md` 索引、`plugin/skills/init/SKILL.md` 参考文档块）登记而失败；这类静态检查失败会让全量 suite 报 `# fail 45` 且零个体测试可归因，与两次 needs-human 记录的失败特征完全一致。该阻断已由后续提交 `cfb2664aa`（2026-09-18T09:40:21Z，"docs(skills): declare SPEC-quay-init-reconcile at both SPEC declaration points"）修复，晚于本任务两次 needs-human 时间戳。复位前已在当前 develop HEAD 上重跑 `node --no-warnings --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts`，得到干净 `PASS: all 44 orchestration/SPEC-*.md declared at each of 2 declaration points`。⇒ 非本任务自身实现缺陷，复位 status: needs-human → ready，交回 worker-driver 重派。AC/DoD 内容未动。
