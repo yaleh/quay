@@ -138,7 +138,10 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
 // Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
 // (packages/quay/src/primitives/PROVENANCE.md). The main transcript's own mtime (the "never a
@@ -1257,14 +1260,8 @@ hand-write the JSON.
 observer's rolling counter. --root defaults to the SHARED checkout root (a worktree invocation
 resolves to the main checkout so the outer can see it).`;
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 function parseStringArrayArg(args, name) {
-  const raw = getArgValue(args, `--${name}`);
+  const raw = flagValue(args, `--${name}`);
   if (raw === undefined) return undefined;
   let arr;
   try {
@@ -1305,7 +1302,7 @@ export async function main(argv) {
     return 0;
   }
 
-  const rootArg = getArgValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const root = rootArg ? path.resolve(rootArg) : findSharedRoot();
 
   // --target <name> — WHO is being observed (AC1). Resolved once, fail-closed on a non-filename-safe
@@ -1313,7 +1310,7 @@ export async function main(argv) {
   // .quay/blocked-signals/<target>.json).
   let target;
   try {
-    target = resolveTarget(getArgValue(args, "--target"));
+    target = resolveTarget(flagValue(args, "--target"));
   } catch (e) {
     console.error(`inner-blocked-signal: ${e.message}`);
     return 1;
@@ -1321,9 +1318,9 @@ export async function main(argv) {
 
   // --assert-blocked
   if (args.includes("--assert-blocked")) {
-    const taskId = getArgValue(args, "--taskId");
-    const reason = getArgValue(args, "--reason");
-    const question = getArgValue(args, "--question");
+    const taskId = flagValue(args, "--taskId");
+    const reason = flagValue(args, "--reason");
+    const question = flagValue(args, "--question");
     if (!taskId || !reason || !question) {
       console.error("inner-blocked-signal: --assert-blocked requires --taskId <id> --reason <r> --question <q>");
       return 1;
@@ -1364,8 +1361,8 @@ export async function main(argv) {
   // test/ops override of the pane observer's multi-sample consistency requirement.
   if (args.includes("--detect-stop")) {
     try {
-      const actionArg = getArgValue(args, "--action") ?? DEFAULT_BLOCK_ACTION;
-      const actionCommandArg = getArgValue(args, "--action-command");
+      const actionArg = flagValue(args, "--action") ?? DEFAULT_BLOCK_ACTION;
+      const actionCommandArg = flagValue(args, "--action-command");
       const action = actionCommandArg !== undefined ? "command" : actionArg;
       if (!BLOCK_ACTIONS.includes(action)) {
         console.error(`inner-blocked-signal: invalid --action "${action}"; must be one of: ${BLOCK_ACTIONS.join(", ")}`);
@@ -1375,7 +1372,7 @@ export async function main(argv) {
         console.error("inner-blocked-signal: --action command requires --action-command <cmd>");
         return 1;
       }
-      const transcriptArg = getArgValue(args, "--transcript");
+      const transcriptArg = flagValue(args, "--transcript");
       const transcriptPath = transcriptArg
         ? path.resolve(transcriptArg)
         : process.env.INNER_BLOCKED_TRANSCRIPT
@@ -1384,12 +1381,12 @@ export async function main(argv) {
       const stallMsOverride = process.env.INNER_BLOCKED_RULING_STALL_MS
         ? Number(process.env.INNER_BLOCKED_RULING_STALL_MS)
         : undefined;
-      const paneArg = getArgValue(args, "--pane");
+      const paneArg = flagValue(args, "--pane");
       const panePath = paneArg ? path.resolve(paneArg) : undefined;
       // gap-last-pane-txt-has-no-writer (candidate B): a stale/absent --pane snapshot falls back to
       // a LIVE tmux capture-pane of this target. Explicit config (flag > env > env-file), never a guess.
-      const tmuxTargetArg = getArgValue(args, "--tmux-target") || process.env.INNER_BLOCKED_TMUX_TARGET || undefined;
-      const samplesArg = getArgValue(args, "--samples");
+      const tmuxTargetArg = flagValue(args, "--tmux-target") || process.env.INNER_BLOCKED_TMUX_TARGET || undefined;
+      const samplesArg = flagValue(args, "--samples");
       const envSamples = process.env.INNER_BLOCKED_RULING_SAMPLES;
       const samplesRaw = samplesArg !== undefined ? samplesArg : envSamples;
       const samplesOverride = samplesRaw !== undefined ? Number(samplesRaw) : undefined;
@@ -1517,7 +1514,7 @@ export async function main(argv) {
   // name (matches the contract invoke grep); --escalate-stale is kept as the AC9 back-compat alias
   // (existing docs/tests name it).
   if (args.includes("--escalate-stale") || args.includes("--timeout")) {
-    const maxAgeArg = getArgValue(args, "--max-age-ms");
+    const maxAgeArg = flagValue(args, "--max-age-ms");
     let thresholdMs = DEFAULT_BLOCKED_ESCALATION_MS;
     if (maxAgeArg !== undefined) {
       const n = Number(maxAgeArg);

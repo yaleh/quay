@@ -78,7 +78,11 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+// flagArg (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+// (The local adapter is named `flagArg`, not `flagValue`, so it cannot shadow the import.)
+import { helpExit, flagValue } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -528,10 +532,9 @@ if (isDirect) {
   // positional workspace-root (the previous `args.find(a => !a.startsWith("--"))` returned the value
   // of `--tasks-dir` when that flag was used).
   const VALUE_FLAGS = new Set(["--tasks-dir", "--base", "--only"]);
-  const flagValue = (name: string): string | null => {
-    const i = args.indexOf(name);
-    return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice and
+   *  keeps this call site's original `null`-when-absent reading. */
+  const flagArg = (name: string): string | null => flagValue(args, name) ?? null;
   const positionals: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (VALUE_FLAGS.has(args[i])) { i++; continue; }
@@ -542,13 +545,13 @@ if (isDirect) {
   if (!wsRoot) usage();
   const resolvedRoot = path.resolve(process.cwd(), wsRoot);
   // --tasks-dir: override the tasks subdirectory (default "tasks")
-  const tasksDirRelative = flagValue("--tasks-dir") ?? "tasks";
+  const tasksDirRelative = flagArg("--tasks-dir") ?? "tasks";
   const tasksDir = path.resolve(resolvedRoot, tasksDirRelative);
 
   // ── --changed: the DELTA-SCOPED mode (see the header). ───────────────────────────────────────────
   if (args.includes("--changed")) {
-    const base = flagValue("--base");
-    const only = flagValue("--only");
+    const base = flagArg("--base");
+    const only = flagArg("--only");
     let seedIds: string[];
     let baseLabel = base ?? "(unresolved)";
     let notEvaluated: string | null = null;

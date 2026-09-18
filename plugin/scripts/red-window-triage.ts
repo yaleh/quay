@@ -39,7 +39,10 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { scanFamily, kindForFile, isFamilyMember } from "./known-load-sensitive.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
@@ -166,12 +169,6 @@ function writeState(file, state) {
   writeJsonAtomic(file, state);
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 const usage = `red-window-triage.ts — mechanical red-window triage: partition + isolate-rerun trigger + verdict
 (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage AC3/AC4/AC6)
 
@@ -187,8 +184,8 @@ export function main(argv) {
   const partitionMode = args.includes("--partition");
   const bandMode = args.includes("--band");
   const recordMode = args.includes("--record-verdict");
-  const root = path.resolve(getArgValue(args, "--root") ?? REPO_ROOT);
-  const stateFile = path.resolve(getArgValue(args, "--state") ?? defaultStateFile(root));
+  const root = path.resolve(flagValue(args, "--root") ?? REPO_ROOT);
+  const stateFile = path.resolve(flagValue(args, "--state") ?? defaultStateFile(root));
   const family = scanFamily(root);
 
   if (partitionMode) {

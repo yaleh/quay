@@ -31,7 +31,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
-import { emitPass, emitFail } from "./gate-script-base.ts";
+// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { emitPass, emitFail, flagValue } from "./gate-script-base.ts";
 
 /** The exemption list's repo-root-relative location (a DATA file, not scattered code). */
 export const EXEMPTIONS_REL = "plugin/scripts/checker-mechanical-spine-exemptions.json";
@@ -246,11 +249,6 @@ function usage(): never {
   process.exit(0);
 }
 
-function argValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 /** Read the committed (git HEAD) form of the exemptions file; null on bootstrap (not yet committed). */
 function readHeadBaseline(root: string): Exemptions | null {
   try {
@@ -270,10 +268,10 @@ export function main(argv: string[]): number {
   if (args.includes("--help") || args.includes("-h")) usage();
   const asJson = args.includes("--json");
 
-  const rootArg = argValue(args, "--root");
-  const scriptsDirArg = argValue(args, "--scripts-dir");
-  const exemptionsArg = argValue(args, "--exemptions");
-  const baselineArg = argValue(args, "--baseline-exemptions");
+  const rootArg = flagValue(args, "--root");
+  const scriptsDirArg = flagValue(args, "--scripts-dir");
+  const exemptionsArg = flagValue(args, "--exemptions");
+  const baselineArg = flagValue(args, "--baseline-exemptions");
 
   const root = rootArg ? path.resolve(rootArg) : process.cwd();
   const scriptsDir = scriptsDirArg ? path.resolve(scriptsDirArg) : path.join(root, "plugin", "scripts");

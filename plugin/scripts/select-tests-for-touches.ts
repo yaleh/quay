@@ -56,7 +56,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries } from "./touches-parser.ts";
 
@@ -391,19 +394,13 @@ Exit codes:
   1  test-selection-thin: <50% of Touches resolved to a test (pass --allow-thin to run anyway)
   2  usage error / task file not found`;
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 /**
  * CLI main. @param {string[]} argv — process.argv @returns {number} exit code
  */
 export function main(argv) {
   const args = argv.slice(2);
-  const taskId = getArgValue(args, "--task");
-  const rootArg = getArgValue(args, "--root");
+  const taskId = flagValue(args, "--task");
+  const rootArg = flagValue(args, "--root");
   const asJson = args.includes("--json");
   const pathsOnly = args.includes("--paths-only");
   const allowThin = args.includes("--allow-thin");

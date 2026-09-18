@@ -71,7 +71,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DRIVER_KINDS } from "./driver-runtime.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+// valueOf (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // The `round` field is a JSON STRING in these carriers; that conversion is ALREADY solved (and
 // unit-tested) in AC-254's producer, which shares this very carrier file. ⛔ A second copy would be
 // the exact 「两份实现 = 漂移」 shape — and the trap is silent: writing the raw string through is
@@ -529,10 +532,8 @@ function roundMtimeIso(root: string): string {
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
   const json = args.includes("--json");
-  const valueOf = (name: string): string | undefined => {
-    const i = args.indexOf(`--${name}`);
-    return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: the `--` prefix is this call site's own spelling. */
+  const valueOf = (name: string): string | undefined => flagValue(args, `--${name}`);
   const root = path.resolve(valueOf("root") ?? process.cwd());
   const control = valueOf("control") ?? "none";
   const windowMs = Number(valueOf("window-ms") ?? "1200000");

@@ -23,7 +23,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { walkFiles } from "./fs-walk.ts";
 
@@ -456,11 +459,6 @@ function usage(): never {
   process.exit(0);
 }
 
-function argValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 function printHuman(report: Report): void {
   console.log("identity-replication-check — P2 身份复制检测器 (docs/proposals/archguard-generation-era-primitives.md §3)");
   console.log("root:", report.root);
@@ -498,8 +496,8 @@ export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) usage();
   const asJson = args.includes("--json");
-  const rootArg = argValue(args, "--root");
-  const limitArg = argValue(args, "--limit");
+  const rootArg = flagValue(args, "--root");
+  const limitArg = flagValue(args, "--limit");
   const limit = limitArg ? Number(limitArg) : 25;
   if (limitArg && (!Number.isInteger(limit) || limit < 1)) {
     console.error("ERROR: --limit must be a positive integer");

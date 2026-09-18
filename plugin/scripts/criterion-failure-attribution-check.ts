@@ -64,7 +64,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { emitPass, emitFail, emitNotEvaluated, helpExit, isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { emitPass, emitFail, emitNotEvaluated, helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { bareFailureExitsOfCriterion, type BareLine } from "../../packages/quay/src/goal-store.ts";
 
@@ -274,16 +277,11 @@ Usage:
 Exit: 0 PASS · 1 FAIL (ratchet raised) · 2 usage/env · 3 NOT-EVALUATED
 The predicate itself lives in packages/quay/src/goal-store.ts (shared with the write gate).`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
-  const goalsDir = path.resolve(getArgValue(args, "--goals-dir") ?? path.join(root, "goals"));
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
+  const goalsDir = path.resolve(flagValue(args, "--goals-dir") ?? path.join(root, "goals"));
   const asJson = args.includes("--json");
   const capture = args.includes("--capture");
 
@@ -304,7 +302,7 @@ export function main(argv: string[]): number {
   }
 
   if (capture) {
-    const p = baselinePath(root, getArgValue(args, "--baseline"));
+    const p = baselinePath(root, flagValue(args, "--baseline"));
     writeBaseline(p, enum0);
     return emitPass(
       `criterion-failure-attribution-check: captured baseline → inDomain=${enum0.inDomain} bareAcs=${enum0.bareAcs.length} bareLines=${enum0.bareLines}`,
@@ -313,7 +311,7 @@ export function main(argv: string[]): number {
     );
   }
 
-  const p = baselinePath(root, getArgValue(args, "--baseline"));
+  const p = baselinePath(root, flagValue(args, "--baseline"));
   const baseline = readBaseline(p);
   if (baseline === null) {
     return emitNotEvaluated(

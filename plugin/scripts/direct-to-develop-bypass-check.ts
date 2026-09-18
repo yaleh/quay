@@ -119,7 +119,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
@@ -912,11 +915,6 @@ function readJsonlLines(file) {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过全部 fan-in 机件的检测器
 (tasks/gap-direct-to-develop-bypasses-fan-in-gates)
 
@@ -966,11 +964,11 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const develop = getArgValue(args, "--develop") ?? "develop";
-  const baseline = getArgValue(args, "--baseline");
-  const lockEventsFile = path.resolve(getArgValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
-  const commitsArg = getArgValue(args, "--commits");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const develop = flagValue(args, "--develop") ?? "develop";
+  const baseline = flagValue(args, "--baseline");
+  const lockEventsFile = path.resolve(flagValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
+  const commitsArg = flagValue(args, "--commits");
   const asJson = args.includes("--json");
 
   let commits = null;

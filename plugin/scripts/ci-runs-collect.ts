@@ -72,6 +72,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
+// flag (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 import {
   attributeRun,
   loadKnownFlakes,
@@ -1280,10 +1284,9 @@ export function main(argv: string[]): number {
     console.log(usage());
     return 0;
   }
-  const flag = (n: string): string | null => {
-    const i = argv.indexOf(n);
-    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. The
+   *  `?? null` preserves THIS call site's original `null`-when-absent reading. */
+  const flag = (n: string): string | null => flagValue(argv, n) ?? null;
 
   const root = flag("--root") ?? repoRoot();
   const carrier = flag("--carrier") ?? path.join(root, CARRIER_REL);

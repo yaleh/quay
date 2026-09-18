@@ -38,7 +38,10 @@ import {
   classifyDarkAxisRecord,
   type DarkAxisVerdict,
 } from "../../packages/quay/src/gate/dark-axis-record.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getFlagValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 // Re-exported for the in-repo consumers that treat this module as the predicate's plugin-side entry
 // (plugin/scripts/ready-pool-check.ts reads a pool task's dark-axis state through this name, and the
@@ -61,11 +64,6 @@ export function taskBodyOf(fileText: string): string {
     if (lines[i].trim() === "---") return lines.slice(i + 1).join("\n");
   }
   return fileText; // no closing fence → not frontmatter; scan the whole file rather than drop it
-}
-
-function getFlagValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
 }
 
 export const USAGE = `dark-axis-record-check.ts — ADR-007 per-milestone dark-axis record check
@@ -113,7 +111,7 @@ export function main(argv: string[]): number {
     return 2;
   }
 
-  const root = path.resolve(getFlagValue(args, "--root") ?? process.cwd());
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
   const asJson = args.includes("--json");
   const taskPath = path.join(root, "tasks", `${taskId}.md`);
 

@@ -121,7 +121,10 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION,
   VALID_STAGES,
@@ -2219,12 +2222,6 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight + non-task subagents vs closed-but-live; carries reconcileCompliant)
   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRITES an end event per close + records the invocation timestamp)`;
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 /**
  * Read every event and build the report-with-meta shape. Shared by --report and --snapshot so
  * both paths compute the SAME object from the SAME events — the persisted snapshot cannot diverge
@@ -2353,12 +2350,12 @@ async function loadSlotsFast(root) {
  */
 export async function main(argv) {
   const args = argv.slice(2);
-  const rootArg = getArgValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const root = rootArg ?? repoRoot();
 
   // --task-start
   if (args.includes("--task-start")) {
-    const taskId = getArgValue(args, "--taskId");
+    const taskId = flagValue(args, "--taskId");
     if (!taskId) {
       console.error("fast-mode-telemetry: --task-start requires --taskId <id>");
       return 1;
@@ -2384,9 +2381,9 @@ export async function main(argv) {
 
   // --task-end
   if (args.includes("--task-end")) {
-    const taskId = getArgValue(args, "--taskId");
-    const runId = getArgValue(args, "--runId");
-    const outcome = getArgValue(args, "--outcome");
+    const taskId = flagValue(args, "--taskId");
+    const runId = flagValue(args, "--runId");
+    const outcome = flagValue(args, "--outcome");
     if (!taskId || !runId || !outcome) {
       console.error("fast-mode-telemetry: --task-end requires --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred>");
       return 1;
@@ -2409,7 +2406,7 @@ export async function main(argv) {
     // Fan-in commit sha (gap-task-telemetry-6-percent-join AC3): `--fanInCommit <sha>` overrides;
     // otherwise auto-lookup the task's fan-in merge commit (best-effort — null when never fan-in'd
     // or git unavailable, so a needs-human/abandoned/deferred close records null, not a wrong sha).
-    let fanInCommit = getArgValue(args, "--fanInCommit") ?? null;
+    let fanInCommit = flagValue(args, "--fanInCommit") ?? null;
     if (fanInCommit == null) {
       fanInCommit = findFanInCommit(root, { taskId, runId }) ?? findFanInCommitSha(root, taskId);
     }
@@ -2445,12 +2442,12 @@ export async function main(argv) {
   // (exit 1, nothing written): a Build completion without a --task-start bracket is an anomaly, and
   // the caller must not silently drop the boundary.
   if (args.includes("--impl-complete")) {
-    const taskId = getArgValue(args, "--taskId");
+    const taskId = flagValue(args, "--taskId");
     if (!taskId) {
       console.error("fast-mode-telemetry: --impl-complete requires --taskId <id>");
       return 1;
     }
-    let runId = getArgValue(args, "--runId");
+    let runId = flagValue(args, "--runId");
     if (!runId) {
       const events = [];
       for await (const e of readAllEvents(root)) events.push(e);
@@ -2489,7 +2486,7 @@ export async function main(argv) {
   // generated at --task-start, recoverable here without the caller having held onto it (robust
   // against crash-restart, same rationale as --close-task). Never writes a file.
   if (args.includes("--run-id-for")) {
-    const taskId = getArgValue(args, "--taskId");
+    const taskId = flagValue(args, "--taskId");
     if (!taskId) {
       console.error("fast-mode-telemetry: --run-id-for requires --taskId <id>");
       return 1;
@@ -2509,8 +2506,8 @@ export async function main(argv) {
   // interval is recorded → haltedHours stays 0 → the window keeps that halt time (the pre-fix,
   // conservative behavior; never an overestimate).
   if (args.includes("--halt-start")) {
-    const atMsArg = getArgValue(args, "--atMs");
-    const reason = getArgValue(args, "--reason");
+    const atMsArg = flagValue(args, "--atMs");
+    const reason = flagValue(args, "--reason");
     let atMs = Date.now();
     if (atMsArg !== undefined) {
       atMs = Date.parse(atMsArg);
@@ -2529,7 +2526,7 @@ export async function main(argv) {
     return 0;
   }
   if (args.includes("--halt-end")) {
-    const atMsArg = getArgValue(args, "--atMs");
+    const atMsArg = flagValue(args, "--atMs");
     let atMs = Date.now();
     if (atMsArg !== undefined) {
       atMs = Date.parse(atMsArg);
@@ -2553,7 +2550,7 @@ export async function main(argv) {
   // persisting is the explicit --snapshot subcommand's job. An observation poll (outer Monitor,
   // every 60s) therefore cannot dirty the working tree and deadlock restart-readiness-check.sh.
   if (args.includes("--report")) {
-    const sinceArg = getArgValue(args, "--since");
+    const sinceArg = flagValue(args, "--since");
     let reportWithMeta;
     try {
       ({ report: reportWithMeta } = await loadAndAggregate(root, sinceArg));
@@ -2578,7 +2575,7 @@ export async function main(argv) {
   // made the state self-check item ① vacuous. cap is an INPUT (--cap, effective_cap from
   // cap-from-gate.sh); default SLOT_STATUS_CAP_DEFAULT.
   if (args.includes("--slot-status")) {
-    const capArg = getArgValue(args, "--cap");
+    const capArg = flagValue(args, "--cap");
     const cap = capArg !== undefined ? Number(capArg) : SLOT_STATUS_CAP_DEFAULT;
     if (capArg !== undefined && (!Number.isFinite(cap) || cap < 0)) {
       console.error(`fast-mode-telemetry: invalid --cap "${capArg}" (expected a non-negative integer)`);
@@ -2644,7 +2641,7 @@ export async function main(argv) {
   // milestones/fast-mode-telemetry/<date>.json and prints it (so --snapshot --json stdout is
   // byte-identical to the file it wrote — AC4's no-divergence guarantee).
   if (args.includes("--snapshot")) {
-    const sinceArg = getArgValue(args, "--since");
+    const sinceArg = flagValue(args, "--since");
     let reportWithMeta;
     try {
       ({ report: reportWithMeta } = await loadAndAggregate(root, sinceArg));
@@ -2679,7 +2676,7 @@ export async function main(argv) {
   // (the tick passes its `effective_cap` from cap-from-gate.sh); when omitted, slotsTotal/
   // slotsRemaining are null.
   if (args.includes("--slots")) {
-    const capArg = getArgValue(args, "--cap");
+    const capArg = flagValue(args, "--cap");
     let cap = null;
     if (capArg !== undefined) {
       cap = Number(capArg);

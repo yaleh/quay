@@ -30,7 +30,10 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
 /** The manifest carrying the pin (repo-root-relative). */
@@ -162,17 +165,12 @@ Exit: 0 = consistent with the pin; 1 = drift (local or fleet side differs, or a 
 missing); 2 = usage/env error; 3 = NOT-EVALUATED (fleet repo absent, or the pinned SHA/path
 unreadable — never conflated with 'consistent').`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const asJson = args.includes("--json");
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
-  const fleetOverride = getArgValue(args, "--fleet");
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
+  const fleetOverride = flagValue(args, "--fleet");
 
   let res: PrimitivesDriftResult;
   try {

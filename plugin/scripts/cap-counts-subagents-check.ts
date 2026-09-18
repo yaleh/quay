@@ -56,7 +56,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~57 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
 
 // ── 判据1 markers (position: the slot-refill.ts canonical comment block) ──────────────────────────────
@@ -343,11 +346,6 @@ export function readTaskStatuses(tasksDir) {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `cap-counts-subagents-check.ts — AC76 in-flight = CONCURRENT SUBAGENTS checker
   (tasks/gap-ac76-cap-counts-subagents-not-worktrees, 人 2026-08-14 07:3xZ/09:1xZ 裁定)
 
@@ -397,17 +395,17 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const slotRefillFile = getArgValue(args, "--slot-refill") ?? path.join(root, "plugin", "scripts", "slot-refill.ts");
-  const fmTelemetryFile = getArgValue(args, "--fast-mode-telemetry") ?? path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
-  const heartbeatFile = getArgValue(args, "--heartbeat-check") ?? path.join(root, "plugin", "scripts", "inner-wakeup-heartbeat-check.ts");
-  const sessionDir = getArgValue(args, "--session-dir");
-  const minutes = Number(getArgValue(args, "--minutes") ?? 5);
-  const worktreeCount = getArgValue(args, "--worktree-count") != null ? Number(getArgValue(args, "--worktree-count")) : null;
-  const subagentCount = getArgValue(args, "--subagent-count") != null ? Number(getArgValue(args, "--subagent-count")) : null;
-  const reportLine = getArgValue(args, "--report-line");
-  const liveRunning = (getArgValue(args, "--live-running") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const taskStatusDir = getArgValue(args, "--task-status-dir") ?? path.join(root, "tasks");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const slotRefillFile = flagValue(args, "--slot-refill") ?? path.join(root, "plugin", "scripts", "slot-refill.ts");
+  const fmTelemetryFile = flagValue(args, "--fast-mode-telemetry") ?? path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts");
+  const heartbeatFile = flagValue(args, "--heartbeat-check") ?? path.join(root, "plugin", "scripts", "inner-wakeup-heartbeat-check.ts");
+  const sessionDir = flagValue(args, "--session-dir");
+  const minutes = Number(flagValue(args, "--minutes") ?? 5);
+  const worktreeCount = flagValue(args, "--worktree-count") != null ? Number(flagValue(args, "--worktree-count")) : null;
+  const subagentCount = flagValue(args, "--subagent-count") != null ? Number(flagValue(args, "--subagent-count")) : null;
+  const reportLine = flagValue(args, "--report-line");
+  const liveRunning = (flagValue(args, "--live-running") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const taskStatusDir = flagValue(args, "--task-status-dir") ?? path.join(root, "tasks");
   const asJson = args.includes("--json");
 
   const checks = [];

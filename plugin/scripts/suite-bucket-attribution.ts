@@ -49,7 +49,10 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 
 export type Bucket = "P" | "S" | "M";
 
@@ -372,15 +375,10 @@ Usage:
 
 Output: P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   const fileRef = args[0];
-  const rootArg = getArgValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const asJson = args.includes("--json");
 
   if (!fileRef) {

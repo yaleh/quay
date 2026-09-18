@@ -35,7 +35,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 // ── The registries this checker owns ────────────────────────────────────────────────────────────
 // Each entry: the carrier file (repo-root relative) and the registry function inside it. Adding a
@@ -182,10 +185,8 @@ export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(USAGE);
 
-  const flagVal = (name: string): string | undefined => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const flagVal = (name: string): string | undefined => flagValue(args, name);
   const asJson = args.includes("--json");
   const root = path.resolve(flagVal("--root") || defaultRoot());
 

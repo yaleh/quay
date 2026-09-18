@@ -29,6 +29,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+// flagArg (below, 4 identical closures) is now a one-line arity adapter over the shared `flagValue`;
+// its algorithm was one of the ~73 hand-written copies of the indexOf+next-arg idiom in
+// plugin/scripts (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine
+// `semantic-dedup-scan`). The adapter is named `flagArg`, not `flagValue`, so it cannot shadow the
+// import.
+import { flagValue } from "./gate-script-base.ts";
 
 const ENUMERATED_STATES = ["waiting-input", "permission-prompt", "busy", "error-banner", "unknown"];
 
@@ -673,12 +679,10 @@ export function probeResidueTarget(target: string, maxClicks = RESIDUE_CLEAR_MAX
  *   target mode — anything else is treated as a pane target and probed live (bounded C-u loop). */
 export function runCheckResidue(argv: string[]): number {
   const positional = argv.filter((a) => !a.startsWith("--"));
-  const flagValue = (name: string): string | undefined => {
-    const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : undefined;
-  };
-  const afterFile = flagValue("--after");
-  const maxClicksRaw = flagValue("--max-clicks");
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. */
+  const flagArg = (name: string): string | undefined => flagValue(argv, name);
+  const afterFile = flagArg("--after");
+  const maxClicksRaw = flagArg("--max-clicks");
   const maxClicksParsed = maxClicksRaw ? Number.parseInt(maxClicksRaw, 10) : NaN;
   // A degenerate cap (non-numeric or < 1) falls back to the default — a 0-click "probe" would
   // see a single capture and misread real text as ghost (trivially identical), so refuse it.
@@ -773,10 +777,8 @@ export function runCanReceive(argv: string[]): number {
 //   --poll <s>  re-judge interval (default DEFAULT_CAN_RECEIVE_POLL_S)
 export function runCanReceiveWait(argv: string[]): number {
   const positional = argv.filter((a) => !a.startsWith("--"));
-  const flagValue = (name: string): string | undefined => {
-    const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. */
+  const flagArg = (name: string): string | undefined => flagValue(argv, name);
   const target = positional[0];
   if (!target) {
     process.stderr.write(
@@ -784,8 +786,8 @@ export function runCanReceiveWait(argv: string[]): number {
     );
     return 2;
   }
-  const waitRaw = flagValue("--wait");
-  const pollRaw = flagValue("--poll");
+  const waitRaw = flagArg("--wait");
+  const pollRaw = flagArg("--poll");
   const waitS = waitRaw ? Number(waitRaw) : DEFAULT_CAN_RECEIVE_WAIT_S;
   const pollS = pollRaw ? Number(pollRaw) : DEFAULT_CAN_RECEIVE_POLL_S;
   const deadline = Date.now() + waitS * 1000;
@@ -828,10 +830,8 @@ export function runCanReceiveWait(argv: string[]): number {
  * same defaults the bash functions produce for a missing transcript. */
 export function runTranscript(argv: string[]): number {
   const positional = argv.filter((a) => !a.startsWith("--"));
-  const flagValue = (name: string): string | undefined => {
-    const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. */
+  const flagArg = (name: string): string | undefined => flagValue(argv, name);
   const file = positional[0];
   if (!file) {
     process.stderr.write(
@@ -839,8 +839,8 @@ export function runTranscript(argv: string[]): number {
     );
     return 2;
   }
-  const satRaw = flagValue("--saturation-tokens");
-  const winRaw = flagValue("--api-error-window");
+  const satRaw = flagArg("--saturation-tokens");
+  const winRaw = flagArg("--api-error-window");
   const saturationTokens = satRaw ? Number(satRaw) : 450000;
   const apiWindow = winRaw ? Number(winRaw) : 200;
   let lines: string[] = [];
@@ -875,10 +875,8 @@ export function runTranscript(argv: string[]): number {
  * --warn-rounds N (default 3), --tx-window N (default 60). Prints warn|ok. */
 export function runPermPromptWarnVerdict(argv: string[]): number {
   const positional = argv.filter((a) => !a.startsWith("--"));
-  const flagValue = (name: string): string | undefined => {
-    const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. */
+  const flagArg = (name: string): string | undefined => flagValue(argv, name);
   const roundsRaw = positional[0];
   const txAgeRaw = positional[1];
   if (roundsRaw === undefined || txAgeRaw === undefined) {
@@ -887,8 +885,8 @@ export function runPermPromptWarnVerdict(argv: string[]): number {
     );
     return 2;
   }
-  const warnRoundsRaw = flagValue("--warn-rounds");
-  const txWindowRaw = flagValue("--tx-window");
+  const warnRoundsRaw = flagArg("--warn-rounds");
+  const txWindowRaw = flagArg("--tx-window");
   const opts = {
     warnRounds: warnRoundsRaw ? Number(warnRoundsRaw) : undefined,
     txWindow: txWindowRaw ? Number(txWindowRaw) : undefined,

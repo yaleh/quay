@@ -46,7 +46,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
 /** The two mirror directories (repo-root-relative). */
@@ -218,17 +221,12 @@ Usage:
   node --experimental-strip-types mirror-pair-drift-check.ts [--root <dir>] [--json]
 Exit: 0 = every pair consistent-or-allowed; 1 = >=1 unexempted/expanded drift; 2 = usage/env error; 3 = NOT-EVALUATED.`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   // --help first, exit 0, no side effect (gap-help-contract-incompatible-behaviors).
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
   const asJson = args.includes("--json");
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
 
   let res: MirrorDriftResult;
   try {

@@ -159,7 +159,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
 import { parsePerFileLines } from "./measure-trend-check.ts";
@@ -924,11 +927,6 @@ export function appendPreVerifiedRound(file, record) {
   fs.appendFileSync(file, JSON.stringify({ ...record, round: prior + 1 }) + "\n", "utf8");
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `pre-verified-round-record.ts — SHARED AC1/AC2 writer: append ONE verification-round.jsonl
   record for a full-suite round that ran OUTSIDE full-suite-runner.ts (the fan-in detached suite paths):
   the pre-verified branch (suite ran OUTSIDE the fan-in subagent's round, capture reused — preverified:1)
@@ -998,8 +996,8 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const recordFileOverride = getArgValue(args, "--record-file");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const recordFileOverride = flagValue(args, "--record-file");
   const asJson = args.includes("--json");
 
   const fail = (msg) => {
@@ -1009,22 +1007,22 @@ export function main(argv) {
   };
 
   const built = buildPreVerifiedRoundRecord({
-    taskId: getArgValue(args, "--task-id"),
-    runId: getArgValue(args, "--run-id"),
-    startedAt: getArgValue(args, "--started-at"),
-    durationMs: getArgValue(args, "--duration-ms"),
-    laneCount: getArgValue(args, "--lane-count"),
-    load: getArgValue(args, "--load"),
-    commit: getArgValue(args, "--commit"),
-    preverified: getArgValue(args, "--preverified"),
-    cpuTimeS: getArgValue(args, "--cpu-time-s"),
-    cpuSource: getArgValue(args, "--cpu-source"),
-    cpuUserS: getArgValue(args, "--cpu-user-s"),
-    cpuSysS: getArgValue(args, "--cpu-sys-s"),
-    runner: getArgValue(args, "--runner"),
-    suiteLog: getArgValue(args, "--suite-log"),
-    state: getArgValue(args, "--state"),
-    notEvaluated: getArgValue(args, "--not-evaluated"),
+    taskId: flagValue(args, "--task-id"),
+    runId: flagValue(args, "--run-id"),
+    startedAt: flagValue(args, "--started-at"),
+    durationMs: flagValue(args, "--duration-ms"),
+    laneCount: flagValue(args, "--lane-count"),
+    load: flagValue(args, "--load"),
+    commit: flagValue(args, "--commit"),
+    preverified: flagValue(args, "--preverified"),
+    cpuTimeS: flagValue(args, "--cpu-time-s"),
+    cpuSource: flagValue(args, "--cpu-source"),
+    cpuUserS: flagValue(args, "--cpu-user-s"),
+    cpuSysS: flagValue(args, "--cpu-sys-s"),
+    runner: flagValue(args, "--runner"),
+    suiteLog: flagValue(args, "--suite-log"),
+    state: flagValue(args, "--state"),
+    notEvaluated: flagValue(args, "--not-evaluated"),
     root,
   });
   if (built.error) return fail(built.error);

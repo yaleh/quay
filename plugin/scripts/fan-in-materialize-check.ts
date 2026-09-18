@@ -73,7 +73,10 @@ import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { matchesObject, FAN_IN_ORCHESTRATION_FILES } from "./select-static-checks-for-touches.ts";
@@ -416,11 +419,6 @@ export function aggregate(verdicts: { record: MaterializedWorkflowRecord; verdic
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `fan-in-materialize-check.ts — gap-workflow-scriptpath-materialize-falls-back-main
   Detects the workflow scriptPath MATERIALIZATION fallback (M176 family): a bootstrap-HIT fan-in
   dispatched with scriptPath=<worktree>/.claude/workflows/fan-in-execute.js but MATERIALIZED from the
@@ -463,12 +461,12 @@ export function main(argv: string[]): number {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const projectDir = getArgValue(args, "--project-dir") ?? defaultProjectDir(root);
-  const tasksDir = getArgValue(args, "--tasks-dir") ?? path.join(root, "tasks");
-  const workflowRel = getArgValue(args, "--workflow-file") ?? DEFAULT_WORKFLOW_REL;
-  const workflowEventsDir = getArgValue(args, "--workflow-events-dir") ?? path.join(root, ".workflow-events");
-  const mainlineRef = getArgValue(args, "--mainline-ref") ?? "HEAD";
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const projectDir = flagValue(args, "--project-dir") ?? defaultProjectDir(root);
+  const tasksDir = flagValue(args, "--tasks-dir") ?? path.join(root, "tasks");
+  const workflowRel = flagValue(args, "--workflow-file") ?? DEFAULT_WORKFLOW_REL;
+  const workflowEventsDir = flagValue(args, "--workflow-events-dir") ?? path.join(root, ".workflow-events");
+  const mainlineRef = flagValue(args, "--mainline-ref") ?? "HEAD";
   const asJson = args.includes("--json");
 
   const files = findMaterializedWorkflowFiles(projectDir);

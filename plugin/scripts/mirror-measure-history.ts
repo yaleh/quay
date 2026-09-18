@@ -36,7 +36,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { resolveSharedCheckout } from "./per-task-suite-record.ts";
 import { landMeasureHistory } from "./measure-trend-check.ts";
 
@@ -44,11 +47,6 @@ import { landMeasureHistory } from "./measure-trend-check.ts";
  *  __PERFILE__ lines, or this exact log was already landed), NOT a failure (exit 0, never blocks the
  *  fan-in). Everything else (missing field, unresolvable checkout, fs error) is fail-closed (exit 2). */
 const BENIGN_REASONS = new Set(["no-log", "no-perfile-lines", "duplicate-log"]);
-
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
 
 const usage = `mirror-measure-history.ts — gap-measure-history-detached-suite-mirror-write AC1/AC3 writer:
   mirror-write the per-file duration history (.quay/measure-history.jsonl) reflecting a fan-in
@@ -70,14 +68,14 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const historyOverride = getArgValue(args, "--history");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const historyOverride = flagValue(args, "--history");
   const asJson = args.includes("--json");
-  const logFile = getArgValue(args, "--log");
-  const laneCountRaw = getArgValue(args, "--lane-count");
-  const runAt = getArgValue(args, "--run-at");
-  const taskId = getArgValue(args, "--task-id");
-  const runId = getArgValue(args, "--run-id");
+  const logFile = flagValue(args, "--log");
+  const laneCountRaw = flagValue(args, "--lane-count");
+  const runAt = flagValue(args, "--run-at");
+  const taskId = flagValue(args, "--task-id");
+  const runId = flagValue(args, "--run-id");
 
   const fail = (msg) => {
     if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));

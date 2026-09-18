@@ -62,7 +62,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
 // `.quay/` is EXCLUDED from the measurement (the generated, non-deterministic namespace): config.yml
@@ -281,11 +284,6 @@ Usage:
       freshness mode — exit 1 iff the laydown SOURCE fingerprint differs from the committed baseline
       (a laydown source changed without a re-anchor); exit 3 iff the baseline/set cannot be read.`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 function doReanchor(root: string, asJson: boolean): number {
   const result = runLaydown(root);
   if (!result.evaluated) {
@@ -382,14 +380,14 @@ function doCheckStale(root: string, asJson: boolean): number {
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate");
   const reanchor = args.includes("--reanchor");
   const checkStale = args.includes("--check-stale");
 
-  const baselineFilesArg = getArgValue(args, "--baseline-files");
-  const baselineBytesArg = getArgValue(args, "--baseline-bytes");
+  const baselineFilesArg = flagValue(args, "--baseline-files");
+  const baselineBytesArg = flagValue(args, "--baseline-bytes");
   const hasOverrides = baselineFilesArg !== undefined || baselineBytesArg !== undefined;
 
   if (!gate && !reanchor && !checkStale) {

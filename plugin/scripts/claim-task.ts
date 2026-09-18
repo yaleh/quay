@@ -32,7 +32,10 @@
 //   stdout: `claimable` | `already-claimed` | `touches-overlap` (+ reason). Exit 0 iff claimable.
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
@@ -114,20 +117,15 @@ Exit 0 iff claimable; 1 not claimable; 2 usage / missing file.
 `);
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
 
 /**
  * CLI main. @param {string[]} argv — process.argv @returns {number} exit code
  */
 export function main(argv) {
   const args = argv.slice(2);
-  const taskFile = getArgValue(args, "--task");
-  const rootArg = getArgValue(args, "--root");
-  const inFlightCsv = getArgValue(args, "--in-flight");
+  const taskFile = flagValue(args, "--task");
+  const rootArg = flagValue(args, "--root");
+  const inFlightCsv = flagValue(args, "--in-flight");
   const json = args.includes("--json");
 
   if (!taskFile) {

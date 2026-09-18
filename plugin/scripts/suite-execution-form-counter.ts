@@ -52,7 +52,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 /** 默认 verification-round 相对路径（<root>/.quay/verification-round.jsonl）——外层每轮一行套件记录。 */
 export const DEFAULT_VERIFICATION_ROUND_REL = path.join(".quay", "verification-round.jsonl");
@@ -356,10 +359,10 @@ Exit: 0 healthy / insufficient-evidence · 1 rollback signal (invariant false) �
 
 export function main(argv) {
   const args = argv.slice(2);
-  const flagVal = (name, def) => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : def;
-  };
+  /** Arity-2 adapter over the shared `flagValue`: this closure captures the local `args` slice and
+   *  adds a per-call-site default (`??`, which is exact — the original returned `args[i + 1]`
+   *  verbatim whenever the flag was present, including the empty string). */
+  const flagVal = (name, def) => flagValue(args, name) ?? def;
   if (args.includes("--help") || args.includes("-h")) {
     usage();
     return 0;

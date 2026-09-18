@@ -126,6 +126,10 @@ import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from "./suite-state-trigger.ts";
 // gap-precommit-guard-blocks-commits-not-working-tree-edits — the assertion-surface resolution is the
@@ -734,11 +738,6 @@ export function segmentedFailureFields(failures: SuiteFailure[]): {
     ...(seg.derived.length ? { derived: seg.derived } : {}),
     ...(seg.unattributed.length ? { unattributed: seg.unattributed } : {}),
   };
-}
-
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
 }
 
 // gap-batch-merge-gate-reads-stale-green: normalize an ISO 8601 timestamp to EPOCH SECONDS for the
@@ -1379,7 +1378,7 @@ function positiveIntFromEnv(name: string): number | undefined {
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
-  const raw = parseArg(argv, name);
+  const raw = flagValue(argv, name);
   if (raw === undefined) return null;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) return null;
@@ -1787,7 +1786,7 @@ export async function run(argv: string[]): Promise<number> {
   // via --one-shot-worktree. A caller that already targets a worktree (execute-suite-fix's
   // --root <wt>) or a hermetic temp root is never re-provisioned (guarded by !isGitWorktree + the
   // root === REPO_ROOT condition).
-  let root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
+  let root = path.resolve(flagValue(argv, "--root") ?? REPO_ROOT);
   const mainRoot = root; // the main repo: fork source + state/log write target when one-shot
   // gap-suite-state-split-across-worktree-and-gate: the STATE/LOG write location is decoupled from
   // --root (the TESTED CHECKOUT). --state-dir is the .quay state directory the gate reads; when a
@@ -1803,9 +1802,9 @@ export async function run(argv: string[]): Promise<number> {
   // suite" branch below must leave a line in THIS suite log. Resolving it after those branches left
   // exactly the branches that matter unable to write. Depends only on mainRoot + argv (⛔ not on the
   // later one-shot `root` reassignment), so hoisting it is a pure move.
-  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
-  const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
-  const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
+  const stateDir = path.resolve(flagValue(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
+  const stateFile = path.resolve(flagValue(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
+  const logFile = path.resolve(flagValue(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
   // AC3 — true once the suite log stream is open (== the runner entered the execution section). The
   // signal-abort / crash handlers below write a SUITE-NOT-RUN line ONLY while this is still false:
   // "no test was executed" must stay literally true, and after the stream opens a suite may have
@@ -1826,8 +1825,8 @@ export async function run(argv: string[]): Promise<number> {
 
   const oneShot = argv.includes("--one-shot-worktree") || path.resolve(root) === REPO_ROOT;
   let oneShotWorktreePath: string | null = null;
-  const explicitCommand = parseArg(argv, "--command");
-  const laneCountArg = parseArg(argv, "--lane-count");
+  const explicitCommand = flagValue(argv, "--command");
+  const laneCountArg = flagValue(argv, "--lane-count");
   // AC1 — effective laneCount = explicit --lane-count if given, else the nproc-derived default.
   const laneCount = laneCountArg !== undefined ? Number(laneCountArg) : defaultLaneCount();
   if (!Number.isFinite(laneCount) || laneCount < 1) {
@@ -1847,12 +1846,12 @@ export async function run(argv: string[]): Promise<number> {
   // = serial, NOT a fixed 3). An explicit flag always wins over env/config and the default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
-  if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
+  if (serialConcurrencyArg === null && flagValue(argv, "--serial-concurrency") !== undefined) {
     process.stderr.write(`full-suite-runner: invalid --serial-concurrency (must be a positive integer)\n`);
     recordSuiteNotRun(logFile, "invalid-args", "invalid --serial-concurrency (must be a positive integer)");
     return 1;
   }
-  if (lowconcConcurrencyArg === null && parseArg(argv, "--lowconc-concurrency") !== undefined) {
+  if (lowconcConcurrencyArg === null && flagValue(argv, "--lowconc-concurrency") !== undefined) {
     process.stderr.write(`full-suite-runner: invalid --lowconc-concurrency (must be a positive integer)\n`);
     recordSuiteNotRun(logFile, "invalid-args", "invalid --lowconc-concurrency (must be a positive integer)");
     return 1;
@@ -1874,7 +1873,7 @@ export async function run(argv: string[]): Promise<number> {
   // flag, instead of the canonical full suite. The runner's ONLY job here is to hand the bucket task
   // to test.sh (which is the selection authority) and to carry the __BUCKETS__ marker into the round
   // record. An explicit --command wins over --buckets (the caller took over the command entirely).
-  const bucketTaskId = parseArg(argv, "--buckets");
+  const bucketTaskId = flagValue(argv, "--buckets");
   const baseCommand =
     explicitCommand ??
     (bucketTaskId !== undefined ? `bash scripts/test.sh --buckets ${bucketTaskId}` : "bash scripts/test.sh");
@@ -1951,7 +1950,7 @@ export async function run(argv: string[]): Promise<number> {
   // 否则从 scope 的同一来源派生（不新造判定逻辑）：worktree 内跑 ⇒ inner（fan-in/内层），
   // 主检出跑 ⇒ outer（外层/人要求的一次性轮）。两个载体（state + verification-round）共用 base.runner，
   // 从此不再各说各话。
-  const runnerArg = parseArg(argv, "--runner");
+  const runnerArg = flagValue(argv, "--runner");
   let runner: "outer" | "inner";
   if (runnerArg !== undefined) {
     if (runnerArg !== "outer" && runnerArg !== "inner") {
@@ -1979,7 +1978,7 @@ export async function run(argv: string[]): Promise<number> {
   // generation guard / suite-load-<runId>.jsonl / the verification-round record as ONE key (the
   // record ↔ telemetry join the /tests page keys the load curve on). Default (no --run-id) =
   // randomUUID() — an independent run keeps self-naming.
-  const runId = parseArg(argv, "--run-id") ?? randomUUID();
+  const runId = flagValue(argv, "--run-id") ?? randomUUID();
   // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
   // child (and hence to every node --test probe via the sweep helpers' QUAY_RUN_ID):
   // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —

@@ -37,7 +37,10 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
 
@@ -224,11 +227,6 @@ export async function runTypecheckGate(worktree, root, { fakeGate = null, comman
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `fan-in-ts-typecheck-gate.ts — fan-in admission pre-check: run the ts-typecheck gate when a task's Touches include NEW/MOVED .ts files (gap-ts-touching-fan-in-needs-typecheck-gate)
 
 Usage:
@@ -257,16 +255,16 @@ export async function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const taskId = getArgValue(args, "--task");
+  const taskId = flagValue(args, "--task");
   if (!taskId) {
     process.stderr.write(`fan-in-ts-typecheck-gate: --task is required\n${usage}\n`);
     return 2;
   }
-  const worktree = path.resolve(getArgValue(args, "--worktree") ?? process.cwd());
-  const mergeTarget = getArgValue(args, "--merge-target") ?? "develop";
+  const worktree = path.resolve(flagValue(args, "--worktree") ?? process.cwd());
+  const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
   const asJson = args.includes("--json");
   const checkOnly = args.includes("--check-only");
-  const fakeGate = getArgValue(args, "--fake-gate");
+  const fakeGate = flagValue(args, "--fake-gate");
   if (fakeGate != null && fakeGate !== "pass" && fakeGate !== "fail") {
     process.stderr.write(`fan-in-ts-typecheck-gate: --fake-gate must be "pass" or "fail" (got "${fakeGate}")\n`);
     return 2;

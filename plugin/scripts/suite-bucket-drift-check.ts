@@ -34,7 +34,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import {
   bucketSetOf,
   canonicalBuckets,
@@ -156,17 +159,12 @@ Usage:
   node --experimental-strip-types suite-bucket-drift-check.ts --scan [--root <dir>] [--json]
       measure mode — print every comparison, exit 0 always.`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   // --help is the shared checker contract (gap-help-contract-incompatible-behaviors): usage FIRST,
   // exit 0, NO side effect — evaluated BEFORE root resolution, never as a usage error (exit 2).
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate") || args.includes("--touches") || args.includes("--task");
   const scan = args.includes("--scan");
@@ -179,9 +177,9 @@ export function main(argv: string[]): number {
   const staticReport = checkStaticVsTruth(root);
   let truthReport: TruthSelectionReport | null = null;
   if (args.includes("--touches")) {
-    truthReport = checkTruthSelection(root, (getArgValue(args, "--touches") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+    truthReport = checkTruthSelection(root, (flagValue(args, "--touches") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
   } else if (args.includes("--task")) {
-    const id = getArgValue(args, "--task") ?? "";
+    const id = flagValue(args, "--task") ?? "";
     truthReport = checkTruthSelection(root, taskTouchEntries(id, root));
   }
 

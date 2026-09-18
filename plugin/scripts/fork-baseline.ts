@@ -53,7 +53,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 
@@ -151,22 +154,16 @@ and the branch-model tests.
 `);
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 /**
  * CLI main. @param {string[]} argv — process.argv @returns {number} exit code
  */
 export function main(argv) {
   const args = argv.slice(2);
-  const taskFile = getArgValue(args, "--task");
-  const rootArg = getArgValue(args, "--root");
-  const developRef = getArgValue(args, "--develop") ?? "develop";
-  const integrationRef = getArgValue(args, "--integration") ?? "integration";
-  const unverifiedCsv = getArgValue(args, "--unverified");
+  const taskFile = flagValue(args, "--task");
+  const rootArg = flagValue(args, "--root");
+  const developRef = flagValue(args, "--develop") ?? "develop";
+  const integrationRef = flagValue(args, "--integration") ?? "integration";
+  const unverifiedCsv = flagValue(args, "--unverified");
 
   // RETIRED flag (gap-worktree-fork-baseline-always-integration): fail loud rather than silently
   // ignore a stale call site that still passes --force-integration.

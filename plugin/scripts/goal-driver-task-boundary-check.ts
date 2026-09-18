@@ -38,6 +38,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -280,11 +284,6 @@ export function runCheck(target: string): BoundaryCheckResult {
   return { ok: violations.length === 0, notEvaluated: false, target, violations };
 }
 
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
 export function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(
@@ -293,8 +292,8 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/goal-driver-
     );
     return 0;
   }
-  const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
-  const goalDriverArg = parseArg(argv, "--goal-driver");
+  const root = path.resolve(flagValue(argv, "--root") ?? DEFAULT_ROOT);
+  const goalDriverArg = flagValue(argv, "--goal-driver");
   const target = goalDriverArg ? path.resolve(goalDriverArg) : path.join(root, GOAL_DRIVER_REL);
   const json = argv.includes("--json");
 

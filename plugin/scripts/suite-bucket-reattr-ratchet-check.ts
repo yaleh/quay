@@ -55,7 +55,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import { bucketSetOf } from "./suite-bucket-attribution.ts";
 import { repoRoot } from "./repo-root.ts";
 import { listSuiteFiles, loadReattribution } from "./suite-bucket-select.ts";
@@ -118,16 +121,11 @@ Usage:
       gate mode — exit 1 iff any pure-S (layer-1) test has no reattribution entry, OR any
       reattribution entry names a file that is no longer a suite test (layer 3, zombie).`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   // --help is the shared checker contract: usage FIRST, exit 0, NO side effect — before root resolution.
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
   const gate = args.includes("--gate");
   const scan = args.includes("--scan");

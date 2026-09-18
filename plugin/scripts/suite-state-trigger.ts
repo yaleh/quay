@@ -75,6 +75,10 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
@@ -714,7 +718,7 @@ export const DEFAULT_RETRIGGER_IDLE_MS = 10 * 60 * 1000; // 10 min — Contract 
 export function resolveRetriggerIdleMs(argv?: string[], opts?: { idleMs?: number }): number {
   if (opts?.idleMs !== undefined && Number.isFinite(opts.idleMs) && opts.idleMs > 0) return opts.idleMs;
   if (argv) {
-    const minArg = parseArg(argv, "--retrigger-idle-min");
+    const minArg = flagValue(argv, "--retrigger-idle-min");
     if (minArg !== undefined) {
       const min = Number(minArg);
       if (Number.isFinite(min) && min > 0) return Math.round(min * 60 * 1000);
@@ -1028,7 +1032,7 @@ export const DEFAULT_IDLE_GREEN_MS = 2 * 60 * 1000; // 2 min — "sustained idle
 export function resolveIdleGreenMs(argv?: string[], opts?: { idleGreenMs?: number }): number {
   if (opts?.idleGreenMs !== undefined && Number.isFinite(opts.idleGreenMs) && opts.idleGreenMs > 0) return opts.idleGreenMs;
   if (argv) {
-    const minArg = parseArg(argv, "--idle-green-min");
+    const minArg = flagValue(argv, "--idle-green-min");
     if (minArg !== undefined) {
       const min = Number(minArg);
       if (Number.isFinite(min) && min > 0) return Math.round(min * 60 * 1000);
@@ -1047,7 +1051,7 @@ export function resolveIdleGreenMs(argv?: string[], opts?: { idleGreenMs?: numbe
 export function resolveVerifyTarget(argv?: string[], opts?: { verifyTarget?: string | null }): string | null {
   if (opts?.verifyTarget) return opts.verifyTarget;
   if (argv) {
-    const arg = parseArg(argv, "--verify-target");
+    const arg = flagValue(argv, "--verify-target");
     if (arg) return arg;
   }
   const env = process.env.QUAY_SUITE_VERIFY_TARGET;
@@ -1498,14 +1502,9 @@ async function runMonitor(
   }
 }
 
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
 export async function run(argv: string[]): Promise<number> {
-  const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
-  const interval = Number(parseArg(argv, "--interval") ?? "5");
+  const root = path.resolve(flagValue(argv, "--root") ?? REPO_ROOT);
+  const interval = Number(flagValue(argv, "--interval") ?? "5");
   const idleMs = resolveRetriggerIdleMs(argv);
   const idleGreenMs = resolveIdleGreenMs(argv);
   const verifyTarget = resolveVerifyTarget(argv);

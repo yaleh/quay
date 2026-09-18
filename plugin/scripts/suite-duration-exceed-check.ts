@@ -37,7 +37,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -180,16 +183,11 @@ export function checkSuiteDuration(
   };
 }
 
-function getArgValue(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 ? argv[idx + 1] : undefined;
-}
-
 export function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) helpExit("usage: node suite-duration-exceed-check.ts [--root <dir>] [--limit-ms <n>] [--since-epoch <t>] [--json] [--no-block]");
-  const root = path.resolve(getArgValue(argv, "--root") ?? REPO_ROOT);
-  const limitMs = Number(getArgValue(argv, "--limit-ms") ?? String(DEFAULT_LIMIT_MS));
-  const sinceRaw = getArgValue(argv, "--since-epoch");
+  const root = path.resolve(flagValue(argv, "--root") ?? REPO_ROOT);
+  const limitMs = Number(flagValue(argv, "--limit-ms") ?? String(DEFAULT_LIMIT_MS));
+  const sinceRaw = flagValue(argv, "--since-epoch");
   const sinceEpoch = sinceRaw !== undefined ? Number(sinceRaw) : null;
   const asJson = argv.includes("--json");
   // --no-block (gap-suite-duration-exceed-check-not-wired): the REPORT-ONLY wired path. The verdict
