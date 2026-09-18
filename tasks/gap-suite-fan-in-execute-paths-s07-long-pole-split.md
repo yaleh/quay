@@ -111,5 +111,6 @@ sum 1 509 264 / 128 并发 = **11.8s** 的理想 makespan，实测 main 41.9s �
 
 - plugin/test/fan-in-execute-paths-s07.test.mjs
 - plugin/test/fan-in-execute-paths-s11.test.mjs
+- plugin/test/fan-in-execute-paths-s12.test.mjs
 - .quay/suite-bucket-reattribution.jsonl
 - tasks/gap-suite-fan-in-execute-paths-s07-long-pole-split.md
