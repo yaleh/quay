@@ -3,7 +3,7 @@ id: gap-quay-init-config-heredoc-comment-backtick-executes-cli
 title: quay-init.sh 的 config heredoc 未加引号 ⇒ 注释里的反引号被真的执行（quay init
   --reconcile），其多行 stdout 被替换进注释 ⇒ 生成的 .quay/config.yml 不是合法 YAML：develop 上 3
   个安装族测试恒红，每个 code-delta 任务的机械 fan-in 都因此 suite 红
-status: ready
+status: done
 labels:
   - gap
   - defect

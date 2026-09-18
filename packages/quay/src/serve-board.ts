@@ -5,9 +5,10 @@ import type { ProviderClient } from "./provider-client.ts";
 import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
-// gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 10
-// dictionary (`boardLabelsFor` / `fillLabel`) instead of hard-coded Chinese literals — the same
-// pattern gap-webui-dashboard-body-copy-en-zh established (ROW 5) and the rest of the series copies.
+// gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 11
+// dictionary (`boardLabelsFor` / `fillLabel` / `boardLabel`) instead of hard-coded Chinese literals —
+// the same pattern gap-webui-dashboard-body-copy-en-zh established (ROW 5) and the rest of the series
+// copies. (ROW 10 is /journal's, which landed into develop first.)
 import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
@@ -530,7 +531,7 @@ function renderBoardResponse(res: ServerResponse, snap: BoardSnapshot, url: URL,
   // 「nothing is in flight」 (硬规则 3b/5: never render 「无法判定」 as a confident 「没有」).
   const allParam = (url.searchParams.get("all") ?? "").trim().toLowerCase();
   const showAll = allParam === "1" || allParam === "true" || allParam === "yes";
-  // The names are this page's body copy, so they come from the board dictionary (ROW 10) resolved
+  // The names are this page's body copy, so they come from the board dictionary (ROW 11) resolved
   // for `cfg.lang` — NOT from the render function's roster, which is why they are read here through
   // `boardLabel` by key. A source's own STATE is preserved per source: 「no data」 and 「read failed」
   // are different facts and must not collapse into a generic 「a source failed」.

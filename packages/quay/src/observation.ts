@@ -226,6 +226,19 @@ export interface JournalSection {
   reason: string | null;
   /** Markdown text to render with the existing renderer (serve-handlers.ts renderMarkdown). */
   markdown: string | null;
+  /**
+   * gap-webui-journal-body-copy-en-zh: the STALE-SOURCE FACT, when this section's backing file is
+   * older than `ESCALATIONS_STALE_DAYS` — `days` is already floored and clamped to ≥1, `date` is
+   * the file's last-write date (`YYYY-MM-DD`). Absent/null ⇒ not stale (or mtime unreadable).
+   *
+   * ⚠️ This REPLACED a rendered Chinese markdown banner that this module used to prepend into
+   * `markdown`. That implementation made the sentence un-localizable by construction: the words
+   * were assembled HERE, before any renderer had seen the request's language, so `lang=en` could
+   * only ever show them in Chinese (the /journal body-copy task's red baseline measured exactly
+   * that). A reader must report WHAT it observed; saying it in the reader's language is the
+   * renderer's job, and the renderer is the only party that knows `cfg.lang`.
+   */
+  staleSource?: { date: string; days: number } | null;
 }
 
 export interface JournalResult {
@@ -2041,11 +2054,17 @@ function pad2(n: number): string {
 }
 
 /**
- * Stale banner for a channel superseded by tick-log but still rendered first on the Journal page
- * (gap-webui-journal-stale-and-ticklog-bug AC1). A dead channel shown as a fresh 「最近记录」 is
- * fake; the banner makes its age explicit. Null when the file is fresh or its mtime is unreadable.
+ * The staleness FACT for a channel superseded by tick-log but still rendered first on the Journal
+ * page (gap-webui-journal-stale-and-ticklog-bug AC1). A dead channel shown as a fresh 「最近记录」
+ * is fake; the fact that it is stale is what makes its age explicit. Null when the file is fresh
+ * or its mtime is unreadable.
+ *
+ * ⚠️ gap-webui-journal-body-copy-en-zh: this used to return the FINISHED Chinese markdown banner
+ * (`### ⚠️ 陈旧记录 — …`), which readEscalations prepended into `markdown`. Splitting the fact
+ * from its wording is what lets the renderer say it in the request's language; the markdown
+ * rendering is now the renderer's, and this function observes only.
  */
-function staleBanner(abs: string, nowMs: number): string | null {
+function staleSource(abs: string, nowMs: number): { date: string; days: number } | null {
   let mtimeMs: number;
   try {
     mtimeMs = fs.statSync(abs).mtimeMs;
@@ -2054,17 +2073,14 @@ function staleBanner(abs: string, nowMs: number): string | null {
   }
   const ageDays = (nowMs - mtimeMs) / 86_400_000;
   if (ageDays < ESCALATIONS_STALE_DAYS) return null;
-  const when = new Date(mtimeMs).toISOString().slice(0, 10);
-  return `### ⚠️ 陈旧记录 — 最后更新于 ${when}（约 ${Math.max(1, Math.floor(ageDays))} 天前）；升级机制已由 tick-log 取代，此处仅供参考`;
+  return { date: new Date(mtimeMs).toISOString().slice(0, 10), days: Math.max(1, Math.floor(ageDays)) };
 }
 
-/** escalations.md — `## `-section reader plus the stale banner (AC1). */
+/** escalations.md — `## `-section reader plus the stale-source fact (AC1). */
 function readEscalations(root: string, relFile: string, max: number, nowMs: number): JournalSection {
   const section = readRecentSections(root, relFile, max);
   if (section.status !== "ok" || section.markdown == null) return section;
-  const banner = staleBanner(path.join(root, relFile), nowMs);
-  if (banner == null) return section;
-  return { status: "ok", reason: null, markdown: `${banner}\n\n${section.markdown}` };
+  return { ...section, staleSource: staleSource(path.join(root, relFile), nowMs) };
 }
 
 /**

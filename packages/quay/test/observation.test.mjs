@@ -480,16 +480,22 @@ test("AC1: readJournal marks a superseded escalations.md stale, and does NOT mar
 
     const journal = readJournal(ws, JOURNAL_NOW);
     assert.equal(journal.escalations.status, "ok", "AC1: a stale-but-readable escalations.md is still ok");
-    assert.match(journal.escalations.markdown || "", /陈旧记录/, "AC1: the stale banner appears");
-    assert.match(journal.escalations.markdown || "", /约 9 天前/, "AC1: the banner names the age in days");
-    assert.match(journal.escalations.markdown || "", /2026-08-14/, "AC1: the banner names the last-write date");
+    // gap-webui-journal-body-copy-en-zh: the reader now reports the stale FACT ({date, days}) rather
+    // than a pre-rendered Chinese banner, because the banner's words have to be chosen in the
+    // REQUEST's language — which only the renderer knows. This assertion therefore reads the fact;
+    // the WORDING ("⚠️ Stale record …" in en, the verbatim zh literal) is pinned black-box by
+    // packages/quay/test/serve-journal-body-i18n.test.mjs.
+    assert.deepEqual(journal.escalations.staleSource, { date: "2026-08-14", days: 9 },
+      "AC1: the stale-source fact names the last-write date and the floored age in days");
+    assert.doesNotMatch(journal.escalations.markdown || "", /陈旧记录/,
+      "AC1: the reader no longer bakes the banner's words into the markdown it hands over");
 
-    // Negative control — a fresh escalations.md carries no banner.
+    // Negative control — a fresh escalations.md carries no stale fact.
     setMtime(esc, JOURNAL_NOW - 3600_000); // 1 hour ago
     const fresh = readJournal(ws, JOURNAL_NOW);
     assert.equal(fresh.escalations.status, "ok");
-    assert.doesNotMatch(fresh.escalations.markdown || "", /陈旧记录/,
-      "AC1 negative control: a fresh escalations.md is not marked stale (the banner is real, not vacuous)");
+    assert.equal(fresh.escalations.staleSource ?? null, null,
+      "AC1 negative control: a fresh escalations.md is not marked stale (the fact is real, not vacuous)");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

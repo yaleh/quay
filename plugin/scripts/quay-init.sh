@@ -1857,9 +1857,10 @@ loop:
   # 下一行原先把 CLI 后面的命令用反引号包住 ⇒ 写出的 config 里那条注释被换成该命令的真实输出
   # （多行），第二行没有井号 ⇒ 整个文件变成非法 YAML（yaml.scanner.ScannerError:
   # could not find expected ':'）⇒ 此后每次 quay-init 升级都 exit 1，三个真装机 e2e 全红。
-  # 要在本 heredoc 的注释里写反引号，必须加反斜杠转义（下一行即示例）。
-  # LOOP_VERSION_DEFAULTS（CLI \`quay init --reconcile\` 用它做 diff）。shell 无法 import TS，
+  # LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）。shell 无法 import TS，
   # 所以这一行是【镜像】：新增版本级默认值时要同时改两处，或把这里改成从 schema 派生。
+  # 该不变式由 plugin/test/quay-init-loop.test.mjs 的 "AC5" 用例机械钉住（扫描本文件全部未加引号的
+  # heredoc 正文，反引号/命令替换一处即红）——⛔ 不要靠"记得转义"，那正是它复发的方式。
   # ⛔ 不要在这里补那个已被删除的零消费者分支键：plugin/test/quay-init.test.mjs 以可执行的判据
   # 钉住"它不被写出"（gap-config-key-consumer-check-mechanical-enumeration）；理由见 init.ts。
   fork_baseline: develop

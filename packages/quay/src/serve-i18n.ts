@@ -746,12 +746,83 @@ export function chromeLabel(key: string, lang: Lang = DEFAULT_LANG): string {
   return entry[lang];
 }
 
-// ── ROW 10: the /board BODY copy (gap-webui-board-body-copy-en-zh) ──────────────────────────────
+// ── ROW 10: the /journal BODY copy (gap-webui-journal-body-copy-en-zh) ──────────────────────────
 //
-// ROW 5 did this for /dashboard; this is the series' SECOND page and it obeys ROW 5~8 unchanged
-// (one table, one ROW per RENDERED string, `{name}` templates filled by `fillLabel`, the zh column
-// byte-equal to the pre-extraction literal, a CLOSED `Record<…>` roster). The three rules that had
-// to be DECIDED for THIS page rather than inherited are recorded here:
+// ROW 5 is /dashboard's body copy. This row is /journal's, and it obeys ROW 2/ROW 6/ROW 7/ROW 8
+// unchanged: the roster is closed, the zh column is the pre-existing literal BYTE FOR BYTE, and
+// interpolated copy carries `{name}` in both columns.
+//
+// HOW THE ROSTER WAS FOUND — by MEASUREMENT, not by reading the source. The red-baseline probe
+// renders /journal TWICE from two real servers: one rooted at the real workspace (real
+// escalations.md with its real mtime, real 2 MB tick-log.md, real commit log) and one rooted at a
+// workspace with an EMPTY orchestration/ and a one-commit ASCII log. A CJK line present in BOTH
+// renders is interface copy BY CONSTRUCTION — it cannot have come from data, because the second
+// render had none. That differential is what produced this roster, and it is re-runnable.
+//
+// ⚠️ WHY THE ROSTER INCLUDES THE EMPTY/ERROR STATES (`noData`, `readFailed`, `noContent`) EVEN
+// THOUGH THE HEALTHY PAGE NEVER RENDERS THEM: the differential found them in the no-data render,
+// and they are this page's copy every bit as much as the section headings are. A roster built only
+// from the healthy render would leave the page half-English in exactly the state an operator
+// reaches for it — when a source has gone missing.
+//
+// ⚠️ `staleBanner` IS THE ONE INTERPOLATED ROW, and it is the only reason this task also touches
+// observation.ts. The banner was not copy this page's renderer ever saw: `observation.staleBanner`
+// built the finished Chinese MARKDOWN STRING and prepended it to `escalations.markdown`, so by the
+// time any renderer ran, the words were already baked into the data (see ROW 6's rule — a sentence
+// assembled before the language is known cannot be un-assembled at the call site). The reader now
+// reports the stale FACT (`{date, days}`) and the renderer says it in the request's language.
+export const JOURNAL_KEYS = [
+  // page header
+  "titleSuffix",
+  // the three section headings (the file name each carries is DATA and stays verbatim)
+  "sectionEscalations", "sectionTickLog", "sectionCommits",
+  // renderSectionBlock's three states
+  "noContent", "noData", "readFailed",
+  // the stale-source banner (interpolated — ROW 6)
+  "staleBanner",
+] as const;
+
+export type JournalKey = (typeof JOURNAL_KEYS)[number];
+
+/** The /journal body-copy dictionary — see ROW 10 and ROW 2/6/7/8. */
+export const JOURNAL_LABELS: Record<JournalKey, { en: string; zh: string }> = {
+  // The `<h1>`'s suffix, rendered as `${pageNameFor("Journal", lang)} — <this>`.
+  titleSuffix: { en: "recent loop record", zh: "循环最近记录" },
+  // The section headings. ⛔ The parenthesised file name is the reader's own source path — DATA —
+  // and is carried verbatim in both columns rather than reassembled at the call site, so the en
+  // column cannot silently drop it (it is the operator's only pointer to which file this is).
+  sectionEscalations: { en: "Escalations (escalations.md)", zh: "升级项 (escalations.md)" },
+  sectionTickLog: { en: "Tick log (tick-log.md)", zh: "Tick 记录 (tick-log.md)" },
+  sectionCommits: { en: "Recent commits (git log)", zh: "最近提交 (git log)" },
+  // renderSectionBlock's "source exists and is readable, but has no recent content" state — a
+  // third state, distinct from both noData (source absent) and readFailed (source unreadable).
+  noContent: { en: "No recent content.", zh: "暂无内容。" },
+  noData: { en: "No data", zh: "无数据" },
+  readFailed: { en: "Read failed", zh: "读失败" },
+  // ⚠️ `{days}` is rendered with a `d` unit rather than a pluralised "day"/"days": the dictionary
+  // has one column per language and no number/plural dimension, so a pluralisation rule would have
+  // to live at the call site — the exact shape ROW 6 forbids. `~{days}d ago` is correct English for
+  // every n, including n=1, without one.
+  staleBanner: {
+    en: "⚠️ Stale record — last updated {date} (~{days}d ago); the escalation channel has been superseded by tick-log and is kept for reference only",
+    zh: "⚠️ 陈旧记录 — 最后更新于 {date}（约 {days} 天前）；升级机制已由 tick-log 取代，此处仅供参考",
+  },
+};
+
+/** The whole /journal roster resolved for one language — the `navLabelsFor`/`dashboardLabelsFor`
+ *  idiom (take it ONCE per render rather than re-reading `JOURNAL_LABELS` at each call site). */
+export function journalLabelsFor(lang: Lang = DEFAULT_LANG): Record<JournalKey, string> {
+  const out = {} as Record<JournalKey, string>;
+  for (const key of JOURNAL_KEYS) out[key] = JOURNAL_LABELS[key][lang];
+  return out;
+}
+
+// ── ROW 11: the /board BODY copy (gap-webui-board-body-copy-en-zh) ──────────────────────────────
+//
+// ROW 5 did this for /dashboard and ROW 10 for /journal; this is the series' THIRD page and it obeys
+// ROW 5~8 unchanged (one table, one ROW per RENDERED string, `{name}` templates filled by
+// `fillLabel`, the zh column byte-equal to the pre-extraction literal, a CLOSED `Record<…>` roster).
+// The three rules that had to be DECIDED for THIS page rather than inherited are recorded here:
 //
 // ① THE STATE WORD IS ONE ROW, NOT ONE PER RENDER SITE. `doneUnlanded` / `landedNotClosed` /
 //    `awaitingLandTag` / `inFlightTimeout` / `orphan` each render once PER ROW of the table, i.e.
@@ -766,20 +837,21 @@ export function chromeLabel(key: string, lang: Lang = DEFAULT_LANG): string {
 //    ⚠️ The zh column is byte-equal to the literal it replaced, so `lang=zh` output does not move
 //    (this task's AC3) — a zh value that merely "reads better" is a REGRESSION here (ROW 7).
 //
-// ③ THE TABLE DOES NOT REUSE `DASHBOARD_LABELS`' ROWS, and the duplication is DELIBERATE. `读失败`
-//    (`readFailed`), `无数据`/`读取超时` and the "not wired / no data" family render byte-identically
-//    on both pages, and ROW 5's own note argues for SHARING such a string. It is NOT shared here,
-//    for the reason ROW 5 gives for the /live constant: a value owned by another page's table makes
-//    that page's next re-wording a CROSS-TABLE edit, so a change made for /board would silently
-//    move /dashboard's copy (and vice versa). The duplication is real, recorded, and the cheaper of
-//    the two failure modes. ⛔ It is NOT an invitation to "merge the duplicate" later.
+// ③ THE TABLE DOES NOT REUSE `DASHBOARD_LABELS`' OR `JOURNAL_LABELS`' ROWS, and the duplication is
+//    DELIBERATE. `读失败` (`readFailed`), `无数据`/`读取超时` and the "not wired / no data" family
+//    render byte-identically on three pages now, and ROW 5's own note argues for SHARING such a
+//    string. It is NOT shared here, for the reason ROW 5 gives for the /live constant: a value owned
+//    by another page's table makes that page's next re-wording a CROSS-TABLE edit, so a change made
+//    for /board would silently move /dashboard's and /journal's copy (and vice versa). The
+//    duplication is real, recorded, and the cheaper of the two failure modes. ⛔ It is NOT an
+//    invitation to "merge the duplicate" later.
 //
 // ⚠️ NOT IN THIS ROW, and why (each is a judgement, not an omission):
 //   - The reader DIAGNOSTIC strings appended after 「读失败」/「读取超时」/「无数据」 (e.g.
 //     `未找到遥测记录（.workflow-events/ 不存在）`, `landing 判断源执行超过 8000ms 未完成（fail-open）`)
 //     come from `observation.ts`'s readers, which are NOT in this task's Touches and are shared with
 //     /dashboard. They are rendered verbatim through `escapeHtml`, i.e. the same class as a task
-//     title (data), and the /dashboard body-copy task classified them the same way.
+//     title (data), and the /dashboard and /journal body-copy tasks classified them the same way.
 //   - `Filter` / `Page size:` / `« Previous` / `Page {n} of {m}` / the two filter-input placeholders
 //     are ALREADY English in both columns (they predate this series); they are not defects, and
 //     moving them would change zh output, which AC3 forbids.
@@ -806,7 +878,7 @@ export const BOARD_KEYS = [
 
 export type BoardKey = (typeof BOARD_KEYS)[number];
 
-/** The /board body-copy dictionary — see ROW 10 (and ROW 5~8, which it obeys unchanged). */
+/** The /board body-copy dictionary — see ROW 11 (and ROW 5~8, which it obeys unchanged). */
 export const BOARD_LABELS: Record<BoardKey, { en: string; zh: string }> = {
   // ── page chrome ─────────────────────────────────────────────────────────────────────────────
   // ⚠️ The `<title>` itself is NOT here: its token is PAGE_LABELS' job (ROW 3), and it was re-keyed
@@ -842,7 +914,7 @@ export const BOARD_LABELS: Record<BoardKey, { en: string; zh: string }> = {
   colExec: { en: "Execution", zh: "执行" },
   colLanding: { en: "Landing", zh: "落地" },
 
-  // ── per-cell state words (ROW 10 ①) ─────────────────────────────────────────────────────────
+  // ── per-cell state words (ROW 11 ①) ─────────────────────────────────────────────────────────
   inFlightMinutes: { en: "In flight {minutes} min", zh: "在飞 {minutes} 分钟" },
   // The exec cell's own awaiting-land tag. ⛔ NOT shared with `inFlightBreakdown` above: one is a
   // standalone `<strong>` tag inside a table cell, the other is a sentence fragment in the summary
