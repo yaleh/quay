@@ -2,7 +2,7 @@
 id: gap-mirror-measure-history-retire-dead-writer
 title: mirror-measure-history.ts 是死写入器（唯一调用者 fan-in-execute step 4.5
   已删）却仍在册——catalog 6 行（含指着已不存在块的「谁按」）+ 编排文件清单 + 自带测试待连带处置
-status: needs-human
+status: todo
 needs_human_cause: human-adjudication
 labels:
   - gap
