@@ -199,6 +199,14 @@ dev-tree 动态 import 被 inline、产物自足。我方给该文件加了 `imp
 **（b）`packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs` AC3 —— ⛔ 不是本任务的，本轮未修。**
 
 非空性断言 `the window contains merge second parents to verify (non-vacuous)` 在末轮 suite 红，但**本轮三次复跑全绿**（`pass 3 / fail 0` ×2，另有末轮日志）。根因与处置已由 `META-008` / `META-010` 记录：`git log --all --topo-order -n 200` 被 `refs/notes/quay-cmv-merge` 占窗 ⇒ 真 merge 被挤出 ⇒ 窗口内 0 个第二父；而它的解扣动作（把 `tasks/gap-git-history-window-notes-ref-dominates.md` 里位于真 `## Touches` **之前**的那个 `### Touches …` 小标题改名）落在**别的任务的任务体**上——按 self-touch 授权模型不属于本 worker 的写权限面，故只登记、不代改。
+**（c）本轮 scoped 门读数（⛔ 附覆盖范围，别把它读成对 (a) 的验证）。**
+
+`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-arg-parsing-helper-family --allow-thin` ⇒ **EXIT=0**，测试面 `tests 1569 / pass 1569 / fail 0`。
+⚠️ 但**选中的 69 个测试文件里没有 `plugin/test/loop-shipping*.test.mjs`**（`select-tests-for-touches.ts --paths-only` 实读 69 行，逐行 grep `loop-shipping` = 0）——
+`plugin/scripts/loop-shipping-exclusion-data.mjs` 没有按反向 import 图映到那两个测试文件 ⇒ **这轮门的绿不构成对 (a) 的验证**。
+(a) 的验证是上面那两条**直接跑**的读数（necessity-check 3/3、loop-shipping 21/21），另加另外两个读同一张表的消费者
+（`direct-to-develop-bypass-check` 58/58、`prod-data-audit` 10/10）。全量面由 fan-in 的 suite 覆盖。
+
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `arg-parsing-helper-family`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789723686226`）所描述的问题被复核并处置
