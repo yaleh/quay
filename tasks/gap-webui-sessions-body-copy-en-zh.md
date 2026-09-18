@@ -36,7 +36,7 @@ extra:
 2. **字典**：`serve-i18n.ts` 新增 `SESSIONS_KEYS` + `SESSIONS_LABELS` + `sessionsLabelsFor`（同 `DASHBOARD_LABELS` 形；zh 列逐字等于现有字面量）。
 3. **改 `serve-sessions.ts`**：界面文案全走字典；数据原样；标题后缀与页名并列处理；**POST 端点的响应带语言**。
 4. 局部刷新端点（若有）带语言（决定记录 ⑥）；客户端脚本串走参数（⑦）。
-5. **既有测试迁移**：`serve-sessions.test.mjs`、`serve-ac95-views.test.mjs`、`serve-handlers.test.mjs` 中被**实跑**证实变红的，钉中文断言改显式 zh；负向断言显式 zh；不在 Touches 的先补 Touches 再改。
+5. **既有测试迁移**：`serve-sessions.test.mjs`、`serve-ac95-views.test.mjs`、`serve-handlers.test.mjs` 中被**实跑**证实变红的，钉中文断言改显式 zh；负向断言显式 zh；不在 Touches 的先补 Touches 再改。**（补：扫描范围须含 `plugin/test/`——本页源码的字面量也被该目录的测钉着；全量 suite 才暴露的第三条红见 AC7 补。）**
 6. **新测试** `packages/quay/test/serve-sessions-body-i18n.test.mjs`（`@test-group product`）：字典完备 + throw 路径 + 黑盒 en/zh（GET 首屏 + 每个 POST 反馈）。
 7. **因果对照**：钳成恒 zh → en 黑盒变红，恢复复绿。
 8. **收口**：scoped 门 + `serve-*.test.mjs` + `tsc --noEmit` 绿；重启常驻 serve 并截图。
@@ -91,6 +91,8 @@ extra:
 
 **AC7 实跑变红清单**（`node --test <file>`）：`serve-sessions.test.mjs` 1/8 红、`serve-sessions-zh-chrome.test.mjs` 2/4 红；`serve-ac95-views.test.mjs` 21/21、`serve-handlers.test.mjs` 63/63、`observation.test.mjs` 51/51 **全绿未动**。迁移后五者全绿；scoped 门 131/131 绿；`tsc --noEmit` 干净。
 
+**AC7 补（fan-in 全量 suite 才暴露的第三条红，2026-09-18 第二轮）**：上表的扫描范围只到 `serve-*.test.mjs` / `packages/quay/test/`，**漏了 `plugin/test/`**——全量 suite（3289 tests）报出 `plugin/test/session-primitives-adoption.test.mjs` AC5 红 1 条，**根因同一**：该测用 `assert.match(src, /状态记录不可用/)` 钉 `serve-sessions.ts` 的**源码形**，而本次本地化正是把这个字面量搬进了 `serve-i18n.ts` ROW 15（`refusedStateRecord`）——**它断言的是本地化前的源码形，恰是本任务要移除的那样东西**（且该测文件不在 Touches/diff 内，故机械 delta-relatedness 判为 UNRELATED；实为同一根因，硬规则 5 的窄范围教训）。**处置 = 跟着文案走**（与 `serve-*.test.mjs` 迁移同形，家族已定 pattern）：一条断言改为两读——`serve-sessions.ts` 必须解析该帧行（`refusedStateRecord`，实测在该文件**出现 1 次且位于代码位**、非注释）+ `serve-i18n.ts` 该行 zh 列仍带原措辞。**红控制（证明非空转）**：把渲染表达式里的该帧行替换掉 ⇒ `AssertionError: the render surface resolves the refusal frame row`；`git checkout --` 还原（`refusedStateRecord` 计数回到 1、`git status` 只余该测试文件）⇒ 10/10 复绿。`## Touches` 已补 `plugin/test/session-primitives-adoption.test.mjs`（DoD 3 的「只含 Touches 内文件」随之成立）。
+
 **AC3 的唯一逐条解释**：详情页 zh 响应在**长 transcript**（触发滚动加载）时，`<script>` 的**源码形**变了（两个字面量改为注入的 JS literal），**执行的 DOM 写入逐字相同**（两版求值同串），短 transcript 则整页逐字相同。
 
 ## DoD
@@ -111,3 +113,4 @@ extra:
 - packages/quay/test/serve-sessions.test.mjs
 - packages/quay/test/serve-sessions-zh-chrome.test.mjs
 - packages/quay/test/serve-ac95-views.test.mjs
+- plugin/test/session-primitives-adoption.test.mjs
