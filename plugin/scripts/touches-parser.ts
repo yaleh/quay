@@ -202,28 +202,83 @@ export function flagBareDirUncertainTouches(touchesSection, root) {
   return out;
 }
 
-// Locate the `## Touches` section of a full task/charter body. Returns { hasSection, section }.
-// `hasSection` distinguishes "no declaration" (→ conservative) from "declared empty", matching
-// touches-orthogonality-check.ts's parseTouches contract. The section is the raw text between the
-// `## Touches` heading and the next heading of ANY depth (matching extractSection's depth rule is
-// not needed here — parseTouches historically stopped at the next `#`/`##` heading line).
+// Locate the `## Touches` section of a full task/charter body.
+//
+// Returns { hasSection, section, heading, startLine, level }:
+//   hasSection  "no declaration" (→ conservative) vs "declared empty/no bullet paths" — the
+//               touches-orthogonality-check.ts parseTouches contract.
+//   section     the raw body text of the SELECTED section.
+//   heading     the selected heading's text (trimmed, `#` markers removed); null when none matched.
+//   startLine   1-based line number of the selected heading; null when none matched.
+//   level       the selected heading's `#` depth (1..6); null when none matched.
+//
+// The last three exist for 硬规则 3b: without them, "read a Touches section that declares no
+// bullet paths" and "never found a Touches section at all" are the SAME reading (`section: ""`),
+// so a consumer cannot report the second without also accusing the first. They make the two
+// non-isomorphic.
+//
+// SELECTION RULE (gap-touches-parser-early-subheading-latch-hides-declaration). The old rule took
+// the FIRST heading whose text matched /^touches\b/i and ended the section at the next heading of
+// ANY depth. A `### Touches 最终清单（…）`-style subheading placed BEFORE the real `## Touches`
+// therefore latched the section early, its body was cut at the next `###`, and the real `## Touches`
+// was never read → `globs = []`, indistinguishable from "no declaration". Downstream
+// anti-drift-touches-check.ts then reported every changed file as `out-of-declared: task wrote
+// <file> (matches no declared Touches glob)` — blaming the declaration for a parser defect, and
+// making the task permanently unlandable. Measured on the real victim body
+// (tasks/gap-git-history-window-notes-ref-dominates.md): 0 globs read while the real `## Touches`
+// carried 10.
+//
+// The rule is now, over ALL headings whose text matches /^touches\b/i (case-insensitive, trimmed):
+//   1. an EXACT `Touches` wins (case-insensitive; a `## Touches 声明…` prose heading is not one);
+//      earliest of those if several;
+//   2. otherwise the HIGHEST level (`#` fewest); earliest among ties.
+// Two same-level `## Touches` → the first, preserving the historical semantics.
+//
+// The EXTENT rule is deliberately UNCHANGED: the section still ends at the next heading of ANY
+// depth. Loosening it to "level <= the selected level" (so a subheading would not truncate its own
+// section) was measured against all 2299 bodies in tasks/*.md and REJECTED — it is not a hypothesis
+// left untested. The repo's own convention puts a `### Finding：…` note immediately after
+// `## Touches`, and those notes carry PROSE BULLET LISTS; under the loosened rule the parser reads
+// them as declared paths. Four real tasks were affected:
+//   DIR-075                                                                  3 -> 15
+//   gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared  17 -> 20
+//   gap-mcp-server-test-deadlocks-at-high-test-concurrency                    5 -> 18
+//   gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files       6 ->  8
+// e.g. `- **① 确定性规则**：冲突路径…` and `- ① 首次（昨日…）conc=16 —— 死锁` became globs. That is
+// the SAME defect class this function is being fixed for — a declaration reading that does not
+// match the declaration's intent — and it is the dangerous direction (a spurious glob makes a
+// genuinely out-of-declared write PASS anti-drift). The SELECTION rule alone fixes the latch
+// (measured: exactly ONE body in the store changes, the intended 0 -> 5).
 export function extractTouchesSection(fullText) {
   const lines = String(fullText).split(/\r?\n/);
-  let inSection = false;
-  let hasSection = false;
-  const out = [];
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
-    if (heading) {
-      if (inSection) break; // next heading ends the section
-      inSection = /^touches\b/i.test(heading[1].trim());
-      if (inSection) hasSection = true;
-      continue;
-    }
-    if (inSection) out.push(line);
+  const candidates = [];
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].trimEnd().match(/^(#{1,6})\s+(.*)$/);
+    if (!heading) continue;
+    const text = heading[2].trim();
+    if (/^touches\b/i.test(text)) candidates.push({ line: i, level: heading[1].length, text });
   }
-  return { hasSection, section: out.join("\n") };
+  if (candidates.length === 0) {
+    return { hasSection: false, section: "", heading: null, startLine: null, level: null };
+  }
+  // Priority 1 — an exact `Touches` heading (the canonical spelling), earliest first.
+  const exact = candidates.filter((c) => c.text.toLowerCase() === "touches");
+  const chosen = exact.length
+    ? exact[0]
+    : candidates.slice().sort((a, b) => a.level - b.level || a.line - b.line)[0];
+  const out = [];
+  for (let i = chosen.line + 1; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    if (/^#{1,6}\s+/.test(line)) break; // the next heading of ANY depth ends the section
+    out.push(line);
+  }
+  return {
+    hasSection: true,
+    section: out.join("\n"),
+    heading: chosen.text,
+    startLine: chosen.line + 1,
+    level: chosen.level,
+  };
 }
 
 // Direct invocation is NOT a CLI operation — this is a shared library. The experiments/

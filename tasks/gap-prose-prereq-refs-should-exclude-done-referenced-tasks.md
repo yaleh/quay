@@ -2,7 +2,7 @@
 id: gap-prose-prereq-refs-should-exclude-done-referenced-tasks
 title: prosePrereqRefs 的 add() 只排除 superseded、不排除 done ⇒
   引用了已完成任务的散文句会被读成「未建边前置」，任务无法自愈地被永久拦在晋升闸外
-status: ready
+status: done
 labels:
   - gap
   - defect

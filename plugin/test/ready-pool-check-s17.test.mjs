@@ -159,7 +159,10 @@ test("ready task with prose prereq and NO relation edge ⇒ excluded from the po
   const root = makeWorkspace("prereq-ready");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // The referenced prereq task exists (so the wikilink resolves) but has NO relation edge to the target.
-  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ status is `todo`, NOT `done`: a DONE prereq is a SATISFIED one and is no longer a gap at all
+  // (gap-prose-prereq-refs-should-exclude-done-referenced-tasks), so a `done` fixture here would make
+  // this test pass without the no-edge mechanism doing anything.
+  writeTask(root, "gap-prereq-a", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-no-edge", {
     status: "ready",
     labels: ["gap"],
@@ -177,9 +180,12 @@ test("ready task with prose prereq and NO relation edge ⇒ excluded from the po
 test("prose prereq that IS a relation edge (depends_on) ⇒ NOT excluded; depsReady checks depends_on", (t) => {
   const root = makeWorkspace("prereq-edge");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done` — see the note in the previous test: a done ref is dropped by the status
+  // filter before the edge comparison, which would make the "edge covers the prose prereq" claim
+  // untested. `ready` keeps the ref alive so the depends_on edge is what closes the gap.
+  writeTask(root, "gap-prereq-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-prereq-b", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
-  // The prose prereq is ALSO expressed as a depends_on edge (done) ⇒ no gap, stays dispatchable.
+  // The prose prereq is ALSO expressed as a depends_on edge ⇒ no gap, stays dispatchable.
   writeTask(root, "gap-edged-ready", {
     status: "ready",
     labels: ["gap"],
@@ -210,7 +216,8 @@ test("prose prereq that IS a relation edge (depends_on) ⇒ NOT excluded; depsRe
 test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed)", (t) => {
   const root = makeWorkspace("prereq-promo");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `todo`, not `done` — a done ref is a satisfied prereq and would no longer block (see above).
+  writeTask(root, "gap-prereq-a", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
   // AC1 (gap-ac46-pool-criteria-in-gate): the candidate needs its C8 self-touch so it PASSES the
   // self-touch gate and the prose-prereq gap (not self-touch) becomes the blocking reason.
   writeTask(root, "gap-cand", {
