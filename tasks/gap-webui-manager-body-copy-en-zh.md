@@ -2,7 +2,7 @@
 id: gap-webui-manager-body-copy-en-zh
 title: /manager 正文文案在 lang=en 下仍是硬编码中文（三层状态卡、Monitor 注册表、观测指标说明）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
