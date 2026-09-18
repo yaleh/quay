@@ -68,15 +68,83 @@ GOAL-024 AC-289~303 与 `gap-webui-lang-switcher-control` 落地后，`?lang=en`
 5. **可回滚**：还原 `serve-dashboard.ts`/`serve-render.ts`（`renderIdentityCard`）的取词调用、删 `DASHBOARD_LABELS`，纯本地代码无外部状态。
 6. **生效核对**：重启 serve 后浏览器截图（AC8），⛔ 不以「代码已落地」代替「页面已变」（常驻 serve 不会自动重载）。
 
+## 决定记录（pattern —— 其余 13 页照抄，不需重新设计）
+
+**① 字典**：`serve-i18n.ts` ROW 5~8 新增 `DASHBOARD_KEYS` + `DASHBOARD_LABELS: Record<DashboardKey,{en,zh}>`。
+单位是**一个渲染串**，不是组件 —— 两处渲染同一串（`未接入`/`运行中`/`读失败`）共用一行，一处改词两处同时动。
+zh 列**逐字等于**提取前的字面量：本改动是**从运行中的代码里抽出来的**，不是另写一份。
+
+**② 取词**：渲染函数开头 `const L = dashboardLabelsFor(lang)` 一次取整表；带插值的行写成**两列都含 `{name}` 的模板**，
+由 `fillLabel(tpl, params)` 填。⛔ 不在调用点拼「中文字面量 + 数字」——那种串的英文语序无法在调用点修复。
+缺参数 **throw**（ROW 6）：静默留 `{cap}` 会把模板语法渲染到页面上，而没有任何「页面该有的值在不在」的检查会变红。
+
+**③ 默认语言**：`lang: Lang = DEFAULT_LANG`（= en），与 `pageNameFor` / `htmlLangTag` / `navLabelsFor` 同形。
+
+**④ 既有测试迁移**：默认 en ⇒ 钉中文字面量的断言改为**显式** `lang: "zh"` / `?lang=zh` / `Cookie: lang=zh`，
+原断言不变（它们因此成为 zh 回归护栏），另补 en 侧断言。
+⚠️ **负向断言（`!includes("中文")`）必须显式 zh**：在 en 下它会变成恒真空转（字符串缺席的原因是错的）。
+⚠️ 直接渲染的调用点用 `lang: "zh"`；HTTP 探针用 `?lang=zh`（不必改各文件自己的 `get()` helper）。
+
+**⑤ 共享外壳的两个缺口**（本任务顺带修，zh 零变化）：`跳到主要内容`（skip link）与移动菜单四个分组标题
+`核心/观测/记录/知识` —— 新增 ROW 9 `CHROME_LABELS` + `chromeLabel()`。它们是**每页都渲染**的 chrome，
+由本任务的红基线探针量到：「外壳已是英文」这个前提对 nav 各项成立、对这 5 条不成立。
+⛔ 切换控件的 endonym `中文` **不在此列**：它在两种语言下都必须是「中文」（ROW 4 的既定设计）。
+⛔ 未纳入（逐条记录，属别的任务）：`pageTitle` 无 identity 时的 `未接入项目身份 — <page>`（需 identity
+未解析才出现，实测页面不含）；`observation.readTests().reason` 等 reader 诊断串（本页只 `escapeHtml`
+原样渲染，与任务标题同属「数据」）；`obsNote` / `renderBackLink`（其他页面）；`serve-live.ts` 自己的
+`phaseLabel` 副本（/live 的，硬规则 5b 兄弟实例）。
+
+**⑥ `/dashboard/cards` 必须带语言**：它在 30 s 后整卡替换 DOM；退回默认语言会让 zh 页面在几秒后变英文，
+而**页面自身的 HTML 是正确的** ⇒ 任何只抓一次响应的探针看不见。（`handleDashboardCards` 的 `cfg` 由
+`{ workspaceRoot }` 放宽为 `ServePageCfg`；dispatcher 本来传的就是它，只是这个注解比实参窄。）
+
+**⑦ `sparklineSvg` 的阈值词作为【参数】传入**：其源码经 `Function#toString` 进客户端脚本，浏览器没有字典。
+服务端渲染用 `dashboardLabelsFor(lang).sparkThreshold`，客户端从内联常量 `THRESHOLD_LABEL` 取。
+缺参数时降级为**裸数字**（绝不替调用方选一个语言）。
+
+**⑧ `renderTimelineBarSvg` 是 /dashboard 与 /tests 共享的**：aria-label 变语言相关后，`serve-tests.ts`
+必须传自己那页的 `lang`（已做）。⛔ 不传不会报错 —— 默认 en 会让 `?lang=zh` 的 /tests 渲染英文
+aria-label（硬规则 3b：静默默认与「接好了」同形）。
+
+**⑨ 测试形态**：`packages/quay/test/serve-dashboard-body-i18n.test.mjs` 三层 —— 字典完备性（键集闭合 /
+两列非空 / en 无 CJK / zh 有 CJK 或与 en 逐字同）+ 取词函数的**两条 throw 路径** + 黑盒两态
+（en 下界面 CJK = 0，且**同一谓词对 zh 干跑必须命中**；`/dashboard/cards` 也随语言）。
+「zh 有 CJK 或与 en 逐字同」**不是放宽而是更强的谓词**：一个纯 ASCII 的 zh 值只允许在它**逐字等于**
+en 时存在（如 live_state 的 `running`），因此「误写成英文的 zh 文案」仍然会红。
+
+## 证据（改后读数）
+
+- **AC1 红基线**：`lang=en` 含 CJK 文本行 **60**；分类 —— 界面文案 **51**（正文 46 + 共享外壳 5：`跳到主要内容`、`核心`/`观测`/`记录`/`知识`）、切换控件 endonym `中文` ×2（既定设计）、用户数据 7（3 条任务标题 + 1 条提交信息 + 3 条 reader/goal 诊断串）。
+- **AC2 改后**：同一判据 **8** 条 —— `中文` ×2（endonym）+ 6 条用户数据；**界面文案 = 0**。零计数对照：同一谓词对 zh 响应命中 **92 > 20**。
+- **AC3 zh 零变化**：`lang=zh` 改前/改后可见文本 diff 仅 6 处、raw HTML diff 27 行，全部是动态数据（监听端口、cpu/load 实时采样、4 处 `5m ago`→`10m ago`、提交列表随 develop 前进）或新增的客户端脚本管道（`THRESHOLD_LABEL` 常量 + 序列化函数多一个形参），**界面文案无一处变化**。
+- **AC4 因果**：删掉 `loopPulse` 的 `zh` 列 ⇒ `tsc` 报 `TS2741: Property 'zh' is missing … but required in type '{ en: string; zh: string; }'`；恢复后 `tsc` 干净。
+- **AC6 因果**：`dashboardLabelsFor`/`dashboardLabel`/`chromeLabel` 三处钳成恒 zh ⇒ 新测试 **6 条转红**（含 AC2 黑盒、两条 AC5 路径、cards payload）；恢复后 **12/12 绿**。
+- **AC7 迁移**：Touches 内 5 个文件改造后先红 **8** 条（A/B 对照：同一命令在原始源码上 49/49 绿）；扩面到「所有可能受影响的测试」（导入 serve-* 或含被移动文案的 105 个文件）后共 **33 条**转红，逐个迁移后仅余 2 条**与本次改动无关的既存红**（`cli.test.mjs`、`server-status-web-control-same-pid.test.mjs` 的 dist bundle 断言 —— 两者在**原始源码**的 A/B 对照里同样红，因为 worktree 无 `dist/`）。
+- **AC8**：见 `quay serve`（worktree，port 4319）+ headless Chrome 截图。
+
 ## Touches
 
 - tasks/gap-webui-dashboard-body-copy-en-zh.md
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/src/serve-render.ts
 - packages/quay/src/serve-i18n.ts
+- packages/quay/src/serve-tests.ts
 - packages/quay/test/serve-dashboard-body-i18n.test.mjs (new)
 - packages/quay/test/serve-dashboard.test.mjs
 - packages/quay/test/serve-ac95-views.test.mjs
+- packages/quay/test/serve-nav-inconsistent-routes.test.mjs
+- packages/quay/test/serve-live-implcomplete.test.mjs
 - packages/quay/test/gap-dashboard-cards-layout-and-livecard-swimlane.test.mjs
 - packages/quay/test/gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs
 - packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs
+- packages/quay/test/gap-dashboard-driver-status-card.test.mjs
+- packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-ac-progress-bar.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
+- packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
+- packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
+- packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs
+- packages/quay/test/gap-webui-tests-page-missing-rounds-timeline-bar.test.mjs
+- packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs
