@@ -120,10 +120,14 @@ function pageAuthoredCjk(body, readerReasons) {
 //    had to resolve by hand). git-inited (not merely mkdtemp'd) because the landing reader shells out
 //    to the drift checker, which resolves the repo root from cwd. ──────────────────────────────────
 
-let server, port, root, originalCwd, tasksDir;
+// ⚠️ `parent` is a MODULE-LEVEL binding on purpose: `tmp-leak-pairing-check` requires the mkdtemp
+// result to be named in its cleanup (`fs.rmSync(<that variable>)` in an after() hook), so cleaning
+// `path.dirname(root)` — the same directory, one alias away — would read as an UNPAIRED mkdtemp and
+// red the static gate. The alias is not the thing the detector pairs on.
+let server, port, root, parent, originalCwd, tasksDir;
 
 before(async () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "board-i18n-"));
+  parent = fs.mkdtempSync(path.join(os.tmpdir(), "board-i18n-"));
   root = path.join(parent, "main");
   tasksDir = path.join(root, "tasks");
   fs.mkdirSync(tasksDir, { recursive: true });
@@ -157,7 +161,7 @@ after(async () => {
   await new Promise((r) => server.close(r));
   if (server?.client) await server.client.close();
   process.chdir(originalCwd);
-  if (root) fs.rmSync(path.dirname(root), { recursive: true, force: true });
+  if (parent) fs.rmSync(parent, { recursive: true, force: true });
 });
 
 /** The reader diagnostics this page echoes verbatim, read from the same readers the page read, so
@@ -340,8 +344,15 @@ test("AC5: the SNAPSHOT path (production default) renders both languages correct
   assert.equal(hits.length, 4, "the four switcher items were located (see the AC2 test for why the count is asserted)");
   assert.deepEqual(pageAuthoredCjk(en.body, reasons).residual, [], "the snapshot render path is localized too");
   const zh = await get(port, "/board", { Cookie: "lang=zh" });
+  // The three view notes are mutually exclusive and state-dependent, so the positive arm is an OR
+  // over them; the NEGATIVE arm below is what makes it a language assertion rather than a
+  // "some Chinese string is on the page" one (a fallback to DEFAULT_LANG would render the en wording
+  // and none of the three Chinese ones).
   assert.ok(zh.body.includes("默认过滤未生效") || zh.body.includes("默认视图") || zh.body.includes("已显示全部"),
     "AC5: the snapshot path is still zh under ?lang=zh/zh cookie (the language did not fall back to the default)");
+  for (const enWord of ["Default filter not applied", "Default view:", "Showing all"]) {
+    assert.ok(!zh.body.includes(enWord), `AC5: the snapshot path did not fall back to the en wording ${JSON.stringify(enWord)}`);
+  }
 });
 
 test("AC5: the LEGACY path (snapshot absent — QUAY_BOARD_SNAPSHOT_DISABLED=1) carries the language too", async () => {
