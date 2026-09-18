@@ -65,6 +65,7 @@ import {
   DRIVER_KINDS,
   KNOWN_KINDS,
   preferredAnchorKernel,
+  writeDesired,
 } from "../scripts/driver-runtime.ts";
 // ⚠️ 本文件**只剩** anchor 进程边界那半边（收敛 / 心跳判据 / stop --kind / 崩溃边界 / 双派发硬闸）。
 //    「内核源树 + 陈旧 bundle 动作面」那 8 个 test() 已按功能边界拆到 `driver-anchor-bundle.test.mjs`
@@ -92,6 +93,10 @@ const ANCHOR_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "driver-anchor.t
 // ⚠️ 已知边界（如实标注，⛔ 不伪装成全测）：本文件因此验的是**anchor 实际加载的那份**内核 ——
 //   在 worktree 里就 = 主检出那份 ⇒ **worktree 中对 anchor 内核本身的改动不会被本文件验到**
 //   （driver-runtime.ts 已明记该形态「结构上无法自测」）。这是形态的性质，⛔ 不是夹具能绕开的。
+//   ✅ **一个例外，且只对下面 AC1/AC2 成立**：那两条**不经** `kernel()`/driver-runtime 解析，而是起一个
+//   harness 直接 `import` 本文件的 `ANCHOR_SCRIPT`（= 本 worktree 那份）⇒ 它们验的**就是**本 worktree
+//   的 driver-anchor.ts。`preferredAnchorKernel` 那条边界对它们不适用（代价：它们测的是一个**注入
+//   invokeKind** 的 anchor，⛔ 不是一份真 driver；真 driver 的进程边界仍由上面那些 test 覆盖）。
 const _anchorKernel = preferredAnchorKernel();
 assert.ok(
   _anchorKernel,
@@ -245,6 +250,140 @@ function cleanup(root) {
   }
   fs.rmSync(root, { recursive: true, force: true });
 }
+
+// ── AC1/AC2：停机后⛔ 不得再把 kind 拉起来（D1，gap-driver-anchor-self-refresh-leaves-no-anchor-alive）──
+//
+// ⚠️ 这两条⛔ **不能**走本文件上面的 `makeFixture` + `kernel()`：那一路经 driver-runtime 的
+//    `preferredAnchorKernel()` 解析要跑的 anchor 内核，而它**优先主检出**（见文件头 :92-94 的已知边界）
+//    ⇒ **worktree 里对 `driver-anchor.ts` 的改动结构上验不到**，而 D1 的闸就写在 `driver-anchor.ts` 里。
+//    ⇒ 必须让 anchor 真的加载**本 worktree 那一份**：直接起 `ANCHOR_SCRIPT`。
+//    而 `invokeKind` 是 `runAnchor()` 的**进程内**缝（AnchorOptions）⇒ 由一个一次性的 harness 注入：
+//    harness import 本 worktree 的 driver-anchor.ts 并调 runAnchor({invokeKind})；测试把 SIGTERM 发给
+//    harness —— **真进程上的真停机信号**，与生产同一条码路（⛔ 不是给测试加的停机缝）。
+//    注入的循环**立刻返回** ⇒ 「事件循环层 respawn」与「reconcile 起分支」两条重启路径都可被逐条数出。
+
+/** 写一个注入 `invokeKind` 的 harness（见上）。每次调用追写 `.quay/invoke.jsonl`（**直接量**：
+ *  「循环还在被调用吗」不靠日志解析）。 */
+function writeAnchorHarness(root, kinds) {
+  const file = path.join(root, "anchor-harness.mjs");
+  fs.writeFileSync(
+    file,
+    `import fs from "node:fs";
+import path from "node:path";
+import { runAnchor } from ${JSON.stringify(ANCHOR_SCRIPT)};
+
+const root = process.argv[2];
+const invokes = path.join(root, ".quay", "invoke.jsonl");
+await runAnchor({
+  root,
+  kinds: ${JSON.stringify(kinds)},
+  reconcileMs: 30,
+  restartDelaySecs: 1, // 事件循环层 respawn 的退避基准（代码里下限就是 1s）
+  logFile: path.join(root, ".quay", "anchor.log"),
+  invokeKind: async (kind) => {
+    fs.appendFileSync(invokes, JSON.stringify({ kind, pid: process.pid, at: Date.now() }) + "\\n");
+    return 0; // ⛔ 立刻返回：循环体结束 ⇒ 走 respawn 分支（这正是要观测的两条重启路径之一）
+  },
+});
+`,
+    "utf8",
+  );
+  return { file, invokes: path.join(root, ".quay", "invoke.jsonl") };
+}
+
+/** harness 的夹具根：只有 `.quay/`（anchor 自己会建）+ 一个**空的** plugin/scripts。
+ *  ⚠️ QUAY_PLUGIN_ROOT 指到那个空目录 ⇒ `sourceWatch().state === "unwatched"` ⇒ 自刷新的两条支路
+ *  （stale / bundleStale）都不成立 —— 本组测停机，⛔ 不让它顺带重启自己。 */
+function makeHarnessRoot(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `anchor-${tag}-`));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  return root;
+}
+
+function startHarness(root, harnessFile) {
+  return spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", harnessFile, root], {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: {
+      ...process.env,
+      QUAY_PLUGIN_ROOT: path.join(root, "plugin"),
+      // 有界停机宽限调小（测试缝）：RED 形态下 anchor 的唯一出口是它，60000ms 会让本测慢到没法跑。
+      QUAY_ANCHOR_SHUTDOWN_GRACE_MS: "2000",
+    },
+  });
+}
+
+const anchorLogOf = (root) => {
+  const p = path.join(root, ".quay", "anchor.log");
+  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+};
+
+/** 日志里**最后一次** `stop requested` 之后的全部内容（未出现 ⇒ null）。 */
+function afterStopRequested(log) {
+  const i = log.lastIndexOf("stop requested");
+  return i < 0 ? null : log.slice(i);
+}
+
+const countIn = (s, re) => (s.match(re) ?? []).length;
+const invokeCount = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() !== "").length : 0);
+
+test("AC1 (D1) — stop 请求之后 reconcile ⛔ 不再拉起任何 kind（修复前：起分支无 `!stopping` 闸 ⇒ 停完下一趟就重起，宽限成了唯一出口）", async (t) => {
+  const root = makeHarnessRoot("d1-stop");
+  const { file, invokes } = writeAnchorHarness(root, ["outer", "goal"]);
+  const child = startHarness(root, file);
+  t.after(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } fs.rmSync(root, { recursive: true, force: true }); });
+
+  // 正控制①：停机之前两个 kind 都真的起过、且**只起一次**（幂等；⛔ 否则下面的负断言可能因为「压根没跑到」而空过）。
+  await waitFor(() => countIn(anchorLogOf(root), /loop started/g) >= 2, 20_000, "both kinds to start");
+  assert.equal(countIn(anchorLogOf(root), /loop started/g), 2, "两个 kind 各起一次（幂等：已在 active 的不重起）");
+  // 等到事件循环层 respawn 至少发生过一次 ⇒ 此刻 SIGTERM 处理器**一定**已注册、anchor 已完全进入常驻循环
+  // （处理器在初始 startKindTask 之后注册，只等 "loop started" 会撞上一个极窄的窗口）。
+  await waitFor(() => /event-loop respawn #1/.test(anchorLogOf(root)), 20_000, "the anchor to be fully inside its resident loop");
+
+  child.kill("SIGTERM");
+  await waitFor(() => afterStopRequested(anchorLogOf(root)) !== null, 20_000, "the stop request to be logged");
+  // 正控制②：循环**确实收尾过**——否则「停后没有 loop started」是一句空话（什么都没停，就没得重起）。
+  await waitFor(() => afterStopRequested(anchorLogOf(root)).includes("loop stopped"), 20_000, "the loops to actually drain after the stop");
+  const drainedInvokes = invokeCount(invokes);
+  // 给足时间：≥60 趟 reconcile（30ms/趟）+ 一次 respawn 退避（1s）。修复前，收尾后的**下一趟**就会重起
+  // （`wanted` 仍是盘上期望态，它不看 `stopping`）。
+  await new Promise((r) => setTimeout(r, 2500));
+
+  const after = afterStopRequested(anchorLogOf(root));
+  assert.ok(after !== null, "stop-requested 标记在场");
+  assert.ok(after.includes("loop stopped"), "收尾本身发生了（⛔ 负断言不是空过）");
+  const restarted = after.split("\n").filter((l) => l.includes("loop started"));
+  assert.equal(
+    restarted.length,
+    0,
+    `stop 请求之后⛔ 不得再出现 loop started（实得 ${restarted.length} 条）:\n${restarted.join("\n")}`,
+  );
+  assert.equal(countIn(after, /restarting in \d+ms/g), 0, "停机后连事件循环层 respawn 也不该有");
+  // 直接量：注入的循环**没有再被调用**（⛔ 不靠日志解析——那是代理量）。
+  assert.equal(invokeCount(invokes), drainedInvokes, `停机后循环⛔ 不得再被调用（invoke.jsonl ${drainedInvokes} → ${invokeCount(invokes)}）`);
+});
+
+test("AC2 (D1 负控制) — ⛔ 没有 stop 时两条重启路径都仍在：循环返回 ⇒ respawn；期望态后加的 kind ⇒ reconcile 起它", async (t) => {
+  const root = makeHarnessRoot("d1-nostop");
+  const { file, invokes } = writeAnchorHarness(root, ["outer"]);
+  const child = startHarness(root, file);
+  t.after(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } fs.rmSync(root, { recursive: true, force: true }); });
+
+  // (a) 事件循环层 respawn：循环体立刻返回，同一 kind 被**再次**调用。这条路径⛔ 不受 D1 影响
+  //     （D1 只挡 `stopping` 之后的**起**），修闸时⛔ 不得把它一起关掉。
+  await waitFor(
+    () => fs.existsSync(invokes) && fs.readFileSync(invokes, "utf8").split("\n").filter((l) => l.includes('"outer"')).length >= 2,
+    20_000,
+    "the outer loop to be respawned at the event-loop level",
+  );
+  assert.match(anchorLogOf(root), /event-loop respawn #\d+/, "respawn 计数落在日志里（⛔ 不静默）");
+
+  // (b) reconcile 的**起分支**：把一个 kind 后加进期望态（**全程没有 stop 请求**）⇒ 它必须被拉起。
+  //     这正是那道 `!stopping` 闸的负控制：闸只能挡停机后的起，⛔ 不能挡正常态下的起。
+  writeDesired(root, ["outer", "goal"], "test:d1-negative-control");
+  await waitFor(() => /kind=goal loop started/.test(anchorLogOf(root)), 20_000, "reconcile to start the newly-desired kind");
+  assert.ok(!anchorLogOf(root).includes("stop requested"), "全程没有停机请求（否则这条负控制测的就不是正常态）");
+});
 
 // ── AC1 / AC2 / AC4：收敛 + criterion 逐字 exit 0 + 六心跳仍被写 ──────────────────────────────────
 
