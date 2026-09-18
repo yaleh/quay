@@ -2,7 +2,7 @@
 id: gap-git-history-window-notes-ref-dominates
 title: git-history 窗口被 refs/notes/quay-cmv-merge 线性链占满：生产读路径 200 条里 185 条是 notes
   提交，且钉死全仓 code-delta fan-in（AC3 非空判据恒红）
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -147,7 +147,7 @@ notes = **200/200**。同时 `git rev-list --merges --count refs/notes/quay-cmv-
    + ✅ AC3 的负控制（判据仍可假，实测报红）。
 2. **可被打红**：✅ AC1 的两组读数（两组都给了，且给出互斥性论证）+ ✅ AC3 的负控制（实测非恒真）。
 3. **记账**：✅ 修法**取 a** 及三条理由见 §Plan 步骤 2；✅ 「`--all` 其它读者」9 项清单见 §实现记录。
-4. **不许越界**：✅ 改了生产侧 ⇒ 受影响的 7 个 oracle 文件**全部已同步**（清单见 §实现记录 Touches 表，
+4. **不许越界**：✅ 改了生产侧 ⇒ 受影响的 7 个 oracle 文件**全部已同步**（清单见 §实现记录「声明清单」表，
    每行都写了「对齐到哪里」）。⛔ 无一处「改了生产、oracle 留在旧窗口定义」的漏网。
 
 ## 实现记录
@@ -160,7 +160,7 @@ notes = **200/200**。同时 `git rev-list --merges --count refs/notes/quay-cmv-
 ⛔ 这**不是**让 oracle 回声 `readGitHistory`：oracle 仍然自己跑真 git 取 git 的发射序/父/装饰，
 共享的只是**被测的窗口定义**本身。窗口定义另有**独立判据**（AC2 的 notes 条数 = 0）在管，不靠这条共享。
 
-### Touches 最终清单（⛔ 实现前定稿，与 `## Touches` 逐条一致，无追加）
+### 声明清单（⛔ 实现前定稿，与文末「Touches」段逐条一致，无追加）
 
 | 文件 | 角色 | 改了什么 |
 |---|---|---|
@@ -207,7 +207,7 @@ notes = **200/200**。同时 `git rev-list --merges --count refs/notes/quay-cmv-
 | 9 | `workflow-replay.ts:345`、`gate-event-coverage-check.ts:333`、`*-closure-{assertion,ratchet}.ts` | 否 | `--all` 是**它们自己的 CLI 参数**（`--all --loop`），不是 `git log` 的 |
 
 **取证手法（硬规则 2：零计数要先对已知为真的样本干跑谓词）**：谓词「同一文件里既含 `"--all"` 又含
-`readGitHistory(`」⇒ 命中 8 个文件（7 测试 + `observation.ts`），与 Touches 表一一对应，无遗漏。
+`readGitHistory(`」⇒ 命中 8 个文件（7 测试 + `observation.ts`），与声明清单表一一对应，无遗漏。
 
 ### AC3 取证
 
@@ -248,6 +248,23 @@ notes = **200/200**。同时 `git rev-list --merges --count refs/notes/quay-cmv-
 - scoped 门：`bash scripts/test.sh --for-task gap-git-history-window-notes-ref-dominates --allow-thin`
   ⇒ `tests 169 / pass 169 / fail 0`
 - scoped 门缓存已写入（`--write-scoped-gate-cache`，developSha=`c89b7e7e7`）⇒ fan-in 跳过冗余重跑
+
+### 本轮（2026-09-18，第二次续做）修掉的 anti-drift 早退根因
+
+前一轮 `exited-not-landed` 于 `step=anti-drift`，报 **9 violation(s)**，全部是
+`out-of-declared: task wrote <file> (matches no declared Touches glob)` —— 而 9 个文件**逐条都在文末
+`## Touches` 里**。根因**不在声明内容**，在**段提取**：`extractTouchesSection`
+（`plugin/scripts/touches-parser.ts:210`）取**第一个** `^touches\b` 的标题并在下一个标题处截断；
+本文档原先在 §实现记录 里有一个 `### Touches 最终清单（…）` 子标题，**位置在文末 `## Touches` 之前**
+⇒ 被当成 Touches 段，而它下面是一张 markdown **表格**（不是 `- ` bullet）⇒ 解析出 **0 个 glob**
+⇒ 9 个真实文件全被判为 out-of-declared。
+
+**修法（一行，⛔ 不改共享解析器）**：把该子标题改为不以前缀 `Touches` 开头的
+`### 声明清单（…）`。判据（改前/改后同一命令）：
+`parseTouches(<本任务体>).globs.length` ⇒ 改前 **0**、改后 **10**（= 文末 `## Touches` 的 10 条）。
+⚠️ 该提取器的「首个前缀标题胜出」形态是**共享机件**（`task-contract-check` / `fan-in-ts-typecheck-gate` /
+`defect-shape-aggregate` 等 6 个消费者同样用它），本文档只修**自己这一处触发点**；
+`plugin/scripts/touches-parser.ts` **不在本任务 Touches 内**，故那是一处**另计的机制缺陷观察**，不在本 delta。
 
 ## Touches
 

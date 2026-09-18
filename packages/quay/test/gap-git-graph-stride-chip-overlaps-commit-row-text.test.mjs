@@ -23,7 +23,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 import {
   layoutGitGraph,
   gitGraphClientScript,
@@ -141,9 +141,10 @@ test("AC4: %D-nonempty rows still render an inline label; count equals git's %D-
   assert.ok(layout && layout.rows.length > 0, "the window carries commits");
 
   // git oracle: commits in the SAME window carrying a non-empty %D decoration.
-  // --topo-order matches readGitHistory's own query (`--all --topo-order -n`); the default date-order
-  // window can select a DIFFERENT N-commit set when an out-of-order merge tip sits near the boundary.
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+  // --topo-order matches readGitHistory's own query (`GIT_HISTORY_REF_SCOPE --topo-order -n`); the
+  // default date-order window can select a DIFFERENT N-commit set when an out-of-order merge tip sits
+  // near the boundary. The ref scope comes from the same shared constant.
+  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });

@@ -28,7 +28,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, GIT_HISTORY_LIMIT } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_LIMIT, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 import { taskIdFromSubject, layoutTaskGraph, layoutGitGraph, gitHistoryJson, renderGitHistoryPage, gitHistoryViewOf } from "../src/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +45,10 @@ let SNAPSHOT = null;
  *  make two of this file's measures disagree — the window cannot shift under it. */
 function snapshot() {
   if (SNAPSHOT) return SNAPSHOT;
-  const logOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", `-n ${GIT_HISTORY_LIMIT}`, LOG_FORMAT], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+  // The ref scope MUST be the production one (GIT_HISTORY_REF_SCOPE): this snapshot IS the window the
+  // seam serves to `readGitHistory`, so spelling `--all` here would make the fixture's window differ
+  // from production's (defeating the seam's purpose — it exists to freeze the SAME read, not a wider one).
+  const logOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", `-n ${GIT_HISTORY_LIMIT}`, LOG_FORMAT], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
   let head = "";
   try {
     head = execFileSync("git", ["-C", REPO_ROOT, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] }).trim();

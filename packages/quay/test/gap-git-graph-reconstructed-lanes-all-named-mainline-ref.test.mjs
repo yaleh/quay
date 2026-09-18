@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { layoutGitGraph } from "../src/serve-git.ts";
-import { readGitHistory } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -55,10 +55,11 @@ test("AC3: every production label exists in git %D (mislabel count = 0)", () => 
   const history = readGitHistory(REPO_ROOT, { limit: 500 });
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
   const layout = layoutGitGraph(history);
-  // --topo-order matches readGitHistory's own query (`--all --topo-order -n`); the default date-order
-  // window can select a DIFFERENT 500-commit set when an out-of-order merge tip sits near the boundary,
-  // so the two must be aligned or the label comparison compares two different windows.
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", "500", "--pretty=format:%H%x01%D"], {
+  // --topo-order matches readGitHistory's own query (`GIT_HISTORY_REF_SCOPE --topo-order -n`); the
+  // default date-order window can select a DIFFERENT 500-commit set when an out-of-order merge tip
+  // sits near the boundary, so the two must be aligned or the label comparison compares two different
+  // windows. Same for the ref SCOPE — taken from the shared constant, never respelled here.
+  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", "500", "--pretty=format:%H%x01%D"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
