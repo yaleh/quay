@@ -20,8 +20,28 @@
 // emitted UNCHANGED (current behavior). The caller (scripts/test.sh) additionally refuses a
 // short/empty result and keeps the original order.
 //
+// ⚠️ FAIL-OPEN IS INVISIBLE FROM THE OUTPUT ALONE — the identity list is a VALID list, and it has
+// exactly the right line count, so a caller that infers "reordered" from "output looks well-formed"
+// reports a reorder that never happened (硬规则 3b: a check with no "not evaluated" value cannot
+// tell "checked and fine" from "never checked"). Measured on CI run 35297103524 (2026-09-18): the
+// suite printed `lpt-order: file list reordered (56 files; first=closure-lag-check.test.mjs)` and
+// `(32 files; first=observation.test.mjs)` — and those two names are EXACTLY the first files of
+// their groups in raw glob order, i.e. nothing was reordered. A fresh checkout (CI) has no
+// `.quay/verification-round.jsonl` at all (gitignored), so EVERY CI run took this path. The `LptReport`
+// returned by the entry point carries the provenance, and the CLI prints it to stderr, so
+// "no carrier" is distinguishable from "carrier present and the order really changed".
+//
+// COMMITTED LAST-RESORT CARRIER (`--baseline <path>`): the same measured CI run dispatched the main
+// bucket in RAW glob order, putting a 19 165 ms file at queue position ~565 so it started at t=17.2 s
+// and pinned main_phase_ms at 36.3 s against a 19.5 s floor (the other 16 s of slack had no cause in
+// the floor at all). The live rolling carrier always WINS when present; --baseline is consulted ONLY
+// when it yields nothing, so a checkout that has no per-file history still gets a duration-AWARE
+// order instead of the identity order. It is order-only and fail-open (unreadable/malformed ⇒ empty),
+// and a stale baseline can only cost scheduling quality, never correctness.
+//
 // Usage (stdin → stdout, one path per line; paths in, paths out in the same form):
 //   node --experimental-strip-types suite-lpt-order.ts --root <main-checkout> --rounds 3 < files.txt
+//   node --experimental-strip-types suite-lpt-order.ts --root <r> --baseline docs/analysis/suite-perfile-duration-baseline.json < files.txt
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -38,13 +58,16 @@ export function repoRelKey(file: string, root: string): string {
   return rel.replace(/^\.\//, "");
 }
 
-function parseArgs(argv: string[]): { root: string; rounds: number } {
+function parseArgs(argv: string[]): { root: string; rounds: number; baseline: string } {
   let root = process.cwd();
   let rounds = 3;
+  let baseline = "";
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root" && i + 1 < argv.length) root = argv[++i];
     else if (a.startsWith("--root=")) root = a.slice("--root=".length);
+    else if (a === "--baseline" && i + 1 < argv.length) baseline = argv[++i];
+    else if (a.startsWith("--baseline=")) baseline = a.slice("--baseline=".length);
     else if (a === "--rounds" && i + 1 < argv.length) {
       const n = Number(argv[++i]);
       if (Number.isInteger(n) && n >= 1) rounds = n;
@@ -53,7 +76,7 @@ function parseArgs(argv: string[]): { root: string; rounds: number } {
       if (Number.isInteger(n) && n >= 1) rounds = n;
     }
   }
-  return { root: path.resolve(root), rounds };
+  return { root: path.resolve(root), rounds, baseline };
 }
 
 /** Read a PER-FILE rolling average from the carrier: for each repo-rel key, average that file's own
@@ -101,6 +124,64 @@ export function loadDurationAverages(carrier: string, root: string, rounds: numb
   return avg;
 }
 
+/** Read the COMMITTED last-resort duration table (`docs/analysis/suite-perfile-duration-baseline.json`:
+ *  `{ durations: { <repo-rel-key>: <rolling-average ms> } }`). Consulted ONLY when the live rolling
+ *  carrier yields NOTHING — a fresh checkout (CI) has no `.quay/verification-round.jsonl` (gitignored),
+ *  so without this the LPT silently degrades to identity order on every CI run. Order-only: the keys
+ *  are the SAME repo-relative keys `repoRelKey` produces, an entry for a file that no longer exists is
+ *  simply never looked up, and any read/parse failure returns an EMPTY map (fail-open). */
+export function loadBaselineDurations(baselinePath: string): Map<string, number> {
+  const map = new Map<string, number>();
+  let text: string;
+  try {
+    text = fs.readFileSync(baselinePath, "utf8");
+  } catch {
+    return map; // absent/unreadable ⇒ no reordering signal (fail-open)
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return map; // malformed ⇒ no signal (fail-open), never an exception
+  }
+  const d = parsed?.durations;
+  if (!d || typeof d !== "object") return map;
+  for (const [key, value] of Object.entries(d)) {
+    const n = Number(value);
+    if (key && Number.isFinite(n) && n > 0) map.set(key, n);
+  }
+  return map;
+}
+
+/** Which carrier supplied the duration table — so "no history ⇒ identity output" is distinguishable
+ *  from "history present and the order really changed" (硬规则 3b). */
+export type LptProvenance = "rolling-carrier" | "committed-baseline" | "none" | "disabled";
+
+export interface LptReport {
+  provenance: LptProvenance;
+  /** entries in the duration table used (0 ⇒ the order below is the input order) */
+  entries: number;
+  /** number of input files handed to the classifier */
+  files: number;
+  /** true only when the MAIN bucket's emitted order differs from its input order */
+  mainReordered: boolean;
+}
+
+/** Resolve the duration table: the LIVE rolling carrier wins; `--baseline` is the last resort. */
+export function resolveDurationTable(opts: {
+  root: string;
+  rounds: number;
+  baseline?: string;
+}): { table: Map<string, number>; provenance: LptProvenance } {
+  const live = loadDurationAverages(path.join(opts.root, ".quay", "verification-round.jsonl"), opts.root, opts.rounds);
+  if (live.size > 0) return { table: live, provenance: "rolling-carrier" };
+  if (opts.baseline) {
+    const base = loadBaselineDurations(opts.baseline);
+    if (base.size > 0) return { table: base, provenance: "committed-baseline" };
+  }
+  return { table: live, provenance: "none" };
+}
+
 /** Pure LPT reorder: descending average duration, ties and unknowns keep their ORIGINAL relative
  *  order (explicit index tiebreaker — never relies on engine sort stability). Returns a NEW array;
  *  the input strings are returned unchanged (paths in, paths out in the same form). */
@@ -111,7 +192,7 @@ export function orderByLpt(input: string[], avg: Map<string, number>, root: stri
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { root, rounds } = parseArgs(argv);
+  const { root, rounds, baseline } = parseArgs(argv);
   // Read input paths from stdin (one per line, the exact `--buckets` selected file list).
   const inputRaw = await new Promise<string>((resolve) => {
     const chunks: Buffer[] = [];
@@ -121,8 +202,14 @@ async function main(argv: string[]): Promise<number> {
   const input = inputRaw.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
   if (input.length === 0) return 0;
 
-  const avg = loadDurationAverages(path.join(root, ".quay", "verification-round.jsonl"), root, rounds);
-  for (const file of orderByLpt(input, avg, root)) process.stdout.write(file + "\n");
+  const { table, provenance } = resolveDurationTable({ root, rounds, baseline: baseline || undefined });
+  const out = orderByLpt(input, table, root);
+  // The authoritative status line: the reorder claim lives HERE, where the comparison is real, and
+  // NOT in the caller's "output looks well-formed" inference (which the identity list also satisfies).
+  process.stderr.write(
+    `suite-lpt-order: provenance=${provenance} entries=${table.size} files=${input.length} reordered=${out.some((f, i) => f !== input[i])}\n`,
+  );
+  for (const file of out) process.stdout.write(file + "\n");
   return 0;
 }
 

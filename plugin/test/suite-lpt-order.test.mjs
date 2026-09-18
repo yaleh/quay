@@ -38,7 +38,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { repoRelKey, loadDurationAverages, orderByLpt } from "../scripts/suite-lpt-order.ts";
+import { repoRelKey, loadDurationAverages, orderByLpt, loadBaselineDurations, resolveDurationTable } from "../scripts/suite-lpt-order.ts";
 import { parseRunnerArgs } from "../scripts/suite-lpt-runner.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -123,7 +123,7 @@ test("ordering — LPT is TS-side (suite-lpt-order.ts + suite-scheduler.ts class
   assert.doesNotMatch(testSh, /lpt_reorder_files/, "scripts/test.sh must no longer define/call lpt_reorder_files");
   // The DEFAULT path's LPT now lives inside the scheduler: classifyAndOrder calls suite-lpt-order.ts's
   // loadDurationAverages + orderByLpt (the TS pure functions the ordering-helper tests above cover).
-  assert.match(scheduler, /loadDurationAverages\(carrier, opts\.root, opts\.rounds\)/, "suite-scheduler.ts must call loadDurationAverages (LPT in TS)");
+  assert.match(scheduler, /loadDurationAverages\(path\.join\(opts\.root, "\.quay", "verification-round\.jsonl"\), opts\.root, opts\.rounds\)/, "suite-scheduler.ts must call loadDurationAverages on the rolling carrier (LPT in TS)");
   assert.match(scheduler, /orderByLpt\(queues\.main, avg, opts\.root\)/, "suite-scheduler.ts must LPT-order the main bucket");
   // The retired legacy fallback keeps a thin forwarder that wraps suite-lpt-order.ts behind the
   // QUAY_TEST_LPT_ORDER rollback gate (LPT logic is in TS; the forwarder is just the call).
@@ -227,8 +227,72 @@ test("ordering — a short/empty helper result never empties the list (spawnSync
     assert.equal(r.status, 0, `helper must exit 0 (stderr: ${r.stderr})`);
     // No carrier ⇒ input unchanged (a.test.mjs then b.test.mjs).
     assert.equal(r.stdout, "plugin/test/a.test.mjs\nplugin/test/b.test.mjs\n");
+    // …AND the stderr status line must SAY so. The whole 硬规则-3b defect was that "no reorder
+    // happened" was indistinguishable from "reordered": the identity output has the right line count,
+    // so a caller inferring from well-formedness logged a reorder that never occurred.
+    assert.match(r.stderr, /suite-lpt-order: provenance=none entries=0 files=2 reordered=false/,
+      "the fail-open path must be reported as provenance=none / reordered=false, not left silent");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ══ committed last-resort baseline (gap-suite-main-phase-scheduling-slack-after-floor-drop) ════════
+// A fresh checkout (CI) has no .quay/verification-round.jsonl at all, so before this the LPT emitted
+// the identity order on every CI run. The baseline is consulted ONLY when the live carrier is empty,
+// is order-only, and is fail-open on every read/parse failure.
+
+test("baseline — loadBaselineDurations reads a well-formed table, and is EMPTY (never throws) on absent/malformed input", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-baseline-"));
+  try {
+    const good = path.join(dir, "good.json");
+    fs.writeFileSync(good, JSON.stringify({ rounds: 3, unit: "ms", durations: { "plugin/test/a.test.mjs": 1200, "plugin/test/b.test.mjs": 500, "plugin/test/bad.test.mjs": 0, "plugin/test/neg.test.mjs": -3 } }));
+    const m = loadBaselineDurations(good);
+    assert.equal(m.get("plugin/test/a.test.mjs"), 1200);
+    assert.equal(m.get("plugin/test/b.test.mjs"), 500);
+    assert.equal(m.size, 2, "non-positive durations must be skipped, not carried as 0");
+    // each failure mode ⇒ empty map, no exception (fail-open, same contract as loadDurationAverages)
+    assert.equal(loadBaselineDurations(path.join(dir, "absent.json")).size, 0, "absent ⇒ empty");
+    const bad = path.join(dir, "bad.json");
+    fs.writeFileSync(bad, "{ not json");
+    assert.equal(loadBaselineDurations(bad).size, 0, "malformed JSON ⇒ empty");
+    const noKey = path.join(dir, "nokey.json");
+    fs.writeFileSync(noKey, JSON.stringify({ note: "no durations key" }));
+    assert.equal(loadBaselineDurations(noKey).size, 0, "missing `durations` ⇒ empty");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("baseline — the LIVE rolling carrier WINS; the baseline is used only when the live carrier is empty", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-resolve-"));
+  try {
+    const baseline = path.join(dir, "baseline.json");
+    fs.writeFileSync(baseline, JSON.stringify({ durations: { "plugin/test/a.test.mjs": 999 } }));
+
+    // (1) no live carrier ⇒ the baseline is used
+    const empty = fs.mkdtempSync(path.join(dir, "empty-"));
+    const r1 = resolveDurationTable({ root: empty, rounds: 3, baseline });
+    assert.equal(r1.provenance, "committed-baseline");
+    assert.equal(r1.table.get("plugin/test/a.test.mjs"), 999);
+
+    // (2) both present ⇒ the live carrier wins (a stale committed table must never override live data)
+    const live = fs.mkdtempSync(path.join(dir, "live-"));
+    fs.mkdirSync(path.join(live, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(live, ".quay", "verification-round.jsonl"),
+      JSON.stringify({ perFile: [{ file: "plugin/test/a.test.mjs", durationMs: 42 }] }) + "\n",
+    );
+    const r2 = resolveDurationTable({ root: live, rounds: 3, baseline });
+    assert.equal(r2.provenance, "rolling-carrier");
+    assert.equal(r2.table.get("plugin/test/a.test.mjs"), 42);
+
+    // (3) neither ⇒ none (and NOT an exception)
+    const r3 = resolveDurationTable({ root: fs.mkdtempSync(path.join(dir, "none-")), rounds: 3, baseline: path.join(dir, "absent.json") });
+    assert.equal(r3.provenance, "none");
+    assert.equal(r3.table.size, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

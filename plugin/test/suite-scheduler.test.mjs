@@ -193,6 +193,55 @@ test("classifyAndOrder — raw files classify into buckets, --groups filters, LP
   }
 });
 
+// gap-suite-main-phase-scheduling-slack-after-floor-drop — the report is what makes "no carrier ⇒ the
+// order below is the INPUT order" distinguishable from "the order really changed". Both cases emit a
+// perfectly well-formed list of the right length, so a caller that infers reordering from the output
+// shape logs a reorder that never happened (硬规则 3b) — which is exactly what the suite did on CI.
+test("classifyAndOrder — report distinguishes a REAL reorder from the fail-open identity order, and the committed baseline backstops an absent live carrier", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-report-"));
+  try {
+    const mk = (name, group) => {
+      const p = path.join(dir, name);
+      fs.writeFileSync(p, `// @test-group ${group}\nimport { test } from 'node:test';\ntest('t', () => {});\n`);
+      return p;
+    };
+    const files = ["m-a", "m-b", "m-c"].map((n) => mk(`${n}.test.mjs`, "product"));
+
+    // (1) live carrier absent, no baseline ⇒ provenance=none AND mainReordered=false (fail-open identity)
+    let seen;
+    const none = classifyAndOrder(files, { root: dir, rounds: 3, lptEnabled: true, onReport: (r) => (seen = r) });
+    assert.equal(seen.provenance, "none", "an absent carrier must be REPORTED as none, not left implicit");
+    assert.equal(seen.entries, 0);
+    assert.equal(seen.mainReordered, false, "the identity order must never be reported as a reorder");
+    assert.deepEqual(none.main, files, "and the emitted order really is the input order");
+
+    // (2) disabled ⇒ its own provenance value (not "none" — "not evaluated" ≠ "evaluated and empty")
+    classifyAndOrder(files, { root: dir, rounds: 3, lptEnabled: false, onReport: (r) => (seen = r) });
+    assert.equal(seen.provenance, "disabled");
+
+    // (3) baseline backstops the absent live carrier ⇒ the main bucket IS reordered longest-first
+    const baseline = path.join(dir, "baseline.json");
+    fs.writeFileSync(baseline, JSON.stringify({ durations: { "m-a.test.mjs": 100, "m-b.test.mjs": 9000, "m-c.test.mjs": 500 } }));
+    const ordered = classifyAndOrder(files, { root: dir, rounds: 3, lptEnabled: true, baseline, onReport: (r) => (seen = r) });
+    assert.equal(seen.provenance, "committed-baseline", "the baseline is a NAMED provenance, never silently == live");
+    assert.equal(seen.entries, 3);
+    assert.equal(seen.mainReordered, true, "with real durations the shortest tuple order must change");
+    assert.deepEqual(ordered.main.map((f) => path.basename(f)), ["m-b.test.mjs", "m-c.test.mjs", "m-a.test.mjs"],
+      "longest-known first: b(9000) c(500) a(100)");
+
+    // (4) the LIVE carrier still wins when both exist (a stale baseline can never override live data)
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".quay", "verification-round.jsonl"),
+      files.map((f) => JSON.stringify({ perFile: [{ file: f, durationMs: path.basename(f) === "m-c.test.mjs" ? 9999 : 1 }] })).join("\n") + "\n");
+    const live = classifyAndOrder(files, { root: dir, rounds: 3, lptEnabled: true, baseline, onReport: (r) => (seen = r) });
+    assert.equal(seen.provenance, "rolling-carrier");
+    assert.deepEqual(live.main.map((f) => path.basename(f)), ["m-c.test.mjs", "m-a.test.mjs", "m-b.test.mjs"],
+      "live durations decide the order, not the committed baseline");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file count (one red, one green)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-probe-"));
   try {

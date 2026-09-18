@@ -69,7 +69,7 @@ import { Transform } from "node:stream";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
-import { loadDurationAverages, orderByLpt } from "./suite-lpt-order.ts";
+import { loadDurationAverages, orderByLpt, loadBaselineDurations, type LptReport } from "./suite-lpt-order.ts";
 import { readPerFileCpuMs, readPerFileMemPeakKb } from "./measure-suite-reporter.mjs";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
@@ -233,12 +233,20 @@ export interface ClassifyOptions {
   lptEnabled: boolean;
   /** Optional `--groups` csv; undefined = all four groups (product,engine,serial,lowconc). */
   groups?: string;
+  /** Committed last-resort duration table, consulted ONLY when the live rolling carrier is empty
+   *  (a fresh CI checkout has no .quay/verification-round.jsonl — see suite-lpt-order.ts header). */
+  baseline?: string;
+  /** Receives the LPT provenance + whether the MAIN order actually changed, so the caller can put a
+   *  real reading in the log instead of inferring "reordered" from a well-formed output (硬规则 3b). */
+  onReport?: (r: LptReport) => void;
 }
 
 /** classify + filter + LPT-order the raw file list into the three per-bucket queues. Scheduling-only:
  *  every retained file appears in exactly one bucket exactly once — a bug here can drop a file only by
  *  the explicit --groups filter (which is the SELECTION, not a scheduling accident). LPT FAIL-OPEN: an
- *  absent/unreadable carrier yields an empty average map and orderByLpt returns the input unchanged. */
+ *  absent/unreadable carrier yields an empty average map and orderByLpt returns the input unchanged —
+ *  in which case `onReport` says provenance=none and mainReordered=false, so the caller never mistakes
+ *  "no carrier" for "reordered" (the identity list has the same line count either way). */
 export function classifyAndOrder(files: string[], opts: ClassifyOptions): GroupQueues {
   const queues: GroupQueues = { serial: [], lowconc: [], main: [] };
   const include = opts.groups ? groupsArgToSuiteGroups(opts.groups) : undefined;
@@ -247,13 +255,29 @@ export function classifyAndOrder(files: string[], opts: ClassifyOptions): GroupQ
     if (include && !include.has(sg)) continue;
     queues[sg].push(f);
   }
-  if (opts.lptEnabled) {
-    const carrier = path.join(opts.root, ".quay", "verification-round.jsonl");
-    const avg = loadDurationAverages(carrier, opts.root, opts.rounds);
-    queues.serial = orderByLpt(queues.serial, avg, opts.root);
-    queues.lowconc = orderByLpt(queues.lowconc, avg, opts.root);
-    queues.main = orderByLpt(queues.main, avg, opts.root);
+  if (!opts.lptEnabled) {
+    opts.onReport?.({ provenance: "disabled", entries: 0, files: files.length, mainReordered: false });
+    return queues;
   }
+  let avg = loadDurationAverages(path.join(opts.root, ".quay", "verification-round.jsonl"), opts.root, opts.rounds);
+  let provenance: LptReport["provenance"] = avg.size > 0 ? "rolling-carrier" : "none";
+  if (avg.size === 0 && opts.baseline) {
+    const base = loadBaselineDurations(opts.baseline);
+    if (base.size > 0) {
+      avg = base;
+      provenance = "committed-baseline";
+    }
+  }
+  const mainBefore = [...queues.main];
+  queues.serial = orderByLpt(queues.serial, avg, opts.root);
+  queues.lowconc = orderByLpt(queues.lowconc, avg, opts.root);
+  queues.main = orderByLpt(queues.main, avg, opts.root);
+  opts.onReport?.({
+    provenance,
+    entries: avg.size,
+    files: files.length,
+    mainReordered: queues.main.some((f, i) => f !== mainBefore[i]),
+  });
   return queues;
 }
 
@@ -436,6 +460,7 @@ function parseArgs(argv: string[]): {
   testNamePatterns: string[];
   root: string;
   mainRoot: string;
+  baseline: string;
   groups?: string;
   rounds: number;
 } {
@@ -443,6 +468,7 @@ function parseArgs(argv: string[]): {
   const testNamePatterns: string[] = [];
   let root = process.cwd();
   let mainRoot = "";
+  let baseline = "";
   let groups: string | undefined;
   let rounds = Number(process.env.QUAY_TEST_LPT_ROUNDS);
   if (!Number.isInteger(rounds) || rounds < 1) rounds = 3;
@@ -462,6 +488,10 @@ function parseArgs(argv: string[]): {
       mainRoot = argv[++i]; // the LPT carrier root (main checkout's .quay/verification-round.jsonl)
     } else if (a.startsWith("--main-root=")) {
       mainRoot = a.slice("--main-root=".length);
+    } else if (a === "--baseline" && i + 1 < argv.length) {
+      baseline = argv[++i]; // committed last-resort duration table (used only when the live carrier is empty)
+    } else if (a.startsWith("--baseline=")) {
+      baseline = a.slice("--baseline=".length);
     } else if (a === "--groups" && i + 1 < argv.length) {
       groups = argv[++i];
     } else if (a.startsWith("--groups=")) {
@@ -504,11 +534,11 @@ async function main(argv: string[]): Promise<number> {
         "usage: <raw file paths on stdin, one per line> | node suite-scheduler.ts \\\n" +
         "         --root <repo> --main-root <main-checkout> \\\n" +
         "         --serial-concurrency <S> --lowconc-concurrency <L> --main-concurrency <M> \\\n" +
-        "         [--groups <csv>] [--rounds <N>] [<node --test flags...>]\n",
+        "         [--groups <csv>] [--rounds <N>] [--baseline <path>] [<node --test flags...>]\n",
     );
     return 0;
   }
-  const { budgets, testNamePatterns, mainRoot, groups: groupsArg, rounds } = parseArgs(argv);
+  const { budgets, testNamePatterns, mainRoot, baseline, groups: groupsArg, rounds } = parseArgs(argv);
   const files = await readFiles();
   if (files.length === 0) {
     process.stderr.write("suite-scheduler: no test files on stdin\n");
@@ -519,6 +549,13 @@ async function main(argv: string[]): Promise<number> {
     rounds,
     lptEnabled: process.env.QUAY_TEST_LPT_ORDER !== "0",
     groups: groupsArg,
+    baseline: baseline || undefined,
+    onReport: (r) =>
+      // The REAL reorder reading — provenance says WHICH carrier supplied durations, so a log reader
+      // never has to infer "LPT ran" from the absence of an error (硬规则 3b).
+      process.stderr.write(
+        `scheduler: lpt provenance=${r.provenance} entries=${r.entries} files=${r.files} main_reordered=${r.mainReordered}\n`,
+      ),
   });
   const total = groups.serial.length + groups.lowconc.length + groups.main.length;
   if (total === 0) {

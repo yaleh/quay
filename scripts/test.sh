@@ -188,6 +188,15 @@ cd "$repo_root"
 # gap-fan-in-worktree-quay-provisioning; the 2026-08-28 awk-SIGPIPE fix is subsumed by the full-stream read).
 main_root="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-concurrency.ts" --derive-main-root "${repo_root}")"
 
+# LPT_BASELINE — the committed LAST-RESORT per-file duration table for the LPT ordering. Consumed ONLY
+# when the live rolling carrier (${main_root}/.quay/verification-round.jsonl) yields nothing: a fresh
+# checkout — CI — has no such file (it is gitignored), so before this the LPT degraded to IDENTITY order
+# on every CI run while the log still said "reordered" (measured: CI run 35297103524 dispatched the main
+# bucket in raw glob order; see plugin/scripts/suite-lpt-order.ts's header for the 16 s slack that cost).
+# Order-only + fail-open: an absent/stale baseline can only cost scheduling quality, never correctness.
+# Regenerate with the command recorded in the artifact's own `_note` field.
+LPT_BASELINE="${repo_root}/docs/analysis/suite-perfile-duration-baseline.json"
+
 # ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
 # `.quay/` is gitignored ⇒ `git worktree add` copies NONE of it. The fan-in full suite runs DIRECTLY
 # in the task worktree (`cd ${worktree} && bash scripts/test.sh` — no full-suite-runner provisioning),
@@ -1005,14 +1014,24 @@ mark_nested() {
 # .quay/verification-round.jsonl perFile[].durationMs (rolling average of the last QUAY_TEST_LPT_ROUNDS
 # rounds) — no new measurer. Scheduling-only (every file emitted exactly once) + FAIL-OPEN (no history /
 # helper failure / short result ⇒ original order). QUAY_TEST_LPT_ORDER=0 is the one-key rollback.
+# --baseline is the committed last-resort table (docs/analysis/suite-perfile-duration-baseline.json),
+# consulted ONLY when the live carrier is empty — a fresh CI checkout has none (see suite-lpt-order.ts).
+#
+# ⚠️ THIS FUNCTION MUST NOT CLAIM THE ORDER CHANGED. It used to echo "file list reordered" whenever the
+# helper's output had the right LINE COUNT — which the FAIL-OPEN identity output also satisfies — so
+# "there was no history at all" was logged as "reordered" (硬规则 3b). Proven on CI run 35297103524
+# (2026-09-18): the echo named `closure-lag-check.test.mjs` / `observation.test.mjs`, which are exactly
+# the first files of their groups in RAW glob order — i.e. nothing had been reordered. The authoritative
+# verdict now comes from suite-lpt-order.ts's own `suite-lpt-order: provenance=… reordered=…` stderr
+# line, where the before/after comparison is real; here we only record that the output was ACCEPTED.
 lpt_order_files() {
   local -n _lpt_arr="$1"
   if [ "${QUAY_TEST_LPT_ORDER:-1}" = "1" ] && [ "${#_lpt_arr[@]}" -gt 1 ]; then
     local _lpt_out
-    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
+    _lpt_out="$(printf '%s\n' "${_lpt_arr[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-lpt-order.ts" --root "${main_root}" --baseline "${repo_root}/docs/analysis/suite-perfile-duration-baseline.json" --rounds "${QUAY_TEST_LPT_ROUNDS:-3}")" || _lpt_out=""
     if [ -n "${_lpt_out}" ] && [ "$(printf '%s\n' "${_lpt_out}" | wc -l)" -eq "${#_lpt_arr[@]}" ]; then
       mapfile -t _lpt_arr <<< "${_lpt_out}"
-      echo "scripts/test.sh: lpt-order: file list reordered (${#_lpt_arr[@]} files; first=$(basename "${_lpt_arr[0]}"))" >&2
+      echo "scripts/test.sh: lpt-order: helper output accepted (${#_lpt_arr[@]} files)" >&2
     fi
   fi
 }
@@ -1159,8 +1178,11 @@ run_selected() {
     # tail waited ≈38% of the round). Reorder IN PLACE before EITHER branch (overlap/sequential) so
     # both get the LPT order, then hand to suite-lpt-runner.mjs run({files}) — the ONLY path that
     # preserves argv order. Same invariant as the main phase (membership unchanged, order only).
-    lpt_order_files serial_files
-    lpt_order_files lowconc_files
+    # ⛔ The reorder happens INSIDE the legacy branch (below), NOT here: on the unified-scheduler path
+    # (the default) the scheduler receives the RAW `${_RG_FILES[@]}` and re-classifies + re-LPTs it, so
+    # a reorder of these two arrays is DISCARDED work (2 extra node spawns + 2 carrier reads per run)
+    # AND it emitted a log line that read as "main/serial/lowconc were LPT-ordered" when the scheduler
+    # was the one actually deciding order. One LPT path, not two.
     # ── unified scheduler (gap-suite-dynamic-waterline-scheduler) ─────────────────────────────────
     # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP) with ONE
     # event-driven loop. Since gap-suite-classification-lpt-scheduler-ts-ization the scheduler
@@ -1181,6 +1203,7 @@ run_selected() {
       printf '%s\n' "${_RG_FILES[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
           --root "${repo_root}" \
           --main-root "${main_root}" \
+          --baseline "${LPT_BASELINE}" \
           --serial-concurrency "$SERIAL_CONCURRENCY" \
           --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
           --main-concurrency "$(bucket_test_concurrency "$@")" \
@@ -1214,6 +1237,10 @@ run_selected() {
     # unified scheduler above replaces it with one concurrent waterline loop (serial∥lowconc∥main).
     # Kept solely as the fallback safety net.
     # ════════════════════════════════════════════════════════════════════════════════════════════
+    # The ONLY consumer of the bash LPT forwarder: these two arrays are dispatched here by
+    # suite-lpt-runner.mjs (order-preserving), unlike the scheduler path which re-derives order itself.
+    lpt_order_files serial_files
+    lpt_order_files lowconc_files
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
     # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
@@ -1715,6 +1742,7 @@ elif [ "${1:-}" = "--buckets" ]; then
     printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-scheduler.ts" \
         --root "${repo_root}" \
         --main-root "${main_root}" \
+        --baseline "${LPT_BASELINE}" \
         --serial-concurrency "$SERIAL_CONCURRENCY" \
         --lowconc-concurrency "$LOWCONC_CONCURRENCY" \
         --main-concurrency "$(bucket_test_concurrency "${rest_args[@]}")" \
