@@ -312,7 +312,7 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
    these rules implement the sc-if design's desktop navGroupDefs rendering (Quay改进版WebUI.dc.html
    nav block): single-row header bar, brand flush left, a vertical bar separating each of the
    four groups, current page red+bold (accent-700 — the design's ACCENT700), inactive items
-   ink-weight-600, and the Board NEW badge. */
+   ink-weight-600. */
 .nav { flex-wrap: wrap; row-gap: var(--space-2); }
 .nav-brand { margin-right: var(--space-2); }
 .nav-group {
@@ -323,11 +323,6 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 }
 .nav .nav-item { color: var(--color-text); font-weight: 600; font-size: 14px; }
 .nav .nav-current { color: var(--color-accent-700); font-weight: 800; font-size: 14px; }
-.nav-badge {
-  font-size: 9px; letter-spacing: 0.06em; line-height: 1;
-  background: var(--color-accent); color: var(--color-bg);
-  padding: 2px 5px;
-}
 /* gap-webui-lang-switcher-control: the language switcher (renderLangSwitcher) — the clickable
    entry point into the AC-288 mechanism. Two entries, the ACTIVE one a non-link that carries
    aria-current="true" (styled red+bold off the SAME accent-700 token the nav's current page
@@ -891,13 +886,12 @@ export const SITE_NAV_ROUTES: Record<string, string> = {
 };
 
 /** One nav item: the current page is a non-link span (red+bold via .nav-current), everything
- *  else an <a> to its route. Board carries the design's NEW badge (sc-if mkItem.badge). */
+ *  else an <a> to its route. All items render the same shape — no item carries a badge. */
 function navItem(key: string, label: string, current: string, prefix: "nav-" | "mobile-menu-"): string {
-  const badge = key === "board" ? html`<span class="nav-badge">NEW</span>` : "";
   if (key === current) {
-    return html`<span class="${prefix}item nav-current" aria-current="page">${escapeHtml(label)}${badge}</span>`;
+    return html`<span class="${prefix}item nav-current" aria-current="page">${escapeHtml(label)}</span>`;
   }
-  return html`<a class="${prefix}item" href="${SITE_NAV_ROUTES[key]}">${escapeHtml(label)}${badge}</a>`;
+  return html`<a class="${prefix}item" href="${SITE_NAV_ROUTES[key]}">${escapeHtml(label)}</a>`;
 }
 
 /**
@@ -948,7 +942,7 @@ export function renderLangSwitcher(current: Lang = DEFAULT_LANG, variant: "nav" 
  *  Modernist `.nav` / `.nav-brand` classes (the design system's "header bar",
  *  components/navigation.html): brand flush left, a vertical bar separating each of the four
  *  groups, the current page red+bold (sc-if mkItem: active → accent-700 + weight 800,
- *  inactive → text + weight 600), and the Board NEW badge. The `.site-nav` strip sits OUTSIDE
+ *  inactive → text + weight 600). The `.site-nav` strip sits OUTSIDE
  *  <main> (an independent full-width bar) and is hidden on mobile — its links live in the
  *  hamburger menu (renderMobileMenu). */
 /** AC4 (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated): skip-link — the first

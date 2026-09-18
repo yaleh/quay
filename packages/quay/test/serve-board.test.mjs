@@ -106,7 +106,8 @@ function titleOf(body) {
 
 /** The visible label of a nav current-item span, by its own class — the two places a page's nav
  *  label appears (`nav-item` desktop / `mobile-menu-item` mobile). Captured up to the first `<` so
- *  the `nav-badge` NEW span that follows on /board is not part of the label. */
+ *  any trailing child element inside the span (formerly the `nav-badge` NEW span on /board, removed
+ *  by gap-webui-remove-board-nav-new-badge) is not swallowed into the label. */
 function currentItemLabels(body) {
   return {
     desktop: (body.match(/<span class="nav-item nav-current"[^>]*>([^<]*)/) || [])[1] ?? null,
