@@ -204,12 +204,9 @@ node（v24.19）**不过滤**——实测报 `tests 45 / pass 45`，即该 patte
 - packages/quay/src/config.ts
 - packages/quay/src/mcp-server.ts
 - packages/quay/src/mcp-handlers.ts
-- packages/quay-native/bin/quay-native.ts（本轮新增：`runInit` 的新 outcome 词汇 —— `corrupt` /
-  `reconciled` / `unchanged` —— 必须在该 handler 上也有分支，否则损坏态会被打印成 "Created …
-  nothing written" 的假成功）
+- packages/quay-native/bin/quay-native.ts（本轮新增：runInit 新 outcome 词汇 corrupt / reconciled / unchanged 必须在该 handler 上也有分支，否则损坏态会被打印成假成功）
 - plugin/skills/init/SKILL.md
 - packages/quay/test/init.test.mjs
 - packages/quay/test/mcp-server.test.mjs
-- docs/analysis/quay-init-closure-ratchet.baseline.json（本轮新增：删了 laydown 源文件里的死代码，
-  指纹过期 ⇒ 守卫要求按 `--reanchor` 重锚；gate 实测 shrink-only，footprint 未增长）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（本轮新增：删除 laydown 源文件死代码后指纹过期，守卫要求按 --reanchor 重锚；gate 实测 shrink-only，footprint 未增长）
 - orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md（背景引用，不改内容）
