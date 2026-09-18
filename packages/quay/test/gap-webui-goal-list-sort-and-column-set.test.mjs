@@ -110,7 +110,10 @@ function ledgerExtremes(logPath, id) {
 
 /** renderGoalCard's per-active-goal "AC 达成 N/M", parsed from its HTML (the reference口径). */
 function renderGoalCardRollups(records) {
-  const html = renderGoalCard(records, { nowMs: Date.now() });
+  // gap-webui-dashboard-body-copy-en-zh: pinned to `zh` — this helper exists to be compared
+  // against the /goal PAGE's 「AC 达成」 column (serve-goal.ts, still zh in both languages), so the
+  // two sides must be rendered in the same language or the comparison measures our own default.
+  const html = renderGoalCard(records, { nowMs: Date.now(), lang: "zh" });
   const out = {};
   const re = /href="\/goal\/(GOAL-\d+)"[^>]*>[\s\S]*?AC 达成 (\d+)\/(\d+)/g;
   let m;

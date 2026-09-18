@@ -86,25 +86,35 @@ test("AC2: round number is wrapped by an inverse-colour chip (background, not me
 test("AC3: timelineBar/bar render BEFORE recentList/list (indexOf comparison, not eyeballing)", () => {
   const nowMs = FIXED_NOW_MS;
 
+  // ⚠️ gap-webui-dashboard-body-copy-en-zh: the barrier's aria-label is now language-dependent
+  // (DASHBOARD_LABELS.timelineAriaPastHours), and the DEFAULT is `en` — so this ordering probe asks
+  // for `zh` explicitly. Pinning it to the default would have silently changed what is being
+  // located; pinning it to `zh` keeps the probe's own baseline AND makes it a zh regression guard.
+  // The shared prefix `aria-label="` is what both arms carry, so the locator is not itself
+  // language-bound.
   const testsHtml = renderTestsCard({
     status: "ok",
     reason: null,
     runs: [{ round: 12, state: "green", pass: 45, tests: 50, durationMs: 754_000, startedAt: new Date(nowMs - 10 * 60_000).toISOString() }],
-  }, null, { hours: 3, nowMs });
-  const testsBarIdx = testsHtml.indexOf('aria-label="过去');
+  }, null, { hours: 3, nowMs, lang: "zh" });
+  const testsBarIdx = testsHtml.indexOf('aria-label="');
   const testsListIdx = testsHtml.indexOf("#12");
   assert.ok(testsBarIdx >= 0 && testsListIdx >= 0, "both the bar and the recent list render in the testsCard fixture");
   assert.ok(testsBarIdx < testsListIdx, `testsCard bar (${testsBarIdx}) precedes the recent list (${testsListIdx})`);
+  // …and the bar's own label really is the zh one, so "found an aria-label" cannot be satisfied by
+  // some other labelled element this fixture happens to grow later (硬规则 2: prove the hit).
+  assert.ok(testsHtml.includes('aria-label="过去'), "the located aria-label is the timeline bar's zh label");
 
   const nowSec = Math.floor(nowMs / 1000);
   const fanInHtml = renderFanInCardFromRecords(
     [{ ts: null, task: "t1", mechanical_fan_in: mfi(nowSec - 600, nowSec - 590, "landed") }],
-    { hours: 3, nowMs },
+    { hours: 3, nowMs, lang: "zh" },
   );
-  const fanInBarIdx = fanInHtml.indexOf('aria-label="过去');
+  const fanInBarIdx = fanInHtml.indexOf('aria-label="');
   const fanInListIdx = fanInHtml.indexOf("t1");
   assert.ok(fanInBarIdx >= 0 && fanInListIdx >= 0, "both the bar and the list render in the fan-in fixture");
   assert.ok(fanInBarIdx < fanInListIdx, `fan-in bar (${fanInBarIdx}) precedes the list (${fanInListIdx})`);
+  assert.ok(fanInHtml.includes('aria-label="过去'), "the located aria-label is the timeline bar's zh label");
 });
 
 test("AC4: renderLiveCard title wraps (no white-space:nowrap on the title element)", () => {

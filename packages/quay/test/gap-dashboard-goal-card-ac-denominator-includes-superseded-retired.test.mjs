@@ -33,6 +33,12 @@ import { GOAL_STATUSES } from "../src/abi.ts";
 import { createGoalStore } from "../src/goal-store.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
+// gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and
+// the module default is `en` (DEFAULT_LANG). Every render below is therefore made EXPLICITLY
+// `zh` — the assertions in this file were written against the zh baseline and keep their exact
+// original meaning as that baseline's regression guard.
+
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..", "..", "..");
 const GOAL_DRIVER_SRC = path.join(REPO_ROOT, "plugin", "scripts", "goal-driver.ts");
@@ -49,7 +55,7 @@ function ac(id, goalId, status) {
 
 const NOW = Date.parse("2026-09-06T00:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
-const OPTS = { cap: 3, staleMs: 7 * DAY, nowMs: NOW };
+const OPTS = { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" };
 
 /** 进度条填充宽度百分比（"66.7"），无进度条时 null。锚在填充 div 自己的 style 上，
  *  故裸的容器 `width:100%` 不会被误匹配。 */

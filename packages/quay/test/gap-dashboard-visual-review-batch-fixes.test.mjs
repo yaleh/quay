@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { dashboardLabelsFor } from "../src/serve-i18n.ts";
 import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage, sparklineSvg, renderDashboardCardRefreshScript } from "../src/serve-dashboard.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -44,7 +45,7 @@ function makeDashboardArgs(tasks = []) {
 test("AC1: mgrCard renders the resident drivers' honest alive status (未运行 when absent, never undefined/NaN)", () => {
   // Absent drivers reading (the dashboard error fallback) → 「未运行」, never undefined/NaN/empty
   // (gap-dashboard-driver-status-card: the retired liveness/loop-driver probe is no longer read).
-  const absent = renderMgrCard({});
+  const absent = renderMgrCard({}, "zh");
   assert.ok(!/undefined|NaN/.test(absent), "absent drivers never leak undefined/NaN");
   assert.ok(absent.includes("未接入"), "absent drivers render the honest 未接入 phrase");
 
@@ -56,7 +57,7 @@ test("AC1: mgrCard renders the resident drivers' honest alive status (未运行 
       { kind: "promotion", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
       { kind: "worker", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
     ],
-  });
+  }, "zh");
   assert.ok(running.includes("promotion"), "running renders the promotion kind");
   assert.ok(running.includes("worker"), "running renders the worker kind");
   assert.ok(running.includes("运行中"), "running renders the 运行中 alive text");
@@ -70,7 +71,7 @@ test("AC2: renderLiveCard renders an elapsed duration per in-flight row from fix
     concurrency: 1,
     inFlight: [{ taskId: "T-1", phase: "implementing", startedAtMs: nowMs - 754_000 }],
   };
-  const html = renderLiveCard(live, nowMs);
+  const html = renderLiveCard(live, nowMs, undefined, undefined, undefined, "zh");
   assert.ok(html.includes("12m34s"), "in-flight row carries the 754s → 12m34s elapsed string");
 });
 
@@ -107,7 +108,7 @@ test("AC4: renderTestsCard renders a readable recent-run list (round · pass X/Y
       { round: 11, state: "red", pass: 40, tests: 50, durationMs: 123_000 },
     ],
   };
-  const html = renderTestsCard(tests, null);
+  const html = renderTestsCard(tests, null, { lang: "zh" });
   assert.ok(html.includes("#12") && html.includes("#11"), "round numbers render");
   assert.ok(html.includes("pass 45/50") && html.includes("pass 40/50"), "pass X/Y renders per round");
   assert.ok(html.includes("12m34s"), "round 12 duration renders (754000ms → 12m34s)");
@@ -243,15 +244,25 @@ test("AC3: sysHistory.push records ts and the time-span labels match earliest/la
 
 test("AC4: threshold reference line drawn only when loadThreshold is present", () => {
   // in-range threshold (load data 1.5..4.5) → line at its true position + value label.
-  const withThreshold = sparklineSvg(SPARK_HISTORY, 3);
+  // gap-webui-dashboard-body-copy-en-zh: the threshold WORD is now a caller-supplied template
+  // (sparklineSvg's source is serialized into the client script via Function#toString, so the
+  // browser has no dictionary to look one up in — see the parameter's doc). The zh template is
+  // passed explicitly here; the module no longer bakes a word into the function.
+  const THR = dashboardLabelsFor("zh").sparkThreshold;
+  const withThreshold = sparklineSvg(SPARK_HISTORY, 3, THR);
   assert.ok(withThreshold.includes('class="spark-threshold"'), "non-null loadThreshold draws the reference line");
   assert.ok(withThreshold.includes("阈 3"), "the threshold value is labelled");
   // out-of-range threshold still renders (clamped to the plot edge), never dropped.
-  const aboveRange = sparklineSvg(SPARK_HISTORY, 8);
+  const aboveRange = sparklineSvg(SPARK_HISTORY, 8, THR);
   assert.ok(aboveRange.includes('class="spark-threshold"'), "above-range loadThreshold still draws the clamped line");
-  const withoutThreshold = sparklineSvg(SPARK_HISTORY, null);
+  const withoutThreshold = sparklineSvg(SPARK_HISTORY, null, THR);
   assert.ok(!withoutThreshold.includes("spark-threshold"), "null loadThreshold draws no reference line");
   assert.ok(!withoutThreshold.includes("阈 "), "no fabricated default threshold label");
+  // A caller that supplies NO template degrades to the bare number — ⛔ never to some other
+  // language's word chosen on the caller's behalf (硬规则 3b).
+  const noTemplate = sparklineSvg(SPARK_HISTORY, 3);
+  assert.ok(noTemplate.includes(">3<"), "an absent template still renders the value, wordless");
+  assert.ok(!noTemplate.includes("{value}"), "the placeholder itself never reaches the page");
 });
 
 test("AC5: no server-side fs write/append path added (zero-persistence contract)", () => {

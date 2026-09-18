@@ -40,6 +40,12 @@ import { renderMgrCard } from "../src/serve-dashboard.ts";
 import { aliveness, carrierStats, KNOWN_KINDS, DRIVER_KINDS } from "../../../plugin/scripts/driver-runtime.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
+// gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and
+// the module default is `en` (DEFAULT_LANG). Every render below is therefore made EXPLICITLY
+// `zh` — the assertions in this file were written against the zh baseline and keep their exact
+// original meaning as that baseline's regression guard.
+
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
@@ -164,20 +170,20 @@ function reading(kind, { running }) {
 
 test("AC2: running:true ⇒ 输出含各 kind 各自的 alive 文案（运行中）", () => {
   const mgr = { drivers: KNOWN_KINDS.map((kind) => reading(kind, { running: true })) };
-  const html = renderMgrCard(mgr);
+  const html = renderMgrCard(mgr, "zh");
   for (const kind of KNOWN_KINDS) assert.match(html, new RegExp(kind), `must render the ${kind} kind`);
   assert.match(html, /运行中/, "must render the alive text (运行中)");
 });
 
 test("AC2: running:false（pid 缺失）⇒ 输出「未运行」，不含 undefined/NaN/空", () => {
   const mgr = { drivers: KNOWN_KINDS.map((kind) => reading(kind, { running: false })) };
-  const html = renderMgrCard(mgr);
+  const html = renderMgrCard(mgr, "zh");
   assert.match(html, /未运行/, "must render 「未运行」 for a dead kind");
   assert.doesNotMatch(html, /undefined|NaN/, "must not leak undefined/NaN");
 });
 
 test("AC2: drivers 读数整体缺失（error fallback）⇒ 输出「未接入」而非 undefined/NaN", () => {
-  const html = renderMgrCard({});
+  const html = renderMgrCard({}, "zh");
   assert.match(html, /未接入/, "an absent drivers reading must render the honest 未接入 phrase");
   assert.doesNotMatch(html, /undefined|NaN/, "must not leak undefined/NaN");
 });
@@ -247,7 +253,7 @@ test("AC7: 5 个存活 kind 渲染「运行中」+ 非空末条记录；outer（
 
   clearDriverStatusCache();
   const got = await readDriverStatus(root);
-  const html = renderMgrCard({ drivers: got });
+  const html = renderMgrCard({ drivers: got }, "zh");
 
   // 5 个存活 kind：运行中 + 非空末条记录相对时间。
   for (const kind of ["promotion", "worker", "quality", "meta", "goal"]) {
@@ -265,7 +271,7 @@ test("AC7 负控制: 删 pid 文件 ⇒ 该 kind 从「运行中」变「未运�
   writeAllFixtures(root, true, ts);
 
   clearDriverStatusCache();
-  const before = renderMgrCard({ drivers: await readDriverStatus(root) });
+  const before = renderMgrCard({ drivers: await readDriverStatus(root) }, "zh");
   assert.match(before, /<b>quality<\/b>: 运行中/, "quality must start 运行中");
 
   // 负控制：删除 quality 的 pid 文件 ⇒ 该 kind 应翻为「未运行」，而不是从卡片上消失。
@@ -274,7 +280,7 @@ test("AC7 负控制: 删 pid 文件 ⇒ 该 kind 从「运行中」变「未运�
   fs.rmSync(path.join(q, `${DRIVER_KINDS.quality.prefix}.pid`), { force: true });
 
   clearDriverStatusCache();
-  const after = renderMgrCard({ drivers: await readDriverStatus(root) });
+  const after = renderMgrCard({ drivers: await readDriverStatus(root) }, "zh");
   assert.match(after, /<b>quality<\/b>: 未运行/, "quality must flip to 未运行 after pid removal");
   assert.doesNotMatch(after, /<b>quality<\/b>: 运行中/, "quality must NOT stay 运行中");
 });

@@ -17,6 +17,8 @@ import {
   navLabelsFor,
   navLabel,
   pageNameFor,
+  chromeLabel,
+  dashboardLabelsFor,
   LANG_NAMES,
   LANG_SWITCHER_GROUP,
   LANG_SWITCH_ARIA,
@@ -862,13 +864,19 @@ export function isMissingIdTask(t: { id?: unknown; title?: unknown; extra?: Reco
 // AC-289: this table carries nav KEYS only — the 15 view labels live in serve-i18n.ts's
 // `NAV_LABELS`, which is their single source. A literal label here would be a SECOND copy that the
 // zh dictionary could not reach: exactly the shape that left the nav English under `lang=zh`.
-// The `label` field is the GROUP heading (核心/观测/记录/知识) and is not a per-view label — it is
-// out of AC-289's scope and is rendered verbatim in both languages.
-const SITE_NAV_GROUPS: Array<{ label: string; items: NavKey[] }> = [
-  { label: "核心", items: ["dashboard", "tasks"] },
-  { label: "观测", items: ["live", "board", "system", "manager", "needs-human"] },
-  { label: "记录", items: ["journal", "git", "tests", "sessions"] },
-  { label: "知识", items: ["adr", "goal", "doc", "architecture"] },
+// The `labelKey` field names the GROUP heading's row in serve-i18n.ts's `CHROME_LABELS`
+// (ROW 9) — it was a literal (核心/观测/记录/知识) until
+// gap-webui-dashboard-body-copy-en-zh, whose `lang=en` baseline probe listed the four headings
+// among the page's remaining Chinese. AC-289 had declared them out of its scope because they are
+// not per-VIEW labels; they are still per-language copy, and they render inside the mobile menu's
+// `<nav>` on every page, so the group heading now resolves through the shared dictionary like any
+// other chrome word. ⛔ NOT a nav key: `navLabelsFor` cannot serve them, and folding them into
+// `NAV_LABELS` would make a group heading look like a 16th view.
+const SITE_NAV_GROUPS: Array<{ labelKey: string; items: NavKey[] }> = [
+  { labelKey: "navGroupCore", items: ["dashboard", "tasks"] },
+  { labelKey: "navGroupObserve", items: ["live", "board", "system", "manager", "needs-human"] },
+  { labelKey: "navGroupRecords", items: ["journal", "git", "tests", "sessions"] },
+  { labelKey: "navGroupKnowledge", items: ["adr", "goal", "doc", "architecture"] },
 ];
 
 /** Exported (gap-webui-lang-switcher-control) so the test that enumerates "every route carries the
@@ -947,13 +955,13 @@ export function renderLangSwitcher(current: Lang = DEFAULT_LANG, variant: "nav" 
  *  keyboard tab stop on every page, jumping straight to <main id="main">. Emitted as the FIRST
  *  element of the site nav so every page that renders renderSiteNav gets it with zero per-page
  *  churn; the .skip-link class (pageStyles) keeps it visually hidden until :focus. */
-export function renderSkipLink(): string {
-  return html`<a class="skip-link" href="#main">跳到主要内容</a>`;
+export function renderSkipLink(lang: Lang = DEFAULT_LANG): string {
+  return html`<a class="skip-link" href="#main">${escapeHtml(chromeLabel("skipToMain", lang))}</a>`;
 }
 
 export function renderSiteNav(current: string, lang: Lang = DEFAULT_LANG): string {
   const labels = navLabelsFor(lang);
-  return html`${renderSkipLink()}<nav class="site-nav" aria-label="Site navigation">
+  return html`${renderSkipLink(lang)}<nav class="site-nav" aria-label="Site navigation">
     <div class="nav">
       <span class="nav-brand">Quay</span>
       ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${
@@ -969,7 +977,7 @@ export function renderSiteNav(current: string, lang: Lang = DEFAULT_LANG): strin
 function renderMobileMenu(current: string, lang: Lang = DEFAULT_LANG): string {
   const labels = navLabelsFor(lang);
   return SITE_NAV_GROUPS.map((g) => html`<div class="mobile-menu-group">
-    <div class="mobile-menu-group-label">${escapeHtml(g.label)}</div>
+    <div class="mobile-menu-group-label">${escapeHtml(chromeLabel(g.labelKey, lang))}</div>
     ${g.items.map((key) => navItem(key, labels[key], current, "mobile-menu-")).join("")}
   </div>`).join("");
 }
@@ -1258,37 +1266,46 @@ export function serveIdentity(input: ServeIdentityInput): ServeIdentity {
 /** The dashboard identity card — project root, machine + bind address, the交付物-vs-laid plugin
  *  version pair (with a MECHANICALLY DETECTABLE mismatch marker) and the branch model. Rendered
  *  without an `id="…-card"` (so it never joins the auto-refresh registration contract: it is a
- *  static page-chrome card, like the commits/git-history cards beside it). */
-export function renderIdentityCard(id: ServeIdentity): string {
+ *  static page-chrome card, like the commits/git-history cards beside it).
+ *
+ *  gap-webui-dashboard-body-copy-en-zh: every word of this card now resolves through
+ *  `dashboardLabelsFor(lang)` — the card was the one piece of /dashboard body copy NOT reached by
+ *  the AC-289~303 chrome work, because it is a card in the body rather than shell. `lang` defaults
+ *  to `DEFAULT_LANG` for the direct-render callers that predate it, exactly like `pageNameFor` /
+ *  `htmlLangTag`; the only production caller is `renderDashboardPage`, which passes its own. */
+export function renderIdentityCard(id: ServeIdentity, lang: Lang = DEFAULT_LANG): string {
+  const t = dashboardLabelsFor(lang);
   const state = pluginVersionState(id.deliveredPluginVersion, id.initPluginVersion);
   // The marker is the mechanical face of AC3: a single attribute whose value the mismatch state
   // (and ONLY it) turns to "mismatch" — greppable from a saved page, no visual judgment needed.
   const marker = `data-plugin-version-state="${state}"`;
-  const fmt = (v: string | null): string => (v === null ? "<span class=\"meta\">未接入/无数据</span>" : escapeHtml(v));
+  const fmt = (v: string | null): string => (v === null ? `<span class="meta">${escapeHtml(t.identityUnavailable)}</span>` : escapeHtml(v));
   // The mismatch row is styled with the SAME verdict classes the rest of the UI uses, so a
   // divergence reads as a verdict rather than as one more neutral metadata line.
   const verdictCls = state === "mismatch" ? "verdict-fail" : state === "match" ? "verdict-pass" : "meta";
+  // The three verdict states stay three VALUES fed from three label rows — ⛔ not one row reworded
+  // per branch, which is how the "no data" and "one side missing" states would collapse.
   const stateText = state === "mismatch"
-    ? "不一致 — 该工作区落盘的 plugin 已过期"
+    ? t.identityMismatch
     : state === "match"
-      ? "一致"
-      : "未评估（缺一侧读数）";
+      ? t.identityMatch
+      : t.identityNotEvaluated;
   const br = id.branches;
-  const branchVal = (v: string | null): string => (v === null ? "<span class=\"meta\">未接入/无数据</span>" : `<code>${escapeHtml(v)}</code>`);
+  const branchVal = (v: string | null): string => (v === null ? `<span class="meta">${escapeHtml(t.identityUnavailable)}</span>` : `<code>${escapeHtml(v)}</code>`);
   return html`<div id="identity-panel" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">项目身份</div>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">${escapeHtml(t.identityTitle)}</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.6">
-      <strong>项目根路径</strong>：<code class="identity-project-root">${escapeHtml(id.projectRoot)}</code><br>
-      <strong>主机</strong>：<code class="identity-host">${escapeHtml(id.hostname)}</code>
-      <strong>监听</strong>：<code class="identity-addr">${escapeHtml(id.host)}:${id.port}</code>
+      <strong>${escapeHtml(t.identityProjectRoot)}</strong>${escapeHtml(t.labelColon)}<code class="identity-project-root">${escapeHtml(id.projectRoot)}</code><br>
+      <strong>${escapeHtml(t.identityHost)}</strong>${escapeHtml(t.labelColon)}<code class="identity-host">${escapeHtml(id.hostname)}</code>
+      <strong>${escapeHtml(t.identityListen)}</strong>${escapeHtml(t.labelColon)}<code class="identity-addr">${escapeHtml(id.host)}:${id.port}</code>
     </p>
     <p style="margin:0;font-size:0.8rem;line-height:1.6" ${marker}>
-      <strong>plugin 版本</strong>：交付物 <code class="identity-plugin-version">${fmt(id.deliveredPluginVersion)}</code>
-      · 工作区落盘 <code class="identity-init-version">${fmt(id.initPluginVersion)}</code>
+      <strong>${escapeHtml(t.identityPluginVersion)}</strong>${escapeHtml(t.labelColon)}${escapeHtml(t.identityDelivered)} <code class="identity-plugin-version">${fmt(id.deliveredPluginVersion)}</code>
+      ${escapeHtml(t.identityWorkspaceDisk)} <code class="identity-init-version">${fmt(id.initPluginVersion)}</code>
       · <span class="${verdictCls}">${escapeHtml(stateText)}</span>
     </p>
     <p style="margin:0;font-size:0.8rem;line-height:1.6">
-      <strong>分支模型</strong>：default ${branchVal(br.default)} · doc-branch ${branchVal(br.doc)} · landing-baseline ${branchVal(br.landingBaseline)}
+      <strong>${escapeHtml(t.identityBranchModel)}</strong>${escapeHtml(t.labelColon)}default ${branchVal(br.default)} · doc-branch ${branchVal(br.doc)} · landing-baseline ${branchVal(br.landingBaseline)}
     </p>
   </div>`;
 }

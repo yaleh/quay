@@ -177,7 +177,7 @@ test("AC5: renderLiveCard keeps the in-flight mini-list AND renders the merged g
   const records = [
     { task: "T-hist", run_id: "R9", started_at: new Date(nowMs - HOUR_MS).toISOString(), ended_at: new Date(nowMs - 30 * 60_000).toISOString(), final_state: "completed", mechanical_fan_in: { outcome: "landed" } },
   ];
-  const html = renderLiveCard(live, nowMs, [], records, 3);
+  const html = renderLiveCard(live, nowMs, [], records, 3, "zh");
 
   // The mini-list (liveMiniList) is a hard constraint — its task-id anchor is UNIQUE to the mini-list
   // (the gantt svg has no <a>), so its presence proves the list was NOT removed by the gantt upgrade.
@@ -186,6 +186,15 @@ test("AC5: renderLiveCard keeps the in-flight mini-list AND renders the merged g
   assert.match(html, /循环脉搏甘特图/, "the merged fixed-lane gantt svg renders");
   // Both must be in the SAME card render (indexOf order is irrelevant; coexistence is the assertion).
   assert.ok(html.includes('aria-label="循环脉搏甘特图'), "gantt svg present");
+
+  // gap-webui-dashboard-body-copy-en-zh: the SAME card under `en` (the default) — structure
+  // identical, copy switched. Asserting only the zh arm above would leave the default language
+  // unwatched.
+  const enHtml = renderLiveCard(live, nowMs, [], records, 3, "en");
+  assert.match(enHtml, /<a href="\/task\/T-1"/, "the mini-list anchor survives in en too");
+  assert.match(enHtml, /Implementing/, "the en mini-list tag text renders");
+  assert.ok(!/[一-鿿]/.test(enHtml.replace(/<title>[^<]*<\/title>/g, "")),
+    "the en liveCard carries no CJK outside the (data-bearing) gantt block <title> text");
 });
 
 // ── gap-dashboard-live-swimlane-fixed-lane-gantt-timeline DoD integration test ────────────────────
@@ -209,7 +218,7 @@ test("DoD: renderLiveCard gantt merges readLive() + worker-outcome.jsonl into on
     const live = readLive(ws, { nowMs, liveWorkers: [{ taskId: "gap-live-c", pid: "100", startedAtMs: Date.parse("2026-08-24T07:30:00.000Z") }] });
 
     const records = readWorkerOutcomeRecords(ws);
-    const html = renderLiveCard(live, nowMs, [], records, 3);
+    const html = renderLiveCard(live, nowMs, [], records, 3, "zh");
 
     assert.match(html, /循环脉搏甘特图/, "the gantt svg renders from real readLive + worker-outcome data");
     const ganttStart = html.indexOf('aria-label="循环脉搏甘特图');
@@ -232,7 +241,13 @@ test("DoD: renderLiveCard gantt merges readLive() + worker-outcome.jsonl into on
 //   AC3 — 负控制：两个终态（done/superseded）本来就只显示计数、无 mini-list；本任务不得给它们加上一个。
 
 /** The mini-list rows are the ONLY `<a href="/task/…">` anchors renderTaskCard emits, so counting
- *  anchors inside one status's block is an exact row count (no shared-class ambiguity). */
+ *  anchors inside one status's block is an exact row count (no shared-class ambiguity).
+ *
+ *  ⚠️ gap-webui-dashboard-body-copy-en-zh: the block's LABEL is language-dependent, and the
+ *  DEFAULT is `en` — so every test below renders with an explicit `"zh"` and this locator keeps its
+ *  original zh form. That is deliberate on both counts: the zh arm stays the regression guard the
+ *  assertions were written as, and (the trap) `>done（最近 ` — a NEGATIVE assertion in AC3 — would
+ *  become a TAUTOLOGY under `en`, where that string is absent for the wrong reason. */
 function miniListBlock(html, status) {
   const start = html.indexOf(`>${status}（最近 `);
   assert.ok(start >= 0, `the ${status} mini-list label renders`);
@@ -256,7 +271,7 @@ test("AC1: 12 ready tasks ⇒ the ready mini-list renders 10 rows (the newest 10
   const tasks = Array.from({ length: 12 }, (_, i) =>
     summary(`r${String(i).padStart(2, "0")}`, "ready", base + i * 60_000));
 
-  const html = renderTaskCard(tasks);
+  const html = renderTaskCard(tasks, "zh");
 
   assert.equal(miniListRows(html, "ready"), 10, "the ready mini-list shows exactly 10 rows (was 3)");
   // Cap-and-sort, not merely "10 happened to be present": the two OLDEST must be the ones dropped.
@@ -265,6 +280,16 @@ test("AC1: 12 ready tasks ⇒ the ready mini-list renders 10 rows (the newest 10
   assert.ok(!block.includes('/task/r01"'), "the second-oldest ready task (r01) is also cut");
   assert.ok(block.includes('/task/r11"'), "the newest ready task (r11) survives");
   assert.ok(block.includes('/task/r02"'), "the 10th-newest ready task (r02) survives");
+
+  // gap-webui-dashboard-body-copy-en-zh: the en arm — same 10 rows, en label. The count is asserted
+  // on the en render too, so "the cap is 10" is pinned in BOTH languages (a language-dependent
+  // count would be a defect neither arm alone could see).
+  const enHtml = renderTaskCard(tasks, "en");
+  assert.ok(enHtml.includes(">ready (latest 10)"), "the en mini-list label renders");
+  // The zh locator CANNOT be reused on the en render — it asserts its own label is present and would
+  // throw rather than report 0. Count the anchors directly instead, so the en cap is measured.
+  assert.equal((enHtml.match(/<a href="\/task\//g) ?? []).length, 10, "the en render shows exactly 10 rows too");
+  assert.ok(!/[一-鿿]/.test(enHtml), "the en taskCard carries no CJK at all");
 });
 
 test("AC2: 5 todo tasks (a real small project) ⇒ the todo mini-list renders all 5, none truncated", () => {
@@ -272,7 +297,7 @@ test("AC2: 5 todo tasks (a real small project) ⇒ the todo mini-list renders al
   const tasks = Array.from({ length: 5 }, (_, i) =>
     summary(`t${i}`, "todo", base + i * 60_000));
 
-  const html = renderTaskCard(tasks);
+  const html = renderTaskCard(tasks, "zh");
 
   assert.equal(miniListRows(html, "todo"), 5, "all 5 todo rows render — nothing silently truncated below the cap");
   for (let i = 0; i < 5; i++) {
@@ -288,7 +313,7 @@ test("AC3 (negative control): the terminal states done/superseded gain NO mini-l
     summary("r0", "ready", base),
   ];
 
-  const html = renderTaskCard(tasks);
+  const html = renderTaskCard(tasks, "zh");
 
   // No mini-list block for either terminal state (the label is the block's unmistakable marker)…
   assert.ok(!html.includes(">done（最近 "), "done renders NO mini-list block");

@@ -157,7 +157,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
     "the startup build must have produced a snapshot (a timeout here would make every assertion below vacuous)",
   );
 
-  const before = await get(port, "/dashboard");
+  const before = await get(port, "/dashboard?lang=zh");
   assert.equal(before.status, 200);
   assert.match(before.body, /id="goal-card"/, "goal-card is present");
   assert.deepEqual(goalRows(before.body), ["1/2"], "the fixture's real AC progress renders (AC5′)");
@@ -179,7 +179,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   }
   await coldCaches(await import("../src/serve-dashboard.ts"));
 
-  const afterMutate = await get(port, "/dashboard");
+  const afterMutate = await get(port, "/dashboard?lang=zh");
   assert.doesNotMatch(
     afterMutate.body,
     /#9999/,
@@ -198,7 +198,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   process.env[DASHBOARD_SNAPSHOT_DISABLED_ENV] = "1";
   try {
     await coldCaches(await import("../src/serve-dashboard.ts"));
-    const legacy = await get(port, "/dashboard");
+    const legacy = await get(port, "/dashboard?lang=zh");
     assert.match(
       legacy.body,
       /#9999/,
@@ -212,7 +212,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   // …and a rebuild picks both mutations up again, so the snapshot is a fresh-enough view, not a freeze.
   await coldCaches(await import("../src/serve-dashboard.ts"));
   await server.dashboardSnapshot.rebuildNow();
-  const afterRebuild = await get(port, "/dashboard");
+  const afterRebuild = await get(port, "/dashboard?lang=zh");
   assert.match(afterRebuild.body, /#9999/, "after a rebuild the sentinel round IS rendered");
   assert.deepEqual(goalRows(afterRebuild.body), ["1/4"], "and the two late ACs are rendered too");
 });
@@ -268,7 +268,7 @@ test("AC3′+AC4′: while a rebuild runs, concurrent /dashboard stay <10s and t
   setDashboardSnapshotStepHook(async () => { entered = true; await held; });
   const rebuilding = server.dashboardSnapshot.rebuildNow();
   assert.ok(await until(() => entered && isDashboardSnapshotRebuilding(workspaceRoot), 10_000), "a rebuild must actually be in flight for this reading to mean anything");
-  const concurrent = await Promise.all(Array.from({ length: 5 }, () => get(port, "/dashboard")));
+  const concurrent = await Promise.all(Array.from({ length: 5 }, () => get(port, "/dashboard?lang=zh")));
   release();
   await rebuilding;
   setDashboardSnapshotStepHook(null);
@@ -282,7 +282,7 @@ test("AC3′+AC4′: while a rebuild runs, concurrent /dashboard stay <10s and t
 // ── AC5′ / AC6′: real content, no silently deleted cards ─────────────────────────────────────────
 
 test("AC5′+AC6′: the snapshot-backed page keeps real goal data and does not drop the mgr/sys cards", async () => {
-  const r = await get(port, "/dashboard");
+  const r = await get(port, "/dashboard?lang=zh");
   assert.match(r.body, /id="goal-card"/, "goal-card is present");
   assert.match(r.body, /AC 达成 \d+\/\d+/, "per-goal AC progress is real data");
   assert.match(r.body, /\b(fresh|stale|NOT-EVALUATED)\b/, "one of the three staleness states renders");

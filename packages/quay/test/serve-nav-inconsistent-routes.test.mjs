@@ -239,20 +239,59 @@ test("AC4 — every route emits the mobile chrome (hamburger header + full 14-vi
 });
 
 test("AC4 — renderMobileChrome carries the full 14-view nav under per-group section labels", () => {
-  const html = renderMobileChrome("tasks", "task list");
-  assert.ok(html.includes('id="mobile-menu-toggle"'), "mobile toggle has a stable id");
-  assert.ok(html.includes('class="mobile-menu-group"'), "mobile menu groups its items");
-  assert.ok(html.includes("task list"), "page label rendered");
-  // All four group labels (the design's 核心/观测/记录/知识) + all 14 views.
+  // ⚠️ gap-webui-dashboard-body-copy-en-zh: the four group section labels (核心/观测/记录/知识)
+  // moved into serve-i18n.ts's CHROME_LABELS (ROW 9) — they were the last piece of shared chrome
+  // still hard-coded Chinese, found by that task's `lang=en` baseline probe. The DEFAULT language
+  // is `en`, so this test now asks for `zh` explicitly (keeping its original assertions as the zh
+  // regression guard) and pins the en arm in a second test below. The 14 VIEW labels were already
+  // language-dependent before this change; they happen to be identical in both columns.
+  // ⚠️ TWO renders, not one: the group section labels and the 14 VIEW labels are different rows of
+  // the dictionary (CHROME_LABELS ROW 9 vs NAV_LABELS ROW 1), and they do not answer to the same
+  // language in this assertion's original form — the group labels used to be Chinese in BOTH
+  // languages while the view labels were Chinese only under zh. Rendering once and asserting both
+  // halves in the same language is what broke; each half is now pinned in the language it is defined
+  // for. (The pre-change single render was `en`-for-views + `zh`-for-groups, i.e. it agreed with
+  // neither column.)
+  const zh = renderMobileChrome("tasks", "task list", "zh");
+  assert.ok(zh.includes('id="mobile-menu-toggle"'), "mobile toggle has a stable id");
+  assert.ok(zh.includes('class="mobile-menu-group"'), "mobile menu groups its items");
+  assert.ok(zh.includes("task list"), "page label rendered");
   for (const label of ["核心", "观测", "记录", "知识"]) {
-    assert.ok(html.includes(label), `mobile menu renders the ${label} group section label`);
+    assert.ok(zh.includes(label), `mobile menu renders the ${label} group section label under zh`);
+  }
+  for (const label of ["仪表盘", "任务", "实时", "看板", "系统", "管理器", "日志",
+    "Git 历史", "测试", "会话", "架构决策", "目标", "文档", "架构"]) {
+    assert.ok(zh.includes(label), `mobile menu includes the zh view label ${label}`);
+  }
+  assert.ok(zh.includes("NEW"), "mobile menu renders the Board NEW badge");
+  assert.ok(zh.includes("nav-current"), "mobile menu marks the current page");
+
+  // …and the en render: the English group labels AND the English view labels, same 14 views.
+  const en = renderMobileChrome("tasks", "task list", "en");
+  for (const label of ["Core", "Observation", "Records", "Knowledge"]) {
+    assert.ok(en.includes(label), `mobile menu renders the en ${label} group section label`);
   }
   for (const label of ["Dashboard", "Tasks", "Live", "Board", "System", "Manager", "Journal",
     "Git History", "Tests", "Sessions", "ADRs", "Goals", "Docs", "Architecture"]) {
-    assert.ok(html.includes(label), `mobile menu includes ${label}`);
+    assert.ok(en.includes(label), `mobile menu includes ${label}`);
   }
-  assert.ok(html.includes("NEW"), "mobile menu renders the Board NEW badge");
-  assert.ok(html.includes("nav-current"), "mobile menu marks the current page");
+  assert.ok(en.includes("NEW"), "mobile menu renders the Board NEW badge");
+  assert.ok(en.includes("nav-current"), "mobile menu marks the current page");
+});
+
+/** Han, built from a code point so this file stays ASCII (a literal range would make the file that
+ *  asserts "no Chinese" itself contain Chinese — and every CJK sweep of the tree would flag it). */
+const CJK_HAN = new RegExp("[" + String.fromCharCode(0x4e00) + "-" + String.fromCharCode(0x9fff) + "]");
+
+test("AC4 (en) — the same menu under `en` renders English group section labels and no Chinese at all", () => {
+  const html = renderMobileChrome("tasks", "task list", "en");
+  for (const label of ["Core", "Observation", "Records", "Knowledge"]) {
+    assert.ok(html.includes(label), `mobile menu renders the en ${label} group section label`);
+  }
+  // The endonym 中文 in the switcher is the ONE deliberate exception (serve-i18n ROW 4).
+  const withoutSwitcher = html.replace(/<span class="lang-switcher-item"[^>]*>[\s\S]*?<\/span>/g, "")
+    .replace(/<a class="lang-switcher-item"[^>]*>[\s\S]*?<\/a>/g, "");
+  assert.ok(!CJK_HAN.test(withoutSwitcher), "the en mobile chrome carries no Chinese outside the language switcher's endonym");
 });
 
 test("AC4 — mobile CSS: the menu-group section labels and 48px touch targets exist in the ≤600px form", () => {

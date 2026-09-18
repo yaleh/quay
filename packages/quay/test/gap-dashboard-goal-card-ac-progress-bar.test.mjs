@@ -14,6 +14,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderGoalCard } from "../src/serve-dashboard.ts";
 
+// gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and
+// the module default is `en` (DEFAULT_LANG). Every render below is therefore made EXPLICITLY
+// `zh` — the assertions in this file were written against the zh baseline and keep their exact
+// original meaning as that baseline's regression guard.
+
+
 // ── fixtures (renderGoalCard 只读 id/title/status/kind/goal/evidence) ─────────────────────────────
 
 function goal(id, { status = "active", kind = "goal", title = `${id} title` } = {}) {
@@ -42,7 +48,7 @@ test("AC1: progress bar width is proportional to achieved/total — specific % a
     ac("AC-2", "GOAL-001", "achieved"),
     ac("AC-3", "GOAL-001", "active"),
   ];
-  const html = renderGoalCard(goals, { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  const html = renderGoalCard(goals, { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" });
 
   assert.match(html, /AC 达成 2\/3/, "original plain-text x/y is retained (bar is a supplement)");
   assert.equal(progressBarWidthPct(html), "66.7", "fill width = 2/3 → 66.7% (specific value, not boolean)");
@@ -52,13 +58,13 @@ test("AC1: progress bar width is proportional to achieved/total — specific % a
 test("AC1: zero achieved with non-zero denominator renders 0.0% (bar present, not missing)", () => {
   const html = renderGoalCard(
     [goal("GOAL-001"), ac("AC-1", "GOAL-001", "active"), ac("AC-2", "GOAL-001", "active")],
-    { cap: 3, staleMs: 7 * DAY, nowMs: NOW },
+    { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" },
   );
   assert.equal(progressBarWidthPct(html), "0.0", "0 achieved of 2 → 0.0% width");
 });
 
 test("AC2: acs.length === 0 renders no bar and no NaN/Infinity width", () => {
-  const html = renderGoalCard([goal("GOAL-001")], { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  const html = renderGoalCard([goal("GOAL-001")], { cap: 3, staleMs: 7 * DAY, nowMs: NOW, lang: "zh" });
   assert.match(html, /AC 达成 0\/0/, "plain text still readable when the goal has zero ACs");
   assert.equal(progressBarWidthPct(html), null, "no progress bar when the denominator is 0");
   assert.doesNotMatch(html, /NaN|Infinity/, "no NaN/Infinity width leaks into the HTML");

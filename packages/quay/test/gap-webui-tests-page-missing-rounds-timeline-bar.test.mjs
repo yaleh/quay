@@ -109,7 +109,9 @@ test("AC1: GET /tests renders a svg with aria-label=\"过去 3 小时时间轴\"
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const res = await get(port, "/tests");
+    // gap-webui-dashboard-body-copy-en-zh: the aria-label below is shared with /dashboard and is now
+    // language-dependent (default `en`), so this probe asks for the zh baseline it asserts.
+    const res = await get(port, "/tests?lang=zh");
     assert.equal(res.status, 200, "GET /tests returns 200");
     // The same aria-label the dashboard's timeline bar carries (both via the shared renderTimelineBarSvg).
     const svg = extractSvg(res.body, "过去 3 小时时间轴");
