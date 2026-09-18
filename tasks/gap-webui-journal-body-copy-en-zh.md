@@ -49,14 +49,14 @@ extra:
 
 ## AC
 
-- [x] **AC1（红基线 + 分离，枚举不是布尔）**：见「证据 · AC1」。谓词是**两台真服务器的结构性对照**（不是关键词、不是目测）：A=真实 workspace（真 stale escalations.md + 真 2MB tick-log.md + 真提交日志），B=**orchestration/ 为空、提交信息 ASCII** 的 workspace。CJK 行同时出现在 A 与 B ⇒ 只可能是模板渲染（B 根本没有数据可渲染）。实测：A 含 CJK 文本行 **241**，其中**界面文案 6 条**（逐条见证据）、**数据 235 条**。陈旧提示由第二条判据（源文件可追溯性）从数据类里取出：它由 `observation.ts` 生成、⛔ 不在任何源文件里，却在改前被 prepend 进 markdown ⇒ 归界面类。
+- [x] **AC1（红基线 + 分离，枚举不是布尔）**：谓词是**两台真服务器的结构性对照**（不是关键词、不是目测）：A=真实 workspace（真 stale escalations.md + 真 2MB tick-log.md + 真提交日志），B=**orchestration/ 为空、提交信息 ASCII** 的 workspace。CJK 行同时出现在 A 与 B ⇒ 只可能是模板渲染（B 根本没有数据可渲染）。实测：A 含 CJK 文本行 **241**，其中**界面文案 6 条**（逐条见证据）、**数据 235 条**。陈旧提示由第二条判据（源文件可追溯性）从数据类里取出：它由 `observation.ts` 生成、⛔ 不在任何源文件里，却在改前被 prepend 进 markdown ⇒ 归界面类。
 - [x] **AC2（en 清零）**：改后同一谓词：界面文案 CJK **6 → 0**；剩余含 CJK 行 **2 条，全是切换控件 endonym「中文」**（ROW 4 的既定设计：英文页也必须写「中文」，否则需要它的人找不到它）。**数据类 235 → 234**，集合 diff 只有一条 —— 移出的正是那条陈旧提示（它已改由渲染层用英文说出）。数据行**零改动**。
 - [x] **AC3（zh 零变化）**：改前/改后各抓 `lang=zh` 的**原始 HTML**，`diff` 输出**为空**（69081 bytes，逐字节相同）。见证据。
 - [x] **AC4（字典完备且被强制）**：`JOURNAL_KEYS` 8 键、`JOURNAL_LABELS` 为 `Record<JournalKey,{en,zh}>`（缺列即编译错）；测试断言键集闭合、两列非空、en 列无 CJK、zh 列已译或与 en 逐字同。删 `titleSuffix` 的 `zh` 列 ⇒ `tsc` 报 **TS2741**（`serve-i18n.ts:779`，指向 `:777` 的 `Record<JournalKey,{en,zh}>`），恢复后干净。
 - [x] **AC5（所有渲染路径带语言）**：`/journal` 的渲染入口**有且只有一个** —— `serve-handlers.ts:225` 的 `handleJournal(req, res, reqCfg)`，`reqCfg` 携带 dispatcher 解析出的 `cfg.lang`。`renderJournalPage` 是模块私有（未 export），**唯一调用点** `serve-live.ts:245`，⛔ 不存在第二条渲染路径可以漏掉语言。`/journal` **没有**局部刷新端点（区别于 `/dashboard/cards`）—— 实测 `grep -rn '"/journal"' packages/quay/src/` 只命中路由分派一处。`?lang=zh` 下逐条断言仍 zh：见 AC3 的逐字 diff 与新测试的 4 条 zh 字面量断言。
 - [x] **AC6（因果对照）**：把 `journalLabelsFor` 钳成恒返回 `JOURNAL_LABELS[key].zh` ⇒ en 黑盒 **2 个测试变红**（`en /journal's CJK lines are exactly …`、`en renders the stale banner in English`）；恢复 ⇒ 8/8 复绿。两次读数见证据。
 - [x] **AC7（既有测试迁移 + 不回归）**：实跑变红清单 **5 条**（3 个文件）：`serve.test.mjs` 两条 `/journal` 空态断言（`无数据`→`No data`）、`observation.test.mjs` 陈旧 banner 断言（改判 `staleSource` 事实）、`serve-journal-zh-chrome.test.mjs` 两条把 en `<h1>` 钉成改前字面量的断言（AC-296 自己的「en 基线不许漂移」护栏，本任务**故意**移动了那个字节）。迁移后：`serve-*.test.mjs` + `observation.test.mjs` **335/335 绿**、新测试 **8/8 绿**、`tsc --noEmit` 绿。`/live` 输出与改前逐字一致 —— 唯一 diff 是实时的活动计数（`10 条提交`→`9 条提交`）。
-- [x] **AC8（真实浏览器形态）**：见证据 · AC8。
+- [x] **AC8（真实浏览器形态）**：真实 `quay serve` CLI（`packages/quay/bin/quay.ts serve`，根在本任务 worktree）+ 真实 headless Chrome 截图两态。en 图：`<h1>Journal — recent loop record</h1>`、三个区头英文、陈旧提示英文、**escalations 数据原文保持中文不动**；zh 图与改前一致。截图与响应体：`/tmp/journal-i18n/ac8/journal-{en,zh}.{png,html}`。
 
 ## DoD
 
@@ -64,7 +64,7 @@ extra:
 1. 读数来自 HTTP 响应体（真实 `startServer`，⛔ 不读渲染函数返回值）。
 2. AC6 实跑；AC1 谓词对 zh 命中过（zh 页 CJK ≥ 4 条，同谓词）；AC2 证明数据未被误翻译（数据行在 en 页逐字出现）。
 3. 不越界：`git diff --stat` 只含 Touches 内文件；`/live` 输出不变。
-4. 重启 serve + 截图（AC8）。
+4. 重启 serve + 截图（AC8）。⚠️ 常驻实例的重启归 fan-in/manager —— 本任务的代码此刻**只在任务分支上**，尚未合入 develop；此刻重启常驻 serve 会加载**旧代码**。故 AC8 用**本 worktree 起的一台真 serve**（同一份产品代码、同一 CLI、真实浏览器），落地后常驻实例由 driver 的 fan-in 换装。
 5. 可回滚：还原取词调用、删 `JOURNAL_*`、恢复 `staleSource`。
 
 ## 决定记录（pattern 的 /journal 实例 —— 后续页面照抄）
@@ -122,7 +122,7 @@ A text lines / CJK : 398 / 241   →   398 / 236
 
 ### AC3 · zh 零变化
 
-`diff before/journal-D-real-zh.html after/journal-D-real-zh.html` → **无输出**（两者同为 69081 bytes，逐字节相同）。
+`diff before/journal-D-real-zh.html after/journal-D-real-zh.html` → **无输出**（两者同为 69081 bytes，逐字节相同）。两次抓取都在**本任务提交之前**（git log 数据相同，故差异只可能来自代码）。
 
 ### AC4 · 删列红读数
 
@@ -160,4 +160,17 @@ npx tsc --noEmit -p packages/quay/     → exit 0
 
 ### AC8 · 真实浏览器形态
 
-见下方「AC8 落地读数」小节。
+真实 `quay serve` CLI（`node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port <free>`，cwd = 本任务 worktree）+ 真实 headless Chrome（`--headless=new --window-size=1440,2600`）。产物：`/tmp/journal-i18n/ac8/journal-{en,zh}.{png,html}`。
+
+**en 响应体（界面的原文）**：
+```
+<h1>Journal — recent loop record</h1>
+<h2>Escalations (escalations.md)</h2>
+<h2>Tick log (tick-log.md)</h2>
+<h2>Recent commits (git log)</h2>
+<h4>⚠️ Stale record — last updated 2026-08-27 (~21d ago); the escalation channel has been
+    superseded by tick-log and is kept for reference only</h4>
+```
+**en 页同谓词 CJK = 236 行**，与 `startServer` 探针完全一致（同一份产品代码，CLI 路径与测试路径同源）；前 2 行是 endonym，其余全部是 escalations/tick-log 数据原文（中文），⛔ 一条界面文案都没有。
+**zh 响应体**：`<h1>日志 — 循环最近记录</h1>`、`<h2>升级项 (escalations.md)</h2>`、`<h2>Tick 记录 (tick-log.md)</h2>`、`<h2>最近提交 (git log)</h2>`、`<h4>⚠️ 陈旧记录 — 最后更新于 2026-08-27（约 21 天前）；升级机制已由 tick-log 取代，此处仅供参考</h4>` —— 与改前字面量逐字一致。
+**截图目视**：en 图上导航/标题/区头/陈旧提示全英文，正文数据保持中文原文；zh 图与改前一致。
