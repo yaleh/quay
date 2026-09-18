@@ -16,6 +16,40 @@ install explicitly.
 **The logic lives in ONE executable** — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh`. This skill
 delegates to it rather than repeating the write logic inline.
 
+## Re-running on an existing project: RECONCILE, not "already exists"
+
+Re-running `/quay:init` after a plugin upgrade is a first-class operation, and since
+`gap-quay-init-native-reconcile` (2026-09-18) the version-level part of it is a **per-key reconcile**
+instead of a skip: keys this version added to the `loop:` schema are filled from the single-source
+default table (`LOOP_VERSION_DEFAULTS` in `packages/quay/src/init.ts`), values this version considers
+incompatible are rewritten through a declared migration table, and every other key — and every
+comment — is left byte-for-byte alone. A config that is already current is not rewritten at all.
+This retires the failure mode that made the same fix necessary twice: a default added to the
+fresh-install template but never to the upgrade path was unreachable for every project initialized
+before it, no matter how many times init re-ran.
+
+Two equivalent surfaces, both calling the same `runInit`:
+
+```
+quay init --reconcile --root <dir>              # CLI
+# MCP: the `init` tool with { "root": "<dir>" }   (reconcile is that tool's DEFAULT)
+```
+
+⛔ Neither needs a READABLE config — that is the point. An ABSENT config is written fresh; an
+UNPARSEABLE one is rebuilt from the defaults with the broken bytes preserved beside it as
+`.quay/config.yml.corrupt-<timestamp>`; a config that exists but cannot be read is reported as
+exactly that, never as a name conflict ("already exists, use --force" was the old — and wrong —
+answer, because it sends you looking for a conflict that does not exist). The MCP `init` tool is
+registered BEFORE any config is read, so it is reachable in precisely the workspace where every other
+tool is not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
+
+⚠️ **Not yet wired into the script below.** `bash quay-init.sh` is still what this skill runs, and its
+own `loop:` upgrade (`ensure_loop_config`) updates only the four project-derived values
+(`repo_root`/`test_command`/`tmux_session`/`worktree_root`); the version-level reconcile above is
+reachable today through the CLI and the MCP tool, not yet from the script. Closing that gap is the
+remaining half of `gap-quay-init-native-reconcile`, and the measured reason it was deferred is
+recorded in that task's DoD evidence section.
+
 ## Write surface (the six-file closed set)
 
 ```

@@ -90,6 +90,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import YAML from "yaml";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -1790,6 +1791,68 @@ async function main() {
       fs.rmSync(gateTasksDir, { recursive: true, force: true });
       fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });
       fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  }
+
+  // ── AC4 (gap-quay-init-native-reconcile): a workspace whose `.quay/config.yml` is MISSING or
+  // UNPARSEABLE must not take the whole MCP server down with it.
+  //
+  // Why this is a different input class from block 11 above (the broken-PROVIDER block): there the
+  // config PARSED and a provider launch failed; here the config cannot be read at all. The startup
+  // sequence used to be `loadConfig()` → `enabledProviderIds()` → `new McpServer()` → register
+  // everything, both throwing steps BEFORE the server object existed ⇒ zero tools, and the MCP
+  // client saw the process exit 1, indistinguishable from a crash — including for `init`, the one
+  // tool whose job is to repair exactly this condition (硬规则 3b: "could not read the input" was
+  // being reported with the shape of "there is nothing here").
+  //
+  // The three assertions below are the structural falsifier: (a) the server is reachable AT ALL,
+  // (b) it lists the bootstrap tool, (c) that tool actually repairs the workspace. Re-point (b)/(c)
+  // at any config-dependent tool and it goes red — e.g. `task_list` cannot be served in this
+  // workspace, so a fix that merely kept the OLD registration order would fail here.
+  {
+    const brokenRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-broken-cfg-"));
+    fs.mkdirSync(path.join(brokenRoot, ".quay"), { recursive: true });
+    // Not a config with a semantic problem (DIR-099-C's scope, deliberately not re-opened) — a file
+    // the YAML parser cannot read at all.
+    fs.writeFileSync(path.join(brokenRoot, ".quay", "config.yml"), "providers: [unclosed\n  bad: : :\n");
+
+    const { client: brokenCfgClient, transport: brokenCfgTransport } = await connectStdio(
+      "node",
+      [coreBin, "mcp"],
+      brokenRoot
+    );
+
+    try {
+      const toolsResult = await brokenCfgClient.listTools();
+      const toolNames = (toolsResult.tools ?? []).map((t) => t.name);
+      assert(
+        toolNames.includes("init"),
+        `AC4: a workspace with an unparseable .quay/config.yml still lists the bootstrap 'init' tool (got: [${toolNames.join(", ")}])`
+      );
+      assert(
+        toolNames.includes("config_validate"),
+        `AC4: the diagnostic 'config_validate' is registered on the degraded path too (got: [${toolNames.join(", ")}])`
+      );
+
+      const repaired = await brokenCfgClient.callTool({
+        name: "init",
+        arguments: { root: brokenRoot, reconcile: true },
+      });
+      assert(repaired.isError !== true, `AC4: init on the broken workspace succeeds (got: ${JSON.stringify(repaired.structuredContent)})`);
+      assert(
+        repaired.structuredContent?.configState === "corrupt",
+        `AC4: the repair reports the pre-state honestly as 'corrupt' (got: ${repaired.structuredContent?.configState})`
+      );
+
+      const cfgPath = path.join(brokenRoot, ".quay", "config.yml");
+      const reparsed = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+      assert(
+        reparsed?.loop?.fork_baseline === "develop",
+        `AC4: init wrote a PARSEABLE config carrying this version's defaults (loop.fork_baseline=${reparsed?.loop?.fork_baseline})`
+      );
+    } finally {
+      await brokenCfgTransport.close();
+      fs.rmSync(brokenRoot, { recursive: true, force: true });
     }
   }
 

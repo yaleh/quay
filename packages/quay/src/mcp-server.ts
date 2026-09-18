@@ -48,11 +48,12 @@ import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadConfig, activeProvider } from "./config.ts";
+import { loadConfig, activeProvider, findConfig } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
-import { type ConnectedProvider, registerAllHandlers } from "./mcp-handlers.ts";
+import { type ConnectedProvider, registerAllHandlers, registerConfigHandlers } from "./mcp-handlers.ts";
 import { resolvePluginScriptExec } from "./plugin-root.ts";
+import { runInit } from "./init.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -189,36 +190,179 @@ export async function runInstrument(
   return spawnCapture(command, argv, workspaceRoot);
 }
 
+/**
+ * The workspace root + config path to fall back to when `loadConfig()` cannot produce them.
+ *
+ * ⛔ This is the bootstrap path, so it must NOT go through `loadConfig()` — the whole point is that
+ * `loadConfig()` may be exactly what failed. `findConfig()` walks up from cwd and answers with the
+ * path of a config file whether or not its CONTENTS parse (it is an existence walk, not a reader),
+ * so a corrupt config still yields the right root; only a workspace with no config at all falls back
+ * to cwd, which is the correct answer there.
+ */
+function bootstrapLocation(): { workspaceRoot: string; configPath: string } {
+  const found = findConfig();
+  if (found) return { workspaceRoot: path.dirname(path.dirname(found)), configPath: found };
+  const root = process.cwd();
+  return { workspaceRoot: root, configPath: path.join(root, ".quay", "config.yml") };
+}
+
+/**
+ * Register the tools that must work with NO usable config (SPEC §3.3 bootstrap phase).
+ *
+ * WHY THIS IS A SEPARATE PHASE (gap-quay-init-native-reconcile): the startup sequence used to be
+ * `loadConfig()` → `enabledProviderIds()` → `new McpServer()` → register everything. Both of the
+ * first two can throw, and both sat BEFORE the server object existed, so a workspace whose config was
+ * missing or syntactically broken got ZERO tools — including the tools whose entire job is to
+ * diagnose and repair exactly that condition. The MCP client saw the process exit 1, i.e. "the
+ * server is not there", which is indistinguishable from a crash.
+ *
+ * The fix is ordering, not a new mechanism: the bootstrap tool is registered FIRST and unconditionally,
+ * so `quay mcp` always has a surface from which a broken workspace can be repaired. (DIR-099-C's
+ * ruling that startup does NO SEMANTIC validation is untouched — it was about configs that PARSE;
+ * "the file cannot be read at all" was never in its scope.)
+ */
+function registerBootstrapHandlers(server: McpServer): void {
+  // init — the repair entry point. ⛔ `root` is REQUIRED and never read from a loaded config: on the
+  // path this tool exists for, there IS no loaded config to take a workspaceRoot from (硬规则 4b —
+  // the tool must not depend on a quantity produced by the very thing it is repairing). It reuses
+  // `runInit`, which is already decoupled from `loadConfig` (that decoupling is why the CLI works on
+  // a config-less directory today); no init logic is re-implemented here.
+  server.registerTool(
+    "init",
+    {
+      description:
+        "Initialize or reconcile a quay workspace's config surface at an explicit `root` — the ONE entry " +
+        "point that works even when `.quay/config.yml` is absent or unparseable (which is why it is " +
+        "registered before any config is read, and why `root` is required rather than taken from the " +
+        "loaded config). Mirrors the `quay init` CLI. With `reconcile` (default true) an EXISTING config " +
+        "is brought up to this version's requirements instead of being refused: keys this version added " +
+        "are filled from the defaults, values this version considers incompatible are migrated, and every " +
+        "other key and comment is left untouched (a config already current is not rewritten at all). An " +
+        "unparseable config is rebuilt from defaults with the broken file preserved beside it as " +
+        "`config.yml.corrupt-<timestamp>`. Pass `reconcile: false` to get the strict refusal instead, or " +
+        "`dryRun: true` to see what would be written without writing anything.",
+      inputSchema: {
+        root: z.string().describe(
+          "Absolute path of the workspace to initialize/reconcile. Required — on the degraded-startup path this tool exists for, there is no loaded config to derive it from."
+        ),
+        reconcile: z.boolean().optional().describe(
+          "Bring an existing config up to this version's defaults (default: true). false = refuse an existing config the way a bare `quay init` does."
+        ),
+        force: z.boolean().optional().describe("Overwrite an existing config wholesale (default: false). Wins over `reconcile` when both are given."),
+        dryRun: z.boolean().optional().describe("Report what would be written without touching the disk (default: false)."),
+      },
+    },
+    async ({ root, reconcile, force, dryRun }) => {
+      try {
+        const result = runInit({
+          root,
+          force: force === true,
+          reconcile: reconcile !== false,
+          dryRun: dryRun === true,
+        });
+        const payload = {
+          outcome: result.outcome,
+          configState: result.configState,
+          corruptReason: result.corruptReason ?? null,
+          configPath: result.configPath,
+          tasksDir: result.tasksDir,
+          added: result.reconcile?.added ?? [],
+          migrated: result.reconcile?.migrated ?? [],
+          content: dryRun === true ? result.content : undefined,
+        };
+        // A refusal is a NORMAL result of a well-formed judgment (`isError: false` would claim quay
+        // did what was asked); only the two outcomes that leave the caller with nothing to act on
+        // report as errors.
+        const refused = result.outcome === "corrupt" || result.outcome === "skipped" || result.outcome === "branch-model-blocked";
+        return {
+          ...(refused ? { isError: true } : {}),
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+          structuredContent: payload as unknown as Record<string, unknown>,
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+}
+
 export async function startMcpServer(): Promise<void> {
-  const cfg = loadConfig();
-  const enabledIds = enabledProviderIds(cfg);
-  if (enabledIds.length === 0) {
-    throw new Error("quay mcp: no enabled provider in .quay/config.yml");
+  const server = new McpServer({
+    name: "quay-core",
+    version: "0.0.1",
+  });
+
+  // ── Phase 1 — bootstrap, UNCONDITIONAL ─────────────────────────────────────────────────────────
+  registerBootstrapHandlers(server);
+
+  // ── Phase 2 — everything that needs a usable config, and DEGRADES instead of exiting ────────────
+  // A config that cannot be loaded is a REASON TO RUN IN A REDUCED MODE, not a reason to die: the
+  // process must stay up (a) so the bootstrap tool above is reachable, and (b) so the operator is
+  // told WHY the rest is missing, in the server's own words, instead of watching a stack trace from
+  // a `loadConfig()` that never returned (硬规则 3b: "could not read the input" must not be shaped
+  // like "there is nothing here").
+  let cfg: ReturnType<typeof loadConfig> | null = null;
+  let enabledIds: string[] = [];
+  let degradedReason: string | null = null;
+  // Declared OUTSIDE the healthy-path branch: the shutdown wiring below is shared by BOTH modes
+  // (a degraded server still owns this map — it is simply empty), so `closeAllProviders` must not
+  // live inside a branch that may not have run.
+  const clients = new Map<string, Promise<ConnectedProvider>>(); // providerId -> Promise<{id, client}>
+  let defaultId: string | null = null;
+  try {
+    cfg = loadConfig();
+    enabledIds = enabledProviderIds(cfg);
+    if (enabledIds.length === 0) {
+      degradedReason = "no enabled provider in .quay/config.yml";
+      cfg = null;
+    }
+  } catch (err) {
+    degradedReason = err instanceof Error ? err.message : String(err);
+    cfg = null;
   }
-  const defaultId = enabledIds[0];
+
+  if (cfg === null) {
+    // Degraded mode: register ONLY the tools that can still answer questions about this workspace.
+    // `config_validate` belongs here for the same reason `init` does — it is the diagnostic the
+    // operator needs, and it was previously registered only on the path that required the very
+    // config it diagnoses. It is registered through the SAME `registerConfigHandlers` the healthy
+    // path uses (one implementation, one schema), given the fallback location instead of a loaded cfg.
+    const loc = bootstrapLocation();
+    registerConfigHandlers(server, {
+      config: {},
+      configPath: loc.configPath,
+      workspaceRoot: loc.workspaceRoot,
+    } as unknown as ReturnType<typeof loadConfig>);
+    console.error(
+      `quay mcp: DEGRADED — .quay/config.yml could not be loaded, so only the bootstrap tools ` +
+      `(init, config_validate) are available.\n` +
+      `quay mcp:   reason: ${degradedReason}\n` +
+      `quay mcp:   workspace: ${loc.workspaceRoot}\n` +
+      `quay mcp:   repair with the \`init\` tool (root: "${loc.workspaceRoot}"), then restart this server.`
+    );
+  } else {
+    const loaded = cfg;
+    defaultId = enabledIds[0];
 
   // Lazily connect to each enabled Provider on first use (not eagerly at
   // startup) so a workspace with N enabled Providers but a session that only
   // ever touches one doesn't pay the spawn cost for the others. Connections
   // are cached and reused, and closed together on server shutdown.
-  const clients = new Map<string, Promise<ConnectedProvider>>(); // providerId -> Promise<{id, client}>
   function getClient(providerId: string | undefined): Promise<ConnectedProvider> {
-    const id = providerId || defaultId;
+    const id = providerId || (defaultId as string);
     if (!enabledIds.includes(id)) {
       throw new Error(
         `quay mcp: provider "${id}" is not enabled in .quay/config.yml (enabled providers: ${enabledIds.join(", ")})`
       );
     }
     if (!clients.has(id)) {
-      clients.set(id, connectToProvider(cfg, id));
+      clients.set(id, connectToProvider(loaded, id));
     }
     return clients.get(id) as Promise<ConnectedProvider>;
   }
-
-  const server = new McpServer({
-    name: "quay-core",
-    version: "0.0.1",
-  });
 
   // provider://manifest — alias for the default-enabled Provider, for
   // single-Provider-workspace symmetry with each Provider's own manifest
@@ -228,7 +372,7 @@ export async function startMcpServer(): Promise<void> {
     "provider://manifest",
     { description: "The default-enabled Provider's static self-declaration (provider.yml), proxied through Core." },
     async (uri) => {
-      const { client } = await getClient(defaultId);
+      const { client } = await getClient(defaultId ?? undefined);
       const manifest = await client.manifest();
       return {
         contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(manifest, null, 2) }],
@@ -256,7 +400,7 @@ export async function startMcpServer(): Promise<void> {
   }
 
   // Delegate tool registrations to domain handler groups (ARCH-M93-002).
-  registerAllHandlers(server, getClient, cfg);
+  registerAllHandlers(server, getClient, loaded);
 
   // instrument — the discoverable entry point for the plugin/scripts instruments
   // (gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point, AC3/AC5). Workspace-scoped
@@ -284,7 +428,7 @@ export async function startMcpServer(): Promise<void> {
     async ({ action, name, args }) => {
       try {
         if (action === "list") {
-          const manifest = await fetchInstrumentsManifest(cfg.workspaceRoot);
+          const manifest = await fetchInstrumentsManifest(loaded.workspaceRoot);
           return {
             content: [{ type: "text" as const, text: JSON.stringify(manifest, null, 2) }],
             structuredContent: manifest as unknown as Record<string, unknown>,
@@ -296,7 +440,7 @@ export async function startMcpServer(): Promise<void> {
             content: [{ type: "text" as const, text: "instrument run requires a `name` (the instrument's basename without extension)" }],
           };
         }
-        const r = await runInstrument(cfg.workspaceRoot, name, args ?? []);
+        const r = await runInstrument(loaded.workspaceRoot, name, args ?? []);
         return {
           isError: r.exitCode !== 0,
           content: [{ type: "text" as const, text: r.exitCode === 0 ? r.stdout : (r.stderr || r.stdout || `exit ${r.exitCode}`) }],
@@ -310,12 +454,18 @@ export async function startMcpServer(): Promise<void> {
       }
     }
   );
+  } // end healthy (config-loaded) mode
 
+  // ── Shared tail — the transport is connected in BOTH modes ──────────────────────────────────────
+  // A degraded server that never connected its transport would be indistinguishable to the MCP
+  // client from a server that crashed, which is exactly the failure this phase split exists to end.
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(
-    `quay mcp: aggregating enabled providers [${enabledIds.join(", ")}] (default: ${defaultId})`
-  );
+  if (defaultId !== null) {
+    console.error(
+      `quay mcp: aggregating enabled providers [${enabledIds.join(", ")}] (default: ${defaultId})`
+    );
+  }
 
   // Close every connected Provider client when the Core server's own
   // transport closes (stdin closes), so no orphaned Provider subprocess is

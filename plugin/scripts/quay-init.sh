@@ -21,7 +21,15 @@
 #
 # 已退役（copy 机器，AC1 archive）：copy_one/copy_dir/write_state_file/write_session_env + managed/
 # conflict/stale 三态判定 + .quay/runtime 铺设 + ensure_vendor_runtime + verify_provider_runtime_existence
-# + --check-drift/--check-dependency-closure 的铺设面消费。⚠️ 铺设退役【不等于】既有项目的
+# + --check-drift/--check-dependency-closure 的铺设面消费。
+# ⚠️ 2026-09-18（gap-quay-init-native-reconcile）：上述退役体的【死代码】已从本文件物理删除——它们
+# 当时即已无任何调用者（保留的只是定义）。同批删除的还有：write_provider_config（被 write_config
+# 的新装分支取代的重复 writer）、backup_config / rollback_config_on_exit（同一批无人调用的回滚件）、
+# drift_report（--check-drift 的打印器）、ensure_runtime_gitignore（被 ensure_runtime_artifacts_gitignore
+# 取代）、以及 _precompute_states/_CMP_STATE/_DST_HASH 批量化（其生产者即 copy 机器，删后 _is_identical
+# 的"批量查表"分支从未被执行过 ⇒ 一并退化为直接 `cmp -s`）。2959 → 2426 行；判定方式见该任务的 DoD
+# 证据小节（reachability + `derive_loop_scripts` 输出逐字不变 + 真实铺设产物逐字不变）。
+# ⚠️ 铺设退役【不等于】既有项目的
 # `.quay/runtime/` 无人管：其继任者是 migrate_stale_mcp_entry（升级通道）——把 provider 绑定迁到
 # 插件交付的 runtime 绝对路径，并把无引用且陈旧的本地副本退役（gap-upgrade-leaves-legacy-project-
 # runtime-stale-and-unmigrated AC1/AC2，裁定见该函数头）。⚠️ 保留为【库函数】（供 laydown-set-check.sh /
@@ -264,297 +272,26 @@ PLUGIN_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))
 PLUGIN_NAME="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo quay)"
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
-COPIED=0; SKIPPED=0; CONFLICTED=0; CLEANED=0
 # Backup timestamp for AC4 residue cleanup: every cleanup in one run is grouped under a single
 # per-run backup dir (<workspace>/.quay/quay-init-backups/<ts>/), so "backup 在哪" is one line.
 BACKUP_TS="$(date +%s)"
 
-# state_laid_hash <workspace-rel-path>: read the recorded laid-down hash of a managed product
-# file from .quay/quay-init-state.json (written by the PREVIOUS install — the upgrade path's
-# record of "what quay-init laid down"). Empty when there is no record (fresh install) or the
-# file is not managed.
-state_laid_hash() {
-  local rel="$1"
-  [ -f "$WORKSPACE_ROOT/.quay/quay-init-state.json" ] || { echo ""; return; }
-  python3 -c '
-import json, sys
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-    print(d.get("laidFiles", {}).get(sys.argv[2], ""))
-except Exception:
-    print("")
-' "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$rel"
-}
-
-# ── batched file-state precompute (gap-suite-serial-install-copy-one-subprocess-batching) ────────────
-# copy_one / compute_drift_report used to spawn ONE `cmp -s` per file (plus one `sha256sum | cut` per
-# managed file) — ~400 subprocess spawns per --loop run, the dominant wall-clock cost of the serial-
-# install family (the 7 slow files run a real `quay init --loop` under concurrency-1 serial, so their
-# wall-clock floor IS the per-file subprocess count). The two associative arrays below hold the result
-# of ONE python3 pass over a <src>\t<dst> manifest:
-#   _CMP_STATE[dst] ∈ missing|identical|differ   (byte comparison, replaces per-file `cmp -s`)
-#   _DST_HASH[dst]  = sha256(dst) when present   (replaces per-managed-file `sha256sum | cut`)
-# The copy_one decision logic and every output line are UNCHANGED — only the comparison primitive is
-# swapped for an array lookup (AC2: byte-identical output). A dst whose state was NOT precomputed
-# (e.g. a standalone copy_one caller outside a precompute window) falls back to the subprocess form,
-# so a future caller stays correct, just unbatched.
-declare -A _CMP_STATE=()
-declare -A _DST_HASH=()
-
-# _precompute_states <manifest> — ONE python3 pass over a <src>\t<dst> manifest (one pair per line),
-# classifying each pair by in-memory byte comparison and hashing each present dst. Populates
-# _CMP_STATE + _DST_HASH. Deterministic: output order = manifest order, so the caller feeds a
-# manifest built in lay-down order and the copy_one lines stay byte-identical to the pre-batch form.
-_precompute_states() {
-  local manifest="$1" dst state hash
-  _CMP_STATE=()
-  _DST_HASH=()
-  while IFS=$'\t' read -r dst state hash; do
-    [ -n "$dst" ] || continue
-    _CMP_STATE["$dst"]="$state"
-    # `if` (not `&&`) so the loop body always ends exit-0 — under `set -e` a body ending on
-    # `[ -n "$hash" ] && …` aborts the whole loop when the last row's hash is empty (missing).
-    if [ -n "$hash" ]; then _DST_HASH["$dst"]="$hash"; fi
-  done < <(python3 - "$manifest" <<'PYEOF'
-import sys, os, hashlib
-manifest = sys.argv[1]
-pairs = []
-with open(manifest, "r", encoding="utf-8") as f:
-    for ln in f:
-        ln = ln.rstrip("\n")
-        if not ln or "\t" not in ln:
-            continue
-        src, dst = ln.split("\t", 1)
-        pairs.append((src, dst))
-for src, dst in pairs:
-    if not os.path.isfile(dst):
-        print("%s\tmissing\t" % dst)
-        continue
-    try:
-        with open(src, "rb") as fh:
-            sc = fh.read()
-        with open(dst, "rb") as fh:
-            dc = fh.read()
-    except OSError:
-        # Unreadable → treat as differ (the pre-batch `cmp -s` returned non-zero the same way).
-        print("%s\tdiffer\t" % dst)
-        continue
-    state = "identical" if sc == dc else "differ"
-    print("%s\t%s\t%s" % (dst, state, hashlib.sha256(dc).hexdigest()))
-PYEOF
-)
-}
-
-# _is_identical <src> <dst> — the batched replacement for `cmp -s "$src" "$dst"`. Consults the
-# precomputed _CMP_STATE when present; falls back to `cmp -s` for a dst that was never precomputed.
+# _is_identical <src> <dst> — byte comparison.
+# ⚠️ 2026-09-18 (gap-quay-init-native-reconcile): this used to consult a precomputed `_CMP_STATE`
+# array filled by `_precompute_states`, falling back to `cmp -s` for a dst the batch had not covered.
+# That producer belonged to the copy machinery AC168 retired and had been unreachable ever since, so
+# the fallback arm was the ONLY arm ever taken and the batching
+# (gap-suite-serial-install-copy-one-subprocess-batching) had been buying nothing. The arrays and the
+# lookup are gone; the remaining live caller (`compute_drift_report`) gets the same answer.
 _is_identical() {
-  local src="$1" dst="$2" st
-  st="${_CMP_STATE[$dst]:-}"
-  case "$st" in
-    identical) return 0 ;;
-    differ) return 1 ;;
-    missing) return 1 ;;
-    *) cmp -s "$src" "$dst" ;;
-  esac
-}
-
-# _dst_sha256 <dst> — the batched replacement for `sha256sum "$dst" | cut -d' ' -f1`. Consults the
-# precomputed _DST_HASH when present; falls back to the two-subprocess form otherwise.
-_dst_sha256() {
-  local dst="$1" h
-  h="${_DST_HASH[$dst]:-}"
-  if [ -n "$h" ]; then
-    printf '%s' "$h"
-  else
-    sha256sum "$dst" | cut -d' ' -f1
-  fi
-}
-
-# _LAID_TOOK[rel]=1 — the set of workspace-rel paths whose lay-down TOOK EFFECT this round: the
-# installer wrote the product (copied / clean-replaced / managed-replaced / --force overwritten) or
-# found the disk already byte-identical to the product (skipped). write_state_file only recomputes
-# laidFiles hashes for THIS set; every other path — the CONFLICT branches, where a user edit is
-# PRESERVED and the installer wrote nothing — keeps the previous round's record, so a preserved edit
-# is never mis-recorded as "laid" (gap-quay-init-write-state-file-corrupts-hash-after-conflict:
-# unconditionally hashing current disk content made a preserved CONFLICT edit look stale-installed
-# next round, and a zero-change 3rd run silently ate the edit without reporting CONFLICT).
-declare -A _LAID_TOOK=()
-
-# _record_laid_took <dst>: mark an absolute dst path's workspace-rel form as "took effect this round".
-_record_laid_took() {
-  local dst="$1"
-  [ -n "$dst" ] || return
-  _LAID_TOOK["${dst#"$WORKSPACE_ROOT"/}"]=1
-}
-
-# idempotent copy of one file. The 3rd arg MODE ("clean"|"preserve"|"managed", default preserve)
-# distinguishes three conflict classes for a same-name-different-content target:
-#   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
-#              A same-name-different-content target is RESIDUE (a stale hot-copy leftover) and is
-#              DISPOSED OF: backed up under <workspace>/.quay/quay-init-backups/<ts>/ and replaced
-#              with the product content, with a visible report (gap-cold-start-...-eight-steps AC4).
-#   managed  — install-managed localizable files (tick docs / prose). The upgrade path (AC5)
-#              distinguishes install-managed stale content from a genuine user edit by the
-#              recorded laid-down hash: a target that still equals what the PREVIOUS install laid
-#              down is stale product from an older plugin version → replaced (backed up + reported);
-#              a target that differs from BOTH the product and that hash is a user edit → CONFLICT,
-#              preserved (AC6 — replacing a silent skip with a silent overwrite is the worse trade).
-#   preserve — localizable files: the conflict is listed and the target is left untouched.
-# Usage: copy_one <src> <dst> [clean|preserve|managed]
-copy_one() {
-  local src="$1" dst="$2" mode="${3:-preserve}"
-  local fname
-  # ${dst##*/} is the bash builtin for basename (no subprocess) — same for ${dst%/*} (dirname).
-  # All callers pass an absolute dst, so ${dst%/*} is always the parent dir (gap-quay-init-install-
-  # wall-clock-slow: per-file basename/dirname subprocess spawns in the copy loop).
-  fname="${dst##*/}"
-
-  if [ ! -f "$dst" ]; then
-    if [ "$DRY_RUN" = true ]; then
-      echo "  would-copy: $dst"
-    else
-      mkdir -p "${dst%/*}"
-      cp "$src" "$dst"
-      echo "  copied: $dst"
-    fi
-    COPIED=$((COPIED + 1))
-    _record_laid_took "$dst"
-  elif _is_identical "$src" "$dst"; then
-    SKIPPED=$((SKIPPED + 1))
-    _record_laid_took "$dst"
-    if [ "$DRY_RUN" = true ]; then
-      echo "  would-skip (identical): $dst"
-    else
-      echo "  skipped (identical): $dst"
-    fi
-  elif [ "$mode" = "clean" ]; then
-    # AC4 residue cleanup: the target has a same-name file whose content differs from the product —
-    # a stale hot-copy leftover. Dispose of it VISIBLY: back it up and replace it. 不静默覆盖 — the
-    # backup path is always reported, never a silent overwrite.
-    CLEANED=$((CLEANED + 1))
-    if [ "$DRY_RUN" = true ]; then
-      echo "  would-clean-residue: $dst (stale copy differs from the product — would back up + replace)"
-    else
-      local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
-      mkdir -p "$backup_dir"
-      cp "$dst" "$backup_dir/$fname"
-      mkdir -p "${dst%/*}"
-      cp "$src" "$dst"
-      echo "  cleaned-residue: $dst"
-      echo "    backup: $backup_dir/$fname"
-    fi
-    COPIED=$((COPIED + 1))
-    _record_laid_took "$dst"
-  elif [ "$mode" = "managed" ]; then
-    # Install-managed localizable file (config-driven install, SPEC AC5/AC6). A target that
-    # still equals the previous install's recorded laid-down hash is stale product from an
-    # OLDER plugin version → replaced. A target that differs from both the product and that
-    # hash is a genuine user edit → CONFLICT, preserved (AC6 must still fire).
-    local laid_hash cur_hash
-    laid_hash="$(state_laid_hash "${dst#"$WORKSPACE_ROOT"/}")"
-    cur_hash="$(_dst_sha256 "$dst")"
-    if [ -n "$laid_hash" ] && [ "$laid_hash" = "$cur_hash" ]; then
-      CLEANED=$((CLEANED + 1))
-      if [ "$DRY_RUN" = true ]; then
-        echo "  would-replace-stale-install: $dst (previous quay-init laid it verbatim; upgrade to the new product)"
-      else
-        local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
-        mkdir -p "$backup_dir"
-        cp "$dst" "$backup_dir/$fname"
-        mkdir -p "${dst%/*}"
-        cp "$src" "$dst"
-        echo "  replaced-stale-install: $dst"
-        echo "    backup: $backup_dir/$fname"
-      fi
-      COPIED=$((COPIED + 1))
-      _record_laid_took "$dst"
-    elif [ "$FORCE" = true ]; then
-      if [ "$DRY_RUN" = true ]; then
-        echo "  would-overwrite (conflict, --force): $dst"
-      else
-        mkdir -p "${dst%/*}"
-        cp "$dst" "$dst.bak.$(date +%s)"
-        cp "$src" "$dst"
-        echo "  overwritten (backed up): $dst"
-      fi
-      COPIED=$((COPIED + 1))
-      _record_laid_took "$dst"
-    else
-      CONFLICTED=$((CONFLICTED + 1))
-      if [ "$DRY_RUN" = true ]; then
-        echo "  would-conflict (content differs, skip unless --force): $dst"
-      else
-        echo "  CONFLICT: $dst (content differs — use --force to overwrite)"
-      fi
-    fi
-  else
-    # preserve (default): localizable files — the conflict is listed and the target is left untouched.
-    if [ "$FORCE" = true ]; then
-      if [ "$DRY_RUN" = true ]; then
-        echo "  would-overwrite (conflict, --force): $dst"
-      else
-        mkdir -p "${dst%/*}"
-        cp "$dst" "$dst.bak.$(date +%s)"
-        cp "$src" "$dst"
-        echo "  overwritten (backed up): $dst"
-      fi
-      COPIED=$((COPIED + 1))
-      _record_laid_took "$dst"
-    else
-      CONFLICTED=$((CONFLICTED + 1))
-      if [ "$DRY_RUN" = true ]; then
-        echo "  would-conflict (content differs, skip unless --force): $dst"
-      else
-        echo "  CONFLICT: $dst (content differs — use --force to overwrite)"
-      fi
-    fi
-  fi
-}
-
-# copy_dir <src_dir> <dst_dir>: idempotent-copy every file in src_dir.
-copy_dir() {
-  local src_dir="$1" dst_dir="$2"
-  if [ ! -d "$src_dir" ]; then
-    echo "  (source directory missing — skipped category)"
-    return
-  fi
-  # gap-verify-referenced-landed-concurrency-hardening-insufficient: the empty-source check must NOT
-  # shell out to `ls -A` — under heavy concurrent load a `$(ls …)` command substitution can be killed
-  # mid-stream (returning empty) and an EMPTY source is falsely reported for a NON-empty dir, skipping
-  # the whole category (observed: .claude/workflows/* false-positived referenced-not-landed). The
-  # `for f in "$src_dir"/*` glob is a bash builtin (no subprocess), so it cannot be torn — count the
-  # files it actually iterates instead.
-  local f found=0 manifest
-  manifest="$(mktemp)"
-  # First glob pass: build the (src,dst) manifest + detect emptiness. The glob stays a bash builtin
-  # (no subprocess) so the empty-source check cannot be torn (same rationale as above); the per-file
-  # `cmp -s` that copy_one used to spawn is then batched into ONE python3 pass (gap-suite-serial-
-  # install-copy-one-subprocess-batching), so the copy loop below consults _CMP_STATE instead.
-  for f in "$src_dir"/*; do
-    [ -f "$f" ] || continue
-    found=1
-    printf '%s\t%s\n' "$f" "$dst_dir/${f##*/}" >> "$manifest"
-  done
-  if [ "$found" = 0 ]; then
-    rm -f "$manifest"
-    echo "  (source directory empty — skipped category)"
-    return
-  fi
-  _precompute_states "$manifest"
-  rm -f "$manifest"
-  for f in "$src_dir"/*; do
-    [ -f "$f" ] || continue
-    copy_one "$f" "$dst_dir/${f##*/}"
-  done
+  cmp -s "$1" "$2"
 }
 
 # render_substitutions has been REMOVED (gap-install-rewrites-files-so-upgrade-cannot-tell-
 # who-changed-them): install is configuration-driven, not text-substitution. Every laid-down
 # file is byte-identical to the product artifact (SPEC AC1); the target-project values
 # (repo_root / test_command / tmux_session) live in ONE config file (.quay/config.yml `loop:`
-# section, AC2) and are READ at runtime, never baked in (AC3). The tick docs are laid down
-# VERBATIM, so a byte-identical landing is `cmp`-checkable and the upgrade path can tell a
-# stale install-managed file from a user edit (state_laid_hash / the `managed` copy mode).
+# section, AC2) and are READ at runtime, never baked in (AC3).
 
 # detect_test_command <root>: AC2 (gap-cold-start-...-eight-steps) — the target project's test
 # command is DETECTABLE, not something the human must already know. Priority ladder (first match
@@ -632,25 +369,16 @@ detect_tmux_session() {
   return 1
 }
 
-# write_provider_config: generate/ensure the target's .quay/config.yml provider mcp_entry is
-# PROJECT-LOCAL (AC7b, gap-cold-start-...-eight-steps). The cold-started loop must NOT depend on the
-# quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
-# If the target has no config yet, write one whose provider uses ABSOLUTE project-local paths (never
-# a bare `quay-native` that PATH-resolves to the dev tree). The mcp_entry command is an absolute path
-# into the laid-down project-local runtime (.quay/runtime/bin/quay-native.js — the self-contained
-# native provider bundle quay-init lays down alongside the Core bundle; see the AC7b lay-down below;
-# the landing dir is .quay/runtime/, never vendor/ — gap-the-runtime-has-nowhere-safe-to-land). If a
-# config already exists, the project owns it — just note the AC7b requirement
-# (a future --force could patch it; not silently rewritten).
 # ensure_loop_config: add/update the `loop:` section in an EXISTING `.quay/config.yml` with the
 # four fast-mode target-project values (repo_root / test_command / tmux_session / worktree_root —
 # SPEC AC2, the single config source for the loop). Laid-down scripts and tick docs READ these at
 # runtime instead of having them baked in at install (SPEC AC3), so two installs of the same product
 # are byte-identical except this config (AC4). A pre-existing config's other keys (providers,
 # credentials) are preserved; only the loop section is added/updated. Used only when the config
-# already exists — a config-less target gets the loop section from write_provider_config's heredoc
-# (which preserves the inline `["node", ...]` mcp_entry the AC7b test pins). Uses python3 + yaml so
-# the values are always valid YAML scalars regardless of their content.
+# already exists — a config-less target gets its loop section from `write_config`'s own heredoc, the
+# ONE remaining fresh-install writer (the orphaned `write_provider_config` duplicate that this
+# comment used to point at was removed 2026-09-18, gap-quay-init-native-reconcile). Uses python3 +
+# yaml so the values are always valid YAML scalars regardless of their content.
 # CONFIG-PRESERVING UPGRADE (gap-quay-init-config-preserving-incremental-upgrade, AC1): the loop
 # section is MERGED, never replaced. `data["loop"] = {...}` (the pre-fix form) DESTROYED every
 # non-fast-mode key the consumer owned — the loop-driver schema (board / gates / stop / policy) and
@@ -1057,264 +785,6 @@ for m in migrated:
 PYEOF
 }
 
-# ensure_runtime_gitignore — gap-the-runtime-has-nowhere-safe-to-land AC10. The chosen
-# mechanism is "the runtime does NOT go into the target's git" (it is install-generated
-# product, never source, and a 1.3MB committed bundle trips common 500KB large-file hooks).
-# quay-init therefore MUST write the .gitignore entry itself — an instruction to the user
-# to add it would be exactly the manual patch G0 bans (人工补丁数必须为 0). Idempotent +
-# non-destructive: if the target's .gitignore already carries the entry (or the whole
-# .quay/ dir, which subsumes it), SKIP; else append (creating the file if needed). NEVER
-# rewrites, reorders, or clobbers the target's other gitignore content (AC10 negative
-# control: a pre-existing same-name entry → no duplicate write, no overwrite).
-ensure_runtime_gitignore() {
-  local gi="$WORKSPACE_ROOT/.gitignore"
-  local entry=".quay/runtime/"
-  if [ -f "$gi" ] && { grep -qxF "$entry" "$gi" || grep -qxF ".quay/" "$gi" || grep -qxF ".quay" "$gi"; }; then
-    if [ "$DRY_RUN" = true ]; then
-      echo "  would-skip: .gitignore already carries $entry"
-    else
-      echo "  skipped: .gitignore already carries $entry"
-    fi
-    return
-  fi
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-append: $entry to .gitignore"
-    return
-  fi
-  {
-    printf '# quay runtime (install-generated, not source — gap-the-runtime-has-nowhere-safe-to-land)\n'
-    printf '%s\n' "$entry"
-  } >> "$gi"
-  echo "  appended: $entry to .gitignore"
-}
-
-# backup_config — gap-quay-init-config-preserving-incremental-upgrade AC2 (config backup before
-# upgrade). The --loop upgrade MODIFIES an existing consumer's `.quay/config.yml` (migrate_stale_
-# mcp_entry + ensure_loop_config). Before ANY modification, the pre-upgrade config is backed up to
-# the SAME per-run backup dir as the residue cleanup (<workspace>/.quay/quay-init-backups/<ts>/), so
-# "backup 在哪" stays one line. Prints the backup path on stdout (empty when there was nothing to
-# back up — a config-less fresh install has nothing to preserve).
-backup_config() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ "$DRY_RUN" = true ] || [ ! -f "$cfg" ]; then echo ""; return; fi
-  local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
-  mkdir -p "$backup_dir"
-  cp "$cfg" "$backup_dir/config.yml"
-  echo "$backup_dir/config.yml"
-}
-
-# rollback_config_on_exit — gap-quay-init-config-preserving-incremental-upgrade AC2 (rollback config
-# unchanged on failure). Wired as an EXIT trap while the upgrade's config write is armed; if the
-# --loop run fails for ANY reason before the config is disarmed (a config write that aborts, a
-# post-config verification that fails closed), the pre-upgrade config is restored from the backup —
-# the consumer's config is byte-for-byte unchanged by a failed upgrade. Disarmed by clearing
-# CONFIG_BACKUP once the config is in its final good state (a later auto-commit failure is a git
-# failure, not a config failure — rolling back the config then would be wrong).
-rollback_config_on_exit() {
-  if [ -n "${CONFIG_BACKUP:-}" ] && [ -f "$CONFIG_BACKUP" ]; then
-    cp "$CONFIG_BACKUP" "$WORKSPACE_ROOT/.quay/config.yml"
-    echo "  rolled back .quay/config.yml from backup (upgrade did not complete — config unchanged)" >&2
-  fi
-}
-
-# ⛔ DEAD CODE — NEVER CALLED. The live config generator is `write_config` (search it below); this
-# function is a superseded earlier copy whose heredoc still writes the RETIRED project-local
-# `.quay/runtime` provider path and a ONE-KEY env block (`QUAY_NATIVE_TASKS_DIR` alone).
-#
-# It is labelled rather than deleted because it is actively misleading, not merely unused: the task
-# gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak was FILED against this function's line
-# numbers ("quay-init.sh:989-990 generates only QUAY_NATIVE_TASKS_DIR"), concluding the live script
-# omitted the three carrier pins — when the live path (`write_config`) already writes all four. That
-# misreading is exactly the two-copies drift this repo's single-source-of-truth principle warns about.
-# A reader who greps for `QUAY_NATIVE_TASKS_DIR` hits this copy first and reaches the same wrong
-# conclusion, so the label is the cheap fix that keeps the trap from springing twice.
-#
-# NOTHING WRITES THROUGH THIS FUNCTION. Deleting it (and its sibling dead pair `backup_config` /
-# `rollback_config_on_exit`) is the follow-up cleanup; that is deliberately NOT bundled here, since
-# this task's job is the carrier-dir defect and a green scoped gate should not be carrying an
-# unrelated 150-line deletion.
-write_provider_config() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b)"
-    return
-  fi
-  if [ -f "$cfg" ]; then
-    echo "  note: .quay/config.yml already exists — keep the provider mcp_entry on project-local absolute paths, never a PATH-resolved quay-native (AC7b)"
-    migrate_stale_mcp_entry
-    ensure_loop_config
-  else
-    mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"
-    cat > "$cfg" <<EOF
-# Generated by quay-init --loop (gap-cold-start-...-eight-steps AC7b).
-# The provider mcp_entry uses ABSOLUTE project-local paths — never a PATH-resolved
-# \`quay-native\` symlink into the quay dev tree. The native provider runtime
-# (.quay/runtime/bin/quay-native.js) is the self-contained bundle quay-init lays down
-# alongside the Core bundle (see the AC7b lay-down in quay-init.sh). The landing dir is
-# .quay/runtime/ — quay's own namespace, NOT vendor/ (Go reserved), node_modules,
-# target, build or dist (gap-the-runtime-has-nowhere-safe-to-land AC9) — and quay-init
-# writes the .gitignore entry so the install-generated runtime is not committed (AC10).
-providers:
-  native:
-    enabled: true
-    path: "${WORKSPACE_ROOT}/.quay/runtime"
-    tasks_dir: "${WORKSPACE_ROOT}/tasks"
-    mcp_entry: ["node", "${WORKSPACE_ROOT}/.quay/runtime/bin/quay-native.js", "mcp"]
-    env:
-      QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
-# Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
-# SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root,
-# plus the branch-model key fork_baseline (SPEC-branching-model current ruling: develop is the fork
-# baseline — the default ships WITH quay-init, never hardcoded master, so a brand-new host's first
-# quay-init --loop does not silently fall back to the retired master-only model). Scripts and tick
-# docs read these at runtime instead of having them baked in at install (AC3).
-loop:
-  repo_root: ${REPO_ROOT}
-  # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
-  # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
-  # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
-  # MUST NOT read a flag's value as a positional test-file argument — otherwise every fan-in round
-  # reds with "Could not find '<value>'" and burns a whole worker session.
-  # Full contract + a drop-in case block: plugin/skills/init/SKILL.md, section "loop.test_command
-  # contract".
-  test_command: ${TEST_COMMAND}
-  tmux_session: ${TMUX_SESSION:-null}
-  worktree_root: ${WORKTREE_ROOT}
-  fork_baseline: develop
-EOF
-    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline — SPEC AC2 + SPEC-branching-model)"
-  fi
-}
-
-# write_state_file: record what --loop laid down, for the upgrade path (AC5).
-# gap-verify-delivery-surface-checks-source-layout-not-consumer-laid (追加两半 #3): the record must
-# match the DELIVERY, not a hand-picked 2 tick docs. archguard found laidFiles hardcoded only
-# ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"] and
-# laidCategories only {"loop"} — while the lay-down actually ships scripts/probes/
-# runtime/config/workflows/agents. Fix: enumerate EVERY root-relative path quay-init owns/lays,
-# sha256 each existing file, and derive the category list from the laid roots.
-write_state_file() {
-  if [ "$DRY_RUN" = true ]; then return; fi
-  if [ ! -d "$WORKSPACE_ROOT/.quay" ]; then
-    # A workspace without .quay/ still gets the state record in a sibling location.
-    mkdir -p "$WORKSPACE_ROOT/.quay"
-  fi
-  local laid_rel_file took_rel_file root f rel
-  laid_rel_file="$(mktemp)"
-  : > "$laid_rel_file"
-  took_rel_file="$(mktemp)"
-  : > "$took_rel_file"
-  # The paths whose lay-down TOOK EFFECT this round (copy_one's _record_laid_took). write_state_file
-  # only recomputes laidFiles hashes for THIS set; every other path keeps the previous round's record
-  # (gap-quay-init-write-state-file-corrupts-hash-after-conflict — a CONFLICT-preserved user edit must
-  # NOT be re-hashed into laidFiles, or a zero-change next run mis-reads it as stale-installed).
-  for rel in "${!_LAID_TOOK[@]}"; do
-    printf '%s\n' "$rel" >> "$took_rel_file"
-  done
-  # Every root-relative path quay-init --loop lays/owns. Files listed directly; dirs expand to all
-  # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
-  for root in \
-    "plugin/scripts" "plugin/probes" "orchestration" "docs/analysis" \
-    ".quay/config.yml" ".quay/profiles.yml" ".quay/quay-init-state.json" ".quay/runtime" \
-    ".claude/workflows" ".claude/agents" ".claude/launch.settings.json"; do
-    if [ -f "$WORKSPACE_ROOT/$root" ]; then
-      printf '%s\n' "$root" >> "$laid_rel_file"
-    elif [ -d "$WORKSPACE_ROOT/$root" ]; then
-      while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        printf '%s\n' "${f#"$WORKSPACE_ROOT"/}" >> "$laid_rel_file"
-      done < <(find "$WORKSPACE_ROOT/$root" -type f | sort)
-    fi
-  done
-  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" "$took_rel_file" <<'PYEOF'
-import json, os, sys, time, hashlib
-version, path, workspace_root, rel_file, took_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-state = {}
-if os.path.exists(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            state = json.load(f)
-    except Exception:
-        state = {}
-prev = state.get("pluginVersion")
-state["pluginVersion"] = version
-state["previousPluginVersion"] = prev if prev and prev != version else state.get("previousPluginVersion")
-state["laidAt"] = time.time()
-with open(rel_file, encoding="utf-8") as f:
-    rels = [line.strip() for line in f if line.strip()]
-with open(took_file, encoding="utf-8") as f:
-    took = {line.strip() for line in f if line.strip()}
-# laidCategories: derive from the laid roots (stable tokens, not just {"loop"}).
-cats = set(state.get("laidCategories", []))
-if any(r.startswith("plugin/scripts") for r in rels): cats.add("scripts")
-if any(r.startswith("plugin/probes") for r in rels): cats.add("probes")
-if any(r.startswith("orchestration") or r.startswith("docs/analysis") for r in rels): cats.add("loop")
-if any(r.startswith(".quay/runtime") for r in rels): cats.add("runtime")
-if any(r.startswith(".claude/workflows") for r in rels): cats.add("workflows")
-if any(r.startswith(".claude/agents") for r in rels): cats.add("agents")
-state["laidCategories"] = sorted(cats)
-# laidFiles: sha256 of each install-managed product file's CURRENT content — the upgrade path's
-# record of "what quay-init laid down". A file that on a later run still equals this hash is stale
-# install-managed content from an OLDER plugin version (replaced, AC5); a file that differs from
-# BOTH this hash and the new product is a genuine user edit (CONFLICT, AC6). The config-driven
-# install makes this distinction possible: every laid-down file is byte-identical to the product,
-# so the ONLY reason a managed file can differ on upgrade is either a stale previous install or a
-# user edit — and the hash tells them apart.
-# gap-quay-init-write-state-file-corrupts-hash-after-conflict: only recompute the hash for a path
-# whose lay-down TOOK EFFECT this round (copy_one wrote the product, or found it already identical).
-# Every other path keeps the previous round's record UNCHANGED — a CONFLICT branch preserved a user
-# edit (the installer wrote nothing), and re-hashing that edit into laidFiles would make the next
-# zero-change run mis-read it as a stale install and silently overwrite it without reporting CONFLICT.
-prev_laid = state.get("laidFiles", {})
-laid = {}
-for rel in rels:
-    if rel in took:
-        p = os.path.join(workspace_root, rel)
-        if os.path.isfile(p):
-            with open(p, "rb") as f:
-                laid[rel] = hashlib.sha256(f.read()).hexdigest()
-        # a took path that is no longer a file is dropped (the copy wrote it, so this is unexpected)
-    elif rel in prev_laid:
-        # Not written this round (CONFLICT-preserved user edit, or a skipped product that was
-        # already recorded) → keep the previous record byte-for-byte.
-        laid[rel] = prev_laid[rel]
-    # else: not written this round AND no prior record → leave out (honest "unknown", never hashing
-    # a pre-existing file the installer did not lay down).
-state["laidFiles"] = laid
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(state, f, indent=2)
-    f.write("\n")
-print(f"  state: .quay/quay-init-state.json pluginVersion={version} previous={prev or 'none'} laidFiles={len(laid)} laidCategories={','.join(sorted(cats))}")
-PYEOF
-  rm -f "$laid_rel_file" "$took_rel_file"
-}
-
-# write_session_env: generate/update orchestration/session-liveness.env with the per-project
-# default-target session (gap-quay-init-rewrites-an-executable-instead-of-generating-config AC1/AC2).
-# Principle: 可执行文件一律原样复制，只生成配置 — the per-project session is CONFIG (可以生成的一类),
-# so quay-init writes it here and the script (copied verbatim) reads it. A pre-existing file's other
-# keys (SESSION_TARGETS / SESSION_HEARTBEATS — the manager's per-machine topology) are preserved;
-# only the SESSION_TMUX_SESSION line is added/updated. This file is per-project state, never packaged.
-write_session_env() {
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: orchestration/session-liveness.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
-    return
-  fi
-  local env_file="$WORKSPACE_ROOT/orchestration/session-liveness.env"
-  local tmp
-  tmp="$(mktemp)"
-  if [ -f "$env_file" ]; then
-    sed '/^SESSION_TMUX_SESSION=/d' "$env_file" > "$tmp"
-  else
-    printf '# Generated by quay-init --loop: per-project session config.\n' > "$tmp"
-    printf '# SESSION_TMUX_SESSION sets the default-target session (read by the session topology scripts).\n' >> "$tmp"
-  fi
-  printf 'SESSION_TMUX_SESSION=%s\n' "$TMUX_SESSION" >> "$tmp"
-  cp "$tmp" "$env_file"
-  rm -f "$tmp"
-  echo "  wrote: orchestration/session-liveness.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
-}
-
 # validate_worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs):
 # FAIL CLOSED when the worktree root is on tmpfs. /tmp is tmpfs — every MB is RAM — and the
 # 2026-08-04 machine-wide OOM traced straight to in-flight worktrees living in it. The root dir may
@@ -1682,40 +1152,6 @@ resolve_tick_core_src() {
     fi
   fi
   printf '%s\n' "$shipped"
-}
-
-# ── drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ─────────────────────────
-# --check-drift: the L2 "upgrade correctness" drift report. The delivery surface (the DERIVED loop
-# script set) GROWS as the plugin ships new mechanism scripts; a target project installed at time T
-# is frozen at T and never receives scripts added after T (the meta-cc measurement: 7 of the 8
-# missing derived scripts were built after 08-03 — drift is the surface growing, not a misinstall).
-# This report mechanically compares the CURRENT derived set (derive_loop_scripts — the SAME
-# derivation the --loop lay-down uses) against the target's plugin/scripts/:
-#   一致  — present in target AND byte-identical to the plugin source
-#   漂移  — present but content differs (a local edit or a stale install) — listed, never silently
-#           overwritten: the upgrade path (--loop re-run) backs it up + reports before replacing
-#   缺失  — absent from the target — the upgrade path auto-fills it (copy_one's `! -f` branch)
-# Prints per-item lines for 漂移/缺失 + a parseable summary `漂移 N / 缺失 N / 一致 N`.
-# Read-only: never modifies the target. Exit 0 always (a report, not a gate).
-drift_report() {
-  local drift=0 missing=0 consistent=0 total=0 s src dst
-  while IFS= read -r s; do
-    [ -z "$s" ] && continue
-    src="$PLUGIN_ROOT/scripts/$s"
-    [ -f "$src" ] || continue   # only the CURRENT derived set that actually exists in the plugin
-    total=$((total + 1))
-    dst="$WORKSPACE_ROOT/plugin/scripts/$s"
-    if [ ! -f "$dst" ]; then
-      missing=$((missing + 1))
-      echo "  缺失: $s"
-    elif cmp -s "$src" "$dst"; then
-      consistent=$((consistent + 1))
-    else
-      drift=$((drift + 1))
-      echo "  漂移: $s"
-    fi
-  done < <(derive_loop_scripts)
-  echo "漂移报告: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent}（派生集 ${total}）"
 }
 
 # verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
@@ -2414,7 +1850,12 @@ loop:
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
+  # ⚠️ 本 heredoc 是【新装】写者；当前版本默认值的正本是 packages/quay/src/init.ts 的
+  # LOOP_VERSION_DEFAULTS（CLI `quay init` 的 reconcile 用它 diff）。shell 无法 import TS，
+  # 所以这两个 key 在这里是【镜像】——新增一个版本级默认值时要同时改两处，或把这里改成从 schema 派生
+  # （gap-quay-init-native-reconcile 把这条不一致记进了 DoD 证据小节）。
   fork_baseline: develop
+  merge_target: develop
 EOF
     echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
   fi

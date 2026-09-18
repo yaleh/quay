@@ -26,12 +26,23 @@ export async function handleInit({ sub, rest }: CliCtx) {
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init [--force] [--reconcile] [--dry-run] [--adopt-branch-model] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
   quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
+  --reconcile  Bring an EXISTING .quay/config.yml up to what THIS version of quay
+               requires, instead of refusing it — the mode /quay:init re-runs use.
+               Per-key diff over the current-version schema: keys the version added
+               since your project was initialized are FILLED from the defaults,
+               values this version considers incompatible are rewritten through an
+               explicit migration table, and every other key (and every comment) is
+               left byte-for-byte alone. A config that is already current is not
+               rewritten at all. Total over the three states, so re-running init is
+               always legal: absent => a normal fresh write; unparseable => rebuilt
+               from defaults with the broken file preserved beside it.
+               --force still wins when both are given (an overwrite is not a diff).
   --doc-branch-name <name>
                (with --branch-model-only) Establish the DOC-ONLY work branch: when the main
                checkout is sitting on the landing baseline 'develop', create <name> at that
@@ -122,6 +133,7 @@ Description:
 
   const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
   const force = initFlags.force === true;
+  const reconcile = initFlags.reconcile === true;
   const dryRun = initFlags["dry-run"] === true;
   const adoptBranchModel = initFlags["adopt-branch-model"] === true;
   const branchModelOnly = initFlags["branch-model-only"] === true;
@@ -135,7 +147,7 @@ Description:
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
   try {
-    const result = runInit({ root: targetRoot, force, dryRun, adoptBranchModel, branchModelOnly });
+    const result = runInit({ root: targetRoot, force, reconcile, dryRun, adoptBranchModel, branchModelOnly });
 
     // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
     // reports the model and decides, nothing else — so the only outcomes it can reach are this one
@@ -205,12 +217,48 @@ Description:
       return;
     }
 
+    // ⛔ BEFORE the "already exists" arm, and on a branch of its own: an unparseable config is not a
+    // config-conflict, and answering it with "already exists, use --force" sends the operator looking
+    // for a conflict that does not exist while the real cause (the parse error) is never printed
+    // (硬规则 3b — "could not read the input" must not be shaped like a verdict about the input).
+    if (result.outcome === "corrupt") {
+      console.error(
+        `.quay/config.yml exists at ${result.configPath} but could not be read as a config:\n` +
+        `  ${result.corruptReason}\n` +
+        "\n" +
+        "This is NOT a name conflict — re-running with --force would not have told you that.\n" +
+        "Two legal moves, both non-destructive:\n" +
+        "  --reconcile  rebuild it from this version's defaults (the unparseable file is kept\n" +
+        "               beside the new one as .quay/config.yml.corrupt-<timestamp>)\n" +
+        "  --dry-run    print what a rebuild would write, without touching anything"
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     if (result.outcome === "skipped") {
       console.error(
         `.quay/config.yml already exists at ${result.configPath}. ` +
-        "Use --force to overwrite, or --dry-run to preview."
+        "Use --force to overwrite, --reconcile to bring it up to this version's defaults, " +
+        "or --dry-run to preview."
       );
       process.exitCode = 1;
+      return;
+    }
+
+    // The reconcile diff (SPEC §3.2). Reporting the DIFF — not just "ok" — is what makes the upgrade
+    // auditable: an operator re-running /quay:init after a plugin upgrade can see exactly which keys
+    // this version added and whether anything else moved (nothing else can: the document is edited in
+    // place, so a key that is not listed here was not touched).
+    if (result.outcome === "reconciled" || result.outcome === "unchanged") {
+      const r = result.reconcile;
+      if (result.outcome === "unchanged") {
+        console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
+      } else {
+        console.log(`${result.configPath}: reconciled to this version's defaults.`);
+        for (const k of r?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
+        for (const m of r?.migrated ?? []) console.log(`  migrated loop.${m}`);
+      }
       return;
     }
 
@@ -238,6 +286,9 @@ Description:
     }
 
     console.log(`Created ${result.configPath}`);
+    // A rebuild-over-corrupt reports where the unreadable bytes went; silence here would make the
+    // salvage step invisible (the operator would have to notice the extra file themselves).
+    if (result.corruptReason) console.log(`  ${result.corruptReason}`);
     console.log(`Created ${result.tasksDir}/ (or already existed)`);
     console.log(`Created ${result.launchSettingsPath}`);
     console.log(`Created ${result.profilesPath}`);
