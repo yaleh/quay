@@ -2,7 +2,7 @@
 id: gap-suite-fan-in-execute-paths-s07-long-pole-split
 title: 测试套件剩余地板 fan-in-execute-paths-s07 32.4s（AC-281 落地后实测 scheduler
   44.4s）——按功能边界拆到 ~21s 以下
-status: todo
+status: ready
 labels:
   - gap
   - test-wall-clock
