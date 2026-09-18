@@ -61,5 +61,6 @@ REAL LANDING: the anchor's source self-refresh hands over to a live replacement 
 
 - plugin/scripts/driver-anchor.ts
 - plugin/test/driver-anchor-stop.test.mjs
+- plugin/test/driver-anchor-takeover.test.mjs
 - plugin/test/driver-anchor.test.mjs
 - tasks/gap-driver-anchor-self-refresh-leaves-no-anchor-alive.md
