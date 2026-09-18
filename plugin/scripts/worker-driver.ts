@@ -5090,7 +5090,32 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
  *  finishedAt 与 mfi.suiteFinishedEpoch 同源（同一 sr.finishedAt 派生）⇒ 载体不再 28h 陈旧（D7 AC3）。
  *  laneCount 取 defaultLaneCount()（nproc-derived 单一真相源，⛔ 非字面量——bucket suite 跑的是
  *  test.sh AC5 派生的真实 lane 数，不是 1 条）。
- *  best-effort：写失败 / 状态在飞（shouldSkipMirrorWrite）不致命——mfi 仍是这次 fan-in 的权威记录。 */
+ *  best-effort：写失败 / 状态在飞（shouldSkipMirrorWrite）不致命——mfi 仍是这次 fan-in 的权威记录。
+ *
+ *  ⚠️ 本函数的 fail-open 姿态（`void` 返回 + `if (built.error) return` + 空 `catch` ⇒ 外部【无法从返回值
+ *  区分「写了」与「没写」】）**正是硬规则 3b 的形状**（读不懂 ⇒ 沉默 ⇒ 与合格同形）。该姿态在这里【成立】，
+ *  但成立的理由不在这几行里 —— ⛔ 下一个读到它的人【不要】把它「修」成 fail-closed：那个「修复」会红掉
+ *  真实绿的 suite。以下五点缺一不可，缺任一条本姿态就退化为一个恒绿伪装：
+ *
+ *   （1）**沉默是有意的**：`void` 返回是设计，不是疏漏 —— 观测写不得阻塞主执行（人 2026-08-30 裁定）。
+ *       `writeSuiteCapture` 的 fail-open 是同一条裁定的另一实例（见其上方注释）。
+ *   （2）**谁在兜底**：`packages/quay/src/fan-in/ff-merge.ts` 的 `readGreenMirrorCommit`（capture 缺失时
+ *       `suiteCertGate` 回退读本镜像）。消费者【不是信任本镜像，而是校验它】—— 镜像是回退源，不是证书本身。
+ *   （3）**它的三个条件（逐条）**：`state === "green"` ∧ `taskId` 与本任务相等 ∧ `commit` 匹配
+ *       `/^[0-9a-f]{40}$/i`。三者任一不满足 ⇒ 返回 `""`（缺值）⇒ `suiteCertGate` 拿不到 `suite_head`
+ *       ⇒ 返回 `{ ok: false }`（**fail-closed**）。且即便拿到 commit，还要过祖先校验
+ *       `git merge-base --is-ancestor suiteHead suiteTip`（同在 `suiteCertGate` 内）—— 非祖先同样拒。
+ *       ⇒ 陈旧的 / 别的任务的 / full-run（无 taskId）的绿镜像都【不】能冒充本任务的证书。
+ *       ⛔ 条件表以 `readGreenMirrorCommit` 为准，此处不另造一套条件（单源）。
+ *   （4）**同一纪律的第二实例**：`plugin/scripts/worker-driver.ts` 的 `readPreviousGreenSuiteCommit` ——
+ *       与上条同形（读的是同一个权威载体的同一份 shape），且它已自述其第三态：「取不到 / 非本任务 /
+ *       非 green / commit 非法（非 40-hex）⇒ `null`（缺值 = 未查，⛔ 不是「可复用」）」（硬规则 3b）。
+ *       两个消费者的条件表是同一张 —— 此处【指向它】，不复制。
+ *   （5）**可证伪的反例（硬规则 4 推论四）**：**若** `readGreenMirrorCommit` 只查 `state === "green"` 而
+ *       【不查 `taskId`】，**则**上一个任务（或任一别的任务）留下的绿镜像会伪装成本任务的证书，ff 闸据此
+ *       放行一个本任务【从未跑过】的 suite ⇒ 本函数的沉默就从「有下游垫背」退化为「恒绿伪装」。
+ *       该反例的对照读数在 `plugin/test/fan-in-ff-merge.test.mjs`：同一 fixture 只改 `taskId`
+ *       （别的任务 ⇒ exit 2；本任务 ⇒ ff 生效），两条读数相反 —— 这就是本姿态可检验性的来源。 */
 export function mirrorMechanicalFanInSuiteState(opts: {
   task: string;
   runId: string;
