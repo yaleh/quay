@@ -47,11 +47,11 @@ extra:
 
 ## AC
 
-- [ ] AC1（先红）`bash plugin/scripts/quay-init.sh --loop --root <ws> --project proj --test-command "node --test" --worktree-root <非 tmpfs 的 tmp>` 后，`python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" <ws>/.quay/config.yml` 退出码**非 0** 且 stderr 含 `ScannerError`；贴原始输出。
-- [ ] AC2（后绿）同一命令修复后退出码 0；且 `<ws>/.quay/config.yml` 中 `grep -c "reconciled to this version's defaults"` = **0**（没有 CLI stdout 被替换进来）；贴该计数与 config 中原本那行注释的修复后原文。
-- [ ] AC3（不回归）`node --no-warnings --experimental-strip-types --test plugin/test/conformance-target-fixture.test.mjs plugin/test/quay-init-loop.test.mjs packages/quay/test/install-config-driven-e2e.test.mjs` 退出码 0，贴 `# tests` / `# pass` / `# fail` 三行（未修复时 `# fail 3`）。
-- [ ] AC4（执行半边的负控制）PATH shim：`<shim>/quay` = `#!/bin/bash` + `echo "ran: $*" >> <marker>` + `exit 0`，再跑 `PATH=<shim>:$PATH bash plugin/scripts/quay-init.sh --loop ...`；**修复后 marker 不存在**（未修复时 marker = `ran: init --reconcile`）。两态读数各贴一次。
-- [ ] AC5（同族扫描，硬规则 5b 的产物）扫描 `plugin/scripts/quay-init.sh` 中**所有** heredoc 开启行（`grep -n "<<"`），逐条列出：定界符形态（是否带引号）、内部是否含反引号或 `$(`；把命中数与每条的判定贴出。只修这一行而不给该读数 ⇒ 视为只修了被报出来的那一个。
+- [x] AC1（先红）`bash plugin/scripts/quay-init.sh --loop --root <ws> --project proj --test-command "node --test" --worktree-root <非 tmpfs 的 tmp>` 后，`python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" <ws>/.quay/config.yml` 退出码**非 0** 且 stderr 含 `ScannerError`；贴原始输出。
+- [x] AC2（后绿）同一命令修复后退出码 0；且 `<ws>/.quay/config.yml` 中 `grep -c "reconciled to this version's defaults"` = **0**（没有 CLI stdout 被替换进来）；贴该计数与 config 中原本那行注释的修复后原文。
+- [x] AC3（不回归）`node --no-warnings --experimental-strip-types --test plugin/test/conformance-target-fixture.test.mjs plugin/test/quay-init-loop.test.mjs packages/quay/test/install-config-driven-e2e.test.mjs` 退出码 0，贴 `# tests` / `# pass` / `# fail` 三行（未修复时 `# fail 3`）。
+- [x] AC4（执行半边的负控制）PATH shim：`<shim>/quay` = `#!/bin/bash` + `echo "ran: $*" >> <marker>` + `exit 0`，再跑 `PATH=<shim>:$PATH bash plugin/scripts/quay-init.sh --loop ...`；**修复后 marker 不存在**（未修复时 marker = `ran: init --reconcile`）。两态读数各贴一次。
+- [x] AC5（同族扫描，硬规则 5b 的产物）扫描 `plugin/scripts/quay-init.sh` 中**所有** heredoc 开启行（`grep -n "<<"`），逐条列出：定界符形态（是否带引号）、内部是否含反引号或 `$(`；把命中数与每条的判定贴出。只修这一行而不给该读数 ⇒ 视为只修了被报出来的那一个。
 
 ## DoD
 
@@ -69,3 +69,36 @@ extra:
 - packages/quay/test/install-config-driven-e2e.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-config-heredoc-comment-backtick-executes-cli.md
+
+## Evidence（worker 实测，2026-09-18）
+
+**改动**：`plugin/scripts/quay-init.sh` 那一行注释改为「# LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）。shell 无法 import TS，」，并加 4 行注释说明该 heredoc 未加引号 ⇒ 正文注释不得含反引号/命令替换；`plugin/test/quay-init-loop.test.mjs` 新增 AC5 用例把该不变式机械化。heredoc **必须**保持未加引号（它要展开 `${PLUGIN_ROOT}` 等），所以「转义」不是选项。
+
+**AC1（先红，用 develop 的 pre-fix 源）**：`python3 yaml.safe_load` 退出码 **1**：
+```
+yaml.scanner.ScannerError: while scanning a simple key
+  in "/home/yale/work/ac184-repro-ws2/.quay/config.yml", line 29, column 3
+could not find expected ':'
+  in "/home/yale/work/ac184-repro-ws2/.quay/config.yml", line 30, column 3
+```
+产物 `:28/:29` 与 Finding 记述逐字一致（`reconciled to this version's defaults.` / `filled loop.fork_baseline (was absent)`）。
+**触发条件是 cwd = 目标 workspace**：从别处跑时 `quay init --reconcile` 走的是那个目录的 config，输出退化成单行、YAML 恰好仍合法 ⇒ 这正是「静默、依宿主」的形态。
+
+**AC2（后绿）**：`quay-init.sh --loop` 退出码 0；`python3 -c "import yaml..."` 打印 `YAML OK` 退出码 **0**；`grep -c "reconciled to this version's defaults"` = **0**。修复后原文：
+```
+  # LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）。shell 无法 import TS，
+```
+
+**AC3（不回归）**：post-fix `# tests 18 / # pass 18 / # fail 0`，退出码 0（18 = 17 原有 + 新增 AC5 用例）。**pre-fix 对照**（同一 3 个文件、develop 的源、独立 worktree）`# tests 17 / # pass 14 / # fail 3`，三条失败消息为 `AssertionError: second install failed:` / `AssertionError: scoped gate runs (delegated to test_command)` / `AssertionError: confirmed run must exit 0:`，三者 stderr 均含 `yaml.scanner.ScannerError: while scanning a simple key` ⇒ 与 Finding 的归因一致。
+
+**AC4（负控制，两态）**：
+- pre-fix：marker = `ran: init --reconcile`（注释里的命令被真的执行）
+- post-fix：marker = **(absent)**（无任何命令被执行）
+两态下 `yaml.safe_load` 均退出 0 —— 因为 shim 不产生 stdout；**这正是 AC4 与 AC1/AC2 的分工**：AC4 测「有没有执行」，AC1/AC2 测「产物合不合法」，两者缺一不可。
+
+**AC5（同族扫描）**：`grep -n "<<"` 命中 **11** 条 heredoc；逐条判定 —— **10 条定界符带引号**（`:224 :396 :460 :613 :1056 :1563 :2055 :2083 :2091 :2211`，均 `<<'PYEOF'` / `<<'EOF'`，替换惰性，其中 `:396/:460/:613/:2083/:2091` 内部确有反引号但**不执行**）；**1 条不带引号** = `:1826`（`cat > "$cfg" <<EOF`，必须不带引号）。未加引号者中，pre-fix 含反引号的行 = **1**（`:1854`，即被报出来的那一条），post-fix = **0**。⇒ 同族**没有**第二个实例，且修复覆盖的是「所有未加引号的 heredoc」而非这一行。
+该扫描已由新增用例 `plugin/test/quay-init-loop.test.mjs`「AC5 — no unquoted heredoc body in quay-init.sh carries a backtick or command substitution」机械化（含「扫描必须真的找到 heredoc / 必须至少有一条未加引号」的守卫，避免解析失败被读成通过，硬规则 3b）。
+
+**scoped 门**：`bash scripts/test.sh --for-task <id> --allow-thin` 退出码 **0**；`ℹ tests 32 / ℹ pass 32 / ℹ fail 0`；`PASS: quay-init-closure-ratchet: laydown source fingerprint fresh (d38dc71b6e70d01b…, 4 sources) — baseline in sync`。develop merged 且 `git rev-list --count HEAD..develop` = **0** 时复跑一次后据此写 scoped-gate 缓存（developSha `1a431b0181f4f78154d359b610c70919fd0d264b`）。
+
+**closure-ratchet**：改 `quay-init.sh` 必然使 baseline 指纹陈旧。先 `--gate` 确认**未膨胀**（`3 files / 1022 bytes ≤ baseline 3 files / 1022 bytes`，shrink-only），再 `--reanchor`；baseline 的 diff 只有 `fingerprint` 与 `quay-init.sh` 的 `sha` 两处（`files`/`bytes` 一字未动）⇒ 不是用重锚洗白增长。（该 baseline 因此进入 Touches。）
