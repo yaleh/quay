@@ -281,7 +281,6 @@ export const FAN_IN_ORCHESTRATION_FILES = [
   "plugin/scripts/pre-verified-round-record.ts", // the shared verification-round writer (both fan-in branches)
   "plugin/scripts/full-suite-runner.ts",
   "plugin/scripts/mirror-full-suite-state.ts", // the full-suite-state mirror MODULE LIBRARY, no CLI entry — consumed in-process by worker-driver.ts's mechanical fan-in (gap-full-suite-state-stale-no-writer AC1; CLI face retired by gap-mirror-full-suite-state-retire-dead-cli-face)
-  "plugin/scripts/mirror-measure-history.ts", // the measure-history mirror writer (gap-measure-history-detached-suite-mirror-write AC1)
 ];
 
 /** PURE: given a branch's repo-relative delta paths (from `git diff --name-only <merge-base> HEAD`),
