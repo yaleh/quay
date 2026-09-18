@@ -18,7 +18,41 @@ depends_on:
   - gap-ac282-runner-prereqs-already-present
 goal_ac: AC-281
 ---
+---
+id: gap-ac281-develop-ci-test-job-wallclock-under-30s
+title: 真实 develop CI test job 一次 success 且套件 schedulerMs≤30s（AC-281）——人
+  2026-09-17 裁定改口径（原 job 墙钟 ≤30s 经实测不可达）；现 scheduler 54.1s / main floor
+  43.0s，须压低最长单文件
+status: ready
+needs_human_cause: unclassified
+labels:
+  - gap
+  - test-wall-clock
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - gap-suite-split-15-over-30s-test-files
+  - gap-checker-mutation-parallel-case-loop
+  - gap-ac282-runner-prereqs-already-present
+goal_ac: AC-281
+---
 **type:** execution
+
+> **2026-09-18 第 4 轮（manager 起草，接第 3 轮 worker 的 §13/§14）**：第 3 轮 worker 已拆掉 3 个长杆
+> （`driver-anchor`→+`driver-anchor-bundle`、`fan-in-execute-paths-s07`→+`s11`、`supervisor-deliver`→+`crosshost`，
+> 见 §13，⛔ **不要重做**），并算出了达标条件：**拆掉 CI 上全部 >20s 的文件**（LPT 模拟：拆 >20s ⇒
+> scheduler ≈26.6s ✓；只拆 >30s ⇒ ~38s ✗；拆 >25s ⇒ ~32.5s ✗）。
+> 它同时诊断出**结构性阻塞**（§14）：AC1/AC3/AC4/AC6/AC7 读的是 **post-landing 的 develop run**，而 fan-in 的
+> ac-precheck 在 suite/ff 之前就因未勾满拒翻 ⇒ 互为前提，任何 worker 都落不了地。
+> **本轮已用仓库既有的机械注解机制解除**：这 5 条未勾项各自带 `——属外层验证（待外部）`（末尾锚定的
+> `（待外部）` + 位置不限的 `外层验证`），干跑确认判据判 `pass-external`（exit 0）放行 flip，而 AC 仍
+> **保持未勾**（`pass-external ≠ pass`，硬规则 3b）。
+> ⇒ **本轮要做的三件事**：① 按 §13 的方法**重新测一次 CI 剖面**（⛔ 不照抄 §13 的 9 个名字——`4b0a99a06`
+> 落地后 `cap-from-gate-*` 三件预计从 24.3s 大幅下降），把**仍 >20s** 的文件逐个拆到 ~20s 以下；
+> ② **不要**把那 5 条改勾——它们只能由**落地后的 develop run** 兑现（注解已放行 flip；勾了反而违反 AC 原文）；
+> ③ 落地并触发 develop CI 后，把那条 run 的 `schedulerMs` 与 `testFiles` 写进下方 Evidence 供外层复核。
 
 > **2026-09-17 重定范围（人裁定后由 manager 改写，本轮）**：判据已被改写为只量**套件自身的 scheduler**，
 > 本任务的对象随之改变。上一轮（worker，未完成）的完整取证与判死结论保留在
@@ -170,7 +204,7 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 
 ## AC
 
-- [ ] **AC1（goal 判据）**：`gate AC-281` 逐字重跑 `verdict: pass`，贴出它打印的 run url / ts /
+- [ ] **AC1（goal 判据）**：`gate AC-281` 逐字重跑 `verdict: pass`，贴出它打印的 run url / ts / ——属外层验证（待外部）
       **`schedulerMs`**，以及同一 run 的 `testFiles`。
       ⛔ 不许靠「改宽判据」达成——2026-09-17 人裁定的那次改写是本任务开工的前提（已在 Proposal 记录），
       **此后** `goals/AC-281-*.md` 的 `criterion` / `expect` / `origin` / `activatedAt` 四处均不得再改动
@@ -185,18 +219,18 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
       ⑥ 最新 = post-SINCE 绿但该 test job **无 `schedulerMs` 键** ⇒ **1** 且 `CAUSE=scheduler-ms-not-recorded`
       （「未评估」必须与「合格」可区分——硬规则 3b）。
       ⛔ 不得改生产载体来做这组对照。
-- [ ] **AC3（不是靠少跑换来的）**：收口 run 的 `testFiles` ≥ 立案读数 **650**（同一命令从载体读）；
+- [ ] **AC3（不是靠少跑换来的）**：收口 run 的 `testFiles` ≥ 立案读数 **650**（同一命令从载体读）； ——属外层验证（待外部）
       若低于，给出被合并/移走文件的完整映射与理由，并说明为什么套件覆盖没有下降。
-- [ ] **AC4（残余墙钟有归因，不是猜）**：给出收口 run 的**相位级**耗时分解（来源：run 日志自身的
+- [ ] **AC4（残余墙钟有归因，不是猜）**：给出收口 run 的**相位级**耗时分解（来源：run 日志自身的 ——属外层验证（待外部）
       `__GROUP__` / `__PERFILE__` / `__OVERHEAD__` 行，以及 GitHub 侧 step 时间），逐项命名并给出数值；
       对 Plan 第 3、4 步每一项给出「改前 → 改后」对照读数（⛔ 无对照的项如实记为**未处置**，不得写成已处置）。
 - [x] **AC5（生产触发路径真跑过）**：贴出触发命令原文与 run id / url；证明该 run 的 `head_branch` 是
       `develop`（载体记录的 `branch` 字段即由此来）。⛔ 任务分支上的绿跑不作数。
-- [ ] **AC6（载体由唯一写面产生）**：贴出 `ci-runs-collect.ts` 的调用与它打印的
+- [ ] **AC6（载体由唯一写面产生）**：贴出 `ci-runs-collect.ts` 的调用与它打印的 ——属外层验证（待外部）
       `appended= / skipped= / schedulerMsDerived=` 读数，证明收口那条记录是**采集器**写的；
       并证明没有手写：`git diff -- .quay/ci-runs.jsonl` 为空（该载体 gitignored，反证靠采集器调用读数 +
       载体行的字段完整性）。
-- [ ] **AC7（回归：压墙钟没有把仪器变成恒绿）**：① 收口时 `gate AC-279` 与 `gate AC-280` 仍 `pass`
+- [ ] **AC7（回归：压墙钟没有把仪器变成恒绿）**：① 收口时 `gate AC-279` 与 `gate AC-280` 仍 `pass` ——属外层验证（待外部）
       （它们是真的验收，⛔ 不是被本任务的改动绕开）；② 收口 run 的 `test` job
       `conclusion == "success"`（快而红不算——判据自己也这么要求）；③ 被拆/被改的测试文件在收口 run 里
       **实际执行过**——从该 run 的 `__PERFILE__` 行里 grep 到各分片的执行行（⛔ 不是只看文件存在）。
