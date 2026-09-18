@@ -2,7 +2,7 @@
 id: gap-inner-wakeup-heartbeat-refusal-shard-ci-red
 title: AC-281 落地引入的 CI 红：新分片 inner-wakeup-heartbeat-refusal.test.mjs 在 develop
   上失败（母文件同 run 绿、helper 逐字相同）——先做对照再归因
-status: todo
+status: ready
 labels:
   - gap
   - test-isolation
