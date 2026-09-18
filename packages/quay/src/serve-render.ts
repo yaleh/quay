@@ -9,11 +9,19 @@ import os from "node:os";
 import path from "node:path";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
-import { DEFAULT_LANG, type Lang } from "./serve-lang.ts";
+import { DEFAULT_LANG, LANGS, type Lang } from "./serve-lang.ts";
 // AC-289: the label dictionary is imported for the render functions here and re-exported for pages,
 // for the SAME reason `htmlLangTag` is (above) — a page's consumption stays one line against the
 // module it already imports from, and no page ever re-reads the dictionary.
-import { navLabelsFor, navLabel, pageNameFor, type NavKey } from "./serve-i18n.ts";
+import {
+  navLabelsFor,
+  navLabel,
+  pageNameFor,
+  LANG_NAMES,
+  LANG_SWITCHER_GROUP,
+  LANG_SWITCH_ARIA,
+  type NavKey,
+} from "./serve-i18n.ts";
 
 // gap-ac288-webui-lang-switch-mechanism: pages consume the language mechanism from ONE import —
 // `htmlLangTag` (the `<html lang="…">` opening tag) is re-exported here so a page's consumption is
@@ -318,6 +326,18 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   background: var(--color-accent); color: var(--color-bg);
   padding: 2px 5px;
 }
+/* gap-webui-lang-switcher-control: the language switcher (renderLangSwitcher) — the clickable
+   entry point into the AC-288 mechanism. Two entries, the ACTIVE one a non-link that carries
+   aria-current="true" (styled red+bold off the SAME accent-700 token the nav's current page
+   uses), the other a link carrying the language query. Token-derived only — ⛔ no hardcoded hex,
+   same rule as every other rule in this sheet. No font-size fork between the two states: the
+   active entry must not be visually larger than the one you are meant to click.
+   ⛔ This comment deliberately spells no language-query literal: the sheet is inlined into every
+   response body, so a literal here would be counted by the very occurrence-counting reading this
+   control exists to move (it would make the un-wired baseline read 1 instead of 0). */
+.lang-switcher { display: inline-flex; align-items: center; gap: var(--space-2); }
+.lang-switcher-item { font-size: 14px; font-weight: 600; color: var(--color-text); text-decoration: none; }
+.lang-switcher-item[aria-current="true"] { color: var(--color-accent-700); font-weight: 800; }
 /* AC100/AC102: verdict colouring is token-defined on BOTH the list pages (this sheet)
    and the detail pages (detailStyles()) — pass uses the positive (green) hue, fail stays
    in the accent (red-orange) family. */
@@ -397,6 +417,13 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   }
   .mobile-header-title { font-weight: 800; font-size: 1.05rem; }
   .mobile-header-page { margin-left: auto; font-size: 0.8rem; color: var(--color-neutral-700); }
+  /* gap-webui-lang-switcher-control: the mobile form of the switcher sits in the sticky header
+     (the desktop one lives in .site-nav, which is display:none at this width — so without this
+     second placement a phone reader would have NO entry point at all, which is the whole defect
+     this control removes). margin-left:auto is already spent by .mobile-header-page above, so
+     the group packs to the right of it; the header's own gap spaces it. Padding (not a bare
+     14px line-box) so the tap target is finger-sized. */
+  .mobile-header .lang-switcher-item { font-size: 16px; padding: 0.4rem 0.45rem; }
   .mobile-menu-burger {
     display: inline-flex; flex-direction: column; justify-content: center; gap: 4px;
     width: 40px; height: 40px; padding: 8px 9px; cursor: pointer;
@@ -844,7 +871,12 @@ const SITE_NAV_GROUPS: Array<{ label: string; items: NavKey[] }> = [
   { label: "知识", items: ["adr", "goal", "doc", "architecture"] },
 ];
 
-const SITE_NAV_ROUTES: Record<string, string> = {
+/** Exported (gap-webui-lang-switcher-control) so the test that enumerates "every route carries the
+ *  language switcher" iterates THIS table rather than a second, hand-kept copy of it — and pins a
+ *  literal 15-route roster that is asserted EQUAL to this table, so the enumeration cannot silently
+ *  shrink to whatever the renderer happens to do (硬规则 4: the pin is the measurement, the table
+ *  only the thing measured). */
+export const SITE_NAV_ROUTES: Record<string, string> = {
   dashboard: "/dashboard", tasks: "/tasks", live: "/live", board: "/board", system: "/system",
   manager: "/manager", "needs-human": "/needs-human", journal: "/journal", git: "/git-history", tests: "/tests",
   sessions: "/sessions", adr: "/adr", goal: "/goal", doc: "/doc", architecture: "/architecture",
@@ -858,6 +890,50 @@ function navItem(key: string, label: string, current: string, prefix: "nav-" | "
     return html`<span class="${prefix}item nav-current" aria-current="page">${escapeHtml(label)}${badge}</span>`;
   }
   return html`<a class="${prefix}item" href="${SITE_NAV_ROUTES[key]}">${escapeHtml(label)}${badge}</a>`;
+}
+
+/**
+ * gap-webui-lang-switcher-control: the language switcher — the ONE clickable entry point into the
+ * AC-288 mechanism.
+ *
+ * WHY THIS EXISTS AT ALL: AC-288 built the whole mechanism (`?lang=` → `resolveLang` →
+ * `Set-Cookie` → `<html lang>`) and AC-289~303 wired it into all 15 pages' copy — but nothing in
+ * any rendered page ever EMITTED a `?lang=` link, so the mechanism had no UI at all: a reader could
+ * only reach it by hand-editing the URL. "The mechanism works" and "a user can operate it" are two
+ * different properties, and only the first was landed. This function is the second: it renders the
+ * link the browser can follow.
+ *
+ * ⛔ It implements NO language logic. It renders `?lang=<the other language>` and nothing else —
+ * the server-side resolve/set-cookie half is AC-288's, already landed, and this function must not
+ * grow a second copy of it (the render layer has no request object to resolve against, and a
+ * "current = whatever this component thinks" arm would be a second source for a decision that
+ * already has one).
+ *
+ * CURRENT LANGUAGE IS NOT A LINK TO ITSELF: the active entry renders as a non-link
+ * `<span … aria-current="true">`, matching how `navItem` renders the current page — a link that
+ * reloads the page you are already on is a dead affordance, and clicking it would additionally
+ * re-write the `lang` cookie for no reason.
+ *
+ * `href="?lang=xx"` IS RELATIVE ON PURPOSE: a browser resolves it against the current pathname, so
+ * the reader stays on the page they were reading. Known, accepted bound: a page that carries OTHER
+ * query parameters (e.g. `/git-history?view=task`) loses them when the language is switched —
+ * preserving the full query is deliberately out of this task's scope and is recorded as such in
+ * AC6, rather than silently half-implemented here.
+ *
+ * `variant` only picks the placement class (`lang-switcher-nav` in the desktop header bar,
+ * `lang-switcher-mobile` in the mobile header) — the markup, the labels and the two states are
+ * identical, so the two chromes cannot drift into two different switchers.
+ */
+export function renderLangSwitcher(current: Lang = DEFAULT_LANG, variant: "nav" | "mobile" = "nav"): string {
+  const items = LANGS.map((target) => {
+    const name = escapeHtml(LANG_NAMES[target]);
+    const aria = escapeHtml(LANG_SWITCH_ARIA[current][target]);
+    if (target === current) {
+      return html`<span class="lang-switcher-item" aria-current="true" aria-label="${aria}">${name}</span>`;
+    }
+    return html`<a class="lang-switcher-item" href="?lang=${target}" aria-label="${aria}">${name}</a>`;
+  }).join("");
+  return html`<span class="lang-switcher lang-switcher-${variant}" role="group" aria-label="${escapeHtml(LANG_SWITCHER_GROUP[current])}">${items}</span>`;
 }
 
 /** Full 15-view site nav (the design's navGroupDefs) as the header bar. Rendered with the
@@ -883,6 +959,7 @@ export function renderSiteNav(current: string, lang: Lang = DEFAULT_LANG): strin
       ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${
         g.items.map((key) => navItem(key, labels[key], current, "nav-")).join("")
       }</span>`).join("")}
+      ${renderLangSwitcher(lang, "nav")}
     </div>
   </nav>`;
 }
@@ -914,6 +991,7 @@ export function renderMobileChrome(current: string, pageLabel: string, lang: Lan
       </label>
       <span class="mobile-header-title">Quay</span>
       <span class="mobile-header-page">${escapeHtml(pageLabel)}</span>
+      ${renderLangSwitcher(lang, "mobile")}
     </header>
     <nav class="mobile-menu" aria-label="Site navigation">
       ${renderMobileMenu(current, lang)}

@@ -411,3 +411,41 @@ export function pageNameFor(pageName: string, lang: Lang = DEFAULT_LANG): string
   const entry = Object.prototype.hasOwnProperty.call(PAGE_LABELS, pageName) ? PAGE_LABELS[pageName] : undefined;
   return entry ? entry.zh : pageName;
 }
+
+// ── ROW 4: the language SWITCHER's own words (gap-webui-lang-switcher-control) ───────────────
+// ROW 1~3 label the CHROME (which view is this? what is this page called?). This row labels the
+// CONTROL that lets a reader change ROW 1~3's input — the entry point into the AC-288 mechanism.
+// It is a separate table for the same reason each row is: the switcher's vocabulary is a peer of
+// the nav's, not a reuse of it (a later re-wording of 「仪表盘」 must not silently move the button
+// that takes you there).
+
+/** The name of a language written IN that language — an ENDONYM. ⛔ Deliberately NOT an
+ *  `{ en, zh }` peer-column pair like every other table here: an endonym is the one label whose
+ *  value is the SAME in both columns by construction, and the reason is the reader's, not a
+ *  short-circuit. A reader who cannot read the current UI language must still be able to FIND
+ *  their own — under an English page the Chinese entry has to read 「中文」, not "Chinese", or the
+ *  affordance is only usable by someone who does not need it. Modelling it as `Record<Lang, …>`
+ *  (keyed by TARGET) rather than `{ en, zh }` (keyed by reader) is the type carrying that: there
+ *  is no reader dimension for this word, so there is nothing for a reader column to disagree on.
+ *  ⛔ Neither value may be re-worded into an English exonym for the same reason. */
+export const LANG_NAMES: Record<Lang, string> = { en: "EN", zh: "中文" };
+
+/** The switcher's own accessible GROUP name, in the READER's language — what this control is.
+ *  Keyed by the language the page is currently rendered in (the reader's), which is why this one
+ *  IS a per-language map: unlike `LANG_NAMES` it names the CONTROL, and "what is this control"
+ *  is a question asked by the reader in their own language. */
+export const LANG_SWITCHER_GROUP: Record<Lang, string> = { en: "Language", zh: "语言" };
+
+/** The per-ITEM accessible names, keyed `[reader][target]` — two dimensions, because an item's
+ *  name is a sentence ABOUT one language WRITTEN IN another, and collapsing either axis produces
+ *  a wrong sentence: keyed by target alone, 「切换到英文」 would be read aloud to a reader who is
+ *  on the English page (where the right sentence is "Switch to Chinese" about the zh item), and
+ *  keyed by reader alone, both items would carry the same name.
+ *  The type is `Record<Lang, Record<Lang, string>>` (both axes COMPLETE) for ROW 2's reason: a
+ *  reader/target pair with no sentence is a type error, not a silent English fallback — an item
+ *  whose name fell back would be indistinguishable from one that was never wired, which is the
+ *  exact class of defect the switcher exists to remove (硬规则 3b). */
+export const LANG_SWITCH_ARIA: Record<Lang, Record<Lang, string>> = {
+  en: { en: "Current language: English", zh: "Switch to Chinese" },
+  zh: { en: "切换到英文", zh: "当前语言：中文" },
+};
