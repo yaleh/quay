@@ -21,7 +21,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory, GIT_HISTORY_LIMIT } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_LIMIT, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 import {
   layoutGitGraph,
   assignGitColumns,
@@ -33,9 +33,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const LIMIT = 500;
 
-/** The git oracle: run `git log --graph --all -n <n>` and parse each commit's column from the `*`. */
+/** The git oracle: run `git log --graph <the production ref scope> -n <n>` and parse each commit's
+ *  column from the `*`. The scope comes from `GIT_HISTORY_REF_SCOPE` so the oracle draws the SAME
+ *  window production fetched — git still computes the columns (the oracle is not an echo). */
 function gitGraphReferenceColumns(n = LIMIT) {
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", "--all", "-n", String(n), "--pretty=format:%x01%H"], {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...GIT_HISTORY_REF_SCOPE, "-n", String(n), "--pretty=format:%x01%H"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -51,9 +53,10 @@ function gitGraphReferenceColumns(n = LIMIT) {
   return map;
 }
 
-/** Commits in git emission order (the SAME order the data layer fetches — `--all --topo-order`). */
+/** Commits in git emission order (the SAME order the data layer fetches — `GIT_HISTORY_REF_SCOPE
+ *  --topo-order`). */
 function emissionOrderCommits(n = LIMIT) {
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(n), "--pretty=format:%H%x1f%P"], {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(n), "--pretty=format:%H%x1f%P"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -131,10 +134,12 @@ test("AC3: the rendered label set equals the %D-nonempty commit set; develop app
   const layout = layoutGitGraph(history);
   const myDecorated = new Set(layout.rows.filter((r) => r.decorations.length > 0).map((r) => r.hash));
 
-  // --topo-order matches readGitHistory's own query (`--all --topo-order -n`); the default date-order
-  // window can select a DIFFERENT 500-commit set when an out-of-order merge tip sits near the boundary,
-  // so the two must be aligned or the label-set comparison compares two different windows.
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+  // --topo-order matches readGitHistory's own query (`GIT_HISTORY_REF_SCOPE --topo-order -n`); the
+  // default date-order window can select a DIFFERENT 500-commit set when an out-of-order merge tip
+  // sits near the boundary, so the two must be aligned or the label-set comparison compares two
+  // different windows. The ref SCOPE must be aligned for the same reason — that is the whole point of
+  // GIT_HISTORY_REF_SCOPE existing as one shared constant.
+  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -191,11 +196,11 @@ test("AC5: no 窗口外分叉 text, and layout rows carry no fork/merge/open fie
 
 // ── AC6: the smallest y (rows[0]) is the newest commit ──────────────────────────────────────────────
 
-test("AC6: the top row (smallest y) is the newest commit across --all", () => {
+test("AC6: the top row (smallest y) is the newest commit in the production ref scope", () => {
   const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
   const layout = layoutGitGraph(history);
   assert.ok(layout.rows.length > 0, "production rows exist");
-  const newest = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "-1", "--pretty=%H"], { encoding: "utf8" }).trim();
+  const newest = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "-1", "--pretty=%H"], { encoding: "utf8" }).trim();
   assert.equal(layout.rows[0].hash, newest, "rows[0] (smallest y) is the newest --all commit");
 });
 

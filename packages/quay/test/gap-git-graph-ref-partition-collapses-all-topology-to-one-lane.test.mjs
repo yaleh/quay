@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { layoutGitGraph, assignGitColumns } from "../src/serve-git.ts";
-import { readGitHistory } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -53,11 +53,11 @@ test("AC2: collapsing every commit to one column mismatches git (the judge can b
   assert.ok(diff > 0, `collapsing to one column differs from the real allocation on ${diff} commits`);
 });
 
-test("AC3: production column numbers match git log --graph --all (topology preserved, not folded)", () => {
+test("AC3: production column numbers match git log --graph over the production ref scope (topology preserved, not folded)", () => {
   const history = readGitHistory(REPO_ROOT, { limit: 500 });
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
   const layout = layoutGitGraph(history);
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", "--all", "-n", "500", "--pretty=format:%x01%H"], {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...GIT_HISTORY_REF_SCOPE, "-n", "500", "--pretty=format:%x01%H"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
