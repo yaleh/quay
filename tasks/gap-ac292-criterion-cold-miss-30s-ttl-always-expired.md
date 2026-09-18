@@ -144,7 +144,15 @@ goal_ac: AC-292
 - packages/quay/src/serve-board.ts
 - packages/quay/src/serve.ts
 - packages/quay/test/gap-ac292-board-request-path-cold-build.test.mjs
+- packages/quay/test/serve-board.test.mjs
 
 （说明：`goals/AC-292-*.md` 属人与驱动维护面，⛔ 不在本 Touches 内 —— 本任务明令禁止改判据。
 运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明 —— `anti-drift-touches-check` 只比对已跟踪文件。
-若落地时后台 tick 的启动点落在其它文件（例如 `serve-dashboard.ts` 的同位），以实际改动为准并在提交说明中补齐。）
+若落地时后台 tick 的启动点落在其它文件（例如 `serve-dashboard.ts` 的同位），以实际改动为准并在提交说明中补齐。
+
+**`serve-board.test.mjs` 的加入理由（落地后按实际改动补齐）**：`/board` 改读后台快照后，该文件里两条测试被影响，
+成因同一个 —— 它们测的是**请求内构建**那条路径：① `AC3 negative control` 在两次请求之间改 fixture 并要求第二次反映，
+快照会服务旧值（实测失败）；② `AC2 negative control` 要求第一次请求付子进程、第二次不付，快照开启时两次都不付
+（且不加开关时它与 tick 首建**竞态**，本次侥幸通过）。两处都显式用 `QUAY_BOARD_SNAPSHOT_DISABLED_ENV` 关掉 tick 并在
+`finally` 还原。先例：`gap-ac179` 同样把三份既有 dashboard 测试纳入 Touches 一并调整。其余 11 条未改动 ——
+它们的 fixture 变更都发生在 `startServer` **之前**，快照在变更之后构建，语义不受影响（已逐条核过并实跑 13/13 绿）。）
