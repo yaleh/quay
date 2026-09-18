@@ -2,7 +2,7 @@
 id: gap-webui-sessions-body-copy-en-zh
 title: /sessions 正文文案在 lang=en 下仍是硬编码中文（数据源说明、会话生命周期/driver 操作说明与表单）——
   正文本地化系列（大页），照 /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
