@@ -207,6 +207,37 @@ test("AC3 batch: writeBatch(3 records) produces exactly ONE commit", () => {
   assert.match(run("log", "-1", "--format=%s").trim(), / by cli:/);
 });
 
+test("gap-goal-batch-dry-run-noop: writeBatch --dry-run persists NOTHING; the same call without it DOES", () => {
+  const { dir, run } = gitRepo("batch-dryrun");
+  const s = createGoalStore(path.join(dir, "goals"));
+  // Precondition: an EXISTING record to UPDATE (a criterion edit — exactly the shape the defect was
+  // hit with: `goal batch --dry-run --json '[{"id":"AC-049","criterion":"…"}]'` wrote + committed).
+  s.write("AC-941", { goal: "GOAL-001", criterion: "true", expect: "e", origin: "o" });
+  const goalsDir = path.join(dir, "goals");
+  const file = path.join(goalsDir, fs.readdirSync(goalsDir).find((f) => f.startsWith("AC-941")));
+
+  // ── NEGATIVE (the defect): dry-run must leave HEAD and the file byte-identical ──
+  const headBefore = run("log", "-1", "--format=%H").trim();
+  const contentBefore = fs.readFileSync(file, "utf8");
+  const out = s.writeBatch([{ id: "AC-941", criterion: "false # dry-run must not land this" }], { dryRun: true });
+  assert.equal(run("log", "-1", "--format=%H").trim(), headBefore, "dry-run ⇒ no new commit");
+  assert.equal(fs.readFileSync(file, "utf8"), contentBefore, "dry-run ⇒ file byte-identical");
+  assert.equal(s.get("AC-941").criterion, "true", "the STORED record still carries the old criterion");
+  // …and it is still a MEASUREMENT of the would-be write, not a silent no-op: the returned view
+  // model carries the NEW value (dry-run's whole point is "validates without persisting").
+  assert.match(String(out[0].criterion), /dry-run must not land this/, "dry-run returns the would-be view model");
+
+  // ── POSITIVE (makes the negative falsifiable, hard rule 4 corollary): the SAME call WITHOUT
+  //    dry-run must commit AND change the file — otherwise "unchanged" above could just mean the
+  //    whole write path was switched off rather than dry-run doing its job ──
+  s.writeBatch([{ id: "AC-941", criterion: "false # landed for real" }]);
+  assert.notEqual(run("log", "-1", "--format=%H").trim(), headBefore, "non-dry-run ⇒ a new commit");
+  const contentAfter = fs.readFileSync(file, "utf8");
+  assert.notEqual(contentAfter, contentBefore, "non-dry-run ⇒ the file actually changed");
+  assert.match(contentAfter, /landed for real/, "the new criterion is what landed");
+  assert.match(String(s.get("AC-941").criterion), /landed for real/);
+});
+
 test("commitStoreBatch primitive: stages multiple paths in one commit with a writer", () => {
   const { dir, run } = gitRepo("batch-prim");
   fs.writeFileSync(path.join(dir, "goals", "AC-1.md"), "v1\n", "utf8");
