@@ -192,6 +192,7 @@
 {"file": "plugin/test/fan-in-execute-paths-s07.test.mjs", "judgment": "S", "mechanism": "P+S+M", "signal": ["__GROUP__", "--for-task", "lane", "concurrency"]}
 {"file": "plugin/test/fan-in-execute-paths-s09.test.mjs", "judgment": "S", "mechanism": "P+S+M", "signal": ["--for-task", "runner-grouping", "concurrency"]}
 {"file": "plugin/test/fan-in-execute-paths-s11.test.mjs", "judgment": "S", "mechanism": "S", "signal": ["__GROUP__", "lane", "concurrency"]}
+{"file": "plugin/test/fan-in-execute-paths-s12.test.mjs", "judgment": "S", "mechanism": "S", "signal": ["scripts/test.sh", "concurrency"]}
 {"file": "plugin/test/full-suite-runner-s03.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
 {"file": "plugin/test/full-suite-runner-s08.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
 {"file": "plugin/test/full-suite-runner-s09.test.mjs", "judgment": "S", "mechanism": "S+M", "signal": ["lane", "concurrency"]}
