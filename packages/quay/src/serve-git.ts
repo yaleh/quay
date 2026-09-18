@@ -24,6 +24,7 @@ import path from "node:path";
 import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
+import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "./serve-i18n.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).
@@ -374,14 +375,20 @@ export function layoutTaskGraph(history: GitHistoryResult): TaskGraphLayout | nu
   return { groups, commitCount: history.commits.length, unattributedCount };
 }
 
-/** Format a coverage span (seconds) as "N 小时" / "N 天". Mirrored verbatim by the client loader. */
-export function formatCoverageSpan(sec: number): string {
+/** Format a coverage span (seconds) as the loaded window's duration ("N 小时" / "N 天" under zh).
+ *
+ *  The UNIT words come from serve-i18n.ts ROW 10 (`coverageHours` / `coverageDays`), which the
+ *  client loader's own mirror of this function is fed from too — so the server and the browser
+ *  cannot drift into two spellings of the same unit. The NUMBER formatting is unchanged and is
+ *  deliberately NOT part of the dictionary: a translated decimal separator is not what this page's
+ *  criterion asks for, and moving it would move the zh rendering this task pins as its baseline. */
+export function formatCoverageSpan(sec: number, lang: Lang = DEFAULT_LANG): string {
   if (sec >= 86400) {
     const d = sec / 86400;
-    return `${d >= 10 ? Math.round(d) : Math.round(d * 10) / 10} 天`;
+    return gitHistoryLabel("coverageDays", lang, { value: d >= 10 ? Math.round(d) : Math.round(d * 10) / 10 });
   }
   const h = sec / 3600;
-  return `${h >= 10 ? Math.round(h) : Math.round(h * 10) / 10} 小时`;
+  return gitHistoryLabel("coverageHours", lang, { value: h >= 10 ? Math.round(h) : Math.round(h * 10) / 10 });
 }
 
 /** The loaded window's time span (newest − oldest commit time). Grows as the scroll loader appends. */
@@ -445,8 +452,23 @@ function gitGraphLibJs(): string {
  * generated JS carries no template literal, `${`, or `</script` so it inlines verbatim — geometry
  * constants are interpolated SERVER-side as plain numbers, and column colours as `var(--color-lane-N)`
  * tokens (the hex stays in GIT_GRAPH_LANE_PALETTE).
+ *
+ * ⚠️ `labels` CARRIES THE FOUR RENDERED WORDS THE BROWSER CANNOT LOOK UP (serve-i18n.ts ROW 10b).
+ * This script is inlined into the page, so the server can concatenate no HTML for it and the browser
+ * has no dictionary; the words must arrive as string constants, resolved SERVER-side for the
+ * REQUEST's language. `null` (the default, and what a pure unit test that only exercises geometry
+ * passes) does NOT fall back to a language on the caller's behalf: the two hints degrade to an
+ * ellipsis and the two units to the bare number. Both are visible in EITHER language, so a caller
+ * that forgot to thread the language gets a page that looks wrong rather than a page that looks
+ * right in the wrong language (硬规则 3b) — the same degradation serve-dashboard.ts's `sparklineSvg`
+ * chose for its threshold word.
  */
-export function gitGraphClientScript(): string {
+export function gitGraphClientScript(labels: GitHistoryClientLabels | null = null): string {
+  // Resolved to plain strings here so the template below stays a literal with no optional chaining.
+  const clickLoadOlder = labels ? labels.clickLoadOlder : "…";
+  const firstCommitReached = labels ? labels.firstCommitReached : "…";
+  const spanHours = labels ? labels.spanHours : "{value}";
+  const spanDays = labels ? labels.spanDays : "{value}";
   return `(function () {
   var mount = document.getElementById("git-graph");
   var dataEl = document.getElementById("git-graph-data");
@@ -459,6 +481,13 @@ export function gitGraphClientScript(): string {
   var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
   var chipH = ${GIT_GRAPH_CHIP_H}, chipPadX = ${GIT_GRAPH_CHIP_PAD_X}, chipRx = ${GIT_GRAPH_CHIP_RX}, chipGap = ${GIT_GRAPH_CHIP_GAP}, decorFontSize = ${GIT_GRAPH_DECOR_FONT_SIZE};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+  // The four rendered words this script emits, resolved server-side for the request's language
+  // (serve-i18n.ts ROW 10b). JSON.stringify (not a raw "\${…}") so a label carrying a quote or a
+  // backslash cannot break out of the string literal it is written into.
+  var LBL_CLICK_LOAD_OLDER = ${JSON.stringify(clickLoadOlder)};
+  var LBL_FIRST_COMMIT_REACHED = ${JSON.stringify(firstCommitReached)};
+  var LBL_SPAN_HOURS = ${JSON.stringify(spanHours)};
+  var LBL_SPAN_DAYS = ${JSON.stringify(spanDays)};
   // Remote names from the server payload ("git remote") — the ONLY authority for "is this a
   // remote-tracking ref". A local branch that merely contains a slash (fix/..., task/...) must NOT be
   // misread as remote (gap-git-graph-decoration-labels-as-colored-chips).
@@ -713,7 +742,7 @@ export function gitGraphClientScript(): string {
     fuseTripped = true;
     if (autoObserver) { autoObserver.disconnect(); autoObserver = null; }
     if (sentinel) {
-      sentinel.textContent = "点击加载更早提交";
+      sentinel.textContent = LBL_CLICK_LOAD_OLDER;
       sentinel.style.cursor = "pointer";
       sentinel.addEventListener("click", loadOlder);
     }
@@ -751,10 +780,15 @@ export function gitGraphClientScript(): string {
     if (min === null || max === null) { return null; }
     return max - min;
   }
+  // The server's formatCoverageSpan mirrored, units included: both read the SAME dictionary row
+  // (the server directly, this script via the injected LBL_SPAN_* constants), so the number the
+  // server renders into the initial HTML and the number this loader writes back after appending a
+  // page cannot disagree in either language.
+  function fillSpan(tpl, v) { return tpl.split("{value}").join(String(v)); }
   function formatSpan(sec) {
-    if (sec >= 86400) { var d = sec / 86400; return (d >= 10 ? Math.round(d) : Math.round(d * 10) / 10) + " 天"; }
+    if (sec >= 86400) { var d = sec / 86400; return fillSpan(LBL_SPAN_DAYS, d >= 10 ? Math.round(d) : Math.round(d * 10) / 10); }
     var h = sec / 3600;
-    return (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + " 小时";
+    return fillSpan(LBL_SPAN_HOURS, h >= 10 ? Math.round(h) : Math.round(h * 10) / 10);
   }
   function updateCoverage() {
     if (!coverageEl) { return; }
@@ -764,7 +798,7 @@ export function gitGraphClientScript(): string {
   }
   function finishOlder() {
     olderDone = true;
-    if (sentinel) { sentinel.textContent = "已加载到仓库最早提交"; }
+    if (sentinel) { sentinel.textContent = LBL_FIRST_COMMIT_REACHED; }
   }
   function loadOlder() {
     if (loadingOlder || olderDone) { return; }
@@ -825,13 +859,16 @@ export function gitGraphClientScript(): string {
  *  scroll container produces real vertical overflow (gap-git-graph-no-bounded-scroll-panel) the bar
  *  sticks at the top and the commit rows scroll cleanly under it — no narrow floating pill occluding
  *  the first visible row. The opaque `--color-surface` background adapts to dark mode via the CSS var. */
-export function gitGraphLegendHtml(): string {
+export function gitGraphLegendHtml(lang: Lang = DEFAULT_LANG): string {
   const glyph = (colorVar: string, ch: string, label: string) =>
     `<span><span style="color:${colorVar}">${ch}</span> ${label}</span>`;
   const parts = [
+    // ⚠️ `commit` / `merge` are LEGEND KEY WORDS for the two glyphs, not Chinese copy: they read the
+    // same in both languages (a git commit is a git commit), so they are literals — the dictionary
+    // holds only the one part of this legend that HAS a translation (ROW 10's `legendParentEdge`).
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
-    glyph("var(--color-neutral-700)", "╰", "父提交连线（圆角正交）"),
+    glyph("var(--color-neutral-700)", "╰", gitHistoryLabel("legendParentEdge", lang)),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.35rem 0.6rem;border-bottom:1px solid var(--color-neutral-200);font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
@@ -856,14 +893,18 @@ export function gitHistoryPageStyle(): string {
  * link); the other view is a link to `?view=<other>`. Default (git) and `?view=git` render this
  * identically, so AC5's byte-identity holds.
  */
-export function gitHistoryViewToggle(view: GitGraphView): string {
+export function gitHistoryViewToggle(view: GitGraphView, lang: Lang = DEFAULT_LANG): string {
+  // ⚠️ The toggle's links keep the DEFAULT view's href (`?view=git` / `?view=task`), i.e. the
+  // language is NOT carried in the href: the switcher is driven by the cookie, and adding `?lang=`
+  // here would create a second language-decision input that disagrees with the one `Vary: Cookie`
+  // was declared for (the same rule handleGitHistory states below).
   const git = view === "git"
-    ? html`<strong>git 拓扑</strong>`
-    : html`<a href="?view=git">git 拓扑</a>`;
+    ? html`<strong>${gitHistoryLabel("viewGit", lang)}</strong>`
+    : html`<a href="?view=git">${gitHistoryLabel("viewGit", lang)}</a>`;
   const task = view === "task"
-    ? html`<strong>任务分组</strong>`
-    : html`<a href="?view=task">任务分组</a>`;
-  return html`<div class="meta" style="margin:0.5rem 0;font-size:0.8rem;color:var(--color-neutral-700)">视图切换：${git} · ${task}（默认 git 拓扑；任务分组是项目特定启发式）</div>`;
+    ? html`<strong>${gitHistoryLabel("viewTask", lang)}</strong>`
+    : html`<a href="?view=task">${gitHistoryLabel("viewTask", lang)}</a>`;
+  return html`<div class="meta" style="margin:0.5rem 0;font-size:0.8rem;color:var(--color-neutral-700)">${gitHistoryLabel("viewTogglePrefix", lang)}${git} · ${task}${gitHistoryLabel("viewToggleSuffix", lang)}</div>`;
 }
 
 /**
@@ -872,22 +913,22 @@ export function gitHistoryViewToggle(view: GitGraphView): string {
  * commits in git emission order), plus the explicit unattributed count. Zero client JS — the native
  * `<details>` element is the "点开一个任务分组" interaction, no custom renderer.
  */
-function renderTaskGroupsHtml(history: GitHistoryResult): string {
+function renderTaskGroupsHtml(history: GitHistoryResult, lang: Lang = DEFAULT_LANG): string {
   const layout = layoutTaskGraph(history);
   if (!layout) return "";
   const groupBlocks = layout.groups.map((g) => {
     const name = html`<a href="/task/${encodeURIComponent(g.id)}">${escapeHtml(g.id)}</a>`;
     const commitsHtml = g.commits.map((c) => html`<li><code>${escapeHtml(c.hash.slice(0, 7))}</code> ${escapeHtml(c.subject)}</li>`).join("\n");
     return html`<details class="task-group" style="margin:0.4rem 0">
-      <summary style="cursor:pointer">${name} · ${g.commits.length} 条提交 · ${escapeHtml(isoTime(g.firstT))} ~ ${escapeHtml(isoTime(g.lastT))}</summary>
+      <summary style="cursor:pointer">${name}${gitHistoryLabel("groupSummaryMeta", lang, { n: g.commits.length })}${escapeHtml(isoTime(g.firstT))} ~ ${escapeHtml(isoTime(g.lastT))}</summary>
       <ul style="list-style:none;padding-left:1rem;margin:0.3rem 0">${commitsHtml}</ul>
     </details>`;
   }).join("\n");
   const unattributed = html`<details class="task-group" style="margin:0.4rem 0">
-    <summary style="cursor:pointer"><span style="color:var(--color-neutral-500)">未归属（无 task id）</span> · ${layout.unattributedCount} 条</summary>
+    <summary style="cursor:pointer"><span style="color:var(--color-neutral-500)">${gitHistoryLabel("unattributedLabel", lang)}</span>${gitHistoryLabel("unattributedCount", lang, { n: layout.unattributedCount })}</summary>
     <ul style="list-style:none;padding-left:1rem;margin:0.3rem 0">${history.commits.filter((c) => taskIdFromSubject(c.subject) === null).map((c) => html`<li><code>${escapeHtml(c.hash.slice(0, 7))}</code> ${escapeHtml(c.subject)}</li>`).join("\n")}</ul>
   </details>`;
-  return html`<h2>任务分组（按 task id 聚合）</h2>
+  return html`<h2>${gitHistoryLabel("taskGroupHeading", lang)}</h2>
     <div class="task-groups">${groupBlocks}${unattributed}</div>`;
 }
 
@@ -901,12 +942,21 @@ function renderTaskGroupsHtml(history: GitHistoryResult): string {
  * the client can tell a remote-tracking ref from a slash-containing LOCAL branch (gap-git-graph-
  * decoration-labels-as-colored-chips AC1); defaults to [] for pure-history callers.
  *
- * `lang` (AC-297) is the request's resolved language (AC-288's mechanism, threaded in by the
- * dispatcher as `cfg.lang`). It reaches FOUR points on this page and nothing else — the
- * `<html lang>` attribute, the shared desktop nav bar, the MOBILE nav, and this page's OWN chrome
- * (`<title>` tokens + the `<h1>` token, both via `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
- * The last two are the whole point: a shared nav bar that switches while THIS page's own `<title>`
- * stays English is precisely what the criterion's `title-unchanged` arm rejects.
+ * `lang` (AC-297, extended by gap-webui-git-history-body-copy-en-zh) is the request's resolved
+ * language (AC-288's mechanism, threaded in by the dispatcher as `cfg.lang`). AC-297 wired the CHROME
+ * (the `<html lang>` attribute, the shared desktop nav bar, the MOBILE nav, the `<title>` tokens and
+ * the `<h1>`'s page name, the last two via `pageNameFor` against serve-i18n.ts's PAGE_LABELS); the
+ * body-copy task then wired the BODY, which is every other rendered string on the page — the `<h1>`'s
+ * subtitle, the view toggle, both view branches' explainer paragraphs, the task-group headings, the
+ * legend, the status note, the sentinel and the sticky "more below" hint, the coverage-span units,
+ * and (as injected constants) the four words the inlined client script writes. All of those come from
+ * serve-i18n.ts ROW 10 via `gitHistoryLabelsFor` / `gitHistoryLabel`.
+ *
+ * ⚠️ `lang` must reach the CLIENT SCRIPT too. The graph is drawn in the browser, so the sentinel's
+ * "click to load" text and the coverage units are not in any HTML the server concatenates — they are
+ * constants inside the script the server writes (ROW 10b). A render path that threads `lang` into
+ * the template but not into `gitGraphClientScript` renders an English page whose sentinel turns
+ * Chinese the moment the auto-load fuse trips, and no single-response probe would see it.
  *
  * ⚠️ There are TWO view branches below and BOTH are wired. The criterion requests the bare
  * `/git-history`, i.e. `gitHistoryViewOf` resolves `"git"` — the DEFAULT branch — so wiring only
@@ -922,23 +972,25 @@ export function renderGitHistoryPage(
   identity: ServeIdentity | null = null,
   lang: Lang = DEFAULT_LANG,
 ): string {
+  // The whole roster, resolved once (serve-i18n.ts ROW 10 / the `dashboardLabelsFor` idiom).
+  const t = gitHistoryLabelsFor(lang);
   if (view === "task") {
     const statusNote = history.status === "error"
-      ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
+      ? html`<p class="meta"><strong>${t.readFailed}</strong> — ${escapeHtml(history.reason || "")}</p>`
       : history.status === "empty"
-        ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(history.reason || "")}</p>`
+        ? html`<p class="meta"><strong>${t.noData}</strong> — ${escapeHtml(history.reason || "")}</p>`
         : "";
     const taskLayout = history.status === "ok" ? layoutTaskGraph(history) : null;
     const nCommits = history.commits.length;
     const mergeCount = history.commits.filter((c) => c.parents > 1).length;
     const unattributedCount = taskLayout ? taskLayout.unattributedCount : 0;
-    const groupsHtml = renderTaskGroupsHtml(history);
-    const guide = html`<p class="meta"><strong>任务分组 = 按 commit subject 里的 task id 聚合（项目特定启发式，非 git 语义）。</strong> 一组 = 一个任务从立案、晋升、实现到 fan-in 的完整轨迹；无法归属任何 task id 的提交计入「未归属」组（<strong>${unattributedCount}</strong> 条）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并。默认视图仍是 git 拓扑，切换回来不会丢任何信息。</p>`;
+    const groupsHtml = renderTaskGroupsHtml(history, lang);
+    const guide = html`<p class="meta"><strong>${t.guideLead}</strong>${t.guideBody}<strong>${unattributedCount}</strong>${gitHistoryLabel("guideTail", lang, { nCommits, mergeCount })}</p>`;
     return html`<!doctype html>
       ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>${pageTitle("Git history — 任务分组", identity, lang)}</title></head>
       <body>${renderMobileChrome("git", pageNameFor("git history", lang), lang)}${renderSiteNav("git", lang)}<main id="main">
-        <h1>${pageNameFor("Git History", lang)} — 任务分组时间轴</h1>
-        ${gitHistoryViewToggle(view)}
+        <h1>${pageNameFor("Git History", lang)} — ${t.h1SubtitleTask}</h1>
+        ${gitHistoryViewToggle(view, lang)}
         ${guide}
         ${statusNote}
         ${groupsHtml}
@@ -946,15 +998,15 @@ export function renderGitHistoryPage(
   }
 
   const statusNote = history.status === "error"
-    ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
+    ? html`<p class="meta"><strong>${t.readFailed}</strong> — ${escapeHtml(history.reason || "")}</p>`
     : history.status === "empty"
-      ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(history.reason || "")}</p>`
+      ? html`<p class="meta"><strong>${t.noData}</strong> — ${escapeHtml(history.reason || "")}</p>`
       : "";
   const layout = history.status === "ok" ? layoutGitGraph(history) : null;
   const nCommits = history.commits.length;
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
   const coverageSpan = layout ? coverageSpanSeconds(layout) : null;
-  const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan) : "—";
+  const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan, lang) : "—";
 
   // The scroll container owns BOTH horizontal and vertical overflow (Plan step 6 — one container, not
   // nested x/y scroll layers). `#git-graph` loses its own overflow-x:auto; the sentinel moves INSIDE the
@@ -966,14 +1018,18 @@ export function renderGitHistoryPage(
   // (gap-git-graph-scroll-panel-no-visual-affordance — the mechanism was already correct; the visual
   // affordance was missing, so the panel read as "the page ends here").
   const graph = layout
-    ? html`<div id="git-graph-scroll" aria-label="Git 纵向时间轴（可滚动）" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px);border:1px solid var(--color-divider);border-radius:6px;background:var(--color-surface);box-shadow:var(--shadow-sm)"><div id="git-graph" aria-label="Git 纵向时间轴">${gitGraphLegendHtml()}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div><div id="git-graph-more-hint" aria-hidden="true" style="position:sticky;bottom:0;display:flex;justify-content:center;align-items:center;gap:0.35rem;padding:0.5rem 0.6rem 0.6rem;background:linear-gradient(to top,var(--color-surface) 55%,transparent);font-size:0.75rem;color:var(--color-neutral-700);pointer-events:none">↓ 更多提交</div></div>`
+    ? html`<div id="git-graph-scroll" aria-label="${t.graphAriaScrollable}" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px);border:1px solid var(--color-divider);border-radius:6px;background:var(--color-surface);box-shadow:var(--shadow-sm)"><div id="git-graph" aria-label="${t.graphAria}">${gitGraphLegendHtml(lang)}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">${t.loadingOlder}</div><div id="git-graph-more-hint" aria-hidden="true" style="position:sticky;bottom:0;display:flex;justify-content:center;align-items:center;gap:0.35rem;padding:0.5rem 0.6rem 0.6rem;background:linear-gradient(to top,var(--color-surface) 55%,transparent);font-size:0.75rem;color:var(--color-neutral-700);pointer-events:none">${t.moreCommits}</div></div>`
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
   const graphData = layout ? { ...layout, remotes } : null;
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
-  const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
+  // ⚠️ The client script takes the REQUEST's language (ROW 10b): it writes the sentinel's text and
+  // the coverage unit after a page has been appended, both of which are in no server-concatenated
+  // HTML. A render that localized every other string but left this one on the server default would
+  // show an English page until the auto-load fuse trips and then turn that one line Chinese.
+  const clientScript = layout ? html`<script>${gitGraphClientScript(gitHistoryClientLabelsFor(lang))}</script>` : "";
   // Scoped --color-lane-N token sheet: the renderer references column colours as tokens, and this
   // sheet (emitted only when there is a graph) defines them on #git-graph — the hex lives once, here.
   const laneTokenStyle = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
@@ -981,9 +1037,9 @@ export function renderGitHistoryPage(
   return html`<!doctype html>
     ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>${pageTitle("Git history — vertical commit timeline", identity, lang)}</title></head>
     <body>${renderMobileChrome("git", pageNameFor("git history", lang), lang)}${renderSiteNav("git", lang)}<main id="main">
-      <h1>${pageNameFor("Git History", lang)} — 提交纵向时间轴</h1>
-      ${gitHistoryViewToggle(view)}
-      <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。在图表容器内滚动到底部自动加载更早的提交（加载较多后改为点击加载）。</p>
+      <h1>${pageNameFor("Git History", lang)} — ${t.h1SubtitleGit}</h1>
+      ${gitHistoryViewToggle(view, lang)}
+      <p class="meta"><strong>${t.axisLead}</strong>${gitHistoryLabel("axisRowPerCommit", lang, { nCommits, mergeCount })}<span id="git-graph-coverage">${escapeHtml(coverageText)}</span>${t.axisAutoLoad}</p>
       ${statusNote}
       ${graph}
       ${dataScript}
@@ -1054,7 +1110,7 @@ export function gitGraphRawRows(history: GitHistoryResult): GitGraphRawRow[] {
  *  instead: `groups` + the explicit `unattributedCount` (AC4) — the git view's payload carries neither
  *  field. gap-git-graph-pagination-appends-page-relative-col-and-torow: the git-view rows no longer
  *  carry `col` / `edges[].toRow` (page-relative layout quantities). */
-export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "git"): {
+export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "git", lang: Lang = DEFAULT_LANG): {
   status: GitHistoryResult["status"];
   reason: string | null;
   commitCount: number;
@@ -1077,7 +1133,7 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
   if (view === "task") {
     const taskLayout = layoutTaskGraph(history);
     if (!taskLayout) {
-      return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0, groups: [], unattributedCount: 0 };
+      return { status: "empty", reason: history.reason ?? gitHistoryLabel("emptyRepoReason", lang), commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0, groups: [], unattributedCount: 0 };
     }
     return {
       status: "ok",
@@ -1093,7 +1149,7 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
   }
   const layout = layoutGitGraph(history);
   if (!layout) {
-    return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0 };
+    return { status: "empty", reason: history.reason ?? gitHistoryLabel("emptyRepoReason", lang), commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0 };
   }
   return {
     status: "ok",
@@ -1119,7 +1175,7 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
 export async function handleGitHistoryJson(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: { workspaceRoot: string; lang?: Lang },
   url: URL,
 ): Promise<void> {
   const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
@@ -1134,7 +1190,11 @@ export async function handleGitHistoryJson(
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
-  writeJson(res, 200, gitHistoryJson(history, gitHistoryViewOf(url)));
+  // AC5: the continuation carries the REQUEST's language, not the default — the client loader
+  // appends this payload into a page that is in one language, and a fragment rendered in the other
+  // would be invisible to any probe that reads only the first response (the same shape as
+  // /dashboard/cards, which replaces whole cards 30 s after load).
+  writeJson(res, 200, gitHistoryJson(history, gitHistoryViewOf(url), cfg.lang ?? DEFAULT_LANG));
 }
 
 /** Parse the `?view=` selector into a view. `"task"` → task grouping; anything else (including the
