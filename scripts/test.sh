@@ -1160,18 +1160,11 @@ run_selected() {
     # phase fails (report all failures; the serial exit code merges into `code`), so a red main
     # must not leave the serial files' verdict unknown (gap-post-merge-verification-failure-batch
     # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
-    local serial_files=() sf serial_code
-    while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")
-    # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the serial_files/lowconc_files selection below feeds
-    # ONLY the legacy phased path — the unified scheduler re-classifies from the raw file list itself.
-    # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
-    # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
-    # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
-    # NEVER a phase metric) — serial_phase_ms / lowconc_phase_ms / main_phase_ms are unchanged, so the
-    # before/after comparison metric (serial_phase_ms + lowconc_phase_ms, task constraint 3) is byte-
-    # identical between this and the pre-change sequential scheduling.
-    local lowconc_files=() lf lowconc_code
-    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc")
+    # ⛔ The serial/lowconc SELECTION no longer happens here — it moved INTO the legacy branch
+    # (gap-suite-bash-lpt-forwarder-dead-on-default-path). It used to sit ABOVE the branch, so the
+    # DEFAULT (scheduler) path paid two `runner-grouping.ts --select` spawns and then DISCARDED the
+    # result: suite-scheduler.ts re-classifies and re-LPTs the raw ${_RG_FILES[@]} itself. Their only
+    # reader has always been the LEGACY PHASED PATH block below — see it for the declarations.
     # LPT order for the serial/lowconc phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered):
     # these were the last bare `node --test` dispatch points on the full path — node --test re-sorts
     # positional args alphabetically, so a longest-known-first order is discarded (the serial/lowconc
@@ -1237,6 +1230,20 @@ run_selected() {
     # unified scheduler above replaces it with one concurrent waterline loop (serial∥lowconc∥main).
     # Kept solely as the fallback safety net.
     # ════════════════════════════════════════════════════════════════════════════════════════════
+    # serial/lowconc SELECTION — LEGACY-ONLY, relocated here (gap-suite-bash-lpt-forwarder-dead-on-
+    # default-path): above the branch these two `runner-grouping.ts --select` spawns were paid by the
+    # DEFAULT scheduler path too, which then discarded them (the scheduler re-classifies from the raw
+    # file list itself). Declared VERBATIM so the legacy path's input set is byte-identical.
+    # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
+    # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
+    # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
+    # NEVER a phase metric) — serial_phase_ms / lowconc_phase_ms / main_phase_ms are unchanged, so the
+    # before/after comparison metric (serial_phase_ms + lowconc_phase_ms, task constraint 3) is byte-
+    # identical between this and the pre-change sequential scheduling.
+    local serial_files=() sf serial_code
+    while IFS= read -r sf; do serial_files+=("$sf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "serial")
+    local lowconc_files=() lf lowconc_code
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(build_deduped_files | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --select "lowconc")
     # The ONLY consumer of the bash LPT forwarder: these two arrays are dispatched here by
     # suite-lpt-runner.mjs (order-preserving), unlike the scheduler path which re-derives order itself.
     lpt_order_files serial_files
@@ -1678,10 +1685,12 @@ elif [ "${1:-}" = "--buckets" ]; then
     run_selected "$(effective_groups)"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
-  # LPT order (gap-m-bucket-long-tail-lpt-scheduling): reorder the M-bucket file list longest-known-
-  # first — the mechanism lives in lpt_order_files() (single definition point, shared with the
-  # run_selected full-suite default path via gap-suite-lpt-full-bucket-run-selected).
-  lpt_order_files files
+  # ⛔ NO `lpt_order_files files` here (gap-suite-bash-lpt-forwarder-dead-on-default-path): on the
+  # DEFAULT (scheduler) path that reorder was DISCARDED work — suite-scheduler.ts classifies AND
+  # LPT-orders internally (classifyAndOrder → orderByLpt on all three buckets), so a pre-order never
+  # reaches a dispatcher. In the FAIL-OPEN regime BOTH orderings are the identity anyway (same carrier,
+  # same rounds ⇒ same empty duration table), so the two agree there too. The legacy bucket path LPTs
+  # its own `bucket_main_files` (below) instead of inheriting a pre-sorted `files`.
   # AC3 (gap-suite-serial-lowconc-classification-recheck 单飞锁侧): the bucket SUCCESS path
   # (non-hub, non-zero selection) structurally bypasses run_selected() — where
   # full_suite_lock_acquire() lives — so QUAY_MAX_CONCURRENT_SUITES=1 never applied to bucket runs
@@ -1707,32 +1716,11 @@ elif [ "${1:-}" = "--buckets" ]; then
   mark_nested
   set +e
   # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) ──
-  # LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0): the "three-phase order (serial→lowconc→main)" below is
-  # the RETIRED static phase-splitting model — the unified scheduler bucket path above replaces it
-  # with one concurrent waterline loop. Kept solely as the ONE-KEY ROLLBACK fallback.
-  # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
-  # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
-  # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
-  # bucket_test_concurrency, so load-sensitive files (the SCD session-observation family) ran under
-  # the full concurrent load and flaked/hung. Split the bucket list by @test-group and run the SAME
-  # three-phase order (serial → lowconc → main) with the SAME per-phase concurrency knobs, keeping
-  # the LPT-reordered main body order-preserving via suite-lpt-runner.mjs run({files}).
-  bucket_serial_files=()
-  bucket_lowconc_files=()
-  bucket_main_files=()
-  while IFS=$'\t' read -r bf bg; do
-    case "$bg" in
-      serial) bucket_serial_files+=("$bf") ;;
-      lowconc) bucket_lowconc_files+=("$bf") ;;
-      *) bucket_main_files+=("$bf") ;;
-    esac
-  done < <(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --classify)
-  # LPT order for the bucket serial/lowconc sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-
-  # ordered): same as the full path — bare `node --test` re-sorts alphabetically and discards the LPT
-  # order, so these two sub-phases were the last bare dispatch points on the --buckets path. Reorder
-  # IN PLACE then hand to suite-lpt-runner.mjs run({files}) (order-preserving). Membership unchanged.
-  lpt_order_files bucket_serial_files
-  lpt_order_files bucket_lowconc_files
+  # ⛔ The @test-group split (bucket_serial/lowconc/main_files) and the per-group LPT calls used to
+  # live HERE. They moved INTO the legacy bucket branch below (gap-suite-bash-lpt-forwarder-dead-on-
+  # default-path): the DEFAULT (scheduler) bucket path classifies every file itself
+  # (suite-scheduler.ts classifyFile), so on that path the split had no reader at all. The legacy
+  # branch is the split's only consumer — see it for the declarations.
   # ── unified scheduler (gap-suite-dynamic-waterline-scheduler, bucket path) ─────────────────────
   # Same group-budget waterline as the full-suite path; the bucket subset benefits identically
   # (serial/lowconc keep their own budgets, main fills the remainder). ONE-KEY ROLLBACK: the same
@@ -1760,6 +1748,36 @@ elif [ "${1:-}" = "--buckets" ]; then
   # LEGACY PHASED BUCKET PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0): serial→lowconc→main
   # static phases are the RETIRED model; the unified scheduler bucket path above replaces it. Kept solely
   # as the ONE-KEY ROLLBACK fallback.
+  # ── bucket load-sensitive isolation (gap-scd-load-sensitive-bucket-isolation) — LEGACY-ONLY ──────
+  # The full-suite default path routes serial/lowconc files to their OWN phases (serial at
+  # $SERIAL_CONCURRENCY, lowconc at $LOWCONC_CONCURRENCY) BEFORE the main concurrency-N body; the
+  # bucket path previously handed the WHOLE selected list to suite-lpt-runner.mjs at
+  # bucket_test_concurrency, so load-sensitive files (the SCD session-observation family) ran under
+  # the full concurrent load and flaked/hung. Split the bucket list by @test-group and run the SAME
+  # three-phase order (serial → lowconc → main) with the SAME per-phase concurrency knobs, keeping
+  # the LPT-reordered main body order-preserving via suite-lpt-runner.mjs run({files}).
+  # ⚠️ Relocated HERE from above the scheduler branch (gap-suite-bash-lpt-forwarder-dead-on-default-
+  # path): the scheduler classifies internally, so on the DEFAULT path this split had no reader.
+  bucket_serial_files=()
+  bucket_lowconc_files=()
+  bucket_main_files=()
+  while IFS=$'\t' read -r bf bg; do
+    case "$bg" in
+      serial) bucket_serial_files+=("$bf") ;;
+      lowconc) bucket_lowconc_files+=("$bf") ;;
+      *) bucket_main_files+=("$bf") ;;
+    esac
+  done < <(printf '%s\n' "${files[@]}" | node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/runner-grouping.ts" --classify)
+  # LPT order for the bucket sub-phases (gap-suite-lpt-serial-lowconc-phases-not-lpt-ordered): same as
+  # the full path — bare `node --test` re-sorts alphabetically and discards the LPT order, so these
+  # sub-phases would be bare dispatch points. Reorder IN PLACE then hand to suite-lpt-runner.mjs
+  # run({files}) (order-preserving). Membership unchanged.
+  # ⚠️ bucket_main_files gets its OWN call: it used to inherit LPT order from a pre-sorted `files`
+  # (the now-removed `lpt_order_files files`). Without this line the legacy bucket main phase would
+  # SILENTLY lose its LPT ordering (gap-suite-bash-lpt-forwarder-dead-on-default-path AC4).
+  lpt_order_files bucket_serial_files
+  lpt_order_files bucket_lowconc_files
+  lpt_order_files bucket_main_files
   bucket_code=0
   if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
