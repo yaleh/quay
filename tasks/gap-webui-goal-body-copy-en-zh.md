@@ -66,6 +66,19 @@ extra:
 - tasks/gap-webui-goal-body-copy-en-zh.md
 - packages/quay/src/serve-goal.ts
 - packages/quay/src/serve-i18n.ts
+- packages/quay/src/serve-render.ts
+- packages/quay/src/serve-handlers.ts
+- packages/quay/src/serve-adr.ts
+- packages/quay/src/serve-doc.ts
 - packages/quay/test/serve-goal-body-i18n.test.mjs (new)
 - packages/quay/test/serve-goal-doc.test.mjs
 - packages/quay/test/gap-webui-goal-list-tab-split-goal-ac.test.mjs
+- packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs
+- packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs
+
+<!-- Touches 扩容理由（AC7 实跑读数，不是预估）：Touches 内 4 个测试文件先红 13 条；扩面到
+     gap-*/serve-* /goal 相关全量后，确认变红集合恰为 4 个文件（其余候选 251 条全绿）。
+     serve-render.ts / serve-handlers.ts / serve-adr.ts / serve-doc.ts 是共享 `renderBackLink`
+     （3 个详情页共用）与 dispatch 传参的承重文件：AC2 要求本页界面文案清零、AC3 要求 zh 零变化，
+     二者只有把该共用的「← 返回列表」行按 ROW 9 的 CHROME_LABELS 落地、并让三个调用点各自
+     声明自己的语言才能同时成立（只改 /goal 会让另两页的 ?lang=zh 变成英文回链，硬规则 3b）。-->
