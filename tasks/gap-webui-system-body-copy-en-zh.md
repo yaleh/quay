@@ -2,7 +2,7 @@
 id: gap-webui-system-body-copy-en-zh
 title: /system 正文文案在 lang=en 下仍是硬编码中文（含 <title>/<h1> 的中文后缀）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
