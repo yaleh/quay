@@ -2,7 +2,8 @@
 id: gap-mirror-measure-history-retire-dead-writer
 title: mirror-measure-history.ts 是死写入器（唯一调用者 fan-in-execute step 4.5
   已删）却仍在册——catalog 6 行（含指着已不存在块的「谁按」）+ 编排文件清单 + 自带测试待连带处置
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -136,3 +137,14 @@ extra:
 - .quay/suite-bucket-reattribution.jsonl（摘除 zombie 登记行——5b 发现的第 4 个载体，被跟踪且进 delta）
 - docs/analysis/suite-perfile-duration-baseline.json（摘除死键——5b 发现的第 5 个载体）
 - tasks/gap-mirror-measure-history-retire-dead-writer.md
+## Needs-Human
+
+**执行 2026-09-18T04:38:24.758Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：5b4d0e21-22e8-4ef6-a4a6-17b8c49667c6
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-measure-history-retire-dead-writer~wk-prod-anchor~1789706200586-03693d.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-measure-history-retire-dead-writer-wk-prod-anchor.log
