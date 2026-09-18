@@ -28,7 +28,12 @@ test("prosePrereqRefs finds backtick-cited ids inside 阻塞 paragraphs (AC2)", 
     "gap-shipped-profiles-missing-worker-roles",
     "gap-promotion-driver-ready-pool-check-path-third-party",
   ];
-  for (const id of ids) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ status `ready`, not `done`: this test is about the CITATION FORM (backtick spans inside 阻塞
+  // paragraphs), and a `done` ref is now dropped by the status filter before the citation form is
+  // reached (gap-prose-prereq-refs-should-exclude-done-referenced-tasks) — which would make the
+  // assertion below vacuous. The snippet's own prose ("已 done 落 develop") is the verbatim
+  // production text and is not what this test measures.
+  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   const refs = prosePrereqRefs(PRE_EDGE_AC207_SNIPPET, path.join(root, "tasks"));
   assert.ok(refs.length >= 1, `must find ≥1 backtick-cited id (got ${refs.length})`);
   assert.deepEqual(refs.slice().sort(), ids.slice().sort(), "all three backtick-cited ids are recovered");
@@ -48,9 +53,12 @@ test("non-prereq backtick mentions are NOT refs — 同族于 / 参见 (AC3)", (
 test("sibling / heritage / example mentions inside a keyword paragraph are NOT prereq refs (precision)", (t) => {
   const root = makeWorkspace("prereq-sibling");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-x", { status: "done", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-y", { status: "done", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-z", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ all three `ready`, NOT `done`: a done ref is dropped by the STATUS filter, so a `done` fixture
+  // would make every assertion below pass without the sibling guard doing anything (the guard is what
+  // this test measures — see gap-prose-prereq-refs-should-exclude-done-referenced-tasks).
+  writeTask(root, "gap-x", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-y", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-z", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   // Each paragraph carries a prereq keyword (so it passes the gate) but the refs are sibling/heritage
   // mentions, not the object of the blocking — they must be dropped.
   const body = [
@@ -68,8 +76,10 @@ test("sibling / heritage / example mentions inside a keyword paragraph are NOT p
 test("backtick-cited prose prereqs fully covered by depends_on ⇒ prosePrereqGap == [] (AC4)", (t) => {
   const root = makeWorkspace("prereq-ac4");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-prereq-b", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done`: the claim under test is "the EDGES cover the prose prereqs", so the refs
+  // must survive the status filter for the edge set to be what produces the empty gap.
+  writeTask(root, "gap-prereq-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-prereq-b", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-edged", {
     status: "ready",
     labels: ["gap"],
@@ -107,7 +117,11 @@ test("backtick-cited prose prereqs fully covered by depends_on ⇒ prosePrereqGa
 test("AC1 — the two production deny-paragraphs no longer harvest ids; the genuine 前置 paragraph still does", (t) => {
   const root = makeWorkspace("prereq-samples");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const id of SAMPLE_IDS) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done`: the samples' own prose labels some ids "done" (verbatim production text),
+  // but the scope/polarity claims below are only tested if the refs survive the status filter — a
+  // `done` fixture is dropped for a reason unrelated to what this test asserts
+  // (gap-prose-prereq-refs-should-exclude-done-referenced-tasks).
+  for (const id of SAMPLE_IDS) writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   const tasksDir = path.join(root, "tasks");
   // Sample 1 paragraph alone: pre-fix 2 ids (⛔ 不作为本任务的阻塞 harvested both). The paragraph is
   // one sentence carrying the DENIAL and both ids, so only polarity — not scope — can drop them.
@@ -128,8 +142,9 @@ test("AC1 — the two production deny-paragraphs no longer harvest ids; the genu
 test("AC2 — keyword→id association is SENTENCE-scoped, both directions (能取假)", (t) => {
   const root = makeWorkspace("prereq-scope");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-para-same-sentence", { status: "done", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-para-other-sentence", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done` — the SCOPE claim needs refs that survive the status filter.
+  writeTask(root, "gap-para-same-sentence", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-para-other-sentence", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   // ① keyword and id in the SAME sentence ⇒ still a prereq. ② keyword and id in the same PARAGRAPH
   // (single newlines, no blank line) but DIFFERENT sentences ⇒ NOT a prereq.
   const body = [
@@ -149,8 +164,9 @@ test("AC2 — keyword→id association is SENTENCE-scoped, both directions (能�
 test("AC3 — an explicitly NEGATED keyword declares nothing; removing the negation re-arms it (能取假)", (t) => {
   const root = makeWorkspace("prereq-negation");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-neg-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-neg-b", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done` — the POLARITY claim needs refs that survive the status filter.
+  writeTask(root, "gap-neg-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-neg-b", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   const tasksDir = path.join(root, "tasks");
   // ① the denial ⇒ not a prereq (⛔ 不作为本任务的阻塞 is sample 1's real wording; ⛔ 不另立 depends_on 边
   //    is sample 2's). The second is asserted at the polarity layer directly, because `另立` alone would

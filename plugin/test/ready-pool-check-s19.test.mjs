@@ -23,7 +23,9 @@ import { SUPERSEDED_MARKER_RE, __dirname, analyzeTasks, assert, buildTargetedPro
 test("AC4 — a paragraph OPENED with <!-- dedup-ref --> is traceability, not a prereq claim (能取假)", (t) => {
   const root = makeWorkspace("prereq-dedupref");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const id of ["gap-dd-a", "gap-dd-b", "gap-dd-c"]) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ⚠️ `ready`, not `done`: the claim is about the DEDUP-REF MARKER, so the refs must survive the
+  // status filter for the marker to be what excludes them (a `done` ref is dropped regardless).
+  for (const id of ["gap-dd-a", "gap-dd-b", "gap-dd-c"]) writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   const tasksDir = path.join(root, "tasks");
   const backlink = "前置追溯：`gap-dd-a`、`gap-dd-b`、`gap-dd-c`（与本条机制不同，仅作查重追溯）。";
   // ② without the marker the paragraph still declares (so the fixture is not vacuously empty):
@@ -87,8 +89,10 @@ test("AC3d — sibling markers are not English-blind: `related-but-not-duplicate
   // "同族于 `gap-x`" — was read as a genuine prereq.
   const root = makeWorkspace("prereq-sibling-en");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⚠️ `ready`, not `done`: the claim is about the SIBLING MARKERS, which can only be tested if the
+  // refs survive the status filter (gap-prose-prereq-refs-should-exclude-done-referenced-tasks).
   for (const id of ["gap-real-prereq", "gap-sib-en", "gap-cross-binds-next"]) {
-    writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+    writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   }
   const tasksDir = path.join(root, "tasks");
   // Each body is ONE sentence (`；` does not split) carrying a NON-negated 阻塞 keyword, so the REF-
@@ -132,6 +136,62 @@ test("AC3d — sibling markers are not English-blind: `related-but-not-duplicate
     prosePrereqRefs("同族于 `gap-sib-en`，阻塞 `gap-real-prereq`。", tasksDir),
     ["gap-real-prereq"],
     "④ the Chinese 同族于 marker is unchanged: drops its own id, keeps the genuine prereq",
+  );
+});
+
+
+test("AC1/AC2 — a prose prereq citing an already-DONE task is not a gap; todo / unknown status stay fail-closed (能取假, 双向对照)", (t) => {
+  // Production shape (tasks/gap-touches-parser-early-subheading-latch-hides-declaration.md:68, reading
+  // taken 2026-09-18T15:37Z — 88 consecutive promotion skips):
+  //   `…` = **3** 条：`gap-git-history-window-notes-ref-dominates`（在飞，当前阻塞器）、
+  // A backtick-cited task id sharing a sentence with a prereq keyword (阻塞), where the CITED task is
+  // already `done`. A done task cannot be an UNSATISFIED prerequisite, so reporting it as a prose-prereq
+  // gap is a false positive that fail-closes the citing task FOREVER: the cited task will never produce
+  // another event, so the gap can never close on its own — only a human rewording the sentence (which
+  // is exactly the workaround that was applied at 15:54Z). The ref-level filter already dropped
+  // SUPERSEDED refs; `done` is the missing arm.
+  const root = makeWorkspace("prereq-done-ref");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  const fileFor = (id) => path.join(tasksDir, `${id}.md`);
+  // ONE body, reused across every direction below — the status of the cited task is the only variable.
+  const body = "前置：`gap-x`，本任务须待其落地后方可派发。";
+  const refsOf = () => prosePrereqRefs(body, tasksDir);
+  const gapOf = () => prosePrereqGap(body, "", tasksDir); // no frontmatter ⇒ no relation edges
+  // ① AC1 — the cited task is DONE ⇒ NO gap. Pre-fix `refsOf()` is ["gap-x"] and the citing task is
+  //    refused promotion; post-fix both readings are [].
+  writeTask(root, "gap-x", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(refsOf(), [], "① a ref to a DONE task is dropped at the ref level (pre-fix: ['gap-x'])");
+  assert.deepEqual(gapOf(), [], "① prosePrereqGap is strictly [] when its only ref is done");
+  // ② AC2 NEGATIVE CONTROL — the SAME body with the cited task NOT done must still be caught. Without
+  //    this direction the fix above would be indistinguishable from a widening into 恒绿.
+  writeTask(root, "gap-x", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(refsOf(), ["gap-x"], "② todo is a genuine unmet prereq ⇒ still harvested");
+  assert.deepEqual(gapOf(), ["gap-x"], "② …and still reported as a gap");
+  writeTask(root, "gap-x", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(gapOf(), ["gap-x"], "② ready is a genuine unmet prereq ⇒ still reported");
+  // ③ AC2 — status that CANNOT be read must never be mistaken for `done` (硬规则③b: 读不懂不得伪装成
+  //    合格). Three unreadable forms, each written raw because writeTask always emits a status line.
+  const fmNoStatus = ["---", "id: gap-x", "title: fixture gap-x", "labels:", "  - gap", "parent: null", "children: []", "extra:", "  schema: v1", "---"].join("\n");
+  fs.writeFileSync(fileFor("gap-x"), `${fmNoStatus}\n\n${fourArtifactBody()}`);
+  assert.deepEqual(gapOf(), ["gap-x"], "③ a task file with NO status field is still a gap (null ≠ done)");
+  fs.writeFileSync(fileFor("gap-x"), `---\nid: gap-x\ntitle: fixture gap-x\nstatus:\nlabels:\n  - gap\nparent: null\nchildren: []\nextra:\n  schema: v1\n---\n\n${fourArtifactBody()}`);
+  assert.deepEqual(gapOf(), ["gap-x"], "③ an EMPTY status value is still a gap");
+  fs.writeFileSync(fileFor("gap-x"), `---\nid: gap-x\ntitle: fixture gap-x\nstatus: ???\n---\n\n${fourArtifactBody()}`);
+  assert.deepEqual(gapOf(), ["gap-x"], "③ a junk status token is still a gap");
+  fs.writeFileSync(fileFor("gap-x"), `${fourArtifactBody()}`); // no frontmatter block at all
+  assert.deepEqual(gapOf(), ["gap-x"], "③ a file with no parseable frontmatter is still a gap");
+  // ④ the superseded arm is untouched (pre-existing behaviour, kept as the regression anchor)
+  writeTask(root, "gap-x", { status: "superseded", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(gapOf(), [], "④ superseded refs are still dropped (unchanged)");
+  // ⑤ the done arm drops the ref but does NOT weaken the sibling/negation arms: a done id in a
+  //    NON-declaring sentence was already absent, and a genuine todo prereq in the same body survives.
+  writeTask(root, "gap-done-other", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-live", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(
+    prosePrereqGap("阻塞 `gap-done-other`；前置 `gap-live`。", "", tasksDir),
+    ["gap-live"],
+    "⑤ only the done ref is dropped; the live prereq in the same sentence still blocks",
   );
 });
 
