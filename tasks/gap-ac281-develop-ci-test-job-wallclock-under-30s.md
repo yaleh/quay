@@ -3,7 +3,7 @@ id: gap-ac281-develop-ci-test-job-wallclock-under-30s
 title: 真实 develop CI test job 一次 success 且套件 schedulerMs≤30s（AC-281）——人
   2026-09-17 裁定改口径（原 job 墙钟 ≤30s 经实测不可达）；现 scheduler 54.1s / main floor
   43.0s，须压低最长单文件
-status: ready
+status: done
 needs_human_cause: unclassified
 labels:
   - gap
