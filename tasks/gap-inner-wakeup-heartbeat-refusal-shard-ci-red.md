@@ -96,7 +96,7 @@ __PERFILE__ duration_ms=8167 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat
       - ③ 负载下：(a) 12 路并发跑同一分片（`for i in $(seq 1 12); do node --test … & done; wait`）
         ⇒ **12/12 rc=0，`does not provide an export named` 命中 0 次**；
         (b) 真实入口 `bash scripts/test.sh --for-task gap-inner-wakeup-heartbeat-refusal-shard-ci-red --allow-thin`
-        ⇒ **exit 0，`ℹ tests 84 / pass 84 / fail 0`，`violations: 0`**（**绿**；merge develop 前后各跑一次，均绿）
+        ⇒ **exit 0，`ℹ tests 84 / pass 84 / fail 0`，`violations: 0`**（**绿**；`merge develop` 前后共跑 4 次，均绿）
       ⇒ **三条全绿 ⇒【本地未能复现】**（按本条 ⛔ 条款如实记录）。⛔ **未以改断言收场**（见 AC2/AC3）。
 
       **CI 侧失败证据（同一分片、同一 runner，跨 run 不一致 ⇒ 非确定性、⛔ 非坏提交）**：
@@ -123,48 +123,64 @@ __PERFILE__ duration_ms=8167 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat
       ⇒ 这正是**硬规则 3b** 的形态：判定的输出词表里没有「没跑起来」这一态 ⇒ 崩溃被报成「拒绝理由缺失」。
       ⇒ **崩溃的触发源未确立**（该模块为何在那一刻不可用），按硬规则 4-推论四**不写成结论**；
         **可复现的是这条混淆本身**（AC2 的 shim 对照）。
-      ⇒ **旁证**：紧随其后同一分支的另一 run（`35296466261`）本分片 `passed=true`，而该 run 唯一的红是**另一个文件**
-        `adr016-screen-use-check.test.mjs`（310ms），错误为 `ENOENT … packages/quay/plugin/test/fixtures/mock-ssh.sh`
-        —— 同属「并发文件树变动」这一类，进一步说明该 flake 是**套件级、与本分片无关**的。
+      ⇒ **同一形态在母文件上活捉一次**：CI run `35296761204`（本任务分支）把
+        `inner-wakeup-heartbeat.test.mjs` 的 `AC2 fail-closed` 打红，其 `actual:` 为
+        `…/plugin/scripts/fast-mode-telemetry.ts:129 SyntaxError: The requested module './workflow-event-schema.mjs'
+        does not provide an export named 'IMPL_COMPLETE_EVENT_KIND'` —— **同一类、不同模块对**，
+        证明这是**套件级**现象，且同一载体上有**多个**实例（见 AC2）。
 
 - [x] **AC2（修复可被打红）**：修复后 `node --test plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` 绿，
       **且**给出「把修复回退 ⇒ 同一条命令变红」的负控制读数（一条命令可查）。
 
       **修复后**：`ℹ tests 4 / pass 4 / fail 0`（**绿**）。
-      修复 = 该文件新增 `writerStartupFailure()` / `runWriterChecked()`：拒绝断言**只会看到真正跑起来的写入方**；
-      「没跑起来」被**单独取值**（硬规则 3b），瞬时启动失败**重测一次**，两次都失败则**大声失败并报出真因**。
-      **负控制**（确定性、一条命令、⛔ 不触碰任何仓库文件）：PATH shim 在**第一次** writer spawn 上打印
+      修复 = 给「没跑起来」**单独取值**（硬规则 3b）：拒绝/裁决断言**只会看到真正跑起来的子进程**，
+      瞬时启动失败**重测一次**，两次都失败则**大声失败并报出真因**（携带两次 stderr）。
+      **硬规则 5b：同一载体（AC53 心跳测试族）的三个文件全部落实**，⛔ 断言一条未删未改未弱化：
+      - `inner-wakeup-heartbeat-refusal.test.mjs`：`writerStartupFailure()` / `runWriterChecked()`，
+        全部 5 个 `runWriter` 调用点改道；
+      - `inner-wakeup-heartbeat.test.mjs`：同款 helper，全部 9 个调用点改道（4 个拒绝 + 5 个 exit-0 读数）；
+      - `inner-wakeup-heartbeat-check.test.mjs`：`cliStartupFailure()` / `runCliChecked()`，全部 6 个裁决调用点改道。
+
+      **负控制**（确定性、一条命令、⛔ 不触碰任何仓库文件）：PATH shim 在**第一次**相关 spawn 上打印
       CI 那条**逐字相同**的模块加载错误并 exit 1，其后交给真 node：
       - **回退修复**（`git checkout develop -- plugin/test/inner-wakeup-heartbeat-refusal.test.mjs`）后同一条命令
         ⇒ **RED**，`AssertionError: the refusal must name 结束不变式违例`，其 `actual:` **正是 CI 那条 SyntaxError**
         ⇒ **CI 症状被确定性复现**；
       - **恢复修复**后同一条命令 ⇒ **GREEN 4/4**（shim 确实触发：`.fired` 存在）。
-      - **持久崩溃对照**（shim 让**每一次** writer spawn 都崩）⇒ 仍 **RED 0/4**，四条都是
-        `the writer FAILED TO START on BOTH attempts — it never ran, so this is NOT a refusal`
+      - **持久崩溃对照**（shim 让**每一次** spawn 都崩）⇒ 仍 **RED**：
+        分片 0/4、母文件 **8** 条、checker 文件 **6** 条，每条都是
+        `… FAILED TO START on BOTH attempts — it never ran, so this is NOT a refusal/verdict`
         ⇒ 修复吸收的是**瞬时**抖动，**不是**把真缺陷藏起来。
+      - 三文件**全部**在瞬时 shim 下绿：4/4、14/14、66/66。
+
+      **硬规则 5b 扫描（记录，⛔ 不在本任务修——不同载体、且在 Touches 之外）**：
+      `plugin/test/` 下 **86** 个测试文件既 `spawnSync("node")` 又对 `.status` 断言；
+      本载体的 3 个已加固。**同一 `69a0adeff` 拆分还产出 4 个同族分片**
+      （`inner-wakeup-heartbeat-check-cli` / `-check-ac53-cli` / `-check-gate-cli` / `-gate`，共 42 处 `.status` 断言）
+      **同样未加固**。⛔ 未改它们：不在 Touches，且越界改会自伤 anti-drift（见
+      `out-of-touches-red-fix-self-inflicts-anti-drift`）。**建议另立一条任务**收口。
 
 - [x] **AC3（没把守卫拆掉）**：该文件里 AC53 的三条断言（`status != 0` / `status == 1` /
       `stderr` 含 `结束不变式违例`）**逐字仍在**，`grep -c '结束不变式违例'` ≥ 3；
       举证：`git diff develop -- plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` 里那三行未被删改。
       **读数**：`grep -c '结束不变式违例' plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` = **4**（≥3）；
-      `git diff develop -- <该文件>` 的**删除行只有 5 条 `runWriter(` 调用点**（改为 `runWriterChecked(`，
-      `1 file changed, 69 insertions(+), 5 deletions(-)`）；**三条 AC53 断言一行未动**——diff 里出现
-      `status != 0` / `status == 1` 的 `+` 行**全部是新增注释**，无任何断言行被增删改。
+      `git diff develop -- <该文件>` 的**删除行只有 5 条 `runWriter(` 调用点**（改为 `runWriterChecked(`）；
+      **三条 AC53 断言一行未动**——diff 里出现 `status != 0` / `status == 1` 的 `+` 行**全部是新增注释**。
+      同一条纪律在另两个文件同验：母文件 14/14、checker 66/66 全绿，两者的 diff 亦**只改调用点**。
 
 - [x] **AC4（真实 CI 上翻绿）**：在**任务分支自己的 CI run** 上，贴出该分片的
       `__PERFILE__ duration_ms=… passed=true` 行原文与 run id。⛔ 本地读数不作数。
-      **run `35296140472`**（任务分支 `task/gap-inner-wakeup-heartbeat-refusal-shard-ci-red`，sha `5917f6b5a`）——
+      **run `35297538895`**（分支 `task/gap-inner-wakeup-heartbeat-refusal-shard-ci-red`，tip sha `6ed083e7f`）——
       **四个 job 全部 `success`**（`test` / `dist-verify-node-floor` / `version-consistency` / `cold-start-e2e`），
-      本分片原文：
+      **全库 `__PERFILE__ … passed=false` 计数 = 0**，三个文件原文：
       ```
-      __PERFILE__ duration_ms=10496 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-refusal.test.mjs passed=true end_ms=1789695709278
+      __PERFILE__ duration_ms=10521 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-refusal.test.mjs passed=true end_ms=1789696846385
+      __PERFILE__ duration_ms=9803  /_work/quay/quay/plugin/test/inner-wakeup-heartbeat.test.mjs         passed=true end_ms=1789696845684
+      __PERFILE__ duration_ms=3271  /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-check.test.mjs   passed=true end_ms=1789696839018
       ```
-      **run `35296466261`**（同分支，sha `abd78d3e0`）本分片亦 `passed=true`：
-      ```
-      __PERFILE__ duration_ms=10629 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-refusal.test.mjs passed=true end_ms=1789695997027
-      ```
-      （该 run 的 `test` job 因**另一个文件** `adr016-screen-use-check.test.mjs` 的 ENOENT 而红——见 AC1 旁证；
-      本分片在两次 run 上**都** `passed=true`。）
+      另有两条同分支绿 run：**`35297361925`**（sha `34626ab07`，四 job `success`、0 个失败文件，
+      含上述三文件 `passed=true`）与 **`35296140472`**（sha `5917f6b5a`，四 job `success`，
+      本分片 `__PERFILE__ duration_ms=10496 … passed=true`）。
 
 - [ ] **AC5（生产面兑现，外层验证）**：落地并触发 develop CI 后，贴出 run id 与该 run `test` job 的
       `conclusion == "success"` ——属外层验证（待外部）
