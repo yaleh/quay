@@ -67,4 +67,5 @@ extra:
 - plugin/test/conformance-target-fixture.test.mjs
 - plugin/test/quay-init-loop.test.mjs
 - packages/quay/test/install-config-driven-e2e.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-config-heredoc-comment-backtick-executes-cli.md
