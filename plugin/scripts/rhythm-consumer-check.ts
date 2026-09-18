@@ -59,7 +59,7 @@ import { matchAtCommandPosition } from "./checker-lib.ts";
 // The --root read below is now delegated to the shared `flagValue`; its indexOf+next-arg read was
 // one of the copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, createSelftest, flagValue } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -431,15 +431,8 @@ export function runCheck(root: string, asJson: boolean): number {
 // ── selftest (pure-function negative controls) ───────────────────────────────────────────────────────
 
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "rhythm-consumer-check" });
+  const check = st.check;
 
   // ── 判据1 — non-按需 must have a call site ──────────────────────────────────────────────────────
   check(
@@ -479,9 +472,7 @@ export function runSelftest(): boolean {
   check("判据4: single copy declared → RED", single.ok === false && single.single.length === 1, JSON.stringify(single));
   const none = judgeDualCopyTouches(["- plugin/scripts/x.ts"]);
   check("判据4: no execution-core touch → not evaluated", none.evaluated === false, JSON.stringify(none));
-
-  console.log(`\nrhythm-consumer-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 export function main(argv: string[]): number {

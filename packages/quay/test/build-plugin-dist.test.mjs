@@ -458,7 +458,19 @@ test("AC1 (AC-205) — bundled send-to-session.js is self-contained (serve-send 
     // Copy send-to-session.ts to a NON-repo-root temp plugin root: its `../../packages/quay/src/`
     // dynamic import can then only resolve via coreSrcAliasPlugin (the dev-tree path does not exist
     // there — this is the STAGED-layout shape the alias plugin must cover).
-    fs.copyFileSync(path.join(PLUGIN_ROOT, "scripts", "send-to-session.ts"), path.join(dir, "scripts", "send-to-session.ts"));
+    // ⛔ Copy the entry's SIBLINGS too — the staged layout ships every scripts/*.ts, and a static
+    // `./…` import of one is only resolvable if it is present. Copying the entry alone made this
+    // fixture quietly measure a DIFFERENT property ("the entry has no siblings"): when
+    // send-to-session.ts adopted the shared arg helper
+    // (`import { flagValue } from "./gate-script-base.ts"`, gap-routine-semantic-dedup-scan-arg-parsing-helper-family)
+    // esbuild failed to resolve it — while the REAL build, which bundles from the full tree, was
+    // verified green on the same commit. Derive the set from the real plugin root rather than listing
+    // the one sibling, so a future adoption does not re-pin it.
+    for (const e of fs.readdirSync(path.join(PLUGIN_ROOT, "scripts"), { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".ts")) {
+        fs.copyFileSync(path.join(PLUGIN_ROOT, "scripts", e.name), path.join(dir, "scripts", e.name));
+      }
+    }
     const outfiles = await bundleEntries(dir, ["scripts/send-to-session.ts"]);
     assert.equal(outfiles.length, 1, "send-to-session.ts must bundle");
     const bundle = fs.readFileSync(outfiles[0], "utf8");

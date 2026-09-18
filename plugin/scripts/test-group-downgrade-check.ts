@@ -53,7 +53,7 @@ import { fileURLToPath } from "node:url";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { helpExit, readFileSafe, flagValue } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
 
@@ -375,15 +375,8 @@ export function main(argv: string[]): number {
 // ── selftest (ADR-018: demonstrate BOTH the RED and GREEN state) ─────────────────────────────────────
 
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "test-group-downgrade-check" });
+  const check = st.check;
 
   // Pure helpers.
   check("groupOfSource: engine", groupOfSource('// @test-group engine\n') === "engine");
@@ -484,9 +477,7 @@ export function runSelftest(): boolean {
   } finally {
     // no-op — per-fixture cleanup already ran
   }
-
-  console.log(`\ntest-group-downgrade-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

@@ -38,7 +38,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createSelftest } from "./gate-script-base.ts";
 
 import { verified, failed, driverResultToExit } from "./checker-io.ts";
 import type { DriverResult } from "./checker-io.ts";
@@ -218,15 +218,8 @@ export function judgeScan(scan: ScanReport): DriverResult<ScanReport> {
 
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "dead-code-after-return-check" });
+  const check = st.check;
 
   // RED: the exact defect shape (the 2026-08-03 pin) is detected.
   const defect = detectFileViolations(
@@ -259,9 +252,7 @@ export function selftest(): boolean {
     "green-comment-mention",
     detectFileViolations("c.sh", '# NEVER write: return 0\ndefault_concurrency_formula\n').length === 0,
   );
-
-  console.log(`\ndead-code-after-return-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 function usage(): never {

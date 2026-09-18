@@ -16,6 +16,7 @@
 import type { TaskCandidate, MilestoneCandidate, CouplingKind } from "./candidate-contracts.ts";
 import { CONTRACT_VERSION, makeSingletonCandidate } from "./candidate-contracts.ts";
 import { buildCouplingGraph, hasProhibitingEdge, supportingNeighbors, type CouplingGraph, type BuildCouplingGraphInput } from "./coupling-graph.ts";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── tunable constants (deterministic, no randomness — reproducible replay) ──────────────────────────
 export const COORDINATION_COST_PER_EXTRA_TASK = 1;
@@ -327,15 +328,8 @@ export function synthesizeCandidates(
 
 // ── selftest ──────────────────────────────────────────────────────────────────────────────────────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   const mk = (id: string, touches: string[], value = 5, deps: string[] = []): TaskCandidate => ({
     version: 1,
@@ -455,9 +449,7 @@ export function selftest(): boolean {
   const soloGraph = buildCouplingGraph({ tasks: [soloTask] });
   const soloScored = scoreCandidate(["SOLO"], new Map([["SOLO", soloTask]]), soloGraph);
   check("singleton-score-consistency", soloScored.score === soloTask.estimatedValue, `score=${soloScored.score}`);
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 if (process.argv[1] != null && process.argv[1].endsWith("candidate-synthesis.ts") && process.argv.includes("--selftest")) {

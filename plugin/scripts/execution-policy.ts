@@ -30,6 +30,7 @@
 // Byte-identical mirror: plugin/scripts/execution-policy.ts
 
 import { createHash } from "node:crypto";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── Contract version ───────────────────────────────────────────────────────────────────────────────
 
@@ -331,16 +332,8 @@ export function invalidateReceiptsForPolicyChange(
 // ── Selftest ─────────────────────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-  const failures: Array<{ name: string; detail: string }> = [];
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      failures.push({ name, detail });
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  const check = st.check;
 
   const p1 = createPolicy();
   check("create-sets-hash", typeof p1.policyHash === "string" && p1.policyHash.length === 64, p1.policyHash.slice(0, 12));
@@ -400,10 +393,7 @@ export function selftest(): boolean {
     check("revoke-inactive-fails", !rev1.ok && rev1.reason.includes("detector-not-active"), rev1.reason);
     check("revoke-reason-required", !revokeActivation(base, "det-ac-cov", { reason: "", actor: "p" }).ok, "empty reason refused");
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  if (!allPassed) console.log(JSON.stringify({ ok: false, failures }));
-  return allPassed;
+  return st.report();
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────────────────────────────

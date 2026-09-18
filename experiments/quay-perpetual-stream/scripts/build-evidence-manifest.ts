@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -279,15 +280,8 @@ export function resolveMilestoneRoot(workspaceRoot: string, milestoneId: string)
 // ── selftest ────────────────────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   // Evidence class ordering
   check("source<unit", isEvidenceClassCompatible("source", "unit"), "unit >= source");
@@ -440,9 +434,7 @@ export function selftest(): boolean {
       check("resolve-bad-throws", true, "threw as expected");
     }
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 // ── Composite evidence mapping (extracted from the retired composite-build.ts / composite-contracts.ts

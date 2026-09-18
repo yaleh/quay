@@ -40,6 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { FindingEnvelope } from "./stage-receipt.ts";
 import { sha256OfString, migratePrepareLedger } from "./stage-receipt.ts";
+import { createSelftest } from "./gate-script-base.ts";
 import {
   authorizeActivation,
   revokeActivation,
@@ -659,16 +660,8 @@ export function reportBackpropagationMetrics(opts: {
 // ── Selftest ─────────────────────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-  const failures: Array<{ name: string; detail: string }> = [];
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      failures.push({ name, detail });
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  const check = st.check;
 
   const redTask = [
     "### AC coverage mapping (DIR-117 mechanism-claim wiring)",
@@ -786,10 +779,7 @@ export function selftest(): boolean {
     });
     check("control-fp-ok", ctl.ok && ctl.revocation.ok && ctl.invalidation?.invalidated.length === 1, ctl.reason);
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  if (!allPassed) console.log(JSON.stringify({ ok: false, failures }));
-  return allPassed;
+  return st.report();
 }
 
 function createPolicyForSelfTest() {

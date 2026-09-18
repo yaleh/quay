@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-check-harness-three-incompatible-shapes
 title: "semantic-dedup-scan: 26 copies of one selftest harness split across
   three mutually incompatible shapes: counters-only (11),
   allPassed+required-detail (10), allPassed+failures[] acc"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -161,6 +161,20 @@ for (const [s,v] of Object.entries(shapes)) console.log(`  ${s} ${v.length}  ${v
   附近的采纳率读数或 `plugin/scripts/gate-script-base.ts` 头注释所指的家族普查，需按新检查器的三项义务落地。
   本任务**不做**：⛔ 不冒充已做。
 
+### 7. 落地时追加的一处 Touches（本任务撰写时未预见，由 fan-in 的全量 suite 暴露）
+
+fan-in 全量 suite 抓到**一个由本次抽取直接造成的红**：`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`
+的 `drop-gate-script-base` 控制项，把「shipped .ts 中 VALUE-import `./gate-script-base.ts` 的个数」**钉成了字面量 `2`**；
+`pane-state-classify.ts` 采纳 harness 后该数变 **3** ⇒ 控制项红（实测 `violations=3`，三行 IMPORT-UNSHIPPED 逐个具名）。
+
+修法：把该数改为**按消费者推导**（在 JS 里镜像 `transport_flat_files` / `transport_imports_of`），与该文件自身
+`consumerRefs` 一段已写明的纪律一致 —— 「⛔ 不钉字面量；字面量过期后的失败形状与真违规不可区分，而『可区分』
+正是那条测试存在的理由」。**这是同一条纪律的第 4 个实例**（该文件已经为 `5` 与 mode 数各踩过一次）。
+
+**负控制（该数承重、非回声）**：把推导值改成 `.slice(0, 2)` ⇒ 该用例当场红并打印
+`…must equal the CONSUMER's own value-importers of it (2: pane-state-classify.ts, quay-init-closure-assertion.ts)`（实测）。
+⇒ 该断言仍可证伪：实现少算一个 importer、或把 type-only import 误算进去，两种漂移都会让它红。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `check-harness-three-incompatible-shapes`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789723686226`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -210,4 +224,5 @@ for (const [s,v] of Object.entries(shapes)) console.log(`  ${s} ${v.length}  ${v
 - `experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs`
 - `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`
 - `plugin/test/gate-script-base.test.mjs`
+- `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-check-harness-three-incompatible-shapes.md`

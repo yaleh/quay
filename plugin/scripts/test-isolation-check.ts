@@ -100,7 +100,7 @@ import { firstArgRegion } from "./source-text-lib.ts";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { helpExit, readFileSafe, flagValue } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import {
   hasNodeTestImport,
   canonicalTestFiles,
@@ -1155,15 +1155,8 @@ export function main(argv: string[]): number {
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ────────────
 
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  function check(name: string, cond: boolean, detail = "") {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  }
+  const st = createSelftest({ flavor: "counters", label: "test-isolation-check" });
+  const check = st.check;
 
   // R1: a fixed `.tmp-` under __dirname is reported; a mkdtemp prefix is NOT.
   const fixedTmp = 'const tasksDir = path.join(__dirname, ".tmp-lock-test");\n';
@@ -1322,9 +1315,7 @@ export function runSelftest(): boolean {
   // C2d RED: a malformed entry.
   failures = runIsolationChecks({ current: [], dataEntries: ["not-a-valid-entry"], baselineEntries: [], baselineCount: null, baselineCountHead: null, fileExists: () => true });
   check("C2d RED: malformed entry fails", failures.some((f) => f.includes("malformed")), JSON.stringify(failures));
-
-  console.log(`\ntest-isolation-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

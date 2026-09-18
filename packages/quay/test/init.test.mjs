@@ -12,8 +12,16 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import YAML from "yaml";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-import { generateConfigContent, mcpEntryForProvider, generateProfilesContent } from "../src/init.ts";
+import {
+  generateConfigContent,
+  mcpEntryForProvider,
+  generateProfilesContent,
+  classifyConfig,
+  reconcileConfigContent,
+  LOOP_VERSION_DEFAULTS,
+} from "../src/init.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
@@ -661,4 +669,209 @@ test("branch model: --dry-run reports the plan and mutates no ref", () => {
   assert.equal(r.exitCode, 0, r.stderr);
   assert.match(r.stdout, /branch model/);
   assert.equal(fs.existsSync(path.join(dir, ".quay", "config.yml")), false, "dry run writes nothing");
+});
+
+// ---------------------------------------------------------------------------
+// gap-quay-init-native-reconcile / AC1 — the THREE-STATE classification.
+//
+// `configExists` was `fs.existsSync`: "there is a file here" answering a
+// different question ("is there a config I must not clobber"). A file that
+// exists but cannot be PARSED fell into the same branch as a valid one, so the
+// operator was told "already exists, use --force" — a true statement about a
+// name conflict, and a false one about their actual problem (硬规则 3b).
+// ---------------------------------------------------------------------------
+
+const BROKEN_YAML = "providers: [unclosed\n  bad: : :\n";
+
+test("AC1 classifyConfig unit: absent / valid / corrupt (malformed YAML) are three distinct states", () => {
+  const dir = tmpDir("ac1-classify");
+
+  const absent = classifyConfig(path.join(dir, ".quay", "config.yml"));
+  assert.equal(absent.state, "absent", "no file ⇒ absent");
+
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.writeFileSync(cfgPath, "providers:\n  native:\n    enabled: true\nloop:\n  board: native\n");
+  const valid = classifyConfig(cfgPath);
+  assert.equal(valid.state, "valid", "a parseable mapping ⇒ valid");
+  assert.equal(valid.config?.providers?.native?.enabled, true, "valid carries the parsed document");
+
+  fs.writeFileSync(cfgPath, BROKEN_YAML);
+  const corrupt = classifyConfig(cfgPath);
+  assert.equal(corrupt.state, "corrupt", "an unparseable file is its OWN state, not 'absent' and not 'valid'");
+  assert.ok((corrupt.reason ?? "").length > 0, "the corrupt state must carry the real cause, not a generic message");
+
+  // A top-level scalar/list parses fine as YAML but no consumer can read it as a config map.
+  fs.writeFileSync(cfgPath, "- just\n- a list\n");
+  assert.equal(classifyConfig(cfgPath).state, "corrupt", "a list-valued document is corrupt, not valid");
+});
+
+test("AC1 corrupt: a malformed .quay/config.yml is NOT reported as an existing config (the real cause is printed)", () => {
+  const dir = tmpDir("ac1-corrupt");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
+
+  const out = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(out.exitCode, 1, "a config that cannot be read is a refusal");
+  assert.ok(
+    !/already exists/.test(out.stderr),
+    `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${out.stderr}`
+  );
+  assert.match(out.stderr, /could not be read as a config/, "the message names what actually happened");
+  assert.match(out.stderr, /YAML parse failed/, "the parser's own reason is relayed verbatim");
+
+  // No silent side effects on the refusal path.
+  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), BROKEN_YAML, "the broken file is untouched");
+});
+
+test("AC1 corrupt: --reconcile repairs it and PRESERVES the unparseable bytes beside the new config", () => {
+  const dir = tmpDir("ac1-corrupt-repair");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), BROKEN_YAML);
+
+  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  assert.ok(out.includes("corrupt"), `the repair reports where the broken bytes went:\n${out}`);
+
+  const repaired = YAML.parse(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"));
+  assert.equal(repaired?.loop?.fork_baseline, "develop", "the rebuilt config carries this version's defaults");
+
+  const backups = fs.readdirSync(path.join(dir, ".quay")).filter((f) => f.startsWith("config.yml.corrupt-"));
+  assert.equal(backups.length, 1, `exactly one backup of the unreadable file (got: [${backups.join(", ")}])`);
+  assert.equal(
+    fs.readFileSync(path.join(dir, ".quay", backups[0]), "utf8"),
+    BROKEN_YAML,
+    "the backup is byte-identical — 'unparseable' is not 'worthless'"
+  );
+});
+
+// ⛔ The quay-native arm of this test CANNOT run in a git worktree, and that is a property of the
+// worktree layout rather than of the change: `packages/quay-native/bin/quay-native.ts` reaches the
+// shared logic through the bare specifier `quay/init`, which resolves through `node_modules/quay` →
+// `../packages/quay`. A task worktree's `node_modules` is a symlink to the MAIN checkout's, so that
+// specifier lands on the main checkout's `src/init.ts` — i.e. on whatever the main checkout has, not
+// on the file under test here (verified: `require.resolve("quay/init")` from this worktree returns
+// `/home/yale/work/quay/packages/quay/src/init.ts`). A test asserting the NEW native behavior would
+// therefore be red for the whole life of any task branch and green only after the change is already
+// on the main checkout — a check that cannot fail when it matters.
+// What IS asserted here instead is the half that is a fact on this branch: quay-native's own handler
+// carries the same three-outcome vocabulary (`corrupt` / `reconciled` / `unchanged`) as Core, because
+// both call the SAME `runInit`. The Core arms above are the executable half of that claim.
+test("AC1 corrupt: quay-native's init handler carries the same three-state vocabulary (shared runInit)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts"), "utf8");
+  assert.match(src, /result\.outcome === "corrupt"/, "the native handler has a corrupt arm of its own");
+  assert.match(src, /could not be read as a config/, "…that reports the real cause rather than a name conflict");
+  assert.match(src, /result\.outcome === "reconciled"/, "…and handles the reconcile outcomes");
+});
+
+// ---------------------------------------------------------------------------
+// gap-quay-init-native-reconcile / AC2 — reconcile to the current version's
+// defaults, replacing "skip or clobber".
+//
+// Regression fixture: the exact historical defect (quay-fleet, 2026-09-18) —
+// a config initialized BEFORE `fork_baseline`/`merge_target` entered the
+// fresh-install template. Re-running /quay:init left the file's mtime
+// unchanged, forever.
+// ---------------------------------------------------------------------------
+
+const LEGACY_CONFIG = [
+  "# a user's own comment that a YAML re-dump would destroy",
+  "providers:",
+  "  native:",
+  "    enabled: true",
+  "    path: \"./node_modules/quay-native\"",
+  "    tasks_dir: \"./tasks\"",
+  "loop:",
+  "  board: \"native\"",
+  "  gates: []",
+  "  # the project's own tuning, which must survive verbatim",
+  "  concurrency_bands: [1, 3]",
+  "  my_project_key: keep-me",
+  "",
+].join("\n");
+
+test("AC2 reconcile: a legacy config missing the version defaults gets them — everything else untouched", () => {
+  const dir = tmpDir("ac2-reconcile");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, LEGACY_CONFIG);
+
+  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  assert.match(out, /reconciled to this version's defaults/, `the run reports a reconcile:\n${out}`);
+  assert.match(out, /filled loop\.fork_baseline/, "the report names the key it filled");
+
+  const after = fs.readFileSync(cfgPath, "utf8");
+  const doc = YAML.parse(after);
+  // The regression itself: the key that entered the template three days after this project's init.
+  assert.equal(doc.loop.fork_baseline, "develop", "fork_baseline is filled from the version default");
+  // ⛔ merge_target is NOT filled, and that is the designed behavior — not an omission. The version
+  // does not require it: `plugin/test/quay-init.test.mjs` has an executable invariant that the loop
+  // writer must NOT emit it (the audited zero-consumer key, deleted from the writer face), and
+  // serve-render.ts falls back to `fork_baseline` for the dashboard. This task's AC2 named both keys
+  // because the quay-fleet SYMPTOM involved both; the constraint wins (see the DoD evidence section).
+  assert.equal(doc.loop.merge_target, undefined, "merge_target is deliberately NOT written (zero-consumer key)");
+  // Preservation — the whole reason this is a diff and not a re-dump.
+  assert.equal(doc.loop.my_project_key, "keep-me", "an unknown user key survives");
+  assert.deepEqual(doc.loop.concurrency_bands, [1, 3], "a user-tuned list survives with its order intact");
+  assert.equal(doc.loop.board, "native", "a pre-existing key keeps its user value");
+  assert.match(after, /^# a user's own comment that a YAML re-dump would destroy$/m, "comments survive (a YAML round-trip would drop them)");
+  assert.match(after, /^  # the project's own tuning, which must survive verbatim$/m, "inline comments inside the edited block survive too");
+});
+
+test("AC2 reconcile: a config already current is NOT rewritten (no gratuitous rewrite)", () => {
+  const dir = tmpDir("ac2-idempotent");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+
+  runQuay(["init", "--reconcile", "--root", dir], dir); // first: fresh write
+  const first = fs.readFileSync(cfgPath, "utf8");
+  const firstMtime = fs.statSync(cfgPath).mtimeMs;
+
+  const start = Date.now();
+  while (Date.now() - start < 50) { /* let mtime be able to differ */ }
+
+  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  assert.match(out, /already current/, `the second run reports a no-op:\n${out}`);
+  assert.equal(fs.readFileSync(cfgPath, "utf8"), first, "content is byte-identical");
+  assert.equal(fs.statSync(cfgPath).mtimeMs, firstMtime, "and the file was not written at all (mtime unchanged)");
+});
+
+test("AC2 reconcile negative control: WITHOUT --reconcile an existing config is still refused", () => {
+  const dir = tmpDir("ac2-nocontrol");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), LEGACY_CONFIG);
+
+  const out = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(out.exitCode, 1, "a bare init still refuses an existing config (reconcile is opt-in, not accidental)");
+  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), LEGACY_CONFIG, "and writes nothing");
+});
+
+test("AC2 reconcile: a value this version considers incompatible is migrated through the declared table", () => {
+  const dir = tmpDir("ac2-migrate");
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  const cfgPath = path.join(dir, ".quay", "config.yml");
+  fs.writeFileSync(cfgPath, "loop:\n  board: \"native\"\n  merge_target: integration\n");
+
+  const out = runQuay(["init", "--reconcile", "--root", dir], dir);
+  assert.match(out, /migrated loop\.merge_target: integration -> develop/, `the migration is reported:\n${out}`);
+  const doc = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+  assert.equal(doc.loop.merge_target, "develop", "the retired-branch value is rewritten");
+  assert.equal(doc.loop.fork_baseline, "develop", "and the fill still happens in the same pass");
+});
+
+test("AC2 reconcile unit: reconcileConfigContent edits in place — only the keys it sets appear", () => {
+  const { content, report } = reconcileConfigContent("loop:\n  board: \"native\"\n");
+  assert.deepEqual(report.added.sort(), Object.keys(LOOP_VERSION_DEFAULTS).sort(), "every schema key absent from the input is filled");
+  assert.equal(report.unchanged, false, "a fill is a change");
+  // The schema is the version's REQUIREMENT list, and it is deliberately short: a key this version
+  // does not require must not be silently introduced by a reconcile (that is how a dead key comes
+  // back). Pinning it here means widening the schema is an explicit, reviewable edit.
+  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["fork_baseline"], "the version-required loop keys, today");
+  const doc = YAML.parse(content);
+  assert.equal(doc.loop.board, "native", "the pre-existing key is preserved");
+  for (const k of Object.keys(LOOP_VERSION_DEFAULTS)) assert.equal(doc.loop[k], LOOP_VERSION_DEFAULTS[k], `loop.${k} filled`);
+
+  // Falsifier for the "no gratuitous rewrite" arm: the same document, once current, reports unchanged.
+  const again = reconcileConfigContent(content);
+  assert.equal(again.report.unchanged, true, "reconciling an already-current document reports unchanged");
+  assert.equal(again.content, content, "and produces the identical bytes");
 });
