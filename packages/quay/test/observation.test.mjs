@@ -903,11 +903,19 @@ test("taskRunsBlock renders one row per attempt for THIS task only + an honest e
     assert.ok(html.includes("run-a") && html.includes("run-b"), "AC1: each attempt's run_id renders");
     assert.ok(!html.includes("run-c") && !html.includes("9999"), "AC1: another task's attempts are NOT rendered");
 
-    const empty = taskRunsBlock(ws, "no-such-task");
+    // gap-webui-doc-tasks-residual-copy-en-zh: the empty state's wording now resolves through
+    // serve-i18n.ts ROW 13, whose default is `en`. The pre-existing assertion is kept VERBATIM and
+    // made explicit about the language it is about (`lang: "zh"`) — so it becomes a zh regression
+    // guard rather than silently reading as an English one — and the en side is asserted alongside
+    // it. ⛔ The `?lang=`-less default is NOT what these two lines test any more: a default-only
+    // assertion here would have kept passing while the string moved out from under it.
+    const empty = taskRunsBlock(ws, "no-such-task", { lang: "zh" });
     assert.ok(empty.includes("<h2>Runs</h2>"), "empty state still renders the Runs block (never a bare page)");
     assert.ok(empty.includes("无 worker 运行记录"), "empty state is an honest 无记录, not a fabricated row");
+    assert.ok(taskRunsBlock(ws, "no-such-task", { lang: "en" }).includes("No worker runs recorded"),
+      "the same empty state under en renders the English ROW 13 row");
 
-    const absent = taskRunsBlock(path.join(ws, "does-not-exist"), "gap-webui-task-runs-block");
+    const absent = taskRunsBlock(path.join(ws, "does-not-exist"), "gap-webui-task-runs-block", { lang: "zh" });
     assert.ok(absent.includes("无 worker 运行记录"), "absent outcome carrier degrades to the empty state, never throws");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });

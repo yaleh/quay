@@ -13,6 +13,9 @@ import {
   // the one `Vary`/the cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor,
 } from "./serve-render.ts";
+// gap-webui-doc-tasks-residual-copy-en-zh: the LIST page's last Chinese string — the read-failure
+// banner — resolves through serve-i18n.ts's ROW 13, the same seam every other page's body copy uses.
+import { docTaskLabelsFor } from "./serve-i18n.ts";
 
 export async function handleDocList(
   req: IncomingMessage,
@@ -29,6 +32,10 @@ export async function handleDocList(
   // ⛔ no `?? "en"` fallback is written here (that would make "not passed" and "passed en" the same
   // value — 硬规则 3b).
   const lang = cfg.lang;
+  // The ROW 13 roster, taken once per render (the ROW 5 `navLabelsFor` idiom). The banner below is
+  // the only consumer TODAY — and it is the one string AC-302 registered by name as out of ITS scope
+  // precisely because it cannot render on the default URL a criterion reads.
+  const L = docTaskLabelsFor(lang);
   const statusFilter = url.searchParams.get("status");
   const docDir = path.join(cfg.workspaceRoot, "docs-managed");
   let docs;
@@ -73,12 +80,17 @@ export async function handleDocList(
   //
   // ⛔ NAMED RESIDUE in THIS FILE, deliberately out of scope and registered rather than silently
   // counted as bilingual:
-  //  ① the `No documents.` empty-state string and the `读失败:` error banner below — both are
-  //     CONDITIONALLY rendered (`docs.length === 0` / `readError` non-empty) and are structurally
-  //     unreachable on the default URL a criterion reads, so no criterion can name them (硬规则 4c:
-  //     a criterion's quantity must survive every intermediate layer to the point it is read). ⛔ Not
-  //     translated here and ⛔ no criterion is invented for them; they are registered by name so a
-  //     later task can pick them up deliberately.
+  //  ① the `No documents.` empty-state string — CONDITIONALLY rendered (`docs.length === 0`), and
+  //     structurally unreachable on the default URL a criterion reads, so no criterion can name it
+  //     (硬规则 4c: a criterion's quantity must survive every intermediate layer to the point it is
+  //     read). ⛔ Still not translated here and ⛔ no criterion is invented for it.
+  //     ⚠️ THE OTHER HALF OF THIS NOTE IS NOW DONE: the `读失败:` error banner used to be listed here
+  //     as the second member of the same class, and
+  //     gap-webui-doc-tasks-residual-copy-en-zh took it (serve-i18n.ts ROW 13) after building the
+  //     fixture that makes the state render — i.e. the class this note describes is not "unreachable",
+  //     it is "unreachable to a probe that does not construct the state", and the residual task
+  //     constructed it. ⛔ `No documents.` remains registered: it is already English in BOTH columns,
+  //     so translating it would change the zh bytes (AC3 forbids that) for no reader's benefit.
   //  ② `handleDocDetail` below (`/doc/<id>` — NOT one of `SITE_NAV_ROUTES`' 15 nav views) keeps its
   //     own hard-coded English html-lang attribute and its lang-less
   //     `renderMobileChrome`/`renderSiteNav`. GOAL-024's scope limits this task to the nav route;
@@ -92,7 +104,7 @@ export async function handleDocList(
     ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>${pageTitle("Docs", cfg.identity, lang)}</title></head>
     <body>${renderMobileChrome("doc", pageNameFor("docs", lang), lang)}${renderSiteNav("doc", lang)}<main id="main">
       <h1>${pageNameFor("Managed documents", lang)} (${docs.length})</h1>
-      ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
+      ${readError ? html`<div class="error-banner" role="alert"><strong>${L.docReadFailed}</strong> ${escapeHtml(readError)}</div>` : ""}
       ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
         <tr><th>id</th><th>status</th><th>kind</th><th>title</th></tr>
         ${rows}

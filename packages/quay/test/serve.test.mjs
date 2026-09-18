@@ -1619,8 +1619,15 @@ async function main() {
       const mPort = mServer.address().port;
 
       const list = await get(mPort, "/tasks");
+      // gap-webui-doc-tasks-residual-copy-en-zh: the placeholder row's sentence now resolves through
+      // serve-i18n.ts ROW 13, whose default is `en`. The default response is asserted in ENGLISH and
+      // the pre-existing Chinese assertion is kept VERBATIM against an explicit `?lang=zh` probe — so
+      // it stays a zh regression guard instead of silently reading whichever language is the default.
+      const listZh = await get(mPort, "/tasks?lang=zh");
       assert(list.status === 200, "AC1: GET /tasks returns 200 with a missing-id task present (not 500)");
-      assert(list.body.includes("缺少 id"), "AC2: page visibly marks the malformed task '缺少 id'");
+      assert(list.body.includes("missing id field"), "AC2 (en): page visibly marks the malformed task 'missing id field'");
+      assert(!list.body.includes("缺少 id"), "AC2 (en): the default response carries no Chinese marker");
+      assert(listZh.body.includes("缺少 id"), "AC2 (zh): page visibly marks the malformed task '缺少 id' (byte for byte as before)");
       assert(list.body.includes("MAL-1"), "AC2: page shows the malformed task's filename fallback");
       assert(list.body.includes('class="malformed-row"'),
         "AC2: the malformed task renders as a visibly distinct placeholder row");
@@ -1637,8 +1644,13 @@ async function main() {
       // task was surfaced, not silently swallowed.
       fs.rmSync(path.join(mTasksDir, "MAL-1.md"));
       const list2 = await get(mPort, "/tasks");
+      const list2Zh = await get(mPort, "/tasks?lang=zh");
       assert(list2.status === 200, "AC3: GET /tasks still returns 200 after removing the malformed fixture");
-      assert(!list2.body.includes("缺少 id"), "AC3: '缺少 id' marker is gone after removing the fixture");
+      // The negative control is asserted in the language that CAN carry the marker. ⛔ Under the
+      // default (en) the zh string is absent no matter what the fixture does, so the original
+      // assertion alone would have become a tautology the moment the string moved (decision ④).
+      assert(!list2.body.includes("missing id field"), "AC3 (en): the marker is gone after removing the fixture");
+      assert(!list2Zh.body.includes("缺少 id"), "AC3 (zh): '缺少 id' marker is gone after removing the fixture");
       const trCount2 = (list2.body.match(/<\/tr>/g) || []).length;
       assert(trCount2 === 3, `AC3: rendered rows drop by exactly 1 after removing the fixture (expected 3 rows, got ${trCount2})`);
     } finally {

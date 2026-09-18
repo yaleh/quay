@@ -1564,15 +1564,27 @@ test("AC1 (unit) — taskRunsBlock shows a 「进行中」 row + session link fo
   fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
   fs.writeFileSync(path.join(home, ".claude", "sessions", "12345.json"), JSON.stringify({ sessionId: sid }));
   try {
+    // gap-webui-doc-tasks-residual-copy-en-zh: the state word now resolves through serve-i18n.ts
+    // ROW 13 (whose default is `en`), so every Chinese assertion here is made EXPLICITLY about zh —
+    // the positive one stays a zh regression guard and the ⚠️ NEGATIVE one stops being a tautology
+    // (under en it would be absent for the wrong reason). The en side is asserted next to them.
     const htmlBlock = taskRunsBlock(root, "gap-live-1", {
       liveWorkers: [{ taskId: "gap-live-1", pid: "12345", startedAtMs: Date.parse("2026-08-25T00:00:00Z") }],
       sessionHome: home,
+      lang: "zh",
     });
     assert.match(htmlBlock, /进行中/, "live worker renders a 「进行中」 row");
     assert.match(htmlBlock, />12345</, "live worker pid is shown");
     assert.match(htmlBlock, /href="\/session\/066a1382-fde0-410b-bee1-78a4b5886132"/, "live worker session id is linked (reuses liveSessionIdForPid)");
     assert.match(htmlBlock, /worker-gap-live-1/, "live worker run id is the worker-<task> form");
     assert.doesNotMatch(htmlBlock, /无 worker 运行记录/, "an in-flight row suppresses the empty-store message");
+    const enBlock = taskRunsBlock(root, "gap-live-1", {
+      liveWorkers: [{ taskId: "gap-live-1", pid: "12345", startedAtMs: Date.parse("2026-08-25T00:00:00Z") }],
+      sessionHome: home,
+      lang: "en",
+    });
+    assert.match(enBlock, /<strong>In progress<\/strong>/, "the same row under en renders ROW 13's English state word");
+    assert.doesNotMatch(enBlock, /进行中/, "and carries no Chinese state word under en");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
@@ -1587,9 +1599,16 @@ test("AC2 (unit) — a done task with no live worker shows NO 「进行中」 ro
     JSON.stringify({ ts: "2026-08-25T00:00:00Z", task: "gap-runs-1", final_state: "completed", exit_code: 0, session_id: null }),
   ].join("\n") + "\n");
   try {
-    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [] });
+    // Explicit zh (see the AC1 note above): this is a NEGATIVE assertion, and under en it would be
+    // true because the zh string is never reachable — a reading that cannot take the other value.
+    const htmlBlock = taskRunsBlock(root, "gap-runs-1", { liveWorkers: [], lang: "zh" });
     assert.doesNotMatch(htmlBlock, /进行中/, "no live worker ⇒ no 「进行中」 ghost row");
     assert.match(htmlBlock, /completed/, "historical outcome row still renders");
+    // The en control: the same input, the same absence, and the state word that WOULD be there shows
+    // up the moment a live worker is supplied (AC1) — so the absence above is about the input, not
+    // about the language.
+    assert.doesNotMatch(taskRunsBlock(root, "gap-runs-1", { liveWorkers: [], lang: "en" }), /In progress/,
+      "under en the ghost is equally absent");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1604,6 +1623,7 @@ test("AC3 (unit) — a live worker with no/malformed session record renders 「�
     const htmlBlock = taskRunsBlock(root, "gap-live-2", {
       liveWorkers: [{ taskId: "gap-live-2", pid: "99999", startedAtMs: null }],
       sessionHome: home, // no sessions dir ⇒ liveSessionIdForPid returns null (honest, not a dead link)
+      lang: "zh", // explicit zh — see the AC1 note above
     });
     assert.match(htmlBlock, /进行中/, "live worker row still present");
     assert.doesNotMatch(htmlBlock, /href="\/session\//, "no session record ⇒ no dead transcript link");
