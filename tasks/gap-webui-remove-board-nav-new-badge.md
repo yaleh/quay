@@ -2,7 +2,7 @@
 id: gap-webui-remove-board-nav-new-badge
 title: 去掉 Web 顶部导航 Board 旁的 NEW 徽标（serve-render.ts navItem 硬编码 + .nav-badge CSS
   + 断言它存在的测试 + 三份 dist）
-status: todo
+status: ready
 labels:
   - gap
   - webui
