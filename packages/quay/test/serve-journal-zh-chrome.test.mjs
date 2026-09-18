@@ -214,7 +214,13 @@ test("AC-black-box: /journal under Cookie lang=zh switches html lang, both nav c
   assert.notEqual(tZh, tEn, "this page's OWN <title> is not byte-identical across the two languages");
 
   // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it).
-  assert.equal(h1Of(en.body), `${H1_TOKEN} — 循环最近记录`, "the en <h1> is the baseline");
+  // ⚠️ gap-webui-journal-body-copy-en-zh moved the SUFFIX, and only the suffix: AC-296 wired the
+  // page's own token (`Journal` / `日志`) and left the trailing 「循环最近记录」 hard-coded, because
+  // that was body copy and belonged to the body-copy series. That series has now landed, so the en
+  // suffix is the dictionary's EN column and the zh suffix is byte-unchanged. ⛔ The two arms are
+  // still asserted separately — the point of this test is that the two languages differ in the
+  // token AND the suffix, and an en suffix that merely matched the zh one would still be a bug.
+  assert.equal(h1Of(en.body), `${H1_TOKEN} — recent loop record`, "the en <h1> is the baseline");
   assert.equal(h1Of(zh.body), `${H1_TOKEN_ZH} — 循环最近记录`, "the zh <h1> is translated");
 });
 
@@ -227,8 +233,13 @@ test("AC-en-baseline: the en response is the pre-AC-296 page verbatim", async ()
   assert.ok(en.body.includes('<html lang="en">'), "the en page is <html lang=\"en\">");
   assert.ok(en.body.includes(`<title>`) && headTitle(en.body).endsWith(` — ${TITLE_TOKEN}`),
     `the en <title> still carries its English page token (got ${JSON.stringify(headTitle(en.body))})`);
-  assert.ok(en.body.includes(`<h1>${H1_TOKEN} — 循环最近记录</h1>`),
-    "the en <h1> is still the pre-AC-296 literal, byte for byte");
+  // ⚠️ The <h1>'s TRAILING SUFFIX is the ONE byte this task deliberately moved: it was hard-coded
+  // Chinese until gap-webui-journal-body-copy-en-zh put it in the ROW 10 dictionary. Everything else
+  // this test pins — the `<html lang>`, the `<title>` token, both current nav items, the mobile
+  // header label — is byte-for-byte what AC-296 left, which is exactly what this arm is for: it is
+  // still the guard against a lang-parameterised renderer quietly moving the EN default.
+  assert.ok(en.body.includes(`<h1>${H1_TOKEN} — recent loop record</h1>`),
+    "the en <h1> carries the English token AND the English suffix");
   const navEn = navRegion(en.body);
   assert.ok(currentItem(navEn, "nav-") === H1_TOKEN,
     `the en desktop current nav item is still "Journal" (got ${JSON.stringify(currentItem(navEn, "nav-"))})`);
