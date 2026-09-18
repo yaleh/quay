@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
+import { journalLabelsFor, fillLabel, type JournalKey } from "./serve-i18n.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data
@@ -11,19 +12,31 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relative
 // handler is wrapped defensively so ANY unexpected throw degrades to a 200 page with an error
 // note (never a 500) — the hard degradation contract of this task.
 
-function renderSectionBlock(s: JournalSection, title: string): string {
+/** AC-306 (gap-webui-journal-body-copy-en-zh): every word this page says comes from
+ *  `journalLabelsFor(lang)` (serve-i18n.ts ROW 10) — ⛔ including the empty/error states, which the
+ *  red baseline found with the same no-data differential that found the section headings.
+ *
+ *  ⚠️ `s.staleSource` is re-rendered here into the SAME markdown the reader used to hand over
+ *  pre-baked, and the result goes through the SAME `renderMarkdown` — so `lang=zh` bytes are
+ *  unchanged by construction, while `lang=en` gets an English sentence. The `### ` stays at this
+ *  call site: it is markdown STRUCTURE (the heading level), not copy, and ROW 10's unit is the
+ *  rendered sentence. */
+function renderSectionBlock(s: JournalSection, title: string, L: Record<JournalKey, string>): string {
   if (s.status === "ok") {
     if (s.markdown && s.markdown.trim()) {
-      return html`<h2>${title}</h2><div class="body">${renderMarkdown(s.markdown)}</div>`;
+      const md = s.staleSource
+        ? `### ${fillLabel(L.staleBanner, { date: s.staleSource.date, days: s.staleSource.days })}\n\n${s.markdown}`
+        : s.markdown;
+      return html`<h2>${title}</h2><div class="body">${renderMarkdown(md)}</div>`;
     }
-    // Source exists and is readable, but has no recent content — distinct from both 无数据
-    // (source absent) and 读失败 (source unreadable).
-    return html`<h2>${title}</h2><p class="meta">暂无内容。</p>`;
+    // Source exists and is readable, but has no recent content — distinct from both 「无数据」
+    // (source absent) and 「读失败」 (source unreadable).
+    return html`<h2>${title}</h2><p class="meta">${L.noContent}</p>`;
   }
   if (s.status === "empty") {
-    return html`<h2>${title}</h2><p class="meta"><strong>无数据</strong> — ${escapeHtml(s.reason || "")}</p>`;
+    return html`<h2>${title}</h2><p class="meta"><strong>${L.noData}</strong> — ${escapeHtml(s.reason || "")}</p>`;
   }
-  return html`<h2>${title}</h2><p class="meta"><strong>读失败</strong> — ${escapeHtml(s.reason || "")}</p>`;
+  return html`<h2>${title}</h2><p class="meta"><strong>${L.readFailed}</strong> — ${escapeHtml(s.reason || "")}</p>`;
 }
 
 // gap-webui-live-implcomplete-state-render: the impl-complete boundary (implCompletedAtMs) splits an
@@ -173,13 +186,18 @@ export function renderLivePage(live: LiveResult, identity: ServeIdentity | null 
  *  The last two are the whole point: a shared nav bar that switches while THIS page's own
  *  `<title>` stays English is precisely what the criterion's `title-unchanged` arm rejects. */
 function renderJournalPage(journal: JournalResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
+  // AC-306: the whole roster, taken ONCE (the `navLabelsFor` idiom) — the body copy is now as
+  // language-aware as the chrome AC-296 already wired. The data sections below are rendered
+  // VERBATIM (⛔ never translated, never truncated): the /journal page shows escalations.md and
+  // tick-log.md, whose Chinese is the operator's own written record, not this page's copy.
+  const L = journalLabelsFor(lang);
   return html`<!doctype html>
     ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>${pageTitle("Journal — recent loop record", identity, lang)}</title></head>
     <body>${renderMobileChrome("journal", "journal", lang)}${renderSiteNav("journal", lang)}<main id="main">
-      <h1>${pageNameFor("Journal", lang)} — 循环最近记录</h1>
-      ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
-      ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
-      ${renderSectionBlock(journal.commits, "最近提交 (git log)")}
+      <h1>${pageNameFor("Journal", lang)} — ${L.titleSuffix}</h1>
+      ${renderSectionBlock(journal.escalations, L.sectionEscalations, L)}
+      ${renderSectionBlock(journal.tickLog, L.sectionTickLog, L)}
+      ${renderSectionBlock(journal.commits, L.sectionCommits, L)}
     </main></body></html>`;
 }
 

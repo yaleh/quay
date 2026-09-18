@@ -69,3 +69,4 @@ extra:
 - packages/quay/src/serve-i18n.ts
 - packages/quay/test/serve-board-body-i18n.test.mjs (new)
 - packages/quay/test/serve-board.test.mjs
+- packages/quay/test/gap-webui-board-transient-columns-drowned-by-history.test.mjs
