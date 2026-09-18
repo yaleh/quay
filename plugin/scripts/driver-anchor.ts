@@ -15,7 +15,8 @@
 //   `.quay/<prefix>-supervisor.pid` 阶段 C 起**退役**——anchor 承担 respawn，⛔ 不再有 supervisor 层
 //   `.quay/anchor.pid`              anchor 自身 pid（⛔ 刻意不叫 `*-driver.pid`，见 driver-runtime 注释）
 //   `.quay/anchor-desired.json`     期望托管的 kind 集合（声明式；`quay driver start/stop --kind X` 改它）
-//   `.quay/anchor.json`             结构化回读面 {pid, startedAt, kinds, host}
+//   `.quay/anchor.json`             结构化回读面 {pid, startedAt, kinds, host, bundle, takeover}
+//   `.quay/anchor-takeover.json`    **接管异常**记录（无此文件 = 干净交接/未发生接管；三态见 TakeoverRecord）
 //
 // ⛔ **本文件是【唯一】把多个 kind 收进一个进程的地方**——若未来某个 kind 需要独立进程（例如 CPU 密集
 // 到会饿死其余 kind，SPEC §9 开放问题 1），正确做法是给它一个单独的 anchor 实例（`--kinds <一个>`），
@@ -182,6 +183,98 @@ function startKindTask(
   return task;
 }
 
+// ── 接管等待预算（D2）与接管异常载体（D3） ─────────────────────────────────────────────────────────
+//
+// 现场（2026-09-18，全部从 `.quay/anchor.log` 与代码读出，⛔ 非推断）：stop 请求 15:33:25 → 旧 anchor
+// **233s 后**才退出（`anchor: exited` 15:37:18），而接管者的等待预算是 `shutdownGraceMs + 60_000`
+// = 180s ⇒ 15:36:20 `REFUSING to start`，随后替换进程退出、旧 anchor 也退出 ⇒ **零 anchor 27 分钟**
+// （直到人手工重启 drivers）。三个缺陷在本段收口：
+//   D1 `!stopping` 闸（见 reconcile 的起分支）：停机后⛔ 不再拉起任何 kind ⇒ 旧 anchor 真的会排空。
+//   D2 预算从**旧 anchor 的真实最坏退出**派生，⛔ 不是 `grace + 60_000`——后者在 grace ≥ 60s 时
+//      **恰好等于**最坏退出时间（不是一个**超过**它的上界）⇒ 一次「正确但慢」的交接被判为失败。
+//   D3 「放弃」不再是**终态**：超预算只把这次交接**标成异常**并**继续等**旧 pid 退出；旧 pid 一死就
+//      接管（那时双派发在结构上不可能——旧进程已经不在）。真的等不到（观察窗内旧 pid 始终不退）才
+//      放弃，且必须留下**机器可读**的记录，⛔ 不是只打一行日志。
+
+/** 旧 anchor 的**真实最坏退出时间**（ms）。与 runAnchor 的两段**有界**等待逐字对应：
+ *   ① 有界停机宽限 `shutdownGraceMs`（下面 `stopping` 支超时即 break）；
+ *   ② 循环收尾等待 `Math.min(60_000, shutdownGraceMs)`（收尾循环那句）。
+ *  ⚠️ 它是**代码里两段等待的上界**，⛔ 不是「这个进程一定会在此时刻前退出」的保证——调度抖动可以让
+ *  reconcile 的 500ms 定时器晚到几十秒（2026-09-18 实测：宽限 120s 的那段实际走了 162s）。正因为
+ *  这一点，D3 必须让「超预算」可继续，⛔ 不能靠把余量调大来掩盖。 */
+export function oldAnchorWorstExitMs(shutdownGraceMs: number): number {
+  const grace = Math.max(0, shutdownGraceMs);
+  return grace + Math.min(60_000, grace);
+}
+
+/** 超预算的余量（ms）：覆盖「停机请求被察觉」的最坏延迟（≤ reconcileMs）与收尾清理。
+ *  ⚠️ 这是**分类阈值**（「这还算一次正常交接吗」），⛔ **不是**接管与否的分界——超过它只是把交接
+ *  标成异常并继续等（D3）。故它的取值 ⛔ 不影响正确性，只影响异常被记下的早晚。 */
+export const TAKEOVER_MARGIN_MS = 20_000;
+
+/** 接管等待预算（ms）= 旧 anchor 的真实最坏退出 + 察觉延迟 + 余量。
+ *  `QUAY_ANCHOR_TAKEOVER_BUDGET_MS` 覆盖（测试缝/运维；⛔ 不是「不设限」的替代表达，见硬规则 4 推论二）。 */
+export function takeoverBudgetMs(shutdownGraceMs: number, reconcileMs: number): number {
+  const override = Number(process.env.QUAY_ANCHOR_TAKEOVER_BUDGET_MS ?? "");
+  if (Number.isFinite(override) && override > 0) return override;
+  return oldAnchorWorstExitMs(shutdownGraceMs) + Math.max(0, reconcileMs) + TAKEOVER_MARGIN_MS;
+}
+
+/** 超预算之后**继续观察**旧 pid 的上限（ms，缺省 30 分钟）。
+ *  等满仍在 ⇒ 放弃启动并留痕：旧 anchor 彻底卡死时接管不可能安全（双派发比「晚一点接管」贵得多）。 */
+export function takeoverAbandonWatchMs(): number {
+  const raw = Number(process.env.QUAY_ANCHOR_TAKEOVER_ABANDON_WATCH_MS ?? "");
+  return Number.isFinite(raw) && raw > 0 ? raw : 1_800_000;
+}
+
+/** 接管异常的**机器可读**载体：`.quay/anchor-takeover.json`。
+ *
+ *  ⛔ **刻意不复用 `.quay/anchor.json`**：那个文件由**在任 anchor 每趟 reconcile 重写一次**（见
+ *  driver-runtime `readAnchorState` 的注释）⇒ 接管者在等待期写进去的记录会在 500ms 内被覆盖，
+ *  「写了」与「没写」同形（硬规则 3b）。本文件只由**接管者**写，故外部读得到。
+ *  ✅ 同一个记录经 `writeState()` 的 `takeover` 字段**出现在 `.quay/anchor.json` 上**——那是 manager/
+ *  外层已经在读的面（与 `bundle` 字段同形）⇒ 本条读数有既有消费者，⛔ 不是只给 fixture 看的。
+ *  ⛔ state 三态互斥、且「无此文件」= 干净交接（或根本没有接管），四者**不共用取值**：
+ *    takeover-abandoned          超预算但旧 pid 仍在——本进程还在等，旧 pid 一死即接管
+ *    taken-over-after-abandon    旧 pid 已死、本进程已接管（异常已收敛）
+ *    takeover-abandoned-gave-up  观察窗内旧 pid 始终不退——本进程放弃启动并退出（双派发硬闸）
+ *  读方若要判「异常此刻仍在进行中」，须同时 `kill -0` 记录里的 `pid`（进程被 SIGKILL 时记录会留在盘上，
+ *  ⛔ 与「正在等」同形）。 */
+export const ANCHOR_TAKEOVER_REL = ".quay/anchor-takeover.json";
+export type TakeoverState = "takeover-abandoned" | "taken-over-after-abandon" | "takeover-abandoned-gave-up";
+export interface TakeoverRecord {
+  state: TakeoverState;
+  /** 写这条记录的进程（= 接管者）。 */
+  pid: number;
+  /** 在等的旧 anchor pid。 */
+  waitingOn: number;
+  budgetMs: number;
+  waitedMs: number;
+  at: string;
+}
+
+function takeoverRecordFile(root: string): string {
+  return path.join(root, ANCHOR_TAKEOVER_REL);
+}
+
+function writeTakeoverRecord(root: string, rec: TakeoverRecord): void {
+  try {
+    const f = takeoverRecordFile(root);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify(rec) + "\n", "utf8");
+  } catch { /* 回读面写失败不致命：日志行仍在（⛔ 但也不假装写成了） */ }
+}
+
+/** 读接管异常记录。缺 / 不可解析 ⇒ null。
+ *  ⚠️ 这里「没有」与「读不懂」共用 null 是**可接受**的：本条读数**不触发任何动作**（只被展示），
+ *  ⛔ 与 bundle 那类要动作的判定不同（那种形态必须给「未评估」独立取值，硬规则 3b）。 */
+export function readTakeoverRecord(root: string): TakeoverRecord | null {
+  try {
+    const o = JSON.parse(fs.readFileSync(takeoverRecordFile(root), "utf8")) as { state?: unknown };
+    return typeof o?.state === "string" ? (o as TakeoverRecord) : null;
+  } catch { return null; }
+}
+
 /** 常驻 anchor 主体：托管若干 kind 的循环，reconcile 期望态，直到收到停机请求。 */
 export async function runAnchor(opts: AnchorOptions): Promise<number> {
   const logFile = opts.logFile ?? anchorPaths(opts.root).logFile;
@@ -197,17 +290,62 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // 「STILL ALIVE after 60s (starting anyway)」**照样起循环** ⇒ 两个进程同时派发。修法两条，缺一不可：
   //   ① 等待上限必须 **> 停机宽限**（否则「等」永远等不到一个正常收敛的旧 anchor）；
   //   ② 到点仍活着 ⇒ **放弃接管并退出**（⛔ 不是「照样起」）—— 延迟自刷新是可恢复的，双派发不是。
+  //
+  // ⚠️ ② 在 2026-09-18 被**再修一次**（D2+D3）：① 的预算只到「宽限 + 60s」，而旧 anchor 的真实最坏
+  // 退出是「宽限 + min(60s, 宽限) + 察觉延迟 + 清理」——两者在宽限 ≥ 60s 时**相等**，不是一个严格
+  // 上界；实测 233s > 180s ⇒ `REFUSING`。同时 ② 的「放弃」是**终态**（只打一行日志就退出），于是旧
+  // anchor 随后退出 = 零 anchor。现在：预算按真实最坏退出派生（D2），且超预算**不等于**放弃接管——
+  // 它降级为「继续等旧 pid 退出，一死就接管」（D3）。「放弃」只在观察窗内旧 pid 始终不退时发生，
+  // 且必然留一条机器可读记录。
   if (opts.takeoverPid) {
-    const takeoverDeadlineMs = shutdownGraceMs + 60_000;
-    const deadline = Date.now() + takeoverDeadlineMs;
+    const budgetMs = takeoverBudgetMs(shutdownGraceMs, opts.reconcileMs ?? 500);
+    const waitT0 = Date.now();
+    const deadline = waitT0 + budgetMs;
     while (pidAlive(opts.takeoverPid) && Date.now() < deadline) {
       await new Promise<void>((r) => setTimeout(r, 200));
     }
     if (pidAlive(opts.takeoverPid)) {
-      log(`${ts()} anchor: takeover ${opts.takeoverPid} STILL ALIVE after ${takeoverDeadlineMs}ms — REFUSING to start (two anchors would double-dispatch); this refresh attempt is abandoned`);
-      return 1;
+      // ── 超预算 ⇒ 交接**分类**变了，但交接本身⛔ 没有失败（D3）─────────────────────────────────
+      const waitedMs = Date.now() - waitT0;
+      log(
+        `${ts()} anchor: takeover ${opts.takeoverPid} STILL ALIVE after ${budgetMs}ms (waited ${waitedMs}ms) — ` +
+        `abandoning the NORMAL-handoff CLASSIFICATION only (state=takeover-abandoned in ${ANCHOR_TAKEOVER_REL}), ` +
+        `NOT the takeover: still watching for ${opts.takeoverPid} to exit — starting now would double-dispatch, ` +
+        `but once the old pid is gone there is nothing left to race`,
+      );
+      // ⛔ 先留痕、**再**等：要求记录某动作就不能把该动作排在记录之后（硬规则 7 的镜像）——「正在等」
+      // 必须在等待**之前**可读，否则读方在整段等待里看到的都是「什么都没有」（与「一切正常」同形）。
+      writeTakeoverRecord(opts.root, {
+        state: "takeover-abandoned", pid: process.pid, waitingOn: opts.takeoverPid, budgetMs, waitedMs, at: ts(),
+      });
+      const watchMs = takeoverAbandonWatchMs();
+      const watchDeadline = Date.now() + watchMs;
+      while (pidAlive(opts.takeoverPid) && Date.now() < watchDeadline) {
+        await new Promise<void>((r) => setTimeout(r, 200));
+      }
+      if (pidAlive(opts.takeoverPid)) {
+        const totalMs = Date.now() - waitT0;
+        writeTakeoverRecord(opts.root, {
+          state: "takeover-abandoned-gave-up", pid: process.pid, waitingOn: opts.takeoverPid, budgetMs, waitedMs: totalMs, at: ts(),
+        });
+        log(
+          `${ts()} anchor: takeover ${opts.takeoverPid} still alive after ${totalMs}ms total ` +
+          `(${watchMs}ms of watching beyond the ${budgetMs}ms budget) — REFUSING to start (two anchors would ` +
+          `double-dispatch); this refresh attempt is abandoned and recorded in ${ANCHOR_TAKEOVER_REL}`,
+        );
+        return 1;
+      }
+      const lateMs = Date.now() - waitT0;
+      log(
+        `${ts()} anchor: takeover ${opts.takeoverPid} exited at last (after ${lateMs}ms, ${lateMs - budgetMs}ms ` +
+        `past the budget) — taking over (double-dispatch is impossible: the old pid is gone)`,
+      );
+      writeTakeoverRecord(opts.root, {
+        state: "taken-over-after-abandon", pid: process.pid, waitingOn: opts.takeoverPid, budgetMs, waitedMs: lateMs, at: ts(),
+      });
+    } else {
+      log(`${ts()} anchor: takeover ${opts.takeoverPid} exited — taking over`);
     }
-    log(`${ts()} anchor: takeover ${opts.takeoverPid} exited — taking over`);
   }
   // 双派发硬闸（与上面的等待互补，覆盖「等待被绕过 / 无 --takeover 的并发起法」）：盘上 anchor.pid
   // 指向一个**活着的、不是我**的进程 ⇒ 拒绝起循环。宁可不起，⛔ 不可两个 anchor 同时派发。
@@ -281,6 +419,12 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           host: "anchor",
           // 内核 bundle 同步读数（每趟 pass 重写；`KernelBundleSyncState` 六态各自独立，⛔ 不与 fresh 同形）。
           bundle: bundleReading,
+          // 接管异常读数（D3，`TakeoverRecord`）：无记录 ⇒ **null**，⛔ 与那三个具名态都不共用取值。
+          // 放在这里而不是只留在 `.quay/anchor-takeover.json`：`anchor.json` 是 manager/外层已经在读的
+          // 回读面（与 `bundle` 同字段同形）⇒ 交接异常在既有消费者那里**可见**，⛔ 不是只给 fixture 看。
+          // ⚠️ 在任 anchor 也会把它读到的记录（= 某个接管者写的）原样带上——那正是期望的：此刻确实
+          // 有一次交接在进行/已收敛，读方按 `state` + 记录里 `pid` 的存活区分「在等」与「已收敛」。
+          takeover: readTakeoverRecord(opts.root),
         }) + "\n",
         "utf8",
       );
@@ -332,8 +476,17 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
 
     const wanted = readDesired(opts.root)?.kinds ?? [];
     // 起：期望态里有而没在跑 ⇒ 起（幂等：已在 active 的就是 no-op，⛔ 不重启——§6.9 不变式 1）。
-    for (const kind of wanted) {
-      if (!active.has(kind)) startKindTask(kind, opts, log, active, desiredOpts()[kind] ?? {});
+    //
+    // ⛔ `!stopping` 闸（D1，2026-09-18 实测）：停机是**不可逆**态，一旦请求就⛔ 不得再拉起任何 kind。
+    //   缺这道闸时，一个刚收尾的 kind 会在**下一趟** reconcile 被重新拉起（`wanted` 仍是盘上期望态，
+    //   它不看 `stopping`）⇒ `active` 永不排空 ⇒ 上面那条「有界停机宽限」从**兜底**变成**唯一**的退出
+    //   路径，而新拉起的循环又把宽限拖满。实测 anchor.log：15:33:25 `stop requested` → 15:33:53 /
+    //   15:34:41 / 15:36:07 三次 `loop started` → 宽限到点后仍等满 `min(60s, grace)` ⇒ **233s** 才退出，
+    //   超过接管者的等待预算 ⇒ `REFUSING to start` + 旧 anchor 随后退出 = **零 anchor 27 分钟**。
+    if (!stopping) {
+      for (const kind of wanted) {
+        if (!active.has(kind)) startKindTask(kind, opts, log, active, desiredOpts()[kind] ?? {});
+      }
     }
     // 停：在跑而期望态里没有 ⇒ 只停那一个（§6.9 不变式 2：⛔ 不波及其余）。
     for (const kind of [...active.keys()]) {
