@@ -2,7 +2,7 @@
 id: gap-webui-doc-tasks-residual-copy-en-zh
 title: /doc 与 /tasks（含 /task/&lt;id&gt; 详情）残留的 5 处硬编码中文界面文案（读失败、缺少 id、解析失败、无
   worker 运行记录、进行中）—— 正文本地化系列，合并一条
-status: todo
+status: ready
 labels:
   - gap
   - webui
