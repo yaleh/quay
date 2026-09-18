@@ -12,6 +12,20 @@ children: []
 extra:
   schema: execution
 ---
+---
+id: gap-touches-parser-early-subheading-latch-hides-declaration
+title: touches-parser 的段提取被「更早的 `### Touches …` 子标题」劫持 ⇒ 声明解析成 0 条 ⇒ anti-drift
+  报「每个改动文件都 out-of-declared」，任务永久不可落地（在飞阻塞器实测 9 violations）；且零 globs 与「没有声明」同形
+status: ready
+labels:
+  - gap
+  - defect
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+---
 ## Proposal
 
 **缺陷（实测 2026-09-18，本机 `/home/yale/work/quay`；⛔ 非推断）**：`plugin/scripts/touches-parser.ts:210-227`
@@ -262,3 +276,44 @@ heading deleted  = 10
 - plugin/scripts/touches-parser.ts
 - plugin/test/touches-parser-parity.test.mjs
 - tasks/gap-touches-parser-early-subheading-latch-hides-declaration.md
+- plugin/scripts/quay-init.sh
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+
+## Blocker fix (⛔ outside this task's ORIGINAL declared surface — declared above, justified here)
+
+**What**: `plugin/scripts/quay-init.sh`'s `write_config` comment carried an unescaped backtick pair
+inside an **unquoted** heredoc (`cat > "$cfg" <<EOF`) ⇒ command substitution at WRITE time ⇒ the
+emitted `.quay/config.yml` got the command's multi-line output spliced in, its continuation line
+carried no `#` ⇒ the file became invalid YAML. Origin `1cdec24fa`
+(`gap-quay-init-native-reconcile`, already `done`).
+
+**One-command contrast** (no fix ⇒ red / fix ⇒ green): 生成一个全新 workspace 跑
+`quay-init.sh --loop`，再 `python3 -c 'import yaml;yaml.safe_load(open("<ws>/.quay/config.yml"))'`。
+BEFORE: `ScannerError ... line 29, column 3 / could not find expected ':'`。
+AFTER: parses; `loop` keys = fork_baseline/repo_root/test_command/tmux_session/worktree_root；
+第二次 `--loop`（升级路径）exit 0。
+
+**Why fixed here rather than waiting for develop**:
+1. 三个红文件与本任务 delta 无关 —— 已用**主检出**（`touches-parser.ts` 为未改的基线版本）
+   逐个复跑，失败逐字相同 ⇒ 不是本任务引入的。
+2. worker-driver 的豁免要求断言签名在窗口内跨 ≥2 个任务复发；实测未复发
+   （`.quay/worker-round.jsonl` @ 2026-09-18T16:27Z: `recurredTasks: []`,
+   `own-defect-counted`）⇒ 每轮都计重试预算，而成功率 0。
+3. 对 `tasks/*.md` 的谓词（已用两个已知为真的样本干跑过）找不到**任何**
+   `ready/todo/needs-human` 任务声明 `plugin/scripts/quay-init.sh` ⇒ 「等 develop 自己修」
+   **没有时间界**，而这个红阻断**每一个**任务的落地。
+   先例：`gap-ac292-criterion-cold-miss-30s-ttl-always-expired`（owner 不在飞时登记 Touches）。
+
+**Verification**: 三个文件 0/3 → **3/3** 绿
+（`conformance-target-fixture` 9/9、`quay-init-loop` 5/5、`install-config-driven-e2e` 3/3）；
+`quay-init-closure-ratchet` 机械重锚（`--gate` shrink-only `3 files / 1022 bytes ≤ 3/1022`；
+`--check-stale` 两侧 exit 0 / exit 1→0；baseline diff 只有 `fingerprint` 与该 source 的 `sha`，
+`files`/`bytes` 未动 ⇒ 未把棘轮放宽）。
+
+**5b sweep（同一形状的其它落点）**: 扫 236 个 shell 文件的【未加引号 heredoc 正文】中含
+反引号或 `$(` 的行，共 47 处；逐条判读后**只有本行**是「非转义且非生成产物」的实例，
+其余是【加反斜杠转义】的形式（`checker-mutation-cases/*.sh`）或生成脚本里有意的替换形式
+（`develop-deliver-tgz.sh` / `verify-deliver-coldstart.sh`）。
+⚠️ 观察项（未立案，硬规则 12：发生率 1，不设前置）：同一陷阱在本注释**被撰写时又复现了一次**
+（我写的解释文字里的反引号同样被求值），说明「评审时看不出来」；若要机制化防复发，
+应是一个「未加引号的 heredoc 正文里出现未转义反引号 ⇒ 报红」的 checker。
