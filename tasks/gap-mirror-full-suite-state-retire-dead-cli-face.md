@@ -3,7 +3,7 @@ id: gap-mirror-full-suite-state-retire-dead-cli-face
 title: mirror-full-suite-state.ts 的模块面是活的、CLI
   入口面已死——退入口留模块；并纠正「pre-verified-round-record.ts 同形」这一误判（其 CLI 在
   fan-in-execute.js:496 仍被真调用）
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -93,7 +93,7 @@ suite-driver.ts        suite-lock-slots.ts           supervisor-preempt-candidat
 - [x] AC4：`mirror-full-suite-state.ts` 退入口留模块——删 `usage` / `main()` / `isDirectEntry` 守卫及入口专用 import；4 个 `export` 签名不变（git diff 见 §执行记录 AC4）。
 - [x] AC5：`plugin/test/mirror-full-suite-state.test.mjs` 的 spawn 用例改为进程内调用，**不残留恒真/恒假断言**；该文件 **7/7 绿**、`spawnSync` 计数 0 —— 见 §执行记录 AC5。
 - [x] AC6：`capability-catalog.sh` + `select-static-checks-for-touches.ts` 的登记行改为"模块库，无 CLI 入口"的如实描述；`node --test plugin/test/capability-catalog.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` **38/38 绿**、catalog `0 unclassified` —— 见 §执行记录 AC6。
-- [ ] AC7：`bash scripts/test.sh` 全量绿；命令与结果贴进任务体。⛔ **本分支未达成，且非本分支所致**：实测 `bash scripts/test.sh`（worktree 内，2026-09-18）**exit 1**，红发生在静态检查阶段的 fail-closed（`STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`），套件在进入 node 测试泳道**之前**就中止 ⇒ 本轮连一条测试泳道结论都没有。红因 = develop 上**既有**的直投提交 `2d3a6fa35`（人 2026-09-18 04:11Z 的 `mem:` 提交）未登记进 `plugin/scripts/direct-to-develop-bypass-check.ts:234 RULED_HISTORICAL_COMMITS`；**「与本分支无关」的证明**（主检出同红、该 sha 是 develop 祖先、与本任务 delta 面零交集）见 §执行记录 AC7。同一红同时打挂在飞任务的全部 fan-in suite（`.quay/fan-in-suite-*` 三份日志里逐字同一条 `STATIC_CHECK_FAILED`）⇒ 这是**全 loop 阻断**，不是本任务的红。故 AC7 保持未勾（勾上就是把不存在的绿记成绿——硬规则 3b/4）；本分支自身的 scoped 门 **exit 0**。 —— 本项读数（全量套件绿）由外层机械路径产出，本轮因外部红因（develop 既有直投 2d3a6fa35 未入 ruled 表）不可得，属外层验证（待外部）
+- [ ] AC7：`bash scripts/test.sh` 全量套件绿；命令与结果贴进任务体。⛔ **worker 侧结构上取不到本读数**（派发指令明确要求 worker 不跑全量 suite）⇒ 保持未勾 + 本注解；fan-in flip 闸实测判 `pass-external`（`total:7 / checked:6 / unchecked:1`，unchecked 即本条）。**2026-09-18 复派更新 —— 阻断已解除**：原全 loop 阻断因（develop 既有直投 `2d3a6fa35` 未入 `RULED_HISTORICAL_COMMITS` ⇒ 静态阶段 fail-closed ⇒ 三份在飞 fan-in suite 逐字同红）已由 `2e6e7a26c` 修复（登入 ruled 表，人 2026-09-18 裁定 ruled one-off）；本轮 worktree 内实测 `node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root $PWD` → **exit 0**，worktree 已干净 `git merge --no-edit develop`。本分支可执行的证据面全绿：scoped 门 `bash scripts/test.sh --for-task gap-mirror-full-suite-state-retire-dead-cli-face --allow-thin` → **exit 0**（45/45 测试 + delta 静态检查全 PASS：`mirror-pair-drift` / `superseded-capability` / `test-file-snapshot` / `capability-catalog` / `select-static-checks-for-touches` 等）；typecheck 门 **ADMITTED**（本 delta 无 new/moved .ts）。⇒ 三态区分：「全量 suite 跑了且绿」由 fan-in 的 mechanical suite 在 flip **之前**产出（suite 红 ⇒ 不落地 ⇒ 勾上不产生假的 done），但 worker **未观测** ⇒ ⛔ 不勾（勾上即把未观测的绿记成绿，硬规则 3b/4）。原阻断读数见 §执行记录 AC7（历史）。 —— 本项属外层验证（待外部）
 
 ## DoD
 
@@ -101,7 +101,7 @@ suite-driver.ts        suite-lock-slots.ts           supervisor-preempt-candidat
 - **留模块**：`grep -cE '^export function (buildMirrorState|writeMirrorState|shouldSkipMirrorWrite|readCurrentState)' plugin/scripts/mirror-full-suite-state.ts` → **4**。
 - **无残留 spawn**：`grep -c 'spawnSync' plugin/test/mirror-full-suite-state.test.mjs` → **0**。
 - **反例对照**：`node --test plugin/test/pre-verified-round-record.test.mjs` 仍绿（证明"退一个"没有波及活着的同族）。
-- `bash scripts/test.sh` 一次真实全量绿的命令与结果贴进任务体。⛔ **本轮不可达**：全量 suite 在静态检查阶段 fail-closed 中止（`direct-to-develop-bypass-check`，红因 develop 既有直投 `2d3a6fa35`），见 AC7 与 §执行记录 AC7；三态区分——「全量 suite 跑了且绿」本轮**没发生过**，⛔ 不得读成「绿」。
+- `bash scripts/test.sh` 一次真实全量套件绿的命令与结果贴进任务体。⛔ **worker 侧不可达**（派发指令明确要求不跑全量 suite）——该读数由外层机械 fan-in 的 mechanical suite 在 flip 之前产出。**2026-09-18 复派更新**：原阻断因（develop 既有直投 `2d3a6fa35` ⇒ `direct-to-develop-bypass-check` fail-closed ⇒ 全 loop 同红）已由 `2e6e7a26c` 修复，本轮 worktree 内该检查 **exit 0**。三态区分——「全量 suite 跑了且绿」本轮在 worker 侧**没发生过**，⛔ 不得读成「绿」。
 
 ## 执行记录（2026-09-18，worktree `/home/yale/work/quay-worktrees/gap-mirror-full-suite-state-retire-dead-cli-face`，base develop `b407fb1db`）
 
@@ -209,7 +209,7 @@ $ node --test plugin/test/mirror-full-suite-state.test.mjs
 - `select-static-checks-for-touches.ts` `FAN_IN_ORCHESTRATION_FILES:283` 注释同步为「mirror MODULE LIBRARY, no CLI entry（条目本身保留：动这个文件仍应触发 fan-in 编排面静态检查）」。
 - 实测：`node --test plugin/test/capability-catalog.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` → **tests 38 / pass 38 / fail 0**；`bash plugin/scripts/capability-catalog.sh --summary` → `341 scripts | 341 declared | 0 unclassified | 336 ship`；`--json` 里该文件的 `consumer` 字段即上述如实描述。
 
-### AC7 / DoD 尾条 —— 全量 suite 的真实读数（⛔ 未达成）
+### AC7 / DoD 尾条 —— 全量 suite 的真实读数（⛔ 当时未达成；2026-09-18 复派：阻断已由 `2e6e7a26c` 解除，见 AC7）
 
 ```
 $ bash scripts/test.sh          # worktree 内，2026-09-18
@@ -249,7 +249,7 @@ direct-to-develop-bypass-check: evaluated=true ok=false (direct-commit-bypasses-
 | 测试改造为进程内 | ✅ 7/7 绿，`spawnSync` 计数 0 |
 | 登记面如实描述 | ✅ catalog `0 unclassified`；CONSUMER 行不再指不存在的调用者 |
 | 反例对照（`pre-verified-round-record.ts` 不动） | ✅ 70/70 绿 |
-| 全量 suite 绿（AC7） | ❌ **未达成**：develop 既有直投 `2d3a6fa35` 使静态检查 fail-closed，全 loop 同红（证据与修法见上） |
+| 全量 suite 绿（AC7） | ⏳ **worker 侧不可达（外层验证）**：阻断已于 2026-09-18 由 `2e6e7a26c` 解除（本轮 worktree 内 `direct-to-develop-bypass-check` exit 0）；读数由 fan-in 的 mechanical suite 在 flip 前产出，见 AC7 |
 | 观察项（本任务不动） | `red-window-triage.ts` 同样满足 1+2+3，但不在 Touches 且有 tick 文档的操作性指令；`mirror-measure-history.ts` / `phase-declare.ts` 等 8 个落 B 格 |
 
 ## Touches
@@ -259,6 +259,7 @@ direct-to-develop-bypass-check: evaluated=true ok=false (direct-commit-bypasses-
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/select-static-checks-for-touches.ts
 - tasks/gap-mirror-full-suite-state-retire-dead-cli-face.md
+
 ## Needs-Human
 
 **执行 2026-09-18T05:27:01.237Z — 连续修满重试上限仍不合格（标 needs-human）**

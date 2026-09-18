@@ -2,7 +2,7 @@
 id: gap-quay-init-native-reconcile
 title: quay-init 退役 shell 脚本，改 CLI/MCP 原生实现；/quay:init 语义从"存在即跳过"改为"reconcile
   到当前版本默认值"
-status: todo
+status: ready
 labels:
   - gap
 parent: null

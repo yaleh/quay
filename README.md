@@ -168,7 +168,7 @@ seeing changes served without a manual restart — run `quay serve` under Node's
 built-in watch mode (`--watch`, Node ≥ 18):
 
 ```sh
-node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173
+node --watch --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1
 ```
 
 `node --watch` restarts the whole process whenever an imported module changes,
@@ -673,7 +673,7 @@ quay driver start --kind promotion [--root <path>]
 quay driver start --kind worker [--root <path>]
 
 # 3. the web UI — a SEPARATE process, with no supervisor of its own
-quay serve --host <ip> --port <p>          # default 0.0.0.0:4173
+quay serve --host <ip> --port <p>          # default host 0.0.0.0; omit --port ⇒ kernel-assigned port
 ```
 
 All three have **independent lifecycles**: restarting one does not restart the
@@ -683,6 +683,17 @@ script backgrounds it itself (and reloads it when its `/health` reports
 kernel knows the kinds `promotion | worker | outer | quality | meta | goal`; a
 project's enablement flow starts **promotion + worker**, the two that make a board
 progress (`outer` the session role is retired — see the enablement-flow section).
+
+`--port` is **optional**: with no `--port`, `quay serve` binds an ephemeral port
+chosen by the kernel and publishes it in `<workspaceRoot>/.quay/server.json`
+(`services[].port`), which is where a reader (`quay server status`, the start
+script) learns the address. Pass `--port N` to pin an exact port — the value is
+then honored exactly and a real collision fails loudly. A workspace root admits at
+most **one** live host: `quay serve` takes an admission lock
+(`<workspaceRoot>/.quay/server.lock`) before it connects the provider or binds
+anything, so a second start on the same root exits 0 with
+`quay serve: already running (pid=…)` instead of silently becoming a second host
+on a different port.
 
 | verb | semantics |
 |---|---|

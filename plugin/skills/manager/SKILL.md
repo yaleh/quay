@@ -228,6 +228,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` — 能力面分层与机制生命周期：把「能力」而非「文件」作为架构单元（probe = routine 的 LLM 形态，⛔ 不新增 kind）· Layer 0 继承强制化 · 机制注册/生命周期（proposal·待人裁定）
 - `orchestration/SPEC-goal-mechanism-2026-09-06.md` — goal 机制启用与改造（PHASE→GOAL 命名、多目标并发、ABI 封装、driver 驱动）：GOAL-NNN 取代 PHASE-NNN、draft 状态、cap=3/stale=7 天硬上限；修订并启用 SPEC-0809（人 2026-09-06 五条裁定）
 - `orchestration/SPEC-store-commit-unification-2026-09-08.md` — 五 store kind 提交面统一（单一 commitStoreWrite 原语：四态返回 committed/unchanged/not-in-git/failed、rev-parse root、pathspec 限定 add+commit；三阶段 ①原语+五 kind 接线 ②传播按读者归位 ③驱动侧直写点）
+- `orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md` — `quay-init` 退役 shell 脚本、改 CLI/MCP 原生实现；`/quay:init` 语义从「存在即跳过」改为「reconcile 到当前版本默认值」（人 2026-09-18 三条原则扩展为规格；讨论结论 + 已核实的现状事实（文件/行号），AC/DoD 与是否立案由外层判断，本文件不建）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

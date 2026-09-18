@@ -6,9 +6,9 @@
 // stale currentState AND collectFailureFiles carries a latent unbounded-union of a stale state's
 // failures[]. This thin writer mirror-writes the terminal state (green — the only state the fan-in
 // phase-2 path reaches) reflecting the fan-in's REAL suite round, reusing full-suite-runner.ts's
-// mirrorStateFile pattern (write `<root>/.quay/full-suite-state.json`) via resolveSharedCheckout
-// (the shared main checkout — same resolution as pre-verified-round-record.ts / per-task-suite-
-// record.ts, so a worktree-invoked write lands in the MAIN repo's state file the consumers read).
+// mirrorStateFile pattern (write `<shared-checkout>/.quay/full-suite-state.json`; the CALLER resolves
+// the shared main checkout — same resolution pre-verified-round-record.ts / per-task-suite-record.ts
+// use — so a fan-in run inside a worktree still lands in the MAIN repo's state file consumers read).
 //
 // State shape (full-suite-runner SuiteState-compatible): state/runner/startedAt/finishedAt/
 // durationMs/laneCount/scope/commit (+ optional taskId/runId/load/reason). `finishedAt` is EPOCH
@@ -16,43 +16,28 @@
 // green: the freshness gate parses epoch); `startedAt` stays ISO 8601. load is best-effort (the
 // /proc/loadavg 1min at the suite's end, already carried in the fan-in capture).
 //
-// Fail-closed (硬规则 3b): a missing/invalid required field exits 2 and writes NOTHING — a partial
-// or fabricated state is never written. NOT a verification-round writer: it OVERWRITES the
-// single-state full-suite-state.json (the same single-state file full-suite-runner overwrites each
-// round), never appends.
+// Fail-closed (硬规则 3b): buildMirrorState returns `{error}` for a missing/invalid required field
+// and the caller writes NOTHING — a partial or fabricated state is never written. NOT a
+// verification-round writer: it OVERWRITES the single-state full-suite-state.json (the same
+// single-state file full-suite-runner overwrites each round), never appends.
 //
-// Usage:
-//   node --experimental-strip-types plugin/scripts/mirror-full-suite-state.ts
-//       --state green --started-at <iso> --duration-ms <ms> --lane-count <n> --commit <sha>
-//       [--finished-at <iso>] [--load <n>] [--task-id <id>] [--run-id <id>] [--runner <name>]
-//       [--scope <name>] [--reason <s>] [--root <dir>] [--state-file <path>] [--json] [--help]
+// ⛔ MODULE LIBRARY — no CLI entry (gap-mirror-full-suite-state-retire-dead-cli-face, 2026-09-18).
+// The former `main(argv)` + `usage` + direct-entry guard were retired: their only caller was the
+// deleted `# mirror-state-block` (fan-in-execute workflow step 4.5), so the CLI face was dead while
+// the MODULE face was — and still is — live. The live caller is worker-driver.ts's mechanical fan-in:
+// `mirrorMechanicalFanInSuiteState` (worker-driver.ts:5094) imports buildMirrorState / writeMirrorState
+// / shouldSkipMirrorWrite / readCurrentState and owns the argv/env plumbing itself. Do NOT re-add a CLI
+// entry here without a real caller — a registration that names a caller which does not exist is the
+// exact defect this retirement removed (same shape as gap-mirror-measure-history-retire-dead-writer).
 //
-//   --state           the terminal state to write: green|red (required)
-//   --started-at      the suite start, ISO-8601 (required)
-//   --finished-at     the suite end, ISO-8601 or epoch-seconds (optional — when absent, derived as
-//                     startedAt + durationMs)
-//   --duration-ms     the suite wall-clock in ms (required, non-negative)
-//   --lane-count      suite lane count (required, non-negative)
-//   --commit          the pinned verified HEAD (suite_head), 40-hex (required)
-//   --load            /proc/loadavg 1min at the suite's end (optional, non-negative)
-//   --task-id         the fan-in task (optional, traceability)
-//   --run-id          the fan-in runId (optional, traceability)
-//   --runner          nominal runner identity (default 'inner' — the fan-in suite is an inner-layer run)
-//   --scope           the tested tree scope (default 'worktree' — the fan-in suite ran against the worktree HEAD)
-//   --reason          red reason (optional; only meaningful with --state red)
-//   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
-//   --state-file      override the state path (hermetic tests)
-//   --json            machine-readable output {ok, state, file}
-//   --help            this help
-//
-// Exit codes:
-//   0  state written
-//   2  usage / environment error (missing/invalid field, unresolvable shared checkout) — nothing written
+// The four exports are the interface:
+//   buildMirrorState(o)            → {state} | {error}  (fail-closed; no IO)
+//   writeMirrorState(file, state)  → atomic overwrite of the single-state file
+//   readCurrentState(file)         → parsed state | null
+//   shouldSkipMirrorWrite(cur)     → true when a non-terminal on-disk state owns the file
 
 import fs from "node:fs";
-import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
-import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
+import { toIsoTimestamp } from "./per-task-suite-record.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
@@ -164,94 +149,5 @@ export function shouldSkipMirrorWrite(currentState) {
   return currentState.finishedAt == null;
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
-const usage = `mirror-full-suite-state.ts — gap-full-suite-state-stale-no-writer AC1/AC3 writer:
-  mirror-write the terminal full-suite-state.json reflecting a fan-in detached-suite round (green).
-  OVERWRITES the single-state <shared-checkout>/.quay/full-suite-state.json (never appends).
-
-Usage:
-  node --experimental-strip-types plugin/scripts/mirror-full-suite-state.ts
-      --state green --started-at <iso> --duration-ms <ms> --lane-count <n> --commit <sha>
-      [--finished-at <iso>] [--load <n>] [--task-id <id>] [--run-id <id>] [--runner <name>]
-      [--scope <name>] [--reason <s>] [--root <dir>] [--state-file <path>] [--json] [--help]
-
-Exit codes:
-  0  state written
-  2  usage / environment error — nothing written`;
-
-export function main(argv) {
-  const args = argv.slice(2);
-  if (args.includes("--help") || args.includes("-h")) {
-    process.stdout.write(usage + "\n");
-    return 0;
-  }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const stateFileOverride = getArgValue(args, "--state-file");
-  const asJson = args.includes("--json");
-
-  const fail = (msg) => {
-    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
-    else console.error(`mirror-full-suite-state: ${msg}`);
-    return 2;
-  };
-
-  const built = buildMirrorState({
-    state: getArgValue(args, "--state"),
-    startedAt: getArgValue(args, "--started-at"),
-    finishedAt: getArgValue(args, "--finished-at"),
-    durationMs: getArgValue(args, "--duration-ms"),
-    laneCount: getArgValue(args, "--lane-count"),
-    load: getArgValue(args, "--load"),
-    commit: getArgValue(args, "--commit"),
-    taskId: getArgValue(args, "--task-id"),
-    runId: getArgValue(args, "--run-id"),
-    runner: getArgValue(args, "--runner"),
-    scope: getArgValue(args, "--scope"),
-    reason: getArgValue(args, "--reason"),
-  });
-  if (built.error) return fail(built.error);
-  const state = built.state;
-
-  let stateFile;
-  if (stateFileOverride) {
-    stateFile = path.resolve(stateFileOverride);
-  } else {
-    const shared = resolveSharedCheckout(root);
-    if (!shared) return fail(`cannot resolve the shared checkout from ${root} (git common-dir failed)`);
-    stateFile = path.join(shared, ".quay", "full-suite-state.json");
-  }
-
-  // gap-full-suite-state-stale-no-writer AC1 — do NOT clobber an in-flight round (a non-terminal
-  // on-disk state is owned by the full-suite-runner; its generation-guarded terminal write would be
-  // dropped if we overwrite `running`/early-red with a foreign runId). Skip is a legitimate outcome
-  // (exit 0, no write), NOT a failure — the runner's own terminal write is authoritative.
-  if (shouldSkipMirrorWrite(readCurrentState(stateFile))) {
-    if (asJson) {
-      console.log(JSON.stringify({ ok: true, skipped: true, reason: "running-in-flight", file: stateFile }));
-    } else {
-      console.log(`mirror-full-suite-state: skip — state in flight (finishedAt null ⇒ running/early-red); not overwriting → ${stateFile}`);
-    }
-    return 0;
-  }
-
-  try {
-    writeMirrorState(stateFile, state);
-  } catch (e) {
-    return fail(`write failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  if (asJson) {
-    console.log(JSON.stringify({ ok: true, state, file: stateFile }));
-  } else {
-    console.log(`mirror-full-suite-state: wrote state=${state.state} (${state.taskId ?? "-"} run ${state.runId ?? "-"}) → ${stateFile}`);
-  }
-  return 0;
-}
-
-if (isDirectEntry(import.meta, undefined, "mirror-full-suite-state")) {
-  process.exitCode = main(process.argv);
-}
+// (no CLI entry — see the header. The caller builds the state file path itself:
+//  worker-driver.ts's mechanical fan-in resolves <shared-checkout>/.quay/full-suite-state.json.)

@@ -482,7 +482,12 @@ function spawnHost(workspaceRoot: string, initial: string[], port: string | unde
   // The dev tree entry is a `.ts` file (needs the strip-types flag); the shipped bundle is `.js`
   // and must NOT be given it (an older Node would reject the flag on a plain ESM bundle).
   const stripTypes = entry.endsWith(".ts") ? ["--experimental-strip-types"] : [];
-  const args = ["--no-warnings", ...stripTypes, entry, "serve", "--host", hostFlag ?? "127.0.0.1", "--port", port ?? "4173"];
+  // ⛔ `--port` is passed ONLY when the caller named one (gap-serve-same-root-admission-lock): the
+  // web port's default now belongs to ONE place — `startServer`'s own `port = 0` (kernel-assigned
+  // ephemeral). Spelling a hardcoded number here would be a second, silently diverging default, and
+  // pinning every spawned host to one number is exactly the collision the ephemeral default removes.
+  const args = ["--no-warnings", ...stripTypes, entry, "serve", "--host", hostFlag ?? "127.0.0.1",
+    ...(port !== undefined && port !== "" ? ["--port", port] : [])];
   const child = spawn(process.execPath, args, {
     cwd: workspaceRoot,
     detached: true,
