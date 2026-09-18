@@ -1859,10 +1859,8 @@ loop:
   # could not find expected ':'）⇒ 此后每次 quay-init 升级都 exit 1，三个真装机 e2e 全红。
   # LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）。shell 无法 import TS，
   # 所以这一行是【镜像】：新增版本级默认值时要同时改两处，或把这里改成从 schema 派生。
-  # ⛔ 本节所有注释【不得】含反引号或美元加左圆括号（命令替换）：本 heredoc 未加引号（它必须展开
-  # 上面的美元变量），所以它们会被【真的执行】、把 stdout 就地替换进注释 ⇒ 产物不是合法 YAML
-  # （gap-quay-init-config-heredoc-comment-backtick-executes-cli）。该不变式由
-  # plugin/test/quay-init-loop.test.mjs 的 "AC5" 用例机械钉住。
+  # 该不变式由 plugin/test/quay-init-loop.test.mjs 的 "AC5" 用例机械钉住（扫描本文件全部未加引号的
+  # heredoc 正文，反引号/命令替换一处即红）——⛔ 不要靠"记得转义"，那正是它复发的方式。
   # ⛔ 不要在这里补那个已被删除的零消费者分支键：plugin/test/quay-init.test.mjs 以可执行的判据
   # 钉住"它不被写出"（gap-config-key-consumer-check-mechanical-enumeration）；理由见 init.ts。
   fork_baseline: develop
