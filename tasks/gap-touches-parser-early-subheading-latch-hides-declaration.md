@@ -65,7 +65,7 @@ heading deleted  = 10
 
 **发生率（硬规则 12 要求的读数；以下为实测，非估算）** —— 对 `tasks/*.md` 全部 **2281** 个体逐一跑同一函数：
 
-- `有 touches 标题 ∧ globs.length === 0` = **3** 条：`gap-git-history-window-notes-ref-dominates`（在飞，当前阻塞器）、
+- `有 touches 标题 ∧ globs.length === 0` = **3** 条：`gap-git-history-window-notes-ref-dominates`（当时在飞，已翻 done 的受害体）、
   `gap-capability-catalog-declarations-not-enforced-at-script-creation`（done）、
   `gap-quay-has-never-self-hosted-its-own-cold-start`（done，**零是正确读数**，见 AC4）；
 - 体内出现 **>1 个** touches 标题（读到哪一个纯属位置偶然）= **9** 条，其中 `DIR-099-C.md`
