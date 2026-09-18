@@ -114,6 +114,70 @@ function runWriter(root, args) {
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", WRITER, "--root", root, ...args], { encoding: "utf8" });
 }
 
+// ── "the writer REFUSED" vs "the writer never STARTED" ───────────────────────────────────────────────
+// gap-inner-wakeup-heartbeat-refusal-shard-ci-red. A child that FAILED TO START is not a child that
+// REFUSED — and the two are indistinguishable by exit code alone: this writer exits 1 for a deliberate
+// AC53 refusal, and Node ALSO exits 1 for an uncaught module-load/instantiation failure. That collision
+// is what made this shard's CI failure read as a refusal with a missing reason.
+//
+// Measured instance (develop CI run 35294113108, the run that filed this task): this file's third test
+// failed on `assert.match(w.stderr, /结束不变式违例/)`, and the assertion's own `actual:` field — the
+// child's real stderr — was
+//     SyntaxError: The requested module './gate-script-base.ts' does not provide an export named 'helpExit'
+// i.e. the writer's process died while instantiating its module graph (`inner-wakeup-heartbeat.ts` →
+// `slot-refill.ts` → `task-schema.ts` → `wiring-coverage-check.ts` → `gate-script-base.ts`) and never
+// reached the end-invariant gate at all. The two assertions above it (`status != 0`, `status == 1`)
+// passed BECAUSE the crash exits 1 — so the shard reported a startup crash as "the refusal reason is
+// missing", and the task's Proposal consequently read it as "another refusal branch, the refusal really
+// did happen". It did not.
+//
+// 硬规则 3b: a verdict whose word-list has no "did not evaluate" cannot distinguish "checked and
+// refused" from "never ran". These helpers give "never ran" its own value instead of letting it share
+// the refusal's exit code — and, because the measured trigger is TRANSIENT (the same shard was GREEN on
+// the next develop run 35294796640, and in the failing run the sibling tests in this very file passed),
+// re-take the measurement once instead of reporting a verdict the child never produced.
+
+/** The writer's own diagnostic lines all start with this prefix; a crashed child prints none of them. */
+const WRITER_DIAGNOSTIC = /inner-wakeup-heartbeat/;
+
+/** Returns a short signature when the child never ran the writer, else null. */
+function writerStartupFailure(w) {
+  if (w.status === 0) return null;
+  const err = w.stderr || "";
+  if (WRITER_DIAGNOSTIC.test(err)) return null; // the writer spoke ⇒ it ran; its exit is its own verdict
+  const m =
+    err.match(/^(SyntaxError|ReferenceError|TypeError|Error):.*$/m) ||
+    err.match(/ERR_MODULE_NOT_FOUND|ERR_UNKNOWN_FILE_EXTENSION|Cannot find module/m) ||
+    (/at .*node:internal\/(modules|process)/.test(err) ? ["uncaught failure inside node:internal"] : null);
+  return m ? m[0] : null;
+}
+
+/**
+ * Spawn the writer and guarantee the CALLER's verdict is about a writer that actually ran.
+ * A startup failure is re-measured exactly once (the measured trigger is transient); if the retry also
+ * fails to start, the test fails LOUDLY and names the real cause, carrying both stderr streams — a
+ * persistent startup failure is a genuine defect and MUST stay red (proven by the negative control in
+ * this task's evidence: a shim that fails every writer spawn still reds, with this message instead of
+ * the misleading refusal one). Never applied to a refusal: a writer that ran is returned untouched, so
+ * the AC53 assertions below see exactly the process they always saw.
+ */
+function runWriterChecked(root, args, what) {
+  const first = runWriter(root, args);
+  const firstFail = writerStartupFailure(first);
+  if (!firstFail) return first;
+  const retry = runWriter(root, args);
+  const retryFail = writerStartupFailure(retry);
+  if (retryFail) {
+    assert.fail(
+      `${what}: the writer FAILED TO START on BOTH attempts — it never ran, so this is NOT a refusal.\n` +
+      `(exit code 1 is shared by a deliberate refusal and a module-load crash; that collision is what made CI run 35294113108 report a crash as a missing refusal reason)\n` +
+      `--- attempt 1: ${firstFail}\n${first.stderr}` +
+      `--- attempt 2: ${retryFail}\n${retry.stderr}`,
+    );
+  }
+  return retry;
+}
+
 function runChecker(root, extraArgs = []) {
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs], { encoding: "utf8" });
 }
@@ -157,7 +221,7 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — the 7th-same-shape replay: WRIT
     const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
     violatingArgs[idxReason + 1] = "null";
     // --in-flight '' (the fixture's empty in-flight set) is already in FULL_ARGS.
-    const w = runWriter(root, violatingArgs);
+    const w = runWriterChecked(root, violatingArgs, "7th-same-shape refusal");
     assert.equal(w.status, 1, `writer must REFUSE the violating end heartbeat:\n${w.stdout}\n${w.stderr}`);
     assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
     assert.match(w.stderr, /inner-round-ended-with-dispatchable-work/, "the refusal reason must be end-invariant-violated");
@@ -185,7 +249,7 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — NEGATIVE CONTROL: a prose --no-
     proseArgs[idxReason + 1] = "ac51 subagent in flight, next dispatch after they land"; // prose SELF-REPORT
     const idxShould = FULL_ARGS.indexOf("--should-refill");
     proseArgs[idxShould + 1] = "true";
-    const w = runWriter(root, proseArgs);
+    const w = runWriterChecked(root, proseArgs, "prose-reason refusal");
     assert.equal(w.status, 1, `writer must REFUSE despite the prose reason:\n${w.stdout}\n${w.stderr}`);
     assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
     assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
@@ -215,7 +279,7 @@ test("AC53 EXIT:0 捕获（manager 2026-08-13 裁定）— 构造一次拒绝 �
     violatingArgs[idxShould + 1] = "true";
     const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
     violatingArgs[idxReason + 1] = "null";
-    const w = runWriter(root, violatingArgs);
+    const w = runWriterChecked(root, violatingArgs, "AC53 EXIT:0 捕获");
     // THE ASSERTION THE RULING ASKS FOR: the caller sees a NON-ZERO exit — not 0, not swallowed.
     assert.notEqual(w.status, 0, `the caller must observe a non-zero exit on a writer refusal:\n${w.stdout}\n${w.stderr}`);
     assert.equal(w.status, 1, `the refusal exit must be exactly 1 (the writer's refusal code):\n${w.stdout}\n${w.stderr}`);
@@ -225,7 +289,7 @@ test("AC53 EXIT:0 捕获（manager 2026-08-13 裁定）— 构造一次拒绝 �
     // write (bare temp dir → no dispatchable work → should_refill=false → the write proceeds).
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-exitctl-"));
     try {
-      const ok = runWriter(tmp, FULL_ARGS);
+      const ok = runWriterChecked(tmp, FULL_ARGS, "legitimate-write control");
       assert.equal(ok.status, 0, `the same harness must see 0 for a legitimate write:\n${ok.stdout}\n${ok.stderr}`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -253,7 +317,7 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — a legitimately-ending tick (ful
     args[idxSlots + 1] = "0";
     const idxShould = args.indexOf("--should-refill");
     args[idxShould + 1] = "false";
-    const w = runWriter(root, args);
+    const w = runWriterChecked(root, args, "legitimately-ending tick");
     assert.equal(w.status, 0, `writer must write a legitimately-ending heartbeat:\n${w.stdout}\n${w.stderr}`);
     const hb = JSON.parse(fs.readFileSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
     assert.equal(hb.should_refill, false, "written dispatch-state must be the DIRECT measurement (should_refill=false)");
