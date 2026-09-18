@@ -203,7 +203,7 @@ test("AC5: the default (no ?view=) page is byte-identical to ?view=git; task vie
   // The default IS the git view — the heuristic is an opt-in, never the default truth.
   assert.ok(def.includes("git-graph-data"), "the default page embeds the git-view data script");
   // ⚠️ These two headings are pinned in BOTH languages (gap-webui-git-history-body-copy-en-zh): the
-  // page's body copy now comes from serve-i18n.ts ROW 10, so a `renderGitHistoryPage(h)` call renders
+  // page's body copy now comes from serve-i18n.ts ROW 17, so a `renderGitHistoryPage(h)` call renders
   // the en column and the zh string below would be unreachable — i.e. the negative assertion would be
   // TRUE BY CONSTRUCTION and the positive one unsatisfiable. Each arm names the language it reads.
   assert.ok(!def.includes("Task grouping (aggregated by task id)"), "the default (en) page does NOT render the task grouping");

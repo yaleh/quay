@@ -18,7 +18,7 @@
 //   • **零计数的对照**（硬规则 2）：同一个谓词对 zh 响应干跑一次必须命中 —— 否则「en 下 0 条」可能
 //     只是谓词坏了。谓词对 zh 干跑命中，正是 AC1 要求的「先对 zh 干跑」。
 //   • AC5：**内联客户端脚本**里的两条加载提示与覆盖时长单位随请求语言 —— 它们在浏览器里渲染，
-//     服务端拼不出它们的 HTML，字典在浏览器里也不存在（ROW 10b），故必须作为常量注入。任何只读
+//     服务端拼不出它们的 HTML，字典在浏览器里也不存在（ROW 17b），故必须作为常量注入。任何只读
 //     首屏 HTML 的探针都看不见这类缺口。
 //   • AC5 续载：`/git-history.json` 的数据面不带任何随语言变化的文案（两语言逐字相同 —— 这是
 //     「片段里没有文案」的正面证据），而它**自己写**的那一条兜底串由 `gitHistoryJson` 按语言取。
@@ -287,7 +287,7 @@ test("AC5 (continuation): /git-history.json carries NO language-dependent copy i
   assert.equal(gitHistoryJson(okNoCommits, "task", "en").reason, "git repository has no commits");
   assert.equal(gitHistoryJson(okNoCommits, "task", "zh").reason, "git 仓库无提交记录");
   // Control: an observation-supplied reason is ECHOED, not replaced — it belongs to another module
-  // (see the ROW 10 note) and must not be rewritten by this page. This is also the shape a real
+  // (see the ROW 17 note) and must not be rewritten by this page. This is also the shape a real
   // non-git workspace produces, which is why the en page CAN carry observation's Chinese there.
   const withReason = { status: "empty", reason: "observation said so", commits: [], head: null, heads: {}, mainlineHead: null };
   assert.equal(gitHistoryJson(withReason, "git", "en").reason, "observation said so");
@@ -297,7 +297,7 @@ test("AC5 (continuation): /git-history.json carries NO language-dependent copy i
 test("AC5 (client script): the inlined script's two load hints and two span units follow the REQUEST's language", async () => {
   // These four strings are rendered by the BROWSER: the graph is drawn client-side, so the server
   // concatenates no HTML for them, and the browser has no dictionary to look them up in. They are
-  // therefore injected constants (ROW 10b) — and the failure they guard against is invisible to a
+  // therefore injected constants (ROW 17b) — and the failure they guard against is invisible to a
   // first-response probe only in the sense that the constant is easy to forget: what it looks like
   // is an English page whose sentinel turns Chinese the moment the auto-load fuse trips.
   const enScript = inlineScripts((await get(port, "/git-history", { Cookie: "lang=en" })).body);
@@ -326,7 +326,7 @@ test("AC5 (client script): the inlined script's two load hints and two span unit
   // belongs to, so "absent" is a finding and not an artifact of a broken needle.
   assert.ok(enScript.includes(JSON.stringify(gitHistoryClientLabelsFor("en").clickLoadOlder)));
 
-  // ── ROW 10b's other half: a caller that injects NOTHING gets NEUTRAL placeholders, never the
+  // ── ROW 17b's other half: a caller that injects NOTHING gets NEUTRAL placeholders, never the
   // server's own default language (a script that quietly chose a language is invisible; a
   // placeholder is visible in both). ────────────────────────────────────────────────────────────
   const bare = (await import("../src/serve-git.ts")).gitGraphClientScript();
@@ -370,7 +370,7 @@ test("AC3: `Cookie: lang=zh` still renders the pre-existing Chinese body copy (t
     "加载更早提交…", "↓ 更多提交",        // sentinel + hint (server template)
     "Git 纵向时间轴（可滚动）",           // scroll container aria
     "小时",                              // coverage unit
-    "Git 历史 — 提交纵向时间轴",          // the FULL rendered <h1> (page name from PAGE_LABELS + ROW 10 subtitle)
+    "Git 历史 — 提交纵向时间轴",          // the FULL rendered <h1> (page name from PAGE_LABELS + ROW 17 subtitle)
   ]) {
     assert.ok(zh.includes(zhWord), `zh render keeps the pre-existing literal ${JSON.stringify(zhWord)}`);
   }
@@ -397,7 +397,7 @@ test("AC3: `Cookie: lang=zh` still renders the pre-existing Chinese body copy (t
 
 // ── the neutral-placeholder contract, at the unit level ───────────────────────────────────────────
 
-test("ROW 10b: gitHistoryClientLabelsFor is complete and language-switched", () => {
+test("ROW 17b: gitHistoryClientLabelsFor is complete and language-switched", () => {
   for (const lang of ["en", "zh"]) {
     const l = gitHistoryClientLabelsFor(lang);
     for (const k of ["clickLoadOlder", "firstCommitReached", "spanHours", "spanDays"]) {

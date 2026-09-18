@@ -1619,8 +1619,15 @@ async function main() {
       const mPort = mServer.address().port;
 
       const list = await get(mPort, "/tasks");
+      // gap-webui-doc-tasks-residual-copy-en-zh: the placeholder row's sentence now resolves through
+      // serve-i18n.ts ROW 13, whose default is `en`. The default response is asserted in ENGLISH and
+      // the pre-existing Chinese assertion is kept VERBATIM against an explicit `?lang=zh` probe — so
+      // it stays a zh regression guard instead of silently reading whichever language is the default.
+      const listZh = await get(mPort, "/tasks?lang=zh");
       assert(list.status === 200, "AC1: GET /tasks returns 200 with a missing-id task present (not 500)");
-      assert(list.body.includes("缺少 id"), "AC2: page visibly marks the malformed task '缺少 id'");
+      assert(list.body.includes("missing id field"), "AC2 (en): page visibly marks the malformed task 'missing id field'");
+      assert(!list.body.includes("缺少 id"), "AC2 (en): the default response carries no Chinese marker");
+      assert(listZh.body.includes("缺少 id"), "AC2 (zh): page visibly marks the malformed task '缺少 id' (byte for byte as before)");
       assert(list.body.includes("MAL-1"), "AC2: page shows the malformed task's filename fallback");
       assert(list.body.includes('class="malformed-row"'),
         "AC2: the malformed task renders as a visibly distinct placeholder row");
@@ -1637,8 +1644,13 @@ async function main() {
       // task was surfaced, not silently swallowed.
       fs.rmSync(path.join(mTasksDir, "MAL-1.md"));
       const list2 = await get(mPort, "/tasks");
+      const list2Zh = await get(mPort, "/tasks?lang=zh");
       assert(list2.status === 200, "AC3: GET /tasks still returns 200 after removing the malformed fixture");
-      assert(!list2.body.includes("缺少 id"), "AC3: '缺少 id' marker is gone after removing the fixture");
+      // The negative control is asserted in the language that CAN carry the marker. ⛔ Under the
+      // default (en) the zh string is absent no matter what the fixture does, so the original
+      // assertion alone would have become a tautology the moment the string moved (decision ④).
+      assert(!list2.body.includes("missing id field"), "AC3 (en): the marker is gone after removing the fixture");
+      assert(!list2Zh.body.includes("缺少 id"), "AC3 (zh): '缺少 id' marker is gone after removing the fixture");
       const trCount2 = (list2.body.match(/<\/tr>/g) || []).length;
       assert(trCount2 === 3, `AC3: rendered rows drop by exactly 1 after removing the fixture (expected 3 rows, got ${trCount2})`);
     } finally {
@@ -1781,8 +1793,19 @@ async function main() {
       // --- /journal ---
       const journal = await get(obsPort, "/journal");
       assert(journal.status === 200, "AC3: GET /journal returns 200 (got " + journal.status + ")");
-      assert(journal.body.includes("升级项") && journal.body.includes("测试升级项"),
-        "AC3: /journal renders the recent escalations.md entry");
+      // gap-webui-journal-body-copy-en-zh: this page's HEADINGS are dictionary copy now (ROW 10), so
+      // the zh render is what pins them byte-for-byte against the pre-change literal — and the en
+      // render is asserted to carry the English heading. ⚠️ Both arms are load-bearing: before this
+      // migration the old assertion matched the heading's 「升级项」 only as a substring of the
+      // fixture's own section TITLE `测试升级项` (DATA), so translating the heading would have left
+      // it GREEN while the heading it was written for was gone.
+      const journalZh = await get(obsPort, "/journal?lang=zh");
+      assert(journalZh.status === 200 && journalZh.body.includes("升级项 (escalations.md)"),
+        "AC-306: /journal (zh) still renders the escalations heading verbatim");
+      assert(journalZh.body.includes("测试升级项"),
+        "AC3: /journal renders the recent escalations.md entry (zh, verbatim)");
+      assert(journal.body.includes("Escalations (escalations.md)") && journal.body.includes("测试升级项"),
+        "AC-306: /journal (en) renders the English heading and the escalations entry UNTRANSLATED");
       assert(journal.body.includes("tick-log.md") && journal.body.includes("2026-08-03 05:45Z"),
         "AC1: /journal renders the recent tick-log.md entry (## timestamp + prose, not a table row)");
       assert(journal.body.includes("fixture commit") && journal.body.includes(obsCommitHash),
@@ -1816,16 +1839,22 @@ async function main() {
 
       // AC3 reverse control — fail-closed: MISSING tick-log.md reports 「无数据」, never stale data.
       fs.rmSync(tickLogPath, { force: true });
-      const journalMissing = await get(obsPort, "/journal");
+      const journalMissing = await get(obsPort, "/journal?lang=zh");
       assert(journalMissing.status === 200, "AC3: GET /journal returns 200 when tick-log.md is missing");
       assert(journalMissing.body.includes("无数据"),
         "AC3: /journal reports 「无数据」 when tick-log.md is missing");
       assert(!journalMissing.body.includes(todayStamp),
         "AC3: /journal does NOT show tick data when tick-log.md is missing");
+      // gap-webui-journal-body-copy-en-zh: the empty state is chrome copy too (ROW 10's `noData`).
+      // ⚠️ Pinned on the EN render explicitly — this is the state an operator reaches for the page
+      // in, and a half-English page there is the exact defect the body-copy series exists to remove.
+      const journalMissingEn = await get(obsPort, "/journal");
+      assert(journalMissingEn.body.includes("No data") && !journalMissingEn.body.includes("无数据"),
+        "AC-306: /journal (en) reports 「No data」, not the zh empty-state word");
 
       // AC3 reverse control — EMPTY tick-log.md is also fail-closed: 「无数据」, not "ok with no content".
       fs.writeFileSync(tickLogPath, "   \n\n  \n");
-      const journalEmpty = await get(obsPort, "/journal");
+      const journalEmpty = await get(obsPort, "/journal?lang=zh");
       assert(journalEmpty.status === 200, "AC3: GET /journal returns 200 when tick-log.md is empty");
       assert(journalEmpty.body.includes("无数据"),
         "AC3: /journal reports 「无数据」 (status empty) when tick-log.md is empty/whitespace");

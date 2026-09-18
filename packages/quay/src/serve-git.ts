@@ -377,7 +377,7 @@ export function layoutTaskGraph(history: GitHistoryResult): TaskGraphLayout | nu
 
 /** Format a coverage span (seconds) as the loaded window's duration ("N 小时" / "N 天" under zh).
  *
- *  The UNIT words come from serve-i18n.ts ROW 10 (`coverageHours` / `coverageDays`), which the
+ *  The UNIT words come from serve-i18n.ts ROW 17 (`coverageHours` / `coverageDays`), which the
  *  client loader's own mirror of this function is fed from too — so the server and the browser
  *  cannot drift into two spellings of the same unit. The NUMBER formatting is unchanged and is
  *  deliberately NOT part of the dictionary: a translated decimal separator is not what this page's
@@ -453,7 +453,7 @@ function gitGraphLibJs(): string {
  * constants are interpolated SERVER-side as plain numbers, and column colours as `var(--color-lane-N)`
  * tokens (the hex stays in GIT_GRAPH_LANE_PALETTE).
  *
- * ⚠️ `labels` CARRIES THE FOUR RENDERED WORDS THE BROWSER CANNOT LOOK UP (serve-i18n.ts ROW 10b).
+ * ⚠️ `labels` CARRIES THE FOUR RENDERED WORDS THE BROWSER CANNOT LOOK UP (serve-i18n.ts ROW 17b).
  * This script is inlined into the page, so the server can concatenate no HTML for it and the browser
  * has no dictionary; the words must arrive as string constants, resolved SERVER-side for the
  * REQUEST's language. `null` (the default, and what a pure unit test that only exercises geometry
@@ -482,7 +482,7 @@ export function gitGraphClientScript(labels: GitHistoryClientLabels | null = nul
   var chipH = ${GIT_GRAPH_CHIP_H}, chipPadX = ${GIT_GRAPH_CHIP_PAD_X}, chipRx = ${GIT_GRAPH_CHIP_RX}, chipGap = ${GIT_GRAPH_CHIP_GAP}, decorFontSize = ${GIT_GRAPH_DECOR_FONT_SIZE};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
   // The four rendered words this script emits, resolved server-side for the request's language
-  // (serve-i18n.ts ROW 10b). JSON.stringify (not a raw "\${…}") so a label carrying a quote or a
+  // (serve-i18n.ts ROW 17b). JSON.stringify (not a raw "\${…}") so a label carrying a quote or a
   // backslash cannot break out of the string literal it is written into.
   var LBL_CLICK_LOAD_OLDER = ${JSON.stringify(clickLoadOlder)};
   var LBL_FIRST_COMMIT_REACHED = ${JSON.stringify(firstCommitReached)};
@@ -865,7 +865,7 @@ export function gitGraphLegendHtml(lang: Lang = DEFAULT_LANG): string {
   const parts = [
     // ⚠️ `commit` / `merge` are LEGEND KEY WORDS for the two glyphs, not Chinese copy: they read the
     // same in both languages (a git commit is a git commit), so they are literals — the dictionary
-    // holds only the one part of this legend that HAS a translation (ROW 10's `legendParentEdge`).
+    // holds only the one part of this legend that HAS a translation (ROW 17's `legendParentEdge`).
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
     glyph("var(--color-neutral-700)", "╰", gitHistoryLabel("legendParentEdge", lang)),
@@ -950,11 +950,11 @@ function renderTaskGroupsHtml(history: GitHistoryResult, lang: Lang = DEFAULT_LA
  * subtitle, the view toggle, both view branches' explainer paragraphs, the task-group headings, the
  * legend, the status note, the sentinel and the sticky "more below" hint, the coverage-span units,
  * and (as injected constants) the four words the inlined client script writes. All of those come from
- * serve-i18n.ts ROW 10 via `gitHistoryLabelsFor` / `gitHistoryLabel`.
+ * serve-i18n.ts ROW 17 via `gitHistoryLabelsFor` / `gitHistoryLabel`.
  *
  * ⚠️ `lang` must reach the CLIENT SCRIPT too. The graph is drawn in the browser, so the sentinel's
  * "click to load" text and the coverage units are not in any HTML the server concatenates — they are
- * constants inside the script the server writes (ROW 10b). A render path that threads `lang` into
+ * constants inside the script the server writes (ROW 17b). A render path that threads `lang` into
  * the template but not into `gitGraphClientScript` renders an English page whose sentinel turns
  * Chinese the moment the auto-load fuse trips, and no single-response probe would see it.
  *
@@ -972,7 +972,7 @@ export function renderGitHistoryPage(
   identity: ServeIdentity | null = null,
   lang: Lang = DEFAULT_LANG,
 ): string {
-  // The whole roster, resolved once (serve-i18n.ts ROW 10 / the `dashboardLabelsFor` idiom).
+  // The whole roster, resolved once (serve-i18n.ts ROW 17 / the `dashboardLabelsFor` idiom).
   const t = gitHistoryLabelsFor(lang);
   if (view === "task") {
     const statusNote = history.status === "error"
@@ -1025,7 +1025,7 @@ export function renderGitHistoryPage(
   const graphData = layout ? { ...layout, remotes } : null;
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
-  // ⚠️ The client script takes the REQUEST's language (ROW 10b): it writes the sentinel's text and
+  // ⚠️ The client script takes the REQUEST's language (ROW 17b): it writes the sentinel's text and
   // the coverage unit after a page has been appended, both of which are in no server-concatenated
   // HTML. A render that localized every other string but left this one on the server default would
   // show an English page until the auto-load fuse trips and then turn that one line Chinese.

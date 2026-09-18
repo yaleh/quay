@@ -480,16 +480,22 @@ test("AC1: readJournal marks a superseded escalations.md stale, and does NOT mar
 
     const journal = readJournal(ws, JOURNAL_NOW);
     assert.equal(journal.escalations.status, "ok", "AC1: a stale-but-readable escalations.md is still ok");
-    assert.match(journal.escalations.markdown || "", /陈旧记录/, "AC1: the stale banner appears");
-    assert.match(journal.escalations.markdown || "", /约 9 天前/, "AC1: the banner names the age in days");
-    assert.match(journal.escalations.markdown || "", /2026-08-14/, "AC1: the banner names the last-write date");
+    // gap-webui-journal-body-copy-en-zh: the reader now reports the stale FACT ({date, days}) rather
+    // than a pre-rendered Chinese banner, because the banner's words have to be chosen in the
+    // REQUEST's language — which only the renderer knows. This assertion therefore reads the fact;
+    // the WORDING ("⚠️ Stale record …" in en, the verbatim zh literal) is pinned black-box by
+    // packages/quay/test/serve-journal-body-i18n.test.mjs.
+    assert.deepEqual(journal.escalations.staleSource, { date: "2026-08-14", days: 9 },
+      "AC1: the stale-source fact names the last-write date and the floored age in days");
+    assert.doesNotMatch(journal.escalations.markdown || "", /陈旧记录/,
+      "AC1: the reader no longer bakes the banner's words into the markdown it hands over");
 
-    // Negative control — a fresh escalations.md carries no banner.
+    // Negative control — a fresh escalations.md carries no stale fact.
     setMtime(esc, JOURNAL_NOW - 3600_000); // 1 hour ago
     const fresh = readJournal(ws, JOURNAL_NOW);
     assert.equal(fresh.escalations.status, "ok");
-    assert.doesNotMatch(fresh.escalations.markdown || "", /陈旧记录/,
-      "AC1 negative control: a fresh escalations.md is not marked stale (the banner is real, not vacuous)");
+    assert.equal(fresh.escalations.staleSource ?? null, null,
+      "AC1 negative control: a fresh escalations.md is not marked stale (the fact is real, not vacuous)");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
@@ -897,11 +903,19 @@ test("taskRunsBlock renders one row per attempt for THIS task only + an honest e
     assert.ok(html.includes("run-a") && html.includes("run-b"), "AC1: each attempt's run_id renders");
     assert.ok(!html.includes("run-c") && !html.includes("9999"), "AC1: another task's attempts are NOT rendered");
 
-    const empty = taskRunsBlock(ws, "no-such-task");
+    // gap-webui-doc-tasks-residual-copy-en-zh: the empty state's wording now resolves through
+    // serve-i18n.ts ROW 13, whose default is `en`. The pre-existing assertion is kept VERBATIM and
+    // made explicit about the language it is about (`lang: "zh"`) — so it becomes a zh regression
+    // guard rather than silently reading as an English one — and the en side is asserted alongside
+    // it. ⛔ The `?lang=`-less default is NOT what these two lines test any more: a default-only
+    // assertion here would have kept passing while the string moved out from under it.
+    const empty = taskRunsBlock(ws, "no-such-task", { lang: "zh" });
     assert.ok(empty.includes("<h2>Runs</h2>"), "empty state still renders the Runs block (never a bare page)");
     assert.ok(empty.includes("无 worker 运行记录"), "empty state is an honest 无记录, not a fabricated row");
+    assert.ok(taskRunsBlock(ws, "no-such-task", { lang: "en" }).includes("No worker runs recorded"),
+      "the same empty state under en renders the English ROW 13 row");
 
-    const absent = taskRunsBlock(path.join(ws, "does-not-exist"), "gap-webui-task-runs-block");
+    const absent = taskRunsBlock(path.join(ws, "does-not-exist"), "gap-webui-task-runs-block", { lang: "zh" });
     assert.ok(absent.includes("无 worker 运行记录"), "absent outcome carrier degrades to the empty state, never throws");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });

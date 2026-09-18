@@ -144,7 +144,12 @@ test("AC1: default view with 0 in-flight/awaiting-land rows renders an explicit 
     // ⛔ NEVER probe-then-bind: port 0 binds ONCE and the kernel-assigned port is read off the live handle.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: `?lang=zh`. Every assertion in this file pins
+    // the page's copy, and the default language is now `en` — so without this the Chinese-literal
+    // assertions below would silently test the wrong column (and the `!includes(...)` ones would
+    // become vacuous: the string is absent for the wrong reason). Requesting zh leaves all of them
+    // byte-identical and turns this file into a zh-output regression guard (this task's AC3).
+    const board = await get(port, "/board?lang=zh");
     assert.equal(board.status, 200, "AC1: default /board returns 200");
 
     // The page's own counters agree that nothing is transient — the empty state is a TRUE reading.
@@ -192,7 +197,7 @@ test("AC1/AC3: with 1 in-flight task the default view shows ONLY that row; ?all=
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const board = await get(port, "/board");
+    const board = await get(port, "/board?lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(board.status, 200, "AC1: default /board returns 200");
     assert.ok(board.body.includes(">BQ-live-1<"), "AC1: the single in-flight row IS rendered");
     assert.ok(board.body.includes("在飞 "), "AC1: it renders as 在飞 minutes (the transient signal itself)");
@@ -209,7 +214,7 @@ test("AC1/AC3: with 1 in-flight task the default view shows ONLY that row; ?all=
       "AC2: ?status=ready shows the ready rows, unfiltered by transience");
 
     // AC2: ?all=1 is the explicit way back to the whole store (the 2243-row view).
-    const all = await get(port, "/board?all=1");
+    const all = await get(port, "/board?all=1&lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(all.status, 200, "AC2: ?all=1 returns 200");
     for (const id of ["BQ-history-1", "BQ-history-2", "BQ-live-1"]) {
       assert.ok(all.body.includes(`>${id}<`), `AC2: ?all=1 renders ${id} — the full store is one click away`);
@@ -241,7 +246,7 @@ test("guard: an unread transient source does NOT render as an empty default view
     // ⛔ NEVER probe-then-bind: port 0 binds ONCE and the kernel-assigned port is read off the live handle.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    const board = await get(port, "/board?lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(board.status, 200, "guard: default /board still 200 with an unread source");
     assert.ok(board.body.includes("board_default_view=unfiltered-source-incomplete"),
       "guard: the view reports its own un-evaluated state (a distinct value, not the empty-state's)");
@@ -268,12 +273,18 @@ test("render: transientView=applied with 0 rows renders no table; an omitted tra
     intentReason: null,
     rows: [],
   };
-  const applied = renderBoardPage({ ...base, transientView: "applied", joinedTotal: 2248, incompleteSources: [] });
+  // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: `renderBoardPage`'s THIRD positional argument is
+  // `lang`, defaulting to `en`. Both calls below pass "zh" explicitly (decision record ④): the
+  // positive assertions keep the identical Chinese literal, AND the `!legacy.includes(...)` negative
+  // below stays MEANINGFUL — under `en` it would be vacuously true (the string is absent because the
+  // page is English, not because the legacy path suppressed the note), which is the "a negative
+  // assertion keyed on a zh literal silently becomes a no-op" trap ④ names.
+  const applied = renderBoardPage({ ...base, transientView: "applied", joinedTotal: 2248, incompleteSources: [] }, null, "zh");
   assert.ok(applied.includes("当前没有在飞 / 待落地的任务"), "render: the applied-empty state renders the cause");
   assert.ok(applied.includes("2248"), "render: it names the number of rows it is NOT painting");
   assert.ok(!applied.includes("<th>id</th>"), "render: no table is rendered in the applied-empty state");
 
-  const legacy = renderBoardPage({ ...base });
+  const legacy = renderBoardPage({ ...base }, null, "zh");
   assert.ok(legacy.includes("<th>id</th>"), "render: an omitted transientView (direct callers) keeps the table");
   assert.ok(!legacy.includes("当前没有在飞"), "render: the legacy path adds no transient note");
 });

@@ -82,7 +82,7 @@ function makeSel() {
  *
  * ⚠️ The default carries EXPLICIT zh labels (gap-webui-git-history-body-copy-en-zh). The script no
  * longer has a Chinese literal baked in — the two hint words are injected constants, because the
- * browser has no dictionary (serve-i18n.ts ROW 10b) — so a bare `gitGraphClientScript()` renders
+ * browser has no dictionary (serve-i18n.ts ROW 17b) — so a bare `gitGraphClientScript()` renders
  * NEUTRAL placeholders, and the zh assertions below would be asserting against a placeholder. Passing
  * the zh roster is what keeps them meaning "the Chinese page renders Chinese here". */
 function runClient({ pages, seedCommits }, script = gitGraphClientScript(gitHistoryClientLabelsFor("zh"))) {

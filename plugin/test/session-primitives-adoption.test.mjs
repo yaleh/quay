@@ -392,5 +392,12 @@ test("AC5 — observation.ts runs the validator at its output boundary and refus
   assert.match(src, /validateSessionRecord\(/, "observation.ts calls the shared validator");
   assert.match(src, /sessionRefusal: verdict\.errors/, "a refused record carries the validator's reasons");
   const sessions = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-sessions.ts"), "utf8");
-  assert.match(sessions, /状态记录不可用/, "the render surface shows the refusal instead of a folded value");
+  // gap-webui-sessions-body-copy-en-zh: the refusal FRAME's copy left this file for serve-i18n.ts
+  // ROW 15 (`refusedStateRecord`, zh column byte-equal to the literal pinned here before). The
+  // assertion FOLLOWS THE COPY — two reads, both in code position (`refusedStateRecord` occurs
+  // exactly once in serve-sessions.ts, in the render expression) — instead of pinning the
+  // pre-localization source form, which is precisely what this localization removed.
+  assert.match(sessions, /refusedStateRecord/, "the render surface resolves the refusal frame row");
+  const i18n = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-i18n.ts"), "utf8");
+  assert.match(i18n, /状态记录不可用/, "and that row's zh column still carries the refusal wording");
 });

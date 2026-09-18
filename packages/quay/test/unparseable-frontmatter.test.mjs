@@ -143,8 +143,19 @@ test("AC2/AC3/AC4: /tasks returns 200; the unparseable task is an explicit malfo
     assert.equal(list.status, 200, "AC2: GET /tasks returns 200 with 1 unparseable task (not a 500)");
     assert.match(list.body, /class="malformed-row"/, "AC3: the bad task renders as a .malformed-row");
     assert.ok(list.body.includes("UNPARSE-1.md"), "AC3: the row names which file is broken");
-    assert.ok(list.body.includes("解析失败"), "AC3: the row is visibly a parse failure");
     assert.match(list.body, BAD_ERROR, "AC3: the row shows why (the parser's own error)");
+    // gap-webui-doc-tasks-residual-copy-en-zh: the row's SENTENCE now resolves through serve-i18n.ts
+    // ROW 13, whose default is `en` — so the assertion that used to read the default response is made
+    // explicitly about zh (kept verbatim, now a zh regression guard) and the en arm is asserted too.
+    // ⛔ The `?lang=zh` probe rides the same `get()` helper and the same `list` fixture, so the only
+    // difference between the two readings is the language parameter.
+    assert.ok(list.body.includes("parse failed"), "AC3 (en): the default response renders the English row");
+    assert.ok(!list.body.includes("解析失败"), "AC3 (en): and no Chinese, on the same response");
+    const listZh = await get(port, "/tasks?lang=zh");
+    assert.equal(listZh.status, 200, "AC3 (zh): GET /tasks?lang=zh returns 200");
+    assert.ok(listZh.body.includes("解析失败"), "AC3 (zh): the row is visibly a parse failure, byte for byte as before");
+    assert.ok(listZh.body.includes("UNPARSE-1.md") && listZh.body.match(BAD_ERROR), "AC3 (zh): file name and parser error still ride along");
+    assert.equal((listZh.body.match(/<\/tr>/g) || []).length, 4, "AC4 (zh): the zh render has the same 4 rows");
     assert.ok(list.body.includes("GOOD-1") && list.body.includes("GOOD-2"), "AC4: all good tasks still list normally");
     // header row + GOOD-1 + GOOD-2 + UNPARSE-1 malformed row = 4 rows.
     assert.equal((list.body.match(/<\/tr>/g) || []).length, 4, "AC4: N-1 good rows + 1 bad row (4 </tr> total)");

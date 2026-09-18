@@ -134,20 +134,34 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // `pageNameFor` (this page's chrome, ROW 3).
   // Neither zh value may carry the ASCII literal "Board": AC-292's second arm fails the page on that
   // literal inside the nav region, and "看板 — 三源 join 看板" satisfies "non-empty" without it.
-  "Board — 三源 join 看板": { en: "Board — 三源 join 看板", zh: "看板 — 三源 join 看板" },
+  //
+  // ⚠️ RE-KEYED by gap-webui-board-body-copy-en-zh (2026-09-18). The token used to read
+  // `Board — 三源 join 看板` — i.e. this page's own `<title>` rendered a CHINESE subtitle verbatim
+  // under the DEFAULT (en) locale, which is precisely the "frame is English, content is not" defect
+  // the body-copy series exists to remove. AC-292 could not see it: ROW 3's `en` column is the
+  // identity for every token, so no dictionary edit can move an en baseline, and AC-292's third arm
+  // only asserts zh ≠ en. Fixing it therefore REQUIRES changing the token ITSELF to English (that is
+  // the AC-291/AC-293/AC-296/AC-298 shape — a `pageTitle` token is the full English string, subtitle
+  // included). The zh column is unchanged BYTE FOR BYTE, which is what keeps `lang=zh` output
+  // identical (this task's AC3) and AC-292's live criterion green on both of its title arms
+  // (`!includes("Board")` and `t_zh ≠ t_en`).
+  "Board — three-source join": { en: "Board — three-source join", zh: "看板 — 三源 join 看板" },
   Board: { en: "Board", zh: "看板" },
-  // AC-293 (/system page): this page's own TWO tokens, same shape as AC-291's and AC-292's pairs.
-  // `System — 系统状态` is the FULL token `serve-system.ts` passes to `pageTitle` — em dash and the
-  // (already-Chinese) subtitle included, because AC-293's third arm compares this page's `<title>`
-  // against its en baseline and a token that is not byte-equal to the call site misses the lookup
-  // (that miss IS the `title-unchanged` arm, i.e. the exact defect AC-293 exists to remove).
-  // `System` is the token the `<h1>` carries; it is spelled like the nav KEY `system`, but like
-  // AC-290's `Tasks` and AC-292's `Board` it is a separate lookup on purpose — the nav label
+  // AC-293 (/system page): this page's own token, same shape as AC-291's and AC-292's.
+  // ⚠️ ROW 14 (gap-webui-system-body-copy-en-zh, 2026-09-18) RETIRED this page's former second row,
+  // `"System — 系统状态"` — the pre-joined composite the page used to hand to `pageTitle`. The page
+  // now passes the bare `System` token and appends ROW 14's `pageSubtitle` OUTSIDE it, so the name
+  // and the subtitle are owned by two tables rather than by one string. ROW 14 ③ has the reasoning
+  // (a pre-localized composite makes THIS table's zh lookup MISS — the title would render correctly
+  // by falling through the dictionary instead of by being found in it). ⛔ The zh value `系统 — 系统状态`
+  // did NOT disappear: it is now `pageNameFor("System", "zh")` + ` — ` + `SYSTEM_LABELS.pageSubtitle.zh`,
+  // and the zh response is byte-identical before and after the split.
+  // `System` is the token the `<h1>`'s page NAME carries; it is spelled like the nav KEY `system`, but
+  // like AC-290's `Tasks` and AC-292's `Board` it is a separate lookup on purpose — the nav label
   // resolves through `NAV_LABELS` (shared chrome, ROW 1) while this resolves through `pageNameFor`
   // (this page's chrome, ROW 3).
-  // Neither zh value may carry the ASCII literal "System": AC-293's second arm fails the page on
-  // that literal inside the nav region, and "系统 — 系统状态" satisfies "non-empty" without it.
-  "System — 系统状态": { en: "System — 系统状态", zh: "系统 — 系统状态" },
+  // The zh value may not carry the ASCII literal "System": AC-293's second arm fails the page on
+  // that literal inside the nav region, and "系统" satisfies "non-empty" without it.
   System: { en: "System", zh: "系统" },
   // AC-294 (/manager page): this page's own token — and, uniquely among the pages wired so far,
   // ONE entry serves BOTH call sites. /manager's `<title>` is `pageTitle("Manager / Outer / Inner")`
@@ -245,17 +259,21 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // 「测试 — 验证轮记录」 satisfies "non-empty" without either literal.
   "Tests — 验证轮记录": { en: "Tests — 验证轮记录", zh: "测试 — 验证轮记录" },
   tests: { en: "tests", zh: "测试" },
-  // AC-299 (/sessions page): this page needs THREE tokens, not the usual two — its `<h1>` carries a
-  // LOUDER token than its `<title>`, so unlike /tests (AC-298) a single entry cannot serve both.
-  //   `"Sessions — 会话观测"` — the FULL token `serve-sessions.ts` passes to `pageTitle`, em dash and
-  //     the (already-Chinese) subtitle included, byte-equal to the call site. `pageNameFor` is an
-  //     EXACT-token lookup, so registering only the bare nav word `Sessions` would leave this page's
-  //     `<title>` English while the shared nav bar switched — i.e. exactly the `title-unchanged` arm
-  //     this task exists to remove.
-  //   `"Sessions — 会话观测（运行中 + 已结束）"` — the token the page's `<h1>` carries, with the
-  //     full-width parens and the parenthetical included. It is NOT the title token above: the two
-  //     differ by the trailing `（运行中 + 已结束）`, so the title entry does not serve it and vice
-  //     versa. This is the one deviation from the AC-291~298 two-token shape.
+  // AC-299 (/sessions page) registered this page's own tokens. ⚠️ gap-webui-sessions-body-copy-en-zh
+  // RE-KEYED them: the two COMPOSITE rows `"Sessions — 会话观测"` / `"Sessions — 会话观测（运行中 +
+  // 已结束）"` are RETIRED, and the page now passes the BARE `Sessions` token (below) with the
+  // subtitle appended from ROW 15 (`pageSubtitle` / `h1Subtitle`).
+  //
+  // WHY THE COMPOSITE ROWS COULD NOT BE KEPT — and why this is not a style preference: `pageNameFor`
+  // returns its argument UNCHANGED for `en` (ROW 3's contract, "en is the identity for every token,
+  // so the en baseline cannot drift"). A composite token therefore renders its OWN (Chinese) bytes
+  // under `lang=en`, and its `en` column is dead code that no lookup ever reads — i.e. the row was
+  // structurally incapable of localizing the page it named. Splitting the token is the only shape in
+  // which BOTH languages are read from a table. The retired rows' zh values survive byte-for-byte as
+  // ROW 15's subtitles (`会话观测` / `会话观测（运行中 + 已结束）`), so `lang=zh` does not move.
+  //   `Sessions` — the token `serve-sessions.ts` now passes to `pageTitle` and `pageNameFor`: the
+  //     page's NAME alone, with NO subtitle (the subtitles are ROW 15's, appended outside). It is a
+  //     peer of the other pages' name entries (`System`, `Board`, `Journal`, …).
   //   `sessions` — the lowercase token the MOBILE header carries, i.e. the AC-290 `"task list"` /
   //     AC-297 `"git history"` / AC-298 `tests` shape (a page's own chrome token that is not a
   //     `pageTitle` token). It renders into `<span class="mobile-header-page">`, which sits BEFORE
@@ -267,9 +285,8 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   // the page on that literal inside the nav region — where this page's CURRENT item label comes from
   // NAV_LABELS's `sessions` row (「会话」, ROW 1) — and the same literal is what the en baseline's
   // `<title>` and `<h1>` carry, i.e. what the criterion's `title-unchanged` arm compares the zh title
-  // against. 「会话」/「会话观测」 satisfy "non-empty" without either literal.
-  "Sessions — 会话观测": { en: "Sessions — 会话观测", zh: "会话 — 会话观测" },
-  "Sessions — 会话观测（运行中 + 已结束）": { en: "Sessions — 会话观测（运行中 + 已结束）", zh: "会话 — 会话观测（运行中 + 已结束）" },
+  // against. 「会话」 satisfies "non-empty" without either literal.
+  Sessions: { en: "Sessions", zh: "会话" },
   sessions: { en: "sessions", zh: "会话" },
   // AC-300 (/adr page): this page's own TWO tokens — and they differ ONLY IN CASE, which is why
   // they are two independent lookups rather than one.
@@ -398,7 +415,20 @@ const PAGE_LABELS: Record<string, { en: string; zh: string }> = {
   //     The two entries landing on the same zh word (and on the same word as the nav row) is a
   //     coincidence of vocabulary, ⛔ not a shared source — a later re-wording of one must not be
   //     assumed to move the others (same note as AC-295's / AC-300's / AC-301's / AC-302's rows).
-  "Architecture — 系统组件图": { en: "Architecture — 系统组件图", zh: "架构 — 系统组件图" },
+  //
+  // ⚠️ RE-KEYED by gap-webui-architecture-body-copy-en-zh (2026-09-18). The token used to read
+  // `Architecture — 系统组件图` — i.e. this page's own `<title>` rendered a CHINESE subtitle verbatim
+  // under the DEFAULT (en) locale, which is precisely the "frame is English, content is not" defect
+  // the body-copy series exists to remove. AC-303 could not see it: ROW 3's `en` column is the
+  // identity for every token, so no dictionary edit can move an en baseline, and AC-303's fourth arm
+  // only asserts zh ≠ en. Fixing it therefore REQUIRES changing the token ITSELF to English (the
+  // AC-291/AC-292/AC-293/AC-296/AC-298 shape — a `pageTitle` token is the full English string,
+  // subtitle included). The zh column is unchanged BYTE FOR BYTE, which is what keeps `lang=zh`
+  // output identical (this task's AC3) and AC-303's live criterion green on both of its title arms
+  // (`!includes("Architecture")` and `t_zh ≠ t_en`). ⚠️ The `en` value here happens to equal the
+  // string the AC-303 test's `META_DESCRIPTION` residue carries, but they are INDEPENDENT: that meta
+  // node passes through no dictionary and is untouched (see the AC-303 test's named-residue arms).
+  "Architecture — system component map": { en: "Architecture — system component map", zh: "架构 — 系统组件图" },
   Architecture: { en: "Architecture", zh: "架构" },
   architecture: { en: "architecture", zh: "架构" },
 };
@@ -735,7 +765,1057 @@ export function chromeLabel(key: string, lang: Lang = DEFAULT_LANG): string {
   return entry[lang];
 }
 
-// ── ROW 10: the /git-history BODY copy (gap-webui-git-history-body-copy-en-zh) ──────────────────
+// ── ROW 10: the /journal BODY copy (gap-webui-journal-body-copy-en-zh) ──────────────────────────
+//
+// ROW 5 is /dashboard's body copy. This row is /journal's, and it obeys ROW 2/ROW 6/ROW 7/ROW 8
+// unchanged: the roster is closed, the zh column is the pre-existing literal BYTE FOR BYTE, and
+// interpolated copy carries `{name}` in both columns.
+//
+// HOW THE ROSTER WAS FOUND — by MEASUREMENT, not by reading the source. The red-baseline probe
+// renders /journal TWICE from two real servers: one rooted at the real workspace (real
+// escalations.md with its real mtime, real 2 MB tick-log.md, real commit log) and one rooted at a
+// workspace with an EMPTY orchestration/ and a one-commit ASCII log. A CJK line present in BOTH
+// renders is interface copy BY CONSTRUCTION — it cannot have come from data, because the second
+// render had none. That differential is what produced this roster, and it is re-runnable.
+//
+// ⚠️ WHY THE ROSTER INCLUDES THE EMPTY/ERROR STATES (`noData`, `readFailed`, `noContent`) EVEN
+// THOUGH THE HEALTHY PAGE NEVER RENDERS THEM: the differential found them in the no-data render,
+// and they are this page's copy every bit as much as the section headings are. A roster built only
+// from the healthy render would leave the page half-English in exactly the state an operator
+// reaches for it — when a source has gone missing.
+//
+// ⚠️ `staleBanner` IS THE ONE INTERPOLATED ROW, and it is the only reason this task also touches
+// observation.ts. The banner was not copy this page's renderer ever saw: `observation.staleBanner`
+// built the finished Chinese MARKDOWN STRING and prepended it to `escalations.markdown`, so by the
+// time any renderer ran, the words were already baked into the data (see ROW 6's rule — a sentence
+// assembled before the language is known cannot be un-assembled at the call site). The reader now
+// reports the stale FACT (`{date, days}`) and the renderer says it in the request's language.
+export const JOURNAL_KEYS = [
+  // page header
+  "titleSuffix",
+  // the three section headings (the file name each carries is DATA and stays verbatim)
+  "sectionEscalations", "sectionTickLog", "sectionCommits",
+  // renderSectionBlock's three states
+  "noContent", "noData", "readFailed",
+  // the stale-source banner (interpolated — ROW 6)
+  "staleBanner",
+] as const;
+
+export type JournalKey = (typeof JOURNAL_KEYS)[number];
+
+/** The /journal body-copy dictionary — see ROW 10 and ROW 2/6/7/8. */
+export const JOURNAL_LABELS: Record<JournalKey, { en: string; zh: string }> = {
+  // The `<h1>`'s suffix, rendered as `${pageNameFor("Journal", lang)} — <this>`.
+  titleSuffix: { en: "recent loop record", zh: "循环最近记录" },
+  // The section headings. ⛔ The parenthesised file name is the reader's own source path — DATA —
+  // and is carried verbatim in both columns rather than reassembled at the call site, so the en
+  // column cannot silently drop it (it is the operator's only pointer to which file this is).
+  sectionEscalations: { en: "Escalations (escalations.md)", zh: "升级项 (escalations.md)" },
+  sectionTickLog: { en: "Tick log (tick-log.md)", zh: "Tick 记录 (tick-log.md)" },
+  sectionCommits: { en: "Recent commits (git log)", zh: "最近提交 (git log)" },
+  // renderSectionBlock's "source exists and is readable, but has no recent content" state — a
+  // third state, distinct from both noData (source absent) and readFailed (source unreadable).
+  noContent: { en: "No recent content.", zh: "暂无内容。" },
+  noData: { en: "No data", zh: "无数据" },
+  readFailed: { en: "Read failed", zh: "读失败" },
+  // ⚠️ `{days}` is rendered with a `d` unit rather than a pluralised "day"/"days": the dictionary
+  // has one column per language and no number/plural dimension, so a pluralisation rule would have
+  // to live at the call site — the exact shape ROW 6 forbids. `~{days}d ago` is correct English for
+  // every n, including n=1, without one.
+  staleBanner: {
+    en: "⚠️ Stale record — last updated {date} (~{days}d ago); the escalation channel has been superseded by tick-log and is kept for reference only",
+    zh: "⚠️ 陈旧记录 — 最后更新于 {date}（约 {days} 天前）；升级机制已由 tick-log 取代，此处仅供参考",
+  },
+};
+
+/** The whole /journal roster resolved for one language — the `navLabelsFor`/`dashboardLabelsFor`
+ *  idiom (take it ONCE per render rather than re-reading `JOURNAL_LABELS` at each call site). */
+export function journalLabelsFor(lang: Lang = DEFAULT_LANG): Record<JournalKey, string> {
+  const out = {} as Record<JournalKey, string>;
+  for (const key of JOURNAL_KEYS) out[key] = JOURNAL_LABELS[key][lang];
+  return out;
+}
+
+// ── ROW 11: the /board BODY copy (gap-webui-board-body-copy-en-zh) ──────────────────────────────
+//
+// ROW 5 did this for /dashboard and ROW 10 for /journal; this is the series' THIRD page and it obeys
+// ROW 5~8 unchanged (one table, one ROW per RENDERED string, `{name}` templates filled by
+// `fillLabel`, the zh column byte-equal to the pre-extraction literal, a CLOSED `Record<…>` roster).
+// The three rules that had to be DECIDED for THIS page rather than inherited are recorded here:
+//
+// ① THE STATE WORD IS ONE ROW, NOT ONE PER RENDER SITE. `doneUnlanded` / `landedNotClosed` /
+//    `awaitingLandTag` / `inFlightTimeout` / `orphan` each render once PER ROW of the table, i.e.
+//    hundreds of times on a full page. The unit is still one rendered string — ⛔ never a row per
+//    occurrence (the table body is a `.map`; a per-site row would be 200 identical entries).
+//
+// ② EVERY COUNT-BEARING LINE IS A TEMPLATE, INCLUDING THE THREE THAT READ LIKE CONCATENATION.
+//    `· {implementing} 实现中 · {awaiting} 待落地`, `· 扫描 {n} 任务`, and
+//    `默认视图：… —— {shown} 行（全部 {total} 行）。` are all sentences whose WORD ORDER differs
+//    between the columns, so the number cannot be concatenated at the call site (ROW 6). Same for
+//    the two `显示全部 {n} 行` / `已显示全部 {n} 行` link texts and the empty-state body.
+//    ⚠️ The zh column is byte-equal to the literal it replaced, so `lang=zh` output does not move
+//    (this task's AC3) — a zh value that merely "reads better" is a REGRESSION here (ROW 7).
+//
+// ③ THE TABLE DOES NOT REUSE `DASHBOARD_LABELS`' OR `JOURNAL_LABELS`' ROWS, and the duplication is
+//    DELIBERATE. `读失败` (`readFailed`), `无数据`/`读取超时` and the "not wired / no data" family
+//    render byte-identically on three pages now, and ROW 5's own note argues for SHARING such a
+//    string. It is NOT shared here, for the reason ROW 5 gives for the /live constant: a value owned
+//    by another page's table makes that page's next re-wording a CROSS-TABLE edit, so a change made
+//    for /board would silently move /dashboard's and /journal's copy (and vice versa). The
+//    duplication is real, recorded, and the cheaper of the two failure modes. ⛔ It is NOT an
+//    invitation to "merge the duplicate" later.
+//
+// ⚠️ NOT IN THIS ROW, and why (each is a judgement, not an omission):
+//   - The reader DIAGNOSTIC strings appended after 「读失败」/「读取超时」/「无数据」 (e.g.
+//     `未找到遥测记录（.workflow-events/ 不存在）`, `landing 判断源执行超过 8000ms 未完成（fail-open）`)
+//     come from `observation.ts`'s readers, which are NOT in this task's Touches and are shared with
+//     /dashboard. They are rendered verbatim through `escapeHtml`, i.e. the same class as a task
+//     title (data), and the /dashboard and /journal body-copy tasks classified them the same way.
+//   - `Filter` / `Page size:` / `« Previous` / `Page {n} of {m}` / the two filter-input placeholders
+//     are ALREADY English in both columns (they predate this series); they are not defects, and
+//     moving them would change zh output, which AC3 forbids.
+//   - The `id` column header and the `—` empty-cell glyph are not language-bearing.
+export const BOARD_KEYS = [
+  // page chrome
+  "metaDescription", "h1Subtitle",
+  // the three source-summary notes
+  "intentSource", "execSource", "landingSource",
+  "scanTasks", "inFlightBreakdown", "noData", "readTimeout", "readFailed",
+  // table headers
+  "colIntent", "colExec", "colLanding",
+  // per-cell state words (① — one row, hundreds of render sites)
+  "inFlightMinutes", "awaitingLandTag", "inFlightTimeout", "orphan",
+  "doneUnlanded", "landedNotClosed",
+  // the default view's note block (four distinct states, four distinct wordings)
+  "showAllRows", "onlyTransient", "defaultViewNote",
+  "emptyTitle", "emptyBody", "emptyHint",
+  "defaultFilterNotApplied", "defaultFilterNotAppliedBody",
+  "allRowsShown",
+  // the incomplete-source names that fill `defaultFilterNotAppliedBody`'s `{why}`
+  "srcExecEmpty", "srcExecFailed", "srcLandingTimeout", "srcLandingUnavailable", "srcLandingFailed",
+] as const;
+
+export type BoardKey = (typeof BOARD_KEYS)[number];
+
+/** The /board body-copy dictionary — see ROW 11 (and ROW 5~8, which it obeys unchanged). */
+export const BOARD_LABELS: Record<BoardKey, { en: string; zh: string }> = {
+  // ── page chrome ─────────────────────────────────────────────────────────────────────────────
+  // ⚠️ The `<title>` itself is NOT here: its token is PAGE_LABELS' job (ROW 3), and it was re-keyed
+  // to English by this same task (see the `Board — three-source join` row's note). Only the meta
+  // description and the `<h1>`'s subtitle are body copy.
+  metaDescription: {
+    en: "Quay board — the three-source join of intent, execution and landing",
+    zh: "Quay board — 三源 join 看板",
+  },
+  h1Subtitle: { en: "intent / execution / landing", zh: "意图 / 执行 / 落地" },
+
+  // ── the three source-summary notes ──────────────────────────────────────────────────────────
+  // `intentSource` is ONE rendered string (label + source description) because the two halves are
+  // never separated by a tag at that call site — unlike exec/landing, whose source is inside a
+  // `<code>` that follows the label.
+  intentSource: { en: "Intent: task store (Provider ABI)", zh: "意图: 任务库 (Provider ABI)" },
+  execSource: { en: "Execution:", zh: "执行:" },
+  landingSource: { en: "Landing:", zh: "落地:" },
+  scanTasks: { en: "scanned {n} tasks", zh: "扫描 {n} 任务" },
+  // ⚠️ TWO counts. The in-flight view splits into implementing (start, no impl-complete) and
+  // awaiting-land (impl-complete, no end) — two independent signals with two different consumers
+  // (dispatch reads the first, the land gate the second), so the two numbers are NOT interchangeable.
+  inFlightBreakdown: {
+    en: "{implementing} implementing · {awaiting} awaiting land",
+    zh: "{implementing} 实现中 · {awaiting} 待落地",
+  },
+  noData: { en: "No data", zh: "无数据" },
+  readTimeout: { en: "Read timed out", zh: "读取超时" },
+  readFailed: { en: "Read failed", zh: "读失败" },
+
+  // ── table headers ───────────────────────────────────────────────────────────────────────────
+  colIntent: { en: "Intent", zh: "意图" },
+  colExec: { en: "Execution", zh: "执行" },
+  colLanding: { en: "Landing", zh: "落地" },
+
+  // ── per-cell state words (ROW 11 ①) ─────────────────────────────────────────────────────────
+  inFlightMinutes: { en: "In flight {minutes} min", zh: "在飞 {minutes} 分钟" },
+  // The exec cell's own awaiting-land tag. ⛔ NOT shared with `inFlightBreakdown` above: one is a
+  // standalone `<strong>` tag inside a table cell, the other is a sentence fragment in the summary
+  // line — different rendered contexts, so a later re-wording of one must not move the other.
+  awaitingLandTag: { en: "Awaiting land", zh: "待落地" },
+  inFlightTimeout: { en: "In-flight timeout", zh: "在飞超时" },
+  orphan: { en: "Orphan", zh: "孤儿" },
+  doneUnlanded: { en: "done but not landed", zh: "done 但未落地" },
+  landedNotClosed: { en: "landed but not closed", zh: "已落地但未收尾" },
+
+  // ── the default view's note block ───────────────────────────────────────────────────────────
+  // FOUR distinct states share this block, and each gets its OWN wording — 「判定过且为空」,
+  // 「判定过且非空」, 「无法判定」(the filter could not be applied) and 「显式要求全部」 must never
+  // read alike (硬规则 3b: a judge that cannot read its input must not return a value shaped like
+  // one that read it). The two link texts below are reused by the first two states.
+  showAllRows: {
+    en: "Show all {n} rows (including historical tasks)",
+    zh: "显示全部 {n} 行（含历史任务）",
+  },
+  onlyTransient: {
+    en: "Show only the currently in-flight / awaiting-land rows",
+    zh: "只看当前在飞 / 待落地",
+  },
+  defaultViewNote: {
+    en: "Default view: showing only rows where the Execution or Landing column is non-empty — {shown} of {total} rows.",
+    zh: "默认视图：只显示「执行」或「落地」列非空的行 —— {shown} 行（全部 {total} 行）。",
+  },
+  emptyTitle: {
+    en: "No in-flight / awaiting-land tasks right now",
+    zh: "当前没有在飞 / 待落地的任务",
+  },
+  emptyBody: {
+    en: "The default view shows only rows where the Execution or Landing column is non-empty — none of the {total} rows is in flight / awaiting land / landing-abnormal, so the historical tasks are not expanded.",
+    zh: "默认视图只显示「执行」或「落地」列非空的行 —— 全部 {total} 行里没有一行处于在飞 / 待落地 / 落地异常，故不铺开历史任务。",
+  },
+  // ⚠️ The en value starts with a SPACE and the zh value with 「，」: the row is rendered directly
+  // after the 「show all」 link, and the zh byte sequence is the pre-extraction one (a full-width
+  // comma with no space). An en value trimmed "for tidiness" would run the link into the sentence.
+  emptyHint: {
+    en: " — or use the status / label filters above to view a specific subset.",
+    zh: "，或用上方的 status / label 筛选查看指定子集。",
+  },
+  defaultFilterNotApplied: { en: "Default filter not applied", zh: "默认过滤未生效" },
+  // `{why}` is filled with the already-escaped ` · `-joined source list; `{total}` with the joined
+  // row count. The sentence is one row because its clause order differs by language.
+  defaultFilterNotAppliedBody: {
+    en: "{why} could not be read (no data / read failed / read timed out), so which tasks are currently in flight or awaiting land CANNOT be determined — the page therefore shows all {total} rows rather than rendering \"cannot be determined\" as \"none\".",
+    zh: "{why} 读不到（无数据 / 读失败 / 读取超时），无法判定哪些任务当前在飞或待落地 —— 因此下面显示全部 {total} 行，而不是把「无法判定」渲染成「没有」。",
+  },
+  allRowsShown: {
+    en: "Showing all {n} rows (including historical tasks).",
+    zh: "已显示全部 {n} 行（含历史任务）。",
+  },
+
+  // ── the incomplete-source names (fill `{why}` above) ────────────────────────────────────────
+  // One row per SOURCE-and-STATE pair: these are two different sources (execution / landing) each
+  // with its own failure modes, and collapsing them would report which one failed as a generic
+  // 「a source failed」 — the fact the banner exists to state.
+  srcExecEmpty: { en: "the execution source (.workflow-events/) has no data", zh: "执行源（.workflow-events/）无数据" },
+  srcExecFailed: { en: "the execution source (.workflow-events/) read failed", zh: "执行源（.workflow-events/）读失败" },
+  srcLandingTimeout: {
+    en: "the landing source (task-status-drift-check.ts) read timed out",
+    zh: "落地源（task-status-drift-check.ts）读取超时",
+  },
+  srcLandingUnavailable: {
+    en: "the landing source (task-status-drift-check.ts) is unavailable",
+    zh: "落地源（task-status-drift-check.ts）不可用",
+  },
+  srcLandingFailed: {
+    en: "the landing source (task-status-drift-check.ts) read failed",
+    zh: "落地源（task-status-drift-check.ts）读失败",
+  },
+};
+
+/** The whole /board roster resolved for one language — take it ONCE per render (ROW 5's `navLabelsFor`
+ *  idiom), rather than re-reading `BOARD_LABELS` at each of ~30 call sites. */
+export function boardLabelsFor(lang: Lang = DEFAULT_LANG): Record<BoardKey, string> {
+  const out = {} as Record<BoardKey, string>;
+  for (const key of BOARD_KEYS) out[key] = BOARD_LABELS[key][lang];
+  return out;
+}
+
+/** One /board label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`).
+ *  Exported so a caller that needs only ONE interpolated row does not have to take the roster. */
+export function boardLabel(
+  key: BoardKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(BOARD_LABELS, key) ? BOARD_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown board key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+// ── ROW 12: the /architecture BODY copy (gap-webui-architecture-body-copy-en-zh) ────────────────
+//
+// ROW 5 did this for /dashboard, ROW 10 for /journal and ROW 11 for /board; this is the series'
+// FOURTH page and it obeys ROW 5~8 unchanged (one row per RENDERED string, `{name}` templates filled
+// by `fillLabel`, the zh column byte-equal to the pre-extraction literal, a CLOSED `Record<…>`
+// roster, an unknown key THROWS). The four rules that had to be DECIDED for THIS page:
+//
+// ① THE THREE SOURCE-NOTE FRAGMENTS ARE THREE ROWS, NOT ONE. The `<p class="meta">` line is a single
+//    sentence INTERLEAVED with two `<code>` elements — `数据源：` `<code>packages/*</code>`
+//    `（git log 提交事实）· ` `<code>git worktree list</code>` `（在飞开发）`. A tag boundary splits a
+//    rendered line into three visible text nodes, so the `<h2>`/`<th>`-style "one rendered string per
+//    row" rule counts them as three: one row carrying a single literal sentence across a `<code>`
+//    would have to embed the markup, which is exactly what the dictionary must not do (ROW 6).
+//    ⚠️ The en column's 2nd and 3rd fragments therefore START WITH A SPACE — the zh literal follows
+//    `</code>` with no space (a full-width paren closes the gap), while English needs one. Same
+//    recorded judgement as ROW 11's `emptyHint` (which starts with a space in en and 「，」 in zh).
+//
+// ② THE WINDOW DAYS IS A PLACEHOLDER IN *BOTH* COUNT-BEARING ROWS, AND ITS VALUE COMES FROM THE
+//    READER. The page said `近 7 天` twice with the `7` hard-written, while the reader's window is a
+//    PARAMETER (`readArchitecture(root, { windowDays = ARCH_RECENT_WINDOW_DAYS })`). A literal `7` in
+//    the copy is therefore a second, silently-driftable source for one number, and this series'
+//    rule forbids it: the rows carry `{days}` and `serve-architecture.ts` fills them from the
+//    EXPORTED constant the reader defaults to — so changing the window changes the copy by
+//    construction. ⛔ Not `7`, not a per-language "days" plural rule: the `days` unit makes
+//    `past {days} days` correct English for every n including 1, the reason ROW 10's `staleBanner`
+//    uses `~{days}d ago` (there is no number/plural dimension in a two-column table).
+//
+// ③ THE FOUR LEGEND WORDS ARE FOUR ROWS, ONE PER RENDERED STRING — and they are ⛔ NOT shared with
+//    the /board table's `awaitingLandTag`-style rows even where a word coincides: the legend's four
+//    words name the SVG node's HIGHLIGHT STATE (dev / recent / stale / plain), a vocabulary this
+//    page owns. A shared row would make /board's next re-wording move this page's legend (ROW 11 ③).
+//    ⚠️ They are also ⛔ NOT the same strings as the highlight KIND names in `serve-architecture.ts`
+//    (`dev`/`recent`/`plain`/`stale`): the enum is a code identifier that never renders, the label
+//    is the rendered word. One row each, keyed by the rendered word's ROLE (`stateDev` = the word
+//    shown for the `dev` highlight), so a re-ordering of the legend cannot silently swap two words.
+//
+// ④ THE `<title>`'s SUBTITLE IS *NOT* A ROW HERE — it is PAGE_LABELS' business (ROW 3), and this task
+//    RE-KEYED that token to English (see the note on the `Architecture — system component map` row).
+//    The `<h1>`'s subtitle, by contrast, IS body copy (`titleSuffix`): the two sites concatenate
+//    `pageNameFor(<page name>)` with a subtitle, and only the page name goes through PAGE_LABELS.
+//
+// ⚠️ NOT IN THIS ROW, and why (each a judgement, not an omission):
+//   - The `<head>`'s `<meta name="description" content="Quay architecture — system component map">`
+//     is ALREADY English, passes through no dictionary, and is this page's NAMED out-of-scope residue
+//     (AC-303's test asserts it verbatim under BOTH languages). Translating it would change `lang=zh`
+//     output, which AC3 forbids — and would remove a residue another file pins.
+//   - `obsNote(status, reason)` (serve-render.ts) — the `未接入/无数据` / `读失败` prefix shown when
+//     the reader returns a non-ok status — is SHARED CHROME consumed by six other pages (tests /
+//     system / sessions), i.e. the ROW 9 class, not this page's copy. It is not in this task's
+//     Touches, and the healthy page never renders it. Its `reason` half is the reader's own
+//     diagnostic (observation.ts), which the /dashboard, /journal and /board tasks all classified as
+//     DATA. ⛔ Recorded here so the next body-copy task sees it as a named, still-open item rather
+//     than a fresh discovery — the empty-state arms of the black-box test assert it is still there.
+//   - The component NAMES and PATHS in the table (`quay`, `quay-native`, `packages/quay`, …) are DATA
+//     read from the workspace, rendered verbatim through `escapeHtml` in both languages. ⛔ Never
+//     translated — a translated path would point at a directory that does not exist.
+export const ARCHITECTURE_KEYS = [
+  // page header — the `<h1>`'s subtitle (④: the `<title>`'s is a PAGE_LABELS token, not a row here)
+  "titleSuffix",
+  // the source note (① — three rows across two `<code>` boundaries)
+  "sourceLabel", "sourceGitLog", "sourceWorktrees",
+  // the SVG legend (③ — one row per rendered word, named by the highlight state it labels)
+  "stateDev", "stateRecent", "stateStale", "stateStable",
+  // the component table (② — both count-bearing rows carry `{days}`)
+  "tableHeading", "colComponent", "colPath", "colRecentCommits", "colLastCommit",
+] as const;
+
+export type ArchitectureKey = (typeof ARCHITECTURE_KEYS)[number];
+
+/** The /architecture body-copy dictionary — see ROW 12 (and ROW 5~8, which it obeys unchanged). */
+export const ARCHITECTURE_LABELS: Record<ArchitectureKey, { en: string; zh: string }> = {
+  // ── page header ─────────────────────────────────────────────────────────────────────────────
+  // The `<h1>` renders `${pageNameFor("Architecture", lang)} — ${L.titleSuffix}`; the zh value is the
+  // pre-extraction literal `系统组件图`, byte for byte, so the zh `<h1>` (`架构 — 系统组件图`) does not
+  // move (AC3). ⛔ The en value is deliberately the SAME phrase the re-keyed `<title>` token and the
+  // meta description carry — a coincidence of vocabulary, not a shared source.
+  titleSuffix: { en: "system component map", zh: "系统组件图" },
+
+  // ── the source note (①) ─────────────────────────────────────────────────────────────────────
+  // `数据源：` is its own row because a `<code>` immediately follows it. ⚠️ The en value keeps the
+  // full-width-looking role of the colon as an ASCII `:` — the zh `：` is a full-width glyph, and the
+  // en column is independent prose (ROW 1's peer-columns rule), ⛔ not a transliteration. ⚠️ The en
+  // value therefore ENDS WITH A SPACE (like fragments 2 and 3): a full-width `：` separates the two
+  // halves optically on its own, an ASCII `:` does not — without it the page renders
+  // `Source:packages/*`, which is what the AC8 screenshot showed before this was corrected. The zh
+  // column is byte-identical to the pre-extraction literal either way.
+  sourceLabel: { en: "Source: ", zh: "数据源：" },
+  // Fragments 2 and 3 START WITH A SPACE in en (see ①) and end with the pre-existing zh bytes. The
+  // `· ` inside fragment 2 is part of the LITERAL, not a concatenation done at the call site.
+  sourceGitLog: { en: " (git log commit facts) · ", zh: "（git log 提交事实）· " },
+  sourceWorktrees: { en: " (in-flight development)", zh: "（在飞开发）" },
+
+  // ── the SVG legend (③) ──────────────────────────────────────────────────────────────────────
+  // Keyed by the HIGHLIGHT STATE each word labels (dev / recent / stale / plain), so the legend's
+  // order and the highlight enum cannot be silently mismatched:
+  //   dev   = a task worktree exists (something is being built right now)
+  //   recent= the package has commits inside the window
+  //   stale = the flagged/known-issue package (currently quay-github, a design note)
+  //   plain = neither — the stable baseline
+  stateDev: { en: "In development", zh: "正在开发" },
+  stateRecent: { en: "Recently changed", zh: "最近变更" },
+  stateStale: { en: "Flagged issue", zh: "已标记问题" },
+  stateStable: { en: "Stable", zh: "稳定" },
+
+  // ── the component table (②) ─────────────────────────────────────────────────────────────────
+  tableHeading: {
+    en: "Recently changed components (git-verifiable, past {days} days)",
+    zh: "组件最近变更（git 可证，近 {days} 天）",
+  },
+  colComponent: { en: "Component", zh: "组件" },
+  colPath: { en: "Path", zh: "路径" },
+  colRecentCommits: { en: "Commits in the past {days} days", zh: "近 {days} 天提交" },
+  // ⚠️ The en column's `Last commit` is also the wording the EMPTY CELL glyph `—` sits under; that
+  // glyph is not language-bearing and stays a literal at the call site (ROW 11's `id`-column note).
+  colLastCommit: { en: "Last commit", zh: "末次提交" },
+};
+
+/** The whole /architecture roster resolved for one language — take it ONCE per render (ROW 5's
+ *  `navLabelsFor` idiom), rather than re-reading `ARCHITECTURE_LABELS` at each call site. */
+export function architectureLabelsFor(lang: Lang = DEFAULT_LANG): Record<ArchitectureKey, string> {
+  const out = {} as Record<ArchitectureKey, string>;
+  for (const key of ARCHITECTURE_KEYS) out[key] = ARCHITECTURE_LABELS[key][lang];
+  return out;
+}
+
+/** One /architecture label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`);
+ *  a sub-`Record<…>` roster makes the unknown-key arm unreachable from typed code, which is why the
+ *  black-box test reads the roster directly and the throw is asserted through it. */
+export function architectureLabel(
+  key: ArchitectureKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(ARCHITECTURE_LABELS, key) ? ARCHITECTURE_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown architecture key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+// ── ROW 13: the /doc + /tasks + /task/<id> RESIDUAL EDGE-STATE copy ──────────────────────────────
+// (gap-webui-doc-tasks-residual-copy-en-zh)
+//
+// ROW 5 did this for /dashboard, ROW 10 for /journal, ROW 11 for /board and ROW 12 for
+// /architecture; this is the series' FIFTH table and it obeys ROW 6/ROW 7/ROW 8 unchanged (one row
+// per RENDERED string, `{name}` templates filled by `fillLabel`, the zh column byte-equal to the
+// pre-extraction literal, a CLOSED roster, an unknown key THROWS).
+//
+// WHY THIS TABLE IS THE SERIES' ODD ONE: the four page tables each cleared a page that was FULL of
+// Chinese body copy. By the time this task ran, /doc, /tasks and /task/<id> had no Chinese at all on
+// the URL anyone would grab — the residue was five strings that render ONLY in edge states (a store
+// read failure, a task file with no id, a file whose frontmatter will not parse, the Runs block with
+// no records, and its in-flight row). The consequence is methodological, not cosmetic: the series'
+// standing baseline — "count the CJK lines under `lang=en`" — is ZERO before this change and zero
+// after, so it cannot witness this table at all. The red baseline for ROW 13 is a FIXTURE that makes
+// each of the five states actually render (see the test file's `before()`), which is the only shape
+// in which this copy is reachable (硬规则 4: a reading that cannot take the other value is not one).
+//
+// WHY ONE TABLE FOR TWO PAGES (the task's own ruling, recorded here because a later reader will
+// wonder): `serve-task.ts` owns BOTH /tasks and /task/<id>, and the /doc half is a single string.
+// Two tables would put both under the same `serve-i18n.ts` Touches lock anyway while inventing a
+// second roster shape for one row's benefit. The unit stays the RENDERED STRING (ROW 5), so the
+// table's name is where the copy LIVES, not a boundary claim about pages.
+//
+// ① A PARAMETER MAY BE PRE-ESCAPED MARKUP, AND THAT IS THE COMPLIANT DIRECTION. Three of these rows
+//    wrap live data in an element the CALLER owns: `⚠ <code>{file}</code> — 解析失败: …`, the
+//    `<code>`-wrapped carrier path inside the Runs empty state, and the missing-id row's cell (a
+//    link when the task has an id, escaped text when it does not). ROW 6 forbids the DICTIONARY
+//    carrying markup; it does not forbid the caller assembling it. So the caller passes the
+//    already-`escapeHtml`'d, already-wrapped fragment in as the parameter and emits the filled
+//    string RAW — the same idiom as ROW 5's `gitReadFailedWithReason` (serve-dashboard.ts, which
+//    calls `fillLabel(L.gitReadFailedWithReason, { reason: escapeHtml(cap) })`). The alternative —
+//    embedding `<code>`/`<a>` in the label — is what ROW 12 ① split three separate rows to AVOID.
+//
+// ② THE zh COLUMN IS THE PRE-EXISTING LITERAL, BYTE FOR BYTE — brackets included. English needs
+//    ASCII `(` `)` and a half-width `:`; Chinese had full-width `（` `）` and a half-width `:` (the
+//    error banner's colon really is ASCII today, which is why `docReadFailed` ends in `:` in BOTH
+//    columns rather than being "corrected" here). ⛔ The brackets are INSIDE the label in both
+//    columns, never concatenated at the call site: a call site assembling `（` + path + `）` would be
+//    a language-bearing fragment outside the dictionary, which is the exact shape ROW 6 removes.
+//
+// ⚠️ NOT IN THIS ROW, and why (each a judgement, not an omission):
+//   - The Runs table's `<th>` headings (`started`/`state`/`exit`/`wall`/`worker pid`/`run id`/
+//     `transcript`/`fan-in`) and `renderFanInCell`'s `landed`/`red`/`step`/`lock`/`suite`/`sha`
+//     tokens are ALREADY English in both languages and pass through no dictionary. Translating them
+//     would change `lang=zh` output, which AC3 forbids. They are /task/<id>'s named residue.
+//   - The detail page's CHROME (`<html lang="en">`, `renderSiteNav("tasks")` with no `lang`,
+//     `renderMobileChrome` likewise) is deliberately NOT wired here: AC-290 registered it as
+//     out-of-scope residue ("the DETAIL page … is not one of the 15 nav routes"), and this task's
+//     criterion is the five edge-state strings, not the detail page's frame. Under `?lang=zh` the
+//     Runs block switches while the surrounding chrome stays English — that is the registered
+//     residue, visible and named, not a silent half-migration.
+//   - `m.error` and the `<code>`-wrapped carrier PATH are DATA (a YAML parser's diagnostic, a file
+//     path). They ride in as parameters and are `escapeHtml`'d verbatim in both languages.
+export const DOC_TASK_KEYS = [
+  // /doc — the store read-failure banner (serve-doc.ts, the `<strong>` of the `.error-banner`)
+  "docReadFailed",
+  // /tasks — the two `.malformed-row` placeholders
+  "taskMissingId", "taskParseFailed",
+  // /task/<id> — the Runs block's two states
+  "runsNoRecords", "runInFlight",
+] as const;
+
+export type DocTaskKey = (typeof DOC_TASK_KEYS)[number];
+
+/** The /doc + /tasks + /task/<id> residual edge-state dictionary — see ROW 13 (and ROW 5~8, which it
+ *  obeys unchanged). */
+export const DOC_TASK_LABELS: Record<DocTaskKey, { en: string; zh: string }> = {
+  // The `<strong>` of /doc's read-failure banner. ⚠️ `:` is ASCII in the zh column because it is
+  // ASCII in the pre-extraction literal (`<strong>读失败:</strong>`) — see ROW 13 ②.
+  docReadFailed: { en: "Read failed:", zh: "读失败:" },
+
+  // The `.malformed-row` for a task whose frontmatter carries no `id:` (the provider falls back to
+  // the file name and flags the task). `{id}` is the caller's cell — a `/task/<id>` link when an id
+  // exists, escaped display text when it does not (ROW 13 ①).
+  taskMissingId: { en: "⚠ {id} — missing id field", zh: "⚠ {id} — 缺少 id 字段" },
+  // The `.malformed-row` for a file whose frontmatter will not parse at all. `{file}` is the
+  // `<code>`-wrapped file name; `{error}` is the parser's diagnostic (DATA, escaped, untranslated).
+  taskParseFailed: { en: "⚠ {file} — parse failed: {error}", zh: "⚠ {file} — 解析失败: {error}" },
+
+  // The Runs block when there is neither a record nor a live worker. `{carrier}` is the
+  // `<code>`-wrapped path — DATA. ⚠️ The brackets are INSIDE the row in both columns (ROW 13 ②).
+  runsNoRecords: {
+    en: "No worker runs recorded ({carrier})",
+    zh: "无 worker 运行记录（{carrier}）",
+  },
+  // The Runs row for a worker that is live right now (no END record yet). ⛔ NOT folded into ROW 5's
+  // `running` ("Running"/"运行中"): a different zh word, a different table and a different page — the
+  // series' rule that a shared row makes one page's next re-wording move another page's copy.
+  runInFlight: { en: "In progress", zh: "进行中" },
+};
+
+/** The whole ROW 13 roster resolved for one language — take it ONCE per render (ROW 5's
+ *  `navLabelsFor` idiom), rather than re-reading `DOC_TASK_LABELS` at each call site. */
+export function docTaskLabelsFor(lang: Lang = DEFAULT_LANG): Record<DocTaskKey, string> {
+  const out = {} as Record<DocTaskKey, string>;
+  for (const key of DOC_TASK_KEYS) out[key] = DOC_TASK_LABELS[key][lang];
+  return out;
+}
+
+/** One ROW 13 label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`). */
+export function docTaskLabel(
+  key: DocTaskKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(DOC_TASK_LABELS, key) ? DOC_TASK_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown doc-task key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+// ── ROW 14: the /system BODY copy (gap-webui-system-body-copy-en-zh) ─────────────────────────────
+//
+// ROW 5 did this for /dashboard, ROW 10 for /journal, ROW 11 for /board, ROW 12 for /architecture
+// and ROW 13 for /doc + /tasks + /task/<id>; this is the series' SIXTH table and it obeys ROW 6/ROW
+// 7/ROW 8 unchanged (one row per RENDERED string, `{name}` templates filled by `fillLabel`, the zh
+// column byte-equal to the pre-extraction literal, a CLOSED roster, an unknown key THROWS).
+//
+// THE PAGE'S SHAPE: /system is the series' SMALLEST page after /board — six rows. That is the whole
+// reason it needs its own comment rather than none: AC-293 already wired this page's CHROME (the
+// `<html lang>` attribute, the shared nav bar, the `<title>` and the `<h1>`'s page NAME), so the
+// residue here is exactly the part of the page that was left over — the `<title>`/`<h1>` SUBTITLE
+// (`— 系统状态`, which AC-293 could not see: it wired `pageNameFor("System")`, and the subtitle was
+// concatenated outside it), the two `<p class="meta">` notes, the resource banner's verdict text,
+// and the meter bar's unknown-limit marker.
+//
+// ① A PARAMETER MAY BE PRE-ESCAPED MARKUP (ROW 13 ①'s rule, reused). Two rows here wrap live data
+//    in an element the CALLER owns: `dataSourceNote`'s two `<code>` elements and `thresholdNote`'s
+//    `<code>nproc</code>`. ROW 6 forbids the DICTIONARY carrying markup; it does not forbid the
+//    caller assembling it, so the caller passes the already-wrapped fragment in as the parameter
+//    and emits the filled string RAW. ⛔ The alternative — moving the `<code>` elements out to the
+//    call site — would put the ` · ` separator and the ( ) brackets outside the dictionary, i.e.
+//    language-bearing fragments at a call site, which is the exact shape ROW 6/ROW 13 ② remove.
+//
+// ② THE BANNER'S LEADING SEPARATOR IS INSIDE THE ROW. `bannerGo`/`bannerWait` are the text AFTER
+//    the `<strong>⇒ GO</strong>` verdict token, and the colon that joins them is language-bearing
+//    (zh full-width `：`, en ASCII `: `) — so it lives in the row, exactly as ROW 13 ② keeps the
+//    brackets in the row. The verdict TOKEN itself (`GO`/`WAIT`) stays in the markup: it is the
+//    machine's own word (the `verdict` field of `resource-gate.sh --json`), not copy, and it reads
+//    the same in both languages.
+//
+// ③ THE PAGE NAME AND THE SUBTITLE ARE PARALLEL, NOT MERGED (this task's ruling). `pageTitle`
+//    receives the bare `System` token and its suffix is appended OUTSIDE it, so the NAME resolves
+//    through ROW 3's `PAGE_LABELS` and the SUBTITLE through this table: each table owns one piece
+//    and neither is a copy of the other. ⛔ Passing a PRE-LOCALIZED composite token
+//    (`${pageNameFor("System", lang)} — …`) would make ROW 3's lookup MISS under zh and silently
+//    return the token it was handed — the composite would render correctly by falling through the
+//    dictionary rather than by being found in it (硬规则 3b: a lookup that misses must not be
+//    indistinguishable from one that hit). The legacy composite row
+//    `PAGE_LABELS["System — 系统状态"]` is therefore RETIRED here: its zh value lives on as
+//    `pageSubtitle` + ROW 3's `System`, and leaving the row would be a second, unread copy.
+//
+// ④ ⚠️ NOT IN THIS ROW, and why (each a judgement, not an omission):
+//    - `/manager` shares `serve-system.ts` but is a DIFFERENT page with its own task
+//      (gap-webui-manager-body-copy-en-zh). Its body copy is deliberately untouched here.
+//    - The meter TABLES' row labels (`cpu_stall (avg10)`, `mem_avail`, `total_budget`, `verdict`,
+//      the `nproc×2≈32` captions) are the mechanism scripts' JSON field names and units — data,
+//      already ASCII, and translating them would change `lang=zh` output, which AC3 forbids.
+//    - `pageTitle`'s no-identity fallback (`未接入项目身份 — …` in serve-render.ts) renders only
+//      when identity resolution fails; it is shared chrome owned by the same series' residue list
+//      (registered by gap-webui-dashboard-body-copy-en-zh), ⛔ not this page's to move.
+//    - `readSystem`'s diagnostics (`obsNote`'s reason strings, e.g. 「system 机制脚本缺失」) are
+//      DATA: a reader's own description of what it could not read, rendered verbatim in both
+//      languages — the same class as a task title.
+export const SYSTEM_KEYS = [
+  // the <title>/<h1> subtitle (appended after the ROW 3 page name)
+  "pageSubtitle",
+  // the two <p class="meta"> notes
+  "dataSourceNote", "thresholdNote",
+  // the resource banner's two verdict texts
+  "bannerGo", "bannerWait",
+  // the meter bar's unevaluable-denominator marker
+  "unknownLimit",
+] as const;
+
+export type SystemKey = (typeof SYSTEM_KEYS)[number];
+
+/** The /system body-copy dictionary — see ROW 14 (and ROW 5~8, which it obeys unchanged). */
+export const SYSTEM_LABELS: Record<SystemKey, { en: string; zh: string }> = {
+  // The `<h1>`/`<title>` subtitle. ⚠️ ROW 3 keeps the NAME (`System` / `系统`); this row is only the
+  // tail after the em dash, which is why the two can be re-worded independently (ROW 14 ③).
+  pageSubtitle: { en: "system status", zh: "系统状态" },
+
+  // The `<p class="meta">` under the `<h1>`. `{gate}`/`{budget}` are the caller's `<code>`-wrapped
+  // command names (ROW 14 ①) — DATA, escaped and untranslated.
+  dataSourceNote: {
+    en: "Data source: {gate} · {budget} (stable machine-readable JSON output)",
+    zh: "数据源：{gate} · {budget}（稳定机读 JSON 输出）",
+  },
+  // The `<p class="meta">` under the process-budget table. `{nproc}` is the `<code>nproc</code>`
+  // element (ROW 14 ①).
+  thresholdNote: {
+    en: "Thresholds are computed from {nproc} at render time — this page never hard-codes the numbers of the machine it happens to run on.",
+    zh: "阈值按 {nproc} 动态计算显示，不写死当前机器上的数字。",
+  },
+
+  // The resource banner's two tails — ⚠️ the joining colon is INSIDE the row (ROW 14 ②).
+  bannerGo: { en: ": resources sufficient, safe to run", zh: "：资源充足，可以跑" },
+  bannerWait: { en: ": resources constrained, waiting", zh: "：资源受限，等待" },
+
+  // The meter bar's marker for a value with no evaluable denominator. ⛔ NOT folded into ROW 5's
+  // `identityNotEvaluated` (「未评估（缺一侧读数）」): a different word, a different table, a
+  // different page — the series' rule that a shared row makes one page's next re-wording move
+  // another page's copy.
+  unknownLimit: { en: "(unknown limit)", zh: "（未知上限）" },
+};
+
+/** The whole ROW 14 roster resolved for one language — take it ONCE per render (ROW 5's
+ *  `navLabelsFor` idiom), rather than re-reading `SYSTEM_LABELS` at each call site. */
+export function systemLabelsFor(lang: Lang = DEFAULT_LANG): Record<SystemKey, string> {
+  const out = {} as Record<SystemKey, string>;
+  for (const key of SYSTEM_KEYS) out[key] = SYSTEM_LABELS[key][lang];
+  return out;
+}
+
+/** One ROW 14 label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`). */
+export function systemLabel(
+  key: SystemKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(SYSTEM_LABELS, key) ? SYSTEM_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown system key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+// ── ROW 15: the /sessions + /session/<id> BODY copy (gap-webui-sessions-body-copy-en-zh) ─────────
+//
+// ROW 5 did this for /dashboard, ROW 10 /journal, ROW 11 /board, ROW 12 /architecture, ROW 13
+// /doc+/tasks+/task/<id> and ROW 14 /system; this is the series' SEVENTH table and it obeys ROW
+// 5~8 (one row per RENDERED string, `{name}` templates filled by `fillLabel`, the zh column
+// byte-equal to the pre-extraction literal, a CLOSED roster, an unknown key THROWS) unchanged.
+//
+// TWO PAGES, ONE FILE, ONE TABLE. `serve-sessions.ts` renders BOTH the `/sessions` list and the
+// `/session/<sessionId>` detail view, and the task's census ("非注释中文行 24 条") is a FILE
+// measurement — so the roster below covers both pages rather than the list alone. Splitting them
+// into two tables would put two pages' copy in one file's dict anyway; keeping one table is what
+// makes the census checkable line by line.
+//
+// ① THE TITLE AND THE `<h1>` CARRY DIFFERENT SUBTITLES HERE — hence TWO rows, not ROW 14's one.
+//    `/system`'s `<title>` and `<h1>` share `系统状态`. `/sessions`'s do NOT: the `<title>` says
+//    `会话观测` while the `<h1>` says the louder `会话观测（运行中 + 已结束）`. ⛔ Collapsing them
+//    into one row would silently shorten the `<h1>` — the two are re-wordable independently, and a
+//    single row would make one page's future re-wording move the other site.
+//
+// ② THE COMPOSITE `PAGE_LABELS` ROWS ARE RETIRED (ROW 14 ③'s ruling, applied here). The page used
+//    to pass `"Sessions — 会话观测"` / `"Sessions — 会话观测（运行中 + 已结束）"` to `pageTitle` /
+//    `pageNameFor`. That structure CANNOT be localized: `pageNameFor` returns its argument
+//    UNCHANGED for `en` (ROW 3: "en is the identity"), so the en column of those rows was never
+//    read and the composite rendered its own Chinese under both languages. The page now passes the
+//    bare `Sessions` token (ROW 3's new row) and appends the subtitle from THIS table — two
+//    parallel lookups, each of which is actually read in both languages. The retired rows' zh
+//    values live on as `pageSubtitle` + `h1Subtitle` + ROW 3's `Sessions`; leaving them would be a
+//    second, unread copy (the series' single-source rule).
+//
+// ③ PARAMETERS ARE PRE-ESCAPED MARKUP WHERE THE CALLER OWNS AN ELEMENT (ROW 14 ①, reused). The
+//    data-source notes wrap command names / a transcript path in `<code>`, `refusedStateRecord`
+//    carries the shared schema's own verdict text, and `lifecycleNote` wraps three commands. The
+//    dictionary never carries markup; the caller assembles the fragment and emits the filled
+//    string RAW. The words BETWEEN those fragments stay in the row, so no language-bearing
+//    punctuation or connector lives at a call site.
+//
+// ④ THE CLIENT-SIDE SCRIPT'S STRING IS A ROW TOO (the series' ⑦). The detail page's scroll loader
+//    rewrites the sentinel node with `更早的 transcript 超出读取窗口 — <a…>下载完整 transcript</a>`
+//    when it runs past the read window. That string is built in the BROWSER, so a server-side
+//    render can only localize it by INLINING the words as JS string literals — which is what
+//    `handleSession` does via `JSON.stringify`. ⛔ Two rows rather than one because the `<a href>`
+//    carries the RUNTIME sessionId and must be concatenated in the browser; `earlierBeyondWindow`
+//    therefore ends at the em dash (trailing space included — it is inside the row, exactly as
+//    ROW 14 ② keeps the joining colon inside its rows).
+//
+// ⑤ THE POST HANDLERS ARE IN THE ROSTER, because their JSON `reason` is what the browser SHOWS
+//    after a native form submit (the three lifecycle forms POST without JS; the response body IS
+//    the next page). They are the one class of copy a single GET probe can never see (ROW 13's
+//    lesson), which is why the task asserts them separately. The handlers receive the per-request
+//    `lang` the dispatcher already resolved — ⛔ they must not re-parse `?lang=`/the cookie (a
+//    second parse is a second decision table reading a different request's inputs).
+//
+// ⑥ NOT IN THIS ROW, and why (each a judgement, not an omission):
+//    - `obsNote`'s state words (`未接入/无数据`, `读失败`, …) are SHARED chrome: one function in
+//      `serve-render.ts` renders them on EVERY page, so they belong to the series' residue list
+//      (registered by gap-webui-dashboard-body-copy-en-zh) and not to this page.
+//    - `pageTitle`'s no-identity fallback (`未接入项目身份 — …`) is the same class, and ROW 14 ④
+//      already assigned it to that residue list.
+//    - `renderSendForm` (`serve-send.ts`) renders a Chinese delivery form INSIDE the detail page.
+//      It is a DIFFERENT module with its own POST surface and is not in this task's Touches.
+//    - `SESSION_LAYERS`' headings live in `observation.ts` (a shared session primitive, not in
+//      Touches). The `Other / 未分类` heading is nevertheless THIS page's `<h2>`, so it is
+//      localized at the RENDER SITE through `layerOther` — observation.ts is untouched and the
+//      roster stays closed. `Manager`/`Outer`/`Inner` are ASCII and unchanged.
+//    - Session names, transcript text, the machine's `session.lifecycle=`/`session.activity=`
+//      field names and the shared schema's refusal DETAIL are DATA: a reader's own content and
+//      the machine's own words, rendered verbatim in both languages.
+//    - The detail page's `<html lang>` attribute and its nav/mobile-chrome are CHROME (the
+//      AC-290~303 family), untouched here: this table is BODY copy. Switching them would move the
+//      `lang=zh` baseline this task's third criterion diffs.
+export const SESSIONS_KEYS = [
+  // list page: <title> + <h1> subtitles (① — two rows, they are not the same string)
+  "pageSubtitle", "h1Subtitle",
+  // list page: <head> meta description
+  "metaDescription",
+  // list page: <p class="meta"> data-source note, the per-layer empty state, the GONE fold's summary
+  "dataSourceNote", "noLiveSessions", "goneSummary",
+  // the four per-layer <h2> headings (⑥ — the rows live here, the layer table stays in observation.ts)
+  "layerManager", "layerOuter", "layerInner", "layerOther",
+  // the session card's two states: refused record / deferred transcript read
+  "refusedStateRecord", "transcriptDeferredHint",
+  // the session-state line's age annotation
+  "sessionAgeSuffix",
+  // the lifecycle section: heading, note, three submit buttons, five placeholders
+  "lifecycleHeading", "lifecycleNote", "driverSubmit",
+  "newSessionSubmit", "resumeSubmit",
+  "newProfilePlaceholder", "resumeProfilePlaceholder",
+  "newPermissionModePlaceholder", "resumePermissionModePlaceholder", "sessionIdPlaceholder",
+  // detail page: meta description, back link, data-source note
+  "detailMetaDescription", "detailBackLink", "detailDataSourceNote",
+  // detail page: transcript heading (+ its "showing the most recent N" suffix), the loading marker
+  "transcriptHeading", "transcriptHeadingRecentSuffix", "loadingEarlier",
+  // detail page: the scroll loader's two browser-side strings (④)
+  "earlierBeyondWindow", "downloadFullTranscript",
+  // POST feedback (⑤): the three lifecycle endpoints' 400 reasons
+  "newSessionInvalid", "resumeSessionInvalid", "earlierInvalidSessionId",
+] as const;
+
+export type SessionsKey = (typeof SESSIONS_KEYS)[number];
+
+/** The /sessions + /session/<id> body-copy dictionary — see ROW 15 (and ROW 5~8, which it obeys). */
+export const SESSIONS_LABELS: Record<SessionsKey, { en: string; zh: string }> = {
+  // ① the <title>'s subtitle (after ROW 3's page NAME + the em dash)
+  pageSubtitle: { en: "session observation", zh: "会话观测" },
+  // ① the <h1>'s subtitle — a DIFFERENT string from the row above, deliberately
+  h1Subtitle: { en: "session observation (running + finished)", zh: "会话观测（运行中 + 已结束）" },
+
+  metaDescription: {
+    en: "Quay sessions — running + finished sessions",
+    zh: "Quay sessions — 运行中 + 已结束会话",
+  },
+
+  // ③ `{agents}` / `{flag}` are the caller's `<code>`-wrapped command names — DATA, untranslated.
+  dataSourceNote: {
+    en: "Data source: {agents} (running · interactive + {flag}) + transcript directory scan (finished) + session transcript tail",
+    zh: "数据源：{agents}（运行中 · 交互式 + {flag}）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部",
+  },
+  noLiveSessions: { en: "No running sessions", zh: "无运行中会话" },
+  // `{n}` is the GONE count — a number, interpolated raw.
+  goneSummary: { en: "Finished sessions (GONE · {n})", zh: "已结束会话（GONE · {n}）" },
+  // ⑥ the four layer `<h2>`s. ⚠️ The first three are identical in both columns ON PURPOSE: they
+  // ARE the same word in both languages, and a dictionary is not improved by hiding that. The
+  // FOURTH is why the roster exists — `Other` is the layer KEY (data-ish, ASCII) while its heading
+  // carries a word.
+  layerManager: { en: "Manager", zh: "Manager" },
+  layerOuter: { en: "Outer", zh: "Outer" },
+  layerInner: { en: "Inner", zh: "Inner" },
+  layerOther: { en: "Other / uncategorised", zh: "Other / 未分类" },
+
+  // ③ `{detail}` is the shared session-schema's own refusal text, PRE-ESCAPED by the caller.
+  refusedStateRecord: {
+    en: "State record unusable (rejected by the shared schema): {detail}",
+    zh: "状态记录不可用（共享 schema 拒收）：{detail}",
+  },
+  transcriptDeferredHint: {
+    en: "transcript is read on demand on the detail page — click to view",
+    zh: "transcript 在详情页按需读取 — 点击查看",
+  },
+
+  // The session-state line's age annotation. ⚠️ Full-width parens in zh, ASCII in en — the ONLY
+  // difference, which is why it is a row and not a call-site literal: the parens are typography
+  // belonging to the language, not to the number they wrap.
+  sessionAgeSuffix: { en: " (age {n}s)", zh: "（age {n}s）" },
+
+  lifecycleHeading: { en: "Session lifecycle (headless)", zh: "会话生命周期（headless）" },
+  // ③ `{driver}` / `{new}` / `{resume}` are `<code>`-wrapped commands (DATA); the ⛔ and the
+  // sentence around them are copy.
+  lifecycleNote: {
+    en: "The driver reuses {driver}; new = {new}; restart = {resume}. ⛔ Interactive manager/outer/inner are not exposed here. Submissions return JSON.",
+    zh: "driver 复用 {driver}；新建 = {new}；重启 = {resume}。⛔ 交互式 manager/outer/inner 不在此暴露。提交结果为 JSON。",
+  },
+  driverSubmit: { en: "Driver action", zh: "driver 操作" },
+  newSessionSubmit: { en: "New session", zh: "新建会话" },
+  resumeSubmit: { en: "Restart session (--resume)", zh: "重启会话（--resume）" },
+
+  // Form placeholders. ⚠️ FOUR rows for what looks like two fields: the new-session form and the
+  // resume form render DIFFERENT strings for the same input (`profile（role 名，必填）` vs
+  // `profile（role 名）`; `权限模式（必填，无默认）` vs `权限模式（必填）`). ⛔ Collapsing either
+  // pair into one row would have silently re-worded the resume form — ROW 5's `readFailed`
+  // "one row, two call sites" licence applies ONLY when the rendered bytes are identical, and here
+  // they are not (verified against `git show HEAD:packages/quay/src/serve-sessions.ts`, not by
+  // eye: the two differ by the trailing `，无默认` / `，必填` clause).
+  newProfilePlaceholder: { en: "profile (role name, required)", zh: "profile（role 名，必填）" },
+  resumeProfilePlaceholder: { en: "profile (role name)", zh: "profile（role 名）" },
+  newPermissionModePlaceholder: { en: "permission mode (required, no default)", zh: "权限模式（必填，无默认）" },
+  resumePermissionModePlaceholder: { en: "permission mode (required)", zh: "权限模式（必填）" },
+  sessionIdPlaceholder: { en: "session-id (UUID)", zh: "session-id（UUID）" },
+
+  detailMetaDescription: { en: "Quay session — single session view", zh: "Quay session — 单一会话视图" },
+  // The `Sessions` on the end is the destination page's NAME (ROW 1/ROW 3's word), not a row here.
+  detailBackLink: { en: "← Back to Sessions", zh: "← 返回 Sessions" },
+  // ③ `{path}` is the caller's `<code>`-wrapped transcript path (escaped entities included).
+  detailDataSourceNote: {
+    en: "Data source: {path} (transcript tail, not real-time)",
+    zh: "数据源：{path}（transcript 尾部，非实时）",
+  },
+
+  // ③ `{n}` = turn count; `{suffix}` is this table's own `transcriptHeadingRecentSuffix` (empty
+  // when every turn fits). ⛔ Keeping the closing bracket INSIDE the row is deliberate: the
+  // parenthetical is part of the sentence, not a call-site decoration.
+  transcriptHeading: {
+    en: "Transcript ({n} messages · old→new{suffix})",
+    zh: "Transcript（{n} 条消息 · 旧→新{suffix}）",
+  },
+  transcriptHeadingRecentSuffix: { en: ", showing the most recent {k}", zh: "，默认显示最近 {k} 条" },
+  loadingEarlier: { en: "Loading earlier messages…", zh: "加载更早消息…" },
+
+  // ④ the two browser-side strings. ⚠️ `earlierBeyondWindow`'s TRAILING SPACE is part of the row:
+  // the browser concatenates the `<a>` immediately after it.
+  earlierBeyondWindow: { en: "the earlier transcript is beyond the read window — ", zh: "更早的 transcript 超出读取窗口 — " },
+  downloadFullTranscript: { en: "download the full transcript", zh: "下载完整 transcript" },
+
+  // ⑤ the POST feedback (see ROW 15 ⑤)
+  newSessionInvalid: {
+    en: "profile and permissionMode are both required (⛔ permission mode has no default)",
+    zh: "profile 与 permissionMode 均必填（⛔ 权限模式无默认值）",
+  },
+  resumeSessionInvalid: {
+    en: "sessionId must be a valid UUID, and profile and permissionMode are both required",
+    zh: "sessionId 须为合法 UUID，且 profile 与 permissionMode 均必填",
+  },
+  earlierInvalidSessionId: { en: "invalid sessionId (must be a UUID)", zh: "sessionId 非法（须为 UUID）" },
+};
+
+/** The whole ROW 15 roster resolved for one language — take it ONCE per render (ROW 5's
+ *  `navLabelsFor` idiom), rather than re-reading `SESSIONS_LABELS` at each call site. */
+export function sessionsLabelsFor(lang: Lang = DEFAULT_LANG): Record<SessionsKey, string> {
+  const out = {} as Record<SessionsKey, string>;
+  for (const key of SESSIONS_KEYS) out[key] = SESSIONS_LABELS[key][lang];
+  return out;
+}
+
+/** One ROW 15 label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`). */
+export function sessionLabel(
+  key: SessionsKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(SESSIONS_LABELS, key) ? SESSIONS_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown sessions key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+/** The LAYER → ROW map behind `sessionLayerHeading`. All FOUR of `SESSION_LAYERS`' headings are
+ *  RENDERED strings (the page emits each as an `<h2>`), so all four get a row — three of them with
+ *  identical columns because `Manager`/`Outer`/`Inner` really are the same word in both languages.
+ *  ⛔ Not collapsing those three into "return the layer name" is deliberate: the roster stays
+ *  CLOSED (ROW 8), so a later re-wording of, say, the Inner heading is a one-line change HERE
+ *  instead of a code change at a render site. */
+const SESSION_LAYER_ROWS: Record<string, SessionsKey> = {
+  Manager: "layerManager",
+  Outer: "layerOuter",
+  Inner: "layerInner",
+  Other: "layerOther",
+};
+
+/** The `<h2>` for one session layer on the /sessions page. `heading` is the shared layer table's
+ *  own value, returned unchanged for a layer this dictionary does not know — an unmapped layer
+ *  renders its caller's string rather than a blank (硬规则 6: 缺值 = 未查, never a fabricated
+ *  label). */
+export function sessionLayerHeading(
+  layer: string,
+  heading: string,
+  lang: Lang = DEFAULT_LANG,
+): string {
+  const key = Object.prototype.hasOwnProperty.call(SESSION_LAYER_ROWS, layer) ? SESSION_LAYER_ROWS[layer] : undefined;
+  return key === undefined ? heading : SESSIONS_LABELS[key][lang];
+}
+
+// ── ROW 16: the /manager BODY copy (gap-webui-manager-body-copy-en-zh) ───────────────────────────
+//
+// ROW 5 did this for /dashboard, ROW 10 /journal, ROW 11 /board, ROW 12 /architecture, ROW 13
+// /doc+/tasks+/task/<id>, ROW 14 /system and ROW 15 /sessions; this is the series' EIGHTH table and
+// it obeys ROW 5~8 unchanged (one row per RENDERED string, `{name}` templates filled by
+// `fillLabel`, the zh column byte-equal to the pre-extraction literal, a CLOSED roster, an unknown
+// key THROWS).
+//
+// ⚠️ ROW 14 ④ recorded that /manager "shares serve-system.ts but is a DIFFERENT page with its own
+// task". This row IS that task. The two tables are PEERS, not renames of one another, and the file
+// they share is why the census behind this task was taken per RENDER FUNCTION rather than per file:
+// `serve-system.ts`'s 17 non-comment CJK lines are 6 for /system (ROW 14) + 11 for /manager (here),
+// and a file count alone cannot tell which row a given line belongs to.
+//
+// THE PAGE'S SHAPE: /manager answers "what are the three layers doing?" — four `<h2>` sections
+// (Loop/会话, Monitor 注册表, 主要观测指标, plus the `<h1>`'s own subtitle), each with a
+// `<p class="meta">` naming where its reading comes from, two table headers, and the release line.
+// Its body copy is EXACTLY 11 rendered strings — the 11 non-comment CJK lines of `renderManagerPage`
+// — one row each. That 1:1 correspondence is deliberate: it makes the roster checkable against the
+// SOURCE, rather than against a feeling that the page "looks translated".
+//
+// ① THE `<h1>` SUBTITLE IS A ROW, THE PAGE NAME IS NOT (ROW 14 ③'s ruling, applied here). The page
+//    passes the bare `Manager / Outer / Inner` token to `pageNameFor` (ROW 3) and appends its tail
+//    from THIS table: two parallel lookups, each actually read in both languages. ⛔ Passing a
+//    pre-localized composite to ROW 3 would make the lookup MISS under zh and render correctly by
+//    falling through the dictionary — 硬规则 3b's silent shape, where a miss and a hit look alike.
+//    ⚠️ The row is named `h1Subtitle` and not ROW 14's `pageSubtitle` because HERE it renders in the
+//    `<h1>` ONLY: this page's `<title>` is the bare page token, with no subtitle at all — the exact
+//    inverse of ROW 15, where the `<title>` and the `<h1>` each carry one.
+//
+// ② THE `<meta name="description">` IS IN THE ROSTER even though the census that produced these keys
+//    cannot see it: it lives in an ATTRIBUTE, so a probe that strips tags and counts text lines — the
+//    series' AC1 red-baseline probe — never reads it. It is still copy a reader meets (search
+//    results, the tab's own tooltip), and ROW 14 and ROW 15 each carry the same row. Leaving it out
+//    would mean the page's localization was measured by an instrument blind to it (硬规则 4b).
+//
+// ③ PARAMETERS ARE PRE-ESCAPED MARKUP WHERE THE CALLER OWNS AN ELEMENT (ROW 14 ①, reused).
+//    `registryNote` and `poolSourceNote` each wrap a file path in `<code>`; the dictionary never
+//    carries markup, so the caller assembles the fragment and emits the filled string RAW. The words
+//    BETWEEN those fragments stay in the row, so no language-bearing punctuation or connector lives
+//    at a call site. `releaseLine` shows why that matters: the ` · ` separator AND the word order of
+//    「develop 领先 {n} 提交」 are both inside the row — a call site concatenating 「领先 」+n+「 提交」
+//    would be a sentence only Chinese word order can assemble, with the en column unfixable without
+//    editing the call site.
+//
+// ④ TWO ROWS ARE LATENT, and are rows here BECAUSE they are: a healthy single-response probe cannot
+//    see either (ROW 13's lesson — the same reason ROW 14's `unknownLimit` exists).
+//      - `colSession` renders only when the liveness reader returns ≥1 session row (it is retired
+//        today, so nothing on the live page reaches it);
+//      - `recentPromotions` renders only when the pool reader's `lastPromoted` is non-empty.
+//    Both were found by reading the RENDER FUNCTION, not the rendered page. A roster built only from
+//    what a probe happens to show would omit them and stay green forever after (硬规则 3b).
+//
+// ⑤ NOT IN THIS ROW, and why (each a judgement, not an omission):
+//    - `obsNote`'s state words (`未接入/无数据`, `已接入/暂无记录`, `读失败`) are SHARED chrome: one
+//      function in serve-render.ts renders them on EVERY page, and ROW 15 ⑥ assigned them to the
+//      series' shared residue list. This page echoes three of them (`loopDriver`, `liveness`, `pool`),
+//      which is exactly why this task's own census — a count of CJK lines in the RESPONSE — listed
+//      them: a per-response count cannot distinguish a page's own copy from the shared chrome the page
+//      renders. ⛔ Localizing them from here would move seven other pages' `lang=en` output and red
+//      `serve-architecture-body-i18n.test.mjs`, whose empty-state arm asserts this residue is STILL
+//      Chinese — a guard written precisely so that a later "translate everything" pass cannot do it by
+//      accident. This task's dedup note asked whether to add a page-local row for the word; the answer
+//      recorded here is NO, and for ROW 9's reason: a second copy of a shared word is the drift a
+//      shared table exists to prevent. The word's home is a shared-chrome row of its own.
+//    - The reader DIAGNOSTIC after that prefix (`— …/loop-driver-check.sh 缺失（…）`,
+//      `— .quay/promotion-round.jsonl 尚无 round 记录（…）`) is DATA: a reader's own description of
+//      what it could not read, rendered verbatim in both languages — the same class as a task title.
+//    - The observer TABLE's rows (`name`/`status`/`root`/`note`) are DATA read out of
+//      `orchestration/observer-registry.conf`; this repo's own registry carries Chinese notes
+//      (`本仓库（项目类）`, `兄弟项目`), and translating them would be translating the user's registry.
+//    - The two JSON field-name `<h2>`s (`resource-gate.sh` / `process-budget.sh`) and the meter
+//      labels are /system's (ROW 14 ④) and are untouched from this side too.
+export const MANAGER_KEYS = [
+  // <head> meta description (②) + the <h1>'s subtitle tail (①)
+  "metaDescription", "h1Subtitle",
+  // the page's intro note under the <h1>, and the three section headings
+  "probeNote", "headingLoop", "headingObservers", "headingPool",
+  // the two <p class="meta"> provenance notes (③ — one `{file}` parameter each)
+  "registryNote", "poolSourceNote",
+  // the release line (③ — `{version}` + `{n}`)
+  "releaseLine",
+  // latent rows (④): the liveness table's first column header, the pool card's promotion list
+  "colSession", "recentPromotions",
+] as const;
+
+export type ManagerKey = (typeof MANAGER_KEYS)[number];
+
+/** The /manager body-copy dictionary — see ROW 16 (and ROW 5~8, which it obeys unchanged). */
+export const MANAGER_LABELS: Record<ManagerKey, { en: string; zh: string }> = {
+  metaDescription: {
+    en: "Quay manager — Manager / Outer / Inner three-layer status",
+    zh: "Quay manager — Manager/Outer/Inner 三层状态",
+  },
+
+  // ① the `<h1>`'s tail, after ROW 3's page NAME. ⚠️ ROW 3 keys on the bare `Manager / Outer /
+  // Inner` token; this row is only the part after the em dash (which the render site keeps, as ROW
+  // 14 does), so the two can be re-worded independently.
+  h1Subtitle: { en: "three-layer status", zh: "三层状态" },
+
+  probeNote: {
+    en: "Three-layer adaptive probing: multi-signal weighted verdicts; a missing signal is honestly marked as not detected rather than silently assumed.",
+    zh: "三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。",
+  },
+
+  // The three `<h2>`s. `Loop` / `Monitor` stay ASCII — they are the mechanism's own names for the
+  // things being observed, and the row is the WHOLE heading so the `/` separator sits inside it.
+  headingLoop: { en: "Loop / sessions", zh: "Loop / 会话" },
+  headingObservers: { en: "Monitor registry", zh: "Monitor 注册表" },
+  headingPool: { en: "Primary observability metrics", zh: "主要观测指标" },
+
+  // ③ `{file}` is the caller's `<code>`-wrapped path — DATA, escaped and untranslated.
+  registryNote: {
+    en: "Reads the single registration table {file}.",
+    zh: "读 {file} 单一登记表。",
+  },
+  poolSourceNote: {
+    en: "pool/floor/deficit/cap are read from {file} (promotion-driver round records; cap defaults to 5, floor = cap × 4)",
+    zh: "pool/floor/deficit/cap 读 {file}（promotion-driver round 记录，cap 默认 5，floor = cap × 4）",
+  },
+
+  // ③ `{version}` is the build-time QUAY_VERSION, `{n}` the commit count — both DATA. ⛔ The
+  // separator and the word order are INSIDE the row, never at the call site.
+  releaseLine: {
+    en: "release={version} · develop is {n} commits ahead",
+    zh: "release={version} · develop 领先 {n} 提交",
+  },
+
+  // ④ latent rows — see the roster comment. `colSession` is one word because the other three
+  // columns of that table (`alive` / `pid` / `halted`) are the reader's own field names, not copy.
+  colSession: { en: "Session", zh: "会话" },
+  recentPromotions: {
+    en: "Most recent promotions (promotion-driver):",
+    zh: "最近一轮晋升（promotion-driver）：",
+  },
+};
+
+/** The whole ROW 16 roster resolved for one language — take it ONCE per render (ROW 5's
+ *  `navLabelsFor` idiom), rather than re-reading `MANAGER_LABELS` at each call site. */
+export function managerLabelsFor(lang: Lang = DEFAULT_LANG): Record<ManagerKey, string> {
+  const out = {} as Record<ManagerKey, string>;
+  for (const key of MANAGER_KEYS) out[key] = MANAGER_LABELS[key][lang];
+  return out;
+}
+
+/** One ROW 16 label by key. Unknown key ⇒ THROW (ROW 8's rule, same reason as `navLabel`). */
+export function managerLabel(
+  key: ManagerKey,
+  lang: Lang = DEFAULT_LANG,
+  params?: Record<string, string | number>,
+): string {
+  const entry: { en: string; zh: string } | undefined =
+    Object.prototype.hasOwnProperty.call(MANAGER_LABELS, key) ? MANAGER_LABELS[key] : undefined;
+  if (entry === undefined) {
+    throw new Error(`serve-i18n: unknown manager key ${JSON.stringify(key)} — the dictionary has no label for it`);
+  }
+  return fillLabel(entry[lang], params ?? {});
+}
+
+// ── ROW 17: the /git-history BODY copy (gap-webui-git-history-body-copy-en-zh) ──────────────────
 //
 // ROW 5 opened the body-copy series for /dashboard; this row is its SECOND page and obeys ROW 5~8
 // unchanged (one row per RENDERED STRING; the zh column is the pre-existing literal byte for byte;
@@ -766,7 +1846,7 @@ export function chromeLabel(key: string, lang: Lang = DEFAULT_LANG): string {
 //   ⛔ The FALLBACK for that field (`history.reason ?? "git 仓库无提交记录"`) IS authored in
 //     serve-git.ts and therefore IS this row's (`emptyRepoReason`).
 //
-// ⚠️ ROW 10b — THE CLIENT SCRIPT IS A DIFFERENT KIND OF CONSUMER. Four of this page's strings are
+// ⚠️ ROW 17b — THE CLIENT SCRIPT IS A DIFFERENT KIND OF CONSUMER. Four of this page's strings are
 // rendered in the BROWSER (the two auto-load hints and the two coverage-span units): the graph is
 // drawn client-side, so the server can concatenate no HTML for them and the browser has no
 // dictionary to look them up in. Per ROW 6's rule they are resolved SERVER-side and injected into
@@ -792,13 +1872,13 @@ export const GIT_HISTORY_KEYS = [
   "unattributedLabel", "unattributedCount",
   // the JSON pagination endpoint's own fallback diagnostic
   "emptyRepoReason",
-  // client-script constants (injected; see ROW 10b)
+  // client-script constants (injected; see ROW 17b)
   "clientClickLoadOlder", "clientFirstCommitReached",
 ] as const;
 
 export type GitHistoryKey = (typeof GIT_HISTORY_KEYS)[number];
 
-/** The /git-history body-copy dictionary — see ROW 10. Every `zh` value below is the literal that
+/** The /git-history body-copy dictionary — see ROW 17. Every `zh` value below is the literal that
  *  was in serve-git.ts before this row existed, byte for byte (ROW 7's rule): `lang=zh` output
  *  cannot move. The `en` column is the NEW text. */
 export const GIT_HISTORY_LABELS: Record<GitHistoryKey, { en: string; zh: string }> = {
@@ -875,11 +1955,11 @@ export const GIT_HISTORY_LABELS: Record<GitHistoryKey, { en: string; zh: string 
 
   // ── the JSON pagination endpoint ────────────────────────────────────────────────────────────
   // serve-git.ts's own fallback for `history.reason` — the ONE diagnostic string on this page this
-  // task authors (observation.ts's own reasons are echoed, see the ROW 10 note). It rides the
+  // task authors (observation.ts's own reasons are echoed, see the ROW 17 note). It rides the
   // request's language because the endpoint is read by the client loader of a page in one language.
   emptyRepoReason: { en: "git repository has no commits", zh: "git 仓库无提交记录" },
 
-  // ── client-script constants (ROW 10b) ───────────────────────────────────────────────────────
+  // ── client-script constants (ROW 17b) ───────────────────────────────────────────────────────
   clientClickLoadOlder: { en: "Click to load older commits", zh: "点击加载更早提交" },
   clientFirstCommitReached: { en: "Reached the repository's oldest commit", zh: "已加载到仓库最早提交" },
 };
@@ -907,7 +1987,7 @@ export function gitHistoryLabel(
   return fillLabel(entry[lang], params ?? {});
 }
 
-/** The four strings the inlined client script needs (ROW 10b). Resolved SERVER-side: the browser has
+/** The four strings the inlined client script needs (ROW 17b). Resolved SERVER-side: the browser has
  *  no dictionary, so the words must arrive as constants in the script the server writes. */
 export interface GitHistoryClientLabels {
   /** The sentinel's text once the auto-load fuse trips (it becomes a click target). */

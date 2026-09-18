@@ -50,10 +50,17 @@ test("AC2: renderBar pct is monotonic in val/threshold (25/50/100/200% → 25/50
 
 test("AC3: numericLimit null/NaN renders NO fill bar + an explicit unknown marker", () => {
   for (const badLimit of [null, NaN]) {
-    const out = renderBar("loadavg (1m)", 5, badLimit, "nproc×2≈32");
-    assert.equal(fillPct(out), null, `numericLimit=${badLimit} must not render a fill bar`);
-    assert.ok(!out.includes("width:"), `numericLimit=${badLimit} output must not contain any width:`);
-    assert.ok(out.includes("（未知上限）"), `numericLimit=${badLimit} must show the unknown marker`);
+    // ⚠️ `lang` is EXPLICIT since gap-webui-system-body-copy-en-zh: the marker is dictionary copy
+    // now (serve-i18n.ts ROW 14's `unknownLimit`), so an argument-less call asserts the DEFAULT (en)
+    // string and would leave the zh literal unchecked — the assertion below would then be testing
+    // the wrong language while still looking green. Both languages are asserted.
+    const zh = renderBar("loadavg (1m)", 5, badLimit, "nproc×2≈32", "zh");
+    assert.equal(fillPct(zh), null, `numericLimit=${badLimit} must not render a fill bar`);
+    assert.ok(!zh.includes("width:"), `numericLimit=${badLimit} output must not contain any width:`);
+    assert.ok(zh.includes("（未知上限）"), `numericLimit=${badLimit} must show the unknown marker (zh)`);
+    const en = renderBar("loadavg (1m)", 5, badLimit, "nproc×2≈32", "en");
+    assert.ok(en.includes("(unknown limit)"), `numericLimit=${badLimit} must show the unknown marker (en)`);
+    assert.ok(!/[一-龥]/.test(en), `numericLimit=${badLimit} en bar carries no CJK`);
   }
 });
 

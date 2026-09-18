@@ -20,6 +20,11 @@ import {
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
 import { resolvePluginScript } from "./plugin-root.ts";
+// gap-webui-sessions-body-copy-en-zh: this file's BODY copy resolves through serve-i18n.ts ROW 15.
+// ⛔ `serve-i18n.ts` (not `serve-render.ts`) because the page's own labels are that table's business;
+// `serve-render.ts` re-exports the MECHANISM (lang resolution, the ROW 1/3 chrome), which is what
+// the import above takes.
+import { sessionsLabelsFor, sessionLabel, fillLabel, sessionLayerHeading, type SessionsKey } from "./serve-i18n.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -31,12 +36,18 @@ import { resolvePluginScript } from "./plugin-root.ts";
  * never displayed. A fixture that predates the field renders nothing (honest absence, not a fabricated
  * axis — 硬规则 6: 缺值 = 未查).
  */
-function sessionStateLine(s: SessionDetail): string {
+function sessionStateLine(s: SessionDetail, L: Record<SessionsKey, string>): string {
   if (s.session) {
-    return html`<div style="font-size:0.7rem;color:var(--color-neutral-700)">session.lifecycle=${s.session.lifecycle.value} · session.activity=${s.session.activity.value}（age ${s.session.activity.ageSec}s）</div>`;
+    // ⚠️ `session.lifecycle=` / `session.activity=` are the MACHINE's field names (data, ASCII, and
+    // translated they would stop naming anything real); the age annotation around them is copy —
+    // its full-width parens are the language's typography, not the number's.
+    return html`<div style="font-size:0.7rem;color:var(--color-neutral-700)">session.lifecycle=${s.session.lifecycle.value} · session.activity=${s.session.activity.value}${fillLabel(L.sessionAgeSuffix, { n: s.session.activity.ageSec })}</div>`;
   }
   if (s.sessionRefusal && s.sessionRefusal.length > 0) {
-    return html`<div style="font-size:0.7rem;color:var(--color-danger-700,#b91c1c)">状态记录不可用（共享 schema 拒收）：${escapeHtml(s.sessionRefusal.join("; "))}</div>`;
+    // The verdict text is the shared schema's OWN sentence (data, rendered verbatim); the frame
+    // around it is this page's copy, so the two travel as one row with the detail PRE-ESCAPED
+    // (ROW 15 ③) — the colon is language-bearing and therefore lives in the dictionary.
+    return html`<div style="font-size:0.7rem;color:var(--color-danger-700,#b91c1c)">${fillLabel(L.refusedStateRecord, { detail: escapeHtml(s.sessionRefusal.join("; ")) })}</div>`;
   }
   return "";
 }
@@ -49,6 +60,10 @@ export function renderSessionsPage(
   // English bytes verbatim; the live handler threads the per-request `cfg.lang` in below.
   lang: Lang = DEFAULT_LANG,
 ): string {
+  // gap-webui-sessions-body-copy-en-zh: this page's BODY copy, taken ONCE per render (the
+  // `navLabelsFor` idiom ROW 5 established) rather than re-read per card. ⚠️ `lang` now reaches
+  // MORE than AC-299's four chrome points — it also reaches every row of serve-i18n.ts ROW 15.
+  const L = sessionsLabelsFor(lang);
   // AC1 (gap-sessions-page-slow-unclickable-flat-render): the card is an <a href="/session/<id>"> —
   // the detail page already exists, the list just never linked to it. sessionId is a strict UUID
   // ([0-9a-f-]), so the href is a lookup key, never a path-traversal vector.
@@ -61,14 +76,14 @@ export function renderSessionsPage(
       : s.alive
         ? obsNote(s.transcriptStatus, s.transcriptReason)
         // AC2: a GONE card's tail is NOT read on the list page — render a hint, not a fabricated 未接入.
-        : html`<p class="meta">transcript 在详情页按需读取 — 点击查看</p>`;
+        : html`<p class="meta">${escapeHtml(L.transcriptDeferredHint)}</p>`;
     return html`<a href="/session/${escapeHtml(s.sessionId)}" style="text-decoration:none;color:inherit;background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${escapeHtml(s.name)}</b>
         <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-positive-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
       </div>
       <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
-      ${sessionStateLine(s)}
+      ${sessionStateLine(s, L)}
       ${msgHtml}
     </a>`;
   };
@@ -90,25 +105,25 @@ export function renderSessionsPage(
     const live = items.filter((s) => s.alive);
     const gone = items.filter((s) => !s.alive);
     return html`<section style="margin-bottom:1.5rem">
-      <h2>${escapeHtml(heading)}</h2>
+      <h2>${escapeHtml(sessionLayerHeading(layer, heading, lang))}</h2>
       ${live.length > 0
         ? html`<div style="${grid}">${live.map(cardFor).join("")}</div>`
-        : html`<p class="meta">无运行中会话</p>`}
+        : html`<p class="meta">${escapeHtml(L.noLiveSessions)}</p>`}
       ${gone.length > 0
         ? html`<details style="margin-top:0.75rem">
-            <summary style="cursor:pointer;font-size:0.8rem;color:var(--color-neutral-700)">已结束会话（GONE · ${gone.length}）</summary>
+            <summary style="cursor:pointer;font-size:0.8rem;color:var(--color-neutral-700)">${fillLabel(L.goneSummary, { n: gone.length })}</summary>
             <div style="${grid};margin-top:0.75rem">${gone.map(cardFor).join("")}</div>
           </details>`
         : ""}
     </section>`;
   }).join("");
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>${pageTitle("Sessions — 会话观测", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.metaDescription)}">${modernistStyles()}${pageStyles()}<title>${pageTitle(pageNameFor("Sessions", lang), identity, lang)} — ${escapeHtml(L.pageSubtitle)}</title></head>
     <body>${renderMobileChrome("sessions", pageNameFor("sessions", lang), lang)}${renderSiteNav("sessions", lang)}<main id="main">
-      <h1>${pageNameFor("Sessions — 会话观测（运行中 + 已结束）", lang)}</h1>
-      <p class="meta">数据源：<code>claude agents --json</code>（运行中 · 交互式 + <code>-p</code>）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部</p>
+      <h1>${pageNameFor("Sessions", lang)} — ${escapeHtml(L.h1Subtitle)}</h1>
+      <p class="meta">${fillLabel(L.dataSourceNote, { agents: "<code>claude agents --json</code>", flag: "<code>-p</code>" })}</p>
       ${obsNote(sessions.status, sessions.reason)}
-      ${renderLifecycleSection()}
+      ${renderLifecycleSection(L)}
       ${sessions.sessions.length > 0 ? sections : ""}
     </main></body></html>`;
 }
@@ -210,7 +225,20 @@ function renderTurnsHtml(turns: TranscriptTurn[], maps: ToolMaps): string {
   return turns.map(turnFor).filter(Boolean).join("");
 }
 
-export function renderSessionPage(view: SessionViewResult): string {
+/**
+ * `lang` is this request's resolved language (the dispatcher's `cfg.lang`), and since
+ * gap-webui-sessions-body-copy-en-zh it reaches this page's BODY copy (serve-i18n.ts ROW 15) —
+ * the transcript heading, the loading marker, the scroll loader's two browser-side strings (which
+ * are INLINED into the script as JSON string literals, ROW 15 ④), the back link, the data-source
+ * note and the `<meta name="description">`.
+ *
+ * ⚠️ It defaults to `DEFAULT_LANG` like every other lang-taking function in this tree, so a direct
+ * caller that predates it keeps rendering what it rendered before. ⛔ It does NOT reach this page's
+ * `<html lang>` attribute or its nav/mobile-chrome: those are CHROME (the AC-290~303 family) and
+ * switching them here would move the `lang=zh` baseline this task diffs (ROW 15 ⑥).
+ */
+export function renderSessionPage(view: SessionViewResult, lang: Lang = DEFAULT_LANG): string {
+  const L = sessionsLabelsFor(lang);
   const maps = buildToolMaps(view.turns);
   const recent = view.turns.slice(-SESSION_VIEW_INITIAL_TURNS);
   const olderCount = view.turns.length - recent.length;
@@ -218,18 +246,30 @@ export function renderSessionPage(view: SessionViewResult): string {
 
   let transcriptHtml = "";
   if (view.turns.length > 0) {
-    const heading = html`<h2>Transcript（${view.turns.length} 条消息 · 旧→新${olderCount > 0 ? `，默认显示最近 ${recent.length} 条` : ""}）</h2>`;
+    // The parenthetical is ONE sentence: the recent-N clause is a row of its own and fills the
+    // `{suffix}` slot (empty when every turn fits) so the closing bracket stays in the dictionary.
+    const heading = html`<h2>${fillLabel(L.transcriptHeading, {
+      n: view.turns.length,
+      suffix: olderCount > 0 ? fillLabel(L.transcriptHeadingRecentSuffix, { k: recent.length }) : "",
+    })}</h2>`;
     const sentinel = lazy
-      ? html`<div id="tx-earlier-sentinel" class="meta" style="padding:0.5rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早消息…</div>`
+      ? html`<div id="tx-earlier-sentinel" class="meta" style="padding:0.5rem 0;color:var(--color-neutral-700);font-size:0.75rem">${escapeHtml(L.loadingEarlier)}</div>`
       : "";
     transcriptHtml = html`<div id="tx-list" data-session="${escapeHtml(view.sessionId)}" data-rendered="${recent.length}" data-total="${view.turns.length}" data-truncated="${view.truncated}">${heading}${sentinel}${renderTurnsHtml(recent, maps)}</div>`;
   }
 
   // One self-contained scroll-loader (the deliberate zero-JS break). Auto-scrolls to the newest turn
   // (chat-style), then IntersectionObserver on the top sentinel fetches older chunks on scroll-up.
+  // ROW 15 ④: this string is assembled in the BROWSER, so the only way a server render can
+  // localize it is to inline the words as JS string literals. `JSON.stringify` is the encoder
+  // (it IS a JS literal, not HTML); `<` is then escaped to `<` so no dictionary value can
+  // ever terminate the surrounding `<script>` element.
+  const jsLit = (s: string): string => JSON.stringify(s).replace(/</g, "\\u003c");
   const loaderScript = lazy
     ? html`<script>
 (() => {
+  const BEYOND = ${jsLit(L.earlierBeyondWindow)};
+  const DOWNLOAD = ${jsLit(L.downloadFullTranscript)};
   const list = document.getElementById("tx-list");
   if (!list) return;
   const sentinel = document.getElementById("tx-earlier-sentinel");
@@ -242,7 +282,7 @@ export function renderSessionPage(view: SessionViewResult): string {
   const done = () => rendered >= total && !truncated;
   function finish() {
     if (truncated) {
-      sentinel.outerHTML = '<p class="meta">更早的 transcript 超出读取窗口 — <a href="/session/' + encodeURIComponent(sessionId) + '/download">下载完整 transcript</a></p>';
+      sentinel.outerHTML = '<p class="meta">' + BEYOND + '<a href="/session/' + encodeURIComponent(sessionId) + '/download">' + DOWNLOAD + '</a></p>';
     } else {
       sentinel.remove();
     }
@@ -277,10 +317,10 @@ export function renderSessionPage(view: SessionViewResult): string {
     : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay session — 单一会话视图">${modernistStyles()}${pageStyles()}<title>Session — ${escapeHtml(view.sessionId)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.detailMetaDescription)}">${modernistStyles()}${pageStyles()}<title>Session — ${escapeHtml(view.sessionId)}</title></head>
     <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>Session — <code>${escapeHtml(view.sessionId)}</code></h1>
-      <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
+      <p class="meta"><a href="/sessions">${escapeHtml(L.detailBackLink)}</a> · ${fillLabel(L.detailDataSourceNote, { path: "<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>" })}</p>
       ${obsNote(view.status, view.reason)}
       ${transcriptHtml}
       ${loaderScript}
@@ -291,7 +331,7 @@ export function renderSessionPage(view: SessionViewResult): string {
 export async function handleSession(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
   sessionId: string,
 ): Promise<void> {
   let view: SessionViewResult;
@@ -301,7 +341,7 @@ export async function handleSession(
     view = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessionId, transcriptPath: null, turns: [], truncated: false };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderSessionPage(view));
+  res.end(renderSessionPage(view, cfg.lang));
 }
 
 // ── /session/<sessionId>/earlier ─────────────────────────────────────────────────────────────────
@@ -325,13 +365,13 @@ export function earlierTurnsChunk(turns: TranscriptTurn[], before: number): Tran
 export async function handleSessionEarlier(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
   sessionId: string,
   url: URL,
 ): Promise<void> {
   const transcriptPath = sessionTranscriptPath(cfg.workspaceRoot, sessionId);
   if (transcriptPath == null) {
-    writeJson(res, 400, { html: "", count: 0, truncated: false, total: 0, status: "empty", reason: "sessionId 非法（须为 UUID）" });
+    writeJson(res, 400, { html: "", count: 0, truncated: false, total: 0, status: "empty", reason: sessionLabel("earlierInvalidSessionId", cfg.lang) });
     return;
   }
   const t = readTranscript(transcriptPath);
@@ -658,7 +698,7 @@ function writeJson(res: ServerResponse, status: number, obj: unknown): void {
  * manager/outer/inner, status, drain) ⇒ 400 (AC3). The valid path delegates to runDriver and echoes
  * its structured result (ok/reason/stdout/stderr/exitCode) — never a reimplemented lifecycle.
  */
-export async function handleDriverLifecycle(req: IncomingMessage, res: ServerResponse, cfg: { workspaceRoot: string }): Promise<void> {
+export async function handleDriverLifecycle(req: IncomingMessage, res: ServerResponse, cfg: ServePageCfg): Promise<void> {
   const raw = await readBody(req);
   const body = parsePostBody(raw, req.headers["content-type"] ?? "");
   const spec = driverActionSpec(body.verb, body.kind);
@@ -677,12 +717,14 @@ export async function handleDriverLifecycle(req: IncomingMessage, res: ServerRes
  * POST /sessions/new — create a NEW headless session. Body: {profile, permissionMode, sessionId?}.
  * ⛔ blocker ③: permissionMode is REQUIRED (no default); missing ⇒ 400.
  */
-export async function handleNewSession(req: IncomingMessage, res: ServerResponse, cfg: { workspaceRoot: string }): Promise<void> {
+export async function handleNewSession(req: IncomingMessage, res: ServerResponse, cfg: ServePageCfg): Promise<void> {
   const raw = await readBody(req);
   const body = parsePostBody(raw, req.headers["content-type"] ?? "");
   const spec = newSessionArgs({ profile: body.profile, permissionMode: body.permissionMode, sessionId: body.sessionId, root: cfg.workspaceRoot });
   if (spec == null) {
-    writeJson(res, 400, { ok: false, reason: "profile 与 permissionMode 均必填（⛔ 权限模式无默认值）" });
+    // ROW 15 ⑤: the JSON `reason` is what the browser SHOWS next (the form posts natively), so it
+    // is copy, not a machine code — resolved in the language the dispatcher already decided.
+    writeJson(res, 400, { ok: false, reason: sessionLabel("newSessionInvalid", cfg.lang) });
     return;
   }
   const { pid } = spawnSession(spec.argv, cfg.workspaceRoot);
@@ -693,12 +735,12 @@ export async function handleNewSession(req: IncomingMessage, res: ServerResponse
  * POST /sessions/resume — restart an ended session via `--resume <sessionId>` (AC2: context preserved).
  * Body: {sessionId, profile, permissionMode}. A non-UUID sessionId ⇒ 400 (traversal-proof).
  */
-export async function handleResumeSession(req: IncomingMessage, res: ServerResponse, cfg: { workspaceRoot: string }): Promise<void> {
+export async function handleResumeSession(req: IncomingMessage, res: ServerResponse, cfg: ServePageCfg): Promise<void> {
   const raw = await readBody(req);
   const body = parsePostBody(raw, req.headers["content-type"] ?? "");
   const spec = resumeSessionArgs({ sessionId: body.sessionId, profile: body.profile, permissionMode: body.permissionMode, root: cfg.workspaceRoot });
   if (spec == null) {
-    writeJson(res, 400, { ok: false, reason: "sessionId 须为合法 UUID，且 profile 与 permissionMode 均必填" });
+    writeJson(res, 400, { ok: false, reason: sessionLabel("resumeSessionInvalid", cfg.lang) });
     return;
   }
   const { pid } = spawnSession(spec.argv, cfg.workspaceRoot);
@@ -707,28 +749,28 @@ export async function handleResumeSession(req: IncomingMessage, res: ServerRespo
 
 // ── 生命周期 UI（原生 form POST，零客户端 JS——与全站约定一致）──────────────────────────────────
 
-function renderLifecycleSection(): string {
+function renderLifecycleSection(L: Record<SessionsKey, string>): string {
   const field = "padding:0.4rem 0.5rem;border:1px solid var(--color-divider);border-radius:4px;background:var(--color-surface);font-size:0.85rem";
   const btn = "padding:0.4rem 0.75rem;border:1px solid var(--color-divider);border-radius:4px;background:var(--color-accent-700);color:#fff;font-size:0.85rem;cursor:pointer";
   const form = "display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0.5rem 0";
   return html`<section style="margin:1.5rem 0 1rem;padding:1rem;background:var(--color-surface);border-radius:8px">
-    <h2>会话生命周期（headless）</h2>
-    <p class="meta">driver 复用 <code>quay driver</code>；新建 = <code>-p --input-format stream-json</code>；重启 = <code>--resume</code>。⛔ 交互式 manager/outer/inner 不在此暴露。提交结果为 JSON。</p>
+    <h2>${escapeHtml(L.lifecycleHeading)}</h2>
+    <p class="meta">${fillLabel(L.lifecycleNote, { driver: "<code>quay driver</code>", new: "<code>-p --input-format stream-json</code>", resume: "<code>--resume</code>" })}</p>
     <form method="POST" action="/sessions/driver" style="${form}">
       <select name="verb" style="${field}"><option value="start">start</option><option value="stop">stop</option><option value="restart">restart</option></select>
       <select name="kind" style="${field}">${WEB_DRIVER_KINDS.map((k) => html`<option value="${k}">${k}</option>`)}</select>
-      <button type="submit" style="${btn}">driver 操作</button>
+      <button type="submit" style="${btn}">${escapeHtml(L.driverSubmit)}</button>
     </form>
     <form method="POST" action="/sessions/new" style="${form}">
-      <input name="profile" placeholder="profile（role 名，必填）" required style="${field}">
-      <input name="permissionMode" placeholder="权限模式（必填，无默认）" required style="${field}">
-      <button type="submit" style="${btn}">新建会话</button>
+      <input name="profile" placeholder="${escapeHtml(L.newProfilePlaceholder)}" required style="${field}">
+      <input name="permissionMode" placeholder="${escapeHtml(L.newPermissionModePlaceholder)}" required style="${field}">
+      <button type="submit" style="${btn}">${escapeHtml(L.newSessionSubmit)}</button>
     </form>
     <form method="POST" action="/sessions/resume" style="${form}">
-      <input name="sessionId" placeholder="session-id（UUID）" required style="${field}">
-      <input name="profile" placeholder="profile（role 名）" required style="${field}">
-      <input name="permissionMode" placeholder="权限模式（必填）" required style="${field}">
-      <button type="submit" style="${btn}">重启会话（--resume）</button>
+      <input name="sessionId" placeholder="${escapeHtml(L.sessionIdPlaceholder)}" required style="${field}">
+      <input name="profile" placeholder="${escapeHtml(L.resumeProfilePlaceholder)}" required style="${field}">
+      <input name="permissionMode" placeholder="${escapeHtml(L.resumePermissionModePlaceholder)}" required style="${field}">
+      <button type="submit" style="${btn}">${escapeHtml(L.resumeSubmit)}</button>
     </form>
   </section>`;
 }

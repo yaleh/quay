@@ -11,8 +11,13 @@ import {
   // the AC-288 mechanism (`htmlLangTag`) and the AC-289 dictionaries (`pageNameFor`) through this
   // one import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie
   // (a second parse is a second decision table) and never re-derives a label.
-  htmlLangTag, pageNameFor,
+  htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
 } from "./serve-render.ts";
+// gap-webui-doc-tasks-residual-copy-en-zh: this file's four remaining Chinese strings — the two
+// `.malformed-row` placeholders on /tasks and the Runs block's two states on /task/<id> — resolve
+// through serve-i18n.ts's ROW 13. `fillLabel` is taken alongside the roster because three of the
+// rows interpolate data (see ROW 13 ①).
+import { docTaskLabelsFor, fillLabel } from "./serve-i18n.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
@@ -209,6 +214,10 @@ export async function handleTaskList(
 
   // QW-009 (experiment 3, iteration 4): add labels column to list table.
   const currentListHref = bh(statusFilter, sortKey, labelFilters, safePage > 1 ? safePage : null, prefixFilter, qFilter);
+  // gap-webui-doc-tasks-residual-copy-en-zh: the ROW 13 roster for the two `.malformed-row`
+  // placeholders below — taken ONCE per render (the ROW 5 `navLabelsFor` idiom), off `cfg.lang`
+  // (the per-request language the dispatcher already resolved; this page never re-parses it).
+  const L = docTaskLabelsFor(cfg.lang);
   const rows = pageTasks
     .map(
       (t) => {
@@ -224,8 +233,11 @@ export async function handleTaskList(
           const idCell = (typeof t.id === "string" && t.id.length > 0)
             ? html`<a href="/task/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a>`
             : escapeHtml(display);
+          // `idCell` is the caller's markup (a `/task/<id>` link, or escaped display text when the
+          // task has no id at all) — ROW 13 ①: the label carries the sentence, the caller assembles
+          // the element and every interpolated value it hands over is already escaped.
           return html`<tr class="malformed-row">
-            <td colspan="6">⚠ ${idCell} — 缺少 id 字段</td>
+            <td colspan="6">${fillLabel(L.taskMissingId, { id: idCell })}</td>
           </tr>`;
         }
         // QX-018 (iteration 4): show updatedAt as relative time in list row.
@@ -265,8 +277,11 @@ export async function handleTaskList(
   // title, status or labels to filter by, and hiding it would recreate the
   // "0 tasks and no error" failure this whole mechanism exists to prevent.
   const malformedRows = malformed
+    // gap-webui-doc-tasks-residual-copy-en-zh: the sentence is ROW 13's; the two interpolated values
+    // stay the caller's and are escaped BEFORE they are filled in (ROW 13 ① — `{file}` is wrapped in
+    // `<code>` here, which is why the dictionary cannot own this string's markup).
     .map((m) => html`<tr class="malformed-row">
-      <td colspan="6">⚠ <code>${escapeHtml(m.file)}</code> — 解析失败: ${escapeHtml(m.error)}</td>
+      <td colspan="6">${fillLabel(L.taskParseFailed, { file: `<code>${escapeHtml(m.file)}</code>`, error: escapeHtml(m.error) })}</td>
     </tr>`)
     .join("\n");
   // QW-003: filter navigation links — All, todo, ready, done, needs-human, superseded.
@@ -486,11 +501,14 @@ export async function handleTaskList(
   // re-read `?lang=` or the cookie (a second parse is a second decision table, and it would also
   // read a different request's inputs than the one Vary/Cookie was declared for).
   //
-  // ⛔ The DETAIL page below (`/task/<id>`) is deliberately NOT wired: it is not one of the 15 nav
-  // routes and is out of this task's scope (its `<title>` is the bare entity id by existing
-  // contract). Its page-header language attribute stays hard-coded to the default on purpose —
-  // AC5③'s per-file count is a measure of EXACTLY that, so this note deliberately does not spell
-  // the attribute out (a comment mentioning a literal is not a hit — 硬规则 2).
+  // ⛔ The DETAIL page below (`/task/<id>`) keeps its CHROME unwired: it is not one of the 15 nav
+  // routes and was out of AC-290's scope (its `<title>` is the bare entity id by existing contract).
+  // Its page-header language attribute stays hard-coded to the default on purpose — AC5③'s per-file
+  // count is a measure of EXACTLY that, so this note deliberately does not spell the attribute out
+  // (a comment mentioning a literal is not a hit — 硬规则 2).
+  // ⚠️ gap-webui-doc-tasks-residual-copy-en-zh wired the page's RUNS BLOCK (`taskRunsBlock` below)
+  // and nothing else: under `?lang=zh` those two strings switch while the frame stays English. That
+  // split is a registered residue, not a half-finished migration — see ROW 13's carrier note.
   res.end(html`<!doctype html>
     ${htmlLangTag(cfg.lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity, cfg.lang)}</title></head>
     <body>${renderMobileChrome("tasks", pageNameFor("task list", cfg.lang), cfg.lang)}${renderSiteNav("tasks", cfg.lang)}<main id="main">
@@ -574,32 +592,42 @@ export function renderFanInCell(
   return parts.join(layout === "inline" ? " · " : "<br>");
 }
 
+/** The Runs block of `/task/<id>`. `lang` is the per-request language (`ServePageCfg.lang`) the
+ *  dispatcher resolved; it defaults to `DEFAULT_LANG` so a direct unit call — the shape every
+ *  pre-existing test of this function uses — renders exactly the bytes it rendered before
+ *  gap-webui-doc-tasks-residual-copy-en-zh (ROW 13's rows interpolate, so a default is a value here,
+ *  not an omission). ⛔ The detail page's own CHROME is NOT wired to this parameter: that is
+ *  AC-290's registered residue (see the wiring note on `handleTaskList` below). */
 export function taskRunsBlock(
   root: string,
   taskId: string,
-  opts: { liveWorkers?: LiveWorker[] | null; sessionHome?: string } = {},
+  opts: { liveWorkers?: LiveWorker[] | null; sessionHome?: string; lang?: Lang } = {},
 ): string {
+  const { liveWorkers = null, sessionHome, lang = DEFAULT_LANG } = opts;
+  const L = docTaskLabelsFor(lang);
   const records = readWorkerOutcomeRecords(root).filter((r) => r.task === taskId);
 
   // Scope the host-global /proc scan to THIS workspace (gap-observation-hardcodes-quay-worktrees-
   // ignoring-config-worktree-root, sibling site of observation.readLive's scan): `workerDriverActive`
   // says this workspace HAS a driver, not that the scanned processes are its workers.
-  const live = opts.liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc", { root }) : []);
+  const live = liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc", { root }) : []);
   const inFlight = live.filter((w) => w && w.taskId === taskId);
 
   if (records.length === 0 && inFlight.length === 0) {
-    return html`<h2>Runs</h2><p class="meta">无 worker 运行记录（<code>.quay/worker-outcome.jsonl</code>）</p>`;
+    // The carrier path is DATA (a real file name) and rides in wrapped in its `<code>`; the brackets
+    // around it belong to the sentence and live in the label (ROW 13 ②).
+    return html`<h2>Runs</h2><p class="meta">${fillLabel(L.runsNoRecords, { carrier: `<code>.quay/worker-outcome.jsonl</code>` })}</p>`;
   }
 
   const inFlightRows = inFlight.map((w) => {
     const started = w.startedAtMs != null ? new Date(w.startedAtMs).toISOString() : "—";
-    const sessionId = liveSessionIdForPid(w.pid, opts.sessionHome);
+    const sessionId = liveSessionIdForPid(w.pid, sessionHome);
     const transcript = sessionId != null
       ? html`<a href="/session/${encodeURIComponent(sessionId)}">view</a> · <a href="/session/${encodeURIComponent(sessionId)}/download">download</a>`
       : "—";
     return html`<tr>
       <td>${escapeHtml(started)}</td>
-      <td><strong>进行中</strong></td>
+      <td><strong>${L.runInFlight}</strong></td>
       <td>—</td>
       <td>—</td>
       <td>${escapeHtml(w.pid)}</td>
@@ -753,7 +781,12 @@ export async function handleTaskDetail(
   url: URL,
   taskId: string,
   client: ProviderClient,
-  cfg: { workspaceRoot: string },
+  // gap-webui-doc-tasks-residual-copy-en-zh: widened from `{ workspaceRoot }` to the full
+  // `ServePageCfg` so the Runs block below can be handed the per-request language. The dispatcher
+  // (serve-handlers.ts) already passes `reqCfg` — this annotation was simply NARROWER than its own
+  // argument, so nothing at the call site changes. Same shape as the /dashboard/cards fix recorded
+  // in the /dashboard body-copy task's decision ⑥.
+  cfg: ServePageCfg,
 ): Promise<void> {
   const t = await client.taskGet(taskId);
   if (!t) {
@@ -815,7 +848,7 @@ export async function handleTaskDetail(
       <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
       ${displayUpdated != null ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(displayUpdated))}</p>` : ""}
       ${childrenMeta}
-      ${taskRunsBlock(cfg.workspaceRoot, taskId)}
+      ${taskRunsBlock(cfg.workspaceRoot, taskId, { lang: cfg.lang })}
       <h2 class="sr-only">Details</h2>
       ${renderTaskBody(t.body)}
     </main></body></html>`);

@@ -319,6 +319,9 @@ test("AC3 — /task/<id> detail reuses the batch cache: cache hit spawns 0 git; 
 // INDEPENDENT `test()` runs hitting different bytes (hard rule 3 — report an enumeration, not the
 // boolean "the page looks translated"). ⛔ `/task/<id>` is out of scope and is asserted NOWHERE
 // here: it is not one of the 15 nav routes (see the wiring note in serve-task.ts).
+// ⚠️ Carve-out added by gap-webui-doc-tasks-residual-copy-en-zh: that task wired the detail page's
+// RUNS BLOCK (and only it), asserted in `serve-doc-tasks-residual-i18n.test.mjs`. The sentence above
+// still describes THIS file's scope — the detail page's zh CHROME remains unwired and untested here.
 
 let zhServer, zhPort, zhWorkspace, zhTasks, zhOriginalCwd;
 

@@ -67,8 +67,15 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 /** The THREE tokens THIS page registers — pinned as literals, byte-equal to the `serve-architecture.ts`
- *  call sites. Deriving them from PAGE_LABELS would make the assertions below a tautology (硬规则 4). */
-const TITLE_TOKEN = "Architecture — 系统组件图";
+ *  call sites. Deriving them from PAGE_LABELS would make the assertions below a tautology (硬规则 4).
+ *
+ *  ⚠️ RE-KEYED by gap-webui-architecture-body-copy-en-zh (2026-09-18): `TITLE_TOKEN` was
+ *  `Architecture — 系统组件图` and is now `Architecture — system component map`. AC-303 could not fix
+ *  this: ROW 3's `en` column is the IDENTITY, so no dictionary edit can move this page's en `<title>`
+ *  — the token had to change at the call site, exactly as AC-291/292/293/296/298 did. ⚠️ The zh
+ *  column is untouched, so `TITLE_ZH` below is unchanged and every zh arm in this file still asserts
+ *  the pre-change bytes (`架构 — 系统组件图`). Asserted in the AC-dict arm. */
+const TITLE_TOKEN = "Architecture — system component map";
 /** ⚠️ The `<h1>` token is a strict PREFIX of `TITLE_TOKEN` — the property that makes this page's
  *  three-entry shape easy to get wrong, and the reason the `AC-dict` arms perturb the title token
  *  rather than only asserting the bare word resolves. */

@@ -64,7 +64,7 @@ function makeSel() {
 /** Execute gitGraphClientScript() in a fresh vm context; returns the state the tests assert on.
  *
  *  ⚠️ EXPLICIT zh labels (gap-webui-git-history-body-copy-en-zh): the two hint words are INJECTED
- *  constants (serve-i18n.ts ROW 10b — the browser has no dictionary), so a bare `gitGraphClientScript()`
+ *  constants (serve-i18n.ts ROW 17b — the browser has no dictionary), so a bare `gitGraphClientScript()`
  *  renders neutral placeholders and the AC4 assertion below would be reading a placeholder. */
 function runClient({ pages, seedCommits }) {
   const layout = { status: "ok", reason: null, rows: seedCommits, commitCount: seedCommits.length };

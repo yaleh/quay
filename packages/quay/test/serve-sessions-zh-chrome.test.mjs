@@ -14,14 +14,20 @@
 // translated") — a single combined assertion would leave it unknowable WHICH of the four sites a
 // regression broke, which is precisely the granularity the goal criterion's `CAUSE=` names.
 //
-// ⚠️ THREE tokens, not the usual TWO. /tests (AC-298) got away with two because its `<title>` and its
-// `<h1>` carry the SAME string. /sessions does not: its `<h1>` is `"Sessions — 会话观测（运行中 +
-// 已结束）"` while its `<title>` is the shorter `"Sessions — 会话观测"`, and its mobile header carries
-// the bare lowercase `sessions`. `pageNameFor` is an EXACT-token lookup, so a single entry cannot
-// serve them — registering the bare nav word `Sessions` would leave the `<title>` and `<h1>` English
-// while the shared nav bar switched, i.e. exactly the `title-unchanged` arm this task exists to
-// remove. The tokens asserted below are the strings the call sites actually pass, spelled the same
-// way (em dash U+2014, full-width parens).
+// ⚠️ RE-KEYED by gap-webui-sessions-body-copy-en-zh: AC-299 registered THREE tokens here because
+// this page's `<title>` and `<h1>` carried two different PRE-JOINED composites
+// (`"Sessions — 会话观测"` / `"Sessions — 会话观测（运行中 + 已结束）"`). That shape could not be
+// localized — `pageNameFor` returns its argument unchanged for `en`, so the composite's `en` column
+// was never read and both sites rendered Chinese under both languages. The page now passes the BARE
+// `Sessions` token (row `Sessions`, ROW 3) to `pageTitle` / `pageNameFor` and appends its subtitle
+// from serve-i18n.ts ROW 15 (`pageSubtitle` / `h1Subtitle`). So the page now has TWO PAGE_LABELS
+// entries, not three (`Sessions` + the lowercase mobile `sessions`), and its two SUBTITLES are
+// ROW 15's business. The two composite rows are RETIRED — `AC-dict`'s last arm proves that by
+// showing they no longer resolve.
+//
+// The zh values below are UNCHANGED from AC-299 in what they render (`会话` + `会话观测（运行中 +
+// 已结束）` still concatenate to `会话 — 会话观测（运行中 + 已结束）`), which is the point: this is a
+// re-keying, not a re-wording.
 //
 // The nav region is extracted with the SAME method the goal criterion uses (flatten newlines, then a
 // GREEDY `/<nav.*<\/nav>/`) so this test and the criterion cannot drift on what "the nav region"
@@ -46,18 +52,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-/** The three tokens THIS page registers — pinned as literals, byte-equal to the `serve-sessions.ts`
- *  call sites. Deriving them from PAGE_LABELS would make the assertions below a tautology
- *  (硬规则 4). `TITLE_TOKEN` is what `pageTitle` receives; `H1_TOKEN` is what the `<h1>` receives
- *  (⛔ NOT the same string — the trailing `（运行中 + 已结束）` is the whole reason this page needs a
- *  third entry); `MOBILE_TOKEN` is the lowercase label the mobile header carries (the AC-290
- *  `"task list"` / AC-297 `"git history"` / AC-298 `tests` shape). */
-const TITLE_TOKEN = "Sessions — 会话观测";
-const H1_TOKEN = "Sessions — 会话观测（运行中 + 已结束）";
+/** The tokens THIS page registers — pinned as literals, byte-equal to the `serve-sessions.ts` call
+ *  sites. Deriving them from PAGE_LABELS would make the assertions below a tautology (硬规则 4).
+ *  `NAME_TOKEN` is what `pageTitle`/`pageNameFor` receive (the same bare token for both sites now —
+ *  the subtitles moved to ROW 15); `MOBILE_TOKEN` is the lowercase label the mobile header carries
+ *  (the AC-290 `"task list"` / AC-297 `"git history"` / AC-298 `tests` shape).
+ *
+ *  ⚠️ `RETIRED_TITLE_TOKEN` / `RETIRED_H1_TOKEN` are the AC-299 composites. They are pinned here as
+ *  literals for a NEGATIVE control — see `AC-dict`'s last arm. */
+const NAME_TOKEN = "Sessions";
 const MOBILE_TOKEN = "sessions";
+const NAME_ZH = "会话";
+const MOBILE_ZH = "会话";
+const RETIRED_TITLE_TOKEN = "Sessions — 会话观测";
+const RETIRED_H1_TOKEN = "Sessions — 会话观测（运行中 + 已结束）";
+
+/** The two ROW 15 subtitles this page appends, pinned as the EN bytes the `<title>`/`<h1>` now carry
+ *  (they are the task's new copy, so they cannot be derived from the dictionary either). */
+const TITLE_EN = "Sessions — session observation";
+const H1_EN = "Sessions — session observation (running + finished)";
+/** The zh composites, byte-equal to what AC-299 rendered — the re-keying must not move them. */
 const TITLE_ZH = "会话 — 会话观测";
 const H1_ZH = "会话 — 会话观测（运行中 + 已结束）";
-const MOBILE_ZH = "会话";
 
 /** The literal the goal criterion fails the page on. Pinned as a literal on purpose — see the note
  *  on TITLE_TOKEN. ⚠️ The LIVE en `<title>` is `quay — Sessions — 会话观测`, but its prefix is
@@ -128,21 +144,23 @@ after(async () => {
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 });
 
-test("AC-dict: this page's three tokens resolve through pageNameFor, and `en` is the identity for all three", () => {
-  assert.equal(pageNameFor(TITLE_TOKEN, "en"), TITLE_TOKEN,
-    "en is the identity for the /sessions <title> token — the en baseline cannot move by construction");
-  assert.equal(pageNameFor(H1_TOKEN, "en"), H1_TOKEN,
-    "en is the identity for the /sessions <h1> token");
+test("AC-dict: this page's two PAGE_LABELS tokens resolve, and `en` is the identity for both", () => {
+  assert.equal(pageNameFor(NAME_TOKEN, "en"), NAME_TOKEN,
+    "en is the identity for the /sessions page NAME — the en baseline cannot move by construction");
   assert.equal(pageNameFor(MOBILE_TOKEN, "en"), MOBILE_TOKEN,
     "en is the identity for the /sessions mobile-header token");
-  assert.equal(pageNameFor(TITLE_TOKEN, "zh"), TITLE_ZH, "zh translates the /sessions <title> token");
-  assert.equal(pageNameFor(H1_TOKEN, "zh"), H1_ZH, "zh translates the /sessions <h1> token");
+  assert.equal(pageNameFor(NAME_TOKEN, "zh"), NAME_ZH, "zh translates the /sessions page NAME");
   assert.equal(pageNameFor(MOBILE_TOKEN, "zh"), MOBILE_ZH, "zh translates the /sessions mobile-header token");
-  // The <h1> token and the <title> token are DIFFERENT STRINGS — the reason this page needs a third
-  // entry. If the table ever collapsed them into one lookup, the <h1> would silently fall back to
-  // its English token and this arm is what says so.
-  assert.notEqual(TITLE_TOKEN, H1_TOKEN,
-    "this page's <title> and <h1> tokens really are distinct (the three-entry shape is not decorative)");
+  // ⚠️ NEGATIVE CONTROL (gap-webui-sessions-body-copy-en-zh): the two AC-299 COMPOSITES are retired,
+  // so they no longer resolve — each keeps its own (Chinese-bearing) bytes as its zh value, which is
+  // exactly the defect the split removed. If a future change re-adds a composite row, the page's
+  // `<title>`/`<h1>` would go back to rendering Chinese under `en` while these arms stay green; the
+  // AC1④/⑤ arms below (which read the LIVE en response) are what would fire. This control makes the
+  // retirement itself measurable rather than merely stated.
+  assert.equal(pageNameFor(RETIRED_TITLE_TOKEN, "zh"), RETIRED_TITLE_TOKEN,
+    "the retired AC-299 <title> composite no longer resolves — the split is what serves the page now");
+  assert.equal(pageNameFor(RETIRED_H1_TOKEN, "zh"), RETIRED_H1_TOKEN,
+    "the retired AC-299 <h1> composite no longer resolves");
   // The criterion fails the page on the ASCII literal inside the NAV region; the title arm fails it
   // on the same literal in this page's own <title>/<h1>. A zh value that still carried the English
   // word ("会话 Sessions") would satisfy "non-empty" while defeating both — assert the absent
@@ -152,17 +170,13 @@ test("AC-dict: this page's three tokens resolve through pageNameFor, and `en` is
   // asserting that alone would be a TAUTOLOGY, not a measurement (硬规则 4). Its arm is therefore
   // case-INSENSITIVE, which is the shape that can actually fail, and the controls below show the en
   // peers tripping the very same predicates.
-  assert.ok(!pageNameFor(TITLE_TOKEN, "zh").includes(LABEL_EN),
-    `the zh <title> token does not carry the ASCII literal "${LABEL_EN}"`);
-  assert.ok(!pageNameFor(H1_TOKEN, "zh").includes(LABEL_EN),
-    `the zh <h1> token does not carry the ASCII literal "${LABEL_EN}"`);
+  assert.ok(!pageNameFor(NAME_TOKEN, "zh").includes(LABEL_EN),
+    `the zh page NAME does not carry the ASCII literal "${LABEL_EN}"`);
   assert.ok(!pageNameFor(MOBILE_TOKEN, "zh").toLowerCase().includes(LABEL_EN.toLowerCase()),
     `the zh mobile token does not carry "${LABEL_EN}" in any case`);
   // Control — the literal predicates are not vacuous: they DO fire on the en tokens they must reject.
-  assert.ok(pageNameFor(TITLE_TOKEN, "en").includes(LABEL_EN),
-    `control: the "${LABEL_EN}" predicate fires on the en title token it must reject`);
-  assert.ok(pageNameFor(H1_TOKEN, "en").includes(LABEL_EN),
-    `control: the "${LABEL_EN}" predicate fires on the en h1 token it must reject`);
+  assert.ok(pageNameFor(NAME_TOKEN, "en").includes(LABEL_EN),
+    `control: the "${LABEL_EN}" predicate fires on the en page NAME it must reject`);
   assert.ok(pageNameFor(MOBILE_TOKEN, "en").toLowerCase().includes(LABEL_EN.toLowerCase()),
     `control: the case-insensitive "${LABEL_EN}" predicate fires on the en mobile token it must reject`);
 });
@@ -186,8 +200,12 @@ test("AC1: /sessions under Cookie lang=zh switches the page header, nav current 
   //    control is unchanged from the pre-AC-299 live baseline.
   assert.ok(navEn.includes(LABEL_EN),
     `⑥ en nav region still carries the literal "${LABEL_EN}" (the criterion's own baseline assumption)`);
-  assert.ok(headTitle(en.body).endsWith(` — ${TITLE_TOKEN}`),
-    `⑥ en <title> still ends with this page's own pre-AC-299 token (got ${JSON.stringify(headTitle(en.body))})`);
+  // ⚠️ RE-PINNED by gap-webui-sessions-body-copy-en-zh: the `<title>`'s own tail is no longer the
+  // AC-299 composite (it rendered Chinese under `en`); it is now ROW 3's bare NAME + ROW 15's
+  // subtitle. The arm's SUBJECT is unchanged — "the en `<title>` still ends with this page's own
+  // tail" — only the bytes that tail is made of moved.
+  assert.ok(headTitle(en.body).endsWith(` — ${TITLE_EN}`),
+    `⑥ en <title> still ends with this page's own tail (got ${JSON.stringify(headTitle(en.body))})`);
 
   // ② NAV CURRENT ITEM, desktop and mobile, asserted SEPARATELY (hard rule 3: enumerate, don't report
   //    a boolean "the nav looks translated").
@@ -228,15 +246,21 @@ test("AC1: /sessions under Cookie lang=zh switches the page header, nav current 
   assert.notEqual(tZh, tEn, "④ the page's OWN <title> is not byte-identical across the two languages");
   assert.ok(!tZh.includes(LABEL_EN), `④ the zh <title> carries no ASCII "${LABEL_EN}" (got ${JSON.stringify(tZh)})`);
   assert.ok(tZh.includes("会话"), `④ the zh <title> carries the translated token (got ${JSON.stringify(tZh)})`);
+  // ⚠️ The zh tail is pinned BYTE FOR BYTE to what AC-299 rendered (`会话 — 会话观测`), via the two
+  // pieces the split now resolves separately. This is the arm that would catch a re-keying that
+  // "reads better" but moves the zh baseline (this task's AC3 forbids that).
+  assert.ok(tZh.endsWith(` — ${TITLE_ZH}`),
+    `④ the zh <title> tail is byte-equal to the pre-split composite (got ${JSON.stringify(tZh)})`);
 
   // ⑤ this page's OWN <h1>.
   const h1En = h1Of(en.body);
   const h1Zh = h1Of(zh.body);
   console.log(`  [ac299] en <h1> = ${JSON.stringify(h1En)}`);
   console.log(`  [ac299] zh <h1> = ${JSON.stringify(h1Zh)}`);
-  assert.equal(h1En, H1_TOKEN, `⑤ the en <h1> is the full h1 token (got ${JSON.stringify(h1En)})`);
+  // RE-PINNED (same reason as ⑥): the en `<h1>` is now the bare NAME + ROW 15's LOUDER subtitle.
+  assert.equal(h1En, H1_EN, `⑤ the en <h1> is the full en h1 (got ${JSON.stringify(h1En)})`);
   assert.ok(!h1Zh.includes(LABEL_EN), `⑤ the zh <h1> carries no ASCII "${LABEL_EN}" (got ${JSON.stringify(h1Zh)})`);
-  assert.equal(h1Zh, H1_ZH, `⑤ the zh <h1> is translated (got ${JSON.stringify(h1Zh)})`);
+  assert.equal(h1Zh, H1_ZH, `⑤ the zh <h1> is byte-equal to what AC-299 rendered (got ${JSON.stringify(h1Zh)})`);
 });
 
 test("AC1b: the mobile header page label (rendered OUTSIDE the nav region) also switches", async () => {

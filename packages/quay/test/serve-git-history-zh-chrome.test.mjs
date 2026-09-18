@@ -93,7 +93,7 @@ const NAV_CURRENT_ZH = "Git 历史";
  *  because "the subtitle was already Chinese in the en baseline" — i.e. the en `<h1>` read
  *  `Git History — 提交纵向时间轴`. That WAS the body-copy defect the follow-up task exists to remove
  *  (its AC1 red baseline lists the en `<h1>` line among the 12), so the suffix now comes from
- *  serve-i18n.ts ROW 10 and the two columns are asserted SEPARATELY. The zh pair is byte-identical
+ *  serve-i18n.ts ROW 17 and the two columns are asserted SEPARATELY. The zh pair is byte-identical
  *  to the pre-extraction literals — that is the arm this file has always guarded, and it is
  *  unchanged; only the en pair is new. */
 const H1_SUFFIX_GIT = " — vertical commit timeline";
@@ -327,7 +327,7 @@ test("AC-en-baseline: both en renderings are the pre-AC-297 page verbatim", asyn
   assert.ok(headTitle(enTask.body).endsWith(` — ${TITLE_TOKEN_TASK}`),
     `the en task-view <title> still carries its English page token (got ${JSON.stringify(headTitle(enTask.body))})`);
   // The en `<h1>`: its PAGE NAME is the AC-297 baseline verbatim; its SUBTITLE was localized by the
-  // follow-up task, so it is now pinned as the ROW 10 en literal (see the MIGRATION note above).
+  // follow-up task, so it is now pinned as the ROW 17 en literal (see the MIGRATION note above).
   assert.ok(enGit.body.includes(`<h1>${H1_TOKEN}${H1_SUFFIX_GIT}</h1>`),
     "the en default-view <h1> keeps the AC-297 page name and the localized subtitle");
   assert.ok(enTask.body.includes(`<h1>${H1_TOKEN}${H1_SUFFIX_TASK}</h1>`),
