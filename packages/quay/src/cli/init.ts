@@ -42,6 +42,9 @@ Flags:
                rewritten at all. Total over the three states, so re-running init is
                always legal: absent => a normal fresh write; unparseable => rebuilt
                from defaults with the broken file preserved beside it.
+               Scope: when the config already EXISTS, this mode touches
+               .quay/config.yml ONLY — it never lays down tasks/, profiles.yml or
+               the launch settings. An ABSENT config gets the full fresh scaffold.
                --force still wins when both are given (an overwrite is not a diff).
   --doc-branch-name <name>
                (with --branch-model-only) Establish the DOC-ONLY work branch: when the main

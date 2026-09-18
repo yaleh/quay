@@ -98,11 +98,21 @@ export function classifyConfig(configPath: string): ConfigClassification {
 export const LOOP_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
   /** The branch a task worktree forks from (SPEC-branching-model current ruling: `develop`). */
   fork_baseline: "develop",
-  /** The branch mechanical fan-in fast-forwards into. Consumers already fall back to `develop` when
-   *  it is unset (`worker-driver.ts` `mergeTarget ?? "develop"`), so writing it is a DISPLAY-honesty
-   *  fix (the dashboard reads the key itself) — it never changes where work lands. */
-  merge_target: "develop",
 };
+
+// ⛔ `merge_target` is DELIBERATELY NOT in the table above, and the reason is executable rather than
+// editorial: `plugin/test/quay-init.test.mjs` asserts the loop section must NOT carry it
+// ("the zero-consumer key is deleted from the writer face — the negative control is that the dead key
+// is NOT written, not merely unwired", from gap-config-key-consumer-check-mechanical-enumeration).
+// This task's own AC2 named both keys in its regression fixture, on the strength of the quay-fleet
+// symptom; that fixture was written before this constraint was discovered, and it is the constraint
+// that wins, because the alternative is two fresh-install writers that disagree about what this
+// version emits — the exact drift this whole change exists to remove. `merge_target` is display-only
+// here: `serve-render.ts` reads `loop.merge_target ?? loop.fork_baseline`, so a config without it is
+// still honestly rendered from the fork baseline, and `worker-driver.ts` never reads the config for
+// it at all (`mergeTarget ?? "develop"` is an OPTION default). A config that already carries it keeps
+// its value (the reconcile preserves what it does not own); one carrying the retired `integration` is
+// still migrated — see LOOP_VALUE_MIGRATIONS. See this task's DoD evidence for the recorded deviation.
 
 /**
  * Explicit migration table for values this version considers incompatible (SPEC §3.2).

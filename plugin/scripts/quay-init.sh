@@ -1850,12 +1850,12 @@ loop:
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
-  # ⚠️ 本 heredoc 是【新装】写者；当前版本默认值的正本是 packages/quay/src/init.ts 的
-  # LOOP_VERSION_DEFAULTS（CLI `quay init` 的 reconcile 用它 diff）。shell 无法 import TS，
-  # 所以这两个 key 在这里是【镜像】——新增一个版本级默认值时要同时改两处，或把这里改成从 schema 派生
-  # （gap-quay-init-native-reconcile 把这条不一致记进了 DoD 证据小节）。
+  # ⚠️ 本 heredoc 是【新装】写者，而版本级默认值的正本是 packages/quay/src/init.ts 的
+  # LOOP_VERSION_DEFAULTS（CLI `quay init --reconcile` 用它做 diff）。shell 无法 import TS，
+  # 所以这一行是【镜像】：新增版本级默认值时要同时改两处，或把这里改成从 schema 派生。
+  # ⛔ 不要在这里补那个已被删除的零消费者分支键：plugin/test/quay-init.test.mjs 以可执行的判据
+  # 钉住"它不被写出"（gap-config-key-consumer-check-mechanical-enumeration）；理由见 init.ts。
   fork_baseline: develop
-  merge_target: develop
 EOF
     echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
   fi

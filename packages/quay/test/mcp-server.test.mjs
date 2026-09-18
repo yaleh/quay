@@ -1809,12 +1809,24 @@ async function main() {
   // (b) it lists the bootstrap tool, (c) that tool actually repairs the workspace. Re-point (b)/(c)
   // at any config-dependent tool and it goes red — e.g. `task_list` cannot be served in this
   // workspace, so a fix that merely kept the OLD registration order would fail here.
-  {
-    const brokenRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-broken-cfg-"));
+  // Both shapes of "no usable config" are exercised: the AC names them as one scenario
+  // ("没有/损坏"), and they fail the startup sequence at DIFFERENT points (no file ⇒ `findConfig()`
+  // walks to the filesystem root and returns null; unparseable file ⇒ the walk SUCCEEDS and the
+  // parser throws), so a fix that only survives one of them would look complete.
+  // shape -> the three-state value `classifyConfig` must report for it (the shape name describes the
+  // INPUT; the state name describes the VERDICT, and they differ for the parser case on purpose —
+  // "unparseable bytes" is reported as `corrupt`, the vocabulary every caller reads).
+  for (const [shape, expectedState] of [["absent", "absent"], ["unparseable", "corrupt"]]) {
+    const brokenRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-mcp-${shape}-cfg-`));
     fs.mkdirSync(path.join(brokenRoot, ".quay"), { recursive: true });
-    // Not a config with a semantic problem (DIR-099-C's scope, deliberately not re-opened) — a file
-    // the YAML parser cannot read at all.
-    fs.writeFileSync(path.join(brokenRoot, ".quay", "config.yml"), "providers: [unclosed\n  bad: : :\n");
+    if (shape === "unparseable") {
+      // Not a config with a semantic problem (DIR-099-C's scope, deliberately not re-opened) — a
+      // file the YAML parser cannot read at all.
+      fs.writeFileSync(path.join(brokenRoot, ".quay", "config.yml"), "providers: [unclosed\n  bad: : :\n");
+    } else {
+      // ABSENT: remove the directory the walk would find, so findConfig() finds nothing at all.
+      fs.rmdirSync(path.join(brokenRoot, ".quay"));
+    }
 
     const { client: brokenCfgClient, transport: brokenCfgTransport } = await connectStdio(
       "node",
@@ -1827,28 +1839,28 @@ async function main() {
       const toolNames = (toolsResult.tools ?? []).map((t) => t.name);
       assert(
         toolNames.includes("init"),
-        `AC4: a workspace with an unparseable .quay/config.yml still lists the bootstrap 'init' tool (got: [${toolNames.join(", ")}])`
+        `AC4[${shape}]: a workspace with no usable .quay/config.yml still lists the bootstrap 'init' tool (got: [${toolNames.join(", ")}])`
       );
       assert(
         toolNames.includes("config_validate"),
-        `AC4: the diagnostic 'config_validate' is registered on the degraded path too (got: [${toolNames.join(", ")}])`
+        `AC4[${shape}]: the diagnostic 'config_validate' is registered on the degraded path too (got: [${toolNames.join(", ")}])`
       );
 
       const repaired = await brokenCfgClient.callTool({
         name: "init",
         arguments: { root: brokenRoot, reconcile: true },
       });
-      assert(repaired.isError !== true, `AC4: init on the broken workspace succeeds (got: ${JSON.stringify(repaired.structuredContent)})`);
+      assert(repaired.isError !== true, `AC4[${shape}]: init on the broken workspace succeeds (got: ${JSON.stringify(repaired.structuredContent)})`);
       assert(
-        repaired.structuredContent?.configState === "corrupt",
-        `AC4: the repair reports the pre-state honestly as 'corrupt' (got: ${repaired.structuredContent?.configState})`
+        repaired.structuredContent?.configState === expectedState,
+        `AC4[${shape}]: the repair reports the pre-state honestly (want ${expectedState}, got: ${repaired.structuredContent?.configState})`
       );
 
       const cfgPath = path.join(brokenRoot, ".quay", "config.yml");
       const reparsed = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
       assert(
         reparsed?.loop?.fork_baseline === "develop",
-        `AC4: init wrote a PARSEABLE config carrying this version's defaults (loop.fork_baseline=${reparsed?.loop?.fork_baseline})`
+        `AC4[${shape}]: init wrote a PARSEABLE config carrying this version's defaults (loop.fork_baseline=${reparsed?.loop?.fork_baseline})`
       );
     } finally {
       await brokenCfgTransport.close();

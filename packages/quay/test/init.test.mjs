@@ -789,7 +789,7 @@ const LEGACY_CONFIG = [
   "",
 ].join("\n");
 
-test("AC2 reconcile: a legacy config missing fork_baseline/merge_target gets them — everything else untouched", () => {
+test("AC2 reconcile: a legacy config missing the version defaults gets them — everything else untouched", () => {
   const dir = tmpDir("ac2-reconcile");
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   const cfgPath = path.join(dir, ".quay", "config.yml");
@@ -798,13 +798,17 @@ test("AC2 reconcile: a legacy config missing fork_baseline/merge_target gets the
   const out = runQuay(["init", "--reconcile", "--root", dir], dir);
   assert.match(out, /reconciled to this version's defaults/, `the run reports a reconcile:\n${out}`);
   assert.match(out, /filled loop\.fork_baseline/, "the report names the key it filled");
-  assert.match(out, /filled loop\.merge_target/, "the report names the key it filled");
 
   const after = fs.readFileSync(cfgPath, "utf8");
   const doc = YAML.parse(after);
-  // The regression itself: both keys that entered the template three days after this project's init.
+  // The regression itself: the key that entered the template three days after this project's init.
   assert.equal(doc.loop.fork_baseline, "develop", "fork_baseline is filled from the version default");
-  assert.equal(doc.loop.merge_target, "develop", "merge_target is filled from the version default");
+  // ⛔ merge_target is NOT filled, and that is the designed behavior — not an omission. The version
+  // does not require it: `plugin/test/quay-init.test.mjs` has an executable invariant that the loop
+  // writer must NOT emit it (the audited zero-consumer key, deleted from the writer face), and
+  // serve-render.ts falls back to `fork_baseline` for the dashboard. This task's AC2 named both keys
+  // because the quay-fleet SYMPTOM involved both; the constraint wins (see the DoD evidence section).
+  assert.equal(doc.loop.merge_target, undefined, "merge_target is deliberately NOT written (zero-consumer key)");
   // Preservation — the whole reason this is a diff and not a re-dump.
   assert.equal(doc.loop.my_project_key, "keep-me", "an unknown user key survives");
   assert.deepEqual(doc.loop.concurrency_bands, [1, 3], "a user-tuned list survives with its order intact");
@@ -858,6 +862,10 @@ test("AC2 reconcile unit: reconcileConfigContent edits in place — only the key
   const { content, report } = reconcileConfigContent("loop:\n  board: \"native\"\n");
   assert.deepEqual(report.added.sort(), Object.keys(LOOP_VERSION_DEFAULTS).sort(), "every schema key absent from the input is filled");
   assert.equal(report.unchanged, false, "a fill is a change");
+  // The schema is the version's REQUIREMENT list, and it is deliberately short: a key this version
+  // does not require must not be silently introduced by a reconcile (that is how a dead key comes
+  // back). Pinning it here means widening the schema is an explicit, reviewable edit.
+  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["fork_baseline"], "the version-required loop keys, today");
   const doc = YAML.parse(content);
   assert.equal(doc.loop.board, "native", "the pre-existing key is preserved");
   for (const k of Object.keys(LOOP_VERSION_DEFAULTS)) assert.equal(doc.loop[k], LOOP_VERSION_DEFAULTS[k], `loop.${k} filled`);
