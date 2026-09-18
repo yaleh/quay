@@ -716,7 +716,10 @@ async function main() {
           // not up yet
         }
       }
-      assert(up, `quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)${up ? "" : ` -- stdout: ${JSON.stringify(stdout.slice(0, 500))}, stderr: ${JSON.stringify(stderr.slice(0, 500))}, exitCode: ${child.exitCode}`}`);
+      // gap-serve-same-root-admission-lock: the default is now 0 (kernel-assigned), so the
+      // discriminator this test pins is「the port FROM THE COMMAND LINE was used」— which is only
+      // observable if the CLI reaches startServer with it (the argv.slice(3) re-parse).
+      assert(up, `quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, rather than the default ephemeral bind)${up ? "" : ` -- stdout: ${JSON.stringify(stdout.slice(0, 500))}, stderr: ${JSON.stringify(stderr.slice(0, 500))}, exitCode: ${child.exitCode}`}`);
       if (up) {
         const body = await new Promise((resolve, reject) => {
           http.get({ host: "127.0.0.1", port, path: "/tasks" }, (res) => {
