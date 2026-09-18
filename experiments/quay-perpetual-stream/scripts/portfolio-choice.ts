@@ -12,6 +12,7 @@
 
 import type { MilestoneCandidate, RejectedShape, MilestonePortfolio } from "./candidate-contracts.ts";
 import { CONTRACT_VERSION } from "./candidate-contracts.ts";
+import { createSelftest } from "./gate-script-base.ts";
 
 // ── CadenceConstraint (M188/DIR-119-A AC5 follow-up) ─────────────────────────────────────────────────
 // Wires explore-exploit-cadence.ts's verdict into portfolio choice: when an EXPLORE milestone is DUE,
@@ -207,15 +208,8 @@ export function assertPortfolioDisjoint(portfolio: MilestonePortfolio): void {
 
 // ── selftest ──────────────────────────────────────────────────────────────────────────────────────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   const mkC = (id: string, taskIds: string[], score: number, resourceUse = 10): MilestoneCandidate => ({
     version: 1,
@@ -393,9 +387,7 @@ export function selftest(): boolean {
   };
   const p13 = choosePortfolio([cDependent], { dependency: dependencyCtxUnknown });
   check("dependency-fails-open-on-unknown-target", p13.selected.length === 1, JSON.stringify(p13.selected));
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 if (process.argv[1] != null && process.argv[1].endsWith("portfolio-choice.ts") && process.argv.includes("--selftest")) {

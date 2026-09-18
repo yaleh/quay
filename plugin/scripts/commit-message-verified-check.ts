@@ -48,7 +48,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createSelftest } from "./gate-script-base.ts";
 
 /**
  * A "verified"-class ASSERTION: an assertion of a PASS state with a subject. Positional —
@@ -155,15 +155,8 @@ export function scanRepo(root: string, depth: number): Violation[] {
 
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
 export function selftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name: string, cond: boolean, detail = "") => {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  };
+  const st = createSelftest({ flavor: "counters", label: "commit-message-verified-check" });
+  const check = st.check;
 
   // RED — the exact defect shape (8e2e49b9): a bare "all syntax verified" claim.
   let v = analyzeMessage("8e2e49b9", "merge: 45 conflicts resolved (…; all syntax verified)");
@@ -188,9 +181,7 @@ export function selftest(): boolean {
 
   // GREEN — a CITED claim (task-filing commit quoting the finding) is not an assertion.
   check("green-citation", analyzeMessage("a", 'tasks: file AC11 carrier — 8e2e49b9 claims "all syntax verified"') === null);
-
-  console.log(`\ncommit-message-verified-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 function usage(): never {

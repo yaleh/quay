@@ -38,6 +38,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { validateEvent, emitEvent, VALID_STAGES } from "./workflow-event-schema.mjs";
+import { createSelftest } from "./gate-script-base.ts";
 import {
   sha256File,
   serializeReceipt,
@@ -464,18 +465,8 @@ export class StageJournalStore {
 // ── Selftest ────────────────────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-  const failures: Array<{ name: string; detail: string }> = [];
-
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      failures.push({ name, detail });
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  const check = st.check;
 
   const savedCwd = process.cwd();
   const fixtureDir = fs.mkdtempSync(path.join(savedCwd, "tmp", "workflow-journal-selftest-"));
@@ -603,12 +594,7 @@ export function selftest(): boolean {
       /* best-effort cleanup */
     }
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  if (!allPassed) {
-    console.log(JSON.stringify({ ok: false, failures }));
-  }
-  return allPassed;
+  return st.report();
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────

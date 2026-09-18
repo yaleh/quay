@@ -40,6 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import { createSelftest } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -674,18 +675,8 @@ export function canReuseFinding(
 // ── Selftest ────────────────────────────────────────────────────────────────────────────────────────
 
 export function selftest(): boolean {
-  let allPassed = true;
-  const failures: Array<{ name: string; detail: string }> = [];
-
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      failures.push({ name, detail });
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases", collectFailures: true, dumpFailuresJson: true });
+  const check = st.check;
 
   const savedCwd = process.cwd();
   // gap-stage-receipt-selftest-mkdtemp-requires-tmp-dir: `tmp/` is gitignored runtime state —
@@ -816,12 +807,7 @@ export function selftest(): boolean {
       /* best-effort cleanup */
     }
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  if (!allPassed) {
-    console.log(JSON.stringify({ ok: false, failures }));
-  }
-  return allPassed;
+  return st.report();
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────

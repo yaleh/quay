@@ -21,6 +21,7 @@
 import { expandGlobs, filesDisjoint } from "./touches-orthogonality-check.ts";
 import type { TaskCandidate, CouplingEdge, CouplingKind } from "./candidate-contracts.ts";
 import { isProhibiting } from "./candidate-contracts.ts";
+import { createSelftest } from "./gate-script-base.ts";
 
 export interface BuildCouplingGraphInput {
   tasks: TaskCandidate[];
@@ -194,15 +195,8 @@ export function supportingNeighbors(graph: CouplingGraph, taskId: string): strin
 
 // ── selftest ───────────────────────────────────────────────────────────────────────────────────────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   const mk = (id: string, touches: string[], deps: string[] = [], sem: string[] = []): TaskCandidate => ({
     version: 1,
@@ -279,9 +273,7 @@ export function selftest(): boolean {
   const tasks5 = [mk("J", ["j.ts"], ["OUTSIDE-TASK"])];
   const g5 = buildCouplingGraph({ tasks: tasks5 });
   check("dependency-outside-fact-set-dropped-not-thrown", g5.edges.length === 0, JSON.stringify(g5.edges));
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 if (process.argv[1] != null && process.argv[1].endsWith("coupling-graph.ts") && process.argv.includes("--selftest")) {

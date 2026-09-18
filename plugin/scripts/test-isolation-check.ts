@@ -97,7 +97,7 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 // finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
 // exported it.
 import { firstArgRegion } from "./source-text-lib.ts";
-import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
 import {
   hasNodeTestImport,
   canonicalTestFiles,
@@ -1158,15 +1158,8 @@ function getArgValue(args: string[], name: string): string | undefined {
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ────────────
 
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  function check(name: string, cond: boolean, detail = "") {
-    if (cond) pass++;
-    else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  }
+  const st = createSelftest({ flavor: "counters", label: "test-isolation-check" });
+  const check = st.check;
 
   // R1: a fixed `.tmp-` under __dirname is reported; a mkdtemp prefix is NOT.
   const fixedTmp = 'const tasksDir = path.join(__dirname, ".tmp-lock-test");\n';
@@ -1325,9 +1318,7 @@ export function runSelftest(): boolean {
   // C2d RED: a malformed entry.
   failures = runIsolationChecks({ current: [], dataEntries: ["not-a-valid-entry"], baselineEntries: [], baselineCount: null, baselineCountHead: null, fileExists: () => true });
   check("C2d RED: malformed entry fails", failures.some((f) => f.includes("malformed")), JSON.stringify(failures));
-
-  console.log(`\ntest-isolation-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

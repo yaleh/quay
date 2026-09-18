@@ -60,7 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -446,16 +446,8 @@ async function main(argv: string[]): Promise<number> {
 
 // ── selftest ─────────────────────────────────────────────────────────────────────────────────────
 async function runSelftest(): Promise<number> {
-  let pass = 0;
-  let fail = 0;
-  function check(name: string, cond: boolean, detail: string = "") {
-    if (cond) {
-      pass++;
-    } else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  }
+  const st = createSelftest({ flavor: "counters", label: "config-wiring-check" });
+  const check = st.check;
 
   // ── checkGeneralReader ──
   const r1 = checkGeneralReader("board", REPO_ROOT);
@@ -560,9 +552,7 @@ async function runSelftest(): Promise<number> {
   } finally {
     fs.rmSync(vrRedDir, { recursive: true, force: true });
   }
-
-  console.log(`\nconfig-wiring-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0 ? 0 : 1;
+  return st.report() ? 0 : 1;
 }
 
 // gap-config-wiring-check-symlink-noop: raw string equality between `process.argv[1]` (NEVER
