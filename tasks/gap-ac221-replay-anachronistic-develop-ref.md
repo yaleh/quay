@@ -79,13 +79,13 @@ reflog 覆盖深度实测：4481 条、最早 `2026-08-23T03:25:46Z` ⇒ 覆盖�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`developTipAt` 对 `2026-09-18T11:12:40.533Z` 返回的 commit 的 `tasks/gap-goal-batch-dry-run-noop.md`，`flipAcGateVerdict` 判 `ok=false`（0/6）；⛔ 仍返回 `ca1a8276d` / `ok=true` ⇒ 假。
-- [ ] AC2（正控制，判据自身保留取假能力）：判据里存在一条**读真实历史**的断言，对已知真复发样本（`gap-cli-write-surface-lacks-toplevel-fields@2026-09-07T03:37:36.503Z` → ref `8d8e353db` = 8/8）判为复发；**双向对照**：同一断言换成已知真阴性样本（`gap-ac207` 2026-09-09T14:26:02.187Z）时判非复发（两臂都要实测，缺一臂不算）。
-- [ ] AC3（fail-closed 三态）：reflog 读不到 / 最早条目晚于事件 ts / 最新条目 ≠ 当前 develop tip 这三种情形下，`developTipAt` 返回 null，主判据走 `unclassified` 分支 **FAIL**（⛔ 不当作「没复发」）。用带窄时间窗的构造输入或临时仓库实测该三态。
-- [ ] AC4（端到端）：`QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs` 退出码 0、`fail 0`。
-- [ ] AC5（不静默收窄范围）：判据头注如实写明「本判据的 develop 侧口径不覆盖『写已提交但尚未到达 develop』的传播竞态」+ 上面那份 83 秒实测读数；⛔ 不得把该残留写成已解决。
-- [ ] AC6：`bash scripts/test.sh --for-task gap-ac221-replay-anachronistic-develop-ref` 绿（含改动/新增测试）。
-- [ ] AC7（真阴性样本不被误伤）：负控制二（`gap-ac207` 2026-09-09T14:26:02.187Z）仍判 `recurrence === false`。
+- [x] AC1（能取假）：`developTipAt` 对 `2026-09-18T11:12:40.533Z` 返回的 commit 的 `tasks/gap-goal-batch-dry-run-noop.md`，`flipAcGateVerdict` 判 `ok=false`（0/6）；⛔ 仍返回 `ca1a8276d` / `ok=true` ⇒ 假。
+- [x] AC2（正控制，判据自身保留取假能力）：判据里存在一条**读真实历史**的断言，对已知真复发样本（`gap-cli-write-surface-lacks-toplevel-fields@2026-09-07T03:37:36.503Z` → ref `8d8e353db` = 8/8）判为复发；**双向对照**：同一断言换成已知真阴性样本（`gap-ac207` 2026-09-09T14:26:02.187Z）时判非复发（两臂都要实测，缺一臂不算）。
+- [x] AC3（fail-closed 三态）：reflog 读不到 / 最早条目晚于事件 ts / 最新条目 ≠ 当前 develop tip 这三种情形下，`developTipAt` 返回 null，主判据走 `unclassified` 分支 **FAIL**（⛔ 不当作「没复发」）。用带窄时间窗的构造输入或临时仓库实测该三态。
+- [x] AC4（端到端）：`QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs` 退出码 0、`fail 0`。
+- [x] AC5（不静默收窄范围）：判据头注如实写明「本判据的 develop 侧口径不覆盖『写已提交但尚未到达 develop』的传播竞态」+ 上面那份 83 秒实测读数；⛔ 不得把该残留写成已解决。
+- [x] AC6：`bash scripts/test.sh --for-task gap-ac221-replay-anachronistic-develop-ref` 绿（含改动/新增测试）。
+- [x] AC7（真阴性样本不被误伤）：负控制二（`gap-ac207` 2026-09-09T14:26:02.187Z）仍判 `recurrence === false`。
 
 ## Definition of Done
 
