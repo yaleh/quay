@@ -27,19 +27,77 @@ extra:
 
 在 `prosePrereqRefs` 的 `add(id)` 里，除现有的 `superseded` 早返回外，再加：`readTaskStatusOnDisk(tasksDir, id) === "done"` 时也早返回。**保持 fail-closed**：`todo` / `ready` / `in-progress` / 未知状态 / 缺失或无法解析的 status **一律仍计入缺口**——未知状态绝不能被当成 done（硬规则 3b：读不懂不得伪装成合格）。不改关系边（`depends_on`）语义；`prosePrereqRefs` 由 ready-pool 分析与 promotion-driver 共用，修一处即两处生效。
 
+## Result
+
+`add()` 改为先取一次 `const status = readTaskStatusOnDisk(...)`，`status === "superseded" || status === "done"` 时早返回；其余取值（`todo` / `ready` / 其他 / `""` / 垃圾 token / `null`）一律保持原有 fail-closed 行为入缺口集。`readTaskStatusOnDisk` 与 `prosePrereqRefs` 的两处文档注释同步更新（硬规则 5b：同一条原则在本文件里有三处表述，一处不改即留漂移）。
+
+**Touches 扩面的理由（硬规则 5b 的产物）**：本条原则的其它实例就在同目录的兄弟夹具里——`ready-pool-check-s17/s18` 里被引用的夹具任务此前一律写成 `status: "done"`，那只表示「这个被引用任务存在」，**不是**被测机制的一部分。新规则下 done 引用在 sibling/scope/polarity/dedup-marker 这些被测机制生效**之前**就被状态过滤丢掉 ⇒ 那些断言会变成恒绿（硬规则 3b 的「空转」形态）。因此把它们的夹具状态改为非 done（`ready` / `todo`），使被测机制重新承重。**忠实性对照**：单独回退源码修复后重跑，s17/s18/s19 全绿、只有新增用例红 ⇒ 夹具改动忠实保留了原行为，没有放宽任何断言。同一扫描面（`grep -rln "analyzeTasks|buildTargetedPromotion"` ∩ `grep -rln 前置|阻塞|Do not dispatch until`）的交集只有 s17/s18/s19，其余 `analyzeTasks` 消费者无散文前置关键词，不受影响。
+
 ## Acceptance Criteria
 
-- [ ] AC1（先红）在 `plugin/test/ready-pool-check-s19.test.mjs`（若不适合则新建同目录兄弟测试）加用例：任务体含 ``前置：`gap-x` ``，tasks 目录里 `gap-x` 的 status 为 `done` ⇒ `prosePrereqGap` 严格等于 `[]`；修复前该用例**红**，贴原始红输出。
-- [ ] AC2（负控制，防改成恒绿）同一任务体，`gap-x` status 为 `todo` ⇒ 仍为 `['gap-x']`；`gap-x` 无 status 或 status 无法解析 ⇒ 仍被计入缺口；两个方向各贴读数。
-- [ ] AC3（不回归）`node --test plugin/test/ready-pool-check-*.test.mjs plugin/test/promotion-driver-*.test.mjs` 退出码 0，贴 `# tests` / `# pass` / `# fail` 三行。
-- [ ] AC4（生产读数）落地后，对上述受害体正文（触发句 + 已 done 的引用）在真实 tasks 目录上求值，`prosePrereqGap` 不含那个已 done 的 id；贴读数。
+- [x] AC1（先红）在 `plugin/test/ready-pool-check-s19.test.mjs`（若不适合则新建同目录兄弟测试）加用例：任务体含 ``前置：`gap-x` ``，tasks 目录里 `gap-x` 的 status 为 `done` ⇒ `prosePrereqGap` 严格等于 `[]`；修复前该用例**红**，贴原始红输出。
+  - 用例：`ready-pool-check-s19.test.mjs` 的 `AC1/AC2 — a prose prereq citing an already-DONE task is not a gap; todo / unknown status stay fail-closed`。
+  - **修复前（`git checkout -- plugin/scripts/ready-pool-check.ts` 后跑 `node --test --test-name-pattern="AC1/AC2" plugin/test/ready-pool-check-s19.test.mjs`）**：
+    ```
+    ✖ AC1/AC2 — a prose prereq citing an already-DONE task is not a gap; …
+      AssertionError [ERR_ASSERTION]: ① a ref to a DONE task is dropped at the ref level (pre-fix: ['gap-x'])
+      + actual   [ 'gap-x' ]
+      - expected []
+      ℹ tests 1 / ℹ pass 0 / ℹ fail 1
+    ```
+    失败点正是第一条断言（`gap-x` 已 done 却仍被采为前置），与 Finding 的机制一致。
+  - **修复后**：同命令 ⇒ `✔ AC1/AC2 …` `ℹ tests 1 / ℹ pass 1 / ℹ fail 0`。
+
+- [x] AC2（负控制，防改成恒绿）同一任务体，`gap-x` status 为 `todo` ⇒ 仍为 `['gap-x']`；`gap-x` 无 status 或 status 无法解析 ⇒ 仍被计入缺口；两个方向各贴读数。
+  - 同一 `body = "前置：`gap-x`，本任务须待其落地后方可派发。"` 全程复用，**只改被引用任务的 status**：
+    | `gap-x` 的 status | `prosePrereqRefs` | `prosePrereqGap` |
+    |---|---|---|
+    | `done` | `[]` | `[]` |
+    | `todo` | `["gap-x"]` | `["gap-x"]` |
+    | `ready` | — | `["gap-x"]` |
+    | 无 status 字段（`readTaskStatusOnDisk` ⇒ `null`） | — | `["gap-x"]` |
+    | `status:` 空值 | — | `["gap-x"]` |
+    | `status: ???`（垃圾 token） | — | `["gap-x"]` |
+    | 无 frontmatter 块（整段读不出） | — | `["gap-x"]` |
+  - 反向读数（① done ⇒ `[]`）与正向读数（② todo/未知 ⇒ `["gap-x"]`）都在同一用例里断言，**缺任一方向该用例即不能同时挡住「恒假」与「恒绿」**。
+  - 另：`superseded` 仍被丢弃（既有行为锚点）；`阻塞 `gap-done-other`；前置 `gap-live`。` ⇒ 只丢 done 那条、同句里的活前置仍拦（防「一改就全放行」）。
+
+- [x] AC3（不回归）`node --test plugin/test/ready-pool-check-*.test.mjs plugin/test/promotion-driver-*.test.mjs` 退出码 0，贴 `# tests` / `# pass` / `# fail` 三行。
+  - `node --no-warnings --experimental-strip-types --test --test-reporter=tap plugin/test/ready-pool-check-*.test.mjs plugin/test/promotion-driver-*.test.mjs` ⇒ `exit=0`：
+    ```
+    # tests 224
+    # pass 224
+    # fail 0
+    ```
+  - scoped 门（driver fan-in 同一条）：`bash scripts/test.sh --for-task gap-prose-prereq-refs-should-exclude-done-referenced-tasks --allow-thin` ⇒ `exit=0`，`ℹ tests 9 / ℹ pass 9 / ℹ fail 0`。
+  - **忠实性对照**（本条的关键负控制）：单独回退源码修复、保留夹具改动后重跑 s17+s18+s19 ⇒ **只有新增用例红**（`✖ AC1/AC2 …`），被改夹具的 10 个既有用例全绿 ⇒ 夹具改动没有放宽既有断言。
+
+- [x] AC4（生产读数）落地后，对上述受害体正文（触发句 + 已 done 的引用）在真实 tasks 目录上求值，`prosePrereqGap` 不含那个已 done 的 id；贴读数。
+  - 受害体正文取**改写措辞之前**的那一版（`git show 1e1fa1f46:tasks/gap-touches-parser-early-subheading-latch-hides-declaration.md`）——现行文件在 `15:54Z` 被人工改写成「当时在飞，已翻 done 的受害体」，正好把触发词 `阻塞` 从该句拿掉，所以现版正文已不含触发句。触发句即 :68：
+    ```
+    - `有 touches 标题 ∧ globs.length === 0` = **3** 条：`gap-git-history-window-notes-ref-dominates`（在飞，当前阻塞器）、
+    ```
+  - 在**真实** `tasks/` 目录上求值（`prosePrereqGap(body, frontmatterRaw, tasksDir)`），同一份正文跑两次源码：
+    ```
+    [PRE-FIX  (develop HEAD)] cited=gap-git-history-window-notes-ref-dominates status=done prosePrereqGap=["gap-git-history-window-notes-ref-dominates"] containsCited=true
+    [POST-FIX (this task)  ] cited=gap-git-history-window-notes-ref-dominates status=done prosePrereqGap=[]                                        containsCited=false
+    ```
+  - 被引用任务 `tasks/gap-git-history-window-notes-ref-dominates.md` 的 status 由同一命令读出为 `done` ⇒ **旧读数正是那 88 次跳过的理由，新读数为空**。
 
 ## Definition of Done
 
 **真实落地判据**：被 ready-pool 分析与 promotion-driver 共用的那一份 `prosePrereqRefs` 本体不再把已 done 的引用计为未建边前置；不是只在测试夹具里绿。不改关系边语义，不放宽对 todo/ready/未知状态的 fail-closed。可回滚：还原 `add()` 里新增的一行早返回即可。
 
+**落地位置核验**：`plugin/scripts/ready-pool-check.ts:1449-1464` 的 `add()` 是本条唯一改动点；AC4 的 POST-FIX 读数正是这份本体在**真实 tasks 目录**上的求值结果（非夹具），故不是「只在测试夹具里绿」。
+
 ## Touches
 
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check-s19.test.mjs
+- plugin/test/ready-pool-check-s17.test.mjs
+- plugin/test/ready-pool-check-s18.test.mjs
 - tasks/gap-prose-prereq-refs-should-exclude-done-referenced-tasks.md
+
+<!-- Touches 扩面说明（硬规则 5b）：s17/s18 是本条原则的兄弟实例——两文件里被引用的夹具任务此前一律写
+     status: "done"（只表示「被引用任务存在」），新规则下它们在 sibling/scope/polarity/dedup-marker 生效
+     之前就被丢 ⇒ 那些断言会退化成恒绿。改夹具状态为 ready/todo 使其重新承重；忠实性对照见 AC3。 -->
