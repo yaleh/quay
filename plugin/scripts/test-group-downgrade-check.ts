@@ -50,7 +50,10 @@ import path from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
 
@@ -316,12 +319,6 @@ function usage(): never {
   process.exit(2);
 }
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit("usage: node test-group-downgrade-check.ts [--root <repo-root>] [--baseline <sha>] [--json] [--selftest]");
@@ -331,7 +328,7 @@ export function main(argv: string[]): number {
   const asJson = args.includes("--json");
   const positional = args.filter((a) => !a.startsWith("--"));
   const root = path.resolve(positional[0] ?? process.cwd());
-  const baseline = getArgValue(args, "--baseline") ?? DEFAULT_BASELINE;
+  const baseline = flagValue(args, "--baseline") ?? DEFAULT_BASELINE;
 
   if (!fs.existsSync(path.join(root, "scripts", "test.sh"))) {
     console.error(`ERROR: ${path.join(root, "scripts", "test.sh")} not found — is <repo-root> correct?`);

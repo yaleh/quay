@@ -30,7 +30,10 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import {
   classifyPath,
   canonicalBuckets,
@@ -386,16 +389,11 @@ Output modes:
   --write-effective  write .quay/suite-bucket-effective.jsonl (the single-truth-source artifact the
                      page reads) and exit — the standalone bootstrap for the dispatch-side write`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
-  const rootArg = getArgValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const root = path.resolve(rootArg ?? repoRoot());
-  const taskId = getArgValue(args, "--task");
+  const taskId = flagValue(args, "--task");
   const asJson = args.includes("--json");
   const pathsOnly = args.includes("--paths-only");
   const summary = args.includes("--summary");

@@ -38,7 +38,10 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { helpExit, isDirectEntry, createSelftest } from "./gate-script-base.ts";
+// flag (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, createSelftest, flagValue } from "./gate-script-base.ts";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { isCovered, loadRegistry, parseRegistry } from "./drivable-workspace-check.ts";
 import type { Registry } from "./drivable-workspace-check.ts";
@@ -303,10 +306,8 @@ async function main(argv: string[]): Promise<number> {
     return selftest() ? 0 : 1;
   }
 
-  const flag = (name: string): string | undefined => {
-    const i = args.indexOf(name);
-    return i >= 0 ? args[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const flag = (name: string): string | undefined => flagValue(args, name);
 
   // --check: the combined contract gate (the invocation the tick docs use).
   if (args.includes("--check")) {

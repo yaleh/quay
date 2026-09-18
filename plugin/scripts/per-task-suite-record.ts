@@ -70,7 +70,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 export const REQUIRED_FIELDS = [
   "taskId",
@@ -342,11 +345,6 @@ export function buildRecord(o) {
   return { record };
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `per-task-suite-record.ts — AC72 判据2 writer: append ONE third-party-readable record for a
   per-task FULL-suite run to the SHARED checkout's .quay/per-task-suite-records.jsonl
   (taskId / runId / state / laneCount / durationMs / failed-files / 起止时刻).
@@ -410,9 +408,9 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const recordFileOverride = getArgValue(args, "--record-file");
-  const stateFile = getArgValue(args, "--state-file");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const recordFileOverride = flagValue(args, "--record-file");
+  const stateFile = flagValue(args, "--state-file");
   const asJson = args.includes("--json");
 
   const fail = (msg) => {
@@ -433,24 +431,24 @@ export function main(argv) {
   }
 
   const built = buildRecord({
-    taskId: getArgValue(args, "--task-id"),
-    runId: getArgValue(args, "--run-id"),
-    state: getArgValue(args, "--state"),
-    laneCount: getArgValue(args, "--lane-count"),
-    durationMs: getArgValue(args, "--duration-ms"),
-    failedFiles: getArgValue(args, "--failed-files"),
-    startedAt: getArgValue(args, "--started-at"),
-    finishedAt: getArgValue(args, "--finished-at"),
-    docChecked: getArgValue(args, "--doc-checked"),
-    docCheckExit: getArgValue(args, "--doc-check-exit"),
-    fullSuiteRan: getArgValue(args, "--full-suite-ran"),
-    skipReason: getArgValue(args, "--skip-reason"),
-    cpuTimeS: getArgValue(args, "--cpu-time-s"),
-    cpuSource: getArgValue(args, "--cpu-source"),
-    cpuUserS: getArgValue(args, "--cpu-user-s"),
-    cpuSysS: getArgValue(args, "--cpu-sys-s"),
-    load: getArgValue(args, "--load"),
-    phases: getArgValue(args, "--phases"),
+    taskId: flagValue(args, "--task-id"),
+    runId: flagValue(args, "--run-id"),
+    state: flagValue(args, "--state"),
+    laneCount: flagValue(args, "--lane-count"),
+    durationMs: flagValue(args, "--duration-ms"),
+    failedFiles: flagValue(args, "--failed-files"),
+    startedAt: flagValue(args, "--started-at"),
+    finishedAt: flagValue(args, "--finished-at"),
+    docChecked: flagValue(args, "--doc-checked"),
+    docCheckExit: flagValue(args, "--doc-check-exit"),
+    fullSuiteRan: flagValue(args, "--full-suite-ran"),
+    skipReason: flagValue(args, "--skip-reason"),
+    cpuTimeS: flagValue(args, "--cpu-time-s"),
+    cpuSource: flagValue(args, "--cpu-source"),
+    cpuUserS: flagValue(args, "--cpu-user-s"),
+    cpuSysS: flagValue(args, "--cpu-sys-s"),
+    load: flagValue(args, "--load"),
+    phases: flagValue(args, "--phases"),
     stateFile: stateFileValues,
   });
   if (built.error) return fail(built.error);

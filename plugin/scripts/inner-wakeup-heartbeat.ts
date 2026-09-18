@@ -45,7 +45,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // Single source of truth for the minimal field contract + the AC53 dispatch-state contract: the
 // checker defines them, the writer enforces both.
 import {
@@ -246,10 +249,10 @@ tick must NOT sleep while dispatchable work waits; nothing written) · 2 usage e
 export function main(argv) {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) { usage(); return 2; }
-  const flagVal = (name, def) => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : def;
-  };
+  /** Arity-2 adapter over the shared `flagValue`: this closure captures the local `args` slice and
+   *  adds a per-call-site default (`??`, which is exact — the original returned `args[i + 1]`
+   *  verbatim whenever the flag was present, including the empty string). */
+  const flagVal = (name, def) => flagValue(args, name) ?? def;
   const root = flagVal("--root", ".");
   const jsonOut = args.includes("--json");
 

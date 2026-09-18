@@ -37,6 +37,10 @@ import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
 import { walkFiles } from "./fs-walk.ts";
+// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 // ── 别名索引 ───────────────────────────────────────────────────────────────────────────────────
 
@@ -363,11 +367,6 @@ function usage(): never {
   process.exit(0);
 }
 
-function argValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 function printHuman(r: Report): void {
   console.log("deletion-closure-check — P1 删除闭包检测器 (docs/proposals/archguard-generation-era-primitives.md §3)");
   console.log(`component(s): ${r.components.join(", ")}`);
@@ -405,7 +404,7 @@ export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) usage();
   const asJson = args.includes("--json");
-  const rootArg = argValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const components = args.filter((x) => !x.startsWith("--") && x !== rootArg);
   if (components.length < 1) {
     console.error("ERROR: missing <component> argument");

@@ -50,7 +50,10 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 // finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
 // exported it.
 import { firstArgRegion } from "./source-text-lib.ts";
-import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated, flagValue } from "./gate-script-base.ts";
 
 // ── ALLOWLIST (the ratchet baseline) ───────────────────────────────────────────────────────────────
 // file (repo-relative) → { reason, expected }. One entry per line so shrinking it later (as the
@@ -284,7 +287,8 @@ function resolveRoot(rootArg: string | undefined): string {
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  const flagVal = (name: string) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : undefined; };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const flagVal = (name: string): string | undefined => flagValue(args, name);
   const asJson = args.includes("--json");
   const root = resolveRoot(flagVal("--root"));
   const { surface, hits, newHits, allowlistedFiles } = scan(root);

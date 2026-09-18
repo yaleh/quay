@@ -50,7 +50,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -317,11 +320,6 @@ export function suiteRunInterval(root, suiteStateFile) {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `fan-in-ff-protocol-check.ts — AC62 protocol checker (判据2 能取假 / 判据3 失败路径)
   non-ff fan-in merge on develop ⇒ red; suite call inside the locked section ⇒ red;
   malformed ff-retry record ⇒ red (tasks/gap-ac62-fan-in-ff-merge-lock-protocol)
@@ -358,14 +356,14 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const develop = getArgValue(args, "--develop") ?? "develop";
-  const baseline = getArgValue(args, "--baseline");
-  const lockEventsFile = path.resolve(getArgValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
-  const fanInLockEventsFile = path.resolve(getArgValue(args, "--fan-in-lock-events") ?? path.join(root, ".quay", "fan-in-lock-events.jsonl"));
-  const suiteStateFile = path.resolve(getArgValue(args, "--suite-state") ?? path.join(root, ".quay", "full-suite-state.json"));
-  const retryRecordFile = path.resolve(getArgValue(args, "--retry-record") ?? path.join(root, ".quay", "fan-in-retries.jsonl"));
-  const rawMaxHold = getArgValue(args, "--max-hold-seconds");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const develop = flagValue(args, "--develop") ?? "develop";
+  const baseline = flagValue(args, "--baseline");
+  const lockEventsFile = path.resolve(flagValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
+  const fanInLockEventsFile = path.resolve(flagValue(args, "--fan-in-lock-events") ?? path.join(root, ".quay", "fan-in-lock-events.jsonl"));
+  const suiteStateFile = path.resolve(flagValue(args, "--suite-state") ?? path.join(root, ".quay", "full-suite-state.json"));
+  const retryRecordFile = path.resolve(flagValue(args, "--retry-record") ?? path.join(root, ".quay", "fan-in-retries.jsonl"));
+  const rawMaxHold = flagValue(args, "--max-hold-seconds");
   const maxHoldSeconds = rawMaxHold != null ? Number(rawMaxHold) : 60;
   if (rawMaxHold != null && (!Number.isFinite(maxHoldSeconds) || maxHoldSeconds < 0)) {
     process.stderr.write(`fan-in-ff-protocol-check: --max-hold-seconds must be a non-negative number (got '${rawMaxHold}')\n`);

@@ -39,6 +39,10 @@ import { fileURLToPath } from "node:url";
 // copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside the finding's own pair). Not
 // re-exported: this module never exported it.
 import { stripComments } from "./source-text-lib.ts";
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -968,11 +972,6 @@ export function recomputeDeadSet(
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
 function usage(): string {
   return `registry-bare-filename-scan.ts — AC156 裸文件名引用扫描 + 死集重算
 usage:
@@ -1008,7 +1007,7 @@ export function main(argv: string[]): number {
     process.stdout.write(usage());
     return 0;
   }
-  const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
+  const root = path.resolve(flagValue(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");
   const mode = argv.includes("--check") ? "check" : argv.includes("--dead-set") ? "dead-set" : "scan";
 
@@ -1024,10 +1023,10 @@ export function main(argv: string[]): number {
     const bareRefs = scan.refs;
     const extraRefs = scan.extraRefs;
     const now = new Date();
-    const until = parseArg(argv, "--until") ?? now.toISOString();
-    const since = parseArg(argv, "--since") ?? new Date(now.getTime() - 72 * 3600000).toISOString();
+    const until = flagValue(argv, "--until") ?? now.toISOString();
+    const since = flagValue(argv, "--since") ?? new Date(now.getTime() - 72 * 3600000).toISOString();
     const sessionsDir = path.resolve(
-      parseArg(argv, "--sessions-dir") ?? path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay"),
+      flagValue(argv, "--sessions-dir") ?? path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay"),
     );
     const result = recomputeDeadSet(root, sessionsDir, since, until, bareRefs, extraRefs);
     if (!json) {
@@ -1038,7 +1037,7 @@ export function main(argv: string[]): number {
         `window ${result.window.since} → ${result.window.until} (${result.window.hours}h); universe ${result.universe}\n`,
       );
     }
-    const writePath = path.resolve(parseArg(argv, "--write") ?? path.join(root, DEAD_SET_RESULT_REL));
+    const writePath = path.resolve(flagValue(argv, "--write") ?? path.join(root, DEAD_SET_RESULT_REL));
     fs.mkdirSync(path.dirname(writePath), { recursive: true });
     fs.writeFileSync(writePath, `${JSON.stringify(result, null, 2)}\n`);
     process.stdout.write(`wrote ${path.relative(root, writePath)}\n`);

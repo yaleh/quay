@@ -47,7 +47,10 @@ import { repoRoot } from "./repo-root.ts";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+// get (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 
 // ── Repo-root 检测（与 select-tests-for-touches.ts 同形态：.quay/config.yml 优先，git 兜底）──
 
@@ -266,7 +269,8 @@ Options:
 
 export function main(argv = process.argv) {
   const args = argv.slice(2);
-  const get = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const get = (name: string): string | undefined => flagValue(args, name);
   const has = (name) => args.includes(name);
   const session = get("--session");
   const since = get("--since");

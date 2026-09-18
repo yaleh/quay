@@ -39,6 +39,10 @@ import { spawnSync } from "node:child_process";
 // `shell-scan-surface-family`). Its extension set went with it, as fs-walk.ts#EXEC_EXTENSIONS
 // (.md is deliberately absent: a doc mention is not a call surface, 硬规则 2).
 import { listExecutableFiles } from "./fs-walk.ts";
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
@@ -331,11 +335,6 @@ export function runCheck(root: string, opts: { sinceEpoch?: number | null; lockE
   return { ok: !red, notEvaluated, dualCopies: dual, lockEvents: lock, issues };
 }
 
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
 export function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(
@@ -344,14 +343,14 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/fan-in-workf
     );
     return 0;
   }
-  const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
-  const sinceEpochRaw = parseArg(argv, "--since-epoch");
+  const root = path.resolve(flagValue(argv, "--root") ?? DEFAULT_ROOT);
+  const sinceEpochRaw = flagValue(argv, "--since-epoch");
   const sinceEpoch = sinceEpochRaw === undefined ? null : Number(sinceEpochRaw);
   if (sinceEpoch !== null && !Number.isFinite(sinceEpoch)) {
     process.stderr.write("fan-in-workflow-retirement-check: --since-epoch must be a number\n");
     return 2;
   }
-  const lockEventsRel = parseArg(argv, "--lock-events");
+  const lockEventsRel = flagValue(argv, "--lock-events");
   const json = argv.includes("--json");
 
   const res = runCheck(root, { sinceEpoch, lockEventsRel });

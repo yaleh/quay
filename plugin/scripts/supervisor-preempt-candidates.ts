@@ -40,7 +40,10 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import {
   readAllEvents,
   aggregate,
@@ -273,11 +276,6 @@ export async function performPreempt(
   };
 }
 
-function getArgValue(args, name) {
-  const i = args.indexOf(name);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 /**
  * CLI main.
  * @param {string[]} argv
@@ -285,7 +283,7 @@ function getArgValue(args, name) {
  */
 export async function main(argv) {
   const args = argv.slice(2);
-  const root = getArgValue(args, "--root") ?? repoRoot();
+  const root = flagValue(args, "--root") ?? repoRoot();
   const dryRun = args.includes("--dry-run");
 
   if (args.includes("--list") || args.includes("--list-preemptible") || args.includes("list-preemptible")) {
@@ -298,14 +296,14 @@ export async function main(argv) {
   }
 
   if (args.includes("--preempt") || args.includes("preempt-task")) {
-    const taskId = getArgValue(args, "--taskId") ?? getArgValue(args, "--task") ?? args[args.indexOf("--preempt") + 1];
+    const taskId = flagValue(args, "--taskId") ?? flagValue(args, "--task") ?? args[args.indexOf("--preempt") + 1];
     if (!taskId) {
       console.error("supervisor-preempt-candidates: --preempt requires --taskId <id>");
       return 2;
     }
-    const graceArg = getArgValue(args, "--grace-ms");
+    const graceArg = flagValue(args, "--grace-ms");
     const graceMs = graceArg !== undefined && Number.isFinite(Number(graceArg)) ? Number(graceArg) : 150;
-    const ledgerPath = getArgValue(args, "--ledger") ?? null;
+    const ledgerPath = flagValue(args, "--ledger") ?? null;
     const res = await performPreempt(root, taskId, { dryRun, graceMs, ledgerPath });
     if (!res.ok) {
       console.log(`preempt-task: ${taskId} NOT preemptible (${res.reason})`);
