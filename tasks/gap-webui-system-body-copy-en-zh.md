@@ -69,3 +69,4 @@ extra:
 - packages/quay/test/serve-system-body-i18n.test.mjs (new)
 - packages/quay/test/serve-system.test.mjs
 - packages/quay/test/serve-ac95-views.test.mjs
+- packages/quay/test/gap-webui-meter-limit-param-doubles-as-display-string.test.mjs
