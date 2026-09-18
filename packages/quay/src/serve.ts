@@ -22,6 +22,11 @@ import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation
 // path onto a background snapshot tick, started here beside the develop-ref refresh tick (the same
 // "cold build at startup, unref'd interval, never in a request" shape).
 import { startDashboardSnapshotRefresh } from "./serve-dashboard.ts";
+// gap-ac292-criterion-cold-miss-30s-ttl-always-expired: the SAME fix, applied to /board — whose
+// readers (a full-scan drift-checker subprocess + a develop-ref git scan + a provider round-trip)
+// cost 9.17–9.78 s cold against AC-292's fixed `curl --max-time 10`, i.e. they straddle the budget
+// and flip the criterion red/green per run. Started here, beside the other two ticks.
+import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §7 stage A2): the MCP control plane is
 // hosted by THIS process. `serveControlPlane` is imported from plugin/scripts/driver-shared.ts
 // rather than reimplemented here — the control plane has exactly ONE implementation (AC150-3), and
@@ -786,6 +791,12 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // takes the legacy in-request path until the first snapshot lands).
   const dashboardSnapshot = startDashboardSnapshotRefresh(cfg.workspaceRoot, client);
 
+  // gap-ac292-criterion-cold-miss-30s-ttl-always-expired: /board's four sources are snapshotted the
+  // same way, for the same measured reason (see the block in serve-board.ts). Unref'd and never
+  // awaited: the cold build must not delay `listen`, and a request arriving before the first
+  // snapshot lands takes the legacy in-request path (bounded to that one window).
+  const boardSnapshot = startBoardSnapshotRefresh(cfg.workspaceRoot, client);
+
   // Expose the control-plane handle the same way QN-031 exposed `client`: a caller (notably a test)
   // can retire BOTH hosted services deterministically instead of orphaning the control socket.
   const owned = server as Server & {
@@ -795,8 +806,11 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     // The dashboard snapshot tick's handle — `rebuildNow()` lets a caller drive a rebuild on demand
     // (what the AC3/AC4 readings need) and `stop()` retires the tick, so a test never leaks one.
     dashboardSnapshot: { stop: () => void; rebuildNow: () => Promise<void> };
+    // The /board snapshot tick's handle — same contract as `dashboardSnapshot` (AC-292).
+    boardSnapshot: { stop: () => void; rebuildNow: () => Promise<void> };
   };
   owned.dashboardSnapshot = dashboardSnapshot;
+  owned.boardSnapshot = boardSnapshot;
   owned.control = control;
   owned.hostedServices = {
     isUp: (name: "web" | "control") => (name === "web" ? webServer !== null : controlHandle !== null),

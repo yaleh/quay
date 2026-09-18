@@ -1408,6 +1408,16 @@ export function getDevelopRefBoundedWalkCount(): number { return developRefBound
 /** Clear the batched develop-ref caches (test seam — a fixture that rewrites the develop ref
  *  mid-test must not read a cached prior read). Clears status + title + commit-time together: the
  *  three develop-ref read faces share one source of truth and one TTL clock. */
+/** Test seam (gap-ac292 AC3): how many times the develop-ref status-map read actually BUILT — i.e.
+ *  a cache miss that goes on to `git ls-tree` + `cat-file --batch` over EVERY task file at the ref.
+ *  A COUNT, not a wall-clock proxy: `/board`'s request path reads the snapshot, so a request must
+ *  trigger ZERO builds no matter how large the store is; the build belongs to the background tick.
+ *  (硬规则 4b: a loaded host makes the scan SLOWER, not more frequent — so frequency is the only
+ *  reading that isolates the property under test.) */
+let taskStatusRefBuildCount = 0;
+export function getTaskStatusRefBuildCount(): number { return taskStatusRefBuildCount; }
+export function resetTaskStatusRefBuildCount(): void { taskStatusRefBuildCount = 0; }
+
 export function clearTaskStatusRefCache(): void {
   taskStatusRefCache.clear();
   taskTitleRefCache.clear();
@@ -1453,6 +1463,7 @@ export function readTaskStatusMapAtRef(
   const key = `${root}\n${ref}`;
   const hit = taskStatusRefCache.get(key);
   if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  taskStatusRefBuildCount++;
   const map = new Map<string, TaskStatus>();
   try {
     const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskFilesAtRef(root, ref));
