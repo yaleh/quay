@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-arg-parsing-helper-family
 title: "semantic-dedup-scan: ~60 copies of the same indexOf+next-arg idiom
   across 50+ checker/driver scripts under 9 different names; gate-script-base.ts
   is imported by 246 files yet expor"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
