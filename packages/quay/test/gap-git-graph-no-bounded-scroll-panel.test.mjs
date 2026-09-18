@@ -23,6 +23,7 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,8 +79,13 @@ function makeSel() {
  * AC4 negative control) in a fresh vm context. Records every IntersectionObserver construction's
  * (cb, opts) so the tests can assert the observed root; the sentinel records click listeners so AC5
  * can drive the manual path after the fuse trips.
- */
-function runClient({ pages, seedCommits }, script = gitGraphClientScript()) {
+ *
+ * ⚠️ The default carries EXPLICIT zh labels (gap-webui-git-history-body-copy-en-zh). The script no
+ * longer has a Chinese literal baked in — the two hint words are injected constants, because the
+ * browser has no dictionary (serve-i18n.ts ROW 10b) — so a bare `gitGraphClientScript()` renders
+ * NEUTRAL placeholders, and the zh assertions below would be asserting against a placeholder. Passing
+ * the zh roster is what keeps them meaning "the Chinese page renders Chinese here". */
+function runClient({ pages, seedCommits }, script = gitGraphClientScript(gitHistoryClientLabelsFor("zh"))) {
   const layout = { status: "ok", reason: null, rows: seedCommits, commitCount: seedCommits.length };
   const sentinel = {
     textContent: "",
@@ -216,7 +222,7 @@ test("AC5: past the fuse threshold, auto-load stops and the sentinel becomes a c
   ioCallbacks[0]([{ isIntersecting: true }]); // one auto trigger
   await flush();
   assert.equal(fetchCalls.length, pagesNeeded, `auto fetch stops at ${pagesNeeded} pages (the fuse trips, no more auto)`);
-  assert.equal(sentinel.textContent, "点击加载更早提交", "the sentinel degraded to a manual button");
+  assert.equal(sentinel.textContent, "点击加载更早提交", "the sentinel degraded to a manual button (zh roster — the label is injected, not a script literal)");
   assert.ok(sentinel.listeners.click && sentinel.listeners.click.length >= 1, "the sentinel is clickable");
 
   sentinel.listeners.click[0]();

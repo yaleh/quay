@@ -202,10 +202,17 @@ test("AC5: the default (no ?view=) page is byte-identical to ?view=git; task vie
   assert.equal(def, git, "default and ?view=git render byte-identical HTML (so #git-graph-data is byte-identical)");
   // The default IS the git view — the heuristic is an opt-in, never the default truth.
   assert.ok(def.includes("git-graph-data"), "the default page embeds the git-view data script");
-  assert.ok(!def.includes("任务分组（按 task id 聚合）"), "the default page does NOT render the task grouping");
+  // ⚠️ These two headings are pinned in BOTH languages (gap-webui-git-history-body-copy-en-zh): the
+  // page's body copy now comes from serve-i18n.ts ROW 10, so a `renderGitHistoryPage(h)` call renders
+  // the en column and the zh string below would be unreachable — i.e. the negative assertion would be
+  // TRUE BY CONSTRUCTION and the positive one unsatisfiable. Each arm names the language it reads.
+  assert.ok(!def.includes("Task grouping (aggregated by task id)"), "the default (en) page does NOT render the task grouping");
+  assert.ok(!def.includes("任务分组（按 task id 聚合）"), "…and the zh heading is absent from the en page too");
   const task = renderGitHistoryPage(h, "task");
   assert.notEqual(task, git, "the task view renders a distinct page");
-  assert.ok(task.includes("任务分组（按 task id 聚合）"), "the task view renders the task grouping");
+  assert.ok(task.includes("Task grouping (aggregated by task id)"), "the en task view renders the task grouping");
+  assert.ok(renderGitHistoryPage(h, "task", [], null, "zh").includes("任务分组（按 task id 聚合）"),
+    "the zh task view renders the pre-existing Chinese grouping heading (the extracted literal did not move)");
   assert.ok(!task.includes("git-graph-data"), "the task view does NOT embed the git graph data script");
   assert.equal(gitHistoryViewOf(undefined), "git", "no ?view= param defaults to git");
   assert.equal(gitHistoryViewOf(new URL("http://x/?view=git")), "git");

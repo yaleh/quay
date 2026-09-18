@@ -37,9 +37,9 @@ const DAY = 86400;
 // loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
 // port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
-function get(port, urlPath) {
+function get(port, urlPath, headers = {}) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -201,10 +201,18 @@ test("?view=task routing: /git-history serves the task view; default = ?view=git
     assert.equal(def.body, gitView.body, "default /git-history is byte-identical to ?view=git");
     assert.equal(def.body, bogus.body, "an unknown ?view= value fails closed to the git default");
     assert.ok(def.body.includes("git-graph-data"), "the default page embeds the git-view data script");
-    assert.ok(!def.body.includes("任务分组（按 task id 聚合）"), "the default page does NOT render the task grouping");
-    assert.ok(taskView.body.includes("任务分组（按 task id 聚合）"), "?view=task renders the task grouping");
-    assert.ok(taskView.body.includes("未归属"), "?view=task shows the unattributed group explicitly");
+    // ⚠️ These read the page's BODY COPY, which is localized (gap-webui-git-history-body-copy-en-zh):
+    // the bare `get()` above sends no cookie, so it renders the en column and a zh-literal assertion
+    // against it is true by construction. Each arm below names its language — the zh arm is the
+    // pre-existing literal (unchanged), the en arm is the new one.
+    const taskViewZh = await get(port, "/git-history?view=task", { Cookie: "lang=zh" });
+    assert.ok(!def.body.includes("Task grouping (aggregated by task id)"), "the default (en) page does NOT render the task grouping");
+    assert.ok(!def.body.includes("任务分组（按 task id 聚合）"), "…and the zh heading is absent from the en page too");
+    assert.ok(taskView.body.includes("Task grouping (aggregated by task id)"), "?view=task renders the task grouping");
+    assert.ok(taskView.body.includes("Unattributed (no task id)"), "?view=task shows the unattributed group explicitly");
     assert.ok(taskView.body.includes("gap-1"), "the task group names the task id");
+    assert.ok(taskViewZh.body.includes("任务分组（按 task id 聚合）"), "the zh ?view=task keeps the pre-existing Chinese heading");
+    assert.ok(taskViewZh.body.includes("未归属"), "the zh ?view=task keeps the pre-existing Chinese unattributed label");
   } finally {
     if (server) {
       server.close();
@@ -231,7 +239,12 @@ test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (
     const port = server.address().port;
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "non-git workspace still returns 200 (never 500)");
-    assert.ok(r.body.includes("无数据"), "page renders 「无数据」 for a non-git workspace");
+    // The status word is body copy and is now localized; both columns are asserted (the zh one is the
+    // pre-existing literal, the en one is the new spelling).
+    assert.ok(r.body.includes("No data"), "the en page renders 「No data」 for a non-git workspace");
+    assert.ok(!r.body.includes("无数据"), "…and no Chinese status word leaks into the en page");
+    const rZh = await get(port, "/git-history", { Cookie: "lang=zh" });
+    assert.ok(rZh.body.includes("无数据"), "the zh page still renders the pre-existing 「无数据」");
     assert.ok(!r.body.includes('id="git-graph"'), "no graph mount when there is no data to graph");
     assert.ok(!r.body.includes("d3js.org"), "no D3 library is inlined when there is no graph");
   } finally {

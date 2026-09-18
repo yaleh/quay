@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitGraphClientScript } from "../src/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,7 +61,11 @@ function makeSel() {
   return sel;
 }
 
-/** Execute gitGraphClientScript() in a fresh vm context; returns the state the tests assert on. */
+/** Execute gitGraphClientScript() in a fresh vm context; returns the state the tests assert on.
+ *
+ *  ⚠️ EXPLICIT zh labels (gap-webui-git-history-body-copy-en-zh): the two hint words are INJECTED
+ *  constants (serve-i18n.ts ROW 10b — the browser has no dictionary), so a bare `gitGraphClientScript()`
+ *  renders neutral placeholders and the AC4 assertion below would be reading a placeholder. */
 function runClient({ pages, seedCommits }) {
   const layout = { status: "ok", reason: null, rows: seedCommits, commitCount: seedCommits.length };
   const sentinel = {
@@ -94,7 +99,7 @@ function runClient({ pages, seedCommits }) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(p) });
     },
   };
-  new vm.Script(gitGraphClientScript()).runInNewContext(sandbox);
+  new vm.Script(gitGraphClientScript(gitHistoryClientLabelsFor("zh"))).runInNewContext(sandbox);
   return { sentinel, fetchCalls, ioCallbacks };
 }
 

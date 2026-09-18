@@ -17,6 +17,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
 
 /** A minimal row (the shape the client renderer reads: hash/t/subject/parents/col/decorations/edges). */
 function commit(hash, t, subject) {
@@ -72,7 +73,7 @@ function makeSel() {
  * listener (for AC2's hint-toggle driving). `omitHint` drops `#git-graph-more-hint` from the DOM to
  * simulate AC5's stripped-negative-control.
  */
-function runClient({ pages, seedCommits, omitHint = false }, script = gitGraphClientScript()) {
+function runClient({ pages, seedCommits, omitHint = false }, script = gitGraphClientScript(gitHistoryClientLabelsFor("zh"))) {
   const layout = { status: "ok", reason: null, rows: seedCommits, commitCount: seedCommits.length };
   const sentinel = {
     textContent: "",
@@ -259,7 +260,7 @@ test("AC3-5: the auto-load fuse still stops auto-fetching and degrades the senti
   ioCallbacks[0]([{ isIntersecting: true }]); // one auto trigger
   await flush();
   assert.equal(fetchCalls.length, pagesNeeded, `auto fetch stops at ${pagesNeeded} pages (the fuse trips, no more auto)`);
-  assert.equal(sentinel.textContent, "点击加载更早提交", "the sentinel degraded to a manual button");
+  assert.equal(sentinel.textContent, "点击加载更早提交", "the sentinel degraded to a manual button (zh roster — the label is injected, not a script literal)");
   assert.ok(sentinel.listeners.click && sentinel.listeners.click.length >= 1, "the sentinel is clickable");
 
   sentinel.listeners.click[0]();

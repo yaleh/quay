@@ -44,6 +44,15 @@
 //                  baseline, and the criterion would then be measuring a moving target. Pinned as
 //                  literals, never derived from the dictionary (硬规则 4 — a structural identity is
 //                  not a measurement).
+//
+//   ⚠️ MIGRATION (gap-webui-git-history-body-copy-en-zh): the CHROME this file pins did not move —
+//                  html lang, both nav current items, the mobile page label, the two `<title>`s and
+//                  the en page NAME in the `<h1>` are all still asserted against the same literals.
+//                  What changed is the `<h1>` SUBTITLE, which AC-297 had deliberately left Chinese on
+//                  the en page ("already Chinese in the en baseline"); the follow-up task's AC1
+//                  red-baseline lists that line among the 12 en-visible Chinese lines, so it is now
+//                  localized and the suffix is pinned per language. The zh arm is byte-identical to
+//                  the pre-extraction literal — that is the regression guard, and it is unchanged.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -78,10 +87,19 @@ const H1_TOKEN_ZH = "Git 历史";
  *  the same reason: the current nav item's text comes from the nav dictionary, and deriving the
  *  expectation from it would assert nothing. */
 const NAV_CURRENT_ZH = "Git 历史";
-/** The `<h1>` subtitle suffixes — untouched by this task (already Chinese in the en baseline); they
- *  are pinned only so the `<h1>` assertion is an equality against the FULL rendered heading. */
-const H1_SUFFIX_GIT = " — 提交纵向时间轴";
-const H1_SUFFIX_TASK = " — 任务分组时间轴";
+/** The `<h1>` subtitle suffixes, per language.
+ *
+ *  ⚠️ MIGRATED by gap-webui-git-history-body-copy-en-zh. AC-297 left these as ONE Chinese pair
+ *  because "the subtitle was already Chinese in the en baseline" — i.e. the en `<h1>` read
+ *  `Git History — 提交纵向时间轴`. That WAS the body-copy defect the follow-up task exists to remove
+ *  (its AC1 red baseline lists the en `<h1>` line among the 12), so the suffix now comes from
+ *  serve-i18n.ts ROW 10 and the two columns are asserted SEPARATELY. The zh pair is byte-identical
+ *  to the pre-extraction literals — that is the arm this file has always guarded, and it is
+ *  unchanged; only the en pair is new. */
+const H1_SUFFIX_GIT = " — vertical commit timeline";
+const H1_SUFFIX_TASK = " — task grouping timeline";
+const H1_SUFFIX_GIT_ZH = " — 提交纵向时间轴";
+const H1_SUFFIX_TASK_ZH = " — 任务分组时间轴";
 /** The three ASCII spellings of this page's name that a "translated" value must NOT still carry.
  *  The criterion's own two greps are case-SENSITIVE (`Git History` / `Git history`); the
  *  all-lowercase mobile token is the third the page emits. */
@@ -219,7 +237,7 @@ after(async () => {
 });
 
 /** All four arms of AC-297's AC1/AC1b, asserted SEPARATELY against one (view, lang) pair. */
-async function assertViewSwitches(viewQuery, titleToken, titleTokenZh, h1Suffix) {
+async function assertViewSwitches(viewQuery, titleToken, titleTokenZh, h1SuffixEn, h1SuffixZh) {
   const url = `/git-history${viewQuery}`;
   const en = await request(port, url);
   const zh = await request(port, url, { Cookie: "lang=zh" });
@@ -271,21 +289,28 @@ async function assertViewSwitches(viewQuery, titleToken, titleTokenZh, h1Suffix)
 
   // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it). It is
   //     a SECOND call site of the same page name, so wiring only the <title> would leave it English.
-  assert.equal(h1Of(en.body), `${H1_TOKEN}${h1Suffix}`, `${url}: the en <h1> is the baseline`);
-  assert.equal(h1Of(zh.body), `${H1_TOKEN_ZH}${h1Suffix}`, `${url}: the zh <h1> is translated`);
+  // ⚠️ The suffix is per-language since gap-webui-git-history-body-copy-en-zh: the en `<h1>` used to
+  // carry the CHINESE suffix (AC-297 read it as "already Chinese in the en baseline", which is exactly
+  // the body-copy defect the follow-up task removed). Both arms are asserted — the zh pair is the one
+  // that must not have moved, the en pair is the one that had to.
+  assert.equal(h1Of(en.body), `${H1_TOKEN}${h1SuffixEn}`, `${url}: the en <h1>`);
+  assert.equal(h1Of(zh.body), `${H1_TOKEN_ZH}${h1SuffixZh}`, `${url}: the zh <h1> is translated`);
+  assert.notEqual(h1Of(zh.body), h1Of(en.body), `${url}: the <h1> is not byte-identical across the two languages`);
   assert.ok(!h1Of(zh.body).includes("Git History"), `${url}: the zh <h1> carries no ASCII "Git History"`);
+  // The en side of the same rule (the follow-up task's AC2): the en <h1> carries no CJK at all.
+  assert.ok(!/[一-鿿]/.test(h1Of(en.body)), `${url}: the en <h1> carries no CJK (got ${JSON.stringify(h1Of(en.body))})`);
 }
 
 test("AC1: /git-history (DEFAULT view) under Cookie lang=zh switches html lang, both nav current items, its OWN <title> and <h1>", async () => {
   // The criterion requests the bare route, so THIS is the branch it reads.
-  await assertViewSwitches("", TITLE_TOKEN_GIT, TITLE_TOKEN_GIT_ZH, H1_SUFFIX_GIT);
+  await assertViewSwitches("", TITLE_TOKEN_GIT, TITLE_TOKEN_GIT_ZH, H1_SUFFIX_GIT, H1_SUFFIX_GIT_ZH);
 });
 
 test("AC1b: /git-history?view=task under Cookie lang=zh switches the same four points (the SECOND branch)", async () => {
   // An independent control against a half-fix: wiring only the default branch leaves THIS branch
   // English, and wiring only this one leaves the CRITERION red. Neither reading substitutes for the
   // other — that is why the two are separate tests.
-  await assertViewSwitches("?view=task", TITLE_TOKEN_TASK, TITLE_TOKEN_TASK_ZH, H1_SUFFIX_TASK);
+  await assertViewSwitches("?view=task", TITLE_TOKEN_TASK, TITLE_TOKEN_TASK_ZH, H1_SUFFIX_TASK, H1_SUFFIX_TASK_ZH);
 });
 
 // ── AC-en-baseline: the default rendering is byte-stable by construction ──────────────────────────
@@ -301,10 +326,12 @@ test("AC-en-baseline: both en renderings are the pre-AC-297 page verbatim", asyn
     `the en default-view <title> still carries its English page token (got ${JSON.stringify(headTitle(enGit.body))})`);
   assert.ok(headTitle(enTask.body).endsWith(` — ${TITLE_TOKEN_TASK}`),
     `the en task-view <title> still carries its English page token (got ${JSON.stringify(headTitle(enTask.body))})`);
+  // The en `<h1>`: its PAGE NAME is the AC-297 baseline verbatim; its SUBTITLE was localized by the
+  // follow-up task, so it is now pinned as the ROW 10 en literal (see the MIGRATION note above).
   assert.ok(enGit.body.includes(`<h1>${H1_TOKEN}${H1_SUFFIX_GIT}</h1>`),
-    "the en default-view <h1> is still the pre-AC-297 literal, byte for byte");
+    "the en default-view <h1> keeps the AC-297 page name and the localized subtitle");
   assert.ok(enTask.body.includes(`<h1>${H1_TOKEN}${H1_SUFFIX_TASK}</h1>`),
-    "the en task-view <h1> is still the pre-AC-297 literal, byte for byte");
+    "the en task-view <h1> keeps the AC-297 page name and the localized subtitle");
 
   const navEn = navRegion(enGit.body);
   assert.equal(currentItem(navEn, "nav-"), H1_TOKEN,
