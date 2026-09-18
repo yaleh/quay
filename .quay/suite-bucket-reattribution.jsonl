@@ -85,7 +85,6 @@
 {"file":"plugin/test/measure-trend-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/mechanism-count.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/mirror-full-suite-state.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
-{"file":"plugin/test/mirror-measure-history.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/no-manager-tick-doc-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/obligation-discharge-agent.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/obligation-ledger-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}

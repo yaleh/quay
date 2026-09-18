@@ -250,12 +250,13 @@ export function readHistoryRounds(historyFile: string): Array<{ round: number; r
  * post-suite hook over the same log never duplicates a round). Best-effort at the call site:
  * a land failure must never fail the suite verdict.
  *
- * SHARED writer (gap-measure-history-detached-suite-mirror-write AC1/AC3): this function is ALSO
- * called by plugin/scripts/mirror-measure-history.ts — the fan-in detached-suite path
- * (`setsid bash scripts/test.sh`, which never goes through full-suite-runner.ts) parses its REAL
- * suite log through landMeasureHistory so the appended round's {round,runAt,file,durationMs,passed,
- * laneCount,logDigest} shape is IDENTICAL to the runner's direct writes — this consumer (and
- * compareLastTwoRounds) reads the mirror-write round without any format difference.
+ * CALLERS: plugin/scripts/full-suite-runner.ts (the suite finalize step — the production path)
+ * and this module's own CLI entry below (`--no-land` opts out). Both land through THIS function,
+ * so every round in the history carries the same {round,runAt,file,durationMs,passed,laneCount,
+ * logDigest} shape — this consumer (and compareLastTwoRounds) reads ONE format, never two.
+ * (Historically a THIRD caller existed — plugin/scripts/mirror-measure-history.ts, the fan-in
+ * detached-suite mirror — retired by gap-mirror-measure-history-retire-dead-writer once both
+ * fan-in paths went through full-suite-runner.ts; see fan-in-execute.js:796-802.)
  */
 export function landMeasureHistory(opts: {
   historyFile?: string;
