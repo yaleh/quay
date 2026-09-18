@@ -148,3 +148,15 @@ extra:
 - session_id：5b4d0e21-22e8-4ef6-a4a6-17b8c49667c6
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-measure-history-retire-dead-writer~wk-prod-anchor~1789706200586-03693d.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-measure-history-retire-dead-writer-wk-prod-anchor.log
+
+## Needs-Human
+
+**执行 2026-09-18T09:35:06.532Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 3 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：80c0efec-e8f4-41b7-8c43-0e37cf01ccb1
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-measure-history-retire-dead-writer~wk-prod-anchor~1789723917464-d2559f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-measure-history-retire-dead-writer-wk-prod-anchor.log

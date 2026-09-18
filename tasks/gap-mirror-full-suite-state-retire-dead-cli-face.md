@@ -4,6 +4,7 @@ title: mirror-full-suite-state.ts 的模块面是活的、CLI
   入口面已死——退入口留模块；并纠正「pre-verified-round-record.ts 同形」这一误判（其 CLI 在
   fan-in-execute.js:496 仍被真调用）
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -258,3 +259,14 @@ direct-to-develop-bypass-check: evaluated=true ok=false (direct-commit-bypasses-
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/select-static-checks-for-touches.ts
 - tasks/gap-mirror-full-suite-state-retire-dead-cli-face.md
+## Needs-Human
+
+**执行 2026-09-18T05:27:01.237Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：285d4b48-05fe-496a-8e8c-4373035722cf
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-full-suite-state-retire-dead-cli-face~wk-prod-anchor~1789708968875-dea557.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-full-suite-state-retire-dead-cli-face-wk-prod-anchor.log
