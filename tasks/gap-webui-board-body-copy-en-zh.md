@@ -2,7 +2,7 @@
 id: gap-webui-board-body-copy-en-zh
 title: /board 正文文案在 lang=en 下仍是硬编码中文（三源列头、默认视图说明、「done 但未落地」等状态词）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
