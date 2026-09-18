@@ -2,7 +2,7 @@
 id: gap-webui-needs-human-body-copy-en-zh
 title: /needs-human 正文文案在 lang=en 下仍是硬编码中文（说明段、待办/升级台账标题、空态）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
