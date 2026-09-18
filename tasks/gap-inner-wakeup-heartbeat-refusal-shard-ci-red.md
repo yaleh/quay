@@ -41,6 +41,15 @@ __PERFILE__ duration_ms=8167 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat
 「最新一条 post-filing develop run 的 test job 是 success」** ⇒ **不修好它，AC-281 结构上无法达成**
 （同 GOAL-022 的退出条件只差 AC-281）。
 
+> ### ✅ 落地后回填（2026-09-18，worker 交付）：上面第 3 条事实**读的是断言标题，不是断言的 `actual:` 字段**
+>
+> 该失败断言**自带 `actual:`**（= 子进程真实 stderr），原文是
+> `SyntaxError: The requested module './gate-script-base.ts' does not provide an export named 'helpExit'`
+> —— **写入方在模块实例化阶段就崩了，根本没跑到结束不变式闸**。`status == 1` 之所以成立，
+> 是因为 **Node 未捕获异常的退出码也是 1**，与写入方「故意拒绝」的退出码**同值**。
+> ⇒ **「拒绝确实发生、走的是另一条拒绝分支」这个结论被证否**（详见 AC1）。本条 Proposal 的
+> 三个事实保留原样，作为「只读断言标题就会误判」的现场记录。
+
 ### ⛔ 机制是假说，不是结论（硬规则 4-推论四）
 
 形态像「同一个 `test()` 换到新文件/新泳道后，受并发或前置条件影响而走了另一条拒绝路径」——
@@ -78,15 +87,85 @@ __PERFILE__ duration_ms=8167 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat
 
 ## AC
 
-- [ ] **AC1（对照先于结论）**：贴出 Plan 第 1 步三条对照的**实际命令与结果**，并据此写出归因；
+- [x] **AC1（对照先于结论）**：贴出 Plan 第 1 步三条对照的**实际命令与结果**，并据此写出归因；
       ⛔ 三条都绿（不可复现）⇒ **如实记为「未能复现」**并附 CI 失败证据，⛔ 不得以改断言收场。
-- [ ] **AC2（修复可被打红）**：修复后 `node --test plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` 绿，
+
+      **三条对照**（本地 16 核 / Node v24.19.0，worktree `quay-worktrees/gap-inner-wakeup-heartbeat-refusal-shard-ci-red`）：
+      - ① 单独跑该分片 `node --test plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` ⇒ `ℹ tests 4 / pass 4 / fail 0`（**绿**）
+      - ② 负控制 `node --test plugin/test/inner-wakeup-heartbeat.test.mjs` ⇒ `ℹ tests 14 / pass 14 / fail 0`（**绿**，符合 Plan 的「必须绿」）
+      - ③ 负载下：(a) 12 路并发跑同一分片（`for i in $(seq 1 12); do node --test … & done; wait`）
+        ⇒ **12/12 rc=0，`does not provide an export named` 命中 0 次**；
+        (b) 真实入口 `bash scripts/test.sh --for-task gap-inner-wakeup-heartbeat-refusal-shard-ci-red --allow-thin`
+        ⇒ **exit 0，`ℹ tests 84 / pass 84 / fail 0`，`violations: 0`**（**绿**；merge develop 前后各跑一次，均绿）
+      ⇒ **三条全绿 ⇒【本地未能复现】**（按本条 ⛔ 条款如实记录）。⛔ **未以改断言收场**（见 AC2/AC3）。
+
+      **CI 侧失败证据（同一分片、同一 runner，跨 run 不一致 ⇒ 非确定性、⛔ 非坏提交）**：
+      - `35294113108`（develop `cf06fcf8c`）：本分片 `__PERFILE__ duration_ms=8167 … passed=false`，且是该 run **唯一**失败文件；
+      - `35294796640`（develop `d0057085c`）：**本分片 `__PERFILE__ duration_ms=10631 … passed=true`** —— 同一分片、同一 CI 环境**绿**；
+      - `35291891619`：同一条 `SyntaxError … does not provide an export named 'helpExit'` 再现；
+      - `git show cf06fcf8c:plugin/scripts/gate-script-base.ts | grep -c 'export function helpExit'` = **1**，
+        且该 sha 的 `wiring-coverage-check.ts:48` 正是 `import { helpExit } from "./gate-script-base.ts";`
+        ⇒ **失败 sha 的提交树自洽** ⇒ 那份不匹配的模块是**运行期状态**，不是坏提交。
+
+      **归因（由 CI 日志里断言自带的 `actual:` 直接量支撑，⛔ 与 Proposal 的假说相反）**：
+      `35294113108` 那条失败断言**自带 `actual:` 字段**（= 子进程真实 stderr），原文：
+      ```
+      file:///_work/quay/quay/plugin/scripts/wiring-coverage-check.ts:48
+      import { helpExit } from "./gate-script-base.ts";
+      SyntaxError: The requested module './gate-script-base.ts' does not provide an export named 'helpExit'
+          at #asyncInstantiate (node:internal/modules/esm/module_job:455:21)
+      Node.js v24.21.0
+      ```
+      ⇒ **写入方在【模块实例化】阶段就崩了，从未跑到结束不变式闸**；`w.status` 为 1 是 **Node 未捕获异常的退出码 1**，
+      与写入方「故意拒绝」的退出码 1 **同值** ⇒ 前两条断言（`status != 0` / `status == 1`）**因此通过**，
+      第三条才在 stderr 文本上失败。
+      ⇒ **Proposal 第 3 条事实的结论（「拒绝确实发生、走了另一条拒绝分支」）被证否：拒绝没有发生。**
+      ⇒ 这正是**硬规则 3b** 的形态：判定的输出词表里没有「没跑起来」这一态 ⇒ 崩溃被报成「拒绝理由缺失」。
+      ⇒ **崩溃的触发源未确立**（该模块为何在那一刻不可用），按硬规则 4-推论四**不写成结论**；
+        **可复现的是这条混淆本身**（AC2 的 shim 对照）。
+      ⇒ **旁证**：紧随其后同一分支的另一 run（`35296466261`）本分片 `passed=true`，而该 run 唯一的红是**另一个文件**
+        `adr016-screen-use-check.test.mjs`（310ms），错误为 `ENOENT … packages/quay/plugin/test/fixtures/mock-ssh.sh`
+        —— 同属「并发文件树变动」这一类，进一步说明该 flake 是**套件级、与本分片无关**的。
+
+- [x] **AC2（修复可被打红）**：修复后 `node --test plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` 绿，
       **且**给出「把修复回退 ⇒ 同一条命令变红」的负控制读数（一条命令可查）。
-- [ ] **AC3（没把守卫拆掉）**：该文件里 AC53 的三条断言（`status != 0` / `status == 1` /
+
+      **修复后**：`ℹ tests 4 / pass 4 / fail 0`（**绿**）。
+      修复 = 该文件新增 `writerStartupFailure()` / `runWriterChecked()`：拒绝断言**只会看到真正跑起来的写入方**；
+      「没跑起来」被**单独取值**（硬规则 3b），瞬时启动失败**重测一次**，两次都失败则**大声失败并报出真因**。
+      **负控制**（确定性、一条命令、⛔ 不触碰任何仓库文件）：PATH shim 在**第一次** writer spawn 上打印
+      CI 那条**逐字相同**的模块加载错误并 exit 1，其后交给真 node：
+      - **回退修复**（`git checkout develop -- plugin/test/inner-wakeup-heartbeat-refusal.test.mjs`）后同一条命令
+        ⇒ **RED**，`AssertionError: the refusal must name 结束不变式违例`，其 `actual:` **正是 CI 那条 SyntaxError**
+        ⇒ **CI 症状被确定性复现**；
+      - **恢复修复**后同一条命令 ⇒ **GREEN 4/4**（shim 确实触发：`.fired` 存在）。
+      - **持久崩溃对照**（shim 让**每一次** writer spawn 都崩）⇒ 仍 **RED 0/4**，四条都是
+        `the writer FAILED TO START on BOTH attempts — it never ran, so this is NOT a refusal`
+        ⇒ 修复吸收的是**瞬时**抖动，**不是**把真缺陷藏起来。
+
+- [x] **AC3（没把守卫拆掉）**：该文件里 AC53 的三条断言（`status != 0` / `status == 1` /
       `stderr` 含 `结束不变式违例`）**逐字仍在**，`grep -c '结束不变式违例'` ≥ 3；
       举证：`git diff develop -- plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` 里那三行未被删改。
-- [ ] **AC4（真实 CI 上翻绿）**：在**任务分支自己的 CI run** 上，贴出该分片的
+      **读数**：`grep -c '结束不变式违例' plugin/test/inner-wakeup-heartbeat-refusal.test.mjs` = **4**（≥3）；
+      `git diff develop -- <该文件>` 的**删除行只有 5 条 `runWriter(` 调用点**（改为 `runWriterChecked(`，
+      `1 file changed, 69 insertions(+), 5 deletions(-)`）；**三条 AC53 断言一行未动**——diff 里出现
+      `status != 0` / `status == 1` 的 `+` 行**全部是新增注释**，无任何断言行被增删改。
+
+- [x] **AC4（真实 CI 上翻绿）**：在**任务分支自己的 CI run** 上，贴出该分片的
       `__PERFILE__ duration_ms=… passed=true` 行原文与 run id。⛔ 本地读数不作数。
+      **run `35296140472`**（任务分支 `task/gap-inner-wakeup-heartbeat-refusal-shard-ci-red`，sha `5917f6b5a`）——
+      **四个 job 全部 `success`**（`test` / `dist-verify-node-floor` / `version-consistency` / `cold-start-e2e`），
+      本分片原文：
+      ```
+      __PERFILE__ duration_ms=10496 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-refusal.test.mjs passed=true end_ms=1789695709278
+      ```
+      **run `35296466261`**（同分支，sha `abd78d3e0`）本分片亦 `passed=true`：
+      ```
+      __PERFILE__ duration_ms=10629 /_work/quay/quay/plugin/test/inner-wakeup-heartbeat-refusal.test.mjs passed=true end_ms=1789695997027
+      ```
+      （该 run 的 `test` job 因**另一个文件** `adr016-screen-use-check.test.mjs` 的 ENOENT 而红——见 AC1 旁证；
+      本分片在两次 run 上**都** `passed=true`。）
+
 - [ ] **AC5（生产面兑现，外层验证）**：落地并触发 develop CI 后，贴出 run id 与该 run `test` job 的
       `conclusion == "success"` ——属外层验证（待外部）
 
