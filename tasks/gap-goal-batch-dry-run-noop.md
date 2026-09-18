@@ -1,7 +1,7 @@
 ---
 id: gap-goal-batch-dry-run-noop
 title: goal-store batch --dry-run 静默失效——从未被实现，全量写入+提交照常发生
-status: todo
+status: ready
 labels:
   - gap
   - defect
