@@ -11,6 +11,8 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-git-history-window-notes-ref-dominates
 ---
 ## Finding
 ~60 copies of the same indexOf+next-arg idiom across 50+ checker/driver scripts under 9 different names; gate-script-base.ts is imported by 246 files yet exports no arg helper, and parseJsonArg has 5 copies total (2 more found ad hoc in stage-receipt.ts:833 and workflow-journal.ts:620).
