@@ -69,7 +69,7 @@ extra:
 
 **② `{code}` 洞承载 markup**：`数据源：<code>…</code>（每轮一段…）` 这类句子是**一行模板 + 一个 `{code}` 洞**，
 ⛔ 不是「`数据源：` 一行 + `（…）` 另一行」。拆成三行会让句子变成**三个译文的拼接**（ROW 6 明禁）。
-本页共 5 个 `{code}` 洞（`dataSourceRounds` / `dataSourceRoundsTimeline` / `dataSourceSuiteLoad` /
+本页共 6 个 `{code}` 洞（`dataSourceRounds` / `dataSourceRoundsTimeline` / `dataSourceSuiteLoad` /
 `dataSourcePerFile` / `fileTrendDataSource` / `fileFragmentDataSource`）。
 
 **③ 一个共享的括号行 `roundSuffix`**：`（{round}）` 出现在**三个**标题里（负载曲线 / 测试时间线 / 运行期间负载曲线片段），
@@ -96,7 +96,7 @@ extra:
 `!includes("仅出现在 1 轮")` 这类断言在**默认 en** 下会因为「页面现在用英文写」而**恒真空转**（硬规则 3b）。
 实测迁移的 17 条既有断言里有 4 条属于此类，全部改成 `?lang=zh` 读数并在原位注明理由。
 
-**⑧ 跨文件断言要用 `visibleText` 而不是 `body`**：`pageStyles()` 的 **CSS 注释里就写着**
+**⑧ 跨断言要用 `visibleText` 而不是 `body`**：`pageStyles()` 的 **CSS 注释里就写着**
 `HUE = bucket (P 产品 / S 套件 / M 机件 …)`。裸 `body.includes()` 的负向臂会把它当成泄漏——
 而它对读者不可见。判据必须落在**页面上看得见的文本**上，这也正是红基线的度量单位。
 
@@ -107,7 +107,7 @@ fixture 若按「新→旧」写，页面会把**最旧**那轮当最新，然�
 ## 证据（改后读数）
 
 **探针**：`/tmp/tests-i18n/probe.mjs`（真实 `startServer({port:0})` + 真 fixture workspace；
-`npm`-free，纯 `node --experimental-strip-types`）。谓词 = 去 `<style>/<script>` → 去标签 → 解码实体 →
+纯 `node --experimental-strip-types`）。谓词 = 去 `<style>/<script>` → 去标签 → 解码实体 →
 按行取含 CJK 的行。**先对 zh 干跑命中**（硬规则 2 的零计数对照）。
 
 **AC1 红基线（改前，`lang=en`）**：`/tests` 有记录态 **26** 行、空态 **8** 行；`/tests/file` **13** 行（两态同）。
@@ -124,7 +124,7 @@ fixture 若按「新→旧」写，页面会把**最旧**那轮当最新，然�
 | `/tests/file` 段（> 975 行） | **11** | 全部 → ROW 20（`fileTrendCaption` / `fileTrendHeading` / `fileTrendDataSource` / `fileTrendSingleRound` / `fileFragmentHeading` / `fileFragmentDataSource` / `fileFragmentNoSamples` / `fileBackLink` / `notFoundLabel`+`fileNotFoundSuffix` / `fileHistoryHeading`）+ `PAGE_LABELS["Test file"]`（`<h1>` 页名 `测试文件`） |
 | **合计** | **37** | **37/37 有家**（硬规则 5 的「全部有家」，不是抽查） |
 
-**AC2 改后**：`/tests` 有记录态 **4** 行、空态 **4** 行；`/tests/file` **2** 行。拆开看**全部是刻意不译的三类**：
+**AC2 改后（fixture）**：`/tests` 有记录态 **4** 行、空态 **4** 行；`/tests/file` **2** 行。拆开看**全部是刻意不译的三类**：
 
 | 残留 | 条数（两页合计） | 归类 |
 |---|---|---|
@@ -134,6 +134,18 @@ fixture 若按「新→旧」写，页面会把**最旧**那轮当最新，然�
 | reader 诊断串 `tests.reason` | 1（空态） | DATA（`observation.ts` 自己的诊断，与任务标题同类） |
 
 **⇒「界面文案」类中文行 = 0。** 零计数对照：同一谓词对 zh 命中 **62 / 44 / 13**。
+
+**AC2 改后（真实生产页，非 fixture）** —— 这是本任务最强的一条读数：本 worktree 起真实
+`quay serve`，加载的是**仓库自己的** 1947 轮 / 449 个文件的台账：
+
+```
+/tests?lang=en        status=200 bytes=83108  textLines=510 cjkLines=2
+/tests?lang=zh        status=200 bytes=81939  textLines=510 cjkLines=113
+/tests/file?lang=en   status=200 bytes=57486  textLines=404 cjkLines=2
+```
+**en 的 2 条恰好就是两个切换控件 endonym（`中文` ×2）**，再无第三条；zh 113 条是对照
+（谓词在真页上确实命中）。⛔ 与 fixture 读数不同，这一条**没有排除任何东西**——真实数据里一条
+中文都没有漏进来。
 
 **AC3 zh 零变化（逐字节）**：改前/改后各抓四组（有记录态·空态 × `/tests`·`/tests/file`），
 把 fixture 临时目录名归一后 `diff`：
@@ -176,14 +188,34 @@ AC3 对照、AC5 aria、数据逐字、字典解析；`serve-handlers` 7 条）�
 - 26 个候选文件的合并跑 ⇒ **389 tests / 372 pass / 0 fail**（含上面 17 条）
 - 新文件 `serve-tests-body-i18n.test.mjs` ⇒ **12/12 绿**
 - `tsc --noEmit -p packages/quay` ⇒ 干净（exit 0）
+- **scoped 门** `bash scripts/test.sh --for-task gap-webui-tests-body-copy-en-zh --allow-thin`
+  ⇒ **209 tests / 209 pass / 0 fail，exit 0**（选择器选中 14 个测试文件，含全部被迁移的文件与新文件）
 
-三个**不在原 Touches 里**的测试文件（`serve-handlers` / `serve-tests-zh-chrome` /
-`gap-webui-tests-page-timeline-gantt-truncated`）已按「先补 Touches 再改」补进 Touches。
+**`/dashboard` 不回归（A/B，硬读数）**：把两个源文件临时换回基线 `3663391bf` 的版本、各跑一次真实
+serve，把**易变量**（监听端口、实时 cpu_stall/loadavg、`ts`）归一后比对：
+```
+dashboard-en:    IDENTICAL (md5 22f707b62f1c781eeb88a8869a057fa0)
+dashboard-zh:    IDENTICAL (md5 d0d82146fefde23d47792e59a45647b7)
+dashboard-cards: IDENTICAL (md5 13afc48a8d284790f2edfa63ccd845af)
+```
+⚠️ 第一次尝试这条时踩了一个坑并已纠正：`git stash push -- <两个文件>` 在**文件已提交、工作树干净**
+时**什么也不建**，随后的 `git stash pop` 于是弹出了一个**别的层预先放着的 stash**（`goals/` 证据写），
+制造了 22 个冲突文件。已 `git checkout -f HEAD -- goals/` 复原（**那个 stash 条目本身未被 drop，原样保留**），
+随后改用「从基线 `git show` 取文件 + 显式拷回」的方式重做，读数如上。
 
-**AC8 真实浏览器形态**：worktree 起真实 `quay serve --host 127.0.0.1 --port 4322`（加载的是本分支的
-`serve-*.ts`），headless Chrome 1500×2400 截图 `/tests?lang=en` 与 `?lang=zh`。
+**AC8 真实浏览器形态**：worktree 起真实 `quay serve --host 127.0.0.1 --port 14417`（加载的是本分支的
+`serve-*.ts`，标题印证：en 下 `<title>` = `gap-webui-tests-body-copy-en-zh — Tests — verification rounds`），
+headless Chrome（`google-chrome --headless=new`，1500×2600）截图：
+- `/tmp/tests-i18n/shots/tests-en.png`（347008 B）：`Tests — verification rounds` / `Data source: …(one row appended per completed suite run, red and green alike)` / `Recent test-record timeline segments` / `Load curve (round #1947 · 22:50Z)` / `Test timeline (round #1947 · 22:50Z)` / `Legend: P product · M mechanism · multi-bucket · unresolved` / `Run history (new → old)` / `← latest`——**界面文案全英文**，仅余切换控件 endonym `中文`。
+- `/tmp/tests-i18n/shots/tests-zh.png`（368291 B）：逐项与改前一致（`测试 — 验证轮记录` / `数据源：` / `最近测试记录分段时间轴` / `负载曲线` / `测试时间线` / `图例：P 产品 …` / `历史运行（新→旧）` / `← 最新`）。
+⚠️ 任务体原写的端口 4322 实测**已被另一 worktree 的常驻 serve 占用**（`EADDRINUSE`；它服务的是
+`gap-webui-board-body-copy-en-zh`），故改用 14417 并先核对 `<title>` 确认是自己的 worktree。
 ⛔ **未重启 :4173 常驻 serve**：它服务的是**共享主检出**，把未落地的 worktree 指过去会改掉其他层
 正在读的工作区（且落地发生在 fan-in 之后）。落地后重启常驻 serve 属收尾步骤。
+
+**观察项（不阻塞，⛔ 不是本任务引入的）**：zh 页上 `Page size:` / `Page 1 of 9 (449 rows)` /
+`« Previous` / `Next »` 仍是英文——那是 `renderPagingNav` 的字面量，本任务与之前都未处理；
+方向是「zh 下混英文」而非本任务的「en 下混中文」，且改前改后逐字节相同（AC3 已证），故仅登记。
 
 ## Touches
 
