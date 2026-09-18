@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-subject-goal-009-ac-203
 title: "freshness-refresh: 28.5% of the window is left (margin 57 of K=200) and
   margin/K is at/below the 0.2925 threshold: at the worst observed delivery-face
   burst (25 commits/h) the rema"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
