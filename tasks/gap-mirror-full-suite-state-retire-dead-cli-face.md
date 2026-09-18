@@ -3,7 +3,7 @@ id: gap-mirror-full-suite-state-retire-dead-cli-face
 title: mirror-full-suite-state.ts 的模块面是活的、CLI
   入口面已死——退入口留模块；并纠正「pre-verified-round-record.ts 同形」这一误判（其 CLI 在
   fan-in-execute.js:496 仍被真调用）
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
