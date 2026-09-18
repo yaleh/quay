@@ -2,7 +2,7 @@
 id: gap-suite-bash-lpt-forwarder-dead-on-default-path
 title: bash LPT 转发器在默认路径上是死代码（≈5.4s/轮无用功）：Phase 1 搬进 legacy 分支（行为等价）；Phase 2
   彻底退役需人裁定撤掉 QUAY_SUITE_SCHEDULER=0
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -279,3 +279,9 @@ legacy 路径 `QUAY_SUITE_SCHEDULER=0` 真跑（原始日志 `.quay/lpt-phase1/a
 - session_id：c45bbc15-441c-486f-b391-fb0e7811eb5b
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-suite-bash-lpt-forwarder-dead-on-default-path~wk-prod-anchor~1789724008781-e905da.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-suite-bash-lpt-forwarder-dead-on-default-path-wk-prod-anchor.log
+
+## Note
+
+**2026-09-18 — needs-human → ready 复位（人工核实，非本任务实现缺陷）**
+
+上面两条 needs-human 记录（含最近一次 09:38:10Z）的失败签名均为 `step=suite: # fail 45` + "suite 红但归因不出任何失败测试文件"。经驱动 Claude 会话独立核实，真因是 develop HEAD 当时存在的系统性阻断：`plugin/scripts/spec-declaration-point-check.ts` 因提交 `516a5485c`（2026-09-18T08:29:32Z，新增 `orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md`）未在两个声明点（`plugin/skills/manager/SKILL.md` 索引、`plugin/skills/init/SKILL.md` 参考文档块）登记而失败；这类静态检查失败会让全量 suite 报 `# fail 45` 且零个体测试可归因，与两次 needs-human 记录的失败特征完全一致（且本任务体自己的「环境读数」节已独立观察到同一时段 `direct-to-develop-bypass-check` 等基建红，印证「suite 红非本任务实现问题」这一判断方向）。该阻断已由后续提交 `cfb2664aa`（2026-09-18T09:40:21Z，"docs(skills): declare SPEC-quay-init-reconcile at both SPEC declaration points"）修复，晚于本任务两次 needs-human 时间戳。复位前已在当前 develop HEAD 上重跑 `node --no-warnings --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts`，得到干净 `PASS: all 44 orchestration/SPEC-*.md declared at each of 2 declaration points`。⇒ 非本任务自身实现缺陷，复位 status: needs-human → ready，交回 worker-driver 重派。AC/DoD 内容未动（AC6 仍保持未勾，符合其"本任务不得勾"的约束）。
