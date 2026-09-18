@@ -2,7 +2,7 @@
 id: gap-webui-architecture-body-copy-en-zh
 title: /architecture 正文文案在 lang=en 下仍是硬编码中文（数据源说明、组件状态图例、变更表头）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: todo
+status: ready
 labels:
   - gap
   - webui
