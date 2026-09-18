@@ -381,13 +381,21 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
   const server = await startServer({ port: 0, host: "127.0.0.1" });
   const port = server.address().port;
   try {
+    // ⚠️ These are DEFAULT-LOCALE readings (`get` sends no lang cookie/param), and the default is
+    // `en` — so each entry pins the token that page's `<title>` carries under en.
+    // ⚠️ MIGRATED by gap-webui-architecture-body-copy-en-zh (2026-09-18): the /architecture row used
+    // to read `Architecture — 系统组件图`, because AC-303's `pageTitle` token carried a Chinese
+    // subtitle and ROW 3's en column is the identity — so the page's own `<title>` rendered Chinese
+    // under the DEFAULT locale. The body-copy task re-keyed the token (see serve-i18n.ts's RE-KEYED
+    // note); the en row follows, and the pre-existing Chinese is asserted EXPLICITLY under zh below
+    // rather than left to a default-locale read that only looked Chinese by accident.
     const routes = [
       ["/dashboard", "Dashboard"],
       ["/system", "System — 系统状态"],
       ["/manager", "Manager / Outer / Inner"],
       ["/tests", "Tests — 验证轮记录"],
       ["/sessions", "Sessions"],
-      ["/architecture", "Architecture — 系统组件图"],
+      ["/architecture", "Architecture — system component map"],
     ];
     for (const [route, title] of routes) {
       const r = await get(port, route);
@@ -395,6 +403,21 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
       assert(r.body.includes(title), `AC1: GET ${route} is not a placeholder — includes title "${title}"`);
       assert(/<main[\s>]/.test(r.body), `AC1: GET ${route} renders a real page`);
     }
+    // …and the zh arm for the page this task moved, so the Chinese token is pinned EXPLICITLY (an
+    // assertion that only ever reads the default locale cannot tell "still Chinese" from "never was
+    // translated"). Both arms together are the re-key's contract: en moved, zh did not.
+    const archZh = await get(port, "/architecture?lang=zh");
+    assert(archZh.body.includes("架构 — 系统组件图"),
+      "AC1: the zh <title>/<h1> token is the pre-existing Chinese, explicitly requested");
+    // …and the zh page's BODY copy did not fall back to English. ⛔ Deliberately NOT phrased as
+    // `!includes("system component map")`: that string IS on the zh page once, as the
+    // `<meta name="description">` residue (already-English, passes through no dictionary, named
+    // out-of-scope in serve-i18n.ts ROW 12). The arm asserts the copy that IS dictionary-backed.
+    for (const zhCopy of ["数据源：", "组件最近变更（git 可证，近 7 天）", "末次提交"]) {
+      assert(archZh.body.includes(zhCopy), `AC1: the zh page keeps its body copy ${JSON.stringify(zhCopy)}`);
+    }
+    assert(!archZh.body.includes("Last commit") && !archZh.body.includes("Source:"),
+      "AC1: …and the zh body copy did not fall back to the en wording");
 
     // /tests must show the fixture round's real data (AC2 — mechanism-sourced, not blank/0).
     const testsPage = await get(port, "/tests");
