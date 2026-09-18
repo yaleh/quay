@@ -2581,13 +2581,45 @@ export interface GitHistoryResult {
 }
 
 /**
- * Read the commit-landing timeline as `git log --all --topo-order` emits it (gap-git-graph-adopt-git-
- * column-algorithm-and-decorate-labels). The retired per-ref "active branch lane" model is GONE: the
- * column-allocation algorithm needs commits in git's EMISSION order — every commit emitted before its
- * parents — which `--topo-order` guarantees and a per-ref/time-sorted fetch does not (measured: 60
- * commits, 1 mis-ordered). `--all` (not the old 7-day active-branch filter) makes the page match
- * `git log --graph --all` exactly, the AC1 mechanical judge. `%D` supplies the decorate labels so a
- * branch name renders only on the commit a ref actually points at (AC3).
+ * The ref scope of the git-history window — `--all` MINUS the notes namespace
+ * (gap-git-history-window-notes-ref-dominates).
+ *
+ * Why notes are excluded: `refs/notes/*` is not history, it is METADATA attached to history — but
+ * `--all` includes it, and a notes chain is a LINEAR chain of commits whose tip tracks every note
+ * write. `--topo-order` emits a linear chain contiguously, so the notes chain lands as one unbroken
+ * block at the top of the window. Measured 2026-09-18 on `/home/yale/work/quay`
+ * (`refs/notes/quay-cmv-merge`, the cross-machine verify carrier — `cross-machine-verify.sh` pushes
+ * it to origin, so it is not clutter that can be cleaned): chain length 235, and the `-n 200` window
+ * was **200/200 notes commits** ⇒ the page showed no real history at all, and `mainlineHead`
+ * (the "newest commit") was itself a note. The same window without notes carried 70 merges and 45
+ * in-window second-parent edges, vs 0 and 0 with them.
+ *
+ * `--exclude=refs/notes/*` (not a `--branches --tags --remotes` whitelist) so the ref set stays
+ * EXACTLY what `--all` meant except the notes namespace: HEAD, `refs/stash`, `refs/replace/*` etc.
+ * are all still in (measured: both spellings yield the identical 200-commit window here, but the
+ * whitelist would drop HEAD and with it a detached-HEAD worktree's own tip). The exclusion covers
+ * the whole `refs/notes/*` namespace, not just `quay-cmv-merge`, so a sibling notes ref cannot
+ * re-flood it.
+ *
+ * ⛔ ORDER IS LOAD-BEARING. `--exclude` applies only to the ref-listing option that IMMEDIATELY
+ * FOLLOWS it. Measured on git 2.43.0 (2026-09-18):
+ *   `git log --exclude=refs/notes/* --all`  ⇒ 0 notes commits   ✅
+ *   `git log --all --exclude=refs/notes/*`  ⇒ 200 notes commits ❌ silently ignored
+ * That silent no-op is the exact shape of this bug (硬规则 3b: an option that reads as covered but
+ * is not), which is why this pair lives in ONE exported constant instead of being respelled at each
+ * call site — production and every test oracle read the window from here.
+ */
+export const GIT_HISTORY_REF_SCOPE: readonly string[] = ["--exclude=refs/notes/*", "--all"];
+
+/**
+ * Read the commit-landing timeline as `git log <GIT_HISTORY_REF_SCOPE> --topo-order` emits it
+ * (gap-git-graph-adopt-git-column-algorithm-and-decorate-labels). The retired per-ref "active branch
+ * lane" model is GONE: the column-allocation algorithm needs commits in git's EMISSION order — every
+ * commit emitted before its parents — which `--topo-order` guarantees and a per-ref/time-sorted fetch
+ * does not (measured: 60 commits, 1 mis-ordered). `--all` (not the old 7-day active-branch filter)
+ * makes the page match `git log --graph` over the same ref scope exactly, the AC1 mechanical judge;
+ * notes refs are excluded from that scope — see `GIT_HISTORY_REF_SCOPE`. `%D` supplies the decorate
+ * labels so a branch name renders only on the commit a ref actually points at (AC3).
  *
  * Pagination (`before=<unixSeconds>`) keeps the same cursor semantics: `--before` filters to commits
  * STRICTLY older than the cursor, then `--topo-order` re-orders that older window. A non-git workspace
@@ -2636,7 +2668,7 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before
 
 function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now(), exec = realGitExec }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number; exec?: GitExec } = {}): GitHistoryResult {
   try {
-    const args = ["-C", root, "log", "--all", "--topo-order", `-n ${limit}`];
+    const args = ["-C", root, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", `-n ${limit}`];
     // gap-git-graph-pagination-appends-page-relative-col-and-torow: `skip` is the EMISSION-ORDER cursor
     // (`git log --skip`) that pages `--all --topo-order` contiguously — a `--before=<t>` timestamp filter
     // reorders/drops commits relative to the single `-n <loaded>` walk, so it can never reconstruct the

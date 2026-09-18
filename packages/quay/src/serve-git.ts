@@ -1,8 +1,10 @@
 // serve-git.ts — /git-history route handler + git graph layout, split from serve-handlers.ts.
 //
 // gap-git-graph-adopt-git-column-algorithm-and-decorate-labels: this file no longer models the graph
-// as branch/lane OBJECTS. It adopts git's own layout — `git log --graph --all` — by (1) reading commits
-// in git's emission order (observation.readGitHistory uses `--all --topo-order`), (2) assigning each
+// as branch/lane OBJECTS. It adopts git's own layout — `git log --graph` over the production ref scope
+// (`GIT_HISTORY_REF_SCOPE`, which is `--all` minus `refs/notes/*` — gap-git-history-window-notes-ref-
+// dominates) — by (1) reading commits in git's emission order (observation.readGitHistory uses
+// `GIT_HISTORY_REF_SCOPE --topo-order`), (2) assigning each
 // commit a column with git graph.c's active-column + recycle algorithm, and (3) drawing one row per
 // commit with inline `%D` decoration labels (a branch name appears ONLY on the commit a ref points at).
 // The retired lane model's fold/expand, stride chips, hit rects, fork/merge/open classification and
@@ -136,8 +138,10 @@ export interface GitGraphLayout {
 }
 
 /**
- * Assign every commit a column, matching `git log --graph --all` EXACTLY (verified 19175/19175 = 0
- * mismatch on the production repo). This is git graph.c `graph_update_columns` distilled:
+ * Assign every commit a column, matching `git log --graph` over the production ref scope EXACTLY
+ * (verified 19175/19175 = 0 mismatch on the production repo; the scope is now `GIT_HISTORY_REF_SCOPE`
+ * = `--all` minus `refs/notes/*` — gap-git-history-window-notes-ref-dominates). This is git graph.c
+ * `graph_update_columns` distilled:
  *
  *   - `columns[]` is the set of commits whose branch line is still being drawn (parents seen but not
  *     yet emitted), in column order. A commit's column is its index in this array when IT is emitted.
@@ -1106,8 +1110,9 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
 
 /** GET /git-history.json?skip=<n>&limit=<m>[&before=<unixSeconds>] — the on-demand pagination endpoint
  *  the client's scroll loader calls. `skip` = the emission-order cursor (`git log --skip` — the page
- *  that continues `--all --topo-order` contiguously, so the client's merged full sequence is exactly
- *  `git log --all --topo-order -n <loaded>` and its recomputed columns match `git log --graph --all`);
+ *  that continues `GIT_HISTORY_REF_SCOPE --topo-order` contiguously, so the client's merged full
+ *  sequence is exactly `git log <GIT_HISTORY_REF_SCOPE> --topo-order -n <loaded>` and its recomputed
+ *  columns match `git log --graph` over that same scope);
  *  `before` is retained as a backward-compat timestamp watermark (the self-chain cursor still walks
  *  back through time), ignored when `skip` is present. The client appends the returned raw rows below
  *  the current ones and re-renders. */

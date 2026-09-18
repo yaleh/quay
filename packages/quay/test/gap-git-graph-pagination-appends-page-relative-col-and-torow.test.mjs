@@ -161,6 +161,11 @@ function renderedColByHash(mount) {
 // (Verified on this repo, `--skip` 0/500/1000/1500: `git log <all-ref-shas> --topo-order -n 500
 // --skip=N` is byte-identical to `git log --all --topo-order -n 500 --skip=N`, and
 // `git log --graph <shas>` to `git log --graph --all`.)
+// ⚠️ gap-git-history-window-notes-ref-dominates: "all-ref-shas" above now means the PRODUCTION ref
+// scope, i.e. `refs/notes/*` is EXCLUDED from the frozen list — see snapshotRefWindow(). Freezing
+// alone was never enough for this window: it makes the window stable, and a stable window that
+// carries the notes chain is stably wrong (measured 200/200 notes at `-n 200`). The equivalence
+// above therefore holds against `--exclude=refs/notes/* --all`, which is what production runs.
 //
 // LOCATION: snapshotRefWindow() / frozenGitExec() below. The production read path (`observation.ts`)
 // is UNCHANGED — the frozen list is fed through its existing `exec` host-read seam (`GitExec`),
@@ -187,6 +192,11 @@ function snapshotRefWindow() {
   for (const line of out.split("\n")) {
     const [sha, ref] = line.split("\t");
     if (!sha || !ref) continue;
+    // gap-git-history-window-notes-ref-dominates: the frozen list must mirror the PRODUCTION ref scope
+    // (GIT_HISTORY_REF_SCOPE = `--all` minus `refs/notes/*`). A notes chain is LINEAR and its tip tracks
+    // every note write, so a frozen list that still carries `refs/notes/quay-cmv-merge` freezes the
+    // notes FLOOD in place — the window would be stable AND useless (measured 2026-09-18: 200/200).
+    if (ref.startsWith("refs/notes/")) continue;
     shas.add(sha);
     if (ref.startsWith("refs/heads/")) heads.push(ref);
     else if (ref.startsWith("refs/tags/")) tags.push(ref);
