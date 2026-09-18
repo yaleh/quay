@@ -2,7 +2,7 @@
 id: gap-git-history-window-notes-ref-dominates
 title: git-history 窗口被 refs/notes/quay-cmv-merge 线性链占满：生产读路径 200 条里 185 条是 notes
   提交，且钉死全仓 code-delta fan-in（AC3 非空判据恒红）
-status: ready
+status: done
 labels:
   - gap
   - webui
