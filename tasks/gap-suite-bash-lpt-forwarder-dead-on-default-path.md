@@ -3,6 +3,7 @@ id: gap-suite-bash-lpt-forwarder-dead-on-default-path
 title: bash LPT 转发器在默认路径上是死代码（≈5.4s/轮无用功）：Phase 1 搬进 legacy 分支（行为等价）；Phase 2
   彻底退役需人裁定撤掉 QUAY_SUITE_SCHEDULER=0
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - test-wall-clock
@@ -254,3 +255,15 @@ legacy 路径 `QUAY_SUITE_SCHEDULER=0` 真跑（原始日志 `.quay/lpt-phase1/a
 - plugin/test/suite-bucket-load-sensitive-isolation.test.mjs
 - plugin/test/runner-grouping-serial-anti-stomp.test.mjs
 - tasks/gap-suite-bash-lpt-forwarder-dead-on-default-path.md
+
+## Needs-Human
+
+**执行 2026-09-18T04:53:55.098Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：38d62560-8c9b-4fe1-8f91-5cbb2a7bc827
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-suite-bash-lpt-forwarder-dead-on-default-path~wk-prod-anchor~1789707055941-3c8774.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-suite-bash-lpt-forwarder-dead-on-default-path-wk-prod-anchor.log
