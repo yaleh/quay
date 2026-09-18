@@ -1407,8 +1407,10 @@ function splitSentences(text) {
 }
 
 /** Read a task's `status:` frontmatter field straight off disk (null when the file/field is absent).
- *  Used to drop refs to SUPERSEDED tasks — a retired task is not a valid current-prereq target (its
- *  body reference is a stale name; the successor carries the real dependency). */
+ *  Used to drop refs to NON-GAP targets — `superseded` (a retired task is not a valid current-prereq
+ *  target: its body reference is a stale name; the successor carries the real dependency) and `done`
+ *  (a finished task is not an UNSATISFIED prereq). Every other value, including null, is left to the
+ *  caller's fail-closed test. */
 function readTaskStatusOnDisk(tasksDir, id) {
   const file = path.join(tasksDir, `${id}.md`);
   if (!fs.existsSync(file)) return null;
@@ -1434,8 +1436,11 @@ function readTaskStatusOnDisk(tasksDir, id) {
  *  Two further ref-level filters keep the detector PRECISE (a sibling/heritage mention is not a
  *  prereq):
  *    - a ref whose context carries a sibling marker is dropped (see SIBLING_MENTION_RE);
- *    - a ref to a SUPERSEDED task is dropped (retired task — its successor is the real prereq).
- *  Only ids that resolve to an existing, non-superseded task file are returned. */
+ *    - a ref to a SUPERSEDED task (its successor is the real prereq) or to a DONE task (a finished
+ *      task is not an UNSATISFIED prereq) is dropped — see `add()` below for why the `done` arm is
+ *      what makes the citing task self-healing rather than permanently blocked.
+ *  Only ids that resolve to an existing task file whose status is neither `superseded` nor `done` are
+ *  returned; todo / ready / in-progress / unreadable status stay in the set (fail-closed). */
 export function prosePrereqRefs(body, tasksDir) {
   const refs = new Set();
   const noFence = stripFences(body);
@@ -1444,7 +1449,19 @@ export function prosePrereqRefs(body, tasksDir) {
   const inlineParas = inlineStripped.split(/\r?\n\s*\r?\n/);
   const add = (id) => {
     if (refs.has(id)) return;
-    if (readTaskStatusOnDisk(tasksDir, id) === "superseded") return;
+    const status = readTaskStatusOnDisk(tasksDir, id);
+    // A retired task (`superseded`) is not a current-prereq target — its successor carries the real
+    // dependency. A FINISHED task (`done`) is not an UNSATISFIED prereq — the cited reference is a
+    // satisfied one. Both are non-gaps; every OTHER value (todo / ready / in-progress / "" / a junk
+    // token / null) stays IN the gap set, fail-closed: a status this function cannot read must never
+    // be mistaken for `done` (硬规则③b — 读不懂不得伪装成合格). Dropping `done` here is what makes the
+    // citing task self-healing: before it, a prose sentence whose cited task later COMPLETED stayed a
+    // permanent promotion block (production, 2026-09-18: 88 consecutive skips of
+    // gap-touches-parser-early-subheading-latch-hides-declaration on
+    // prosePrereqGap=[gap-git-history-window-notes-ref-dominates], whose cited task had been done
+    // since 14:28Z that day — no future event could ever clear it, so the only exit was a human
+    // rewording the sentence).
+    if (status === "superseded" || status === "done") return;
     const file = path.join(tasksDir, `${id}.md`);
     if (fs.existsSync(file)) refs.add(id);
   };
