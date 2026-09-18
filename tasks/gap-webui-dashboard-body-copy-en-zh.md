@@ -2,7 +2,7 @@
 id: gap-webui-dashboard-body-copy-en-zh
 title: /dashboard 正文文案在 lang=en 下仍是硬编码中文 —— 卡片标题/状态词/链接/项目身份卡都不随语言切换（正文本地化系列第 1
   页，定 pattern）
-status: ready
+status: done
 labels:
   - gap
   - webui
