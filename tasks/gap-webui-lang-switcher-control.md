@@ -1,7 +1,7 @@
 ---
 id: gap-webui-lang-switcher-control
 title: web UI 无任何可点击的语言切换控件 —— serve-lang.ts 机制已生效但 nav 里没有入口
-status: todo
+status: ready
 labels:
   - gap
   - webui
