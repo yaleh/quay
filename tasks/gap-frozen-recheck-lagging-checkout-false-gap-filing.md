@@ -73,6 +73,12 @@ $ QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types \
 - **生产读数（读生产载体、且只计落地之后的时间窗 —— 硬规则推论三）**：落地后的时间窗内，`.quay/goal-round.jsonl` 的 `frozenRecheck.entries`（或 `.quay/gate-events.jsonl` 对应事件）中存在至少一轮 `not-evaluated` + `checkout-lagging-develop` 的真实记录，且该轮**没有**为该 AC 产出 gap。若该窗口内生产恰无此形状（复核根一直齐平），如实记录实测为零，并给出该窗口内 `git rev-list --count HEAD..develop` 的最大值。⛔ 不得以夹具冒充生产读数。
 - **AC-221 的台账闭环**：下一次 goal-driver 复核 AC-221 后 ledger tail 翻 pass（AC-221 由「当前为假」翻回真）；本任务不动 AC-221 的判据文本。
 
+## 落地读数（worker 实测，供 DoD 复核；⛔ 不是夹具读数）
+
+- **生产窗口尚未开始**：本读数在 worker 退出前采集，此刻代码**尚未 fan-in 到 develop**（落地在退出后由 driver 机械 fan-in 完成）⇒ 「落地之后的时间窗」为空，`.quay/goal-round.jsonl` 中 `checkout-lagging-develop` 命中数实测 = **0**（⛔ 这是「窗口为空」，不是「窗口内确实没有」——两者不同形，硬规则 3b）。
+- 同一时刻主检出（author，HEAD `e8cf1eb80b21`）与 `develop` **齐平**：`git rev-list --count HEAD..develop` = **0**（`origin/develop` 同为 `e8cf1eb80b21`）⇒ 若窗口此刻开始，本机制不会被触发（触发条件是计数 > 0）。
+- ⇒ 上述第二条 DoD 的「最大值」需在落地后的真实窗口里由 goal-driver 复核；worker ⛔ 不以任何夹具读数代替它。
+
 ## Touches
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-driver-s10.test.mjs
