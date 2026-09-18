@@ -18,26 +18,6 @@ depends_on:
   - gap-ac282-runner-prereqs-already-present
 goal_ac: AC-281
 ---
----
-id: gap-ac281-develop-ci-test-job-wallclock-under-30s
-title: 真实 develop CI test job 一次 success 且套件 schedulerMs≤30s（AC-281）——人
-  2026-09-17 裁定改口径（原 job 墙钟 ≤30s 经实测不可达）；现 scheduler 54.1s / main floor
-  43.0s，须压低最长单文件
-status: ready
-needs_human_cause: unclassified
-labels:
-  - gap
-  - test-wall-clock
-parent: null
-children: []
-extra:
-  schema: execution
-depends_on:
-  - gap-suite-split-15-over-30s-test-files
-  - gap-checker-mutation-parallel-case-loop
-  - gap-ac282-runner-prereqs-already-present
-goal_ac: AC-281
----
 **type:** execution
 
 > **2026-09-18 第 4 轮（manager 起草，接第 3 轮 worker 的 §13/§14）**：第 3 轮 worker 已拆掉 3 个长杆
