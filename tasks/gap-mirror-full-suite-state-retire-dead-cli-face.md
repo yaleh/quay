@@ -86,13 +86,13 @@ suite-driver.ts        suite-lock-slots.ts           supervisor-preempt-candidat
 
 ## AC
 
-- [ ] AC1（兄弟集测量，先做）：复现上述扫描（对含 `isDirectEntry(import.meta` 的脚本逐个查真调用者），把 16 个孤岛**逐个**按 Contract 的三条判别式分类为「死 CLI 入口面 / 库上的防御性守卫」，**贴出每个的判定证据**（守卫行号 + 入口行号 + 是否有 spawn 它的测试 + 真调用者 grep 输出）。⛔ 不得只贴结论。
-- [ ] AC2（负控制，硬规则 4 推论四）：对**至少一个**判为"防御性守卫"的样本（建议 `touches-parser.ts`——它确实是纯库）给出"若它其实是死入口，结论会不同"的对照读数，即说明它为何落到另一格；贴命令与输出。
-- [ ] AC3：`pre-verified-round-record.ts` **不动**，并在任务体记明理由 + `fan-in-execute.js:496` 的调用现场（防止后来者"顺手把同族删干净"）。跑 `node --test plugin/test/pre-verified-round-record.test.mjs` 仍绿。
-- [ ] AC4：`mirror-full-suite-state.ts` 退入口留模块——删 `usage` / `main()` / `isDirectEntry` 守卫及入口专用 import；4 个 `export` 保持签名不变。贴 `git diff`。
-- [ ] AC5：`plugin/test/mirror-full-suite-state.test.mjs:123` 的 spawn 用例改为进程内调用或删除；**删后不得留下恒真/恒假断言**。跑 `node --test plugin/test/mirror-full-suite-state.test.mjs` 绿。
-- [ ] AC6：`capability-catalog.sh` + `select-static-checks-for-touches.ts` 中该文件的登记/清单行改为"模块库，无 CLI 入口"的如实描述；跑 `node --test plugin/test/capability-catalog.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` 绿。
-- [ ] AC7：`bash scripts/test.sh` 全量绿；命令与结果贴进任务体。
+- [x] AC1（兄弟集测量，先做）：复扫 + 16 个孤岛逐个分类 + 逐个判定证据 —— 见 §执行记录 AC1（表 + 命令 + 输出）。
+- [x] AC2（负控制，硬规则 4 推论四）：对 `touches-parser.ts` 给出「若它其实是死入口，结论会不同」的对照读数，并说明它为何落到另一格 —— 见 §执行记录 AC2。
+- [x] AC3：`pre-verified-round-record.ts` **不动**（`git status` 该文件为空），任务体记明理由 + `fan-in-execute.js:496` 调用现场；`node --test plugin/test/pre-verified-round-record.test.mjs` **70/70 绿** —— 见 §执行记录 AC3。
+- [x] AC4：`mirror-full-suite-state.ts` 退入口留模块——删 `usage` / `main()` / `isDirectEntry` 守卫及入口专用 import；4 个 `export` 签名不变（git diff 见 §执行记录 AC4）。
+- [x] AC5：`plugin/test/mirror-full-suite-state.test.mjs` 的 spawn 用例改为进程内调用，**不残留恒真/恒假断言**；该文件 **7/7 绿**、`spawnSync` 计数 0 —— 见 §执行记录 AC5。
+- [x] AC6：`capability-catalog.sh` + `select-static-checks-for-touches.ts` 的登记行改为"模块库，无 CLI 入口"的如实描述；`node --test plugin/test/capability-catalog.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` **38/38 绿**、catalog `0 unclassified` —— 见 §执行记录 AC6。
+- [ ] AC7：`bash scripts/test.sh` 全量绿；命令与结果贴进任务体。⛔ **本分支未达成，且非本分支所致**：实测 `bash scripts/test.sh`（worktree 内，2026-09-18）**exit 1**，红发生在静态检查阶段的 fail-closed（`STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`），套件在进入 node 测试泳道**之前**就中止 ⇒ 本轮连一条测试泳道结论都没有。红因 = develop 上**既有**的直投提交 `2d3a6fa35`（人 2026-09-18 04:11Z 的 `mem:` 提交）未登记进 `plugin/scripts/direct-to-develop-bypass-check.ts:234 RULED_HISTORICAL_COMMITS`；**「与本分支无关」的证明**（主检出同红、该 sha 是 develop 祖先、与本任务 delta 面零交集）见 §执行记录 AC7。同一红同时打挂在飞任务的全部 fan-in suite（`.quay/fan-in-suite-*` 三份日志里逐字同一条 `STATIC_CHECK_FAILED`）⇒ 这是**全 loop 阻断**，不是本任务的红。故 AC7 保持未勾（勾上就是把不存在的绿记成绿——硬规则 3b/4）；本分支自身的 scoped 门 **exit 0**。
 
 ## DoD
 
@@ -100,7 +100,156 @@ suite-driver.ts        suite-lock-slots.ts           supervisor-preempt-candidat
 - **留模块**：`grep -cE '^export function (buildMirrorState|writeMirrorState|shouldSkipMirrorWrite|readCurrentState)' plugin/scripts/mirror-full-suite-state.ts` → **4**。
 - **无残留 spawn**：`grep -c 'spawnSync' plugin/test/mirror-full-suite-state.test.mjs` → **0**。
 - **反例对照**：`node --test plugin/test/pre-verified-round-record.test.mjs` 仍绿（证明"退一个"没有波及活着的同族）。
-- `bash scripts/test.sh` 一次真实全量绿的命令与结果贴进任务体。
+- `bash scripts/test.sh` 一次真实全量绿的命令与结果贴进任务体。⛔ **本轮不可达**：全量 suite 在静态检查阶段 fail-closed 中止（`direct-to-develop-bypass-check`，红因 develop 既有直投 `2d3a6fa35`），见 AC7 与 §执行记录 AC7；三态区分——「全量 suite 跑了且绿」本轮**没发生过**，⛔ 不得读成「绿」。
+
+## 执行记录（2026-09-18，worktree `/home/yale/work/quay-worktrees/gap-mirror-full-suite-state-retire-dead-cli-face`，base develop `b407fb1db`）
+
+### AC1 —— 兄弟集复扫与逐个分类
+
+**复扫命令与读数**（工作树内）：`grep -l "isDirectEntry(import.meta" plugin/scripts/*.ts | wc -l` → **124**（立案时记 125，**差 1**）。
+
+⚠️ 差额已核，**不是代码变化**：以立案 commit `63b4f1bad` 为基线逐文件比对（对当时每个含守卫的 `plugin/scripts/*.ts` 跑 `git show <filing>:<path> | grep isDirectEntry` 再看今天盘上是否仍有），**没有任何文件丢过守卫、也没有文件被删**；递归 `--include=*.ts` 计数同为 124；无子目录守卫。⇒ 差额是立案时那次扫描的仪器偏差（+1），本记录基于实测的 124。
+
+**扫描器**（两轴分开，⛔ 不把「模块 import」与「进程启动」混成一列）：
+- **c2 轴一 · 模块 import** = 非注释行匹配 `\bfrom\s+["']…/<stem>.ts["']`；
+- **c2 轴二 · 进程启动** = 非注释行同时含文件名与 `--experimental-strip-types` / `node` / `bash` / `spawnSync` / `spawn(` / `execFileSync` / `execSync`，且排除 `assert.` / `expect(` / `includes(` / `.has(` / `readFileSync` 这类**匹配式**（它们不是调用）。
+- 注释行按位置排除（`//`、`*`、`/*`、`#`）；再排除自身、自身测试、`capability-catalog.sh`、`select-static-checks-for-touches.ts`、`archive/`、`node_modules`、`.git`。
+
+**16 个孤岛逐个判定**（c1 守卫行 / c1 入口行 / c2 非注释真调用者 / c3 有子进程跑它的测试）：
+
+| # | 文件 | c1 守卫 / 入口 | c2 真调用者 | c3 子进程测试 | 判定 |
+|---|---|---|---|---|---|
+| 1 | `claim-task.ts` | `:170` / `main :126` | **有** `plugin/scripts/claim-task.sh:148`（`node --no-warnings --experimental-strip-types "$SCRIPT_DIR/claim-task.ts"`） | 有 `plugin/test/claim-task.test.mjs:152,161` | 不属本任务（CLI 活） |
+| 2 | `derive-touches-heuristic.ts` | `:175` / `main :149` | 仅模块 import（`plugin/scripts/concurrent-batch-scheduler.ts:33` 等 3 处）；进程启动 **0** | 无 | 库上的防御性守卫 |
+| 3 | **`mirror-full-suite-state.ts`** | `:255` / `usage :172` + `main :186` | 进程启动 **0**（模块 import 1：`worker-driver.ts:232`） | **有** `plugin/test/mirror-full-suite-state.test.mjs:127-129`（`spawnSync("node", [… mirror-full-suite-state.ts …])`） | **死 CLI 入口面 ← 本任务动作对象** |
+| 4 | `mirror-measure-history.ts` | `:151` / `usage :53` + `main :67` | 进程启动 0；唯一 import 是**自身测试** `:29`，且它以 **in-process** 调 `main()`，不是子进程 | 无 | c1∧c2 成立、c3 不成立 ⇒ 按 Contract 归**库上的防御性守卫格**（⇒ 本任务不动它） |
+| 5 | `outer-driver.ts` | `:545` / `main :488` | 进程启动 0（单行 grep）；**真引用在注册表**：`driver-runtime.ts:172-181` `DRIVER_KINDS.outer.driver = "outer-driver.ts"`，通用 spawner 按表取文件名 | 无 | 不属本任务（有真引用：驱动 kind 注册表） |
+| 6 | `packaging-hygiene-check.ts` | `:251` / `main :218` | 进程启动 0（单行 grep）；**间接真调用**：`quality-gate-driver.ts:215-218 defaultPackagingCheckArgv()` 组装 `node --no-warnings --experimental-strip-types <root>/plugin/scripts/packaging-hygiene-check.ts --root … --json`，调用点 `:309` | 无 | 不属本任务（⚠️ 调用点**跨行拼装**，单行 grep 必然漏） |
+| 7 | `phase-declare.ts` | `:370` / `main :300` | 进程启动 0、import 0 | 无 | 库上的防御性守卫格 |
+| 8 | `quay-deliver.ts` | `:31` / **无入口**（无 `usage` / `main`） | 进程启动 0 | 无 | 不属本任务（c1 不成立） |
+| 9 | `red-window-triage.ts` | `:266` / `usage :175` + `main :185` | 进程启动 0；唯一 import 是自身测试 `:36` | **有** `plugin/test/red-window-triage.test.mjs:42-43`（`runCli` → `spawnSync`，`:189/:210/:222/:236/:239/:246` 六处调用） | **同为死 CLI 入口面（1+2+3 全成立）——但不在本任务 Touches，且 `orchestration/fast-mode-tick-core.md:72` C11 逐字教人用 `red-window-triage.ts --partition`、`orchestration/manager-phase-goal.md:3539` 写「不能退役」⇒ 记观察项，本任务不动** |
+| 10 | `server-partial-stop-verify.ts` | `:677` / `main :475` | 模块 import 1（`server-restart-inflight-verify.ts:80`）；进程启动 0 | 无 | 库上的防御性守卫 |
+| 11 | `suite-bucket-attribution.ts` | `:407` / `usage :368` + `main :380` | 模块 import 10；进程启动 0 | 无（初判有、**读行后否**：`plugin/test/suite-bucket-reattr-ratchet-check.test.mjs:98` 是写进 fixture 的**字符串字面量**，不是 spawn） | 库上的防御性守卫 |
+| 12 | `suite-bucket-hub-list.ts` | `:174` / `usage :120` + `main :141` | 模块 import 3；进程启动 0 | 无 | 库上的防御性守卫 |
+| 13 | `suite-driver.ts` | `:395` / `main :328` | 模块 import 6（`worker-driver.ts:228` 等）；进程启动 0 | 无 | 库上的防御性守卫 |
+| 14 | `suite-lock-slots.ts` | `:180` / `usage :132` + `main :146` | 模块 import 15；进程启动 0 | 无（初判有、**读行后否**：`plugin/test/fan-in-workflow-lock.test.mjs:149` 是 `node -e` 里**import 模块**，不是启动 CLI） | 库上的防御性守卫 |
+| 15 | `supervisor-preempt-candidates.ts` | `:329` / `main :286` | 进程启动 0（单行 grep）；**间接真调用**：`supervisor-preempt.sh:88` 的 `CANDIDATES_TS` 默认值 + `:206` `node --no-warnings --experimental-strip-types "$CANDIDATES_TS" "$@"` | 有（经 `supervisor-preempt.sh`） | 不属本任务（有真调用者，经 shell 变量间接） |
+| 16 | `touches-parser.ts` | `:236` / **无入口** | 模块 import 18（`plugin/scripts` + `experiments/…` 双侧镜像）；进程启动 0 | 无 | 不属本任务（c1 不成立）—— AC2 负控制样本 |
+
+**合计**：死 CLI 入口面 **2**（#3 本任务动作对象、#9 观察项）；库上的防御性守卫 **8**（#2/#4/#7/#10/#11/#12/#13/#14）；不属本任务 **6**（#1/#5/#6/#8/#15/#16）= **16**。
+
+**典型真调用者读数原文**（`mirror-full-suite-state.ts`，排除自身与自身测试后）：
+```
+plugin/scripts/worker-driver.ts:232: import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
+（进程启动面：0 行 —— 这就是「入口死、模块活」的读数本身）
+```
+
+**本表暴露的两个仪器教训**（都已在上面按行标注）：① **跨行拼装的调用点会被单行 grep 漏掉**（#6、#15 —— 文件名与 `node` 不在同一行）；② **「同窗口出现 spawnSync + 文件名」不是 spawn**（#11 是 fixture 字符串、#14 是 `node -e` 里的模块 import），这两处若不读行就会把 c3 报成 YES、把库上的防御性守卫误升格成「死 CLI 入口面」。
+
+### AC2 —— 负控制（`touches-parser.ts`）
+
+```
+$ grep -n 'isDirectEntry(import.meta' plugin/scripts/touches-parser.ts
+236:if (isDirectEntry(import.meta, undefined, "touches-parser")) {
+$ grep -cE '^(export )?(async )?function main\(|^const usage = ' plugin/scripts/touches-parser.ts
+0
+```
+⇒ **c1 的「真正的参数解析入口」不成立**：这个文件根本没有任何 argv 解析面，`:236` 那个守卫是**防御性的**（被当脚本执行时保持安静）。**它落在「不属本任务」格与它的调用者计数无关**。
+
+**反事实对照（若它其实是死入口，结论会不同）**：把**同一个谓词**对 `mirror-full-suite-state.ts` 干跑，退入口前取到 `usage :172` + `main :186`（c1 成立）⇒ 同一扫描下它进候选；`touches-parser.ts` 在同一列取 **0** ⇒ 落到另一格。这正是硬规则 2 的**零计数半边**要求的动作——**零计数的配套动作是把谓词对着一个已知为真的样本干跑一次**（否则零计数既可能是「真没有」也可能是「谓词写错了」）。
+
+**第二条对照 —— c3 是 A/B 格的判据，且本扫描器在这一格出过一次假阳性**：`suite-lock-slots.ts` 满足 c1∧c2（守卫 `:180` + `usage :132`/`main :146`；进程启动 0；15 处模块 import）。**若 c3 也成立，它就是死 CLI 入口面、就该退入口**——它落在 B 格的**唯一**依据是 c3 = 否；而**同窗口式 spawn 检测器最初对它报的就是 YES**，读行后才发现 `plugin/test/fan-in-workflow-lock.test.mjs:149` 是在 `node -e` 里 `import { suiteLockSlotCount } from "…/suite-lock-slots.ts"`（**import 模块**），不是启动 CLI。⇒ 判据可**两个方向取假**（既曾把库报成入口候选，也会把真入口漏成库），不是恒真/恒假量。
+
+### AC3 —— `pre-verified-round-record.ts` 不动（反例对照）
+
+```
+$ git status --short plugin/scripts/pre-verified-round-record.ts      → （空）
+$ node --test plugin/test/pre-verified-round-record.test.mjs          → tests 70 / pass 70 / fail 0
+```
+**理由（留给后来者，⛔ 别顺手把同族删干净）**：它的 CLI 面是**活的**——`plugin/workflows/fan-in-execute.js:496` 逐字调用现场（红桶 suite 的 `verification-round` 入账路径，写在 `if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]` 分支内）：
+```sh
+if [ "$full_suite_ran" = "true" ] && [ "$suite_exit" != "0" ]; then
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
+    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified 0 --state red \
+    --root ${worktree} \
+    --suite-log "$suite_log_file" --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" …
+```
+它的守卫 `:1056` / `main :995` 都是活的。它与 `mirror-full-suite-state.ts` **形态同族而结论相反**，所以「判死/判活」必须逐文件测量。
+
+### AC4 —— 退入口留模块（`git diff --stat` + DoD 三条）
+
+```
+$ git diff develop...HEAD --stat
+ plugin/scripts/capability-catalog.sh               |   8 +-
+ plugin/scripts/mirror-full-suite-state.ts          | 150 ++++-----------------
+ plugin/scripts/select-static-checks-for-touches.ts |   2 +-
+ plugin/test/mirror-full-suite-state.test.mjs       |  36 +++--
+ 4 files changed, 44 insertions(+), 152 deletions(-)
+```
+- 删：`usage` 常量、`export function main(argv)`、`getArgValue`、`if (isDirectEntry(import.meta, undefined, "mirror-full-suite-state"))`，以及**仅为入口所用**的 import —— `gate-script-base.ts` 的 `isDirectEntry`、`node:path`、`per-task-suite-record.ts` 的 `resolveSharedCheckout`（逐个确认模块面不再需要；`fs` / `toIsoTimestamp` / `writeJsonAtomic` 保留，模块面在用）。
+- 留：4 个 `export` 签名逐字不变，文件头注释保留（它是这份 state shape 的正本）；头注释里描述 CLI argv / exit 2 的段落改为模块契约（`buildMirrorState` 返回 `{error}`，调用方不写）。
+- 有意**未改** `#!/usr/bin/env node`：同目录的纯库 `suite-lock-slots.ts` 也带 shebang，且 shipped-entry 一族检查动的是 shipped 入口面——改它不在本任务判据内，属"顺手改"风险。
+- DoD 三条实测：`isDirectEntry|export function main` = **0**；4 个 export = **4**；测试文件 `spawnSync` = **0**。
+
+### AC5 —— 测试改造（进程内）
+
+原 `:123` 用例是**唯一**以子进程跑 CLI 的用例（物证「它曾经是给人/给编排跑的入口」）。入口退掉后改为**进程内**：把 `running` 态写到盘上 → `readCurrentState(file)` → `shouldSkipMirrorWrite(cur)` 必须为 true → 盘上状态未被覆盖。保留的正是原用例真正想钉的那条链（**盘上态 → 读 → 跳过决策**），⛔ 不是"断言文件不存在"那种恒真/恒假形状。
+
+```
+$ node --test plugin/test/mirror-full-suite-state.test.mjs
+ℹ tests 7 / pass 7 / fail 0
+```
+
+### AC6 —— 登记面改为如实描述
+
+- `capability-catalog.sh` **CONSUMER（谁按）行**原文写「谁按：fan-in-execute workflow step 4.5 的 `# mirror-state-block` …」——**该调用者已不存在**；改为「【模块库，无 CLI 入口】」（含原入口面死因 + 活的调用者 `worker-driver.ts` 的 `mirrorMechanicalFanInSuiteState` 于 `:5094`、import 于 `:232`、调用点 `:4940`）。⛔ 不留任何指向不存在调用者的「谁按」行。
+- 同表 QUESTION 行补「MODULE LIBRARY 无 CLI 入口」；INVALIDATION 行把「本 workflow 内」改为「机械 fan-in（worker-driver.ts）」；LAST_REAFFIRMED `2026-08-18` → `2026-09-18`。
+- `select-static-checks-for-touches.ts` `FAN_IN_ORCHESTRATION_FILES:283` 注释同步为「mirror MODULE LIBRARY, no CLI entry（条目本身保留：动这个文件仍应触发 fan-in 编排面静态检查）」。
+- 实测：`node --test plugin/test/capability-catalog.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` → **tests 38 / pass 38 / fail 0**；`bash plugin/scripts/capability-catalog.sh --summary` → `341 scripts | 341 declared | 0 unclassified | 336 ship`；`--json` 里该文件的 `consumer` 字段即上述如实描述。
+
+### AC7 / DoD 尾条 —— 全量 suite 的真实读数（⛔ 未达成）
+
+```
+$ bash scripts/test.sh          # worktree 内，2026-09-18
+…
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore
+PASS — AC56 判据1/2/3: recommended (1) is de-ordered …
+STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1
+checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): direct-to-develop-bypass-check(exit=1)
+__OVERHEAD__ lock_overhead_ms=26 partial=1
+EXIT=1
+```
+**红在静态检查阶段的 fail-closed，套件在进入 node 测试泳道之前就中止** ⇒ 本轮**没有任何测试泳道的结论**（不得读成"测试全挂"）。红因逐字指名：
+
+```
+$ node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root <worktree>   → exit 1
+direct-to-develop-bypass-check: evaluated=true ok=false (direct-commit-bypasses-fan-in)
+  RED 2d3a6fa3580947889d42f8234e9d2fe389386f18 — mem: 修掉 quay serve host 泄漏链 + --orphan-serves 回收模式 + serve 堆上限
+```
+
+**「与本分支无关」的三条对照（硬规则 4 推论四：附一个若前提为假则结果会不同的对照）**：
+1. **主检出同红**（同一份 `.git`、develop 树）：在主检出 `--root /home/yale/work/quay` 跑同一条命令 → **exit 1、同一条 RED sha**。⇒ 不是 worktree 上下文造成的。
+2. **该 sha 是 develop 的既存祖先**：`git merge-base --is-ancestor 2d3a6fa35 develop` → true；`git log -1` 报 `2026-09-18 04:11:28 +0000  Yale Huang  mem: 修掉 quay serve host 泄漏链…`——它**早于本分支的创建**，且不在 `direct-to-develop-bypass-check.ts:234 RULED_HISTORICAL_COMMITS` 里（`grep -c 2d3a6fa35` 该文件 = 0）。
+3. **与本任务 delta 面零交集**：本分支 delta 只有 4 个文件（见 AC4 的 `--stat`），没有一个是该提交的产物面（`plugin/scripts/worktree-process-reaper.ts` 等）；该检查的分类面是 reflog + 提交内容，不看工作树。
+
+**这不是本任务一家的红**：`.quay/fan-in-suite-*.log` 里在飞任务的三份 fan-in suite 日志（`gap-suite-bash-lpt-forwarder-dead-on-default-path` / `gap-mirror-mechanical-fanin-fail-open-posture-undocumented` / `gap-mirror-measure-history-retire-dead-writer`）**逐字同一条** `STATIC_CHECK_FAILED: direct-to-develop-bypass-check` + `# suite red static-check` ⇒ **全 loop 阻断**。
+
+**最小可行动修法（留给有裁定权的一层，⛔ 本任务不动它）**：把 `2d3a6fa35` 按既有 ruled 惯例登进 `plugin/scripts/direct-to-develop-bypass-check.ts` 的 `RULED_HISTORICAL_COMMITS`（带一行定案理由），或由裁定层 revert/改走 fan-in；两条路都要求「谁有权裁定一次直投」这个判断，**不属于 per-task worker 的授权面**（本任务 Touches 也不含该 checker），故只报告、不代裁。
+
+**本分支自身可执行的证据面**（全绿）：scoped 门 `bash scripts/test.sh --for-task gap-mirror-full-suite-state-retire-dead-cli-face --allow-thin` → **exit 0**（45 项测试 + 全套 delta 静态检查 PASS：`superseded-capability` / `mirror-pair-drift` / `test-file-snapshot` / `capability-catalog` / `select-static-checks-for-touches` 等）；外加 `mirror-full-suite-state` 7/7、`pre-verified-round-record` 70/70、`capability-catalog` + `select-static-checks-for-touches` 38/38。
+
+### 交付面小结
+
+| 项 | 状态 |
+|---|---|
+| 退 CLI 入口面（`mirror-full-suite-state.ts`） | ✅ `isDirectEntry`/`main` 计数 0，import 面已按需收缩 |
+| 留模块（4 个 export） | ✅ 计数 4，签名不变；活的消费者 `worker-driver.ts:232/4940/5094` 未动 |
+| 测试改造为进程内 | ✅ 7/7 绿，`spawnSync` 计数 0 |
+| 登记面如实描述 | ✅ catalog `0 unclassified`；CONSUMER 行不再指不存在的调用者 |
+| 反例对照（`pre-verified-round-record.ts` 不动） | ✅ 70/70 绿 |
+| 全量 suite 绿（AC7） | ❌ **未达成**：develop 既有直投 `2d3a6fa35` 使静态检查 fail-closed，全 loop 同红（证据与修法见上） |
+| 观察项（本任务不动） | `red-window-triage.ts` 同样满足 1+2+3，但不在 Touches 且有 tick 文档的操作性指令；`mirror-measure-history.ts` / `phase-declare.ts` 等 8 个落 B 格 |
 
 ## Touches
 
