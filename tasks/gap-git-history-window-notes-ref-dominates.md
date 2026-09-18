@@ -2,7 +2,7 @@
 id: gap-git-history-window-notes-ref-dominates
 title: git-history 窗口被 refs/notes/quay-cmv-merge 线性链占满：生产读路径 200 条里 185 条是 notes
   提交，且钉死全仓 code-delta fan-in（AC3 非空判据恒红）
-status: todo
+status: ready
 labels:
   - gap
   - webui
@@ -16,9 +16,9 @@ extra:
 
 **缺口（实测 2026-09-18，本机 `/home/yale/work/quay`，⛔ 非估算）**：`git log --all --topo-order -n 200` 把
 `refs/notes/quay-cmv-merge` 的线性 notes 链**整段连续吐出**（topo-order 对线性链是连续发射的），而该链的 tip
-当前是仓库最新的提交 ⇒ **窗口 200 个槽位里 185 个是 notes 提交**。两个后果：
+当前是仓库最新的提交 ⇒ **窗口 200 个槽位里 185 个是 notes 提交**（实现前复核时已涨到 **200/200**）。两个后果：
 
-**① 生产缺陷（用户可见）**：`readGitHistory`（`packages/quay/src/observation.ts:2636`）的 argv 逐字是
+**① 生产缺陷（用户可见）**：`readGitHistory`（`packages/quay/src/observation.ts:2639`）的 argv 逐字是
 `["-C", root, "log", "--all", "--topo-order", "-n <limit>"]` —— `--all` 含 `refs/notes/*`。
 直调生产读路径实测：`readGitHistory(root, {limit: 200})` ⇒ `status: ok`，**200 条里 185 条 subject 是
 `Notes added by 'git notes add'`**，真实提交只剩 15 条 ⇒ Web UI 的 git-history 页被 notes 噪声淹没。
@@ -29,9 +29,10 @@ extra:
 （链长 233 > 窗口 200，第二父全部落在窗外）⇒ 判据恒红。**该红不属于任何 code-delta 任务的 delta，却让每一轮
 code-delta fan-in 都在 `step=suite` 死掉。**
 
-## Evidence（本条立案时的实测读数，全部为直接量）
+## Evidence
 
-**窗口组成（worktree 内实测）**：
+### 立案读数（2026-09-18，原样保留）
+
 ```
 git log --all --topo-order -n 200 --format="%H %P"
   ⇒ 200 行；其中带 ≥2 父的 186 条；第二父落在窗口内的边缘 = 0
@@ -40,10 +41,12 @@ refs/notes/quay-cmv-merge 链长 = 233（2026-08-12 13:20:01 → 2026-09-18 11:3
 ```
 
 **对照（能区分；硬规则 4 推论四）——把 notes 从 `--all` 里去掉，同一算法**：
+
 ```
 git log --branches --tags --remotes --topo-order -n 200 --format="%H %P"
   ⇒ 窗口 200 条；merge 66 条；第二父落在窗口内的边缘 = 66
 ```
+
 ⇒ **非空判据从「0」翻成「66」** ⇒ 归因成立：占满窗口的是 notes 链，不是测试要验的分页语义。
 
 **「不是本任务 delta」的对照**：同一测试在**主检出**（不含任何本任务改动）**逐字同样失败**；且两侧
@@ -63,16 +66,51 @@ git log --branches --tags --remotes --topo-order -n 200 --format="%H %P"
 `refs/notes/*`** 也算进窗口且它当前占满窗口」——冻结窗口仍会把 notes 冻在里面。⇒ 修法必须**把 notes 从窗口的
 定义里排除**，或让非空判据不再以「窗内第二父边缘」为量。
 
+### 实现前复核 + AC1 两读互校（本 worktree 内，同一瞬间，⛔ 全部为直接量）
+
+取读时刻同一瞬间（`/home/yale/work/quay-worktrees/gap-git-history-window-notes-ref-dominates`，
+HEAD=`b966cf928`，`refs/notes/quay-cmv-merge` tip=`db844fe9a`，链长 **235**）：
+
+| 读法 | 窗口条数 | merge（≥2 父） | **窗内第二父边缘** | notes 条数 |
+|---|---|---|---|---|
+| **(a)** `git log --all --topo-order -n 200` | 200 | **0** | **0** | **200** |
+| **(b)** `git log --branches --tags --remotes --topo-order -n 200` | 200 | 70 | **45** | 0 |
+
+同一读数经**生产读路径**复核（`readGitHistory(root, {limit:200})`，非另起 shell）：
+`{status:"ok", total:200, notes:200, inWindowSecondParentEdges:0, mainlineHead:"db844fe9a"}`
+⇒ 页面的「最新提交」（`mainlineHead`）本身就是一条 notes 提交。
+
+**AC1 结论（病因判定）**：**(a)=0 而 (b)=45 ⇒ 病因是 `refs/notes/*` 占满窗口，不是 ref race。**
+二者是**互斥**的修法：race 的修法是「冻结窗口」（兄弟任务已用），而本条的窗口即使冻结，**notes 仍冻在里面**
+⇒ 照搬兄弟修法会做出一个「冻住了但仍然是 0」的判据（Plan 步骤 1 预见并排除的正是这一条）。
+另一条独立佐证（不是同一读数换说法）：`git rev-list --merges --count refs/notes/quay-cmv-merge` = **0**
+⇒ notes 链是**线性**的，topo-order 对线性链连续发射 ⇒ 它必然整段占据窗口顶部。
+
+### ⚠️ 立案读数与复核读数的差异（如实记录，⛔ 不静默覆盖）
+
+立案读数称 (a) 窗口内「带 ≥2 父的 186 条」，**本次复核不可复现**：同一读法实测 merge = **0**、
+notes = **200/200**。同时 `git rev-list --merges --count refs/notes/quay-cmv-merge` = 0（线性链，
+`cross-machine-verify.sh` 只用 `notes add`，无 `notes merge`）⇒ notes 提交**不可能是**那 186 条合并提交的来源，
+而一条 200 槽的窗口里 185 条是 notes 时非 notes 只有 15 条，**186 这个数在算术上不自洽**。
+⇒ 该数字判为**立案时的误测**（保留原文不改，此处留差异）。
+**结论不受影响且更强**：立案称 185/200 被 notes 占，复核实测 **200/200**；AC3 的失败点
+（`:77` `inWindowSecondParents > 0`）在两种读数下都恰是那一条 ⇒ 病因判定与修法方向不变。
+
 ## Plan
 
-1. **先做两读互校，确认病因不是「窗口位移」**（避免误取兄弟任务的修法）：对同一瞬间取
-   (a) `--all` 窗口与 (b) 去 notes 窗口，比较第二父边缘数。若 (a)=0 而 (b)>0，则病因是 notes 占用，
-   **不是** race ⇒ 冻结 ref 窗口**不适用**（⛔ 照搬兄弟修法会做出一个「冻住了但仍然是 0」的判据）。
-2. **选定修法（二选一，需在实现前把理由写进任务体）**：
-   a. **生产侧排除 notes**：`readGitHistory` 的 `--all` 改为显式 ref 范围（`--branches --tags --remotes`）
-      或加 `--exclude=refs/notes/*`——**同时**要处理一个语义问题：notes 提交此前一直出现在 git-history 页，
-      排除它们是否会让某些既有测试的对拍 oracle 失配（**必须逐个核 `--all` 的其它读者**）。
-   b. **只修测试侧**：让 AC3 的非空判据改用与分页语义同源的量，而不是「实时 `--all` 窗口内的第二父边缘」。
+1. **先做两读互校，确认病因不是「窗口位移」**（避免误取兄弟任务的修法）：见上表 —— (a)=0、(b)=45
+   ⇒ 病因是 notes 占用，**不是** race ⇒ 冻结 ref 窗口**不适用**。✅ 已完成。
+2. **选定修法：取 a（生产侧排除 notes）**。理由（三条，均为可核事实）：
+   1. **AC2 与 DoD#1 直接把生产读数定为落地对象**（`readGitHistory` 的 notes 条数 = 0），
+      只修测试侧在结构上无法满足 AC2 ⇒ 本条的 DoD 本身要求改生产面。
+   2. **最小语义差**：`--exclude=refs/notes/*` 只从 `--all` 的 ref 集合里去掉 notes 命名空间，
+      其余（含 HEAD、`refs/stash`）逐一保留。实测两者在本仓给出**逐条相同**的 200 条窗口
+      （`--exclude=refs/notes/* --all` 与 `--branches --tags --remotes` 交集 200 / 各差 0），
+      但 `--all` 保留 HEAD ⇒ detached-HEAD worktree 的 tip 仍在图上。故取 `--all --exclude=…` 而非白名单。
+   3. **排除整个 notes 命名空间**（`refs/notes/*`）而不是那一个 ref ⇒ 同族的其它 notes ref 一并覆盖。
+   ⛔ **`--exclude` 的位置是承重的**：它只作用于**紧随其后的** ref 列举选项。实测 git 2.43.0：
+   `git log --exclude=refs/notes/* --all` ⇒ 0 notes；`git log --all --exclude=refs/notes/*` ⇒ **200 notes**
+   （静默无效，正是本 bug 的形态）⇒ 实现里把这对方括号钉成一个导出的常量，附注释说明顺序。
 3. **硬规则 3b/4 的两条红线（⛔ 不可接受的修法）**：
    - 把判据改成恒真（例如「仓库里存在 merge 提交」——结构上不可能为假）；
    - 只对两侧交集比对、或让 oracle 回声 `readGitHistory`。
@@ -107,9 +145,54 @@ git log --branches --tags --remotes --topo-order -n 200 --format="%H %P"
 4. **不许越界**：若最终只修测试侧，任务体必须明说「生产读路径 `observation.ts` 未改」；若改了生产侧，
    必须列出全部受影响读者与各自的对拍 oracle 是否已同步。
 
+## 实现记录（Touches 最终清单，⛔ 实现前定稿）
+
+**根因是「窗口定义」被复制在 8 处**（1 处生产 + 7 处 oracle），故修法 = 把窗口定义收敛成一个
+**导出的单一常量** `GIT_HISTORY_REF_SCOPE`（`packages/quay/src/observation.ts`），生产与全部 oracle 都从它取。
+⛔ 这**不是**让 oracle 回声 `readGitHistory`：oracle 仍然自己跑真 git 取 git 的发射序/父/装饰，
+共享的只是**被测的窗口定义**本身。窗口定义另有**独立判据**（AC2 的 notes 条数 = 0）在管，不靠这条共享。
+
+| 文件 | 角色 | 改什么 |
+|---|---|---|
+| `packages/quay/src/observation.ts` | 生产读路径（唯一） | 新增导出常量 + `:2639` 用它 + 更新 docstring |
+| `packages/quay/src/serve-git.ts` | 文档 | 4 处注释写着 `--all --topo-order`（`:4-5`、`:139`、`:1109-1110`）⇒ 同步为去 notes 的窗口定义（仅注释，防漂移） |
+| `packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs` | **AC3 主载体** | oracle 对齐新窗口 + 新增**负控制**（线性窗口 ⇒ 判据必须报红） |
+| `packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs` | oracle（列号/装饰/最新提交 4 处） | 对齐新窗口（`:38` `:56` `:137` `:198`） |
+| `packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs` | oracle（装饰） | 对齐（`:61`） |
+| `packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs` | oracle（列号） | 对齐（`:60`） |
+| `packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs` | oracle（装饰计数） | 对齐（`:146`） |
+| `packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` | oracle 缝（喂冻结字节） | 对齐（`:48`）——否则缝里的窗口与生产窗口不再是同一个 |
+| `packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs` | 冻结 ref 窗口（兄弟任务的修法） | 冻结集合 `for-each-ref refs/` 含 `refs/notes/*` ⇒ 从冻结集合里剔掉 notes，否则「冻住的窗口」与生产窗口定义不一致 |
+| `tasks/gap-git-history-window-notes-ref-dominates.md` | 本任务体 | AC1 读数 / 修法理由 / 读者清单 |
+
+**`--all` 其它读者清单（AC2 要求，⛔ 逐个核过）**——除本页外无第二个读者消费 `readGitHistory`，
+其余是各自独立的 shell-out：
+
+| # | 调用点 | 是否受**同一** notes 污染 | 判定依据 |
+|---|---|---|---|
+| 1 | `packages/quay/src/observation.ts:2639` | **是（窗口型）** | 本任务修的就是它 |
+| 2 | `plugin/vendor/quay/dist/quay.js:35702` | **是，但无独立修法** | 同一行源码的**构建产物**（`.gitignore:4` `dist/`，DIR-108 非提交例外），由 `plugin/scripts/sync-vendor.sh`（postinstall）重建 ⇒ 不手改、不进本 delta |
+| 3 | `plugin/scripts/prod-data-audit.ts:544` `buildLandingEpochIndex` | **是（grep 型，非窗口型）** | `--all` + `%B` 全消息扫任务 id；notes 提交的**正文就是 note 内容**（跨机验证记录，常含任务 id）⇒ 落地时刻可能取自一条 notes 提交。**无 `-n` ⇒ 不受窗口挤出**，是另一类缺陷，不在本任务范围（本任务只负责窗口型） |
+| 4 | `plugin/scripts/prod-data-audit.ts:255` | 否（grep 型，同 3 的机理但 `-1`） | 同上：`--grep=<taskId>` 可能命中 notes 提交体。**同 3，另一类，不在本任务范围** |
+| 5 | `plugin/scripts/ready-pool-check.ts:780` `log --all --format=%s` | 否 | 无 `-n` 的全量扫，读全部 subject；notes subject 是常量串 `Notes added by 'git notes add'`，不参与其谓词 ⇒ 无窗口挤出、无谓词命中 |
+| 6 | `plugin/scripts/fast-mode-telemetry.ts:842` `--all --merges` | 否 | 只取 merge；实测 `git rev-list --merges refs/notes/quay-cmv-merge` = **0**，且 subject 正则 `task/…` 对 notes subject 零命中（实测 `git log refs/notes/… --format=%s \| grep -c 'task/'` = 0） |
+| 7 | `plugin/scripts/fast-mode-telemetry.ts:768` / `:939`、`plugin/scripts/over90-task-gate.ts:42`、`plugin/scripts/fan-in-runid-check.ts:64` | 否 | 同上：`--merges` + `--grep <branch\|fan-in>`；notes 合并提交 **0** ⇒ 结构性进不了结果集 |
+| 8 | `plugin/scripts/verify-deliver-coldstart.sh`（多处） | 否 | 跑在**新建的临时 workspace**（`quay-init` 铺出的空仓），不读本仓的 notes |
+| 9 | `plugin/scripts/workflow-replay.ts:345`、`gate-event-coverage-check.ts:333`、`*-closure-{assertion,ratchet}.ts` | 否 | `--all` 是**它们自己的 CLI 参数**（`--all --loop`），不是 `git log` 的 |
+
+**AC2 读者清单的取证（硬规则 2：零计数要先对已知为真的样本干跑谓词）**：谓词
+`同一文件里既含 "--all" 又含 readGitHistory(` ⇒ 命中 8 个文件（7 测试 + observation.ts）；
+`git rev-list --merges --count refs/notes/quay-cmv-merge` = 0；`git log refs/notes/quay-cmv-merge --format=%s | grep -c 'task/'` = 0。
+
 ## Touches
 
+- packages/quay/src/observation.ts
+- packages/quay/src/serve-git.ts
 - packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs
+- packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs
+- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs
+- packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs
+- packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs
+- packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs
+- packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs
 - tasks/gap-git-history-window-notes-ref-dominates.md
-（若 Plan 取 a，加入 `packages/quay/src/observation.ts` 与受影响的兄弟测试文件——⛔ 实现前先把 Touches 补全，
-不要边做边加。）
