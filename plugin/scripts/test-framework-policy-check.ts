@@ -60,7 +60,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
-// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, readFileSafe, flagValue } from "./gate-script-base.ts";

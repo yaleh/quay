@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
 import { walkFiles } from "./fs-walk.ts";
-// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";

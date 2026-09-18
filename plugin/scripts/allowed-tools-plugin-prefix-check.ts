@@ -33,7 +33,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~57 copies of the
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the copies of the
 // indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, emitPass, emitFail, emitNotEvaluated, readFrontmatter, flagValue } from "./gate-script-base.ts";

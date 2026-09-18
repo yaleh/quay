@@ -44,7 +44,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
-// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";

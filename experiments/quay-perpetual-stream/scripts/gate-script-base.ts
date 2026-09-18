@@ -2,7 +2,7 @@
 // Import the functions/classes you need from this module.
 //
 // Usage:
-//   import { parseArgs, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry } from "./gate-script-base.ts";
+//   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry } from "./gate-script-base.ts";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -85,6 +85,42 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   }
 
   return result;
+}
+
+// ── flagValue ───────────────────────────────────────────────────────────────────────────────────────
+// Read ONE `--flag <value>` pair out of an already-sliced argv (callers pass `argv.slice(2)` — the
+// positional args, NOT the whole `process.argv`). Returns the token following `name`, or `undefined`
+// when `name` is absent or is the last token with no value after it.
+//
+// WHY THIS EXPORT EXISTS — it is an extraction, not a new idea. A `semantic-dedup-scan` pass
+// (.quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1789723686226`,
+// finding `arg-parsing-helper-family`, verdict `real-duplication`, suggestedAction `extract`) found
+// ~60 private copies of this idiom across plugin/scripts under 9 spellings (getArgValue / argValue /
+// getFlagValue / parseArg / flagVal / …) and noted that THIS file, imported by the whole checker
+// surface, exported no arg helper for them to converge on. Every copy carried the SAME
+// `indexOf(name)` + "next token" algorithm; they differed only in trivia (ternary vs early-return,
+// typed vs untyped) EXCEPT at one input where the trivia is load-bearing — an EMPTY-STRING value
+// (`prog --flag ""`):
+//   • `""`          — the majority form: `idx === -1 ? undefined : args[idx + 1]`
+//   • `undefined`   — the falsy form:  `idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined`
+// The falsy form is RETIRED here rather than preserved, because its only effect is that a value the
+// user DID pass reads as absent, and the caller's `?? default` then silently substitutes the
+// default for it (硬规则 3b: "读不懂" 不得伪装成 "没给"). A caller that wants that reading must say
+// so at its own call site (`flagValue(args, "--x") || undefined`) instead of inheriting it from a
+// private copy. See plugin/test/gate-script-base-flag-value.test.mjs for the control that pins the
+// two apart.
+//
+// ⛔ What this helper deliberately does NOT do:
+//   • It does NOT accept the `--flag=value` spelling. No copy it replaces did either (`indexOf`
+//     matches the exact token `--flag`), so gaining the `=` form here would change every caller's
+//     input language at once. Use parseArgs()'s spec-driven path where `=` must be supported.
+//   • It does NOT treat a missing value as an error. Pair it with requireArg() when an absent value
+//     must be a usage error (exit 2) rather than a silent fallback.
+//   • It is NOT the arity-1 `argvFlag(name)` shape: the callers that read `process.argv` directly
+//     now write `flagValue(process.argv, name)`, so the token source stays visible at the call site.
+export function flagValue(argv: readonly string[], name: string): string | undefined {
+  const idx = argv.indexOf(name);
+  return idx === -1 ? undefined : argv[idx + 1];
 }
 
 // ── readFrontmatter ─────────────────────────────────────────────────────────────────────────────────

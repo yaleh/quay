@@ -57,7 +57,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { matchAtCommandPosition } from "./checker-lib.ts";
 // The --root read below is now delegated to the shared `flagValue`; its indexOf+next-arg read was
-// one of the ~73 copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
+// one of the copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 

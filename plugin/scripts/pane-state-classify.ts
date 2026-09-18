@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 // flagArg (below, 4 identical closures) is now a one-line arity adapter over the shared `flagValue`;
-// its algorithm was one of the ~73 hand-written copies of the indexOf+next-arg idiom in
+// its algorithm was one of the hand-written copies of the indexOf+next-arg idiom in
 // plugin/scripts (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine
 // `semantic-dedup-scan`). The adapter is named `flagArg`, not `flagValue`, so it cannot shadow the
 // import.

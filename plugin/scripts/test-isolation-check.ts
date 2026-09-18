@@ -97,7 +97,7 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 // finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
 // exported it.
 import { firstArgRegion } from "./source-text-lib.ts";
-// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, readFileSafe, flagValue } from "./gate-script-base.ts";

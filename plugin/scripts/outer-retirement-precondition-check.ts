@@ -44,7 +44,7 @@ import { fileURLToPath } from "node:url";
 // `shell-scan-surface-family`). EXEC_EXTENSIONS went with it and is still this checker's reference
 // set for listScriptBasenames (.md is deliberately absent: a doc mention is not a call surface).
 import { listExecutableFiles, EXEC_EXTENSIONS } from "./fs-walk.ts";
-// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";

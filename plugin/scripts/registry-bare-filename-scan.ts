@@ -39,7 +39,7 @@ import { fileURLToPath } from "node:url";
 // copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside the finding's own pair). Not
 // re-exported: this module never exported it.
 import { stripComments } from "./source-text-lib.ts";
-// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the ~73 byte-identical
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";

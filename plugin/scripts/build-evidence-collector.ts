@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 // argvFlag (below) reads its tokens straight out of process.argv; the indexOf+next-arg algorithm now
-// lives in gate-script-base.ts as `flagValue` (one of the ~57 copies in plugin/scripts;
+// lives in gate-script-base.ts as `flagValue` (one of the copies in plugin/scripts;
 // .quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import type {
