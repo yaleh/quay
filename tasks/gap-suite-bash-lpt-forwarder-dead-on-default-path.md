@@ -2,7 +2,7 @@
 id: gap-suite-bash-lpt-forwarder-dead-on-default-path
 title: bash LPT 转发器在默认路径上是死代码（≈5.4s/轮无用功）：Phase 1 搬进 legacy 分支（行为等价）；Phase 2
   彻底退役需人裁定撤掉 QUAY_SUITE_SCHEDULER=0
-status: todo
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
