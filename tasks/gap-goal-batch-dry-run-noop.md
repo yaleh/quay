@@ -36,12 +36,12 @@ extra:
 
 ## AC
 
-- [ ] `case "batch"`（`goal-store.ts`）从 `rest` 解析 `--dry-run`，可用 `grep -n "dry-run" packages/quay/src/goal-store.ts` 核对该 case 块内出现该字符串
-- [ ] `writeBatch()` 参数类型含 `dryRun` 字段，且该值被传入每条记录的 `write(...)` 调用（`grep -n "dryRun" packages/quay/src/goal-store.ts` 在 `writeBatch` 函数体内命中 ≥2 处：解构/透传 + 提交守卫）
-- [ ] `commitStoreBatch(...)` 调用被 `if (!dryRun)`（或等价条件）包裹——`dryRun: true` 时不产生新提交
-- [ ] 新增/扩展的回归测试：对一个已存在的 goal 记录跑 `writeBatch([{id, criterion: "<新值>"}], { dryRun: true })`，测试内用 `git log -1 --format=%H` 前后对比 + 目标文件内容前后对比，均断言"不变"；同一测试反向验证 `dryRun: false`（或省略）时确实提交且文件确实改变（正负对照缺一不可）
-- [ ] `node --experimental-strip-types packages/quay/bin/quay.ts goal batch --dry-run --json '[{"id":"<既有goal id>","criterion":"<test-only 不落地>"}]'` 手工验证：命令退出后 `git status`/`git log -1` 均无新变化，且目标 goal 文件内容与执行前逐字相同
-- [ ] `scripts/test.sh --for-task gap-goal-batch-dry-run-noop` 绿（含新增测试）
+- [x] `case "batch"`（`goal-store.ts`）从 `rest` 解析 `--dry-run`，可用 `grep -n "dry-run" packages/quay/src/goal-store.ts` 核对该 case 块内出现该字符串
+- [x] `writeBatch()` 参数类型含 `dryRun` 字段，且该值被传入每条记录的 `write(...)` 调用（`grep -n "dryRun" packages/quay/src/goal-store.ts` 在 `writeBatch` 函数体内命中 ≥2 处：解构/透传 + 提交守卫）
+- [x] `commitStoreBatch(...)` 调用被 `if (!dryRun)`（或等价条件）包裹——`dryRun: true` 时不产生新提交
+- [x] 新增/扩展的回归测试：对一个已存在的 goal 记录跑 `writeBatch([{id, criterion: "<新值>"}], { dryRun: true })`，测试内用 `git log -1 --format=%H` 前后对比 + 目标文件内容前后对比，均断言"不变"；同一测试反向验证 `dryRun: false`（或省略）时确实提交且文件确实改变（正负对照缺一不可）
+- [x] `node --experimental-strip-types packages/quay/bin/quay.ts goal batch --dry-run --json '[{"id":"<既有goal id>","criterion":"<test-only 不落地>"}]'` 手工验证：命令退出后 `git status`/`git log -1` 均无新变化，且目标 goal 文件内容与执行前逐字相同
+- [x] `scripts/test.sh --for-task gap-goal-batch-dry-run-noop` 绿（含新增测试）
 
 ## DoD
 
