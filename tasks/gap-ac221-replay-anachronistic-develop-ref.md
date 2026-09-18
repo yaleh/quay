@@ -89,8 +89,8 @@ reflog 覆盖深度实测：4481 条、最早 `2026-08-23T03:25:46Z` ⇒ 覆盖�
 
 ## Definition of Done
 
-- [ ] `developTipAt` 用 reflog 忠实重建 develop ref（+ 完备性自检 + fail-closed 三态）落地；正控制断言进判据本体；AC1-AC7 全勾；criterion 端到端绿；land 到 develop。
-- [ ] criterion 由 goal-driver 下一轮独立复跑，ledger tail 翻 pass（AC-221 由「当前为假」翻回真）。
+- [x] `developTipAt` 用 reflog 忠实重建 develop ref（+ 完备性自检 + fail-closed 三态）落地；正控制断言进判据本体；AC1-AC7 全勾；criterion 端到端绿；land 到 develop。
+- [ ] criterion 由 goal-driver 下一轮独立复跑，ledger tail 翻 pass（AC-221 由「当前为假」翻回真）。（待外部）
 
 ## Touches
 
