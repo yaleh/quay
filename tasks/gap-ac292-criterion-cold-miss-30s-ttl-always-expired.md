@@ -202,6 +202,8 @@ goal_ac: AC-292
 - packages/quay/src/serve.ts
 - packages/quay/test/gap-ac292-board-request-path-cold-build.test.mjs
 - packages/quay/test/serve-board.test.mjs
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
 
 （说明：`goals/AC-292-*.md` 属人与驱动维护面，⛔ 不在本 Touches 内 —— 本任务明令禁止改判据。
 运行时证据若落 `.quay/` 则**保持未跟踪**，故不声明 —— `anti-drift-touches-check` 只比对已跟踪文件。
@@ -213,3 +215,6 @@ goal_ac: AC-292
 （且不加开关时它与 tick 首建**竞态**，本次侥幸通过）。两处都显式用 `QUAY_BOARD_SNAPSHOT_DISABLED_ENV` 关掉 tick 并在
 `finally` 还原。先例：`gap-ac179` 同样把三份既有 dashboard 测试纳入 Touches 一并调整。其余 11 条未改动 ——
 它们的 fixture 变更都发生在 `startServer` **之前**，快照在变更之后构建，语义不受影响（已逐条核过并实跑 13/13 绿）。）
+
+**`plugin/skills/init/SKILL.md` / `plugin/skills/manager/SKILL.md` 两条的加入理由（develop 侧的全量静态闸红，非本任务 delta）**：`orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md` 已随兄弟任务落在 develop 上，但两个 SPEC 声明点（`plugin/skills/init/SKILL.md` 的 `reference-doc` 块、`plugin/skills/manager/SKILL.md` 的 SPEC index）都没登记 ⇒ `spec-declaration-point-check` **在 develop 上 exit 1**（已在**干净的 develop 归档树**上复现，与本分支无关 ——`git diff develop...HEAD` 不含这两个文件）。它是仓库级静态闸，scoped 层被排除、只在 full 门跑 ⇒ **所有 code-delta 任务的 fan-in 都在 `step=suite` 中止**（日志形如 `STATIC_CHECK_FAILED: spec-declaration-point-check exit=1` + `# tests 0` + `# fail 45`，那 45 是 fail-closed 雪崩、一个测试都没跑）。develop 侧未被独立修复（该 SPEC 的 owner 任务 `gap-quay-init-native-reconcile` 仍为 `todo`，其 Touches 只含 init 一侧、且不含 manager 一侧）⇒ 按 `out-of-touches-red-fix-self-inflicts-anti-drift-take-develop` 的「仍不收敛 ⇒ 把它登记为 Touches 并在提交信息里写明理由」处置：**补两行机械声明**（init 为字母序 `reference-doc` 行、manager 为 index 末尾追加），内容由 develop 既有事实唯一决定、不引入任何本任务语义。两条都不是本任务机制的一部分。
+
