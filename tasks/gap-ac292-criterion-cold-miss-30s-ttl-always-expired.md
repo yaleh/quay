@@ -2,7 +2,7 @@
 id: gap-ac292-criterion-cold-miss-30s-ttl-always-expired
 title: AC-292 复验间歇假红：/board 请求路径现付 30s-TTL 冷构建（实测冷 9.3–16.6s / 热 2.9s），越过判据 curl
   --max-time 10 —— 与 AC-179 同一病灶，修法照搬（后台构建 → 请求路径只读快照）
-status: ready
+status: done
 labels:
   - gap
   - webui
