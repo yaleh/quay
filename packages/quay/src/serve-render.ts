@@ -33,11 +33,14 @@ import {
 export { htmlLangTag, DEFAULT_LANG, type Lang, type LangSource, type LangResolution } from "./serve-lang.ts";
 export { navLabel, navLabelsFor, pageNameFor, NAV_KEYS, NAV_LABELS, type NavKey } from "./serve-i18n.ts";
 
-// live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
-// two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
-// back to the generic 「无数据」.
-export const LIVE_STATE_RUNNING_UNWIRED_LABEL = "在跑但未接遥测";
-export const LIVE_STATE_NOT_RUNNING_LABEL = "未在运行";
+// ⚠️ The two live-state discriminator texts (`LIVE_STATE_RUNNING_UNWIRED_LABEL` /
+// `LIVE_STATE_NOT_RUNNING_LABEL`, "在跑但未接遥测" / "未在运行") used to live HERE. They are DELETED
+// (gap-webui-live-body-copy-en-zh, 2026-09-18): a page-specific Chinese string in a module EVERY page
+// imports was exactly the drift the body-copy series removes, and /live — the single consumer this
+// module's own comment named — now resolves the words through serve-i18n.ts ROW 19
+// (`liveStateRunningUnwired` / `liveStateNotRunning`), whose zh column is byte-equal to the two
+// literals that stood here. ⛔ Reintroducing a page's copy as a shared constant is the regression;
+// the dictionary is where a page's words belong.
 
 // ── Rendering helpers (moved from serve.ts) ──────────────────────────────────
 

@@ -107,9 +107,12 @@ function assert(cond, msg) {
   }
 }
 
-function get(port, urlPath) {
+// `headers` is optional and defaults to none, so every pre-existing call site is unchanged
+// (gap-webui-live-body-copy-en-zh added it: /live's body copy is now language-dependent, so a test
+// that asserts a particular language must be able to ASK for it).
+function get(port, urlPath, headers = {}) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
@@ -1757,8 +1760,12 @@ async function main() {
       const gitBefore = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });
 
       // --- /live ---
-      const live = await get(obsPort, "/live");
-      assert(live.status === 200, "AC4: GET /live returns 200 with the telemetry store present (got " + live.status + ")");
+      // ⚠️ gap-webui-live-body-copy-en-zh: /live's BODY copy is dictionary copy now (serve-i18n ROW
+      // 19) and the DEFAULT language is `en`, so the zh assertions are made against an EXPLICIT
+      // `Cookie: lang=zh` — they keep their exact original meaning as the zh regression guard — and
+      // the SAME facts are asserted in English straight after. A bare `/live` renders English now.
+      const live = await get(obsPort, "/live", { Cookie: "lang=zh" });
+      assert(live.status === 200, "AC4: GET /live (zh) returns 200 with the telemetry store present (got " + live.status + ")");
       assert(live.body.includes("OBS-A"), "AC2: /live page shows the in-flight task id (OBS-A)");
       assert(!live.body.includes("OBS-B"), "AC2: /live does NOT list the completed task (OBS-B)");
       assert(!live.body.includes("OBS-BLK"), "AC2: /live does NOT list the blocked-wait event (OBS-BLK)");
@@ -1766,6 +1773,17 @@ async function main() {
       assert(live.body.includes("分钟"), "AC2: /live shows the elapsed-minutes column");
       if (fs.existsSync("/proc/pressure/cpu")) {
         assert(live.body.includes("CPU 压力"), "AC2: /live shows the CPU-pressure row when /proc/pressure/cpu is readable");
+      }
+      // The en arm — the same three moved words, positively asserted (⛔ NOT a `!includes("中文")`
+      // check: under en every Chinese string is absent by construction, so a negative arm there would
+      // be true for the wrong reason — 决定记录 ④).
+      const liveEn = await get(obsPort, "/live");
+      assert(liveEn.status === 200, "AC4 (en): GET /live returns 200 with the telemetry store present");
+      assert(liveEn.body.includes("OBS-A"), "AC2 (en): /live still shows the in-flight task id (OBS-A)");
+      assert(liveEn.body.includes("In flight: 1 / cap:"), "AC2 (en): /live shows the cap label in English");
+      assert(liveEn.body.includes(" min<"), "AC2 (en): /live shows the elapsed-minutes column in English");
+      if (fs.existsSync("/proc/pressure/cpu")) {
+        assert(liveEn.body.includes("CPU pressure (some avg10):"), "AC2 (en): /live shows the CPU-pressure row in English");
       }
       // Nav links present on the task list page (the observation surface is reachable).
       const obsList = await get(obsPort, "/tasks");
@@ -1872,11 +1890,18 @@ async function main() {
       // a freshly-written tick-log.md) ⇒ /live must say 「在跑但未接遥测」 (running-unwired), the
       // AC2 negative control. Then restore and confirm recovery.
       fs.renameSync(eventsDir, eventsDir + ".bak");
-      const liveEmpty = await get(obsPort, "/live");
-      assert(liveEmpty.status === 200, "AC4: GET /live still returns 200 when the telemetry store is renamed (got " + liveEmpty.status + ")");
+      // zh arm explicit (gap-webui-live-body-copy-en-zh — see the /live block above), plus the en arm
+      // for the same two facts. ⚠️ The reader's own explanation is DATA and stays Chinese in both
+      // arms, so neither arm asserts "no CJK".
+      const liveEmpty = await get(obsPort, "/live", { Cookie: "lang=zh" });
+      assert(liveEmpty.status === 200, "AC4: GET /live (zh) still returns 200 when the telemetry store is renamed (got " + liveEmpty.status + ")");
       assert(liveEmpty.body.includes("在跑但未接遥测") && liveEmpty.body.includes("live_state=running-unwired"),
         "AC2/AC4: telemetry absent + activity signals present ⇒ /live says 「在跑但未接遥测」(running-unwired)");
       assert(!liveEmpty.body.includes("未在运行"), "AC2/AC4: running-unwired and not-running are distinguishable on the page");
+      const liveEmptyEn = await get(obsPort, "/live");
+      assert(liveEmptyEn.body.includes("Running, telemetry not wired") && liveEmptyEn.body.includes("live_state=running-unwired"),
+        "AC2/AC4 (en): the unwired state word and its machine key are both on the English page");
+      assert(!liveEmptyEn.body.includes("Not running"), "AC2/AC4 (en): the two empty states stay distinguishable in English");
       fs.renameSync(eventsDir + ".bak", eventsDir);
       const liveRestored = await get(obsPort, "/live");
       assert(liveRestored.status === 200 && liveRestored.body.includes("OBS-A"),
@@ -1886,10 +1911,16 @@ async function main() {
       // fails ⇒ /live must show 「读失败」, NOT 「无数据」, and still 200.
       fs.rmSync(eventsDir, { recursive: true, force: true });
       fs.writeFileSync(eventsDir, "i am a file, not a directory\n");
-      const liveErr = await get(obsPort, "/live");
-      assert(liveErr.status === 200, "AC5: /live returns 200 even when the telemetry store is unreadable (got " + liveErr.status + ")");
+      const liveErr = await get(obsPort, "/live", { Cookie: "lang=zh" });
+      assert(liveErr.status === 200, "AC5: /live (zh) returns 200 even when the telemetry store is unreadable (got " + liveErr.status + ")");
       assert(liveErr.body.includes("读失败"), "AC5: /live shows 「读失败」 for a present-but-unreadable store");
       assert(!liveErr.body.includes("无数据"), "AC5: 「读失败」 and 「无数据」 are distinguishable on the page");
+      const liveErrEn = await get(obsPort, "/live");
+      assert(liveErrEn.body.includes("Read failed"), "AC5 (en): the read-failure label is English");
+      // ⚠️ The reader's `reason` after the label is DATA (observation.ts's diagnostic) and renders
+      // verbatim in both languages — asserted HERE so the classification is a pinned fact rather than
+      // an assumption (serve-i18n ROW 19 names it as this page's out-of-scope residue).
+      assert(liveErrEn.body.includes("读取遥测失败"), "AC5 (en): the reader's own diagnostic is carried verbatim (DATA, not copy)");
     } finally {
       if (obsServer) {
         obsServer.close();
@@ -2071,12 +2102,27 @@ async function main() {
         taskId, runId: `worker-${taskId}`, pid: "4242", sessionId: null, startedAtMs: Date.now() - 60_000,
         implCompletedAtMs: null, status, phase, suite: null, minutes: 1, liveness: "alive", blocks: [], blockedBy: [],
       });
-      const out = renderLivePage({ ...base, inFlight: [t("gap-live-1", "ready", "implementing"), t("gap-live-2", "done", "fan-in")] });
+      const fixture = { ...base, inFlight: [t("gap-live-1", "ready", "implementing"), t("gap-live-2", "done", "fan-in")] };
+      // ⚠️ gap-webui-live-body-copy-en-zh: `lang` omitted now means the DEFAULT (`en`), so the
+      // pre-existing zh assertions take an explicit `"zh"` (they keep their meaning as the zh
+      // regression guard) and the en arm is pinned against the SAME fixture right after. What this
+      // block is about — the two-axis STRUCTURE — is asserted in both.
+      const out = renderLivePage(fixture, null, "zh");
       assert(out.includes("<th>状态</th>") && out.includes("<th>阶段</th>"), "AC4: /live table has 状态 and 阶段 columns (two axes)");
       assert(out.includes("ready"), "AC4: the 状态 column renders the lifecycle status (ready)");
       assert(out.includes("实现中"), "AC4: the 阶段 column renders the implementing phase label");
       assert(out.includes("fan-in"), "AC4: the 阶段 column renders the fan-in phase label");
       assert(!out.includes("已完工待落地"), "AC4: the old conflated 已完工待落地 label is gone");
+
+      const outEn = renderLivePage(fixture);
+      assert(outEn.includes("<th>status</th>") && outEn.includes("<th>phase</th>"), "AC4 (en): the two axis columns are English");
+      assert(outEn.includes("ready"), "AC4 (en): the 状态 column renders the lifecycle status (ready)");
+      assert(outEn.includes("Implementing"), "AC4 (en): the 阶段 column renders the implementing phase label");
+      // ⚠️ `fan-in` is language-NEUTRAL and stays a literal in BOTH arms (see serve-live.phaseLabel's
+      // note) — asserted here so a future "translate everything" pass that turned it into a dictionary
+      // row would red this arm rather than silently moving the en baseline.
+      assert(outEn.includes("fan-in"), "AC4 (en): the language-neutral fan-in token is unchanged");
+      assert(!outEn.includes("实现中") && !outEn.includes("阶段"), "AC4 (en): no zh phase word/header leaks into the en table");
     }
   }
 

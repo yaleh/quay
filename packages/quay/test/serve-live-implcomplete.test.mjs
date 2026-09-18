@@ -93,8 +93,13 @@ test("AC1: /live table renders the two axes — 状态 (lifecycle) vs 阶段 (ex
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const live = await get(port, "/live");
-    assert.equal(live.status, 200, "AC1: GET /live returns 200");
+    // ⚠️ gap-webui-live-body-copy-en-zh: the /live BODY copy now resolves through serve-i18n.ts's
+    // LIVE_LABELS and the DEFAULT language is `en` — so the original zh assertions below are made
+    // against an EXPLICIT `Cookie: lang=zh` request (they keep their original meaning, now as the zh
+    // regression guard) and the en arm is pinned right after them. A bare `/live` would render
+    // English and these assertions would fail for the WRONG reason (see 决定记录 ④ in the task body).
+    const live = await get(port, "/live", { Cookie: "lang=zh" });
+    assert.equal(live.status, 200, "AC1: GET /live (zh) returns 200");
     // The two-axis columns render (状态 = lifecycle, 阶段 = execution phase).
     assert.ok(live.body.includes("<th>状态</th>"), "AC1: /live table has a 状态 column");
     assert.ok(live.body.includes("<th>阶段</th>"), "AC1: /live table has a 阶段 column");
@@ -118,6 +123,23 @@ test("AC1: /live table renders the two axes — 状态 (lifecycle) vs 阶段 (ex
     assert.ok(imRow.includes("—"), "AC1: the implementing task's 待落地时长 cell is a placeholder (—)");
     // The awaiting-land task's 待落地时长 is now − implCompletedAtMs = ~5 minutes → "5m".
     assert.ok(alRow.includes("5m"), "AC1: the awaiting-land task shows the 待落地时长 (~5m)");
+
+    // …and the SAME table under the default language (the arm that would have been left unwatched).
+    // The two-axis STRUCTURE is unchanged — only the words moved — so this arm re-asserts the
+    // structure in English rather than only checking that Chinese is gone.
+    const liveEn = await get(port, "/live");
+    assert.equal(liveEn.status, 200, "AC1 (en): GET /live (the default) returns 200");
+    assert.ok(liveEn.body.includes("<th>status</th>"), "AC1 (en): the 状态 column header is English");
+    assert.ok(liveEn.body.includes("<th>phase</th>"), "AC1 (en): the 阶段 column header is English");
+    assert.ok(liveEn.body.includes("<th>awaiting-land duration</th>"), "AC1 (en): the 待落地时长 column header is English");
+    const imRowEn = liveEn.body.split("</tr>").find((r) => r.includes("IM-1"));
+    const alRowEn = liveEn.body.split("</tr>").find((r) => r.includes("AL-1"));
+    assert.ok(imRowEn && alRowEn, "AC1 (en): both task rows still render");
+    assert.ok(imRowEn.includes("Implementing"), "AC1 (en): the implementing task's phase cell is English");
+    assert.ok(alRowEn.includes("Awaiting land"), "AC1 (en): the awaiting-land task's phase cell is English");
+    assert.ok(imRowEn.includes(" min<"), "AC1 (en): the elapsed cell carries the English minute unit");
+    assert.ok(!liveEn.body.includes("实现中") && !liveEn.body.includes("待落地") && !liveEn.body.includes("分钟"),
+      "AC1 (en): no zh body word leaks into the en table");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }

@@ -36,9 +36,12 @@ const VALID_SECTIONS =
 // loopback probe did not even match startServer's 0.0.0.0 bind. Measured EADDRINUSE + the fix (bind
 // port 0, read server.address().port) are recorded in packages/quay/test/serve-board.test.mjs.
 
-function get(port, urlPath) {
+// `headers` is optional and defaults to none, so every pre-existing call site is unchanged
+// (gap-webui-live-body-copy-en-zh added it: /live's body copy is now language-dependent, so a test
+// that asserts a particular language must be able to ASK for it).
+function get(port, urlPath, headers = {}) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -91,14 +94,31 @@ test("AC2 negative control: telemetry absent + activity present ⇒ /live says �
 
     server = await startFor(wsObj.ws);
     const port = server.address().port;
-    const live = await get(port, "/live");
-    assert.equal(live.status, 200, "AC2: /live still 200");
+    // ⚠️ gap-webui-live-body-copy-en-zh: the /live body copy now follows the request's language and
+    // the DEFAULT is `en`, so the pre-existing zh assertions are made against an EXPLICIT
+    // `Cookie: lang=zh` (unchanged in meaning — they are now the zh regression guard) and the en arm
+    // follows. ⛔ The negative assertions STAY on the zh arm: under en they would be vacuously true
+    // for the wrong reason (决定记录 ④).
+    const live = await get(port, "/live", { Cookie: "lang=zh" });
+    assert.equal(live.status, 200, "AC2: /live (zh) still 200");
     assert.ok(live.body.includes("在跑但未接遥测"), "AC2: page says 「在跑但未接遥测」");
     assert.ok(live.body.includes("live_state=running-unwired"), "AC2: machine key live_state=running-unwired present");
     assert.ok(live.body.includes("最近 30 分钟有 1 条提交"), "AC1: explanation names the commit signal");
     assert.ok(live.body.includes("tick 日志在"), "AC1: explanation names the tick-log signal");
     assert.ok(live.body.includes("--task-start"), "mechanism: next step points at --task-start/--task-end");
     assert.ok(!live.body.includes("未在运行"), "AC1: not-running text is NOT shown for the running-unwired state");
+
+    // …and the SAME state under the default language. ⚠️ The reader's own `liveExplanation` is DATA
+    // and stays Chinese by design (observation.ts's diagnostic; this page renders it verbatim through
+    // `escapeHtml`) — so this arm asserts the MOVED words positively and does NOT assert "no CJK".
+    const liveEn = await get(port, "/live");
+    assert.equal(liveEn.status, 200, "AC2 (en): /live returns 200");
+    assert.ok(liveEn.body.includes("Running, telemetry not wired"), "AC2 (en): the state word is English");
+    assert.ok(liveEn.body.includes("Next: check that the target project's loop calls"), "AC2 (en): the next-step line is English");
+    assert.ok(liveEn.body.includes("<code>--task-start</code>/<code>--task-end</code>"), "AC2 (en): the next-step `{flags}` hole carries its payload, not the template syntax");
+    assert.ok(!liveEn.body.includes("{flags}"), "AC2 (en): no unfilled placeholder is rendered");
+    assert.ok(!liveEn.body.includes("在跑但未接遥测") && !liveEn.body.includes("Not running"),
+      "AC2 (en): neither the zh word nor the OTHER state's word leaks in");
 
     // Unit-level pin on the same workspace.
     const unit = readLive(wsObj.ws, { nowMs: Date.now() });
@@ -122,13 +142,21 @@ test("AC3 negative control: telemetry absent + NO activity ⇒ /live says 「未
   try {
     server = await startFor(wsObj.ws);
     const port = server.address().port;
-    const live = await get(port, "/live");
-    assert.equal(live.status, 200, "AC3: /live still 200");
+    // zh arm explicit — same migration as AC2 above.
+    const live = await get(port, "/live", { Cookie: "lang=zh" });
+    assert.equal(live.status, 200, "AC3: /live (zh) still 200");
     assert.ok(live.body.includes("未在运行"), "AC3: page says 「未在运行」");
     assert.ok(live.body.includes("live_state=not-running"), "AC3: machine key live_state=not-running present");
     assert.ok(live.body.includes("无任何活动信号"), "AC1: explanation states no activity signal is present");
     assert.ok(live.body.includes("会话/cron"), "mechanism: next step points at session/cron");
     assert.ok(!live.body.includes("在跑但未接遥测"), "AC1: running-unwired text is NOT shown for the not-running state");
+
+    // …and the SAME state under the default language (the reader's explanation stays Chinese — DATA).
+    const liveEn = await get(port, "/live");
+    assert.ok(liveEn.body.includes("Not running"), "AC3 (en): the state word is English");
+    assert.ok(liveEn.body.includes("Next: check whether the session / cron is running."), "AC3 (en): the next-step line is English");
+    assert.ok(!liveEn.body.includes("未在运行") && !liveEn.body.includes("Running, telemetry not wired"),
+      "AC3 (en): neither the zh word nor the OTHER state's word leaks in");
 
     const unit = readLive(wsObj.ws, { nowMs: Date.now() });
     assert.equal(unit.liveState, "not-running");
@@ -159,23 +187,34 @@ test("positive + AC4 no-regression: telemetry present ⇒ running; unreadable st
     server = await startFor(wsObj.ws);
     const port = server.address().port;
 
-    // Positive: telemetry records exist ⇒ live_state=running.
-    const live = await get(port, "/live");
-    assert.equal(live.status, 200, "positive: /live 200 with telemetry present");
+    // Positive: telemetry records exist ⇒ live_state=running. zh arm explicit (see AC2 above); the
+    // negative arms stay HERE because under en they would be vacuously true (决定记录 ④).
+    const live = await get(port, "/live", { Cookie: "lang=zh" });
+    assert.equal(live.status, 200, "positive: /live (zh) 200 with telemetry present");
     assert.ok(live.body.includes("live_state=running"), "positive: machine key live_state=running present");
     assert.ok(live.body.includes("上限"), "positive: running summary renders the cap label (上限), not the retired 并发数");
     assert.ok(!live.body.includes("在跑但未接遥测") && !live.body.includes("未在运行"),
       "positive: neither telemetry-empty state text appears when telemetry is present");
+    const liveEn = await get(port, "/live");
+    assert.ok(liveEn.body.includes("live_state=running"), "positive (en): machine key live_state=running present");
+    assert.ok(liveEn.body.includes("In flight: 1 / cap:"), "positive (en): the running summary renders its English cap label");
+    assert.ok(!liveEn.body.includes("Running, telemetry not wired") && !liveEn.body.includes("Not running"),
+      "positive (en): neither English empty-state text appears when telemetry is present");
 
     // AC4: turn the store into a plain FILE so readdirSync fails ⇒ 读失败, still 200, and NOT
     // one of the empty-state texts (never masked).
     fs.rmSync(eventsDir, { recursive: true, force: true });
     fs.writeFileSync(eventsDir, "i am a file, not a directory\n");
-    const err = await get(port, "/live");
-    assert.equal(err.status, 200, "AC4: /live still 200 when the store is unreadable");
+    const err = await get(port, "/live", { Cookie: "lang=zh" });
+    assert.equal(err.status, 200, "AC4: /live (zh) still 200 when the store is unreadable");
     assert.ok(err.body.includes("读失败"), "AC4: page says 「读失败」");
     assert.ok(!err.body.includes("在跑但未接遥测") && !err.body.includes("未在运行") && !err.body.includes("无数据"),
       "AC4: 「读失败」 is distinguishable from both empty-state texts and the retired generic 「无数据」");
+    const errEn = await get(port, "/live");
+    assert.equal(errEn.status, 200, "AC4 (en): /live still 200 when the store is unreadable");
+    assert.ok(errEn.body.includes("Read failed"), "AC4 (en): the read-failure label is English");
+    assert.ok(!errEn.body.includes("Running, telemetry not wired") && !errEn.body.includes("Not running"),
+      "AC4 (en): the read failure is distinguishable from both empty-state texts");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }

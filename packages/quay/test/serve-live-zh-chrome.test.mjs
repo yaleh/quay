@@ -131,8 +131,14 @@ test("AC-en-baseline: the en rendering is the pre-AC-291 page verbatim, and `lan
   assert.ok(implicit.includes('<html lang="en">'), "the en page is <html lang=\"en\">");
   assert.ok(implicit.includes(`<title>未接入项目身份 — ${TITLE_TOKEN}</title>`),
     "the en <title> is still the bare page token with no project identity resolved");
-  assert.ok(implicit.includes(`<h1>${H1_TOKEN} — 循环此刻在做什么</h1>`),
-    "the en <h1> is still the pre-AC-291 literal, byte for byte");
+  // ⚠️ The <h1>'s TRAILING SUFFIX is the ONE byte this task deliberately moved: it was hard-coded
+  // Chinese until gap-webui-live-body-copy-en-zh put it in serve-i18n.ts ROW 19. Everything else this
+  // arm pins — the `<html lang>`, the `<title>` token, both current nav items, the mobile header
+  // label — is byte-for-byte what AC-291 left, which is exactly what this arm is for: it is still the
+  // guard against a lang-parameterised renderer quietly moving the EN default. ⛔ The zh arm in the
+  // black-box test below is UNCHANGED byte for byte — that is this task's AC3 evidence.
+  assert.ok(implicit.includes(`<h1>${H1_TOKEN} — what the loop is doing right now</h1>`),
+    "the en <h1> carries the English token AND the English suffix");
   assert.ok(currentItem(implicit, "nav-") === H1_TOKEN,
     `the en desktop current nav item is still "Live" (got ${JSON.stringify(currentItem(implicit, "nav-"))})`);
   assert.ok(currentItem(implicit, "mobile-menu-") === H1_TOKEN,
@@ -221,7 +227,13 @@ test("AC-black-box: /live under Cookie lang=zh switches html lang, both nav curr
   assert.notEqual(tZh, tEn, "this page's OWN <title> is not byte-identical across the two languages");
 
   // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it).
-  assert.equal(h1Of(en.body), `${H1_TOKEN} — 循环此刻在做什么`, "the en <h1> is the baseline");
+  // ⚠️ gap-webui-live-body-copy-en-zh moved the SUFFIX (and only the suffix): AC-291 wired the page's
+  // own token (`Live` / `实时`) and left the trailing 「循环此刻在做什么」 hard-coded, because that was
+  // BODY copy and belonged to the body-copy series. That series has now landed, so the en suffix is
+  // ROW 19's EN column and the zh suffix is BYTE-UNCHANGED. ⛔ The two arms are still asserted
+  // separately: the point of this test is that the two languages differ in the token AND the suffix,
+  // and an en suffix that merely matched the zh one would still be a bug.
+  assert.equal(h1Of(en.body), `${H1_TOKEN} — what the loop is doing right now`, "the en <h1> is the baseline");
   assert.equal(h1Of(zh.body), `${H1_TOKEN_ZH} — 循环此刻在做什么`, "the zh <h1> is translated");
 });
 
