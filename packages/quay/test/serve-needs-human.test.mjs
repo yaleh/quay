@@ -142,7 +142,11 @@ test("AC1 + AC2: /needs-human renders 当前待办 (status+reason) AND 升级台
     process.chdir(ws);
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const page = await get(port, "/needs-human");
+    // ⚠️ gap-webui-needs-human-body-copy-en-zh: the DEFAULT language is `en`, so a bare GET now
+    // renders English section headings. These assertions pin the CHINESE literals on purpose (they
+    // are the zh zero-change regression guard, decision record ④), so the request is EXPLICIT.
+    const page = await get(port, "/needs-human", { Cookie: "lang=zh" });
+    const pageEn = await get(port, "/needs-human");
     assert.equal(page.status, 200, "GET /needs-human returns 200");
 
     // AC1 — the active task and its reason are visible (no transcript read).
@@ -150,6 +154,13 @@ test("AC1 + AC2: /needs-human renders 当前待办 (status+reason) AND 升级台
     assert.ok(page.body.includes("连续修满 3 次仍不合格"), "AC1: the 阻碍原因 reason is rendered");
     assert.ok(page.body.includes("当前待办") && page.body.includes("升级台账"),
       "AC1: the page renders both 当前待办 and 升级台账 sections");
+
+    // The en side of the same two facts — the lang plumbing must not have disturbed the DATA.
+    assert.equal(pageEn.status, 200, "GET /needs-human (en) returns 200");
+    assert.ok(pageEn.body.includes("NH-ACTIVE") && pageEn.body.includes("连续修满 3 次仍不合格"),
+      "AC1 (en): the active task and its reason render identically under the default language");
+    assert.ok(pageEn.body.includes("Currently awaiting") && pageEn.body.includes("Escalation ledger"),
+      "AC1 (en): the two section headings render in English under the default language");
 
     // AC2 — the status-moved-on sample is STILL visible via the ledger (the negative control: drop
     // the ledger read and this row vanishes even though the event really happened).
@@ -185,10 +196,18 @@ test("degradation: no needs-human tasks and no ledger still renders 200 (never a
     process.chdir(ws);
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const page = await get(port, "/needs-human");
+    // ⚠️ EXPLICIT zh (decision record ④): the empty-state notes are exactly the copy this task moved
+    // behind the dictionary, so a bare GET (default en) would assert them in the wrong language.
+    const page = await get(port, "/needs-human", { Cookie: "lang=zh" });
+    const pageEn = await get(port, "/needs-human");
     assert.equal(page.status, 200, "empty workspace still returns 200");
     assert.ok(page.body.includes("当前无 needs-human 任务"), "empty active table renders the none note");
     assert.ok(page.body.includes("无 needs-human 升级记录"), "empty ledger renders the none note");
+
+    // The en counterparts — the empty states are localized too, not left Chinese under en.
+    assert.equal(pageEn.status, 200, "empty workspace still returns 200 under en");
+    assert.ok(pageEn.body.includes("No needs-human tasks currently"), "en: the empty active note is English");
+    assert.ok(pageEn.body.includes("No needs-human escalations recorded"), "en: the empty ledger note is English");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
@@ -228,6 +247,12 @@ test("degradation: no needs-human tasks and no ledger still renders 200 (never a
  *  criterion's `title-unchanged` arm. */
 const NH_TOKEN = "Needs Human";
 const NH_TOKEN_ZH = "待人工";
+
+/** The `<h1>`'s SUFFIX, pinned as the literal the dictionary renders under en
+ *  (gap-webui-needs-human-body-copy-en-zh). ⛔ Not imported from serve-i18n.ts — same anti-tautology
+ *  rule as `NH_TOKEN`: a page that rendered the dictionary's own value would satisfy an assertion
+ *  that read the dictionary back. */
+const NH_SUFFIX_EN = "Awaiting human decision";
 
 /** The nav current item's zh label — NAV_LABELS's `needs-human` row (shared chrome, ROW 1). Pinned
  *  separately from NH_TOKEN_ZH even though both are 待人工 today: they are two independent lookups
@@ -360,8 +385,13 @@ test("AC-295 AC-black-box: /needs-human under Cookie lang=zh switches html lang,
     assert.notEqual(tZh, tEn, "this page's OWN <title> is not byte-identical across the two languages");
 
     // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it).
-    assert.equal(h1Of(en.body), `${NH_TOKEN} — 待人类决定`, "the en <h1> is the baseline");
-    assert.equal(h1Of(zh.body), `${NH_TOKEN_ZH} — 待人类决定`, "the zh <h1> is translated");
+    //     ⚠️ gap-webui-needs-human-body-copy-en-zh moved the SUFFIX behind the dictionary, so the en
+    //     expectation is now the NEW English text rather than the pre-existing Chinese. The literal
+    //     is PINNED here (⛔ not imported from serve-i18n.ts) for the same anti-tautology reason the
+    //     token above is: deriving the expectation from the thing under test asserts nothing.
+    assert.equal(h1Of(en.body), `${NH_TOKEN} — ${NH_SUFFIX_EN}`, "the en <h1> carries the English suffix");
+    assert.equal(h1Of(zh.body), `${NH_TOKEN_ZH} — 待人类决定`, "the zh <h1> is unchanged");
+    assert.notEqual(h1Of(zh.body), h1Of(en.body), "the <h1> suffix is not byte-identical across languages");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
@@ -369,7 +399,7 @@ test("AC-295 AC-black-box: /needs-human under Cookie lang=zh switches html lang,
   }
 });
 
-test("AC-295 AC-en-baseline: the en response is the pre-AC-295 page verbatim", async () => {
+test("AC-295 AC-en-baseline + gap-webui-needs-human-body-copy-en-zh: the en SHARED chrome is the pre-AC-295 page verbatim, and the en BODY copy is the new English", async () => {
   const { ws, tasksDir } = makeWorkspace("nh-zh-en-");
   const cwd0 = process.cwd();
   let server;
@@ -388,12 +418,23 @@ test("AC-295 AC-en-baseline: the en response is the pre-AC-295 page verbatim", a
     assert.ok(body.includes('<html lang="en"><head>'),
       'the en page still opens <html lang="en"><head> — htmlLangTag(DEFAULT_LANG) must be byte-identical to the literal it replaced');
     assert.ok(headTitle(body).endsWith(` — ${NH_TOKEN}`), "the en <title> token is unchanged");
-    assert.equal(h1Of(body), `${NH_TOKEN} — 待人类决定`, "the en <h1> is unchanged");
     assert.equal(currentItem(navRegion(body), "nav-"), NH_TOKEN, "the en desktop nav current item is unchanged");
     assert.equal(currentItem(navRegion(body), "mobile-menu-"), NH_TOKEN, "the en mobile nav current item is unchanged");
     assert.ok(!body.includes(NH_TOKEN_ZH), "the en page carries no zh label anywhere");
-    assert.ok(body.includes("当前待办") && body.includes("升级台账"),
-      "the en page still renders both data sections (the lang plumbing did not disturb them)");
+
+    // ── the BODY copy (gap-webui-needs-human-body-copy-en-zh) ────────────────────────────────────
+    // The <h1> SUFFIX is the one pre-existing literal this task intentionally MOVED (it used to be
+    // 待人类决定 under en); the section headings and the reason header follow it. Each expectation is
+    // pinned literally (⛔ not read back from the dictionary) — see NH_SUFFIX_EN's note.
+    assert.equal(h1Of(body), `${NH_TOKEN} — ${NH_SUFFIX_EN}`, "the en <h1> suffix is the new English copy");
+    assert.ok(body.includes("Currently awaiting") && body.includes("Escalation ledger"),
+      "the en page still renders both data sections, now under their English headings");
+    assert.ok(body.includes("<th>Blocking reason</th>"), "the reason column's header is English under en");
+    // The zh label is absent from the en page — including the reason column's absent-value word,
+    // which only renders for a task carrying no 阻碍原因 line (this fixture HAS one, so the word's
+    // en/zh pair is asserted by the sibling body-i18n file instead).
+    assert.ok(!body.includes("待人类决定") && !body.includes("当前待办") && !body.includes("升级台账"),
+      "no pre-extraction zh interface literal survives anywhere on the en page");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }

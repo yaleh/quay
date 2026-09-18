@@ -26,8 +26,18 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
+import { needsHumanLabelsFor, needsHumanLabel } from "./serve-i18n.ts";
 import { readNeedsHumanLedger } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
+
+// The `<code>` ELEMENTS this page embeds mid-sentence, as `{code}` payloads (serve-i18n.ts ROW 18).
+// They sit HERE rather than in the dictionary because the dictionary carries copy, not markup; the
+// two store/ledger discriminators are ASCII and identical in both languages, so one definition
+// serves both columns. ⛔ They are repo literals, never request data — nothing here is escaped.
+const CODE_NEEDS_HUMAN = "<code>needs-human</code>";
+const CODE_STATUS_NEEDS_HUMAN = "<code>status: needs-human</code>";
+const CODE_ACTION_NEEDS_HUMAN = "<code>action: needs-human</code>";
+const CODE_PROMOTION_OUTCOME_LEDGER = "<code>.quay/promotion-outcome.jsonl</code>";
 
 /** Extract the `阻碍原因：` line from a task body's `## Needs-Human` section (written by
  *  promotion-driver.markNeedsHuman). Returns null when the section/line is absent — a needs-human
@@ -55,12 +65,21 @@ interface LedgerRow {
   ts: string | null;
 }
 
-/** AC-295: `lang` is the request's resolved language (AC-288's mechanism, threaded in by the
- *  dispatcher as `cfg.lang`). It reaches FOUR points on this page and nothing else — the
- *  `<html lang>` attribute, the shared desktop nav bar, the MOBILE nav, and this page's OWN chrome
- *  (`<title>` token + `<h1>` token, both via `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
- *  The last two are the whole point: a shared nav bar that switches while THIS page's own `<title>`
- *  stays English is precisely what the criterion's `title-unchanged` arm rejects.
+/** `lang` is the request's resolved language (AC-288's mechanism, threaded in by the dispatcher as
+ *  `cfg.lang`).
+ *
+ *  AC-295 (GOAL-024) wired the CHROME: the `<html lang>` attribute, the shared desktop nav bar, the
+ *  MOBILE nav, and this page's OWN `<title>`/`<h1>` tokens (`pageNameFor` against serve-i18n.ts's
+ *  PAGE_LABELS) — the criterion's `title-unchanged` arm exists because a nav bar that switches while
+ *  the page's own `<title>` stays English is a real half-fix.
+ *
+ *  gap-webui-needs-human-body-copy-en-zh wired the BODY: every remaining interface string on this
+ *  page now resolves through serve-i18n.ts ROW 18 (`needsHumanLabelsFor` / `needsHumanLabel`) —
+ *  the `<h1>` suffix, the `<meta name="description">`, the intro paragraph, both section headings
+ *  and their `{code}` payloads, the reason column's header and its absent-value word, and both
+ *  tables' empty states. ⛔ What stays un-translated by design is DATA: task ids, task titles, the
+ *  阻碍原因 text the driver wrote into the body, and the ledger's `detail`/`ts` — this page renders
+ *  those verbatim, in whatever language their author wrote them.
  *
  *  ⛔ The `"needs human"` literal passed to `renderMobileChrome` below is deliberately NOT routed
  *  through `pageNameFor`: it renders into `<span class="mobile-header-page">`, which sits BEFORE the
@@ -74,16 +93,22 @@ export function renderNeedsHumanPage(
   identity: ServeIdentity | null = null,
   lang: Lang = DEFAULT_LANG,
 ): string {
+  // The whole roster for this request's language, taken ONCE (serve-i18n.ts ROW 18 / the
+  // `dashboardLabelsFor` idiom). The four `{code}`-bearing rows are filled through `needsHumanLabel`
+  // so a forgotten payload THROWS rather than rendering `{code}` onto the page (ROW 6).
+  const L = needsHumanLabelsFor(lang);
+  const notRecorded = needsHumanLabel("reasonNotRecorded", lang);
+
   const activeRows = active.length === 0
-    ? html`<tr><td colspan="3">当前无 needs-human 任务（升级台账见下）。</td></tr>`
+    ? html`<tr><td colspan="3">${L.emptyActive}</td></tr>`
     : active.map((r) => html`<tr>
         <td><a href="/task/${encodeURIComponent(r.id)}">${escapeHtml(r.id)}</a></td>
         <td>${escapeHtml(r.title)}${r.labels.length > 0 ? ` · ${escapeHtml(r.labels.join(", "))}` : ""}</td>
-        <td class="clamp" title="${r.reason != null ? escapeHtml(r.reason) : "未记录"}">${r.reason != null ? escapeHtml(r.reason) : html`<span style="color:var(--color-neutral-700)">未记录</span>`}</td>
+        <td class="clamp" title="${r.reason != null ? escapeHtml(r.reason) : escapeHtml(notRecorded)}">${r.reason != null ? escapeHtml(r.reason) : html`<span style="color:var(--color-neutral-700)">${notRecorded}</span>`}</td>
       </tr>`).join("\n");
 
   const ledgerRows = ledger.length === 0
-    ? html`<tr><td colspan="3">无 needs-human 升级记录（<code>.quay/promotion-outcome.jsonl</code>）。</td></tr>`
+    ? html`<tr><td colspan="3">${needsHumanLabel("emptyLedger", lang, { code: CODE_PROMOTION_OUTCOME_LEDGER })}</td></tr>`
     : ledger.map((r) => html`<tr>
         <td><a href="/task/${encodeURIComponent(r.taskId)}">${escapeHtml(r.taskId)}</a></td>
         <td class="clamp" title="${r.detail != null ? escapeHtml(r.detail) : "—"}">${r.detail != null ? escapeHtml(r.detail) : "—"}</td>
@@ -91,18 +116,18 @@ export function renderNeedsHumanPage(
       </tr>`).join("\n");
 
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>${pageTitle("Needs Human", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.metaDescription)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Needs Human", identity, lang)}</title></head>
     <body>${renderMobileChrome("needs-human", "needs human", lang)}${renderSiteNav("needs-human", lang)}<main id="main">
-      <h1>${pageNameFor("Needs Human", lang)} — 待人类决定</h1>
-      <p class="meta">人机接口的显式承接者：一条 <code>needs-human</code> 产生后，无需读任何 transcript，在此页即可看到。上面是「当前待办」，下面是「升级台账」（含状态已流转的历史样本）。</p>
+      <h1>${pageNameFor("Needs Human", lang)} — ${L.titleSuffix}</h1>
+      <p class="meta">${needsHumanLabel("intro", lang, { code: CODE_NEEDS_HUMAN })}</p>
 
-      <h2>当前待办（<code>status: needs-human</code>）</h2>
+      <h2>${needsHumanLabel("sectionActive", lang, { code: CODE_STATUS_NEEDS_HUMAN })}</h2>
       ${tableWrap(html`<table>
-        <tr><th>id</th><th>title</th><th>阻碍原因</th></tr>
+        <tr><th>id</th><th>title</th><th>${L.colReason}</th></tr>
         ${activeRows}
       </table>`)}
 
-      <h2>升级台账（<code>action: needs-human</code>）</h2>
+      <h2>${needsHumanLabel("sectionLedger", lang, { code: CODE_ACTION_NEEDS_HUMAN })}</h2>
       ${tableWrap(html`<table>
         <tr><th>task_id</th><th>detail</th><th>ts</th></tr>
         ${ledgerRows}
