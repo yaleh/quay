@@ -133,7 +133,7 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 **去重核对（机制，不是症状关键词）**：本 store 内认领 `goal_ac: AC-281` 的只有本任务与
 `gap-ac281-scheduler-ms-carrier-field`（后者 **done**——只建载体派生字段，不改套件）。机制相邻但**不同层**、
 已 done 的：`gap-develop-ci-first-decisive-green`(AC-265) 建的是采集器与载体；`gap-suite-split-15-over-30s-test-files`(AC-279)
-与 `gap-checker-mutation-parallel-case-loop`(AC-280) 只覆盖 `scripts/test.sh` 内部相位，且**它们点名的 15 个
+与`gap-checker-mutation-parallel-case-loop`(AC-280)只覆盖 `scripts/test.sh` 内部相位，且**它们点名的 15 个
 文件与上表 9 个无交集**；`gap-ac282-runner-prereqs-already-present` 处置的是 runner 侧前置（已 done）。
 本任务与 AC-279/AC-280/AC-282 的依赖是实测的、不是想象的，以顶层 `depends_on` 结构化声明。
 
@@ -268,6 +268,13 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
 - plugin/test/inner-wakeup-heartbeat-check.test.mjs
 - plugin/test/supervisor-deliver.test.mjs
 - plugin/test/supervisor-deliver-crosshost.test.mjs
+- plugin/test/inner-wakeup-heartbeat-refusal.test.mjs
+- plugin/test/inner-wakeup-heartbeat-gate.test.mjs
+- plugin/test/inner-wakeup-heartbeat-check-cli.test.mjs
+- plugin/test/inner-wakeup-heartbeat-check-ac53-cli.test.mjs
+- plugin/test/inner-wakeup-heartbeat-check-gate-cli.test.mjs
+- plugin/test/driver-anchor-stop.test.mjs
+- plugin/test/driver-anchor-bundle-fresh.test.mjs
 - plugin/test/ci-runner-env-prereqs.test.mjs
 - scripts/test.sh
 - .quay/ac281-evidence.md
