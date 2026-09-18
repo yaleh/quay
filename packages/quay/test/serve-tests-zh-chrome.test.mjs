@@ -14,11 +14,19 @@
 // translated") — a single combined assertion would leave it unknowable WHICH of the four sites a
 // regression broke, which is precisely the granularity the goal criterion's `CAUSE=` names.
 //
-// ⚠️ THE FULL `pageTitle` TOKEN, not the bare nav word. /tests's `<title>` and `<h1>` both carry
-// `"Tests — 验证轮记录"` — em dash and the (already-Chinese) subtitle included. `pageNameFor` is an
-// EXACT-token lookup, so registering the bare `Tests` would leave the title English while the shared
-// nav bar switched, i.e. exactly the `title-unchanged` arm this task exists to remove. The tokens
-// asserted below are the strings the call sites actually pass, spelled the same way.
+// ⚠️ THE TOKEN THE CALL SITES PASS, AND THE COMPOSED STRINGS THEY RENDER. When AC-298 wrote this
+// test the call sites passed the FULL composite `"Tests — 验证轮记录"` — em dash and the
+// (already-Chinese) subtitle included — and this header argued the composite had to be registered
+// because `pageNameFor` is an EXACT-token lookup.
+//
+// ⚠️ MIGRATED by gap-webui-tests-body-copy-en-zh (2026-09-18). That argument is INVERTED by
+// measurement: `pageNameFor` returns its argument UNCHANGED for `en` (ROW 3's contract), so a
+// composite token renders its OWN Chinese bytes under the DEFAULT locale and its `en` column is dead
+// code no lookup reads — i.e. the composite WAS the "title renders Chinese under en" defect, not the
+// cure for it. The page now passes the bare `Tests` token with the subtitle appended from ROW 20
+// (`pageSubtitle`), exactly as /system (ROW 14 ③) and /sessions (ROW 15) were re-keyed before it.
+// The tokens below are therefore the strings the call sites ACTUALLY pass, spelled the same way, and
+// the composed `<h1>`/`<title>` are asserted as compositions rather than as one opaque token.
 //
 // The nav region is extracted with the SAME method the goal criterion uses (flatten newlines, then a
 // GREEDY `/<nav.*<\/nav>/`) so this test and the criterion cannot drift on what "the nav region"
@@ -36,7 +44,7 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-import { pageNameFor } from "../src/serve-i18n.ts";
+import { pageNameFor, TESTS_LABELS } from "../src/serve-i18n.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
@@ -46,13 +54,17 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
  *  sites. Deriving them from PAGE_LABELS would make the assertion below a tautology (硬规则 4).
  *  `TITLE_TOKEN` is what `pageTitle` AND the `<h1>` receive; `MOBILE_TOKEN` is the lowercase label
  *  the mobile header carries (the AC-290 `"task list"` / AC-297 `"git history"` shape). */
-const TITLE_TOKEN = "Tests — 验证轮记录";
+const TITLE_TOKEN = "Tests";
 const MOBILE_TOKEN = "tests";
-const TITLE_ZH = "测试 — 验证轮记录";
+const TITLE_ZH = "测试";
 const MOBILE_ZH = "测试";
+/** The COMPOSED page header — `pageNameFor(NAME_TOKEN, lang)` + ` — ` + ROW 20's `pageSubtitle`.
+ *  Pinned as literals on the same reasoning as the tokens: they are what the RENDERED page carries. */
+const H1_EN = "Tests — verification rounds";
+const H1_ZH = "测试 — 验证轮记录";
 
 /** The literal the goal criterion fails the page on. Pinned as a literal on purpose — see the note
- *  on TITLE_TOKEN. ⚠️ The LIVE en `<title>` is `quay — Tests — 验证轮记录`, but its prefix is
+ *  on TITLE_TOKEN. ⚠️ The LIVE en `<title>` now ends ` — Tests — verification rounds`, but its prefix is
  *  `projectLabel(identity)` — the WORKSPACE's project name — so under this fixture it is the temp
  *  dir's basename, not `quay`. The arms below therefore assert the ` — <token>` SUFFIX (which is
  *  this page's own chrome, and is what the task actually moves) rather than the whole string; the
@@ -137,6 +149,13 @@ test("AC-dict: this page's two tokens resolve through pageNameFor, and `en` is t
     "en is the identity for the /tests mobile-header token");
   assert.equal(pageNameFor(TITLE_TOKEN, "zh"), TITLE_ZH, `zh translates the /tests <title>+<h1> token`);
   assert.equal(pageNameFor(MOBILE_TOKEN, "zh"), MOBILE_ZH, "zh translates the /tests mobile-header token");
+  // The SUBTITLE is ROW 20's copy, appended OUTSIDE the token by both call sites — assert the two
+  // halves compose to the rendered header, so a re-key that moved the name but lost the subtitle
+  // (or a subtitle row whose zh column drifted) is caught here rather than by reading the page.
+  assert.equal(`${pageNameFor(TITLE_TOKEN, "en")} — ${TESTS_LABELS.pageSubtitle.en}`, H1_EN,
+    "the en header composes from the bare token + ROW 20's subtitle");
+  assert.equal(`${pageNameFor(TITLE_TOKEN, "zh")} — ${TESTS_LABELS.pageSubtitle.zh}`, H1_ZH,
+    "the zh header composes from the same two rows and is the pre-existing Chinese");
   // The criterion fails the page on the ASCII literal inside the NAV region; the title arm fails it
   // on the same literal in this page's own <title>. A zh value that still carried the English word
   // ("测试 Tests") would satisfy "non-empty" while defeating both — assert the absent literal.
@@ -175,8 +194,8 @@ test("AC1: /tests under Cookie lang=zh switches the page header, nav current ite
   //    control is unchanged from the pre-AC-298 live baseline.
   assert.ok(navEn.includes(LABEL_EN),
     `⑥ en nav region still carries the literal "${LABEL_EN}" (the criterion's own baseline assumption)`);
-  assert.ok(headTitle(en.body).endsWith(` — ${TITLE_TOKEN}`),
-    `⑥ en <title> still ends with this page's own pre-AC-298 token (got ${JSON.stringify(headTitle(en.body))})`);
+  assert.ok(headTitle(en.body).endsWith(` — ${H1_EN}`),
+    `⑥ en <title> still ends with this page's own header (got ${JSON.stringify(headTitle(en.body))})`);
 
   // ② NAV CURRENT ITEM, desktop and mobile, asserted SEPARATELY (hard rule 3: enumerate, don't report
   //    a boolean "the nav looks translated").
@@ -217,15 +236,17 @@ test("AC1: /tests under Cookie lang=zh switches the page header, nav current ite
   assert.notEqual(tZh, tEn, "④ the page's OWN <title> is not byte-identical across the two languages");
   assert.ok(!tZh.includes(LABEL_EN), `④ the zh <title> carries no ASCII "${LABEL_EN}" (got ${JSON.stringify(tZh)})`);
   assert.ok(tZh.includes("测试"), `④ the zh <title> carries the translated token (got ${JSON.stringify(tZh)})`);
+  assert.ok(tZh.endsWith(` — ${H1_ZH}`),
+    `④ the zh <title> ends with the pre-existing Chinese header (got ${JSON.stringify(tZh)})`);
 
   // ⑤ this page's OWN <h1>.
   const h1En = h1Of(en.body);
   const h1Zh = h1Of(zh.body);
   console.log(`  [ac298] en <h1> = ${JSON.stringify(h1En)}`);
   console.log(`  [ac298] zh <h1> = ${JSON.stringify(h1Zh)}`);
-  assert.equal(h1En, TITLE_TOKEN, `⑤ the en <h1> is the full title token (got ${JSON.stringify(h1En)})`);
+  assert.equal(h1En, H1_EN, `⑤ the en <h1> is the composed header (got ${JSON.stringify(h1En)})`);
   assert.ok(!h1Zh.includes(LABEL_EN), `⑤ the zh <h1> carries no ASCII "${LABEL_EN}" (got ${JSON.stringify(h1Zh)})`);
-  assert.equal(h1Zh, TITLE_ZH, `⑤ the zh <h1> is translated (got ${JSON.stringify(h1Zh)})`);
+  assert.equal(h1Zh, H1_ZH, `⑤ the zh <h1> is the pre-existing Chinese header (got ${JSON.stringify(h1Zh)})`);
 });
 
 test("AC1b: the mobile header page label (rendered OUTSIDE the nav region) also switches", async () => {

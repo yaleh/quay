@@ -10,6 +10,16 @@
 // embedded JSON graph payload + an inlined D3 <script> (client JS is now permitted).
 //
 // Run (scoped): node --test packages/quay/test/serve-handlers.test.mjs
+//
+// ⚠️ MIGRATED by gap-webui-tests-body-copy-en-zh (2026-09-18) — /tests AND /tests/file body copy.
+// Until that task, this file's /tests assertions read the DEFAULT locale and saw Chinese, because the
+// page's copy was hard-coded Chinese; the page now resolves it through `serve-i18n.ts` ROW 20, so the
+// default (`en`) renders English. Every assertion pinning Chinese copy below therefore requests
+// `?lang=zh` EXPLICITLY (the 决定记录 ④ shape): the assertion text is unchanged and now guards the zh
+// rendering, while the default-locale (en) rendering is pinned by the page's own i18n test and by the
+// en arms added here. ⛔ The NEGATIVE arms (`!…includes(<Chinese>)`) needed this most: under `en` the
+// string is absent for the WRONG reason, so they would have become vacuous (硬规则 3b) — each of them
+// is annotated where it appears.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -380,7 +390,7 @@ test("load curve: GET /tests renders the server-side load curve for the latest r
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("负载曲线"), "the page has a load-curve section");
     assert.ok(r.body.includes("suite-load-"), "the section names the sampler's timeseries source");
@@ -405,8 +415,11 @@ test("renderPerFileTable sorts by duration DESC, marks failed files red (verdict
     { file: "packages/quay/test/slow.test.mjs", durationMs: 210, passed: false },
     { file: "packages/quay/test/mid.test.mjs", durationMs: 100, passed: true },
   ];
-  const out = renderPerFileTable(perFile);
+  // Direct-render call site ⇒ pass the language explicitly (决定记录 ④); `en` is pinned right after.
+  const out = renderPerFileTable(perFile, "zh");
   assert.ok(out.includes("perFile 耗时明细"), "renders the perFile table heading");
+  assert.ok(renderPerFileTable(perFile, "en").includes("perFile duration detail"),
+    "the en column renders the English heading");
   // Sorted by duration DESC: slow (210) → mid (100) → fast (12). indexOf on a pure-function output
   // is unambiguous (no failureDetails / history table in the same string).
   const slowIdx = out.indexOf("slow.test.mjs");
@@ -435,9 +448,12 @@ test("renderPerFileTimelineSvg renders one server-side SVG bar per timestamped f
     // A legacy entry WITHOUT timestamps must be dropped (not plotted, not fabricated).
     { file: "packages/quay/test/legacy.test.mjs", durationMs: 50, passed: true },
   ];
-  const out = renderPerFileTimelineSvg(perFile); // no root → every file is UNRESOLVED (never throws)
+  // no root → every file is UNRESOLVED (never throws). Direct-render call site ⇒ explicit language.
+  const out = renderPerFileTimelineSvg(perFile, null, undefined, "zh");
   assert.ok(out.startsWith("<svg"), "output is an <svg> element (server-rendered, zero client JS)");
   assert.ok(out.includes("测试时间线"), "renders the timeline heading");
+  assert.ok(renderPerFileTimelineSvg(perFile, null, undefined, "en").includes("Test timeline"),
+    "the en column renders the English caption");
   // One bar per timestamped file (3 label links), the legacy entry dropped.
   assert.equal((out.match(/href="\/tests\/file\?path=/g) ?? []).length, 3, "three timestamped files → three bars");
   assert.ok(out.includes("gantt-bucket-unresolved"), "a file with no readable source is UNRESOLVED, not fabricated");
@@ -485,7 +501,7 @@ test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not j
       { file: pFile, durationMs: 100, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 },
       { file: mFile, durationMs: 200, passed: true, endedAtMs: t0 + 2000, startedAtMs: t0 + 1000 },
       { file: sFile, durationMs: 300, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 2000 },
-    ], root);
+    ], root, undefined, "zh"); // direct-render call site ⇒ explicit language (决定记录 ④)
 
     // AC1 — distinct bucket hues, not just the old pass/fail pair.
     assert.ok(out.includes('class="gantt-bucket-P"'), "P bar carries the P hue class");
@@ -493,11 +509,22 @@ test("AC1/AC2/AC3: timeline bars are bucket-coloured (P/M/S distinct hues, not j
     assert.ok(out.includes('class="gantt-bucket-S"'), "S bar carries the S hue class");
     assert.ok(!out.includes('class="gantt-svg-bar"'), "no bar still uses the old pass hue");
 
-    // AC3 — a legend names each bucket's colour meaning.
+    // AC3 — a legend names each bucket's colour meaning. The bucket WORDS are copy (ROW 20), so the
+    // zh column is asserted explicitly, and the en column alongside it (the canonical TOKEN —
+    // `P`/`S`/`M` — is data and is what the class names above carry either way).
     assert.ok(out.includes("图例"), "renders a legend");
     assert.ok(out.includes("P 产品"), "legend names the P bucket");
     assert.ok(out.includes("M 机件"), "legend names the M bucket");
     assert.ok(out.includes("S 套件"), "legend names the S bucket");
+    const outEn = renderPerFileTimelineSvg([
+      { file: pFile, durationMs: 100, passed: true, endedAtMs: t0 + 1000, startedAtMs: t0 },
+      { file: mFile, durationMs: 200, passed: true, endedAtMs: t0 + 2000, startedAtMs: t0 + 1000 },
+      { file: sFile, durationMs: 300, passed: true, endedAtMs: t0 + 3000, startedAtMs: t0 + 2000 },
+    ], root, undefined, "en");
+    for (const enWord of ["Legend:", "P product", "M mechanism", "S suite"]) {
+      assert.ok(outEn.includes(enWord), `the en legend names the bucket as ${JSON.stringify(enWord)}`);
+    }
+    assert.ok(!outEn.includes("产品"), "the en legend carries no Chinese bucket word");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -522,7 +549,7 @@ test("AC2: GET /tests renders the timeline SVG when the latest perFile row carri
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("测试时间线"), "the page renders the timeline section");
     assert.ok(/class="gantt-bucket-/.test(r.body), "the page renders at least one bucket-coloured timeline bar");
@@ -559,7 +586,7 @@ test("AC2: GET /tests renders the perFile table (sorted, failed red) — a legac
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("perFile 耗时明细"), "the page renders the perFile table");
     const slowIdx = r.body.indexOf("slow.test.mjs");
@@ -666,7 +693,7 @@ test("AC1: the three sections each render their OWN referenced round (load curve
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     // Load curve names the CURRENT runId's round (latest = red #479).
     assert.ok(r.body.includes("负载曲线（round #479 · 03:33Z）"), "load curve heading names round #479");
@@ -700,7 +727,7 @@ test("AC2: latest run without perFile shows the explicit 「最新一轮无 perF
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     assert.ok(r.body.includes("最新一轮无 perFile 数据"), "explicit no-perFile notice is present");
     assert.ok(r.body.includes("round #479 · 03:33Z"), "the notice names the latest (no-perFile) round");
@@ -738,12 +765,14 @@ test("AC3: negative control — all three sections reference the same round cons
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests");
+    const r = await get(port, "/tests?lang=zh");
     assert.equal(r.status, 200, "GET /tests returns 200");
     // All three sections name the SAME round (#230).
     assert.ok(r.body.includes("负载曲线（round #230 · 01:00Z）"), "load curve names round #230");
     assert.ok(r.body.includes("测试时间线（round #230 · 01:00Z）"), "timeline names round #230");
     assert.ok(r.body.includes('<a href="/tests?round=230">#230</a>') && r.body.includes("← 最新"), "history top row marks #230 as 最新 (the #NNN cell is now a link)");
+    // ⛔ NEGATIVE arm ⇒ the read MUST be explicit zh: under `en` the fallback notice reads
+    // "carries no perFile data", so `!includes("无 perFile 数据")` would be vacuous (硬规则 3b).
     assert.ok(!r.body.includes("无 perFile 数据"), "no fallback notice in the consistent case");
   } finally {
     if (server) {
@@ -840,7 +869,7 @@ test("AC1/AC2: GET /tests/file?path= returns a single-file detail page with cros
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs&lang=zh");
     assert.equal(r.status, 200, "GET /tests/file returns 200");
     assert.ok(r.body.includes("测试文件"), "the page renders the single-file detail heading");
     assert.ok(r.body.includes("packages/quay/test/slow.test.mjs"), "the page names the requested file");
@@ -850,7 +879,17 @@ test("AC1/AC2: GET /tests/file?path= returns a single-file detail page with cros
     assert.ok(/class="gantt-svg-bar"/.test(r.body), "the trend chart renders bars");
     assert.ok(r.body.includes("pass/fail 历史"), "renders the pass/fail history table");
     assert.ok(r.body.includes("#229") && r.body.includes("#231"), "history spans all three rounds");
+    // ⛔ NEGATIVE arm ⇒ explicit zh read (see this file's header note): under `en` the notice reads
+    // "appears in only 1 round", so this predicate would be vacuous there (硬规则 3b).
     assert.ok(!r.body.includes("仅出现在 1 轮"), "no single-round notice for a multi-round file");
+
+    // …and the DEFAULT locale renders the same page's copy in English (the body-copy contract this
+    // task established: the numbers are data and do not move; only the words around them do).
+    const en = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    assert.ok(en.body.includes("Test file"), "the en <h1> carries the page name token");
+    assert.ok(en.body.includes("durationMs trend"), "the en page renders the English trend heading");
+    assert.ok(en.body.includes("pass/fail history"), "the en page renders the English history heading");
+    assert.ok(!en.body.includes("测试文件"), "…and no Chinese page name survives under the default locale");
   } finally {
     if (server) {
       server.close();
@@ -877,12 +916,18 @@ test("AC2 falsifiability: a file appearing in only ONE round shows the explicit 
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fonlyonce.test.mjs");
+    // ⛔ BOTH negative arms below need the explicit zh read: under `en` the strings are absent for the
+    // WRONG reason (the page spells them in English), which is a vacuous predicate (硬规则 3b).
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fonlyonce.test.mjs&lang=zh");
     assert.equal(r.status, 200, "GET /tests/file returns 200 even for a single-round file");
     assert.ok(r.body.includes("packages/quay/test/onlyonce.test.mjs"), "the page names the requested file");
     assert.ok(r.body.includes("仅出现在 1 轮"), "explicit single-round notice (no fabricated trend)");
     assert.ok(!r.body.includes("durationMs 趋势"), "no cross-round trend for a single-round file");
     assert.ok(!r.body.includes("未找到"), "the file WAS found (in 1 round) — not a not-found page");
+    // …and the same page under the DEFAULT locale carries the English single-round notice.
+    const en = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fonlyonce.test.mjs");
+    assert.ok(en.body.includes("appears in only 1 round"), "the en page renders the English notice");
+    assert.ok(!en.body.includes("durationMs trend"), "…and still renders no cross-round trend chart");
   } finally {
     if (server) {
       server.close();
@@ -909,12 +954,15 @@ test("AC1 falsifiability: an unknown path (or absent path) renders the not-found
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const unknown = await get(port, "/tests/file?path=does%2Fnot%2Fexist.test.mjs");
+    const unknown = await get(port, "/tests/file?path=does%2Fnot%2Fexist.test.mjs&lang=zh");
     assert.equal(unknown.status, 200, "unknown path still returns 200 (never 500)");
     assert.ok(unknown.body.includes("未找到"), "the page renders the not-found note");
-    const absent = await get(port, "/tests/file");
+    const absent = await get(port, "/tests/file?lang=zh");
     assert.equal(absent.status, 200, "absent path still returns 200");
     assert.ok(absent.body.includes("未找到"), "an absent path renders the not-found note");
+    // …and the not-found note is copy like everything else: under the DEFAULT locale it reads English.
+    const unknownEn = await get(port, "/tests/file?path=does%2Fnot%2Fexist.test.mjs");
+    assert.ok(unknownEn.body.includes("Not found"), "the en page renders the English not-found note");
   } finally {
     if (server) {
       server.close();
@@ -1004,7 +1052,7 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r510 = await get(port, "/tests?round=510");
+    const r510 = await get(port, "/tests?round=510&lang=zh");
     assert.equal(r510.status, 200, "GET /tests?round=510 returns 200");
     assert.ok(r510.body.includes("正在查看 round #510 · 01:00Z"), "focus note names round 510");
     assert.ok(r510.body.includes("测试时间线（round #510 · 01:00Z）"), "timeline names round 510");
@@ -1014,7 +1062,7 @@ test("AC1: GET /tests?round=N shows THAT round's timeline + load curve (not the 
 
     // Negative control: the DEFAULT page still shows the latest round (#511), proving ?round=510 is
     // not ignored (a param-ignoring handler would render #511's timeline here too).
-    const rDefault = await get(port, "/tests");
+    const rDefault = await get(port, "/tests?lang=zh");
     assert.ok(rDefault.body.includes("测试时间线（round #511 · 02:00Z）"), "default page timeline names the latest round 511");
     assert.ok(rDefault.body.includes("负载曲线（round #511 · 02:00Z）"), "default page load curve names the latest round 511");
     assert.ok(!rDefault.body.includes("slow.test.mjs"), "default page shows only 511's perFile");
@@ -1079,9 +1127,12 @@ test("AC1 falsifiability: /tests?round=<absent> renders an explicit not-found no
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests?round=999");
+    const r = await get(port, "/tests?round=999&lang=zh");
     assert.equal(r.status, 200, "GET /tests?round=999 returns 200");
     assert.ok(r.body.includes("未找到 round #999"), "an absent round renders an explicit not-found note (hard rule 3b: not a silent latest)");
+    // …and the same note under the DEFAULT locale is English — it is copy, not a data string.
+    const rEn = await get(port, "/tests?round=999");
+    assert.ok(rEn.body.includes("Round #999 not found"), "the en page renders the English not-found note");
   } finally {
     if (server) {
       server.close();
@@ -1139,7 +1190,7 @@ test("AC1: GET /tests?round=N clips the load curve to [startedAt, startedAt+dura
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests?round=560");
+    const r = await get(port, "/tests?round=560&lang=zh");
     assert.equal(r.status, 200, "GET /tests?round=560 returns 200");
     assert.ok(r.body.includes("负载曲线（round #560 · 01:00Z）"), "the load curve heading names round 560");
     // Exactly the two in-window samples are plotted (one <circle class="git-svg-commit"> per sample).
@@ -1236,7 +1287,7 @@ test("AC1: a broken-key round (runId ≠ load-file key) still shows its load cur
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests?round=692");
+    const r = await get(port, "/tests?round=692&lang=zh");
     assert.equal(r.status, 200, "GET /tests?round=692 returns 200");
     assert.ok(r.body.includes("负载曲线"), "the broken-key round still has a load-curve section");
     assert.ok(r.body.includes("<polyline"), "the curve is server-rendered SVG");
@@ -1325,10 +1376,16 @@ test("AC3: a broken-key round with NO matching load file (and a legacy no-durati
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r710 = await get(port, "/tests?round=710");
+    // ⛔ NEGATIVE arm on a copy string ⇒ explicit zh read: under `en` the heading reads "<h2>Load
+    // curve", so `!includes("<h2>负载曲线")` would be vacuously true for the wrong reason (硬规则 3b).
+    const r710 = await get(port, "/tests?round=710&lang=zh");
     assert.equal(r710.status, 200, "GET /tests?round=710 returns 200 (no 500)");
     assert.ok(!r710.body.includes("<polyline"), "no matching load file → no curve");
     assert.ok(!r710.body.includes("<h2>负载曲线"), "no load-curve section rendered (the focus note mentioning 负载曲线 is not a curve)");
+    // …and the same negative holds under the DEFAULT locale for the English heading — asserted
+    // separately so the zh arm above is not the only reading of this contract.
+    const r710En = await get(port, "/tests?round=710");
+    assert.ok(!r710En.body.includes("<h2>Load curve"), "the en page renders no load-curve section either");
 
     const r711 = await get(port, "/tests?round=711");
     assert.equal(r711.status, 200, "GET /tests?round=711 returns 200 (legacy no-durationMs tolerated)");
@@ -1367,7 +1424,8 @@ test("AC1 (file page): /tests/file recovers a broken-key round's load fragment v
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs");
+    // ⛔ NEGATIVE arm on a copy string ⇒ explicit zh read (硬规则 3b), same as the r710 arms above.
+    const r = await get(port, "/tests/file?path=packages%2Fquay%2Ftest%2Fslow.test.mjs&lang=zh");
     assert.equal(r.status, 200, "GET /tests/file returns 200");
     assert.ok(r.body.includes("运行期间负载曲线片段"), "the file page renders the load-fragment section");
     assert.ok(r.body.includes("<polyline"), "the fragment is a server-rendered curve (window fallback hit)");

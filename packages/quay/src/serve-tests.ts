@@ -15,6 +15,11 @@ import {
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
 } from "./serve-render.ts";
 import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
+// ROW 20 (gap-webui-tests-body-copy-en-zh): this page's body-copy dictionary. `testsLabelsFor` takes
+// the whole roster once per render (the `dashboardLabelsFor` idiom); `fillLabel` fills the `{name}`
+// holes. ⛔ The page never re-reads `?lang=`/the cookie — `lang` arrives as a parameter, exactly as
+// `pageNameFor`/`htmlLangTag` do (a second parse is a second decision table).
+import { testsLabelsFor, fillLabel, type TestsKey } from "./serve-i18n.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
 //
@@ -212,7 +217,11 @@ function isPlottableSample(s: SuiteLoadSample): s is SuiteLoadSample & { loadavg
  * Render the suite-run loadavg curve as a pure, dependency-free SVG string. Returns "" when there
  * are no plottable samples (the page then omits the section). Deterministic on its input.
  */
-export function renderLoadCurveSvg(samples: SuiteLoadSample[]): string {
+export function renderLoadCurveSvg(samples: SuiteLoadSample[], lang: Lang = DEFAULT_LANG): string {
+  // ROW 20: this chart is shared by /tests AND /tests/file, so its caption resolves through the
+  // dictionary like every other rendered string on either page. The default keeps a direct caller
+  // that predates this parameter rendering what it rendered before.
+  const L = testsLabelsFor(lang);
   const pts = samples.filter(isPlottableSample);
   if (pts.length === 0) return "";
   const M = { top: 24, right: 24, bottom: 44, left: 48 };
@@ -263,7 +272,7 @@ export function renderLoadCurveSvg(samples: SuiteLoadSample[]): string {
 ${grid}
 ${polyline}
 ${points}
-<text class="git-svg-ink" x="${M.left}" y="${M.top - 6}" font-size="11">loadavg (1m) · suite 运行期采样</text>
+<text class="git-svg-ink" x="${M.left}" y="${M.top - 6}" font-size="11">${escapeHtml(L.loadCurveCaption)}</text>
 </svg>`;
 }
 
@@ -369,8 +378,10 @@ function roundTimeWindowMs(r: TestRunRecord | null | undefined): { start: number
  */
 export function renderPerFileTable(
   perFile: { file: string; durationMs: number; passed: boolean }[] | null | undefined,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   if (!perFile || perFile.length === 0) return "";
+  const L = testsLabelsFor(lang);
   const sorted = [...perFile].sort((a, b) => b.durationMs - a.durationMs);
   // gap-webui-test-file-detail-page AC3 — the file cell is a link to the single-file detail page
   // (path is the repo-rel path, URL-encoded into the query param; the handler decodes it back).
@@ -380,7 +391,7 @@ export function renderPerFileTable(
     <td class="${f.passed ? "" : "verdict-fail"}" style="${f.passed ? "" : "font-weight:700"}">${f.passed ? "passed" : "failed"}</td>
   </tr>`).join("\n");
   return html`<details open style="margin-top:1rem">
-    <summary style="cursor:pointer;font-weight:600">perFile 耗时明细（耗时降序 · 失败标红）</summary>
+    <summary style="cursor:pointer;font-weight:600">${escapeHtml(L.perFileSummary)}</summary>
     ${tableWrap(html`<table style="margin-top:0.5rem">
       <tr><th>file</th><th>duration</th><th>result</th></tr>
       ${rows}
@@ -481,13 +492,16 @@ function bucketColorKey(canonical: string): string {
   return canonical; // "P" | "S" | "M"
 }
 
-/** Legend label for a canonical bucket string. */
-function bucketLabel(canonical: string): string {
-  if (canonical === "UNRESOLVED") return "未解析";
-  if (canonical.includes("+")) return "多桶";
-  if (canonical === "P") return "P 产品";
-  if (canonical === "S") return "S 套件";
-  return "M 机件";
+/** Legend label for a canonical bucket string, in `L`'s language.
+ *  ⚠️ The canonical TOKEN (`P`/`S`/`M`) is language-neutral DATA — the dispatch-written
+ *  `suite-bucket-effective.jsonl` carries it — but the rendered WORD (「P 产品」/「P product」) is
+ *  copy, so it resolves through ROW 20's bucket rows rather than being assembled at the call site. */
+function bucketLabel(canonical: string, L: Record<TestsKey, string>): string {
+  if (canonical === "UNRESOLVED") return L.bucketUnresolved;
+  if (canonical.includes("+")) return L.bucketMulti;
+  if (canonical === "P") return L.bucketProduct;
+  if (canonical === "S") return L.bucketSuite;
+  return L.bucketMechanism;
 }
 
 /**
@@ -521,8 +535,10 @@ export function renderPerFileTimelineSvg(
   perFile: { file: string; durationMs: number; passed: boolean; startedAtMs?: number; endedAtMs?: number }[] | null | undefined,
   root?: string | null,
   paging?: TimelinePaging,
+  lang: Lang = DEFAULT_LANG,
 ): string {
   if (!perFile || perFile.length === 0) return "";
+  const L = testsLabelsFor(lang);
   const timed = perFile.filter(hasTimestamps);
   if (timed.length === 0) return "";
   // gap-webui-tests-page-timeline-gantt-truncated — a chronological window (start-time ASC, then this
@@ -545,7 +561,7 @@ export function renderPerFileTimelineSvg(
   const effective = root ? readBucketEffective(root) : new Map<string, Set<Bucket>>();
   const attributed = rows.map((f) => {
     const canonical = canonicalBuckets(effective.get(normalizeFileRef(f.file)) ?? new Set());
-    return { ...f, key: bucketColorKey(canonical), label: bucketLabel(canonical) };
+    return { ...f, key: bucketColorKey(canonical), label: bucketLabel(canonical, L) };
   });
 
   const M = { top: 24, right: 24, bottom: 64, left: 340 };
@@ -572,7 +588,7 @@ export function renderPerFileTimelineSvg(
       const endHhmmss = `${pad2(end.getHours())}:${pad2(end.getMinutes())}:${pad2(end.getSeconds())}`;
       return `<g>
 <text class="git-svg-ink" x="${(M.left - 8).toFixed(1)}" y="${(y + rowH - 2).toFixed(1)}" font-size="10" text-anchor="end"><a href="/tests/file?path=${encodeURIComponent(f.file)}">${escapeHtml(truncateLabel(f.file, 52))}</a></text>
-<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(f.file)} · ${Math.round(f.durationMs)} ms · ${f.label} · 结束 ${endHhmmss}</title></rect>
+<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH}" rx="2"><title>${escapeHtml(fillLabel(L.ganttBarTitle, { file: f.file, ms: Math.round(f.durationMs), bucket: f.label, time: endHhmmss }))}</title></rect>
 </g>`;
     })
     .join("\n");
@@ -591,7 +607,7 @@ export function renderPerFileTimelineSvg(
     })
     .join("");
   const legend = legendItems
-    ? `<g class="gantt-svg-legend"><text class="git-svg-muted" x="${M.left}" y="${legendY - 4}" font-size="10">图例：</text></g>${legendItems}`
+    ? `<g class="gantt-svg-legend"><text class="git-svg-muted" x="${M.left}" y="${legendY - 4}" font-size="10">${escapeHtml(L.ganttLegend)}</text></g>${legendItems}`
     : "";
 
   const durSec = span / 1000;
@@ -614,13 +630,17 @@ export function renderPerFileTimelineSvg(
 
   // gap-webui-tests-page-timeline-gantt-truncated AC5 — name the current page's row range ("第 X/Y 页 ·
   // 本页 A–B / 共 N 个文件") instead of the old "仅显示最慢 N/M" (which implied the rest were gone).
-  const title = `测试时间线（每文件起止时刻 · 第 ${page}/${totalPages} 页 · 本页 ${offset + 1}–${offset + rows.length} / 共 ${totalRows} 个文件 · 按开始时刻升序 · 按 bucket 着色）`;
+  // ROW 20: `{shown}` is the page's own row range (`3–7`) as ONE hole — the en dash belongs to the
+  // range, not to the call site (the same reason ROW 19 kept `[`…`]` inside its template).
+  const title = fillLabel(L.ganttCaption, {
+    page, totalPages, shown: `${offset + 1}–${offset + rows.length}`, totalRows,
+  });
 
   return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Per-file test timeline (gantt)" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
 ${xTicks.join("\n")}
 ${bars}
 ${legend}
-<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">${title}</text>
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">${escapeHtml(title)}</text>
 </svg>`;
 }
 
@@ -730,6 +750,7 @@ function renderTestsPage(
   // handler threads the per-request `cfg.lang` in below.
   lang: Lang = DEFAULT_LANG,
 ): string {
+  const L = testsLabelsFor(lang);
   const latest = tests.runs[0] ?? null;
   // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
   // names one (null on the default page, which keeps the pre-existing latest-run focus). The banner,
@@ -752,10 +773,10 @@ function renderTestsPage(
   // and say so plainly when the requested round isn't in the record (never silently show the latest
   // as if the param had worked — 硬规则 3b: a "read the input failed" result must not look like success).
   const focusNote = focus
-    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">正在查看 ${roundLabel(focus)} 的详情（时间线 / 负载曲线 / perFile 均来自该轮）。</p>`
+    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">${escapeHtml(fillLabel(L.focusNote, { round: roundLabel(focus) }))}</p>`
     : "";
   const notFoundNote = roundRequested != null && focus == null
-    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">未找到 round #${escapeHtml(String(roundRequested))} — 验证轮记录中无该轮次，以下显示最新一轮。</p>`
+    ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">${escapeHtml(fillLabel(L.roundNotFoundNote, { round: roundRequested }))}</p>`
     : "";
   // gap-webui-tests-page-unpaginated-tables — slice the history table server-side (default 20 rows).
   // The slice is a window into tests.runs (newest-first); the « ← 最新 » marker keys off the GLOBAL
@@ -768,7 +789,7 @@ function renderTestsPage(
   const historyOffset = (historyPage - 1) * historyPageSize;
   const historySlice = tests.runs.slice(historyOffset, historyOffset + historyPageSize);
   const historyRows = historySlice.map((r, i) => html`<tr>
-    <td>${r.round != null ? html`<a href="/tests?round=${r.round}">#${escapeHtml(String(r.round))}</a>${historyOffset + i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
+    <td>${r.round != null ? html`<a href="/tests?round=${r.round}">#${escapeHtml(String(r.round))}</a>${historyOffset + i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">${escapeHtml(L.latestMarker)}</span>` : ""}` : "—"}</td>
     <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
@@ -780,16 +801,16 @@ function renderTestsPage(
   const failedRun = tests.runs.find((r) => r.fail != null && r.fail > 0 && r.failures && r.failures.length > 0);
   const failureDetails = failedRun
     ? html`<details style="margin-top:1rem">
-        <summary style="cursor:pointer;font-weight:600">#${escapeHtml(String(failedRun.round))} 失败用例明细（点击展开）</summary>
+        <summary style="cursor:pointer;font-weight:600">${escapeHtml(fillLabel(L.failureDetailsSummary, { round: failedRun.round ?? "—" }))}</summary>
         <ul style="padding-left:1.5rem;font-size:0.85rem;line-height:1.7;color:var(--color-accent-800)">
           ${failedRun.failures!.map((f) => html`<li>${escapeHtml(f)}</li>`).join("")}
         </ul>
       </details>`
     : "";
-  const loadCurveSvg = renderLoadCurveSvg(samples);
+  const loadCurveSvg = renderLoadCurveSvg(samples, lang);
   const loadCurve = loadCurveSvg
-    ? html`<h2>负载曲线${loadLabel ? `（${loadLabel}）` : ""}</h2>
-        <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（suite 运行期采样，结束即停）</p>
+    ? html`<h2>${escapeHtml(L.loadCurveHeading)}${loadLabel ? escapeHtml(fillLabel(L.roundSuffix, { round: loadLabel })) : ""}</h2>
+        <p class="meta">${fillLabel(L.dataSourceSuiteLoad, { code: "<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>" })}</p>
         ${loadCurveSvg}`
     : "";
   // gap-test-detail-perfile-duration-failed AC2 — render the per-file table for the newest run that
@@ -810,7 +831,7 @@ function renderTestsPage(
   const perFilePage = Math.min(Math.max(1, opts.perFilePage ?? 1), perFileTotalPages);
   const perFileOffset = (perFilePage - 1) * perFilePageSize;
   const perFileSlice = perFileRun ? perFileRun.perFile.slice(perFileOffset, perFileOffset + perFilePageSize) : null;
-  const perFileTable = perFileSlice && perFileSlice.length > 0 ? renderPerFileTable(perFileSlice) : "";
+  const perFileTable = perFileSlice && perFileSlice.length > 0 ? renderPerFileTable(perFileSlice, lang) : "";
   // gap-webui-tests-page-timeline-gantt-truncated — paginate the gantt (a chart, not a list) over the
   // TIMED entries only (the chart plots only those), its OWN namespace (?ganttPage / ?ganttPageSize).
   // Default pageSize stays TIMELINE_MAX_BARS (50) so the byte budget the unpaginated-tables task solved
@@ -824,7 +845,7 @@ function renderTestsPage(
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
   const perFileTimelineSvg = perFileRun
-    ? renderPerFileTimelineSvg(perFileRun.perFile, root, { page: ganttPage, totalPages: ganttTotalPages, totalRows: ganttTotalRows, pageSize: ganttPageSize })
+    ? renderPerFileTimelineSvg(perFileRun.perFile, root, { page: ganttPage, totalPages: ganttTotalPages, totalRows: ganttTotalRows, pageSize: ganttPageSize }, lang)
     : "";
   // gap-web-tests-three-sections-round-drift AC2 — the find() above silently falls back to an
   // EARLIER run when the newest run carries no perFile (red / static-check-early-fail / reporter
@@ -842,9 +863,9 @@ function renderTestsPage(
       )
     : "";
   const perFileTimeline = perFileTimelineSvg
-    ? html`<h2>测试时间线${perFileRun ? `（${roundLabel(perFileRun)}）` : ""}</h2>
-        ${timelineFallback ? html`<p class="meta" style="margin:0.25rem 0;color:var(--color-accent-800);font-weight:600">⚠️ 最新一轮无 perFile 数据${latest ? `（${roundLabel(latest)}）` : ""}，以下回退显示${perFileRun ? ` ${roundLabel(perFileRun)}` : ""}。</p>` : ""}
-        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile 起止时刻（reporter 结束时刻 + duration 反推起始）</p>
+    ? html`<h2>${escapeHtml(L.perFileTimelineHeading)}${perFileRun ? escapeHtml(fillLabel(L.roundSuffix, { round: roundLabel(perFileRun) })) : ""}</h2>
+        ${timelineFallback ? html`<p class="meta" style="margin:0.25rem 0;color:var(--color-accent-800);font-weight:600">${escapeHtml(fillLabel(L.timelineFallbackNote, { latest: roundLabel(latest), shown: roundLabel(perFileRun) }))}</p>` : ""}
+        <p class="meta">${fillLabel(L.dataSourcePerFile, { code: "<code>.quay/verification-round.jsonl</code>" })}</p>
         ${perFileTimelineSvg}
         ${ganttNav}`
     : "";
@@ -870,16 +891,16 @@ function renderTestsPage(
     .map((n) => html`<a href="/tests?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
     .join(" · ");
   const roundsTimeline = roundsTimelineBar
-    ? html`<h2>最近测试记录分段时间轴</h2>
-        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮一段，红=red · 绿=green，锚定最近一轮结束时刻）</p>
-        <p class="meta">时间轴窗口（过去 ${hours}h）：${hourLinks}</p>
+    ? html`<h2>${escapeHtml(L.roundsTimelineHeading)}</h2>
+        <p class="meta">${fillLabel(L.dataSourceRoundsTimeline, { code: "<code>.quay/verification-round.jsonl</code>" })}</p>
+        <p class="meta">${escapeHtml(fillLabel(L.timelineWindow, { hours }))}${hourLinks}</p>
         ${roundsTimelineBar}`
     : "";
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tests — 验证轮记录", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>${pageTitle(pageNameFor("Tests", lang), identity, lang)} — ${escapeHtml(L.pageSubtitle)}</title></head>
     <body>${renderMobileChrome("tests", pageNameFor("tests", lang), lang)}${renderSiteNav("tests", lang)}<main id="main">
-      <h1>${pageNameFor("Tests — 验证轮记录", lang)}</h1>
-      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
+      <h1>${pageNameFor("Tests", lang)} — ${escapeHtml(L.pageSubtitle)}</h1>
+      <p class="meta">${fillLabel(L.dataSourceRounds, { code: "<code>.quay/verification-round.jsonl</code>" })}</p>
       ${obsNote(tests.status, tests.reason)}
       ${focusNote}
       ${notFoundNote}
@@ -887,7 +908,7 @@ function renderTestsPage(
       ${roundsTimeline}
       ${loadCurve}
       ${perFileTimeline}
-      ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
+      ${tests.runs.length > 0 ? html`<h2>${escapeHtml(L.historyHeading)}</h2>
       ${historyNav}
       ${tableWrap(html`<table>
         <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
@@ -1011,8 +1032,9 @@ export function collectFileHistory(runs: TestRunRecord[], filePath: string): Fil
  * the SAME fail-vs-pass token language as the timeline. Returns "" with <2 points (a one-round
  * "trend" is not a cross-round trend — AC2's falsifiability guard: 「只有单轮 ⇒ 假」).
  */
-export function renderFileDurationTrendSvg(points: FileRoundPoint[]): string {
+export function renderFileDurationTrendSvg(points: FileRoundPoint[], lang: Lang = DEFAULT_LANG): string {
   if (points.length < 2) return "";
+  const L = testsLabelsFor(lang);
   const M = { top: 24, right: 24, bottom: 48, left: 64 };
   const W = 960;
   const H = 240;
@@ -1048,7 +1070,7 @@ export function renderFileDurationTrendSvg(points: FileRoundPoint[]): string {
   return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Single-file duration trend across rounds" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
 ${yTicks.join("\n")}
 ${bars}
-<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">durationMs 趋势（每轮一根柱 · 失败标红 · 按轮次升序）</text>
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">${escapeHtml(L.fileTrendCaption)}</text>
 </svg>`;
 }
 
@@ -1101,36 +1123,38 @@ function renderFileDetailPage(
   filePath: string,
   tests: TestsResult,
   fragment: { samples: SuiteLoadSample[]; label: string } | null,
+  lang: Lang = DEFAULT_LANG,
 ): string {
+  const L = testsLabelsFor(lang);
   const history = collectFileHistory(tests.runs, filePath);
-  const trendSvg = renderFileDurationTrendSvg(history);
+  const trendSvg = renderFileDurationTrendSvg(history, lang);
   const historyTable = renderFileHistoryTable(history);
   const notFound = history.length === 0;
 
   const trend = trendSvg
-    ? html`<h2>durationMs 趋势（跨 ${history.length} 轮）</h2>
-        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile（同一文件跨多轮聚合）</p>
+    ? html`<h2>${escapeHtml(fillLabel(L.fileTrendHeading, { n: history.length }))}</h2>
+        <p class="meta">${fillLabel(L.fileTrendDataSource, { code: "<code>.quay/verification-round.jsonl</code>" })}</p>
         ${trendSvg}`
     : history.length === 1
-      ? html`<p class="meta" style="color:var(--color-accent-800);font-weight:600">⚠️ 该文件仅出现在 1 轮 — 无跨多轮趋势（AC2 的「只有单轮 ⇒ 假」守卫）。</p>`
+      ? html`<p class="meta" style="color:var(--color-accent-800);font-weight:600">${escapeHtml(L.fileTrendSingleRound)}</p>`
       : "";
 
-  const fragmentSvg = fragment ? renderLoadCurveSvg(fragment.samples) : "";
+  const fragmentSvg = fragment ? renderLoadCurveSvg(fragment.samples, lang) : "";
   const loadFragment = fragment
-    ? html`<h2>运行期间负载曲线片段${fragment.label ? `（${escapeHtml(fragment.label)}）` : ""}</h2>
-        <p class="meta">数据源：<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>（裁剪到该文件起止窗口）</p>
-        ${fragmentSvg || html`<p class="meta">该文件起止窗口内无采样点 — 负载曲线是数据源依赖项（sampler-bypass 修复后显示）。</p>`}`
+    ? html`<h2>${escapeHtml(L.fileFragmentHeading)}${fragment.label ? escapeHtml(fillLabel(L.roundSuffix, { round: fragment.label })) : ""}</h2>
+        <p class="meta">${fillLabel(L.fileFragmentDataSource, { code: "<code>.quay/suite-load-&lt;runId&gt;.jsonl</code>" })}</p>
+        ${fragmentSvg || html`<p class="meta">${escapeHtml(L.fileFragmentNoSamples)}</p>`}`
     : "";
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay test file — single-file cross-round history">${modernistStyles()}${pageStyles()}<title>Test file — ${escapeHtml(filePath)}</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
-      <h1>测试文件 — <code>${escapeHtml(filePath)}</code></h1>
-      <p class="meta"><a href="/tests">← 返回 Tests</a></p>
+      <h1>${pageNameFor("Test file", lang)} — <code>${escapeHtml(filePath)}</code></h1>
+      <p class="meta"><a href="/tests">${escapeHtml(L.fileBackLink)}</a></p>
       ${obsNote(tests.status, tests.reason)}
-      ${notFound ? html`<p class="meta"><strong>未找到</strong> — 该路径未出现在任何验证轮的 perFile 记录中。</p>` : ""}
+      ${notFound ? html`<p class="meta"><strong>${escapeHtml(L.notFoundLabel)}</strong>${escapeHtml(L.fileNotFoundSuffix)}</p>` : ""}
       ${trend}
-      ${historyTable ? html`<h2>pass/fail 历史（${history.length} 轮 · 旧→新）</h2>${historyTable}` : ""}
+      ${historyTable ? html`<h2>${escapeHtml(fillLabel(L.fileHistoryHeading, { n: history.length }))}</h2>${historyTable}` : ""}
       ${loadFragment}
     </main></body></html>`;
 }
@@ -1138,7 +1162,11 @@ function renderFileDetailPage(
 export async function handleTestsFile(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  // ROW 20: widened from `{ workspaceRoot: string }` to the dispatcher's actual `ServePageCfg` — the
+  // dispatcher already passes it, only this annotation was narrower than its argument, so this page's
+  // body copy could not see the request's language. Same widening the /dashboard/cards handler needed
+  // (ROW 5 ⑥); ⛔ it does NOT reach this page's nav / `<html lang>` / `<title>` — those are chrome.
+  cfg: ServePageCfg,
   url: URL,
 ): Promise<void> {
   const filePath = url.searchParams.get("path") ?? "";
@@ -1150,5 +1178,5 @@ export async function handleTestsFile(
   }
   const fragment = fileLoadFragment(cfg.workspaceRoot, tests.runs, filePath);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderFileDetailPage(filePath, tests, fragment));
+  res.end(renderFileDetailPage(filePath, tests, fragment, cfg.lang));
 }

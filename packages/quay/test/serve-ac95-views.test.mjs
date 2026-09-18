@@ -319,7 +319,10 @@ test("regression: /tests renders a broken-key runId round as 200 with no fabrica
     ].join("\n"));
     const r = await get(port, "/tests");
     assert.equal(r.status, 200, "GET /tests with a broken-key runId round returns 200");
-    assert.ok(r.body.includes("Tests — 验证轮记录"), "the page still renders");
+    // ⚠️ MIGRATED by gap-webui-tests-body-copy-en-zh (2026-09-18): this is a DEFAULT-LOCALE read
+    // (`get` sends no lang cookie/param, and the default is `en`), so it pins the en token — which
+    // the body-copy task moved from the Chinese-bearing composite to `Tests — verification rounds`.
+    assert.ok(r.body.includes("Tests — verification rounds"), "the page still renders");
     assert.ok(!r.body.includes("<polyline"), "no load file → no fabricated curve");
   } finally {
     process.chdir(cwd0);
@@ -395,11 +398,17 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
     // body-copy task moved the subtitle into serve-i18n.ts ROW 14 (the page NAME stays ROW 3's
     // token), so the en row follows, and the pre-existing Chinese is asserted EXPLICITLY under zh
     // below rather than left to a default-locale read that only looked Chinese by accident.
+    // ⚠️ MIGRATED by gap-webui-tests-body-copy-en-zh (2026-09-18), same shape again: the /tests row
+    // used to read `Tests — 验证轮记录`, because AC-298's `pageTitle` token was the FULL composite
+    // (em dash and Chinese subtitle included) and ROW 3's en column is the identity — so the page's
+    // own `<title>`/`<h1>` rendered Chinese under the DEFAULT locale. This task re-keyed it to the
+    // bare `Tests` token with the subtitle appended from serve-i18n.ts ROW 20 (see that row's RE-KEYED
+    // note); the en row follows, and the pre-existing Chinese is asserted EXPLICITLY under zh below.
     const routes = [
       ["/dashboard", "Dashboard"],
       ["/system", "System — system status"],
       ["/manager", "Manager / Outer / Inner"],
-      ["/tests", "Tests — 验证轮记录"],
+      ["/tests", "Tests — verification rounds"],
       ["/sessions", "Sessions"],
       ["/architecture", "Architecture — system component map"],
     ];
@@ -429,6 +438,23 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
     const testsPage = await get(port, "/tests");
     assert(testsPage.body.includes("verification-round.jsonl"), "tests page names its data source");
     assert(testsPage.body.includes("42"), "tests page shows the fixture pass count");
+    // …and the zh arm for the page THIS task moved: the subtitle's Chinese is pinned EXPLICITLY, and
+    // the default-locale read above is asserted to NOT carry it. Both arms together are the re-key's
+    // contract: the en title moved, the zh one did not.
+    const testsZh = await get(port, "/tests?lang=zh");
+    assert(testsZh.body.includes("测试 — 验证轮记录"),
+      "AC1: the zh /tests <title>/<h1> is the pre-existing Chinese, explicitly requested");
+    assert(!testsPage.body.includes("验证轮记录"),
+      "AC1: the default-locale /tests no longer carries the Chinese subtitle");
+    // …and the zh page's BODY copy did not fall back to English (the dictionary-backed rows, i.e. the
+    // copy this task's ROW 20 owns — ⛔ not `obsNote`'s shared-chrome label, which is out of scope).
+    for (const zhCopy of ["数据源：", "最近测试记录分段时间轴", "历史运行（新→旧）"]) {
+      assert(testsZh.body.includes(zhCopy), `AC1: the zh /tests keeps its body copy ${JSON.stringify(zhCopy)}`);
+    }
+    assert(testsPage.body.includes("Recent test-record timeline segments"),
+      "AC1: the default-locale /tests renders its body copy in English");
+    assert(!testsPage.body.includes("最近测试记录分段时间轴"),
+      "AC1: …and that English copy is not merely alongside the Chinese one");
 
     // /system reads real resource-gate output on Linux (no fixture needed).
     const sysPage = await get(port, "/system");

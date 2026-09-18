@@ -275,17 +275,30 @@ test("AC5: gantt title names the page range, never '仅显示最慢'", async () 
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    const p1 = await get(port, "/tests");
+    // ⚠️ MIGRATED by gap-webui-tests-body-copy-en-zh (2026-09-18): the gantt caption is BODY COPY and
+    // now resolves through serve-i18n.ts ROW 20 (`ganttCaption`), so a default-locale read renders the
+    // ENGLISH caption. The assertions below are unchanged in substance — they now request `?lang=zh`
+    // explicitly, which makes them a zh regression guard for the same page-range contract, and the en
+    // arm is asserted separately right after.
+    const p1 = await get(port, "/tests?lang=zh");
     const svg1 = extractGanttSvg(p1.body);
     assert.ok(svg1, "AC5: page 1 renders the gantt");
     assert.ok(!svg1.includes("仅显示最慢"), "AC5: no '仅显示最慢' wording");
     assert.ok(svg1.includes("第 1/2 页"), "AC5: page 1 of 2");
     assert.ok(svg1.includes("共 60 个文件"), "AC5: total 60 files named");
 
-    const p2 = await get(port, "/tests?ganttPage=2");
+    const p2 = await get(port, "/tests?ganttPage=2&lang=zh");
     const svg2 = extractGanttSvg(p2.body);
     assert.ok(svg2.includes("第 2/2 页"), "AC5: page 2 of 2");
     assert.ok(svg2.includes("本页 51–60"), "AC5: page 2 names its row range 51–60");
+
+    // …and the DEFAULT locale renders the same page-range facts in English (the body-copy contract:
+    // the numbers are data and do not move; only the words around them do).
+    const en = await get(port, "/tests");
+    const svgEn = extractGanttSvg(en.body);
+    assert.ok(svgEn.includes("page 1/2"), "AC5: the en caption names page 1 of 2");
+    assert.ok(svgEn.includes("of 60 files"), "AC5: the en caption names the 60 files");
+    assert.ok(!svgEn.includes("第 1/2 页"), "AC5: the en caption carries no Chinese page-range wording");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
