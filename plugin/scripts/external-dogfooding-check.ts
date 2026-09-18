@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, createSelftest } from "./gate-script-base.ts";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { isCovered, loadRegistry, parseRegistry } from "./drivable-workspace-check.ts";
 import type { Registry } from "./drivable-workspace-check.ts";
@@ -188,15 +188,8 @@ export function checkDirectiveFinding(taskText: unknown): FindingResult {
 
 // ── selftest — embedded GREEN+RED fixture suite (mirrors drivable-workspace-check's selftest) ──────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases-period" });
+  const check = st.check;
 
   // ── cadence (GREEN) ──
   const every5 = checkCadenceTrigger("every(5)");
@@ -275,13 +268,7 @@ export function selftest(): boolean {
   check("finding-no-label", checkDirectiveFinding(goodFinding.replace("  - directive", "  - milestone-candidate")).ok === false, "non-directive label rejected (AC3)");
   check("finding-no-evidence", checkDirectiveFinding(goodFinding.replace("`quay task get`", "the CLI").replace("returned exit 1", "failed").replace("Evidence: node_modules/quay -- task get QX-999 on /home/yale/work/archguard.", "A friction happened.")).ok === false, "vague finding without evidence rejected");
   check("finding-empty", checkDirectiveFinding("").ok === false, "empty finding rejected");
-
-  if (allPassed) {
-    console.log("SELFTEST: all fixture cases PASS.");
-    return true;
-  }
-  console.error("SELFTEST: one or more fixture cases FAILED.");
-  return false;
+  return st.report();
 }
 
 // ── Thin CLI ─────────────────────────────────────────────────────────────────────────────────────

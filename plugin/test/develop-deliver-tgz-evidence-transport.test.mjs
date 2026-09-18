@@ -125,9 +125,36 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "keeping the checker but dropping node_modules/yaml must ALSO be caught — a bare specifier does not resolve remotely");
   assert.match(r.stdout, /BARE-UNSHIPPED: provider-binding-resolvability-check\.ts imports bare "yaml"/,
     "the bare-specifier violation must name the package (NODE_PATH does not apply to ESM)");
-  // the general relative-import form, and the guard's inability to be fooled by an unreadable list
-  assert.match(r.stdout, /drop-gate-script-base → violations=2 \(expect ≥1, IMPORT-UNSHIPPED\)/,
-    "dropping a ./ relative-import target must be caught (the general form of the same defect)");
+  // the general relative-import form, and the guard's inability to be fooled by an unreadable list.
+  // ⛔ The count is DERIVED from the consumer, not pinned — same discipline (and the same reason) as
+  // consumerRefs below, applied one control earlier. It is |shipped .ts siblings that VALUE-import
+  // ./gate-script-base.ts|, and the literal `2` went stale the moment a third sibling adopted the
+  // shared harness (2026-09-18, extract createSelftest: pane-state-classify.ts gained
+  // `import { createSelftest } from "./gate-script-base.ts"`) — i.e. it failed in exactly the shape
+  // of a real violation, the one distinction this whole test exists to keep. Mirroring
+  // transport_flat_files / transport_imports_of in JS is deliberate: two independent readings of the
+  // same consumer is what makes this number a measurement (硬规则 4) instead of an echo.
+  const gateScriptImporters = (() => {
+    const src = readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "develop-deliver-tgz.sh"), "utf8");
+    const flat = src.match(/^transport_flat_files\(\) \{([\s\S]*?)^\}$/m);
+    assert.ok(flat, "transport_flat_files() must be discoverable — it is the shipped set's single source");
+    const shippedTs = [...flat[1].matchAll(/\$\{SCRIPT_DIR\}\/([A-Za-z0-9._-]+\.ts)/g)].map((m) => m[1]);
+    assert.ok(shippedTs.length >= 5, `the shipped .ts set must be discoverable (found ${shippedTs.length})`);
+    return shippedTs.filter((name) => {
+      if (name === "gate-script-base.ts") return false; // the dropped target cannot import itself
+      // mirror of transport_imports_of: comment lines and `import type`/`export type` are erased by
+      // --experimental-strip-types, so neither counts as a remote dependency.
+      return readFileSync(path.join(REPO_ROOT, "plugin", "scripts", name), "utf8")
+        .split("\n")
+        .filter((l) => !/^\s*(\/\/|#|\*|\/\*)/.test(l))
+        .filter((l) => !/^\s*(import|export)\s+type\s+/.test(l))
+        .some((l) => /(from|import)\s*"\.\/gate-script-base\.ts"/.test(l));
+    });
+  })();
+  assert.ok(gateScriptImporters.length >= 1,
+    "the drop control must be non-vacuous — with zero importers a `violations=0` reading would be the pass");
+  assert.match(r.stdout, new RegExp(`drop-gate-script-base → violations=${gateScriptImporters.length} \\(expect ≥1, IMPORT-UNSHIPPED\\)`),
+    `dropping a ./ relative-import target must be caught (the general form of the same defect), and the count must equal the CONSUMER's own value-importers of it (${gateScriptImporters.length}: ${gateScriptImporters.join(", ")}) — a pinned literal goes stale the moment a sibling adopts the harness`);
   assert.match(r.stdout, /synthetic-type-erasure → violations=1 \(expect exactly 1: the VALUE relative import\)/,
     "the type-erasure boundary: a VALUE ./ import is flagged, an `import type` one is NOT (false positives get guards switched off)");
   assert.match(r.stdout, /IMPORT-UNSHIPPED: x\.ts imports \.\/not-shipped\.ts/,

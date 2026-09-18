@@ -29,6 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createSelftest } from "./gate-script-base.ts";
 
 const ENUMERATED_STATES = ["waiting-input", "permission-prompt", "busy", "error-banner", "unknown"];
 
@@ -924,12 +925,8 @@ export function runPaneVerdict(stdin: string): number {
 // ── in-file self-check (ADR-018 pattern: prove BOTH the RED and GREEN paths) ──────────────────────
 
 export function selfcheck(): boolean {
-  let pass = 0;
-  let fail = 0;
-  const check = (name, cond, detail = "") => {
-    if (cond) pass++;
-    else { fail++; console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`); }
-  };
+  const st = createSelftest({ flavor: "counters", label: "pane-state-classify", verb: "selfcheck" });
+  const check = st.check;
 
   // GREEN: a real waiting-input screen (empty input + status line, no busy flag).
   const idle = [
@@ -1163,9 +1160,7 @@ export function selfcheck(): boolean {
   // AC1 reuse: classifyInputResidueStatic distinguishes the static part.
   check("residue-static-empty", classifyInputResidueStatic(idle) === "empty");
   check("residue-static-has-text", classifyInputResidueStatic(realBefore) === "has-text");
-
-  console.log(`\npane-state-classify --selfcheck: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect =

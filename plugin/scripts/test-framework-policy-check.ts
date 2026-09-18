@@ -60,7 +60,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
-import { helpExit, readFileSafe } from "./gate-script-base.ts";
+import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
 
@@ -444,16 +444,8 @@ function getArgValue(args: string[], name: string): string | undefined {
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ───────────
 
 export function runSelftest(): boolean {
-  let pass = 0;
-  let fail = 0;
-  function check(name: string, cond: boolean, detail = "") {
-    if (cond) {
-      pass++;
-    } else {
-      fail++;
-      console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
-    }
-  }
+  const st = createSelftest({ flavor: "counters", label: "test-framework-policy-check" });
+  const check = st.check;
 
   const nodeTestSource = '// @test-group engine\nimport { test } from "node:test";\ntest("x", () => {});\n';
   const legacySource = '// @test-group product\nfunction makeAssert() {}\nmakeAssert();\n';
@@ -590,9 +582,7 @@ export function runSelftest(): boolean {
   // REFUTE round-2: a `//` division with ++ / -- must NOT be read as a regex that hides imports.
   const divisionOk = 'const x = 5;\nlet a = 10;\nconst r = a / 2; // division\nx++ / 2;\nimport { test } from "node:test";\ntest("x", () => {});\n';
   check("division: x++ / 2 and a / 2 must not hide the real import", hasNodeTestImport(divisionOk) === true, "import after divisions must still be detected");
-
-  console.log(`\ntest-framework-policy-check --selftest: ${pass} passed, ${fail} failed`);
-  return fail === 0;
+  return st.report();
 }
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

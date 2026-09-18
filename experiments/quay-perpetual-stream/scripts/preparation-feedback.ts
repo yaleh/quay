@@ -8,6 +8,7 @@
 // of silently looping or silently forcing a stale portfolio through.
 
 import type { MilestonePortfolio, TaskCandidate } from "./candidate-contracts.ts";
+import { createSelftest } from "./gate-script-base.ts";
 
 export const MAX_PREPARATION_ROUNDS = 3;
 
@@ -69,15 +70,8 @@ export function runPreparationFeedbackLoop(
 
 // ── selftest ──────────────────────────────────────────────────────────────────────────────────────
 export function selftest(): boolean {
-  let allPassed = true;
-  function check(name: string, condition: boolean, detail: string): void {
-    if (condition) {
-      console.log(`SELFTEST PASS: ${name} — ${detail}`);
-    } else {
-      console.error(`SELFTEST FAIL: ${name} — ${detail}`);
-      allPassed = false;
-    }
-  }
+  const st = createSelftest({ flavor: "cases" });
+  const check = st.check;
 
   const mkPortfolio = (round: number): MilestonePortfolio => ({
     version: 1,
@@ -155,9 +149,7 @@ export function selftest(): boolean {
       JSON.stringify(outcome.history),
     );
   }
-
-  console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
-  return allPassed;
+  return st.report();
 }
 
 if (process.argv[1] != null && process.argv[1].endsWith("preparation-feedback.ts") && process.argv.includes("--selftest")) {
