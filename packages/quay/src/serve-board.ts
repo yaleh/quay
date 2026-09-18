@@ -5,6 +5,10 @@ import type { ProviderClient } from "./provider-client.ts";
 import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
+// gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 10
+// dictionary (`boardLabelsFor` / `fillLabel`) instead of hard-coded Chinese literals — the same
+// pattern gap-webui-dashboard-body-copy-en-zh established (ROW 5) and the rest of the series copies.
+import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
@@ -114,40 +118,43 @@ export function renderBoardPage(board: {
   /** Human labels of the transient sources that are not `ok` (rendered by "off-source-incomplete"). */
   incompleteSources?: string[];
 }, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
+  // The page's whole body-copy roster, taken ONCE (ROW 5's `navLabelsFor` idiom) instead of
+  // re-reading BOARD_LABELS at each of ~30 call sites.
+  const L = boardLabelsFor(lang);
   const landingNote = board.landing.status === "ok"
-    ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
+    ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · ${fillLabel(L.scanTasks, { n: board.landing.scanned })}</span>`
     : board.landing.status === "empty"
-      ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>无数据</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+      ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.noData}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
       : board.landing.timedOut
         // gap-webui-board-load-120s AC3 — fail-open: a subprocess that exceeded LANDING_TIMEOUT_MS
         // renders 「读取超时」 (distinct from a generic 读失败) instead of empty-waiting to the old
         // 120s hard cap.
-        ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读取超时</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
-        : html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读失败</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
+        ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.readTimeout}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+        : html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.readFailed}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
   // gap-inflight-states-missing-impl-complete-event: the in-flight view splits into TWO independent
   // counts — implementing (start, no impl-complete: 真正在实现) vs awaiting-land (impl-complete, no
   // end: 排队待落地). Build dispatch reads the former; the land single-flight gate reads the latter.
   const implementingCount = board.execution.inFlight.filter((t) => t.implCompletedAtMs == null).length;
   const awaitingLandCount = board.execution.inFlight.length - implementingCount;
   const execNote = board.execution.status === "ok"
-    ? html`<span>执行: <code>.workflow-events/</code> · ${implementingCount} 实现中 · ${awaitingLandCount} 待落地</span>`
+    ? html`<span>${L.execSource} <code>.workflow-events/</code> · ${fillLabel(L.inFlightBreakdown, { implementing: implementingCount, awaiting: awaitingLandCount })}</span>`
     : board.execution.status === "empty"
-      ? html`<span>执行: <code>.workflow-events/</code> · <strong>无数据</strong> — ${escapeHtml(board.execution.reason || "")}</span>`
-      : html`<span>执行: <code>.workflow-events/</code> · <strong>读失败</strong> — ${escapeHtml(board.execution.reason || "")}</span>`;
+      ? html`<span>${L.execSource} <code>.workflow-events/</code> · <strong>${L.noData}</strong> — ${escapeHtml(board.execution.reason || "")}</span>`
+      : html`<span>${L.execSource} <code>.workflow-events/</code> · <strong>${L.readFailed}</strong> — ${escapeHtml(board.execution.reason || "")}</span>`;
   const intentNote = board.intentStatus === "ok"
-    ? html`<span>意图: 任务库 (Provider ABI)</span>`
-    : html`<span>意图: 任务库 (Provider ABI) · <strong>读失败</strong> — ${escapeHtml(board.intentReason || "")}</span>`;
+    ? html`<span>${L.intentSource}</span>`
+    : html`<span>${L.intentSource} · <strong>${L.readFailed}</strong> — ${escapeHtml(board.intentReason || "")}</span>`;
 
   const rows = board.rows.map((r) => {
     const flagAttr = r.landingFlag ? ` data-flag="${escapeHtml(r.landingFlag)}"` : "";
     const execAttr = r.execFlags.length > 0 ? ` data-exec-flag="${escapeHtml(r.execFlags.join(","))}"` : "";
     const execCell = r.inFlightMinutes != null
-      ? html`在飞 ${escapeHtml(r.inFlightMinutes.toFixed(1))} 分钟${r.awaitingLand ? html` · <strong>待落地</strong>` : ""}${r.execFlags.map((f) => html` · <strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join("")}`
-      : (r.execFlags.length > 0 ? r.execFlags.map((f) => html`<strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join(" · ") : "—");
+      ? html`${fillLabel(L.inFlightMinutes, { minutes: r.inFlightMinutes.toFixed(1) })}${r.awaitingLand ? html` · <strong>${L.awaitingLandTag}</strong>` : ""}${r.execFlags.map((f) => html` · <strong>${f === "in-flight-timeout" ? L.inFlightTimeout : L.orphan}</strong>`).join("")}`
+      : (r.execFlags.length > 0 ? r.execFlags.map((f) => html`<strong>${f === "in-flight-timeout" ? L.inFlightTimeout : L.orphan}</strong>`).join(" · ") : "—");
     const landingCell = r.landingFlag === "done-unlanded"
-      ? html`<strong>done 但未落地</strong>`
+      ? html`<strong>${L.doneUnlanded}</strong>`
       : r.landingFlag === "landed-not-closed"
-        ? html`<strong>已落地但未收尾</strong>`
+        ? html`<strong>${L.landedNotClosed}</strong>`
         : "—";
     return html`<tr${flagAttr}${execAttr}>
       <td><a href="/task/${encodeURIComponent(r.id)}">${escapeHtml(r.id)}</a></td>
@@ -187,28 +194,28 @@ export function renderBoardPage(board: {
   const joinedTotal = board.joinedTotal ?? totalRows;
   const showAllHref = buildBoardHref(statusFilter, labelFilters, null, pageSize, true);
   const hasRows = board.rows.length > 0;
-  const allRowsHref = html`<a href="${showAllHref}">显示全部 ${joinedTotal} 行（含历史任务）</a>`;
+  const allRowsHref = html`<a href="${showAllHref}">${fillLabel(L.showAllRows, { n: joinedTotal })}</a>`;
   let viewNote = "";
   if (transientView === "applied" && !hasRows) {
     // AC1's explicit empty state: NOT an empty table, NOT a dash wall — the page says why it is empty
     // and how to get the full list back.
     viewNote = html`<div class="info-banner" role="status">
-      <p><strong>当前没有在飞 / 待落地的任务</strong> <code>board_default_view=transient-empty</code></p>
-      <p>默认视图只显示「执行」或「落地」列非空的行 —— 全部 ${joinedTotal} 行里没有一行处于在飞 / 待落地 / 落地异常，故不铺开历史任务。</p>
-      <p>${allRowsHref}，或用上方的 status / label 筛选查看指定子集。</p>
+      <p><strong>${L.emptyTitle}</strong> <code>board_default_view=transient-empty</code></p>
+      <p>${fillLabel(L.emptyBody, { total: joinedTotal })}</p>
+      <p>${allRowsHref}${L.emptyHint}</p>
     </div>`;
   } else if (transientView === "applied") {
-    viewNote = html`<p class="meta list-nav" role="status">默认视图：只显示「执行」或「落地」列非空的行 —— ${totalRows} 行（全部 ${joinedTotal} 行）。${allRowsHref}</p>`;
+    viewNote = html`<p class="meta list-nav" role="status">${fillLabel(L.defaultViewNote, { shown: totalRows, total: joinedTotal })}${allRowsHref}</p>`;
   } else if (transientView === "off-source-incomplete") {
     // The filter could NOT be applied: at least one transient source did not read. Say so, and show
     // everything — an unread source is not evidence of absence (硬规则 5).
     const why = (board.incompleteSources ?? []).join(" · ");
     viewNote = html`<div class="info-banner" role="status">
-      <p><strong>默认过滤未生效</strong> <code>board_default_view=unfiltered-source-incomplete</code></p>
-      <p>${escapeHtml(why)} 读不到（无数据 / 读失败 / 读取超时），无法判定哪些任务当前在飞或待落地 —— 因此下面显示全部 ${joinedTotal} 行，而不是把「无法判定」渲染成「没有」。</p>
+      <p><strong>${L.defaultFilterNotApplied}</strong> <code>board_default_view=unfiltered-source-incomplete</code></p>
+      <p>${fillLabel(L.defaultFilterNotAppliedBody, { why: escapeHtml(why), total: joinedTotal })}</p>
     </div>`;
   } else if (transientView === "off-explicit-all") {
-    viewNote = html`<p class="meta list-nav" role="status">已显示全部 ${joinedTotal} 行（含历史任务）。<a href="${buildBoardHref(statusFilter, labelFilters, null, pageSize, false)}">只看当前在飞 / 待落地</a></p>`;
+    viewNote = html`<p class="meta list-nav" role="status">${fillLabel(L.allRowsShown, { n: joinedTotal })}<a href="${buildBoardHref(statusFilter, labelFilters, null, pageSize, false)}">${L.onlyTransient}</a></p>`;
   }
   // An "applied" view whose filtered set is empty renders the note INSTEAD of an empty table (AC1 /
   // DoD: 「而非空表格/空横杠墙」); the legacy direct-caller path (transientView omitted) always renders
@@ -241,9 +248,9 @@ export function renderBoardPage(board: {
     </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalRows} rows)</p>`;
 
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>${pageTitle("Board — 三源 join 看板", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.metaDescription)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Board — three-source join", identity, lang)}</title></head>
     <body>${renderMobileChrome("board", "board", lang)}${renderSiteNav("board", lang)}<main id="main">
-      <h1>${pageNameFor("Board", lang)} — 意图 / 执行 / 落地</h1>
+      <h1>${pageNameFor("Board", lang)} — ${L.h1Subtitle}</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       ${filterForm}
       ${filterNav}
@@ -251,7 +258,7 @@ export function renderBoardPage(board: {
       ${viewNote}
       ${showTable ? pageNav : ""}
       ${showTable ? tableWrap(html`<table>
-        <tr><th>id</th><th>意图</th><th>执行</th><th>落地</th></tr>
+        <tr><th>id</th><th>${L.colIntent}</th><th>${L.colExec}</th><th>${L.colLanding}</th></tr>
         ${rows}
       </table>`) : ""}
     </main></body></html>`;
@@ -523,18 +530,23 @@ function renderBoardResponse(res: ServerResponse, snap: BoardSnapshot, url: URL,
   // 「nothing is in flight」 (硬规则 3b/5: never render 「无法判定」 as a confident 「没有」).
   const allParam = (url.searchParams.get("all") ?? "").trim().toLowerCase();
   const showAll = allParam === "1" || allParam === "true" || allParam === "yes";
+  // The names are this page's body copy, so they come from the board dictionary (ROW 10) resolved
+  // for `cfg.lang` — NOT from the render function's roster, which is why they are read here through
+  // `boardLabel` by key. A source's own STATE is preserved per source: 「no data」 and 「read failed」
+  // are different facts and must not collapse into a generic 「a source failed」.
   const incompleteSources: string[] = [];
   if (execution.status !== "ok") {
-    incompleteSources.push(execution.status === "empty"
-      ? "执行源（.workflow-events/）无数据"
-      : "执行源（.workflow-events/）读失败");
+    incompleteSources.push(boardLabel(execution.status === "empty" ? "srcExecEmpty" : "srcExecFailed", cfg.lang));
   }
   if (landing.status !== "ok") {
-    incompleteSources.push(landing.timedOut === true
-      ? "落地源（task-status-drift-check.ts）读取超时"
-      : landing.status === "empty"
-        ? "落地源（task-status-drift-check.ts）不可用"
-        : "落地源（task-status-drift-check.ts）读失败");
+    incompleteSources.push(boardLabel(
+      landing.timedOut === true
+        ? "srcLandingTimeout"
+        : landing.status === "empty"
+          ? "srcLandingUnavailable"
+          : "srcLandingFailed",
+      cfg.lang,
+    ));
   }
   // An explicit status/label filter is the user asking for a NAMED set — the transient default must
   // not narrow it further (AC2: the manual filters stay, and they are one of the two ways back to

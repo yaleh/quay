@@ -311,7 +311,12 @@ test("AC5/AC6: three data sources visible; a missing source degrades to 200 (nev
     // process to be handed the same port.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: `?lang=zh`. The default language is now `en`,
+    // so the assertions below — which pin CHINESE literals — would be testing the other column.
+    // Requesting zh leaves every assertion byte-identical AND makes this test a zh-output regression
+    // guard (this task's AC3: zh must not move). The en side is covered by the new
+    // serve-board-body-i18n.test.mjs. (Same migration rule as the pattern task's decision record ④.)
+    const board = await get(port, "/board?lang=zh");
     assert.equal(board.status, 200, "AC6: /board still 200 when observation sources are missing");
     assert.ok(board.body.includes("意图") && board.body.includes("执行") && board.body.includes("落地"),
       "AC5: three columns (意图/执行/落地) are rendered");
@@ -361,7 +366,7 @@ test("AC7/execution column: live run (process present) renders in-flight + timeo
     // process to be handed the same port.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    const board = await get(port, "/board?lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(board.status, 200, "AC7: /board 200 with telemetry present");
     // EX-2 (live process) is in-flight: renders 在飞 minutes + timeout flag.
     assert.ok(board.body.includes("在飞"), "AC7: execution column shows the in-flight marker for the live run");
@@ -430,7 +435,7 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
     // process to be handed the same port.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    const board = await get(port, "/board?lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(board.status, 200, "AC8: /board 200 with the two-segment telemetry present");
     // The two INDEPENDENT counts render (1 implementing + 1 awaiting-land), not a single "2 在飞".
     assert.ok(board.body.includes("1 实现中"), "AC8: the implementing count renders");
@@ -505,7 +510,7 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     // process to be handed the same port.
     server = await startServer({ port: 0 });
     const port = server.address().port;
-    const board = await get(port, "/board");
+    const board = await get(port, "/board?lang=zh"); // migrated to explicit zh — see the note above
     assert.equal(board.status, 200, "AC2: /board 200");
     const lvRow = board.body.split("</tr>").find((r) => r.includes(">LV-1<"));
     assert.ok(lvRow && /data-exec-flag="[^"]*orphan/.test(lvRow), "AC2: /board renders LV-1 as 孤儿");
@@ -734,13 +739,18 @@ test("AC3 fail-open: a landing subprocess exceeding the second-level timeout ren
   assert.equal(landing2.timedOut, true, "AC2/AC3: the cached reading is still the timeout");
 
   // (b) The render emits 「读取超时」 distinctly from a generic 读失败.
+  // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: `renderBoardPage`'s THIRD positional argument is
+  // `lang` and defaults to `en` — so the two Chinese-literal assertions below must pass "zh"
+  // explicitly, exactly as decision record ④ prescribes for direct render callers. Assertions
+  // unchanged ⇒ this stays a zh-output regression guard; the en side is asserted in the new
+  // serve-board-body-i18n.test.mjs.
   const page = renderBoardPage({
     landing: { status: "error", timedOut: true, reason: landing.reason, flags: new Map(), scanned: 0 },
     execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
     intentStatus: "ok",
     intentReason: null,
     rows: [],
-  });
+  }, null, "zh");
   assert.ok(page.includes("读取超时"), "AC3: the rendered page shows 读取超时");
   const okPage = renderBoardPage({
     landing: { status: "error", reason: "landing 判断源读失败：boom", flags: new Map(), scanned: 0 },
@@ -748,7 +758,7 @@ test("AC3 fail-open: a landing subprocess exceeding the second-level timeout ren
     intentStatus: "ok",
     intentReason: null,
     rows: [],
-  });
+  }, null, "zh");
   assert.ok(okPage.includes("读失败") && !okPage.includes("读取超时"),
     "AC3: a non-timeout failure renders 读失败, not 读取超时 (the two are distinguishable)");
 });
@@ -843,9 +853,14 @@ test("AC-292 — /board's own chrome switches under Cookie: lang=zh; en baseline
     assert.equal(currentItemLabels(en.body).mobile, "Board", "control: en mobile nav current item is Board");
     assert.ok(navRegion(en.body).includes("Board"),
       "control: the en NAV REGION carries the literal Board — the same predicate ② reverses for zh");
-    assert.equal(titleOf(en.body).endsWith(" — Board — 三源 join 看板"), true,
-      `control: en <title> keeps its pre-change token (got ${JSON.stringify(titleOf(en.body))})`);
-    assert.ok(en.body.includes("<h1>Board — 意图 / 执行 / 落地</h1>"), "control: en <h1> keeps its pre-change token");
+    // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: this control used to pin the en token
+    // `Board — 三源 join 看板`, i.e. it asserted that the page's own English `<title>` still carried
+    // a CHINESE subtitle — a control guarding the very defect the body-copy task removes. The token
+    // is now English (`Board — three-source join`); the arm is unchanged in PURPOSE (the en title is
+    // still a fixed, pinned string, not whatever the dictionary happens to return).
+    assert.equal(titleOf(en.body).endsWith(" — Board — three-source join"), true,
+      `control: en <title> carries this page's English token (got ${JSON.stringify(titleOf(en.body))})`);
+    assert.ok(en.body.includes("<h1>Board — intent / execution / landing</h1>"), "control: en <h1> carries its English subtitle");
 
     // ── ① the document's own lang attribute (AC-288's mechanism reaching THIS page).
     assert.ok(zh.body.includes('<html lang="zh"'),
@@ -889,14 +904,18 @@ test("AC-292 — /board's own chrome switches under Cookie: lang=zh; en baseline
 test("AC-292 — the PAGE_LABELS tokens serve-board.ts passes to pageTitle/pageNameFor resolve in zh", async () => {
   const { pageNameFor } = await import("../src/serve-i18n.ts");
   // The FULL token `pageTitle` receives (em dash + subtitle included) — ROW 3's key shape.
-  assert.equal(pageNameFor("Board — 三源 join 看板", "zh"), "看板 — 三源 join 看板",
+  // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: the token itself is now ENGLISH. Only the TOKEN
+  // moved; AC-292's four arms are unchanged, because `pageNameFor`'s en column is the identity for
+  // every token (ROW 3) — so the zh value stays byte-identical and the en value is whatever the call
+  // site passes, i.e. the two arms below (zh ≠ en, zh carries no ASCII "Board") hold either way.
+  assert.equal(pageNameFor("Board — three-source join", "zh"), "看板 — 三源 join 看板",
     "AC-292: the whole <title> token is registered (a `Board`-only key misses it ⇒ title-unchanged)");
   assert.equal(pageNameFor("Board", "zh"), "看板", "AC-292: the <h1> token is registered");
   // `en` is the identity for EVERY token (ROW 3) — this is what keeps the en baseline byte-identical.
-  assert.equal(pageNameFor("Board — 三源 join 看板", "en"), "Board — 三源 join 看板", "AC-292: en is the identity");
+  assert.equal(pageNameFor("Board — three-source join", "en"), "Board — three-source join", "AC-292: en is the identity");
   assert.equal(pageNameFor("Board", "en"), "Board", "AC-292: en is the identity");
   // The gate-gameability guard the criterion's second arm exists for: a zh value that merely LOOKS
   // translated while still carrying the English literal would satisfy "non-empty" and stay red live.
-  assert.ok(!pageNameFor("Board — 三源 join 看板", "zh").includes("Board"), "AC-292: zh <title> token carries no ASCII Board");
+  assert.ok(!pageNameFor("Board — three-source join", "zh").includes("Board"), "AC-292: zh <title> token carries no ASCII Board");
   assert.ok(!pageNameFor("Board", "zh").includes("Board"), "AC-292: zh <h1> token carries no ASCII Board");
 });
