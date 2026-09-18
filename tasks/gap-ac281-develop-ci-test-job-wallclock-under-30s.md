@@ -232,8 +232,8 @@ criterion 按 `ts` 排序后取 `rows[-1]`，所以：
    **可被下一轮独立复算**（⛔ 不是只写一句「已绿」）。
    ⚠️ **这些 `.quay/` 证据文件是运行时产物：⛔ 不要 `git add` 它们。** 若要提交，必须把**具体**路径
    逐条写进 `## Touches`——`anti-drift` 的 `actualFiles` 是 `git diff --name-only develop...HEAD`，
-   已提交的 `.quay/` 文件会立刻变成 `out-of-declared` HARD FAIL；且**通配形**（`.quay/ac281-*.md`）
-   会被 `isOverbroadDeclaration` 判 overbroad 从而**挡住晋升**（实证 AC-260）。本任务 Touches 已登记
+   已提交的 `.quay/` 文件会立刻变成 `out-of-declared` HARD FAIL；且**通配形**（`.quay/ac281-*.md`）会
+   被 `isOverbroadDeclaration` 判 overbroad 从而**挡住晋升**（实证 AC-260）。本任务 Touches 已登记
    上面两个具体路径作为兜底。
 
 ## 历史（前两轮，⛔ 已结案，不要重跑）
@@ -422,3 +422,66 @@ verdict: fail — CAUSE=too-slow；run 35288482345 的套件 scheduler = 54.2s >
 **AC7① —— 成立，但 ②③ 不成立 ⇒ AC7 整条未勾**：`gate AC-279 = pass`、`gate AC-280 = pass`
 （⛔ 未被本任务改动绕开，即两条兄弟判据仍是真的验收）。同时这条读数也证明
 **本轮的 3 个拆分尚未到达 develop**（develop 的 `schedulerMs` 仍是 54.2s，与立案时 54.1s 同级）。
+
+### §16 执行轮 4（2026-09-18，worker）—— 全部 >20s 文件已拆；地板改由【一个 test()】钉死
+
+**方法上的改变（本轮最重要的操作）**：⛔ 不再用本地 16 核当 CI 的代理量——实测同一文件的
+CI/local 比在 **0.55×–2.55×** 之间双向偏离（§13 的 `fan-in-execute-paths-s07` 本地 16.3s / CI 41.7s
+就是 2.55× 那一端）。本轮**在任务分支上跑真 CI** 取地板（`gh workflow run ci.yml --ref task/…`；
+ci.yml 自己的注释明记该 job "is dispatched on task branches / master as well as develop"）。
+
+**拆前（分支 CI run 35290919973）**：`scheduler_ms=44232`，`main_phase_ms=41847`，
+`floor_ms=32429`，`files=747`。逐文件：`fan-in-execute-paths-s07` 32.43s、
+`inner-wakeup-heartbeat` 29.04s、`inner-wakeup-heartbeat-check` 27.29s、`driver-anchor` 22.29s、
+`driver-anchor-bundle` 20.92s（`cap-from-gate-*` 已由 `4b0a99a06` 降到 ~1.3s）。
+
+**本轮拆分（4 文件 → +7 新文件；每个 `test()` 逐字搬移，⛔ 未改一行断言）**，拆后 CI 实测：
+
+| 文件 | 拆前 CI | 拆后 CI | 新分片（CI 实测） |
+|---|---|---|---|
+| `inner-wakeup-heartbeat` | 29.04s | 9.91s | `-refusal` 10.55s / `-gate` 9.64s |
+| `inner-wakeup-heartbeat-check` | 27.29s | 3.27s | `-cli` 6.17s / `-ac53-cli` 8.31s / `-gate-cli` 11.73s |
+| `driver-anchor` | 22.29s | 11.02s | `driver-anchor-stop` 11.55s |
+| `driver-anchor-bundle` | 20.92s | 10.49s | `driver-anchor-bundle-fresh` 10.58s |
+
+正确性机械核对：拆前 `git show HEAD:<file>` 的 `^test("…"` 标题集合 vs 新文件集合，排序后 diff
+⇒ 24→24、88→88、7→7、8→8 逐字相同；`suite-bucket-reattr-ratchet-check --gate` 仍 PASS。
+
+**拆后（分支 CI run 35292275945）**：`scheduler_ms=44396`，`main_phase_ms=42007`，
+`floor_ms=32427`，`files=747 → 754`（AC3 的 ≥650 大幅满足；⛔ 不是靠少跑）。
+
+**⇒ 本轮结论（实测，非推断）：`scheduler_ms` 44232 → 44396，没有下降。** 拆后除 s07 外全部文件
+≤ 19.56s（次名 `branch-model` 19.56 / `supervisor-deliver-crosshost` 19.14 /
+`full-suite-runner-phases` 19.12 / `closure-lag-check` 18.65 / `observation` 18.46），
+而 `fan-in-execute-paths-s07.test.mjs` 仍 32.43s，其中**单个 `test()` 占 31.06s**
+（`⑧⑩ 锁等待负控制`；同一 run 的 `✔ … (31058.416726ms)` 行）。可分辨证据：`main_phase_ms` 的
+`__OVERHEAD__` 打印于 `00:25:35.747`，该 test 的 `✔` 打印于 `00:25:35.740` —— main 相位在
+**这一条 test 结束的同一瞬间**结束 ⇒ 它单独钉死了 main 相位与 scheduler。
+
+**为什么拆不动**：`node --test` 只在**文件之间**并行 ⇒ 拆文件能把文件地板降到 19.6s，但
+**一个 `test()` 内部拆不开**。该 test 等的是 detach 启动的**真** `full-suite-runner.ts`，其头注释
+自记「tokyo-alpha 并发 128 下达 marker 需 18.2s，空载 16 核约 2s」并明确**拒绝 seam**。
+⇒ **达标条件的正确形式（用本轮实测标定）**：若 s07 那条 test 降到与次名同级（≈19.6s），
+`main ≈ 25.3s`、`scheduler ≈ 27.7s ≤ 30s ✓`。**s07 是本任务唯一的剩余杠杆，且它不是文件拆分问题，
+是单个 test 的 CI 成本问题**（需把它移出 main 泳道 / 给受控 seam / 接受并改判据——⛔ 三项都不在
+worker 授权内）。本轮**没有**为让它变小而改动该 test 一行，也**没有**改判据。
+
+**AC**：AC2/AC5 沿用前轮已勾；**AC1/AC3/AC4/AC6/AC7 仍不勾**——它们读的是**收口 run**
+（post-landing develop run），本轮不存在，且 AC1 的 `verdict: pass` 按上面的地板结论**结构上不成立**。
+`git diff develop...HEAD -- goals/` 为空（AC1 第二条成立，⛔ 未改判据）。
+`gate AC-279` / `gate AC-280` 未被本任务改动绕开。
+
+**未处置（如实，⛔ 不写成已处置）**：s07 的 31.06s 单 test；Plan 第 4 步非测试相位残余
+（checkout / setup-node / coverage self-check / bootstrap config）。
+
+**观察项（⛔ 假说，不是结论）**：两次任务分支 CI 各出现 1 条**互不相同**的失败，两次都在本地与
+「同 commit 的干净 clone」上不可复现（本地 10/10 通过）：①`task-contract-check` 的
+`BASELINE CEILING BREACH`（stdout 空、exit 1）；②`inner-wakeup-heartbeat-gate` 的 `AC53-gate 判据4`
+（子进程 stderr 里 `SyntaxError: … './task-schema.ts' does not provide an export named 'frontmatterStatus'`，
+而该 export 在 `7e7ec6c05` 与 `7e708bcec` 两份文件里都存在）。**已知对照**：10 条 develop CI run 里
+两者都是 0 次，而这两次任务分支 run 都**额外并跑** `cold-start-e2e`（develop 的 push 触发里它是
+`skipped`）。可分辨的预测：若成因是并发 job 共用 runner 工作目录覆写 `plugin/scripts/*`，则 develop
+的 push 触发 run 应当干净——正是 10/10 的观测。**但本 worker 拿不出关掉 cold-start-e2e 的对照臂**
+（任务分支只能 `workflow_dispatch`，必然带上它）⇒ **降为假说，不作结论**。
+
+完整读数与复算命令见 `.quay/ac281-evidence.md` §16（运行时产物，⛔ 未 git add）。
