@@ -221,10 +221,17 @@ async function main() {
       console.log(`quay-native init — scaffold a new quay workspace
 
 Usage:
-  quay-native init [--force] [--dry-run] [--root <path>]
+  quay-native init [--force] [--reconcile] [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
+  --reconcile  Bring an EXISTING .quay/config.yml up to this version's defaults
+               instead of refusing it: keys this version added are filled from the
+               defaults, values this version considers incompatible are migrated,
+               everything else (including comments) is left alone. Handles all three
+               states — absent (fresh write), unparseable (rebuilt, broken file kept
+               beside it), valid (per-key diff). Shares one implementation with the
+               Core CLI's "quay init --reconcile".
   --dry-run    Print the generated config to stdout without writing to disk.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
@@ -263,17 +270,43 @@ Description:
 
     const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
     const force = initFlags.force === true;
+    const reconcile = initFlags.reconcile === true;
     const dryRun = initFlags["dry-run"] === true;
 
     try {
-      const result = runInit({ root: targetRoot, force, dryRun });
+      const result = runInit({ root: targetRoot, force, reconcile, dryRun });
+
+      // ⛔ Its own arm, before "already exists": an unparseable config is not a name conflict, and
+      // reporting it as one hides the parse error (硬规则 3b). Same three-state vocabulary as Core.
+      if (result.outcome === "corrupt") {
+        console.error(
+          `.quay/config.yml exists at ${result.configPath} but could not be read as a config:\n` +
+          `  ${result.corruptReason}\n` +
+          "Use --reconcile to rebuild it from this version's defaults (the unparseable file is kept\n" +
+          "beside the new one), or --dry-run to preview a rebuild without touching anything."
+        );
+        process.exitCode = 1;
+        return;
+      }
 
       if (result.outcome === "skipped") {
         console.error(
           `.quay/config.yml already exists at ${result.configPath}. ` +
-          "Use --force to overwrite, or --dry-run to preview."
+          "Use --force to overwrite, --reconcile to bring it up to this version's defaults, " +
+          "or --dry-run to preview."
         );
         process.exitCode = 1;
+        return;
+      }
+
+      if (result.outcome === "reconciled" || result.outcome === "unchanged") {
+        if (result.outcome === "unchanged") {
+          console.log(`${result.configPath}: already current for this version of quay — not rewritten.`);
+        } else {
+          console.log(`${result.configPath}: reconciled to this version's defaults.`);
+          for (const k of result.reconcile?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
+          for (const m of result.reconcile?.migrated ?? []) console.log(`  migrated loop.${m}`);
+        }
         return;
       }
 
@@ -288,6 +321,7 @@ Description:
       }
 
       console.log(`Created ${result.configPath}`);
+      if (result.corruptReason) console.log(`  ${result.corruptReason}`);
       console.log(`Created ${result.tasksDir}/ (or already existed)`);
       console.log(`Created ${result.launchSettingsPath}`);
       console.log(`Created ${result.profilesPath}`);

@@ -7,18 +7,206 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import YAML from "yaml";
 import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } from "./branch-model.ts";
+
+// ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
+// (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
+//
+// WHY THREE STATES AND NOT A BOOLEAN: `fs.existsSync` answers "is there a file at this path", and the
+// callers used that answer for a different question — "is there a config I must not clobber". The two
+// coincide only while every existing file happens to be usable. A file that exists but cannot be
+// parsed is NOT a config: reporting it through the same branch as a valid one hides the real cause
+// behind "already exists, use --force" (the user cannot tell a name conflict from a broken file), and
+// reporting it as "absent" would silently overwrite whatever the user still has on disk.
+// 硬规则 3b: a judge that cannot read its input must not return the value it returns on a verdict —
+// so "corrupt" is its OWN state with its OWN reason string, never folded into either neighbour.
+export type ConfigState = "absent" | "valid" | "corrupt";
+
+export interface ConfigClassification {
+  state: ConfigState;
+  /** Absolute path that was classified. */
+  configPath: string;
+  /** Parsed document — present only when `state === "valid"` (an empty file yields `{}`). */
+  config?: Record<string, unknown>;
+  /**
+   * The file's bytes as read, present whenever the file exists and was readable. Carried so the
+   * reconcile edits the SAME bytes this classification judged, instead of re-reading the path and
+   * re-opening the window between "is it valid?" and "what do I edit?".
+   */
+  raw?: string;
+  /**
+   * Why this file is not usable, verbatim from the reader/parser — present only when
+   * `state === "corrupt"`. Surfaced to the operator unchanged: the whole point of the third state is
+   * that the operator is told the REAL cause instead of a generic "already exists".
+   */
+  reason?: string;
+}
+
+/**
+ * Classify an existing `.quay/config.yml` into absent / valid / corrupt.
+ *
+ * "valid" means: the file was read AND `YAML.parse` produced a plain object (or nothing, for an empty
+ * file). Everything else that exists is "corrupt" — unreadable bytes, a YAML syntax error, or a
+ * document whose top level is a scalar/list (which no consumer downstream can read as a config map).
+ */
+export function classifyConfig(configPath: string): ConfigClassification {
+  if (!fs.existsSync(configPath)) return { state: "absent", configPath };
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch (err) {
+    return { state: "corrupt", configPath, reason: `cannot read the file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(raw);
+  } catch (err) {
+    return { state: "corrupt", configPath, reason: `YAML parse failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  if (parsed === null || parsed === undefined) return { state: "valid", configPath, config: {}, raw };
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      state: "corrupt",
+      configPath,
+      raw,
+      reason: `the document's top level is ${Array.isArray(parsed) ? "a list" : `a ${typeof parsed}`}, not a mapping — no quay consumer can read it as a config`,
+    };
+  }
+  return { state: "valid", configPath, config: parsed as Record<string, unknown>, raw };
+}
+
+// ── The current-version `loop:` default schema — THE single source of truth (SPEC §3.2) ─────────────
+//
+// THE DEFECT THIS REPLACES: every new version-level `loop:` default had to be hand-copied into a
+// purpose-built merge function (`quay-init.sh`'s `ensure_loop_config` knows exactly four keys;
+// `ensure_provider_carrier_env` knows exactly three more). A default added to the fresh-install
+// template but not to those functions is unreachable for every project that was initialized before
+// it — forever, no matter how many times the upgrade entry re-runs. Measured on a real project
+// (quay-fleet, 2026-09-18): `fork_baseline` / `merge_target` were added to the template three days
+// after that project's init (`fe053af7`), and re-running `/quay:init` left the config's mtime
+// unchanged. That is not an oversight to fix once — it is the SHAPE of the mechanism, so the fix is
+// to remove the second place: there is now ONE table, and adding a key here is the whole change.
+//
+// ⛔ ONLY version-level CONSTANTS belong here. A key whose right value depends on the project
+// (repo_root / test_command / tmux_session / worktree_root / worktree path) is DETECTED, not
+// defaulted, and inventing a constant for it would write a confidently wrong value into a user's
+// config — strictly worse than leaving it out.
+export const LOOP_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
+  /** The branch a task worktree forks from (SPEC-branching-model current ruling: `develop`). */
+  fork_baseline: "develop",
+};
+
+// ⛔ `merge_target` is DELIBERATELY NOT in the table above, and the reason is executable rather than
+// editorial: `plugin/test/quay-init.test.mjs` asserts the loop section must NOT carry it
+// ("the zero-consumer key is deleted from the writer face — the negative control is that the dead key
+// is NOT written, not merely unwired", from gap-config-key-consumer-check-mechanical-enumeration).
+// This task's own AC2 named both keys in its regression fixture, on the strength of the quay-fleet
+// symptom; that fixture was written before this constraint was discovered, and it is the constraint
+// that wins, because the alternative is two fresh-install writers that disagree about what this
+// version emits — the exact drift this whole change exists to remove. `merge_target` is display-only
+// here: `serve-render.ts` reads `loop.merge_target ?? loop.fork_baseline`, so a config without it is
+// still honestly rendered from the fork baseline, and `worker-driver.ts` never reads the config for
+// it at all (`mergeTarget ?? "develop"` is an OPTION default). A config that already carries it keeps
+// its value (the reconcile preserves what it does not own); one carrying the retired `integration` is
+// still migrated — see LOOP_VALUE_MIGRATIONS. See this task's DoD evidence for the recorded deviation.
+
+/**
+ * Explicit migration table for values this version considers incompatible (SPEC §3.2).
+ *
+ * Keyed by `loop:` key → the set of values that must NOT survive a reconcile, with the replacement.
+ * Distinct from both neighbours on purpose: a key absent from the config is FILLED from
+ * `LOOP_VERSION_DEFAULTS`; a key carrying an ordinary user value is PRESERVED verbatim; only a value
+ * listed here is rewritten. That is the third arm the SPEC asks for ("不是简单保留也不是简单覆盖").
+ */
+export const LOOP_VALUE_MIGRATIONS: Readonly<Record<string, { from: readonly string[]; to: unknown; why: string }>> = {
+  merge_target: {
+    from: ["integration"],
+    to: "develop",
+    why: "`integration` was the landing branch of the retired classic milestone loop (ADR-022); a config still naming it as the fan-in target points at a branch nothing maintains.",
+  },
+};
+
+export interface ReconcileReport {
+  /** `loop:` keys that were absent from the config and were filled from LOOP_VERSION_DEFAULTS. */
+  added: string[];
+  /** `key: old -> new` for values rewritten via LOOP_VALUE_MIGRATIONS. */
+  migrated: string[];
+  /**
+   * True when the reconciled document is byte-identical to the input ⇒ nothing was written. Kept as
+   * its own field (not inferred from `added.length === 0`) because a migration and a fill can cancel
+   * out byte-wise; "did we write" is the question the caller must be able to answer.
+   */
+  unchanged: boolean;
+}
+
+/**
+ * Reconcile an existing config's `loop:` section to the current version's schema.
+ *
+ * PRESERVATION IS THE DEFAULT: the document is edited through `YAML.parseDocument` / `doc.setIn` —
+ * the comment-preserving Document API — so every key the user already has (and every comment, which
+ * `YAML.parse` + a re-dump would silently destroy) survives byte-for-byte; only the keys this
+ * function actually sets appear in the output. Callers must not write the file when `unchanged` is
+ * true (mirrors `quay-init.sh`'s AC3 "no gratuitous rewrite" discipline: a version-level no-op must
+ * not reformat a project's config).
+ *
+ * @throws when the input is not parseable — callers reach this only after `classifyConfig` returned
+ *         "valid", so a throw here means the file changed underneath them; it is never swallowed.
+ */
+export function reconcileConfigContent(raw: string): { content: string; report: ReconcileReport } {
+  const doc = YAML.parseDocument(raw);
+  const added: string[] = [];
+  const migrated: string[] = [];
+
+  for (const [key, value] of Object.entries(LOOP_VERSION_DEFAULTS)) {
+    if (doc.hasIn(["loop", key])) continue;
+    doc.setIn(["loop", key], value);
+    added.push(key);
+  }
+
+  for (const [key, rule] of Object.entries(LOOP_VALUE_MIGRATIONS)) {
+    const current = doc.getIn(["loop", key]);
+    if (typeof current !== "string" || !rule.from.includes(current)) continue;
+    doc.setIn(["loop", key], rule.to);
+    migrated.push(`${key}: ${current} -> ${String(rule.to)}`);
+  }
+
+  // ⛔ `unchanged` is decided by "was there anything to do", NOT by `doc.toString() === raw`.
+  // Those are not the same question, and answering the byte question would be wrong in the
+  // direction that matters: the Document API normalizes some formatting it did not change the
+  // MEANING of (a trailing blank line, say), so a no-op reconcile of a current config would report
+  // "changed" and rewrite the file — the gratuitous rewrite this whole discipline exists to avoid.
+  // A reconcile with nothing to add and nothing to migrate has nothing to write, full stop.
+  const unchanged = added.length === 0 && migrated.length === 0;
+  return { content: unchanged ? raw : doc.toString(), report: { added, migrated, unchanged } };
+}
 
 /**
  * Result of an init operation.
  */
 export interface InitResult {
   /**
-   * "written" | "dry-run" | "skipped" (existing, no --force) |
+   * "written" | "dry-run" | "skipped" (existing + valid, no --force/--reconcile) |
+   * "corrupt" (existing + unparseable, no --force/--reconcile) |
+   * "reconciled" (existing + valid + --reconcile, and the config had to change) |
+   * "unchanged" (existing + valid + --reconcile, and the config was already current) |
    * "branch-model-blocked" (divergent landing baseline without adoption) |
    * "branch-model-only" (the config-free branch-model entry — see `branchModelOnly`).
    */
   outcome: string;
+  /**
+   * Three-state classification of the config BEFORE this run (AC1). Carried on the result so every
+   * caller can distinguish "there was no config" from "there was one and it was broken" — the
+   * distinction the boolean `configExists` this replaces could not express (硬规则 3b).
+   */
+  configState: ConfigState;
+  /** Why the config was unreadable — present only when `outcome === "corrupt"`. */
+  corruptReason?: string;
+  /** What the reconcile changed — present only when `outcome === "reconciled" | "unchanged"`. */
+  reconcile?: ReconcileReport;
   /** Absolute path to the config file that was (or would be) written. */
   configPath: string;
   /** Absolute path to the tasks dir that was (or would be) created. */
@@ -54,6 +242,22 @@ export interface InitOptions {
   force: boolean;
   /** Print to stdout instead of writing to disk. */
   dryRun: boolean;
+  /**
+   * Reconcile an EXISTING config to this version's schema instead of refusing it (SPEC §3.2).
+   *
+   * This is the mode `/quay:init` needs: the shipped upgrade path must be able to re-run on an
+   * already-initialized project and bring its config up to what THIS version of quay requires —
+   * filling keys the version added since the project was initialized (`LOOP_VERSION_DEFAULTS`) and
+   * rewriting values this version considers incompatible (`LOOP_VALUE_MIGRATIONS`) — while leaving
+   * every other key and comment byte-for-byte alone.
+   *
+   * Robustness is the point, so the flag is total over the three states (AC1): absent ⇒ a normal
+   * fresh write; corrupt ⇒ salvage-by-rebuild (the unparseable file is preserved beside the new one);
+   * valid ⇒ the per-key diff. With it, re-running init is always a legal, idempotent operation.
+   *
+   * `force` still wins where both are given: an explicit overwrite is not a diff.
+   */
+  reconcile?: boolean;
   /** Provider id override (default: auto-detect). */
   provider?: string;
   /**
@@ -258,6 +462,11 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "loop:",
     "  board: \"" + providerId + "\"",
     "  gates: []",
+    // The version-level defaults, EMITTED FROM THE SAME TABLE the reconcile fills from
+    // (`LOOP_VERSION_DEFAULTS`) rather than re-typed here. Two hand-kept copies of one list is the
+    // defect this whole change exists to remove: a fresh workspace must not be born one reconcile
+    // behind, which is exactly what a template that forgets a key the reconcile knows about produces.
+    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${String(v)}`),
     "  # stop: \"once\"                # uncomment and set your preferred stop policy",
     "  # policy: \"ready-first\"        # uncomment to customize task selection",
     "  # execution: \"dispatched\"      # uncomment to use inline builds",
@@ -497,6 +706,7 @@ export function runInit(opts: InitOptions): InitResult {
     });
     return {
       outcome: "branch-model-only",
+      configState: classifyConfig(configPath).state,
       configPath,
       tasksDir,
       content: "",
@@ -509,12 +719,37 @@ export function runInit(opts: InitOptions): InitResult {
     };
   }
 
-  // Check if config already exists.
-  const configExists = fs.existsSync(configPath);
-  if (configExists && !opts.force && !opts.dryRun) {
-    // AC3: refuse to overwrite existing config.
+  // ── What does the target already have? (three-state — AC1; not `fs.existsSync`) ────────────────
+  const existing = classifyConfig(configPath);
+  const reconcileMode = opts.reconcile === true && !opts.force;
+
+  // EXISTING + UNPARSEABLE, and the caller asked for neither an overwrite nor a reconcile: stop, and
+  // say WHY. This branch is the whole reason the classification is three-valued — the pre-fix code
+  // answered `existsSync` here and printed "already exists, use --force", which is a true statement
+  // about a DIFFERENT problem (a name conflict) and sent the operator looking for a conflict that
+  // does not exist (硬规则 3b).
+  if (existing.state === "corrupt" && !reconcileMode && !opts.force && !opts.dryRun) {
+    return {
+      outcome: "corrupt",
+      configState: "corrupt",
+      corruptReason: existing.reason,
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
+      branchModelReport: "",
+    };
+  }
+
+  // EXISTING + USABLE, no overwrite, no reconcile: refuse, exactly as before (AC3).
+  if (existing.state === "valid" && !reconcileMode && !opts.force && !opts.dryRun) {
     const result: InitResult = {
       outcome: "skipped",
+      configState: "valid",
       configPath,
       tasksDir,
       content: "",
@@ -526,6 +761,42 @@ export function runInit(opts: InitOptions): InitResult {
       branchModelReport: "",
     };
     return result;
+  }
+
+  // ── The reconcile diff (SPEC §3.2; AC2) ────────────────────────────────────────────────────────
+  // Reached only for a VALID config under `--reconcile`. The content is edited in place, so the
+  // report below describes exactly the keys added/migrated and nothing else. A no-op reconcile writes
+  // NOTHING: re-running `/quay:init` on a current project must leave the config byte-identical.
+  if (existing.state === "valid" && reconcileMode) {
+    const { content, report } = reconcileConfigContent(existing.raw ?? "");
+    if (!opts.dryRun && !report.unchanged) {
+      fs.writeFileSync(configPath, content, "utf8");
+    }
+    return {
+      outcome: report.unchanged ? "unchanged" : "reconciled",
+      configState: "valid",
+      configPath,
+      tasksDir,
+      content,
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      reconcile: report,
+      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
+      branchModelReport: "",
+    };
+  }
+
+  // EXISTING + UNPARSEABLE, with an explicit overwrite/reconcile decision: salvage by rebuild. The
+  // unreadable bytes are preserved beside the new file rather than discarded — "the parser could not
+  // read it" is not evidence that the content is worthless (the SPEC's §3.3 asks for exactly this
+  // salvage step; the backup is what makes it non-destructive).
+  let corruptBackupPath: string | undefined;
+  if (existing.state === "corrupt" && !opts.dryRun) {
+    corruptBackupPath = `${configPath}.corrupt-${Date.now()}`;
+    fs.copyFileSync(configPath, corruptBackupPath);
+    // fall through to the fresh-write path below
   }
 
   // ── Branch model (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
@@ -541,6 +812,7 @@ export function runInit(opts: InitOptions): InitResult {
   if (!branchModel.ok && !opts.dryRun) {
     return {
       outcome: "branch-model-blocked",
+      configState: existing.state,
       configPath,
       tasksDir,
       content: "",
@@ -566,7 +838,7 @@ export function runInit(opts: InitOptions): InitResult {
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
   if (opts.dryRun) {
-    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
+    return { outcome: "dry-run", configState: existing.state, configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
   }
 
   // Write config.
@@ -595,7 +867,20 @@ export function runInit(opts: InitOptions): InitResult {
     fs.writeFileSync(profilesPath, profilesContent, "utf8");
   }
 
-  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
+  return {
+    outcome: "written",
+    configState: existing.state,
+    ...(corruptBackupPath ? { corruptReason: `unparseable config preserved at ${corruptBackupPath}` } : {}),
+    configPath,
+    tasksDir,
+    content,
+    launchSettingsPath,
+    launchSettingsContent,
+    profilesPath,
+    profilesContent,
+    branchModel,
+    branchModelReport,
+  };
 }
 
 /**
