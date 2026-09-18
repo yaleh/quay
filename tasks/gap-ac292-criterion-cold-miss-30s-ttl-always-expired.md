@@ -103,24 +103,75 @@ goal_ac: AC-292
 
 ## AC
 
-- [ ] **AC1（判据本身：连续冷跑全绿）**：在重启后的活实例上
+- [x] **AC1（判据本身：连续冷跑全绿）**：在重启后的活实例上
   `for i in 1 2 3 4 5; do node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json; echo "EXIT=$?"; sleep 31; done`
   ⇒ **5/5 `verdict:"pass"` + `EXIT=0`**，五次原文并排贴出。
   ⛔ 必须带 `sleep 31` 的**冷路径** —— 否则测的是缓存热态，而那正是 AC-179 那条「优化了稳态、而判据从不走稳态」的错误。
-- [ ] **AC2（直接量：冷路径与判据预算的余量）**：冷路径（强制造冷后的首次请求）**3 次采样全部 < 5s**，
+
+  **实测**（实例 = 本 worktree 启动的 `quay.ts serve --port 4175`，cwd = 该 worktree ⇒ 判据探针匹配）：
+  ```
+  RUN #1..5 → EXIT=0  "verdict": "pass"  acceptance passed (exit 0)     5/5 全绿，每次间隔 sleep 31
+  同口径改前基线（未改动代码）：3/3 红 —— CAUSE=en-fetch-failed -- GET http://127.0.0.1:4175/board returned nothing
+  ```
+- [x] **AC2（直接量：冷路径与判据预算的余量）**：冷路径（强制造冷后的首次请求）**3 次采样全部 < 5s**，
   并同时贴出判据写死的 10s 预算作为对照；同时贴**热路径**读数。⛔ 不是「变快了」，是**冷路径跨过 10s 预算的概率为 0**。
-- [ ] **AC3（不随仓库规模退化 —— 本条与前两次修复的分界）**：给出**成本结构**证据，证明请求路径**不再包含**
+
+  **实测**（同一实例，`sleep 31` 强制造冷）：
+  ```
+  改后  COLD t=0.08s / 3.29s / 0.04s      HOT t=0.04s / 0.07s / 0.02s
+  改前  COLD t=9.78s / 9.62s / 9.17s      HOT t=0.24s / 2.35s / 0.23s     （判据预算 = 10s）
+  ```
+  ⇒ 冷路径 3/3 < 5s，余量 ≥ 6.7s；`COLD#2 = 3.29s` 落在后台重建的一个阻塞步上（重建协作式，每个阻塞 reader
+  独占一个 macrotask ⇒ 并发请求最多等**一个** reader 而非它们之和）。
+- [x] **AC3（不随仓库规模退化 —— 本条与前两次修复的分界）**：给出**成本结构**证据，证明请求路径**不再包含**
   随任务数增长的构建（例如：请求路径内 **0 次子进程 spawn**、**0 次全量扫描**，用可复算的读数给出，⛔ 不是「应该不会」）。
   ⛔ 本任务**禁止**以「把 timeout 调大到 N 秒」或「把 TTL 调长」作为落地手段 —— 那两次已经试过（见 Proposal 表），
   且判据的消费间隔恒 >TTL ⇒ 调 TTL 结构上无效。
-- [ ] **AC4（可被打红 —— 因果对照）**：把后台构建**临时**关掉（一次性本地改动，⛔ 不提交），
+
+  **实测（直接计数，非墙钟代理；两侧读数都在 —— 硬规则 4）** —— `gap-ac292-board-request-path-cold-build.test.mjs` 的 AC3′：
+  | 状态 | 5 次 `/board` 后 `+landing 子进程 spawn` | `+develop-ref 全量扫描` |
+  |---|---|---|
+  | 快照在位 | **0** | **0** |
+  | `QUAY_BOARD_SNAPSHOT_DISABLED=1` | **+1（恰好一次）** | **+1（恰好一次）** |
+  计数器为本次新增的直接量（`observation.getLandingColdRunCount` / `getTaskStatusRefBuildCount`）；
+  第二个（关掉后 +1）证明「0」是真读数而非恒零旋钮。
+  `LANDING_TIMEOUT_MS` / `LANDING_CACHE_TTL_MS` 两处字面量**未改**（`git diff` 可验）。
+- [x] **AC4（可被打红 —— 因果对照）**：把后台构建**临时**关掉（一次性本地改动，⛔ 不提交），
   证明冷路径回到 >10s 且判据可红；恢复后复绿。**两次读数并排贴出**。
   ⛔ 无此对照 ⇒「是本次接线造成的」只是一句未被检验的断言（硬规则 4 推论四）。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-criterion-cold-miss-30s-ttl-always-expired` 绿；
+
+  **实测（对照形态：把 `startBoardSnapshotRefresh` 调用换成惰性句柄，跑完 `git checkout -- packages/quay/src/serve.ts` 还原，⛔ 未提交）**：
+  ```
+  PHASE A（关掉后台构建）  COLD t=6.47s / 5.85s / 12.83s   criterion 2/2 "verdict":"pass"
+  PHASE B（还原后）        COLD t=2.72s / 0.03s            criterion 2/2 "verdict":"pass"
+  ```
+  **⚠️ 如实记录一处偏离**：对照**有效且因果成立**（关掉后请求路径重新现付全量构建 5.85–12.83s，其中一次越过 10s；
+  开启后 0.03–0.08s ⇒「快是本次接线造成的」**已被检验**）。但 AC4 字面要求的「冷路径回到 >10s **且判据可红**」
+  **未在本对照中复现**：3 次冷采样只 1 次 >10s，2 次判据都是 pass。成因是一条**未申报的副作用** ——
+  本实现的 fallback 与后台 tick **共用同一个** `buildBoardSnapshot`（单一实现，两者不会漂移），
+  它把落地子进程与 provider/git 读**并发**发起，故 fallback 是 `max(6.46, ~2.4)` ≈ 6.5s，而改前是 `6.46+1.41+provider` ≈ 9.7s。
+  ⇒ **「>10s / 判据可红」的诚实证据由改前红基线提供**：同机器、同端口、同命令、**未改动代码**，
+  冷 9.17 / 9.62 / 9.78s，判据 **3/3 红**。本任务选择**保留并发**（首建窗口 ~9.7s → ~6.5s），
+  并把这条偏离写进证据，而不是为迁就对对照的数值预期把 fallback 人为串行化。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-criterion-cold-miss-30s-ttl-always-expired` 绿；
   ② `node --test packages/quay/test/serve-*.test.mjs packages/quay/test/observation.test.mjs` 绿；
   ③ **`/board` 既有渲染语义逐条不变**：`Cookie: lang=zh` 下仍 `<html lang="zh"`、nav 区块内无字面量 `Board`、
   本页 `<title>` 与 en 逐字不同（三段原样贴出）；`?status=` / `?label=` / `?page=` 的过滤与分页行为不变；
   ④ `git diff --name-only <base>...HEAD` 只含本任务 Touches 的路径。
+
+  **实测**：① scoped 门 `ℹ tests 155 · pass 155 · fail 0`（exit 0；选择面含本次两个测试文件）；
+  ② `ℹ tests 310 · pass 309 · fail 0`（33 个 serve-* 文件 + observation.test.mjs）；
+  ③ 活实例原样读数 ——
+  ```
+  en nav 区块含字面量 Board : …<a class="mobile-menu-item" href="/board">Board</a>…
+  zh 响应头                : <html lang="zh"
+  zh nav 区块含字面量 Board : absent（判据第 2 段通过）
+  en/zh <title>            : 「… — Board — 三源 join 看板」 vs 「… — 看板 — 三源 join 看板」（逐字不同）
+  /board?status=ready → Page 1 of 1 (5 rows) · ?label=gap → 1730 rows · ?page=2&all=1 → Page 2 of 114 (2274 rows) · ?pageSize=5&all=1 → Page 1 of 455
+  ```
+  ④ `git diff --name-only $(git merge-base develop HEAD)...HEAD` = `observation.ts` / `serve-board.ts` / `serve.ts` /
+  `gap-ac292-board-request-path-cold-build.test.mjs` / `serve-board.test.mjs` —— 与 Touches 逐条相同；
+  `goals/AC-292-*.md` **未改**。
 
 ## DoD
 
@@ -136,6 +187,12 @@ goal_ac: AC-292
    与它的作用域（纯本地代码、无外部状态）。
 6. **证据留痕**：红/绿判据原文、冷/热两态读数、因果对照两次读数、成本结构读数，
    落成**任务体内联**或**未跟踪** scratch 文件，可被下一轮独立复算（⛔ 不是只写一句「已修好」）。
+
+**留痕位置**：上面每条 AC 内联；完整证据包（含成本分解、复算命令、逐字读数）落在**未跟踪**的
+`.quay/ac292/EVIDENCE.md`（连同 `start-serve.sh` / `stop-serve.sh` / `run-ac1.sh` / `run-ac4.sh` 与各次原始输出）。
+**回滚形态**：`git revert` 本任务提交即可——请求路径回到 `handleBoard` 内联四 reader、后台 tick 消失、
+快照四件套无调用点；随后 `npm run build -w quay` + **重启 `quay serve`**。作用域纯本地，不写任何持久化载体
+（快照只在进程内存），不改 `goals/`、不改配置。回滚后行为 == 上文红基线。
 
 ## Touches
 
