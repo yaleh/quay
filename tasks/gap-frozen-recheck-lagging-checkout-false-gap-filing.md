@@ -60,7 +60,7 @@ $ QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types \
 
 ## Acceptance Criteria
 
-- [x] AC1（本通道被挡住）：夹具「复核根落后 develop、且 develop 上已有使判据转绿的提交」下，`runPrefilingRecheck` 对该 AC 的 entry 为 `outcome: "not-evaluated"` + `cause: "checkout-lagging-develop"`，且该轮 `computeGoalGaps` **不产出**该 AC 的 `frozen-violated`（该 AC 落 `not-evaluated` 独立取值、⛔ 非 `frozen-violated`；`gap_spawns` 为空）。⛔ 若仍落 `confirmed-failing` ⇒ 假。
+- [x] AC1（本通道被挡住）：夹具「复核根落后 develop、且 develop 上已有使判据转绿的提交」下，`runPrefilingRecheck` 对该 AC 的 entry 为 `outcome: "not-evaluated"` + `cause: "checkout-lagging-develop"`，且该轮 `computeGoalGaps` **不产出**该 AC 的 `frozen-violated`（`gaps` 无该条、`gap_spawns` 为空）。⛔ 若仍落 `confirmed-failing` ⇒ 假。
 - [x] AC2（正向控制，⛔ 不得一律放过）：同一夹具、复核根**与 develop 齐平**且判据真为假时，entry 为 `outcome: "confirmed-failing"` + `cause: "still-false"`，该轮**照常**产出 `frozen-violated` 且 `gap_spawns` 含该 AC。两臂缺一不算。
 - [x] AC3（既有行为不被削弱）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-driver-s10.test.mjs` exit 0，两条既有断言（裸 tmp 根：第 1 轮 `confirmed-failing`+立案、第 2 轮 `cleared/now-true`+不立案）逐条仍绿。
 - [x] AC4（独立取值，⛔ 不布尔化）：存在断言逐条区分 `checkout-lagging-develop` 与 `cleared`(now-true) / `confirmed-failing`(still-false) / `guard-refused` / `unreadable` 五个取值，且互为不等。
