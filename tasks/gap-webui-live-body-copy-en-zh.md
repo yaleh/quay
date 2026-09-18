@@ -2,7 +2,7 @@
 id: gap-webui-live-body-copy-en-zh
 title: /live 正文文案在 lang=en 下仍是硬编码中文（在飞摘要、空态、跨任务阻塞说明）+ serve-live.ts 里 phaseLabel
   的重复副本 —— 正文本地化系列，照 /dashboard 已定 pattern
-status: todo
+status: ready
 labels:
   - gap
   - webui
