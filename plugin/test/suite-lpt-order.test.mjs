@@ -266,18 +266,26 @@ test("baseline — loadBaselineDurations reads a well-formed table, and is EMPTY
 
 test("baseline — the LIVE rolling carrier WINS; the baseline is used only when the live carrier is empty", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lpt-resolve-"));
+  // Every mkdtemp result is a variable that a cleanup region rmSync's (the carrier-array pattern
+  // tmp-leak-pairing-check's detector requires) — nested roots live under `dir` but are tracked and
+  // removed explicitly rather than relying on the parent rm.
+  const created = [];
+  const mk = (prefix) => {
+    const d = fs.mkdtempSync(path.join(dir, prefix));
+    created.push(d);
+    return d;
+  };
   try {
     const baseline = path.join(dir, "baseline.json");
     fs.writeFileSync(baseline, JSON.stringify({ durations: { "plugin/test/a.test.mjs": 999 } }));
 
     // (1) no live carrier ⇒ the baseline is used
-    const empty = fs.mkdtempSync(path.join(dir, "empty-"));
-    const r1 = resolveDurationTable({ root: empty, rounds: 3, baseline });
+    const r1 = resolveDurationTable({ root: mk("empty-"), rounds: 3, baseline });
     assert.equal(r1.provenance, "committed-baseline");
     assert.equal(r1.table.get("plugin/test/a.test.mjs"), 999);
 
     // (2) both present ⇒ the live carrier wins (a stale committed table must never override live data)
-    const live = fs.mkdtempSync(path.join(dir, "live-"));
+    const live = mk("live-");
     fs.mkdirSync(path.join(live, ".quay"), { recursive: true });
     fs.writeFileSync(
       path.join(live, ".quay", "verification-round.jsonl"),
@@ -288,10 +296,11 @@ test("baseline — the LIVE rolling carrier WINS; the baseline is used only when
     assert.equal(r2.table.get("plugin/test/a.test.mjs"), 42);
 
     // (3) neither ⇒ none (and NOT an exception)
-    const r3 = resolveDurationTable({ root: fs.mkdtempSync(path.join(dir, "none-")), rounds: 3, baseline: path.join(dir, "absent.json") });
+    const r3 = resolveDurationTable({ root: mk("none-"), rounds: 3, baseline: path.join(dir, "absent.json") });
     assert.equal(r3.provenance, "none");
     assert.equal(r3.table.size, 0);
   } finally {
+    for (const d of created) fs.rmSync(d, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
