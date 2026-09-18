@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readSystem, readManager, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
-import { systemLabelsFor, systemLabel, fillLabel } from "./serve-i18n.ts";
+import { systemLabelsFor, systemLabel, fillLabel, managerLabelsFor } from "./serve-i18n.ts";
 
 // ── /system ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -150,17 +150,25 @@ export async function handleSystem(
 
 // ── /manager ───────────────────────────────────────────────────────────────────────────────────────
 
-/** AC-294: `lang` is this request's resolved language (AC-288's mechanism, threaded in by the
- *  dispatcher via `handleManager`'s `cfg.lang`, which had been received and dropped). It reaches
- *  FOUR things on this page and nothing else: the document-language attribute, the shared nav bar
- *  (`renderSiteNav`) and mobile chrome (`renderMobileChrome`) — whose `manager` entry already
- *  exists in NAV_LABELS (ROW 1) — this page's own `<title>` (through `pageTitle`), and the `<h1>`'s
- *  page-name token (through `pageNameFor` against serve-i18n.ts's PAGE_LABELS).
+/** AC-294 wired this page's CHROME; since gap-webui-manager-body-copy-en-zh its BODY copy is wired
+ *  too (serve-i18n.ts ROW 16), so `lang` now reaches:
  *
- *  The last two are the whole point: wiring only the SHARED nav bar would leave the `<title>` at
- *  `quay — Manager / Outer / Inner` under zh, which is the difference between "the nav switched"
- *  and "THIS page switched" — and AC-294's third arm fails the page on exactly that
- *  (CAUSE=title-unchanged).
+ *    • the document-language attribute;
+ *    • the shared nav bar (`renderSiteNav`) and mobile chrome (`renderMobileChrome`) — whose
+ *      `manager` entry already exists in NAV_LABELS (ROW 1);
+ *    • this page's own `<title>` (through `pageTitle`) and the `<h1>`'s page-NAME token (through
+ *      `pageNameFor` against serve-i18n.ts's PAGE_LABELS) — AC-294's two, the whole point of that
+ *      AC: wiring only the SHARED nav bar would leave the `<title>` at `quay — Manager / Outer /
+ *      Inner` under zh, which is the difference between "the nav switched" and "THIS page switched"
+ *      (AC-294's third arm fails the page on exactly that, CAUSE=title-unchanged);
+ *    • and, since ROW 16, the BODY copy: the `<meta name="description">`, the `<h1>`'s SUBTITLE
+ *      tail (appended OUTSIDE `pageTitle`, whose token stays the bare page name — ROW 16 ①), the
+ *      intro note, the three `<h2>`s, the two provenance notes, the release line, plus the two
+ *      LATENT rows (`colSession` / `recentPromotions`) a healthy single-response probe cannot see.
+ *
+ *  ⚠️ `obsNote`'s state words on this page (`未接入/无数据` ×3 in the census) are SHARED chrome and
+ *  stay Chinese in both languages — ROW 16 ⑤ records the ruling and the reason it is not a
+ *  page-local row here.
  *
  *  Unlike /system above, this page's `<title>` token and its `<h1>` page-name token are the SAME
  *  string (`Manager / Outer / Inner`): the `<h1>` is that page name plus the ` — 三层状态` subtitle,
@@ -173,6 +181,9 @@ export async function handleSystem(
  *  is the identity — so the en baseline the goal criterion reads off the live page cannot move as
  *  this page is wired. */
 function renderManagerPage(mgr: ManagerResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
+  // ROW 16's roster, taken ONCE (the `navLabelsFor` idiom). The page NAME stays in ROW 3 — the two
+  // are parallel, never merged into one pre-joined token (serve-i18n.ts ROW 16 ①).
+  const L = managerLabelsFor(lang);
   const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:var(--color-surface);padding:1rem">
     <div style="font-size:0.85rem;color:var(--color-neutral-700);margin-bottom:4px">${escapeHtml(label)}</div>
     <div style="font-weight:700">${statusText}</div>
@@ -181,7 +192,7 @@ function renderManagerPage(mgr: ManagerResult, identity: ServeIdentity | null = 
 
   const ld = mgr.loopDriver;
   const livenessRows = mgr.liveness.sessions.length > 0 ? html`<table>
-    <tr><th>会话</th><th>alive</th><th>pid</th><th>halted</th></tr>
+    <tr><th>${escapeHtml(L.colSession)}</th><th>alive</th><th>pid</th><th>halted</th></tr>
     ${mgr.liveness.sessions.map((s) => html`<tr>
       <td>${escapeHtml(s.name)}</td>
       <td>${s.alive ? "LIVE" : "GONE"}</td>
@@ -204,16 +215,16 @@ function renderManagerPage(mgr: ManagerResult, identity: ServeIdentity | null = 
   const poolNote = pool.status === "ok"
     ? html`<div style="font-family:ui-monospace,monospace;font-size:0.85rem;line-height:1.7">
         pool=${pool.pool ?? "—"} floor=${pool.floor ?? "—"} deficit=${pool.deficit ?? "—"} cap=${pool.cap ?? "—"}
-        ${pool.lastPromoted.length > 0 ? html`<div style="color:var(--color-neutral-700)">最近一轮晋升（promotion-driver）：${pool.lastPromoted.map((id) => html`<a href="/task/${encodeURIComponent(id)}" style="color:var(--color-accent)">${escapeHtml(id)}</a>`).join(" · ")}</div>` : ""}
+        ${pool.lastPromoted.length > 0 ? html`<div style="color:var(--color-neutral-700)">${escapeHtml(L.recentPromotions)}${pool.lastPromoted.map((id) => html`<a href="/task/${encodeURIComponent(id)}" style="color:var(--color-accent)">${escapeHtml(id)}</a>`).join(" · ")}</div>` : ""}
       </div>`
     : obsNote(pool.status, pool.reason);
 
   return html`<!doctype html>
-    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>${pageTitle("Manager / Outer / Inner", identity, lang)}</title></head>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(L.metaDescription)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Manager / Outer / Inner", identity, lang)}</title></head>
     <body>${renderMobileChrome("manager", "manager", lang)}${renderSiteNav("manager", lang)}<main id="main">
-      <h1>${pageNameFor("Manager / Outer / Inner", lang)} — 三层状态</h1>
-      <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
-      <h2>Loop / 会话</h2>
+      <h1>${pageNameFor("Manager / Outer / Inner", lang)} — ${escapeHtml(L.h1Subtitle)}</h1>
+      <p class="meta">${escapeHtml(L.probeNote)}</p>
+      <h2>${escapeHtml(L.headingLoop)}</h2>
       ${obsNote(ld.status, ld.reason)}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;margin-bottom:1rem">
         ${loopCards("Loop driver", ld.verdict ?? "—", ld.detail || `exit=${ld.exitCode ?? "—"}`)}
@@ -221,14 +232,14 @@ function renderManagerPage(mgr: ManagerResult, identity: ServeIdentity | null = 
       </div>
       ${obsNote(mgr.liveness.status, mgr.liveness.reason)}
       ${livenessRows}
-      <h2>Monitor 注册表</h2>
+      <h2>${escapeHtml(L.headingObservers)}</h2>
       ${obsNote(mgr.observers.status, mgr.observers.reason)}
       ${observerRows}
-      <p class="meta">读 <code>observer-registry.conf</code> 单一登记表。</p>
-      <h2>主要观测指标</h2>
+      <p class="meta">${fillLabel(L.registryNote, { file: "<code>observer-registry.conf</code>" })}</p>
+      <h2>${escapeHtml(L.headingPool)}</h2>
       ${poolNote}
-      <p class="meta">pool/floor/deficit/cap 读 <code>.quay/promotion-round.jsonl</code>（promotion-driver round 记录，cap 默认 5，floor = cap × 4）</p>
-      <p class="meta">release=${escapeHtml(mgr.version ?? "—")} · develop 领先 ${mgr.developLead != null ? escapeHtml(String(mgr.developLead)) : "—"} 提交</p>
+      <p class="meta">${fillLabel(L.poolSourceNote, { file: "<code>.quay/promotion-round.jsonl</code>" })}</p>
+      <p class="meta">${escapeHtml(fillLabel(L.releaseLine, { version: mgr.version ?? "—", n: mgr.developLead != null ? String(mgr.developLead) : "—" }))}</p>
     </main></body></html>`;
 }
 

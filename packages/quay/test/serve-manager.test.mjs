@@ -215,8 +215,20 @@ test("AC-black-box: /manager under Cookie lang=zh switches html lang, both nav c
   assert.ok(!tZh.includes(NAV_LABEL_EN), `the zh <title> carries no ASCII literal "Manager" (got ${JSON.stringify(tZh)})`);
 
   // (3) THIS PAGE'S OWN <h1> (GOAL-024's "本页 chrome", though the criterion does not read it).
-  assert.equal(h1Of(en.body), `${TITLE_TOKEN} — 三层状态`, "the en <h1> is the baseline");
-  assert.equal(h1Of(zh.body), `${TITLE_TOKEN_ZH} — 三层状态`, "the zh <h1> is translated");
+  // ⚠️ MIGRATED by gap-webui-manager-body-copy-en-zh: the `<h1>`'s SUBTITLE used to be the hard-coded
+  // `三层状态` in BOTH languages, so the en arm pinned a Chinese literal. The page's body copy now
+  // resolves through serve-i18n ROW 16 (`h1Subtitle`), so the en arm pins the new ENGLISH literal and
+  // the zh arm keeps pinning `三层状态` unchanged — which is what makes this pair a zh-regression
+  // guard as well as an en baseline. The ` — ` separator stays at the render site in both languages
+  // (ROW 16 ①: the page NAME resolves through ROW 3, the tail through ROW 16 — parallel, not merged).
+  const H1_SUBTITLE_EN = "three-layer status";
+  const H1_SUBTITLE_ZH = "三层状态";
+  assert.equal(h1Of(en.body), `${TITLE_TOKEN} — ${H1_SUBTITLE_EN}`, "the en <h1> carries the English subtitle");
+  assert.equal(h1Of(zh.body), `${TITLE_TOKEN_ZH} — ${H1_SUBTITLE_ZH}`, "the zh <h1> is translated");
+  // ⛔ The zh arm above only guards zh if the en arm cannot also carry the Chinese word: assert the
+  // separation directly, so a future edit that put the zh tail back into the en path reds HERE.
+  assert.ok(!h1Of(en.body).includes(H1_SUBTITLE_ZH),
+    `the en <h1> carries no Chinese subtitle (got ${JSON.stringify(h1Of(en.body))})`);
 });
 
 test("AC-en-baseline: the en chrome is the pre-AC-294 rendering verbatim", async () => {
@@ -227,8 +239,11 @@ test("AC-en-baseline: the en chrome is the pre-AC-294 rendering verbatim", async
   assert.ok(en.body.includes('<html lang="en">'), "the en page is <html lang=\"en\">");
   assert.ok(headTitle(en.body).endsWith(` — ${TITLE_TOKEN}`),
     "the en <title> still ends with its English page token, byte for byte");
-  assert.ok(en.body.replace(/\n/g, " ").includes(`<h1>${TITLE_TOKEN} — 三层状态</h1>`),
-    "the en <h1> is still the pre-AC-294 literal, byte for byte");
+  // ⚠️ MIGRATED by gap-webui-manager-body-copy-en-zh (see the note on the h1 pair above): this arm
+  // used to pin the Chinese subtitle as the EN baseline. ROW 16 made the subtitle language-dependent,
+  // so the en literal it pins is now the English one; the zh rendering is pinned by the other test.
+  assert.ok(en.body.replace(/\n/g, " ").includes(`<h1>${TITLE_TOKEN} — three-layer status</h1>`),
+    "the en <h1> keeps its English page token AND its English subtitle, byte for byte");
   assert.ok(en.body.includes('<span class="mobile-header-page">manager</span>'),
     "the en mobile header page label is still the lowercase \"manager\" (not re-worded by this task)");
 
