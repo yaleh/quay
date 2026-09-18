@@ -2,7 +2,7 @@
 id: gap-touches-parser-early-subheading-latch-hides-declaration
 title: touches-parser 的段提取被「更早的 `### Touches …` 子标题」劫持 ⇒ 声明解析成 0 条 ⇒ anti-drift
   报「每个改动文件都 out-of-declared」，任务永久不可落地（在飞阻塞器实测 9 violations）；且零 globs 与「没有声明」同形
-status: done
+status: ready
 labels:
   - gap
   - defect
