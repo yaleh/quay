@@ -101,6 +101,9 @@ test("AC1 structural — the list page emits the mobile chrome (hamburger header
   // The mobile menu carries the full 15-view site nav (the "go anywhere" affordance).
   assert.ok(r.body.includes("Git History"), "mobile menu links to Git History");
   assert.ok(r.body.includes("Architecture"), "mobile menu links to Architecture");
+  // gap-webui-remove-board-nav-new-badge: the mobile menu (the second of the two nav forms)
+  // renders no Board NEW badge either.
+  assert.ok(!r.body.includes("nav-badge"), "mobile menu renders no Board NEW badge");
 });
 
 test("AC1/AC2 — desktop site-nav is the .nav header bar tagged .site-nav; filter/sort are .list-nav; label nav is chips", async () => {
@@ -111,7 +114,11 @@ test("AC1/AC2 — desktop site-nav is the .nav header bar tagged .site-nav; filt
   assert.ok(r.body.includes('<nav class="site-nav"'), "desktop nav is a <nav class=\"site-nav\"> header bar (hidden on mobile)");
   assert.ok(r.body.includes('class="nav-brand"'), "desktop nav carries the Quay .nav-brand");
   assert.ok(r.body.includes('class="nav-group"'), "desktop nav groups its items in .nav-group bars");
-  assert.ok(r.body.includes('class="nav-badge"'), "desktop nav renders the Board NEW badge");
+  // gap-webui-remove-board-nav-new-badge: the Board NEW badge is gone from BOTH nav forms
+  // (desktop .nav header bar and the mobile hamburger menu) — pinned as an ABSENCE so a
+  // re-introduction reds here. The mobile half is asserted in the AC1 structural test above,
+  // which is the test that renders the mobile chrome.
+  assert.ok(!r.body.includes("nav-badge"), "desktop nav renders no Board NEW badge");
   assert.ok(!r.body.includes('class="meta site-nav"'), "the old <p class=\"meta site-nav\"> text nav line is gone");
   assert.ok(r.body.includes('class="meta list-nav"'), "filter line is tagged .list-nav");
   assert.ok(r.body.includes('class="meta list-nav"') && r.body.indexOf("Sort:") > -1, "sort line is tagged .list-nav");

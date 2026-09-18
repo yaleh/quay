@@ -2,7 +2,7 @@
 id: gap-driver-anchor-self-refresh-leaves-no-anchor-alive
 title: driver anchor 源码自刷新（AC-184）：stop 期间 reconcile 把 loop 重新拉起 + 接管等待预算短于旧
   anchor 最坏退出时间 + 接管放弃后无人兜底 ⇒ 六个 kind 一起停摆（实测 09-13/09-18 共 4 次，最近一次 27 分钟）
-status: ready
+status: done
 labels:
   - gap
   - defect

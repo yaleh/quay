@@ -10,8 +10,10 @@
 //     SITE_NAV_GROUPS items INCLUDING /board — a FULL ENUMERATION, not a test of the new parts.
 //   ② VISUAL — renderSiteNav() emits the Modernist `.nav` + `.nav-brand` header bar (the design
 //     system's components/navigation.html): brand flush left, vertical bars (.nav-group)
-//     separating the four groups, current page red+bold (.nav-current, accent-700 + weight 800),
-//     and the Board NEW badge. Asserted structurally here; the CSS preconditions are pinned too.
+//     separating the four groups, current page red+bold (.nav-current, accent-700 + weight 800).
+//     Asserted structurally here; the CSS preconditions are pinned too. (gap-webui-remove-board-nav-new-badge:
+//     the Board NEW badge was REMOVED by human decision 2026-09-18 — the assertions below now pin its
+//     ABSENCE, on every route and in both nav forms, so a re-introduction reds this suite.)
 //   ③ MOBILE — renderMobileChrome() is wired into EVERY route (not just /tasks), and the mobile
 //     menu carries the full navGroupDefs under per-group section labels.
 //
@@ -166,6 +168,29 @@ test("AC2 — every route's nav strip links to all 14 SITE_NAV_GROUPS items INCL
   }
 });
 
+// ── gap-webui-remove-board-nav-new-badge: NO route renders the Board NEW badge ───────────────
+// FULL ENUMERATION, not a spot check: every one of the 18 ROUTES (which includes /board, i.e.
+// board-as-current, AND the 17 routes where board is a plain link), following the same enumeration
+// shape as AC2 above. Both halves are pinned — the badge MARKUP (`.nav-badge`) and the badge TEXT
+// (`>NEW<`, asserting on the nav strip so an unrelated `NEW` elsewhere on the page cannot pass it).
+
+test("gap-webui-remove-board-nav-new-badge — no route renders the Board NEW badge, in body or nav strip", async () => {
+  for (const [route, currentKey, currentLabel, currentHref] of ROUTES) {
+    const r = await get(port, route);
+    assert.equal(r.status, 200, `GET ${route} returns 200 (got ${r.status})`);
+    assert.ok(!r.body.includes("nav-badge"), `GET ${route} body carries no .nav-badge`);
+    const strip = navStrip(r.body);
+    assert.ok(!strip.includes(">NEW<"), `GET ${route} nav strip carries no >NEW< label`);
+    // The nav is otherwise intact: it still renders the item for board (as a span when current,
+    // as a link otherwise) — this guards against "the badge went away because the item went away".
+    if (currentHref === "/board") {
+      assert.ok(strip.includes(">Board<"), `GET ${route} still renders the Board item (as current)`);
+    } else {
+      assert.ok(strip.includes('href="/board"'), `GET ${route} still links to /board`);
+    }
+  }
+});
+
 // ── AC1: STRUCTURE — no hand-written nav variant survives on any route ───────────────────────
 
 test("AC1 — no route body retains a hand-written legacy nav fragment", async () => {
@@ -195,8 +220,14 @@ test("AC3 — renderSiteNav emits the Modernist .nav/.nav-brand header bar with 
   assert.equal((nav.match(/class="nav-group"/g) || []).length, 4, "exactly four .nav-group separators");
   // Current page (board) is red+bold: span.nav-current with aria-current.
   assert.ok(nav.includes('class="nav-item nav-current" aria-current="page"'), "current page is span.nav-current with aria-current");
-  // Board carries the design's NEW badge (sc-if mkItem.badge) — both as current and as a link.
-  assert.ok(nav.includes('class="nav-badge">NEW'), "nav renders the Board NEW badge");
+  // gap-webui-remove-board-nav-new-badge: Board carries NO badge (it used to carry the design's
+  // NEW badge via sc-if mkItem.badge) — not as the current page here, and not as a link below.
+  assert.ok(!nav.includes("nav-badge"), "board-as-current nav carries no .nav-badge");
+  assert.ok(!nav.includes(">NEW<"), "board-as-current nav carries no NEW label");
+  // …and the same for a render where board is NOT the current page (a link, the other branch).
+  const navBoardAsLink = renderSiteNav("tasks");
+  assert.ok(!navBoardAsLink.includes("nav-badge"), "board-as-link nav carries no .nav-badge");
+  assert.ok(!navBoardAsLink.includes(">NEW<"), "board-as-link nav carries no NEW label");
   // Non-current items are real links.
   assert.ok(nav.includes('<a class="nav-item" href="/tasks"'), "non-current items are links");
   // Dashboard (a non-current) is a link when board is current.
@@ -208,7 +239,7 @@ test("AC3 — every route inlines the .nav header-bar CSS and the nav visual cla
   assert.ok(r.body.includes(".nav-group"), "response inlines the .nav-group CSS");
   assert.ok(r.body.includes(".nav-current"), "response inlines the .nav-current CSS");
   assert.ok(r.body.includes(".nav-brand"), "response inlines the .nav-brand CSS");
-  assert.ok(r.body.includes(".nav-badge"), "response inlines the .nav-badge CSS");
+  assert.ok(!r.body.includes(".nav-badge"), "response does NOT inline any .nav-badge CSS (rule removed)");
   // Token-derived: current-page colour comes from the accent-700 token, not a hardcoded hex.
   assert.ok(r.body.includes("color: var(--color-accent-700)"), "current-page red is token-derived (accent-700)");
 });
@@ -219,7 +250,7 @@ test("AC3 — pageStyles() carries the nav CSS preconditions, token-derived (AC1
   assert.ok(/\.nav-group\s*\{/.test(css), "base sheet styles .nav-group");
   assert.ok(/\.nav-current\s*\{[^}]*var\(--color-accent-700\)/.test(css), ".nav-current is accent-700 (red)");
   assert.ok(/\.nav-current\s*\{[^}]*font-weight:\s*800/.test(css), ".nav-current is weight 800 (bold)");
-  assert.ok(/\.nav-badge\s*\{/.test(css), "base sheet styles .nav-badge");
+  assert.ok(!/\.nav-badge\s*\{/.test(css), "base sheet carries no .nav-badge rule");
   // AC102 ② — serve-handlers.ts carries zero hardcoded hex.
   const src = fs.readFileSync(SERVE_HANDLERS, "utf8");
   const hex = src.match(/#[0-9a-fA-F]{6}/g) || [];
@@ -263,7 +294,7 @@ test("AC4 — renderMobileChrome carries the full 14-view nav under per-group se
     "Git 历史", "测试", "会话", "架构决策", "目标", "文档", "架构"]) {
     assert.ok(zh.includes(label), `mobile menu includes the zh view label ${label}`);
   }
-  assert.ok(zh.includes("NEW"), "mobile menu renders the Board NEW badge");
+  assert.ok(!zh.includes("nav-badge"), "zh mobile menu renders no Board NEW badge");
   assert.ok(zh.includes("nav-current"), "mobile menu marks the current page");
 
   // …and the en render: the English group labels AND the English view labels, same 14 views.
@@ -275,7 +306,7 @@ test("AC4 — renderMobileChrome carries the full 14-view nav under per-group se
     "Git History", "Tests", "Sessions", "ADRs", "Goals", "Docs", "Architecture"]) {
     assert.ok(en.includes(label), `mobile menu includes ${label}`);
   }
-  assert.ok(en.includes("NEW"), "mobile menu renders the Board NEW badge");
+  assert.ok(!en.includes("nav-badge"), "en mobile menu renders no Board NEW badge");
   assert.ok(en.includes("nav-current"), "mobile menu marks the current page");
 });
 
