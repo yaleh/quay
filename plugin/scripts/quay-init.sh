@@ -1851,8 +1851,12 @@ loop:
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   # ⚠️ 本 heredoc 是【新装】写者，而版本级默认值的正本是 packages/quay/src/init.ts 的
-  # LOOP_VERSION_DEFAULTS（CLI `quay init --reconcile` 用它做 diff）。shell 无法 import TS，
+  # LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）。shell 无法 import TS，
   # 所以这一行是【镜像】：新增版本级默认值时要同时改两处，或把这里改成从 schema 派生。
+  # ⛔ 本节所有注释【不得】含反引号或美元加左圆括号（命令替换）：本 heredoc 未加引号（它必须展开
+  # 上面的美元变量），所以它们会被【真的执行】、把 stdout 就地替换进注释 ⇒ 产物不是合法 YAML
+  # （gap-quay-init-config-heredoc-comment-backtick-executes-cli）。该不变式由
+  # plugin/test/quay-init-loop.test.mjs 的 "AC5" 用例机械钉住。
   # ⛔ 不要在这里补那个已被删除的零消费者分支键：plugin/test/quay-init.test.mjs 以可执行的判据
   # 钉住"它不被写出"（gap-config-key-consumer-check-mechanical-enumeration）；理由见 init.ts。
   fork_baseline: develop

@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, runInit, pluginDir } from "./quay-init-loop-helpers.mjs";
 
 function git(cwd, args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -140,4 +140,48 @@ test('AC1/control — --dry-run never auto-commits', () => {
     assert.match(r.stdout, /auto-commit: SKIP \(--dry-run/, 'dry-run must skip auto-commit');
     assert.ok(!/chore\(quay-init\)/.test(git(ws, ["log", "--oneline", "-3"])), 'dry-run must not create any commit');
   } finally { cleanup(ws); }
+});
+
+// ── AC5 (gap-quay-init-config-heredoc-comment-backtick-executes-cli): every UNQUOTED heredoc body in
+// quay-init.sh must be substitution-inert. An unquoted heredoc expands ${...} — which the fresh-install
+// config writer needs — and that same expansion ALSO runs `$(...)` and backticks. A comment carrying a
+// backtick therefore executes a real command and splices its stdout into the generated .quay/config.yml
+// ⇒ the artifact stops being valid YAML, and (measured) three install-family tests go red on develop
+// for EVERY code-delta task. Source-level invariant, so nothing has to be installed to check it.
+const SUBSTITUTION_HAZARD = /[`]|\$\(/;
+
+/** Enumerate heredocs in a shell script: [openerLine, delimiter, quoted, bodyLines]. */
+function heredocs(src) {
+  const lines = src.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /<<(-?)(["']?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(lines[i]);
+    if (!m) continue;
+    const body = [];
+    let j = i + 1;
+    for (; j < lines.length && lines[j].trim() !== m[3]; j++) body.push(lines[j]);
+    out.push({ line: i + 1, delim: m[3], quoted: m[2] !== "", body });
+    i = j;
+  }
+  return out;
+}
+
+test('AC5 — no unquoted heredoc body in quay-init.sh carries a backtick or command substitution', () => {
+  const src = fs.readFileSync(path.join(pluginDir, "scripts", "quay-init.sh"), "utf8");
+  const all = heredocs(src);
+  // The scan is only meaningful if it found heredocs at all — a parser that matches nothing would
+  // otherwise report a vacuous pass (硬规则 3b: "cannot evaluate" must not share an output with "fine").
+  assert.ok(all.length >= 5, `heredoc scan must find the script's heredocs (found ${all.length})`);
+  const unquoted = all.filter((h) => !h.quoted);
+  assert.ok(unquoted.length >= 1, 'the fresh-install config writer IS an unquoted heredoc — if this is 0 the parser is broken');
+  const violations = [];
+  for (const h of unquoted) {
+    h.body.forEach((b, k) => {
+      if (SUBSTITUTION_HAZARD.test(b)) violations.push(`:${h.line + 1 + k} (delim ${h.delim}): ${b.trim()}`);
+    });
+  }
+  assert.deepEqual(
+    violations, [],
+    `unquoted heredocs execute backticks/$( ) even inside comments — an executed command's stdout is spliced into the written file:\n${violations.join("\n")}`,
+  );
 });
