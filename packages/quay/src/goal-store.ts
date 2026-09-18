@@ -2476,7 +2476,13 @@ export function createGoalStore(
     force?: boolean;
     actor?: string;
     reason?: string;
-  }>): GoalViewModel[] {
+  }>, { dryRun = false }: {
+    /** P9 dry-run for the batch path (gap-goal-batch-dry-run-noop): validate every record through
+     *  the SAME `write()` (incl. the activation gate) and return the would-be view models, but
+     *  persist NOTHING — no file write AND no `commitStoreBatch`. ⛔ This is the batch counterpart
+     *  of `write`'s own `dryRun`; before this existed the flag was silently ignored here. */
+    dryRun?: boolean;
+  } = {}): GoalViewModel[] {
     const root = resolveGitRoot(goalDir);
     const results: GoalViewModel[] = [];
     const relPaths: string[] = [];
@@ -2485,21 +2491,23 @@ export function createGoalStore(
         title: r.title, status: r.status, goal: r.goal, criterion: r.criterion,
         expect: r.expect, origin: r.origin, supersedes: r.supersedes,
         supersededBy: r.supersededBy, body: r.body, force: r.force,
-        actor: r.actor, reason: r.reason, commit: false,
+        actor: r.actor, reason: r.reason, commit: false, dryRun,
       });
       results.push(vm);
       const f = fileNameForId(goalDir, r.id);
       if (f) relPaths.push(root ? path.relative(root, path.join(goalDir, f)) : `goals/${f}`);
     }
-    const outcome = commitStoreBatch({
-      relPaths,
-      kind: "goals",
-      id: records.map((r) => r.id).join(" "),
-      action: "batch",
-      root,
-    });
-    if (outcome === "failed") {
-      console.error(`goal-store: batch commit of ${records.length} record(s) failed — files written to disk but not on any branch's history`);
+    if (!dryRun) {
+      const outcome = commitStoreBatch({
+        relPaths,
+        kind: "goals",
+        id: records.map((r) => r.id).join(" "),
+        action: "batch",
+        root,
+      });
+      if (outcome === "failed") {
+        console.error(`goal-store: batch commit of ${records.length} record(s) failed — files written to disk but not on any branch's history`);
+      }
     }
     return results;
   }
@@ -2516,7 +2524,8 @@ export function createGoalStore(
 //              [--expect-absent] [--expect-existing] [--fidelity-judge-argv '<json argv array>']
 //              (--expect-absent = create intent, refuse if it exists; --expect-existing =
 //              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
-//   batch --json '<array>'  — write N records in ONE commit (each: id + the write fields)
+//   batch --json '<array>' [--dry-run]
+//              — write N records in ONE commit (each: id + the write fields)
 //              (`--origin` is REQUIRED on create, OPTIONAL on update — patch semantics keep the
 //              stored value; `--dry-run` validates without persisting; `--force` skips the
 //              activation gate)
@@ -2877,6 +2886,12 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // fields (title/status/goal/criterion/expect/origin/body/actor/reason/force).
       const ji = rest.indexOf("--json");
       if (ji < 0) { console.error("goal-store: batch requires --json <array-of-records>"); return 2; }
+      // P9 dry-run (gap-goal-batch-dry-run-noop): the flag is siblings-consistent with `write`
+      // (--dry-run) and `gate` (--dry-run). ⛔ Before this line existed, `batch --dry-run` parsed
+      // no error and then wrote + committed anyway — the failure mode was SILENT (a successful,
+      // plausible-looking run), which is why hard rule 3b applies: the unhandled flag must not be
+      // indistinguishable from the honoured one.
+      const dryRun = rest.includes("--dry-run");
       const raw = rest[ji + 1];
       if (raw === undefined) { console.error("goal-store: batch --json missing value"); return 2; }
       let records: unknown;
@@ -2900,7 +2915,7 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
             actor: o.actor as string | undefined,
             reason: o.reason as string | undefined,
           };
-        }));
+        }), { dryRun });
         process.stdout.write(JSON.stringify(results, null, 2) + "\n");
         return 0;
       } catch (err) {
