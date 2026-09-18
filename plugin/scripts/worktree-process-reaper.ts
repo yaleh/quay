@@ -78,7 +78,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+// The direct-entry guard below is bundle-safe and single-sourced (see its call site).
+import { isDirectEntry } from "./gate-script-base.ts";
 // gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
 // definition point). fullSuiteLockFiles() reads it so the stale-lock reclaim covers ALL S slots
 // (S=3 ⇒ `.2` stale holders are reclaimable, never invisible to the fixed `.0`/`.1` list).
@@ -640,7 +641,17 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+// ⛔ NAME-based, never URL-based (gap-serve-same-root-admission-lock, 2026-09-18 — measured):
+// `packages/quay/src/serve.ts` now imports this module for `readProcCmdline` + `isQuayServe`, so the
+// reaper is INLINED into the shipped `quay` bundle. In that form EVERY inlined module shares the
+// bundle's `import.meta.url`, so the old `fileURLToPath(import.meta.url) === resolve(argv[1])` check
+// was TRUE inside `quay serve`: this top-level block ran the reaper's own CLI with `serve`'s argv,
+// printed "one of --worktree/--orphans/--orphan-serves is required" on stderr, and set exit code 2 —
+// which then OVERRODE the refusal path's documented `exit 0` (measured: serve.test.mjs AC1 failed
+// with exit 2 on the refused second start). `isDirectEntry` is the repo's single source for this
+// check and takes the script's own basename, which is the entry's in both source and bundle form and
+// can never match an inlined library (see its header: the bare form is gone on purpose).
+const isDirect = isDirectEntry(import.meta, undefined, "worktree-process-reaper");
 if (isDirect) {
   try {
     process.exitCode = main(process.argv.slice(2));

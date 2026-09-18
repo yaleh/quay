@@ -2392,6 +2392,14 @@ async function main() {
         host = await spawnRealHost(root);
         assert(readLockRaw(root) === String(host.child.pid),
           `AC1: the live host's pid is the lock's content (lock=${readLockRaw(root)}, host=${host.child.pid})`);
+        // ⛔ The regression this pins, measured 2026-09-18: the pid-reuse check imports
+        // worktree-process-reaper.ts, and the SHIPPED BUNDLE inlines it — with a URL-based
+        // direct-entry guard, that library's CLI block ran inside `quay serve` (printing its usage
+        // and stamping exit code 2, which then overrode the refusal's exit 0). Asserting on the
+        // host's stderr is only decisive when the prebuilt bundle is in use; under a stale bundle
+        // the .ts source is spawned and the check passes either way — harmless, never a false red.
+        assert(!/worktree-process-reaper:/.test(host.err()),
+          `AC1: the reaper's own CLI block must NOT run inside the serve bundle (stderr=${JSON.stringify(host.err().slice(0, 200))})`);
 
         // (a) the CLI path: a second real `quay serve` must exit 0 (idempotent 「already running」)
         //     with the machine-readable marker naming the holder — and must not touch the carrier.
