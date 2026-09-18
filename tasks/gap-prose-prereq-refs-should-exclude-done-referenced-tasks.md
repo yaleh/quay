@@ -69,11 +69,11 @@ extra:
     # pass 224
     # fail 0
     ```
-  - scoped 门（driver fan-in 同一条）：`bash scripts/test.sh --for-task gap-prose-prereq-refs-should-exclude-done-referenced-tasks --allow-thin` ⇒ `exit=0`，`ℹ tests 9 / ℹ pass 9 / ℹ fail 0`。
+  - scoped 门（driver fan-in 同一条）：`bash scripts/test.sh --for-task gap-prose-prereq-refs-should-exclude-done-referenced-tasks --allow-thin` ⇒ `exit=0`，`ℹ pass 25 / ℹ fail 0`（Touches 扩面前是 `pass 9` —— 旧 Touches 选不到 s17/s18，正是「门绿在一个不含本次改动的集合上」那个形态，故以扩面后的 25 为准）。
   - **忠实性对照**（本条的关键负控制）：单独回退源码修复、保留夹具改动后重跑 s17+s18+s19 ⇒ **只有新增用例红**（`✖ AC1/AC2 …`），被改夹具的 10 个既有用例全绿 ⇒ 夹具改动没有放宽既有断言。
 
 - [x] AC4（生产读数）落地后，对上述受害体正文（触发句 + 已 done 的引用）在真实 tasks 目录上求值，`prosePrereqGap` 不含那个已 done 的 id；贴读数。
-  - 受害体正文取**改写措辞之前**的那一版（`git show 1e1fa1f46:tasks/gap-touches-parser-early-subheading-latch-hides-declaration.md`）——现行文件在 `15:54Z` 被人工改写成「当时在飞，已翻 done 的受害体」，正好把触发词 `阻塞` 从该句拿掉，所以现版正文已不含触发句。触发句即 :68：
+  - 受害体正文取**改写措辞之前**的那一版（`git show 1e1fa1f46:tasks/gap-touches-parser-early-subheading-latch-hides-declaration.md`）——现行文件在 `15:54Z` 被人工改写成「当时在飞，已翻 done 的受害体」，正好把触发词 `阻塞` 从该句拿掉，所以现版正文已不含触发句。触发句即该版 :68：
     ```
     - `有 touches 标题 ∧ globs.length === 0` = **3** 条：`gap-git-history-window-notes-ref-dominates`（在飞，当前阻塞器）、
     ```
@@ -88,7 +88,7 @@ extra:
 
 **真实落地判据**：被 ready-pool 分析与 promotion-driver 共用的那一份 `prosePrereqRefs` 本体不再把已 done 的引用计为未建边前置；不是只在测试夹具里绿。不改关系边语义，不放宽对 todo/ready/未知状态的 fail-closed。可回滚：还原 `add()` 里新增的一行早返回即可。
 
-**落地位置核验**：`plugin/scripts/ready-pool-check.ts:1449-1464` 的 `add()` 是本条唯一改动点；AC4 的 POST-FIX 读数正是这份本体在**真实 tasks 目录**上的求值结果（非夹具），故不是「只在测试夹具里绿」。
+**落地位置核验**：唯一改动点是 `plugin/scripts/ready-pool-check.ts` 中 `prosePrereqRefs` 内的 `add()`，即 `if (status === "superseded" || status === "done") return;` 那一行（刻意不写行号：行号随文件上方任何编辑漂移）。AC4 的 POST-FIX 读数正是这份本体在**真实 tasks 目录**上的求值结果（非夹具），故不是「只在测试夹具里绿」。
 
 ## Touches
 
