@@ -389,9 +389,15 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
     // under the DEFAULT locale. The body-copy task re-keyed the token (see serve-i18n.ts's RE-KEYED
     // note); the en row follows, and the pre-existing Chinese is asserted EXPLICITLY under zh below
     // rather than left to a default-locale read that only looked Chinese by accident.
+    // ⚠️ MIGRATED by gap-webui-system-body-copy-en-zh (2026-09-18), same shape as the /architecture
+    // row above: the /system row used to read `System — 系统状态`, because that page's subtitle was
+    // hard-coded Chinese and the `<title>` rendered it verbatim under the DEFAULT locale. The
+    // body-copy task moved the subtitle into serve-i18n.ts ROW 14 (the page NAME stays ROW 3's
+    // token), so the en row follows, and the pre-existing Chinese is asserted EXPLICITLY under zh
+    // below rather than left to a default-locale read that only looked Chinese by accident.
     const routes = [
       ["/dashboard", "Dashboard"],
-      ["/system", "System — 系统状态"],
+      ["/system", "System — system status"],
       ["/manager", "Manager / Outer / Inner"],
       ["/tests", "Tests — 验证轮记录"],
       ["/sessions", "Sessions"],
@@ -427,6 +433,15 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
     // /system reads real resource-gate output on Linux (no fixture needed).
     const sysPage = await get(port, "/system");
     assert(sysPage.body.includes("resource-gate.sh"), "system page names its data source");
+
+    // …and the zh arm for the page this task moved: the subtitle's Chinese is pinned EXPLICITLY, and
+    // the en arm above is asserted to NOT carry it (both arms together are the move's contract: the
+    // en title moved, the zh one did not).
+    const sysZh = await get(port, "/system?lang=zh");
+    assert(sysZh.body.includes("系统 — 系统状态"),
+      "AC1: the zh <title>/<h1> is the pre-existing Chinese, explicitly requested");
+    assert(!sysPage.body.includes("系统状态"),
+      "AC1: the default-locale /system no longer carries the Chinese subtitle");
 
     // /architecture shows the packages/ components as a real table (not 未接入).
     const archPage = await get(port, "/architecture");
