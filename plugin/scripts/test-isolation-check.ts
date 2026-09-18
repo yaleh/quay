@@ -97,7 +97,10 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 // finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
 // exported it.
 import { firstArgRegion } from "./source-text-lib.ts";
-import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import {
   hasNodeTestImport,
   canonicalTestFiles,
@@ -1048,7 +1051,7 @@ export function main(argv: string[]): number {
   const positional = args.filter((a) => !a.startsWith("--"));
   const root = path.resolve(positional[0] ?? process.cwd());
 
-  const dataFileRel = getArgValue(args, "--data-file") ?? DATA_FILE_REL;
+  const dataFileRel = flagValue(args, "--data-file") ?? DATA_FILE_REL;
   const dataFileAbs = path.isAbsolute(dataFileRel) ? dataFileRel : path.join(root, dataFileRel);
 
   if (!fs.existsSync(path.join(root, "scripts", "test.sh"))) {
@@ -1090,7 +1093,7 @@ export function main(argv: string[]): number {
   // Baseline: explicit --baseline-file wins; otherwise git HEAD (fail closed unless bootstrap).
   let baselineEntries = dataEntries;
   let baselineCountHead: number | null = null;
-  const baselineFileArg = getArgValue(args, "--baseline-file");
+  const baselineFileArg = flagValue(args, "--baseline-file");
   if (baselineFileArg) {
     const baselineText = readFileSafe(path.resolve(root, baselineFileArg));
     baselineEntries = parseViolationList(baselineText);
@@ -1147,12 +1150,6 @@ export function main(argv: string[]): number {
     }
   }
   return failures.length === 0 ? 0 : 1;
-}
-
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
 }
 
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ────────────

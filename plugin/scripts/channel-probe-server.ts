@@ -23,6 +23,10 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// one (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -268,10 +272,8 @@ function main(): void {
     process.exit(0);
   }
   if (argv.includes("--selfcheck")) { selfcheck(); return; }
-  const one = (k: string): string | undefined => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: the `--` prefix is this call site's own spelling. */
+  const one = (k: string): string | undefined => flagValue(argv, `--${k}`);
   void runChannelServer({
     evidencePath: path.resolve(one("evidence") ?? DEFAULT_EVIDENCE),
     httpPort: Number(one("http-port") ?? DEFAULT_HTTP_PORT),

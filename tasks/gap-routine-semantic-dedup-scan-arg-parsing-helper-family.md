@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-arg-parsing-helper-family
 title: "semantic-dedup-scan: ~60 copies of the same indexOf+next-arg idiom
   across 50+ checker/driver scripts under 9 different names; gate-script-base.ts
   is imported by 246 files yet expor"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -185,6 +185,31 @@ dev-tree 动态 import 被 inline、产物自足。我方给该文件加了 `imp
 时刻最新（12:11/12:22/12:45Z）⇒ 200 个窗口位被 notes 提交占满、真 merge 被挤出 ⇒ 实测窗口内 3 个 merge、
 **0 个窗口内第二父**。⇒ 属**已知的仓级状态**，不在本任务范围。
 
+### 9. 第三次 fan-in 的两个 suite 红：一个是 develop 侧既存（已由本轮修掉），另一个⛔不是本任务的
+
+末轮（`runId mfi-…-1789736341033`，13:02Z）suite `# fail 2`。两个都不是本任务 delta 引入的，但**其中一个会阻塞每一次 code-delta fan-in**，故本轮修掉它。
+
+**（a）`plugin/test/loop-shipping-necessity-check.test.mjs` AC1/AC2 —— develop 侧既存红，本轮修掉。**
+
+判据：`inert_exclusions: 1`，唯一违规项 `plugin/scripts/quay-init.sh`（`retainedNote=NO`）。
+
+- **对照（能区分「是 develop 的」还是「是本 delta 的」）**：`git worktree add --detach /tmp/probe-develop-lsnc develop`，在**干净 develop 树**上跑同一文件 ⇒ **同一条断言、同一个违规项**（`VIOLATION plugin/scripts/quay-init.sh — inert with no retainedNote`）。这与 `git diff develop...HEAD`（本任务 delta 里 0 个 loop-shipping 文件）一致：**不是本任务的**。
+- **根因（读数，不是推断）**：`gap-quay-init-native-reconcile` 的 `9ef94fe18`（2026-09-18 11:20Z，已 done 且已 ff 落 develop）把 quay-init.sh 重写向闭集，删掉了它**最后一处**逐字拼写两个 deployed tick-doc 目标路径的注释 ⇒ 对 `9ef94fe18^` / `9ef94fe18` / `develop` 三处各跑一次命中计数（脚本 `/tmp/count-hits.mjs`，谓词取自本模块的 `oldPathPatterns` 正本）⇒ `hits=2` → `hits=0` → `hits=0`。即该排除条目由 live 变 inert。这是**闭环**的：条目 reason 写的就是 `target layout (orchestration/ + docs/analysis/)`，而闭集重写正是让该 reason 过期的那件事。
+- **修法（先例，不是本轮发明）**：`d29523fd4`（2026-09-08）同一条测试、同一形态（`verify-deliver-coldstart.sh` 因重锚向闭集而变 inert）的处置 = **删掉惰性条目 + 扩 `## Touches`**。本轮同法：删除 `plugin/scripts/quay-init.sh` 条目，原位留一条注释，沿用本文件既有的 `// (gap-… : <file> was rewritten to the closed-set contract — … so its exclusion entry is gone.)` 写法（该写法在 AC168 下已有三处）。⛔ 没有选 `retainedNote`——那正是「排除表只增不减」这条病本身的形态，而该脚本已不再逐字拼写任何 old path。
+- **读数**：改前 `inert_exclusions: 1`；改后 **`inert_exclusions: 0`**（`inert-but-retained` 6 条未变）。`plugin/test/loop-shipping.test.mjs` **21/21 绿**——AC1b 的活引用扫描没有因为去掉该条目而变红（因为它的 hits 本就是 0，条目抑制的命中数为 0）。
+
+**（b）`packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs` AC3 —— ⛔ 不是本任务的，本轮未修。**
+
+非空性断言 `the window contains merge second parents to verify (non-vacuous)` 在末轮 suite 红，但**本轮三次复跑全绿**（`pass 3 / fail 0` ×2，另有末轮日志）。根因与处置已由 `META-008` / `META-010` 记录：`git log --all --topo-order -n 200` 被 `refs/notes/quay-cmv-merge` 占窗 ⇒ 真 merge 被挤出 ⇒ 窗口内 0 个第二父；而它的解扣动作（把 `tasks/gap-git-history-window-notes-ref-dominates.md` 里位于真 `## Touches` **之前**的那个 `### Touches …` 小标题改名）落在**别的任务的任务体**上——按 self-touch 授权模型不属于本 worker 的写权限面，故只登记、不代改。
+**（c）本轮 scoped 门读数（⛔ 附覆盖范围，别把它读成对 (a) 的验证）。**
+
+`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-arg-parsing-helper-family --allow-thin` ⇒ **EXIT=0**，测试面 `tests 1569 / pass 1569 / fail 0`。
+⚠️ 但**选中的 69 个测试文件里没有 `plugin/test/loop-shipping*.test.mjs`**（`select-tests-for-touches.ts --paths-only` 实读 69 行，逐行 grep `loop-shipping` = 0）——
+`plugin/scripts/loop-shipping-exclusion-data.mjs` 没有按反向 import 图映到那两个测试文件 ⇒ **这轮门的绿不构成对 (a) 的验证**。
+(a) 的验证是上面那两条**直接跑**的读数（necessity-check 3/3、loop-shipping 21/21），另加另外两个读同一张表的消费者
+（`direct-to-develop-bypass-check` 58/58、`prod-data-audit` 10/10）。全量面由 fan-in 的 suite 覆盖。
+
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `arg-parsing-helper-family`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1789723686226`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -241,6 +266,7 @@ dev-tree 动态 import 被 inline、产物自足。我方给该文件加了 `imp
 - `plugin/scripts/known-load-sensitive.ts`
 - `plugin/scripts/l1-delivery-surface-check.ts`
 - `plugin/scripts/landing-target-check.ts`
+- `plugin/scripts/loop-shipping-exclusion-data.mjs`
 - `plugin/scripts/main-thread-edit-check.ts`
 - `plugin/scripts/measure-trend-check.ts`
 - `plugin/scripts/mirror-pair-drift-check.ts`

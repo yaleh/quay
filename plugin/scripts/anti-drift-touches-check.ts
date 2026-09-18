@@ -13,7 +13,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
 import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/branch-model.ts";
 
@@ -101,11 +104,6 @@ export function checkAntiDrift(builds, opts) {
 // build whose every actual file must fall within a declared glob — is the SAME checkAntiDrift as
 // the manifest-file mode (a single build cannot cross-build-overlap; out-of-declared and
 // overbroad-declaration are HARD FAIL). The judgment logic is UNCHANGED; only the input surface is new.
-
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
 
 /** Compute the files the fan-in would land: `git diff --name-only <merge-target>...HEAD` in the
  *  worktree. After the fan-in workflow's step-1 merge of the merge-target into the task worktree,
@@ -236,10 +234,10 @@ export async function main(argv) {
   // [--merge-target <ref>] — the fast-mode fan-in gate. Reads the task body's declared Touches and
   // computes the actual diff itself; the judgment is the SAME checkAntiDrift as the manifest mode.
   if (args.includes("--task")) {
-    const taskId = getArgValue(args, "--task");
+    const taskId = flagValue(args, "--task");
     if (!taskId) { usage(); return 2; }
-    const worktree = path.resolve(getArgValue(args, "--worktree") ?? process.cwd());
-    const mergeTarget = getArgValue(args, "--merge-target") ?? "develop";
+    const worktree = path.resolve(flagValue(args, "--worktree") ?? process.cwd());
+    const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
     return runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty });
   }
   // ── manifest-file mode (the classic-loop driver): [--allow-empty] <ran-batch-manifest.json>

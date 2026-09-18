@@ -56,7 +56,10 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { matchAtCommandPosition } from "./checker-lib.ts";
-import { isDirectEntry, createSelftest } from "./gate-script-base.ts";
+// The --root read below is now delegated to the shared `flagValue`; its indexOf+next-arg read was
+// one of the copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, createSelftest, flagValue } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -484,10 +487,11 @@ export function main(argv: string[]): number {
     return 0;
   }
   if (args.includes("--selftest")) return runSelftest() ? 0 : 1;
-  const root = (() => {
-    const i = args.indexOf("--root");
-    return i !== -1 ? path.resolve(args[i + 1]) : DEFAULT_ROOT;
-  })();
+  // ⛔ `args.includes` (not a `flagValue(...) === undefined` test) is deliberate: the original
+  // resolved `args[i + 1]` whenever the flag was PRESENT, so `--root` with no value after it threw
+  // from path.resolve rather than falling back. This form keeps that behavior exactly.
+  const rootFlag = flagValue(args, "--root");
+  const root = args.includes("--root") ? path.resolve(rootFlag as string) : DEFAULT_ROOT;
   return runCheck(root, args.includes("--json"));
 }
 

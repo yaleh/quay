@@ -14,6 +14,11 @@
  *   --adjudication <pursue|abandon|fold|none> [--json]
  */
 
+// getArg (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
+
 export interface CandidateSurface {
   /** How the cov is sourced: 'machine' = CI-exit/GateEvent/registry-bounded; 'subjective' = human judgment */
   covSource: 'machine' | 'subjective';
@@ -64,10 +69,8 @@ export function validateSurface(surface: CandidateSurface): GuardResult {
 // ── CLI ────────────────────────────────────────────────────────────────
 const isMain = process.argv[1] && (process.argv[1].endsWith('anti-gaming-guard.ts') || process.argv[1].endsWith('anti-gaming-guard'));
 if (isMain) {
-  const getArg = (name: string): string | undefined => {
-    const idx = process.argv.indexOf(`--${name}`);
-    return idx >= 0 ? process.argv[idx + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: the `--` prefix is this call site's own spelling. */
+  const getArg = (name: string): string | undefined => flagValue(process.argv, `--${name}`);
   const jsonMode = process.argv.includes('--json');
 
   const surface: CandidateSurface = {

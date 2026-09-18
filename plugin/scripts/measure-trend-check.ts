@@ -38,6 +38,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+// parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 import { fileURLToPath } from "node:url";
 import {
   resolveWorktreeNamespace,
@@ -411,11 +415,6 @@ export function formatGrowthJson(g: GrowthReport): string {
   });
 }
 
-function parseArg(argv: string[], name: string): string | undefined {
-  const idx = argv.indexOf(name);
-  return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
 const isDirect = process.argv[1] && path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "measure-trend-check";
 if (isDirect) {
   const argv = process.argv.slice(2);
@@ -426,11 +425,11 @@ usage: node --experimental-strip-types plugin/scripts/measure-trend-check.ts [--
     );
     process.exit(0);
   }
-  const historyFile = parseArg(argv, "--history") ?? DEFAULT_HISTORY_FILE;
-  const logFile = parseArg(argv, "--log") ?? DEFAULT_LOG_FILE;
-  const relativeFactorRaw = Number(parseArg(argv, "--relative-factor") ?? String(DEFAULT_RELATIVE_FACTOR));
-  const absoluteMsRaw = Number(parseArg(argv, "--absolute-ms") ?? String(DEFAULT_ABSOLUTE_MS));
-  const smallTestMsRaw = Number(parseArg(argv, "--small-test-ms") ?? String(DEFAULT_SMALL_TEST_MS));
+  const historyFile = flagValue(argv, "--history") ?? DEFAULT_HISTORY_FILE;
+  const logFile = flagValue(argv, "--log") ?? DEFAULT_LOG_FILE;
+  const relativeFactorRaw = Number(flagValue(argv, "--relative-factor") ?? String(DEFAULT_RELATIVE_FACTOR));
+  const absoluteMsRaw = Number(flagValue(argv, "--absolute-ms") ?? String(DEFAULT_ABSOLUTE_MS));
+  const smallTestMsRaw = Number(flagValue(argv, "--small-test-ms") ?? String(DEFAULT_SMALL_TEST_MS));
   const relativeFactor = Number.isFinite(relativeFactorRaw) && relativeFactorRaw > 1 ? relativeFactorRaw : DEFAULT_RELATIVE_FACTOR;
   const absoluteMs = Number.isFinite(absoluteMsRaw) && absoluteMsRaw > 0 ? absoluteMsRaw : DEFAULT_ABSOLUTE_MS;
   const smallTestMs = Number.isFinite(smallTestMsRaw) && smallTestMsRaw > 0 ? smallTestMsRaw : DEFAULT_SMALL_TEST_MS;

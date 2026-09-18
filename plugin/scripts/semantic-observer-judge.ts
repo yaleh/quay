@@ -38,7 +38,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // AC3 触发启发式正本在 semantic-trigger.ts（迁出 inner-wakeup-heartbeat-check.ts，非 inner 名）
 import { semanticTriggerHeuristic, freeTextHash, evaluateTrigger } from "./semantic-trigger.ts";
 
@@ -234,10 +237,10 @@ function readTextMaybe(p: string | undefined): string | null {
 
 export function main(argv: string[]): number {
   const args = argv.slice(2);
-  const flagVal = (name: string, def?: string): string | undefined => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : def;
-  };
+  /** Arity-2 adapter over the shared `flagValue`: this closure captures the local `args` slice and
+   *  adds a per-call-site default (`??`, which is exact — the original returned `args[i + 1]`
+   *  verbatim whenever the flag was present, including the empty string). */
+  const flagVal = (name: string, def?: string): string | undefined => flagValue(args, name) ?? def;
   if (args.includes("--help") || args.includes("-h")) {
     usage();
     return 2;

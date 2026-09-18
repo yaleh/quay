@@ -32,7 +32,10 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { extractRunIdFromCommitSubject, findFanInCommitSha } from "./fast-mode-telemetry.ts";
 
 /** A subject that identifies a fan-in merge commit (the `merge: fan-in task/<id> …` family). */
@@ -206,12 +209,6 @@ export function telemetryRunIdForTask(root, runId, taskId) {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 const usage = `fan-in-runid-check.ts — fan-in runId existence + traceability checker (gap-task-telemetry-6-percent-join)
 
 Usage:
@@ -240,12 +237,12 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = resolveRoot(getArgValue(args, "--root"));
-  const ourTask = getArgValue(args, "--task");
-  const commitArg = getArgValue(args, "--commit");
-  const vhsTaskId = getArgValue(args, "--taskId");
-  const expectedRunId = getArgValue(args, "--run-id");
-  const ref = getArgValue(args, "--ref") ?? "HEAD";
+  const root = resolveRoot(flagValue(args, "--root"));
+  const ourTask = flagValue(args, "--task");
+  const commitArg = flagValue(args, "--commit");
+  const vhsTaskId = flagValue(args, "--taskId");
+  const expectedRunId = flagValue(args, "--run-id");
+  const ref = flagValue(args, "--ref") ?? "HEAD";
   const jsonOut = args.includes("--json");
 
   // ── OUR --task mode: the latest fan-in merge for that specific task (AC3 surface) ──

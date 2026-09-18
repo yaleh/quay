@@ -60,7 +60,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
 import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
-import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
 
@@ -350,7 +353,7 @@ export function main(argv: string[]): number {
   const root = path.resolve(positional[0] ?? process.cwd());
 
   const dataFileRel =
-    getArgValue(args, "--data-file") ??
+    flagValue(args, "--data-file") ??
     DATA_FILE_REL;
   const dataFileAbs = path.isAbsolute(dataFileRel)
     ? dataFileRel
@@ -375,8 +378,8 @@ export function main(argv: string[]): number {
   let baselineList = currentList;
   let baselineFiles = new Set(files.map((f) => f.rel)); // bootstrap default: nothing is "new"
   let baselineCountHead: number | null = null; // ceiling parsed from the HEAD/baseline copy
-  const baselineFileArg = getArgValue(args, "--baseline-file");
-  const baselineFilesArg = getArgValue(args, "--baseline-files");
+  const baselineFileArg = flagValue(args, "--baseline-file");
+  const baselineFilesArg = flagValue(args, "--baseline-files");
   if (baselineFileArg) {
     const baselineText = readFileSafe(path.resolve(root, baselineFileArg));
     baselineList = parseExemptionList(baselineText);
@@ -433,12 +436,6 @@ export function main(argv: string[]): number {
     }
   }
   return failures.length === 0 ? 0 : 1;
-}
-
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
 }
 
 // ── selftest (ADR-018 selfcheck-fixture pattern: demonstrate BOTH the RED and GREEN state) ───────────

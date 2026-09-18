@@ -61,7 +61,10 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -432,20 +435,14 @@ Usage:
 
 Exit: 0 ok; 1 a --check/--check-exit invariant violation; 2 usage/env error.`;
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 export function main(argv) {
   const args = argv.slice(2);
   const listMode = args.includes("--list");
-  const kindArg = getArgValue(args, "--kind");
+  const kindArg = flagValue(args, "--kind");
   const checkMode = args.includes("--check");
   const listEntryMode = args.includes("--list-entry");
   const checkExitMode = args.includes("--check-exit");
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
 
   if (listMode) {
     for (const m of scanFamily(root)) {

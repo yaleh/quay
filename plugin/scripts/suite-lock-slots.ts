@@ -31,7 +31,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 /** Read an env var the way bash's `${VAR:-…}` reads it: an EMPTY string is treated as UNSET and falls
  *  through to the next source. The bash canonical (suite-slot-lib.sh) uses `:-` on both seams, so the
@@ -149,10 +152,8 @@ function main(argv: string[]): number {
     console.log(usage);
     return 0;
   }
-  const flagVal = (name: string) => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const flagVal = (name: string): string | undefined => flagValue(args, name);
   const baseArg = flagVal("--base");
   const rootArg = flagVal("--root");
   if (baseArg) {

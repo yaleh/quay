@@ -38,7 +38,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { listSuiteFiles } from "./suite-bucket-select.ts";
 
@@ -223,18 +226,13 @@ Usage:
   node --experimental-strip-types suite-fs-trace.ts --list [--root <dir>] [--json]
       print the cached test→{reads,writes} map.`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
-  const root = path.resolve(getArgValue(args, "--root") ?? repoRoot());
+  const root = path.resolve(flagValue(args, "--root") ?? repoRoot());
   const asJson = args.includes("--json");
 
   if (args.includes("--collect")) {
-    const files = args.filter((a) => !a.startsWith("--") && !["--collect", "--root", "--json"].includes(a) && a !== getArgValue(args, "--root"));
+    const files = args.filter((a) => !a.startsWith("--") && !["--collect", "--root", "--json"].includes(a) && a !== flagValue(args, "--root"));
     if (files.length === 0) {
       process.stderr.write(`${usage}\n`);
       return 2;
@@ -259,7 +257,7 @@ export function main(argv: string[]): number {
   }
 
   if (args.includes("--update")) {
-    const limitRaw = getArgValue(args, "--limit");
+    const limitRaw = flagValue(args, "--limit");
     const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined;
     const res = updateTraceCache(root, listSuiteFiles(root), {
       force: args.includes("--force"),

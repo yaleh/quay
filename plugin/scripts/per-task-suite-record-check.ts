@@ -62,7 +62,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { resolveSharedCheckout } from "./per-task-suite-record.ts";
 
 // ── 判据2 — the required record shape (AC72 判据2 fields) ────────────────────────────────────────────
@@ -369,11 +372,6 @@ function readLockEventFfs(file) {
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `per-task-suite-record-check.ts — AC72 判据2/判据3 + AC63 判据2 checker for the per-task
   suite record file (.quay/per-task-suite-records.jsonl in the SHARED checkout).
     判据2 shape — every existing record must carry taskId/runId/state/laneCount/durationMs/startedAt/
@@ -423,13 +421,13 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
-  const recordFileOverride = getArgValue(args, "--record-file");
-  const samplesJson = getArgValue(args, "--samples-json");
-  const lockEventsFile = getArgValue(args, "--lock-events");
-  const enforcementBaselineTs = getArgValue(args, "--enforcement-baseline-ts");
-  const boundaryTs = getArgValue(args, "--boundary-ts");
-  const boundaryRef = getArgValue(args, "--boundary-ref");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const recordFileOverride = flagValue(args, "--record-file");
+  const samplesJson = flagValue(args, "--samples-json");
+  const lockEventsFile = flagValue(args, "--lock-events");
+  const enforcementBaselineTs = flagValue(args, "--enforcement-baseline-ts");
+  const boundaryTs = flagValue(args, "--boundary-ts");
+  const boundaryRef = flagValue(args, "--boundary-ref");
   const replayReal = args.includes("--replay-real-samples");
   const asJson = args.includes("--json");
 

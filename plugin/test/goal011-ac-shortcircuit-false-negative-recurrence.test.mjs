@@ -21,6 +21,21 @@
 //
 // 三态处理：node:test 退出码是唯一信号通道；样本不足/自动消歧发现真复发都 fail-closed。
 //
+// ⚠️ 回放方法已修（2026-09-18，gap-ac221-replay-anachronistic-develop-ref）：**「develop 在事件时刻
+// 的历史态」一度是用 `git log develop --until=<ts> -1` 重放的，那是【时代错置】**——`--until` 对
+// **当前 DAG** 按**提交日期**过滤，可以返回一个事件当时还没进 develop、之后才 merge/push 进来的提交。
+// 实测：2026-09-18T11:12:40.533Z 那条短路事件，`--until` 取到 ca1a8276d（提交日期 11:11:34），而
+// reflog 显示它 11:12:57 才 push 进 develop（事件之后 16.5 秒，其 parent b3d0ea5f3 = 事件当刻的真实
+// tip）⇒ 6/6「已全勾」被误报为真复发，实为 0/6 真阴性。现改为 **reflog 忠实重建 ref**（见
+// developTipAt：取时间戳 ≤ 事件 ts 的最新一条 reflog 条目 + 完备性自检 + 三态 fail-closed）。
+//
+// ⚠️ 本判据的 develop 侧口径**不覆盖**「AC 勾选已提交、但尚未到达 develop」的**传播竞态**
+// （同上事件：勾选写在 11:11:34 提交，直到 11:12:57 才到达 develop——**83 秒传播延迟**，而 worker
+// 在 11:12:40 被短路 ⇒ 烧掉一个 worker 轮次）。按本判据写下的口径（develop 侧）它**不算**复发；
+// 但它与 2026-09-07 事故**共享代价形状**（勾完了却被短路）。⛔ 这是**如实记录的残留，不是已解决项**，
+// 也**不得**塞进本判据（那会重新引入 AC-221 于 2026-09-09 由人明确要求拆掉的 confound）——
+// 它需要自己的一条 AC/裁定。
+//
 // ⚠️ 事故记录 + 修法（2026-09-09T15:xx，本文件落地约 1h 后发现）：本文件在 plugin/test/*.test.mjs
 // glob 下会被 scripts/test.sh 的全量 suite 无条件扫到；落地 1h 后生产真出现短路事件，判据据实 FAIL，
 // 拖垮两个【与 GOAL-011 无关】的其它任务的 fan-in（gap-ac201-productization-*、
@@ -34,6 +49,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { mainCheckoutRoot } from "../scripts/repo-root.ts";
@@ -46,6 +62,23 @@ const LANDING_SHA = "bdbdb368d";
 const LANDING_CUTOFF = "2026-09-09T11:28:11Z";
 
 const SHORTCIRCUIT_PATTERN = /^AC 未全勾/;
+
+// 宿主若泄漏 GIT_* 环境变量（GIT_DIR/GIT_WORK_TREE/…），`git -C <dir>` 会去操作【另一个】仓库——
+// 对本判据是**静默错误**（读到的 reflog/tip 全是别处的，而完备性自检照样通过）。显式清掉。
+const GIT_ENV = (() => {
+  const env = { ...process.env };
+  for (const k of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  ]) {
+    delete env[k];
+  }
+  return env;
+})();
 
 function readWorkerOutcomeLines() {
   const root = mainCheckoutRoot();
@@ -69,17 +102,78 @@ function isShortCircuit(rec) {
   return typeof rec.failure_reason === "string" && SHORTCIRCUIT_PATTERN.test(rec.failure_reason);
 }
 
-/** develop 分支在时间戳 ts 当刻（或之前最近一次提交）的 tip commit sha，读不到返回 null。 */
-function developTipAt(root, ts) {
+/** `%gd` 的 --date=unix 形态 `develop@{1789738993}` ⇒ epoch 秒；读不懂返回 null。 */
+function parseReflogUnix(gd) {
+  const m = /@\{(\d+)\}/.exec(gd);
+  return m ? Number(m[1]) : null;
+}
+
+/** develop 的 reflog 条目，reflog 顺序（新→旧）；reflog 不可读、或任一行读不懂（格式漂移）返回 null。
+ *  ⛔ 读不懂时【不】跳过该行继续——那会让"最新一条"落到一个更旧的条目上，与"回放成功"同形（硬规则 3b）。 */
+function readDevelopReflog(root) {
+  let out;
   try {
-    const out = execFileSync(
-      "git", ["-C", root, "log", "develop", "--format=%H", "--until", ts, "-1"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    ).trim();
-    return out || null;
+    out = execFileSync(
+      "git", ["-C", root, "reflog", "show", "develop", "--date=unix", "--format=%H%x09%gd"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }
+    );
   } catch {
     return null;
   }
+  const entries = [];
+  for (const line of out.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    const fields = t.split("\t");
+    if (fields.length !== 2) return null;
+    const [sha, gd] = fields;
+    const unix = parseReflogUnix(gd);
+    if (!/^[0-9a-f]{40}$/.test(sha) || unix === null || !Number.isFinite(unix)) return null;
+    entries.push({ sha, unix });
+  }
+  return entries;
+}
+
+/** 当前 develop ref 的值（git 自己的读法）；读不到返回 null。 */
+function currentDevelopTip(root) {
+  try {
+    return (
+      execFileSync("git", ["-C", root, "rev-parse", "develop"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"], env: GIT_ENV,
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * develop 分支在时间戳 ts 当刻的 tip commit sha——**忠实重建 ref 的历史值**，读不出返回 null。
+ *
+ * ⛔ 不用 `git log develop --until=<ts>`：那是对【当前 DAG】按【提交日期】做的过滤，**不是**
+ *    「该时刻 develop ref 的值」。它可以返回一个事件当时还没进 develop、之后才 merge/push 进来的
+ *    提交。2026-09-18T11:12:40.533Z 那条事件的实测（时代错置）：
+ *      `--until` 取到 ca1a8276d（提交日期 11:11:34），而它直到 11:12:57 才 push 进 develop
+ *      —— 事件当刻 develop 真实 tip 是 b3d0ea5f3（11:00:28），ref 移动发生在事件之后 16.5 秒。
+ *    两种读法在这一次上给出【相反】的结论（6/6 判复发 vs 0/6 判真阴性），把一条 16.5 秒的传播
+ *    竞态误报成 2026-09-07 那类真复发。
+ *
+ * 三态 fail-closed（AC-221 原文「回放不出历史态时 fail-closed(判不出≠没复发)」）——任一条不成立
+ * 即返回 null，调用方据此走 unclassified 分支判 FAIL：
+ *   ① reflog 不可读 / 有条目读不懂（格式漂移）
+ *   ② 没有任何条目时间戳 ≤ ts（最早条目晚于事件时刻 ⇒ 该时刻回放不出来）
+ *   ③ reflog 最新一条 ≠ 当前 develop tip（reflog 被剪枝/不完整 ⇒ 回放不可信）
+ */
+function developTipAt(root, ts) {
+  const t = Date.parse(ts);
+  if (!Number.isFinite(t)) return null;
+  const entries = readDevelopReflog(root);
+  if (entries === null || entries.length === 0) return null; // ①
+  const tip = currentDevelopTip(root);
+  if (tip === null || entries[0].sha !== tip) return null; // ③（完备性自检，⛔ 不静默）
+  const hit = entries.find((e) => e.unix * 1000 <= t); // reflog 新→旧 ⇒ 首命中即「≤ts 的最新一条」
+  return hit ? hit.sha : null; // ②
 }
 
 /** 某个历史 commit 上 tasks/<id>.md 的内容，读不到（文件当时不存在/commit 不存在）返回 null。 */
@@ -87,7 +181,7 @@ function taskBodyAtCommit(root, sha, taskId) {
   try {
     return execFileSync(
       "git", ["-C", root, "show", `${sha}:tasks/${taskId}.md`],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: GIT_ENV }
     );
   } catch {
     return null;
@@ -143,6 +237,105 @@ test("负控制：消歧器对已知真阴性样本（gap-ac207 2026-09-09T14:26
   const known = classifyEvent(root, { ts: "2026-09-09T14:26:02.187Z", task: "gap-ac207-e2e-target-driver-driven-real-commit-task-done" });
   assert.ok(known.classified, `消歧器应能回放这条已知样本,实际: ${known.detail}`);
   assert.equal(known.recurrence, false, `已知真阴性样本被误判为复发: ${known.detail}`);
+});
+
+// ── 正控制（硬规则 4：把「本方法仍能取假」钉进判据本体，⛔ 不靠注释）──────────────────────
+// 只留主判据那条「复发数 = 0」的断言时，任何**恒判非复发**的实现（例如回放永远返回 null 但被当成
+// 「没复发」、或判定函数被改成永远 ok=false）都能让判据变绿——那是一个结构上不可能取假的量。
+// 所以这里对【同一个断言】做双向对照，两臂都必须实测：
+//   正臂 = 2026-09-07 那次原始事故（GOAL-011 立条时引用的就是它）⇒ 必须判「复发」
+//   负臂 = 2026-09-09 gap-ac207 已知真阴性                      ⇒ 必须判「非复发」
+
+test("正控制（双向）：消歧器对已知真复发样本判「复发」、对已知真阴性样本判「非复发」", () => {
+  if (!liveEnabled) {
+    console.log(`SKIP: 未设置 ${LIVE_ENV}=1——见文件头注的事故记录,默认在全量 suite 里不断言。`);
+    return;
+  }
+  const root = mainCheckoutRoot();
+
+  const positive = classifyEvent(root, {
+    ts: "2026-09-07T03:37:36.503Z",
+    task: "gap-cli-write-surface-lacks-toplevel-fields",
+  });
+  assert.ok(positive.classified, `正臂：消歧器应能回放这条已知真复发样本,实际: ${positive.detail}`);
+  assert.equal(
+    positive.recurrence,
+    true,
+    `正臂：已知真复发样本（2026-09-07 原始事故）未被判为复发 ⇒ 本判据已丧失取假能力: ${positive.detail}`
+  );
+
+  const negative = classifyEvent(root, {
+    ts: "2026-09-09T14:26:02.187Z",
+    task: "gap-ac207-e2e-target-driver-driven-real-commit-task-done",
+  });
+  assert.ok(negative.classified, `负臂：消歧器应能回放这条已知真阴性样本,实际: ${negative.detail}`);
+  assert.equal(
+    negative.recurrence,
+    false,
+    `负臂：已知真阴性样本被误判为复发 ⇒ 本判据会把正常拦截误报成事故: ${negative.detail}`
+  );
+});
+
+// ── AC3：回放的三态 fail-closed（临时仓库/构造输入实测，⛔ 判不出不得当作「没复发」）──────────
+
+/** 建一个自带 develop reflog 的临时仓库：两次提交，返回 { dir, first, second }。 */
+function makeTempRepoWithDevelopReflog(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac221-reflog-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", env: GIT_ENV }).trim();
+  git("init", "-q", "-b", "develop");
+  // 显式钉死身份/签名/钩子，避免宿主的全局 git 配置把临时仓库的行为改掉。
+  git("config", "user.email", "ac221@example.invalid");
+  git("config", "user.name", "ac221");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.hooksPath", path.join(dir, ".git", "hooks"));
+  const commit = (text, msg) => {
+    fs.writeFileSync(path.join(dir, "f.txt"), text);
+    git("add", "f.txt");
+    git("commit", "-q", "-m", msg);
+    return git("rev-parse", "HEAD");
+  };
+  const first = commit("one\n", "c1");
+  const second = commit("two\n", "c2");
+  return { dir, first, second, git };
+}
+
+test("AC3-①：reflog 不可读（非 git 目录）⇒ developTipAt 返回 null（fail-closed）", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac221-nogit-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(
+    developTipAt(dir, new Date().toISOString()),
+    null,
+    "reflog 读不到时必须 fail-closed（⛔ 不得返回一个看似可用的 sha / 不得静默当作「没复发」）"
+  );
+});
+
+test("AC3-②：reflog 最早条目晚于事件 ts ⇒ developTipAt 返回 null（fail-closed）", (t) => {
+  const { dir, second } = makeTempRepoWithDevelopReflog(t);
+  const now = new Date().toISOString();
+  assert.equal(developTipAt(dir, now), second, "构造前的正控制：完备 reflog 应能解析出 tip");
+  // 2000 年早于该仓库最早一条 reflog 条目 ⇒ 该时刻回放不出来。
+  assert.equal(
+    developTipAt(dir, "2000-01-01T00:00:00.000Z"),
+    null,
+    "事件时刻早于最早 reflog 条目时必须 fail-closed，⛔ 不得回退到一个「之后」的提交"
+  );
+});
+
+test("AC3-③：reflog 最新条目 ≠ 当前 develop tip（不完整）⇒ developTipAt 返回 null（fail-closed）", (t) => {
+  const { dir, first, second, git } = makeTempRepoWithDevelopReflog(t);
+  const now = new Date().toISOString();
+  assert.equal(developTipAt(dir, now), second, "构造前的正控制：完备 reflog 应能解析出 tip");
+  // 绕开 git 的 ref API 直接改写 loose ref ⇒ ref 移动了但 reflog 没有对应条目
+  // （模拟 reflog 被 gc 剪枝 / 不完整——此时「最新条目」不再等于 ref 的真值，回放不可信）。
+  fs.writeFileSync(path.join(dir, ".git", "refs", "heads", "develop"), first + "\n");
+  assert.equal(git("rev-parse", "develop"), first, "负控制：ref 确实已被改写");
+  assert.equal(
+    developTipAt(dir, now),
+    null,
+    "reflog 最新条目与当前 develop tip 不一致时必须 fail-closed"
+  );
 });
 
 // ── 主判据：落地后窗口内，自动消歧为「真复发」的短路事件数为 0 ────────────────────────────

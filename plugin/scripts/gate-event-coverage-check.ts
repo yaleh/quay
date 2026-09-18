@@ -44,7 +44,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+// argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 export interface Landing {
   task: string;
@@ -75,11 +78,6 @@ export interface CoverageReport {
   worstCoverage: number | null;
   verdict: "pass" | "red" | "not-evaluated";
   reason: string;
-}
-
-function argValue(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
 /** `git log` 的 (sha, committer ISO, subject) 三元组，按**分支顺序**（--reverse ⇒ 旧→新）。 */
@@ -327,15 +325,15 @@ async function main(): Promise<number> {
   }
   const json = args.includes("--json");
   const gate = args.includes("--gate");
-  const root = path.resolve(argValue(args, "--root") ?? process.cwd());
-  const mergeTarget = argValue(args, "--merge-target") ?? "develop";
-  const daysRaw = argValue(args, "--days");
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
+  const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
+  const daysRaw = flagValue(args, "--days");
   const days: number | "all" = args.includes("--all") ? "all" : daysRaw ? Number(daysRaw) : 3;
   if (days !== "all" && (!Number.isFinite(days) || days < 1)) {
     console.error("gate-event-coverage-check: --days must be a positive integer");
     return 2;
   }
-  const thresholdRaw = argValue(args, "--threshold");
+  const thresholdRaw = flagValue(args, "--threshold");
   const threshold = thresholdRaw ? Number(thresholdRaw) : 95;
   if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 100) {
     console.error("gate-event-coverage-check: --threshold must be in (0,100]");

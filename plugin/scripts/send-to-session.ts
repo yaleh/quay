@@ -195,6 +195,10 @@ export function targetInboundPolicy(
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+// one (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 // 共享 socket 协议（packages/quay/src/serve-send.ts 的 sendSessionFrames）。动态 import 用相对路径
 // ——与 build-evidence-gate.ts 的 `await import("../../packages/quay/src/…")` 同型（plugin 从 repo-root
@@ -222,10 +226,8 @@ async function loadSendSessionFrames(): Promise<
 // convention, and inventing one would fabricate a fact (硬规则 6).
 const args = process.argv.slice(2);
 if (args.includes("--keys")) {
-  const one = (name: string): string | undefined => {
-    const i = args.indexOf(name);
-    return i === -1 ? undefined : args[i + 1];
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
+  const one = (name: string): string | undefined => flagValue(args, name);
   const sockPath = one("--sock");
   if (!sockPath) {
     console.error("⛔ --keys 需要 --sock <pty.sock>（本仓库无已验证的 pty.sock 发现约定，⛔ 不猜）");

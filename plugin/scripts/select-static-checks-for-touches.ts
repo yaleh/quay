@@ -44,7 +44,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
-import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -614,12 +617,6 @@ Output modes:
 
 Exit codes: 0 ok; 2 usage/task-not-found.`;
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  if (idx === -1) return undefined;
-  return args[idx + 1];
-}
-
 /** The positional (non-flag) args — for the fan-in CLI modes (--classify-delta / --bootstrap-
  *  orchestration) where the delta paths are positional and `--root <dir>` is a flag+value pair. A
  *  value immediately following a `--flag` is that flag's value (e.g. the `--root` directory), never a
@@ -711,9 +708,9 @@ function touchesFromTask(root, taskId) {
 
 export function main(argv) {
   const args = argv.slice(2);
-  const taskId = getArgValue(args, "--task");
-  const rootArg = getArgValue(args, "--root");
-  const touchesArg = getArgValue(args, "--touches");
+  const taskId = flagValue(args, "--task");
+  const rootArg = flagValue(args, "--root");
+  const touchesArg = flagValue(args, "--touches");
   const asJson = args.includes("--json");
   const namesOnly = args.includes("--names");
   const listMode = args.includes("--list");
@@ -743,8 +740,8 @@ export function main(argv) {
   // "merge develop 前先同步" safety net — fixes the orchestration SCRIPTS even when the dispatcher
   // misses the sync). Runs BEFORE the scripts/test.sh registry check (a pure git op — no registry).
   if (bootstrapSync) {
-    const worktreeArg = getArgValue(args, "--worktree");
-    const mergeTarget = getArgValue(args, "--merge-target") ?? "develop";
+    const worktreeArg = flagValue(args, "--worktree");
+    const mergeTarget = flagValue(args, "--merge-target") ?? "develop";
     if (!worktreeArg) {
       process.stderr.write(`select-static-checks-for-touches: --bootstrap-sync requires --worktree <dir> (the task worktree to sync)\n`);
       return 2;

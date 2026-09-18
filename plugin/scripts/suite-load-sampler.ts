@@ -31,6 +31,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+// arg (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -90,10 +94,8 @@ function isSuiteRunning(stateFile: string, runId: string): boolean {
 }
 
 async function main(): Promise<void> {
-  const arg = (name: string): string | undefined => {
-    const i = process.argv.indexOf(`--${name}`);
-    return i >= 0 ? process.argv[i + 1] : undefined;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: the `--` prefix is this call site's own spelling. */
+  const arg = (name: string): string | undefined => flagValue(process.argv, `--${name}`);
   const stateFile = arg("state-file");
   const outFile = arg("out-file");
   const runId = arg("run-id");

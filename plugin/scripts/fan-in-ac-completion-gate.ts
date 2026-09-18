@@ -30,7 +30,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { countCompletionCheckboxes } from "./ready-pool-check.ts";
 import { isLandedCodeComplete } from "./slot-refill.ts";
 
@@ -76,11 +79,6 @@ export function flipAcGateVerdict(body) {
   };
 }
 
-function getArgValue(args, name) {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 const usage = `fan-in-ac-completion-gate.ts — fan-in flip AC-completion gate (gap-fan-in-flip-no-ac-completion-check)
 
 Usage:
@@ -102,12 +100,12 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const taskId = getArgValue(args, "--task");
+  const taskId = flagValue(args, "--task");
   if (!taskId) {
     process.stderr.write(`fan-in-ac-completion-gate: --task is required\n${usage}\n`);
     return 2;
   }
-  const worktree = path.resolve(getArgValue(args, "--worktree") ?? process.cwd());
+  const worktree = path.resolve(flagValue(args, "--worktree") ?? process.cwd());
   const asJson = args.includes("--json");
   const taskPath = path.join(worktree, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskPath)) {

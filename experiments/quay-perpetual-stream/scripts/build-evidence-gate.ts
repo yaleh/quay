@@ -7,6 +7,10 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+// argvFlag (below) reads its tokens straight out of process.argv; the indexOf+next-arg algorithm now
+// lives in gate-script-base.ts as `flagValue` (one of the copies in plugin/scripts;
+// .quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 import type {
   BuildEvidenceManifest,
   EvidenceClass,
@@ -330,10 +334,8 @@ function cliFail(message: string): never {
   process.exit(1);
 }
 
-function argvFlag(name: string): string | undefined {
-  const i = process.argv.indexOf(name);
-  return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : undefined;
-}
+/** Arity-1 adapter over the shared `flagValue`: this module's tokens come from process.argv itself. */
+const argvFlag = (name: string): string | undefined => flagValue(process.argv, name);
 
 if (process.argv[1] != null && process.argv[1].endsWith("build-evidence-gate.ts")) {
   const manifestPath = argvFlag("--manifest");

@@ -3,7 +3,7 @@ id: gap-ac221-replay-anachronistic-develop-ref
 title: AC-221 判据的 develop 历史态回放【时代错置】——`git log develop --until=<ts>` 按提交日期过滤【当前
   DAG】，取到「事件当时还没进入 develop、之后才 merge 进来」的提交，把一条 16.5 秒的传播竞态误报为 2026-09-07
   那类真复发；改用 reflog 忠实重建 ref（1 真复发 → 0，且正控制证明仍能取假）
-status: ready
+status: done
 labels:
   - gap
   - defect

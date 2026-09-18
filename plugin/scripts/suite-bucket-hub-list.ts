@@ -39,7 +39,10 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+// getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
 
 
@@ -125,11 +128,6 @@ Usage:
 
 Output: full (unconditional full suite) | bucket (proceed to fan-out — a later concern)`;
 
-function getArgValue(args: string[], name: string): string | undefined {
-  const idx = args.indexOf(name);
-  return idx === -1 ? undefined : args[idx + 1];
-}
-
 /** Read one task's parsed ## Touches entries. Returns [] when the file/section is absent. */
 export function taskTouchEntries(taskId: string, root: string): string[] {
   const file = path.join(root, "tasks", `${taskId}.md`);
@@ -141,13 +139,13 @@ export function taskTouchEntries(taskId: string, root: string): string[] {
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   const asJson = args.includes("--json");
-  const rootArg = getArgValue(args, "--root");
+  const rootArg = flagValue(args, "--root");
   const root = path.resolve(rootArg ?? repoRoot());
   const positional = args.filter((a) => !a.startsWith("--") && !["--root", "--task", "--json"].includes(a));
 
   let touched: string[] = [];
   let label = "paths";
-  const taskId = getArgValue(args, "--task");
+  const taskId = flagValue(args, "--task");
   if (taskId) {
     touched = taskTouchEntries(taskId, root);
     label = `task ${taskId}`;

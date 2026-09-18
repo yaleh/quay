@@ -35,7 +35,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { isDirectEntry } from "./gate-script-base.ts";
+// flagVal now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
+// copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
+// `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
 /** The 7 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
  *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
@@ -149,18 +152,13 @@ Usage:
 
 Exit codes: 0 ok; 1 FAIL-CLOSED (malformed suite: section — the suite must not silently degrade).`;
 
-function flagVal(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  return i !== -1 ? args[i + 1] : undefined;
-}
-
 function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = path.resolve(flagVal(args, "--root") ?? process.cwd());
+  const root = path.resolve(flagValue(args, "--root") ?? process.cwd());
   let params: SuiteParams;
   try {
     params = readSuiteParams(root);

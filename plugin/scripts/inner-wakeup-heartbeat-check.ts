@@ -27,7 +27,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
+// of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 // AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13 ruling): the
 // end-invariant MUST be judged on the MACHINE's fresh slot-refill output, never the heartbeat's
 // self-reported fields. analyzeSlotRefill is the pure machine decision; FIXED_DISPATCH_CAP is the
@@ -647,10 +650,10 @@ dispatch-state-missing / end-invariant-unverifiable / invariant-violated) ·
 
 export function main(argv) {
   const args = argv.slice(2);
-  const flagVal = (name, def) => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : def;
-  };
+  /** Arity-2 adapter over the shared `flagValue`: this closure captures the local `args` slice and
+   *  adds a per-call-site default (`??`, which is exact — the original returned `args[i + 1]`
+   *  verbatim whenever the flag was present, including the empty string). */
+  const flagVal = (name, def) => flagValue(args, name) ?? def;
   if (args.includes("--help") || args.includes("-h")) helpExit("usage: node inner-wakeup-heartbeat-check.ts --root <dir> [--max-age-secs <N>] [--in-flight <ids>] [--running <ids>] [--json]");
   const root = flagVal("--root", ".");
   const maxAge = Number(flagVal("--max-age-secs", String(DEFAULT_MAX_AGE_SECS)));

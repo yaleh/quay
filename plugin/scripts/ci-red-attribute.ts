@@ -37,6 +37,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// flag (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
+// the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
+// (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
+import { flagValue } from "./gate-script-base.ts";
 
 /** 三元词表 —— `attribution` 只能取其中之一（AC-269 判据逐字读这三个值）。 */
 export const ATTRIBUTION_VOCAB = ["real-defect", "infrastructure", "known-flake"] as const;
@@ -366,10 +370,11 @@ export function main(argv: string[]): number {
     console.log(usage());
     return 0;
   }
-  const flag = (name: string): string | null => {
-    const i = argv.indexOf(name);
-    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
-  };
+  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `argv`. The
+   *  `|| null` preserves THIS call site's original reading — a flag whose value is the empty string
+   *  reads as "not given" (see flagValue's header: that reading is now a per-call-site decision, not
+   *  an inherited property of a private copy). */
+  const flag = (name: string): string | null => flagValue(argv, name) || null;
 
   const flakesPath = flag("--flakes") ?? defaultKnownFlakesPath();
   const knownFlakes = loadKnownFlakes(flakesPath);
