@@ -2,7 +2,7 @@
 id: gap-webui-git-history-body-copy-en-zh
 title: /git-history 正文文案在 lang=en 下仍是硬编码中文（视图切换、图例说明、客户端脚本里的加载提示）—— 正文本地化系列，照
   /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
