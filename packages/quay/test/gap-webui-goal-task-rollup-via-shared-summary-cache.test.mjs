@@ -16,6 +16,11 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { handleGoalList, renderTaskAttachText, goalAcOf } from "../src/serve-goal.ts";
 import { readTaskSummary, clearTaskSummaryCache } from "../src/serve-dashboard.ts";
+// gap-webui-goal-body-copy-en-zh: the three-state markers moved into serve-i18n.ts ROW 21's
+// `GOAL_LABELS`. The DIRECT-import arms below now pass `ZH` explicitly, because the dictionary's
+// default language is `en` — leaving them on the default would silently turn "the marker is
+// translated" into "the marker is absent" for every Chinese assertion (决定记录 ④).
+import { goalLabelsFor } from "../src/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -23,9 +28,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function get(port, urlPath) {
+/** The pre-existing Chinese roster — the three-state markers this file pins. */
+const ZH = goalLabelsFor("zh");
+/** The default-locale roster, for the en peer arms. */
+const EN = goalLabelsFor("en");
+
+/** `cookie` (optional) — see the ZH/EN note above: every arm that pins a Chinese literal asks for
+ *  `lang=zh`, so it stays a zh regression guard rather than a statement about the wrong rendering. */
+function get(port, urlPath, cookie) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers: cookie ? { Cookie: cookie } : {} }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -65,12 +77,13 @@ function goalTableRows(html) {
 // ── AC2 (unit): three states pairwise distinct; 未挂靠 != "0"; 未读到 != 未挂靠 ───────────────
 
 test("AC2: count / 未挂靠 / 未读到 are pairwise distinct (hard rule 6/3b)", () => {
-  const a = renderTaskAttachText({ ok: true, tasks: [
+  const read = { ok: true, tasks: [
     { id: "T-1", status: "done", goal_ac: "AC-1" },
     { id: "T-2", status: "ready", goal_ac: "AC-1" },
-  ] }, ["AC-1"]);
-  const b = renderTaskAttachText({ ok: true, tasks: [] }, ["AC-1"]);
-  const c = renderTaskAttachText({ ok: false, error: "boom" }, ["AC-1"]);
+  ] };
+  const a = renderTaskAttachText(read, ["AC-1"], ZH);
+  const b = renderTaskAttachText({ ok: true, tasks: [] }, ["AC-1"], ZH);
+  const c = renderTaskAttachText({ ok: false, error: "boom" }, ["AC-1"], ZH);
 
   assert.match(a, /^2（/, "attached state renders its count first");
   assert.match(b, /未挂靠/, "no-reference state is the 未挂靠 marker");
@@ -80,6 +93,22 @@ test("AC2: count / 未挂靠 / 未读到 are pairwise distinct (hard rule 6/3b)"
   assert.notEqual(b, c, "未挂靠 != 未读到");
   assert.notEqual(b, "0", "未挂靠 is NOT the string \"0\" (hard rule 6)");
   assert.notEqual(c, b, "未读到 is NOT 未挂靠 (hard rule 3b)");
+  // The en peer — the SAME three states, pairwise distinct in the default locale too, and disjoint
+  // from their zh values. This is what shows the markers are a dictionary lookup rather than three
+  // hard-coded strings (the arms above would pass on a page that ignored the language entirely).
+  const aEn = renderTaskAttachText(read, ["AC-1"], EN);
+  const bEn = renderTaskAttachText({ ok: true, tasks: [] }, ["AC-1"], EN);
+  const cEn = renderTaskAttachText({ ok: false, error: "boom" }, ["AC-1"], EN);
+  assert.match(aEn, /^2 \(/, "the en count form uses ASCII parens");
+  assert.equal(bEn, "not attached", "the en no-reference marker");
+  assert.match(cEn, /^read failed \(boom\)$/, "the en failed-read marker carries the reason");
+  assert.notEqual(aEn, a, "the count form is not byte-identical across languages");
+  assert.notEqual(bEn, b, "the no-reference marker is not byte-identical across languages");
+  assert.notEqual(cEn, c, "the failed-read marker is not byte-identical across languages");
+  // …and the render still SHARES the roster it was handed rather than re-reading the dictionary:
+  // a roster of a third language (here: en values under a zh-named object) must be honoured.
+  const swapped = renderTaskAttachText({ ok: true, tasks: [] }, ["AC-1"], EN);
+  assert.equal(swapped, bEn, "the passed-in roster decides the language, not the default");
 });
 
 test("goalAcOf: top-level goal_ac wins; extra.goal_ac fallback; unset => null", () => {
@@ -98,12 +127,16 @@ test("AC6: goal rollup == sum of criteria; direct-on-goal task excluded", () => 
     { id: "T-3", status: "todo", goal_ac: "AC-102" },
     { id: "T-4", status: "done", goal_ac: "GOAL-001" }, // hangs on the GOAL, not an AC
   ] };
-  const ac101 = renderTaskAttachText(read, ["AC-101"]);
-  const ac102 = renderTaskAttachText(read, ["AC-102"]);
-  const goal = renderTaskAttachText(read, ["AC-101", "AC-102"]);
+  const ac101 = renderTaskAttachText(read, ["AC-101"], ZH);
+  const ac102 = renderTaskAttachText(read, ["AC-102"], ZH);
+  const goal = renderTaskAttachText(read, ["AC-101", "AC-102"], ZH);
   assert.match(ac101, /^2（/, "AC-101 has 2 tasks");
   assert.match(ac102, /^1（/, "AC-102 has 1 task");
   assert.match(goal, /^3（/, "goal = 2 + 1, NOT 4 (the GOAL-001-hanging task is excluded)");
+  // The en peer recomputes the SAME three counts — the arithmetic is language-independent, so the
+  // numbers above are not a property of the zh column.
+  assert.match(renderTaskAttachText(read, ["AC-101"], EN), /^2 \(/, "en: AC-101 has 2 tasks");
+  assert.match(renderTaskAttachText(read, ["AC-101", "AC-102"], EN), /^3 \(/, "en: goal = 2 + 1");
 });
 
 // ── AC3 (static + unit): reuses the dashboard accessor, not a second Map ────────────────────────
@@ -150,11 +183,19 @@ test("AC5: taskList failure renders 未读到 with the reason, never a bare —"
   // gap-webui-goal-list-tab-split-goal-ac: criteria render on the Criteria tab — the criterion
   // row's 挂靠任务 cell is where the three-state 未读到（reason） shows up.
   const res = captureRes();
-  await handleGoalList({}, res, new URL("http://localhost/goal?kind=criterion"), client, "ws");
+  await handleGoalList({}, res, new URL("http://localhost/goal?kind=criterion"), client, { workspaceRoot: "ws", lang: "zh" });
   assert.equal(res.statusCode, 200, "fail-open: page still 200");
   assert.match(res.body, /AC-101/, "criterion row still renders");
   assert.match(res.body, /未读到/, "stats column shows the 未读到 state");
   assert.match(res.body, /boom-read-failed/, "未读到 carries the failure reason substring");
+  // …and the SAME failing read routed through `lang: "en"`: the failure STATE is unchanged, only its
+  // marker is. Without this peer, the three zh arms above would keep passing on a page that ignored
+  // the request's language.
+  const resEn = captureRes();
+  await handleGoalList({}, resEn, new URL("http://localhost/goal?kind=criterion"), client, { workspaceRoot: "ws", lang: "en" });
+  assert.equal(resEn.statusCode, 200, "fail-open under en too");
+  assert.match(resEn.body, /read failed \(boom-read-failed\)/, "the en marker carries the same reason");
+  assert.doesNotMatch(resEn.body, /未读到/, "the en row carries no Chinese marker");
 });
 
 // ── integration: a real running serve instance ─────────────────────────────────────────────────
@@ -227,7 +268,7 @@ after(async () => {
 // ── AC1: production-carrier reading — per-goal task counts match the ledger truth ───────────────
 
 test("AC1: /goal shows 11/13/6/5 for the four attached goals, 未挂靠 for the rest", async () => {
-  const r = await get(port, "/goal");
+  const r = await get(port, "/goal", "lang=zh");
   assert.equal(r.status, 200);
   const rows = goalTableRows(r.body);
   const expected = { "GOAL-001": 11, "GOAL-003": 13, "GOAL-007": 6, "GOAL-008": 5 };
@@ -244,33 +285,77 @@ test("AC1: /goal shows 11/13/6/5 for the four attached goals, 未挂靠 for the 
     assert.match(row.taskAttach, /未挂靠/, `${gid} shows 未挂靠, got "${row.taskAttach}"`);
   }
   assert.deepEqual(mismatches, [], `(goal, page, truth) mismatches:\n  ${mismatches.join("\n  ")}`);
+  // The en peer: the SAME carrier, the SAME four counts, and the unattached goals read the English
+  // marker — so the 未挂靠 arms above are a reading of the LANGUAGE, on the production carrier.
+  const en = goalTableRows((await get(port, "/goal", "lang=en")).body);
+  for (const gid of Object.keys(expected)) {
+    const row = en.find((x) => x.id === gid && x.kind === "goal");
+    assert.ok(row, `en goal row ${gid} present`);
+    assert.equal(Number(/^(\d+)/.exec(row.taskAttach)[1]), expected[gid], `en ${gid} carries the same count`);
+  }
+  for (const gid of ["GOAL-002", "GOAL-004", "GOAL-005", "GOAL-006"]) {
+    assert.equal(en.find((x) => x.id === gid).taskAttach, "not attached", `en ${gid} carries the translated marker`);
+  }
 });
 
 // ── AC7: detail page provides the SAME rollup as the list for the same id ──────────────────────
 
 test("AC7: /goal/<id> shows the same task-attach value as /goal for the same id", async () => {
-  const list = await get(port, "/goal");
+  // `lang=zh` on both, because the detail arm's regex pins the row's zh prefix (ROW 21's
+  // `detailAttachedTasks`). The COMPARISON is language-independent — it compares the two surfaces'
+  // values to each other — so asking for zh does not weaken it.
+  const list = await get(port, "/goal", "lang=zh");
   const goalRow = goalTableRows(list.body).find((x) => x.id === "GOAL-001" && x.kind === "goal");
   assert.ok(goalRow, "GOAL-001 in list");
-  const detail = await get(port, "/goal/GOAL-001");
+  const detail = await get(port, "/goal/GOAL-001", "lang=zh");
   assert.equal(detail.status, 200);
   const detailM = /挂靠任务: ([^<]+)/.exec(detail.body);
   assert.ok(detailM, "detail page shows the 挂靠任务 statistic");
   assert.equal(detailM[1].trim(), goalRow.taskAttach, "detail value == list value for GOAL-001");
   // Per-criterion rows in the detail block also carry the column.
   assert.match(detail.body, /<th>挂靠任务<\/th>/, "detail criterion block has the task-attach column");
+  // The en peer — both surfaces switch together, and they still agree, so "same value on both
+  // surfaces" is not an artifact of both being hard-coded in one language.
+  const listEn = goalTableRows((await get(port, "/goal", "lang=en")).body).find((x) => x.id === "GOAL-001");
+  const detailEn = await get(port, "/goal/GOAL-001", "lang=en");
+  const detailEnM = /attached tasks: ([^<]+)/.exec(detailEn.body);
+  assert.ok(detailEnM, "the en detail page shows the translated statistic");
+  assert.equal(detailEnM[1].trim(), listEn.taskAttach, "en: detail value == list value for GOAL-001");
+  // ⚠️ The statistic is NOT byte-identical across languages, and must not be: ROW 21's `attachCount`
+  // owns the surrounding parens, which are full-width in zh and ASCII in en. What IS
+  // language-independent is the COUNT and the status distribution inside them — asserted directly,
+  // so a change that translated the distribution words (which are the ABI's own status tokens, i.e.
+  // DATA) would go red here rather than quietly shipping.
+  // Two shapes differ between the columns by design and neither is copy: the parens are full-width
+  // in zh / ASCII in en (ROW 21's `attachCount`), and the en column carries a space before its `(`.
+  // Normalising exactly those two is the whole of `inner` — everything else (the count, the status
+  // tokens, the ` · ` separator) must survive untouched, which is what makes the assertion below a
+  // reading of the DATA rather than of the punctuation.
+  const inner = (s) => s
+    .replace(/\s*([（(])\s*/g, "(")
+    .replace(/\s*[）)]/g, ")")
+    .trim();
+  assert.equal(inner(detailEnM[1]), inner(detailM[1]),
+    "the count and its status distribution are the same reading in both languages (only the parens differ)");
+  assert.equal(inner(detailM[1]), "11(done 4 · ready 4 · todo 3)", "the reading itself, spelled out once");
+  assert.notEqual(detailEnM[1].trim(), detailM[1].trim(), "…and the rows really do differ, i.e. the arm above is not trivially true");
+  assert.match(detailEn.body, /<th>attached tasks<\/th>/, "the en detail block carries the translated column header");
 });
 
 // ── AC4: cache-hit p50 vs cache-miss latency, both bounded, both rendered fully ─────────────────
 
 test("AC4: cache-hit stays fast; cache-miss renders fully and stays bounded", async () => {
+  // `lang=en` explicitly for every fetch here: this arm is a LATENCY canary whose "the page still
+  // rendered fully" guard names a column header, and naming it in a specific language is what makes
+  // the guard non-vacuous (a bare `挂靠任务` under the default `en` would be absent for the wrong
+  // reason, turning "rendered fully" into "did not render"). Timing is insensitive to the cookie.
   // Warm the shared taskSummaryCache (the /dashboard and /goal paths share the same 30s cache).
-  await get(port, "/goal");
+  await get(port, "/goal", "lang=en");
 
   const hitTimes = [];
   for (let i = 0; i < 11; i++) {
     const t0 = process.hrtime.bigint();
-    const r = await get(port, "/goal");
+    const r = await get(port, "/goal", "lang=en");
     const t1 = process.hrtime.bigint();
     assert.equal(r.status, 200);
     hitTimes.push(Number(t1 - t0) / 1e6);
@@ -284,11 +369,11 @@ test("AC4: cache-hit stays fast; cache-miss renders fully and stays bounded", as
   for (let i = 0; i < 3; i++) {
     clearTaskSummaryCache();
     const t0 = process.hrtime.bigint();
-    const r = await get(port, "/goal");
+    const r = await get(port, "/goal", "lang=en");
     const t1 = process.hrtime.bigint();
     assert.equal(r.status, 200, "cold-miss page still 200");
     assert.match(r.body, /GOAL-001/, "cold-miss page still renders goal rows");
-    assert.match(r.body, /<th>挂靠任务<\/th>/, "cold-miss page still renders the stats column");
+    assert.match(r.body, /<th>attached tasks<\/th>/, "cold-miss page still renders the stats column");
     missTimes.push(Number(t1 - t0) / 1e6);
   }
   const missMax = Math.max(...missTimes);

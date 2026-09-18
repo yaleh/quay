@@ -19,9 +19,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function get(port, urlPath) {
+/** `cookie` (optional) — gap-webui-goal-body-copy-en-zh: the default language is `en`, so the arms
+ *  that pin this page's PRE-EXISTING Chinese copy ask for `lang=zh` explicitly (they become zh
+ *  regression guards); the negative arms MUST do so too, or they would be vacuous under `en`. */
+function get(port, urlPath, cookie) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers: cookie ? { Cookie: cookie } : {} }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -174,16 +177,28 @@ test("有 draft AC 时 Goals tab 显示跨 tab 待裁定横幅与条数；无 dr
   try {
     // gap-webui-goal-list-tab-split-goal-ac: a draft CRITERION is the Criteria tab's own count, so
     // the default Goals tab shows the cross-tab hint ("另有 N 条 AC 待裁定"), not its own banner.
-    const r = await get(port, "/goal");
+    // `lang=zh` (gap-webui-goal-body-copy-en-zh): the banner sentence is now ROW 21's
+    // `draftOtherBanner`, so pinning its Chinese column requires asking for zh. ⚠️ The two NEGATIVE
+    // arms below need it just as much — under the default `en` they would pass because the page has
+    // no Chinese at all, i.e. for the wrong reason (决定记录 ④).
+    const r = await get(port, "/goal", "lang=zh");
     assert.match(r.body, /另有 1 条 AC 待裁定/);
     assert.match(r.body, /href="\/goal\?status=draft&kind=criterion"/);
     // 已经在 draft 筛选下时不重复提示（避免同一信息叠加两次）。
-    const d = await get(port, "/goal?status=draft");
+    const d = await get(port, "/goal?status=draft", "lang=zh");
     assert.doesNotMatch(d.body, /待裁定/, "?status=draft 不叠加横幅");
+    // en peer: the banner is present AND translated, so the zh arms above are a reading of the
+    // LANGUAGE and not of the banner's presence (which the two negative arms alone cannot show).
+    const rEn = await get(port, "/goal", "lang=en");
+    assert.match(rEn.body, /1 more AC awaiting a decision/);
+    assert.doesNotMatch(rEn.body, /待裁定/, "the en Goals tab carries no Chinese banner copy");
   } finally {
     fs.rmSync(draftPath, { force: true });
   }
   // 负控制：draft 清零后横幅必须消失（⛔ 不得是恒显示的装饰）。
-  const after = await get(port, "/goal");
+  const after = await get(port, "/goal", "lang=zh");
   assert.doesNotMatch(after.body, /待裁定/);
+  // …and the same negative under en — the control must hold in the language the banner actually
+  // renders in, not only in the one where the literal happens to be absent by construction.
+  assert.doesNotMatch((await get(port, "/goal", "lang=en")).body, /awaiting a decision/);
 });

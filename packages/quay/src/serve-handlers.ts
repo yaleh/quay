@@ -273,7 +273,11 @@ export async function handleAllRoutes(
   const adrM = /^\/adr\/([^/]+)$/.exec(url.pathname);
   if (adrM) {
     const id = decodeURIComponent(adrM[1]);
-    await handleAdrDetail(req, res, id, client);
+    // gap-webui-goal-body-copy-en-zh: `reqCfg.lang`, for the SHARED `renderBackLink` (serve-i18n
+    // ROW 9's `backLink`). The helper's `lang` defaults to `DEFAULT_LANG`, so a caller that omits it
+    // renders an English back link on a `?lang=zh` page — the silently-defaulted-language trap
+    // (硬规则 3b). All THREE detail pages therefore pass their own language.
+    await handleAdrDetail(req, res, id, client, reqCfg.lang);
     return;
   }
 
@@ -288,7 +292,11 @@ export async function handleAllRoutes(
   const goalM = /^\/goal\/([^/]+)$/.exec(url.pathname);
   if (goalM) {
     const id = decodeURIComponent(goalM[1]);
-    await handleGoalDetail(req, res, id, client, reqCfg.workspaceRoot);
+    // gap-webui-goal-body-copy-en-zh: `reqCfg` (not `reqCfg.workspaceRoot`) — the detail page's BODY
+    // copy is now language-dependent (ROW 21), so it needs the per-request language exactly as the
+    // list route above does. The dispatcher already held it; only this call site's argument narrowed
+    // it away.
+    await handleGoalDetail(req, res, id, client, reqCfg);
     return;
   }
 

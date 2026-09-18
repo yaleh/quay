@@ -44,9 +44,14 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
 // value (an unquoted YAML scalar with `: ` would be parsed as a nested mapping).
 const LONG_ORIGIN = "empirical basis for this criterion, recorded at length and in full detail across many sentences. ".repeat(8);
 
-function get(port, urlPath) {
+/** `cookie` (optional) — gap-webui-goal-body-copy-en-zh: the default language is `en`, so every
+ *  assertion below that pins a PRE-EXISTING Chinese literal passes `lang=zh` EXPLICITLY and thereby
+ *  becomes a zh regression guard (the dashboard series' 决定记录 ④). A negative assertion is the case
+ *  that matters most: without the cookie it would be vacuous under `en` (the string is absent for the
+ *  wrong reason). */
+function get(port, urlPath, cookie) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers: cookie ? { Cookie: cookie } : {} }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -212,7 +217,10 @@ after(async () => {
 // ── AC1: origin column removed (header + value absent; new columns present) ───────────────────
 
 test("AC1: origin column removed; time + rollup columns present", async () => {
-  const r = await get(port, "/goal");
+  // `lang=zh`: the 「AC 达成」 header literal is this page's zh column (serve-i18n ROW 21's
+  // `colAcRollup`), so pinning it requires asking for zh — under the default `en` the header is
+  // 「AC achieved」 and this arm would be testing the wrong rendering.
+  const r = await get(port, "/goal", "lang=zh");
   assert.equal(r.status, 200);
   const tableMatch = /<table[^>]*>([\s\S]*?)<\/table>/.exec(r.body);
   assert.ok(tableMatch, "list page has a table");
@@ -222,6 +230,11 @@ test("AC1: origin column removed; time + rollup columns present", async () => {
   assert.match(header, /first evidence/, "first evidence column present");
   assert.match(header, /AC 达成/, "AC rollup column present");
   assert.doesNotMatch(r.body, /recorded at length and in full detail/, "GOAL-008's long origin prose is not in the list");
+  // …and the en peer, so the zh arm above cannot be satisfied by a page that renders zh in both
+  // languages (the 5b direction: the header token must actually follow the request's language).
+  const en = await get(port, "/goal", "lang=en");
+  assert.match(/<table[^>]*>([\s\S]*?)<\/table>/.exec(en.body)[1].split("</tr>")[0], /AC achieved/,
+    "the en header carries the translated rollup column");
 });
 
 // ── AC2: the two time columns are ledger-derived (max / min) ─────────────────────────────────
@@ -264,7 +277,10 @@ test("AC3: touch (mtime only) leaves the two time columns byte-identical, while 
 // ── AC4: 未记录 is a distinct value; a real (old) timestamp is not the marker ────────────────
 
 test("AC4: no-event → 未记录 (no timestamp, not —); with-event → real timestamp", async () => {
-  const r = await get(port, "/goal?kind=criterion");
+  // `lang=zh` — the marker literal is ROW 21's `notRecorded` zh column; under the default `en` it
+  // renders 「not recorded」 and every arm below would be asserting the wrong language (and the
+  // negative arm would be vacuous).
+  const r = await get(port, "/goal?kind=criterion", "lang=zh");
   const rows = listRows(r.body, "criterion");
   const noEvent = rows.find((x) => x.id === "AC-801");
   assert.ok(noEvent, "AC-801 (no ledger event) present");
@@ -275,6 +291,11 @@ test("AC4: no-event → 未记录 (no timestamp, not —); with-event → real t
   assert.ok(oldEvent, "AC-201 (old event) present");
   assert.equal(oldEvent.lastAt, "2020-01-01T00:00:00.000Z", "old-event record renders its real timestamp");
   assert.doesNotMatch(oldEvent.lastRaw, /未记录/, "a real timestamp is not the 未记录 marker");
+  // The en peer: the same cell switches (and the absent-literal arm above is therefore about the
+  // language, not about the marker being gone from the page).
+  const en = listRows((await get(port, "/goal?kind=criterion", "lang=en")).body, "criterion");
+  assert.match(en.find((x) => x.id === "AC-801").lastRaw, /not recorded/, "the en cell renders the translated marker");
+  assert.doesNotMatch(en.find((x) => x.id === "AC-201").lastRaw, /not recorded/, "a real timestamp is not the en marker either");
 });
 
 // ── AC5: server-side sort really reorders; no client sorting script ──────────────────────────
@@ -369,9 +390,13 @@ test("AC9: ?kind=criterion&goal=GOAL-008 narrows rows; all rows goal == GOAL-008
 // ── AC10: detail page has the same time info as the list; no >400-char p.meta ─────────────────
 
 test("AC10: detail time info == list time info; no p.meta over 400 chars", async () => {
-  const listGoal = listRows((await get(port, "/goal")).body, "goal").find((x) => x.id === "GOAL-001");
+  // `lang=zh` on BOTH fetches so the two regexes below can pin the pre-existing 「最近进展: 」「首次证据: 」
+  // prefixes (ROW 21's `detailRecentProgress` / `detailFirstEvidence` zh columns). The comparison
+  // itself is language-independent — it is the `title` ATTRIBUTE's absolute timestamp, which is DATA
+  // and is byte-identical in both languages, so asking for zh does not weaken the reading.
+  const listGoal = listRows((await get(port, "/goal", "lang=zh")).body, "goal").find((x) => x.id === "GOAL-001");
   assert.ok(listGoal, "GOAL-001 in list");
-  const detail = await get(port, "/goal/GOAL-001");
+  const detail = await get(port, "/goal/GOAL-001", "lang=zh");
   assert.equal(detail.status, 200);
   const detailLast = /最近进展: <span title="([^"]*)"/.exec(detail.body);
   const detailFirst = /首次证据: <span title="([^"]*)"/.exec(detail.body);
@@ -379,6 +404,11 @@ test("AC10: detail time info == list time info; no p.meta over 400 chars", async
   assert.ok(detailFirst, "detail page has 首次证据");
   assert.equal(detailLast[1], listGoal.lastAt, "detail lastProgressAt == list lastProgressAt");
   assert.equal(detailFirst[1], listGoal.firstAt, "detail firstEvidenceAt == list firstEvidenceAt");
+  // The en peer: the same two prefixes are translated, so the zh arms above are a language reading
+  // rather than a statement about prefixes that are hard-coded.
+  const enDetail = await get(port, "/goal/GOAL-001", "lang=en");
+  assert.match(enDetail.body, /last progress: <span title="/, "the en detail page carries the translated prefix");
+  assert.doesNotMatch(enDetail.body, /最近进展/, "the en detail page carries no Chinese prefix");
 
   // The long-origin goal must not inflate any <p class="meta"> past 400 chars (scan only <main>,
   // since the <head> stylesheet inlines CSS whose comments mention <p>/<main> fragments).

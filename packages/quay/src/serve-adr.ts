@@ -12,6 +12,7 @@ import {
   // the one Vary/Cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor,
 } from "./serve-render.ts";
+import { DEFAULT_LANG, type Lang } from "./serve-lang.ts";
 
 export async function handleAdrList(
   req: IncomingMessage,
@@ -71,6 +72,12 @@ export async function handleAdrDetail(
   res: ServerResponse,
   adrId: string,
   client: ProviderClient,
+  // gap-webui-goal-body-copy-en-zh: the shared `renderBackLink` is language-dependent now, so this
+  // page states its own language rather than letting the helper's `DEFAULT_LANG` decide it. ⚠️ ONLY
+  // the back link is wired — this handler's OTHER detail chrome (the html-lang attribute, the
+  // lang-less `renderMobileChrome`/`renderSiteNav`) stays exactly as AC-300 left it, and is
+  // registered as that task's residue (serve-goal.ts's AC-301 note, same shape).
+  lang: Lang = DEFAULT_LANG,
 ): Promise<void> {
   // 与 /goal 详情同形（硬规则 5b）：一次 `adrList()` 取代 `adrGet()` —— 既取本记录又拿到全部
   // ADR id 用于正文实体回链。ADR store 没有 goal 账本（无 6.87MB 解析成本），一次调用即最优。
@@ -94,7 +101,7 @@ export async function handleAdrDetail(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(a.id)}: ${escapeHtml(a.title)}">${shellStyles("detail")}<title>${escapeHtml(a.id)}</title></head>
     <body class="detail-page">${renderMobileChrome("adr", a.id)}${renderSiteNav("adr")}<main id="main">
-      ${renderBackLink("/adr")}
+      ${renderBackLink("/adr", lang)}
       <h1>${escapeHtml(a.id)}: ${escapeHtml(a.title)}</h1>
       <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${adrExt.date ? ` · ${escapeHtml(adrExt.date as string)}` : ""}</p>
       ${supersedesMeta}${supersededByMeta}

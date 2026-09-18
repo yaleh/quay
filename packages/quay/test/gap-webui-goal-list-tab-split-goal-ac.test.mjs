@@ -29,9 +29,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function get(port, urlPath) {
+/** `cookie` (optional) — gap-webui-goal-body-copy-en-zh: the default language is `en`, so the arms
+ *  that pin this page's PRE-EXISTING Chinese header/banner literals ask for `lang=zh` explicitly,
+ *  which turns them into zh regression guards instead of assertions about the wrong rendering. */
+function get(port, urlPath, cookie) {
   return new Promise((resolve, reject) => {
-    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath, headers: cookie ? { Cookie: cookie } : {} }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () => resolve({ status: res.statusCode, body }));
@@ -182,7 +185,10 @@ after(async () => {
 // ── AC1: /goal (no kind) is the Goals tab — 7 headers, goal rows only ────────────────────────
 
 test("AC1: /goal renders 7 columns, no criterion/recent verdict/kind, all rows kind=goal", async () => {
-  const r = await get(port, "/goal");
+  // `lang=zh`: the two Chinese headers pinned below are ROW 21's zh columns (`colAcRollup`,
+  // `colAttachedTasks`). The column COUNT and the row-kind assertions are language-independent, so
+  // asking for zh does not weaken them.
+  const r = await get(port, "/goal", "lang=zh");
   assert.equal(r.status, 200);
   const hs = headers(r.body);
   assert.equal(hs.length, 7, `Goals tab has 7 <th>; got: ${hs.join(" | ")}`);
@@ -196,12 +202,22 @@ test("AC1: /goal renders 7 columns, no criterion/recent verdict/kind, all rows k
   assert.ok(rows.length >= 4, `rendered ${rows.length} goal rows`);
   const bad = rows.filter((x) => x.kind !== "goal").map((x) => `id=${x.id}`);
   assert.deepEqual(bad, [], `non-goal rows on the Goals tab:\n  ${bad.join("\n  ")}`);
+
+  // The en peer — same 7 columns, same order, the two translated labels in the same positions, and
+  // ⛔ neither Chinese header anywhere in the en row of `<th>`s (the language really follows the
+  // request rather than the page being zh in both).
+  const en = await get(port, "/goal", "lang=en");
+  const enHs = headers(en.body);
+  assert.deepEqual(enHs, ["id", "status", "title", "AC achieved", "last progress", "first evidence", "attached tasks"],
+    `the en Goals tab carries the translated headers; got: ${enHs.join(" | ")}`);
+  assert.ok(!enHs.includes("AC 达成") && !enHs.includes("挂靠任务"), "the en header row carries no Chinese");
 });
 
 // ── AC2: /goal?kind=criterion is the Criteria tab — 8 headers, criterion rows only ───────────
 
 test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, all rows criterion", async () => {
-  const r = await get(port, "/goal?kind=criterion");
+  // `lang=zh` for the same reason as AC1: `挂靠任务` is pinned below.
+  const r = await get(port, "/goal?kind=criterion", "lang=zh");
   assert.equal(r.status, 200);
   const hs = headers(r.body);
   assert.equal(hs.length, 8, `Criteria tab has 8 <th>; got: ${hs.join(" | ")}`);
@@ -215,6 +231,12 @@ test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, 
   assert.ok(rows.length >= 4, `rendered ${rows.length} criterion rows`);
   const bad = rows.filter((x) => x.kind !== "criterion").map((x) => `id=${x.id}`);
   assert.deepEqual(bad, [], `non-criterion rows on the Criteria tab:\n  ${bad.join("\n  ")}`);
+
+  // The en peer: the same 8 columns, and the Criteria tab still has no rollup column in EITHER
+  // language — the "no AC 达成" ban is a statement about the column set, not about the word.
+  const enHs = headers((await get(port, "/goal?kind=criterion", "lang=en")).body);
+  assert.deepEqual(enHs, ["id", "goal", "status", "title", "criterion", "recent verdict", "last progress", "attached tasks"],
+    `the en Criteria tab carries the translated 挂靠任务 header; got: ${enHs.join(" | ")}`);
 });
 
 // ── AC3: structural squeeze resolved — the title column gets the widest budget (structural proxy
@@ -273,9 +295,16 @@ test("AC5: a draft AC is visible from the Goals tab; a draft GOAL from the Crite
   fs.writeFileSync(draftAc,
     "---\nid: AC-900\ntitle: proposed criterion\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: \"exit 0\"\norigin: test\n---\n## Rationale\nproposed\n");
   try {
-    const g = await get(port, "/goal");
+    // `lang=zh`: the banner sentence is ROW 21's `draftOtherBanner` — asserted in its zh column (the
+    // pre-existing literal) so this stays a zh regression guard, and the href it carries is
+    // language-independent.
+    const g = await get(port, "/goal", "lang=zh");
     assert.match(g.body, /另有 1 条 AC 待裁定/);
     assert.match(g.body, /href="\/goal\?status=draft&kind=criterion"/, "cross-tab hint links to the Criteria tab's draft filter");
+    // …and the same banner under en, so the zh arm above is a reading of the LANGUAGE.
+    const gEn = await get(port, "/goal", "lang=en");
+    assert.match(gEn.body, /1 more AC awaiting a decision/, "the en Goals tab carries the translated cross-tab hint");
+    assert.doesNotMatch(gEn.body, /待裁定/, "the en Goals tab carries no Chinese banner copy");
   } finally {
     fs.rmSync(draftAc, { force: true });
   }
@@ -286,9 +315,15 @@ test("AC5: a draft AC is visible from the Goals tab; a draft GOAL from the Crite
   fs.writeFileSync(draftGoal,
     "---\nid: GOAL-006\ntitle: proposed goal\nstatus: draft\nkind: goal\norigin: test\n---\n## 背景\nproposed\n");
   try {
-    const c = await get(port, "/goal?kind=criterion");
+    const c = await get(port, "/goal?kind=criterion", "lang=zh");
     assert.match(c.body, /另有 1 条 GOAL 待裁定/);
     assert.match(c.body, /href="\/goal\?status=draft"/, "cross-tab hint links to the Goals tab's draft filter");
+    // en peer — the same row, the translated sentence, ⛔ and the `Goals` tab NAME raw (a tab token,
+    // ROW 21 ④): the banner is the one place the en page shows a bare tab name mid-sentence.
+    const cEn = await get(port, "/goal?kind=criterion", "lang=en");
+    assert.match(cEn.body, /1 more GOAL awaiting a decision/);
+    assert.match(cEn.body, /Go to the Goals tab/);
+    assert.doesNotMatch(cEn.body, /待裁定/, "the en Criteria tab carries no Chinese banner copy");
   } finally {
     fs.rmSync(draftGoal, { force: true });
   }

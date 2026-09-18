@@ -116,7 +116,12 @@ export async function handleDocDetail(
   req: IncomingMessage,
   res: ServerResponse,
   docId: string,
-  cfg: { workspaceRoot: string },
+  // gap-webui-goal-body-copy-en-zh: widened from `{ workspaceRoot: string }` ONLY to reach `lang` —
+  // the shared `renderBackLink` is language-dependent now, and a caller that omits the language
+  // renders English on a `?lang=zh` page (硬规则 3b). ⚠️ This handler's OTHER detail chrome (the
+  // html-lang attribute, the lang-less `renderMobileChrome`/`renderSiteNav`) is untouched and stays
+  // AC-302's registered residue.
+  cfg: ServePageCfg,
 ): Promise<void> {
   const docDir = path.join(cfg.workspaceRoot, "docs-managed");
   const store = createDocumentStore(docDir);
@@ -131,7 +136,7 @@ export async function handleDocDetail(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}">${shellStyles("detail")}<title>${escapeHtml(String(d.id))}</title></head>
     <body class="detail-page">${renderMobileChrome("doc", String(d.id))}${renderSiteNav("doc")}<main id="main">
-      ${renderBackLink("/doc")}
+      ${renderBackLink("/doc", cfg.lang)}
       <h1>${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}</h1>
       <p class="meta">status: <strong>${escapeHtml(String(d.status ?? ""))}</strong>${ext.kind ? ` · kind: ${escapeHtml(String(ext.kind))}` : ""}</p>
       <article>${renderMarkdown(d.body || "", { headingOffset: 0 })}</article>

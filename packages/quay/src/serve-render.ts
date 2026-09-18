@@ -1008,8 +1008,12 @@ export function renderMobileChrome(current: string, pageLabel: string, lang: Lan
 // each render a "back to the list" link as the FIRST element of <main> — previously none of them
 // had any way back to their list (main a[href="/goal"] did not exist). One shared helper, one
 // href each, so the affordance stays consistent and is never re-invented per page.
-export function renderBackLink(href: string): string {
-  return html`<p class="meta"><a class="back-link" href="${href}">← 返回列表</a></p>`;
+export function renderBackLink(href: string, lang: Lang = DEFAULT_LANG): string {
+  // ROW 9's `backLink` row. ⚠️ `lang` DEFAULTS to `DEFAULT_LANG` (= en), so a caller that omits it
+  // renders English — which is why every caller passes its own request's language rather than
+  // relying on the default: an un-passed language is indistinguishable from a wired one (硬规则 3b),
+  // and the failure it hides here is a `?lang=zh` page rendering an English back link.
+  return html`<p class="meta"><a class="back-link" href="${href}">${chromeLabel("backLink", lang)}</a></p>`;
 }
 
 // ── Small shared helpers used by multiple domain handlers ────────────────────
