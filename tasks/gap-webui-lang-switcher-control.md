@@ -76,21 +76,103 @@ HTML 里**没有任何一个可点击的元素**去触发这个切换。
 
 ## AC
 
-- [ ] **AC1（红基线）**：对未接线代码上的 `/dashboard` 响应体执行 `grep -c '?lang='`，读数为 **0**，贴原始输出。
-- [ ] **AC2（纯函数正负控制）**：`node --test packages/quay/test/serve-lang-switcher.test.mjs` 里的 ① 用例，逐条断言
+### 验收读数（原始输出，逐条对应）
+
+**AC1（红基线）** —— 两个 `renderLangSwitcher` 调用点从 `serve-render.ts` 移除后，真实 `quay serve`（`port: 0`，temp workspace）+ 原始 HTTP：
+```
+probe: GET /dashboard -> 53036 bytes
+probe: grep -c '?lang=' (occurrences) = 0
+probe: href="?lang=zh" occurrences      = 0
+probe: href="?lang=en" occurrences      = 0
+probe: nav-switcher (desktop) occurrences = 0
+probe: nav-switcher (mobile)  occurrences = 0
+probe: GET /dashboard?lang=zh -> <html lang="zh"> = true          ← 机制本体仍在，缺的只是入口
+```
+接线后同一探针：`grep -c '?lang=' = 2`、`href="?lang=zh" = 2`、`desktop = 1`、`mobile = 1`。
+（⛔ 计数口径：`pageStyles()` 里本控件的 CSS 注释刻意不写语言 query 字面量——否则未接线基线会读成 1 而不是 0。）
+
+**AC2（纯函数正负控制）**：
+```
+✔ AC2① — the ACTIVE language is not a link to itself; the other one is (both directions)
+✔ AC2② — the accessible names are keyed on BOTH axes (reader AND target), and are complete
+```
+AC2①：`renderLangSwitcher("en")` 含 `href="?lang=zh"`、**不含** `href="?lang=en"`、含 `aria-current="true"`；`"zh"` 为镜像；两态 `notEqual`。
+（这一对断言互相钳制：两端都发 ⇒ `!includes` 侧红；两端都不发 ⇒ 正侧红。）
+
+**AC3（桌面 + 移动端两处分别断言）**：
+```
+✔ AC3② — /dashboard's DESKTOP and MOBILE chrome EACH carry the control, in both languages
+```
+区域分别抽取（`.nav` 到 `</nav>` / `<header class="mobile-header">` 到 `</header>`），每个区域独立断言
+`lang-switcher` 存在、en 请求含 `href="?lang=zh"` 且不含 `href="?lang=en"`，zh 请求（`Cookie: lang=zh`）为镜像；
+并附互斥负控制（桌面区域不含 `mobile-header`，移动区域不含 `class="nav-item"`）。
+
+**AC4（全站 15 路由逐一枚举）**：
+```
+  [ac-lang-switcher] PASS  /dashboard  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /tasks  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /live  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /board  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /system  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /manager  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /needs-human  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /journal  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /git-history  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /tests  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /sessions  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /adr  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /goal  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /doc  status=200  desktop=true  mobile=true
+  [ac-lang-switcher] PASS  /architecture  status=200  desktop=true  mobile=true
+```
+15 条路由清单**以字面量钉死**在测试里，并断言它 == `SITE_NAV_ROUTES`（新增路由会红在钉子上，而非漏跑）；
+同时断言 `SITE_NAV_ROUTES` 的键集 == `NAV_KEYS`。
+
+**AC5（因果对照，两次读数并排）** —— 把两处调用点从 `renderSiteNav`/`renderMobileChrome` 移除（本地、不提交），跑同一套读数：
+```
+                    | 接线后 | 对照（调用点移除） | 恢复后
+grep -c '?lang='    |   2    |        0           |   2
+AC2①                |   ✔    |        ✔           |   ✔     ← 纯函数，本就不依赖调用点（对照的负控制）
+AC3②                |   ✔    |        ✖           |   ✔
+AC4③                | ✔ 15/15|   ✖ 15/15 FAIL     | ✔ 15/15
+AC6                 |   ✔    |        ✖           |   ✔
+```
+⛔ 方法学记录：第一次尝试用 HTML 注释包住 `${…}` 属**无效对照**——模板字面量里的插值照样求值，读数全绿。
+真实对照必须删掉调用本身；上面表格是删掉调用后的读数。
+
+**AC6（真链接的 click-through）** —— 取**页面自己渲染出来的** href，用浏览器自身的规则 `new URL(href, base)` 解析后跟随：
+```
+probe: rendered href found in the body = "?lang=zh"
+probe: browser-resolved target = /dashboard?lang=zh
+probe: followed -> status=200 <html lang="zh">=true Set-Cookie=["lang=zh; Path=/; Max-Age=31536000; SameSite=Lax"]
+probe: followed page offers the way back (href="?lang=en") = true
+```
+（`href` 是相对路径 ⇒ 停在原页面；这是"点击"这条路径到达 AC-288 已有机制的证明，不重验 `resolveLang` 四态本体。）
+
+**AC7（不回归）**：
+```
+$ bash scripts/test.sh --for-task gap-webui-lang-switcher-control --allow-thin   → exit 0（95 tests, 0 fail）
+$ node --test packages/quay/test/serve-*.test.mjs                                → tests 264 / pass 263 / fail 0 / skipped 1（既有 skip）
+$ npx tsc --noEmit                                                               → exit 0
+```
+
+### 判据清单
+
+- [x] **AC1（红基线）**：对未接线代码上的 `/dashboard` 响应体执行 `grep -c '?lang='`，读数为 **0**，贴原始输出。
+- [x] **AC2（纯函数正负控制）**：`node --test packages/quay/test/serve-lang-switcher.test.mjs` 里的 ① 用例，逐条断言
   `renderLangSwitcher("en")` 的输出含 `href="?lang=zh"` 且**不含** `href="?lang=en"`（当前语言不可点自身），反之亦然；
   且两种语言态的输出**互不相等**（负控制，防止恒定输出蒙混过关）。
-- [ ] **AC3（黑盒：桌面 + 移动端两处入口都生效）**：`startServer({port:0})`，② GET `/dashboard` 的 body 同时含
+- [x] **AC3（黑盒：桌面 + 移动端两处入口都生效）**：`startServer({port:0})`，② GET `/dashboard` 的 body 同时含
   `class="nav"`（桌面头部）与 `class="mobile-header"`（移动头部）区块内的语言切换链接，两处**分别**断言存在，
   href 逐字含 `?lang=en`/`?lang=zh`。
-- [ ] **AC4（全站覆盖，枚举不是抽查）**：③ 对 `SITE_NAV_ROUTES` 的**全部 15 个**路由逐一 GET，每个响应体都含
+- [x] **AC4（全站覆盖，枚举不是抽查）**：③ 对 `SITE_NAV_ROUTES` 的**全部 15 个**路由逐一 GET，每个响应体都含
   语言切换链接，贴逐路由的 pass/fail 表（不是只报一个总数）。
-- [ ] **AC5（因果对照）**：把 `renderLangSwitcher` 调用点临时注释掉，AC3②③ 变红；恢复后复绿，两次读数并排贴出。
-- [ ] **AC6（点击后真的切换语言——复用 AC-288 机制，不重新实现）**：真实 HTTP 序列——GET `/dashboard` 拿到含
+- [x] **AC5（因果对照）**：把 `renderLangSwitcher` 调用点临时注释掉，AC3②③ 变红；恢复后复绿，两次读数并排贴出。
+- [x] **AC6（点击后真的切换语言——复用 AC-288 机制，不重新实现）**：真实 HTTP 序列——GET `/dashboard` 拿到含
   `href="?lang=zh"` 的链接 → 跟随该链接 GET `/dashboard?lang=zh` → 响应头含 `Set-Cookie: lang=zh…` 且 body 含
   `<html lang="zh">`（复用 `gap-ac288-webui-lang-switch-mechanism` 已证的契约，本任务不重新验证 `resolveLang`
   本体的四态，只验证"点击这个新链接"这条路径确实到达了已有机制）。
-- [ ] **AC7（不回归）**：`bash scripts/test.sh --for-task gap-webui-lang-switcher-control` 绿；
+- [x] **AC7（不回归）**：`bash scripts/test.sh --for-task gap-webui-lang-switcher-control` 绿；
   `node --test packages/quay/test/serve-*.test.mjs` 全绿；`tsc --noEmit` 绿。
 
 ## DoD
