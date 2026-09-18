@@ -2,7 +2,8 @@
 id: gap-mirror-mechanical-fanin-fail-open-posture-undocumented
 title: mirrorMechanicalFanInSuiteState 的 fail-open 姿态缺一份写下来的理由——形状与硬规则 3b
   同形（void + 静默 return + 空 catch），而它成立靠下游 fail-closed；补说明、零行为改动
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -162,3 +163,14 @@ EXIT=0
 
 - plugin/scripts/worker-driver.ts（仅注释）
 - tasks/gap-mirror-mechanical-fanin-fail-open-posture-undocumented.md
+## Needs-Human
+
+**执行 2026-09-18T04:52:10.029Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 45
+- run_id：wk-prod-anchor
+- session_id：29898065-5648-49ce-aa1e-e38370160985
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-mirror-mechanical-fanin-fail-open-posture-undocumented~wk-prod-anchor~1789706884424-035d3d.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-mirror-mechanical-fanin-fail-open-posture-undocumented-wk-prod-anchor.log
