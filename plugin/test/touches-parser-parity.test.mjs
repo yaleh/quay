@@ -24,7 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseTouchEntries, parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
+import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "../scripts/touches-parser.ts";
 import { parseTouches, checkTouchesPair, matchGlob } from "../scripts/touches-orthogonality-check.ts";
 import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
@@ -287,6 +287,129 @@ test("parseTouchEntriesWithTags: empty/missing section → []", () => {
   assert.deepEqual(parseTouchEntriesWithTags(""), []);
   assert.deepEqual(parseTouchEntriesWithTags(null), []);
   assert.deepEqual(parseTouchEntriesWithTags("## Next\nnot a bullet list"), []);
+});
+
+// ── gap-touches-parser-early-subheading-latch-hides-declaration ───────────────────────────────────
+// The section-extraction bug: `extractTouchesSection` took the FIRST heading whose text matched
+// /^touches\b/i as the start of the `## Touches` section and stopped at the next heading of ANY
+// depth. A `### Touches …` subheading sitting BEFORE the real `## Touches` therefore latched the
+// section early, its body was truncated at the next `###`, and the real `## Touches` was NEVER read
+// → `globs = []`, which is INDISTINGUISHABLE from "this task declares no Touches" (硬规则 3b).
+// Downstream `anti-drift-touches-check.ts` intersects that empty set with the real change set and
+// reports EVERY changed file as `out-of-declared: task wrote <file> (matches no declared Touches
+// glob)` — the message blames the declaration, not the parser. Real victim (read-only measurement
+// on the production task body at 7a6306a5d): `parseTouches(body).globs.length` was 0 while the real
+// `## Touches` carried 10 entries.
+//
+// The rename-the-subheading workaround the victim's own worker applied is NOT the fix: any FUTURE
+// task body that writes a `### Touches 最终清单`-style subheading silently loses its declaration.
+// This block pins the parser defect itself.
+const EARLY_SUBHEADING_BODY = [
+  "## Proposal",
+  "",
+  "### Touches 最终清单（⛔ 实现前定稿，与 `## Touches` 逐条一致，无追加）",
+  "",
+  "| 文件 | 角色 |",
+  "|---|---|",
+  "| `plugin/scripts/decoy.ts` | 表格不是 bullet ⇒ 解析出 0 条 |",
+  "",
+  "## Touches",
+  "",
+  "- plugin/scripts/alpha.ts",
+  "- plugin/test/beta.test.mjs",
+].join("\n");
+
+test("AC1: an EARLY `### Touches …` subheading must not latch the section — the real `## Touches` wins", () => {
+  // As-is this returns [] (the subheading's markdown table has no bullets) — the defect under test.
+  assert.deepEqual(
+    parseTouches(EARLY_SUBHEADING_BODY).globs,
+    ["plugin/scripts/alpha.ts", "plugin/test/beta.test.mjs"],
+    "an earlier `### Touches …` subheading swallowed the real `## Touches` declaration",
+  );
+  // The subheading's TABLE CONTENT must not leak in either — the section read is the real one.
+  assert.ok(
+    !parseTouches(EARLY_SUBHEADING_BODY).globs.some((g) => g.includes("decoy")),
+    "the early subheading's own body must not be read as the Touches section",
+  );
+});
+
+test("AC1 boundary: an EARLY body-form `## Touches 声明 …` heading must not beat the exact `## Touches`", () => {
+  // Same shape at the SAME level: priority is "exact `Touches` first, earliest among those" — NOT
+  // "first heading that merely starts with the word Touches".
+  const body = ["## Touches 声明（说明段，非清单）", "", "本段是说明，不是路径清单。", "", "## Touches", "", "- real.ts"].join("\n");
+  assert.deepEqual(parseTouches(body).globs, ["real.ts"]);
+});
+
+test("AC1 no-regression: a lone `### Touches` (no `## Touches` anywhere) still reads its own body", () => {
+  const body = ["## Plan", "", "### Touches", "", "- plugin/scripts/only.ts", ""].join("\n");
+  assert.deepEqual(parseTouches(body).globs, ["plugin/scripts/only.ts"]);
+});
+
+test("AC1 no-regression: two same-level `## Touches` sections → the FIRST wins (fixed semantics)", () => {
+  const body = ["## Touches", "", "- a.ts", "", "## Touches", "", "- b.ts", ""].join("\n");
+  assert.deepEqual(parseTouches(body).globs, ["a.ts"]);
+});
+
+test("AC1 negative control (REAL data shape): a `### Finding` note AFTER `## Touches` must not become declared globs", () => {
+  // Measured on the real store: 4 tasks put a `### Finding：…` note right after `## Touches`, and
+  // those notes carry PROSE bullet lists. Widening the section-extent rule to "level <= the
+  // selected level" (so a subheading would not truncate its own section) swallowed them as declared
+  // paths — DIR-075 3→15, gap-mcp-server-test-deadlocks 5→18, etc. — which is the SAME defect class
+  // this task exists to kill, in the PERMISSIVE direction (a spurious glob lets a genuinely
+  // out-of-declared write pass anti-drift). The extent rule therefore stays "next heading of any
+  // depth". This fixture is the real shape.
+  const body = [
+    "## Touches",
+    "",
+    "- packages/quay/test/mcp-server.test.mjs（复现/修复落点）",
+    "- packages/quay/src/provider-client.ts",
+    "",
+    "### Finding：并发死锁实证（manager 2026-08-11 10:2x，落点 Finding 不进 Contract）",
+    "",
+    "**已复现、已用 /proc + ep_poll 确认，非猜测**：`--test-concurrency=16` 下卡住。",
+    "",
+    "- ① 首次（昨日，lane16 全量套件，main 相尾声）conc=16 —— 死锁",
+    "- ② main-only 隔离跑（第 305/305 个文件，批次尾声）conc=8 —— 死锁",
+  ].join("\n");
+  assert.deepEqual(parseTouches(body).globs, [
+    "packages/quay/test/mcp-server.test.mjs",
+    "packages/quay/src/provider-client.ts",
+  ]);
+});
+
+test("AC5: the return value distinguishes 'section read but no paths' from 'section never read'", () => {
+  // 硬规则 3b — before the fix both of these produced `{hasSection:false|true, section:""}` with no
+  // way to tell "read an empty declaration" from "never found a declaration". The selected heading
+  // and its line number make the two readings NON-isomorphic.
+  const compoundBody = ["## Touches", "", "(compound task — see each child's own `## Touches`)", ""].join("\n");
+  const noHeading = ["## Plan", "", "no touches declaration here at all", ""].join("\n");
+
+  const compound = extractTouchesSection(compoundBody);
+  const missing = extractTouchesSection(noHeading);
+
+  // "Read the section, it declares no bullet paths" — distinguishable, and NOT an error.
+  assert.equal(compound.hasSection, true);
+  assert.equal(compound.heading, "Touches");
+  assert.equal(compound.startLine, 1);
+  assert.equal(compound.level, 2);
+  assert.deepEqual(parseTouchEntries(compound.section), []);
+
+  // "Never read a section at all" — a DIFFERENT reading, not the same shape as the above.
+  assert.equal(missing.hasSection, false);
+  assert.equal(missing.heading, null);
+  assert.equal(missing.startLine, null);
+  assert.equal(missing.level, null);
+
+  assert.notDeepEqual(compound, missing, "the two readings must not be isomorphic");
+});
+
+test("AC5: the returned heading/line is the one actually selected (early subheading case)", () => {
+  const sel = extractTouchesSection(EARLY_SUBHEADING_BODY);
+  assert.equal(sel.heading, "Touches");
+  assert.equal(sel.level, 2);
+  // 1-based line number of the real `## Touches` (index 8 → line 9).
+  assert.equal(sel.startLine, EARLY_SUBHEADING_BODY.split("\n").findIndex((l) => l === "## Touches") + 1);
+  assert.ok(sel.section.includes("plugin/scripts/alpha.ts"));
 });
 
 // ── AC1 backstop: only ONE implementation exists (definition-site grep) ───────────────────────────
