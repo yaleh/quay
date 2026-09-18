@@ -59,7 +59,12 @@ test("AC1: every card (LIVE and GONE) links to its /session/<id> detail page", (
 });
 
 test("AC2: GONE cards fold into a collapsed <details>; LIVE cards render outside it by default", () => {
-  const html = renderSessionsPage(sessionsResult());
+  // gap-webui-sessions-body-copy-en-zh: the summary and the deferred-read hint are now DICTIONARY
+  // rows (serve-i18n.ts ROW 15), and `renderSessionsPage`'s default is `en`. The arms below pin the
+  // CHINESE copy, so this render is asked for `zh` EXPLICITLY — the assertion's subject is the
+  // structural fold plus the words it carries, and an unstated default would silently re-point it
+  // at the en column the next time a default moves.
+  const html = renderSessionsPage(sessionsResult(), null, "zh");
   const liveIdx = html.indexOf(`href="/session/${LIVE_ID}"`);
   const goneIdx = html.indexOf(`href="/session/${GONE_ID}"`);
   // The GONE fold's opening tag is the marker (the inlined CSS also mentions the literal "<details>"
