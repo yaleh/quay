@@ -18,12 +18,18 @@
 // ⚠️ This file is NOT the whole coverage of `plugin/workflows/fan-in-execute.js`; s07 + s11 + this file
 //    together are. Same "只看本文件不再是完整覆盖" note s07/s11 carry.
 //
+// ➕ 2026-09-19 (gap-fan-in-marker-exists-before-write-reads-empty): this shard also owns the marker
+//    **completion-granularity** cluster — AC1 (content, not existence: the wait primitive must not call a
+//    created-but-unwritten marker "done") and AC3 (the REAL SUITE_LAUNCH block publishes its exit marker
+//    atomically, so there is no observable exists-but-unwritten window). Same subject as the two ⑧⑩
+//    waits above — "what counts as DONE for a marker" — hence the same file.
+//
 // Run:
 //   scripts/test.sh plugin/test/fan-in-execute-paths-s12.test.mjs
 //   node --test plugin/test/fan-in-execute-paths-s12.test.mjs
 
 import { test } from "node:test";
-import { REPO_ROOT, assert, cleanup, extractBlockFromPrompts, fs, os, path, promptContaining, runBash, runWorkflow, runnerHermeticEnv, spawn, spawnSync, symlinkRuntimeTrees, waitForMarkerOrDeath } from "./helpers/fan-in-execute-paths-harness.mjs";
+import { REPO_ROOT, assert, cleanup, extractBlockFromPrompts, fs, os, path, promptContaining, readFinishedMarker, runBash, runWorkflow, runnerHermeticEnv, spawn, spawnSync, symlinkRuntimeTrees, waitForMarkerOrDeath } from "./helpers/fan-in-execute-paths-harness.mjs";
 
 /** Is `pid` a live process? (kill -0 semantics; EPERM counts as alive — someone else's process.) */
 
@@ -225,4 +231,151 @@ test("⑧⑩ 锁等待负控制 — suite-launch 不再携带 FULL_SUITE_LOCK_TI
   assert.match(markerText, /exit=0/, `the suite must run to exit 0 after acquiring the freed slot, got: ${markerText.trim()}`);
   assert.match(log, /acquired full-suite single-flight slot/, "the suite must log its slot acquisition");
   assert.ok(!log.includes("not starting"), "the suite must NOT fail-closed (no 'not starting' lock refusal)");
+});
+
+// ── gap-fan-in-marker-exists-before-write-reads-empty ──────────────────────────────────────────────
+// THE DEFECT (the cluster above is its subject, which is why these live here): the fan-in producers
+// published the exit marker with `printf ... > "$suite_exit_marker"` (fan-in-execute.js SUITE_LAUNCH /
+// ISOLATE_LAUNCH) — open(O_TRUNC) FIRST, write() SECOND — while the wait primitive decided completion by
+// `fs.existsSync(markerPath)`. Whichever reader opened the path inside that scheduling gap resolved
+// "marker" and then read the EMPTY string, so the ⑧⑩ lock-wait test above failed with
+// `actual: '' expected: /exit=0/` under full-suite load (1/56 fan-in suite logs overall, 3/18 in the
+// 09-12 window). The driver exempts that red as flaky ⇒ the task never exhausted its retries ⇒ a full
+// ~19min suite burned per hit without advancing. The completion event of a marker is "the file has been
+// WRITTEN", never "the file exists".
+
+test("AC1 (能取假, 负控制) — content, not existence: a created-but-unwritten marker must NOT read as 'marker' (gap-fan-in-marker-exists-before-write-reads-empty)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fanin-marker-empty-"));
+  t.after(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  const marker = path.join(dir, "suite.exit");
+
+  // The pre-fix producer's `printf ... > "$marker"` really is two steps: create the file (0 bytes) NOW,
+  // write the content LATER. Reconstruct that sequence literally.
+  fs.writeFileSync(marker, ""); // ── the open(O_TRUNC) half
+  // The pre-fix consumer predicate, transcribed in shape from the old harness line
+  // `if (fs.existsSync(markerPath)) return "marker";`
+  const legacyPredicate = (p) => (fs.existsSync(p) ? "marker" : "wait");
+  assert.equal(legacyPredicate(marker), "marker", "negative control: an existence-only predicate IS fooled by the created-but-unwritten marker");
+  assert.equal(fs.readFileSync(marker, "utf8"), "", "...and the text its caller then reads is the EMPTY string — exactly the reported flake");
+  assert.equal(readFinishedMarker(marker), null, "the content predicate must not call a 0-byte marker finished (hard rule 3b: no 'satisfied' value for an incomplete read)");
+
+  // The fix's own negative control: the SAME sequence must NOT resolve before the write lands.
+  // ⛔ If this still returns "marker" (and the caller still reads ""), the AC is FALSE and this must red.
+  let outcome = null;
+  const pending = waitForMarkerOrDeath(marker, process.pid, 30_000).then((o) => { outcome = o; return o; });
+  await new Promise((r) => setTimeout(r, 900)); // ≫ several 250ms ticks + the fs.watch event the create fires
+  assert.equal(outcome, null, "the wait must NOT report 'marker' while the marker is created-but-unwritten");
+  fs.writeFileSync(marker, "exit=0\nend_ms=1\n"); // ── the write() half
+  assert.equal(await pending, "marker", "once the content lands, completion is still an event (no budget burned)");
+  assert.match(fs.readFileSync(marker, "utf8"), /exit=0/);
+});
+
+/** Observe a marker path while a real producer writes it, recording every moment the path EXISTED but its
+ * content carried no `exit=` line yet — precisely the state the pre-fix predicate called "marker".
+ * Two channels, so neither inotify coalescing nor poll granularity decides the answer: fs.watch on the
+ * marker's directory (fires on CREATE, then on MODIFY / MOVED_TO) plus a 1ms poll. */
+function observeHalfWrittenMarker(markerPath) {
+  const hits = [];
+  const sample = (via) => {
+    let text;
+    try { text = fs.readFileSync(markerPath, "utf8"); } catch { return; } // ENOENT ⇒ not an observable window
+    if (!/^exit=[0-9]+/m.test(text)) hits.push({ via, bytes: text.length });
+  };
+  let watcher = null;
+  try { watcher = fs.watch(path.dirname(markerPath), () => sample("watch")); } catch { /* poll-only */ }
+  const tick = setInterval(() => sample("poll"), 1);
+  return { hits, stop() { clearInterval(tick); try { watcher?.close(); } catch { /* best-effort */ } } };
+}
+
+test("AC3 (真实载体) — the REAL SUITE_LAUNCH block publishes its exit marker atomically: no observable exists-but-unwritten window (gap-fan-in-marker-exists-before-write-reads-empty)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-atomic-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-atomic-marker";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  // A fast fake suite (exit 0). The single-flight lock is NOT this test's subject — the marker's
+  // publication is (the ⑧⑩ lock-wait test above covers the lock's own semantics).
+  const fakeTest = ["#!/usr/bin/env bash", "set -u", 'echo "fake suite ok"', "exit 0", ""].join("\n");
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), fakeTest);
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add fake test.sh"]);
+  symlinkRuntimeTrees(dir, {});
+
+  const ids = [task, `${task}2`];
+  const codeDeltaFiles = ids.map((id) => `/tmp/fan-in-code-delta-${id}.txt`);
+  const tmpFiles = ids.flatMap((id) => ["env", "exit", "exit.tmp", "time", "log", "pid"].map((ext) => `/tmp/fan-in-suite-${id}.${ext}`)).concat(codeDeltaFiles);
+  const rmTmp = () => { for (const f of tmpFiles) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } };
+  rmTmp(); // start clean too — a stale capture would trip the block's pre-verified branch
+  t.after(rmTmp);
+  for (const f of codeDeltaFiles) fs.writeFileSync(f, "plugin/workflows/fan-in-execute.js\n");
+
+  const launchBlockFor = async (runId, id) => {
+    const { prompts } = await runWorkflow({ args: { task: id, worktree: dir, root: dir, runId, mergeTarget: "develop" } });
+    return extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  };
+  const launchBlock = await launchBlockFor("fm-atomic", task);
+
+  const runLaunch = async (block, markerPath) => {
+    const obs = observeHalfWrittenMarker(markerPath);
+    const proc = spawn("bash", ["-c", block], { cwd: dir, stdio: ["ignore", "pipe", "pipe"], env: runnerHermeticEnv() });
+    let out = "";
+    proc.stdout.on("data", (d) => { out += d; });
+    proc.stderr.on("data", (d) => { out += d; });
+    const exit = await new Promise((r) => proc.on("exit", (code, sig) => r({ code, sig })));
+    // The suite is DETACHED: the launch block returns after its own ~3s confirm, and the marker lands
+    // whenever the suite actually finishes — so keep observing until the marker is COMPLETE, then stop.
+    // (The guard is a hang-guard only, same contract as the ⑧⑩ wait test: the decision is the event.)
+    const outcome = await waitForMarkerOrDeath(markerPath, process.pid, 60_000);
+    obs.stop();
+    return { exit, out, hits: obs.hits, outcome };
+  };
+
+  // ── structural falsifier, on the real carrier: the marker is PUBLISHED by rename ──────────────────
+  // A marker's completion must be a rename onto its final path (content complete at the instant the path
+  // becomes visible). Revert the producer to the single-redirect shape and these three lines red.
+  assert.match(launchBlock, />\s*"\$4\.tmp"\s*&&\s*mv -f\s*"\$4\.tmp"\s*"\$4"/,
+    "SUITE_LAUNCH must publish the exit marker with an atomic rename, not a bare > redirect");
+  assert.ok(!/T%3NZ\)" > "\$4"'/.test(launchBlock),
+    "the pre-fix single-redirect publication of the exit marker must be gone (a bare `> \"$4\"` is open(O_TRUNC)-then-write)");
+  assert.ok(!/date \+%s%3N\)" > "\$5"; cd/.test(launchBlock),
+    "the pidfile has the same created-before-written shape (硬规则 5b sibling) and must be published atomically too");
+
+  // ── "after" reading: the real, fixed launch block ─────────────────────────────────────────────────
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const after = await runLaunch(launchBlock, marker);
+  assert.equal(after.exit.code, 0, `launch block failed: ${after.out}`);
+  assert.match(after.out, /SUITE_OUTCOME=started/, `the full-suite branch must fire (code_delta non-empty), got: ${after.out}`);
+  assert.equal(after.outcome, "marker", `the detached suite must publish its exit marker (wait outcome=${after.outcome})`);
+  const afterText = fs.readFileSync(marker, "utf8");
+  assert.match(afterText, /^exit=0/m, `the real launch block must publish exit=0, got: ${JSON.stringify(afterText)}`);
+  console.log(`[AC3] real SUITE_LAUNCH (atomic publication): exists-but-unwritten observations = ${after.hits.length} ${JSON.stringify(after.hits.slice(0, 3))}; marker bytes=${afterText.length}`);
+  assert.equal(after.hits.length, 0, `the real launch block must never expose an exists-but-unwritten marker, saw: ${JSON.stringify(after.hits)}`);
+
+  // ── "before" reading / instrument calibration: the same observer against the pre-fix SHAPE ─────────
+  // The production window is a scheduling gap — microseconds on an idle box, milliseconds under the load
+  // that produced the 3/18 rate — and no test can conjure that load on demand. So the control does the
+  // only honest thing: take the SAME real block, revert the publication to the pre-fix shape, and widen
+  // that same internal gap (create the file now, write it 500ms later). It MUST be caught — a zero-hit
+  // result from an observer that cannot even catch a 500ms window would be a blind spot, not a
+  // measurement (hard rule 4: a reading that cannot take false carries no information).
+  const legacyBlock = (await launchBlockFor("fm-atomic-legacy", `${task}2`))
+    .replace('> "$4.tmp" && mv -f "$4.tmp" "$4"', '> "$4"')
+    .replace('rc=$?; printf "exit=', 'rc=$?; printf "" > "$4"; sleep 0.5; printf "exit=');
+  assert.ok(!legacyBlock.includes('> "$4.tmp"') && legacyBlock.includes('sleep 0.5; printf "exit='),
+    "the control must actually have reverted the publication shape — otherwise the comparison below is a no-op");
+  const marker2 = `/tmp/fan-in-suite-${task}2.exit`;
+  const before = await runLaunch(legacyBlock, marker2);
+  assert.equal(before.exit.code, 0, `control launch block failed: ${before.out}`);
+  assert.equal(before.outcome, "marker", `the control suite must still publish (wait outcome=${before.outcome})`);
+  assert.match(fs.readFileSync(marker2, "utf8"), /^exit=0/m, "the control must still finish its publication — its hits must come from a real write, not a broken run");
+  console.log(`[AC3] pre-fix shape (open → 0.5s gap → write): exists-but-unwritten observations = ${before.hits.length} ${JSON.stringify(before.hits.slice(0, 3))}`);
+  assert.ok(before.hits.length > 0, `negative control for the observer: the pre-fix shape MUST be caught, saw ${before.hits.length} observations`);
 });
