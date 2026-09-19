@@ -73,23 +73,25 @@ node --experimental-strip-types plugin/scripts/arch-coverage-report.ts \
 
 | 语言 | tracked | status | analyzedBy | reason |
 |---|---|---|---|---|
-| ts | **448** | `analyzed` | `77856690` | `partial-coverage: 438/448 (97.8%) 落在某个 scope 内；GLOBAL scope 77856690 只覆盖 98/448 (21.9%)；5 个目录未覆盖` |
+| ts | **449** | `analyzed` | `77856690` | `partial-coverage: 439/449 (97.8%) 落在某个 scope 内；GLOBAL scope 77856690 只覆盖 98/449 (21.8%)；5 个目录未覆盖` |
 | mjs | **80** | `NOT-EVALUATED` | null | `no-analyzer` |
 | js | **15** | `NOT-EVALUATED` | null | `no-analyzer` |
 | sh | **144** | `NOT-EVALUATED` | null | `no-analyzer` |
 | py | **6** | `NOT-EVALUATED` | null | `no-analyzer` |
 
-- AC3：`globalScopeKey = 77856690`，`globalScopeSources = ["packages/quay/src"]`，`globalScopeCoversTsFraction = 0.21875`（< 1）。
+- AC3：`globalScopeKey = 77856690`，`globalScopeSources = ["packages/quay/src"]`，`globalScopeCoversTsFraction = 0.2182628062360802`（< 1）。
 - `uncoveredTsDirs`（5）：`experiments/quay-perpetual-stream/fixtures/preparation`、`plugin/gate-scripts`、`plugin/test/fixtures/criterion-fidelity`、`plugin/test/fixtures/task-file-bypass/plugin/scripts`、`scripts`。
-- 7 个 scope（entityCount / 归到它的 ts 文件数）：`37cd62ff`(4/3) `3f438d8b`(14/3) `48429582`(8/6) `6e556e41`(786/4) `77856690`(446/98) `c045940f`(2879/254) `d74f9c1e`(649/70) —— 合计 438，与 448−10 一致。
-- AC6 载体：`.quay/arch-coverage-report.latest.json`；`git check-ignore -v` 命中 `.gitignore:142`；`git status --porcelain <该路径>` 为空（不是「未跟踪但未忽略」）。AC2–AC4 的结论已在该**载体文件**上逐条复验通过（不是只在 selftest 里）。
+- 7 个 scope（entityCount / 归到它的 ts 文件数）：`37cd62ff`(4/3) `3f438d8b`(14/3) `48429582`(8/6) `6e556e41`(786/4) `77856690`(446/98) `c045940f`(2879/254) `d74f9c1e`(649/70) —— 合计 439，与 449−10 一致。
+- AC6 载体：`.quay/arch-coverage-report.latest.json`；`git check-ignore -v <该路径>` 命中 `.gitignore` 里那条 `**/.quay/arch-coverage-report.latest.json` 规则（⛔ 不在这里写死行号——行号随 `.gitignore` 演化漂移，而「钉在会漂的字面量上」正是本仓库反复付过代价的形状）；`git status --porcelain <该路径>` 为空（不是「未跟踪但未忽略」）。AC2–AC4 的结论已在该**载体文件**上逐条复验通过（不是只在 selftest 里）。
+
+**⚠️ 本报告自指导致的读数位移（留档，因为它正是本任务要报的那类漂移）**：实现落地前 ts = **448**，`globalScopeCoversTsFraction = 0.21875`；`arch-coverage-report.ts` 一旦被 `git add` 成为 **tracked** `.ts`，读数即变 **449 / 0.21826**（`git ls-files` 只列 tracked 文件；被它排除的测试文件 `arch-coverage-report.test.mjs` 是 `.mjs` 且 basename 含 `.test.`，故 mjs 行 80、sh 行 144 不变）。**测试文件因此按【动态独立计数】断言而不是按字面量**（`caliber — the .ts row equals an independent count` 每次都重新跑 `git ls-files`）——若当初写死 448，套件会在实现提交那一刻转红，而在未提交状态下是绿的：一个「提交前绿、提交后红」的判据，正是硬规则 4b 说的代理量。notes 里的 448 已按最终落盘状态订正为 449。
 
 ### 口径（AC2/AC4 的独立计数）
 
 | 命令 | 输出 | 报告值 |
 |---|---|---|
 | `git ls-files '*.sh' \| grep -v 'checker-mutation-cases/' \| grep -v '^archive/' \| wc -l` | 144 | sh 144 ✓（AC2 逐字命令） |
-| `git ls-files '*.ts'` 经同样排除规则 | 448 | ts 448 ✓（AC4） |
+| `git ls-files '*.ts'` 经同样排除规则 | 449 | ts 449 ✓（AC4） |
 | `git ls-files \| grep -c '^\.claude/worktrees/'` | 0 | ✓（AC4 前提） |
 
 **⚠️ 一处与 Proposal 散文的显式偏离（记录为决定，不是静默差异）**：Proposal 的排除清单写了 `/test/`，但 AC2 把 `sh.trackedFiles` 钉在它自己的命令上，而那条命令**保留** `test/`、`plugin/test/`、`packages/quay/test/`。两者同时套用会差 4 个文件（139 vs 144）。**实现取 AC2 的可执行口径**（AC 胜散文），并把该偏离写进 `EXCLUSION_RULES.noteTestDirs`，由 `plugin/test/arch-coverage-report.test.mjs` 的 `caliber — segment-equality exclusion` 用例双向钉住（`plugin/test/delivery.sh`、`test/e2e.sh` 不排除）。
@@ -102,9 +104,10 @@ node --experimental-strip-types plugin/scripts/arch-coverage-report.ts \
 
 ```
 (1) BASELINE  manifest 在且合法                       exit=0  evaluated=true   ts.status=analyzed
-                                                                              ts.reason="partial-coverage: 438/448 … 98/448 (21.9%)"
+                                                                              ts.analyzedBy=77856690
+                                                                              ts.reason="partial-coverage: 439/449 … 98/449 (21.8%)"  uncovered=5
 (2) RENAMED   mv manifest.json manifest.json.renamed   exit=0  evaluated=true   ts.status=NOT-EVALUATED
-                                                                              ts.reason="manifest-missing"  ts.analyzedBy=null
+                                                                              ts.reason="manifest-missing"  ts.analyzedBy=null  uncovered=0
 (3) RESTORED  mv 回来                                  exit=0  evaluated=true   ts.status=analyzed（与 (1) 逐字相同）
 (4) CORRUPTED printf '{ broken' > manifest.json        exit=2  evaluated=false  ts.status=NOT-EVALUATED
                                                                               ts.reason="manifest-unreadable"
@@ -147,4 +150,4 @@ SELFTEST: all fixture cases PASS
 
 ### 门 / 套件
 
-`bash scripts/test.sh --for-task gap-arch-coverage-self-report --allow-thin` → **exit 0**（29 tests / 29 pass：本任务 13 + capability-catalog 16）。
+`bash scripts/test.sh --for-task gap-arch-coverage-self-report --allow-thin` → **exit 0**（29 tests / 29 pass：本任务 13 + capability-catalog 16）。scoped-gate cache 已按最终 `develop` sha 写入。fan-in 的 ac-precheck（`fan-in-ac-completion-gate.ts --worktree <本 worktree>`）实测 **6/6 pass**——tick 由 `task_write` 经 develop 同步进入本 worktree（同步前 worktree 内仍是 0/6，同步后 6/6，两次都实测过）。
