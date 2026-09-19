@@ -371,7 +371,24 @@ test("AC4 — node ids are unique, carry no .claude/worktrees copy, and no symli
   const named = new Set();
   for (const s of [...REAL.valueSccs, ...REAL.typeSccs]) for (const f of s.files) named.add(f);
   for (const e of [...REAL.reverseEdges, ...REAL.kernelViolations]) named.add(e.from), named.add(e.to);
-  assert.ok(named.size > 0, "the real reading must name at least one node");
+  // ⚠️ The vacuity guard is BASELINE-AWARE (gap-arch-import-cycles-zero — the task that repaired the
+  // last value/type cycle). "The real reading must name a node" is the right guard against a BLIND
+  // checker, but as a literal pin it fights this file's own stated design ("when a cycle is repaired the
+  // baseline is lowered and these assertions follow it automatically"): once every counter reaches its
+  // 0 baseline the enumerated surface is legitimately EMPTY and the guard would be unsatisfiable exactly
+  // at the ratchet's target state. An empty `named` is therefore admissible ONLY when the graph was
+  // really read and the reading really is the repaired one — four falsifiable conjuncts, not a bypass:
+  // a blind read has evaluated=false or files=0, and any surviving SCC/edge/kernel violation names a node.
+  if (named.size === 0) {
+    assert.equal(REAL.evaluated, true, `an empty reading must still be an EVALUATED one, not a blind read: ${REAL.reason}`);
+    assert.ok(REAL.files > 0, "a reading that names no node must still have analysed files (NOT-EVALUATED ≠ clean)");
+    assert.deepEqual(
+      countsOf(REAL),
+      { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+      "an empty named surface requires all three ratchet counters at 0",
+    );
+    assert.deepEqual(REAL.kernelViolations, [], `nothing may be named yet kernelViolations be non-empty; got ${JSON.stringify(REAL.kernelViolations)}`);
+  }
   for (const f of named) {
     assert.ok(!f.split("/").includes(".."), `${f} is not a normalized repo-relative path`);
     assert.ok(!f.startsWith(".claude/worktrees/"), `${f} is a worktree copy — the node set is polluted`);
