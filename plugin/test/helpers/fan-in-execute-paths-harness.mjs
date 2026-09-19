@@ -495,11 +495,35 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; }
 }
 
+/** The completion predicate for a fan-in marker: CONTENT, not existence.
+ *
+ * gap-fan-in-marker-exists-before-write-reads-empty: the marker used to be published with
+ * `printf ... > "$suite_exit_marker"` — open(O_TRUNC) FIRST, write() SECOND — so a reader that opened the
+ * path inside that scheduling gap got a 0-byte file, and the heavier the host load the wider that gap
+ * (measured: 3/18 in the 09-12 window, 1/56 fan-in suite logs overall). Existence is the WRONG completion
+ * event — the marker is finished when its `exit=<rc>` line is on disk. The producers now publish
+ * atomically (rename), so producer and predicate agree; this predicate is kept content-based anyway
+ * because a predicate that CAN be fooled by a half-written file is not a predicate (its own negative
+ * control is the AC1 test in fan-in-execute-paths-s12.test.mjs).
+ *
+ * Returns the finished marker's TEXT, else null. Unreadable ⇒ null (NOT complete), per 硬规则 3b: an
+ * evaluator that cannot read its input must not return the same value as "satisfied" — the caller's
+ * hang-guard turns a permanently unreadable marker into a loud `guard` red instead of a silent pass. */
+function readFinishedMarker(markerPath) {
+  let text;
+  try {
+    text = fs.readFileSync(markerPath, "utf8");
+  } catch {
+    return null; // ENOENT (not created yet) or unreadable — either way, not a completion event
+  }
+  return /^exit=[0-9]+/m.test(text) ? text : null; // same line the suite-wait block's `sed -n 's/^exit=//p'` reads
+}
+
 async function waitForMarkerOrDeath(markerPath, pid, guardMs = Number(process.env.FANIN_TEST_MARKER_GUARD_MS ?? 0) || 120_000) {
   // No trustworthy pid ⇒ marker-only wait (the launch block's own documented fallback path:
   // "pidfile 读不到 ⇒ suite_pid 空，poller 退回纯 .exit 轮询（安全兜底）").
   const livenessKnown = Number.isFinite(pid) && pid > 0;
-  if (fs.existsSync(markerPath)) return "marker";
+  if (readFinishedMarker(markerPath) !== null) return "marker";
   if (livenessKnown && !pidAlive(pid)) return "dead";
   const deadline = Date.now() + guardMs;
   return await new Promise((resolve) => {
@@ -511,9 +535,11 @@ async function waitForMarkerOrDeath(markerPath, pid, guardMs = Number(process.en
       try { watcher.close(); } catch { /* best-effort */ }
       resolve(outcome);
     };
-    const watcher = fs.watch(path.dirname(markerPath), () => { if (fs.existsSync(markerPath)) finish("marker"); });
+    // A create that lands mid-write fires here too — the predicate stays false and the wait continues
+    // (the write's own IN_MODIFY / the 250ms tick re-checks, so completion is still an EVENT).
+    const watcher = fs.watch(path.dirname(markerPath), () => { if (readFinishedMarker(markerPath) !== null) finish("marker"); });
     const tick = setInterval(() => {
-      if (fs.existsSync(markerPath)) return finish("marker");
+      if (readFinishedMarker(markerPath) !== null) return finish("marker");
       if (livenessKnown && !pidAlive(pid)) return finish("dead");
       if (Date.now() > deadline) return finish("guard");
     }, 250);
@@ -543,4 +569,4 @@ function makeFixScopeDir(prefix, task, body) {
   return dir;
 }
 
-export { F127_ID, F128_ID, FLAT_TRAP_ID, REPO_ROOT, SEL_CLI, SESSION, SLUG, SUITE_FLOOR_SECS, WORKFLOW, __dirname, antiDriftBlockFor, antiDriftLandBlockFor, assert, bootstrapBlockFor, bracketCloseBlockFor, buildTaskManifest, checkTaskAntiDrift, classifyRealDelta, cleanup, commitFiles, extractBlock, extractBlockFromPrompts, fileURLToPath, fixScopeGateBlockFor, flipBlockFor, fs, makeAntiDriftRepo, makeDir127ReplayHome, makeFixScopeDir, makeFlipDir, makeRepoWithDelta, makeStaleBootstrapRepo, makeTelemetryFakeRoot, os, path, pidAlive, promptContaining, runBash, runSyncCli, runWorkflow, runnerHermeticEnv, spawn, spawnSync, startBracket, symlinkPluginForGit, symlinkRuntimeTrees, test, vm, waitForMarkerOrDeath, writeAgentFile };
+export { F127_ID, F128_ID, FLAT_TRAP_ID, REPO_ROOT, SEL_CLI, SESSION, SLUG, SUITE_FLOOR_SECS, WORKFLOW, __dirname, antiDriftBlockFor, antiDriftLandBlockFor, assert, bootstrapBlockFor, bracketCloseBlockFor, buildTaskManifest, checkTaskAntiDrift, classifyRealDelta, cleanup, commitFiles, extractBlock, extractBlockFromPrompts, fileURLToPath, fixScopeGateBlockFor, flipBlockFor, fs, makeAntiDriftRepo, makeDir127ReplayHome, makeFixScopeDir, makeFlipDir, makeRepoWithDelta, makeStaleBootstrapRepo, makeTelemetryFakeRoot, os, path, pidAlive, promptContaining, readFinishedMarker, runBash, runSyncCli, runWorkflow, runnerHermeticEnv, spawn, spawnSync, startBracket, symlinkPluginForGit, symlinkRuntimeTrees, test, vm, waitForMarkerOrDeath, writeAgentFile };
