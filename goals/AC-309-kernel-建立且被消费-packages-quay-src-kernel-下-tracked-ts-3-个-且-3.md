@@ -2,7 +2,7 @@
 id: AC-309
 title: kernel/ 建立且被消费：packages/quay/src/kernel/ 下 tracked .ts ≥ 3 个，且 ≥ 3 个文件按
   import 语句位置从 kernel/ 导入
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: >
@@ -23,6 +23,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §3 / §8-①，
   2026-09-19 裁定：「在 packages/quay 内新建 kernel/ 目录」。「迁入但无人消费」与「没迁」同形（硬规则 4
   推论三），故判据含消费者一半。目录可被误删/回退，故 long-term:true。
 activatedAt: 2026-09-19T05:29:24.230Z
+statusLog:
+  - at: 2026-09-19T08:52:03.169Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
 **范围**：新建 `packages/quay/src/kernel/`，迁入 3 个纯叶子原语：`write-json-atomic`（35 行）、`shape-sections`（71 行）、`worktree-process-reaper`（662 行——体量已非「叶子」，迁前先审它的依赖）。边界规则：kernel/ 不得 import 自身之外的任何模块，也不得 import `plugin/`、`experiments/`（由 import-graph-check 的 kernel 规则守）。
