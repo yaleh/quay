@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-marker-exists-before-write-reads-empty
 title: fan-in suite 的 .exit marker「先建后写」——存在性判据读到空文件，误判 suite 红
-status: ready
+status: done
 labels:
   - gap
   - finding

@@ -233,7 +233,17 @@ rm -f "$suite_pid_file"
 # so the manual sampler spawn is gone — the runner is the single spawner again (converged, not parallel).
 # ISOLATE_LAUNCH (below) is NOT bucket-wired: it is the C11 isolate rerun of an explicit load-sensitive
 # file list — --buckets would override that list (it still runs scripts/test.sh directly, NOT the runner).
-setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+# ⛔ ATOMIC PUBLICATION of both the pidfile ($5) and the exit marker ($4) — '> "$N.tmp" && mv -f "$N.tmp" "$N"'.
+# gap-fan-in-marker-exists-before-write-reads-empty: 'printf ... > "$N"' is open(O_TRUNC) FIRST and
+# write() SECOND, so a reader that opens the path inside that gap gets a 0-byte file — and under heavy
+# suite load the scheduling gap widens, so the reader loses that race more often. The completion event of
+# a marker is "the file has been WRITTEN", never "the file exists"; rename(2) publishes the target path
+# only once its content is complete ⇒ every existence-only reader is correct without touching the reader
+# (this block's own poller, the suite-wait block's '[ ! -f ]', the test harness). Measured incidence of
+# the non-atomic shape: 1/56 fan-in suite logs overall, 3/18 in the 09-12 window. A leftover "$N.tmp" is
+# harmless and needs no cleanup: nothing ever opens a .tmp path, and '> "$N.tmp"' truncates before
+# every rename. Reverting this to the single-redirect shape re-reds fan-in-execute-paths-s12's AC3 test.
+setsid bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$5.tmp" && mv -f "$5.tmp" "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; else node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --buckets ${task} --root "$1" --state-dir "${root}/.quay" --runner inner --log-file "$3"; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4.tmp" && mv -f "$4.tmp" "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
@@ -272,7 +282,10 @@ isolate_files=$(tr '\\n' ' ' < "/tmp/fan-in-scope-isolate-${task}.files" 2>/dev/
 suite_pid_file="/tmp/fan-in-suite-${task}.pid"
 ${STALE_HOLDER_REAP}
 rm -f "$suite_pid_file"
-setsid env SUITE_ISOLATE_FILES="$isolate_files" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$4"; cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+# Same atomic publication as SUITE_LAUNCH (硬规则 5b: this is the sibling instance of the SAME shape —
+# 'printf ... > "$N"' for the pidfile ($4) and the exit marker ($3)); fixing only SUITE_LAUNCH would have
+# left the isolate-rerun path reading empty exactly the same way.
+setsid env SUITE_ISOLATE_FILES="$isolate_files" bash -c 'printf "%s %s\\n" "$$" "$(date +%s%3N)" > "$4.tmp" && mv -f "$4.tmp" "$4"; cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3.tmp" && mv -f "$3.tmp" "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
 suite_pid=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if [ -s "$suite_pid_file" ]; then suite_pid=$(cut -d' ' -f1 "$suite_pid_file" 2>/dev/null); break; fi
