@@ -140,15 +140,34 @@ function globToRegExp(glob) {
 }
 
 // ── walkFiles / expandGlobs ──────────────────────────────────────────────────────────────────────
-// Walk `root` returning repo-relative POSIX paths of every regular file, skipping VCS/dep dirs.
+// Walk `root` returning repo-relative POSIX paths of every file, skipping VCS/dep dirs. A SYMLINK
+// whose target is a regular file IS a file here. `entry.isFile()` is false for a symlink (dirents
+// are lstat-based), so the previous predicate silently dropped every mirrored path — and
+// `experiments/quay-perpetual-stream/scripts/` IS 61 such mirrors into `plugin/scripts/` after
+// gap-arch-duplicate-copies-zero converted the 39 byte-identical copies to links (the AC-310
+// zero-duplicates state). A task's `## Touches` legitimately declares those mirror PATHS, so the
+// drop turned `expandGlobs` EMPTY for a wildcard over that directory and let `checkTouchesPair` take
+// its conservative "matched nothing (likely a typo) → serialize" branch: a FALSE RED that also cost
+// concurrency. Measured 2026-09-19 on the conversion — `plugin/test/touches-orthogonality-check.test.mjs`
+// "main: disjoint pair → exit 0" and "no --root falls back to repoRoot" both flipped to exit 1, and
+// `concurrent-batch-scheduler`'s two wildcard tests went red (same root cause).
+// ⛔ A DANGLING link is still NOT a file — its target does not exist (the 3 archived `git-lens-*`
+// mirrors are the live instances). Existence is what `touchExists` reads this list to decide, so a
+// walker that cannot resolve its target must not return the "file exists" shape (硬规则 3b). The
+// resolve is also what keeps a symlink-to-DIRECTORY out: dirent mode reports it as a non-dir, so
+// only the target check distinguishes it from a real file (and nothing descends through it).
 const SKIP_DIRS = new Set([".git", "node_modules", ".quay"]);
 // Traversal is fs-walk.ts (aliased — this module's own export is also named `walkFiles` and is
 // imported by slot-refill.ts / ready-pool-check.ts, so that name must not move).
 export function walkFiles(root) {
-  return walkFilesShared(root, {
+  const rels = walkFilesShared(root, {
     sort: false,
     prune: (name, isDir) => isDir && SKIP_DIRS.has(name),
-    include: (_name, _ext, entry) => entry.isFile(),
+    include: (_name, _ext, entry) => entry.isFile() || entry.isSymbolicLink(),
+  });
+  return rels.filter((rel) => {
+    try { return fs.statSync(path.join(root, rel)).isFile(); }
+    catch { return false; }
   });
 }
 
