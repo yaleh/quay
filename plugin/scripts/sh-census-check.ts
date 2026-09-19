@@ -7,7 +7,10 @@
 //
 // THE DEFECT THIS CLOSES（实测，非印象）:
 //   archguard 不解析 shell。而仓库里 tracked 的 `.sh` 中有一批「以 bash 为壳、内嵌 python/node/jq 为实」
-//   的程序（verify-deliver-coldstart.sh 6293 有效行、develop-deliver-tgz.sh 2346、capability-catalog.sh 2187 …），
+//   的程序（verify-deliver-coldstart.sh 6293 有效行、develop-deliver-tgz.sh 2346、capability-catalog.sh 2187 …；
+//   ⚠️ 末例已于 2026-09-19 数据化 — gap-arch-catalog-declarations-leave-bash 把它的 10 张声明表搬进
+//   capability-catalog-declarations.json，该 .sh 现为 14 有效行的薄入口。本节数字保留为立案时的读数，
+//   ⛔ 不要把它当现状引用），
 //   另有 `experiments/**/scripts/` 与 `plugin/scripts/` 之间字节相同的重复副本。
 //   在这之前【没有任何读数在盯它们】⇒ 后续 Phase 1/5 的「收敛了」只能靠断言（SPEC §2 P2/P4）。
 //   两个量都是「会回升」的（新增一个内嵌解释器的脚本 / 复制一份副本），所以必须是棘轮而不是一次性读数。
@@ -120,7 +123,7 @@ export function parseHeredocDelim(src: string, j: number): HeredocSpec | null {
  *
  * 三个必须做对的地方（每个都是一次实测的错误形态）:
  *   ① `$( … )` 与反引号【即使在双引号内】也是命令位置 —— `x="$(python3 - <<'PY' …)"` 是本仓库最常见的
- *      内嵌形态（develop-deliver-tgz.sh / capability-catalog.sh 都是它）。把双引号整段掩掉会让
+ *      内嵌形态（develop-deliver-tgz.sh 是；capability-catalog.sh 在 2026-09-19 数据化之前也是）。把双引号整段掩掉会让
  *      「内嵌解释器」的读数归零，而那正是一个恒零且与「一切正常」同形的读数（硬规则 4）。
  *   ② heredoc 体整段掩掉，但【声明行】不掩 —— `python3 - <<'PY'` 的 `python3` 是命令，`PY` 之后到
  *      分隔符之间的正文不是。
@@ -272,8 +275,10 @@ export function maskShellNonCode(src: string): Uint8Array {
       // ⛔ `<<<` is a HERESTRING, not a heredoc. Advancing only past the first two `<` makes the
       // SECOND `<` look like a fresh `<<` start (`src[i+2]` is then `"` or a word, i.e. not `<`),
       // and the herestring's word gets registered as a heredoc DELIMITER — after which every
-      // following line is masked as a body that never closes. Measured: capability-catalog.sh:2272
-      // `done <<<"${DOC_REFERENCED_SH}"` masked the whole rest of the file and zeroed its reading.
+      // following line is masked as a body that never closes. Measured (that line number is from
+      // before capability-catalog.sh was data-ized on 2026-09-19; the heredoc SHAPE it demonstrates
+      // is what this branch exists for): capability-catalog.sh:2272 `done <<<"${DOC_REFERENCED_SH}"`
+      // masked the whole rest of the file and zeroed its reading.
       if (src[i + 2] === "<") {
         i += 3;
         continue;
