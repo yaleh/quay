@@ -18,6 +18,13 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "${workdir}/plugin/scripts" "${workdir}/.git"
 cp "${checker_dir}/capability-catalog.sh" "${workdir}/plugin/scripts/capability-catalog.sh"
 cp "${checker_dir}/repo-root.sh" "${workdir}/plugin/scripts/repo-root.sh"
+cp "${checker_dir}/repo-root.ts" "${workdir}/plugin/scripts/repo-root.ts"
+# The declaration tables are DATA now (gap-arch-catalog-declarations-leave-bash): the .sh is a thin
+# exec wrapper around capability-catalog.ts, which reads capability-catalog-declarations.json.
+# Copying only the entry leaves the renderer/data absent ⇒ the entry exits 3 (CAUSE=..., not a
+# reddening data change) and this mutation case reads as "baseline RED — checker always-red?".
+cp "${checker_dir}/capability-catalog.ts" "${workdir}/plugin/scripts/capability-catalog.ts"
+cp "${checker_dir}/capability-catalog-declarations.json" "${workdir}/plugin/scripts/capability-catalog-declarations.json"
 
 checker_cmd() {
   bash "${workdir}/plugin/scripts/capability-catalog.sh" --superseded-check >/dev/null 2>&1

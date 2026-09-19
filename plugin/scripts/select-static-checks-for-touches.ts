@@ -89,8 +89,11 @@ export const CAPABILITY_CATALOG_CHECKER = {
  * authorize in its Touches (gap-new-script-touches-missing-inventory-catalog-registration, AC3). A
  * new script landing in the plugin-bundle has ONE mechanical-necessity sync product that lives
  * OUTSIDE the script file itself:
- *   1. `plugin/scripts/capability-catalog.sh` — the AC1c QUESTION-table declaration line (a new
- *      script with no declaration is `unclassified` and the catalog exits non-zero).
+ *   1. `plugin/scripts/capability-catalog-declarations.json` — the AC1c QUESTION-table declaration
+ *      entry (a new script with no declaration is `unclassified` and the catalog exits non-zero).
+ *      ⛔ This is the DECLARATION DATA FILE, not capability-catalog.sh: the tables moved out of the
+ *      .sh into data (gap-arch-catalog-declarations-leave-bash), so that file — not the shell entry,
+ *      which is now a thin exec wrapper — is where a new script is registered.
  *   (The former SECOND product — `docs/proposals/quay-product-outline.md` §6 DELIVERY-INVENTORY
  *   snapshot — is RETIRED: the inventory is now computed at check time by
  *   verify-delivery-surface.ts --inventory (gap-delivery-inventory-check-time-computation), so a new
@@ -102,7 +105,7 @@ export const CAPABILITY_CATALOG_CHECKER = {
  * `touches-missing-registration` and must be fixed (add the files to ## Touches) before it can be
  * worked — the agent either oversteps or stops today, both of which this task removes.
  */
-export const NEW_SCRIPT_REGISTRATION_REQUIRED = ["plugin/scripts/capability-catalog.sh"];
+export const NEW_SCRIPT_REGISTRATION_REQUIRED = ["plugin/scripts/capability-catalog-declarations.json"];
 
 /**
  * Dispatch-preflight registration check (gap-new-script-touches-missing-inventory-catalog-

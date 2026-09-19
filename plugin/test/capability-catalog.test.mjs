@@ -4,7 +4,8 @@
 // check declare what QUESTION it makes askable (capability was never missing, visibility was).
 //
 // Coverage map (task ACs):
-//   AC1a — the declaration is a machine-readable field in a script (capability-catalog.sh),
+//   AC1a — the declaration is a machine-readable field in the shipped artifact
+//          (capability-catalog-declarations.json, read by capability-catalog.ts),
 //          never the README; --json emits a top-level array the contract's jq pipes can read.
 //   AC1b — one command lists "what you installed and what each answers"; the check count is
 //          DERIVED from the filesystem glob, never a hardcoded "82"/"87".
@@ -35,6 +36,14 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const PLUGIN_DIR = path.join(REPO_ROOT, "plugin");
 const SCRIPTS_DIR = path.join(PLUGIN_DIR, "scripts");
 const CATALOG = path.join(SCRIPTS_DIR, "capability-catalog.sh");
+// The catalog's declaration tables are DATA in this file (gap-arch-catalog-declarations-leave-bash):
+// the .sh is a thin exec wrapper around plugin/scripts/capability-catalog.ts, which reads
+// capability-catalog-declarations.json. A fixture that carries the entry but not its data exits 3
+// (CAUSE=declarations-missing), which would read as "the catalog is always red" and make every
+// negative control below vacuous. So the fixture builders carry the data file too, and the
+// injections that used to patch the .sh source patch the data instead.
+const CATALOG_DATA_NAME = "capability-catalog-declarations.json";
+const CATALOG_DATA = path.join(SCRIPTS_DIR, CATALOG_DATA_NAME);
 const CATALOG_EXTENSIONS = [".sh", ".ts", ".mjs"];
 
 // The contract's exact glob, derived in the test too — never a hardcoded count.
@@ -66,26 +75,38 @@ function sharedBaseline() {
   for (const f of files) {
     fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(dir, "plugin", "scripts", f));
   }
+  fs.copyFileSync(CATALOG_DATA, path.join(dir, "plugin", "scripts", CATALOG_DATA_NAME));
   _baseline.dir = dir;
   _baseline.files = files;
   return _baseline;
 }
 
 // materializeScripts(tag): a fresh WRITABLE plugin/scripts tree for one test. Every script is a
-// hard link to the shared baseline (no data copy), except capability-catalog.sh which is a real
-// copy so a test's writeFileSync patches only its own copy. Returns the tmp root (plugin/ lives
-// under it); the caller creates any non-scripts sibling dirs it needs.
+// hard link to the shared baseline (no data copy), except capability-catalog.sh AND the declaration
+// data file, which are real copies so a test's writeFileSync patches only its own copy. Returns the
+// tmp root (plugin/ lives under it); the caller creates any non-scripts sibling dirs it needs.
 function materializeScripts(tag) {
   const base = sharedBaseline();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `cap-cat-${tag}-`));
   fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-  for (const f of base.files) {
+  for (const f of [...base.files, CATALOG_DATA_NAME]) {
     const src = path.join(base.dir, "plugin", "scripts", f);
     const dst = path.join(tmp, "plugin", "scripts", f);
-    if (f === "capability-catalog.sh") fs.copyFileSync(src, dst);
+    if (f === "capability-catalog.sh" || f === CATALOG_DATA_NAME) fs.copyFileSync(src, dst);
     else fs.linkSync(src, dst);
   }
   return tmp;
+}
+
+/** The injection seam for the catalog's data-level negative controls: read a fixture's declaration
+ *  data, let `mutate` change it, write it back. Re-serializing keeps the file valid JSON, so a
+ *  control that reddens the catalog reddens it through the GATE, not through a parse failure. */
+function patchDeclarations(fixtureRoot, mutate) {
+  const f = path.join(fixtureRoot, "plugin", "scripts", CATALOG_DATA_NAME);
+  const obj = JSON.parse(fs.readFileSync(f, "utf8"));
+  mutate(obj);
+  fs.writeFileSync(f, JSON.stringify(obj, null, 2) + "\n");
+  return f;
 }
 after(() => {
   for (const d of _baselineDirs) {
@@ -192,42 +213,38 @@ test("AC1c — a new script without a declared question is unclassified and the 
 });
 
 // ── AC5 (task): no command substitution in data values (gap-capability-catalog-backtick-command-substitution) ──
-// A backtick or $( inside a double-quoted data value is EXECUTED by bash at load time — the
-// data/code boundary punched through by a quote (round 143 red: a backtick `bash scripts/test.sh
-// --static-checks-doc` in QUESTION[precommit-guard.ts] ran the whole doc-check suite on every
-// catalog load and broke the tab-separated ROWS → --json IndexError). The catalog's own AC5 gate
-// must fail loud on both injection forms and pass on the fixed baseline.
+// A backtick or $( inside a bash-quoted data value was EXECUTED at load time — the data/code boundary
+// punched through by a quote (round 143 red: a backtick `bash scripts/test.sh --static-checks-doc` in
+// QUESTION[precommit-guard.ts] ran the whole doc-check suite on every catalog load and broke the
+// tab-separated ROWS → --json IndexError). The tables are JSON now, so the value is never evaluated;
+// the gate is KEPT anyway (a migrated-away hazard must not become a permanently-green check) and
+// re-scoped from "source lines with a two-space indent" to "every value of every one of the ten
+// tables" — the old shape-based scan missed 9 non-two-space-indented declarations entirely.
 test("AC5 no-command-substitution — a data value containing a backtick or $( makes the catalog exit non-zero (negative control + restore)", () => {
   const tmp = materializeScripts("ac5cs");
   try {
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
-    const src = fs.readFileSync(CATALOG, "utf8");
-    // Anchor: the capability-catalog.sh QUESTION line (first `[capability-catalog.sh]="..."` in the file).
-    const anchor = /^(\s*\[capability-catalog\.sh\]="[^"]*)(")$/m;
 
-    // Baseline: the fixed catalog (no injection) passes the AC5 gate.
+    // Baseline: the real declaration data (no injection) passes the AC5 gate.
     const base = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.equal(base.status, 0, `baseline catalog must pass the AC5 gate:\n${base.stderr}`);
 
-    // Fail direction 1: a BACKTICK inside a QUESTION value (command substitution injection).
-    const btInjected = src.replace(anchor, '$1 — runs `echo injected` now$2');
-    assert.notEqual(btInjected, src, "the backtick must actually be injected");
-    fs.writeFileSync(catTmp, btInjected);
+    // Fail direction 1: a BACKTICK inside a QUESTION value (command-substitution injection).
+    patchDeclarations(tmp, (d) => { d.QUESTION["capability-catalog.sh"] += " — runs `echo injected` now"; });
     const failBt = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.notEqual(failBt.status, 0, "a backtick in a data value must make the catalog exit non-zero (AC5 gate)");
     assert.match(failBt.stderr, /AC5 no-command-substitution/, "the gate names the AC5 failure");
-    assert.match(failBt.stderr, /capability-catalog\.sh/, "the gate points at the injecting line");
+    assert.match(failBt.stderr, /capability-catalog-declarations\.json/, "the gate names the data file it read");
+    assert.match(failBt.stderr, /QUESTION\[capability-catalog\.sh\]/, "the gate points at the offending entry");
 
     // Fail direction 2: $( ) inside a QUESTION value.
-    const dollarInjected = src.replace(anchor, '$1 — computes $(echo injected) now$2');
-    assert.notEqual(dollarInjected, src, "the $() must actually be injected");
-    fs.writeFileSync(catTmp, dollarInjected);
+    patchDeclarations(tmp, (d) => { d.QUESTION["capability-catalog.sh"] += " — computes $(echo injected) now"; });
     const failDollar = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.notEqual(failDollar.status, 0, "$( ) in a data value must make the catalog exit non-zero (AC5 gate)");
     assert.match(failDollar.stderr, /AC5 no-command-substitution/, "the gate names the AC5 failure");
 
-    // Pass direction: restored catalog passes again.
-    fs.writeFileSync(catTmp, src);
+    // Pass direction: restore the untouched data → passes again.
+    fs.copyFileSync(CATALOG_DATA, path.join(tmp, "plugin", "scripts", CATALOG_DATA_NAME));
     const pass = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.equal(pass.status, 0, `restored catalog must pass the AC5 gate:\n${pass.stderr}`);
   } finally {
@@ -324,19 +341,16 @@ test("① entry gate — a declared check missing cadence/失效前提 is reject
   try {
     // A temp copy of the whole plugin/scripts so the catalog sees every real script.
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
-    const src = fs.readFileSync(CATALOG, "utf8");
 
     // Remove ONE CADENCE row for a real declared script (capability-catalog.sh itself).
-    const stripped = src.replace(/^(\s*)\[capability-catalog\.sh\]="每轮"$/m, "");
-    assert.notEqual(stripped, src, "the capability-catalog.sh CADENCE row must be present to strip");
-    fs.writeFileSync(catTmp, stripped);
+    patchDeclarations(tmp, (d) => { delete d.CADENCE["capability-catalog.sh"]; });
 
     const fail = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.notEqual(fail.status, 0, "a declared check missing cadence must make the catalog exit non-zero");
     assert.match(fail.stderr, /lack cadence/, "the gate names the missing-cadence failure");
 
     // Restore → passes again.
-    fs.writeFileSync(catTmp, src);
+    fs.copyFileSync(CATALOG_DATA, path.join(tmp, "plugin", "scripts", CATALOG_DATA_NAME));
     const pass = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.equal(pass.status, 0, `restored catalog must pass:\n${pass.stderr}`);
   } finally {
@@ -348,11 +362,8 @@ test("① entry gate — a declared check missing 失效前提 (invalidation) is
   const tmp = materializeScripts("inval");
   try {
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
-    const src = fs.readFileSync(CATALOG, "utf8");
-    // Remove the capability-catalog.sh INVALIDATION row.
-    const stripped = src.replace(/^(\s*)\[capability-catalog\.sh\]="失效前提：[^"]*"$/m, "");
-    assert.notEqual(stripped, src, "the capability-catalog.sh INVALIDATION row must be present to strip");
-    fs.writeFileSync(catTmp, stripped);
+    // Remove the INVALIDATION row for capability-catalog.sh itself.
+    patchDeclarations(tmp, (d) => { delete d.INVALIDATION["capability-catalog.sh"]; });
     const fail = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
     assert.notEqual(fail.status, 0, "a declared check missing 失效前提 must make the catalog exit non-zero");
     assert.match(fail.stderr, /lack 失效前提/, "the gate names the missing-invalidation failure");

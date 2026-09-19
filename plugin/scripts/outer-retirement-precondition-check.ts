@@ -23,7 +23,7 @@
 //
 // 参考位置判定（硬规则 2）：引用检测按【代码位置】——只屏蔽注释（`//` / `/* */`），不屏蔽字符串
 // （import 说明符 `from "./outer-anchor-check.ts"` 里的文件名是真实调用面，必须命中）；测试文件
-// （`*.test.mjs` / `*.test.ts`）、catalog（capability-catalog.sh）、shipping 排除表
+// （`*.test.mjs` / `*.test.ts`）、catalog（capability-catalog 的声明数据）、shipping 排除表
 // （loop-shipping-exclusion-data.mjs）不算调用面（测试随 checker 退役、catalog/shipping 是元数据）。
 // `.md` 文档提及一律排除（SPEC §2.3b「⛔ 已排除 .md 提及」）。
 //
@@ -66,7 +66,7 @@ export const RETIRED_MARKER = "RETIRED-WITH-RETIRING-LAYER";
 /** 不算调用面的元数据/测试文件（测试随 checker 退役；catalog/shipping 是元数据）。
  *  checker-driver-result-ratchet-check.ts（gap-b4-checker-reuse-driver-result）的 REQUIRED_ADOPTERS
  *  是一个【钉住清单】（把已迁移 checker 的 basename 作为字符串数据列出），不是 `import from` 式调用面——
- *  与 capability-catalog.sh 的表格、loop-shipping-exclusion-data.mjs 的排除表同类。若不算元数据，
+ *  与 capability-catalog 的声明表、loop-shipping-exclusion-data.mjs 的排除表同类。若不算元数据，
  *  它的 "outer-anchor-check.ts" 字符串会把这名孤儿伪造成「有外部调用面」而漏报（实测 suite 红）。 */
 const NON_CALLER_BASENAMES = new Set([
   "capability-catalog.sh",

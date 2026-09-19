@@ -1,7 +1,8 @@
 // checker-lib.ts — gap-crystallization-five-directions ④: 公共判定原语抽库。
 // 「按位置不按关键词」与「枚举式存在性」仓库此前各实现过两次却未抽库
 // (drive-contract-check.ts / test-framework-policy-check.ts), 写 A16 时又犯第三次。
-// 抽成库后, 新检查器必须在 capability-catalog.sh 的 MATCHING 表声明自己用了哪种匹配
+// 抽成库后, 新检查器必须在 capability-catalog 的 MATCHING 表声明自己用了哪种匹配
+// (表在 capability-catalog-declarations.json —— gap-arch-catalog-declarations-leave-bash 把它搬出了 .sh)
 // (匹配方式: position | keyword | enumerative | n/a)。
 //
 // Primitive 1 — matchAtCommandPosition: 在「命令/代码位置」匹配, 绝不在注释/字符串/正则字面量里
@@ -14,7 +15,7 @@
 //   布尔化的存在性检查会把「对象没了」伪装成「检查失败」; 枚举式返回 present/absent 两个清单,
 //   缺席是一个事实 (清单), 不是判决 (boolean)。调用方据此区分「0 个存在」与「检查失败」。
 //
-// 该文件同时被 capability-catalog.sh 的 QUESTION 表声明为仓库能力
+// 该文件同时被 capability-catalog 的 QUESTION 表声明为仓库能力 (capability-catalog-declarations.json)
 // ("Do shared checker primitives (position-matching / enumerative existence) behave correctly?").
 
 // ── Primitive 1: position-based matching (按位置不按关键词) ─────────────────────────────────────────

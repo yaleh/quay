@@ -7,8 +7,14 @@
   "_reanchorLog": [
     {
       "when": "2026-09-19 (land)",
-      "from": { "embeddedInterpreterLines": 11431, "duplicateCopies": 38 },
-      "to": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
+      "from": {
+        "embeddedInterpreterLines": 11431,
+        "duplicateCopies": 38
+      },
+      "to": {
+        "embeddedInterpreterLines": 11690,
+        "duplicateCopies": 37
+      },
       "why": "The baseline was anchored at 11431/38 on the task branch. Merging develop (63 commits, incl. the context-slimming P2 work) moved the TRUE reading to 11690/37. Re-anchoring to the true reading is REQUIRED for the checker to land green on develop: any other value either reds the whole repo's static layer or is a lie. Both numbers are the checker's OWN reading on the merged tree — never hand-fitted.",
       "attribution": {
         "embeddedInterpreterLines": "+259 = +109 orchestration/context-slimming/v-judge.sh (new on develop, jq) + +135 orchestration/context-slimming/v-run.sh (new on develop, jq) + +6 plugin/scripts/capability-catalog.sh (develop registering its OWN new script — 6 rows per script, NOT this task's registration, which was already inside the 11431) + +9 plugin/scripts/develop-deliver-tgz.sh (develop's edit). Residual = 0.",
@@ -18,16 +24,55 @@
     },
     {
       "when": "2026-09-19 (gap-arch-duplicate-copies-zero, dedup Phase 1)",
-      "from": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
-      "to": { "embeddedInterpreterLines": 11690, "duplicateCopies": 0 },
+      "from": {
+        "embeddedInterpreterLines": 11690,
+        "duplicateCopies": 37
+      },
+      "to": {
+        "embeddedInterpreterLines": 11690,
+        "duplicateCopies": 0
+      },
       "why": "DOWNWARD re-anchor — this is the intended direction and the point of the task, NOT a re-anchor bought by a regression. gap-arch-duplicate-copies-zero converted every remaining non-symlink byte-identical same-basename pair under experiments/**/scripts/ into a RELATIVE symlink (../../../plugin/scripts/<basename>), and did the same for the 2 same-name-but-differing pairs (tree-hygiene-check.sh / worktree-branch-hygiene-check.sh — plugin side is authoritative: it carries the 2026-08-09 unified --help). 39 paths converted. Each moves from `duplicateCopies` to `symlinkedCopies`.",
       "attribution": {
         "embeddedInterpreterLines": "0 — untouched (this task converts mirrors, it does not add or remove .sh interpreter lines). A 0 delta is the assertion, not an omission.",
         "duplicateCopies": "-37 = the 37 byte-identical non-symlink pairs the checker read on develop at 6b713f7ca, all converted. ⛔ NOT 38: the task body's立案实测 said 38, but the checker's own land-time re-anchor above had already moved the true reading to 37 by converting write-json-atomic.ts. Both numbers are the checker's OWN reading; the 38 was the pre-convert reading."
       },
       "ratchetNote": "⚠️ Anchoring at 0 is the ONLY value that makes this task's gain durable. Leaving the baseline at 37 would let any future regression back up to 37 stay GREEN — the gain would be un-recaptured. The shrink-guard permits lowering with no ceremony; only the commit is required."
+    },
+    {
+      "when": "2026-09-19 (gap-arch-catalog-declarations-leave-bash)",
+      "from": {
+        "embeddedInterpreterLines": 11690,
+        "duplicateCopies": 37
+      },
+      "to": {
+        "embeddedInterpreterLines": 9505,
+        "duplicateCopies": 37
+      },
+      "why": "This is the SHRINK the entry above predicted ('Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table'). Phase 4 moved the 10 declare -A declaration tables out of plugin/scripts/capability-catalog.sh into capability-catalog-declarations.json, read by a new TypeScript renderer; the .sh is now a thin exec wrapper. Lowering a baseline is the intended direction (this file's _note: 'needs no ceremony, but the file change must still be committed') — it is committed here, and both numbers are again the checker's OWN reading on the tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2185 = plugin/scripts/capability-catalog.sh effective lines 2199 -> 14 (-2185). The file still contains an embedded interpreter at a command position (it execs node on the renderer), so it stays IN scope — it is the line count that moved, not its membership. Residual = 0: no other tracked .sh changed effective lines in this task.",
+        "duplicateCopies": "unchanged (37). The migration added no experiments/** mirror and touched no byte-identical pair."
+      },
+      "structuralNote": "↘ This is the first DECREASE on this axis, and it validates the Phase 4 direction: the two ratchet axes were chosen on the premise that the shell corpus is the thing to shrink, and moving DATA out of a shell file into a data file is a real, mechanical way to do it (the hazard removed was not line count but shell EVALUATION of shell-quoted data). Note what did NOT move: the axis counts effective lines of embedded-interpreter .sh, so a thin wrapper around a TS renderer still counts — 'make it thin' is rewarded, 'make it JS' is not what this axis measures."
+    },
+    {
+      "when": "2026-09-19 (merge resolution: gap-arch-duplicate-copies-zero ⊗ gap-arch-catalog-declarations-leave-bash)",
+      "from": {
+        "embeddedInterpreterLines": 11690,
+        "duplicateCopies": 37
+      },
+      "to": {
+        "embeddedInterpreterLines": 9505,
+        "duplicateCopies": 0
+      },
+      "why": "Both branch sides re-anchored ONE axis each, from the SAME base (11690/37): ours lowered duplicateCopies 37→0 (mirrors → symlinks), develop's lowered embeddedInterpreterLines 11690→9505 (capability-catalog.sh declaration tables → JSON). Neither is a regression bought by the other axis, so the union is the composed state — and per this file's rule the two numbers below are the checker's OWN reading on the MERGED tree, not a sum of two deltas. This entry exists so the log keeps its convention that the LAST entry's `to` equals the file's final numbers (a bare line-union left the last entry describing only one axis).",
+      "attribution": {
+        "embeddedInterpreterLines": "-2185 from develop's capability-catalog.sh migration (see the entry above) computed on the merged tree; live reading confirms 9505.",
+        "duplicateCopies": "0 — ours: all 37 byte-identical non-symlink pairs are now symlinks; develop's migration added none. Live reading confirms 0."
+      }
     }
   ],
-  "embeddedInterpreterLines": 11690,
+  "embeddedInterpreterLines": 9505,
   "duplicateCopies": 0
 }

@@ -3,7 +3,7 @@ id: gap-arch-catalog-declarations-leave-bash
 title: 架构棘轮：capability-catalog 声明表离开 bash —— 1907 行 [key]="…" 声明（10 张 declare -A
   表）→ 数据文件 + TS 渲染器，令 AC-311 取真值，同时保住 10 个调用方 / 13 个测试 / 3 个 mutation fixture /
   laydown / 打包面
-status: ready
+status: done
 labels:
   - gap
 parent: null

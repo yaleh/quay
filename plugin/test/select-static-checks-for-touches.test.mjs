@@ -151,7 +151,7 @@ t("AC1 — a `(new)`-tagged plugin/scripts touch selects capability-catalog (CLI
     // (gap-new-script-touches-missing-inventory-catalog-registration AC3) — so the CLI selection
     // (which fail-closes on a missing registration) exits 0 and this test exercises the SELECTION.
     writeTask(root, "t-new",
-      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-new.md\n");
+      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog-declarations.json\n- docs/proposals/quay-product-outline.md\n- tasks/t-new.md\n");
     const r = runSelCli(root, "--task", "t-new", "--json");
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
@@ -173,7 +173,7 @@ t("AC1 — a git-untracked plugin/scripts touch selects capability-catalog even 
   gitInit(root);
   try {
     writeTask(root, "t-untracked",
-      "## Touches\n- plugin/scripts/ghost-check.sh\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-untracked.md\n");
+      "## Touches\n- plugin/scripts/ghost-check.sh\n- plugin/scripts/capability-catalog-declarations.json\n- docs/proposals/quay-product-outline.md\n- tasks/t-untracked.md\n");
     const r = runSelCli(root, "--task", "t-untracked", "--names");
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^capability-catalog$/m,
@@ -195,16 +195,21 @@ t("AC1 — a git-untracked plugin/scripts touch selects capability-catalog even 
 t("AC2 — a task declaring a new script NOT in the catalog QUESTION table makes the scoped gate red", async () => {
   const root = makeWorkspace({});
   writeTestSh(root);
-  // Build the artifact exactly as the scoped tier would scan it: the REAL catalog + a NEW script
-  // that has NO declaration line in the QUESTION table (the ghost).
+  // Build the artifact exactly as the scoped tier would scan it: the REAL catalog (entry + renderer +
+  // declaration data) + a NEW script that has NO declaration entry in the QUESTION table (the ghost).
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   fs.copyFileSync(CATALOG, path.join(root, "plugin", "scripts", "capability-catalog.sh"));
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "repo-root.sh"), path.join(root, "plugin", "scripts", "repo-root.sh"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "repo-root.ts"), path.join(root, "plugin", "scripts", "repo-root.ts"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog.ts"),
+    path.join(root, "plugin", "scripts", "capability-catalog.ts"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog-declarations.json"),
+    path.join(root, "plugin", "scripts", "capability-catalog-declarations.json"));
   fs.writeFileSync(path.join(root, "plugin", "scripts", "ghost-check.sh"),
     "#!/usr/bin/env bash\n# a brand-new checker with no declared question\necho hi\n");
   try {
     writeTask(root, "t-ghost",
-      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-ghost.md\n");
+      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog-declarations.json\n- docs/proposals/quay-product-outline.md\n- tasks/t-ghost.md\n");
     // The scoped tier emits the catalog command for this task…
     const r = runSelCli(root, "--task", "t-ghost", "--commands");
     assert.equal(r.status, 0, r.stderr);
@@ -240,9 +245,12 @@ t("AC3 — a task touching an ALREADY-declared script (claim-task.sh) does NOT s
   // since a37df1c5; the VIRTUAL AC1c --json gate must NOT be selected for an already-declared script.
   assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
     `claim-task.sh is already declared — no false positive (no --json gate): ${selected.map((s) => s.name)}`);
-  // And claim-task.sh genuinely IS declared in the real catalog (the AC3 precondition).
-  const src = fs.readFileSync(CATALOG, "utf8");
-  assert.match(src, /\[claim-task\.sh\]=/, "claim-task.sh must have a QUESTION-table entry (AC3 precondition)");
+  // And claim-task.sh genuinely IS declared in the real catalog (the AC3 precondition) — in the
+  // declaration DATA, which is where the QUESTION table lives since gap-arch-catalog-declarations-
+  // leave-bash.
+  const decls = JSON.parse(fs.readFileSync(
+    path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog-declarations.json"), "utf8"));
+  assert.ok(decls.QUESTION["claim-task.sh"], "claim-task.sh must have a QUESTION-table entry (AC3 precondition)");
 });
 
 t("AC3 — a task touching the catalog's own script file does NOT select capability-catalog (self is existing)", async () => {
@@ -308,14 +316,16 @@ t("AC4 — isGitUntracked unit: false for non-git, false for tracked, true for a
 // ── gap-new-script-touches-missing-inventory-catalog-registration ─────────────────────────────────────
 // AC2/AC3/AC4 — dispatch-preflight registration check: a task whose ## Touches declare a NEW
 // plugin/scripts file ((new) tag, git-untracked, or the full-width （新：…） marker the repo's real
-// new-script Touches use) MUST ALSO authorize the registration file (capability-catalog.sh). Missing ⇒
+// new-script Touches use) MUST ALSO authorize the registration file — which is the catalog's
+// DECLARATION DATA file, not the .sh entry (gap-arch-catalog-declarations-leave-bash moved the
+// tables into data). Missing ⇒
 // the scoped static-check selection exits non-zero with `touches-missing-registration` (fail-closed:
 // the task cannot pass its own scoped run until its Touches authorize the sync product — the
 // 3-instance overstep/stop regression this task closes). The former SECOND registration file
 // (docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY snapshot) is RETIRED
 // (gap-delivery-inventory-check-time-computation): the inventory is computed at check time.
 
-const REG_CATALOG = "plugin/scripts/capability-catalog.sh";
+const REG_CATALOG = "plugin/scripts/capability-catalog-declarations.json";
 
 t("AC2 — a new plugin/scripts touch without the registration files ⇒ touches-missing-registration (pure)", async () => {
   const mod = await importMod();

@@ -2,7 +2,7 @@
 // guard-lineage-check.ts — P4 守卫谱系检测器 (docs/proposals/archguard-generation-era-primitives.md §3 P4).
 // 每个检测器机器可读地声明四元组 ⟨guards, wired-into, last-run, last-fired⟩; 本工具核验/记录其中
 // 本任务承担的两半 (tasks/gap-archguard-p4-guard-lineage-declaration-and-registry):
-//   ① 守卫头部声明块 — 复用 capability-catalog.sh 的登记位, 新增 GUARD_OBJECT 数组声明该守卫
+//   ① 守卫头部声明块 — 复用 capability-catalog 的登记位, GUARD_OBJECT 表声明该守卫
 //     "守的是什么对象/不变式" (guards)。对象两种形态: `file:<relpath>` (可核验存在性) /
 //     `invariant:<描述>` (约定, 无文件可指 — 文档 §3 P4 原文: "多数守卫守的是一条约定…没有可指对象")。
 //   ② verdict 记录流 — 读 checker-cost.jsonl 的 verdict 字段 (gap-checker-cost-jsonl-add-verdict-field
@@ -31,7 +31,8 @@
 //                      (默认 repo-root.ts 推导)。生产/现场读运行时态 (gitignored tick log / checker-cost)
 //                      时应指向主检出 — verify worktree 无这些运行时态 (同 instrument-decay-check 的
 //                      --root main_root 约定)。
-//   --catalog <file>   capability-catalog.sh 路径 (读 GUARD_OBJECT 声明块; 默认 <root>/plugin/scripts/capability-catalog.sh)
+//   --catalog <file>   capability-catalog declarations 文件 (读 GUARD_OBJECT 表; 默认 <root>/plugin/scripts/capability-catalog-declarations.json)
+//                      ⛔ 不再是 capability-catalog.sh：声明表已搬出 bash 成为数据 (gap-arch-catalog-declarations-leave-bash)
 //   --cost-file <file> checker-cost.jsonl 路径 (读 verdict 流; 默认 <root>/.quay/checker-cost.jsonl)
 //   --json             机器可读 JSON
 //   --help             用法, exit 0
@@ -78,7 +79,7 @@ export function enumerateGuards(root: string): GuardRef[] {
   return out;
 }
 
-// ── 声明块解析 (从 capability-catalog.sh 源文本读 GUARD_OBJECT 数组) ───────────────────────────
+// ── 声明块解析 (从 capability-catalog 的声明数据读 GUARD_OBJECT 表) ────────────────────────────
 export interface GuardDeclaration {
   object: string;          // 原始声明值 (file:<path> / invariant:<desc> / 无前缀按 invariant)
   kind: "file" | "invariant";
@@ -92,20 +93,30 @@ export function classifyDeclaration(value: string): GuardDeclaration {
   return { object: value, kind: "invariant" };
 }
 
-/** 解析 `declare -A GUARD_OBJECT=( [name]="value" … )` 块 — 逐行 [name]="value", 遇裸 `)` 停。 */
-export function parseGuardObjects(catalogText: string): Map<string, GuardDeclaration> {
+/**
+ * 解析 capability-catalog 声明数据 (plugin/scripts/capability-catalog-declarations.json) 的
+ * `GUARD_OBJECT` 表: `{ "<basename>": "<声明值>" }`。
+ *
+ * ⛔ 这份文件以前是 capability-catalog.sh 里的 `declare -A GUARD_OBJECT=( … )` bash 块，逐行按
+ * `[name]="value"` 解析 (gap-arch-catalog-declarations-leave-bash 把它搬成了数据)。解析失败 ⇒
+ * 空表 (= 「无守卫声明」)，绝不当成「查过且合格」—— 一份读不懂的声明文件不会静默：capability-catalog
+ * 自己的入口闸对同一份文件 exit 3 (CAUSE=declarations-unparsable / -missing)，而 declaredRatio=0
+ * 在报告里本来就是一个响亮的异常值。
+ */
+export function parseGuardObjects(declarationsText: string): Map<string, GuardDeclaration> {
   const out = new Map<string, GuardDeclaration>();
-  const idx = catalogText.indexOf("GUARD_OBJECT=(");
-  if (idx === -1) return out;
-  const open = catalogText.indexOf("(", idx);
-  if (open === -1) return out;
-  for (const raw of catalogText.slice(open + 1).split("\n")) {
-    const line = raw.trim();
-    if (line === ")") break; // 数组闭合 — 停, 不得读进后续 CADENCE/MATCHING/CONSUMER 等数组 (否则后续数组同名覆盖本数组)
-    if (line === "") continue;
-    const m = line.match(/^\[([^\]]+)\]="(.*)"$/);
-    if (!m) continue;
-    out.set(m[1], classifyDeclaration(m[2]));
+  let doc: unknown;
+  try {
+    doc = JSON.parse(declarationsText);
+  } catch {
+    return out;
+  }
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) return out;
+  const table = (doc as Record<string, unknown>)["GUARD_OBJECT"];
+  if (table === null || typeof table !== "object" || Array.isArray(table)) return out;
+  for (const [name, value] of Object.entries(table as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    out.set(name, classifyDeclaration(value));
   }
   return out;
 }
@@ -406,7 +417,7 @@ export function main(argv: string[]): number {
     console.error(`guard-lineage-check: plugin/scripts not found under ${root} — is --root correct?`);
     return 2;
   }
-  const catalogFile = opts.catalog ? path.resolve(opts.catalog) : path.join(root, "plugin", "scripts", "capability-catalog.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const catalogFile = opts.catalog ? path.resolve(opts.catalog) : path.join(root, "plugin", "scripts", "capability-catalog-declarations.json");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const costFile = opts.costFile ? path.resolve(opts.costFile) : path.join(root, ".quay", "checker-cost.jsonl");
   const report = analyze(root, { catalogFile, costFile });
   if (opts.json) printJson(report);

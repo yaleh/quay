@@ -370,6 +370,11 @@ test("AC6 — the manager-layer task cross-annotates the trend criterion (manage
 });
 
 test("AC7 — capability-catalog declares trend-check.ts's question (new script enters the artifact declared, AC1c)", () => {
-  const catalog = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog.sh"), "utf8");
-  assert.ok(/\[trend-check\.ts\]="[^"]+"/.test(catalog), "trend-check.ts has a declared question in the capability catalog");
+  // The declaration lives in the catalog's DATA file (gap-arch-catalog-declarations-leave-bash moved
+  // the 10 tables out of capability-catalog.sh into capability-catalog-declarations.json), so read
+  // the table, not the shell source.
+  const declarations = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog-declarations.json"), "utf8"));
+  const q = declarations.QUESTION["trend-check.ts"];
+  assert.ok(typeof q === "string" && q.length > 0, "trend-check.ts has a declared question in the capability catalog");
 });

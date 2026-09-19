@@ -87,7 +87,10 @@ ready-made body.
      flip can't be attributed to itself.
    If the task adds a new shipped `plugin/scripts/*.ts`, also touch its capability-catalog entry
    and outline registration — a new script file trips three registration gates
-   (outline + capability-catalog + laydown; see `plugin/scripts/capability-catalog.sh` header) —
+   (outline + capability-catalog + laydown; the declaration entry goes in
+   `plugin/scripts/capability-catalog-declarations.json` — the catalog's DATA half, which is what
+   `select-static-checks-for-touches.ts` requires in Touches — and the entry form is documented in
+   the `plugin/scripts/capability-catalog.sh` header) —
    name all three in Touches, not just the script itself.
 
 5. **Compute the id.** Default family is `gap-<kebab-slug>` (defect/optimization/execution
