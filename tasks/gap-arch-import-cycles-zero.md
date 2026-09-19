@@ -96,7 +96,7 @@ plugin/scripts/full-suite-runner.ts:174  值导入 runner-red-parse.ts (gateScan
 - plugin/scripts/runner-state-write.ts
 - plugin/scripts/runner-red-parse.ts
 - plugin/scripts/full-suite-runner-types.ts (new)
-- plugin/scripts/code-span-strip.ts (new)
+- plugin/scripts/code-span-strip.ts (new；若取「放进 gate-script-base.ts」的替代路则无此文件)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/red-on-omission-audit.ts
 - packages/quay/src/gate/types.ts (new)
@@ -120,9 +120,10 @@ plugin/scripts/full-suite-runner.ts:174  值导入 runner-red-parse.ts (gateScan
 - packages/quay/test/document-gate.test.mjs
 - tasks/gap-arch-import-cycles-zero.md
 
-（`plugin/scripts/red-on-omission-audit.ts` 是落地时按硬规则 5b 补进的：类型环 B 迁出 `SuiteState` 后它的
-`scope_worktree_gate` invariant 按字面读 `full-suite-runner.ts` 转红，见 ## Notes。⛔ 未取
-「放进 `gate-script-base.ts`」的替代路（那会撑大 186 依赖的 hub），故 `code-span-strip.ts` 已落地。）
+（若实现者选择别的模块名或别的落点，新增与改动的文件仍属本任务 Touches，须在同一次编辑里补进本清单。）
+（本次落地补进的是 `plugin/scripts/red-on-omission-audit.ts`：类型环 B 迁出 `SuiteState` 后它的
+`scope_worktree_gate` invariant 按字面读 `full-suite-runner.ts` 转红（硬规则 5b 的连带修复），见 ## Notes。
+另：⛔ 未取「放进 `gate-script-base.ts`」的替代路 —— 那会撑大 186 依赖的 hub，故 `code-span-strip.ts` 已落地。）
 
 ## AC
 
@@ -244,14 +245,17 @@ import-graph-check: files=436 edges=1055 (value 939 / type 116)
 按任务体「以检查器读数为准、多出来的一并清零」的要求，这 5 个文件同属一个 0 目标，已一并清零；**未**改动
 `suite-state-trigger.ts` / `pre-verified-round-record.ts` 本身（破它们入环的那条 type 边即可）。
 类型环 A 的文件集 = 11 个（9 factories + `gate/registry.ts` + `gate/config/loader.ts`），与任务体实测的 10 处
-import 者一致。
+import 者一致。**类型环 A 的 import 者计数对账**：任务体原文「9 个 import 者 + config/loader.ts = 10 处」
+经复核**成立**（8 个具体工厂 + `factories/index.ts` = 9，加 `config/loader.ts` = 10）；AC-308 原文的
+「11 个 gate/factories/*」是把 `factories/` 下**不**导入 GateFn 的 `loader.ts`/`utils.ts` 也算进去了 ⇒
+按任务体要求**以检查器读数为准**，未调检查器去凑 11。
 
 ### 一处连带修复（硬规则 5b：修好 X ≠ X 只在那一处）
 
 类型环 B 把 `SuiteState` 迁出后，**`plugin/scripts/red-on-omission-audit.ts` 的 `scope_worktree_gate`
 invariant 转红**——它按字面在 `full-suite-runner.ts` 里找 `scope?: "main" | "worktree"`。**pre-commit 守卫
 在提交时抓到了它**（`STATIC_CHECK_FAILED: red-on-omission-audit exit=1`）。修法：该字段改在
-**runner 的声明面（`full-suite-runner.ts` **或** `full-suite-runner-types.ts`）任一处**存在即可
+**runner 的声明面（`full-suite-runner.ts` 或 `full-suite-runner-types.ts`）任一处**存在即可
 （`readUnder` 缺文件返回 `""` ⇒ 仍 FAIL，**未放松**判定）。该检查器的 mutation case 用**自己的 fixture**，
 注入仍变红、恢复仍变绿，已复跑 exit 0 ⇒ `plugin/scripts/red-on-omission-audit.ts` 已补进 ## Touches。
 （同轮另行核实 `config-wiring-check` / `eligible-no-goal-source-check` / `suite-slot-ssot-check` /
