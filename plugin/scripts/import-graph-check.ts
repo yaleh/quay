@@ -557,7 +557,8 @@ export interface SelftestCase {
   reverseEdgeTo?: string[];
 }
 
-/** AC5's case is expressed as a pure-function pair (no git needed): a raised baseline must be caught. */
+/** AC5's case, in TWO halves that must agree: the predicate (±1 on every axis) and the CODE the
+ *  production `decide()` path emits for the same three states on a real committed fixture repo. */
 export const BASELINE_RAISE_CASE = {
   name: "baseline-raised-above-head",
   head: { valueSccs: 1, typeSccs: 2, reverseEdges: 5 } as Baseline,
@@ -573,16 +574,61 @@ export function runBaselineRaiseCase(): { ok: boolean; detail: string } {
   const lo = checkBaselineShrinkOnly(c.lowered, c.head);
   const hi = checkBaselineShrinkOnly(c.raised, c.head);
   const boot = checkBaselineShrinkOnly(c.raised, null);
-  const ok =
+  const predicateOk =
     eq.raised.length === 0 &&
     eq.bootstrap === false &&
     lo.raised.length === 0 &&
     hi.raised.length === 1 &&
     hi.raised[0] === "valueSccs" &&
     boot.bootstrap === true;
+
+  // The end-to-end half: a real repo with the baseline COMMITTED at {1,2,5}, the graph reading 0/0/0
+  // (so the ≤ check can never be what fires), then three working-tree mutations of that file. Only the
+  // raised one may produce exit 1 — AC5 says 「⇒ exit 1」, and this asserts the number the production
+  // path returns, not a re-derivation of it.
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "import-graph-raise-"));
+  let codes: number[] = [];
+  let e2eOk = false;
+  let e2eDetail = "";
+  try {
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "only.ts"), "export const only = 1;\n");
+    const bAbs = baselineFile(dir);
+    fs.mkdirSync(path.dirname(bAbs), { recursive: true });
+    fs.writeFileSync(bAbs, JSON.stringify(c.head, null, 2) + "\n");
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
+    execFileSync("git", ["-c", "init.defaultBranch=main", "-c", "core.hooksPath=/dev/null", "init", "-q"], { cwd: dir, env, stdio: "pipe" });
+    execFileSync("git", ["-c", "core.hooksPath=/dev/null", "add", "-A"], { cwd: dir, env, stdio: "pipe" });
+    execFileSync(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "user.email=igc@example.invalid", "-c", "user.name=igc", "commit", "-q", "-m", "fixture: committed baseline"],
+      { cwd: dir, env, stdio: "pipe" },
+    );
+    const write = (b: Baseline): void => fs.writeFileSync(bAbs, JSON.stringify(b, null, 2) + "\n");
+    const codeFor = (b: Baseline): number => {
+      write(b);
+      return decide(dir).code;
+    };
+    codes = [codeFor(c.equal), codeFor(c.lowered), codeFor(c.raised)];
+    const [eqCode, loCode, hiCode] = codes;
+    const bootCode = decide(dir, path.join(dir, "no-such-baseline.json")).code; // no baseline ⇒ 2
+    e2eOk = eqCode === 0 && loCode === 0 && hiCode === 1 && bootCode === 2;
+    e2eDetail = `decide() on a committed fixture: equal⇒${eqCode} lowered⇒${loCode} raised(+1)⇒${hiCode} missing-baseline⇒${bootCode} (want 0/0/1/2)`;
+  } catch (err) {
+    e2eDetail = `INFRASTRUCTURE: ${(err as Error).message.split("\n")[0]}`;
+  } finally {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
   return {
-    ok,
-    detail: `equal⇒raised=[${eq.raised}] lowered⇒raised=[${lo.raised}] raised(+1 valueSccs)⇒raised=[${hi.raised}] head=absent⇒bootstrap=${boot.bootstrap}`,
+    ok: predicateOk && e2eOk,
+    detail:
+      `predicate: equal⇒raised=[${eq.raised}] lowered⇒raised=[${lo.raised}] raised(+1 valueSccs)⇒raised=[${hi.raised}] head=absent⇒bootstrap=${boot.bootstrap}` +
+      ` | ${e2eDetail}`,
   };
 }
 
@@ -760,7 +806,9 @@ export function runSelftest(): { ok: boolean; results: SelftestResult[] } {
   results.push({
     name: "baseline-raised-above-head (AC5: raising ANY baseline axis past git HEAD ⇒ exit 1)",
     ok: raise.ok,
-    expected: "equal⇒raised=[] · lowered⇒raised=[] · raised(+1 valueSccs)⇒raised=[valueSccs] · head absent⇒bootstrap=true",
+    expected:
+      "predicate: equal⇒raised=[] · lowered⇒raised=[] · raised(+1 valueSccs)⇒raised=[valueSccs] · head absent⇒bootstrap=true" +
+      " | decide() on a committed fixture: equal⇒0 · lowered⇒0 · raised⇒1 · missing baseline⇒2",
     detail: raise.detail,
   });
   return { ok: results.every((r) => r.ok), results };
@@ -837,6 +885,45 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
   }
 }
 
+export interface Decision {
+  reading: GraphReading;
+  baseline: Baseline | null;
+  verdict: RatchetVerdict | null;
+  /** The exit code the CLI returns for this root — 0 PASS · 1 FAIL · 2 usage/env-or-unreadable. */
+  code: number;
+  /** the repo-relative baseline path used for the git-HEAD comparison ("" when outside the root). */
+  relForHead: string;
+}
+
+/**
+ * The ONE gate decision for a root — read the graph, read the baseline file, read the SAME file's
+ * git-HEAD version, and map the verdict to an exit code. Exported and used by BOTH the CLI and
+ * --selftest so the self-test can assert the CODE the production path emits rather than only the
+ * predicate behind it (AC5 asks for 「⇒ exit 1」, and a case that re-implements the mapping would be
+ * asserting its own arithmetic).
+ */
+export function decide(root: string, baselineAbs: string = baselineFile(root)): Decision {
+  const reading = readImportGraph(root);
+  if (!reading.evaluated) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
+  const baseline = readBaselineFile(baselineAbs);
+  if (baseline === null) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
+  // HEAD comparison only applies when the baseline lives inside the analyzed root's repo (a --baseline
+  // override pointing at a temp file has no HEAD counterpart and is therefore a bootstrap reading).
+  const relForHead = path.relative(root, baselineAbs).split(path.sep).join("/");
+  const inRepo = !relForHead.startsWith("../") && !path.isAbsolute(relForHead);
+  let headBaseline: Baseline | null = null;
+  if (inRepo) {
+    try {
+      execFileSync("git", ["-C", root, "rev-parse", "--verify", "HEAD"], { stdio: "pipe" });
+      headBaseline = readHeadBaseline(root, relForHead);
+    } catch {
+      headBaseline = null; // no HEAD (a fresh fixture repo) ⇒ bootstrap
+    }
+  }
+  const verdict = judge(reading, baseline, baseline, headBaseline);
+  return { reading, baseline, verdict, code: verdict.ok ? 0 : 1, relForHead };
+}
+
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(USAGE);
@@ -862,15 +949,13 @@ export function main(argv: string[]): number {
   const root = path.resolve(flagValue(args, "--root") ?? positional ?? defaultRoot());
   const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselineFile(root));
 
-  const reading = readImportGraph(root);
+  const { reading, baseline, verdict, code, relForHead } = decide(root, baselineAbs);
   if (!reading.evaluated) {
     reportReading(reading, null, null, asJson);
     process.stderr.write(`import-graph-check: NOT-EVALUATED — ${reading.reason ?? "the import graph could not be read"}\n`);
     return 2;
   }
-
-  const baseline = readBaselineFile(baselineAbs);
-  if (baseline === null) {
+  if (baseline === null || verdict === null) {
     reportReading(reading, null, null, asJson);
     process.stderr.write(
       `import-graph-check: NOT-EVALUATED — baseline file missing or malformed (${baselineAbs}); a checker that cannot read its baseline is never conflated with "≤ baseline"\n`,
@@ -878,21 +963,6 @@ export function main(argv: string[]): number {
     return 2;
   }
 
-  // HEAD comparison only applies when the baseline lives inside the analyzed root's repo (the
-  // --baseline override in the self-test/mutation paths points at a temp file with no HEAD counterpart).
-  const relForHead = path.relative(root, baselineAbs).split(path.sep).join("/");
-  const inRepo = !relForHead.startsWith("../") && !path.isAbsolute(relForHead);
-  let headBaseline: Baseline | null = null;
-  if (inRepo) {
-    try {
-      execFileSync("git", ["-C", root, "rev-parse", "--verify", "HEAD"], { stdio: "pipe" });
-      headBaseline = readHeadBaseline(root, relForHead);
-    } catch {
-      headBaseline = null; // no HEAD (a fresh fixture repo) ⇒ bootstrap
-    }
-  }
-
-  const verdict = judge(reading, baseline, baseline, headBaseline);
   reportReading(reading, verdict, baseline, asJson);
 
   const counts = countsOf(reading);
@@ -920,7 +990,7 @@ export function main(argv: string[]): number {
   process.stdout.write(
     `PASS — valueSccs=${counts.valueSccs} ≤ ${baseline.valueSccs}, typeSccs=${counts.typeSccs} ≤ ${baseline.typeSccs}, reverseEdges=${counts.reverseEdges} ≤ ${baseline.reverseEdges}${boot}\n`,
   );
-  return 0;
+  return code; // 0 — the three FAIL branches above already returned; `decide()` is the single mapping
 }
 
 if (isDirectEntry(import.meta, undefined, "import-graph-check")) {
