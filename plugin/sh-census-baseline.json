@@ -15,8 +15,19 @@
         "duplicateCopies": "-1: develop converted experiments/quay-perpetual-stream/scripts/write-json-atomic.ts into a symlink to plugin/scripts/write-json-atomic.ts (dedup Phase 1), moving it from duplicateCopies to symlinkedCopies (19 -> 20)."
       },
       "structuralNote": "⚠️ This re-anchor exposes a real weakness of the '只降不升' ratchet: any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor (which the shrink-guard permits once committed, since it compares worktree-vs-HEAD copies of this very file). So the guard reliably catches UNCOMMITTED (drifting) raises and forces committed raises to be visible/reviewable — but it CANNOT by itself prevent legitimate growth. Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table and the experiments/** mirrors, not on the ratchet alone."
+    },
+    {
+      "when": "2026-09-19 (gap-arch-catalog-declarations-leave-bash)",
+      "from": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
+      "to": { "embeddedInterpreterLines": 9505, "duplicateCopies": 37 },
+      "why": "This is the SHRINK the entry above predicted ('Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table'). Phase 4 moved the 10 declare -A declaration tables out of plugin/scripts/capability-catalog.sh into capability-catalog-declarations.json, read by a new TypeScript renderer; the .sh is now a thin exec wrapper. Lowering a baseline is the intended direction (this file's _note: 'needs no ceremony, but the file change must still be committed') — it is committed here, and both numbers are again the checker's OWN reading on the tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2185 = plugin/scripts/capability-catalog.sh effective lines 2199 -> 14 (-2185). The file still contains an embedded interpreter at a command position (it execs node on the renderer), so it stays IN scope — it is the line count that moved, not its membership. Residual = 0: no other tracked .sh changed effective lines in this task.",
+        "duplicateCopies": "unchanged (37). The migration added no experiments/** mirror and touched no byte-identical pair."
+      },
+      "structuralNote": "↘ This is the first DECREASE on this axis, and it validates the Phase 4 direction: the two ratchet axes were chosen on the premise that the shell corpus is the thing to shrink, and moving DATA out of a shell file into a data file is a real, mechanical way to do it (the hazard removed was not line count but shell EVALUATION of shell-quoted data). Note what did NOT move: the axis counts effective lines of embedded-interpreter .sh, so a thin wrapper around a TS renderer still counts — 'make it thin' is rewarded, 'make it JS' is not what this axis measures."
     }
   ],
-  "embeddedInterpreterLines": 11690,
+  "embeddedInterpreterLines": 9505,
   "duplicateCopies": 37
 }

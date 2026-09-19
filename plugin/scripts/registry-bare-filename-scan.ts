@@ -12,8 +12,10 @@
 // 本扫描器按【位置】补上这第三种形式（字符串字面量/JSON 字符串值恰等于 plugin/scripts 裸文件名），
 // 并把该形式作为一条新边接进 §12d 死集闭包，产出重算后的死集清单。
 //
-// ⛔ 唯一不算引用的登记处是 capability-catalog.sh——它是对种群的【描述】不是使用；把 catalog 条目
-//   当引用会让所有脚本永远活着（硬规则 4「结构上不可能取假的量」）。故本扫描器【显式排除】它。
+// ⛔ 唯一不算引用的登记处是 capability-catalog 的【声明数据】——它是对种群的【描述】不是使用；把
+//   catalog 条目当引用会让所有脚本永远活着（硬规则 4「结构上不可能取假的量」）。故本扫描器【显式
+//   排除】它。该角色 2026-09-19 从 capability-catalog.sh 迁到 capability-catalog-declarations.json
+//   （gap-arch-catalog-declarations-leave-bash），排除集合随之迁移 —— 见 EXCLUDED_CARRIER_BASENAMES。
 //
 // 三种模式：
 //   --scan                      扫描裸文件名引用（默认）。人读输出，含真样本命中前 3 条实际内容。
@@ -57,10 +59,18 @@ export const KNOWN_SAMPLE = "supervisor-bus-identity.sh";
 /** 该真样本所在的清单载体。 */
 export const KNOWN_SAMPLE_CARRIER = "plugin/scripts/quay-deliver.ts";
 
-/** 显式排除的登记处：capability-catalog.sh 是种群描述不是使用（硬规则 4）；本扫描器自身不是载体
- *  （其源码含 KNOWN_SAMPLE / EXCLUDED_CARRIER_BASENAMES 字符串，扫自己会把常量误判成引用）。 */
+/** 显式排除的登记处：capability-catalog 的【声明数据】是种群描述不是使用（硬规则 4）；本扫描器自身
+ *  不是载体（其源码含 KNOWN_SAMPLE / EXCLUDED_CARRIER_BASENAMES 字符串，扫自己会把常量误判成引用）。
+ *  ⛔ 这个角色 2026-09-19 换了载体：capability-catalog.sh 曾把 10 张声明表以 `[<basename>]="…"` 逐行
+ *  嵌在体内，所以必须按名排除——扫它会让种群里的每个脚本都「被引用」一次，本工具的判别力归零。
+ *  gap-arch-catalog-declarations-leave-bash 把那些表搬进了 capability-catalog-declarations.json，
+ *  于是排除对象随之迁移：**数据文件**必须排除（同一批 basename 以新名字复现同一个假边），而薄入口
+ *  capability-catalog.sh 现在只 exec 渲染器、可以正常计入载体（它对 capability-catalog.ts 的引用是
+ *  真边）。按【角色】而不是按【文件名】表述，换载体时不会漏。
+ *  ⚠️ 仅对 code carrier 生效还不够：声明数据是 *.json，而 jsonFiles 那条路绕过了这个集合 ——
+ *  所以排除量在两处都要施加（见 listCarrierFiles）。 */
 const SELF_BASENAME = path.basename(fileURLToPath(import.meta.url));
-const EXCLUDED_CARRIER_BASENAMES = new Set(["capability-catalog.sh", SELF_BASENAME]);
+const EXCLUDED_CARRIER_BASENAMES = new Set(["capability-catalog-declarations.json", SELF_BASENAME]);
 const TEST_FILE_RE = /\.test\.(mjs|ts|cjs|js)$/;
 const SKIP_DIR_NAMES = new Set([
   ".git", "node_modules", ".quay", ".archguard", "worktrees", "dist", "vendor", "archive",
@@ -275,12 +285,14 @@ function listFiles(root: string, exts: Set<string>): string[] {
  * 枚举注册表/清单载体（§12f）：
  *   (a) 所有 *.json（排除数据输出目录 docs/measurements/experiments/packages/tasks/.claude 等 + 锁文件）；
  *   (b) 文件名带 registry|manifest|deliver|allowlist|exempt|catalog|members|inventory 信号的 *.ts/mjs/js/sh；
- * 显式排除 capability-catalog.sh 与测试文件。
+ * 显式排除 capability-catalog 的声明数据（EXCLUDED_CARRIER_BASENAMES，两处都要施加：jsonFiles 那条
+ * 路绕过 codeFiles 的过滤）与测试文件。
  */
 export function listCarrierFiles(root: string): string[] {
   const jsonFiles = listFiles(root, new Set([".json"])).filter((f) => {
     const rel = path.relative(root, f).split(path.sep).join("/");
     const base = path.basename(f);
+    if (EXCLUDED_CARRIER_BASENAMES.has(base)) return false;
     if (rel === "package.json" || rel === "package-lock.json" || rel === "tsconfig.json") return false;
     return true;
   });
@@ -641,7 +653,7 @@ export function collectExtraRefs(root: string, scripts: string[]): ExtraRef[] {
   // ① source-builtin：`source <path>` / `. <path>`。
   for (const abs of walkSourceFiles(root)) {
     const base = path.basename(abs);
-    if (base === "capability-catalog.sh") continue;
+    if (EXCLUDED_CARRIER_BASENAMES.has(base)) continue;
     if (TEST_FILE_RE.test(base)) continue;
     const ext = path.extname(abs);
     const rel = path.relative(root, abs).split(path.sep).join("/");
@@ -745,7 +757,7 @@ export interface ReferenceMap {
  * 建立反向引用表：对每个脚本，收集「以代码位置引用它」的文件（import 说明符 / plugin/scripts/<name>
  * 调用行（含 `${repo_root}/plugin/scripts/<name>` 插值形式）/ path.join(__dirname, "<name>") 相对执行形式
  * / 裸文件名清单项）。`bareRefs` 为扫描结果（调用方已算一次，勿重扫）；`includeBare` 控制是否
- * 计入 §12f 裸文件名边（before/after 对照）。载体排除：脚本自身、测试文件、capability-catalog.sh。
+ * 计入 §12f 裸文件名边（before/after 对照）。载体排除：脚本自身、测试文件、capability-catalog 的声明数据。
  * `.md` 引用只认 `plugin/scripts/<name>` 命令行（散文提及不算，SPEC §12d）；`.json` 只认裸文件名。
  */
 export function buildReferenceMap(
@@ -761,7 +773,7 @@ export function buildReferenceMap(
   const absToScript = buildAbsToScript(root, scripts);
   for (const abs of walkSourceFiles(root)) {
     const base = path.basename(abs);
-    if (base === "capability-catalog.sh") continue;
+    if (EXCLUDED_CARRIER_BASENAMES.has(base)) continue;
     if (TEST_FILE_RE.test(base)) continue;
     const ext = path.extname(abs);
     let text: string;

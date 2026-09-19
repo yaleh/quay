@@ -3,8 +3,10 @@
 // Covers the pure primitives on synthetic fixtures (never the live repo — deterministic):
 //   - enumerateGuards: 三目录按后缀 -check|-guard|-audit 枚举, 非守卫后缀不数。
 //   - classifyDeclaration: file:<path> = file 对象, 其余 = invariant。
-//   - parseGuardObjects: 只读 GUARD_OBJECT 块, 遇闭合 `)` 停 — 不读进后续 CADENCE/MATCHING/CONSUMER
-//     等数组 (回归: 首版 continue 而非 break, 同名覆盖读成 310 条错值)。
+//   - parseGuardObjects: 只读声明数据的 GUARD_OBJECT 表 — 同一份数据里其它表 (QUESTION/CADENCE/
+//     MATCHING/CONSUMER …) 绝不能被读成守卫对象 (回归: bash 表时代首版 continue 而非 break, 同名覆盖
+//     读成 310 条错值; gap-arch-catalog-declarations-leave-bash 把表搬成 JSON 后, 该风险由「按键取表」
+//     结构性消除, 本用例仍钉住「只读这一张表」)。
 //   - checkObjectPresent: file 存在/缺失, invariant 不可机械核验, 未声明。
 //   - readVerdicts: fired 名 / 窗口 / verdict-less 行不计入窗口且不伪造 fired。
 //   - isMutationVerified: 有 mutation case 文件才为真。
@@ -71,24 +73,30 @@ test("classifyDeclaration — file: 前缀 = file 对象, 其余 = invariant", (
   assert.equal(classifyDeclaration("no prefix").kind, "invariant");
 });
 
-test("parseGuardObjects — 只读 GUARD_OBJECT 块, 遇 ) 停, 不读进后续数组", () => {
-  const catalog = [
-    "declare -A QUESTION=(",
-    '  [foo-check.sh]="some question"',
-    ")",
-    "declare -A GUARD_OBJECT=(",
-    '  [foo-check.sh]="file:plugin/scripts/foo-check.sh"',
-    '  [bar-check.sh]="invariant:bar stays consistent"',
-    ")",
-    "declare -A CADENCE=(",
-    '  [foo-check.sh]="每轮"',
-    ")",
-  ].join("\n");
-  const m = parseGuardObjects(catalog);
-  assert.equal(m.size, 2, `must stop at the GUARD_OBJECT closing paren, got ${m.size}: ${JSON.stringify([...m.keys()])}`);
+test("parseGuardObjects — 只读 GUARD_OBJECT 表, 不读进 QUESTION/CADENCE/CONSUMER 等表", () => {
+  const declarations = JSON.stringify({
+    QUESTION: { "foo-check.sh": "some question", "baz-check.sh": "another question" },
+    GUARD_OBJECT: {
+      "foo-check.sh": "file:plugin/scripts/foo-check.sh",
+      "bar-check.sh": "invariant:bar stays consistent",
+    },
+    CADENCE: { "foo-check.sh": "每轮", "bar-check.sh": "按需" },
+    MATCHING: { "foo-check.sh": "keyword" },
+    CONSUMER: { "foo-check.sh": "consumer-facing" },
+  });
+  const m = parseGuardObjects(declarations);
+  assert.equal(m.size, 2, `must read ONLY the GUARD_OBJECT table, got ${m.size}: ${JSON.stringify([...m.keys()])}`);
   assert.equal(m.get("foo-check.sh").kind, "file");
   assert.equal(m.get("foo-check.sh").filePath, "plugin/scripts/foo-check.sh");
   assert.equal(m.get("bar-check.sh").kind, "invariant");
+  assert.equal(m.has("baz-check.sh"), false, "a name declared only in QUESTION is not a guard object");
+});
+
+test("parseGuardObjects — 读不懂的声明数据 ⇒ 空表 (不是伪造的合格)", () => {
+  for (const bad of ["", "not json", "[1,2,3]", JSON.stringify({ QUESTION: {} })]) {
+    const m = parseGuardObjects(bad);
+    assert.equal(m.size, 0, `unparsable/missing-table input must yield an empty map, got ${m.size} for ${JSON.stringify(bad)}`);
+  }
 });
 
 test("checkObjectPresent — file 存在/缺失, invariant 不可机械核验, 未声明", () => {
@@ -145,18 +153,20 @@ test("analyze — AC1/AC2 比例 + AC3 对象存在 + AC4 preventive/suspicious 
     "plugin/scripts/plain-check.ts": "export const x=1;\n",
     "plugin/scripts/checker-mutation-cases/checker-mutation-check.sh": "", // mutation-verified
     "orchestration/manager-tick-log.md": "tick",                          // file object present
-    "catalog.sh": [
-      "declare -A GUARD_OBJECT=(",
-      '  [checker-mutation-check.sh]="invariant:checkers can be mutation-reddened (preventive)"',
-      '  [manager-tick-log-check.sh]="file:orchestration/manager-tick-log.md"',
-      '  [plain-check.ts]="file:orchestration/nonexistent.md"',
-      ")",
-    ].join("\n"),
+    "catalog.json": JSON.stringify({
+      QUESTION: { "checker-mutation-check.sh": "q", "manager-tick-log-check.sh": "q", "plain-check.ts": "q" },
+      GUARD_OBJECT: {
+        "checker-mutation-check.sh": "invariant:checkers can be mutation-reddened (preventive)",
+        "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
+        "plain-check.ts": "file:orchestration/nonexistent.md",
+      },
+      CADENCE: { "checker-mutation-check.sh": "每轮" },
+    }),
     "cost.jsonl": [
       '{"name":"checker-mutation-check","ms":1,"n":1,"load":1,"at":"2026-09-04T10:00:00Z","verdict":"pass"}',
     ].join("\n") + "\n",
   });
-  const report = analyze(dir, { catalogFile: path.join(dir, "catalog.sh"), costFile: path.join(dir, "cost.jsonl") });
+  const report = analyze(dir, { catalogFile: path.join(dir, "catalog.json"), costFile: path.join(dir, "cost.jsonl") });
 
   // AC1: 3 guards, 3 declared (三个 basename 都在 GUARD_OBJECT)
   assert.equal(report.totalGuards, 3);

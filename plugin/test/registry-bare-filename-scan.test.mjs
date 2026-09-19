@@ -92,12 +92,15 @@ test("AC2: real repo — supervisor-bus-identity.sh is bare-filename-referenced 
   }
 });
 
-test("AC1: capability-catalog.sh is excluded as a carrier (population description, not usage)", () => {
+test("AC1: the capability-catalog DECLARATION DATA is excluded as a carrier (population description, not usage)", () => {
   const result = scanBareFilenameRefs(repoRoot);
-  // 任何脚本的命中 carrier 都不该是 capability-catalog.sh。
+  // 任何脚本的命中 carrier 都不该是那份声明数据 —— 它逐条登记种群里的每个 basename，当引用读会让所有
+  // 脚本永远活着（硬规则 4）。该角色 2026-09-19 从 capability-catalog.sh 换到此文件
+  // (gap-arch-catalog-declarations-leave-bash)：.sh 成了薄入口，可以（且必须）正常计入载体。
   for (const ref of result.refs) {
     for (const c of ref.carriers) {
-      assert.ok(!c.file.endsWith("capability-catalog.sh"), `${ref.script} must not be "referenced" by the catalog`);
+      assert.ok(!c.file.endsWith("capability-catalog-declarations.json"),
+        `${ref.script} must not be "referenced" by the catalog's declaration data`);
     }
   }
 });

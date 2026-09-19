@@ -260,7 +260,10 @@ test("AC5 wiring — manager-phase-goal carries the AC41 判据 3 red-on-omissio
 });
 
 test("AC5 wiring — the checker is declared in capability-catalog (mechanism-catalog admission)", () => {
-  const cat = fs.readFileSync(path.join(repoRoot, "plugin", "scripts", "capability-catalog.sh"), "utf8");
+  // The declaration table is DATA now (gap-arch-catalog-declarations-leave-bash), read from
+  // capability-catalog-declarations.json rather than from the .sh source text.
+  const cat = fs.readFileSync(
+    path.join(repoRoot, "plugin", "scripts", "capability-catalog-declarations.json"), "utf8");
   assert.match(cat, /red-on-omission-audit/, "capability-catalog must declare the red-on-omission audit");
 });
 

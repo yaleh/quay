@@ -93,6 +93,14 @@ type Tables = Record<string, Record<string, string>>;
 // the packaged artifact (plugin/scripts/dist/capability-catalog.js → plugin/scripts/), because
 // package.sh bundles the .ts into dist/ and deletes the raw source. Two candidate paths, first
 // hit wins; ZERO hits is a hard error, never a silently-empty catalog (硬规则 3b).
+//
+// ⛔ The directory the file is FOUND IN is also the answer to "which directory holds the checks"
+// (PLUGIN_SCRIPTS_DIR below), and that matters: in the packaged artifact this module lives in
+// dist/ while the check set lives one level up, so enumerating `SCRIPT_DIR` would silently derive
+// an EMPTY check set and report `0 scripts | 0 declared | 0 unclassified` — a vacuous PASS of
+// exactly the kind 硬规则 3b forbids. The declarations file is the anchor for both, so the two
+// can never disagree. (Found by running the real packages/quay/scripts/package.sh and reading the
+// staged artifact; the dev tree alone cannot see it.)
 function declarationsCandidates(): string[] {
   return [
     path.join(SCRIPT_DIR, DECLARATIONS_BASENAME),
@@ -105,7 +113,13 @@ function die(cause: string, detail: string): never {
   process.exit(3);
 }
 
-function loadTables(): Tables {
+interface Declarations {
+  tables: Tables;
+  file: string;
+  scriptsDir: string;
+}
+
+function loadTables(): Declarations {
   const candidates = declarationsCandidates();
   const file = candidates.find((p) => fs.existsSync(p));
   if (!file) {
@@ -113,6 +127,7 @@ function loadTables(): Tables {
       `no ${DECLARATIONS_BASENAME} found (looked in: ${candidates.join(", ")}). The capability catalog's ` +
       `declaration data is absent — refusing to render an empty catalog as if every check were declared.`);
   }
+  const scriptsDir = path.dirname(path.resolve(file));
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
@@ -151,7 +166,7 @@ function loadTables(): Tables {
       `${file} is missing the ${missing.join(", ")} table(s). An absent table is NOT an empty table — ` +
       `rendering it as empty would silently report every check as unclassified-or-undeclared.`);
   }
-  return tables;
+  return { tables, file, scriptsDir };
 }
 
 // ── data-integrity gate (AC5): no command-substitution pattern in any DECLARATION value ──────
@@ -220,8 +235,8 @@ function fileExists(p: string): boolean {
   try { return fs.statSync(p).isFile(); } catch { return false; }
 }
 
-function runSupersededCheck(tables: Tables): number {
-  const root = repoRoot(SCRIPT_DIR);
+function runSupersededCheck(tables: Tables, scriptsDir: string): number {
+  const root = repoRoot(scriptsDir);
   const superseded = tables.SUPERSEDED;
   let viol = "";
   for (const b of Object.keys(superseded)) {
@@ -327,7 +342,7 @@ function main(argv: string[]): number {
       return 2;
   }
 
-  const tables = loadTables();
+  const { tables, scriptsDir } = loadTables();
 
   // AC5 data-integrity gate — fail-fast BEFORE any rendering, over EVERY declaration value.
   const csHits = findCommandSubstitutions(tables);
@@ -338,10 +353,13 @@ function main(argv: string[]): number {
     return 1;
   }
 
-  if (mode === "superseded-check") return runSupersededCheck(tables);
+  if (mode === "superseded-check") return runSupersededCheck(tables, scriptsDir);
 
   // ── build rows ────────────────────────────────────────────────────────────────────────────
-  const scripts = deriveScripts(SCRIPT_DIR);
+  // ⛔ scriptsDir, NOT SCRIPT_DIR: in the packaged artifact this module lives in scripts/dist/ while
+  // the check set lives in scripts/ (see loadTables). Enumerating the module's own dir derives an
+  // EMPTY set and reports a vacuous `0 scripts | 0 declared | 0 unclassified` PASS.
+  const scripts = deriveScripts(scriptsDir);
   const QUESTION = tables.QUESTION, CADENCE = tables.CADENCE, INVALIDATION = tables.INVALIDATION;
   const LAST_REAFFIRMED = tables.LAST_REAFFIRMED, MATCHING = tables.MATCHING;
   const CONSUMER = tables.CONSUMER, NOT_SHIPPED = tables.NOT_SHIPPED, PUBLIC_ENTRYPOINTS = tables.PUBLIC_ENTRYPOINTS;
@@ -383,7 +401,7 @@ function main(argv: string[]): number {
     rows.push({ file: b, question: q, ships, surface, cadence, invalidation, lastReaffirmed, matching, consumer });
   }
 
-  const pluginRoot = path.resolve(SCRIPT_DIR, "..");
+  const pluginRoot = path.resolve(scriptsDir, "..");
   const docRefs = docReferencedSh(pluginRoot);
   const violations = docRefs.filter((b) => !PUBLIC_ENTRYPOINTS[b]);
   const DOC_REFERENCED_SH_COUNT = docRefs.length;
@@ -427,7 +445,7 @@ function main(argv: string[]): number {
   } else if (mode === "summary") {
     console.log(`capability-catalog: ${TOTAL} scripts | ${DECLARED} declared | ${UNCLASSIFIED} unclassified | ${SHIPPED} ship`);
   } else if (mode === "table") {
-    console.log(`capability catalog — what each shipped check answers (${SCRIPT_DIR})`);
+    console.log(`capability catalog — what each shipped check answers (${scriptsDir})`);
     console.log("---------------------------------------------------------------------------");
     for (const r of rows) {
       if (!r.ships) console.log(`  ${r.file.padEnd(40, " ")} ${r.question}   [NOT SHIPPED — exp5 legacy]`);

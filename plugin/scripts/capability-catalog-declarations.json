@@ -862,7 +862,7 @@
   "inner-wakeup-heartbeat.ts": "失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休",
   "instrument-failure-check.ts": "失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休",
   "instrument-decay-check.ts": "失效前提：fan-in-step-trace.jsonl / fan-in-lock-events.jsonl 仍是共享载体的 fan-in 遥测账本（worker-driver.ts 的 appendFanInStepTrace / 锁事件写手不退役不改名），且共享载体仍承担跨任务/跨时间聚合；若 suite 决策步骤移出共享载体成为有意设计（不再要求共享聚合），本条的 expected 词表随写手语义失效，退休",
-  "guard-lineage-check.ts": "失效前提：本仓库仍以 checker-cost.jsonl 的 verdict 字段（gap-checker-cost-jsonl-add-verdict-field）与 capability-catalog.sh 的 GUARD_OBJECT 声明块为 P4 守卫谱系的裁决/声明来源；若 verdict 记录格式迁出 checker-cost.jsonl 或 GUARD_OBJECT 声明块迁出 capability-catalog.sh（改由守卫脚本头部自述），本条的 declared-ratio / fired-ratio / disposition 读取面失效，需同步",
+  "guard-lineage-check.ts": "失效前提：本仓库仍以 checker-cost.jsonl 的 verdict 字段（gap-checker-cost-jsonl-add-verdict-field）与 capability-catalog 的 GUARD_OBJECT 表（声明数据 capability-catalog-declarations.json；2026-09-19 前该表在 capability-catalog.sh 里，gap-arch-catalog-declarations-leave-bash 搬出）为 P4 守卫谱系的裁决/声明来源；若 verdict 记录格式迁出 checker-cost.jsonl 或 GUARD_OBJECT 表迁出该数据文件（改由守卫脚本头部自述），本条的 declared-ratio / fired-ratio / disposition 读取面失效，需同步",
   "retired-clause-check.ts": "失效前提：AC58 archive 仍是退役条款的落点登记处；若迁出 archive 机制，本条按 ④ 失效",
   "integration-batch-merge.sh": "无可测前提，靠周期复核",
   "it0-enforcement-with-design-check.sh": "无可测前提，靠周期复核",
