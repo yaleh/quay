@@ -2,7 +2,7 @@
 id: gap-arch-coverage-self-report
 title: 分析仪器覆盖面自报：按语言列出谁分析了它，未分析者标 NOT-EVALUATED（含 archguard 默认 global scope
   只覆盖部分 TS 的显式读数）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
