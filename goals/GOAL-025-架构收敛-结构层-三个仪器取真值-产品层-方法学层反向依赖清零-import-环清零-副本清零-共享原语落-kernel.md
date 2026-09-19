@@ -1,13 +1,22 @@
 ---
 id: GOAL-025
 title: 架构收敛（结构层）：三个仪器取真值、产品层→方法学层反向依赖清零、import 环清零、副本清零、共享原语落 kernel/、catalog 声明表数据化
-status: draft
+status: active
 kind: goal
 origin: 人 2026-09-19 两轮对话：①对 quay 做 archguard 架构分析并补充未覆盖部分；②检查 .sh 层，相信其中许多应集成入
   .ts 以构建更紧凑架构；③按 SPEC-architecture-consolidation-ts-and-shell-2026-09-19
   立案，Phase 0 三个 task 已立（gap-arch-import-graph-check / gap-arch-sh-census-check /
   gap-arch-coverage-self-report）；同日四条裁定（kernel/、控制面 shell 暂保留、experiments
   副本先改符号链接、verify-deliver-coldstart 不立案）。
+activatedAt: 2026-09-19T05:30:42.502Z
+statusLog:
+  - at: 2026-09-19T05:30:42.503Z
+    from: draft
+    to: active
+    actor: user
+    reason: 人 2026-09-19 对话中明确指示「先立 Phase 0 的三个 task，再建 GOAL 并激活（单次授权）」；8 条
+      AC（AC-304~AC-311）已就位且判据均为读本地检查器输出的轻量形态，今天逐条实跑均为 exit 1 并带
+      CAUSE=（能取假），桩检查器下通过/失败/未评估三支各 18/18 符合预期。
 ---
 ## 背景
 
