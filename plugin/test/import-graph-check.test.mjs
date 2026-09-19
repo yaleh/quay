@@ -358,6 +358,14 @@ test("AC3 — the real reverse edges start from the three packages/ files the ra
 });
 
 test("AC4 — node ids are unique, carry no .claude/worktrees copy, and no symlink-dir phantom", () => {
+  // The DISJOINTNESS half first, asserted on the FLAT list rather than through a Set: SCCs partition
+  // the node set, so a path appearing twice would mean the graph was built twice over — and a Set would
+  // silently absorb exactly that. This is the assertion AC4's 「每个节点路径唯一」 actually names.
+  const flatSccMembers = [...REAL.valueSccs, ...REAL.typeSccs].flatMap((s) => s.files);
+  assert.equal(new Set(flatSccMembers).size, flatSccMembers.length, `an SCC member appears twice: ${flatSccMembers.filter((f, i) => flatSccMembers.indexOf(f) !== i)}`);
+  const flatReverse = REAL.reverseEdges.map((e) => `${e.from}:${e.line}->${e.to}`);
+  assert.equal(new Set(flatReverse).size, flatReverse.length, "the same reverse edge is listed twice");
+
   // Every path the checker ever names (both layers: SCC members and reverse-edge endpoints) — this is
   // the enumerated surface, so a phantom node cannot hide outside the SCC lists.
   const named = new Set();
