@@ -33,14 +33,16 @@ depends_on:
 - 归档前 `find ~/.claude/projects/-home-yale-work-quay/memory -type f -name '*.md' | wc -l` = **543**
 - 归档后 同命令 = **543**（manifest 头部 `files_before=543` / `files_after=543`；`archive/*.md` = **352** = manifest 数据行数 352）
 - 全部用 `mv`，未删任何文件。
+- ⚠️ **检出时该命令返回 546 而非 543**：07:18Z 另一个会话往共享记忆目录新写了 3 条记忆（`backticked-path-anchor-…` / `doc-only-task-scoped-gate-needs-allow-thin` / `ifs-tab-read-collapses-…`），**是增长不是丢失**。AC1 的谓词是「归档前后各跑一次」，其两个读数就是 manifest 头部的 `files_before`/`files_after`（543/543，`--apply` 退出前自断言相等）；把「目录永远等于 543」当判据会让这条 AC 在它自己描述的多层共享环境里不可满足。`--check` 因此改为四段：①边界守恒（543==543）②`archive/` 与清单行数一致 ③352 行原路径全部已不在原位 ④`now >= files_after`，**增长只报尺寸不判红**。
 
 **AC2 索引形状**：
-- 新 `MEMORY.md`：`awk 'END{print NR}'` = **39**（≤40）；`awk '{ if (length($0)>150) c++ } END{print c+0}'` = **0**
+- 新 `MEMORY.md`：`awk 'END{print NR}'` = **40**（≤40）；`awk '{ if (length($0)>150) c++ } END{print c+0}'` = **0**
 - 旧版同谓词 = **58**（95 行 / 22334 B）⇒ 谓词能命中
 - AC 指定的对照：`baseline/MEMORY.md.snapshot` 同谓词 = **56** > 0
-- 直链 **52** 条（另有 11 个 topic 簇入口）：40 行上限把 Proposal 的「最热 60 直链」压到 52（26 行 × 2 链接）。差距是行数上限的函数、已量出，不是遗漏。
+- 结构：11 个 topic 簇入口 + `**热点直链**` + 热点直链。**40 行上限把 Proposal 的「最热 60 直链」压到 52**（26 行 × 2 链接）——这是行数上限的函数，已量出，不是漏做。
+- ⚠️ **另一个会话在 07:18Z 追加了一行**（三个新记忆挤在一行，202 字符，超限）。三个长文件名单独就占 158 字符 ⇒ 任何三链接行都过不了 150，故拆成两行；同时**撤掉读数最低的一对**（`gap-task-required-headings` / `filing-four-artifacts-min-40-chars`，合计 7 次，两者都能从 `topic-filing` 到达）以守住 40 行。**该索引是多写者共享文件，40 行是每个写者都要守的预算**——追加前不核预算是本次唯一一次超限的成因，`--check` 的 AC2 就是抓它的仪器（它抓到了）。
 
-**AC3 链接**：63 条 `](path)` 逐条枚举（`--check` 每条打印 OK），断链 **0**。
+**AC3 链接**：**64** 条 `](path)` 逐条枚举（`--check` 每条打印 OK），断链 **0**。
 
 **AC4 归档前读取次数**：`p2-archive-selfcheck.sh --check` 以 readings.sh 的同一谓词逐文件重算，352 行全部 `reads_now=0` 且 `recorded=0`；前 3 行：
 - `a22-heartbeat-must-pass-cap-5.md` reads_now=0 recorded=0
@@ -53,6 +55,6 @@ depends_on:
 
 **④ 去重**：`quay-config-yml-is-gitignored`、`memory-directory-shared-across-layers`、`meta-cc-main-session-query-is-fresh-dont-handgrep` 三条已被 CLAUDE.md 覆盖且从未被读 ⇒ 随归档移入 `archive/`，reason 列写 `never-read-14d;covered-by-CLAUDE.md`（3 行，可 grep 审计）。
 
-**结果**：`bash orchestration/context-slimming/p2-archive-selfcheck.sh --check` → **8 PASS / 0 FAIL / 0 NOT-EVALUATED，VERDICT GREEN**；`--apply` 幂等（重跑 moved=0 / already_in_place=352）。
+**结果**：`bash orchestration/context-slimming/p2-archive-selfcheck.sh --check` → **11 PASS / 0 FAIL / 0 NOT-EVALUATED，VERDICT GREEN**；`--apply` 幂等（重跑 moved=0 / already_in_place=352）。
 
 **观察期**：起点 2026-09-19 写入 manifest 头部 `observation_start`；找回处置写在同一头部 `misarchive_policy`（移回 + 追加一行 reason 含 `misarchive`），不靠记忆。
