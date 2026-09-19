@@ -63,12 +63,17 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - packages/quay/src/kernel/write-json-atomic.ts (new)
 - packages/quay/src/kernel/shape-sections.ts (new)
 - packages/quay/src/kernel/proc-identity.ts (new)
+- packages/quay/src/kernel/control-state.ts (new)
+- packages/quay/src/kernel/control-plane-http.ts (new)
 - packages/quay/src/serve.ts
 - packages/quay/src/server-state.ts
 - packages/quay-native/src/store.ts
 - plugin/scripts/write-json-atomic.ts
 - plugin/scripts/shape-sections.ts
 - plugin/scripts/worktree-process-reaper.ts
+- plugin/scripts/driver-shared.ts
+- packages/quay/scripts/build-dist.mjs
+- packages/quay/scripts/esbuild-sea.mjs
 - plugin/import-graph-baseline.json
 - plugin/test/worktree-process-reaper.test.mjs
 - plugin/test/suite-slot-ssot-check.test.mjs
@@ -76,18 +81,123 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - packages/quay/test/serve.test.mjs
 - tasks/gap-arch-reverse-edges-zero.md
 
-（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。）
+（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本。）
 
 ## AC
 
-- [ ] AC1（判据取假，负控制）在任务 worktree 里**临时**加一条 `packages/quay/src/<file>.ts` → `plugin/scripts/<x>.ts` 的 import，`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `reverseEdges` 增加且命令 exit 1；撤销后 exit 0 且 `reverseEdges` 为空数组。**两次输出（含 `reverseEdges.length`）贴进 notes。** ⛔ 若撤销前后读数相同 ⇒ 判据未取假，本任务不算完成。
-- [ ] AC2（目标读数，两个独立读法互校）在真实仓库根跑 AC-307 的判据本体 `node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `evaluated===true` 且 `Array.isArray(reverseEdges) && reverseEdges.length === 0`；**同时** Proposal 里那条 `git ls-files` 位置判据的 grep 输出行数 = 0。**两者不一致 ⇒ 报仪器故障，不得只信其一**（硬规则 4 推论二检测半边）。
-- [ ] AC3（kernel 边界）`packages/quay/src/kernel/` 下每个 tracked `.ts` 的 import 均只指向 `node:*` 或 kernel/ 内文件；同一次 `--json` 的 `kernelChecked===true` 且无 kernel 越界项。`worktree-process-reaper.ts` **未被整文件搬入**（仍在 `plugin/scripts/` 且仍 import `./gate-script-base.ts`）。
-- [ ] AC4（生产载体，非 fixture —— 硬规则 4 推论三；**本任务最重要的一条**）在任务 worktree 内构建真产物并对其取读数：`bash packages/quay/scripts/package.sh` 产出的 dist bundle 中**不再内联 plugin 层路径**——对 `packages/quay/dist/quay.js` grep `plugin/scripts/{write-json-atomic,shape-sections,driver-shared,worktree-process-reaper}` 命中 0，或对每条仍存在的命中给出逐条说明；且 `node --test packages/quay/test/npm-pack-e2e.test.mjs` 与 `node --test packages/quay/test/build-dist.test.mjs` 绿。**命令与关键输出行贴进 notes。** ⛔ 只跑 `--json` 检查器不算本条的证据。
-- [ ] AC5（棘轮方向）`plugin/import-graph-baseline.json` 的 `reverseEdges` 值 = 0，且 notes 里说明本任务是**降低**基线而非抬高；`import-graph-check --selftest` 中「把基线任一值调高相对 HEAD 基线 ⇒ exit 1」的用例仍通过。
-- [ ] AC6（回归面不破）`scripts/test.sh` 的 scoped/静态入口（见其头注释）在本任务 Touches 上全绿；另单独跑并贴出：`plugin/test/worktree-process-reaper.test.mjs`、`plugin/test/suite-slot-ssot-check.test.mjs`、`packages/quay-native/test/gate-shape-dispatch.test.mjs`、`packages/quay/test/serve.test.mjs`。
-- [ ] AC7（注释不成为假话）三处注释（`quay-native/src/store.ts:36-41`、`server-state.ts:32-35`、`serve.ts:31-35`）中不再有「这些模块住在 plugin/scripts/ 是因为 quay-init 不铺 packages/ 树」这类**与落地后事实相反**的句子；`git diff` 里能看到它们被改写为 kernel 侧的可达性论证。
+- [x] AC1（判据取假，负控制）在任务 worktree 里**临时**加一条 `packages/quay/src/<file>.ts` → `plugin/scripts/<x>.ts` 的 import，`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `reverseEdges` 增加且命令 exit 1；撤销后 exit 0 且 `reverseEdges` 为空数组。**两次输出（含 `reverseEdges.length`）贴进 notes。** ⛔ 若撤销前后读数相同 ⇒ 判据未取假，本任务不算完成。
+- [x] AC2（目标读数，两个独立读法互校）在真实仓库根跑 AC-307 的判据本体 `node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `evaluated===true` 且 `Array.isArray(reverseEdges) && reverseEdges.length === 0`；**同时** Proposal 里那条 `git ls-files` 位置判据的 grep 输出行数 = 0。**两者不一致 ⇒ 报仪器故障，不得只信其一**（硬规则 4 推论二检测半边）。
+- [x] AC3（kernel 边界）`packages/quay/src/kernel/` 下每个 tracked `.ts` 的 import 均只指向 `node:*` 或 kernel/ 内文件；同一次 `--json` 的 `kernelChecked===true` 且无 kernel 越界项。`worktree-process-reaper.ts` **未被整文件搬入**（仍在 `plugin/scripts/` 且仍 import `./gate-script-base.ts`）。
+- [x] AC4（生产载体，非 fixture —— 硬规则 4 推论三；**本任务最重要的一条**）在任务 worktree 内构建真产物并对其取读数：`bash packages/quay/scripts/package.sh` 产出的 dist bundle 中**不再内联 plugin 层路径**——对 `packages/quay/dist/quay.js` grep `plugin/scripts/{write-json-atomic,shape-sections,driver-shared,worktree-process-reaper}` 命中 0，或对每条仍存在的命中给出逐条说明；且 `node --test packages/quay/test/npm-pack-e2e.test.mjs` 与 `node --test packages/quay/test/build-dist.test.mjs` 绿。**命令与关键输出行贴进 notes。** ⛔ 只跑 `--json` 检查器不算本条的证据。
+- [x] AC5（棘轮方向）`plugin/import-graph-baseline.json` 的 `reverseEdges` 值 = 0，且 notes 里说明本任务是**降低**基线而非抬高；`import-graph-check --selftest` 中「把基线任一值调高相对 HEAD 基线 ⇒ exit 1」的用例仍通过。
+- [x] AC6（回归面不破）`scripts/test.sh` 的 scoped/静态入口（见其头注释）在本任务 Touches 上全绿；另单独跑并贴出：`plugin/test/worktree-process-reaper.test.mjs`、`plugin/test/suite-slot-ssot-check.test.mjs`、`packages/quay-native/test/gate-shape-dispatch.test.mjs`、`packages/quay/test/serve.test.mjs`。
+- [x] AC7（注释不成为假话）三处注释（`quay-native/src/store.ts:36-41`、`server-state.ts:32-35`、`serve.ts:31-35`）中不再有「这些模块住在 plugin/scripts/ 是因为 quay-init 不铺 packages/ 树」这类**与落地后事实相反**的句子；`git diff` 里能看到它们被改写为 kernel 侧的可达性论证。
 
 ## DoD
 
 真实落地标准（DIR-026 Reading A）：**判据已在真实仓库上取到 0，且在真产物（npm-pack tarball / dist bundle）上验证过产品仍自包含**——不是「检查器在 fixture 上绿了」。**负控制已实做并留证**（AC1 的注入-撤销两次输出）。`serveControlPlane` 的选择（注入 / 下沉）与理由写在提交信息与 notes 里。**不修改 Provider ABI 与公开 CLI/MCP 表面**（`packages/quay/src/abi.ts` 及其 provider 契约）；**不改 `packages/**` 之外的语义**；**不动 `ff-merge.ts` 的运行时 spawn**；**不删任何 plugin 侧旧路径**（re-export 保留一个发布周期）。落地后 `bash plugin/scripts/capability-catalog.sh --summary` 的脚本数自报值不变（三个文件仍在原位，只是内容改为 re-export），UNCLASSIFIED=0。
+
+## Notes
+
+### §8-①b 裁定：`serveControlPlane` **下沉 kernel**，不注入（三条实测依据）
+
+1. **注入没有注入者。** `startServer()` 全仓库唯一调用点是 `packages/quay/src/cli/serve.ts` —— 它本身就在 `packages/**` 下，与 `serve.ts` 一样拿不到 plugin 侧实现。注入的净效果是产品里 MCP 控制面**静默永不起**（GOAL-017/AC-251 的全部意义就是 `quay serve` 一个 pid 同时托管 web + control），且没有任何检查会报。
+2. **「运行时解析缺省实现」会破坏产品自包含**，而那正是本任务 AC4 量的东西：用计算路径 resolve `plugin/scripts/driver-shared.ts`（`ff-merge.ts` 的 spawn 手法）会让 dist 依赖一个只在开发检出里存在的 `.ts` ⇒ 它按构造满足 import 图检查器，却让产品更不独立。任务体原文对这条形态已有预警（「把一条能被 import 图读到的边，改成在消费者里解析不到的边」）。
+3. **「下沉会把 driver 语义带进 L0」经实测被证否。** `serveControlPlane` 的传递闭包 = {`kernel/control-state.ts`, `kernel/control-plane-http.ts`, `kernel/write-json-atomic.ts`} + `node:fs` / `node:path` / `node:http` / `node:crypto`，**够不到 driver 运行时**：`resourceGateCheck`、`resolveResourceGateScript`、`spawnSync`、`fileURLToPath` 全部留在 `plugin/scripts/driver-shared.ts` 原位未动（该文件 504 → 118 行）。真正下沉的是「控制态 + 身份闸 + MCP 托管」这一域，而 `packages/quay/src/serve.ts` 自 stage A2（AC-251）起就在本进程内托管它 ⇒ 按 L0 的定义它已是共享原语。
+
+**方向**：`plugin/scripts/*.ts` re-export kernel（`export * from "../../packages/quay/src/kernel/…"`），恒为 plugin → kernel。kernel 侧无一条边反向。
+
+### AC1 — 负控制（注入 → 撤销 两次输出）
+
+探针 `packages/quay/src/ac1-reverse-edge-probe.ts`（临时，`git add -N` 使其进入 `git ls-files` 节点集，测毕删除并 `git reset`）：
+
+```
+=== WITH the injected import ===   import { isDirectEntry } from "../../../plugin/scripts/gate-script-base.ts";
+exit=1
+reverseEdges.length = 1
+    {'from': 'packages/quay/src/ac1-reverse-edge-probe.ts', 'to': 'plugin/scripts/gate-script-base.ts', 'line': 2}
+verdict.over = ['reverseEdges']
+
+=== AFTER revert ===
+exit=0 ; evaluated = True ; reverseEdges = [] -> length 0 ; kernelChecked = True kernelViolations = 0
+```
+
+两次读数不同 ⇒ 判据确实能取假。（第一次试跑用了 `../../plugin/…` 两级相对路径，`resolveSpecifier` 解析不到 ⇒ 读数仍 0 —— 这说明该量只计**可解析**的边，探针路径必须真实存在。）
+
+### AC2 — 两个独立读法互校（都在真实仓库根）
+
+- 读法一（判据本体）：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `exit=0`，`evaluated=true`，`files=433`，`reverseEdges=[]`（length 0），`kernelChecked=true`，`kernelViolations=[]`，`valueSccs=1`，`typeSccs=2`，`baseline={'valueSccs':1,'typeSccs':2,'reverseEdges':0}`，`verdict.ok=true`。
+- 读法二（位置 grep）：Proposal 里那条 `git ls-files … | grep -nE "^\s*(import|export)…"` ⇒ **行数 = 0**。
+
+两者一致。**kernel 文件必须已 tracked 才有效**：第一次（文件仅存在于工作树、未 `git add`）读数同样是 `kernelChecked=true / 0 violations`，但那是「目录存在而节点集为空」的空转；`git add` 后 `files` 由 428 升到 **433**（+5 个 kernel 文件），读数才是真的 —— 硬规则 3b 的形态，记录在此以免后人误信未 tracked 时的绿灯。
+
+### AC3 — kernel 边界（枚举，非布尔）
+
+`git ls-files 'packages/quay/src/kernel/*.ts'` = 5 个文件，其全部 `import … from` / `export … from` 语句：
+
+```
+kernel/control-plane-http.ts:22  import path from "node:path";
+kernel/control-plane-http.ts:23  import { randomUUID } from "node:crypto";
+kernel/control-plane-http.ts:24  import { createServer } from "node:http";
+kernel/control-state.ts:46       import fs from "node:fs";
+kernel/control-state.ts:47       import path from "node:path";
+kernel/control-state.ts:48       import { writeJsonAtomic } from "./write-json-atomic.ts";
+kernel/proc-identity.ts:29       import fs from "node:fs";
+kernel/proc-identity.ts:30       import path from "node:path";
+kernel/write-json-atomic.ts:32   import fs from "node:fs";
+kernel/write-json-atomic.ts:33   import path from "node:path";
+kernel/write-json-atomic.ts:34   import { randomBytes } from "node:crypto";
+```
+
+全部为 `node:*` 或 kernel/ 内文件。`control-plane-http.ts` 另有的 `@modelcontextprotocol/sdk/*` 与 `zod` 是 **`await import()` 惰性裸说明符**，按第四条规则不在「层间越界」范畴内（该规则明示裸说明符不在此列）。
+
+`worktree-process-reaper.ts` **未被整文件搬入**：仍在 `plugin/scripts/`（`git ls-files` 可见），且 `:82` 仍 `import { isDirectEntry } from "./gate-script-base.ts";`，`:86` 仍 import `./suite-lock-slots.ts`；只把两个叶子谓词提走并在文件顶部 `import { readProcCmdline, isQuayServe } from "../../packages/quay/src/kernel/proc-identity.ts"; export { readProcCmdline, isQuayServe };`。
+
+### AC4 — 真产物（**本任务最重要的一条**）
+
+```
+$ bash packages/quay/scripts/package.sh          # exit 0
+  ... dist-closure gate OK: 98 referenced dist bundles all present in quay-0.10.0-dev.tgz
+  Artifact: packages/quay/dist/../../packages/quay/quay-0.10.0-dev.tgz   (12.4 MB, 513 files)
+
+$ grep -c "plugin/scripts/<name>" packages/quay/dist/quay.js   (2474591 bytes)
+  plugin/scripts/write-json-atomic     -> 0
+  plugin/scripts/shape-sections        -> 0
+  plugin/scripts/driver-shared         -> 0
+  plugin/scripts/worktree-process-reaper -> 0
+```
+
+bundle 里 **13 行**仍含 `plugin/` 字样，**逐条说明（全部为运行时耦合 / 文案，无一条是 import 边）**：`path.join(root, "plugin/scripts/drivers.yml")` 读文件；`task-status-drift-check.ts` / `runtime-usage-inventory.ts` / `loop-driver-check.sh` / `dark-axis-record-check.ts` 的 **spawn 目标或存在性探测**；`quay-init.sh` 出现在工具帮助文案与错误消息里；另有 1 行注释。这与任务体点名「`ff-merge.ts` 的运行时 spawn 不算边、不得顺手改」是同一条边界。
+
+两条测试（AC4 要求）：
+- `node --test packages/quay/test/npm-pack-e2e.test.mjs` ⇒ **11 pass / 0 fail**，exit 0（其中包含「tarball 必须携带整个 plugin bundle」「bin 解析到 dist/quay.js」「installed `quay task list` 真 provider 往返」）。
+- `node --test packages/quay/test/build-dist.test.mjs` ⇒ **7 pass / 0 fail**，exit 0。
+
+### AC5 — 棘轮方向：**降低**基线
+
+`plugin/import-graph-baseline.json` 的 `reverseEdges` 由 **5 → 0**（降低方向，无需仪式，但改动已提交）。`valueSccs=1` / `typeSccs=2` 未动（实测未变，见 AC2）。
+
+`node --experimental-strip-types plugin/scripts/import-graph-check.ts --selftest` ⇒ **PASS — all 9 case(s) behaved**，exit 0，其中含 `baseline-raised-above-head`：`equal⇒0 · lowered⇒0 · raised(+1)⇒1 · missing-baseline⇒2`（把基线任一值调高相对 HEAD ⇒ exit 1 的用例仍通过）。
+
+### AC6 — 回归面
+
+- `plugin/test/worktree-process-reaper.test.mjs` ⇒ **22 pass / 0 fail**
+- `plugin/test/suite-slot-ssot-check.test.mjs` ⇒ **20 pass / 0 fail**
+- `packages/quay-native/test/gate-shape-dispatch.test.mjs` ⇒ **14 pass / 0 fail**
+- `packages/quay/test/serve.test.mjs` ⇒ **1 pass / 0 fail**（97.5 s，QN-031 serve/action 全组）
+- `plugin/test/driver-shared.test.mjs` ⇒ **7 pass / 0 fail**
+- `scripts/test.sh --for-task gap-arch-reverse-edges-zero --allow-thin` ⇒ 见提交信息
+
+`bash plugin/scripts/capability-catalog.sh --summary` ⇒ `341 scripts | 341 declared | 0 unclassified | 336 ship` —— 与主检出读数**逐字相同**（三个文件仍在原位，只是内容改为 re-export）。
+
+### AC7 — 注释不成为假话
+
+三处点名的注释已改写（`git diff` 可见），新的论证是 kernel 侧可达性论证而非删除。**同轮另发现并修掉两处同形假话**（硬规则 5b：修好一个不等于只有这一个）：
+- `plugin/scripts/worktree-process-reaper.ts` 文件末尾的 `isDirectEntry` 理由段原写「serve.ts 现在 import 本模块 ⇒ reaper 被 inline 进 quay bundle」—— 本改动后该前提消失，已改为「该 inlining 已随本任务消失，NAME-based guard 仍保留（本文件仍被 import 它的 PLUGIN bundle inline、仍被 ff-merge 直接 spawn）」。
+- `packages/quay/scripts/build-dist.mjs` 的 `bundleNodePaths` 与 `packages/quay/scripts/esbuild-sea.mjs` 的 `nodePaths` 注释原以「serve.ts inline plugin/scripts/driver-shared.ts」为理由 —— 已标明该理由随本任务失效、机制保留为防御（additive），并指明当前真正的判据是 `reverseEdges === 0`。
+
+全仓库再 grep「quay-init 铺机制层但不铺 packages/ 树」这一说法，唯一命中在 `kernel/shape-sections.ts` 内部，且处于「**该旧理由现已是假**」的引述句中，非断言。
+
+### 与 Proposal 5 条边的对账
+
+实现后 5 条边全部消失，**无一条为凑数而被改检查器**：`serve.ts` 三条 → `./kernel/{control-plane-http,write-json-atomic,proc-identity}.ts`；`server-state.ts` 一条 → `./kernel/write-json-atomic.ts`；`packages/quay-native/src/store.ts` 一条 → `../../quay/src/kernel/shape-sections.ts`。Proposal 表格的行号（`:36/:38/:42/:38/:42`）与实现前实测一致，未出现差异。
