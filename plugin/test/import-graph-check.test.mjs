@@ -289,6 +289,31 @@ test("an unreadable input is NOT-EVALUATED, never a silent PASS (AC1's exit-2 di
   });
 });
 
+test("--json emits ONE parseable JSON document on stdout — no human line appended", () => {
+  // The failure this pins: the human `PASS — …` line was written to stdout AFTER the JSON object, so
+  // `checker --json | jq .` died with "Unexpected non-whitespace character after JSON" while the
+  // checker itself exited 0 — a machine consumer broken by a passing run. `JSON.parse` on the WHOLE
+  // stdout is the assertion: a stray line makes it throw.
+  const checker = path.join(REPO_ROOT, "plugin", "scripts", "import-graph-check.ts");
+  for (const args of [["--json"], ["--selftest", "--json"]]) {
+    const out = execFileSync(process.execPath, ["--no-warnings", "--experimental-strip-types", checker, "--root", REPO_ROOT, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const parsed = JSON.parse(out); // throws on any trailing non-JSON text
+    assert.equal(typeof parsed, "object");
+  }
+});
+
+test("the non-JSON reading DOES print the human verdict line", () => {
+  const checker = path.join(REPO_ROOT, "plugin", "scripts", "import-graph-check.ts");
+  const out = execFileSync(process.execPath, ["--no-warnings", "--experimental-strip-types", checker, "--root", REPO_ROOT], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.match(out, /^(import-graph-check: files=|PASS — |FAIL — )/m);
+});
+
 // ── the real repo: AC2 / AC3 / AC4 as readings, not prose ────────────────────────────────────────────
 
 const REAL = readImportGraph(REPO_ROOT);

@@ -941,7 +941,7 @@ export function main(argv: string[]): number {
         console.log(`      ${r.ok ? "reading : " : "PROBLEM : "}${r.detail}`);
       }
     }
-    console.log(ok ? `PASS — all ${results.length} case(s) behaved` : "FAIL — see the cases above");
+    if (!asJson) console.log(ok ? `PASS — all ${results.length} case(s) behaved` : "FAIL — see the cases above");
     return ok ? 0 : 1;
   }
 
@@ -984,12 +984,17 @@ export function main(argv: string[]): number {
     );
     return 1;
   }
-  const boot = verdict.bootstrap
-    ? ` (headBaseline: absent-bootstrap — HEAD carries no ${relForHead}; this reading is the new baseline)`
-    : ` (headBaseline ${JSON.stringify(verdict.headBaseline)})`;
-  process.stdout.write(
-    `PASS — valueSccs=${counts.valueSccs} ≤ ${baseline.valueSccs}, typeSccs=${counts.typeSccs} ≤ ${baseline.typeSccs}, reverseEdges=${counts.reverseEdges} ≤ ${baseline.reverseEdges}${boot}\n`,
-  );
+  // ⛔ In --json mode stdout carries the JSON OBJECT and nothing else: an appended human line makes the
+  // whole stream unparseable (`--json | jq` and every machine consumer break), and the verdict is
+  // already inside the JSON. The human PASS line is for the non-JSON reading only.
+  if (!asJson) {
+    const boot = verdict.bootstrap
+      ? ` (headBaseline: absent-bootstrap — HEAD carries no ${relForHead}; this reading is the new baseline)`
+      : ` (headBaseline ${JSON.stringify(verdict.headBaseline)})`;
+    process.stdout.write(
+      `PASS — valueSccs=${counts.valueSccs} ≤ ${baseline.valueSccs}, typeSccs=${counts.typeSccs} ≤ ${baseline.typeSccs}, reverseEdges=${counts.reverseEdges} ≤ ${baseline.reverseEdges}${boot}\n`,
+    );
+  }
   return code; // 0 — the three FAIL branches above already returned; `decide()` is the single mapping
 }
 
