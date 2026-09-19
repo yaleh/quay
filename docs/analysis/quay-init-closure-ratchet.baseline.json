@@ -1,11 +1,11 @@
 {
   "files": 3,
   "bytes": 1022,
-  "fingerprint": "8738bf2c24c5db05fbc45c35c372748396684ff3846eb9ad9c4af90031e8ebca",
+  "fingerprint": "80ae1871ad6691289a6d0a32c1c359cc394148143799d80e4b8fab24f7f06dbf",
   "sources": [
     {
       "rel": "plugin/.claude-plugin/plugin.json",
-      "sha": "bbef7be895e515cebcb5dd99e20a47e0cc4df15373b133bdf023e541a8f14363"
+      "sha": "a143b901c975c985852b0a53e32ee427ad1a12f5d18058cf47bcf5d7a3bbe5b6"
     },
     {
       "rel": "plugin/.claude/launch.settings.json",
