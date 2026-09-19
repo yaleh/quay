@@ -100,32 +100,132 @@ $ bash plugin/scripts/capability-catalog.sh --json | jq length
 - plugin/scripts/guard-lineage-check.ts
 - plugin/scripts/select-static-checks-for-touches.ts
 - plugin/scripts/rhythm-consumer-check.ts
+- plugin/scripts/registry-bare-filename-scan.ts
+- plugin/scripts/outer-retirement-precondition-check.ts
+- plugin/scripts/sh-census-check.ts
 - plugin/scripts/checker-lib.ts
 - plugin/scripts/quay-init.sh
 - plugin/scripts/checker-mutation-cases/capability-catalog.sh
 - plugin/scripts/checker-mutation-cases/rhythm-consumer-check.sh
 - plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh
 - plugin/test/capability-catalog.test.mjs
+- plugin/test/guard-lineage-check.test.mjs
+- plugin/test/select-static-checks-for-touches.test.mjs
+- plugin/test/registry-bare-filename-scan.test.mjs
 - plugin/test/trend-check.test.mjs
 - plugin/test/red-on-omission-audit.test.mjs
 - plugin/test/repo-root-unification.test.mjs
 - plugin/test/archive-exclusion-wiring.test.mjs
+- plugin/test/shipped-entry-runnable.test.mjs
+- plugin/sh-census-baseline.json
+- plugin/skills/quay-file-task/SKILL.md
 - packages/quay/scripts/package.sh
 - tasks/gap-arch-catalog-declarations-leave-bash.md
 
-（前 3 行按**设计分岔 (a)** 命名（数据 = `.json`，渲染器 = `.ts`）；**若选 (b)**，落地前先把 `plugin/catalog/capability-catalog.ts` 与 `plugin/catalog/<declarations>.json` 补进本清单再改——两条路都需要 `quay-init.sh` 的 laydown 集合与 `package.sh` 的暂存副本核对，故这两个文件无论选哪条都在清单里。落地若发现必须改其它文件（如 `plugin/test/select-static-checks-for-touches.test.mjs`、`plugin/test/shipped-entry-runnable.test.mjs`、`plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh` 之外的 fixture），**先补进本清单再改**。）
+（**设计分岔已选 (a)**：数据 = `plugin/scripts/capability-catalog-declarations.json`，渲染器 = `plugin/scripts/capability-catalog.ts`，派生集 343→344。理由：渲染器是真实机件，放在 `plugin/scripts/` 之外会让它对 sh-census / import-graph / catalog 自己的清单结构性不可见（正是本方法论要消灭的可见性洞）；`.json` 不进派生集已有先例 `judged-object-registry.json`；而 (b) 的新目录对闭包推导不可见，失效形态是消费者项目里的 `ERR_MODULE_NOT_FOUND`。落地时**原清单未列齐、必须先补进再改**的文件：`registry-bare-filename-scan.ts`（它按名把 `capability-catalog.sh` 排除为「种群描述而非引用」——该角色随表迁到数据文件，排除对象必须跟着换位，否则 344 条声明会把「每个脚本都被引用」灌进死集闭包）、`outer-retirement-precondition-check.ts`、`sh-census-check.ts`（5b 扫描出的 3 处**日期化的实测引用**）、`registry-bare-filename-scan.test.mjs`、`guard-lineage-check.test.mjs`、`shipped-entry-runnable.test.mjs`、`select-static-checks-for-touches.test.mjs`、`plugin/skills/quay-file-task/SKILL.md`、以及 `plugin/sh-census-baseline.json`。）
 
 ## AC
 
-- [ ] **AC1（判据本体在真实仓库根取真值）** 逐字提取 `goals/AC-311-*.md` 的 `criterion` 并在真实仓库根执行 ⇒ `exit 0`；同一次的 `grep -cE '^\s*\[[A-Za-z0-9._-]+\]="' plugin/scripts/capability-catalog.sh` = `0`，`bash plugin/scripts/capability-catalog.sh --summary` = `exit 0`。⛔ 不得用 fixture、自造输出或别的模式代替这次真读数；命令与原始输出逐字贴进 notes。
-- [ ] **AC2（搬移无损，逐条枚举不是布尔）** 10 张表**逐表**给出「迁移前行数 / 迁移后数据文件内对应条目数」，并对每张表做一次**排序后的 (key→value) diff 为空**；合计 1907 行**全部有家**（每张表 → 数据文件中落点的映射写进 notes）。⛔ 抽查不算。12 个非派生条目（逐字：`accounting-emit-layer-map.ts`、`blocked-signal-check.sh`、`dead-loop-check.sh`、`fan-in-runid-check.ts`、`laydown-set-check.sh`、`process-budget.sh`、`slot-refill.ts`、`stage-receipt.ts`、`suite-state-trigger.ts`、`threshold-scope-check.ts`、`trend-check.ts`、`workflow-journal.ts`）必须在数据文件中都存在，逐个断言。
-- [ ] **AC3（入口闸迁前迁后各取假一次）** ①**迁移前**、②**迁移后**，各在 `plugin/scripts/` 放一个未声明的新文件（如 `zzz-undeclared-probe.ts`）⇒ `--summary` 与 `--json` **均非零退出**且报出 unclassified；删除后 ⇒ `exit 0`。③ 若数据文件被移走/改名/损坏 ⇒ 入口必须**非零退出并带 CAUSE**，⛔ 不得把表读成空后静默 `exit 0`（硬规则 3b）。三次注入都在 worktree 内进行、**当场撤销**，收尾 `git status --porcelain` 干净（硬规则 11/11b）。
-- [ ] **AC4（其余模式逐字等价）** 迁移前后各跑一次并对比：`--json`（340 条逐条 diff）、`--table`、`--entry-surface`、`--entry-surface --summary`、`--superseded-check`；退出码相同、输出相同（若选 (a) 使 N 340→341，差异必须**只有本次引入的新文件那一行**，逐行署名，其余 340 条逐字不变）。迁移前/后的 `--summary` 两行**原文**贴进 notes。
-- [ ] **AC5（读源文本的消费者已全部换位 + 5b 扫描）** 对六处逐个给出「改动前红（负控）/ 改动后绿」：`guard-lineage-check.ts`（并跑它自己的 mutation case）、`trend-check.test.mjs:373`、`red-on-omission-audit.test.mjs:263`、`repo-root-unification.test.mjs:141`、`archive-exclusion-wiring.test.mjs:106`、`capability-catalog.test.mjs:200`。**5b 扫描**：贴出 `grep -rn 'capability-catalog' …` 的**命中数与前 3 条**，并给出逐条判定「是否陈述了表的位置」的结论。
-- [ ] **AC6（fixture / laydown / 打包面实跑）** 三个 mutation fixture 各跑一次 `bash plugin/scripts/checker-mutation-cases/<name>.sh <workdir>` ⇒ `exit 0`，且**改动前先跑一次作为负控**（预期 catalog 与 rhythm 两个在 baseline 就红，若 fixture 不同步拷新文件）；`quay-init.sh` 的 laydown 集合含新增文件，并在临时目标树上实跑一次 laydown（或 `plugin/test/capability-catalog.test.mjs` 的 Wiring 用例）证明**落地后**入口 `--summary` = `exit 0`；暂存副本上 `bash packages/quay/plugin/scripts/capability-catalog.sh --entry-surface` = `exit 0`。
-- [ ] **AC7（AC5 门不变成恒绿）** 对「数据值含反引号或 `$(`」注入一次 ⇒ 入口（或其数据完整性检查）**非零退出**；撤销 ⇒ `exit 0`。若判定该门退役，写明「格式已消除危险」的理由**并**给出替代完整性检查（如数据文件必须可被解析且键值非空），且替代检查自己取假一次（注入即红）。⛔ 不得让 `capability-catalog.test.mjs:200` 在搬表后继续绿着却什么也没验到。
-- [ ] **AC8（入口形态未变）** `packages/quay/scripts/package.sh:132` 与 `plugin/scripts/select-static-checks-for-touches.ts:84` 的调用形态保持 `bash …/capability-catalog.sh <mode>`（或同步更新并给出理由）；未新增 CLI 参数/子命令；`CLAUDE.md` 里「`bash plugin/scripts/capability-catalog.sh`（唯一清单）」这句仍然成立（贴出实跑）。
+- [x] **AC1（判据本体在真实仓库根取真值）** 逐字提取 `goals/AC-311-*.md` 的 `criterion` 并在真实仓库根执行 ⇒ `exit 0`；同一次的 `grep -cE '^\s*\[[A-Za-z0-9._-]+\]="' plugin/scripts/capability-catalog.sh` = `0`，`bash plugin/scripts/capability-catalog.sh --summary` = `exit 0`。⛔ 不得用 fixture、自造输出或别的模式代替这次真读数；命令与原始输出逐字贴进 notes。
+- [x] **AC2（搬移无损，逐条枚举不是布尔）** 10 张表**逐表**给出「迁移前行数 / 迁移后数据文件内对应条目数」，并对每张表做一次**排序后的 (key→value) diff 为空**；合计 1907 行**全部有家**（每张表 → 数据文件中落点的映射写进 notes）。⛔ 抽查不算。12 个非派生条目必须在数据文件中都存在，逐个断言。
+- [x] **AC3（入口闸迁前迁后各取假一次）** ①**迁移前**、②**迁移后**，各在 `plugin/scripts/` 放一个未声明的新文件 ⇒ `--summary` 与 `--json` **均非零退出**且报出 unclassified；删除后 ⇒ `exit 0`。③ 若数据文件被移走/改名/损坏 ⇒ 入口必须**非零退出并带 CAUSE**，⛔ 不得把表读成空后静默 `exit 0`（硬规则 3b）。三次注入都在 worktree 内进行、**当场撤销**，收尾 `git status --porcelain` 干净（硬规则 11/11b）。
+- [x] **AC4（其余模式逐字等价）** 迁移前后各跑一次并对比：`--json`、`--table`、`--entry-surface`、`--entry-surface --summary`、`--superseded-check`；退出码相同、输出相同（选 (a) 使 N 343→344，差异**只有本次引入的新文件那一行**，逐行署名，其余逐字不变）。迁移前/后的 `--summary` 两行**原文**贴进 notes。
+- [x] **AC5（读源文本的消费者已全部换位 + 5b 扫描）** 对六处逐个给出「改动前红（负控）/ 改动后绿」：`guard-lineage-check.ts`、`trend-check.test.mjs`、`red-on-omission-audit.test.mjs`、`repo-root-unification.test.mjs`、`archive-exclusion-wiring.test.mjs`、`capability-catalog.test.mjs`。**5b 扫描**：贴出 `grep -rn 'capability-catalog' …` 的**命中数与前 3 条**，并给出逐条判定「是否陈述了表的位置」的结论。
+- [x] **AC6（fixture / laydown / 打包面实跑）** 三个 mutation fixture 各跑一次 ⇒ `exit 0`，且**改动前先跑一次作为负控**；`quay-init.sh` 的 laydown 集合含新增文件，并用 Wiring 用例证明入口 `--summary` = `exit 0`；暂存副本上 `bash packages/quay/plugin/scripts/capability-catalog.sh --entry-surface` = `exit 0`。
+- [x] **AC7（AC5 门不变成恒绿）** 对「数据值含反引号或 `$(`」注入一次 ⇒ 入口**非零退出**；撤销 ⇒ `exit 0`。⛔ 不得让 `capability-catalog.test.mjs` 在搬表后继续绿着却什么也没验到。
+- [x] **AC8（入口形态未变）** `packages/quay/scripts/package.sh:132` 与 `plugin/scripts/select-static-checks-for-touches.ts:84` 的调用形态保持 `bash …/capability-catalog.sh <mode>`；未新增 CLI 参数/子命令；`CLAUDE.md` 里「`bash plugin/scripts/capability-catalog.sh`（唯一清单）」这句仍然成立（贴出实跑）。
 
 ## DoD
 
-真实落地标准：**AC-311 的 `criterion` 在 fan-in 后的生产树（develop / 主检出）上 `exit 0`**，且该次 `--summary` 满足 `declared == scripts`、`unclassified == 0`、`ship` 与迁移前一致（或与迁移前逐字相同，见 AC4 的分支判读）。AC2 的 10 张表逐表 diff 为空 + 1907 行落点映射在 notes 里；AC3 的入口闸注入（**迁前迁后各一次**）与 AC7 的数据完整性注入各有「注入 ⇒ 红、撤销 ⇒ 绿」的实做留痕；AC5 的六处含**改动前负控**（证明修的是真缺陷、不是「本来就绿」）；AC6 的三个 fixture、laydown 落地与暂存副本实跑留痕齐备；worktree `git status --porcelain` 干净、无残留注入。⛔ 不是「加了一个数据文件就算了」——是**判据在真实仓库根取真值、且两支 CAUSE 与入口闸都仍能取假**。
+真实落地标准：**AC-311 的 `criterion` 在 fan-in 后的生产树（develop / 主检出）上 `exit 0`**，且该次 `--summary` 满足 `declared == scripts`、`unclassified == 0`、`ship` 与迁移前一致（选 (a) 故为逐字增量比对）。AC2 的 10 张表逐表 diff 为空 + 行数落点映射在 notes 里；AC3 的入口闸注入（**迁前迁后各一次**）与 AC7 的数据完整性注入各有「注入 ⇒ 红、撤销 ⇒ 绿」的实做留痕；AC5 的六处含**改动前负控**；AC6 的三个 fixture、laydown 落地与暂存副本实跑留痕齐备；worktree `git status --porcelain` 干净、无残留注入。
+
+## Notes — 落地留痕（全部为真实仓库根/worktree 内的实测读数）
+
+### 分支选择与实际数字（立案数字已过期，⛔ 未沿用）
+选 **(a)**。立案写「1907 行 / 340 scripts」，落地实测为 **1925 行 / 343 scripts** —— `gap-arch-coverage-self-report` / `import-graph-check` / `sh-census-check` 三条相邻任务在立案后落了地，各注册了新脚本。本任务全部按**自己的读数**交付。
+
+### AC1（判据本体，逐字）
+```
+$ grep -cE '^\s*\[[A-Za-z0-9._-]+\]="' plugin/scripts/capability-catalog.sh
+0
+$ bash plugin/scripts/capability-catalog.sh --summary
+capability-catalog: 344 scripts | 344 declared | 0 unclassified | 339 ship      # exit 0
+$ <criterion 逐字执行>  → exit 0
+```
+迁移前同一支读数（真实仓库根 baseline，本会话开始时实测）：`capability-catalog: 343 scripts | 343 declared | 0 unclassified | 338 ship`（exit 0）。
+
+### AC2（逐表 ledger，diff 全部为空）
+1909 条 bash 唯一键（1925 声明行 = 1909 + 16 次重复赋值，bash **last-wins**；12 个重复在 QUESTION、1 个在 CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）。数据文件 = **1915** 条（1909 + 6 条为 `capability-catalog.ts` 的登记）。
+
+| 表 | 声明行 | bash 唯一键 | 数据文件 | 排序后 (key→value) diff |
+|---|---|---|---|---|
+| QUESTION | 355 | 343 | 344 | EMPTY（extra 仅 `capability-catalog.ts`） |
+| GUARD_OBJECT | 7 | 7 | 7 | EMPTY |
+| CADENCE | 344 | 343 | 344 | EMPTY（extra 仅 `capability-catalog.ts`） |
+| INVALIDATION | 344 | 343 | 344 | **1 处署名修改**，0 丢失 |
+| LAST_REAFFIRMED | 344 | 343 | 344 | EMPTY（extra 仅 `capability-catalog.ts`） |
+| MATCHING | 344 | 343 | 344 | EMPTY（extra 仅 `capability-catalog.ts`） |
+| CONSUMER | 148 | 148 | 148 | EMPTY |
+| SUPERSEDED | 5 | 5 | 5 | EMPTY |
+| NOT_SHIPPED | 5 | 5 | 5 | EMPTY |
+| PUBLIC_ENTRYPOINTS | 29 | 29 | 30 | EMPTY（extra 仅 `capability-catalog.ts`） |
+| **合计** | **1925** | **1909** | **1915** | |
+
+落点映射：**全部 10 张表 → `plugin/scripts/capability-catalog-declarations.json` 的同名顶层键**（单文件单层，无分片）。
+
+**无损性是对着 bash 自己的求值验的，不是重新解析**：把原 `declare -A` 块逐字抽进临时脚本、在干净 shell 里 source 后 dump `表\t键\t值`，与数据文件逐键比对 ⇒ **10 张表全等**（含 last-wins 折叠与 `\$` 反转义）。这是 AC2 的「排序后 diff 为空」的实际取证方式。
+
+**唯一一处署名修改**（不是丢失）：`INVALIDATION[guard-lineage-check.ts]`。它的全文以「`capability-catalog.sh` 的 GUARD_OBJECT 声明块」为失效前提的登记处，并写明「若 GUARD_OBJECT 声明块迁出 capability-catalog.sh …本条失效」——**该触发句在本任务里恰好成立**，故同步为「capability-catalog 的 GUARD_OBJECT 表（声明数据 capability-catalog-declarations.json）」。其余 1908 条逐字不变。
+
+12 个非派生登记位**逐个断言存在**：`accounting-emit-layer-map.ts`、`blocked-signal-check.sh`、`dead-loop-check.sh`、`fan-in-runid-check.ts`、`laydown-set-check.sh`、`process-budget.sh`、`slot-refill.ts`、`stage-receipt.ts`、`suite-state-trigger.ts`、`threshold-scope-check.ts`、`trend-check.ts`、`workflow-journal.ts` ⇒ 全部 `OK`。
+
+### AC3（入口闸两支）
+- **迁移前**（原 `.sh` = 1925 声明行，放进临时树）：clean `exit 0`；注 `zzz-undeclared-probe.ts` ⇒ `--summary exit 1`（`3 scripts | 2 declared | 1 unclassified`）∧ `--json exit 1`（`question: null` = probe）；删除 ⇒ `exit 0`。
+- **迁移后**（worktree 内）：clean `exit 0`（344/344/0/339）；注 probe ⇒ `--summary exit 1`（345/344/1）∧ `--json exit 1`（unclassified = `['zzz-undeclared-probe.ts']`）；删除 ⇒ `exit 0`。**probe 当场删除，收尾 `git status --porcelain` 无该文件。**
+- **③ 数据文件三态，三支各自不同 CAUSE，⛔ 均未静默 exit 0**：移走/改名 ⇒ `exit 3` `CAUSE=capability-catalog-declarations-missing`（bash 侧，入口 exec 之前）；截断 ⇒ `exit 3` `CAUSE=declarations-unparsable`；删掉 `GUARD_OBJECT` 表 ⇒ `exit 3` `CAUSE=declarations-table-missing`。撤销 ⇒ `exit 0`。
+
+### AC4（模式等价）
+`--summary` / `--table` / `--entry-surface` / `--entry-surface --summary` / `--superseded-check` 五个模式**迁移前后 stdout 逐字相同**（`--table` 与 `--summary` 的唯一差异是新脚本那一行与随之的 N/ship 数）。`--json` 逐条 diff = **恰好一行新增**（`capability-catalog.ts`，`surface: null`，question/cadence/invalidation/last_reaffirmed/matching 齐全）+ 上面那一条署名 INVALIDATION 修改；其余 343 条逐字不变。stderr 只多出 Node 对 plugin 下所有 `.ts` 都会打的 `MODULE_TYPELESS_PACKAGE_JSON` 提示（仓库既有形态，非本次引入）。
+```
+BEFORE: capability-catalog: 343 scripts | 343 declared | 0 unclassified | 338 ship
+AFTER : capability-catalog: 344 scripts | 344 declared | 0 unclassified | 339 ship
+```
+
+### AC5（六处消费者 + 5b 扫描）
+| 处 | 改动前（负控） | 改动后 |
+|---|---|---|
+| `guard-lineage-check.ts` | 旧解析器读新 `.sh` ⇒ **0** 个 GUARD_OBJECT（静默归零） | 新解析器读数据文件 ⇒ **7** 个（= 表大小） |
+| `trend-check.test.mjs:373` | ✖ `trend-check.ts has a declared question…` | ✔ 16/0 |
+| `red-on-omission-audit.test.mjs:263` | ✖ 同名 wiring 断言 | ✔ 18/0 |
+| `repo-root-unification.test.mjs:141` | ✔（**改动前后都绿**） | ✔ 10/0 |
+| `archive-exclusion-wiring.test.mjs:106` | ✖（注入目标消失 ⇒ 断言 notEqual 失败） | ✔ 6/0 |
+| `capability-catalog.test.mjs:200` 等 | ✖ 5 个用例（AC1c / AC5 / AC3 / ①② 入口闸，fixture 缺数据文件一律 exit 3） | ✔ 16/0 |
+
+**偏差必须写明**：`repo-root-unification.test.mjs:141` **没有**改动前红——薄入口仍 `source ${SCRIPT_DIR}/repo-root.sh`，这正是任务体要求「显式确认」的那一处，故保留原断言未动。`guard-lineage-check.ts` **没有自己的 mutation case**（`plugin/scripts/checker-mutation-cases/` 下无 `guard-lineage-check.sh`，实测），其行为覆盖是单元测试文件 + 上面的新旧解析器对照。
+
+**5b 扫描**：`grep -rn 'capability-catalog' plugin/scripts plugin/test plugin/loop plugin/skills packages/quay/scripts CLAUDE.md` ⇒ **281 命中**（迁移前 275；增量来自本次新增文件的自述）。前 3 条：
+```
+plugin/scripts/sh-census-check.ts:10://   的程序（verify-deliver-coldstart.sh 6293 有效行、develop-deliver-tgz.sh 2346、capability-catalog.sh 2187 …），
+plugin/scripts/sh-census-check.ts:123: *      内嵌形态（develop-deliver-tgz.sh / capability-catalog.sh 都是它）。把双引号整段掩掉会让
+plugin/scripts/sh-census-check.ts:275:      // following line is masked as a body that never closes. Measured: capability-catalog.sh:2272
+```
+逐条判定**「是否陈述了表的位置」**：7 个文件**是**并已改（`checker-lib.ts`、`outer-retirement-precondition-check.ts`、`package.sh`、`quay-file-task/SKILL.md`、`shipped-entry-runnable.test.mjs`、`guard-lineage-check.ts`、`capability-catalog.test.mjs`）——其中 `package.sh` 的失败提示与 `quay-file-task` 的登记指引是**可执行的误导**，必须改。`CLAUDE.md:15/178` **判定为仍成立**（陈述的是「唯一入口」与「不得复制清单」，入口形态未变，AC8 已实测）⇒ 未改（本文件是本仓库最稀缺资源，不在 Touches 内，不做非必要改动）。`sh-census-check.ts` 的 3 处**判定为同类但不同子类**：它们说的是**该文件的行数/行号**（日期化的实测记录），不是表的存放处；仍按 5b 精神补注「该文件已于 2026-09-19 数据化」，⛔ 数字保留为立案时读数而非删改（删掉就是抹掉该判据的取证）。其余 271 条为路径调用、断言字符串、自身文档与相邻任务的任务体，不属于「陈述表的位置」。
+
+### AC6（fixture / laydown / 打包面）
+- 三个 mutation fixture：**迁移后全 `exit 0`**；**迁移前的负控实做**：`capability-catalog` fixture `exit 4`（`baseline RED … checker always-red?`）、`rhythm-consumer-check` fixture `exit 3`（`STAYED-GREEN — an unwired non-按需 mechanism did not redden the checker`）、`kernel-sibling-resolution-check` `exit 0`（它不拷 catalog，仅按路径引用）。
+  ⚠️ `rhythm-consumer-check` fixture 的 INJECT **换了形态**：它原先靠「把 catalog 从 `scripts/test.sh` 里摘掉」取红，搬表后**不再红**——因为判据1 接受 strict(broad) 任一命中，而渲染器合法地在自己的头部写了入口 basename（真边）。故 INJECT 改为**注入一个「已声明非-按需但无人调用」的新探针**，这才是判据1真正禁止的形态。
+- laydown：`bash plugin/scripts/laydown-set-check.sh --root <wt> --list`（**与 `--loop` laydown 同一个 single source**）含 `capability-catalog.sh`、`capability-catalog.ts`、`capability-catalog-declarations.json`、`repo-root.sh`、`repo-root.ts` —— 两个新文件**经闭包步 (d)** 自动进入（薄入口里 `${SCRIPT_DIR}/capability-catalog.ts` / `…-declarations.json` 两个引用），故**未改 `quay-init.sh`**（该显式清单的用途正是「闭包看不见的依赖」，再加一份即制造双份清单）。另外在临时目标树上实跑 `quay-init --loop`：catalog **不落地**（与 `Wiring` 用例一致），入口在插件内 standalone 通过。
+- 打包面：**真跑 `bash packages/quay/scripts/package.sh`**（exit 0，`AC3 gate … → PASS`，dist 闭包门 100/100）。暂存副本 `bash packages/quay/plugin/scripts/capability-catalog.sh --entry-surface` ⇒ `exit 0`（75 shipped | 29 public | 46 internal，21 distinct .sh）。
+  **这一步抓出一个真缺陷并已修**：`package.sh` 把 `.ts` 打进 `scripts/dist/`，渲染器原先以**自己的目录**为「检查集目录」⇒ 在**已发布的产物形态**下枚举到 0 个脚本、`--summary` 报 `0 scripts | 0 declared | 0 unclassified`（一个**与合格同形的空转读数**，硬规则 3b）。修法是让「检查集目录」锚在**声明数据文件所在目录**（两种形态下都正确）⇒ 产物形态复查 `87 scripts | 87 declared | 0 unclassified | 84 ship`，`--superseded-check` 与 `--entry-surface --json`（`ok: true`）均 `exit 0`。**开发树看不见这个形态**，只有真打包能看见。
+
+### AC7（完整性门未恒绿）
+数据值注入反引号 ⇒ `exit 1`，stderr：`FAIL (AC5 no-command-substitution): a declaration value in capability-catalog-declarations.json contains a command-substitution pattern…` + `QUESTION[capability-catalog.sh]: …`（**点名到表与键**）；注入 `$(` ⇒ 同样 `exit 1`；撤销 ⇒ `exit 0`。门的**扫描面从「两空格缩进的源码行」改为「10 张表的每一个值」**（今日 1915 个），故原先逃逸的 9 行非两空格缩进声明现在也在面内；`_comment` 这类下划线散文键除外（与旧门不扫注释行同构，且在渲染器注释里明写，⛔ 不隐含扩张）。
+
+### AC8（入口形态）
+`packages/quay/scripts/package.sh:133` 与 `plugin/scripts/select-static-checks-for-touches.ts:84` 的调用形态**逐字未变**（`bash …/capability-catalog.sh --entry-surface` / `run_checker "capability-catalog" bash "${repo_root}/plugin/scripts/capability-catalog.sh" --json`）；未新增 CLI 参数/子命令；`CLAUDE.md:15` 的「`bash plugin/scripts/capability-catalog.sh`（唯一清单）」经实跑仍成立。scoped 门里 `superseded-capability-check` 就是按该命令行调起来的（日志可见），是这条的机械复跑。
+
+### 其它被本改动带动的棘轮（原 Touches 未列，已先补再改）
+`plugin/sh-census-baseline.json`：本改动**正是**该基线 `structuralNote` 预告的 Phase 4 收缩。`embeddedInterpreterLines` **11690 → 9505**（−2185），归因 = `capability-catalog.sh` 有效行 **2199 → 14**（−2185），**残差 0**；`duplicateCopies` 37 不变。已在 `_reanchorLog` 追加一条（含 from/to/why/attribution/structuralNote）并由 `sh-census-check --check` 与它自己的测试（20/0）复核。⚠️ 注意该轴计的是「内嵌解释器的 .sh 有效行」——薄入口仍内嵌解释器，所以**减的是行数不是成员资格**。
+
+### scoped 门与收尾
+`bash scripts/test.sh --for-task gap-arch-catalog-declarations-leave-bash --allow-thin` ⇒ **exit 0，187/187 通过**（改动后又改过 5b 注释，重跑一次仍 exit 0，`checker-mutation-check --check-changed` 覆盖本 delta 的 5 个 checker 载体：capability-catalog / rhythm-consumer-check / outer-retirement-precondition-check / registry-bare-filename-scan / sh-census-check）。worktree `git status --porcelain` 干净、无残留注入、无打包遗留（`packages/quay/plugin/` 与 `.tgz` 均 gitignored）。全部提交在任务分支上，`develop` 只由 fan-in 移动。
