@@ -1,7 +1,7 @@
 ---
 id: gap-arch-import-cycles-zero
 title: 架构棘轮：import 环清零 —— 值级 SCC 1→0、类型级 SCC 2→0（由 import-graph-check 读出）
-status: ready
+status: done
 labels:
   - gap
 parent: null
