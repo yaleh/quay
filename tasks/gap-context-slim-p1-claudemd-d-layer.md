@@ -27,6 +27,8 @@ depends_on:
 - docs/epistemology-casebook.md (new)
 - orchestration/context-slimming/p1-landing-map.tsv (new)
 - orchestration/context-slimming/landing-map-check.sh (new)
+- docs/analysis/threshold-scope-violations.md
+- plugin/test/threshold-scope-check.test.mjs
 - tasks/gap-context-slim-p1-claudemd-d-layer.md
 ## Resolution
 落地分支 `task/gap-context-slim-p1-claudemd-d-layer`：实现 commit `07407133e`，其后合 develop（`34c949269`）。产物 4 个：改写后的 `CLAUDE.md`、新增 `docs/epistemology-casebook.md`、落点映射 `orchestration/context-slimming/p1-landing-map.tsv`、映射检查器 `orchestration/context-slimming/landing-map-check.sh`。
@@ -89,11 +91,36 @@ selector 把每个 Touches 条目解析为**同名 `*/test/<basename>.test.mjs`*
 | ② | 把快照里跨两行的句子并成一行 | `≥2` 与本条判据落进同一行 ⇒ 命中同类判据 | 恢复原断行（**内容一字未改**） |
 | ③ | 锚点写作 `docs/epistemology-casebook.md#x` | path candidate 带 `#x` 解析不到 ⇒ stale-path | 改为 `casebook#x`（不构成 path candidate），并在正文声明该写法 |
 
-修后：`threshold-scope-check` ⇒ `violations 2`（均在 `plugin/loop/orchestrator-loop-tick.md`，与本次 delta 无关）、`stalePaths 0`、**`new since baseline 0`**、`resolved 1`（旧 CLAUDE.md 的 `.claude/workflows/execute-milestone.js` 随该节迁出而消失），`exit 0`。**⛔ 未 `--write-ratchet` 收窄基线**：`docs/analysis/threshold-scope-violations.md` 不在本任务 Touches 内，改它即超范围；基线里那条已失效的条目只是不再被消费（检查器自报 `resolved: 1`），不阻塞。
+修后：`threshold-scope-check` ⇒ `violations 2`（均在 `plugin/loop/orchestrator-loop-tick.md`，与本次 delta 无关）、`stalePaths 0`、**`new since baseline 0`**、`resolved 1`（旧 CLAUDE.md 的 `.claude/workflows/execute-milestone.js` 随该节迁出而消失），`exit 0`。**当时决定不 `--write-ratchet` 收窄基线**（理由：该文件不在 Touches 内，改它即超范围）。**⚠️ 该决定只对了检查器半边、漏了测试半边——见下节，它正是本轮 fan-in suite 变红的根因。**
 
 **(2) 自写的 `landing-map-check.sh` 里有一个真 bug（首跑险些产出「结构完整、数字合理」的错结果）。** 首跑报 **43 条 `UNKNOWN-FORM`**，且它们的第 3 列打印的是**注记文本**。根因：读取用了 `IFS=$'\t' read -r a b c d` —— **TAB 是 IFS 空白字符，bash 的 `read` 会把连续 TAB 折叠成一个** ⇒ 第 2 列为空的那些行（快照里大把空行）整体左移，第 4 列的注记被当成去向。改为 `IFS= read -r line` + `cut -fN` 后 **382/382** 解析成功。
 
 **(3) 快照里 `## Commands` 段 driver 冷启动缺口的 7 行叙述被压成 3 行状态 + 负控制。** 被去掉的是三个机制名（`enumerateColdStartInflight` / `enumerateColdStartInflightAsync` / `coldInflight`）与「被 manager 对生产实时状态验证过」的措辞；**结论（两个方向都已修复、restart 不重派、孤儿自动收敛、核对 `ps aux | grep quay-task-worker` 是习惯性负控制）与两个任务 id（`gap-worker-driver-cold-start-inflight-blind` / `-refresh`）全部保留** —— 按本文件「只放指针」政策，细节经任务 id 可检索。
+
+### 第二轮（本轮）：fan-in suite 红的归因与修复
+
+上轮 exited-not-landed，`step=suite`，4 条红。**逐条归因（硬规则 4b：用直接量，不叠加未验证的过滤）**：先单跑每一条，**两条非本 delta 的**（`plugin/test/start-drivers.test.mjs` AC6 SIGTERM 时序、`plugin/test/fan-in-execute-paths-s12.test.mjs` 锁等待时序）**solo 各自全绿（17/17 与 2/2）** ⇒ 判定为负载敏感 flake，不是本任务引入。
+
+**另 2 条是本任务真实造成、且同根**：`plugin/test/threshold-scope-check.test.mjs` 的 `AC9` 与 `AC6/default`。根因 = **上轮「不改基线」的决定**：
+
+- `AC6/default:248` 断言 `ratchet.currentCount === ratchet.baselineCount`（**严格相等**）。上轮只核了检查器的 `exit 0`（`growth:false`），而**检查器在合法收缩时本来就退 0**（自报 `resolved: 1`）——**测试的不变式比检查器严，收缩未重录时测试红而检查器绿**。⇒ 3(基线) ≠ 2(实际)：正是上轮那条「已失效的条目只是不再被消费」的条目。
+- `AC9:217` 断言 `--judge CLAUDE.md` **必须 exit 1**，因为 CLAUDE.md 载有那条陈旧路径。本任务把 D 层（含 `## Workflow resume anti-pattern` 节）删掉后，**该路径已不在 CLAUDE.md**（`stalePaths: []`）⇒ 前提消失，exit 0。
+
+**修复（两项，均属本任务 delta 的必经收尾）**：
+
+1. **重录棘轮**（ratchet 文件自述的正式动作：「Remove an entry only after the underlying doc is fixed (then run `--write-ratchet` to persist the shrunken list)」）：`--write-ratchet --reset-baseline` ⇒ `baseline-count: 3 → 2`，`CLAUDE.md: stale-path: .claude/workflows/execute-milestone.js` 行删除（该条目由检查器自报 `resolved`）。**先例**：`5969b096`（`outer: threshold-scope ratchet 4→3 — 重录 AC38 切分后的合法收缩`）在完全同形的场景下用了同一条命令、只改同一文件。**必须带 `--reset-baseline`**：`writeRatchet` 无它时 `ceiling` 保持旧值，会写出「2 条目 + baseline-count: 3」的自相矛盾文件，转而把 `AC5` 打红（负控制 C 实测命中）。
+2. **`AC9` 改为非空转的对照**（⛔ 不是「把断言改松」）：CLAUDE.md 现在干净，故裸断言 `stalePaths.length === 0` **与恒真同形、什么都验不到**（硬规则 4），原 `for (const s of out.stalePaths)` 假阳性循环也退化为空转。改为**在同一语料上做阳性对照**：真实 CLAUDE.md 全文 + 注入**一条**确定不可解析的路径，用绝对临时路径 `--judge`（检查器按 `--root` 解析候选 ⇒ 那 ~18 条 basename 简写引用的解析行为与真实运行**逐字相同**）。断言 `stalePaths === [注入的那一条]`，**两个方向都可证伪**。
+
+**双向负控制（硬规则 4c：判据落笔当轮取真实读数）**：
+
+```
+A. 真实语料、不注入        ⇒ stalePaths 0  flagged False   （⇒ 不注入时 AC9 的 ===1 必红：注入是承重的）
+B. 真实语料 + 注入 1 条    ⇒ stalePaths ['plugin/scripts/this-path-does-not-exist-ac9-control.ts'] flagged True
+C. 基线 ceiling 留 3（不重录）⇒ AC6/default 红，原文 `current violation set must match the shrink-only baseline`（复现上轮 suite 红）
+   —— 同时 AC5 红：`entries (2) must equal baseline-count (3)`（两条判据各自独立命中同一缺陷）
+D. 还原后                  ⇒ 10/10 绿，exit 0
+```
+⇒ C 证明 `AC6/default` **可证伪且复现了 fan-in 的原报错**；A/B 证明 `AC9` 新断言两个方向都能响。
 
 ### 门与自检
 
@@ -138,6 +165,8 @@ exit 0
 | `docs/epistemology-casebook.md` | 新增 | 473 行 / 31308 字节 / **16** 个 `## ` 锚点，与 CLAUDE.md 引用 **1:1** |
 | `orchestration/context-slimming/p1-landing-map.tsv` | 新增 | **382** 数据行（== 快照行数）/ 95407 字节；列 = `行号 \t 快照原文 \t 去向 \t 注记` |
 | `orchestration/context-slimming/landing-map-check.sh` | 新增 | 检查 A（覆盖/行号连续/原文逐字节）、B（空去向）、C（去向可解析，含递归 `dup:`）；三值输出 OK/UNRESOLVED/UNKNOWN，缺输入报 `NOT-EVALUATED` 且 exit 2（**不与 0 同形**）；`--selfcheck` 三臂 |
+| `docs/analysis/threshold-scope-violations.md` | 重录（本轮） | `baseline-count: 3 → 2`；删 `CLAUDE.md: stale-path: .claude/workflows/execute-milestone.js`（被检查器自报 `resolved`）；`--write-ratchet --reset-baseline` |
+| `plugin/test/threshold-scope-check.test.mjs` | 改 AC9 + 覆盖图注释（本轮） | AC9 由「真实 CLAUDE.md 必须带陈旧路径」改为「真实 doc 干净 + 同语料注入一条阳性对照」；`AC6/default` **未改一字**（由重录基线满足） |
 
 ### 删节 → 去向（AC3 的三节 + 退役叙事）
 | 删掉的 `## ` 标题 | 去向 |
@@ -151,11 +180,11 @@ exit 0
 
 ### 复跑的既有门（未新增失败）
 - `retired-clause-check.ts --root <wt>` ⇒ `OK — 33 entries migrated (55 unique tokens: all gone from source, all present in archive)`，exit 0（R17–R20 的 CLAUDE.md 侧独有词条在本轮改写后仍**全部不在**源文件里）。
-- `threshold-scope-check.ts --root <wt>` ⇒ `new since baseline 0 / stalePaths 0 / resolved 1`，exit 0。
+- `threshold-scope-check.ts --root <wt>` ⇒ 重录后 `baselineCount 2 / currentCount 2 / growth false / newSinceBaseline 0`，exit 0。
+- `plugin/test/threshold-scope-check.test.mjs` ⇒ **10/10 绿**，exit 0（本轮修复后；双向负控制见 Resolution）。
 - `scripts/test.sh --for-task … --allow-thin` ⇒ exit 0，0 条 FAIL（change 级静态检查全绿）。
 
 ### 未覆盖
-- **未 `--write-ratchet`** 收窄 `docs/analysis/threshold-scope-violations.md`（超 Touches，理由见 Resolution）。
-- **未跑全量 suite**（worker 不跑；由 driver 的 fan-in 承担）。
+- **未跑全量 suite**（worker 不跑；由 driver 的 fan-in 承担）。本轮已单跑归因 4 条红中的 2 条时序 flake（solo 全绿）与 2 条同根真红（已修并负控制）。
 - `docs/epistemology-casebook.md` **不被自动注入**，也不被任何检查器扫描——它的正确性由 `landing-map-check.sh`（锚点可解析）与本任务体的逐行映射保证，不由运行时门保证。
 - the casebook 的叙事是**搬迁**不是**重写**：除拆行/加标题外未改写内容；若复核发现某条叙事在搬迁中被压缩，以 P0 快照为准（`orchestration/context-slimming/baseline/CLAUDE.md.snapshot` 是逐字节基线）。
