@@ -1,7 +1,7 @@
 ---
 id: gap-ac157-catalog-carrier-moved-criterion-stale
 title: AC157 判据仍红——catalog 重构把枚举承载者迁到 capability-catalog.ts，判据仍点名 thin wrapper .sh
-status: todo
+status: ready
 labels:
   - gap
 parent: null
