@@ -9,6 +9,11 @@
       "reason": "structural path-depth difference, NOT drift: same as tree-hygiene-check.sh — plugin/scripts/ (depth 2) resolves repo root as $HERE/../.. while experiments/quay-perpetual-stream/scripts/ (depth 3) resolves it as $HERE/../../.. . Byte-identity is the WRONG invariant for this pair.",
       "pluginSha256": "d1f495d7bbb008ba888e4d358a2868119d0858c9c9d1ab5d10bfcf9aecddc045",
       "experimentsSha256": "aba00f7737348f649eb6481ad360941fa31bd57a7c649abba2b44fe5168f7e2d"
+    },
+    "write-json-atomic.ts": {
+      "reason": "structural path-depth difference, NOT drift: same class as tree-hygiene-check.sh — since tasks/gap-arch-reverse-edges-zero this file is a RE-EXPORT of packages/quay/src/kernel/write-json-atomic.ts, and a relative import specifier is correct for exactly one directory depth. plugin/scripts/ (depth 2) needs '../../packages/...' while experiments/quay-perpetual-stream/scripts/ (depth 3) needs '../../../packages/...'. Byte-identity is the WRONG invariant for a pair whose correctness depends on its own directory depth; the experiments copy is CONSUMED (experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs imports it), so the depth-correct prefix is load-bearing.",
+      "pluginSha256": "b4ee59540ecc3013c6fc7f2593634c9030f4e22a9e0b7b650209ffd4b0275237",
+      "experimentsSha256": "d4067d43ceeb7e058b378d8d421edacc3c7ddd5cf5b2be47a9974e04a6043e05"
     }
   }
 }
