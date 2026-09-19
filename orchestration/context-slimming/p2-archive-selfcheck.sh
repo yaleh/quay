@@ -393,18 +393,60 @@ run_check() {
   [ -f "$MANIFEST" ] || { ne "manifest not found: $MANIFEST"; printf 'VERDICT NOT-EVALUATED\n'; exit 2; }
 
   # ---- AC1: file conservation ---------------------------------------------------------
-  local files_before now archive_n rows_n
+  #
+  # AC1 IS EVALUATED AT THE ARCHIVE BOUNDARY. The AC's command is `find … | wc -l` before and
+  # after the archive, and the archive itself asserts the two are equal before it exits; the
+  # recorded files_before/files_after in the manifest header ARE those two readings. What this
+  # check must NOT become is "the directory holds exactly 543 .md files forever": this memory
+  # directory is written by every session on the host, so its count grows under the check
+  # (observed: 543 at the 07:12Z archive → 546 at the 07:20Z check, three memories written by
+  # another session — and it appended a line to the index too). Folding that growth into AC1
+  # would make the criterion impossible to satisfy in the very environment it describes, which
+  # is the shape hard rule 12 forbids from the other side. What AC1 exists to forbid is SILENT
+  # LOSS, so loss is what is checked: boundary conservation, every archived file actually in
+  # archive/, every original actually gone from the top level, and now >= files_after. Growth
+  # is REPORTED (with its size), not failed.
+  local files_before files_after now archive_n rows_n
   files_before=$(manifest_header files_before)
+  files_after=$(manifest_header files_after)
   now=$(count_memory_md)
   rows_n=$(manifest_rows | /usr/bin/grep -c .)
   archive_n=$(find "$ARCHIVE_DIR" -type f -name '*.md' 2>/dev/null | wc -l)
-  printf -- '-- AC1 file conservation (header files_before=%s, now=%s, manifest rows=%s, archive/*.md=%s)\n' \
-    "$files_before" "$now" "$rows_n" "$archive_n"
-  if [ "$files_before" = "$now" ] && [ "$archive_n" = "$rows_n" ]; then
-    ok "AC1 conservation: find -name '*.md' | wc -l == files_before ($now), archive rows == manifest rows ($rows_n)"
+  printf -- '-- AC1 conservation (recorded files_before=%s files_after=%s; now=%s; manifest rows=%s; archive/*.md=%s)\n' \
+    "$files_before" "$files_after" "$now" "$rows_n" "$archive_n"
+  if [ "$files_before" = "$files_after" ]; then
+    ok "AC1a boundary conservation: recorded files_before == files_after ($files_before)"
   else
-    bad "AC1 conservation: files_before=$files_before now=$now rows=$rows_n archive=$archive_n"
+    bad "AC1a boundary conservation: files_before=$files_before files_after=$files_after"
   fi
+  if [ "$rows_n" -gt 0 ] && [ "$archive_n" = "$rows_n" ]; then
+    ok "AC1b archive complete: archive/*.md ($archive_n) == manifest rows ($rows_n)"
+  else
+    bad "AC1b archive complete: archive/*.md=$archive_n manifest rows=$rows_n"
+  fi
+  local still_here=0 n=0 orig
+  while IFS=$'\t' read -r orig _rest; do
+    [ -n "$orig" ] || continue
+    n=$((n + 1))
+    [ -e "$orig" ] && still_here=$((still_here + 1))
+  done < <(manifest_rows)
+  if [ "$still_here" -eq 0 ]; then
+    ok "AC1c moved: 0 of $n manifest rows remain at their original path"
+  else
+    bad "AC1c moved: $still_here of $n manifest rows remain at their original path"
+  fi
+  case "$now" in
+    ''|*[!0-9]*) ne "AC1d: the live file count is $now — cannot compare against files_after" ;;
+    *)
+      if [ "$now" -lt "$files_after" ]; then
+        bad "AC1d loss: now=$now < files_after=$files_after — files disappeared after the archive"
+      elif [ "$now" -eq "$files_after" ]; then
+        ok "AC1d no loss: now == files_after ($now)"
+      else
+        ok "AC1d no loss: now=$now > files_after=$files_after (+$((now - files_after)) written by other sessions since the archive — growth, not loss)"
+      fi
+      ;;
+  esac
 
   # ---- AC2: MEMORY.md shape, with a positive control on the baseline snapshot ----------
   local idx="$MEMORY_DIR/MEMORY.md" lines long_n base_long
