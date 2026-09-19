@@ -72,6 +72,8 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - plugin/scripts/shape-sections.ts
 - plugin/scripts/worktree-process-reaper.ts
 - plugin/scripts/driver-shared.ts
+- plugin/scripts/mirror-pair-drift-allowlist.json
+- experiments/quay-perpetual-stream/scripts/write-json-atomic.ts
 - packages/quay/scripts/build-dist.mjs
 - packages/quay/scripts/esbuild-sea.mjs
 - plugin/import-graph-baseline.json
@@ -81,7 +83,7 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - packages/quay/test/serve.test.mjs
 - tasks/gap-arch-reverse-edges-zero.md
 
-（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本。）
+（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本；另按 scoped 门实测结果补入 mirror-pair 的两处落点 —— 见 Notes §「scoped 门红 1：mirror-pair-drift-check」。）
 
 ## AC
 
@@ -186,9 +188,30 @@ bundle 里 **13 行**仍含 `plugin/` 字样，**逐条说明（全部为运行�
 - `packages/quay-native/test/gate-shape-dispatch.test.mjs` ⇒ **14 pass / 0 fail**
 - `packages/quay/test/serve.test.mjs` ⇒ **1 pass / 0 fail**（97.5 s，QN-031 serve/action 全组）
 - `plugin/test/driver-shared.test.mjs` ⇒ **7 pass / 0 fail**
-- `scripts/test.sh --for-task gap-arch-reverse-edges-zero --allow-thin` ⇒ 见提交信息
+- `experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs` ⇒ **2 pass / 0 fail**
+- `scripts/test.sh --for-task gap-arch-reverse-edges-zero --allow-thin` ⇒ 见 §「scoped 门」与提交信息
 
 `bash plugin/scripts/capability-catalog.sh --summary` ⇒ `341 scripts | 341 declared | 0 unclassified | 336 ship` —— 与主检出读数**逐字相同**（三个文件仍在原位，只是内容改为 re-export）。
+
+### scoped 门红 1：mirror-pair-drift-check（**修因，未豁免掉**）
+
+第一次 `scripts/test.sh --for-task … --allow-thin` ⇒ `STATIC_CHECK_FAILED: mirror-pair-drift-check exit=1`：
+
+```
+DRIFT: plugin/scripts/write-json-atomic.ts vs experiments/quay-perpetual-stream/scripts/write-json-atomic.ts — not allow-listed
+mirror-pair-drift-check: RED — 1 mirror pair(s) drifted
+```
+
+**这是个真信号，不是噪声**：`experiments/quay-perpetual-stream/scripts/` 下有 22 个符号链接指向 `plugin/scripts/`，但 `write-json-atomic.ts` 是**第 23 个、以真实副本形式存在**的那一个（`git ls-files -s` = `100644`，byte-identical 副本），由 `mirror-pair-drift-check` 钉住字节一致。**且它是被消费的**：`experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs:18` `import { writeJsonAtomic } from "../scripts/write-json-atomic.ts"`。
+
+⇒ 修法：把该副本改成**同一份 re-export、但相对路径按它自己的目录深度修正**
+（`experiments/quay-perpetual-stream/scripts/` 比 `plugin/scripts/` 深一级 ⇒ `../../../packages/quay/src/kernel/…`），
+并把这对登记进 `plugin/scripts/mirror-pair-drift-allowlist.json` —— 理由与既有的
+`tree-hygiene-check.sh` / `worktree-branch-hygiene-check.sh` 两条**同类**：相对 import 说明符只对
+一个目录深度成立，**字节一致是错的判据**。⛔ 没有把检查器改绿，也没有让豁免变成盲过：allow-list
+条目按机制记录两侧 sha256，任一侧再变即 RED。
+
+复验：`mirror-pair-drift-check` ⇒ `PASS — every mirror pair matches or is allow-listed with an unchanged signature.`（exit 0）；`node --test experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs` ⇒ 2/2 绿（证明深度修正后的路径真的解析得到，不只是字节好看）。
 
 ### AC7 — 注释不成为假话
 
