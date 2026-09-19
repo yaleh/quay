@@ -116,11 +116,12 @@ $ bash plugin/scripts/capability-catalog.sh --json | jq length
 - plugin/test/repo-root-unification.test.mjs
 - plugin/test/archive-exclusion-wiring.test.mjs
 - plugin/test/shipped-entry-runnable.test.mjs
+- plugin/sh-census-baseline.json
 - plugin/skills/quay-file-task/SKILL.md
 - packages/quay/scripts/package.sh
 - tasks/gap-arch-catalog-declarations-leave-bash.md
 
-（**设计分岔已选 (a)**：数据 = `plugin/scripts/capability-catalog-declarations.json`，渲染器 = `plugin/scripts/capability-catalog.ts`，派生集 343→344。理由：渲染器是真实机件，放在 `plugin/scripts/` 之外会让它对 sh-census / import-graph / catalog 自己的清单结构性不可见（正是本方法论要消灭的可见性洞）；`.json` 不进派生集已有先例 `judged-object-registry.json`；而 (b) 的新目录对闭包推导不可见，失效形态是消费者项目里的 `ERR_MODULE_NOT_FOUND`。落地时**原清单未列齐、必须先补进再改**的文件：`registry-bare-filename-scan.ts`（它按名把 `capability-catalog.sh` 排除为「种群描述而非引用」——该角色随表迁到数据文件，排除对象必须跟着换位，否则 344 条声明会把「每个脚本都被引用」灌进死集闭包）、`outer-retirement-precondition-check.ts`、`registry-bare-filename-scan.test.mjs`、`guard-lineage-check.test.mjs`、`shipped-entry-runnable.test.mjs`、`select-static-checks-for-touches.test.mjs`、`plugin/skills/quay-file-task/SKILL.md`（立案 skill 指向登记文件的那句）。）
+（**设计分岔已选 (a)**：数据 = `plugin/scripts/capability-catalog-declarations.json`，渲染器 = `plugin/scripts/capability-catalog.ts`，派生集 343→344。理由：渲染器是真实机件，放在 `plugin/scripts/` 之外会让它对 sh-census / import-graph / catalog 自己的清单结构性不可见（正是本方法论要消灭的可见性洞）；`.json` 不进派生集已有先例 `judged-object-registry.json`；而 (b) 的新目录对闭包推导不可见，失效形态是消费者项目里的 `ERR_MODULE_NOT_FOUND`。落地时**原清单未列齐、必须先补进再改**的文件：`registry-bare-filename-scan.ts`（它按名把 `capability-catalog.sh` 排除为「种群描述而非引用」——该角色随表迁到数据文件，排除对象必须跟着换位，否则 344 条声明会把「每个脚本都被引用」灌进死集闭包）、`outer-retirement-precondition-check.ts`、`registry-bare-filename-scan.test.mjs`、`guard-lineage-check.test.mjs`、`shipped-entry-runnable.test.mjs`、`select-static-checks-for-touches.test.mjs`、`plugin/skills/quay-file-task/SKILL.md`（立案 skill 指向登记文件的那句）、以及 `plugin/sh-census-baseline.json`（本改动**正是**该基线 `structuralNote` 预告的 Phase 4 收缩：capability-catalog.sh 有效行 2199→14 ⇒ embeddedInterpreterLines 11690→9505，差 2185 = 2199−14，残差 0）。）
 
 ## AC
 
