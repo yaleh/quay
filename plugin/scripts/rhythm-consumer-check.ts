@@ -297,7 +297,16 @@ export function broadSurfaceFiles(root: string): string[] {
   const scriptsDir = path.join(root, "plugin", "scripts");
   if (fs.existsSync(scriptsDir)) {
     for (const e of fs.readdirSync(scriptsDir)) {
-      if (e.startsWith("checker-mutation") || e === "capability-catalog.sh") continue;
+      // ⛔ Never let a carrier that EMBEDS EVERY MECHANISM'S BASENAME into this surface: a basename
+      // present there is not evidence that anything RUNS the mechanism, and one such file would
+      // silently green 判据1 for the whole repo. That carrier used to be capability-catalog.sh — the
+      // 10 declaration tables lived inside it as `[<basename>]="…"` lines, which is why it was
+      // excluded by name. Since gap-arch-catalog-declarations-leave-bash those basenames live in the
+      // declaration DATA file (skipped below by the not-a-script test) and the .sh is a thin exec
+      // wrapper — so the .sh is scannable again, and it is exactly what wires capability-catalog.ts
+      // (wired-broad evidence for the renderer). The rule is stated by PROPERTY (not a name list) so
+      // it keeps holding if the carrier is renamed or a second one appears.
+      if (e.startsWith("checker-mutation")) continue;
       if (/\.(sh|ts|mjs|js)$/.test(e)) out.push(path.join(scriptsDir, e));
     }
   }

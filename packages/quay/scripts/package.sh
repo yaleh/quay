@@ -122,7 +122,8 @@ echo "Excluded: plugin/test/ (quay's own suite — not a user-facing deliverable
 # 2026-08-06: the user should get a SMALL number of executable files. bash cannot be bundled into a
 # single executable (unlike .ts via esbuild — gap-shipped-ts-files-are-not-bundled-* owns that axis),
 # so the .sh reachable form is "few entry points + internal parts not exposed": the consumer-facing
-# entry set is DECLARED (capability-catalog.sh's PUBLIC_ENTRYPOINTS) and mechanically cross-checked
+# entry set is DECLARED (the capability-catalog PUBLIC_ENTRYPOINTS table, in
+# plugin/scripts/capability-catalog-declarations.json) and mechanically cross-checked
 # against the shipped consumer docs HERE at pack time. This is the AC3 negative control: an internal
 # .sh that appears in consumer-facing docs (plugin/loop/*.md + plugin/skills/*/SKILL.md) is an
 # UNARGUED consumer-facing surface → the pack FAILS CLOSED rather than shipping a delivery form whose
@@ -132,7 +133,7 @@ echo "Checking the .sh delivery form on the staged copy (declared entry surface 
 if ! bash "${PLUGIN_DEST}/scripts/capability-catalog.sh" --entry-surface; then
   echo "ERROR: the staged plugin's .sh delivery form is not an argued decision — see above." >&2
   echo "       An internal .sh appears in consumer-facing docs (plugin/loop/*.md or plugin/skills/*/SKILL.md)." >&2
-  echo "       Either declare it in PUBLIC_ENTRYPOINTS (plugin/scripts/capability-catalog.sh) or remove the doc reference." >&2
+  echo "       Either declare it in PUBLIC_ENTRYPOINTS (plugin/scripts/capability-catalog-declarations.json) or remove the doc reference." >&2
   exit 1
 fi
 LOOSE_SH_COUNT="$(find "${PLUGIN_DEST}" -name '*.sh' | wc -l | tr -d ' ')"

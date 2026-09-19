@@ -90,11 +90,15 @@ test("version-consistency-check isArchivedPath classifies archive/** (negative c
   assert.equal(isArchivedPath("plugin/.claude-plugin/plugin.json"), false);
 });
 
-// ── capability-catalog.sh: recursive enumeration skips archive/** ───────────────────────────
+// ── capability-catalog: recursive enumeration skips archive/** ──────────────────────────────
 // Materialize the real plugin/scripts corpus (so every script is declared), drop a fake archived
 // script under plugin/scripts/archive/, and assert the catalog stays green. Then remove the
-// archive/** exclusion line and assert the catalog goes red (the archived script is unclassified).
-test("capability-catalog.sh excludes archive/** (negative control: removing the exclusion reddens it)", () => {
+// archive/** exclusion and assert the catalog goes red (the archived script is unclassified).
+// ⛔ The exclusion lives in the RENDERER (capability-catalog.ts), not in the .sh: the entry is a
+// thin exec wrapper since gap-arch-catalog-declarations-leave-bash, so the injection target is the
+// renderer's SKIPPED_SEGMENTS set — injecting into the .sh would change nothing and the negative
+// control would read green forever.
+test("capability-catalog excludes archive/** (negative control: removing the exclusion reddens it)", () => {
   const d = tmpdir("catalog");
   try {
     const sdir = path.join(d, "plugin", "scripts");
@@ -104,6 +108,8 @@ test("capability-catalog.sh excludes archive/** (negative control: removing the 
       if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(sdir, f));
     }
     const cat = path.join(sdir, "capability-catalog.sh");
+    const renderer = path.join(sdir, "capability-catalog.ts");
+    assert.ok(fs.existsSync(renderer), "the renderer must travel with the entry (it is the injected target)");
     fs.mkdirSync(path.join(sdir, "archive", "2026-09-05"), { recursive: true });
     fs.writeFileSync(path.join(sdir, "archive", "2026-09-05", "ghost-archived.sh"),
       "#!/usr/bin/env bash\necho ghost\n");
@@ -112,15 +118,18 @@ test("capability-catalog.sh excludes archive/** (negative control: removing the 
     assert.equal(green.status, 0, `catalog must stay green with archive/ excluded:\n${green.stderr}`);
 
     // Remove the archive/** exclusion (the "撤排除" negative control).
-    let src = fs.readFileSync(cat, "utf8");
+    let src = fs.readFileSync(renderer, "utf8");
     const before = src;
-    src = src.replace("  -not -path '*/archive/*' -print0)", "  -print0)");
-    assert.notEqual(src, before, "archive exclusion line must be present and removable");
-    fs.writeFileSync(cat, src);
+    src = src.replace('new Set(["checker-mutation-cases", "archive"])', 'new Set(["checker-mutation-cases"])');
+    assert.notEqual(src, before, "archive exclusion must be present and removable in the renderer");
+    fs.writeFileSync(renderer, src);
 
-    const red = spawnSync("bash", [cat, "--summary"], { encoding: "utf8" });
+    const red = spawnSync("bash", [cat, "--json"], { encoding: "utf8" });
     assert.notEqual(red.status, 0, "removing the archive/** exclusion must redden the catalog");
-    assert.match(red.stdout, /unclassified/, "the red must be the unclassified-gate (archived script listed)");
+    const rows = JSON.parse(red.stdout);
+    const ghost = rows.find((r) => r.file === "ghost-archived.sh");
+    assert.ok(ghost, "the archived script must be enumerated once the exclusion is gone");
+    assert.equal(ghost.question, null, "and it is the UNCLASSIFIED entry that reddens the gate");
   } finally {
     rm(d);
   }

@@ -21,7 +21,7 @@
 // ⛔ exec-bit / shebang ALONE is NOT entry evidence. The tarball legitimately
 // carries the whole plugin bundle (`files` includes "plugin" — the plugin IS the
 // delivery surface), and every plugin/*.sh carries a shebang + exec bit: those are
-// mechanisms invoked BY PATH by the driver/gate (capability-catalog.sh's table),
+// mechanisms invoked BY PATH by the driver/gate (the capability-catalog declarations),
 // not user-facing commands. Treating "any shebang file" as an entry produced ~300
 // false violations (plugin/scripts/*.sh, plugin/gate-scripts/*.sh,
 // plugin/vendor/*/dist/*.js) — the over-wide definition this test now narrows to

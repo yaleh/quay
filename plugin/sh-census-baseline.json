@@ -1,0 +1,33 @@
+{
+  "_note": "Shrink-only ratchet baseline for plugin/scripts/sh-census-check.ts (tasks/gap-arch-sh-census-check; SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P2/P4, §5 Phase 0b). These two numbers are the checker's OWN readings on the real tree at land time (2026-09-19) — never hand-fitted. A reading above its baseline is RED; raising a baseline above the git-HEAD value is also RED (so 「调高基线」 cannot buy a pass). Lowering a baseline is the intended direction (that is what Phase 1/5 do) and needs no ceremony, but the file change must still be committed. The live reading is `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals.",
+  "_axes": {
+    "embeddedInterpreterLines": "sum of code lines over tracked *.sh that are NOT in plugin/sh-census-exceptions.txt and contain an embedded interpreter (node with --experimental-strip-types/-e/.ts, python3, or jq) AT A COMMAND POSITION (comments / strings / heredoc bodies do not count).",
+    "duplicateCopies": "count of non-symlink byte-identical same-basename pairs between experiments/**/scripts/ and plugin/scripts/ (includes .sh and .ts). Symlinked copies are counted separately as totals.symlinkedCopies and are NOT duplicates."
+  },
+  "_reanchorLog": [
+    {
+      "when": "2026-09-19 (land)",
+      "from": { "embeddedInterpreterLines": 11431, "duplicateCopies": 38 },
+      "to": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
+      "why": "The baseline was anchored at 11431/38 on the task branch. Merging develop (63 commits, incl. the context-slimming P2 work) moved the TRUE reading to 11690/37. Re-anchoring to the true reading is REQUIRED for the checker to land green on develop: any other value either reds the whole repo's static layer or is a lie. Both numbers are the checker's OWN reading on the merged tree — never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "+259 = +109 orchestration/context-slimming/v-judge.sh (new on develop, jq) + +135 orchestration/context-slimming/v-run.sh (new on develop, jq) + +6 plugin/scripts/capability-catalog.sh (develop registering its OWN new script — 6 rows per script, NOT this task's registration, which was already inside the 11431) + +9 plugin/scripts/develop-deliver-tgz.sh (develop's edit). Residual = 0.",
+        "duplicateCopies": "-1: develop converted experiments/quay-perpetual-stream/scripts/write-json-atomic.ts into a symlink to plugin/scripts/write-json-atomic.ts (dedup Phase 1), moving it from duplicateCopies to symlinkedCopies (19 -> 20)."
+      },
+      "structuralNote": "⚠️ This re-anchor exposes a real weakness of the '只降不升' ratchet: any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor (which the shrink-guard permits once committed, since it compares worktree-vs-HEAD copies of this very file). So the guard reliably catches UNCOMMITTED (drifting) raises and forces committed raises to be visible/reviewable — but it CANNOT by itself prevent legitimate growth. Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table and the experiments/** mirrors, not on the ratchet alone."
+    },
+    {
+      "when": "2026-09-19 (gap-arch-catalog-declarations-leave-bash)",
+      "from": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
+      "to": { "embeddedInterpreterLines": 9505, "duplicateCopies": 37 },
+      "why": "This is the SHRINK the entry above predicted ('Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table'). Phase 4 moved the 10 declare -A declaration tables out of plugin/scripts/capability-catalog.sh into capability-catalog-declarations.json, read by a new TypeScript renderer; the .sh is now a thin exec wrapper. Lowering a baseline is the intended direction (this file's _note: 'needs no ceremony, but the file change must still be committed') — it is committed here, and both numbers are again the checker's OWN reading on the tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2185 = plugin/scripts/capability-catalog.sh effective lines 2199 -> 14 (-2185). The file still contains an embedded interpreter at a command position (it execs node on the renderer), so it stays IN scope — it is the line count that moved, not its membership. Residual = 0: no other tracked .sh changed effective lines in this task.",
+        "duplicateCopies": "unchanged (37). The migration added no experiments/** mirror and touched no byte-identical pair."
+      },
+      "structuralNote": "↘ This is the first DECREASE on this axis, and it validates the Phase 4 direction: the two ratchet axes were chosen on the premise that the shell corpus is the thing to shrink, and moving DATA out of a shell file into a data file is a real, mechanical way to do it (the hazard removed was not line count but shell EVALUATION of shell-quoted data). Note what did NOT move: the axis counts effective lines of embedded-interpreter .sh, so a thin wrapper around a TS renderer still counts — 'make it thin' is rewarded, 'make it JS' is not what this axis measures."
+    }
+  ],
+  "embeddedInterpreterLines": 9505,
+  "duplicateCopies": 37
+}
