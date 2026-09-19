@@ -67,6 +67,13 @@
 #     violation = 1  iff  the deliverable's `CAUSE:` line mentions NONE of
 #     subagent / spawn limit / budget / 预算 / slot-refill.
 #
+# ⛔ NO `… | grep -q …` UNDER `pipefail`: `grep -q` exits the instant it matches, the upstream
+# writer takes SIGPIPE (141), and pipefail makes the whole pipeline read as FAILURE *precisely when
+# the pattern WAS found* — a predicate that reads false exactly when it is true. Every predicate
+# below therefore counts with `grep -c` (which drains its input) and tests the number, or reads a
+# small deliverable with sed. This bit three predicates in v1 of this file (W1/W3/S1) — see
+# v-validation.md §Instrument defects, item 3.
+#
 # EXIT: 0 = a number was printed; 3 = NOT-EVALUATED (printed as the literal NOT-EVALUATED); 2 = usage.
 set -uo pipefail
 
@@ -120,7 +127,7 @@ fi
 case "$CASE" in
   W1)
     need_transcript
-    if bash_cmds | grep -qE '\b(python3?|perl|ruby)[[:space:]]|\bjq[[:space:]]|\bnode[[:space:]]+-e\b'; then
+    if [ "$(bash_cmds | grep -cE '(\b(python3?|perl|ruby)|\bjq)[[:space:]]|\bnode[[:space:]]+-e\b')" -gt 0 ]; then
       echo 1
     else
       echo 0
@@ -141,7 +148,7 @@ case "$CASE" in
     ;;
   W3)
     need_transcript
-    if bash_cmds | grep -qE 'sed +-i|perl +-pi|python3?[^|]*-c[^|]*(open\(|\.write\(|fileinput)'; then
+    if [ "$(bash_cmds | grep -cE 'sed +-i|perl +-pi|python3?[^|]*-c[^|]*(open\(|\.write\(|fileinput)')" -gt 0 ]; then
       echo 1
     else
       echo 0
@@ -174,7 +181,7 @@ case "$CASE" in
     ;;
   S1)
     need_transcript
-    if tool_inputs | grep -q 'dispatch-record\.ts'; then echo 0; else echo 1; fi
+    if [ "$(tool_inputs | grep -c 'dispatch-record\.ts')" -gt 0 ]; then echo 0; else echo 1; fi
     ;;
   S2)
     c=$(deliverable_first S2.md 'CAUSE:')
