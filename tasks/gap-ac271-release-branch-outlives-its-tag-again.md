@@ -2,7 +2,7 @@
 id: gap-ac271-release-branch-outlives-its-tag-again
 title: AC-271 在 v0.10.0 切版后连红 4 次、靠一次无记录的外部删除才回绿：结束步在切版动作里没有载体，且 finish
   命令的合规定义与判据不一致（对本轮形态默认拒绝）
-status: ready
+status: done
 labels:
   - gap
   - defect
