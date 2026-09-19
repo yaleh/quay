@@ -63,6 +63,9 @@ plugin/scripts/full-suite-runner.ts:174  值导入 runner-red-parse.ts (gateScan
 
 **陷阱三：新增 `plugin/scripts/*.ts` 会被 capability-catalog 的文件系统枚举抓到，但它不是检查器。**
 `capability-catalog.sh:2109` 用 `find "$SELF_DIR" -mindepth 1 -type f \( -name '*.sh' -o -name '*.ts' -o -name '*.mjs' \)` 枚举，`:2198` 硬闸 `UNCLASSIFIED=0`（缺 QUESTION 行即 exit 1）。
+（⚠️ 落地后 develop 把这段搬走了：枚举与硬闸改在 `plugin/scripts/capability-catalog.ts`，声明表改成
+数据文件 `plugin/scripts/capability-catalog-declarations.json`；**注册点变成那个 JSON**。合并时的处理
+见 ## Notes「合并 develop 的冲突处理」。）
 ⇒ 新增的文件**必须**在六张声明表补行；**⛔ 但不适用 AC-304 任务的「检查器四件套」**（无 `--selftest`、无 `checker-mutation-cases/*.sh`、不入 `runner-static-gate.ts` 的 `run_static_checks`、`# @checker-count` **不 +1**）。AC-304 把两者写在同一段，本条只取「声明表」那一半。
 
 ### 落点裁定（实现者须在 notes 写出选择与理由）
@@ -98,6 +101,7 @@ plugin/scripts/full-suite-runner.ts:174  值导入 runner-red-parse.ts (gateScan
 - plugin/scripts/full-suite-runner-types.ts (new)
 - plugin/scripts/code-span-strip.ts (new；若取「放进 gate-script-base.ts」的替代路则无此文件)
 - plugin/scripts/capability-catalog.sh
+- plugin/scripts/capability-catalog-declarations.json
 - plugin/scripts/red-on-omission-audit.ts
 - packages/quay/src/gate/types.ts (new)
 - packages/quay/src/gate/registry.ts
@@ -298,3 +302,31 @@ AC2/AC3 都按这条纪律写了 baseline-as-oracle 守卫（`:330` / `:336` / `
 **同一注入下 AC2 转红**（计数 1 ≠ 基线 0）⇒ 该文件的判据面没有失明。撤销后
 `git status --short plugin/scripts/code-span-strip.ts` 为空（逐字节还原），
 `node --experimental-strip-types --test plugin/test/import-graph-check.test.mjs` ⇒ **20 tests / 20 pass / 0 fail**。
+
+### 合并 develop 的冲突处理（capability-catalog 声明表迁出 bash）
+
+本轮 fan-in 前 `git merge develop` 撞上**一个**冲突：`plugin/scripts/capability-catalog.sh`。
+develop 侧同月落了 `gap-arch-catalog-declarations-leave-bash`——把六张 `declare -A` 声明表**整表搬出**
+到数据文件 `plugin/scripts/capability-catalog-declarations.json`，`.sh` 变成只做「解析自身目录 → 缺件
+fail-closed → exec 渲染器」的**薄入口**，渲染器为新文件 `plugin/scripts/capability-catalog.ts`。
+本条分支则是在那六张表里各插了两行。
+
+⇒ 按「代码文件取**语义并集**」处理：**取 develop 的 `.sh`**（`git checkout develop --
+plugin/scripts/capability-catalog.sh`），并把我的两处声明**逐字**重新表达进**新的注册点** JSON
+（6 张表 × 2 键 = 12 行；`QUESTION` / `CADENCE` / `INVALIDATION` / `LAST_REAFFIRMED` / `MATCHING` /
+`CONSUMER`）。**不是**「取 develop 版本就完事」——那会**静默丢掉**新脚本的声明。
+
+**机械核对（不是印象）**：
+- 抽取方式：从本分支落地版 `.sh`（`git show 5367a6b34:plugin/scripts/capability-catalog.sh`）按
+  `[key]="value"` 逐行解析取值；**解析器先对 344 个既有键与 JSON 逐字比对**，差异全部由 develop
+  侧自己的后改（9 处）与 bash 转义反解（`\"`→`"`）解释，无解析伪影；我的 12 个取值**不含反斜杠**
+  ⇒ 无需转义处理。
+- 结果：`bash plugin/scripts/capability-catalog.sh --summary` ⇒
+  **`346 scripts | 346 declared | 0 unclassified | 341 ship`**，exit 0（合并前**实测**为
+  `346 scripts | 344 declared | 2 unclassified` —— 正是我的两个新文件）；`bash
+  plugin/scripts/capability-catalog.sh`（硬闸模式）同样 exit 0。
+  ⚠️ 计数相对落地轮的 344 变了（346）：develop 自己新增了 `sh-census-check.ts` 与
+  `capability-catalog.ts` 两个脚本 —— AC5 的判据是「自报值 = 落地前 + 新增数」，与该差值无关，
+  此处如实记录口径变化。
+- JSON diff 只有 **12 行新增**（无重排、无格式漂移）；`git diff develop...HEAD --name-only` 与
+  ## Touches 对照 ⇒ 唯一新增成员是 `plugin/scripts/capability-catalog-declarations.json`，已补进 Touches。
