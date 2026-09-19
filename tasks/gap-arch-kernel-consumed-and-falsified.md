@@ -1,7 +1,7 @@
 ---
 id: gap-arch-kernel-consumed-and-falsified
 title: 架构棘轮：kernel/ 被消费 —— AC-309 判据本体取真值 + 两支 CAUSE 取假 + packages 侧跨层消费者 ≥3 逐条可核
-status: todo
+status: ready
 labels:
   - gap
 parent: null
