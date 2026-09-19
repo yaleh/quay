@@ -678,7 +678,13 @@ function buildFixture(dir: string, c: SelftestCase): void {
 }
 
 /** Run one case end-to-end: fixture → readImportGraph → judge → compare every expected field. */
-export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; detail: string } {
+export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; detail: string; expected: string } {
+  const expected =
+    `evaluated=${c.expect.evaluated} valueSccs=${c.expect.valueSccs} typeSccs=${c.expect.typeSccs}` +
+    ` reverseEdges=${c.expect.reverseEdges}` +
+    (c.expect.kernelChecked === undefined ? "" : ` kernelChecked=${c.expect.kernelChecked}`) +
+    (c.expect.kernelViolations === undefined ? "" : ` kernelViolations=${c.expect.kernelViolations}`) +
+    ` exit=${c.expect.exit}`;
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "import-graph-selftest-"));
   try {
     buildFixture(dir, c);
@@ -710,13 +716,14 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
     return {
       name: c.name,
       ok: problems.length === 0,
+      expected,
       detail:
         problems.length === 0
-          ? `evaluated=${reading.evaluated} valueSccs=${counts.valueSccs} typeSccs=${counts.typeSccs} reverseEdges=${counts.reverseEdges} kernelChecked=${reading.kernelChecked} exit=${exit}`
+          ? `got evaluated=${reading.evaluated} valueSccs=${counts.valueSccs} typeSccs=${counts.typeSccs} reverseEdges=${counts.reverseEdges} kernelChecked=${reading.kernelChecked} kernelViolations=${reading.kernelViolations.length} exit=${exit}`
           : problems.join("; "),
     };
   } catch (err) {
-    return { name: c.name, ok: false, detail: `INFRASTRUCTURE: ${(err as Error).message.split("\n")[0]}` };
+    return { name: c.name, ok: false, expected, detail: `INFRASTRUCTURE: ${(err as Error).message.split("\n")[0]}` };
   } finally {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -726,12 +733,22 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
   }
 }
 
-export function runSelftest(): { ok: boolean; results: { name: string; ok: boolean; detail: string }[] } {
-  const results = SELFTEST_CASES.map(runSelftestCase);
+export interface SelftestResult {
+  name: string;
+  ok: boolean;
+  detail: string;
+  /** The verdict the case declares BEFORE it runs — printed next to the reading so the enumeration is
+   *  an expectation-vs-reading table, not a list of names (AC1 asks for 「预期判定」, not labels). */
+  expected: string;
+}
+
+export function runSelftest(): { ok: boolean; results: SelftestResult[] } {
+  const results: SelftestResult[] = SELFTEST_CASES.map(runSelftestCase);
   const raise = runBaselineRaiseCase();
   results.push({
     name: "baseline-raised-above-head (AC5: raising ANY baseline axis past git HEAD ⇒ exit 1)",
     ok: raise.ok,
+    expected: "equal⇒raised=[] · lowered⇒raised=[] · raised(+1 valueSccs)⇒raised=[valueSccs] · head absent⇒bootstrap=true",
     detail: raise.detail,
   });
   return { ok: results.every((r) => r.ok), results };
@@ -818,8 +835,12 @@ export function main(argv: string[]): number {
     if (asJson) {
       console.log(JSON.stringify({ selftest: results, ok }, null, 2));
     } else {
-      console.log(`import-graph-check --selftest — ${results.length} injected case(s)`);
-      for (const r of results) console.log(`  [${r.ok ? "ok" : "FAIL"}] ${r.name}\n      ${r.detail}`);
+      console.log(`import-graph-check --selftest — ${results.length} injected case(s), each an expectation vs a real reading`);
+      for (const r of results) {
+        console.log(`  [${r.ok ? "ok" : "FAIL"}] ${r.name}`);
+        console.log(`      expected: ${r.expected}`);
+        console.log(`      ${r.ok ? "reading : " : "PROBLEM : "}${r.detail}`);
+      }
     }
     console.log(ok ? `PASS — all ${results.length} case(s) behaved` : "FAIL — see the cases above");
     return ok ? 0 : 1;

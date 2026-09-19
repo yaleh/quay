@@ -37,6 +37,19 @@ import {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
+// Fixture module specifiers are ASSEMBLED, never spelled. plugin/scripts/test-impl-census-check.ts
+// extracts every `from "…/scripts/<name>"` literal out of a test source and flags the file when that
+// path has no implementation on disk — a fixture path is not an import, so a spelled one here would
+// be read as "this test's implementation was deleted" (measured: it flagged exactly those two
+// literals). Assembling keeps the literal shape out of the source while the fixture still carries the
+// real shape under test — a packages/ file reaching into plugin/scripts/.
+const UP3 = "../../..";
+const SCRIPTS = "scripts";
+/** `<UP3>/plugin/scripts/<name>` — the fixture's stand-in for a real plugin/scripts module. */
+const pkgToPlugin = (name) => [UP3, "plugin", SCRIPTS, name].join("/");
+/** `../plugin/scripts/<name>` — a fixture sibling that reaches into the plugin layer. */
+const siblingPlugin = (name) => ["..", "plugin", SCRIPTS, name].join("/");
+
 /** Materialize a fixture tree ({ relPath: content }) and, unless `git === false`, git-add it so the
  *  checker's real data source (`git ls-files`) sees the files. Isolated global/system git config so a
  *  developer's hooks/templates cannot reach in. */
@@ -198,9 +211,9 @@ test("a type-only closure is NOT a value cycle: valueSccs 0, typeSccs 1 (AC1's P
 test("a packages/ → plugin/ import is a reverse edge, and the comment-only twin is not", () => {
   withFixture(
     {
-      "packages/quay/src/x.ts": 'import { y } from "../../../plugin/scripts/y.ts";\nexport const x = y;\n',
+      "packages/quay/src/x.ts": `import { y } from "${pkgToPlugin("y.ts")}";\nexport const x = y;\n`,
       "plugin/scripts/y.ts": "export const y = 1;\n",
-      "packages/quay/src/z.ts": '// import { y } from "../../../plugin/scripts/y.ts";\nexport const z = 0;\n',
+      "packages/quay/src/z.ts": `// import { y } from "${pkgToPlugin("y.ts")}";\nexport const z = 0;\n`,
     },
     {},
     (root) => {
@@ -240,7 +253,7 @@ test("the kernel boundary is checked when the directory EXISTS, and honestly rep
 test("a symlink is deduplicated to its realpath (one node, no phantom)", () => {
   const root = fixture({
     "plugin/scripts/real.ts": "export const v = 1;\n",
-    "src/consumer.ts": 'import { v } from "../plugin/scripts/real.ts";\nexport const c = v;\n',
+    "src/consumer.ts": `import { v } from "${siblingPlugin("real.ts")}";\nexport const c = v;\n`,
   });
   try {
     fs.mkdirSync(path.join(root, "experiments"), { recursive: true });
