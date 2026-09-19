@@ -41,6 +41,7 @@ extra:
 - plugin/scripts/arch-coverage-report.ts
 - plugin/test/arch-coverage-report.test.mjs
 - plugin/scripts/capability-catalog.sh
+- .gitignore
 - tasks/gap-arch-coverage-self-report.md
 
 ## AC

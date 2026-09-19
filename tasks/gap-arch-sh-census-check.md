@@ -1,7 +1,7 @@
 ---
 id: gap-arch-sh-census-check
 title: 架构棘轮：shell 层普查检查器（内嵌解释器有效行 / 字节相同重复副本，例外清单单列），两个量只降不升
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -39,13 +39,13 @@ extra:
 
 ## Touches
 
-- plugin/scripts/sh-census-check.ts
-- plugin/sh-census-baseline.json
-- plugin/sh-census-exceptions.txt
-- plugin/test/sh-census-check.test.mjs
+- plugin/scripts/sh-census-check.ts (new)
+- plugin/sh-census-baseline.json (new)
+- plugin/sh-census-exceptions.txt (new)
+- plugin/test/sh-census-check.test.mjs (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
-- plugin/scripts/checker-mutation-cases/sh-census-check.sh
+- plugin/scripts/checker-mutation-cases/sh-census-check.sh (new)
 - tasks/gap-arch-sh-census-check.md
 
 ## AC
