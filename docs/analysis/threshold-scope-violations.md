@@ -11,8 +11,7 @@
 # criterion fix; it re-anchors the ceiling to the current violation set.
 #
 # Format: one `<rel-file>: <code>: <detail>` per line (repo-root-relative, sorted).
-# baseline-count: 3
+# baseline-count: 2
 
-CLAUDE.md: stale-path: .claude/workflows/execute-milestone.js
 plugin/loop/orchestrator-loop-tick.md: unscoped-threshold: | needs-human 积压 ≥3 | 分诊：真阻塞的攒给人，可继续的指示内层继续 |
 plugin/loop/orchestrator-loop-tick.md: unscoped-threshold: 超 90 分钟 / needs-human 积压 ≥3」就停下等人——外层就是那个「人」的常规部分。内层仍然停，只是停的
