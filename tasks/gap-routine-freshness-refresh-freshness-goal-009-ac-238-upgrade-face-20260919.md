@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-238-upgrade-face-2026091
 title: "freshness-refresh: GOAL-009-AC-238 evidence (build_sha
   b29affe9d0b955647c4a215ad6b9fbf0d662ec9f, carrier ts 2026-09-17T06:40:51Z) is
   already 146 delivery-face commits behind develo"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
