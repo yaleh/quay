@@ -1,7 +1,7 @@
 ---
 id: gap-context-slim-p0-baseline-readings
 title: 上下文瘦身 P0：冻结基线快照并把常驻注入读数脚本化
-status: todo
+status: ready
 labels:
   - gap
 parent: null
