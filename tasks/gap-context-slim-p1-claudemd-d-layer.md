@@ -1,7 +1,7 @@
 ---
 id: gap-context-slim-p1-claudemd-d-layer
 title: 上下文瘦身 P1：CLAUDE.md 删 D 层并把事故叙事迁出常驻文件
-status: ready
+status: done
 labels:
   - gap
 parent: null
