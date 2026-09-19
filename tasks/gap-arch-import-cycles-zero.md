@@ -112,6 +112,7 @@ plugin/scripts/full-suite-runner.ts:174  值导入 runner-red-parse.ts (gateScan
 - packages/quay/src/gate/factories/test-pass.ts
 - packages/quay/src/gate/config/loader.ts
 - plugin/import-graph-baseline.json
+- plugin/test/import-graph-check.test.mjs
 - plugin/test/strategic-doc-staleness-check.test.mjs
 - plugin/test/suite-state-trigger.test.mjs
 - plugin/test/full-suite-runner-phases.test.mjs
@@ -266,3 +267,34 @@ invariant 转红**——它按字面在 `full-suite-runner.ts` 里找 `scope?: "
 
 未改 Provider ABI / 公开 CLI-MCP 表面；未创建或消费 `packages/quay/src/kernel/`；未拆两个巨型文件；
 **未修改 `import-graph-check.ts` 的判定语义**（只降基线数值，且降低也如实提交）。
+
+### 第二处连带修复（硬规则 5b 的第二个实例）：AC4 的「空转守卫」是一条不随棘轮走的字面钉
+
+**症状（落地上报）**：整轮 fan-in 的全量 suite 红 —— `# tests 9038 / # pass 9037 / # fail 1`，唯一红点
+`plugin/test/import-graph-check.test.mjs:374`
+`AssertionError [ERR_ASSERTION]: the real reading must name at least one node`
+（日志 `.quay/fan-in-suite-gap-arch-import-cycles-zero~wk-prod-anchor~1789810992180-11260d.log`
+第 9391-9392 行；`__PERFILE__ …/plugin/test/import-graph-check.test.mjs passed=false`）。
+
+**根因（本任务造成的、且是**目标态**本身）**：AC4 把「真实读数必须点名至少一个节点」写成**无条件**断言，
+而它点名的面 = SCC 成员 ∪ 反向边端点 ∪ kernel 违规端点。本条把 `valueSccs` 1→0、`typeSccs` 2→0，
+AC-307 已把 `reverseEdges` 降到 0 ⇒ **三个来源同时为空**（实机读数：`files=437 edges=1055`、
+`valueSccs=[] typeSccs=[] reverseEdges=[] kernelViolations=[]`、`verdict.ok=true`）⇒ `named.size===0`。
+即：**该守卫在棘轮到达目标态那一刻变成不可满足**。这与该测试文件自己的设计声明直接冲突 ——
+其头注释写着「when a cycle is repaired the baseline is lowered (the sanctioned act) and these assertions
+follow it automatically; **a literal pin here would fight the ratchet's own reason to exist**」。
+AC2/AC3 都按这条纪律写了 baseline-as-oracle 守卫（`:330` / `:336` / `:349`），**AC4 是唯一的例外**。
+
+**修法（改测试的空转守卫，⛔ 不动检查器判定语义、⛔ 不调基线）**：空 `named` 只在**读数确实取到、
+且确实是已修复的那一份**时方可放行 —— 四条各自可取假的合取，不是屏蔽：
+`REAL.evaluated===true`、`REAL.files>0`、`countsOf(REAL)=== {0,0,0}`、`REAL.kernelViolations===[]`；
+一旦有任何东西被点名，原来的逐节点卫生断言（无 `..` / 无 `.claude/worktrees/` / 无 symlink 别名）
+**逐字照跑**。该文件因此补进 ## Touches（它现在是本分支 delta 的一部分）。
+
+**负控制（证明这是「分叉」而不是「绕过」）**：临时把值环注回去
+（`code-span-strip.ts` 值导入 `ready-pool-check.ts` 的 `judgePoolCandidate`）⇒
+检查器读数 `valueSccs=[[code-span-strip, ready-pool-check, strategic-doc-staleness-check]]`、
+`verdict.ok=false over:['valueSccs']`；此时 AC4 **走非空分支并仍绿**（3 个被点名文件，逐节点卫生断言真的执行），
+**同一注入下 AC2 转红**（计数 1 ≠ 基线 0）⇒ 该文件的判据面没有失明。撤销后
+`git status --short plugin/scripts/code-span-strip.ts` 为空（逐字节还原），
+`node --experimental-strip-types --test plugin/test/import-graph-check.test.mjs` ⇒ **20 tests / 20 pass / 0 fail**。
