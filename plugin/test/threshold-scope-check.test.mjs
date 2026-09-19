@@ -23,9 +23,11 @@
 //         AND the skip is VISIBLE: skippedByMarker is reported (a silent skip is indistinguishable
 //         from "no findings").
 //   AC4  — matching is by line CONTENT: fenced code blocks and HTML-comment content are stripped.
-//   AC9  — the three-layer stale-path judgment, run against the REAL CLAUDE.md: the 18 local
-//         references (basename-exists shorthand) are NOT reported; only the genuinely unresolvable
-//         path is.
+//   AC9  — the three-layer stale-path judgment, run against the REAL CLAUDE.md. After P1
+//         context-slim (gap-context-slim-p1-claudemd-d-layer) deleted its D layer, the real doc is
+//         CLEAN; the control is kept non-vacuous by judging the same corpus with ONE injected
+//         unresolvable path — the ~18 basename-shorthand local references must still NOT be
+//         reported, and the injected one must be (exactly one stale path, and it is that one).
 //   AC10 — placeholder patterns (`NNN`, `<...>`, `*`, `{`) are skipped (`tasks/DIR-NNN.md`).
 //   AC11 — the negative control: a fabricated reference to a nonexistent file MUST be reported;
 //         the same text with a real path MUST NOT.
@@ -212,19 +214,40 @@ test("AC11b — a `path:NNN` LINE-NUMBER citation resolves to its base path: exi
 });
 
 // ── AC9 + three-layer stale-path judgment on the REAL CLAUDE.md ─────────────────────────────────────
-test("AC9 — the real CLAUDE.md stale-path run: local references (basename-exists shorthand) are NOT reported; the one unresolvable path is", () => {
-  const res = run("--judge", "CLAUDE.md", "--json");
-  assert.equal(res.status, 1, `CLAUDE.md carries the known stale path, so --judge must exit 1, got ${res.status}:\n${res.stdout}${res.stderr}`);
-  const out = JSON.parse(res.stdout);
-  // The 18 local-path class (a shorthand whose basename exists elsewhere) is NOT reported.
-  // `OUTER-LOOP.md`, `prepare-milestone.js`, `execute-milestone.js` etc. in CLAUDE.md are all
-  // annotated as retired OR basename-resolve — assert none of those appear as stale.
-  for (const s of out.stalePaths) {
-    assert.ok(s.path !== "OUTER-LOOP.md" && !s.path.includes("prepare-milestone"), `annotated/retired reference must not report: ${s.path}`);
+// P1 context-slim (gap-context-slim-p1-claudemd-d-layer) deleted CLAUDE.md's D layer, which carried
+// the LAST genuinely-unresolvable path (`.claude/workflows/execute-milestone.js` — a file that no
+// longer exists). The ratchet re-baselined 3→2 accordingly, and the real CLAUDE.md is now CLEAN.
+//
+// A bare `assert.equal(stalePaths.length, 0)` on that would measure NOTHING — it cannot fail for any
+// checker, vacuous or not (硬规则 4: a quantity that structurally cannot be false is not a
+// measurement), and the original `for (const s of out.stalePaths)` false-positive loop would become
+// an empty iteration for the same reason. So the control is RETAINED on the SAME corpus instead of
+// dropped: the real CLAUDE.md text plus ONE injected unresolvable path, judged via an absolute temp
+// path (the checker resolves candidates against `--root`, so all ~18 of CLAUDE.md's basename-shorthand
+// local references resolve exactly as they do in the real run). `stalePaths === [INJECTED]` is
+// falsifiable in BOTH directions: a checker that falsely flags a local reference reports >1, and a
+// checker gone vacuous reports 0.
+test("AC9 — the real CLAUDE.md is clean after P1 (its last stale path was deleted); its local references are NOT reported, and an INJECTED stale path IS (positive control on the same corpus)", () => {
+  // (a) the pristine real doc: clean, so --judge exits 0.
+  const clean = run("--judge", "CLAUDE.md", "--json");
+  assert.equal(clean.status, 0, `CLAUDE.md is clean after P1, so --judge must exit 0, got ${clean.status}:\n${clean.stdout}${clean.stderr}`);
+  const cleanOut = JSON.parse(clean.stdout);
+  assert.equal(cleanOut.stalePaths.length, 0, `expected 0 stale paths in the real CLAUDE.md, got ${JSON.stringify(cleanOut.stalePaths)}`);
+
+  // (b) the positive control: the same corpus + one injected unresolvable path.
+  const INJECTED = "plugin/scripts/this-path-does-not-exist-ac9-control.ts";
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tsc-ac9-"));
+  const f = path.join(dir, "claudemd-plus-injected.md");
+  fs.writeFileSync(f, fs.readFileSync(path.join(REPO_ROOT, "CLAUDE.md"), "utf8") + `\n对照：\`${INJECTED}\`。\n`);
+  try {
+    const res = judgeFile(f);
+    assert.equal(res.status, 1, `an injected unresolvable path must flip --judge to exit 1, got ${res.status}:\n${res.stdout}${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.stalePaths.length, 1, `exactly the INJECTED path must be reported — a longer list means a basename-shorthand local reference was falsely flagged: ${JSON.stringify(out.stalePaths)}`);
+    assert.equal(out.stalePaths[0].path, INJECTED, `flagged path must be the injected one, got ${out.stalePaths[0].path}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  // The ONE genuinely unresolvable, unannotated path is the current finding.
-  const known = out.stalePaths.find((s) => s.path === ".claude/workflows/execute-milestone.js");
-  assert.ok(known, `expected the known stale path to be reported, got ${JSON.stringify(out.stalePaths)}`);
 });
 
 // ── AC6 + default gate on the real repo (shrink-only ratchet consistency) ───────────────────────────
