@@ -662,6 +662,18 @@ export const SELFTEST_CASES: SelftestCase[] = [
     baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
     expect: { evaluated: false, valueSccs: 0, typeSccs: 0, reverseEdges: 0, exit: 2 },
   },
+  {
+    // A SECOND unreadable-input path, distinct from the one above: here git works and the enumeration
+    // succeeds, but there is nothing to analyze. `git ls-files` failing and `git ls-files` returning
+    // zero analyzable files are different code paths (throw vs `nodes.size === 0`), and both must land
+    // on the SAME three-valued answer — a checker that answers "0 cycles" for "no input at all" is
+    // exactly the archguard failure this whole task exists to close.
+    name: "empty-repo (git works, zero analyzable TS ⇒ evaluated false + exit 2, NEVER '0 cycles')",
+    git: true,
+    files: { "README.md": F("# nothing to analyze here") },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: { evaluated: false, valueSccs: 0, typeSccs: 0, reverseEdges: 0, exit: 2 },
+  },
 ];
 
 function buildFixture(dir: string, c: SelftestCase): void {
