@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 63 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 64 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -967,6 +967,25 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/ packages/ experiments/ scripts/ plugin/import-graph-baseline.json plugin/scripts/import-graph-check.ts plugin/test/import-graph-check.test.mjs plugin/scripts/checker-mutation-cases/import-graph-check.sh
   run_checker "import-graph-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/import-graph-check.ts" --root "${repo_root}"
+  echo "== sh-census ratchet (tasks/gap-arch-sh-census-check — SPEC-architecture-consolidation §2 P2/P4 / §5 Phase 0b) =="
+  # The shell layer's census: for every tracked `.sh`, whether it is a PROGRAM (an embedded
+  # node/python3/jq at a COMMAND position) or GLUE, plus the byte-identical duplicate copies between
+  # experiments/**/scripts/ and plugin/scripts/. Two quantities that REGROW (a new embedding script /
+  # a new copy) are ratcheted shrink-only against plugin/sh-census-baseline.json: a reading above its
+  # baseline is RED, and raising a baseline past git HEAD is RED too (so 「调高基线」 cannot buy a pass).
+  # archguard does not parse shell at all — this is the only reading that watches the ~25k code lines
+  # of the 146 tracked real scripts, which is why Phase 1/5's "收敛了" stops being an assertion.
+  # `--root repo_root` (NOT main_root): the only inputs are checked-in sources under the tree under
+  # test — this task's own worktree carries the change before the main checkout does, and reading
+  # main_root would report the PRE-change census.
+  # Exit vocabulary: 0 PASS · 1 a quantity grew / the baseline was raised · 2 usage-or-environment
+  # error INCLUDING "the census could not be read" (git unavailable / no .sh / the exception list
+  # unparseable) — deliberately NOT this repo's usual exit 3, because this checker's whole subject is
+  # whether the census CAN be read, so an unreadable input is a violation of the invariant; run_checker
+  # treats 2 as RED (never吞成 0) either way.
+  # @static-tier change
+  # @static-object plugin/ scripts/ experiments/ plugin/sh-census-baseline.json plugin/sh-census-exceptions.txt plugin/scripts/sh-census-check.ts plugin/test/sh-census-check.test.mjs plugin/scripts/checker-mutation-cases/sh-census-check.sh
+  run_checker "sh-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/sh-census-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

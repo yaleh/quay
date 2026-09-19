@@ -1,0 +1,9 @@
+{
+  "_note": "Shrink-only ratchet baseline for plugin/scripts/sh-census-check.ts (tasks/gap-arch-sh-census-check; SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P2/P4, §5 Phase 0b). These two numbers are the checker's OWN readings on the real tree at land time (2026-09-19) — never hand-fitted. A reading above its baseline is RED; raising a baseline above the git-HEAD value is also RED (so 「调高基线」 cannot buy a pass). Lowering a baseline is the intended direction (that is what Phase 1/5 do) and needs no ceremony, but the file change must still be committed. The live reading is `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals.",
+  "_axes": {
+    "embeddedInterpreterLines": "sum of code lines over tracked *.sh that are NOT in plugin/sh-census-exceptions.txt and contain an embedded interpreter (node with --experimental-strip-types/-e/.ts, python3, or jq) AT A COMMAND POSITION (comments / strings / heredoc bodies do not count).",
+    "duplicateCopies": "count of non-symlink byte-identical same-basename pairs between experiments/**/scripts/ and plugin/scripts/ (includes .sh and .ts). Symlinked copies are counted separately as totals.symlinkedCopies and are NOT duplicates."
+  },
+  "embeddedInterpreterLines": 11425,
+  "duplicateCopies": 38
+}

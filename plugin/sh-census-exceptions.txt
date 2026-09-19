@@ -1,0 +1,20 @@
+# sh-census exceptions — files whose lines are counted as `exceptionLines` and NOT into the
+# `embeddedInterpreterLines` ratchet. Every line is `<repo-relative path>  # <reason>`; a line
+# without a path or without a `#` reason makes the whole list unparseable (the checker then reports
+# `evaluated:false` + exit 2 rather than a reading that silently dropped an entry).
+#
+# ⛔ 例外不是「不算数」—— 这些文件照常出现在 `--json` 的 `files[]` 里（`exception:true`）并计入
+#    `exceptionLines`。例外只影响【棘轮读数】这一件事，不影响可见性（硬规则 3/9）。
+#
+# 族① 控制面 shell（人 2026-09-19 裁定「暂保持 bash 现状，长期考虑退役」；见
+#      orchestration/SPEC-architecture-consolidation-ts-and-shell-2026-09-19.md §1.4 / §8-②）:
+#      tmux 输入路径是斜杠命令控制面的唯一通道（CLAUDE.md），TS 化收益最低、风险不低。
+plugin/scripts/send-keys-reliable.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状）：tmux 输入通道，斜杠命令控制面的唯一通道
+plugin/scripts/supervisor-deliver.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状）：tmux 投递（低版本 Claude Code / Bedrock 等下游交付面）
+plugin/scripts/supervisor-bus.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状）：supervisor 消息总线
+plugin/scripts/supervisor-preempt.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状）：supervisor 抢占
+plugin/scripts/supervisor-observe.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状）：supervisor 观测
+plugin/scripts/process-budget.sh  # 族①控制面（人 2026-09-19 裁定暂保持 bash 现状；文件头自称 RETIRED 但仍在树里）
+# 族② 体量最大、风险最高的单一负债（人 2026-09-19 裁定「列入路线图但先不立案」，SPEC §8-④）:
+#      待 Phase 5.1–5.3 落地后再据实测成本裁定是否迁移。
+plugin/scripts/verify-deliver-coldstart.sh  # 族②（人 2026-09-19 裁定「列入路线图但先不立案」）：9111 行、153 函数、19 个 python3 heredoc，SPEC §8-④ 待裁定
