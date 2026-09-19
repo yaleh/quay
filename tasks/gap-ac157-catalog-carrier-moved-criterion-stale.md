@@ -49,13 +49,13 @@ goal_ac: AC-157
 
 ## AC
 
-- [ ] AC1 判据取真：逐字跑 AC-157 判据 ⇒ exit 0（贴读数；goal-driver 下一轮独立复核并翻 pass）
-- [ ] AC2 承载者含字面：`grep -vE '^[[:space:]]*(#|//|\*)' plugin/scripts/capability-catalog.ts | grep -q 'archive/'` ⇒ 真
-- [ ] AC3 判据不再点名不承载该角色的文件：`grep -c 'capability-catalog\.sh' goals/AC-157-archive-mechanism-exclusion-wiring.md` ⇒ 0
-- [ ] AC4 行为不变：任意深度的 `archive` 目录仍被跳过——新测试证明含 `archive/…` 的 fixture 中的探针不出现在派生脚本集里，且 `bash plugin/scripts/capability-catalog.sh --summary` 的输出与改动前一致（贴两侧读数）
-- [ ] AC5 能取假（负控制）：临时把 `.ts` 的 `archive/` 排除改成不匹配形式 ⇒ AC2 与新测试同时红；恢复 ⇒ 绿（贴两段读数）
-- [ ] AC6 SPEC §12c/§12a 有带日期的承载者更正行，且该 SPEC 不再以「枚举面」的措辞单点 `capability-catalog.sh`
-- [ ] AC7 `node plugin/scripts/task-schema-check.ts tasks/gap-ac157-catalog-carrier-moved-criterion-stale.md` ⇒ exit 0
+- [x] AC1 判据取真：逐字跑 AC-157 判据 ⇒ exit 0（贴读数；goal-driver 下一轮独立复核并翻 pass）
+- [x] AC2 承载者含字面：`grep -vE '^[[:space:]]*(#|//|\*)' plugin/scripts/capability-catalog.ts | grep -q 'archive/'` ⇒ 真
+- [x] AC3 判据不再点名不承载该角色的文件：`grep -c 'capability-catalog\.sh' goals/AC-157-archive-mechanism-exclusion-wiring.md` ⇒ 0
+- [x] AC4 行为不变：任意深度的 `archive` 目录仍被跳过——新测试证明含 `archive/…` 的 fixture 中的探针不出现在派生脚本集里，且 `bash plugin/scripts/capability-catalog.sh --summary` 的输出与改动前一致（贴两侧读数）
+- [x] AC5 能取假（负控制）：临时把 `.ts` 的 `archive/` 排除改成不匹配形式 ⇒ AC2 与新测试同时红；恢复 ⇒ 绿（贴两段读数）
+- [x] AC6 SPEC §12c/§12a 有带日期的承载者更正行，且该 SPEC 不再以「枚举面」的措辞单点 `capability-catalog.sh`
+- [x] AC7 `node plugin/scripts/task-schema-check.ts tasks/gap-ac157-catalog-carrier-moved-criterion-stale.md` ⇒ exit 0
 
 ## DoD
 
@@ -65,6 +65,40 @@ AC-157 在 goal-driver 下一轮由 fail 翻 pass（读 `.quay/goal-round.jsonl`
 
 - plugin/scripts/capability-catalog.ts
 - plugin/test/capability-catalog.test.mjs
+- plugin/test/archive-exclusion-wiring.test.mjs
 - goals/AC-157-archive-mechanism-exclusion-wiring.md
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-ac157-catalog-carrier-moved-criterion-stale.md
+
+## Evidence
+
+（2026-09-19，worker，worktree `/home/yale/work/quay-worktrees/gap-ac157-catalog-carrier-moved-criterion-stale`；实现提交 `9b2b27eda`，goal 写入提交 `c73c0dc82`）
+
+**AC1** — 判据取真 ∧ 可区分两态：
+- `quay goal gate AC-157 --root <wt>` ⇒ `"verdict": "pass"`，`"reason": "acceptance passed (exit 0)"`。
+- 判据文本由 goal store 逐字取出、落盘后以 `bash` 执行（cwd = worktree 根）⇒ **exit 0**。
+- 负方向（同一条判据，只把承载体 token 换回 `.sh`）⇒ **exit 1**：`AC-157 fail: plugin/scripts/capability-catalog.sh has no non-comment line referencing archive/` ⇒ 判据不是恒真，且复现了原报错。
+
+**AC2** — `grep -vE '^[[:space:]]*(#|//|\*)' plugin/scripts/capability-catalog.ts | grep -n 'archive/'` ⇒ `209:const ARCHIVE_SEGMENT_RE = new RegExp("(^|/)archive/");` ⇒ 真。⚠️ 写成字符串形态是**必须的**：JS 正则字面量要转义分隔符（`archive\/`），字面量形态下 `archive/` 在源码里根本不出现——判据只能被字符串形态满足。
+
+**AC3** — `grep -c 'capability-catalog\.sh' goals/AC-157-archive-mechanism-exclusion-wiring.md` ⇒ **0**（改前 2）。criterion 与 body 均经 `quay goal write AC-157 --criterion/--body` 写入（provider 自行提交 `c73c0dc82`），非手搓文件。
+
+**AC4** — 行为不变，同一 corpus 把渲染器换成改动前 `c8b7fd615` 版对比：
+```
+  after            exit=0 rows=346 probe_rows=0 | capability-catalog: 346 scripts | 346 declared | 0 unclassified | 341 ship
+  before           exit=0 rows=346 probe_rows=0 | capability-catalog: 346 scripts | 346 declared | 0 unclassified | 341 ship
+  diff before/after: IDENTICAL — 346 rows, same set AND same order
+```
+再把存档探针 `archive/2026-09-19-probe/probe.sh` 放进同一 corpus：两侧均 `probe_rows=0`、`exit=0`（任意深度 `archive` 仍被跳过）。新测试在**临时 fixture 目录**上断言 `deriveScripts` == `["keep.sh","keep.ts"]`——顶层 `archive/` 与嵌套 `nested/archive/` 都跳过、普通嵌套目录仍被走进（`keep.ts` 证明）、非脚本文件忽略 ⇒ 红不可能来自「walk 什么也没看见」；并经**真实入口**（materialize 的 `plugin/scripts` fixture）断言存档探针不进派生脚本集。
+
+**AC5** — 负控制（把真实 `.ts` 的排除改成不匹配形态，恢复后 md5 `65ab439ad7b9f5bd072af68b89833a7f` 与改前一致）：
+```
+  mutated          exit=1 rows=347 probe_rows=1 | capability-catalog: 347 scripts | 346 declared | 1 unclassified | 342 ship
+  AC2（mutated）⇒ FALSE；新测试 ⇒ ✖ AssertionError（archive/** 子集不在派生集里）
+  archive-exclusion-wiring.test.mjs 的撤除控制（已改指向新载体）⇒ ✖ 同样取假
+  恢复 ⇒ AC2 TRUE，两文件 23/23 pass、fail 0
+```
+
+**AC6** — §12a 根据句（`:402`）与 §12c 接线面清单（`:425`）各加**带日期**更正行（2026-09-19）；§12e「唯一不算引用的登记处」句（`:564`）同款更正。⛔ 未动 `:459`（2026-09-02 负控制的历史读数——改写即篡改当时的测量）与 `:553/:554`（死集清单里的**行号引用**，不是 §12a/§12c 的枚举面措辞）。
+
+**AC7** — `node plugin/scripts/task-schema-check.ts tasks/gap-ac157-catalog-carrier-moved-criterion-stale.md` ⇒ **exit 0**，读数 `N/A legacy (no schema marker)`（1 total / 0 pass / 1 N/A-legacy / 0 fail）；worktree 副本与主检出副本同读数。⚠️ 该 exit 0 是「按无 schema 标记的 legacy 任务放行」，**不是**对该任务形状的校验结论。
