@@ -1,7 +1,7 @@
 ---
 id: gap-context-slim-p2-memory-archive
 title: 上下文瘦身 P2：MEMORY.md 压成热点索引并归档从未被读的记忆文件
-status: ready
+status: done
 labels:
   - gap
 parent: null

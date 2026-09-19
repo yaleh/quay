@@ -2,7 +2,7 @@
 id: AC-307
 title: 产品层不再反向依赖上层：packages/** → plugin/** 或 experiments/** 的真实 import 边 = 0（由
   import-graph-check 按语句位置读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -19,6 +19,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.2 T1 / §2 P
   → shape-sections.ts。会回升的量（新 import 随时可再引入），故 long-term:true（goal-mechanism
   §12b 三岔第二行）。
 activatedAt: 2026-09-19T05:29:20.918Z
+statusLog:
+  - at: 2026-09-19T08:51:50.507Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
 **范围（供立案/实现对齐，⛔ 不需读 SPEC 也能执行）**：把 `packages/quay/src/serve.ts`、`server-state.ts` 与 `packages/quay-native/src/store.ts` 对 `plugin/scripts/{write-json-atomic,shape-sections,worktree-process-reaper}.ts` 的 import 改为从 **`packages/quay/src/kernel/`** 导入（落点由人 2026-09-19 裁定为 kernel/）。`serveControlPlane`（`plugin/scripts/driver-shared.ts:283`）属 driver 运行时，由实现者按实测在「下沉 kernel」与「由 serve 注入」间选（推荐注入，只改 serve.ts 一处调用点）。plugin 侧旧路径保留 re-export 一个发布周期，避免下游 worktree 中途断链。
