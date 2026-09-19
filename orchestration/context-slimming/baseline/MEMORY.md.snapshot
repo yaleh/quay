@@ -7,6 +7,7 @@
 
 **单条**：
 - [只是 untracked（未 gitignore）的运行时记录会被 add -A + checkout 抹掉](runtime-record-untracked-but-not-ignored-is-lost-by-add-all-then-checkout.md) — 记录只剩最后一行而 git status 两次都干净；新记录载体必须同轮带 .gitignore（fixture 也要）
+- [`git ls-files` 普查会把产出它的那支脚本自己数进去（提交那一刻 +1）](git-ls-files-census-counts-its-own-producer-once-committed.md) — 钉字面量的判据「提交前绿、提交后红」；取证必须在 add 之后重取
 - [未 provision 的 worktree 里 commit 报 yaml 模块找不到](unprovisioned-worktree-commit-fails-with-yaml-module-not-found.md) — 真因是 pre-commit 守卫缺 node_modules；setup 助手结构性拒绝非 task/<id> 分支
 - [serve-i18n 的 ROW N 号会在兄弟页任务合并时撞号](serve-i18n-row-number-collides-on-sibling-page-merge.md) — 取一方即静默撞号；并集 + 重编号 + 追加到末尾
 - [正文本地化探针的两个静默盲区](webui-body-i18n-probe-two-blind-spots.md) — endonym 过滤取首项 ⇒ en 下等于没滤；meta/title 属性位的界面文案不在文本行里
@@ -14,6 +15,7 @@
 - [禁 GitHub PR，文档走本地 d…](no-github-pr-land-docs-via-local-develop-ff.md) — `origin/author` 是清理惯例的例外，⛔ 别删
 - [--test-name-pattern…](test-name-pattern-after-file-arg-is-a-silent-noop.md) — flag 须在文件前，否则跑全量且 exit 0
 - [worktree 里裸 `quay/*…](worktree-bare-quay-specifier-resolves-to-main-checkout.md) — 跨包改动在分支上不可测
+- [测试结论翻转先读 MODULE_TYPELESS 警告的绝对路径](test-verdict-flip-read-the-module-warning-absolute-path.md) — 判断跑在哪个树；`cd X && A & B &` 里 B 不在 X
 - [instrument-failure-…](instrument-failure-check-family3-treats-or-or-as-a-pipe.md) · [FAMILY-5 会被「描述该形状的注…](instrument-failure-check-f5-fires-on-comments-documenting-the-pattern.md) — 注释里别同现载体文件名+读+green/red
 - [dispatch worktree s…](dispatch-worktree-setup-runs-the-main-checkouts-worktree-include.md) · [precommit guard hoo…](precommit-guard-hook-e2e-installs-main-checkout-copy.md)
 - [quay native task ed…](quay-native-task-edit-has-no-help-and-actually-edits.md) · [quay native task ed…](quay-native-task-edit-body-leading-dash-corrupts.md)
@@ -88,3 +90,4 @@
 - [quay-init 写 config …](quay-init-config-heredoc-is-unquoted-backticks-in-comments-execute.md)
 - [AC1b 排除条目被闭集重写弄成 in…](loop-shipping-ac1b-entry-goes-inert-after-closed-set-rewrite.md)
 - [anchor.pid 写在 SIGTE…](anchor-pid-is-written-before-the-sigterm-handler.md)
+- [plugin↔packages 的源码相对路径在安装布局下解析不到](plugin-tarball-layout-breaks-packages-relative-imports.md) — packages/quay/plugin 是 gitignored 打包暂存副本；自包含靠 esbuild inline ⇒ 改 import 方向必须验真产物，不能只看 import-graph 变绿
