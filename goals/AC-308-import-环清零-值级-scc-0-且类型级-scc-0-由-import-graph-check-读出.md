@@ -1,7 +1,7 @@
 ---
 id: AC-308
 title: import 环清零：值级 SCC = 0 且类型级 SCC = 0（由 import-graph-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -18,6 +18,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.2 T2/T3 / §
   runner-state-write.ts/runner-red-parse.ts 等 5 个）。archguard 对这三个 SCC 报
   0——不能作为证据。会回升的量，故 long-term:true。
 activatedAt: 2026-09-19T05:29:22.523Z
+statusLog:
+  - at: 2026-09-19T11:36:59.120Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
 **范围**：①值环：`stripCodeSpans` 下沉到独立小模块，`ready-pool-check.ts` 与 `strategic-doc-staleness-check.ts` 都从它导入；②类型环：`GateFn` 等抽到 `gate/types.ts`；`SuiteState`/`SuiteRoundRecord`/`SuiteFailure` 等抽到 `full-suite-runner-types.ts`。
