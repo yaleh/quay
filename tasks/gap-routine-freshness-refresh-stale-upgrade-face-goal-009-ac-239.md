@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-upgrade-face-goal-009-ac-239
 title: "freshness-refresh: AC-239 shares the upgrade-face producer and the same
   d=172/margin=28 evidence age as AC-238 (both records are written as an
   UPGRADE-PAIR on one run), so one run "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
