@@ -399,8 +399,13 @@ archive/<YYYY-MM-DD>-<slug>/<保持原始相对路径>     例：archive/2026-09
 archive/INDEX.tsv                                  一行一个对象，机读
 ```
 **⛔ archive 必须在 `plugin/` 之外**——`packages/quay/package.json` 的 `files` 含 `"plugin"`，
-archive 放进去会**随每次发布交付一堆死物**；且 `capability-catalog.sh` 按目录列举 `plugin/scripts`，
+archive 放进去会**随每次发布交付一堆死物**；且 `capability-catalog.ts` 按目录列举 `plugin/scripts`，
 子目录形式的 archive 会污染它的清单。
+**⚠️ 更正（2026-09-19，`gap-ac157-catalog-carrier-moved-criterion-stale`）**：本句原写作
+`capability-catalog.sh`。枚举承载者已于 2026-09-19 迁至 `plugin/scripts/capability-catalog.ts`
+（`gap-arch-catalog-declarations-leave-bash` 把 `.sh` 抽成 thin exec wrapper，枚举 + `archive/**`
+排除随迁，在 `.ts` 内以字面 `archive/` 路径段表达）。**点名承载者时以 `.ts` 为准**——判据绑在
+文件路径上，承载者再搬迁时同款漂移会重演一次（AC-157 判据曾因此取假 12 天后才被发现）。
 **⊢ 保持原始相对路径是为了让恢复是机械的**：`git mv archive/<批次>/plugin/scripts/x.ts plugin/scripts/x.ts`。
 
 `archive/INDEX.tsv` 每行字段（缺一不可）：
@@ -417,9 +422,15 @@ archive 放进去会**随每次发布交付一堆死物**；且 `capability-cata
 
 ### 12c. 必须一并接线的排除面（不接线就会红）
 
-`archive/**` 须被以下排除：`capability-catalog.sh`、`runtime-usage-inventory.ts`、
+`archive/**` 须被以下排除：**`capability-catalog.ts`**（枚举承载者；`.sh` 只是 thin exec wrapper，
+⛔ 不是接线面）、`runtime-usage-inventory.ts`、
 `scripts/test.sh` 的测试 glob、laydown/交付面闭包检查、`version-consistency-check.ts`。
 npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
+**⚠️ 更正（2026-09-19，`gap-ac157-catalog-carrier-moved-criterion-stale`）**：第一面原写作
+`capability-catalog.sh`。枚举 + 该排除已于 2026-09-19 随 `gap-arch-catalog-declarations-leave-bash`
+迁进 `capability-catalog.ts`（排除以字面 `archive/` 路径段表达，任意深度的 `archive` 目录仍被跳过，
+`find -not -path '*/archive/*'` 行为等价）。**接线面清单点名文件时以承载该角色的文件为准**——
+判据/清单绑在 `.sh` 上会在每次重构后重新变假（AC-157 判据即因此取假）。
 
 ### 12d. 退役判据（本次实测已产出可执行清单）
 
@@ -550,7 +561,8 @@ workflow-replay.ts                       worktree-branch-hygiene-check.sh
 ⇒ **注册表/清单里的裸文件名引用检测不到。**
 **⇒ 执行 archive 之前必须补一趟裸文件名扫描**（对象：`quay-deliver.ts` 这类清单、
 `*.json` 清单、其它以数组/映射登记脚本的地方），把命中的从死集里摘出来单独判。
-**⛔ 唯一不算引用的登记处是 `capability-catalog.sh`**——它是**对种群的描述**，不是使用；
+**⛔ 唯一不算引用的登记处是 capability catalog**（2026-09-19 更正：原写作 `capability-catalog.sh`；
+枚举承载者已迁至 `plugin/scripts/capability-catalog.ts`，`.sh` 只剩 thin exec wrapper）——它是**对种群的描述**，不是使用；
 把 catalog 条目当引用会让所有脚本永远活着（那正是硬规则 4「结构上不可能取假的量」）。
 **⊢ 本缺口的发现方式值得记**：不是靠重读代码，是靠**执行一条裁定时去找它的连带面**——
 裁定落地的动作本身就是对判据的一次负控制。

@@ -191,12 +191,38 @@ function findCommandSubstitutions(tables: Tables): string[] {
 // -name '*.mjs' \) -not -path '*/checker-mutation-cases/*' -not -path '*/archive/*'`: recursive,
 // basename-keyed, skipping the fixture dir and archive/** (SPEC §12c) so a misplaced archive
 // subdir can never pollute the live catalog.
-const SKIPPED_SEGMENTS = new Set(["checker-mutation-cases", "archive"]);
+//
+// ⚠️ THE ARCHIVE EXCLUSION IS STATED HERE AS A LITERAL `archive/` PATH SEGMENT, on purpose
+// (gap-ac157-catalog-carrier-moved-criterion-stale). The enumeration moved out of the bash entry
+// into this renderer (gap-arch-catalog-declarations-leave-bash); the criterion guarding this
+// exclusion names the file that carries it, so the carrier must express the exclusion in its own
+// live code in the same literal form the criterion reads. A bare basename set made the string
+// `archive/` exist nowhere in the new carrier — the guarantee held while the criterion read red.
+// Behavior is unchanged: ANY directory segment named `archive` is skipped, at any depth, exactly
+// as `find -not -path '*/archive/*'` did.
+//
+// ⛔ Written as a STRING pattern, not a `/.../ ` literal, and that is load-bearing: a JS regex
+// literal must escape the delimiter (`archive\/`), so the literal the criterion greps for would
+// not be present in the source at all. A criterion whose reading is satisfiable only by a form the
+// carrier cannot express is a broken criterion — the string pattern is the operative exclusion
+// (changing it changes behavior), stated in the one form both the code and the criterion read.
+const ARCHIVE_SEGMENT_RE = new RegExp("(^|/)archive/");
+const SKIPPED_SEGMENTS = new Set(["checker-mutation-cases"]);
 const CHECK_EXT_RE = /\.(sh|ts|mjs)$/;
 
-function deriveScripts(dir: string): string[] {
+/** True when a directory at repo-relative POSIX path `rel` must NOT be walked into. Directories
+ *  are probed with a trailing `/` so a leading `archive` segment matches at `^archive/`; a nested
+ *  one matches at `/archive/`. Exported (and made a pure function of `rel`) so the exclusion can
+ *  be unit-tested against a temp fixture tree — no probe dropped into the live plugin/scripts. */
+export function isExcludedDirRelPath(rel: string): boolean {
+  return ARCHIVE_SEGMENT_RE.test(`${rel}/`) || SKIPPED_SEGMENTS.has(path.basename(rel));
+}
+
+/** The derived check set: every `.sh`/`.ts`/`.mjs` under `dir`, basename-keyed, with the fixture
+ *  dir and any `archive/` subtree skipped. Exported for the same reason as the predicate above. */
+export function deriveScripts(dir: string): string[] {
   const out: string[] = [];
-  const walk = (d: string): void => {
+  const walk = (d: string, rel: string): void => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(d, { withFileTypes: true });
@@ -205,9 +231,10 @@ function deriveScripts(dir: string): string[] {
     }
     for (const e of entries) {
       const abs = path.join(d, e.name);
+      const relChild = rel === "" ? e.name : `${rel}/${e.name}`;
       if (e.isDirectory()) {
-        if (SKIPPED_SEGMENTS.has(e.name)) continue;
-        walk(abs);
+        if (isExcludedDirRelPath(relChild)) continue;
+        walk(abs, relChild);
         continue;
       }
       if (!e.isFile()) continue;
@@ -215,7 +242,7 @@ function deriveScripts(dir: string): string[] {
       out.push(e.name);
     }
   };
-  walk(dir);
+  walk(dir, "");
   return [...out].sort();
 }
 
@@ -482,4 +509,12 @@ function main(argv: string[]): number {
   return 0;
 }
 
-process.exitCode = main(process.argv.slice(2));
+// Direct-invocation guard (the adr016-screen-use-check.ts idiom, used by ~dozens of plugin checks):
+// this module is now IMPORTABLE by its own test (the exported archive-exclusion predicate), so main()
+// must not run — and must not set the process exit code — merely because the module was loaded.
+// A misfiring guard cannot pass silently: the catalog would then print nothing and exit 0, which the
+// suite's own --json/--summary assertions (and the AC1c negative control) fail on immediately.
+const isDirectInvocation = process.argv[1] !== undefined
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  && path.basename(process.argv[1]).replace(/\.(js|ts|mjs)$/, "") === "capability-catalog";
+if (isDirectInvocation) process.exitCode = main(process.argv.slice(2));

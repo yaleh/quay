@@ -1,8 +1,10 @@
 // @test-group engine
 // archive-exclusion-wiring.test.mjs — gap-archive-mechanism-and-exclusion-wiring (AC157).
-// The archive mechanism's five exclusion faces (SPEC §12c): capability-catalog.sh,
-// runtime-usage-inventory.ts, scripts/test.sh's test glob, the laydown closure
-// (quay-init.sh derive_loop_scripts + laydown-set-check.sh), and version-consistency-check.ts.
+// The archive mechanism's five exclusion faces (SPEC §12c): the capability catalog
+// (renderer plugin/scripts/capability-catalog.ts — the .sh is a thin entry since
+// gap-arch-catalog-declarations-leave-bash), runtime-usage-inventory.ts, scripts/test.sh's test
+// glob, the laydown closure (quay-init.sh derive_loop_scripts + laydown-set-check.sh), and
+// version-consistency-check.ts.
 // Each face must exclude `archive/**`; this file proves each exclusion is REAL via a negative
 // control — with the exclusion the face stays green, with the exclusion removed (or its archive
 // input removed) the archived object is flagged (red). A face with no test here is a face that
@@ -117,10 +119,13 @@ test("capability-catalog excludes archive/** (negative control: removing the exc
     const green = spawnSync("bash", [cat, "--summary"], { encoding: "utf8" });
     assert.equal(green.status, 0, `catalog must stay green with archive/ excluded:\n${green.stderr}`);
 
-    // Remove the archive/** exclusion (the "撤排除" negative control).
+    // Remove the archive/** exclusion (the "撤排除" negative control). The injection target is the
+    // exclusion's CURRENT carrier — a literal `archive/` path pattern in the renderer
+    // (gap-ac157-catalog-carrier-moved-criterion-stale). Injecting into the retired basename set the
+    // exclusion used to live in would change nothing and this control would read green forever.
     let src = fs.readFileSync(renderer, "utf8");
     const before = src;
-    src = src.replace('new Set(["checker-mutation-cases", "archive"])', 'new Set(["checker-mutation-cases"])');
+    src = src.replace('new RegExp("(^|/)archive/")', 'new RegExp("(^|/)__archive_exclusion_removed__/")');
     assert.notEqual(src, before, "archive exclusion must be present and removable in the renderer");
     fs.writeFileSync(renderer, src);
 

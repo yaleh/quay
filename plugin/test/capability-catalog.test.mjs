@@ -30,6 +30,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The renderer is IMPORTABLE (it guards its own direct invocation), so the archive/** exclusion can
+// be unit-tested against a temp fixture tree instead of by dropping a probe into the live
+// plugin/scripts. See the archive/** test below.
+import { deriveScripts, isExcludedDirRelPath } from "../scripts/capability-catalog.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -170,6 +174,65 @@ test("AC1b — the check count is DERIVED from the filesystem, never a hardcoded
   assert.deepEqual(files, derived, "the catalog's file set must be exactly the filesystem script set");
   assert.ok(rows.some((r) => r.file === "capability-catalog.sh"),
     "the catalog is self-describing — it declares its own question (else it becomes the 83rd undeclared script)");
+});
+
+// ── archive/** exclusion (gap-ac157-catalog-carrier-moved-criterion-stale) ───────────────────
+// The enumeration moved out of the bash entry into the renderer (gap-arch-catalog-declarations-
+// leave-bash) and the archive exclusion moved WITH it. The AC-157 criterion names the file that
+// carries the exclusion — so the carrier states it in its own live code as a literal `archive/`
+// path segment, and this test pins the BEHAVIOR, twice over:
+//   ① over a temp FIXTURE tree (never a probe dropped into the live plugin/scripts) — archive dirs
+//      at any depth are skipped while ordinary nested dirs ARE walked, so a red cannot come from
+//      "the walk stopped seeing anything";
+//   ② through the REAL entry on a materialized fixture — an archived probe neither reddens the
+//      catalog nor enters its derived script set.
+// ⛔ A face with no red direction is a face "wired" only on paper: flipping the exclusion's pattern
+// to a non-matching form must redden BOTH this test and the criterion's own grep.
+test("archive/** exclusion — archive dirs at any depth are skipped (fixture tree + real entry)", () => {
+  // ① the derived script set over a fixture tree carrying archive dirs at two depths.
+  const fx = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-archive-"));
+  try {
+    fs.mkdirSync(path.join(fx, "nested", "deep"), { recursive: true });
+    fs.mkdirSync(path.join(fx, "archive", "2026-09-19-probe"), { recursive: true });
+    fs.mkdirSync(path.join(fx, "nested", "archive"), { recursive: true });
+    fs.mkdirSync(path.join(fx, "checker-mutation-cases"), { recursive: true });
+    fs.writeFileSync(path.join(fx, "keep.sh"), "#!/usr/bin/env bash\n");
+    fs.writeFileSync(path.join(fx, "nested", "deep", "keep.ts"), "export const x = 1;\n");
+    fs.writeFileSync(path.join(fx, "readme.md"), "not a script\n");
+    fs.writeFileSync(path.join(fx, "archive", "2026-09-19-probe", "probe.sh"), "#!/usr/bin/env bash\n");
+    fs.writeFileSync(path.join(fx, "nested", "archive", "probe.mjs"), "export const y = 1;\n");
+    fs.writeFileSync(path.join(fx, "checker-mutation-cases", "probe.ts"), "export const z = 1;\n");
+
+    assert.deepEqual(deriveScripts(fx), ["keep.sh", "keep.ts"],
+      "archive/** at ANY depth plus the fixture dir are skipped; ordinary nested dirs are walked " +
+      "(keep.ts proves it) and non-scripts (readme.md) are ignored");
+
+    // The predicate stated directly, so a regression points at the exclusion rather than the walk.
+    assert.equal(isExcludedDirRelPath("archive"), true, "a top-level archive dir is excluded");
+    assert.equal(isExcludedDirRelPath("a/archive/b"), true, "a nested archive dir is excluded");
+    assert.equal(isExcludedDirRelPath("checker-mutation-cases"), true, "the fixture dir is excluded");
+    assert.equal(isExcludedDirRelPath("myarchive"), false, "a dir merely NAMED LIKE archive is NOT excluded");
+    assert.equal(isExcludedDirRelPath("nested"), false, "an ordinary dir is not excluded");
+  } finally {
+    fs.rmSync(fx, { recursive: true, force: true });
+  }
+
+  // ② the same guarantee through the production entry form.
+  const tmp = materializeScripts("archive");
+  try {
+    fs.mkdirSync(path.join(tmp, "plugin", "scripts", "archive", "2026-09-19-probe"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "plugin", "scripts", "archive", "2026-09-19-probe", "probe.sh"),
+      "#!/usr/bin/env bash\necho probe\n");
+    const r = spawnSync("bash", [path.join(tmp, "plugin", "scripts", "capability-catalog.sh"), "--json"],
+      { encoding: "utf8" });
+    assert.equal(r.status, 0, `an archived probe must not redden the catalog:\n${r.stderr}`);
+    const rows = JSON.parse(r.stdout);
+    assert.ok(!rows.some((x) => x.file === "probe.sh"),
+      "the archived probe never enters the derived script set (it is not an unclassified script — " +
+      "it was not enumerated at all)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── AC5/band: unclassified == 0 and no entry is the empty "checks correctness" ──
