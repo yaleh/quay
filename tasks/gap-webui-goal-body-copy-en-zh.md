@@ -2,7 +2,7 @@
 id: gap-webui-goal-body-copy-en-zh
 title: /goal 列表与详情正文文案在 lang=en 下仍是硬编码中文（AC 达成/挂靠任务/未挂靠/未记录 等列头与状态词）——
   正文本地化系列（大页），照 /dashboard 已定 pattern
-status: ready
+status: done
 labels:
   - gap
   - webui
