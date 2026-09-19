@@ -234,6 +234,7 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-context-injection-slimming-2026-09-19.md -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-dispatch-ordering-semantic-2026-08-13.md -->
 <!-- reference-doc: orchestration/SPEC-execution-loop-productization-2026-08-28.md -->

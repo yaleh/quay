@@ -1,0 +1,93 @@
+# Memory Index
+
+**Topic shards（按域分片，每条内含多条）**：
+- 判据 / 闸门 / 测试：[[topic-checker-and-gate-discipline]]（34） · [[topic-criterion-forensics]]（26） · [[topic-suite-gate]]（19）
+- git / 共享检出 / worktree / 任务记录：[[topic-git-and-shared-checkout]]（29） · [[topic-fan-in]]（23） · [[topic-touches]]（12） · [[topic-task-record]]（19） · [[topic-worker-worktree]]（16）
+- 驱动 / shell / 立案：[[topic-driver-dispatch-and-liveness]]（22） · [[topic-shell-cli-and-process-traps]]（26） · [[topic-filing]]（9）
+
+**单条**：
+- [只是 untracked（未 gitignore）的运行时记录会被 add -A + checkout 抹掉](runtime-record-untracked-but-not-ignored-is-lost-by-add-all-then-checkout.md) — 记录只剩最后一行而 git status 两次都干净；新记录载体必须同轮带 .gitignore（fixture 也要）
+- [`git ls-files` 普查会把产出它的那支脚本自己数进去（提交那一刻 +1）](git-ls-files-census-counts-its-own-producer-once-committed.md) — 钉字面量的判据「提交前绿、提交后红」；取证必须在 add 之后重取
+- [未 provision 的 worktree 里 commit 报 yaml 模块找不到](unprovisioned-worktree-commit-fails-with-yaml-module-not-found.md) — 真因是 pre-commit 守卫缺 node_modules；setup 助手结构性拒绝非 task/<id> 分支
+- [serve-i18n 的 ROW N 号会在兄弟页任务合并时撞号](serve-i18n-row-number-collides-on-sibling-page-merge.md) — 取一方即静默撞号；并集 + 重编号 + 追加到末尾
+- [正文本地化探针的两个静默盲区](webui-body-i18n-probe-two-blind-spots.md) — endonym 过滤取首项 ⇒ en 下等于没滤；meta/title 属性位的界面文案不在文本行里
+- [goal-store 新 write …](goal-store-write-flag-needs-two-registrations.md) — 漏登记即静默丢弃；取值形状按路由不同
+- [禁 GitHub PR，文档走本地 d…](no-github-pr-land-docs-via-local-develop-ff.md) — `origin/author` 是清理惯例的例外，⛔ 别删
+- [--test-name-pattern…](test-name-pattern-after-file-arg-is-a-silent-noop.md) — flag 须在文件前，否则跑全量且 exit 0
+- [worktree 里裸 `quay/*…](worktree-bare-quay-specifier-resolves-to-main-checkout.md) — 跨包改动在分支上不可测
+- [测试结论翻转先读 MODULE_TYPELESS 警告的绝对路径](test-verdict-flip-read-the-module-warning-absolute-path.md) — 判断跑在哪个树；`cd X && A & B &` 里 B 不在 X
+- [instrument-failure-…](instrument-failure-check-family3-treats-or-or-as-a-pipe.md) · [FAMILY-5 会被「描述该形状的注…](instrument-failure-check-f5-fires-on-comments-documenting-the-pattern.md) — 注释里别同现载体文件名+读+green/red
+- [dispatch worktree s…](dispatch-worktree-setup-runs-the-main-checkouts-worktree-include.md) · [precommit guard hoo…](precommit-guard-hook-e2e-installs-main-checkout-copy.md)
+- [quay native task ed…](quay-native-task-edit-has-no-help-and-actually-edits.md) · [quay native task ed…](quay-native-task-edit-body-leading-dash-corrupts.md)
+- [git-lens 三代理已归档只剩悬空符链](git-lens-proxies-are-archived-with-dangling-symlinks.md) · [arch-review 例程被悬空符号…](arch-review-routine-dead-from-dangling-symlink.md)
+- [harness waitfor ret…](harness-waitfor-returns-falsy-on-timeout-not-throw.md) · [select static check…](select-static-checks-names-prints-derived-name-not-the-gate-name.md) · [delta relatedness h…](delta-relatedness-hint-misses-two-hop-data-dependency.md)
+- [任务依赖的代码可能只活在在飞兄弟分支上](target-code-may-live-only-in-inflight-sibling-merge-it.md)
+- [promotion gate read…](promotion-gate-reads-develop-ref-so-a-failed-propagate-stales-the-REF-not-the-disk.md) · [promotion gate read…](promotion-gate-reads-develop-ref-so-unpropagated-fix-is-invisible.md)
+- [goal 立案前复核在滞后 devel…](goal-recheck-evaluates-criteria-in-lagging-main-checkout.md)
+- [scoped gate selects…](scoped-gate-selects-tests-from-task-touches-update-touches-first.md) · [scoped-gate-cache 是…](scoped-gate-cache-is-single-slot-so-concurrent-workers-clobber.md) — 未命中即 fail-closed 照跑
+- [worker task write l…](worker-task-write-lands-on-main-not-worktree.md) · [task write already …](task-write-already-commits-the-task-file.md) · [task write body is …](task-write-body-is-full-replacement-not-section-merge.md) · [worker 里 MCP …](mcp-task-write-lands-on-the-mcp-servers-root-not-the-worktree.md) · [MCP task write 的 co…](mcp-task-write-commit-can-fail-silently-leaving-main-dirty.md)
+- [空 GH_CONFIG_DIR 才等于…](gh-config-dir-empty-emulates-ci-unauthenticated-gh.md) · [worktree 里 `task ed…](task-edit-from-worktree-commits-on-the-task-branch.md)
+- [空 delta 有两种成因，处置相反](worker-target-deleted-by-develop-untick-acs-not-done.md) · [未勾 AC 的短路在 suite 之前](fan-in-ac-precheck-shortcircuits-before-suite.md) — 把 suite 层全局阻断伪装成「worker 没做完」
+- [gap task required h…](gap-task-required-headings-finding-requested-action.md) · [ac draft heading in…](ac-draft-heading-invisible-to-checkbox-gate.md) · [[unchecked-ac-three-outer-verification-markers]] — 留未勾不带注解 = 唯一必错的那格
+- [裸 NUL 字节让整个文件对 grep 隐形](bare-nul-bytes-make-a-file-invisible-to-grep.md) · [位置判据的 `head -1` 会命中…](position-criterion-first-match-can-hit-a-comment.md)
+- [third party drive n…](third-party-drive-needs-develop-checked-out-and-clean-tree.md) · [live third party lo…](live-third-party-loop-verify-without-landing.md) · [updating a third pa…](updating-a-third-party-projects-quay-deployment.md) · [quay third party in…](quay-third-party-install-workspace-root-confusion.md)
+- [production form ac …](production-form-ac-satisfied-by-hand-starting-unlanded-code-reverts.md) · [serve 陈旧：消费者已补上但只被显…](serve-stale-signal-has-no-consumer-start-drivers-skips.md) — 落地 serve 代码不会自动加载
+- [任务体声称的门可能是派生量](task-premise-threshold-may-miss-a-derived-divisor.md) · [goal criterion bloc…](goal-criterion-block-is-a-shell-script-and-goal-files-are-multi-doc.md)
+- [checker 的 verdict 是…](bypass-check-gate-invocation-always-evaluates.md) — 手动读数⛔ 不能外推为 gate 读数
+- [verify gap filing p…](verify-gap-filing-premise-before-filing.md) · [cited file line may…](cited-file-line-may-be-dead-code.md)
+- [anchor kernel alway…](anchor-kernel-always-main-checkout-module-level-state-splits.md) · [delivery evidence p…](delivery-evidence-producer-must-run-with-main-checkout-root.md) · [self host anchor pi…](self-host-anchor-pinned-to-stale-staging-dist.md)
+- [ac machine criterio…](ac-machine-criterion-weaker-than-spec-intent-add-per-kind-controls.md) · [unit falsifiability…](unit-falsifiability-control-can-pass-while-production-verdict-is-constant.md)
+- [[a22-heartbeat-must-pass-cap-5]] · [[ac65-direct-fix-two-line-form-required]] · [[ac74-lowconc-concurrency-semantic-value-vs-host-derived]]
+- [[blocking-tool-call-stalls-autonomous-loop]] · [[cc-daemon-spare-pool-memory-pressure]]
+- [[dead-code-checker-walk-read-race]]
+- [depends on nested e…](depends-on-nested-extra-invisible-to-dispatch.md) · [goal ac nested unde…](goal-ac-nested-under-extra-reds-the-whole-suite.md) · [pre-merge 守卫按 HEAD…](precommit-guard-goal-ac-rejects-merges-of-stale-branches.md)
+- [[experiments-source-copy-needs-loadbearing-sibling-test]] · [[relation-sync-header-claims-serial-but-declares-product]] · [merge 后的 `git commit…](git-commit-amend-after-a-merge-amends-the-merge-commit.md)
+- [fix completion inde…](fix-completion-independent-of-enumeration.md) · [fix x solves y need…](fix-x-solves-y-needs-counterexample.md)
+- [[frontmatter-naive-dash-split-truncates-silently]] · [[task-body-prose-mimics-frontmatter-and-follow-false-renames]] · [[yaml-folded-block-scalar-criterion-extraction]] · [[line-based-criterion-arm-rejects-idiomatic-fix-form]]
+- [git log --all 含 ref…](git-log-all-includes-refs-notes-and-can-flood-a-limited-window.md) — 窗口型 oracle 恒红；`--exclude` 的位置承重（放错位置静默无效）
+- [replay-histor…](replay-historical-readings-from-git-plus-cut-ledger-and-clock.md) · [载体记录的 ts 是整趟远端运行的开始时刻](ac-record-append-ts-is-the-run-start-stamp.md) · [`--until/--before` …](git-before-until-does-not-reconstruct-a-ref-history.md)
+- [criterion 的 fa…](goal-criterion-failure-exit-must-share-a-line-with-its-cause.md) · [缺席断言钉在旧值字面量上会静…](absence-assertion-keyed-on-a-value-literal-becomes-tautology.md) · [判据钉版本【字面量】的 ach…](achieved-ac-pinned-to-a-value-literal-becomes-unsatisfiable.md)
+- [[memory-directory-shared-across-layers]] · [[meta-cc-main-session-query-is-fresh-dont-handgrep]] · [[meta-driver-round-in-worktree-commits-goal-evidence]] · [[midturn-human-messages-invisible-to-audit]] · [meta-cc stdio envel…](meta-cc-stdio-envelope-and-scan-cost.md)
+- [[precommit-guard-doc-check-empty-output-is-timeout]] · [[quay-config-yml-is-gitignored]] · [quay-fleet 跟踪 .quay…](quay-fleet-tracks-dotquay-config-and-claude-settings.md)
+- [retire dead shell s…](retire-dead-shell-sever-all-references.md) · [retire script repla…](retire-script-replacement-must-declare-public-entrypoint.md) · [[subagent-no-turn-timeout-fan-in-premise-debunked]]
+- [bundle fixture 只拷入口…](bundle-fixture-copying-only-the-entry-pins-no-siblings.md) — 加兄弟 import 即红，而真构建绿；先跑真 root 的 bundle 对照再动代码
+- [prefix-code-swap-fo…](prefix-code-swap-for-red-control.md) · [gate-script-direct-…](gate-script-direct-entry-guard-is-filename-based.md) · [PATH shim 给真脚本注入突变](path-shim-injects-mutation-into-real-script-run.md)
+- [HTML 注释不能停掉模板字面量里的 …](html-comment-does-not-disable-template-interpolation.md) — 这样的「对照」恒绿，与「机制不是承重的」同形
+- [[install-layout-verification-build-prefix-controls]] · [node modules ts typ…](node-modules-ts-type-stripping-blocks-installed-quay-loader.md) · [npm allow scripts w…](npm-allow-scripts-warning-does-not-mean-postinstall-skipped.md) · [dist 引用扫描要与真实 plugin…](dist-reference-scan-must-intersect-with-real-plugin-ts.md)
+- [[python-heredoc-backslash-b-becomes-backspace-in-task-text]] · [[goal-store-write-rewraps-hand-wrapped-scalars]] · [[slot-holder-json-quoted-suitecommand-expands-dollar-bang]] · [task create --body-…](task-create-body-file-frontmatter-gets-duplicated.md)
+- [cross host verifica…](cross-host-verification-has-no-orchestrator.md) · [verify deliver cold…](verify-deliver-coldstart-json-fragment-needs-escaped-grep.md) · [跨机送码跑码的三个静默陷阱](cross-host-ship-and-run-three-silent-traps.md) · [verify 传输的 scp -r y…](verify-transport-scp-r-yaml-is-slow-not-stalled.md)
+- [quay driver --help …](quay-driver-help-lives-in-cli-help-ts-not-driver-ts.md) · [startKind 给 supervi…](startkind-hardcodes-strip-types-for-supervisor-spawn.md) · [driver-anchor 继承调用者 e…](driver-anchor-inherits-caller-env-and-stop-needs-term.md) · [new cli verb needs …](new-cli-verb-needs-three-registrations.md)
+- [mkdirSync recursive…](mkdir-recursive-under-proc-hangs.md) · [local fixture harne…](local-fixture-harness-beats-remote-run-iterations.md) · [系统路径 fixture 用 sudo…](system-path-fixture-via-sudo-symlink-to-real-binary.md) · [fixture 的 git 身份要…](fixture-git-identity-must-go-in-child-env-not-repo-config.md)
+- [quay init edits re …](quay-init-edits-re-stale-the-closure-ratchet.md) · [closure ratchet rea…](closure-ratchet-reading-depends-on-vendored-bundle.md) · [版本文件冲突取 active …](version-bump-conflict-resolve-to-active-goal-pinned-version.md) · [publish-dist-branch 本…](publish-dist-branch-blocked-by-precommit-hook-locally.md)
+- [remote control endp…](remote-control-endpoint-is-anthropic-base-url.md) · [claude code bg pty …](claude-code-bg-pty-host-attach-channel.md) · [resume p on running…](resume-p-on-running-session-does-not-inject-and-transcript-diverges-from-live-context.md)
+- [worker touches must…](worker-touches-must-declare-plugin-mirror-and-quay-artifacts.md) · [out of touches red …](out-of-touches-red-fix-self-inflicts-anti-drift-take-develop.md) · [Touches 里声明 .quay 运…](touches-glob-on-quay-runtime-artifacts-blocks-promotion.md) · [Touches 自己那行不能带 `(n…](touches-self-entry-must-not-carry-new-tag.md) · [新脚本进 Touches 还要连带声…](touches-missing-registration-gate-for-new-plugin-scripts.md) · [Touches 换行 bullet 的…](touches-wrapped-bullet-annotation-never-stripped.md)
+- [new plugin script n…](new-plugin-script-needs-six-capability-catalog-rows.md) · [new plugin checker …](new-plugin-checker-three-obligations.md) · [local plugin script…](local-plugin-scripts-dist-reds-two-static-gates.md) · [checker input set g…](checker-input-set-growth-stales-its-existing-mutation-fixture.md) · [capability catalog …](capability-catalog-values-must-not-contain-backticks.md) · [capability catalog …](capability-catalog-ac5-sample-is-corpus-size-sensitive.md) · [capability-catalog.…](capability-catalog-conflict-is-an-assoc-array-union.md)
+- [serve-task.…](serve-task-test-forbids-git-command-spellings-in-observation-ts.md) · [quay serve 冷启动阻塞事件循…](quay-serve-cold-start-blocks-event-loop.md) · [serve 探针判据取 pgrep 首…](serve-probe-criterion-picks-first-pgrep-match-stale-instance.md) · [quay serve 会泄漏孙进程 ·…](quay-serve-leak-and-server-json-hijack.md) · [内联 `pgrep -f` + kil…](pgrep-f-inline-kill-matches-the-invoking-shell.md)
+- [live fixture 的 runId 短尾会把阶段静默改判](live-fixture-runid-tail-flips-phase-silently.md) — runProcessAliveSync 取「末两段」，命中无关进程 ⇒ awaiting-land 变 implementing，行还在所以像产品漏事件
+- [host-repo-surfa…](host-repo-surface-shrink-root-cause-is-extractor-truncation.md) · [dirty tree whitelis…](dirty-tree-whitelist-lives-in-two-judges.md) · [委托给冻结模块会继承它的错误语义](delegating-to-a-frozen-module-inherits-its-error-semantics.md)
+- [direct node test in…](direct-node-test-in-worktree-reds-golden-replay-no-dist.md) · [worktree include on…](worktree-include-only-works-from-main-checkout-cwd.md) · [driver env quay plu…](driver-env-quay-plugin-root-breaks-worktree-suite-proxy-asserts.md) · [refresh-worktree-qua…](refresh-worktree-quay-clobbers-worktree-dotquay-config.md) · [refresh-worktree-qua…](refresh-worktree-quay-snapshot-mid-acquire-half-ledger.md) · [worker 分叉点的真基准取 ori…](worker-fork-point-must-be-origin-develop-not-local-develop.md)
+- [upgrade face produc…](upgrade-face-producer-wallclock-is-40min-not-hours.md) · [probing a ttl cache…](probing-a-ttl-cached-endpoint-warms-the-thing-you-measure.md) · [measure-ci-on-a-tas…](measure-ci-on-a-task-branch-dispatch-is-heavier-than-develop.md) · [CI test job 跑在 self…](ci-test-job-runs-on-self-hosted-uid0-nonC-locale.md)
+- [anti-drift 三点 diff…](anti-drift-three-dot-diff-includes-unlanded-prerequisite.md) · [硬规则 5b 扫描：任何 grep 都…](hard-rule-5b-sweep-needs-structural-not-line-grep.md) · [调用者扫描双向都会错](caller-scan-needs-multiline-and-not-same-window-spawn.md) · [git-options-after-d…](git-options-after-double-dash-become-pathspecs.md) · [git-decorate-head-s…](git-decorate-head-splits-checked-out-branch-name.md) · [git-ls-tree…](git-ls-tree-pathspec-does-not-glob-and-grep-rev-prefixes-lines.md)
+- [createGoalStore(dir…](creategoalstore-takes-the-goals-dir-not-the-root.md) · [计划里的「便宜 reader」要用…](plan-cheap-reader-must-be-remeasured-through-the-real-abi.md) · [ledger readings are…](ledger-readings-are-workspace-local-supply-the-production-ledger-in-the-worktree.md) · [git-graph A…](git-graph-ac6-newest-commit-oracle-is-date-order-not-topo-order.md)
+- [workflow 的 p…](workflow-js-prompts-are-template-literals-backticks-break-them.md) · [AC-258 的恢复命令 flag 只…](ac258-resume-path-lives-only-on-its-task-branch.md) · [AC-205 选择器：socket 文…](ac205-picker-socket-exists-is-not-a-live-session.md) · [AC-161 用户级污染挡住…](ac161-user-scope-pollution-blocks-ac257-record-on-both-hosts.md)
+- [plugin install reus…](plugin-install-reuses-same-version-cache-dir.md) · [plugin scope locked…](plugin-scope-locked-uninstall-recipe-is-self-defeating.md) · [plugin cache 拷…](claude-code-plugin-cache-copies-whole-dir-and-bin-joins-path.md) · [plugin cache 按 versi…](plugin-cache-is-version-keyed-and-shared-across-scopes.md) · [claude plugin disab…](claude-plugin-disable-keeps-the-key.md)
+- [PAGE_LABELS 的 en 列对…](page-labels-composite-key-makes-en-column-dead.md) · [正文本地化的「N 行」把共享外壳算成本页…](page-census-counts-shared-chrome-not-just-page-copy.md) — 归零靠逐条归类，不靠那个数字
+- [AC 括号与实现冲突：改实现，⛔ 不改 AC](ac-parenthetical-conflict-restore-ac-not-rewrite-it.md)
+- [并发立案的时间竞态会击穿查重](concurrent-filing-race-defeats-dedup-check.md) · [goal AC 的 criterion …](goal-ac-criterion-stricter-than-the-task-ac-serving-it.md) · [多段判据的对照必须逐段钳制](ordered-criterion-needs-per-arm-clamp-not-one-shared-input-clamp.md) · [证伪对照必须覆盖当时真正在跑的那个配置](falsifying-control-must-cover-the-config-that-ran.md) · [合过 develop 后 merge-…](merge-base-head-develop-drifts-to-develop-after-merging.md) — 用它取「修复前的源」= 静默拿到已修复版，对照变假阴性
+- [stash pop 在空 push 之后会弹掉别人的 stash](git-stash-pop-after-a-noop-push-pops-a-foreign-stash.md) — push 无改动即静默不建条目；那次 A/B 对照因此是假的
+- [frozen violated fir…](frozen-violated-fires-on-a-stale-verdict-check-fix-landing-time-first.md) · [stale pass failing …](stale-pass-failing-is-cleared-only-by-the-rotation-not-by-a-fresh-tail-event.md) · [fresh clone has no …](fresh-clone-has-no-local-master-ref-so-master-criteria-report-no-master-ref.md)
+- [附注 tag 推到分支会被拒](git-push-annotated-tag-to-a-branch-is-rejected.md) · [GITHUB_TOKEN 推不动 wo…](github-token-cannot-push-workflow-file-changes.md) · [routine finding 落进没…](routine-findings-carrier-has-no-filing-consumer.md) · [.quay/fan-in-blocke…](fan-in-blocker-txt-has-no-reader.md) — 有消费者的通道是 `meta_write` → 常驻 meta-driver
+- [worktree 里改 GOAL bod…](goal-body-write-from-worker-worktree-and-rejudge-proof.md) · [AC 达成显示面必须用在域口径](ac-rollup-display-must-match-inscopeacs-of-set.md) · [并发 worker 会话会互相覆盖 /…](concurrent-worker-sessions-clobber-tmp-log-evidence.md)
+- [grid 上只加 align-item…](grid-align-start-alone-is-noop-over-a-full-bleed-container.md)
+- [AC-290~303 页面任务要加 P…](ac290-303-page-chrome-series-needs-two-page-labels.md) · [nav 区块抽取在结构上只覆盖 chrome](nav-region-extraction-is-structurally-chrome-only.md) · [GOAL-024 判据探针的 root…](goal-probe-root-follows-invocation-cwd-worktree-needs-own-serve.md) · [mobile-header 第二实参只…](mobile-header-page-label-raw-except-tasks.md)
+- [scoped 门的 `tests N`…](scoped-gate-tests-n-counts-the-selected-test-files-not-the-static-checks.md) · [github-job-log-line…](github-job-log-lines-carry-an-iso-timestamp-prefix.md) · [ci-runs-carrier-pos…](ci-runs-carrier-post-derived-fields-each-need-own-gate.md)
+- [flock 的锁活在 fd 描述里，不…](flock-lock-lives-in-the-fd-not-the-pid.md) · [exit 1 断言混淆崩溃与拒绝](exit-1-assertion-conflates-crash-with-refusal.md) · [会杀进程的工具首跑必须用它的 seam](kill-capable-tool-first-run-must-use-its-seam.md) · [develop 直投棘轮只卡 code…](develop-global-ratchet-red-only-stalls-code-delta-fan-ins.md) — 解 = worktree 里 merge develop
+- [关键词家族普查会少数成员](keyword-family-census-undercounts-use-declaration-position.md)
+- [anti-drift 说「每个文件都 …](antidrift-all-files-out-of-declared-check-earlier-touches-subheading.md)
+- [touches 段结束条件必须停在【任…](touches-section-extent-must-stop-at-any-heading.md)
+- [suite red 的 exempt …](worker-driver-suite-red-exempt-is-uncapped.md)
+- [混合成因的 suite 红：重跑一次并…](mixed-suite-red-re-run-splits-persistent-from-transient-half.md)
+- [quay-init 写 config …](quay-init-config-heredoc-is-unquoted-backticks-in-comments-execute.md)
+- [AC1b 排除条目被闭集重写弄成 in…](loop-shipping-ac1b-entry-goes-inert-after-closed-set-rewrite.md)
+- [anchor.pid 写在 SIGTE…](anchor-pid-is-written-before-the-sigterm-handler.md)
+- [plugin↔packages 的源码相对路径在安装布局下解析不到](plugin-tarball-layout-breaks-packages-relative-imports.md) — packages/quay/plugin 是 gitignored 打包暂存副本；自包含靠 esbuild inline ⇒ 改 import 方向必须验真产物，不能只看 import-graph 变绿

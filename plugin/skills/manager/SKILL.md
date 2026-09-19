@@ -229,6 +229,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-goal-mechanism-2026-09-06.md` — goal 机制启用与改造（PHASE→GOAL 命名、多目标并发、ABI 封装、driver 驱动）：GOAL-NNN 取代 PHASE-NNN、draft 状态、cap=3/stale=7 天硬上限；修订并启用 SPEC-0809（人 2026-09-06 五条裁定）
 - `orchestration/SPEC-store-commit-unification-2026-09-08.md` — 五 store kind 提交面统一（单一 commitStoreWrite 原语：四态返回 committed/unchanged/not-in-git/failed、rev-parse root、pathspec 限定 add+commit；三阶段 ①原语+五 kind 接线 ②传播按读者归位 ③驱动侧直写点）
 - `orchestration/SPEC-quay-init-reconcile-and-native-implementation-2026-09-18.md` — `quay-init` 退役 shell 脚本、改 CLI/MCP 原生实现；`/quay:init` 语义从「存在即跳过」改为「reconcile 到当前版本默认值」（人 2026-09-18 三条原则扩展为规格；讨论结论 + 已核实的现状事实（文件/行号），AC/DoD 与是否立案由外层判断，本文件不建）
+- `orchestration/SPEC-context-injection-slimming-2026-09-19.md` — 常驻注入上下文瘦身：`CLAUDE.md`（57KB）+ auto-memory `MEMORY.md`（21KB）压到约 21KB，其余改为「索引 → 按需读」并保证被删内容全部有家（人 2026-09-19 裁定范围：本期只做 P0 + P1 + P2 + 新构造任务验证 V，P3–P5 推迟待观察期读数；任务 P0/P1/P2/V 已立）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)
