@@ -4,6 +4,6 @@
     "embeddedInterpreterLines": "sum of code lines over tracked *.sh that are NOT in plugin/sh-census-exceptions.txt and contain an embedded interpreter (node with --experimental-strip-types/-e/.ts, python3, or jq) AT A COMMAND POSITION (comments / strings / heredoc bodies do not count).",
     "duplicateCopies": "count of non-symlink byte-identical same-basename pairs between experiments/**/scripts/ and plugin/scripts/ (includes .sh and .ts). Symlinked copies are counted separately as totals.symlinkedCopies and are NOT duplicates."
   },
-  "embeddedInterpreterLines": 11425,
+  "embeddedInterpreterLines": 11431,
   "duplicateCopies": 38
 }
