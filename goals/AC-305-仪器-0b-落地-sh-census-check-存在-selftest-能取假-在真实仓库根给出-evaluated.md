@@ -2,7 +2,7 @@
 id: AC-305
 title: 仪器 0b 落地：sh-census-check 存在、--selftest 能取假、在真实仓库根给出 evaluated:true 且
   scripts>0 的有效读数
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -17,6 +17,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase
   0b。实测缘由：上一轮汇报「397 个 .sh」被 .claude/worktrees 副本污染 10 倍以上（真值：tracked 236 个 / 真脚本
   144 个）——没有读数在盯 shell 层。
 activatedAt: 2026-09-19T05:29:17.653Z
+statusLog:
+  - at: 2026-09-19T10:32:57.334Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **对应任务**：`gap-arch-sh-census-check`（已立案）。
 

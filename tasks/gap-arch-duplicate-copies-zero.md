@@ -48,6 +48,7 @@ plugin/scripts/it0-enforcement-with-design-check.ts:332  … fileURLToPath(impor
 plugin/scripts/it0-split-or-commit-check.ts:522           （同上，basename 期望值不同）
 ```
 （另 16 个副本也出现 `process.argv[1]`，但逐行核对后**不是**身份比较——注释/参数检查——故不在本清单。⛔ 这是逐行看过的结论，不是正则计数。）
+**⚠️ 落地实测补充（scoped gate 抓出，硬规则 5b「缺陷是成簇的」）**：上表的「另 16 个」结论**只对 `.ts` 成立**——同一缺陷还有一个 `.mjs` 兄弟实例：`plugin/scripts/workflow-metadata-conformance.mjs:793` 也是纯 URL 相等判据。已一并修复（见 Notes 的 AC4 节）。⇒ 教训：枚举缺陷实例时**先把载体枚举全（按扩展名）**，再逐行看；只按一个扩展名扫会把兄弟实例留在原地。
 
 **已实做的对照（2026-09-19，本机 Node v24.19.0；`/tmp/vmprobe` 复刻真实相对深度：`plugin/scripts/` + `experiments/quay-perpetual-stream/scripts/`）**——同一文件、同一参数，仅差一个符号链接：
 ```
@@ -120,19 +121,20 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 - plugin/scripts/vmeta-lag-check.ts
 - plugin/scripts/it0-enforcement-with-design-check.ts
 - plugin/scripts/it0-split-or-commit-check.ts
+- plugin/scripts/workflow-metadata-conformance.mjs
 - plugin/scripts/tree-hygiene-check.sh
 - plugin/scripts/worktree-branch-hygiene-check.sh
 - plugin/sh-census-baseline.json
 - tasks/gap-arch-duplicate-copies-zero.md
 
-（上 40 行 experiments/**/scripts/* 即本任务转换的 40 个路径——前 38 个为字节相同副本、末 2 个为同名不同内容者；下 7 行是与之互为镜像的 plugin 侧正本（5 个 TS 改身份判据、2 个 sh 改 ROOT 推导）。⛔ 不新增 `plugin/scripts/*.ts`，故无 capability-catalog / outline 登记连带面；落地若发现必须改 `experiments/quay-perpetual-stream/test/*.mjs` 的镜像断言，须在改之前把该文件补进本清单。）
+（上 40 行 experiments/**/scripts/* 即本任务转换的 40 个路径——前 38 个为字节相同副本、末 2 个为同名不同内容者；下 8 行是与之互为镜像的 plugin 侧正本（6 个改身份判据：5 个 TS + 1 个 .mjs、2 个 sh 改 ROOT 推导）。⛔ 不新增 `plugin/scripts/*.ts`，故无 capability-catalog / outline 登记连带面。**清单修正记录**：`plugin/scripts/workflow-metadata-conformance.mjs` 不在立案时的清单里——它是 scoped gate 抓出的第 6 个身份判据兄弟实例（任务体「陷阱一」只扫了 `.ts`）；发现后**先补进本清单再改**。）
 
 ## AC
 
 - [ ] AC1（判据本体在真实仓库根取真值）逐字提取 `goals/AC-310-*.md` 的 `criterion` 并在真实仓库根执行 ⇒ `exit 0`；同一次 `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` 的 `evaluated===true` 且 `totals.duplicateCopies===0`。⛔ 不得用 `--selftest`、自造 JSON 或 fixture 代替这次真读数；命令与原始输出贴进 notes。
 - [ ] AC2（逐条枚举，不是布尔）40 个路径逐个断言：`readlink <path>` 非空、`git ls-files -s <path>` 模式为 `120000`、`readlink -f <path>` 落在 `plugin/scripts/<basename>` ⇒ 40 行逐条贴进 notes（缺一行即未完成）。
 - [ ] AC3（两支 CAUSE 分别取假，注入即当场撤销）①`CAUSE=checker-missing`：在任务 worktree 内把 `plugin/scripts/sh-census-check.ts` 临时改名 ⇒ 判据 `exit 1` 且 stderr 含 `CAUSE=checker-missing`；改回 ⇒ `exit 0`。②`CAUSE=duplicate-copies-nonzero-or-not-evaluated`：把任一已转换的符号链接临时替换为实体副本（`cp plugin/scripts/<f> experiments/.../<f>`）⇒ 判据 `exit 1` 且 stderr 含该 CAUSE；恢复符号链接 ⇒ `exit 0`。两次注入都在 worktree 内进行并**当场撤销**，收尾 `git status --porcelain` 干净（硬规则 11/11b：共享检出上不留未提交的生产输入变更）。
-- [ ] AC4（5 个 TS 经镜像调用不再静默 no-op）对 5 个文件各做一次对照，**改动前先跑一次作为负控制**：`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/<name>.ts <最小参数>` ⇒ 有非空输出（usage/verdict/错误行）且与经 `plugin/scripts/<name>.ts` 同参数调用的输出**逐字相同**；负控制须记录「零输出 + exit 0」。10 行（改动前 5 + 改动后 5）贴进 notes。
+- [ ] AC4（5 个 TS 经镜像调用不再静默 no-op）对 5 个文件各做一次对照，**改动前先跑一次作为负控制**：`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/<name>.ts <最小参数>` ⇒ 有非空输出（usage/verdict/错误行）且与经 `plugin/scripts/<name>.ts` 同参数调用的输出**逐字相同**；负控制须记录「零输出 + exit 0」。10 行（改动前 5 + 改动后 5）贴进 notes。（实测另有第 6 个同类文件 `.mjs`，按同一判据一并对照，共 12 行。）
 - [ ] AC5（2 个 sh 不错树）`bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh` 与 `bash plugin/scripts/tree-hygiene-check.sh` 在被检树的根上一致（experiments 调用**不得**把 `experiments/quay-perpetual-stream` 当作被检根）；`worktree-branch-hygiene-check.sh` 同。两条改动前负控制（experiments 调用报出 experiments 根）一并记 notes。
 - [ ] AC6（不删除、不新增悬空）`git diff --name-status` 的 experiments 段只出现 `T`（typechange 100644→120000）与必要的 `M`，**无 `D`**；带守卫地枚举 `experiments/quay-perpetual-stream/scripts/` 下悬空链接数 = 3（与改动前一致）。
 - [ ] AC7（棘轮下降）`plugin/sh-census-baseline.json` 的 `duplicateCopies` = 0，且重跑 `sh-census-check --json` 仍 `duplicateCopies===0`（棘轮不红）；notes 写明「基线 38→0 是本任务的动作，不是 AC-305 的」，并附 `--baseline` 缺省重跑的输出。
