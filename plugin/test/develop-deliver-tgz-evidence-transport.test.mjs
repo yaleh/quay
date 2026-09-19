@@ -138,7 +138,13 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     const src = readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "develop-deliver-tgz.sh"), "utf8");
     const flat = src.match(/^transport_flat_files\(\) \{([\s\S]*?)^\}$/m);
     assert.ok(flat, "transport_flat_files() must be discoverable — it is the shipped set's single source");
-    const shippedTs = [...flat[1].matchAll(/\$\{SCRIPT_DIR\}\/([A-Za-z0-9._-]+\.ts)/g)].map((m) => m[1]);
+    // ⛔ The capture is the entry's path RELATIVE TO plugin/scripts, not just its basename: a shipped
+    // entry may legitimately live outside $SCRIPT_DIR (the SPEC .md always has; the kernel
+    // write-json-atomic leaf does since gap-arch-reverse-edges-zero — the transport is flat, so what
+    // lands remotely is the BASENAME wherever it came from). A basename-only capture would silently
+    // DROP that entry from this mirror, i.e. this "second reading" would stop covering the very file
+    // the first reading was just corrected for — the two readings would then agree by omission.
+    const shippedTs = [...flat[1].matchAll(/"\$\{SCRIPT_DIR\}\/([^"]+\.ts)"/g)].map((m) => m[1]);
     assert.ok(shippedTs.length >= 5, `the shipped .ts set must be discoverable (found ${shippedTs.length})`);
     return shippedTs.filter((name) => {
       if (name === "gate-script-base.ts") return false; // the dropped target cannot import itself

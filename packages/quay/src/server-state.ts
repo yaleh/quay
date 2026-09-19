@@ -31,11 +31,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-// The atomic JSON write is single-source in the plugin layer (write-json-atomic.ts's header:
-// "the single atomic JSON-file write for every state writer") and is imported by the product the
-// same way packages/quay-native/src/store.ts imports plugin/scripts/shape-sections.ts — esbuild
-// inlines it into the self-contained dist bundle.
-import { writeJsonAtomic } from "../../../plugin/scripts/write-json-atomic.ts";
+// The atomic JSON write is single-source (kernel/write-json-atomic.ts's header: "the single atomic
+// JSON-file write for every state writer") and is imported from the kernel — an in-package import.
+// Before tasks/gap-arch-reverse-edges-zero this line pointed at plugin/scripts/write-json-atomic.ts,
+// a `packages/**` → `plugin/**` reverse edge that resolved only because esbuild inlined the plugin
+// file into the self-contained dist bundle.
+import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
 
 /** The carrier's workspace-relative path. Runtime state — never committed (untracked `.quay/`). */
 export const SERVER_STATE_REL = ".quay/server.json";

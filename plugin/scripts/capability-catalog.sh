@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [arch-coverage-report.ts]="仓库里每一种语言，**谁分析了它、分析了几成** —— 具体说：.archguard/query/manifest.json 的 global scope（默认 scope，直接调 archguard_summary 时唯一可见的那个）只覆盖 tracked 非测试 .ts 的哪一部分、哪些 .ts 目录落在**任何** scope 之外、以及 mjs/js/sh/py 这四种语言是不是**根本没有分析器**，从而让「archguard 报 0 环」不再能冒充「无环」，也让「未评估」第一次有独立取值（⛔ 缺 manifest ⇒ 行 NOT-EVALUATED/manifest-missing，坏 JSON ⇒ evaluated:false exit 2，两者与「查过且合格」三态互不同形；tasks/gap-arch-coverage-self-report，SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.1/§2 P6）？"
   [import-graph-check.ts]="按【语句位置】解析出的模块依赖图里，那三个会回升的结构量各是几 —— import/export 语句（值边）vs import type / export type（类型边）构成的强连通分量中【只用值边就成立的环】有几个、【只有把类型边也算进去才成立的环】有几个、packages/** 反向 import plugin/** 或 experiments/** 的边有几条，以及（当 packages/quay/src/kernel/ 存在时）其下文件有没有 import 到 kernel 之外 —— 从而让 archguard 对 plugin/scripts 只当成单个 (root) 包、detect_cycles 返回 []（即『0 环』实为『未评估』）这件事，第一次有一个按位置判定、realpath 去重、只降不升的读数（tasks/gap-arch-import-graph-check；SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P1 / §5 Phase 0a）?"
   [sh-census-check.ts]="本仓库 tracked 的 .sh 里，哪些是【程序】、哪些是【胶水】 —— 每个 .sh 的有效行（去空行、去纯注释行）、有没有在【命令位置】内嵌 node（须带 --experimental-strip-types / -e / --eval / 直接跑 .ts）、python3、jq（注释、字符串、heredoc 正文里提到不算）、有没有同目录同名的 .ts 孪生、被多少个 ts / sh / test / 其它文件按 basename 引用；以及 experiments 下的 scripts 目录与 plugin/scripts 之间有几对【非符号链接且字节相同】的重复副本（符号链接单独计为 symlinkedCopies，不计入重复）、有几个无调用者的候选（⚠️ 静态 basename 匹配的候选，会漏掉动态拼接的脚本名，删除前必须做动态引用核对）—— 从而让 archguard 完全不解析 shell 这件事第一次有一个读数在盯这约 2.5 万有效行，并把两个【会回升】的量设成只降不升的棘轮：内嵌解释器的 .sh 有效行合计（例外清单外）与字节相同重复副本对数（例外清单单列汇总、不计入棘轮但也不从输出里消失；两个基线文件的路径见本表的 CONSUMER 行，不在此处重述）（tasks/gap-arch-sh-census-check；SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P2/P4 / §5 Phase 0b）?"
   [dev-stats-collect.ts]="README.md 里那段「开发过程统计」的数字，是脚本在一个具名提交上算出来的，还是有人手填的 —— 即每个统计值是否就是脚本在 README 标记块写出的那个提交上、对**被 git 跟踪的载体**（git 历史 / tasks/*.md / goals/*.md / plugin/scripts/*.ts）的逐字读数，从而让「README 的数字与重跑结果脱节」这件事第一次可机械提问（AC-277：--json 只出扁平标量、--check 判漂移时 exit 1 且 stderr 带 CAUSE=stats-drift；tasks/gap-dev-stats-collect-from-production-carriers）?"
@@ -474,6 +475,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [arch-coverage-report.ts]="按需"
   [import-graph-check.ts]="每轮"
   [sh-census-check.ts]="每轮"
   [dev-stats-collect.ts]="按需"
@@ -824,6 +826,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [arch-coverage-report.ts]="失效前提：① 语言的判定仍按扩展名（ts/mjs/js/sh/py），counted 口径仍取自 git ls-files 的 tracked 面；② archguard 的 scope 载体仍是 .archguard/query/manifest.json 且其 scopes[].sources 仍是目录绝对路径、globalScopeKey 仍指向其中一个 key；③ ts 的 analyzed 判据仍是「所在目录落于某 scope 的 sources 之内」。若 archguard 换掉 manifest 的形状/位置（例如改为按文件而非按目录记 scope），或新增某种语言的分析器（那时该语言应从 no-analyzer 改为真判据，而不是继续恒报 NOT-EVALUATED），本条需同步"
   [import-graph-check.ts]="失效前提：模块依赖仍以 git 跟踪的 TypeScript 源文件为唯一载体，且依赖关系仍由 import/export 语句声明（按语句位置可读）；若模块系统整体退休、或跨层依赖改由配置/注入表达而不再写进 import 语句，本条随之失效"
   [sh-census-check.ts]="失效前提：shell 层普查的两个量仍然只可能由本检查器枚举的那三类载体回升 —— ①被 git 跟踪的 .sh 文件（数据源是 git ls-files，不是 find），②命令位置的内嵌解释器（node 带 --experimental-strip-types/-e/--eval/直接跑 .ts、python3、jq），③experiments 脚本目录与 plugin/scripts 之间同 basename 的字节相同副本；若 shell 层被整体收敛到不再有 tracked .sh、或内嵌程序的判定口径改为读 AST 或配置声明而不再按命令位置、或实验目录副本策略改为直接删除（不再有可比较的同名对），本条退休"
   [dev-stats-collect.ts]="失效前提：README.md 仍是开发过程统计的展示面，且统计仍从被 git 跟踪的载体派生（git 历史 / tasks/*.md / goals/*.md / plugin/scripts/*.ts）—— 本机件的全部读数都取自这些面之外的提交对象库；若统计块改由别的机制产出（如 web UI 直出），或口径改从运行时载体（随检出而异的 .quay 面）派生，本条退休"
@@ -1153,7 +1156,7 @@ declare -A INVALIDATION=(
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
   [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
-  [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休"
+  [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休。⚠️ 2026-09-19（gap-arch-reverse-edges-zero）把【实现】下沉到 packages/quay/src/kernel/write-json-atomic.ts（产品层 packages/** 也读它，而产品层不得反向 import 方法学层），本模块改为 re-export ⇒ 第三条触发句的字面条件（实现载体已不在 plugin/scripts/）成立，但本条的断言对象未失去（本路径仍是 plugin 侧 state 写取用 writeJsonAtomic 的唯一入口），故本条不退休，判据改为「本路径是否仍是 plugin 侧那批 import 的唯一入口」。⚠️ 同轮实测到原断言句的 import 者名单已失真（⛔ 两处都与本改动无关或半关：driver-shared.ts 现经 kernel/control-state.ts 间接取用、不再直接 import 本路径；proposal-convergence.ts 早已 import 本路径却从来不在名单里）⇒ 前提里不要再钉死 import 者名单或处数，判据只认「唯一入口」这一条"
 
   [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
   [over90-task-gate.ts]="失效前提：supervisor 抢占判定（supervisor-preempt-candidates.ts）与 --detect-stop 的 over-90m 检测（inner-blocked-signal.ts detectTaskOver90m）仍以本模块为唯一 TASK_OVER_90M_MS/taskStatusAllowsOver90m/makeOver90ExecutorGone 实现；若这两个消费者退役，本条退休"
@@ -1174,6 +1177,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [arch-coverage-report.ts]="2026-09-19"
   [import-graph-check.ts]="2026-09-19"
   [sh-census-check.ts]="2026-09-19"
   [dev-stats-collect.ts]="2026-09-17"
@@ -1524,6 +1528,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [arch-coverage-report.ts]="enumerative"
   [import-graph-check.ts]="position"
   [sh-census-check.ts]="position"
   [dev-stats-collect.ts]="n/a"
@@ -1880,6 +1885,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [arch-coverage-report.ts]="谁按：任何要判「仓库里某语言/某目录有没有被任何分析仪器覆盖」的人或层 —— 命令行 node --experimental-strip-types plugin/scripts/arch-coverage-report.ts <root> --archguard-manifest <主检出的 .archguard/query/manifest.json> --json，并把完整输出写进 .quay/arch-coverage-report.latest.json（该载体已 gitignore）；在 task worktree 里必须带 --archguard-manifest，因为 .archguard/ 是主检出的生成物、worktree 内通常不存在（不带则 ts 行按 manifest-missing 报 NOT-EVALUATED，这是诚实读数而非故障）。条件=要判定 archguard 的默认 global scope 覆盖面是否等于全仓（读数随仓库推进漂移，本次落地时 packages/quay/src 覆盖 tracked 非测试 .ts 的约 22%；精确值以 --json 的 globalScopeCoversTsFraction 与 globalScopeSources 为准，⛔ 不在此钉死字面量以免漂移），或要判某种语言是否根本没有分析器（当前 mjs/js/sh/py 四行全部 NOT-EVALUATED/no-analyzer）。⛔ 它【只报告不做门】，exit 0 只表示「报告已产出」，不表示「全部已评估」；本机件刻意不接入 runner-static-gate.ts —— 要做成棘轮是另一个任务"
   [import-graph-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/ packages/ experiments/ scripts/ 以及本检查自身的三个文件；另由 plugin/test/import-graph-check.test.mjs 双控：真仓读数必须对上 plugin/import-graph-baseline.json 的三个数 + 六类 RED fixture + 注释/字符串负控 + NOT-EVALUATED 三态；mutation case 见 plugin/scripts/checker-mutation-cases/import-graph-check.sh）；基线数据文件 = plugin/import-graph-baseline.json（只降不升，且相对 git HEAD 的值也只许降）；条件=要判『模块依赖图的三个结构量是否回升』（值级环 / 仅类型边才成立的环 / packages→plugin|experiments 反向边），或 packages/quay/src/kernel/ 落地后要判其边界（tasks/gap-arch-import-graph-check）"
   [sh-census-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/ scripts/ experiments/ 以及本检查自身的四个文件：plugin/sh-census-baseline.json、plugin/sh-census-exceptions.txt、plugin/scripts/sh-census-check.ts、plugin/test/sh-census-check.test.mjs；另由 plugin/test/sh-census-check.test.mjs 双控：真仓读数必须对上 plugin/sh-census-baseline.json 的两个数 + totals.scripts 必须等于一条独立 shell 管道的输出 + 按位置的六类注入用例与三态；mutation case 见 plugin/scripts/checker-mutation-cases/sh-census-check.sh）；基线数据文件 = plugin/sh-census-baseline.json（两轴只降不升，且相对 git HEAD 的值也只许降），例外清单 = plugin/sh-census-exceptions.txt；条件=要判『shell 层是否在重新长出内嵌解释器的程序或重复副本』—— 这正是 SPEC 的 Phase 1（去重删除）与 Phase 5（大脚本 TS 化）的取假点，两个读数下降才算收敛（tasks/gap-arch-sh-census-check）"
   [dev-stats-collect.ts]="谁按：任何要在 README.md 建/刷新开发过程统计块的人或任务实现者，跑 node --experimental-strip-types plugin/scripts/dev-stats-collect.ts --write（写面只此一处），并用 --check 核块与快照一致；AC-277 的判据本身由 goal-driver 每轮在同一个提交上做同一比对（--json 的重算值必须逐字出现在标记块里）；条件=README 需要首次建立一个机械产出的统计块，或已有块要随仓库推进刷新到新的快照提交；⛔ 不得接进任何每轮驱动 —— README.md 是被 git 跟踪的文件，每轮重写会让工作树常脏，而 fan-in 的 ff 只放行未跟踪路径 ⇒ 之后每一次 fan-in 的 ff 都会失败"

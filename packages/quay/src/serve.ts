@@ -28,18 +28,21 @@ import { startDashboardSnapshotRefresh } from "./serve-dashboard.ts";
 // and flip the criterion red/green per run. Started here, beside the other two ticks.
 import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §7 stage A2): the MCP control plane is
-// hosted by THIS process. `serveControlPlane` is imported from plugin/scripts/driver-shared.ts
-// rather than reimplemented here — the control plane has exactly ONE implementation (AC150-3), and
-// stage A2 is a MERGE of two existing implementations into one process, not a second copy. The
-// product-side import of a plugin script is the sanctioned pattern
-// (packages/quay-native/src/store.ts imports plugin/scripts/shape-sections.ts the same way).
-import { serveControlPlane, type ControlPlaneHandle } from "../../../plugin/scripts/driver-shared.ts";
+// hosted by THIS process. `serveControlPlane` is imported, never reimplemented here — the control
+// plane has exactly ONE implementation (AC150-3), and stage A2 is a MERGE of two existing
+// implementations into one process, not a second copy.
+// It now lives in the kernel (`./kernel/control-plane-http.ts`, tasks/gap-arch-reverse-edges-zero):
+// the product HOSTS the control plane, so its implementation must be reachable from the product
+// without the product reverse-importing `plugin/**`. This import used to point at
+// plugin/scripts/driver-shared.ts; the kernel home makes it an in-package one.
+import { serveControlPlane, type ControlPlaneHandle } from "./kernel/control-plane-http.ts";
 import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "./server-state.ts";
-import { writeJsonAtomic } from "../../../plugin/scripts/write-json-atomic.ts";
+import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
 // The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is
-// alive but is NOT a `quay serve` must be judged STALE, not "held". Both predicates already exist
-// and are single-sourced in the reaper — ⛔ not reimplemented here (second copy = drift).
-import { readProcCmdline, isQuayServe } from "../../../plugin/scripts/worktree-process-reaper.ts";
+// alive but is NOT a `quay serve` must be judged STALE, not "held". Both predicates are
+// single-sourced in the kernel leaf `./kernel/proc-identity.ts` (extracted from the reaper, which
+// re-exports them for its own callers) — ⛔ not reimplemented here (second copy = drift).
+import { readProcCmdline, isQuayServe } from "./kernel/proc-identity.ts";
 // The service inventory is a ZERO-IMPORT leaf module (cli/driver-vocab.ts) because the same names
 // appear in `quay --help`'s statically-imported help text — this file's graph must not be pulled in
 // just to print them. One list, two consumers.
@@ -626,7 +629,7 @@ async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port =
   // Port: `0` by default (the kernel picks an ephemeral port, read back from the handle) because a
   // fixed control port would be a second hardcoded surface colliding across worktrees; the env
   // override exists for a deployment that must pin it. The control plane stays loopback-bound by
-  // default (its only gate is the caller-identity check, driver-shared.ts CONTROL_HEADER) — the
+  // default (its only gate is the caller-identity check, kernel/control-state.ts CONTROL_HEADER) — the
   // web leg keeps binding 0.0.0.0 as before, so NO existing route's reachability changes.
   //
   // ⛔ This is deliberately NOT a new `quay serve` flag: SPEC §8 criterion 9 forbids stage A from
