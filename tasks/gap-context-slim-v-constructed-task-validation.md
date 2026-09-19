@@ -22,7 +22,7 @@ depends_on:
 ## DoD
 真实运行：这些验证任务在真实 driver/worker 环境里对真实的新旧 CLAUDE.md 各跑过（不是 fixture 或 dry-run），运行记录路径写入 Resolution；若正控制不足 6 行，如实写出数量并降级结论，不放宽判据。
 ## Touches
-- orchestration/context-slimming/v-cases.tsv
-- orchestration/context-slimming/v-validation.md
-- orchestration/context-slimming/v-run.sh
+- orchestration/context-slimming/v-cases.tsv (new)
+- orchestration/context-slimming/v-validation.md (new)
+- orchestration/context-slimming/v-run.sh (new)
 - tasks/gap-context-slim-v-constructed-task-validation.md
