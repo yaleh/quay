@@ -33,13 +33,20 @@ import { commitStoreWrite } from "../../quay/src/store-commit.ts";
 // path can reach proves nothing about the writer path).
 import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
-// headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
-// sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
-// judge). They live in plugin/scripts/ (not packages/) because quay-init lays the mechanism layer
-// but NOT the packages/ source tree into consumers, so a laid-down ready-pool-check.ts can only
-// reach a sibling plugin/scripts file; esbuild inlines this import into the self-contained dist
-// bundle so the product build stays standalone.
-import { SHAPE_SECTIONS } from "../../../plugin/scripts/shape-sections.ts";
+// headings count as proposal/plan/ac/dod per shape) live in ONE place — packages/quay/src/kernel/
+// shape-sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts
+// (methodology judge). They live in the KERNEL, not in plugin/scripts/: this store is the product
+// judge, and a `packages/**` → `plugin/**` import reverses the layer direction (it was such an edge
+// before tasks/gap-arch-reverse-edges-zero; it resolved only because esbuild inlined the plugin file
+// into the self-contained dist bundle).
+// ⛔ The OLD reason recorded here — "they live in plugin/scripts/ because quay-init lays the
+// mechanism layer but NOT the packages/ source tree into consumers" — is now FALSE for this
+// direction and was replaced by the kernel-side argument: the mechanism side reaches them through
+// plugin/scripts/shape-sections.ts, a re-export of this kernel file, which build-plugin-dist's
+// `coreSrcAliasPlugin` re-points onto the real Core source tree and INLINES into
+// `dist/ready-pool-check.js`. A consumer therefore still needs no packages/ tree for the tools it
+// runs, and this store no longer reverse-imports the mechanism layer.
+import { SHAPE_SECTIONS } from "../../quay/src/kernel/shape-sections.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 

@@ -129,18 +129,34 @@ test("AC150-2 — 控制态 pre-halted ⇒ 驱动停止晋升与 fix spawn（运
 });
 
 
-test("AC150-3 — 资源门/halt 判定只有 driver-shared.ts 一份实现（⛔ 无复制粘贴）", () => {
+test("AC150-3 — 资源门/halt 判定各只有一份实现（⛔ 无复制粘贴）", () => {
   // 函数级同一份：worker-driver re-export 与 driver-shared 是同一个函数引用。
   assert.equal(sharedResourceGateCheck, workerResourceGateCheck, "resourceGateCheck 同一份实现（worker re-export = shared）");
   assert.equal(sharedIsHalted, workerIsHalted, "isHalted 同一份实现（worker re-export = shared）");
 
-  // 取假（grep 形）：三个源文件里，resourceGateCheck / isHalted 只定义在 driver-shared.ts 一份；
-  // worker-driver.ts 与 promotion-driver.ts 都只 import（⛔ 不各写一份独立实现）。
+  // 取假（grep 形）：两份判定各只被 DEFINITION 一次，别处一律只 import / re-export。
+  // ⛔ 断言的量是「定义处唯一」，不是「定义在某个特定文件」——`isHalted` 的落点已由
+  // gap-arch-reverse-edges-zero 从 driver-shared.ts 移到 kernel/control-state.ts（产品层
+  // packages/** 也要读它，而产品层不得反向 import 方法学层），driver-shared.ts 改为
+  // `export *` 转出。把位置钉死在 driver-shared.ts 会让这条判据在**单份实现仍然成立**时变红，
+  // 而变红的「修法」若被读成「搬回来」就又造出一条 packages→plugin 反向边。
+  // 所以：每条判定各点名它当前的唯一落点，并断言其余三个文件都不定义它（复制粘贴仍取假）。
   const sharedSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "driver-shared.ts"), "utf8");
   const workerSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "worker-driver.ts"), "utf8");
   const promoSrc = fs.readFileSync(path.resolve(__dirname, "..", "scripts", "promotion-driver.ts"), "utf8");
+  const kernelSrc = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "packages", "quay", "src", "kernel", "control-state.ts"), "utf8");
+
+  // 唯一落点①：resourceGateCheck ∈ driver-shared.ts（driver 运行时，非共享原语）。
   assert.match(sharedSrc, /export function resourceGateCheck/, "resourceGateCheck defined in driver-shared.ts");
-  assert.match(sharedSrc, /export function isHalted/, "isHalted defined in driver-shared.ts");
+  // 唯一落点②：isHalted ∈ kernel/control-state.ts。
+  assert.match(kernelSrc, /export function isHalted/, "isHalted defined in kernel/control-state.ts");
+  // driver-shared 是【转出】而非【定义】，且转出口必须对着 kernel —— 否则它可以悄悄变成一个 stub，
+  // 而函数级同一份的断言会因为 stub 恰好等于 worker 侧那条链而仍然通过。
+  assert.doesNotMatch(sharedSrc, /export function isHalted/, "driver-shared.ts does NOT define isHalted (re-export only)");
+  assert.match(sharedSrc, /export \* from "\.\.\/\.\.\/packages\/quay\/src\/kernel\/control-state\.ts"/,
+    "driver-shared.ts re-exports the kernel module (the plugin → kernel direction)");
+
   assert.doesNotMatch(workerSrc, /export function resourceGateCheck/, "worker-driver.ts does NOT define resourceGateCheck");
   assert.doesNotMatch(workerSrc, /export function isHalted/, "worker-driver.ts does NOT define isHalted");
   assert.doesNotMatch(promoSrc, /export function resourceGateCheck/, "promotion-driver.ts does NOT define resourceGateCheck");
