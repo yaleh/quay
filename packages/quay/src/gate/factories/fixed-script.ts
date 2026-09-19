@@ -3,7 +3,7 @@
 // A thin sibling of `makeIt0Gate` for a FIXED script that takes NO
 // `task.extra` args at all. Reuses the SAME `runAcceptance` runner.
 
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { runAcceptance } from "../acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions, shQuote } from "./utils.ts";
 

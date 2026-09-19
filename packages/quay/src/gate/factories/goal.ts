@@ -14,7 +14,7 @@
 // record's `criterion` takes effect without a process restart — same shape as makeAdrGate.
 
 import path from "node:path";
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { runAcceptance } from "../acceptance-runner.ts";
 import { resolveRunnerOptions } from "../config/utils.ts";
 import { createGoalStore } from "../../goal-store.ts";

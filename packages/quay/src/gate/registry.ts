@@ -17,9 +17,12 @@ var moduleDir = typeof __dirname === "string" ? __dirname : path.dirname(fileURL
 // dist (dist/) — a fixed up-4 walk is wrong under the dist bundle location.
 var REPO_ROOT = discoverWorkspaceRoot(moduleDir) ?? path.resolve(moduleDir, "..", "..", "..", "..");
 
-export interface GateVerdict { ok: boolean; reason: string; }
-export interface GateDefinition { description?: string; onPass?: string; onFail?: string; check?: (task: Task, client: unknown) => Promise<GateVerdict>; }
-export type GateFn = (task: Task, client: unknown) => Promise<GateVerdict>;
+// The gate function-shape types live in ./types.ts (a leaf module) so the factories and the
+// workspace-gate loader can `import type` them WITHOUT an edge back into this file — that edge was a
+// type-level import cycle (gap-arch-import-cycles-zero). Imported here for this module's own use and
+// re-exported so the public API (`import type { GateFn } from ".../gate/registry.ts"`) is unchanged.
+import type { GateVerdict, GateDefinition, GateFn } from "./types.ts";
+export type { GateVerdict, GateDefinition, GateFn } from "./types.ts";
 
 export { loadWorkspaceGates, readGatesConfig, discoverWorkspaceRoot, loadWorkspaceGateMetadata } from "./config/loader.ts";
 export type { GatesConfig } from "./config/types.ts";

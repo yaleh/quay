@@ -4,7 +4,7 @@
 // object kind: a document's `contracts` check its OWN live body content
 // in-process (`contract-validator.ts#validateContracts`), no external shell-out.
 
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { createDocumentStore } from "../../document-store.ts";
 import { validateContracts } from "../../contract-validator.ts";
 import type { Task } from "../../abi.ts";

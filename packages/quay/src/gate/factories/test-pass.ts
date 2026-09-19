@@ -3,7 +3,7 @@
 // Run a workspace-configured command, PASS iff exit 0. No test runner name
 // is ever mentioned here; the command is workspace data (gates.yml).
 
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { runAcceptance } from "../acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions } from "./utils.ts";
 

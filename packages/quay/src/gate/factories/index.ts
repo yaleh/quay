@@ -1,7 +1,7 @@
 // Barrel re-export of all 7 gate factory functions + gateFactories dispatch map.
 // Does NOT re-export utils.ts or loader.ts content.
 
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { makeIt0Gate } from "./it0.ts";
 import { makeFixedScriptGate } from "./fixed-script.ts";
 import { makeAdrGate } from "./adr.ts";

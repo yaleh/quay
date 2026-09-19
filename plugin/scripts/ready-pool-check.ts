@@ -1202,25 +1202,11 @@ const WIKILINK_RE = /\[\[([A-Za-z0-9][A-Za-z0-9-]*)(?:[#|][^\]]*)?\]\]/g;
 // matches; the existsSync resolution below filters out non-task ids (code files, skill names).
 const BACKTICK_ID_RE = /`([A-Za-z0-9][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)`/g;
 
-/** Strip fenced code blocks (```…``` / ~~~…~~~). Inline backticks are NOT stripped here — they are the
- *  repo's citation form, matched separately by BACKTICK_ID_RE in prosePrereqRefs. */
-function stripFences(text) {
-  return text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
-}
-
-/** Strip inline backtick spans (`…`) only (no fences). Used for the WIKILINK arm of prosePrereqRefs so
- *  a QUOTED wikilink stays an illustrative mention. */
-function stripInlineCodeSpans(text) {
-  return text.replace(/`[^`\n]*`/g, " ");
-}
-
-/** Strip fenced code blocks (```…``` / ~~~…~~~) and inline backtick spans (`…`) so a QUOTED wikilink
- *  inside code is not read as a prereq declaration. Fences are removed before inline spans (an inline
- *  backtick can appear inside a fence). Exported — strategic-doc-staleness-check.ts reuses it (its
- *  contract is fence+inline stripping, so it is left unchanged). */
-export function stripCodeSpans(text) {
-  return stripInlineCodeSpans(stripFences(text));
-}
+// gap-arch-import-cycles-zero — the code-span stripping family moved to the leaf module
+// code-span-strip.ts. `stripFences`/`stripInlineCodeSpans` stay IMPORTED (this file still uses them
+// below); `stripCodeSpans` is also re-exported so this module's public API is byte-for-byte unchanged.
+import { stripFences, stripInlineCodeSpans, stripCodeSpans } from "./code-span-strip.ts";
+export { stripCodeSpans } from "./code-span-strip.ts";
 
 /** The task's declared relation-edge set — parent + children + depends_on (the fields every
  *  dependency mechanism reads). A prereq written into ANY of these is mechanism-visible. */

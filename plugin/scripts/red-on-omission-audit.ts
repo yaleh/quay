@@ -125,7 +125,15 @@ export const REGISTRY: RedReadingEntry[] = [
     verify: (root) => {
       const runner = readUnder(root, "plugin/scripts/full-suite-runner.ts");
       const fix = readUnder(root, "plugin/workflows/execute-suite-fix.js");
-      const okField = has(runner, 'scope?: "main" | "worktree"');
+      // gap-arch-import-cycles-zero: the `SuiteState` DECLARATION was moved VERBATIM out of
+      // full-suite-runner.ts into the leaf module full-suite-runner-types.ts (to break a type-level
+      // import cycle), and full-suite-runner.ts re-exports it — so the runner's declaration surface
+      // now spans BOTH files. Look the field up in either. ⛔ Not a loosening: a missing file reads
+      // "" (readUnder) ⇒ still a FAIL, and the invariant is unchanged — the runner's type surface
+      // must still declare the field somewhere.
+      const runnerTypes = readUnder(root, "plugin/scripts/full-suite-runner-types.ts");
+      const okField =
+        has(runner, 'scope?: "main" | "worktree"') || has(runnerTypes, 'scope?: "main" | "worktree"');
       const okConsumer =
         has(fix, "scope=worktree") && hasRe(fix, /state\s*===\s*'green'|state\s*===["']green["']/);
       const okDoc = hasRe(tickCore(root), /scope=worktree|scope=main/);

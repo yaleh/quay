@@ -51,8 +51,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // REUSE (gap-judgepoolcandidate-keyword-vs-position): the same code-span stripper the ready-pool
-// prose-prereq detector uses (ready-pool-check.ts:641) — single source, no parallel copy.
-import { stripCodeSpans } from "./ready-pool-check.ts";
+// prose-prereq detector uses — single source, no parallel copy. gap-arch-import-cycles-zero: that
+// single source is now the leaf module code-span-strip.ts (ready-pool-check.ts VALUE-imports
+// judgePoolCandidate from this file, so importing stripCodeSpans FROM it was a value-level import cycle).
+import { stripCodeSpans } from "./code-span-strip.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -14,7 +14,10 @@
 // Re-exported from full-suite-runner.ts so its public API surface is unchanged.
 
 import { TMUX_LEAK_FAIL_RE } from "./tmux-leak-fail-re.ts";
-import type { SuiteFailure, StaticCheckViolation, FailClosedChecker } from "./full-suite-runner.ts";
+// gap-arch-import-cycles-zero — these types are DEFINED in full-suite-runner.ts, which VALUE-imports
+// this module: importing them from there made this a type-level import cycle. They now live in the
+// leaf module full-suite-runner-types.ts (full-suite-runner.ts re-exports them, so nothing else moves).
+import type { SuiteFailure, StaticCheckViolation, FailClosedChecker } from "./full-suite-runner-types.ts";
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
 // stdout/stderr stream, never waiting for the run to finish. These are STRUCTURED

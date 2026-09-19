@@ -6,7 +6,7 @@
 // `spawnSyncCapture` is kept private to this file (not re-exported).
 
 import { spawnSync } from "node:child_process";
-import type { GateFn } from "../registry.ts";
+import type { GateFn } from "../types.ts";
 import { type GateConfig, resolveRunnerOptions } from "./utils.ts";
 
 interface SpawnCaptureResult {

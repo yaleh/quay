@@ -16,7 +16,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { SuiteState, SuiteRoundRecord } from "./full-suite-runner.ts";
+// gap-arch-import-cycles-zero — these types are DEFINED in full-suite-runner.ts, which VALUE-imports
+// this module: importing them from there made this a type-level import cycle. They now live in the
+// leaf module full-suite-runner-types.ts (full-suite-runner.ts re-exports them, so nothing else moves).
+import type { SuiteState, SuiteRoundRecord } from "./full-suite-runner-types.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 /**
