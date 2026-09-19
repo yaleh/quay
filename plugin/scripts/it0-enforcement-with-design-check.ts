@@ -36,7 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -329,7 +329,13 @@ function usage(): never {
   process.exit(2);
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-enforcement-with-design-check";
+// ⛔ NOT a URL-equality check. Under a mirror invocation (`experiments/**/scripts/<name>.ts` is a
+// symlink to `plugin/scripts/<name>.ts`), Node resolves `import.meta.url` to the REALPATH (plugin
+// side) while `process.argv[1]` keeps the path as written (experiments side) ⇒ URL equality is
+// permanently false, the block below never runs, and the process exits 0 with ZERO output — the
+// "could not read the input" failure printed in the same shape as "all clear"
+// (gap-arch-duplicate-copies-zero). `isDirectEntry` judges by basename, so both call paths agree.
+const isDirect = isDirectEntry(import.meta, process.argv[1], "it0-enforcement-with-design-check");
 if (isDirect) {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit("usage: node it0-enforcement-with-design-check.ts [--root <dir>] [--inherited-core <path>] [--dod-check <path>] <workspace-root>");

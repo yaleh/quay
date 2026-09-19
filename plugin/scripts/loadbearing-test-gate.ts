@@ -271,8 +271,14 @@ function main(argv: string[]): number {
 }
 
 // Run the CLI only when this file is the entry point (not when imported by tests / a quay gate).
-import { fileURLToPath } from "node:url";
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// ⛔ NOT a URL-equality check. Under a mirror invocation (`experiments/**/scripts/<name>.ts` is a
+// symlink to `plugin/scripts/<name>.ts`), Node resolves `import.meta.url` to the REALPATH (plugin
+// side) while `process.argv[1]` keeps the path as written (experiments side) ⇒ URL equality is
+// permanently false, `main()` never runs, and the process exits 0 with ZERO output — the "could not
+// read the input" failure printed in the same shape as "all clear" (gap-arch-duplicate-copies-zero).
+// `isDirectEntry` judges by basename, so both call paths agree.
+import { isDirectEntry } from "./gate-script-base.ts";
+const isDirect = isDirectEntry(import.meta, process.argv[1], "loadbearing-test-gate");
 if (isDirect) {
   process.exit(main(process.argv));
 }

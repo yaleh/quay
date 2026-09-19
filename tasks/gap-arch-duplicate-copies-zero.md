@@ -2,7 +2,7 @@
 id: gap-arch-duplicate-copies-zero
 title: 架构棘轮：重复副本清零 —— experiments 镜像 38 个非链接副本（+2 对同名不同内容）改符号链接，令 AC-310
   判据取真值，并修符号链接本身引入的两类静默失效（5 个 TS 直接调用判据 + 2 个 sh 的 ROOT 推导）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -126,6 +126,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 - plugin/scripts/worktree-branch-hygiene-check.sh
 - plugin/sh-census-baseline.json
 - tasks/gap-arch-duplicate-copies-zero.md
+- plugin/scripts/touches-orthogonality-check.ts
+- plugin/test/sh-census-check.test.mjs
+- experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs
+
+（**第 2 次清单修正，续做轮 2026-09-19**：上面 3 行不在立案清单里——它们是「39 个副本 → 符号链接」这一步**落地后**才暴露的连带面：`touches-orthogonality-check.ts` 的 walker 把镜像链接整个丢掉（`walkFiles` 的 `entry.isFile()` 谓词），另两个是被这次转换**新发现**的镜像、其断言随转换而失效。按陷阱一 `.mjs` 兄弟实例的同一条教训处理：**先补清单，再改**。
 
 （上 40 行 experiments/**/scripts/* 即本任务转换的 40 个路径——前 38 个为字节相同副本、末 2 个为同名不同内容者；下 8 行是与之互为镜像的 plugin 侧正本（6 个改身份判据：5 个 TS + 1 个 .mjs、2 个 sh 改 ROOT 推导）。⛔ 不新增 `plugin/scripts/*.ts`，故无 capability-catalog / outline 登记连带面。**清单修正记录**：`plugin/scripts/workflow-metadata-conformance.mjs` 不在立案时的清单里——它是 scoped gate 抓出的第 6 个身份判据兄弟实例（任务体「陷阱一」只扫了 `.ts`）；发现后**先补进本清单再改**。）
 
@@ -277,3 +282,48 @@ $ bash experiments/…/worktree-branch-hygiene-check.sh          → exit 0，�
 - **第二次（`ff2990434` 时，含 `.mjs` 修复 + 更新后的 Touches + merge develop）= 绿，`EXIT=0`，`✖` 计数 = 0。**
 
 （该 gate 自身会 `build dist/quay.js` + `build dist/quay-native.js` + `sync-vendor.sh --sync-dist` 再跑，故 worktree 里原本缺失的 `packages/*/dist` 不构成阻塞。）
+
+### 续做轮（2026-09-19）：转换本身暴露的 7 条 suite red —— **全部**是本次转换的后果，⛔ 不是环境
+
+上轮 exited-not-landed 的真因日志 = `.quay/fan-in-suite-gap-arch-duplicate-copies-zero~wk-prod-anchor~1789814446155-b68ded.log`（`# tests 6026 / # pass 6019 / # fail 7`）。7 条 red 落在 4 个测试文件；逐条核到根因后：**7 条全部由「39 个副本 → 符号链接」这一步造成**，无一条 flaky/环境（续做 prompt 的 delta-relatedness 提示把这 4 个文件判为 UNRELATED —— **该提示在这个方向上错了**：本地逐个复现、根因链完整可追、修完即全绿）。⇒ 一般形态：**「哪个文件的 Touches 声明了它」与「谁的行为改变了它」是两个问题**——失败文件不在 Touches 里，不等于失败与本次改动无关。
+
+| 失败（文件 × 条数） | 根因 | 修法 |
+|---|---|---|
+| `plugin/test/touches-orthogonality-check.test.mjs` ×2：`main: disjoint pair → exit 0`、`main: no --root falls back to repoRoot` | `touches-orthogonality-check.ts` 的 `walkFiles` 以 `entry.isFile()` 过滤，而 dirent 是 **lstat** 语义 ⇒ **符号链接不是 file**。转换后该目录的镜像对 `expandGlobs` 全部不可见 ⇒ `checkTouchesPair` 落到保守分支「matched nothing (likely a typo) → serialize」⇒ exit 1 | `walkFiles` 的 include 改 `entry.isFile() \|\| entry.isSymbolicLink()`，结果再过一次 `fs.statSync(...).isFile()`（悬空链接抛 ⇒ 排除；同时排除指向目录的链接）。**单一修点**，下一行同一根因 |
+| `experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs` ×2：`expandDeclaredTouches` 通配符、`assembleBatch` 通配符 | 同上：`expandDeclaredTouches` 的**通配符**支路走 `expandGlobs` → 同一个 `walkFiles`（具体路径支路不查 fs，故同文件「concrete declared path still resolves」那条一直是绿的） | 同上（无第二处修点） |
+| `.../symlink-mirror-invocation.test.mjs`：`[gate-script-base.ts] 非静默` | **测试的发现机制按关键词匹配**：`GUARD_PATTERN` 裸正则撞上 `gate-script-base.ts` 的**头注释**（逐字引用了已退役的 `isDirectEntry(import.meta)` 写法）。该文件是纯库、无 CLI 块 ⇒ 无参调用本就应当静默，断言是假红（且是硬规则 2 的教科书形态：注释里的提及被当成命中） | 发现前先过 `checker-lib.ts` 的 `buildNonCodeMask`（仓库既有的「按位置不按关键词」原语）。实测：`gate-script-base.ts` masked=**false**（不再被发现）、真 CLI `task-status-drift-check.ts` masked=**true**（仍被发现） |
+| 同上：`[task-status-drift-check.ts] 非静默` | 该脚本无参即跑默认全仓扫描并 **`return 0; // ALWAYS 0 — report-only, never a gate`**（逐字）⇒ exit 0 + 报告、无 `Usage:`；而测试的 exit-0 分支只认 `/Usage:/` | 放宽 exit-0 判据为「**stdout 非空**」（接口清单 **或** 报告皆可），并写明理由：该 no-args 形态是**生产接口**——`plugin/loop/orchestrator-loop-tick.md:117`、`plugin/loop/fast-mode-loop-tick.md:100` 正是无参调用它。负控制改成新规则仍能抓的形状（exit 0 且**只有 stderr** 有输出），旧负控制里「任意非-usage stdout 噪声 ⇒ 视为静默」一条**逐字删除并注明原因**（它已不再是缺陷形状） |
+| `plugin/test/sh-census-check.test.mjs` AC4 | 该 AC 的**正控**断言真实仓库里仍存在一对字节相同的非链接副本（`gate-script-base.ts`）—— 而这正是本任务要消灭的状态 ⇒ 结构性不可满足 | 正控移到**同文件已有的 hermetic fixture**（`:148`「byte-identical non-symlink copies are duplicates; a symlink is NOT」），真实仓库半边改钉**落地态**：该路径现在报为 SYMLINK（`target` 逐字 = `../../../plugin/scripts/gate-script-base.ts`）且 `duplicateCopies===0`。⛔ 不写成「它不在 duplicates 里即通过」——一个坏掉的扫描器同样满足那个（硬规则 3b） |
+
+**硬规则 5b 的收获**：立案时枚举到的两类静默失效（陷阱一 = 5/6 个 TS 身份判据、陷阱二 = 2 个 sh 的 ROOT 推导）**都是「谁直接比较 URL / ROOT」这一谓词**上的；第三类「**谁把 dirent 当 file**」是转换**落地后**才暴露的。`fs-walk.ts` 的头注释本来就逐字写明了这条轴（`entry.isFile()` 把符号链接整个丢掉），只是本任务的枚举没按这个谓词扫。⇒ 教训与陷阱一的 `.mjs` 兄弟实例同形（先枚举载体，再逐条看），这次是**先枚举谓词**。5b 扫描结论见下。
+
+### AC8 — 陷阱四扫描结论（续做轮重跑，命中 53 条）
+
+命令（AC8 原文，逐字）：
+```
+$ grep -rn 'lstatSync\|isFile()\|readlink\|120000' experiments/quay-perpetual-stream/test/ plugin/test/
+53 条命中
+```
+逐条判定「是否断言镜像为非链接实体」⇒ **没有一条构成需要修改的真断言**，分四类：
+1. **断言镜像【是】符号链接（方向相反，转换后更绿）**：`experiments/quay-perpetual-stream/test/config-wiring-check.test.mjs:55,74`（lstat isSymbolicLink）、`plugin/test/gate-dispatch-coverage.test.mjs:147-148`（plugin 侧 `isFile()` + experiments 侧 `isSymbolicLink()`）、`plugin/test/loop-shipping.test.mjs:256-259`（canonical `isFile()` + reExport `readlinkSync` 含 `plugin/scripts/fast-mode-telemetry.ts`）。⇒ 它们要求镜像**是**链接，与本次转换同向；对象在既有那 22 个链接里，转换前即绿。
+2. **`fast-mode-telemetry.ts` 的「全仓只有一份实体副本」枚举**（`loop-shipping.test.mjs:262-337`，5 处 `!lstatSync(p).isSymbolicLink()`）：对象只有一个文件，转换不触发。
+3. **与被转换路径无关**：`send-keys-reliable:272`、`loop-shipping-necessity-check:82`、`plugin-bin-shim-npm-free-cli:218`、`tmux-isolated:61`、`repo-root-unification:150`、`provision-verify-worktree:*` 与 `dispatch-worktree-setup:*`（都是 `node_modules` 链接）、`quay-init-install-fixture-wipe:82`、`archive-exclusion-wiring:104`、`help-contract-incompatible-behaviors:183`。
+4. **`120000` 是超时毫秒数**、不是 git 模式：`runner-grouping-*`、`full-suite-runner-s02`、`resource-gate-s08`、`helpers/host-budget.mjs`、`worker-driver-fan-in-s05`。
+（`plugin/test/fs-walk.test.mjs` 单列：它是 `fs-walk.ts` 语义钉子，本任务**未改** `fs-walk.ts`——修改落在调用方的谓词上。）
+
+### 5b 扫描结论：「把 dirent 当 file」这条谓词在别处的落点
+
+`grep -rn "isFile()\|isSymbolicLink()" plugin/scripts/*.ts` 得 40+ 处，逐个判定「其扫面上是否含本任务新转的 39 个路径」：
+- **同缺陷、已修**：`plugin/scripts/touches-orthogonality-check.ts:151` —— **唯一需要改的落点**，因为 `expandGlobs` / `touchExists` / `expandDeclaredTouches`（slot-refill / ready-pool-check / claim-task / fork-baseline 的派发重合判定）全部经它。
+- **判为无影响（逐条理由，不是略过）**：`derive-touches-heuristic.ts:92`（token 含 `/` 直接透传、裸名按 basename 解析——少一份重名反而更少歧义）、`mirror-pair-drift-check.ts:125,130`（**按其设计**：它比的是「两份独立实体副本是否漂移」，符号链接按定义不是副本；`totalPairs` 随之下落是**可见读数**，回归风险由 sh-census 侧承担）、`registry-bare-filename-scan.ts:263`（显式 `isSymbolicLink() → continue`，扫的是 catalog 载体）、`loadbearing-test-gate.ts:73,89` / `select-tests-for-touches.ts:243` / `canonical-test-files.ts:66` / `suite-bucket-select.ts:144` / `ci-runs-collect.ts:450`（都在**测试**目录上扫，不在 `experiments/**/scripts/`）、`sh-census-check.ts:489`（**就是**用 lstat 正确区分链接的那处，行为不变）、其余为具体单文件的存在性判定。
+
+### 残留发现（记录在案，**不在本任务范围**）
+
+1. **AC-310 判据的一处可玩性**：`sh-census-check.ts` 的 `scanCopies`（`:476`）把「experiments 侧是链接」直接计入 `symlinkedCopies`，**不判其 target 是否指向对应的 plugin 文件**（悬空只由 `orphanCandidates` 覆盖）⇒ 把路径链接到**任意非悬空目标**同样能让 `duplicateCopies===0`。本任务的实际落地不受影响——AC2 对 40 个路径逐条断言 `readlink -f` 落在 `plugin/scripts/<basename>`（证据见 AC2 节），但**该口径面属于 AC-305 的仪器**，宜单独立案而非在本任务里顺手改。
+2. **`plugin/test/sh-census-check.test.mjs` AC4 的正控对象已被本任务消灭**（见上表最后一行）——已按「fixture 正控 + 落地态断言」重写。
+
+### 续做轮的验证（命令 + 原始输出）
+
+- 4 个曾红的测试文件单独重跑：`plugin/test/touches-orthogonality-check.test.mjs` = 62/62 pass；`experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs` = 45/45 pass；`experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs` = 45/45 pass（发现集从 21 个降为 20 个 = 去掉 `gate-script-base.ts` 这个假阳，算术自洽）；`plugin/test/sh-census-check.test.mjs` = 20/20 pass。
+- `walkFiles` 修后直调（真实仓库根）：`node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --root . experiments/quay-perpetual-stream/fixtures/touches/disjoint-a.md experiments/quay-perpetual-stream/fixtures/touches/disjoint-b.md` ⇒ `DISJOINT: … (disjoint file-sets)` **exit 0**（修前逐字为 `OVERLAP: … side A globs matched nothing (empty expansion — likely a typo) → serialize` **exit 1**）。
+- **悬空守卫取真（负控制的反面）**：`walkFiles(".")` 的结果里 **3 个 `git-lens-*` 悬空链接不出现**，而同名的**实体**归档文件 `archive/2026-09-07-zero-call-scripts/plugin/scripts/git-lens-*.ts` 仍出现 ⇒ 过滤的是「解析不了」，不是「名字像」（硬规则 2 的形状）。

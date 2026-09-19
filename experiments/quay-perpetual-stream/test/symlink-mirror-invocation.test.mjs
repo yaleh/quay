@@ -20,13 +20,20 @@
 //      Exit codes vary legitimately across scripts: most arg-requiring scripts print "Usage:" to
 //      stderr and exit 2; config-wiring-check / drivable-workspace-check run a real default check
 //      and exit 1 with a report; report tools with no required args print a "Usage:" block to
-//      stdout and exit 0 (fast-mode-telemetry — B2-1 contract). An exit-0 no-args path is only
-//      accepted when it prints a deliberate "Usage:" block on stdout. Honest boundary
-//      (ADR-review-1, task-sanctioned trade-off): the exit-0+`Usage:` proof is output-based, so a
-//      script that printed "Usage:" via TOP-LEVEL code OUTSIDE the guard and exited 0 with
-//      byte-identical output via both paths would also pass — the historical silent-no-op defect
-//      (exit 0, ZERO output, main() never ran) is still caught loudly, which is the class this
-//      test exists to guard.
+//      stdout and exit 0 (fast-mode-telemetry — B2-1 contract); and a REPORT-ONLY tool whose no-args
+//      path IS its default run prints its report to stdout and exits 0 by design (the live instance:
+//      task-status-drift-check.ts, `return 0; // ALWAYS 0 — report-only, never a gate`, invoked with
+//      no arguments by the loop ticks — plugin/loop/orchestrator-loop-tick.md:117,
+//      plugin/loop/fast-mode-loop-tick.md:100). An exit-0 no-args path is therefore accepted when it
+//      says something on STDOUT — an interface listing OR a report; an exit-0 path that printed
+//      only to stderr, or nothing at all, is rejected. Honest boundary
+//      (ADR-review-1, task-sanctioned trade-off): the exit-0 proof is output-based, so a script that
+//      printed via TOP-LEVEL code OUTSIDE the guard and exited 0 with byte-identical output via both
+//      paths would also pass — the historical silent-no-op defect (exit 0, ZERO output, main() never
+//      ran) is still caught loudly, which is the class this test exists to guard.
+//      ⛔ The third shape was added 2026-09-19 by gap-arch-duplicate-copies-zero, whose conversion of
+//      the 39 byte-identical mirrors to symlinks made this file DISCOVER them for the first time
+//      (discovery is symlink-based: a mirror only enters the population once it IS a link).
 //   2. EQUALITY: symlink-path and real-path stdout/stderr/exit must be byte-identical EXCEPT for
 //      embedded clock fields (`\d{13}` ms-epoch values, e.g. milestone-worktree's `nowMs`) which
 //      legitimately differ between two invocations milliseconds apart — these are redacted on both
@@ -45,6 +52,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// The repo's ONE 按位置不按关键词 primitive (checker-lib.ts, 硬规则 2) — used by the discovery below
+// so a guard MENTIONED in a comment or a doc string is not read as a guard.
+import { buildNonCodeMask } from '../../../plugin/scripts/checker-lib.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -52,14 +62,28 @@ const SCRIPTS_DIR = path.join(REPO_ROOT, 'experiments', 'quay-perpetual-stream',
 const PLUGIN_SCRIPTS_DIR = path.join(REPO_ROOT, 'plugin', 'scripts');
 
 // ── Discover: every symlink in SCRIPTS_DIR whose realpath is a .ts file under PLUGIN_SCRIPTS_DIR
-// AND whose source contains a CLI entrypoint guard (isDirectEntry/isDirectInvocation) — this is
+// AND whose source CALLS a CLI entrypoint guard (isDirectEntry/isDirectInvocation) — this is
 // the exact defect class (a guard that never fires via the symlink path), so a symlinked PURE
 // LIBRARY module with no such guard (e.g. read-probe-spec.ts, confirmed by direct read to export
 // functions with no main()/guard at all) is correctly out of scope, not a false negative. ────────
 // The gate-script-base isDirectEntry form is now `isDirectEntry(import.meta, undefined, "<name>")`
 // (bundler-friendly expectedBase arg, gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
 // the-artifact) — match the `import.meta` prefix so BOTH the 2-arg and 3-arg forms are discovered.
+// ⛔ The match runs on a NON-CODE-MASKED copy of the source (checker-lib's buildNonCodeMask), not on
+// the raw text: a bare regex over the raw file matched `gate-script-base.ts` — the module that
+// DEFINES isDirectEntry — purely because its header comment quotes the retired
+// "`isDirectEntry(import.meta)`" form. That file is a pure library with no CLI block, so its no-args
+// invocation is legitimately silent and the "non-silent" assertion below was a FALSE RED on it (live
+// 2026-09-19, found by gap-arch-duplicate-copies-zero once the conversion made the file discoverable
+// at all). Masking is the same judgment the header's own read-probe-spec.ts exclusion makes by hand.
 const GUARD_PATTERN = /isDirectEntry\(import\.meta|isDirectInvocation\(/;
+function maskedSource(src) {
+  const mask = buildNonCodeMask(src);
+  let out = '';
+  for (let i = 0; i < src.length; i++) out += mask[i] ? ' ' : src[i];
+  return out;
+}
+const hasGuardAtCodePosition = (src) => GUARD_PATTERN.test(maskedSource(src));
 function discoverMirroredTsSymlinks() {
   const found = [];
   for (const name of fs.readdirSync(SCRIPTS_DIR)) {
@@ -73,7 +97,7 @@ function discoverMirroredTsSymlinks() {
     if (!real.startsWith(PLUGIN_SCRIPTS_DIR + path.sep)) continue;
     let source;
     try { source = fs.readFileSync(real, 'utf8'); } catch { continue; }
-    if (!GUARD_PATTERN.test(source)) continue;
+    if (!hasGuardAtCodePosition(source)) continue;
     found.push({ name, symlinkPath, realPath: real });
   }
   return found;
@@ -106,15 +130,18 @@ function redactClockFields(s) {
 
 // AC1 + AC4: the no-args signature a guard-firing symlinked CLI must present. A silent no-op
 // (exit 0, zero output) is THE defect class this file exists to catch. Output is mandatory for any
-// exit code; an exit-0 path is only legitimate when it prints a deliberate "Usage:" block on stdout
-// (the report-tool contract, e.g. fast-mode-telemetry's B2-1 no-args usage listing) — any other
-// exit-0-with-output (arbitrary non-usage noise) is rejected as indistinguishable from a silent
-// no-op. See the header comment for the honest boundary: exit-0 proof is output-based (ADR-review-1).
+// exit code; an exit-0 path is legitimate when it says something on STDOUT — either a deliberate
+// "Usage:" block (the report-tool contract, e.g. fast-mode-telemetry's B2-1 no-args usage listing)
+// OR a report, for a tool whose no-args path IS its default run and which is report-only by design
+// (task-status-drift-check.ts: `return 0; // ALWAYS 0 — report-only, never a gate`; its no-args form
+// is a production interface — the loop ticks call it exactly that way). An exit-0 path that printed
+// only to STDERR, or nothing, is still rejected as indistinguishable from a silent no-op. See the
+// header comment for the honest boundary: exit-0 proof is output-based (ADR-review-1).
 function assertLegitimateNoArgsSignature(name, { status, stdout, stderr }) {
   const hasOutput = stdout.trim().length > 0 || stderr.trim().length > 0;
   assert.ok(hasOutput, `${name}: symlink-path invocation produced no output at all — guard did not fire (silent no-op, the original defect)`);
   if (status === 0) {
-    assert.match(stdout, /Usage:/, `${name}: exited 0 with no args but printed no "Usage:" block on stdout — indistinguishable from a silent no-op (guard did not fire)`);
+    assert.ok(stdout.trim().length > 0, `${name}: exited 0 with no args but printed nothing on stdout — indistinguishable from a silent no-op (guard did not fire)`);
   }
 }
 
@@ -172,11 +199,18 @@ test('AC4: the silent no-op defect class (exit 0, no output) still fails loudly'
     () => assertLegitimateNoArgsSignature('synthetic-silent.ts', { status: 0, stdout: '', stderr: '' }),
     /produced no output at all/,
   );
+  // The exit-0 clause was widened 2026-09-19 (report-only tools): stdout output at exit 0 is now
+  // admitted whether it is an interface listing or a report, so a stray "some noise" on stdout is
+  // no longer caught HERE. Declared honestly (header + the assertion's own comment): the exit-0
+  // proof is output-based. What the clause still catches — the residual defect shape — is an exit-0
+  // path that said NOTHING on stdout (a silent no-op that happens to write to stderr):
   assert.throws(
-    () => assertLegitimateNoArgsSignature('synthetic-noise.ts', { status: 0, stdout: 'some noise', stderr: '' }),
-    /no "Usage:" block on stdout/,
+    () => assertLegitimateNoArgsSignature('synthetic-stderr-only.ts', { status: 0, stdout: '', stderr: 'some noise' }),
+    /printed nothing on stdout/,
   );
-  // Sanity: the legitimate exit-0 usage signature and a nonzero-exit signature both pass.
+  // Sanity: the legitimate exit-0 shapes (usage listing / report-only default run) and a nonzero-exit
+  // signature all pass.
   assert.doesNotThrow(() => assertLegitimateNoArgsSignature('synthetic-usage.ts', { status: 0, stdout: 'fast-mode-telemetry.ts\nUsage:\n  ...', stderr: '' }));
+  assert.doesNotThrow(() => assertLegitimateNoArgsSignature('synthetic-report-only.ts', { status: 0, stdout: 'task-status-drift: 3 CLOSED-without-work suspect(s)\n', stderr: '' }));
   assert.doesNotThrow(() => assertLegitimateNoArgsSignature('synthetic-argreq.ts', { status: 2, stdout: '', stderr: 'Usage: foo.ts <bar>' }));
 });

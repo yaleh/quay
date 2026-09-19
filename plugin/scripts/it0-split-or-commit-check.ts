@@ -82,7 +82,7 @@ import { fileURLToPath } from "node:url";
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 // (The local adapter is named `flagArg`, not `flagValue`, so it cannot shadow the import.)
-import { helpExit, flagValue } from "./gate-script-base.ts";
+import { helpExit, flagValue, isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -519,7 +519,13 @@ function usage(): never {
   process.exit(2);
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-split-or-commit-check";
+// ⛔ NOT a URL-equality check. Under a mirror invocation (`experiments/**/scripts/<name>.ts` is a
+// symlink to `plugin/scripts/<name>.ts`), Node resolves `import.meta.url` to the REALPATH (plugin
+// side) while `process.argv[1]` keeps the path as written (experiments side) ⇒ URL equality is
+// permanently false, the block below never runs, and the process exits 0 with ZERO output — the
+// "could not read the input" failure printed in the same shape as "all clear"
+// (gap-arch-duplicate-copies-zero). `isDirectEntry` judges by basename, so both call paths agree.
+const isDirect = isDirectEntry(import.meta, process.argv[1], "it0-split-or-commit-check");
 if (isDirect) {
   const args = process.argv.slice(2);
   const USAGE = "usage: node it0-split-or-commit-check.ts [--allow-empty] [--changed [--base <ref>] [--only <id,id,…>]] [--tasks-dir <dir>] <workspace-root>";

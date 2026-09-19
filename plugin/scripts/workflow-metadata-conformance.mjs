@@ -790,5 +790,12 @@ export function main(argv) {
 }
 
 // Run the CLI only when invoked directly (not when imported by a test).
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+// ⛔ NOT a URL-equality check. Under a mirror invocation (a deeper `experiments/**/scripts/` copy
+// symlinked back to this file), Node resolves `import.meta.url` to the REALPATH while
+// `process.argv[1]` keeps the path as written ⇒ URL equality is permanently false, `main()` never
+// runs, and the process exits 0 with ZERO output — a "could not read the input" failure printed in
+// the same shape as "all clear". Basename match answers the same question on both call paths (the
+// same idiom workflow-event-schema.mjs already uses for its own isDirectEntry), and it stays correct
+// when this module is inlined into a bundle, whose argv[1] basename is the bundle's.
+const isDirect = process.argv[1] != null && path.basename(process.argv[1]) === "workflow-metadata-conformance.mjs";
 if (isDirect) main(process.argv.slice(2));

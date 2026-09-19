@@ -247,12 +247,28 @@ test("AC3: two known program-shells have a non-empty `embedded`; two known pure-
   assert.ok(reading.totals.embeddedInterpreterLines > 0);
 });
 
-test("AC4: the byte-identical gate-script-base.ts pair is a duplicate, and symlinkedCopies >= 1", () => {
+test("AC4: the duplicate axis is proven on a fixture pair; the real repo reports ZERO duplicates — its gate-script-base.ts mirror is now a SYMLINK (the AC-310 state)", () => {
+  // ⛔ The original form of this test asserted that the REAL repo still contains a byte-identical
+  // non-symlink pair (`experiments/quay-perpetual-stream/scripts/gate-script-base.ts`). That became
+  // structurally unsatisfiable on 2026-09-19: gap-arch-duplicate-copies-zero converted all 39 such
+  // copies to symlinks to make AC-310's criterion read `duplicateCopies === 0`, and the pair this
+  // test named is one of them. The axis control did NOT disappear with it — it lives in the hermetic
+  // fixture above ("byte-identical non-symlink copies are duplicates; a symlink is NOT"), which
+  // proves the judgment BITES on a real pair instead of relying on the repo happening to contain one.
+  // What the real-repo half must now pin is the landed state, and it pins it in the direction that
+  // carries information: the once-duplicated path is reported as a SYMLINK (not merely "absent from
+  // duplicates", which a broken scan would also produce — 硬规则 3b).
   const reading = realCensus();
-  const pair = reading.duplicates.find(
-    (d) => d.experimentsPath === "experiments/quay-perpetual-stream/scripts/gate-script-base.ts" && d.pluginPath === "plugin/scripts/gate-script-base.ts",
+  const MIRROR = "experiments/quay-perpetual-stream/scripts/gate-script-base.ts";
+  const sym = reading.symlinked.find((s) => s.experimentsPath === MIRROR);
+  assert.ok(sym, `${MIRROR} must be reported as a SYMLINK copy — the conversion target of gap-arch-duplicate-copies-zero`);
+  assert.equal(sym.target, "../../../plugin/scripts/gate-script-base.ts", "the mirror must point at its plugin-side counterpart, in the relative form every mirror uses (an absolute link breaks in a worktree/clone)");
+  assert.equal(
+    reading.duplicates.find((d) => d.experimentsPath === MIRROR),
+    undefined,
+    "the converted mirror must NOT still be counted as a duplicate",
   );
-  assert.ok(pair, "gate-script-base.ts must be reported as a byte-identical non-symlink duplicate pair");
+  assert.equal(reading.totals.duplicateCopies, 0, "the AC-310 zero-duplicates state");
   assert.ok(reading.totals.symlinkedCopies >= 1, "the experiments→plugin symlink copies must be counted separately");
   assert.equal(reading.totals.duplicateCopies, reading.duplicates.length);
   assert.equal(reading.totals.symlinkedCopies, reading.symlinked.length);

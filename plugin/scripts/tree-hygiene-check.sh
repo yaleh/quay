@@ -20,7 +20,19 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 set -u
-HERE="$(cd "$(dirname "$0")" && pwd)"
+# ⛔ `dirname "$0"` alone is NOT enough once this file is mirrored by a symlink. A mirror call
+# (a copy under a deeper `experiments/**/scripts/` tree, symlinked back to this file by the relative
+# path `../../../plugin/scripts/<name>.sh`) would derive HERE = the MIRROR's directory and therefore
+# ROOT = `<repo>/experiments` — a DIFFERENT, wrong tree that this gate would then silently inspect,
+# reporting PASS in the same shape as a real pass. Resolve through the link FIRST so both call paths
+# derive the SAME root: the real file lives at `<repo>/plugin/scripts/`, so `../..` is the repo root
+# either way. Guarded — if resolution fails we fall back to the literal path rather than yielding an
+# empty ROOT (the mirror dirs also contain dangling links, so a bare `readlink -f` is not safe to
+# trust).
+SELF="${BASH_SOURCE[0]}"
+SELF_REAL="$(readlink -f "$SELF" 2>/dev/null || true)"
+[ -n "$SELF_REAL" ] || SELF_REAL="$SELF"
+HERE="$(cd "$(dirname "$SELF_REAL")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT" || { echo "ERROR: cannot cd to repo root ($ROOT)" >&2; exit 1; }
 
