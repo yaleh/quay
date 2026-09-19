@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-upgrade-face-goal-009-ac-238
 title: "freshness-refresh: AC-238 evidence sits at d=172 of K=200 (margin 28)
   and the measured worst-hour advance rate (25 commits/h) can consume 59.5
   commits during the producer's (W+I)=2"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
