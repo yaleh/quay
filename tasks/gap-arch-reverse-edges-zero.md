@@ -2,7 +2,7 @@
 id: gap-arch-reverse-edges-zero
 title: 架构棘轮：产品层反向依赖清零 —— packages/** → plugin|experiments 真实 import 边 5→0（3
   个共享原语下沉 packages/quay/src/kernel/）
-status: ready
+status: done
 labels:
   - gap
 parent: null
