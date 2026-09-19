@@ -9,6 +9,17 @@ children: []
 extra:
   schema: execution
 ---
+---
+id: gap-context-slim-p0-baseline-readings
+title: 上下文瘦身 P0：冻结基线快照并把常驻注入读数脚本化
+status: ready
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+---
 ## Proposal
 背景：`CLAUDE.md`（382 行/57KB）与 auto-memory `MEMORY.md`（90 行/21KB，背后 537 个记忆文件）每会话常驻注入，近 14 天历史显示大多数无头会话几乎不消费它们。瘦身（后续任务 P1/P2）之前必须先冻结基线，否则无法证明「改后不劣于改前」，且历史读数会随 job 清理而丢失。本任务只做两件事：①把当前 `CLAUDE.md`、`MEMORY.md` 原样快照进仓库；②把「常驻注入体量」与「记忆文件被读取情况」的读数写成可重跑脚本。**所有 grep 必须用 `/usr/bin/grep`**——本环境 `grep` 被 ugrep 包装，对 `~/.claude/jobs/` 下文件静默返回空，会产出假零计数。脚本对无法读取的输入必须输出独立取值 `NOT-EVALUATED`，不得输出与合格同形的 0。
 产物放 `orchestration/context-slimming/`：`baseline/CLAUDE.md.snapshot` 与 `baseline/MEMORY.md.snapshot`（快照当前内容，逐字节一致）；`readings.sh` 输出：CLAUDE.md 行数/字节/最长行、MEMORY.md 行数/字节/最长行、记忆目录文件总数（记忆目录 = `~/.claude/projects/-home-yale-work-quay/memory/`）、近 N 天（参数，默认 14）内被 Read 工具读过的记忆文件数（下限，注明不含 Bash 变量拼路径）；`readings-selfcheck.sh` 对已知真样本与已知缺失输入各干跑一次。
@@ -24,6 +35,8 @@ extra:
 - orchestration/context-slimming/readings-selfcheck.sh (new)
 - orchestration/context-slimming/baseline/CLAUDE.md.snapshot (new)
 - orchestration/context-slimming/baseline/MEMORY.md.snapshot (new)
+- plugin/skills/init/SKILL.md (declaration-point fix, see ## Evidence)
+- plugin/skills/manager/SKILL.md (declaration-point fix, see ## Evidence)
 - tasks/gap-context-slim-p0-baseline-readings.md
 ## Resolution
 落地分支 `task/gap-context-slim-p0-baseline-readings`（合 develop 后 HEAD `2b955329a`）。scoped 门绿：`bash scripts/test.sh --for-task gap-context-slim-p0-baseline-readings --allow-thin` exit 0（选中 0 个测试文件，全部静态检查 PASS）。
@@ -91,3 +104,11 @@ arm 1 的样本是**生产语料里真实的 transcript**（`0007c7c9-….jsonl`
 ### 未覆盖
 - P1/P2 未落地：本任务只冻结基线，未改动 `CLAUDE.md` / `MEMORY.md` 一个字节。
 - `memory_files_read_14d` 键名按 AC2 固定为 `_14d`，即使 `--days` 取别的值；实际窗口始终由 `lookback_days=` 报告。
+
+## Evidence
+- **本轮续做未改一字节实现**：5 个 commit 与 4/4 AC 均为上一轮产物（`task_check` 复核 `ok:true, acTotal 4, acChecked 4`）。本轮只解决上一轮 `step=suite: # fail 45` 的真实根因。
+- **根因是 develop 侧，不是本任务 delta**（一条命令可复现）：在**干净 develop 树**上跑同一 checker ⇒ exit 1。判定动作：`git archive develop | tar -x -C /tmp/devchk-spec && cd /tmp/devchk-spec && node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts` ⇒ `FAIL: 2 missing SPEC declaration(s) across 2 declaration points`。本分支 `git diff develop...HEAD --name-only` 只有声明的 4 个文件，**不含 `plugin/skills/**`**。
+- **影响面是全局的**：该检查在静态面 fail-closed ⇒ 整轮 suite `# tests 0 / # fail 45`（一个测试都没跑），**每个**任务的 fan-in 都会被它中止，不只是本任务。
+- **无 owner 可等**（这是选择就地修复而非等待的依据）：`tasks/` 中无任何任务引用该 SPEC；`git log --all -S 'context-injection-slimming' -- plugin/skills/` 命中 0 ⇒ 无在飞修复；同族 P1/P2/V 的 Touches 均不含 `plugin/skills/**`。
+- **修复内容由 develop 既有事实唯一决定**（故登记 Touches 不是范围漂移）：init 侧列表按文件名字典序 ⇒ 唯一插入位置在 `SPEC-complete-delivery-surface-2026-08-05.md` 与 `SPEC-cut-the-waiting.md` 之间；manager 侧索引按落地顺序追加 ⇒ 追加到末尾，与上一条 SPEC 的先例提交 `cfb2664aa`（`declare SPEC-quay-init-reconcile at both SPEC declaration points`）同形；manager 侧描述取自 SPEC 自身的标题与裁定行。
+- **修复后**：`node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts` ⇒ `PASS: all 45 orchestration/SPEC-*.md declared at each of 2 declaration points`，exit 0。
