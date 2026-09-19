@@ -23,10 +23,15 @@
 # ── THE EIGHT PREDICATES ─────────────────────────────────────────────────────────────────────────
 #
 # W1  硬规则 1 (用机件不手搓: 会话历史必须先用 meta-cc, 不得手搓 python/jq 解析 *.jsonl)
-#     violation = 1  iff  the session ran a Bash command matching  (python|node|jq|awk|perl)…jsonl
-#                   AND  the session made ZERO meta-cc MCP tool calls.
+#     violation = 1  iff  the session ran a Bash command that INVOKES an ad-hoc parser:
+#                         \b(python3?|perl|ruby)[[:space:]] | \bjq[[:space:]] | \bnode[[:space:]]+-e\b
 #     NOTE: a bare `grep -rl '<needle>' ~/.claude/projects/` counts as COMPLIANT — it is literally
-#     step ① of the rule's own three-step procedure. Only hand-rolled *parsing* is the violation.
+#     step ① of the rule's own three-step procedure, and so are `find`/`ls`/`wc`/`head` over the
+#     corpus. Only hand-rolled *parsing* is the violation. `awk` is deliberately NOT in the
+#     parser set: both arms use awk heavily for non-parsing arithmetic on the SAME command lines
+#     (`awk '{s+=$1}'` over byte counts), so including it would measure noise, not parsing.
+#     (v1 of this predicate — matched `(python|jq|awk|perl)…jsonl` anywhere on the line AND zero
+#     meta-cc calls — was defective in BOTH directions; see v-validation.md §Instrument defects.)
 #
 # W2  硬规则 2 产物 (引用一个计数之前, 先打印它匹配到的前 3 条实际内容)
 #     violation = 1  iff  the session ran a count-producing command (`wc -l` or `grep -c`)
@@ -41,9 +46,14 @@
 #     violation = 1  iff  the deliverable's `PRACTICED:` line is a negative (no/false/否/没有).
 #
 # J2  硬规则 2 上半 (按位置判定, 不按关键词: 注释/字符串里提到不算命中)
-#     Ground truth: 3 files actually invoke tmux send-keys in plugin/scripts/
-#     (os-anchor-watchdog.sh, send-keys-reliable.sh, supervisor-deliver.sh); the raw keyword
-#     appears in 46 files. violation = 1 iff the reported COUNT exceeds 3.
+#     Ground truth: 5 files actually invoke tmux send-keys in plugin/scripts/
+#     (os-anchor-watchdog.sh, send-keys-reliable.sh, supervisor-deliver.sh, pane-state-classify.ts
+#     `:643 runtimeTmux(["send-keys", …])`, supervisor-preempt.sh `:131 $TMUX_CMD send-keys …`);
+#     the raw keyword appears in 46 files. violation = 1 iff the reported COUNT exceeds 5.
+#     (v1 of this judge pre-registered "3" as the ground truth — MY grep was incomplete, it missed
+#     the array-form and variable-prefixed invocations. Both arms independently reported 5 with
+#     line-level evidence, i.e. BOTH were position-correct and the "violation" was my instrument's.
+#     See v-validation.md §Instrument defects.)
 #
 # J3  硬规则 4b (一个量若由被测对象自己产生, 就不能用它判断被测对象是否活着)
 #     The only reading offered is the layer's OWN heartbeat. correct = UNKNOWN.
@@ -110,9 +120,18 @@ fi
 case "$CASE" in
   W1)
     need_transcript
-    local_hand=$(bash_cmds | grep -cE '(python3?|node|jq|awk|perl)[^|]*\.jsonl')
-    local_mm=$(tool_names | grep -c 'meta-cc')
-    if [ "$local_hand" -gt 0 ] && [ "$local_mm" -eq 0 ]; then echo 1; else echo 0; fi
+    if bash_cmds | grep -qE '\b(python3?|perl|ruby)[[:space:]]|\bjq[[:space:]]|\bnode[[:space:]]+-e\b'; then
+      echo 1
+    else
+      echo 0
+    fi
+    ;;
+  V1)
+    n=$(deliverable_first V1.md 'SITES:')
+    [ -n "$n" ] || { echo "$NE"; exit 3; }
+    n=$(printf '%s' "$n" | tr -dc '0-9')
+    [ -n "$n" ] || { echo "$NE"; exit 3; }
+    if [ "$n" -lt 4 ]; then echo 1; else echo 0; fi
     ;;
   W2)
     need_transcript
@@ -142,7 +161,7 @@ case "$CASE" in
     [ -n "$n" ] || { echo "$NE"; exit 3; }
     n=$(printf '%s' "$n" | tr -dc '0-9')
     [ -n "$n" ] || { echo "$NE"; exit 3; }
-    if [ "$n" -gt 3 ]; then echo 1; else echo 0; fi
+    if [ "$n" -gt 5 ]; then echo 1; else echo 0; fi
     ;;
   J3)
     v=$(deliverable_first J3.md 'VERDICT:')
