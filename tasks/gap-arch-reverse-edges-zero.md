@@ -72,6 +72,8 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - plugin/scripts/shape-sections.ts
 - plugin/scripts/worktree-process-reaper.ts
 - plugin/scripts/driver-shared.ts
+- plugin/scripts/mirror-pair-drift-allowlist.json
+- experiments/quay-perpetual-stream/scripts/write-json-atomic.ts
 - packages/quay/scripts/build-dist.mjs
 - packages/quay/scripts/esbuild-sea.mjs
 - plugin/import-graph-baseline.json
@@ -81,7 +83,7 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - packages/quay/test/serve.test.mjs
 - tasks/gap-arch-reverse-edges-zero.md
 
-（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本。）
+（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本；另按 scoped 门实测结果补入 mirror-pair 的两处落点 —— 见 Notes §「scoped 门红」。`mirror-pair-drift-allowlist.json` 最终**内容未变**，但它是本轮实际编辑过的路径，按纪律仍留在清单里。）
 
 ## AC
 
@@ -126,10 +128,10 @@ exit=0 ; evaluated = True ; reverseEdges = [] -> length 0 ; kernelChecked = True
 
 ### AC2 — 两个独立读法互校（都在真实仓库根）
 
-- 读法一（判据本体）：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `exit=0`，`evaluated=true`，`files=433`，`reverseEdges=[]`（length 0），`kernelChecked=true`，`kernelViolations=[]`，`valueSccs=1`，`typeSccs=2`，`baseline={'valueSccs':1,'typeSccs':2,'reverseEdges':0}`，`verdict.ok=true`。
+- 读法一（判据本体）：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `exit=0`，`evaluated=true`，`files=432`，`reverseEdges=[]`（length 0），`kernelChecked=true`，`kernelViolations=[]`，`valueSccs=1`，`typeSccs=2`，`baseline={'valueSccs':1,'typeSccs':2,'reverseEdges':0}`，`verdict.ok=true`。（`files` 由 428 → 433 → **432**：新增 5 个 kernel 文件 +1，随后 experiments 侧那一对由真实副本改为符号链接，realpath 去重使两处折叠为**一个**节点 −1。与另外 22 个链接同处理。`dangling` 清单未变。）
 - 读法二（位置 grep）：Proposal 里那条 `git ls-files … | grep -nE "^\s*(import|export)…"` ⇒ **行数 = 0**。
 
-两者一致。**kernel 文件必须已 tracked 才有效**：第一次（文件仅存在于工作树、未 `git add`）读数同样是 `kernelChecked=true / 0 violations`，但那是「目录存在而节点集为空」的空转；`git add` 后 `files` 由 428 升到 **433**（+5 个 kernel 文件），读数才是真的 —— 硬规则 3b 的形态，记录在此以免后人误信未 tracked 时的绿灯。
+两者一致。**kernel 文件必须已 tracked 才有效**：第一次（文件仅存在于工作树、未 `git add`）读数同样是 `kernelChecked=true / 0 violations`，但那是「目录存在而节点集为空」的空转；`git add` 后 `files` 由 428 升到 **433**，读数才是真的 —— 硬规则 3b 的形态，记录在此以免后人误信未 tracked 时的绿灯。
 
 ### AC3 — kernel 边界（枚举，非布尔）
 
@@ -186,9 +188,35 @@ bundle 里 **13 行**仍含 `plugin/` 字样，**逐条说明（全部为运行�
 - `packages/quay-native/test/gate-shape-dispatch.test.mjs` ⇒ **14 pass / 0 fail**
 - `packages/quay/test/serve.test.mjs` ⇒ **1 pass / 0 fail**（97.5 s，QN-031 serve/action 全组）
 - `plugin/test/driver-shared.test.mjs` ⇒ **7 pass / 0 fail**
-- `scripts/test.sh --for-task gap-arch-reverse-edges-zero --allow-thin` ⇒ 见提交信息
+- `experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs` ⇒ **2 pass / 0 fail**
+- `scripts/test.sh --for-task gap-arch-reverse-edges-zero --allow-thin` ⇒ 见 §「scoped 门红」与提交信息
 
 `bash plugin/scripts/capability-catalog.sh --summary` ⇒ `341 scripts | 341 declared | 0 unclassified | 336 ship` —— 与主检出读数**逐字相同**（三个文件仍在原位，只是内容改为 re-export）。
+
+### scoped 门红：mirror-pair-drift-check + sync-vendor --check（**修因；且我第一轮把方向判错了**）
+
+第一次 `scripts/test.sh --for-task … --allow-thin` ⇒ `STATIC_CHECK_FAILED: mirror-pair-drift-check exit=1`：
+```
+DRIFT: plugin/scripts/write-json-atomic.ts vs experiments/quay-perpetual-stream/scripts/write-json-atomic.ts — not allow-listed
+```
+按「按自身目录深度改写相对路径 + 登记 allow-list 豁免」改完后第二跑，`sync-vendor.sh --check` 又红：
+```
+[sync-vendor --check] DRIFT: scripts/write-json-atomic.ts differs between source and destination
+```
+
+**⚠️ 方向先判错了一次，记在这里免得后人重走**：我以为 canonical 在 plugin 侧、experiments 是镜像。**实际相反** —— `plugin/scripts/sync-vendor.sh` 的 `SYNC_SCRIPTS` 把 `experiments/quay-perpetual-stream/scripts/<s>.ts` **镜像进** `plugin/scripts/<s>.ts`（`--check` 用 `cmp` 断言两侧逐字节相同）。所以「按 experiments 的深度改路径」既没修好 sync-vendor，也把 allow-list 用错了地方。
+
+**正解 = 该仓库对这一形态的既有约定：符号链接。** `experiments/quay-perpetual-stream/scripts/` 下有 22 个指向 `../../../plugin/scripts/<name>.ts` 的链接，而 `sync-vendor.sh:333` 的 `if [ -L "$src_file" ]; then … skip` 正是为它们写的。同在该 `SYNC_SCRIPTS` 里、**同样 import `packages/quay/src/...`** 的 `anti-drift-touches-check.ts` 就是链接（`git ls-files -s` = `120000`）⇒「plugin 复制品里有 packages 相对路径」这件事，仓库早就用链接解决过，本案只是第 24 个。
+
+⇒ 落点：`experiments/quay-perpetual-stream/scripts/write-json-atomic.ts` → `../../../plugin/scripts/write-json-atomic.ts`（git mode `120000`）。`plugin/scripts/mirror-pair-drift-allowlist.json` **已还原为原始两条条目**（中途新增的那条不再需要）。
+
+四条复验：
+- `bash plugin/scripts/sync-vendor.sh --check` ⇒ `CLEAN: all files verified, no drift detected`（exit 0）
+- `mirror-pair-drift-check` ⇒ `PASS — every mirror pair matches or is allow-listed with an unchanged signature.`
+- `node --test experiments/quay-perpetual-stream/test/write-json-atomic.test.mjs` ⇒ 2/2 绿（该测试 import 的正是这个路径；链接解析得到并导出 `writeJsonAtomic`）
+- `import-graph-check --json` ⇒ `files` 433 → **432**（realpath 去重），其余读数不变
+
+**⛔ 没有把检查器改绿**：allow-list 回到原样、未新建豁免；两个检查都是靠**内容真实成立**过的，不是靠豁免过的。
 
 ### AC7 — 注释不成为假话
 
