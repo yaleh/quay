@@ -24,7 +24,7 @@ depends_on:
 真实落地：合入 develop 后 `git show develop:CLAUDE.md | wc -l` 已下降，且 `git show develop:docs/epistemology-casebook.md` 可见；落点映射已随提交贴入。不接受只在分支上满足。
 ## Touches
 - CLAUDE.md
-- docs/epistemology-casebook.md
-- orchestration/context-slimming/p1-landing-map.tsv
-- orchestration/context-slimming/landing-map-check.sh
+- docs/epistemology-casebook.md (new)
+- orchestration/context-slimming/p1-landing-map.tsv (new)
+- orchestration/context-slimming/landing-map-check.sh (new)
 - tasks/gap-context-slim-p1-claudemd-d-layer.md
