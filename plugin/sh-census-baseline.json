@@ -15,8 +15,19 @@
         "duplicateCopies": "-1: develop converted experiments/quay-perpetual-stream/scripts/write-json-atomic.ts into a symlink to plugin/scripts/write-json-atomic.ts (dedup Phase 1), moving it from duplicateCopies to symlinkedCopies (19 -> 20)."
       },
       "structuralNote": "⚠️ This re-anchor exposes a real weakness of the '只降不升' ratchet: any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor (which the shrink-guard permits once committed, since it compares worktree-vs-HEAD copies of this very file). So the guard reliably catches UNCOMMITTED (drifting) raises and forces committed raises to be visible/reviewable — but it CANNOT by itself prevent legitimate growth. Convergence therefore depends on Phase 4/5 actually removing the 1900-line capability-catalog.sh data table and the experiments/** mirrors, not on the ratchet alone."
+    },
+    {
+      "when": "2026-09-19 (gap-arch-duplicate-copies-zero, dedup Phase 1)",
+      "from": { "embeddedInterpreterLines": 11690, "duplicateCopies": 37 },
+      "to": { "embeddedInterpreterLines": 11690, "duplicateCopies": 0 },
+      "why": "DOWNWARD re-anchor — this is the intended direction and the point of the task, NOT a re-anchor bought by a regression. gap-arch-duplicate-copies-zero converted every remaining non-symlink byte-identical same-basename pair under experiments/**/scripts/ into a RELATIVE symlink (../../../plugin/scripts/<basename>), and did the same for the 2 same-name-but-differing pairs (tree-hygiene-check.sh / worktree-branch-hygiene-check.sh — plugin side is authoritative: it carries the 2026-08-09 unified --help). 39 paths converted. Each moves from `duplicateCopies` to `symlinkedCopies`.",
+      "attribution": {
+        "embeddedInterpreterLines": "0 — untouched (this task converts mirrors, it does not add or remove .sh interpreter lines). A 0 delta is the assertion, not an omission.",
+        "duplicateCopies": "-37 = the 37 byte-identical non-symlink pairs the checker read on develop at 6b713f7ca, all converted. ⛔ NOT 38: the task body's立案实测 said 38, but the checker's own land-time re-anchor above had already moved the true reading to 37 by converting write-json-atomic.ts. Both numbers are the checker's OWN reading; the 38 was the pre-convert reading."
+      },
+      "ratchetNote": "⚠️ Anchoring at 0 is the ONLY value that makes this task's gain durable. Leaving the baseline at 37 would let any future regression back up to 37 stay GREEN — the gain would be un-recaptured. The shrink-guard permits lowering with no ceremony; only the commit is required."
     }
   ],
   "embeddedInterpreterLines": 11690,
-  "duplicateCopies": 37
+  "duplicateCopies": 0
 }
