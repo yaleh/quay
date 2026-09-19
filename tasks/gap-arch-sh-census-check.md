@@ -1,7 +1,7 @@
 ---
 id: gap-arch-sh-census-check
 title: 架构棘轮：shell 层普查检查器（内嵌解释器有效行 / 字节相同重复副本，例外清单单列），两个量只降不升
-status: todo
+status: ready
 labels:
   - gap
 parent: null
