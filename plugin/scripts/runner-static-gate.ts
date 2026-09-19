@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 62 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 63 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -950,6 +950,23 @@ run_static_checks() {
   # @static-tier change
   # @static-object .github/workflows/release.yml plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh
   run_checker "release-master-advance-needs-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-master-advance-needs-check.ts" --root "${repo_root}"
+  echo "== import-graph ratchet (tasks/gap-arch-import-graph-check — SPEC-architecture-consolidation §2 P1 / §5 Phase 0a) =="
+  # The module dependency graph read BY STATEMENT POSITION (value / type-only SCCs + packages→plugin|
+  # experiments reverse edges + the conditional packages/quay/src/kernel boundary), ratcheted shrink-only
+  # against plugin/import-graph-baseline.json. This is the mechanical instrument behind the SPEC's Phase 0a:
+  # archguard reports 0 cycles for plugin/scripts because it sees that tree as ONE `(root)` package, so
+  # 「0 环」there is a NOT-EVALUATED reading, not a clean one — this checker is the reading that can take
+  # the value 0 and mean it. Baseline values may only DECREASE, and a baseline raised past the git-HEAD
+  # value is RED too (so 「调高基线」 cannot buy a pass). `--root repo_root` (NOT main_root): the only
+  # inputs are checked-in sources under the tree under test — this task's own worktree carries the change
+  # before the main checkout does, and reading main_root would report the PRE-change graph.
+  # Exit vocabulary: 0 PASS · 1 a quantity grew / the baseline was raised / a kernel violation ·
+  # 2 usage-or-environment error INCLUDING "the graph could not be read" (evaluated:false). Deliberately
+  # NOT the repo's usual exit 3: this checker's whole subject is whether the graph CAN be read, so an
+  # unreadable input is a violation of the invariant, and run_checker treats 2 as RED (never吞成 0).
+  # @static-tier change
+  # @static-object plugin/ packages/ experiments/ scripts/ plugin/import-graph-baseline.json plugin/scripts/import-graph-check.ts plugin/test/import-graph-check.test.mjs plugin/scripts/checker-mutation-cases/import-graph-check.sh
+  run_checker "import-graph-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/import-graph-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
