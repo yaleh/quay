@@ -39,13 +39,13 @@ extra:
 
 ## Touches
 
-- plugin/scripts/sh-census-check.ts
-- plugin/sh-census-baseline.json
-- plugin/sh-census-exceptions.txt
-- plugin/test/sh-census-check.test.mjs
+- plugin/scripts/sh-census-check.ts (new)
+- plugin/sh-census-baseline.json (new)
+- plugin/sh-census-exceptions.txt (new)
+- plugin/test/sh-census-check.test.mjs (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
-- plugin/scripts/checker-mutation-cases/sh-census-check.sh
+- plugin/scripts/checker-mutation-cases/sh-census-check.sh (new)
 - tasks/gap-arch-sh-census-check.md
 
 ## AC
