@@ -2,7 +2,7 @@
 id: AC-310
 title: 重复副本清零：experiments/…/scripts 与 plugin/scripts 下同名、非符号链接且字节相同的文件对 = 0（由
   sh-census-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -18,6 +18,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.3 S2 / §8-�
   plugin/scripts 同名文件字节相同（含 gate-script-base.ts 23KB）。副本可被重新复制出来，故
   long-term:true。
 activatedAt: 2026-09-19T05:29:25.892Z
+statusLog:
+  - at: 2026-09-19T11:37:06.219Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 ---
 **范围**：把 38 个非链接字节相同副本改为指向 `plugin/scripts/` 对应文件的符号链接；另有 2 对同名但内容有差异者，先逐个核对、取权威版本再处理。**不删除**（人裁定：先过渡；是否删除待本条清零后另行裁定）。
