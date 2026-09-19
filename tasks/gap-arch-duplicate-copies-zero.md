@@ -2,7 +2,7 @@
 id: gap-arch-duplicate-copies-zero
 title: 架构棘轮：重复副本清零 —— experiments 镜像 38 个非链接副本（+2 对同名不同内容）改符号链接，令 AC-310
   判据取真值，并修符号链接本身引入的两类静默失效（5 个 TS 直接调用判据 + 2 个 sh 的 ROOT 推导）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
