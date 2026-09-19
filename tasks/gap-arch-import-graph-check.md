@@ -1,7 +1,7 @@
 ---
 id: gap-arch-import-graph-check
 title: 架构棘轮：按语句位置解析 import 的模块依赖图检查器（值级环 / 类型级环 / 产品层→方法学层反向边），三个量只降不升
-status: ready
+status: done
 labels:
   - gap
 parent: null
