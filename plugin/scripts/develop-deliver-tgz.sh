@@ -359,6 +359,17 @@ build_state_json() {
 # ⛔ SINGLE SOURCE: BOTH modes (verify_coldstart_mode / verify_upgrade_mode) ship from here, so a new
 # dependency is ONE edit. The 2026-09-11 defect was a two-place enumeration updated in neither place
 # (硬规则 5b: 修好一个实例 ≠ 该原则只在那一处适用).
+#
+# ⛔ An entry may live OUTSIDE $SCRIPT_DIR — the SPEC .md below already does — because the transport is
+# FLAT: `scp "${flat[@]}" "${target}:~/"` lands every entry at $HOME/$(basename <local path>). The
+# write-json-atomic entry is the SECOND such case, and it is deliberate (gap-arch-reverse-edges-zero):
+#   · the IMPLEMENTATION now lives at packages/quay/src/kernel/write-json-atomic.ts (the kernel leaf);
+#   · plugin/scripts/write-json-atomic.ts is only a re-export shim for in-flight checkouts, and its
+#     `export * from "../../packages/…"` does NOT resolve from a flat $HOME/ — shipping the shim would
+#     put a MODULE_NOT_FOUND two levels ABOVE the remote's $HOME, where nothing here would see it;
+#   · the kernel leaf imports only node:fs/node:path/node:crypto, so it IS self-sufficient flat.
+# Both remote consumers (`$SCRIPT_DIR/write-json-atomic.ts` in verify-deliver-coldstart.sh, and
+# runner-state-write.ts's `./write-json-atomic.ts`) resolve to $HOME/write-json-atomic.ts either way.
 transport_flat_files() {
   printf '%s\n' \
     "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
@@ -367,7 +378,7 @@ transport_flat_files() {
     "${SCRIPT_DIR}/gate-script-base.ts" \
     "${SCRIPT_DIR}/repo-root.ts" \
     "${SCRIPT_DIR}/runner-state-write.ts" \
-    "${SCRIPT_DIR}/write-json-atomic.ts" \
+    "${SCRIPT_DIR}/../../packages/quay/src/kernel/write-json-atomic.ts" \
     "${SCRIPT_DIR}/provider-binding-resolvability-check.ts" \
     "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md"
 }
@@ -399,16 +410,24 @@ transport_imports_of() {
 # ⛔ 一个【读不懂输入】的清单（空文件 / 名字全写错）会得到 0 违规——与【合格】同形。调用方必须先
 # 断言清单非空（selfcheck_transport_closure 就是这么用的；硬规则 3b）。
 transport_closure_violations() {
-  local listfile="$1" n=0 f name imp pkg
-  local -a shipped=() pkgs=()
+  local listfile="$1" n=0 f name imp pkg rel
+  local -a shipped=() pkgs=() remote=()
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     shipped+=("$f")
-    case "$f" in */node_modules/*) pkgs+=("$(basename "$f")") ;; esac
+    case "$f" in
+      */node_modules/*) pkgs+=("$(basename "$f")") ;;
+      *)                remote+=("$(basename "$f")") ;;
+    esac
   done < "$listfile"
 
-  in_shipped() { local x; for x in "${shipped[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
   in_pkgs()    { local x; for x in "${pkgs[@]}";    do [ "$x" = "$1" ] && return 0; done; return 1; }
+  # Membership AT THE REMOTE, which is the only thing the verdict is about. The transport is flat
+  # (`scp "${flat[@]}" "${target}:~/"`), so a shipped entry named <a>/<b>/x.ts lands at $HOME/x.ts —
+  # NOT at $SCRIPT_DIR/x.ts. Judging by the local path instead would report a correctly-shipped
+  # out-of-$SCRIPT_DIR entry (the kernel leaf, the SPEC .md) as "unshipped": a false red whose
+  # natural "fix" is to un-ship a file the remote genuinely needs.
+  in_remote()  { local x; for x in "${remote[@]}";  do [ "$x" = "$1" ] && return 0; done; return 1; }
 
   # (0) every listed path must exist — a typo in the enumeration is a silent remote failure too.
   for f in "${shipped[@]}"; do
@@ -421,7 +440,7 @@ transport_closure_violations() {
   #     what makes that distinction mechanical rather than an exemption list someone can extend.
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    in_shipped "${SCRIPT_DIR}/${name}" \
+    in_remote "${name}" \
       || { echo "REF-UNSHIPPED: ${name} — invoked by verify-deliver-coldstart.sh but absent from the shipped set"; n=$((n + 1)); }
   done < <(sed '/^selfcheck() {/,/^}$/d' "${SCRIPT_DIR}/verify-deliver-coldstart.sh" 2>/dev/null \
            | grep -oE '\$\{?SCRIPT_DIR\}?/[A-Za-z0-9._-]+\.(ts|mjs|js|sh)' \
@@ -430,15 +449,25 @@ transport_closure_violations() {
   # (2) IMPORT closure — every shipped .ts must be self-sufficient at the remote: node builtins, a
   #     ./ relative import that is itself shipped, or a bare specifier whose package travels under
   #     node_modules/. Anything else is MODULE_NOT_FOUND on the remote.
+  #     The specifier is resolved the way the REMOTE resolves it: the importing file sits at
+  #     $HOME/<basename>, so `./x` ⇒ $HOME/x (flat ⇒ one path segment) and `../x` ⇒ /x, i.e. outside
+  #     the shipped set by construction. The two get different verdicts on purpose — the repair for an
+  #     escaping import is "stop importing across the tree", never "add ../x to the enumeration".
   for f in "${shipped[@]}"; do
     case "$f" in *.ts) ;; *) continue ;; esac
     while IFS= read -r imp; do
       [ -n "$imp" ] || continue
       case "$imp" in
         node:*) continue ;;
-        ./*|../*)
-          in_shipped "${SCRIPT_DIR}/${imp#./}" || in_shipped "${SCRIPT_DIR}/${imp#./}.ts" \
-            || { echo "IMPORT-UNSHIPPED: $(basename "$f") imports ${imp} — not in the shipped set"; n=$((n + 1)); } ;;
+        ../*)
+          echo "IMPORT-ESCAPES-REMOTE: $(basename "$f") imports ${imp} — a flat remote file sits at \$HOME/<basename>, so this resolves outside the shipped set"; n=$((n + 1)) ;;
+        ./*)
+          rel="${imp#./}"
+          case "$rel" in
+            */*) echo "IMPORT-UNSHIPPED: $(basename "$f") imports ${imp} — the remote layout is flat, so no subdirectory can resolve"; n=$((n + 1)) ;;
+            *) in_remote "$rel" || in_remote "${rel}.ts" \
+                 || { echo "IMPORT-UNSHIPPED: $(basename "$f") imports ${imp} — not in the shipped set"; n=$((n + 1)); } ;;
+          esac ;;
         *)
           pkg="${imp%%/*}"
           case "$imp" in @*/*) pkg="$(printf '%s' "$imp" | cut -d/ -f1,2)" ;; esac
