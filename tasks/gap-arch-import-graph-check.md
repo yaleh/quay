@@ -42,12 +42,12 @@ extra:
 
 ## Touches
 
-- plugin/scripts/import-graph-check.ts
-- plugin/import-graph-baseline.json
-- plugin/test/import-graph-check.test.mjs
+- plugin/scripts/import-graph-check.ts (new)
+- plugin/import-graph-baseline.json (new)
+- plugin/test/import-graph-check.test.mjs (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
-- plugin/scripts/checker-mutation-cases/import-graph-check.sh
+- plugin/scripts/checker-mutation-cases/import-graph-check.sh (new)
 - tasks/gap-arch-import-graph-check.md
 
 ## AC
