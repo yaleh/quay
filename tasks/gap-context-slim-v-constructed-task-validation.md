@@ -1,7 +1,7 @@
 ---
 id: gap-context-slim-v-constructed-task-validation
 title: 上下文瘦身 V：用新构造的最小任务验证瘦身前后行为不回退
-status: todo
+status: ready
 labels:
   - gap
 parent: null
