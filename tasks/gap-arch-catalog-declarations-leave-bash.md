@@ -100,20 +100,27 @@ $ bash plugin/scripts/capability-catalog.sh --json | jq length
 - plugin/scripts/guard-lineage-check.ts
 - plugin/scripts/select-static-checks-for-touches.ts
 - plugin/scripts/rhythm-consumer-check.ts
+- plugin/scripts/registry-bare-filename-scan.ts
+- plugin/scripts/outer-retirement-precondition-check.ts
 - plugin/scripts/checker-lib.ts
 - plugin/scripts/quay-init.sh
 - plugin/scripts/checker-mutation-cases/capability-catalog.sh
 - plugin/scripts/checker-mutation-cases/rhythm-consumer-check.sh
 - plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh
 - plugin/test/capability-catalog.test.mjs
+- plugin/test/guard-lineage-check.test.mjs
+- plugin/test/select-static-checks-for-touches.test.mjs
+- plugin/test/registry-bare-filename-scan.test.mjs
 - plugin/test/trend-check.test.mjs
 - plugin/test/red-on-omission-audit.test.mjs
 - plugin/test/repo-root-unification.test.mjs
 - plugin/test/archive-exclusion-wiring.test.mjs
+- plugin/test/shipped-entry-runnable.test.mjs
+- plugin/skills/quay-file-task/SKILL.md
 - packages/quay/scripts/package.sh
 - tasks/gap-arch-catalog-declarations-leave-bash.md
 
-（前 3 行按**设计分岔 (a)** 命名（数据 = `.json`，渲染器 = `.ts`）；**若选 (b)**，落地前先把 `plugin/catalog/capability-catalog.ts` 与 `plugin/catalog/<declarations>.json` 补进本清单再改——两条路都需要 `quay-init.sh` 的 laydown 集合与 `package.sh` 的暂存副本核对，故这两个文件无论选哪条都在清单里。落地若发现必须改其它文件（如 `plugin/test/select-static-checks-for-touches.test.mjs`、`plugin/test/shipped-entry-runnable.test.mjs`、`plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh` 之外的 fixture），**先补进本清单再改**。）
+（**设计分岔已选 (a)**：数据 = `plugin/scripts/capability-catalog-declarations.json`，渲染器 = `plugin/scripts/capability-catalog.ts`，派生集 343→344。理由：渲染器是真实机件，放在 `plugin/scripts/` 之外会让它对 sh-census / import-graph / catalog 自己的清单结构性不可见（正是本方法论要消灭的可见性洞）；`.json` 不进派生集已有先例 `judged-object-registry.json`；而 (b) 的新目录对闭包推导不可见，失效形态是消费者项目里的 `ERR_MODULE_NOT_FOUND`。落地时**原清单未列齐、必须先补进再改**的文件：`registry-bare-filename-scan.ts`（它按名把 `capability-catalog.sh` 排除为「种群描述而非引用」——该角色随表迁到数据文件，排除对象必须跟着换位，否则 344 条声明会把「每个脚本都被引用」灌进死集闭包）、`outer-retirement-precondition-check.ts`、`registry-bare-filename-scan.test.mjs`、`guard-lineage-check.test.mjs`、`shipped-entry-runnable.test.mjs`、`select-static-checks-for-touches.test.mjs`、`plugin/skills/quay-file-task/SKILL.md`（立案 skill 指向登记文件的那句）。）
 
 ## AC
 
