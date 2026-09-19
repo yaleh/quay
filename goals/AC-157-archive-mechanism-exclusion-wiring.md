@@ -9,7 +9,7 @@ criterion: >-
   "AC-157 fail: archive/INDEX.tsv header does not have exactly 7 tab-separated
   fields" >&2; exit 1; }
 
-  for f in plugin/scripts/capability-catalog.sh
+  for f in plugin/scripts/capability-catalog.ts
   plugin/scripts/runtime-usage-inventory.ts scripts/test.sh
   plugin/scripts/laydown-set-check.sh scripts/version-consistency-check.ts; do
     [ -e "$f" ] || { echo "AC-157 fail: exclusion surface $f does not exist" >&2; exit 1; }
@@ -24,7 +24,7 @@ origin: |
 ---
 
 **判据（能取假）**：archive 机制落地——`archive/<日期>-<slug>/<保持原始相对路径>` + `archive/INDEX.tsv`
-（SPEC §12a 的七字段）+ **五个排除面接线**（`capability-catalog.sh` / `runtime-usage-inventory.ts` /
+（SPEC §12a 的七字段）+ **五个排除面接线**（`capability-catalog.ts` / `runtime-usage-inventory.ts` /
 `scripts/test.sh` 测试 glob / laydown 交付面闭包 / `version-consistency-check.ts`）。
 
 **取假**：随便 archive 一个文件后跑全量 suite——**不接线必红**；接线后应绿。
