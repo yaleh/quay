@@ -239,6 +239,20 @@ packages/quay/plugin/
 # The carrier is a DERIVED view of GitHub state and is rebuildable by the collector's backfill.
 **/.quay/ci-runs.jsonl
 **/.quay/ci-runs-collect-state.json
+# gap-ac271-release-branch-outlives-its-tag-again (2026-09-19): the release-cut finish RECORD
+# (.quay/release-branch-finish.jsonl) — one line per release-branch finish decision (branch, time,
+# shared-compliance form, tag, base, result, remote result, exit), appended by
+# plugin/scripts/release-branch-finish.sh and read back with its `--log`. Runtime state, never
+# git-tracked — and it MUST be ignored rather than merely untracked: the same ff clean-tree channel
+# that the sibling entries above exist for passes only `??` paths, and a record swept into a commit
+# (e.g. by `git add -A`) is then DELETED by the next `git checkout` of a ref that lacks it —
+# silently losing the very trace this file exists to keep (measured in this task's own test
+# fixture before the ignore was added).
+# Not `@quay-runtime-artifact`-marked on purpose, same as the sibling `**/.quay/*` entries above:
+# a consumer project's `.gitignore` gets the covering `.quay/*` rule from quay-init, so listing it
+# in quay-runtime-artifacts.txt would contradict that file's stated policy (and break the
+# marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
+**/.quay/release-branch-finish.jsonl
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 .workflow-events/

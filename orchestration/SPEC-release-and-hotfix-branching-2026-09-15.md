@@ -343,12 +343,54 @@ PR/worktree 目标要 `develop`，而门面要 `master`——两者在 2026-09-1
 release/vX.Y.Z        ← 取代现行的 release-vXXX-build
   从 develop 切  →  版本 bump（9 处，见 §4.3）+ changelog  →  合回 develop
   →  在合并点打 tag vX.Y.Z  →  【删除分支】
+  └── 末三步（合回 → 打 tag → 删除）= 一条命令：
+      bash plugin/scripts/release-branch-finish.sh <branch> --cut --tag vX.Y.Z
 ```
 
 **变更点（相对现状）有三个，其余保持**：
 1. 命名带 `/` 与完整 semver（现状 `release-v062-build` 的 `062` 形态在 `0.10.x` 之后会排序错乱）
 2. **合回后删除**（现状：两条都还在，且 `release-v063-build` 在 tag 之后又长了 15 个提交，§2.4）
 3. 切点前置（§4.2）
+
+#### 4.1.1 结束步的载体与「合规」的唯一定义（2026-09-19）
+
+**这一节存在的理由（实测，硬规则 9 的代价）**：上表末三步在 2026-09-15 只有「删除」那一步有命令，
+**合回与删除没有被同一件事带上**——于是它依赖「结束一次 release 的人恰好想起来运行该命令」。
+2026-09-19T03:27–03:38Z 的真实切版（v0.10.0）证明这个前提曾经不成立：判据连红 4 次，
+而把它翻绿的**是一次无任何记录的外部删除**（该分支的 reflog、提交、派发记录里都查不到
+「谁删的、用什么命令删的」——详见 §10 残留 4）。
+
+**① 合规的唯一定义（判据与命令共用同一份）**。AC-271 的 criterion 接受**两种**终结形态；
+命令此前只认第一种，于是「按规程删除」对第二种形态在物理上做不到：
+
+| 形态 | criterion 的谓词 | 命令的谓词 |
+|---|---|---|
+| 已合回 | 分支不存在 | `git rev-list --count <base>..<branch>` = 0 |
+| tip 被某个 tag 持有 | `git tag --points-at <branch>` 非空（tip 逐字停在 tag 上） | `git tag --contains <branch>` 非空（tip 被某个 tag 持有） |
+
+两种形态**都蕴含「删掉不丢任何提交」**，因此它们是同一条「有无删除的许可」判据的两个充分条件；
+命令对**两者皆不满足**仍然 **fail-closed 拒绝**（`exit 3` + `CAUSE=release-branch-not-merged`）
+——那是唯一真会丢工作的形态。命令侧认的是「被 tag 持有」这一**较宽**的读法（tip 是 tag 的祖先时，
+提交由 tag 保管，删除同样无损），而 criterion 的「逐字停在 tag 上」是它的子集：**命令接受的每一种
+形态，执行之后产生的状态都满足 criterion**（分支消失 ⇒ 形态①成立）。
+仪器故障（tag 列举跑不起来）有独立的 `CAUSE=release-branch-tag-scan-failed`，
+⛔ 绝不与「没有 tag 持有它」共用输出（硬规则 3b）。
+
+**② 结束步的载体 = 切版动作自己**。`release-branch-finish.sh <branch> --cut --tag vX.Y.Z`
+在一次调用里做完协议末三步：合回 `<base>`（`--no-ff`，要求 HEAD 已是 `<base>`）→
+**在该合并点打版本 tag** → 结束（删除）。⇒ **「这次切版走完了」与「分支已消失」是同一条命令的
+exit 0**，不是两件需要分别记得的事；tag 一旦打上，就正是让第①条的谓词放行的那件事。
+⛔ 它不改变手工路径：手工切版仍可能留下残留，代价由 AC-271 的 criterion 按轮抓出（那是判据的职责）。
+`--cut` 的每条前置（缺 `--tag`／tag 已存在／HEAD 不是 `<base>`／工作树有已跟踪改动）都
+fail-closed 拒绝且**不动任何 ref**。
+
+**③ 每一次结束都留痕（可查）**。命令把每一次判定（删除／拒绝／仪器故障）追加进本地记录
+`.quay/release-branch-finish.jsonl`（分支名、时刻、合规形态、tag、base、结果、远端结果、退出码），
+用 `release-branch-finish.sh --log` 读回。**记录文件不存在 ⇒ `exit 2` 且带独立
+`CAUSE=release-branch-trace-missing`**（「从未发生」⛔ 不与「发生但没有记录」共用输出，硬规则 3b/9）。
+⛔ 载体必须落在**本地侧**：实测 `git ls-remote --heads origin release/v0.10.0` 为空，
+`release-*` / `release/*` 只存在于本地，任何远端侧载体（例如 release workflow 里加一个 job）
+**在结构上够不到这些 ref**。
 
 ### 4.2 切点前置：develop 的上一次 **decisive** CI 必须是绿
 
@@ -590,7 +632,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 0 | **把本 SPEC 落盘**（"master 是化石"从口头认知变成可引用记录） | 无 | ✅ **已完成** |
 | 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
 | 1 | **GitHub 默认分支 `master` → `develop`** ⛔ **本行已 superseded（2026-09-17）**：方向被 §3.2.1′ 追加裁定**反转**回 `master`，由 **`AC-285`**（默认分支实测 = `master`）+ **`AC-284`**（worktree 分叉点结构性校验）接替原 **`AC-273`** | 无（纯 GitHub 设置，可逆） | ✅ **当时已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 该记录是**历史事实**（那一次确实切成了 `develop`），**不是当前配置**——反转后的落地见 `gap-ac285-github-default-branch-master`（`goal_ac: AC-285`） |
-| 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ **删除半边已完成**（`gap-release-branch-deleted-after-merge`，2026-09-15T16:4xZ）：落成 fail-closed 命令 `plugin/scripts/release-branch-finish.sh`（只认 `release-*` / `release/*` 名；`develop..<b>` ≠ 0 ⇒ 拒绝；远端删除失败或读不到 ⇒ 独立 `CAUSE=` + 非零退出）；**现存两条 `release-v06x-build` 由该命令在生产仓库删除**——`release-v062-build` tip `158616df7`（= `v0.6.2`）、`release-v063-build` tip `d097f48c7`，两条 `develop..<b>` 实测均为 **0** ⇒ 删除无损；删除后 `AC-271` 由 fail 转 **pass**。⚠️ 命名半边（§4.1 变更点 1）仍未采用——⛔ 它不在判据乙的达标条件内（判据按 tip 是否指向 tag 判定，不解析分支名）
+| 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ **删除半边已完成**（`gap-release-branch-deleted-after-merge`，2026-09-15T16:4xZ）：落成 fail-closed 命令 `plugin/scripts/release-branch-finish.sh`（只认 `release-*` / `release/*` 名；`develop..<b>` ≠ 0 ⇒ 拒绝；远端删除失败或读不到 ⇒ 独立 `CAUSE=` + 非零退出）；**现存两条 `release-v06x-build` 由该命令在生产仓库删除**——`release-v062-build` tip `158616df7`（= `v0.6.2`）、`release-v063-build` tip `d097f48c7`，两条 `develop..<b>` 实测均为 **0** ⇒ 删除无损；删除后 `AC-271` 由 fail 转 **pass**。⚠️ 命名半边（§4.1 变更点 1）仍未采用——⛔ 它不在判据乙的达标条件内（判据按 tip 是否指向 tag 判定，不解析分支名）<br>✅ **2026-09-19 补齐三处**（`gap-ac271-release-branch-outlives-its-tag-again`，详见 §4.1.1）：① 命令的合回谓词与 AC-271 的 criterion **对齐为同一份合规定义**（认「tip 被某个 tag 持有」；两者皆不满足仍 fail-closed 拒绝 exit 3）；② 结束步有了载体——`--cut --tag <vX.Y.Z>` 在一次调用里做完「合回 → 在合并点打 tag → 删除」（此前这三步只有删除那一步有命令，合回与删除不被同一件事带上）；③ 每一次结束留痕 `.quay/release-branch-finish.jsonl` + `--log` 读回（此前只有 stdout，硬规则 9）。⚠️ 触发它的根因：v0.10.0 那次切版的残留让判据连红 4 次、靠一次**无痕迹的外部删除**才回绿（§10 残留 4）。⚠️ 命名半边仍未采用
 | 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭） |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
 | 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布）；⚠️ 第 4 步落地后**这一步是自动发生的**，不需要另外的人工动作 |
@@ -613,6 +655,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 1 | ~~Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`）~~ | **已关闭（2026-09-15T15:0xZ，`gap-develop-version-union-missing-dev-suffix`）**：接受。真实安装读数（隔离 `CLAUDE_CONFIG_DIR`）：`claude plugin install quay@quay -s user --json` → `{"outcome":"ok","plugin":"quay@quay","scope":"user"}` exit 0；`claude plugin list --json` → `"version":"0.7.0-dev"`，`installPath=…/plugins/cache/quay/quay/0.7.0-dev` ⇒ 该字段不仅接受 prerelease，还以它作 cache 键。⚠️ 顺带读数：该次安装时 marketplace 目录（默认分支 develop）仍声明 `version: 0.7.0`，而拉到的插件 manifest 为 `0.7.0-dev` —— CLI 报的是**拉到的插件**那一侧；本 SPEC 第 3 步落地 develop 后两侧一致 | — |
 | 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
 | 3 | ~~判据甲–戊的立案时机~~ | **已关闭**：2026-09-15T14:0xZ 全部立案为 `AC-270`..`AC-274`（`--expect-absent`，挂 GOAL-020），见 §7 | — |
+| 4 | **`release/v0.10.0` 的消失不可归因**（2026-09-19T03:38:24Z）：`git rev-parse release/v0.10.0` 于 03:2xZ 仍可解析（tip `8c7b85e79`），03:39:02Z 起已不可解析，`AC-271` 的 criterion 随之由连红 4 次转回 pass。**这次删除没有留下任何痕迹**：`.git/logs/refs/heads/release/` 目录不存在（reflog 随分支一起消失）、无对应提交（`git log --all --grep` 只有该分支的 bump 提交 `8c7b85e79` 与合并提交 `4c8116632`）、`orchestration/dispatch-record.jsonl` 无记录、当时 worker driver 为空闲（`.quay/worker-round.jsonl` 03:31:28Z `action=stop` / `pool-empty`） ⇒ **「谁删的、用什么命令删的」在本仓库不可查**（硬规则 9 的代价：可见性 ⊂ 执行）。⛔ 不得把它记成任何任务的成果，也⛔ 不得写成「已由 `release-branch-finish.sh` 删除」 | 已由 §4.1.1 的**留痕**半边直接对治（从 2026-09-19 起，每一次结束都写 `.quay/release-branch-finish.jsonl`，`--log` 可查）；本条**永久留为历史记录**，其价值是它作为「结束步没有载体」的第一个实证（同一根因的另外两处见 §4.1.1 ①②） | — |
 
 ---
 
@@ -623,6 +666,12 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **第 2 步的删除半边已完成**（`gap-release-branch-deleted-after-merge`：`plugin/scripts/release-branch-finish.sh` 落成，两条现存 `release-v06x-build` **穿过该命令**删除，`AC-271` 转 pass；命名半边未采用，且不在判据乙的达标条件内）；
 第 4 步已解除阻塞、待实现；第 5 步等 `AC-268`，届时由 §6.1 的 `advance-master` job 自动完成。
 ⛔ 本文件自身仍不推进任何分支——master 至今未动，且按裁定 4 这正是正确输出。
+
+**追加执行状态（2026-09-19T03:3xZ 起）**：v0.10.0 切版（`8c7b85e79` bump → `4c8116632` 合并 + tag `v0.10.0`
+→ 分支 `release/v0.10.0` 未删除）使 `AC-271` 连红 4 次；该分支于 03:38Z 前后消失，
+**成因不可查**（§10 残留 4）。第 2 步的「结束步载体 + 合规定义对齐 + 留痕」三处由
+`gap-ac271-release-branch-outlives-its-tag-again` 补齐，落点见 §4.1.1。
+⛔ 那次删除**不计入**任何任务的成果。
 
 ---
 
