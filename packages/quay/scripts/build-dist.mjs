@@ -44,21 +44,25 @@ export const REQUIRE_BANNER =
  * Extra node_modules roots for the bundle's bare specifiers, in addition to esbuild's normal
  * walk-up from each file's own directory.
  *
- * WHY (GOAL-017/AC-251): the Core bundle now INLINES sources that live outside the product package
- * — `src/serve.ts` imports `serveControlPlane` from `plugin/scripts/driver-shared.ts`, which in turn
- * dynamic-imports `@modelcontextprotocol/sdk/*` and `zod`. esbuild resolves a bundled file's bare
- * specifiers relative to THAT FILE's directory, but a plugin-layer source has no node_modules
- * between it and the filesystem root: in a real checkout it happens to work (npm hoists to
- * `<repo>/node_modules`, an ancestor of `plugin/scripts/`), while in a *packaging copy* that gives
- * the deps only to the package (`<copy>/packages/quay/node_modules` — the layout
- * `npm-pack-e2e.test.mjs` builds) the resolution fails and `package.sh` dies with
+ * WHY IT WAS ADDED (GOAL-017/AC-251): the Core bundle used to INLINE sources living outside the
+ * product package — `src/serve.ts` imported `serveControlPlane` from
+ * `plugin/scripts/driver-shared.ts`, which dynamic-imports `@modelcontextprotocol/sdk/*` and
+ * `zod`. esbuild resolves a bundled file's bare specifiers relative to THAT FILE's directory, and a
+ * plugin-layer source has no node_modules between it and the filesystem root: it happened to work in
+ * a real checkout (npm hoists to `<repo>/node_modules`, an ancestor of `plugin/scripts/`), while in
+ * a *packaging copy* that gives the deps only to the package (`<copy>/packages/quay/node_modules` —
+ * the layout `npm-pack-e2e.test.mjs` builds) resolution failed and `package.sh` died with
  * `Could not resolve "@modelcontextprotocol/sdk/server/mcp.js"`.
  *
- * The right statement is that a SELF-CONTAINED bundle's bare specifiers must resolve against the
- * BUNDLE'S package — those are the dependencies it ships against (`@modelcontextprotocol/sdk` and
- * `zod` are declared deps of `packages/quay/package.json`). Declaring them here makes that explicit
- * and independent of where an inlined source file happens to sit. Additive: esbuild still tries each
- * importer's own directory first, so nothing that resolved before resolves differently.
+ * ⚠️ THAT REASON NO LONGER HOLDS (tasks/gap-arch-reverse-edges-zero): every source this bundle
+ * inlines is now under `packages/quay/src/`, so there is no longer an out-of-package importer. The
+ * function is RETAINED deliberately rather than deleted: it is additive (esbuild still tries each
+ * importer's own directory first, so nothing that resolved before resolves differently), and it
+ * pins the property that a SELF-CONTAINED bundle's bare specifiers resolve against the BUNDLE'S
+ * package — the dependencies it ships against (`@modelcontextprotocol/sdk` and `zod` are declared
+ * deps of `packages/quay/package.json`). The load-bearing assertion for the current tree is the
+ * import-graph checker's `reverseEdges === 0`
+ * (`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json`), not this flag.
  */
 export function bundleNodePaths(pkgRoot = pkgDir) {
   return [path.join(pkgRoot, "node_modules")];

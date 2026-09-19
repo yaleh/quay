@@ -100,6 +100,7 @@ unset _cs_violations
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
   [arch-coverage-report.ts]="仓库里每一种语言，**谁分析了它、分析了几成** —— 具体说：.archguard/query/manifest.json 的 global scope（默认 scope，直接调 archguard_summary 时唯一可见的那个）只覆盖 tracked 非测试 .ts 的哪一部分、哪些 .ts 目录落在**任何** scope 之外、以及 mjs/js/sh/py 这四种语言是不是**根本没有分析器**，从而让「archguard 报 0 环」不再能冒充「无环」，也让「未评估」第一次有独立取值（⛔ 缺 manifest ⇒ 行 NOT-EVALUATED/manifest-missing，坏 JSON ⇒ evaluated:false exit 2，两者与「查过且合格」三态互不同形；tasks/gap-arch-coverage-self-report，SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.1/§2 P6）？"
+  [import-graph-check.ts]="按【语句位置】解析出的模块依赖图里，那三个会回升的结构量各是几 —— import/export 语句（值边）vs import type / export type（类型边）构成的强连通分量中【只用值边就成立的环】有几个、【只有把类型边也算进去才成立的环】有几个、packages/** 反向 import plugin/** 或 experiments/** 的边有几条，以及（当 packages/quay/src/kernel/ 存在时）其下文件有没有 import 到 kernel 之外 —— 从而让 archguard 对 plugin/scripts 只当成单个 (root) 包、detect_cycles 返回 []（即『0 环』实为『未评估』）这件事，第一次有一个按位置判定、realpath 去重、只降不升的读数（tasks/gap-arch-import-graph-check；SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P1 / §5 Phase 0a）?"
   [dev-stats-collect.ts]="README.md 里那段「开发过程统计」的数字，是脚本在一个具名提交上算出来的，还是有人手填的 —— 即每个统计值是否就是脚本在 README 标记块写出的那个提交上、对**被 git 跟踪的载体**（git 历史 / tasks/*.md / goals/*.md / plugin/scripts/*.ts）的逐字读数，从而让「README 的数字与重跑结果脱节」这件事第一次可机械提问（AC-277：--json 只出扁平标量、--check 判漂移时 exit 1 且 stderr 带 CAUSE=stats-drift；tasks/gap-dev-stats-collect-from-production-carriers）?"
   [discovery-path-classify.ts]="「谁先发现它」的分布是什么 —— 全部真实 gap 任务的**首次揭发**里，①人的追问/裁定 ②自主循环的主动巡检 ③测试套件/闸门报红 各占多少，以及该分布随立案月份与 08-11 前后两窗怎么变，从而让「人是唯一的样本外探测器」这条原本只有 n=5 的定性结论第一次有一个几百例的读数可对（判据命不中时落 other 且不留证据，绝不静默并进任一实质类；tasks/gap-who-discovered-it-first-sample-is-only-five）?"
   [driver-anchor.ts]="Do the six driver kinds’ resident loops live in ONE OS process (SPEC-unified-quay-server §7 stage C / §6.1) — an anchor host that runs each kind’s OWN main(argv) loop in-process behind an independent event-loop error boundary + restart counter, writes each kind’s .quay/<prefix>.pid as its own pid (so AC-255’s criterion de-duplicates to ONE live pid) while retiring the per-kind supervisor pid files, reconciles a declarative .quay/anchor-desired.json so quay driver start|stop --kind X adds/removes exactly ONE loop without touching the others or killing in-flight worker children (§6.9 inv.2/3), and self-refreshes onto the main checkout’s kernel when it advances (AC8 durability; the base is the MAIN CHECKOUT OF THE KERNEL’S OWN REPO — ⛔ NOT the workspace root passed as --root, whose <workspaceRoot>/plugin/scripts/… form resolves to a nonexistent file in a third-party project and is fail-closed by kernel-sibling-resolution-check’s DRIVER-SCOPE rule on driver-runtime.ts) — rather than 12 supervisor+driver processes whose per-kind crash isolation is bought with 8 registry tables and a ps that can no longer tell ‘the process is up’ from ‘this kind is still turning’ (§6.10)?"
@@ -474,6 +475,7 @@ declare -A GUARD_OBJECT=(
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
   [arch-coverage-report.ts]="按需"
+  [import-graph-check.ts]="每轮"
   [dev-stats-collect.ts]="按需"
   [discovery-path-classify.ts]="按需"
   [driver-anchor.ts]="按需"
@@ -823,6 +825,7 @@ declare -A CADENCE=(
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
   [arch-coverage-report.ts]="失效前提：① 语言的判定仍按扩展名（ts/mjs/js/sh/py），counted 口径仍取自 git ls-files 的 tracked 面；② archguard 的 scope 载体仍是 .archguard/query/manifest.json 且其 scopes[].sources 仍是目录绝对路径、globalScopeKey 仍指向其中一个 key；③ ts 的 analyzed 判据仍是「所在目录落于某 scope 的 sources 之内」。若 archguard 换掉 manifest 的形状/位置（例如改为按文件而非按目录记 scope），或新增某种语言的分析器（那时该语言应从 no-analyzer 改为真判据，而不是继续恒报 NOT-EVALUATED），本条需同步"
+  [import-graph-check.ts]="失效前提：模块依赖仍以 git 跟踪的 TypeScript 源文件为唯一载体，且依赖关系仍由 import/export 语句声明（按语句位置可读）；若模块系统整体退休、或跨层依赖改由配置/注入表达而不再写进 import 语句，本条随之失效"
   [dev-stats-collect.ts]="失效前提：README.md 仍是开发过程统计的展示面，且统计仍从被 git 跟踪的载体派生（git 历史 / tasks/*.md / goals/*.md / plugin/scripts/*.ts）—— 本机件的全部读数都取自这些面之外的提交对象库；若统计块改由别的机制产出（如 web UI 直出），或口径改从运行时载体（随检出而异的 .quay 面）派生，本条退休"
   [discovery-path-classify.ts]="失效前提：任务体仍以叙事段（Finding / Proposal / Resolution / Requested action / Setup）承载触发描述、且出处仍写成正文散文 —— 本分类器的全部证据都逐字取自该窗口；若任务体改由结构化字段声明发现路径（那时应直接读那个字段而不是抽散文），或叙事段的标题集合改名、或出处写法从「主体+日期+动作」改成别的形态，本条需同步"
   [driver-anchor.ts]="失效前提：驱动 kind 的常驻循环仍然可以在同一个 Node 进程的事件循环里并发跑（即 §9 开放问题 1「会不会互相饿死」的实测结论仍为「可行」）且 quay driver <verb> --kind X 仍是驱动生命周期的用户面；若某个 kind 被实测饿死而转回独立进程（或驱动启停面整体换成 systemd 类承载），本条退休"
@@ -1150,7 +1153,7 @@ declare -A INVALIDATION=(
   [promotion-driver.ts]="失效前提：todo→ready 晋升仍经 ready-pool-check --apply 全池判定；若晋升并入别处（如 outer tick 内联）或 ready-pool-check 全池模式退役，本条退休"
   [outer-driver.ts]="失效前提：outer 会话的纯机械 A/B 段仍需一个常驻机械进程承接（读数/收尾/自查），且例程型 driver（Layer 0+1b）仍是其承载；若 outer 会话退役后这些段也随会话消失（不再需要机械承接）或例程型承载迁出（如并入 manager 会话），本条退休"
   [outer-retirement-precondition-check.ts]="失效前提：outer 执行核（orchestrator-tick-core.md）仍是退役前 checker 调用面的枚举正本，且 static-gate 注册表（runner-static-gate.ts）仍是「留存调用面」的判定来源之一；若执行核退役后本前置随之退役（其使命就是退役那一步的前置），或 checker 留存调用面的判定改由别的正本承载，本检查退休"
-  [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休"
+  [write-json-atomic.ts]="失效前提：6 处 state 写仍以本模块为唯一原子写实现（driver-shared / inner-blocked-signal / mirror-full-suite-state / red-window-triage / runner-state-write / suite-state-trigger 各自 import writeJsonAtomic）；若 rename(2) 原子性假设失效（如迁到非 POSIX 或跨文件系统 rename）或 state 写载体迁出 plugin/scripts/，本条退休。⚠️ 2026-09-19（gap-arch-reverse-edges-zero）把【实现】下沉到 packages/quay/src/kernel/write-json-atomic.ts（产品层 packages/** 也读它，而产品层不得反向 import 方法学层），本模块改为 re-export ⇒ 第三条触发句的字面条件（实现载体已不在 plugin/scripts/）成立，但本条的断言对象未失去（本路径仍是 plugin 侧 state 写取用 writeJsonAtomic 的唯一入口），故本条不退休，判据改为「本路径是否仍是 plugin 侧那批 import 的唯一入口」。⚠️ 同轮实测到原断言句的 import 者名单已失真（⛔ 两处都与本改动无关或半关：driver-shared.ts 现经 kernel/control-state.ts 间接取用、不再直接 import 本路径；proposal-convergence.ts 早已 import 本路径却从来不在名单里）⇒ 前提里不要再钉死 import 者名单或处数，判据只认「唯一入口」这一条"
 
   [dual-source-check.ts]="失效前提：职责→driver 的退役仍以文档标注为唯一真相源；若退役改为机制强制（cron 删除即无锚），本条按 ④ 失效"
   [over90-task-gate.ts]="失效前提：supervisor 抢占判定（supervisor-preempt-candidates.ts）与 --detect-stop 的 over-90m 检测（inner-blocked-signal.ts detectTaskOver90m）仍以本模块为唯一 TASK_OVER_90M_MS/taskStatusAllowsOver90m/makeOver90ExecutorGone 实现；若这两个消费者退役，本条退休"
@@ -1172,6 +1175,7 @@ declare -A INVALIDATION=(
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
   [arch-coverage-report.ts]="2026-09-19"
+  [import-graph-check.ts]="2026-09-19"
   [dev-stats-collect.ts]="2026-09-17"
   [discovery-path-classify.ts]="2026-09-15"
   [driver-anchor.ts]="2026-09-13"
@@ -1521,6 +1525,7 @@ declare -A LAST_REAFFIRMED=(
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
   [arch-coverage-report.ts]="enumerative"
+  [import-graph-check.ts]="position"
   [dev-stats-collect.ts]="n/a"
   [discovery-path-classify.ts]="position"
   [driver-anchor.ts]="n/a"
@@ -1876,6 +1881,7 @@ declare -A MATCHING=(
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
   [arch-coverage-report.ts]="谁按：任何要判「仓库里某语言/某目录有没有被任何分析仪器覆盖」的人或层 —— 命令行 node --experimental-strip-types plugin/scripts/arch-coverage-report.ts <root> --archguard-manifest <主检出的 .archguard/query/manifest.json> --json，并把完整输出写进 .quay/arch-coverage-report.latest.json（该载体已 gitignore）；在 task worktree 里必须带 --archguard-manifest，因为 .archguard/ 是主检出的生成物、worktree 内通常不存在（不带则 ts 行按 manifest-missing 报 NOT-EVALUATED，这是诚实读数而非故障）。条件=要判定 archguard 的默认 global scope 覆盖面是否等于全仓（当前读数 packages/quay/src 98/448 ≈ 21.9%），或要判某种语言是否根本没有分析器（当前 mjs/js/sh/py 四行全部 NOT-EVALUATED/no-analyzer）。⛔ 它【只报告不做门】，exit 0 只表示「报告已产出」，不表示「全部已评估」；本机件刻意不接入 runner-static-gate.ts —— 要做成棘轮是另一个任务"
+  [import-graph-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/ packages/ experiments/ scripts/ 以及本检查自身的三个文件；另由 plugin/test/import-graph-check.test.mjs 双控：真仓读数必须对上 plugin/import-graph-baseline.json 的三个数 + 六类 RED fixture + 注释/字符串负控 + NOT-EVALUATED 三态；mutation case 见 plugin/scripts/checker-mutation-cases/import-graph-check.sh）；基线数据文件 = plugin/import-graph-baseline.json（只降不升，且相对 git HEAD 的值也只许降）；条件=要判『模块依赖图的三个结构量是否回升』（值级环 / 仅类型边才成立的环 / packages→plugin|experiments 反向边），或 packages/quay/src/kernel/ 落地后要判其边界（tasks/gap-arch-import-graph-check）"
   [dev-stats-collect.ts]="谁按：任何要在 README.md 建/刷新开发过程统计块的人或任务实现者，跑 node --experimental-strip-types plugin/scripts/dev-stats-collect.ts --write（写面只此一处），并用 --check 核块与快照一致；AC-277 的判据本身由 goal-driver 每轮在同一个提交上做同一比对（--json 的重算值必须逐字出现在标记块里）；条件=README 需要首次建立一个机械产出的统计块，或已有块要随仓库推进刷新到新的快照提交；⛔ 不得接进任何每轮驱动 —— README.md 是被 git 跟踪的文件，每轮重写会让工作树常脏，而 fan-in 的 ff 只放行未跟踪路径 ⇒ 之后每一次 fan-in 的 ff 都会失败"
   [discovery-path-classify.ts]="谁按：本任务实现者跑出 docs/analysis/who-found-it-first-distribution.md 的全部读数（命令行 + 种子 20260915 + develop tip 都写在文档的「可复跑锚点」节），以及任何要复审 docs/references/维度边界与结晶——从熔融实现中发现原则.md §2.1 ① 那条分级的人或层（分级已按本次读数改写，要再判就得重跑）；条件=要判定「人是唯一的样本外探测器」这条结论是否被扩大样本支持或推翻，或语料增长后要刷新分布与趋势"
   [driver-anchor.ts]="谁按：driver-runtime.ts（startKind/stopKind/restartKind 经本文件的 spawnAnchor + .quay/anchor-desired.json 期望态拉起/停掉 kind）+ 六个 kind driver（registerKindStop 登记进程内停机信号）；条件=需要把六个 kind 的常驻循环收进一个进程（SPEC §7 阶段 C）且保留 per-kind 停机与在飞子进程不被杀的语义"

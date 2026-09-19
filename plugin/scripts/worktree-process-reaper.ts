@@ -84,6 +84,16 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // definition point). fullSuiteLockFiles() reads it so the stale-lock reclaim covers ALL S slots
 // (S=3 ⇒ `.2` stale holders are reclaimable, never invisible to the fixed `.0`/`.1` list).
 import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
+// The two process-IDENTITY predicates (`readProcCmdline` / `isQuayServe`, re-exported below for
+// every existing caller) now live in the kernel leaf `packages/quay/src/kernel/proc-identity.ts`
+// (tasks/gap-arch-reverse-edges-zero). They are the ONLY part of this file `packages/quay/src/
+// serve.ts` needs, and serve.ts may not import this file: that would be a `packages/**` →
+// `plugin/**` reverse edge. This file keeps every one of its OWN imports — which is exactly why the
+// extraction was of the two leaf predicates rather than of the whole file: relocating the whole file
+// would drag ./gate-script-base.ts (186 dependents) and ./suite-lock-slots.ts into the kernel and
+// break the kernel boundary rule outright.
+import { readProcCmdline, isQuayServe } from "../../packages/quay/src/kernel/proc-identity.ts";
+export { readProcCmdline, isQuayServe };
 
 export interface ProcInfo {
   pid: number;
@@ -136,20 +146,8 @@ export function readProcArgv0(pid: number): string | null {
   }
 }
 
-/** Full argv from /proc/<pid>/cmdline (NUL-separated, trailing empty field dropped). null when
- *  unreadable — which is NOT the same as "no arguments" (硬规则 3b): a caller that must recognise
- *  a specific invocation treats null as "could not tell", never as "does not match". */
-export function readProcCmdline(pid: number): string[] | null {
-  try {
-    const raw = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    if (!raw) return null;
-    const parts = raw.split("\0");
-    if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
-    return parts.length > 0 ? parts : null;
-  } catch {
-    return null;
-  }
-}
+// `readProcCmdline` is imported from ../../packages/quay/src/kernel/proc-identity.ts and re-exported
+// at the top of this file (see the import block) — its body lives there now, not here.
 
 /** Read { state, ppid } from /proc/<pid>/stat (comm may contain spaces/parens — match the LAST
  * ')' then split the tail; after comm: state(3) ppid(4)). */
@@ -316,18 +314,8 @@ export function classifyOrphans(procs: ProcInfo[], lockFiles: string[], exclude:
   return { probes, staleLockHolders };
 }
 
-/** Is this argv a `quay … serve` invocation? Needs the FULL cmdline (argv0 is only the node
- *  binary). Matches either source-execution entry (`bin/quay.ts`) or the version-probe shim
- *  (`bin/quay.js`), with `serve` among the arguments. A null cmdline ⇒ false, and every caller
- *  must treat "could not read argv" as its own state rather than folding it into this `false`. */
-export function isQuayServe(cmdline: string[] | null | undefined): boolean {
-  if (!cmdline || cmdline.length === 0) return false;
-  const isEntry = cmdline.some((a) => {
-    const b = path.basename(a);
-    return b === "quay.ts" || b === "quay.js";
-  });
-  return isEntry && cmdline.includes("serve");
-}
+// `isQuayServe` is imported from ../../packages/quay/src/kernel/proc-identity.ts and re-exported at
+// the top of this file (see the import block) — its body lives there now, not here.
 
 /** The `.quay/server.json` reading, THREE-VALUED on purpose (硬规则 3b).
  *
@@ -642,8 +630,8 @@ export function main(argv: string[]): number {
 }
 
 // ⛔ NAME-based, never URL-based (gap-serve-same-root-admission-lock, 2026-09-18 — measured):
-// `packages/quay/src/serve.ts` now imports this module for `readProcCmdline` + `isQuayServe`, so the
-// reaper is INLINED into the shipped `quay` bundle. In that form EVERY inlined module shares the
+// when `packages/quay/src/serve.ts` imported this module for `readProcCmdline` + `isQuayServe`, the
+// reaper was INLINED into the shipped `quay` bundle. In that form EVERY inlined module shares the
 // bundle's `import.meta.url`, so the old `fileURLToPath(import.meta.url) === resolve(argv[1])` check
 // was TRUE inside `quay serve`: this top-level block ran the reaper's own CLI with `serve`'s argv,
 // printed "one of --worktree/--orphans/--orphan-serves is required" on stderr, and set exit code 2 —
@@ -651,6 +639,11 @@ export function main(argv: string[]): number {
 // with exit 2 on the refused second start). `isDirectEntry` is the repo's single source for this
 // check and takes the script's own basename, which is the entry's in both source and bundle form and
 // can never match an inlined library (see its header: the bare form is gone on purpose).
+// ⚠️ The INLINING that made the old check wrong is gone as of tasks/gap-arch-reverse-edges-zero:
+// serve.ts now takes those two predicates from the kernel leaf, so this file is no longer part of
+// the `quay` bundle. The NAME-based guard stays regardless — this file is still inlined into the
+// PLUGIN bundles that import it, and is still spawned directly as a sibling script by
+// `fan-in/ff-merge.ts`, so it is entered both as an entry and as a library.
 const isDirect = isDirectEntry(import.meta, undefined, "worktree-process-reaper");
 if (isDirect) {
   try {

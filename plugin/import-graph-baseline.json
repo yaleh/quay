@@ -1,0 +1,6 @@
+{
+  "_note": "Shrink-only ratchet baseline for plugin/scripts/import-graph-check.ts (tasks/gap-arch-import-graph-check). These three numbers are the READINGS of the checker itself on the real tree at land time (2026-09-19) — never hand-fitted. A reading above its baseline is RED; raising a baseline above the git-HEAD value is also RED. Lowering a baseline is the intended direction and requires no ceremony, but the file change must still be committed (see the checker's --json for the live reading).",
+  "valueSccs": 1,
+  "typeSccs": 2,
+  "reverseEdges": 0
+}
