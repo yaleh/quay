@@ -22,6 +22,6 @@ depends_on:
 ## DoD
 真实落地：在真实记忆目录上完成，`MEMORY.md` 已为热点索引，`archive/` 存在且文件数与 manifest 行数一致；观察期起点（日期）写入 manifest 头部，观察期 14 天内若归档文件被找回则移回并记为「误归档」。
 ## Touches
-- orchestration/context-slimming/p2-archive-manifest.tsv
-- orchestration/context-slimming/p2-archive-selfcheck.sh
+- orchestration/context-slimming/p2-archive-manifest.tsv (new)
+- orchestration/context-slimming/p2-archive-selfcheck.sh (new)
 - tasks/gap-context-slim-p2-memory-archive.md
