@@ -2,7 +2,7 @@
 id: AC-306
 title: 仪器 0c 落地：arch-coverage-report 存在、--selftest 能取假、真实仓库根 --json 给出 ts/sh/mjs
   三行的 analyzed|NOT-EVALUATED 状态
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -17,6 +17,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase
   0c。实测缘由：archguard 默认 global scope 只指向 packages/quay/src，plugin/scripts 是独立
   scope 且被当成单个 (root) 包；约 300 个手写 .mjs/.js 与 144 个 .sh 完全不被解析——「0 环」只能读作「未评估」。
 activatedAt: 2026-09-19T05:29:19.270Z
+statusLog:
+  - at: 2026-09-19T09:33:47.539Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **对应任务**：`gap-arch-coverage-self-report`（已立案）。
 
