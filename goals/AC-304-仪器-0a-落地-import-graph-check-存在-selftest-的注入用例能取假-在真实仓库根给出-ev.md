@@ -2,7 +2,7 @@
 id: AC-304
 title: 仪器 0a 落地：import-graph-check 存在、--selftest 的注入用例能取假、在真实仓库根给出
   evaluated:true 且 edges>0 的有效读数
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-025
 criterion: |
@@ -18,6 +18,12 @@ origin: SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase
   3 个文件级 SCC——该工具输出词表里没有「未评估」一态（硬规则 3b）。本条只判「仪器建成且能取假」（建成即不撤销，故不带
   long-term）；它读的量（环数/反向边数）由 AC-307/308 判。
 activatedAt: 2026-09-19T05:29:16.003Z
+statusLog:
+  - at: 2026-09-19T07:21:39.555Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **对应任务**：`gap-arch-import-graph-check`（已立案）。
 
