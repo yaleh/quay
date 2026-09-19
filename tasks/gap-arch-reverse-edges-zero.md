@@ -73,17 +73,21 @@ git ls-files 'packages/**/*.ts' | grep -vE '\.test\.|/test/' | while read f; do
 - plugin/scripts/worktree-process-reaper.ts
 - plugin/scripts/driver-shared.ts
 - plugin/scripts/mirror-pair-drift-allowlist.json
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/develop-deliver-tgz.sh
 - experiments/quay-perpetual-stream/scripts/write-json-atomic.ts
 - packages/quay/scripts/build-dist.mjs
 - packages/quay/scripts/esbuild-sea.mjs
 - plugin/import-graph-baseline.json
 - plugin/test/worktree-process-reaper.test.mjs
 - plugin/test/suite-slot-ssot-check.test.mjs
+- plugin/test/promotion-driver-s08.test.mjs
+- plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
 - packages/quay-native/test/gate-shape-dispatch.test.mjs
 - packages/quay/test/serve.test.mjs
 - tasks/gap-arch-reverse-edges-zero.md
 
-（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本；另按 scoped 门实测结果补入 mirror-pair 的两处落点 —— 见 Notes §「scoped 门红」。`mirror-pair-drift-allowlist.json` 最终**内容未变**，但它是本轮实际编辑过的路径，按纪律仍留在清单里。）
+（若实现者把 kernel 拆成别的模块名，新增文件仍属本任务 Touches，须在同一次编辑里补进本清单。已按 §8-①b 的裁定结果补入 `kernel/control-state.ts`、`kernel/control-plane-http.ts`、`plugin/scripts/driver-shared.ts`，以及随注释修正一并改动的两个构建脚本；另按 scoped 门实测结果补入 mirror-pair 的两处落点 —— 见 Notes §「scoped 门红」。`mirror-pair-drift-allowlist.json` 最终**内容未变**，但它是本轮实际编辑过的路径，按纪律仍留在清单里。**第 2 轮**（fan-in suite 红：两条与本改动真实相关的回归面）另补入 `capability-catalog.sh`（失效前提句被本改动打成字面命中）、`develop-deliver-tgz.sh`（运送闭集的实现落点 + 成员判定）、以及两条回归面测试 —— 见 Notes §「第 2 轮」。）
 
 ## AC
 
@@ -229,3 +233,46 @@ DRIFT: plugin/scripts/write-json-atomic.ts vs experiments/quay-perpetual-stream/
 ### 与 Proposal 5 条边的对账
 
 实现后 5 条边全部消失，**无一条为凑数而被改检查器**：`serve.ts` 三条 → `./kernel/{control-plane-http,write-json-atomic,proc-identity}.ts`；`server-state.ts` 一条 → `./kernel/write-json-atomic.ts`；`packages/quay-native/src/store.ts` 一条 → `../../quay/src/kernel/shape-sections.ts`。Proposal 表格的行号（`:36/:38/:42/:38/:42`）与实现前实测一致，未出现差异。
+
+### 第 2 轮（fan-in suite 红 = `fail 2`：两条**都是本改动引起的真实回归**，⛔ 不是环境问题）
+
+上一轮 exited-not-landed 的 suite 红是 `fail 2`，两条都落在**本改动真实触及的判据面**上。delta 提示两条都标 `UNRELATED`（测试文件不在 Touches、单跳 import 不相交）—— **提示这次是错的**，而且错得有结构原因：这两条判据读的都不是 import 图（一条 grep 源码字面量、一条跑 shell 的运送闭集自检），所以「单跳 import 不相交」这个谓词对它们**按构造取不到真**。按纪律**先在 worktree 里各复跑一遍**确认可复现，才动手。
+
+**① `promotion-driver-s08.test.mjs` AC150-3 —— 判据把「一份实现」钉在了文件位置上。**
+原断言 `assert.match(sharedSrc, /export function isHalted/)`（sharedSrc = `driver-shared.ts`）。本改动把 halt 实现下沉 kernel（现 `packages/quay/src/kernel/control-state.ts:149`），`driver-shared.ts` 改为 `export *` 转出 ⇒ 该断言按字面取假，**而「单份实现」这个不变量仍然成立**（函数级 identity 的两条断言本来就通过，本轮的失败点只有这一条位置 grep）。
+修正 = 断言改成「**每条判定各只有一处 DEFINITION**」：`resourceGateCheck` ∈ `driver-shared.ts`、`isHalted` ∈ `kernel/control-state.ts`，其余三处 `doesNotMatch` 一字未动（复制粘贴仍取假），并**新增**一条转出口断言 `export * from "../../packages/quay/src/kernel/control-state.ts"`（否则该文件可以悄悄变成一个 stub，而 identity 断言会因为 stub 恰好等于 worker 侧那条链而仍然通过）。
+⚠️ **AC150-3 的判据正本未改，也无需改**：`orchestration/manager-phase-goal.md:1150` 与 `goals/AC-150-*.md:25` 写的是「**必须是与 worker-driver 共用的同一份**（函数级复用，不是复制粘贴）。**⊢ 本条是给下一阶段分层留的接口：先共用，再上收**」——**位置无关**，而本改动正是它预留的「再上收」，按原判据仍成立。
+⛔ **没有为了变绿而放宽**：新断言比原来**多**一条（转出口），取假面比原来更宽。同轮 5b 扫过 `plugin/test/worker-driver-fan-in-s01.test.mjs` 与 driver 测试 harness 里的同形断言 —— 两者用的是**函数引用 identity**、不是位置 grep ⇒ 本来就对，不动。
+
+**② 运送闭集（shipped-set closure）—— 本改动第一次把一条「跨树相对 import」带进了跨机运送集。**
+`plugin/scripts/write-json-atomic.ts` 现在是 re-export shim（内容 = `export * from "../../packages/quay/src/kernel/write-json-atomic.ts"`）。`develop-deliver-tgz.sh` 把这个集合**扁平** scp 到远端 `$HOME/`（`scp "${flat[@]}" "${target}:~/"`）⇒ 远端那份 shim 会去找 `$HOME/../..` 下的 `/packages/...` ⇒ **远端 MODULE_NOT_FOUND，而本地全绿**。这正是任务体点名要防的形态（「把一条能被 import 图读到的边，改成在消费者里解析不到的边」），只不过消费者是跨机运送面而不是 dist。自检如实地报了它：
+`IMPORT-UNSHIPPED: write-json-atomic.ts imports ../../packages/quay/src/kernel/write-json-atomic.ts — not in the shipped set`。
+
+**修因（两处，都不是把检查器调绿）**：
+- **`transport_flat_files`**：该条由 `plugin/scripts/write-json-atomic.ts`（shim）改为 `packages/quay/src/kernel/write-json-atomic.ts`（**实现叶子** —— 只 import `node:fs/node:path/node:crypto`，扁平下去自足）。扁平运送使两者落点同名 `$HOME/write-json-atomic.ts`，两个远端消费者（`verify-deliver-coldstart.sh` 的 `$SCRIPT_DIR/write-json-atomic.ts`、`runner-state-write.ts` 的 `./write-json-atomic.ts`）**都仍解析得到**。⚠️ 该清单里**本来就有**一条树外条目（SPEC 的 `.md`）⇒「条目可以不在 `$SCRIPT_DIR` 下」不是新造的先例，只是第一次用在 `.ts` 上。
+- **成员判定改为按「远端名」**：原判据 `in_shipped "${SCRIPT_DIR}/${imp#./}"` 把**本地路径**当成了**远端路径** —— 在全部条目都住 `$SCRIPT_DIR/` 时恰好等价，一旦有树外条目就变成**假红**（会把一条正确运送的文件报成未运送，而它的「修法」是把该文件**撤出**运送集）。改为按 basename 判定，这正是它自己注释写的意图（"a ./ relative import that is itself shipped"）；**同时**把 `../` 与 `./sub/x` 拆成两条独立判词（`IMPORT-ESCAPES-REMOTE` / 平面布局无子目录），因为对扁平远端两者有**不同的修法**。⛔ **不是放宽**：`../` 在扁平远端按构造解析到 `$HOME` 之外，**仍然报红**。
+
+**负控制（新分支必须能取假，实测两轮 + 还原）**：临时往 `plugin/scripts/repo-root.ts` 各追加一条 import，跑 `--selfcheck-transport-closure`，随后 `git checkout --` 还原（`diff` 对备份逐字相同）：
+```
+追加 export * from "../../packages/quay/src/kernel/write-json-atomic.ts";
+  ⇒ positive → violations=1（⛔ 期望 0）；IMPORT-ESCAPES-REMOTE: repo-root.ts imports … ⇒ FAIL
+追加 import "./nope/x.ts";
+  ⇒ positive → violations=1；IMPORT-UNSHIPPED: repo-root.ts imports ./nope/x.ts — the remote layout is flat ⇒ FAIL
+还原后 ⇒ positive → violations=0；6 组控制全部按期望取值；PASS（exit 0）
+```
+⇒ 新分支**实测能取假**，且**原缺陷形态仍被抓住**（只是换成了更精确的判词）。
+
+**两个独立读法互校（硬规则 4）**：`--selfcheck-transport-closure` 的 `positive → violations=0`（判据本体）与测试 ⑥ 里**镜像 `transport_flat_files()` 推导出的** `drop-gate-script-base → violations=3`（= 消费者中值-import `./gate-script-base.ts` 的 shipped `.ts` 数，**不是钉死的字面量**）一致。同轮把测试 ⑥ 的镜像捕获从「basename 形」改为「相对 `plugin/scripts` 的路径形」—— 否则该镜像会把树外那条**静默漏掉**，两个读法就会**靠遗漏而一致**（那正是这条测试自己的注释在防的形态）。
+
+**③ 5b 扫描（修好一个 ≠ 只有这一个）：`capability-catalog.sh` 的失效前提句被本改动打成字面命中。**
+`[write-json-atomic.ts]` 的失效前提含触发句「**若 … state 写载体迁出 plugin/scripts/，本条退休**」——本改动正是把**实现**迁出 `plugin/scripts`。逐条查其余被搬模块：`shape-sections.ts` / `worktree-process-reaper.ts` 的前提都是「无可测前提，靠周期复核」⇒ **只有这一条命中**。
+**处置 = 改写前提并在句内写明读法（既不静默退休，也不静默无视）**：本条的**断言对象**（本路径仍是 plugin 侧取用 `writeJsonAtomic` 的唯一入口）**未失去** ⇒ 不退休；判据由「实现在哪个目录」改成「本路径是否仍是唯一入口」。
+⚠️ **这是扩范围的动作，理由与两种读法都写在句内，并明确标为可被推翻**：字面条件成立、而后果（退休）会让一个**活着的机件从清册里消失**，那比留一句不精确的前提更贵。
+同轮还实测到该前提**原有的 import 者名单已经失真**（两处都**不是**本改动造成的：`driver-shared.ts` 现经 `kernel/control-state.ts` 间接取用、不再直接 import 本路径；`proposal-convergence.ts` 早已 import 本路径却从来不在名单里）⇒ 句内已标注「前提里不要再钉死 import 者名单或处数」。
+`capability-catalog.sh --summary` 复跑 = `341 scripts | 341 declared | 0 unclassified | 336 ship`，与主检出**逐字相同** ⇒ DoD 的该条仍成立。（该文件自 2026-09-10 起不在 quay-init 的 `LAYDOWN_SOURCES` 里，改它不触发 closure-ratchet ⇒ 无需 `--reanchor`。）
+
+**本轮回归面（改动后实测）**：
+- `node --test plugin/test/promotion-driver-s08.test.mjs` ⇒ **5 pass / 0 fail**
+- `node --test plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` ⇒ **20 pass / 0 fail**
+- `bash plugin/scripts/develop-deliver-tgz.sh --selfcheck-transport-closure` ⇒ exit 0，PASS
+- `bash -n` 两个被改的 shell 文件 ⇒ 语法 OK
