@@ -67,7 +67,7 @@ goal_ac: AC-304
 
 ## Notes
 
-**落地 2026-09-19** — 分支 `task/gap-arch-import-graph-check`，最终 commit `b96b3ce37`（6 个实现提交 + 1 个 develop 合并提交）。工作树 `git status` 干净（无未提交的 tracked 改动）。
+**落地 2026-09-19** — 分支 `task/gap-arch-import-graph-check`（6 个提交，全部 cherry-pick 到本地 `develop` 之上，见 §7）。工作树 `git status` 干净。
 
 ### 1. 与任务体三个「正则先验」的对账 —— 逐条命中，无一条需要处置
 
@@ -83,7 +83,7 @@ goal_ac: AC-304
 
 ⇒ **没有一条是正则误判，也没有新发现**，因此没有逐条对账表可写（无差异可对）。
 
-一次完整读数（develop 合并后）：`files=428 edges=1039`（value 930 / type 109）；`kernelChecked=false`（`packages/quay/src/kernel/` 尚未落地 ⇒ **显式 false，不与「已检查且合格」同形**）；`notAnalyzed={mjs:35,js:11}`；`dangling` = 3 条悬空符号链接（`experiments/quay-perpetual-stream/scripts/git-lens-l-{d,g,s}-*.ts` —— 归档后只剩符链，**列出而非静默丢弃**，且不因此判 NOT-EVALUATED：那是仓库自身的状态，不是检查器读不懂输入）。
+一次完整读数：`files=428 edges=1039`（value 930 / type 109）；`kernelChecked=false`（`packages/quay/src/kernel/` 尚未落地 ⇒ **显式 false，不与「已检查且合格」同形**）；`notAnalyzed={mjs:35,js:11}`；`dangling` = 3 条悬空符号链接（`experiments/quay-perpetual-stream/scripts/git-lens-l-{d,g,s}-*.ts` —— 归档后只剩符链，**列出而非静默丢弃**，且不因此判 NOT-EVALUATED：那是仓库自身的状态，不是检查器读不懂输入）。
 
 ### 2. AC6 四件套（命令与结果）
 
@@ -94,7 +94,7 @@ goal_ac: AC-304
 | `bash plugin/scripts/checker-mutation-check.sh --check` | **exit 0**（`checkers_total: 81 / checkers_with_mutation: 81 / uncovered: 0 / mutations_that_stayed_green: 0`） |
 | `grep -n "import-graph-check" plugin/scripts/runner-static-gate.ts` | **位置命中** `:969` 的 `run_checker "import-graph-check" …` 调用行（在 `run_static_checks` 函数体内，非注释） |
 
-同族连带（非 AC6 但同族义务，全绿）：`rhythm-consumer-check --check` exit 0（判据1：「每轮」有真实调用点，否则它判红）；`instrument-failure-check --gate` FAMILY 1–5 全在 shrink-only 基线内（新写的 catalog 值未产生 FAMILY-5 命中）；`checker-mechanical-spine-check` exit 0；`test-impl-census-check` exit 0；`test-framework-policy-check` exit 0。
+同族连带（非 AC6 但同族义务，全绿）：`rhythm-consumer-check --check` exit 0（判据1：「每轮」有真实调用点，否则它判红）；`instrument-failure-check --gate` FAMILY 1–5 全在 shrink-only 基线内（新写的 catalog 值未产生 FAMILY-5 命中）；`checker-mechanical-spine-check` exit 0；`test-impl-census-check` exit 0；`test-framework-policy-check` exit 0；`anti-drift-touches-check --merge-target develop` exit 0（§7）。
 
 ### 3. AC7 生产载体（套件静态层**真实执行**，非 fixture）
 
@@ -106,7 +106,7 @@ $ bash scripts/test.sh --for-task gap-arch-import-graph-check --allow-thin
 import-graph-check: files=428 edges=1039 (value 930 / type 109)
 PASS — valueSccs=1 ≤ 1, typeSccs=2 ≤ 2, reverseEdges=5 ≤ 5 (headBaseline {"valueSccs":1,"typeSccs":2,"reverseEdges":5})
 ...  ℹ tests 36 · pass 36 · fail 0
-FINAL exit=0     （全文 /tmp/igc-final.log；`STATIC_CHECK_FAILED` 行数 = 0）
+RW exit=0     （全文 /tmp/igc-final-rw.log；`STATIC_CHECK_FAILED` 行数 = 0）
 ```
 
 三点是关键：①它是被 **scoped 选择器选中并真实执行**的（不只是被登记在注册表里）；②`headBaseline` **不是 bootstrap** —— 基线文件已随本任务提交，所以「相对 HEAD 只许降」这条规则在这次运行里**是活的**；③判 PASS 靠的是 **读数 ≤ 基线**，不是自证。该结论与 `--selftest` 的注入 seam 无关（`--selftest` 是独立子命令，主路径不经过它）。
@@ -118,7 +118,7 @@ FINAL exit=0     （全文 /tmp/igc-final.log；`STATIC_CHECK_FAILED` 行数 = 0
 - `packages/quay/src/zz-negative-control.ts`：`import { writeJsonAtomic } from "../../../plugin/scripts/write-json-atomic.ts"`（人造反向边）
 - `plugin/scripts/zz-nc-cycle-a.ts` ↔ `plugin/scripts/zz-nc-cycle-b.ts`：互相值导入（人造值环）
 
-**红**（注入态，同一条 scoped 命令，跑在最终代码上）：
+**红**（注入态，同一条 scoped 命令）：
 ```
 import-graph-check: files=431 edges=1042 (value 933 / type 109)
   value SCC: plugin/scripts/zz-nc-cycle-a.ts, plugin/scripts/zz-nc-cycle-b.ts
@@ -135,7 +135,7 @@ import-graph-check: files=428 edges=1039 (value 930 / type 109)
 PASS — valueSccs=1 ≤ 1, typeSccs=2 ≤ 2, reverseEdges=5 ≤ 5 (headBaseline {...})
 green exit=0       （全文 /tmp/igc-green.log）
 ```
-⇒ 红/绿两半**跑在同一个提交（`e0d252b41`）上**，是同一个命令的前后对照。
+⇒ 红/绿两半是**同一条命令在同一棵树上的前后对照**；两半所依据的**本任务 6 个文件**与最终分支上的**逐字相同**（§7 有 `git diff` 证据），且读数完全相同（428/1039，因为 release 线改的不是任何 `.ts`）。
 
 **另外三组独立对照（同一结论的其它方向）**：
 - `--baseline` 指向三值全 0 的基线 ⇒ `exit 1` 并逐条报 `valueSccs 1 > baseline 0; typeSccs 2 > baseline 0; reverseEdges 5 > baseline 0`；指向宽松基线 ⇒ `exit 0`；指向不存在的文件 ⇒ `exit 2` + `NOT-EVALUATED`（**不与「≤ 基线」同形**）。
@@ -144,7 +144,7 @@ green exit=0       （全文 /tmp/igc-green.log）
 
 **DoD 其余两条**：
 - `bash plugin/scripts/capability-catalog.sh --summary` → `341 scripts | 341 declared | 0 unclassified | 336 ship`。落地前同一读法（`git ls-tree` 于 `develop`，按 catalog 自身的 find 口径排除 `checker-mutation-cases/` 与 `archive/`）= **340** ⇒ **+1**，且 **UNCLASSIFIED = 0**。
-- **未修改任何 `packages/**` 生产代码**：`git diff --name-only develop...HEAD` 中属于本任务的 7 个文件全部在 `## Touches` 内，无 `packages/**` 条目（负控制注入的两个 `packages/`/`plugin/scripts/` 文件已 `git reset` + 删除，工作树干净）。
+- **未修改任何 `packages/**` 生产代码**：`git diff --name-only develop..HEAD` = **恰好 6 个文件**，全在 `## Touches` 内，无 `packages/**` 条目（负控制注入的两个文件已 `git reset` + 删除，工作树干净）。
 
 ### 5. AC4 去重的直接读数
 
@@ -155,11 +155,24 @@ green exit=0       （全文 /tmp/igc-green.log）
 ### 6. 实现过程中由**套件/自检**（不是我的 inspection）暴露并修掉的三个缺陷
 
 1. **`test-impl-census-check` 把我自己的测试判红。** `plugin/test/import-graph-check.test.mjs` 的 fixture 里**逐字写**了 `from "../../../plugin/scripts/y.ts"` 这类路径，而 `test-impl-census-check.ts` 会从每个测试文件里抽出 `from "…/scripts/<name>"` 字面量、磁盘上找不到对应实现即判红 —— **fixture 路径不是 import**。修法：fixture 的说明符**在运行时拼出来**（`pkgToPlugin()` / `siblingPlugin()`），被测形状（`packages/` 伸进 `plugin/scripts/`）一字未改。
-2. **`--json` 里混进了人类可读行。** `PASS — valueSccs=1 ≤ 1, …` 被写在 JSON 对象**之后**的 stdout 上，于是 `import-graph-check --json | jq .` 报 `Unexpected non-whitespace character after JSON` **而检查器退出码是 0** —— 一次**通过的**运行打断机器消费方，且直接违反本任务自己声明的 CLI 契约。修法：两个 `--json` 面（读数与 `--selftest`）都只输出那个 JSON 文档，人类行以 `!asJson` 为闸。加了**两条测试**把它钉住（`--json` 的整段 stdout 必须能 `JSON.parse`；非 JSON 读数仍须带人类判定行）。
+2. **`--json` 里混进了人类可读行。** `PASS — valueSccs=1 ≤ 1, …` 被写在 JSON 对象**之后**的 stdout 上，于是 `import-graph-check --json | jq .` 报 `Unexpected non-whitespace character after JSON` **而检查器退出码是 0** —— 一次**通过的**运行打断机器消费方，且直接违反本任务自己声明的 CLI 契约。修法：两个 `--json` 面（读数与 `--selftest`）都只输出那个 JSON 文档，人类行以 `!asJson` 为闸。加了**两条测试**把它钉住。
 3. **AC4 的「唯一」原来可能被 Set 静默吸收。** 原测试把节点收进 `Set` 再断言，而「同一路径出现两次」正是 Set 会悄悄吞掉的失败形态。改成对**扁平列表**断言（SCC 成员零重复 + 反向边三元组零重复），重复即红。
 
-另有两次**只有实测才会暴露**的实现修正：`import` 语句的定位原本只锚在关键字上，于是 `export const doc = 'import { b } from "./b.ts";'` 这样的**字符串字面量**会被读出一条模块边 —— 现在**关键字与 `from` 两处**都必须在代码位置（AC1 的注释/字符串负控用例钉住它）；以及「未闭合的 `[^;]*?` 会把两条无分号语句并成一条」（本仓库无分号风格）—— 由单测钉住。
+另有两次**只有实测才会暴露**的实现修正：`import` 语句的定位原本只锚在关键字上，于是 `export const doc = 'import { b } from "./b.ts";'` 这样的**字符串字面量**会被读出一条模块边 —— 现在**关键字与 `from` 两处**都必须在代码位置（AC1 的注释/字符串负控制用例钉住它）；以及「未闭合的 `[^;]*?` 会把两条无分号语句并成一条」（本仓库无分号风格）—— 由单测钉住。
 
-### 7. 一处与实现无关、但会影响读数的仓库状态（记录，不处置）
+### 7. 一个真实的落地阻塞：worktree 的 fork 点选错（已修，值得复现者读）
 
-本地 `develop` 与 `origin/develop` 当前**已分叉**：`origin/develop` 带 v0.10.0 release 线（`8c7b85e79` / `4c8116632` / `225c81e17`），本地 `develop` 不带、多两条 `task_write` 提交。本分支与**同级任务分支同形**（都 fork 自 `origin/develop`、再 merge 本地 `develop`），不是本任务引入的。⚠️ 因此 `git diff develop..HEAD` 会显示一批**不属于本任务**的版本号文件；判断本任务的真实增量请用 `## Touches` 的 7 条逐一核对，不要用那个 diff 的条目数。
+**现象**：`anti-drift-touches-check --task … --merge-target develop` **HARD FAIL**，13 条 `out-of-declared`，全部是版本号文件（`.claude-plugin/marketplace.json` / `package-lock.json` / `packages/*/package.json` / `plugin/VERSION` / `plugin/vendor/quay/package.json` / …）。driver 的机械 fan-in **step 3 就是这一步** ⇒ 会直接拒翻。
+
+**真因**：本 worktree 用 **`git worktree add -b … origin/develop`** 建，而本仓库**本地 `develop` 与 `origin/develop` 已分叉** —— `origin/develop` 带 v0.10.0 release 线（`8c7b85e79` / `4c8116632` / `225c81e17`，`plugin/VERSION` = `0.11.0-dev`），本地 `develop` **不带**（`plugin/VERSION` = `0.10.0-dev`），而 driver 的 merge target 默认就是本地 `develop`（`worker-driver.ts:4534`）。于是 `git diff develop...HEAD` 除我的 6 个文件外，还包含 **release 线对那批文件的改动** —— 那是**主干的分叉**，不是本任务的写入面。
+
+**修法（可复现）**：
+```
+git checkout -B task/<id> develop
+git cherry-pick <本任务的每个非 merge 提交>
+```
+⛔ **不要**用 `git rebase --onto develop <fork-origin>`：`<fork-origin>..HEAD` 的范围里包含 origin/develop 那 60+ 个**不属于本任务**的提交，rebase 会去重放它们并在 `tasks/*.md` 上撞 add/add 冲突（实测 `Rebasing (1/66)` 即冲突）。
+
+**结果**：`git diff --name-only develop..HEAD` = **恰好 6 个文件**；`anti-drift-touches-check --task … --merge-target develop` → `ANTI-DRIFT OK: task gap-arch-import-graph-check — 6 actual file(s), all within declared Touches (7 glob(s))` exit 0；6 个文件的**内容与重写前逐字相同**（`git diff backup/igc-pre-rebase HEAD -- <每个文件>` 全空），检查器读数不变（428/1039，三值均等于基线），scoped 门重跑 **exit 0**（36/36 测试）。
+
+**为什么值得写下来**：`dispatch-worktree-setup.sh` 当时报的是 **`fork-point PASS`**，所以这个错**不会被建树这一步拦住**；它只在 fan-in 的 anti-drift 才现形，而那时的表象（一串版本号文件）与真因（fork 点选了 `origin/develop`，而权威基线与 merge target 都是本地 `develop`）**完全不同形**。本仓库凡「本地 develop 落后 origin/develop」的时段，任何 fork 自 `origin/develop` 的任务都会撞同一堵墙。
