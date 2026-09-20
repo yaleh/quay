@@ -2,7 +2,7 @@
 id: gap-anti-drift-touches-project-configurable-exempt-globs
 title: anti-drift-touches-check 支持目标项目在 .quay/config.yml 配置 anti_drift.exempt
   glob 豁免（barrel 等异常文件与 Touches 互相卡死）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
