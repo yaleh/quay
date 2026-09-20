@@ -3,7 +3,7 @@ id: gap-ac261-criterion-reads-unowned-local-dist-plugin-ref
 title: AC-261 恒假的仪器失败：criterion 读【无主】本地 dist-plugin
   ref（publish-dist-branch.sh:97 每次 branch -D 删它）⇒ 改读渠道 ref；四条实质臂实测已全绿，唯一假红来自 ref
   解析
-status: todo
+status: ready
 labels:
   - gap
   - defect
