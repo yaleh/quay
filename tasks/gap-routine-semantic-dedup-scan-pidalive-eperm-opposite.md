@@ -29,6 +29,10 @@ Three copies treat EPERM as alive (exists-but-not-ours) and are byte-identical, 
 - kind：`divergent-implementation`
 - verdict：`divergent-implementation`
 
+**⚠️ 这是同一条判定的第四轮**（前三次：`pidalive-eperm-divergence` 09-13、`pidalive-eperm-dead-vs-alive` 09-17、
+`pidalive-twin` 09-18）。前几轮未落地 ⇒ 本轮按「修掉」处置，并留一条可判别的回归钉，
+⛔ 不以「已注意到」结案（AC2 的原文要求）。
+
 ## Requested action
 merge
 
@@ -45,4 +49,5 @@ merge
 - `packages/quay/src/server-state.ts`
 - `plugin/scripts/start-drivers.ts`
 - `plugin/scripts/server-partial-stop-verify.ts`
+- `plugin/test/driver-runtime-s03.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-pidalive-eperm-opposite.md`
