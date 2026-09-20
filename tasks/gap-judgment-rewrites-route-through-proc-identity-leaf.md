@@ -2,7 +2,7 @@
 id: gap-judgment-rewrites-route-through-proc-identity-leaf
 title: ~6 处真 TS 站点手搓 /proc/&lt;pid&gt;/cmdline，未走 kernel leaf
   proc-identity.ts；同时收窄判定重写指纹使纯快照收集器出列
-status: todo
+status: ready
 labels:
   - gap
   - defect
