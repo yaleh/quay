@@ -7,7 +7,9 @@
 //   (b) 判定重写数: 按「读取的外部事实集合」给代码块建指纹 (例: 读 /proc/<pid>/cmdline ∧ 比较名字
 //       = 识别某进程), 同指纹的多处独立实现计数为判定重写。
 // 另报: 路径字面量常量 (产品源码硬编码 ../../../plugin/scripts/* 的 *_REL 常量, import 图上不可见)、
-//   plugin/scripts ↔ experiments/*/scripts 字节完全相同文件对、以及共享模块负控制 (gate-script-base.ts
+//   plugin/scripts ↔ experiments/*/scripts 字节完全相同文件对 (只计【两侧都是常规文件】的同名对——
+//   任一侧是软链就是单一来源引用/同一 inode, 逐字节比对等于文件和自己比, 不是「复制替代抽象」的证据;
+//   规则与 mirror-pair-drift-check.ts 取同一判定)、以及共享模块负控制 (gate-script-base.ts
 //   经单一 import 访问器被引用, 不得报高复制度)。
 //
 // 每个计数都内建「打印命中样本」纪律 (docs 附录 A): 报一个计数时同时报出它匹配到的前若干条实际内容,
@@ -231,31 +233,66 @@ export interface ByteIdenticalPair {
   lines: number;
 }
 
-export function findByteIdenticalPairs(root: string): { pairs: ByteIdenticalPair[]; totalLines: number } {
+/** 直接子条目的名字, 按【常规文件】与【全部条目】两个集合返回。
+ *  常规文件判定用 `Dirent.isFile()` —— 它是 lstat/d_type 级的 (符号链接报 isFile() === false),
+ *  不是跟随软链后的 stat, 因此【不依赖链接指向哪里】(悬空链与指向本目录的链一律排除)。
+ *  目录不可读 ⇒ 两个空集 (没有名字, 不是崩溃; 由调用方按「无候选」处理, 不与「扫过且无命中」混淆)。 */
+function mirrorDirNames(dir: string): { regular: Set<string>; all: Set<string> } {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    return {
+      regular: new Set(entries.filter((d) => d.isFile()).map((d) => d.name)),
+      all: new Set(entries.map((d) => d.name)),
+    };
+  } catch {
+    return { regular: new Set(), all: new Set() };
+  }
+}
+
+export function findByteIdenticalPairs(
+  root: string,
+): { pairs: ByteIdenticalPair[]; totalLines: number; symlinksSkipped: number } {
   const scriptsDir = path.join(root, "plugin", "scripts");
-  const exps: string[] = [];
+  // 任一侧是【软链】的条目不是 pair —— 它是单一来源引用 (同一 inode), 逐字节比对等于文件和自己比,
+  // 会把「单源」读成「复制替代抽象」的最强证据。规则正本 = mirror-pair-drift-check.ts 头注释:
+  // "a SYMLINK on either side is NOT a pair — it is a single-source reference (the same file), so it
+  // cannot drift; the checker excludes it rather than comparing a file against itself." 本处用同一
+  // lstat 级谓词 (`Dirent.isFile()`) 取同一判定, 但【不共享代码】—— 该检查器把镜像目录写死为
+  // quay-perpetual-stream, 本检查器扫 experiments/*/scripts 全部镜像目录, 遍历面不同。
+  const exps: { dir: string; regular: Set<string>; all: Set<string> }[] = [];
   const expRoot = path.join(root, "experiments");
   if (fs.existsSync(expRoot)) {
     for (const e of fs.readdirSync(expRoot, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
       const s = path.join(expRoot, e.name, "scripts");
-      if (fs.existsSync(s)) exps.push(s);
+      if (fs.existsSync(s)) exps.push({ dir: s, ...mirrorDirNames(s) });
     }
   }
   const pairs: ByteIdenticalPair[] = [];
   let totalLines = 0;
+  let symlinksSkipped = 0;
   let names: string[] = [];
   try {
-    names = fs.readdirSync(scriptsDir).filter((n) => /\.(ts|sh|mjs)$/.test(n)).sort();
+    // 左侧同样只取常规文件 (对称: "a SYMLINK on EITHER side is NOT a pair")。
+    names = fs
+      .readdirSync(scriptsDir, { withFileTypes: true })
+      .filter((d) => d.isFile() && /\.(ts|sh|mjs)$/.test(d.name))
+      .map((d) => d.name)
+      .sort();
   } catch {
-    return { pairs, totalLines };
+    return { pairs, totalLines, symlinksSkipped };
   }
   for (const name of names) {
     const pluginFile = path.join(scriptsDir, name);
     const pluginBuf = fs.readFileSync(pluginFile);
-    for (const s of exps) {
-      const cand = path.join(s, name);
-      if (!fs.existsSync(cand)) continue;
+    for (const { dir, regular, all } of exps) {
+      if (!regular.has(name)) {
+        // 同名但非常规文件 (软链/目录) ⇒ 按规则跳过, 且【计数】而不是静默丢弃:
+        // 报告里 "0 对" 与 "镜像目录不存在" 必须可区分 (hard rule 3b)。
+        if (all.has(name)) symlinksSkipped++;
+        continue;
+      }
+      const cand = path.join(dir, name);
       const candBuf = fs.readFileSync(cand);
       if (pluginBuf.equals(candBuf)) {
         const lines = pluginBuf.toString("utf8").split("\n").length - 1;
@@ -264,7 +301,7 @@ export function findByteIdenticalPairs(root: string): { pairs: ByteIdenticalPair
       }
     }
   }
-  return { pairs, totalLines };
+  return { pairs, totalLines, symlinksSkipped };
 }
 
 // ── (a) 字面量复制度 (AC5: full vs code 分列; 单一访问器 vs 硬编码) ───────────────────────────
@@ -392,7 +429,13 @@ export interface Report {
   root: string;
   pathConstants: PathConstant[];
   judgmentRewrites: JudgmentRewrite[];
-  byteIdentical: { count: number; totalLines: number; pairs: ByteIdenticalPair[] };
+  byteIdentical: {
+    count: number;
+    totalLines: number;
+    pairs: ByteIdenticalPair[];
+    // 同名但 experiments 侧是软链/目录而跳过的条目数 —— 使 "0 对" 与 "镜像不存在" 可区分 (hard rule 3b)。
+    symlinksSkipped: number;
+  };
   literalReplication: { sessionLiveness: LiteralReplication; gateScriptBase: LiteralReplication };
   sharedModuleControl: SharedModuleControl;
   table: LiteralReplication[];
@@ -439,6 +482,7 @@ export function run(root: string, limit: number): Report {
       count: byteIdenticalRaw.pairs.length,
       totalLines: byteIdenticalRaw.totalLines,
       pairs: byteIdenticalRaw.pairs,
+      symlinksSkipped: byteIdenticalRaw.symlinksSkipped,
     },
     literalReplication: { sessionLiveness, gateScriptBase },
     sharedModuleControl: sharedModule,
@@ -473,7 +517,10 @@ function printHuman(report: Report): void {
   console.log(`\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ${report.judgmentRewrites.length} 处 ==`);
   for (const j of report.judgmentRewrites) console.log(`  ${j.file}:${j.line}`);
 
-  console.log(`\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ==`);
+  console.log(
+    `\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ` +
+      `(跳过 ${report.byteIdentical.symlinksSkipped} 个软链条目: 单一来源引用, 非 pair) ==`,
+  );
   for (const p of report.byteIdentical.pairs.slice(0, 5)) console.log(`  ${p.plugin}  ==  ${p.experiment}  (${p.lines} 行)`);
   if (report.byteIdentical.count > 5) console.log(`  … 及另外 ${report.byteIdentical.count - 5} 对`);
 
