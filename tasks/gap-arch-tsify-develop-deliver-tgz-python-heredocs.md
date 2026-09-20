@@ -2,7 +2,7 @@
 id: gap-arch-tsify-develop-deliver-tgz-python-heredocs
 title: shell→TS（SPEC Phase 5.3 第一阶段）：develop-deliver-tgz.sh 的 10 个内嵌 python3
   heredoc 抽成独立 .ts，编排保留 bash
-status: ready
+status: done
 labels:
   - gap
 parent: null
