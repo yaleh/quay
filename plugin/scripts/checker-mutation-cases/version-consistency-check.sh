@@ -4,8 +4,9 @@
 # ── THE JUDGMENT (tasks/gap-version-single-source-root-file-and-resolver, 2026-09-20) ───────────
 # Was: every version-bearing artifact must carry the identical version (internal consistency).
 # Is:  every artifact must equal `resolveVersion(VERSION,'tracked')` — the SINGLE SOURCE at the repo
-#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 11 artifacts stamped with
-#      the derived tracked form (`1.0.0-dev`).
+#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 15 carrier entries (11 files
+#      — `package-lock.json` contributes four workspace members) stamped with the derived tracked form
+#      (`1.0.0-dev`).
 #
 # ⚠️ INVARIANT (two halves, both required — the second half is new):
 #   (a) the file set built below MUST cover the checker's VERSION_ENTRIES exactly — one artifact per
@@ -36,12 +37,16 @@
 #   indistinguishable. The prose carrier and the plain-text stamp each got such a path when they were
 #   added; the machine-field manifest was added without one, and the un-updated fixture is what
 #   surfaced as a whole-repo `always-red` instead. Restore → MUST exit 0 (GREEN).
+# Inject 7 (gap-version-stamp-generator-and-build-wiring): bump ONLY ONE of `package-lock.json`'s four
+#   workspace entries → drift → MUST exit 1 (RED). The lockfile was outside this union entirely until
+#   that task, so "the four entries were added" and "the four entries actually judge" is not a
+#   hypothetical distinction here. Same doctrine as Injects 2/3/4. Restore → MUST exit 0 (GREEN).
 # Inject 5 (AC5 counter-criterion, hard rule 4 推论三): DELETE `VERSION` — the checker must exit
 #   non-zero. This is the case that separates "the checker reads the production carrier" from "the
 #   checker echoes its own fixture": with the source gone there is nothing to agree with, and a
 #   checker that still exits 0 is proving only that it can read its own fixture. Restore → exit 0.
-# Inject 6 (THE NEW JUDGMENT'S BLIND SPOT — the reason this case exists after the change): bump ALL 11
-#   carriers to 1.0.1-dev while `VERSION` stays 1.0.0 — a UNIFORMLY stale tree. Under the OLD
+# Inject 6 (THE NEW JUDGMENT'S BLIND SPOT — the reason this case exists after the change): bump ALL 15
+#   carrier entries to 1.0.1-dev while `VERSION` stays 1.0.0 — a UNIFORMLY stale tree. Under the OLD
 #   "carriers agree with each other" rule this was GREEN (all equal!) and that is precisely the defect
 #   the single-source judgment was introduced to remove. MUST exit 1 (RED). Restore → exit 0 (GREEN).
 set -u
@@ -75,6 +80,13 @@ printf '%s\n' "${carrier_ver}" > "${workdir}/plugin/VERSION"
 # when it is absent or not a semver. Absent here ⇒ mode:'error' ⇒ false "checker always-red".
 mkmanifest() { printf '{\n  "version": "%s"\n}\n' "$1" > "${workdir}/delivery-manifest.json"; }
 mkmanifest "${carrier_ver}"
+# npm's lockfile carries FOUR version-bearing entries (the `packages/<dir>` workspace members) — added
+# by gap-version-stamp-generator-and-build-wiring. ⛔ Same INVARIANT (a) as every other artifact here:
+# without them the GREEN baseline lands in mode:'error' for those four entries, this whole case reports
+# `always-red` (exit 4), and every fan-in in the repo reds at the static phase — the failure mode the
+# header's (a) note describes for the delivery-manifest.json addition.
+mkpackageslock() { printf '{\n  "name": "quay-workspace",\n  "version": "0.1.0",\n  "packages": {\n    "packages/quay": {\n      "version": "%s"\n    },\n    "packages/quay-native": {\n      "version": "%s"\n    },\n    "packages/quay-github": {\n      "version": "%s"\n    },\n    "packages/quay-backlog": {\n      "version": "%s"\n    }\n  }\n}\n' "$1" "$1" "$1" "$1" > "${workdir}/package-lock.json"; }
+mkpackageslock "${carrier_ver}"
 # THE SINGLE SOURCE. Bare semver, no suffix (a suffixed VERSION is mode:'error' by construction).
 printf '%s\n' "${base_ver}" > "${workdir}/VERSION"
 
@@ -171,6 +183,7 @@ printf '[{"name":"quay","version":"1.0.1-dev","source":"github"}]\n' > "${workdi
 printf '# quay plugin\n\nquay plugin v1.0.1-dev - fixture.\n' > "${workdir}/plugin/README.md"
 printf '1.0.1-dev\n' > "${workdir}/plugin/VERSION"
 mkmanifest "1.0.1-dev"
+mkpackageslock "1.0.1-dev"
 if checker_cmd "${workdir}"; then
   echo "STAYED-GREEN — a uniformly stale carrier set (all equal, none equal to VERSION) did not redden the checker" >&2
   exit 3
@@ -188,8 +201,30 @@ printf '[{"name":"quay","version":"%s","source":"github"}]\n' "${carrier_ver}" >
 printf '# quay plugin\n\nquay plugin v%s - fixture.\n' "${carrier_ver}" > "${workdir}/plugin/README.md"
 printf '%s\n' "${carrier_ver}" > "${workdir}/plugin/VERSION"
 mkmanifest "${carrier_ver}"
+mkpackageslock "${carrier_ver}"
 if checker_cmd "${workdir}"; then :; else
   echo "ALWAYS-RED — restored uniformly-consistent store still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT 7 (package-lock only): bump ONLY one of the lockfile's four workspace entries → drift → exit 1.
+# Same doctrine as Injects 2/3/4 (hard rule 4): without this path, "the four lock entries were added to
+# the carrier table" and "the four lock entries actually participate in the judgment" are
+# indistinguishable — and this file was outside the union entirely until
+# gap-version-stamp-generator-and-build-wiring, so the "added but not judging" reading is not
+# hypothetical here. The sibling entries are left at carrier_ver, which also pins that the four are read
+# PER MEMBER: a whole-file rewrite would drag them along and the drift count below would not be 1.
+# Bump EXACTLY ONE member (quay-backlog); its three siblings stay at carrier_ver.
+printf '{\n  "name": "quay-workspace",\n  "version": "0.1.0",\n  "packages": {\n    "packages/quay": {\n      "version": "%s"\n    },\n    "packages/quay-native": {\n      "version": "%s"\n    },\n    "packages/quay-github": {\n      "version": "%s"\n    },\n    "packages/quay-backlog": {\n      "version": "1.0.1-dev"\n    }\n  }\n}\n' "${carrier_ver}" "${carrier_ver}" "${carrier_ver}" > "${workdir}/package-lock.json"
+if checker_cmd "${workdir}"; then
+  echo "STAYED-GREEN — package-lock-only version drift did not redden the checker (lock entries not judging)" >&2
+  exit 3
+fi
+
+# RESTORE: the lockfile back to carrier_ver everywhere → exit 0.
+mkpackageslock "${carrier_ver}"
+if checker_cmd "${workdir}"; then :; else
+  echo "ALWAYS-RED — restored package-lock consistency still reddens the checker" >&2
   exit 4
 fi
 

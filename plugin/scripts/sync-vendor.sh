@@ -465,6 +465,39 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6.5. Build-mode version stamp (gap-version-stamp-generator-and-build-wiring)
+# ---------------------------------------------------------------------------
+# A built tree is an ARTIFACT, and an artifact's version is decided by the BUILD, not by the commit:
+# `resolveVersion(VERSION,'build')` is `X.Y.Z` on a `release/*` branch (or at tag `vX.Y.Z`) and
+# `X.Y.Z-dev` everywhere else — the human ruling of 2026-09-20 ("在 build 过程中，监测分支并加后缀").
+# The committed carriers are ALWAYS `X.Y.Z-dev` (they are not branch-dependent; the tag commit no
+# longer self-describes), so this step is a NO-OP on develop/author and only bites on a release build.
+#
+# ⚠️ On a `release/*` branch this WRITES TRACKED FILES (`plugin/.claude-plugin/plugin.json`,
+# `plugin/VERSION`, `plugin/README.md`, `plugin/.claude-plugin/marketplace.json`,
+# `plugin/vendor/quay/package.json`) — deliberately, and it is the reading AC4 of that task requires: a
+# release branch is a transient build surface, and nothing here is committed (the tag is cut on the
+# `-dev` commit; the released version belongs to the artifact). `git status` on a release branch
+# therefore shows these five files as modified after a build. On develop/author, build == tracked, so
+# nothing is written and `git status` stays clean.
+#
+# ⛔ NOT in `--check` mode and NOT in `--sync-dist` mode: those are verification / mirror-only paths and
+# must never write (an unexpected write in a mirror step is the drift this script exists to prevent).
+# ⛔ Reached through `stamp-version.mjs` (the Node-20-safe entry), not the `.ts` source: this script is
+# also the root `postinstall` (`engines: >=20`), where `--experimental-strip-types` does not exist.
+if ! $CHECK_MODE; then
+  STAMP_ENTRY="${REPO_ROOT}/scripts/stamp-version.mjs"
+  if [ ! -f "${STAMP_ENTRY}" ]; then
+    echo "ERROR: the build-mode version stamper is missing: ${STAMP_ENTRY}" >&2
+    echo "       A built plugin tree must carry the BUILD version (no -dev on a release branch);" >&2
+    echo "       publishing an unstamped tree would ship a development version as a release." >&2
+    exit 2
+  fi
+  echo "[sync-vendor] stamping the built plugin tree with the build-version (branch-aware)..."
+  node "${STAMP_ENTRY}" --mode build --root "${PLUGIN_DIR}" --git-root "${REPO_ROOT}"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Done / exit
 # ---------------------------------------------------------------------------
 if $CHECK_MODE; then

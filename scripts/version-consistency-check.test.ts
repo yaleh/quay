@@ -6,7 +6,7 @@
  * ── THE JUDGMENT CHANGED (tasks/gap-version-single-source-root-file-and-resolver, 2026-09-20) ────
  * Was: `every carrier carries the identical version string` (internal consistency).
  * Is:  `every carrier == resolveVersion(VERSION, 'tracked')` (single source).
- * So EVERY fixture below must now carry a `VERSION` file as well as the 11 carriers: a fixture with
+ * So EVERY fixture below must now carry a `VERSION` file as well as the 15 carriers: a fixture with
  * no source is not a "green tree with a missing detail", it is a tree the checker cannot judge at all
  * (mode:'error') — and a test suite that kept the old fixtures would be asserting the OLD judgment.
  * The two cases under "the single source is the judgment" are the load-bearing new ones: they pin the
@@ -15,7 +15,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, mkdtempSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +64,29 @@ function makeFixture(name: string, versions: Record<string, string>, opts: Fixtu
       writeFileSync(full, JSON.stringify([{ name: 'quay', version: v }], null, 2));
     } else if (p === 'plugin/.claude-plugin/plugin.json') {
       writeFileSync(full, JSON.stringify({ version: v }, null, 2));
+    } else if (p === 'package-lock.json') {
+      // npm's lockfile carries FOUR version-bearing entries (the `packages/<dir>` workspace members),
+      // not one field — added to the union by
+      // gap-version-stamp-generator-and-build-wiring, which had to extend BOTH this fixture and
+      // plugin/scripts/checker-mutation-cases/version-consistency-check.sh: an entry the fixture does
+      // not build is not "a new dimension", it is a GREEN baseline that lands in mode:'error' and makes
+      // the mutation case report the checker as always-red.
+      writeFileSync(
+        full,
+        JSON.stringify(
+          {
+            name: 'quay-workspace',
+            version: '0.1.0',
+            lockfileVersion: 3,
+            requires: true,
+            packages: Object.fromEntries(
+              LOCK_WORKSPACE_DIRS.map((d) => [`packages/${d}`, { version: v, license: 'MIT' }]),
+            ),
+          },
+          null,
+          2,
+        ),
+      );
     } else if (p === 'delivery-manifest.json') {
       // Version-bearing JSON field like the package.json files, but its own fixture branch keeps the
       // shape honest (a `$schema` + `artifacts` body, not a package.json stand-in).
@@ -80,12 +103,21 @@ function makeFixture(name: string, versions: Record<string, string>, opts: Fixtu
   return tmp;
 }
 
-/** A fixture whose 11 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
+/** A fixture whose 15 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
 function consistentFixture(name: string, base: string, carrierVersion = `${base}${DEV_SUFFIX}`): string {
   const versions: Record<string, string> = {};
   for (const p of ALL_PATHS) versions[p] = carrierVersion;
   return makeFixture(name, versions, { versionFile: base });
 }
+
+/**
+ * Every carrier ENTRY the checker judges — 15 over 12 files. Held as entries (not files) so the count
+ * assertions below pin the union size the judge actually walks: `package-lock.json` contributes four.
+ */
+const CARRIER_ENTRY_COUNT = 15;
+
+/** The four `package-lock.json` workspace members whose `version` is a carrier entry. */
+const LOCK_WORKSPACE_DIRS = ['quay', 'quay-native', 'quay-github', 'quay-backlog'];
 
 const ALL_PATHS = [
   'packages/quay/package.json',
@@ -99,16 +131,23 @@ const ALL_PATHS = [
   'plugin/vendor/quay/package.json',
   'plugin/VERSION',
   'delivery-manifest.json',
+  // FOUR carrier entries in ONE file — see makeFixture's branch and CARRIER_ENTRY_COUNT.
+  'package-lock.json',
 ];
 
 // ── Unit tests ──────────────────────────────────────────────────────────
 
-test('readVersions returns 11 entries for the real tree', () => {
+test('readVersions returns 15 entries for the real tree', () => {
   const entries = readVersions(repoRoot);
-  assert.equal(entries.length, 11);
+  assert.equal(entries.length, CARRIER_ENTRY_COUNT);
   for (const e of entries) {
     assert.ok(e.label.length > 0, `entry for ${e.path} has no label`);
   }
+  // The four package-lock entries are ENTRIES, not a single "lockfile" entry: a union that judged the
+  // lockfile once would still leave three workspace members unjudged, which is the gap this extension
+  // closes (the file's four `packages/<dir>` members drifted together as one hand-edit before).
+  const lockEntries = entries.filter((e) => e.path === 'package-lock.json');
+  assert.equal(lockEntries.length, LOCK_WORKSPACE_DIRS.length);
 });
 
 test('readVersions returns errors for missing files', () => {
@@ -356,6 +395,67 @@ test('check detects drift when ONLY delivery-manifest.json moves (RED)', () => {
   }
 });
 
+// ── package-lock.json paths (gap-version-stamp-generator-and-build-wiring) ───────────────────
+// The lockfile's four workspace members were OUTSIDE this union: `version-consistency-check` never
+// read the file, so a bump that updated all 11 other carriers and left `package-lock.json` stale
+// passed the gate. Same discipline as the README / plugin/VERSION / delivery-manifest pairs above —
+// without an ONLY-this-carrier path, "the four entries were added" and "the four entries actually
+// judge" are indistinguishable (hard rule 4).
+
+/**
+ * The lock entry's label. Spelled as `version-carriers.ts` spells it — and matched EXACTLY, never by
+ * `includes`: `packages/quay-backlog` is also the label of the `packages/quay-backlog/package.json`
+ * carrier, so a substring match silently asserts about the wrong carrier (measured: the first version
+ * of this test passed its write and still read back the package.json entry's value).
+ */
+function lockLabel(dir: string): string {
+  return `package-lock.json (packages/${dir})`;
+}
+
+function writeLock(tmp: string, dir: string, version: string): void {
+  const raw = JSON.parse(readFileSync(resolve(tmp, 'package-lock.json'), 'utf-8'));
+  raw.packages[`packages/${dir}`].version = version;
+  writeFileSync(resolve(tmp, 'package-lock.json'), JSON.stringify(raw, null, 2));
+}
+
+test('check detects drift when ONLY ONE package-lock workspace entry moves (RED)', () => {
+  const tmp = consistentFixture('lock-drift', '9.9.9');
+  try {
+    writeLock(tmp, 'quay-backlog', '9.9.8-dev');
+    const result = check(tmp);
+    assert.equal(result.mode, 'drift');
+    assert.equal(result.ok, false);
+    const drifted = result.entries.find((e: any) => e.label === lockLabel('quay-backlog'));
+    assert.ok(drifted, 'the packages/quay-backlog lock entry must be in the checked set');
+    assert.equal(drifted.version, '9.9.8-dev');
+    // ...and its three siblings must NOT have been dragged along: a genuine per-member read, not a
+    // whole-file rewrite.
+    for (const d of ['quay', 'quay-native', 'quay-github']) {
+      const sib = result.entries.find((e: any) => e.label === lockLabel(d));
+      assert.equal(sib?.version, '9.9.9-dev', `packages/${d} must be read independently`);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('check returns mode=error (NOT all-equal) when a package-lock entry has no semver', () => {
+  const tmp = consistentFixture('lock-unparseable', '9.9.9');
+  try {
+    // A lockfile entry that CANNOT be read must not be shaped like one that agrees (hard rule 3b).
+    const raw = JSON.parse(readFileSync(resolve(tmp, 'package-lock.json'), 'utf-8'));
+    delete raw.packages['packages/quay-github'].version;
+    writeFileSync(resolve(tmp, 'package-lock.json'), JSON.stringify(raw, null, 2));
+    const result = check(tmp);
+    assert.equal(result.mode, 'error');
+    assert.equal(result.ok, false);
+    const e = result.entries.find((x: any) => x.label === lockLabel('quay-github'));
+    assert.ok(e?.error, 'the versionless lock entry must carry an error');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('suffixPolicyOf is three-state: all-bare is NOT mixed, unreadable is NOT a policy', () => {
   assert.equal(suffixPolicyOf(['1.0.0', '2.0.0']), 'all-bare');
   assert.equal(suffixPolicyOf(['1.0.0-dev', '2.0.0-dev']), 'all-suffixed');
@@ -408,7 +508,7 @@ test('CLI --json exits 0 with JSON output even on drift', () => {
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.ok, 'boolean');
   assert.ok(Array.isArray(parsed.entries));
-  assert.equal(parsed.entries.length, 11);
+  assert.equal(parsed.entries.length, CARRIER_ENTRY_COUNT);
   assert.ok(Array.isArray(parsed.uniqueVersions));
   assert.equal(typeof parsed.expectedVersion, 'string');
   assert.equal(typeof parsed.sourceBase, 'string');

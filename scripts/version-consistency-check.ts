@@ -15,171 +15,30 @@
  *   checker has no source to judge against, so it must not report a verdict at all (hard rule 3b).
  *   The all-or-none suffix assertion is RETAINED as a second, structural reading (see `suffixPolicyOf`).
  *
- * The enumerated list below remains the canonical set of version-bearing files. Each entry is
- * { path, extractor } where extractor returns the version string from parsed content.
+ * ── WHERE THE CARRIER LIST LIVES (single home) ───────────────────────────────────────────────────
+ * The set of version-bearing files is NOT declared here — it is `version-carriers.ts`'s
+ * `VERSION_CARRIERS`, which `stamp-version.ts` (the GENERATOR) imports too. Two hand-maintained copies
+ * of "which files carry a version" is the exact drift this repo's single-source discipline forbids: the
+ * judge would keep passing while the generator silently missed a carrier. `version-carriers.ts` also
+ * cross-checks, on every read, that the token it would rewrite is the field this judge reads.
+ * tasks/gap-version-stamp-generator-and-build-wiring.
  *
- * Usage: node --experimental-strip-types scripts/version-consistency-check.ts [--json]
+ * Usage: node --experimental-strip-types scripts/version-consistency-check.ts [--json] [--root <dir>]
  *   --json  emit a JSON summary to stdout (always exit 0 for json; drift is in the JSON)
  */
 
-import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveVersion, readBaseVersion, type ResolveMode } from './resolve-version.ts';
+import {
+  VERSION_CARRIERS,
+  carrierPaths,
+  readCarrierVersion,
+  type VersionCarrier,
+} from './version-carriers.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
-
-type VersionEntry = {
-  label: string;
-  path: string;
-  extract(raw: string): string;
-};
-
-const VERSION_ENTRIES: VersionEntry[] = [
-  {
-    label: 'packages/quay',
-    path: 'packages/quay/package.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    label: 'packages/quay-native',
-    path: 'packages/quay-native/package.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    label: 'packages/quay-github',
-    path: 'packages/quay-github/package.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    label: 'packages/quay-backlog',
-    path: 'packages/quay-backlog/package.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    label: 'plugin/.claude-plugin/plugin.json',
-    path: 'plugin/.claude-plugin/plugin.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    // Prose carrier, not a machine field: its version lives inside the sentence
-    // `quay plugin v<semver> — …`. The extractor is ANCHORED to that sentence and THROWS when it
-    // cannot find it — a reworded README must redden the gate (mode:'error'), never silently
-    // return '' and read as "consistent" (hard rule 3b: an input it cannot parse must not
-    // produce a value shaped like "pass"). Added by
-    // gap-ac169-readme-version-not-in-version-consistency-set: README had drifted to v0.6.1 while
-    // plugin.json was 0.6.3 across two bumps, precisely because it was NOT in this set.
-    //
-    // The capture group spans the WHOLE version token, INCLUDING an optional prerelease suffix.
-    // This is not cosmetic: the previous form `/^quay plugin v(\d+\.\d+\.\d+)\b/m` *looks* like it
-    // matches a version, but `\b` holds between `0` and `-`, so on `quay plugin v0.7.0-dev` the
-    // group closes at `0.7.0` and the suffixed token reads as a BARE `0.7.0` — exactly the
-    // self-description AC-272 exists to eliminate (hard rule 4c: a quantity that does not survive
-    // the intermediate layer is not the quantity being judged; this one was measured, not assumed).
-    // Widening the COMPARISON to prefix-equality is NOT the fix — that would let `0.7.0-dev` and
-    // `0.7.0` judge each other consistent, which is the ambiguity itself.
-    label: 'plugin/README.md',
-    path: 'plugin/README.md',
-    extract: (raw: string) => {
-      const m = raw.match(/^quay plugin v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/m);
-      if (!m) {
-        throw new Error(
-          'no "quay plugin v<semver>" version line found in plugin/README.md (cannot evaluate — not a pass)',
-        );
-      }
-      return m[1];
-    },
-  },
-  {
-    label: 'plugin/.claude-plugin/marketplace.json (quay entry)',
-    path: 'plugin/.claude-plugin/marketplace.json',
-    extract: (raw) => {
-      const data = JSON.parse(raw);
-      const plugins = Array.isArray(data) ? data : (data.plugins ?? []);
-      const q = plugins.find((p: any) => p.name === 'quay');
-      if (!q) throw new Error('quay entry not found in plugin marketplace.json');
-      return q.version;
-    },
-  },
-  {
-    label: '.claude-plugin/marketplace.json (quay entry)',
-    path: '.claude-plugin/marketplace.json',
-    extract: (raw) => {
-      const data = JSON.parse(raw);
-      const plugins = Array.isArray(data) ? data : (data.plugins ?? []);
-      const q = plugins.find((p: any) => p.name === 'quay');
-      if (!q) throw new Error('quay entry not found in root marketplace.json');
-      return q.version;
-    },
-  },
-  {
-    label: 'plugin/vendor/quay/package.json',
-    path: 'plugin/vendor/quay/package.json',
-    extract: (raw) => JSON.parse(raw).version,
-  },
-  {
-    // Plain-text version stamp (`plugin/VERSION` holds a bare semver and nothing else) — deliberately
-    // NOT JSON.parse'd. Added by gap-ac259-version-union-lockstep-and-host-install-readings: this file
-    // was the ONE member of the version-bearing union that no single judge covered. AC-259's criterion
-    // enumerated it while this list did not (and vice versa for plugin/vendor/quay/package.json), so a
-    // `plugin/VERSION`-only drift reddened AC-259 while this checker stayed green. Precedent on the real
-    // release path: `6bf000622` claimed to bump "all 8 version-bearing files" and left plugin/VERSION at
-    // 0.5.0 — requiring a second commit `bd466ce2a` to repair, with this checker green in between.
-    // The extractor THROWS when the file does not hold a semver token: an unreadable stamp must land in
-    // mode:'error', never be shaped like a stamp that agrees (hard rule 3b).
-    // CONFIRMED (AC4, 2026-09-15) to survive the `-dev` suffix: it RETURNS THE WHOLE TRIMMED LINE
-    // (`return v`), and `/^\d+\.\d+\.\d+/` is only a fail-closed GUARD, not a capture — so
-    // `plugin/VERSION` holding `0.7.0-dev` reads back verbatim as `0.7.0-dev`. Contrast the README
-    // entry above, whose extractor DID capture a truncated prefix.
-    label: 'plugin/VERSION',
-    path: 'plugin/VERSION',
-    extract: (raw: string) => {
-      const v = raw.trim();
-      if (!/^\d+\.\d+\.\d+/.test(v)) {
-        throw new Error(
-          'no bare semver in plugin/VERSION (cannot evaluate — not a pass)',
-        );
-      }
-      return v;
-    },
-  },
-  {
-    // Added by gap-release-cut-via-workflow-dispatch (2026-09-15). `delivery-manifest.json` was the
-    // ONE version-bearing file outside this set, and it drifted exactly the way this checker exists to
-    // prevent: bumped through `08e8ec55f` (0.4.0 -> 0.5.0) and then left at `0.5.0` across the 0.6.x/0.7.x
-    // bumps. The drift was invisible here but fatal on the release path — `delivery-manifest-check.ts`
-    // then built the expected asset name as `quay-sea-${manifest.version}-${platform}` and EXACT-matched
-    // it against the assets a run really published, so against release `v0.7.0` (assets
-    // `quay-sea-0.7.0-*`) it matched nothing. Measured two-way in the task worktree with the real GitHub
-    // Release: manifest 0.5.0 => 4 failures (2 SEA + 2 npm/plugin); manifest 0.7.0 => only the 2
-    // npm/plugin failures that were there because that run's `release` job had failed and never uploaded
-    // `quay-0.7.0.tgz`. Same shape as the plugin/README.md and plugin/VERSION additions above (hard rule
-    // 5b: fixing the one instance that was reported does not mean it was the only one — the sweep over
-    // the other version-bearing files returned this single remaining point).
-    // ⚠️ 2026-09-16: that asset-name cross-check no longer exists — the npm-pack and Node-SEA release
-    // lines were cancelled by the human ruling recorded in
-    // orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md §11, and `delivery-manifest-check`'s
-    // `--ci` asset-verification mode was removed with them. `delivery-manifest.json` STAYS in this union
-    // regardless: it is still a version-bearing release artifact (its `version` field tracks the release
-    // the manifest describes, and `delivery-manifest-check.test.ts` asserts it equals
-    // packages/quay/package.json's), and the original drift — the reason it was added — is a property of
-    // the file, not of the checker that happened to catch it.
-    // The extractor THROWS when the field is absent: an unparseable manifest must land in mode:'error',
-    // never be shaped like a version that agrees (hard rule 3b).
-    label: 'delivery-manifest.json',
-    path: 'delivery-manifest.json',
-    extract: (raw: string) => {
-      const v = JSON.parse(raw).version;
-      if (typeof v !== 'string' || !/^\d+\.\d+\.\d+/.test(v)) {
-        throw new Error(
-          'no semver in delivery-manifest.json .version (cannot evaluate — not a pass)',
-        );
-      }
-      return v;
-    },
-  },
-];
 
 export function resolveRepoRoot(callerDir?: string): string {
   return callerDir ? resolve(callerDir, '..') : repoRoot;
@@ -195,17 +54,19 @@ export function isArchivedPath(relPath: string): boolean {
   return relPath === "archive" || relPath.startsWith("archive/") || relPath.includes("/archive/");
 }
 
+/**
+ * Read every carrier of the shared table from `root`. `extract`-and-`locate` disagreement, a missing
+ * file, or an unparseable body all land as `error` on that entry — never as a version that "happens to
+ * be" whatever the file contained (hard rule 3b).
+ */
 export function readVersions(root: string): { label: string; path: string; version: string; error?: string }[] {
-  return VERSION_ENTRIES
-    .filter((entry) => !isArchivedPath(entry.path))
-    .map((entry) => {
-      try {
-        const raw = readFileSync(resolve(root, entry.path), 'utf-8');
-        return { label: entry.label, path: entry.path, version: entry.extract(raw) };
-      } catch (e: any) {
-        return { label: entry.label, path: entry.path, version: '', error: e.message };
-      }
-    });
+  // The read is the SHARED one (`readCarrierVersion`), not a local re-implementation: it is the very
+  // call whose span/field cross-check the generator relies on, so "the judge reads field A" and "the
+  // generator writes field B" cannot come apart (hard rule 4).
+  return VERSION_CARRIERS.filter((entry: VersionCarrier) => !isArchivedPath(entry.path)).map((entry) => {
+    const reading = readCarrierVersion(root, entry);
+    return { label: reading.label, path: reading.path, version: reading.version, error: reading.error };
+  });
 }
 
 /**
@@ -410,7 +271,8 @@ if (isMain) {
     console.log(carrierLine(e.label, e.version, e.version === expected, expected));
   }
   console.log(
-    `\nAll ${result.entries.length} carriers == ${JUDGMENT_LABEL} == ${expected} (suffix policy: ${result.suffixPolicy})`,
+    `\nAll ${result.entries.length} carriers == ${JUDGMENT_LABEL} == ${expected} ` +
+      `(over ${carrierPaths().length} files; suffix policy: ${result.suffixPolicy})`,
   );
   process.exit(0);
 }
