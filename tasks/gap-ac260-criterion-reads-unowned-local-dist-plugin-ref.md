@@ -233,3 +233,92 @@ criteria referencing bare dist-plugin: 3
 - plugin/test/ac260-ac261-delivery-face-ref-source.test.mjs
 - docs/analysis/criterion-failure-attribution.baseline.json
 - tasks/gap-ac260-criterion-reads-unowned-local-dist-plugin-ref.md
+
+## Evidence
+
+**AC1 取证完整**（全部在 `/home/yale/work/quay` 主检出上取）：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-260 --dry-run   → verdict=fail rc=1
+  reason: "cannot read branch dist-plugin (Command '['git','ls-tree','-r','--name-only','dist-plugin']' returned non-zero exit status 128.) => the marketplace delivery face is absent, …"
+$ node packages/quay/bin/quay.js goal check --stale-pass      → rc=1
+  {"frozenScope":119,"evaluated":true,"failing":["AC-260","AC-261"], …}
+$ git rev-parse --verify -q refs/heads/dist-plugin^{commit}   → rc=1（ABSENT）
+$ git rev-parse refs/remotes/origin/dist-plugin
+  = git ls-remote origin refs/heads/dist-plugin = f57218052b2f4ee71ef90c24f19048cb49c174b5（逐字同值）
+渠道 ref 上三支谓词：carriers=348 total=175 bad=0 dangling=0   （= §二 的 175／0／0）
+```
+⇒ 与 §一/§二逐条一致，未触发停并报告。
+
+**AC2 只改 ref 来源**：改动的物理行 = AC-260 的 `BR = "dist-plugin"` 一行（换成候选表解析 + 仪器态分支）
+与 AC-261 的 `ls-tree` ref / 其 except 消息 / `expect` 里的 `随 dist-plugin` 短语。断言、三支语义、
+零计数守卫、`sys.exit` 码一字未动 —— `fileset = set(files)` 以下直到 `sys.exit(0)` 与改写前**逐字节相同**
+（`diff -u` 只显示 ref 解析与两条消息行）。
+
+**AC3 负控制 10 臂全跑通**（`/tmp/ac260-probe/arms.mjs`；criterion 只含裸 `git`，全部在 `mktemp -d`
+scratch 仓库里以该目录为 cwd 跑，对生产仓库零破坏）：
+
+| 臂 | 读数 |
+|---|---|
+| AC-260 ① 渠道候选（仅 remote-tracking）+ 载体干净 | exit 0 |
+| AC-260 ②a 退回**原文**裸 ref 判据 | exit 1（`cannot read branch dist-plugin`） |
+| AC-260 ②b 把候选表改回裸 `("dist-plugin",)` | exit 1 |
+| AC-260 ③ 候选 ref 全删 | exit 1 ∧ `INSTRUMENT STATE … the face has NOT been judged`（可区分） |
+| AC-260 ④ 载体植入 `plugin/scripts/dist/*.js` | exit 1 ∧ `2 of 2 dist references … first 3: [('SKILL.md','plugin/scripts/dist/foo.js'), …]` |
+| AC-260 ⑤ 渠道只在 `refs/heads/dist-plugin` | exit 0（第二候选活着） |
+| AC-261 ① shim + 渠道候选 + `bin/quay` 100755 | exit 0 |
+| AC-261 ②a 退回**原文**裸 ref 判据 | exit 1 |
+| AC-261 ②b 候选表改回裸 | exit 1 |
+| AC-261 ③ 候选 ref 全删 | exit 1 ∧ `INSTRUMENT STATE … NOT been evaluated`（可区分） |
+
+⇒ 10/10 与预期一致（含仪器态与交付面违规**可区分**，硬规则 3b）。
+
+**AC4 写入门**：
+
+```
+$ quay goal write AC-260 --criterion <改写全文> --actor worker:… --reason … --dry-run   → rc=0（被接受）
+$ quay goal write AC-261 --criterion <改写全文> --actor worker:… --reason … --expect … --dry-run → rc=0
+$ quay goal write AC-260 …  /  AC-261 …   （去 --dry-run）                              → rc=0（落盘 + 提交）
+```
+criterion 经写面往返**逐字节相同**（`rec.criterion === 改写文本`）。归属棘轮 BEFORE/AFTER 均为
+`PASS: … inDomain=155 bareAcs=0 ≤ baseline 0 (bareLines=0)` ⇒ **计数未增，基线未动**。
+
+**AC5 store runner 转绿**（主检出，⛔ 非手工 python）：
+
+```
+$ quay goal gate AC-260        → {"verdict":"pass","reason":"acceptance passed (exit 0)"} rc=0
+$ quay goal gate AC-261        → {"verdict":"pass","reason":"acceptance passed (exit 0)"} rc=0
+$ quay goal check --stale-pass → {"frozenScope":119,"evaluated":true,"failing":[], …} rc=0
+```
+主检出与 worktree 两份 `goals/AC-26*.md` md5 **逐字相同** ⇒ merge 无冲突。
+
+**AC6 回归守护能取假**：新增 `plugin/test/ac260-ac261-delivery-face-ref-source.test.mjs`（13 tests，
+`@test-group engine`，`fs.mkdtempSync(os.tmpdir())` 全程 hermetic）。
+- 两个读数都取到：把盘上两条 criterion 的候选表退回裸 `("dist-plugin",)` ⇒ **8 条失败**
+  （`✖ AC-260/AC-261 resolves the channel…`、`✖ arm 1`、`✖ arm 4`、`✖ arm 5`、两条 reversion control 等）；
+  恢复 ⇒ `ℹ pass 13 / fail 0`。
+- 测试自身还内建一次 reversion control（`revertToBareLocalRef`，含 `assert.notEqual` 保证变异真的生效）。
+
+**AC7 复验态**：改写后 `goal check --stale-pass` ⇒ `failing: []` ∧ **exit 0**。桶读数（**真实值**，
+随 rotation 走动，取于 2026-09-20 ~11:00Z）：
+- 紧随 `goal gate` 之后：AC-260、AC-261 ∈ **`amendedUnverified`** —— 轮转 verdict 的 `criterionHash`
+  属于旧文本，AMENDMENT GATE 因此不许它断言新旧任一方向（goal-store.ts 该分支自己的注释）；
+- 轮转随后重跑两条（`lastSweepAt` 推进到 `2026-09-20T10:59:25Z`）：AC-260、AC-261 ∈ **`verifiedFresh`**。
+⛔ 不照抄 AC-272 的「取不到」结论：AC-272 是 `long-term: true`、结构上进不了 frozen；本条两条 `long-term: false`
+且 GOAL-019 已 achieved ⇒ **在** frozen 人口内（`frozenScope` 119 含它们）。⛔ 未手改 AC 的 `status`。
+
+**AC8 既有门**：
+
+```
+$ bash scripts/test.sh --for-task gap-ac260-criterion-reads-unowned-local-dist-plugin-ref --allow-thin → rc=0
+  ℹ tests 13 / pass 13 / fail 0；scoped 静态闸全 PASS
+  PASS: criterion failure attribution intact: inDomain=155 bareAcs=0 ≤ baseline 0 (bareLines=0)
+```
+归属棘轮基线**未动**（无需 `--capture` 重锚）。fan-in 的 ac-precheck 在 worktree 上读：
+`AC 全勾（8/8）——可翻 done`。scoped-gate 缓存按 develop `0fa41cb9c` 落（与所门过的树一致）。
+
+**⛔ 明确不做**（逐条理由）：① 未改交付面内容 —— 渠道 ref 上三支谓词实测 175／0／0，交付面此刻是对的，
+重发 `publish-plugin-dist.yml` 无对象；② 未把本地 `dist-plugin` ref 摆回来 —— 见 §五四条裁定，且
+`gap-develop-version-union-missing-dev-suffix` 已记录过一次同类修法失败；③ 未为 AC-260/261 另写恒等检查器 ——
+新测试复用 `goal-store.createGoalStore` + `runAcceptance`（与 `quay goal gate` 同一个 runner），
+不复制第二份判据文本。
