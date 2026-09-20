@@ -392,6 +392,66 @@ fail-closed 拒绝且**不动任何 ref**。
 `release-*` / `release/*` 只存在于本地，任何远端侧载体（例如 release workflow 里加一个 job）
 **在结构上够不到这些 ref**。
 
+#### 4.1.2 「取 release 形态读数」的载体：**隔离 Git 目录**（2026-09-20）
+
+**这一节存在的理由（实测，硬规则 9 的代价）**：AC-271 禁止本地存在 tip 不在任何 tag 上的
+`release-*` / `release/*` 分支，而 `scripts/resolve-version.ts` 的 `build` 模式**按分支名判定**
+（`RELEASE_BRANCH_RE = /^release\//`）：无后缀的 `X.Y.Z` 只在 HEAD 恰在 tag `vX.Y.Z` 上、
+**或当前分支是 `release/*`** 时产生。⇒ **每一次真实的 build 模式验证都必须在真仓库里把 HEAD
+放到一条真 `release/*` 分支上**——正是 AC-271 禁止的那个状态。**两个机制各自都对，合起来直接冲突**，
+而冲突的代价是：一个 `long-term: true` 的保证被**合法验证动作**击穿，且击穿者无从追查。
+
+**实测（2026-09-20，主检出）**：在飞任务 `gap-version-stamp-generator-and-build-wiring` 的 AC 逐字要求
+「在真实 `release/*` 临时分支上跑 `sync-vendor.sh` 的产物…无 `-dev`」⇒ worker 会话
+`c543788e-52ea-4e2f-917a-8bc89399a001` 于 `04:51:07.365Z` 在**任务 worktree 里**执行
+`git worktree add …/ac-stamp-release-reading -b release/ac4-reading HEAD`，`04:53:26.422Z` 执行
+`git worktree remove --force … && git branch -D release/ac4-reading`。
+**红窗宽度 2m19s**，期间 `04:52:49.353Z` 的 driver 读数给出 `verdict=fail` +
+`CAUSE=release-branch-not-parked-on-a-tag — 1 of 1 release branches have a tip that is not any tag:
+release/ac4-reading`。该 tip `df538caa6` 是一条**与该版本无关**的实现提交，`git tag --points-at` 为空、
+`git merge-base --is-ancestor df538caa6 {develop,author,master}` **三个全 NO**
+⇒ 立案对照**排除了**「某次切版忘了删分支」（那条路径的 tip 会停在版本 tag 之后、或与某次 cut 同源），
+**与「为取读数临时造了一条分支」一致**。同一会话在 `05:00:52.101Z`–`05:01:16.474Z` 又造/删了一条
+`release/ac4-reading2`（24s）——那一次**没有被判据观测到**（`04:59:36.472Z` 之后至今无 AC-271 台账读数），
+**那是运气不是保证**。
+
+⛔ **这两次创建与销毁在仓库里零痕迹**：`.quay/release-branch-finish.jsonl` 末条仍是
+`2026-09-19T03:52:55Z`（本轮**没有**对应行——走的是裸 `git worktree add -b` / `git branch -D`，
+⛔ **不是** `release-branch-finish.sh`，它以 `result=deleted-local` / `refused-no-license` 记账，
+本轮记录里没有那样的行），且 `.git/logs/refs/heads/release/` 目录不存在（`git branch -D` 连 reflog
+一起删）⇒ **成因只能由 worker transcript 可查，仓库产物不可查**。⛔ 不得写成「已由命令处理」，
+也⛔ 不得记成任何任务的成果。这与 §10 残留 4 的 2026-09-19「无痕迹的外部删除」**是同一形态，
+只是这次发生在创建侧**——同一个坑两次，两次都不是靠仓库产物发现的。
+
+**载体（本条的执行面，⛔ 不是措辞——ADR-004）**：凡要求「在真实 release 分支上取一次 build 模式读数」
+的步骤，改按
+
+```
+node --experimental-strip-types plugin/scripts/release-reading-sandbox.ts \
+     --root <repo> --branch release/<name>
+```
+
+它把读数搬进**隔离的 Git 目录**：`git init` 一个 scratch 目录 → 用 `git fetch` 把目标提交取进去
+（**按 sha**，所以对 `df538caa6` 这种**不被任何 tag 引用、也不在任何分支上**的提交同样成立）→
+**在那里面**建 `release/...` 分支 → 把判定**原样委托**给真正的
+`scripts/resolve-version.ts --mode build`（⛔ 不重写分支/tag 规则）→ **同一次运行**里打印源仓库
+`refs/heads/release-*` / `refs/heads/release/*` 的读数（前 / 后）→ 追加一行痕迹 → 删除 scratch 目录。
+⇒ 「共享仓库里没有悬空 release 分支」与「读数真的给出了无后缀形态」**同一次运行自证**。
+
+**⛔ 边界（不许做的三件事）**：① **不放宽判据**——AC-271 的 criterion 一字不改；本轮它**抓对了**，
+红的是保证、不是判据；② **不给 `resolve-version.ts` 加「注入分支名」的开关**——那会把 build 读数变成
+恒真的回声（硬规则 4 推论三：一个只能被注入数据满足的判据不是测量）；③ 本命令**不向源仓库写任何 ref**，
+它不是「创建 release 分支」的通用工具。**成对负控制**：同一条命令换一个非 `release` 名再跑一次
+**必须给 `X.Y.Z-dev`** ——只贴 release 那一侧的话，一个恒定返回 `X.Y.Z` 的实现也能通过。
+
+**痕迹与独立取值（硬规则 3b/8/9）**：每一次读数追加进本地记录
+`.quay/release-reading-sandbox.jsonl`（分支名、时刻、sha、形态、版本、结果），用 `--log` 读回；
+**记录文件不存在 ⇒ `exit 4` + `CAUSE=release-reading-trace-missing`**；
+**存在但读不出 ⇒ `exit 5` + `CAUSE=release-reading-trace-unreadable`** ——「从未发生」/「发生但读不出」/
+「发生过」三者**各自独立取值**。⛔ 记录词表**不复用** `.quay/release-branch-finish.jsonl` 的 `form=`
+（那是另一个载体回答的另一个问题：`none` / `merged` / `tagged` / `cut`），本记录用
+`shape=` ∈ {`release-branch`, `non-release-branch`}（硬规则 8：命名不得复用）。
+
 ### 4.2 切点前置：develop 的上一次 **decisive** CI 必须是绿
 
 **⚠️ 这是一条实测依赖，不是凭空前置**（硬规则 12 要求给出发生率）：
@@ -672,6 +732,16 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **成因不可查**（§10 残留 4）。第 2 步的「结束步载体 + 合规定义对齐 + 留痕」三处由
 `gap-ac271-release-branch-outlives-its-tag-again` 补齐，落点见 §4.1.1。
 ⛔ 那次删除**不计入**任何任务的成果。
+
+**追加执行状态（2026-09-20）**：`AC-271` 第二次被翻红，这一次的成因**不是**删除半边漏了，
+而是**创建侧**：一条在飞任务的 AC 逐字要求取一次**真实 build 模式读数**，而 build 模式按分支名判定
+⇒ 合法验证动作必须在共享仓库里造一条真 `release/*` 分支，正是判据禁止的状态。窗口
+`04:51:07.365Z`–`04:53:26.422Z`（`release/ac4-reading`）与 `05:00:52.101Z`–`05:01:16.474Z`
+（`release/ac4-reading2`），两次创建与销毁**在仓库产物里零痕迹**（成因由 worker transcript
+`c543788e-52ea-4e2f-917a-8bc89399a001` 可查，`.quay/release-branch-finish.jsonl` 无对应行、
+`.git/logs/refs/heads/release/` 不存在 ⇒ 走的不是 `release-branch-finish.sh`）。
+判据本身**保持严格**（本轮它抓对了）。载体由 `gap-ac271-build-reading-creates-shared-release-ref`
+补齐为**隔离 Git 目录**上的读数，落点见 §4.1.2。⛔ 这两次创建/销毁**不计入**任何任务的成果。
 
 ---
 
