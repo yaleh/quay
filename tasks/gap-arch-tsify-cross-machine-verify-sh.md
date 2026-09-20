@@ -2,7 +2,7 @@
 id: gap-arch-tsify-cross-machine-verify-sh
 title: shell→TS（SPEC Phase 5.2）：cross-machine-verify.sh（489 行，内嵌 python3）改写为
   TS，先做 characterization
-status: todo
+status: ready
 labels:
   - gap
 parent: null
