@@ -94,6 +94,37 @@ const MD_PATH_PREFIXED_RE =
 const CORE_SRC_DIR = path.resolve(pkgDir, "src");
 const CORE_PATH_JOIN_TS_RE = /path\.join\([^)]*"scripts"[^)]*"([A-Za-z0-9_.-]+\.ts)"/g;
 
+// ── the SIBLING-RESOLUTION MANIFEST form (the 7th instance of "the closure scan is blind to a
+//    reference SHAPE") ────────────────────────────────────────────────────────────────────────────
+// gap-fan-in-installed-layout-sibling-script-resolvability-test-and-reaper-bundling. Core source
+// (`fan-in/ff-merge.ts`) spawns plugin scripts as SIBLINGS through
+// `siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.<role>)`: the resolver tries the raw `.ts` first
+// and the shipped `dist/<name>.js` second (`siblingScriptCandidates`). Every scan above keys on a
+// literal path segment; this shape carries NONE (the name sits in an exported table, and the path
+// is built at runtime), so `worktree-process-reaper.ts` was never an entry, its bundle was never
+// produced, and — the artifact DELETES the raw plugin `.ts` — it resolved in NEITHER form. Measured
+// on the REAL `package.sh` artifact at v0.10.0 (96 dist bundles) and at this task's base commit
+// (99): the reaper is NOT-RESOLVABLE in every install layout. It surfaced only as
+// `worktree-process-reaper not resolvable` on a failure path, which read as harmless noise. Same
+// shape as gap-ff-merge-suite-cert-classifier-unshipped-and-misreported, which fixed the
+// classifier's two call sites — the instance it was reported on — and left this sibling of the same
+// class (硬规则 5b: fix the class, not the instance).
+//
+// The entry set is DERIVED from the table's VALUES, ⛔ never from a hand-maintained list here: the
+// table is the SINGLE SOURCE the call sites themselves read, so a name added there ships its bundle
+// with no edit in this file.
+//
+// FAIL-CLOSED when a Core module exports the marker but its table does not parse (硬规则 3b):
+// returning an empty set would shrink the closure gate's REQUIRED set in lockstep with the entry
+// set, so a rename or reformat would silently DROP a bundle and still report OK. A missing Core src
+// dir is different — an installed artifact has no `src/` at all, and that is legitimately empty
+// (exactly as `scanCoreReferences` treats it).
+const CORE_SIBLING_MANIFEST_MARKER = "export const SIBLING_SCRIPTS";
+const CORE_SIBLING_MANIFEST_TABLE_RE =
+  /export\s+const\s+SIBLING_SCRIPTS\s*=\s*\{([\s\S]*?)\n\}\s*as\s+const\s*;/;
+const CORE_SIBLING_MANIFEST_ROW_RE =
+  /^[ \t]*[A-Za-z_$][A-Za-z0-9_$]*[ \t]*:[ \t]*"([A-Za-z0-9_.-]+\.ts)"[ \t]*,?[ \t]*$/gm;
+
 // A shipped table/list row that names a bundled entry by its dist path (`dist/<name>.js`), e.g.
 // deliver-verify-usage.sh's VERIFY_SET row `"suite-execution-form-counter|js|dist/suite-execution-form-counter.js|…"`.
 // Reverse-looked-up to the same-named `.ts` (if it exists) so the entry ships as `dist/<name>.js`.
@@ -276,6 +307,39 @@ export function scanPluginSiblingReferences(pluginRoot) {
 }
 
 /**
+ * Derive the plugin `.ts` basenames Core source resolves as SIBLINGS, from the exported
+ * `SIBLING_SCRIPTS` manifest table(s) — see the constants above for why this is a SHAPE rule.
+ *
+ * The caller intersects the result with existing plugin `.ts` (a name that names nothing is
+ * ignored), exactly like the other Core-side scans.
+ * @returns {Set<string>} `.ts` basenames (e.g. "worktree-process-reaper.ts")
+ * @throws {Error} when a Core module exports the marker but its table does not parse — a
+ *   fail-closed refusal, because an empty set is indistinguishable from "no sibling spawns"
+ *   (硬规则 3b) and would drop the very bundles this scan exists to ship.
+ */
+export function scanCoreSiblingManifest() {
+  const basenames = new Set();
+  if (!fs.existsSync(CORE_SRC_DIR)) return basenames;
+  for (const f of walk(CORE_SRC_DIR)) {
+    if (!f.endsWith(".ts")) continue;
+    const text = fs.readFileSync(f, "utf8");
+    if (!text.includes(CORE_SIBLING_MANIFEST_MARKER)) continue;
+    const table = CORE_SIBLING_MANIFEST_TABLE_RE.exec(text);
+    const rows = table ? [...table[1].matchAll(CORE_SIBLING_MANIFEST_ROW_RE)] : [];
+    if (!table || rows.length === 0) {
+      throw new Error(
+        `build-plugin-dist: ${path.relative(CORE_SRC_DIR, f)} exports a SIBLING_SCRIPTS manifest ` +
+          `but it could not be parsed — refusing to derive an entry set that silently DROPS the ` +
+          `bundles those Core-side sibling spawns need (keep the shape ` +
+          `\`export const SIBLING_SCRIPTS = { name: "x.ts", … } as const;\`)`
+      );
+    }
+    for (const m of rows) basenames.add(m[1]);
+  }
+  return basenames;
+}
+
+/**
  * Derive the consumer-referenced entry set for a plugin root.
  * @param {string} pluginRoot
  * @returns {{ scripts: string[], gateScripts: string[] }} relative entry paths
@@ -324,6 +388,12 @@ export function deriveEntries(pluginRoot) {
     if (rel) referenced.add(rel);
   }
   for (const sibling of scanPluginSiblingReferences(pluginRoot)) {
+    const rel = existing.get(sibling);
+    if (rel) referenced.add(rel);
+  }
+  // Core-side sibling spawns (`siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.<role>)`) — see the
+  // SIBLING-RESOLUTION MANIFEST constants. Throws (fail-closed) when the table cannot be parsed.
+  for (const sibling of scanCoreSiblingManifest()) {
     const rel = existing.get(sibling);
     if (rel) referenced.add(rel);
   }

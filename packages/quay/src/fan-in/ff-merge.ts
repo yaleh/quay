@@ -256,7 +256,7 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
     }
     if (benignOk && benignPaths.length > 0) {
       const scriptsDir = scriptsDirOf(args) ?? "";
-      const touchesArgv = siblingScriptArgv(scriptsDir, "touches-orthogonality-check.ts");
+      const touchesArgv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.touchesOrthogonality);
       // unresolvable ⇒ benignOk stays false (fail-closed to "working tree not clean") — the honest
       // reading: the judge could not run, so the tree is not certified benign.
       const verdict = touchesArgv
@@ -323,7 +323,7 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
  *  bundle `dist/<name>.js`. ⛔ SINGLE SOURCE for "what was tried": `siblingScriptArgv` consumes this,
  *  so a probe's "tried …" detail and the resolver itself can never disagree about it (hard rule 5b —
  *  the two would otherwise be siblings of the same class, in the same file, drifted apart). */
-function siblingScriptCandidates(scriptsDir: string, name: string): string[] {
+export function siblingScriptCandidates(scriptsDir: string, name: string): string[] {
   const raw = path.join(scriptsDir, name);
   // A non-`.ts` name has no bundle form (the shipped bundle is the `.ts`'s dist twin).
   if (!name.endsWith(".ts")) return [raw];
@@ -334,14 +334,54 @@ function siblingScriptCandidates(scriptsDir: string, name: string): string[] {
 /** Resolve a sibling orchestration script under `scriptsDir` to its RUNNABLE argv prefix — the raw
  *  `.ts` (dev tree, run with `--experimental-strip-types`) or the shipped bundle `dist/<name>.js`
  *  (plain ESM, no flag). `scriptsDir` may ITSELF be the dist dir (shipped kernel). null ⇒ neither
- *  form exists ⇒ the caller must report NOT-EVALUATED, ⛔ never a verdict (hard rule 3b). */
-function siblingScriptArgv(scriptsDir: string, name: string): string[] | null {
+ *  form exists ⇒ the caller must report NOT-EVALUATED, ⛔ never a verdict (hard rule 3b).
+ *
+ *  Exported (and `siblingScriptCandidates` with it) so the packaging-layout test
+ *  (`plugin/test/installed-layout-sibling-resolvability.test.mjs`) asserts on THE resolver the call
+ *  sites use, ⛔ never on a second copy of the candidate rule (硬规则 5b). */
+export function siblingScriptArgv(scriptsDir: string, name: string): string[] | null {
   for (const p of siblingScriptCandidates(scriptsDir, name)) {
     if (!fs.existsSync(p)) continue;
     return ["node", ...(p.endsWith(".ts") ? ["--experimental-strip-types"] : []), p];
   }
   return null;
 }
+
+// ── the sibling-resolution MANIFEST: call site → plugin script name ─────────────────────────────────
+// gap-fan-in-installed-layout-sibling-script-resolvability-test-and-reaper-bundling. Every plugin
+// script this file spawns as a SIBLING is named HERE, once. Three consumers read this one table, and
+// they are exactly the three that used to drift apart (硬规则 5b — a defect that is one class
+// appearing in several places must be fixed at the class, not at the instance it was reported on):
+//
+//   ① the call sites below (they resolve `SIBLING_SCRIPTS.<role>`, ⛔ never a second literal);
+//   ② `packages/quay/scripts/build-plugin-dist.mjs` (`scanCoreSiblingManifest`): the SHIPPED bundle
+//      entry set is DERIVED from these VALUES. A Core-source sibling spawn the packager does not
+//      know about ships no `dist/<name>.js`, and the artifact DELETES the raw plugin `.ts` — so in
+//      ANY install layout the spawn resolves to neither form (measured pre-fix on the real
+//      `package.sh` artifact: `worktree-process-reaper.ts` NOT-RESOLVABLE, the other two
+//      RESOLVABLE(dist)). That is the shape of
+//      gap-ff-merge-suite-cert-classifier-unshipped-and-misreported, which fixed the classifier's
+//      two call sites and left this one — the sibling instance of the same class;
+//   ③ `plugin/test/installed-layout-sibling-resolvability.test.mjs`: pins that the number of
+//      `siblingScriptArgv` CALL SITES in this file EQUALS the number of rows here, so a new call
+//      site that is not registered (and therefore not bundled) turns the test red.
+//
+// ⛔ ONE ROW PER CALL SITE, not per distinct script: a script resolved from two different places has
+// two rows, which is what makes the "call sites == rows" relation exact (and what makes a new call
+// site — even one reusing an already-registered name — require an explicit act). The packaging
+// consumer only cares about the VALUES, so duplicate values are harmless there.
+export const SIBLING_SCRIPTS = {
+  /** the benign-runtime-dirty verdict (`touches-orthogonality-check.ts --runtime-dirty`) */
+  touchesOrthogonality: "touches-orthogonality-check.ts",
+  /** the cert gate's delta classifier (`select-static-checks-for-touches.ts --classify-delta`) */
+  deltaClassifier: "select-static-checks-for-touches.ts",
+  /** the startup / pre-suite instrument probe's classifier half */
+  classifierProbe: "select-static-checks-for-touches.ts",
+  /** the startup / pre-suite instrument probe's reaper half */
+  reaperProbe: "worktree-process-reaper.ts",
+  /** the blocked-path reaper run (best-effort cleanup after a refused certificate) */
+  reaperRun: "worktree-process-reaper.ts",
+} as const;
 
 /** Prepend `--no-warnings` to a sibling argv prefix (⛔ it is a NODE flag — it must precede the script
  *  path, never be appended after it). null passes through. */
@@ -501,9 +541,12 @@ type DeltaClassification =
   | { kind: "non-inert"; paths: string[] }
   | { kind: "not-evaluated"; detail: string };
 
-/** Run `--classify-delta` for `files` (repo-relative to `root`) and return its three-state verdict. */
-function classifyDeltaVerdict(root: string, scriptsDir: string, files: string[]): DeltaClassification {
-  const argv = siblingScriptArgv(scriptsDir, "select-static-checks-for-touches.ts");
+/** Run `--classify-delta` for `files` (repo-relative to `root`) and return its three-state verdict.
+ *  Exported for the packaging-layout e2e (`plugin/test/installed-layout-sibling-resolvability.test.mjs`),
+ *  which asserts this gate REACHES A VERDICT (`kind !== "not-evaluated"`) against a PACKAGED scripts
+ *  dir on a third-party project — ⛔ not on a copy of the classifier-invocation rule (硬规则 5b). */
+export function classifyDeltaVerdict(root: string, scriptsDir: string, files: string[]): DeltaClassification {
+  const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.deltaClassifier);
   if (!argv) {
     return {
       kind: "not-evaluated",
@@ -688,10 +731,9 @@ export interface InstrumentProbe {
   reaper: InstrumentReading;
 }
 
-/** The two sibling script names the probe resolves — the SAME names the contract gate / reaper call
- *  sites use, so a rename in one place cannot leave the probe reporting on a stale name. */
-const CLASSIFIER_SCRIPT = "select-static-checks-for-touches.ts";
-const REAPER_SCRIPT = "worktree-process-reaper.ts";
+// The two sibling script names the probe resolves come from `SIBLING_SCRIPTS` (`classifierProbe` /
+// `reaperProbe`) — ⛔ NOT local copies: the probe, the contract gate and the reaper call sites must
+// name one script each, and the packaging derivation reads the same table (see its header).
 
 /** Classifier probe: REALLY run one `--classify-delta` against `root` — ⛔ not an existence check, since
  *  "the file is there" does not imply "it can judge this root". An empty delta list suffices: the
@@ -700,11 +742,11 @@ const REAPER_SCRIPT = "worktree-process-reaper.ts";
  *  possible. The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`);
  *  probing some other candidate root would report a capability the call site does not have. */
 function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
-  const argv = siblingScriptArgv(scriptsDir, CLASSIFIER_SCRIPT);
+  const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.classifierProbe);
   if (!argv) {
     return {
       evaluated: false,
-      detail: `root=${root} — classifier NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, CLASSIFIER_SCRIPT).join(" , ")}`,
+      detail: `root=${root} — classifier NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, SIBLING_SCRIPTS.classifierProbe).join(" , ")}`,
     };
   }
   const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root]);
@@ -725,10 +767,10 @@ function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
 /** Reaper probe: resolution only. The reaper is best-effort cleanup on an ALREADY-refused path, so
  *  "is it reachable at all" is the whole question — there is no root it must judge. */
 function probeReaper(scriptsDir: string): InstrumentReading {
-  const argv = siblingScriptArgv(scriptsDir, REAPER_SCRIPT);
+  const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.reaperProbe);
   return argv
     ? { evaluated: true, detail: argv.join(" ") }
-    : { evaluated: false, detail: `reaper NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, REAPER_SCRIPT).join(" , ")}` };
+    : { evaluated: false, detail: `reaper NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, SIBLING_SCRIPTS.reaperProbe).join(" , ")}` };
 }
 
 /** Probe both fan-in instruments against `root`. Read-only w.r.t. quay state (the classifier run writes
@@ -816,7 +858,7 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     // derived entry set ⇒ its dist bundle is never produced) — resolvable in the dev tree only. It is
     // best-effort cleanup on an already-refused path, so an unresolvable reaper is reported and
     // skipped, never silently counted as "reaped".
-    const reaperArgv = withNodeNoWarnings(siblingScriptArgv(scriptsDir, "worktree-process-reaper.ts"));
+    const reaperArgv = withNodeNoWarnings(siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.reaperRun));
     if (reaperArgv) {
       if (args.worktree) {
         sh([...reaperArgv, "--worktree", args.worktree, "--root", root, "--json"]);
