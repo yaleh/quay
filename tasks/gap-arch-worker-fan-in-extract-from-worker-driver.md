@@ -141,6 +141,14 @@ $ bash scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-dri
 
 **四处源码结构判据随代码搬家（⛔ 不是删断言）**：`worker-driver-fan-in-s06` / `worker-driver.test.mjs` / `fan-in-driver-mechanical-orchestration.test.mjs` 里读 `worker-driver.ts` 源码的 `assert.match` 断言，其目标代码已迁走 ⇒ 改为读 `worker-fan-in.ts`（`FAN_IN` / `FANIN_SRC`）。**负臂（「某坏形态已消失」）不降级**：改为对**两个文件都查**——代码从哪搬走都不许在任一处重现。
 
+**第五条同类断言（由 fan-in 全量 suite 抓出；本轮修复）**：上面那四处是迁移者自己扫出来的，**还有第五处漏网**——`plugin/test/archguard-structural-gate-fan-in.test.mjs`（`gap-fan-in-remove-archguard-gate` 的 AC4）**按路径硬读 `worker-driver.ts`**，断言「archguard 步被移除之处仍文档化按需命令」（`/archguard-runner\.ts --root/`）。机械 fan-in 的 5.5 archguard 说明随代码迁进 `worker-fan-in.ts` ⇒ 该断言红（fan-in 全量 suite：`# tests 6153 / pass 6152 / fail 1`，红的就是它）。
+
+**为何窄跑抓不到它（这也是全量 suite 不可被 scoped 门替代的一条实证）**：AC5 的窄跑 glob 是 `worker-driver*` / `driver-*` / `fan-in-*`，而该文件名以 `archguard-` 开头、不在任何一条 glob 内；`--for-task` 的 scoped 门也没选中它（那轮 218 条不含它）⇒ **只有 fan-in 的全量 suite 会看到它**。
+
+**修法与「搬家」是两种不同的处置（写明为何不能照搬前者）**：该断言**不能**改成读 `worker-fan-in.ts`——① 该测试文件**不在本任务 Touches**（改它 ⇒ out-of-Touches 红）；② 它的正文字面就要求「文档化在 `worker-driver.ts` 的移除说明里」，那是 `gap-fan-in-remove-archguard-gate` 的既有不变量，搬家者无权单方面改写**别人**的断言。⇒ 改为**在 `worker-driver.ts` 的抽取说明处留一块指路牌**：写明步链不含 archguard 步 + 按需命令字面量 + 「步链本体与该说明的正本住在 `worker-fan-in.ts`」。既不与 `worker-fan-in.ts` 的正本冲突（正本仍在代码旁），又让读 `worker-driver.ts`（机械 fan-in 的**驱动侧入口**）的人在同一处看得到这件事。
+
+**验证**：`node --test plugin/test/archguard-structural-gate-fan-in.test.mjs` ⇒ **3/3 绿**（修复前 1 红）。改动只增注释 ⇒ AC2（导出面）不受影响（注释不产生导出/绑定），AC4 重跑 `import-graph-check --json` 仍为 `valueSccs []` / `typeSccs []` / `reverseEdges []` / `kernelViolations []`。
+
 **AC6（生产载体）—— 已完成的半边 + 余下待外部**：
 
 用**生产入口本身**（`spawnMechanicalFanIn` 构造的同一 argv：`worker-driver.ts --mechanical-fan-in --task … --worktree … --root … --json`）在本 worktree 的 kernel 上跑了一次**真实机械 fan-in**（无任何 `opts.*` 测试缝，hermetic 目标仓，非 test 进程）：
@@ -179,14 +187,15 @@ $ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢�
 从本 worktree 解析 ⇒ …/quay-worktrees/gap-arch-worker-fan-in-extract-from-worker-driver/plugin/scripts/worker-driver.ts
 从主检出解析     ⇒ /home/yale/work/quay/plugin/scripts/worker-driver.ts
 ```
-主检出要等本改动**落地到 develop**（并经 doc→develop 同步）才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 走的仍是拆分前的代码，**「落地后由生产 driver 走通」的那条记录**要由**下一次** fan-in 产生。这正是任务库既有的「（待外部）」形态（先例：`tasks/gap-ac134-promotion-outcome-ledger.md` 的 AC2/DoD，done 且注明「（待外部）」）；标注后 fan-in 的 `flipAcGateVerdict` 判为 `pass-external`（`isLandedCodeComplete` 的既定语义），不阻塞翻 done。
+主检出要等本改动**落地到 develop**（并经 doc→develop 同步）才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 走的仍是拆分前的代码，**「落地后由生产 driver 走通」的那条记录**要由**下一次** fan-in 产生。这正是任务库既有的「（待外部）」形态（先例：`tasks/gap-ac134-promotion-outcome-ledger.md` 的 AC2/DoD，done 且注明「（待外部）」）；标注后 fan-in 的 `flipAcGateVerdict` 判为 `pass-external`（`isLandedCodeComplete` 的既定语义），不阻塞翻 done。**本任务的 fan-in 日志已实证这一点**：`.quay/fan-in-gap-arch-worker-fan-in-extract-from-worker-driver-wk-prod-anchor.log` 里 `{"step":"ac-precheck","ok":true}` 且 `acTicked=6/7`。
 
 **AC7（行数只作旁证，⛔ 不作通过判据）**：
 
 ```
 迁移前  plugin/scripts/worker-driver.ts   6112 行   （git show HEAD:… | wc -l）
 迁移后  plugin/scripts/worker-driver.ts   4453 行   （-1659，-27.1%）
-新增    plugin/scripts/worker-fan-in.ts   1772 行
+修复后  plugin/scripts/worker-driver.ts   4459 行   （+6 = 上述「第五条断言」的指路牌注释；⛔ 行数仍只作旁证）
+新增    plugin/scripts/worker-fan-in.ts   1772 行   （未变）
 ```
 
 **边界说明（保持可复核）**：`worker-fan-in.ts` 内含**注释与文档**（原样平移，未删减），故 1772 行 ≈ ① 1520 + ②③④⑤ 188 + 新增导入/头注释 64。行数**只是旁证**：承重判据是 AC2（导出面 diff 空）、AC3（能取假）、AC4（无新环）、AC6（生产路径真的走了它）。
@@ -194,18 +203,20 @@ $ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢�
 ## AC
 
 - [x] AC1（重测在先）notes 里贴出重新定位后的 fan-in 区域起止行、导出个数，以及该区域对区域外的真实调用清单（按 import/调用位置判定，非关键词），与调查的「1 处」逐条对账 —— 见 `## Notes` 第 1 节：区域本体 `3709`–`5228`（1520 行）、导出 37 个、区域外真实调用 **8 个**；对账结论 = 调查的「1」是**两点名 grep 非枚举**，同一枚举器在调查时点的真实读数是 **2**（`scopedGateCommandFor` + 类型引用 `WorkerRunResult`），故真实增长 2 → 8；8 个中 5 个只被区域消费，余 3 个同处一段连续 180 行的单缝内。**结论：仍值得拆**（触发条件一已触发、二未触发、无新增网状纠缠）。
-- [x] AC2（导出面不变）迁移前后 `worker-driver.ts` 的导出名集合逐字相同：迁前迁后各跑一次导出枚举命令，两份输出 diff 为空（贴 diff 命令与结果）—— 见 `## Notes`：运行期 value 导出 **174 → 174**（missing/added 均 `[]`）+ 源码级导出名 **204 → 204**（`diff` 输出为空），两条独立枚举各跑一次。
+- [x] AC2（导出面不变）迁移前后 `worker-driver.ts` 的导出名集合逐字相同：迁前迁后各跑一次导出枚举命令，两份输出 diff 为空（贴 diff 命令与结果）—— 见 `## Notes`：运行期 value 导出 **174 → 174**（missing/added 均 `[]`）+ 源码级导出名 **204 → 204**（`diff` 输出为空），两条独立枚举各跑一次。本轮只增注释 ⇒ 该面不受影响。
 - [x] AC3（判据取假）临时从 `worker-driver.ts` 的 re-export 里删掉一个导出（`mechSh`），`plugin/test/worker-driver-fan-in-s*.test.mjs` 必须红；撤销后绿。两次结果贴进 notes —— 见 `## Notes`：删后 `# tests 18 / pass 0 / fail 18`，报 `does not provide an export named 'mechSh'`；撤销（逐字节还原）后 `# tests 102 / pass 102 / fail 0`。
-- [x] AC4（无新环）`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `valueSccs=[]`、`typeSccs=[]`、`reverseEdges=[]`、`verdict.ok=true`；`worker-fan-in.ts` 不得 import `worker-driver.ts` —— 见 `## Notes`：四条读数全部如上；`worker-fan-in.ts` 对 `worker-driver` 的 import 命中数为 0。
-- [x] AC5（回归面）`plugin/test/worker-driver-fan-in-s01..s12.test.mjs` 与 `worker-driver*.test.mjs` 全绿，且 `scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver` 全绿 —— 见 `## Notes`：s01–s18 合计 **102/102 绿**；`worker-driver*.test.mjs` + `driver-*.test.mjs` + `fan-in-*.test.mjs` 合计 **741/742**，唯一红是 **pristine develop 上同样红**的既有失败（`fan-in-workflow-lock` 的 `.concurrency` 条目，对照读数 4 pass/1 fail 两边逐字相同）；跨包 `packages/quay/test/serve.test.mjs` 1/1 绿；`scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver --allow-thin` **218/218 绿**（exit 0），绿后已写 scoped-gate 缓存（`{"ok":true}`）。
+- [x] AC4（无新环）`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `valueSccs=[]`、`typeSccs=[]`、`reverseEdges=[]`、`verdict.ok=true`；`worker-fan-in.ts` 不得 import `worker-driver.ts` —— 见 `## Notes`：四条读数全部如上；`worker-fan-in.ts` 对 `worker-driver` 的 import 命中数为 0。本轮改后重跑，四条读数不变（`kernelViolations` 亦空）。
+- [x] AC5（回归面）`plugin/test/worker-driver-fan-in-s01..s12.test.mjs` 与 `worker-driver*.test.mjs` 全绿，且 `scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver` 全绿 —— 见 `## Notes`：s01–s18 合计 **102/102 绿**；`worker-driver*.test.mjs` + `driver-*.test.mjs` + `fan-in-*.test.mjs` 合计 **741/742**，唯一红是 **pristine develop 上同样红**的既有失败（`fan-in-workflow-lock` 的 `.concurrency` 条目，对照读数 4 pass/1 fail 两边逐字相同）；跨包 `packages/quay/test/serve.test.mjs` 1/1 绿；`scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver --allow-thin` **218/218 绿**（exit 0），绿后已写 scoped-gate 缓存（`{"ok":true}`）。**（补记：窄跑与 scoped 门的覆盖缺口）** 第五处同类断言的文件名以 `archguard-` 开头，既不在任何窄跑 glob 内、scoped 门也未选中 ⇒ **它只被 fan-in 的全量 suite 抓到**（本轮已修复，见 `## Notes` 的「第五条同类断言」段）。
 - [ ] AC6（生产载体，硬规则 4 推论三）拆分落地后 driver 的一次真实机械 fan-in 走通新模块：`.workflow-events/` 或 dispatch 记录里出现落地后时间窗内、由 `worker-fan-in` 路径完成的 fan-in 记录 ≥1 条（贴该记录）；关掉测试注入缝后仍成立 —— **这半边的证据只能在落地后产生**：生产 fan-in 的执行器锚在 **kernel 安装位置**（`spawnMechanicalFanIn` → `kernelSiblingArgv("worker-driver.ts")`），而常驻 worker-driver 跑在**主检出**上，主检出要等本改动落地并同步后才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 仍走拆分前代码，该记录须由**下一次** fan-in 产生。**落地前能做的半边已做完并留下读数**（见 `## Notes`）：生产入口 `--mechanical-fan-in`（无任何测试缝）在本 worktree 的 kernel 上跑出 `outcome:landed`（`landedSha=a33d293…`，目标仓落 `tasks: 翻 gap-af6-probe done（driver 机械 fan-in）`，`instruments` 回读的 kernel 路径 = 本 worktree），且**取假负控制**成立（模块挪开 ⇒ 同一入口 `ERR_MODULE_NOT_FOUND` 于 `worker-driver.ts` 的 import；恢复后再次执行）。（待外部）
-- [x] AC7（行数只作旁证）notes 里记 `wc -l` 前后读数；⛔ 不得以行数作通过判据 —— 见 `## Notes`：6112 → 4453（-1659，-27.1%），新增 `worker-fan-in.ts` 1772 行；并写明行数**只作旁证**，承重判据是 AC2/AC3/AC4/AC6。
+- [x] AC7（行数只作旁证）notes 里记 `wc -l` 前后读数；⛔ 不得以行数作通过判据 —— 见 `## Notes`：6112 → 4453（-1659，-27.1%），本轮修复的指路牌注释使其为 4459（+6）；新增 `worker-fan-in.ts` 1772 行；并写明行数**只作旁证**，承重判据是 AC2/AC3/AC4/AC6。
 
 ## DoD
 
 真实落地：新模块在生产 driver 上被一次真实机械 fan-in 走过（AC6），而不是只有测试绿。导出面 diff 为空（AC2）、无新环（AC4）。若重测结论是「不该再拆」，则以 AC1 的证据关闭本任务并注明，不算失败。
 
-**本轮状态**：AC2（导出面 diff 空）、AC4（无新环）已达成；AC6 的**落地前半边**已达成并留读数（生产入口真实 fan-in 走到 `landed` + 取假负控制），**另半边**（落地后由常驻生产 driver 完成的那条记录）标注「（待外部）」——见 `## Notes` 的 AC6 节与 `tasks/gap-ac134-promotion-outcome-ledger.md` 的同一形态先例。重测结论是**「仍值得拆」**（AC1 已给出逐条依据），故不走「以 AC1 证据关闭本任务」的免失败分支。
+**本轮状态**：AC2（导出面 diff 空）、AC4（无新环）已达成；AC6 的**落地前半边**已达成并留读数（生产入口真实 fan-in 走到 `landed` + 取假负控制），**另半边**（落地后由常驻生产 driver 完成的那条记录）标注「（待外部）」——见 `## Notes` 的 AC6 节与 `tasks/gap-arch134-promotion-outcome-ledger.md` 的同一形态先例。重测结论是**「仍值得拆」**（AC1 已给出逐条依据），故不走「以 AC1 证据关闭本任务」的免失败分支。
+
+**本轮补记**：抽取漏了一处**别人的**源码结构断言（`archguard-structural-gate-fan-in.test.mjs`），由 fan-in 全量 suite 抓出并已修复（见 `## Notes` 的「第五条同类断言」段）：按「指路牌留在 `worker-driver.ts`、正本随代码住 `worker-fan-in.ts`」处置，⛔ 未改该测试文件（不在本任务 Touches）。
 
 ## Touches
 
