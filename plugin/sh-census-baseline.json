@@ -167,8 +167,25 @@
         "embeddedInterpreterLines": "-481 = plugin/scripts/cross-machine-verify.sh effective lines 489 -> 8. Residual = 0 BY CONSTRUCTION, not by sampling: the branch's `.sh` delta vs develop is EXACTLY this one file (`git diff --name-only develop HEAD` -> plugin/scripts/cross-machine-verify.sh, plus the new .ts and the new .mjs test; the new module is a `.ts`, outside a `*.sh` census). Measured with the checker's OWN reading: files[path=plugin/scripts/cross-machine-verify.sh].codeLines 489 -> 8 and totals.embeddedInterpreterLines 8894 -> 8413; the two readings differ by exactly the one file, so nothing else moved.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-checker-mutation-check-sh, SPEC §5 Phase 5.2)",
+      "from": {
+        "embeddedInterpreterLines": 8413,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 8418,
+        "duplicateCopies": 0
+      },
+      "why": "⛔ UPWARD re-anchor — RECORDED, not hidden, and it is +5 rather than negative because THIS TASK'S AC4 PREMISE IS FALSE, measured. plugin/scripts/checker-mutation-check.sh was assumed (SPEC-architecture-consolidation §1.3's table pairs it with `node`) to be one of the bash files hiding an embedded interpreter, so converting its 490 effective lines to plugin/scripts/checker-mutation-check.ts was expected to LOWER this axis. The checker's OWN reading says otherwise: that file's `embedded` was `[]` BEFORE the rewrite and `[]` (i.e. none) is what its program ever used — its only `node` tokens are inside COMMENT lines and one grep regex STRING, never at a command position, which is exactly what the census's code-position mask is for. So this file was never IN the axis, there were no interpreter lines to give back, and the only movement this task can produce is the thin entry's own 5 effective lines: the entry execs `node --no-warnings --experimental-strip-types`, which `nodeQualifies` counts (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh / cross-machine-verify.sh entries above — a thin entry STAYS in the axis; it is the line count that moves). ⛔ The alternative was to write the entry so the interpreter call is invisible to the detector (e.g. exec-ing the .ts directly through its own shebang): that would have bought a flat reading by moving this entry OFF the form the packaging rewriter (`rewriteShell`'s `exec node --experimental-strip-types \"$SCRIPT_DIR/X.ts\" → exec node \"$SCRIPT_DIR/dist/X.js\"` rule) and both sibling thin entries use. A production entry whose packaged form has no proven rewrite path is a worse outcome than 5 recorded lines, so the entry keeps the house form and the cost is written down here.",
+      "attribution": {
+        "embeddedInterpreterLines": "+5 = plugin/scripts/checker-mutation-check.sh effective lines 490 -> 5 (the thin entry). Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY this one file (`git diff --name-only develop HEAD` -> this .sh plus the new .ts and the two test files; both new files are not `*.sh`), so nothing else in the census can have moved. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/checker-mutation-check.sh].codeLines 490 -> 5, embedded [] -> [\"node\"], and totals.embeddedInterpreterLines 8413 -> 8418 — the two readings differ by exactly those 5 lines.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      },
+      "ratchetNote": "This is the axis's SECOND upward re-anchor (the first is the 2026-09-19 land entry, +259, same mechanism): a committed raise is visible and reviewable, an uncommitted one is caught by the worktree-vs-HEAD guard. It is the honest cost of a thin entry for a script that had no embedded interpreter to convert. ⛔ It is NOT a ratchet weakening: the reading and the baseline are both the checker's own numbers on this tree."
     }
   ],
-  "embeddedInterpreterLines": 8413,
+  "embeddedInterpreterLines": 8418,
   "duplicateCopies": 0
 }
