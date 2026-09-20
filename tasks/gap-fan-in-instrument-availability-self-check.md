@@ -2,7 +2,7 @@
 id: gap-fan-in-instrument-availability-self-check
 title: 仪器可用性自检——driver 启动时与每次 fan-in 进 suite 之前探测分类器/reaper 是否可解析，结果作为事实记录并在
   driver status 与观测面可见（只记录、不拦截）
-status: ready
+status: done
 labels:
   - gap
 parent: null

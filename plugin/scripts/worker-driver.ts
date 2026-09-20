@@ -248,6 +248,11 @@ import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verif
 // ⛔ 不新造计数函数——复用 flip 闸 fan-in-ac-completion-gate.ts 的 flipAcGateVerdict（与机械 fan-in
 // step 6.5 ac-precheck / step 8 ac-gate 同源，countCompletionCheckboxes / isLandedCodeComplete 单一真相源）。
 import { flipAcGateVerdict } from "./fan-in-ac-completion-gate.ts";
+// gap-fan-in-instrument-availability-self-check：仪器可用性读数（分类器 / reaper 是否可解析）的类型。
+// ⛔ `import type`（编译期擦除）——运行期符号仍经 loadFfMergeModule 的动态 import 取（见其注释）；若改成
+// 值 import，Core 源码树字面量就会以【静态边】进入本 kernel 的 bundle，而它必须仍由 coreSrcAliasPlugin
+// 按同一处 specifier 内联。
+import type { InstrumentProbe } from "../../packages/quay/src/fan-in/ff-merge.ts";
 export {
   splitArgs,
   launchArgv,
@@ -1608,6 +1613,44 @@ function kernelSiblingArgv(name: string): string[] {
  *  不带 flag）。两者都不在 ⇒ 回退 kernelScriptsDir 下的 .ts（运行期 fail-closed）。 */
 function workerDriverSelfArgv(): string[] {
   return ["node", ...kernelSiblingArgv("worker-driver.ts")];
+}
+
+/** The two ff-merge.ts (Core `packages/quay/src/fan-in/ff-merge.ts`) symbols this kernel consumes:
+ *  the 持锁段 ff itself, and the instrument probe (gap-fan-in-instrument-availability-self-check).
+ *  ⛔ Declared structurally rather than `import type`d so the ONE runtime specifier below stays the
+ *  only place the Core source-tree layout is named — and so the two consumers cannot end up loaded
+ *  from different module instances. */
+interface FfMergeModule {
+  ffMerge: (o: {
+    task: string; root: string; mergeTarget: string; runId: string; attemptKey: string;
+    worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number;
+    token: string; scriptsDir: string;
+  }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }>;
+  probeInstruments: (root: string, scriptsDir?: string | null) => InstrumentProbe;
+}
+
+/** Load the ff-merge Core module — ONE resolution shared by BOTH its consumers (the step-9 ff and the
+ *  pre-suite instrument probe). ⛔ A second copy of this specifier would let the `opts.ffMergeModule`
+ *  test seam be honoured by one consumer and silently ignored by the other (the probe would then read
+ *  the repo's real module while the ff read the fixture's) — hard rule 5b shape, same file, same class.
+ *
+ *  gap-resolve-kernel-src-module-strip-types-node-modules: production goes through the static-literal
+ *  dynamic import (source-tree-relative resolution; the SHIPPED bundle inlines it via
+ *  coreSrcAliasPlugin); the `opts.ffMergeModule` seam is kept for hermetic test repos whose worktree
+ *  carries no `packages/quay/src`. */
+async function loadFfMergeModule(override?: string): Promise<FfMergeModule> {
+  const mod = override
+    ? await import(/* @vite-ignore */ pathToFileURL(override).href)
+    : await import("../../packages/quay/src/fan-in/ff-merge.ts");
+  return mod as unknown as FfMergeModule;
+}
+
+/** Both instruments reduced to one readable line for a trace `reason` (⛔ every value here is the
+ *  reading's own — no re-classification: `evaluated=false` prints as NOT-evaluated, never as ok). */
+function instrumentSummary(p: InstrumentProbe): string {
+  const one = (k: string, r: { evaluated: boolean; detail: string }): string =>
+    `${k}=${r.evaluated ? "available" : "NOT-evaluated"}(${r.detail})`;
+  return `${one("classifier", p.classifier)}; ${one("reaper", p.reaper)}`;
 }
 
 /** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
@@ -3761,6 +3804,11 @@ export interface MechanicalFanInResult {
    *  prompt / needs-human 注记据此构造绝对路径，⛔ 不靠命名约定猜）。red ∧ step=suite 时非 null（suite
    *  真因落该文件——183KB 真因只能靠命名约定猜的病根）；其它步骤 / landed 时 null。 */
   suiteLog: string | null;
+  /** 仪器可用性读数（gap-fan-in-instrument-availability-self-check）：本次 fan-in 进 suite 之前探到的
+   *  分类器 / reaper 读数，**只记录、不拦截**（⛔ 不参与任何控制流，见 ff-merge.ts probeInstruments 上方
+   *  的裁定与理由）。`null` = 本次 fan-in 在探针之前就失败了（**未评估**，⛔ 与「探过且可用」不同形——
+   *  硬规则 3b）；对象内部各自的 `evaluated:false` 才是「探过、判不出」。 */
+  instruments?: InstrumentProbe | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -4685,6 +4733,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   let suiteOutcome: SuiteOutcome | null = null;
   let suiteFinishedEpoch: number | null = null;
   let suitePid: number | null = null;
+  // 仪器可用性读数（gap-fan-in-instrument-availability-self-check），探针在 step 6.9 填。null = 本次 fan-in
+  // 在探针之前就返回了（未评估；⛔ 与「探过且判不出」不同形）。
+  let instruments: InstrumentProbe | null = null;
 
   // A（gap-worker-execution-history-index-not-reachable-from-task）：suite 红时 verdict.logFile 指向
   // .quay/fan-in-suite-*.log（真因文件，⛔ 不再 null——旧一路 logFile:null 让 183KB 真因只能靠命名约定
@@ -4806,6 +4857,27 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         a = await step("scoped-gate", scopedCmd, 600_000);
         if (!a.ok) return fail("scoped-gate", a);
       }
+    }
+
+    // 6.9 仪器可用性探针（gap-fan-in-instrument-availability-self-check）：把「这台安装里分类器 /
+    //     reaper 是否可解析」在**进 suite 之前**变成读数，落进本次 outcome 的 mechanical_fan_in.instruments
+    //     与过程日志的一行 trace。
+    //     ⛔ 只记录、不拦截（人 2026-09-20 裁定）：下面这一段【不参与任何控制流】——不改 needSuite /
+    //     scoped / 重试 / needs-human，探针失败也照常进 suite。理由（外部项目里 flip 提交已按身份判惰性、
+    //     不需要分类器；无条件拦截会让没 registry 的项目里每个任务都死在 suite 之前）见 ff-merge.ts
+    //     probeInstruments 上方注释。⛔ 也不要给它加 `return`——那是另一次裁定的事，须先有发生率读数。
+    const probeT0 = Date.now();
+    try {
+      const ffMod = await loadFfMergeModule(opts.ffMergeModule);
+      // 探的 root = worktree：fan-in 自己的 `--classify-delta --root <worktree>`（step 4）用的就是它，
+      // 探别的 root 会报出调用点并不具备的能力。
+      instruments = ffMod.probeInstruments(worktree, scriptsDir);
+      trace({ step: "instrument-probe", exit: 0, wall_ms: Date.now() - probeT0, ok: true, reason: instrumentSummary(instruments) });
+    } catch (e) {
+      // 探针模块本身加载不了 ⇒ 两个仪器都判「未评估」（硬规则 3b：读不懂 ≠ 合格），⛔ 仍然不拦截。
+      const why = `probe unavailable: ${(e as Error)?.message ?? String(e)}`;
+      instruments = { classifier: { evaluated: false, detail: why }, reaper: { evaluated: false, detail: why } };
+      trace({ step: "instrument-probe", exit: 1, wall_ms: Date.now() - probeT0, ok: false, reason: instrumentSummary(instruments) });
     }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
@@ -4965,11 +5037,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const ffT0 = Date.now();
     appendFanInStepTrace(root, task, runId, "ff", "begin");
     const ffToken = randomUUID();
-    const { ffMerge: ffMergeFn } = await (
-      opts.ffMergeModule
-        ? import(/* @vite-ignore */ pathToFileURL(opts.ffMergeModule).href)
-        : import("../../packages/quay/src/fan-in/ff-merge.ts")
-    ) as { ffMerge: (o: { task: string; root: string; mergeTarget: string; runId: string; attemptKey: string; worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number; token: string; scriptsDir: string }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }> };
+    // ⛔ specifier / 测试缝解析收在 loadFfMergeModule 一处——它在 step 6.9 已被调过一次（探针），本步是
+    // 同一模块的第二个消费者（那次调用结果不缓存：两次 import 同一 specifier 由 ESM 缓存去重）。
+    const { ffMerge: ffMergeFn } = await loadFfMergeModule(opts.ffMergeModule);
     // attemptKey = perSuiteRunId (mfi-<task>-<epoch>-<rand>, generated once per fan-in): the per-dispatch
     // identity for the ff retry counter. ⛔ NOT runId (wk-prod-<epoch>) — that is the driver-process
     // lifetime id, constant across dispatches, which latches a task's retry budget across independent
@@ -5021,6 +5091,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       pendingRed.lockHoldSecs = lock.lockHoldSecs;
       pendingRed.lockAcquireEpoch = lock.lockAcquireEpoch;
       pendingRed.lockReleaseEpoch = lock.lockReleaseEpoch;
+      // 仪器读数与锁时长同一时机填：探针在 [acquire, release] 区间内跑（step 6.9），此刻的 `instruments`
+      // 就是本次尝试自己的读数；探针之前失败 ⇒ 仍是 null（未评估，⛔ 不伪造成「探过」）。
+      pendingRed.instruments = instruments;
     }
     trace({ step: "release-fan-in-lock", exit: 0, wall_ms: Date.now() - relT0, ok: true });
   }
@@ -5033,6 +5106,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     ...lock, suiteFinishedEpoch, suiteOutcome, suitePid, landedSha,
     suiteLog: null,
     fanInLog: path.basename(fanInLog),
+    instruments,
   };
 }
 
@@ -5071,6 +5145,8 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
     lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
     suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
     suiteLog: null,
+    // spawn 未起/输出不可解析 ⇒ 探针从未跑过（未评估，⛔ 不是「探过且判不出」）。
+    instruments: null,
   });
   if (r.status === null) {
     return red("spawn-mechanical-fan-in", r.error?.message ?? `fresh mechanical fan-in process failed: ${r.stderr || "no output"}`);

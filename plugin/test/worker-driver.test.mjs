@@ -2988,3 +2988,125 @@ test("AC4 (端到端负控制): after `quay init` establishes the baseline, the 
   // and the pre-quay tip is preserved rather than destroyed
   assert.ok(runGit(repo, ["branch", "--list", "develop-pre-quay-init-*"]).trim().length > 0, "old develop preserved");
 });
+
+// ── instrument availability probe in the mechanical fan-in (gap-fan-in-instrument-availability-self-check) ──
+// AC2 has THREE obligations, and the third is the one a one-sided test would miss: the probe must run
+// BEFORE the suite (trace order), its reading must land in the run's result (`instruments`, carried
+// into the outcome record as `mechanical_fan_in.instruments`), and — the NEGATIVE CONTROL — a probe
+// that reads `evaluated:false` must NOT stop the suite. Without that control, "the suite ran" would
+// also be produced by a probe that never ran at all.
+//
+// The fixture is deliberately registry-free in its WORKTREE (`makeScopedCacheRepo` writes a
+// `scripts/test.sh`, but the classifier's registry is `runner-static-gate.ts`, which it does not
+// carry), so the classifier reading for the probed root is `evaluated:false` — a real not-evaluated
+// reading rather than a simulated one. `scriptsDir` is the repo's own plugin/scripts, so the reaper
+// reads `evaluated:true`: the two readings differ in the same run, which is what makes "the field is
+// just echoed" impossible.
+
+/** The per-run trace log's step names, in write order. */
+function readFanInTraceSteps(repo, runId) {
+  const fanInLog = path.join(repo, ".quay", `fan-in-${SCG_TASK}-${runId}.log`);
+  return fs.readFileSync(fanInLog, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
+    .map((l) => JSON.parse(l).step);
+}
+
+test("AC2 (gap-fan-in-instrument-availability-self-check) — the probe runs BEFORE the suite, its reading lands in the result, and evaluated=false does NOT intercept the suite", async (t) => {
+  const { base, repo, worktree } = makeScopedCacheRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const suiteMarker = path.join(base, "suite-ran");
+  const r = await runMechanicalFanIn({
+    ...scgFanInArgs({ repo, worktree, base, runId: "instr-1", scopedGateCommand: ["true"] }),
+    // The suite writes a marker: "the suite ran" must be an OBSERVED act, not an inferred one.
+    suiteCommand: ["bash", "-c", `touch ${suiteMarker}; exit 0`],
+  });
+  assert.equal(r.outcome, "landed", `fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+
+  // (1) trace order — the probe is a step of its own, strictly BEFORE the suite's own steps.
+  const steps = readFanInTraceSteps(repo, "instr-1");
+  const iProbe = steps.indexOf("instrument-probe");
+  assert.notEqual(iProbe, -1, `instrument-probe trace line present (saw ${steps.join(",")})`);
+  assert.ok(iProbe < steps.indexOf("suite-start"), "the probe runs BEFORE suite-start");
+  assert.ok(iProbe < steps.indexOf("ac-precheck"), "the probe runs BEFORE the suite's ac-precheck");
+
+  // (2) the reading is in the RESULT — the same object the driver embeds as `mechanical_fan_in`.
+  assert.ok(r.instruments, `the run carries an instruments reading: ${JSON.stringify(r.instruments)}`);
+  assert.strictEqual(r.instruments.classifier.evaluated, false,
+    `the fixture worktree carries no runner-static-gate.ts ⇒ not-evaluated: ${JSON.stringify(r.instruments.classifier)}`);
+  assert.match(r.instruments.classifier.detail, /runner-static-gate\.ts/, "the reading names what it looked for");
+  assert.strictEqual(r.instruments.reaper.evaluated, true,
+    `the repo's own plugin/scripts carries the reaper ⇒ available: ${JSON.stringify(r.instruments.reaper)}`);
+  // ⛔ The two readings differ IN THE SAME RUN — so neither is a constant the test merely echoes.
+  assert.notEqual(r.instruments.classifier.evaluated, r.instruments.reaper.evaluated,
+    "one instrument unavailable + one available in the same run (⛔ not a fixed value)");
+  // The outcome record is JSON on disk (`mechanical_fan_in` rides verbatim inside it) — assert the
+  // field survives that exact transformation rather than only existing on the in-memory object.
+  const landed = JSON.parse(JSON.stringify(r));
+  assert.strictEqual(landed.instruments.classifier.evaluated, false, "the reading survives the outcome record's JSON round-trip");
+  assert.strictEqual(landed.instruments.reaper.evaluated, true, "…for both instruments");
+
+  // (3) NEGATIVE CONTROL — no interception: the suite RAN despite evaluated=false.
+  assert.ok(fs.existsSync(suiteMarker), "the suite still executed with the classifier UNavailable (record only, never intercept)");
+});
+
+test("AC2 (gap-fan-in-instrument-availability-self-check) — a fan-in that fails BEFORE the probe carries instruments:null (未评估, ⛔ not a fabricated reading)", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wd-instr-early-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "instr-test"]);
+  runGit(repo, ["config", "user.email", "instr@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  // No task file ⇒ the anti-drift step (step 3, BEFORE the probe) fails ⇒ the run must be red with an
+  // UNEVALUATED instruments reading — distinguishable from "probed, could not judge" (hard rule 3b).
+  runGit(repo, ["commit", "-q", "--allow-empty", "-m", "base"]);
+  runGit(repo, ["worktree", "add", worktree, "-b", `task/${SCG_TASK}`]);
+  const r = await runMechanicalFanIn(scgFanInArgs({
+    repo, worktree, base, runId: "instr-early-1",
+    scopedGateCommand: ["true"],
+  }));
+  assert.equal(r.outcome, "red", `expected a pre-probe failure, got ${r.outcome}`);
+  assert.notEqual(r.step, "instrument-probe", "the failure is BEFORE the probe step");
+  assert.strictEqual(r.instruments, null, "⛔ the probe never ran ⇒ null (未评估), never a reading shaped like 'checked'");
+});
+
+// ── `quay driver status --kind worker` reports the instrument readings (AC3) ──────────────────────────
+// The reading is a FACT, so the exit code must NOT move when it reads not-evaluated — and that claim is
+// only falsifiable next to a case where the reading is the OTHER value: a probe-driven exit code would
+// have to differ between the two. Hence the pair below (registry-free ⇒ evaluated=0; a workspace that
+// carries the registry ⇒ evaluated=1), both required to exit 0.
+test("AC3 (gap-fan-in-instrument-availability-self-check) — `quay driver status --kind worker` prints both instrument readings; a NOT-evaluated probe leaves the exit code at 0", async (t) => {
+  const { base, repo } = makeThirdPartyRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const QUAY_CLI = path.join(REPO_ROOT, "packages", "quay", "bin", "quay.ts");
+  const runStatus = (extra = []) =>
+    spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "driver", "status", "--kind", "worker", "--root", repo, ...extra],
+      { encoding: "utf8", cwd: path.dirname(path.dirname(QUAY_CLI)) });
+
+  // (a) a workspace with no registry: the classifier cannot judge ⇒ evaluated=0, reaper resolves ⇒ 1.
+  const a = runStatus();
+  assert.equal(a.status, 0, `driver status must still exit 0 — a NOT-evaluated probe is a reading, not a failure:\n${a.stdout}${a.stderr}`);
+  assert.match(a.stdout, /instruments: classifier evaluated=0/, `the classifier reading is printed:\n${a.stdout}`);
+  assert.match(a.stdout, /instruments: reaper evaluated=1/, `the reaper reading is printed:\n${a.stdout}`);
+  // The not-evaluated arm must say WHY (and what it looked for) — a bare 0 would send the reader hunting.
+  assert.match(a.stdout, /runner-static-gate\.ts/, "the reading names the registry candidate it looked for");
+  assert.ok(!/instruments: classifier evaluated=0 —\s*$/.test(a.stdout), "⛔ not-evaluated never prints without its detail");
+
+  // (b) the SAME workspace once it carries a registry ⇒ evaluated=1, same exit code 0.
+  fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "plugin", "scripts", "runner-static-gate.ts"), "# empty registry\n", "utf8");
+  const b = runStatus();
+  assert.equal(b.status, 0, "the available arm also exits 0");
+  assert.match(b.stdout, /instruments: classifier evaluated=1/, `a reachable registry reads available:\n${b.stdout}`);
+  assert.notEqual(a.stdout, b.stdout, "the reading really follows its input (⛔ not a constant string)");
+
+  // (c) `--json` carries the SAME reading as one object (⛔ not the text lines appended to a JSON body).
+  const c = runStatus(["--json"]);
+  assert.equal(c.status, 0, "the JSON arm keeps the same exit code");
+  const parsed = JSON.parse(c.stdout.trim());
+  assert.ok(parsed.instruments, `the JSON arm carries an instruments key: ${c.stdout}`);
+  assert.strictEqual(parsed.instruments.classifier.evaluated, true, "JSON classifier reading");
+  assert.strictEqual(parsed.instruments.reaper.evaluated, true, "JSON reaper reading");
+  assert.equal(parsed.kind, "worker", "…without disturbing the pre-existing fields");
+});
