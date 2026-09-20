@@ -74,6 +74,7 @@ live `embeddedInterpreterLines=9504` vs 提交基线 `9505`。检查器本体（
 ⛔ 没有做「重试到两次相同」这类掩盖——那会把真差异一起吞掉，正是本文件存在的理由。
 
 **对 6 条 AC 的影响**：①②③ 改的是「测试的 fixture 前提 / 棘轮锚点」，④ 改的是判据本身对「报告型工具 + 活仓库」的错设；AC1–AC6 的读数与判据对象均未变，故本轮**不改任何 AC 勾选**（六条仍全部为真）。
+**收尾轮在合并后的 tip 上重测（不沿用上一轮读数）**：tip `67b61050`（develop `27cd906c` 已并入）。AC1 `scripts/stamp-version.test.ts` = `ℹ tests 14 / pass 14 / fail 0`、`scripts/version-consistency-check.test.ts` = `26 / 26 / 0`；AC3 真实仓库 `version-consistency-check.ts` exit 0（`All 15 carriers == resolveVersion(VERSION,'tracked') == 0.10.0-dev`）；AC5/AC6 的正向路径由 npm-pack-e2e 里的**真实** `package.sh` 覆盖（exit 0、产出 tarball）。scoped gate（与 fan-in 同款命令）：`--for-task gap-version-stamp-generator-and-build-wiring --allow-thin` ⇒ `ℹ tests 65 / pass 65 / fail 0`，exit 0，且 gate 前/后 develop 均为 `27cd906c` ⇒ 按该 develop sha 写入 scoped-gate 缓存。⛔ 该 scoped 选择器按 `*/test/*.test.mjs` 规则选测，`scripts/*.test.ts` 这类同目录兄弟测试**不在**它的选择集里（实测：select 出的 65 条中含 symlink 46 + npm-pack 11；两个 `.test.ts` 命中数为 0）——所以上面两条 AC1 读数是**另跑**的，不是 scoped gate 覆盖的。
 
 ## AC
 
