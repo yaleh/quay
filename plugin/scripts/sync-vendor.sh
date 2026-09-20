@@ -281,16 +281,26 @@ if $CHECK_MODE; then
     "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" \
     "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
 else
-  echo "[sync-vendor] mirroring the task-schema check -> plugin/scripts/{task-schema.ts,task-schema-check.ts,task-schema-check.sh} ..."
-  cp "${EXPERIMENT_SCRIPTS}/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema.ts"
-  cp "${EXPERIMENT_SCRIPTS}/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts"
-  cp "${EXPERIMENT_SCRIPTS}/task-schema-check.sh" "${PLUGIN_DIR}/scripts/task-schema-check.sh"
-  chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
-  # M152 (DIR-091) refactored task-schema-check.sh (and 6 sibling gate scripts) to depend
-  # on this shared lib. No exp5 attribution to sanitize (byte-identical copy, not group-2).
-  echo "[sync-vendor] mirroring gate-script-lib.sh (task-schema-check.sh's shared dependency) ..."
-  cp "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
-  chmod +x "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
+  # M152 (DIR-091) refactored task-schema-check.sh (and 6 sibling gate scripts) to depend on the shared
+  # gate-script-lib.sh; it travels with them (see this section's header note above the list). No exp5
+  # attribution to sanitize (byte-identical copy, not group-2).
+  echo "[sync-vendor] mirroring the task-schema check + its shared gate-script-lib.sh -> plugin/scripts/ ..."
+  # ⛔ Symlink guard, same as section 4's SYNC_SCRIPTS loop below — and for the same reason. These four
+  # sources are SYMLINKS into plugin/scripts/ today (`experiments/.../scripts/task-schema.ts ->
+  # ../../../plugin/scripts/task-schema.ts`, the single-source direction of the mirror policy), so a
+  # plain `cp` is a copy of a file ONTO ITSELF: `cp: '…' and '…' are the same file`, exit 1, and
+  # `set -e` aborts the whole script. Measured 2026-09-20 in a fresh worktree: the full (no-flag) path
+  # died HERE and never reached the later sections — including the build-mode version stamp at the end
+  # of section 7, whose ordering constraint (section 6 rewrites plugin/vendor/quay/package.json's
+  # version) is why it cannot simply be moved earlier. The abort was pre-existing and invisible: the
+  # only routine caller is the root `postinstall` (`bash plugin/scripts/sync-vendor.sh || true`), whose
+  # `|| true` swallowed it. Fixing it here rather than deferring is not scope creep — without it the
+  # wiring this task adds was unreachable code, and a release build would have shipped a `-dev` artifact.
+  for s in task-schema.ts task-schema-check.ts task-schema-check.sh gate-script-lib.sh; do
+    if [ -L "${EXPERIMENT_SCRIPTS}/${s}" ]; then echo "[sync-vendor] skipping symlink: ${s}"; continue; fi
+    cp "${EXPERIMENT_SCRIPTS}/${s}" "${PLUGIN_DIR}/scripts/${s}"
+    case "$s" in *.sh) chmod +x "${PLUGIN_DIR}/scripts/${s}" ;; esac
+  done
 fi
 
 # ---------------------------------------------------------------------------
@@ -476,6 +486,23 @@ if $CHECK_MODE; then
     exit 1
   fi
 else
+  # ── Build-mode version stamp (gap-version-stamp-generator-and-build-wiring) ──────────────────────
+  # The last write of a build, and it MUST be the last one: section 6 rewrites
+  # plugin/vendor/quay/package.json's version from packages/quay/package.json, so a stamp placed
+  # earlier would be undone. A built tree is an ARTIFACT, and an artifact's version is decided by the
+  # BUILD, not by the commit — `resolveVersion(VERSION,'build')` is `X.Y.Z` on a `release/*` branch (or
+  # at tag `vX.Y.Z`) and `X.Y.Z-dev` everywhere else (human ruling 2026-09-20:
+  # 「可以在 build 过程中，监测分支并加后缀，如 -dev」). The committed carriers are ALWAYS `X.Y.Z-dev`
+  # on every branch, so this is a NO-OP on develop/author and only bites on a release build.
+  # ⚠️ On a `release/*` branch it therefore WRITES TRACKED FILES (plugin/VERSION,
+  # plugin/.claude-plugin/{plugin,marketplace}.json, plugin/README.md, plugin/vendor/quay/package.json)
+  # — deliberately: a release branch is a transient build surface, nothing here is committed (the tag
+  # is cut on the `-dev` commit; the released version belongs to the artifact), and `git status` on
+  # develop/author stays clean because build == tracked there.
+  # ⛔ Reached through `stamp-version.mjs` (the Node-20-safe entry), never the `.ts` source: this
+  # script is also the root `postinstall` (`engines: >=20`), where `--experimental-strip-types` does
+  # not exist. A missing entry makes `node` itself exit non-zero ⇒ `set -e` fails closed.
+  echo "[sync-vendor] stamping the built plugin tree (build-form, branch-aware)..." && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${PLUGIN_DIR}" --git-root "${REPO_ROOT}"
   # gap-dist-runtime-not-self-contained-reads-external-package-json (AC3): the
   # completion claim is now ACCURATE — src/version.ts embeds the version at build
   # time (esbuild json loader inlines it into dist/quay.js), so the vendored

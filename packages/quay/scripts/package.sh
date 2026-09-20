@@ -73,23 +73,33 @@ if [ ! -d "${PLUGIN_SRC}" ]; then
   exit 1
 fi
 
-# Version-sync gate (gap-npm-install-does-not-register-the-plugin-with-claude-code): the
-# Claude Code plugin manifest's version MUST track package.json's version. Claude Code
-# presents marketplace.json's `plugins[].version` to the user in `/plugin` listings — a
-# drift makes a freshly installed 0.4.0 package advertise itself as 0.3.13. Fail closed
-# instead of shipping a lying manifest. When bumping the package version, bump
-# plugin/.claude-plugin/marketplace.json AND plugin/.claude-plugin/plugin.json in the
-# same change.
-PKG_VERSION="$(node -p 'require(process.argv[1]).version' "${PACKAGE_DIR}/package.json")"
-MKT_VERSION="$(node -p 'require(process.argv[1]).plugins[0].version' "${PLUGIN_SRC}/.claude-plugin/marketplace.json")"
-PLUGIN_VERSION="$(node -p 'require(process.argv[1]).version' "${PLUGIN_SRC}/.claude-plugin/plugin.json")"
-if [ "${PKG_VERSION}" != "${MKT_VERSION}" ] || [ "${PKG_VERSION}" != "${PLUGIN_VERSION}" ]; then
-  echo "ERROR: plugin manifest version drift — package.json=${PKG_VERSION}, marketplace.json=${MKT_VERSION}, plugin.json=${PLUGIN_VERSION}" >&2
-  echo "       The Claude Code plugin lists marketplace.json's plugins[].version; a drift shows the wrong version to users." >&2
-  echo "       Fix: bump plugin/.claude-plugin/marketplace.json and plugin/.claude-plugin/plugin.json to ${PKG_VERSION} in the same change." >&2
+# ── Version-carrier gate (gap-version-stamp-generator-and-build-wiring) ───────────────────────────
+# Was: a hand-copied THREE-WAY comparison here (package.json vs marketplace.json vs plugin.json) —
+# an after-the-fact check of three files against EACH OTHER, which the other twelve version-bearing
+# carriers (and package-lock.json's four workspace entries) were outside of, and which could not tell
+# a uniformly stale set from a correct one.
+# Is: the single source (`VERSION` at the repo root) judged against EVERY carrier, by the same
+# generator that writes them (`stamp-version.ts` → its Node-20-safe entry `stamp-version.mjs`, since
+# ci.yml's dist-verify-node-floor job runs THIS script on Node 20, which has no
+# `--experimental-strip-types`). The carrier list is `scripts/version-carriers.ts` — one table, shared
+# with `version-consistency-check.ts`; there is no second copy of it here.
+# A drift fails closed: shipping a lying plugin manifest shows users the wrong version in `/plugin`
+# listings (gap-npm-install-does-not-register-the-plugin-with-claude-code), and a stale
+# `delivery-manifest.json` has bitten the release path before.
+REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd)"
+STAMP_ENTRY="${REPO_ROOT}/scripts/stamp-version.mjs"
+if [ ! -f "${STAMP_ENTRY}" ]; then
+  echo "ERROR: the version gate is missing: ${STAMP_ENTRY}" >&2
+  echo "       Every version-bearing carrier is judged against the root VERSION by that generator;" >&2
+  echo "       without it this build cannot tell whether its own manifests are stale." >&2
   exit 1
 fi
-echo "Plugin manifest version sync OK (marketplace.json + plugin.json = ${PKG_VERSION})"
+echo "Verifying every version carrier against VERSION (stamp-version --check)..."
+if ! node "${STAMP_ENTRY}" --check --root "${REPO_ROOT}"; then
+  echo "ERROR: version carriers are out of sync with ${REPO_ROOT}/VERSION — refusing to pack." >&2
+  echo "       Fix: node --experimental-strip-types scripts/stamp-version.ts   (updates all of them)" >&2
+  exit 1
+fi
 echo "Staging the plugin bundle (packages/quay/plugin/) from repo-root plugin/ before packing..."
 rm -rf "${PLUGIN_DEST}"
 mkdir -p "${PLUGIN_DEST}"

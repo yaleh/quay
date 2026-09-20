@@ -71,8 +71,24 @@
         "embeddedInterpreterLines": "-2185 from develop's capability-catalog.sh migration (see the entry above) computed on the merged tree; live reading confirms 9505.",
         "duplicateCopies": "0 — ours: all 37 byte-identical non-symlink pairs are now symlinks; develop's migration added none. Live reading confirms 0."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-version-stamp-generator-and-build-wiring)",
+      "from": {
+        "embeddedInterpreterLines": 9505,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 9504,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, produced by this task's build-wiring edits to two embedded-interpreter .sh files, NOT by a regression. The task's own measured delta was `sync-vendor.sh -1、publish-dist-branch.sh 0、package.sh +4`: the generator wiring had to be COMPRESSED (section 3's two `cp`s merged, section 7's else-branch folded onto one line, the stamp chained onto publish's existing `--rewrite` line) because the first, uncompressed wiring measured +28 (9533 > 9505) — a raise this ratchet correctly refused. What landed is therefore -1 net, and this file's AC6 test (plugin/test/sh-census-check.test.mjs) requires the committed baseline to EQUAL the live reading, not merely bound it: a stale-higher baseline lets a future +1 regression stay green, which is exactly the gain-not-recaptured failure the 0-anchor entry above calls out. Re-anchored AFTER the wiring was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` → totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-1 = plugin/scripts/sync-vendor.sh effective lines 325 -> 324 (section 3's `cp` merge). Residual = 0. Measured per-file with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters) on `git show develop:<f>` vs `HEAD:<f>` over all four .sh this task touched: sync-vendor.sh 325->324 (embedded ⇒ IN the axis, -1); publish-dist-branch.sh 87->87 (embedded ⇒ IN, 0); package.sh 75->79 (NOT embedded — no embedded interpreter at a command position ⇒ outside this axis, the +4 is the wiring itself); plugin/scripts/checker-mutation-cases/version-consistency-check.sh 111->125 (IS embedded, but that path carries the checker's FIXTURE_MARKER and is excluded from the census entirely — it is absent from the 150-file `files[]`, so its +14 is outside this axis too, not silently absorbed). ⛔ The +4 and the +14 are called out rather than folded in: a reader who sums the task's own diff must be able to account for every line, and only the -1 is in-axis.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 9505,
+  "embeddedInterpreterLines": 9504,
   "duplicateCopies": 0
 }
