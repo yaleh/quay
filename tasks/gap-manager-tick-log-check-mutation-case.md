@@ -2,7 +2,7 @@
 id: gap-manager-tick-log-check-mutation-case
 title: manager-tick-log-check.sh 无 mutation case ⇒ P4 谱系归入
   suspicious（与坏守卫不可区分）；两个注入方向（陈旧/缩水）都要补且必须被自动 manifest 执行
-status: ready
+status: done
 labels:
   - gap
   - defect

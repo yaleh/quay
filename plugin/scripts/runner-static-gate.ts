@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 64 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 65 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -986,9 +986,38 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/ scripts/ experiments/ plugin/sh-census-baseline.json plugin/sh-census-exceptions.txt plugin/scripts/sh-census-check.ts plugin/test/sh-census-check.test.mjs plugin/scripts/checker-mutation-cases/sh-census-check.sh
   run_checker "sh-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/sh-census-check.ts" --root "${repo_root}"
+  echo "== manager tick-log persistence check — 注册面 (gap-manager-tick-log-check-mutation-case) =="
+  # manager-tick-log-check.sh 是 AC5b 的机械挂载点（「上一轮 tick 没落行」），生产调用方是外层
+  # tick doc（quay-init 把它落到 consumer 的 orchestration/ 布局，每轮 `--json` 调用）。它此前
+  # 【不在任何注册面里】——mutation
+  # case 即使存在也没有任何机件执行它（checker-mutation-check.sh 的 manifest 只从 run_static_checks /
+  # run_operational_checks / run_doc_checks / CI 解析，名单从不手写）⇒ 那是 hard rule 4 推论三的
+  # 「回声」形态。这一行把它接进 manifest，于是它的 mutation case 由 --check 实际执行（P4 谱系里
+  # 也就有了「被证明能红」的证据，不再与坏守卫不可区分）。
+  #
+  # ⛔ 固定 fixture，不是 live log —— 两个理由各自单独致命：
+  #   ① 写副作用：本守卫在 `LINES > BASELINE` 时会【写】<LOG>.baseline sidecar。一个静态门不得在跑
+  #      检查时写仓内文件 ⇒ --log/--baseline 都指向本次运行的临时目录（独占，见下面的清理）。
+  #   ② 不误伤主线：manager tick log 是 untrack 载体（人裁定 46ba6360，git 无兜底）⇒ 在 fresh 检出 /
+  #      别的 worktree 里【合法缺失】。指向 live log 会落在守卫的 `no-log ⇒ exit 1` 分支上，把无关任务
+  #      的套件判红（硬规则 3b：未评估 ≠ 红 ≠ 绿，三者取值必须可区分）。守卫本体保持该语义不变
+  #      （那是 AC5b 要的）；歧义在【注册面】消解：这里喂的是固定合法 fixture，任何检出上恒绿。
+  #      真实 tick log 的新鲜度仍由它的生产调用方（orchestrator-loop-tick.md 每轮）判。
+  # @static-tier full  （与 delta 无关的接线自检；scoped 模式推迟到 full-suite 门，deferred-not-dropped）
+  # @static-object plugin/scripts/manager-tick-log-check.sh plugin/test/manager-tick-log-check.test.mjs plugin/scripts/checker-mutation-cases/manager-tick-log-check.sh
+  _mgr_tick_fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/mgr-tick-check-XXXXXX")"
+  printf '# Manager Tick Log\n| 时间 | 层 | 动作 |\n| 17:3xZ | manager | fixture tick row |\n' > "${_mgr_tick_fixture_dir}/manager-tick-log.md"
+  printf '3\n' > "${_mgr_tick_fixture_dir}/manager-tick-log.md.baseline"
+  touch "${_mgr_tick_fixture_dir}/manager-tick-log.md"
+  run_checker "manager-tick-log-check" bash "${repo_root}/plugin/scripts/manager-tick-log-check.sh" --log "${_mgr_tick_fixture_dir}/manager-tick-log.md" --baseline "${_mgr_tick_fixture_dir}/manager-tick-log.md.baseline" --stale-hours 24
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
-  run_checker_parallel_wait
+  # rc 先接住、再清 fixture、最后原样 return：清理必须发生在 wait（join 点）【之后】（后台子进程读
+  # fixture 之前删它是静默 fail-open，硬规则 3b），而 wait 失败时 `set -e` 会直接中止本函数 ⇒ 不接住
+  # 就会漏掉清理。返回值语义不变：调用方看到的仍是 wait 的退出码。
+  if run_checker_parallel_wait; then _mgr_tick_wait_rc=0; else _mgr_tick_wait_rc=$?; fi
+  if [ -n "${_mgr_tick_fixture_dir:-}" ]; then rm -rf "$_mgr_tick_fixture_dir"; fi
+  return "$_mgr_tick_wait_rc"
 }
 # run_operational_checks — the OPERATIONAL-CLASS (runtime-state) checker registry: the checks
 # that read the autonomous loop's LIVE runtime state (tick telemetry, runtime ledgers, live
