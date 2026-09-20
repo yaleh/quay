@@ -2,7 +2,7 @@
 id: gap-needs-human-raw-fan-in-reason-observation-surface
 title: 人类观测面读得到 fan-in 失败的原文——web(/needs-human、Runs 块)、CLI、MCP 共用 observation.ts
   单一读取器，原文只展示不解释
-status: ready
+status: done
 labels:
   - gap
 parent: null
