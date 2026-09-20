@@ -58,10 +58,14 @@ Re-run session-delivery's shared command (same run as coldstart-face) only on a 
 | `margin/K` vs 阈值 0.2808 | **0.195 ≤ 0.2808** ⇒ 立案 | **0.99 > 0.2808** ⇒ 情形已消失 |
 
 阈值算术的可核来源（探针自测，逐字取自 `scan-round` 的 `notes`）：
-`filed AC-203/205/207/232 (margin 39, fraction 0.195 <= threshold 0.2808)`，其中
-`(W_p + I) × R / K = (0.34 + 2.0) × 24 / 200 = 0.2808`（W 与 I 读 `plugin/freshness-producers.json` 与
-`.quay/config.yml` 的 `interval:120m`；R **是探针当场实测**的交付面前进速率，本次取到 24 提交/小时，
-⛔ 不是 config.yml 注释里那 18 —— 这正是探针规格 ③ 要求「自己测 R」的理由）。
+`filed AC-203/205/207/232 (margin 39, fraction 0.195 <= threshold 0.2808)`，代入
+`(W_p + I) × R / K = (0.34 + 2.0) × 24 / 200 = 0.2808`（W 读 `plugin/freshness-producers.json:52`，
+I 读 `.quay/config.yml` 的 `interval:120m`；R 由探针当场实测，⛔ 不采 config.yml 注释里那 18 ——
+这正是探针规格 ③ 要求「自己测 R」的理由）。
+**取证层级如实标注**：`R=24` 是由探针自报的 `threshold=0.2808` **反解**出的（`0.2808 × 200 / 2.34`），
+⛔ 不是逐字读数 —— `scan-round` 载体记录的键集里**没有** `r`（逐字核过：
+`ts/kind/routine/probe/role/runId/findings/malformed/shards/inventory/notes/exit/durationMs`）。
+这不影响本节任一结论（`margin` 与 `d` 都是逐字读数、并经 ② 独立重算），只标注这一项的取证层级。
 
 ### ② `d` 独立重算（⛔ 不采信 finding / 快照的自报值），且谓词能取假
 
@@ -107,8 +111,8 @@ EXIT=0
 `:51` 的 `_same_run_as` 就是它的指针），所以 AC-203 的那次重跑**同时**产出了 AC-205。
 ⛔ 本任务没有重跑（理由见 ⑧），执行者是**派发链**（兄弟任务的 worker），符合 DoD 第 2 条。
 
-**例程半边未执行，机械可证**：`plugin/scripts/probe-routine.ts:678-687` 的 FILE-ONLY 守卫 —— 探针 spawn 期间
-任何 tracked 文件被改动即整轮判 `failed` 且**什么都不记录**；而 `filing-round` 记录逐字只有
+**例程半边未执行，机械可证**：`plugin/scripts/probe-routine.ts:668-680` 的 FILE-ONLY 守卫 —— 探针 spawn 期间
+任何 tracked 文件被改动即整轮判 `failed` 且**什么都不记录**（违反时的话逐字在 `:679`）；而 `filing-round` 记录逐字只有
 `filed: [...]` / `errors: []`（L472）。两读数同向。
 
 ### ④ 「失败在哪一步」—— 前置那一半的具名读数（⛔ 不是推理：同一次运行、两台机的逐字日志）
@@ -212,7 +216,7 @@ finding 写的是「Re-run … **only on a host** whose live session passes `--p
 |---|---|---|
 | 检测 | `plugin/probes/freshness-refresh.md`（读 `plugin/freshness-producers.json` + `.quay/goal-freshness-margin.json`，R 当场自测） | `scan-round`：7 主体 / 7 有产出者 / 3 产出者 / 立案 4 |
 | 立案 | `plugin/scripts/routine-file-gate.ts` 三道闸（quality / dedup / rate） | `filing-round`：filed 2（含本任务）；AC-207/232 被 rate 闸挡（cap 3） |
-| FILE-ONLY | `plugin/scripts/probe-routine.ts:678-687` | 例程未执行任何产出者 |
+| FILE-ONLY | `plugin/scripts/probe-routine.ts:668-680` | 例程未执行任何产出者 |
 | 执行 | 派发链（worker）重跑产出者 | `13:21:57Z` 兄弟任务跑 → `13:23:10Z` 落账 |
 | 记录 | AC-205 腿只在 `transcript_confirmed=1` 时落账（`plugin/scripts/verify-deliver-coldstart.sh:5304`） | host B 落账 / host C 不落账 |
 | 缺席可见 | `check_evidence_completeness` 逐条点名 + `exit 2`（`develop-deliver-tgz.sh:1911-1913`） | `PARTIAL present=5 missing=1 list=GOAL-009-AC-205` |
