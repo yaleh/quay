@@ -45,3 +45,11 @@ extra:
 ## DoD
 
 git-graph 测试族里不再存在「实时数据层读 × 实时窗口 oracle」的对拍判据：任何 ref 在两次读之间前进都不再产生假的 `dropped K` / `git=undefined` 不一致；生产读路径（`observation.ts`）与这些判据的强度都不下降（各自的负控制仍能取红）。
+
+## Touches
+
+- packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs（AC1 `:75`→`:79`、`:133`→`:142`、AC6 `:200`→`:203` 三处对拍点冻结 ref 窗口）
+- packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs（`:138`→`:147` 的 `%D` oracle 冻结 ref 窗口）
+- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（AC3 `:55`→`:62` 的 `%D` oracle 冻结 ref 窗口）
+- packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（AC3 `:57`→`:60` 的 `--graph` 列号 oracle 冻结 ref 窗口）
+- tasks/gap-git-graph-live-ref-oracle-siblings-unfrozen.md（自身）
