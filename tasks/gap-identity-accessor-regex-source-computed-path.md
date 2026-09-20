@@ -2,7 +2,7 @@
 id: gap-identity-accessor-regex-source-computed-path
 title: identity-replication-check.ts 的 accessor 正则读不出本仓两种主流 source
   idiom——gate-script-lib.sh 143 处正当引用被计成 hardcoded=143/accessor=0
-status: ready
+status: done
 labels:
   - gap
   - defect
