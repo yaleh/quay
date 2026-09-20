@@ -2,7 +2,7 @@
 id: gap-ac260-criterion-reads-unowned-local-dist-plugin-ref
 title: AC-260 恒假的仪器失败：criterion 读【无主】本地 dist-plugin ref（发布脚本每次 branch -D
   删它），而交付面本身是对的 ⇒ 改读渠道 ref（refs/remotes/origin/dist-plugin 优先）并扫掉兄弟实例 AC-261
-status: ready
+status: done
 labels:
   - gap
   - defect
