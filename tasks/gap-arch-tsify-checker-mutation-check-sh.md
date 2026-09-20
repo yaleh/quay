@@ -13,7 +13,7 @@ goal_ac: AC-312
 ---
 ## Proposal
 
-**把 `plugin/scripts/checker-mutation-check.sh`（490 行）改写为 `plugin/scripts/checker-mutation-check.ts`，`.sh` 留作薄入口一个发布周期。SPEC-architecture-consolidation §5 Phase 5.2；GOAL-B 的量来源之一。**
+**把 `plugin/scripts/checker-mutation-check.sh`（490 有效行）改写为 `plugin/scripts/checker-mutation-check.ts`，`.sh` 留作薄入口一个发布周期。SPEC-architecture-consolidation §5 Phase 5.2；GOAL-B 的量来源之一。**
 
 **这个脚本的特殊性（为什么 characterization 尤其要紧）**：它本身是「让检查器能取假」的**突变仪器**（AC-224 一族依赖它证明检查器不是恒绿）。改写时若悄悄改变它的突变判据，等于让整个「能取假」保证静默失效，而且**与「一切正常」同形**（硬规则 3b）。⇒ characterization 必须对**每个既有 mutation case**钉住「注入后检查器变红」的结果。
 
@@ -21,23 +21,122 @@ goal_ac: AC-312
 
 ## AC
 
-- [ ] AC1（characterization 先于改写，取假）新测试 `plugin/test/checker-mutation-check-characterization.test.mjs` 在**未改动的旧 bash** 上先落盘并全绿；对旧 bash 注入一处判据改动（例如让「突变后仍绿」被判为通过），该测试必须红，撤销后绿。两次输出贴进 notes，且 characterization 提交早于 TS 改写提交。
-- [ ] AC2（逐用例等价，枚举非布尔）对 `checker-mutation-cases/` 下**每个**用例，旧 bash 与新 TS 对「突变前绿 / 突变后红」的判定与退出码一致；贴逐用例对照表，用例数与目录里的用例文件数相同（缺一即不合格）。
-- [ ] AC3（不许把「读不懂」伪装成合格，硬规则 3b）对一个格式错误的用例文件，新 TS 必须给出**独立的「未评估」取值**（非 0 退出或显式 `evaluated:false`），不得与「全部通过」同形；贴该输出，并对旧 bash 同输入的行为做对照。
-- [ ] AC4（内嵌解释器/行数读数）`sh-census-check.ts --json` 显示本脚本不再含内嵌解释器（或被 ≤25 行薄入口取代）；`plugin/sh-census-baseline.json` 只降不升地下调。
-- [ ] AC5（生产载体，硬规则 4 推论三）落地后时间窗内，一次**真实**运行该突变仪器对真实检查器给出读数（贴时间戳晚于落地提交的运行记录）；关掉 fixture 仍成立。
-- [ ] AC6（调用方与无新环）`axis-generator.ts`、`checked-in-write-check.ts` 及 `checker-mutation-cases/*.sh` 对它的引用不断，各自测试单独跑并贴结果；`capability-catalog.sh --summary` 声明数一致；`import-graph-check.ts --json` `verdict.ok=true`。
-- [ ] AC7（回归面）`scripts/test.sh --for-task gap-arch-tsify-checker-mutation-check-sh` 全绿。
+- [x] AC1（characterization 先于改写，取假）新测试 `plugin/test/checker-mutation-check-characterization.test.mjs` 在**未改动的旧 bash** 上先落盘并全绿；对旧 bash 注入一处判据改动（例如让「突变后仍绿」被判为通过），该测试必须红，撤销后绿。两次输出贴进 notes，且 characterization 提交早于 TS 改写提交。
+- [x] AC2（逐用例等价，枚举非布尔）对 `checker-mutation-cases/` 下**每个**用例，旧 bash 与新 TS 对「突变前绿 / 突变后红」的判定与退出码一致；贴逐用例对照表，用例数与目录里的用例文件数相同（缺一即不合格）。
+- [x] AC3（不许把「读不懂」伪装成合格，硬规则 3b）对一个格式错误的用例文件，新 TS 必须给出**独立的「未评估」取值**（非 0 退出或显式 `evaluated:false`），不得与「全部通过」同形；贴该输出，并对旧 bash 同输入的行为做对照。
+- [x] AC4（内嵌解释器/行数读数）`sh-census-check.ts --json` 显示本脚本不再含内嵌解释器（或被 ≤25 行薄入口取代）；`plugin/sh-census-baseline.json` 只降不升地下调。**⚠️ 逐字偏离一处，见下方「AC4」节：立案前提为假（本脚本从未含内嵌解释器），「下调」在结构上不可能，读数只升了薄入口自身那 5 行，且已按机制记进 `_reanchorLog`。**
+- [x] AC5（生产载体，硬规则 4 推论三）落地后时间窗内，一次**真实**运行该突变仪器对真实检查器给出读数（贴时间戳晚于落地提交的运行记录）；关掉 fixture 仍成立。
+- [x] AC6（调用方与无新环）`axis-generator.ts`、`checked-in-write-check.ts` 及 `checker-mutation-cases/*.sh` 对它的引用不断，各自测试单独跑并贴结果；`capability-catalog.sh --summary` 声明数一致；`import-graph-check.ts --json` `verdict.ok=true`。
+- [x] AC7（回归面）`scripts/test.sh --for-task gap-arch-tsify-checker-mutation-check-sh` 全绿。
 
 ## DoD
 
 真实落地：突变仪器新实现对真实检查器跑出过读数（AC5），且每个既有用例的突变判定与旧实现逐项一致（AC2）。「读不懂输入」有独立取值（AC3）。
+
+## 证据（AC 逐条）
+
+**落地提交**：`1dc63c7ce`（characterization，先）→ `6aeb42704`（TS 改写）→ `06c22f5a3`（catalog 登记）→ `0d241f910`（merge develop，无冲突）。分支 `task/gap-arch-tsify-checker-mutation-check-sh`。
+
+**AC1 — characterization 先于改写，且可取假。✅**
+`plugin/test/checker-mutation-check-characterization.test.mjs`（14 例）在**未改动的旧 bash** 上落盘并 **14/14** 全绿（`.quay/ac-char/baseline-run.txt`）；提交序 `git log --oneline --reverse develop..HEAD` 里 `1dc63c7ce test(checker-mutation): characterization BEFORE the TS rewrite` 早于 `6aeb42704 arch(checker-mutation): the program moves into TypeScript`。
+取假（负控制）：把旧 bash 的**一个 token** 改掉——`3) res="stayed-green"` → `3) res="pass"`（其余一字不动，副本放在 `plugin/scripts/` 内以免 `_script_dir/../..` 解析错根）：
+```
+mutant  : ℹ tests 14 · pass 12 · fail 2 · rc=1   (.quay/ac-char/mutant-run.txt)
+baseline: ℹ tests 14 · pass 14 · fail 0 · rc=0
+```
+两条红断言是 `exit 3 (defect present, checker still green) must be a FINDING, never a pass` 与 `MUTATION fake-stayed-green: stayed-green` 的正则。撤销（删除 mutate 副本）后回到 14/14。
+**同一个测试文件在改写后仍 14/14 全绿**（跑的是薄入口 → .ts），所以它钉的是「迁移前后同一份输入同一份输出」，不是某一份实现的自画像。测试可用 `CMC_UNDER_TEST` / `CMC_RUNNER` 指向任一实现（AC2 的差分用的就是这个机制）。
+
+**AC2 — 逐用例等价。✅**
+差分夹具：`git show 1dc63c7ce:plugin/scripts/checker-mutation-check.sh` 取出**未改动的旧 bash**，与新实现（`bash plugin/scripts/checker-mutation-check.sh` → 薄入口 → `.ts`）对**同一棵树**各跑一次 `--run --json`：
+```
+用例文件数(=目录里 *.sh 数): 88     每实现执行用例数: 85 / 85
+两实现 results 键集相同: True       逐用例判定不一致数: 0 / 88
+旧实现总退出码 0     新实现总退出码 0
+checkers_total 83 / checkers_with_mutation 83 / stayed_green 0 / always_red 0 / errors 0 / uncovered 0（两者逐字相同）
+```
+全表在 `.quay/ac-char/ac2-table.md`（88 行，每行一个用例文件：在 manifest 内 / 旧判定 / 新判定 / 一致）。其中 3 行是**目录里有、manifest 里没有**的用例（`manager-observation-runtime-check` / `no-manager-tick-doc-check` / `tmux-test-isolation-check`）——两实现都不跑它们，表里如实标「未注册」而不是省略，所以行数与目录文件数相等。
+JSON 的**唯一**差异是新增两个键（`evaluated` / `not_evaluated`，AC3 的取值），旧实现的键序与值逐字保留在其之前。
+
+**AC3 — 「读不懂」有独立取值。✅**
+夹具根（`--repo-root` 指向一个临时根，注册一个 checker，其用例文件是语法坏掉的 `if` 未闭合）：
+
+旧 bash：
+```
+/tmp/ac3fix/plugin/scripts/checker-mutation-cases/fake-malformed-check.sh: line 5: syntax error: unexpected end of file
+MUTATION fake-malformed-check: error
+errors: 1
+RESULT: FAIL — a checker stayed green under a defect it should catch, or the manifest is incomplete/broken.
+rc=1
+```
+新 TS：
+```
+MUTATION fake-malformed-check: not-evaluated
+errors: 0
+not_evaluated: 1
+not-evaluated (the case file could not be read/evaluated at all — ⛔ not a pass):
+  - fake-malformed-check  (bash -n rejected the case file (syntax error): …line 5: syntax error: unexpected end of file)
+RESULT: NOT-EVALUATED — at least one case file could not be evaluated (see the list above); a case that cannot report a verdict is never a pass.
+rc=2
+```
+`--json`：`"results":{"fake-malformed-check":"not-evaluated"}`、`"evaluated":false`、`"not_evaluated":["fake-malformed-check"]`、`"errors":0`（旧：`"error"` / 无 `evaluated` 键 / `errors:1`）。
+⇒ 新取值**显式、可区分、非 0 退出**，与「全部通过」不同形（硬规则 3b）。**这是本任务唯一的行为新增**（改写前那个值是 `error`，它把「读不懂这个文件」与「这个文件跑起来报了基础设施错」混在一格；更糟的是**注释-only 的用例文件**旧实现判 `pass`——那正是 #6 的「不会失败的探针」形状，新实现判 `not-evaluated`）。
+
+**AC4 — 内嵌解释器/行数读数。⚠️ 满足第一肢；第二肢的前提为假，如实记录。**
+`node --experimental-strip-types plugin/scripts/sh-census-check.ts --json`：
+- 本脚本：`codeLines 490 → 5`、`tsTwin false → true`、`embedded [] → ["node"]`。
+- ⇒ 第一肢的括号支成立：它**被 ≤25 行薄入口取代**（5 行）。
+- `plugin/sh-census-baseline.json`：`embeddedInterpreterLines 8413 → 8418`。**⛔ 是升不是降，原因不是本任务偷懒，而是立案前提为假**：SPEC-architecture-consolidation §1.3 的表把本脚本与 `node` 配了对，但**实测**这个 `.sh` 从来不在该轴上（`embedded: []`，改写前后一致）——它全文的 `node` 只出现在**注释**与一条 `grep` 正则**字符串**里（按位置判定，硬规则 2），从来没有命令位置的解释器调用。所以「转换一个内嵌解释器 .sh ⇒ 轴按程序行数下降」在这里**无对象**，唯一可能的移动就是薄入口自己那 5 行（`exec node --no-warnings --experimental-strip-types`，census 的 `nodeQualifies` 按设计计入——与 capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh / cross-machine-verify.sh 同形：薄入口留在轴内，动的是行数）。
+- 这 5 行已按 census 自己的机制写进 `_reanchorLog`（含 `why` 与 `attribution`：「+5 = 490→5，残差 0 由构造保证，因为本分支的 `.sh` delta 就是这一个文件」），**没有静默**。
+- **为什么不用「让 detector 看不见那个调用」的写法把读数压平**：把入口写成直接 exec 那个 `.ts`（靠它自己的 shebang），读数确实不动，但那条路径**不在** `packages/quay/scripts/build-plugin-dist.mjs` 的 `rewriteShell` 已验证的改写规则上（`exec node --experimental-strip-types "$SCRIPT_DIR/X.ts" → exec node "$SCRIPT_DIR/dist/X.js"` 是唯一被生产产物证过的形态）——为了 5 行读数把一个**打包后可能跑不起来**的入口形态引进生产，比 5 行可复核的账更贵。⇒ 保留户形，把代价写进账本。
+- 判据取假：census 自身的 `verdict.ok=true`（读数不超基线、基线相对 HEAD 未被调高）。
+
+**AC5 — 生产载体：一次真实（非 fixture）运行。✅**
+落地提交 `6aeb42704` 的提交时刻 = `2026-09-20T20:20:45+00:00`；运行窗口严格在其后：
+```
+run start: 2026-09-20T20:22:44Z      （.quay/ac-char/ac5-real-run.txt）
+$ bash plugin/scripts/checker-mutation-check.sh --run --json
+rc=0    stderr: []
+checkers_total: 83  checkers_with_mutation: 83
+mutations_that_stayed_green: 0  always_red: 0  errors: 0  uncovered: []
+cases executed: 85  duration_ms: 17095  evaluated: True
+run end:   2026-09-20T20:23:02Z
+```
+**关掉 fixture 仍成立**：`--root` 未给（用真树）、`--only` 未给、无 `--meta-inject`、用例目录是仓库里真实的 `plugin/scripts/checker-mutation-cases/`（88 个文件，其中 85 个被真实执行）——夹具关掉后它照样给读数。
+另外，本任务自己的用例（`checker-mutation-cases/checker-mutation-check.sh` → `--selftest`）就在这 85 个里，判 `pass`：**突变仪器对自己的突变覆盖也是真的跑过的**。
+
+**AC6 — 调用方与无新环。✅**
+- 三个被点名载体对本脚本的引用**逐字未动**（`git diff --name-only develop...HEAD` 里没有它们；`axis-generator.ts:162/214`、`checked-in-write-check.ts:54/91` 都是**注释**，本任务未触碰，也未新增引用）。
+- 各自测试单独跑：`axis-generator.test.mjs` **10/10**、`checked-in-write-check.test.mjs` **12/12**。
+- `checker-mutation-cases/*.sh` 的引用（用例文件用 `bash "${checker_dir}/checker-mutation-check.sh" --selftest` 调用）**不断**：该用例在 AC5 的真实运行里执行并判 `pass`；另跑三份按路径引用的测试：`scoped-static-checks.test.mjs` **14/14**、`select-static-checks-for-touches.test.mjs` **23/23**、`guard-lineage-check.test.mjs` **9/9**。
+- `capability-catalog.sh --summary`：**351 scripts | 351 declared | 0 unclassified | 346 ship**（改前，在 `1dc63c7ce` 的 detached worktree 实测）→ **352 | 352 | 0 | 347**。差量恰为新增的这一个脚本且已声明，`unclassified` 两次都是 0（新增 `.ts` 原本会让它变 1 并使目录 exit 1——已按「新脚本六行登记」补齐 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER，同 `cross-machine-verify.ts` 的先例）。
+- `import-graph-check.ts --json`：`verdict.ok=true`、`reverseEdges=[]`、`valueSccs=[]`（无新环、无 packages→plugin 边）。
+- 另跑与清单/交付面有关的两个检查器：`capability-manifest-check` rc=0、`scripts/delivery-manifest-check.ts` rc=0。
+
+**AC7 — scoped 门全绿。✅**
+`bash scripts/test.sh --for-task gap-arch-tsify-checker-mutation-check-sh --allow-thin` ⇒ **rc=0（47 tests / 47 pass / 0 fail）**，其中包含本任务的两个测试文件（characterization 14 例 + 存量 checker-mutation-check 11 例，后者含改写后仍然有效的 parser 负控制——它现在通过 `plugin/scripts/` 的**符号链接影子目录**改坏实现本体，因此变异体仍能解析自己的 import，断言的失败原因是 `manifest is EMPTY` 而不是 import 错误：不会出现「因为别的原因红了所以算过」的假绿）。
+scoped-gate 缓存已写（`developSha=0d241f91066bc992b0df890a3d5e470ba1835f6f`）。
+
+## Notes
+
+### 与相邻任务的关系（实现前已读三方状态）
+`gap-checker-mutation-parallel-case-loop`、`gap-checker-mutation-cases-4-checkers`、`gap-checker-mutation-check-has-no-change-tier-companion` **均 done**，无在飞冲突。**唯一已知同文件风险**：`gap-arch-tsify-integration-batch-merge-sh`（ready，SPEC 5.2 的姊妹任务）也改 `plugin/sh-census-baseline.json`——两者都往 `_reanchorLog` 追加并各自设定顶层读数。本任务落地后若该任务再落，合并时**必须两边都保留日志条目并重新取一次真实读数**（不能只留一边的数字，那会让读数与基线脱钩而 census 报红）。
+
+### 本任务范围内的行为差异（全部记在此，不静默）
+1. **`not-evaluated`**（AC3）：新增取值，作用于「用例文件根本读不懂」这一类输入。旧实现在这一类上给 `error`（rc 1）；对**注释-only**的用例文件旧实现甚至给 `pass`。
+2. **`--only` 指了未注册名字**：旧 bash 打出 ERROR 之后**继续**打完整报告，并在 `_run_duration_ms` 上撞 `set -u` → `unbound variable` 崩掉（实测 rc=1、报告半截）；新实现按源码本意**干净地 rc=2** 且不半打报告。
+3. **`--help`**：契约（首参 `--help|-h` → 打印用法 → exit 0；用法正本在文件头部注释）不变；正文改为打印**实现文件**的头部注释（旧 bash 打印 `.sh` 自己的前 120 行注释，而 `.sh` 现在是 3 行入口）。无测试钉正文。
+4. **实现层**：awk/grep/sed/sort 从热路径消失；并行用例池从「后台 subshell + 结果文件」改成真 async 池（同样的 `CHECKER_MUTATION_PARALLEL → STATIC_CHECK_CONCURRENCY → 宿主核数`，信号杀死的用例仍记 `error` 而不是 pass）。
+
+### Touches 的一处增补（必须说明）
+增补 `plugin/test/checker-mutation-check.test.mjs`：该文件里有一条**AC4 的代码级负控制**读的就是被改写的那份源码（`assert.ok(src.includes("(list_run_static_checks_checkers; list_ci_checkers) | sort -u"))`），改写后它必然红（实测 1 fail / 10 pass）。**判据的对象随程序移动**，所以把它指向 `.ts`（并加了「失败原因必须是 EMPTY-manifest」这条断言，防止 import 错误冒充负控制成功）。`plugin/scripts/checker-mutation-cases/*.sh` 与 `axis-generator.ts` / `checked-in-write-check.ts` **零改动**（范围界定照原样遵守）。
 
 ## Touches
 
 - plugin/scripts/checker-mutation-check.sh
 - plugin/scripts/checker-mutation-check.ts (new)
 - plugin/test/checker-mutation-check-characterization.test.mjs (new)
+- plugin/test/checker-mutation-check.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/sh-census-baseline.json
 - plugin/scripts/axis-generator.ts
