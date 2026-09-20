@@ -37,6 +37,11 @@ const SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
 const FF_MERGE_MODULE = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 const SLOT_LIB = path.join(SCRIPTS_DIR, "suite-slot-lib.sh");
 const DRIVER_SRC = path.join(SCRIPTS_DIR, "worker-driver.ts");
+// gap-arch-worker-fan-in-extract-from-worker-driver：机械 fan-in 编排（runMechanicalFanIn / step() /
+// acquireFanInLock 的持锁脚本 / spawnMechanicalFanIn）的正本已迁 worker-fan-in.ts。worker-driver.ts 经
+// re-export 保持【import 面】不变，但【读源码的结构判据】必须按代码实际所在处取（⛔ 读一个不再持有该
+// 代码的文件 = 判据空转，硬规则 3b 的镜像）。
+const FANIN_SRC = path.join(SCRIPTS_DIR, "worker-fan-in.ts");
 const RUNTIME_SRC = path.join(SCRIPTS_DIR, "driver-runtime.ts");
 
 const TASK = "gap-mf-mech";
@@ -279,11 +284,15 @@ test("merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop），锁�
 // AC1（能取假，结构面）：acquire 步不再传 120_000，改传 Infinity（unbounded）。结构断言是唯一能在
 // 不真等 120s 的前提下取假的判据——排队等待时长本身不是可注入的 seam（120s 是硬编码字面量）。
 test("AC1 (gap-mech-fan-in-acquire-lock-timeout-queue-semantics, ADR-034 修订) — acquire 步无超时：driver 经非分离 holder 持锁（flock -x 无 -w），⛔ 无 --acquire-fan-in-lock 分离 holder、⛔ 无 120s 短超时", () => {
-  const src = fs.readFileSync(DRIVER_SRC, "utf8");
+  // runMechanicalFanIn / acquireFanInLock / step() 均已在 worker-fan-in.ts（AC4：该模块不反指 driver）。
+  const src = fs.readFileSync(FANIN_SRC, "utf8");
   // ADR-034：acquire 不再经 fan-in-ff-merge.sh --acquire-fan-in-lock（分离 holder + flag 协议已废除）。
   // ⛔ 散文注释可合法提及被废除的 flag 名；本断言查【argv 字符串字面量】形态（`--acquire-fan-in-lock"`，
   // 带闭引号）——只有真调用会带闭引号，注释不会。
-  assert.doesNotMatch(src, /--acquire-fan-in-lock"/, "no argv carries the --acquire-fan-in-lock flag (detached-holder protocol abolished)");
+  // 负臂对【两个文件】都查（坏形态在任何一处重现都算红）——⛔ 不因代码搬家把负臂收窄成只查新文件。
+  for (const s of [fs.readFileSync(DRIVER_SRC, "utf8"), src]) {
+    assert.doesNotMatch(s, /--acquire-fan-in-lock"/, "no argv carries the --acquire-fan-in-lock flag (detached-holder protocol abolished)");
+  }
   assert.match(src, /acquireFanInLock/, "runMechanicalFanIn must acquire via the driver-side non-detached holder");
   // holder 的 flock 无 -w（unbounded）——fan-in 锁是正确性锁，排队等待正是它存在的意义（⛔ 无超时）。
   assert.match(src, /flock -x "\$fd"/, "holder flock must be unbounded (no -w)");
@@ -363,9 +372,11 @@ test("短超时负控制 — runAsync 有限超时仍 SIGKILL（⛔ 超时机制
 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn（spawn 主检出的 worker-driver.ts --mechanical-fan-in），⛔ 不再 in-process", () => {
   const src = fs.readFileSync(DRIVER_SRC, "utf8");
+  // spawnMechanicalFanIn 本体已迁 worker-fan-in.ts ⇒ 它的两条断言按【代码所在模块】读。
+  const fanSrc = fs.readFileSync(FANIN_SRC, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync must spawn a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
-  assert.match(src, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
+  assert.match(fanSrc, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
+  assert.match(fanSrc, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /runMechanicalFanIn\(\{\s*\n\s*task,\s*\n\s*worktree: mechWorktree,/, "--mechanical-fan-in mode calls runMechanicalFanIn with the worktree");
 });
