@@ -15,10 +15,18 @@ criterion: >-
       sys.stderr.write("AC-261: %s absent => the npm-free CLI route (PATH already carries <plugin-root>/bin per SPEC-plugin-lifecycle:41,:307) is still unbuilt\n" % SH); sys.exit(1)
   if not os.access(SH, os.X_OK):
       sys.stderr.write("AC-261: %s exists but is not executable => a PATH lookup would skip it\n" % SH); sys.exit(1)
+  CHAN = None
+
+  for _cand in ("refs/remotes/origin/dist-plugin", "refs/heads/dist-plugin"):
+      _r = subprocess.run(["git","rev-parse","--verify","-q","%s^{commit}" % _cand],capture_output=True,text=True)
+      if _r.returncode == 0:
+          CHAN = _cand; break
+  if CHAN is None:
+      sys.stderr.write("AC-261: no dist-plugin ref resolves on the candidate list ('refs/remotes/origin/dist-plugin', 'refs/heads/dist-plugin') => INSTRUMENT STATE, not a delivery-face verdict: the shim's delivery could not be read, so this AC has NOT been evaluated\n"); sys.exit(1)
   try:
-      ls = subprocess.run(["git","ls-tree","-r","dist-plugin","bin/"],capture_output=True,text=True,check=True).stdout
+      ls = subprocess.run(["git","ls-tree","-r",CHAN,"bin/"],capture_output=True,text=True,check=True).stdout
   except Exception as e:
-      sys.stderr.write("AC-261: cannot read dist-plugin bin/ (%s) => cannot confirm the shim reaches the marketplace face\n" % e); sys.exit(1)
+      sys.stderr.write("AC-261: cannot read %s bin/ (%s) => cannot confirm the shim reaches the marketplace face\n" % (CHAN, e)); sys.exit(1)
   rows = [l for l in ls.splitlines() if l.strip()]
 
   ship = [l for l in rows if l.split()[0] == "100755" and l.split("\t")[-1] ==
@@ -47,11 +55,13 @@ criterion: >-
   sys.exit(0)
 
   P
-expect: exit 0 = plugin/bin/quay 存在且可执行 ∧ 随 dist-plugin 以 mode 100755 交付 ∧ 在最小
-  PATH（仅 <repo>/plugin/bin:/usr/bin:/bin）且 QUAY_PLUGIN_ROOT 与 CLAUDE_PLUGIN_ROOT
-  均 unset 下 quay --version rc=0 并打出 semver ∧ command -v quay 解析到该 shim。exit 1 =
-  任一环节不成立，各自给出原因。第四步是负控制：若 PATH 解析到的不是 plugin bin 下那个（例如 npm-global
-  的），即判失败——否则这个读数根本不能证明「免 npm」。基线 2026-09-15：plugin/bin 目录不存在，而 PATH 里已经有它。
+expect: exit 0 = plugin/bin/quay 存在且可执行 ∧ 随渠道
+  ref（CHAN：refs/remotes/origin/dist-plugin 优先，回退 refs/heads/dist-plugin）以 mode
+  100755 交付 ∧ 在最小 PATH（仅 <repo>/plugin/bin:/usr/bin:/bin）且 QUAY_PLUGIN_ROOT 与
+  CLAUDE_PLUGIN_ROOT 均 unset 下 quay --version rc=0 并打出 semver ∧ command -v quay
+  解析到该 shim。exit 1 = 任一环节不成立，各自给出原因。第四步是负控制：若 PATH 解析到的不是 plugin bin 下那个（例如
+  npm-global 的），即判失败——否则这个读数根本不能证明「免 npm」。基线 2026-09-15：plugin/bin 目录不存在，而 PATH
+  里已经有它。
 origin: SPEC-plugin-lifecycle:41 与 :307 自己的 T4 实测记录「PATH 中已存在
   <plugin-root>/bin（该目录尚不存在也照样在）⇒ 建目录即可让 CLI 免 npm 全局安装」；本会话 PATH 复核确认含
   /home/yale/work/quay/plugin/bin 而该目录不存在；官方文档确认 plugin 根的 bin/ 自动进 Bash tool 的
