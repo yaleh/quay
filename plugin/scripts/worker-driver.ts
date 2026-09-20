@@ -285,6 +285,12 @@ import { parse as parseYaml } from "yaml";
 // 已抽到 worker-fan-in.ts。该模块 ⛔ 不反指本文件 ⇒ 无值环（AC4）；下面两条语句是【同一处】的两半：
 //   · import —— 本文件仍需【直接调用】的少数符号（⛔ `export { … } from` 不建立本地绑定，不能替代）；
 //   · re-export —— 保持既有 test 文件对 worker-driver.ts 的 import 面逐字不变（AC2），零测试迁移成本。
+//
+// 机械 fan-in 步链【不含】archguard 结构闸步（gap-fan-in-remove-archguard-gate：零发火、零指引、
+// 27s/次串行关键路径），已降级为【按需命令】——⛔ 不是静默消失，需要结构信号时手动跑：
+//   node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root>
+// 步链本体（连同该说明的完整正文）现随机械 fan-in 一并住在 worker-fan-in.ts；此处留指路牌，使读本文件
+// （机械 fan-in 的驱动侧入口）的人在同一处看得到这件事。
 import {
   runMechanicalFanIn,
   spawnMechanicalFanIn,
