@@ -2,7 +2,7 @@
 id: gap-arch-retire-orphan-sh-and-dangling-symlinks
 title: 架构清理：退役 3 个无调用者 .sh（两个 selfcheck + inner-stalled.sh）并删除 3
   个悬空符号链接（git-lens-l-*.ts）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
