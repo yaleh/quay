@@ -24,10 +24,10 @@ depends_on: []
 
 ## AC
 
-- [ ] `node --test plugin/test/fan-in-ff-merge.test.mjs` exit 0，新增用例覆盖：① 单个 flip 提交、仅 M 该任务文件 ⇒ 惰性且**分类器未被调用**（以调用计数或 stub 断言）；② 同一提交多改一个文件 ⇒ 落回分类器；③ 两个提交 ⇒ 落回分类器；④ 状态为 A/R/D ⇒ 落回分类器；⑤ 改的是**别的任务**的文件 ⇒ 落回分类器；⑥ `tasks_dir` 配成非 `tasks/` 目录时按配置判定。
-- [ ] 反例判据（硬规则 4 推论三）：把身份判定短路关掉（注入 seam 置为 false）后，用例 ① 必须变红（证明它读到了真实的判定，不是回声）。
-- [ ] 真实对象：在临时外部 git 项目（无 `plugin/scripts/runner-static-gate.ts`）里，建任务分支、造 suite_head、追加一个只改 `tasks/<id>.md` 的 flip 提交，运行证书闸——修复前 `NOT-EVALUATED`（贴出原文），修复后通过（贴出原文）。同一项目里追加一个改 `src/app.ts` 的提交后仍走分类器（结果仍为 NOT-EVALUATED，贴出）——证明身份判定不放宽其它路径。
-- [ ] `scripts/test.sh --for-task gap-fan-in-cert-flip-commit-identity-inert` exit 0。
+- [x] `node --test plugin/test/fan-in-ff-merge.test.mjs` exit 0，新增用例覆盖：① 单个 flip 提交、仅 M 该任务文件 ⇒ 惰性且**分类器未被调用**（以调用计数或 stub 断言）；② 同一提交多改一个文件 ⇒ 落回分类器；③ 两个提交 ⇒ 落回分类器；④ 状态为 A/R/D ⇒ 落回分类器；⑤ 改的是**别的任务**的文件 ⇒ 落回分类器；⑥ `tasks_dir` 配成非 `tasks/` 目录时按配置判定。
+- [x] 反例判据（硬规则 4 推论三）：把身份判定短路关掉（注入 seam 置为 false）后，用例 ① 必须变红（证明它读到了真实的判定，不是回声）。
+- [x] 真实对象：在临时外部 git 项目（无 `plugin/scripts/runner-static-gate.ts`）里，建任务分支、造 suite_head、追加一个只改 `tasks/<id>.md` 的 flip 提交，运行证书闸——修复前 `NOT-EVALUATED`（贴出原文），修复后通过（贴出原文）。同一项目里追加一个改 `src/app.ts` 的提交后仍走分类器（结果仍为 NOT-EVALUATED，贴出）——证明身份判定不放宽其它路径。
+- [x] `scripts/test.sh --for-task gap-fan-in-cert-flip-commit-identity-inert` exit 0。
 
 ## DoD
 
