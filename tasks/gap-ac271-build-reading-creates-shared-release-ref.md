@@ -92,7 +92,7 @@ const RELEASE_BRANCH_RE = /^release\//;
 3. **让「某次 release 形态读数发生过」可查（硬规则 9）**：记录里能读出**分支名 / 时刻 / 结果**；且「从未发生」必须有**独立取值**（独立退出码 + 独立 `CAUSE=`），**不与「发生但没记」共用输出**（硬规则 3b）。⛔ 命名不得复用既有 `form=` 词表（硬规则 8：编号/命名不得复用）。
 4. **两条负控制（硬规则 4c：落笔当轮当场干跑一次，两次读数都贴）**：
    - **① 判据未被放宽**：在主检出造一条 tip 既不在 develop、也不在任何 tag 的 `release/v0.0.0-nc271b` ⇒ `node packages/quay/bin/quay.js goal gate AC-271` 必须 **`verdict=fail`** + 同一 `CAUSE=release-branch-not-parked-on-a-tag` 且**列出该分支名**；**同一动作序列内**删除后再跑 ⇒ 必须 **`verdict=pass`**。⛔ 临时分支同轮删掉、⛔ 不得留残留。
-   - **② 读数是真读数不是回声（硬规则 4 推论三）**：在隔离载体上，对**非** `release/*` 分支取同一读数 ⇒ 必须给带后缀的 `X.Y.Z-dev`；对 `release/*` 分支取 ⇒ 必须给**无后缀**的 `X.Y.Z`。**两次读数都贴**——只贴后者的话，一个恒定返回 `X.Y.Z` 的实现也能通过，那正是「回声」。
+   - **② 读数是真读数不是回声（硬规则 4 推论三）**：在隔离载体上，对**非** `release/*` 分支取同一读数 ⇒ 必须给带后缀的 `X.Y.Z-dev`；对 `release/*` 分支取 ⇒ 必须给**无后缀** `X.Y.Z`。**两次读数都贴**——只贴后者的话，一个恒定返回 `X.Y.Z` 的实现也能通过，那正是「回声」。
 5. **登记与测试**：本轮若新增 `plugin/scripts/*` 脚本，按 `plugin/scripts/capability-catalog.sh` **头部自述的规则**补齐它要求的表项（声明数据半边在 `plugin/scripts/capability-catalog-declarations.json`，⛔ 不照抄任何清单）；行为变更必须有测试进入套件泳道（`plugin/test/` 下新文件或扩既有文件）；本轮新增的每个文件**同轮**写进本任务 `## Touches`。
 6. **落点同步**：`orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` 中凡要求「在真实 release 分支上取读数」的步骤，按当轮读数指向新载体；并如实把本轮 `04:51:07Z`–`04:53:26Z` 的创建/销毁记为**无仓库痕迹**（⛔ 不写成「已由命令处理」）。⛔ 只改 SPEC 措辞**不算**本任务的载体（载体是第 2 步的命令）。
 
@@ -116,10 +116,8 @@ const RELEASE_BRANCH_RE = /^release\//;
 
 ## Touches
 
-- plugin/scripts/release-reading-sandbox.sh (new)
-- plugin/test/release-reading-sandbox.test.mjs (new)
-- plugin/scripts/release-branch-finish.sh
-- plugin/scripts/capability-catalog.sh
+- plugin/scripts/release-reading-sandbox.ts
+- plugin/test/release-reading-sandbox.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md
 - tasks/gap-ac271-build-reading-creates-shared-release-ref.md
