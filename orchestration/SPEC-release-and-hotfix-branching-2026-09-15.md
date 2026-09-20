@@ -400,6 +400,42 @@ fail-closed 拒绝且**不动任何 ref**。
 `release-*` / `release/*` 只存在于本地，任何远端侧载体（例如 release workflow 里加一个 job）
 **在结构上够不到这些 ref**。
 
+**④ §12 使「形态 (b)」对按规程切的版**结构上不可达 ⇒ 删除是唯一可达的合规形态**（2026-09-20 实测）**。
+这条是 §12.2 的**已实测后果**，不是推断：§12.2（人 2026-09-20 逐字裁定「tag 提交不自描述」）把版本 tag
+钉在**合回 develop 的合并点**上，而该合并点是分支 tip 的**子**提交。实测（v0.11.0 那次切版）：
+
+| 量 | 读数 |
+|---|---|
+| `git tag --points-at release/v0.11.0` | **空**（⇒ 形态 (b) 不成立） |
+| `git tag --contains release/v0.11.0` | `v0.11.0` |
+| tag `v0.11.0` 的落点 | `f00a7486d` = 「Merge release/v0.11.0 into develop」，`parents=b0aa9f334 7d10a1d2d` ⇒ 分支 tip `7d10a1d2d` 是它的父 |
+| `git merge-base --is-ancestor 7d10a1d2d v0.11.0` | 是（EXIT=0） |
+| `git rev-list --count develop..release/v0.11.0` | `0` |
+
+⇒ ①表格里「tip 被某个 tag 持有」那一行**仍成立**（命令侧认它），但 criterion 的形态 (b)
+**恒不成立**；⇒ 凡按 §12 规程切的版，**唯一可达的合规形态是 (a) 删除**，
+**收尾步就是整条长期保证的唯一承重墙**。
+⇒ 而这一步此前只靠人记得：本轮切版**没有经过 `release-branch-finish.sh`**（`.quay/release-branch-finish.jsonl`
+2026-09-20 一行都没有），随后那次删除**同样零痕迹**（见 §10 残留 5）。
+**⑤ 承重墙的【自作用】载体 = `release-branch-janitor.ts`（2026-09-20）**。既然保证全压在「删除」上，
+「谁记得谁做」就不是可接受的实现方式（硬规则 9：可见性 ⊂ 执行）。该命令每轮按 **AC-271 同一份枚举**
+（`refs/heads/release-*` + `refs/heads/release/*`）分派到三种**互不共用输出**的结果：
+
+| 分派 | 谓词 | 动作 |
+|---|---|---|
+| 已合规 | `tag --points-at <b>` 非空 | **不碰**（记录 `parked-compliant`） |
+| 红且可无损删除 | `points-at` 空 **且**（`tag --contains <b>` 非空 **或** `rev-list --count <base>..<b>` = 0） | **经 `release-branch-finish.sh` 结束**（共用①的合规定义与③的痕迹载体；⛔ 不自己 `git branch -D`） |
+| 红且无许可 | 两种许可皆不成立 | **留在原地**（那正是 criterion 必须继续抓到的「会丢工作」形态，⛔ 不得代判为绿） |
+
+仪器故障（枚举 / tag 扫描跑不起来）有**独立**退出码与 `CAUSE=`，⛔ 绝不与「枚举为空」共用输出（硬规则 3b）。
+它**每轮挂在 `worker-driver` 的 housekeeping 里**（与 `superseded_reclaim` 同一处）⇒「切版忘了删」在
+**一个 tick 内**被收尾、**不需要任何人记得**；结果写本轮 round 记录的 `release_branch_janitor` 字段。
+⛔ **不接进 goal gate / goal-driver 的判定路径**：判定者不得成为被判定状态的修复者，否则判据变自证（硬规则 4）。
+它有自己的记录 `.quay/release-branch-janitor.jsonl`（`--log` 读回；「从未发生」/「存在但读不出」各有独立
+退出码与 `CAUSE=`，且即使枚举为空也写一条 pass 摘要行 ⇒ 「跑过且无事可做」⛔ 不与「从未跑过」同形）。
+**词表刻意不复用**既有 `form=`（本文件③）与 `shape=`（§4.1.2）——用 `disposition=` 与
+`{parked-compliant, finished-via-carrier, finish-failed, left-alone-no-license}`（硬规则 8）。
+
 #### 4.1.2 「取 release 形态读数」的载体：**隔离 Git 目录**（2026-09-20）
 
 **这一节存在的理由（实测，硬规则 9 的代价）**：AC-271 禁止本地存在 tip 不在任何 tag 上的
@@ -730,6 +766,8 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
 | 3 | ~~判据甲–戊的立案时机~~ | **已关闭**：2026-09-15T14:0xZ 全部立案为 `AC-270`..`AC-274`（`--expect-absent`，挂 GOAL-020），见 §7 | — |
 | 4 | **`release/v0.10.0` 的消失不可归因**（2026-09-19T03:38:24Z）：`git rev-parse release/v0.10.0` 于 03:2xZ 仍可解析（tip `8c7b85e79`），03:39:02Z 起已不可解析，`AC-271` 的 criterion 随之由连红 4 次转回 pass。**这次删除没有留下任何痕迹**：`.git/logs/refs/heads/release/` 目录不存在（reflog 随分支一起消失）、无对应提交（`git log --all --grep` 只有该分支的 bump 提交 `8c7b85e79` 与合并提交 `4c8116632`）、`orchestration/dispatch-record.jsonl` 无记录、当时 worker driver 为空闲（`.quay/worker-round.jsonl` 03:31:28Z `action=stop` / `pool-empty`） ⇒ **「谁删的、用什么命令删的」在本仓库不可查**（硬规则 9 的代价：可见性 ⊂ 执行）。⛔ 不得把它记成任何任务的成果，也⛔ 不得写成「已由 `release-branch-finish.sh` 删除」 | 已由 §4.1.1 的**留痕**半边直接对治（从 2026-09-19 起，每一次结束都写 `.quay/release-branch-finish.jsonl`，`--log` 可查）；本条**永久留为历史记录**，其价值是它作为「结束步没有载体」的第一个实证（同一根因的另外两处见 §4.1.1 ①②） | — |
+| 5 | **`release/v0.11.0` 的残留与随后的零痕迹消失**（2026-09-20）：AC-271 于 `15:24:57.854Z` / `15:29:00.488Z` / `15:30:59.641Z` 三次 `verdict=fail` 并点名 `release/v0.11.0`（tip `7d10a1d2d`，`tag --points-at` **空**）。**这次切版没有经过 `release-branch-finish.sh`**：`.quay/release-branch-finish.jsonl` 2026-09-20 **一行都没有**（`--log` 末条仍为 `2026-09-19T03:52:55Z`，`trace: 4 record(s)`），而同一窗口 `.quay/worker-round.jsonl` 第 119–123 轮**全部** `in_flight:0` / `pool-empty`（排除 worker 归因；⛔ 本行不声称知道执行者是谁，只给可核的量）。随后约 `15:35Z` 该分支**消失**，`AC-271` 随之转 `pass`——**这次消失同样零痕迹**：`--log` **无新增行**、`.git/logs/refs/heads/release/` **不存在**（`git branch -D` 连 reflog 一起删）、`git rev-parse --verify 7d10a1d2d` 仍 EXIT=0。⇒ 与残留 4 **是同一形态的第三次**（第二次是 §4.1.2 的 `release/ac4-reading`，创建与销毁均零痕迹），且**第二次与第三次都发生在第一次的修复（§4.1.1 ① ② ③）落地之后**。⛔ 不得记成任何任务的成果，⛔ 不得写成「已由 `release-branch-finish.sh` 删除」，也⛔ 不据此声称 AC-271 已被修复 | 已由 §4.1.1 ⑤ 的 **janitor** 直接对治（收尾步不再靠人记得：红且被 tag 持有者每轮经载体结束、并留 `disposition=` 记录；红且无许可者留在原地由判据继续抓）；本条**永久留为历史记录**，其价值是它是「载体存在但可以不被经过」的第三个实证 | — |
+：`git rev-parse release/v0.10.0` 于 03:2xZ 仍可解析（tip `8c7b85e79`），03:39:02Z 起已不可解析，`AC-271` 的 criterion 随之由连红 4 次转回 pass。**这次删除没有留下任何痕迹**：`.git/logs/refs/heads/release/` 目录不存在（reflog 随分支一起消失）、无对应提交（`git log --all --grep` 只有该分支的 bump 提交 `8c7b85e79` 与合并提交 `4c8116632`）、`orchestration/dispatch-record.jsonl` 无记录、当时 worker driver 为空闲（`.quay/worker-round.jsonl` 03:31:28Z `action=stop` / `pool-empty`） ⇒ **「谁删的、用什么命令删的」在本仓库不可查**（硬规则 9 的代价：可见性 ⊂ 执行）。⛔ 不得把它记成任何任务的成果，也⛔ 不得写成「已由 `release-branch-finish.sh` 删除」 | 已由 §4.1.1 的**留痕**半边直接对治（从 2026-09-19 起，每一次结束都写 `.quay/release-branch-finish.jsonl`，`--log` 可查）；本条**永久留为历史记录**，其价值是它作为「结束步没有载体」的第一个实证（同一根因的另外两处见 §4.1.1 ①②） | — |
 
 ---
 

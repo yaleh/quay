@@ -227,6 +227,13 @@ import { loadProfiles, resolveRole } from "./profile-policy.ts";
 // 静默看门狗，⛔ 不新写一份 suite 生命周期）。suiteLockBase 读 TS 侧单一真相源槽路径。
 import { spawnSuiteAndWait, type SuiteOutcome, type SuiteRunResult } from "./suite-driver.ts";
 import { suiteLockBase } from "./suite-lock-slots.ts";
+// gap-ac271-finish-step-needs-self-acting-carrier：release 收尾步的【自作用】载体。AC-271 的两种合规
+// 形态里，SPEC §12.2 把版本 tag 钉在合回 develop 的合并点上 ⇒ `tag --points-at <branch>` 恒空 ⇒ 形态 (b)
+// 对按规程切的版结构上不可达 ⇒ **删除是唯一可达的合规形态**，整条长期保证全压在收尾这一步上。而这一步
+// 此前只靠人记得（实测 3 次：v0.10.0 / ac4-reading / v0.11.0 的残留与零痕迹消失）。与本步同族——
+// janitor 走 AC-271【同一份枚举】，红且被 tag 持有者【经 release-branch-finish.sh】结束（⛔ 不自己
+// `git branch -D`），无许可者【留在原地】（判据必须继续抓到的形态）；结果进本轮 round 记录（生产载体）。
+import { runReleaseBranchJanitor, type JanitorResult } from "./release-branch-janitor.ts";
 // D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
@@ -1396,6 +1403,10 @@ export function computeWorkerRoundRecord(opts: {
    *  且无候选」与「压根没跑」在载体上可区分，硬规则 4 推论三的读生产载体半边）。缺省 null = 没跑该步
    *  （⛔ 与 candidateCount=0 区分）。 */
   supersededReclaim?: ReclaimSupersededResult | null;
+  /** 本轮 release 分支 janitor 的结果（gap-ac271-finish-step-needs-self-acting-carrier）。缺省 null =
+   *  本轮**没跑**该步（⛔ 与「跑了、枚举为空」区分：后者 evaluated:true + branchCount:0，硬规则 4
+   *  推论三的读生产载体半边——AC6 的生产读数正是读它）。 */
+  releaseBranchJanitor?: JanitorResult | null;
   /** 本轮 push 滞后检查的读数（gap-fan-in-push-silently-fails-no-detection AC7）。缺省 null = 本轮
    *  **没跑**该步（⛔ 与「跑了且 in-sync」可区分——同 supersededReclaim 的约定，硬规则 4 推论三）。 */
   pushLag?: PushLagRoundRecord | null;
@@ -1421,6 +1432,9 @@ export function computeWorkerRoundRecord(opts: {
     retry_exemptions: opts.retryExemptions ?? [],
     exited_not_landed_stops: opts.exitedNotLandedStops ?? [],
     superseded_reclaim: opts.supersededReclaim ?? null,
+    // gap-ac271-finish-step-needs-self-acting-carrier：本轮 release 分支 janitor 读数（枚举为空也记，
+    // ⛔ 不省略——「跑过且无分支可处理」与「没跑该步」在载体上可区分；后者为 null）。
+    release_branch_janitor: opts.releaseBranchJanitor ?? null,
     // gap-fan-in-push-silently-fails-no-detection AC7：本轮 push 滞后检查读数（in-sync 也记，
     // ⛔ 不省略——「跑过且无滞后」与「没跑该步」在载体上可区分；后者为 null）。
     push_lag: opts.pushLag ?? null,
@@ -5337,6 +5351,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // （与 coldInflight 同族）⇒ writeRound / writeErrorRound 直接从闭包读它，两处调用的签名逐字不变；
   // 每轮开头显式复位 ⇒ ⛔ 上一轮的读数不会漏进本轮（尤其不会把「上一轮跑过」伪装成本轮跑过，硬规则 3b）。
   let pushLagReading: PushLagRoundRecord | null = null;
+  // 本轮 release 分支 janitor 读数（gap-ac271-finish-step-needs-self-acting-carrier）。声明位置与上面
+  // pushLagReading 同族（while 之外 + 每轮开头复位）：writeRound / writeErrorRound 直接从闭包读它，
+  // 且错误轮（janitor 步【之后】才抛错）也能带上「本轮真跑过」的读数（⛔ 不抹成 null = 不让「跑过」
+  // 与「没跑」在错误轮上不可区分，硬规则 3b）。⛔ 缺省 null = 没跑该步 ≠ evaluated:true+branchCount:0。
+  let releaseBranchJanitorResult: JanitorResult | null = null;
   const inFlightTasks = (): string[] => running.map((r) => r.task).concat([...coldInflight]);
   // gap-live-fan-in-window-elapsed-zero：每任务派发时刻（task id → ISO 起始）。只覆盖内存 running
   // （driver 派发时已知 startedAtMs）；冷启动在飞 task 无起点 ⇒ 不入图（readLive 对缺起点回退 nowMs，
@@ -5381,6 +5400,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-superseded-task-residual-worktree-never-reclaimed AC7：本轮 superseded worktree 回收结果
       // （候选数 0 也记 0，⛔ 不省略——「跑过且无候选」与「没跑」可区分）。
       supersededReclaim,
+      // gap-ac271-finish-step-needs-self-acting-carrier：本轮 janitor 读数（同上，枚举为空也记）。
+      releaseBranchJanitor: releaseBranchJanitorResult,
       // gap-fan-in-push-silently-fails-no-detection AC7（闭包读，见 pushLagReading 的声明注释）。
       pushLag: pushLagReading,
     });
@@ -5415,6 +5436,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 抛错发生在 push-lag 步【之后】时，本轮确实跑过该步 ⇒ 把它带上（⛔ 不因「本轮以 error 收尾」
       // 就抹成 null——那会让「跑过且无滞后」与「没跑」在错误轮上不可区分，硬规则 3b）。
       pushLag: pushLagReading,
+      // gap-ac271-finish-step-needs-self-acting-carrier：同款——janitor 步【之后】才抛错时，本轮
+      // 确实跑过它 ⇒ 带上读数（⛔ 不抹成 null）。
+      releaseBranchJanitor: releaseBranchJanitorResult,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -5629,6 +5653,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     let reconciled: string[] = [];
     let supersededReclaimResult: ReclaimSupersededResult | null = null;
     pushLagReading = null; // 每轮复位（见上面的声明注释）
+    releaseBranchJanitorResult = null; // 每轮复位（同上：⛔ 上一轮的读数不漏进本轮）
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -5677,6 +5702,35 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       if (json && supersededReclaimResult.candidateCount > 0) {
         process.stdout.write(
           `${JSON.stringify({ event: "superseded-reclaim", candidate_count: supersededReclaimResult.candidateCount, reclaimed: supersededReclaimResult.reclaimed, skipped: supersededReclaimResult.skipped })}\n`,
+        );
+      }
+
+      // 1b'. release 分支 janitor（gap-ac271-finish-step-needs-self-acting-carrier）——与上一步同族的
+      //   机械家务：AC-271 的唯一可达合规形态是【删除】，而删除此前只靠人记得（实测 3 次残留/零痕迹消失）。
+      //   每轮走 AC-271 同一份枚举，把「切版忘了删」在一个 tick 内收尾，⛔ 不需要任何人记得。
+      //   ⛔ 本步**只**挂在这里：不进 goal gate / goal-driver 的判定路径——判定者不得成为被判定状态的
+      //   修复者，否则判据变自证（硬规则 4）。无许可的红分支【留在原地】（那是判据必须继续抓到的
+      //   「会丢工作」形态，⛔ janitor 不得代判为绿）。
+      //   ⛔ 本步失败绝不能让整轮抛错（git 读失败 = 下一轮重试，不是错误轮）；异常就地吞成
+      //   instrument-failure 读数，仍进 round 记录（可区分于「没跑」）。
+      step = "release-branch-janitor";
+      try {
+        releaseBranchJanitorResult = runReleaseBranchJanitor(rootDir, {});
+      } catch (e: any) {
+        releaseBranchJanitorResult = {
+          evaluated: false,
+          verdict: "instrument-failure",
+          exit: 2,
+          cause: `CAUSE=release-branch-janitor-threw — the janitor step threw: ${e?.message ?? String(e)}`,
+          branchCount: 0,
+          decisions: [],
+          redBranches: [],
+          carrierCalls: [],
+        };
+      }
+      if (json && (releaseBranchJanitorResult.redBranches.length > 0 || !releaseBranchJanitorResult.evaluated)) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "release-branch-janitor", verdict: releaseBranchJanitorResult.verdict, branch_count: releaseBranchJanitorResult.branchCount, red_branches: releaseBranchJanitorResult.redBranches, cause: releaseBranchJanitorResult.cause })}\n`,
         );
       }
 

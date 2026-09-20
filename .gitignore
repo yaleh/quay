@@ -260,6 +260,19 @@ packages/quay/plugin/
 # in quay-runtime-artifacts.txt would contradict that file's stated policy (and break the
 # marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
 **/.quay/release-branch-finish.jsonl
+# gap-ac271-finish-step-needs-self-acting-carrier (2026-09-20): the release-branch JANITOR record
+# (.quay/release-branch-janitor.jsonl) — one line per branch decision (branch, time, disposition,
+# licence, carrier exit, outcome code) plus one pass-summary line, appended by
+# plugin/scripts/release-branch-janitor.ts (also run every worker-driver round) and read back with
+# its `--log`. Same family and the same reason as the entry directly above: runtime state, never
+# git-tracked, and it MUST be ignored rather than merely untracked — the ff clean-tree channel
+# passes only `??` paths, and a record swept into a commit is then DELETED by the next
+# `git checkout` of a ref that lacks it, silently losing the trace this file exists to keep.
+# Not `@quay-runtime-artifact`-marked on purpose, for the same reason as the sibling `**/.quay/*`
+# entry above (a consumer project's `.gitignore` gets the covering `.quay/*` rule from quay-init;
+# marking it would contradict quay-runtime-artifacts.txt's stated policy and break the
+# marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
+**/.quay/release-branch-janitor.jsonl
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 .workflow-events/
