@@ -24,7 +24,9 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 
 **人 2026-09-15 裁定后的四条确定动作**（§1 ⑤）：
 **①默认分支即刻切 `develop`（不等 master）〔⚠️ 已被 §3.2.1′〈2026-09-17 追加裁定〉反转：默认分支回到 `master`，
-理由与效力见该节〕｜②develop 携带 `X.Y.Z-dev`，release 分支去后缀｜
+理由与效力见该节〕｜②develop 携带 `X.Y.Z-dev`，release 分支去后缀〔⚠️ **落实机制已于 2026-09-20
+由 §12 追加裁定修订**：`-dev` 语义**不变**，变的是「谁写后缀」——`VERSION` 单一来源 + `resolveVersion` build 模式，
+**不再有手工「去后缀的 bump 提交」**；下文的「去后缀」措辞一律读作 §12 的机制〕｜
 ③master 推进落在 `release.yml` 内一个新 job（`needs:` 枚举其余全部 6 个 job，ff-only，⛔ 永不 `--force`）｜
 ④首次 ff 等 v0.7.0 全绿——在此之前 master 不动是规则的正确输出，不是缺陷。**
 
@@ -45,7 +47,7 @@ release 分支规程化并在合回后删除；hotfix 线【实测发生率 1 �
 | 问 | 裁定 | 落点 | 效力 |
 |---|---|---|---|
 | 1 默认分支是否现在切 `develop` | **「是，且与 master 改造无冲突」**〔⚠️ **这条裁定已于 2026-09-17 被 §3.2.1′ 追加裁定反转**（默认分支回到 `master`）——本行保留为历史，效力不再〕 | §3.2、§9 第 1 步 | 解除 §2.2 后果 1+2；**不等 master 修好** |
-| 2 版本 bump 落 develop（带 `-dev`）还是落 release 分支 | **「`-dev` 后缀」** | §4.3 选项 ii | develop 携带 `X.Y.Z-dev`，release 分支去后缀 |
+| 2 版本 bump 落 develop（带 `-dev`）还是落 release 分支 | **「`-dev` 后缀」** | §4.3 选项 ii | develop 携带 `X.Y.Z-dev`，release 分支去后缀〔⚠️ **裁定原文保留为历史；落实机制已由 §12 修订**（2026-09-20）：「去后缀」不再是 release 分支上的一次手工提交，而是 `resolveVersion` 在 **build 模式**下对同一份 `VERSION` 的解析结果〕 |
 | 3 master 推进用 A 还是 C | **「A 工作流内」** | §6 | ⊢ 人由此同时裁定：**同一次显式 dispatch 内的后续 job 写 GitHub，不违反 ③ 的裁定精神**（③ 禁的是隐式触发，不是显式 run 内的后续步骤） |
 | 4 首次 ff 等 v0.7.0 全绿还是接受红着的 v0.6.3 | **「等 v0.7.0 全绿」** | §6 末、§9 第 5 步 | master 在此之前**保持不动是正确输出** |
 | 5 判据甲–戊 挂 GOAL-020 还是独立立 GOAL | **「挂 GOAL-020」** | §7 | 编号立案时分配（当前最大 `AC-269`） |
@@ -341,11 +343,17 @@ PR/worktree 目标要 `develop`，而门面要 `master`——两者在 2026-09-1
 
 ```
 release/vX.Y.Z        ← 取代现行的 release-vXXX-build
-  从 develop 切  →  版本 bump（9 处，见 §4.3）+ changelog  →  合回 develop
+  从 develop 切  →  changelog（⚠️ 没有「版本 bump」这一步 —— 见下）+ 合回 develop
   →  在合并点打 tag vX.Y.Z  →  【删除分支】
   └── 末三步（合回 → 打 tag → 删除）= 一条命令：
       bash plugin/scripts/release-branch-finish.sh <branch> --cut --tag vX.Y.Z
 ```
+
+**⚠️ 2026-09-20（§12 追加裁定）：本条**没有**「版本 bump」这一步。** 切 release 分支**不再**伴随一次
+「把 `-dev` 去掉」的提交——release 分支上的提交与 develop 上逐字相同（`X.Y.Z-dev`），发布产物的**无后缀**
+形态是 `resolveVersion(VERSION,'build')` 在**构建时**按模式解析出来的（HEAD 在 tag `vX.Y.Z` 上，或分支名是
+`release/*`）。人侧的动作只剩改 `VERSION` 一行 + 跑一次生成器（`scripts/stamp-version.ts`）。
+⇒ 下文凡出现「版本 bump / 去后缀」的地方，都是**旧机制的残留措辞**，效力以 §12 为准。
 
 **变更点（相对现状）有三个，其余保持**：
 1. 命名带 `/` 与完整 semver（现状 `release-v062-build` 的 `062` 形态在 `0.10.x` 之后会排序错乱）
@@ -473,36 +481,41 @@ node --experimental-strip-types plugin/scripts/release-reading-sandbox.ts \
 | 选项 | 做法 | 代价 |
 |---|---|---|
 | **i. nvie 严格** | bump 只发生在 `release/*` 上，随合并回到 develop；develop 间歇期携带**上一个已发布版本号** | ⚠️ 更糟：滚动渠道装到的东西会自称 `0.6.3`（一个真实存在的已发布版本）而内容是 develop ⇒ 版本号说谎的方向从"未来"变成"过去"，**更难查** |
-| **ii. 预发布标记** ✅**已裁定采纳** | develop 上的版本写作 `0.7.0-dev`；`release/vX.Y.Z` 上去掉 `-dev` 后缀；tag 打在去后缀的提交上 | 需要 `version-consistency-check.ts` 的 9 条目认 `-dev` 后缀（它已是集中式清单，改动局部）【读码】 |
+| **ii. 预发布标记** ✅**已裁定采纳** | develop 上的版本写作 `0.7.0-dev`；`release/vX.Y.Z` 上去掉 `-dev` 后缀；tag 打在去后缀的提交上〔⚠️ **本行的「去掉后缀 / tag 打在去后缀的提交上」是 2026-09-15 的旧落实措辞，已由 §12 修订（2026-09-20）**：裁定本身（选项 ii）不变，但**没有**任何一次手工「去后缀」提交——见下方"落实口径"〕 | 需要 `version-consistency-check.ts` 的 9 条目认 `-dev` 后缀（它已是集中式清单，改动局部）【读码】 |
 
 **⊢ 已裁定：选项 ii（`-dev` 后缀）**（人 2026-09-15，§1 ⑤ 问 2）。
 理由：它让「装到的是不是一个已发布版本」从**字面量**即可判定，不需要查 tag、不需要调 gh，
 与 §2.6 的 criterion 机制约束一致。
 
-**落实口径**：
+**落实口径**（⚠️ **2026-09-20 由 §12 改写**；下方是**当前生效**的机制，不是 2026-09-15 的手工流程）：
 
-| 位置 | 版本形态 | 说明 |
+| 位置 | 形态 | 由谁决定 |
 |---|---|---|
-| `develop` 常态 | `0.7.0-dev` | **10 处**版本字面量齐步（`VERSION_ENTRIES` 实测 10 条，见「实现要点」）；滚动渠道 B 装到的东西自称 `-dev` ⇒ **自证"不是已发布版本"** |
-| `release/v0.7.0` 上的 bump 提交 | `0.7.0` | 去后缀即定稿；tag 打在合回 develop 的合并点 |
-| 合回 develop 之后 | `0.8.0-dev` | 下一轮开发立即带上新的 `-dev`（⛔ 不要让 develop 停留在无后缀的已发布版本号上，否则 §2.5 的歧义原样复发，只是方向相反） |
+| **唯一来源** `VERSION`（仓库根，git 跟踪） | 裸 `X.Y.Z`，**无后缀** | **人**（唯一需要手工改的一行） |
+| 所有**被提交**的载体（13 条目 / 10 文件，`scripts/version-carriers.ts`） | `X.Y.Z-dev`，**在每一条分支上，包括 `release/vX.Y.Z`** | `scripts/stamp-version.ts`（生成器）跑一次，读 `resolveVersion(VERSION,'tracked')` |
+| **发布产物**（dist-plugin 树 / npm tgz / SEA / marketplace 缓存键） | `X.Y.Z`（**无后缀**） | `resolveVersion(VERSION,'build')` 在**构建时**按 git 状态解析：HEAD 恰在 tag `vX.Y.Z` 上，**或**当前分支是 `release/*` |
+| 判定不了时（游离 HEAD 且无版本 tag） | **`evaluated:false`** — 独立取值，⛔ 不是 `-dev` | `resolve-version.ts`（硬规则 3b） |
 
-**实现要点**【读码】：
-- `scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 是**集中式清单**（**实测 10 条**，⛔ 本节原稿写 9 条：本 SPEC 成文时漏数了 `plugin/README.md` 之外的 `plugin/vendor/quay/package.json`，
-  实现期直调 `readVersions()` 取到真实条数后更正），
-  改动局部：让比对认 `-dev` 后缀，并断言**要么全带、要么全不带**（⛔ 半带 = 漂移，必须红）
-- **并集之外还有第 11–14 个承载面**：`package-lock.json` 里 `packages/quay{,-native,-github,-backlog}`
-  四条 `version` 同样承载版本号、却不在 `VERSION_ENTRIES` 内（实现期实测发现的缺口，本 SPEC 原稿未列）
-  ⇒ 版本 bump 必须把这 4 条一并改齐并提交。⚠️ 这 4 条**同时**是硬规则 11b 的实例：一个只改工作树、不提交的
-  改动已经在影响盘上读数，却对任何读 git 的人不可见。
-- `0.7.0-dev` 是合法 semver prerelease ⇒ `package.json` / `npm pack` 接受
-- 产物名在非发布构建下会带后缀（`quay-0.7.0-dev.tgz` / `quay-sea-0.7.0-dev-linux-x64.tar.gz`），
-  **正式发布产物名不变**（release 分支上已去后缀）
+**⇒ 三个「不再」（这是本节相对 2026-09-15 原稿的实质改动）**：
+1. ⛔ **不再有** release 分支上「去掉 `-dev`」的 bump 提交——release 分支的提交载体**同样是 `X.Y.Z-dev`**；
+2. ⛔ **不再有**合回 develop 之后「加回 `-dev`」的 bump 提交——人只改 `VERSION` 一行（`X.Y.(Z+1)`）+ 跑生成器；
+3. ⛔ **tag 提交不自描述**（人 2026-09-20 逐字）——tag `vX.Y.Z` 打在合回 develop 的合并点上，而该点的提交内容是
+   `X.Y.Z-dev`。**这个不一致是设计**：发布产物的版本是**构建的属性**，不是**提交的属性**。
+
+**实现要点**【读码】（2026-09-20 现状；原稿点名的 `VERSION_ENTRIES` 常量与 9/10 条目的计数**已不存在**）：
+- 载体表是 `scripts/version-carriers.ts` 的 `VERSION_CARRIERS`——**判官（`version-consistency-check.ts`）与生成器（`stamp-version.ts`）共用同一张表**（一张手抄两遍的清单正是本仓库 ADR-004 要禁的漂移）。
+  **当前实测 13 条目 / 10 文件**（`package-lock.json` 的 4 个 workspace 成员各算一条）。⛔ 本节原稿的「9 条 / 10 条 / 第 11–14 个承载面」是**那个时点的**盘点，已被这张表取代。
+- 判定是**外部单一来源判据**：每个载体必须 `== resolveVersion(VERSION,'tracked')`。旧判据（「载体之间互相相等」）**结构上看不见**一棵「全体一致但全体过时」的树。
+- **`marketplace.json` 的 `plugins[].version` 已从载体表移除（2026-09-20 实测）**：Claude Code **从不读**该字段，安装缓存按拉到的插件自己的 `plugin.json` version 键控（决定性对照：marketplace 广告 `9.9.9` vs manifest `0.10.0-dev` ⇒ 仍回读 `0.10.0-dev`）。两个 `marketplace.json` 中的该字段**已删除**，故 `grep -c '"version"' .claude-plugin/marketplace.json` 在 quay 条目上为 0。读数见 §12 与 `scripts/version-carriers.ts` 的表注释。
+- `X.Y.Z-dev` 是合法 semver prerelease ⇒ `package.json` / `npm pack` 接受
+- 产物名在**非发布构建**下带后缀（`quay-0.7.0-dev.tgz` / `quay-sea-0.7.0-dev-linux-x64.tar.gz`），
+  **正式发布产物名不变**（构建时 HEAD 在 tag 上 / 分支是 `release/*` ⇒ build 模式给无后缀形态）
 - ✅ **原「需实测的未知」已于 2026-09-15 实测关闭**：Claude Code marketplace **接受** prerelease 后缀。
   读数（`gap-develop-version-union-missing-dev-suffix`，隔离的 `CLAUDE_CONFIG_DIR` 真实安装）：
   `claude plugin install quay@quay -s user --json` → `{"outcome":"ok",…}`，
   `claude plugin list --json` → `"version":"0.7.0-dev"`、`installPath=…/plugins/cache/quay/quay/0.7.0-dev`
-  ⇒ 该字段不仅接受，还以它作为 cache 目录的键。残留 1 已结算（§10 同步）。
+  ⇒ 它接受的**其实是拉到的插件 manifest 的版本**（该次读数当时被读成"marketplace 字段被接受"，
+  2026-09-20 的对照把它更正为"marketplace 字段根本没被读"——§12）。残留 1 已结算（§10 同步）。
 
 ### 4.4 打 tag 与发布：复用已被证过的三点同一判据
 
@@ -693,7 +706,7 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 | 0b | **判据甲–戊立案**（`AC-270`..`AC-274`，挂 GOAL-020） | 裁定 5 | ✅ **已完成**（2026-09-15T14:0xZ，5 条写入并经 store runner 复跑，§7） |
 | 1 | **GitHub 默认分支 `master` → `develop`** ⛔ **本行已 superseded（2026-09-17）**：方向被 §3.2.1′ 追加裁定**反转**回 `master`，由 **`AC-285`**（默认分支实测 = `master`）+ **`AC-284`**（worktree 分叉点结构性校验）接替原 **`AC-273`** | 无（纯 GitHub 设置，可逆） | ✅ **当时已完成**（2026-09-15T13:5xZ，含本地 `set-head`，执行记录见 §3.2.1）；⚠️ 该记录是**历史事实**（那一次确实切成了 `develop`），**不是当前配置**——反转后的落地见 `gap-ac285-github-default-branch-master`（`goal_ac: AC-285`） |
 | 2 | release 分支规程（命名 + 合回删除） | 无 | ✅ **删除半边已完成**（`gap-release-branch-deleted-after-merge`，2026-09-15T16:4xZ）：落成 fail-closed 命令 `plugin/scripts/release-branch-finish.sh`（只认 `release-*` / `release/*` 名；`develop..<b>` ≠ 0 ⇒ 拒绝；远端删除失败或读不到 ⇒ 独立 `CAUSE=` + 非零退出）；**现存两条 `release-v06x-build` 由该命令在生产仓库删除**——`release-v062-build` tip `158616df7`（= `v0.6.2`）、`release-v063-build` tip `d097f48c7`，两条 `develop..<b>` 实测均为 **0** ⇒ 删除无损；删除后 `AC-271` 由 fail 转 **pass**。⚠️ 命名半边（§4.1 变更点 1）仍未采用——⛔ 它不在判据乙的达标条件内（判据按 tip 是否指向 tag 判定，不解析分支名）<br>✅ **2026-09-19 补齐三处**（`gap-ac271-release-branch-outlives-its-tag-again`，详见 §4.1.1）：① 命令的合回谓词与 AC-271 的 criterion **对齐为同一份合规定义**（认「tip 被某个 tag 持有」；两者皆不满足仍 fail-closed 拒绝 exit 3）；② 结束步有了载体——`--cut --tag <vX.Y.Z>` 在一次调用里做完「合回 → 在合并点打 tag → 删除」（此前这三步只有删除那一步有命令，合回与删除不被同一件事带上）；③ 每一次结束留痕 `.quay/release-branch-finish.jsonl` + `--log` 读回（此前只有 stdout，硬规则 9）。⚠️ 触发它的根因：v0.10.0 那次切版的残留让判据连红 4 次、靠一次**无痕迹的外部删除**才回绿（§10 残留 4）。⚠️ 命名半边仍未采用
-| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭） |
+| 3 | 版本号 `-dev` 后缀（§4.3 选项 ii，**已裁定**） | 无（裁定已下） | ✅ **已完成**（`gap-develop-version-union-missing-dev-suffix`，2026-09-15T15:0xZ）——并集 10 条 + `package-lock.json` 4 条 workspace 版本齐步到 `0.7.0-dev`；checker 认后缀并新增 all-or-none 断言；`AC-272` 转 **pass**；滚动渠道 `origin/dist-plugin` 已由 run `34985578795` 重发（`VERSION=0.7.0-dev`）；marketplace 实测**接受** prerelease（§10 残留 1 已关闭）<br>⚠️ **2026-09-20 修订（§12）**：本行的落实**已换代**——「10 条并集 / checker 的 `VERSION_ENTRIES` / 手工齐步」都不再是现状。现在是 `VERSION` 单一来源 + `scripts/resolve-version.ts`（`tracked`/`build` 双模式）+ `scripts/stamp-version.ts` 生成器 + 共用的载体表 `scripts/version-carriers.ts`（13 条目 / 10 文件），人只改 `VERSION` 一行；**没有**「去后缀 / 加回后缀」的 bump 提交。判定也换代了：`checker == resolveVersion(VERSION,'tracked')`（外部单一来源），取代「载体之间互相相等」 |
 | 4 | master 推进 job `advance-master` + `needs:` 全集静态检查（§6.1，**已裁定 A**） | 无（裁定已下） | ✅ **实现可今天就做**；⛔ 不变式 3 的静态检查必须同批落地；**生效要等第 5 步** |
 | 5 | **首次 ff**：master → 第一个全绿发布的 tag | `AC-268` | ❌ 阻塞中（至今 0 次全绿发布）；⚠️ 第 4 步落地后**这一步是自动发生的**，不需要另外的人工动作 |
 | 6 | hotfix 线 | 第 5 步 + 真实触发条件出现（§5） | ❌ 且**不应催化**（发生率 1） |
@@ -712,7 +725,8 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 | # | 残留 | 为什么不能靠推断解决 | 触发点 |
 |---|---|---|---|
-| 1 | ~~Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`）~~ | **已关闭（2026-09-15T15:0xZ，`gap-develop-version-union-missing-dev-suffix`）**：接受。真实安装读数（隔离 `CLAUDE_CONFIG_DIR`）：`claude plugin install quay@quay -s user --json` → `{"outcome":"ok","plugin":"quay@quay","scope":"user"}` exit 0；`claude plugin list --json` → `"version":"0.7.0-dev"`，`installPath=…/plugins/cache/quay/quay/0.7.0-dev` ⇒ 该字段不仅接受 prerelease，还以它作 cache 键。⚠️ 顺带读数：该次安装时 marketplace 目录（默认分支 develop）仍声明 `version: 0.7.0`，而拉到的插件 manifest 为 `0.7.0-dev` —— CLI 报的是**拉到的插件**那一侧；本 SPEC 第 3 步落地 develop 后两侧一致 | — |
+| 1 | ~~Claude Code marketplace 的 `version` 字段是否接受 prerelease 后缀（`0.7.0-dev`）~~ | **已关闭（2026-09-15T15:0xZ，`gap-develop-version-union-missing-dev-suffix`）**：接受。真实安装读数（隔离 `CLAUDE_CONFIG_DIR`）：`claude plugin install quay@quay -s user --json` → `{"outcome":"ok","plugin":"quay@quay","scope":"user"}` exit 0；`claude plugin list --json` → `"version":"0.7.0-dev"`，`installPath=…/plugins/cache/quay/quay/0.7.0-dev`。⚠️ 顺带读数：该次安装时 marketplace 目录（默认分支 develop）仍声明 `version: 0.7.0`，而拉到的插件 manifest 为 `0.7.0-dev` —— CLI 报的是**拉到的插件**那一侧；本 SPEC 第 3 步落地 develop 后两侧一致<br>⚠️ **2026-09-20 更正（§12，`gap-version-marketplace-omit-and-spec-amendment`）**：本行的结论「该字段不仅接受 prerelease，还以它作 cache 键」**是错的**——那次读数只看到「拉到的插件 manifest 的版本」，没看到 marketplace 字段。决定性对照（marketplace 广告 `9.9.9` vs manifest `0.10.0-dev`）证明 CLI **从不读** marketplace 条目的 `version`。⇒ 该字段已从两个 `marketplace.json` 删除并从载体表移除 | — |
+| 1b | ~~marketplace 条目的 `version` 字段是否可以整个省略~~（本 SPEC §4.3 只实测过「接受 `-dev` 后缀」时留下的未知） | **已关闭（2026-09-20，`gap-version-marketplace-omit-and-spec-amendment`）**：不但可以省略，而且**本来就没被读过**。四种方言 × 两组对照的真实安装（隔离 `CLAUDE_CONFIG_DIR`）读数见 §12；一个广告 `9.9.9` 的条目照样装成功并回读 manifest 的 `0.10.0-dev`。⇒ 字段已删除（两个文件），两个 carrier 条目已从 `scripts/version-carriers.ts` 移除 | — |
 | 2 | `advance-master` 的 `needs:` 全集静态检查落在哪个检查器 | 需与既有 workflow 类检查器合并还是新建，取决于现有覆盖面 | §9 第 4 步实现时；⛔ 不得延后到第 4 步之后 |
 | 3 | ~~判据甲–戊的立案时机~~ | **已关闭**：2026-09-15T14:0xZ 全部立案为 `AC-270`..`AC-274`（`--expect-absent`，挂 GOAL-020），见 §7 | — |
 | 4 | **`release/v0.10.0` 的消失不可归因**（2026-09-19T03:38:24Z）：`git rev-parse release/v0.10.0` 于 03:2xZ 仍可解析（tip `8c7b85e79`），03:39:02Z 起已不可解析，`AC-271` 的 criterion 随之由连红 4 次转回 pass。**这次删除没有留下任何痕迹**：`.git/logs/refs/heads/release/` 目录不存在（reflog 随分支一起消失）、无对应提交（`git log --all --grep` 只有该分支的 bump 提交 `8c7b85e79` 与合并提交 `4c8116632`）、`orchestration/dispatch-record.jsonl` 无记录、当时 worker driver 为空闲（`.quay/worker-round.jsonl` 03:31:28Z `action=stop` / `pool-empty`） ⇒ **「谁删的、用什么命令删的」在本仓库不可查**（硬规则 9 的代价：可见性 ⊂ 执行）。⛔ 不得把它记成任何任务的成果，也⛔ 不得写成「已由 `release-branch-finish.sh` 删除」 | 已由 §4.1.1 的**留痕**半边直接对治（从 2026-09-19 起，每一次结束都写 `.quay/release-branch-finish.jsonl`，`--log` 可查）；本条**永久留为历史记录**，其价值是它作为「结束步没有载体」的第一个实证（同一根因的另外两处见 §4.1.1 ①②） | — |
@@ -823,3 +837,74 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 
 ⛔ 本小节与本次修订**不新增任何判据、不改任何 AC 的 `status` / `criterion`**：`AC-266/267/268` 保持
 `superseded`，`AC-274` 保持 `active`，GOAL-020 自身的 `status` 保持 `active`——改的只有 GOAL-020 的文本。
+
+---
+
+## 12. 追加裁定（2026-09-20）：版本落实机制 —— `VERSION` 单一来源 + build 模式解析，⛔ 没有「去后缀的 bump 提交」
+
+**人 2026-09-20 逐字裁定**：
+
+> 「版本号应有唯一来源，由 git 跟踪。可以在 build 过程中，监测分支并加后缀，如 -dev。」
+> 「tag 提交不再自描述。」
+
+### 12.1 改的是什么，⛔ 不改的是什么
+
+- ⛔ **不改** §4.3 选项 ii 的 **`-dev` 语义**：develop 常态带后缀、发布产物无后缀。
+- ✅ **改的是「谁写这个后缀」**。旧机制：人在 release 分支上手工去掉 `-dev`（一次提交）、合回 develop 后再加回来
+  （又一次提交）——**两个必须记得的手工动作**，且 tag 提交的内容被用来"自描述"发布版本。
+  新机制：`VERSION`（git 跟踪，裸 `X.Y.Z`）是**唯一来源**；后缀由 `scripts/resolve-version.ts` 按**模式**解析，
+  由生成器在改 `VERSION` 时一并写齐。
+- ⛔ **不改** §4.1.1 结束步的载体与合规定义：`release-branch-finish.sh` 的判据是「分支已合回」或「tip 被某个 tag
+  持有」，**不读任何版本字面量**——本次修订因此**一行都没有改它**（`--cut --tag <vX.Y.Z>` 由调用者显式给 tag 名，
+  正是因为它不猜版本）。已核实：`bash plugin/scripts/release-branch-finish.sh --help` exit 0，
+  且其判据不含「存在一个去后缀的 bump 提交」这一前置（该前置**从来不存在**）。
+
+### 12.2 载体表（机制，不是措辞 —— ADR-004）
+
+| 面 | 载体 | 行为 |
+|---|---|---|
+| **唯一来源** | `VERSION`（仓库根，git 跟踪，裸 `X.Y.Z`） | 人只改这一行 |
+| **解析** | `scripts/resolve-version.ts`（`--mode tracked` / `--mode build`） | `tracked` ⇒ **恒** `X.Y.Z-dev`（**所有分支**，含 `release/*`）；`build` ⇒ HEAD 恰在 tag `vX.Y.Z` 上 **或** 分支名匹配 `release/*` 时给 `X.Y.Z`，否则 `X.Y.Z-dev`；**判定不了**（游离 HEAD 且无版本 tag）⇒ `evaluated:false`（独立取值，硬规则 3b），⛔ 不回答 `-dev` |
+| **生成** | `scripts/stamp-version.ts` + **共用的**载体表 `scripts/version-carriers.ts` | 改 `VERSION` 后跑一次，**13 条目 / 10 文件**齐步（`package-lock.json` 的 4 个 workspace 成员各算一条） |
+| **判定** | `scripts/version-consistency-check.ts` | 每个载体必须 `== resolveVersion(VERSION,'tracked')`——**外部单一来源**判据，取代旧的「载体之间互相相等」（后者结构上看不见一棵"全体一致但全体过时"的树） |
+
+**⇒ tag 提交不自描述（人的裁定）**：tag `vX.Y.Z` 打在**合回 develop 的合并点**上，而该点的提交内容是
+`X.Y.Z-dev`。**发布产物的版本是构建的属性，不是提交的属性**——这个不一致是**设计**。
+⇒ 合回之后人只改 `VERSION` 一行（`X.Y.(Z+1)`）+ 跑生成器；⛔ **没有**去后缀提交，也⛔ **没有**加回后缀提交。
+
+### 12.3 marketplace `plugins[].version`：实测删除（同日）
+
+**问题**（本 SPEC §4.3 只实测过"接受 `-dev` 后缀"，§10 残留 1 曾把它读成"该字段被接受并以它作 cache 键"）：
+根 `.claude-plugin/marketplace.json` 的 `version` 由 Claude Code 从 git 直接读、**没有构建步骤可盖章**，
+仍是一处必须手写的提交字面量。它能整个省略吗？
+
+**实测（`gap-version-marketplace-omit-and-spec-amendment`，隔离 `CLAUDE_CONFIG_DIR` 的**真实安装**，
+`claude plugin marketplace add` + `claude plugin install quay@quay -s user --json` + `claude plugin list --json`）**：
+
+| 方言 | 条目 `version` | `install` outcome | `list --json` `version` / `installPath` 键 |
+|---|---|---|---|
+| 根（github source, ref `dist-plugin`） | `0.10.0-dev` | `ok` | `0.10.0` / `…/quay/quay/0.10.0` |
+| 根（github source） | **省略** | `ok` | `0.10.0` / `…/quay/quay/0.10.0`（与上行**逐字相同**） |
+| `plugin/`（`source: "."`） | `0.10.0-dev` | `ok` | `0.10.0-dev` / `…/quay/quay/0.10.0-dev` |
+| `plugin/`（`source: "."`） | **省略** | `ok` | `0.10.0-dev` / `…/quay/quay/0.10.0-dev`（与上行同样相同） |
+| `plugin/`（`source: "."`） | **`9.9.9`**（故意发散） | `ok` | `0.10.0-dev` ← **决定性对照** |
+
+⊢ **最后一行是前四行给不出的对照**（硬规则 4 推论四）：marketplace 广告 `9.9.9`、manifest 是 `0.10.0-dev`，
+安装照样成功且回读 `0.10.0-dev` ⇒ 「该字段被忽略」与「该字段恰好一致」**可区分**，而它是**被忽略**的。
+⇒ 该字段携带**零信息**，却要人手工维护两个文件里的一个字面量。
+**动作**：从两个 `marketplace.json` 删除该字段，并从载体表移除对应的两条 carrier；新加一条可执行断言
+（`plugin/test/plugin-packaging.test.mjs`：两个 `marketplace.json` 的 quay 条目**不得**带 `version`），
+因为字段一旦离开载体表，**再没有任何机件会因它回归而变红**（硬规则 9：可见性 ⊂ 执行）。
+读数原样保留在 `scripts/version-carriers.ts` 的表注释里。
+
+### 12.4 本条对旧文的效力
+
+| 旧文 | 处置 |
+|---|---|
+| §0 ②、§1 ⑤ 问 2、§4.3 选项 ii 表 | **裁定原文保留为历史**（那是 2026-09-15 那天确实发生的事）+ 就地 ⚠️ 标注指向本条 |
+| §4.1 生命周期流程图、§4.3「落实口径」 | **已改写**为当前机制（⛔ 不是加注：这两处是**规程**，读者照做即生效） |
+| §9 第 3 行、§10 残留 1 | **已改写** + ⚠️ 标注；§10 新增残留 1b（marketplace 字段能否省略）并**当场关闭** |
+| §4.3「实现要点」 | **已改写**：`VERSION_ENTRIES` 常量与 9/10 条目的计数**已不存在**，现为共用的 `VERSION_CARRIERS`（13 条目 / 10 文件） |
+
+⛔ 本条**不新增任何判据、不改任何 AC 的 `status` / `criterion`**，也不改任何分支——它改的是 §4.1/§4.3 的
+**落实机制措辞**与 `marketplace.json` 的一个字段。
