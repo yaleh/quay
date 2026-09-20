@@ -135,8 +135,24 @@
         "embeddedInterpreterLines": "-50 = orchestration/watch/inner-stalled.sh effective lines 50 -> gone. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is 8 paths (`git diff --name-only develop HEAD`), of which the .sh are exactly the three this task deleted. The two selfchecks (407 + 122 = 529 lines) are NOT in the axis: their `files[]` entries read `embedded: []`, so their deletion moves totals.scripts (150 -> 147) and the orphan reading (3 -> 0) but not this sum. Measured with the checker's OWN reading (`sh-census-check.ts --json` -> totals.embeddedInterpreterLines) before (9183) and after (9133).",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair (the 3 deleted dangling git-lens symlinks were never counted in symlinkedCopies either: sh-census-check only lists symlinks whose target resolves, and theirs were already archived to archive/2026-09-07-zero-call-scripts/)."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-integration-batch-merge-sh, SPEC Phase 5.2 first script)",
+      "from": {
+        "embeddedInterpreterLines": 9133,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 8439,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase 5.2's first script. plugin/scripts/integration-batch-merge.sh (697 effective lines, TWO embedded interpreters: `node … orphan-session-check.ts` in the teardown helper and five `python3 -c`/heredoc JSON reads) is now plugin/scripts/integration-batch-merge.ts; the .sh is a 3-line thin entry that execs it. This is Phase 4's catalog shape repeated: the .sh STILL carries `node` at a command position (it execs the module), so it STAYS IN the axis — it is the line count that moved, not its membership (the axis measures effective lines of embedded-interpreter .sh, so 'make it thin' is rewarded and 'make it a .ts' is what the thin entry has to point at). AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it: leaving 9133 would let a 700-line embedded-interpreter .sh be re-added for free, i.e. the whole Phase 5.2 gain would be un-recaptured.",
+      "attribution": {
+        "embeddedInterpreterLines": "-694 = plugin/scripts/integration-batch-merge.sh effective lines 697 -> 3. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is 6 paths (`git diff --name-only develop HEAD`), of which exactly one is a `*.sh` — this file. The other five are integration-batch-merge.ts (a .ts, outside a .sh census), integration-batch-merge-characterization.test.mjs (.mjs, outside), capability-catalog-declarations.json, and this baseline file. Measured with the checker's OWN reading (`sh-census-check.ts --json` -> files[path=plugin/scripts/integration-batch-merge.sh].codeLines) before (697) and after (3), and confirmed on totals.embeddedInterpreterLines 9133 -> 8439.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 9133,
+  "embeddedInterpreterLines": 8439,
   "duplicateCopies": 0
 }
