@@ -115,6 +115,8 @@ export interface WalkOptions {
    * the root's own entries and never descends. Default: Infinity.
    */
   maxDepth?: number;
+  /** Return absolute paths instead of root-relative POSIX paths. Default false. */
+  absolute?: boolean;
   /**
    * Restrict the walk to the paths git considers part of this work tree — the gitignore-driven
    * skip face (`gitVisiblePaths`). Entries are matched by their path relative to `visible.root`
