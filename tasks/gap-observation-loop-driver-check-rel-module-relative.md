@@ -107,7 +107,7 @@ readManager(<worktree>) 修前 = {"status":"empty","reason":"../../../plugin/scr
   (none)
 ```
 
-**零计数非空转的对照（硬规则 2 的另一半）**：同一谓词对**已知为真**的样本仍命中——`plugin/test/identity-replication-check.test.mjs`（8/8 绿）的 `findPathConstants` 用例把 `export const RESOURCE_GATE_REL = "../../../plugin/scripts/resource-gate.sh";` 作为正样本并断言命中（`plugin/test/identity-replication-check.test.mjs:74-87`）。⇒ 上面的 0 是「查过且没有」，不是「谓词坏了」。
+**零计数非空转的对照（硬规则 2 的另一半）**：同一谓词对**已知为真**的样本仍命中——`plugin/test/identity-replication-check.test.mjs` 的 `findPathConstants` 用例把 `export const RESOURCE_GATE_REL = "../../../plugin/scripts/resource-gate.sh";` 作为正样本并断言命中。⇒ 上面的 0 是「查过且没有」，不是「谓词坏了」。
 
 生产载体读数（修后 `readManager(<worktree>)`，本仓）：
 
@@ -143,11 +143,20 @@ resolvePluginScript(LOOP_DRIVER_CHECK_REL) = /home/yale/work/quay/plugin/scripts
 
 ### AC6（回归）
 
-- `node --experimental-strip-types plugin/test/identity-replication-check.test.mjs` → **8/8 pass, exit 0**
+- `node --experimental-strip-types plugin/test/identity-replication-check.test.mjs` → **exit 0**（本分支实现当刻 8/8；merge develop 后 9/9，见「二次收尾」）
 - `packages/quay/test/observation.test.mjs` → **58/58 pass**（含新增 4 条）
 - `packages/quay/test/plugin-root.test.mjs` → 20/20；`packages/quay/test/serve-manager-body-i18n.test.mjs` → 11/11
 - reader 邻接面：`gap-dashboard-parallelize` 13/13、`serve-ac95-views` 21/21、`serve-system-body-i18n` 11/11、`gap-ac136-web-truth-source` 3/3
 - `npx tsc --noEmit -p packages/quay` → exit 0
+
+### 二次收尾（merge develop 后重测 + scoped 门 + 缓存记录）
+
+develop 在本轮窗口内前进（`699565759` → `c7ab1b586`），其中一条**直接改动了本任务 AC3 所依赖的仪器**：`fadb16f45 fix(identity-replication-check): AC3 byte-pair scan skips symlinks`（`plugin/scripts/identity-replication-check.ts` + 其测试）。⇒ 收尾不是仪式，是**对着新仪器重测**：
+
+- 检测器重跑（merge 后，逐字）：`== 路径字面量常量 (AC1) — 0 个 *_REL 常量硬编码 plugin 脚本相对路径 ==` ⇒ AC3 的 0 是在**当前**检测器上测出的，不是立案时那版。
+- 检测器自测：**9/9 pass**（develop 侧新增一条用例）。
+- scoped 门重跑（`--for-task … --allow-thin`，对 merge 进来的 tip）：**174 tests / 174 pass / 0 fail**，scoped 静态层逐条 PASS（`it0-split-or-commit-check --changed` 报 **NOT-EVALUATED**——本分支相对 develop 没改任务体，该 delta 判据无对象可归属，⛔ 与 PASS 分开取值，硬规则 3b）。无 `selected 0 test files`（该形态 = 假绿）。
+- **scoped-gate 缓存**：首写按 prompt 原样用 `$(git rev-parse develop)` 记成 `c7ab1b586`，而那时门跑的树是 merge 的 `^2` = `699565759` ⇒ 一条把**未评估的 tip** 记成 `ok:true` 的假记录（false-skip 方向）。处置：**再 merge develop（把 `c7ab1b586` 真的合进来）→ 再跑一次门 → 显式传该 tip**。自检三项全过：`记录值 == HEAD^2 == develop == c7ab1b586`、`git merge-base --is-ancestor c7ab1b586 HEAD` = TRUE、缓存文件读回 `key = gap-observation-loop-driver-check-rel-module-relative\tc7ab1b586…` 且 `ok:true`。⇒ 这一条缓存是**对着一棵真的评估过的树**写的（同一 sha 从「假」变「真」，判别式必须是写入那一刻记录值与 HEAD 的关系，不是跨轮比 sha 值）。
 
 ### 连带修正（同一 diff 内，原因如实记录）
 
