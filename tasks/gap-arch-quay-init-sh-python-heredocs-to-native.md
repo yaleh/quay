@@ -2,7 +2,7 @@
 id: gap-arch-quay-init-sh-python-heredocs-to-native
 title: shell→TS（SPEC Phase 5.1 残余）：quay-init.sh 的 8 个内嵌 python3 heredoc 收进原生
   init.ts——gap-quay-init-native-reconcile 的「载体迁移暂缓」部分
-status: ready
+status: done
 labels:
   - gap
 parent: null
