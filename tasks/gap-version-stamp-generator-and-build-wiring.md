@@ -2,7 +2,7 @@
 id: gap-version-stamp-generator-and-build-wiring
 title: 版本号生成器 stamp-version——改 VERSION 一处即更新全部提交载体（含 package-lock 4 条），构建阶段按
   build 模式盖章，替换 package.sh 的手工漂移校验
-status: todo
+status: ready
 labels:
   - gap
 parent: null
