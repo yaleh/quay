@@ -182,6 +182,29 @@ verify_port=18091
 # 加 keepalive 让 ssh 客户端主动发心跳，连接路径上就没有「空闲」可被中间盒计时器判定超时。
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
 
+# ── py_steps <step> [args…] — the extracted JSONL predicates (SPEC §5 Phase 5.3 first stage) ───────
+# The twelve `python3` invocations this entry used to embed — ten `<<'PY'` heredoc bodies plus two
+# `python3 -c` one-liners — now live in the sibling TypeScript module
+# `plugin/scripts/develop-deliver-python-steps.ts`. The shell keeps the ORCHESTRATION (which step runs
+# when, in what order, and what its report line says); the LOGIC — the record-identity dedup, the
+# three-valued completeness verdict, the (host, project_root) pairing predicates, the AC-248/AC-249
+# field-shape readings, and the two state-file readers — is one typed, testable unit there.
+# ⛔ WHY A WRAPPER AND NOT TWELVE INLINE COMMANDS. Same reason as plugin/scripts/quay-init.sh's
+# `quay-init-step`: it keeps the call sites one short line each, AND it keeps the invocation in the ONE
+# spelling the shipped-artifact rewriter knows.
+# ⛔ The NO-BRACES `$SCRIPT_DIR` in the line below is LOAD-BEARING — do NOT "tidy" it to `${SCRIPT_DIR}`.
+# `build-plugin-dist.mjs`'s rewriteShell matches `node --no-warnings --experimental-strip-types
+# "$SCRIPT_DIR/X.ts"` and rewrites it to `node --no-warnings "$SCRIPT_DIR/dist/X.js"` for the staged
+# artifact (the raw .ts are deleted there). The braced spelling misses that rule, falls through to the
+# generic extension swap, and leaves `--experimental-strip-types` on the command line of a `.js`
+# bundle — a flag a bare Node 20 (the artifact's declared floor) rejects outright.
+# The wrapper passes the step's EXIT CODE through unchanged: `evidence-completeness` (0/2/3) and
+# `e2e-pairing` / `upgrade-pairing` (0/2) are three-distinguishable-value verdicts, and collapsing
+# them here would make 「判为缺」 and 「脚本炸了」 the same shape (硬规则 3b).
+py_steps() {
+  node --no-warnings --experimental-strip-types "$SCRIPT_DIR/develop-deliver-python-steps.ts" "$@"
+}
+
 hosts="B C"
 force=0
 check_only=0
@@ -638,44 +661,7 @@ transport_evidence_append() {
     return 1
   fi
   mkdir -p "$(dirname "$carrier")"
-  appended="$(python3 - "$carrier" "$evidence" <<'PY'
-import json, sys
-carrier, evidence = sys.argv[1], sys.argv[2]
-def sig(r):
-    # 记录身份 = 全部字段（见上方注释：键元组漏 kind 会把第二条 AC-203 记录静默吃掉）。
-    return json.dumps(r, sort_keys=True)
-existing = set()
-try:
-    with open(carrier, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                existing.add(sig(json.loads(line)))
-            except Exception:
-                pass
-except FileNotFoundError:
-    pass
-appended = 0
-with open(carrier, "a", encoding="utf-8") as out, open(evidence, encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            r = json.loads(line)
-        except Exception:
-            continue
-        s = sig(r)
-        if s in existing:
-            continue
-        existing.add(s)
-        out.write(line + "\n")
-        appended += 1
-print(appended)
-PY
-)"
+  appended="$(py_steps evidence-append "$carrier" "$evidence")"
   if [ -z "$appended" ]; then
     echo "NOT-EVALUATED evidence-parse-failed path=${evidence}"
     return 1
@@ -713,35 +699,7 @@ check_evidence_completeness() {
   # ⛔ 也【不】在函数体内 set +e / set -e：试过，它会把调用方的 errexit 提前恢复，于是「函数返回非 0」
   #    在调用方那一行就把调用方杀掉（实测：--selfcheck-evidence-completeness 停在第三条用例）。
   #    if-形不动 errexit 状态，两个方向都安全。
-  if result="$(python3 - "${evidence}" "${expected}" <<'PY'
-import json, sys
-evidence, expected = sys.argv[1], sys.argv[2].split()
-present = set()
-with open(evidence, encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            r = json.loads(line)
-        except Exception:
-            continue
-        a = r.get("ac", "")
-        if a:
-            present.add(a)
-exp = set(expected)
-have = present & exp
-if not have:
-    print("ALL-MISSING present=%d" % len(present))
-    sys.exit(3)
-missing = sorted(exp - present)
-if missing:
-    print("PARTIAL present=%d missing=%d list=%s" % (len(have), len(missing), ",".join(missing)))
-    sys.exit(2)
-print("COMPLETE present=%d" % len(have))
-sys.exit(0)
-PY
-)"; then
+  if result="$(py_steps evidence-completeness "${evidence}" "${expected}")"; then
     pyrc=0
   else
     pyrc=$?
@@ -779,50 +737,9 @@ check_e2e_pairing() {
     echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
     return 1
   fi
-  result="$(python3 - "${evidence}" <<'PY'
-import json, sys
-evidence = sys.argv[1]
-a203, a207 = {}, {}
-with open(evidence, encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            r = json.loads(line)
-        except Exception:
-            continue
-        h = str(r.get("host") or "")
-        pr = str(r.get("project_root") or "")
-        if not h or not pr:
-            continue
-        try:
-            alive = int(r.get("driver_alive") or 0)
-            recs = int(r.get("carrier_records") or 0)
-            gates = int(r.get("gate_events") or 0)
-        except Exception:
-            continue
-        if (r.get("ac") == "GOAL-009-AC-203" and r.get("has_plugin_dir") is False
-                and alive == 1 and recs > 0):
-            a203.setdefault(h, set()).add(pr)
-        if (r.get("ac") == "GOAL-009-AC-207" and r.get("task_status") == "done"
-                and gates > 0 and r.get("produced_by_driver") is True
-                and r.get("commit_sha") and r.get("task_id")):
-            a207.setdefault(h, set()).add(pr)
-hosts = sorted(set(a203) | set(a207))
-paired = [h for h in hosts if a203.get(h, set()) & a207.get(h, set())]
-if paired:
-    print("E2E-PAIR OK host=%s roots=%s" % (",".join(paired),
-          ",".join(sorted(set().union(*[a203[h] & a207[h] for h in paired])))))
-    sys.exit(0)
-# ⛔ 不静默：把两侧的 root 集逐 host 印出来（可核，而不是只说「配不上」）
-detail = " ; ".join(
-    "host=%s AC203_roots=%s AC207_roots=%s" % (h, sorted(a203.get(h, set())), sorted(a207.get(h, set())))
-    for h in hosts) or "no AC-203/AC-207 records at all"
-print("PARTIAL E2E_PAIR_MISSING=1 %s" % detail)
-sys.exit(2)
-PY
-)"
+  # ⛔ The call line is matched VERBATIM by this function's own selfcheck (the positional control that
+  # proves the verdict is WIRED into verify_coldstart_mode) — do not reformat it here.
+  result="$(py_steps e2e-pairing "${evidence}")"
   pyrc=$?
   echo "develop-deliver: e2e-pairing ${result}"
   case "$pyrc" in
@@ -854,56 +771,7 @@ check_upgrade_pairing() {
     echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
     return 1
   fi
-  result="$(python3 - "${evidence}" <<'PY'
-import json, sys
-evidence = sys.argv[1]
-a238, a239 = {}, {}
-with open(evidence, encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            r = json.loads(line)
-        except Exception:
-            continue
-        h = str(r.get("host") or "")
-        pr = str(r.get("project_root") or "")
-        if not h or not pr:
-            continue
-        # AC-238 合格 = 与 criterion 逐字同源的四件读数（存量不减 / 旧 runtime 有年龄 / 被换掉 / CLI 读得出）
-        if (r.get("ac") == "GOAL-009-AC-238"
-                and isinstance(r.get("pre_upgrade_task_count"), int) and r.get("pre_upgrade_task_count") > 0
-                and r.get("post_upgrade_task_count") == r.get("pre_upgrade_task_count")
-                and isinstance(r.get("pre_upgrade_runtime_age_days"), (int, float))
-                and r.get("pre_upgrade_runtime_age_days") >= 1
-                and r.get("runtime_replaced") is True
-                and r.get("task_list_ok") is True
-                and r.get("build_sha")):
-            a238.setdefault(h, set()).add(pr)
-        # AC-239 合格 = 端到端四件（commit_sha/task_id 非空 ∧ done ∧ gate>0 ∧ 出自 driver）
-        try:
-            gates = int(r.get("gate_events") or 0)
-        except Exception:
-            continue
-        if (r.get("ac") == "GOAL-009-AC-239" and r.get("task_status") == "done"
-                and gates > 0 and r.get("produced_by_driver") is True
-                and r.get("commit_sha") and r.get("task_id")):
-            a239.setdefault(h, set()).add(pr)
-hosts = sorted(set(a238) | set(a239))
-paired = [h for h in hosts if a238.get(h, set()) & a239.get(h, set())]
-if paired:
-    print("UPGRADE-PAIR OK host=%s roots=%s" % (",".join(paired),
-          ",".join(sorted(set().union(*[a238[h] & a239[h] for h in paired])))))
-    sys.exit(0)
-# ⛔ 不静默：把两侧的 root 集逐 host 印出来（可核，而不是只说「配不上」）
-detail = " ; ".join(
-    "host=%s AC238_roots=%s AC239_roots=%s" % (h, sorted(a238.get(h, set())), sorted(a239.get(h, set())))
-    for h in hosts) or "no AC-238/AC-239 records at all"
-print("PARTIAL UPGRADE_PAIR_MISSING=1 %s" % detail)
-sys.exit(2)
-PY
-)"
+  result="$(py_steps upgrade-pairing "${evidence}")"
   pyrc=$?
   echo "develop-deliver: upgrade-pairing ${result}"
   case "$pyrc" in
@@ -1347,41 +1215,8 @@ EVID
 
   # ④ AC-248 专有：两个 detects 字段的【JSON 布尔形态】。用 python 按判据的同一谓词读（`is False`/`is True`），
   #    正样本必须过，两条冒充样本（0/1 与字符串）必须【各自】不过 ⇒ 这个谓词不是恒真的。
-  bad_bad="$(python3 - "${carrier}" <<'PY'
-import json, sys
-ok = False
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-248":
-        continue
-    ok = (r.get("adr_check_before_detects") is False and r.get("adr_check_after_detects") is True
-          and bool(r.get("adr_check_probe_tool")))
-print("1" if ok else "0")
-PY
-)"
-  bad_str="$(python3 - "${carrier}" <<'PY'
-import json, sys
-# 冒充形态：把两个字段换成 0/1 与字符串 —— 同一个谓词必须【两种都不过】。
-bad = [dict(), dict()]
-n = 0
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-248":
-        continue
-    a = dict(r); a["adr_check_before_detects"] = 0; a["adr_check_after_detects"] = 1
-    b = dict(r); b["adr_check_before_detects"] = "false"; b["adr_check_after_detects"] = "true"
-    bad = [a, b]
-    n = 1
-def passes(r):
-    return (r.get("adr_check_before_detects") is False and r.get("adr_check_after_detects") is True
-            and bool(r.get("adr_check_probe_tool")))
-print(("0" if any(passes(r) for r in bad) else "1") if n else "0")
-PY
-)"
+  bad_bad="$(py_steps adrflip-bool-shape "${carrier}" positive)"
+  bad_str="$(py_steps adrflip-bool-shape "${carrier}" impostors)"
   echo "selfcheck-adrflip-transport: json-bool-shape(is-False/is-True) positive=${bad_bad} impostors-refused=${bad_str} (expect 1/1 — 0-1 与字符串两种冒充都必须取不到真)"
   [ "${bad_bad}" = "1" ] || rc=1
   [ "${bad_str}" = "1" ] || rc=1
@@ -1457,71 +1292,10 @@ EVID
 
   # ④ 字段谓词控制：同一组谓词（逐字同形于 goal criterion 的那两行 any(...)）读运输回来的记录。
   #    正样本 1 条；三段冒充（只代码 / 只文档 / `./src` 形态）必须【各自】取不到真。
-  cc_pos="$(python3 - "${carrier}" <<'PY'
-import json, sys
-ok = False
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-249":
-        continue
-    cf = r.get("commit_files")
-    ok = (isinstance(cf, list) and bool(cf)
-          and any(str(x).startswith(("src/", "scripts/")) for x in cf)
-          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf)
-          and bool(r.get("task_id")))
-print("1" if ok else "0")
-PY
-)"
-  cc_code="$(python3 - "${carrier}" <<'PY'
-import json, sys
-# 冒充形态一：并集只有代码面（一个完美但【不完整】的修复）
-ok = False
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-249":
-        continue
-    cf = ["scripts/check-adr.ts", "tests/unit/scripts/check-adr.test.ts"]
-    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
-          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
-print("0" if ok else "1")
-PY
-)"
-  cc_doc="$(python3 - "${carrier}" <<'PY'
-import json, sys
-# 冒充形态二：并集只有文档面（只同步文档、没改代码）
-ok = False
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-249":
-        continue
-    cf = ["quay-adr/ADR-007.md", "docs/notes.md"]
-    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
-          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
-print("0" if ok else "1")
-PY
-)"
-  cc_dot="$(python3 - "${carrier}" <<'PY'
-import json, sys
-# 冒充形态三：路径带 `./` 前缀 —— criterion 的 startswith("src/") 分支必须因此取假
-ok = False
-for line in open(sys.argv[1], encoding="utf-8"):
-    if not line.strip():
-        continue
-    r = json.loads(line)
-    if r.get("ac") != "GOAL-016-AC-249":
-        continue
-    cf = ["./scripts/check-adr.ts", "quay-adr/ADR-007.md"]
-    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
-          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
-print("0" if ok else "1")
-PY
-)"
+  cc_pos="$(py_steps complete-change-predicate "${carrier}" positive)"
+  cc_code="$(py_steps complete-change-predicate "${carrier}" code-only)"
+  cc_doc="$(py_steps complete-change-predicate "${carrier}" doc-only)"
+  cc_dot="$(py_steps complete-change-predicate "${carrier}" dot-slash)"
   echo "selfcheck-complete-change-transport: commit-files-predicate positive=${cc_pos} impostors-refused(code=${cc_code},doc=${cc_doc},dot-slash=${cc_dot}) (expect 1/1/1/1 — 单边不算 + 前缀必须原样，两种都能取假)"
   [ "${cc_pos}" = "1" ] || rc=1
   [ "${cc_code}" = "1" ] || rc=1
@@ -1658,7 +1432,10 @@ fi
 # --force overrides every branch to deliver. The state comes ONLY from .quay/develop-deliver-state.json
 # (the deliver's own record) — never from this script's own recent invocations (硬规则 4b).
 read_state_field() {
-  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],''))" "${state_file}" "$1" 2>/dev/null || echo ""
+  # The `|| echo ""` is the contract, not decoration: every failure mode of the reader (state file
+  # absent, unparseable, a JSON non-object, or the key missing) must land as the EMPTY value so the
+  # trigger below can tell 「没有这一项」 from 「读到一项」 (硬规则 3b — 缺值 ≠ 一个值).
+  py_steps state-field "${state_file}" "$1" 2>/dev/null || echo ""
 }
 
 decision="deliver"
@@ -1670,7 +1447,10 @@ elif [ -f "${state_file}" ]; then
   last_delivered="$(read_state_field lastDelivered)"
   ts="$(read_state_field timestamp)"
   if [ -n "${ts}" ]; then
-    age_seconds="$(python3 -c "import sys,datetime; d=datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')); print(max(0,int((datetime.datetime.now(datetime.timezone.utc)-d).total_seconds())))" "${ts}" 2>/dev/null || echo "")"
+    # An UNUSABLE timestamp (unparseable, or carrying no zone) must read as empty, never as a 0 someone
+    # measured — the `[ -n "${age_seconds}" ]` guard below is what keeps the hold from being applied to
+    # an age nobody read.
+    age_seconds="$(py_steps age-seconds "${ts}" 2>/dev/null || echo "")"
   fi
   if [ "${last_delivered}" = "${develop_tip}" ]; then
     decision="fresh"
