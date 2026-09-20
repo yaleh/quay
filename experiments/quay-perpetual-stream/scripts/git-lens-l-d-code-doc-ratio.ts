@@ -1,1 +1,0 @@
-../../../plugin/scripts/git-lens-l-d-code-doc-ratio.ts

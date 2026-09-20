@@ -1,1 +1,0 @@
-../../../plugin/scripts/git-lens-l-s-behavior-variance.ts

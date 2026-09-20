@@ -1,1 +1,0 @@
-../../../plugin/scripts/git-lens-l-g-structural-drift.ts
