@@ -282,15 +282,36 @@ if $CHECK_MODE; then
     "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
 else
   echo "[sync-vendor] mirroring the task-schema check -> plugin/scripts/{task-schema.ts,task-schema-check.ts,task-schema-check.sh} ..."
-  cp "${EXPERIMENT_SCRIPTS}/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema.ts"
-  cp "${EXPERIMENT_SCRIPTS}/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts"
-  cp "${EXPERIMENT_SCRIPTS}/task-schema-check.sh" "${PLUGIN_DIR}/scripts/task-schema-check.sh"
+  # ⛔ Symlink guard, same as section 4's SYNC_SCRIPTS loop below — and for the same reason. The four
+  # sources here are now SYMLINKS into plugin/scripts/ (`experiments/.../scripts/task-schema.ts ->
+  # ../../../plugin/scripts/task-schema.ts`, the single-source direction of the mirror policy), so a
+  # plain `cp` is a copy of a file ONTO ITSELF: `cp: '…' and '…' are the same file`, exit 1, and
+  # `set -e` aborts the whole script. Measured 2026-09-20 in a fresh worktree: the full (no-flag) path
+  # died at section 3 and NEVER REACHED the later sections — including the build-mode version stamp in
+  # section 6.5, which is the last step (ordering matters: section 6 rewrites
+  # plugin/vendor/quay/package.json's version, so the stamp has to come after it). The abort was
+  # pre-existing and invisible: the only routine caller is the root `postinstall`
+  # (`bash plugin/scripts/sync-vendor.sh || true`), whose `|| true` swallowed it. Fixing it here rather
+  # than deferring is not scope creep — the wiring this task adds to this file was, without it,
+  # unreachable code that would have let a release build ship a `-dev` artifact.
+  for s in task-schema.ts task-schema-check.ts task-schema-check.sh; do
+    src_file="${EXPERIMENT_SCRIPTS}/${s}"
+    if [ -L "$src_file" ]; then
+      echo "[sync-vendor] skipping symlink: ${s}"
+      continue
+    fi
+    cp "${src_file}" "${PLUGIN_DIR}/scripts/${s}"
+  done
   chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
   # M152 (DIR-091) refactored task-schema-check.sh (and 6 sibling gate scripts) to depend
   # on this shared lib. No exp5 attribution to sanitize (byte-identical copy, not group-2).
   echo "[sync-vendor] mirroring gate-script-lib.sh (task-schema-check.sh's shared dependency) ..."
-  cp "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
-  chmod +x "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
+  if [ -L "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" ]; then
+    echo "[sync-vendor] skipping symlink: gate-script-lib.sh"
+  else
+    cp "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
+    chmod +x "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,111 @@
+=== AC3: change VERSION to 9.9.9 (temporarily), run the generator, compare git diff to the carrier table
+--- 1. VERSION before: 0.10.0
+--- 2. VERSION after edit: 9.9.9
+--- 3. run: node --experimental-strip-types scripts/stamp-version.ts
+(node:2097176) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/stamp-version.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+STAMP-VERSION: mode=tracked root=/home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring source=/home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/VERSION = 9.9.9 => every carrier must == 9.9.9-dev
+STAMP-VERSION: wrote 12 file(s), 15 carrier(s):
+  packages/quay/package.json  (packages/quay): 0.10.0-dev -> 9.9.9-dev
+  packages/quay-native/package.json  (packages/quay-native): 0.10.0-dev -> 9.9.9-dev
+  packages/quay-github/package.json  (packages/quay-github): 0.10.0-dev -> 9.9.9-dev
+  packages/quay-backlog/package.json  (packages/quay-backlog): 0.10.0-dev -> 9.9.9-dev
+  plugin/.claude-plugin/plugin.json  (plugin/.claude-plugin/plugin.json): 0.10.0-dev -> 9.9.9-dev
+  plugin/README.md  (plugin/README.md): 0.10.0-dev -> 9.9.9-dev
+  plugin/.claude-plugin/marketplace.json  (plugin/.claude-plugin/marketplace.json (quay entry)): 0.10.0-dev -> 9.9.9-dev
+  .claude-plugin/marketplace.json  (.claude-plugin/marketplace.json (quay entry)): 0.10.0-dev -> 9.9.9-dev
+  plugin/vendor/quay/package.json  (plugin/vendor/quay/package.json): 0.10.0-dev -> 9.9.9-dev
+  plugin/VERSION  (plugin/VERSION): 0.10.0-dev -> 9.9.9-dev
+  delivery-manifest.json  (delivery-manifest.json): 0.10.0-dev -> 9.9.9-dev
+  package-lock.json  (package-lock.json (packages/quay)): 0.10.0-dev -> 9.9.9-dev
+  package-lock.json  (package-lock.json (packages/quay-native)): 0.10.0-dev -> 9.9.9-dev
+  package-lock.json  (package-lock.json (packages/quay-github)): 0.10.0-dev -> 9.9.9-dev
+  package-lock.json  (package-lock.json (packages/quay-backlog)): 0.10.0-dev -> 9.9.9-dev
+  files changed: packages/quay/package.json, packages/quay-native/package.json, packages/quay-github/package.json, packages/quay-backlog/package.json, plugin/.claude-plugin/plugin.json, plugin/README.md, plugin/.claude-plugin/marketplace.json, .claude-plugin/marketplace.json, plugin/vendor/quay/package.json, plugin/VERSION, delivery-manifest.json, package-lock.json
+--- 4. git diff --name-only:
+.claude-plugin/marketplace.json
+VERSION
+delivery-manifest.json
+package-lock.json
+packages/quay-backlog/package.json
+packages/quay-github/package.json
+packages/quay-native/package.json
+packages/quay/package.json
+plugin/.claude-plugin/marketplace.json
+plugin/.claude-plugin/plugin.json
+plugin/README.md
+plugin/VERSION
+plugin/vendor/quay/package.json
+--- 4b. count: 13 files
+(node:2097234) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/version-carriers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+--- 4c. carrier table distinct files: [33m12[39m
+--- 4d. table file list:
+(node:2097260) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/version-carriers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+    packages/quay/package.json
+    packages/quay-native/package.json
+    packages/quay-github/package.json
+    packages/quay-backlog/package.json
+    plugin/.claude-plugin/plugin.json
+    plugin/README.md
+    plugin/.claude-plugin/marketplace.json
+    .claude-plugin/marketplace.json
+    plugin/vendor/quay/package.json
+    plugin/VERSION
+    delivery-manifest.json
+    package-lock.json
+--- 4e. per-carrier entry values (all 15 must be 9.9.9-dev):
+(node:2097296) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/version-carriers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+   OK  packages/quay = "9.9.9-dev"
+   OK  packages/quay-native = "9.9.9-dev"
+   OK  packages/quay-github = "9.9.9-dev"
+   OK  packages/quay-backlog = "9.9.9-dev"
+   OK  plugin/.claude-plugin/plugin.json = "9.9.9-dev"
+   OK  plugin/README.md = "9.9.9-dev"
+   OK  plugin/.claude-plugin/marketplace.json (quay entry) = "9.9.9-dev"
+   OK  .claude-plugin/marketplace.json (quay entry) = "9.9.9-dev"
+   OK  plugin/vendor/quay/package.json = "9.9.9-dev"
+   OK  plugin/VERSION = "9.9.9-dev"
+   OK  delivery-manifest.json = "9.9.9-dev"
+   OK  package-lock.json (packages/quay) = "9.9.9-dev"
+   OK  package-lock.json (packages/quay-native) = "9.9.9-dev"
+   OK  package-lock.json (packages/quay-github) = "9.9.9-dev"
+   OK  package-lock.json (packages/quay-backlog) = "9.9.9-dev"
+   => 15 entries, 0 not stamped
+--- 4f. the 4 package-lock workspace entries read straight off disk:
+    packages/quay = 9.9.9-dev
+    packages/quay-native = 9.9.9-dev
+    packages/quay-github = 9.9.9-dev
+    packages/quay-backlog = 9.9.9-dev
+--- 5. version-consistency-check on the stamped tree:
+(node:2097340) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/version-consistency-check.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  package-lock.json (packages/quay-backlog)               9.9.9-dev == resolveVersion(VERSION,'tracked')
+
+All 15 carriers == resolveVersion(VERSION,'tracked') == 9.9.9-dev (over 12 files; suffix policy: all-suffixed)
+    exit=0
+--- 6. restore: git checkout -- .
+--- 7. VERSION after restore: 0.10.0
+--- 8. version-consistency-check after restore:
+(node:2097399) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/scripts/version-consistency-check.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  package-lock.json (packages/quay-backlog)               0.10.0-dev == resolveVersion(VERSION,'tracked')
+
+All 15 carriers == resolveVersion(VERSION,'tracked') == 0.10.0-dev (over 12 files; suffix policy: all-suffixed)
+    exit=0
+--- 9. git status after restore (must be clean):
+?? .quay/ac-stamp-version-ac3-evidence.txt
