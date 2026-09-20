@@ -2,7 +2,7 @@
 id: gap-git-graph-live-ref-oracle-siblings-unfrozen
 title: git-graph 测试族里仍有 4 个「实时 ref oracle 对实时数据层读」的对拍判据未冻结 ref 窗口——同族的第 3
   份实例又会以窗口位移误杀 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
