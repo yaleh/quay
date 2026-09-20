@@ -135,27 +135,19 @@ if [ ! -f "${WORK}/scripts/runner-static-gate.ts" ]; then
   echo "ERROR: the static-check registry (scripts/runner-static-gate.ts) is missing after the strip step." >&2
   exit 1
 fi
-echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles ..."
-node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}"
-
-# ── Build-mode version stamp (gap-version-stamp-generator-and-build-wiring) ──────────────────────
-# The assembled tree IS the published artifact, so its version is decided HERE, by the build:
-# `resolveVersion(VERSION,'build')` ⇒ `X.Y.Z` on a `release/*` branch (or at tag `vX.Y.Z`),
-# `X.Y.Z-dev` otherwise (human ruling 2026-09-20: 「可以在 build 过程中，监测分支并加后缀，如 -dev」).
-# The committed carriers stay `X.Y.Z-dev` on every branch — the tag commit no longer self-describes,
-# which is exactly why a release no longer needs a de-suffixing bump commit.
+echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles and stamping the build version ..."
+# ── Build-mode version stamp (gap-version-stamp-generator-and-build-wiring), chained onto the rewrite
+# step so the stamp cannot be separated from it: the assembled tree IS the published artifact, so its
+# version is decided HERE, by the build — `resolveVersion(VERSION,'build')` ⇒ `X.Y.Z` on a `release/*`
+# branch (or at tag `vX.Y.Z`), `X.Y.Z-dev` otherwise (human ruling 2026-09-20: 「可以在 build 过程中，
+# 监测分支并加后缀，如 -dev」). The committed carriers stay `X.Y.Z-dev` on every branch — the tag commit
+# no longer self-describes, which is exactly why a release needs no de-suffixing bump commit.
 # Stamping ${WORK} (and NOT ${PLUGIN_DIR}) is the point: this tree is generated, throwaway, and never
 # committed, so the release form reaches the published branch without dirtying the calling checkout.
-# ⛔ Node-20-safe entry (`stamp-version.mjs`): CI's publish workflow need not run the `.ts` runtime, and
-# the artifact should not depend on which Node happened to invoke the publisher.
-echo "[publish-dist-branch] stamping the assembled tree with the build-version (branch-aware) ..."
-STAMP_ENTRY="${REPO_ROOT}/scripts/stamp-version.mjs"
-if [ ! -f "${STAMP_ENTRY}" ]; then
-  echo "ERROR: the build-mode version stamper is missing: ${STAMP_ENTRY}" >&2
-  echo "       Refusing to publish without it: the published branch would carry a development version." >&2
-  exit 1
-fi
-node "${STAMP_ENTRY}" --mode build --root "${WORK}" --git-root "${REPO_ROOT}"
+# ⛔ Node-20-safe entry (`stamp-version.mjs`, not the `.ts` source): the artifact must not depend on
+# which Node happened to invoke the publisher. A missing entry makes `node` exit non-zero ⇒ `set -e`
+# aborts before anything is committed or pushed (fail-closed), so no explicit check is needed here.
+node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}"
 
 # ── AC-263: the dist reference-closure gate for THIS channel — and it must ABORT, not warn ────────
 # The npm-tarball channel has had an equivalent assertion since gap-plugin-dist-entry-derivation-
