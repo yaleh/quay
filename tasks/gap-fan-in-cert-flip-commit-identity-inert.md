@@ -2,7 +2,7 @@
 id: gap-fan-in-cert-flip-commit-identity-inert
 title: suite 证书闸对 driver 自己的 flip-done 提交按【身份】判惰性，不再交给依赖 registry
   的分类器——外部项目每个任务白烧 3～6 次全量 suite 的根因修复
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -141,3 +141,21 @@ merge develop → B=$(git rev-parse develop) → 跑 scoped 门 → A=$(git rev-
 本轮 `B == A == 49686a7ab88b9e81d654af20211089f3de4e49a2`，门 `EXIT=0 / tests 139 / pass 139 / fail 0`，**缓存记的就是这个 sha**。
 **⚠️ 本轮为什么需要收敛**：本任务**自己的 `task_write`** 会推动 develop —— `49686a7ab` 正是「为本任务的 4 个未修兄弟立案」那条 task_write 提交，它落进 develop 之后，第一次门（对着 `45f483105…`）就作废了。
 ⇒ **「勾完 AC / 改完任务体之后必须再 merge + 再跑门」这一步不可省**；判据是上面那个 `B == A`，⛔ 不是「merge 命令 exit 0」。
+
+### E9 续做轮（2026-09-20，worker 重入）的收敛读数 —— 覆盖 E8 的 sha，⛔ 不是 E8 被推翻
+
+上一轮结束于 `step=unknown-step`（孤儿 worker 退出，退出码不可观测），**代码与 AC 当时已完整**；本轮只补跑收尾链，⛔ 未重做任何实现：
+
+```
+git status                      ⇒ 无 UU / 无未合并路径
+git merge --no-edit develop     ⇒ 干净（无冲突；'ort' 策略）
+B = A = 885728c6e507e1f96a6dc08ec2ed8312d763cd7f    ← 门跑完 develop 未动，1 轮即收敛
+scoped 门                       ⇒ EXIT=0 / tests 139 / pass 139 / fail 0
+写缓存 --develop-sha 885728c6e… ⇒ {"event":"scoped-gate-cache-written","developSha":"885728c6e507e1f96a6dc08ec2ed8312d763cd7f"}
+```
+
+⚠️ **与 E8 的关系，读法必须写清楚（否则会被读成假命中）**：E8 记的 `49686a7ab…` 是**上一轮**实际验证过的 tip，**当时**缓存记的正是它；本轮 develop 已前进（`49686a7ab…` → `885728c6e…`，本分支已 merge 至该 tip），缓存被**重新写入**为本轮的 `885728c6e…`。⇒ 缓存**当前值 == 本门本轮实际验证过的 tip**，与 E8 的纪律是**同一条**；⛔ 不要把「E8 写 `49686a7ab`、缓存现在写 `885728c6e`」读成假命中——那是两次各自正确的收尾。
+
+**本轮逐行复核（E7 的读数在本轮复现）**：`:314` 冻结臂 AC3 ✔；`:384-388` 本任务六条（AC1① / AC2 负控制 / AC1②③④⑤ / AC1⑥ / AC3 真实对象）全 ✔。
+
+**DoD「字节未变」本轮复核**：`git diff develop...HEAD -- packages/quay/src/fan-in/ff-merge.ts | grep -iE 'retry|needs-human|cap|attempt'` **只命中注释行**（`// Measured … retried up to the cap` / `// attempt in projects whose root…`），重试上限与 needs-human 逻辑**零改动**。
