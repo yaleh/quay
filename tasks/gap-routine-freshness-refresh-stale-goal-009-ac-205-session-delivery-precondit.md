@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-205-session-delivery-precond
 title: "freshness-refresh: AC-205's newest delivery evidence is the same aged
   build_sha 2d3a6fa3 (2026-09-18T04:20:31Z, carrier line 256), d=161 leaving
   margin 39 (0.195) under the 0.2808 "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
