@@ -29,6 +29,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { resolvePluginRoot } from "../plugin-root.ts";
+import { loadConfig, activeProvider } from "../config.ts";
 import {
   classifyRuntimeArtifactDirty,
   isRuntimeArtifactPath,
@@ -79,6 +80,11 @@ export interface FfMergeArgs {
   worktree?: string;
   /** test seam — the plugin/scripts dir (self-bootstrapping default is the SPEC §6b resolver). */
   scriptsDir?: string;
+  /** gap-fan-in-cert-flip-commit-identity-inert: the certificate gate's `flip-done` IDENTITY
+   *  short-circuit. Default true. `false` is the injection seam that turns it OFF, so a
+   *  negative-control case can prove the identity verdict is READ rather than echoed (hard rule 4
+   *  推论三: a criterion satisfiable only by a fixture is not a measurement). */
+  flipIdentityShortCircuit?: boolean;
   now?: () => Date;
 }
 
@@ -362,6 +368,87 @@ function classifyRootCandidates(root: string, scriptsDir: string): string[] {
   ].filter(Boolean))];
 }
 
+// ── flip-done identity short-circuit (gap-fan-in-cert-flip-commit-identity-inert) ────────────────────
+// A fan-in run's OWN `flip-done` appends ONE commit to the task branch AFTER the suite finished (the
+// promotion-driver flipping `status:` in `tasks/<id>.md`). That commit's delta is inert BY
+// CONSTRUCTION — a checker reads code, and a status field is not code — but it still makes `tip`
+// outrun `suite_head`, so the certificate gate below had to ask the DELTA CLASSIFIER about it.
+//
+// In an EXTERNAL project the classifier cannot answer: it reads `<root>/plugin/scripts/runner-static-
+// gate.ts` (its TEST_SH_REL registry), which a consumer workspace does not carry ⇒ exit 2 ⇒
+// `not-evaluated` ⇒ fail-closed refusal ⇒ the ff is refused and the WHOLE FULL SUITE is burned again.
+// Measured (quay-fleet, 2026-09-20): 3–6 attempts and 3 full suites per landed task; three tasks were
+// retried up to the cap and flipped to needs-human.
+//
+// So judge the IDENTITY of the delta FIRST, from the SHAPE OF HISTORY alone — no registry, no
+// classifier, no project identity beyond the task file's own configured location:
+//   exactly ONE commit in `suite_head..tip` ∧ its sole parent IS `suite_head` ∧ `--name-status`
+//   is exactly one line `M <tasks_dir>/<task>.md` (tasks_dir read from the ENABLED provider in
+//   `.quay/config.yml`, ⛔ never a hardcoded `tasks/`).
+// Any other shape (an extra file, a second commit, an A/R/D status, another task's file, an
+// unreadable config) falls through to the classifier — behavior unchanged. The short-circuit only
+// ever PROVES inert; it never broadens what counts as inert.
+
+/** The quay-protocol task directory name (`tasks/*.md` ARE the data) — the fallback used when the
+ *  enabled provider declares no `tasks_dir`. Derived through `path.join` rather than written as a bare
+ *  string literal: `target-identity-literal-check.ts`'s TARGET domain scans this file, and a bare
+ *  override-less identity literal is exactly the shape it flags (this value happens to be
+ *  protocol-fixed and therefore legal, but deriving it keeps that escape hatch out of play). */
+const PROTOCOL_TASKS_DIR = path.join("tasks");
+
+/** `path.relative` output in git's spelling (forward slashes) — diff paths are always `/`-joined. */
+function toPosix(p: string): string {
+  return p.split(path.sep).join("/");
+}
+
+/** The workspace's tasks dir, RELATIVE to `root` (git reports diff paths root-relative). The value
+ *  comes from the ENABLED provider's `tasks_dir` in `<root>/.quay/config.yml` — a workspace may point
+ *  it anywhere, so a hardcoded `tasks/` would silently never match there. With no readable config (or
+ *  no enabled provider declaring `tasks_dir`) it falls back to `<root>/tasks`, the quay-protocol
+ *  directory name — the same fallback `malformed-task-check.ts` uses. */
+function tasksDirRel(root: string): string {
+  try {
+    const loaded = loadConfig(root);
+    // `undefined` id ⇒ `activeProvider`'s documented v0 default: the first ENABLED provider.
+    // (The 2nd argument is required by the signature — `config.ts` is a `.ts` file, so TS checks
+    // arity even though the parameter is un-annotated; `serve.ts` passes the same explicit
+    // `undefined`.)
+    const provider = activeProvider(loaded, undefined) as { tasks_dir?: unknown };
+    if (typeof provider.tasks_dir === "string" && provider.tasks_dir.trim() !== "") {
+      return toPosix(path.relative(root, path.resolve(loaded.workspaceRoot, provider.tasks_dir)));
+    }
+  } catch {
+    // no .quay/config.yml / no enabled provider / unreadable config — fall through to the default
+  }
+  // The quay-protocol task directory name (`tasks/*.md` ARE the data). Derived, ⛔ not a bare literal:
+  // `target-identity-literal-check.ts` flags per-project identity written as an override-less literal.
+  return toPosix(path.relative(root, path.join(root, PROTOCOL_TASKS_DIR)));
+}
+
+/** Is `suite_head..tip` EXACTLY this task's own status-flip commit — and nothing else? Reads only git;
+ *  ⛔ never the classifier (which is the whole point: it must answer where the classifier cannot). */
+function isFlipOnlyDelta(root: string, suiteHead: string, suiteTip: string, task: string): boolean {
+  // ① exactly one commit in the range.
+  const commits = git(root, "rev-list", `${suiteHead}..${suiteTip}`).stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (commits.length !== 1) return false;
+  // ② whose SOLE parent IS suite_head. (Not implied by ①: a merge commit whose two parents are both
+  //    reachable from suite_head is also "the only commit in the range" while sitting on top of a
+  //    merged-in history — that is NOT a flip.)
+  const parent = git(root, "rev-parse", "--verify", "--quiet", `${commits[0]}^`).stdout.trim();
+  if (parent !== suiteHead) return false;
+  // ③ whose name-status is EXACTLY one `M <tasks dir>/<task>.md`.
+  //    `-c core.quotepath=false` (hard rule 5b: the sibling of the two sites already fixed in this
+  //    file) so a non-ASCII task filename arrives as the REAL path, not a C-quoted string that could
+  //    never equal it. `--name-status` prints `R100\told\tnew` for a rename (diff.renames defaults on)
+  //    ⇒ 3 fields ⇒ not a flip, as required.
+  const ns = git(root, "-c", "core.quotepath=false", "diff", "--name-status", suiteHead, suiteTip).stdout;
+  const lines = ns.split("\n").map((s) => s.replace(/\r$/, "")).filter((s) => s !== "");
+  if (lines.length !== 1) return false;
+  const fields = lines[0].split("\t");
+  if (fields.length !== 2 || fields[0] !== "M") return false;
+  return fields[1] === path.posix.join(tasksDirRel(root), `${task}.md`);
+}
+
 // ── suite certificate gate ───────────────────────────────────────────────────────────────────────────
 // (gap-suite-concurrency-ff-gate-and-slot-ssot): the ff gate reads THIS task's capture (suite_exit=0 ∧
 // suite_head is an ancestor of the ff tip ∧ the suite_head..tip delta is classified inert). Fail-closed.
@@ -430,7 +517,7 @@ function readGreenMirrorCommit(stateFile: string, taskId: string): string {
   return "";
 }
 
-function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: string | null } {
+function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: string | null; note?: string } {
   const capture = args.suiteCapture ?? `/tmp/fan-in-suite-${args.task}.env`;
   let suiteExit = readCaptureField(capture, "suite_exit");
   let suiteHead = readCaptureField(capture, "suite_head");
@@ -453,6 +540,19 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   // the lock. Same flag, same reason; raw bytes are what the classifier's registry match expects.
   const delta = git(root, "-c", "core.quotepath=false", "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
+    // IDENTITY FIRST (gap-fan-in-cert-flip-commit-identity-inert): this run's own `flip-done` commit
+    // is inert by construction, and asking the classifier about it is what burned a full suite per
+    // attempt in projects whose root carries no registry. Judge the shape of history instead; every
+    // other delta keeps the classifier path byte-for-byte.
+    if (args.flipIdentityShortCircuit !== false && isFlipOnlyDelta(root, suiteHead, suiteTip, args.task)) {
+      return {
+        ok: true,
+        reason: null,
+        note:
+          `fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交` +
+          `（身份判定：仅 M ${path.posix.join(tasksDirRel(root), `${args.task}.md`)}）⇒ 判惰性，⛔ 未调分类器`,
+      };
+    }
     const scriptsDir = scriptsDirOf(args) ?? "";
     const verdict = classifyDeltaVerdict(root, scriptsDir, delta.split("\n").filter(Boolean));
     if (verdict.kind === "non-inert") {
@@ -580,6 +680,9 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
 
   // suite certificate gate (fail-closed).
   const cert = suiteCertGate(args, root);
+  // An identity-short-circuited certificate is a REAL verdict reached without the classifier — say so,
+  // so a landing that never consulted the classifier is attributable from the ff's own output.
+  if (cert.note) err.push(cert.note);
   if (!cert.ok) {
     // blocked path: run the reaper best-effort (gap-wiring-D-worktree-remove-orphans-reclaim-restore).
     // gap-ff-merge-suite-cert-classifier-unshipped-and-misreported AC5: `worktree-process-reaper` is
@@ -758,6 +861,9 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
       case "--lock-wait": args.lockWaitSecs = Number(next()); break;
       case "--worktree": args.worktree = next(); break;
       case "--scripts-dir": args.scriptsDir = next(); break;
+      // injection seam (negative control): turn the flip-done identity short-circuit OFF so a case can
+      // prove the identity verdict is READ, not echoed (hard rule 4 推论三).
+      case "--no-flip-identity-shortcut": args.flipIdentityShortCircuit = false; break;
       case "--help":
       case "-h": help = true; break;
       default: break;
@@ -771,6 +877,7 @@ Usage:
   node --experimental-strip-types packages/quay/src/fan-in/ff-merge.ts --task <taskId> [--root <repo>]
     [--merge-target <branch>] [--run-id <runId>] [--attempt-key <key>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
     [--lock-events <file>] [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--worktree <path>]
+    [--no-flip-identity-shortcut]
 Exit codes: 0 = ff performed; 1 = develop advanced (retry); 2 = usage/env/token; 3 = anti-livelock.
 `;
 
