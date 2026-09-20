@@ -325,11 +325,36 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
   // source between the two installs). The byte-identity contract is NOT weakened: a laydown that
   // baked the derived test command into a product file would still differ across the two workspaces
   // even with a frozen source (the frozen copy is the same current plugin, copied once at start).
+  //
+  // ⛔ THE FREEZE MUST COVER THE CORE SOURCE THE PLUGIN READS, NOT JUST THE DIRECTORY IT LAUNCHES FROM.
+  // Since gap-arch-quay-init-sh-python-heredocs-to-native (SPEC-architecture-consolidation-ts-and-shell
+  // §5 Phase 5.1) quay-init.sh's steps are no longer python3 bodies inside the shell — it dispatches to
+  // the sibling `scripts/quay-init-steps.ts`, whose logic lives in `packages/quay/src/init.ts` and is
+  // reached through `core-src-import.ts` (static literal FIRST: `<pluginRoot>/packages/quay/src/
+  // init.ts`). Freezing only `plugin/` left the copy with no Core to read at all: every step died with
+  // ERR_MODULE_NOT_FOUND, so `has-npm-test` read as "no scripts.test", the ladder fell through every
+  // rung, and quay-init exited 2 before laying anything down — measured 2026-09-20 as the full suite's
+  // only red (`ws1 install failed: … none could be detected in /tmp/install-e2e-…`). Copy the Core
+  // source UNDER THE SAME RELATIVE SHAPE so the freeze covers what an install actually reads.
+  // The frozen Core's bare imports (`yaml`, today) resolve through a SYMLINK to the checkout's own
+  // node_modules — the same shape `installed-layout-sibling-resolvability.test.mjs` uses, and for the
+  // same reason: a test must not own a second install of the dependency tree. (Deps are not the
+  // source the freeze protects, so a symlink does not weaken it — and unlike a copy of one package,
+  // it keeps resolving if the Core ever grows a second bare import.)
+  //
+  // ⛔ WHY NOT `<frozenRoot>/plugin` + `<frozenRoot>/packages/quay/src` (the repo-tree shape): that
+  // would make `$PLUGIN_ROOT/../packages/quay/src` EXIST — the very source dir quay-init's staleness
+  // probe (`dist_stale`) keys off — and a copied source file newer than the copied bundle (cpSync does
+  // not preserve mtimes) would send BOTH parallel installs into a sync-vendor.sh auto-rebuild *into the
+  // frozen copy*. Nested inside the plugin root that path stays absent, so the probe still cannot fire.
   const frozenPlugin = makeWorkspace("install-e2e-frozenplugin-");
   fs.cpSync(PLUGIN_ROOT, frozenPlugin, { recursive: true });
+  fs.cpSync(path.join(REPO_ROOT, "packages", "quay", "src"), path.join(frozenPlugin, "packages", "quay", "src"), { recursive: true });
+  fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(frozenPlugin, "node_modules"), "dir");
 
   // The two installs are INDEPENDENT (distinct workspace / worktree root / tmux session; the frozen
-  // plugin copy is a read-only input — its source tree is absent so quay-init never rebuilds into it).
+  // plugin copy is a read-only input — `$PLUGIN_ROOT/../packages/quay/src` is absent, the source dir
+  // quay-init's staleness probe keys off, so it never rebuilds into it).
   // Run them in parallel (gap-suite-parallel-independent-installs): spawnSync blocks the event loop,
   // so the sync form can never overlap; Promise.all over two async spawns is the one place intra-test
   // concurrency actually takes effect.
