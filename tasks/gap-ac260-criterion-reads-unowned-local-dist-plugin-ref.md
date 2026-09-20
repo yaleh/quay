@@ -194,21 +194,21 @@ criteria referencing bare dist-plugin: 3
 
 ## Acceptance Criteria
 
-- [ ] **AC1 取证完整**：§Requested action 1 的全部原始输出已贴，且与本文 §一/§二读数一致（不一致 ⇒ 停并报告）。
-- [ ] **AC2 两条 criterion 已改且只改了 ref 来源**：贴 AC-260 与 AC-261 改写**前后**的完整文本（diff 形态），
+- [x] **AC1 取证完整**：§Requested action 1 的全部原始输出已贴，且与本文 §一/§二读数一致（不一致 ⇒ 停并报告）。
+- [x] **AC2 两条 criterion 已改且只改了 ref 来源**：贴 AC-260 与 AC-261 改写**前后**的完整文本（diff 形态），
       并逐条指出「断言 / 三支语义 / 零计数守卫 / exit 码一字未动」。⛔ 只贴改写后不算。
-- [ ] **AC3 负控制四臂全跑通**（每臂贴命令 + 原始输出 + exit 码）：① 渠道候选 ⇒ exit 0；② 退回裸 ref ⇒ exit 1；
+- [x] **AC3 负控制四臂全跑通**（每臂贴命令 + 原始输出 + exit 码）：① 渠道候选 ⇒ exit 0；② 退回裸 ref ⇒ exit 1；
       ③ 候选全删 ⇒ exit 1 ∧ 仪器态原因可区分（硬规则 3b）；④ 候选面上人为植入 cwd 相对前缀 ⇒ exit 1 ∧
       打出计数与前 3 条命中。⛔ 缺臂即未完成。
-- [ ] **AC4 写入门读数**：两条 criterion 均经 goal store 写面接受（或拒绝原文逐字落痕 + 处置），且
+- [x] **AC4 写入门读数**：两条 criterion 均经 goal store 写面接受（或拒绝原文逐字落痕 + 处置），且
       `criterion-failure-attribution-check.ts` 计数未增（贴前后计数）。
-- [ ] **AC5 store runner 转绿**：`goal gate AC-260` 与 `goal gate AC-261` ⇒ exit 0（各贴完整 JSON）；
+- [x] **AC5 store runner 转绿**：`goal gate AC-260` 与 `goal gate AC-261` ⇒ exit 0（各贴完整 JSON）；
       `goal check --stale-pass` ⇒ `failing: []` ∧ exit 0（贴完整 JSON）。
-- [ ] **AC6 回归守护能取假**：新增/扩展的测试在「把 ref 来源退回裸 `dist-plugin`」时**变红**，恢复后变绿；
+- [x] **AC6 回归守护能取假**：新增/扩展的测试在「把 ref 来源退回裸 `dist-plugin`」时**变红**，恢复后变绿；
       **两个读数都贴**。⛔ 只贴绿不算（恒真断言与"合格"同形）。
-- [ ] **AC7 amended 复验态已上报**：贴 `goal check --stale-pass` 原始输出，并明写 AC-260/AC-261 落在哪个桶
+- [x] **AC7 amended 复验态已上报**：贴 `goal check --stale-pass` 原始输出，并明写 AC-260/AC-261 落在哪个桶
       （取真实值，⛔ 不照抄 AC-272 的结论）。
-- [ ] **AC8 既有门不因本次改动转红**：`bash scripts/test.sh --for-task <本任务 id>` exit 0（贴读数）；
+- [x] **AC8 既有门不因本次改动转红**：`bash scripts/test.sh --for-task <本任务 id>` exit 0（贴读数）；
       若动了归属棘轮基线，贴重锚前后两个读数。
 
 ## Definition of Done
