@@ -33,15 +33,6 @@ import {
   syncDevelopToDoc,
   docBranchForkedFromDevelop,
   syncDocDevelopBidirectional,
-  NEEDS_HUMAN_CAUSE,
-  NEEDS_HUMAN_CAUSES,
-  isNeedsHumanCause,
-  classifyNeedsHumanCause,
-  readNeedsHumanCause,
-  patchNeedsHumanCauseField,
-  blockedOutsideTaskResolved,
-  FF_ESCALATIONS_REL,
-  tallyNeedsHumanCauses,
   discardedCommitsAreDisposable,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
@@ -977,132 +968,56 @@ test("C (负控制) — 无 exited-not-landed 记录 ⇒ 不追加 run_id/日志
   assert.doesNotMatch(body, /session_id：/, "C 负控制: no session_id line when no outcome record");
 });
 
-// ── needs-human 成因类三态（gap-needs-human-overloaded-two-populations-one-state）────────────────
-// `needs-human` 一个状态承载两个处理者相反的群体（人须裁决 vs worker 落不了地），翻转必须写【机械可读】
-// 成因类（needs_human_cause frontmatter 字段，三态可枚举），⛔ 非散文非布尔。AC1 三态可枚举 + 判据读结构化
-// 字段；AC2 三态双向能取假；AC3 unclassified 不与合格同形；AC4 第二类证据谓词能取假；AC5 回放由输入决定。
+// ── needs-human 成因类枚举【已退役】的回归对照（gap-retire-needs-human-cause-enumeration，2026-09-20）──
+// 此处原有 needs-human 成因类三态枚举（human-adjudication / blocked-outside-task / unclassified）、手写的
+// 「人须裁决」步骤名清单 + 分类器、以及第二类的再入队证据谓词——已整套删除。删除理由（直接量）：
+// 磁盘上带该字段的任务 37 个，取值 human-adjudication 29 / unclassified 8 / blocked-outside-task 【0】，
+// 即这套机制存在的全部理由（区分第二类并据证据谓词再入队）在生产里一次都没发生过；再入队谓词零个
+// 非测试调用者；除本文件与其实现外无任何读者。人的裁定（2026-09-20，逐字）：「needs-human 本来就不应该
+// 有『可机械再入队』的路径。」「我对靠枚举 needs_human_cause 做逻辑控制也没有太大信心 —— needs-human
+// 的原因应当是异常，枚举异常是靠不住的。」
+// 下面【不再】断言任何成因字段——改为两条回归对照：① 翻转写出的注记事实行齐全、且【不含】成因类行与
+// 成因字段（若有人把成因分类悄悄加回注记 ⇒ 红）；② 带遗留成因字段的任务仍可翻转、字段原样保留
+// （惰性遗留，⛔ 不批量改任务文件，硬规则 11b）。
 
-test("AC1 — 三态可枚举：NEEDS_HUMAN_CAUSES 恰为三值，isNeedsHumanCause 校验机械取值（⛔ 非散文非布尔）", () => {
-  assert.deepEqual(NEEDS_HUMAN_CAUSES, ["human-adjudication", "blocked-outside-task", "unclassified"], "三态枚举序固定");
-  assert.equal(new Set(NEEDS_HUMAN_CAUSES).size, 3, "三态互异");
-  for (const c of NEEDS_HUMAN_CAUSES) assert.equal(isNeedsHumanCause(c), true, `${c} 是合法取值`);
-  assert.equal(isNeedsHumanCause(true), false, "布尔不是成因类");
-  assert.equal(isNeedsHumanCause("retry-cap-exhausted"), false, "散文/旧措辞不是成因类");
-  assert.equal(isNeedsHumanCause(undefined), false, "缺值不是成因类");
-});
-
-test("AC1 (能取假) — markNeedsHuman 写机械可读成因类（ff 步 ⇒ blocked-outside-task）+ readNeedsHumanCause 读回（⛔ 无字段 ⇒ 假）", (t) => {
-  const root = makeRoot("cause-write");
+test("退役回归 — markNeedsHuman 注记事实行齐全（## Needs-Human / 阻碍原因 / 失败步判词 / run_id / 日志路径），且不含成因类行与成因字段（⛔ 加回 ⇒ 红）", (t) => {
+  const root = makeRoot("nh-retire-regression");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), JSON.stringify({
-    ts: new Date().toISOString(), task: "gap-nh", final_state: "exited-not-landed",
-    failure_reason: "task status=ready not done",
-    mechanical_fan_in: { outcome: "red", step: "ff", reason: "FF FAILED (attempt 3) — ANTI-LIVELOCK: develop keeps advancing" },
+    ts: "2026-09-01T04:57:00.000Z", task: "gap-nh", final_state: "exited-not-landed",
+    run_id: "wk-prod-1788218643", session_id: "sess-3",
+    mechanical_fan_in: { outcome: "red", step: "suite", reason: "suite red", suiteLog: "fan-in-suite-gap-nh-run.log", fanInLog: "fan-in-gap-nh-run.log" },
   }) + "\n", "utf8");
+
   const res = markNeedsHuman(root, "gap-nh", "worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）");
   assert.equal(res.ok, true);
-  assert.equal(res.cause, "blocked-outside-task", "ff 步 ⇒ 阻塞在任务之外");
-  assert.equal(readNeedsHumanCause(root, "gap-nh"), "blocked-outside-task", "结构化 frontmatter 字段读回（⛔ 正文 grep ⇒ 假）");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-nh.md"), "utf8");
+  // 事实行齐全（⛔ 缺任一 ⇒ 假）——退役删的是成因分类，⛔ 不是注记的事实面。
+  assert.match(body, /^## Needs-Human$/m, "注记段存在");
+  assert.match(body, /- 阻碍原因：worker-driver 连续 3 次/, "阻碍原因行");
+  assert.match(body, /- 失败步\/判词：step=suite: suite red/, "失败步/判词行（判词随步一起写出，非模板句）");
+  assert.match(body, /- run_id：wk-prod-1788218643/, "run_id 行");
+  assert.match(body, /- suite 日志：.*\.quay\/fan-in-suite-gap-nh-run\.log/, "suite 日志路径行");
+  assert.match(body, /- fan-in 日志：.*\.quay\/fan-in-gap-nh-run\.log/, "fan-in 日志路径行");
+  // 退役面：⛔ 成因类行与成因字段都不得再出现（加回 ⇒ 红）。这是本任务的核心回归对照。
+  assert.doesNotMatch(body, /成因类/, "⛔ 注记不得再有「成因类」行");
+  assert.doesNotMatch(body, /needs_human_cause/, "⛔ 任务体不得再写成因字段");
+  assert.equal("cause" in res, false, "⛔ markNeedsHuman 返回值不再带 cause");
+  assert.equal(readTaskStatus(root, "gap-nh"), "needs-human", "status 仍照常翻转 ready→needs-human");
 });
 
-test("AC1 (负控制) — 无 exited-not-landed 尝试（promotion 连续修满）⇒ human-adjudication（⛔ unclassified ⇒ 假）", (t) => {
-  const root = makeRoot("cause-promo");
+test("退役回归(惰性遗留) — 已带成因字段的任务仍可翻转，既有字段原样保留（⛔ 不拒写、⛔ 不批量改任务文件）", (t) => {
+  const root = makeRoot("nh-legacy-field");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: todo\n---");
-  const res = markNeedsHuman(root, "gap-nh", "连续修满 3 次仍不合格（闸在重验证后仍判不合格）");
-  assert.equal(res.cause, "human-adjudication", "任务自身缺陷未解 ⇒ 人须裁决（保持现有语义）");
-  assert.equal(readNeedsHumanCause(root, "gap-nh"), "human-adjudication");
-});
-
-test("AC1 (判据读结构化字段，⛔ grep 正文) — readNeedsHumanCause 只读 frontmatter 字段，正文散文不算命中", (t) => {
-  const root = makeRoot("cause-read");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(root, "tasks", "gap-x.md"),
-    "---\nid: gap-x\nstatus: needs-human\n---\n\n## Needs-Human\n\n成因是 blocked-outside-task（散文正文）\n", "utf8");
-  assert.equal(readNeedsHumanCause(root, "gap-x"), null, "正文散文不算命中（⛔ grep 正文 ⇒ 假）");
-  fs.writeFileSync(path.join(root, "tasks", "gap-y.md"),
-    "---\nid: gap-y\nstatus: needs-human\nneeds_human_cause: blocked-outside-task\n---\n\nbody\n", "utf8");
-  assert.equal(readNeedsHumanCause(root, "gap-y"), "blocked-outside-task", "读结构化 frontmatter 字段");
-});
-
-test("AC1 — patchNeedsHumanCauseField：无字段插入 status 行后；已有字段就地换值；无 status 行 fail-closed", () => {
-  const p1 = patchNeedsHumanCauseField("id: x\nstatus: ready\n", "blocked-outside-task");
-  assert.equal(p1.ok, true);
-  assert.equal(p1.fm, "id: x\nstatus: ready\nneeds_human_cause: blocked-outside-task\n");
-  const p2 = patchNeedsHumanCauseField("status: needs-human\nneeds_human_cause: unclassified\n", "human-adjudication");
-  assert.equal(p2.ok, true);
-  assert.equal(p2.fm, "status: needs-human\nneeds_human_cause: human-adjudication\n");
-  const p3 = patchNeedsHumanCauseField("id: x\n", "human-adjudication");
-  assert.equal(p3.ok, false, "无 status 行 ⇒ fail-closed");
-});
-
-test("AC2/AC3 — classifyNeedsHumanCause 三态双向能取假 + unclassified 独立取值（⛔ 落成前两者之一 ⇒ 假）", () => {
-  const C = NEEDS_HUMAN_CAUSE;
-  assert.equal(classifyNeedsHumanCause("ff", null), C.BLOCKED_OUTSIDE_TASK, "ff-escalation 判词 ⇒ 阻塞在任务之外");
-  assert.equal(classifyNeedsHumanCause("ac-gate", null), C.HUMAN_ADJUDICATION, "任务自身 AC 不达标 ⇒ 人须裁决");
-  assert.equal(classifyNeedsHumanCause("ac-precheck", null), C.HUMAN_ADJUDICATION, "AC 未全勾 ⇒ 人须裁决");
-  assert.equal(classifyNeedsHumanCause("suite", null), C.HUMAN_ADJUDICATION, "任务自身缺陷（suite 红）⇒ 人须裁决（保持现有语义）");
-  assert.equal(classifyNeedsHumanCause(null, null), C.UNCLASSIFIED, "解析不出判词 ⇒ 未能分类");
-  assert.equal(classifyNeedsHumanCause("some-unknown-step", null), C.UNCLASSIFIED, "未知步 ⇒ 未能分类");
-  // 三态取值互异（AC3）
-  assert.equal(new Set([C.HUMAN_ADJUDICATION, C.BLOCKED_OUTSIDE_TASK, C.UNCLASSIFIED]).size, 3, "三态取值 pairwise distinct");
-  assert.notEqual(C.UNCLASSIFIED, C.HUMAN_ADJUDICATION, "unclassified ≠ 人须裁决");
-  assert.notEqual(C.UNCLASSIFIED, C.BLOCKED_OUTSIDE_TASK, "unclassified ≠ 阻塞在任务之外");
-  assert.notEqual(classifyNeedsHumanCause("ff", null), C.HUMAN_ADJUDICATION, "ff 不得误归人须裁决");
-});
-
-test("AC3 — unclassified 在读数上与「缺字段/另两态」可区分（硬规则 3b：⛔ 与合格同形 ⇒ 假）", (t) => {
-  const root = makeRoot("cause-unclass");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(root, "tasks", "gap-u.md"), "---\nid: gap-u\nstatus: needs-human\nneeds_human_cause: unclassified\n---\n\nbody\n", "utf8");
-  fs.writeFileSync(path.join(root, "tasks", "gap-absent.md"), "---\nid: gap-absent\nstatus: needs-human\n---\n\nbody\n", "utf8");
-  assert.equal(readNeedsHumanCause(root, "gap-u"), "unclassified", "unclassified 是可读取的独立取值");
-  assert.equal(readNeedsHumanCause(root, "gap-absent"), null, "缺字段 ⇒ null（⛔ 与 unclassified 同形 ⇒ 假）");
-  assert.notEqual(readNeedsHumanCause(root, "gap-absent"), "unclassified", "null ≠ unclassified");
-});
-
-test("AC4 (能取假) — blockedOutsideTaskResolved：阻塞证据仍在 ⇒ false；证据消失 ⇒ true；无记录 ⇒ null", (t) => {
-  const root = makeGitRoot("cause-reenqueue");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  git(root, "branch", "-M", "develop");
-  writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
-  git(root, "add", "--", "tasks/gap-nh.md");
-  git(root, "commit", "-q", "-m", "baseline");
-  const baseline = git(root, "rev-parse", "HEAD").trim();
-  // develop 前进（该提交 = 阻塞对象 developHead）。
-  fs.writeFileSync(path.join(root, "other.md"), "x\n", "utf8");
-  git(root, "add", "--", "other.md");
-  git(root, "commit", "-q", "-m", "develop advances");
-  const developHead = git(root, "rev-parse", "HEAD").trim();
-  // 任务分支从 baseline（develop 前进之前）分出 ⇒ developHead 尚未并入。
-  git(root, "checkout", "-q", "-b", "task/gap-nh", baseline);
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(root, FF_ESCALATIONS_REL), JSON.stringify({
-    event: "ff-escalation", taskId: "gap-nh", developHead, ts: new Date().toISOString(),
-  }) + "\n", "utf8");
-
-  assert.equal(blockedOutsideTaskResolved(root, "gap-nh"), false, "阻塞证据仍在 ⇒ 不再入队（false）");
-  assert.equal(blockedOutsideTaskResolved(root, "gap-other"), null, "无 escalation 记录 ⇒ null（缺值=未查，⛔ 与 true 区分）");
-
-  // 阻塞解除的证据：developHead 已并入任务分支。
-  git(root, "merge", "--no-edit", "develop");
-  assert.equal(blockedOutsideTaskResolved(root, "gap-nh"), true, "阻塞证据消失 ⇒ 可再入队（true）");
-});
-
-test("AC5 — tallyNeedsHumanCauses 纯函数：各态条数由输入决定（⛔ 硬编码 ⇒ 假）", () => {
-  const t1 = tallyNeedsHumanCauses([
-    { step: "ff" }, { step: "ff" }, { step: "ac-gate" }, { step: null },
-  ]);
-  assert.equal(t1["blocked-outside-task"], 2);
-  assert.equal(t1["human-adjudication"], 1);
-  assert.equal(t1["unclassified"], 1);
-  // 换输入 ⇒ human-adjudication 计数变（非硬编码）。
-  const t2 = tallyNeedsHumanCauses([{ step: "ff" }, { step: null }]);
-  assert.equal(t2["human-adjudication"], 0, "喂无 ac-gate 的输入 ⇒ 人须裁决=0（⛔ 硬编码 ⇒ 假）");
-  assert.equal(t2["blocked-outside-task"], 1);
-  assert.equal(t2["unclassified"], 1);
+  // 磁盘上真实存在的 37 个遗留样本之一（如 tasks/gap-ac281-*.md 带 needs_human_cause: unclassified）。
+  writeTask(root, "gap-legacy", "---\nid: gap-legacy\nstatus: ready\nneeds_human_cause: human-adjudication\n---");
+  const res = markNeedsHuman(root, "gap-legacy", "带遗留成因字段的任务仍应可翻转");
+  assert.equal(res.ok, true, "⛔ 不因遗留字段拒写（fail-closed 只针对 missing / 无 frontmatter / 非 todo·ready）");
+  const body = fs.readFileSync(path.join(root, "tasks", "gap-legacy.md"), "utf8");
+  assert.match(body, /^needs_human_cause: human-adjudication$/m, "既有遗留字段原样保留（⛔ 不删不改——惰性遗留）");
+  assert.match(body, /^status: needs-human$/m, "status 已翻转");
 });
 
 // ── 终局解的可弃性判定（gap-develop-sync-reset-hard-destroys-third-party-project-tree）────────────────
