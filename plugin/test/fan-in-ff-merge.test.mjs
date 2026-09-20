@@ -1806,3 +1806,320 @@ test("runtime-artifacts pure — pattern compilation, path matching, and the fai
   assert.equal(hits[0].pattern, "**/.quay-parse-cache.json");
   assert.equal(hits[1].area, "milestones/fast-mode-telemetry/*.json");
 });
+
+// ── flip-done identity short-circuit (gap-fan-in-cert-flip-commit-identity-inert) ────────────────────
+// A fan-in run's OWN `flip-done` appends ONE commit to the task branch AFTER the suite finished (the
+// promotion-driver flipping `status:` in `tasks/<id>.md`). That commit's delta is inert BY
+// CONSTRUCTION, but it makes `tip` outrun `suite_head`, so the certificate gate had to ask the DELTA
+// CLASSIFIER. In an EXTERNAL project the classifier cannot answer — it reads
+// `<root>/plugin/scripts/runner-static-gate.ts`, which a consumer workspace does not carry ⇒ exit 2 ⇒
+// NOT-EVALUATED ⇒ fail-closed refusal ⇒ the WHOLE FULL SUITE is burned again (measured in quay-fleet:
+// 3–6 attempts and 3 full suites per landed task; three tasks flipped to needs-human).
+//
+// The gate now judges the delta's IDENTITY first, from the SHAPE OF HISTORY alone: exactly one commit
+// in `suite_head..tip`, its sole parent IS `suite_head`, and `--name-status` is exactly one line
+// `M <tasks_dir>/<task>.md`. Every other shape falls through to the classifier, unchanged.
+//
+// The single dimension each case varies is the SHAPE. The classifier is a RECORDING SHIM: it appends
+// to a marker file and yields no verdict (exit 2), so "the classifier was not consulted" is an
+// observed fact, not an inference — and each fall-back case proves the shim really is reachable
+// (a marker that is merely never written would also be produced by a case that never got that far).
+
+/** The classifier as a RECORDING shim: it note every invocation and yields NO verdict (exit 2 ⇒
+ *  not-evaluated). `calls()` is the "was the classifier consulted?" reading. */
+function recordingClassifier(tag) {
+  const scriptsDir = makeTmp(`reccls-${tag}`);
+  const markerDir = makeTmp(`recmark-${tag}`);
+  const marker = path.join(markerDir, "calls.log");
+  fs.mkdirSync(path.join(scriptsDir, "dist"), { recursive: true });
+  fs.writeFileSync(
+    path.join(scriptsDir, "dist", "select-static-checks-for-touches.js"),
+    `import fs from "node:fs";\n` +
+      `fs.appendFileSync(${JSON.stringify(marker)}, "called\\n");\n` +
+      `process.stderr.write("recording-classifier: no verdict (test shim)\\n");\n` +
+      `process.exit(2);\n`,
+    "utf8",
+  );
+  return {
+    scriptsDir,
+    markerDir,
+    calls: () => (fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0),
+  };
+}
+
+/** The classifier in its SHIPPED form (a `dist/<name>.js` shim delegating to this repo's REAL
+ *  classifier) inside a scripts dir whose every candidate root is REGISTRY-FREE — the EXTERNAL-project
+ *  condition. ⛔ No registry is planted anywhere: that absence IS the fixture's premise, and the pre-fix
+ *  reading below asserts it rather than assuming it. */
+function externalScriptsDir(tag) {
+  const scriptsDir = makeTmp(`extcls-${tag}`);
+  fs.mkdirSync(path.join(scriptsDir, "dist"), { recursive: true });
+  writeClassifierShim(path.join(scriptsDir, "dist"));
+  return scriptsDir;
+}
+
+/** A REAL `flip-done`-shaped history on `task/<id>`: the task file already exists at the branch point
+ *  (status todo), and ONE commit on top flips its status — an `M`, exactly the promotion-driver's
+ *  post-suite commit. Leaves the repo on develop. Returns `{ suiteHead, tip }`.
+ *
+ *  `opts` varies the shape (the single dimension each case pins):
+ *    `devFiles`     — paths committed on develop BEFORE the branch (so they exist at suiteHead, and a
+ *                     flip of them is an `M`); default `[tasks/<id>.md]`.
+ *    `relPath`      — the file the flip commit touches; default the task's own file.
+ *    `mode`         — "modify" (default) | "add" | "delete" | "rename".
+ *    `extraFiles`   — `[{ path, content }]` committed IN THE SAME commit.
+ *    `extraCommits` — further commits appended after the flip. */
+function makeFlipBranch(dir, taskId, opts = {}) {
+  const own = path.posix.join("tasks", `${taskId}.md`);
+  const mode = opts.mode ?? "modify";
+  const devFiles = opts.devFiles ?? (mode === "add" ? [] : [own]);
+  for (const rel of devFiles) {
+    const abs = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, taskFileBody(path.basename(rel, ".md"), "todo"), "utf8");
+  }
+  if (devFiles.length) {
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", `develop: ${devFiles.join(" ")}`);
+  }
+  const suiteHead = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+
+  gitCmd(dir, "checkout", "-q", "-b", `task/${taskId}`);
+  const rel = opts.relPath ?? own;
+  const abs = path.join(dir, rel);
+  if (mode === "delete") {
+    fs.rmSync(abs);
+  } else if (mode === "rename") {
+    fs.renameSync(abs, path.join(dir, "tasks", `${taskId}-renamed.md`));
+  } else {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, taskFileBody(taskId, "ready"), "utf8");
+  }
+  for (const f of opts.extraFiles ?? []) {
+    fs.mkdirSync(path.dirname(path.join(dir, f.path)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f.path), f.content ?? "delta\n", "utf8");
+  }
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", `promotion-driver 翻转 ${taskId}`);
+  for (let i = 0; i < (opts.extraCommits ?? 0); i++) {
+    fs.writeFileSync(path.join(dir, `extra-${i}.txt`), "extra\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", `extra ${i}`);
+  }
+  const tip = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+  gitCmd(dir, "checkout", "-q", "develop");
+  return { suiteHead, tip };
+}
+
+/** Write `.quay/config.yml` declaring a native provider whose `tasks_dir` is `tasksDir`.
+ *  `.quay/` is gitignored by `initRepo`, so it never shows up in the clean-tree check. */
+function writeWorkspaceConfig(dir, tasksDir) {
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".quay", "config.yml"),
+    `providers:\n  native:\n    enabled: true\n    path: ./tasks\n    tasks_dir: "${tasksDir}"\n`,
+    "utf8",
+  );
+}
+
+/** Assert a case's delta really has the shape the case claims (fixture premise, ⛔ not assumed). */
+function nameStatusOf(dir, suiteHead, tip) {
+  return gitCmd(dir, "-c", "core.quotepath=false", "diff", "--name-status", suiteHead, tip).stdout.trim();
+}
+
+test("gap-fan-in-cert-flip-commit-identity-inert AC1① — a single flip-only commit is INERT and the classifier is NOT consulted (the ff LANDS)", () => {
+  const dir = makeTmp("idn1");
+  const st = stateDir("idn1");
+  const cls = recordingClassifier("idn1");
+  try {
+    initRepo(dir);
+    const { suiteHead, tip } = makeFlipBranch(dir, "idn-1");
+    // Premise: the shape under test really is "one commit, one `M <task file>`".
+    assert.equal(nameStatusOf(dir, suiteHead, tip), "M\ttasks/idn-1.md", "fixture premise: the flip commit is a single `M` of the task's own file");
+    assert.equal(gitCmd(dir, "rev-list", "--count", `${suiteHead}..${tip}`).stdout.trim(), "1", "fixture premise: exactly one commit");
+
+    const cap = ["--suite-capture", writeSuiteCapture(st, "idn-1", suiteHead)];
+    const r = runMerge(["--task", "idn-1", "--root", dir, "--scripts-dir", cls.scriptsDir, ...cap]);
+    assert.equal(r.status, 0, `a flip-only delta must be judged inert and land WITHOUT the classifier:\n${r.stdout}${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+    // THE assertion this AC is about: the classifier was never invoked. Its shim records every call
+    // and yields no verdict, so had it run the gate would have read NOT-EVALUATED and refused.
+    assert.equal(cls.calls(), 0, `the classifier MUST NOT be consulted for a flip-only delta (recorded ${cls.calls()} call(s))`);
+    assert.match(r.stderr, /判惰性，⛔ 未调分类器/, `the landing must be attributable to the identity verdict:\n${r.stderr}`);
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(cls.scriptsDir); cleanup(cls.markerDir);
+  }
+});
+
+test("gap-fan-in-cert-flip-commit-identity-inert AC2 (negative control) — the SAME fixture with the identity short-circuit OFF is refused NOT-EVALUATED (the verdict is READ, not echoed)", () => {
+  const dir = makeTmp("idn1neg");
+  const st = stateDir("idn1neg");
+  const cls = recordingClassifier("idn1neg");
+  try {
+    initRepo(dir);
+    const { suiteHead, tip } = makeFlipBranch(dir, "idn-1n");
+    const cap = ["--suite-capture", writeSuiteCapture(st, "idn-1n", suiteHead)];
+    // Single variable = the injection seam. With the short-circuit off this is EXACTLY the pre-fix
+    // reading: the shim is reachable, answers nothing, and the certificate is refused.
+    const r = runMerge(["--task", "idn-1n", "--root", dir, "--scripts-dir", cls.scriptsDir, "--no-flip-identity-shortcut", ...cap]);
+    assert.equal(r.status, 2, `with the seam off the flip-only delta must be refused (the pre-fix behavior):\n${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /NOT-EVALUATED/, `the refusal carries the distinct not-evaluated token:\n${r.stderr}`);
+    assert.ok(cls.calls() > 0, "with the seam off the classifier IS consulted — ⛔ otherwise case AC1①'s zero-call reading would be vacuous");
+    assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop must NOT have advanced");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(cls.scriptsDir); cleanup(cls.markerDir);
+  }
+});
+
+test("gap-fan-in-cert-flip-commit-identity-inert AC1②③④⑤ — every OTHER delta shape falls back to the classifier (it only ever PROVES inert)", () => {
+  // Each entry varies ONE dimension of the shape. `expectStatus` is always 2: the recording shim
+  // yields no verdict, so a fall-back is observable as NOT-EVALUATED + a NON-ZERO call count.
+  const cases = [
+    { name: "② same commit ALSO touches one more file", taskId: "idn-2", opts: { extraFiles: [{ path: "src/app.ts" }] } },
+    { name: "③ a SECOND commit on top of the flip", taskId: "idn-3", opts: { extraCommits: 1 } },
+    { name: "④ status A (the task file is added by the flip, not modified)", taskId: "idn-4a", opts: { mode: "add" } },
+    { name: "④ status D (the task file is deleted by the flip)", taskId: "idn-4d", opts: { mode: "delete" } },
+    { name: "④ status R (the task file is renamed by the flip)", taskId: "idn-4r", opts: { mode: "rename" } },
+    {
+      name: "⑤ a DIFFERENT task's file is flipped",
+      taskId: "idn-5",
+      opts: { devFiles: ["tasks/idn-5.md", "tasks/other-task.md"], relPath: "tasks/other-task.md" },
+    },
+  ];
+  for (const c of cases) {
+    const dir = makeTmp(`idn-${c.taskId}`);
+    const st = stateDir(`idn-${c.taskId}`);
+    const cls = recordingClassifier(c.taskId);
+    try {
+      initRepo(dir);
+      const { suiteHead, tip } = makeFlipBranch(dir, c.taskId, c.opts);
+      const ns = nameStatusOf(dir, suiteHead, tip);
+      // Premise per case: the delta is NOT the single-`M`-own-file shape (⛔ otherwise the case would
+      // be measuring case ① and the fall-back assertion would be unsatisfiable by construction).
+      const isFlipOnlyShape = ns === `M\ttasks/${c.taskId}.md`;
+      assert.ok(!isFlipOnlyShape, `${c.name}: fixture premise — the delta must NOT be the flip-only shape, got ${JSON.stringify(ns)}`);
+
+      const cap = ["--suite-capture", writeSuiteCapture(st, c.taskId, suiteHead)];
+      const r = runMerge(["--task", c.taskId, "--root", dir, "--scripts-dir", cls.scriptsDir, ...cap]);
+      assert.equal(r.status, 2, `${c.name}: must fall back to the classifier and be refused:\n${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /NOT-EVALUATED/, `${c.name}: the reading is the classifier's (not-evaluated), not an inert verdict:\n${r.stderr}`);
+      assert.ok(!/未调分类器/.test(r.stderr), `${c.name}: ⛔ the identity verdict must NOT have been claimed:\n${r.stderr}`);
+      assert.ok(cls.calls() > 0, `${c.name}: the classifier IS consulted on this shape (⛔ a zero call count here would mean the case never reached the gate)`);
+      assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, `${c.name}: develop must NOT have advanced`);
+    } finally {
+      cleanup(dir); cleanup(st); cleanup(cls.scriptsDir); cleanup(cls.markerDir);
+    }
+  }
+});
+
+test("gap-fan-in-cert-flip-commit-identity-inert AC1⑥ — the task file is located by the CONFIGURED tasks_dir, ⛔ not a hardcoded `tasks/`", () => {
+  // (a) POSITIVE: config points tasks_dir at `todo-list/`, and the flip touches `todo-list/<id>.md`
+  //     ⇒ recognised as the identity shape (inert) even though it is NOT under `tasks/`.
+  {
+    const dir = makeTmp("idn6a");
+    const st = stateDir("idn6a");
+    const cls = recordingClassifier("idn6a");
+    try {
+      initRepo(dir);
+      writeWorkspaceConfig(dir, "./todo-list");
+      const rel = "todo-list/idn-6.md";
+      const { suiteHead, tip } = makeFlipBranch(dir, "idn-6", { devFiles: [rel], relPath: rel });
+      assert.equal(nameStatusOf(dir, suiteHead, tip), `M\t${rel}`, "fixture premise: the flip is a single M under the CONFIGURED dir");
+      const cap = ["--suite-capture", writeSuiteCapture(st, "idn-6", suiteHead)];
+      const r = runMerge(["--task", "idn-6", "--root", dir, "--scripts-dir", cls.scriptsDir, ...cap]);
+      assert.equal(r.status, 0, `a flip under the configured tasks_dir must be judged inert:\n${r.stdout}${r.stderr}`);
+      assert.equal(cls.calls(), 0, "the classifier is not consulted");
+      assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded");
+    } finally {
+      cleanup(dir); cleanup(st); cleanup(cls.scriptsDir); cleanup(cls.markerDir);
+    }
+  }
+
+  // (b) NEGATIVE, the other direction — SAME config (`todo-list/`), but the flip touches
+  //     `tasks/<id>.md`. It must NOT be recognised: the configured value is READ, never assumed. A
+  //     hardcoded `tasks/` would call this inert and land it; the config-driven judge refuses.
+  {
+    const dir = makeTmp("idn6b");
+    const st = stateDir("idn6b");
+    const cls = recordingClassifier("idn6b");
+    try {
+      initRepo(dir);
+      writeWorkspaceConfig(dir, "./todo-list");
+      const { suiteHead, tip } = makeFlipBranch(dir, "idn-6b"); // touches tasks/idn-6b.md
+      assert.equal(nameStatusOf(dir, suiteHead, tip), "M\ttasks/idn-6b.md", "fixture premise: single M of a file OUTSIDE the configured tasks_dir");
+      const cap = ["--suite-capture", writeSuiteCapture(st, "idn-6b", suiteHead)];
+      const r = runMerge(["--task", "idn-6b", "--root", dir, "--scripts-dir", cls.scriptsDir, ...cap]);
+      assert.equal(r.status, 2, `the configured tasks_dir is the judge — this shape must fall back:\n${r.stdout}${r.stderr}`);
+      assert.ok(cls.calls() > 0, "the classifier IS consulted (the short-circuit did not fire)");
+      assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop must NOT have advanced");
+    } finally {
+      cleanup(dir); cleanup(st); cleanup(cls.scriptsDir); cleanup(cls.markerDir);
+    }
+  }
+});
+
+test("gap-fan-in-cert-flip-commit-identity-inert AC3 (real object) — an EXTERNAL project with NO registry lands first try on the identity verdict, and the same project's code delta still goes to the classifier", () => {
+  // THE product-level reading, with the REPO'S REAL classifier (not a shim): the only thing synthesized
+  // is the scripts dir it is resolved FROM, whose every candidate root is registry-free — i.e. an
+  // external project. ⛔ No registry is planted; the pre-fix refusal below is what proves it.
+  const dir = makeTmp("extproj");
+  const st = stateDir("extproj");
+  const scriptsDir = externalScriptsDir("ext");
+  try {
+    initRepo(dir);
+    // Premise, asserted not assumed: this project carries no registry where the classifier looks, and
+    // the REAL classifier therefore cannot answer here — probed directly, so the pre-fix refusal below
+    // is attributable to the registry's absence and not to something else about the fixture. (The
+    // gate's own detail line carries the classifier's FIRST stderr line, which node's module-type
+    // warning can occupy — hence the direct probe rather than a substring of the refusal.)
+    assert.ok(!fs.existsSync(path.join(dir, "plugin", "scripts", "runner-static-gate.ts")),
+      "fixture premise: an external project carries no plugin/scripts/runner-static-gate.ts");
+    const probe = spawnSync("node", ["--experimental-strip-types",
+      path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts"),
+      "--classify-delta", "--root", dir, "tasks/ext-1.md"], { encoding: "utf8" });
+    assert.equal(probe.status, 2, `fixture premise: the real classifier cannot judge in a registry-free project:\n${probe.stdout}${probe.stderr}`);
+    assert.match(probe.stderr, /registry file \(runner-static-gate\.ts\) not found/, `fixture premise: the cause IS the missing registry:\n${probe.stderr}`);
+
+    const { suiteHead, tip } = makeFlipBranch(dir, "ext-1");
+    const cap = ["--suite-capture", writeSuiteCapture(st, "ext-1", suiteHead)];
+    // (a) PRE-FIX reading on this exact fixture: seam off ⇒ the classifier cannot answer ⇒ refused.
+    const pre = runMerge(["--task", "ext-1", "--root", dir, "--scripts-dir", scriptsDir, "--no-flip-identity-shortcut", ...cap]);
+    assert.equal(pre.status, 2, `pre-fix: the certificate must be refused:\n${pre.stdout}${pre.stderr}`);
+    assert.match(pre.stderr, /NOT-EVALUATED/, `pre-fix reading (the literal wording):\n${pre.stderr}`);
+
+    // (b) POST-FIX: the identity verdict ⇒ the certificate is granted and the ff LANDS ON THE FIRST TRY.
+    const post = runMerge(["--task", "ext-1", "--root", dir, "--scripts-dir", scriptsDir, ...cap]);
+    assert.equal(post.status, 0, `post-fix: a real external project must land first try:\n${post.stdout}${post.stderr}`);
+    assert.ok(!/NOT-EVALUATED/.test(post.stderr), `⛔ the pre-fix defect must not reappear:\n${post.stderr}`);
+    assert.match(post.stderr, /判惰性，⛔ 未调分类器/, "the landing is attributable to the identity verdict");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(scriptsDir);
+  }
+
+  // (c) The OTHER side of the control — SAME project, SAME command, single variable = the delta path:
+  //     a commit that also changes SOURCE must still take the classifier. Without the registry the
+  //     classifier yields not-evaluated, so the reading is a refusal — which is exactly the point: the
+  //     identity verdict never widens what counts as inert.
+  const dir2 = makeTmp("extproj-code");
+  const st2 = stateDir("extproj-code");
+  const scriptsDir2 = externalScriptsDir("extcode");
+  try {
+    initRepo(dir2);
+    const { suiteHead, tip } = makeFlipBranch(dir2, "ext-2", {
+      // `src/app.ts` must exist at the branch point too, so the commit MODIFIES it (an `M`) — the case
+      // is about a modified source file riding along with the flip, not about a new file.
+      devFiles: ["tasks/ext-2.md", "src/app.ts"],
+      extraFiles: [{ path: "src/app.ts", content: "export const x = 1;\n" }],
+    });
+    assert.equal(nameStatusOf(dir2, suiteHead, tip), "M\tsrc/app.ts\nM\ttasks/ext-2.md", "fixture premise: the commit changes source AND the task file");
+    const cap2 = ["--suite-capture", writeSuiteCapture(st2, "ext-2", suiteHead)];
+    const r = runMerge(["--task", "ext-2", "--root", dir2, "--scripts-dir", scriptsDir2, ...cap2]);
+    assert.equal(r.status, 2, `a source delta must NOT be short-circuited:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /NOT-EVALUATED/, `it still goes to the classifier — which, in a registry-free project, reads not-evaluated:\n${r.stderr}`);
+    assert.ok(!/未调分类器/.test(r.stderr), "⛔ the identity verdict must not have been claimed for a source delta");
+    assert.notEqual(gitCmd(dir2, "rev-parse", "develop").stdout.trim(), tip, "develop must NOT have advanced");
+  } finally {
+    cleanup(dir2); cleanup(st2); cleanup(scriptsDir2);
+  }
+});
