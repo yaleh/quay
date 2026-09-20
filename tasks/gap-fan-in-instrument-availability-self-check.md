@@ -24,10 +24,10 @@ depends_on:
 
 ## AC
 
-- [ ] `node --test plugin/test/fan-in-ff-merge.test.mjs` exit 0，新增用例：有 registry 的 root ⇒ `classifier.evaluated=true`；无 registry 的 root ⇒ `evaluated=false` 且 detail 含尝试过的候选路径；reaper 解析不到 ⇒ `reaper.evaluated=false`（三个用例都断言与「可用」取值可区分）。
-- [ ] `node --test plugin/test/worker-driver.test.mjs` exit 0，新增用例：探针在 suite 步骤**之前**执行（以 trace 顺序断言），探针 `evaluated=false` 时 suite **照常执行**（拦截不发生的负控制），且 outcome 记录含 `mechanical_fan_in.instruments`。
-- [ ] `node --experimental-strip-types packages/quay/bin/quay.ts driver status --kind worker` 在 fixture workspace 中输出两项仪器读数；探针失败时输出 `evaluated:false` 与 detail，退出码不变（不因此变非零）。
-- [ ] `scripts/test.sh --for-task gap-fan-in-instrument-availability-self-check` exit 0。
+- [x] `node --test plugin/test/fan-in-ff-merge.test.mjs` exit 0，新增用例：有 registry 的 root ⇒ `classifier.evaluated=true`；无 registry 的 root ⇒ `evaluated=false` 且 detail 含尝试过的候选路径；reaper 解析不到 ⇒ `reaper.evaluated=false`（三个用例都断言与「可用」取值可区分）。
+- [x] `node --test plugin/test/worker-driver.test.mjs` exit 0，新增用例：探针在 suite 步骤**之前**执行（以 trace 顺序断言），探针 `evaluated=false` 时 suite **照常执行**（拦截不发生的负控制），且 outcome 记录含 `mechanical_fan_in.instruments`。
+- [x] `node --experimental-strip-types packages/quay/bin/quay.ts driver status --kind worker` 在 fixture workspace 中输出两项仪器读数；探针失败时输出 `evaluated:false` 与 detail，退出码不变（不因此变非零）。
+- [x] `scripts/test.sh --for-task gap-fan-in-instrument-availability-self-check` exit 0。
 
 ## DoD
 
