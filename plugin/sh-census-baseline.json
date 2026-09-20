@@ -183,8 +183,24 @@
         "embeddedInterpreterLines": "-694 = plugin/scripts/integration-batch-merge.sh effective lines 697 -> 3. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch’s own `.sh` delta vs its fork point is EXACTLY this one file (git diff --name-only develop HEAD at the fork -> integration-batch-merge.sh, capability-catalog-declarations.json, sh-census-baseline.json, plus the new .ts and .mjs which are outside a *.sh census). After the develop merge the tree’s measured total is 7719 = 8413 - 694, i.e. the develop-side deltas (-239 develop-deliver-tgz.sh, -481 cross-machine-verify.sh, both on disjoint files) and this delta (-694) compose exactly. Measured with the checker’s OWN reading (`sh-census-check.ts --json` -> files[path=plugin/scripts/integration-batch-merge.sh].codeLines before 697 / after 3, and totals.embeddedInterpreterLines 8413 -> 7719).",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-thin-sh-wrappers-callers-call-ts-directly, SPEC Phase 1c)",
+      "from": {
+        "embeddedInterpreterLines": 7719,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7680,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of SPEC-architecture-consolidation-ts-and-shell-2026-09-19 Phase 1c. Five experiments/quay-perpetual-stream/scripts/*.sh that were nothing but `node \"$(dirname \"$0\")/<basename>.ts\" \"$@\"` shells (5/7/11/5/11 effective lines) were deleted and their live callers switched to the direct `node <basename>.ts` invocation: anti-drift-touches-check.sh, concurrent-batch-scheduler.sh, it0-backlog-projection-check.sh, serial-fanin-absorb.sh, touches-orthogonality-check.sh. All five carried `embedded: [\"node\"]`, so all five are IN this axis (the axis counts effective lines of .sh containing an embedded interpreter at a command position) — this is a line-count move, not a membership move. ⚠️ The other 22 plugins/experiments thin shells that the same census flags (`tsTwin=true ∧ codeLines<=25`) are deliberately NOT deleted: each is a declared/consumer-facing entry (PUBLIC_ENTRYPOINTS), a `parts/quay/scripts/package.sh`-gated shipped gate, a `runner-static-gate.ts` registration whose `.sh` form is what `build-plugin-dist.mjs --rewrite` rewrites to `dist/*.js`, or a `.quay/config.yml.example` gate script — see the task's AC1 disposition table. AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it: leaving 7719 would let five new embedded-interpreter .sh land for free, i.e. the Phase 1c gain would be un-recaptured. Re-anchored after the deletions and the caller conversions were final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` -> totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-39 = the five deleted shells' effective lines, summed from the checker's OWN per-file reading taken BEFORE the deletion (`sh-census-check.ts --json` -> files[path].codeLines): anti-drift-touches-check.sh 5 + concurrent-batch-scheduler.sh 7 + it0-backlog-projection-check.sh 11 + serial-fanin-absorb.sh 5 + touches-orthogonality-check.sh 11 = 39. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY these five paths (`git diff --name-status develop HEAD -- '*.sh'` -> 5 x `D`), and every caller edit this task made is to a `.sh` file that already existed and whose own line count is unchanged in a way this axis reads (the four `*-selfcheck.sh` edits swap `\"$CHK\"` for `node \"$CHK\"` and `-x` for `-f`, +0 effective lines each — all four remain non-embedded pure-shell programs). ⛔ The totals.scripts movement (147 -> 142) and embeddedInterpreterScripts (59 -> 54) are called out rather than folded in: they are the same five files, seen from the count axes, and neither is a ratchet axis.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (the five deleted paths are real files, not symlinks, so totals.symlinkedCopies stays 59)."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7719,
+  "embeddedInterpreterLines": 7680,
   "duplicateCopies": 0
 }

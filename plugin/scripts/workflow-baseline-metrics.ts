@@ -1071,7 +1071,7 @@ export function selftest(): boolean {
       },
       {
         timing: { queuedAtMs: 4000, startedAtMs: 4100, endedAtMs: 4500 },
-        agentLabel: "reconcile", commandIdentity: "bash experiments/quay-perpetual-stream/scripts/serial-fanin-absorb.sh",
+        agentLabel: "reconcile", commandIdentity: "node --experimental-strip-types experiments/quay-perpetual-stream/scripts/serial-fanin-absorb.ts",
         observedWrites: ["backlog.md", "dashboard.md"],
         outcome: "done", waitReason: null, resourceClaim: null,
         stage: "Reconcile", eventKind: "end", candidateId: "DIR-TEST", runId: "run-001",
