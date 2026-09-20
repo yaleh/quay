@@ -2,7 +2,7 @@
 id: gap-deletion-closure-walker-respects-gitignore
 title: deletion-closure-check.ts 的 fs walker 不认 .gitignore——12010 文件闭包里 10962
   条来自 .claude/worktrees，R=44.32 量的是 worktree 快照不是删除债
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -251,3 +251,12 @@ SCOPED GATE EXIT=0
 - plugin/scripts/fs-walk.ts
 - plugin/test/deletion-closure-check.test.mjs
 - tasks/gap-deletion-closure-walker-respects-gitignore.md
+
+## Needs-Human
+
+**执行 2026-09-20T19:18:05.309Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 失败步/判词：AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：3cc14ee5-4859-49ff-abc2-1bd88981569a
