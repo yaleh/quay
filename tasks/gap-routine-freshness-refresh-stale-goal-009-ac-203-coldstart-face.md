@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-203-coldstart-face
 title: "freshness-refresh: AC-203's newest delivery evidence is build_sha
   2d3a6fa3580947889d42f8234e9d2fe389386f18 (2026-09-18T04:32:56Z, carrier line
   262); d=161 of K=200 leaves margin 39"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
