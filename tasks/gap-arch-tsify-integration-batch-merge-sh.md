@@ -2,7 +2,7 @@
 id: gap-arch-tsify-integration-batch-merge-sh
 title: shell→TS（SPEC Phase 5.2）：integration-batch-merge.sh（697 行，内嵌
   node+python3）改写为 TS，先做 characterization
-status: todo
+status: ready
 labels:
   - gap
 parent: null
