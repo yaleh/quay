@@ -2,7 +2,7 @@
 id: gap-arch-worker-fan-in-extract-from-worker-driver
 title: 架构：从 worker-driver.ts 抽出机械 fan-in 区域为 worker-fan-in.ts（调查方案第一期；文件已 6063
   行，越过调查设的 3300 行重评线）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
