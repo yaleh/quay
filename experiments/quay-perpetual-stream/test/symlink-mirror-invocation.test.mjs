@@ -12,9 +12,10 @@
 // This test does NOT hardcode the affected script names — it enumerates every symlink under
 // `experiments/quay-perpetual-stream/scripts/` whose realpath target is a `.ts` file under
 // `plugin/scripts/`, and for each one, invokes it via BOTH the symlink path and the real path with
-// no arguments. The asserted CONTRACT is deliberately uniform, but it accounts for the two
-// legitimate divergences the original uniform assumption denied (confirmed live 2026-08-02,
-// `gap-symlink-mirror-invocation-test-contract-mismatch`):
+// no arguments. The asserted CONTRACT is deliberately uniform, but it accounts for the legitimate
+// divergences the original uniform assumption denied (two confirmed live 2026-08-02,
+// `gap-symlink-mirror-invocation-test-contract-mismatch`; a third added 2026-09-20 by
+// gap-version-stamp-generator-and-build-wiring — see bullet 2's ⛔ note):
 //   1. NON-SILENT: a guard-firing CLI must print something — exit 0 with zero output is THE defect
 //      class (a guard that never fires is indistinguishable from "ran and found nothing wrong").
 //      Exit codes vary legitimately across scripts: most arg-requiring scripts print "Usage:" to
@@ -41,6 +42,16 @@
 //      `\d{13}`-run rule, so a NON-clock 13-digit difference would also be hidden (speculative
 //      future script; none in the current population); every difference OUTSIDE a 13-digit run
 //      still fails.
+//      ⛔ A SECOND sanctioned stdout divergence, added 2026-09-20 by
+//      gap-version-stamp-generator-and-build-wiring: a report-only tool whose no-args path prints
+//      the repo's LIVE state cannot hold still while the loop advances it. `task-status-drift-check.ts`
+//      is that tool — measured, two invocations minutes apart differed on exactly ONE line (its
+//      STRANDED branch list, after a task branch was merged and another advanced) while the 67
+//      closed-without-work and 9 reverse-drift lines that read the task store were byte-identical —
+//      so that ONE block is redacted too (`redactLiveBranchState` below, scoped by its unique header
+//      and trailer, pinned by its own unit test). stderr is NOT redacted: the report goes to stdout.
+//      Honest boundary: a difference anywhere outside that block — including the empty-vs-full report
+//      the silent-no-op class produces — still fails.
 // A future script added with the same vulnerable guard shape (silent exit-0 no-op via the symlink
 // path) is still caught automatically.
 //
