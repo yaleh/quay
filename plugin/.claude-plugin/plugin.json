@@ -1,6 +1,6 @@
 {
   "name": "quay",
-  "version": "0.10.0-dev",
+  "version": "0.12.0-dev",
   "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (execute, quay-directive, quay-file-task, loop-driver, init, quay-cold-start, quay-drivers, quay-task-operator, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology, manager), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
   "author": {
     "name": "Yale Huang",
