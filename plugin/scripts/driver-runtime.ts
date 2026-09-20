@@ -237,18 +237,12 @@ export function ts(): string {
   return new Date().toISOString().slice(0, 19) + "Z";
 }
 
-/** `kill -0` 等价：pid 存活判定（读不懂 / 非正整数 ⇒ false）。 */
-export function pidAlive(pid: string | number | null | undefined): boolean {
-  if (pid === null || pid === undefined || pid === "") return false;
-  const n = Number(pid);
-  if (!Number.isInteger(n) || n <= 0) return false;
-  try {
-    process.kill(n, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// `pidAlive`（`kill -0` 等价：pid 存活判定，读不懂 / 非正整数 ⇒ false）**不再在本文件定义** ——
+// 它是 Core `server-state.ts` 的单一真相源，在下面的「Layer 0 · Core 库符号的单一导入面」处导入并
+// 再导出。旧实现在这里留过一份**副本**，其裸 `catch { return false }` 把 EPERM 读成 DEAD，而另外三份
+// 读成 ALIVE ⇒ 同一个探针在 driver 路径上把「活着但不属于我们」的 pid 报成死的
+// （`.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`，routine `semantic-dedup-scan`，
+// runId `semantic-dedup-scan-1789889905875`）。副本已删，语义差随之消失，⛔ 不是改了判据再留一份。
 
 /** 读 pid 文件（缺失/读失败 ⇒ ""，⛔ 不抛）。 */
 export function readPidFile(file: string): string {
@@ -459,6 +453,15 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
 // store 侧改名后 driver 会**静默停止守闸**（硬规则 5b 的形态），故走单一导入面。
 export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
 export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+
+// `pidAlive`：**本文件曾是它的第四份副本**，且是唯一把 EPERM（exists-but-not-ours）读成 DEAD 的一份
+// ⇒ `rmCarrierUnlessForeignLive`（存在的理由正是「别删掉一个外来的活进程在盘上唯一的记录」）与
+// `stopLegacyPair`（存在的理由正是「停不掉不得报成停掉了」）在 EPERM 那一支上恰好被自己的探针反制。
+// 现改为**从单一真相源取符号**：Core `server-state.ts` 定义一次，本文件导入并再导出（下游
+// `server-partial-stop-verify.ts` 等经本文件取，布局知识仍只在本节出现一次）。
+// (import + export, ⛔ 不是 `export … from` —— 本文件内部多处直接调用 `pidAlive`，需要一个本地绑定。)
+import { pidAlive } from "../../packages/quay/src/server-state.ts";
+export { pidAlive };
 
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root

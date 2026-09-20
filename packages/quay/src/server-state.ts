@@ -168,11 +168,28 @@ export function readServerState(workspaceRoot: string): ServerStateRead {
 }
 
 /** Direct quantity: is this pid a live process? `kill(pid, 0)` probes existence without signalling —
- *  EPERM means "exists but not ours", which is still alive. */
-export function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+ *  EPERM means "exists but not ours", which is still alive. That branch is not a nicety: the callers
+ *  that guard a **foreign** pid carrier (`rmCarrierUnlessForeignLive`, `stopLegacyPair`) exist to
+ *  protect a live process that is not ours, and a probe that read EPERM as DEAD would delete that
+ *  process's only record on disk / report "not running" for a running loop (硬规则 3b).
+ *
+ *  ⚠️ SINGLE SOURCE. `plugin/scripts/driver-runtime.ts` re-exports this symbol instead of keeping its
+ *  own copy — it used to keep one whose bare `catch` returned false unconditionally, so the same
+ *  probe read a live-but-foreign pid as DEAD on the driver path and ALIVE here
+ *  (`.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`, routine `semantic-dedup-scan`,
+ *  runId `semantic-dedup-scan-1789889905875`, 2026-09-20; re-filed on 09-13 / 09-17 as well).
+ *  The ONE remaining copy is `plugin/scripts/start-drivers.ts` — a zero-closure-deps laydown entry
+ *  that cannot import anything (see its direct-entry guard); it carries the same EPERM semantics.
+ *
+ *  The input is COERCED rather than required to be a number: pid carriers are read as TEXT
+ *  (`readPidFile` returns a string), so the driver-side readers hand this function strings. Anything
+ *  that is not a positive integer after coercion ⇒ not alive (读不懂 ⇒ 不报存活). */
+export function pidAlive(pid: string | number | null | undefined): boolean {
+  if (pid === null || pid === undefined || pid === "") return false;
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return false;
   try {
-    process.kill(pid, 0);
+    process.kill(n, 0);
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException)?.code === "EPERM";
