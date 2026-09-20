@@ -2193,3 +2193,75 @@ test("gap-fan-in-cert-flip-commit-identity-inert AC3 (real object) — an EXTERN
     cleanup(dir2); cleanup(st2); cleanup(scriptsDir2);
   }
 });
+
+// ── instrument availability probe (gap-fan-in-instrument-availability-self-check) ────────────────────
+// Whether the certificate gate's CLASSIFIER and the ff's REAPER are resolvable used to surface only
+// after a suite had run (classifyDeltaVerdict / siblingScriptArgv returning null), so "this install
+// cannot find these two instruments at all" was invisible to both the human and the driver until a
+// task was already needs-human. `probeInstruments(root, scriptsDir)` turns it into a reading.
+//
+// The single dimension these cases vary is WHICH input is unusable (the root's registry, the reaper
+// file) — and every case pins the reading against its own POSITIVE control, because a probe that
+// could only ever answer `false` would satisfy a one-sided assertion while measuring nothing
+// (hard rule 4 推论三: a criterion satisfiable only by a fixture is not a measurement).
+
+test("gap-fan-in-instrument-availability-self-check AC1 — classifier: a root WITH a registry reads evaluated=true; a root WITHOUT one reads evaluated=false (with the tried registry candidates). The two readings are NOT interchangeable.", async () => {
+  const m = await import(MERGE_SCRIPT);
+  const emptyScriptsDir = makeTmp("instr-empty");
+  const noRegistryRoot = makeTmp("instr-noreg");
+  try {
+    assert.equal(typeof m.probeInstruments, "function", "probeInstruments is exported");
+
+    // (a) POSITIVE control: this repo's own root carries plugin/scripts/runner-static-gate.ts.
+    const good = m.probeInstruments(REPO_ROOT, REAL_SCRIPTS_DIR);
+    assert.strictEqual(good.classifier.evaluated, true,
+      `a root carrying the registry must read evaluated=true: ${JSON.stringify(good.classifier)}`);
+    assert.match(good.classifier.detail, /exit=0/, "the reading names the probe it really ran and its exit code");
+
+    // (b) the registry-free root: still a real run (the classifier resolves), but no verdict is possible.
+    const bad = m.probeInstruments(noRegistryRoot, REAL_SCRIPTS_DIR);
+    assert.strictEqual(bad.classifier.evaluated, false,
+      `a registry-free root must read evaluated=false: ${JSON.stringify(bad.classifier)}`);
+    // The detail must name the candidates that were TRIED — a bare "false" would send the reader looking
+    // for the reason elsewhere. Both of the classifier's registry layouts are named by the classifier
+    // ITSELF (its own stderr), never by a second copy of the list in ff-merge.ts.
+    assert.match(bad.classifier.detail, /runner-static-gate\.ts/, "detail names the registry candidate that was looked for");
+    assert.match(bad.classifier.detail, /plugin\/scripts\/runner-static-gate\.ts/, "detail names the primary layout");
+    assert.match(bad.classifier.detail, /scripts\/runner-static-gate\.ts/, "detail names the packaged layout");
+
+    // (c) distinguishable: the two readings differ in a way a reader cannot confuse — `evaluated` is a
+    //     real boolean in BOTH, so "could not judge" never borrows the "available" value (hard rule 3b).
+    assert.notDeepEqual(bad.classifier, good.classifier, "not-evaluated and available are different readings");
+    assert.strictEqual(typeof bad.classifier.evaluated, "boolean", "evaluated is a boolean in the not-evaluated arm too (⛔ not an absent key)");
+    assert.equal("evaluated" in bad.classifier, true, "⛔ the key is present — an ABSENT key would be indistinguishable from 'not asked'");
+
+    // (d) unresolvable classifier script ⇒ still false, and the detail names the SCRIPT candidates tried
+    //     (the other half of "tried …": the instrument file itself, not only the registry).
+    const noScripts = m.probeInstruments(REPO_ROOT, emptyScriptsDir);
+    assert.strictEqual(noScripts.classifier.evaluated, false, "an empty scripts dir reads not-evaluated");
+    assert.match(noScripts.classifier.detail, /select-static-checks-for-touches\.ts/, "detail names the classifier path tried");
+    assert.match(noScripts.classifier.detail, /dist\/select-static-checks-for-touches\.js/, "detail names its shipped-bundle twin");
+  } finally {
+    cleanup(emptyScriptsDir); cleanup(noRegistryRoot);
+  }
+});
+
+test("gap-fan-in-instrument-availability-self-check AC1 — reaper: resolvable ⇒ evaluated=true; not resolvable ⇒ evaluated=false with the tried candidates (⛔ never the same value)", async () => {
+  const m = await import(MERGE_SCRIPT);
+  const emptyScriptsDir = makeTmp("instr-empty2");
+  try {
+    // POSITIVE control first (the negative is only meaningful next to it).
+    const ok = m.probeInstruments(REPO_ROOT, REAL_SCRIPTS_DIR);
+    assert.strictEqual(ok.reaper.evaluated, true, `the dev tree carries worktree-process-reaper.ts: ${JSON.stringify(ok.reaper)}`);
+    assert.match(ok.reaper.detail, /worktree-process-reaper\.ts/, "detail names the resolved path");
+
+    const missing = m.probeInstruments(REPO_ROOT, emptyScriptsDir);
+    assert.strictEqual(missing.reaper.evaluated, false, `an empty scripts dir must read evaluated=false: ${JSON.stringify(missing.reaper)}`);
+    assert.match(missing.reaper.detail, /worktree-process-reaper\.ts/, "detail names the dev-tree path tried");
+    assert.match(missing.reaper.detail, /dist\/worktree-process-reaper\.js/, "detail names the shipped-bundle path tried");
+    assert.notDeepEqual(missing.reaper, ok.reaper, "not-evaluated and available are different readings");
+    assert.equal("evaluated" in missing.reaper, true, "⛔ the key is present in the not-evaluated arm too");
+  } finally {
+    cleanup(emptyScriptsDir);
+  }
+});

@@ -32,6 +32,9 @@ import { parseFlags, resolveJsonFlag } from "./flags.ts";
 import { findConfig } from "../config.ts";
 import { resolvePluginScriptExec } from "../plugin-root.ts";
 import { readFanInAttempts, type FanInAttemptsResult } from "../observation.ts";
+// gap-fan-in-instrument-availability-self-check AC3：`quay driver status --kind worker` 也报这两个 fan-in
+// 仪器的当前读数。⛔ 只读（探针不写任何 quay 状态）、⛔ 不改退出码——它是**事实**，不是拦截信号。
+import { probeInstruments, type InstrumentProbe, type InstrumentReading } from "../fan-in/ff-merge.ts";
 import type { CliCtx } from "./context.ts";
 
 // VERBS 与 KINDS 定义在 cli/driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能把这两个
@@ -195,6 +198,45 @@ export function runDriverLog(
   return { stdout, reason: null, exitCode: res.status === "carrier-unreadable" ? 1 : 0 };
 }
 
+/**
+ * AC3 (gap-fan-in-instrument-availability-self-check): attach the two fan-in instruments' probe
+ * readings to `quay driver status --kind worker`'s output. The reading is a FACT and ⛔ never a control
+ * signal — it changes no exit code, and ⛔ must not be read as "the driver will refuse something"
+ * (record only, never intercept; the ruling and its why live on ff-merge.ts's probeInstruments).
+ *
+ * `scriptsDir` = the resolved KERNEL's own dir — the same dir `resolveKernelScriptsDir()` hands the
+ * mechanical fan-in — so the reading answers "can THIS installation resolve its instruments", not "does
+ * the workspace happen to carry a copy". `root` = the workspace root `status` was resolved against: the
+ * tree a fan-in of this workspace would classify against.
+ *
+ * `--json` output is merged in place (parsed, then re-serialized) so machine readers still see ONE
+ * object; any non-JSON output gets the two readings appended as text lines.
+ */
+export function withInstrumentReadings(stdout: string, root: string, scriptsDir: string): string {
+  let probe: InstrumentProbe;
+  try {
+    probe = probeInstruments(root, scriptsDir);
+  } catch (e) {
+    // probeInstruments is structurally throw-free; if it ever throws, say NOT-evaluated (hard rule 3b)
+    // rather than swallow it into a reading shaped like "available".
+    const detail = `probe threw: ${(e as Error)?.message ?? String(e)}`;
+    probe = { classifier: { evaluated: false, detail }, reaper: { evaluated: false, detail } };
+  }
+  const line = (name: string, r: InstrumentReading): string =>
+    `instruments: ${name} evaluated=${r.evaluated ? 1 : 0} — ${r.detail}`;
+  const trimmed = stdout.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return JSON.stringify({ ...parsed, instruments: probe }) + "\n";
+      }
+    } catch { /* not JSON after all — fall through to the text arm */ }
+  }
+  const prefix = stdout === "" || stdout.endsWith("\n") ? stdout : stdout + "\n";
+  return prefix + line("classifier", probe.classifier) + "\n" + line("reaper", probe.reaper) + "\n";
+}
+
 /** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */
 export interface DriverRunResult {
   /** true = the command was delegated to the supervisor kernel (spawn succeeded). */
@@ -275,5 +317,12 @@ export function runDriver(
     ? ["--experimental-strip-types", kernel.path, ...args]
     : [kernel.path, ...args];
   const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
-  return { ok: true, reason: null, stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+  // AC3 (gap-fan-in-instrument-availability-self-check): the two fan-in instruments are a worker-kind
+  // concern (its mechanical fan-in is their only consumer) — attach their readings to `status` for
+  // `worker` only. ⛔ stdout only: the probe never changes the command's success (exitCode untouched).
+  const stdout =
+    verb === "status" && kind === "worker"
+      ? withInstrumentReadings(r.stdout ?? "", root, path.dirname(kernel.path))
+      : r.stdout ?? "";
+  return { ok: true, reason: null, stdout, stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 }

@@ -320,17 +320,26 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
 // Resolve BOTH forms, exactly as the kernel does (`driver-runtime.ts:resolveKernelSibling`) and Core
 // does (`plugin-root.ts:resolvePluginScriptExec`) — never a bare `.ts` join.
 
+/** The absolute paths `siblingScriptArgv` tries, IN ORDER — the raw `.ts` (dev tree) then the shipped
+ *  bundle `dist/<name>.js`. ⛔ SINGLE SOURCE for "what was tried": `siblingScriptArgv` consumes this,
+ *  so a probe's "tried …" detail and the resolver itself can never disagree about it (hard rule 5b —
+ *  the two would otherwise be siblings of the same class, in the same file, drifted apart). */
+function siblingScriptCandidates(scriptsDir: string, name: string): string[] {
+  const raw = path.join(scriptsDir, name);
+  // A non-`.ts` name has no bundle form (the shipped bundle is the `.ts`'s dist twin).
+  if (!name.endsWith(".ts")) return [raw];
+  const bundledDir = path.basename(scriptsDir) === "dist" ? scriptsDir : path.join(scriptsDir, "dist");
+  return [raw, path.join(bundledDir, name.replace(/\.ts$/, ".js"))];
+}
+
 /** Resolve a sibling orchestration script under `scriptsDir` to its RUNNABLE argv prefix — the raw
  *  `.ts` (dev tree, run with `--experimental-strip-types`) or the shipped bundle `dist/<name>.js`
  *  (plain ESM, no flag). `scriptsDir` may ITSELF be the dist dir (shipped kernel). null ⇒ neither
  *  form exists ⇒ the caller must report NOT-EVALUATED, ⛔ never a verdict (hard rule 3b). */
 function siblingScriptArgv(scriptsDir: string, name: string): string[] | null {
-  const raw = path.join(scriptsDir, name);
-  if (fs.existsSync(raw)) return ["node", ...(name.endsWith(".ts") ? ["--experimental-strip-types"] : []), raw];
-  if (name.endsWith(".ts")) {
-    const bundledDir = path.basename(scriptsDir) === "dist" ? scriptsDir : path.join(scriptsDir, "dist");
-    const bundled = path.join(bundledDir, name.replace(/\.ts$/, ".js"));
-    if (fs.existsSync(bundled)) return ["node", bundled];
+  for (const p of siblingScriptCandidates(scriptsDir, name)) {
+    if (!fs.existsSync(p)) continue;
+    return ["node", ...(p.endsWith(".ts") ? ["--experimental-strip-types"] : []), p];
   }
   return null;
 }
@@ -645,16 +654,105 @@ function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string
   return v.kind === "inert" ? "" : v.kind === "non-inert" ? v.paths.join("\n") : "__CLASSIFY_FAILED__";
 }
 
+// ── instrument availability probe (gap-fan-in-instrument-availability-self-check) ────────────────────
+//
+// Whether the certificate gate's CLASSIFIER and the ff-merge REAPER are resolvable used to surface only
+// AFTER a suite had run (`classifyDeltaVerdict` / `siblingScriptArgv` returning null), so neither the
+// human nor the driver could see the fact "this installation cannot find these two instruments at all"
+// — until the task was already flipped to needs-human (in one external project the reaper's
+// `worktree-process-reaper not resolvable` line appeared only on the failure path and was read as
+// harmless noise). This probe turns that fact into a READING: the driver probes once at startup and
+// once more before every mechanical fan-in enters the suite.
+//
+// ⛔ RECORD ONLY — NEVER INTERCEPT (人 2026-09-20 ruling, on the record): the probe result takes part
+// in NO control flow — it does not stop the driver, does not touch the retry cap, does not touch the
+// needs-human logic. Why: interacting with gap-fan-in-cert-flip-commit-identity-inert, an external
+// project's own flip commit is already judged inert BY IDENTITY and does not need the classifier at
+// all, so an unconditional pre-suite interception would kill EVERY task before the suite in a project
+// with no registry — strictly worse than today. An intercepting form needs its own ruling AND an
+// incidence reading for "probe failed but the delta never needed the classifier" first (hard rule 12).
+
+/** One instrument's reading. `evaluated:false` is a DISTINCT value sharing NO output word with
+ *  "available" (hard rule 3b): "could not resolve / could not judge" must read as itself, never as a
+ *  silent "fine". */
+export interface InstrumentReading {
+  /** true = the instrument was LOCATED **and** actually produced a judgement for the probed root. */
+  evaluated: boolean;
+  /** The evidence: on true, the resolved path/argv + exit code; on false, the candidate paths that were
+   *  TRIED and why each failed. */
+  detail: string;
+}
+
+/** The two instruments the fan-in's certificate gate and its blocked-path reaper depend on. */
+export interface InstrumentProbe {
+  classifier: InstrumentReading;
+  reaper: InstrumentReading;
+}
+
+/** The two sibling script names the probe resolves — the SAME names the contract gate / reaper call
+ *  sites use, so a rename in one place cannot leave the probe reporting on a stale name. */
+const CLASSIFIER_SCRIPT = "select-static-checks-for-touches.ts";
+const REAPER_SCRIPT = "worktree-process-reaper.ts";
+
+/** Classifier probe: REALLY run one `--classify-delta` against `root` — ⛔ not an existence check, since
+ *  "the file is there" does not imply "it can judge this root". An empty delta list suffices: the
+ *  classifier decides whether it can evaluate BEFORE it looks at any path (a missing registry ⇒ exit 2
+ *  with `registry file … not found at …`), so exit 0 ⇔ this root carries a registry ⇔ a verdict is
+ *  possible. The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`);
+ *  probing some other candidate root would report a capability the call site does not have. */
+function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
+  const argv = siblingScriptArgv(scriptsDir, CLASSIFIER_SCRIPT);
+  if (!argv) {
+    return {
+      evaluated: false,
+      detail: `root=${root} — classifier NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, CLASSIFIER_SCRIPT).join(" , ")}`,
+    };
+  }
+  const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root]);
+  if (r.status === 0) {
+    return { evaluated: true, detail: `root=${root} — ${argv.join(" ")} --classify-delta --root ${root} exit=0` };
+  }
+  // The classifier's own stderr names the registry candidate paths it looked for (its
+  // REGISTRY_REL_CANDIDATES) — ⛔ never a second copy of that list here (hard rule 5b). `--no-warnings`
+  // above keeps Node's MODULE_TYPELESS_PACKAGE_JSON banner out of it (it would otherwise be the FIRST
+  // line, and a reader would take the banner for the reason).
+  const why = r.stderr.trim().split("\n").filter(Boolean).join(" | ") || `exit=${r.status} (no stderr)`;
+  return {
+    evaluated: false,
+    detail: `root=${root} — classifier resolved (${argv.join(" ")}) but produced no verdict: ${why}`,
+  };
+}
+
+/** Reaper probe: resolution only. The reaper is best-effort cleanup on an ALREADY-refused path, so
+ *  "is it reachable at all" is the whole question — there is no root it must judge. */
+function probeReaper(scriptsDir: string): InstrumentReading {
+  const argv = siblingScriptArgv(scriptsDir, REAPER_SCRIPT);
+  return argv
+    ? { evaluated: true, detail: argv.join(" ") }
+    : { evaluated: false, detail: `reaper NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, REAPER_SCRIPT).join(" , ")}` };
+}
+
+/** Probe both fan-in instruments against `root`. Read-only w.r.t. quay state (the classifier run writes
+ *  nothing) and ⛔ never throws — an unusable input is a READING, not an error (hard rule 3b). */
+export function probeInstruments(root: string, scriptsDir?: string | null): InstrumentProbe {
+  const dir = scriptsDir ?? defaultScriptsDir() ?? "";
+  return { classifier: probeClassifier(root, dir), reaper: probeReaper(dir) };
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The plugin `scripts/` dir the canonical resolver yields (SPEC §6b), or null when unresolvable. */
+function defaultScriptsDir(): string | null {
+  const pluginRoot = resolvePluginRoot();
+  return pluginRoot ? path.join(pluginRoot, "scripts") : null;
+}
 
 /** The plugin `scripts/` dir — caller override (worker-driver's worktree seam) else the canonical
  *  resolver (SPEC §6b: never the workspace root, never an import.meta.url walk-up without a worktree
  *  check — the pre-migration `MODULE_REPO_ROOT` and `root/plugin/scripts` defaults). null when
  *  unresolvable (callers fail closed). */
 function scriptsDirOf(args: FfMergeArgs): string | null {
-  if (args.scriptsDir) return args.scriptsDir;
-  const pluginRoot = resolvePluginRoot();
-  return pluginRoot ? path.join(pluginRoot, "scripts") : null;
+  return args.scriptsDir ?? defaultScriptsDir();
 }
 
 /** The full 持锁段 ff, as an importable function (used by `quay task fan-in` and worker-driver.ts). */
