@@ -137,18 +137,29 @@ EXIT=0
 **该脚本的判据不读任何版本字面量**（`plugin/scripts/release-branch-finish.sh:289-320`）：合规删除只认
 「`develop..<b>` == 0（已合回）」或「`git tag --contains <b>` 非空（tip 被某 tag 持有）」两种形态；
 `--cut --tag <vX.Y.Z>` 的 tag 名由**调用者显式给**——正是因为它不猜版本。⇒ **「存在一个去后缀的 bump 提交」
-这一前置在本脚本中从来不存在**，本次修订**一行都没有改它**（故它不在本任务的改动集里）。
-其测试在**不含任何版本 bump 提交**的 release 分支上全绿（scoped 门日志）：
+这一前置从来没有被写进任何判据**，本次修订**一行都没有改它**（故它不在本任务的改动集里）。
+
+**⚠️ 措辞精确化（不把 fixture 说错）**：其测试**不是**只跑「不带 bump 提交的分支」——
+`plugin/test/release-branch-finish.test.mjs:454` 的 `makeReleaseBranchWithBump` 造的正是**一条带 bump 提交**的
+release 分支，而那条 bump 的**内容**是普通 `version.txt`（`0.1.0\n`，不是任何形式的版本字面量），
+且删除许可判据**对提交内容无感**：带 bump 与不带 bump 的用例走的是**同一条**「tip 是否被 tag 持有 / 是否已合回」的读法。
+⇒ 真正的读数是「**判据对提交内容无感**」，这比「分支里没有 bump 提交」更强也更准——它意味着
+**任何**内容的一次 release 分支 bump（包括旧规程里那次「去 `-dev`」）都不是判据的输入。
+
+scoped 门日志（全绿）：
 
 ```
 ✔ --cut lands the cut in ONE command: merge back → tag the merge point → finish (250.101445ms)
 ✔ --cut preconditions fail closed: missing --tag / existing tag / HEAD not base — nothing mutates
 ✔ a tip CONTAINED IN A TAG licenses the delete even though develop..<b> != 0 (AC-271's second form)
-… ℹ tests 16  ℹ pass 16  ℹ fail 0  ℹ duration_ms 3334.253742
+… ℹ tests 56  ℹ pass 56  ℹ fail 0
 ```
 
 ```
 $ bash scripts/test.sh --for-task gap-version-marketplace-omit-and-spec-amendment --allow-thin ; echo EXIT=$?
+… MUTATION version-consistency-check: pass
+… checker-mutation-check [--check-changed]: delta base develop; 1 checker carrier(s) in THIS delta:
+    version-consistency-check
 EXIT=0
 ```
 
