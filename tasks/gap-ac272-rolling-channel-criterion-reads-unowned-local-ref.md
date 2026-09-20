@@ -2,7 +2,7 @@
 id: gap-ac272-rolling-channel-criterion-reads-unowned-local-ref
 title: AC-272 恒假的仪器失败：criterion 读的是【无主】的本地 dist-plugin ref（发布脚本每次 branch -D
   删它、全仓只此一个读者），而渠道本身是对的 ⇒ 把 ref 来源改成 refs/remotes/origin/dist-plugin（用户实际装的那一侧）
-status: ready
+status: done
 labels:
   - gap
   - defect
