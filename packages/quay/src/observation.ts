@@ -687,6 +687,12 @@ export interface MechanicalFanInRecord {
   suitePid: number | null;
   /** landed sha (develop tip after ff); null when red. */
   landedSha: string | null;
+  /** suite process log file name (`.quay/fan-in-suite-<task>~<runId>~<ts>-<hash>.log` basename) —
+   *  the step="suite" failure's full output carrier. On disk since the mechanical fan-in landed, but
+   *  NOT parsed until gap-needs-human-raw-fan-in-reason-observation-surface: the field was written
+   *  (driver-filters.test.mjs's own fixture carries it) and read by nobody, so the one artifact that
+   *  says WHAT the suite failed on was invisible to every observation surface. null when absent. */
+  suiteLog: string | null;
   /** fan-in process log file name (`.quay/fan-in-<task>-<runId>.log` basename) — the Runs block's
    *  view/download link key. null when absent. */
   fanInLog: string | null;
@@ -745,24 +751,48 @@ export function parseMechanicalFanIn(v: unknown): MechanicalFanInRecord | null {
     suiteOutcome: str(j.suiteOutcome),
     suitePid: num(j.suitePid),
     landedSha: str(j.landedSha),
+    suiteLog: str(j.suiteLog),
     fanInLog: str(j.fanInLog),
   };
 }
 
-/** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records. Pure — never
- *  throws; a malformed line is skipped (best-effort runtime log, not a store). Reads every field the
- *  driver writes (computeOutcome's 14) rather than a hand-picked subset — `worker_pid` was on disk
- *  but dropped by the old 4-field parse (gap-webui-task-runs-block AC2). */
-export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
+/** A parsed carrier + the line accounting that makes "read it all" distinguishable from "read some
+ *  of it". `malformedLines` is ENUMERATED rather than folded into a boolean — hard rule ③ (枚举，不布尔):
+ *  a boolean `ok` would make "every line parsed" and "3 of 400 lines were unreadable" the same value. */
+export interface ParsedWorkerOutcomes {
+  records: WorkerOutcomeRecord[];
+  /** Non-blank lines seen (the parse input size). */
+  totalLines: number;
+  /** Lines that carried data but could not be read as a JSON object. */
+  malformedLines: number;
+}
+
+/** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records, WITH the line
+ *  accounting. Pure — never throws; a malformed line is skipped (best-effort runtime log, not a store).
+ *  Reads every field the driver writes (computeOutcome's 14) rather than a hand-picked subset —
+ *  `worker_pid` was on disk but dropped by the old 4-field parse (gap-webui-task-runs-block AC2).
+ *
+ *  ⚠️ A line that parses to a NON-OBJECT (a bare `5` / `"x"` / `[]` straight into JSON.parse) counts
+ *  as malformed rather than being pushed as an all-null record: the old shape fabricated a record with
+ *  16 null fields out of a line that carried no record at all, which is exactly the 硬规则 3b form
+ *  (「读不懂」伪装成「读到了一个空记录」). */
+export function parseWorkerOutcomeRecordsDetailed(text: string): ParsedWorkerOutcomes {
   const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
   const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
   const out: WorkerOutcomeRecord[] = [];
+  let totalLines = 0;
+  let malformedLines = 0;
   for (const line of String(text).split("\n")) {
     const s = line.trim();
     if (!s) continue;
+    totalLines++;
     let j: Record<string, unknown>;
-    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) { malformedLines++; continue; }
+      j = parsed as Record<string, unknown>;
+    } catch { malformedLines++; continue; }
     out.push({
       ts: str(j.ts),
       task: str(j.task),
@@ -782,7 +812,13 @@ export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
       mechanical_fan_in: parseMechanicalFanIn(j.mechanical_fan_in),
     });
   }
-  return out;
+  return { records: out, totalLines, malformedLines };
+}
+
+/** Parse `.quay/worker-outcome.jsonl` into outcome records (no line accounting). Pure — see
+ *  `parseWorkerOutcomeRecordsDetailed`, which this delegates to (⛔ one parser, two views — hard rule 5b). */
+export function parseWorkerOutcomeRecords(text: string): WorkerOutcomeRecord[] {
+  return parseWorkerOutcomeRecordsDetailed(text).records;
 }
 
 /**
@@ -969,13 +1005,35 @@ export function liveSessionIdForPid(pid: string, home: string = os.homedir()): s
   }
 }
 
-/** Read `.quay/worker-outcome.jsonl` as text. Absent/unreadable ⇒ null (degrade, never throw). */
-function readWorkerOutcomeText(root: string): string | null {
+/** The three-state result of reading a `.quay/` carrier's TEXT: `absent` (no such file — a real
+ *  "nothing was ever written here") is a DIFFERENT value from `unreadable` (the file is there but
+ *  could not be read), and neither may be shaped like a successful empty read (硬规则 3b — a
+ *  boolean "could I read it" would collapse both into the same false). */
+export type CarrierTextStatus = "ok" | "absent" | "unreadable";
+
+export interface CarrierText {
+  status: CarrierTextStatus;
+  text: string | null;
+  /** Why the read failed (null for ok/absent) — carried so the caller can say WHAT was wrong. */
+  reason: string | null;
+}
+
+/** Read a `<root>/<rel>` carrier as text, KEEPING the absent-vs-unreadable distinction. */
+function readCarrierText(root: string, rel: string): CarrierText {
   try {
-    return fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
-  } catch {
-    return null;
+    return { status: "ok", text: fs.readFileSync(path.join(root, rel), "utf8"), reason: null };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { status: "absent", text: null, reason: null };
+    return { status: "unreadable", text: null, reason: (err as Error)?.message ?? String(err) };
   }
+}
+
+/** Read `.quay/worker-outcome.jsonl` as text. Absent/unreadable ⇒ null (degrade, never throw). The
+ *  distinction is dropped HERE on purpose (this is the pre-existing lossy view); callers that must
+ *  tell the two apart use `readCarrierText`/`readFanInAttempts`. */
+function readWorkerOutcomeText(root: string): string | null {
+  return readCarrierText(root, WORKER_OUTCOME_REL).text;
 }
 
 /** Read + parse all worker-outcome records for a workspace root (the /task/<id> Runs block's data
@@ -983,6 +1041,122 @@ function readWorkerOutcomeText(root: string): string | null {
 export function readWorkerOutcomeRecords(root: string): WorkerOutcomeRecord[] {
   const text = readWorkerOutcomeText(root);
   return text != null ? parseWorkerOutcomeRecords(text) : [];
+}
+
+// ── the fan-in attempt reader (gap-needs-human-raw-fan-in-reason-observation-surface) ───────────
+//
+// THE GAP THIS CLOSES (人 2026-09-20 逐字): 「driver 当然应当记录相应的日志，人类观测面（如 quay
+// cli/mcp/web）也应提供这些日志的访问。」 The driver already writes one record per attempt into
+// `.quay/worker-outcome.jsonl` (2295 records on the live store, 978 carrying `mechanical_fan_in`),
+// but only ONE observation surface read it (web `/task/<id>`'s Runs block); CLI and MCP had no entry
+// point at all, and `/needs-human` showed only the 阻碍原因 prose the promotion-driver pasted into
+// the task body. An operator looking at a needs-human task could not see WHICH STEP each attempt died
+// on, or the raw failure text.
+//
+// ⛔ NO CLASSIFICATION, NO INTERPRETATION (same ruling): the enum of "causes" is unreliable for an
+// exception, so this reader surfaces the RAW text and nothing else. `step`/`reason`/`suiteLog`/
+// `fanInLog` are lifted verbatim from the record; `reason` is NEVER truncated here — truncation is a
+// rendering decision and belongs to whoever renders (a reader that cut the text would make the CLI/MCP
+// surfaces permanently lossy for a caller that wants the whole line).
+
+/** One worker attempt, as the human observation surface needs it. A SUPERSET of the 8 fields the
+ *  proposal names: `extends WorkerOutcomeRecord` so an existing consumer that wants the full record
+ *  (the /task/<id> Runs block's fan-in cell) can take the same object rather than re-reading the
+ *  carrier — ⛔ one reader, not two (硬规则 5b). The lifted `outcome`/`step`/`reason`/`suiteLog`/
+ *  `fanInLog` are the `mechanical_fan_in` sub-object's own values, promoted so a caller that only
+ *  wants the failure原文 does not have to know the nesting. All of them are null when the record
+ *  predates mechanical fan-in — the honest "not recorded", never a fabricated value. */
+export interface FanInAttempt extends WorkerOutcomeRecord {
+  /** `mechanical_fan_in.outcome` — "landed" | "red" (null when the attempt never reached fan-in). */
+  outcome: string | null;
+  /** `mechanical_fan_in.step` — the first FAILING step name; null when landed / never reached. */
+  step: string | null;
+  /** `mechanical_fan_in.reason` — the failure原文, verbatim and untruncated. */
+  reason: string | null;
+  /** `mechanical_fan_in.suiteLog` — the suite step's full-output log file basename (step="suite"). */
+  suiteLog: string | null;
+  /** `mechanical_fan_in.fanInLog` — the fan-in process log file basename. */
+  fanInLog: string | null;
+}
+
+/** The three-state outcome of reading the attempt carrier — NOT a boolean and NOT an array length.
+ *  `carrier-absent` (this workspace never ran a worker → a real "no attempts") is a different value
+ *  from `carrier-unreadable` (attempts exist but cannot be read right now) and from
+ *  `malformed-lines` (read, but not all of it parsed). Hard rule 3b: 「读不出」 must be readable as
+ *  itself, never as 「这里没有」. */
+export type FanInAttemptsStatus = "ok" | "carrier-absent" | "carrier-unreadable" | "malformed-lines";
+
+export interface FanInAttemptsResult {
+  status: FanInAttemptsStatus;
+  /** Why the carrier could not be read in full (null for `ok`/`carrier-absent`) — a sentence the
+   *  caller can render, never a bare flag. */
+  reason: string | null;
+  /** The carrier path this result is ABOUT, repo-relative (data, so a caller need not hardcode it). */
+  carrier: string;
+  /** Non-blank lines seen (0 when the carrier was absent/unreadable). */
+  totalLines: number;
+  /** Lines that carried data but could not be read as a JSON object (enumerated — hard rule ③). */
+  malformedLines: number;
+  /** The attempts, in carrier order (oldest → newest). */
+  attempts: FanInAttempt[];
+}
+
+/** Project a parsed outcome record onto the attempt view. Pure. */
+export function fanInAttemptFromRecord(r: WorkerOutcomeRecord): FanInAttempt {
+  const mfi = r.mechanical_fan_in;
+  return {
+    ...r,
+    outcome: mfi?.outcome ?? null,
+    step: mfi?.step ?? null,
+    reason: mfi?.reason ?? null,
+    suiteLog: mfi?.suiteLog ?? null,
+    fanInLog: mfi?.fanInLog ?? null,
+  };
+}
+
+/**
+ * The ONE reader behind web / CLI / MCP (⛔ the three surfaces must not each write their own parse).
+ *
+ * `taskId` filters to one task's attempts (null = every task); `limit` keeps the most recent N of the
+ * selected set (null = all). The returned `attempts` are in carrier order (oldest → newest) — a
+ * `limit` therefore trims the OLD end, the natural "tail" reading of a runtime log.
+ *
+ * Degradation is explicit, never silent: an absent carrier answers `carrier-absent` (this workspace
+ * ran no worker — correct and distinguishable), an existing-but-unreadable one answers
+ * `carrier-unreadable` WITH the underlying error, and a partially-parsed one answers
+ * `malformed-lines` with the count. Only `ok` means "every line was read".
+ */
+export function readFanInAttempts(
+  root: string,
+  { taskId = null, limit = null }: { taskId?: string | null; limit?: number | null } = {},
+): FanInAttemptsResult {
+  const base = { carrier: WORKER_OUTCOME_REL, totalLines: 0, malformedLines: 0, attempts: [] as FanInAttempt[] };
+  const carrier = readCarrierText(root, WORKER_OUTCOME_REL);
+  if (carrier.status !== "ok") {
+    return {
+      ...base,
+      status: carrier.status === "absent" ? "carrier-absent" : "carrier-unreadable",
+      reason: carrier.status === "absent"
+        ? null
+        : `${WORKER_OUTCOME_REL} could not be read: ${carrier.reason ?? "unknown error"}`,
+    };
+  }
+  const parsed = parseWorkerOutcomeRecordsDetailed(carrier.text as string);
+  let attempts = parsed.records.map(fanInAttemptFromRecord);
+  if (taskId != null) attempts = attempts.filter((a) => a.task === taskId);
+  if (limit != null && Number.isFinite(limit) && limit >= 0 && attempts.length > limit) {
+    attempts = attempts.slice(attempts.length - limit);
+  }
+  return {
+    ...base,
+    status: parsed.malformedLines > 0 ? "malformed-lines" : "ok",
+    reason: parsed.malformedLines > 0
+      ? `${parsed.malformedLines} of ${parsed.totalLines} line(s) in ${WORKER_OUTCOME_REL} could not be parsed as a JSON record`
+      : null,
+    totalLines: parsed.totalLines,
+    malformedLines: parsed.malformedLines,
+    attempts,
+  };
 }
 
 /**

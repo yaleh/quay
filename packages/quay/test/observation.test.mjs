@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 
@@ -1353,4 +1353,138 @@ test("AC4 — the background refresh is fail-open: git unavailable never throws,
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-needs-human-raw-fan-in-reason-observation-surface — the fan-in attempt reader ─────────────
+// 人 2026-09-20: 「driver 当然应当记录相应的日志，人类观测面（如 quay cli/mcp/web）也应提供这些日志的
+// 访问。」 plus the ruling that a needs-human cause is an exception and an enum of causes is unreliable
+// — so this reader surfaces the 原文 and NEVER classifies it. Its second obligation is 硬规则 3b: a
+// carrier it cannot read must be a DISTINGUISHABLE state, not an empty list.
+
+/** One attempt whose mechanical fan-in failed at `step` with `reason`, plus a landed one before it. */
+function writeFanInCarrier(root, task, reason, step = "suite") {
+  fs.writeFileSync(path.join(root, WORKER_OUTCOME_REL), [
+    JSON.stringify({
+      ts: "2026-09-20T04:00:00.000Z", task, run_id: "r-landed", final_state: "completed",
+      started_at: "2026-09-20T03:50:00.000Z", ended_at: "2026-09-20T04:00:00.000Z",
+      mechanical_fan_in: { outcome: "landed", step: null, reason: null },
+    }),
+    JSON.stringify({
+      ts: "2026-09-20T05:25:06.591Z", task, run_id: "r-red", final_state: "exited-not-landed",
+      started_at: "2026-09-20T04:36:41.511Z", ended_at: "2026-09-20T05:25:06.591Z",
+      failure_reason: "task status=ready (not done) and leftover worktree still present",
+      mechanical_fan_in: {
+        outcome: "red", step, reason,
+        suiteLog: "fan-in-suite-" + task + "~r-red.log", fanInLog: "fan-in-" + task + "-r-red.log",
+        lockHoldSecs: 453,
+      },
+    }),
+  ].join("\n") + "\n");
+}
+
+test("readFanInAttempts: returns each attempt's step + the RAW reason (untruncated) + suiteLog/fanInLog", () => {
+  const ws = workerWorkspace("fanin-attempts");
+  try {
+    const reason = "AssertionError [ERR_ASSERTION]: task-status-drift-check.ts: stdout differs between symlink and real invocation";
+    writeFanInCarrier(ws, "T-1", reason);
+
+    const all = readFanInAttempts(ws, {});
+    assert.equal(all.status, "ok", "every line parsed ⇒ the ONLY status that means 读全了");
+    assert.equal(all.attempts.length, 2);
+    assert.equal(all.totalLines, 2);
+    assert.equal(all.malformedLines, 0);
+    assert.equal(all.carrier, WORKER_OUTCOME_REL, "the result names the carrier it read (data, not a caller literal)");
+
+    const t1 = readFanInAttempts(ws, { taskId: "T-1" });
+    assert.equal(t1.attempts.length, 2, "taskId selects this task's attempts");
+    assert.equal(readFanInAttempts(ws, { taskId: "no-such-task" }).attempts.length, 0, "an unknown task selects none");
+
+    const red = t1.attempts[1];
+    assert.equal(red.run_id, "r-red");
+    assert.equal(red.final_state, "exited-not-landed");
+    assert.equal(red.outcome, "red");
+    assert.equal(red.step, "suite", "the failing step is lifted to the top level");
+    assert.equal(red.reason, reason, "reason is the 原文 — byte for byte, NOT truncated");
+    assert.equal(red.suiteLog, "fan-in-suite-T-1~r-red.log", "the suite step's log file is parsed (a field on disk read by nobody until now)");
+    assert.equal(red.fanInLog, "fan-in-T-1-r-red.log");
+    // The projection is a SUPERSET: the full outcome record rides along, so the /task/<id> Runs block
+    // reads worker_pid/mechanical_fan_in off the SAME object (one reader, not two — 硬规则 5b).
+    assert.equal(red.mechanical_fan_in.step, "suite", "the nested record is preserved for renderFanInCell");
+    assert.equal(red.mechanical_fan_in.lockHoldSecs, 453);
+
+    const landed = t1.attempts[0];
+    assert.equal(landed.outcome, "landed");
+    assert.equal(landed.step, null);
+    assert.equal(landed.reason, null, "a landed attempt has no reason — null, never a fabricated string");
+
+    const limited = readFanInAttempts(ws, { taskId: "T-1", limit: 1 });
+    assert.equal(limited.attempts.length, 1);
+    assert.equal(limited.attempts[0].run_id, "r-red", "limit keeps the MOST RECENT N (tail semantics)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readFanInAttempts: absent / unreadable / corrupt-line are three DIFFERENT states (硬规则 3b)", () => {
+  // ① ABSENT carrier — this workspace never dispatched a worker. A real "nothing here".
+  const absent = workerWorkspace("fanin-absent");
+  try {
+    const r = readFanInAttempts(absent, {});
+    assert.equal(r.status, "carrier-absent");
+    assert.deepEqual(r.attempts, []);
+    assert.equal(r.reason, null, "absence needs no explanation");
+  } finally {
+    fs.rmSync(absent, { recursive: true, force: true });
+  }
+
+  // ② CORRUPT lines — the carrier exists, some of it is unreadable. The good records still come
+  //    back, but the status is NOT `ok`: "read some of it" must not read as "read it all".
+  const corrupt = workerWorkspace("fanin-corrupt");
+  try {
+    fs.writeFileSync(path.join(corrupt, WORKER_OUTCOME_REL),
+      '{"task":"A","run_id":"r1","final_state":"completed"}\n' +
+      '{"task":"B","run_id":"r2"\n' +   // truncated JSON
+      '[]\n' +                          // valid JSON, NOT a record (the old shape fabricated an all-null record)
+      'not json\n');
+    const r = readFanInAttempts(corrupt, {});
+    assert.equal(r.status, "malformed-lines");
+    assert.equal(r.totalLines, 4);
+    assert.equal(r.malformedLines, 3, "enumerated, not a boolean (硬规则 ③)");
+    assert.equal(r.attempts.length, 1, "the one readable line is still returned");
+    assert.equal(r.attempts[0].task, "A");
+    assert.ok(r.reason != null && r.reason.includes("3 of 4"), `the reason names the counts (got ${r.reason})`);
+  } finally {
+    fs.rmSync(corrupt, { recursive: true, force: true });
+  }
+
+  // ③ UNREADABLE carrier — the file is there (EISDIR), the read fails for a reason that is NOT
+  //    "it does not exist". This is the state the old lossy reader reported as [].
+  const unreadable = workerWorkspace("fanin-unreadable");
+  try {
+    fs.mkdirSync(path.join(unreadable, WORKER_OUTCOME_REL), { recursive: true });
+    const r = readFanInAttempts(unreadable, {});
+    assert.equal(r.status, "carrier-unreadable", "读不出 is its OWN value, never shaped like an empty read");
+    assert.deepEqual(r.attempts, []);
+    assert.ok(r.reason != null && r.reason.includes("could not be read"), `the diagnostic is carried (got ${r.reason})`);
+  } finally {
+    fs.rmSync(unreadable, { recursive: true, force: true });
+  }
+});
+
+test("parseWorkerOutcomeRecordsDetailed: line accounting; the lossy parseWorkerOutcomeRecords delegates to it", () => {
+  const text = '{"task":"a","run_id":"r1"}\n\nnot json\n{"task":"b","run_id":"r2"}\n';
+  const d = parseWorkerOutcomeRecordsDetailed(text);
+  assert.equal(d.totalLines, 3, "blank lines are not data lines");
+  assert.equal(d.malformedLines, 1);
+  assert.deepEqual(d.records.map((r) => r.task), ["a", "b"]);
+  assert.deepEqual(parseWorkerOutcomeRecords(text), d.records, "the legacy view is this parse's records (⛔ one parser)");
+
+  // fanInAttemptFromRecord is a pure projection: a record with no mechanical_fan_in lifts to all-null.
+  const bare = d.records[0];
+  const a = fanInAttemptFromRecord(bare);
+  assert.equal(a.step, null);
+  assert.equal(a.reason, null);
+  assert.equal(a.suiteLog, null);
+  assert.equal(a.fanInLog, null);
+  assert.equal(a.outcome, null);
 });

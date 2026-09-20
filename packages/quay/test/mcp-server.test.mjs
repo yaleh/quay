@@ -88,6 +88,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { execFileSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import YAML from "yaml";
@@ -508,6 +509,85 @@ async function main() {
 
     const noName = await core.callTool({ name: "instrument", arguments: { action: "run" } });
     assert(noName.isError === true, "instrument run without a name is isError:true, not a crash");
+  }
+
+  // ---- 7c. (gap-needs-human-raw-fan-in-reason-observation-surface) driver_log ----
+  // 人 2026-09-20：「driver 当然应当记录相应的日志，人类观测面（如 quay cli/mcp/web）也应提供这些日志的
+  // 访问。」 The driver already wrote one record per attempt into `.quay/worker-outcome.jsonl`; the MCP
+  // tool and the `quay driver log` CLI must return the SAME record FIELD FOR FIELD — the deepEqual
+  // below is what makes "both go through the one reader" a measurement rather than an intention
+  // (⛔ three surfaces each writing their own parse is exactly what this task forbids).
+  {
+    const fixtureReason = "AssertionError [ERR_ASSERTION]: stdout differs between symlink and real invocation";
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "worker-outcome.jsonl"),
+      [
+        JSON.stringify({
+          ts: "2026-09-20T04:00:00.000Z", task: "MCP-A1", run_id: "r-landed",
+          started_at: "2026-09-20T03:50:00.000Z", ended_at: "2026-09-20T04:00:00.000Z",
+          final_state: "completed", mechanical_fan_in: { outcome: "landed", step: null, reason: null },
+        }),
+        JSON.stringify({
+          ts: "2026-09-20T05:25:06.591Z", task: "MCP-A1", run_id: "r-red",
+          started_at: "2026-09-20T04:36:41.511Z", ended_at: "2026-09-20T05:25:06.591Z",
+          final_state: "exited-not-landed",
+          mechanical_fan_in: {
+            outcome: "red", step: "suite", reason: fixtureReason,
+            suiteLog: "fan-in-suite-MCP-A1.log", fanInLog: "fan-in-MCP-A1.log",
+          },
+        }),
+      ].join("\n") + "\n"
+    );
+
+    const viaMcp = await core.callTool({ name: "driver_log", arguments: { kind: "worker", task: "MCP-A1" } });
+    assert(viaMcp.isError !== true, "driver_log succeeds through quay mcp");
+    const mcpRec = viaMcp.structuredContent;
+    assert(mcpRec.status === "ok", "the MCP result carries the reader's own tri-state status");
+    assert(mcpRec.attempts.length === 2, "both of this task's attempts come back");
+    assert(mcpRec.attempts[1].step === "suite", "the failing step is lifted onto the attempt");
+    assert(mcpRec.attempts[1].reason === fixtureReason, "the RAW failure text comes back untruncated and unclassified");
+
+    const cliOut = execFileSync(
+      "node",
+      [coreBin, "driver", "log", "--kind", "worker", "--task", "MCP-A1", "--json", "--root", workspaceRoot],
+      { encoding: "utf8" }
+    );
+    // Field-identical, key-order-insensitively: both sides are the SAME `readFanInAttempts` result,
+    // serialized by two different transports (the CLI's own JSON.stringify vs MCP's
+    // structuredContent). `stableJson` sorts keys recursively so the comparison measures the VALUES,
+    // not the serializers' key order.
+    const stableJson = (v) =>
+      Array.isArray(v)
+        ? `[${v.map(stableJson).join(",")}]`
+        : v && typeof v === "object"
+          ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(",")}}`
+          : JSON.stringify(v ?? null);
+    assert(
+      stableJson(JSON.parse(cliOut)) === stableJson(mcpRec),
+      "AC4: `quay driver log --json` and MCP `driver_log` return FIELD-IDENTICAL records (one shared reader)"
+    );
+    assert(
+      JSON.parse(cliOut).attempts[1].reason === mcpRec.attempts[1].reason,
+      "AC4: the RAW failure text is byte-identical across the CLI and MCP arms"
+    );
+
+    // A kind with no attempt carrier is reported as NOT COVERED — never as an empty log (硬规则 3b).
+    const notCovered = await core.callTool({ name: "driver_log", arguments: { kind: "promotion" } });
+    assert(notCovered.isError === true, "a not-covered kind is isError:true, not an empty log");
+
+    // A carrier that could not be read is an ERROR too, and it says WHY rather than answering [].
+    const carrierPath = path.join(workspaceRoot, ".quay", "worker-outcome.jsonl");
+    const saved = fs.readFileSync(carrierPath, "utf8");
+    fs.rmSync(carrierPath);
+    fs.mkdirSync(carrierPath, { recursive: true }); // a DIRECTORY at the carrier path: EISDIR, not ENOENT
+    try {
+      const unreadable = await core.callTool({ name: "driver_log", arguments: { kind: "worker" } });
+      assert(unreadable.isError === true, "an unreadable carrier is isError:true (读不出 ≠ 空)");
+      assert(unreadable.structuredContent?.status === "carrier-unreadable", "and the status names the state");
+    } finally {
+      fs.rmSync(carrierPath, { recursive: true, force: true });
+      fs.writeFileSync(carrierPath, saved);
+    }
   }
 
   // NOTE (AC4 connection consolidation): `core` is deliberately NOT closed here

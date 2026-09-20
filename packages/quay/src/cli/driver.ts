@@ -28,9 +28,10 @@
 
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { parseFlags } from "./flags.ts";
+import { parseFlags, resolveJsonFlag } from "./flags.ts";
 import { findConfig } from "../config.ts";
 import { resolvePluginScriptExec } from "../plugin-root.ts";
+import { readFanInAttempts, type FanInAttemptsResult } from "../observation.ts";
 import type { CliCtx } from "./context.ts";
 
 // VERBS 与 KINDS 定义在 cli/driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能把这两个
@@ -89,8 +90,18 @@ Usage:
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (⛔ not just a
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
+  log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
+             attempt — never classified, never interpreted). Reads the workspace's own runtime
+             carrier through observation.readFanInAttempts, the same single reader the web
+             /needs-human page and the MCP \`driver_log\` tool use. ⛔ Does NOT start/stop anything
+             and does not spawn the supervisor kernel.
 
   --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
+             For \`log\`, only \`worker\` is covered today: the per-attempt fan-in records live in the
+             worker driver's outcome carrier. Another kind is reported as not-covered (exit 1), never
+             as an empty log.
+  --task <id>                 (log only) Restrict to one task's attempts.
+  --limit <n>                 (log only) Keep the most recent n attempts.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
                               even if every edge event (worker exit) is lost — degrade to
@@ -108,12 +119,80 @@ carried from the workspace root (main checkout), not a short-lived worktree.
     return;
   }
 
+  // `log` is the ONE read-only verb: it is intercepted HERE, before the kernel delegation below,
+  // because it has no kernel counterpart (no supervisor, no control state, no spawn). ⛔ It also does
+  // NOT go through the worktree-root rejection — that guard protects a RESIDENT PROCESS from being
+  // carried by a short-lived worktree, and reading a log from one is harmless (and useful: an
+  // operator debugging a worktree reads its log there).
+  if (sub === "log") {
+    const r = runDriverLog(flags, resolveRoot(flags.root));
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.reason) process.stderr.write(r.reason + "\n");
+    process.exitCode = r.exitCode;
+    return;
+  }
+
   const r = runDriver(sub, flags.kind, rest, flags.root);
   if (r.stdout) process.stdout.write(r.stdout);
   if (r.stderr) process.stderr.write(r.stderr);
   if (r.reason) console.error(r.reason);
   process.exitCode = r.exitCode;
   return;
+}
+
+/** Render a `FanInAttemptsResult` as human-readable text — the non-`--json` arm of `driver log`.
+ *  ⛔ Every field it prints is the record's own value, verbatim: `reason` is NOT truncated and NOT
+ *  classified (人 2026-09-20: the cause of a needs-human is an exception and an enum of causes is
+ *  unreliable, so this surface shows the原文 and nothing else). The status line is the reader's own
+ *  tri-state, so "the carrier could not be read" reads as itself instead of as an empty log. */
+export function renderFanInAttemptsText(res: FanInAttemptsResult): string {
+  const lines: string[] = [];
+  lines.push(`carrier: ${res.carrier}  status: ${res.status}${res.reason != null ? `  (${res.reason})` : ""}`);
+  lines.push(`lines: ${res.totalLines} (${res.malformedLines} unparseable)  attempts: ${res.attempts.length}`);
+  for (const a of res.attempts) {
+    lines.push("");
+    lines.push(`${a.ts ?? "—"}  ${a.task ?? "—"}  run=${a.run_id ?? "—"}  state=${a.final_state ?? "—"}`);
+    if (a.step != null) lines.push(`  step:       ${a.step}`);
+    if (a.reason != null) lines.push(`  reason:     ${a.reason}`);
+    if (a.failure_reason != null) lines.push(`  failure:    ${a.failure_reason}`);
+    if (a.suiteLog != null) lines.push(`  suite log:  ${a.suiteLog}`);
+    if (a.fanInLog != null) lines.push(`  fan-in log: ${a.fanInLog}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** The `quay driver log` body — a pure function of (flags, resolved root) so the CLI and any future
+ *  caller share ONE implementation (the `runDriver` pattern above). `root` is null when no
+ *  `.quay/config.yml` was found (the caller reports it rather than guessing a workspace). */
+export function runDriverLog(
+  flags: Record<string, any>,
+  root: string | null,
+): { stdout: string; reason: string | null; exitCode: number } {
+  if (!root) {
+    return { stdout: "", reason: `quay driver log: no .quay/config.yml found (searched from ${flags.root ?? process.cwd()} upward). Run from a quay workspace root, or pass --root <workspace-root>.`, exitCode: 1 };
+  }
+  const kind = typeof flags.kind === "string" ? flags.kind : "";
+  if (!KINDS.includes(kind)) {
+    return { stdout: "", reason: `quay driver log: missing/invalid --kind: ${kind || "<empty>"} (expected ${KINDS.join("|")})`, exitCode: 1 };
+  }
+  if (kind !== "worker") {
+    return { stdout: "", reason: `quay driver log: --kind ${kind} is not covered by this reader (only \`worker\` writes the per-attempt fan-in records). Refusing to print an empty log as if the driver had none.`, exitCode: 1 };
+  }
+  const limit = flags.limit !== undefined ? Number(flags.limit) : null;
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+    return { stdout: "", reason: `quay driver log: --limit requires a non-negative integer (got ${JSON.stringify(flags.limit)})`, exitCode: 1 };
+  }
+  const taskId = typeof flags.task === "string" ? flags.task : null;
+  const res = readFanInAttempts(root, { taskId, limit });
+  const json = resolveJsonFlag(flags);
+  if (json == null) {
+    return { stdout: "", reason: `quay driver log: invalid --format value (only \`json\` is accepted)`, exitCode: 1 };
+  }
+  const stdout = json.json ? JSON.stringify(res, null, 2) + "\n" : renderFanInAttemptsText(res);
+  // Only an UNREADABLE carrier is an error: an absent one is a real "this workspace ran no worker",
+  // and `malformed-lines` still delivered the attempts that DID parse (both exit 0 — a caller that
+  // needs the distinction reads `status` in the output, which is present in BOTH arms).
+  return { stdout, reason: null, exitCode: res.status === "carrier-unreadable" ? 1 : 0 };
 }
 
 /** Structured result of `runDriver` — the shared core behind both the CLI and the web surface. */

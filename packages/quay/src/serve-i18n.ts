@@ -1270,8 +1270,8 @@ export const DOC_TASK_KEYS = [
   "docReadFailed",
   // /tasks — the two `.malformed-row` placeholders
   "taskMissingId", "taskParseFailed",
-  // /task/<id> — the Runs block's two states
-  "runsNoRecords", "runInFlight",
+  // /task/<id> — the Runs block's three states
+  "runsNoRecords", "runsUnreadable", "runInFlight",
 ] as const;
 
 export type DocTaskKey = (typeof DOC_TASK_KEYS)[number];
@@ -1296,6 +1296,15 @@ export const DOC_TASK_LABELS: Record<DocTaskKey, { en: string; zh: string }> = {
   runsNoRecords: {
     en: "No worker runs recorded ({carrier})",
     zh: "无 worker 运行记录（{carrier}）",
+  },
+  // gap-needs-human-raw-fan-in-reason-observation-surface: the Runs block when the carrier EXISTS
+  // but could not be read. ⛔ A SEPARATE row from `runsNoRecords` on purpose — 「读不出」 and
+  // 「无记录」 are different facts, and one shared row would make a broken log indistinguishable
+  // from a task that never ran (硬规则 3b). Same `{carrier}` hole (DATA, the reader's own path); the
+  // reader's diagnostic sentence follows it at the call site (also DATA, also escaped).
+  runsUnreadable: {
+    en: "Worker runs could not be read ({carrier})",
+    zh: "worker 运行记录读不出（{carrier}）",
   },
   // The Runs row for a worker that is live right now (no END record yet). ⛔ NOT folded into ROW 5's
   // `running` ("Running"/"运行中"): a different zh word, a different table and a different page — the
@@ -2080,6 +2089,10 @@ export const NEEDS_HUMAN_KEYS = [
   "colReason", "reasonNotRecorded",
   // the two empty states (see the note above)
   "emptyActive", "emptyLedger",
+  // the latest-failure column (gap-needs-human-raw-fan-in-reason-observation-surface): its header,
+  // the word for "no attempt is recorded for this task", and the word for the ONE state that must
+  // not read as an empty cell — the attempt log exists but could not be read (硬规则 3b).
+  "colLatestFailure", "latestFailureNotRecorded", "latestFailureUnreadable",
 ] as const;
 
 export type NeedsHumanKey = (typeof NEEDS_HUMAN_KEYS)[number];
@@ -2115,6 +2128,16 @@ export const NEEDS_HUMAN_LABELS: Record<NeedsHumanKey, { en: string; zh: string 
     en: "No needs-human escalations recorded ({code}).",
     zh: "无 needs-human 升级记录（{code}）。",
   },
+  // ── the latest-failure column (gap-needs-human-raw-fan-in-reason-observation-surface) ──────────
+  // ⚠️ The CELL's content is the driver's RAW failure text — DATA, rendered verbatim and escaped,
+  // NOT a row here (this page's standing rule: 阻碍原因 / ledger detail / task titles are never
+  // translated). These three rows are only the column header and its two WORDS FOR ABSENCE.
+  // ⚠️ TWO rows for absence, not one: "no attempt is recorded for this task" and "the attempt log
+  // could not be read" are different facts and must not share a string (硬规则 3b — a reader that
+  // cannot read its input must not render the same bytes as a reader that found nothing).
+  colLatestFailure: { en: "Latest failure (raw)", zh: "最近失败原文" },
+  latestFailureNotRecorded: { en: "No attempt recorded", zh: "无尝试记录" },
+  latestFailureUnreadable: { en: "Attempt log unreadable", zh: "尝试日志读不出" },
 };
 
 /** The whole /needs-human roster resolved for one language — take it ONCE per render (the
