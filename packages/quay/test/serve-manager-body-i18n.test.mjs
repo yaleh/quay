@@ -105,10 +105,17 @@ function stripLangSwitcher(body) {
  *  carrying a string the READER produced and this page merely echoes.
  *
  *  (b) is AC2's "剩余含中文的行逐条归类" made mechanical. The reader's own text covers two classes:
- *  the diagnostics after the `obsNote` prefix (`— …/loop-driver-check.sh 缺失（…）`) and the
- *  `observer-registry.conf` rows' `note` column — both rendered VERBATIM by this page, both the same
- *  class of thing as a task title. They are read here FROM THE SAME READER the page read
- *  (`readManager`), escapeHtml'd the same way, and lines they account for are excluded.
+ *  the diagnostics after the `obsNote` prefix and the `observer-registry.conf` rows' `note` column —
+ *  both rendered VERBATIM by this page, both the same class of thing as a task title. They are read
+ *  here FROM THE SAME READER the page read (`readManager`), escapeHtml'd the same way, and lines they
+ *  account for are excluded.
+ *
+ *  ⚠️ In THIS healthy fixture only the `note` column is non-null: every reader DIAGNOSTIC is null once
+ *  a source reads Ok, and `gap-observation-loop-driver-check-rel-module-relative` fixed the last one
+ *  that was not — the loop-driver probe used to resolve no script at all (`../../../plugin/scripts/…`
+ *  against the PLUGIN ROOT), so its 「缺失（… 未接入）」 note was rendered on the en page in EVERY repo.
+ *  The class itself is unchanged (it was always "any CJK string the reader produced", reasons
+ *  included); the assertion below now witnesses it through the registry's notes.
  *
  *  ⛔ ONLY CJK-bearing reader strings are eligible as exclusions. A short ASCII value would be a
  *  black hole — `line.includes(".")` is true of nearly every line — so the filter is "the reader
@@ -132,9 +139,10 @@ function pageAuthoredCjk(body, mgr) {
   return { residual, excluded, hits };
 }
 
-// ── the fixture: a real workspace. ASCII-only where it matters, EXCEPT the two deliberate Chinese
-//    carriers that must survive in both languages — the observer registry's `note` column (read
-//    from the real `orchestration/observer-registry.conf`) and the reader's own diagnostics. ─────
+// ── the fixture: a real workspace. ASCII-only where it matters, EXCEPT the deliberate Chinese
+//    carrier that must survive in both languages — the observer registry's `note` column, read from
+//    the real `orchestration/observer-registry.conf` (the reader's own diagnostics are all null in a
+//    healthy workspace; see the ⚠️ note on pageAuthoredCjk above). ─────────────────────────────────
 
 let server, port, root, originalCwd, tasksDir;
 
@@ -287,8 +295,9 @@ test("AC2: `Cookie: lang=en` renders /manager with ZERO page-authored CJK — an
     "the endonym class is present in the page (the two switcher items stripped above)");
   assert.ok(excluded.some((l) => SHARED_CHROME_WORDS.some((w) => l.includes(w))),
     "the named shared-chrome class fired (obsNote's state words are on this page in this fixture)");
-  assert.ok(excluded.some((l) => mgr.loopDriver.reason && l.includes(mgr.loopDriver.reason)),
-    "the reader-diagnostic class fired (the loop-driver probe's own missing-script note)");
+  assert.ok(excluded.some((l) => mgr.observers.rows.some(
+    (r) => r.note && CJK.test(r.note) && l.includes(escapeHtml(r.note)))),
+    "the reader-produced CJK class fired (the registry's own `note` column, rendered verbatim on the en page)");
   assert.ok(excluded.length <= 12, `the excluded set stays small and enumerated (got ${excluded.length})`);
 
   // ── the control, and it is the half that makes the zero above mean something (硬规则 2) ─────────

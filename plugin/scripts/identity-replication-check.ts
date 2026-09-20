@@ -4,10 +4,17 @@
 //   (a) 字面量复制度: 含 X 路径/basename/env 名/CLI flag 的【代码】文件数, 且未经由单一访问器
 //       (import/require/source)。按位置区分代码 / 注释 / 文档 — 注释与 .md 文档不算, 字符串字面量
 //       (路径常量、spawn 参数、注册表条目) 是代码级引用, 算。
+//       单一访问器认【三族】形态, 全在 accessorRegexSource() 一处: ①import/require ②source <内联路径
+//       (引号可嵌套): source "$(dirname "$0")/x.sh" ③先赋值路径到变量、再 source 该变量 (本仓 .sh
+//       的主流形态: _lib="$(dirname "${BASH_SOURCE[0]}")/x.sh"; … . "$_lib")。②③ 缺席曾使
+//       gate-script-lib.sh 的 67 个正当引用被逐个计成 hardcoded=82/accessor=0
+//       (gap-identity-accessor-regex-source-computed-path)。
 //   (b) 判定重写数: 按「读取的外部事实集合」给代码块建指纹 (例: 读 /proc/<pid>/cmdline ∧ 比较名字
 //       = 识别某进程), 同指纹的多处独立实现计数为判定重写。
 // 另报: 路径字面量常量 (产品源码硬编码 ../../../plugin/scripts/* 的 *_REL 常量, import 图上不可见)、
-//   plugin/scripts ↔ experiments/*/scripts 字节完全相同文件对、以及共享模块负控制 (gate-script-base.ts
+//   plugin/scripts ↔ experiments/*/scripts 字节完全相同文件对 (只计【两侧都是常规文件】的同名对——
+//   任一侧是软链就是单一来源引用/同一 inode, 逐字节比对等于文件和自己比, 不是「复制替代抽象」的证据;
+//   规则与 mirror-pair-drift-check.ts 取同一判定)、以及共享模块负控制 (gate-script-base.ts
 //   经单一 import 访问器被引用, 不得报高复制度)。
 //
 // 每个计数都内建「打印命中样本」纪律 (docs 附录 A): 报一个计数时同时报出它匹配到的前若干条实际内容,
@@ -147,6 +154,51 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ── 单一访问器正则 ───────────────────────────────────────────────────────────────────────────
+// 【一处定义, 两处使用】literalReplication() 与 replicationTable() 曾经各持这份正则的一份【逐字副本】
+// (gap-identity-accessor-regex-source-computed-path): 两份副本既让同一缺陷要修两遍, 又允许两条路径
+// 悄悄分叉。现在只有 accessorRegexSource() 这一份, 分叉在结构上不可能 (AC4)。
+
+/** shell 路径表达式片段 —— 允许内部出现【成对引号】, 但【不跨注释】。
+ *  `source "$(dirname "$0")/gate-script-lib.sh"` 的引号是嵌套的: 旧的 `[^"'\n]*?` 在内层第一个 `"`
+ *  处必然失败 ⇒ 本仓 6 个直接引用文件被逐个计成 hardcoded。
+ *  ⛔ 两个方向都不能过: 简单放宽成 `[^\n]*?` 会让 `. "$CONF" # loads x.sh` 这种【行尾注释里的提及】
+ *  也算成 accessor (匹配起点是行首的 `.`, 落在代码位置, 位置掩码拦不住) —— 等于把
+ *  `flagged = hardcoded >= threshold && hardcoded > accessor` 架空, 即把检测器关掉。
+ *  仅要求引号成对【也】不够: 那样 `. "$CONF" # loads x.sh` 会被读成「引号段 "$CONF" + 后面的路径」。
+ *  故未加引号的片段额外排除 `#` (shell 里词首的 `#` 开注释; 引号段内的 `#` 不受影响)。
+ *  两条合起来才同时做到「读得懂嵌套引号」与「不吞掉行尾注释」。 */
+const PATH_EXPR = `(?:[^\\n"'#]|"[^"\\n]*"|'[^'\\n]*')*?`;
+
+/** source / `.` 的【命令位置】前缀: 行首, 或紧跟 `;` `&` `|` `{` 换行; 之后再可选一个 shell 关键字。
+ *  关键字必须在真命令位【之后】—— 61 个 idiom-B 文件的实际形态是 `]; then . "$_gap_help_lib"` 一行,
+ *  所以关键字是不可省的一半; 而 `#` 不是命令位锚点, 纯注释行因此不会被误判成 accessor。 */
+const SOURCE_CMD = `(?:^|[;&|{\\n])\\s*(?:then\\s+|do\\s+|else\\s+)?(?:\\.|source)\\s+`;
+
+/** 变量赋值锚点 (行首 / 命令位之后)。 */
+const ASSIGN_ANCHOR = `(?:^|[;&|{\\n])\\s*`;
+
+/** 赋值语句与随后的 `source <变量>` 之间允许的最大距离 (字符)。 */
+const ACCESSOR_VAR_WINDOW = 2000;
+
+/** 单一访问器正则【源】—— 三个族:
+ *  ① `import … from "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
+ *  ② `source <.路径表达式>` / `. <.路径表达式>`        (shell 内联路径, 引号可嵌套)
+ *  ③ `VAR="<.路径表达式>"` … `. "$VAR"` / `source "${VAR}"`  (shell 先赋值路径、后 source 变量,
+ *     本仓 61 个 .sh 的主流形态 —— 单份正则做不到, 故用 \\1 反向引用把两半绑在同一个变量名上)
+ *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。 */
+export function accessorRegexSource(stem: string): string {
+  const s = escapeRegex(stem);
+  return (
+    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `import\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `require\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `${SOURCE_CMD}["']?${PATH_EXPR}${s}(?:\\.sh)?["']?|` +
+    `${ASSIGN_ANCHOR}([A-Za-z_][A-Za-z0-9_]*)=(["'])${PATH_EXPR}${s}(?:\\.sh)?\\2` +
+    `[\\s\\S]{0,${ACCESSOR_VAR_WINDOW}}?${SOURCE_CMD}["']?\\$\\{?\\1\\}?["']?)`
+  );
+}
+
 // ── (a) 路径字面量常量 (AC1: 产品源码硬编码 plugin 脚本相对路径的 *_REL 常量) ─────────────────
 
 export interface PathConstant {
@@ -187,23 +239,83 @@ export interface JudgmentRewrite {
   line: number;
 }
 
+/** 读取原语 —— 「这一行是在【读】」那一半。 */
+const READ_PRIM = /readFile|<|cat\s+|open\s*\(/;
+
+/** 比较/识别原语【词表】—— 与收窄前同一份（含 `argv[0]` 与 shell 的 `grep -q`）。
+ *  ⛔ 收窄改的是「原语必须作用在【读取结果】上」，**不是**「什么算原语」：砍词表会把判据砍空，
+ *  而判据砍空与「没有判定重写」同形（硬规则 2/3b）。 */
+const COMPARE_PRIM = /grep\s+-q|\.includes\(|\.indexOf\(|\.match\(|basename\(|\.split\(|\.startsWith\(|\.endsWith\(|argv\[0\]/;
+
+/** 可作用在【具名主体】/链式读表达式上的方法形比较原语。 */
+const COMPARE_METHOD = /\.(?:includes|indexOf|match|split|startsWith|endsWith)\(/;
+
+/** shell 比较记号：管道里的 `grep -q`、`case … in`、字符串/数值比较。 */
+const SHELL_CMP = /\bgrep\s+-q|\bcase\b[^\n]*\bin\b|=~|==|!=/;
+
+/** 链式绑定的最大间隔（字符）：读表达式之后多近接上比较原语才算「链在同一次读上」。 */
+const CHAIN_GAP = 40;
+/** 具名绑定的搜索窗口（字符）：主体被比较的位置离读多远还算同一次判定。 */
+const SUBJECT_WINDOW = 400;
+
+/** 同一行、读之前的最近一个 `IDENT =`（带或不带 const/let/var）：读结果的【具名主体】。
+ *  null ⇒ 这次读没有被绑定到任何名字 —— 正是纯快照收集器的形态（`arr.push(read…)`，结果被搬走、
+ *  比较发生在【别处】）。 */
+function readSubject(prefix: string): string | null {
+  const m =
+    /(?:^|[^\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[^=]*$/.exec(prefix) ??
+    /(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*=\s*[^=]*$/.exec(prefix);
+  return m ? m[1] : null;
+}
+
+/** 具名主体是否在窗口内【作为比较原语的操作数】被比较（= 「比较」作用在读取结果上）。 */
+function subjectCompared(src: string, from: number, subj: string, isShell: boolean): boolean {
+  const win = src.slice(from, from + SUBJECT_WINDOW);
+  const e = escapeRegex(subj);
+  if (new RegExp(`(?:^|[^\\w$.])${e}\\s*${COMPARE_METHOD.source}`).test(win)) return true;
+  if (new RegExp(`basename\\(\\s*${e}\\b`).test(win)) return true;
+  if (isShell) {
+    // 管道/`case` 把结果交给下一个进程或模式表而不是变量名，所以 shell 侧的绑定是
+    // 「$subj 与比较记号【同行】」—— 同一行即这一族的邻域约束。
+    const ref = new RegExp(`\\$\\{?${e}[\\}\\s"']`);
+    for (const line of win.split("\n")) if (ref.test(line) && SHELL_CMP.test(line)) return true;
+  }
+  return false;
+}
+
+/** 收窄的核心（AC4）：把「比较原语」绑到【这一次读的结果】上，三条绑法任一成立即算绑定：
+ *   A 链式 —— 读表达式之后（≤ CHAIN_GAP 字符）直接链上比较原语（`…readFileSync(p).split("\0")…`）；
+ *   B 具名 —— 同一行把读结果赋给 IDENT，且 IDENT 在窗口内是比较原语的操作数
+ *             （`IDENT.includes(…)` / `basename(IDENT)` / shell 的 `case "$IDENT" in …`）；
+ *   C 管道 ——（.sh）读的那一行本身含 shell 比较记号。
+ *  ⛔ 三条全不成立 ⇒ 这是【收集器】不是判定：`fast-mode-telemetry.ts:215` 的 `snapshotProcCmdlines`
+ *  把全部 cmdline 收进数组、比较发生在另一个函数里，收窄前只因同文件有一处 `.includes(` 就上榜。 */
+function boundToRead(src: string, at: number, prefix: string, suffix: string, isShell: boolean): boolean {
+  if (new RegExp(`^[^;\\n]{0,${CHAIN_GAP}}${COMPARE_METHOD.source}`).test(suffix)) return true;
+  if (isShell && SHELL_CMP.test(suffix)) return true;
+  const subj = readSubject(prefix);
+  return subj !== null && subjectCompared(src, at, subj, isShell);
+}
+
 /** 判定指纹 F: 一个代码文件【读 /proc/<pid>/cmdline】(外部事实 A) 且【对读到的内容做名字/特征比较】
- *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。 */
+ *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。
+ *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。 */
 export function findJudgmentRewrites(root: string, files: string[]): JudgmentRewrite[] {
   // 外部事实 A: 读 /proc/<pid>/cmdline — 必须出现在【读】上下文 (readFile* / shell `<` 重定向 / cat /
   // python open), 而非仅仅在描述字符串里提及该路径 (capability-catalog 的 QUESTION 描述不算实现)。
   // 两种实现形态都要抓 (文档 §2.8 方法(e) 的教训: 单位选错聚不出靶子): ①字面量 `/proc/${pid}/cmdline`;
-  // ②构造形 `path.join(procRoot/procDir, pid, "cmdline")` (manager-tick-readings.ts:364 / worker-driver.ts)。
+  // ②构造形 `path.join(procRoot/procDir, pid, "cmdline")`。
   const procPath = /\/proc\/[^'"\s\n]*\/cmdline/;
   const constructed = /(?:procRoot|procDir)[^'"\n]{0,60}["']cmdline["']/;
-  const readPrim = /readFile|<|cat\s+|open\s*\(/;
-  const compRe = /grep\s+-q|\.includes\(|\.indexOf\(|\.match\(|basename\(|\.split\(|\.startsWith\(|\.endsWith\(|argv\[0\]/;
   const out: JudgmentRewrite[] = [];
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const mask = maskFor(f)(src);
-    // 外部事实 B: 名字/特征比较原语 (识别进程的另一半)。
-    if (codeMatch(src, mask, compRe).length === 0) continue;
+    const isShell = f.endsWith(".sh");
+    // 廉价【必要】预筛: 整文件没有任何比较原语 ⇒ 不可能是「读 ∧ 比」。
+    // ⛔ 它【不再】是充分条件 —— 收窄前它独自决定判定，于是收集器只要同文件里恰好有一处
+    // `.includes(` 就被计成「识别进程」；决定权已移到 boundToRead（必须绑到这次读上）。
+    if (codeMatch(src, mask, COMPARE_PRIM).length === 0) continue;
     // 外部事实 A: 路径 (字面量或构造形) 落在代码位置, 且其【同行的前缀】含读原语。
     let found = false;
     let hitLine = 0;
@@ -212,8 +324,13 @@ export function findJudgmentRewrites(root: string, files: string[]): JudgmentRew
       let m: RegExpExecArray | null;
       while ((m = g.exec(src)) !== null) {
         if (mask[m.index] !== 0) continue;
-        const prefix = src.slice(src.lastIndexOf("\n", m.index) + 1, m.index);
-        if (readPrim.test(prefix)) { hitLine = lineOf(src, m.index); found = true; return; }
+        const lineStart = src.lastIndexOf("\n", m.index) + 1;
+        let lineEnd = src.indexOf("\n", m.index);
+        if (lineEnd === -1) lineEnd = src.length;
+        const prefix = src.slice(lineStart, m.index);
+        if (!READ_PRIM.test(prefix)) continue;
+        if (!boundToRead(src, m.index, prefix, src.slice(m.index, lineEnd), isShell)) continue;
+        hitLine = lineOf(src, m.index); found = true; return;
       }
     };
     scan(procPath);
@@ -231,31 +348,66 @@ export interface ByteIdenticalPair {
   lines: number;
 }
 
-export function findByteIdenticalPairs(root: string): { pairs: ByteIdenticalPair[]; totalLines: number } {
+/** 直接子条目的名字, 按【常规文件】与【全部条目】两个集合返回。
+ *  常规文件判定用 `Dirent.isFile()` —— 它是 lstat/d_type 级的 (符号链接报 isFile() === false),
+ *  不是跟随软链后的 stat, 因此【不依赖链接指向哪里】(悬空链与指向本目录的链一律排除)。
+ *  目录不可读 ⇒ 两个空集 (没有名字, 不是崩溃; 由调用方按「无候选」处理, 不与「扫过且无命中」混淆)。 */
+function mirrorDirNames(dir: string): { regular: Set<string>; all: Set<string> } {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    return {
+      regular: new Set(entries.filter((d) => d.isFile()).map((d) => d.name)),
+      all: new Set(entries.map((d) => d.name)),
+    };
+  } catch {
+    return { regular: new Set(), all: new Set() };
+  }
+}
+
+export function findByteIdenticalPairs(
+  root: string,
+): { pairs: ByteIdenticalPair[]; totalLines: number; symlinksSkipped: number } {
   const scriptsDir = path.join(root, "plugin", "scripts");
-  const exps: string[] = [];
+  // 任一侧是【软链】的条目不是 pair —— 它是单一来源引用 (同一 inode), 逐字节比对等于文件和自己比,
+  // 会把「单源」读成「复制替代抽象」的最强证据。规则正本 = mirror-pair-drift-check.ts 头注释:
+  // "a SYMLINK on either side is NOT a pair — it is a single-source reference (the same file), so it
+  // cannot drift; the checker excludes it rather than comparing a file against itself." 本处用同一
+  // lstat 级谓词 (`Dirent.isFile()`) 取同一判定, 但【不共享代码】—— 该检查器把镜像目录写死为
+  // quay-perpetual-stream, 本检查器扫 experiments/*/scripts 全部镜像目录, 遍历面不同。
+  const exps: { dir: string; regular: Set<string>; all: Set<string> }[] = [];
   const expRoot = path.join(root, "experiments");
   if (fs.existsSync(expRoot)) {
     for (const e of fs.readdirSync(expRoot, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
       const s = path.join(expRoot, e.name, "scripts");
-      if (fs.existsSync(s)) exps.push(s);
+      if (fs.existsSync(s)) exps.push({ dir: s, ...mirrorDirNames(s) });
     }
   }
   const pairs: ByteIdenticalPair[] = [];
   let totalLines = 0;
+  let symlinksSkipped = 0;
   let names: string[] = [];
   try {
-    names = fs.readdirSync(scriptsDir).filter((n) => /\.(ts|sh|mjs)$/.test(n)).sort();
+    // 左侧同样只取常规文件 (对称: "a SYMLINK on EITHER side is NOT a pair")。
+    names = fs
+      .readdirSync(scriptsDir, { withFileTypes: true })
+      .filter((d) => d.isFile() && /\.(ts|sh|mjs)$/.test(d.name))
+      .map((d) => d.name)
+      .sort();
   } catch {
-    return { pairs, totalLines };
+    return { pairs, totalLines, symlinksSkipped };
   }
   for (const name of names) {
     const pluginFile = path.join(scriptsDir, name);
     const pluginBuf = fs.readFileSync(pluginFile);
-    for (const s of exps) {
-      const cand = path.join(s, name);
-      if (!fs.existsSync(cand)) continue;
+    for (const { dir, regular, all } of exps) {
+      if (!regular.has(name)) {
+        // 同名但非常规文件 (软链/目录) ⇒ 按规则跳过, 且【计数】而不是静默丢弃:
+        // 报告里 "0 对" 与 "镜像目录不存在" 必须可区分 (hard rule 3b)。
+        if (all.has(name)) symlinksSkipped++;
+        continue;
+      }
+      const cand = path.join(dir, name);
       const candBuf = fs.readFileSync(cand);
       if (pluginBuf.equals(candBuf)) {
         const lines = pluginBuf.toString("utf8").split("\n").length - 1;
@@ -264,7 +416,7 @@ export function findByteIdenticalPairs(root: string): { pairs: ByteIdenticalPair
       }
     }
   }
-  return { pairs, totalLines };
+  return { pairs, totalLines, symlinksSkipped };
 }
 
 // ── (a) 字面量复制度 (AC5: full vs code 分列; 单一访问器 vs 硬编码) ───────────────────────────
@@ -285,12 +437,7 @@ export function literalReplication(root: string, files: string[], entity: string
   let code = 0;
   let accessor = 0;
   let hardcoded = 0;
-  const importRe = new RegExp(
-    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `import\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `require\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `(?:^|[;&|\\n])\\s*(?:\\.|source)\\s+["']?[^"'\\n]*?${escapeRegex(stem)}(?:\\.sh)?["']?)`,
-  );
+  const importRe = new RegExp(accessorRegexSource(stem));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     if (!src.includes(entity)) continue;
@@ -328,6 +475,9 @@ export function replicationTable(
     codeFiles: [] as string[],
   }));
   const stems = rows.map((r) => r.entity.replace(/\.(ts|sh|mjs|js)$/, ""));
+  // 每个实体只编译一次访问器正则 (原来是每个 (文件 × 实体) 编译一次)。共享同一份 accessorRegexSource,
+  // 与 literalReplication() 是【同一个判定】而不是两份逐字副本 —— 分叉在结构上不可能 (AC4)。
+  const accessorRes = stems.map((s) => new RegExp(accessorRegexSource(s)));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const rel = relOf(root, f);
@@ -345,14 +495,7 @@ export function replicationTable(
       if (!codeHit) continue;
       row.code++;
       row.codeFiles.push(rel);
-      const stem = stems[ri];
-      const importRe = new RegExp(
-        `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `import\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `require\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `(?:^|[;&|\\n])\\s*(?:\\.|source)\\s+["']?[^"'\\n]*?${escapeRegex(stem)}(?:\\.sh)?["']?)`,
-      );
-      if (codeMatch(src, mask, importRe).length > 0) row.accessor++;
+      if (codeMatch(src, mask, accessorRes[ri]).length > 0) row.accessor++;
       else row.hardcoded++;
     }
   }
@@ -392,7 +535,13 @@ export interface Report {
   root: string;
   pathConstants: PathConstant[];
   judgmentRewrites: JudgmentRewrite[];
-  byteIdentical: { count: number; totalLines: number; pairs: ByteIdenticalPair[] };
+  byteIdentical: {
+    count: number;
+    totalLines: number;
+    pairs: ByteIdenticalPair[];
+    // 同名但 experiments 侧是软链/目录而跳过的条目数 —— 使 "0 对" 与 "镜像不存在" 可区分 (hard rule 3b)。
+    symlinksSkipped: number;
+  };
   literalReplication: { sessionLiveness: LiteralReplication; gateScriptBase: LiteralReplication };
   sharedModuleControl: SharedModuleControl;
   table: LiteralReplication[];
@@ -439,6 +588,7 @@ export function run(root: string, limit: number): Report {
       count: byteIdenticalRaw.pairs.length,
       totalLines: byteIdenticalRaw.totalLines,
       pairs: byteIdenticalRaw.pairs,
+      symlinksSkipped: byteIdenticalRaw.symlinksSkipped,
     },
     literalReplication: { sessionLiveness, gateScriptBase },
     sharedModuleControl: sharedModule,
@@ -473,7 +623,10 @@ function printHuman(report: Report): void {
   console.log(`\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ${report.judgmentRewrites.length} 处 ==`);
   for (const j of report.judgmentRewrites) console.log(`  ${j.file}:${j.line}`);
 
-  console.log(`\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ==`);
+  console.log(
+    `\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ` +
+      `(跳过 ${report.byteIdentical.symlinksSkipped} 个软链条目: 单一来源引用, 非 pair) ==`,
+  );
   for (const p of report.byteIdentical.pairs.slice(0, 5)) console.log(`  ${p.plugin}  ==  ${p.experiment}  (${p.lines} 行)`);
   if (report.byteIdentical.count > 5) console.log(`  … 及另外 ${report.byteIdentical.count - 5} 对`);
 

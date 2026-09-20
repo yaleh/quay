@@ -158,8 +158,14 @@ export function targetInboundPolicy(
   });
   const home = opts.home ?? os.homedir();
   const cwd = opts.cwd ?? "";
-  const cmdlineRaw = readFile(`/proc/${pid}/cmdline`);
-  const argv = cmdlineRaw ? cmdlineRaw.split("\0").filter(Boolean) : [];
+  // 路径构造 + 读 + NUL 切分全在 kernel leaf（本文件原有第二份手搓副本 —
+  // gap-judgment-rewrites-route-through-proc-identity-leaf）。`readFile` 原样作为 leaf 的 reader
+  // 缝传入 —— 它收到的仍是 `/proc/<pid>/cmdline` 这个【同一个字符串】（leaf 用 path.join 拼出
+  // 同样的路径），所以既有单测按路径注入的接缝不受影响。
+  // ⛔ 失败值仍是 []（本调用点的口径）：readFile 读不成 ⇒ leaf 返回 null ⇒ 这里折成空 argv，
+  // 于是断言面缺席、verdict 落 "unknown"，与迁移前逐字一致。
+  const argvRaw = readProcCmdline(pid, "/proc", readFile);
+  const argv = argvRaw === null ? [] : argvRaw.filter(Boolean);
   const faces = inboundFacesFromArgv(argv, readFile);
   const settingsPaths: Array<{ label: string; p: string }> = [
     { label: path.join(home, ".claude", "settings.json"), p: path.join(home, ".claude", "settings.json") },
@@ -199,6 +205,7 @@ import path from "node:path";
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 
 // 共享 socket 协议（packages/quay/src/serve-send.ts 的 sendSessionFrames）。动态 import 用相对路径
 // ——与 build-evidence-gate.ts 的 `await import("../../packages/quay/src/…")` 同型（plugin 从 repo-root

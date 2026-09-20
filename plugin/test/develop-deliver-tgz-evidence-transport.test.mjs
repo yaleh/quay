@@ -351,11 +351,22 @@ test("AC-248 — a non-qualifying evidence file yields a DISTINGUISHABLE verdict
   const start = src.indexOf("check_evidence_completeness() {");
   assert.ok(start >= 0, "check_evidence_completeness must exist");
   const fn = src.slice(start, src.indexOf("\n}", start) + 2);
+  // ⚠️ WHAT CHANGED AND WHY THE DRIVER GOT TWO MORE LINES (gap-arch-tsify-develop-deliver-tgz-python-
+  // heredocs, SPEC §5 Phase 5.3): the body used to be self-contained — its verdict came from `python3`
+  // on PATH. It now reaches the sibling step CLI through the script's own `py_steps` wrapper, which
+  // needs the $SCRIPT_DIR the REAL script resolves at startup. So the isolation driver must supply the
+  // same two things the product supplies, or it would be measuring `command not found` instead of the
+  // verdict (a false red, and a worse one than the false green it would hide).
+  // ⛔ Both functions are SLICED FROM THE SAME SOURCE — never re-typed here: a second copy of either
+  // would drift from the product and this control would silently stop testing it.
+  const pyStart = src.indexOf("py_steps() {");
+  assert.ok(pyStart >= 0, "py_steps must exist — it is how check_evidence_completeness reaches the step CLI");
+  const pyFn = src.slice(pyStart, src.indexOf("\n}", pyStart) + 2);
   const tmp = mkdtempSync(path.join(os.tmpdir(), "ac248-nev-"));
   try {
     const evidence = path.join(tmp, "evidence.jsonl");
     writeFileSync(evidence, '{"ts":"2026-09-12T00:00:00Z","ac":"AC88","ok":true}\n');
-    const driver = `set -euo pipefail\n${fn}\nif check_evidence_completeness "$EV" "GOAL-016-AC-248"; then echo "VERDICT=0"; else echo "VERDICT=$?"; fi\necho AFTER-VERDICT\n`;
+    const driver = `set -euo pipefail\nSCRIPT_DIR=${JSON.stringify(path.join(REPO_ROOT, "plugin", "scripts"))}\n${pyFn}\n${fn}\nif check_evidence_completeness "$EV" "GOAL-016-AC-248"; then echo "VERDICT=0"; else echo "VERDICT=$?"; fi\necho AFTER-VERDICT\n`;
     const r = spawnSync("bash", ["-c", driver], { encoding: "utf8", env: { ...process.env, EV: evidence } });
     assert.match(r.stdout, /ALL-MISSING/, "the verdict line must name the distinguishable reason");
     assert.match(r.stdout, /VERDICT=1/, "a run that produced no expected record must be NOT-EVALUATED (exit 1)");
