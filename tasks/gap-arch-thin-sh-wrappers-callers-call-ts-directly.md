@@ -1,7 +1,7 @@
 ---
 id: gap-arch-thin-sh-wrappers-callers-call-ts-directly
 title: 架构清理：27 个「≤25 行且有 TS 孪生」的薄 .sh 包装——调用方改为直接调 TS，逐个核对后退役（SPEC Phase 1c）
-status: ready
+status: done
 labels:
   - gap
 parent: null
