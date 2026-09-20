@@ -2,7 +2,7 @@
 id: gap-ac271-build-reading-creates-shared-release-ref
 title: AC-271 第二次红：取一次 build 模式读数（resolveVersion 按 release/* 分支名判定）就必须在共享 Git
   目录造一条真 release/* 分支——合法验证动作与长期保证结构冲突，且创建与销毁都不留痕
-status: ready
+status: done
 labels:
   - gap
   - defect
