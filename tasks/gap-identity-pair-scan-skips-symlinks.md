@@ -2,7 +2,7 @@
 id: gap-identity-pair-scan-skips-symlinks
 title: identity-replication-check.ts 的 AC3 字节对扫描跟随软链——59 对"复制"其实是同一 inode
   自己比自己，应与 mirror-pair-drift-check 同规则跳过软链
-status: ready
+status: done
 labels:
   - gap
   - defect
