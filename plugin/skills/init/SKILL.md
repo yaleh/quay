@@ -13,8 +13,13 @@ closed set below — no `.claude/{skills,workflows,agents}` copies, no `plugin/s
 scripts are delivered by the **quay Claude Code plugin**, which this skill's output tells you how to
 install explicitly.
 
-**The logic lives in ONE executable** — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh`. This skill
-delegates to it rather than repeating the write logic inline.
+**The entry point is ONE executable** — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh`. This skill
+delegates to it rather than repeating the write logic inline. Since
+`gap-arch-quay-init-sh-python-heredocs-to-native` (2026-09-20) that script is the **orchestration**
+(which step runs when, in what order, with which report lines) and the **step logic lives in
+`packages/quay/src/init.ts`**, reached through the sibling `plugin/scripts/quay-init-steps.ts`. It
+used to embed twelve `python3` invocations; it now embeds none, so a quay project can be initialized
+with no Python on the machine at all.
 
 ## Re-running on an existing project: RECONCILE, not "already exists"
 
@@ -43,12 +48,16 @@ answer, because it sends you looking for a conflict that does not exist). The MC
 registered BEFORE any config is read, so it is reachable in precisely the workspace where every other
 tool is not (see `packages/quay/src/mcp-server.ts`, the two-phase `startMcpServer`).
 
-⚠️ **Not yet wired into the script below.** `bash quay-init.sh` is still what this skill runs, and its
-own `loop:` upgrade (`ensure_loop_config`) updates only the four project-derived values
+⚠️ **The VERSION-LEVEL half is still not wired into the script below.** `bash quay-init.sh` is what
+this skill runs, and its own `loop:` upgrade (`ensureLoopConfig` in `packages/quay/src/init.ts`,
+dispatched by that script) updates only the four project-derived values
 (`repo_root`/`test_command`/`tmux_session`/`worktree_root`); the version-level reconcile above is
 reachable today through the CLI and the MCP tool, not yet from the script. Closing that gap is the
 remaining half of `gap-quay-init-native-reconcile`, and the measured reason it was deferred is
 recorded in that task's DoD evidence section.
+(⛔ Do not read the 2026-09-20 port as having closed it: that port moved twelve embedded `python3`
+steps into `init.ts` unchanged — it relocated CODE, it did not add the reconcile to the script's
+path. `ensureLoopConfig` is the same four-value merge it always was.)
 
 ## Write surface (the six-file closed set)
 

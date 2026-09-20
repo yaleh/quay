@@ -103,8 +103,24 @@
         "embeddedInterpreterLines": "-1 = plugin/scripts/develop-deliver-tgz.sh effective lines 2355 -> 2354. Residual = 0, and it is 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is two paths (`git diff develop HEAD --name-only`), of which the only `*.sh` is this file — the other is plugin/test/develop-deliver-tgz.test.mjs, a `.mjs` and therefore outside a `*.sh` census. Measured per-file with the checker's OWN primitives (countCodeLines on `git show develop:<f>` vs the worktree copy): 2355 -> 2354; and the file IS embedded (python3 at a command position), so it is IN the axis, not outside it.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-quay-init-sh-python-heredocs-to-native, GOAL-026 AC-314)",
+      "from": {
+        "embeddedInterpreterLines": 9503,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 9183,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of the task. SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase 5.1 残余: plugin/scripts/quay-init.sh carried TWELVE embedded `python3` invocations (eight heredoc bodies + four `python3 -c` one-liners). They now live in packages/quay/src/init.ts, dispatched by the new sibling plugin/scripts/quay-init-steps.ts; the shell keeps only the orchestration. quay-init.sh becomes 1012 effective lines and its `embedded` reading is `[node]` — python3 is GONE (AC4's target reading). ⚠️ The axis counts effective lines of .sh that contain an embedded interpreter at a command position and quay-init.sh still execs `node`, so the file STAYS IN the axis — it is the line count that moved, not its membership (the same shape as the catalog-declarations entry above).",
+      "attribution": {
+        "embeddedInterpreterLines": "-320 = plugin/scripts/quay-init.sh effective lines 1332 -> 1012. Residual = 0: no other tracked .sh changed effective lines in this task (the new quay-init-steps.ts is a .ts and outside a .sh census). Measured with the checker's OWN reading (`sh-census-check.ts --json` -> files[path=plugin/scripts/quay-init.sh].codeLines) before (1332) and after (1012).",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 9503,
+  "embeddedInterpreterLines": 9183,
   "duplicateCopies": 0
 }

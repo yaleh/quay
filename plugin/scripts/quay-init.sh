@@ -57,6 +57,42 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
+# ── this script's own directory (for the sibling step CLI) ─────────────────────────────────────────
+# ⛔ NOT `$0`: this file is also SOURCED in library mode (laydown-set-check.sh and
+# plugin/test/laydown-set-check.test.mjs source it and call `derive_loop_scripts`), where `$0` is the
+# caller's name. `${BASH_SOURCE[0]}` is this file in both modes.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# ── quay-init-step <step> [args…] — the ONE way this script reaches its step logic ──────────────────
+# (gap-arch-quay-init-sh-python-heredocs-to-native; SPEC-architecture-consolidation-ts-and-shell-
+# 2026-09-19 §5 Phase 5.1.) This script used to embed TWELVE `python3` invocations — EIGHT heredoc
+# bodies plus FOUR `python3 -c` one-liners — a program archguard cannot analyze, has no types, and is
+# hard to test. (⚠️ The count and the word "heredoc" are spelled out on purpose: a literal heredoc
+# OPENER in this comment would be picked up by the heredoc scanner in
+# plugin/test/quay-init-loop.test.mjs and swallow every real heredoc after it — measured, this
+# comment alone turned that test's scan from N bodies into 1.)
+# The LOGIC now lives in `packages/quay/src/init.ts` (the functions are exported there; the sibling
+# step CLI beside this file is a thin dispatch over them — ONE implementation, no second copy), and
+# this file keeps the ORCHESTRATION: 把「程序」收进 TS,把「胶水」留在 bash.
+#
+# ⛔ KEEP THE INVOCATION SPELLED EXACTLY AS BELOW — the exact SPELLING of the directory variable is
+# load-bearing, not cosmetic. `build-plugin-dist.mjs` does two things to it, by two DIFFERENT rules:
+#   · its bundle entry set is derived from the `${SCRIPT_DIR}/X.ts` form (INVOCATION_RE);
+#   · its staged rewrite points shipped layouts at the sibling DIST bundle — and the rule that
+#     matches the BRACED form (the generic `${SCRIPT_DIR}/X.ts` → `${SCRIPT_DIR}/dist/X.js`)
+#     rewrites the PATH but LEAVES `--experimental-strip-types` on the command line, while the
+#     unbraced rule drops the flag as well. Measured on the real npm-pack artifact 2026-09-20: with
+#     the braced spelling the shipped quay-init.sh ran `node --no-warnings
+#     --experimental-strip-types .../dist/quay-init-steps.js` — a flag the bundle does not need and
+#     that Node <22.6 rejects outright. Unbraced is the spelling that yields the intended
+#     `node --no-warnings "$SCRIPT_DIR/dist/quay-init-steps.js"`, and it is the spelling every other
+#     .sh here already uses.
+# The shipped layout needs the bundle because the raw sibling cannot resolve its bare `yaml` import
+# there (no `node_modules` beside a plugin cache / npm-pack tree).
+quay-init-step() {
+  node --no-warnings --experimental-strip-types "$SCRIPT_DIR/quay-init-steps.ts" "$@"
+}
+
 # ── resolve plugin root ─────────────────────────────────────────────────────────────────────────────
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down AC6: the host does NOT inject
@@ -221,15 +257,7 @@ RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
 read_existing_loop_value() {
   local key="$1"
   [ -f "$WORKSPACE_ROOT/.quay/config.yml" ] || { echo ""; return; }
-  python3 - "$WORKSPACE_ROOT/.quay/config.yml" "$key" <<'PYEOF'
-import sys, yaml
-try:
-    with open(sys.argv[1], encoding="utf-8") as f:
-        d = yaml.safe_load(f) or {}
-    print((d.get("loop") or {}).get(sys.argv[2]) or "")
-except Exception:
-    pass
-PYEOF
+  quay-init-step loop-value "$WORKSPACE_ROOT/.quay/config.yml" "$key"
 }
 
 # Defaults for loop params. repo_root defaults to the workspace root on a FRESH install; on an
@@ -268,8 +296,8 @@ if [ ! -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
 fi
 PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd)"
 
-PLUGIN_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo unknown)"
-PLUGIN_NAME="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo quay)"
+PLUGIN_VERSION="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" version unknown 2>/dev/null || echo unknown)"
+PLUGIN_NAME="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" name quay 2>/dev/null || echo quay)"
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
 # Backup timestamp for AC4 residue cleanup: every cleanup in one run is grouped under a single
@@ -309,17 +337,10 @@ detect_test_command() {
     return 0
   fi
   if [ -f "$root/package.json" ]; then
-    if python3 -c '
-import json, sys
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-    scripts = d.get("scripts")
-    if isinstance(scripts, dict) and isinstance(scripts.get("test"), str) and scripts["test"].strip():
-        sys.exit(0)
-except Exception:
-    pass
-sys.exit(1)
-' "$root/package.json" 2>/dev/null; then
+    # `has-npm-test` exits 0 only for a NON-BLANK `scripts.test` string (the python predicate's
+    # `sys.exit(0)/sys.exit(1)` contract, unchanged); an unreadable/oddly-shaped package.json is a
+    # miss, never a crash — the ladder simply falls through to the next rung.
+    if quay-init-step has-npm-test "$root/package.json" 2>/dev/null; then
       echo "npm test"
       return 0
     fi
@@ -377,8 +398,10 @@ detect_tmux_session() {
 # credentials) are preserved; only the loop section is added/updated. Used only when the config
 # already exists — a config-less target gets its loop section from `write_config`'s own heredoc, the
 # ONE remaining fresh-install writer (the orphaned `write_provider_config` duplicate that this
-# comment used to point at was removed 2026-09-18, gap-quay-init-native-reconcile). Uses python3 +
-# yaml so the values are always valid YAML scalars regardless of their content.
+# comment used to point at was removed 2026-09-18, gap-quay-init-native-reconcile). Parses and
+# re-serialises the document through a YAML library so the values are always valid YAML scalars
+# regardless of their content (since 2026-09-20 that library is the TypeScript one, in
+# `ensureLoopConfig` — see quay-init-step above).
 # CONFIG-PRESERVING UPGRADE (gap-quay-init-config-preserving-incremental-upgrade, AC1): the loop
 # section is MERGED, never replaced. `data["loop"] = {...}` (the pre-fix form) DESTROYED every
 # non-fast-mode key the consumer owned — the loop-driver schema (board / gates / stop / policy) and
@@ -393,42 +416,9 @@ detect_tmux_session() {
 ensure_loop_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN" <<'PYEOF'
-import sys, yaml
-cfg, repo, test, tmux, wtroot = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-dry_run = sys.argv[6] == "true"
-with open(cfg, encoding="utf-8") as f:
-    data = yaml.safe_load(f) or {}
-# gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC3 (负控制: 不得做无谓改写):
-# a re-dump is not free — `yaml.safe_dump` REFORMATS the whole file (an inline `mcp_entry: [...]`
-# becomes a block sequence), so an upgrade that changes no VALUE must not rewrite the file at all.
-# Snapshot the data before the loop update and compare after: equal ⇒ skip the write, so a project
-# whose runtime binding is already current survives the upgrade byte-identical.
-def dump(d):
-    return yaml.safe_dump(d, allow_unicode=True, sort_keys=False, default_flow_style=False)
-before = dump(data)
-loop = data.get("loop")
-if not isinstance(loop, dict):
-    loop = {}
-loop["repo_root"] = repo
-loop["test_command"] = test
-# gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write: an empty session (no tmux
-# host / no matching session) is written as an explicit YAML null, not an empty string — the
-# session is optional since SPEC-tmux-retirement-2026-09-03, and null is the honest "not set".
-loop["tmux_session"] = tmux if tmux else None
-loop["worktree_root"] = wtroot
-data["loop"] = loop
-after = dump(data)
-if after == before:
-    print("  unchanged: .quay/config.yml loop: (values already current — no gratuitous rewrite, AC3)")
-    sys.exit(0)
-if dry_run:
-    print("  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
-    sys.exit(0)
-with open(cfg, "w", encoding="utf-8") as f:
-    f.write(after)
-print("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
-PYEOF
+  # The merge + no-gratuitous-rewrite logic (and the exact report lines) live in
+  # `ensureLoopConfig` (packages/quay/src/init.ts) — one implementation, no second copy.
+  quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"
 }
 
 # ensure_provider_carrier_env: pin the provider's carrier directories in an EXISTING
@@ -457,111 +447,9 @@ PYEOF
 ensure_provider_carrier_env() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$WORKSPACE_ROOT" "$DRY_RUN" <<'PYEOF'
-import re, sys
-
-cfg, ws_root = sys.argv[1], sys.argv[2]
-dry_run = sys.argv[3] == "true"
-
-KINDS = [("QUAY_NATIVE_ADR_DIR", "adr"),
-         ("QUAY_NATIVE_GOAL_DIR", "goals"),
-         ("QUAY_NATIVE_META_DIR", "meta")]
-
-with open(cfg, encoding="utf-8") as f:
-    lines = f.read().split("\n")
-
-
-def indent_of(s):
-    return len(s) - len(s.lstrip(" "))
-
-
-def block_end(start, parent_ind):
-    """First index >= start+1 that is non-blank with indent <= parent_ind, else len(lines)."""
-    j = start + 1
-    while j < len(lines):
-        if lines[j].strip() and indent_of(lines[j]) <= parent_ind:
-            return j
-        j += 1
-    return len(lines)
-
-
-def find_child(start, end, key, min_indent):
-    """(index, indent) of the first `key:` line in [start, end) at indent >= min_indent."""
-    pat = re.compile(r"^(\s*)" + re.escape(key) + r"\s*:")
-    for i in range(start, end):
-        m = pat.match(lines[i])
-        if m and len(m.group(1)) >= min_indent:
-            return i, len(m.group(1))
-    return None, None
-
-
-# ── locate providers[: -> <id>: -> env:] by INDENTATION, not by a yaml round-trip ────────────────
-prov_i, prov_ind = find_child(0, len(lines), "providers", 0)
-if prov_i is None:
-    print("  note: .quay/config.yml has no providers: section — carrier env pins not applicable (nothing written)")
-    sys.exit(0)
-native_i, native_ind = find_child(prov_i + 1, block_end(prov_i, prov_ind), "native", prov_ind + 1)
-if native_i is None:
-    print("  note: providers: has no native: entry — carrier env pins not applicable (nothing written)")
-    sys.exit(0)
-native_end = block_end(native_i, native_ind)
-env_i, env_ind = find_child(native_i + 1, native_end, "env", native_ind + 1)
-
-# ── collect the keys the env block already carries ───────────────────────────────────────────────
-key_re = re.compile(r"^(\s*)(QUAY_NATIVE_\w+)\s*:\s*(.*)$")
-present = {}
-if env_i is not None:
-    rest = lines[env_i].split(":", 1)[1].strip()
-    if rest and not rest.startswith("{"):
-        print("  note: providers.native.env has an unrecognized inline form — carrier env pins NOT applied "
-              "(add QUAY_NATIVE_ADR_DIR/QUAY_NATIVE_GOAL_DIR/QUAY_NATIVE_META_DIR by hand)", file=sys.stderr)
-        sys.exit(0)
-    if rest.startswith("{"):
-        for m in re.finditer(r"(QUAY_NATIVE_\w+)\s*:", rest):
-            present[m.group(1)] = ""
-    else:
-        for i in range(env_i + 1, block_end(env_i, env_ind)):
-            m = key_re.match(lines[i])
-            if m and len(m.group(1)) > env_ind:
-                present[m.group(2)] = m.group(3).strip()
-
-missing = [(k, kind) for k, kind in KINDS if k not in present]
-if not missing:
-    print("  unchanged: .quay/config.yml providers.native.env: (four carrier dirs already pinned — no rewrite, AC4)")
-    sys.exit(0)
-
-# Mirror the form of the existing tasks-dir pin so the env block does not mix absolute and relative.
-tasks_val = present.get("QUAY_NATIVE_TASKS_DIR", "./tasks").strip().strip('"').strip("'")
-absolute = tasks_val.startswith("/") or tasks_val.startswith("~")
-def value_for(kind):
-    return f"{ws_root}/{kind}" if absolute else f"./{kind}"
-
-if dry_run:
-    for k, kind in missing:
-        print(f"  would-pin: providers.native.env.{k}: \"{value_for(kind)}\" (carrier dir pin — AC4)")
-    sys.exit(0)
-
-# ── append the missing keys to the END of the env block (or create the block, if absent) ─────────
-new_lines = list(lines)
-if env_i is None:
-    insert_at = native_end
-    base_ind = native_ind + 2
-    added = [f'{" " * base_ind}env:'] + [f'{" " * (base_ind + 2)}{k}: "{value_for(kind)}"' for k, kind in missing]
-else:
-    last = env_i
-    for i in range(env_i + 1, block_end(env_i, env_ind)):
-        if lines[i].strip():
-            last = i
-    insert_at = last + 1
-    base_ind = env_ind + 2
-    added = [f'{" " * base_ind}{k}: "{value_for(kind)}"' for k, kind in missing]
-
-new_lines[insert_at:insert_at] = added
-with open(cfg, "w", encoding="utf-8") as f:
-    f.write("\n".join(new_lines))
-for k, kind in missing:
-    print(f'  pinned: .quay/config.yml providers.native.env.{k}: "{value_for(kind)}" (carrier dir pin — AC4)')
-PYEOF
+  # The indent-anchored, line-level insert (never a yaml round-trip: that would reformat every other
+  # key and lose the file's comments) lives in `ensureProviderCarrierEnv` (packages/quay/src/init.ts).
+  quay-init-step ensure-carrier-env "$cfg" "$WORKSPACE_ROOT" "$DRY_RUN"
 }
 
 # migrate_stale_mcp_entry: the UPGRADE-CHANNEL migration for the RETIRED project-local runtime
@@ -610,179 +498,10 @@ migrate_stale_mcp_entry() {
   local install_runtime="${install_provider}/dist/quay-native.js"
   local install_core="${PLUGIN_ROOT}/vendor/quay/dist/quay.js"
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$install_provider" "$install_runtime" "$install_core" "$WORKSPACE_ROOT" "$DRY_RUN" "$BACKUP_TS" <<'PYEOF'
-import sys, os, re, yaml, hashlib, shutil
-cfg, install_provider, install_runtime, install_core, ws_root = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-dry_run = sys.argv[6] == "true"
-backup_ts = sys.argv[7]
-with open(cfg, encoding="utf-8") as f:
-    data = yaml.safe_load(f) or {}
-prov = (data.get("providers") or {}).get("native")
-if not isinstance(prov, dict):
-    sys.exit(0)
-
-def sha(p):
-    try:
-        with open(p, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except Exception:
-        return None
-
-def under(path, base):
-    p = os.path.abspath(str(path))
-    return p == base or p.startswith(base + os.sep)
-
-# gap-the-runtime-has-nowhere-safe-to-land: reserved directory names that must never hold the quay
-# runtime in a target (Go vendor/, npm node_modules/, cargo target/, make/build/, bundler dist/).
-# The landing path check is by PATH LITERAL segment (task AC9), the same list here. An EXISTING
-# install (pre-fix) laid the runtime into `<target>/vendor/quay[-native]/` — on upgrade that dir
-# EXISTS, so a bare `not os.path.isdir(p)` guard would never migrate it and the target would stay
-# pointed at the Go-reserved directory forever. The upgrade path therefore migrates any provider
-# path/mcp_entry that is (a) dangling, OR (b) a quay runtime path sitting under a reserved segment.
-RESERVED = {"vendor", "node_modules", "target", "build", "dist"}
-def under_reserved(p):
-    parts = [seg for seg in str(p).split(os.sep) if seg]
-    return any(seg in RESERVED for seg in parts)
-def is_quay_runtime_dir(p):
-    base = os.path.basename(str(p).rstrip(os.sep))
-    return base in ("quay", "quay-native")
-# The RETIRED project-local runtime dir + a predicate for "this reference points into it".
-rt_dir = os.path.join(ws_root, ".quay", "runtime")
-def in_retired_runtime(p):
-    s = str(p)
-    cands = [s] if os.path.isabs(s) else [s, os.path.join(ws_root, s)]
-    return any(under(c, rt_dir) for c in cands)
-# gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC2: the BARE PATH form. The OS
-# resolves it through $PATH, so the effective runtime is "whatever this host happens to have" —
-# exactly the ambiguity AC2 forbids. No separator ⇒ it is a PATH lookup, not a path.
-def is_bare_path_quay(ref):
-    return os.sep not in str(ref) and str(ref) in ("quay", "quay-native")
-RUNTIME_BASENAME = re.compile(r"^quay(-native)?\.(js|ts)$")
-# The element that NAMES the runtime is NOT always index 1. The canonical node form is
-# ["node", <runtime>, "mcp"] (runtime at index 1), but the legacy BARE PATH form is
-# ["quay-native", "mcp"] — the executable is index 0 there. A fixed `me[1]` therefore read "mcp",
-# matched nothing, and left the whole bare form unmigrated. Scoped to the two real shapes (index 0
-# bare / index 1 runtime file) so an unrelated "quay" argument deeper in the list is never touched.
-def runtime_ref_index(me):
-    if not isinstance(me, list) or len(me) < 2:
-        return None
-    if isinstance(me[0], str) and is_bare_path_quay(me[0]):
-        return 0
-    if isinstance(me[1], str) and RUNTIME_BASENAME.match(os.path.basename(me[1])):
-        return 1
-    return None
-
-# retired_rt_state — the single source of truth for the fate of <ws>/.quay/runtime, computed ONCE
-# from the ORIGINAL bytes (before any move). Both the binding rules and the retirement below read
-# it, so "the runtime dir is stale" has one definition:
-#   absent  — nothing there
-#   retire  — recognizably quay's install-generated runtime, and STALE vs this delivery
-#   keep    — recognizably quay's install-generated runtime, and byte-identical (AC3: never touch)
-#   unknown — not quay's runtime shape, or the delivered bundle is unreadable ⇒ NEVER touch
-# The `unknown` state exists so "cannot evaluate" never shares an output with "evaluated, fine"
-# (硬规则 3b): a directory we cannot recognize is left alone rather than treated as stale.
-def retired_rt_state():
-    if not os.path.isdir(rt_dir):
-        return "absent"
-    known = [(os.path.join(rt_dir, "bin", "quay-native.js"), install_runtime),
-             (os.path.join(rt_dir, "bin", "quay.js"), install_core)]
-    known = [(t, s) for t, s in known if os.path.isfile(t)]
-    if not known or any(sha(s) is None for _, s in known):
-        return "unknown"
-    return "retire" if any(sha(t) != sha(s) for t, s in known) else "keep"
-
-rt_state = retired_rt_state()
-
-changed = False
-migrated = []   # (old, reason) — printed as the AC1/AC2 observable artifact
-
-# path: a stale provider dir is migrated to the install-state provider dir. "Stale" = the dir does
-# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/
-# land), OR it is the retired project-local runtime dir AND that runtime is stale. The staleness
-# gate matters: a byte-current project-local runtime is a working binding, and AC3 forbids
-# rewriting it (防「为修 A 而破坏 B」) — only a copy this delivery supersedes is migrated away.
-p = prov.get("path")
-if isinstance(p, str) and p != install_provider and (
-        (not os.path.isdir(p)) or (under_reserved(p) and is_quay_runtime_dir(p))
-        or (in_retired_runtime(p) and rt_state == "retire")):
-    prov["path"] = install_provider
-    changed = True
-    migrated.append(f"path {p!r} -> {install_provider}")
-
-# mcp_entry: any OLD/AMBIGUOUS binding form is migrated to this delivery's runtime bundle.
-me = prov.get("mcp_entry")
-legacy_native = os.path.join(ws_root, "vendor", "quay-native", "dist", "quay-native.js")
-legacy_core = os.path.join(ws_root, "vendor", "quay", "dist", "quay.js")
-if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
-    idx = runtime_ref_index(me)
-    ref = me[idx] if idx is not None else None
-    reason = None
-    if idx is not None and ref != install_runtime:
-        if is_bare_path_quay(ref):
-            reason = f"bare PATH reference {ref!r} (resolved by whatever $PATH happens to hold)"
-        elif RUNTIME_BASENAME.match(os.path.basename(ref)) and (not os.path.exists(ref) or under_reserved(ref)):
-            reason = f"dangling reference to a quay runtime file {ref!r}"
-        # Legacy layout migration: a config from an install that laid the runtime under vendor/
-        # (the OLD layout — a Go-reserved dir whose 1.3MB bundles trip common large-file hooks).
-        # Fires EVEN IF the legacy vendor/ copy still exists — the layout moved.
-        elif RUNTIME_BASENAME.match(os.path.basename(ref)) and ref in (legacy_native, legacy_core):
-            reason = f"legacy vendor/ layout {ref!r}"
-        # Retired project-local runtime that is STALE: the binding must not stay pinned to a copy
-        # no product path updates. A byte-current copy is left alone (AC3 negative control) — it is
-        # indistinguishable from a legitimate one.
-        elif in_retired_runtime(ref) and rt_state == "retire":
-            reason = f"stale retired project-local runtime {ref!r}"
-    if reason:
-        # Rebuild canonically: ["node", <plugin runtime>] + everything the old entry carried after
-        # the runtime/executable token (the "mcp" verb + any trailing args) — identical to the
-        # pre-fix output for the index-1 form, and the correct shape for the index-0 bare form.
-        prov["mcp_entry"] = ["node", install_runtime] + list(me[idx + 1:])
-        prov["path"] = install_provider
-        changed = True
-        migrated.append(f"mcp_entry {reason} -> {install_runtime}")
-
-# ── retire the unreferenced project-local runtime (AC1 ruling (c) + its (b) corollary) ──────────
-# Decide the fate of <ws>/.quay/runtime AFTER the migrations above, from the state computed before
-# them. Retire it only when the post-migration binding no longer references it AND it is STALE. A
-# byte-current copy is left byte-identical (AC3); an unrecognized directory is NEVER touched. The
-# three outcomes each report a DISTINCT word so "retired" and "could not evaluate" never look alike.
-def referenced_by_binding():
-    refs = [prov.get("path")] if isinstance(prov.get("path"), str) else []
-    if isinstance(prov.get("mcp_entry"), list):
-        refs += [x for x in prov["mcp_entry"] if isinstance(x, str)]
-    return any(in_retired_runtime(r) for r in refs)
-
-backup_dir = os.path.join(ws_root, ".quay", "quay-init-backups", backup_ts)
-if rt_state == "retire" and not referenced_by_binding():
-    dest = os.path.join(backup_dir, "runtime")
-    if dry_run:
-        print(f"  would-retire-orphan-runtime: {rt_dir} -> {dest} (retired layout, unreferenced, stale vs this delivery — AC1)")
-    else:
-        os.makedirs(backup_dir, exist_ok=True)
-        n = 1
-        while os.path.exists(dest):
-            dest = os.path.join(backup_dir, f"runtime-{n}")
-            n += 1
-        shutil.move(rt_dir, dest)
-        print(f"  retired-orphan-runtime: {rt_dir} -> backup {dest} (retired layout, unreferenced, stale vs this delivery — AC1)")
-elif rt_state == "retire":
-    print(f"  kept-referenced-runtime: {rt_dir} (still referenced by the provider binding — NOT retired)")
-elif rt_state == "keep":
-    print(f"  kept-runtime-copy: {rt_dir} (byte-identical to this delivery — untouched, AC3)")
-elif rt_state == "unknown":
-    print(f"  kept-unrecognized-runtime-dir: {rt_dir} (not quay's install-generated runtime shape — never touched)")
-
-if not changed:
-    sys.exit(0)
-if dry_run:
-    for m in migrated:
-        print(f"  would-migrate: {m} (upgrade-channel runtime migration — AC1/AC2)")
-    sys.exit(0)
-with open(cfg, "w", encoding="utf-8") as f:
-    yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-for m in migrated:
-    print(f"  migrated: {m} (upgrade-channel runtime migration — AC1/AC2)")
-PYEOF
+  # The migration rules, the four-way fate of the retired `.quay/runtime` (absent / retire / keep /
+  # unknown — never collapsed: "could not evaluate" must not print as "evaluated, fine") and the
+  # canonical rebuild all live in `migrateStaleMcpEntry` (packages/quay/src/init.ts).
+  quay-init-step migrate-mcp-entry "$cfg" "$install_provider" "$install_runtime" "$install_core" "$WORKSPACE_ROOT" "$DRY_RUN" "$BACKUP_TS"
 }
 
 # validate_worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs):
@@ -1041,7 +760,8 @@ _derive_loop_scripts_once() {
       mv "$out.archfilt" "$out"
     fi
   fi
-  # (d) dependency closure — repeat until fixpoint. ONE python3 pass replaces the retired per-script
+  # (d) dependency closure — repeat until fixpoint. ONE pass (now `deriveLoopScriptsClosure` in
+  # packages/quay/src/init.ts) replaces the retired per-script
   # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
   # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3
   # batched ~1000 fork/execve per pass into ONE). The closure regex keeps the PACKAGED two-segment
@@ -1053,46 +773,8 @@ _derive_loop_scripts_once() {
   # loop EXACTLY: iterate the round-start snapshot (`for s in $(cat "$out")`), append new deps (picked
   # up next round), membership = the LIVE set (`grep -qxF "$dep" "$out"`), same filters (non-empty →
   # not NEVER_LAYDOWN → exists under scripts/), same round<20 bound, same sorted-unique output.
-  python3 - "$out" "$PLUGIN_ROOT" "$NEVER_LAYDOWN" <<'PYEOF'
-import sys, os, re
-out_path, root, never = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
-pat = re.compile(r'(?:\$\{SCRIPT_DIR\}/|\$SCRIPT_DIR/)([a-zA-Z0-9][a-zA-Z0-9._/-]*)')
-def read(p):
-    try:
-        with open(p, "rb") as fh:
-            return fh.read().decode("utf-8", "replace")
-    except OSError:
-        return ""
-names = []
-with open(out_path, "r", encoding="utf-8") as fh:
-    for ln in fh:
-        ln = ln.strip("\n")
-        if ln:
-            names.append(ln)
-seen = set(names)
-changed, rnd = True, 0
-while changed and rnd < 20:
-    changed = False
-    rnd += 1
-    for s in names[:]:                        # the round-start snapshot ($(cat "$out"))
-        script = os.path.join(root, "scripts", s)
-        if not os.path.isfile(script):        # [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-            continue
-        for dep in pat.findall(read(script)):
-            if not dep:                       # [ -n "$dep" ] || continue
-                continue
-            if dep in never:                  # case " $NEVER_LAYDOWN " in *" $dep "*
-                continue
-            if not os.path.isfile(os.path.join(root, "scripts", dep)):  # [ -f …/$dep ]
-                continue
-            if dep not in seen:               # ! grep -qxF "$dep" "$out"
-                names.append(dep)
-                seen.add(dep)
-                changed = True
-with open(out_path, "w", encoding="utf-8") as fh:
-    for x in sorted(set(names)):              # sort -u "$out"
-        fh.write(x + "\n")
-PYEOF
+  # The fixpoint lives in `deriveLoopScriptsClosure` (packages/quay/src/init.ts).
+  quay-init-step derive-loop-scripts "$out" "$PLUGIN_ROOT" "$NEVER_LAYDOWN"
   sort -u "$out"
   rm -f "$out"
 }
@@ -1439,7 +1121,7 @@ vendor_runtime_user_scope_stale_check() {
   [ -f "$dist" ] && [ -f "$pkg" ] || return 0
   local embedded declared
   embedded="$(node "$dist" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
-  declared="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version",""))' "$pkg" 2>/dev/null || true)"
+  declared="$(quay-init-step json-field "$pkg" version "" 2>/dev/null || true)"
   [ -n "$embedded" ] && [ -n "$declared" ] || return 0
   if [ "$embedded" != "$declared" ]; then
     echo "  STALE (user-scope vendor runtime): the built bundle embeds version ${embedded} but plugin/vendor/quay/package.json declares ${declared}." >&2
@@ -1560,19 +1242,7 @@ verify_provider_runtime_existence() {
     return 1
   fi
   local entry_file
-  entry_file="$(python3 - "$cfg" <<'PYEOF'
-import sys, yaml
-try:
-    with open(sys.argv[1], encoding="utf-8") as f:
-        d = yaml.safe_load(f) or {}
-    prov = (d.get("providers") or {}).get("native") or {}
-    mcp = prov.get("mcp_entry") or []
-    if isinstance(mcp, list) and len(mcp) >= 2:
-        print(mcp[1])
-except Exception:
-    pass
-PYEOF
-)"
+  entry_file="$(quay-init-step provider-entry-file "$cfg" 2>/dev/null || true)"
   if [ -z "$entry_file" ]; then
     echo "  verify-provider-runtime-existence: OK (no mcp_entry path found in the provider config — nothing to verify)"
     return 0
@@ -2056,27 +1726,10 @@ write_claude_settings() {
     return
   fi
   mkdir -p "$(dirname "$dst")"
-  python3 - "$dst" "$PLUGIN_NAME" <<'PYEOF'
-import json, sys, os
-dst, name = sys.argv[1], sys.argv[2]
-data = {}
-if os.path.exists(dst):
-    try:
-        with open(dst, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-ep = data.setdefault("enabledPlugins", {})
-ep[f"{name}@{name}"] = True
-perm = data.setdefault("permissions", {})
-allow = perm.setdefault("allow", [])
-entry = f"mcp__plugin_{name}_{name}__*"
-if entry not in allow:
-    allow.append(entry)
-with open(dst, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PYEOF
+  # The read-modify-write (an EXISTING settings file keeps every unrelated key; the quay block is
+  # only added) lives in `writeClaudeSettings` (packages/quay/src/init.ts). Its `JSON.stringify`
+  # output is byte-identical to the python `json.dump(..., indent=2)` + trailing newline it replaced.
+  quay-init-step write-claude-settings "$dst" "$PLUGIN_NAME"
   echo "  wrote: .claude/settings.json (enabledPlugins: {\"${PLUGIN_NAME}@${PLUGIN_NAME}\": true} + permissions.allow: [\"mcp__plugin_${PLUGIN_NAME}_${PLUGIN_NAME}__*\"])"
 }
 
@@ -2212,16 +1865,8 @@ if [ -z "$TMUX_SESSION" ]; then
 fi
 
 if [ -z "$WORKTREE_ROOT" ] && [ -f "$WORKSPACE_ROOT/.quay/config.yml" ]; then
-  WORKTREE_ROOT="$(python3 - "$WORKSPACE_ROOT/.quay/config.yml" <<'PYEOF' 2>/dev/null || true
-import sys, yaml
-try:
-    with open(sys.argv[1], encoding="utf-8") as f:
-        d = yaml.safe_load(f) or {}
-    print((d.get("loop") or {}).get("worktree_root") or "")
-except Exception:
-    pass
-PYEOF
-)"
+  # Same reader as the `read_existing_loop_value` calls above — one step, not a second inline copy.
+  WORKTREE_ROOT="$(quay-init-step loop-value "$WORKSPACE_ROOT/.quay/config.yml" worktree_root 2>/dev/null || true)"
 fi
 if [ -z "$WORKTREE_ROOT" ]; then
   WORKTREE_ROOT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees"
