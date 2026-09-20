@@ -25,6 +25,7 @@ import {
   findJudgmentRewrites,
   findByteIdenticalPairs,
   literalReplication,
+  replicationTable,
   sharedModuleControl,
   run,
 } from "../scripts/identity-replication-check.ts";
@@ -158,6 +159,78 @@ test("literalReplication — full vs code 分列 (脚本自己做位置区分)",
   const r = literalReplication(dir, files, NEEDLE);
   assert.equal(r.full, 2, "two files carry the literal");
   assert.equal(r.code, 1, "only one carries it at a code position");
+});
+
+// ── 单一访问器的 shell 形态 (gap-identity-accessor-regex-source-computed-path) ────────────────
+// 立案缺陷: 旧 importRe 的 source 分支要求「source/. 与路径同行、且路径里不含引号」, 于是本仓两种
+// 【主流】引用写法全读不进去, gate-script-lib.sh 的 67 个正当引用被逐个计成 hardcoded=82/accessor=0。
+// 下面五条 fixture 同时钉住两个方向: 正当引用升 accessor (① ②), 非引用不得被算成 accessor (③ ④ ⑤)。
+
+const ACCESSOR_ENTITY = "shared-lib.sh";
+
+/** {relPath: content} —— 五条 fixture, 每条只说一件事。 */
+function accessorFixtures() {
+  return {
+    // ① idiom A: source + 内联 computed path, 引号【嵌套】—— 旧正则在内层第一个 " 处必然失败。
+    "plugin/scripts/idiom-a.sh": '#!/usr/bin/env bash\nsource "$(dirname "$0")/shared-lib.sh"\n',
+    // ② idiom B: 先赋值路径、后 source 变量 (本仓 61 个 .sh 的主流形态; 单行正则做不到, 靠反向引用)。
+    "plugin/scripts/idiom-b.sh":
+      '#!/usr/bin/env bash\n_lib="$(dirname "${BASH_SOURCE[0]}")/shared-lib.sh"\nif [ -f "$_lib" ]; then . "$_lib"; fi\n',
+    // ③ 负控制: 只在【注释】里提及 ⇒ code 位置判定即剔除, 既不 accessor 也不 hardcoded。
+    "plugin/scripts/comment-only.sh": "#!/usr/bin/env bash\n# shared-lib.sh is the single accessor\necho hi\n",
+    // ④ 负控制 (AC3 的反向实例): 字符串字面量提到 basename、从不 source/import ⇒ 仍是 hardcoded。
+    "plugin/scripts/string-only.sh": '#!/usr/bin/env bash\necho "shared-lib.sh"\n',
+    // ⑤ 负控制【放宽过头】: 真 source 的【行尾注释】里提到 basename, 不得因此升为 accessor。
+    //    第 3 行提供【代码位置】的提及, 否则整文件会被位置判定提前剔除, 这条守卫就成了空转
+    //    (与「忽略」同形)。两种过头放宽都会在第 2 行命中: `[^\n]*?` 直接吞到行尾; 只要求引号成对
+    //    则把 "$CONF" 读成一个引号段、再吃掉后面的 `#`。匹配起点是行首的 `.` (代码位置), 位置掩码
+    //    拦不住 ⇒ 只有「引号成对 ∧ 未加引号片段不含 #」两条合起来才挡得住。
+    "plugin/scripts/comment-tail.sh":
+      '#!/usr/bin/env bash\n. "$CONF"  # loads shared-lib.sh\necho "shared-lib.sh"\n',
+  };
+}
+
+const ACCESSOR_FIXTURE_FILES = Object.keys(accessorFixtures());
+
+test("literalReplication — 单一访问器的三族形态: 内联 computed path / 赋值后 source 变量 / 非引用不升 accessor", () => {
+  const dir = mktmp(accessorFixtures());
+  // 逐文件判 (literalReplication 的 accessor/hardcoded 是文件级计数 ⇒ 单文件读数即该文件的分类)。
+  const classify = (rel) => {
+    const one = literalReplication(dir, [path.join(dir, rel)], ACCESSOR_ENTITY);
+    if (one.code === 0) return "ignored";
+    return one.accessor > 0 ? "accessor" : "hardcoded";
+  };
+  assert.equal(classify("plugin/scripts/idiom-a.sh"), "accessor",
+    "idiom A (source + nested-quote inline path) must be a single-accessor reference");
+  assert.equal(classify("plugin/scripts/idiom-b.sh"), "accessor",
+    "idiom B (assign path to a var, then source that var) must be a single-accessor reference");
+  assert.equal(classify("plugin/scripts/comment-only.sh"), "ignored",
+    "a comment-only mention is removed by the position mask, not counted in either bucket");
+  assert.equal(classify("plugin/scripts/string-only.sh"), "hardcoded",
+    "a string-literal mention that never sources/imports stays hardcoded (not an accessor)");
+  assert.equal(classify("plugin/scripts/comment-tail.sh"), "hardcoded",
+    "mentioning the basename in a TRAILING COMMENT after a real source must NOT upgrade it to accessor " +
+      "(the relaxation guard: `[^\\n]*?` here would match from the line-start `.`, which the position mask cannot catch)");
+
+  // 整组计数: 两条真访问器, 两条硬编码, 一条被位置判定剔除 —— 双向都非空, 断言不空转。
+  const r = literalReplication(dir, ACCESSOR_FIXTURE_FILES.map((p) => path.join(dir, p)), ACCESSOR_ENTITY);
+  assert.equal(r.accessor, 2, `exactly the two real accessors, got ${r.accessor} (codeFiles=${JSON.stringify(r.codeFiles)})`);
+  assert.equal(r.hardcoded, 2, `the two non-accessor code mentions stay hardcoded, got ${r.hardcoded}`);
+  assert.equal(r.code, 4, "the comment-only fixture is dropped by the position mask");
+  assert.equal(r.full, 5, "all five fixtures carry the literal in the full-text sense");
+});
+
+test("literalReplication vs replicationTable — 同一实体两条路径读数一致 (AC4: 分叉在结构上不可能)", () => {
+  const dir = mktmp(accessorFixtures());
+  const files = ACCESSOR_FIXTURE_FILES.map((p) => path.join(dir, p));
+  const one = literalReplication(dir, files, ACCESSOR_ENTITY);
+  const row = replicationTable(dir, files, [ACCESSOR_ENTITY]).find((r) => r.entity === ACCESSOR_ENTITY);
+  assert.ok(row, "replicationTable must return a row for the entity");
+  assert.deepEqual(
+    { full: row.full, code: row.code, accessor: row.accessor, hardcoded: row.hardcoded },
+    { full: one.full, code: one.code, accessor: one.accessor, hardcoded: one.hardcoded },
+    "the single-entity entry and the full table must agree on the same entity (no forked judgement)",
+  );
 });
 
 test("sharedModuleControl — 经 import 单一访问器的真共享模块不得报高复制度 (AC4 负控制)", () => {

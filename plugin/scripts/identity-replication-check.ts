@@ -4,6 +4,11 @@
 //   (a) 字面量复制度: 含 X 路径/basename/env 名/CLI flag 的【代码】文件数, 且未经由单一访问器
 //       (import/require/source)。按位置区分代码 / 注释 / 文档 — 注释与 .md 文档不算, 字符串字面量
 //       (路径常量、spawn 参数、注册表条目) 是代码级引用, 算。
+//       单一访问器认【三族】形态, 全在 accessorRegexSource() 一处: ①import/require ②source <内联路径
+//       (引号可嵌套): source "$(dirname "$0")/x.sh" ③先赋值路径到变量、再 source 该变量 (本仓 .sh
+//       的主流形态: _lib="$(dirname "${BASH_SOURCE[0]}")/x.sh"; … . "$_lib")。②③ 缺席曾使
+//       gate-script-lib.sh 的 67 个正当引用被逐个计成 hardcoded=82/accessor=0
+//       (gap-identity-accessor-regex-source-computed-path)。
 //   (b) 判定重写数: 按「读取的外部事实集合」给代码块建指纹 (例: 读 /proc/<pid>/cmdline ∧ 比较名字
 //       = 识别某进程), 同指纹的多处独立实现计数为判定重写。
 // 另报: 路径字面量常量 (产品源码硬编码 ../../../plugin/scripts/* 的 *_REL 常量, import 图上不可见)、
@@ -147,6 +152,51 @@ function codeMatch(src: string, mask: Uint8Array, re: RegExp): { line: number; m
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ── 单一访问器正则 ───────────────────────────────────────────────────────────────────────────
+// 【一处定义, 两处使用】literalReplication() 与 replicationTable() 曾经各持这份正则的一份【逐字副本】
+// (gap-identity-accessor-regex-source-computed-path): 两份副本既让同一缺陷要修两遍, 又允许两条路径
+// 悄悄分叉。现在只有 accessorRegexSource() 这一份, 分叉在结构上不可能 (AC4)。
+
+/** shell 路径表达式片段 —— 允许内部出现【成对引号】, 但【不跨注释】。
+ *  `source "$(dirname "$0")/gate-script-lib.sh"` 的引号是嵌套的: 旧的 `[^"'\n]*?` 在内层第一个 `"`
+ *  处必然失败 ⇒ 本仓 6 个直接引用文件被逐个计成 hardcoded。
+ *  ⛔ 两个方向都不能过: 简单放宽成 `[^\n]*?` 会让 `. "$CONF" # loads x.sh` 这种【行尾注释里的提及】
+ *  也算成 accessor (匹配起点是行首的 `.`, 落在代码位置, 位置掩码拦不住) —— 等于把
+ *  `flagged = hardcoded >= threshold && hardcoded > accessor` 架空, 即把检测器关掉。
+ *  仅要求引号成对【也】不够: 那样 `. "$CONF" # loads x.sh` 会被读成「引号段 "$CONF" + 后面的路径」。
+ *  故未加引号的片段额外排除 `#` (shell 里词首的 `#` 开注释; 引号段内的 `#` 不受影响)。
+ *  两条合起来才同时做到「读得懂嵌套引号」与「不吞掉行尾注释」。 */
+const PATH_EXPR = `(?:[^\\n"'#]|"[^"\\n]*"|'[^'\\n]*')*?`;
+
+/** source / `.` 的【命令位置】前缀: 行首, 或紧跟 `;` `&` `|` `{` 换行; 之后再可选一个 shell 关键字。
+ *  关键字必须在真命令位【之后】—— 61 个 idiom-B 文件的实际形态是 `]; then . "$_gap_help_lib"` 一行,
+ *  所以关键字是不可省的一半; 而 `#` 不是命令位锚点, 纯注释行因此不会被误判成 accessor。 */
+const SOURCE_CMD = `(?:^|[;&|{\\n])\\s*(?:then\\s+|do\\s+|else\\s+)?(?:\\.|source)\\s+`;
+
+/** 变量赋值锚点 (行首 / 命令位之后)。 */
+const ASSIGN_ANCHOR = `(?:^|[;&|{\\n])\\s*`;
+
+/** 赋值语句与随后的 `source <变量>` 之间允许的最大距离 (字符)。 */
+const ACCESSOR_VAR_WINDOW = 2000;
+
+/** 单一访问器正则【源】—— 三个族:
+ *  ① `import … from "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
+ *  ② `source <.路径表达式>` / `. <.路径表达式>`        (shell 内联路径, 引号可嵌套)
+ *  ③ `VAR="<.路径表达式>"` … `. "$VAR"` / `source "${VAR}"`  (shell 先赋值路径、后 source 变量,
+ *     本仓 61 个 .sh 的主流形态 —— 单份正则做不到, 故用 \\1 反向引用把两半绑在同一个变量名上)
+ *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。 */
+export function accessorRegexSource(stem: string): string {
+  const s = escapeRegex(stem);
+  return (
+    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `import\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `require\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `${SOURCE_CMD}["']?${PATH_EXPR}${s}(?:\\.sh)?["']?|` +
+    `${ASSIGN_ANCHOR}([A-Za-z_][A-Za-z0-9_]*)=(["'])${PATH_EXPR}${s}(?:\\.sh)?\\2` +
+    `[\\s\\S]{0,${ACCESSOR_VAR_WINDOW}}?${SOURCE_CMD}["']?\\$\\{?\\1\\}?["']?)`
+  );
 }
 
 // ── (a) 路径字面量常量 (AC1: 产品源码硬编码 plugin 脚本相对路径的 *_REL 常量) ─────────────────
@@ -322,12 +372,7 @@ export function literalReplication(root: string, files: string[], entity: string
   let code = 0;
   let accessor = 0;
   let hardcoded = 0;
-  const importRe = new RegExp(
-    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `import\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `require\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-      `(?:^|[;&|\\n])\\s*(?:\\.|source)\\s+["']?[^"'\\n]*?${escapeRegex(stem)}(?:\\.sh)?["']?)`,
-  );
+  const importRe = new RegExp(accessorRegexSource(stem));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     if (!src.includes(entity)) continue;
@@ -365,6 +410,9 @@ export function replicationTable(
     codeFiles: [] as string[],
   }));
   const stems = rows.map((r) => r.entity.replace(/\.(ts|sh|mjs|js)$/, ""));
+  // 每个实体只编译一次访问器正则 (原来是每个 (文件 × 实体) 编译一次)。共享同一份 accessorRegexSource,
+  // 与 literalReplication() 是【同一个判定】而不是两份逐字副本 —— 分叉在结构上不可能 (AC4)。
+  const accessorRes = stems.map((s) => new RegExp(accessorRegexSource(s)));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const rel = relOf(root, f);
@@ -382,14 +430,7 @@ export function replicationTable(
       if (!codeHit) continue;
       row.code++;
       row.codeFiles.push(rel);
-      const stem = stems[ri];
-      const importRe = new RegExp(
-        `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `import\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `require\\s*\\(\\s*["'][^"']*?${escapeRegex(stem)}(?:\\.(?:ts|mjs|js))?["']|` +
-          `(?:^|[;&|\\n])\\s*(?:\\.|source)\\s+["']?[^"'\\n]*?${escapeRegex(stem)}(?:\\.sh)?["']?)`,
-      );
-      if (codeMatch(src, mask, importRe).length > 0) row.accessor++;
+      if (codeMatch(src, mask, accessorRes[ri]).length > 0) row.accessor++;
       else row.hardcoded++;
     }
   }
