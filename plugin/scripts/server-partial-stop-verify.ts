@@ -49,7 +49,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { DRIVER_KINDS } from "./driver-runtime.ts";
+// `pidAlive` rides the edge that already existed: it used to be a 5-line private copy here (one of
+// the four divergent ones — `.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1789889905875`); driver-runtime.ts re-exports the
+// single source from Core `server-state.ts`, so this file carries no copy of the probe at all.
+import { DRIVER_KINDS, pidAlive } from "./driver-runtime.ts";
 // valueOf (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -408,15 +412,7 @@ function probeHost(host: string): string {
   return host === "0.0.0.0" || host === "::" || host === "*" || host === "" ? "127.0.0.1" : host;
 }
 
-function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException)?.code === "EPERM";
-  }
-}
+// (the private `pidAlive` copy that used to live here is gone — imported from ./driver-runtime.ts)
 
 interface ServerCarrier {
   pid: number;

@@ -38,3 +38,71 @@ depends_on: []
 - packages/quay/src/fan-in/ff-merge.ts
 - plugin/test/fan-in-ff-merge.test.mjs
 - tasks/gap-fan-in-cert-flip-commit-identity-inert.md
+- packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs（不是本缺陷的载体，是本轮 fan-in 的**阻塞器**：该文件 AC3 的实时 ref 竞态与本 delta 无关，但每次 suite 都可能红 ⇒ 见 Evidence E1–E5）
+
+## Evidence
+
+### E1 本轮 suite 红的归因：一条落在两次读之间的提交（⛔ 不是本 delta 引入）
+
+上轮 `exited-not-landed` 于 `step=suite`，`# fail 1`，唯一失败文件与本任务 delta 无 import 通路：
+
+```
+packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs:127:10
+✖ AC3: every in-window second parent is fetched (no side branch lost by the production traversal)
+  AssertionError [ERR_ASSERTION]: git --all emits 200 commits; the data layer dropped 1 (side branch lost)
+  1 !== 0
+```
+日志：`/home/yale/work/quay/.quay/fan-in-suite-gap-fan-in-cert-flip-commit-identity-inert~wk-prod-anchor~1789891421089-765b21.log:7888-7894`（`# pass 3419 / # fail 1`）。
+
+**归因读数（机械，非推断）**：该文件 AC3 结束于 `end_ms=1789891775883`（= 08:09:35.883Z，duration 214ms ⇒ oracle 读在 08:09:35.87Z），而 `git reflog` 显示
+`e18962e2a HEAD@{2026-09-20 08:09:35 +0000}: commit: tasks: gap-anti-drift-… todo→ready（promotion-driver 机械晋升）`
+——**恰好落在那两次读之间**。`--all` 窗口头因此前进 1 ⇒ 尾部掉出 1 ⇒ `dropped = 1`，掉出的正是**数据层读不到的那个新提交**。
+
+**隔离重跑（判据）**：`node --test …mainline-lane-empty-before-page.test.mjs` ⇒ `tests 3 / pass 3 / fail 0`（修前，工作树内）。⇒ 红不是本 delta 造成的，是**窗口位移**。
+
+### E2 根因：AC3 的两侧是两次独立实时读，中间没有快照（同族先例：已修过一份，未修这一份）
+
+- 数据层：`readGitHistory(REPO_ROOT, {limit})` → `git log <GIT_HISTORY_REF_SCOPE> --topo-order -n 200`（`observation.ts`；AC1 先调过 ⇒ AC3 复用其 **30s TTL 缓存**，所以两次读的间隔不是毫秒级而是 ~1 秒级）。
+- oracle：`liveWindowHashes()` → 同一条 argv 的**第二次实时读**。间隔内任何 ref 前进 K 个 ⇒ 窗口头多 K、尾部掉 K ⇒ `dropped = K`。
+
+**硬规则 5b（修好一处 ≠ 只此一处）**：同一 race 已在**兄弟文件**修过并通过 ——
+`gap-git-graph-pagination-ac2-oracle-races-live-refs`（done）对 `gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs` 实现了冻结 ref 窗口（`snapshotRefWindow()` / `frozenGitExec()`），且当时**未**覆盖本文件。**全库扫描同一形态**（`readGitHistory(REPO_ROOT…` ∧ 实时 `git` oracle ∧ 无冻结）：`gap-git-graph-adopt-git-column-algorithm-and-decorate-labels` / `-cross-column-edges-drawn-as-fixed-stubs-not-anchored` / `-decoration-labels-as-colored-chips` / `-stride-chip-overlaps-commit-row-text` / `-task-view-aggregate-commits-by-task-id` / `-reconstructed-lanes-all-named-mainline-ref` / `-ref-partition-collapses-all-topology-to-one-lane` 共 7 个文件**仍带同一形态**，但它们的 oracle 与数据层**不构成 AC3 那一对同 argv 的两次读**（逐条看过：有的只在同一函数内读一次、有的读的是 `%D`/`--graph` 而数据层另有快照缝隙）——本任务只修**已实际误杀本轮 fan-in 的这一个**，其余 7 个不属本任务 Touches，另记，⛔ 不借机扩大 delta。
+
+### E3 修法：把 ref 集合冻结成不可变对象名，两侧同源（生产读路径零改动）
+
+`observation.ts` **零改动** —— 冻结列表经它既有的 `exec` 宿主读取缝隙（`GitExec`，其设计理由逐字就是 "hand the reader a frozen snapshot of the host instead of racing the live repo"）进入生产读路径；oracle 用**同一个** `shas`。新增 `snapshotRefWindow()` / `resolveRefWindow()` / `frozenGitExec()` / `oracleWindowHashes(scope)`，AC3 在**任一侧读之前**一次性取值。`frozenGitExec` 是 **fail-closed**：`log` 调用里没有 `--all` 就 throw（⛔ 不静默回答另一个问题，硬规则 3b）——沿用同文件 `linearWindow()` 缝隙既有的纪律。
+
+**落笔前干跑（硬规则 4c）**，工作树 `-n 200`：
+```
+live --all md5: bc7c2972de509f4172b0edb5f0b04d9c  -
+frozen  refs md5: bc7c2972de509f4172b0edb5f0b04d9c  -
+EQUIVALENT ✔   refs count: 182
+```
+（`refs/notes/*` 从冻结列表里排除，因为 `GIT_HISTORY_REF_SCOPE` 排除它——只冻结不够：一个稳定的、仍带 notes 链的窗口是「稳定地错」。）
+
+### E4 受控复现（隔离 clone，单一变量 = 跑测试期间推进 ref 的 churn 循环）
+
+```
+git clone --shared <worktree> /tmp/ggw-race-probe；拷入本文件（带修）；symlink node_modules
+churn: while :; do git commit -q --allow-empty -m churn && git update-ref refs/scratch/race HEAD; sleep 0.25; done
+```
+| 臂 | 冻结 | churn | 读数 |
+|---|---|---|---|
+| 修前形态（`QUAY_TEST_GIT_GRAPH_LIVE_REFS=1`） | 关 | 开 | **红 3/3**：`pass 2 fail 1`，原句 `the data layer dropped 1` / `dropped 1` / `dropped 2` |
+| 修后（缺省） | 开 | 开 | **绿 3/3**：`pass 3 fail 0` |
+| 修后（缺省） | 开 | 关 | 绿 3/3 |
+
+⇒ 与真实样本**同一签名**（`dropped K`，K=1）；单变量可区分：同一份代码只翻转冻结开关，红/绿互换 ⇒ 冻结窗口是**被读到的**，不是回声（硬规则 4 推论三）。churn 探针已删除（`rm -rf /tmp/ggw-race-probe`），源仓库未被扰动。
+
+### E5 负控制另一半：非空性判据没被这次修复削弱
+
+`QUAY_GGW_LINEAR_WINDOW=1`（既有的线性窗口缝隙）⇒ AC3 **仍红** `the window contains merge second parents to verify (non-vacuous)`（`fail 1`）。⇒ 冻结没有把 AC3 变成恒真；窗口内第二父的边缘仍是真的被数出来的。
+三臂的绿色读数都带**臂标识**（`frozen at <ts> (N ref object names)` / `LIVE --all (QUAY_TEST_GIT_GRAPH_LIVE_REFS=1)` / `linear`），⛔ 三个臂不会互相冒充。
+
+### E6 反例判据（硬规则 4 推论三）：关掉冻结 ⇒ 并发 churn 下重新报红
+
+见 E4 第一行：`QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` ∧ churn ⇒ **红 3/3**，且**修前形态**就是缺这个冻结。⇒ AC3 读的是真实判定。
+
+### E7 诚实口径注：scoped-gate 缓存的 `--develop-sha`
+
+缓存键是 `(task, developSha)`，fan-in 的命中判据是**锁内 merge 到的 develop tip 逐字相符**（`worker-driver.ts:4787-4791`）。本文件记录的 sha 取**本门实际验证过的**那个 develop tip（worktree 里那个 merge 提交的第二父），⛔ 不取「写缓存那刻的 `git rev-parse develop`」——develop 若在跑门期间前进，后者会记下一个**本门从未验证过**的状态，制造假命中。develop 此后前进 ⇒ 未命中 ⇒ 门照跑（fail-closed，安全方向）。
