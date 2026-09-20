@@ -109,3 +109,70 @@ All 15 carriers == resolveVersion(VERSION,'tracked') == 0.10.0-dev (over 12 file
     exit=0
 --- 9. git status after restore (must be clean):
 ?? .quay/ac-stamp-version-ac3-evidence.txt
+=== AC4: build-mode reading — real release/* branch vs develop/author
+--- branch: release/ac4-reading   VERSION: 0.10.0
+--- reset the 5 plugin carriers to the tracked form, then run the REAL sync-vendor.sh (full path)
+    pre: plugin/VERSION=0.10.0-dev  plugin.json.version=0.10.0-dev
+--- run: bash plugin/scripts/sync-vendor.sh
+[sync-vendor] stamping the built plugin tree with the build-version (branch-aware)...
+STAMP-VERSION: mode=build root=/home/yale/work/quay-worktrees/ac-stamp-release-reading/plugin source=/home/yale/work/quay-worktrees/ac-stamp-release-reading/VERSION = 0.10.0 => every carrier must == 0.10.0
+STAMP-VERSION: wrote 5 file(s), 5 carrier(s):
+    exit=0
+--- post (must have NO -dev on a release/* branch):
+    plugin/.claude-plugin/plugin.json .version = 0.10.0
+    plugin/VERSION                             = 0.10.0
+    plugin/README.md  version line             = quay plugin v0.10.0
+    plugin/vendor/quay/package.json .version   = 0.10.0
+    plugin/.claude-plugin/marketplace.json     = 0.10.0
+--- the same carriers on develop/author (build form == tracked form => -dev, and a no-op):
+    repr: node scripts/stamp-version.mjs --mode build --check --root plugin   [in the task worktree]
+
+--- develop/author reading (task worktree, branch task/gap-version-stamp-generator-and-build-wiring):
+    $ node scripts/stamp-version.mjs --mode build --check --root plugin
+STAMP-VERSION: OK — all 5 carriers == 0.10.0-dev
+  (5 carriers over 5 files)
+    exit=0
+    plugin/.claude-plugin/plugin.json .version = 0.10.0-dev
+    plugin/VERSION                             = 0.10.0-dev
+=== AC5: package.sh must FAIL through stamp-version --check when a carrier is corrupted
+--- 0. the hand-copied three-way compare must be gone:
+    $ grep -n 'PKG_VERSION.*MKT_VERSION' packages/quay/scripts/package.sh
+    no hits (exit 1) — the old hand-copied comparison is deleted
+--- 1. corrupt ONE carrier (plugin/VERSION 0.10.0-dev -> 9.9.9-dev):
+    plugin/VERSION = 9.9.9-dev
+--- 2. run the REAL package.sh:
+  dist/quay.js  2.4mb ⚠️
+
+⚡ Done in 228ms
+esbuild: quay ESM dist bundle written to /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/packages/quay/dist/quay.js (createRequire banner injected).
+[build-dist] done: /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/packages/quay/dist/quay.js
+Verifying every version carrier against VERSION (stamp-version --check)...
+STAMP-VERSION: mode=tracked root=/home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring source=/home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/VERSION = 0.10.0 => every carrier must == 0.10.0-dev
+STAMP-VERSION: DRIFT — 1 of 15 carriers != 0.10.0-dev
+  plugin/VERSION  (plugin/VERSION): 9.9.9-dev -> 0.10.0-dev
+  run `node --experimental-strip-types scripts/stamp-version.ts` (no --check) to update them all
+ERROR: version carriers are out of sync with /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/VERSION — refusing to pack.
+       Fix: node --experimental-strip-types scripts/stamp-version.ts   (updates all of them)
+    package.sh exit=1
+--- 3. restore:
+    plugin/VERSION = 0.10.0-dev
+
+=== AC6: the stale gitignored build product packages/quay/plugin/VERSION
+--- the RECORDED condition (main checkout, gitignored artifact from the last real package run):
+    /home/yale/work/quay/packages/quay/plugin/VERSION = 0.7.0  [mtime 2026-09-15 07:35:43]
+--- reproduce the same stale state in THIS worktree, then run the real package.sh:
+    before: packages/quay/plugin/VERSION = 0.7.0
+--- run: bash packages/quay/scripts/package.sh
+npm notice
+quay-0.10.0-dev.tgz
+Verifying dist reference closure against the tarball (every referenced dist/*.js is packed)...
+dist-closure gate OK: 100 referenced dist bundles all present in quay-0.10.0-dev.tgz
+Artifact: /home/yale/work/quay-worktrees/gap-version-stamp-generator-and-build-wiring/packages/quay/quay-0.10.0-dev.tgz
+
+Install globally:  npm install -g quay-0.10.0-dev.tgz
+Then run:          quay --help
+    package.sh exit=0
+    after:  packages/quay/plugin/VERSION = 0.10.0-dev
+    after:  packages/quay/plugin/.claude-plugin/plugin.json .version = 0.10.0-dev
+    (the tarball itself, if packed:)
+packages/quay/quay-0.10.0-dev.tgz
