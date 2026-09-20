@@ -17,6 +17,8 @@ import {
   fileWithinDeclared,
   normalizePath,
   checkAntiDrift,
+  readAntiDriftExempt,
+  partitionExempt,
   main,
 } from "../scripts/anti-drift-touches-check.ts";
 
@@ -336,6 +338,264 @@ test("unresolvable default branch ⇒ NO verdict (unreadable is not divergent)",
     adCommit(dir, "base");
     adGit(dir, ["checkout", "-q", "-b", "develop"]);
     assert.equal(await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]), 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── anti_drift.exempt: project-configurable exemption globs ──────────────────────────────────────
+// gap-anti-drift-touches-project-configurable-exempt-globs. A target project (cloudcli, 2026-09-20)
+// was deadlocked: a backend task NECESSARILY drags in a barrel (`server/modules/providers/index.ts`)
+// because implementing it means adding an export, and `## Touches` is required to stay minimal — so
+// the per-file out-of-declared judgment bit a CORRECT implementation. The fix is a flat, project-owned
+// waiver list in the WORKSPACE-ROOT `.quay/config.yml`:
+//
+//   anti_drift:
+//     exempt:
+//       - glob: "server/modules/*/index.ts"
+//         reason: "barrel re-export"
+//
+// The four properties these tests pin (see the module header for the full statement):
+//   ① one flat glob list, exempt globs NOT screened for overbroadness (the project decides);
+//   ② the output ENUMERATES the waiver (`exempted: <file> <- <glob>` + a count);
+//   ③ a malformed list is a DISTINCT fail-closed verdict, never a pass and never `out-of-declared`;
+//   ④ the read source is the WORKSPACE ROOT config, NEVER the worktree copy.
+// Plus: an all-exempt diff is judged exactly like an empty diff, and an absent config is byte-for-byte
+// the pre-change behavior.
+//
+// FALSIFIABILITY (the pair is what pins the implementation — neither half is evidence alone):
+//   · drop the waiver arm (`exempt` never applied) ⇒ the positive test goes red (exit 1).
+//   · make the waiver arm a blanket pass ⇒ the negative-control test goes red.
+
+const EXEMPT_YAML = 'anti_drift:\n  exempt:\n    - glob: "server/modules/*/index.ts"\n      reason: "barrel re-export"\n';
+const EXEMPT_BARREL = "server/modules/providers/index.ts";
+const EXEMPT_TASK_BODY = "## Touches\n\n- src/feature.txt\n- tasks/T-1.md\n";
+
+/** Run main() while capturing its stdout, so a test can assert on the TEXT (not just the exit code)
+ *  — the enumeration requirement ② is a text property. Same write-patch the BASELINE tests use. */
+async function adRunCapture(argv) {
+  const chunks = [];
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (c) => { chunks.push(String(c)); return true; };
+  let code;
+  try {
+    code = await main(argv);
+  } finally {
+    process.stdout.write = write;
+  }
+  return { code, out: chunks.join("") };
+}
+const adDriverArgv = (worktree) => ["node", "s", "--task", "T-1", "--worktree", worktree, "--merge-target", "develop"];
+
+/** Write `<dir>/.quay/config.yml`; `null` means "no config file at all". */
+function adWriteConfig(dir, configYml) {
+  if (configYml === null) return;
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), configYml);
+}
+
+/** Shape: the task's diff is {declared feature, declared task file, UNDECLARED barrel}. The barrel
+ *  matches the documented exempt glob, so it is the fixture's whole point. */
+function barrelRepo(configYml) {
+  const dir = adRepo();
+  adGit(dir, ["branch", "-M", "master"]);
+  for (const d of ["src", "tasks", "server/modules/providers"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "base.txt"), "base\n");
+  adWriteConfig(dir, configYml);
+  adCommit(dir, "base");
+  adGit(dir, ["checkout", "-q", "-b", "develop"]);
+  adGit(dir, ["checkout", "-q", "-b", "task/T-1"]);
+  fs.writeFileSync(path.join(dir, "src", "feature.txt"), "feature\n");
+  fs.writeFileSync(path.join(dir, EXEMPT_BARREL), "export * from './a.ts';\n");
+  fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), EXEMPT_TASK_BODY);
+  adCommit(dir, "implement feature (necessarily drags in the barrel)");
+  adGit(dir, ["merge", "--no-edit", "develop"]);
+  return dir;
+}
+
+/** Shape: the task's ENTIRE diff is the exempt barrel — removing the waived files leaves nothing. */
+function exemptOnlyRepo(configYml) {
+  const dir = adRepo();
+  adGit(dir, ["branch", "-M", "master"]);
+  for (const d of ["src", "tasks"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "base.txt"), "base\n");
+  fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), EXEMPT_TASK_BODY); // on `master` ⇒ not in the task diff
+  adWriteConfig(dir, configYml);
+  adCommit(dir, "base");
+  adGit(dir, ["checkout", "-q", "-b", "develop"]);
+  adGit(dir, ["checkout", "-q", "-b", "task/T-1"]);
+  fs.mkdirSync(path.join(dir, "server", "modules", "providers"), { recursive: true });
+  fs.writeFileSync(path.join(dir, EXEMPT_BARREL), "export * from './a.ts';\n");
+  adCommit(dir, "the barrel and nothing else");
+  adGit(dir, ["merge", "--no-edit", "develop"]);
+  return dir;
+}
+
+/** Shape: the task branch has NO commit at all — the reference "empty diff" case. */
+function emptyDiffRepo(configYml) {
+  const dir = adRepo();
+  adGit(dir, ["branch", "-M", "master"]);
+  for (const d of ["src", "tasks"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "base.txt"), "base\n");
+  fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), EXEMPT_TASK_BODY);
+  adWriteConfig(dir, configYml);
+  adCommit(dir, "base");
+  adGit(dir, ["checkout", "-q", "-b", "develop"]);
+  adGit(dir, ["checkout", "-q", "-b", "task/T-1"]);
+  adGit(dir, ["merge", "--no-edit", "develop"]);
+  return dir;
+}
+
+test("anti_drift.exempt: an undeclared barrel covered by the workspace-root waiver ⇒ exit 0, ENUMERATED", async () => {
+  const dir = barrelRepo(EXEMPT_YAML);
+  try {
+    const { code, out } = await adRunCapture(adDriverArgv(dir));
+    assert.equal(code, 0, `the waiver must clear the barrel; got exit ${code}:\n${out}`);
+    assert.match(out, /ANTI-DRIFT OK: task T-1/);
+    assert.match(out, /exempted \(1\)/, "the exempted COUNT must be reported (硬规则 3)");
+    assert.match(
+      out,
+      /exempted: server\/modules\/providers\/index\.ts <- server\/modules\/\*\/index\.ts/,
+      "the waived FILE and the GLOB it matched must both be enumerated",
+    );
+    assert.doesNotMatch(out, /out-of-declared/, "the waived file must not also be reported as a violation");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("anti_drift.exempt negative-control: the SAME diff with NO config is still out-of-declared", async () => {
+  const dir = barrelRepo(null);
+  try {
+    const { code, out } = await adRunCapture(adDriverArgv(dir));
+    assert.notEqual(code, 0, "the guardrail must still bite when no waiver exists");
+    assert.match(out, /ANTI-DRIFT HARD FAIL/);
+    assert.match(out, /out-of-declared: task wrote server\/modules\/providers\/index\.ts/);
+    assert.doesNotMatch(out, /exempted/, "nothing was waived, so nothing may be reported as waived");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("anti_drift.exempt worktree-copy-ignored: a waiver in the WORKTREE copy does not open one", async () => {
+  // Constraint ④. `tasks/T-1.md` is on the base commit (so the task file exists in the worktree);
+  // the worktree branch adds the barrel and then writes a waiver into ITS OWN `.quay/config.yml`
+  // (uncommitted). The read source is the MAIN checkout, which has no config at all.
+  const dir = adRepo();
+  const wtParent = fs.mkdtempSync(path.join(os.tmpdir(), "antidrift-wtcopy-"));
+  const wt = path.join(wtParent, "wt");
+  try {
+    adGit(dir, ["branch", "-M", "master"]);
+    for (const d of ["src", "tasks"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "base.txt"), "base\n");
+    fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), EXEMPT_TASK_BODY);
+    adCommit(dir, "base");
+    adGit(dir, ["checkout", "-q", "-b", "develop"]);
+
+    adGit(dir, ["worktree", "add", "-q", "-b", "task/T-1", wt, "master"]);
+    fs.mkdirSync(path.join(wt, "server", "modules", "providers"), { recursive: true });
+    fs.writeFileSync(path.join(wt, EXEMPT_BARREL), "export * from './a.ts';\n");
+    adCommit(wt, "implement barrel");
+    adWriteConfig(wt, EXEMPT_YAML); // the worktree copy — deliberately NOT committed
+    adGit(wt, ["merge", "--no-edit", "develop"]);
+
+    // premise: the worktree copy really does declare the waiver (otherwise this test proves nothing)
+    assert.equal(readAntiDriftExempt(wt).status, "ok", "premise: the worktree copy carries a valid waiver");
+
+    const { code, out } = await adRunCapture(adDriverArgv(wt));
+    assert.notEqual(code, 0, "a self-granted worktree waiver must not clear the barrel");
+    assert.match(out, /out-of-declared: task wrote server\/modules\/providers\/index\.ts/);
+    assert.doesNotMatch(out, /exempted/, "the worktree copy's waiver must not be honored");
+  } finally {
+    try { adGit(dir, ["worktree", "remove", "--force", wt]); } catch { /* best effort */ }
+    fs.rmSync(wtParent, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const [label, yml] of [
+  ["a missing reason", 'anti_drift:\n  exempt:\n    - glob: "server/modules/*/index.ts"\n'],
+  ["a blank reason", 'anti_drift:\n  exempt:\n    - glob: "server/modules/*/index.ts"\n      reason: "   "\n'],
+  ["a non-list exempt", 'anti_drift:\n  exempt: "server/modules/*/index.ts"\n'],
+]) {
+  test(`anti_drift.exempt malformed: ${label} ⇒ fail-closed, and NOT the out-of-declared shape`, async () => {
+    const dir = barrelRepo(yml);
+    try {
+      const { code, out } = await adRunCapture(adDriverArgv(dir));
+      assert.notEqual(code, 0, "a malformed waiver list must never pass (硬规则 3b)");
+      assert.match(out, /malformed anti_drift/, "the verdict must name the malformed key");
+      assert.doesNotMatch(out, /out-of-declared/, "a broken waiver list is a DIFFERENT cause from a stray write");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("anti_drift.exempt absent-config: no config behaves byte-for-byte as before", async () => {
+  const none = barrelRepo(null);            // no .quay/ at all
+  const emptyFile = barrelRepo("");         // an empty config file
+  const noKey = barrelRepo("loop: {}\n");   // a config with no anti_drift key
+  try {
+    const a = await adRunCapture(adDriverArgv(none));
+    const b = await adRunCapture(adDriverArgv(emptyFile));
+    const c = await adRunCapture(adDriverArgv(noKey));
+    assert.equal(a.code, 1, "with no waiver the barrel is a genuine out-of-declared write");
+    assert.equal(b.code, a.code);
+    assert.equal(c.code, a.code);
+    assert.equal(b.out, a.out, "an empty config file must be byte-identical to no config file");
+    assert.equal(c.out, a.out, "a config without an anti_drift key must be byte-identical to no config");
+    // The pre-change wording, pinned verbatim — "absent is not an error" must mean NO format change.
+    assert.equal(
+      a.out,
+      "ANTI-DRIFT HARD FAIL: task T-1 — 1 violation(s)\n" +
+        "  out-of-declared: task wrote server/modules/providers/index.ts (matches no declared Touches glob)\n",
+    );
+  } finally {
+    for (const d of [none, emptyFile, noKey]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("anti_drift.exempt exempt-only-equals-empty: an all-exempt diff judges exactly like an empty diff", async () => {
+  // Proposal point 5: waived files do not count as "having done something". Removing the waived files
+  // must leave the SAME verdict as a diff that was empty to begin with — the `--allow-empty`
+  // NON-WAIVABLE semantics are untouched (a zero-file build is still a legal, clean single build).
+  const exemptOnly = exemptOnlyRepo(EXEMPT_YAML);
+  const emptyDiff = emptyDiffRepo(null);
+  try {
+    const a = await adRunCapture(adDriverArgv(exemptOnly));
+    const b = await adRunCapture(adDriverArgv(emptyDiff));
+    assert.equal(a.code, b.code, "the two exit codes must match, side by side");
+    assert.equal(a.code, 0);
+    const verdictLine = (s) => s.split("\n")[0];
+    assert.equal(verdictLine(a.out), verdictLine(b.out), "the verdict wording must be identical");
+    assert.equal(
+      verdictLine(b.out),
+      "ANTI-DRIFT OK: task T-1 — 0 actual file(s), all within declared Touches (2 glob(s))",
+      "the reference empty-diff verdict line",
+    );
+    assert.match(a.out, /exempted \(1\)/, "the waiver is EXTRA information appended to the same verdict");
+    assert.doesNotMatch(b.out, /exempted/, "an empty diff waives nothing");
+  } finally {
+    fs.rmSync(exemptOnly, { recursive: true, force: true });
+    fs.rmSync(emptyDiff, { recursive: true, force: true });
+  }
+});
+
+test("readAntiDriftExempt: an overbroad-looking exempt glob is ACCEPTED (the project's call)", () => {
+  // Constraint ①: exempt globs are deliberately NOT screened by isOverbroadDeclaration. `**/index.ts`
+  // would be rejected as a Touches declaration; as a WAIVER it is the project choosing how wide to
+  // cast its own exception net, which is explicitly its business.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "antidrift-cfg-"));
+  try {
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".quay", "config.yml"), 'anti_drift:\n  exempt:\n    - glob: "**/index.ts"\n      reason: "any barrel"\n');
+    const r = readAntiDriftExempt(dir);
+    assert.equal(r.status, "ok");
+    assert.deepEqual(r.entries, [{ glob: "**/index.ts", reason: "any barrel" }]);
+    assert.deepEqual(partitionExempt(["a/b/index.ts", "a/c.ts"], r.entries), {
+      judged: ["a/c.ts"],
+      exempted: [{ file: "a/b/index.ts", glob: "**/index.ts" }],
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
