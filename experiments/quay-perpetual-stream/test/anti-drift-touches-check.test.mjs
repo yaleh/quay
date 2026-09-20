@@ -178,10 +178,19 @@ test("checkAntiDrift: malformed manifest (wrong field names) FAILS CLOSED — DI
 });
 
 test("main: malformed manifest → exit 1 (HARD FAIL, not OK)", async () => {
-  const bad = fx("malformed.json");
-  fs.writeFileSync(bad, JSON.stringify([{ id: "A", touches: ["x/a.js"] }]));
-  assert.equal(await main(["node", "s", bad]), 1);
-  fs.rmSync(bad, { force: true });
+  // ⛔ Written into a TEMP dir, NOT into the checked-in `fixtures/antidrift/`: the manifest here is
+  // DISPOSABLE INPUT, not a checked-in fixture, and writing it into the repo tree is a real violation
+  // of `checked-in-write-check` (it flagged this test the moment this file entered a task delta — the
+  // scoped tier is `--changed`-scoped, so an untouched-but-real defect stays invisible until the file
+  // is touched). Same assertion, no write into the checked-in tree.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "antidrift-malformed-"));
+  const bad = path.join(scratch, "malformed.json");
+  try {
+    fs.writeFileSync(bad, JSON.stringify([{ id: "A", touches: ["x/a.js"] }]));
+    assert.equal(await main(["node", "s", bad]), 1);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("main: no manifest arg → exit 2", async () => {
