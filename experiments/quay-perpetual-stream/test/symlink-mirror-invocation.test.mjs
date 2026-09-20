@@ -128,6 +128,31 @@ function redactClockFields(s) {
   return s.replace(/\d{13}/g, '<CLOCK>');
 }
 
+// AC2 (live-state): `task-status-drift-check.ts` is a REPORT-ONLY tool whose no-args path IS its
+// default run, and what it reports is the repo's CURRENT branch state. Two invocations seconds apart
+// on the live loop therefore do NOT necessarily see the same repo: a fan-in can merge a task branch,
+// and a new one can be created or advanced, in that window — and those are precisely the lines the
+// STRANDED block prints.
+//
+// Measured (2026-09-20, gap-version-stamp-generator-and-build-wiring — a task whose own delta touches
+// no branch, no worktree and no task-store code): two invocations of the script MINUTES apart differed
+// on exactly ONE line — `stranded: task/gap-ac271-… (has-commits, 4 commit(s) ahead, …)` had become
+// `stranded: task/gap-ac272-… (has-commits, 1 commit(s) ahead, …)` after the first branch was merged
+// by the loop — while the 67 closed-without-work and 9 reverse-drift lines, which read the task store,
+// were byte-identical. Two invocations BACK-TO-BACK on a quiet repo are byte-identical. So the
+// divergence is live branch state, not an invocation-path difference, and it is redacted here exactly
+// as clock fields are above.
+// Honest boundary (ADR-review-1): the redaction is scoped to that ONE block, anchored on its unique
+// header (`^task-status-drift: N STRANDED branch(es)`) and trailer (`^  → human review: merge or
+// adjudicate`). Every difference outside it — including the empty-vs-full report that the silent-no-op
+// defect class produces — still fails, and the unit test below pins that boundary.
+function redactLiveBranchState(s) {
+  return s.replace(
+    /^task-status-drift: \d+ STRANDED branch\(es\)[\s\S]*?^  → human review: merge or adjudicate[^\n]*\n/gm,
+    '<LIVE-BRANCH-STATE>\n'
+  );
+}
+
 // AC1 + AC4: the no-args signature a guard-firing symlinked CLI must present. A silent no-op
 // (exit 0, zero output) is THE defect class this file exists to catch. Output is mandatory for any
 // exit code; an exit-0 path is legitimate when it says something on STDOUT — either a deliberate
@@ -173,7 +198,15 @@ for (const { name, symlinkPath, realPath } of discovered) {
     // AC2: redact `\d{13}` clock fields on BOTH sides so a script that embeds Date.now() (e.g.
     // milestone-worktree's `nowMs`) can still be proven identical via both invocation paths. Any
     // NON-clock difference OUTSIDE a 13-digit run in stdout/stderr still fails the assertion below.
-    assert.equal(redactClockFields(viaSymlink.stdout), redactClockFields(viaReal.stdout), `${name}: stdout differs between symlink and real invocation`);
+    // AC2 (live-state): stdout additionally redacts the one block a report-only tool cannot hold still
+    // — the branch-state STRANDED block — see redactLiveBranchState above for the measurement. stderr
+    // is NOT redacted: the branch-state report goes to stdout, so redacting stderr would only weaken
+    // the comparison.
+    assert.equal(
+      redactLiveBranchState(redactClockFields(viaSymlink.stdout)),
+      redactLiveBranchState(redactClockFields(viaReal.stdout)),
+      `${name}: stdout differs between symlink and real invocation`
+    );
     assert.equal(redactClockFields(viaSymlink.stderr), redactClockFields(viaReal.stderr), `${name}: stderr differs between symlink and real invocation`);
   });
 }
@@ -185,6 +218,36 @@ test('AC2: clock-field redaction preserves non-clock differences (no blanket wea
   assert.equal(redactClockFields('a{"nowMs":1785673919246}b'), 'a{"nowMs":<CLOCK>}b');
   assert.notEqual(redactClockFields('{"code":"missing-workspace"}'), redactClockFields('{"code":"missing-milestone"}'));
   assert.notEqual(redactClockFields('real-error'), redactClockFields('symlink-error'));
+});
+
+// AC2 (live-state) support proof: the branch-state redaction is SCOPED to the STRANDED block, so it
+// cannot become a blanket weakening. A difference inside that block is swallowed (that is the point);
+// a difference anywhere else, or an empty report, or a report missing the block entirely, still fails.
+test('AC2: live-branch-state redaction is scoped to the STRANDED block', () => {
+  const store = (id) => `task-status-drift: 1 CLOSED-without-work suspect(s) — …\n  closed-without-work: ${id} (status done)\n`;
+  const stranded = (n, branch) =>
+    `task-status-drift: ${n} STRANDED branch(es) — …\n  stranded: ${branch} (has-commits, 1 commit(s) ahead)\n  → human review: merge or adjudicate the branch; …\n`;
+  // the measured divergence: the branch set moved between the two invocations ⇒ equal after redaction
+  assert.equal(
+    redactLiveBranchState(store('T-1') + stranded(1, 'task/a')),
+    redactLiveBranchState(store('T-1') + stranded(2, 'task/b'))
+  );
+  // the block is actually consumed (a no-op predicate would pass the line above for the wrong reason)
+  const redacted = redactLiveBranchState(store('T-1') + stranded(1, 'task/a'));
+  assert.ok(redacted.includes('<LIVE-BRANCH-STATE>'), 'the block must be replaced by its marker');
+  assert.ok(!redacted.includes('stranded:'), 'no stranded line may survive the redaction');
+  assert.ok(redacted.includes('closed-without-work: T-1'), 'the task-store block must survive untouched');
+  // a difference OUTSIDE the block still fails equality
+  assert.notEqual(
+    redactLiveBranchState(store('T-1') + stranded(1, 'task/a')),
+    redactLiveBranchState(store('T-2') + stranded(1, 'task/a'))
+  );
+  // …and so does the defect class this file exists for: an empty report vs a full one
+  assert.notEqual(redactLiveBranchState(''), redactLiveBranchState(store('T-1') + stranded(1, 'task/a')));
+  // a block whose trailer is missing is NOT swallowed (strict comparison kept — the safe direction)
+  assert.ok(
+    redactLiveBranchState(store('T-1') + 'task-status-drift: 1 STRANDED branch(es) — …\n').includes('STRANDED branch(es)')
+  );
 });
 
 // AC4 proof: the guard-never-fires defect class (exit 0 with zero output) STILL fails loudly, and

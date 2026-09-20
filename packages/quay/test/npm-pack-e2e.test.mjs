@@ -36,6 +36,10 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+// The gate's OWN carrier table (scripts/version-carriers.ts) — see copyVersionGateInputs below: the
+// temp copy must carry exactly the files package.sh judges, and deriving that list from the table the
+// judge itself imports is what keeps the two from drifting apart.
+import { VERSION_CARRIERS } from "../../../scripts/version-carriers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
@@ -43,6 +47,47 @@ const repoRoot = path.resolve(pkgDir, "..", "..");
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
+
+/** The files a `node scripts/stamp-version.mjs` run needs in order to EXIST at all: the Node-20-safe
+ *  runner, the source modules it esbuild-bundles at run time, and the single source `VERSION`. */
+const STAMP_ENTRY_FILES = [
+  "scripts/stamp-version.mjs",
+  "scripts/stamp-version.ts",
+  "scripts/version-carriers.ts",
+  "scripts/resolve-version.ts",
+  "VERSION",
+];
+
+/**
+ * Copy every input the version gate reads into the temp copy — the carriers (the shared table), the
+ * generator's own modules, and `VERSION` itself.
+ *
+ * WHY THIS EXISTS (gap-version-stamp-generator-and-build-wiring): package.sh's version gate was
+ * replaced by `stamp-version.mjs --check --root <repo root>`, which judges EVERY version carrier
+ * against `VERSION` and refuses to pack when one is unreadable or stale. That gate is repo-root
+ * relative, so a temp copy that mirrored only `<base>/packages/quay` + `<base>/plugin` made the REAL
+ * package.sh fail closed with "the version gate is missing: <base>/scripts/stamp-version.mjs" — the
+ * copy, not the script, was incomplete. Copying the carrier list from the table (rather than
+ * hand-listing 12 paths here) means a future carrier is carried automatically and this copy cannot
+ * fall behind the gate it has to satisfy.
+ *
+ * `<base>/node_modules` is symlinked as well as `<base>/packages/quay/node_modules`: the runner
+ * resolves its `esbuild` dependency by walking up from its OWN location (`<base>/scripts/`), and
+ * without the base-level link that walk finds nothing and the runner exits 2.
+ */
+function copyVersionGateInputs(base) {
+  for (const rel of STAMP_ENTRY_FILES) {
+    const dest = path.join(base, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.cpSync(path.join(repoRoot, rel), dest);
+  }
+  for (const carrier of VERSION_CARRIERS) {
+    const dest = path.join(base, carrier.path);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.cpSync(path.join(repoRoot, carrier.path), dest);
+  }
+  fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(base, "node_modules"), "dir");
+}
 
 // Copy the package tree into a FRESH temp dir so package.sh's build-dist step
 // (esbuild -> dist/quay.js) and `npm pack` both run inside the temp copy, never
@@ -52,7 +97,8 @@ const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"),
 // interference source, don't mask the check). The repo's node_modules is
 // symlinked into the copy so build-dist.mjs's `import * as esbuild` resolves.
 //
-// The temp copy MIRRORS THE REAL REPO LAYOUT: <base>/packages/quay + <base>/plugin.
+// The temp copy MIRRORS THE REAL REPO LAYOUT: <base>/packages/quay + <base>/plugin + the
+// repo-root version gate's inputs (VERSION, scripts/stamp-version.*, every carrier).
 // package.sh (gap-release-excludes-plugin-bundle-agent-surface, AC16) stages the
 // plugin bundle into packages/quay/plugin/ before `npm pack`, resolving its source
 // as <package-dir>/../../plugin. That only resolves to the repo-root plugin/ if the
@@ -70,6 +116,7 @@ function makeTempPackageCopy() {
   // sync-vendor.sh), so package.sh's fail-closed guard does not fire.
   fs.cpSync(path.join(repoRoot, "plugin"), path.join(base, "plugin"), { recursive: true });
   fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(root, "node_modules"), "dir");
+  copyVersionGateInputs(base);
   return base; // the mkdtemp result itself — caller captures it into tempBase, cleaned in after()
 }
 

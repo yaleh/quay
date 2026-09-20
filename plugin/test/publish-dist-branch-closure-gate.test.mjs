@@ -134,9 +134,53 @@ test("AC1/AC3: a rebuilt-but-unreferenced bundle is NOT a closure requirement (t
 
 // ── layer 2: the real publish script must ABORT (AC2) ───────────────────────────────────────────────
 
+/** The version-stamp inputs the REAL publish script reads before it reaches the gate under test.
+ *  Same discipline as the script/bundler copies above: the generator's own entry and source modules
+ *  are copied from the repo (a fixture copy would stop testing what ships), while the CARRIERS are
+ *  minimal synthetic files — synthetic like the rest of the stub (alpha-tool, SKILL.md), and
+ *  deliberately so: a real plugin/README.md or marketplace.json copied in would reference
+ *  `dist/<name>.js` bundles this stub does not carry, so the closure gate would end up judging the
+ *  copy's prose instead of the stub's closure. The stamp WRITES the version it derives from `VERSION`
+ *  + the stub's git state, so any value parseable at each carrier's anchor is a valid starting point;
+ *  the anchors are the ones scripts/version-carriers.ts requires (`"version": "…"` JSON fields, a
+ *  `quay plugin v<semver>` README line, an array-anchored `name: quay` marketplace entry, a bare
+ *  semver in VERSION).
+ *
+ *  The five carrier paths are the `plugin/`-prefixed members of the shared carrier table, which is
+ *  what `buildCarriers('plugin')` projects into an assembled tree by dropping that prefix — mirrored
+ *  here under `plugin/` because the script rsyncs `<stub>/plugin/` to the assembled tree's root. */
+function addVersionStampInputs(root) {
+  for (const rel of [
+    "scripts/stamp-version.mjs",
+    "scripts/stamp-version.ts",
+    "scripts/version-carriers.ts",
+    "scripts/resolve-version.ts",
+    "VERSION",
+  ]) {
+    writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel)));
+  }
+  const carriers = {
+    "plugin/VERSION": "0.0.0\n",
+    "plugin/.claude-plugin/plugin.json": JSON.stringify({ name: "quay", version: "0.0.0" }, null, 2) + "\n",
+    "plugin/.claude-plugin/marketplace.json":
+      JSON.stringify({ plugins: [{ name: "quay", source: "./", version: "0.0.0" }] }, null, 2) + "\n",
+    "plugin/vendor/quay/package.json": JSON.stringify({ name: "quay", version: "0.0.0" }, null, 2) + "\n",
+    "plugin/README.md": "quay plugin v0.0.0 — stub\n",
+  };
+  for (const [rel, body] of Object.entries(carriers)) writeFile(path.join(root, rel), body);
+}
+
 /** A disposable stub repo holding the REAL publish script + the REAL bundler, with one bundleable
  *  script referenced by one carrier — small enough to assemble in seconds, structurally the same
- *  shape the real repo hands the script (plugin/ + packages/quay/scripts + vendor bundle). */
+ *  shape the real repo hands the script (plugin/ + packages/quay/scripts + vendor bundle).
+ *
+ *  ⛔ The shape it must reproduce grew by one step in gap-version-stamp-generator-and-build-wiring:
+ *  the script now stamps the assembled tree's version (chained onto the SAME `--rewrite` line, so it
+ *  cannot be separated from it) by calling `<repo>/scripts/stamp-version.mjs --mode build`. That is a
+ *  REAL call into the REAL generator, so the stub has to carry what the generator reads — the entry,
+ *  its source modules, `VERSION`, and the five build carriers. Measured before this was added
+ *  (2026-09-20): the green-baseline run died with `Cannot find module '<stub>/scripts/stamp-version.mjs'`
+ *  — i.e. the stub, not the script, was incomplete, and the gate this test is about never ran. */
 function makeStubRepo(tag) {
   const root = makeTmpDir(tag);
   // esbuild is resolved by walking up from the bundler's own location ⇒ the stub needs node_modules.
@@ -158,6 +202,7 @@ function makeStubRepo(tag) {
     "# demo\n\nRun: `node --experimental-strip-types plugin/scripts/alpha-tool.ts`\n"
   );
   writeFile(path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"), "// stub vendor bundle\n");
+  addVersionStampInputs(root);
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");
   git(root, "-c", "user.name=ac263", "-c", "user.email=ac263@test.invalid", "commit", "-q", "-m", "stub");
