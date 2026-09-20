@@ -409,7 +409,11 @@ function toPosix(p: string): string {
 function tasksDirRel(root: string): string {
   try {
     const loaded = loadConfig(root);
-    const provider = activeProvider(loaded) as { tasks_dir?: unknown };
+    // `undefined` id ⇒ `activeProvider`'s documented v0 default: the first ENABLED provider.
+    // (The 2nd argument is required by the signature — `config.ts` is a `.ts` file, so TS checks
+    // arity even though the parameter is un-annotated; `serve.ts` passes the same explicit
+    // `undefined`.)
+    const provider = activeProvider(loaded, undefined) as { tasks_dir?: unknown };
     if (typeof provider.tasks_dir === "string" && provider.tasks_dir.trim() !== "") {
       return toPosix(path.relative(root, path.resolve(loaded.workspaceRoot, provider.tasks_dir)));
     }
