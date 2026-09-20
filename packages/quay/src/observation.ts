@@ -34,12 +34,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, execFile, spawn } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
-import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
+import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./plugin-root.ts";
 // Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
 // blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
 // ⛔ Do not re-implement either of these here: SPEC §3.3's only unacceptable outcome is a second
@@ -3197,8 +3197,27 @@ export interface ManagerResult {
   drivers?: DriversReading;
 }
 
-export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
-export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
+/** Plugin-root-relative rel for the loop-driver probe — resolved by the canonical resolver
+ *  (`runPluginScript` → `resolvePluginScript`), exactly like RESOURCE_GATE_REL / PROCESS_BUDGET_REL
+ *  above. (gap-observation-loop-driver-check-rel-module-relative: the third and LAST survivor of the
+ *  module-relative family in this file.)
+ *
+ *  ⛔ The old module-relative walk-up literal was not merely non-canonical — it was a LIVE DEFECT:
+ *  `resolvePluginScript` resolves a rel against the PLUGIN ROOT, so joining `<repo>/plugin/` with that
+ *  walk-up pointed outside the repo entirely and `readManager` reported the loopDriver probe as
+ *  「未接入」 in EVERY repo, this one included (measured 2026-09-20 pre-fix: `status:"empty"`, reason
+ *  `<rel> 缺失（产品安装无 methodology 层 → 未接入）`). `scripts/…` is the only shape the resolver
+ *  accepts (it probes `plugin/scripts/…` and `scripts/…` per level).
+ *  path.join, not a bare literal, mirrors RESOURCE_GATE_REL's AC1b-safe form. */
+export const LOOP_DRIVER_CHECK_REL = path.join("scripts", "loop-driver-check.sh");
+
+/** The observer registry, relative to the `orchestration/` METHODOLOGY tree — resolved by
+ *  `resolveOrchestrationFile` (plugin-root.ts), never by a module-relative `import.meta.url` walk-up.
+ *  (`OBSERVER_REGISTRY_CONF` before this change: the module-relative form read the WORKTREE's copy of
+ *  a methodology file, violating SPEC §6b constraint ①, and pointed at a non-existent path in every
+ *  shipped install.) `orchestration/` is a SIBLING of `plugin/`, so no plugin-root rel can reach it —
+ *  hence the dedicated sibling resolver rather than a plugin-relative constant. */
+export const OBSERVER_REGISTRY_REL = "observer-registry.conf";
 
 /** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
 export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "status" | "reason"> {
@@ -3232,8 +3251,13 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
 
 /** loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
  *  first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
- *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes. */
-async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
+ *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes.
+ *
+ *  EXPORTED for the AC4 two-way negative control (gap-observation-loop-driver-check-rel-module-relative):
+ *  the probe must (①) resolve the REAL script in this repo and (②) report the explicit 「未接入」
+ *  reading — not a spawn failure / ENOENT — when no plugin tree is reachable. The QUAY_PLUGIN_ROOT
+ *  seam (plugin-root.ts) makes ② hermetic, so the control needs no second checkout. */
+export async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
   const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", "--json", root], 15_000);
   if (r.stdout == null) {
     return { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
@@ -3536,20 +3560,36 @@ export async function readManager(root: string): Promise<ManagerResult> {
 
   const liveness: SessionLivenessReading = { status: "empty", reason: "liveness observer retired 2026-09-03", sessions: [] };
 
-  // observer-registry.conf — the single registration surface (mechanism input, not prose).
+  // observer-registry.conf — the single registration surface (mechanism input, not prose). It lives
+  // in the METHODOLOGY tree (`orchestration/`, a SIBLING of `plugin/`), so it is resolved by
+  // resolveOrchestrationFile — three-valued: a real path, or null when the tree is not installed.
+  // The null branch is its own explicit reading (硬规则 3b: "absent" must not be shaped like "read").
   let observers: ManagerResult["observers"];
   {
-    const conf = fileURLToPath(new URL(OBSERVER_REGISTRY_CONF, import.meta.url));
-    let rows: ObserverRow[] = [];
-    try {
-      if (!fs.existsSync(conf)) throw new Error("missing");
-      rows = parseObserverRegistry(fs.readFileSync(conf, "utf8"));
-    } catch (err) {
-      observers = { status: "empty", reason: `observer-registry.conf 不可读（${err instanceof Error ? err.message : String(err)} → 未接入）`, rows: [] };
+    const conf = resolveOrchestrationFile(OBSERVER_REGISTRY_REL);
+    if (conf === null) {
+      observers = {
+        status: "empty",
+        reason: "observer-registry.conf 缺失（orchestration 树未随安装落地 → 未接入）",
+        rows: [],
+      };
+    } else {
+      let rows: ObserverRow[] = [];
+      let readError: string | null = null;
+      try {
+        rows = parseObserverRegistry(fs.readFileSync(conf, "utf8"));
+      } catch (err) {
+        readError = err instanceof Error ? err.message : String(err);
+      }
+      if (readError !== null) {
+        // PRESENT but unreadable — its own value, never the 「为空」 reading below (DEGRADATION CONTRACT).
+        observers = { status: "empty", reason: `observer-registry.conf 不可读（${readError}）`, rows: [] };
+      } else {
+        observers = rows.length > 0
+          ? { status: "ok", reason: null, rows }
+          : { status: "empty", reason: "observer-registry.conf 为空", rows };
+      }
     }
-    observers = rows.length > 0
-      ? { status: "ok", reason: null, rows }
-      : { status: "empty", reason: "observer-registry.conf 为空", rows };
   }
 
   // version — build-time-embedded QUAY_VERSION (version.ts) — NEVER a runtime read of package.json,

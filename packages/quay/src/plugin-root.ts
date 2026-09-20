@@ -187,6 +187,34 @@ function resolvePluginScriptUnder(root: string, rel: string): string | null {
 }
 
 /**
+ * Resolve a file under the `orchestration/` METHODOLOGY tree — the SIBLING of `plugin/` in this
+ * repo's layout, deliberately NOT inside it.
+ *
+ * WHY a sibling resolver instead of `resolvePluginScript`: `orchestration/` is not under the plugin
+ * root by construction, so no plugin-root-relative rel can reach it — and the form this replaced
+ * (a `../../../orchestration/…` literal resolved against `import.meta.url`) read the WORKTREE's copy
+ * of a methodology file (SPEC §6b constraint ①, the failure class that killed a resident supervisor
+ * on 2026-08-23) and resolved to a non-existent path in every shipped install (constraint ②).
+ *
+ * It COMPOSES `resolvePluginRoot()` rather than re-deriving any of the three constraints: the anchor
+ * is `plugin/`, so a worktree-loaded module lands on the MAIN checkout's methodology tree, and no
+ * local `plugin/` copy is required of the target project.
+ *
+ * Returns null when the plugin root can't be resolved OR the file is absent — and that null is the
+ * EXPECTED value, not an error: a shipped install (npm-pack / marketplace / SEA) carries no
+ * `orchestration/` tree at all (it is methodology, not deliverable). Every caller must therefore
+ * render its own explicit 「未接入」 reading (硬规则 3b: never shape "absent" like "read").
+ */
+export function resolveOrchestrationFile(rel: string): string | null {
+  const pluginRoot = resolvePluginRoot();
+  if (!pluginRoot) return null;
+  // pluginRoot is the dir that directly contains `scripts/` — `<repo>/plugin` in this layout — so the
+  // methodology tree is its sibling. Any other install layout simply has no such sibling → null.
+  const abs = path.resolve(path.dirname(pluginRoot), "orchestration", rel);
+  return fs.existsSync(abs) ? abs : null;
+}
+
+/**
  * True when `root` (a plugin root — the dir that directly contains `scripts/`) is the quay SOURCE
  * checkout's plugin tree: Core's own source (`packages/quay/src`) sits directly beside it.
  *
