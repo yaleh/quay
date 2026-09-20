@@ -168,8 +168,12 @@ export function windowGitExec(refs, repoRoot = QUAY_REPO_ROOT) {
  *   • attempts exhausted       → throw, naming the moving target. NEVER a silent pass.
  * Negative-control arm (`refs === null`, QUAY_TEST_GIT_GRAPH_LIVE_REFS=1): no snapshot exists, so
  * there is nothing to gate on — the body runs exactly once, i.e. the pre-fix shape, single attempt.
+ *
+ * `maxAttempts` is set so the gate survives the family's own churn harness (one ref advance per 250 ms
+ * ⇒ ~30 % chance a ~300 ms judgment is clear, so ≈3 attempts typical, P(exhaust) ≈ 0.7^20 ≈ 0.08 %).
+ * It is a retry BOUND, not a timeout: with no churn it is always attempt 1.
  */
-export function withStableWindow(body, { maxAttempts = 5, repoRoot = QUAY_REPO_ROOT, label = "ref-window" } = {}) {
+export function withStableWindow(body, { maxAttempts = 20, repoRoot = QUAY_REPO_ROOT, label = "ref-window" } = {}) {
   let lastErr = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const refs = resolveRefWindow(repoRoot);
