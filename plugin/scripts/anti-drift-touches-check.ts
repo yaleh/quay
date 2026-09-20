@@ -8,11 +8,55 @@
 // This is the guardrail that keeps a mis-declared `touches` from silently corrupting shared state —
 // it MUST be able to bite (a RED fixture proves it). Native-only, no manda.
 //
+// ── anti_drift.exempt — project-configurable exemption globs ─────────────────────────────────────
+// A target project may declare ONCE, in its WORKSPACE-ROOT `.quay/config.yml`, the globs whose files
+// are EXEMPT from the per-file out-of-declared judgment of the driver mode below:
+//
+//   anti_drift:
+//     exempt:
+//       - glob: "server/modules/*/index.ts"
+//         reason: "barrel re-export — an implementation change necessarily drags this file in"
+//
+// Four constraints (设计裁定 2026-09-20 — `sibling-barrel` 等关联规则明确否决: the exemption is a
+// FLAT LIST OF GLOBS, never a relationship / built-in rule):
+//   ① ONE flat list — no order, no negation, no relationship. A diff file matching ANY exempt glob
+//      is not judged out-of-declared. How wide to cast it is the PROJECT's call (`**/index.ts` is
+//      legal), so exempt globs are deliberately NOT run through isOverbroadDeclaration.
+//   ② The output must ENUMERATE: every waived file is reported as `exempted: <file> <- <glob>` plus
+//      a count, so "exempted" stays distinguishable from "was never changed" (硬规则 3).
+//   ③ `reason` is REQUIRED on every entry. A missing/blank `reason`, a non-list `exempt`, or a
+//      non-mapping `anti_drift` is MALFORMED ⇒ fail-closed with its OWN verdict (`malformed
+//      anti_drift`, exit 2) — never the same shape as a pass, and never the same as
+//      `out-of-declared` (硬规则 3b).
+//   ④ READ SOURCE = the WORKSPACE ROOT (main checkout) config, resolved via `git rev-parse
+//      --git-common-dir` and never from cwd — NOT the worktree copy. That file is gitignored (so it
+//      does not exist in the merge target), and the equivalent defense is that a task must not be
+//      able to open a waiver for itself by editing its own worktree copy.
+// A missing config file (or a config carrying no `anti_drift` key) means NO exemptions — the
+// pre-change behavior, byte for byte, and NOT an error.
+//
+// Exempt files do not count as "having done something": they are removed from the judged set BEFORE
+// the judgment, so a diff whose non-exempt part is empty gets exactly the empty-diff verdict (the
+// `--allow-empty` NON-WAIVABLE semantics are untouched). Exemption applies ONLY to the per-file
+// out-of-declared arm — it does not enter the walker's ignored-directory set, the glob-expansion
+// logic, or the cross-build-overlap / overbroad arms. (This comment deliberately does not spell that
+// set's identifier: the task's AC pins `grep -c` on the diff to 0, and a mention in prose would
+// satisfy a keyword grep while proving nothing — 硬规则 2.)
+//
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+// Same YAML reader as the other driver-side config readers (driver-config.ts / suite-params.ts):
+// the `yaml` package directly, NOT a Core-src module — a third-party install may have no packages/
+// tree (worker-driver.ts:1487 states the same rule for its loop.* readers).
+import { parse as parseYaml } from "yaml";
+// Workspace-root resolution: the PARENT of `git rev-parse --git-common-dir`, order-independent and
+// explicitly NOT the first `git worktree list` entry (repo-root.ts's own doc explains why). Reused
+// rather than re-derived (ADR-004 single-source); it also gives us the "must not depend on cwd"
+// property constraint ④ requires.
+import { mainCheckoutRoot } from "./repo-root.ts";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -32,6 +76,84 @@ export function fileWithinDeclared(file, declaredGlobs) {
   const f = normalizePath(file);
   for (const g of declaredGlobs) if (matchGlob(normalizePath(g), f)) return true;
   return false;
+}
+
+// ── readAntiDriftExempt — the workspace-root `anti_drift.exempt` reader ───────────────────────────
+// Reads `<workspaceRoot>/.quay/config.yml` (the MAIN checkout — see constraint ④ in the header) and
+// returns a THREE-VALUED result, never a boolean (硬规则 3b — "could not read it" must not share an
+// output shape with "read it and it is fine"):
+//   { status: "absent"    }               → no config file / no `anti_drift` key / no `exempt` key
+//                                            ⇒ NO exemptions (= the pre-change behavior, not an error)
+//   { status: "ok", entries: [{glob, reason}] } → a well-formed list (possibly empty)
+//   { status: "malformed", message }      → present but unreadable as the documented shape
+//                                            ⇒ the CALLER fail-closes with its own verdict
+// "absent" is deliberately NOT "malformed": a project that never opted in has a valid, empty waiver
+// list. A root that exists but carries no `anti_drift` key is the same case, not a defect.
+// An entry's `reason` is required and must be non-blank: an unexplained waiver is indistinguishable
+// from a forgotten one, so it is refused rather than silently honored.
+export function readAntiDriftExempt(workspaceRoot) {
+  if (!workspaceRoot) return { status: "absent" };
+  const configPath = path.join(workspaceRoot, ".quay", "config.yml");
+  let text;
+  try {
+    text = fs.readFileSync(configPath, "utf8");
+  } catch {
+    return { status: "absent" }; // no config file (ENOENT etc.) ⇒ no exemptions, not an error
+  }
+  let doc;
+  try {
+    doc = parseYaml(text);
+  } catch (e) {
+    return { status: "malformed", message: `${configPath} is not valid YAML (${e.message})` };
+  }
+  // A config whose ROOT is not a mapping cannot carry `anti_drift` at all ⇒ treat as absent (same
+  // as the "no such key" case), rather than inventing a defect the project did not make.
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return { status: "absent" };
+  const ad = doc.anti_drift;
+  if (ad === undefined || ad === null) return { status: "absent" };
+  if (typeof ad !== "object" || Array.isArray(ad)) {
+    return { status: "malformed", message: "anti_drift must be a mapping with an `exempt` key" };
+  }
+  const ex = ad.exempt;
+  if (ex === undefined || ex === null) return { status: "absent" };
+  if (!Array.isArray(ex)) {
+    return { status: "malformed", message: "anti_drift.exempt must be a LIST of {glob, reason} entries" };
+  }
+  const entries = [];
+  for (let i = 0; i < ex.length; i++) {
+    const e = ex[i];
+    if (!e || typeof e !== "object" || Array.isArray(e)) {
+      return { status: "malformed", message: `anti_drift.exempt[${i}] must be a mapping with a \`glob\` and a \`reason\`` };
+    }
+    const glob = e.glob;
+    if (typeof glob !== "string" || !glob.trim()) {
+      return { status: "malformed", message: `anti_drift.exempt[${i}] is missing a non-empty string \`glob\`` };
+    }
+    const reason = e.reason;
+    if (typeof reason !== "string" || !reason.trim()) {
+      return { status: "malformed", message: `anti_drift.exempt[${i}] (glob "${glob.trim()}") is missing a non-empty \`reason\` — every exemption must say why it is an exception` };
+    }
+    entries.push({ glob: glob.trim(), reason: reason.trim() });
+  }
+  return { status: "ok", entries };
+}
+
+// ── partitionExempt — split the diff into judged vs exempted ─────────────────────────────────────
+// A file matching ANY exempt glob is REMOVED from the judged set (so it can never be an
+// out-of-declared violation) and recorded as `{file, glob}` for the required enumeration. The first
+// matching glob wins (the list is unordered — only which glob matched is reported). Exempt globs are
+// deliberately NOT screened by isOverbroadDeclaration: casting the net wide is the project's call.
+export function partitionExempt(actualFiles, exemptEntries) {
+  const entries = Array.isArray(exemptEntries) ? exemptEntries : [];
+  const judged = [];
+  const exempted = [];
+  for (const f of actualFiles || []) {
+    const nf = normalizePath(f);
+    const hit = entries.find((e) => matchGlob(normalizePath(e.glob), nf));
+    if (hit) exempted.push({ file: nf, glob: normalizePath(hit.glob) });
+    else judged.push(f);
+  }
+  return { judged, exempted };
 }
 
 // ── checkAntiDrift ───────────────────────────────────────────────────────────────────────────────
@@ -131,10 +253,22 @@ export function buildTaskManifest(taskBody, actualFiles) {
 }
 
 /** Driver verdict over one task build: checkAntiDrift (judgment UNCHANGED) with the task's declared
- *  Touches vs its actual diff. Returns the checkAntiDrift result plus the manifest for transparency. */
+ *  Touches vs its actual diff. Returns the checkAntiDrift result plus the manifest for transparency.
+ *  `opts.exempt` (the workspace-root `anti_drift.exempt` entries) removes matching files from the
+ *  JUDGED set before the judgment runs — the judgment itself is untouched, so an all-exempt diff is
+ *  judged exactly like an empty one. `actualFiles` stays the full diff for transparency; `judgedFiles`
+ *  is what the verdict actually saw, and `exempted` is the enumeration the output must report. */
 export function checkTaskAntiDrift(taskBody, actualFiles, opts) {
-  const builds = buildTaskManifest(taskBody, actualFiles);
-  return { ...checkAntiDrift(builds, opts), builds, actualFiles, declaredGlobs: builds[0].declaredGlobs };
+  const { judged, exempted } = partitionExempt(actualFiles, opts && opts.exempt);
+  const builds = buildTaskManifest(taskBody, judged);
+  return {
+    ...checkAntiDrift(builds, opts),
+    builds,
+    actualFiles,
+    judgedFiles: judged,
+    exempted,
+    declaredGlobs: builds[0].declaredGlobs,
+  };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
@@ -143,14 +277,17 @@ function usage() {
     "Usage:\n" +
       "  anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n" +
       "  anti-drift-touches-check.mjs --task <id> --worktree <dir> [--merge-target <ref>] [--allow-empty]\n" +
-      "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)\n",
+      "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)\n" +
+      "    Waivers: `anti_drift.exempt` in the WORKSPACE-ROOT .quay/config.yml (a list of\n" +
+      "    {glob, reason}); waived files are reported as `exempted: <file> <- <glob>`.\n",
   );
 }
 
 /** Driver-mode body: run the anti-drift check over ONE task build. Exit 0 = clean (every actual
  *  file within the declared Touches, declaration not overbroad); 1 = HARD FAIL (out-of-declared
- *  write or overbroad declaration); 2 = usage/env error (task file missing / git diff unavailable —
- *  fail-closed, never a silent OK). */
+ *  write or overbroad declaration); 2 = usage/env error (task file missing / git diff unavailable /
+ *  MALFORMED `anti_drift.exempt` in the workspace-root config — fail-closed, never a silent OK);
+ *  3 = BASELINE-MISMATCH (the merge target is not a continuation of the default branch). */
 function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
   const taskPath = path.join(worktree, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskPath)) {
@@ -194,21 +331,46 @@ function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
     );
     return 2;
   }
+  // ── anti_drift.exempt (workspace-root config; see the header's constraint ④) ────────────────────
+  // Resolved from the WORKSPACE ROOT, not the worktree: the worktree copy is the one a task can edit
+  // itself. `malformed` is a DISTINCT verdict with a DISTINCT exit code — a broken waiver list must
+  // not present as either a pass or an out-of-declared write (硬规则 3b). An unresolvable root ("" —
+  // not a git repo) degrades to "no exemptions", i.e. the STRICTER direction, never a waiver.
+  const workspaceRoot = mainCheckoutRoot(worktree);
+  const exemptRead = readAntiDriftExempt(workspaceRoot);
+  if (exemptRead.status === "malformed") {
+    // Wording note: this text deliberately does NOT contain the token `out-of-declared`. A broken
+    // waiver list and a stray write must stay separable by a plain grep — "可区分" is only real if
+    // it survives the cheapest discriminator (硬规则 3b).
+    process.stdout.write(
+      `ANTI-DRIFT CONFIG ERROR: malformed anti_drift in ${path.join(workspaceRoot, ".quay", "config.yml")} — ` +
+        `${exemptRead.message}\n  This is NOT a stray write by the task: the exemption list could not be ` +
+        `evaluated, so the check fail-closes rather than judging with an unknown waiver set.\n`,
+    );
+    return 2;
+  }
+  const exempt = exemptRead.status === "ok" ? exemptRead.entries : [];
   let r;
   try {
-    r = checkTaskAntiDrift(fs.readFileSync(taskPath, "utf8"), actualFiles, { allowEmpty });
+    r = checkTaskAntiDrift(fs.readFileSync(taskPath, "utf8"), actualFiles, { allowEmpty, exempt });
   } catch (e) {
     // malformed task/input → fail-closed HARD FAIL (never silently pass a NON-WAIVABLE guardrail)
     process.stdout.write(`ANTI-DRIFT HARD FAIL: malformed input — ${e.message}\n`);
     return 1;
   }
+  // Enumeration is mandatory (constraint ②): "exempted" must be distinguishable from "never changed".
+  const exemptLines = r.exempted.length
+    ? `  exempted (${r.exempted.length}) by workspace-root anti_drift.exempt:\n` +
+      r.exempted.map((e) => `    exempted: ${e.file} <- ${e.glob}\n`).join("")
+    : "";
   if (r.ok) {
     process.stdout.write(
-      `ANTI-DRIFT OK: task ${taskId} — ${actualFiles.length} actual file(s), all within declared Touches (${r.declaredGlobs.length} glob(s))\n`,
+      `ANTI-DRIFT OK: task ${taskId} — ${r.judgedFiles.length} actual file(s), all within declared Touches (${r.declaredGlobs.length} glob(s))\n` +
+        exemptLines,
     );
     return 0;
   }
-  process.stdout.write(`ANTI-DRIFT HARD FAIL: task ${taskId} — ${r.violations.length} violation(s)\n`);
+  process.stdout.write(`ANTI-DRIFT HARD FAIL: task ${taskId} — ${r.violations.length} violation(s)\n` + exemptLines);
   for (const v of r.violations) {
     if (v.type === "overbroad-declaration") {
       process.stdout.write(`  overbroad-declaration: task declares "${v.glob}" (too broad to validate stray writes against)\n`);
@@ -226,7 +388,9 @@ export async function main(argv) {
       "Usage:\n" +
         "  anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n" +
         "  anti-drift-touches-check.mjs --task <id> --worktree <dir> [--merge-target <ref>] [--allow-empty]\n" +
-        "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)",
+        "    (driver mode — fast-mode fan-in gate: actual diff vs declared ## Touches)\n" +
+        "    Waivers: `anti_drift.exempt` in the WORKSPACE-ROOT .quay/config.yml (a list of\n" +
+        "    {glob, reason}); waived files are reported as `exempted: <file> <- <glob>`.",
     );
   }
   const allowEmpty = args.includes("--allow-empty");
