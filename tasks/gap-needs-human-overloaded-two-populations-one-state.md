@@ -105,3 +105,19 @@ ff-only subset tally: {"human-adjudication":0,"blocked-outside-task":38,"unclass
 - `plugin/scripts/driver-filters.ts`
 - `plugin/test/driver-filters.test.mjs`
 - `tasks/gap-needs-human-overloaded-two-populations-one-state.md`
+
+
+## 被 gap-retire-needs-human-cause-enumeration 取代（2026-09-20）
+
+**本节是追加——其上的正文与 AC/DoD **一字未改**，作为该机制的历史实现记录保留。** 本任务引入的整套机制（`needs_human_cause` frontmatter 字段、三态枚举、手写的步骤名清单 + 分类器、以及第二类的再入队证据谓词）已由 `gap-retire-needs-human-cause-enumeration` 整套删除。
+
+**直接量（2026-09-20）**：磁盘上带 `needs_human_cause:` 的任务 **37** 个 —— `human-adjudication` **29** / `unclassified` **8** / `blocked-outside-task` **0**。
+
+⇒ 本任务存在的全部理由（把第二类分出来、并据证据谓词再入队）在生产里**一次都没发生过**：`blocked-outside-task` 零样本；`blockedOutsideTaskResolved` 零个非测试调用者；除 `driver-filters.ts` 与其测试外，源码 / schema / CLI / MCP / web / 派发**没有任何读者**。且枚举清单是开放世界：新增一个 fan-in 步骤就漏，步骤名 `ff` 还会把证书闸失败错标成「develop 前进」。
+
+**人的裁定（2026-09-20，逐字）**：
+
+> 「needs-human 本来就不应该有『可机械再入队』的路径。」
+> 「我对靠枚举 `needs_human_cause` 做逻辑控制也没有太大信心 —— needs-human 的原因应当是异常，枚举异常是靠不住的。」
+
+⇒ 上面 AC1–AC5 与「Relation to …」一节里指向被删符号的判据随之失效（它们的实现对象已不存在）。删除**不新增任何替代分类，也不新增任何再入队路径**——本条的这一节不是「换成另一种枚举」，而是「这条路本身不该存在」。磁盘上已有的 37 个遗留字段作惰性遗留保留（⛔ 不批量改任务文件，硬规则 11b）。

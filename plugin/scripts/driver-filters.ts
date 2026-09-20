@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readFrontmatter } from "./gate-script-base.ts";
-import { parseTask, readDependsOn, readTaskStatusAtRef, parseFrontmatterCompletely } from "./task-schema.ts";
+import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
 // 上收到 task-ops.ts（⛔ 本文件不再各写一份 regex+writeFileSync+git 序列）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
@@ -777,183 +777,19 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
   return attempts.length > 0 ? attempts[attempts.length - 1].reason : null;
 }
 
-// ── needs-human 成因类（gap-needs-human-overloaded-two-populations-one-state）────────────────────
-// `needs-human` 一个状态承载两个处理者相反的群体：① 人须裁决（方向取舍/授权/跨层冲突/任务自身 AC
-// 不达标）——处理者是人；② worker 落不了地（ff 闩锁 / flaky / 无关红 / 宿主负载）——正确动作是阻塞
-// 解除后重新派发。二者在 status/载体/读法上逐字段同形 ⇒ 翻转时必须写入【机械可读】的成因类
-// （三态可枚举，⛔ 非散文、⛔ 非布尔），第二类据此可被证据谓词（blockedOutsideTaskResolved）判定再入队。
-
-/** needs-human 成因类三态（可枚举取值，⛔ 非散文非布尔——第三态 unclassified 独立取值，硬规则 3b）。 */
-export const NEEDS_HUMAN_CAUSE = {
-  /** 人须裁决：方向取舍/授权/跨层冲突/任务自身 AC 不达标（处理者仍是人，本条不改其语义）。 */
-  HUMAN_ADJUDICATION: "human-adjudication",
-  /** 阻塞在任务之外：ff 闩锁 / flaky / 无关红 / 宿主负载（正确动作 = 阻塞解除后重新派发）。 */
-  BLOCKED_OUTSIDE_TASK: "blocked-outside-task",
-  /** 未能分类：解析不出判词（⛔ 不得落成前两者之一，硬规则 3b）。 */
-  UNCLASSIFIED: "unclassified",
-} as const;
-
-/** 成因类取值类型（三态可枚举）。 */
-export type NeedsHumanCause = (typeof NEEDS_HUMAN_CAUSE)[keyof typeof NEEDS_HUMAN_CAUSE];
-
-/** 三态枚举序（固定，供测试/校验枚举完备性）。 */
-export const NEEDS_HUMAN_CAUSES: readonly NeedsHumanCause[] = [
-  NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION,
-  NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK,
-  NEEDS_HUMAN_CAUSE.UNCLASSIFIED,
-];
-
-/** 值是否为一个合法成因类（机械可读取值校验，⛔ 非散文匹配）。 */
-export function isNeedsHumanCause(v: unknown): v is NeedsHumanCause {
-  return typeof v === "string" && (NEEDS_HUMAN_CAUSES as readonly string[]).includes(v);
-}
-
-/** 归「人须裁决」的机械 fan-in 步——这些步的失败是【任务自身缺陷】（merge-develop 冲突 / anti-drift
- *  违反 / typecheck / doc-check / scoped-gate / suite 红 / AC 未全勾 / flip 失败 / 锁与异常），处理者
- *  仍是人。⛔ 不含 "ff"——ff 步失败 = develop 前进/无法 fast-forward，阻塞对象在任务之外。 */
-const HUMAN_ADJUDICATION_STEPS: ReadonlySet<string> = new Set([
-  "merge-develop", "anti-drift", "typecheck", "doc-check", "scoped-gate",
-  "suite", "anti-drift-land", "ac-precheck", "ac-gate", "flip-done",
-  "acquire-fan-in-lock", "exception",
-]);
-
-/** 成因分类器（纯函数）：读【结构化】的 mechanical_fan_in.step（⛔ 不读 ## Needs-Human 散文——判词是
- *  自由散文，解析它违反硬规则②）。`reason` 仅作签名保留不参与判定（同硬规则②）。映射：
- *    step === "ff"                  ⇒ blocked-outside-task（ff 闩锁 = develop 前进/无法 ff，阻塞在任务外）
- *    step ∈ HUMAN_ADJUDICATION_STEPS ⇒ human-adjudication（任务自身缺陷，处理者仍是人）
- *    其余（step 为 null / 未知步）     ⇒ unclassified（解析不出判词，⛔ 不得落成前两者之一） */
-export function classifyNeedsHumanCause(step: string | null, _reason: string | null): NeedsHumanCause {
-  if (step === "ff") return NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK;
-  if (step !== null && HUMAN_ADJUDICATION_STEPS.has(step)) return NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION;
-  return NEEDS_HUMAN_CAUSE.UNCLASSIFIED;
-}
-
-/** 成因类的前端 frontmatter 字段名（top-level 标量，机械可读，⛔ 非 ## Needs-Human 散文段）。 */
-export const NEEDS_HUMAN_CAUSE_FIELD = "needs_human_cause";
-
-/** 从已解析 frontmatter 投影成因类（委托单一 parser parseFrontmatterCompletely 的产物，⛔ 不 grep 正文）。
- *  缺值 / 非字符串 / 非法取值 ⇒ null（缺值 = 未查，硬规则 6——「无成因类」与任一具体取值可区分）。 */
-export function frontmatterNeedsHumanCause(fm: unknown): NeedsHumanCause | null {
-  const obj = fm && typeof fm === "object" && !Array.isArray(fm) ? (fm as Record<string, unknown>) : null;
-  const v = obj ? obj[NEEDS_HUMAN_CAUSE_FIELD] : undefined;
-  return isNeedsHumanCause(v) ? v : null;
-}
-
-/** 写成因类到 frontmatter（byte-preserving 行级编辑，⛔ 不 YAML 整体回写——与 patchStatusField 同族）。
- *  已有该字段 ⇒ 就地换值；无 ⇒ 在 status 行后插入。无 status 行 ⇒ fail-closed（markNeedsHuman 必含 status）。 */
-export function patchNeedsHumanCauseField(
-  frontmatterRaw: string,
-  cause: NeedsHumanCause,
-): { ok: true; fm: string; added: boolean } | { ok: false; reason: string } {
-  const lineRe = /^needs_human_cause:[ \t]*[^\r\n]*$/m;
-  if (lineRe.test(frontmatterRaw)) {
-    return { ok: true, fm: frontmatterRaw.replace(lineRe, `needs_human_cause: ${cause}`), added: false };
-  }
-  const statusRe = /^status:[ \t]*[^\r\n]*$/m;
-  const m = statusRe.exec(frontmatterRaw);
-  if (!m) return { ok: false, reason: "no-status-line" };
-  const insertAt = m.index + m[0].length;
-  return {
-    ok: true,
-    fm: frontmatterRaw.slice(0, insertAt) + `\nneeds_human_cause: ${cause}` + frontmatterRaw.slice(insertAt),
-    added: true,
-  };
-}
-
-/** 读任务的成因类（读盘上任务文件的【结构化 frontmatter 字段】，⛔ 不 grep ## Needs-Human 散文）。
- *  读失败 / 字段缺 / 非法取值 ⇒ null（缺值 = 未查，硬规则 6）。 */
-export function readNeedsHumanCause(root: string, taskId: string): NeedsHumanCause | null {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
-  } catch {
-    return null;
-  }
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
-  if (!m) return null;
-  return frontmatterNeedsHumanCause(parseFrontmatterCompletely(m[1]));
-}
-
-// ── 第二类（blocked-outside-task）的再入队证据谓词（AC4）────────────────────────────────────────
-// 正确动作是「阻塞解除后重新派发」，⛔ 但不得按时间/次数自动重派（复活活锁）。再入队条件必须由【证据】
-// 触发：ff 闩锁的阻塞对象 = 上次 ff-escalation 记录的 developHead（develop 前进、任务分支无法 fast-forward）。
-// 阻塞解除的证据 = 该 developHead 现已并入任务分支（ff 可快进）。⛔ 不是「距上次失败超过 N 分钟」。
-
-/** ff-escalation 载体的仓库相对路径（ff-merge.ts 写 event:"ff-escalation" / "ff-escalation-resolved"）。 */
-export const FF_ESCALATIONS_REL = ".quay/fan-in-ff-escalations.jsonl";
-
-/** 一条 ff-escalation 记录的投影（只读所需字段）。 */
-export interface FfEscalationRecord {
-  event?: string;
-  taskId?: string;
-  attempt?: number;
-  developHead?: string;
-  ts?: string;
-  epoch?: number;
-}
-
-/** 读该 task 最近一条 ff-escalation 记录（文件行序 = 时间序，取最后一条）。无记录 / 读失败 ⇒ null。 */
-export function readLatestFfEscalation(root: string, taskId: string): FfEscalationRecord | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(path.join(root, FF_ESCALATIONS_REL), "utf8");
-  } catch {
-    return null;
-  }
-  let latest: FfEscalationRecord | null = null;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let rec: FfEscalationRecord;
-    try {
-      rec = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (rec.event === "ff-escalation" && rec.taskId === taskId) latest = rec;
-  }
-  return latest;
-}
-
-/** `git merge-base --is-ancestor <ancestor> <branch>`：ancestor 是否已并入 branch。
- *  exit 0 ⇒ true（已并入）；exit 1 ⇒ false（未并入）；其它（branch 不存在/坏对象）⇒ null（读不懂，硬规则 6）。 */
-function isAncestorOfBranch(root: string, ancestor: string, branch: string): boolean | null {
-  try {
-    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, branch], { stdio: "ignore" });
-    return true;
-  } catch (e) {
-    const status = (e as { status?: number }).status;
-    if (status === 1) return false;
-    return null;
-  }
-}
-
-/** 第二类的再入队证据谓词（AC4，能取假）：阻塞证据仍在 ⇒ false（不再入队）；阻塞证据消失 ⇒ true
- *  （可再入队）。证据 = 最近一次 ff-escalation 记录的 developHead 已并入任务分支（task/<id>）。
- *  无 escalation 记录 / 无 developHead / git 读不懂 ⇒ null（缺值 = 未查，⛔ 与「已解除 true」区分）。 */
-export function blockedOutsideTaskResolved(root: string, taskId: string): boolean | null {
-  const esc = readLatestFfEscalation(root, taskId);
-  if (esc === null) return null;
-  const developHead = typeof esc.developHead === "string" && esc.developHead ? esc.developHead : null;
-  if (developHead === null) return null;
-  return isAncestorOfBranch(root, developHead, `task/${taskId}`);
-}
-
-/** 成因分类的批量回放（AC5，纯函数）：输入 = 一组翻转的【结构化】失败步，输出 = 三态各若干条。
- *  「人须裁决」条数由输入决定（⛔ 非硬编码）——喂不同输入 ⇒ 不同计数。 */
-export function tallyNeedsHumanCauses(
-  records: ReadonlyArray<{ step: string | null }>,
-): Record<NeedsHumanCause, number> {
-  const tally: Record<NeedsHumanCause, number> = {
-    [NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION]: 0,
-    [NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK]: 0,
-    [NEEDS_HUMAN_CAUSE.UNCLASSIFIED]: 0,
-  };
-  for (const r of records) {
-    tally[classifyNeedsHumanCause(r.step, null)] += 1;
-  }
-  return tally;
-}
+// ── needs-human 成因类枚举【已退役】（gap-retire-needs-human-cause-enumeration，2026-09-20）─────
+// 此处原有 needs-human 成因类的三态 frontmatter 字段（human-adjudication / blocked-outside-task /
+// unclassified）、手写的「人须裁决」步骤名清单、以及第二类的再入队证据谓词（连同只服务于它的
+// ff-escalation 读取器与 git ancestor 判定）。
+// 实测（2026-09-20 直接量）：磁盘上带该字段的任务 37 个——human-adjudication 29 / unclassified 8 /
+// blocked-outside-task 【0】；再入队证据谓词零个非测试调用者。即这套机制存在的全部理由（区分第二类
+// 并据证据谓词再入队）在生产里一次都没发生过，且步骤名清单是开放世界（新增一个 fan-in 步骤就漏，
+// 步骤名 `ff` 还会把证书闸失败错标成「develop 前进」）。
+// 人的裁定（2026-09-20，逐字）：「needs-human 本来就不应该有『可机械再入队』的路径。」「我对靠枚举
+// 成因字段做逻辑控制也没有太大信心 —— needs-human 的原因应当是异常，枚举异常是靠不住的。」
+// ⇒ 整套删除，⛔ 不新增任何替代分类或再入队路径。磁盘上已有的 37 个遗留成因字段作惰性保留
+// （⛔ 不批量改任务文件，硬规则 11b）。注记里的事实行（阻碍原因 / 失败步判词 / run_id / session_id /
+// suite 日志 / fan-in 日志）全部保留。完整被删符号清单见任务体。
 
 /** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
  *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。worker 派发的是 ready 任务、promotion
@@ -961,24 +797,23 @@ export function tallyNeedsHumanCauses(
  *  只在 status ∈ {todo, ready} 时写（并发保护，同 ready-pool-check 的 setTaskStatus）。
  *  COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write)：写盘即提交（复用 commitTaskFile 族，
  *  ⛔ 不写第四份）——翻转后主检出不留脏树（硬规则 11b：盘上翻转改变派发计算但对读 git 的人不可见）。
- *  返回 { id, ok, reason, committed, cause }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready；
- *  cause=null）；committed=false 表示未提交（repo-less 单测临时目录 no-op，或 git 提交失败）。
- *  gap-needs-human-overloaded-two-populations-one-state：翻转同时写【机械可读】的成因类
- *  （needs_human_cause frontmatter 字段，三态可枚举）——由最近一条 exited-not-landed 的【结构化】
- *  mechanical_fan_in.step 分类（⛔ 不读 ## Needs-Human 散文）。无任何 exited-not-landed 尝试（promotion
- *  连续修满仍不合格 / 快速死亡退避上限）⇒ 任务自身缺陷未解 ⇒ human-adjudication（⛔ 不落 unclassified）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean; cause: NeedsHumanCause | null } {
+ *  返回 { id, ok, reason, committed }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready）；
+ *  committed=false 表示未提交（repo-less 单测临时目录 no-op，或 git 提交失败）。
+ *  ⛔ 不再写成因类 frontmatter 字段、⛔ 不再返回 cause（gap-retire-needs-human-cause-enumeration：
+ *  三态成因枚举已整套退役——零非测试读者、零 blocked-outside-task 生产样本；人的裁定「needs-human
+ *  本来就不应该有『可机械再入队』的路径」。⛔ 不引入任何替代分类）。 */
+export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean } {
   const file = path.join(root, "tasks", `${id}.md`);
-  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false, cause: null };
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false };
   const raw = fs.readFileSync(file, "utf8");
   // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（splitTaskFile /
   // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
   const split = splitTaskFile(raw);
-  if (!split) return { id, ok: false, reason: "no-frontmatter", committed: false, cause: null };
+  if (!split) return { id, ok: false, reason: "no-frontmatter", committed: false };
   const from = statusFromFrontmatter(split.frontmatterRaw);
-  if (from !== TASK_STATUS.TODO && from !== TASK_STATUS.READY) return { id, ok: false, reason: "not-todo", committed: false, cause: null };
+  if (from !== TASK_STATUS.TODO && from !== TASK_STATUS.READY) return { id, ok: false, reason: "not-todo", committed: false };
   const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.NEEDS_HUMAN);
-  if (!patched.ok) return { id, ok: false, reason: patched.reason, committed: false, cause: null };
+  if (!patched.ok) return { id, ok: false, reason: patched.reason, committed: false };
   // gap-needs-human-note-carries-step-verdict：注记携带最近 exited-not-landed 的实际失败步+判词
   // （⛔ 只写模板句会把 merge 冲突 / suite 红 / ac-gate 未勾等完全不同真因压扁成同一句——读注记无法区分）。
   // 无记录 / 读不懂 ⇒ 不追加该行（与旧行为同形，⛔ 不伪造成「有失败步」）。
@@ -988,23 +823,15 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   const attempts = exitedNotLandedAttempts(root, id);
   const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
   const stepVerdict = lastAttempt ? lastAttempt.reason : null;
-  // 成因类读【结构化】的 mechanical_fan_in.step（⛔ 不读散文判词）。无任何 exited-not-landed 尝试
-  // （promotion 连续修满仍不合格 / 快速死亡退避上限）⇒ 任务自身缺陷未解 ⇒ human-adjudication。
-  const cause = lastAttempt
-    ? classifyNeedsHumanCause(lastAttempt.step, lastAttempt.reason)
-    : NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION;
-  const patchedCause = patchNeedsHumanCauseField(patched.fm, cause);
-  if (!patchedCause.ok) return { id, ok: false, reason: patchedCause.reason, committed: false, cause: null };
   const record =
     `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
     `- 阻碍原因：${reason}\n` +
-    `- 成因类：${cause}\n` +
     (stepVerdict ? `- 失败步/判词：${stepVerdict}\n` : "") +
     (lastAttempt?.runId ? `- run_id：${lastAttempt.runId}\n` : "") +
     (lastAttempt?.sessionId ? `- session_id：${lastAttempt.sessionId}\n` : "") +
     (lastAttempt?.suiteLog ? `- suite 日志：${lastAttempt.suiteLog}\n` : "") +
     (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
-  fs.writeFileSync(file, `${split.open}${patchedCause.fm}${split.close}${split.body}${record}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
   // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
   // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
@@ -1014,7 +841,7 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
     : `tasks: ${id} 首次登记（status=needs-human，重试上限机械落盘）`;
   const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
-  return { id, ok: true, reason, committed, cause };
+  return { id, ok: true, reason, committed };
 }
 
 /** 候选未被标 needs-human（status 非 needs-human）。读不懂 ⇒ fail-closed 滤掉（⛔ 读不懂 ≠ 合格）。 */

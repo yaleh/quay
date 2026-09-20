@@ -47,6 +47,34 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
+// ── the marketplace `version` field must stay ABSENT (gap-version-marketplace-omit-and-spec-amendment) ──
+test('neither marketplace entry carries a `version` — the field is read by nothing, so it must not come back', () => {
+  // Executable face of a measured decision (2026-09-20). Real installs under an isolated
+  // `CLAUDE_CONFIG_DIR` showed the CLI never consults a marketplace entry's `version`: the install
+  // cache is keyed by the FETCHED plugin's own `plugin.json` version. The decisive control — a
+  // marketplace advertising `9.9.9` against a `0.10.0-dev` manifest — still installed and reported
+  // `0.10.0-dev`. The field was therefore deleted from both files and from the carrier table
+  // (scripts/version-carriers.ts carries the four readings).
+  //
+  // ⛔ WHY THIS TEST EXISTS rather than a comment: once the field left the carrier table, NOTHING
+  // could redden if someone re-added it — it would be a committed literal that is stamped by nothing,
+  // judged by nothing, and read by nothing. That is the silent-regression shape this repo's
+  // "prose gets paraphrased away, ship the execution face" discipline exists to prevent. If a future
+  // change genuinely needs the field back, it must first show what READS it (re-run the install
+  // measurement), and then relax this assertion deliberately rather than rediscovering it by drift.
+  for (const rel of ['.claude-plugin/marketplace.json', 'plugin/.claude-plugin/marketplace.json']) {
+    const mp = readJson(path.join(repoRoot, rel));
+    const plugins = Array.isArray(mp) ? mp : (mp.plugins ?? []);
+    const entry = plugins.find((p) => p.name === 'quay');
+    assert.ok(entry, `${rel} must list a plugin named "quay"`);
+    assert.equal(
+      entry.version,
+      undefined,
+      `${rel}: the quay entry must NOT carry a version — no consumer reads it (see the test comment)`,
+    );
+  }
+});
+
 test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task; gap-skill-start-drivers-webserver: +quay-drivers; gap-retire-unused-quay-author-skill: -author)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');

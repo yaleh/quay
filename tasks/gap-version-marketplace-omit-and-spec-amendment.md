@@ -1,7 +1,7 @@
 ---
 id: gap-version-marketplace-omit-and-spec-amendment
 title: marketplace.json 省略 version 字段的真实安装实测 + 修订 SPEC §4.3/发布流程（去掉「去 -dev 的 bump 提交」）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -168,6 +168,59 @@ EXIT=0
 （只有 `task/gap-release-*`、`worktree-release-*` 这些**不匹配** `^release[-/]` 的名字）⇒ 本次工作没有制造
 SPEC §4.1.2 记录的那个「为取读数而造一条真 release 分支」的窗口。
 
+### AC5（AC 外、但为本改动的直接下游）— 全量 suite 红：`chart2-s2` 的版本源表仍含两条已删字段
+
+**症状**（fan-in 全量 suite `# tests 6048 / # fail 2`，**两轮 exited-not-landed**）：
+
+```
+✖ CLI: against THIS repo (default root) → cov 3/3 …, exit 0
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /S2 Delivery-completeness cov = 1 \(3\/3/. Input:
+  'S2 Delivery-completeness cov = 0.6666666666666666 (2/3: version-consistent=false, manifest-published=true, foreign-install-green=true)\n'
+✖ CLI: explicit repoRoot arg → cov 3/3 against the real repo   （同一读数）
+```
+
+**它不是环境红——它是本次改动的直接下游，判成 UNRELATED 是错的。** 机制：
+`experiments/quay-perpetual-stream/scripts/chart2-s2-delivery-completeness.ts` 的 `VERSION_SOURCES` 是
+**第二张版本载体表**（与 `scripts/version-carriers.ts` 并列、各自手工维护），它把两个 `marketplace.json` 的
+`plugins[0].version` 列为 5 个版本源中的 2 个。字段被删后它们读出 `null` ⇒ `versionsConsistent` 取假
+⇒ S2 的 conjunct-1 由真变假 ⇒ cov 3/3 掉到 2/3。
+
+⚠️ **delta-relatedness 判定给出的 UNRELATED 是错的**：那条判定走的是**import 一跳**，而这里的耦合是
+**运行期数据依赖**——脚本按路径 `readFileSync` 读 `marketplace.json`，与该测试文件之间**没有 import 边**。
+（同硬规则 2：按位置/结构判定，不按「看起来有没有关系」判定。）
+**可复现的负控制**：在 develop 上该测试全绿（develop 的 marketplace 仍有 `version`）；在本分支上稳定 2/3。
+
+**修法（改机制，⛔ 不改判据期望值）**：把测试期望改成 `2/3` 是错的——那会把「删掉一个**实测从未被读**的字段」
+谎报成一次交付完成度回退。真正的修法是**源表跟上裁定**（与 `scripts/version-carriers.ts` 15→13 同性质）：
+
+| 文件 | 改动 |
+|---|---|
+| `experiments/quay-perpetual-stream/scripts/chart2-s2-delivery-completeness.ts` | `VERSION_SOURCES` 5 → 3（两个 marketplace 出表）；删掉只服务它们的 `plugins0.version` pointer 变体与嵌套读取分支（否则是 dead code）；`selftest()` 四个 fixture 数组 5 → 3、用例名 `red-5way-drift-no-evidence` → `red-drift-no-evidence`；头注新增段落记录为什么这两条不是源、以及决定性对照 |
+| `experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs` | `writeFixtureRepo` 5 文件 → 3 文件（去掉 `nested` 分支）；两处 `fields.length`/序号断言随表长调整；CLI 负控制的漂移数组 5 → 3；**新增负控制**：往 fixture 里写一个 `plugins[0].version: "9.9.9"` 的 `marketplace.json`，断言它**不进入** `readVersionFields` 且 `versionsConsistent` 仍为真 |
+
+**⊢ 那条新增负控制为什么必须有**：否则「marketplace 不再是源」只由「少了一行代码」来断言——恒真、不可取假
+（硬规则 4 推论三）。有了它，若有人把这两条加回源表，这条测试**会红**。
+
+**⊢ 为什么不把 S2 这张表并进 `version-carriers.ts`**：两张表消费者不同（判官/生成器 vs chart-2 的 S2 子判据），
+S2 的 `VERSION_SOURCES` 只读不写、不参与盖章；合并要跨 `packages/`…`experiments/` 引入新耦合。**本次只让 S2 表跟上裁定，不动它所在架构。**
+
+**读数（本工作树实测）**：
+
+```
+$ node --test experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs
+ℹ tests 23  ℹ pass 23  ℹ fail 0
+$ node --test $(find experiments/quay-perpetual-stream/test -name '*.test.mjs')      # 该目录全部
+ℹ tests 1362  ℹ suites 43  ℹ pass 1362  ℹ fail 0
+$ node --test scripts/version-consistency-check.test.ts scripts/stamp-version.test.ts \
+        plugin/test/plugin-packaging.test.mjs plugin/test/publish-dist-branch-closure-gate.test.mjs
+ℹ tests 80  ℹ pass 80  ℹ fail 0
+```
+
+**⊢ 5b 自查（同一原则在别处的适用点）**：`grep -rn "plugins\[0\]\.version\|plugins0\.version" --include=*.ts --include=*.mjs --include=*.js .`
+（去 `node_modules`/`.quay/`）**命中 3 条、前 3 条分别是本文件的两条注释/测试名与测试文件的一条注释——0 条是读取代码**。
+**谓词正控制**（硬规则 2 的零计数半边）：同一谓词打在 develop 上那份文件上得 **4** 命中 ⇒ 谓词本身有效，不是恒零。
+⇒ marketplace 条目 `version` 的读取方在本次修完后**已无残留**。
+
 ### 落点清单（本任务实际改动的文件）
 
 | 文件 | 改动 |
@@ -180,15 +233,19 @@ SPEC §4.1.2 记录的那个「为取读数而造一条真 release 分支」的�
 | `plugin/scripts/checker-mutation-cases/version-consistency-check.sh` | 删掉两处已非 carrier 的 fixture 写入（否则是「green baseline 什么都没证」的形状）；计数注释 15/11 → 13/10 |
 | `plugin/test/publish-dist-branch-closure-gate.test.mjs` | stub 的 carrier 集合由 5 改 4，并注明为什么删掉那条 |
 | `plugin/test/plugin-packaging.test.mjs` | **新增**：两个 `marketplace.json` 的 quay 条目不得带 `version` |
+| `experiments/quay-perpetual-stream/scripts/chart2-s2-delivery-completeness.ts` | **新增（AC5）**：`VERSION_SOURCES` 5 → 3 + 删 dead code + selftest fixture 与头注跟上 |
+| `experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs` | **新增（AC5）**：fixture 5 → 3 + 下标断言 + 一条「marketplace 不是源」的负控制 |
 | `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` | §0/§1/§4.1/§4.3/§9/§10 改写或标注 + 新增 §12 |
 
-### ⛔ 本次**没有**做、且理由成立的三件事
+### ⛔ 本次**没有**做、且理由成立的四件事
 
 1. **没有**给 `resolve-version.ts` 加「注入分支名」的开关——那会把 build 模式读数变成恒真的回声（硬规则 4 推论三）。
 2. **没有**在 `VERSION_CARRIERS` 里加一条「marketplace 必须无 version」的负向 carrier——`VersionCarrier` 的
    `extract/locate` 契约是「读出一个可写入的版本」，塞一个「断言缺席」的语义进同一接口会让生成器那侧无意义；
    等价的守卫放在 `plugin-packaging.test.mjs` 更贴切，且**不改**判官/生成器的契约。
 3. **没有**改 `release-branch-finish.sh`——已核实其判据不含该前置（见 AC4）。
+4. **没有**把 chart2-s2 的 `VERSION_SOURCES` 并进 `version-carriers.ts`（理由见 AC5 的 ⊢ 段）——本次只让
+   S2 表跟上裁定，不合并两张表。
 
 ## Touches
 
@@ -204,4 +261,6 @@ SPEC §4.1.2 记录的那个「为取读数而造一条真 release 分支」的�
 - plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - plugin/test/plugin-packaging.test.mjs
 - plugin/test/publish-dist-branch-closure-gate.test.mjs
+- experiments/quay-perpetual-stream/scripts/chart2-s2-delivery-completeness.ts
+- experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs
 - tasks/gap-version-marketplace-omit-and-spec-amendment.md

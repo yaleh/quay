@@ -60,8 +60,6 @@ function makeFixture(name: string, versions: Record<string, string>, opts: Fixtu
       // Plain-text stamp — same trap as the README: a fixture that does not write it leaves the entry
       // in mode:'error', turning every GREEN assertion below into a false red (hard rule 3b).
       writeFileSync(full, `${v}\n`);
-    } else if (p.includes('marketplace.json')) {
-      writeFileSync(full, JSON.stringify([{ name: 'quay', version: v }], null, 2));
     } else if (p === 'plugin/.claude-plugin/plugin.json') {
       writeFileSync(full, JSON.stringify({ version: v }, null, 2));
     } else if (p === 'package-lock.json') {
@@ -103,7 +101,7 @@ function makeFixture(name: string, versions: Record<string, string>, opts: Fixtu
   return tmp;
 }
 
-/** A fixture whose 15 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
+/** A fixture whose 13 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
 function consistentFixture(name: string, base: string, carrierVersion = `${base}${DEV_SUFFIX}`): string {
   const versions: Record<string, string> = {};
   for (const p of ALL_PATHS) versions[p] = carrierVersion;
@@ -111,10 +109,12 @@ function consistentFixture(name: string, base: string, carrierVersion = `${base}
 }
 
 /**
- * Every carrier ENTRY the checker judges — 15 over 12 files. Held as entries (not files) so the count
+ * Every carrier ENTRY the checker judges — 13 over 10 files. Held as entries (not files) so the count
  * assertions below pin the union size the judge actually walks: `package-lock.json` contributes four.
+ * (Was 15 over 12 until 2026-09-20, when the two `marketplace.json` `plugins[].version` entries left
+ * the table with the field itself — see ALL_PATHS's note.)
  */
-const CARRIER_ENTRY_COUNT = 15;
+const CARRIER_ENTRY_COUNT = 13;
 
 /** The four `package-lock.json` workspace members whose `version` is a carrier entry. */
 const LOCK_WORKSPACE_DIRS = ['quay', 'quay-native', 'quay-github', 'quay-backlog'];
@@ -126,8 +126,11 @@ const ALL_PATHS = [
   'packages/quay-backlog/package.json',
   'plugin/.claude-plugin/plugin.json',
   'plugin/README.md',
-  'plugin/.claude-plugin/marketplace.json',
-  '.claude-plugin/marketplace.json',
+  // ⛔ NO marketplace.json path here (2026-09-20): the two `plugins[].version` entries left the
+  // carrier table when the field itself was deleted — real installs measured under an isolated
+  // `CLAUDE_CONFIG_DIR` showed the CLI never reads it (the cache key comes from the fetched plugin's
+  // own `plugin.json`). A marketplace advertising `9.9.9` against a `0.10.0-dev` manifest still
+  // reports `0.10.0-dev`. See scripts/version-carriers.ts's table comment for the four readings.
   'plugin/vendor/quay/package.json',
   'plugin/VERSION',
   'delivery-manifest.json',
@@ -482,17 +485,31 @@ test('check returns mode=error (NOT all-equal) when delivery-manifest.json holds
   }
 });
 
-test('check handles marketplace.json with { plugins: [...] } wrapper', () => {
-  const ver = '1.0.0-dev';
-  const tmp = consistentFixture('plugins-wrapper', '1.0.0', ver);
+test('a marketplace `plugins[].version` is NOT judged any more — even a divergent one stays GREEN', () => {
+  // Both dialects of the file, carrying a value that deliberately DISAGREES with the source. This is
+  // the negative half of gap-version-marketplace-omit-and-spec-amendment: the field used to be a
+  // judged carrier (this test used to assert it was judged), and the point of its removal is that a
+  // marketplace entry can no longer redden — or, worse, silently agree with — the version gate.
+  // ⛔ If someone re-adds the carrier, this test reddens, which is exactly the tripwire wanted: the
+  // field is read by nothing (measured, see version-carriers.ts), so re-adding it re-creates a
+  // hand-written literal that drifts unobserved.
+  const tmp = consistentFixture('marketplace-not-carried', '1.0.0');
   try {
-    // Rewrite marketplace files with wrapper format
-    const m1 = JSON.stringify({ plugins: [{ name: 'quay', version: ver }] }, null, 2);
-    writeFileSync(resolve(tmp, 'plugin/.claude-plugin/marketplace.json'), m1);
-    writeFileSync(resolve(tmp, '.claude-plugin/marketplace.json'), m1);
+    const divergent = JSON.stringify({ plugins: [{ name: 'quay', version: '9.9.9' }] }, null, 2);
+    mkdirSync(resolve(tmp, 'plugin/.claude-plugin'), { recursive: true });
+    mkdirSync(resolve(tmp, '.claude-plugin'), { recursive: true });
+    writeFileSync(resolve(tmp, 'plugin/.claude-plugin/marketplace.json'), divergent);
+    writeFileSync(resolve(tmp, '.claude-plugin/marketplace.json'), divergent);
+
     const result = check(tmp);
     assert.equal(result.mode, 'all-equal');
     assert.equal(result.ok, true);
+    // The union must not contain a marketplace entry at all (not merely "ignore it when agreeing").
+    assert.equal(
+      result.entries.filter((e: any) => e.path.includes('marketplace.json')).length,
+      0,
+      'marketplace.json must contribute NO carrier entry',
+    );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
