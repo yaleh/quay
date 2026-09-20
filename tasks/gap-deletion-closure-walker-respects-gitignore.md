@@ -2,7 +2,7 @@
 id: gap-deletion-closure-walker-respects-gitignore
 title: deletion-closure-check.ts 的 fs walker 不认 .gitignore——12010 文件闭包里 10962
   条来自 .claude/worktrees，R=44.32 量的是 worktree 快照不是删除债
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -174,7 +174,7 @@ gate-script-lib.sh is referenced here
 (B 注入后) refs=957  dc=957  callGraph=205 | .claude/worktrees/=0 .archguard/=0 packages/quay/plugin/=0 | md5(refs)=60667cd2eb58
 (C 撤除后) refs=957  dc=957  callGraph=205 | .claude/worktrees/=0 .archguard/=0 packages/quay/plugin/=0 | md5(refs)=60667cd2eb58
 
-A\B = []        B\A = []        B\C = []
+A\B = []        B\A = []        B\C = []        C\B = []
 A vs C identical?  true          fixture 路径出现在 B.refs?  []
 ```
 
@@ -226,9 +226,37 @@ SCOPED GATE EXIT=0
 - ⛔ 未以"新增单测通过"代替生产读数（生产读数在上；单测只作为 AC5 的回归面）✅
 - ⛔ 未以"DC 数字变小了"代替"该前缀条数为 0"（AC2 判定按位置：三条各 0）✅
 
+## worker 轮复验（合并 develop 后重跑全部 AC）
+
+**T=2026-09-20T19:10Z**，worktree `/home/yale/work/quay-worktrees/gap-deletion-closure-walker-respects-gitignore`，
+先 `git merge --no-edit develop`（clean，`develop` = `c7ab1b586`），再逐条重跑 AC。每条读数都取自**生产载体** `--root /home/yale/work/quay`（不是 worktree —— 那三个 gitignored 树在 worktree 里不存在）：
+
+- **AC2/AC3**（`--json`）：`dcTotal`=**957**、`callGraphTotal`=**205**、`R`=**4.67**；`.claude/worktrees/`=**0**、`.archguard/`=**0**、`packages/quay/plugin/`=**0**；`tasks/`=**487**（≥400）、`experiments/`=**33**（未被顺手排除，与修前逐字相同）；`plugin/scripts/` 下 code 类命中=**104**（>0）；`ignoreSource.kind`=`"git-worktree"`，`visiblePaths`=**7026**。⇒ 与上表逐条一致。
+- **AC4**（注入三读 + 面开关，fixture = `.archguard/fixture-20260920T191049/ref.md`，内容引用 `gate-script-lib.sh`）：三读 refs/dc/callGraph 全为 **957 / 957 / 205**，三条前缀各 0，`fixtureInDc`=false，`A\B=B\A=B\C=C\B=[]`，`A vs C identical = true`。（本轮 md5 由本 worker 的脚本对 sorted `refs[].file` 串计算，与上表口径不同故值不同 —— 判据是三次读**彼此**相同，三次均为 `21adcac97e24`。）
+  **面开关**：面开（gitignore 驱动）`kind=git-worktree` refs=**122**、fixture **不在** DC；面关（显式传 `visible=null`）`kind=manual-skip-only` refs=**1056**、fixture **在** DC ⇒ 排除确由 skip 面做出，而不是"fixture 恰好没被读到"。fixture 已删除，未留残迹。
+- **AC5**：`deletion-closure-check.test.mjs` exit **0**（tests 13 / pass 13 / fail 0）；`gate-script-lib.sh` 单构件剖面 R=**1.51** ≤ 2。
+- **AC6**：`bash scripts/test.sh --for-task … --allow-thin` exit **0**；scoped 静态相全部 PASS（唯一 NOT-EVALUATED 是 `it0-split-or-commit-check --changed`「本轮 delta 无任务文件」，与 PASS 不同形、不阻塞 —— 硬规则 3b 的正确行为）；scoped 单测相 tests 31 / pass 31 / fail 0。
+
+### ⚠️ 复验中发现并修复的一处附带损伤（同一实现提交自己引入）
+
+本任务的实现提交 `fe94f3c7f` 在插入 `WalkOptions.visible` 文档块时，**连带删掉了相邻的 `absolute?: boolean;` 声明**，而 `opts.absolute`（`fs-walk.ts:145`）与调用方的 `absolute: true`（`:263`）仍在用 ⇒ `tsc` 报 **TS2339**（`Property 'absolute' does not exist on type 'WalkOptions'`）+ **TS2353**（对象字面量的 `absolute` 不在类型里）。`develop` 与 merge-base 两处都还在（`:62-63`），所以这是本次改动引入的净回归。
+
+**没有任何 gate 会报它**：`ts-typecheck` gate 的命令是 `for d in packages/*/; do npx tsc --noEmit -p "$d"; done`，而 `plugin/scripts/` 不在根 `tsconfig.json` 的 `include` 里（只含 `packages/**`）⇒ plugin 脚本根本不被类型检查。运行期无影响（Node 只 strip 类型，`opts.absolute` 照常取到值），所以 scoped 门/full suite 都不会红。
+
+已在 worker 轮恢复该声明（commit `c8fd3eee3`）。**负控制**：对同一文件跑 `tsc --noEmit`，修复前报上面那 2 条错误、修复后 **0 条**（`--ignoreConfig` 单文件调用，因根 tsconfig 不覆盖该路径）。
+
 ## Touches
 
 - plugin/scripts/deletion-closure-check.ts
 - plugin/scripts/fs-walk.ts
 - plugin/test/deletion-closure-check.test.mjs
 - tasks/gap-deletion-closure-walker-respects-gitignore.md
+
+## Needs-Human
+
+**执行 2026-09-20T19:18:05.309Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 失败步/判词：AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：3cc14ee5-4859-49ff-abc2-1bd88981569a
