@@ -2,7 +2,7 @@
 id: gap-fan-in-installed-layout-sibling-script-resolvability-test-and-reaper-bundling
 title: fan-in 兄弟脚本在【打包安装+外部项目】布局下可解析的真实布局测试，并把 worktree-process-reaper 打进
   dist（缺陷成簇：分类器 registry 与 reaper 同类）
-status: todo
+status: ready
 labels:
   - gap
   - defect
