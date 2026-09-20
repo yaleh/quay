@@ -70,14 +70,16 @@ packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test
 
 **全库扫描同一形态**（`readGitHistory(REPO_ROOT…` ∧ 实时 `git` oracle ∧ 无冻结）命中 8 个文件（含本文件）；**除本文件外 7 个逐条读了比对点**，分两类：
 
-- **确实构成同一对**（数据层实时读 × 实时窗口 oracle，中间无快照）——**4 个，本轮 ⛔ 未修**（不属本任务 Touches，另立任务）：
+- **确实构成同一对**（数据层实时读 × 实时窗口 oracle，中间无快照）——**4 个，本轮 ⛔ 未修**，已另立任务 `gap-git-graph-live-ref-oracle-siblings-unfrozen`：
   - `gap-git-graph-adopt-git-column-algorithm-and-decorate-labels`：AC1（`:75` 实时读 → `:79` `--graph` 列 oracle）、`:133` → `:142`（`%D`）、AC6（`:200` → `:203` `git log -1` 取最新提交与 `rows[0]` 比对）
   - `gap-git-graph-stride-chip-overlaps-commit-row-text`：`:138` 实时读 → `:147` `%D` oracle（比 inline-label 行**计数**）
   - `gap-git-graph-reconstructed-lanes-all-named-mainline-ref`：AC3（`:55` 实时读 → `:62` `%D` oracle，比逐条 label）
   - `gap-git-graph-ref-partition-collapses-all-topology-to-one-lane`：AC3（`:57` 实时读 → `:60` `--graph` 列 oracle）
 - **不构成**（oracle 读的不是浮动提交窗口）：`gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored`（`git show 303a94950^:<blob>`，钉死对象）、`gap-git-graph-decoration-labels-as-colored-chips`（`symbolic-ref -q HEAD` / `git remote`）、`gap-git-graph-task-view-aggregate-commits-by-task-id`（**已经** `exec: snapshotExec` 冻结，是本族里已加固的那一个）。
 - **暴露度差异（实测口径，⛔ 不是「有无」）**：本文件 AC3 的两次读相隔 ~1s（数据层那次被 AC1 的 30s 缓存复用），而上面 4 个的比对点两读相邻（几十 ms 量级）⇒ 单轮命中率低得多，但**同类同签名**。
-  ⇒ 这 4 个是本任务**未修**的同类实例；本任务只修**已实际误杀本轮 fan-in 的这一个**，⛔ 不借机扩大 delta。
+  ⇒ 本任务只修**已实际误杀本轮 fan-in 的这一个**，⛔ 不借机扩大 delta；其余 4 个的接口已在 `gap-git-graph-live-ref-oracle-siblings-unfrozen` 里给出（含逐条比对点坐标与已确立的两处修法先例）。
+
+**⚠️ 任务体自身在收尾时会推动 develop（E8 实测）**：本任务新立案的兄弟任务那条 `task_write` 提交（`49686a7ab`）落进 develop 后，本文件的 scoped 门读数就作废了一次 —— 见 E8 的收敛流程。
 
 ### E3 修法：把 ref 集合冻结成不可变对象名，两侧同源（生产读路径零改动）
 
@@ -127,6 +129,15 @@ churn: while :; do git commit -q --allow-empty -m churn && git update-ref refs/s
 ```
 （该日志里**不打印**测试文件名，所以「grep 文件名 = 0 命中」是这台机器的输出形态，⛔ 不是「没跑」。）选择器实读：`select-tests-for-touches.ts --task … --paths-only --allow-thin` ⇒ 9 个文件，含本文件与被修的那一个。
 
-### E8 诚实口径注：scoped-gate 缓存的 `--develop-sha`
+### E8 诚实口径注：scoped-gate 缓存的 `--develop-sha`（收尾定稿读数）
 
-缓存键是 `(task, developSha)`，fan-in 的命中判据是**锁内 merge 到的 develop tip 逐字相符**（`worker-driver.ts:4787-4791`）。本文件记录的 sha = **本门实际验证过的**那个 develop tip（worktree 里那个 merge 提交的第二父）`45f483105ea78c1dcaefd4e97eba1698a465e5e9`，⛔ 不取「写缓存那刻的 `git rev-parse develop`」——**实测**写缓存时 develop 已前进到 `e466c0f74ef5245dc5b90d2d8b4001c14694d3a7`，用后者会记下一个**本门从未验证过**的状态、制造假命中（`worker-driver.ts:1617` 的指引签名正是那个形态）。⇒ 本次缓存**必然未命中**（锁内 merge 到 e466c0f7…），门照跑（fail-closed，安全方向）。
+缓存键是 `(task, developSha)`，fan-in 的命中判据是**锁内 merge 到的 develop tip 逐字相符**（`worker-driver.ts:4787-4791`）。本文件记录的 sha = **本门实际验证过的**那个 develop tip，⛔ 不取「写缓存那刻的 `git rev-parse develop`」——**实测** develop 在收尾窗口里连续前进（`45f483105…` → `e466c0f74…` → `49686a7ab…`），用后者会记下一个**本门从未验证过**的状态、制造假命中（`worker-driver.ts:1617` 的指引签名正是那个形态）。
+
+**收敛流程（本轮实测，1 轮即稳定，⛔ 不要省）**：
+```
+merge develop → B=$(git rev-parse develop) → 跑 scoped 门 → A=$(git rev-parse develop)
+[ "$B" = "$A" ] 才算「门跑的正是这个 tip」；不等 ⇒ 再 merge 再跑门
+```
+本轮 `B == A == 49686a7ab88b9e81d654af20211089f3de4e49a2`，门 `EXIT=0 / tests 139 / pass 139 / fail 0`，**缓存记的就是这个 sha**。
+**⚠️ 本轮为什么需要收敛**：本任务**自己的 `task_write`** 会推动 develop —— `49686a7ab` 正是「为本任务的 4 个未修兄弟立案」那条 task_write 提交，它落进 develop 之后，第一次门（对着 `45f483105…`）就作废了。
+⇒ **「勾完 AC / 改完任务体之后必须再 merge + 再跑门」这一步不可省**；判据是上面那个 `B == A`，⛔ 不是「merge 命令 exit 0」。
