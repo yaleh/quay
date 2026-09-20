@@ -26,7 +26,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { resolvePluginRoot } from "../plugin-root.ts";
 import { loadConfig, activeProvider } from "../config.ts";
@@ -1008,16 +1007,23 @@ Usage:
 Exit codes: 0 = ff performed; 1 = develop advanced (retry); 2 = usage/env/token; 3 = anti-livelock.
 `;
 
-function isMainModule(): boolean {
-  const argv1 = process.argv[1];
-  if (!argv1) return false;
-  const self = import.meta.url;
-  const target = pathToFileURL(argv1).href;
-  if (self === target) return true;
-  try { return self === pathToFileURL(fs.realpathSync(argv1)).href; } catch { return false; }
-}
+// Direct-invocation guard: this module is BOTH a library (imported by cli/task-fan-in.ts and, since
+// gap-fan-in-instrument-availability-self-check, by cli/driver.ts for `probeInstruments`) and the
+// documented CLI entry (`node --experimental-strip-types …/fan-in/ff-merge.ts --task <id>`).
+//
+// ⛔ NAME-based, never URL-based — same defect and same fix as goal-store.ts:3107 and plugin/scripts/
+// worktree-process-reaper.ts:633. WHY (measured 2026-09-20 on serve.test.mjs AC1): in the shipped
+// `dist/quay.js` EVERY inlined module shares the BUNDLE's `import.meta.url`, so the old
+// `import.meta.url === pathToFileURL(process.argv[1]).href` equality was TRUE for this library module
+// on every bundled invocation. The moment cli/driver.ts began importing this file, `quay serve` (which
+// reaches driver.ts) pulled its `__esm` init in: the guard ran `ffMerge` with serve's own argv, found no
+// `--task`, printed "fan-in-ff-merge: --task <taskId> is required" and stamped exit code 2 — which
+// OVERRODE the serve admission refusal's documented exit 0. The reading is a pure library module here,
+// so the guard must be false in the bundle and true only for the real entry.
+const isMain =
+  process.argv[1] != null && process.argv[1].endsWith("ff-merge.ts");
 
-if (isMainModule()) {
+if (isMain) {
   const { args, help } = parseArgv(process.argv.slice(2));
   if (help) {
     process.stdout.write(HELP);
