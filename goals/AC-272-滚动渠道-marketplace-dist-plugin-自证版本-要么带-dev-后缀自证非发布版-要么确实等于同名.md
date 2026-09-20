@@ -14,7 +14,7 @@ criterion: >-
       return r.returncode, r.stdout.strip(), r.stderr.strip()
   CHAN = None
 
-  for cand in ("refs/remotes/origin/dist-plugin", "refs/heads/dist-plugin"):
+  for cand in ("dist-plugin",):
       rc, _, _ = git("rev-parse", "--verify", "-q", "%s^{commit}" % cand)
       if rc == 0:
           CHAN = cand; break
