@@ -13,7 +13,8 @@
 // were two INDEPENDENT LIVE reads of the production window: a ref advancing between them shifts the
 // window head by K and drops K off the tail ⇒ exactly K mismatches shaped `git=undefined` — a window
 // SHIFT, not a folded-topology bug. Both sides now read the SAME frozen ref set
-// (`helpers/git-ref-window.mjs`), resolved ONCE before either side reads.
+// (`helpers/git-ref-window.mjs`), resolved ONCE before either side reads; `withStableWindow()` also
+// retries the judgment if any ref moved across it, so a verdict is never taken over a moving target.
 // Negative control (⛔ dry-run only): `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` restores the live-`--all` arms
 // (AC1/AC2 are pure fixtures and read no ref at all — they are unaffected by either arm).
 //
@@ -26,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { layoutGitGraph, assignGitColumns } from "../src/serve-git.ts";
 import { readGitHistory } from "../src/observation.ts";
-import { resolveRefWindow, windowScopeArgs, windowGitExec, describeWindow } from "./helpers/git-ref-window.mjs";
+import { windowScopeArgs, windowGitExec, withStableWindow } from "./helpers/git-ref-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -65,22 +66,22 @@ test("AC2: collapsing every commit to one column mismatches git (the judge can b
 });
 
 test("AC3: production column numbers match git log --graph over the production ref scope (topology preserved, not folded)", () => {
-  const refs = resolveRefWindow(); // frozen ONCE, before either side reads
-  console.log(`[ref-window] ${describeWindow(refs)}`);
-  const history = readGitHistory(REPO_ROOT, { limit: 500, exec: windowGitExec(refs) });
-  assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
-  const layout = layoutGitGraph(history);
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...windowScopeArgs(refs), "-n", "500", "--pretty=format:%x01%H"], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+  withStableWindow((refs) => {
+    const history = readGitHistory(REPO_ROOT, { limit: 500, exec: windowGitExec(refs) });
+    assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
+    const layout = layoutGitGraph(history);
+    const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...windowScopeArgs(refs), "-n", "500", "--pretty=format:%x01%H"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const refCols = new Map();
+    for (const line of out.split("\n")) {
+      const idx = line.indexOf("\x01");
+      if (idx === -1) continue;
+      refCols.set(line.slice(idx + 1).trim(), Math.floor(line.indexOf("*") / 2));
+    }
+    let mismatch = 0;
+    for (const r of layout.rows) if (refCols.get(r.hash) !== r.col) mismatch++;
+    assert.equal(mismatch, 0, `column mismatch = 0 (got ${mismatch})`);
   });
-  const refCols = new Map();
-  for (const line of out.split("\n")) {
-    const idx = line.indexOf("\x01");
-    if (idx === -1) continue;
-    refCols.set(line.slice(idx + 1).trim(), Math.floor(line.indexOf("*") / 2));
-  }
-  let mismatch = 0;
-  for (const r of layout.rows) if (refCols.get(r.hash) !== r.col) mismatch++;
-  assert.equal(mismatch, 0, `column mismatch = 0 (got ${mismatch})`);
 });

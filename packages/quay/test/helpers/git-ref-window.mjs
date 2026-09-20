@@ -35,6 +35,22 @@
 // (Annotated tags are peeled by `git log` exactly as `--all` peels them, so `%(objectname)` — the tag
 // OBJECT sha — is the correct start point; the equivalence above covers it.)
 //
+// ── THE SECOND MECHANISM: freezing the ref SET does not freeze %D ───────────────────────────────
+// MEASURED, not inferred (2026-09-20, isolated clone + ref churn): over ONE frozen object list, two
+// consecutive `git log <frozen> --pretty=%H%x01%D` reads DISAGREE —
+//     read 1: `b644776…_churn`      read 2: `b644776…`
+// because the churn ref advanced to a commit outside the frozen list, so the commit that HAD the
+// decoration lost it. Decorations (`%D`) are computed by git from the LIVE ref table; pinning the
+// commit set therefore removes the window-shift class but NOT the decoration class. A decoration
+// judgment ("does the rendered label set equal the %D-nonempty set?") is still a live-ref oracle.
+//
+// There is no way to pin `%D` for two sides without making one side an echo of the other (硬规则 4) or
+// reimplementing git's decoration rendering — both forbidden by AC3 ("判据不得退化"). So the residual
+// is closed by `withStableWindow()`: it re-takes the WHOLE judgment (both reads) whenever the ref
+// mapping moved across it. That never weakens a verdict — a failing judgment whose refs held still is
+// reported immediately as the real failure it is; only a verdict taken over a MOVING target is
+// discarded and retried, and exhaustion FAILS (fail-closed, 硬规则 3b) rather than silently passing.
+//
 // ── NEGATIVE CONTROL (硬规则 4 推论三: a judge only fixture/injection satisfies is not a measurement)
 // `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` turns the freeze OFF on BOTH sides of every judgment in the
 // family, restoring the pre-fix shape. Under an isolated clone + ref churn that arm must go RED; the
@@ -72,6 +88,7 @@ export function snapshotRefWindow(repoRoot = QUAY_REPO_ROOT) {
     maxBuffer: 64 * 1024 * 1024,
   });
   const shas = new Set();
+  const refMap = {}; // refname -> objectname, the WHOLE mapping (not just the sha set)
   const heads = [];
   const tags = [];
   for (const line of out.split("\n")) {
@@ -79,14 +96,26 @@ export function snapshotRefWindow(repoRoot = QUAY_REPO_ROOT) {
     if (!sha || !ref) continue;
     if (ref.startsWith("refs/notes/")) continue;
     shas.add(sha);
+    refMap[ref] = sha;
     if (ref.startsWith("refs/heads/")) heads.push(ref);
     else if (ref.startsWith("refs/tags/")) tags.push(ref);
   }
   try {
     const h = execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-    if (h) shas.add(h); // `--all` includes HEAD, `for-each-ref refs/` does not
+    if (h) { shas.add(h); refMap["HEAD"] = h; } // `--all` includes HEAD, `for-each-ref refs/` does not
   } catch { /* unborn HEAD — `%D` still marks it when it exists */ }
-  return { shas: [...shas].sort(), refCount: shas.size, heads, tags, at: new Date().toISOString() };
+  return { shas: [...shas].sort(), refCount: shas.size, refMap, heads, tags, at: new Date().toISOString() };
+}
+
+/** True iff no ref moved between two snapshots. Used by `withStableWindow` as the "did the target
+ *  move while I was judging it" test. Compares the FULL refname→objectname mapping, not the sha SET:
+ *  a set misses a ref that moved onto a commit another ref already names (the set is unchanged, but
+ *  `%D` on two commits changed). */
+export function sameRefMap(a, b) {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) if (a[k] !== b[k]) return false;
+  return true;
 }
 
 /** The window for ONE reading: frozen by default, `null` only under the negative-control seam.
@@ -125,6 +154,40 @@ export function frozenGitExec(repoRoot, shas) {
  *  is deliberately never memoized — see `readGitHistory`.) */
 export function windowGitExec(refs, repoRoot = QUAY_REPO_ROOT) {
   return refs ? frozenGitExec(repoRoot, refs.shas) : realGitExec;
+}
+
+/**
+ * Run ONE paired judgment over ONE frozen ref window, re-running it while refs are moving.
+ *
+ * `body(refs)` takes the window ONCE and must read BOTH sides from it (data layer + oracle); it
+ * reports failure by throwing (assertions stay inline). Rules:
+ *   • body passes              → the verdict stands (both sides agreed over the window they read).
+ *   • body throws, refs STILL  → propagate: the failure is real, not an artifact of a moving target.
+ *   • body throws, refs MOVED  → retry with a fresh window (a verdict over a moving target is not a
+ *                                verdict, and reporting one is how this family produced false reds).
+ *   • attempts exhausted       → throw, naming the moving target. NEVER a silent pass.
+ * Negative-control arm (`refs === null`, QUAY_TEST_GIT_GRAPH_LIVE_REFS=1): no snapshot exists, so
+ * there is nothing to gate on — the body runs exactly once, i.e. the pre-fix shape, single attempt.
+ */
+export function withStableWindow(body, { maxAttempts = 5, repoRoot = QUAY_REPO_ROOT, label = "ref-window" } = {}) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const refs = resolveRefWindow(repoRoot);
+    console.log(`[${label}] attempt ${attempt}/${maxAttempts}: ${describeWindow(refs)}`);
+    try {
+      body(refs);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!refs) throw err; // live arm: no window to hold still — single attempt, pre-fix shape
+      if (sameRefMap(refs.refMap, snapshotRefWindow(repoRoot).refMap)) throw err; // refs held ⇒ real
+      console.log(`[${label}] refs moved during the judgment (attempt ${attempt}); retrying`);
+    }
+  }
+  throw new Error(
+    `the ref window never held still across ${maxAttempts} attempts — this judgment was taken over a ` +
+      `moving target, so no verdict is reportable (last error: ${lastErr && lastErr.message})`,
+  );
 }
 
 /** One-line provenance for a reading's log/assertion message: WHERE the window comes from and WHEN
