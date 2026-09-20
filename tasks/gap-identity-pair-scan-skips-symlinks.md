@@ -15,7 +15,7 @@ extra:
 
 ## Proposal
 
-`plugin/scripts/identity-replication-check.ts` 的 `findByteIdenticalPairs()`（约 :234）在比对 `plugin/scripts/*` 与 `experiments/*/scripts/` 的同名文件时用 `fs.existsSync(cand)` + `fs.readFileSync(cand)`——**跟随软链**。而 `experiments/quay-perpetual-stream/scripts/` 下现有 **59 个软链**（`ls -la … | grep -c '^l'` = 59，总条目 121，`git ls-files …` = 121 同样为 121），全部形如 `X -> ../../../plugin/scripts/X`。于是扫描把 59 个文件**与它自己**逐字节比对、当然相等，报成 59 对"字节完全相同文件对 / 27646 行"。
+`plugin/scripts/identity-replication-check.ts` 的 `findByteIdenticalPairs()`（约 :234）在比对 `plugin/scripts/*` 与 `experiments/*/scripts/` 的同名文件时用 `fs.existsSync(cand)` + `fs.readFileSync(cand)`——**跟随软链**。而 `experiments/quay-perpetual-stream/scripts/` 下现有 **59 个软链**（`ls -la … | grep -c '^l'` = 59；该目录共 121 个条目，`git ls-files … | wc -l` = 121 —— 即 121 个 tracked 条目里 59 个是软链、62 个是常规文件），全部形如 `X -> ../../../plugin/scripts/X`。于是扫描把 59 个文件**与它自己**逐字节比对、当然相等，报成 59 对"字节完全相同文件对 / 27646 行"。
 
 现场实跑（立案时，逐字）：
 
@@ -39,7 +39,7 @@ extra:
 
 ## AC
 
-- [ ] AC1（复现固化）：贴出立案读数逐字（59 对 / 27646 行）与 5/5 抽样的 `ls -la` 输出（证明被报的"对"在 experiments 侧是软链），并附两条计数：`ls -la experiments/quay-perpetual-stream/scripts/ | grep -c '^l'` = 59、`git ls-files experiments/quay-perpetual-stream/scripts/ | wc -l` = 121。
+- [ ] AC1（复现固化）：贴出立案读数逐字（59 对 / 27646 行）与 5/5 抽样的 `ls -la` 输出（证明被报的"对"在 experiments 侧是软链），并附两条计数：`ls -la experiments/quay-perpetual-stream/scripts/ | grep -c '^l'` = 59（软链数），`git ls-files experiments/quay-perpetual-stream/scripts/ | wc -l` = 121（tracked 条目总数）。
 - [ ] AC2（修后·位置判定）：修后重跑检测器，`byteIdentical.pairs[]` 中 **experiments 侧为软链的条目数 = 0**（对每条做 `lstat` 判定后计数，贴出计数与命令），总对数落到真实副本量级（贴出修后精确数字，并与 `mirror-pair-drift-check.ts` 对同一镜像目录给出的真副本数交叉核对，贴出后者输出）。
 - [ ] AC3（负控制·真副本不许被一并漏掉）：构造一个含两条目的 fixture 目录——`a.ts` 两侧都是**常规文件**且逐字节相同、`b.ts` 在 experiments 侧是**软链**——修后的 `findByteIdenticalPairs()`（或等价可注入 fixture 的测试入口）必须**报 a、不报 b**。贴出该 fixture 的真实输出（两行都要出现，一行是命中、一行是缺席的对照）。
 - [ ] AC4（与姊妹规则一致）：用一条命令级证据证明两检查器对"软链不是 pair"取同一判定——`node --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --json` 与 identity-replication 的 AC3 结果在"软链条目"这一集合上**都没有**条目（贴出两侧输出）。
