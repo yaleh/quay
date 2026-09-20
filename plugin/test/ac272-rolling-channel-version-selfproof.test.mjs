@@ -142,22 +142,40 @@ function resolves(d, ref) {
   }
 }
 
+/** The criterion's candidate list, read AS DATA out of its `for cand in (...)` header.
+ *
+ *  ⛔ Deliberately NOT a substring search over the whole criterion. The CAUSE prose also names both
+ *  refs (the branch-absent message explains which two it looked for), so `indexOf(REMOTE) < indexOf(LOCAL)`
+ *  is satisfied by the MESSAGE even when the CODE reads a bare local ref — a measured false pass: with
+ *  the pre-fix tuple restored the text-position assertion still went green while five arms went red.
+ *  Extracting the tuple keeps the assertion about the code path it claims to be about. */
+function candidateList(criterion) {
+  const m = criterion.match(/for cand in \(([^)]*)\):/);
+  assert.ok(m, "the criterion has no `for cand in (...)` header — its ref resolution changed shape");
+  const cands = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  assert.ok(cands.length > 0, `the candidate list is empty (header: ${JSON.stringify(m[0])})`);
+  return cands;
+}
+
 // ── the criterion's own text: the ref source is remote-tracking FIRST (positional, not keyword) ────
 test("AC-272 resolves the channel from refs/remotes/origin/dist-plugin before the local branch", () => {
-  const criterion = storedCriterion();
-  const remoteAt = criterion.indexOf(CHANNEL_REMOTE);
-  const localAt = criterion.indexOf(CHANNEL_LOCAL);
-  assert.notEqual(remoteAt, -1, `the criterion never names ${CHANNEL_REMOTE} — it is not reading the marketplace side`);
-  assert.notEqual(localAt, -1, `the criterion never names ${CHANNEL_LOCAL} — the local fallback is gone`);
-  assert.ok(
-    remoteAt < localAt,
-    `the criterion names the LOCAL branch before the remote-tracking ref (${localAt} < ${remoteAt}) — the candidate order is the fix`,
+  const cands = candidateList(storedCriterion());
+  assert.equal(
+    cands[0],
+    CHANNEL_REMOTE,
+    `the FIRST candidate is ${cands[0]}, not ${CHANNEL_REMOTE} — the marketplace side must win`,
   );
-  // The pre-fix shape must be absent from the ref-READING position. `git rev-parse ... "dist-plugin^{commit}"`
-  // is the exact pre-fix expression; the bare name may still appear inside CAUSE prose, which is why this
-  // is anchored on the expression and not on the word.
+  assert.deepEqual(
+    cands,
+    [CHANNEL_REMOTE, CHANNEL_LOCAL],
+    `the candidate list is ${JSON.stringify(cands)} — expected the remote-tracking channel first, then the local copy`,
+  );
   assert.ok(
-    !criterion.includes('"dist-plugin^{commit}"'),
+    !cands.includes("dist-plugin"),
+    "the pre-fix bare `dist-plugin` is back in the candidate list — git's dwim can only resolve that to the unowned local branch",
+  );
+  assert.ok(
+    !storedCriterion().includes('"dist-plugin^{commit}"'),
     "the criterion still carries the pre-fix bare-local ref expression",
   );
 });
