@@ -12,36 +12,40 @@ criterion: >-
   def git(*a):
       r = subprocess.run(["git", *a], capture_output=True, text=True)
       return r.returncode, r.stdout.strip(), r.stderr.strip()
-  rc, _, _ = git("rev-parse", "--verify", "-q", "dist-plugin^{commit}")
+  CHAN = None
 
-  if rc != 0:
-      sys.stderr.write("CAUSE=dist-plugin-branch-absent — this checkout has no dist-plugin ref, so the rolling channel's shipped version cannot be read (fetch it, or run this where the branch exists)\n"); sys.exit(1)
+  for cand in ("refs/remotes/origin/dist-plugin", "refs/heads/dist-plugin"):
+      rc, _, _ = git("rev-parse", "--verify", "-q", "%s^{commit}" % cand)
+      if rc == 0:
+          CHAN = cand; break
+  if CHAN is None:
+      sys.stderr.write("CAUSE=dist-plugin-branch-absent — neither refs/remotes/origin/dist-plugin (the branch the marketplace source yaleh/quay ref=dist-plugin pulls) nor a local refs/heads/dist-plugin resolves in this checkout, so the rolling channel's shipped version cannot be read (fetch it, or run this where the branch exists)\n"); sys.exit(1)
   ver = None
 
   for path in ("VERSION", "plugin/VERSION"):
-      rc, out, _ = git("show", "dist-plugin:%s" % path)
+      rc, out, _ = git("show", "%s:%s" % (CHAN, path))
       if rc == 0 and out.strip():
           ver = out.strip().splitlines()[0].strip(); break
   if not ver:
-      sys.stderr.write("CAUSE=dist-plugin-version-unreadable — neither dist-plugin:VERSION nor dist-plugin:plugin/VERSION holds a version string, so what the marketplace channel claims to ship cannot be determined\n"); sys.exit(1)
+      sys.stderr.write("CAUSE=dist-plugin-version-unreadable — neither %s:VERSION nor %s:plugin/VERSION holds a version string, so what the marketplace channel claims to ship cannot be determined\n" % (CHAN, CHAN)); sys.exit(1)
   if ver.endswith("-dev"):
       sys.exit(0)
   rc, tagsha, _ = git("rev-parse", "--verify", "-q", "v%s^{commit}" % ver)
 
   if rc != 0 or not tagsha:
-      sys.stderr.write("CAUSE=claims-a-version-that-was-never-released — dist-plugin ships version %r but no tag v%s exists => whatever `/plugin install` pulls advertises a version number with no release behind it, and neither a user nor a checker can answer 'which version is this' (baseline at filing: dist-plugin claimed 0.7.0 while the newest tag was v0.6.3, built from a commit 548 past that tag and 155 behind develop). Ruling 2 (2026-09-15) resolves this by carrying -dev on develop; a bare version here means the -dev discipline is not in force\n" % (ver, ver)); sys.exit(1)
-  rc, msg, _ = git("log", "-1", "--format=%s", "dist-plugin")
+      sys.stderr.write("CAUSE=claims-a-version-that-was-never-released — %s ships version %r but no tag v%s exists => whatever `/plugin install` pulls advertises a version number with no release behind it, and neither a user nor a checker can answer 'which version is this' (baseline at filing: dist-plugin claimed 0.7.0 while the newest tag was v0.6.3, built from a commit 548 past that tag and 155 behind develop). Ruling 2 (2026-09-15) resolves this by carrying -dev on develop; a bare version here means the -dev discipline is not in force\n" % (CHAN, ver, ver)); sys.exit(1)
+  rc, msg, _ = git("log", "-1", "--format=%s", CHAN)
 
   m = re.search(r"build from ([0-9a-f]{7,40})", msg or "")
 
   if not m:
-      sys.stderr.write("CAUSE=build-source-unrecorded — dist-plugin's tip subject %r carries no 'build from <sha>' marker, so the commit it was built from cannot be recovered\n" % (msg or "")[:120]); sys.exit(1)
+      sys.stderr.write("CAUSE=build-source-unrecorded — %s's tip subject %r carries no 'build from <sha>' marker, so the commit it was built from cannot be recovered\n" % (CHAN, (msg or "")[:120])); sys.exit(1)
   rc, srcsha, _ = git("rev-parse", "--verify", "-q", "%s^{commit}" % m.group(1))
 
   if rc != 0 or not srcsha:
-      sys.stderr.write("CAUSE=build-source-unresolvable — dist-plugin says it was built from %s but that commit does not resolve in this repository\n" % m.group(1)); sys.exit(1)
+      sys.stderr.write("CAUSE=build-source-unresolvable — %s says it was built from %s but that commit does not resolve in this repository\n" % (CHAN, m.group(1))); sys.exit(1)
   if srcsha != tagsha:
-      sys.stderr.write("CAUSE=released-version-built-from-a-different-commit — dist-plugin claims released version %s (tag v%s = %s) but was built from %s => the channel advertises a release while shipping something else\n" % (ver, ver, tagsha[:9], srcsha[:9])); sys.exit(1)
+      sys.stderr.write("CAUSE=released-version-built-from-a-different-commit — %s claims released version %s (tag v%s = %s) but was built from %s => the channel advertises a release while shipping something else\n" % (CHAN, ver, ver, tagsha[:9], srcsha[:9])); sys.exit(1)
   sys.exit(0)
 
   P
