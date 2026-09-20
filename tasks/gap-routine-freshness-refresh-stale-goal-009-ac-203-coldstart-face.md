@@ -195,8 +195,43 @@ EXIT=0
 与文件对 upgrade-face 的 `0.38` 所写的「floor to re-measure, not a settled constant」同形）。
 ⛔ 未改 `K`、未改 `criterion`、未动 `.quay/routine-findings.jsonl`、未改本 finding 的 `files:`/`symbols:` 观测面。
 
+### ⑧ 续做轮（2026-09-20）：上一轮 fan-in `step=suite` red 的真因与修法
+
+上一轮 exited-not-landed 在 `step=suite`，失败断言 `AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal`，
+失败文件 `plugin/test/sh-census-check.test.mjs`。fan-in 的 delta 相关度提示把该文件判为 `UNRELATED` ——
+**该提示是错的，本任务就是真因**（提示自身已声明「不是结论，复现即当真」；这里复现了，且根因机械可考）。
+
+- 读数：`embeddedInterpreterLines` **live 9503 / committed baseline 9504**。AC6 要求两者**相等**（不只是 ≤）
+  —— 所以**下缩也会红**，这正是该断言存在的理由（记录收益、防止日后 +1 悄悄回涨）。
+- 根因（逐文件实测，用 checker 自己的原语 `countCodeLines`）：本任务对 `plugin/scripts/develop-deliver-tgz.sh`
+  的修改把 `if [ -e ... ]; then …; fi` 三行 stale-worktree 清理折成一行 `[ -e ... ] && { …; }`
+  ⇒ 该文件有效行 **2355 → 2354（−1）**。该文件**在轴内**（`python3` 在命令位；checker 自己的读数 `embedded:["python3"]`，`exception:false`）。
+- **残差 = 0，且是结构性为 0**（⛔ 不是抽样）：`git diff develop HEAD --name-only` 只有两个路径，
+  其中唯一的 `*.sh` 就是它；另一个是 `plugin/test/develop-deliver-tgz.test.mjs`，`.mjs` 不在 `*.sh` 普查内。
+- 修法 = **下锚**（该文件自己的 `_note`：「Lowering a baseline is the intended direction … needs no ceremony,
+  but the file change must still be committed」）：`plugin/sh-census-baseline.json` 9504 → 9503，
+  并按该文件的 `_reanchorLog` 约定补一条带 attribution 的条目（约定「最后一条的 `to` 等于文件末尾两个数值」——已校验 `true`）。
+- 实测（修后，逐字）：
+
+```
+node --experimental-strip-types --test plugin/test/sh-census-check.test.mjs
+  ℹ tests 20   ℹ pass 20   ℹ fail 0
+node --no-warnings --experimental-strip-types plugin/scripts/sh-census-check.ts --root <worktree>
+  PASS — embeddedInterpreterLines=9503 ≤ 9503, duplicateCopies=0 ≤ 0 (headBaseline 9504)   rc=0
+```
+
+**5b 扫描：还有谁按「shell 行数」设闸** ⇒ 只有 `sh-census-check` 这一族：
+`grep -rln 'sh-ratchet|RATCHET_BASELINE|ratchet-baseline'` **零命中**；读同一份基线文件的只有 4 处
+（`sh-census-check.ts` / 其测试 / `runner-static-gate.ts` / `checker-mutation-cases/sh-census-check.sh`），
+其中 mutation case **自建 hermetic fixture**（自带 `{0,0}` 基线，与真实基线文件无关）⇒ 不受影响；
+`quay-init` closure ratchet 只覆盖 4 个文件（`plugin/.claude-plugin/plugin.json`、`plugin/.claude/launch.settings.json`、
+`plugin/.quay/profiles.yml`、`plugin/scripts/quay-init.sh`）⇒ **不含本次改动的任何文件**。
+
+**新增 Touches 一项**：`plugin/sh-census-baseline.json`（anti-drift 要求 diff ⊆ 声明，故必须声明）。
+
 ## Touches
 - `plugin/freshness-producers.json`
 - `plugin/scripts/develop-deliver-tgz.sh`
+- `plugin/sh-census-baseline.json`
 - `plugin/test/develop-deliver-tgz.test.mjs`
 - `tasks/gap-routine-freshness-refresh-stale-goal-009-ac-203-coldstart-face.md`
