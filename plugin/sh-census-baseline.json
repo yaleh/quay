@@ -87,8 +87,24 @@
         "embeddedInterpreterLines": "-1 = plugin/scripts/sync-vendor.sh effective lines 325 -> 324 (section 3's `cp` merge). Residual = 0. Measured per-file with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters) on `git show develop:<f>` vs `HEAD:<f>` over all four .sh this task touched: sync-vendor.sh 325->324 (embedded ⇒ IN the axis, -1); publish-dist-branch.sh 87->87 (embedded ⇒ IN, 0); package.sh 75->79 (NOT embedded — no embedded interpreter at a command position ⇒ outside this axis, the +4 is the wiring itself); plugin/scripts/checker-mutation-cases/version-consistency-check.sh 111->125 (IS embedded, but that path carries the checker's FIXTURE_MARKER and is excluded from the census entirely — it is absent from the 150-file `files[]`, so its +14 is outside this axis too, not silently absorbed). ⛔ The +4 and the +14 are called out rather than folded in: a reader who sums the task's own diff must be able to account for every line, and only the -1 is in-axis.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-routine-freshness-refresh-stale-goal-009-ac-203-coldstart-face)",
+      "from": {
+        "embeddedInterpreterLines": 9504,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 9503,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and here a SIDE EFFECT of the fix rather than its goal. This task repairs build_develop_tgz in plugin/scripts/develop-deliver-tgz.sh (a detached worktree cannot stamp a version ⇒ package.sh fails closed ⇒ no artifact ⇒ the coldstart-face delivery evidence goes stale). The same edit folds the three-line `if [ -e ... ]; then ... fi` stale-worktree guard onto ONE `[ -e ... ] && { ...; }` line, so the file's effective line count falls by 1. AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it — so a legitimate shrink must be recorded here or the whole static layer reds on the next land. This entry IS the visible committed re-anchor that test exists to force. Re-anchored after the fix was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` → totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-1 = plugin/scripts/develop-deliver-tgz.sh effective lines 2355 -> 2354. Residual = 0, and it is 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is two paths (`git diff develop HEAD --name-only`), of which the only `*.sh` is this file — the other is plugin/test/develop-deliver-tgz.test.mjs, a `.mjs` and therefore outside a `*.sh` census. Measured per-file with the checker's OWN primitives (countCodeLines on `git show develop:<f>` vs the worktree copy): 2355 -> 2354; and the file IS embedded (python3 at a command position), so it is IN the axis, not outside it.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 9504,
+  "embeddedInterpreterLines": 9503,
   "duplicateCopies": 0
 }
