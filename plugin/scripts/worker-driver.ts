@@ -124,6 +124,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef } from "./task-schema.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：flipTaskDone 的 status 读/写经 task-ops.ts
@@ -694,13 +695,12 @@ export function enumerateLiveWorkerCmdlines(procDir: string = "/proc", workerNam
   const out: string[] = [];
   for (const e of entries) {
     if (!/^\d+$/.test(e)) continue;
-    let buf: Buffer;
-    try {
-      buf = fs.readFileSync(path.join(procDir, e, "cmdline"));
-    } catch {
-      continue; // 进程已退 / 无权限 ⇒ 跳过
-    }
-    const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
+    // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（本文件原有第二份手搓副本 —
+    // gap-judgment-rewrites-route-through-proc-identity-leaf）；procDir 原样透传作 leaf 的 procRoot。
+    // ⛔ 读不成 ⇒ null ⇒ 跳过（与迁移前 catch 同路），不折成空串。
+    const text = readProcCmdlineText(e, procDir);
+    if (text === null) continue; // 进程已退 / 无权限 ⇒ 跳过
+    const cmdline = text.trim();
     if (cmdline.includes(workerName)) out.push(cmdline);
   }
   return out;
@@ -729,13 +729,9 @@ function findLiveWorkerPid(taskId: string, procDir: string = "/proc", workerName
   }
   for (const e of entries) {
     if (!/^\d+$/.test(e)) continue;
-    let buf: Buffer;
-    try {
-      buf = fs.readFileSync(path.join(procDir, e, "cmdline"));
-    } catch {
-      continue; // 进程已退 / 无权限 ⇒ 跳过
-    }
-    const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
+    const text = readProcCmdlineText(e, procDir);
+    if (text === null) continue; // 进程已退 / 无权限 ⇒ 跳过
+    const cmdline = text.trim();
     if (hasLiveWorkerForTask(taskId, [cmdline], workerName)) return Number(e);
   }
   return null;
@@ -764,13 +760,13 @@ export function probePidLiveness(pid: number, procDir: string = "/proc"): PidLiv
   const pids = entries.filter((e) => /^\d+$/.test(e));
   if (pids.length === 0) return "unknown"; // 看不到进程表 ⇒ 没查成（⛔ 不是「进程不存在」）
   if (!pids.includes(String(pid))) return "exited";
-  let buf: Buffer;
-  try {
-    buf = fs.readFileSync(path.join(procDir, String(pid), "cmdline"));
-  } catch {
-    return "unknown"; // 条目在但读不到（权限 / 竞态）⇒ 没查成
-  }
-  return buf.toString("utf8").replace(/\0/g, " ").trim().length === 0 ? "exited" : "alive";
+  // ⚠️ 这里【必须】用 Text 形而【不是】argv 形：本函数的契约要求区分「读不成」（⇒ unknown）与
+  // 「读到了但空」（僵尸/已退未收尸 ⇒ exited，是【测量】而非「没查成」）。argv 形把空折成 null，
+  // 那一折正好是硬规则 3b 的失败形态。读由 kernel leaf 单点实现
+  // （gap-judgment-rewrites-route-through-proc-identity-leaf）；leaf 对二者分别给出 "" / null。
+  const text = readProcCmdlineText(pid, procDir);
+  if (text === null) return "unknown"; // 条目在但读不到（权限 / 竞态）⇒ 没查成
+  return text.trim().length === 0 ? "exited" : "alive";
 }
 
 /** 冷启动「已在飞」排除集：task id 同时满足 ① 有 task/<id> worktree、② 有存活 worker 进程。二者缺一
@@ -3132,13 +3128,12 @@ export function removeDispatchRecord(file: string, taskId: string): void {
 }
 
 /** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
- *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。 */
+ *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。
+ *  读由 kernel leaf 单点实现；⛔ 保留「空 cmdline ⇒ ""」这一取值（调用方按 falsy 与 null 同判
+ *  「已死」，但取值本身不同形，见 `probePidLiveness` 对同一区分的用法）。 */
 export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
-  try {
-    return fs.readFileSync(path.join(procDir, String(pid), "cmdline")).toString("utf8").replace(/\0/g, " ").trim();
-  } catch {
-    return null;
-  }
+  const text = readProcCmdlineText(pid, procDir);
+  return text === null ? null : text.trim();
 }
 
 /** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /

@@ -44,6 +44,7 @@ import { fileURLToPath } from "node:url";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
 import {
   readAllEvents,
   aggregate,
@@ -130,7 +131,11 @@ export function findExecutorPids(runId) {
   const out = [];
   for (const pidStr of pids) {
     try {
-      const cmd = fs.readFileSync(`/proc/${pidStr}/cmdline`, "utf8").replace(/\0/g, " ");
+      // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（本文件原有第二份手搓副本 —
+      // gap-judgment-rewrites-route-through-proc-identity-leaf），比的是【空格 join 后的整串】。
+      // ⛔ 读不成 ⇒ null ⇒ 走与「不匹配」相同的 continue，但取值不折成空串（硬规则 3b）。
+      const cmd = readProcCmdlineText(pidStr);
+      if (cmd === null) continue; // pid exited mid-scan
       if (!cmd.includes(needle)) continue;
       const pid = Number(pidStr);
       let pgid = pid;

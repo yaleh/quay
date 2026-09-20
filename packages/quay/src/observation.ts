@@ -37,6 +37,7 @@ import { execFileSync, execFile, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
+import { readProcCmdlineText } from "./kernel/proc-identity.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./plugin-root.ts";
@@ -971,10 +972,11 @@ export function readLiveWorkerProcesses(procDir: string = "/proc", { root = null
   const out: LiveWorker[] = [];
   for (const e of entries) {
     if (!/^\d+$/.test(e)) continue;
-    let cmdline: string;
-    try {
-      cmdline = fs.readFileSync(path.join(procDir, e, "cmdline"), "utf8").replace(/\0/g, " ").trim();
-    } catch { continue; }
+    // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（同文件 runProcessAliveSync 下方的迁移）。
+    // ⛔ 读不成 ⇒ null ⇒ continue（与迁移前 catch 同路），不折成空串。
+    const text = readProcCmdlineText(e, procDir);
+    if (text === null) continue;
+    const cmdline = text.trim();
     const taskId = workerTaskIdFromCmdline(cmdline);
     if (!taskId) continue;
     const repoRoot = workerRepoRootFromCmdline(cmdline);
@@ -2562,13 +2564,14 @@ export function runProcessAliveSync(runId: string): boolean | null {
   try {
     const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
     for (const pid of procs) {
-      try {
-        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
-        readable++;
-        if (cmd.includes(needle)) return true;
-      } catch {
-        // pid exited mid-scan — not a match
-      }
+      // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（本文件原有第二份手搓副本 —
+      // gap-judgment-rewrites-route-through-proc-identity-leaf）。用 Text 形而非 argv 形是刻意的：
+      // 本函数比的是【空格 join 后的整串】，且「读到了但空」与「读不成」在这里都不命中、都计入
+      // readable —— Text 形对两者分别给出 "" / null，落到同一个 continue-后-else 分支上，与迁移前逐字一致。
+      const cmd = readProcCmdlineText(pid);
+      if (cmd === null) continue; // pid exited mid-scan — not a match
+      readable++;
+      if (cmd.includes(needle)) return true;
     }
   } catch {
     return null; // /proc unavailable (non-Linux / restricted) — unknown
