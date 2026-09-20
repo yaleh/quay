@@ -28,6 +28,7 @@ goal_ac: AC-314
 - [x] AC5（自举，生产载体，硬规则 4 推论三）在一个**没有预装 quay 的干净环境**（新用户目录 + 只有 npm-pack 产物/插件 cache）里，从 `/quay:init` skill 的真实入口跑一遍，六文件面齐全（贴运行输出）；关掉 fixture 后仍成立。
 - [x] AC6（文案不成假话）`plugin/skills/init/SKILL.md:16、:46` 关于「逻辑在 quay-init.sh」「Not yet wired」的表述按落地后事实改写；`git diff` 可见。
 - [x] AC7（闭包棘轮与回归面）`plugin/test/quay-init-closure-ratchet.test.mjs` 与 `quay-init-laydown-closure.test.mjs` 全绿（改 `quay-init.sh` 会令闭包棘轮 stale，需按既有 re-anchor 流程重锚并写明）；`scripts/test.sh --for-task gap-arch-quay-init-sh-python-heredocs-to-native` 全绿。
+- [x] AC8（本改动的真实副作用：全量 suite 回归面）本改动第一次让安装路径**读出 `plugin/` 之外**（步骤逻辑在 `packages/quay/src/init.ts`），于是 `install-config-driven-e2e.test.mjs` A1 的「冻结插件副本」不再完备，全量 suite 唯一红点即此。fixture 补齐它真正要读的两份输入（Core src + `yaml`）并在**同一棵树**上取假（去掉那行 A1 必红、复现原报错；加回绿）。
 
 ## DoD
 
@@ -125,6 +126,36 @@ totals.embeddedInterpreterLines = 9183   （verdict.ok=true，baselineRaised=[]�
 - **`bash scripts/test.sh --for-task gap-arch-quay-init-sh-python-heredocs-to-native --allow-thin`：rc=0，`tests 175 / pass 175 / fail 0`**，全部 scoped 静态检查 PASS（含 `PASS — embeddedInterpreterLines=9183 ≤ 9183, duplicateCopies=0 ≤ 0`）。
 - **一个环境陷阱（写给下一个跑者）**：若在本 worktree 里跑过 `build-plugin-dist.mjs`/`package.sh`，会生成 gitignored 的 `plugin/scripts/dist/*.js`，而 `worktree-namespace-literal-check`（26 处 `"quay-worktrees"`，25 处在产物里）与 `task-file-bypass-check`（5 处 NEW）会因此变红——**这不是实现缺陷**（主检出一模一样地红）。干净 worktree 本就没有这个目录；`scripts/test.sh` 的 `build_dist_once` 也不建它。删掉即绿。
 
+### AC8 — 全量 suite 回归：本改动打红了一个既有测试（fixture 输入的完备性）
+
+**现象**：两次 fan-in 全量 suite 的**唯一**红点都是
+`packages/quay/test/install-config-driven-e2e.test.mjs:338` 的 A1：
+`ws1 install failed: ERROR: quay-init needs the target project's test command but none could be detected in /tmp/install-e2e-…`。
+⚠️ 机械 delta-relatedness 判定它 **UNRELATED**（「不在本任务 Touches/diff、直接 import 无交集」）——**该判定是错的**：判的是「文件是否在 diff 里」，漏掉了「本改动经由**运行期**依赖（`quay-init-steps.ts` → `init.ts`）改变了这个测试所依赖的布局前提」。这正是硬规则 4b 说的：代理量（文件交集）与实际（运行期读取面）偏离。
+
+**根因（最小复现，不靠推断）**：A1 为隔离 mid-suite 源码变更，把插件冻结到一个私有副本，冻结方式是**一行** `fs.cpSync(PLUGIN_ROOT, frozenPlugin)`。本改动之后，quay-init.sh 的步骤不再在 shell 内：
+`quay-init-step` → `plugin/scripts/quay-init-steps.ts` → `packages/quay/src/init.ts`（经 `core-src-import.ts`，**静态字面量优先** = `<pluginRoot>/packages/quay/src/init.ts`）。
+只冻结 `plugin/` 的副本里**没有 Core 可读** ⇒ 每个 step 都以 `ERR_MODULE_NOT_FOUND` 死掉 ⇒ `has-npm-test` 恒等于「没有 scripts.test」⇒ 梯级全落空 ⇒ rc=2，在任何文件落盘之前退出。最小复现（与 suite 日志**逐字相同**的报错）：
+
+```
+$ cp -r <wt>/plugin /tmp/FP
+$ node --no-warnings --experimental-strip-types /tmp/FP/scripts/quay-init-steps.ts has-npm-test /tmp/pkg.json
+quay-init-steps: Cannot find module '/tmp/packages/quay/src/init.ts' imported from /tmp/FP/scripts/quay-init-steps.ts
+rc=1
+```
+
+**为什么责任在本改动而不在环境**：develop 的 `quay-init.sh` 读的每一个可执行件都在 `plugin/` **内部**（内联 python3 + vendored `plugin/vendor/quay/dist/quay.js`），所以「只冻结 plugin/」当时是**完备**的。本改动第一次让安装路径**读出 `plugin/` 之外**，冻结随之不再完备。⇒ **修的是冻结的完备性，不是判据的宽严**（⛔ 没有放松 A1 的任何断言）。
+
+**修法**：fixture 把安装真正要读的第二份源码一并冻进副本——`<frozenPlugin>/packages/quay/src/` + `<frozenPlugin>/node_modules/yaml`——保持**同一相对形状**，静态字面量直接命中（不走 fallback）。`yaml` 是 `init.ts` 唯一的裸 import 且自身无依赖。
+⛔ **为什么不**用「`<frozenRoot>/plugin` + `<frozenRoot>/packages/quay/src`」这种更像仓库树的形状：那会让 `$PLUGIN_ROOT/../packages/quay/src` **存在**——正是 quay-init `dist_stale` 探针盯的源目录——而 `cpSync` 不保留 mtime，被复制的源一旦比被复制的 bundle 新，就会让**两个并行安装同时**往冻结副本里跑 `sync-vendor.sh` 自动重建（fixture 注释里本来就写着要避免的那条路）。嵌在插件根内部时该路径仍不存在，探针仍不触发（`dist_stale` 返回 2 → `core_nosrc=1`），与改动前的行为一致。
+
+**取假（同一棵树，只切那一行）**：
+- 去掉 Core src 那一行 ⇒ A1 **红**，报错与 fan-in suite 日志逐字相同（`none could be detected`）。
+- 加回 ⇒ A1 **绿**（`node --test packages/quay/test/install-config-driven-e2e.test.mjs` → `tests 3 / pass 3 / fail 0`）。
+- 结论：这行是承重的，A1 没有变成恒真回声。
+
+**回归面复跑**：`plugin/test/quay-init*.test.mjs` 七个文件 **57/57 绿**（含 characterization 与两个闭包测试）。
+
 ## Touches
 
 - plugin/scripts/quay-init.sh
@@ -136,9 +167,10 @@ totals.embeddedInterpreterLines = 9183   （verdict.ok=true，baselineRaised=[]�
 - plugin/test/quay-init.test.mjs
 - plugin/test/quay-init-closure-ratchet.test.mjs
 - plugin/test/quay-init-laydown-closure.test.mjs
+- packages/quay/test/install-config-driven-e2e.test.mjs
 - plugin/sh-census-baseline.json
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-arch-quay-init-sh-python-heredocs-to-native.md
 
-（与原清单的差异：`packages/quay/src/cli/init.ts` **未改**（原清单的预判——落点全在 `init.ts` 的导出函数 + 新兄弟 CLI，没动公开 CLI 表面）；`plugin/test/quay-init-closure-ratchet.test.mjs`、`plugin/test/quay-init-laydown-closure.test.mjs` **未改**（保留在清单里因为它们是本改动的回归面、scoped 门应跑）；实际**新增**：`plugin/scripts/quay-init-steps.ts`、`plugin/test/quay-init-characterization.test.mjs`、`plugin/test/quay-init-loop.test.mjs`（「heredoc 扫描器不许空泛通过」的守卫按落地后事实改成目的形态：原先 `all.length >= 5` 的**计数**判据在 8 段 python heredoc 离场后把一次正确的移植判红——这是判据形态的错，不是实现的错）、`docs/analysis/quay-init-closure-ratchet.baseline.json`（机械重锚）、`plugin/scripts/capability-catalog-declarations.json`（新脚本的 6 行声明，否则 `capability-catalog --entry-surface` 会红 ⇒ package.sh 拒发）。）
+（与原清单的差异：`packages/quay/src/cli/init.ts` **未改**（原清单的预判——落点全在 `init.ts` 的导出函数 + 新兄弟 CLI，没动公开 CLI 表面）；`plugin/test/quay-init-closure-ratchet.test.mjs`、`plugin/test/quay-init-laydown-closure.test.mjs` **未改**（保留在清单里因为它们是本改动的回归面、scoped 门应跑）；实际**新增**：`plugin/scripts/quay-init-steps.ts`、`plugin/test/quay-init-characterization.test.mjs`、`plugin/test/quay-init-loop.test.mjs`（「heredoc 扫描器不许空泛通过」的守卫按落地后事实改成目的形态：原先 `all.length >= 5` 的**计数**判据在 8 段 python heredoc 离场后把一次正确的移植判红——这是判据形态的错，不是实现的错）、`docs/analysis/quay-init-closure-ratchet.baseline.json`（机械重锚）、`plugin/scripts/capability-catalog-declarations.json`（新脚本的 6 行声明，否则 `capability-catalog --entry-surface` 会红 ⇒ package.sh 拒发）、`packages/quay/test/install-config-driven-e2e.test.mjs`（AC8：冻结副本补齐 Core src + `yaml`，修掉本改动在**全量 suite** 里打红的 A1——该文件不在原 Touches 里，因为原清单只覆盖 scoped 面，漏了这条运行期依赖）。）
