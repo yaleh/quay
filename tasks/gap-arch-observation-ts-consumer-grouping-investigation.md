@@ -1,7 +1,7 @@
 ---
 id: gap-arch-observation-ts-consumer-grouping-investigation
 title: 架构调查：observation.ts（4671 行，扇入 105/扇出 112）消费者分组与可执行拆分方案——只调查，不动代码
-status: ready
+status: done
 labels:
   - gap
 parent: null
