@@ -33,17 +33,6 @@ depends_on:
 
 用真实 `package.sh` 产出的打包布局（不是 fixture 拼出来的目录）作 scriptsDir，对一个外部临时 git 项目运行证书闸的分类路径：`tasks/x.md` 判惰性、`src/app.ts` 判 non-inert，且两者均为已评估结论；拿掉打包 registry 后同命令回到 not-evaluated（对照）。
 
-## Acceptance Criteria
-
-- [x] `node --test plugin/test/select-static-checks-for-touches.test.mjs` exit 0，新增用例：① `<root>/plugin/scripts/runner-static-gate.ts` 存在 ⇒ 现有行为不变；② 仅 `<root>/scripts/runner-static-gate.ts` 存在 ⇒ 命中；③ 两者皆无 ⇒ exit 2 且 stderr 含原有 "registry file … not found" 文案（负控制：证明没有伪造判决）。
-- [x] `node --test plugin/test/fan-in-ff-merge.test.mjs` exit 0，新增用例：以打包布局（`scriptsDir=<pluginroot>/scripts/dist`，registry 在 `<pluginroot>/scripts/`）为 scriptsDir、外部项目为 root，对 `tasks/x.md` 判惰性、对 `src/app.ts` 判 non-inert（均为**已评估**，不是 not-evaluated）。
-- [x] 路径常量单一：`grep -rn "runner-static-gate.ts" packages/quay/src/fan-in/ff-merge.ts plugin/scripts/select-static-checks-for-touches.ts` 打印命中并确认只有一处常量定义，其余为引用/注释（前 3 条命中贴出）。
-- [x] `scripts/test.sh --for-task gap-classify-delta-registry-path-layout-aware` exit 0。
-
-## Definition of Done
-
-用真实 `package.sh` 产出的打包布局（不是 fixture 拼出来的目录）作 scriptsDir，对一个外部临时 git 项目运行证书闸的分类路径：`tasks/x.md` 判惰性、`src/app.ts` 判 non-inert，且两者均为已评估结论；拿掉打包 registry 后同命令回到 not-evaluated（对照）。
-
 ## Evidence
 
 AC1 — `node --test plugin/test/select-static-checks-for-touches.test.mjs` ⇒ **exit 0**（23 tests / 23 pass / 0 fail）。新用例 `AC1 — the registry lookup accepts the PACKAGED layout (<root>/scripts/…) as well as the dev layout` 三态：① 两种布局都在时 `<root>/plugin/scripts/…` **胜出**（断言 `--list` 里没有 fallback 的标记名）；② 只有 `<root>/scripts/runner-static-gate.ts` 时 exit 0，且 `--list` 打印的 checker 名是**只有那份拷贝才有**的 `shipped-fallback-probe`（出处证明，不是只看 exit 0）；③ 两者皆无 ⇒ exit 2、stdout 空、stderr 含原文案 `registry file (runner-static-gate.ts) not found`。
@@ -53,20 +42,24 @@ AC2 — `node --test plugin/test/fan-in-ff-merge.test.mjs` ⇒ **exit 0**（52 t
 **取假验证（负控制）**：把候选列表临时改回单条 `plugin/scripts/…` 后，上述两条新用例**双双变红**（`✖ AC1 — the registry lookup accepts…`、`✖ AC2 — flat packaged layout…`），恢复后复绿 —— 判据能取假，不是恒真。
 
 AC3 — `grep -rn "runner-static-gate.ts" packages/quay/src/fan-in/ff-merge.ts plugin/scripts/select-static-checks-for-touches.ts` 前 3 条命中：
+
 ```
 packages/quay/src/fan-in/ff-merge.ts:362: *  `<root>/plugin/scripts/runner-static-gate.ts` FIRST and `<root>/scripts/runner-static-gate.ts` as the
 plugin/scripts/select-static-checks-for-touches.ts:60:export const REGISTRY_BASENAME = "runner-static-gate.ts";
 plugin/scripts/select-static-checks-for-touches.ts:63: *  registry is the single source for the mapping (`runner-static-gate.ts`'s `run_static_checks()`
 ```
+
 过滤掉注释行后，**唯一一处代码级常量定义**是 `select-static-checks-for-touches.ts:60` 的 `REGISTRY_BASENAME`（`REGISTRY_REL_CANDIDATES` 与 `TEST_SH_REL` 都由它派生，无第二份字面量）；ff-merge.ts 里没有任何路径字面量，只有注释引用。
 
 AC4 — `bash scripts/test.sh --for-task gap-classify-delta-registry-path-layout-aware --allow-thin` ⇒ **exit 0**（160 tests / 160 pass / 0 fail；scoped 静态层全绿）。另跑全量层的 `kernel-sibling-resolution-check` ⇒ PASS（0 naive 解析），`registry-bare-filename-scan`（14/14）、`scoped-static-checks`（14/14）全绿。
 
 DoD — 真跑 `bash packages/quay/scripts/package.sh` 产出 `quay-0.10.0-dev.tgz`（artifact 的 dist-closure gate 自报 101 个被引用的 dist bundle 全部在包内），把 tarball 装进一个**外部**临时项目的 `node_modules/quay/`，以 `<install>/plugin/scripts/dist` 为 scriptsDir 驱动证书闸（`ff-merge.ts`）：
+
 - 实测布局：`plugin root = <install>/plugin`，registry = `<install>/plugin/scripts/runner-static-gate.ts` 存在，`<install>/plugin/plugin` **不存在**（正是打包拍平形）；
 - A) `tasks/x.md` ⇒ 判惰性、`exit 0`、develop 快进到 tip（落地）；
 - B) `src/app.ts` ⇒ `delta classified non-inert (src/app.ts)`、`exit 2`（**已评估**，不是 not-evaluated）；
 - C) 对照：`mv` 走打包 registry 后同一命令 ⇒ `NOT-EVALUATED`（stderr 逐候选根列出两条候选路径都被试过），`exit 2`。
+
 脚本与完整输出：`.quay/dod-packaged-layout.sh` / `.quay/dod-packaged-layout.evidence.txt`（未跟踪）。
 
 ## Touches
