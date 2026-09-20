@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 
 export const NAME = "manager-tick-readings";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
@@ -244,13 +245,15 @@ export function latestTickLog(project: Project, maxLen = 200, opts?: { mtimeEpoc
   return truncate(r.row, maxLen);
 }
 
+/** 读 + NUL 切分由 kernel leaf `readProcCmdline` 单点实现（本文件原有第二份手搓副本 —
+ *  gap-judgment-rewrites-route-through-proc-identity-leaf）；`procRoot` 是本调用点的测试缝，
+ *  原样透传给 leaf。⛔ 失败值仍是 []（本调用点的口径，与 orphan-session-check 的 null 相反，
+ *  迁移不得把两者折叠成同一个值）。
+ *  ⚠️ 本函数名刻意保留：instrument-failure-check 把 `readCmdline(pid, procRoot)[0] ?? ""` 当作
+ *  /proc 读取的【安全形】样本，改名会让那条负控制失去已知真样本。 */
 export function readCmdline(pid: number, procRoot = "/proc"): string[] {
-  try {
-    const buf = fs.readFileSync(path.join(procRoot, String(pid), "cmdline"));
-    return buf.toString("utf8").split("\0").filter(Boolean);
-  } catch {
-    return [];
-  }
+  const argv = readProcCmdline(pid, procRoot);
+  return argv === null ? [] : argv.filter(Boolean);
 }
 
 export interface GoalReading {

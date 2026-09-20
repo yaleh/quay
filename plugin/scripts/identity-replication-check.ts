@@ -239,23 +239,83 @@ export interface JudgmentRewrite {
   line: number;
 }
 
+/** 读取原语 —— 「这一行是在【读】」那一半。 */
+const READ_PRIM = /readFile|<|cat\s+|open\s*\(/;
+
+/** 比较/识别原语【词表】—— 与收窄前同一份（含 `argv[0]` 与 shell 的 `grep -q`）。
+ *  ⛔ 收窄改的是「原语必须作用在【读取结果】上」，**不是**「什么算原语」：砍词表会把判据砍空，
+ *  而判据砍空与「没有判定重写」同形（硬规则 2/3b）。 */
+const COMPARE_PRIM = /grep\s+-q|\.includes\(|\.indexOf\(|\.match\(|basename\(|\.split\(|\.startsWith\(|\.endsWith\(|argv\[0\]/;
+
+/** 可作用在【具名主体】/链式读表达式上的方法形比较原语。 */
+const COMPARE_METHOD = /\.(?:includes|indexOf|match|split|startsWith|endsWith)\(/;
+
+/** shell 比较记号：管道里的 `grep -q`、`case … in`、字符串/数值比较。 */
+const SHELL_CMP = /\bgrep\s+-q|\bcase\b[^\n]*\bin\b|=~|==|!=/;
+
+/** 链式绑定的最大间隔（字符）：读表达式之后多近接上比较原语才算「链在同一次读上」。 */
+const CHAIN_GAP = 40;
+/** 具名绑定的搜索窗口（字符）：主体被比较的位置离读多远还算同一次判定。 */
+const SUBJECT_WINDOW = 400;
+
+/** 同一行、读之前的最近一个 `IDENT =`（带或不带 const/let/var）：读结果的【具名主体】。
+ *  null ⇒ 这次读没有被绑定到任何名字 —— 正是纯快照收集器的形态（`arr.push(read…)`，结果被搬走、
+ *  比较发生在【别处】）。 */
+function readSubject(prefix: string): string | null {
+  const m =
+    /(?:^|[^\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[^=]*$/.exec(prefix) ??
+    /(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*=\s*[^=]*$/.exec(prefix);
+  return m ? m[1] : null;
+}
+
+/** 具名主体是否在窗口内【作为比较原语的操作数】被比较（= 「比较」作用在读取结果上）。 */
+function subjectCompared(src: string, from: number, subj: string, isShell: boolean): boolean {
+  const win = src.slice(from, from + SUBJECT_WINDOW);
+  const e = escapeRegex(subj);
+  if (new RegExp(`(?:^|[^\\w$.])${e}\\s*${COMPARE_METHOD.source}`).test(win)) return true;
+  if (new RegExp(`basename\\(\\s*${e}\\b`).test(win)) return true;
+  if (isShell) {
+    // 管道/`case` 把结果交给下一个进程或模式表而不是变量名，所以 shell 侧的绑定是
+    // 「$subj 与比较记号【同行】」—— 同一行即这一族的邻域约束。
+    const ref = new RegExp(`\\$\\{?${e}[\\}\\s"']`);
+    for (const line of win.split("\n")) if (ref.test(line) && SHELL_CMP.test(line)) return true;
+  }
+  return false;
+}
+
+/** 收窄的核心（AC4）：把「比较原语」绑到【这一次读的结果】上，三条绑法任一成立即算绑定：
+ *   A 链式 —— 读表达式之后（≤ CHAIN_GAP 字符）直接链上比较原语（`…readFileSync(p).split("\0")…`）；
+ *   B 具名 —— 同一行把读结果赋给 IDENT，且 IDENT 在窗口内是比较原语的操作数
+ *             （`IDENT.includes(…)` / `basename(IDENT)` / shell 的 `case "$IDENT" in …`）；
+ *   C 管道 ——（.sh）读的那一行本身含 shell 比较记号。
+ *  ⛔ 三条全不成立 ⇒ 这是【收集器】不是判定：`fast-mode-telemetry.ts:215` 的 `snapshotProcCmdlines`
+ *  把全部 cmdline 收进数组、比较发生在另一个函数里，收窄前只因同文件有一处 `.includes(` 就上榜。 */
+function boundToRead(src: string, at: number, prefix: string, suffix: string, isShell: boolean): boolean {
+  if (new RegExp(`^[^;\\n]{0,${CHAIN_GAP}}${COMPARE_METHOD.source}`).test(suffix)) return true;
+  if (isShell && SHELL_CMP.test(suffix)) return true;
+  const subj = readSubject(prefix);
+  return subj !== null && subjectCompared(src, at, subj, isShell);
+}
+
 /** 判定指纹 F: 一个代码文件【读 /proc/<pid>/cmdline】(外部事实 A) 且【对读到的内容做名字/特征比较】
- *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。 */
+ *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。
+ *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。 */
 export function findJudgmentRewrites(root: string, files: string[]): JudgmentRewrite[] {
   // 外部事实 A: 读 /proc/<pid>/cmdline — 必须出现在【读】上下文 (readFile* / shell `<` 重定向 / cat /
   // python open), 而非仅仅在描述字符串里提及该路径 (capability-catalog 的 QUESTION 描述不算实现)。
   // 两种实现形态都要抓 (文档 §2.8 方法(e) 的教训: 单位选错聚不出靶子): ①字面量 `/proc/${pid}/cmdline`;
-  // ②构造形 `path.join(procRoot/procDir, pid, "cmdline")` (manager-tick-readings.ts:364 / worker-driver.ts)。
+  // ②构造形 `path.join(procRoot/procDir, pid, "cmdline")`。
   const procPath = /\/proc\/[^'"\s\n]*\/cmdline/;
   const constructed = /(?:procRoot|procDir)[^'"\n]{0,60}["']cmdline["']/;
-  const readPrim = /readFile|<|cat\s+|open\s*\(/;
-  const compRe = /grep\s+-q|\.includes\(|\.indexOf\(|\.match\(|basename\(|\.split\(|\.startsWith\(|\.endsWith\(|argv\[0\]/;
   const out: JudgmentRewrite[] = [];
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const mask = maskFor(f)(src);
-    // 外部事实 B: 名字/特征比较原语 (识别进程的另一半)。
-    if (codeMatch(src, mask, compRe).length === 0) continue;
+    const isShell = f.endsWith(".sh");
+    // 廉价【必要】预筛: 整文件没有任何比较原语 ⇒ 不可能是「读 ∧ 比」。
+    // ⛔ 它【不再】是充分条件 —— 收窄前它独自决定判定，于是收集器只要同文件里恰好有一处
+    // `.includes(` 就被计成「识别进程」；决定权已移到 boundToRead（必须绑到这次读上）。
+    if (codeMatch(src, mask, COMPARE_PRIM).length === 0) continue;
     // 外部事实 A: 路径 (字面量或构造形) 落在代码位置, 且其【同行的前缀】含读原语。
     let found = false;
     let hitLine = 0;
@@ -264,8 +324,13 @@ export function findJudgmentRewrites(root: string, files: string[]): JudgmentRew
       let m: RegExpExecArray | null;
       while ((m = g.exec(src)) !== null) {
         if (mask[m.index] !== 0) continue;
-        const prefix = src.slice(src.lastIndexOf("\n", m.index) + 1, m.index);
-        if (readPrim.test(prefix)) { hitLine = lineOf(src, m.index); found = true; return; }
+        const lineStart = src.lastIndexOf("\n", m.index) + 1;
+        let lineEnd = src.indexOf("\n", m.index);
+        if (lineEnd === -1) lineEnd = src.length;
+        const prefix = src.slice(lineStart, m.index);
+        if (!READ_PRIM.test(prefix)) continue;
+        if (!boundToRead(src, m.index, prefix, src.slice(m.index, lineEnd), isShell)) continue;
+        hitLine = lineOf(src, m.index); found = true; return;
       }
     };
     scan(procPath);

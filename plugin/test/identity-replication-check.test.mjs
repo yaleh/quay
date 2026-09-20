@@ -105,6 +105,71 @@ test("findJudgmentRewrites — 读 /proc/<pid>/cmdline ∧ 比较名字 = 判定
   assert.equal(found[0].file, "plugin/scripts/a.ts");
 });
 
+// ── 收窄: 「比」必须绑在【这一次读】上 (gap-judgment-rewrites-route-through-proc-identity-leaf) ─────
+// 立案缺陷: 外部事实 B 曾是【文件级】判定 —— 整文件出现任一个比较原语即算「识别进程」。于是纯快照收集器
+// (把全部 cmdline 收进数组、比较发生在【另一个函数】里) 只要同文件恰好有一处 `.includes(` 就上榜
+// (现场读数: plugin/scripts/fast-mode-telemetry.ts:215 —— 本轮修前它确实在列, 修后出列)。
+// 收窄把「比较原语必须作用在【这次读的结果】上」定为判据, 三条绑法: 链式 / 具名 / shell 管道。
+// 两个方向都要钉住 —— 只证明「少了」而不证明「没砍空」的收窄会把判据关掉 (硬规则 2 的零计数半边):
+//   · col-collector 必须【出列】(文件里确有比较原语, 只是不在这次读上);
+//   · hit-* 三条绑法各自的【已知真样本】必须【仍在列】。
+
+/** {relPath: content} —— 收窄的双向 fixture, 每条只说一件事。 */
+function narrowingFixtures() {
+  return {
+    // 负控制 (收窄前会误报的那一个): 收集全部 cmdline 进数组, 比较在另一个函数里。
+    "plugin/scripts/col-collector.ts":
+      "export function snapAll() {\n" +
+      "  const out = [];\n" +
+      "  for (const pid of pids()) out.push(fs.readFileSync(`/proc/${pid}/cmdline`, \"utf8\").replace(/\\0/g, \" \"));\n" +
+      "  return out;\n" +
+      "}\n" +
+      "export function alive(cmds, needle) { for (const c of cmds) if (c.includes(needle)) return true; return false; }\n",
+    // ② 具名绑定: 读结果赋给 IDENT, IDENT 是比较原语的操作数。
+    "plugin/scripts/hit-subject.ts":
+      "const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, \"utf8\");\nif (cmd.includes(\"claude\")) return true;\n",
+    // ③ 链式绑定: 读表达式之后【紧接着】链上比较原语 (无中间变量 ⇒ 具名绑法不成立, 只有链式能命中)。
+    "plugin/scripts/hit-chain.ts":
+      "export function argv0(pid) { return fs.readFileSync(`/proc/${pid}/cmdline`, \"utf8\").split(\"\\0\")[0] ?? \"\"; }\n",
+    // ④ shell 管道绑定: 同一条语句里读 + 比 (管道把结果交给下一个进程, 不经过变量)。
+    "plugin/scripts/hit-pipe.sh":
+      "#!/usr/bin/env bash\nif tr '\\0' ' ' < \"/proc/$pid/cmdline\" 2>/dev/null | grep -q claude; then echo 1; fi\n",
+    // ⑤ 负控制: 读【绑定了】主体, 但比较发生在【别的主体】上 ⇒ 仍不是「比这次读的结果」。
+    "plugin/scripts/col-other-subject.ts":
+      "const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, \"utf8\");\nreturn otherText.includes(needle);\n",
+  };
+}
+
+const NARROWING_FIXTURE_FILES = Object.keys(narrowingFixtures());
+
+test("findJudgmentRewrites — 收窄双向: 纯快照收集器出列 ∧ 三条绑法的真站点保留 (硬规则 2 干跑对照)", () => {
+  const dir = mktmp(narrowingFixtures());
+  const flagged = (rel) =>
+    findJudgmentRewrites(dir, [path.join(dir, rel)]).length > 0;
+
+  assert.equal(flagged("plugin/scripts/col-collector.ts"), false,
+    "a pure snapshot collector must NOT be reported: its comparison is in another function, not on this read");
+  assert.equal(flagged("plugin/scripts/col-other-subject.ts"), false,
+    "a read bound to a subject that is NOT the one compared is still not 'this read is compared'");
+
+  assert.equal(flagged("plugin/scripts/hit-subject.ts"), true,
+    "binding ② (subject) — the known-true sample must survive the narrowing");
+  assert.equal(flagged("plugin/scripts/hit-chain.ts"), true,
+    "binding ③ (chained) — a chain with no intermediate variable is only reachable through this prong");
+  assert.equal(flagged("plugin/scripts/hit-pipe.sh"), true,
+    "binding ④ (shell pipeline) — the .sh known-true sample must survive (the narrowing must not gut the judge)");
+
+  // 整组读数: 全部命中文件都在这三条绑法里, 一个不多一个不少 (既不空转也不误报)。
+  const found = findJudgmentRewrites(dir, NARROWING_FIXTURE_FILES.map((p) => path.join(dir, p)))
+    .map((r) => r.file)
+    .sort();
+  assert.deepEqual(found, [
+    "plugin/scripts/hit-chain.ts",
+    "plugin/scripts/hit-pipe.sh",
+    "plugin/scripts/hit-subject.ts",
+  ], `expected exactly the three bound fixtures, got ${JSON.stringify(found)}`);
+});
+
 test("findByteIdenticalPairs — 字节相同对计数 + 行数, 漂移副本不算", () => {
   const dir = mktmp({
     "plugin/scripts/foo.ts": "export const x = 1;\n",
