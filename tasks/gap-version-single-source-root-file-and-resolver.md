@@ -2,7 +2,7 @@
 id: gap-version-single-source-root-file-and-resolver
 title: 版本号唯一来源——根 VERSION（git 跟踪）+ resolve-version
   解析函数，version-consistency-check 改判据为「载体 == 解析结果」
-status: ready
+status: done
 labels:
   - gap
 parent: null
