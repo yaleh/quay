@@ -25,6 +25,20 @@ test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   assert.equal(pidAlive(deadPid()), false, "dead pid ⇒ not alive");
   assert.equal(pidAlive(process.pid), true, "self pid ⇒ alive");
+  // ── pidalive-eperm-opposite 的回归钉（routine `semantic-dedup-scan`，runId
+  //    `semantic-dedup-scan-1789889905875`）：driver 侧的探针必须把 EPERM 读成 ALIVE。
+  //    修前本文件 import 到的正是那份**唯一**把 EPERM 读成 DEAD 的副本（另外三份读成 ALIVE），
+  //    于是 driver-runtime 里两处「保护外来活进程」的函数（`rmCarrierUnlessForeignLive` /
+  //    `stopLegacyPair`）恰好被自己的探针反制。**在这里钉住，⛔ 不靠下一次扫描再发现。**
+  assert.equal(pidAlive(String(process.pid)), true, "pid 载体读出来是**文本** ⇒ 也要真去探，⛔ 不读成 DEAD");
+  // 非 root 主机上 `kill(1, 0)` 抛 EPERM（exists-but-not-ours）⇒ 这一支才是判别支。
+  let epermReachable = false;
+  try { process.kill(1, 0); } catch (err) { epermReachable = err?.code === "EPERM"; }
+  assert.equal(pidAlive(1), true, "EPERM / 成功都意味着「pid 1 存在」⇒ ALIVE，⛔ 不是 DEAD");
+  if (!epermReachable) {
+    // 硬规则 3b：宿主给不出 EPERM 时，上面那条断言只走成功支、**没有判别力** —— 明说，⛔ 不静默当通过。
+    t.diagnostic("pidAlive EPERM 支未被本宿主触发（kill(1,0) 未抛 EPERM，多半是以 root 跑）——上一条断言本次未起到判别作用");
+  }
   assert.equal(readPidFile(path.join(root, ".quay", "missing.pid")), "", "missing ⇒ empty");
   writePidFile(path.join(root, ".quay", "promotion-driver-supervisor.pid"), Number(deadPid()));
   const a = aliveness(root, "promotion");
