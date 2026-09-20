@@ -23,11 +23,11 @@ depends_on:
 
 ## AC
 
-- [ ] 修复前取数：对当前 `packages/quay/scripts/package.sh` 的真实产物，列出清单中「不可解析」的脚本名（应至少含 `worktree-process-reaper.ts`），贴出命令与输出（硬规则 12b：先查现状再修）；并对 v0.10.0 的产物做同一取数，贴出结果。
-- [ ] `node --test plugin/test/installed-layout-sibling-resolvability.test.mjs` exit 0：清单中每个脚本在打包布局下可解析；清单由 `ff-merge.ts` 导出，`grep -n "siblingScriptArgv(" packages/quay/src/fan-in/ff-merge.ts` 的调用点数量（贴出条数与前 3 条）等于清单长度（新增调用点而忘登记 ⇒ 用例红）。
-- [ ] 反例判据：把 `worktree-process-reaper` 从 `build-plugin-dist.mjs` 入口清单里临时删除，上述用例必须变红；还原后变绿（两次输出都贴出）。
-- [ ] 端到端：打包布局 + 临时外部项目上，证书闸对 flip 提交与对 `src/app.ts` 的 delta 均给出**已评估**结论（无 not-evaluated），reaper 步骤日志不含 "not resolvable"。
-- [ ] `scripts/test.sh --for-task gap-fan-in-installed-layout-sibling-script-resolvability-test-and-reaper-bundling` exit 0。
+- [x] 修复前取数：对当前 `packages/quay/scripts/package.sh` 的真实产物，列出清单中「不可解析」的脚本名（应至少含 `worktree-process-reaper.ts`），贴出命令与输出（硬规则 12b：先查现状再修）；并对 v0.10.0 的产物做同一取数，贴出结果。
+- [x] `node --test plugin/test/installed-layout-sibling-resolvability.test.mjs` exit 0：清单中每个脚本在打包布局下可解析；清单由 `ff-merge.ts` 导出，`grep -n "siblingScriptArgv(" packages/quay/src/fan-in/ff-merge.ts` 的调用点数量（贴出条数与前 3 条）等于清单长度（新增调用点而忘登记 ⇒ 用例红）。
+- [x] 反例判据：把 `worktree-process-reaper` 从 `build-plugin-dist.mjs` 入口清单里临时删除，上述用例必须变红；还原后变绿（两次输出都贴出）。
+- [x] 端到端：打包布局 + 临时外部项目上，证书闸对 flip 提交与对 `src/app.ts` 的 delta 均给出**已评估**结论（无 not-evaluated），reaper 步骤日志不含 "not resolvable"。
+- [x] `scripts/test.sh --for-task gap-fan-in-installed-layout-sibling-script-resolvability-test-and-reaper-bundling` exit 0。
 
 ## DoD
 
