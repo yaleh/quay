@@ -37,10 +37,34 @@ extra:
 
 ## AC
 
-- [ ] 4 个文件逐一对拍判据的两侧取自**同一个不可变 ref 集合**（快照或等价机制），打印实现位置与取值时机；`observation.ts` 保持零改动（除非能证明必须改）。
-- [ ] 负控制可区分（硬规则 4 推论三）：每个文件都留一个「关掉冻结」的注入缝隙（沿用 `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` 这一族命名，⛔ 不设第二个语义相同、名字不同的开关）；隔离 clone + churn 下关掉 ⇒ 红、打开 ⇒ 绿，两臂都是真实读数。
-- [ ] 判据不得退化：各文件原本的非空性/一致性断言修后仍能取假（至少给出一处「构造错位读数 ⇒ 报红」的真实读数），⛔ 不得用「只比交集」「重读一次生产函数」等方式削弱。
+- [x] 4 个文件逐一对拍判据的两侧取自**同一个不可变 ref 集合**（快照或等价机制），打印实现位置与取值时机；`observation.ts` 保持零改动（除非能证明必须改）。
+- [x] 负控制可区分（硬规则 4 推论三）：每个文件都留一个「关掉冻结」的注入缝隙（沿用 `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` 这一族命名，⛔ 不设第二个语义相同、名字不同的开关）；隔离 clone + churn 下关掉 ⇒ 红、打开 ⇒ 绿，两臂都是真实读数。
+- [x] 判据不得退化：各文件原本的非空性/一致性断言修后仍能取假（至少给出一处「构造错位读数 ⇒ 报红」的真实读数），⛔ 不得用「只比交集」「重读一次生产函数」等方式削弱。
 - [ ] `scripts/test.sh --for-task <本条>` exit 0，且**逐行核过**选中的测试确实包含这 4 个文件（不是只看 exit code —— 本仓库实测过「门绿在 0 个测试上」的形态）。
+
+## Evidence
+
+**AC1 — 实现位置与取值时机（运行时打印，非注释声称）**
+- 位置：`packages/quay/test/helpers/git-ref-window.mjs`。`snapshotRefWindow()`（一次性 `for-each-ref` ∪ `rev-parse HEAD`，⛔ 排除 `refs/notes/*` 以镜像生产 `GIT_HISTORY_REF_SCOPE`）→ `windowScopeArgs(refs)`（**oracle 侧** argv）/ `windowGitExec(refs)`（**数据层**：经 `observation.ts` 既有 `exec` 宿主读取缝隙）。4 个文件**共用这一个实现**——本条缺陷正是「各文件各自重新推导同一个 oracle」，第 5 份本地拷贝就是把缺陷复制到第 5 个载体。
+- 取值时机：每个对拍判据读前取一次。运行时逐条打印：
+  `[ref-window] attempt 1/20: FROZEN at 2026-09-20T08:58:49.592Z (181 ref object names); packages/quay/test/helpers/git-ref-window.mjs snapshotRefWindow() → windowScopeArgs()/windowGitExec()`
+- 干跑等价（本仓库实测，181 个 ref 对象名，含 **18 个 annotated tag**；⛔ 不靠推断）：`git log --exclude=refs/notes/* --all --topo-order -n {5,50,200,500}` 与 `git log <frozen> …` 输出 **md5 相同**；`--graph` 同；`-1 --pretty=%H` 同（annotated tag 被 `git log` 与 `--all` 同样 peel）。
+- `observation.ts` 零改动：`git diff --stat develop...HEAD -- packages/quay/src/observation.ts` 为空。
+
+**AC2 — 负控制（隔离 `git clone --shared` + 每 250ms 推进 scratch ref `_churn`）**
+- 单一开关：helper 内一处 `LIVE_REFS = process.env.QUAY_TEST_GIT_GRAPH_LIVE_REFS === "1"`；4 个文件不另设开关。
+- **关掉冻结（`QUAY_TEST_GIT_GRAPH_LIVE_REFS=1`）×3 ⇒ RED**：fail 2 / 6 / 5（exit 1）。真实签名：`column mismatch = 0 (got 1)`、`the label set matches %D-nonempty commits exactly (mismatch 2)`、`rows[0] (smallest y) is the newest --all commit`、`every rendered label matches git %D exactly (mislabel 1)`、`the recycling allocation matches git (precondition)`。
+- **打开冻结 ×3 ⇒ GREEN**：17/17 pass ×3（exit 0）；stability gate 实际触发 retry 0 / 4 / 6 次（证明闸门在跑，不是空转）。
+- 两臂同 clone、同 churn、同 4 个文件，**只差冻结**。
+
+**AC3 — 判据不退化（构造错位读数 ⇒ 报红，且 refs 稳定）**
+- clone 内两个 shim（改 oracle，不改数据层）：列号 oracle 全体 +1 ⇒ `column mismatch = 0 (got 500)`；`%D` oracle 每条加一个伪 label ⇒ `mislabel 500`。两者 RED，且都在 **attempt 1 直接上抛**（`withStableWindow` 不吞稳定 refs 下的真失败）。
+- 各文件原有负控制（adopt AC2 no-recycle 列分配、ref-partition AC2 塌成一列、stride AC3 还原浮动 chip）在 17/17 绿中同时通过 = 它们各自观察到 >0。
+- ⛔ 未使用「只比交集」「重读一次生产函数」等削弱手法；两侧仍是两次独立 git 读，只是起点列表不可变。
+
+**⚠️ 实测发现的第二个机制（超出本条 Finding 的诊断，已一并修掉）**：**冻结 ref「集合」并不冻结 `%D`**。同一份不可变对象名列表下，两次相邻 `git log … %D` 读数**会不同**（实测：`b644776…_churn` → `b644776…`）——churn ref 前进到冻结列表之外的提交，原来带 decoration 的提交就失去了它。`%D` 由 git 从**实时 ref 表**渲染，而 3 个文件判的正是 decoration 集合 ⇒ 残留同类假失败。`%D` 无法在不让一侧沦为回声（硬规则 4）的前提下钉死，故加 `withStableWindow()`：整个判据在 ref 映射变动时重取（refs 稳定时的失败**立即上抛**；尝试耗尽则 fail-closed 报错，⛔ 不静默通过）。
+
+**DoD 佐证**：`observation.ts` 零改动；各判据负控制仍取红；生产读路径与判据强度均未下降。
 
 ## DoD
 
@@ -52,4 +76,5 @@ git-graph 测试族里不再存在「实时数据层读 × 实时窗口 oracle�
 - packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs（`:138`→`:147` 的 `%D` oracle 冻结 ref 窗口）
 - packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（AC3 `:55`→`:62` 的 `%D` oracle 冻结 ref 窗口）
 - packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（AC3 `:57`→`:60` 的 `--graph` 列号 oracle 冻结 ref 窗口）
+- packages/quay/test/helpers/git-ref-window.mjs（新增：4 个文件共用的冻结 ref 窗口唯一实现 + `withStableWindow()` 稳定性闸）
 - tasks/gap-git-graph-live-ref-oracle-siblings-unfrozen.md（自身）

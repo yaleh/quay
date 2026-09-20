@@ -3,7 +3,7 @@ id: gap-classify-delta-registry-path-layout-aware
 title: --classify-delta 的 registry
   查找认打包安装布局（<插件根>/scripts/runner-static-gate.ts），装好的 quay 在外部项目里对非 flip 的 delta
   也能出结论
-status: todo
+status: ready
 labels:
   - gap
   - defect
