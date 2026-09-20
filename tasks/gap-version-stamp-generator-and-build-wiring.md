@@ -35,9 +35,45 @@ depends_on:
 `experiments/quay-perpetual-stream/scripts/{task-schema,task-schema-check}.{ts,sh}` 与 `gate-script-lib.sh` 现是指回 `plugin/scripts/` 的符号链接，section 3 的 `cp` 因此是「把文件拷到自己身上」⇒ `cp: … are the same file` exit 1 ⇒ `set -e` 中止整个脚本。实测（2026-09-20，新建 worktree）：full（无参）路径死在 section 3，**永远到不了后面的步骤**——包括本任务新增的盖章步。该中止是既有的、且不可见：唯一常驻调用方 postinstall 的 `|| true` 把它吞了。section 4 早有同款 `-L` 守卫，这里只是补齐该文件自己的既有做法。不修则本任务的接线是死代码，release 构建会静默发布带 `-dev` 的产物。
 
 **C. sh-census 只降不升棘轮逼出的压紧（改法不是调基线）。**
-`plugin/sh-census-check.ts` 对 `embeddedInterpreterLines` 设只降不升棘轮（基线 `plugin/sh-census-baseline.json`）；两个被改的 .sh 都含内嵌解释器 ⇒ 其**全部有效行**计入读数。初版接线实测 +28（9533 > 9505）直接红。改法：section 3 合并拷贝（-2 行）、section 7 的 else 分支收成 1 行、publish 侧挂到既有 `--rewrite` 行（+0）。实测 delta：`sync-vendor.sh` -1、`publish-dist-branch.sh` 0、`package.sh` +4（该文件无内嵌解释器，不计入）。⛔ 未动基线、未进例外清单。
+`plugin/sh-census-check.ts` 对 `embeddedInterpreterLines` 设只降不升棘轮（基线 `plugin/sh-census-baseline.json`）；两个被改的 .sh 都含内嵌解释器 ⇒ 其**全部有效行**计入读数。初版接线实测 +28（9533 > 9505）直接红。改法：section 3 合并拷贝（-2 行）、section 7 的 else 分支收成 1 行、publish 侧挂到既有 `--rewrite` 行（+0）。实测 delta：`sync-vendor.sh` -1、`publish-dist-branch.sh` 0、`package.sh` +4（该文件无内嵌解释器，不计入）。⛔ 当轮未动基线、未进例外清单；**收尾轮 ③ 把基线下锚了**（9505→9504，见「收尾轮」③）——「没动」不是声明而是当时的真实读数（9505），而 AC6 要求基线 == live，使下锚成为必然。
 
 **D. 一处必须说清的副作用。** build 模式的盖章落在 `plugin/` 上，所以在 `release/*` 分支上它会写**被跟踪的文件**（`plugin/VERSION` 等 5 个）。这是刻意的、也是 AC4 要求的读数：release 分支是瞬态构建面，这些改动不被提交（tag 打在 `-dev` 提交上，发布版本属于产物）；develop/author 上 build == tracked，不写任何文件、`git status` 干净。
+
+### 收尾轮（fan-in suite 首次全量跑红：4 条 red 的归属、实测与修法）
+
+本分支第一次进全量 suite（日志 `fan-in-suite-gap-version-stamp-generator-and-build-wiring~wk-prod-anchor~1789880972558-20f6eb.log`）报 4 个文件红。逐条查证后**没有一条**被当作「suite 环境脏」绕过；其中 3 条由本任务的接线直接造成，1 条是本任务 delta 之外的既有判据错设。
+
+**① `packages/quay/test/npm-pack-e2e.test.mjs`（本任务造成）。**
+`package.sh` 的新版本门是**仓库根相对**的（`REPO_ROOT/scripts/stamp-version.mjs` 与 `REPO_ROOT/VERSION`），而该测试的临时副本只镜像了 `<base>/packages/quay` + `<base>/plugin`，于是**真实的** `package.sh` fail-closed：
+`ERROR: the version gate is missing: /tmp/quay-m120-e2e-*/scripts/stamp-version.mjs`。
+**修法**：新增 `copyVersionGateInputs(base)`——把门的输入（`VERSION`、`scripts/stamp-version.{mjs,ts}` + `version-carriers.ts` + `resolve-version.ts`，以及**从共享载体表 `VERSION_CARRIERS` 推导**的每个载体文件）复制进副本，并在 `<base>/node_modules` 补一条符号链接（runner 的 `import('esbuild')` 从它自己的位置向上找）。
+⛔ 清单从**表**推导而不是在这里手抄 12 条路径：将来新增载体自动被带上，副本不会落后于它必须满足的门。
+**读数**：`ℹ tests 11  ℹ pass 11  ℹ fail 0`，exit 0。
+
+**② `plugin/test/publish-dist-branch-closure-gate.test.mjs` AC2（本任务造成）。**
+publish 脚本新增的盖章步是**真实调用**（`<repo>/scripts/stamp-version.mjs --mode build`），而 stub 仓库缺这些输入 ⇒ `Cannot find module '/tmp/ac263-stub-*/scripts/stamp-version.mjs'`——**绿基线都跑不到被测的那个闭包门**。
+**修法**：`addVersionStampInputs(root)`——生成器的入口与源码模块按该文件既有做法**拷真实文件**（fixture 替身会停止测试真正 shipped 的东西），而 5 个 build 载体写**锚点正确的合成文件**（与 stub 里合成 `alpha-tool`/`SKILL.md` 同一纪律：真实 `README.md`/`marketplace.json` 拷进来会引用本 stub 不携带的 `dist/*.js`，闭包门就会去判副本的散文而不是 stub 的闭包）。
+**读数**：`ℹ tests 3  ℹ pass 3  ℹ fail 0`，exit 0。
+
+**③ `plugin/test/sh-census-check.test.mjs` AC6（本任务造成的必然结果）。**
+live `embeddedInterpreterLines=9504` vs 提交基线 `9505`。检查器本体（只降不升棘轮）是**绿**的，但 AC6 要求**基线 == live**——否则将来 +1 的回归可以停在绿。
+**修法**：下锚 9505→9504，并按该文件自身惯例补 `_reanchorLog` 条目（含 `from`/`to`/`why`/逐条归因）。逐条归因用检查器**自己的**原语（`countCodeLines` + `extractEmbeddedInterpreters`）在 `git show develop:<f>` vs `HEAD:<f>` 上实测：
+`sync-vendor.sh` 325→324（内嵌 ⇒ **在轴内**，-1）、`publish-dist-branch.sh` 87→87（内嵌 ⇒ 在轴内，0）、`package.sh` 75→79（**无**内嵌解释器 ⇒ 轴外）、`plugin/scripts/checker-mutation-cases/version-consistency-check.sh` 111→125（有内嵌，但该路径带 `FIXTURE_MARKER` 被普查整体排除——它不在 150 个 `files[]` 里 ⇒ 轴外）。
+⛔ 后两条的 +4 / +14 被**点名**而不是被折叠：读本任务 diff 的人必须能把每一行都归位，只有 -1 在轴内。
+**读数**：`ℹ tests 20  ℹ pass 20  ℹ fail 0`，exit 0。
+
+**④ `experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs`（不是本任务 delta 造成）。**
+失败的是 `task-status-drift-check.ts` 的 symlink↔real stdout 相等臂。**三步实测**：
+(a) 本分支上 `plugin/scripts/task-status-drift-check.ts` 与该测试文件的 diff 均为**空**；
+(b) 同一脚本连续两次调用（安静仓库）**逐字节相同**，加 10 路 CPU 负载后仍相同 ⇒ 排除负载敏感；
+(c) 相隔数分钟的两次调用**只差一行**——`stranded: task/gap-ac271-… (has-commits, 4 commit(s) ahead, …)` 变成了 `stranded: task/gap-ac272-…`（前者已被 loop 的 fan-in 合并），而读任务库的 67 条 closed-without-work + 9 条 reverse-drift **逐字节相同**。
+⇒ 差的是**活仓库的分支状态**，而该测试对一个「报告型工具的活状态输出」断言了逐字节相等。
+**修法**：新增 `redactLiveBranchState()`，只替换**那一段**（唯一 header `^task-status-drift: N STRANDED branch(es)` + 唯一 trailer `^  → human review: merge or adjudicate`），与既有 `redactClockFields` 同一纪律；并补单测钉住**范围**（段内差异被吞、段外差异 / 空输出 / 缺 trailer 都不被吞）。
+对**真实数据**取证：把那两份**真的不同**的捕获输出喂给该函数 ⇒ 原始 `false`、redact 后 `true`，且 stranded 行残留 0、67 条 closed-without-work 与 9 条 reverse-drift 原样保留。
+**读数**：`ℹ tests 46  ℹ pass 46  ℹ fail 0`，exit 0。
+⛔ 没有做「重试到两次相同」这类掩盖——那会把真差异一起吞掉，正是本文件存在的理由。
+
+**对 6 条 AC 的影响**：①②③ 改的是「测试的 fixture 前提 / 棘轮锚点」，④ 改的是判据本身对「报告型工具 + 活仓库」的错设；AC1–AC6 的读数与判据对象均未变，故本轮**不改任何 AC 勾选**（六条仍全部为真）。
 
 ## AC
 
@@ -90,3 +126,7 @@ depends_on:
 - plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - .quay/ac-stamp-version-evidence.txt
 - tasks/gap-version-stamp-generator-and-build-wiring.md
+- plugin/sh-census-baseline.json
+- packages/quay/test/npm-pack-e2e.test.mjs
+- plugin/test/publish-dist-branch-closure-gate.test.mjs
+- experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs
