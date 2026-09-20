@@ -55,9 +55,48 @@ import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
  *  FULL set only, and scoped conservatively defers it (never silently drops it from the full gate). */
 export const DEFAULT_TIER = "full";
 const TIERS = new Set(["always", "change", "full"]);
-/** The single source for the checker registry: plugin/scripts/runner-static-gate.ts's
- *  `run_static_checks()` body (extracted from scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
-export const TEST_SH_REL = "plugin/scripts/runner-static-gate.ts";
+/** The registry's FILE NAME — the ONE path literal in the repo (see REGISTRY_REL_CANDIDATES); every
+ *  layout's location is derived from it, so a second copy can never drift from it. */
+export const REGISTRY_BASENAME = "runner-static-gate.ts";
+
+/** Where the checker registry is looked up, relative to a candidate root, in PRIORITY ORDER. The
+ *  registry is the single source for the mapping (`runner-static-gate.ts`'s `run_static_checks()`
+ *  body, extracted from scripts/test.sh, gap-ac128-hub-split-harness-concerns) and it exists in the
+ *  tree under TWO layouts, because the SHIPPED artifact does not preserve the source tree's shape:
+ *
+ *    1. `plugin/scripts/runner-static-gate.ts` — the dev/source checkout and anything carrying a
+ *       `plugin/` layer (`<repo>/plugin/scripts/…`, the main-checkout merge root). Tried FIRST, so the
+ *       source tree's own registry always wins where it exists (behavior unchanged).
+ *    2. `scripts/runner-static-gate.ts` — the PACKAGED artifact: `package.sh` stages `plugin/` INTO
+ *       `packages/quay/plugin/` and `npm pack` ships that dir as the package's `plugin/`, so the
+ *       installed plugin ROOT carries `scripts/` DIRECTLY — ⛔ no nested `plugin/` layer underneath.
+ *       Before this fallback the lookup joined the single relative literal above and exited 2 on every
+ *       install (`<pluginroot>/plugin/scripts/…` never exists there) ⇒ `--classify-delta` could not
+ *       judge a non-empty delta in ANY third-party project ⇒ the fan-in suite-certificate gate refused
+ *       every non-flip delta ⇒ full suites burned (gap-classify-delta-registry-path-layout-aware).
+ *
+ *  ⛔ Still three-state, not boolean (hard rule 3b): "not found under ANY layout" stays exit 2 with the
+ *  original wording — an external project that carries no registry of its own AND is not sitting under
+ *  a packaged plugin root is `not-evaluated`, never an invented "empty registry ⇒ inert" verdict. */
+export const REGISTRY_REL_CANDIDATES = [
+  path.posix.join("plugin", "scripts", REGISTRY_BASENAME),
+  path.posix.join("scripts", REGISTRY_BASENAME),
+];
+
+/** The PRIMARY layout's relative path — kept as the module's historical export (`ff-merge.ts` and the
+ *  scanners refer to it by this name). It is a READ of the candidate list, ⛔ not a second literal. */
+export const TEST_SH_REL = REGISTRY_REL_CANDIDATES[0];
+
+/** The FIRST candidate root that actually carries the registry, or null when none does. Pure lookup:
+ *  the caller decides what an absent registry MEANS (here: exit 2), so a miss can never be mistaken
+ *  for a verdict. */
+export function resolveRegistryPath(root) {
+  for (const rel of REGISTRY_REL_CANDIDATES) {
+    const abs = path.join(root, rel);
+    if (fs.existsSync(abs)) return abs;
+  }
+  return null;
+}
 
 /**
  * The capability-catalog AC1c ENTRY-POINT gate (gap-eighty-two-shipped-checks-and-none-says-what-it-
@@ -767,9 +806,10 @@ export function main(argv) {
     return 0;
   }
 
-  const testSh = path.join(root, TEST_SH_REL);
-  if (!fs.existsSync(testSh)) {
-    process.stderr.write(`select-static-checks-for-touches: registry file (runner-static-gate.ts) not found at ${testSh}\n`);
+  const testSh = resolveRegistryPath(root);
+  if (!testSh) {
+    const looked = REGISTRY_REL_CANDIDATES.map((rel) => path.join(root, rel)).join(" or ");
+    process.stderr.write(`select-static-checks-for-touches: registry file (${REGISTRY_BASENAME}) not found at ${looked}\n`);
     return 2;
   }
   const registry = parseStaticCheckRegistry(fs.readFileSync(testSh, "utf8"));

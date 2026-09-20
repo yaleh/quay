@@ -483,6 +483,63 @@ t("AC4b — a NEW file under plugin/scripts/checker-mutation-cases/ is a FIXTURE
   }
 });
 
+// ── AC1 (gap-classify-delta-registry-path-layout-aware): the registry lookup is LAYOUT-AWARE ─────────
+// `package.sh` stages the source `plugin/` INTO `packages/quay/plugin/` and `npm pack` ships that dir as
+// the package's `plugin/`, so the INSTALLED plugin root carries `scripts/` DIRECTLY — there is no nested
+// `plugin/` layer under it. The lookup used to join the single rel literal
+// `plugin/scripts/runner-static-gate.ts`, so `<pluginroot>/plugin/scripts/…` never existed in any
+// install ⇒ exit 2 ⇒ `--classify-delta` could not judge a non-empty delta in ANY third-party project ⇒
+// the fan-in suite-certificate gate refused every non-flip delta and burned full suites. The fix is a
+// candidate LIST (`REGISTRY_REL_CANDIDATES`): the dev layout FIRST (so the source tree's own registry
+// still wins and existing behavior is unchanged), the packaged layout as the fallback.
+//
+// Single variable across the three cases: WHICH layout carries the registry. Case ③ is the negative
+// control — without it, "exit 0" could be produced by a fabricated verdict rather than by a registry
+// file, and case ② proves PROVENANCE (the registry actually READ is the one at `<root>/scripts/`) by
+// matching a marker only that copy carries, not merely by exit code.
+
+/** The dev fixture registry with a MARKER checker name (`task-contract-check` → `shipped-fallback-probe`)
+ *  so `--list` output identifies WHICH copy was read, not merely that a registry was. */
+const FALLBACK_REGISTRY = MINI_TEST_SH.replace(/task-contract-check/g, "shipped-fallback-probe");
+
+/** Write a registry at `<root>/scripts/runner-static-gate.ts` — the PACKAGED layout (no `plugin/` layer). */
+function writePackagedRegistry(root, content) {
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "runner-static-gate.ts"), content);
+}
+
+t("AC1 — the registry lookup accepts the PACKAGED layout (<root>/scripts/…) as well as the dev layout", () => {
+  // ① BOTH layouts carry a registry ⇒ the `<root>/plugin/scripts/…` copy WINS (priority order ⇒ the
+  //    dev/source tree's own registry is never shadowed by the shipped fallback).
+  const both = makeWorkspace({});
+  writeTestSh(both);
+  writePackagedRegistry(both, FALLBACK_REGISTRY);
+  const rBoth = runSelCli(both, "--list");
+  assert.equal(rBoth.status, 0, `the dev layout must still resolve: ${rBoth.stderr}`);
+  assert.match(rBoth.stdout, /test-framework-policy-check/, "① the dev registry was read");
+  assert.ok(!/shipped-fallback-probe/.test(rBoth.stdout),
+    `⛔ priority: <root>/plugin/scripts/… must win when both layouts carry a registry:\n${rBoth.stdout}`);
+
+  // ② ONLY `<root>/scripts/runner-static-gate.ts` — the shipped layout this defect is about.
+  const pkg = makeWorkspace({});
+  writePackagedRegistry(pkg, FALLBACK_REGISTRY);
+  assert.ok(!fs.existsSync(path.join(pkg, "plugin")), "fixture premise: the packaged layout has NO `plugin/` layer");
+  const rPkg = runSelCli(pkg, "--list");
+  assert.equal(rPkg.status, 0, `the packaged layout must resolve (pre-fix this was exit 2): ${rPkg.stderr}`);
+  assert.match(rPkg.stdout, /shipped-fallback-probe/,
+    `⛔ provenance: the registry READ must be the one at <root>/scripts/ (exit 0 alone could be faked):\n${rPkg.stdout}`);
+
+  // ③ NEITHER layout carries a registry ⇒ exit 2, the ORIGINAL wording, and NO registry-derived output
+  //    (hard rule 3b: a lookup that cannot read its input must not return a verdict-shaped value).
+  const none = makeWorkspace({});
+  const rNone = runSelCli(none, "--list");
+  assert.equal(rNone.status, 2, "no registry under any layout must stay fail-closed (exit 2), never 0");
+  assert.equal(rNone.stdout.trim(), "", "⛔ an unresolvable registry must not emit a registry-derived listing");
+  // The wording is a CONTRACT: the fan-in gate's own assertions match this exact substring.
+  assert.match(rNone.stderr, /registry file \(runner-static-gate\.ts\) not found/,
+    `the pre-existing wording must survive (ff-merge's classifyDeltaVerdict assertions match on it): ${rNone.stderr}`);
+});
+
 // ── gap-checker-mutation-check-has-no-change-tier-companion ────────────────────────────────────────
 // The full-tier `checker-mutation-check` (the whole-store meta-check on the checkers THEMSELVES) is
 // DEFERRED out of scoped runs, so a task that edits a checker and breaks its mutation case shipped
