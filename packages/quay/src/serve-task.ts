@@ -19,7 +19,7 @@ import {
 // rows interpolate data (see ROW 13 ①).
 import { docTaskLabelsFor, fillLabel } from "./serve-i18n.ts";
 import {
-  readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
+  readFanInAttempts, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
   readTaskAtRefMeta, readTaskCommitTimeAtRef,
 } from "./observation.ts";
@@ -605,7 +605,13 @@ export function taskRunsBlock(
 ): string {
   const { liveWorkers = null, sessionHome, lang = DEFAULT_LANG } = opts;
   const L = docTaskLabelsFor(lang);
-  const records = readWorkerOutcomeRecords(root).filter((r) => r.task === taskId);
+  // gap-needs-human-raw-fan-in-reason-observation-surface: read through the ONE fan-in attempt
+  // reader (observation.readFanInAttempts) — the same call the /needs-human page, `quay driver log`
+  // and the MCP `driver_log` tool make. ⛔ Not a second reader: the attempt view is a SUPERSET of the
+  // outcome record, so this block keeps every field it rendered before (`r.mechanical_fan_in` rides
+  // along for `renderFanInCell`) while sharing one parse with the other two surfaces.
+  const attempts = readFanInAttempts(root, { taskId });
+  const records = attempts.attempts;
 
   // Scope the host-global /proc scan to THIS workspace (gap-observation-hardcodes-quay-worktrees-
   // ignoring-config-worktree-root, sibling site of observation.readLive's scan): `workerDriverActive`
@@ -614,9 +620,17 @@ export function taskRunsBlock(
   const inFlight = live.filter((w) => w && w.taskId === taskId);
 
   if (records.length === 0 && inFlight.length === 0) {
+    // ⚠️ 「读不出」 must never render as 「无记录」 (硬规则 3b): a carrier that EXISTS but could not be
+    // read answers with its own row carrying the reader's own diagnostic — collapsing the two would
+    // make a broken log look like a task that never ran.
+    if (attempts.status === "carrier-unreadable") {
+      // The carrier path is DATA (the reader's own relative path) and rides in wrapped in its
+      // `<code>`; the brackets around it belong to the sentence and live in the label (ROW 13 ②).
+      return html`<h2>Runs</h2><p class="meta">${fillLabel(L.runsUnreadable, { carrier: `<code>${escapeHtml(attempts.carrier)}</code>` })} ${escapeHtml(attempts.reason ?? "")}</p>`;
+    }
     // The carrier path is DATA (a real file name) and rides in wrapped in its `<code>`; the brackets
     // around it belong to the sentence and live in the label (ROW 13 ②).
-    return html`<h2>Runs</h2><p class="meta">${fillLabel(L.runsNoRecords, { carrier: `<code>.quay/worker-outcome.jsonl</code>` })}</p>`;
+    return html`<h2>Runs</h2><p class="meta">${fillLabel(L.runsNoRecords, { carrier: `<code>${escapeHtml(attempts.carrier)}</code>` })}</p>`;
   }
 
   const inFlightRows = inFlight.map((w) => {

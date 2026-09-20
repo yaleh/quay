@@ -13,8 +13,14 @@
 // 等重依赖——实测把 KINDS 留在 driver.ts 会让 `quay --help` 从 0.25s 涨到 0.67s（每次调用都付）。
 // 本模块零 import ⇒ 加载成本可忽略。⚠️ 与"能不能少写一个文件"无关，是 help 路径的实测成本。
 
-/** `quay driver <verb>` 的全部 verb。 */
-export const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
+/** `quay driver <verb>` 的全部 verb。
+ *
+ *  ⚠️ `log` 与其余六个 verb 的**类别不同**：那六个是 supervisor kernel 的**控制面**动词（start/stop/
+ *  drain/resume/status/restart 都要落到常驻进程上），`log` 是**只读的载体读取**——它不 spawn kernel、
+ *  也不碰任何控制态。它仍在此表里，是因为用户找它的位置就是 `quay driver`（人 2026-09-20 的裁定把
+ *  「driver 应当记录的日志」的可达面点名在 quay cli/mcp/web 上）；cli/driver.ts 在委派 kernel 之前
+ *  截住它（见那里的 `runDriverLog`）。 */
+export const VERBS = ["start", "stop", "drain", "resume", "status", "restart", "log"];
 
 // ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供
 // goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6），并作为帮助文本

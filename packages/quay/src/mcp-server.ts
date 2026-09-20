@@ -54,6 +54,7 @@ import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers, registerConfigHandlers } from "./mcp-handlers.ts";
 import { resolvePluginScriptExec } from "./plugin-root.ts";
 import { runInit } from "./init.ts";
+import { readFanInAttempts } from "./observation.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -445,6 +446,61 @@ export async function startMcpServer(): Promise<void> {
           isError: r.exitCode !== 0,
           content: [{ type: "text" as const, text: r.exitCode === 0 ? r.stdout : (r.stderr || r.stdout || `exit ${r.exitCode}`) }],
           structuredContent: { name, exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+
+  // driver_log — the agent-facing arm of the SAME reader the web /needs-human page and the
+  // `quay driver log` CLI use (gap-needs-human-raw-fan-in-reason-observation-surface). 人 2026-09-20:
+  // 「driver 当然应当记录相应的日志，人类观测面（如 quay cli/mcp/web）也应提供这些日志的访问。」
+  // The driver already wrote one record per attempt into `.quay/worker-outcome.jsonl`; this makes it
+  // reachable from the MCP surface with ZERO new parsing (⛔ the three surfaces must not each write
+  // their own parse — the whole point of the single reader).
+  //
+  // The result carries the reader's tri-state `status` — `carrier-absent` / `carrier-unreadable` /
+  // `malformed-lines` / `ok` — so an agent can tell "this workspace ran no worker" from "the log is
+  // there and I could not read it" (硬规则 3b). An UNREADABLE carrier is isError:true; an ABSENT one
+  // is a normal, honest empty answer (it is the correct reading of a workspace that never dispatched).
+  server.registerTool(
+    "driver_log",
+    {
+      description:
+        "Read the worker driver's recorded per-attempt log for THIS workspace — the RAW failure text of each " +
+        "dispatch attempt (step, reason, suite log, fan-in log), exactly as the driver wrote it into the worker " +
+        "outcome carrier. ⛔ Read-only and unclassified: no cause labels, no interpretation, and `reason` is never " +
+        "truncated — a needs-human cause is an exception and an enum of causes is unreliable, so this surface " +
+        "shows the原文 only. `status` distinguishes the four read outcomes: `ok` (every line parsed), " +
+        "`malformed-lines` (count in `malformedLines`), `carrier-absent` (this workspace ran no worker), " +
+        "`carrier-unreadable` (the carrier exists but could not be read — reported as an error, never as an empty " +
+        "log). Shares ONE reader with the web /needs-human page and the `quay driver log` CLI.",
+      inputSchema: {
+        kind: z.enum(["promotion", "worker", "outer", "quality", "meta", "goal"]).optional().describe(
+          "Which driver's log. Only `worker` is covered today (the per-attempt fan-in records live in the worker driver's outcome carrier); another kind is reported as not-covered rather than as an empty log. Default: worker."
+        ),
+        task: z.string().optional().describe("Restrict to one task's attempts."),
+        limit: z.number().optional().describe("Keep the most recent N attempts (default: all)."),
+      },
+    },
+    async ({ kind, task, limit }) => {
+      try {
+        const k = kind ?? "worker";
+        if (k !== "worker") {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `driver_log: kind "${k}" is not covered by this reader (only \`worker\` writes the per-attempt fan-in records). Refusing to return an empty log as if the driver had none.` }],
+          };
+        }
+        const res = readFanInAttempts(loaded.workspaceRoot, { taskId: task ?? null, limit: limit ?? null });
+        return {
+          isError: res.status === "carrier-unreadable",
+          content: [{ type: "text" as const, text: JSON.stringify(res, null, 2) }],
+          structuredContent: res as unknown as Record<string, unknown>,
         };
       } catch (err) {
         return {

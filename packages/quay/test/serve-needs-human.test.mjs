@@ -441,3 +441,95 @@ test("AC-295 AC-en-baseline + gap-webui-needs-human-body-copy-en-zh: the en SHAR
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+// ── gap-needs-human-raw-fan-in-reason-observation-surface ─────────────────────────────────────────
+// 人 2026-09-20：「driver 当然应当记录相应的日志，人类观测面（如 quay cli/mcp/web）也应提供这些日志的
+// 访问。」 The 阻碍原因 column said WHAT the driver pasted into the body; nothing on any surface said
+// WHICH STEP each attempt died on or what the failure text actually was. This page now shows it, RAW
+// (⛔ no classification — the same ruling: an exception's cause does not enumerate reliably), and it
+// reads through observation.readFanInAttempts, the ONE reader the CLI and MCP tools also use.
+test("AC3: /needs-human renders a needs-human task's latest RAW fan-in failure, HTML-escaped", async () => {
+  const { ws, tasksDir } = makeWorkspace("nh-fanin-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "NH-FANIN", {
+      title: "needs-human with a failed attempt",
+      status: "needs-human",
+      body: needsHumanBody("连续修满 3 次仍不合格"),
+    });
+    // The reason carries an HTML payload ON PURPOSE — the negative control for the escaping arm.
+    const reason = "AssertionError [ERR_ASSERTION]: <script>alert(1)</script> stdout differs between symlink and real invocation";
+    fs.writeFileSync(
+      path.join(ws, ".quay", "worker-outcome.jsonl"),
+      [
+        JSON.stringify({
+          ts: "2026-09-20T04:00:00.000Z", task: "NH-FANIN", run_id: "r-landed",
+          started_at: "2026-09-20T03:50:00.000Z", final_state: "completed",
+          mechanical_fan_in: { outcome: "landed", step: null, reason: null },
+        }),
+        JSON.stringify({
+          ts: "2026-09-20T05:25:06.591Z", task: "NH-FANIN", run_id: "r-red",
+          started_at: "2026-09-20T04:36:41.511Z", final_state: "exited-not-landed",
+          mechanical_fan_in: { outcome: "red", step: "suite", reason, suiteLog: "fan-in-suite-NH-FANIN.log" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const page = await get(server.address().port, "/needs-human");
+    assert.equal(page.status, 200, "GET /needs-human returns 200");
+
+    // AC3 — the latest attempt's failing step and its RAW reason are on the page.
+    assert.ok(page.body.includes("Latest failure (raw)"), "the new column header renders (en default)");
+    assert.ok(page.body.includes("<code>suite</code>"), "the failing step name renders (verbatim from the record)");
+    assert.ok(page.body.includes("stdout differs between symlink and real invocation"), "the raw failure text renders");
+    assert.ok(page.body.includes("AssertionError [ERR_ASSERTION]:"), "the reason is NOT truncated before the UI");
+
+    // Negative control: the payload is ESCAPED TEXT, never markup.
+    assert.ok(!page.body.includes("<script>alert(1)</script>"), "an HTML payload in the reason is NOT emitted as markup");
+    assert.ok(page.body.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), "it is emitted as escaped text");
+
+    // The page reads through the ONE reader: a reason that never reaches the carrier never reaches
+    // the page either (the landed attempt's null reason must not be back-filled from the body prose).
+    assert.ok(!page.body.includes('alert("not-on-the-carrier")'), "nothing is invented from the 阻碍原因 prose");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (3b): an UNREADABLE attempt carrier renders 读不出, never the empty-looking word", async () => {
+  const { ws, tasksDir } = makeWorkspace("nh-fanin-unreadable-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "NH-UNREADABLE", { title: "needs-human, log unreadable", status: "needs-human", body: needsHumanBody("连续修满 3 次仍不合格") });
+    // A DIRECTORY at the carrier path: the read fails for a reason that is NOT "it does not exist".
+    fs.mkdirSync(path.join(ws, ".quay", "worker-outcome.jsonl"), { recursive: true });
+
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
+    const zh = await get(port, "/needs-human", { Cookie: "lang=zh" });
+    const en = await get(port, "/needs-human");
+    assert.equal(zh.status, 200, "an unreadable carrier still renders 200");
+    assert.ok(zh.body.includes("尝试日志读不出"), "zh: the unreadable state has its OWN word");
+    assert.ok(!zh.body.includes("无尝试记录"), "zh: 读不出 is NOT rendered as 无记录 (硬规则 3b)");
+    assert.ok(en.body.includes("Attempt log unreadable"), "en: the unreadable state has its OWN word");
+    assert.ok(!en.body.includes("No attempt recorded"), "en: 读不出 is NOT rendered as 无记录 (硬规则 3b)");
+
+    // Negative control for the same page: with NO carrier at all, the honest word IS 无记录 —
+    // so the two states are distinguishable by rendering, not merely by an internal field.
+    fs.rmSync(path.join(ws, ".quay", "worker-outcome.jsonl"), { recursive: true, force: true });
+    const en2 = await get(port, "/needs-human");
+    assert.ok(en2.body.includes("No attempt recorded"), "an ABSENT carrier renders the not-recorded word");
+    assert.ok(!en2.body.includes("Attempt log unreadable"), "and NOT the unreadable word");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
