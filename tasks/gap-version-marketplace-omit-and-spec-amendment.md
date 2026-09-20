@@ -1,7 +1,7 @@
 ---
 id: gap-version-marketplace-omit-and-spec-amendment
 title: marketplace.json 省略 version 字段的真实安装实测 + 修订 SPEC §4.3/发布流程（去掉「去 -dev 的 bump 提交」）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
