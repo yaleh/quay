@@ -143,12 +143,15 @@ test("AC1/AC3: a rebuilt-but-unreferenced bundle is NOT a closure requirement (t
  *  copy's prose instead of the stub's closure. The stamp WRITES the version it derives from `VERSION`
  *  + the stub's git state, so any value parseable at each carrier's anchor is a valid starting point;
  *  the anchors are the ones scripts/version-carriers.ts requires (`"version": "…"` JSON fields, a
- *  `quay plugin v<semver>` README line, an array-anchored `name: quay` marketplace entry, a bare
- *  semver in VERSION).
+ *  `quay plugin v<semver>` README line, a bare semver in VERSION).
  *
- *  The five carrier paths are the `plugin/`-prefixed members of the shared carrier table, which is
+ *  The four carrier paths are the `plugin/`-prefixed members of the shared carrier table, which is
  *  what `buildCarriers('plugin')` projects into an assembled tree by dropping that prefix — mirrored
- *  here under `plugin/` because the script rsyncs `<stub>/plugin/` to the assembled tree's root. */
+ *  here under `plugin/` because the script rsyncs `<stub>/plugin/` to the assembled tree's root.
+ *  ⛔ NOT here any more: `plugin/.claude-plugin/marketplace.json`. Its `plugins[].version` left the
+ *  carrier table on 2026-09-20 (gap-version-marketplace-omit-and-spec-amendment) once real installs
+ *  showed the CLI never reads it, so a stub entry for it would be a synthetic file the generator no
+ *  longer touches — i.e. the stub would no longer mirror what ships. */
 function addVersionStampInputs(root) {
   for (const rel of [
     "scripts/stamp-version.mjs",
@@ -162,8 +165,6 @@ function addVersionStampInputs(root) {
   const carriers = {
     "plugin/VERSION": "0.0.0\n",
     "plugin/.claude-plugin/plugin.json": JSON.stringify({ name: "quay", version: "0.0.0" }, null, 2) + "\n",
-    "plugin/.claude-plugin/marketplace.json":
-      JSON.stringify({ plugins: [{ name: "quay", source: "./", version: "0.0.0" }] }, null, 2) + "\n",
     "plugin/vendor/quay/package.json": JSON.stringify({ name: "quay", version: "0.0.0" }, null, 2) + "\n",
     "plugin/README.md": "quay plugin v0.0.0 — stub\n",
   };

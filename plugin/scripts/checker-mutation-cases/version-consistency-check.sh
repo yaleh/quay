@@ -4,9 +4,13 @@
 # ── THE JUDGMENT (tasks/gap-version-single-source-root-file-and-resolver, 2026-09-20) ───────────
 # Was: every version-bearing artifact must carry the identical version (internal consistency).
 # Is:  every artifact must equal `resolveVersion(VERSION,'tracked')` — the SINGLE SOURCE at the repo
-#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 15 carrier entries (11 files
+#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 13 carrier entries (10 files
 #      — `package-lock.json` contributes four workspace members) stamped with the derived tracked form
 #      (`1.0.0-dev`).
+#      ⛔ 2026-09-20 (gap-version-marketplace-omit-and-spec-amendment): the two `marketplace.json`
+#      `plugins[].version` entries left the carrier table with the field itself, so this fixture no
+#      longer builds those two files — a fixture file that is not a carrier is exactly the "green
+#      baseline that proves nothing" shape INVARIANT (a) below exists to forbid.
 #
 # ⚠️ INVARIANT (two halves, both required — the second half is new):
 #   (a) the file set built below MUST cover the checker's VERSION_ENTRIES exactly — one artifact per
@@ -45,7 +49,7 @@
 #   non-zero. This is the case that separates "the checker reads the production carrier" from "the
 #   checker echoes its own fixture": with the source gone there is nothing to agree with, and a
 #   checker that still exits 0 is proving only that it can read its own fixture. Restore → exit 0.
-# Inject 6 (THE NEW JUDGMENT'S BLIND SPOT — the reason this case exists after the change): bump ALL 15
+# Inject 6 (THE NEW JUDGMENT'S BLIND SPOT — the reason this case exists after the change): bump ALL
 #   carrier entries to 1.0.1-dev while `VERSION` stays 1.0.0 — a UNIFORMLY stale tree. Under the OLD
 #   "carriers agree with each other" rule this was GREEN (all equal!) and that is precisely the defect
 #   the single-source judgment was introduced to remove. MUST exit 1 (RED). Restore → exit 0 (GREEN).
@@ -56,7 +60,7 @@ scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/scripts"
 
 mkdir -p "${workdir}/packages/quay" "${workdir}/packages/quay-native" \
   "${workdir}/packages/quay-github" "${workdir}/packages/quay-backlog" \
-  "${workdir}/plugin/.claude-plugin" "${workdir}/plugin/vendor/quay" "${workdir}/.claude-plugin"
+  "${workdir}/plugin/.claude-plugin" "${workdir}/plugin/vendor/quay"
 
 # The derived tracked form the carriers must carry, and the bare base the source must hold.
 carrier_ver="1.0.0-dev"
@@ -69,14 +73,12 @@ mkver "quay-github" "${carrier_ver}" "${workdir}/packages/quay-github/package.js
 mkver "quay-backlog" "${carrier_ver}" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"        "${carrier_ver}" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "%s",\n  "main": "dist/entry.js"\n}\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/plugin.json"
-printf '[{"name":"quay","version":"%s","source":"github"}]\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/marketplace.json"
-printf '[{"name":"quay","version":"%s","source":"github"}]\n' "${carrier_ver}" > "${workdir}/.claude-plugin/marketplace.json"
 # Prose carrier — must be present and parseable, else the baseline reads mode:'error' (NOT exit 0).
 printf '# quay plugin\n\nquay plugin v%s - fixture.\n' "${carrier_ver}" > "${workdir}/plugin/README.md"
 # Plain-text stamp — MUST be present, else the entry reads mode:'error' and the whole case reports a
 # false "checker always-red" (exit 4) instead of exercising the drift path (hard rule 3b).
 printf '%s\n' "${carrier_ver}" > "${workdir}/plugin/VERSION"
-# Machine-field manifest (the 11th artifact) — the checker reads `.version` via JSON.parse and THROWS
+# Machine-field manifest (the 8th carrier FILE) — the checker reads `.version` via JSON.parse and THROWS
 # when it is absent or not a semver. Absent here ⇒ mode:'error' ⇒ false "checker always-red".
 mkmanifest() { printf '{\n  "version": "%s"\n}\n' "$1" > "${workdir}/delivery-manifest.json"; }
 mkmanifest "${carrier_ver}"
@@ -94,7 +96,7 @@ checker_cmd() {
   node --experimental-strip-types "${scripts_dir}/version-consistency-check.ts" --root "$1" >/dev/null 2>&1
 }
 
-# GREEN baseline: VERSION=1.0.0 and all 11 artifacts at 1.0.0-dev → all-equal with the source → exit 0.
+# GREEN baseline: VERSION=1.0.0 and all 9 carrier files at 1.0.0-dev → all-equal with the source → exit 0.
 if checker_cmd "${workdir}"; then :; else
   echo "baseline RED on a consistent store (checker always-red?)" >&2
   exit 4
@@ -170,7 +172,7 @@ if checker_cmd "${workdir}"; then :; else
   exit 4
 fi
 
-# INJECT 6: bump ALL 11 carriers to 1.0.1-dev, leave VERSION at 1.0.0 — a UNIFORMLY STALE tree.
+# INJECT 6: bump ALL carriers to 1.0.1-dev, leave VERSION at 1.0.0 — a UNIFORMLY STALE tree.
 # Under the OLD all-equal rule this fixture was GREEN; the single-source judgment is what reddens it.
 mkver "quay"         "1.0.1-dev" "${workdir}/packages/quay/package.json"
 mkver "quay-native"  "1.0.1-dev" "${workdir}/packages/quay-native/package.json"
@@ -178,8 +180,6 @@ mkver "quay-github"  "1.0.1-dev" "${workdir}/packages/quay-github/package.json"
 mkver "quay-backlog" "1.0.1-dev" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"         "1.0.1-dev" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "1.0.1-dev",\n  "main": "dist/entry.js"\n}\n' > "${workdir}/plugin/.claude-plugin/plugin.json"
-printf '[{"name":"quay","version":"1.0.1-dev","source":"github"}]\n' > "${workdir}/plugin/.claude-plugin/marketplace.json"
-printf '[{"name":"quay","version":"1.0.1-dev","source":"github"}]\n' > "${workdir}/.claude-plugin/marketplace.json"
 printf '# quay plugin\n\nquay plugin v1.0.1-dev - fixture.\n' > "${workdir}/plugin/README.md"
 printf '1.0.1-dev\n' > "${workdir}/plugin/VERSION"
 mkmanifest "1.0.1-dev"
@@ -196,8 +196,6 @@ mkver "quay-github"  "${carrier_ver}" "${workdir}/packages/quay-github/package.j
 mkver "quay-backlog" "${carrier_ver}" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"         "${carrier_ver}" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "%s",\n  "main": "dist/entry.js"\n}\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/plugin.json"
-printf '[{"name":"quay","version":"%s","source":"github"}]\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/marketplace.json"
-printf '[{"name":"quay","version":"%s","source":"github"}]\n' "${carrier_ver}" > "${workdir}/.claude-plugin/marketplace.json"
 printf '# quay plugin\n\nquay plugin v%s - fixture.\n' "${carrier_ver}" > "${workdir}/plugin/README.md"
 printf '%s\n' "${carrier_ver}" > "${workdir}/plugin/VERSION"
 mkmanifest "${carrier_ver}"

@@ -197,7 +197,9 @@ test('buildCarriers projects the table onto a plugin-rooted artifact tree', () =
   const carriers = buildCarriers(BUILD_TREE_PREFIX);
   const paths = carriers.map((c) => c.path).sort();
   assert.deepEqual(paths, [
-    '.claude-plugin/marketplace.json',
+    // `.claude-plugin/marketplace.json` is NOT here any more: its `plugins[].version` is read by
+    // nothing (measured — see version-carriers.ts), so the field was deleted and its carrier with it
+    // (gap-version-marketplace-omit-and-spec-amendment, 2026-09-20). A build no longer stamps it.
     '.claude-plugin/plugin.json',
     'README.md',
     'VERSION',

@@ -21,28 +21,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(__dirname, "..", "scripts", "chart2-s2-delivery-completeness.ts");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", ".."); // test → repo root
 
-// Build a temp repo tree with the 5 version-source files. `versions` maps 1:1 onto the 5 sources;
+// Build a temp repo tree with the 3 version-source files. `versions` maps 1:1 onto the 3 sources;
 // null → write the file but omit the version field.
+// ⛔ The two `marketplace.json` files are NOT sources (2026-09-20,
+// gap-version-marketplace-omit-and-spec-amendment): their `plugins[].version` is measured never to
+// be read by the installer and was deleted from both files; the "must stay absent" guard lives in
+// `plugin/test/plugin-packaging.test.mjs`. So these fixtures no longer write them at all.
 function writeFixtureRepo(versions) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chart2-s2-fixt-"));
   const specs = [
-    { rel: "packages/quay/package.json", nested: false },
-    { rel: ".claude-plugin/marketplace.json", nested: true },
-    { rel: "plugin/.claude-plugin/plugin.json", nested: false },
-    { rel: "plugin/.claude-plugin/marketplace.json", nested: true },
-    { rel: "plugin/vendor/quay/package.json", nested: false },
+    "packages/quay/package.json",
+    "plugin/.claude-plugin/plugin.json",
+    "plugin/vendor/quay/package.json",
   ];
-  specs.forEach((s, i) => {
-    const abs = path.join(root, s.rel);
+  specs.forEach((rel, i) => {
+    const abs = path.join(root, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     const v = versions[i];
-    let obj;
-    if (s.nested) {
-      obj = v === null ? { plugins: [{ name: "x" }] } : { plugins: [{ name: "x", version: v }] };
-    } else {
-      obj = v === null ? { name: "x" } : { name: "x", version: v };
-    }
-    fs.writeFileSync(abs, JSON.stringify(obj));
+    fs.writeFileSync(abs, JSON.stringify(v === null ? { name: "x" } : { name: "x", version: v }));
   });
   return root;
 }
@@ -79,7 +75,7 @@ test("versionsConsistent: empty array → false", () => {
   assert.equal(versionsConsistent([]), false);
 });
 
-test("versionsConsistent: the real repo's 5-way drift → false", () => {
+test("versionsConsistent: a 5-way drift → false", () => {
   const fields = [
     { source: "a", version: "0.3.8" },
     { source: "b", version: "0.3.5" },
@@ -115,40 +111,53 @@ test("computeS2Cov: 2/3 (manifest + install, versions drifted) → cov 0.666…"
 });
 
 // ── readVersionFields (against temp fixture repo trees) ─────────────────────────────────────────
-test("readVersionFields: reads all 5 fields (flat .version + nested .plugins[0].version)", () => {
-  const root = writeFixtureRepo(["0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4"]);
+test("readVersionFields: reads all 3 fields (flat top-level .version)", () => {
+  const root = writeFixtureRepo(["0.4.0", "0.4.1", "0.4.2"]);
   const fields = readVersionFields(root);
-  assert.equal(fields.length, 5);
-  assert.deepEqual(fields.map((f) => f.version), ["0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4"]);
+  assert.equal(fields.length, 3);
+  assert.deepEqual(fields.map((f) => f.version), ["0.4.0", "0.4.1", "0.4.2"]);
   assert.deepEqual(fields.map((f) => f.source), [
     "packages/quay/package.json",
-    ".claude-plugin/marketplace.json",
     "plugin/.claude-plugin/plugin.json",
-    "plugin/.claude-plugin/marketplace.json",
     "plugin/vendor/quay/package.json",
   ]);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// ⊣ negative control for the 2026-09-20 retirement: a `plugins[0].version` in a marketplace.json is
+// NOT a version source any more, so writing one into the fixture tree must change nothing. Without
+// this, "the marketplace is not a source" is only asserted by the absence of a line of code.
+test("readVersionFields: a `plugins[0].version` in a marketplace.json is NOT a source (retired 2026-09-20)", () => {
+  const root = writeFixtureRepo(["0.4.0", "0.4.0", "0.4.0"]);
+  const mp = path.join(root, ".claude-plugin/marketplace.json");
+  fs.mkdirSync(path.dirname(mp), { recursive: true });
+  fs.writeFileSync(mp, JSON.stringify({ plugins: [{ name: "quay", version: "9.9.9" }] }));
+  const fields = readVersionFields(root);
+  assert.equal(fields.length, 3);
+  assert.equal(fields.some((f) => f.source.includes("marketplace.json")), false);
+  assert.equal(versionsConsistent(fields), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("readVersionFields: aligned fixture → versionsConsistent true", () => {
-  const root = writeFixtureRepo(["1.0.0", "1.0.0", "1.0.0", "1.0.0", "1.0.0"]);
+  const root = writeFixtureRepo(["1.0.0", "1.0.0", "1.0.0"]);
   assert.equal(versionsConsistent(readVersionFields(root)), true);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test("readVersionFields: a missing field (null) reads as version:null", () => {
-  const root = writeFixtureRepo(["1.0.0", "1.0.0", null, "1.0.0", "1.0.0"]);
+  const root = writeFixtureRepo(["1.0.0", null, "1.0.0"]);
   const fields = readVersionFields(root);
-  assert.equal(fields[2].version, null);
+  assert.equal(fields[1].version, null);
   assert.equal(versionsConsistent(fields), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test("readVersionFields: a missing file reads as version:null", () => {
-  const root = writeFixtureRepo(["1.0.0", "1.0.0", "1.0.0", "1.0.0", "1.0.0"]);
+  const root = writeFixtureRepo(["1.0.0", "1.0.0", "1.0.0"]);
   fs.rmSync(path.join(root, "plugin/vendor/quay/package.json"));
   const fields = readVersionFields(root);
-  assert.equal(fields[4].version, null);
+  assert.equal(fields[2].version, null);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -218,7 +227,7 @@ test("CLI: explicit repoRoot arg → cov 3/3 against the real repo", () => {
 // still compute cov 0.0 — if a delivery ever removes/negates the evidence without the code noticing,
 // this assertion catches the regression. Drifted versions + both-false evidence → 0/3.
 test("CLI: negative control — temp repo with both-false evidence → cov 0.0 (fail-closed)", () => {
-  const root = writeFixtureRepo(["0.3.8", "0.3.5", "0.3.22", "0.3.16", "0.3.5"]); // drifted → version-consistent=false
+  const root = writeFixtureRepo(["0.3.8", "0.3.22", "0.3.5"]); // drifted → version-consistent=false
   const evDir = path.join(root, "experiments", "quay-perpetual-stream");
   fs.mkdirSync(evDir, { recursive: true });
   fs.writeFileSync(

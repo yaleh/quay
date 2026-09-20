@@ -90,16 +90,6 @@ const README_VERSION_RE = /^quay plugin v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/d
 const PLUGIN_STAMP_RE = /^(\S+)/dm;
 /** The first `"version": "<v>"` token of a JSON file. */
 const JSON_VERSION_RE = /"version"\s*:\s*"([^"]*)"/d;
-/**
- * The version of the `quay` plugin entry inside a marketplace's plugin list. Anchored on the ARRAY of
- * objects (`[ {`), NOT on `"name": "quay"` alone — the marketplace itself is also named `quay` at the
- * top level, so a name-anchored match would rewrite the wrong object. Array-anchored (rather than
- * `"plugins"`-anchored) on purpose: the shipped dialect is `{ "plugins": [ … ] }`, while bare-array
- * marketplaces are also valid and both shapes must be stampable — and for the wrapped shape the first
- * `[ {` IS the plugins array, so one pattern covers both.
- */
-const MARKETPLACE_QUAY_VERSION_RE =
-  /(\[\s*\{[\s\S]*?"name"\s*:\s*"quay"[\s\S]*?"version"\s*:\s*")([^"]*)(")/d;
 
 /** The `packages/<dir>` workspace entry's `version` field, inside `package-lock.json`. */
 function workspaceLockRe(dir: string): RegExp {
@@ -132,28 +122,14 @@ function jsonVersionField(label: string, path: string): VersionCarrier {
   };
 }
 
-/** A carrier whose version is a marketplace's `quay` plugin entry. */
-function marketplaceQuayEntry(label: string, path: string): VersionCarrier {
-  const structural = (raw: string): string => {
-    const data = JSON.parse(raw);
-    const plugins = Array.isArray(data) ? data : (data.plugins ?? []);
-    const q = plugins.find((p: any) => p.name === 'quay');
-    if (!q) throw new Error(`quay entry not found in ${path}`);
-    return q.version;
-  };
-  return {
-    label,
-    path,
-    extract: structural,
-    locate(raw) {
-      const m = raw.match(MARKETPLACE_QUAY_VERSION_RE);
-      if (!m) {
-        throw new Error(`${path}: no "plugins": [{ "name": "quay", …, "version": "…" }] anchor to rewrite`);
-      }
-      return spanOf(m, 2);
-    },
-  };
-}
+/**
+ * ⛔ REMOVED (2026-09-20, gap-version-marketplace-omit-and-spec-amendment): the two carriers for a
+ * marketplace's `quay` plugin-entry `version` used to live here (`marketplaceQuayEntry` +
+ * `MARKETPLACE_QUAY_VERSION_RE`). They were deleted together with the FIELD ITSELF, on measurement
+ * rather than on preference — see the table's comment below for the readings. Do not re-introduce
+ * either half without re-running that measurement: a re-added field is stamped by the generator,
+ * judged by the checker, and read by NOTHING.
+ */
 
 /** A `packages/<dir>` workspace entry inside `package-lock.json` (npm's lockfile, not a second source). */
 function packageLockEntry(dir: string): VersionCarrier {
@@ -181,10 +157,36 @@ function packageLockEntry(dir: string): VersionCarrier {
 // ── THE TABLE (single home — both the judge and the generator import this) ────────────────────────
 
 /**
- * Every version-bearing file, in report order. 15 entries over 11 distinct files:
+ * Every version-bearing file, in report order. 13 entries over 10 distinct files:
  * the 4 `packages/<name>/package.json`, the 4 `package-lock.json` workspace entries, `plugin.json`,
- * `plugin/README.md`, the two `marketplace.json`s, `plugin/vendor/quay/package.json`,
- * `plugin/VERSION`, and `delivery-manifest.json`.
+ * `plugin/README.md`, `plugin/vendor/quay/package.json`, `plugin/VERSION`, and `delivery-manifest.json`.
+ *
+ * ── WHY THE TWO `marketplace.json` ENTRIES ARE NOT HERE (2026-09-20) ─────────────────────────────
+ * `gap-version-marketplace-omit-and-spec-amendment` measured whether the `plugins[].version` field of
+ * a marketplace entry is read at all, and found that it IS NOT. The install cache is keyed by the
+ * FETCHED PLUGIN's own `plugin.json` version — the marketplace entry's value never enters the
+ * reading. Four real installs under an isolated `CLAUDE_CONFIG_DIR` (`claude plugin marketplace add` +
+ * `claude plugin install quay@quay -s user --json` + `claude plugin list --json`):
+ *
+ *   dialect                marketplace entry `version`   list --json `version` / `installPath` key
+ *   ─────────────────────  ───────────────────────────   ──────────────────────────────────────────
+ *   root (github source)   `0.10.0-dev`                  `0.10.0`      (plugin.json on dist-plugin)
+ *   root (github source)   ABSENT                        `0.10.0`      (identical to the row above)
+ *   plugin (`source: "."`) `0.10.0-dev`                  `0.10.0-dev`  (plugin.json in that tree)
+ *   plugin (`source: "."`) ABSENT                        `0.10.0-dev`  (identical to the row above)
+ *   plugin (`source: "."`) **`9.9.9`** (deliberate)      `0.10.0-dev`  ← the decisive control
+ *
+ * The last row is the control the first four cannot supply by themselves (hard rule 4 推论四): a
+ * marketplace advertising `9.9.9` against a `0.10.0-dev` plugin manifest still installs and reports
+ * `0.10.0-dev`, so "the field is ignored" and "the field happens to agree" are distinguishable — and
+ * it is ignored. The field therefore carried ZERO information while costing a hand-written committed
+ * literal in two files, which is exactly the defect this table exists to make visible. So the field
+ * was deleted from both files and these two entries left the table.
+ *
+ * ⛔ The consequence to keep in mind: nothing now checks these two files. A future author who re-adds
+ * `"version"` to a marketplace entry gets a literal that is stamped by `stamp-version` (only for the
+ * `plugin/` one — the root file is not under a build prefix), judged by nothing, and read by nothing.
+ * Fix the mechanism, not the symptom: re-run the measurement above before bringing either half back.
  */
 export const VERSION_CARRIERS: VersionCarrier[] = [
   jsonVersionField('packages/quay', 'packages/quay/package.json'),
@@ -229,11 +231,6 @@ export const VERSION_CARRIERS: VersionCarrier[] = [
       return spanOf(m);
     },
   },
-  marketplaceQuayEntry(
-    'plugin/.claude-plugin/marketplace.json (quay entry)',
-    'plugin/.claude-plugin/marketplace.json',
-  ),
-  marketplaceQuayEntry('.claude-plugin/marketplace.json (quay entry)', '.claude-plugin/marketplace.json'),
   jsonVersionField('plugin/vendor/quay/package.json', 'plugin/vendor/quay/package.json'),
   {
     // Plain-text version stamp (`plugin/VERSION` holds a bare semver and nothing else) — deliberately
@@ -307,7 +304,7 @@ export const VERSION_CARRIERS: VersionCarrier[] = [
   packageLockEntry('quay-backlog'),
 ];
 
-/** The distinct files the table covers (11 for the 15 entries — package-lock contributes 4 entries). */
+/** The distinct files the table covers (10 for the 13 entries — package-lock contributes 4 entries). */
 export function carrierPaths(carriers: VersionCarrier[] = VERSION_CARRIERS): string[] {
   return [...new Set(carriers.map((c) => c.path))];
 }

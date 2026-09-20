@@ -4,14 +4,25 @@
 // 5-way version drift; no install mechanism") with an OBJECTIVE, capped cov computed from three
 // sub-checks:
 //
-//   (1) version-consistency — LOCALLY COMPUTABLE NOW. The 5 published version fields must all be
-//       equal. Sourced live from:
+//   (1) version-consistency — LOCALLY COMPUTABLE NOW. The 3 published version-bearing surfaces
+//       must all be equal. Sourced live from:
 //         packages/quay/package.json                → .version
-//         .claude-plugin/marketplace.json           → .plugins[0].version   (root marketplace)
 //         plugin/.claude-plugin/plugin.json         → .version
-//         plugin/.claude-plugin/marketplace.json    → .plugins[0].version
 //         plugin/vendor/quay/package.json           → .version
 //       A missing file/field reads as null → treated as NOT consistent.
+//
+//       ⛔ The two `marketplace.json` files are deliberately NOT sources (2026-09-20,
+//       gap-version-marketplace-omit-and-spec-amendment). Their `plugins[].version` was MEASURED
+//       never to be read: an isolated-CLAUDE_CONFIG_DIR real install returns the version of the
+//       plugin manifest it actually fetched, keyed by THAT file's version, whatever the marketplace
+//       entry says. Decisive control (hard rule 4 corollary four): an entry pinned to `9.9.9`
+//       against a manifest of `0.10.0-dev` still installs into `…/cache/quay/quay/0.10.0-dev` — the
+//       reading differs if the "CLI reads this field" hypothesis is true, and it does not differ.
+//       The field was therefore DELETED from both files rather than left as an unread
+//       hand-maintained literal. The guard that it never returns lives in
+//       `plugin/test/plugin-packaging.test.mjs` (one source of truth); this script does not carry a
+//       second, weaker copy of that assertion. See §12 of
+//       orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md.
 //
 //   (2) full-manifest-published — from the checked-in evidence file chart2-s2-delivery.json
 //       (fullManifestPublished). A delivery manifest does not exist yet → false.
@@ -21,9 +32,9 @@
 //
 //   cov = (# sub-checks satisfied) / 3.
 //
-// On the CURRENT real repo this computes cov = 0/3 = 0.0: the 5 versions are inconsistent
-// (0.3.8 / 0.3.5 / 0.3.22 / 0.3.16 / 0.3.5) and both evidence flags are false. When all 5 versions
-// align AND the full manifest is published AND the foreign-install e2e goes green, cov → 3/3 = 1.0.
+// On the CURRENT real repo this computes cov = 3/3 = 1.0: all 3 version-bearing surfaces read
+// `0.10.0-dev` and both evidence flags are true (chart2-s2-delivery.json, DELIVERY-C/D). cov falls
+// to 2/3 when the version surfaces drift, and to 0/3 when the evidence flags are false as well.
 //
 // This is a LOAD-BEARING script: its cov output feeds chart-2's S2 cell in the inherited-core VT
 // model (DIR-064-B). Hard check over stored/live facts — NOT a paraphrase of prose (ADR-004).
@@ -64,49 +75,33 @@ export interface S2Cov {
   total: number;
 }
 
-// The 5 version sources. `pointer` selects how to read the version out of the parsed JSON:
-//   "version"           → obj.version
-//   "plugins0.version"  → obj.plugins[0].version   (marketplace.json nesting)
-interface VersionSourceSpec {
-  relPath: string;
-  pointer: "version" | "plugins0.version";
-}
-
-const VERSION_SOURCES: VersionSourceSpec[] = [
-  { relPath: "packages/quay/package.json", pointer: "version" },
-  { relPath: ".claude-plugin/marketplace.json", pointer: "plugins0.version" },
-  { relPath: "plugin/.claude-plugin/plugin.json", pointer: "version" },
-  { relPath: "plugin/.claude-plugin/marketplace.json", pointer: "plugins0.version" },
-  { relPath: "plugin/vendor/quay/package.json", pointer: "version" },
+// The 3 version-bearing surfaces. All three carry a flat top-level `.version` — the
+// `plugins[0].version` pointer went away with the two `marketplace.json` sources (see the header),
+// so no dead variant of it is kept here.
+const VERSION_SOURCES: string[] = [
+  "packages/quay/package.json",
+  "plugin/.claude-plugin/plugin.json",
+  "plugin/vendor/quay/package.json",
 ];
 
 // ── readVersionField — read one version field from one JSON file. ────────────────────────────────
 // A missing file, unparseable JSON, or a missing/non-string field all yield version:null.
-function readVersionField(repoRoot: string, spec: VersionSourceSpec): VersionField {
-  const abs = path.join(repoRoot, spec.relPath);
+function readVersionField(repoRoot: string, relPath: string): VersionField {
+  const abs = path.join(repoRoot, relPath);
   let version: string | null = null;
   try {
     const raw = fs.readFileSync(abs, "utf8");
     const obj = JSON.parse(raw) as Record<string, unknown>;
-    let val: unknown;
-    if (spec.pointer === "version") {
-      val = obj.version;
-    } else {
-      const plugins = obj.plugins;
-      if (Array.isArray(plugins) && plugins.length > 0 && plugins[0] && typeof plugins[0] === "object") {
-        val = (plugins[0] as Record<string, unknown>).version;
-      }
-    }
-    version = typeof val === "string" ? val : null;
+    version = typeof obj.version === "string" ? obj.version : null;
   } catch {
     version = null;
   }
-  return { source: spec.relPath, version };
+  return { source: relPath, version };
 }
 
-// ── readVersionFields — read all 5 version fields, in declared order. ────────────────────────────
+// ── readVersionFields — read all 3 version fields, in declared order. ────────────────────────────
 export function readVersionFields(repoRoot: string): VersionField[] {
-  return VERSION_SOURCES.map((spec) => readVersionField(repoRoot, spec));
+  return VERSION_SOURCES.map((relPath) => readVersionField(repoRoot, relPath));
 }
 
 // ── versionsConsistent — true iff every field is non-null AND all versions are equal. ────────────
@@ -150,26 +145,21 @@ export function loadS2Evidence(jsonPath: string): S2Evidence {
 }
 
 // ── selftest — RED+GREEN fixture cases exercised against temp repo trees. ────────────────────────
-// RED case 1: 5-way version drift (the real repo's state) + no evidence → cov 0/3.
+// RED case 1: 3-way version drift + no evidence → cov 0/3.
 // RED case 2: versions aligned but evidence flags false → cov 1/3.
 // RED case 3: a missing version file (null) → not consistent → cov contribution 0.
-// GREEN case: all 5 versions aligned + both evidence flags true → cov 3/3 = 1.0.
+// GREEN case: all 3 versions aligned + both evidence flags true → cov 3/3 = 1.0.
 export function selftest(): boolean {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chart2-s2-"));
   let allPassed = true;
 
   function writeVersioned(root: string, versions: (string | null)[]): void {
     // versions maps 1:1 onto VERSION_SOURCES. null → omit the field (still write the file).
-    VERSION_SOURCES.forEach((spec, i) => {
-      const abs = path.join(root, spec.relPath);
+    VERSION_SOURCES.forEach((relPath, i) => {
+      const abs = path.join(root, relPath);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       const v = versions[i];
-      let obj: Record<string, unknown>;
-      if (spec.pointer === "version") {
-        obj = v === null ? { name: "x" } : { name: "x", version: v };
-      } else {
-        obj = v === null ? { plugins: [{ name: "x" }] } : { plugins: [{ name: "x", version: v }] };
-      }
+      const obj: Record<string, unknown> = v === null ? { name: "x" } : { name: "x", version: v };
       fs.writeFileSync(abs, JSON.stringify(obj));
     });
   }
@@ -191,23 +181,23 @@ export function selftest(): boolean {
     }
   }
 
-  // RED case 1: 5-way drift (real repo's actual values) + no evidence → 0/3.
+  // RED case 1: 3-way drift (the shape M126 originally observed) + no evidence → 0/3.
   {
     const root = path.join(tmpDir, "drift");
-    writeVersioned(root, ["0.3.8", "0.3.5", "0.3.22", "0.3.16", "0.3.5"]);
+    writeVersioned(root, ["0.3.8", "0.3.22", "0.3.5"]);
     const ev = writeEvidence(root, false, false);
     const fields = readVersionFields(root);
     const vc = versionsConsistent(fields);
     const { fullManifestPublished, foreignInstallE2eGreen } = loadS2Evidence(ev);
     const { cov } = computeS2Cov(vc, fullManifestPublished, foreignInstallE2eGreen);
     if (vc !== false) { console.error("SELFTEST FAIL: drift versions should be inconsistent"); allPassed = false; }
-    check("red-5way-drift-no-evidence", cov, 0);
+    check("red-drift-no-evidence", cov, 0);
   }
 
   // RED case 2: versions aligned but evidence flags false → 1/3.
   {
     const root = path.join(tmpDir, "aligned-no-evidence");
-    writeVersioned(root, ["0.4.0", "0.4.0", "0.4.0", "0.4.0", "0.4.0"]);
+    writeVersioned(root, ["0.4.0", "0.4.0", "0.4.0"]);
     const ev = writeEvidence(root, false, false);
     const fields = readVersionFields(root);
     const vc = versionsConsistent(fields);
@@ -220,7 +210,7 @@ export function selftest(): boolean {
   // RED case 3: one missing version field (null) → not consistent → cov 0/3.
   {
     const root = path.join(tmpDir, "missing-field");
-    writeVersioned(root, ["0.4.0", "0.4.0", null, "0.4.0", "0.4.0"]);
+    writeVersioned(root, ["0.4.0", null, "0.4.0"]);
     const ev = writeEvidence(root, false, false);
     const fields = readVersionFields(root);
     const vc = versionsConsistent(fields);
@@ -233,7 +223,7 @@ export function selftest(): boolean {
   // GREEN case: all aligned + both evidence flags true → 3/3 = 1.0.
   {
     const root = path.join(tmpDir, "all-green");
-    writeVersioned(root, ["0.4.0", "0.4.0", "0.4.0", "0.4.0", "0.4.0"]);
+    writeVersioned(root, ["0.4.0", "0.4.0", "0.4.0"]);
     const ev = writeEvidence(root, true, true);
     const fields = readVersionFields(root);
     const vc = versionsConsistent(fields);
