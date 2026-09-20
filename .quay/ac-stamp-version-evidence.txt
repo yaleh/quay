@@ -176,3 +176,30 @@ Then run:          quay --help
     after:  packages/quay/plugin/.claude-plugin/plugin.json .version = 0.10.0-dev
     (the tarball itself, if packed:)
 packages/quay/quay-0.10.0-dev.tgz
+
+=== AC4 RE-VERIFIED on the FINAL code (after the sh-census compaction of sync-vendor.sh /
+    publish-dist-branch.sh) — the reading above was taken before that compaction, so it is re-taken here.
+--- worktree on branch release/ac4-reading2 (created at the committed tip), VERSION = 0.10.0
+--- pre:  plugin/VERSION = 0.10.0-dev   plugin/.claude-plugin/plugin.json .version = 0.10.0-dev
+--- $ bash plugin/scripts/sync-vendor.sh          (the REAL full path, exit 0)
+    [sync-vendor] stamping the built plugin tree (build-form, branch-aware)...
+    STAMP-VERSION: mode=build root=.../plugin source=.../VERSION = 0.10.0 => every carrier must == 0.10.0
+    STAMP-VERSION: wrote 5 file(s), 5 carrier(s)
+--- post (NO -dev on a release/* branch):
+    plugin/VERSION                             = 0.10.0
+    plugin/.claude-plugin/plugin.json .version = 0.10.0
+    plugin/README.md version line              = quay plugin v0.10.0
+    plugin/vendor/quay/package.json .version   = 0.10.0
+    plugin/.claude-plugin/marketplace.json     = 0.10.0
+--- and the publish channel: $ bash plugin/scripts/publish-dist-branch.sh --no-build   (exit 0)
+    [publish-dist-branch] rewriting staged invokers ... and stamping the build version ...
+    STAMP-VERSION: mode=build root=.../.tmp-dist-publish-worktrees/publish-pU4K4h ... => every carrier must == 0.10.0
+    STAMP-VERSION: wrote 5 file(s), 5 carrier(s)
+    dist-closure gate OK (directory): 100 referenced dist bundles all present in the assembled tree
+    orphan commit ready: 8cd8d79cfa861b4f61257bb56bf9e716540762f3   (no --push: nothing published)
+
+=== AC5+AC6 re-verified after the compaction: the scoped gate is GREEN
+    $ bash scripts/test.sh --for-task gap-version-stamp-generator-and-build-wiring --allow-thin
+    exit=0  (sh-census-check PASS; mirror-pair-drift-check PASS; 5/5 tests pass)
+    carrier/plugin .sh code-line deltas vs develop (the sh-census ratchet axis): sync-vendor.sh -1,
+    publish-dist-branch.sh 0, packages/quay/scripts/package.sh +4 (not an embedded-interpreter script)
