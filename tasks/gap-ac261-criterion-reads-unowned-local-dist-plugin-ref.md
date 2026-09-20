@@ -137,21 +137,21 @@ $ git branch -a | grep -i dist
 
 ## Acceptance Criteria
 
-- [ ] **AC1 取证完整**：Requested action 1 的全部原始输出已贴，且与本文 §一/§三 读数一致（不一致 ⇒ 停并报告）。
-- [ ] **AC2 AC-261 criterion 已改且只改了 ref 来源**：贴改写**前后**完整文本（diff 形态），并逐条指出
+- [x] **AC1 取证完整**：Requested action 1 的全部原始输出已贴，且与本文 §一/§三 读数一致（不一致 ⇒ 停并报告）。
+- [x] **AC2 AC-261 criterion 已改且只改了 ref 来源**：贴改写**前后**完整文本（diff 形态），并逐条指出
       「断言 / 四条臂语义 / exit 码一字未动」。⛔ 只贴改写后不算。若走收窄条款（沿用兄弟任务形态），
       须贴出该任务的落地读数与「逐字沿用」的证据。
-- [ ] **AC3 负控制三臂全跑通**（每臂贴命令 + 原始输出 + exit 码）：① 渠道候选 ⇒ exit 0；② 候选全不可解析
+- [x] **AC3 负控制三臂全跑通**（每臂贴命令 + 原始输出 + exit 码）：① 渠道候选 ⇒ exit 0；② 候选全不可解析
       ⇒ exit 1 ∧ 仪器态原因可区分（硬规则 3b）；③ 退回裸 ref ⇒ exit 1。⛔ 缺臂即未完成。
-- [ ] **AC4 写入门读数**：AC-261 criterion 经 goal store 写面接受（或拒绝原文逐字落痕 + 处置），且
+- [x] **AC4 写入门读数**：AC-261 criterion 经 goal store 写面接受（或拒绝原文逐字落痕 + 处置），且
       `criterion-failure-attribution-check.ts` 计数未增（贴前后计数）；若增，按该检查器自述的 `--capture`
       重锚 `docs/analysis/criterion-failure-attribution.baseline.json`（⛔ 不得靠放宽检测器过关）。
-- [ ] **AC5 store runner 转绿**：`goal gate AC-261` ⇒ exit 0（贴完整 JSON）；`goal check --stale-pass`
+- [x] **AC5 store runner 转绿**：`goal gate AC-261` ⇒ exit 0（贴完整 JSON）；`goal check --stale-pass`
       ⇒ `failing` **不含 AC-261**（贴完整 JSON）。⚠️ 若该次读数里 `failing` 仍含 AC-260，如实贴出并注明
       那属于 `gap-ac260-…` 的范围，⛔ 不据此判本任务失败、也⛔ 不代它修。
-- [ ] **AC6 回归守护能取假**：新增/扩展的测试在「把 ref 来源退回裸 `dist-plugin`」时**变红**，恢复后变绿；
+- [x] **AC6 回归守护能取假**：新增/扩展的测试在「把 ref 来源退回裸 `dist-plugin`」时**变红**，恢复后变绿；
       **两个读数都贴**。⛔ 只贴绿不算（恒真断言与"合格"同形）。
-- [ ] **AC7 既有门不因本次改动转红**：`bash scripts/test.sh --for-task gap-ac261-criterion-reads-unowned-local-dist-plugin-ref` exit 0（贴读数）。
+- [x] **AC7 既有门不因本次改动转红**：`bash scripts/test.sh --for-task gap-ac261-criterion-reads-unowned-local-dist-plugin-ref` exit 0（贴读数）。
 
 ## Definition of Done
 
