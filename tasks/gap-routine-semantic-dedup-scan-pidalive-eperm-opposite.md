@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-pidalive-eperm-opposite
 title: "semantic-dedup-scan: Three copies treat EPERM as alive
   (exists-but-not-ours) and are byte-identical, but driver-runtime.ts:241
   returns false unconditionally, so the same-named prob"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
