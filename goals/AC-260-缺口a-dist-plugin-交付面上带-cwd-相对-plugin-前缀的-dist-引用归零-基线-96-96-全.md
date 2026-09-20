@@ -7,11 +7,18 @@ goal: GOAL-019
 criterion: |-
   python3 - <<'P'
   import re, subprocess, sys
-  BR = "dist-plugin"
+  CHAN = None
+  for _cand in ("refs/remotes/origin/dist-plugin", "refs/heads/dist-plugin"):
+      _r = subprocess.run(["git","rev-parse","--verify","-q","%s^{commit}" % _cand],capture_output=True,text=True)
+      if _r.returncode == 0:
+          CHAN = _cand; break
+  BR = CHAN
+  if BR is None:
+      sys.stderr.write("AC-260: no dist-plugin ref resolves on the candidate list ('refs/remotes/origin/dist-plugin', 'refs/heads/dist-plugin') => INSTRUMENT STATE, not a delivery-face verdict: this criterion cannot read the marketplace face at all, so the face has NOT been judged (fetch refs/remotes/origin/dist-plugin, or run where the branch exists)\n"); sys.exit(1)
   try:
       files = subprocess.run(["git","ls-tree","-r","--name-only",BR],capture_output=True,text=True,check=True).stdout.split()
   except Exception as e:
-      sys.stderr.write("AC-260: cannot read branch %s (%s) => the marketplace delivery face is absent, so this AC has never been exercised\n" % (BR, e)); sys.exit(1)
+      sys.stderr.write("AC-260: resolved %s but its tree is unreadable (%s) => INSTRUMENT STATE, not a delivery-face verdict: this AC has NOT been evaluated\n" % (BR, e)); sys.exit(1)
   fileset = set(files)
   carriers = [f for f in files if f.rsplit(".",1)[-1] in ("md","sh","js")]
   if not carriers:
