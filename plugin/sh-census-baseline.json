@@ -151,8 +151,24 @@
         "embeddedInterpreterLines": "-239 = plugin/scripts/develop-deliver-tgz.sh effective lines 2354 -> 2115. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is exactly this one file (`git diff --name-only develop HEAD` → the new .ts, the two .mjs tests, and this .sh), and the new module is a `.ts`, outside a `*.sh` census. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/develop-deliver-tgz.sh].codeLines 2354 -> 2115, and totals.embeddedInterpreterLines 9133 -> 8894 — the two readings differ by exactly the one file, so nothing else moved.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-cross-machine-verify-sh, SPEC §5 Phase 5.2)",
+      "from": {
+        "embeddedInterpreterLines": 8894,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 8413,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of the task. plugin/scripts/cross-machine-verify.sh was 489 effective lines carrying FIVE embedded `python3` invocations (three `-c` one-liners + two heredocs: the concatenated-JSON-object scanner, ISO->epoch, hours-between, the gate's failing-file extraction, and the report's JSON emitter). The program now lives in the new sibling plugin/scripts/cross-machine-verify.ts and the .sh is an 8-effective-line thin entry that execs it. BOTH halves of this task's AC3 hold on the checker's own reading: that file's `embedded` is now [\"node\"] — python3 is GONE — AND its codeLines is 8 (<= 25), so it is a thin entry rather than merely a shrunken program. NOTE the axis counts effective lines of .sh containing an embedded interpreter AT A COMMAND POSITION, and the wrapper execs `node --no-warnings --experimental-strip-types`, so the file STAYS IN the axis — the line count moved, not its membership (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh entries above). Lowering is the permitted direction and needs no ceremony beyond this committed file change.",
+      "attribution": {
+        "embeddedInterpreterLines": "-481 = plugin/scripts/cross-machine-verify.sh effective lines 489 -> 8. Residual = 0 BY CONSTRUCTION, not by sampling: the branch's `.sh` delta vs develop is EXACTLY this one file (`git diff --name-only develop HEAD` -> plugin/scripts/cross-machine-verify.sh, plus the new .ts and the new .mjs test; the new module is a `.ts`, outside a `*.sh` census). Measured with the checker's OWN reading: files[path=plugin/scripts/cross-machine-verify.sh].codeLines 489 -> 8 and totals.embeddedInterpreterLines 8894 -> 8413; the two readings differ by exactly the one file, so nothing else moved.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 8894,
+  "embeddedInterpreterLines": 8413,
   "duplicateCopies": 0
 }
