@@ -2,7 +2,7 @@
 id: gap-ac271-finish-step-needs-self-acting-carrier
 title: AC-271 第三次红：release/v0.11.0 切版未删分支（§12 把 tag 钉在合并点 ⇒ 判据形态 (b)
   不可达，删除是唯一可达的合规形态），而收尾步仍只靠人记得——需要一个【自作用】的收尾载体
-status: todo
+status: ready
 labels:
   - gap
   - defect
