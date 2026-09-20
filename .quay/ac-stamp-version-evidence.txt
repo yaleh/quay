@@ -203,3 +203,28 @@ packages/quay/quay-0.10.0-dev.tgz
     exit=0  (sh-census-check PASS; mirror-pair-drift-check PASS; 5/5 tests pass)
     carrier/plugin .sh code-line deltas vs develop (the sh-census ratchet axis): sync-vendor.sh -1,
     publish-dist-branch.sh 0, packages/quay/scripts/package.sh +4 (not an embedded-interpreter script)
+
+=== AC1 literal command
+    $ node --experimental-strip-types --test scripts/stamp-version.test.ts
+    ℹ tests 14   ℹ pass 14   ℹ fail 0     exit=0
+    $ node --experimental-strip-types --test scripts/version-consistency-check.test.ts
+    ℹ tests 26   ℹ pass 26   ℹ fail 0     exit=0
+
+=== AC2 literal command (硬规则 2: 前 3 条命中 + 对已知为真的样本干跑一次)
+    $ grep -rn "packages/quay-backlog/package.json" scripts/*.ts | grep -v "\.test\."
+    scripts/version-carriers.ts:193:  jsonVersionField('packages/quay-backlog', 'packages/quay-backlog/package.json'),
+    (exactly ONE module; and the same predicate on scripts/version-carriers.ts — the known-true sample —
+     returns the same single hit, so the predicate is not vacuously true)
+    其余三条 carrier 路径同样只在 scripts/version-carriers.ts 出现
+    负控制：把 4 条 lock 条目喂给旧 fixture ⇒ 新检查器 exit 1 / mode:'error'（见下）
+
+=== AC2 negative control: the fixture extension is load-bearing, not decorative
+    old fixture (no package-lock.json) + new checker =>
+      VERSION-CONSISTENCY: ERROR
+      package-lock.json (packages/quay        ): ERROR — unreadable: ENOENT .../package-lock.json
+      package-lock.json (packages/quay-native ): ERROR — ...
+      package-lock.json (packages/quay-github ): ERROR — ...
+      package-lock.json (packages/quay-backlog): ERROR — ...
+      exit=1
+    ⇒ 不补 plugin/scripts/checker-mutation-cases/version-consistency-check.sh 的 fixture，
+      GREEN baseline 会变成这个 always-red 形状（该 case 自己的 INVARIANT (a) 说的就是这个）
