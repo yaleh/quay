@@ -53,7 +53,7 @@
 // Run:
 //   scripts/test.sh plugin/test/cross-machine-verify-characterization.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -99,9 +99,14 @@ function git(cwd, args, env = {}) {
   });
 }
 
-const tmpDirs = [];
-process.on("exit", () => {
-  for (const d of tmpDirs) {
+// Temp-dir lifecycle: the carrier array + `after()` pattern (the house form — `tmp-leak-pairing-check`
+// and `test-isolation-check` both judge this file, and a `process.on("exit")` teardown reads to them as
+// NO cleanup at all). Every temp tree goes through `tempRoot()` below, which pushes onto the
+// carrier the `after()` hook drains. Each fixture is a bare repo + two working clones, so leaking one
+// leaves four directories behind per case.
+const TEMP_ROOTS = [];
+after(() => {
+  for (const d of TEMP_ROOTS) {
     try {
       fs.rmSync(d, { recursive: true, force: true });
     } catch {
@@ -109,9 +114,9 @@ process.on("exit", () => {
     }
   }
 });
-function mkdtemp(prefix) {
+function tempRoot(prefix) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  tmpDirs.push(d);
+  TEMP_ROOTS.push(d);
   return d;
 }
 
@@ -151,7 +156,7 @@ function syncB(b) {
  * checkout (the bare repo's `develop` is born here); `machine-b` = the OTHER machine, a real clone.
  */
 function setupMachines() {
-  const tmp = mkdtemp("cmv-char-");
+  const tmp = tempRoot("cmv-char-");
   const origin = path.join(tmp, "origin.git");
   const a = path.join(tmp, "machine-a");
   const b = path.join(tmp, "machine-b");
@@ -488,7 +493,7 @@ test("C4c — an EMPTY --branches is a usage error (2), not a run over `no branc
 });
 
 test("C4d — a --root that is not a git repo is a fail-closed exit 2", () => {
-  const tmp = mkdtemp("cmv-nonrepo-");
+  const tmp = tempRoot("cmv-nonrepo-");
   const r = cmv(["--root", tmp, "--branch", "develop", "--machine", "machine-B"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, new RegExp(`^cross-machine-verify: not a git repo: ${tmp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
