@@ -2,7 +2,7 @@
 id: gap-fan-in-cert-flip-commit-identity-inert
 title: suite 证书闸对 driver 自己的 flip-done 提交按【身份】判惰性，不再交给依赖 registry
   的分类器——外部项目每个任务白烧 3～6 次全量 suite 的根因修复
-status: ready
+status: done
 labels:
   - gap
   - defect
