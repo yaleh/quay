@@ -3,7 +3,8 @@
 #
 # WHY THIS FILE EXISTS: manager-tick-log-check.sh 在 P4 守卫谱系里是【已声明】守卫
 # (capability-catalog GUARD_OBJECT: `manager-tick-log-check.sh → file:orchestration/manager-tick-log.md`)
-# 且在 orchestration/orchestrator-loop-tick.md 每轮被真实调用 —— 但它的判定窗口内 `fired` 为空，
+# 且在外层 tick doc 里每轮被真实调用（quay-init 把它落到 consumer 的 orchestration/ 布局）——
+# 但它的判定窗口内 `fired` 为空，
 # 又【没有 mutation case】⇒ guard-lineage-check.ts 把它归入 suspicious（「never-fired and not
 # mutation-verified — indistinguishable from a broken guard」，P4 定义）。姊妹档 outer-tick-log-check.sh
 # 同样从未变红，唯一差别就是它【有】这个 case 文件 ⇒ 归 preventive。本文件补上那个差别。

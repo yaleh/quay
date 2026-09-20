@@ -987,8 +987,9 @@ run_static_checks() {
   # @static-object plugin/ scripts/ experiments/ plugin/sh-census-baseline.json plugin/sh-census-exceptions.txt plugin/scripts/sh-census-check.ts plugin/test/sh-census-check.test.mjs plugin/scripts/checker-mutation-cases/sh-census-check.sh
   run_checker "sh-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/sh-census-check.ts" --root "${repo_root}"
   echo "== manager tick-log persistence check — 注册面 (gap-manager-tick-log-check-mutation-case) =="
-  # manager-tick-log-check.sh 是 AC5b 的机械挂载点（「上一轮 tick 没落行」），生产调用方是
-  # orchestration/orchestrator-loop-tick.md（每轮 `--json`）。它此前【不在任何注册面里】——mutation
+  # manager-tick-log-check.sh 是 AC5b 的机械挂载点（「上一轮 tick 没落行」），生产调用方是外层
+  # tick doc（quay-init 把它落到 consumer 的 orchestration/ 布局，每轮 `--json` 调用）。它此前
+  # 【不在任何注册面里】——mutation
   # case 即使存在也没有任何机件执行它（checker-mutation-check.sh 的 manifest 只从 run_static_checks /
   # run_operational_checks / run_doc_checks / CI 解析，名单从不手写）⇒ 那是 hard rule 4 推论三的
   # 「回声」形态。这一行把它接进 manifest，于是它的 mutation case 由 --check 实际执行（P4 谱系里
