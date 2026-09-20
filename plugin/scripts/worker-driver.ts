@@ -2676,6 +2676,9 @@ export function isQuickDeath(
 //   session limit · resets 11:30am (UTC)"); fallback to first shuffled candidate`，对应 wall_clock_ms =
 //   4643 / 7685 / 5106（三次都 <60s ⇒ 三次都计入上限）⇒ 任务 fleet-agent-sessions-screen-endpoint 被机械
 //   翻 needs-human，成因类记成 human-adjudication（"需要人裁决"，而真相是"等 17 分钟"）。
+//   ⚠️ 这段是 2026-09-13 的事实记录：其中的「成因类」字段已于 2026-09-20 整套退役
+//   （gap-retire-needs-human-cause-enumeration）——本分类器（下面的 classifyQuickDeathCause）保留，
+//   它只决定重试计数与注记文字，⛔ 不再是任何 frontmatter 字段。
 // ⛔ 关键点：driver 【已经握着能区分的证据】——限流原文完整落在 selector_reason 字段里并落了盘。
 //   不是"看不出来"，是"看出来了但不分类"。
 // 判据来源（⛔ 不新增探测面、⛔ 不做语义判断）：只用 driver 已捕获的 selector_reason 文本做【字面子串】
@@ -5427,16 +5430,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     );
     if (backoff.newlyNeedsHuman) {
       retryState.needsHuman.add(r.taskId);
-      // 成因类写进注记（plan item 4「成因类必须让读者一眼区分」）：⛔ 不再让 quick-death 路径的成因
-      // 与 human-adjudication 同形——markNeedsHuman 对【无 exited-not-landed 尝试】的翻转默认落
-      // human-adjudication，而这里如实带上本条分类器的取值（ordinary / unclassifiable；transient-external
-      // 结构上到不了这里）。⛔ transient-external 不自动回捞（终态由人/上层裁决），此处只保证
-      // 「若真落了终态，成因可区分」。
+      // 注记必须让读者一眼区分真因（plan item 4）：本路径【没有】exited-not-landed 尝试 ⇒ 注记的
+      // 「失败步/判词」行结构上缺省，若不带上快速死亡分类器的取值，这条翻转就只剩模板句、与其他路径
+      // 同形。故如实把分类器取值写进阻碍原因（ordinary / unclassifiable 两态；transient-external
+      // 结构上到不了这里）。⛔ 该分类器只管重试计数——它不再是「needs-human 成因字段」的一部分
+      // （gap-retire-needs-human-cause-enumeration 已删除该字段）。⛔ transient-external 不自动回捞
+      // （终态由人/上层裁决）。
       markNeedsHuman(
         rootDir,
         r.taskId,
         `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）` +
-          `；成因类：${backoff.cause ?? "unclassifiable"}（快速死亡成因分类器取值，⛔ 非 human-adjudication 模板）`,
+          `；快速死亡分类：${backoff.cause ?? "unclassifiable"}`,
       );
     }
     if (backoff.quickDeath && json) {
