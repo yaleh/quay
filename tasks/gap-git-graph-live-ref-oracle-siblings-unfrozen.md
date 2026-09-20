@@ -40,7 +40,7 @@ extra:
 - [x] 4 个文件逐一对拍判据的两侧取自**同一个不可变 ref 集合**（快照或等价机制），打印实现位置与取值时机；`observation.ts` 保持零改动（除非能证明必须改）。
 - [x] 负控制可区分（硬规则 4 推论三）：每个文件都留一个「关掉冻结」的注入缝隙（沿用 `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` 这一族命名，⛔ 不设第二个语义相同、名字不同的开关）；隔离 clone + churn 下关掉 ⇒ 红、打开 ⇒ 绿，两臂都是真实读数。
 - [x] 判据不得退化：各文件原本的非空性/一致性断言修后仍能取假（至少给出一处「构造错位读数 ⇒ 报红」的真实读数），⛔ 不得用「只比交集」「重读一次生产函数」等方式削弱。
-- [ ] `scripts/test.sh --for-task <本条>` exit 0，且**逐行核过**选中的测试确实包含这 4 个文件（不是只看 exit code —— 本仓库实测过「门绿在 0 个测试上」的形态）。
+- [x] `scripts/test.sh --for-task <本条>` exit 0，且**逐行核过**选中的测试确实包含这 4 个文件（不是只看 exit code —— 本仓库实测过「门绿在 0 个测试上」的形态）。
 
 ## Evidence
 
@@ -63,6 +63,13 @@ extra:
 - ⛔ 未使用「只比交集」「重读一次生产函数」等削弱手法；两侧仍是两次独立 git 读，只是起点列表不可变。
 
 **⚠️ 实测发现的第二个机制（超出本条 Finding 的诊断，已一并修掉）**：**冻结 ref「集合」并不冻结 `%D`**。同一份不可变对象名列表下，两次相邻 `git log … %D` 读数**会不同**（实测：`b644776…_churn` → `b644776…`）——churn ref 前进到冻结列表之外的提交，原来带 decoration 的提交就失去了它。`%D` 由 git 从**实时 ref 表**渲染，而 3 个文件判的正是 decoration 集合 ⇒ 残留同类假失败。`%D` 无法在不让一侧沦为回声（硬规则 4）的前提下钉死，故加 `withStableWindow()`：整个判据在 ref 映射变动时重取（refs 稳定时的失败**立即上抛**；尝试耗尽则 fail-closed 报错，⛔ 不静默通过）。
+
+**AC4 — scoped 门 exit 0，选择面逐行核过**
+- `bash scripts/test.sh --for-task gap-git-graph-live-ref-oracle-siblings-unfrozen --allow-thin` ⇒ **exit 0**，`tests 17 / pass 17 / fail 0`。
+- 选择面逐行核过（`select-tests-for-touches.ts --root <worktree> --task <本条> --allow-thin`）：`task gap-git-graph-live-ref-oracle-siblings-unfrozen: 4 test file(s)`，其后逐行就是这 4 个文件（adopt / reconstructed / ref-partition / stride）——⛔ 不是「只看 exit code」，也不是「门绿在 0 个测试上」。
+- **重跑过一次**：develop 在本轮内前进（`8721aa853` → `8a260e748`，其中 `plugin/scripts/anti-drift-touches-check.ts` +184 行），故重新 `merge develop` 并**重跑** scoped 门 ⇒ 仍 exit 0 / 17 pass。
+- `anti-drift-touches-check --task <本条> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: 5 actual file(s), all within declared Touches (6 glob(s))`。
+- scoped-gate cache 以 `develop=8a260e748` 写入 `.quay/scoped-gate-cache.json`。
 
 **DoD 佐证**：`observation.ts` 零改动；各判据负控制仍取红；生产读路径与判据强度均未下降。
 
