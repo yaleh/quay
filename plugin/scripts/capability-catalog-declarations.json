@@ -27,6 +27,7 @@
  ],
 "QUESTION": {
   "quay-init-steps.ts": "plugin/scripts/quay-init.sh 的每一个内嵌步骤，现在由 packages/quay/src/init.ts 的哪个函数实现、输入/输出契约是什么，以及去掉那 12 处内嵌 python3（8 段 heredoc + 4 个 -c 单行）之后，这条入口在【没有 python3 的机器】上是否仍能把六文件面写对？（可复核读数是 sh-census-check 里 quay-init.sh 的 embedded 集合不含 python3）",
+  "develop-deliver-python-steps.ts": "plugin/scripts/develop-deliver-tgz.sh 里那 12 处内嵌 python3（10 段 <<'PY' heredoc 体 + 2 个 python3 -c 单行）现在由哪个 step 实现、输入/输出契约是什么，以及去掉它们之后这条入口在【没有 python3 的机器】上是否仍产出同一份交付产物、判出同一组可区分取值？（可复核读数：sh-census-check 里 develop-deliver-tgz.sh 的 embedded 集合不含 python3；plugin/test/develop-deliver-tgz-characterization.test.mjs 把 12 个契约的 stdout/退出码按迁移前实测钉住）",
   "arch-coverage-report.ts": "仓库里每一种语言，**谁分析了它、分析了几成** —— 具体说：.archguard/query/manifest.json 的 global scope（默认 scope，直接调 archguard_summary 时唯一可见的那个）只覆盖 tracked 非测试 .ts 的哪一部分、哪些 .ts 目录落在**任何** scope 之外、以及 mjs/js/sh/py 这四种语言是不是**根本没有分析器**，从而让「archguard 报 0 环」不再能冒充「无环」，也让「未评估」第一次有独立取值（⛔ 缺 manifest ⇒ 行 NOT-EVALUATED/manifest-missing，坏 JSON ⇒ evaluated:false exit 2，两者与「查过且合格」三态互不同形；tasks/gap-arch-coverage-self-report，SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.1/§2 P6）？",
   "import-graph-check.ts": "按【语句位置】解析出的模块依赖图里，那三个会回升的结构量各是几 —— import/export 语句（值边）vs import type / export type（类型边）构成的强连通分量中【只用值边就成立的环】有几个、【只有把类型边也算进去才成立的环】有几个、packages/** 反向 import plugin/** 或 experiments/** 的边有几条，以及（当 packages/quay/src/kernel/ 存在时）其下文件有没有 import 到 kernel 之外 —— 从而让 archguard 对 plugin/scripts 只当成单个 (root) 包、detect_cycles 返回 []（即『0 环』实为『未评估』）这件事，第一次有一个按位置判定、realpath 去重、只降不升的读数（tasks/gap-arch-import-graph-check；SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P1 / §5 Phase 0a）?",
   "sh-census-check.ts": "本仓库 tracked 的 .sh 里，哪些是【程序】、哪些是【胶水】 —— 每个 .sh 的有效行（去空行、去纯注释行）、有没有在【命令位置】内嵌 node（须带 --experimental-strip-types / -e / --eval / 直接跑 .ts）、python3、jq（注释、字符串、heredoc 正文里提到不算）、有没有同目录同名的 .ts 孪生、被多少个 ts / sh / test / 其它文件按 basename 引用；以及 experiments 下的 scripts 目录与 plugin/scripts 之间有几对【非符号链接且字节相同】的重复副本（符号链接单独计为 symlinkedCopies，不计入重复）、有几个无调用者的候选（⚠️ 静态 basename 匹配的候选，会漏掉动态拼接的脚本名，删除前必须做动态引用核对）—— 从而让 archguard 完全不解析 shell 这件事第一次有一个读数在盯这约 2.5 万有效行，并把两个【会回升】的量设成只降不升的棘轮：内嵌解释器的 .sh 有效行合计（例外清单外）与字节相同重复副本对数（例外清单单列汇总、不计入棘轮但也不从输出里消失；两个基线文件的路径见本表的 CONSUMER 行，不在此处重述）（tasks/gap-arch-sh-census-check；SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §2 P2/P4 / §5 Phase 0b）?",
@@ -387,6 +388,7 @@
 },
 "CADENCE": {
   "quay-init-steps.ts": "按需",
+  "develop-deliver-python-steps.ts": "按需",
   "arch-coverage-report.ts": "按需",
   "import-graph-check.ts": "每轮",
   "sh-census-check.ts": "每轮",
@@ -738,6 +740,7 @@
 },
 "INVALIDATION": {
   "quay-init-steps.ts": "失效前提：① quay-init.sh 仍以 node --no-warnings --experimental-strip-types \"${SCRIPT_DIR}/quay-init-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/quay-init-steps.js）；② 由此到达的 init.ts 函数仍是【逐行等价移植】而不是重写；③ 那 12 个调用点仍各自占 quay-init.sh 的一行。三点任一改变（例如 quay-init.sh 整体退役、或改成直调 vendored 的 dist/quay.js），本条的读数不再成立",
+  "develop-deliver-python-steps.ts": "失效前提：① develop-deliver-tgz.sh 仍以 node --no-warnings --experimental-strip-types \"$SCRIPT_DIR/develop-deliver-python-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/develop-deliver-python-steps.js）；② 由此到达的函数仍是【逐行等价移植】而不是重写（AC3 判的是同一份输入下 stdout/退出码一致）；③ 那 12 个调用点仍各自占 develop-deliver-tgz.sh 的一行（10 个 heredoc 体与 2 个 -c 单行各被替换成一行 py_steps <step>）。三点任一改变（例如 develop-deliver-tgz.sh 整体退役、或改成直调别的运行时），本条的读数不再成立",
   "arch-coverage-report.ts": "失效前提：①语言的判定仍按扩展名（ts/mjs/js/sh/py），counted 口径仍取自 git ls-files 的 tracked 面；② archguard 的 scope 载体仍是 .archguard/query/manifest.json 且其 scopes[].sources 仍是目录绝对路径、globalScopeKey 仍指向其中一个 key；③ ts 的 analyzed 判据仍是「所在目录落于某 scope 的 sources 之内」。若 archguard 换掉 manifest 的形状/位置（例如改为按文件而非按目录记 scope），或新增某种语言的分析器（那时该语言应从 no-analyzer 改为真判据，而不是继续恒报 NOT-EVALUATED），本条需同步",
   "import-graph-check.ts": "失效前提：模块依赖仍以 git 跟踪的 TypeScript 源文件为唯一载体，且依赖关系仍由 import/export 语句声明（按语句位置可读）；若模块系统整体退休、或跨层依赖改由配置/注入表达而不再写进 import 语句，本条随之失效",
   "sh-census-check.ts": "失效前提：shell 层普查的两个量仍然只可能由本检查器枚举的那三类载体回升 —— ①被 git 跟踪的 .sh 文件（数据源是 git ls-files，不是 find），②命令位置的内嵌解释器（node 带 --experimental-strip-types/-e/--eval/直接跑 .ts、python3、jq），③experiments 脚本目录与 plugin/scripts 之间同 basename 的字节相同副本；若 shell 层被整体收敛到不再有 tracked .sh、或内嵌程序的判定口径改为读 AST 或配置声明而不再按命令位置、或实验目录副本策略改为直接删除（不再有可比较的同名对），本条退休",
@@ -1089,6 +1092,7 @@
 },
 "LAST_REAFFIRMED": {
   "quay-init-steps.ts": "2026-09-20",
+  "develop-deliver-python-steps.ts": "2026-09-20",
   "arch-coverage-report.ts": "2026-09-19",
   "import-graph-check.ts": "2026-09-19",
   "sh-census-check.ts": "2026-09-19",
@@ -1440,6 +1444,7 @@
 },
 "MATCHING": {
   "quay-init-steps.ts": "n/a",
+  "develop-deliver-python-steps.ts": "n/a",
   "arch-coverage-report.ts": "enumerative",
   "import-graph-check.ts": "position",
   "sh-census-check.ts": "position",
@@ -1791,6 +1796,7 @@
 },
 "CONSUMER": {
   "quay-init-steps.ts": "谁按：plugin/scripts/quay-init.sh 的 quay-init-step 函数（唯一调用者，每个 step 占一行）；机械消费者是 plugin/test/quay-init-characterization.test.mjs（跑真实入口、把六文件面与退出码按 sha256 钉住，并已实测可取假）与 plugin/scripts/sh-census-check.ts（读 quay-init.sh 的 embedded 集合是否还含 python3）。命令行：node --no-warnings --experimental-strip-types plugin/scripts/quay-init-steps.ts <step> [args…]（--help 列出全部 step）",
+  "develop-deliver-python-steps.ts": "谁按：plugin/scripts/develop-deliver-tgz.sh 的 py_steps 包装函数（唯一调用者，每个 step 占一行 —— transport_evidence_append / check_evidence_completeness / check_e2e_pairing / check_upgrade_pairing / selfcheck_adrflip_transport / selfcheck_complete_change_transport / read_state_field / age_seconds）；机械消费者是 plugin/test/develop-deliver-tgz-characterization.test.mjs（跑真实的 --selfcheck* 与 --check 入口，把 12 个契约的 stdout/退出码钉住，并已实测可取假）、plugin/test/develop-deliver-tgz-evidence-transport.test.mjs 与 plugin/scripts/sh-census-check.ts（读 develop-deliver-tgz.sh 的 embedded 集合是否还含 python3）。命令行：node --no-warnings --experimental-strip-types plugin/scripts/develop-deliver-python-steps.ts <step> [args…]（--help 列出全部 step）",
   "arch-coverage-report.ts": "谁按：任何要判「仓库里某语言/某目录有没有被任何分析仪器覆盖」的人或层 —— 命令行 node --experimental-strip-types plugin/scripts/arch-coverage-report.ts <root> --archguard-manifest <主检出的 .archguard/query/manifest.json> --json，并把完整输出写进 .quay/arch-coverage-report.latest.json（该载体已 gitignore）；在 task worktree 里必须带 --archguard-manifest，因为 .archguard/ 是主检出的生成物、worktree 内通常不存在（不带则 ts 行按 manifest-missing 报 NOT-EVALUATED，这是诚实读数而非故障）。条件=要判定 archguard 的默认 global scope 覆盖面是否等于全仓（读数随仓库推进漂移，本次落地时 packages/quay/src 覆盖 tracked 非测试 .ts 的约 22%；精确值以 --json 的 globalScopeCoversTsFraction 与 globalScopeSources 为准，⛔ 不在此钉死字面量以免漂移），或要判某种语言是否根本没有分析器（当前 mjs/js/sh/py 四行全部 NOT-EVALUATED/no-analyzer）。⛔ 它【只报告不做门】，exit 0 只表示「报告已产出」，不表示「全部已评估」；本机件刻意不接入 runner-static-gate.ts —— 要做成棘轮是另一个任务",
   "import-graph-check.ts": "谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/ packages/ experiments/ scripts/ 以及本检查自身的三个文件；另由 plugin/test/import-graph-check.test.mjs 双控：真仓读数必须对上 plugin/import-graph-baseline.json 的三个数 + 六类 RED fixture + 注释/字符串负控 + NOT-EVALUATED 三态；mutation case 见 plugin/scripts/checker-mutation-cases/import-graph-check.sh）；基线数据文件 = plugin/import-graph-baseline.json（只降不升，且相对 git HEAD 的值也只许降）；条件=要判『模块依赖图的三个结构量是否回升』（值级环 / 仅类型边才成立的环 / packages→plugin|experiments 反向边），或 packages/quay/src/kernel/ 落地后要判其边界（tasks/gap-arch-import-graph-check）",
   "sh-census-check.ts": "谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object plugin/ scripts/ experiments/ 以及本检查自身的四个文件：plugin/sh-census-baseline.json、plugin/sh-census-exceptions.txt、plugin/scripts/sh-census-check.ts、plugin/test/sh-census-check.test.mjs；另由 plugin/test/sh-census-check.test.mjs 双控：真仓读数必须对上 plugin/sh-census-baseline.json 的两个数 + totals.scripts 必须等于一条独立 shell 管道的输出 + 按位置的六类注入用例与三态；mutation case 见 plugin/scripts/checker-mutation-cases/sh-census-check.sh）；基线数据文件 = plugin/sh-census-baseline.json（两轴只降不升，且相对 git HEAD 的值也只许降），例外清单 = plugin/sh-census-exceptions.txt；条件=要判『shell 层是否在重新长出内嵌解释器的程序或重复副本』—— 这正是 SPEC 的 Phase 1（去重删除）与 Phase 5（大脚本 TS 化）的取假点，两个读数下降才算收敛（tasks/gap-arch-sh-census-check）",

@@ -135,8 +135,24 @@
         "embeddedInterpreterLines": "-50 = orchestration/watch/inner-stalled.sh effective lines 50 -> gone. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is 8 paths (`git diff --name-only develop HEAD`), of which the .sh are exactly the three this task deleted. The two selfchecks (407 + 122 = 529 lines) are NOT in the axis: their `files[]` entries read `embedded: []`, so their deletion moves totals.scripts (150 -> 147) and the orphan reading (3 -> 0) but not this sum. Measured with the checker's OWN reading (`sh-census-check.ts --json` -> totals.embeddedInterpreterLines) before (9183) and after (9133).",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair (the 3 deleted dangling git-lens symlinks were never counted in symlinkedCopies either: sh-census-check only lists symlinks whose target resolves, and theirs were already archived to archive/2026-09-07-zero-call-scripts/)."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-develop-deliver-tgz-python-heredocs, SPEC §5 Phase 5.3 first stage)",
+      "from": {
+        "embeddedInterpreterLines": 9133,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 8894,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of the task. plugin/scripts/develop-deliver-tgz.sh carried TWELVE embedded `python3` invocations (ten `<<'PY'` heredoc bodies + two `python3 -c` one-liners, 231 body lines in total). They now live in the new sibling plugin/scripts/develop-deliver-python-steps.ts, reached through the shell's `py_steps` wrapper; the shell keeps only the orchestration. AC4's target reading holds: that file's `embedded` is `[\"node\"]` — python3 is GONE from the entry. ⚠️ The axis counts effective lines of .sh that contain an embedded interpreter AT A COMMAND POSITION, and the wrapper still execs `node`, so the file STAYS IN the axis — it is the line count that moved, not its membership (the same shape as the capability-catalog.sh and quay-init.sh entries above). AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it: leaving 9133 would let a future +239 embedded-interpreter .sh land for free. Re-anchored after the extraction was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` → totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-239 = plugin/scripts/develop-deliver-tgz.sh effective lines 2354 -> 2115. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is exactly this one file (`git diff --name-only develop HEAD` → the new .ts, the two .mjs tests, and this .sh), and the new module is a `.ts`, outside a `*.sh` census. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/develop-deliver-tgz.sh].codeLines 2354 -> 2115, and totals.embeddedInterpreterLines 9133 -> 8894 — the two readings differ by exactly the one file, so nothing else moved.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 9133,
+  "embeddedInterpreterLines": 8894,
   "duplicateCopies": 0
 }
