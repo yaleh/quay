@@ -2,7 +2,7 @@
 id: gap-retire-needs-human-cause-enumeration
 title: 退役 needs_human_cause 三态枚举与 blockedOutsideTaskResolved——零读者、零
   blocked-outside-task 样本，needs-human 的原因是异常，不该用枚举做逻辑控制
-status: todo
+status: ready
 labels:
   - gap
 parent: null
