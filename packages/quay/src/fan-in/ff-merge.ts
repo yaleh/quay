@@ -341,9 +341,35 @@ function withNodeNoWarnings(argv: string[] | null): string[] | null {
   return argv ? [argv[0], "--no-warnings", ...argv.slice(1)] : null;
 }
 
+/** The plugin root `scriptsDir` belongs to — the dir that CARRIES `scripts/`, and therefore the registry
+ *  in EITHER layout the classifier's own lookup accepts (`REGISTRY_REL_CANDIDATES`): a source checkout
+ *  keeps it at `<pluginroot>/plugin/scripts/…`, the packaged artifact at `<pluginroot>/scripts/…`
+ *  (⛔ `package.sh` stages `plugin/` INTO the package and `npm pack` ships it as the package's `plugin/`,
+ *  so the installed plugin root has NO nested `plugin/` layer — see classifyRootCandidates below).
+ *
+ *  Two shapes, discriminated by the SAME predicate `siblingScriptArgv` already uses to find a sibling's
+ *  shipped form: a `dist` dir means the raw `.ts` were deleted at pack time, so the plugin root is two
+ *  hops up; otherwise the scripts dir IS `<pluginroot>/scripts` and it is one hop up. ⛔ Deriving this
+ *  from `scriptsDir` (rather than adding a fixed hop to the list) is what keeps the guarantee below
+ *  independent of how many `..`s a particular layout happens to need. */
+function pluginRootOf(scriptsDir: string): string {
+  return path.basename(scriptsDir) === "dist"
+    ? path.resolve(scriptsDir, "..", "..")
+    : path.resolve(scriptsDir, "..");
+}
+
 /** Candidate roots for the classifier's REGISTRY lookup. `select-static-checks-for-touches.ts` reads
- *  `<root>/plugin/scripts/runner-static-gate.ts` (its TEST_SH_REL) — i.e. the root must be the dir
- *  that CARRIES a `plugin/scripts/` tree.
+ *  `<root>/plugin/scripts/runner-static-gate.ts` FIRST and `<root>/scripts/runner-static-gate.ts` as the
+ *  shipped-layout FALLBACK (its `REGISTRY_REL_CANDIDATES` — the single source of that rel-path
+ *  knowledge; ⛔ this file must never carry a second copy of either literal) — i.e. the root must be a
+ *  dir that carries the registry under ONE of those two layouts.
+ *
+ *  ⛔ `pluginRootOf(scriptsDir)` is listed explicitly so the PACKAGED plugin root is guaranteed to be
+ *  tried rather than merely reachable by counting `..`s: in the shipped shape
+ *  (`<pluginroot>/scripts/dist`) it coincides with the `..`/`..` candidate, but in the
+ *  `<pluginroot>/scripts` shape the `..`-hops both overshoot it (parent of the plugin root) — and that
+ *  is exactly the shape `package.sh` stages. It is also the only candidate that reaches the registry in
+ *  a THIRD-PARTY project, whose own tree carries none.
  *
  *  ⛔ `root` (the merge target — the tree the DELTA paths are relative to, and the tree whose suite the
  *  certificate is about) is the SEMANTICALLY correct answer and is tried FIRST. It is also the only
@@ -353,15 +379,15 @@ function withNodeNoWarnings(argv: string[] | null): string[] | null {
  *  hops up, so NO fixed `..`-hop formula reaches it. Ordering it first is what makes a task's FIRST
  *  fan-in land; every derived candidate below is a `..`-hop guess at the shipped `<pkg>` root.
  *
- *  The `..`-hop candidates remain as fallbacks for a SHIPPED install in a consumer project whose own
- *  root carries no registry: `<pkg>/plugin/scripts/dist` ⇒ `<pkg>` via `..`/`..`/`..`. ⛔ Deliberately
- *  NOT a single fixed hop: `resolve(scriptsDir, "..", "..")` is the plugin root ITSELF there, and the
- *  classifier then looks for `<pkg>/plugin/plugin/scripts/…` — one level too deep, silently. Every
- *  candidate is accepted by the classifier's OWN exit code (see classifyDeltaVerdict), so there is no
- *  second copy of the registry path to drift. */
+ *  The `..`-hop candidates remain as fallbacks for other install shapes. ⛔ Deliberately NOT a single
+ *  fixed hop: which `..` lands on the plugin root depends on whether `scriptsDir` is the scripts dir or
+ *  its `dist/` — a single fixed hop overshoots one of the two, silently. Every candidate is accepted by
+ *  the classifier's OWN exit code (see classifyDeltaVerdict), so there is no second copy of the registry
+ *  path to drift. */
 function classifyRootCandidates(root: string, scriptsDir: string): string[] {
   return [...new Set([
     root,
+    pluginRootOf(scriptsDir),
     path.resolve(scriptsDir, "..", ".."),
     path.resolve(scriptsDir, "..", "..", ".."),
     path.resolve(scriptsDir, ".."),
@@ -374,11 +400,14 @@ function classifyRootCandidates(root: string, scriptsDir: string): string[] {
 // CONSTRUCTION — a checker reads code, and a status field is not code — but it still makes `tip`
 // outrun `suite_head`, so the certificate gate below had to ask the DELTA CLASSIFIER about it.
 //
-// In an EXTERNAL project the classifier cannot answer: it reads `<root>/plugin/scripts/runner-static-
-// gate.ts` (its TEST_SH_REL registry), which a consumer workspace does not carry ⇒ exit 2 ⇒
+// In an EXTERNAL project the classifier could not answer: it read `<root>/plugin/scripts/runner-static-
+// gate.ts` (its then-only registry path), which a consumer workspace does not carry ⇒ exit 2 ⇒
 // `not-evaluated` ⇒ fail-closed refusal ⇒ the ff is refused and the WHOLE FULL SUITE is burned again.
 // Measured (quay-fleet, 2026-09-20): 3–6 attempts and 3 full suites per landed task; three tasks were
-// retried up to the cap and flipped to needs-human.
+// retried up to the cap and flipped to needs-human. (The classifier's lookup is layout-aware since
+// gap-classify-delta-registry-path-layout-aware — it now also accepts `<pluginroot>/scripts/…`, the
+// packaged shape — so a real install CAN evaluate; this short-circuit is kept because it answers from
+// git alone, without spawning anything, and still covers a scripts dir whose registry is unresolvable.)
 //
 // So judge the IDENTITY of the delta FIRST, from the SHAPE OF HISTORY alone — no registry, no
 // classifier, no project identity beyond the task file's own configured location:

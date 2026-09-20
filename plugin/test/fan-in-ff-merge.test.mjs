@@ -1387,6 +1387,76 @@ test("AC2 — install layout: the delta classifier resolves to the shipped dist 
   }
 });
 
+// ── AC2 (gap-classify-delta-registry-path-layout-aware): the FLAT packaged layout ─────────────────────
+// `shippedLayoutFixture` above models an install shape where a nested `plugin/` DOES exist
+// (`<pkg>/plugin/scripts/dist`), so the registry was reachable via `<pkg>/plugin/scripts/…`. The shape
+// `package.sh` ACTUALLY stages is different: it copies the source `plugin/` INTO `packages/quay/plugin/`
+// and `npm pack` ships that dir as the package's `plugin/`, so an install's scripts dir is
+// `<pluginroot>/scripts/dist` and the registry sits at `<pluginroot>/scripts/runner-static-gate.ts` —
+// ⛔ with NO `plugin/` layer between them. The classifier's then-only lookup joined
+// `<root>/plugin/scripts/runner-static-gate.ts`, which exists under NO candidate root in that layout ⇒
+// exit 2 ⇒ not-evaluated ⇒ the certificate gate refused every non-flip delta in a third-party project
+// and burned full suites. Single variable across the three halves below: the delta path, plus the
+// registry's presence (the negative control).
+
+/** The layout `package.sh` really stages: `scriptsDir = <pluginroot>/scripts/dist`, registry at
+ *  `<pluginroot>/scripts/runner-static-gate.ts` (⛔ no nested `plugin/`). */
+function flatPackagedLayoutFixture(tag) {
+  const pluginRoot = makeTmp(`flatpkg-${tag}`);
+  const distDir = path.join(pluginRoot, "scripts", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"),
+    path.join(pluginRoot, "scripts", "runner-static-gate.ts"));
+  writeClassifierShim(distDir);
+  return { pluginRoot, scriptsDir: distDir, registry: path.join(pluginRoot, "scripts", "runner-static-gate.ts") };
+}
+
+test("AC2 — flat packaged layout + an EXTERNAL project: a doc delta is INERT and a code delta NON-INERT (both EVALUATED)", () => {
+  const dir = makeTmp("flatpkg-ext");
+  const st = stateDir("flatpkg-ext");
+  const fx = flatPackagedLayoutFixture("ext");
+  try {
+    initRepo(dir);
+    // Fixture premise, ASSERTED not assumed: the consumer project carries no registry of its own, so any
+    // evaluation below can only have come from the PACKAGED plugin root.
+    for (const rel of ["plugin/scripts/runner-static-gate.ts", "scripts/runner-static-gate.ts"]) {
+      assert.ok(!fs.existsSync(path.join(dir, rel)), `fixture premise: the external project carries no ${rel}`);
+    }
+
+    // (a) NEGATIVE CONTROL (the DoD's contrast half): remove the packaged registry ⇒ the SAME command on
+    //     the SAME fixture returns not-evaluated. This is what pins the verdicts below to the registry,
+    //     rather than to a candidate root that would have resolved anyway.
+    const savedRegistry = fs.readFileSync(fx.registry, "utf8");
+    fs.rmSync(fx.registry);
+    const { base: baseN, tip: tipN } = makeTaskBranchWith(dir, "flatpkg-none", "tasks/flatpkg-none.md", "---\nid: flatpkg-none\n---\n");
+    const capN = ["--suite-capture", writeSuiteCapture(st, "flatpkg-none", baseN)];
+    const rN = runMerge(["--task", "flatpkg-none", "--root", dir, "--scripts-dir", fx.scriptsDir, ...capN]);
+    assert.equal(rN.status, 2, `without the packaged registry the gate must fail closed:\n${rN.stdout}${rN.stderr}`);
+    assert.match(rN.stderr, /NOT-EVALUATED/, `⛔ the contrast half — no registry ⇒ no verdict:\n${rN.stderr}`);
+    assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tipN, "develop must NOT have advanced");
+    fs.writeFileSync(fx.registry, savedRegistry, "utf8");
+
+    // (b) a CODE delta ⇒ a REAL non-inert verdict NAMING the path. `src/app.ts` is not under a doc
+    //     surface ⇒ code without needing any registry coverage — what the registry enables is the RUN.
+    const { base: baseC } = makeTaskBranchWith(dir, "flatpkg-code", "src/app.ts", "export const x = 1;\n");
+    const capC = ["--suite-capture", writeSuiteCapture(st, "flatpkg-code", baseC)];
+    const rC = runMerge(["--task", "flatpkg-code", "--root", dir, "--scripts-dir", fx.scriptsDir, ...capC]);
+    assert.equal(rC.status, 2, `a code delta must REFUSE (⛔ never misread as inert):\n${rC.stdout}${rC.stderr}`);
+    assert.match(rC.stderr, /non-inert \(src\/app\.ts\)/, `⛔ a REAL verdict must name the real path:\n${rC.stderr}`);
+    assert.ok(!/NOT-EVALUATED/.test(rC.stderr), `⛔ the packaged registry must make the judgment POSSIBLE:\n${rC.stderr}`);
+
+    // (c) a DOC delta (`tasks/<id>.md` — exactly the shape of the branch's own `flip-done` commit) ⇒
+    //     INERT ⇒ the ff LANDS without the whole suite being burned again.
+    const { base, tip } = makeTaskBranchWith(dir, "flatpkg-doc", "tasks/flatpkg-doc.md", "---\nid: flatpkg-doc\n---\n");
+    const cap = ["--suite-capture", writeSuiteCapture(st, "flatpkg-doc", base)];
+    const r = runMerge(["--task", "flatpkg-doc", "--root", dir, "--scripts-dir", fx.scriptsDir, ...cap]);
+    assert.equal(r.status, 0, `a doc-only delta must be judged inert and land:\n${r.stdout}${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(fx.pluginRoot);
+  }
+});
+
 // ── core.quotepath vs the inert-increment retry (gap-ff-merge-quotepath-breaks-inert-retry) ──────────
 // git C-quotes non-ASCII pathnames in `diff --name-only` output BY DEFAULT (core.quotepath=true), so an
 // increment containing a Chinese filename — this repo's goals/ and tasks/ are full of them, written
