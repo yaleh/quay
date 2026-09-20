@@ -19,9 +19,12 @@
 #   option, recorded in the DIR-123 task Finding).
 #
 # FLOW (best-effort — a remote being down must never fail the trigger):
-#   1. build quay + quay-native .tgz from a detached worktree AT THE DEVELOP TIP (git worktree add
-#      --detach <develop-tip>) — NOT the primary checkout HEAD, which may be integration ahead with
-#      untested commits; the delivered artifact must exactly correspond to the merged commit.
+#   1. build quay + quay-native .tgz from a worktree AT THE DEVELOP TIP (git worktree add
+#      -B <transient branch> <develop-tip>) — NOT the primary checkout HEAD, which may be integration
+#      ahead with untested commits; the delivered artifact must exactly correspond to the merged
+#      commit. ⚠️ A TRANSIENT BRANCH, not `--detach`: the build's version stamping reads
+#      `git symbolic-ref HEAD` and fails closed (exit 3 ⇒ BUILD FAILED) on a detached HEAD — see
+#      build_develop_tgz's own note for the two-direction measurement (2026-09-20).
 #   2. scp both .tgz to B and C.
 #   3. on each host: ONE `npm install -g <quay.tgz> <quay-native.tgz>` (single command so
 #      quay-native's `quay:*` dep resolves to the local tgz, not the registry), with PATH prepended
@@ -1694,17 +1697,26 @@ fi
 
 echo "develop-deliver: develop tip = ${develop_tip:0:12} (${develop_tip})"
 
-# ── 1. Build the two .tgz from a detached worktree at develop-tip ──────────────────────────────
+# ── 1. Build the two .tgz from a transient-branch worktree at develop-tip ──────────────────────
 # Factored so both the deliver mode and the --verify-coldstart mode build the SAME fresh
 # hardware-independent artifact at the develop tip (NOT the primary checkout HEAD). Sets the globals
 # quay_tgz / qn_tgz and leaves the build worktree in place (the caller removes it).
 build_develop_tgz() {
-  wt="${worktree_base}-${develop_tip:0:12}"
-  if [ -e "${wt}" ]; then
-    git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
-  fi
-  echo "develop-deliver: creating detached worktree at develop tip: ${wt}"
-  git -C "${repo_root}" worktree add --detach "${wt}" "${develop_tip}" >/dev/null 2>&1
+  wt="${worktree_base}-${develop_tip:0:12}"; build_ref="deliver-build-${develop_tip:0:12}"
+  # ⛔ The worktree carries a TRANSIENT BRANCH, never `--detach`: the build's version stamping
+  # (`sync-vendor.sh` → `stamp-version --mode build`, which reads `git symbolic-ref HEAD`) answers
+  # NOT-EVALUATED for a DETACHED HEAD carrying no version tag — exit 3 ⇒ its caller fails closed ⇒
+  # BUILD FAILED. Measured 2026-09-20 on develop c80040ad4: `--detach` ⇒ package.sh rc=3, no
+  # artifact; the SAME commit on a branch ⇒ rc=0, `quay-0.10.0-dev.tgz` built. The artifact is
+  # unchanged by this (same commit, same content) — only the git context the build can READ is.
+  # The branch sweep below reclaims the branches of FINISHED runs: a branch still checked out by a
+  # LIVE concurrent build cannot be deleted (git refuses to delete a checked-out branch) ⇒ this is
+  # orphan-only by construction, and it covers every cleanup site — including one added later —
+  # without a second copy of the cleanup appended to each of them.
+  git -C "${repo_root}" branch --list 'deliver-build-*' --format='%(refname:short)' | xargs -r -I{} git -C "${repo_root}" branch -D {} >/dev/null 2>&1 || true
+  [ -e "${wt}" ] && { git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"; }
+  echo "develop-deliver: creating build worktree on branch ${build_ref} at develop tip: ${wt}"
+  git -C "${repo_root}" worktree add -B "${build_ref}" "${wt}" "${develop_tip}" >/dev/null 2>&1
   # symlink the main checkout's node_modules (hoisted, pure-JS deps) so build-dist/esbuild resolve
   ln -s "${repo_root}/node_modules" "${wt}/node_modules" 2>/dev/null || true
 

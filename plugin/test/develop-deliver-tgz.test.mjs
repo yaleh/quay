@@ -25,6 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -83,4 +84,23 @@ test("arg validation — an unknown flag exits 2 (usage error, not a silent run)
   const r = run(["--no-such-flag"]);
   assert.equal(r.status, 2, "unknown argument must exit 2");
   assert.match(r.stderr, /unknown arg/, "the usage error must name the bad argument");
+});
+
+test("build worktree is created on a transient BRANCH, never --detach", () => {
+  // The coupling this pins (gap-routine-freshness-refresh-stale-goal-009-ac-203-coldstart-face):
+  // the build's version stamping (`sync-vendor.sh` → `stamp-version --mode build`, which reads
+  // `git symbolic-ref HEAD`) answers NOT-EVALUATED — exit 3 ⇒ package.sh fails closed ⇒ BUILD
+  // FAILED — on a DETACHED HEAD with no version tag. Measured 2026-09-20 on develop c80040ad4:
+  // `--detach` ⇒ package.sh rc=3 and no artifact; the SAME commit on a branch ⇒ rc=0 and
+  // `quay-0.10.0-dev.tgz`. The producer therefore builds on a transient branch.
+  // Asserted on the command line (not the whole file): the file's own comments MENTION `--detach`
+  // to explain why it is not used, so a whole-file match would be the wrong instrument.
+  // It can take FALSE: restoring `--detach` on that line reddens this test.
+  const lines = fs.readFileSync(SCRIPT, "utf8").split("\n");
+  const adds = lines
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("git ") && l.includes("worktree add"));
+  assert.equal(adds.length, 1, `expected exactly ONE worktree-creating command, got ${adds.length}: ${adds.join(" | ")}`);
+  assert.doesNotMatch(adds[0], /--detach/, "the build worktree must NOT be detached (version stamping fails closed on a detached HEAD)");
+  assert.match(adds[0], /worktree add -B "\$\{build_ref\}"/, "it must be created on the transient build branch");
 });
