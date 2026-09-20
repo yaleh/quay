@@ -187,7 +187,9 @@ $ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢�
 从本 worktree 解析 ⇒ …/quay-worktrees/gap-arch-worker-fan-in-extract-from-worker-driver/plugin/scripts/worker-driver.ts
 从主检出解析     ⇒ /home/yale/work/quay/plugin/scripts/worker-driver.ts
 ```
-主检出要等本改动**落地到 develop**（并经 doc→develop 同步）才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 走的仍是拆分前的代码，**「落地后由生产 driver 走通」的那条记录**要由**下一次** fan-in 产生。这正是任务库既有的「（待外部）」形态（先例：`tasks/gap-ac134-promotion-outcome-ledger.md` 的 AC2/DoD，done 且注明「（待外部）」）；标注后 fan-in 的 `flipAcGateVerdict` 判为 `pass-external`（`isLandedCodeComplete` 的既定语义），不阻塞翻 done。**本任务的 fan-in 日志已实证这一点**：`.quay/fan-in-gap-arch-worker-fan-in-extract-from-worker-driver-wk-prod-anchor.log` 里 `{"step":"ac-precheck","ok":true}` 且 `acTicked=6/7`。
+主检出要等本改动**落地到 develop**（并经 doc→develop 同步）才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 走的仍是拆分前的代码，**「落地后由生产 driver 走通」的那条记录**要由**下一次** fan-in 产生。这正是任务库既有的「（待外部）」形态（先例：`tasks/gap-ac134-promotion-outcome-ledger.md` 的 AC2/DoD，done 且注明「（待外部）」）；标注后 fan-in 的 `flipAcGateVerdict` 判为 `pass-external`（`isLandedCodeComplete` 的既定语义），不阻塞翻 done。
+
+**本任务的 fan-in 已实证后一句**：`ac-precheck` 步在 **AC 勾选数 6/7**（唯一未勾的正是本条 AC6）时返回 `ok:true`，且该轮一路走到 `suite-start` —— 逐字读数（`.quay/fan-in-step-trace.jsonl`）：`{"event":"step-end","step":"ac-precheck","task":"gap-arch-worker-fan-in-extract-from-worker-driver","runId":"wk-prod-anchor","exit":0,"ok":true,"durationMs":613}`；同轮 fan-in 日志 `.quay/fan-in-gap-arch-worker-fan-in-extract-from-worker-driver-wk-prod-anchor.log` 有同读数的一行。⚠️ **这两个载体都【不带】勾选计数**——6/7 是从**任务文件本身**（该轮提交 `a3eeda183`，与本轮 `task_check` 读数一致）读出的，⛔ 不是从该日志的某个字段读出的（硬规则 5：该来源对「勾选计数」不完备，别把「日志里没写计数」读成「没有计数」）。
 
 **AC7（行数只作旁证，⛔ 不作通过判据）**：
 
