@@ -16,14 +16,25 @@
 //   AC4  标签仍然存在：%D 非空的提交行仍带内联标签，条数与 `git log --all -n <N>` 中 %D 非空的
 //        提交数相等（不许用「什么都不画」来满足 AC1/AC2）。
 //
+// ── gap-git-graph-live-ref-oracle-siblings-unfrozen: ONE frozen ref window per 对拍 ─────────────────
+// AC4 pairs the data layer's decorated-row count against a live `git log … %D` count. Those were two
+// INDEPENDENT LIVE reads of the production window: a ref advancing between them shifts the window head
+// by K and drops K off the tail ⇒ a count imbalance that is a window SHIFT, not a label bug. Both
+// sides now read the SAME frozen ref set (`helpers/git-ref-window.mjs`), resolved ONCE before either
+// side reads; AC2/AC3 (single-read structural verdicts) go through the same window so every reading in
+// this file is internally consistent. AC4 is additionally stability-gated: `%D` labels come from the
+// LIVE ref table, which pinning the commit set does not pin (helper, "THE SECOND MECHANISM").
+// Negative control (⛔ dry-run only): `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` restores the live-`--all` arms.
+//
 // Run (scoped): node --test packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs
+// Negative control: QUAY_TEST_GIT_GRAPH_LIVE_REFS=1 node --test <same file>
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
+import { readGitHistory } from "../src/observation.ts";
 import {
   layoutGitGraph,
   gitGraphClientScript,
@@ -31,6 +42,7 @@ import {
   GIT_GRAPH_ROW_H,
   GIT_GRAPH_PAD_Y,
 } from "../src/serve-git.ts";
+import { resolveRefWindow, windowScopeArgs, windowGitExec, describeWindow, withStableWindow } from "./helpers/git-ref-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -91,7 +103,9 @@ test("AC1: serve-git.ts carries zero appendChip sites (grep -c = 0, was 4)", () 
 // ── AC2: overlap is structurally impossible — the renderer emits only per-row commit ink ───────────
 
 test("AC2: no non-commit text element can intersect a commit text element (structural, pairs = 0)", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
+  const refs = resolveRefWindow(); // frozen ONCE, before the read
+  console.log(`[ref-window] ${describeWindow(refs)}`);
+  const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
   const layout = layoutGitGraph(history);
   assert.ok(layout && layout.rows.length > 0, "the window carries commits (a non-empty page)");
@@ -118,7 +132,9 @@ test("AC2: no non-commit text element can intersect a commit text element (struc
 // ── AC3: negative control — the judge can be false ────────────────────────────────────────────────
 
 test("AC3: a restored floating chip on a commit row's y intersects (judge can be false)", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
+  const refs = resolveRefWindow(); // frozen ONCE, before the read
+  console.log(`[ref-window] ${describeWindow(refs)}`);
+  const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
   const layout = layoutGitGraph(history);
   assert.ok(layout && layout.rows.length > 0, "the window carries commits");
 
@@ -135,34 +151,39 @@ test("AC3: a restored floating chip on a commit row's y intersects (judge can be
 // ── AC4: inline labels survive — the page is not empty of decoration ──────────────────────────────
 
 test("AC4: %D-nonempty rows still render an inline label; count equals git's %D-nonempty count", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
-  assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
-  const layout = layoutGitGraph(history);
-  assert.ok(layout && layout.rows.length > 0, "the window carries commits");
+  // `%D` is computed from the LIVE ref table, so this is the file's one decoration judgment — window-
+  // gated AND stability-gated (see helpers/git-ref-window.mjs, "THE SECOND MECHANISM").
+  withStableWindow((refs) => {
+    const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
+    assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
+    const layout = layoutGitGraph(history);
+    assert.ok(layout && layout.rows.length > 0, "the window carries commits");
 
-  // git oracle: commits in the SAME window carrying a non-empty %D decoration.
-  // --topo-order matches readGitHistory's own query (`GIT_HISTORY_REF_SCOPE --topo-order -n`); the
-  // default date-order window can select a DIFFERENT N-commit set when an out-of-order merge tip sits
-  // near the boundary. The ref scope comes from the same shared constant.
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  let refDecorated = 0;
-  for (const line of decOut.split("\n")) {
-    const idx = line.indexOf("\x01");
-    if (idx !== -1 && line.slice(idx + 1).trim()) refDecorated++;
-  }
-
-  const myDecorated = layout.rows.filter((r) => r.decorations.length > 0);
-  assert.equal(myDecorated.length, refDecorated, "inline-label row count equals git's %D-nonempty commit count");
-
-  // Each decorated row's inline text actually embeds its decoration names — labels are still INLINE,
-  // not merely counted.
-  for (const r of myDecorated) {
-    const label = commitTextLabel(r);
-    for (const d of r.decorations) {
-      assert.ok(label.includes(d), `row ${r.hash.slice(0, 7)} inline label embeds ${JSON.stringify(d)}`);
+    // git oracle: commits in the SAME window carrying a non-empty %D decoration.
+    // --topo-order matches readGitHistory's own query (production's scope `--topo-order -n`); the
+    // default date-order window can select a DIFFERENT N-commit set when an out-of-order merge tip sits
+    // near the boundary. The ref scope comes from the same shared constant, and the window from the one
+    // frozen snapshot both sides read — so this compares one window against itself.
+    const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...windowScopeArgs(refs), "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    let refDecorated = 0;
+    for (const line of decOut.split("\n")) {
+      const idx = line.indexOf("\x01");
+      if (idx !== -1 && line.slice(idx + 1).trim()) refDecorated++;
     }
-  }
+
+    const myDecorated = layout.rows.filter((r) => r.decorations.length > 0);
+    assert.equal(myDecorated.length, refDecorated, "inline-label row count equals git's %D-nonempty commit count");
+
+    // Each decorated row's inline text actually embeds its decoration names — labels are still INLINE,
+    // not merely counted.
+    for (const r of myDecorated) {
+      const label = commitTextLabel(r);
+      for (const d of r.decorations) {
+        assert.ok(label.includes(d), `row ${r.hash.slice(0, 7)} inline label embeds ${JSON.stringify(d)}`);
+      }
+    }
+  });
 });

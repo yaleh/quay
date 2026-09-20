@@ -14,30 +14,44 @@
 //   AC7  滚动加载未被打回：client 脚本仍带 sentinel IntersectionObserver + before= 分页自链
 //        （详细自链/终止判据由 gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag 覆盖）。
 //
+// ── gap-git-graph-live-ref-oracle-siblings-unfrozen: ONE frozen ref window per 对拍 ─────────────────
+// Every paired judgment below (AC1, AC2, AC3, AC6) used to take TWO INDEPENDENT LIVE reads of the
+// production ref window — the data layer one, the git oracle the other. A ref advancing between them
+// shifts the window head by K and drops K off the tail ⇒ exactly K mismatches shaped `git=undefined`
+// (AC1/AC2/AC6) or a set/count imbalance (AC3). Sharing the SCOPE (`GIT_HISTORY_REF_SCOPE`) was
+// necessary but not sufficient: scope ≠ window. Both sides of each judgment now read the SAME frozen
+// ref set (`helpers/git-ref-window.mjs`), resolved ONCE per judgment before either side reads, and
+// `withStableWindow()` discards-and-retries a verdict taken while refs were moving (necessary for the
+// `%D` judgments — labels come from the LIVE ref table, see the helper's "THE SECOND MECHANISM").
+// Negative control (⛔ dry-run only): `QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` restores the live-`--all` arms.
+//
 // Run (scoped): node --test packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs
+// Negative control: QUAY_TEST_GIT_GRAPH_LIVE_REFS=1 node --test <same file>
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory, GIT_HISTORY_LIMIT, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
+import { readGitHistory, GIT_HISTORY_LIMIT } from "../src/observation.ts";
 import {
   layoutGitGraph,
   assignGitColumns,
   renderGitHistoryPage,
   gitGraphClientScript,
 } from "../src/serve-git.ts";
+import { resolveRefWindow, windowScopeArgs, windowGitExec, describeWindow, withStableWindow } from "./helpers/git-ref-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const LIMIT = 500;
 
 /** The git oracle: run `git log --graph <the production ref scope> -n <n>` and parse each commit's
- *  column from the `*`. The scope comes from `GIT_HISTORY_REF_SCOPE` so the oracle draws the SAME
- *  window production fetched — git still computes the columns (the oracle is not an echo). */
-function gitGraphReferenceColumns(n = LIMIT) {
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...GIT_HISTORY_REF_SCOPE, "-n", String(n), "--pretty=format:%x01%H"], {
+ *  column from the `*`. The scope comes from the SAME frozen ref window the data layer was handed
+ *  (`windowScopeArgs(refs)`; live `GIT_HISTORY_REF_SCOPE` only under the negative-control arm) — git
+ *  still computes the columns, so the oracle is not an echo. */
+function gitGraphReferenceColumns(n = LIMIT, refs = null) {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", ...windowScopeArgs(refs), "-n", String(n), "--pretty=format:%x01%H"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -53,10 +67,10 @@ function gitGraphReferenceColumns(n = LIMIT) {
   return map;
 }
 
-/** Commits in git emission order (the SAME order the data layer fetches — `GIT_HISTORY_REF_SCOPE
- *  --topo-order`). */
-function emissionOrderCommits(n = LIMIT) {
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(n), "--pretty=format:%H%x1f%P"], {
+/** Commits in git emission order (the SAME order the data layer fetches — production's scope
+ *  `--topo-order`), read from the SAME frozen ref window as the other side of the judgment. */
+function emissionOrderCommits(n = LIMIT, refs = null) {
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", ...windowScopeArgs(refs), "--topo-order", "-n", String(n), "--pretty=format:%H%x1f%P"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -72,100 +86,109 @@ function emissionOrderCommits(n = LIMIT) {
 // ── AC1: column numbers match git log --graph EXACTLY (the mechanical judge, un-degenerable) ────────
 
 test("AC1: my per-commit column equals git log --graph --all for the same window (mismatch = 0)", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
-  assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
-  const layout = layoutGitGraph(history);
-  assert.ok(layout, "the production history yields a layout");
-  assert.ok(layout.rows.length > 0, "the window carries commits");
-  // The oracle's `-n` is the LOADED count (layout.rows.length), not a hardcoded 500 — so the judge
-  // follows whatever window was actually read (gap-git-graph-pagination-appends-page-relative-col-and-torow).
-  const refCols = gitGraphReferenceColumns(layout.rows.length);
-  assert.ok(refCols.size > 0, "the git oracle parsed a non-empty column map");
+  withStableWindow((refs) => {
+    const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
+    assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
+    const layout = layoutGitGraph(history);
+    assert.ok(layout, "the production history yields a layout");
+    assert.ok(layout.rows.length > 0, "the window carries commits");
+    // The oracle's `-n` is the LOADED count (layout.rows.length), not a hardcoded 500 — so the judge
+    // follows whatever window was actually read (gap-git-graph-pagination-appends-page-relative-col-and-torow).
+    const refCols = gitGraphReferenceColumns(layout.rows.length, refs);
+    assert.ok(refCols.size > 0, "the git oracle parsed a non-empty column map");
 
-  let mismatch = 0;
-  const samples = [];
-  for (const r of layout.rows) {
-    const ref = refCols.get(r.hash);
-    if (ref === undefined) { mismatch++; continue; } // my commit missing from the git window
-    if (ref !== r.col) { mismatch++; if (samples.length < 8) samples.push(`${r.hash.slice(0, 7)} mine=${r.col} git=${ref}`); }
-  }
-  assert.equal(mismatch, 0, `column mismatch = 0 (got ${mismatch}${samples.length ? ": " + samples.join(", ") : ""})`);
+    let mismatch = 0;
+    const samples = [];
+    for (const r of layout.rows) {
+      const ref = refCols.get(r.hash);
+      if (ref === undefined) { mismatch++; continue; } // my commit missing from the git window
+      if (ref !== r.col) { mismatch++; if (samples.length < 8) samples.push(`${r.hash.slice(0, 7)} mine=${r.col} git=${ref}`); }
+    }
+    assert.equal(mismatch, 0, `column mismatch = 0 (got ${mismatch}${samples.length ? ": " + samples.join(", ") : ""})`);
+  });
 });
 
 // ── AC2: negative control — a no-recycling allocation must disagree (the judge can be false) ────────
 
 test("AC2: the no-recycle allocation (every second parent opens a new column) mismatches git (mismatch > 0)", () => {
-  const commits = emissionOrderCommits(LIMIT);
-  const refCols = gitGraphReferenceColumns(commits.length);
+  withStableWindow((refs) => {
+    const commits = emissionOrderCommits(LIMIT, refs);
+    const refCols = gitGraphReferenceColumns(commits.length, refs);
 
-  // Inline reimplementation of the retired lane-model behaviour: a second parent ALWAYS gets a brand-new
-  // column, never dedup/reuse — the allocation that exploded to 25 lanes where git uses ~6.
-  function noRecycleColumns(commits) {
-    const col = new Map();
-    let nextCol = 0;
-    for (const C of commits) {
-      if (!col.has(C.hash)) col.set(C.hash, nextCol++);
-      const colC = col.get(C.hash);
-      C.parentHashes.forEach((p, pi) => {
-        if (col.has(p)) return;
-        if (pi === 0) col.set(p, colC);   // first parent inherits the child's column
-        else col.set(p, nextCol++);        // second parent: ALWAYS a new column (no recycle)
-      });
+    // Inline reimplementation of the retired lane-model behaviour: a second parent ALWAYS gets a brand-new
+    // column, never dedup/reuse — the allocation that exploded to 25 lanes where git uses ~6.
+    function noRecycleColumns(commits) {
+      const col = new Map();
+      let nextCol = 0;
+      for (const C of commits) {
+        if (!col.has(C.hash)) col.set(C.hash, nextCol++);
+        const colC = col.get(C.hash);
+        C.parentHashes.forEach((p, pi) => {
+          if (col.has(p)) return;
+          if (pi === 0) col.set(p, colC);   // first parent inherits the child's column
+          else col.set(p, nextCol++);        // second parent: ALWAYS a new column (no recycle)
+        });
+      }
+      return col;
     }
-    return col;
-  }
 
-  const correct = assignGitColumns(commits);
-  const noRecycle = noRecycleColumns(commits);
-  let correctMismatch = 0;
-  let noRecycleMismatch = 0;
-  for (const c of commits) {
-    if (correct.get(c.hash) !== refCols.get(c.hash)) correctMismatch++;
-    if (noRecycle.get(c.hash) !== refCols.get(c.hash)) noRecycleMismatch++;
-  }
-  assert.equal(correctMismatch, 0, "the recycling allocation matches git (precondition)");
-  assert.ok(noRecycleMismatch > 0, `the no-recycle allocation mismatches git (${noRecycleMismatch} > 0) — the judge can be false`);
+    const correct = assignGitColumns(commits);
+    const noRecycle = noRecycleColumns(commits);
+    let correctMismatch = 0;
+    let noRecycleMismatch = 0;
+    for (const c of commits) {
+      if (correct.get(c.hash) !== refCols.get(c.hash)) correctMismatch++;
+      if (noRecycle.get(c.hash) !== refCols.get(c.hash)) noRecycleMismatch++;
+    }
+    assert.equal(correctMismatch, 0, "the recycling allocation matches git (precondition)");
+    assert.ok(noRecycleMismatch > 0, `the no-recycle allocation mismatches git (${noRecycleMismatch} > 0) — the judge can be false`);
+  });
 });
 
 // ── AC3: labels appear ONLY on the commit a ref points at; develop appears exactly once ─────────────
 
 test("AC3: the rendered label set equals the %D-nonempty commit set; develop appears once", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
-  const layout = layoutGitGraph(history);
-  const myDecorated = new Set(layout.rows.filter((r) => r.decorations.length > 0).map((r) => r.hash));
+  // The decoration half is the reason this one is window-gated AND stability-gated: `%D` is computed
+  // from the LIVE ref table, so pinning the commit set alone does not pin the labels (see
+  // helpers/git-ref-window.mjs, "THE SECOND MECHANISM").
+  withStableWindow((refs) => {
+    const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
+    const layout = layoutGitGraph(history);
+    const myDecorated = new Set(layout.rows.filter((r) => r.decorations.length > 0).map((r) => r.hash));
 
-  // --topo-order matches readGitHistory's own query (`GIT_HISTORY_REF_SCOPE --topo-order -n`); the
-  // default date-order window can select a DIFFERENT 500-commit set when an out-of-order merge tip
-  // sits near the boundary, so the two must be aligned or the label-set comparison compares two
-  // different windows. The ref SCOPE must be aligned for the same reason — that is the whole point of
-  // GIT_HISTORY_REF_SCOPE existing as one shared constant.
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    // --topo-order matches readGitHistory's own query (production's scope `--topo-order -n`); the
+    // default date-order window can select a DIFFERENT 500-commit set when an out-of-order merge tip
+    // sits near the boundary, so the two must be aligned or the label-set comparison compares two
+    // different windows. The ref SCOPE *and* the window must be aligned for the same reason — the scope
+    // comes from the shared production constant, the window from the one frozen snapshot both sides read.
+    const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", ...windowScopeArgs(refs), "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const refDecorated = new Set();
+    for (const line of decOut.split("\n")) {
+      const idx = line.indexOf("\x01");
+      if (idx === -1) continue;
+      const hash = line.slice(0, idx).trim();
+      if (line.slice(idx + 1).trim()) refDecorated.add(hash);
+    }
+    let setMismatch = 0;
+    for (const h of refDecorated) if (!myDecorated.has(h)) setMismatch++;
+    for (const h of myDecorated) if (!refDecorated.has(h)) setMismatch++;
+    assert.equal(setMismatch, 0, `the label set matches %D-nonempty commits exactly (mismatch ${setMismatch})`);
+
+    let developCount = 0;
+    // `%D` renders the CHECKED-OUT branch's own decoration as the COMBINED `HEAD -> <name>` form, never a
+    // separate bare `<name>` entry (parseDecorations keeps it as one raw string — AC4: the HEAD split is
+    // the client renderer's job). So a bare `d === "develop"` under-counts by one whenever `develop` is
+    // the checked-out branch — which is exactly the shape of a fresh `actions/checkout@v4` in CI
+    // (workflow triggers on `push: branches: [develop]`) and of any contributor with develop checked out.
+    // Root cause of the CI failure (`got 0`); measured directly on a fresh clone at a different path.
+    // Both forms name the develop label ⇒ still exactly one, so AC3's invariant is unchanged.
+    const namesDevelop = (d) => d === "develop" || /^HEAD\s*->\s*develop$/.test(d);
+    for (const r of layout.rows) for (const d of r.decorations) if (namesDevelop(d)) developCount++;
+    assert.equal(developCount, 1, `develop label appears on exactly one commit (got ${developCount}, was 6)`);
   });
-  const refDecorated = new Set();
-  for (const line of decOut.split("\n")) {
-    const idx = line.indexOf("\x01");
-    if (idx === -1) continue;
-    const hash = line.slice(0, idx).trim();
-    if (line.slice(idx + 1).trim()) refDecorated.add(hash);
-  }
-  let setMismatch = 0;
-  for (const h of refDecorated) if (!myDecorated.has(h)) setMismatch++;
-  for (const h of myDecorated) if (!refDecorated.has(h)) setMismatch++;
-  assert.equal(setMismatch, 0, `the label set matches %D-nonempty commits exactly (mismatch ${setMismatch})`);
-
-  let developCount = 0;
-  // `%D` renders the CHECKED-OUT branch's own decoration as the COMBINED `HEAD -> <name>` form, never a
-  // separate bare `<name>` entry (parseDecorations keeps it as one raw string — AC4: the HEAD split is
-  // the client renderer's job). So a bare `d === "develop"` under-counts by one whenever `develop` is
-  // the checked-out branch — which is exactly the shape of a fresh `actions/checkout@v4` in CI
-  // (workflow triggers on `push: branches: [develop]`) and of any contributor with develop checked out.
-  // Root cause of the CI failure (`got 0`); measured directly on a fresh clone at a different path.
-  // Both forms name the develop label ⇒ still exactly one, so AC3's invariant is unchanged.
-  const namesDevelop = (d) => d === "develop" || /^HEAD\s*->\s*develop$/.test(d);
-  for (const r of layout.rows) for (const d of r.decorations) if (namesDevelop(d)) developCount++;
-  assert.equal(developCount, 1, `develop label appears on exactly one commit (got ${developCount}, was 6)`);
 });
 
 // ── AC4: every interaction mechanism is gone from the source ────────────────────────────────────────
@@ -181,7 +204,9 @@ test("AC4: serve-git.ts carries zero interaction mechanisms (expanded[/点击展
 // ── AC5: no dangling markers, and the row model has no fork/merge/open fields ───────────────────────
 
 test("AC5: no 窗口外分叉 text, and layout rows carry no fork/merge/open fields", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
+  const refs = resolveRefWindow(); // frozen ONCE, before the read
+  console.log(`[ref-window] ${describeWindow(refs)}`);
+  const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
   const html = renderGitHistoryPage(history);
   assert.ok(!html.includes("窗口外分叉"), "the rendered page carries no 窗口外分叉 marker (was 5)");
 
@@ -197,11 +222,13 @@ test("AC5: no 窗口外分叉 text, and layout rows carry no fork/merge/open fie
 // ── AC6: the smallest y (rows[0]) is the newest commit ──────────────────────────────────────────────
 
 test("AC6: the top row (smallest y) is the newest commit in the production ref scope", () => {
-  const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
-  const layout = layoutGitGraph(history);
-  assert.ok(layout.rows.length > 0, "production rows exist");
-  const newest = execFileSync("git", ["-C", REPO_ROOT, "log", ...GIT_HISTORY_REF_SCOPE, "-1", "--pretty=%H"], { encoding: "utf8" }).trim();
-  assert.equal(layout.rows[0].hash, newest, "rows[0] (smallest y) is the newest --all commit");
+  withStableWindow((refs) => {
+    const history = readGitHistory(REPO_ROOT, { limit: LIMIT, exec: windowGitExec(refs) });
+    const layout = layoutGitGraph(history);
+    assert.ok(layout.rows.length > 0, "production rows exist");
+    const newest = execFileSync("git", ["-C", REPO_ROOT, "log", ...windowScopeArgs(refs), "-1", "--pretty=%H"], { encoding: "utf8" }).trim();
+    assert.equal(layout.rows[0].hash, newest, "rows[0] (smallest y) is the newest --all commit");
+  });
 });
 
 // ── AC7: the scroll loader survives (sentinel observer + before= pagination self-chain) ─────────────
