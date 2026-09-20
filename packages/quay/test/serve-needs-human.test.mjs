@@ -501,6 +501,48 @@ test("AC3: /needs-human renders a needs-human task's latest RAW fan-in failure, 
   }
 });
 
+// ⚠️ WHY THE LEDGER ROW CARRIES THE SAME COLUMN (and why it is asserted separately): the task the
+// column exists for is the one whose status has ALREADY moved on — escalated by the driver, then
+// taken forward by a human or a re-dispatch. The active table no longer lists it, so a failure column
+// only on the active rows would be structurally blind to exactly the case the problem statement names
+// (「3 个任务因同一原因被打成 needs-human」). This is the REAL-STORE shape: today's store has 0 active
+// needs-human tasks and 23 real ledger samples.
+test("AC3 (ledger): an ALREADY-ESCALATED task's raw failure text is visible on /needs-human", async () => {
+  const { ws, tasksDir } = makeWorkspace("nh-fanin-ledger-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // The task's store status has moved on to done — it is in the ledger only.
+    seed(tasksDir, "NH-LEDGER", { title: "escalated then re-dispatched", status: "done", body: needsHumanBody("was needs-human, now done") });
+    fs.writeFileSync(
+      path.join(ws, ".quay", "promotion-outcome.jsonl"),
+      JSON.stringify({ task_id: "NH-LEDGER", action: "needs-human", result: { ok: true, detail: "retry-cap-exhausted" }, ts: "2026-09-01T06:18:06.497Z" }) + "\n",
+    );
+    const ledgerReason = "fan-in-ac-completion-gate: AC 未全勾（checked 0/3，剩余未勾 3 含非待外部项）——未翻 done";
+    fs.writeFileSync(
+      path.join(ws, ".quay", "worker-outcome.jsonl"),
+      JSON.stringify({
+        ts: "2026-09-01T06:18:06.497Z", task: "NH-LEDGER", run_id: "r-ac-gate",
+        final_state: "exited-not-landed",
+        mechanical_fan_in: { outcome: "red", step: "ac-gate", reason: ledgerReason },
+      }) + "\n",
+    );
+
+    process.chdir(ws);
+    server = await startServer({ port: 0 });
+    const page = await get(server.address().port, "/needs-human");
+    assert.equal(page.status, 200, "GET /needs-human returns 200");
+    const ledgerPart = page.body.split("Escalation ledger")[1] ?? "";
+    assert.ok(ledgerPart.includes("NH-LEDGER"), "the escalated task is in the ledger section");
+    assert.ok(ledgerPart.includes("<code>ac-gate</code>"), "the ledger row carries the failing step");
+    assert.ok(ledgerPart.includes("AC 未全勾（checked 0/3"), "the ledger row carries the RAW failure text");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC3 (3b): an UNREADABLE attempt carrier renders 读不出, never the empty-looking word", async () => {
   const { ws, tasksDir } = makeWorkspace("nh-fanin-unreadable-");
   const cwd0 = process.cwd();

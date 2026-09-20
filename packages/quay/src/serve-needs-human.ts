@@ -117,11 +117,13 @@ export function latestFailureByTask(res: FanInAttemptsResult): Map<string, Failu
   return out;
 }
 
-/** One ledger record row (was-ever-escalated truth) + a display timestamp. */
+/** One ledger record row (was-ever-escalated truth) + a display timestamp + its latest raw failure.
+ *  See `FailureCell` — omitted ⇒ `not-evaluated`. */
 interface LedgerRow {
   taskId: string;
   detail: string | null;
   ts: string | null;
+  latestFailure?: FailureCell;
 }
 
 /** `lang` is the request's resolved language (AC-288's mechanism, threaded in by the dispatcher as
@@ -182,11 +184,17 @@ export function renderNeedsHumanPage(
         <td class="clamp" title="${escapeHtml(failureTitle(r.latestFailure ?? { kind: "not-evaluated" }, L))}">${failureCell(r.latestFailure ?? { kind: "not-evaluated" })}</td>
       </tr>`).join("\n");
 
+  // ⚠️ The failure cell rides the LEDGER rows too, and that is not symmetry for its own sake: the
+  // task this column exists for is the one whose status has ALREADY moved on (the driver escalated it,
+  // a human or a re-dispatch took it forward) — the active table no longer lists it, so a failure
+  // column only on the active rows would be structurally blind to exactly the case the problem
+  // statement names ("3 个任务因同一原因被打成 needs-human"). The ledger is where that history lives.
   const ledgerRows = ledger.length === 0
-    ? html`<tr><td colspan="3">${needsHumanLabel("emptyLedger", lang, { code: CODE_PROMOTION_OUTCOME_LEDGER })}</td></tr>`
+    ? html`<tr><td colspan="4">${needsHumanLabel("emptyLedger", lang, { code: CODE_PROMOTION_OUTCOME_LEDGER })}</td></tr>`
     : ledger.map((r) => html`<tr>
         <td><a href="/task/${encodeURIComponent(r.taskId)}">${escapeHtml(r.taskId)}</a></td>
         <td class="clamp" title="${r.detail != null ? escapeHtml(r.detail) : "—"}">${r.detail != null ? escapeHtml(r.detail) : "—"}</td>
+        <td class="clamp" title="${escapeHtml(failureTitle(r.latestFailure ?? { kind: "not-evaluated" }, L))}">${failureCell(r.latestFailure ?? { kind: "not-evaluated" })}</td>
         <td>${r.ts != null ? escapeHtml(relativeTime(Date.parse(r.ts))) : "—"}</td>
       </tr>`).join("\n");
 
@@ -204,7 +212,7 @@ export function renderNeedsHumanPage(
 
       <h2>${needsHumanLabel("sectionLedger", lang, { code: CODE_ACTION_NEEDS_HUMAN })}</h2>
       ${tableWrap(html`<table>
-        <tr><th>task_id</th><th>detail</th><th>ts</th></tr>
+        <tr><th>task_id</th><th>detail</th><th>ts</th><th>${L.colLatestFailure}</th></tr>
         ${ledgerRows}
       </table>`)}
     </main></body></html>`;
@@ -253,7 +261,12 @@ export async function handleNeedsHuman(
   //    ⇒ [] (a real "none", never a fabricated read — the page degrades, does not throw).
   const ledger: LedgerRow[] = readNeedsHumanLedger(cfg.workspaceRoot)
     .filter((r) => r.task_id != null)
-    .map((r) => ({ taskId: r.task_id as string, detail: r.detail, ts: r.ts }));
+    .map((r) => ({
+      taskId: r.task_id as string,
+      detail: r.detail,
+      ts: r.ts,
+      latestFailure: failureByTask.get(r.task_id as string) ?? pageFailure,
+    }));
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderNeedsHumanPage(active, ledger, manifest, cfg.identity, cfg.lang));
