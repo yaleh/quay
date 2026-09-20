@@ -33,6 +33,27 @@ depends_on:
 
 在一个真实的无 registry 外部项目上启动 worker driver，`driver status` 显示分类器 `evaluated:false`、reaper 读数如实；随后一个任务的 outcome 记录里带同样的 instruments 读数；driver 与任务的派发、重试、needs-human 行为与本任务前逐字相同。
 
+## Evidence
+
+**交付物**：`ff-merge.ts` 导出 `probeInstruments()` + `InstrumentReading`/`InstrumentProbe`（分类器探针 = 对该 root **真跑**一次 `--classify-delta`，⛔ 不是存在性检查；reaper 探针 = `siblingScriptArgv` 解析；`siblingScriptCandidates()` 是「试过哪些候选路径」的单一真相源，故 detail 与解析器不可能各说各话——硬规则 5b）；worker-driver 在每次机械 fan-in **进 suite 之前**探针，读数写进该次 outcome 的 `mechanical_fan_in.instruments`（fan-in 在探针之前就失败 ⇒ 记 `instruments:null`，即「未评估」，⛔ 不伪造读数）；`quay driver status --kind worker` 经 `withInstrumentReadings()` 输出两项读数（`--json` 就地合并成单个对象）。⛔ **只记录**：探针不参与任何控制流——不改派发、不改重试上限、不改 needs-human、⛔ 不改退出码。
+
+**AC 逐条验证（2026-09-20，worktree `…/gap-fan-in-instrument-availability-self-check`）**
+- **AC1** `node --test plugin/test/fan-in-ff-merge.test.mjs` → exit 0，**54 pass / 0 fail**，含两条新用例（有 registry ⇒ `classifier.evaluated=true`；无 registry ⇒ `false` 且 detail 列出试过的候选路径；reaper 同形）。
+- **AC2** `node --test plugin/test/worker-driver.test.mjs` → exit 0，**103 pass / 0 fail**，含 AC2 两例（探针在 suite **之前**、读数落进结果、`evaluated=false` **不**拦截 suite）与 AC3 一例。
+- **AC3** 同上的 AC3 用例：`quay driver status --kind worker` 打印两项读数；探针 NOT-evaluated 时退出码仍为 0（`evaluated:false` 与「可用」取值可区分）。
+- **AC4** `bash scripts/test.sh --for-task gap-fan-in-instrument-availability-self-check --allow-thin` → exit 0，**242 pass / 0 fail**。附带 `npx tsc --noEmit -p packages/quay` exit 0。
+
+**同时修掉的、由本任务 delta 引入的 suite 红（fan-in 第 2 轮 `exited-not-landed` 的真因）**
+`packages/quay/test/serve.test.mjs` AC1 红了：`the refused second CLI start exits 0 … got 2; stderr=fan-in-ff-merge: --task <taskId> is required`。**隔离运行同样 red ⇒ 真实缺陷，不是负载敏感的 flake**（该文件虽带 `@load-sensitive child-spawn`，但那是提示不是判决；硬规则 4b）。
+
+**真因**：`cli/driver.ts` 新 import 了 `fan-in/ff-merge.ts`，于是 `quay serve`（经 driver.ts）把 ff-merge 的模块体拉进**打包产物** `dist/quay.js`。ff-merge 原来的直入口守卫是 **URL 式**的（`import.meta.url === pathToFileURL(process.argv[1]).href`）——单文件 bundle 里**每个被内联的模块共享 bundle 自己的 `import.meta.url`**，因此它恒等于 `process.argv[1]`，守卫在**每次** `quay` 调用上都为真：它拿 serve 自己的 argv 去跑 `ffMerge`，没有 `--task` ⇒ 打印该 stderr 并把 `process.exitCode` 置 2，**覆盖了 serve 准入拒绝路径文档化的 exit 0**。
+
+**修法**（提交 `760b38f4a`）：改用本仓库既有的**按文件名**形式——同款缺陷、同款修法见 `packages/quay/src/goal-store.ts:3107` 与 `plugin/scripts/worktree-process-reaper.ts:633`。Core ⛔ 不能 import `plugin/scripts/gate-script-base.ts` 的 `isDirectEntry`（self-contained-dist 不变量），故按 Core 侧先例内联 `.endsWith("ff-merge.ts")` 形式；顺手删掉随之无用的 `pathToFileURL` import。探针「只记录、不拦截」的行为一字未动。
+
+**为何不新增单测**：在 `node --test` 下 `process.argv[1]` 是**测试文件**，URL 式旧守卫在该上下文里同样是 false ⇒ 任何 unit 级用例**恒真、空转**（硬规则 4c：判据恒真但什么也没验到）。能取假的只有**打包形态**，而 `serve.test.mjs` AC1 恰是这个形态：它在真缺陷上红、修好后绿——它已经是这条缺陷的判据。（Core 侧现已无 URL 式直入口守卫；`plugin/scripts/*` 那约 20 处同族 URL 守卫既不在本任务 Touches 内，Core 也不 import plugin，故不动，留作已知族。）
+
+**判据取证（按位置，硬规则 2）**：新 bundle 上 `grep -c "fan-in-ff-merge" <stderr>` = **0**（修复前 = 1）；`grep -n 'endsWith("ff-merge.ts")' dist/quay.js` 命中守卫一行；`serve.test.mjs` 重跑时**无** `cli-entry: … STALE/MISSING` 回退告警 ⇒ 跑的确实是**新 bundle**，⛔ 没走「stale bundle 回落 `.ts` 源码」那条会假绿的路（该测试自己的注释正警告这一形态）。
+
 ## Touches
 
 - packages/quay/src/fan-in/ff-merge.ts
