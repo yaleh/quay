@@ -4,7 +4,8 @@
 //   - tsCommentMask / shCommentMask: 注释被标为非代码, 字符串字面量保持代码 (字面量是被测对象)。
 //   - findPathConstants: *_REL 路径常量按位置命中, 注释提及不命中。
 //   - findJudgmentRewrites: 读 /proc/<pid>/cmdline ∧ 比较名字 = 判定重写; 仅注释/无比较不命中。
-//   - findByteIdenticalPairs: plugin/scripts ↔ experiments/*/scripts 字节相同对计数 + 行数。
+//   - findByteIdenticalPairs: plugin/scripts ↔ experiments/*/scripts 字节相同对计数 + 行数;
+//     任一侧是软链的条目不是 pair (单一来源引用/同一 inode, 与 mirror-pair-drift-check.ts 同规则)。
 //   - literalReplication: full vs code 分列 (证明脚本自己做位置区分, 不靠人工)。
 //   - sharedModuleControl: 经 import 单一访问器的真共享模块不得报高复制度 (AC4 负控制)。
 //
@@ -114,6 +115,33 @@ test("findByteIdenticalPairs — 字节相同对计数 + 行数, 漂移副本不
   assert.equal(pairs.length, 1, JSON.stringify(pairs));
   assert.equal(pairs[0].plugin, "plugin/scripts/foo.ts");
   assert.equal(totalLines, 1);
+});
+
+test("findByteIdenticalPairs — 软链不是 pair (单一来源引用), 真副本才报 (AC3 负控制)", () => {
+  // a.ts: 两侧都是【常规文件】且逐字节相同 ⇒ 必须报 (真副本对照)
+  // b.ts: experiments 侧是【软链】, 指向 plugin 侧那个逐字节相同的真文件 ⇒ 必须不报
+  //       (链接目标是真实存在的同内容文件, 所以这是真负控制: 跟随软链的旧实现会把它报成一对)
+  const dir = mktmp({
+    "plugin/scripts/a.ts": "export const x = 1;\n",
+    "experiments/quay-perpetual-stream/scripts/a.ts": "export const x = 1;\n",
+    "plugin/scripts/b.ts": "export const y = 2;\n",
+  });
+  const mirror = path.join(dir, "experiments/quay-perpetual-stream/scripts");
+  fs.symlinkSync(path.join(dir, "plugin/scripts/b.ts"), path.join(mirror, "b.ts"));
+
+  // 负控制非空转的前置: 被跳过的那条【确实】逐字节相同 (即旧实现确实会报它)。
+  const followed = fs.readFileSync(path.join(mirror, "b.ts"));
+  assert.ok(followed.equals(fs.readFileSync(path.join(dir, "plugin/scripts/b.ts"))),
+    "fixture must be byte-identical through the symlink, else the negative control is vacuous");
+
+  const { pairs, totalLines, symlinksSkipped } = findByteIdenticalPairs(dir);
+  const experiments = pairs.map((p) => p.experiment);
+  assert.deepEqual(experiments, ["experiments/quay-perpetual-stream/scripts/a.ts"],
+    `expected exactly the real-file copy a.ts, got ${JSON.stringify(pairs)}`);
+  assert.equal(experiments.includes("experiments/quay-perpetual-stream/scripts/b.ts"), false,
+    "the symlinked entry must NOT be reported as a pair");
+  assert.equal(totalLines, 1);
+  assert.equal(symlinksSkipped, 1, "the skipped symlink is counted, not silently dropped");
 });
 
 test("literalReplication — full vs code 分列 (脚本自己做位置区分)", () => {
