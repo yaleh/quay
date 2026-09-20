@@ -214,7 +214,7 @@ $ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢�
 
 真实落地：新模块在生产 driver 上被一次真实机械 fan-in 走过（AC6），而不是只有测试绿。导出面 diff 为空（AC2）、无新环（AC4）。若重测结论是「不该再拆」，则以 AC1 的证据关闭本任务并注明，不算失败。
 
-**本轮状态**：AC2（导出面 diff 空）、AC4（无新环）已达成；AC6 的**落地前半边**已达成并留读数（生产入口真实 fan-in 走到 `landed` + 取假负控制），**另半边**（落地后由常驻生产 driver 完成的那条记录）标注「（待外部）」——见 `## Notes` 的 AC6 节与 `tasks/gap-arch134-promotion-outcome-ledger.md` 的同一形态先例。重测结论是**「仍值得拆」**（AC1 已给出逐条依据），故不走「以 AC1 证据关闭本任务」的免失败分支。
+**本轮状态**：AC2（导出面 diff 空）、AC4（无新环）已达成；AC6 的**落地前半边**已达成并留读数（生产入口真实 fan-in 走到 `landed` + 取假负控制），**另半边**（落地后由常驻生产 driver 完成的那条记录）标注「（待外部）」——见 `## Notes` 的 AC6 节与 `tasks/gap-ac134-promotion-outcome-ledger.md` 的同一形态先例。重测结论是**「仍值得拆」**（AC1 已给出逐条依据），故不走「以 AC1 证据关闭本任务」的免失败分支。
 
 **本轮补记**：抽取漏了一处**别人的**源码结构断言（`archguard-structural-gate-fan-in.test.mjs`），由 fan-in 全量 suite 抓出并已修复（见 `## Notes` 的「第五条同类断言」段）：按「指路牌留在 `worker-driver.ts`、正本随代码住 `worker-fan-in.ts`」处置，⛔ 未改该测试文件（不在本任务 Touches）。
 
