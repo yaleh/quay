@@ -130,6 +130,13 @@ $ node --test --experimental-strip-types plugin/test/worker-driver*.test.mjs \
 
 $ node --test --experimental-strip-types packages/quay/test/serve.test.mjs
 # tests 1 / # pass 1 / # fail 0        （唯一跨包消费者 computeWorkerRoundRecord 走 re-export 面，未回归）
+
+$ bash scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver --allow-thin
+ℹ tests 218 / pass 218 / fail 0 / duration_ms 40997.87   （exit 0）
+⇒ 本轮 pre-merge 的 scoped 门（= driver fan-in 跑的同一条命令）全绿；绿后按
+  `--write-scoped-gate-cache --task … --develop-sha f0ee648c4… --root <root>` 写缓存
+  ⇒ `<root>/.quay/scoped-gate-cache.json` = {"key":"<task>\tf0ee648c4…","ok":true}，
+  供 fan-in 跳过这次已冗余的 scoped 门。
 ```
 
 **四处源码结构判据随代码搬家（⛔ 不是删断言）**：`worker-driver-fan-in-s06` / `worker-driver.test.mjs` / `fan-in-driver-mechanical-orchestration.test.mjs` 里读 `worker-driver.ts` 源码的 `assert.match` 断言，其目标代码已迁走 ⇒ 改为读 `worker-fan-in.ts`（`FAN_IN` / `FANIN_SRC`）。**负臂（「某坏形态已消失」）不降级**：改为对**两个文件都查**——代码从哪搬走都不许在任一处重现。
@@ -145,8 +152,9 @@ exit=0
 {"outcome":"landed","verdict":null,"lockHoldSecs":6,"suiteOutcome":"done",
  "landedSha":"a33d29391b764e22e71a0187febb6f6800663276",
  "fanInLog":"fan-in-gap-af6-probe-ac6-probe-1.log",
- "instruments":{…,"reaper":{"evaluated":true,"detail":"node --experimental-strip-types
-   /home/yale/work/quay-worktrees/gap-arch-worker-fan-in-extract-from-worker-driver/plugin/scripts/worktree-process-reaper.ts"}}}
+ "instruments":{"classifier":{"evaluated":false,…},
+                "reaper":{"evaluated":true,"detail":"node --experimental-strip-types
+                 /home/yale/work/quay-worktrees/gap-arch-worker-fan-in-extract-from-worker-driver/plugin/scripts/worktree-process-reaper.ts"}}}
 ```
 `instruments` 里的 kernel 路径**证明这次 fan-in 跑的是本 worktree（拆分后）的 kernel**；目标仓落地产物：
 ```
@@ -162,7 +170,7 @@ a33d293 tasks: 翻 gap-af6-probe done（driver 机械 fan-in）
 $ mv plugin/scripts/worker-fan-in.ts /tmp/ac6/worker-fan-in.ts.aside
 $ node … --mechanical-fan-in … --run-id ac6-probe-2 --json     ⇒ exit=1
 Cannot find module '…/plugin/scripts/worker-fan-in.ts' imported from '…/plugin/scripts/worker-driver.ts'   (ERR_MODULE_NOT_FOUND)
-$ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢复后同一入口再次执行（正常走到步骤判定）
+$ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢复后同一入口再次执行（ac6-probe-3 起，正常走到步骤判定）
 ```
 ⇒ 生产 fan-in 路径**结构上依赖** `worker-fan-in.ts`，不是「测试绿而已」。
 
@@ -189,7 +197,7 @@ $ mv /tmp/ac6/worker-fan-in.ts.aside plugin/scripts/worker-fan-in.ts   ⇒ 恢�
 - [x] AC2（导出面不变）迁移前后 `worker-driver.ts` 的导出名集合逐字相同：迁前迁后各跑一次导出枚举命令，两份输出 diff 为空（贴 diff 命令与结果）—— 见 `## Notes`：运行期 value 导出 **174 → 174**（missing/added 均 `[]`）+ 源码级导出名 **204 → 204**（`diff` 输出为空），两条独立枚举各跑一次。
 - [x] AC3（判据取假）临时从 `worker-driver.ts` 的 re-export 里删掉一个导出（`mechSh`），`plugin/test/worker-driver-fan-in-s*.test.mjs` 必须红；撤销后绿。两次结果贴进 notes —— 见 `## Notes`：删后 `# tests 18 / pass 0 / fail 18`，报 `does not provide an export named 'mechSh'`；撤销（逐字节还原）后 `# tests 102 / pass 102 / fail 0`。
 - [x] AC4（无新环）`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` ⇒ `valueSccs=[]`、`typeSccs=[]`、`reverseEdges=[]`、`verdict.ok=true`；`worker-fan-in.ts` 不得 import `worker-driver.ts` —— 见 `## Notes`：四条读数全部如上；`worker-fan-in.ts` 对 `worker-driver` 的 import 命中数为 0。
-- [x] AC5（回归面）`plugin/test/worker-driver-fan-in-s01..s12.test.mjs` 与 `worker-driver*.test.mjs` 全绿，且 `scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver` 全绿 —— 见 `## Notes`：s01–s18 合计 **102/102 绿**；`worker-driver*.test.mjs` + `driver-*.test.mjs` + `fan-in-*.test.mjs` 合计 **741/742**，唯一红是 **pristine develop 上同样红**的既有失败（`fan-in-workflow-lock` 的 `.concurrency` 条目，对照读数 4 pass/1 fail 两边逐字相同）；跨包 `packages/quay/test/serve.test.mjs` 1/1 绿；`--for-task` scoped 门见本轮 pre-merge 步骤（绿后才写 scoped-gate 缓存）。
+- [x] AC5（回归面）`plugin/test/worker-driver-fan-in-s01..s12.test.mjs` 与 `worker-driver*.test.mjs` 全绿，且 `scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver` 全绿 —— 见 `## Notes`：s01–s18 合计 **102/102 绿**；`worker-driver*.test.mjs` + `driver-*.test.mjs` + `fan-in-*.test.mjs` 合计 **741/742**，唯一红是 **pristine develop 上同样红**的既有失败（`fan-in-workflow-lock` 的 `.concurrency` 条目，对照读数 4 pass/1 fail 两边逐字相同）；跨包 `packages/quay/test/serve.test.mjs` 1/1 绿；`scripts/test.sh --for-task gap-arch-worker-fan-in-extract-from-worker-driver --allow-thin` **218/218 绿**（exit 0），绿后已写 scoped-gate 缓存（`{"ok":true}`）。
 - [ ] AC6（生产载体，硬规则 4 推论三）拆分落地后 driver 的一次真实机械 fan-in 走通新模块：`.workflow-events/` 或 dispatch 记录里出现落地后时间窗内、由 `worker-fan-in` 路径完成的 fan-in 记录 ≥1 条（贴该记录）；关掉测试注入缝后仍成立 —— **这半边的证据只能在落地后产生**：生产 fan-in 的执行器锚在 **kernel 安装位置**（`spawnMechanicalFanIn` → `kernelSiblingArgv("worker-driver.ts")`），而常驻 worker-driver 跑在**主检出**上，主检出要等本改动落地并同步后才持有 `worker-fan-in.ts` ⇒ 本任务自身那次 fan-in 仍走拆分前代码，该记录须由**下一次** fan-in 产生。**落地前能做的半边已做完并留下读数**（见 `## Notes`）：生产入口 `--mechanical-fan-in`（无任何测试缝）在本 worktree 的 kernel 上跑出 `outcome:landed`（`landedSha=a33d293…`，目标仓落 `tasks: 翻 gap-af6-probe done（driver 机械 fan-in）`，`instruments` 回读的 kernel 路径 = 本 worktree），且**取假负控制**成立（模块挪开 ⇒ 同一入口 `ERR_MODULE_NOT_FOUND` 于 `worker-driver.ts` 的 import；恢复后再次执行）。（待外部）
 - [x] AC7（行数只作旁证）notes 里记 `wc -l` 前后读数；⛔ 不得以行数作通过判据 —— 见 `## Notes`：6112 → 4453（-1659，-27.1%），新增 `worker-fan-in.ts` 1772 行；并写明行数**只作旁证**，承重判据是 AC2/AC3/AC4/AC6。
 
