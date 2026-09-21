@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-resolveroot
 title: "semantic-dedup-scan: Five byte-identical bodies (path.resolve(rootArg ??
   process.cwd())); all five already import flagValue/helpExit from
   gate-script-base.ts, so a shared home exis"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
