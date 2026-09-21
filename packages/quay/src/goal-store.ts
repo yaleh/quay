@@ -2327,7 +2327,12 @@ export function createGoalStore(
           if (!existingFile) {
             if (bare.length > 0) {
               throw new Error(
-                `${id}: criterion carries ${bare.length} failure exit(s) that write no cause — refused at the write surface (a failing criterion must say WHY on the same line: write to stderr, e.g. \`sys.stderr.write("...\\n")\`, \`>&2\`, or \`console.error\`). Offending: ${formatBareFailureExits(bare)}. Accepted forms: a failure exit whose line also writes to stderr/stdout.`
+                // ⛔ TWO accepted repairs, and the entry's own class label (in formatBareFailureExits)
+                // says which one applies. Telling every author "write a cause on this line" would be
+                // actively wrong for an `errexit abort`: the cause IS written, on a line errexit never
+                // reaches — the assignment must be guarded instead. A rejection that names the wrong
+                // repair is a rejection that does not open (硬规则 3b).
+                `${id}: criterion carries ${bare.length} failure exit(s) that write no cause — refused at the write surface. Offending: ${formatBareFailureExits(bare)}. Accepted forms: (a) a WRITTEN failure exit whose line also writes to stderr/stdout (e.g. \`sys.stderr.write("...\\n")\`, \`>&2\`, \`console.error\`); (b) for a line marked "errexit abort", GUARD the assignment — \`VAR="$(cmd || true)"\`, \`VAR="$(cmd)" || true\`, or \`if ! VAR=$(cmd); then …\` — because a cause written below it can never run.`
               );
             }
           } else {
