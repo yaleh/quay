@@ -2,7 +2,7 @@
 id: gap-ac241-errexit-abort-silent-failures-have-no-predicate
 title: AC-241 台账回归（第 6 次）：errexit 下【非 exit 语句】的静默中止是新的空因来源 —— 谓词把显式/隐式出口当互斥，4
   条共享此岸的在域判据静态 bare=0（本轮 AC-286 实证）
-status: ready
+status: done
 labels:
   - gap
   - defect
