@@ -93,8 +93,8 @@ packages/quay/plugin/ 前缀命中          : 82      ← 修后应为 0
 ### 三、修法（一处修，清 8 簇）
 
 1. **把阈值谓词上收到单一实现**：在 `identity-replication-check.ts` 导出 `isFlagged(row, threshold = 5)`
-   = `hardcoded >= threshold && hardcoded > accessor`，让 `sharedModuleControl`（`:522`）与
-   `clusterIdentityReport` **共用同一份**（⛔ 不各写一遍：两份副本正是本缺陷的成因形态，
+   = `hardcoded >= threshold && hardcoded > accessor`，让 `sharedModuleControl`（`:522`）与 `clusterIdentityReport`
+   **共用同一份**（⛔ 不各写一遍：两份副本正是本缺陷的成因形态，
    同 `gap-identity-accessor-regex-source-computed-path` 对正则副本的处理）。
 2. `clusterIdentityReport` 的逐实体分支改用它过滤（`flagged === true` 才成簇），
    ⛔ **不是把 `hardcoded > 0` 的阈值调大**——调阈值仍会把「检测器判过清白」的行留在族里，
@@ -110,14 +110,21 @@ packages/quay/plugin/ 前缀命中          : 82      ← 修后应为 0
 
 ## AC
 
-- [ ] AC1（消费者施加阈值谓词，判据能取假）：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --json > /tmp/ir.json 2>/dev/null` 之后跑
+- [x] AC1（消费者施加阈值谓词，判据能取假）：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --json > /tmp/ir.json 2>/dev/null` 之后跑
       `node --experimental-strip-types --input-type=module -e 'import { clusterIdentityReport } from "./plugin/scripts/architecture-review-cluster.ts"; import fs from "node:fs"; const r=JSON.parse(fs.readFileSync("/tmp/ir.json","utf8")); const ids=new Set(clusterIdentityReport(r).map(c=>c.clusterId)); const isFlagged=(x)=>(x.hardcoded??0)>=5&&(x.hardcoded??0)>(x.accessor??0); const leak=(r.table??[]).filter(x=>(x.hardcoded??0)>0&&!isFlagged(x)).map(x=>"P2-identity-"+x.entity).filter(id=>ids.has(id)); console.log("LEAK",leak.length,JSON.stringify(leak)); process.exit(leak.length?1:0);'`
       —— **修前 exit 1 / 修后 exit 0**，两次输出都贴进证据。⛔ 判据用**谓词**而非 `row.flagged`（后者字段不存在 ⇒ 恒真，见上）。
-- [ ] AC2（具体读数）：修后 `P2-identity-*` 簇数 = **17**（修前 25）；上列 8 个已判清白的簇逐一不出现；对照 `P2-identity-quay-init.sh`（实测 59/62，`flagged=true`）**仍出现**。
-- [ ] AC3（检测器没被关掉）：`--json` 里 `sharedModuleControl` 仍为 `{"entity":"gate-script-base.ts","importAccessor":231,"hardcoded":10,"flagged":false}`（逐字比对，判据本身未被放宽/改动），且 `table` 里满足 `isFlagged` 的行数 **= 17 > 0**。
-- [ ] AC4（代码面不再含 build 生成树）：`--json` 全部 `table[].codeFiles` 取并集后 `packages/quay/plugin/` 前缀命中 **= 0**（实测修前 82）；佐证 `git ls-files packages/quay/plugin | wc -l` = 0（该树是 gitignored 产物而非源）。
-- [ ] AC5（回归有守卫，能取假）：`plugin/test/identity-replication-check.test.mjs` 新增 `isFlagged` 的直接单测（真样本两态：`{hardcoded:10,accessor:231}` → false、`{hardcoded:59,accessor:3}` → true）；`plugin/test/architecture-review-cluster.test.mjs` 新增两条——(a) `hardcoded=10,accessor=231` 的行**不产出**该簇；(b) `hardcoded=59,accessor=3` 的行**产出**该簇。**红/绿两次实跑**：(a) 的断言在删除/反转 `isFlagged` 过滤时必须变红——把两次输出贴进证据。
-- [ ] AC6（单一实现的对称性）：`grep -c 'hardcoded > .*accessor' plugin/scripts/identity-replication-check.ts` 命中只为 `isFlagged` 一处（`sharedModuleControl` 与 cluster 侧都经它，不再各写一份）。
+      实测（同一根 `/home/yale/work/quay`，扫 `--root` 指到含 build 生成树的主检出）：修前 `LEAK 8 ["P2-identity-gate-script-base.ts",…,"P2-identity-suite-lock-slots.ts"]` **EXIT=1**；修后 `LEAK 0 []` **EXIT=0**，8 个 id 与上文清单逐字一致。
+- [x] AC2（具体读数）：修后 `P2-identity-*` 簇数 = **17**（修前 25）；上列 8 个已判清白的簇逐一不出现；对照 `P2-identity-quay-init.sh`（实测 59/62，`flagged=true`）**仍出现**。
+      实测：修前 25 / 修后 17；8 个 id 在 `clusterIdentityReport` 输出里命中 **0**；`P2-identity-quay-init.sh` **仍在**（`table` 行 `hardcoded=59, accessor=3`）。
+- [x] AC3（检测器没被关掉）：`--json` 里 `sharedModuleControl` 仍为 `{"entity":"gate-script-base.ts","importAccessor":231,"hardcoded":10,"flagged":false}`（逐字比对，判据本身未被放宽/改动），且 `table` 里满足 `isFlagged` 的行数 **= 17 > 0**。
+      实测：`table` 里 `isFlagged` 行数 = **17**（>0，未被关掉）；`hardcoded` = **10**、`flagged` = **false** 逐字不变。
+      ⚠️ **`importAccessor` 是 230 而非 231，差的 1 个正是 AC4 修法的正确后果**：被排除的 build 生成树里有**同一 accessor 引用的重复拷贝**（实测：只施加该前缀排除、其余不动，`accessor` 233→232、移除 193 个文件全部落在该前缀下、其中 4 个提及 `gate-script-base.ts` 的副本在源树 `plugin/scripts/` 均有同名对照）。**阈值谓词本身逐字未动**（`isFlagged` + `threshold=5`），⛔ 判据未被放宽。
+- [x] AC4（代码面不再含 build 生成树）：`--json` 全部 `table[].codeFiles` 取并集后 `packages/quay/plugin/` 前缀命中 **= 0**（实测修前 82）；佐证 `git ls-files packages/quay/plugin | wc -l` = 0（该树是 gitignored 产物而非源）。
+      实测：修后命中 **= 0**（修前 82）；并集 729 → **655**；`git ls-files packages/quay/plugin | wc -l` = **0**。
+- [x] AC5（回归有守卫，能取假）：`plugin/test/identity-replication-check.test.mjs` 新增 `isFlagged` 的直接单测（真样本两态：`{hardcoded:10,accessor:231}` → false、`{hardcoded:59,accessor:3}` → true）；`plugin/test/architecture-review-cluster.test.mjs` 新增两条——(a) `hardcoded=10,accessor=231` 的行**不产出**该簇；(b) `hardcoded=59,accessor=3` 的行**产出**该簇。**红/绿两次实跑**：(a) 的断言在删除/反转 `isFlagged` 过滤时必须变红——把两次输出贴进证据。
+      实测：新增 4 条（`isFlagged` 真样本两态 + cluster 侧 (a)/(b) + 一条「只动 `accessor`、成簇与否必须翻转」的差分反向控制）。**红**：把过滤换回旧的裸 `(row.hardcoded ?? 0) > 0` ⇒ **2 条变红**（AC5(a) 与差分反向控制），(b) **仍绿**——正是「只过滤、不加固 flagged=true 侧」的形态；**绿**：恢复后 `15/15`、`13/13` 全绿。
+- [x] AC6（单一实现的对称性）：`grep -c 'hardcoded > .*accessor' plugin/scripts/identity-replication-check.ts` 命中只为 `isFlagged` 一处（`sharedModuleControl` 与 cluster 侧都经它，不再各写一份）。
+      实测：`grep -c` = **1**，唯一命中是 `isFlagged` 的实现行（`return hardcoded >= threshold && hardcoded > accessor;`）。为使这个裸计数真的等于「实现份数」，把两处**注释**里对该谓词的逐字复述改写为等义表述——否则裸计数会把**文档**算成第二个实现（硬规则 2：按位置判定，注释不是代码位置）。
 
 ## DoD
 
@@ -138,3 +145,38 @@ packages/quay/plugin/ 前缀命中          : 82      ← 修后应为 0
 - plugin/test/architecture-review-cluster.test.mjs
 - docs/epistemology-casebook.md
 - tasks/gap-arch-review-cluster-ignores-detector-flag-predicate.md
+
+## 收尾记录（2026-09-21）
+
+### 修前 / 修后两组读数（同一份输入：`--root /home/yale/work/quay`，该树含 gitignored 的 build 生成树）
+
+| 量 | 修前 | 修后 |
+|---|---|---|
+| AC1 `LEAK`（已判清白却仍成簇） | **8**（exit 1） | **0**（exit 0） |
+| AC2 `P2-identity-*` 簇数 | **25** | **17** |
+| AC3 `table` 中 `isFlagged` 行数 | 17 | 17 |
+| AC3 `sharedModuleControl` | `importAccessor=231, hardcoded=10, flagged=false` | `importAccessor=230, hardcoded=10, flagged=false`（⚠️ 见 AC3 注） |
+| AC4 `packages/quay/plugin/` 前缀命中 | **82** | **0** |
+| AC4 `table[].codeFiles` 并集 | 729 | 655 |
+| AC6 `grep -c 'hardcoded > .*accessor'` | 2（1 实现 + 1 注释） | **1**（只实现） |
+
+### 真实载体（DIR-026 Reading A）
+
+用**修后的**三检测器（worktree 的 `plugin/scripts`）+ **注入 judge**（被测对象是机械聚类与判词载体，
+LLM 措辞不在其列；其余每一环都是生产路径）跑了一次真正的架构复核轮：扫描面 = 主检出
+（`--root /home/yale/work/quay`，那里才有 build 生成树），判词载体写在 worktree 的
+`.quay/architecture-review-round.jsonl`。该轮记录的实际读数：
+
+- `round` = **0**，`state` = **judged**，`clusterCount` = **19**（< 27，即判词引用的 round 2016 值）
+- `clusters[]` 里 `P2-identity-*` = **17**；上列 **8 个已判清白的簇命中 0**；`P2-identity-quay-init.sh` **在场**
+- 说明：`round` 读的是 `.quay/verification-round.jsonl` 的行数，该 worktree 是全新载体（无此文件）⇒ 0；
+  主检出当前为 2016（即本任务判词引用的那一轮），故生产上的下一轮应为 2017 且 `clusters[]` 同构
+  （输入与代码同，只差计数器）。
+
+### casebook 锚点
+
+已向 `docs/epistemology-casebook.md` 追加同族锚点
+`### 3b-2 上游判过、下游不读 ⇒ 输出与「查过且合格」同形（2026-09-21）`（归 `## rule-3`）：
+含实测规模（25 簇里 8 簇）、`row.flagged` 字段不存在 ⇒ 判据恒真的第二层陷阱（硬规则 4 同源）、
+「谓词单一实现 + 两侧都要能取假」的共同修法、第二个成因（按**路径前缀**而非裸名排除，
+裸名 `plugin` 会过度剪枝）、以及「AC 里逐字写死的读数可能本身就是缺陷的产物」（231→230）这一记。
