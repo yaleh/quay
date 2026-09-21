@@ -3,7 +3,7 @@ id: gap-ac286-fanin-merge-target-criterion-carrier-stale
 title: AC-286 判据点名的承载者随机械 fan-in 抽取迁走（`2440b52d0`）⇒ 判据恒红，且是冻结population 119 条里唯一
   failing 的一条——改为【结构化解析 runMechanicalFanIn 的定义模块】，恢复「机械 fan-in 合并目标仍是
   develop」的回归防护
-status: todo
+status: ready
 labels:
   - gap
   - defect
