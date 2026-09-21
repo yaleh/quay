@@ -114,8 +114,19 @@ function maskFor(f: string): (src: string) => Uint8Array {
 const SKIP_DIRS = new Set(["node_modules", "vendor", "fixture", ".git", ".quay", "dist", "coverage"]);
 const CODE_EXTS = new Set([".ts", ".sh", ".mjs", ".js"]);
 
-/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules)。
- *  遍历用 fs-walk.ts；skip 集与扩展名集仍是本检查器自己的。 */
+/** 跳过的【构建产物树】——点名的不是 basename 而是【仓内相对路径前缀】。
+ *  `packages/quay/plugin/` 是 `package.sh` 在 `npm pack` 前把仓根 `plugin/` 整体**暂存**出来的快照
+ *  (`.gitignore:26`；`git ls-files packages/quay/plugin` = 0 条，411 个常规文件 / 0 个软链)：它与
+ *  `plugin/` 是同一批文件的**第二份拷贝**，枚举它等于把每个实体数两遍，直接抬高 `code`/`hardcoded`
+ *  (实测：`table[].codeFiles` 并集 729 个里有 **82** 个落在此前缀下)。
+ *  ⛔ 为什么不写进 SKIP_DIRS：`walkFiles` 的 `prune` 只拿到 **basename**，而 `plugin` 同时是四个扫描根
+ *  之一（prune 对根本身不生效，但一个**全局**裸名 `plugin` 会连带剪掉**任何**叫 plugin 的目录）；
+ *  名字面比要表达的面宽 ⇒ 静默过度剪枝，正是硬规则 3b 的形态。按路径前缀表达才是这个谓词本身
+ *  (gap-arch-review-cluster-ignores-detector-flag-predicate 成因二)。 */
+const SKIP_REL_PREFIXES = ["packages/quay/plugin/"];
+
+/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules
+ *  与构建产物树 SKIP_REL_PREFIXES)。遍历用 fs-walk.ts；skip 集与扩展名集仍是本检查器自己的。 */
 export function walkCodeFiles(root: string): string[] {
   const roots = ["plugin", "packages", "experiments", "scripts"].map((d) => path.join(root, d));
   const out = roots.flatMap((r) =>
@@ -125,7 +136,12 @@ export function walkCodeFiles(root: string): string[] {
       include: (name, ext) => CODE_EXTS.has(ext),
     }),
   );
-  return out.sort();
+  return out
+    .filter((f) => {
+      const rel = relOf(root, f).split(path.sep).join("/");
+      return !SKIP_REL_PREFIXES.some((p) => rel.startsWith(p));
+    })
+    .sort();
 }
 
 function relOf(root: string, f: string): string {
@@ -164,7 +180,9 @@ function escapeRegex(s: string): string {
  *  处必然失败 ⇒ 本仓 6 个直接引用文件被逐个计成 hardcoded。
  *  ⛔ 两个方向都不能过: 简单放宽成 `[^\n]*?` 会让 `. "$CONF" # loads x.sh` 这种【行尾注释里的提及】
  *  也算成 accessor (匹配起点是行首的 `.`, 落在代码位置, 位置掩码拦不住) —— 等于把
- *  `flagged = hardcoded >= threshold && hardcoded > accessor` 架空, 即把检测器关掉。
+ *  `isFlagged` 的评判 (硬编码数须达到阈值且多于访问器数) 架空, 即把检测器关掉。
+ *  ⛔ 此处刻意不逐字写出谓词: 本文件上「阈值谓词有几个实现」的机械读数是一条裸 grep (AC6),
+ *  注释里再写一遍会让它把**文档**算成第二个实现 (硬规则 2: 按位置判定, 注释不是代码位置)。
  *  仅要求引号成对【也】不够: 那样 `. "$CONF" # loads x.sh` 会被读成「引号段 "$CONF" + 后面的路径」。
  *  故未加引号的片段额外排除 `#` (shell 里词首的 `#` 开注释; 引号段内的 `#` 不受影响)。
  *  两条合起来才同时做到「读得懂嵌套引号」与「不吞掉行尾注释」。 */
@@ -512,6 +530,24 @@ export interface SharedModuleControl {
   sampleFiles: string[];
 }
 
+/** 高复制度的**阈值谓词 —— 单一实现**（两处消费者：`sharedModuleControl` 与下游的
+ *  `architecture-review-cluster.ts#clusterIdentityReport`）。
+ *
+ *  为什么必须收成一处：判据有两半，「字面量重复出现 ≥ threshold 次」只是其一；另一半（硬编码数须
+ *  **多于**访问器数）才是把「**大量文件走单一访问器引用、少数硬编码**」（= 共享模块的正常形态，
+ *  `gate-script-base.ts` 就是它）与真正的复制区分开的那一半。下游曾只读裸计数 `hardcoded > 0`，
+ *  阈值判定整个缺席 ⇒ 25 个逐实体簇里 8 个是检测器**已经判过清白**的假簇
+ *  (gap-arch-review-cluster-ignores-detector-flag-predicate：上游判过、下游不读 ⇒ 输出与
+ *  「查过且合格」同形，硬规则 3b)。两份副本正是本缺陷的成因形态，故只此一份。
+ *
+ *  `accessor`/`hardcoded` 缺席按 0 计：缺值不等于「未判」——行上两者都在（`LiteralReplication`），
+ *  缺省只出现在手写 fixture 里。PURE。 */
+export function isFlagged(row: { hardcoded?: number; accessor?: number }, threshold = 5): boolean {
+  const hardcoded = row.hardcoded ?? 0;
+  const accessor = row.accessor ?? 0;
+  return hardcoded >= threshold && hardcoded > accessor;
+}
+
 export function sharedModuleControl(
   root: string,
   files: string[],
@@ -519,7 +555,7 @@ export function sharedModuleControl(
   threshold = 5,
 ): SharedModuleControl {
   const r = literalReplication(root, files, entity);
-  const flagged = r.hardcoded >= threshold && r.hardcoded > r.accessor;
+  const flagged = isFlagged(r, threshold);
   return {
     entity,
     importAccessor: r.accessor,

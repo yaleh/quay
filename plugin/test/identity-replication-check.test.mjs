@@ -8,6 +8,7 @@
 //     任一侧是软链的条目不是 pair (单一来源引用/同一 inode, 与 mirror-pair-drift-check.ts 同规则)。
 //   - literalReplication: full vs code 分列 (证明脚本自己做位置区分, 不靠人工)。
 //   - sharedModuleControl: 经 import 单一访问器的真共享模块不得报高复制度 (AC4 负控制)。
+//   - isFlagged: 阈值谓词的单一实现, 两态都用真读数 (10/231 清白 vs 59/3 成簇)。
 //
 // Run:
 //   node --experimental-strip-types plugin/test/identity-replication-check.test.mjs
@@ -27,6 +28,7 @@ import {
   literalReplication,
   replicationTable,
   sharedModuleControl,
+  isFlagged,
   run,
 } from "../scripts/identity-replication-check.ts";
 
@@ -312,6 +314,26 @@ test("sharedModuleControl — 经 import 单一访问器的真共享模块不得
   assert.equal(c.importAccessor, 2, "both consumers go through the single import accessor");
   assert.equal(c.hardcoded, 0, "no hardcoded basename reference");
   assert.equal(c.flagged, false, "a single-accessor module must NOT be flagged as replicated");
+});
+
+// ── 阈值谓词 isFlagged：单一实现的直接单测（gap-arch-review-cluster-ignores-detector-flag-predicate AC5）──
+// 两个样本都是**实测过的真读数**（不是编出来的边界）：
+//   `{hardcoded:10, accessor:231}` = gate-script-base.ts 的 sharedModuleControl —— 检测器判清白；
+//   `{hardcoded:59, accessor:3}`   = table 里的 quay-init.sh —— 真复制，必须成簇。
+// ⛔ 这条谓词是 cluster 阶段此前整个缺席的那一半判据；它一旦恒真/恒假，本文件与 cluster 侧同时失守。
+
+test("isFlagged — 阈值谓词两态（真样本：10/231 清白 vs 59/3 成簇）", () => {
+  assert.equal(isFlagged({ hardcoded: 10, accessor: 231 }), false, "hardcoded >= 5 但 hardcoded <= accessor ⇒ 清白（共享模块正常形态）");
+  assert.equal(isFlagged({ hardcoded: 59, accessor: 3 }), true, "hardcoded >= 5 且 hardcoded > accessor ⇒ 真复制");
+  // 第一半（阈值）单独能取假：hardcoded 低于阈值且压倒 accessor，仍不成簇。
+  assert.equal(isFlagged({ hardcoded: 4, accessor: 0 }), false, "低于阈值 ⇒ 不成簇（第一半能取假）");
+  // 第二半（> accessor）单独能取假：accessor 持平/反超即清白，与 hardcoded 多大无关。
+  assert.equal(isFlagged({ hardcoded: 1000, accessor: 1000 }), false, "hardcoded == accessor ⇒ 清白（第二半能取假）");
+  // 缺席按 0 计（手写 fixture 的行上没有 accessor）：不因缺字段而恒假或抛错。
+  assert.equal(isFlagged({ hardcoded: 5 }), true, "accessor 缺席按 0 计（缺值 ≠ 未判）");
+  assert.equal(isFlagged({}), false, "两个操作数都缺席 ⇒ 全 0 ⇒ 不成簇");
+  // threshold 可调（sharedModuleControl 的既有参数面）。
+  assert.equal(isFlagged({ hardcoded: 2, accessor: 0 }, 2), true, "threshold 参数透传");
 });
 
 test("run — 产出完整 report (各 section 在场)", () => {

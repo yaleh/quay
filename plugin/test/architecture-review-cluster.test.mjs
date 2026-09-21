@@ -48,8 +48,10 @@ const IDENTITY = {
     pairs: [{ plugin: "plugin/scripts/foo.ts", experiment: "experiments/quay-perpetual-stream/scripts/foo.ts" }],
   },
   table: [
-    { entity: "session-liveness.sh", code: 5, hardcoded: 4, codeFiles: ["plugin/scripts/a.ts", "packages/quay/src/observation.ts"] },
-    { entity: "gate-script-base.ts", code: 3, hardcoded: 0, codeFiles: ["plugin/scripts/c.ts"] },
+    // 成簇行：满足检测器判定 `hardcoded >= 5 && hardcoded > accessor`。⛔ 本 fixture 原先只写
+    // `hardcoded: 4`（旧的裸计数判据 `hardcoded > 0` 放行）——下面 AC5 的两条对照用例把这个谓词钉死。
+    { entity: "session-liveness.sh", code: 5, accessor: 0, hardcoded: 5, codeFiles: ["plugin/scripts/a.ts", "packages/quay/src/observation.ts"] },
+    { entity: "gate-script-base.ts", code: 3, accessor: 231, hardcoded: 0, codeFiles: ["plugin/scripts/c.ts"] },
   ],
 };
 
@@ -115,6 +117,38 @@ test("AC1 — per-source clustering maps each detector's shape to clusters", () 
   assert.deepEqual(deletion.map((c) => c.clusterId), ["P1-deletion-closure"]);
   assert.equal(deletion[0].rawCount, 2);
   assert.match(deletion[0].label, /R=2\.00/);
+});
+
+// ── 阈值谓词：cluster 阶段消费检测器自己的判定（gap-arch-review-cluster-ignores-detector-flag-predicate
+//    AC5(a)/(b)）—— 两侧都要能取假：只做「过滤掉清白行」而不做「flagged=true 侧仍成簇」，等于把检测器
+//    关掉（正是 identity-replication-check.ts 里那条注释自己担心的那件事）。
+//    两个样本都是**实测过的真读数**：10/231 = gate-script-base.ts（检测器判清白，修前却成簇），
+//    59/3 = quay-init.sh（真复制，修前后都必须成簇）。
+
+test("AC5(a) — 检测器判清白的行（hardcoded=10 < accessor=231）不产出该簇", () => {
+  const r = { table: [{ entity: "gate-script-base.ts", code: 241, accessor: 231, hardcoded: 10, codeFiles: ["plugin/scripts/a.ts"] }] };
+  assert.deepEqual(
+    clusterIdentityReport(r).map((c) => c.clusterId),
+    [],
+    "hardcoded < accessor ⇒ 大量文件走单一访问器引用（共享模块正常形态）⇒ ⛔ 不成簇",
+  );
+});
+
+test("AC5(b) — 检测器判定 flagged 的行（hardcoded=59 > accessor=3）仍产出该簇", () => {
+  const r = { table: [{ entity: "quay-init.sh", code: 62, accessor: 3, hardcoded: 59, codeFiles: ["plugin/scripts/a.ts"] }] };
+  const ids = clusterIdentityReport(r).map((c) => c.clusterId);
+  assert.deepEqual(ids, ["P2-identity-quay-init.sh"], "flagged ⇒ 仍成簇（阈值判定没被用来关掉检测器）");
+  // rawCount 仍是裸 hardcoded 计数（判据是「成不成簇」，不是「报什么数」）。
+  const c = clusterIdentityReport(r)[0];
+  assert.equal(c.rawCount, 59);
+});
+
+test("AC5(a/b) 反向控制 — 同一份输入里两条行只在 accessor 上不同，成簇与否必须跟着翻转", () => {
+  const row = (hardcoded, accessor) => ({ entity: "x.sh", code: hardcoded + accessor, accessor, hardcoded, codeFiles: ["plugin/scripts/a.ts"] });
+  // 差分对照：hardcoded 不变（=59），只把 accessor 从 3 抬到 59 ⇒ 判定翻转。若 cluster 侧退回裸
+  // `hardcoded > 0`，下面第二条断言立刻变红（hardcoded 两态都是 59 > 0）。
+  assert.deepEqual(clusterIdentityReport({ table: [row(59, 3)] }).map((c) => c.clusterId), ["P2-identity-x.sh"]);
+  assert.deepEqual(clusterIdentityReport({ table: [row(59, 59)] }).map((c) => c.clusterId), []);
 });
 
 test("AC1 — empty deletion report / no components ⇒ no P1 cluster", () => {
