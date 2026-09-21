@@ -9,7 +9,7 @@ criterion: >-
 
   set -euo pipefail
 
-  SRC="plugin/scripts/worker-driver.ts"
+  SRC="plugin/scripts/worker-fan-in.ts"
 
   if [ ! -f "$SRC" ]; then
     echo "CAUSE=source-absent — $SRC does not exist" >&2; exit 1
@@ -17,7 +17,7 @@ criterion: >-
 
   LINE="$(grep -nE
   'const[[:space:]]+mergeTarget[[:space:]]*=[[:space:]]*opts\.mergeTarget'
-  "$SRC" | head -1)"
+  "$SRC" | head -1 || true)"
 
   if [ -z "$LINE" ]; then
     echo "CAUSE=default-assignment-not-found — no line in $SRC assigns 'const mergeTarget = opts.mergeTarget ?? ...' — the mechanical fan-in's default merge-target expression may have been refactored; this criterion needs updating, not silently passed" >&2; exit 1
@@ -29,8 +29,11 @@ criterion: >-
   esac
 
   CRIT
-expect: criterion exits 0 as long as worker-driver.ts's mechanical fan-in path
-  still references develop as the merge target
+expect: criterion exits 0 as long as the mechanical fan-in's merge-target default
+  assignment still defaults to develop. ⛔ The probe anchor is `plugin/scripts/worker-fan-in.ts`
+  (where `const mergeTarget = opts.mergeTarget ?? "develop"` lives, line 1138) — the expression
+  moved there out of `worker-driver.ts` without the guarantee changing; only the anchor followed
+  the symbol (gap-ac241-errexit-abort-silent-failures-have-no-predicate)
 origin: 本方案不改变 fan-in 目标，需要一条判据防止未来意外漂移
 activatedAt: 2026-09-17T04:11:33.576Z
 statusLog:

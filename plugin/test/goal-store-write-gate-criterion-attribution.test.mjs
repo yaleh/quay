@@ -95,6 +95,37 @@ test("A2 the implicit-exit class is covered by the SAME predicate (no second cod
   assert.equal(v.bare[0].implicit, true, "reported as INHERITED, not as a written exit");
 });
 
+test("A5 the errexit-abort class is covered by the SAME predicate (the 6th recurrence, third class)", () => {
+  // AC-286's shape: `set -euo pipefail` + an UNGUARDED assignment-with-command-substitution. Under
+  // `set -e` the substitution's non-zero ENDS THE SHELL on that line, so the `CAUSE=…` written by the
+  // guard below it is dead code. Measured in the production ledger 2026-09-20T23:50:57Z: this criterion
+  // carries THREE attributed exits and still wrote ZERO bytes on both streams.
+  const red = [
+    "set -euo pipefail",
+    "LINE=\"$(grep -nE 'p' \"$f\" | head -1)\"",
+    'if [ -z "$LINE" ]; then echo "CAUSE=anchor-not-found" >&2; exit 1; fi',
+  ].join("\n");
+  const v = goalStore.evaluateCriterionAttribution(red);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.bare.length, 1, "the unguarded assignment is the failure exit");
+  assert.equal(v.bare[0].line, 2, "reported WITH its line number");
+  assert.equal(v.bare[0].errexitAbort, true, "and with the errexit marker — a THIRD repair, not 'write a cause'");
+  // The existing two classes are blind to it, which is why five prior repairs all held while AC-241
+  // stayed red. Pinned as readings so a future narrowing has to argue with a test.
+  assert.deepEqual(goalStore.implicitFailureExitLines(red), [], "class ② is behind `out.length === 0` and cannot see it");
+  assert.equal(red.split("\n").filter((l) => goalStore.isBareFailureExitLine(l)).length, 0, "class ① cannot see it");
+
+  // NEGATIVE CONTROLS — the same shape with each of the two correct repairs.
+  for (const guarded of [
+    "set -euo pipefail\nLINE=\"$(grep -nE 'p' \"$f\" | head -1 || true)\"\nif [ -z \"$LINE\" ]; then echo CAUSE=x >&2; exit 1; fi",
+    "set -euo pipefail\nif ! LINE=$(grep -nE 'p' \"$f\"); then echo CAUSE=x >&2; exit 1; fi",
+  ]) {
+    const g = goalStore.evaluateCriterionAttribution(guarded);
+    assert.equal(g.evaluated, true, "the guarded form is readable");
+    assert.deepEqual(g.bare, [], `the guarded form must NOT be flagged: ${guarded}`);
+  }
+});
+
 test("A3 `||`-remediated and attributed forms stay clean (the false side of the predicate)", () => {
   for (const clean of [
     "grep -q X f || { echo cause >&2; exit 1; }",
@@ -160,6 +191,37 @@ test("B3 UPDATE is SHRINK-ONLY: N+1 bare exits refused, N and 0 admitted", () =>
   store.write("AC-902", { criterion: "  sys.stderr.write('no record\\n') or sys.exit(1)" }); // 0: legal
 });
 
+test("B6 CREATE: an errexit-abort criterion is REFUSED by name, and its GUARDED twin is ADMITTED", () => {
+  // The birth surface must close this class too, or a criterion that can only ever fail silently keeps
+  // being born into the ~42s goal loop — and every such round appends a PERMANENT unattributable fail to
+  // the append-only ledger, which is precisely what AC-241 judges (detection is 事后 by construction).
+  const { dir, store } = freshStore();
+  const red = [
+    "set -euo pipefail",
+    "LINE=\"$(grep -nE 'p' \"$f\" | head -1)\"",
+    'if [ -z "$LINE" ]; then echo "CAUSE=anchor-not-found" >&2; exit 1; fi',
+  ].join("\n");
+  assert.throws(
+    () => store.write("AC-905", { title: "t", ...BASE, criterion: red }),
+    (err) => {
+      assert.match(err.message, /line 2/, "the rejection enumerates the offending line number");
+      assert.match(err.message, /errexit abort/, "…and says WHICH class it is (a third, distinct repair)");
+      assert.match(err.message, /refused at the write surface/);
+      return true;
+    },
+  );
+  assert.deepEqual(fs.readdirSync(dir), [], "a refused write leaves NOTHING on disk");
+
+  // NEGATIVE CONTROL — the same shape, guarded. Without this half, "the gate refuses" and "the gate
+  // refuses everything" are the same observation.
+  store.write("AC-905", {
+    title: "t",
+    ...BASE,
+    criterion: "set -euo pipefail\nLINE=\"$(grep -nE 'p' \"$f\" | head -1 || true)\"\nif [ -z \"$LINE\" ]; then echo CAUSE=x >&2; exit 1; fi",
+  });
+  assert.equal(fs.readdirSync(dir).length, 1, "the guarded twin landed on disk");
+});
+
 test("B4 an UNREADABLE stored criterion is NOT-EVALUATED — distinct text, and the repair stays open", () => {
   const { dir, store } = freshStore();
   seedHandwritten(dir, "AC-903", null); // no criterion field at all
@@ -195,6 +257,7 @@ test("C1 the ratchet re-exports the SAME predicate — identity, not a copy", ()
   assert.equal(checker.hasTrailingComputedFailureExit, goalStore.hasTrailingComputedFailureExit);
   assert.equal(checker.implicitFailureExitLines, goalStore.implicitFailureExitLines);
   assert.equal(checker.bareFailureExitsOfCriterion, goalStore.bareFailureExitsOfCriterion);
+  assert.equal(checker.errexitAbortSilentExits, goalStore.errexitAbortSilentExits, "the third class is ONE object too");
 });
 
 test("C2 the gate and the ratchet agree on a real criterion (the two surfaces cannot drift)", () => {

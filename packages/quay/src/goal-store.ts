@@ -991,6 +991,11 @@ export interface BareLine {
    *  reader can tell "the exit is written here and writes no cause" from "the exit is not written at
    *  all and this command's status becomes it" — two different repairs. */
   implicit?: boolean;
+  /** true ⇔ this line is an ERREXIT ABORT: under `set -e`, this assignment's command substitution fails
+   *  and ends the shell on this line, so every guard below it (and the cause it writes) is dead code.
+   *  A THIRD repair, distinct from both above: guard the assignment (`|| true`) or move it into a
+   *  condition — ⛔ not "write a cause here", which the criterion already does and cannot reach. */
+  errexitAbort?: boolean;
 }
 
 /** Blank an unquoted `#`-to-end-of-line comment. `#` is the comment starter in BOTH shells and python,
@@ -1094,14 +1099,160 @@ export function isBareFailureExitLine(line: string): boolean {
   return hasFailureExit(code) && !ATTRIBUTION_RE.test(code);
 }
 
-/** Every bare failure exit of a whole criterion — the explicit forms line by line, plus the
- *  implicit-exit class when no explicit failure exit exists. Pure; `[]` for a clean criterion. */
+// ── THE ERREXIT-ABORT CLASS (2026-09-21, gap-ac241-errexit-abort-silent-failures-have-no-predicate) ─
+//
+// THE THIRD CLASS, and the first one that is NOT about an `exit` statement at all. Classes ① and ②
+// both ask "where does the non-zero status come from?" — ① reads written exits, ② reads the inherited
+// status of a criterion that writes none. This class asks a different question: **the criterion writes
+// its cause correctly, and the shell never reaches the line that writes it.**
+//
+// WHAT THE FORM IS. Under `set -e`, an ASSIGNMENT whose value is a command substitution
+// (`LINE="$(grep … | head -1)"`) takes the substitution's exit status, and a non-zero status ENDS THE
+// SHELL on that line. Every guard below it — `if [ -z "$LINE" ]; then echo "CAUSE=…" >&2; exit 1; fi` —
+// is dead code. The failure is silent not because the criterion forgot a cause but because errexit
+// aborted before the branch that writes one could run. Measured 2026-09-20 in the production ledger:
+// AC-286's criterion carries THREE attributed failure exits and still died with ZERO bytes on both
+// streams, so the runner wrote its zero-output template and AC-241 went red for the 6th time. Minimal
+// reproduction (this repo, 2026-09-21):
+//   $ bash -c 'set -euo pipefail; x="$(grep NO-SUCH /dev/null | head -1)"; if [ -z "$x" ]; then echo "CAUSE=x" >&2; exit 1; fi'
+//   EXIT=1   ← zero output: the guard and its CAUSE never ran
+//
+// WHY THE EARLIER CLASSES CANNOT SEE IT. ① judges LINES CONTAINING a failure exit — this line contains
+// none, so it reads clean by construction. ② judges the status-bearing statement of a criterion with NO
+// exit statement anywhere, and it sits behind `if (out.length === 0)` — the mutex documented as making
+// the two classes "disjoint by construction". The abort lies in the SEAM: a criterion that is fully
+// attributed AND still silent. That is why five successive repairs (bare exits → trailing computed →
+// implicit terminal → birth gate → stock cleanup) each held and AC-241 still went red.
+//
+// THE RULE (position-based, 硬规则 2). Walk the lines in order, tracking whether errexit is currently ON
+// and whether the line sits in an `if`/`elif`/`while`/`until` CONDITION — POSIX exempts conditions from
+// errexit, which is exactly what makes `if ! LINE=$(…)` a correct repair and not a bug. A line is an
+// errexit-abort silent exit iff ALL hold:
+//   · errexit is ON at that line (`set -e…` / `set -o errexit` on, `set +e…` / `set +o errexit` off);
+//   · the line is an ASSIGNMENT (`NAME=` / `export NAME=`) whose VALUE holds a command substitution —
+//     the value is what the shell evaluates, so a substitution anywhere else on the line
+//     (`echo "$(cmd)"`, whose status is `echo`'s) is NOT this class;
+//   · the statement is UNGUARDED: no `||` on it. `LINE="$(grep … || true)"` and `LINE="$(…)" || true`
+//     both prevent the abort (measured, both exit 0). `&&` is deliberately NOT remediation — same
+//     choice class ② makes, same reason: a silent left branch of `&&` short-circuits and, as the
+//     status-bearing statement, exits non-zero with zero output.
+// ⛔ ATTRIBUTION ON THE SAME LINE DOES NOT CLEAR IT, and that is not an oversight: measured,
+//   `X="$(false)"; echo "CAUSE=x" >&2; exit 1` still exits 1 with ZERO output — errexit aborts at the
+//   assignment, so that `echo` is as dead as any guard below it. Clearing here on ATTRIBUTION_RE would
+//   manufacture precisely the false negative this class exists to remove (硬规则 4).
+//
+// MEASURED OVER-REPORT, stated rather than hidden (the discipline ATTRIBUTION_RE and class ② follow).
+// Two directions, both kept, both sized by a scan of develop's 155 in-domain criteria on 2026-09-21:
+//   · a pipeline inside the substitution WITHOUT `pipefail` (`set -e; X="$(false | head -1)"`) does not
+//     abort — measured, exit 0 — because a pipeline's status is its last command's. The predicate keys
+//     on errexit alone and flags it. SIZE: 0 (every flagged AC sets `set -euo pipefail`).
+//   · `X="$(false)" && echo ok` does not abort when a later statement succeeds (measured, exit 0), and
+//     IS flagged. SIZE: 0 (no in-domain criterion carries that shape).
+
+/** errexit turned ON by this line: `set -e`, `set -euo pipefail`, `set -ue -o pipefail`, `set -o errexit`. */
+const ERREXIT_ON_RE = /^(?:command\s+)?set\s+(?:-\w*e\w*(?:\s|$)|-\w*o\s+errexit(?:\s|$))/;
+/** errexit turned OFF by this line: `set +e`, `set +o errexit`. */
+const ERREXIT_OFF_RE = /^(?:command\s+)?set\s+(?:\+\w*e\w*(?:\s|$)|\+\w*o\s+errexit(?:\s|$))/;
+
+/** A line that OPENS a condition, whose commands POSIX exempts from errexit. `!` alone included: `! cmd`
+ *  is a condition context. */
+const CONDITION_OPENER_RE = /^(?:if|elif|while|until|!)(?:\s|$)/;
+/** …and the token that CLOSES it. A condition may span lines (`if [ -f x ]` / `&& [ -f y ]; then`), so
+ *  the region is tracked rather than judged per line. */
+const CONDITION_END_RE = /(?:^|[;&|\s])(?:then|do)\s*$/;
+
+/** A line whose statement is an ASSIGNMENT — `NAME=`, `export NAME=`, `readonly NAME=`. `(?!=)` keeps a
+ *  comparison (`NAME==`) out. */
+const ASSIGNMENT_PREFIX_RE = /^(?:export\s+|readonly\s+|declare\s+-\w+\s+)?[A-Za-z_][A-Za-z0-9_]*=(?!=)/;
+
+/** A command substitution — `$( … )` or `` ` … ` `` — anywhere it can EXECUTE. */
+const CMD_SUBST_RE = /\$\(|`/;
+
+/** True iff `text` leaves a shell construct OPEN: an unterminated quote, an unbalanced `$( … )` or
+ *  backtick, or a trailing `\` continuation. Used to join the physical lines of ONE logical statement,
+ *  so a guard written on a LATER line of a multi-line assignment
+ *  (`LINE="$(grep …` / `"$f" | head -1 || true)"`) is still seen — read per physical line, such a
+ *  criterion reads BARE although it is guarded, i.e. the detector accuses a clean criterion (硬规则 3b,
+ *  the harder error to notice). */
+function statementLeavesOpen(text: string): boolean {
+  let quote: string | null = null;
+  let depth = 0;
+  let ticks = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote !== null) {
+      if (c === "\\" && quote !== "'") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "\\") { i++; continue; }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === "`") { ticks++; continue; }
+    if (c === "$" && text[i + 1] === "(") { depth++; i++; continue; }
+    if (c === ")") depth = Math.max(0, depth - 1);
+  }
+  return quote !== null || depth !== 0 || ticks % 2 !== 0 || /\\\s*$/.test(text);
+}
+
+/** The errexit-abort silent exits of `criterion` (see the class documentation above). Pure; `[]` for a
+ *  criterion that never enables errexit, or one whose every such assignment is guarded. */
+export function errexitAbortSilentExits(criterion: string): BareLine[] {
+  const out: BareLine[] = [];
+  const lines = criterion.split("\n");
+  let errexit = false;
+  let condPending = false;
+  for (let i = 0; i < lines.length; i++) {
+    const code = maskHashComments(lines[i]).trim();
+    if (condPending) {
+      if (CONDITION_END_RE.test(code)) condPending = false;
+      continue;
+    }
+    if (code === "") continue;
+    if (CONDITION_OPENER_RE.test(code)) {
+      // A single-line `if …; then` opens and closes on the same line; a multi-line one holds the region
+      // open until its `then`/`do`.
+      if (!CONDITION_END_RE.test(code)) condPending = true;
+      continue;
+    }
+    if (ERREXIT_OFF_RE.test(code)) { errexit = false; continue; }
+    if (ERREXIT_ON_RE.test(code)) { errexit = true; continue; }
+    if (!errexit) continue;
+    if (!ASSIGNMENT_PREFIX_RE.test(code)) continue;
+    const startLine = i + 1;
+    // Join the rest of THIS logical statement before judging its guards — the guard may be written on a
+    // later physical line of a multi-line value.
+    let stmt = code;
+    while (statementLeavesOpen(stmt) && i + 1 < lines.length) {
+      i += 1;
+      stmt += "\n" + maskHashComments(lines[i]);
+    }
+    const eq = code.indexOf("=");
+    if (!CMD_SUBST_RE.test(code.slice(eq + 1))) continue;
+    if (stmt.includes("||")) continue;
+    out.push({ line: startLine, text: code, errexitAbort: true });
+  }
+  return out;
+}
+
+/** Every bare failure exit of a whole criterion — the explicit forms line by line, the implicit-exit
+ *  class when no explicit failure exit exists, and the errexit-abort class. Pure; `[]` for a clean
+ *  criterion.
+ *
+ *  ⛔ THE ERREXIT CLASS IS NOT BEHIND `out.length === 0`. That mutex is exactly what made the implicit
+ *  class miss AC-286 — a criterion can carry attributed explicit exits AND still die with zero output,
+ *  so the third class must be ADDITIVE. The mutex is kept for class ② alone, where it is correct (a
+ *  written exit determines the status; nothing is inherited). */
 export function bareFailureExitsOfCriterion(criterion: string): BareLine[] {
   const out: BareLine[] = [];
   criterion.split("\n").forEach((line, i) => {
     if (isBareFailureExitLine(line)) out.push({ line: i + 1, text: line.trim() });
   });
   if (out.length === 0) out.push(...implicitFailureExitLines(criterion));
+  // A line can be BOTH an explicit bare exit and an errexit abort; it is one site, so count it once.
+  const already = new Set(out.map((b) => b.line));
+  for (const b of errexitAbortSilentExits(criterion)) {
+    if (!already.has(b.line)) out.push(b);
+  }
   return out;
 }
 
@@ -1141,7 +1292,14 @@ export function evaluateCriterionAttribution(criterion: unknown): CriterionAttri
  *  line text (hard rule 3 — an enumeration, not a boolean). */
 export function formatBareFailureExits(bare: BareLine[]): string {
   return bare
-    .map((b) => `line ${b.line}${b.implicit ? " (implicit — this command's status becomes the criterion's)" : ""}: ${b.text}`)
+    .map((b) => {
+      const kind = b.errexitAbort
+        ? " (errexit abort — under `set -e` this assignment's command substitution ends the shell here, so the cause written below never runs; guard it with `|| true` or move it into a condition)"
+        : b.implicit
+          ? " (implicit — this command's status becomes the criterion's)"
+          : "";
+      return `line ${b.line}${kind}: ${b.text}`;
+    })
     .join("; ");
 }
 
