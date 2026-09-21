@@ -99,6 +99,16 @@ function relPath(dir: string | undefined, basename: string | undefined): string 
   return dir ? `${dir}/${basename}` : basename;
 }
 
+/** 逐实体复制度降序比较器——**P2 面（`clusterIdentityReport`）与 P1 面（`deletionClosureComponents`）
+ *  共用同一份**，⛔ 不各写一遍（两处副本正是本文件那个缺陷的成因形态：同一判据在两个消费点各写一次，
+ *  修了一处漏另一处 ⇒ 硬规则 5b）。只排序，⛔ 不是选取谓词——选取一律走 `isFlagged`。 */
+function byHardcodedDesc(
+  a: { hardcoded?: number },
+  b: { hardcoded?: number },
+): number {
+  return (b.hardcoded ?? 0) - (a.hardcoded ?? 0);
+}
+
 /** P2 聚类：身份复制（字面量复制度 + 判定重写 + 字节相同对 + 路径字面量常量）。PURE。 */
 export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
   const out: Cluster[] = [];
@@ -146,7 +156,7 @@ export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
   // ⛔ 也不是「把阈值调大」：调阈值仍会把检测器判过清白的行留在族里，同一缺陷换个数字复发。
   const entities = (r.table ?? [])
     .filter((row) => isFlagged(row) && typeof row.entity === "string" && row.entity.length > 0)
-    .sort((a, b) => (b.hardcoded ?? 0) - (a.hardcoded ?? 0));
+    .sort(byHardcodedDesc);
   for (const row of entities) {
     const entity = row.entity as string;
     out.push({
@@ -208,11 +218,20 @@ export function clusterDeletionReport(r: DeletionReportView): Cluster[] {
   ];
 }
 
-/** 从 identity 报告的逐实体复制度表推导 deletion-closure 的候选构件（hardcoded>0 的前 max 个）。PURE。 */
+/** 从 identity 报告的逐实体复制度表推导 deletion-closure 的候选构件（**检测器判定 `isFlagged`
+ *  的前 max 个**）。PURE。
+ *
+ *  ⛔ 不是裸 `(row.hardcoded ?? 0) > 0`：那是**同一个缺陷在 P1 面的未扫兄弟**（硬规则 5b）——
+ *  `clusterIdentityReport()` 已改成消费 `isFlagged`（`hardcoded >= 5 && hardcoded > accessor`），
+ *  本函数却仍按裸计数选取，于是检测器**已经判过清白**的共享模块（`hardcoded` 高但 `accessor` 更高：
+ *  `gate-script-base.ts` 10/230、`touches-orthogonality-check.ts` 20/23…）照样作为「构件」被送进
+ *  `deletion-closure-check.ts`，产出一条大而无意义的 DC。实测池 25 → 17，8 个已判清白的行退出。
+ *  ⛔ 也不是「把 max 调小」或「调阈值」：那仍会把判过清白的行留在族里，同一缺陷换个数字复发。
+ *  谓词只有一份实现（上面 import 的 `isFlagged`），与 P2 面共用，⛔ 不各写一遍。 */
 export function deletionClosureComponents(r: IdentityReportView, max = 3): string[] {
   return (r.table ?? [])
-    .filter((row) => (row.hardcoded ?? 0) > 0 && typeof row.entity === "string" && row.entity.length > 0)
-    .sort((a, b) => (b.hardcoded ?? 0) - (a.hardcoded ?? 0))
+    .filter((row) => isFlagged(row) && typeof row.entity === "string" && row.entity.length > 0)
+    .sort(byHardcodedDesc)
     .slice(0, max)
     .map((row) => row.entity as string);
 }

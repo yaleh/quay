@@ -161,6 +161,38 @@ test("AC1 — deletionClosureComponents derives hardcoded>0 entities (top N)", (
   assert.deepEqual(deletionClosureComponents(IDENTITY, 0), []);
 });
 
+// ── AC3/AC5 · P1 候选构件选取与 P2 面共用 `isFlagged`（硬规则 5b：同一原则在 P1 面的未扫兄弟）──────
+// 判据必须能取假：一张 below-threshold 的行排在 top-N 边界内，裸判据选它、`isFlagged` 判据不选它。
+// ⛔ 本组第二条是「另一半能取假」——把 leak.ts 的 accessor 降到谓词之下后**仍须被选出**，
+//    证明修法排的是「检测器判过清白」，不是把边界行一律丢掉（否则就是空转）。
+
+/** AC3 的差分表：leak.ts 20/23 硬编码多但访问器更多（共享模块的正常形态），其余三行真越过谓词。 */
+const BOUNDARY_TABLE = [
+  { entity: "leak.ts", hardcoded: 20, accessor: 23 },
+  { entity: "real.ts", hardcoded: 9, accessor: 2 },
+  { entity: "real2.ts", hardcoded: 8, accessor: 3 },
+  { entity: "real3.ts", hardcoded: 7, accessor: 4 },
+];
+
+test("AC3/AC5 — below-threshold boundary row is NOT selected as a P1 component", () => {
+  // 修前（裸 `(row.hardcoded ?? 0) > 0`）选出 ["leak.ts","real.ts","real2.ts"] —— leak.ts 20/23 在列。
+  // 修后（`isFlagged`）选出 ["real.ts","real2.ts","real3.ts"] —— leak.ts 被排除，真构件不被丢掉。
+  assert.deepEqual(
+    deletionClosureComponents({ table: BOUNDARY_TABLE }, 3),
+    ["real.ts", "real2.ts", "real3.ts"],
+  );
+});
+
+test("AC3/AC5 — 另一半能取假：越过谓词的边界行修后仍被选出", () => {
+  // 只把 accessor 20/23 → 20/3（越过 `hardcoded > accessor && hardcoded >= 5`）⇒ 必须回到候选池。
+  // 若修法写成「把 top-N 边界整段丢掉」或「按文件名/位置排除」，本条即变红。
+  const crossed = BOUNDARY_TABLE.map((r) => (r.entity === "leak.ts" ? { ...r, accessor: 3 } : r));
+  assert.deepEqual(
+    deletionClosureComponents({ table: crossed }, 3),
+    ["leak.ts", "real.ts", "real2.ts"],
+  );
+});
+
 // ── 触发（能取假）─────────────────────────────────────────────────────────────────────────────
 
 test("trigger — candidate clusters empty ⇒ not fired (能取假)", () => {
