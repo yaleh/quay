@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-st
 title: 'semantic-dedup-scan: All 12 bodies byte-identical
   (`s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`) under THREE names (escapeRe x3,
   escapeRegex x2, escapeRegExp x7); store.ts:116 docume'
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
