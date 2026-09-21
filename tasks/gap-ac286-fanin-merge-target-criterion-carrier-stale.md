@@ -169,28 +169,28 @@ CRIT
 
 ## AC
 
-- [ ] **AC1（判据红→绿，同一命令同一对象，前后并排）**：`node packages/quay/bin/quay.ts goal gate AC-286` 改动前
+- [x] **AC1（判据红→绿，同一命令同一对象，前后并排）**：`node packages/quay/bin/quay.ts goal gate AC-286` 改动前
       exit 1（贴含 `CAUSE=default-assignment-not-found` 的原文）⇒ 改动后 exit 0 且 `verdict: "pass"`；并贴
       `criterion` 文本改动前后的 md5 与全文。⛔ 不得改动判据的**覆盖面**（见 Plan 3 第三条边界）。
-- [ ] **AC2（可被打红——负控制实跑，⛔ 没有正控制的 exit 1 什么也不证明）**：对 `goal show AC-286 --json` 取回的
+- [x] **AC2（可被打红——负控制实跑，⛔ 没有正控制的 exit 1 什么也不证明）**：对 `goal show AC-286 --json` 取回的
       **新判据全文**，三个 scratch 变形各跑一次并贴 exit code 与 `CAUSE=`：① 默认值改 `"master"` ⇒
       `CAUSE=default-not-develop`；② 删掉赋值行 ⇒ `CAUSE=default-assignment-not-found`；③ 定义行改名 ⇒
       `CAUSE=fanin-module-unresolved`。另贴正控制（真实树 exit 0）。
-- [ ] **AC3（承载者按【内容】解析，⛔ 不按路径钉）**：贴出解析读数（今天 = `plugin/scripts/worker-fan-in.ts`，
+- [x] **AC3（承载者按【内容】解析，⛔ 不按路径钉）**：贴出解析读数（今天 = `plugin/scripts/worker-fan-in.ts`，
       恰好 1 命中）；并在 scratch 副本里把该模块**整体改名**（如 `worker-fan-in-renamed.ts`，内容不变）后跑
       同一条判据 ⇒ **仍 exit 0**（证明它跟随定义、不跟随文件名）；恢复。
-- [ ] **AC4（用机件改 + 作用域最小 + 落点正确）**：① `goal show AC-286 --json` 显示新 `criterion`/`expect`，
+- [x] **AC4（用机件改 + 作用域最小 + 落点正确）**：① `goal show AC-286 --json` 显示新 `criterion`/`expect`，
       而 `status` 仍 `achieved`、`goal` 仍 `GOAL-023`、`origin`/`activatedAt` 前后逐字相同（并排贴）；
       ② `git -C /home/yale/work/quay show HEAD --stat -- goals/` 显示该记录由 store 的自动提交落在**主检出**
       （⛔ 不在任务 worktree 的 `goals/`），且 diff **只在 criterion 与 expect 两个字段**；
       ③ 贴 `git log -1 --format=%H` 的提交 sha。
-- [ ] **AC5（台账面复核，⛔ 不把 `amendedUnverified` 说成绿）**：`quay goal check --stale-pass` 读数里
+- [x] **AC5（台账面复核，⛔ 不把 `amendedUnverified` 说成绿）**：`quay goal check --stale-pass` 读数里
       AC-286 **不在 `failing`**；若它此刻在 `amendedUnverified`，逐字写明"轮转还没轮到、下次何时可判"，
       ⛔ 不得宣告已复绿。
-- [ ] **AC6（保证本身仍为真的直接量，⛔ 不是"我改好了"的自述）**：并排贴出 ① `worker-fan-in.ts:1138` 的默认赋值行；
+- [x] **AC6（保证本身仍为真的直接量，⛔ 不是"我改好了"的自述）**：并排贴出 ① `worker-fan-in.ts:1138` 的默认赋值行；
       ② 生产调用点 `worker-driver.ts:3513` 不传 `mergeTarget` 的逐字行；③ `grep -rlE '^export async function
       runMechanicalFanIn' plugin/scripts/*.ts` 恰好 1 命中的读数。若任一条不成立 ⇒ 本任务判负（改判据只是把红藏起来）。
-- [ ] **AC7（入库自检）**：`node plugin/scripts/task-schema-check.ts tasks/gap-ac286-fanin-merge-target-criterion-carrier-stale.md`
+- [x] **AC7（入库自检）**：`node plugin/scripts/task-schema-check.ts tasks/gap-ac286-fanin-merge-target-criterion-carrier-stale.md`
       ⇒ exit 0，且 `node packages/quay/bin/quay.ts task check gap-ac286-fanin-merge-target-criterion-carrier-stale --json`
       的 `missing` = `[]`。
 
@@ -224,3 +224,92 @@ goal-driver 每轮/轮转复跑），在 `plugin/test/` 再放一份是**同一�
 **仓库扫描面之外**的那一条。证据一律内联任务体或写进 `.quay/` 下**未跟踪** scratch 文件：按
 `touches-glob-on-quay-runtime-artifacts-blocks-promotion`，未跟踪运行时产物不进 anti-drift 的 `actualFiles`，
 声明它们反而是噪声且会挡晋升。）
+
+## Evidence
+
+**改动对象**：goal store 里 AC-286 的 `criterion` + `expect` 两个字段（⛔ 无产品代码改动）。
+落点 = **主检出**的 store 自动提交 `eb0510745482c0f93657ea6a3e721b24187f0cc4`
+（message = `goals: AC-286 field:criterion,expect by cli:2136151`）。字段级 diff 逐键比对：
+`id/title/status/kind/goal/origin/activatedAt/statusLog/fidelity` 全 **SAME**，**只有 `criterion` / `expect` CHANGED**。
+
+**criterion md5（前后）**：`1999545f54b98bb3b54c98d1cc2abad1` → `1332790b724730703c49aec34ef47d78`；
+**expect md5**：`5c8257acf349de7bb289816ca75262f8` → `643f277d37354ca11450c7af6b3176fa`。
+
+**AC1（红→绿，同一命令同一对象）**
+- 改动前（**原始**判据，承载体钉在 `plugin/scripts/worker-driver.ts`，取自 goal store 的 git 历史 `609dd4677`）
+  在真实树上逐字重跑 ⇒ **exit 1**，且输出**为空**：`set -euo pipefail` 下
+  `LINE="$(grep … | head -1)"` 的命令替换非零在**赋值语句**上中止脚本（正是 AC-241§6 立案的那条）；
+  给该赋值补 `|| true` 后同一条判据打出它**本应**打的具名成因，逐字与 Proposal 所引一致：
+  `CAUSE=default-assignment-not-found — no line in plugin/scripts/worker-driver.ts assigns 'const mergeTarget = opts.mergeTarget ?? ...' — …`
+- 改动后：`node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-286`
+  ⇒ **exit 0**，`verdict: "pass"`，`reason: "acceptance passed (exit 0)"`。
+- ⚠️ **诚实披露（⛔ 不粉饰）**：`goal gate AC-286` 在**本任务开工前**那一刻已经是 exit 0 ——
+  commit `7611c46fa`（2026-09-21T00:15:37Z，任务 `gap-ac241-errexit-abort-silent-failures-have-no-predicate`
+  的第 6 次回归修复）已把锚点从 `worker-driver.ts` 换成 `worker-fan-in.ts`（**只换前缀**，AC-157 形态）。
+  所以本 AC 的"改动前 exit 1"取自**原始承载体文本**（git 历史可取），而非紧邻的上一个修订。
+  那次换前缀的读数恰是本任务立得住的根据：它是同一个"承载者搬迁"缺陷的**第二次实例** ——
+  换前缀只把下一次搬家推后，本任务把它换成**结构化解析**，搬家那天判据自己跟着走。
+
+**AC2（可被打红 —— 三臂负控制，跑在【从 store 取回的真实判据全文】上，⛔ 不在草稿上）**
+
+| 臂 | 变形 | exit | 输出（逐字） |
+|---|---|---|---|
+| pos | 真实树副本（正控制） | **0** | `OK — mechanical fan-in (plugin/scripts/worker-fan-in.ts) mergeTarget default:   const mergeTarget = opts.mergeTarget ?? "develop";` |
+| neg1 | 默认值改 `"master"` | **1** | `CAUSE=default-not-develop — mechanical fan-in (plugin/scripts/worker-fan-in.ts) mergeTarget default no longer defaults to "develop":   const mergeTarget = opts.mergeTarget ?? "master";` |
+| neg2 | 删掉赋值行 | **1** | `CAUSE=default-assignment-not-found — plugin/scripts/worker-fan-in.ts defines runMechanicalFanIn but carries no 'const mergeTarget = opts.mergeTarget ?? ...' line; …` |
+| neg3 | 定义行改名 `runFanInMech` | **1** | `CAUSE=fanin-module-unresolved — no plugin/scripts/*.ts defines runMechanicalFanIn; the region was renamed/moved again — re-anchor this criterion, do not silently pass` |
+
+三态互不同形，也⛔不与 pass 同形（硬规则 3b）。取回的判据全文与落盘文本逐字相同
+（唯一差别是 YAML 折叠掉的末行换行）。
+
+**AC3（承载者按【内容】解析，⛔ 不按路径钉）**
+解析读数：`grep -rlE '^export async function runMechanicalFanIn' plugin/scripts/*.ts` ⇒ **恰好 1 命中 = `plugin/scripts/worker-fan-in.ts`**。
+scratch 副本把该模块**整体改名** `worker-fan-in-renamed.ts`（内容不变）后跑同一条判据 ⇒ **exit 0**，
+且输出里的模块名逐字为 `plugin/scripts/worker-fan-in-renamed.ts` —— 跟随定义、不跟随文件名。
+同一个搬运动作下，**旧（钉路径）判据 exit 1 `CAUSE=source-absent`**（并排对照）。
+
+**AC4（用机件改 + 作用域最小 + 落点正确）**
+① `goal show AC-286 --json` 显示新 `criterion`/`expect`，`status` 仍 `achieved`、`goal` 仍 `GOAL-023`、
+`origin`/`activatedAt`/`longTerm`/`title`/`kind` 前后逐字相同（上面字段级 diff 是逐键比对，不是抽查）。
+② `git -C /home/yale/work/quay show HEAD --stat -- goals/` ⇒ 该记录由 store 的自动提交落在**主检出**
+（⛔ 不在任务 worktree 的 `goals/`），diff **只在 `criterion` 与 `expect` 两个字段**。
+③ 提交 sha = `eb0510745482c0f93657ea6a3e721b24187f0cc4`。
+
+**AC5（台账面复核，⛔ 不把 `amendedUnverified` 说成绿）**
+`quay goal check --stale-pass` ⇒ `frozenScope=119`、**`failing=[]`**、`staleUnverified=[]`、
+`notEvaluated=[]`、`neverGated=[]`。换文本后 AC-286 **一度**进 `amendedUnverified=[AC-286]`
+（既有 verdict 针对旧文本），已跑 `goal check --stale-pass --sweep` 落新账，
+**现 `amendedUnverified=[]`**：台账尾事件 `2026-09-21T00:44:02.880Z`、actor=`goal-amend`、verdict=`pass`、
+`payload.criterionHash = d2331a320cfd43e4` —— 与**当前**判据指纹逐字相同
+（`sha256(空白折叠).slice(0,16)` = `criterionFingerprint`），而前一条 `f7a8568ad6e33e49` 恰为**改动前**文本的指纹。
+⇒ 这条绿是**针对当前文本**的 verdict，⛔ 不是旧文本留下的 stale pass，⛔ 也不是 `amendedUnverified`。
+
+**AC6（保证本身仍为真的直接量，⛔ 不是"我改好了"的自述）**
+① `plugin/scripts/worker-fan-in.ts:1138` 逐字：`  const mergeTarget = opts.mergeTarget ?? "develop";`
+② 生产调用点 `plugin/scripts/worker-driver.ts:3513` 逐字：`mechResult = await spawnMechanicalFanIn({ task: taskId, worktree: paths[0], root: rootDir, runId });`
+   —— **不传** `mergeTarget` ⇒ 取默认（CLI 面 `worker-driver.ts:4306` `mergeTarget: mechMergeTarget` 来自 `--merge-target`，缺省 `undefined` ⇒ 同样取默认）。
+③ `grep -rlE '^export async function runMechanicalFanIn' plugin/scripts/*.ts` ⇒ **恰好 1 命中**。
+（主检出与 worktree 的 `worker-fan-in.ts` / `worker-driver.ts` 经 `cmp` 逐字节相同 —— 本任务零代码改动。）
+
+**AC7（入库自检）**
+`node plugin/scripts/task-schema-check.ts tasks/gap-ac286-…md` ⇒ **exit 0**（`1 total, 0 pass, 1 N/A-legacy, 0 fail`）；
+`quay task check gap-ac286-…` ⇒ `ok:true`、`missing:[]`。
+
+**覆盖面边界（⛔ 有意为之，逐条实测，不是遗漏）**
+- 解析用**一层** glob `plugin/scripts/*.ts`，**不递归**。递归会捞到 `plugin/scripts/**` 下的陈旧副本
+  （实测本树 `grep -rln 'opts.mergeTarget' plugin/scripts/` 命中 3 个文件，其中 2 个是 `.sh` 包装器），
+  `head -1` 可能命中旧定义 ⇒ **静默假绿**（硬规则 3b 最危险的那一半）。一层 glob 的代价 =
+  模块若挪进子目录就报 `CAUSE=fanin-module-unresolved`（实测 neg4 臂）—— **取可见红，⛔ 不取静默绿**。
+- 正则前缀锚定 ⇒ 后缀改名 `runMechanicalFanInV2` 仍被解析到（实测 ac5 臂 exit 0；同一函数、跟随是对的）；
+  完全改名则落到 `CAUSE=fanin-module-unresolved`（neg3 臂）。
+- 判据覆盖的仍是**默认赋值这一处结构事实**（与原判据**同口径**，⛔ 不扩大也不缩小）：它**不**检查
+  调用点是否显式传非 develop 目标（那需要文本匹配调用点，假阳性高 —— `--merge-target` 的 CLI 面与测试都显式传 `"develop"`）。
+
+**证据载体（未跟踪 scratch，可被下一轮独立复算）**
+- `.quay/ac286-arms/`：三份判据全文（原始 / 改前 / 改后）、七个臂根（`pos/neg1/neg2/neg3/neg4/ac3/ac5`）、
+  `before-*.txt` / `after-*.txt`（前后全文与 md5）、`verify-run.txt`。
+- `.quay/ac286-verify-arms.sh`：**一键重跑** —— 从 goal store 取回判据全文 → 按当前真实
+  `worker-fan-in.ts` 重建七臂 → 逐臂打 `exit` 与 `CAUSE`。
+
+**回滚形态**：`quay goal write AC-286 --root /home/yale/work/quay --criterion "<before-criterion.txt 全文>" --expect "<before-expect.txt 全文>" --expect-existing`
+—— 作用域只有 store 里**一条记录的两个字段**，⛔ 不触碰任何代码。
