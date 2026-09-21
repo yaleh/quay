@@ -2,7 +2,7 @@
 id: gap-repo-root-derivation-bypasses-shared-accessor
 title: repo-root 单一访问器被 24 个 plugin/scripts 用手搓「向上两级」常量绕过——迁移到 repoRoot() +
   加棘轮检查器（架构复核 P2-identity-repo-root.ts，round 2019）
-status: ready
+status: done
 labels:
   - gap
   - defect
