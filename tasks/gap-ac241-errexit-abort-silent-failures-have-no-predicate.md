@@ -320,10 +320,16 @@ EXIT=1
 
 ```
 $ bash scripts/test.sh --for-task gap-ac241-errexit-abort-silent-failures-have-no-predicate --allow-thin
-ℹ tests 211   ℹ pass 211   ℹ fail 0   ℹ skipped 0
-EXIT=0
+warning: test-selection-thin: … resolved tests for 5/11 Touches entries (0.45) < 0.5; pass --allow-thin to run anyway
+ℹ tests 211   ℹ pass 211   ℹ fail 0   ℹ skipped 0   EXIT=0
 ```
-scoped-gate cache 已按 develop `3244381d7a16fb26aa18459fe816f7d012973f1e` 记入 `.quay/scoped-gate-cache.json`。
+⛔ 选取非零（新测试确实在选中集里，`+ plugin/test/errexit-abort-silent-exits-zero.test.mjs`）—— 不是「绿在 0 个测试上」那种假绿。
+scoped-gate cache 已按**当时的 develop tip**（`git rev-parse develop`）记入 `.quay/scoped-gate-cache.json`（cache key = `<task>\t<develop-sha>`，⛔ 不是硬编码在本任务体里）：
+```
+$ node --experimental-strip-types plugin/scripts/worker-driver.ts --write-scoped-gate-cache --task gap-ac241-… --develop-sha "$(git rev-parse develop)" --root /home/yale/work/quay
+{"event":"scoped-gate-cache-written","developSha":"e15bed1943439de223ee1a6f3caa4c232d3d9639","cacheFile":"/home/yale/work/quay/.quay/scoped-gate-cache.json"}
+```
+（`3244381d7` 是本分支的 fork 点；期间 develop 前进到 `e15bed194`，故按**门实际跑的那棵树**重记。）
 
 ### E12 — DoD：为什么前五次没守住 + 与前作的关系
 
