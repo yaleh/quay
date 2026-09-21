@@ -141,6 +141,7 @@ in-domain criteria with non-empty criterion: 155
 - goals/AC-283-author-分支已推送到-origin-且是本地-author-的真实祖先-解决单点失效.md
 - goals/AC-285-github-仓库默认分支实测为-master.md
 - packages/quay/src/goal-store.ts
+- plugin/scripts/criterion-failure-attribution-check.ts
 - docs/analysis/criterion-failure-attribution.baseline.json
 - plugin/test/criterion-failure-attribution-check.test.mjs
 - plugin/test/goal-store-write-gate-criterion-attribution.test.mjs
