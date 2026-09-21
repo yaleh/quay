@@ -45,10 +45,11 @@ import { stripComments } from "./source-text-lib.ts";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
-export const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+export const DEFAULT_ROOT = repoRoot();
 export const SCRIPTS_DIR_REL = "plugin/scripts";
 /** 脚本全域 = plugin/scripts 顶层 .ts/.sh/.mjs（SPEC §12e 的 309 = 218+78+13）。 */
 export const SCRIPT_EXTENSIONS = new Set([".ts", ".sh", ".mjs"]);

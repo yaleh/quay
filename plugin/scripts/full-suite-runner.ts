@@ -176,6 +176,7 @@ import { concurrentSuiteSlots, hostParallelism, spliceConcurrency, defaultLowcon
 import { readVerifiedCommit, readTreeState, contentHash, snapshotAssertionSurface } from "./runner-tree-state.ts";
 import type { AssertionSurfaceSnapshot } from "./runner-tree-state.ts";
 import { writeState, appendVerificationRound } from "./runner-state-write.ts";
+import { repoRoot } from "./repo-root.ts";
 
 export { gateScanCause, isFailureLine, buildStaticCheckFailures } from "./runner-red-parse.ts";
 export { concurrentSuiteSlots, hostParallelism, spliceConcurrency, stripConcurrencyFlags } from "./runner-concurrency.ts";
@@ -212,10 +213,7 @@ export type {
   SuiteRoundRecord,
 } from "./full-suite-runner-types.ts";
 
-
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 // gap-perfile-cpu-cost-collection — route (a) 子进程自报 preload seam. The preload module
 // (plugin/scripts/per-file-cpu-report.mjs), loaded into every node process of a measured suite via
@@ -231,12 +229,6 @@ export function withPerFileCpuPreload(existingNodeOptions: string | undefined): 
   const prior = existingNodeOptions && existingNodeOptions.trim() ? existingNodeOptions.trim() : "";
   return prior ? `${prior} ${requireFlag}` : requireFlag;
 }
-
-
-
-
-
-
 
 // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers
 // that flip state to red + reason=aborted: the suite emitted NO correctness conclusion. The concrete
@@ -349,7 +341,6 @@ export function extractStaticCheckDetail(line: string): {
   return null;
 }
 
-
 /**
  * Parse ONE checker-cost-lib fail-closed line into a FailClosedChecker (best-effort; null when the
  * line is not a `STATIC_CHECK_FAILED:` shape or carries an unparseable exit code).
@@ -362,7 +353,6 @@ export function extractFailClosedChecker(line: string): FailClosedChecker | null
   return { name: m[1], exitCode, line };
 }
 
-
 /**
  * Parse ONE checker-cost-lib not-evaluated line into a NotEvaluatedChecker (best-effort; null when the
  * line is not a `STATIC_CHECK_NOT_EVALUATED:` shape). ⛔ A NOT-EVALUATED line must NEVER match the
@@ -374,7 +364,6 @@ export function extractNotEvaluatedChecker(line: string): NotEvaluatedChecker | 
   if (!m) return null;
   return { name: m[1], line };
 }
-
 
 // gap-streaming-red-cascade-amplifies-failures-array AC1 — the KNOWN suite-state-asserting TEST FILES:
 // tests that read the shared `.quay/full-suite-state.json` and assert `state=running with finishedAt
@@ -455,7 +444,6 @@ function toEpochSeconds(iso: string): number {
   return Math.floor(Date.parse(iso) / 1000);
 }
 
-
 // ── AC6: append-only suite-duration sequence (gap-no-criterion-records-its-own-cost) ──────────────────
 // `.quay/full-suite-state.json` is a SINGLE-STATE file overwritten every round — the previous
 // round's durationMs is destroyed. The fix (same shape as the checker-cost ledger): append one line
@@ -521,8 +509,6 @@ export function effectiveParallelism(cpuTimeS: number | null | undefined, durati
   return Number((cpuTimeS / wallS).toFixed(3));
 }
 
-
-
 // ── failure-location capture (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ──────
 // The SUITE-RED event must carry WHERE the red landed (state.failures) so the inner dispatch rule can
 // distinguish a SHARED-GATE failure (run_static_checks — every scoped run pays it ⇒ stop dispatch)
@@ -563,7 +549,6 @@ export function isAbortLine(line: string): boolean {
 }
 
 // ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
-
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
@@ -641,7 +626,6 @@ export function yieldedSuiteSlotCount(): number {
     return 0;
   }
 }
-
 
 // ── gap-lanes-nproc-concurrent-suites-accounting: nproc + concurrent-suite accounting ────────────────
 
@@ -821,7 +805,6 @@ function parsePositiveIntArg(argv: string[], name: string): number | null {
   return n;
 }
 
-
 /**
  * Whether a command is concurrency-relevant — the default full suite (`bash scripts/test.sh`),
  * or any command that references a test.sh / already carries a --test-concurrency flag. Arbitrary
@@ -832,9 +815,7 @@ export function isConcurrencyRelevantCommand(cmd: string): boolean {
   return /\btest\.sh\b/.test(cmd) || cmd.includes("--test-concurrency");
 }
 
-
 // ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
-
 
 /**
  * gap-concurrent-write-mutable-tree-false-positive-red — read the tested checkout's CURRENT HEAD and
@@ -867,7 +848,6 @@ export function readTreeMutation(
 // never a green/red criterion — a red in such a round is a false-positive candidate, a green is a
 // weaker green. The assertion-surface RESOLUTION is reused from precommit-guard.ts (the SAME
 // judged-object registry the guard reads; AC51 doc-class files already excluded).
-
 
 /**
  * Compare the CURRENT content of the snapshot's assertion-surface files against the round-start

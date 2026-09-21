@@ -37,10 +37,10 @@ import { fileURLToPath } from "node:url";
 // indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, emitPass, emitFail, emitNotEvaluated, readFrontmatter, flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The default checked surface = the quay repo root (this script lives at <repo>/plugin/scripts/).
-const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_ROOT = repoRoot();
 
 // The shipped-skill surface whose allowed-tools field is judged.
 export const SKILLS_DIR_REL = "plugin/skills";

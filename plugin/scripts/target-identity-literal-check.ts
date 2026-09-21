@@ -54,10 +54,10 @@ import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
-const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_ROOT = repoRoot();
 
 /** 合法身份默认值（逐项目不变——协议固定的 git ref + 协议固定的任务目录名）。值规范化后（trim + 去
  *  前导 `./`）逐 token 判定；`tasks` 覆盖 `tasks_dir` 的默认目录名，`develop/integration/master` 覆盖

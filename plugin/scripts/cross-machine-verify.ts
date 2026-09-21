@@ -104,6 +104,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { repoRoot } from "./repo-root.ts";
 
 const MERGE_REF = "quay-cmv-merge";
 const VERDICT_REF = "quay-cmv-verdict";
@@ -822,5 +823,5 @@ export function main(argv: string[], defaultRoot: string, out = process.stdout, 
 
 // ── entry guard: run only when executed, never when imported by a test ────────────────────────────
 if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
-  process.exit(main(process.argv.slice(2), path.resolve(SCRIPT_DIR, "..", "..")));
+  process.exit(main(process.argv.slice(2), repoRoot()));
 }

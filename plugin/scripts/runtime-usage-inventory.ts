@@ -45,6 +45,7 @@ import { fileURLToPath } from "node:url";
 // registry-bare-filename-scan.ts's copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside
 // the finding's own pair). Not re-exported: this module never exported it.
 import { stripComments } from "./source-text-lib.ts";
+import { repoRoot } from "./repo-root.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1182,7 +1183,7 @@ function defaultSessionsDir(root: string): string {
 export function main(argv: string[]): number {
   const args = parseArgv(argv);
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const root = path.resolve(args.root ?? path.resolve(here, "..", ".."));
+  const root = path.resolve(args.root ?? repoRoot());
   // --instruments-json: the entry-point directory (gap-eighty-one-instruments...). Cheap (filesystem
   // scan + header reads only — NO transcript reading), so it is the mode the Core `instrument` MCP
   // tool spawns for `action: "list"`. The count is derived, never hardcoded.

@@ -378,7 +378,8 @@
     "crystallization-half-life.ts": "规则从落笔到有【可执行】强制落地要多久 —— 对真实 adr 目录与真实 git 历史逐条测出 {落笔日期, enforcement 字段值, 强制首次落地提交 SHA 与日期, 间隔天数, 状态}，报出间隔的中位/p90/最大值以及『至今无产物』的完整清单（不是抽样），并逐条判 CLAUDE.md 硬规则自标『靠自觉』与其点名产物是否真的落地。状态取五值，其中『无法判定』与 N/A 各自独立、不与『无产物』或『已强制』合并（硬规则 3b），GateEvent 载体读不到时报未评估而不是零事件（tasks/gap-crystallization-half-life-rule-to-enforcement）?",
     "ci-red-attribute.ts": "一条 CI 红是哪一类 —— 真缺陷 / 被测对象之外的基础设施问题（超时 / 被取消 / 测试步从未开始）/ 已知负载 flake？入参是载体 .quay/ci-runs.jsonl 的一条失败记录（可带 job 级读数），出参 {attribution, signals}；判定只取客观字段（timedOut / job 时长 vs 该 job 的 timeout-minutes / job 结论 / 步级结论 / testFiles / failedTests），⛔ 不读日志正文做关键词匹配；兜底方向取『当作真缺陷』（误记 infra/flake 会豁免一条红，代价不对称），且兜底必须写显式标记 default:no-signal-matched 以便与命中信号判出的 real-defect 可分辨（硬规则 3b）；登记表 plugin/scripts/known-flakes.json 为空或读不到就判不出 known-flake；infra 信号**不是一票通过**——同一 run 里若另有 job 的红是实质性的（测试步执行过，或失败在非 setup 步），则那个红才是成因，兄弟 job 的取消/超时不得豁免它（被压制的信号原样留在 signals 里，读记录的人分得出「没命中」与「命中但没定案」）（tasks/gap-ci-red-attribution-classifier，GOAL-020/AC-269）?",
     "ci-runs-collect.ts": "哪些 CI run 跑过、结论是什么、跑到了多少个测试文件、每一个红又是哪一类 —— 把 GitHub Actions 的 run 落成载体 .quay/ci-runs.jsonl（ts = run 自己的时刻、branch/workflow/conclusion/runId/testFiles/timedOut/durationSec/job 级读数），并在**写面**上对 conclusion=failure 的记录接一处机械归因（非 failure 记录不写 attribution，否则『有归因』这件事失去信息量）；testFiles 由 job 日志的 __GROUP__ … files=N 派生（run 元数据里没有这个字段；对 conclusion ∈ success|failure 的 run 默认开、已派生过的 run 增量跳过、只拉名字含 test 的 job、单次有条数上界），派生不出就不写该键（缺 ≠ 0，⛔ 不回落到常量）；release workflow（Release / release.yml）的记录上另有 seaVerify —— release.yml 的 SEA 验证 job（sea-verify-node-free + matrix 形态的 sea-verify-node-free-cross-platform (…)）的结论派生，词表 success / failure / incomplete / absent，⛔ 没有『读不懂 ⇒ success』这条路径（absent = 没评估成 ≠ 通过），它是 AC-267 载体臂唯一可读的字段；并且它每轮真的被按了吗（gh 二进制解析不出时给可区分的 gh-unavailable 而非静默 0 条）；离线缝 --from-file 走的是同一条写路径（tasks/gap-ci-red-attribution-classifier 建面，tasks/gap-develop-ci-first-decisive-green 补 testFiles 派生/回填补全/gh 解析/生产接线）?",
-    "cross-machine-verify.ts": "plugin/scripts/cross-machine-verify.sh 里那 5 处内嵌 python3（3 个 -c 单行 + 2 段 heredoc：拼接 JSON 对象的扫描器、ISO→epoch、hours-between、快速门的失败文件提取、报告的 JSON 发射）现在由本文件的哪些具名函数实现、输入/输出契约是什么，以及去掉它们之后这条入口在【没有 python3 的机器】上是否仍判出同一组取值？（可复核读数：sh-census-check 里 cross-machine-verify.sh 的 embedded 集合不含 python3 且 codeLines ≤ 25 的薄入口；plugin/test/cross-machine-verify-characterization.test.mjs 把 21 个 CLI 契约的 stdout/退出码按迁移前实测钉住）"
+    "cross-machine-verify.ts": "plugin/scripts/cross-machine-verify.sh 里那 5 处内嵌 python3（3 个 -c 单行 + 2 段 heredoc：拼接 JSON 对象的扫描器、ISO→epoch、hours-between、快速门的失败文件提取、报告的 JSON 发射）现在由本文件的哪些具名函数实现、输入/输出契约是什么，以及去掉它们之后这条入口在【没有 python3 的机器】上是否仍判出同一组取值？（可复核读数：sh-census-check 里 cross-machine-verify.sh 的 embedded 集合不含 python3 且 codeLines ≤ 25 的薄入口；plugin/test/cross-machine-verify-characterization.test.mjs 把 21 个 CLI 契约的 stdout/退出码按迁移前实测钉住）",
+    "repo-root-derivation-check.ts": "Does any plugin/scripts file still re-derive the repo root by counting two levels up from its own directory constant, instead of calling the ONE shared resolver repo-root.ts's repoRoot() — the copy-instead-of-call half of the root-resolution defect class (tasks/gap-repo-root-derivation-bypasses-shared-accessor)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "file:orchestration/manager-tick-log.md",
@@ -742,7 +743,8 @@
     "crystallization-half-life.ts": "按需",
     "ci-red-attribute.ts": "按需",
     "ci-runs-collect.ts": "每轮",
-    "cross-machine-verify.ts": "每轮"
+    "cross-machine-verify.ts": "每轮",
+    "repo-root-derivation-check.ts": "按需"
   },
   "INVALIDATION": {
     "quay-init-steps.ts": "失效前提：① quay-init.sh 仍以 node --no-warnings --experimental-strip-types \"${SCRIPT_DIR}/quay-init-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/quay-init-steps.js）；② 由此到达的 init.ts 函数仍是【逐行等价移植】而不是重写；③ 那 12 个调用点仍各自占 quay-init.sh 的一行。三点任一改变（例如 quay-init.sh 整体退役、或改成直调 vendored 的 dist/quay.js），本条的读数不再成立",
@@ -1097,7 +1099,8 @@
     "crystallization-half-life.ts": "失效前提：① adr 目录仍是 ADR 的正本、且每条 ADR 的落笔日期仍写在 frontmatter 的 date 键或正文的日期行（日期改由别的登记表承载 ⇒ 三条取源全部落空，间隔一栏整列转『无法判定』）；② enforcement 声明仍以 frontmatter 的 enforcement 键或正文的 enforcement 注释为形态（改由集中表声明 ⇒ 本脚本的抽取面失效）；③ 首次落地仍能从 git 的逐文件 add 历史取得（仓库改以整仓快照发布、丢掉逐文件 add 历史 ⇒ 间隔失去来源）",
     "ci-red-attribute.ts": "失效前提：载体 .quay/ci-runs.jsonl 的记录仍以 conclusion ∈ {success,failure,cancelled} + job 级 {conclusion,durationSec,timeoutMinutes,steps[]} + testFiles + failedTests 的形态承载失败读数，且『基础设施问题』仍可由『超时 / 被取消 / 测试步从未开始』三者之一客观识别；若 GitHub 改掉 job/step 的 conclusion 词表、或 run 元数据里直接给出测试文件总数与失败测试标识（那时 testFiles/failedTests 的派生面消失，应直接读那个字段）、或 known-flakes 登记表改由别处声明（本模块的注入点失效），本条需同步",
     "ci-runs-collect.ts": "失效前提：CI 仍以 GitHub Actions 的 run 承载、gh CLI 仍是读取面（gh api .../actions/runs 与 .../runs/<id>/jobs 的字段名不变：created_at/head_branch/name/conclusion/started_at/completed_at/steps[].conclusion），且 .quay/ci-runs.jsonl 仍是 AC-265/268/269 判据读的那个载体路径；若 CI 迁离 Actions、或 gh 被换掉、或载体改由 CI 自己上报（不再需要本地采集），本条退休",
-    "cross-machine-verify.ts": "失效前提：① plugin/scripts/cross-machine-verify.sh 仍以 exec node --no-warnings --experimental-strip-types \"$SCRIPT_DIR/cross-machine-verify.ts\" \"$@\" 这一形态调用（薄入口锁死的是那一行；换成别的运行时或直调别的文件，本行读数不再成立）；② 本文件仍是【逐行等价移植】而不是重写（判据是同一份输入下 stdout/退出码一致，见 plugin/test/cross-machine-verify-characterization.test.mjs）；③ 那 5 处 python3 的语义仍各自由一个具名导出覆盖（parseNotes / epoch / hoursBetween 与 pyRound2 / execGate 的失败文件提取 / pyJsonCompact 与 pyJsonIndent）。三点任一改变，本条读数不再成立"
+    "cross-machine-verify.ts": "失效前提：① plugin/scripts/cross-machine-verify.sh 仍以 exec node --no-warnings --experimental-strip-types \"$SCRIPT_DIR/cross-machine-verify.ts\" \"$@\" 这一形态调用（薄入口锁死的是那一行；换成别的运行时或直调别的文件，本行读数不再成立）；② 本文件仍是【逐行等价移植】而不是重写（判据是同一份输入下 stdout/退出码一致，见 plugin/test/cross-machine-verify-characterization.test.mjs）；③ 那 5 处 python3 的语义仍各自由一个具名导出覆盖（parseNotes / epoch / hoursBetween 与 pyRound2 / execGate 的失败文件提取 / pyJsonCompact 与 pyJsonIndent）。三点任一改变，本条读数不再成立",
+    "repo-root-derivation-check.ts": "失效前提：① repoRoot() 仍是 repo-root.ts 导出的唯一根解析器（bundle→consumer→plain-git 标记向上走查 + git rev-parse --show-toplevel + cwd 兜底），且 ② 判定形态仍是「本文件的脚本目录常量 + 紧邻的两级上溯」。任一改变即失效：例如根解析改为显式参数/环境变量传入、脚本目录常量不再由 path.dirname(fileURLToPath(import.meta.url)) 派生、或 plugin/scripts 不再是扫描面。"
   },
   "LAST_REAFFIRMED": {
     "quay-init-steps.ts": "2026-09-20",
@@ -1452,7 +1455,8 @@
     "crystallization-half-life.ts": "2026-09-14",
     "ci-red-attribute.ts": "2026-09-15",
     "ci-runs-collect.ts": "2026-09-15",
-    "cross-machine-verify.ts": "2026-09-20"
+    "cross-machine-verify.ts": "2026-09-20",
+    "repo-root-derivation-check.ts": "2026-09-21"
   },
   "MATCHING": {
     "quay-init-steps.ts": "n/a",
@@ -1807,7 +1811,8 @@
     "crystallization-half-life.ts": "n/a",
     "ci-red-attribute.ts": "position",
     "ci-runs-collect.ts": "n/a",
-    "cross-machine-verify.ts": "keyword"
+    "cross-machine-verify.ts": "keyword",
+    "repo-root-derivation-check.ts": "position"
   },
   "CONSUMER": {
     "quay-init-steps.ts": "谁按：plugin/scripts/quay-init.sh 的 quay-init-step 函数（唯一调用者，每个 step 占一行）；机械消费者是 plugin/test/quay-init-characterization.test.mjs（跑真实入口、把六文件面与退出码按 sha256 钉住，并已实测可取假）与 plugin/scripts/sh-census-check.ts（读 quay-init.sh 的 embedded 集合是否还含 python3）。命令行：node --no-warnings --experimental-strip-types plugin/scripts/quay-init-steps.ts <step> [args…]（--help 列出全部 step）",
@@ -1966,7 +1971,8 @@
     "crystallization-half-life.ts": "谁按：任务实现者在量『规则落笔→可执行强制落地』的分布时按（node --experimental-strip-types plugin/scripts/crystallization-half-life.ts --root <主检出> 可加 --json），它同时是 docs/analysis/crystallization-half-life.md 全部读数的产出者；条件=要判某条 ADR / 某条 CLAUDE.md 硬规则至今有没有可执行产物，或要判 ADR-004 的『硬形变优于散文』是否有分布支撑（而不是只有轶事）",
     "ci-red-attribute.ts": "谁按：CI 红的定性者 —— node --experimental-strip-types plugin/scripts/ci-red-attribute.ts --record-file <一条 JSON 记录> 拿 {attribution, signals}，或 --carrier <载体> 只读复核每条 failure 记录是否都带合法 attribution（缺归因 exit 3），或 --list-flakes 看登记表；条件=要判一条红是真缺陷 / 基础设施 / 已知 flake，或要判归因器本身是不是恒值（单变量对照）",
     "ci-runs-collect.ts": "谁按：①【机器，每轮】plugin/scripts/goal-driver.ts 的 runGoalRound 每轮调一次 collectForRound（本文件的 collectForRound 导出面；开关 = drivers.yml kinds.goal.ci_runs_collect 置位 true，节流 kinds.goal.ci_runs_collect_throttle_ms 缺省 10 分钟）——把 GitHub Actions 的 run 结论连同 attribution 追加/补全进 .quay/ci-runs.jsonl，并每轮在 goal-ring 读数里留一条 ciRuns 三态痕（ok / throttled / gh-unavailable / error / disabled）。凭证 = 本 driver 是 AC-265 的评估者，而 AC-265 读的是这个本地载体：没有生产者时判据只能报 carrier-absent / collection-stalled，与「CI 真红」在读法上同形。②【人，按需】node --experimental-strip-types plugin/scripts/ci-runs-collect.ts --limit <n>（可加 --workflow ci.yml --branch develop --log-fetch decisive|none|all），用于补一段历史 run 或只读复核。⚠️ 载体在本仓是 gitignored 运行时载体（.gitignore 的 **/.quay/ci-runs.jsonl；2026-09-15 从 tracked 改判——它此前被跟踪时每轮采集都会弄脏工作树，而 ff 的 benign-runtime-dirty 通道只放行未跟踪的 .quay/* ⇒ 会挡住之后每一次 fan-in 的 ff）。载体是 GitHub 状态的派生视图，可由回填重建，故不跟踪不丢数据",
-    "cross-machine-verify.ts": "谁按：plugin/scripts/cross-machine-verify.sh 的薄入口 —— 唯一调用者，每次调用都 exec 到本文件；它自身的调用方是 plugin/scripts/periodic-push-backup.sh 的两处 --record-merge 与循环 tick 的 --verify / --report。机械消费者：plugin/test/cross-machine-verify-characterization.test.mjs（跑真实的 CLI 入口，把 21 个契约的 stdout/退出码钉住，并已实测可取假）、plugin/scripts/sh-census-check.ts（读 cross-machine-verify.sh 的 embedded 集合是否还含 python3、以及是否已是 ≤25 行的薄入口）。命令行：bash plugin/scripts/cross-machine-verify.sh --report --json"
+    "cross-machine-verify.ts": "谁按：plugin/scripts/cross-machine-verify.sh 的薄入口 —— 唯一调用者，每次调用都 exec 到本文件；它自身的调用方是 plugin/scripts/periodic-push-backup.sh 的两处 --record-merge 与循环 tick 的 --verify / --report。机械消费者：plugin/test/cross-machine-verify-characterization.test.mjs（跑真实的 CLI 入口，把 21 个契约的 stdout/退出码钉住，并已实测可取假）、plugin/scripts/sh-census-check.ts（读 cross-machine-verify.sh 的 embedded 集合是否还含 python3、以及是否已是 ≤25 行的薄入口）。命令行：bash plugin/scripts/cross-machine-verify.sh --report --json",
+    "repo-root-derivation-check.ts": "谁按：plugin/scripts/runner-static-gate.ts 的 run_static_checks（@static-tier change，@static-object plugin/scripts/）——每次全量 suite 各一次，且任何 delta 落在 plugin/scripts/ 下的 scoped 门同样选中它；条件=要判「plugin/scripts 里还有没有手搓『脚本目录常量向上两级』的仓根推导」。命令行：node --no-warnings --experimental-strip-types plugin/scripts/repo-root-derivation-check.ts --root <dir> [--json] [--scan <file-or-dir>]…（--scan 可把判定收窄到一个文件，夹具与单文件干跑用）"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

@@ -35,10 +35,10 @@ import { fileURLToPath } from "node:url";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** The default checked surface = the quay repo root (this script lives at <repo>/plugin/scripts/). */
-const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_ROOT = repoRoot();
 const SPEC_BASENAME = "SPEC-complete-delivery-surface-2026-08-05.md";
 
 export interface L1Category {

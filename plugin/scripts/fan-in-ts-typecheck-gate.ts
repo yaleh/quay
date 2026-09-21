@@ -34,6 +34,10 @@
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
+// The Core-src walk-up: the ONE layout-independent way a plugin script locates a `packages/quay/src`
+// module (repo tree / staged copy / npm-installed package). Reused rather than re-derived — this
+// module's own loader probe is exactly that question, one file over.
+import { resolveCoreSrcFile } from "./core-src-import.ts";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -124,24 +128,29 @@ export function requiresTypecheck(touches, newMovedTsFiles) {
  *  a resolver anchored on the project under test cannot find quay's own source there. */
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-/** The Core config loader's rel shape under each candidate base (see (1) above). Probed with
- *  `fs.existsSync`, so a missing shape is a miss — never an exception that a `catch` could hide. */
-const LOADER_REL_SHAPES = [
-  "packages/quay/src/gate/config/loader.ts",
-  "src/gate/config/loader.ts",
-];
+/** The Core config loader, relative to a Core-src root (`packages/quay/src/` in the repo tree, or
+ *  the staged package root's `src/`). Its two layout shapes are `resolveCoreSrcFile`'s two probes. */
+const CORE_LOADER_REL = "gate/config/loader.ts";
 
-/** Candidate loader paths in priority order: the caller's explicit base first (the test seam, and
- *  the worktree's own source when it has one), then THIS script's install location — `../..` for a
- *  `<pkg|root>/plugin/scripts/…` script, and `..` for the marketplace layout where the plugin root
- *  directly contains `scripts/` (the two shapes plugin-root.ts constraint ③ documents). */
+/** The EXISTING candidate loader paths, in priority order: the caller's explicit base first (the
+ *  test seam, and the worktree's own source when it has one), then THIS script's own install
+ *  location.
+ *
+ *  ⛔ The install-location half is a WALK UP from `SCRIPT_DIR` — `resolveCoreSrcFile`, the repo's ONE
+ *  answer to "where is Core source in this layout, given the file I am running from" — and NOT a
+ *  fixed `"..", ".."` constant. gap-repo-root-derivation-bypasses-shared-accessor removed that
+ *  constant here, and the reason is the load-bearing part: "up exactly two" reaches the PACKAGE root
+ *  only while the script sits at `<pkg>/plugin/scripts`, but the Core loader ALSO lives at the
+ *  package root in the npm-installed layout (`<pkg>/src/gate/config/loader.ts` — ad-arm1's real
+ *  0.7.0 install ships `src/` at the package root and has NO `packages/` tree, measured 2026-09-14,
+ *  see (1) above) and in the staged `packages/quay/plugin/scripts` copy. Counting segments encodes
+ *  one layout as if it were the definition; probing both shapes at every level encodes none. */
 export function configLoaderCandidates(moduleRoot = null) {
-  const bases = [];
-  if (moduleRoot) bases.push(path.resolve(moduleRoot));
-  bases.push(path.resolve(SCRIPT_DIR, "..", ".."));
-  bases.push(path.resolve(SCRIPT_DIR, ".."));
   const out = [];
-  for (const base of bases) for (const rel of LOADER_REL_SHAPES) out.push(path.join(base, rel));
+  const fromModule = moduleRoot ? resolveCoreSrcFile(CORE_LOADER_REL, path.resolve(moduleRoot)) : null;
+  if (fromModule) out.push(fromModule);
+  const fromScript = resolveCoreSrcFile(CORE_LOADER_REL, SCRIPT_DIR);
+  if (fromScript && fromScript !== fromModule) out.push(fromScript);
   return out;
 }
 

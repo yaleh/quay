@@ -61,12 +61,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
 // mirror: Node resolves import.meta.url through symlinks to the REAL file's location (verified),
 // so __dirname is always plugin/scripts regardless of which path was used to launch the script.
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 const LOOP_FIELDS = ["board", "gates", "stop", "policy", "execution", "audit", "concurrency", "routines"] as const;
 type LoopField = (typeof LOOP_FIELDS)[number];

@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 65 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 66 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -1010,6 +1010,25 @@ run_static_checks() {
   printf '3\n' > "${_mgr_tick_fixture_dir}/manager-tick-log.md.baseline"
   touch "${_mgr_tick_fixture_dir}/manager-tick-log.md"
   run_checker "manager-tick-log-check" bash "${repo_root}/plugin/scripts/manager-tick-log-check.sh" --log "${_mgr_tick_fixture_dir}/manager-tick-log.md" --baseline "${_mgr_tick_fixture_dir}/manager-tick-log.md.baseline" --stale-hours 24
+  echo "== repo-root derivation check (gap-repo-root-derivation-bypasses-shared-accessor) =="
+  # 棘轮：plugin/scripts 里不得再用「脚本目录常量向上两级」手搓仓根。repo-root.ts 的 repoRoot() 是
+  # 这一层唯一的根解析器（bundle→consumer→plain-git 标记向上走 + git rev-parse --show-toplevel +
+  # cwd 兜底），归档时仍有 29 个文件一次都不 import 它、各自把「脚本目录向上数两级」当成仓根的【定义】。
+  # 两种写法实测【不等价】：从 <repo>/plugin/scripts 出发同值，但从 <repo>/packages/quay/plugin/scripts
+  # （插件落盘副本）出发裸常量得 <repo>/packages/quay 而 repoRoot() 仍得 <repo> —— 差别不在整洁：裸常量
+  # 回答「向上恰好两级」，repoRoot() 回答「这里是不是仓根」。
+  # 判定是【位置】的，不是关键词的（硬规则 2）：先在同一文件里真声明出脚本目录常量集合（__dirname 及其
+  # 由 path.dirname(fileURLToPath(import.meta.url)) 传递派生的标识符），再在代码位置找以它为首参、紧邻两级
+  # 上溯的调用；注释/字符串/正则里拼写不算（复用 checker-lib 的 buildNonCodeMask，shell 额外涂 `#`）。
+  # ⛔ 不写死标识符白名单——白名单改个名字就绕开，传递闭包不能。扫描面固定为 plugin/scripts（跳过 dist/ 与
+  # checker-mutation-cases/：前者是构建产物，后者是别人的夹具语料）。全量扫 354 个文件实测 ~0.34 s
+  # （两个 O(n) 必要先验把昂贵的掩码构建挡在绝大多数文件之外），故留在 change 层而不是推给 full 门。
+  # 负控制（双向）：plugin/test/repo-root-derivation-check.test.mjs —— 修前真样本必须命中、同一文件里
+  # 注释与 copy 清单字符串必须不命中、读取面为空必须 NOT-EVALUATED；mutation case 见
+  # plugin/scripts/checker-mutation-cases/repo-root-derivation-check.sh。
+  # @static-tier change
+  # @static-object plugin/scripts/
+  run_checker "repo-root-derivation-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/repo-root-derivation-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   # rc 先接住、再清 fixture、最后原样 return：清理必须发生在 wait（join 点）【之后】（后台子进程读

@@ -58,6 +58,7 @@ import { DRIVER_KINDS, pidAlive } from "./driver-runtime.ts";
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
 /** AC-254's own id, verbatim — the criterion matches this string exactly. */
 export const AC_ID = "GOAL-017-AC-254";
@@ -431,8 +432,6 @@ function readServerCarrier(root: string): ServerCarrier | null {
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-
 /** The ts key per kind (quality's verdict carrier uses `judgedAt`) — read from the kernel registry. */
 function tsKeyFor(kind: string): string {
   const spec = DRIVER_KINDS[kind as keyof typeof DRIVER_KINDS] as { tsKey?: string } | undefined;
@@ -442,7 +441,7 @@ function tsKeyFor(kind: string): string {
 function resolveCliPath(explicit: string | undefined): string | null {
   if (explicit) return fs.existsSync(explicit) ? explicit : null;
   // Default: the Core CLI of the checkout this script lives in (`<repo>/plugin/scripts/…`).
-  const repoRoot = path.resolve(SCRIPT_DIR, "..", "..");
+  const repoRoot = moduleRepoRoot();
   const devEntry = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
   return fs.existsSync(devEntry) ? devEntry : null;
 }

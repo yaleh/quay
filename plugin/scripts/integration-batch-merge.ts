@@ -223,6 +223,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
 // ── output helpers ──────────────────────────────────────────────────────────────────────────────
 // `echo "x"` / `echo "x" >&2`: one line, plus a newline. Kept as named helpers so the stdout/stderr
@@ -275,7 +276,7 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h") {
 
 // ── location + git plumbing ─────────────────────────────────────────────────────────────────────
 const SCRIPT_DIR = path.dirname(SELF);
-let repoRoot = path.resolve(SCRIPT_DIR, "..", "..");
+let repoRoot = moduleRepoRoot();
 
 /** `git -C <repoRoot> …`. Never throws: a failed spawn surfaces as a non-zero exit code, matching
  *  the bash helper's explicit status handling (the script is `set -uo pipefail`, NOT `-e` — failures

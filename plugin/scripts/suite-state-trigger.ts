@@ -85,9 +85,9 @@ import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.
 // gap-crash-watchdog-round-ledger-not-written — the SHARED round-ledger appender (round numbering +
 // the ledger file contract live in one place; ⛔ 不在本层另写一个 appender).
 import { appendPreVerifiedRound } from "./pre-verified-round-record.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 export type SuiteStateValue = "running" | "green" | "red";
 // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — a FOURTH reason value:
