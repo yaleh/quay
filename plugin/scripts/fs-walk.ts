@@ -29,18 +29,24 @@
 // (the per-caller SKIP_DIRS) stayed with the callers because those genuinely differ.
 
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 export interface WalkOptions {
   /**
-   * Prune an entry from the walk. Receives the basename and (once known) whether it is a
-   * directory. Return true to drop the entry — and, for a directory, its whole subtree.
+   * Prune an entry from the walk. Receives the basename, (once known) whether it is a directory,
+   * and its root-relative POSIX path (no leading `./`). Return true to drop the entry — and, for a
+   * directory, its whole subtree.
+   *
+   * `relPath` is what lets a caller consult a path-keyed predicate that a bare basename cannot
+   * answer — e.g. `gitIgnoredPaths` below: gitignore may ignore a NESTED directory
+   * (`examples/.quality/`) while leaving its parent legitimately walked.
    *
    * In `entryKind: "dirent"` mode `isDir` is free. In `"stat"` mode the entry is stat'ed first,
    * so a predicate that ignores `isDir` (the shape-A/C callers) still sees — and drops — the same
    * names it always did; the only difference is a wasted stat on a pruned entry.
    */
-  prune?: (name: string, isDir: boolean) => boolean;
+  prune?: (name: string, isDir: boolean, relPath: string) => boolean;
   /**
    * Record a non-directory entry? Default: every non-directory entry survives.
    * `entry` is the Dirent in `"dirent"` mode and null in `"stat"` mode (a bare `readdirSync`
@@ -86,7 +92,7 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
     out.push(absolute ? abs : path.relative(root, abs).split(path.sep).join("/"));
   };
 
-  const walk = (dir: string, depth: number) => {
+  const walk = (dir: string, depth: number, relDir: string) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -106,10 +112,11 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
           continue;
         }
       }
-      if (prune && prune(e.name, isDir)) continue;
+      const rel = relDir === "" ? e.name : `${relDir}/${e.name}`;
+      if (prune && prune(e.name, isDir, rel)) continue;
       const abs = path.join(dir, e.name);
       if (isDir) {
-        if (depth < maxDepth) walk(abs, depth + 1);
+        if (depth < maxDepth) walk(abs, depth + 1, rel);
         continue;
       }
       const ext = path.extname(e.name);
@@ -117,8 +124,58 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
     }
   };
 
-  walk(root, 1);
+  walk(root, 1, "");
   return wantSort ? out.sort() : out;
+}
+
+// ── gitIgnoredPaths ──────────────────────────────────────────────────────────────────────────────
+/** Per-root memo. A walk-heavy process (select-preflight expands ~29 glob sets per run) must not
+ *  re-shell `git` per walk. Safe because `.gitignore` does not change mid-process in practice —
+ *  and a caller that DOES mutate it between walks can pass its own precomputed set instead. */
+const _ignoredByRoot = new Map<string, ReadonlySet<string>>();
+
+/**
+ * The paths git itself reports as ignored under `root` — `.gitignore`, `.git/info/exclude` and
+ * `core.excludesFile` combined, i.e. `--exclude-standard`.
+ *
+ * WHY THIS EXISTS (and why it is not just a longer skip-set): a disk walk sees everything on
+ * disk, including what git does not consider part of the repo — build output, caches, run
+ * artifacts. Their directory names are project-specific and unknowable to a hardcoded skip-set,
+ * while `.gitignore` already states them, per project, as a fact the project maintains anyway.
+ * arch-coverage-report.ts learned this the expensive way ("one `find` walked into
+ * `.claude/worktrees/*` and inflated the `.sh` count to 5213") and pinned `git ls-files` as its
+ * data source; this closes the same hole on the walk path.
+ *
+ * This does NOT replace a caller's skip-set: the two answer different questions ("git does not
+ * track this" vs "this is semantically out of scope for me") and a caller keeps its own — see the
+ * module header on why policy stays with callers.
+ *
+ * SHAPE: repo-relative POSIX. Directory entries carry a trailing `/` — `--directory` folds a
+ * wholly-ignored directory into ONE entry rather than enumerating it (measured on a repo whose
+ * run-artifact root held 192,665 entries: one `.quality/` entry instead of 192,665). Files are
+ * listed individually, which is how git represents a directory whose ignore rules have `!`
+ * exceptions (e.g. `.quay/*` + `!.quay/config.yml` cannot fold — git lists the 84 ignored files).
+ * Callers therefore probe BOTH `rel` and `rel + "/"`.
+ *
+ * Returns an EMPTY set when `root` is not a git repo or git is unavailable, so callers degrade to
+ * their hardcoded skip-set alone rather than throwing.
+ */
+export function gitIgnoredPaths(root: string): ReadonlySet<string> {
+  const memo = _ignoredByRoot.get(root);
+  if (memo) return memo;
+  let paths: ReadonlySet<string>;
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"],
+      { encoding: "utf8", timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    paths = new Set(out.split("\0").filter((s) => s !== "").map((s) => s.split(path.sep).join("/")));
+  } catch {
+    paths = new Set();
+  }
+  _ignoredByRoot.set(root, paths);
+  return paths;
 }
 
 /**
