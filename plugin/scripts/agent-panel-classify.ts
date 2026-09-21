@@ -10,7 +10,11 @@
 //      ⇒ ENDED——标出，使其不再与 live 行视觉不可区分。
 //   2. frozen-timer: 相隔 N 秒两次采样，计时未推进的行 ⇒ FROZEN——脚本做两次采样，无需人跨时间采样猜。
 //
-// Pure functions only — no side effects, no imports.
+// Pure functions only — no side effects, no I/O. The ONE import is the kernel's pure
+// `escapeRegExp` leaf (reached via the plugin shim `./regex-escape.ts`), so the module stays
+// side-effect-free: its own copy of that body was one of the twelve byte-identical bodies extracted
+// by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRe } from "./regex-escape.ts";
 
 /** The panel's agent state verbs (the Contract measure's grep surface). */
 export const STATE_VERBS = Object.freeze([
@@ -66,10 +70,9 @@ export function extractAgentLines(paneText) {
   return out;
 }
 
-/** Escape a string for use in a RegExp literal. PURE. */
-export function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+/** Escape a string for use in a RegExp literal. PURE. Re-exported from the kernel leaf so this
+ *  module's public surface is unchanged. */
+export { escapeRe };
 
 /**
  * Match a line against a set of known task ids using a strict token boundary (the id is bounded by

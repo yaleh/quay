@@ -54,6 +54,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs, emitVerdict, isDirectEntry, type Verdict } from "./gate-script-base.ts";
 import { buildNonCodeMask } from "./checker-lib.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRe` is the name
+// this file's call sites already use. Own copy was one of the twelve byte-identical bodies extracted
+// by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRe } from "./regex-escape.ts";
 
 // ── registry types ────────────────────────────────────────────────────────────────────────────────
 /** How a token set is read out of a file. */
@@ -511,10 +515,8 @@ export function authorityDerivation(
   return null;
 }
 
-/** Escape a literal for embedding into a RegExp source (symbol/file names are plain identifiers). */
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// `escapeRe` (imported above) escapes a literal for embedding into a RegExp source (symbol/file
+// names are plain identifiers).
 
 /** Flat verdict of a declared runtime derivation — see `SurfaceSpec.derivesFrom` for the three rules. */
 export interface DerivationVerdict {

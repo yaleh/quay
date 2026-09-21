@@ -166,6 +166,12 @@ import { repoRoot } from "./repo-root.ts";
 // this dir into consumers WITHOUT a packages/ source tree — a static `import` of store.ts from here
 // would ERR_MODULE_NOT_FOUND in a laid-down consumer.
 import { SHAPE_SECTIONS } from "./shape-sections.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim) — the SAME one
+// packages/quay-native/src/store.ts uses, which makes the "same byte semantics / single-judge
+// contract" the two files documented by comment structural. Own copy was one of the twelve
+// byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 // Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
 // the single source now, not a local hand-copied map.
 export { SHAPE_SECTIONS };
@@ -708,13 +714,10 @@ export function detectShape(body) {
   return "unknown";
 }
 
-/** Escape regex-special characters so a heading is matched LITERALLY. `extractSection` builds its
- *  heading regex from the caller's string — without escaping, a heading like `AC (draft)` would be
- *  interpreted as a capture group and never match the literal `## AC (draft)` line. All registered
- *  headings are plain section names; escaping is a no-op for them. */
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// `escapeRegExp` (imported above) escapes regex-special characters so a heading is matched
+// LITERALLY: `extractSection` builds its heading regex from the caller's string — without escaping,
+// a heading like `AC (draft)` would be interpreted as a capture group and never match the literal
+// `## AC (draft)` line. All registered headings are plain section names; escaping is a no-op for them.
 
 function sectionNonWsLength(body, heading) {
   const sec = extractSection(body, escapeRegExp(heading));

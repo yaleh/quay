@@ -36,6 +36,10 @@ import path from "node:path";
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { walkFiles } from "./fs-walk.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
+// name this file's call sites already use. Own copy was one of the twelve byte-identical bodies
+// extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
 
 // ── 位置掩码 (comment-only: 只标注释为非代码, 字符串/模板字面量保持代码) ─────────────────────
 // 与 checker-lib.ts 的 buildNonCodeMask 不同: 那个把字符串也标为非代码 (用于「命令位置」判定);
@@ -164,10 +168,6 @@ function codeMatch(src: string, mask: Uint8Array, re: RegExp): { line: number; m
     if (m[0].length === 0) g.lastIndex++;
   }
   return hits;
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ── 单一访问器正则 ───────────────────────────────────────────────────────────────────────────

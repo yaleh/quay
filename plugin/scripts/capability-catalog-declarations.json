@@ -26,6 +26,7 @@
     "NEW_SCRIPT_REGISTRATION_REQUIRED so a new-script task must declare it in Touches."
   ],
   "QUESTION": {
+    "regex-escape.ts": "What is the ONE implementation of \"escape every regex metacharacter in a string\" — the kernel leaf escapeRegExp (the 14 regex-special characters: . * + ? ^ dollar { } ( ) | [ ] backslash) that BOTH packages/quay-native/src/store.ts (product judge) and eleven plugin/scripts instruments reach, so the twelve byte-identical bodies that had accumulated under three names (escapeRe x3 / escapeRegex x2 / escapeRegExp x7) collapse to one and a heading like AC (draft) is escaped identically on both sides (routine semantic-dedup-scan finding escapere-escaperegex-escaperegexp-fndefre-stemre-escapere)?",
     "quay-init-steps.ts": "plugin/scripts/quay-init.sh 的每一个内嵌步骤，现在由 packages/quay/src/init.ts 的哪个函数实现、输入/输出契约是什么，以及去掉那 12 处内嵌 python3（8 段 heredoc + 4 个 -c 单行）之后，这条入口在【没有 python3 的机器】上是否仍能把六文件面写对？（可复核读数是 sh-census-check 里 quay-init.sh 的 embedded 集合不含 python3）",
     "develop-deliver-python-steps.ts": "plugin/scripts/develop-deliver-tgz.sh 里那 12 处内嵌 python3（10 段 <<'PY' heredoc 体 + 2 个 python3 -c 单行）现在由哪个 step 实现、输入/输出契约是什么，以及去掉它们之后这条入口在【没有 python3 的机器】上是否仍产出同一份交付产物、判出同一组可区分取值？（可复核读数：sh-census-check 里 develop-deliver-tgz.sh 的 embedded 集合不含 python3；plugin/test/develop-deliver-tgz-characterization.test.mjs 把 12 个契约的 stdout/退出码按迁移前实测钉住）",
     "arch-coverage-report.ts": "仓库里每一种语言，**谁分析了它、分析了几成** —— 具体说：.archguard/query/manifest.json 的 global scope（默认 scope，直接调 archguard_summary 时唯一可见的那个）只覆盖 tracked 非测试 .ts 的哪一部分、哪些 .ts 目录落在**任何** scope 之外、以及 mjs/js/sh/py 这四种语言是不是**根本没有分析器**，从而让「archguard 报 0 环」不再能冒充「无环」，也让「未评估」第一次有独立取值（⛔ 缺 manifest ⇒ 行 NOT-EVALUATED/manifest-missing，坏 JSON ⇒ evaluated:false exit 2，两者与「查过且合格」三态互不同形；tasks/gap-arch-coverage-self-report，SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §1.1/§2 P6）？",
@@ -391,6 +392,7 @@
     "verification-marginal-return.ts": "invariant:一个 checker/闸 的拦截数只有三种取值（查过且有 / 查过且零 / 未查），「没有拦截通道」绝不与「拦截数 = 0」同形（硬规则 6 + 3b）—— 并给出判据：谓词 isPureTax 必须对一个【已知有拦截】的行干跑一次返回 false"
   },
   "CADENCE": {
+    "regex-escape.ts": "每里程碑",
     "quay-init-steps.ts": "按需",
     "develop-deliver-python-steps.ts": "按需",
     "arch-coverage-report.ts": "按需",
@@ -747,6 +749,7 @@
     "repo-root-derivation-check.ts": "按需"
   },
   "INVALIDATION": {
+    "regex-escape.ts": "无可测前提，靠周期复核",
     "quay-init-steps.ts": "失效前提：① quay-init.sh 仍以 node --no-warnings --experimental-strip-types \"${SCRIPT_DIR}/quay-init-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/quay-init-steps.js）；② 由此到达的 init.ts 函数仍是【逐行等价移植】而不是重写；③ 那 12 个调用点仍各自占 quay-init.sh 的一行。三点任一改变（例如 quay-init.sh 整体退役、或改成直调 vendored 的 dist/quay.js），本条的读数不再成立",
     "develop-deliver-python-steps.ts": "失效前提：① develop-deliver-tgz.sh 仍以 node --no-warnings --experimental-strip-types \"$SCRIPT_DIR/develop-deliver-python-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/develop-deliver-python-steps.js）；② 由此到达的函数仍是【逐行等价移植】而不是重写（AC3 判的是同一份输入下 stdout/退出码一致）；③ 那 12 个调用点仍各自占 develop-deliver-tgz.sh 的一行（10 个 heredoc 体与 2 个 -c 单行各被替换成一行 py_steps <step>）。三点任一改变（例如 develop-deliver-tgz.sh 整体退役、或改成直调别的运行时），本条的读数不再成立",
     "arch-coverage-report.ts": "失效前提：①语言的判定仍按扩展名（ts/mjs/js/sh/py），counted 口径仍取自 git ls-files 的 tracked 面；② archguard 的 scope 载体仍是 .archguard/query/manifest.json 且其 scopes[].sources 仍是目录绝对路径、globalScopeKey 仍指向其中一个 key；③ ts 的 analyzed 判据仍是「所在目录落于某 scope 的 sources 之内」。若 archguard 换掉 manifest 的形状/位置（例如改为按文件而非按目录记 scope），或新增某种语言的分析器（那时该语言应从 no-analyzer 改为真判据，而不是继续恒报 NOT-EVALUATED），本条需同步",
@@ -1103,6 +1106,7 @@
     "repo-root-derivation-check.ts": "失效前提：① repoRoot() 仍是 repo-root.ts 导出的唯一根解析器（bundle→consumer→plain-git 标记向上走查 + git rev-parse --show-toplevel + cwd 兜底），且 ② 判定形态仍是「本文件的脚本目录常量 + 紧邻的两级上溯」。任一改变即失效：例如根解析改为显式参数/环境变量传入、脚本目录常量不再由 path.dirname(fileURLToPath(import.meta.url)) 派生、或 plugin/scripts 不再是扫描面。"
   },
   "LAST_REAFFIRMED": {
+    "regex-escape.ts": "2026-09-21",
     "quay-init-steps.ts": "2026-09-20",
     "develop-deliver-python-steps.ts": "2026-09-20",
     "arch-coverage-report.ts": "2026-09-19",
@@ -1459,6 +1463,7 @@
     "repo-root-derivation-check.ts": "2026-09-21"
   },
   "MATCHING": {
+    "regex-escape.ts": "n/a",
     "quay-init-steps.ts": "n/a",
     "develop-deliver-python-steps.ts": "n/a",
     "arch-coverage-report.ts": "enumerative",

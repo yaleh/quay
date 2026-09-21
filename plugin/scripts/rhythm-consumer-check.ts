@@ -56,6 +56,10 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { matchAtCommandPosition } from "./checker-lib.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim). This file's own copy
+// was one of the twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 // The --root read below is now delegated to the shared `flagValue`; its indexOf+next-arg read was
 // one of the copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -324,10 +328,6 @@ export function broadSurfaceFiles(root: string): string[] {
     }
   }
   return out;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Full-text basename presence in a file (the call-surface convention mechanism-vitality uses). */

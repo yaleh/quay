@@ -37,6 +37,10 @@ import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
 import { walkFiles } from "./fs-walk.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
+// name this file's six call sites already use. Own copy was one of the twelve byte-identical bodies
+// extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
 // argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -63,10 +67,6 @@ export function aliasesOf(component: string): Aliases {
     spaceStem: stem.replace(/-/g, " "),
     relPath: norm.includes("/") ? norm : `plugin/scripts/${basename}`,
   };
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function maskFor(f: string): (src: string) => Uint8Array {

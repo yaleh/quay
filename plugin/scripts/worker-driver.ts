@@ -131,6 +131,10 @@ import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef } from "./task-
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
 import { repoRoot } from "./repo-root.ts";
+// 转义正则元字符（task id 进 `new RegExp` 前）—— the single regex-literal escaper, the kernel leaf
+// reached via the plugin shim. Own copy was one of the twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -631,11 +635,6 @@ export function readLockMetricsForRun(
 // 共同纪律（同族 gap-fix-worker-edit-exit-4）：驱动写任何终态之前，必须读任务侧的直接量。
 // readTaskStatus / depsSatisfied / touchesDisjoint 已上收 driver-filters.ts（AC152 单一实现），本文件
 // 只 re-export readTaskStatus、派发环消费 applyTaskFilters。
-
-/** 转义正则元字符（task id 进 `new RegExp` 前）。 */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** 是否存在本任务残留 worktree（形状感知——路径 basename ∨ 分支去掉可选 `task/` 前缀 == taskId，
  *  gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind）。判定收敛到

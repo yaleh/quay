@@ -53,6 +53,10 @@ import { repoRoot } from "./repo-root.ts";
 // 的同一件 buildMask（本仓既有手法，不复写第二份）。
 import { buildMask } from "./concurrency-literal-check.ts";
 import { walkFiles } from "./fs-walk.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRe` is the name
+// this file's call sites already use. Own copy was one of the twelve byte-identical bodies extracted
+// by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRe } from "./regex-escape.ts";
 import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 
 // ── 判据片段（拼装，故意不写出完整字面量——见头注释「自指陷阱」）────────────────────────────────
@@ -62,10 +66,6 @@ const RESOLVE_CALL = ["path", "resolve"].join(".") + "(";
 const UP_ONE = String.fromCharCode(46, 46);
 /** 上溯一段的带引号形态，即判定里出现在实参位置的那两个字符串字面量。 */
 const QUOTED_UP_ONE = `"${UP_ONE}"`;
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** 扫描面：本检查器只判【生产】plugin/scripts。`dist/` 是 gitignored 构建产物（源码改完下次 build
  *  自然带上，判它只会把陈旧副本的噪声当成缺陷）；`checker-mutation-cases/` 是夹具语料——其他检查器

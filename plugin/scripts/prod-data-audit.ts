@@ -33,6 +33,12 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim). Own copy was one of the
+// twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre. Re-exported so
+// this module's public surface is unchanged.
+import { escapeRegExp } from "./regex-escape.ts";
+export { escapeRegExp };
 
 // ── 常量 ────────────────────────────────────────────────────────────────────────────────────────────────
 export const THREE_STATES = { HAS_DATA: "HAS_DATA", ZERO_DATA: "ZERO_DATA", NOT_EVALUATED: "NOT_EVALUATED" } as const;
@@ -95,10 +101,6 @@ export function resolveProductionRoot(startDir) {
 // ── 纯工具 ─────────────────────────────────────────────────────────────────────────────────────────────
 export function basenameOf(name) {
   return String(name ?? "").split(/[\\/]/).pop() ?? "";
-}
-
-export function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // 边界化文件名引用：`events.jsonl` 不得命中 `gate-events.jsonl` 的子串（按位置判定，硬规则②）。

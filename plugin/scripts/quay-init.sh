@@ -722,8 +722,17 @@ _derive_loop_scripts_once() {
   #   into the dist bundle. Without this explicit entry a cold-started consumer lays ready-pool-check.ts
   #   with no sibling shape-sections.ts and dies with ERR_MODULE_NOT_FOUND (this is exactly the defect
   #   this task closed: the section list lived in store.ts which is NOT laid down).
+  #   regex-escape.ts (gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre):
+  #   the SAME class as shape-sections.ts one entry up — a kernel leaf reached through a plugin-side
+  #   re-export. ELEVEN laid-down instruments now import it via ESM `./regex-escape.ts` (ready-pool-check.ts,
+  #   worker-driver.ts, task-ops.ts, rhythm-consumer-check.ts, deletion-closure-check.ts,
+  #   identity-replication-check.ts, enum-surface-parity-check.ts, prod-data-audit.ts,
+  #   agent-panel-classify.ts, repo-root-derivation-check.ts, manager-observation-runtime-check.ts) —
+  #   an ESM `./` import is INVISIBLE to closure step (d), and the kernel path itself is unreachable
+  #   from a flat laydown tree. Without this explicit entry a cold-started consumer lays those eleven
+  #   without their sibling and dies with ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts regex-escape.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
