@@ -55,6 +55,9 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry, flagValue, createSelftest } from "./gate-script-base.ts";
+// `lineAt` was this file's own copy of the 1-based newline counter (semantic-dedup-scan
+// `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
+import { lineOf } from "./source-text-lib.ts";
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -293,13 +296,6 @@ export function maskShellNonCode(src: string): Uint8Array {
   return mask;
 }
 
-/** 1-based 行号。 */
-function lineAt(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
 /** 该位置的词是否是【命令词】：前一个字符是空白/分隔符/行首，后一个字符不是词字符。
  *  ⛔ 不用裸 `\b`：`node:*`（case 分支模式）里的 `node` 会被 `\b` 判为边界，而它是一个 glob 模式不是命令。 */
 function isCommandWord(src: string, start: number, end: number): boolean {
@@ -339,7 +335,7 @@ export function extractEmbeddedInterpreters(src: string): EmbeddedHit[] {
     if (mask[start] !== 0) return;
     if (!isCommandWord(src, start, end)) return;
     if (name === "node" && !nodeQualifies(src, end)) return;
-    const line = lineAt(src, start);
+    const line = lineOf(src, start);
     const lineStart = src.lastIndexOf("\n", start) + 1;
     const lineEnd = src.indexOf("\n", start);
     first.set(name, { interpreter: name, line, evidence: src.slice(lineStart, lineEnd === -1 ? src.length : lineEnd).trim().slice(0, 160) });

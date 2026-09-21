@@ -40,6 +40,9 @@ import { walkFiles } from "./fs-walk.ts";
 // name this file's call sites already use. Own copy was one of the twelve byte-identical bodies
 // extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
 import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
+// lineOf 上收到 source-text-lib.ts (semantic-dedup-scan `lineof-lineat`); 本地 `relOf` 包装
+// (body 恰为 `path.relative(root, f)`) 已就地内联 —— 一行 stdlib 委托没有可抽的算法。
+import { lineOf } from "./source-text-lib.ts";
 
 // ── 位置掩码 (comment-only: 只标注释为非代码, 字符串/模板字面量保持代码) ─────────────────────
 // 与 checker-lib.ts 的 buildNonCodeMask 不同: 那个把字符串也标为非代码 (用于「命令位置」判定);
@@ -142,20 +145,10 @@ export function walkCodeFiles(root: string): string[] {
   );
   return out
     .filter((f) => {
-      const rel = relOf(root, f).split(path.sep).join("/");
+      const rel = path.relative(root, f).split(path.sep).join("/");
       return !SKIP_REL_PREFIXES.some((p) => rel.startsWith(p));
     })
     .sort();
-}
-
-function relOf(root: string, f: string): string {
-  return path.relative(root, f);
-}
-
-function lineOf(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
 }
 
 /** 正则命中且命中【起点】落在代码位置 (mask[start] === 0)。 */
@@ -239,7 +232,7 @@ export function findPathConstants(root: string, files: string[]): PathConstant[]
       if (mask[m.index] !== 0) continue;
       const script = m[4];
       out.push({
-        file: relOf(root, f),
+        file: path.relative(root, f),
         line: lineOf(src, m.index),
         name: m[1],
         script,
@@ -353,7 +346,7 @@ export function findJudgmentRewrites(root: string, files: string[]): JudgmentRew
     };
     scan(procPath);
     if (!found) scan(constructed);
-    if (found) out.push({ file: relOf(root, f), line: hitLine });
+    if (found) out.push({ file: path.relative(root, f), line: hitLine });
   }
   return out;
 }
@@ -429,7 +422,7 @@ export function findByteIdenticalPairs(
       const candBuf = fs.readFileSync(cand);
       if (pluginBuf.equals(candBuf)) {
         const lines = pluginBuf.toString("utf8").split("\n").length - 1;
-        pairs.push({ plugin: `plugin/scripts/${name}`, experiment: relOf(root, cand), lines });
+        pairs.push({ plugin: `plugin/scripts/${name}`, experiment: path.relative(root, cand), lines });
         totalLines += lines;
       }
     }
@@ -469,7 +462,7 @@ export function literalReplication(root: string, files: string[], entity: string
     }
     if (codeHit) {
       code++;
-      codeFiles.push(relOf(root, f));
+      codeFiles.push(path.relative(root, f));
       if (codeMatch(src, mask, importRe).length > 0) accessor++;
       else hardcoded++;
     }
@@ -498,7 +491,7 @@ export function replicationTable(
   const accessorRes = stems.map((s) => new RegExp(accessorRegexSource(s)));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
     for (let ri = 0; ri < rows.length; ri++) {
       const row = rows[ri];
       if (!src.includes(row.entity)) continue;

@@ -45,6 +45,7 @@ import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { lineOf } from "./source-text-lib.ts";
 
 // ── 别名索引 ───────────────────────────────────────────────────────────────────────────────────
 
@@ -116,15 +117,9 @@ export function walkDocFiles(root: string): string[] {
   });
 }
 
-function relOf(root: string, f: string): string {
-  return path.relative(root, f);
-}
-
-function lineOf(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
+// lineOf 上收到 source-text-lib.ts (semantic-dedup-scan `lineof-lineat`); 本地 `relOf` 包装
+// (body 恰为 `path.relative(root, f)`) 已就地内联 —— 一行 stdlib 委托没有可抽的算法, 两个私有
+// 同名包装才是被报出的那份重复。
 
 // ── 引用抽取 (按位置: code / comment / doc) ──────────────────────────────────────────────────
 
@@ -311,7 +306,7 @@ export function deletionClosure(root: string, components: string[]): Report {
     } catch {
       continue;
     }
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
     for (const a of aliases) {
       if (!mentions(src, a)) continue;
       const r = classifyCodeFile(rel, src, a);
@@ -326,7 +321,7 @@ export function deletionClosure(root: string, components: string[]): Report {
     } catch {
       continue;
     }
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
     for (const a of aliases) {
       const r = classifyDocFile(rel, src, a);
       if (r) bump(r);

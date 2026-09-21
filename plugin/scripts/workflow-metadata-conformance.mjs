@@ -27,6 +27,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// lineOf now lives once in source-text-lib.ts (semantic-dedup-scan `lineof-lineat`): this file's
+// copy was the twelfth live instance of the same 1-based newline counter. Sibling .mjs modules
+// already import .ts from this directory (workflow-event-schema.mjs, workflow-invariant-ownership.mjs).
+import { lineOf } from "./source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -193,15 +197,6 @@ function findBalanced(source, openIndex, openChar, closeChar) {
     i++;
   }
   return -1;
-}
-
-// 1-based line number of a character index.
-function lineOf(source, index) {
-  let line = 1;
-  for (let i = 0; i < index && i < source.length; i++) {
-    if (source[i] === "\n") line++;
-  }
-  return line;
 }
 
 // Unescape a single/double-quoted JS string body (as captured between the quotes).
