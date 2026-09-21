@@ -231,6 +231,8 @@ goal-driver 每轮/轮转复跑），在 `plugin/test/` 再放一份是**同一�
 落点 = **主检出**的 store 自动提交 `eb0510745482c0f93657ea6a3e721b24187f0cc4`
 （message = `goals: AC-286 field:criterion,expect by cli:2136151`）。字段级 diff 逐键比对：
 `id/title/status/kind/goal/origin/activatedAt/statusLog/fidelity` 全 **SAME**，**只有 `criterion` / `expect` CHANGED**。
+该提交随后经 `propagateDocBranchToDevelop` 自动 ff 到 `develop`（实测：写完 40 秒内 `git rev-list --count develop..author` 归 0）
+⇒ 新文本**同时**在主检出与 develop 上，⛔ 无需任何人工搬运。
 
 **criterion md5（前后）**：`1999545f54b98bb3b54c98d1cc2abad1` → `1332790b724730703c49aec34ef47d78`；
 **expect md5**：`5c8257acf349de7bb289816ca75262f8` → `643f277d37354ca11450c7af6b3176fa`。
@@ -271,18 +273,26 @@ scratch 副本把该模块**整体改名** `worker-fan-in-renamed.ts`（内容�
 **AC4（用机件改 + 作用域最小 + 落点正确）**
 ① `goal show AC-286 --json` 显示新 `criterion`/`expect`，`status` 仍 `achieved`、`goal` 仍 `GOAL-023`、
 `origin`/`activatedAt`/`longTerm`/`title`/`kind` 前后逐字相同（上面字段级 diff 是逐键比对，不是抽查）。
-② `git -C /home/yale/work/quay show HEAD --stat -- goals/` ⇒ 该记录由 store 的自动提交落在**主检出**
-（⛔ 不在任务 worktree 的 `goals/`），diff **只在 `criterion` 与 `expect` 两个字段**。
+② store 的自动提交 `eb0510745…` 只动 `goals/AC-286-…md` 一个文件、**只在 `criterion` 与 `expect` 两个字段**
+（`git show eb0510745… --stat -- goals/` = 1 file changed, 17 insertions(+), 12 deletions(-)）。
+⚠️ 改完后 `HEAD` 已不是它：本任务自己的 `task_write`（勾 AC + 写 Evidence）把 HEAD 前移了
+⇒ 现在它是 `HEAD~1`。**该提交落在主检出**（`git -C /home/yale/work/quay log --format=%h%n%s -1 eb0510745…` 在
+`author` 上可达），⛔ **不在**任务 worktree 的 `goals/`；worktree 侧是在 2b(i) 的
+`git merge --no-edit develop` 里**快进**得到它的（`253abe305..939afe358` Fast-forward）。
 ③ 提交 sha = `eb0510745482c0f93657ea6a3e721b24187f0cc4`。
 
 **AC5（台账面复核，⛔ 不把 `amendedUnverified` 说成绿）**
 `quay goal check --stale-pass` ⇒ `frozenScope=119`、**`failing=[]`**、`staleUnverified=[]`、
 `notEvaluated=[]`、`neverGated=[]`。换文本后 AC-286 **一度**进 `amendedUnverified=[AC-286]`
 （既有 verdict 针对旧文本），已跑 `goal check --stale-pass --sweep` 落新账，
-**现 `amendedUnverified=[]`**：台账尾事件 `2026-09-21T00:44:02.880Z`、actor=`goal-amend`、verdict=`pass`、
+**现 `amendedUnverified=[]`**：台账 rotation 尾事件 `2026-09-21T00:44:02.880Z`、actor=`goal-amend`、verdict=`pass`、
 `payload.criterionHash = d2331a320cfd43e4` —— 与**当前**判据指纹逐字相同
 （`sha256(空白折叠).slice(0,16)` = `criterionFingerprint`），而前一条 `f7a8568ad6e33e49` 恰为**改动前**文本的指纹。
 ⇒ 这条绿是**针对当前文本**的 verdict，⛔ 不是旧文本留下的 stale pass，⛔ 也不是 `amendedUnverified`。
+**终态复核（写成任务体那一刻再读一次，纯读）**：`failing=[]`、`staleUnverified=[]`、`notEvaluated=[]`、
+`amendedUnverified=[]`、`neverGated=[]`、`verifiedFresh=119` 且**含 `AC-286`**。
+（另注：`goal gate AC-286` 是 `actor=goal-cli` 的事件，⛔ 不进 rotation 的 `lastSweep`
+⇒ 再跑一次 gate 不会把本条推回 `amendedUnverified`；上表读数已实测复核。）
 
 **AC6（保证本身仍为真的直接量，⛔ 不是"我改好了"的自述）**
 ① `plugin/scripts/worker-fan-in.ts:1138` 逐字：`  const mergeTarget = opts.mergeTarget ?? "develop";`
@@ -293,7 +303,7 @@ scratch 副本把该模块**整体改名** `worker-fan-in-renamed.ts`（内容�
 
 **AC7（入库自检）**
 `node plugin/scripts/task-schema-check.ts tasks/gap-ac286-…md` ⇒ **exit 0**（`1 total, 0 pass, 1 N/A-legacy, 0 fail`）；
-`quay task check gap-ac286-…` ⇒ `ok:true`、`missing:[]`。
+`quay task check gap-ac286-…` ⇒ `ok:true`、`acChecked 7/7`、`reason: "all AC and DoD checkboxes checked"`。
 
 **覆盖面边界（⛔ 有意为之，逐条实测，不是遗漏）**
 - 解析用**一层** glob `plugin/scripts/*.ts`，**不递归**。递归会捞到 `plugin/scripts/**` 下的陈旧副本
@@ -307,9 +317,15 @@ scratch 副本把该模块**整体改名** `worker-fan-in-renamed.ts`（内容�
 
 **证据载体（未跟踪 scratch，可被下一轮独立复算）**
 - `.quay/ac286-arms/`：三份判据全文（原始 / 改前 / 改后）、七个臂根（`pos/neg1/neg2/neg3/neg4/ac3/ac5`）、
-  `before-*.txt` / `after-*.txt`（前后全文与 md5）、`verify-run.txt`。
+  `before-*.txt` / `after-*.txt`（前后全文与 md5）、`verify-run.txt`、`stalepass-*.json`。
 - `.quay/ac286-verify-arms.sh`：**一键重跑** —— 从 goal store 取回判据全文 → 按当前真实
   `worker-fan-in.ts` 重建七臂 → 逐臂打 `exit` 与 `CAUSE`。
 
 **回滚形态**：`quay goal write AC-286 --root /home/yale/work/quay --criterion "<before-criterion.txt 全文>" --expect "<before-expect.txt 全文>" --expect-existing`
 —— 作用域只有 store 里**一条记录的两个字段**，⛔ 不触碰任何代码。
+
+**本任务零代码改动 ⇒ worktree delta 为空（⛔ 有意为之，不是漏做）**：落地对象是 store 里那条记录，
+经主检出的自动提交 + `propagateDocBranchToDevelop` 落到 develop；任务 worktree 在 2b(i) 快进后
+`git rev-list --count develop..HEAD` = 0、`git status --porcelain` 为空。fan-in 的 delta 判定对空 delta
+走 `doc-only → skip suite` 分支（`worker-fan-in.ts:1321-1324` 的 `deltaList.length > 0` 前提），
+anti-drift 的 `actualFiles` 取 `git diff --name-only <target>...HEAD`（⛔ 不含未跟踪文件）⇒ 0 条越界。
