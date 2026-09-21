@@ -3,7 +3,7 @@ id: gap-arch-review-cluster-ignores-detector-flag-predicate
 title: 架构复核 cluster 阶段用裸 `hardcoded>0` 取代检测器自己的阈值判定——25 簇里 8
   簇是检测器已判清白的假簇（gate-script-base.ts 10/231 在列），且代码面把 build 生成的 gitignored
   `packages/quay/plugin/`（82/729）当源文件
-status: ready
+status: done
 labels:
   - gap
   - defect
