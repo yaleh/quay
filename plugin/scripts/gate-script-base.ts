@@ -123,6 +123,30 @@ export function flagValue(argv: readonly string[], name: string): string | undef
   return idx === -1 ? undefined : argv[idx + 1];
 }
 
+// ── resolveRoot ─────────────────────────────────────────────────────────────────────────────────────
+// Resolve a caller-supplied `--root <dir>` value to an absolute path, falling back to the current
+// working directory when the flag is absent. The relative/absolute decision is `path.resolve`'s, so a
+// RELATIVE `--root` resolves against cwd (the conventional CLI reading) rather than against this
+// module's own directory — a checker invoked from anywhere lands on the directory the user named.
+//
+// WHY THIS EXPORT EXISTS — an extraction, not a new idea (semantic-dedup-scan routine, runId
+// `semantic-dedup-scan-1790028867335`, findingId `resolveroot`, verdict `real-duplication`,
+// suggestedAction `extract`): five checkers (concurrency-literal-check / instrument-failure-check /
+// landing-target-check / suite-slot-ssot-check / task-file-bypass-check) carried this byte-identical
+// body, and all five ALREADY imported this module — so the shared home existed and the copies were
+// pure maintainability debt. Each call site now reads `resolveRoot(flagValue(args, "--root"))`, which
+// keeps the token source visible per flagValue's own contract, and the arity-1 `flagVal` closure that
+// existed only to feed the private copy is gone with it.
+//
+// ⛔ NOT the same function as `repoRoot()` (repo-root.ts): that one WALKS UPWARD from a start dir to
+// discover the repo/workspace root; this one only converts a value the caller already named. The three
+// checkers that default `--root` to the REPO ROOT instead of cwd (fan-in-runid-check / inner-idle-log /
+// crystallization-half-life) are therefore a different behavior and are deliberately NOT folded in
+// here — that divergence is a separate filed finding (`resolveroot-2`).
+export function resolveRoot(rootArg: string | undefined): string {
+  return path.resolve(rootArg ?? process.cwd());
+}
+
 // ── readFrontmatter ─────────────────────────────────────────────────────────────────────────────────
 // Read and parse YAML frontmatter from a markdown file.
 // Returns a Record of key→value for simple scalar/list fields, or null if no frontmatter found.

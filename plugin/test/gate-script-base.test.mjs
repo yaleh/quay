@@ -13,6 +13,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   emitPass,
   emitFail,
@@ -21,8 +24,12 @@ import {
   verdictExitCode,
   VERDICT_EXIT_CODE,
   flagValue,
+  resolveRoot,
   createSelftest,
 } from "../scripts/gate-script-base.ts";
+
+/** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
+const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts");
 
 function captureStream(stream, fn) {
   const orig = process[stream].write;
@@ -184,6 +191,68 @@ test("CONTROL: an empty-string value reads as `\"\"`, and is NOT indistinguishab
   // input wide and cannot be hiding a second one.
   for (const argv of [[], ["--task"], ["--task", "GAP-1"], ["--other", ""]]) {
     assert.equal(flagValue(argv, "--task"), retiredFalsyForm(argv, "--task"), `divergence beyond the empty-string input for ${JSON.stringify(argv)}`);
+  }
+});
+
+// ── resolveRoot ─────────────────────────────────────────────────────────────────────────────────────
+// The extraction under task gap-routine-semantic-dedup-scan-resolveroot (semantic-dedup-scan finding
+// `resolveroot`, runId `semantic-dedup-scan-1790028867335`, verdict `real-duplication`): five checkers
+// carried this byte-identical body. These tests pin the RESOLUTION RULE (not just "it compiles"),
+// because the rule is what the five call sites inherited and must keep.
+
+test("resolveRoot: absent flag ⇒ cwd, absolute", () => {
+  assert.equal(resolveRoot(undefined), path.resolve(process.cwd()));
+  assert.ok(path.isAbsolute(resolveRoot(undefined)));
+});
+
+test("resolveRoot: a RELATIVE value resolves against cwd, NOT against this module's directory", () => {
+  // The decision this export encodes. A checker invoked from anywhere with `--root .` must land on
+  // the caller's cwd; if the helper had used its own module dir (the `repoRoot()` convention) the
+  // five call sites would silently scan plugin/scripts instead of the tree the user named.
+  const got = resolveRoot(".");
+  assert.equal(got, path.resolve(process.cwd()));
+  assert.notEqual(got, SCRIPTS_DIR);
+  assert.equal(resolveRoot("sub/dir"), path.resolve(process.cwd(), "sub/dir"));
+});
+
+test("resolveRoot: an ABSOLUTE value is returned as-is", () => {
+  assert.equal(resolveRoot("/tmp/some/root"), path.resolve("/tmp/some/root"));
+});
+
+test("resolveRoot: an EMPTY-STRING value resolves to cwd (the 3b hazard flagValue documents is inert here)", () => {
+  // `flagValue(args, "--root")` returns `""` (not undefined) when invoked as `--root ""`. That value
+  // reaches `rootArg ?? cwd` unchanged — `??` falls back only on null/undefined — so the resolution is
+  // `path.resolve("")`, which IS cwd. No silent-substitution defect, but recorded so it is a known
+  // reading rather than an accident.
+  assert.equal(resolveRoot(""), path.resolve(process.cwd()));
+});
+
+test("resolveRoot: the extracted body lives in the base ONLY — the five callers carry no private copy", () => {
+  // The mechanical statement of the finding, kept as a regression guard: if a caller re-inlines the
+  // body (or a sixth appears), this goes RED instead of quietly regrowing the duplication the routine
+  // filed. The predicate is positional (the exact statement text), so a comment mentioning it does not
+  // count.
+  const BODY = "return path.resolve(rootArg ?? process.cwd());";
+  const callers = [
+    "concurrency-literal-check.ts",
+    "instrument-failure-check.ts",
+    "landing-target-check.ts",
+    "suite-slot-ssot-check.ts",
+    "task-file-bypass-check.ts",
+  ];
+
+  const hits = (file) => fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() === BODY).length;
+
+  for (const caller of callers) {
+    assert.equal(hits(path.join(SCRIPTS_DIR, caller)), 0, `${caller} re-inlined the body instead of importing resolveRoot`);
+  }
+  assert.equal(hits(path.join(SCRIPTS_DIR, "gate-script-base.ts")), 1, "the base must hold the body exactly once");
+
+  // ... and each caller must actually IMPORT the shared one (a caller that merely deleted the private
+  // copy without importing would still pass the count above, so this half is not redundant).
+  for (const caller of callers) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8");
+    assert.match(src, /import \{[^}]*\bresolveRoot\b[^}]*\} from "\.\/gate-script-base\.ts"/, `${caller} does not import resolveRoot from the base`);
   }
 });
 
