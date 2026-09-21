@@ -2,7 +2,7 @@
 id: gap-arch-review-p1-seed-ignores-detector-flag-predicate
 title: P1 删除闭包候选构件仍用裸 hardcoded>0 选取——同文件 clusterIdentityReport 已消费 isFlagged
   的未扫兄弟（硬规则 5b），8 个检测器已判清白的共享模块仍在候选池、紧贴 top-3 切线
-status: ready
+status: done
 labels:
   - gap
   - defect
