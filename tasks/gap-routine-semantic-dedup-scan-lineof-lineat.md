@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-lineof-lineat
 title: "semantic-dedup-scan: Five identical 1-based newline-count bodies split
   across two names (lineOf x2, lineAt x3) — the rename signal; repo-wide there
   are 10 copies including a PRIVAT"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
