@@ -143,6 +143,7 @@ packages/quay/plugin/ 前缀命中          : 82      ← 修后应为 0
 - plugin/scripts/architecture-review-cluster.ts
 - plugin/test/identity-replication-check.test.mjs
 - plugin/test/architecture-review-cluster.test.mjs
+- plugin/test/quality-gate-driver.test.mjs
 - docs/epistemology-casebook.md
 - tasks/gap-arch-review-cluster-ignores-detector-flag-predicate.md
 
@@ -180,3 +181,34 @@ LLM 措辞不在其列；其余每一环都是生产路径）跑了一次真正�
 含实测规模（25 簇里 8 簇）、`row.flagged` 字段不存在 ⇒ 判据恒真的第二层陷阱（硬规则 4 同源）、
 「谓词单一实现 + 两侧都要能取假」的共同修法、第二个成因（按**路径前缀**而非裸名排除，
 裸名 `plugin` 会过度剪枝）、以及「AC 里逐字写死的读数可能本身就是缺陷的产物」（231→230）这一记。
+
+### 第二轮（2026-09-21，suite 红修复）：谓词落地暴露了一条**陈旧 fixture**，已改 fixture 而非改期望
+
+上一轮 `exited-not-landed`，真因是 suite 红（非环境）：`plugin/test/quality-gate-driver.test.mjs` 两条断言
+`3 !== 4`。**直接成因是本任务的谓词修复**——该文件的 fake identity 行原写作：
+
+```
+table:[{entity:"session-liveness.sh", code:5, hardcoded:4, ...}]
+```
+
+`hardcoded:4` **低于** `isFlagged` 的阈值 5 ⇒ 修后该行被判清白 ⇒ `P2-identity-session-liveness.sh`
+不再成簇 ⇒ `judgedCount` 4→3、`actionabilityNotEvaluated` 4→3。**这条 fixture 正是本缺陷的样本**：
+它过去只因旧的裸 `hardcoded > 0` 判据才成簇。
+
+**为什么修 fixture 而不是把期望改成 3**：同文件的 judge fixture 仍按 `P2-identity-session-liveness.sh`
+给判词，且 `submittedKeys` 断言依赖它——下调期望会连带削掉该测试对 P2 簇的覆盖面，是把缺陷固化成期望。
+改后取真实读数形态（对照生产 `P2-identity-quay-init.sh` 实测 59 hardcoded / 3 accessor）：
+
+```
+table:[{entity:"session-liveness.sh", code:62, hardcoded:59, accessor:3, ...}]
+```
+
+**读数**：该文件修前 `29 pass / 2 fail` ⇒ 修后 **`31 pass / 0 fail`**（确定性复现，⛔ 非 flaky）。
+
+**兄弟实例已按硬规则 5b 逐一排查**（同一谓词的其它适用点）：`grep` 全部 emit identity `table` 行的 fixture——
+本任务自己的 `architecture-review-cluster.test.mjs:53` 已是 `hardcoded:5, accessor:0`（越过阈值，正确）；
+`probe-routine.test.mjs` 与 `driver-config.test.mjs` 的注入命令 emit 空行/无输出 ⇒ 不受影响。
+**全库唯一受影响的消费点就是上面那一处。**
+
+⛔ 本文件**不被** `## Touches` 原先覆盖，故本轮把它补进 Touches（anti-drift 硬失败实测：
+`out-of-declared: task wrote plugin/test/quality-gate-driver.test.mjs`）。
