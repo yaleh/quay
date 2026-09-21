@@ -77,13 +77,13 @@ repoRoot(packages/quay/plugin/scripts)            : /home/yale/work/quay        
 
 ## AC
 
-- [ ] AC1（基线读数可复现·位置判定）：贴出立案基线命令 `grep -nE 'path\.resolve\((SCRIPT_DIR|__dirname), *"\.\.", *"\.\."\)' plugin/scripts/*.ts` 的**逐行命中**，并**逐条分类为代码/注释**；结论必须是**代码文件 24 个（形态 A 18 / 形态 B 6）**。⛔ 直接 `grep -c` 会数出 26 行——已知的 2 行注释（`kernel-sibling-resolution-check.ts:21`、`test-isolation-check.ts:516`）必须被排除并**点名**（硬规则 2：非零计数要查命中的是不是我要的）。
-- [ ] AC2（迁移完成·能取假）：修后同一条 grep（同样排除注释）在 `plugin/scripts/*.ts` 上**零命中**；且 `plugin/scripts/*.ts` 中 `from "./repo-root.ts"` 的 import 文件数 **≥ 24**（贴出命令与计数）。⛔ 只改名/换行/加空格仍会被同一 grep 命中 ⇒ 判为未完成。
-- [ ] AC3（等价性·能取假）：对**至少 3 个**被迁移文件（其中至少 1 个来自形态 B），用**同一输入**分别跑迁移前（`git show <base>:plugin/scripts/<f>.ts` 落到临时路径）与迁移后的版本，贴出两边 `exit code` 与 stdout/stderr **逐字对比，差值为 0**。⛔ 只跑迁移后一遍不算等价性证据。**并**贴出本任务 Proposal §三那条分叉命令的立案输出（证明两形态不等价、迁移把它消除）。
-- [ ] AC4（棘轮对真样本命中·零计数的配套动作）：把棘轮对**一个已知为真的样本**干跑——`git show <base>:plugin/scripts/measure-trend-check.ts`（含 `const REPO_ROOT = path.resolve(__dirname, "..", "..")`）写进临时树后运行棘轮，**必须命中并打印该 file:line**；对同一样本把该行改成 `import` 后运行，必须不再命中。⛔ 只贴「修后 exit 0」而无「对真样本命中」的读数 ⇒ 判据空转（与「我不存在的东西都通过」同形）。
-- [ ] AC5（棘轮假阳性方向 + 自指陷阱）：贴出棘轮源码中**不含**其要抓的字面量（它是自己的扫描面之一）；并对三处**合法字面量提及**干跑，均**不**被计入：`plugin/test/driver-cli.test.mjs:58`、`plugin/scripts/quay-init.sh:669`、`plugin/scripts/repo-root.sh:2`（贴出三者的分类结果）。
-- [ ] AC6（新检查器四件套义务，逐件给读数）：① 六表各一行（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/**CONSUMER**——按需 cadence 缺 CONSUMER 行会让 `rhythm-consumer-check` 判据2 红掉 scoped 门），`bash plugin/scripts/capability-catalog.sh --entry-surface; echo $?` = **0** 且 `--summary` 的 unclassified = 0；② 登记进 `plugin/scripts/runner-static-gate.ts` 的 `run_static_checks`（带 `# @static-tier` + `# @static-object`）并把该函数上的 `# @checker-count 65` 改为 66，`node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .; echo $?` = 0；③ 新增 `plugin/scripts/checker-mutation-cases/repo-root-derivation-check.sh`，`bash plugin/scripts/checker-mutation-check.sh --check; echo $?` = 0；④ `node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check; echo $?` = 0。（⛔ 别用 `cmd | tail; rc=$?` 取退出码，那是 `tail` 的 rc。）
-- [ ] AC7（单测）：`node --test plugin/test/repo-root-derivation-check.test.mjs; echo $?` = 0，且新增断言**双向非空**——至少一条 fixture 判命中、至少一条（注释/字符串/合法 pack 清单）判不命中。
+- [x] AC1（基线读数可复现·位置判定）：贴出立案基线命令 `grep -nE 'path\.resolve\((SCRIPT_DIR|__dirname), *"\.\.", *"\.\."\)' plugin/scripts/*.ts` 的**逐行命中**，并**逐条分类为代码/注释**；结论必须是**代码文件 24 个（形态 A 18 / 形态 B 6）**。⛔ 直接 `grep -c` 会数出 26 行——已知的 2 行注释（`kernel-sibling-resolution-check.ts:21`、`test-isolation-check.ts:516`）必须被排除并**点名**（硬规则 2：非零计数要查命中的是不是我要的）。
+- [x] AC2（迁移完成·能取假）：修后同一条 grep（同样排除注释）在 `plugin/scripts/*.ts` 上**零命中**；且 `plugin/scripts/*.ts` 中 `from "./repo-root.ts"` 的 import 文件数 **≥ 24**（贴出命令与计数）。⛔ 只改名/换行/加空格仍会被同一 grep 命中 ⇒ 判为未完成。
+- [x] AC3（等价性·能取假）：对**至少 3 个**被迁移文件（其中至少 1 个来自形态 B），用**同一输入**分别跑迁移前（`git show <base>:plugin/scripts/<f>.ts` 落到临时路径）与迁移后的版本，贴出两边 `exit code` 与 stdout/stderr **逐字对比，差值为 0**。⛔ 只跑迁移后一遍不算等价性证据。**并**贴出本任务 Proposal §三那条分叉命令的立案输出（证明两形态不等价、迁移把它消除）。
+- [x] AC4（棘轮对真样本命中·零计数的配套动作）：把棘轮对**一个已知为真的样本**干跑——`git show <base>:plugin/scripts/measure-trend-check.ts`（含 `const REPO_ROOT = path.resolve(__dirname, "..", "..")`）写进临时树后运行棘轮，**必须命中并打印该 file:line**；对同一样本把该行改成 `import` 后运行，必须不再命中。⛔ 只贴「修后 exit 0」而无「对真样本命中」的读数 ⇒ 判据空转（与「我不存在的东西都通过」同形）。
+- [x] AC5（棘轮假阳性方向 + 自指陷阱）：贴出棘轮源码中**不含**其要抓的字面量（它是自己的扫描面之一）；并对三处**合法字面量提及**干跑，均**不**被计入：`plugin/test/driver-cli.test.mjs:58`、`plugin/scripts/quay-init.sh:669`、`plugin/scripts/repo-root.sh:2`（贴出三者的分类结果）。
+- [x] AC6（新检查器四件套义务，逐件给读数）：① 六表各一行（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/**CONSUMER**——按需 cadence 缺 CONSUMER 行会让 `rhythm-consumer-check` 判据2 红掉 scoped 门），`bash plugin/scripts/capability-catalog.sh --entry-surface; echo $?` = **0** 且 `--summary` 的 unclassified = 0；② 登记进 `plugin/scripts/runner-static-gate.ts` 的 `run_static_checks`（带 `# @static-tier` + `# @static-object`）并把该函数上的 `# @checker-count 65` 改为 66，`node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .; echo $?` = 0；③ 新增 `plugin/scripts/checker-mutation-cases/repo-root-derivation-check.sh`，`bash plugin/scripts/checker-mutation-check.sh --check; echo $?` = 0；④ `node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check; echo $?` = 0。（⛔ 别用 `cmd | tail; rc=$?` 取退出码，那是 `tail` 的 rc。）
+- [x] AC7（单测）：`node --test plugin/test/repo-root-derivation-check.test.mjs; echo $?` = 0，且新增断言**双向非空**——至少一条 fixture 判命中、至少一条（注释/字符串/合法 pack 清单）判不命中。
 
 ## DoD
 
@@ -93,36 +93,132 @@ repoRoot(packages/quay/plugin/scripts)            : /home/yale/work/quay        
 
 **scoped 门绿**：`bash scripts/test.sh --for-task gap-repo-root-derivation-bypasses-shared-accessor` exit 0。
 
+## 执行记录（worker，2026-09-21）
+
+### 一、范围比立案清单大：实测 29 个文件，不是 24
+
+按硬规则 5b（在某处修好 X ≠ X 只在那一处）在同一载体里枚举了全部适用点：立案清单的 24 个
+（形态 A 18 / 形态 B 6）全数在列，另有 **5 个同族** —— 同样是「脚本目录常量向上两级」，只是常量名
+不叫 `__dirname`/`SCRIPT_DIR`，故不在立案那条 grep 的两种形态里：
+
+| 文件:行 | 常量 | 形态 |
+|---|---|---|
+| `plugin/scripts/manager-tick-readings.ts:314` | `here` | 形态 A |
+| `plugin/scripts/profiles-role-coverage-check.ts:229` | `HERE` | 形态 A |
+| `plugin/scripts/runtime-usage-inventory.ts:1185` | `here` | 形态 A |
+| `plugin/scripts/suite-execution-form-counter.ts:372` | `scriptDir` | 形态 A |
+| `plugin/scripts/external-dogfooding-check.ts:235` | `__dirname`（其后还有更多实参 ⇒ `<repo>/experiments/…`） | 形态 A' |
+
+棘轮按【缺陷族】判而不是按【立案那条 grep 的两种常量名】判 —— 一份常量名白名单改个名字就绕开，
+所以这 5 个不是被放宽掉的，是被同一条位置判据抓住的。这 5 个文件已补进 `## Touches`。
+
+### 二、AC1 的基线读数与任务体写的不同（按实测记录，不按任务体写的数字）
+
+任务体 AC1 写「直接 `grep -c` 会数出 26 行 —— 已知的 2 行注释必须被排除」。**实测是 27 行、3 行注释**：
+除了任务体点名的 `kernel-sibling-resolution-check.ts:21` 与 `test-isolation-check.ts:516`，还有
+`plugin/scripts/repo-root.ts:13`（访问器自己的文档注释）。排除 3 行注释后 = **24 行代码 / 24 个文件
+（形态 A 18 / 形态 B 6）** —— 结论与任务体一致，差的是「26/2」这两个数字。数字按实测记录。
+
+这 3 行注释在修后**依然存在**（它们正是「按位置不判」的活样本），所以修后同一条 grep 仍有 3 行命中；
+AC2 的判据是【排除注释后零命中】，其机器化形态是棘轮的 exit 0（见下）。⛔ 没有为了让 grep 变 0 去改动
+这 3 行注释 —— 那会让「拼写」与「这么做」重新不可区分。
+
+### 三、一个不能机械替换的点：`fan-in-ts-typecheck-gate.ts:141` 是**安装位置**推导，不是仓根推导
+
+它是 `<pkg|root>/plugin/scripts` → `<pkg|root>`，用来同时探
+`<repo>/packages/quay/src/gate/config/loader.ts` 与 npm 安装态的 `<pkg>/src/gate/config/loader.ts`
+（ad-arm1 的真实 0.7.0 安装是 `src/` 在包根、没有 `packages/`，该文件头注释里有实测记录）。
+换成 `repoRoot()` 会在安装态下把 `source: "config"` 静默降级为 `source: "fallback"`
+（探不到 loader ⇒ 读不到那个项目自己声明的 typecheck 命令，且只表现为「走了兜底」）——
+正是**硬规则 3b** 的形态。改走本仓既有的布局无关走查：`core-src-import.ts` 的 `resolveCoreSrcFile`
+（它的两个 shape 就是这里原先手写的那两个），删掉写死的两级与重复的 shape 表。
+等价性已实测：`resolveConfigLoaderPath(null)` 与 `resolveTypecheckCommandDetailed(<repo>, null)`
+迁移前后逐字相同。
+
+### 四、棘轮的两条边界（记录成决定，不是默认）
+
+1. **扫描面 = `plugin/scripts/`（跳过 `dist/` 与 `checker-mutation-cases/`）**。`dist/` 是 gitignored
+   构建产物；`checker-mutation-cases/` 是夹具语料（别的检查器的 mutation 夹具里**故意**含有它们各自
+   要抓的字面量，算进来就是让本棘轮替别人判夹具）。
+2. **`plugin/test/` 不在面内**，实测 159 个测试文件用同一惯用法。这是**边界决定**：测试不随包发布，
+   「换布局就换答案」的风险面不同于 `plugin/scripts`；把它们一并迁走远超本任务的范围。⛔ 本棘轮因此
+   **不**声称测试侧的形态已收口 —— 它只声称自己扫的那一面是干净的。
+   （附带发现：`plugin/test/driver-cli.test.mjs` 里既有真命中（:34 代码）也有合法提及（:58 裸字符串），
+   两者在同一次干跑里被正确区分 —— 见 AC5。）
+
+### 五、棘轮自身：判据形态与两个 O(n) 必要先验
+
+判据是【本文件真声明出的脚本目录常量】+【紧邻的两级上溯】，两者都在**代码位置**判
+（`checker-lib` 的 `buildNonCodeMask`，shell 文件额外涂 `#` 行注释）。跑满掩码构建对 354 个文件要
+~10 s —— 那种棘轮会被推迟（`--static-tier full`），而推迟就是弱化。加了两个 O(n) 必要先验
+（先验文本含 `path.resolve(`；且 `".."` 出现 ≥ 2 次 —— 两个实参都是它），把掩码构建挡在绝大多数文件
+之外：实测 **0.34 s / 354 个文件**，故留在 change 层（任何落在 `plugin/scripts/` 的 delta 都会选中它）。
+先验是**必要**不充分：判词仍来自位置判据，先验既不能制造也不能压掉一个命中（被先验跳过的文件可证零命中）。
+
+### 六、DoD 要求的生产载体读数（不是 fixture）
+
+- **AC1 grep**（排除 3 行注释后）：修前 27 行 → 修后 **0** 行。
+- **`repoRoot` importer 计数**：`grep -lE 'from "\./repo-root\.ts"' plugin/scripts/*.ts | wc -l` = **94**（修前 66）。
+- **棘轮对修前样本命中**：`git show <base>:plugin/scripts/measure-trend-check.ts` 落进临时树 ⇒
+  exit 1 + `plugin/scripts/measure-trend-check.ts:52`；把该行换成 import 形态 ⇒ exit 0；空扫描面 ⇒ exit 3。
+- **等价性**：5 个被迁移文件（`measure-trend-check` / `checked-in-write-check` /
+  `external-dogfooding-check` 的 `selftest()` / `fan-in-ts-typecheck-gate` 的两个导出 /
+  `runtime-usage-inventory` 的 `main(['--instruments-json'])`）× 迁移前后同一输入，exit code 与
+  stdout/stderr **逐字相同**（`runtime-usage-inventory` 的 `generatedAt` 是时钟读数，归一化后比较）。
+- **分叉命令**（Proposal §三）：从 `<repo>/plugin/scripts` 出发两形态同值；从
+  `<repo>/packages/quay/plugin/scripts` 出发裸常量得 `<repo>/packages/quay`、`repoRoot()` 得 `<repo>`
+  —— 不等价已复现。迁移把它消除的形态是：AC2 的 grep 零命中 ⇒ 没有任何站点还能产出那个值，
+  而 `repoRoot()` 对两个起点给同一个答案。
+
+### 七、登记面读数
+
+`checker-count-drift-check` 66/66 · `capability-catalog --entry-surface` exit 0
+（`--summary`：354 scripts | 354 declared | **0 unclassified**）· `checker-mutation-check --check`
+RESULT: PASS（84/84 有 mutation case、stayed-green 0、always-red 0、uncovered 0）·
+`rhythm-consumer-check --check` exit 0 · `node --test plugin/test/repo-root-derivation-check.test.mjs` 6/6
+（双向非空：命中/不命中/未评估三个取值都有断言）。
+
 ## Touches
 
-- plugin/scripts/allowed-tools-plugin-prefix-check.ts（形态 A → repoRoot()）
-- plugin/scripts/checked-in-write-check.ts（形态 A → repoRoot()，保持 export）
-- plugin/scripts/config-wiring-check.ts（形态 A → repoRoot()）
-- plugin/scripts/fan-in-workflow-retirement-check.ts（形态 A → repoRoot()）
-- plugin/scripts/inner-idle-log.ts（形态 A → repoRoot()）
-- plugin/scripts/kernel-sibling-resolution-check.ts（形态 A → repoRoot()）
-- plugin/scripts/loop-complete-task.ts（形态 A → repoRoot()）
-- plugin/scripts/goal-driver-task-boundary-check.ts（形态 A → repoRoot()）
-- plugin/scripts/l1-delivery-surface-check.ts（形态 A → repoRoot()）
-- plugin/scripts/full-suite-runner.ts（形态 A → repoRoot()）
-- plugin/scripts/measure-trend-check.ts（形态 A → repoRoot()）
-- plugin/scripts/outer-retirement-precondition-check.ts（形态 A → repoRoot()）
-- plugin/scripts/red-window-triage.ts（形态 A → repoRoot()）
-- plugin/scripts/registry-bare-filename-scan.ts（形态 A → repoRoot()，保持 export）
-- plugin/scripts/suite-duration-exceed-check.ts（形态 A → repoRoot()）
-- plugin/scripts/target-identity-literal-check.ts（形态 A → repoRoot()）
-- plugin/scripts/suite-state-trigger.ts（形态 A → repoRoot()）
-- plugin/scripts/spec-declaration-point-check.ts（形态 A → repoRoot()）
-- plugin/scripts/accounting-emit.ts（形态 B → repoRoot()）
-- plugin/scripts/cross-machine-verify.ts（形态 B → repoRoot()）
-- plugin/scripts/fan-in-ts-typecheck-gate.ts（形态 B → repoRoot()）
-- plugin/scripts/integration-batch-merge.ts（形态 B → repoRoot()，注意 :379 的 --root 覆盖不动）
-- plugin/scripts/server-restart-inflight-verify.ts（形态 B → repoRoot()）
-- plugin/scripts/server-partial-stop-verify.ts（形态 B → repoRoot()）
+形态 A → `repoRoot()`（18）：
+- plugin/scripts/allowed-tools-plugin-prefix-check.ts
+- plugin/scripts/checked-in-write-check.ts（`export const DEFAULT_ROOT` 保持导出）
+- plugin/scripts/config-wiring-check.ts
+- plugin/scripts/fan-in-workflow-retirement-check.ts
+- plugin/scripts/inner-idle-log.ts
+- plugin/scripts/kernel-sibling-resolution-check.ts
+- plugin/scripts/loop-complete-task.ts（标识符撞名 ⇒ `import { repoRoot as moduleRepoRoot }`）
+- plugin/scripts/goal-driver-task-boundary-check.ts
+- plugin/scripts/l1-delivery-surface-check.ts
+- plugin/scripts/full-suite-runner.ts
+- plugin/scripts/measure-trend-check.ts
+- plugin/scripts/outer-retirement-precondition-check.ts
+- plugin/scripts/red-window-triage.ts
+- plugin/scripts/registry-bare-filename-scan.ts（`export const DEFAULT_ROOT` 保持导出）
+- plugin/scripts/suite-duration-exceed-check.ts
+- plugin/scripts/target-identity-literal-check.ts
+- plugin/scripts/suite-state-trigger.ts
+- plugin/scripts/spec-declaration-point-check.ts
+
+形态 B → `repoRoot()`（6）：
+- plugin/scripts/accounting-emit.ts
+- plugin/scripts/cross-machine-verify.ts
+- plugin/scripts/fan-in-ts-typecheck-gate.ts（**走 `resolveCoreSrcFile` 而不是 `repoRoot()`** —— 它是安装位置推导，见执行记录 §三）
+- plugin/scripts/integration-batch-merge.ts（标识符撞名 ⇒ 别名 import；:379 的 `--root` 覆盖不动）
+- plugin/scripts/server-restart-inflight-verify.ts（别名 import）
+- plugin/scripts/server-partial-stop-verify.ts（别名 import）
+
+硬规则 5b 枚举出的同族 5 个（立案清单漏项）：
+- plugin/scripts/manager-tick-readings.ts（别名 import）
+- plugin/scripts/profiles-role-coverage-check.ts
+- plugin/scripts/runtime-usage-inventory.ts
+- plugin/scripts/suite-execution-form-counter.ts
+- plugin/scripts/external-dogfooding-check.ts
+
+新增与登记：
 - plugin/scripts/repo-root-derivation-check.ts (new)（棘轮：位置判定抓「向上两级」常量）
-- plugin/test/repo-root-derivation-check.test.mjs (new)（双向断言：命中 / 不命中）
+- plugin/test/repo-root-derivation-check.test.mjs (new)（双向断言：命中 / 不命中 / NOT-EVALUATED）
 - plugin/scripts/checker-mutation-cases/repo-root-derivation-check.sh (new)（checker-mutation-check 的 fail-closed 义务）
-- plugin/scripts/capability-catalog.sh（六表登记：catalog 的代码半）
-- plugin/scripts/capability-catalog-declarations.json（六表登记：catalog 的数据半——`select-static-checks-for-touches.ts` 的 `NEW_SCRIPT_REGISTRATION_REQUIRED` 读它）
+- plugin/scripts/capability-catalog-declarations.json（六表登记。`capability-catalog.sh` 的代码半**未改**——六表数据在 JSON 里，与立案清单的猜测不同）
 - plugin/scripts/runner-static-gate.ts（登记进 run_static_checks + `@checker-count 65`→66）
 - tasks/gap-repo-root-derivation-bypasses-shared-accessor.md（自身）
