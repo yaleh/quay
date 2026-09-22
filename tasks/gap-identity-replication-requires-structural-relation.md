@@ -3,7 +3,7 @@ id: gap-identity-replication-requires-structural-relation
 title: identity-replication 判据是关键词在场计数：多行 import 结构性关系漏算 11 处、路径调用/注释行被计成
   hardcoded（ready-pool-check.ts 行 52 个「hardcoded」里 0 个是复制），且 17 簇里 14 簇判词在
   accessor>0 时仍断言 without a single accessor
-status: todo
+status: ready
 labels:
   - gap
   - defect
