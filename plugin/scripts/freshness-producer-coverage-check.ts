@@ -55,7 +55,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, readJsonLines } from "./gate-script-base.ts";
 
 export const DEFAULT_MAPPING_REL = "plugin/freshness-producers.json";
 
@@ -232,24 +232,6 @@ export function judgeCoverage(input: {
   return findings;
 }
 
-function readJsonLines(abs: string): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  const text = fs.readFileSync(abs, "utf8");
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const r = JSON.parse(line);
-      if (typeof r === "object" && r !== null && !Array.isArray(r)) out.push(r as Record<string, unknown>);
-    } catch {
-      // A malformed line is skipped rather than fatal: the carrier is append-only across many
-      // producers, and one bad line must not blind the whole judgement. The COUNT is not reported
-      // as "parsed" anywhere, so no reader can mistake this for full coverage of the file.
-      continue;
-    }
-  }
-  return out;
-}
-
 export interface RunOptions {
   root: string;
   mappingRel?: string;
@@ -284,6 +266,11 @@ export function runCoverageCheck(opts: RunOptions): CoverageReport {
     };
   }
 
+  // readJsonLines (gate-script-base.ts) skips a malformed line rather than failing: the carrier is
+  // append-only across many producers, and one bad line must not blind the whole judgement. The
+  // COUNT of parsed rows is not reported as "parsed" anywhere below, so no reader can mistake a
+  // partially-read carrier for full coverage of it. The `existsSync` guard above is what keeps the
+  // absent case NOT-EVALUATED (硬规则 3b) — the shared reader is deliberately fail-open (absent ⇒ []).
   const obs = observedSubjects(readJsonLines(carrierAbs), pattern, mapping.subject_requires_build_sha);
 
   const marginRel = opts.marginRel ?? mapping.margin_snapshot;

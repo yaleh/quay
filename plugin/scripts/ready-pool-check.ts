@@ -219,7 +219,7 @@ import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-
 // hand-rolled /proc scan. The shared staleness threshold (INFLIGHT_WORKTREE_STALE_MS, above) and
 // this enumerator give the merge-surface path the SAME liveness judgment as the task-worktree path.
 import { enumerateProcs, cwdUnder } from "./worktree-process-reaper.ts";
-import { isDirectEntry, helpExit } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit, readJsonLines } from "./gate-script-base.ts";
 import { TASK_STATUS, isTaskStatus } from "./task-status.ts";
 // DISPATCH-CAP SINGLE SOURCE (tasks/gap-execution-loop-p4-dispatch-productization AC1): the dispatch
 // concurrency cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single
@@ -1589,28 +1589,14 @@ export function computeDependedOnCount(allTasks) {
 
 // ── Consecutive-red-window reader (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC4) ──────
 // Best-effort JSONL parse of the .quay ledgers the outer's full-suite runner already writes. Absent
-// file / corrupt line ⇒ skip (an absent ledger = no suite history = no suite-blocking signal), the
-// same fail-open family as trend-check.ts's readJsonLines.
-
-/** Parse a JSONL file into objects, skipping blank lines and unparseable rows (best-effort). */
-export function readJsonLines(file) {
-  let text;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return [];
-  }
-  const rows = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      // skip a corrupt line — never let one bad row hide the rest of the history
-    }
-  }
-  return rows;
-}
+// file / corrupt line ⇒ skip (an absent ledger = no suite history = no suite-blocking signal) — the
+// shared fail-open family of gate-script-base.ts's readJsonLines, which is where the reader now lives
+// (semantic-dedup-scan finding `readjsonlines-seven-defs-three-behaviors`).
+//
+// ⚠️ `readJsonLines` is re-exported here, NOT re-implemented: it is imported from gate-script-base.ts
+// and named in this module's export surface because plugin/test/helpers/ready-pool-check-harness.mjs
+// blanket-imports it from THIS module by name (removing the name would fail that harness's link).
+export { readJsonLines };
 
 /** Read <root>/.quay/verification-round.jsonl — one row per full-suite run. Absent ⇒ []. */
 export function readVerificationRounds(root) {
