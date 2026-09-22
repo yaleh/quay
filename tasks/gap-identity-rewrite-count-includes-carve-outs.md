@@ -47,17 +47,33 @@ extra:
 
 ## AC
 
-- [ ] AC1（现场读数与逐条分类，枚举非布尔）：修前贴出 `node --experimental-strip-types plugin/scripts/identity-replication-check.ts --root . --json` 中 `judgmentRewrites` 段的完整输出（本轮为 8 条），并对**每一条**给出 类别 ∈ {test, .sh, 已 import leaf, 随包 .mjs, 真可合并} + 一行结构性理由；贴出的条数须与输出条数一致（不得只贴「8 处」这个数字）。
-- [ ] AC2（计数语义收窄·按类不按名）：`identity-replication-check.ts` 导出分类谓词（名字自定，如 `isMergeableRewriteSite`），用 `grep -n` 证明它只在**一处**定义、且 `architecture-review-cluster.ts` **不**另写一份（cluster 侧若再过滤一次即为硬规则 5b 违规）；贴出该谓词对上面 8 个真实路径逐一求值的输出（8 行，全 false），并声明其中无一处在白名单里按文件名硬编码。
-- [ ] AC3（不静默·排除与未扫到可区分）：`--json` 输出同时含 ①可合并站点列表 ②被排除站点列表（每条带理由取值），且人类可读面打印后者；贴出修后 `--json` 两个字段的实际内容（被排除侧须为 8 条、理由覆盖 (a)-(d) 四类）。两态可区分：把某一条排除规则关掉时，该条回到①。
-- [ ] AC4（能取假·已知真样本干跑，硬规则 2 另一半）：单测新增 fixture 矩阵——同一段「读 cmdline ∧ 绑到这次读的比较」内联到四个临时文件：`genuine.ts`（必须在列）、`genuine.test.mjs`（必须出列）、`genuine.sh`（必须出列）、`genuine-imports-leaf.ts`（含 `import … from "../../packages/quay/src/kernel/proc-identity.ts"` ⇒ 必须出列）。贴出 `node --experimental-strip-types plugin/test/identity-replication-check.test.mjs` 的 pass/fail 计数，并贴出把 `genuine.ts` 那条断言反转后**变红**的一次实跑（红控制非空转）。
-- [ ] AC5（簇不再重报·落笔当轮取真实读数 + 反向可区分）：修后在本仓重跑检测器：可合并列表为 **0** 条 ⇒ `clusterIdentityReport` 不再产出 `P2-judgment-rewrites`。贴出修后 `--json` 的判定重写段与 `plugin/test/architecture-review-cluster.test.mjs` 中该簇不产出的用例输出；并给出一条**反向**读数：往假报告里注入一个可合并站点 ⇒ 该簇**必须**重新产出（证明判据不是恒假/空转）。
-- [ ] AC6（消费者面回归）：`plugin/test/identity-replication-check.test.mjs`、`plugin/test/architecture-review-cluster.test.mjs`、`plugin/test/quality-gate-driver.test.mjs`、`plugin/test/probe-routine.test.mjs` 四个文件逐个 `node --experimental-strip-types` 运行并 exit 0，各贴 pass/fail 计数（后两者以 fake detector 输出为 fixture，用于证明 `--json` 加字段没有破坏既有消费面）。
-- [ ] AC7（scoped 门）：`bash scripts/test.sh --for-task gap-identity-rewrite-count-includes-carve-outs` 绿（或等价 scoped 静态门，贴出退出码）。
+- [x] AC1（现场读数与逐条分类，枚举非布尔）：修前贴出 `node --experimental-strip-types plugin/scripts/identity-replication-check.ts --root . --json` 中 `judgmentRewrites` 段的完整输出（本轮为 8 条），并对**每一条**给出 类别 ∈ {test, .sh, 已 import leaf, 随包 .mjs, 真可合并} + 一行结构性理由；贴出的条数须与输出条数一致（不得只贴「8 处」这个数字）。
+- [x] AC2（计数语义收窄·按类不按名）：`identity-replication-check.ts` 导出分类谓词（名字自定，如 `isMergeableRewriteSite`），用 `grep -n` 证明它只在**一处**定义、且 `architecture-review-cluster.ts` **不**另写一份（cluster 侧若再过滤一次即为硬规则 5b 违规）；贴出该谓词对上面 8 个真实路径逐一求值的输出（8 行，全 false），并声明其中无一处在白名单里按文件名硬编码。
+- [x] AC3（不静默·排除与未扫到可区分）：`--json` 输出同时含 ①可合并站点列表 ②被排除站点列表（每条带理由取值），且人类可读面打印后者；贴出修后 `--json` 两个字段的实际内容（被排除侧须为 8 条、理由覆盖 (a)-(d) 四类）。两态可区分：把某一条排除规则关掉时，该条回到①。
+- [x] AC4（能取假·已知真样本干跑，硬规则 2 另一半）：单测新增 fixture 矩阵——同一段「读 cmdline ∧ 绑到这次读的比较」内联到四个临时文件：`genuine.ts`（必须在列）、`genuine.test.mjs`（必须出列）、`genuine.sh`（必须出列）、`genuine-imports-leaf.ts`（含 `import … from "../../packages/quay/src/kernel/proc-identity.ts"` ⇒ 必须出列）。贴出 `node --experimental-strip-types plugin/test/identity-replication-check.test.mjs` 的 pass/fail 计数，并贴出把 `genuine.ts` 那条断言反转后**变红**的一次实跑（红控制非空转）。
+- [x] AC5（簇不再重报·落笔当轮取真实读数 + 反向可区分）：修后在本仓重跑检测器：可合并列表为 **0** 条 ⇒ `clusterIdentityReport` 不再产出 `P2-judgment-rewrites`。贴出修后 `--json` 的判定重写段与 `plugin/test/architecture-review-cluster.test.mjs` 中该簇不产出的用例输出；并给出一条**反向**读数：往假报告里注入一个可合并站点 ⇒ 该簇**必须**重新产出（证明判据不是恒假/空转）。
+- [x] AC6（消费者面回归）：`plugin/test/identity-replication-check.test.mjs`、`plugin/test/architecture-review-cluster.test.mjs`、`plugin/test/quality-gate-driver.test.mjs`、`plugin/test/probe-routine.test.mjs` 四个文件逐个 `node --experimental-strip-types` 运行并 exit 0，各贴 pass/fail 计数（后两者以 fake detector 输出为 fixture，用于证明 `--json` 加字段没有破坏既有消费面）。
+- [x] AC7（scoped 门）：`bash scripts/test.sh --for-task gap-identity-rewrite-count-includes-carve-outs` 绿（或等价 scoped 静态门，贴出退出码）。
 
 ## DoD
 
 修后本仓实测：判定重写计数里**可合并站点 0 条**、`P2-judgment-rewrites` 簇不再产出（贴出同一时刻的检测器 `--json` 输出 + 簇构造输出），而被排除的 8 条仍以**带理由的独立列表**可见（不是被删掉）；单测 fixture 矩阵四态双向且红控制实跑变红；四个消费者测试文件分别 exit 0。⛔ 不以「把 8 行从输出里去掉」作为完成判据——那是删读数，不是收窄判据。
+
+## Evidence
+
+**修后本仓实测（2026-09-22）**：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --root . --json`
+⇒ `judgmentRewrites`（可合并）**0 条**；`judgmentRewriteCarveOuts` **8 条**，理由覆盖 (a) test ×4 / (b) shell ×2 / (c) imports-leaf ×1 / (d) import-free-mjs ×1。
+同一时刻 `clusterIdentityReport(真实检测器输出)` 的 clusterId = `["P2-identity-quay-init.sh","P2-identity-runner-static-gate.ts","P2-identity-resource-gate.sh","P2-identity-quay-launch.sh","P2-identity-task-status-drift-check.ts"]` —— `P2-judgment-rewrites` **不在场**；往假报告注入 1 个可合并站点 ⇒ 该簇**重新产出**（反向读数，判据非恒假）。
+
+- **AC1**：修前 `judgmentRewrites` 8 条完整 JSON 已逐条贴出（8 行），逐条类别为 test×4 / shell×2 / imports-leaf×1 / import-free-mjs×1，无一条是「真可合并」；条数核对 8 == 8 == 修后(0+8)。
+- **AC2**：`grep -n` ⇒ 谓词 `isMergeableRewriteSite` **1 处定义**（`:532`，判定本体 `classifyRewriteSite` `:516`，前者是后者的单行委托）；cluster 侧按**位置**判定（`tsCommentMask`+`blankComments` 抹平注释后）代码位置命中 **0**。谓词对 8 个真实路径逐一求值 **8 行全 false**；已知真样本干跑 = true。四条规则全部按载体结构性属性（路径段/命名约定、扩展名、accessor 到 leaf、specifier 是否全为 `node:`/裸包名），⛔ 无一处文件名白名单。
+- **AC3**：`--json` 两字段实际内容已贴出（①=0 条、②=8 条，每条带 `carveOut` 类别 + `carveOutReason`）；人类可读面新增 `== 判定重写的 carve-out … ==` 一段打印全部 8 条。两态：`--no-carve-out test|shell|imports-leaf|import-free-mjs` 分别把 4/2/1/1 条移回①；未知 kind ⇒ **exit 2**（⛔ 不静默忽略）。
+- **AC4**：`plugin/test/identity-replication-check.test.mjs` **22 pass / 0 fail**；把 `genuine.ts` 那条断言反转成 `false` 的变异体实跑 **21 pass / 1 fail**（红控制非空转，变异体已删）。
+- **AC5**：见上 clusterId 读数 + `plugin/test/architecture-review-cluster.test.mjs` 新增三条用例（空列表 ⇒ 不产簇；注入 ⇒ 重新产出；carve-out 列表非空而可合并列表空 ⇒ 仍不产簇），**21 pass / 0 fail**。
+- **AC6**（各 exit 0）：identity-replication-check **22/0**、architecture-review-cluster **21/0**、quality-gate-driver **32/0**、probe-routine **22/0**。
+- **AC7**：`bash scripts/test.sh --for-task gap-identity-rewrite-count-includes-carve-outs --allow-thin` ⇒ **exit 0**。
+
+⛔ 判据不是「把 8 行从输出里删掉」：8 条仍以带类别 + 一行理由的**独立列表**在场（`judgmentRewriteCarveOuts`），`--json` 与人类可读面都有；`judgmentRewrites.length + judgmentRewriteCarveOuts.length` = 检测到的全部站点数（枚举，没有第三条去路）。
 
 ## Touches
 
