@@ -58,6 +58,10 @@ import { isFlagged } from "./identity-replication-check.ts";
 /** identity-replication-check.ts --json（P2）里聚类消费的面。 */
 export interface IdentityReportView {
   pathConstants?: Array<{ file?: string }>;
+  /** 判定重写（P2）—— 收窄后的语义：**可合并到 kernel leaf 的**站点。
+   *  `judgmentRewriteCarveOuts`（同一检测器 `--json` 的另一个字段：检测到但结构上不可合并，
+   *  每条带 `carveOut` 类别 + 理由）**刻意不被本模块消费** —— 它不是簇的输入，是「排除 ≠ 没扫到」
+   *  的可区分性载体。⛔ 不要在这里对它再判一次。 */
   judgmentRewrites?: Array<{ file?: string }>;
   byteIdentical?: { count?: number; pairs?: Array<{ plugin?: string; experiment?: string }> };
   // `accessor`/`hardcoded` 是阈值谓词的两个操作数，行上都有（检测器的 LiteralReplication）——
@@ -126,6 +130,12 @@ export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
   }
 
   // 判定重写：读 /proc/<pid>/cmdline ∧ 比较名字 ⇒ 识别进程，被独立实现多处。
+  // ⛔ 此处**不再过滤一遍**：`judgmentRewrites` 已经是检测器按**类**收窄后的【可合并到 kernel leaf 的】
+  //   站点；结构上不可合并的站点（test / `.sh` / 已 import leaf / repo-import-free `.mjs`）在检测器的
+  //   `classifyRewriteSite` 里被排除，并以 `judgmentRewriteCarveOuts`（每条带类别 + 一行理由）**独立
+  //   出现在同一份 `--json` 里** —— 它们是「排除」，不是「没扫到」。
+  //   在这里再过滤一次就是同一判据的第二份实现（硬规则 5b：修一处漏另一处），与本文件顶部
+  //   `isFlagged` 那条的成因形态完全相同。
   const rewrites = uniqueSorted((r.judgmentRewrites ?? []).map((j) => j.file));
   if (rewrites.length > 0) {
     out.push({

@@ -342,6 +342,13 @@ export function findPathConstants(root: string, files: string[]): PathConstant[]
 export interface JudgmentRewrite {
   file: string;
   line: number;
+  /** true ⇔ 该站点**可合并到 kernel leaf** ⇒ 计入 `judgmentRewrites` (见 classifyRewriteSite)。 */
+  mergeable: boolean;
+  /** `mergeable === false` 时的 carve-out 类别，true 时为 null —— 枚举取值，⛔ 不是布尔：
+   *  「被排除」必须能说出是被【哪一条】规则排除的 (硬规则 3)。 */
+  carveOut: RewriteCarveOutKind | null;
+  /** 一行结构性理由；`mergeable === true` 时为 null。 */
+  carveOutReason: string | null;
 }
 
 /** 读取原语 —— 「这一行是在【读】」那一半。 */
@@ -402,10 +409,147 @@ function boundToRead(src: string, at: number, prefix: string, suffix: string, is
   return subj !== null && subjectCompared(src, at, subj, isShell);
 }
 
+// ── 判定重写的【可合并性】分类（本任务：把非可合并的站点类从计数里排除）──────────────────────
+//
+// 计数语义（收窄后）：`judgmentRewrites` = **可合并到 kernel leaf 的**判定重写 —— 即该站点所在的
+// 载体能把 `packages/quay/src/kernel/proc-identity.ts` 当作单一实现来用。不含该条件的站点**不是**
+// 「没有判定重写」，而是**结构上不可能合并**：它们的载体有真实理由各自实现判据。
+//
+// ⛔ 按【类】排除，⛔ 不按文件名白名单：按文件名硬编码等于把下一条同类站点漏掉 —— 缺陷是成簇的，
+// 兄弟实例常在同一目录甚至同一文件（硬规则 5b）。下面四条规则问的都是载体的**结构性属性**。
+//
+// ⛔ 排除不得静默（硬规则 3b + 3 枚举）：被排除的站点与理由以**独立取值**出现在 report 里
+// （`judgmentRewriteCarveOuts`，每条带 `carveOut` 类别 + `carveOutReason`），人类可读面也打印它们。
+// **它们没有被删掉** —— 「作为 carve-out 排除」与「没扫到」必须可区分。
+//
+// 已知残余（如实记，⛔ 不假装规则 (d) 无代价）：一条**真的可合并**的重复判定若落在 repo-import-free
+// 的 `.mjs` 里，会被规则 (d) 排除而不上报。这不是恒定盲区 —— `--no-carve-out import-free-mjs` 关掉
+// 该规则后它就回到可合并列表（AC3 的两态对照钉的就是这一点），所以该盲区是**可检的**，不是静默的。
+
+/** carve-out 的四个类别。 */
+export const REWRITE_CARVE_OUT_KINDS = ["test", "shell", "imports-leaf", "import-free-mjs"] as const;
+export type RewriteCarveOutKind = (typeof REWRITE_CARVE_OUT_KINDS)[number];
+
+/** 分类结果 —— 枚举取值而非布尔（硬规则 3）。 */
+export interface RewriteSiteClass {
+  /** true ⇔ 该站点可合并到 kernel leaf ⇒ 计入 `judgmentRewrites`。 */
+  mergeable: boolean;
+  /** `mergeable === false` 时的类别；true 时为 null。 */
+  carveOut: RewriteCarveOutKind | null;
+  /** 一行结构性理由；`mergeable === true` 时为 null。 */
+  carveOutReason: string | null;
+}
+
+/** kernel leaf 的 specifier 词干 —— 供 `accessorRegexSource()` 复用**本文件唯一那套** accessor 正则。 */
+const KERNEL_LEAF_STEM = "kernel/proc-identity";
+
+/** 载体是否是**测试**：路径段里有 `test|tests|__tests__|__test__`，或 basename 形如 `*.test.mjs` /
+ *  `*.spec.ts`。理由：判据与被判对象必须**独立实现**（G3 —— judge 不得共享被判实现）；测试若 import
+ *  生产侧的判定叶子，它验的就是那条叶子自己，测不出叶子错在哪。
+ *  按**路径/命名约定**判定，⛔ 不列文件名（硬规则 5b）。 */
+function isTestCarrier(relFile: string): boolean {
+  const segs = relFile.split("/");
+  const base = segs[segs.length - 1] ?? "";
+  if (segs.slice(0, -1).some((s) => s === "test" || s === "tests" || s === "__tests__" || s === "__test__")) {
+    return true;
+  }
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(base);
+}
+
+/** 载体是否已**经结构性关系到达 kernel leaf**。复用本文件**唯一**那套 accessor 正则
+ *  (`accessorRegexSource`) 并跑在 `blankComments()` 的视图上，⛔ 不另写一份 specifier 匹配 ——
+ *  两份副本正是本仓反复出现的成因形态（硬规则 5b）。
+ *  理由：已 import 叶子的载体里残余的 /proc 读取是**没有被迁移判定的那部分**（例如只取 argv[0] 的
+ *  第三个谓词），不是对同一判定的独立重写。 */
+function importsKernelLeaf(src: string, relFile: string): boolean {
+  const mask = maskFor(relFile)(src);
+  const re = new RegExp(accessorRegexSource(KERNEL_LEAF_STEM));
+  re.lastIndex = 0;
+  return re.test(blankComments(src, mask));
+}
+
+/** 仓内相对 specifier 的四种形态（静态 `import … from` / re-export / 动态 `import()` / `require()`）。
+ *  跑在 `blankComments()` 的视图上：注释里写的 `"./x"` 不是 specifier（硬规则 2：按位置判定 ——
+ *  注释不是代码位置）。`[^;]*?` 读得进换行，故多行导入块不会被漏掉。 */
+const REPO_INTERNAL_SPECIFIER =
+  /(?:^|[^\w$.])(?:import|export)\b[^;]*?\bfrom\s*["']\.{1,2}\/|(?:^|[^\w$.])import\s*\(\s*["']\.{1,2}\/|(?:^|[^\w$.])require\s*\(\s*["']\.{1,2}\/|(?:^|[^\w$.])import\s+["']\.{1,2}\//;
+
+/** 载体是否是**仓内 import-free 的 `.mjs` 运行时助手**：模块 specifier 全部是 `node:` 内建或裸包名，
+ *  没有一条相对路径。理由：这类载体**刻意不 import 仓内 TS 内部件** —— 它们要能以 `node <file>` 单独
+ *  跑、并进 npm-pack 包体，把 kernel leaf 拉进来会破坏它们的存在理由。 */
+function isImportFreeMjs(src: string, relFile: string): boolean {
+  if (!relFile.endsWith(".mjs")) return false;
+  const mask = maskFor(relFile)(src);
+  return !REPO_INTERNAL_SPECIFIER.test(blankComments(src, mask));
+}
+
+/** 命中的 carve-out 规则 + 一行理由；未命中任何规则 ⇒ null（= 真可合并站点）。 */
+function carveOutFor(src: string, relFile: string): { kind: RewriteCarveOutKind; reason: string } | null {
+  if (isTestCarrier(relFile)) {
+    return { kind: "test", reason: "test carrier — 判据与被判对象必须独立实现 (G3), 不得共享被判叶子" };
+  }
+  if (relFile.endsWith(".sh")) {
+    return { kind: "shell", reason: "shell carrier — .sh 不能 import TS kernel leaf (文档化 carve-out)" };
+  }
+  if (importsKernelLeaf(src, relFile)) {
+    return {
+      kind: "imports-leaf",
+      reason: "already imports kernel/proc-identity.ts — 残余 /proc 读取不是被迁移判定的独立重写",
+    };
+  }
+  if (isImportFreeMjs(src, relFile)) {
+    return {
+      kind: "import-free-mjs",
+      reason: "repo-import-free .mjs runtime helper — 刻意不 import 仓内 TS 内部件 (独立运行 + 进包体)",
+    };
+  }
+  return null;
+}
+
+/** **唯一**的可合并性判定（AC2：`grep -n` 只有这一处定义，`architecture-review-cluster.ts` 不另写
+ *  一份 —— 那里只消费 `judgmentRewrites`）。
+ *
+ *  `src` 省略时按 `root/relFile` 从盘上读 —— 便于对一批真实路径逐一求值。
+ *  `disabled` 关掉若干规则（AC3 的两态对照：关掉某条 ⇒ 该条下的站点回到可合并列表）。⛔ 它能取假是
+ *  本条判据的价值所在：一条只会在「全部规则都生效」的世界里取真的谓词是与「没有站点」同形的回声。
+ *  PURE（只读 `src`/盘上文件）。 */
+export function classifyRewriteSite(
+  root: string,
+  relFile: string,
+  src?: string,
+  disabled: readonly RewriteCarveOutKind[] = [],
+): RewriteSiteClass {
+  const text = src ?? fs.readFileSync(path.join(root, relFile), "utf8");
+  const hit = carveOutFor(text, relFile);
+  if (hit === null || disabled.includes(hit.kind)) {
+    return { mergeable: true, carveOut: null, carveOutReason: null };
+  }
+  return { mergeable: false, carveOut: hit.kind, carveOutReason: hit.reason };
+}
+
+/** 便捷布尔视图（AC2 点名的谓词）。⛔ 判定本体是 `classifyRewriteSite` —— 这里只是一层委托，
+ *  两份实现会分叉，故不复制逻辑（硬规则 5b）。 */
+export function isMergeableRewriteSite(
+  root: string,
+  relFile: string,
+  src?: string,
+  disabled: readonly RewriteCarveOutKind[] = [],
+): boolean {
+  return classifyRewriteSite(root, relFile, src, disabled).mergeable;
+}
+
 /** 判定指纹 F: 一个代码文件【读 /proc/<pid>/cmdline】(外部事实 A) 且【对读到的内容做名字/特征比较】
  *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。
- *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。 */
-export function findJudgmentRewrites(root: string, files: string[]): JudgmentRewrite[] {
+ *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。
+ *
+ *  ⛔ 本函数返回**全部**检测到的站点（含 carve-out），每条自带 `mergeable`/`carveOut` 分类 ——
+ *  「检测到了什么」与「哪些可合并」是两件事，前者的已知真样本（含 `.sh`）必须继续被报出，否则
+ *  收窄会把检测器本身砍空（硬规则 2 的零计数半边，见本文件单测的收窄双向 fixture）。 */
+export function findJudgmentRewrites(
+  root: string,
+  files: string[],
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): JudgmentRewrite[] {
   // 外部事实 A: 读 /proc/<pid>/cmdline — 必须出现在【读】上下文 (readFile* / shell `<` 重定向 / cat /
   // python open), 而非仅仅在描述字符串里提及该路径 (capability-catalog 的 QUESTION 描述不算实现)。
   // 两种实现形态都要抓 (文档 §2.8 方法(e) 的教训: 单位选错聚不出靶子): ①字面量 `/proc/${pid}/cmdline`;
@@ -440,9 +584,29 @@ export function findJudgmentRewrites(root: string, files: string[]): JudgmentRew
     };
     scan(procPath);
     if (!found) scan(constructed);
-    if (found) out.push({ file: path.relative(root, f), line: hitLine });
+    if (found) {
+      const rel = path.relative(root, f);
+      const cls = classifyRewriteSite(root, rel, src, opts.disabledCarveOuts ?? []);
+      out.push({
+        file: rel,
+        line: hitLine,
+        mergeable: cls.mergeable,
+        carveOut: cls.carveOut,
+        carveOutReason: cls.carveOutReason,
+      });
+    }
   }
   return out;
+}
+
+/** **可合并**的判定重写 —— `run()` 的 `judgmentRewrites` 就是这个集合，与 `judgmentRewriteCarveOuts`
+ *  互补、不重叠，并集 = `findJudgmentRewrites()` 的全部检测结果（枚举：没有第三条去路）。 */
+export function findMergeableJudgmentRewrites(
+  root: string,
+  files: string[],
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): JudgmentRewrite[] {
+  return findJudgmentRewrites(root, files, opts).filter((j) => j.mergeable);
 }
 
 // ── (a-side) 字节完全相同文件对 (AC3: plugin/scripts ↔ experiments/*/scripts) ────────────────
@@ -756,7 +920,12 @@ export function sharedModuleControl(
 export interface Report {
   root: string;
   pathConstants: PathConstant[];
+  /** **可合并到 kernel leaf 的**判定重写（收窄后的计数语义，见 classifyRewriteSite）。 */
   judgmentRewrites: JudgmentRewrite[];
+  /** 检测到但**结构上不可合并**的站点 —— 以独立取值在场并各带一行理由。
+   *  ⛔ 不是被删掉的读数：`judgmentRewrites.length + judgmentRewriteCarveOuts.length` =
+   *  检测到的全部站点数，「作为 carve-out 排除」与「没扫到」因此可区分 (硬规则 3b)。 */
+  judgmentRewriteCarveOuts: JudgmentRewrite[];
   byteIdentical: {
     count: number;
     totalLines: number;
@@ -769,7 +938,11 @@ export interface Report {
   table: LiteralReplication[];
 }
 
-export function run(root: string, limit: number): Report {
+export function run(
+  root: string,
+  limit: number,
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): Report {
   // 排除检测器自身 + 其单测: 这两个文件含 /proc/<pid>/cmdline 指纹正则、"session-liveness.sh"
   // 被测实体字面量、以及 *_REL 合成 fixture 字符串 (检测器定义/测试输入, 不是被测对象) — 计入会
   // 把检测器自指与测试 fixture 误报成判定重写/复制度 (grep 自匹配, instrument-failure FAMILY-3 同形)。
@@ -779,7 +952,11 @@ export function run(root: string, limit: number): Report {
 
   const pathConstants = findPathConstants(root, files);
 
-  const judgmentRewrites = findJudgmentRewrites(root, files);
+  // 判定重写: 一次检测, 两个互补列表 (可合并 / carve-out)。⛔ 不在这里过滤第二遍 —— 分类判定
+  // 只有一个老家 (classifyRewriteSite), 消费者 import 结果。
+  const detectedRewrites = findJudgmentRewrites(root, files, opts);
+  const judgmentRewrites = detectedRewrites.filter((j) => j.mergeable);
+  const judgmentRewriteCarveOuts = detectedRewrites.filter((j) => !j.mergeable);
 
   const byteIdenticalRaw = findByteIdenticalPairs(root);
 
@@ -806,6 +983,7 @@ export function run(root: string, limit: number): Report {
     root,
     pathConstants,
     judgmentRewrites,
+    judgmentRewriteCarveOuts,
     byteIdentical: {
       count: byteIdenticalRaw.pairs.length,
       totalLines: byteIdenticalRaw.totalLines,
@@ -823,12 +1001,38 @@ export function run(root: string, limit: number): Report {
 function usage(): never {
   console.error(
     "usage: node --experimental-strip-types identity-replication-check.ts [--root <dir>] [--json] [--limit <n>]\n" +
+      "                                        [--no-carve-out <kind>[,<kind>…]]\n" +
       "  --root <dir>   repo to scan (default: repo-root.ts resolution)\n" +
       "  --limit <n>    max rows in the human literal-replication table (default 25)\n" +
       "  --json         emit the full report as JSON\n" +
+      `  --no-carve-out disable one non-mergeable-site rule (repeatable). kinds: ${REWRITE_CARVE_OUT_KINDS.join(", ")}\n` +
+      "                 (disabling a rule moves its sites back into `judgmentRewrites` — the two-state check)\n" +
       "Exit: 0 = report produced (observer, not a pass/fail gate); 2 = usage/environment error.",
   );
   process.exit(0);
+}
+
+/** 解析 `--no-carve-out <kind>`（可重复、可逗号分隔）。未知 kind ⇒ exit 2，⛔ 不静默忽略：
+ *  一条读不懂的规则名若被吞掉，输出就与「该规则已生效」同形（硬规则 3b）。 */
+function collectDisabledCarveOuts(args: string[]): RewriteCarveOutKind[] {
+  const out: RewriteCarveOutKind[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--no-carve-out") continue;
+    const raw = args[i + 1];
+    if (raw === undefined || raw.startsWith("--")) {
+      console.error("ERROR: --no-carve-out needs a kind");
+      process.exit(2);
+    }
+    for (const part of raw.split(",")) {
+      const kind = part.trim();
+      if (!(REWRITE_CARVE_OUT_KINDS as readonly string[]).includes(kind)) {
+        console.error(`ERROR: unknown carve-out kind "${kind}" — one of: ${REWRITE_CARVE_OUT_KINDS.join(", ")}`);
+        process.exit(2);
+      }
+      out.push(kind as RewriteCarveOutKind);
+    }
+  }
+  return out;
 }
 
 function printHuman(report: Report): void {
@@ -842,8 +1046,24 @@ function printHuman(report: Report): void {
   }
   if (report.pathConstants.length === 0) console.log("  (none)");
 
-  console.log(`\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ${report.judgmentRewrites.length} 处 ==`);
+  console.log(
+    `\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ` +
+      `**可合并到 kernel leaf** ${report.judgmentRewrites.length} 处 ==`,
+  );
   for (const j of report.judgmentRewrites) console.log(`  ${j.file}:${j.line}`);
+  if (report.judgmentRewrites.length === 0) {
+    console.log("  (none — 检测到的站点全部落在 carve-out 里; 见下一节, 它们没有被删掉)");
+  }
+
+  // carve-out 面与上面并列在场: 「被排除」与「没扫到」必须在同一份报告里可区分 (硬规则 3b)。
+  console.log(
+    `\n== 判定重写的 carve-out (检测到但结构上不可合并, 带理由) — ` +
+      `${report.judgmentRewriteCarveOuts.length} 处 ==`,
+  );
+  for (const j of report.judgmentRewriteCarveOuts) {
+    console.log(`  ${j.file}:${j.line}  [${j.carveOut}] ${j.carveOutReason}`);
+  }
+  if (report.judgmentRewriteCarveOuts.length === 0) console.log("  (none)");
 
   console.log(
     `\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ` +
@@ -895,7 +1115,7 @@ export function main(argv: string[]): number {
     console.error(`ERROR: plugin/scripts not found under ${root} — is --root correct?`);
     process.exit(2);
   }
-  const report = run(root, limit);
+  const report = run(root, limit, { disabledCarveOuts: collectDisabledCarveOuts(args) });
   if (asJson) {
     console.log(JSON.stringify(report, null, 2));
   } else {

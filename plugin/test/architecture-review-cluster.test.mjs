@@ -173,6 +173,41 @@ test("AC4 — 判词不得在 accessor>0 时断言 without a single accessor (=0
     "accessor=0 ⇒ 强断言必须仍然输出 (否则这条判据在真取真的那一半上被架空)");
 });
 
+// ── 判定重写计数收窄后的簇侧行为 (gap-identity-rewrite-count-includes-carve-outs AC5) ───────────
+// 收窄把「哪些站点算判定重写」的类别判定收进检测器 (`classifyRewriteSite`)：`judgmentRewrites` 只剩
+// **可合并到 kernel leaf 的**站点，非可合并的四类（test / `.sh` / 已 import leaf / repo-import-free
+// `.mjs`）改经 `judgmentRewriteCarveOuts`（带类别 + 理由）在场。
+// 本组两个方向都要钉住（硬规则 2 的另一半 = 零计数也要干跑已知真样本）：
+//   · 列表为空 ⇒ ⛔ 不产出该簇（已 done 的 proc-identity 迁移机制不再每轮被重报）；
+//   · 注入一个可合并站点 ⇒ **必须**重新产出（否则「不产出」与「判据坏死」在报告上同形）。
+// ⛔ cluster 侧不另写一份过滤: 它读的就是检测器已收窄的列表（下游再过滤 = 硬规则 5b 违规）。
+
+test("AC5 — 判定重写列表为空 ⇒ 不产出 P2-judgment-rewrites (不再重报已 done 机制)", () => {
+  const ids = clusterIdentityReport({ judgmentRewrites: [] }).map((c) => c.clusterId);
+  assert.deepEqual(ids, [], "0 个可合并站点 ⇒ 该簇缺席（检测到的 carve-out 不经此面）");
+});
+
+test("AC5 反向 — 注入一个可合并站点 ⇒ 该簇必须重新产出 (判据非恒假/非空转)", () => {
+  const r = { judgmentRewrites: [{ file: "plugin/scripts/never-seen-before.ts", line: 7 }] };
+  const clusters = clusterIdentityReport(r);
+  assert.deepEqual(clusters.map((c) => c.clusterId), ["P2-judgment-rewrites"]);
+  assert.equal(clusters[0].rawCount, 1);
+  assert.deepEqual(clusters[0].files, ["plugin/scripts/never-seen-before.ts"]);
+  assert.match(clusters[0].label, /independently re-implemented 1×/, "判词里的计数与读数一致");
+});
+
+test("AC5 — carve-out 字段不经簇面消费 (排除 ≠ 没扫到, 但 carve-out 不是簇的输入)", () => {
+  // 同一份 --json 里另有一个 judgmentRewriteCarveOuts 列表；即使它非空，可合并列表为空就仍然不产簇。
+  const ids = clusterIdentityReport({
+    judgmentRewrites: [],
+    judgmentRewriteCarveOuts: [
+      { file: "plugin/scripts/os-anchor-watchdog.sh", line: 130, carveOut: "shell", carveOutReason: "shell carrier" },
+      { file: "plugin/test/x.test.mjs", line: 1, carveOut: "test", carveOutReason: "test carrier" },
+    ],
+  }).map((c) => c.clusterId);
+  assert.deepEqual(ids, [], "carve-out 不是可合并站点 ⇒ 不产簇 (它们由检测器的独立字段在场)");
+});
+
 test("AC1 — empty deletion report / no components ⇒ no P1 cluster", () => {
   assert.deepEqual(clusterDeletionReport({ components: [], dc: [], counts: { dcTotal: 0 } }), []);
   assert.deepEqual(clusterDeletionReport({ components: ["x.sh"], dc: [], counts: { dcTotal: 0 } }), []);
