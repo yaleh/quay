@@ -43,33 +43,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { repoRoot } from "./repo-root.ts";
+import { readJsonLines } from "./gate-script-base.ts";
 
 export type PsiSample = { t: number; cpu_stall: number };
 
 export type JoinResult =
   | { found: true; samples: PsiSample[]; mean: number; max: number; sampleCount: number }
   | { found: false; reason: string };
-
-function readJsonLines(file: string): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return out;
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const s = line.trim();
-    if (!s) continue;
-    try {
-      const v = JSON.parse(s);
-      if (v && typeof v === "object") out.push(v as Record<string, unknown>);
-    } catch {
-      /* skip malformed line */
-    }
-  }
-  return out;
-}
 
 // loadRunSamples — read ONE runId's .quay/suite-load-<runId>.jsonl into {t, cpu_stall} samples
 // (sorted ascending by t). Returns null when the carrier file is absent (caller reports found:false).

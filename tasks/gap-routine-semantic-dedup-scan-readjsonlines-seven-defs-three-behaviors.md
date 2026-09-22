@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readjsonlines-seven-defs-three-behaviors
 title: "semantic-dedup-scan: 7 private definitions, none imported, no canonical
   jsonl reader in gate-script-base.ts/checker-lib.ts/kernel; they collapse to 3
   runtime behaviors differing on"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

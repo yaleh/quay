@@ -15,6 +15,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   emitPass,
@@ -26,10 +28,19 @@ import {
   flagValue,
   resolveRoot,
   createSelftest,
+  readJsonLines,
 } from "../scripts/gate-script-base.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts");
+
+/** The plugin/scripts TypeScript sources the two source-scan ratchets below read. */
+function scriptTsFiles() {
+  return fs.readdirSync(SCRIPTS_DIR).filter((f) => f.endsWith(".ts"));
+}
+function sourceOf(rel) {
+  return fs.readFileSync(path.join(SCRIPTS_DIR, rel), "utf8");
+}
 
 function captureStream(stream, fn) {
   const orig = process[stream].write;
@@ -378,3 +389,258 @@ test("createSelftest: the verdict is a function of the INPUT, not the harness (R
   passing.check("x", true, "");
   assert.equal(captureBoth(() => passing.report()).value, true);
 });
+
+// ── readJsonLines ───────────────────────────────────────────────────────────────────────────────────
+// The ledger reader extracted from SEVEN private copies, none imported (semantic-dedup-scan finding
+// `readjsonlines-seven-defs-three-behaviors`, .quay/routine-findings.jsonl, runId
+// `semantic-dedup-scan-1790118332027`, verdict `real-duplication`, requested action `extract`):
+//   obligation-ledger.ts / obligation-ledger-check.ts / psi-failure-correlation-check.ts /
+//   psi-window-join.ts / freshness-producer-coverage-check.ts / ready-pool-check.ts / trend-check.ts
+// Same four-part shape as the resolveRoot guard above — single-source ratchet, negative control,
+// semantics of the rule the call sites inherited, and a CONTROL pinning the ONE input where the
+// retired copies disagreed.
+
+/** The 7 modules that carried a private copy. The last two still NAME the symbol in their export
+ *  surface (`export { readJsonLines }`) — a re-export, not a re-implementation; the ratchet below is
+ *  what keeps that distinction honest. */
+const READ_JSON_LINES_CONSUMERS = [
+  "obligation-ledger.ts",
+  "obligation-ledger-check.ts",
+  "psi-failure-correlation-check.ts",
+  "psi-window-join.ts",
+  "freshness-producer-coverage-check.ts",
+  "ready-pool-check.ts",
+  "trend-check.ts",
+];
+
+function withTempDir(prefix, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  try {
+    return fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── single source (the ratchet — a redefinition turns this RED) ─────────────────────────────────────
+
+test("readJsonLines: defined exactly ONCE under plugin/scripts (gate-script-base.ts)", () => {
+  const defs = scriptTsFiles().filter((f) => /\bfunction readJsonLines\b/.test(sourceOf(f)));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `readJsonLines must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+// ── negative control ────────────────────────────────────────────────────────────────────────────────
+
+test("readJsonLines: none of the 7 former carriers re-defines it, and each IMPORTS the shared one", () => {
+  for (const f of READ_JSON_LINES_CONSUMERS) {
+    assert.doesNotMatch(sourceOf(f), /\bfunction readJsonLines\b/, `${f} must not redefine readJsonLines`);
+    // Deleting the private copy without importing the shared one would still pass the line above, so
+    // this half is not redundant — it is the half that distinguishes "extracted" from "deleted".
+    assert.match(
+      sourceOf(f),
+      /import \{[^}]*\breadJsonLines\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import readJsonLines from the base`,
+    );
+  }
+});
+
+test("readJsonLines: deleting the shared export makes a consumer import fail (the mechanism is real)", () => {
+  // The "删了不红 ⇒ 假" control, same as gap-b3's: a consumer importing an ABSENT named export must
+  // fail to link, and the SAME consumer must link once the export exists.
+  withTempDir("readjsonlines-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { readJsonLines } from "./gate-script-base.ts";\nconsole.log(readJsonLines);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function readJsonLines() { return []; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
+});
+
+// ── semantics: the rule the 7 call sites now share ──────────────────────────────────────────────────
+
+test("readJsonLines: absent / unreadable file ⇒ [] (fail-open, never a throw)", () => {
+  withTempDir("readjsonlines-absent-", (dir) => {
+    assert.deepEqual(readJsonLines(path.join(dir, "does-not-exist.jsonl")), []);
+    // A DIRECTORY reads as EISDIR — still [] and still no throw.
+    assert.deepEqual(readJsonLines(dir), []);
+  });
+});
+
+test("readJsonLines: objects are returned; blank lines, malformed lines and non-object lines are skipped", () => {
+  withTempDir("readjsonlines-semantics-", (dir) => {
+    const file = path.join(dir, "ledger.jsonl");
+    fs.writeFileSync(
+      file,
+      [
+        '{"a":1}',
+        "",
+        "   ",
+        '{"b":2}',
+        "{oops not json",
+        "42",
+        '"a bare string"',
+        "null",
+        "true",
+        "[1,2]",
+        '{"c":3}',
+      ].join("\n") + "\n",
+    );
+    assert.deepEqual(readJsonLines(file), [{ a: 1 }, { b: 2 }, { c: 3 }]);
+  });
+});
+
+test("readJsonLines: a CRLF carrier yields the same rows as an LF one", () => {
+  withTempDir("readjsonlines-crlf-", (dir) => {
+    const lf = path.join(dir, "lf.jsonl");
+    const crlf = path.join(dir, "crlf.jsonl");
+    fs.writeFileSync(lf, '{"a":1}\n{"b":2}\n');
+    fs.writeFileSync(crlf, '{"a":1}\r\n{"b":2}\r\n');
+    assert.deepEqual(readJsonLines(crlf), readJsonLines(lf));
+    assert.deepEqual(readJsonLines(crlf), [{ a: 1 }, { b: 2 }]);
+  });
+});
+
+// ── CONTROL: the ONE input where the retired copies disagreed ───────────────────────────────────────
+
+test("CONTROL: a top-level non-object line is where the retired copies diverged — and they agree everywhere else", () => {
+  // The three retired behaviors, spelled out verbatim (from the 7 copies, before extraction):
+  //   A: split("\n")  + NO guard                                      (4 copies)
+  //   B: split(/\r?\n/) + `v && typeof v === "object"` — a TRUTHY check, so it admits ARRAYS  (2 copies)
+  //   C: split("\n")  + `typeof r === "object" && r !== null && !Array.isArray(r)`  (1 copy)
+  const parseWith = (text, splitRe, guard) => {
+    const out = [];
+    for (const line of text.split(splitRe)) {
+      if (!line.trim()) continue;
+      try {
+        const v = JSON.parse(line);
+        if (guard(v)) out.push(v);
+      } catch {
+        /* skip */
+      }
+    }
+    return out;
+  };
+  const variantA = (t) => parseWith(t, "\n", () => true);
+  const variantB = (t) => parseWith(t, /\r?\n/, (v) => v && typeof v === "object");
+  const variantC = (t) => parseWith(t, "\n", (v) => typeof v === "object" && v !== null && !Array.isArray(v));
+
+  // The decision under test: the canonical reader keeps C's guard, so `null`/`42`/`"x"` — which A and
+  // B returned under a `Record<string, unknown>[]` return type every caller then indexes fields off —
+  // are no longer rows.
+  const nonObjects = "null\n42\n\"x\"\n[1,2]\ntrue\n";
+  assert.deepEqual(variantA(nonObjects), [null, 42, "x", [1, 2], true], "A kept every non-object");
+  assert.deepEqual(variantB(nonObjects), [[1, 2]], "B's truthy check kept the ARRAY (typeof [] === 'object')");
+  assert.deepEqual(readJsonLines(fileOf(nonObjects)), [], "the canonical reader keeps none of them");
+  // ...so the three are provably NON-interchangeable on this input — this test would fail if the
+  // extraction had silently picked either permissive copy as the base.
+  assert.notDeepEqual(variantA(nonObjects), variantB(nonObjects));
+  assert.notDeepEqual(variantB(nonObjects), variantC(nonObjects));
+
+  // ...and they AGREE on every input a real ledger writer can produce (an object per line, or a
+  // corrupt/blank line), so the divergence is exactly one input wide and cannot be hiding a second.
+  for (const input of [
+    "",
+    "\n",
+    '{"a":1}\n',
+    '{"a":1}\n{"b":2}\n',
+    '{"a":1}\n\n{"b":2}\n',
+    '{"a":1}\n{oops\n{"b":2}\n',
+    '{"a":1}\r\n{"b":2}\r\n',
+    '{"perFile":[1,2],"state":"red"}\n',
+  ]) {
+    assert.deepEqual(variantA(input), variantC(input), `A vs C diverged on ${JSON.stringify(input)}`);
+    assert.deepEqual(variantB(input), variantC(input), `B vs C diverged on ${JSON.stringify(input)}`);
+    assert.deepEqual(readJsonLines(fileOf(input)), variantC(input), `canonical vs C diverged on ${JSON.stringify(input)}`);
+  }
+});
+
+test("CONTROL: the CRLF axis does NOT change the row set — the finding's CRLF clause does not reproduce", () => {
+  // The finding's text says "a CRLF ledger yields different rows per caller". READ + MEASURED
+  // 2026-09-22: that clause does NOT reproduce. `JSON.parse` treats a trailing `\r` as JSON
+  // whitespace (the grammar's ws includes CR), and the blank-line test is `.trim()`-based, so both
+  // split strategies return the same rows for every CRLF input. The two calls below are the direct
+  // measurement; the loop is the general statement.
+  assert.deepEqual(JSON.parse('{"a":1}\r'), { a: 1 }, "a trailing CR is JSON whitespace, not a parse error");
+  const crlf = '{"a":1}\r\n{"b":2}\r\n';
+  assert.deepEqual(parseRowsWithSplit(crlf, "\n"), parseRowsWithSplit(crlf, /\r?\n/));
+  for (const text of ["", "\n", "\r\n", '{"a":1}\r\n', '{"a":1}\r\n\r\n{"b":2}\r\n', '{"a":1}\r\r\n', "42\r\n"]) {
+    assert.deepEqual(
+      parseRowsWithSplit(text, "\n"),
+      parseRowsWithSplit(text, /\r?\n/),
+      `the two split strategies diverged on ${JSON.stringify(text)} — the finding's clause would then be real`,
+    );
+  }
+  // The canonical reader still takes the WIDER split: harmless (proved by the loop above) and it makes
+  // the CRLF tolerance explicit rather than an accident of JSON.parse's whitespace rule.
+  assert.deepEqual(readJsonLines(fileOf(crlf)), [{ a: 1 }, { b: 2 }]);
+});
+
+test("BOUNDARY: the readJsonlLines sentinel pair is NOT folded in — its divergence is load-bearing", () => {
+  // The SAME routine run that filed this task also emitted finding
+  // `readjsonllines-load-bearing-unparseable-sentinel` (runId semantic-dedup-scan-1790118332027) for a
+  // DIFFERENT symbol — `readJsonlLines` (note the extra `l`), 2 copies — and its own rationale says
+  // why they must stay separate: absent file ⇒ `null` (not `[]`), and a corrupt line ⇒
+  // `{__unparseable:true}`, a sentinel consumed at 4 call sites. Folding them into the reader above
+  // "would make unparseable permanently false and silently pass two checkers" (硬规则 3b — a judge
+  // that cannot read its input must not return the value shaped like "qualified").
+  //
+  // So the extraction's BOUNDARY is part of its contract, and this test is the mechanical form of it:
+  // a later dedup pass that folds the pair in goes RED here instead of quietly disarming two checkers.
+  const SENTINEL_READERS = ["direct-to-develop-bypass-check.ts", "fan-in-ff-protocol-check.ts"];
+  for (const f of SENTINEL_READERS) {
+    const src = sourceOf(f);
+    assert.match(src, /\bfunction readJsonlLines\b/, `${f} must keep its own sentinel-preserving reader`);
+    assert.match(src, /__unparseable/, `${f} must keep the __unparseable sentinel its callers test for`);
+    assert.doesNotMatch(
+      src,
+      /import \{[^}]*\breadJsonLines\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} must NOT be folded onto the line-dropping reader — that would disarm its unparseable check`,
+    );
+  }
+  // ...and the two symbols are genuinely different names, which is why the census has to be exact:
+  assert.notEqual("readJsonlLines", "readJsonLines");
+});
+
+/** The retired permissive parse (no guard) — the row set a split strategy alone produces. */
+function parseRowsWithSplit(text, splitRe) {
+  const out = [];
+  for (const line of text.split(splitRe)) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
+}
+
+/** Write `text` to a scratch ledger and hand back its path. ⛔ These dirs are NOT left behind: an
+ *  un-removed temp dir per assertion is how /tmp accumulated thousands of stale fixture trees here. */
+const SCRATCH_DIRS = [];
+process.on("exit", () => {
+  for (const d of SCRATCH_DIRS) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* best-effort at exit */
+    }
+  }
+});
+function fileOf(text) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "readjsonlines-fixture-"));
+  SCRATCH_DIRS.push(dir);
+  const file = path.join(dir, "ledger.jsonl");
+  fs.writeFileSync(file, text);
+  return file;
+}
