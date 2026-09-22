@@ -2,7 +2,7 @@
 id: gap-identity-rewrite-count-includes-carve-outs
 title: P2 判定重写计数把 4 类非可合并站点（test / .sh / 已 import leaf / 随包 .mjs）计成缺陷 —— 已 done
   的 proc-identity 迁移机制因此每轮重报
-status: todo
+status: ready
 labels:
   - gap
   - defect
