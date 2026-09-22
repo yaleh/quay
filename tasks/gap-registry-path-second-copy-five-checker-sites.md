@@ -2,7 +2,7 @@
 id: gap-registry-path-second-copy-five-checker-sites
 title: runner-static-gate.ts 路径的单一正本（REGISTRY_BASENAME/REGISTRY_REL_CANDIDATES）被
   5 处 checker 各自手抄第二份副本——迁移这 5 处经候选表，保留 kernel-sibling-dev-tree-only 作用域
-status: todo
+status: ready
 labels:
   - gap
   - defect
