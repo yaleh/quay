@@ -175,8 +175,10 @@ function main(argv: string[]): number {
     // The advisory set is a whole-repo sibling census (hard rule 5b), so it is long and mostly one
     // DATA file (the capability-catalog declaration table). Print a bounded head, keep it complete in
     // --json: a gate log flooded with 80 informational lines is a gate log nobody reads.
-    const ADVISORY_PRINT_CAP = 8;
-    const shown = report.advisory.slice(0, ADVISORY_PRINT_CAP);
+    // ⛔ NOT `*_CAP*`: that name is this repo's structural signal for a CONCURRENCY value
+    // (concurrency-literal-check's CONCURRENCY_KEYWORD_RE), and this is a display bound, not one.
+    const ADVISORY_PRINT_LIMIT = 8;
+    const shown = report.advisory.slice(0, ADVISORY_PRINT_LIMIT);
     const hidden = report.advisory.length - shown.length;
     process.stdout.write(
       `registry-path-literal-check: ${report.ok ? "PASS" : "FAIL"} — ${report.reason}\n` +
