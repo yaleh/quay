@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-recurring-cluster-starvation
 title: "semantic-dedup-scan: 264 candidate findings rejected vs 6 tasks filed
   across 3 rounds (DEFAULT_RATE=3); the highest-recurrence clusters have NO task
   at all — grep of tasks/*.md ret"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
