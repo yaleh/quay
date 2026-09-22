@@ -159,12 +159,23 @@ export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
     .sort(byHardcodedDesc);
   for (const row of entities) {
     const entity = row.entity as string;
+    // 判词必须与**这一行自己的读数**一致 (硬规则 3b: 读数与判词矛盾时仍输出同一句话, 就是让
+    // 「查过且清白」与「没查成」共用输出)。旧判词把「without a single accessor」写成了字面量,
+    // 于是 `accessor > 0` 的行照样这么断言 —— 立案实测: 17 个 P2-identity-* 簇里 **14** 个如此,
+    // 最极端的 `P2-identity-driver-runtime.ts` 是 accessor=26 (gap-identity-replication-requires-structural-relation)。
+    // ⇒ 强断言只在它**真的取真**时输出; 否则输出与读数一致的那一句。
+    const hardcoded = row.hardcoded ?? 0;
+    const accessor = row.accessor ?? 0;
     out.push({
       clusterId: `P2-identity-${entity}`,
       primitive: "P2",
       files: uniqueSorted(row.codeFiles ?? []),
-      rawCount: row.hardcoded ?? 0,
-      label: `identity replication: "${entity}" named in ${row.hardcoded} code file(s) without a single accessor`,
+      rawCount: hardcoded,
+      label:
+        accessor > 0
+          ? `identity replication: "${entity}" named in ${hardcoded} code file(s) that carry no structural relation to it ` +
+            `(a further ${accessor} file(s) reach it through an accessor — partial, not exclusive, replication)`
+          : `identity replication: "${entity}" named in ${hardcoded} code file(s) without a single accessor`,
     });
   }
 

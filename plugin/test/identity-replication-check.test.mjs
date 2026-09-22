@@ -22,6 +22,9 @@ import path from "node:path";
 import {
   tsCommentMask,
   shCommentMask,
+  blankComments,
+  accessorRegexSource,
+  isPathInvocationMention,
   findPathConstants,
   findJudgmentRewrites,
   findByteIdenticalPairs,
@@ -31,7 +34,6 @@ import {
   isFlagged,
   run,
 } from "../scripts/identity-replication-check.ts";
-
 /** Temp dirs created this run — removed in the top-level `after` hook below (test-isolation R6). */
 const _createdDirs = [];
 
@@ -334,6 +336,116 @@ test("isFlagged — 阈值谓词两态（真样本：10/231 清白 vs 59/3 成�
   assert.equal(isFlagged({}), false, "两个操作数都缺席 ⇒ 全 0 ⇒ 不成簇");
   // threshold 可调（sharedModuleControl 的既有参数面）。
   assert.equal(isFlagged({ hardcoded: 2, accessor: 0 }, 2), true, "threshold 参数透传");
+});
+
+// ── 判据产地的三处修正 (gap-identity-replication-requires-structural-relation) ────────────────
+// 立案缺陷: 判词「named in 52 code file(s) without a single accessor」的两半都不成立 ——
+//   ① 「without a single accessor」是**写死的字面量**, 与行上的 accessor 无关 (17 簇里 14 簇如此);
+//   ② 52 个「hardcoded」里 0 个是复制 —— 注释行与**按路径调用**各行其是地混在一起。
+// 下面五条各自钉住一个产地, 且**每一条在修前实现上都是红的** (负控制: 证明它测的是这个缺陷):
+//   · AC3 地形  → tsCommentMask 的幻影字符串 (根因, 不是「疑似反引号让词法器失步」那类假说);
+//   · AC1 地形  → 多行命名导入 (本仓主流写法) 读不进去;
+//   · AC2 地形  → 按路径调用被计成 hardcoded;
+//   · AC6③ 地形 → 判红行给不出命中样本 (计数与内容不同源);
+//   · 反向边界  → 文本里的裸 basename 仍须是证据 (否证「一律放宽」把检测器关掉)。
+
+test("tsCommentMask — 含引号的正则字面量不打开幻影字符串 (AC3 根因)", () => {
+  // 与 plugin/scripts/task-ops.ts:97 同形: 正则里 `["']` 的引号成对出现后, 紧跟的 `'` 在【旧实现】里
+  // 会打开一个单引号串并一路吞到下一个 `'` —— 中间整块注释因此被标成【代码位置】。
+  const src =
+    'const items = list.split(",").map((s) => s.trim().replace(/^["\']|["\']$/g, "")).filter(Boolean);\n' +
+    "/** Ensure the frontmatter carries the label (moved from session-liveness.sh; single\n" +
+    " *  source now lives here). */\n" +
+    "// session-liveness.sh in a line comment\n";
+  const mask = tsCommentMask(src);
+  const idx = occurrences(src, NEEDLE);
+  assert.equal(idx.length, 2, `two mentions (block + line comment), got ${idx.length}`);
+  assert.equal(mask[idx[0]], 1, "块注释里的提及不是代码位置 (旧实现打开幻影字符串后此处为 0)");
+  assert.equal(mask[idx[1]], 1, "行注释里的提及同样不是代码位置");
+  // 反向: 同一份源码里的**字符串字面量**仍须算代码 (否证「把正则一并标死」)。
+  const codeOnly = 'const p = "session-liveness.sh";\n';
+  assert.equal(tsCommentMask(codeOnly)[occurrences(codeOnly, NEEDLE)[0]], 0,
+    "字符串字面量仍是被测对象, 必须保持代码位置 (掩码不能把真样本一起剔掉)");
+});
+
+test("blankComments — 抹平注释但逐位保持长度与偏移 (结构性判定跑在它上面)", () => {
+  const src = 'const a = 1; // session-liveness.sh here\necho "session-liveness.sh"\n';
+  const blanked = blankComments(src, tsCommentMask(src));
+  assert.equal(blanked.length, src.length, "长度不变 ⇒ 命中下标与 src 一一对应");
+  assert.equal(blanked.split("\n").length, src.split("\n").length, "行号不变");
+  assert.equal(blanked.includes("here"), false, "注释内容被抹掉");
+  assert.equal(blanked.includes('"session-liveness.sh"'), true, "字符串字面量**不**被抹平 (抹平它等于关掉 accessor 判定)");
+});
+
+test("accessorRegexSource — 多行命名导入是 accessor, 且不吞掉另一个 import 的 specifier (AC1)", () => {
+  const re = new RegExp(accessorRegexSource("shared-lib"));
+  assert.equal(re.test('import { a } from "./shared-lib.ts";'), true, "单行命名导入");
+  assert.equal(re.test('import {\n  a,\n  b,\n} from "./shared-lib.ts";'), true, "多行命名导入 (AC1 命令的形态)");
+  // 本仓主流形态: 30+ 行、子句内部夹注释 (含撇号) —— 调用方先 blankComments, 所以这里的输入是抹平后的视图。
+  const big =
+    "import {\n  a,\n  // the pool's marker, reused\n  b,\n} from \"./shared-lib.ts\";\n";
+  assert.equal(re.test(blankComments(big, tsCommentMask(big))), true, "带注释的多行导入块");
+  assert.equal(re.test('export { a } from "./shared-lib.ts";'), true, "re-export 也是结构性关系");
+  assert.equal(re.test('import "./shared-lib.ts";'), true, "无 from 的副作用 import");
+  assert.equal(re.test('import { a } from "./other.ts";'), false, "别的 specifier 不算");
+  // ⛔ 负控制【不许吞掉别的语句】: `export function` 不是 re-export 形态, 不得一路扫到后面 import 的 from。
+  assert.equal(re.test('export function f() { return 1 }\nimport { z } from "./other.ts";\n'), false,
+    "export 声明不得被读成 re-export (否则它会跨语句吞掉下一个 import 的 specifier)");
+  assert.equal(re.test('const p = "shared-lib";\n'), false, "裸字符串提及不是 accessor");
+});
+
+test("isPathInvocationMention — 按路径调用是位置, 文本里的裸 basename 是身份 (AC2 与反向边界)", () => {
+  const ent = "shared-lib.ts";
+  const at = (src) => isPathInvocationMention(src, src.indexOf(ent), ent);
+  assert.equal(at('const p = "plugin/scripts/shared-lib.ts";'), true, "A 路径尾 (仓库相对路径串)");
+  assert.equal(at('const p = path.join(__dirname, "../scripts/shared-lib.ts");'), true, "A 路径尾 (path.join 的相对段)");
+  assert.equal(at('const p = path.join(root, "plugin", "scripts", "shared-lib.ts");'), true, "B 实参位 (路径分段拼出)");
+  assert.equal(at('const p = resolveKernelSibling("shared-lib.ts");'), true, "B 实参位 (kernel 同胞解析)");
+  assert.equal(at('spawn("node", ["shared-lib.ts"]);'), true, "B 实参位 (spawn argv)");
+  // 反向边界: 文本/散文/UI 里的裸 basename 是**命名**, 仍是证据。
+  assert.equal(at('console.error("Usage: node shared-lib.ts --json");'), false, "用法串里命名它");
+  assert.equal(at("echo \"shared-lib.ts\"\n"), false, "`echo \"x\"` 不是实参位 (紧邻的前一个非空白是标识符)");
+  assert.equal(at("<h2>shared-lib.ts</h2>"), false, "UI 标签里命名它");
+});
+
+test("literalReplication — 按路径调用的文件不再计入, 文本命名的仍计入 (AC2)", () => {
+  const dir = mktmp({
+    "plugin/scripts/path-rel.ts": 'const p = "plugin/scripts/shared-lib.ts";\n',
+    "plugin/scripts/path-join-tail.ts": 'const p = path.join(__dirname, "../scripts/shared-lib.ts");\n',
+    "plugin/scripts/path-join-args.ts": 'const p = path.join(root, "plugin", "scripts", "shared-lib.ts");\n',
+    "plugin/scripts/sibling-resolve.ts": 'const p = resolveKernelSibling("shared-lib.ts");\n',
+    "plugin/scripts/usage-text.ts": 'console.error("Usage: node shared-lib.ts --json");\n',
+    "plugin/scripts/comment-only.ts": "// shared-lib.ts is the single accessor\nexport const a = 1;\n",
+  });
+  const one = (rel) => literalReplication(dir, [path.join(dir, rel)], "shared-lib.ts");
+  for (const rel of [
+    "plugin/scripts/path-rel.ts",
+    "plugin/scripts/path-join-tail.ts",
+    "plugin/scripts/path-join-args.ts",
+    "plugin/scripts/sibling-resolve.ts",
+    "plugin/scripts/comment-only.ts",
+  ]) {
+    assert.equal(one(rel).code, 0, `${rel} 只有按路径调用/注释 ⇒ 不进 codeFiles (修前会被计成 hardcoded)`);
+  }
+  // 反向: 文本里命名它的文件**仍须**计入 —— 否则这条修法就是把检测器关掉 (硬规则 2 的零计数半边)。
+  assert.equal(one("plugin/scripts/usage-text.ts").hardcoded, 1, "用法串里命名它 ⇒ 仍是硬编码 (证据)");
+});
+
+test("literalReplication — 判红行必须就地给出命中样本 (AC6③: 计数与内容同源)", () => {
+  const dir = mktmp({
+    "plugin/scripts/a.ts": 'console.error("Usage: node shared-lib.ts --json");\n',
+    "plugin/scripts/b.ts": 'console.log("shared-lib.ts — second independent naming");\n',
+  });
+  const files = ["plugin/scripts/a.ts", "plugin/scripts/b.ts"].map((p) => path.join(dir, p));
+  const one = literalReplication(dir, files, "shared-lib.ts");
+  assert.equal(one.hardcoded, 2, "两个文件独立命名它");
+  assert.equal(one.hardcodedSamples.length, 2, "每个硬编码文件都带一条实测样本 (修前没有这个字段)");
+  assert.match(one.hardcodedSamples[0], /^plugin\/scripts\/[ab]\.ts:\d+ {2}/, `样本形如 文件:行 + 该行原文, got ${one.hardcodedSamples[0]}`);
+  assert.equal(one.hardcodedSamples[0].includes("shared-lib.ts"), true, "样本里含命中的实际内容, 不是一个空的占位");
+
+  // 与 replicationTable 同源 (两条读数路径共用同一份分类)。
+  const row = replicationTable(dir, files, ["shared-lib.ts"]).find((r) => r.entity === "shared-lib.ts");
+  assert.deepEqual(row.hardcodedSamples, one.hardcodedSamples, "表读数与单实体读数给出同一批样本");
 });
 
 test("run — 产出完整 report (各 section 在场)", () => {

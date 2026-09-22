@@ -151,6 +151,28 @@ test("AC5(a/b) 反向控制 — 同一份输入里两条行只在 accessor 上�
   assert.deepEqual(clusterIdentityReport({ table: [row(59, 59)] }).map((c) => c.clusterId), []);
 });
 
+// ── 判词必须与**这一行自己的读数**一致 (gap-identity-replication-requires-structural-relation AC4) ──
+// 立案缺陷: 判词把「without a single accessor」写成了**字面量**, 与行上的 `accessor` 无关 ——
+// 17 个 P2-identity-* 簇里 **14** 个在 `accessor > 0` 时照样这么断言 (最极端的 driver-runtime.ts
+// 是 accessor=26)。读数与判词矛盾时仍输出同一句话 ⇒ 「查过且合格」与「没查成」共用输出 (硬规则 3b)。
+// 两个方向都要钉住: accessor>0 **不得**断言独占; accessor=0 **必须**断言 —— 后者否证「把这句话删掉」
+// 冒充修法 (删掉字面量能让前半条恒绿, 却把强断言在整个判据里弄丢)。
+
+test("AC4 — 判词不得在 accessor>0 时断言 without a single accessor (=0 时必须断言)", () => {
+  const row = (hardcoded, accessor) => ({ entity: "x.sh", code: hardcoded + accessor, accessor, hardcoded, codeFiles: ["plugin/scripts/a.ts"] });
+
+  const partial = clusterIdentityReport({ table: [row(59, 3)] })[0];
+  assert.equal(/without a single accessor/.test(partial.label), false,
+    `accessor=3 ⇒ ⛔ 不得断言「没有单一访问器」, label=${partial.label}`);
+  assert.match(partial.label, /3 file\(s\) reach it through an accessor/,
+    "读数必须**出现在判词里** (不是把这句话删掉了事)");
+  assert.match(partial.label, /59 code file\(s\)/, "hardcoded 计数仍在判词里");
+
+  const exclusive = clusterIdentityReport({ table: [row(59, 0)] })[0];
+  assert.match(exclusive.label, /without a single accessor/,
+    "accessor=0 ⇒ 强断言必须仍然输出 (否则这条判据在真取真的那一半上被架空)");
+});
+
 test("AC1 — empty deletion report / no components ⇒ no P1 cluster", () => {
   assert.deepEqual(clusterDeletionReport({ components: [], dc: [], counts: { dcTotal: 0 } }), []);
   assert.deepEqual(clusterDeletionReport({ components: ["x.sh"], dc: [], counts: { dcTotal: 0 } }), []);

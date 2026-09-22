@@ -48,6 +48,48 @@ import { lineOf } from "./source-text-lib.ts";
 // 与 checker-lib.ts 的 buildNonCodeMask 不同: 那个把字符串也标为非代码 (用于「命令位置」判定);
 // 本任务要测的是【字面量】复制度 — 字符串字面量正是被测对象, 必须算代码。注释与文档才剔除。
 
+/** `/` 处是否可能是【正则字面量】的开头 —— ECMAScript 的除法/正则歧义。
+ *  只回看前一个【有效】字符 (跳过空格与 tab, ⛔ **不跳换行**: 换行意味着上一语句已结束, 行首的
+ *  `/` 是新表达式而非除法的延续): 标识符字符 / 数字 / `)` / `]` / `}` / 引号 / 反引号 ⇒ 是除法;
+ *  其余 (`(`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `+`, `-`, `*`, `%`, `~`, `^`, `<`, `>`, `;`, `{`, `,`) ⇒ 可能是正则。
+ *  关键字例外补上 `return /re/.test(x)` 一族。 */
+function maybeRegexStart(src: string, i: number): boolean {
+  let p = i - 1;
+  while (p >= 0 && (src[p] === " " || src[p] === "\t")) p--;
+  const prev = p < 0 ? "\n" : src[p];
+  if (!/[A-Za-z0-9_$)\]}"'`]/.test(prev)) return true;
+  return /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)\s*$/.test(
+    src.slice(0, i),
+  );
+}
+
+/** 正则字面量的闭合位置 (闭合 `/` 之后的下标), 或 -1 = **不是**正则字面量。
+ *  ⛔ 同行护栏是本函数的关键: ECMAScript 的正则字面量**不含行终止符**, 所以「同一行找不到未转义、
+ *  不在 `[…]` 字符类内的 `/`」就说明判错了 ⇒ 退回普通字符。没有这条护栏, 一次误判会跨行吞掉后面的代码。
+ *
+ *  这段存在的理由 (本任务 AC3 的实测根因): 旧掩码不认识正则字面量, 于是
+ *  `list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""))` 里的引号被当成**字符串起点**,
+ *  打开一个跨行的「幻影字符串」; 后面的块注释 (斜杠星号 … 星号斜杠) 与 `//` 行注释因此全部落在
+ *  字符串态里, 位置掩码把它们标成【代码】—— `plugin/scripts/task-ops.ts:158` 的 `ready-pool-check.ts`
+ *  (块注释内) 就是这样被计进 `codeFiles` 的。四个 AC3 实例文件的首次掩码分叉点**逐一无例外**落在
+ *  一个含引号的正则字面量上 (task-ops.ts:97、strategic-doc-staleness-check.ts、
+ *  touches-orthogonality-check.ts 的 `match(/^role:\s*["']?…/)`、build-plugin-dist.mjs 的
+ *  `dirname \"\$0\"` 正则), 不是「疑似反引号让词法器失步」那类假说。 */
+function regexLiteralEnd(src: string, i: number): number {
+  if (!maybeRegexStart(src, i)) return -1;
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length && src[j] !== "\n") {
+    const c = src[j];
+    if (c === "\\") { j += 2; continue; }
+    if (c === "[") { inClass = true; j++; continue; }
+    if (c === "]") { inClass = false; j++; continue; }
+    if (c === "/" && !inClass) return j + 1;
+    j++;
+  }
+  return -1;
+}
+
 // .ts/.mjs/.js 注释掩码: 标 // 行注释与 /* */ 块注释为非代码; 字符串/模板/正则保持代码。
 export function tsCommentMask(src: string): Uint8Array {
   const mask = new Uint8Array(src.length);
@@ -77,9 +119,40 @@ export function tsCommentMask(src: string): Uint8Array {
       if (i < n) { mask[i] = 1; mask[i + 1] = 1; i += 2; }
       continue;
     }
+    if (c === "/") {
+      // 正则字面量: 其**内部**的引号不是字符串起点 (旧实现漏了一步 ⇒ 幻影字符串, 见 regexLiteralEnd)。
+      const end = regexLiteralEnd(src, i);
+      if (end !== -1) { i = end; continue; }
+    }
     i++;
   }
   return mask;
+}
+
+/** 注释位置替换为**空格**、其余原样 —— 长度、行号、其余每个字符都与 `src` 逐位一致。
+ *
+ *  用途: 让**结构性关系**的判定正则跑在「注释已被抹平」的视图上。理由是把注释语法从正则里拿掉:
+ *  旧 import 分支写成 `import\s+[^'"\n]*?from\s*["']` —— `[^'"\n]` 既**排除换行**(多行命名导入读不进去)
+ *  又**排除引号**(为了不跨字符串)。两条约束一叠加, 它连"注释里有撇号"的多行导入块都跨不过去
+ *  (本仓主流形态, `plugin/scripts/slot-refill.ts` 的 30+ 行导入块)。抹平注释后,**唯一**还需要在正则里
+ *  表达的约束只剩「不跨字符串」(`"`/`'`) 与「不跨语句边界」(`;`) —— 这是真结构, 不是行内锚点。
+ *  ⛔ 字符串**不**抹平: 抹平它等于让正则读不到 specifier, 也就把 accessor 判定关掉了。 */
+export function blankComments(src: string, mask: Uint8Array): string {
+  if (!mask.some((m) => m === 1)) return src; // 无注释 ⇒ 原样返回, 不复制
+  const parts: string[] = [];
+  let i = 0;
+  while (i < src.length) {
+    let j = i;
+    if (mask[i] === 1) {
+      while (j < src.length && mask[j] === 1) j++;
+      parts.push(" ".repeat(j - i));
+    } else {
+      while (j < src.length && mask[j] !== 1) j++;
+      parts.push(src.slice(i, j));
+    }
+    i = j;
+  }
+  return parts.join("");
 }
 
 // .sh 注释掩码: 标 # 行注释为非代码 (单/双引号字符串保持代码; # 在字符串内不误标)。
@@ -192,18 +265,39 @@ const ASSIGN_ANCHOR = `(?:^|[;&|{\\n])\\s*`;
 /** 赋值语句与随后的 `source <变量>` 之间允许的最大距离 (字符)。 */
 const ACCESSOR_VAR_WINDOW = 2000;
 
+/** 命名导入 / 再导出**子句**的字符集 —— 子句里只可能出现 标识符 / 空白 / 花括号 / 逗号 / `*`
+ *  (`import defaultExport, { a as b } from …` 是它的上界, 见 accessorRegexSource 的注释)。
+ *  ⛔ 引号与 `;` **不在**其中 —— 这两条排除正是「不跨字符串 ∧ 不跨语句边界」两条真结构约束的载体。 */
+const CLAUSE = `[\\w$\\s{}*,]*?`;
+
 /** 单一访问器正则【源】—— 三个族:
- *  ① `import … from "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
+ *  ① `import … from "…"` / `export … from "…"` / `import "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
  *  ② `source <.路径表达式>` / `. <.路径表达式>`        (shell 内联路径, 引号可嵌套)
  *  ③ `VAR="<.路径表达式>"` … `. "$VAR"` / `source "${VAR}"`  (shell 先赋值路径、后 source 变量,
  *     本仓 61 个 .sh 的主流形态 —— 单份正则做不到, 故用 \\1 反向引用把两半绑在同一个变量名上)
- *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。 */
+ *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。
+ *
+ *  ⛔ ① 的子句**允许跨行**, 但「跨到哪里为止」由 CLAUSE 这个**结构字符集**表达, 不是行内锚点:
+ *    · 旧写法 `import\s+[^'"\n]*?from\s*["']` 里的 `[^'"\n]` 把换行也排除了, 于是本仓**主流**的
+ *      多行命名导入 (`import {\n  a,\n  b,\n} from "./x.ts"`, 以及 `plugin/scripts/slot-refill.ts`
+ *      那种 30+ 行、内部夹注释的导入块) 整族读成 hardcoded —— 与「没有复制」同形 (硬规则 3b)。
+ *    · CLAUSE 读得进换行、花括号与注释(调用方已用 `blankComments()` 抹平注释), 但**读不进引号**:
+ *      每个 import 语句里都至少有一个带引号的 specifier 挡在中间 ⇒ 它绝不吞掉【另一个】import 的
+ *      specifier (惰性匹配在那里必然失败并回溯)。
+ *    · `(?<![\w$.])from` 是最后一道: 子句惰性截断在词中间时 (`trans|from`), 这个 `from` 不算数。
+ *  ⛔ 仍不接 `export function … {}` 这种形态: `from` 只认【re-export】(`export {…} from` /
+ *    `export * [as ns] from` / `export type {…} from`), 否则一个普通 export 声明会一路扫到下一个
+ *    真 import 的 `from` (那里没有引号拦着)。 */
 export function accessorRegexSource(stem: string): string {
   const s = escapeRegex(stem);
+  const ext = `(?:\\.(?:ts|mjs|js))?`;
+  const spec = `\\s*["'][^"']*?${s}${ext}["']`;
   return (
-    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
-    `import\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
-    `require\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `(?:import\\s+${CLAUSE}(?<![\\w$.])from${spec}|` +
+    `export\\s+(?:type\\s+)?(?:\\{${CLAUSE}\\}|\\*(?:\\s+as\\s+[\\w$]+)?)\\s*(?<![\\w$.])from${spec}|` +
+    `import${spec}|` +
+    `import\\s*\\(${spec}|` +
+    `require\\s*\\(${spec}|` +
     `${SOURCE_CMD}["']?${PATH_EXPR}${s}(?:\\.sh)?["']?|` +
     `${ASSIGN_ANCHOR}([A-Za-z_][A-Za-z0-9_]*)=(["'])${PATH_EXPR}${s}(?:\\.sh)?\\2` +
     `[\\s\\S]{0,${ACCESSOR_VAR_WINDOW}}?${SOURCE_CMD}["']?\\$\\{?\\1\\}?["']?)`
@@ -432,42 +526,137 @@ export function findByteIdenticalPairs(
 
 // ── (a) 字面量复制度 (AC5: full vs code 分列; 单一访问器 vs 硬编码) ───────────────────────────
 
+/** 命中点是不是「**按路径调用**」该实体 (而非**命名**它) —— 本任务 §三明列的非证据类。
+ *
+ *  为什么它【非证据】: 一个实体被**调用**时必然要写出它住在哪 —— 那是位置知识, 正是单一访问器
+ *  (import / source) 要收敛掉的那一半; 而「身份复制」问的是这个实体被**独立命名/独立判定**了几次。
+ *  两个形态 (判词 §三 逐字点名的两类):
+ *    A 路径尾 —— 实体名是更长路径串的最后一段 (`"…/scripts/ready-pool-check.ts"`、
+ *      `path.join(__dirname, "../scripts/ready-pool-check.ts")`) ⇒ 前一个字符是路径分隔符;
+ *    B 实参位 —— 实体名**整段**是一个字符串字面量, 且该字面量在实参/数组元素位 (紧邻的前一个非空白
+ *      字符是 `(` / `,` / `[`) ⇒ 它被**交给**某个调用, 而不是被**写进**某段文本:
+ *      `path.join(root, "plugin", "scripts", "ready-pool-check.ts")`、
+ *      `resolveKernelSibling("ready-pool-check.ts")`、spawn 的 argv 数组、`runHelp("ready-pool-check.ts")`。
+ *
+ *  ⛔ 反向边界同样要钉住 (否则本判定会被自己对 0 的那种形态架空, 硬规则 2 的零计数半边):
+ *  **裸 basename 出现在文本/散文/注册表串里仍是证据** —— `echo "shared-lib.sh"`、
+ *  `"Usage: node workflow-event-schema.mjs --validate <file>"`、`<h2>resource-gate.sh</h2>`。
+ *  它们的前一个非空白字符是标识符或运算符, 不是实参位 ⇒ 不被本谓词取掉。
+ *  `plugin/test/identity-replication-check.test.mjs` 的 string-only / comment-tail 两条负控制
+ *  就钉在这一边界上。 */
+export function isPathInvocationMention(src: string, idx: number, entity: string): boolean {
+  const prev = idx > 0 ? src[idx - 1] : "";
+  if (prev === "/" || prev === "\\") return true; // A 路径尾
+  if (prev !== '"' && prev !== "'") return false; // B 只对「整段是实体名」的引号串成立
+  if (src[idx + entity.length] !== prev) return false;
+  let p = idx - 2;
+  while (p >= 0 && (src[p] === " " || src[p] === "\t" || src[p] === "\n" || src[p] === "\r")) p--;
+  const before = p >= 0 ? src[p] : "";
+  return before === "(" || before === "," || before === "[";
+}
+
+/** 单文件 × 单实体的分类结果。 */
+export interface EntityMatch {
+  /** 该文件在代码位置提及该实体, 或经结构性关系引用它 ⇒ 计入 `code`/`codeFiles`。 */
+  code: boolean;
+  /** 经 import / re-export / require / source 单一访问器引用。 */
+  accessor: boolean;
+  /** 代码位置且**非按路径**的命中 —— `hardcoded` 的样本来源 (行号 + 该行原文)。 */
+  evidenceLines: { line: number; text: string }[];
+}
+
+/** `literalReplication()` 与 `replicationTable()` 共用的**唯一**一份逐文件判定。
+ *  (两份逐字副本正是本文件那个缺陷的成因形态: 同一判据在两个消费点各写一遍, 修了一处漏另一处。)
+ *
+ *  判定顺序是判据的一半, 不能颠倒:
+ *    1. **先**问「这个文件是否经结构性关系到达该实体」(`accessorRe` 跑在 `blankComments()` 的视图上)
+ *       —— 有即 `accessor`, 与它的命中点长什么样无关。⛔ 先按位置筛会把 accessor 全筛掉:
+ *       import 的 specifier 本身就是 `"./ready-pool-check.ts"`, 天然是「路径尾」。
+ *    2. **再**问「有没有【代码位置 ∧ 非按路径】的命中」—— 有即 `hardcoded`。
+ *    3. 两条都不成立 ⇒ 不计数 (只被路径引用 / 只在注释与文档里提到)。
+ *
+ *  这与旧实现的差别正是本任务判据的两处产地: 旧的第 2 步只问 `mask[idx] === 0`(注释与文档),
+ *  不看「按路径引用」, 也没有把 accessor 判定前置。 */
+export function matchEntity(
+  src: string,
+  mask: Uint8Array,
+  blanked: string,
+  accessorRe: RegExp,
+  entity: string,
+): EntityMatch {
+  // ⛔ 这里**不**用 `codeMatch()` 的「命中起点必须落在代码位置」那一半判据 —— 它在抹平后的视图上
+  // 会取假(假阴性): 起点可以落在**已被抹成空格**的注释里 (`^` + `\s*` 恰好跨过整行注释), 于是
+  // 一条真正的 `source "$(dirname "$0")/shared-lib.sh"` 被丢掉 —— 实测: 该处起点是注释的第 0 列。
+  // 位置过滤本身没有缺席, 只是换了载体: `blankComments()` 已经把注释**内容**整个抹成空格, 所以
+  // 正则根本读不到注释里的任何实体 (`. "$CONF"  # loads x.sh` 的 `x.sh` 已不存在 ⇒ 不可能命中),
+  // 而命中里留下的实体一定在代码位置 (实体名不含空格 ⇒ 它对不上任何被抹平的区段)。
+  accessorRe.lastIndex = 0; // 调用方传非 global 的正则; 若将来带了 `g`, 这一行让它仍然无状态。
+  const accessor = accessorRe.test(blanked);
+  const evidenceLines: { line: number; text: string }[] = [];
+  let anyEvidence = false;
+  let idx = 0;
+  while ((idx = src.indexOf(entity, idx)) !== -1) {
+    if (mask[idx] === 0 && !isPathInvocationMention(src, idx, entity)) {
+      anyEvidence = true;
+      if (evidenceLines.length < HARDCODED_SAMPLE_LIMIT) {
+        const lineStart = src.lastIndexOf("\n", idx) + 1;
+        let lineEnd = src.indexOf("\n", idx);
+        if (lineEnd === -1) lineEnd = src.length;
+        evidenceLines.push({ line: lineOf(src, idx), text: src.slice(lineStart, lineEnd).trim().slice(0, 120) });
+      }
+      // 样本收满 ⇒「有没有」已确定, 不必扫完剩下的命中 (大文件的完整扫描是这条检查器的热点)。
+      if (evidenceLines.length >= HARDCODED_SAMPLE_LIMIT) break;
+    }
+    idx += entity.length;
+  }
+  return { code: accessor || anyEvidence, accessor, evidenceLines };
+}
+
+/** 每个命中文件取样上限 —— 「报一个计数时同时报出它匹配到的前几条实际内容」(docs 附录 A)。 */
+export const HARDCODED_SAMPLE_LIMIT = 3;
+
 export interface LiteralReplication {
   entity: string;
   full: number;       // 含该 basename 的代码文件数 (全文)
-  code: number;       // 其中 basename 落在【代码位置】(剔除注释/文档) 的文件数
-  accessor: number;   // 经 import/require/source 单一访问器引用的文件数
-  hardcoded: number;  // 代码位置硬编码字面量 (非 import/source) 的文件数
+  code: number;       // 其中 basename 落在【代码位置】或经结构性关系引用的文件数
+  accessor: number;   // 经 import/re-export/require/source 单一访问器引用的文件数
+  hardcoded: number;  // 代码位置【独立命名】该实体 (无结构性关系) 的文件数
   codeFiles: string[];
+  /** 硬编码文件的实测样本 (前 `HARDCODED_SAMPLE_LIMIT` 条, 每条含文件:行 + 该行原文)。
+   *  ⛔ 不是装饰: 计数为 N 的判红行必须能在**同一读数**里给出它命中的是什么 —— 否则「N 个文件
+   *  独立命名了它」与「N 个文件里恰好有个同名串」在报告上同形 (硬规则 2/3b)。 */
+  hardcodedSamples: string[];
 }
 
 export function literalReplication(root: string, files: string[], entity: string): LiteralReplication {
   const stem = entity.replace(/\.(ts|sh|mjs|js)$/, "");
   const codeFiles: string[] = [];
+  const hardcodedSamples: string[] = [];
   let full = 0;
   let code = 0;
   let accessor = 0;
   let hardcoded = 0;
-  const importRe = new RegExp(accessorRegexSource(stem));
+  const accessorRe = new RegExp(accessorRegexSource(stem));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     if (!src.includes(entity)) continue;
     full++;
     const mask = maskFor(f)(src);
-    let codeHit = false;
-    let idx = 0;
-    while ((idx = src.indexOf(entity, idx)) !== -1) {
-      if (mask[idx] === 0) { codeHit = true; break; }
-      idx += entity.length;
-    }
-    if (codeHit) {
-      code++;
-      codeFiles.push(path.relative(root, f));
-      if (codeMatch(src, mask, importRe).length > 0) accessor++;
-      else hardcoded++;
+    const m = matchEntity(src, mask, blankComments(src, mask), accessorRe, entity);
+    if (!m.code) continue;
+    code++;
+    codeFiles.push(path.relative(root, f));
+    if (m.accessor) accessor++;
+    else {
+      hardcoded++;
+      for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
+        if (hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
+          hardcodedSamples.push(`${path.relative(root, f)}:${e.line}  ${e.text}`);
+        }
+      }
     }
   }
-  return { entity, full, code, accessor, hardcoded, codeFiles };
+  return { entity, full, code, accessor, hardcoded, codeFiles, hardcodedSamples };
 }
 
 /** 全量字面量复制度表: 对每个 plugin 脚本 basename 一次性算 full/code (单趟扫描所有文件)。 */
@@ -476,7 +665,6 @@ export function replicationTable(
   files: string[],
   entities: string[],
 ): LiteralReplication[] {
-  const scriptsDir = path.join(root, "plugin", "scripts");
   const rows = entities.map((e) => ({
     entity: e,
     full: 0,
@@ -484,6 +672,7 @@ export function replicationTable(
     accessor: 0,
     hardcoded: 0,
     codeFiles: [] as string[],
+    hardcodedSamples: [] as string[],
   }));
   const stems = rows.map((r) => r.entity.replace(/\.(ts|sh|mjs|js)$/, ""));
   // 每个实体只编译一次访问器正则 (原来是每个 (文件 × 实体) 编译一次)。共享同一份 accessorRegexSource,
@@ -492,22 +681,26 @@ export function replicationTable(
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const rel = path.relative(root, f);
+    // 掩码与「注释抹平」视图按文件算一次, 与实体数无关 (原来每个实体重算一遍掩码)。
+    const mask = maskFor(f)(src);
+    const blanked = blankComments(src, mask);
     for (let ri = 0; ri < rows.length; ri++) {
       const row = rows[ri];
       if (!src.includes(row.entity)) continue;
       row.full++;
-      const mask = maskFor(f)(src);
-      let idx = 0;
-      let codeHit = false;
-      while ((idx = src.indexOf(row.entity, idx)) !== -1) {
-        if (mask[idx] === 0) { codeHit = true; break; }
-        idx += row.entity.length;
-      }
-      if (!codeHit) continue;
+      const m = matchEntity(src, mask, blanked, accessorRes[ri], row.entity);
+      if (!m.code) continue;
       row.code++;
       row.codeFiles.push(rel);
-      if (codeMatch(src, mask, accessorRes[ri]).length > 0) row.accessor++;
-      else row.hardcoded++;
+      if (m.accessor) row.accessor++;
+      else {
+        row.hardcoded++;
+        for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
+          if (row.hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
+            row.hardcodedSamples.push(`${rel}:${e.line}  ${e.text}`);
+          }
+        }
+      }
     }
   }
   return rows;
@@ -670,7 +863,19 @@ function printHuman(report: Report): void {
 
   console.log(`\n== 全量字面量复制度表 (code 位置计数 > 0, top ${report.table.length}) ==`);
   for (const r of report.table) {
-    console.log(`  ${r.entity.padEnd(44)} code=${String(r.code).padStart(3)}  full=${String(r.full).padStart(3)}  accessor=${r.accessor}  hardcoded=${r.hardcoded}`);
+    const flagged = isFlagged(r);
+    console.log(
+      `  ${r.entity.padEnd(44)} code=${String(r.code).padStart(3)}  full=${String(r.full).padStart(3)}  ` +
+        `accessor=${r.accessor}  hardcoded=${r.hardcoded}${flagged ? "  <<FLAGGED" : ""}`,
+    );
+    // 判红行必须**就地**给出它命中的实际内容 (硬规则 2): 一个只报数字的判红行, 与「同名串恰好
+    // 出现在别处」在报告上同形 —— 读的人无法判断这是真复制还是判据又错了。
+    if (flagged) {
+      for (const s of r.hardcodedSamples) console.log(`        sample: ${s}`);
+      if (r.hardcodedSamples.length === 0) {
+        console.log("        sample: (none — 判红却取不出样本 ⇒ 判据故障, 不是「没有复制」)");
+      }
+    }
   }
 }
 
