@@ -585,6 +585,32 @@ test("CONTROL: the CRLF axis does NOT change the row set — the finding's CRLF 
   assert.deepEqual(readJsonLines(fileOf(crlf)), [{ a: 1 }, { b: 2 }]);
 });
 
+test("BOUNDARY: the readJsonlLines sentinel pair is NOT folded in — its divergence is load-bearing", () => {
+  // The SAME routine run that filed this task also emitted finding
+  // `readjsonllines-load-bearing-unparseable-sentinel` (runId semantic-dedup-scan-1790118332027) for a
+  // DIFFERENT symbol — `readJsonlLines` (note the extra `l`), 2 copies — and its own rationale says
+  // why they must stay separate: absent file ⇒ `null` (not `[]`), and a corrupt line ⇒
+  // `{__unparseable:true}`, a sentinel consumed at 4 call sites. Folding them into the reader above
+  // "would make unparseable permanently false and silently pass two checkers" (硬规则 3b — a judge
+  // that cannot read its input must not return the value shaped like "qualified").
+  //
+  // So the extraction's BOUNDARY is part of its contract, and this test is the mechanical form of it:
+  // a later dedup pass that folds the pair in goes RED here instead of quietly disarming two checkers.
+  const SENTINEL_READERS = ["direct-to-develop-bypass-check.ts", "fan-in-ff-protocol-check.ts"];
+  for (const f of SENTINEL_READERS) {
+    const src = sourceOf(f);
+    assert.match(src, /\bfunction readJsonlLines\b/, `${f} must keep its own sentinel-preserving reader`);
+    assert.match(src, /__unparseable/, `${f} must keep the __unparseable sentinel its callers test for`);
+    assert.doesNotMatch(
+      src,
+      /import \{[^}]*\breadJsonLines\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} must NOT be folded onto the line-dropping reader — that would disarm its unparseable check`,
+    );
+  }
+  // ...and the two symbols are genuinely different names, which is why the census has to be exact:
+  assert.notEqual("readJsonlLines", "readJsonLines");
+});
+
 /** The retired permissive parse (no guard) — the row set a split strategy alone produces. */
 function parseRowsWithSplit(text, splitRe) {
   const out = [];
