@@ -2,7 +2,9 @@
 // DIR-051 adversarial audit refuted the gate as prose-only — this makes it runnable). A routine FILES
 // findings as tasks; before one lands, it must pass this gate: QUALITY (a real, actionable finding —
 // carries a `## Finding` with reproduction evidence, not a vague concern), DEDUP (not already on the
-// board — by a stable finding key), RATE (≤ K new routine-filed tasks per window). This does NOT make
+// board — keyed on the finding's mechanical SUBJECT, the symbols it names, with the finding's prose
+// as the fallback; see findingKey for why prose alone is not cross-round-stable), RATE (≤ K new
+// routine-filed tasks per window). This does NOT make
 // the FILE-only-vs-execute boundary mechanical (that is the driving agent's contract, backstopped by
 // a post-fire "a routine produced no commits, only task files" check in the skill) — but it removes
 // the "queue-spam is prose-capped only" hole the audit found.
@@ -16,12 +18,89 @@ import { isDirectEntry } from "./gate-script-base.ts";
 export const DEFAULT_RATE = 3; // ≤ K routine-filed tasks per window (tunable)
 
 // ── findingKey ───────────────────────────────────────────────────────────────────────────────────
-// A stable dedup key from a task's `## Finding` section (normalized: lowercased, whitespace-collapsed,
-// first 200 chars). Two findings with the same normalized finding text are duplicates.
+// The dedup key for a task's `## Finding` section. TWO sources, in priority order:
+//
+//   ① THE SUBJECT — the symbols the finding names (`symbols: \`a\`, \`b\`` in a candidate text;
+//      `- 观测符号：\`a\`、\`b\`` in a filed task body — ONE parser reads both spellings). Normalized
+//      to `symbols:<sorted,lowercased,deduped>`. This is the STABLE handle: the probe extracts it
+//      mechanically from its inventory, so it survives a round boundary.
+//   ② THE PROSE — normalized (lowercased, whitespace-collapsed), first 200 chars, prefixed `prose:`.
+//      The fallback for a finding that names no symbols, and the ORIGINAL behaviour.
+//
+// WHY ① EXISTS — measured 2026-09-22 (gap-routine-semantic-dedup-scan-routine-dedup-branch-never-fires).
+// The key used to be ② alone. For `semantic-dedup-scan` the rationale is re-paraphrased by a
+// fresh-context LLM every round, so ② has NO cross-round persistence: grouping that routine's 476
+// carrier records by their mechanical subject (symbol set) yields **76 clusters recurring across ≥2
+// rounds (129 round-instances), and 0 of them ever produced the same prose key twice**. The gate's
+// own output shows the consequence: across every `semantic-dedup-scan` filing round **0 rejections
+// carried `dedup:`** (277 `rate:`, 36 `action:`), while the SAME clusters (readManifest / sha256 /
+// escapeRegExp / lineOf / maskComments …) were re-reported every round under a regenerated slug. The
+// branch was never broken — the quantity it keyed on simply had no cross-round persistence.
+// ② is KEPT, ⛔ not replaced: it stays correct for a routine whose rationale IS mechanical
+// (freshness-refresh templates it from the subject id, and its `dedup:` branch demonstrably fires —
+// 2 dedup rejections recorded 2026-09-18). Deleting ② would disable dedup for those routines.
+//
+// WHY THE SYMBOLS AND NOT THE FILES — measured on the same corpus: the file axis is unstable AND not
+// even discriminating. Only 42/76 recurring clusters list the same file set across rounds (the `walk`
+// cluster: 12 files → 6, with ZERO overlap) **and** a files-only key swallows **121 distinct clusters
+// under 40 key values** — it would suppress a real finding as a "duplicate" of an unrelated one, the
+// over-block that turns a noisy track off. The symbol set is the axis that survives.
+// ⛔ Do NOT fold the file set back into the key; that is exactly what made the old key round-specific.
+//
+// The two sources carry DISTINCT prefixes so a value from one can never equal a value from the other
+// (硬规则 3b: 「没有 subject」与「有 subject」不得共用一种键形，否则"读不出主语"会伪装成"命中").
+// Measured over all 544 carrier finding records: 360 distinct symbol sets, **0 shared across two
+// routines** ⇒ the subject alone is discriminating today, and the routine is deliberately NOT folded
+// in (硬规则 12: no prerequisite without an occurrence reading — the reading here is 0).
+//
+// THE DECLARED BOUNDARY of the subject key — exact symbol-set equality, on purpose. The probe's
+// symbol set DOES drift between rounds in the looser sense: of the 360 observed sets, 346 pairs are
+// subset/superset and 320 partially overlap (`readjsonlines` vs `readjsonlines,readjsonllines` vs
+// `readjsonlines,readjsonllines,readfrontfield` are one cluster in three shapes). A subset/superset
+// rule would swallow **161 of the 360 sets under a family-mate** — nearly half of all subjects
+// suppressible by an unrelated broad entry, the silent over-block that turns a noisy track off. So
+// the key stays exact: a re-finding whose symbol set drifted is NOT deduped and remains RATE-limited
+// — i.e. it degrades to the pre-fix behaviour for that record. ⛔ Never worse than before; the
+// boundary is named here so the residual reads as declared, not as the branch being dead again.
+
+/** The `## Finding` section. Shared by every extractor below — one section grammar, not three. */
+const FINDING_SECTION = /##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i;
+
+/** The symbols line, in either spelling the two renderers emit — the candidate's
+ *  `symbols: \`a\`, \`b\`` and the filed body's `- 观测符号：\`a\`、\`b\``. ⛔ ONE parser for both: the
+ *  candidate and the board task MUST key identically, and the task-body spelling is what board tasks
+ *  filed before this change already carry ⇒ they retro-fit with no migration.
+ *  `- 观测符号：<none>` (the renderer's no-symbols form) matches the LINE but yields no backticked
+ *  token ⇒ "" — a real "names no symbols", ⛔ never a key of the literal `<none>`. */
+const SYMBOLS_LINE = /^[ \t]*[-*]?[ \t]*(?:观测符号|symbols)[ \t]*[:：][ \t]*(.*)$/im;
+
+/** The finding's mechanical subject: the sorted, lowercased symbol set it names. "" when the finding
+ *  names no symbols — a legitimate state (the freshness routine's ids are not symbols), ⛔ not an
+ *  error and not a key (硬规则 6: 缺值 ≠ 为假; a fabricated key would dedup everything against it). */
+export function findingSubjectKey(taskText) {
+  const section = String(taskText).match(FINDING_SECTION);
+  if (!section) return "";
+  const line = section[1].match(SYMBOLS_LINE);
+  if (!line) return "";
+  const syms = [...line[1].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim().toLowerCase()).filter(Boolean);
+  if (!syms.length) return "";
+  return `symbols:${[...new Set(syms)].sort().join(",")}`;
+}
+
+/** The prose key — the ORIGINAL `findingKey` body, kept byte-for-byte and **unprefixed** so
+ *  `isActionable` (and every consumer that wants "the finding's TEXT", not "its identity") reads
+ *  exactly what it read before this function existed. Prefixing here would shift `isActionable`'s
+ *  20-char bar by the prefix length and silently reclassify boundary findings (硬规则 4b). */
+export function proseKey(taskText) {
+  const m = String(taskText).match(FINDING_SECTION);
+  return (m ? m[1] : "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+}
+
 export function findingKey(taskText) {
-  const m = String(taskText).match(/##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i);
-  const body = (m ? m[1] : "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-  return body;
+  const subject = findingSubjectKey(taskText);
+  if (subject) return subject;
+  const prose = proseKey(taskText);
+  return prose ? `prose:${prose}` : "";
 }
 
 // ── quality ──────────────────────────────────────────────────────────────────────────────────────
@@ -29,9 +108,12 @@ export function findingKey(taskText) {
 // command, a path, a diff/commit ref, a test name) — not a vague concern.
 const EVIDENCE = /(`[^`]+`|\b\w[\w./-]*\.(mjs|js|ts|md|json|sh)\b|\b[0-9a-f]{7,40}\b|exit\s+\d|npx |node |git )/i;
 export function isActionable(taskText) {
-  const key = findingKey(taskText);
+  // ⛔ `proseKey`, never `findingKey`: the quality bar is about the TEXT, and it must not shift when
+  // the dedup key's SOURCE changes. (The subject is not evidence of actionability either — a bare
+  // symbol list is a name, not a reproduction.) Behaviour is byte-identical to the pre-subject gate.
+  const key = proseKey(taskText);
   if (key.length < 20) return false;                 // a real finding is more than a phrase
-  const m = String(taskText).match(/##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i);
+  const m = String(taskText).match(FINDING_SECTION);
   return !!m && EVIDENCE.test(m[1]);                 // must cite concrete evidence
 }
 
@@ -42,7 +124,10 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
   if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
   const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
   const key = findingKey(candidate);
-  if (keys.has(key)) return { accept: false, reason: "dedup: an equivalent finding is already on the board" };
+  // The matched key is NAMED in the reason: the reason is recorded verbatim in the carrier, and
+  // without it a dedup decision is unauditable — you cannot tell which subject swallowed a candidate,
+  // so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
+  if (keys.has(key)) return { accept: false, reason: `dedup: an equivalent finding is already on the board (matched key: ${key})` };
   if (recentCount >= K) return { accept: false, reason: `rate: ${recentCount} routine-filed tasks this window ≥ cap ${K}` };
   return { accept: true, reason: "accepted: actionable, novel, within rate" };
 }
