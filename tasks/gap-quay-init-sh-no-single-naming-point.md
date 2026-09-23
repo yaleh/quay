@@ -2,7 +2,7 @@
 id: gap-quay-init-sh-no-single-naming-point
 title: quay-init.sh 身份复制：9 个非测试代码命名点、零单一访问器（簇 P2-identity-quay-init.sh）——把
   laydown set / closure ratchet / 产品 CLI help 收敛成每层一个 REL+basename 访问器
-status: ready
+status: done
 labels:
   - gap
   - defect
