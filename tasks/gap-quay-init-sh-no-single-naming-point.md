@@ -70,17 +70,17 @@ packages/quay/src/cli/help.ts:238/272  与  packages/quay/src/cli/init.ts:56/91/
 
 ## AC
 
-- [ ] AC1（机制层单一命名点，按位置核）：修后 `grep -n 'quay-init\.sh' plugin/scripts/quay-init-closure-ratchet.ts plugin/scripts/quay-init-closure-assertion.ts` 的**路径字面量**只剩 REL 常量定义那一行；`:174` / `:97` / `:198` 三处改为派生。贴出修前/修后两条 grep 的逐字输出（修前基线见 Proposal 现场段）。
+- [x] AC1（机制层单一命名点，按位置核）：修后 `grep -n 'quay-init\.sh' plugin/scripts/quay-init-closure-ratchet.ts plugin/scripts/quay-init-closure-assertion.ts` 的**路径字面量**只剩 REL 常量定义那一行；`:174` / `:97` / `:198` 三处改为派生。贴出修前/修后两条 grep 的逐字输出（修前基线见 Proposal 现场段）。
 
-- [ ] AC2（产品层单一命名点 + 行为保持，真 CLI）：修后 `grep -rn 'quay-init\.sh' packages/quay/src/cli/help.ts packages/quay/src/cli/init.ts` 只剩那一个常量定义行（+ 指向它的引用）；且 `node packages/quay/bin/quay.js init --help` 的**实际输出**里仍含该名字（行为保持）。贴出修后 grep 逐字 + 真实 CLI 输出的相关片段逐字。
+- [x] AC2（产品层单一命名点 + 行为保持，真 CLI）：修后 `grep -rn 'quay-init\.sh' packages/quay/src/cli/help.ts packages/quay/src/cli/init.ts` 只剩那一个常量定义行（+ 指向它的引用）；且 `node packages/quay/bin/quay.js init --help` 的**实际输出**里仍含该名字（行为保持）。贴出修后 grep 逐字 + 真实 CLI 输出的相关片段逐字。
 
-- [ ] AC3（carve-out 逐条判定 —— 判据能取假）：对 `laydown-set-check.sh:93` / `runner-static-gate.ts:741` / `build-plugin-dist.mjs:810` 三处，各给出一句逐字判定（「已改为派生」或「不可派生的理由」）。⛔ 三条中任何一条留白 ⇒ 本 AC 判红（留白不得当作已修）。
+- [x] AC3（carve-out 逐条判定 —— 判据能取假）：对 `laydown-set-check.sh:93` / `runner-static-gate.ts:741` / `build-plugin-dist.mjs:810` 三处，各给出一句逐字判定（「已改为派生」或「不可派生的理由」）。⛔ 三条中任何一条留白 ⇒ 本 AC 判红（留白不得当作已修）。
 
-- [ ] AC4（红控制 —— 证明 `:174`/`:97`/`:198` 真的经该常量派生，而不是恰好相等的第二份字面量）：把 `QUAY_INIT_REL` 临时改成一个不存在的名字，`quay-init-closure-ratchet.ts --gate` 的 NOT-EVALUATED 分支必须报出**新名字**（而不是旧名 `quay-init.sh`）—— 证明那三处是派生的；随后还原并复核 `git status` 干净（红控制不得进入任何提交）。贴出红控制前/后两条输出逐字。
+- [x] AC4（红控制 —— 证明 `:174`/`:97`/`:198` 真的经该常量派生，而不是恰好相等的第二份字面量）：把 `QUAY_INIT_REL` 临时改成一个不存在的名字，`quay-init-closure-ratchet.ts --gate` 的 NOT-EVALUATED 分支必须报出**新名字**（而不是旧名 `quay-init.sh`）—— 证明那三处是派生的；随后还原并复核 `git status` 干净（红控制不得进入任何提交）。贴出红控制前/后两条输出逐字。
 
-- [ ] AC5（簇的产出侧读数 —— 判据能取假）：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --json --limit 400` 修后，`quay-init.sh` 行的 `hardcoded` 读数**低于**立案基线 `code=22 accessor=2 hardcoded=20`。贴出修前/修后两行逐字。⛔ 只跑不改检测器；若因 AC3 的 carve-out 仍有残余，**照实报出残余条数与对应 carve-out 清单，不得报 0 充数**。
+- [x] AC5（簇的产出侧读数 —— 判据能取假）：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --json --limit 400` 修后，`quay-init.sh` 行的 `hardcoded` 读数**低于**立案基线 `code=22 accessor=2 hardcoded=20`。贴出修前/修后两行逐字。⛔ 只跑不改检测器；若因 AC3 的 carve-out 仍有残余，**照实报出残余条数与对应 carve-out 清单，不得报 0 充数**。
 
-- [ ] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-quay-init-sh-no-single-naming-point` exit 0，贴出退出码与用例计数。若该 invocation 报 thin，同命令加 `--allow-thin` 亦须 exit 0。
+- [x] AC6（scoped 门）：`bash scripts/test.sh --for-task gap-quay-init-sh-no-single-naming-point` exit 0，贴出退出码与用例计数。若该 invocation 报 thin，同命令加 `--allow-thin` 亦须 exit 0。
 
 ## DoD
 
