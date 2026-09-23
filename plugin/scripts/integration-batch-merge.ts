@@ -914,6 +914,10 @@ function checkWorktreeGreenGate(): boolean {
   }
   err(`integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — no scope=worktree+state=green round in ${roundFile}; the suite-fix subagent never self-tested green in its OWN worktree ⇒ 不许 merge（不自测绿不许合）; nothing moved`);
   err("integration-batch-merge:   fix: 先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh（bash scripts/test.sh --for-task <task-id> --allow-thin），得到 scope=worktree+state=green 记录后再 fan-in");
+  // gap-scoped-gate-thin-selection-not-same-shape-as-green：scoped 自测**取零个测试文件**时（交付物是
+  // scripts/*.sh 的任务常见）不是「自测绿」——命令必须打一行 `SCOPED-THIN selected=0`，fan-in 把它记成
+  // `not-evaluated`（⛔ 不记 green）。契约见 plugin/skills/init/SKILL.md「The scoped gate's output contract」。
+  err("integration-batch-merge:   注意：scoped 自测若一个测试文件都没选中（Touches 无 *.test.*），那是【没测】，不是【测绿】——请打 SCOPED-THIN 标记（⛔ 别把 exit 0 当绿），并跑一个真能测到你交付物的检查");
   return false;
 }
 
