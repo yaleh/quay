@@ -30,6 +30,62 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+/**
+ * The paths git considers part of the working tree under `root`: tracked (`ls-files --cached`) ∪
+ * untracked-and-not-ignored (`--others --exclude-standard`), POSIX and relative to `root`. This is
+ * the ONE gitignore-driven skip face: instead of every caller growing its own hand-written name
+ * list, the set of files that *are* the repo comes from git, so gitignored trees (worktree
+ * containers, MCP caches, mirror dirs) drop out by construction.
+ *
+ * ⛔ Returns `null` — deliberately NOT an empty set — when git cannot answer (no work tree at
+ * `root`, git missing, non-zero exit). 硬规则 3b: a value that means "could not evaluate" must not
+ * share its output shape with a value that means "evaluated, and this is the answer". An empty set
+ * would read as "nothing here is ignored"; the caller would then silently scan the ignored trees
+ * while believing it had applied a skip face, and no reading could tell the two apart. Callers must
+ * branch on `null` explicitly and say which face they used.
+ *
+ * Non-zero exit covers the overflow/truncation case too (an oversized listing kills the process and
+ * leaves `status` null), so a truncated answer is reported as NOT-EVALUATED rather than returned as
+ * a plausible-looking smaller set.
+ */
+export function gitVisiblePaths(root: string): Set<string> | null {
+  const res = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (res.error || res.status !== 0 || typeof res.stdout !== "string") return null;
+  const out = new Set<string>();
+  for (const p of res.stdout.split("\0")) if (p) out.add(p);
+  return out;
+}
+
+/** Every directory that has a visible path beneath it (all proper ancestors, POSIX, root-relative).
+ *  The index that lets a walk prune an ignored subtree in O(1): a directory absent from this set
+ *  contains no visible file, so descending is guaranteed to yield nothing. */
+export function visibleDirPrefixes(paths: Iterable<string>): Set<string> {
+  const dirs = new Set<string>();
+  for (const p of paths) {
+    let i = p.lastIndexOf("/");
+    while (i > 0) {
+      const d = p.slice(0, i);
+      if (dirs.has(d)) break; // its ancestors were recorded when it was
+      dirs.add(d);
+      i = d.lastIndexOf("/");
+    }
+  }
+  return dirs;
+}
+
+/** A gitignore-driven skip face tied to the root its paths are relative to — the pair `walkFiles`
+ *  needs to match an entry it discovered on disk against git's own view. `null` = NOT-EVALUATED
+ *  (see `gitVisiblePaths`); pass it through, never coerce it to an empty set. */
+export interface VisibleSet {
+  root: string;
+  paths: ReadonlySet<string>;
+}
 
 export interface WalkOptions {
   /**
@@ -61,6 +117,18 @@ export interface WalkOptions {
   maxDepth?: number;
   /** Return absolute paths instead of root-relative POSIX paths. Default false. */
   absolute?: boolean;
+  /**
+   * Restrict the walk to the paths git considers part of this work tree — the gitignore-driven
+   * skip face (`gitVisiblePaths`). Entries are matched by their path relative to `visible.root`
+   * (the walk root must lie inside it); a directory with no visible descendant is pruned, so an
+   * ignored subtree is never descended into, and a file git does not see is never recorded.
+   *
+   * `null` is a MEANINGFUL value: it means git could not answer, and the walk then applies only
+   * the caller's own `prune`. Never write `visible: gitVisiblePaths(root) ?? {…}` — that erases the
+   * NOT-EVALUATED state (硬规则 3b) and makes "no gitignore face was applied" indistinguishable
+   * from "the gitignore face was applied and matched nothing".
+   */
+  visible?: VisibleSet | null;
   /** Sort the result. Default true — most callers want a stable, diffable order. */
   sort?: boolean;
 }
@@ -78,9 +146,19 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
   const maxDepth = opts.maxDepth ?? Number.POSITIVE_INFINITY;
   const absolute = opts.absolute ?? false;
   const wantSort = opts.sort ?? true;
+  const visible = opts.visible ?? null;
+  const visibleDirs = visible ? visibleDirPrefixes(visible.paths) : null;
 
   const out: string[] = [];
   if (!fs.existsSync(root)) return out;
+
+  /** Is `abs` part of git's view of the work tree? Directories are kept when they have a visible
+   *  descendant (so an ignored tree is pruned, not walked-and-discarded). */
+  const isVisible = (abs: string, isDir: boolean): boolean => {
+    if (!visible || !visibleDirs) return true;
+    const rel = path.relative(visible.root, abs).split(path.sep).join("/");
+    return isDir ? visibleDirs.has(rel) : visible.paths.has(rel);
+  };
 
   const record = (abs: string) => {
     out.push(absolute ? abs : path.relative(root, abs).split(path.sep).join("/"));
@@ -108,6 +186,7 @@ export function walkFiles(root: string, opts: WalkOptions = {}): string[] {
       }
       if (prune && prune(e.name, isDir)) continue;
       const abs = path.join(dir, e.name);
+      if (!isVisible(abs, isDir)) continue;
       if (isDir) {
         if (depth < maxDepth) walk(abs, depth + 1);
         continue;

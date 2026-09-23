@@ -18,6 +18,17 @@
 // 一次退役可能删除多个构件 (message-bus.ts + inbox-reader.sh; prepare/execute 集群)。CLI 接受多个
 // <component> 位置参数, 闭包 = 各构件闭包的并集 (refs 按文件合并)。
 //
+// 扫描面 (skip 面) = **gitignore 驱动** ∪ SKIP_DIRS。正本是 `git ls-files --cached --others
+// --exclude-standard`(fs-walk.ts `gitVisiblePaths`): 只有 git 认为属于本 work tree 的路径才进闭包,
+// 于是 `.claude/worktrees/`(worktree 容器)、`.archguard/`(MCP 缓存)、`packages/quay/plugin/`(镜像)
+// 这些 gitignored 树按构造排除 —— 不再靠往手工名单里加名字 (那是本缺陷的成因：
+// gap-deletion-closure-walker-respects-gitignore, 立案时 12010 条闭包里 11054 条落在 gitignored 前缀下,
+// 前 15 条读的是【另一个 worktree 的整份 repo 副本】)。SKIP_DIRS 的残余职责见其定义处。
+// ⛔ 报告永远带 `ignoreSource`：git 回答不了时走 SKIP_DIRS 兜底并在输出里报警，**不得静默降级**
+//   (硬规则 3b —— 否则"没生效"与"生效且没命中"同形)。
+// ⛔ 不得顺手排除 `tasks/` 与 `experiments/` —— 它们是 tracked 的真实引用面，gitignore 不覆盖它们，
+//   本修法也不会碰到它们 (AC3 的负控制钉这一点)。
+//
 // ⚠️ 参照系更正 (文档 §3 P1, 必须遵守): 真值 = 「实际改动集 ∪ 事后仍能命中的残留引用集」, 不是
 //   「删除提交实际改动的文件集」— DC 与真值的分歧应先当残留发现处理, 再当方法误差。
 //
@@ -36,7 +47,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
-import { walkFiles } from "./fs-walk.ts";
+import { walkFiles, gitVisiblePaths, type VisibleSet } from "./fs-walk.ts";
 // The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
 // name this file's six call sites already use. Own copy was one of the twelve byte-identical bodies
 // extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
@@ -92,15 +103,62 @@ function mentions(src: string, a: Aliases): boolean {
 
 // ── 枚举 ─────────────────────────────────────────────────────────────────────────────────────
 
+// ⛔ 手动名单**不是** skip 面的正本 —— gitignore 才是 (见下面的 scanVisible)。这份名单是本缺陷
+// (gap-deletion-closure-walker-respects-gitignore) 的**成因**：它手工列举"哪些名字属于本仓"，
+// 而漏了三个 gitignored 前缀 (.claude/worktrees/ 10962 条 / packages/quay/plugin/ 90 条 /
+// .archguard/ 2 条)，于是把别的 worktree 的整份 repo 副本读成了"引用 X 的文件"。
+// ⛔ 因此**再往这里加名字是禁止的修法** (那只是把下一次同族缺陷推后)。
+//
+// 名单保留下来只做两件事，都不是"列举 gitignored 名字"：
+//   ① 非 git 根 (测试夹具 mktmp 的临时目录) 的兜底 —— 那里 git 无法回答，只能退回名单；
+//   ② 一条 gitignore **表达不了**的策略：`.quay` 是**部分 tracked** 的运行时状态目录
+//      (101 个 tracked 文件 + 大量未跟踪证据)，gitignore 不覆盖它，但它不是删除债的引用面。
+//      `vendor`/`coverage`/`fixture` 同理属于构建/夹具策略；`node_modules`/`dist`/`.git` 虽也
+//      被 gitignore 覆盖，留在这里是无害的冗余 (先剪枝省一次 stat)。
 const SKIP_DIRS = new Set(["node_modules", "vendor", "fixture", ".git", ".quay", "dist", "coverage"]);
 const CODE_EXTS = new Set([".ts", ".sh", ".mjs", ".js"]);
 const MD_EXTS = new Set([".md"]);
 
-export function walkDcCodeFiles(root: string): string[] {
+/**
+ * 本次扫描的 skip 面来源 —— **三取值里没有"沉默"那一档** (硬规则 3b)：git 能回答时是
+ * `git-worktree`，回答不了时是 `manual-skip-only` 并且**在输出里显式报出**。两种形态不同形，
+ * 所以"gitignore 面没生效"不会伪装成"gitignore 面生效且恰好没命中"。
+ */
+export interface IgnoreSource {
+  kind: "git-worktree" | "manual-skip-only";
+  visiblePaths: number; // |gitVisiblePaths(root)|；NOT-EVALUATED 时为 0
+  detail: string;
+}
+
+/** `gitVisiblePaths(root)` 包成 walker 要的 `{root, paths}` 形态；git 回答不了 ⇒ `null`
+ *  (NOT-EVALUATED，**不是空集** —— 空集会读成"这里没有东西被忽略")。 */
+export function scanVisible(root: string): VisibleSet | null {
+  const paths = gitVisiblePaths(root);
+  if (!paths) return null;
+  return { root, paths };
+}
+
+export function ignoreSourceOf(root: string, visible: VisibleSet | null): IgnoreSource {
+  if (visible) {
+    return {
+      kind: "git-worktree",
+      visiblePaths: visible.paths.size,
+      detail: `git ls-files --cached --others --exclude-standard (${visible.paths.size} 条可见路径)`,
+    };
+  }
+  return {
+    kind: "manual-skip-only",
+    visiblePaths: 0,
+    detail: "git 无法在 --root 下回答 (非 work tree / 无 git / 非零退出) ⇒ 仅按 SKIP_DIRS 剪枝；gitignored 树可能重新进入闭包",
+  };
+}
+
+export function walkDcCodeFiles(root: string, visible: VisibleSet | null = scanVisible(root)): string[] {
   const roots = ["plugin", "packages", "experiments", "scripts", ".claude/workflows"].map((d) => path.join(root, d));
   const out = roots.flatMap((r) =>
     walkFiles(r, {
       absolute: true,
+      visible,
       prune: (name) => SKIP_DIRS.has(name),
       include: (name, ext) => CODE_EXTS.has(ext),
     }),
@@ -108,10 +166,11 @@ export function walkDcCodeFiles(root: string): string[] {
   return out.sort();
 }
 
-/** .md 文档文件 (doc 位置引用的载体)。全仓枚举, 排除 skip 目录。 */
-export function walkDocFiles(root: string): string[] {
+/** .md 文档文件 (doc 位置引用的载体)。全仓枚举, 排除 skip 目录 + gitignored 树。 */
+export function walkDocFiles(root: string, visible: VisibleSet | null = scanVisible(root)): string[] {
   return walkFiles(root, {
     absolute: true,
+    visible,
     prune: (name) => SKIP_DIRS.has(name),
     include: (name, ext) => MD_EXTS.has(ext),
   });
@@ -261,6 +320,7 @@ export interface Report {
   components: string[];
   component: string; // 首构件 (向后兼容)
   aliases: Aliases[];
+  ignoreSource: IgnoreSource;
   callGraph: string[];
   dc: string[];
   refs: FileRef[];
@@ -288,10 +348,10 @@ function isSelfToolFile(f: string): boolean {
   );
 }
 
-export function deletionClosure(root: string, components: string[]): Report {
+export function deletionClosure(root: string, components: string[], visible: VisibleSet | null = scanVisible(root)): Report {
   const aliases = components.map(aliasesOf);
   const selfBases = new Set(aliases.map((a) => a.basename));
-  const codeFiles = walkDcCodeFiles(root).filter((f) => !isSelfToolFile(f) && !selfBases.has(path.basename(f)));
+  const codeFiles = walkDcCodeFiles(root, visible).filter((f) => !isSelfToolFile(f) && !selfBases.has(path.basename(f)));
 
   const byFile = new Map<string, FileRef>();
   const bump = (r: FileRef) => {
@@ -314,7 +374,7 @@ export function deletionClosure(root: string, components: string[]): Report {
       break;
     }
   }
-  for (const f of walkDocFiles(root)) {
+  for (const f of walkDocFiles(root, visible)) {
     let src: string;
     try {
       src = fs.readFileSync(f, "utf8");
@@ -346,7 +406,7 @@ export function deletionClosure(root: string, components: string[]): Report {
     ratio: callGraph.length > 0 ? dc.length / callGraph.length : null,
   };
 
-  return { root, components, component: components[0], aliases, callGraph, dc, refs, counts };
+  return { root, components, component: components[0], aliases, ignoreSource: ignoreSourceOf(root, visible), callGraph, dc, refs, counts };
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────
@@ -366,6 +426,13 @@ function printHuman(r: Report): void {
   console.log("deletion-closure-check — P1 删除闭包检测器 (docs/proposals/archguard-generation-era-primitives.md §3)");
   console.log(`component(s): ${r.components.join(", ")}`);
   console.log(`root: ${r.root}`);
+  // skip 面来源必须每次打印 (硬规则 3b)：否则"gitignore 面没生效"与"生效且没命中"在输出上同形，
+  // 而前者会让 gitignored 树 (别的 worktree 的整份副本) 静默重新进入闭包 —— 正是本缺陷的形态。
+  if (r.ignoreSource.kind === "git-worktree") {
+    console.log(`skip 面: gitignore 驱动 — ${r.ignoreSource.detail} ∪ SKIP_DIRS(${SKIP_DIRS.size} 条策略名)`);
+  } else {
+    console.log(`⚠️  skip 面: 仅 SKIP_DIRS — ${r.ignoreSource.detail}`);
+  }
   console.log(`CallGraph (真调用) = ${r.counts.callGraphTotal} 文件`);
   console.log(`DC (删除闭包, code∪comment∪doc) = ${r.counts.dcTotal} 文件`);
   console.log(`R = |DC|/|CallGraph| = ${r.counts.ratio === null ? "n/a (CallGraph=0)" : r.counts.ratio.toFixed(2)}`);
