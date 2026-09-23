@@ -2,7 +2,7 @@
 id: gap-ac255-anchor-kind-set-silent-loss
 title: GOAL-017/AC-255：anchor 的 kind 集合静默削到 4 —— quality/meta 心跳停摆 264min，判据逐字
   exit 1（收敛已落地，丢的是能力半边）
-status: ready
+status: done
 labels:
   - gap
   - defect
