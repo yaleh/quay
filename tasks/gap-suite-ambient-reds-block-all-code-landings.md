@@ -1,7 +1,7 @@
 ---
 id: gap-suite-ambient-reds-block-all-code-landings
 title: 全量 suite 的四类环境红挡住一切 code 任务落地——自 2026-09-16 无一次 suite 绿，需一次修完才能破锁
-status: todo
+status: ready
 labels:
   - gap
   - defect
