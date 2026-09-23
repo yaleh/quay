@@ -27,7 +27,13 @@ ff 闸读 suite 证书并要求 `state === "green"`（`plugin/scripts/worker-fan
 | 09-22 | 3 |
 | 09-23 | 6 |
 
-**本机最后一次 fan-in suite 跑绿 = 2026-09-16 19:08**（`gap-release-softprops-missing-explicit-tag-name`，RESULT: PASS）。此后每一条跑到全量 suite 的 fan-in 日志都是红的（09-16 / 09-21 / 09-23 共 5 条）。而近三日"落地"的 17 个任务，**suite 日志数 = 0** ⇒ 它们走的是 **doc-only / inert delta 跳过 suite** 的路径。⇒ **凡是 delta 需要跑全量 suite 的 code 任务，自 09-16 起全部落不了地。**
+**本机最后一次 fan-in suite 跑绿 = 2026-09-16 19:08**（`gap-release-softprops-missing-explicit-tag-name`，RESULT: PASS）。此后每一条跑到全量 suite 的 fan-in 日志都是红的（09-16 / 09-21 / 09-23 共 5 条）。
+
+**⚠️ 一处已降为假说的解释（立案后自查推翻了原写法，硬规则 4 推论四）**：立案时本段写的是「近三日落地的 17 个任务 suite 日志数 = 0 ⇒ 它们走的是 doc-only / inert delta 跳过 suite 的路径」。**该因果解释与证据不符**：抽样三个（`gap-serve-labels-hardcode-mechanism-script-basenames`、`gap-registry-path-second-copy-five-checker-sites`、`gap-repo-root-derivation-bypasses-shared-accessor`）的 `## Touches` **全部是 code**（`packages/quay/src/serve-system.ts`、`plugin/scripts/axis-generator.ts`、`plugin/scripts/checked-in-write-check.ts` …），不是 inert。⇒ 保留可确证的读数，撤销解释：
+
+- **可确证**：这 17 个任务的 `ls .quay/fan-in-suite-<id>*.log` 计数 = 0；自 2026-09-16 起无一次 fan-in suite 跑绿；日完成量从 19–63/天 塌到 3–8/天（`.quay/gate-events.jsonl` 的 `gate=complete` 按日计数）。
+- **未归因（候选，均未验证）**：`plugin/scripts/worker-fan-in.ts:1342` 的 `reuseSkip`（code delta + develop 前进面为 doc/inert ⇒ 复用上一 green、跳过 suite）；suite 日志的清理/轮转（立案时已实测到 48h 窗口内两条记录指向**已不存在**的日志文件）。
+⇒ 「哪些 code 任务还能过、凭什么过」**必须由 AC6 在生产上归因**，⛔ 不得沿用本段被推翻的解释。
 
 **为什么必须一次修完（这是本任务存在的理由）**：下面四类红任意一类单独修，其余三类仍红 ⇒ **那个任务自己的 worktree 内 suite 仍是红的 ⇒ 它自己也落不了地**。所以"每类各立一个任务"在结构上不可能成功（这正是 `gap-suite-entry-inherits-host-locale-and-tz` / `gap-arch-coverage-report-couples-to-archguard-manifest-path-form` / `gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check` 三个任务被本任务取代的原因）。只有一个"worktree 内 suite 为绿"的落地能破锁。
 
@@ -113,7 +119,7 @@ unsupported-reflog-action: fetch -q . author:develop, fetch -q . chore/quay-dev-
 - [ ] AC3（第 3 类·复现 + 修后 + 取假）① 贴失败断言 `actual`/`expected` 原文与 manifest 的 mtime、`grep -c '/home/yale/' .archguard/query/manifest.json` 的读数；② 修后该文件全绿；③ **位置判定**：manifest 仍是 symlink 形态（上述 `grep -c` 仍非零）而测试绿 ⇒ 证明是归一生效，不是"机器态碰巧被清理"
 - [ ] AC4（第 4 类·复现 + 修后 + 取假）① 贴 57/1 与失败断言的 `actual`（`unsupported-reflog-action: …`）/`expected` 原文，并贴 `git reflog show develop` 中该条目的完整 `%gs`；② 点名 `fetch -q . author:develop` 由哪个机制、哪个文件:行产生；③ 修后该文件全绿，且该形态被**按结构**归类（贴分类结果）；④ **负控制**：构造一个此前未出现过的 `fetch` 变体（如 `fetch -q . <sha>:refs/heads/x`），分类器仍正确归类 ⇒ 证明不是白名单
 - [ ] AC5（第 5 类·注册表缺口 + 读法更正）① 贴隔离读数 `RC=0` 与 `8 PASS / 0 FAIL`，以及 `grep -cE '^ℹ (pass|fail)'` = **0** 的直接读数 —— 证明它不是"未归因"而是"读法与它的 harness 不匹配"；② 贴它启动真实 serve 子进程与端口绑定的证据（监听行原文）；③ 修后 `known-load-sensitive.ts` 的输出中包含本文件（贴该行），且全量 suite 中它不再出现在 `passed=false` 行；④ 若最终判定它不应进注册表，须给出**可区分**的替代处置（例如让端口分配不冲突）并贴读数——⛔ 不得以"与本任务无关"直接略过
-- [ ] AC6（sources 面完整性，硬规则 5b）除上述 5 个文件外，在同一 provisioned worktree 内系统扫描**同族**（读 `os.tmpdir()`/`TMPDIR` 的、读 symlink 形态绝对路径的、读 reflog action 词的），把命中数与前 3 条贴出；命中者一并纳入本任务或各立任务并贴 id
+- [ ] AC6（sources 面完整性 + 落地逃生面归因，硬规则 5b）① 除上述 5 个文件外，在同一 provisioned worktree 内系统扫描**同族**（读 `os.tmpdir()`/`TMPDIR` 的、读 symlink 形态绝对路径的、读 reflog action 词的），把命中数与前 3 条贴出；命中者一并纳入本任务或各立任务并贴 id；② 另须归因「近三日落地的 code 任务为何没有 suite 日志」（`reuseSkip`？日志清理/轮转？）——给出对照读数（例如对其中一个已落地任务查其 develop 前进面是否 doc/inert）；给不出对照 ⇒ 在 `## Notes` 记为本轮**未归因**，⛔ 不得作为结论写入
 - [ ] AC7（**破锁判据·本任务存在的理由**）**落地证书 = driver 为本任务跑的那份 fan-in suite 日志**（`.quay/fan-in-suite-<本任务id>*.log`）中 `# fail 0` 且红桶为空——它是决定 ff 能否执行的证书（`plugin/scripts/worker-fan-in.ts:1588` 要求 `state === "green"`，`readGreenMirrorCommit` 取不到即 fail-closed）。⛔ worker **不得自行跑全量 suite**：suite 有单飞锁（`QUAY_MAX_CONCURRENT_SUITES=1`），自行跑会与 driver 的 fan-in 争用，且派发契约明文写着「You do NOT run the suite」。worker 的义务是在自己的 worktree 内**逐文件**验证四类红与第 5 类全部转绿（逐文件不占锁）并把每条读数贴出。⛔ 不得只跑子集冒充全量、不得只跑 scoped 门、不得在钉过 env 的壳里跑（env 必须与 fan-in 实际继承的一致——即修法本身必须让默认入口绿）。该读数的产出时刻在落地之时（待外部）
 - [ ] AC8（**生产读数·锁真的开了**）落地后时间窗内，`.quay/gate-events.jsonl` 出现**至少一条** `gate=complete` ∧ `payload.from=ready` ∧ `payload.to=done` 的记录，其任务**不是** doc-only 跳过 suite 的（该任务存在 `.quay/fan-in-suite-<id>*.log` 且其中 `# fail 0`）；贴两条记录的原文与时间戳（均晚于本任务落地提交）。⛔ 这是本任务与"只修好文件"的分界：证明另一个 code 任务真的过了那堵墙。该读数只能在本任务落地之后产生（待外部）
 - [ ] AC9 `bash scripts/test.sh --for-task gap-suite-ambient-reds-block-all-code-landings` 绿
