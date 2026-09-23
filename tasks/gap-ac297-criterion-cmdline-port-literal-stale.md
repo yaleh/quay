@@ -3,7 +3,7 @@ id: gap-ac297-criterion-cmdline-port-literal-stale
 title: AC-297 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据在真实部署上结构性失效（addr=172.28.0.1:0，curl 失败）；机制本身为真（实测 /git-history 四条断言全过）——
   重锚地址派生那一步（照搬 AC-288 已落地的同族形态，同一行）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -109,3 +109,76 @@ grep '"item_id":"AC-297"' .quay/gate-events.jsonl | grep -o '"verdict":"[a-z]*"'
 - `tasks/gap-ac297-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面——criterion 的地址派生那一步，经 `quay goal write AC-297 --criterion …` 落库，`expect` 与正文语义逐字不变、只补「为什么改」；第二条是配套夹具（按 marker 从 goal 文件逐字抽取派生块，与 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-git.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
+
+## 执行记录（落地读数 / 修法 / 为什么改）
+
+**落地面已在 develop（前一飞轮落地），本轮逐条复核为真**
+
+- `git show develop:goals/AC-297-*.md` 含 `# >>> addr-derivation` / `# <<< addr-derivation` 两个 marker，与主检出、任务 worktree 的副本 `diff` 逐字相同（`IDENTICAL`）。
+- 新指纹 `1374f0d89eb3ccc6` ≠ 修前 `bbace9c25e47832d`（台账自 `2026-09-23T14:10:16.521Z` 起）。
+- 本分支相对 develop 的**唯一**增量 = 夹具 `packages/quay/test/ac297-criterion-address-derivation.test.mjs`（429 行，new）。goal 文件与任务体已由 develop 承载。
+
+**AC1 承载体已重锚（读数）**
+
+- goal 文件中 `grep -oE -- '--host [^ ]+ --port [0-9]+'` 命中数 **0**（重锚前 1）。
+- 派生块两个来源在场：`.quay/server.json` ×3 处、`/proc/$p/cmdline` ×1 处。
+- **无本机字面量**：`grep -nE '172\.28\.0\.1|10539|14037|0\.0\.0\.0:[0-9]' goals/AC-297-*.md` ⇒ 空。
+- `expect`（第 214–217 行）与 chrome 作用域语义（第 164–213 行：导航只对 `<nav>…</nav>`、标题只对 `<title>`）逐字保留。
+
+**AC2 两个负控制（判据能取假；两条成因不同形）**
+
+① 该 root 无运行实例（worktree 下无 cwd 相符的 serve）：
+```
+GATE_EXIT=1
+CAUSE=no-derivable-address -- pgrep -f 'quay.ts serve' x cwd=/data/home/yale/work/quay-worktrees/gap-ac297-criterion-cmdline-port-literal-stale matched candidate(s) but none yielded a live web address (an explicit --port >= 1 on the process's own argv, or this root's .quay/server.json naming that pid's web service)
+CANDIDATES: | pid=1483464 addr=- cause=argv-no-serve,carrier-absent | pid=1495519 addr=- cause=argv-no-serve,carrier-absent
+```
+② 受控假候选（真实进程 argv 定位 `serve --host 127.0.0.1 --port 39117`，cwd = worktree root；39117 先实测关闭）：
+```
+GATE_EXIT=1
+CAUSE=en-fetch-failed -- GET http://127.0.0.1:39117/git-history returned nothing (addr=127.0.0.1:39117)
+```
+⇒ ① 报「派生不出地址」、② 报「派出地址但取不到页面」，**具名成因不同形**；② 同时证明 argv 那一步确实工作（把 39117 派了出来，⛔ 不是回落成 0）。两条都带**逐候选归因**（`addr=-` / `cause=`），「无法评估」没有伪装成通过（硬规则 3b）。
+
+**AC3 正控制（活实例）**
+
+`node packages/quay/bin/quay.js goal gate AC-297`（主检出，cwd = 仓库根）：
+```
+{"id":"AC-297","verdict":"pass","reason":"acceptance passed (exit 0)","dryRun":false,
+ "timestamp":"2026-09-23T18:07:00.865Z"}    GATE_EXIT=0
+```
+同一时刻四条断言**各自独立活读**（地址由载体派生 `127.0.0.1:10539`；en 533678 B / zh 533620 B）：
+
+| # | 断言 | 读数 |
+|---|---|---|
+| 1 | en nav 区块 `Git History` 计数 | **2** |
+| 2 | zh 响应 `<html lang=…>` | `<html lang="zh"` |
+| 3 | zh nav 区块 `Git History` 计数 | **0** |
+| 4 | 本页 `<title>` en vs zh | `quay — Git history — vertical commit timeline` / `quay — Git 历史 — 提交纵向时间轴`（不同） |
+| — | 整段 zh 响应里 `Git History` 残留（硬规则 3：给条数） | **0** |
+
+**AC4 两种部署形态 + 派生随载体（本轮读数）**
+
+- 显式端口形态：② 从 argv 派生 `127.0.0.1:39117`；夹具含显式端口正例。
+- `--port 0` + 载体形态：活实例 cmdline `serve --host 0.0.0.0 --port 0`，载体 `web` = `10539` ⇒ gate exit 0（AC3）。
+- **派生随载体变化**：同一份 criterion 文本（指纹 `1374f0d89eb3ccc6`）在 `14:10:16.521Z` / `15:28:26.000Z` 通过，而当前宿主 `pid 2035152` 的 `startedAt` = `16:40:21.519Z` ⇒ 那两次通过必然发生在**另一个宿主进程**（另一个内核分配端口）上；`.quay/serve.log` 记录的前序实例含 `pid 3121749 → http://172.28.0.1:14037`（立案实例）与 `pid 1384111 → http://0.0.0.0:19071`。
+- **本轮未再重启生产 serve**（判断附代价读数）：本轮实测 **3 个 worker 进程 / 12 个任务 worktree 在飞**，且同族在飞任务以**活 serve 为判据面**（`pgrep -af 'quay.ts serve'` 可见其夹具子进程）——重启生产面会把这些**他人在飞**任务翻红。以中断他人为代价重复一条已由上述「跨宿主多端口 + 同一判据文本」覆盖的读数不划算；该条款的实质属性（派生随载体变化）由夹具的**真实进程 + 真实载体**用例直接断言（`--port 0` derives the carrier's web port for THIS pid）。⛔ 未把本机端口写进任何被提交文件：`git grep -nE '10539|14037'` 在 goal 文件与夹具中为空（夹具里的 `172.28.0.1` / `345xx` 是临时 root 的夹具常量，非本机当前部署）。
+
+**AC5 不回归 + 作用域逐文件**
+
+① `bash scripts/test.sh --for-task gap-ac297-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **exit 0**；夹具 `12 pass / 0 fail`。
+② 逐文件（立案基线 16，含 AC-297）：
+```
+grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/   ⇒ 1 文件
+1  goals/AC-289-dashboard-页面在-zh-下真实切换-…md
+```
+⇒ **AC-297 那一条 1→0**；唯一残留是 `AC-289`（同族尚未重锚）—— ⛔ **不在本任务 Touches 内**，不由本条覆盖。
+
+**AC6 新指纹落账**
+
+```
+2026-09-23T08:42:34.315Z fail bbace9c25e47832d   ← 修前
+2026-09-23T17:02:05.571Z pass 1374f0d89eb3ccc6   ← 修后（14:10:16Z / 15:28:26Z 同指纹）
+2026-09-23T18:07:00.865Z pass （payload 只带 reason）
+```
+末条**不带 criterionHash** 是 `goal gate` 的取值面（指纹由 goal-sweep 落），⛔ 不读成「没有指纹」（硬规则 5）。

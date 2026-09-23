@@ -213,9 +213,20 @@ function writeSuiteRedLog(root, basename, failingRel, assertion) {
 }
 
 // 追加一条【其它】任务的 suite-red outcome（worker-outcome.jsonl，供跨任务签名复发扫描）。
+//
+// `suiteSignatures` 与生产写入面同形（`withRecordedSuiteSignatures`，gap-unrelated-suite-red-exemption-
+// unreachable）：签名在**写入时**从该 basename 指向的日志抽出并随记录留存，复发扫描此后只读记录、
+// ⛔ 不再事后读日志（那些日志落地即被 pruneTaskSuiteLogs 删掉）。夹具必须造出**同一个**形状，否则它
+// 测的就不是生产形态——旧夹具只写日志不写签名，等于在测一个生产上不存在的记录形态。
+// 日志不在盘上 ⇒ `suiteSignatures: null`（如实记「没留下」，⛔ 不伪造空数组）。
 function appendOtherSuiteRed(root, taskId, ts, suiteLogBasename) {
+  const logPath = path.join(root, ".quay", suiteLogBasename);
+  let suiteSignatures = null;
+  try {
+    suiteSignatures = assertionSignaturesFromSuiteLog(fs.readFileSync(logPath, "utf8"));
+  } catch { /* 日志不在盘上 ⇒ null（没留下证据） */ }
   fs.appendFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
-    JSON.stringify({ ts, task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s", mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: suiteLogBasename } }) + "\n", "utf8");
+    JSON.stringify({ ts, task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s", mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: suiteLogBasename, suiteSignatures } }) + "\n", "utf8");
 }
 
 // 第一手样本的逐字 selector_reason（quay-fleet 生产载体原文；任务体 DoD 要求保留）。

@@ -42,6 +42,7 @@
 //     结构保证：stopCondition/heartbeat/notify 只在本文件（Layer 0）定义一次，1a/1b 都经 import 消费。
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -1977,6 +1978,321 @@ export function supervisorStaleness(
   };
 }
 
+// ── Layer 0 · 已加载内核版本 vs 已安装版本（gap-driver-status-loaded-vs-installed-version-drift）──────
+//
+// 缺陷（2026-09-23 生产实测，claudecodeui）：`status` 的新鲜度判定（`supervisor_stale` / `source_watch`）
+// 求值的是**执行 status 命令的那个内核自己的目录**（`sourceWatch` 的基准是 `resolveKernelScriptsDir()`），
+// ⛔ 不是**正在运行的 anchor 实际加载的目录**。实测：pid 2166980 自 2026-09-20 10:28 起跑
+// `…/cache/quay/quay/0.10.0/scripts/dist/driver-anchor.js`，而插件已装 0.11.0；用 0.11.0 的 kernel 读
+// 出 `supervisor_stale="fresh"`、`source_watch="unwatched"`——**一个落后 3 天的进程被报成 fresh**
+// （硬规则 3b：读错了对象 ⇒ 读数与「合格」同形）。上游 `caeca6f9c`（2026-09-20 17:14，晚于 0.10.0
+// cache 的构建时刻 10:18）因此在 claudecodeui 整整 3 天未生效，而没有任何读数能显示这一点。
+// 第二个漂移源：`.quay/config.yml` 的 provider `path` 写的是**安装当时**的 cache 版本目录，升级后不变。
+//
+// 读法（硬规则 4b：用**外部可核**的直接量，⛔ 不用被测对象自报的心跳/派生计数）：
+//   · 「运行中进程实际加载了哪份内核」—— `/proc/<pid>/cmdline`（进程自己的 exec 实参，外部可核）。
+//     ⛔ 只有当 cmdline 读不出内核实参时，才退回 anchor 的**回读面** `.quay/anchor.json.bundle.kernel`
+//     （每个 reconcile pass 重写；它是 anchor 对**自己**内核路径的自报 = second-best）——哪一种来源被
+//     采信由 `loadedKernelSource` 单列，⛔ 不把两者混成同一个读数。
+//   · 「当前已安装版本」—— `~/.claude/plugins/installed_plugins.json` 里 `quay@quay` 的**最高**版本条目
+//     （附安装时刻 `installedAt`/`lastUpdated`）；注册表读不到时退回**本内核自己的 `VERSION` 文件**。
+//   · 两个版本都拿到才判；任一读不到 ⇒ `not-evaluated`（⛔ 不与 `current` 同形）。
+//   ⛔ 只报，⛔ **不自动重启**（重启时机由人或 manager 决定）；`behind` 的人可读形态给出 `quay driver
+//     restart` 的提示。
+//
+// 与 `sourceWatch`/`supervisorStaleness` 的分工（⛔ 不是同一条判据的两种写法）：
+//   · `supervisor_stale` 比的是【本内核目录里的源码 mtime vs 宿主进程启动时刻】——它对**装好的产物**
+//     恒报 `unwatched`+fresh（盘上没有源可推进），这正是本缺陷静默的形态；
+//   · 本条比的是【宿主进程**实际加载的**内核版本 vs 已安装版本】——装好的产物上只有它能取假。
+//   两者都保留：前者回答「我改的源码进了那个进程没有」，后者回答「那个进程跑的是不是装好的那版」。
+
+/** 版本三态（`ahead` 是第四个取值：loaded ≠ installed 但**方向相反**——源树检出里 anchor 跑的是比
+ *  注册表更新的一版（如本仓库 `plugin/VERSION` = `0.12.0-dev` vs 注册表 `0.11.0`）。
+ *  ⛔ 不把它并进 `behind`：那会在 quay 自己的开发检出上**永久**报一个方向错误的读数（硬规则 3）。 */
+export type LoadedVersionState = "current" | "behind" | "ahead" | "not-evaluated";
+
+/** 两个版本串的方向（`not-evaluated` = 至少一个读不出/不可排序）。⛔ 与 `state` 分开：state 回答
+ *  「要不要动作」（behind/ahead 都要人看一眼），relation 回答「往哪个方向偏」。 */
+export type VersionRelation = "equal" | "loaded-older" | "loaded-newer" | "not-evaluated";
+
+/** 「已加载内核版本 vs 已安装版本」的完整读数。⛔ 读不到的每一格都有独立取值（`null` /
+ *  `not-evaluated` / `reason`），⛔ 不与「同版本」同形。 */
+export interface LoadedVersionReading {
+  state: LoadedVersionState;
+  /** 运行中宿主进程所加载内核的版本（读不出 ⇒ null）。 */
+  loaded: string | null;
+  /** 当前已安装版本（读不出 ⇒ null）。 */
+  installed: string | null;
+  /** 上述版本的安装时刻（ISO；注册表条目里读不出 ⇒ null）。 */
+  installedAt: string | null;
+  /** `installed` 的来源（⛔ 两个来源不同形：注册表 vs 本内核自己的 VERSION 文件）。 */
+  installedSource: "registry" | "kernel-version-file" | null;
+  /** 宿主进程实际加载的内核脚本绝对路径（读不出 ⇒ null）。 */
+  loadedKernel: string | null;
+  /** `loadedKernel` 的来源（`proc-cmdline` = 外部可核直接量 / `anchor-state` = anchor 自报回读面）。 */
+  loadedKernelSource: "proc-cmdline" | "anchor-state" | null;
+  relation: VersionRelation;
+  /** `.quay/config.yml` 里 provider `path` 的版本段 vs 已安装版本（第二个漂移源，独立取值）。 */
+  configProviderPath: LoadedVersionState;
+  /** 参与上面那个判定的版本段（无版本段可比 ⇒ null）。 */
+  configProviderPathVersion: string | null;
+  /** `not-evaluated` 的原因（⛔ 读不出时必须给，⛔ 不得为空——空读不出与「没问题」同形）。 */
+  reason: string | null;
+}
+
+/** 解析 `x.y.z[-suffix]` 形的版本串为可排序的秩；形状不符 ⇒ null（⛔ 不猜）。 */
+function versionRank(v: string): [number, number, number, string] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.*))?$/.exec(v.trim());
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ?? ""];
+}
+
+/** 两个版本串的方向：`<0` a 更旧 / `0` 相等 / `>0` a 更新 / `null` 不可排序（形状不符）。
+ *  同 `x.y.z` 时**无后缀 > 有后缀**（`1.0.0` > `1.0.0-dev`），两者都有后缀按字典序。 */
+export function compareVersions(a: string, b: string): number | null {
+  const ra = versionRank(a);
+  const rb = versionRank(b);
+  if (!ra || !rb) return null;
+  for (let i = 0; i < 3; i++) if (ra[i] !== rb[i]) return (ra[i] as number) - (rb[i] as number);
+  const sa = ra[3] as string;
+  const sb = rb[3] as string;
+  if (sa === sb) return 0;
+  if (sa === "") return 1;
+  if (sb === "") return -1;
+  return sa < sb ? -1 : 1;
+}
+
+/** 一个 plugin root 的 `VERSION` 文件（首行去空白；缺失/空/读失败 ⇒ null，⛔ 不猜版本）。 */
+function readVersionFile(pluginRoot: string): string | null {
+  try {
+    const first = fs.readFileSync(path.join(pluginRoot, "VERSION"), "utf8").split("\n")[0].trim();
+    return first === "" ? null : first;
+  } catch {
+    return null;
+  }
+}
+
+/** 一个内核脚本路径**所加载的那份内核**的版本。两级：
+ *  ① 它自己 plugin root 的 `VERSION` 文件（源检出 `<repo>/plugin/VERSION` 与 cache 目录
+ *     `<…>/cache/quay/quay/<x.y.z>/VERSION` 两形态都有）——基准是**路径推导**，⛔ 与路径字面量无关；
+ *  ② 路径里的版本段（`…/cache/<mkt>/<plugin>/<x.y.z>[-suffix]/…`）—— ① 读不到时的兜底，因为装好的
+ *     产物可能被裁掉 `VERSION`。
+ *  两级都读不出 ⇒ null（⛔ 不从路径里随便挑一个数字当版本）。 */
+export function versionOfKernelScript(kernelPath: string): string | null {
+  // ⛔ 与 `resolveKernelPluginRoot()` 同一套上跳规则（内核既可能住在 `<root>/scripts/` 也可能住在
+  // `<root>/scripts/dist/`）：从 `<root>/scripts` 出发**总是**再上跳一级，`dist` 层再多上跳一级。
+  // 少了那「总是」的一级会得到 `<root>/scripts` 自己（实测：本仓库的 anchor 因此报 not-evaluated）。
+  const dir = path.dirname(kernelPath);
+  const pluginRoot = path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
+  const fromFile = readVersionFile(pluginRoot);
+  if (fromFile) return fromFile;
+  const m = /(?:^|\/)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?:\/|$)/.exec(kernelPath);
+  return m ? m[1] : null;
+}
+
+/** 内核脚本的 basename 形状（判定 `/proc/<pid>/cmdline` 里**哪一段**是内核）。
+ *  ⛔ 必须按名字认：cmdline 里还有 `--root <path>` 之类的路径实参，误取会报一个假的「已加载」。 */
+const KERNEL_SCRIPT_RE = /\/driver-(?:runtime|anchor)\.(?:ts|js)$/;
+
+/** 运行中进程**实际加载的**内核脚本（`/proc/<pid>/cmdline` 的 exec 实参，外部可核的直接量）。
+ *  ⛔ 读不到 / 实参里没有内核脚本（进程不是内核）⇒ null（⛔ 不退回猜测）。 */
+export function loadedKernelFromCmdline(pid: number): string | null {
+  try {
+    const raw = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+    for (const arg of raw.split("\0")) if (KERNEL_SCRIPT_RE.test(arg)) return arg;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 已安装版本的**注册表**读数（`~/.claude/plugins/installed_plugins.json` 的 `quay@quay` 条目）。
+ *  取**最高**版本那条（同一 host 上同一插件可有多个 scope/多个项目条目；「已安装的是什么版本」的答案
+ *  是其中最高的那个），并带回它的安装时刻与 scope 供排障。
+ *  ⛔ 文件缺失/不可解析/无 `quay@quay` 条目/条目都没有合法版本 ⇒ null（调用方 fail-closed）。 */
+export interface InstalledRegistryReading {
+  version: string;
+  installedAt: string | null;
+  scope: string | null;
+  installPath: string | null;
+}
+
+export function installedVersionFromRegistry(homeDir: string): InstalledRegistryReading | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(homeDir, ".claude", "plugins", "installed_plugins.json"), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const j = JSON.parse(raw) as { plugins?: Record<string, unknown> };
+    const entries = j?.plugins?.["quay@quay"];
+    if (!Array.isArray(entries)) return null;
+    let best: InstalledRegistryReading | null = null;
+    for (const e of entries) {
+      if (!e || typeof e !== "object") continue;
+      const o = e as Record<string, unknown>;
+      const version = typeof o.version === "string" && o.version.trim() !== "" ? o.version.trim() : null;
+      if (version === null) continue;
+      const installedAt =
+        typeof o.lastUpdated === "string" ? o.lastUpdated : typeof o.installedAt === "string" ? o.installedAt : null;
+      const cand: InstalledRegistryReading = {
+        version,
+        installedAt,
+        scope: typeof o.scope === "string" ? o.scope : null,
+        installPath: typeof o.installPath === "string" ? o.installPath : null,
+      };
+      if (best === null) {
+        best = cand;
+        continue;
+      }
+      const c = compareVersions(cand.version, best.version);
+      // 不可排序 ⇒ 字典序兜底：保证「取最高」在任意版本串上都给一个**确定**答案（⛔ 不返回第一个）。
+      if (c === null ? cand.version > best.version : c > 0) best = cand;
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+/** `.quay/config.yml` 的 `providers:` 块里每个 `path:` 带出的版本段。⛔ 只扫 `providers:` 块
+ *  （顶层键起始、下一个顶层键结束）：`gates:`/`loop:` 里也有 `path:` 形的键，扫全文件会读到无关的值。
+ *  没有版本段的 path（`./packages/quay-native` 这种源检出形态）被**跳过**，⛔ 不记成空串。 */
+export function providerPathVersions(root: string): string[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8");
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  let inProviders = false;
+  for (const line of text.split("\n")) {
+    if (/^[A-Za-z_]/.test(line)) {
+      inProviders = /^providers:\s*(#.*)?$/.test(line);
+      continue;
+    }
+    if (!inProviders) continue;
+    const m = /^\s+path:\s*(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    const value = m[1].replace(/\s+#.*$/, "").replace(/^["']|["']$/g, "").trim();
+    const v = /(?:^|\/)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?:\/|$)/.exec(value);
+    if (v) out.push(v[1]);
+  }
+  return out;
+}
+
+/** `.quay/config.yml` provider `path` vs 已安装版本（第二个漂移源）。
+ *  ⛔ 「一个带版本段的 path 都没有」（源检出）与「比过了、一致」**必须不同形**（硬规则 3b）：
+ *  前者 ⇒ `not-evaluated`，后者 ⇒ `current`。 */
+export function configProviderPathReading(
+  root: string,
+  installed: string | null,
+): { configProviderPath: LoadedVersionState; configProviderPathVersion: string | null } {
+  const versions = providerPathVersions(root);
+  if (versions.length === 0) return { configProviderPath: "not-evaluated", configProviderPathVersion: null };
+  if (installed === null) return { configProviderPath: "not-evaluated", configProviderPathVersion: versions[0] };
+  // 多 provider 时取「最坏」的那一条（behind > ahead > current）：任一条落后 ⇒ 这个工作区有漂移。
+  let rank = 0; // 0=current 1=ahead 2=behind
+  for (const v of versions) {
+    const c = compareVersions(v, installed);
+    const r = c === null ? (v === installed ? 0 : 2) : c === 0 ? 0 : c < 0 ? 2 : 1;
+    if (r > rank) rank = r;
+  }
+  return {
+    configProviderPath: rank === 2 ? "behind" : rank === 1 ? "ahead" : "current",
+    configProviderPathVersion: versions[0],
+  };
+}
+
+/** 「已加载内核版本 vs 已安装版本」的判定（见本节头注释）。
+ *
+ *  `hostPid` = 承载本工作区驱动循环的**宿主进程**（收敛形态 = anchor；旧形态 = supervisor）——
+ *  调用方从 `aliveness()` 传（`a.host === "anchor" ? a.anchorPid : a.supervisorPid`）。
+ *  宿主缺失/已死 ⇒ `not-evaluated`（⛔ 不是 `current`：没有运行中的进程 ≠ 跑的是最新版）。
+ *  `opts.homeDir` / `opts.selfVersion` 是 hermetic 测试缝（缺省 = 真 HOME / 本内核 plugin root 的
+ *  `VERSION`）——⛔ 生产调用方不传。 */
+export function loadedVersionReading(
+  root: string,
+  hostPid: number | null,
+  opts: { homeDir?: string; selfVersion?: string | null } = {},
+): LoadedVersionReading {
+  const homeDir = opts.homeDir ?? process.env.HOME ?? os.homedir();
+  const reg = installedVersionFromRegistry(homeDir);
+  const selfVersion = opts.selfVersion !== undefined ? opts.selfVersion : readVersionFile(resolveKernelPluginRoot());
+  const installed = reg?.version ?? selfVersion ?? null;
+  const installedAt = reg?.installedAt ?? null;
+  const installedSource: LoadedVersionReading["installedSource"] = reg
+    ? "registry"
+    : selfVersion
+      ? "kernel-version-file"
+      : null;
+  const cfg = configProviderPathReading(root, installed);
+  const base = { installed, installedAt, installedSource, ...cfg };
+
+  const degraded = (
+    reason: string,
+    extra: Partial<LoadedVersionReading> = {},
+  ): LoadedVersionReading => ({
+    state: "not-evaluated",
+    loaded: null,
+    loadedKernel: null,
+    loadedKernelSource: null,
+    relation: "not-evaluated",
+    reason,
+    ...base,
+    ...extra,
+  });
+
+  if (hostPid === null || !pidAlive(hostPid)) {
+    return degraded(
+      hostPid === null
+        ? "no host process for this workspace (no anchor/supervisor pid) — nothing to read the loaded kernel from"
+        : `host pid ${hostPid} is not alive — nothing to read the loaded kernel from`,
+    );
+  }
+
+  // ① 直接量：进程自己的 exec 实参。② second-best：anchor 每个 reconcile pass 重写的回读面
+  //    （⛔ 只在 ① 读不出内核实参时采信，且只认**同一个 pid** 的回读面——换代/残留的回读面不得冒充）。
+  let loadedKernel = loadedKernelFromCmdline(hostPid);
+  let loadedKernelSource: LoadedVersionReading["loadedKernelSource"] = loadedKernel ? "proc-cmdline" : null;
+  if (loadedKernel === null && readAnchorPid(root) === hostPid) {
+    const b = readAnchorBundleReading(root);
+    if (b?.kernel) {
+      loadedKernel = b.kernel;
+      loadedKernelSource = "anchor-state";
+    }
+  }
+  if (loadedKernel === null) {
+    return degraded(
+      `cannot read the loaded kernel for pid ${hostPid} (/proc/${hostPid}/cmdline carries no kernel script and ` +
+        `.quay/anchor.json reports no bundle.kernel for that pid)`,
+    );
+  }
+
+  const loaded = versionOfKernelScript(loadedKernel);
+  if (loaded === null) {
+    return degraded(`cannot derive a version from the loaded kernel path (${loadedKernel})`, {
+      loadedKernel,
+      loadedKernelSource,
+    });
+  }
+  if (installed === null) {
+    return degraded(
+      "cannot determine the installed version (installed_plugins.json unreadable AND this kernel has no VERSION file)",
+      { loaded, loadedKernel, loadedKernelSource },
+    );
+  }
+
+  const c = compareVersions(loaded, installed);
+  const relation: VersionRelation =
+    c === null ? (loaded === installed ? "equal" : "not-evaluated") : c === 0 ? "equal" : c < 0 ? "loaded-older" : "loaded-newer";
+  const state: LoadedVersionState =
+    relation === "equal" ? "current" : relation === "loaded-older" ? "behind" : relation === "loaded-newer" ? "ahead" : "behind";
+  return { state, loaded, loadedKernel, loadedKernelSource, relation, reason: null, ...base };
+}
+
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
 // 仓库里只此一份 respawn 循环；kind 差异由 DRIVER_KINDS 数据表驱动（⛔ 非两份代码分支）。
 
@@ -2261,11 +2577,19 @@ export function aliveness(root: string, kind: DriverKind): {
  *  ⛔ 不得把 carrier_path 读成 last_record_ts 的来源——两者在真实工作区上会不同名
  *  （见 CarrierStats.lastTsCarrier 的实测；gap-driver-status-carrier-path-source-label-mismatch）。
  *  carrier_path 为 null ⇔ 无任何载体存在 ⇔ records=0（⛔ 不报一个不存在的路径——AC1/AC2）。
- *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。 */
+ *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。
+ *
+ *  `loaded_version` / `loaded` / `installed` / `config_provider_path`（gap-driver-status-loaded-vs-
+ *  installed-version-drift）：回答 `supervisor_stale` **结构上答不了**的那个问题——「跑着的那个进程
+ *  加载的是哪一版内核」。`supervisor_stale` 对**装好的产物**恒报 `unwatched`-fresh（盘上没有源可推进），
+ *  于是「落后 3 天的 anchor」与「一切正常」同形；本条比的是宿主进程**实际加载的**内核版本 vs 已安装版本。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
   const stats = carrierStats(root, kind);
+  // 宿主进程：收敛形态 = anchor；旧多进程形态 = supervisor。⛔ 不用 driverPid——短命的 driver 子进程
+  // 不是「加载了哪份内核」这个问题的主体（常驻宿主才是）。
+  const lv = loadedVersionReading(root, a.host === "anchor" ? a.anchorPid : a.supervisorPid);
   // AC-255 能力半边：`running` 回答「有没有一个活着的承载进程」，**答不了**「这个 kind 的循环还在转
   // 吗」——收敛形态下六个 kind 共用一个 anchor，anchor 活着时全部报 `running=1`，哪怕其中两个的循环
   // 早已被移出期望态而停摆（2026-09-23 实测：`quality`/`meta` 停摆 264min，六个 kind 的 `running` 全是 1）。
@@ -2301,6 +2625,21 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       // AC-255：宿主模型（anchor=收敛形态 / supervisor=旧多进程形态）+ anchor pid。⛔ 两者不同形。
       host: a.host,
       anchor_pid: a.anchorPid,
+      // 已加载内核版本 vs 已安装版本（见本节头注释）。`loaded_version` 四态各自独立——`not-evaluated`
+      // （读不到运行记录/宿主已死）⛔ 不与 `current` 同形（硬规则 3b）；`ahead` 与 `behind` 也不同形
+      // （源树检出里 anchor 跑的是比注册表更新的一版，并进 `behind` 会报一个方向错的读数）。
+      loaded_version: lv.state,
+      loaded: lv.loaded,
+      installed: lv.installed,
+      installed_at: lv.installedAt,
+      installed_source: lv.installedSource,
+      loaded_version_relation: lv.relation,
+      loaded_kernel: lv.loadedKernel,
+      loaded_kernel_source: lv.loadedKernelSource,
+      loaded_version_reason: lv.reason,
+      // 第二个漂移源（`.quay/config.yml` provider `path` 的版本段），独立取值。
+      config_provider_path: lv.configProviderPath,
+      config_provider_path_version: lv.configProviderPathVersion,
       // AC-255 能力半边：本 kind 相对**期望态**的声明状态。四态各自独立（⛔ 不与 `alive`/`running` 同形）：
       // `declared` / `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/
       // `not-evaluated`（读不懂期望态或停机记录）。缺这个字段时，「六个循环里有两个没在转」与
@@ -2308,7 +2647,26 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       declaration: declaration,
     }) + "\n");
   } else {
+    // 人类可读面：已加载版本读数**打在最前面**（第一行、第一个字段——一个落后 3 天的进程必须在读者
+    // 看到 `supervisor_stale=fresh` 之前就先看到它）。`behind` 附 `quay driver restart` 的动作提示
+    // （⛔ 只提示、⛔ 不自动重启——停/起常驻 anchor 的时机由人或 manager 决定）。
+    // ⚠️ 仍是**一整行**（`driver-status-carrier-path.test.mjs` AC3 钉住「恰好一行正文 + 尾换行」）：
+    // 「放在第一行」= 排在行首，⛔ 不是另起一行——另起一行会撞那条既有判据。
+    const loadedHead =
+      `loaded-version-${lv.state}: loaded=${lv.loaded ?? "null"} installed=${lv.installed ?? "null"}` +
+      (lv.installedAt ? ` (installed_at ${lv.installedAt})` : "") +
+      (lv.loadedKernel ? ` kernel=${lv.loadedKernel}` : "") +
+      (lv.loadedKernelSource ? ` source=${lv.loadedKernelSource}` : "") +
+      (lv.state === "behind"
+        ? " — the running host loaded an OLDER kernel than the installed one: run `quay driver restart` to load it"
+        : lv.state === "ahead"
+          ? " — the running host loaded a NEWER kernel than the installed one (a source checkout in front of the registry)"
+          : lv.state === "not-evaluated"
+            ? ` — ${lv.reason ?? "no reason given"}`
+            : "") +
+      " · ";
     out(
+      loadedHead +
       `${spec.prefix}: kind=${kind} · host=${a.host} anchor_pid=${a.anchorPid ?? "none"} · ` +
       `supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
@@ -2320,7 +2678,11 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `last_record_ts=${stats.lastTs ?? "null"}${crossCarrier} · ` +
       // ⛔ 紧邻上面那一项：这就是「这条 ts 从哪来」的答案（`carrier_path` 回答的是另一个问题）。
       `last_record_carrier=${stats.lastTsCarrier ?? "null"} · ` +
-      `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")}\n`,
+      `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")} · ` +
+      // 第二个漂移源（provider `path` 的版本段）；已加载版本那三键已在行首（loadedHead）。
+      // ⛔ 空值打印 "null"，⛔ 不打印空串（硬规则 3b）。
+      `config_provider_path=${lv.configProviderPath}` +
+      `${lv.configProviderPathVersion ? `:${lv.configProviderPathVersion}` : ""}\n`,
     );
   }
   return 0;
