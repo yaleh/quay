@@ -3,7 +3,7 @@ id: gap-ac301-criterion-cmdline-port-literal-stale
 title: AC-301 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   /goal 页判据在真实部署上结构性失效（addr=127.0.0.1:0，curl 失败）；/goal 页面机制本身为真（本轮实测四条断言全过）——
   重锚地址派生那一步（照搬 AC-288 已落地的同族形态，同一行）
-status: ready
+status: done
 labels:
   - gap
   - defect

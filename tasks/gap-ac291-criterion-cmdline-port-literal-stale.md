@@ -3,7 +3,7 @@ id: gap-ac291-criterion-cmdline-port-literal-stale
 title: AC-291 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假（addr=172.28.0.1:0，curl 失败）；机制本身为真（实测 /live 四条断言全过）—— 重锚地址派生那一步（与
   AC-179/288/289/290 在飞任务同一行）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -263,3 +263,17 @@ TOTAL files with the literal    14     13
 
 - `anti-drift-touches-check.ts --task gap-ac291-… --worktree <worktree> --merge-target develop` ⇒ `ANTI-DRIFT OK: 1 actual file(s), all within declared Touches`。
 - 本任务 Touches 三条声明与实际 delta 一致（分支对 develop 的 delta = 新单测一个文件；goal 文件已随 doc 同步在 develop 上，故不在 delta 内）。
+
+## Evidence（复验轮，2026-09-23T17:15–17:20Z，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac291-criterion-cmdline-port-literal-stale`）
+
+上一轮（执行轮）读数里的 pid / 端口已随生产实例重启失效，故本轮**重取全部直接量**；六条 AC 的判定与上一轮一致，**无一条状态变化**。原始留痕：worktree 内 `.quay/ac291-r2-*.txt|sh|mjs`（未跟踪）。
+
+- **AC3 正控制**：生产实例 pid `2035152`，cwd = 仓库根，cmdline `… serve --host 0.0.0.0 --port 0`；criterion 直跑 ⇒ **exit 0**，逐字：
+  `AC-291 candidate readings (cwd=/data/home/yale/work/quay, nserve=1, ncand=1, nderived=1):; pid=2035152 addr=127.0.0.1:10539 argv=argv-port-kernel-assigned cause=fetch-answered`
+  四条断言各自独立复算（对 `127.0.0.1:10539` 的两条响应体直读）：en nav `Live` 计数 = **2**（≥1）/ zh 响应含 `<html lang="zh"` = **true** / zh nav `Live` 计数 = **0** / en `<title>` `quay — Live — loop activity` ≠ zh `<title>` `quay — 实时 — 循环活动`。
+  `node packages/quay/bin/quay.js goal gate AC-291` ⇒ **exit 0**，台账新增 `actor:"goal-cli"` / `verdict:"pass"` / `2026-09-23T17:15:43.159Z`。同一命令在修订前是 fail（`CAUSE=en-fetch-failed … addr=…:0`）。
+- **AC2 两个负控制（本轮重取）**：① `goal gate AC-291 --root <worktree>`（无实例）⇒ **exit 1**，`CAUSE=no-running-serve-instance`（`nserve=0`；gate 自身的 `sh -c` runner 确实出现在候选里、以 `argv-no-serve-subcommand` 被排除出 `nserve`）；② 活候选（cwd = 临时仓库根，argv 带 `--port 0`）+ 载体指向无人监听的端口 `8841` ⇒ **exit 1**，`CAUSE=no-reachable-serve-address`，逐候选 `cause=fetch-failed(connection-refused)`。三态（`no-running-serve-instance` / `no-derivable-serve-address` / `no-reachable-serve-address`）可区分。
+- **AC4 两种部署形态（本轮重取，均对真实例）**：显式端口（worktree 内起 `serve --host 127.0.0.1 --port 29843`，pid `2959726`）⇒ `argv=argv-explicit-port addr=127.0.0.1:29843 cause=fetch-answered`，**exit 0**；**把载体移走后重跑仍 exit 0**（另一候选 `carrier-unreadable`）⇒ 证明该形态走 argv 而非载体。内核分配端口（生产实例 `--port 0`）⇒ `argv-port-kernel-assigned`，真实端口由载体给出 `10539` ⇒ **exit 0**。`0.0.0.0` 归一化由生产实例（bind `0.0.0.0`）实测覆盖；「无 `--port`」由夹具覆盖。
+- **AC6 指纹**：本轮实算当前 `criterionFingerprint` = `f455d4534f8067e9` ≠ 修订前 `848bfb6418f2a892`；台账该 AC 另有 `goal-amend`（`2026-09-23T14:29:52.196Z`）与 `goal-sweep`（`2026-09-23T16:11:33.354Z`）两条带此指纹的 `pass`。
+- **AC5 家族逐文件差量**（fork `bed012a86` ⇒ develop，`git grep -F -c`）：**14 文件 → 2 文件**，每文件计数 1；**AC-291 那格 1→0**，其余 13 格的下降各归其自身立案轮 —— 本任务只动 AC-291 一格。scoped 门 `bash scripts/test.sh --for-task gap-ac291-… --allow-thin` ⇒ **exit 0**（13/13）；scoped-gate 缓存按 `develop=7b6042c87746d1c0dcbe886d3a567546624cf00c` 落。
+- 分支对 develop 的 delta = 单个新文件 `packages/quay/test/ac291-criterion-address-derivation.test.mjs`（goal 文件已随 doc 同步在 develop 上，故不在 delta 内）。

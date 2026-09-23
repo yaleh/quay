@@ -81,11 +81,20 @@ settings are not read at all (SPEC §6 / T3) — so "config committed ⇒ auto-i
 script's output carries the explicit steps, which are:
 
 ```bash
-claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
+claude plugin marketplace add yaleh/quay
 claude plugin install quay@quay --scope project
 # (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall registers the
 #  marketplace source only; the enable is deliberately NOT user-scope by default)
 ```
+
+⚠️ **`marketplace add` takes ONE `<source>`, not `<name> <source>`.** The two-argument form is
+rejected outright (Claude Code 2.1.280: `✘ Invalid marketplace source format. Try: owner/repo,
+https://..., or ./path`). The registered name is **not** aliasable either — it is the `name` field
+of the source root's `.claude-plugin/marketplace.json`. And registering a *directory* here would be
+wrong twice over: it pins the project to a path on one machine, and a directory source loads the
+plugin **in place** with no install record — `claude mcp list` looks Connected while nothing was
+ever installed. The published channel is the github source above; this repo's own dog-food channel
+is the separate name `quay-dev` (directory → `<this repo>/plugin`, declared at user scope, SPEC §4b).
 
 ⚠️ **Always pass `--scope`.** `claude plugin install` defaults to `scope=user`, which writes a
 user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
@@ -202,6 +211,111 @@ code). quay therefore bounds unattributable suite-red retries to **one**, and st
 when two consecutive rounds produce byte-identical logs (a retry provably cannot change the
 result), leaving the task in a human-readable `needs-human` terminal state. Keeping the obligations
 above costs one `shift 2`; violating them costs a full agent session per round.
+
+## The scoped gate's output contract (`SCOPED-THIN`) — read this before writing a scoped entrypoint
+
+quay's mechanical fan-in has a **scoped gate**: before the full suite it runs the project's scoped
+entrypoint (`.quay/config.yml` `loop.scoped_command`; a project that declares none is recorded as
+`not-evaluated` — quay does not invent a scoped run for you) so that a per-task regression is
+caught in seconds instead of after a full suite.
+
+**The contract (one line, and it is the whole point of this section):** when the scoped
+entrypoint resolves **no test files to evaluate** for the task (= nothing was measured), it MUST
+print one line on stdout
+
+```
+SCOPED-THIN selected=0
+```
+
+and still exit **0**. The marker is matched **at the start of a line** (after trimming) — a
+sentence that merely *mentions* `SCOPED-THIN` somewhere in its middle is not a match.
+
+**Why this is required, not a nicety.** Exit-code-only signalling cannot tell "I ran your tests
+and they passed" apart from "I ran nothing": both exit 0. quay records the two as *different
+values* — `green` vs `not-evaluated` — and the only witness to "nothing was measured" is the
+entrypoint itself. Without the marker, a scoped gate that measured nothing is recorded as a pass,
+which is a green that can never go red. Two real consequences you will otherwise hit:
+
+- Tasks whose deliverable is shell/script/config files list no test files in `## Touches`, so a
+  "select the test files named in Touches" entrypoint selects **zero** and, without the marker,
+  silently reports success on every round.
+- A human reading a `scoped-gate: ok` record cannot tell whether the gate worked at all.
+
+**Adopt it like this:**
+
+1. **Touches names test files ⇒ the scoped run MUST really run them.** If your selector finds the
+   files the task declares but runs none of them, that is a defect in your selector, not something
+   to report as success. Do **not** print the marker in this case.
+2. **Touches names no test files ⇒ run the check you do have** (your own linter/contract checker/
+   build) and print the marker only if that check measured nothing either. A project-delivered
+   checker that genuinely ran is a real scoped run: exit 0 with no marker, and it will be recorded
+   `green`.
+3. **Never print the marker to make a red run green.** A non-zero exit is recorded `red`
+   regardless of the marker; the marker is only read when the command exited 0.
+
+**What quay records** (`.quay/fan-in-step-trace.jsonl`, one `scoped-gate` `step-end` record per
+fan-in; `ok` is the control-flow field, `verdict` is the value):
+
+| scoped run | `verdict` | `reason` |
+|---|---|---|
+| ran ≥1 test file, all green | `green` | — |
+| ran ≥1 test file, some red | `red` | the failure summary (and the step fails the fan-in) |
+| exit 0 + `SCOPED-THIN …` | `not-evaluated` | `scoped-thin(selected=0)` |
+| no scoped command declared | `not-evaluated` | `no-scoped-command-declared` |
+
+`not-evaluated` does **not** fail the fan-in (the full suite still runs, and it is the only thing
+that actually measured the change) — it is there so that "nothing was measured" is never written
+down as a pass.
+
+## `loop.doc_surfaces` — what quay is allowed to skip the full suite for
+
+Before running the full suite, quay's mechanical fan-in classifies the task branch's delta
+(`git diff --name-only <fork> HEAD`) as **doc** (the scoped + doc phases already verified it ⇒ the
+full suite is skipped) or **code** (the full suite must re-run). Which paths count as doc is decided
+in three states, never a bare yes/no:
+
+| state | when | doc = |
+|---|---|---|
+| `registry` | the tree carries quay's own checker registry (`runner-static-gate.ts`, under the plugin's `scripts/` directory) | the paths no change/full-tier checker's `@static-object` glob matches, among quay's own surfaces |
+| `declared` | no registry, and `.quay/config.yml` declares `loop.doc_surfaces` | those path prefixes, plus `tasks/` |
+| `conservative-default` | neither | only `tasks/`, `goals/`, `.quay/` — the surfaces quay itself writes |
+
+**Why you should declare it.** `quay-init` writes the conservative default so that a project is
+never left without a judgment, but that default names only quay's own directories: in **your**
+project a delta under `docs/`, `website/`, `notes/` — or whatever your documentation and telemetry
+live in — counts as **code**, and every such task pays a full suite. Add them:
+
+```yaml
+loop:
+  doc_surfaces: ["tasks/", "goals/", ".quay/", "docs/", "website/docs/"]
+```
+
+Rules of the declaration:
+
+1. **A listed entry is a path PREFIX, matched segment-wise** — `docs` covers `docs/a/b.md` but not
+   `docs-old/a.md`. A trailing slash, a leading `./` and a doubled slash are all normalised away, so
+   write it the way your tree reads.
+2. **Anything not listed is CODE** (fail-closed): an unrecognized path may break a suite quay cannot
+   see, so it is never assumed harmless. Declaring a path quay has no checker for costs a suite run;
+   failing to declare a path a checker reads loses a verification. Only one of those is recoverable.
+3. **`tasks/` is always doc**, declared or not — it is the fan-in's own task file, already covered by
+   the scoped and doc phases.
+4. **The declaration is yours.** `quay-init` writes it only when the key is absent; a value you set
+   is preserved verbatim by every upgrade.
+5. **It only applies where there is no registry.** A tree carrying quay's checker registry (i.e.
+   quay itself) is judged by that registry — so **do not commit a copy of that registry into your
+   project** to make classification "work": it does not fix the judgment, it makes quay's checker
+   list decide your project's doc/code split.
+
+Run the judgment yourself, on any set of paths:
+
+```bash
+node --experimental-strip-types <plugin-root>/scripts/select-static-checks-for-touches.ts \
+     --classify-delta --root . docs/a.md server/x.ts
+```
+
+It prints the CODE paths (one per line, empty = the whole delta is doc) and always exits 0 for
+well-formed input — no registry required.
 
 ## Steps
 

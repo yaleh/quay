@@ -3,7 +3,7 @@ id: gap-ac295-criterion-cmdline-port-literal-stale
 title: AC-295 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假（addr=172.28.0.1:0，curl 失败）；机制本身为真（实测 /needs-human 四条断言全过）——
   重锚地址派生那一步（与 AC-179/288/289/290/291/292/293/294 同族任务同一行）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -110,3 +110,95 @@ curl -sf --max-time 10 -H 'Cookie: lang=zh' http://172.28.0.1:13609/needs-human 
 - `tasks/gap-ac295-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-295 --criterion …` 落库，`expect` 与正文语义逐字不变；第二条是配套夹具（两种部署形态的派生正/负控制，与 `packages/quay/test/ac294-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-needs-human.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
+
+## Evidence — 上一轮 fan-in suite 红 30 条的真因（本轮实测，供下一轮/管理者直接用）
+
+**本任务实现已完成且自检全绿**（`task_check` ok:true，6/6 AC；scoped gate `EXIT=0`，14/14；develop 已并入，worktree clean）。上一轮 30 条 suite 红**不是本任务 delta 造成的**，真因是**环境泄漏**，不是代码缺陷：
+
+- 常驻 `driver-anchor`（本工作区 pid 2391720，`/proc/2391720/environ` 实测）带着 **`QUAY_GOAL_ACCEPTANCE_ACTIVE=1`**。
+- `plugin/scripts/suite-driver.ts:176` 的 spawn 用 `env: { ...process.env, … }` ⇒ 该变量随 fan-in 一路传进 `scripts/test.sh` ⇒ `node --test`；`scripts/test.sh` 只 `unset FORCE_COLOR`（`:176` 那条注释的用意正是「入口清干净让每个子进程继承」，本条漏了）。
+- 后果：goal 重入闸（`goal-store.ts:1784/1992`、`goal-driver.ts:639`）在**每一条** goal 判据/轮转路径上短路 ⇒ goal 家族测试批量假红。
+
+逐文件实测（同一 worktree、同一 HEAD，测试文件与 develop **逐字节相同** ⇒ 与 delta 无关）：加 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` 后 `goal-invariants-standing` 19/19、`goal-driver-s12` 4/4、`s13` 3/3、`s02` 14/14、`s10` 4/4、`s04` 14/14、`goal-store` 72/72、`gap-webui-dashboard-tests-card-latest-round-no-live-signal` 4/4 —— 即上一轮日志里红的 8 个文件**全绿，0 失败**。上一轮同样文件的 `passed=false` 行见 `.quay/fan-in-suite-gap-ac295-…-468cbf.log`。
+
+一行复现：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --test plugin/test/goal-invariants-standing.test.mjs`（带该变量 ⇒ 红；不带 ⇒ 绿）。
+
+⚠️ 本任务 Touches 不含 `scripts/test.sh` / `plugin/scripts/suite-driver.ts` ⇒ **不在本任务内修**（越界写会被 fan-in 的 anti-drift 拒）。同族 8 个 in-flight 任务（`gap-ac179/288/289/290/291/292/293/294-…`）同样会被这条卡住 ⇒ 建议单独立案（最小修法：`scripts/test.sh` 入口 `unset QUAY_GOAL_ACCEPTANCE_ACTIVE`，与既有 `unset FORCE_COLOR` 同形；或在 `suite-driver.ts` 的 spawn env 里剔除）。
+
+## Evidence — 本轮（2026-09-24，第 4 轮）· 卡点已收敛到单一环境缺陷，实现侧零改动
+
+**本轮复验（同一 worktree，HEAD = `6a2d0ab8e`，已并入 develop）：**
+
+- `task_check` ⇒ `ok:true`，**6/6** AC。
+- **scoped gate**（与 fan-in 同一条命令，**裸跑**、⛔ 不加 `env -u`）：`bash scripts/test.sh --for-task gap-ac295-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。
+- **AC-295 判据在活实例上仍为真**：`node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json` ⇒ **exit 0**，`payload.reason = "acceptance passed (exit 0)"`。
+- **AC6 台账尾**：`item_id=AC-295` 最后一条 = `2026-09-23T18:03:41.416Z | pass | goal-sweep | hash 7631739f3aeeeafc`（= 修订后指纹，⛔ 非旧 `bf42948d03aef763`）；该 AC 累计 116 条事件。
+- 分支 delta 对 develop = **1 file**：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`（`goals/AC-295-*.md` 的重锚已在 develop 上）。worktree clean，merge 已提交。
+- `--write-scoped-gate-cache` ⇒ `{ok:true, key: "gap-ac295-…\tedf5fa9d8b4a16c2c624c34a4d00054fcba6c78e"}`。
+
+**上一轮 suite 红的归因本轮升级为机制自身的判词（⛔ 不再是人工推断）**：直接调用生产判定函数 `judgeRetryExemption`（`plugin/scripts/worker-driver.ts`）喂入本任务最后一条 `exited-not-landed` 记录 ⇒ `verdict: "unrelated-flaky-exempt"`；`recurredTasks: ["gap-fan-in-delta-classify-declared-doc-surfaces"]`；`failingTestFiles` = 上一轮那 8 个 goal 家族文件。⇒ **「与 delta 无关」已被机制自身认定**。但该判词把动作定为 `count-and-retry`（`decideExitedNotLandedAction`，⛔ **不是**放行落地），而 fan-in 的 suite 步对红一律 `failSuite` fail-closed ⇒ **本任务仍无法落地**。
+
+**30 条红的成分核对（硬规则 3：给条数不给单一布尔）**：上一轮日志 `__PERFILE__ … passed=false` 恰好 **8 个文件**（`goal-driver-s02/s04/s10/s12/s13`、`l1-delivery-surface-check`、`goal-store`、`goal-invariants-standing`），其余文件全部 `passed=true`；`# fail 30` **全部**落在这 8 个文件内 ⇒ 无第二种成因。
+
+**环境泄漏本轮仍在**：`/proc/2391720/environ`（driver-anchor，root=`/data/home/yale/work/quay`，2026-09-24T02:33 启动）实测含 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`；本 worker 会话进程亦继承（父链直上该 anchor）。
+
+**⇒ 上一节的「建议单独立案」本轮已兑现（⛔ 不重复诊断第 4 次）**：新任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env`（`labels: gap/defect`，`status: todo`，5 条 AC，`task_check` 的 `author->ready` 读作 `ok:true, shape: finding`）——内含泄漏链逐层证据、发生率（`.quay/worker-outcome.jsonl` 两条带 `suiteSignatures` 的记录）、逐项同族枚举 AC，与最小修法（`scripts/test.sh` 既有入口归一化块补一个成员 / `suite-driver.ts` spawn env 剔除）。⛔ 本任务**仍未**越界修它（`## Touches` 不含 `scripts/test.sh`）。
+
+## Evidence — 本轮（2026-09-24，第 5 轮）· 受控 A/B 复验；卡点确认仍在飞
+
+**实现侧零改动**（分支 delta 对 develop 仍 = 1 file：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`）。
+
+- `task_check` ⇒ `ok:true`，**6/6** AC（`acTotal:6, acChecked:6`）。
+- `goal gate AC-295 --dry-run --json` ⇒ **EXIT=0**（活实例上判据仍为真）。
+- **scoped gate（与 fan-in 同一条命令、裸跑、⛔ 不加 `env -u`）**：`bash scripts/test.sh --for-task gap-ac295-… --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。
+- `git merge --no-edit develop` ⇒ **Already up to date**，无未合并路径；worktree clean。
+- `--write-scoped-gate-cache` ⇒ `{"key":"gap-ac295-…\t1f884c10fa76bcdb67686c9b49f17a615f079f7a","ok":true}`。
+  ⚠️ 该缓存文件实测是**单条记录**（写入前内容为 `gap-anchor-state-nonatomic-…\ta6a730c9…`）⇒ 本次写入顶掉了对端那条；对端只会因此多跑一次 scoped 门，无正确性影响。
+
+**上一轮 `# fail 29` 本轮受控 A/B 复验（硬规则 4 推论四：给出「若因不成立则结果会不同」的对照）**
+
+同 worktree、同 HEAD、同一组 7 个测试文件，**唯一变量** = `QUAY_GOAL_ACCEPTANCE_ACTIVE`：
+
+| 条件 | 读数 |
+|---|---|
+| `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（= 环境现状） | **`pass 101 / fail 29`** —— 与 fan-in 日志 `# fail 29` **逐数一致** |
+| `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` | **`pass 130 / fail 0`** |
+
+⇒ 29 条红**全部**由该环境变量造成，与 delta 无关（对照存在且能取假）。7 个文件：`goal-driver-s02/s04/s10/s12/s13`、`goal-invariants-standing`、`goal-store`。
+
+**泄漏链本轮直接量（⛔ 非转述，读的是当前进程的 `/proc/*/environ`）**
+
+- 本 worker 会话（pid 1015613）的**父进程 = driver-anchor pid 2391720**，其 environ 含 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`。
+- **正在跑的 fan-in 进程 pid 910685**（`worker-driver.ts --mechanical-fan-in --task gap-anchor-state-nonatomic-and-declaration-outruns-log --root /data/home/yale/work/quay`）environ **同样含该变量**，PPID = 2391720 ⇒ 泄漏在**本轮 fan-in 路径上仍然生效**。
+- 本会话自身 environ 亦含该变量（继承）。
+
+**⇒ 第 5 轮仍无法落地的原因与前一轮同一条；修复已确认在被并行实现**
+
+姊妹任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env` 已 `todo→ready`，其 worktree
+`quay-worktrees/gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env` **于 03:05 建立**，与 peer worker
+会话 pid 544836 的启动时刻 `03:05:16` 吻合 ⇒ **该修复正在被实现中**。它一旦落地（其自身 fan-in 跑的是**它分支上**已
+`unset` 的 `scripts/test.sh` ⇒ 能绿、能落），develop 的 `scripts/test.sh` 即带上该 `unset`，本任务下一轮 fan-in 的
+suite 步即可绿。
+
+⛔ 本任务**未**越界改 `scripts/test.sh`（不在 `## Touches`，会被 anti-drift 拒）；**未**重启 driver-anchor
+（driver 生命周期是 manager 层的人授常设权，本 worker 无此权；且第二个 driver 会劫持在飞 worker）。
+
+## Evidence — 本轮（2026-09-24，第 6 轮）· 剩余 3 条 suite 红经隔离复跑判定为负载敏感 flake（非 delta）
+
+**实现侧零改动**（分支 delta 对 develop 仍 = 1 file：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`；`git merge --no-edit develop` ⇒ **Already up to date**，无未合并路径，worktree clean）。
+
+上一轮 exit-not-landed 的真因日志为 `# fail 3`（**⛔ 不再是 goal 家族那 30 条** —— 泄漏修复已落地，29→3），三条各落在一个**逐字节等于 develop** 的测试文件上（`git diff --stat develop...HEAD -- <三门文件>` 为空）：
+
+| 文件 | 断言 | 本轮隔离复跑 |
+|---|---|---|
+| `plugin/test/ready-pool-check-s22.test.mjs:192` | AC5 N=2000 `cached < uncached*0.75`（套件内实测 ratio 0.80，该文件耗时 23078ms；隔离下 9836ms） | **pass 8/8** |
+| `plugin/test/driver-anchor-declaration.test.mjs:242` | AC5 `readAnchorJson(root)` 读到 `null` ⇒ 读 `.kinds` 抛 TypeError（anchor.json 非原子写） | **pass 3/3** |
+| `packages/quay/test/gap-git-graph-…-decorate-labels.test.mjs:224` | AC6 `rows[0]`(=`fedaf8156` 本分支头) ≠ oracle(=`6ddd6f15a` develop)；且 `[ref-window]` 重试闸未报 refs-moved | **pass 7/7** |
+
+⇒ 三条**全部转绿**；三条文件与 develop 逐字节相同；`QUAY_TEST_GIT_GRAPH_LIVE_REFS` 全树 `grep` 只出现在注释与 `=== "1"` 判定里，**套件从不 export 它**（该文件自述「NEVER set by the suite」）⇒ 判为**套件并发 / 宿主负载下的时序敏感**（当前 loadavg ≈ 30，2 个在飞 worker），非本 delta 造成。第一条与既有经验（该断言 load-independent ~25% 抖动）吻合。
+
+**本轮 scoped 门（与 fan-in 同一条命令、裸跑、⛔ 不加 `env -u`）**：`bash scripts/test.sh --for-task gap-ac295-… --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。`--write-scoped-gate-cache` ⇒ `{"key":"gap-ac295-…\t6ddd6f15a7e7d424a67c87b022197d5423e8f5b6","ok":true}`。
+
+**六条 AC 本轮逐条复验**：AC1 criterion 内旧派生字面量计数 = **0**、`# >>> addr-derivation` 区块在场；AC3 `goal gate AC-295 --dry-run --json` ⇒ **EXIT=0**；AC5② `grep -rlF` 旧字面量在 `goals/` 只剩 **1** 个文件（AC-289，同族在飞）—— **AC-295 不在其中（1→0）**，符合 AC5「同族落地后按逐文件差量、非绝对值」的约定；AC6 台账累计 **117** 条，尾条 `2026-09-23T19:26:08.603Z | pass | goal-cli`，且存在对**新**文本的 pass（`goal-sweep`，`criterionHash 7631739f3aeeeafc` ≠ 旧 `bf42948d03aef763`）。
+
+**⛔ 未越界**：三个红文件均不在本任务 `## Touches`，改它们会被 fan-in 的 anti-drift 拒。建议由拥有 `scripts/test.sh` / 注册表的任务把 `ready-pool-check-s22` 的 AC5 断言登记为 load-sensitive 或加宽判据 —— **本条只记录，不在本任务内修**。

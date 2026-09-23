@@ -177,6 +177,23 @@ export function docCheckCommandFor(worktree: string): string[] | null {
   return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
 }
 
+/** fan-in 的 delta 判定「没判出来」哨兵：分类器非零退出（它没能给出结论）⇒ 本轮 fail-closed 跑全量
+ *  suite（硬规则 3b：判不出 ≠ 不需要）。⛔ 它不是「delta 是 code」的同义词——两者的后果相同（都跑
+ *  suite），但只有前者是【判决】；日志的 reason 必须能把二者分开。 */
+export const CLASSIFY_FAILED = "__CLASSIFY_FAILED__";
+
+/** 把一次 `--classify-delta` 调用映射成 fan-in 的三态 code_delta 取值（【单一定义点】——step 4 与
+ *  其 4b「develop 前进面复用」判定共用，⛔ 两处不得各写一份三元式，硬规则 5b）：
+ *    ""                分类器给出了结论，且 delta 全落 doc/inert 面 ⇒ 跳过全量 suite；
+ *    "<path>…"         分类器给出了结论，且有 code 面 ⇒ 跑全量 suite；
+ *    CLASSIFY_FAILED   分类器【没给出结论】（非零退出）⇒ 跑全量 suite（fail-closed）。
+ *  第三方 worktree 过去必然落到第三者（分类器 `--root <worktree>` 找不到 quay 的检查注册表 ⇒ exit 2，
+ *  生产读数：claudecodeui 177 次 delta 判定中 11 次）——分类器现在自带「声明的 loop.doc_surfaces →
+ *  保守缺省」兜底，第三方也走前两者（gap-fan-in-delta-classify-declared-doc-surfaces）。 */
+export function classifyDeltaOutcome(ok: boolean, stdout: string): string {
+  return ok ? String(stdout ?? "").trim() : CLASSIFY_FAILED;
+}
+
 /** 解析本 kernel 的一个 shell sibling（.sh）—— 实现已上收 `driver-runtime.resolveKernelShellSibling`
  *  （单一入口，⛔ 不各写一份 basename==="dist" 上跳逻辑）。本文件经 import 消费，⛔ 不再本地复制一份。
  *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
@@ -1122,6 +1139,62 @@ export function writeScopedGateCache(cacheFile: string, key: string): void {
   }
 }
 
+// ── scoped 门取值（三态；gap-scoped-gate-thin-selection-not-same-shape-as-green）─────────────────────
+// 缺陷：scoped 命令【取零个测试文件】时退出 0，fan-in 把它记成与「真评了 ≥1 个文件且全绿」同形的
+// ok:true ⇒ 硬规则 3b 的假绿。生产实例（claudecodeui `scripts/test.sh:114`）：交付物是 `scripts/*.sh`
+// 的任务从 `## Touches` 抽到 0 个 `*.test.*` ⇒ 打印 `no scoped test files for <id> (thin)` 后 exit 0，
+// fan-in 侧记成 ok:true；项目不得不自造 `scripts/suite-scope-check.sh` 自救。
+//
+// 修法 = 把契约写成【接口】（scoped 命令自己有「评没评」的知识，只有它能说）：
+//   scoped 命令**没有可评对象**时，必须往 stdout 打一行 `SCOPED-THIN selected=<n>`（thin ⇒ n=0）
+//   并仍以 exit 0 退出。fan-in 见到该标记 ⇒ 记 `not-evaluated`（⛔ 不记 green，也⛔ 不当失败——
+//   全量 suite 照跑，那才是唯一真评过的东西）。⛔ 未打印标记的命令无法与 green 区分——这是契约的
+//   代价，故接口必须写进 quay-init 的文档供第三方遵循（plugin/skills/init/SKILL.md）。
+//
+// 退出码语义不变（0=绿 / 非零=红）；标记只在 exit 0 时才被读（非零 ⇒ red，fail-closed——一个真失败的
+// 命令就是真失败，⛔ 不让「它说自己没评」把红洗成 not-evaluated）。
+
+/** scoped 命令的输出契约标记。判定按【位置】：行首（trim 后）命中才算，⛔ 不是「输出里任意位置出现
+ *  该词」（硬规则 2：注释/字符串/日志正文里提到不算命中）。 */
+export const SCOPED_THIN_MARKER = "SCOPED-THIN";
+
+/** scoped 门的取值（三态，两两不同形，硬规则 3b）：green = 真评了且全绿；red = 真评了且有红；
+ *  not-evaluated = **没评成**（thin / 该项目未声明该能力 / 声明不可读）。⛔ 第三态不得与「合格」
+ *  共用取值——那正是本缺陷的形态。 */
+export type ScopedGateVerdict = "green" | "red" | "not-evaluated";
+
+/** 从 scoped 命令的输出（stdout+stderr 合并流）里读输出契约标记。无标记 ⇒ `{thin:false}`（调用方
+ *  按「真评了」处理——契约面上无可区分信息，⛔ 不臆造）。有标记 ⇒ thin:true，并尽力取 `selected=<n>`
+ *  （取不到 ⇒ null，⛔ 不伪造成 0——「没写计数」与「评了 0 个」不同形）。 */
+export function parseScopedThin(output: string): { thin: boolean; selected: number | null; detail: string } {
+  const line = String(output ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(SCOPED_THIN_MARKER));
+  if (line === undefined) return { thin: false, selected: null, detail: "" };
+  const m = /(?:^|\s)selected=(\d+)(?:\s|$)/.exec(line);
+  const selected = m ? Number(m[1]) : null;
+  return { thin: true, selected, detail: selected === null ? line : `selected=${selected}` };
+}
+
+/** scoped 门三态取值的单一真相源（fan-in 执行侧的三个入口共用：未声明该能力 / 缓存命中 / 真跑）。
+ *  ⛔ 取值与 reason 只在这里产生——判据与测试对着同一处，⛔ 不各写一套标准。
+ *  - skip      ⇒ not-evaluated（reason = 该项目的可区分取值）
+ *  - cache-hit ⇒ green（worker 已对着【同一 develop tip】跑绿，出处写在 reason 里；⛔ 不是「没评」）
+ *  - run       ⇒ exit 非零 ⇒ red；exit 0 且有 thin 标记 ⇒ not-evaluated；否则 green
+ *  只有 run 的 not-evaluated 带 `scoped-thin(...)` 出处（它是本任务新增的那一态）。 */
+export function scopedGateVerdict(o:
+  | { state: "skip"; skipReason: string }
+  | { state: "cache-hit" }
+  | { state: "run"; ok: boolean; output: string }): { verdict: ScopedGateVerdict; reason: string | null } {
+  if (o.state === "skip") return { verdict: "not-evaluated", reason: o.skipReason };
+  if (o.state === "cache-hit") return { verdict: "green", reason: "cache-hit(worker-premerge)" };
+  if (!o.ok) return { verdict: "red", reason: null }; // 判词走既有失败摘要路径（⛔ 不在这里另造一套）
+  const thin = parseScopedThin(o.output);
+  if (thin.thin) return { verdict: "not-evaluated", reason: `scoped-thin(${thin.detail})` };
+  return { verdict: "green", reason: null };
+}
+
 /**
  * driver 机械跑通一次无失败 fan-in 的 happy path（锁/merge/delta/typecheck/scoped门/suite/ff）。
  * ⛔ 语义失败点（merge 冲突 / anti-drift HARD FAIL / typecheck 红 / suite 红 / ff 失败）一律返回
@@ -1240,15 +1313,25 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 据 epoch 定位挂起步；gap-fan-in-subprocess-hang-timeout-recovery AC1）；② A1 一行过程日志。
   // `durMs` 算【一次】，共享载体的 `durationMs` 与 per-run 的 `wall_ms` 用同一个读数——⛔ 不各算一次
   // （两次 Date.now() 会给出两个不一致的「同一步时长」）。
-  const step = async (name: string, argv: string[], timeoutMs = 120_000): Promise<MechShResult> => {
+  // `endExtra`（gap-scoped-gate-thin-selection-not-same-shape-as-green）：本节新增于「跑完才有读数」的
+  // 步（scoped 门的三态取值）——它必须与 `ok`/`durationMs` 写在【同一条】end 记录里。⛔ 事后补写第二条
+  // end 记录不是替代（同一 step 两条 end，在【不用配对读法】的读者看来是多跑了一次），故做成 step() 的
+  // 入参而不是第二步。缺省不影响任何既有调用点（无 endExtra ⇒ 记录逐字同前）。
+  const step = async (
+    name: string,
+    argv: string[],
+    timeoutMs = 120_000,
+    endExtra?: (r: MechShResult) => Record<string, unknown>,
+  ): Promise<MechShResult> => {
     const t0 = Date.now();
     appendFanInStepTrace(root, task, runId, name, "begin");
     const r = await mechSh(argv, timeoutMs);
     const durMs = Date.now() - t0;
-    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok, durationMs: durMs });
+    const extra = endExtra?.(r) ?? {};
+    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok, durationMs: durMs, ...extra });
     trace({
-      step: name, exit: r.status, wall_ms: durMs, ok: r.ok,
-      ...(r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
+      step: name, exit: r.status, wall_ms: durMs, ok: r.ok, ...extra,
+      ...(r.ok || extra.reason !== undefined ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     });
     return r;
   };
@@ -1323,7 +1406,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     let codeDelta = "";
     if (deltaList.length > 0) {
       const cd = await mechSh([...classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
-      codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
+      codeDelta = classifyDeltaOutcome(cd.ok, cd.stdout || "");
     }
     // 4b. develop 前进面复用（gap-fan-in-continue-doc-only-advance-reuse-suite）：任务自身 delta 是 code
     // 时，若上一轮 green bucket suite（full-suite-state.json 的 mirror 记录，taskId=本任务）之后、
@@ -1331,7 +1414,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // CONTINUE 重跑，重跑时任务 delta 仍是 code），则复用上一 green 判定、不重跑 suite。判不出
     // （无上一 green / 非祖先 / classify 失败）⇒ fail-closed 照常跑 suite（硬规则 3b）。
     let reuseSkip = false;
-    if (codeDelta !== "" && codeDelta !== "__CLASSIFY_FAILED__") {
+    if (codeDelta !== "" && codeDelta !== CLASSIFY_FAILED) {
       const prevCommit = readPreviousGreenSuiteCommit(suiteStateFile, task);
       if (prevCommit) {
         const anc = await mechSh(["git", "-C", worktree, "merge-base", "--is-ancestor", prevCommit, "HEAD"], 30_000);
@@ -1339,12 +1422,13 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
           const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
-          reuseSkip = adv.ok && (adv.stdout || "").trim() === ""; // 前进面全 doc/inert ⇒ 复用上一 green
+          // 前进面全 doc/inert ⇒ 复用上一 green（同一映射：【没判出来】不构成复用理由）
+          reuseSkip = classifyDeltaOutcome(adv.ok, adv.stdout || "") === "";
         }
       }
     }
-    const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || (codeDelta !== "" && !reuseSkip);
-    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === "__CLASSIFY_FAILED__" ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
+    const needSuite = opts.forceSuite === true || codeDelta === CLASSIFY_FAILED || (codeDelta !== "" && !reuseSkip);
+    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === CLASSIFY_FAILED ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
 
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。
@@ -1394,20 +1478,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
     const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
     const scopedT0 = Date.now();
-    // 第三方项目：无 scoped 能力（scripts/test.sh 与 loop.test_command 皆无）⇒ 跳过 scoped 门直接进
-    // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
+    // 每个分支都写三态取值 `verdict`（gap-scoped-gate-thin-selection-not-same-shape-as-green）：
+    //   skip（该项目未声明该能力）⇒ not-evaluated，取值 third-party-no-scoped-tooling
+    //   cache-hit                    ⇒ green（worker 已对着同一 develop tip 评过绿，出处写 reason）
+    //   run                          ⇒ red / not-evaluated(thin) / green
+    // ⛔ `ok` 仍是【控制流】字段（该步该不该让 fan-in 失败），`verdict` 才是【取值】——⛔ 不把
+    // 「没评成」写成 ok 的某种取值（那正是本缺陷：not-evaluated 与 green 共用 ok:true）。
     if (scopedCmd === null) {
-      const reason = "third-party-no-scoped-tooling";
+      const v = scopedGateVerdict({ state: "skip", skipReason: "third-party-no-scoped-tooling" });
       const durMs = Date.now() - scopedT0;
-      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason, durationMs: durMs });
-      trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, reason });
+      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, verdict: v.verdict, reason: v.reason, durationMs: durMs });
+      trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, verdict: v.verdict, reason: v.reason });
     } else {
       const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
       const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
       if (scopedCacheHit) {
-        trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+        const v = scopedGateVerdict({ state: "cache-hit" });
+        const durMs = Date.now() - scopedT0;
+        appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, verdict: v.verdict, reason: v.reason, durationMs: durMs });
+        trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, verdict: v.verdict, reason: v.reason });
       } else {
-        a = await step("scoped-gate", scopedCmd, 600_000);
+        a = await step("scoped-gate", scopedCmd, 600_000, (r) => {
+          const v = scopedGateVerdict({ state: "run", ok: r.ok, output: combinedOutput(r.stdout, r.stderr) });
+          return { verdict: v.verdict, ...(v.reason === null ? {} : { reason: v.reason }) };
+        });
         if (!a.ok) return fail("scoped-gate", a);
       }
     }
