@@ -98,13 +98,13 @@ EXIT=0
 
 ## AC
 
-- [ ] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-299 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（**修订前 = `4b43b2403476a121ffb9befe4652f80d`**，取法 = `quay goal show AC-299 --json` 的 `.criterion` 字段逐字落盘后 `md5sum`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/sessions` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `Sessions` 条数、本页 `<title>`）。
-- [ ] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
-- [ ] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-299-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
-- [ ] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
-- [ ] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/sessions"` 与 `LABEL_EN="Sessions"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-299 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-299` 落账。
-- [ ] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-299（贴该集合条数与 AC-299 是否在内）。
-- [ ] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac299-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
+- [x] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-299 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（**修订前 = `4b43b2403476a121ffb9befe4652f80d`**，取法 = `quay goal show AC-299 --json` 的 `.criterion` 字段逐字落盘后 `md5sum`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/sessions` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `Sessions` 条数、本页 `<title>`）。
+- [x] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
+- [x] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-299-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
+- [x] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
+- [x] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/sessions"` 与 `LABEL_EN="Sessions"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-299 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-299` 落账。
+- [x] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-299（贴该集合条数与 AC-299 是否在内）。
+- [x] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac299-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
 
 ## DoD
 
@@ -122,3 +122,25 @@ EXIT=0
 - `tasks/gap-ac299-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-299 --criterion …` 落库，`expect` 与 chrome 作用域语义逐字不变、只补「为什么改」；第二条是配套夹具（按 marker 从 goal 文件逐字抽取派生块，与 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-sessions.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
+
+## 执行记录（落地读数 / 修法 / 为什么改）
+
+**为什么改**：`ce0f47518`（`gap-serve-same-root-admission-lock`，done）把 web 端口默认改成内核分配（`--port 0`），派生那一步解析出的字面量恒为 `0` ⇒ `<host>:0` 是**结构性**不可 fetch 的地址，本 AC 在任何使用该默认的部署上恒假。机制本身从未坏：在**当次**载体 `web` 的真实地址上四条断言全过。坏的只是**判据的承载体**（地址派生那一步）。台账红绿两侧 `criterionHash` 相同（`4043d01f90aa9a56`）= 判据文本没变、变的是宿主。
+
+**修法**：只重锚**地址派生那一步** —— 逐字取用 `goals/AC-288-*.md` 的 `# >>> addr-derivation` … `# <<< addr-derivation` 块（同一行、同族形态；仅把 marker 注释里的夹具路径改为 ac299），`ROUTE="/sessions"` / `LABEL_EN="Sessions"` 两行留在块外逐字不变。候选仍由 `pgrep -f 'quay.ts serve'` × `/proc/<pid>/cwd == $root` 产生；每个候选先读**它自己的 argv**（NUL 分隔、**按位置**判 `serve … --host H --port N`，N ≥ 1），否则读 `$root/.quay/server.json`（要求顶层 `pid` == 该候选 ∧ 活 ∧ `services[].name=="web"` ∧ `up` 为真）；两者取不到 ⇒ 记成因、**继续下一候选**。载体只用于**派生地址**，判定仍是外部 HTTP GET（硬规则 4b）；只取 `name=="web"`（⛔ 不取 control —— 同 pid 不同端口）。
+
+**⚠️ 超出 Plan 字面的一处改动（如实登记）**：Plan 3 写「只有派生块与『为什么改』变化」，但 AC4 要求真实 fail 时 stderr 对**每个**候选给出 `pid` + 派生地址 + 成因。原判据的失败发射是裸 `echo "CAUSE=…" >&2; exit 1`（**不带 pid**），只有零候选的 `no-running-serve-instance` 才「恰好」满足 AC4 —— 那是**空洞满足**（硬规则 4 推论三的形态）。⇒ 把**失败发射**改走正本块自带的 `fail()`（`CAUSE=` 仍单行，另加 `CANDIDATES:` 逐候选行；这正是 AC-288 同族已落地的形态）。**每个 cause token 逐字保留、断言作用域与 `expect` 一字未动**（AC5 的钉死项全部不变），强度只增不减。
+
+**正负两向读数**（未跟踪 scratch `/data/home/yale/work/quay/.quay/ac299-criterion-reanchor/`，下一轮可独立复算）：
+
+- **AC1**（`ac1-derived-addr.txt` / `ac1-en-zh-readings.txt`）：修订前 md5 `4b43b2403476a121ffb9befe4652f80d`（3067 B）；修订后 `a66e795424c2dd3145720daa2f16a0a3`（5684 B；取法 = `goal show AC-299 --json` 的 `.criterion` 逐字落盘后 `md5sum`）。`goal gate AC-299 --dry-run --json` ⇒ `verdict:"pass"`、`GATE_EXIT=0`。派生地址 = **当次**载体 `web` 的 `127.0.0.1:16377`（载体 `pid=850862, host=0.0.0.0, port=16377`；`SRC=carrier`）—— ⛔ 不是 0。`/sessions` 响应体直读：en `<html lang="en"`、nav 区块 `Sessions`=2、`会话`=0、本页 `<title>=quay — Sessions — session observation`；zh `<html lang="zh"`、nav `Sessions`=0、`会话`=2、本页 `<title>=quay — 会话 — 会话观测`。
+- **AC2（两向都贴；`ac2-ac4-controls.txt`）**：(a) **无活候选** —— 全新 `git init` root + 判据作为**文件**运行（runner 自身 `sh` 的 argv 不含 pgrep 模式）⇒ `exit 1`，`CAUSE=no-running-serve-instance …` + `CANDIDATES: none -- pgrep -f 'quay.ts serve' x cwd=… matched no process`；(a′) worktree root（候选在场但无一条可派生地址）⇒ `exit 1`，`CAUSE=no-derivable-address …` + `CANDIDATES: | pid=2882683 addr=- cause=argv-no-serve,carrier-absent`；(b) **派生地址指向真死端口**（kernel 刚交出又释放的 `23575`）⇒ `exit 1`，`CAUSE=en-fetch-failed -- GET http://127.0.0.1:23575/sessions returned nothing (addr=127.0.0.1:23575)`。(a)/(a′) 与 (b) **成因不同形**。
+- **AC3**（`ac3-non-literal.txt`）：`grep -c "14037\|172\.28\.0\.1" goals/AC-299-*.md` ⇒ **0**（`grep` exit 1 = 无命中）；**配套正控制**：同一谓词对**已知为真**的样本（本任务体，含 `172.28.0.1:14037`）⇒ **8**，并贴出前 3 条实际命中行 ⇒ 谓词不是恒零（硬规则 2 下半）。
+- **AC4**：上面 (b) 是真实 fail，stderr 逐候选给出 `pid=2883104 addr=127.0.0.1:23575 cause=derived-from-argv` **与** `pid=2886341 addr=- cause=argv-no-serve,carrier-absent` —— ⛔ 无 `addr=` 空、无无成因裸失败；(a′) 同形给出 `pid` + `addr=-` + `cause`。
+- **AC5**（`ac5-revision.txt`）：字段级 diff 仅 `criterion` 变；`expect` / `title` / `origin` / `status` / `statusLog` / `fidelity` / `activatedAt` 逐字 SAME；`ROUTE` / `LABEL_EN` 与 chrome 作用域取法逐字不变。写入面提交：worktree `b5124cb3d`（criterion）、`0621e78cf`（夹具）；主检出 `9dab0f92a`（criterion）。**新指纹 `2b77f04132787585`**（旧 `4043d01f90aa9a56`）的独立台账行：`2026-09-23T16:18:41.926Z actor=goal-amend verdict=pass criterionHash=2b77f04132787585` —— 由 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE … goal check --stale-pass --sweep --budget 1` 对**活生产实例**真跑产出（`sweep.ran[0]={id:AC-299,verdict:pass,ms:466}`）。
+- **AC6**（`ac6-stale-pass.txt`）：`criterion-failure-attribution-check.ts` ⇒ `PASS: … inDomain=155 bareAcs=0 ≤ baseline 0`，`exit 0`；`goal check --stale-pass` 的 `failing` = **6** 条（`AC-179, AC-255, AC-289, AC-296, AC-298, AC-302`，均为**既存** stale 家族，⛔ 不在本任务 Touches 内），**AC-299 不在内**。修订前 AC-299 在该集合内；修订后进入 `amendedUnverified`，sweep 后该集合已空。
+- **AC7**（`ac7-scoped-gate.txt`）：`bash <worktree>/scripts/test.sh --for-task gap-ac299-criterion-cmdline-port-literal-stale --allow-thin` ⇒ `exit 0`（夹具 12 例全绿）。scoped-gate 缓存已写（`developSha=353fa7e791be6616bf9520609f377a9b959416da`）。
+
+**夹具** `packages/quay/test/ac299-criterion-address-derivation.test.mjs`（`// @test-group product`，12 例全绿）：**不是**派生逻辑的副本 —— 按 marker 从 `goals/AC-299-*.md` **逐字抽取** criterion 的 `addr-derivation` 块（单一正本关系），在 `git init` 过的临时 root 里对**真实进程**与真实载体跑正/负两向：显式端口 / `--port 0` + 载体 / 通配 host 归一化 / 无载体 / 载体 pid 不符 / 无 `web` 条目 / `web.up:false` / 载体 pid 已死 / runner 自身 `sh` 候选的归因 / 死端口的 `en-fetch-failed`；另加一例钉死「块是 route-agnostic、`ROUTE`/`LABEL_EN` 在块外」（同族复用契约）。同族夹具 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 在执行当轮**存在于同族任务分支**（`ae3edb47c`，⛔ 未落 develop/author）⇒ 已按盘上实际内容**照其形态**写本 AC 的同族文件（⛔ 非假定）。
+
+**DoD 一处如实登记**：DoD 写「`goal check --stale-pass` ⇒ `exit 0`」，但该命令的退出码由**全体** frozen AC 共同决定；此刻仍有 6 条**既存** stale 家族 AC 在 `failing`，故**进程退出码为 1**。**AC6 的可满足项（AC-299 不在 `failing` 内）已达成**；把别人的判据改绿不在本任务范围内（⛔ 越界 + 硬规则 12）。同族先例 `gap-ac288-…` 的落地读数同形。
