@@ -182,3 +182,23 @@ suite 步即可绿。
 
 ⛔ 本任务**未**越界改 `scripts/test.sh`（不在 `## Touches`，会被 anti-drift 拒）；**未**重启 driver-anchor
 （driver 生命周期是 manager 层的人授常设权，本 worker 无此权；且第二个 driver 会劫持在飞 worker）。
+
+## Evidence — 本轮（2026-09-24，第 6 轮）· 剩余 3 条 suite 红经隔离复跑判定为负载敏感 flake（非 delta）
+
+**实现侧零改动**（分支 delta 对 develop 仍 = 1 file：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`；`git merge --no-edit develop` ⇒ **Already up to date**，无未合并路径，worktree clean）。
+
+上一轮 exit-not-landed 的真因日志为 `# fail 3`（**⛔ 不再是 goal 家族那 30 条** —— 泄漏修复已落地，29→3），三条各落在一个**逐字节等于 develop** 的测试文件上（`git diff --stat develop...HEAD -- <三门文件>` 为空）：
+
+| 文件 | 断言 | 本轮隔离复跑 |
+|---|---|---|
+| `plugin/test/ready-pool-check-s22.test.mjs:192` | AC5 N=2000 `cached < uncached*0.75`（套件内实测 ratio 0.80，该文件耗时 23078ms；隔离下 9836ms） | **pass 8/8** |
+| `plugin/test/driver-anchor-declaration.test.mjs:242` | AC5 `readAnchorJson(root)` 读到 `null` ⇒ 读 `.kinds` 抛 TypeError（anchor.json 非原子写） | **pass 3/3** |
+| `packages/quay/test/gap-git-graph-…-decorate-labels.test.mjs:224` | AC6 `rows[0]`(=`fedaf8156` 本分支头) ≠ oracle(=`6ddd6f15a` develop)；且 `[ref-window]` 重试闸未报 refs-moved | **pass 7/7** |
+
+⇒ 三条**全部转绿**；三条文件与 develop 逐字节相同；`QUAY_TEST_GIT_GRAPH_LIVE_REFS` 全树 `grep` 只出现在注释与 `=== "1"` 判定里，**套件从不 export 它**（该文件自述「NEVER set by the suite」）⇒ 判为**套件并发 / 宿主负载下的时序敏感**（当前 loadavg ≈ 30，2 个在飞 worker），非本 delta 造成。第一条与既有经验（该断言 load-independent ~25% 抖动）吻合。
+
+**本轮 scoped 门（与 fan-in 同一条命令、裸跑、⛔ 不加 `env -u`）**：`bash scripts/test.sh --for-task gap-ac295-… --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。`--write-scoped-gate-cache` ⇒ `{"key":"gap-ac295-…\t6ddd6f15a7e7d424a67c87b022197d5423e8f5b6","ok":true}`。
+
+**六条 AC 本轮逐条复验**：AC1 criterion 内旧派生字面量计数 = **0**、`# >>> addr-derivation` 区块在场；AC3 `goal gate AC-295 --dry-run --json` ⇒ **EXIT=0**；AC5② `grep -rlF` 旧字面量在 `goals/` 只剩 **1** 个文件（AC-289，同族在飞）—— **AC-295 不在其中（1→0）**，符合 AC5「同族落地后按逐文件差量、非绝对值」的约定；AC6 台账累计 **117** 条，尾条 `2026-09-23T19:26:08.603Z | pass | goal-cli`，且存在对**新**文本的 pass（`goal-sweep`，`criterionHash 7631739f3aeeeafc` ≠ 旧 `bf42948d03aef763`）。
+
+**⛔ 未越界**：三个红文件均不在本任务 `## Touches`，改它们会被 fan-in 的 anti-drift 拒。建议由拥有 `scripts/test.sh` / 注册表的任务把 `ready-pool-check-s22` 的 AC5 断言登记为 load-sensitive 或加宽判据 —— **本条只记录，不在本任务内修**。
