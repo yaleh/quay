@@ -199,8 +199,24 @@
         "embeddedInterpreterLines": "-39 = the five deleted shells' effective lines, summed from the checker's OWN per-file reading taken BEFORE the deletion (`sh-census-check.ts --json` -> files[path].codeLines): anti-drift-touches-check.sh 5 + concurrent-batch-scheduler.sh 7 + it0-backlog-projection-check.sh 11 + serial-fanin-absorb.sh 5 + touches-orthogonality-check.sh 11 = 39. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY these five paths (`git diff --name-status develop HEAD -- '*.sh'` -> 5 x `D`), and every caller edit this task made is to a `.sh` file that already existed and whose own line count is unchanged in a way this axis reads (the four `*-selfcheck.sh` edits swap `\"$CHK\"` for `node \"$CHK\"` and `-x` for `-f`, +0 effective lines each — all four remain non-embedded pure-shell programs). ⛔ The totals.scripts movement (147 -> 142) and embeddedInterpreterScripts (59 -> 54) are called out rather than folded in: they are the same five files, seen from the count axes, and neither is a ratchet axis.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (the five deleted paths are real files, not symlinks, so totals.symlinkedCopies stays 59)."
       }
+    },
+    {
+      "when": "2026-09-23 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot)",
+      "from": {
+        "embeddedInterpreterLines": 7680,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7678,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and here a SIDE EFFECT of the fix rather than its goal. This task rewrites the plugin-install recipe quay-init prints: the old two-argument form (`claude plugin marketplace add quay \"$PLUGIN_ROOT\"` — rejected outright by the current CLI, and pointing consumers at the machine-local plugin-cache directory) becomes the single-argument github channel (`claude plugin marketplace add yaleh/quay`) plus `claude plugin install quay@quay --scope project`. In the shell that collapses a `printf` + a heredoc close + a heredoc open (3 effective lines) into one command line (1 effective line), so plugin/scripts/quay-init.sh falls 1012 -> 1010 effective lines. The file still execs `node` at a command position and is not on the exception list, so it STAYS IN the axis — the line count moved, not its membership (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh entries above). ⚠️ Why this re-anchor is not optional: AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it — a stale-higher baseline would let a future +2 embedded-interpreter .sh land for free, i.e. this gain would be un-recaptured. Re-anchored after the recipe edit was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` -> totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh effective lines 1012 -> 1010, measured on BOTH sides with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters): `git show develop:plugin/scripts/quay-init.sh` reads 1012 / embedded [node]; the worktree copy reads 1010 / embedded [node] — so the file is IN the axis on both sides and the move is a line count, not a membership change. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is 6 paths (`git diff --name-only develop HEAD` -> orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md, plugin/scripts/quay-init.sh, plugin/skills/init/SKILL.md, plugin/test/quay-init.test.mjs, test/cold-start-e2e.sh, docs/analysis/quay-init-closure-ratchet.baseline.json), of which TWO are `*.sh`. The SECOND one is called out rather than folded in: test/cold-start-e2e.sh moved 178 -> 187 effective lines (+9, the new recipe assertions) but its `embedded` reading is `[]` on both sides — pure shell, no interpreter at a command position — so it is OUTSIDE this axis entirely and contributes 0, which is why the total moves by exactly the one file. Confirmed by the checker itself: totals.embeddedInterpreterLines = 7678 and files[path=plugin/scripts/quay-init.sh].codeLines = 1010 differ from the develop-side 7680 / 1012 by exactly the same 2, so nothing else moved.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (both edited .sh are real files, not symlinks, so totals.symlinkedCopies stays 59)."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7680,
+  "embeddedInterpreterLines": 7678,
   "duplicateCopies": 0
 }
