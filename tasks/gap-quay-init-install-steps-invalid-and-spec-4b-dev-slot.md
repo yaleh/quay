@@ -83,3 +83,9 @@ claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
 **执行 2026-09-23T07:32:52.807Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：worker-driver 连续 3 次 <60000ms 快速死亡（退避上限）；快速死亡分类：ordinary
+
+**解除 2026-09-23 — 基础设施原因已修复并验证，非本任务内容缺陷**
+
+- 根因排查确认：上述 needs-human 是 worker-driver 连续快速死亡触发的重试退避上限，根因是 `.quay/profiles.yml` 中 `worker-default.model` 及其三个 `ANTHROPIC_DEFAULT_*_MODEL` 环境覆写被设为一个网关上不存在的模型名 `deepseek-v4-pro-anthropic`（直连探测 `http://127.0.0.1:26510/v1/models` 确认：网关只有 `v4.1flash`/`v4.1flash-anthropic`/`v4pro`/`v4pro-anthropic` 等条目，无任何 `deepseek-*` 名）。该窗口内每次 worker/selector 派发请求都以 400 "Invalid model name" 秒死，与本任务自身的 Proposal/Plan/AC/DoD 内容毫无关系——纯属基础设施配置故障造成的连坐。
+- 修复：已将 `.quay/profiles.yml` 的 `worker-default.model` 与三个 `ANTHROPIC_DEFAULT_*_MODEL` 覆写统一改为 `v4.1flash-anthropic`，并直接对网关发起 `POST /v1/messages`（`model: v4.1flash-anthropic`）验证返回干净的 200 响应，确认该模型名在当前网关上可用。
+- 据此将本任务从 needs-human 退回 ready，交由下一轮 worker-driver 重新拾取执行；本次变更未修改本任务 Proposal/Plan/AC/DoD 的任何一条内容，也未改动 Touches 清单。
