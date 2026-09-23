@@ -110,3 +110,17 @@ curl -sf --max-time 10 -H 'Cookie: lang=zh' http://172.28.0.1:13609/needs-human 
 - `tasks/gap-ac295-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-295 --criterion …` 落库，`expect` 与正文语义逐字不变；第二条是配套夹具（两种部署形态的派生正/负控制，与 `packages/quay/test/ac294-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-needs-human.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
+
+## Evidence — 上一轮 fan-in suite 红 30 条的真因（本轮实测，供下一轮/管理者直接用）
+
+**本任务实现已完成且自检全绿**（`task_check` ok:true，6/6 AC；scoped gate `EXIT=0`，14/14；develop 已并入，worktree clean）。上一轮 30 条 suite 红**不是本任务 delta 造成的**，真因是**环境泄漏**，不是代码缺陷：
+
+- 常驻 `driver-anchor`（本工作区 pid 2391720，`/proc/2391720/environ` 实测）带着 **`QUAY_GOAL_ACCEPTANCE_ACTIVE=1`**。
+- `plugin/scripts/suite-driver.ts:176` 的 spawn 用 `env: { ...process.env, … }` ⇒ 该变量随 fan-in 一路传进 `scripts/test.sh` ⇒ `node --test`；`scripts/test.sh` 只 `unset FORCE_COLOR`（`:176` 那条注释的用意正是「入口清干净让每个子进程继承」，本条漏了）。
+- 后果：goal 重入闸（`goal-store.ts:1784/1992`、`goal-driver.ts:639`）在**每一条** goal 判据/轮转路径上短路 ⇒ goal 家族测试批量假红。
+
+逐文件实测（同一 worktree、同一 HEAD，测试文件与 develop **逐字节相同** ⇒ 与 delta 无关）：加 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` 后 `goal-invariants-standing` 19/19、`goal-driver-s12` 4/4、`s13` 3/3、`s02` 14/14、`s10` 4/4、`s04` 14/14、`goal-store` 72/72、`gap-webui-dashboard-tests-card-latest-round-no-live-signal` 4/4 —— 即上一轮日志里红的 8 个文件**全绿，0 失败**。上一轮同样文件的 `passed=false` 行见 `.quay/fan-in-suite-gap-ac295-…-468cbf.log`。
+
+一行复现：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --test plugin/test/goal-invariants-standing.test.mjs`（带该变量 ⇒ 红；不带 ⇒ 绿）。
+
+⚠️ 本任务 Touches 不含 `scripts/test.sh` / `plugin/scripts/suite-driver.ts` ⇒ **不在本任务内修**（越界写会被 fan-in 的 anti-drift 拒）。同族 8 个 in-flight 任务（`gap-ac179/288/289/290/291/292/293/294-…`）同样会被这条卡住 ⇒ 建议单独立案（最小修法：`scripts/test.sh` 入口 `unset QUAY_GOAL_ACCEPTANCE_ACTIVE`，与既有 `unset FORCE_COLOR` 同形；或在 `suite-driver.ts` 的 spawn env 里剔除）。
