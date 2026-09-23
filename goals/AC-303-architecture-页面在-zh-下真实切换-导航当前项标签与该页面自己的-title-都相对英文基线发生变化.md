@@ -5,26 +5,157 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THIS STEP WAS RE-ANCHORED (2026-09-24,
+  gap-ac303-criterion-cmdline-port-literal-stale):
+
+  # the launcher default for the web port is now 0 = kernel-assigned ephemeral
+  (plugin/scripts/start-drivers.ts;
+
+  # ce0f47518, gap-serve-same-root-admission-lock, 2026-09-18, whose body reads
+  "Default port 4173 -> 0."). A
+
+  # live instance under that default therefore carries the literal "--host H
+  --port 0" on its own argv, and the
+
+  # PREVIOUS derivation of this criterion grepped exactly that argv and produced
+  the structurally unfetchable
+
+  # "H:0", reporting CAUSE=en-fetch-failed against a server that was up the
+  whole time. The ledger shows this
+
+  # AC red for the same reason the whole re-anchored family went red: the pass
+  at 2026-09-23T05:31:48.095Z and
+
+  # the first fail at 2026-09-23T08:55:42.479Z carry the SAME
+  payload.criterionHash f452c81b20f3ae15, so the
+
+  # criterion text did not change -- the CARRIER moved (gen-1 had been started
+  before ce0f47518 with an explicit
+
+  # port and outlived the change; gen-2 restarted at 2026-09-23T13:45:20.163Z
+  and took the new default).
+
+  # The real listening port is knowable only from this root OWN carrier
+  $root/.quay/server.json (writer
+
+  # packages/quay/src/serve.ts; read contract packages/quay/src/server-state.ts,
+  whose absent / unreadable /
+
+  # present three-way outcome is mirrored by the carrier-* tokens below; the
+  carrier holds TWO services, so only
+
+  # name=="web" counts -- control is a different port on the same pid). No
+  host/port literal is written down
+
+  # here: the address is re-derived on EVERY run, so a restart (which binds a
+  different ephemeral port) cannot
+
+  # stale it again, and nothing here depends on this host. The carrier is used
+  ONLY to derive an address -- the
+
+  # verdict stays the external HTTP GET further down (hard rule 4b: never judge
+  a live surface by a reading that
+
+  # surface produced about itself). The block is the family canonical one,
+  adopted VERBATIM from goals/AC-288-*.md
+
+  # with only its header-comment fixture name retargeted; ROUTE= and LABEL_EN=
+  are deliberately OUTSIDE it so the
+
+  # block stays byte-comparable across the re-anchored ACs. The chrome scope
+  below is unchanged: only the
+
+  # <nav>...</nav> region and this page own <title> are matched -- an en
+  response carries "Architecture" 4 times,
+
+  # about 3 of them outside <nav>, so a whole-response substring match would
+  misfire and must not be widened.
+
+  # >>> addr-derivation (this block is run verbatim by
+  packages/quay/test/ac303-criterion-address-derivation.test.mjs)
+
   root=$(git rev-parse --show-toplevel)
+
+  cands=""
+
+  for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do
+    [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
+    cands="$cands $p"
+  done
+
+  argv_addr() {
+    tr '\0' '\n' < "/proc/$1/cmdline" 2>/dev/null | awk '{arg[NR]=$0} END{s=0; for(i=1;i<=NR;i++) if(arg[i]=="serve"){s=i; break}; if(s==0){print "argv-no-serve"; exit}; h=""; q=""; for(i=s+1;i<=NR;i++){ if(arg[i]=="--host"&&i<NR) h=arg[i+1]; else if(arg[i]=="--port"&&i<NR) q=arg[i+1]; else if(arg[i]~/^--host=/) h=substr(arg[i],8); else if(arg[i]~/^--port=/) q=substr(arg[i],8)}; if(q==""){print "argv-port-absent"; exit}; if(q+0<1){print "argv-port-kernel-assigned"; exit}; if(h==""){print "argv-host-absent"; exit}; print "addr="h":"(q+0)}'
+  }
+
+  carrier_addr() {
+    f="$root/.quay/server.json"
+    [ -f "$f" ] || { echo "carrier-absent"; return; }
+    kill -0 "$1" 2>/dev/null || { echo "candidate-pid-dead"; return; }
+    if command -v node >/dev/null 2>&1; then
+      o=$(node -e '(()=>{const j=require(process.argv[1]);if(String(j.pid)!==process.argv[2])return console.log("carrier-pid-mismatch");const w=(j.services||[]).filter(x=>x&&x.name==="web");if(!w.length)return console.log("carrier-no-web-service");if(w[0].up!==true)return console.log("carrier-web-down");console.log("addr="+w[0].host+":"+w[0].port)})()' "$f" "$1" 2>/dev/null)
+    elif command -v python3 >/dev/null 2>&1; then
+      o=$(python3 -c 'import json,sys
+  d=json.load(open(sys.argv[1]))
+
+  if str(d.get("pid"))!=sys.argv[2]: print("carrier-pid-mismatch"); sys.exit()
+
+  w=[x for x in (d.get("services") or []) if x.get("name")=="web"]
+
+  if not w: print("carrier-no-web-service"); sys.exit()
+
+  if w[0].get("up") is not True: print("carrier-web-down"); sys.exit()
+
+  print("addr=%s:%s"%(w[0].get("host"),w[0].get("port")))' "$f" "$1"
+  2>/dev/null)
+    else
+      o="carrier-no-json-tool"
+    fi
+    rc=$?
+    if [ -z "$o" ]; then
+      if [ "$rc" != 0 ]; then o="carrier-unreadable-rc$rc"; else o="carrier-unreadable"; fi
+    fi
+    echo "$o"
+  }
+
+  fail() { echo "CAUSE=$1" >&2; if [ -n "$cands" ]; then echo "CANDIDATES:$rep"
+  >&2; else echo "CANDIDATES: none -- pgrep -f 'quay.ts serve' x cwd=$root
+  matched no process" >&2; fi; exit 1; }
+
+  addr=""
+
+  src=""
+
+  rep=""
+
+  for p in $cands; do
+    a=""
+    c=""
+    s=""
+    ra=$(argv_addr "$p")
+    case "$ra" in addr=*) a="${ra#addr=}"; s="argv" ;; *) c="$ra" ;; esac
+    if [ -z "$a" ]; then
+      rc2=$(carrier_addr "$p")
+      case "$rc2" in addr=*) a="${rc2#addr=}"; s="carrier" ;; *) c="${c:+$c,}$rc2" ;; esac
+    fi
+    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; "*:"*) a="127.0.0.1:${a#*:}" ;; "::"*) a="127.0.0.1:${a#::}" ;; esac
+    if [ -n "$a" ]; then
+      rep="$rep | pid=$p addr=$a cause=derived-from-$s"
+      if [ -z "$addr" ]; then addr="$a"; src="$s"; fi
+    else
+      rep="$rep | pid=$p addr=- cause=$c"
+    fi
+  done
+
+  if [ -z "$addr" ]; then
+    if [ -z "$cands" ]; then fail "no-running-serve-instance -- no quay.ts serve process with cwd=$root; the locale mechanism cannot be evaluated on a live surface (AC-179 probe pattern)"; fi
+    fail "no-derivable-address -- pgrep -f 'quay.ts serve' x cwd=$root matched candidate(s) but none yielded a live web address (an explicit --port >= 1 on the process's own argv, or this root's .quay/server.json naming that pid's web service)"
+  fi
+
+  # <<< addr-derivation
 
   ROUTE="/architecture"
 
   LABEL_EN="Architecture"
-
-  addr=""
-
-  for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do
-    [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
-    a=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
-    [ -n "$a" ] || continue
-    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; esac
-    addr="$a"
-    break
-  done
-
-  if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
-  serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
 
   en=$(curl -sf --max-time 10 "http://$addr$ROUTE" 2>/dev/null)
 
