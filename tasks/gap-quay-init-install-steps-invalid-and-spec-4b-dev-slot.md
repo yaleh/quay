@@ -266,6 +266,34 @@ AC-161 exit=0
 
 **③ 本任务自身的门禁（本轮实测）**：`scripts/test.sh --for-task gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot --allow-thin` ⇒ **EXIT=0**（scoped 只选到 `quay-init.test.mjs`：14 tests / 14 pass / 0 fail，静态检查与 typecheck 全绿）；`anti-drift-touches-check --task ... --merge-target develop` ⇒ 0 违规。
 
+### 续轮（2026-09-24 worker 第 3 轮）：merge 冲突解决 + 两条 suite 红已消失（复核）
+
+**① 上轮 ① 的绝对值随 develop 前进两次再基（数字会变，结论不变）。** 本任务对 `plugin/sh-census-baseline.json`
+的 `-2`（`quay-init.sh` 1012 → 1010）保持成立，但 `from/to` 随 develop **自身的**再锚而移动：
+7680→7678（上轮）⇒ 7683→7681（上轮 merge 后）⇒ **7688→7686（本轮 merge 后）**。
+本轮 merge 在 `plugin/sh-census-baseline.json` 上冲突（两侧都在 `_reanchorLog` 尾部追加了一条），按**逐条并集**解决：
+develop 的 `+5`（`gap-arch-tsify-checker-mutation-check-sh` 的 thin entry）原样保留，本任务条目重新基线后追加为最后一条，
+**文件末的读数取合并树上 checker 自己的实测值**（`sh-census-check.ts --json` → `totals.embeddedInterpreterLines = 7686`），
+不是两数相加、也不是任一侧的原值；per-file 复核同向：`plugin/scripts/quay-init.sh` 1010 / `embedded:[node]`，
+另一条被改的 `test/cold-start-e2e.sh` 187 / `embedded:[]`（在本轴之外，贡献 0）。
+`plugin/test/sh-census-check.test.mjs` AC6（baseline **等于**实测读数）⇒ **20/20 绿**。
+
+**② 上轮 ② 诊断的环境成因已在 develop 落地修复，两条 suite 红本轮复核已消失。**
+上轮 ② 给出的单点修法（`scripts/test.sh` 顶部钉 `LC_ALL`/`LANG`/`TZ`）**已于 2026-09-23 10:46:01 UTC 由 `57138e535`
+（`gap-suite-ambient-reds-block-all-code-landings`）在 develop 落地**——上轮那次失败的 suite（08:33 UTC）跑在该修复**之前**的树上。
+本轮 merge 后复核：`plugin/test/laydown-set-check.test.mjs` **9/9 绿**、`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` **20/20 绿**
+（此前为 8/9、19/20）。⇒ 上轮两次 `exited-not-landed` 的直接成因是 **branch-lag（钉 locale 的修复尚未进分支）**，
+不是本任务内容缺陷；这两条测试无需改动（它们与本任务 delta 无交集）。
+
+**③ 本轮 AC 逐条复核（合并树上重取，非复用上轮读数）**：AC1 ✓（旧两参数形式零命中 exit=1；两文件均打印 github 配方）；
+AC2 ✓（**本轮真实重跑**：隔离 `CLAUDE_CONFIG_DIR` + 空 cwd 下逐行执行打印出的两条命令 → exit=0/0，
+`claude mcp list` 路径含 `/plugins/cache/quay/quay/0.11.0/`；对照旧两参数形式 → `✘ Invalid marketplace source format`、**exit=1**；
+执行后主检出与 worktree 的 `.claude/` 均干净）；AC3 ✓（`quay@quay-dev` `enabled:true` 且**无 `errors` 键**；本仓路径含 `/work/quay/plugin/`；
+quay-fleet / meta-cc / lan / claudecodeui 四条安装路径均含 `/cache/quay/quay/`；空目录 `plugin:quay` 计数 **0**
+而同一份输出里 `plugin:(archguard|meta-cc)` 计数 **2**——硬规则 4 推论二的自检形态）；AC4 ✓（§4b 内 `quay-dev` 8 条命中；
+旧「唯一允许项」零命中 exit=1）；AC5 ✓（`quay-init.test.mjs` 14/14；`scripts/test.sh --for-task ... --allow-thin` **EXIT=0**）；
+AC6 ✓（`quay goal gate AC-161` → `verdict: pass`，exit 0）。
+
 ## DoD
 
 - 一个真实的新项目（空目录，非 fixture）按 `quay-init` 打印的步骤原样操作后，会话里的 quay MCP 从 github 发布渠道的缓存加载（AC2 读数 + 一次真实项目读数）；本仓继续从 `quay-dev` 加载开发树（AC3）。文件改了、测试绿了只是必要条件——判据是生产读数。
