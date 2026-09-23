@@ -14,7 +14,12 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shQuote } from "./config/utils.ts";
+// `DEFAULT_ACCEPTANCE_TIMEOUT_MS` is the ONE definition of the runner's default kill deadline
+// (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). ⛔ The direction of this
+// import matters: config/utils.ts never imports back from here, so importing the constant into
+// both `runAcceptance` and `runAcceptanceCapture` adds no cycle — the reverse (defining it here
+// and importing it into utils) would create one, since utils is upstream of this file.
+import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "./config/utils.ts";
 import type { GateVerdictKind } from "./types.ts";
 
 export interface AcceptanceResult {
@@ -67,9 +72,6 @@ export type NotEvaluatedCause =
   | "spawn"
   /** exit 126 / 127 — the criterion's own command could not be run (not found / not executable) */
   | "not-runnable";
-
-/** The default criterion deadline when neither the record nor the environment names one. */
-export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 60_000;
 
 /** exit 126 (found, not executable) / 127 (not found): the criterion never got to state anything. */
 const NOT_RUNNABLE_EXIT_CODES = new Set([126, 127]);
@@ -135,7 +137,16 @@ export interface AcceptanceTimeout {
 
 /**
  * Resolve a GOAL criterion's deadline: the record's own `timeoutMs` > `QUAY_ACCEPTANCE_TIMEOUT_MS`
- * > the default.
+ * > `DEFAULT_ACCEPTANCE_TIMEOUT_MS`.
+ *
+ * ⛔ The record half is the ONLY thing this function adds: everything below it is the SAME chain
+ * `config/utils.ts:resolveAcceptanceTimeoutMs` owns (env > the gate's own `timeoutMs` > the ONE
+ * default), and the goal paths pass no gate config. The default is therefore IMPORTED, not
+ * re-declared — two `60_000` literals is exactly the drift the sibling task
+ * (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout) removed.
+ * ⛔ `env` stays injectable rather than delegating outright, because the precedence is only
+ * testable by passing an env the test controls, and `resolveAcceptanceTimeoutMs` reads
+ * `process.env` directly.
  *
  * ⛔ A record value that is not a finite positive number is IGNORED, never coerced: `spawnSync`
  * treats `timeout: NaN` as "no deadline", so a typo in a record would silently DISABLE the guard
@@ -281,7 +292,7 @@ export function withFailureOutput(
  * exports are visible to the acceptance command, and the remaining environment
  * is inherited from the invoking process.
  */
-export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name, timeoutKnob }: RunAcceptanceArgs): AcceptanceResult {
+export function runAcceptance({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS, envFile, name, timeoutKnob }: RunAcceptanceArgs): AcceptanceResult {
   // DIR-103-C: fail-closed BEFORE execution when envFile is set but missing.
   if (envFile !== undefined && !fs.existsSync(envFile)) {
     return {
@@ -381,7 +392,7 @@ export interface AcceptanceCaptureResult {
  * text (unlike `runAcceptance`, which keeps only a bounded failure excerpt).
  * Mirrors coverage-floor.ts's `spawnSyncCapture` exactly.
  */
-export function runAcceptanceCapture({ command, cwd, timeoutMs = 60000 }: RunAcceptanceArgs): AcceptanceCaptureResult {
+export function runAcceptanceCapture({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS }: RunAcceptanceArgs): AcceptanceCaptureResult {
   const r = spawnSync(command, {
     cwd,
     shell: true,
