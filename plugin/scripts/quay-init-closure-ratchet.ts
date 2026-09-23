@@ -67,6 +67,17 @@ import { createHash } from "node:crypto";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// The generator's SINGLE repo-root-relative naming point — the sibling assertion module owns it
+// (gap-quay-init-sh-no-single-naming-point). ⛔ Read WHY IT LIVES THERE, in `QUAY_INIT_REL`'s comment
+// in quay-init-closure-assertion.ts before moving it back here: that module is SHIPPED to remote hosts
+// by develop-deliver-tgz.sh and this one is not, so the constant has to live on the transportable side
+// of the pair — a shipped→non-shipped `./` import breaks the transport closure
+// (`--selfcheck-transport-closure`), while this direction (dev-tree → shipped) is both invisible to
+// that check and true in fact. Importing it is what makes the generator's name single: the same
+// constant feeds `LAYDOWN_SOURCES[0]` (the freshness judgment `precommit-guard.ts` runs) and the path
+// `runLaydown()` actually spawns, which used to be two independent spellings of one name (editing the
+// list changed what the guard judged and silently left the spawned path alone — 硬规则 5b).
+import { QUAY_INIT_REL } from "./quay-init-closure-assertion.ts";
 
 // `.quay/` is EXCLUDED from the measurement (the generated, non-deterministic namespace): config.yml
 // embeds random target absolute paths (mcp_entry / repo_root / worktree_root), quay-init-state.json
@@ -81,26 +92,10 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // alongside test-file-baseline.txt — a COMMITTED baseline artifact, not a plugin/scripts/ executable.
 const BASELINE_FILE_REL = "docs/analysis/quay-init-closure-ratchet.baseline.json";
 
-// The generator's repo-root-relative path — THE mechanism-layer naming point for this entity
-// (gap-quay-init-sh-no-single-naming-point). ⛔ Every mechanism-layer site that needs the generator's
-// location derives it from here, never from a second spelling: the file's own comment below already
-// argues that for the LIST (`LAYDOWN_SOURCES` must stay a single exported constant) — this constant
-// closes the same hole one level DOWN, where `LAYDOWN_SOURCES[0]` (the generator, used by the
-// freshness judgment) and the path actually spawned by `runLaydown()` used to be two independent
-// spellings of one name: editing the list changed what `precommit-guard.ts` judged and silently left
-// the spawned path alone. `quay-init-closure-assertion.ts` imports THIS constant for its own two
-// spawn sites (same hole, sibling module).
-// The shape mirrors the product layer's single naming point (`RESOURCE_GATE_REL` + `scriptBasename`,
-// observation.ts): one naming point PER LAYER — ⛔ deliberately not one across layers, because
-// `plugin/scripts/*.ts` and `packages/quay/src/*` do not import each other (the mechanism layer is
-// packaged and shipped independently of the product CLI), so a cross-layer constant would be the
-// layering inversion that split exists to prevent, not a stronger version of this fix.
-export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
-
 // The precise source set that DETERMINES the closed-set laydown output (repo-root-relative paths).
-// The generator (QUAY_INIT_REL above) decides config.yml/.gitignore/.claude/settings.json content;
-// the two templates are laid verbatim; plugin.json is read for the plugin name+version. A change to
-// ANY of these must invalidate the baseline (re-anchor).
+// The generator (the imported `QUAY_INIT_REL` above) decides config.yml/.gitignore/.claude/settings.json
+// content; the two templates are laid verbatim; plugin.json is read for the plugin name+version. A
+// change to ANY of these must invalidate the baseline (re-anchor).
 // EXPORTED (gap-closure-ratchet-stale-wire-into-precommit-guard): `precommit-guard.ts` imports this
 // very constant to decide whether a commit touches the laydown source set — the freshness judgment is
 // now ALSO run at the commit moment (④ there), not only at the suite's @static-tier change layer.
