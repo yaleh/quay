@@ -355,11 +355,21 @@ export function isUnderDocSurface(p, docSurfaces) {
  *  on EVERY non-empty delta (measured: 11 of 177 delta judgments on claudecodeui), and the project
  *  "fixed" it by committing a COPY of quay's registry into its own repo — at which point quay's
  *  checker list decided a foreign tree's doc/code split, which is meaningless. */
+/** The absolute paths the registry lookup actually tries, in priority order — `REGISTRY_REL_CANDIDATES`
+ *  joined to `root`. ⛔ Never a second copy of the rel-path list: the caller (the instrument probe's
+ *  `detail` line) must be able to say WHAT it looked for without re-deriving it (硬规则 5b). */
+export function registryLookupCandidates(root) {
+  return REGISTRY_REL_CANDIDATES.map((rel) => path.join(root, rel));
+}
+
 export function resolveDocSurfaceDecision(root) {
   const registryPath = resolveRegistryPath(root);
+  const candidates = registryLookupCandidates(root);
   if (registryPath) {
     return {
       mode: "registry",
+      registryPath,
+      registryCandidates: candidates,
       registry: parseStaticCheckRegistry(fs.readFileSync(registryPath, "utf8")),
       docSurfaces: DOC_SURFACES,
       detail: `registry at ${registryPath}`,
@@ -369,17 +379,37 @@ export function resolveDocSurfaceDecision(root) {
   if (declared) {
     return {
       mode: "declared",
+      registryPath: null,
+      registryCandidates: candidates,
       registry: null,
       docSurfaces: declared,
-      detail: `loop.${DOC_SURFACES_KEY} declares [${declared.join(", ")}]`,
+      detail: `no registry (tried ${candidates.join(" , ")}) but loop.${DOC_SURFACES_KEY} declares [${declared.join(", ")}]`,
     };
   }
   return {
     mode: "conservative-default",
+    registryPath: null,
+    registryCandidates: candidates,
     registry: null,
     docSurfaces: CONSERVATIVE_DOC_SURFACES,
     detail: `no registry and no loop.${DOC_SURFACES_KEY} declaration ⇒ quay-written surfaces only`,
   };
+}
+
+/** The decision as a MACHINE-readable line — the shape `--classify-delta --resolution` prints and the
+ *  ONLY thing the ff-merge instrument probe parses. WHY a separate face instead of the exit code: the
+ *  probe used to read `--classify-delta` exit 0 as "this root carries a registry", which held only
+ *  while a registry-less root exited 2. That is exactly the condition this task removes, so the probe
+ *  would have read `evaluated: true` for EVERY root — a reading that can no longer take false is not a
+ *  measurement (硬规则 4). Reporting the MODE keeps the reading falsifiable and makes "it judged, but
+ *  without quay's checker list" visible instead of collapsing it into "available". */
+export function docSurfaceDecisionLine(decision) {
+  return JSON.stringify({
+    mode: decision.mode,
+    registryPath: decision.registryPath,
+    registryCandidates: decision.registryCandidates,
+    docSurfaces: decision.docSurfaces,
+  });
 }
 
 /** The fan-in's ONE classification entry (`--classify-delta` is its CLI face): given the tree the
@@ -778,6 +808,11 @@ Output modes:
                               are doc; everything else is code.
       Exit 0 on every well-formed input (empty input ⇒ empty output = doc-only). ⛔ Absence of a
       registry is NOT exit 2 here — a third-party tree gets a real verdict, not a fail-closed rerun.
+  --classify-delta --resolution — the SAME decision, reported instead of applied: print ONE JSON line
+      {mode, registryPath, registryCandidates, docSurfaces}. mode is the three-state above, so a
+      caller can tell "judged by quay's own checker registry" from "judged without it" — the reading the
+      ff-merge instrument probe consumes. ⛔ Never infer capability from the exit code: this mode and
+      the code-subset mode BOTH exit 0 for every registry-less tree.
   --bootstrap-orchestration <path>… — fan-in orchestration bootstrap detection
       (gap-fan-in-orchestration-bootstrap-self-fix): print the given repo-relative delta paths that are
       fan-in orchestration files themselves (fan-in-execute.js / select-static-checks-for-touches.ts /
@@ -892,6 +927,10 @@ export function main(argv) {
   const namesOnly = args.includes("--names");
   const listMode = args.includes("--list");
   const classifyDelta = args.includes("--classify-delta");
+  // `--resolution` is a FACE OF `--classify-delta`, not a mode of its own (see
+  // docSurfaceDecisionLine): same root, same decision, one machine-readable line instead of the code
+  // subset. It is what the ff-merge instrument probe parses.
+  const resolutionMode = args.includes("--resolution");
   const bootstrapOrchestration = args.includes("--bootstrap-orchestration");
   const bootstrapSync = args.includes("--bootstrap-sync");
   const commandsMode = args.includes("--commands");
@@ -951,7 +990,11 @@ export function main(argv) {
   // real verdict ("these paths are code"), not an un-evaluable one. This branch runs BEFORE the
   // registry requirement below — it is the one mode that does not need the registry at all.
   if (classifyDelta) {
-    const { codePaths } = classifyDeltaPaths(root, positionalArgs(args));
+    const { decision, codePaths } = classifyDeltaPaths(root, positionalArgs(args));
+    if (resolutionMode) {
+      console.log(docSurfaceDecisionLine(decision));
+      return 0;
+    }
     for (const p of codePaths) console.log(p);
     return 0;
   }

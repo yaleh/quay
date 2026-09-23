@@ -693,12 +693,21 @@ export interface InstrumentProbe {
 // `reaperProbe`) — ⛔ NOT local copies: the probe, the contract gate and the reaper call sites must
 // name one script each, and the packaging derivation reads the same table (see its header).
 
-/** Classifier probe: REALLY run one `--classify-delta` against `root` — ⛔ not an existence check, since
- *  "the file is there" does not imply "it can judge this root". An empty delta list suffices: the
- *  classifier decides whether it can evaluate BEFORE it looks at any path (a missing registry ⇒ exit 2
- *  with `registry file … not found at …`), so exit 0 ⇔ this root carries a registry ⇔ a verdict is
- *  possible. The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`);
- *  probing some other candidate root would report a capability the call site does not have. */
+/** Classifier probe: REALLY run one `--classify-delta --resolution` against `root` — ⛔ not an
+ *  existence check, since "the file is there" does not imply "it can judge this root".
+ *
+ *  ⛔ The reading is the classifier's RESOLUTION MODE, not its exit code. Until
+ *  gap-fan-in-delta-classify-declared-doc-surfaces, a root carrying no registry made the classifier
+ *  exit 2, so `exit 0 ⇔ this root carries a registry ⇔ the full-fidelity verdict is possible`. That
+ *  task taught the classifier to ANSWER for a registry-less root (declared `loop.doc_surfaces`, else
+ *  the conservative quay-written default), which broke the equivalence: every root now exits 0, so an
+ *  exit-code reading could no longer take false (硬规则 4 — a reading that cannot be wrong is not a
+ *  measurement). `mode === "registry"` keeps `evaluated` falsifiable: it still means "this tree's delta
+ *  is judged by quay's own checker list", while the two degraded modes stay VISIBLE (they are reported
+ *  in `detail`, ⛔ never folded into the available arm).
+ *
+ *  The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`); probing
+ *  some other candidate root would report a capability the call site does not have. */
 function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
   const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.classifierProbe);
   if (!argv) {
@@ -707,18 +716,42 @@ function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
       detail: `root=${root} — classifier NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, SIBLING_SCRIPTS.classifierProbe).join(" , ")}`,
     };
   }
-  const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root]);
-  if (r.status === 0) {
-    return { evaluated: true, detail: `root=${root} — ${argv.join(" ")} --classify-delta --root ${root} exit=0` };
-  }
-  // The classifier's own stderr names the registry candidate paths it looked for (its
-  // REGISTRY_REL_CANDIDATES) — ⛔ never a second copy of that list here (hard rule 5b). `--no-warnings`
-  // above keeps Node's MODULE_TYPELESS_PACKAGE_JSON banner out of it (it would otherwise be the FIRST
-  // line, and a reader would take the banner for the reason).
+  const invoked = `${argv.join(" ")} --classify-delta --root ${root} --resolution`;
+  const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root, "--resolution"]);
+  // `--no-warnings` above keeps Node's MODULE_TYPELESS_PACKAGE_JSON banner out of stderr, so the FIRST
+  // stderr line is the classifier's own reason (a reader would otherwise take the banner for it).
   const why = r.stderr.trim().split("\n").filter(Boolean).join(" | ") || `exit=${r.status} (no stderr)`;
+  if (r.status !== 0) {
+    return { evaluated: false, detail: `root=${root} — classifier resolved (${invoked}) but produced no verdict: ${why}` };
+  }
+  let decision: { mode?: unknown; detail?: unknown; registryPath?: unknown; registryCandidates?: unknown } | null = null;
+  try {
+    const parsed = JSON.parse(r.stdout.trim());
+    if (parsed && typeof parsed === "object" && typeof parsed.mode === "string") decision = parsed;
+  } catch { /* not a resolution line — see the version-skew arm below */ }
+  if (decision) {
+    if (decision.mode === "registry") {
+      return { evaluated: true, detail: `root=${root} — ${invoked} exit=0 ⇒ mode=registry (${decision.registryPath ?? "registry"}); the delta is judged by quay's own checker list` };
+    }
+    // The degraded arms. The registry candidates the classifier itself looked for are echoed from ITS
+    // output — ⛔ never a second copy of that list here (硬规则 5b), and the basename is never written
+    // literally either: it IS the tail of those candidates, so `detail` still names what was looked for.
+    // So the reader can see that the absence is a property of the root, not of the probe.
+    const looked = Array.isArray(decision.registryCandidates) ? decision.registryCandidates.join(" , ") : "<unreported>";
+    return {
+      evaluated: false,
+      detail: `root=${root} — the classifier JUDGED this root WITHOUT quay's checker list: mode=${String(decision.mode)}; looked for ${looked}; ${String(decision.detail ?? "")}`,
+    };
+  }
+  // VERSION SKEW — the classifier answered but printed no resolution line, i.e. it predates the
+  // `--resolution` face (the resolved kernel can lag the code under test: `resolvePluginRoot` prefers
+  // the MERGE ROOT). For THAT binary the exit code still carries the pre-fall contract — "exit 0 ⇔ this
+  // root carries a registry ⇔ a full-fidelity verdict is possible" (a registry-less root exited 2) — so
+  // the reading is the accurate one to make, and the detail SAYS which contract produced it (⛔ never
+  // silently: a reader must be able to tell a mode reading from a legacy one).
   return {
-    evaluated: false,
-    detail: `root=${root} — classifier resolved (${argv.join(" ")}) but produced no verdict: ${why}`,
+    evaluated: true,
+    detail: `root=${root} — ${invoked} exit=0 (no resolution line: this classifier predates --resolution, so the reading falls back to the exit-code contract — exit 0 ⇔ the root carries the registry)`,
   };
 }
 
