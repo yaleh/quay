@@ -2,7 +2,7 @@
 id: gap-arch-coverage-report-couples-to-archguard-manifest-path-form
 title: arch-coverage-report.test.mjs 读机器态 .archguard manifest 的路径形态——symlink 形态与
   realpath 形态不一致导致恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
