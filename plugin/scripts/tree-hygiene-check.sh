@@ -32,8 +32,8 @@ set -u
 SELF="${BASH_SOURCE[0]}"
 SELF_REAL="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -n "$SELF_REAL" ] || SELF_REAL="$SELF"
-HERE="$(cd "$(dirname "$SELF_REAL")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+HERE="$(cd "$(dirname "$SELF_REAL")" && pwd -P)"
+ROOT="$(cd "$HERE/../.." && pwd -P)"
 cd "$ROOT" || { echo "ERROR: cannot cd to repo root ($ROOT)" >&2; exit 1; }
 
 # Scratch patterns the loop's proxies/tools are known to leave; extend as new ones appear.

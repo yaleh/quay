@@ -104,7 +104,7 @@ if [ -z "$PLUGIN_ROOT" ]; then
   SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
   PLUGIN_ROOT="$(cd "$(dirname "$(dirname "$SELF")")" 2>/dev/null && pwd || true)"
 fi
-WORKSPACE_ROOT="$(pwd)"
+WORKSPACE_ROOT="$(pwd -P)"
 PROJECT_NAME=""
 REPO_ROOT=""
 TMUX_SESSION=""
@@ -182,7 +182,7 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
   echo "ERROR: --root does not exist: $WORKSPACE_ROOT" >&2
   exit 2
 fi
-WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
+WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd -P)"
 
 # ── pre-write closed-set snapshot (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade)
 # report_closed_set_state (below) classifies each of the seven closed-set items by comparing their
@@ -294,7 +294,7 @@ if [ ! -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
   echo "ERROR: ${PLUGIN_ROOT} is not a quay plugin (missing .claude-plugin/plugin.json)." >&2
   exit 2
 fi
-PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd)"
+PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd -P)"
 
 PLUGIN_VERSION="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" version unknown 2>/dev/null || echo unknown)"
 PLUGIN_NAME="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" name quay 2>/dev/null || echo quay)"
@@ -1073,7 +1073,7 @@ verify_referenced_landed() {
 verify_delivery_surface_l1() {
   local delivery_root spec_file
   l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
-  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd -P)"
   spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
   if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
     if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
