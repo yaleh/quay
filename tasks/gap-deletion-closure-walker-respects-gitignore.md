@@ -2,7 +2,7 @@
 id: gap-deletion-closure-walker-respects-gitignore
 title: deletion-closure-check.ts 的 fs walker 不认 .gitignore——12010 文件闭包里 10962
   条来自 .claude/worktrees，R=44.32 量的是 worktree 快照不是删除债
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
