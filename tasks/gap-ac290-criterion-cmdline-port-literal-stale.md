@@ -3,7 +3,7 @@ id: gap-ac290-criterion-cmdline-port-literal-stale
 title: AC-290 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假（addr=172.28.0.1:0，curl 失败）；页面侧保证本身实测为真 —— 重锚地址派生那一步（与 AC-179 / AC-288
   / AC-289 在飞任务同一行、不同承载体）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -130,13 +130,13 @@ grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/ | wc -l   ⇒ 17
 
 ## AC
 
-- [ ] AC1 修订后的 criterion 在**活生产实例**上逐字重跑 `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：criterion md5、派生地址、exit code、en/zh 两条响应里 nav 区块与 `<title>` 的原始片段。
-- [ ] AC2 能取假（三向，同一宿主，两侧读数都贴）：(a) 机制被临时关掉（把 `/tasks` 的 zh 词条钳回 en）⇒ 非 0，且 stderr 指明是哪一段断言不过（应为 `nav-label-untranslated` 或 `title-unchanged`，⛔ 不得退化成 `en-fetch-failed`）；(b) 无活候选（停掉 serve host）⇒ 非 0，成因与 (a) **不同形**；(c) 地址指到死端口 ⇒ 非 0，成因含「连接被拒」。⛔ 只有 (a)(b)(c) 都贴才算，只贴绿的一侧不算。
-- [ ] AC3 非字面量（真负控制）：**重启**生产 serve（内核会分配**另一个**端口），同一 root 上重跑 ⇒ 仍 `exit 0`，且两次派生端口不同、各自等于当次载体的值。贴两个端口值 + 两次 exit。⛔ 若两次端口相同 ⇒ 说明又退回字面量派生，判据不通过。
-- [ ] AC4 归因：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败。
-- [ ] AC5 作用域与 `expect` 逐字不变；修订只经 `quay goal write AC-290 --criterion …` 落库且含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-290` 落账；AC-290 的十一个 `CAUSE=` 分支逐字保留（贴 `grep -c 'CAUSE=' ` 前后同值）。
-- [ ] AC6 本仓库自身行为不回退：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node packages/quay/bin/quay.js goal check --stale-pass` 的 failing 集合不再含 AC-290。
-- [ ] AC7 scoped 门 `bash scripts/test.sh --for-task gap-ac290-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
+- [x] AC1 修订后的 criterion 在**活生产实例**上逐字重跑 `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：criterion md5、派生地址、exit code、en/zh 两条响应里 nav 区块与 `<title>` 的原始片段。
+- [x] AC2 能取假（三向，同一宿主，两侧读数都贴）：(a) 机制被临时关掉（把 `/tasks` 的 zh 词条钳回 en）⇒ 非 0，且 stderr 指明是哪一段断言不过（应为 `nav-label-untranslated` 或 `title-unchanged`，⛔ 不得退化成 `en-fetch-failed`）；(b) 无活候选（停掉 serve host）⇒ 非 0，成因与 (a) **不同形**；(c) 地址指到死端口 ⇒ 非 0，成因含「连接被拒」。⛔ 只有 (a)(b)(c) 都贴才算，只贴绿的一侧不算。
+- [x] AC3 非字面量（真负控制）：**重启**生产 serve（内核会分配**另一个**端口），同一 root 上重跑 ⇒ 仍 `exit 0`，且两次派生端口不同、各自等于当次载体的值。贴两个端口值 + 两次 exit。⛔ 若两次端口相同 ⇒ 说明又退回字面量派生，判据不通过。
+- [x] AC4 归因：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败。
+- [x] AC5 作用域与 `expect` 逐字不变；修订只经 `quay goal write AC-290 --criterion …` 落库且含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-290` 落账；AC-290 的十一个 `CAUSE=` 分支逐字保留（贴 `grep -c 'CAUSE=' ` 前后同值）。
+- [x] AC6 本仓库自身行为不回退：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node packages/quay/bin/quay.js goal check --stale-pass` 的 failing 集合不再含 AC-290。
+- [x] AC7 scoped 门 `bash scripts/test.sh --for-task gap-ac290-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
 
 ## DoD
 
@@ -155,3 +155,88 @@ grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/ | wc -l   ⇒ 17
 - `tasks/gap-ac290-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-290 --criterion …` 落库，`expect` 与正文语义逐字不变、只补「为什么改」；第二条是配套夹具（两种部署形态的派生正/负控制）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。）
+## Evidence
+
+Round 2026-09-23 (worker round 2). Full bundle: `.quay/ac290-verify/AC290-EVIDENCE.md`,
+raw scratch `.quay/ac290-live/` (both untracked, as the DoD sanctions). The criterion under test
+is the stored one: **md5 `bbc5999acf05981e9bfc0632cf976089`**, **criterionHash
+`f62c0c486e26a83a`** (the amendment's own hash; the pre-amendment hash was `94183bf6f36b6d15`).
+`goals/AC-290-*.md` md5 `92e8898bbc159561c19d637eba0a50f4` is **identical on develop, on this
+branch, and in the main checkout** — the re-anchored version IS on develop, by content.
+
+**AC1** — live production run, cwd = main checkout, instance pid 1449431
+(`--host 0.0.0.0 --port 0`), carrier `web=0.0.0.0:15147`:
+
+```
+AC-290 serve address derived from carrier as 127.0.0.1:15147 (per-candidate readings:;
+  pid=1449431 addr=127.0.0.1:15147 cause=derived-from-carrier-fetch-answered)
+OK -- /tasks: default nav region carries "Tasks" and <title>="quay — Tasks"; under Cookie: lang=zh
+  the response is <html lang=zh>, that English nav label is gone from the nav region, and this
+  page's own <title> became "quay — 任务"
+CRITERION_EXIT=0
+```
+
+Raw response-body fragments the four assertions read:
+`en: <html lang="en"  navlen=2651  navHAS_Tasks=true   title=<title>quay — Tasks</title>`
+`zh: <html lang="zh"  navlen=2450  navHAS_Tasks=false  title=<title>quay — 任务</title>`
+Derived port **15147** = the carrier's `web.port` — **not 0**.
+
+**AC2 — three DISTINCT shapes, all on this host:**
+
+- **(a) clamped**: `NAV_LABELS.tasks.zh` temporarily `"任务"`→`"Tasks"`, serve restarted in the
+  worktree root (pid 575809, `WEB=127.0.0.1:4043`):
+  `CAUSE=nav-label-untranslated -- the nav region of /tasks under Cookie: lang=zh still renders the
+  literal English nav label "Tasks"` ⇒ exit 1. The address WAS derived (4043), so it did **not**
+  degrade to `en-fetch-failed`. Clamp reverted byte-identical (md5 `c75f481e3411957f5d0849e694120d9e`
+  before and after, `git diff` empty).
+- **(b) no live candidate**: serve stopped ⇒ exit 1,
+  `CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=<root>`.
+- **(c) dead port**: carrier's `web.port` pointed at 9 (closed) ⇒ exit 1,
+  `pid=670086 addr=127.0.0.1:9 cause=derived-from-carrier-fetch-failed(connection-refused) -- curl: (7)
+  Failed to connect to 127.0.0.1 port 9` + `FAIL=no-reachable-serve-address`.
+
+**(a)≠(b)≠(c)** in value and in shape: an assertion refusal, a no-address refusal, and a
+derived-but-unreachable refusal are three separate tokens.
+
+**AC3** — production restarted with the same command line (kernel assigned a new port):
+`P1 = 15147` (pid 1449431) → `P2 = 16377` (pid 850862). Re-run after the restart:
+`AC-290 serve address derived from carrier as 127.0.0.1:16377` ⇒ `CRITERION_EXIT=0`. Two runs, two
+**different** derived ports, each equal to that run's carrier value, both green ⇒ genuinely
+re-derived per run, not a literal.
+
+**AC4** — in the runner's own shape (`sh -c "<criterion>"`, the form
+`acceptance-runner.ts:151` spawns), so the runner shell is itself a candidate:
+`nserve=1, ncand=2, nderived=1` and **both** attributed —
+`pid=772349 addr=127.0.0.1:9 cause=derived-from-carrier-fetch-failed(connection-refused)` and
+`pid=801905 addr=- cause=argv-no-serve-subcommand,carrier-pid-mismatch`. No candidate has a blank
+`addr=` with no cause, and the address-less candidate does not erase the other's address.
+
+**AC5** — `CAUSE=` count **11 → 11**, and the token SET is identical (sorted diff empty):
+`en-fetch-failed, english-baseline-missing, html-lang-not-zh, nav-label-untranslated, no-nav-region,
+no-nav-region-zh, no-running-serve-instance, no-title-tag, no-title-tag-zh, title-unchanged,
+zh-fetch-failed`. The assertion section (everything from `# <<< addr-derivation` to the end —
+`<html lang>` / `<nav>` region / per-page `<title>` assertions and all eleven branches) is
+**byte-identical**: 19 lines each, `diff` empty. The amendment went in through
+`quay goal write AC-290 --criterion …` (commits `d86e30eaf`, `80ccc94ad`, `ffc11ee98` on develop)
+and carries its own "why" block. New criterionHash has its own verdicts:
+`2026-09-23T13:46:28.598Z pass actor=goal-amend criterionHash=f62c0c486e26a83a` and, independently,
+`2026-09-23T14:42:26.353Z pass actor=goal-cli` (a separate `quay goal gate AC-290`).
+
+**AC6** — `criterion-failure-attribution-check.ts` ⇒
+`PASS: criterion failure attribution intact: inDomain=155 bareAcs=0 <= baseline 0` (exit 0).
+`goal check --stale-pass`: `frozenScope=119, evaluated=true, notEvaluated=0`; `failing` (12) =
+AC-179 AC-255 AC-289 AC-294 AC-295 AC-296 AC-298 AC-299 AC-300 AC-301 AC-302 AC-303 — **AC-290 is
+absent**; AC-290 IS in `verifiedFresh` (74). (The siblings still failing belong to `gap-ac288` /
+`gap-ac289`, in flight in parallel rounds, outside this task's Touches.)
+
+**AC7** — `bash scripts/test.sh --for-task gap-ac290-criterion-cmdline-port-literal-stale --allow-thin`
+⇒ exit 0, including the 13/13 fixture tests. Scoped-gate cache recorded for develop sha
+`fbe7d2fd5a01a9f69e9d8a830ed481652998ed6d`.
+
+**Fixture** — `packages/quay/test/ac290-criterion-address-derivation.test.mjs` (`@test-group
+product`) extracts the shipped `addr-derivation` block VERBATIM from the goal file and drives it
+under `/bin/sh` against real processes (real argv, cwd = a fresh git root) and real listeners, both
+directions: explicit-port / carrier / wildcard normalisation / derivable-but-dead, plus
+no-carrier / pid-mismatch / no-web-entry / web-down / unreadable-carrier negatives, the runner-shell
+candidate, and the eleven-branch pin. It would stay green under a reimplementation, which is why it
+runs the shipped text (hard rule 4).
