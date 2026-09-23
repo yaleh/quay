@@ -97,13 +97,13 @@ EXIT=0
 
 ## AC
 
-- [ ] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-298 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（修订前 = `1d2f1892bebd9debcb2f76d9028e75c9`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/tests` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `Tests` 条数、本页 `<title>`）。
-- [ ] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
-- [ ] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-298-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
-- [ ] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
-- [ ] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/tests"` 与 `LABEL_EN="Tests"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-298 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-298` 落账。
-- [ ] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-298（贴该集合条数与 AC-298 是否在内）。
-- [ ] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac298-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
+- [x] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-298 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（修订前 = `1d2f1892bebd9debcb2f76d9028e75c9`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/tests` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `Tests` 条数、本页 `<title>`）。
+- [x] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
+- [x] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-298-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
+- [x] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
+- [x] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/tests"` 与 `LABEL_EN="Tests"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-298 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-298` 落账。
+- [x] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-298（贴该集合条数与 AC-298 是否在内）。
+- [x] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac298-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
 
 ## DoD
 
