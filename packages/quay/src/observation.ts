@@ -2391,7 +2391,8 @@ export function readJournal(root: string, nowMs: number = Date.now()): JournalRe
 //       module location and consumes its JSON. No second copy exists.
 //   Q4: Not reimplementing — the drift checker is authoritative, so AC4's "who is authoritative
 //       when the two drift" question is moot: there is only ONE implementation.
-// CONSEQUENCE: the board's data-flag agrees with `task-status-drift-check.ts --json` per-task
+// CONSEQUENCE: the board's data-flag agrees with the drift checker's `--json` (named once, by
+// TASK_STATUS_DRIFT_CHECK_REL below) per-task
 // BY CONSTRUCTION (AC2/AC3) — the board consumes the checker's own suspects/reverse output.
 // DEGRADATION: the subprocess is fail-closed. If plugin/scripts is absent (a product install
 // without the methodology layer) the landing column reports 「无数据」; if it fails to run/parse
@@ -2427,9 +2428,9 @@ export interface BoardExecution {
 }
 
 // ── Board landing cache — short-TTL, mirroring the pool-metrics probe (readPoolMetrics) ────────────
-// readBoardLanding cold-runs plugin/scripts/task-status-drift-check.ts, which on a large repo does a
-// FULL git-log pass over the landing ref — >150s measured, documented by the checker's own comment
-// (task-status-drift-check.ts:462). Per-request cold-running is exactly the 120s /board defect
+// readBoardLanding cold-runs the drift checker (named once, by TASK_STATUS_DRIFT_CHECK_REL below),
+// which on a large repo does a FULL git-log pass over the landing ref — >150s measured, documented
+// by the checker's own comment. Per-request cold-running is exactly the 120s /board defect
 // (gap-webui-board-load-120s), so a reading is short-TTL-cached (30s, the same window as
 // POOL_METRICS_CACHE_TTL_MS). A TIMEOUT is cached too: on a large repo the checker's steady state IS
 // a timeout, and not caching it would make EVERY request pay the full second-level cap — the AC2
@@ -2464,9 +2465,9 @@ export interface ReadBoardLandingOpts {
 }
 
 /**
- * Reuse the drift checker as the single authoritative landing judgment. Runs
- * `plugin/scripts/task-status-drift-check.ts --json` (resolved relative to THIS module, with
- * cwd = the served workspace root so findRepoRoot finds the served store) and maps its output:
+ * Reuse the drift checker as the single authoritative landing judgment. Runs the checker
+ * (`TASK_STATUS_DRIFT_CHECK_REL`, resolved relative to THIS module, with
+ * cwd = the served workspace root so findRepoRoot finds the served store) as `--json` and maps its output:
  *   suspects  → "landed-not-closed"  (已落地但未收尾: code in tree, status not closed)
  *   reverse   → "done-unlanded"      (done 但未落地: done, code never landed)
  * The result is short-TTL-cached (LANDING_CACHE_TTL_MS) — a cache hit returns WITHOUT spawning the
@@ -2491,11 +2492,11 @@ export async function readBoardLanding(root: string, opts: ReadBoardLandingOpts 
     // `resolvePluginScriptExec` also applies the dev/dist fallback
     // (gap-shipped-ts-files-are-not-bundled: the shipped artifact carries the checker only as
     // bundled dist/*.js, run without --experimental-strip-types).
-    const resolved = resolvePluginScriptExec(path.join("scripts", "task-status-drift-check.ts"));
+    const resolved = resolvePluginScriptExec(TASK_STATUS_DRIFT_CHECK_REL);
     if (resolved == null) {
       return {
         status: "empty",
-        reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts/dist bundle 不存在 — 产品安装无 methodology 层）",
+        reason: `landing 判断源缺失（plugin/${TASK_STATUS_DRIFT_CHECK_REL}/dist bundle 不存在 — 产品安装无 methodology 层）`,
         flags: new Map(),
         scanned: 0,
       };
@@ -3081,6 +3082,13 @@ export interface SystemResult {
 // catch a real stale bare reference. (gap-plugin-root-resolution-remaining-callsites)
 export const RESOURCE_GATE_REL = path.join("scripts", "resource-gate.sh");
 export const PROCESS_BUDGET_REL = "scripts/process-budget.sh";
+// The landing judgment source (gap-task-status-drift-check-serve-labels-no-rel-accessor): the SAME
+// single-naming-point rule as the two above, applied to the /board landing column. Before this, the
+// basename was spelled independently three ways — the 4 `<code>` labels in serve-board.ts, the 6
+// `srcLanding*` label pairs in serve-i18n.ts, and the resolved script path here — so changing the
+// display name could not change what was actually spawned, and vice versa. path.join for the same
+// AC1b reason as RESOURCE_GATE_REL above.
+export const TASK_STATUS_DRIFT_CHECK_REL = path.join("scripts", "task-status-drift-check.ts");
 
 /** The display basename of a plugin-root-relative script rel — the ONE derivation every
  *  product-layer surface names a mechanism script through.
@@ -3100,6 +3108,14 @@ export function scriptBasename(rel: string): string {
 /** The two `/system` labels — derived from the REL constants above, never re-spelled. */
 export const RESOURCE_GATE_NAME = scriptBasename(RESOURCE_GATE_REL);
 export const PROCESS_BUDGET_NAME = scriptBasename(PROCESS_BUDGET_REL);
+
+/** The `/board` landing-source label — derived from TASK_STATUS_DRIFT_CHECK_REL above (the same
+ *  single-naming-point rule, its third application). Every landing surface names the checker through
+ *  THIS constant: serve-board.ts's `<code>` labels and the `{source}` slot of serve-i18n.ts's three
+ *  `srcLanding*` label pairs. serve-i18n.ts itself cannot import it — that module's ZERO-import
+ *  constraint is by design (serve-i18n.ts's own header), which is exactly why those labels carry a
+ *  `{source}` placeholder the caller fills. */
+export const TASK_STATUS_DRIFT_CHECK_NAME = scriptBasename(TASK_STATUS_DRIFT_CHECK_REL);
 
 /** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */
 function jsonNum(j: Record<string, unknown>, key: string): number | null {

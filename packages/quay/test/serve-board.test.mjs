@@ -920,3 +920,104 @@ test("AC-292 — the PAGE_LABELS tokens serve-board.ts passes to pageTitle/pageN
   assert.ok(!pageNameFor("Board — three-source join", "zh").includes("Board"), "AC-292: zh <title> token carries no ASCII Board");
   assert.ok(!pageNameFor("Board", "zh").includes("Board"), "AC-292: zh <h1> token carries no ASCII Board");
 });
+
+// ── gap-task-status-drift-check-serve-labels-no-rel-accessor ───────────────────────────────────────
+// The landing column used to name the drift checker FOUR times as a product-layer literal (the four
+// `<code>` below) and SIX more in serve-i18n.ts's three `srcLanding*` rows, while a THIRD spelling in
+// observation.ts decided what was actually spawned — three independent naming points for one entity.
+// Now there is one (observation.TASK_STATUS_DRIFT_CHECK_REL) and every surface derives it.
+//
+// ⛔ These tests are ADDITIVE BY REQUIREMENT (the task's AC4 counts deletion lines in this file):
+// every symbol they need beyond what the file already imports comes through a dynamic import, exactly
+// as the AC-292 test above does for `pageNameFor`. No existing line may be edited to add an import.
+//
+// On falsifiability, stated plainly: a hardcoded literal that happens to EQUAL the constant today
+// would satisfy the two rendering assertions below (they compare rendered text to the constant, and
+// the values coincide). What those two do prove is that a future rename of the rel PROPAGATES to the
+// rendered page instead of silently leaving the label behind — and the third test is the one that
+// makes a second literal impossible to introduce: it reads the two product sources and requires ZERO
+// occurrences of the basename, with a known-hit control so a zero cannot mean "predicate never fires".
+// The live propagation proof (change the rel ⇒ the real HTTP response follows) is AC3/DoD evidence,
+// not a unit test: no test can mutate a module constant and observe a re-render in the same process.
+test("AC3/AC4 — the landing <code> renders the DERIVED name in all four landing states (ok/empty/timeout/failed)", async () => {
+  const { TASK_STATUS_DRIFT_CHECK_NAME, TASK_STATUS_DRIFT_CHECK_REL, scriptBasename } =
+    await import("../src/observation.ts");
+  // The derivation is the identity the renderer consumes — asserted here so a page that happened to
+  // agree with a stale literal would still be caught by the value check below.
+  assert.equal(TASK_STATUS_DRIFT_CHECK_NAME, scriptBasename(TASK_STATUS_DRIFT_CHECK_REL));
+
+  // All four states the landing column can render. Only "empty" is reachable over HTTP in this
+  // fixture (it needs the checker script to be absent); the other three need a real subprocess that
+  // succeeds/hangs/dies, so they are driven through the same `renderBoardPage` the handler calls.
+  const states = [
+    { label: "ok", landing: { status: "ok", reason: null, flags: new Map(), scanned: 3 } },
+    { label: "empty", landing: { status: "empty", reason: "landing 判断源缺失", flags: new Map(), scanned: 0 } },
+    { label: "timedOut", landing: { status: "error", timedOut: true, reason: "boom", flags: new Map(), scanned: 0 } },
+    { label: "failed", landing: { status: "error", reason: "boom", flags: new Map(), scanned: 0 } },
+  ];
+  const code = `<code>${TASK_STATUS_DRIFT_CHECK_NAME}</code>`;
+  for (const { label, landing } of states) {
+    const page = renderBoardPage({
+      landing,
+      execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+      intentStatus: "ok",
+      intentReason: null,
+      rows: [],
+    }, null, "zh");
+    assert.ok(page.includes(code),
+      `${label}: the landing <code> names the checker through the derived constant (${code})`);
+    assert.ok(page.includes(TASK_STATUS_DRIFT_CHECK_NAME),
+      `${label}: …and the name renders at all (not silently dropped)`);
+  }
+  // The four states are actually four `else if` arms, so assert they are distinguishable — otherwise
+  // the loop above could be exercising one arm four times and call it four.
+  const distinct = new Set(states.map(({ landing }) => renderBoardPage({
+    landing,
+    execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+    intentStatus: "ok",
+    intentReason: null,
+    rows: [],
+  }, null, "zh")));
+  assert.equal(distinct.size, 4, "the four landing states render four DIFFERENT pages");
+});
+
+test("AC2 — the three srcLanding* rows carry a {source} SLOT, not a second literal", async () => {
+  const { boardLabel } = await import("../src/serve-i18n.ts");
+  const { TASK_STATUS_DRIFT_CHECK_NAME } = await import("../src/observation.ts");
+  for (const key of ["srcLandingTimeout", "srcLandingUnavailable", "srcLandingFailed"]) {
+    for (const lang of ["en", "zh"]) {
+      // ⛔ THE DISCRIMINATOR: an unfilled call must THROW. A row that spells the basename as a
+      // literal returns its text happily here (no placeholder to leave unfilled) — so "it throws"
+      // is exactly the difference between 「一个 {source} 槽」 and 「一份恰好相等的第二份字面量」.
+      assert.throws(() => boardLabel(key, lang, {}), /\{source\}/,
+        `${key}/${lang}: the row is a {source} placeholder (a literal would NOT throw — that is the point)`);
+      // …and filling it with the derived constant is what the production call site does.
+      assert.ok(boardLabel(key, lang, { source: TASK_STATUS_DRIFT_CHECK_NAME }).includes(TASK_STATUS_DRIFT_CHECK_NAME),
+        `${key}/${lang}: the filled text names the source the caller supplied`);
+      assert.ok(!boardLabel(key, lang, { source: TASK_STATUS_DRIFT_CHECK_NAME }).includes("{"),
+        `${key}/${lang}: no placeholder survives into the rendered text`);
+    }
+  }
+});
+
+test("AC1 — no product-layer source names the checker a second time (source scan, with a known-hit control)", async () => {
+  const { TASK_STATUS_DRIFT_CHECK_NAME } = await import("../src/observation.ts");
+  const occurrenceLines = (file) => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");
+    return src.split("\n").map((line, i) => [i + 1, line]).filter(([, line]) => line.includes(TASK_STATUS_DRIFT_CHECK_NAME));
+  };
+  for (const file of ["serve-board.ts", "serve-i18n.ts"]) {
+    const hits = occurrenceLines(file);
+    assert.equal(hits.length, 0,
+      `${file} must not name the checker (a second naming point reopens the defect): ` +
+      JSON.stringify(hits.slice(0, 3).map(([n, l]) => `${n}: ${l.trim().slice(0, 90)}`)));
+  }
+  // 硬规则 2's other half — a zero count is only evidence if the predicate fires on a known-true
+  // sample. observation.ts is the ONE remaining naming point, so the same predicate must find it.
+  const control = occurrenceLines("observation.ts");
+  assert.equal(control.length, 1,
+    `control: the predicate DOES fire on the one legitimate naming point (found ${control.length}: ` +
+    JSON.stringify(control.slice(0, 3).map(([n, l]) => `${n}: ${l.trim().slice(0, 90)}`)));
+  assert.ok(control[0][1].includes("TASK_STATUS_DRIFT_CHECK_REL"),
+    "control: …and it is the REL constant's own definition, not some other line");
+});
