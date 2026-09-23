@@ -716,18 +716,22 @@ export const ANCHOR_PID_REL = ".quay/anchor.pid";
 export const ANCHOR_DESIRED_REL = ".quay/anchor-desired.json";
 export const ANCHOR_STATE_REL = ".quay/anchor.json";
 export const ANCHOR_LOG_REL = ".quay/anchor.log";
+/** 「哪些 kind 是被**显式停掉**的」记录（GOAL-017/AC-255 能力半边；见 `readKindStops` 的头注释）。 */
+export const ANCHOR_KIND_STOPS_REL = ".quay/anchor-kind-stops.json";
 
 export function anchorPaths(root: string): {
   pidFile: string;
   desiredFile: string;
   stateFile: string;
   logFile: string;
+  kindStopsFile: string;
 } {
   return {
     pidFile: path.join(root, ANCHOR_PID_REL),
     desiredFile: path.join(root, ANCHOR_DESIRED_REL),
     stateFile: path.join(root, ANCHOR_STATE_REL),
     logFile: path.join(root, ANCHOR_LOG_REL),
+    kindStopsFile: path.join(root, ANCHOR_KIND_STOPS_REL),
   };
 }
 
@@ -929,7 +933,123 @@ export function updateDesired(
   if (present && entry) curOpts[kind] = { ...(curOpts[kind] ?? {}), ...entry };
   if (!present) delete curOpts[kind];
   writeDesired(root, next, updatedBy, curOpts);
+  // 停机记录与期望态**同一次调用里**翻转（AC-255 能力半边）：加入 ⇒ 清记录，移出 ⇒ 落记录。
+  // ⛔ 两处都写才使「操作员有意停机」与「静默丢失」在读数上分得开（见 `kindDeclaration`）。
+  if (present) clearKindStop(root, kind);
+  else recordKindStop(root, kind, updatedBy);
   return next;
+}
+
+// ── 停机记录 + 「未声明」独立取值（GOAL-017/AC-255 **能力半边**）──────────────────────────────────────
+//
+// 缺陷现场（2026-09-23 实测，`.quay/anchor.log` + `quality-round.jsonl`/`meta-driver-round.jsonl`）：
+// anchor 跑哪些 kind **唯一**由 `.quay/anchor-desired.json` 决定，而该文件只有两个写侧 ——
+// `updateDesired(present=true)` 并集加 / `updateDesired(present=false)` 过滤删。⇒ 一次 `stop --kind X`
+// 就把 X 移出集合，而在**任何读数**里都没留下「这是显式停的」这一信息：`updatedBy` 会被下一次 `start`
+// 覆盖。此后 anchor 照常以「一个健康进程」的样子跑剩余 kind，`ps` 完全看不出少了一个 —— 外部只看得见
+// 「进程活着」，看不见「六个循环里有两个没在转」（SPEC §6.7 禁止的那种折叠）。
+//
+// 修法（硬规则 3b）：给「本 kind 既不在期望态里、**又**没有显式停机记录」一个**独立取值**，
+// ⛔ 不与「正在跑」/「显式停过」共用输出。⛔ 这**不是**「一律自动拉满六个 kind」：reconcile 的**行为**
+// 一行未动（它仍只起 `desired.kinds`），本条交付的只是**读数** —— 让「操作员有意停机」与「静默丢失」
+// 在机器可读面上分得开（AC4 立、AC5 是它的反向控制，缺 AC5 则 AC4 退化成「永远拉满六个」）。
+
+/** 一条显式停机的记录（谁、什么时候）。 */
+export interface AnchorKindStopRecord {
+  at: string;
+  by: string;
+}
+
+/** `.quay/anchor-kind-stops.json` 的读出半边。三态（硬规则 3b）：
+ *  · 文件**不存在** ⇒ `{}`（=「从未记录过任何显式停机」，一个合法且自明的状态，冷启动即此态）；
+ *  · 文件存在且可解析 ⇒ 其中的记录；
+ *  · 文件存在但**读不懂**（坏 JSON / 非对象）⇒ **null**（⛔ 不与「没有记录」同形：读不懂时无法区分
+ *    「显式停过」与「静默丢失」，冒充任一取值都是撒谎）。 */
+export function readKindStops(root: string): Record<string, AnchorKindStopRecord> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(anchorPaths(root).kindStopsFile, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const j = JSON.parse(raw) as unknown;
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    const out: Record<string, AnchorKindStopRecord> = {};
+    for (const [k, v] of Object.entries(j as Record<string, unknown>)) {
+      if (!v || typeof v !== "object") continue;
+      const o = v as Record<string, unknown>;
+      out[k] = { at: typeof o.at === "string" ? o.at : "", by: typeof o.by === "string" ? o.by : "unknown" };
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** 写停机记录（原子替换）。 */
+function writeKindStops(root: string, stops: Record<string, AnchorKindStopRecord>): void {
+  const file = anchorPaths(root).kindStopsFile;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(stops, null, 2) + "\n", "utf8");
+  fs.renameSync(tmp, file);
+}
+
+/** 落一条显式停机记录（`quay driver stop --kind X` 的写侧）。读不懂既有记录时 ⇒ **不覆盖**
+ *  （覆盖会把别人写过的记录抹掉——那是新的静默丢失；如实留在原处，由 `readKindStops` 报 null）。 */
+export function recordKindStop(root: string, kind: DriverKind, by: string): void {
+  const cur = readKindStops(root);
+  if (cur === null) return;
+  writeKindStops(root, { ...cur, [kind]: { at: ts(), by } });
+}
+
+/** 清掉某 kind 的停机记录（`quay driver start --kind X` / 加入期望态时）。读不懂既有记录 ⇒ 不覆盖。 */
+export function clearKindStop(root: string, kind: DriverKind): void {
+  const cur = readKindStops(root);
+  if (cur === null || !(kind in cur)) return;
+  const next = { ...cur };
+  delete next[kind];
+  writeKindStops(root, next);
+}
+
+/** 一个 kind 相对**期望态**的声明状态。四态各自独立（硬规则 3b：⛔ 没有「未评估」这一态的判定
+ *  就无法区分「查过」与「没查成」）：
+ *  · `declared`           ∈ `desired.kinds`（正在跑的那个集合）
+ *  · `stopped-explicitly` ∉ 期望态 ∧ **有**显式停机记录（操作员有意停机 —— AC5）
+ *  · `not-declared`       ∉ 期望态 ∧ **无**显式停机记录（静默脱离期望态 —— 本任务要报出的那一态，AC4）
+ *  · `not-evaluated`      读不懂期望态**或**读不懂停机记录 ⇒ 不冒充上面任一取值 */
+export type KindDeclaration = "declared" | "stopped-explicitly" | "not-declared" | "not-evaluated";
+
+export const KIND_DECLARATIONS: readonly KindDeclaration[] = [
+  "declared",
+  "stopped-explicitly",
+  "not-declared",
+  "not-evaluated",
+];
+
+export function kindDeclaration(root: string, kind: DriverKind): KindDeclaration {
+  const desired = readDesired(root);
+  if (desired === null) return "not-evaluated";
+  if (desired.kinds.includes(kind)) return "declared";
+  const stops = readKindStops(root);
+  if (stops === null) return "not-evaluated";
+  return stops[kind] ? "stopped-explicitly" : "not-declared";
+}
+
+/** 六个 kind 各自相对期望态的声明读法（四态见 `KindDeclaration`）。消费面有两处：`driver-anchor`
+ *  每趟把本函数的返回发布到盘上，`quay driver status` 逐 kind 报出它 —— ⛔ 两处都只是**发布**，
+ *  判据的正本始终是本函数（它每次现算，⛔ 不读任何派生的快照）。 */
+export function kindDeclarationMap(root: string): Record<DriverKind, KindDeclaration> {
+  const out = {} as Record<DriverKind, KindDeclaration>;
+  for (const kind of KNOWN_KINDS) out[kind] = kindDeclaration(root, kind);
+  return out;
+}
+
+/** 静默脱离期望态的 kind（`not-declared`）。⛔ 只报这一态：`stopped-explicitly` 是**有意**的，
+ *  把它混进来会让每一个被正常停掉的 kind 每轮都被"报红"（噪声会把信号淹没）。 */
+export function undeclaredKinds(root: string): DriverKind[] {
+  return KNOWN_KINDS.filter((k) => kindDeclaration(root, k) === "not-declared");
 }
 
 /** 本内核【自身安装位置】在主检出里的对应目录 —— 仅当本内核跑在一个 **linked worktree** 里时才与自身
@@ -2470,6 +2590,11 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
   // 宿主进程：收敛形态 = anchor；旧多进程形态 = supervisor。⛔ 不用 driverPid——短命的 driver 子进程
   // 不是「加载了哪份内核」这个问题的主体（常驻宿主才是）。
   const lv = loadedVersionReading(root, a.host === "anchor" ? a.anchorPid : a.supervisorPid);
+  // AC-255 能力半边：`running` 回答「有没有一个活着的承载进程」，**答不了**「这个 kind 的循环还在转
+  // 吗」——收敛形态下六个 kind 共用一个 anchor，anchor 活着时全部报 `running=1`，哪怕其中两个的循环
+  // 早已被移出期望态而停摆（2026-09-23 实测：`quality`/`meta` 停摆 264min，六个 kind 的 `running` 全是 1）。
+  // ⇒ 声明状态是一条**独立**的读数，来自期望态 + 停机记录（见 `kindDeclaration`）。
+  const declaration = kindDeclaration(root, kind);
   // 人类可读面：ts 与它的【来源】必须相邻出现；来源 ≠ carrier_path 时把「跨载体最大值」标注出来——
   // 否则读者会把行内先出现的 carrier_path 当成这个 ts 的来源（正是本任务修的缺陷）。
   // ⛔ 只改打印的并置关系，不改任何取值规则（carrier_path 语义不变，由既有测试钉住）。
@@ -2515,6 +2640,11 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       // 第二个漂移源（`.quay/config.yml` provider `path` 的版本段），独立取值。
       config_provider_path: lv.configProviderPath,
       config_provider_path_version: lv.configProviderPathVersion,
+      // AC-255 能力半边：本 kind 相对**期望态**的声明状态。四态各自独立（⛔ 不与 `alive`/`running` 同形）：
+      // `declared` / `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/
+      // `not-evaluated`（读不懂期望态或停机记录）。缺这个字段时，「六个循环里有两个没在转」与
+      // 「一切正常」在所有既有字段上都同形 —— `alive` 读的是**承载进程**，不是这个 kind 的循环。
+      declaration: declaration,
     }) + "\n");
   } else {
     // 人类可读面：已加载版本读数**打在最前面**（第一行、第一个字段——一个落后 3 天的进程必须在读者
@@ -2540,6 +2670,7 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `${spec.prefix}: kind=${kind} · host=${a.host} anchor_pid=${a.anchorPid ?? "none"} · ` +
       `supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
+      `declaration=${declaration} · ` +
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
       `source_watch=${a.sourceWatch} · ` +
       // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。

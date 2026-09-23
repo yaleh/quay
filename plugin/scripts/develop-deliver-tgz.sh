@@ -169,8 +169,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 verify_port=18091
 # ⚠️ ServerAlive* 不是仪式：--verify-ac258 等模式用【单个前台 ssh】跨 --ac258-poll-secs
 # （默认 3600、实测跑过 2700s=45min）整段保持连接，这正是 NAT/中间盒空闲超时会静默杀掉的连接形状。

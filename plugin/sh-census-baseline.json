@@ -199,8 +199,41 @@
         "embeddedInterpreterLines": "-39 = the five deleted shells' effective lines, summed from the checker's OWN per-file reading taken BEFORE the deletion (`sh-census-check.ts --json` -> files[path].codeLines): anti-drift-touches-check.sh 5 + concurrent-batch-scheduler.sh 7 + it0-backlog-projection-check.sh 11 + serial-fanin-absorb.sh 5 + touches-orthogonality-check.sh 11 = 39. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY these five paths (`git diff --name-status develop HEAD -- '*.sh'` -> 5 x `D`), and every caller edit this task made is to a `.sh` file that already existed and whose own line count is unchanged in a way this axis reads (the four `*-selfcheck.sh` edits swap `\"$CHK\"` for `node \"$CHK\"` and `-x` for `-f`, +0 effective lines each — all four remain non-embedded pure-shell programs). ⛔ The totals.scripts movement (147 -> 142) and embeddedInterpreterScripts (59 -> 54) are called out rather than folded in: they are the same five files, seen from the count axes, and neither is a ratchet axis.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (the five deleted paths are real files, not symlinks, so totals.symlinkedCopies stays 59)."
       }
+    },
+    {
+      "when": "2026-09-23 (gap-suite-ambient-reds-block-all-code-landings)",
+      "from": {
+        "embeddedInterpreterLines": 7680,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7683,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+3) — the exceptional direction for this ratchet, forced by the one change this task cannot make any other way. This task's class 1 pins the suite's locale and timezone at the entry point (`export LC_ALL`/`export LANG`/`export TZ` in scripts/test.sh) because the suite is written against a C collation and a UTC clock while the entry inherited the host's (LANG=en_US.UTF-8, LC_ALL unset, TZ unset); that pin is three real statements and cannot be expressed as comments or as zero lines. scripts/test.sh is ALREADY an embedded-interpreter .sh (it execs `node` at a command position for its static tier), so every effective line it gains lands on this axis. Per this file's _note the raise is legal only once COMMITTED — the shrink-guard compares the worktree copy against the git-HEAD copy of this very file, so this entry is committed in the same commit as the pin and the two sides agree. ⛔ NOT a threshold relaxed to buy a pass: the +3 is measured, attributed line-for-line below (residual = 0), and the ratchet's own AC6 test (plugin/test/sh-census-check.test.mjs) requires this file to EQUAL the live reading, so leaving 7680 would red the whole static layer. This is the same structural weakness the 2026-09-19 entry above already names ('any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor').",
+      "attribution": {
+        "embeddedInterpreterLines": "+3 = scripts/test.sh effective lines 706 -> 709 — exactly the three added statements `export LC_ALL=\"C.UTF-8\"`, `export LANG=\"C.UTF-8\"`, `export TZ=\"UTC\"`. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire `*.sh` delta vs develop is exactly two paths (`git diff --name-only develop HEAD -- '*.sh'` -> scripts/test.sh, plugin/scripts/tmux-leak-scan.sh), and of those only test.sh is IN this axis. The other, plugin/scripts/tmux-leak-scan.sh, gained 7 effective lines (160 -> 167, the class-2 `tmp_root()` helper that stops the scan hardcoding /tmp) but its `embedded` reading is `[]` in BOTH the before and after copies — it contains no embedded interpreter at a command position, so none of those 7 lines was ever counted here. That +7 is called out rather than folded in: a reader summing this task's diff must be able to account for every line, and only 3 of the 10 are in-axis. Measured per file with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters) on `git show HEAD:<f>` vs the worktree copy, and totals.embeddedInterpreterLines 7680 -> 7683 on the real tree (`sh-census-check.ts --json` -> totals).",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-checker-mutation-check-sh, SPEC §5 Phase 5.2)",
+      "from": {
+        "embeddedInterpreterLines": 7683,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7688,
+        "duplicateCopies": 0
+      },
+      "why": "⛔ UPWARD re-anchor — RECORDED, not hidden, and it is +5 rather than negative because THIS TASK'S AC4 PREMISE IS FALSE, measured. plugin/scripts/checker-mutation-check.sh was assumed (SPEC-architecture-consolidation §1.3's table pairs it with `node`) to be one of the bash files hiding an embedded interpreter, so converting its 490 effective lines to plugin/scripts/checker-mutation-check.ts was expected to LOWER this axis. The checker's OWN reading says otherwise: that file's `embedded` was `[]` BEFORE the rewrite and `[]` (i.e. none) is what its program ever used — its only `node` tokens are inside COMMENT lines and one grep regex STRING, never at a command position, which is exactly what the census's code-position mask is for. So this file was never IN the axis, there were no interpreter lines to give back, and the only movement this task can produce is the thin entry's own 5 effective lines: the entry execs `node --no-warnings --experimental-strip-types`, which `nodeQualifies` counts (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh / cross-machine-verify.sh entries above — a thin entry STAYS in the axis; it is the line count that moves). ⛔ The alternative was to write the entry so the interpreter call is invisible to the detector (e.g. exec-ing the .ts directly through its own shebang): that would have bought a flat reading by moving this entry OFF the form the packaging rewriter (`rewriteShell`'s `exec node --experimental-strip-types \"$SCRIPT_DIR/X.ts\" → exec node \"$SCRIPT_DIR/dist/X.js\"` rule) and both sibling thin entries use. A production entry whose packaged form has no proven rewrite path is a worse outcome than 5 recorded lines, so the entry keeps the house form and the cost is written down here. ⚠️ Re-based 2026-09-23 after merging develop (which had shrunk this axis 8413 -> 7683 through other tsify/re-anchor work): the +5 is unchanged and independently re-measured on both sides — develop's tree reads 7683 with files[path=plugin/scripts/checker-mutation-check.sh] = 490 lines / embedded [], this merged tree reads 7688 with the same path = 5 lines / embedded [node].",
+      "attribution": {
+        "embeddedInterpreterLines": "+5 = plugin/scripts/checker-mutation-check.sh effective lines 490 -> 5 (the thin entry). Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY this one file (`git diff --name-only develop HEAD` -> this .sh plus the new .ts and the two test files; both new files are not `*.sh`), so nothing else in the census can have moved. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/checker-mutation-check.sh].codeLines 490 -> 5, embedded [] -> [\"node\"], and totals.embeddedInterpreterLines 7683 -> 7688 (re-based on the merged tree; 8413 -> 8418 was the pre-merge reading) — the two readings differ by exactly those 5 lines.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      },
+      "ratchetNote": "This is the axis's SECOND upward re-anchor (the first is the 2026-09-19 land entry, +259, same mechanism): a committed raise is visible and reviewable, an uncommitted one is caught by the worktree-vs-HEAD guard. It is the honest cost of a thin entry for a script that had no embedded interpreter to convert. ⛔ It is NOT a ratchet weakening: the reading and the baseline are both the checker's own numbers on this tree."
     }
   ],
-  "embeddedInterpreterLines": 7680,
+  "embeddedInterpreterLines": 7688,
   "duplicateCopies": 0
 }

@@ -10,8 +10,8 @@
 set -u
 name="threshold-scope-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # plugin/scripts
-repo_root="$(cd "${script_dir}/../.." && pwd)"                 # repo root
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"   # plugin/scripts
+repo_root="$(cd "${script_dir}/../.." && pwd -P)"                 # repo root
 fixture="${workdir}/driver.md"
 
 checker_cmd() {

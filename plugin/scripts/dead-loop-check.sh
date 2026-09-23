@@ -53,7 +53,7 @@ fi
 set -uo pipefail
 
 # ── 参数 ──────────────────────────────────────────────────────────────────────────────────────────
-_dlc_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_dlc_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root="${DEAD_LOOP_ROOT:-}"
 window_min="${DEAD_LOOP_WINDOW_MIN:-30}"
 json=0
@@ -83,7 +83,7 @@ case "$window_min" in
 esac
 
 if [ -z "$root" ]; then
-  root="$(cd "${_dlc_script_dir}/../.." && pwd)"
+  root="$(cd "${_dlc_script_dir}/../.." && pwd -P)"
 fi
 # 默认 transcript 目录 = $HOME/.claude/projects/<slug>（slug = 根路径 / -> -，同 session-liveness.sh）。
 if [ -z "$transcript_dir" ]; then
@@ -314,8 +314,8 @@ set -uo pipefail
 # ── Self-locate (same BASH_SOURCE convention as session-liveness.sh / inner-state.sh) ─────────
 REPO_ROOT="${DEAD_LOOP_ROOT:-}"
 if [ -z "$REPO_ROOT" ]; then
-  _dl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$_dl_script_dir/../.." && pwd)"
+  _dl_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  REPO_ROOT="$(cd "$_dl_script_dir/../.." && pwd -P)"
 fi
 
 WINDOW_MIN="${DEAD_LOOP_WINDOW_MIN:-30}"

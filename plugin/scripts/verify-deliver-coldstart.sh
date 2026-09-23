@@ -180,7 +180,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 # ── 默认值 ─────────────────────────────────────────────────────────────────────────────
 QUAY_TGZ=""
@@ -205,7 +205,7 @@ AC89=""
 HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
 SPEC_PATH=""                 # SPEC §6 闭集来源（--spec <path> 显式；缺省由 --build-root/dev-tree 推导）
 CHANNEL="npm-global"         # step① 验证哪条安装路径：npm-global（默认）| marketplace（SPEC §6b 约束③）
-CWD="$(pwd)"
+CWD="$(pwd -P)"
 VC_NODE="${VC_NODE:-node}"                    # 启动弹窗探针的 node 接缝（测试可覆盖）
 VC_TMUX_SOCKET="${VC_TMUX_SOCKET:-}"          # 启动弹窗探针的 tmux 套接字覆盖（测试可覆盖）
 
@@ -2015,7 +2015,7 @@ ac257_delivery_cli() {
     if (typeof v === "string" && v) { process.stdout.write(v + "\n"); process.exit(0); }
     process.exit(1);' "$pkg" 2>/dev/null)" || true
   [ -n "$rel" ] || return 1
-  dir="$(cd "$(dirname "$pkg")" 2>/dev/null && pwd)" || return 1
+  dir="$(cd "$(dirname "$pkg")" 2>/dev/null && pwd -P)" || return 1
   [ -n "$dir" ] || return 1
   printf '%s\n' "$dir/${rel#./}"
 }
@@ -4668,7 +4668,7 @@ resolve_driving_profiles() {
   local dev_root
   if [ -n "$DRIVING_PROFILES" ] && [ -f "$DRIVING_PROFILES" ]; then printf '%s' "$DRIVING_PROFILES"; return 0; fi
   if [ -n "$BUILD_ROOT" ] && [ -f "$BUILD_ROOT/.quay/profiles.yml" ]; then printf '%s' "$BUILD_ROOT/.quay/profiles.yml"; return 0; fi
-  dev_root="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)"
+  dev_root="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P)"
   if [ -f "$dev_root/.quay/profiles.yml" ]; then printf '%s' "$dev_root/.quay/profiles.yml"; return 0; fi
   return 1
 }
@@ -6009,7 +6009,7 @@ FAKE_NPM
   #        这正是「某一个 kind 活过」冒充「driver 真活」的形态；负控制，⛔ 少了它 ② 可以是恒绿）
   local ac203k_fx="$tmp/ac203k" ac203k_repo="" ac203k_g="" ac203k_l1="" ac203k_l2="" ac203k_rc1=""
   local ac203k_rc2="" ac203k_same_fx="$tmp/ac203k-same" ac203k_same_rc=""
-  ac203k_repo="$(cd "$(dirname "$0")/../.." && pwd)"
+  ac203k_repo="$(cd "$(dirname "$0")/../.." && pwd -P)"
   mkdir -p "$ac203k_fx/.quay" "$ac203k_fx/goals" "$ac203k_same_fx/.quay" "$ac203k_same_fx/goals"
   AC203K_RC1="not-evaluated"; AC203K_RC2="not-evaluated"; AC203K_SAME_RC="not-evaluated"
   ac203k_g="$(ls "$ac203k_repo"/goals/AC-203-*.md 2>/dev/null | head -1 || true)"
@@ -7748,7 +7748,7 @@ write_ac_record() {
 # （一个 criterion 程序常同时读多个 AC；不分段会把 AC-238 的字段算到 AC-239 头上——实测过）。
 ac_record_schema_report() {
   local repo_root
-  repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+  repo_root="$(cd "$(dirname "$0")/../.." && pwd -P)"
   python3 - "$AC_RECORD_SCHEMA" "$repo_root" "$0" <<'PY'
 import ast, glob, os, re, sys
 
@@ -8638,7 +8638,7 @@ if [ "$AC257_PROJECT_SCOPE" = 1 ]; then
   if [ -n "$AC257_PLUGIN_ROOT_ARG" ]; then
     AC257_PLUGIN_ROOT="$AC257_PLUGIN_ROOT_ARG"
   else
-    AC257_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    AC257_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
   fi
   # CLI 入口从安装物自己的 package.json 解析（见 ac257_delivery_cli 头注释：实测 quay 包没有
   # bin/ 目录，bin.quay=./dist/quay.js ⇒ 硬编码 bin/quay 会在门口 NOT-EVALUATED）。解析不出 ⇒
@@ -8687,7 +8687,7 @@ if [ "$AC258_USER_SCOPE" = 1 ]; then
   if [ -n "$AC258_PLUGIN_ROOT_ARG" ]; then
     AC258_PLUGIN_ROOT="$AC258_PLUGIN_ROOT_ARG"
   else
-    AC258_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    AC258_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
   fi
   AC258_QRL="$(ac257_delivery_cli "$AC258_PLUGIN_ROOT" 2>/dev/null || true)"
   [ -n "$AC258_QRL" ] || AC258_QRL="${AC258_PLUGIN_ROOT}/../bin/quay"

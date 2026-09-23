@@ -1444,10 +1444,22 @@ export function computeWorkerRoundRecord(opts: {
    *  with-disk-ready：人把 needs-human 翻回 ready 后，内存集合据此清除、下一轮重新可派）。非空 =
    *  有对账发生（可观测非静默）；缺省/空 = 本轮无对账（⛔ 与「没观测」可区分——恒有该字段）。 */
   reconciledNeedsHuman?: string[];
-  /** 本轮重试上限豁免判定的三态结果（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）。
-   *  verdict ∈ unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback——三态在记录里可
-   *  区分（AC5，硬规则 3b：判不出 ≠ 判为无关）。缺省/空 = 本轮无豁免判定。 */
-  retryExemptions?: Array<{ task: string; verdict: string; reason: string; failingTestFiles: string[]; recurredTasks: string[] }>;
+  /** 本轮重试上限豁免判定的结果（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）。
+   *  verdict ∈ unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback /
+   *  static-phase-attributed——各态在记录里可区分（AC5，硬规则 3b：判不出 ≠ 判为无关 ≠ 静态相位已归因）。
+   *  staticPhase* 三键（gap-suite-red-attribution-blind-to-static-phase AC5 的生产读数面）：静态相位红
+   *  时记下点名的 checker 与文件，⛔ 只记 retry_exemptions 的既有键无法区分「读到了什么」。缺省/空 =
+   *  本轮无豁免判定。 */
+  retryExemptions?: Array<{
+    task: string;
+    verdict: string;
+    reason: string;
+    failingTestFiles: string[];
+    recurredTasks: string[];
+    staticPhaseRed?: boolean;
+    staticPhaseCheckers?: string[];
+    staticPhaseNamedFiles?: string[];
+  }>;
   /** 本轮「suite 红但归因不出失败测试文件」的【后续动作】判定（gap-fan-in-suite-red-with-no-
    *  attributable-test-still-redispatches-worker）：{ task, kind, verdict, reason, suiteLogHash }。
    *  kind ∈ count-and-retry / stop-terminal——两取值可区分（AC3，硬规则 3b：读不懂的 verdict 不得与
@@ -1841,23 +1853,283 @@ export interface RelatednessSignal {
   reason: string;
 }
 
-/** 从 suite 日志文本提取失败测试文件（repo-relative）。node:test 每文件一行
- *  `__PERFILE__ duration_ms=… <rel> passed=false end_ms=…`——passed=false 即该文件红。读不出 ⇒ []
- *  （不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定是否 suite 红）。 */
-export function failingTestFilesFromSuiteLog(logText: string): string[] {
-  const out: string[] = [];
+// ── suite 失败行解析（gap-suite-failure-attribution-third-party-layout）─────────────────────────────
+// 上游缺陷：本函数曾把【本仓库的测试布局】写死进判据——前缀只认 `(packages|plugin|experiments)/`、
+// 后缀只认 `.test.mjs`。第三方项目（`server/**/*.test.ts`、`src/**/*.test.tsx`）匹配恒为 0 ⇒ 返回
+// `[]` ⇒ judgeRetryExemption 判 insufficient-data-fallback ⇒ park 时的判词写成「the suite log names
+// nothing a worker could fix」——**一个肯定断言，而它的依据只是「解析器没读懂」**（硬规则 3b 的镜像：
+// 读不懂 ⇒ 伪装成判定）。生产读数（claudecodeui `.quay/worker-round.jsonl`，2026-09-20→09-23）：51 次
+// retry_exemptions 中 failingTestFiles 非空 **0 次**，波及 29 个任务；其中一例真凶是一条可一行修的
+// barrel 导入 lint 错误（`not ok - lint: server/…/model-context-window.test.ts:10:49: …`）。
+//
+// 修法：⛔ 不再按路径前缀/后缀白名单判定，改为**按 token 的形态**分三类（硬规则 3b 要求「读不懂」有
+// 独立取值，⛔ 不与「合格」同形）：
+//   - 带路径分隔符的 token ⇒ 真实文件位置（`server/x/y.test.ts`、worktree 绝对路径形态都算）
+//   - 无路径且无扩展名的 token ⇒ **伪阶段名**（`lint` / `typecheck`——runner 的 per-file 记录里它们
+//     占同一字段位，但它们不是文件；旧实现会把 `lint` 当测试文件）
+//   - 其余（含句子碎片、无路径又非测试后缀的 token）⇒ **无法识别**，原样留证，⛔ 不混进 files
+/** suite 日志失败行的解析结果。三态可区分（硬规则 3b）。 */
+export interface SuiteLogFailureParse {
+  /** 归因到的失败文件（repo-relative；worktree 绝对路径形态按 root 归一）。 */
+  files: string[];
+  /** 解析器识别出的失败行数 N（`__PERFILE__ … passed=false` 与 `not ok - …` 两类之和）——
+   *  唯一能区分「日志里没有失败行」与「有失败行但解析器读不懂」的量（⛔ 旧实现两者同形）。 */
+  failingLines: number;
+  /** 识别为伪阶段名的 token（`lint` / `typecheck` 等）——⛔ 不是测试文件。 */
+  pseudoStages: string[];
+  /** 既非真实文件也非伪阶段名 ⇒ 读不懂的 token（原样留证）。 */
+  unclassified: string[];
+}
+
+/** 测试文件后缀（node:test 的 `*.test.*` 与 jest/vitest 的 `*.spec.*`；本仓库自身用 .test.mjs）。 */
+const SUITE_TEST_FILE_RE = /\.(?:test|spec)\.(?:mjs|cjs|js|ts|tsx|jsx|mts|cts)$/i;
+/** 路径 token 的合法字符集——挡掉 `boundaries(dependencies):` 这类句子碎片混进文件名（那是"读不懂"）。 */
+const SUITE_PATH_TOKEN_RE = /^[\w./@~+-]+$/;
+
+/** 单个 token 的形态分类。⛔ 不查 worktree 是否存在：第三方日志里的失败文件常常不在本 worktree
+ *  （其它模块/并行分支），存在性检查会把真实文件误判成读不懂（且 AC 用例的假 root 里文件不存在）。 */
+function classifySuiteToken(token: string): "file" | "pseudo-stage" | "unclassified" {
+  const t = String(token ?? "").trim().replace(/[,;]+$/, "");
+  if (!t) return "unclassified";
+  if (!SUITE_PATH_TOKEN_RE.test(t)) return "unclassified";
+  if (t.includes("/")) return "file";
+  if (!t.includes(".")) return "pseudo-stage";
+  return SUITE_TEST_FILE_RE.test(t) ? "file" : "unclassified";
+}
+
+/** token → repo-relative；定位不出 ⇒ null（**读不懂的独立取值**，硬规则 3b）。
+ *  绝对路径的 repo 根【只能】由 root 给出（生产里 `measure-suite-reporter` 发的是 full-path，而 suite
+ *  在任务 worktree 里跑、调用方拿的是主检出 root）：先按 root 前缀剥离，不在 root 下则取「在 root 下
+ *  真实存在」的最长后缀——存在性是判据。⛔ 不按 `packages|plugin|experiments` 关键词猜前缀（那正是本
+ *  缺陷的成因）；⛔ 也不在无 root 时把绝对路径削成「看着像 repo-relative」的假路径——它会被当成已归因，
+ *  直接污染 AC-317 的读数（假在产物字段上 ⇒ 比读不懂更坏）。 */
+function toRepoRelToken(token: string, root: string | null): string | null {
+  const raw = String(token ?? "").replace(/\\/g, "/").trim();
+  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
+  const rootAbs = root ? `/${normalizeRel(root)}` : "";
+  if (!rootAbs || rootAbs === "/") return null;
+  if (raw === rootAbs || raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
+  const parts = raw.split("/").filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    const cand = parts.slice(i).join("/");
+    try {
+      if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
+    } catch { /* 该后缀不存在，继续缩短 */ }
+  }
+  return null;
+}
+
+/** `__PERFILE__ duration_ms=… <token> passed=false …` 的 <token> = `passed=false` 前那个字段。 */
+function suiteTokenBeforePassedFalse(line: string): string | null {
+  const idx = line.indexOf("passed=false");
+  if (idx < 0) return null;
+  const parts = line.slice(0, idx).trim().split(/\s+/);
+  return parts.length ? parts[parts.length - 1] : null;
+}
+
+/** `not ok - <rest>` 的 <rest>（兼容 TAP 的 `not ok 1 - name` 编号形态）。无该形态 / 空 ⇒ null。
+ *  ⛔ 这一个正则就是「什么算 not ok 行」的唯一定义：下面的 head / 指名文件两个读者共用它。 */
+function suiteNotOkRest(line: string): string | null {
+  const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
+  if (!m) return null;
+  return m[1].trim() || null;
+}
+
+/** `<rest>` 里 `:` 之前的头部 token（`lint` / `server/a/b.test.ts`）；空 ⇒ ""（调用方按 unclassified 处置）。 */
+function suiteNotOkHead(rest: string): string {
+  const ci = rest.indexOf(":");
+  return (ci < 0 ? rest : rest.slice(0, ci)).trim();
+}
+
+/** 伪阶段名后指名的真实文件：`lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
+ *  只在确实像路径/测试文件时返回（⛔ 不把 `not ok - lint: 5 problems` 的 `5` 当文件）。 */
+function suiteFileNamedAfterStage(rest: string): string | null {
+  const ci = rest.indexOf(":");
+  if (ci < 0) return null;
+  const chunk = (rest.slice(ci + 1).trim().split(/\s+/)[0] ?? "").replace(/(?::\d+){1,2}:?$/, "").replace(/:$/, "");
+  if (!chunk) return null;
+  if (!chunk.includes("/") && !SUITE_TEST_FILE_RE.test(chunk)) return null;
+  return chunk;
+}
+
+/** suite 日志 → 失败行解析（三态）。N = 失败行数（`__PERFILE__ … passed=false` + `not ok - …`）。
+ *  ⛔ N 与 files 分开返回：调用方据此把「日志里没有失败行」与「有 N 行但一行也归因不出」写成不同的判词
+ *  （旧实现两者都只说「提取不出」，与「真的没有可修对象」同形）。 */
+export function parseSuiteLogFailures(logText: string, root?: string | null): SuiteLogFailureParse {
+  const files: string[] = [];
+  const pseudoStages: string[] = [];
+  const unclassified: string[] = [];
+  let failingLines = 0;
+  const notePseudo = (t: string): void => { if (t && !pseudoStages.includes(t)) pseudoStages.push(t); };
+  const noteUnclassified = (t: string): void => { if (t && !unclassified.includes(t)) unclassified.push(t); };
+  const addFile = (token: string): void => {
+    // 定位不出 repo-relative（如无 root 的绝对路径）⇒ 归入「读不懂」，⛔ 不冒充已归因（硬规则 3b）。
+    const rel = toRepoRelToken(token, root ?? null);
+    if (!rel) { noteUnclassified(token); return; }
+    if (!files.includes(rel)) files.push(rel);
+  };
+
   for (const raw of String(logText ?? "").split("\n")) {
     const line = raw.trim();
-    if (!line.includes("passed=false")) continue;
-    // `__PERFILE__ duration_ms=… <path> passed=false …` 的 <path> 有两种实况形态（同一 runner，不同 cwd/
-    // 传参路径）：repo-relative（`plugin/test/x.test.mjs`）与 worktree 绝对路径（`/…/quay-worktrees/<task>/
-    // plugin/test/x.test.mjs`）。只取 repo-relative 的 `(packages|plugin|experiments)/…` 后缀，其前可接
-    // 行首 / 空白 / 路径分隔符——⛔ 只匹配 `(?:^|\s)` 会漏掉绝对路径形态（`/plugin/…` 前是 `/` 非空白），
-    // 使续做提示与豁免判定的失败测试集对绝对路径日志恒空（恒假，硬规则 4b）。
-    const m = /(?:^|\s|\/)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
-    if (m && !out.includes(m[1])) out.push(m[1]);
+    if (line.includes("passed=false")) {
+      const token = suiteTokenBeforePassedFalse(line);
+      if (!token) continue;
+      failingLines += 1;
+      const cls = classifySuiteToken(token);
+      if (cls === "file") addFile(token);
+      else if (cls === "pseudo-stage") notePseudo(token);
+      else noteUnclassified(token);
+      continue;
+    }
+    const rest = suiteNotOkRest(line);
+    if (rest === null) continue;
+    failingLines += 1;
+    const head = suiteNotOkHead(rest);
+    const cls = classifySuiteToken(head);
+    if (cls === "file") { addFile(head); continue; }
+    if (cls === "pseudo-stage") notePseudo(head);
+    else noteUnclassified(head);
+    // `not ok - <stage>: <rel>:<line>:<col>` 行把阶段失败【指名】到了真实文件上 ⇒ 归因到它。
+    const named = suiteFileNamedAfterStage(rest);
+    if (named !== null) {
+      if (classifySuiteToken(named) === "file") addFile(named);
+      else noteUnclassified(named);
+    }
   }
-  return out;
+  return { files, failingLines, pseudoStages, unclassified };
+}
+
+/** 判词的「读到了什么」半边：伪阶段名 + 读不懂的 token 摘要（judgeRetryExemption 与 stop-terminal 判词
+ *  共用一份措辞，⛔ 不各写一遍——两份措辞就是两处漂移）。 */
+function suiteTokenDetail(pseudoStages: string[], unclassified: string[]): string {
+  const extra: string[] = [];
+  if (pseudoStages.length) extra.push(`pseudo-stage tokens: ${pseudoStages.slice(0, 5).join(", ")}`);
+  if (unclassified.length) extra.push(`unrecognized tokens: ${unclassified.slice(0, 5).join(", ")}`);
+  return extra.length ? `; ${extra.join("; ")}` : "";
+}
+
+/** 从 suite 日志文本提取失败测试文件（repo-relative）。见 parseSuiteLogFailures。
+ *  读不出 ⇒ []（不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定
+ *  是否 suite 红，或据 parseSuiteLogFailures().failingLines 把两者分开）。 */
+export function failingTestFilesFromSuiteLog(logText: string, root?: string | null): string[] {
+  return parseSuiteLogFailures(logText, root).files;
+}
+
+// ── 静态相位失败的归因（gap-suite-red-attribution-blind-to-static-phase）────────────────────────────
+// 上游缺陷：本模块的重试豁免归因【只有一条路】——失败测试文件（`__PERFILE__ … passed=false` /
+// `not ok - …`）。而 suite 死在【静态相位】时日志里根本没有失败测试行（实测 `# tests 0`），真因写在
+// `STATIC_CHECK_FAILED: <checker> exit=<rc>` 机器行 + 它上面那段 checker 违规输出里。于是
+// `failingTestFiles.length === 0` 恒成立 ⇒ 一律 insufficient-data-fallback ⇒ 终局判词
+// 「infra/contract suspected, not an implementable defect」——**而那个相位逐字点名了本任务新文件里的
+// 可修缺陷**。实测（`gap-arch-tsify-checker-mutation-check-sh` 的 fan-in 日志，2026-09-20T20:37Z）：
+//   checker-mechanical-spine-check — 133 checker(s), 1 violation(s), 0 exempted
+//   FAIL: 1 unexempted violation(s):
+//     - checker-mutation-check.ts (json): --json claimed but no JSON primitive
+//   STATIC_CHECK_FAILED: checker-mechanical-spine-check exit=1
+//   # tests 0 / # fail 47 / # suite red static-check
+// 而该任务的 delta 里就有 `plugin/scripts/checker-mutation-check.ts`（本段修复时 grep 复核过）。
+// 与硬规则 3b 同源、方向相反：一个「读不懂」的输入不得触发与「已读懂且判为不可修」相同的动作。
+
+/** 静态相位失败的解析结果（三态可区分，硬规则 3b）。 */
+export interface StaticPhaseFailureParse {
+  /** 日志是不是【静态相位红】（`STATIC_CHECK_FAILED:` 机器行 或 `# suite red static-check` 结束行）。
+   *  ⛔ 与「suite 红但走测试相位」分开：只有它为真才谈得上静态相位归因。 */
+  staticPhaseRed: boolean;
+  /** `STATIC_CHECK_FAILED: <name> exit=<rc>` 点名的 checker 名（去重，按出现序）。 */
+  failedCheckers: string[];
+  /** 失败块内【指名】的 artifact token（原样留证，⛔ 不解析成猜测路径；去重，按出现序）。 */
+  namedArtifacts: string[];
+}
+
+/** `STATIC_CHECK_FAILED: <name> exit=<rc>`（checker-cost-lib 的 fail-closed 机器行，stderr）——静态相位
+ *  【唯一】的机器可读失败信号。与 `full-suite-runner.ts` 的 `STATIC_CHECK_FAILED_RE` 同形（薄本地副本，
+ *  ⛔ 不 import 那个模块：worker-driver 与 full-suite-runner 之间不新开一条边，import-graph 闸的
+ *  valueSccs 基线为 0）。 */
+const STATIC_CHECK_FAILED_LINE_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
+/** 静态相位红的 suite 收尾行（test.sh 静态检查失败时打的字面量；与机器行互补——任一在 ⇒ 这是静态相位红）。 */
+const STATIC_PHASE_RED_END_RE = /^#\s*suite red static-check\s*$/;
+/** 静态相位失败【块】的起始行。⛔ 只在块内取指名 artifact：baselined 的违规明细在【通过】的 checker
+ *  输出里照样逐条打印——本仓库实测一份 fan-in 日志里有 44 条 `VIOLATION:` 明细而 task-contract-check
+ *  并未失败（它 print 的是 grandfather 名单）。不加这一层 scoping 会把既有违规误归因到每一个任务，
+ *  那是硬规则 3b 的反面（把「不是我的」伪装成「是我的」）。形状取自 `full-suite-runner.ts` 的
+ *  `isStaticCheckFailureLine`（a passing run never emits these）。 */
+const STATIC_FAIL_BLOCK_START_RE =
+  /^(?:FAIL:\s*\d+\s+(?:\S+\s+)?violation|new since baseline:\s*[1-9]|CEILING BREACH|ceiling was RAISED)/;
+/** 失败块【内】一条违规明细行 → 它指名的 artifact token（无 ⇒ null）。两种形态各带一个结构标记
+ *  （`(dimension)` / `— code:`），⛔ 纯 `  - foo:` 的句子碎片不算指名（那会引入假归因）。 */
+function staticBlockNamedArtifact(line: string): string | null {
+  const dash = /^\s+-\s+(\S+)\s+\([a-z0-9_-]+\)\s*:/.exec(line);
+  if (dash) return dash[1];
+  const vio = /^\s*VIOLATION:\s*(\S+)\s*(?:—|-)\s*\S+\s*:/.exec(line);
+  if (vio) return vio[1];
+  return null;
+}
+
+/** suite 日志 → 静态相位失败解析。⛔ 不返回「有没有可修对象」这种布尔——`staticPhaseRed`、
+ *  `failedCheckers`、`namedArtifacts` 三个读数分开给，调用方据此写出如实判词（硬规则 3/3b）。 */
+export function parseStaticCheckFailures(logText: string): StaticPhaseFailureParse {
+  const failedCheckers: string[] = [];
+  const namedArtifacts: string[] = [];
+  let staticPhaseRed = false;
+  let inBlock = false;
+  for (const raw of String(logText ?? "").split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const m = STATIC_CHECK_FAILED_LINE_RE.exec(trimmed);
+    if (m) {
+      staticPhaseRed = true;
+      inBlock = false; // 机器行是收尾汇总，它自己不开一个失败块
+      if (!failedCheckers.includes(m[1])) failedCheckers.push(m[1]);
+      continue;
+    }
+    if (STATIC_PHASE_RED_END_RE.test(trimmed)) { staticPhaseRed = true; inBlock = false; continue; }
+    if (STATIC_FAIL_BLOCK_START_RE.test(trimmed)) { inBlock = true; continue; }
+    if (!inBlock) continue;
+    // 块内续行 = 缩进的明细行；非缩进行 ⇒ 块结束（下一段 checker 输出 / 下一节标题）。
+    if (!/^\s/.test(line)) { inBlock = false; continue; }
+    const tok = staticBlockNamedArtifact(line);
+    if (tok && !namedArtifacts.includes(tok)) namedArtifacts.push(tok);
+  }
+  return { staticPhaseRed, failedCheckers, namedArtifacts };
+}
+
+/** checker/文件的扩展名孪生集。`.sh` ↔ `.ts` ↔ `.js` 是【同一条判断对象的两种壳】（本仓库的 shell→TS
+ *  改写程序把同一个 checker 从 `.sh` 换成 `.ts`）⇒ 判「点名的是不是本任务改的那个文件」时它们等价。 */
+const STATIC_ARTIFACT_EXTS = [".ts", ".sh", ".mjs", ".cjs", ".js", ".tsx", ".jsx", ".mts", ".cts"];
+
+/** 去扩展名的 basename（`a/b/foo-check.ts` ⇒ `foo-check`）。 */
+function artifactStem(p: string): string {
+  const base = path.posix.basename(normalizeRel(p));
+  const ext = path.posix.extname(base).toLowerCase();
+  return STATIC_ARTIFACT_EXTS.includes(ext) ? base.slice(0, -ext.length) : base;
+}
+
+/** 同目录同 stem 的其它扩展名形态（`x.sh` ↔ `x.ts`）。 */
+function artifactExtVariants(p: string): string[] {
+  const rel = normalizeRel(p);
+  const dir = path.posix.dirname(rel);
+  const stem = artifactStem(rel);
+  return STATIC_ARTIFACT_EXTS.map((e) => (dir === "." ? `${stem}${e}` : `${dir}/${stem}${e}`));
+}
+
+/** 一个被指名的 artifact 是否落在本任务 delta 内（AC2/AC3 的判定核）。
+ *  ⛔ **不猜目录前缀**：`checker-mutation-check.ts` 出在日志里只有 basename，把 `plugin/scripts/` 当成
+ *  前缀补上去正是 `gap-suite-failure-attribution-third-party-layout` 那个缺陷的成因（按本仓库布局写死
+ *  判据）。改为**按名字判**，由 delta 侧提供目录：
+ *    ① token 自带路径分隔符 ⇒ 整条路径相等，或同目录同 stem 的扩展名孪生（`.sh`↔`.ts`）。
+ *    ② token 是裸名 ⇒ delta 里任一文件的 basename 相等，或同 stem（覆盖 `STATIC_CHECK_FAILED` 点名的
+ *       checker 名——那是 checker 文件的 stem，不带扩展名）。 */
+export function namedArtifactHitsDelta(artifact: string, deltaPaths: string[]): boolean {
+  const art = normalizeRel(String(artifact ?? "").trim());
+  if (!art) return false;
+  const deltas = deltaPaths.map((d) => normalizeRel(String(d ?? ""))).filter(Boolean);
+  const artStem = artifactStem(art);
+  if (art.includes("/")) {
+    const variants = artifactExtVariants(art);
+    return deltas.some((d) => d === art || variants.includes(d));
+  }
+  return deltas.some((d) => path.posix.basename(d) === art || artifactStem(d) === artStem);
 }
 
 /** 读任务 `## Touches`（repo-relative 路径列表，normalizeRel）。任务文件缺失 / 无 Touches 段 ⇒ null
@@ -2024,7 +2296,7 @@ export function continueRelatednessNote(root: string, task: string, attempts: Ex
   } catch {
     return "";
   }
-  const failing = failingTestFilesFromSuiteLog(logText);
+  const failing = failingTestFilesFromSuiteLog(logText, root);
   if (failing.length === 0) return "";
   return formatRelatednessNote(relatednessSignalsFor(root, task, failing));
 }
@@ -2043,9 +2315,19 @@ export function continueRelatednessNote(root: string, task: string, attempts: Ex
 // ——「判不出」与「判为无关」绝不共用同一取值。⛔ 只减重试计数，不改 markNeedsHuman 的止损语义：任务
 // 自身缺陷照旧在第 3 次翻转 needs-human（AC2 负控制）。
 
-/** 重试豁免三态 verdict。own-defect-counted 与 insufficient-data-fallback 都【照常计数】，但后者表示
- *  「读不懂/数据不足」而非「判定为任务自身缺陷」——两态在记录里必须可区分（硬规则 3b）。 */
-export type RetryExemptionVerdict = "unrelated-flaky-exempt" | "own-defect-counted" | "insufficient-data-fallback";
+/** 重试豁免 verdict。own-defect-counted 与 insufficient-data-fallback 都【照常计数】，但后者表示
+ *  「读不懂/数据不足」而非「判定为任务自身缺陷」——两态在记录里必须可区分（硬规则 3b）。
+ *
+ *  `static-phase-attributed`（gap-suite-red-attribution-blind-to-static-phase）：suite 死在【静态相位】、
+ *  日志里没有失败测试行，但静态相位的失败信号（`STATIC_CHECK_FAILED` 点名的 checker / 失败块指名的
+ *  文件）落在本任务 Touches/diff 内 ⇒ 这是一条**本任务可修的实现缺陷**，⛔ 不得再落
+ *  `insufficient-data-fallback`（那会把可修缺陷报成「infra/contract suspected, not an implementable
+ *  defect」并推向 needs-human）。与 own-defect-counted 分开取值：成因不同，记录里必须能区分。 */
+export type RetryExemptionVerdict =
+  | "unrelated-flaky-exempt"
+  | "own-defect-counted"
+  | "insufficient-data-fallback"
+  | "static-phase-attributed";
 
 /** 一次 exited-not-landed 的重试豁免判定结果（可扩展输出，⛔ 不重写接线）。 */
 export interface RetryExemptionJudgment {
@@ -2057,6 +2339,21 @@ export interface RetryExemptionJudgment {
   signatures: string[];
   /** 窗口内命中同一签名的【其它】不同任务 id（豁免时非空；非豁免 = []）。 */
   recurredTasks: string[];
+  /** 本次 suite 日志里解析器识别出的失败行数 N。⛔ 与 failingTestFiles 分开记：`0 of N` 才是
+   *  「日志里有 N 行失败、一行也没归因出」的证据；N=0 则说明日志里连失败行形态都没有。
+   *  两者在旧实现里同形（都只说「提取不出」）⇒ 判词曾写成「没有 worker 能修的东西」（硬规则 3b）。 */
+  suiteFailingLines?: number;
+  /** 解析器读不懂的 token（伪阶段名 / 句子碎片，原样留证）。 */
+  suiteUnclassified?: string[];
+  /** 解析器识别出的伪阶段名 token（`lint` / `typecheck`——它们不是测试文件）。 */
+  suitePseudoStages?: string[];
+  /** 本次 suite 红是不是【静态相位】红（`STATIC_CHECK_FAILED` / `# suite red static-check`）。缺省
+   *  undefined = 没走到该分支（⛔ 与 false 区分：false = 读过、不是静态相位）。 */
+  staticPhaseRed?: boolean;
+  /** 静态相位点名的 checker 名（`STATIC_CHECK_FAILED: <name>`）。 */
+  staticPhaseCheckers?: string[];
+  /** 静态相位失败块指名的 artifact token（原样留证）。 */
+  staticPhaseNamedFiles?: string[];
 }
 
 /** 近期窗口缺省：48h（与提案 48h needs-human 复盘同窗）。非新设数值阈值——只是「近期」的操作化，与
@@ -2189,6 +2486,59 @@ function recurringSignatureTasks(
   return [...tasks];
 }
 
+/** 静态相位红的归因核（AC2/AC3）。检查两类被指名对象是否落在本任务 Touches/diff 内：
+ *    ① `STATIC_CHECK_FAILED: <name>` 点名的 checker（按 stem 比 delta 的 basename）
+ *    ② 失败块内指名的 artifact token（整条路径 / basename / 扩展名孪生）
+ *  任一命中 ⇒ `static-phase-attributed`（本任务可修的实现缺陷，走既有重试上限路径，⛔ 不再被报成
+ *  「infra/contract suspected, not an implementable defect」）。
+ *  一个都不命中 ⇒ 仍回 insufficient-data-fallback（**走既有不相关路径**，AC3② 的负控制半边），但判词
+ *  必须如实报出【静态相位读到了什么】——点名了哪些 checker/文件、且都不在本任务 delta 内。旧措辞
+ *  （`0 of 0 failing lines`）在静态相位红上等于说「日志里什么都没有」，那是假话（硬规则 3b）。
+ *  delta 读不懂（Touches 缺失/任务文件不在）⇒ 同样 fail-closed 回退，⛔ 不伪造成归因不上。 */
+function judgeStaticPhaseAttribution(
+  root: string,
+  taskId: string,
+  sp: StaticPhaseFailureParse,
+  note: { staticPhaseRed: boolean; staticPhaseCheckers: string[]; staticPhaseNamedFiles: string[] },
+): RetryExemptionJudgment {
+  const base = { failingTestFiles: [] as string[], signatures: [] as string[], recurredTasks: [] as string[], ...note };
+  const delta = computeDeltaPaths(root, taskId);
+  if (delta === null) {
+    return {
+      verdict: "insufficient-data-fallback",
+      reason: `static phase red but this task's Touches/diff is unreadable (cannot attribute)${staticPhaseDetail(sp)}`,
+      ...base,
+    };
+  }
+  const named: Array<{ token: string; origin: string }> = [
+    ...sp.failedCheckers.map((c) => ({ token: c, origin: "STATIC_CHECK_FAILED" })),
+    ...sp.namedArtifacts.map((t) => ({ token: t, origin: "failure-detail" })),
+  ];
+  const hit = named.find((n) => namedArtifactHitsDelta(n.token, delta));
+  if (hit) {
+    return {
+      verdict: "static-phase-attributed",
+      reason: `static phase red names ${hit.token} (${hit.origin}), which is in this task's Touches/diff (own defect)`,
+      ...base,
+    };
+  }
+  return {
+    verdict: "insufficient-data-fallback",
+    reason:
+      `static phase red named ${named.length} artifact(s) and none is in this task's Touches/diff ` +
+      `(no attribution to this task)${staticPhaseDetail(sp)}`,
+    ...base,
+  };
+}
+
+/** 静态相位判词的「读到了什么」半边：点名了哪些 checker / 哪些文件（截断到前 5 条，⛔ 与「什么都没读到」区分）。 */
+function staticPhaseDetail(sp: StaticPhaseFailureParse): string {
+  const parts: string[] = [];
+  if (sp.failedCheckers.length) parts.push(`checkers: ${sp.failedCheckers.slice(0, 5).join(", ")}`);
+  if (sp.namedArtifacts.length) parts.push(`named files: ${sp.namedArtifacts.slice(0, 5).join(", ")}`);
+  return parts.length ? `; ${parts.join("; ")}` : "";
+}
+
 /** 重试豁免判定（纯结构性、不调 LLM、不写盘）。对一次 exited-not-landed 判定「本次是否计入该任务自身
  *  重试计数」。⛔ 只判 suite-red（非 suite red = merge 冲突 / typecheck / scoped-gate / ac-gate 等，天然
  *  是任务自身缺陷候选，无「不相关 flaky」可豁免）。读不懂的每一步都回退 insufficient-data-fallback
@@ -2222,18 +2572,45 @@ export function judgeRetryExemption(
   } catch {
     return { verdict: "insufficient-data-fallback", reason: `unable to read suite log ${suiteLogPath}`, failingTestFiles: [], signatures: [], recurredTasks: [] };
   }
-  const failingTestFiles = failingTestFilesFromSuiteLog(logText);
+  const parsed = parseSuiteLogFailures(logText, root);
+  const parseNote = {
+    suiteFailingLines: parsed.failingLines,
+    suiteUnclassified: parsed.unclassified,
+    suitePseudoStages: parsed.pseudoStages,
+  };
+  const failingTestFiles = parsed.files;
+  // 静态相位红：日志里【没有】失败测试行（`# tests 0`），真因在 STATIC_CHECK_FAILED / 失败块里。
+  // ⇒ 走静态相位归因（旧实现对它恒返 insufficient-data-fallback，判词与真因完全不符）。
+  const staticPhase = parseStaticCheckFailures(logText);
+  const staticNote = {
+    staticPhaseRed: staticPhase.staticPhaseRed,
+    staticPhaseCheckers: staticPhase.failedCheckers,
+    staticPhaseNamedFiles: staticPhase.namedArtifacts,
+  };
+  if (failingTestFiles.length === 0 && staticPhase.staticPhaseRed) {
+    return judgeStaticPhaseAttribution(root, taskId, staticPhase, staticNote);
+  }
   if (failingTestFiles.length === 0) {
-    return { verdict: "insufficient-data-fallback", reason: "no failing test file extracted from the suite log", failingTestFiles: [], signatures: [], recurredTasks: [] };
+    // ⛔ 判词不得写成肯定断言（旧措辞「没有 worker 能修的东西」——依据只是「解析器没读懂」，硬规则 3b）。
+    // 只报可核的读数：解析器读到 N 行失败、0 行归因到文件。`0 of N` 与 `0 of 0` 是两种不同的实况。
+    const detail = suiteTokenDetail(parsed.pseudoStages, parsed.unclassified);
+    return {
+      verdict: "insufficient-data-fallback",
+      reason: `no failing test file extracted from the suite log (parser extracted 0 of ${parsed.failingLines} failing lines${detail})`,
+      failingTestFiles: [],
+      signatures: [],
+      recurredTasks: [],
+      ...parseNote,
+    };
   }
   const signatures = assertionSignaturesFromSuiteLog(logText);
   if (signatures.length === 0) {
-    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [] };
+    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [], ...parseNote };
   }
   // ① 失败测试文件与任务 Touches/diff 交集——任一命中 ⇒ 任务自身缺陷，照常计数（AC2 防滥用负控制）。
   const delta = computeDeltaPaths(root, taskId);
   if (delta === null) {
-    return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [] };
+    return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [], ...parseNote };
   }
   for (const rel of failingTestFiles) {
     const d = classifyDeltaRelatedness(rel, delta, directImportRels(root, rel));
@@ -2241,7 +2618,7 @@ export function judgeRetryExemption(
       return { verdict: "own-defect-counted", reason: `failing test ${rel} is in this task's Touches/diff (own defect)`, failingTestFiles, signatures, recurredTasks: [] };
     }
     if (d.verdict === "unknown") {
-      return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [] };
+      return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [], ...parseNote };
     }
   }
   // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发。
@@ -2357,6 +2734,17 @@ function unattributablePriorAttempts(
   return out;
 }
 
+/** stop-terminal 判词的归因依据。⛔ 只说【解析器读到了什么】，不做「日志里没有 worker 能修的东西」这类
+ *  肯定断言——那句话的依据只是「解析器没读懂」（硬规则 3b：读不懂 ⇒ 伪装成判定）。N 是解析器读到的失败
+ *  行数：`0 of N`（N>0）说明日志里有失败行却一行也没归因出；`0 of 0` 说明连失败行形态都没有。 */
+function suiteAttributionEvidence(exemption: RetryExemptionJudgment): string {
+  const n = exemption.suiteFailingLines;
+  const base = typeof n === "number"
+    ? `parser extracted 0 of ${n} failing lines and attributed none to a file`
+    : "parser attributed no failing file (failure-line count unavailable on this judgment)";
+  return `${base}${suiteTokenDetail(exemption.suitePseudoStages ?? [], exemption.suiteUnclassified ?? [])}`;
+}
+
 /** 后续动作判定（纯结构性、不写盘、不调 LLM）。输入 = 本轮 judgeRetryExemption 的判定；输出 =
  *  「照常计数重派」还是「立即停 + 标 needs-human」。⛔ 不重写既有重试上限逻辑：`count-and-retry`
  *  的诊断与计数仍由 onWorkerFinished 的 advanceRetryCap 路径负责，本函数只回答【该不该再拿一个
@@ -2374,7 +2762,12 @@ export function decideExitedNotLandedAction(
     return {
       kind: "count-and-retry",
       verdict: exemption.verdict,
-      reason: `failure was attributed (${exemption.verdict}) — the existing retry-cap path applies`,
+      // AC4（gap-suite-red-attribution-blind-to-static-phase）：判词必须带上【归因到什么】——静态相位红
+      // 上旧的终局判词是「infra/contract suspected, not an implementable defect（日志里没有 worker 能修
+      // 的东西）」，而真因恰恰是日志点名的、本任务 delta 内的文件（真话在日志里，判词在说反话）。
+      reason:
+        `failure was attributed (${exemption.verdict}) — the existing retry-cap path applies` +
+        (exemption.verdict === "static-phase-attributed" ? `: ${exemption.reason}` : ""),
       suiteLogHash: null,
     };
   }
@@ -2403,7 +2796,7 @@ export function decideExitedNotLandedAction(
       reason:
         `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
         `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
-        `(the suite log names nothing a worker could fix); stopping instead of spending another worker session`,
+        `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`,
     };
   }
   return {
@@ -3664,7 +4057,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 重试上限豁免判定（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：每轮【新】的三态
   // 判定结果（splice(0) 快照清空，⛔ 不跨轮累积）。生产载体 = round 记录（生产 driver argv 无 --json ⇒
   // json 事件不可观测，同 markNeedsHuman 的 needsHumanResults）。三态在 round 记录里可区分（AC5）。
-  const retryExemptions: Array<{ task: string; verdict: RetryExemptionVerdict; reason: string; failingTestFiles: string[]; recurredTasks: string[] }> = [];
+  const retryExemptions: NonNullable<Parameters<typeof computeWorkerRoundRecord>[0]["retryExemptions"]> = [];
   // 归因不出的后续动作判定（gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker）：
   // 每轮【新】的判定结果（splice(0) 快照清空，⛔ 不跨轮累积）。kind ∈ count-and-retry / stop-terminal
   // 在 round 记录里可区分（AC3 生产载体）。
@@ -3819,7 +4212,15 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // 计数（继续重派，⛔ 不是无条件豁免）。三态判定结果经 writeRound 落 round 记录（AC5 生产载体），
         // json 事件供测试/手动观测。判不出 ⇒ insufficient-data-fallback，照常计数（fail-closed）。
         const exemption = judgeRetryExemption(rootDir, r.taskId, r.outcome);
-        retryExemptions.push({ task: r.taskId, verdict: exemption.verdict, reason: exemption.reason, failingTestFiles: exemption.failingTestFiles, recurredTasks: exemption.recurredTasks });
+        retryExemptions.push({
+          task: r.taskId, verdict: exemption.verdict, reason: exemption.reason,
+          failingTestFiles: exemption.failingTestFiles, recurredTasks: exemption.recurredTasks,
+          // 静态相位红 × 已归因 的【生产读数面】（gap-suite-red-attribution-blind-to-static-phase AC5）：
+          // 点名的 checker / 文件一并入 round 记录，⛔ 不让「读到什么」只活在本轮内存里。
+          staticPhaseRed: exemption.staticPhaseRed,
+          staticPhaseCheckers: exemption.staticPhaseCheckers,
+          staticPhaseNamedFiles: exemption.staticPhaseNamedFiles,
+        });
         if (json) process.stdout.write(`${JSON.stringify({ event: "retry-exemption", task: r.taskId, ...exemption })}\n`);
         // 动作跟着读数分叉（gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker）：
         // 同一条 verdict 下，后续动作【不】与「已归因的实现缺陷」共用重派分支。判为「归因不出」且

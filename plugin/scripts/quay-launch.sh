@@ -41,8 +41,8 @@ for a in "${@:2}"; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 # 显式 QUAY_LAUNCH_SETTINGS 可覆盖 settings 文件路径（测试/负控制用；默认检查进仓库的那份）。
 # gap-manager-layer-no-verified-install-vector (bare-metal 冷启动向量): 在 npm pack 的裸机安装里
 # `.claude/launch.settings.json` 不在包根（npm `files` 只随包根 plugin/ 走），它在
