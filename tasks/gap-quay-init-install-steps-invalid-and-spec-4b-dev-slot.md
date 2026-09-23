@@ -2,7 +2,7 @@
 id: gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot
 title: quay-init 安装步骤两参数形式被 CLI 拒且指向缓存目录——改为 github 发布渠道配方；SPEC §4b 改写为
   quay(github) / quay-dev(dog food) 双槽
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -292,3 +292,13 @@ AC-161 exit=0
 - 根因排查确认：上述 needs-human 是 worker-driver 连续快速死亡触发的重试退避上限，根因是 `.quay/profiles.yml` 中 `worker-default.model` 及其三个 `ANTHROPIC_DEFAULT_*_MODEL` 环境覆写被设为一个网关上不存在的模型名 `deepseek-v4-pro-anthropic`（直连探测 `http://127.0.0.1:26510/v1/models` 确认：网关只有 `v4.1flash`/`v4.1flash-anthropic`/`v4pro`/`v4pro-anthropic` 等条目，无任何 `deepseek-*` 名）。该窗口内每次 worker/selector 派发请求都以 400 "Invalid model name" 秒死，与本任务自身的 Proposal/Plan/AC/DoD 内容毫无关系——纯属基础设施配置故障造成的连坐。
 - 修复：已将 `.quay/profiles.yml` 的 `worker-default.model` 与三个 `ANTHROPIC_DEFAULT_*_MODEL` 覆写统一改为 `v4.1flash-anthropic`，并直接对网关发起 `POST /v1/messages`（`model: v4.1flash-anthropic`）验证返回干净的 200 响应，确认该模型名在当前网关上可用。
 - 据此将本任务从 needs-human 退回 ready，交由下一轮 worker-driver 重新拾取执行；本次变更未修改本任务 Proposal/Plan/AC/DoD 的任何一条内容，也未改动 Touches 清单。
+## Needs-Human
+
+**执行 2026-09-23T08:36:59.841Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: helper derived set must EQUAL quay-init derive_loop_scripts() (single source, no second list)
+- run_id：wk-prod-anchor
+- session_id：7e29087c-9256-4160-95d6-bc62123f47b2
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot~wk-prod-anchor~1790152436206-e570c0.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot-wk-prod-anchor.log
