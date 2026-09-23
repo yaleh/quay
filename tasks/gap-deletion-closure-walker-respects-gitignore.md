@@ -260,3 +260,49 @@ SCOPED GATE EXIT=0
 - 失败步/判词：AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：3cc14ee5-4859-49ff-abc2-1bd88981569a
+
+## worker 轮复验 #2（2026-09-23，合并 develop 后重跑全部 AC）
+
+worktree `/data/home/yale/work/quay-worktrees/gap-deletion-closure-walker-respects-gitignore`；
+`git merge --no-edit develop` 两次（均无冲突，工作树干净）。**全部读数取自生产载体**
+`--root /data/home/yale/work/quay`（活共享检出，故每条附时刻）。
+
+- **AC2/AC3**（`--json`，T=2026-09-23T17:11:19Z）：`dcTotal`=**983**、`callGraphTotal`=**199**、`R`=**4.94**、
+  `code`=214 / `comment`=235 / `doc`=640；`.claude/worktrees/`=**0**、`.archguard/`=**0**、
+  `packages/quay/plugin/`=**0**（三条各 0，判定按**位置**，⛔ 不是"总数变小"）；`tasks/`=**503**（≥400 ✅）、
+  `experiments/`=**34**（未被顺手排除）、`plugin/scripts/` 下 code 类命中=**97**（>0 ✅）；
+  `ignoreSource.kind`=`"git-worktree"`、`visiblePaths`=**7487**。
+  与 09-20 轮（957 / 205 / 4.67 / tasks 487 / experiments 33）的差异**全部**来自活共享检出的漂移
+  （`tasks/` +16、`experiments/` +1）；三个 gitignored 前缀仍各 0。
+- **AC4**（注入三读 + 面开关；fixture=`.archguard/fixture-2026-09-23T171141412Z/ref.md`，内容引用 `gate-script-lib.sh`）：
+  三读 refs/dc/cg 全为 **983 / 983 / 199**，`md5(sorted refs[].file)` 三读同为 **`3cf75278290b`**；
+  `A\B=B\A=B\C=C\B=[]`，`A vs C identical = true`，fixture 不在任何一读的 `refs` 中；
+  fixture 已撤除（`statSync` 复核：不存在）。
+  **面开关对照**（同树同 fixture）：面开 `kind=git-worktree` refs=**983**、fixture **不在** DC；
+  面关（显式 `visible=null`）`kind=manual-skip-only` refs=**11950**、fixture **在** DC
+  ⇒ 排除确由 skip 面做出，而不是"fixture 恰好没被读到"。
+- **AC5**：`plugin/test/deletion-closure-check.test.mjs` exit **0**（tests 13 / pass 13 / fail 0）；
+  `deletion-closure-check.ts gate-script-lib.sh` 单构件剖面 CallGraph=**79** / DC=**122** / **R=1.54** ≤ 2 ✅。
+- **AC1 复核**：`git ls-files | wc -l` = **6814**（09-20 为 6732，活树漂移）；三条 `git check-ignore -v`
+  仍逐字命中 `.gitignore:29 **/worktrees/`、`.gitignore:447 .archguard/`、`.gitignore:26 packages/quay/plugin/`。
+- **AC6**：`bash scripts/test.sh --for-task gap-deletion-closure-walker-respects-gitignore --allow-thin` exit **0**
+  （scoped 静态相全部 PASS；scoped 单测相 ℹ tests 31 / pass 31 / fail 0）。唯一 NOT-EVALUATED 是
+  `it0-split-or-commit-check --changed`「本轮 delta 无任务文件」——与 PASS **不同形**、不阻塞（硬规则 3b 的正确行为）。
+
+**scoped-gate 缓存**：`develop-sha = aa379a10a7cae0b8b64b98c22b15bef642e82d1a`，写缓存时该 sha 仍是
+develop tip，且 `git merge-base --is-ancestor develop HEAD` = **YES**（缓存声称"已对着这个确切的 develop
+状态评过绿"才为真；第一次写缓存时 develop 已前进 15 提交，故重做 merge + 重跑门 + 重写）。
+
+### 前一轮 needs-human 的状态复核（⛔ 只报已核实的事实，不复原历史成因）
+
+`## Needs-Human` 记的 19:18 判词是「AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）」。本轮续做时
+**同一谓词**对两个来源都返回可评估且全勾——`countCompletionCheckboxes` 直调（worktree 副本 / develop ref）：
+
+```
+WORKTREE {"total":6,"checked":6,"unchecked":0,"sectionFound":true}
+develop  {"total":6,"checked":6,"unchecked":0,"sectionFound":true}
+```
+
+`task_check` 回 `{"ok":true,"acTotal":6,"acChecked":6}` ⇒ `acShortCircuitVerdict` 的短路条件（两个来源
+都不 ok）**不再成立**，本轮正常走到 scoped 门与退出。19:18 当时两个来源各自读到了什么**没有**被复原
+（那需要当时的树，已不可得）——此处只记录"当下两个来源均可评估且全勾"这一被检验的事实。
