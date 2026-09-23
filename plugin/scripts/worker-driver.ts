@@ -2415,13 +2415,22 @@ export function assertionSignaturesFromSuiteLog(logText: string): string[] {
 
 /** 窗口内全部 suite-red exited-not-landed 尝试（跨任务，⛔ 非 per-task）。读 WORKER_OUTCOME_REL 一次，
  *  对每条 final_state=exited-not-landed ∧ mechanical_fan_in.step=suite ∧ ts 落在 [nowMs-windowMs, nowMs]
- *  的记录，投影出 (taskId, ts, suiteLog 绝对路径)。读失败 / 无记录 ⇒ []（读不懂 ≠ 无失败——空清单与
- *  「无记录」同形，豁免判定据此保守回退，⛔ 不伪造成「无复发」）。 */
+ *  的记录，投影出 (taskId, ts, suiteLog 绝对路径, 写入时留存的签名)。读失败 / 无记录 ⇒ []（读不懂 ≠
+ *  无失败——空清单与「无记录」同形，豁免判定据此保守回退，⛔ 不伪造成「无复发」）。
+ *
+ *  `suiteSignatures` / `suiteSignaturesRecorded` 是**耐久证据面**（gap-unrelated-suite-red-exemption-
+ *  unreachable）：签名由 `withRecordedSuiteSignatures` 在**写这条记录的那一刻**从 suite 日志抽出并落盘，
+ *  复发判定此后只消费这里，⛔ 不再事后 `readFileSync(mfi.suiteLog)`——那些日志在任务落地时会被
+ *  `pruneTaskSuiteLogs` 删掉（`worker-fan-in.ts:1628`），事后读它等于让判词取决于无关第三方任务的存活。
+ *  三态可区分（硬规则 3b）：
+ *    - `suiteSignaturesRecorded=true`  ∧ 数组（可能是 `[]`）⇒ 读了、这是当时的签名全集
+ *    - `suiteSignaturesRecorded=false` ∧ `null` ⇒ 这条记录**没留下**证据（旧记录无该字段 / 写入时日志读不出）
+ *    - 两者对复发判定同义（不贡献证据），但记录面可区分「查过没有」与「没查成」。 */
 export function suiteRedAttemptsInWindow(
   root: string,
   windowMs: number,
   nowMs: number = Date.now(),
-): Array<{ taskId: string; ts: string; suiteLog: string | null }> {
+): Array<{ taskId: string; ts: string; suiteLog: string | null; suiteSignatures: string[] | null; suiteSignaturesRecorded: boolean }> {
   let text: string;
   try {
     text = fs.readFileSync(path.join(root, WORKER_OUTCOME_REL), "utf8");
@@ -2429,7 +2438,7 @@ export function suiteRedAttemptsInWindow(
     return [];
   }
   const floor = nowMs - windowMs;
-  const out: Array<{ taskId: string; ts: string; suiteLog: string | null }> = [];
+  const out: Array<{ taskId: string; ts: string; suiteLog: string | null; suiteSignatures: string[] | null; suiteSignaturesRecorded: boolean }> = [];
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -2448,31 +2457,46 @@ export function suiteRedAttemptsInWindow(
     const suiteLog = typeof mfi.suiteLog === "string" && mfi.suiteLog
       ? path.join(root, ".quay", mfi.suiteLog)
       : null;
-    out.push({ taskId: rec.task, ts: rec.ts, suiteLog });
+    // 写入时留存的签名（⛔ 不在此处读日志——那正是本任务修掉的缺陷）。非数组（含 `null` = 写入时读
+    // 不出、或字段缺失 = 旧记录）⇒ 不贡献证据，且 `suiteSignaturesRecorded=false` 如实标出。
+    const rawSigs = (mfi as { suiteSignatures?: unknown }).suiteSignatures;
+    const suiteSignatures = Array.isArray(rawSigs)
+      ? rawSigs.filter((s): s is string => typeof s === "string")
+      : null;
+    out.push({ taskId: rec.task, ts: rec.ts, suiteLog, suiteSignatures, suiteSignaturesRecorded: Array.isArray(rawSigs) });
   }
   return out;
 }
 
 /** 签名跨任务复发：窗口内命中 `signatures` 任一签名的【其它】不同任务 id 并集（⛔ 不含当前任务自身——
- *  「≥2 个不同任务命中同一签名」= 当前任务 + ≥1 其它任务）。其它任务的 suite log 读失败 ⇒ 跳过（该任务
- *  不贡献复发证据，fail-closed 朝「不复发」，⛔ 不伪造命中）。 */
+ *  「≥2 个不同任务命中同一签名」= 当前任务 + ≥1 其它任务）。
+ *
+ *  ⛔ **不读任何日志**（gap-unrelated-suite-red-exemption-unreachable 的修法核心）：证据只取
+ *  `suiteRedAttemptsInWindow` 投影出的**记录内留存签名**。旧实现在这里 `fs.readFileSync(a.suiteLog)`，
+ *  而那些日志在任务落地时被 `pruneTaskSuiteLogs` 删掉 ⇒ 同一个任务、同一份 suite 日志，判词取决于
+ *  **无关第三方任务**是否恰好已落地（实测两读：日志在 ⇒ unrelated-flaky-exempt；日志没了 ⇒
+ *  own-defect-counted）。记录是 append-only、不轮转的 ⇒ 判定从此只依赖耐久载体，同一输入恒同判词。
+ *
+ *  计数随结果一并返回，供判词如实报出**证据基础**（硬规则 3b：`own-defect-counted` 有两种成因——
+ *  「查过、确实没复发」与「窗口里根本没有带签名的记录可查」，必须在读数上可区分，⛔ 不得同形）。
+ *  两者对**动作**同义（fail-closed 照常计数），故不新设 verdict。 */
 function recurringSignatureTasks(
   root: string,
   signatures: string[],
   currentTaskId: string,
   windowMs: number,
   nowMs: number,
-): string[] {
+): { tasks: string[]; otherAttempts: number; evaluated: number } {
   const sigTasks = new Map<string, Set<string>>();
+  let otherAttempts = 0;
+  let evaluated = 0;
   for (const a of suiteRedAttemptsInWindow(root, windowMs, nowMs)) {
-    if (a.taskId === currentTaskId || !a.suiteLog) continue;
-    let logText: string;
-    try {
-      logText = fs.readFileSync(a.suiteLog, "utf8");
-    } catch {
-      continue;
-    }
-    for (const sig of assertionSignaturesFromSuiteLog(logText)) {
+    if (a.taskId === currentTaskId) continue;
+    otherAttempts += 1;
+    // 没留下签名的记录（旧记录 / 写入时读不出）**不贡献证据**——⛔ 不回头读它的日志补齐。
+    if (!a.suiteSignaturesRecorded || a.suiteSignatures === null) continue;
+    evaluated += 1;
+    for (const sig of a.suiteSignatures) {
       if (!signatures.includes(sig)) continue;
       if (!sigTasks.has(sig)) sigTasks.set(sig, new Set());
       sigTasks.get(sig)!.add(a.taskId);
@@ -2483,7 +2507,33 @@ function recurringSignatureTasks(
     const set = sigTasks.get(sig);
     if (set) for (const t of set) tasks.add(t);
   }
-  return [...tasks];
+  return { tasks: [...tasks], otherAttempts, evaluated };
+}
+
+/** 把本次 suite-red 的断言签名**随 outcome 记录一起留存**（gap-unrelated-suite-red-exemption-unreachable
+ *  的写入侧半边；读取侧见 `suiteRedAttemptsInWindow` / `recurringSignatureTasks`）。
+ *
+ *  WHY 必须在**写入那一刻**抽出：日志是**易失**的（落地即被 `pruneTaskSuiteLogs` 删），记录是**耐久**的
+ *  （append-only、不轮转）。把易失量在耐久载体里固化一次，是把「事后重读易失物」换成「读当时的读数」的
+ *  唯一办法——⛔ 不是「多读一次日志」，而是**换证据来源**。
+ *
+ *  三态写入（硬规则 3b，⛔ 不与「读了但没有签名」同形）：
+ *    - 非 suite-red（`step !== "suite"` / 无 `suiteLog`）⇒ **不加字段**（不适用，⛔ 不是「读了没有」）
+ *    - 有 `suiteLog` 但读不出 ⇒ `suiteSignatures: null`（如实记「这次没留下」）
+ *    - 读出 ⇒ `suiteSignatures: string[]`（可能是 `[]` = 读了、日志里确实没有断言签名）
+ *  返回值是**新对象**（⛔ 不改调用方持有的 `mfi`——同一对象可能在别处还要用）。 */
+export function withRecordedSuiteSignatures<T extends { step?: unknown; suiteLog?: unknown }>(
+  root: string,
+  mfi: T,
+): T & { suiteSignatures?: string[] | null } {
+  if (mfi.step !== "suite") return mfi;
+  const basename = mfi.suiteLog;
+  if (typeof basename !== "string" || !basename) return mfi;
+  try {
+    return { ...mfi, suiteSignatures: assertionSignaturesFromSuiteLog(fs.readFileSync(path.join(root, ".quay", basename), "utf8")) };
+  } catch {
+    return { ...mfi, suiteSignatures: null };
+  }
 }
 
 /** 静态相位红的归因核（AC2/AC3）。检查两类被指名对象是否落在本任务 Touches/diff 内：
@@ -2621,12 +2671,19 @@ export function judgeRetryExemption(
       return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [], ...parseNote };
     }
   }
-  // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发。
-  const recurredTasks = recurringSignatureTasks(root, signatures, taskId, windowMs, nowMs);
-  if (recurredTasks.length >= 1) {
-    return { verdict: "unrelated-flaky-exempt", reason: `signature(s) ${signatures.join("; ")} recurred across ≥2 distinct tasks in window (other: ${recurredTasks.join(", ")})`, failingTestFiles, signatures, recurredTasks };
+  // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发（证据 = 记录内留存签名，⛔ 不事后读日志）。
+  const recurrence = recurringSignatureTasks(root, signatures, taskId, windowMs, nowMs);
+  if (recurrence.tasks.length >= 1) {
+    return { verdict: "unrelated-flaky-exempt", reason: `signature(s) ${signatures.join("; ")} recurred across ≥2 distinct tasks in window (other: ${recurrence.tasks.join(", ")})`, failingTestFiles, signatures, recurredTasks: recurrence.tasks };
   }
-  return { verdict: "own-defect-counted", reason: "failing tests unrelated to this task's delta, but the assertion signature did not recur across ≥2 distinct tasks in the window (fail-closed count)", failingTestFiles, signatures, recurredTasks: [] };
+  // 判词的证据基础必须可区分两种成因（硬规则 3b）：①查过 N 条带签名的记录、确实没复发；②窗口里
+  // 压根没有带签名的记录可查（旧记录 / 写入时读不出）。两者动作同义（照常计数），但读数不得同形。
+  const evidence = recurrence.otherAttempts === 0
+    ? "no other suite-red attempt in window to compare against"
+    : recurrence.evaluated === 0
+      ? `${recurrence.otherAttempts} other suite-red attempt(s) in window, none carried a recorded signature (legacy/pre-recording) — recurrence unevaluable, not evaluated-and-negative`
+      : `${recurrence.otherAttempts} other suite-red attempt(s) in window, ${recurrence.evaluated} carried recorded signatures and none matched`;
+  return { verdict: "own-defect-counted", reason: `failing tests unrelated to this task's delta, but the assertion signature did not recur across ≥2 distinct tasks in the window (fail-closed count; ${evidence})`, failingTestFiles, signatures, recurredTasks: [] };
 }
 
 // ── gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker ─────────────────────────
@@ -3844,7 +3901,13 @@ function runOneWorker({
         : null;
       // 机械 fan-in 结果落进 outcome（gap-fan-in-driver-mechanical-orchestration）：driver 接手 worktree
       // 跑机械 fan-in 的观测面（锁持有时长 / suite outcome / 落地 sha），⛔ 只在真跑过时非 null。
-      const baseOutcome = mechResult ? { ...outcome, mechanical_fan_in: mechResult } : outcome;
+      // 签名在**这一刻**从 suite 日志抽出并随记录落盘（gap-unrelated-suite-red-exemption-unreachable）：
+      // 此后复发判定只读记录、⛔ 不再事后读日志——日志在任务落地时会被 `pruneTaskSuiteLogs` 删掉，事后
+      // 读它会让判词取决于无关第三方任务的存亡。⚠️ 这是**唯一**产出 suite-red 记录的路径（全仓
+      // `mechanical_fan_in` 只在此处写），故在此富化即覆盖全部生产写入面。
+      const baseOutcome = mechResult
+        ? { ...outcome, mechanical_fan_in: withRecordedSuiteSignatures(rootDir, mechResult) }
+        : outcome;
       const finalOutcome = cleanup
         ? {
             ...baseOutcome,
