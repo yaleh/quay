@@ -89,7 +89,7 @@ extra:
 = **23 → 23（delta 0）**；夹具目录 23 → 23。该趟 5/5 pass。
 **AC2（取判据①，两次独立读数）**：① `driver-anchor-bundle.test.mjs` ×5 + `driver-anchor-bundle-fresh.test.mjs` ×5
 连跑：**10/10 绿、ENOTEMPTY 出现 0 次**，夹具目录 0 → 0、孤儿 0 → 0；② 本 worktree 上真实
-`scripts/test.sh --for-task <本任务> --allow-thin`（选 9 个 test）绿，跑前/跑后孤儿 0 → 0、残留目录 0 → 0。
+`scripts/test.sh --for-task <本任务> --allow-thin` 两次（见下 DoD）均绿、无 ENOTEMPTY，跑前/跑后孤儿与残留目录增量均为 0。
 **AC3**：两个测试文件新增 `assertSeamHonest(r)`（`strayPids` 空集 ∧ `.quay/anchor.json` 自报 pid = 直接子进程
 pid），四个会 spawn anchor 的 test 全部调用；修后恒绿，修前在上述触发条件下必红（已贴上两个实际 pid）。
 **AC4**：`kill -TERM` 全部 `ppid==1 ∧ --root /data/scratch/yale/*` 的 anchor = **24 个**（23 个 `bundlestale-*`
@@ -98,9 +98,17 @@ TERM 后仍在、补 SIGKILL。终读数：孤儿 anchor **0**、残留夹具目
 负控——生产 anchor 仍在：`1726114 1 node … driver-anchor.ts __anchor --root /data/home/yale/work/quay --takeover 2391720`。
 ⛔ 全程未向 `--root /data/home/yale/work/quay` 那条发过任何信号，也未改动主检出任何文件的 mtime。
 
-**DoD（真实落地）**：本 worktree 上跑真实 `scripts/test.sh --for-task gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor --allow-thin`
-（它自己的选择器选出 9 个 test）⇒ exit 0、9/9 pass、**无一条 ENOTEMPTY**。跑前/跑后两个计数：
-孤儿 anchor **0 → 0**、`/data/scratch/yale/bundlestale-*` 残留目录 **0 → 0**（增量均为 0）；
-生产 anchor 读数同上一条。⚠️ 「16-lane 满负载下的全量 suite」这一半**不在本 worker 的执行面内**
-（worker 不跑 suite，fan-in 才跑）——本任务提供的是同一触发条件下的**确定性** A/B 对照（修前必红、
-修后必绿），比一次负载相关的抽样更强；满负载全量读数由 fan-in 那趟产生。
+**DoD（真实落地）**：本 worktree 上跑真实
+`scripts/test.sh --for-task gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor --allow-thin`，
+**两次**：
+① 先把 Touches 写成「driver-anchor.ts + bundle.test.mjs」时 ⇒ 选 **9 个 test**，exit 0、9/9 pass；
+② 把兄弟文件写进 `## Touches` 后，选择器随之把它的 3 个 test 纳入 ⇒ 选 **12 个 test**
+（`driver-anchor-bundle.test.mjs` 5 + `driver-anchor-bundle-fresh.test.mjs` 3 + `driver-anchor.test.mjs` 4），
+exit 0、**12/12 pass**、**无一条 ENOTEMPTY**。②这一趟即对着**锁内将合并到的 develop tip**
+（`a8a09b41438a62f224e4b8df3b71802c3a2f4178`）跑的，scoped-gate 缓存也以**这一个实测 sha** 写入
+（⛔ 不拿一个没量过的 sha 去命中缓存 = 假绿）。
+跑前/跑后两个计数：孤儿 anchor **0 → 0**、`/data/scratch/yale/bundlestale-*` 残留目录 **0 → 0**（增量均为 0）；
+生产 anchor 读数同上一条。
+⚠️ 「16-lane 满负载下的全量 suite」这一半**不在本 worker 的执行面内**（worker 不跑 suite，fan-in 才跑）
+——本任务提供的是同一触发条件下的**确定性** A/B 对照（修前必红、修后必绿），比一次负载相关的抽样更强；
+满负载全量读数由 fan-in 那趟产生。
