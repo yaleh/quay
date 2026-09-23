@@ -14,7 +14,12 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { shQuote } from "./config/utils.ts";
+// `DEFAULT_ACCEPTANCE_TIMEOUT_MS` is the ONE definition of the runner's default kill deadline
+// (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). ⛔ The direction of this
+// import matters: config/utils.ts never imports back from here, so importing the constant into
+// both `runAcceptance` and `runAcceptanceCapture` adds no cycle — the reverse (defining it here
+// and importing it into utils) would create one, since utils is upstream of this file.
+import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "./config/utils.ts";
 
 export interface AcceptanceResult {
   ok: boolean;
@@ -153,7 +158,7 @@ export function withFailureOutput(
  * exports are visible to the acceptance command, and the remaining environment
  * is inherited from the invoking process.
  */
-export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name }: RunAcceptanceArgs): AcceptanceResult {
+export function runAcceptance({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS, envFile, name }: RunAcceptanceArgs): AcceptanceResult {
   // DIR-103-C: fail-closed BEFORE execution when envFile is set but missing.
   if (envFile !== undefined && !fs.existsSync(envFile)) {
     return {
@@ -251,7 +256,7 @@ export interface AcceptanceCaptureResult {
  * text (unlike `runAcceptance`, which keeps only a bounded failure excerpt).
  * Mirrors coverage-floor.ts's `spawnSyncCapture` exactly.
  */
-export function runAcceptanceCapture({ command, cwd, timeoutMs = 60000 }: RunAcceptanceArgs): AcceptanceCaptureResult {
+export function runAcceptanceCapture({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS }: RunAcceptanceArgs): AcceptanceCaptureResult {
   const r = spawnSync(command, {
     cwd,
     shell: true,
