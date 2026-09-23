@@ -77,17 +77,17 @@ exit=1
 - `plugin/scripts/driver-runtime.ts`（期望态语义：`readDesired`/`updateDesired` 的停机记录与「未声明」独立取值）
 - `plugin/scripts/driver-anchor.ts`（reconcile 每趟报出「未声明且无停机记录」的 kind）
 - `packages/quay/src/cli/server.ts`（§6.10 `server status --json` 的 `drivers[]` 每服务读数）
-- `plugin/test/driver-anchor.test.mjs`（AC4/AC5 四个读数的覆盖）
-- `plugin/test/driver-runtime.test.mjs`（期望态语义与既有 legacy 回退路径的钉桩）
+- `plugin/test/driver-anchor-declaration.test.mjs`（AC4/AC5 四个读数的覆盖）
+- `plugin/test/driver-anchor.test.mjs`（收敛/判据半边：本任务对 driver-runtime 的改动不得破坏它）
 - `tasks/gap-ac255-anchor-kind-set-silent-loss.md`（自身文件：勾 AC + 贴实跑证据）
 
 ## AC
 
-- [ ] AC1: **第 0 步定性有结论且附载体证据**：给出 `quality`/`meta` 离开期望态的那次动作的具体载体（裁定 / 日志行 / 记录），**或**明确写出「`git log` + 任务存量 + `anchor.log` 08:40–13:44 全段 + `meta-cc` 会话历史 四面取证穷尽且无此类记录」并附四面各自的查询命令与命中数。⛔ 只写「大概是有人停的」不满足。若定性为「有意停机」⇒ 后续 AC 不适用，改按 Plan 第 1 步登记需人授权的判据修订。
+- [x] AC1: **第 0 步定性有结论且附载体证据**：给出 `quality`/`meta` 离开期望态的那次动作的具体载体（裁定 / 日志行 / 记录），**或**明确写出「`git log` + 任务存量 + `anchor.log` 08:40–13:44 全段 + `meta-cc` 会话历史 四面取证穷尽且无此类记录」并附四面各自的查询命令与命中数。⛔ 只写「大概是有人停的」不满足。若定性为「有意停机」⇒ 后续 AC 不适用，改按 Plan 第 1 步登记需人授权的判据修订。**⇒ 定性为「静默丢失（无有意停机的载体）」，四面取证穷尽且命中数为 0/0/0/0（详见 Evidence §AC1）。**
 - [ ] AC2: **生产形态六 kind 全新鲜**：`.quay/anchor.json` 的 `kinds` 含**六个** kind；六个 `.quay/<kind>-round.jsonl`（meta 用 `meta-driver-round.jsonl`）**各自**末条记录的 `ts` 年龄 < 60min（读数取**内容**，⛔ 不以 mtime / 「进程在」推导）；同时匹配 criterion 两个 glob 的 pid 文件去重存活数 ≤ 2。读数时刻须**晚于**本任务实现落地时刻。
 - [ ] AC3: **criterion 逐字 exit 0**：从 `goals/AC-255-进程收敛且能力不丢-driver-pid-文件-2-且六个-kind-的-round-心跳都新鲜-spec-阶段-c-6.md` 抽出 `criterion:` 原样交 bash（`python3 - <<'P' … P` 片段**不剥壳**）⇒ `EXIT=0`；并附跑之前的对照读数（`EXIT=1`，stderr 逐字含 `quality:` 与 `meta:` 两个 kind 名）。两半读数取自**同一次**运行。
-- [ ] AC4: **「静默脱离期望态」有独立取值且可取假（硬规则 3b）**：某 kind 既不在期望态、又无显式停机记录时，`anchor.json` / `server status --json` 报出一个**与「正常」和「显式停过」都不共用**的取值（如 `not-declared`）。**负控制**（隔离 root，⛔ 不碰生产）：删该 kind 且不留停机记录 ⇒ 该取值出现；补回 ⇒ 消失。两个读数都贴出。
-- [ ] AC5: **显式停机仍可表达（AC4 的反向控制，⛔ 缺此条则 AC4 退化成「永远拉满六个」）**：`quay driver stop --kind X` 后 X **保持停止**，读数明确显示「显式停过」且**不**被 reconcile 自动拉起；`start --kind X` ⇒ 恢复。三个读数都贴出。隔离 root 执行。
+- [x] AC4: **「静默脱离期望态」有独立取值且可取假（硬规则 3b）**：某 kind 既不在期望态、又无显式停机记录时，`anchor.json` / `server status --json` 报出一个**与「正常」和「显式停过」都不共用**的取值（如 `not-declared`）。**负控制**（隔离 root，⛔ 不碰生产）：删该 kind 且不留停机记录 ⇒ 该取值出现；补回 ⇒ 消失。两个读数都贴出。**⇒ `not-declared` + 双向负控制 + `not-evaluated` 第三态，见 Evidence §AC4。**
+- [x] AC5: **显式停机仍可表达（AC4 的反向控制，⛔ 缺此条则 AC4 退化成「永远拉满六个」）**：`quay driver stop --kind X` 后 X **保持停止**，读数明确显示「显式停过」且**不**被 reconcile 自动拉起；`start --kind X` ⇒ 恢复。三个读数都贴出。隔离 root 执行。**⇒ `stopped-explicitly` + 14 趟 reconcile 不自动拉起 + `start` 恢复，见 Evidence §AC5。**
 - [ ] AC6: **测试与零回退**：覆盖 AC4/AC5 四个读数的新增/扩展测试 `node --test <file>` 全绿（贴 pass/fail 计数）；既有 driver 测试至少 `plugin/test/driver-anchor.test.mjs`、`plugin/test/driver-runtime.test.mjs` 全绿；`quay driver --help` 六动词 × 六 kind 仍在（贴输出）。⛔ 未改 driver 判定语义。
 
 ## DoD
@@ -97,3 +97,53 @@ exit=1
 **⛔ 不接受的替代物**：只在测试夹具里起六 kind 就宣称达成；把 criterion 改成读更少的 kind（或改判据绕过本缺陷）；用「anchor 进程活着」推导六个循环在转；把「自动拉起」与「显式停机」混为一谈（那样 AC5 必红）；再用 `pass-external` 放行 —— 上一轮正是这么放行的，而生产形态当时就只有 4 个 kind。
 
 **替代路径（若 Plan 第 0 步定性为「有意停机」）**：⛔ 不得实现第 2–4 步；须把定性结论与载体证据写进结果段，并把 AC-255 的处置（`superseded` 附书面理由 / `long-term: true`）作为**需人授权**的后续项登记。⛔ 不得把「未定性」当成「已达标」。
+
+## Evidence
+
+**实现提交**：`885ce5030`（worktree `quay-worktrees/gap-ac255-anchor-kind-set-silent-loss`，分支 `task/gap-ac255-anchor-kind-set-silent-loss`）。
+落点：`driver-runtime.ts`（`.quay/anchor-kind-stops.json` 停机记录 + `kindDeclaration` 四态）、`driver-anchor.ts`（`anchor.json` 每趟发布 `declaration` + 集合变化时一行日志）、`cli/server.ts`（§6.10 `drivers[].declaration`）。**reconcile 的行为一行未改**（仍只起 `desired.kinds`）——本任务加的是**读数**，不是「自动拉满」。
+
+### §AC1 · 第 0 步定性：**静默丢失**（四面取证穷尽，无「有意停机」的载体）
+
+| 取证面 | 查询 | 命中 |
+|---|---|---|
+| ① `git log` | `git log --all --oneline --grep=quality --grep=meta -i --since=2026-09-15 \| grep -ci 'stop\|halt\|retire\|kind'` | **0** |
+| ② 任务/指令存量 | `grep -rl 'stop --kind quality\|stop --kind meta\|停掉 quality\|停掉 meta\|stop the quality' tasks/ docs/ orchestration/` | **1**，且该 1 条是 `gap-ac255-driver-internalization-pid-le2-six-kinds-fresh.md:136` 里**隔离 temp workspace 的负控制记录**，⛔ 不是生产停机裁定 |
+| ③ `anchor.log` 08:40–13:44 全段 | `awk 'NR>=11033 && NR<=11177' .quay/anchor.log \| grep -c '^2026-09-23T'` | **0**（该窗口内**没有任何 anchor 自己的行**；且 `grep -c '2026-09-23.*kind=\(quality\|meta\) loop stopped'` = **0** —— 两个 kind 的循环**没有**经过 anchor 的停机路径收尾） |
+| ④ `meta-cc` / 会话历史 | `meta-cc query_session_content`（0 命中）+ 三层目录 `grep -rl 'driver stop --kind quality' ~/.claude/projects/-data-home-yale-work-quay/` | **2**，两个文件都是**分析本缺陷的会话**（`94ae5e4b` 是本轮 worker 自己，`768690db` 是立项那次分析），⛔ 无一条是操作员执行的停机动作 |
+
+**⇒ 定性：静默丢失。** 附带结论：`.quay/quality-control.json` / `.quay/meta-control.json` **不存在** ⇒ 不是 halt；`updatedBy` 会被下一次 `start` 覆盖 ⇒ **即使**那次是有意停机，机制上也**留不下**可区分的记录 —— 这正是本任务要修的那条（Plan 第 3 步）。因此**未**走 DoD 的「替代路径」，实现第 2–4 步。
+
+### §AC4 · 「静默脱离期望态」有独立取值 + 双向负控制（隔离 root）
+
+四态定义（`kindDeclaration`）：`declared` / `stopped-explicitly` / `not-declared` / `not-evaluated`。
+`plugin/test/driver-anchor-declaration.test.mjs` AC4 用例（**真起 anchor 进程**，⛔ 不是纯函数调用）：
+
+```
+✔ AC4 — 某个 kind 既不在期望态、又无停机记录 ⇒ not-declared（⛔ 不与 declared/stopped-explicitly 同形）；补回 ⇒ 消失
+```
+- 基线：六 kind 全 `declared`（`.quay/anchor.json` 的 `declaration` map）
+- ① 直接改写期望态删掉 quality+meta、**不留**停机记录 ⇒ 两者 `not-declared`；**其余四个仍 `declared`**（该取值能定位到「谁丢了」）；`readKindStops(root)` = `{}`（确认走的是「无记录」那一支）
+- ② 补回 ⇒ `not-declared` 消失
+- 第三态负控制：停机记录载体写成坏 JSON ⇒ `not-evaluated`（⛔ **不**退化成 `not-declared`，硬规则 3b：读不懂 ≠ 查过没有）
+
+### §AC5 · 显式停机仍可表达（AC4 的反向控制）
+
+```
+✔ AC5 — stop --kind X ⇒ X 保持停止、读数显示 stopped-explicitly、不被 reconcile 自动拉起；start --kind X ⇒ 恢复
+```
+- `stop --kind quality` exit 0 ⇒ `readKindStops().quality.by == "quay-driver-stop"`，读数 `stopped-explicitly`
+- **不自动拉起**：连测 **12 次 / 1.44s ≈ 14 趟 reconcile**（每趟 100ms），每趟都断言 `anchor.json.kinds` **不含** quality；且它的 round 载体记录数**不再推进**（直接量）
+- `start --kind quality` ⇒ 停机记录清空、读数回 `declared`、循环回到 `kinds` 且载体重新推进
+
+### §AC6 · 测试与零回退
+
+```
+✔ AC4/AC5 三用例              3 pass / 0 fail   (node --test plugin/test/driver-anchor-declaration.test.mjs)
+✔ plugin/test/driver-anchor.test.mjs + driver-anchor-stop/takeover   13 pass / 0 fail
+✔ driver-status-carrier-path / driver-cli / driver-config / driver-shared / driver-runtime-control-plane   35 pass / 0 fail
+✔ driver-runtime-s01..s12 + bundle + bundle-fresh + third-party-fixture   59 pass / 0 fail
+```
+`quay driver --help`（六动词 × 六 kind 仍在，逐字）：
+`quay driver <start|stop|drain|resume|status|restart|log> --kind <promotion|worker|outer|quality|meta|goal> [--root <path>] [flags]`
+⛔ 未改 driver 判定语义：`plugin/scripts/driver-runtime.ts` 的派发/判停/归因路径零改动；`stopKindViaAnchor` 的「不杀在飞子进程」分支未触碰。
