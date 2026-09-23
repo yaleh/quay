@@ -110,6 +110,13 @@ interface DriverServiceReport {
   pid: number | null;
   host: string;
   liveness: ServiceProbe;
+  /** AC-255 能力半边：本 kind 相对**期望态**的声明状态 —— `declared` / `stopped-explicitly` /
+   *  `not-declared` / `not-evaluated`（或 `null` = 该读数取不到）。⛔ 独立于 `liveness`：
+   *  `liveness.alive` 回答「有没有一个活着的**承载进程**」，收敛形态下六个 kind 共用一个 anchor ⇒
+   *  anchor 活着时它的六个读数全是 `alive:true`，**哪怕其中两个的循环早已静默停摆**（2026-09-23 实测：
+   *  `quality`/`meta` 停摆 264min 期间正是这个形态）。没有本字段时，「六个循环里有两个没在转」与
+   *  「一切正常」在 `server status --json` 上完全同形。 */
+  declaration: string | null;
 }
 
 /** 心跳新鲜度窗口（ms）。与 AC-255 的 criterion 同值（60min）——同一个量、同一个阈值，⛔ 不各写一份。 */
@@ -171,7 +178,7 @@ export async function handleServer(ctx: CliCtx) {
 function driverServiceReport(workspaceRoot: string, kind: string): DriverServiceReport {
   const name = `driver:${kind}`;
   const r = runDriver("status", kind, ["--kind", kind, "--json"], workspaceRoot);
-  const base: DriverServiceReport = { name, kind, pid: null, host: "local", liveness: unevaluated("driver status unavailable") };
+  const base: DriverServiceReport = { name, kind, pid: null, host: "local", liveness: unevaluated("driver status unavailable"), declaration: null };
   if (!r.ok) return { ...base, liveness: unevaluated(r.reason ?? "driver status unavailable") };
   const line = r.stdout.split("\n").find((l) => l.trim().startsWith("{"));
   if (!line) return { ...base, liveness: unevaluated(`driver status produced no JSON frame (exit ${r.exitCode})`) };
@@ -182,6 +189,7 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     carrier_path?: string | null;
     last_record_carrier?: string | null;
     last_record_ts?: string | null;
+    declaration?: string | null;
   };
   try {
     j = JSON.parse(line) as typeof j;
@@ -190,6 +198,10 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
   }
   const pid = j.driver_pid ?? j.anchor_pid ?? null;
   const carrier = j.carrier_path;
+  // AC-255 能力半边：逐 kind 的**声明状态**从 kernel 的 `declaration` 字段透传（⛔ 不在这里重算一份
+  // —— 那是期望态 + 停机记录的读法，正本在 driver-runtime.ts 的 `kindDeclaration`；两份 = 漂移）。
+  // kernel 没报（旧 kernel / 旧 bundle）⇒ **null**（⛔ 不与任一具名态同形：读不到不得冒充「一切正常」）。
+  const declaration = typeof j.declaration === "string" && j.declaration !== "" ? j.declaration : null;
   // ⛔ `carrier_path` 是「首个存在的载体」，**不是**这个 ts 的来源——两者在真实工作区上会不同名
   // （实测 2026-09-13 生产 `promotion`：outcome 存在但末条 ts 停在 2.5h 前、round 每 30s 一条）。
   // 把 ts 归因给 `carrier_path` 就是让一条真读数声称一个假的来源（硬规则 3b/4b）。来源由 kernel 的
@@ -212,6 +224,7 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     return {
       ...base,
       pid,
+      declaration,
       liveness: {
         evaluated: true,
         alive: false,
@@ -221,11 +234,11 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     };
   }
   if (!carrier || !tsRaw) {
-    return { ...base, pid, liveness: unevaluated(`no round heartbeat carrier record yet (carrier=${carrier ?? "null"})`) };
+    return { ...base, pid, declaration, liveness: unevaluated(`no round heartbeat carrier record yet (carrier=${carrier ?? "null"})`) };
   }
   const at = Date.parse(tsRaw);
   if (!Number.isFinite(at)) {
-    return { ...base, pid, liveness: unevaluated(`carrier ${carrier} last ts is unparseable (${tsRaw})`) };
+    return { ...base, pid, declaration, liveness: unevaluated(`carrier ${carrier} last ts is unparseable (${tsRaw})`) };
   }
   const ageMs = Date.now() - at;
   const stale = ageMs > DRIVER_HEARTBEAT_FRESH_MS;
@@ -234,6 +247,7 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     kind,
     pid,
     host: "local",
+    declaration,
     liveness: {
       evaluated: true,
       alive: !stale,

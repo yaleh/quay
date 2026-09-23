@@ -146,6 +146,11 @@ import {
   formatRelatednessNote,
   reclaimSupersededWorktrees,
   resolveKernelSrcModule,
+  judgeRetryExemption,
+  withRecordedSuiteSignatures,
+  suiteRedAttemptsInWindow,
+  assertionSignaturesFromSuiteLog,
+  RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -174,6 +179,7 @@ import {
   waitFor,
   writeTaskFile,
   writeTouchedTask,
+  rmSafe,
 } from "./helpers/worker-driver-harness.mjs";
 
 // gap-arch-worker-fan-in-extract-from-worker-driver：机械 fan-in 区域（fail()/step()/flipTaskDone 的
@@ -3237,4 +3243,156 @@ test("AC3 (gap-fan-in-instrument-availability-self-check) — `quay driver statu
   assert.strictEqual(parsed.instruments.classifier.evaluated, true, "JSON classifier reading");
   assert.strictEqual(parsed.instruments.reaper.evaluated, true, "JSON reaper reading");
   assert.equal(parsed.kind, "worker", "…without disturbing the pre-existing fields");
+});
+
+// ── gap-unrelated-suite-red-exemption-unreachable：判词不得取决于无关第三方任务日志的存亡 ─────────────
+// 实测缺陷（本机，同一 commit，同一任务、同一份 suite 日志，只差窗口内容）：其它任务的 suite 日志
+// 还在盘上 ⇒ `unrelated-flaky-exempt`；那两条日志没了 ⇒ `own-defect-counted`（同一个不相关的红被记到
+// 任务自己头上）。根因 = 复发判定**事后** `readFileSync` 其它任务的日志，而日志是易失的：任务落地时
+// `runMechanicalFanIn` 第 9.5 步（`worker-fan-in.ts:1628`）调 `pruneTaskSuiteLogs` 把该任务名下全部
+// `fan-in-suite-<task>~*.log` 删掉。修法 = 签名在**写记录那一刻**落进 append-only 的
+// `worker-outcome.jsonl`，复发判定只读记录、⛔ 不再事后读任何日志。
+//
+// 夹具形态**逐字对齐生产**：第三方记录经 `withRecordedSuiteSignatures`（生产写入面调用的**同一个**
+// 函数）构造 ⇒ 这里测的是生产真的会写出的记录形态，⛔ 不是手搓一个生产上不存在的输入。
+const AC_UNRELATED_TEST = "plugin/test/obs-unrelated.test.mjs";
+const AC_UNRELATED_SIG = "probe must be alive";
+
+function acWriteTouchesTask(root, id, touches) {
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`),
+    `---\nid: ${id}\nstatus: ready\n---\n\n## Proposal\n\nprose\n\n## Touches\n\n${touches.map((x) => `- ${x}`).join("\n")}\n`, "utf8");
+}
+function acWriteSuiteRedLog(root, basename, assertion) {
+  const p = path.join(root, ".quay", basename);
+  fs.writeFileSync(p, `__PERFILE__ duration_ms=10 ${AC_UNRELATED_TEST} passed=false end_ms=1\n  AssertionError [ERR_ASSERTION]: ${assertion}\n`, "utf8");
+  return p;
+}
+/** 造一条【其它】任务的 suite-red 记录——**经生产富化函数**，与 driver 写盘时同形。 */
+function acAppendThirdParty(root, taskId, tsMs, basename) {
+  const mfi = withRecordedSuiteSignatures(root, { outcome: "red", step: "suite", suiteLog: basename });
+  fs.appendFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({ ts: new Date(tsMs).toISOString(), task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s", mechanical_fan_in: mfi }) + "\n", "utf8");
+}
+/** 造一条**不含签名字段**的旧形态记录（修法之前写下的那些）——用于证明「证据基础」两态可区分。 */
+function acAppendLegacyThirdParty(root, taskId, tsMs, basename) {
+  fs.appendFileSync(path.join(root, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({ ts: new Date(tsMs).toISOString(), task: taskId, final_state: "exited-not-landed", run_id: "r", session_id: "s", mechanical_fan_in: { outcome: "red", step: "suite", suiteLog: basename } }) + "\n", "utf8");
+}
+function acFixture(tag) {
+  const root = makeRoot(tag);
+  acWriteTouchesTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]); // 与失败测试无关
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, AC_UNRELATED_TEST), 'import { test } from "node:test";\n', "utf8");
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-a.log", AC_UNRELATED_SIG);
+  return root;
+}
+const AC_NOW = Date.parse("2026-09-23T16:00:00.000Z");
+const acOwnOutcome = { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } };
+
+test("AC1+AC3 — 同一任务、同一份 suite 日志：两次调用只差【其它任务日志的可读性】⇒ 判词必须【相同】（修前 own-defect-counted vs unrelated-flaky-exempt）", (t) => {
+  const root = acFixture("unrelated-suite-red-ac13");
+  t.after(() => rmSafe(root));
+  const bLog = acWriteSuiteRedLog(root, "fan-in-suite-gap-b.log", AC_UNRELATED_SIG);
+  const cLog = acWriteSuiteRedLog(root, "fan-in-suite-gap-c.log", AC_UNRELATED_SIG);
+  acAppendThirdParty(root, "gap-b", AC_NOW - 3600_000, "fan-in-suite-gap-b.log");
+  acAppendThirdParty(root, "gap-c", AC_NOW - 7200_000, "fan-in-suite-gap-c.log");
+
+  // 窗口②：其它任务日志【可读】。
+  const windowReadable = judgeRetryExemption(root, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(fs.existsSync(bLog) && fs.existsSync(cLog), true, "前置：窗口②下两条第三方日志确实在盘上");
+  // 窗口①：删掉它们——这是两次调用之间**唯一**的输入差异。
+  fs.rmSync(bLog, { force: true });
+  fs.rmSync(cLog, { force: true });
+  const windowPruned = judgeRetryExemption(root, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(fs.existsSync(bLog) || fs.existsSync(cLog), false, "前置：窗口①下两条第三方日志确实没了");
+
+  // 判词**逐字相同**：verdict + 复发任务集 + 判词正文（⛔ 只比 verdict 会漏掉「同一 verdict 但理由不同」）。
+  assert.deepEqual(windowPruned, windowReadable, "判词不再取决于无关第三方任务日志的存亡（修前这两次不同）");
+  assert.equal(windowPruned.verdict, "unrelated-flaky-exempt", "无关 delta + 签名跨 ≥2 任务复发（证据在记录里）⇒ 仍豁免");
+  assert.deepEqual(windowPruned.recurredTasks, ["gap-b", "gap-c"], "复发证据来自记录内留存签名，与日志在不在盘上无关");
+});
+
+test("AC4①（负控制·豁免能力不得因本修法丧失）— 第三方日志**从未在盘上**，签名只存在于记录 ⇒ 仍 unrelated-flaky-exempt", (t) => {
+  const root = acFixture("unrelated-suite-red-ac4-pos");
+  t.after(() => rmSafe(root));
+  // 日志先写、记录后写（生产顺序：suite 跑完 → 写日志 → driver 富化签名 → 追加记录），随后日志被 prune。
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-b.log", AC_UNRELATED_SIG);
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-c.log", AC_UNRELATED_SIG);
+  acAppendThirdParty(root, "gap-b", AC_NOW - 3600_000, "fan-in-suite-gap-b.log");
+  acAppendThirdParty(root, "gap-c", AC_NOW - 7200_000, "fan-in-suite-gap-c.log");
+  fs.rmSync(path.join(root, ".quay", "fan-in-suite-gap-b.log"), { force: true });
+  fs.rmSync(path.join(root, ".quay", "fan-in-suite-gap-c.log"), { force: true });
+
+  const j = judgeRetryExemption(root, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(j.verdict, "unrelated-flaky-exempt", "记录内留存签名足以判定复发 ⇒ 豁免能力保留（⛔ 不是靠放宽阈值换确定性）");
+  assert.deepEqual(j.recurredTasks, ["gap-b", "gap-c"], "两个复发任务都被点名");
+});
+
+test("AC4②（负控制·真缺陷不得被放行）— 签名只在本任务出现（第三方命中【别的】签名）⇒ 仍 own-defect-counted", (t) => {
+  const root = acFixture("unrelated-suite-red-ac4-neg");
+  t.after(() => rmSafe(root));
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-b.log", "a completely different defect: expected 2 to equal 3");
+  acAppendThirdParty(root, "gap-b", AC_NOW - 3600_000, "fan-in-suite-gap-b.log");
+  fs.rmSync(path.join(root, ".quay", "fan-in-suite-gap-b.log"), { force: true });
+
+  const j = judgeRetryExemption(root, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(j.verdict, "own-defect-counted", "第三方日志存在但签名不同 ⇒ 不复发 ⇒ 照常计数（⛔ 不因本修法放宽）");
+  assert.deepEqual(j.recurredTasks, [], "没有任务复发本签名");
+});
+
+test("AC3 证据基础（硬规则 3b）— 窗口内只有【没留下签名】的旧记录 ⇒ 判词如实报「无法判定」，⛔ 不与「查过、没复发」同形", (t) => {
+  const root = acFixture("unrelated-suite-red-3b");
+  t.after(() => rmSafe(root));
+  // 旧形态记录（字段缺失）：日志仍在盘上，但判定⛔不得回头读它——读不回才能保证确定性。
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-b.log", AC_UNRELATED_SIG);
+  acAppendLegacyThirdParty(root, "gap-b", AC_NOW - 3600_000, "fan-in-suite-gap-b.log");
+
+  const j = judgeRetryExemption(root, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(j.verdict, "own-defect-counted", "无法判定 ⇒ fail-closed 照常计数（动作不变）");
+  assert.match(j.reason, /none carried a recorded signature \(legacy\/pre-recording\) — recurrence unevaluable, not evaluated-and-negative/,
+    "读数必须可区分「没查成」与「查过没复发」");
+  assert.match(j.reason, /1 other suite-red attempt\(s\) in window/, "如实报出窗口内有几条可比记录");
+
+  // 对照：同一条记录**带上**签名（生产新形态）⇒ 判词改说「查过、没匹配」，且 verdict 仍是 own-defect-counted。
+  const root2 = acFixture("unrelated-suite-red-3b-ctl");
+  t.after(() => rmSafe(root2));
+  acWriteSuiteRedLog(root2, "fan-in-suite-gap-b.log", "a completely different defect: expected 2 to equal 3");
+  acAppendThirdParty(root2, "gap-b", AC_NOW - 3600_000, "fan-in-suite-gap-b.log");
+  const j2 = judgeRetryExemption(root2, "gap-a", acOwnOutcome, { nowMs: AC_NOW });
+  assert.equal(j2.verdict, "own-defect-counted", "同样照常计数");
+  assert.match(j2.reason, /1 carried recorded signatures and none matched/, "两态判词可区分 ⇒ 3b 成立");
+  assert.notEqual(j.reason, j2.reason, "「没查成」与「查过没复发」不得同形");
+});
+
+test("withRecordedSuiteSignatures — 三态写入（不适用 / 读不出 / 读出），⛔ 不伪造空数组", (t) => {
+  const root = makeRoot("unrelated-suite-red-write");
+  t.after(() => rmSafe(root));
+  acWriteSuiteRedLog(root, "fan-in-suite-gap-a.log", AC_UNRELATED_SIG);
+
+  // ① 非 suite-red（step≠suite）⇒ 不加字段（不适用，⛔ 不是「读了没有」）。
+  const notSuite = withRecordedSuiteSignatures(root, { outcome: "red", step: "merge-develop" });
+  assert.equal("suiteSignatures" in notSuite, false, "非 suite 步 ⇒ 不适用，不加字段");
+  // ①b 无 suiteLog ⇒ 同样不适用。
+  assert.equal("suiteSignatures" in withRecordedSuiteSignatures(root, { outcome: "red", step: "suite", suiteLog: null }), false);
+  // ② 日志读不出 ⇒ null（如实记「没留下」）。
+  assert.strictEqual(withRecordedSuiteSignatures(root, { outcome: "red", step: "suite", suiteLog: "no-such.log" }).suiteSignatures, null,
+    "日志读不出 ⇒ null（⛔ 不是 []）");
+  // ③ 读出 ⇒ 数组，且与从同一份日志直接抽取的结果逐字相同。
+  const sigs = withRecordedSuiteSignatures(root, { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" }).suiteSignatures;
+  assert.deepEqual(sigs, assertionSignaturesFromSuiteLog(fs.readFileSync(path.join(root, ".quay", "fan-in-suite-gap-a.log"), "utf8")),
+    "留存签名 = 从日志抽出的签名（同一归一化正本）");
+  // ④ 返回值是新对象（⛔ 不改调用方持有的 mfi）。
+  const mfi = { outcome: "red", step: "suite", suiteLog: "fan-in-suite-gap-a.log" };
+  withRecordedSuiteSignatures(root, mfi);
+  assert.equal("suiteSignatures" in mfi, false, "⛔ 不就地改调用方的 mfi");
+  // ⑤ suiteRedAttemptsInWindow 的投影三态可区分（记录面，硬规则 3b）。
+  acAppendLegacyThirdParty(root, "gap-legacy", AC_NOW - 60_000, "fan-in-suite-gap-a.log");
+  acAppendThirdParty(root, "gap-recorded", AC_NOW - 120_000, "fan-in-suite-gap-a.log");
+  const attempts = suiteRedAttemptsInWindow(root, RETRY_EXEMPTION_WINDOW_MS_DEFAULT, AC_NOW);
+  const legacy = attempts.find((a) => a.taskId === "gap-legacy");
+  const recorded = attempts.find((a) => a.taskId === "gap-recorded");
+  assert.strictEqual(legacy.suiteSignaturesRecorded, false, "旧记录：没留下签名");
+  assert.strictEqual(legacy.suiteSignatures, null);
+  assert.strictEqual(recorded.suiteSignaturesRecorded, true, "新记录：签名已留存");
+  assert.deepEqual(recorded.suiteSignatures, [AC_UNRELATED_SIG]);
 });

@@ -389,59 +389,6 @@ function withNodeNoWarnings(argv: string[] | null): string[] | null {
   return argv ? [argv[0], "--no-warnings", ...argv.slice(1)] : null;
 }
 
-/** The plugin root `scriptsDir` belongs to — the dir that CARRIES `scripts/`, and therefore the registry
- *  in EITHER layout the classifier's own lookup accepts (`REGISTRY_REL_CANDIDATES`): a source checkout
- *  keeps it at `<pluginroot>/plugin/scripts/…`, the packaged artifact at `<pluginroot>/scripts/…`
- *  (⛔ `package.sh` stages `plugin/` INTO the package and `npm pack` ships it as the package's `plugin/`,
- *  so the installed plugin root has NO nested `plugin/` layer — see classifyRootCandidates below).
- *
- *  Two shapes, discriminated by the SAME predicate `siblingScriptArgv` already uses to find a sibling's
- *  shipped form: a `dist` dir means the raw `.ts` were deleted at pack time, so the plugin root is two
- *  hops up; otherwise the scripts dir IS `<pluginroot>/scripts` and it is one hop up. ⛔ Deriving this
- *  from `scriptsDir` (rather than adding a fixed hop to the list) is what keeps the guarantee below
- *  independent of how many `..`s a particular layout happens to need. */
-function pluginRootOf(scriptsDir: string): string {
-  return path.basename(scriptsDir) === "dist"
-    ? path.resolve(scriptsDir, "..", "..")
-    : path.resolve(scriptsDir, "..");
-}
-
-/** Candidate roots for the classifier's REGISTRY lookup. `select-static-checks-for-touches.ts` reads
- *  `<root>/plugin/scripts/runner-static-gate.ts` FIRST and `<root>/scripts/runner-static-gate.ts` as the
- *  shipped-layout FALLBACK (its `REGISTRY_REL_CANDIDATES` — the single source of that rel-path
- *  knowledge; ⛔ this file must never carry a second copy of either literal) — i.e. the root must be a
- *  dir that carries the registry under ONE of those two layouts.
- *
- *  ⛔ `pluginRootOf(scriptsDir)` is listed explicitly so the PACKAGED plugin root is guaranteed to be
- *  tried rather than merely reachable by counting `..`s: in the shipped shape
- *  (`<pluginroot>/scripts/dist`) it coincides with the `..`/`..` candidate, but in the
- *  `<pluginroot>/scripts` shape the `..`-hops both overshoot it (parent of the plugin root) — and that
- *  is exactly the shape `package.sh` stages. It is also the only candidate that reaches the registry in
- *  a THIRD-PARTY project, whose own tree carries none.
- *
- *  ⛔ `root` (the merge target — the tree the DELTA paths are relative to, and the tree whose suite the
- *  certificate is about) is the SEMANTICALLY correct answer and is tried FIRST. It is also the only
- *  candidate that works in the layout this repo actually runs in: the driver passes
- *  `scriptsDir = resolveKernelScriptsDir()` = the BUNDLED kernel's dir, which here is
- *  `<repo>/packages/quay/plugin/scripts/dist` (a build-output tree, gitignored) — the repo root is FIVE
- *  hops up, so NO fixed `..`-hop formula reaches it. Ordering it first is what makes a task's FIRST
- *  fan-in land; every derived candidate below is a `..`-hop guess at the shipped `<pkg>` root.
- *
- *  The `..`-hop candidates remain as fallbacks for other install shapes. ⛔ Deliberately NOT a single
- *  fixed hop: which `..` lands on the plugin root depends on whether `scriptsDir` is the scripts dir or
- *  its `dist/` — a single fixed hop overshoots one of the two, silently. Every candidate is accepted by
- *  the classifier's OWN exit code (see classifyDeltaVerdict), so there is no second copy of the registry
- *  path to drift. */
-function classifyRootCandidates(root: string, scriptsDir: string): string[] {
-  return [...new Set([
-    root,
-    pluginRootOf(scriptsDir),
-    path.resolve(scriptsDir, "..", ".."),
-    path.resolve(scriptsDir, "..", "..", ".."),
-    path.resolve(scriptsDir, ".."),
-  ].filter(Boolean))];
-}
-
 // ── flip-done identity short-circuit (gap-fan-in-cert-flip-commit-identity-inert) ────────────────────
 // A fan-in run's OWN `flip-done` appends ONE commit to the task branch AFTER the suite finished (the
 // promotion-driver flipping `status:` in `tasks/<id>.md`). That commit's delta is inert BY
@@ -452,10 +399,12 @@ function classifyRootCandidates(root: string, scriptsDir: string): string[] {
 // gate.ts` (its then-only registry path), which a consumer workspace does not carry ⇒ exit 2 ⇒
 // `not-evaluated` ⇒ fail-closed refusal ⇒ the ff is refused and the WHOLE FULL SUITE is burned again.
 // Measured (quay-fleet, 2026-09-20): 3–6 attempts and 3 full suites per landed task; three tasks were
-// retried up to the cap and flipped to needs-human. (The classifier's lookup is layout-aware since
-// gap-classify-delta-registry-path-layout-aware — it now also accepts `<pluginroot>/scripts/…`, the
-// packaged shape — so a real install CAN evaluate; this short-circuit is kept because it answers from
-// git alone, without spawning anything, and still covers a scripts dir whose registry is unresolvable.)
+// retried up to the cap and flipped to needs-human. (Two later changes make a real install evaluate:
+// gap-classify-delta-registry-path-layout-aware taught the classifier's LOCATION lookup the packaged
+// `<pluginroot>/scripts/…` shape, and gap-fan-in-delta-classify-declared-doc-surfaces taught it to
+// ANSWER for a root that carries no registry at all — the declared `loop.doc_surfaces` /
+// conservative-default fallback. This short-circuit is STILL kept: it answers from git alone, without
+// spawning anything, and needs no project identity beyond the task file's configured location.)
 //
 // So judge the IDENTITY of the delta FIRST, from the SHAPE OF HISTORY alone — no registry, no
 // classifier, no project identity beyond the task file's own configured location:
@@ -544,7 +493,19 @@ type DeltaClassification =
 /** Run `--classify-delta` for `files` (repo-relative to `root`) and return its three-state verdict.
  *  Exported for the packaging-layout e2e (`plugin/test/installed-layout-sibling-resolvability.test.mjs`),
  *  which asserts this gate REACHES A VERDICT (`kind !== "not-evaluated"`) against a PACKAGED scripts
- *  dir on a third-party project — ⛔ not on a copy of the classifier-invocation rule (硬规则 5b). */
+ *  dir on a third-party project — ⛔ not on a copy of the classifier-invocation rule (硬规则 5b).
+ *
+ *  ⛔ The classification root is `root` and ONLY `root` — the tree the delta paths are relative to.
+ *  This function used to iterate `classifyRootCandidates(root, scriptsDir)` (the plugin root + a set of
+ *  `..`-hop guesses) because a root carrying no registry made the classifier exit 2 ⇒ `not-evaluated`.
+ *  That fallback was semantically WRONG, not merely redundant: `--root` is also the tree whose
+ *  `.quay/config.yml` the classifier reads, so substituting the PLUGIN root asked quay's own checker
+ *  registry to judge a FOREIGN project's paths — a question with no meaning, and the reason the project
+ *  in the production reading "fixed" its refusals by committing a copy of quay's registry into its own
+ *  repo. The classifier now answers for a registry-less root itself (declared `loop.doc_surfaces`, else
+ *  the conservative quay-written-surfaces default —
+ *  gap-fan-in-delta-classify-declared-doc-surfaces), so `root` alone is both correct and sufficient and
+ *  the candidate list is gone. `scriptsDir` is still needed: it locates the classifier ITSELF. */
 export function classifyDeltaVerdict(root: string, scriptsDir: string, files: string[]): DeltaClassification {
   const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.deltaClassifier);
   if (!argv) {
@@ -553,19 +514,16 @@ export function classifyDeltaVerdict(root: string, scriptsDir: string, files: st
       detail: `classifier not resolvable under ${scriptsDir || "<no scripts dir>"} (neither select-static-checks-for-touches.ts nor dist/select-static-checks-for-touches.js)`,
     };
   }
-  const failures: string[] = [];
-  for (const candidate of classifyRootCandidates(root, scriptsDir)) {
-    const r = sh([...argv, "--classify-delta", "--root", candidate, ...files]);
-    if (r.status === 0) {
-      const paths = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
-      return paths.length ? { kind: "non-inert", paths } : { kind: "inert" };
-    }
-    // non-zero = the classifier did not judge: a candidate root without the registry (exit 2,
-    // "registry file … not found at …") OR a real crash. Try the next candidate root; if none
-    // succeeds the collected details ARE the not-evaluated reason.
-    failures.push(`root=${candidate} exit=${r.status}${r.stderr.trim() ? ` (${r.stderr.trim().split("\n")[0]})` : ""}`);
+  const r = sh([...argv, "--classify-delta", "--root", root, ...files]);
+  if (r.status !== 0) {
+    // non-zero = the classifier did not judge at all (a crash, or a mode that needs the registry).
+    // There is nothing to retry: the classifier's own fallback already covers "this root carries no
+    // registry", so a non-zero exit here is a real fault and NOT a missing-root condition.
+    const first = r.stderr.trim() ? ` (${r.stderr.trim().split("\n")[0]})` : "";
+    return { kind: "not-evaluated", detail: `root=${root} exit=${r.status}${first}` };
   }
-  return { kind: "not-evaluated", detail: `classifier produced no verdict — ${failures.join("; ")}` };
+  const paths = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+  return paths.length ? { kind: "non-inert", paths } : { kind: "inert" };
 }
 
 function readCaptureField(capture: string, key: string): string {
@@ -735,12 +693,21 @@ export interface InstrumentProbe {
 // `reaperProbe`) — ⛔ NOT local copies: the probe, the contract gate and the reaper call sites must
 // name one script each, and the packaging derivation reads the same table (see its header).
 
-/** Classifier probe: REALLY run one `--classify-delta` against `root` — ⛔ not an existence check, since
- *  "the file is there" does not imply "it can judge this root". An empty delta list suffices: the
- *  classifier decides whether it can evaluate BEFORE it looks at any path (a missing registry ⇒ exit 2
- *  with `registry file … not found at …`), so exit 0 ⇔ this root carries a registry ⇔ a verdict is
- *  possible. The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`);
- *  probing some other candidate root would report a capability the call site does not have. */
+/** Classifier probe: REALLY run one `--classify-delta --resolution` against `root` — ⛔ not an
+ *  existence check, since "the file is there" does not imply "it can judge this root".
+ *
+ *  ⛔ The reading is the classifier's RESOLUTION MODE, not its exit code. Until
+ *  gap-fan-in-delta-classify-declared-doc-surfaces, a root carrying no registry made the classifier
+ *  exit 2, so `exit 0 ⇔ this root carries a registry ⇔ the full-fidelity verdict is possible`. That
+ *  task taught the classifier to ANSWER for a registry-less root (declared `loop.doc_surfaces`, else
+ *  the conservative quay-written default), which broke the equivalence: every root now exits 0, so an
+ *  exit-code reading could no longer take false (硬规则 4 — a reading that cannot be wrong is not a
+ *  measurement). `mode === "registry"` keeps `evaluated` falsifiable: it still means "this tree's delta
+ *  is judged by quay's own checker list", while the two degraded modes stay VISIBLE (they are reported
+ *  in `detail`, ⛔ never folded into the available arm).
+ *
+ *  The root mirrors the one the FAN-IN itself passes (`--classify-delta --root <worktree>`); probing
+ *  some other candidate root would report a capability the call site does not have. */
 function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
   const argv = siblingScriptArgv(scriptsDir, SIBLING_SCRIPTS.classifierProbe);
   if (!argv) {
@@ -749,18 +716,42 @@ function probeClassifier(root: string, scriptsDir: string): InstrumentReading {
       detail: `root=${root} — classifier NOT RESOLVABLE; tried ${siblingScriptCandidates(scriptsDir, SIBLING_SCRIPTS.classifierProbe).join(" , ")}`,
     };
   }
-  const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root]);
-  if (r.status === 0) {
-    return { evaluated: true, detail: `root=${root} — ${argv.join(" ")} --classify-delta --root ${root} exit=0` };
-  }
-  // The classifier's own stderr names the registry candidate paths it looked for (its
-  // REGISTRY_REL_CANDIDATES) — ⛔ never a second copy of that list here (hard rule 5b). `--no-warnings`
-  // above keeps Node's MODULE_TYPELESS_PACKAGE_JSON banner out of it (it would otherwise be the FIRST
-  // line, and a reader would take the banner for the reason).
+  const invoked = `${argv.join(" ")} --classify-delta --root ${root} --resolution`;
+  const r = sh([...withNodeNoWarnings(argv)!, "--classify-delta", "--root", root, "--resolution"]);
+  // `--no-warnings` above keeps Node's MODULE_TYPELESS_PACKAGE_JSON banner out of stderr, so the FIRST
+  // stderr line is the classifier's own reason (a reader would otherwise take the banner for it).
   const why = r.stderr.trim().split("\n").filter(Boolean).join(" | ") || `exit=${r.status} (no stderr)`;
+  if (r.status !== 0) {
+    return { evaluated: false, detail: `root=${root} — classifier resolved (${invoked}) but produced no verdict: ${why}` };
+  }
+  let decision: { mode?: unknown; detail?: unknown; registryPath?: unknown; registryCandidates?: unknown } | null = null;
+  try {
+    const parsed = JSON.parse(r.stdout.trim());
+    if (parsed && typeof parsed === "object" && typeof parsed.mode === "string") decision = parsed;
+  } catch { /* not a resolution line — see the version-skew arm below */ }
+  if (decision) {
+    if (decision.mode === "registry") {
+      return { evaluated: true, detail: `root=${root} — ${invoked} exit=0 ⇒ mode=registry (${decision.registryPath ?? "registry"}); the delta is judged by quay's own checker list` };
+    }
+    // The degraded arms. The registry candidates the classifier itself looked for are echoed from ITS
+    // output — ⛔ never a second copy of that list here (硬规则 5b), and the basename is never written
+    // literally either: it IS the tail of those candidates, so `detail` still names what was looked for.
+    // So the reader can see that the absence is a property of the root, not of the probe.
+    const looked = Array.isArray(decision.registryCandidates) ? decision.registryCandidates.join(" , ") : "<unreported>";
+    return {
+      evaluated: false,
+      detail: `root=${root} — the classifier JUDGED this root WITHOUT quay's checker list: mode=${String(decision.mode)}; looked for ${looked}; ${String(decision.detail ?? "")}`,
+    };
+  }
+  // VERSION SKEW — the classifier answered but printed no resolution line, i.e. it predates the
+  // `--resolution` face (the resolved kernel can lag the code under test: `resolvePluginRoot` prefers
+  // the MERGE ROOT). For THAT binary the exit code still carries the pre-fall contract — "exit 0 ⇔ this
+  // root carries a registry ⇔ a full-fidelity verdict is possible" (a registry-less root exited 2) — so
+  // the reading is the accurate one to make, and the detail SAYS which contract produced it (⛔ never
+  // silently: a reader must be able to tell a mode reading from a legacy one).
   return {
-    evaluated: false,
-    detail: `root=${root} — classifier resolved (${argv.join(" ")}) but produced no verdict: ${why}`,
+    evaluated: true,
+    detail: `root=${root} — ${invoked} exit=0 (no resolution line: this classifier predates --resolution, so the reading falls back to the exit-code contract — exit 0 ⇔ the root carries the registry)`,
   };
 }
 

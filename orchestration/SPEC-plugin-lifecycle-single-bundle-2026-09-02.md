@@ -10,6 +10,9 @@
 3. 「可以使用**配置文件**或（**非常克制的**）**文件指针**提供项目配置。」
 4. （对本规格第 8 节遗留问题的裁定）「**manager 是产品一部分。**」
 5. 「**本项目的开发环境不应污染本机其它项目**」——「**仅允许 User Scope 以本项目目录为 plugin marketplace 源**」（详见 §4b）。
+   **2026-09-23 补充**：「**只保障 Claude Code plugin marketplace 这一条部署途径**；其它项目使用 github 的
+   marketplace（`/plugin marketplace add yaleh/quay`），**本项目使用自己的 dog food**」⇒ 发布渠道 `quay`
+   与开发树 `quay-dev` 分成两个名槽（§4b 已按此改写）。
 6. 「**quay-init 过程应进一步简化。其主要操作应当是创建符合 quay 要求的项目文件（任务目录、quay 配置等），
    而不应该复制这些 Claude Code 扩展或脚本。**」（详见 §6）
 
@@ -102,22 +105,71 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 对本机所有项目无条件生效。（该条目由 npm 全局安装的 `register-plugin.mjs` postinstall 自动写入，
 或手工 `claude plugin install` 写入——**不是有意为之的全局化，是安装路径的默认副作用**。）
 
-**裁定形态（人 2026-09-02）——两件事必须分开放**：
+**裁定形态（人 2026-09-02 立，2026-09-23 换名）——两件事必须分开放**：
+
+> **2026-09-23 修订（人裁定）**：本节先前写的「唯一允许项 = `extraKnownMarketplaces.quay` →
+> **directory** `<本仓库>/plugin`」**已被取代**。人 2026-09-23 逐字：「**只保障 Claude Code plugin
+> marketplace 这一条部署途径**；其它项目使用 github 的 marketplace（`/plugin marketplace add
+> yaleh/quay`），**本项目使用自己的 dog food**」。
+> 新形态把**发布渠道**与**本仓 dog food**拆成两个 marketplace 名（同名槽是全机唯一的，见下 4b-机制事实 ①②）：
+
+| 槽名 | 源 | 声明在哪 | 谁启用 | 从哪加载 |
+|---|---|---|---|---|
+| `quay` | **github** `yaleh/quay` | User Scope（`~/.claude/settings.json` `extraKnownMarketplaces.quay`） | **其它项目**（各项目级 `enabledPlugins["quay@quay"]` + `install --scope project`） | 缓存副本 `~/.claude/plugins/cache/quay/quay/<ver>/…` |
+| `quay-dev` | **directory → `<本仓库>/plugin`** | 同上，`extraKnownMarketplaces.quay-dev`（机器特定路径，**不入库**） | **只有本仓库**（`<quay repo>/.claude/settings.json` `enabledPlugins["quay@quay-dev"]`） | **原地**从 `<本仓库>/plugin/vendor/quay/dist/quay.js` |
+
+**为什么必须换名（不是清理走样，是修一个已经发生的污染）**：marketplace 名**全机唯一**，且
+**目录源插件原地加载、不需要安装记录**。旧形态让本仓开发树占住发布渠道的 `quay` 名槽 ⇒
+本机所有启用 `quay@quay` 的项目（**quay-fleet / meta-cc / lan / claudecodeui**，2026-09-23 用
+`claude mcp list` 实测）**全部从 `<本仓库>/plugin` 这个开发树加载 quay 的 MCP**，而不是从各自缓存里的
+已发布版本；claudecodeui 的 github 0.10.0 安装记录被顶替。换名把这条路切断。
 
 | 放什么 | 放哪 | 为什么必须是这一层 |
 |---|---|---|
-| **marketplace 源**（`extraKnownMarketplaces.quay` → directory `/home/yale/work/quay/plugin`） | **User Scope**（`~/.claude/settings.json`） | 它是**机器特定的绝对路径**，不可提交进仓库；且必须先"可见"才谈得上安装 |
-| **启用**（`enabledPlugins["quay@quay"]`） | **项目级**（`<quay repo>/.claude/settings.json`，提交） | 它是**项目意愿**，对任何在本仓库工作的人都成立，且**不应外溢到别的项目** |
+| **marketplace 源**（`extraKnownMarketplaces.quay` → github；`extraKnownMarketplaces.quay-dev` → directory `<本仓库>/plugin`） | **User Scope**（`~/.claude/settings.json`） | directory 那条是**机器特定的绝对路径**，不可提交进仓库；且必须先"可见"才谈得上安装 |
+| **启用**（`enabledPlugins`） | **项目级**（`<quay repo>/.claude/settings.json`，提交） | 它是**项目意愿**，对任何在本仓库工作的人都成立，且**不应外溢到别的项目** |
 
 ```
-~/.claude/settings.json          extraKnownMarketplaces.quay = directory → <本仓库>/plugin   ✅ 允许（唯一允许项）
-                                 enabledPlugins["quay@quay"] = true                          ⛔ 禁止（删除或置 false）
-<quay repo>/.claude/settings.json  enabledPlugins["quay@quay"] = true                        ✅ 在这里启用
-<本机其它项目>                    不启用 ⇒ 不注入 skills / 不进 PATH / 不起 MCP 进程            ✅ 目标态
+~/.claude/settings.json          extraKnownMarketplaces.quay     = github yaleh/quay           ✅ 发布渠道（用户级只留"源"）
+                                 extraKnownMarketplaces.quay-dev = directory → <本仓库>/plugin ✅ dog food（机器特定路径，不入库）
+                                 enabledPlugins 不含任何 quay 键                              ⛔ 禁止（AC-161 判据即读此 key 集）
+<quay repo>/.claude/settings.json  enabledPlugins["quay@quay-dev"] = true                    ✅ 本仓 dog food（从开发树原地加载）
+<本机其它项目>/.claude/settings.json  enabledPlugins["quay@quay"] = true                      ✅ github 渠道
+                                   （以 `install --scope project` 写入；⛔ 不 `marketplace add --scope project`——
+                                     那会把机器特定的源写进消费方的提交文件）                 ⛔ 不启用 ⇒ 不注入 / 不进 PATH / 不起 MCP
 ```
 
 **⊢ 这恰好是裁定 3「配置文件」边界在本问题上的具体落法**：机器特定的东西（源路径）留在用户级、
 不进仓库；项目意愿（启用）进仓库、随 clone 传播。**两者本来就该分层，此前是被安装脚本合并了。**
+换名不改变这条分层，只把「开发树占着发布名」这个穿透堵掉。
+
+### 4b-机制事实（6 条，2026-09-23 实测；逐条落地判据见任务
+`gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot`）
+
+1. **名槽全机唯一；项目级/本地级声明会改写它。** 项目级（或 `settings.local.json` 本地级）的一条
+   marketplace 声明写的是**同一个全机名槽**。实测：本仓 `settings.local.json` 曾把 `quay` 声明为目录源
+   ⇒ quay-fleet / meta-cc / lan / claudecodeui 全部从本仓开发树加载 MCP，claudecodeui 的 github 0.10.0
+   安装记录被顶替。*（也是换名成 `quay-dev` 的直接理由。）*
+2. **名字不可别名。** 注册名 = **源根** `.claude-plugin/marketplace.json` 的 `name` 字段（不是 `add`
+   的参数——`add` 只收**一个** `<source>`）。插件命名空间**不含** marketplace 名 ⇒ 换名后
+   `mcp__plugin_quay_quay__*` 与 `quay:*` **一字不变**。
+3. **`marketplace add` 对已存在的同名槽静默不改**（无输出、无报错）。只有 `marketplace remove` 能改，
+   而 `remove` 会删掉该 marketplace 下**所有项目**的安装记录 ⇒ 迁移一个已存在的名槽后，须逐项目重装。
+4. **同一项目同时启用 `quay@quay` 与 `quay@quay-dev` ⇒ 只剩一个 `plugin:quay:quay`**，静默择一、
+   不报冲突。⇒ 「两个都开着」是**不可观测**的：读数发现不了它，只能靠不这么配。
+5. **目录源插件从源目录原地运行**（`<本仓库>/plugin/vendor/quay/dist/quay.js`），不是从缓存副本。
+   **目录源的插件根不能是 symlink**：commands/agents 的路径按 realpath 核对，逃出 marketplace 目录即
+   `path-traversal`。**MCP 不受此检查** ⇒ **`claude mcp list` 正常不代表插件加载成功**——判据须读
+   `claude plugin list --json` 的 **`errors`** 键。（先例：`fa031022b` 的 symlink 目录方案已撤，
+   skills/agents 全部 path-traversal 加载失败。）同轮实测否掉的另三个布局：`../` 源被拒、对象式
+   `directory` 源不支持、按 `.json` 文件路径注册恒 `cache-miss` ⇒ **唯一可行布局是 `plugin/` 自身作
+   marketplace 根**。
+6. **源码形态名为 `quay-dev`，发布形态为 `quay`**：`plugin/.claude-plugin/marketplace.json` 源码里写
+   `quay-dev`（本仓 dog food 用），`scripts/stamp-marketplace-name.mjs` 从**仓库根**
+   `.claude-plugin/marketplace.json` 读发布名（= `quay`）、**只改副本**——串在 `publish-dist-branch.sh`
+   组装树的 rsync 上（覆盖 `dist-plugin` 与 `release.yml` 的 `plugin-channel-verify`），以及 `package.sh`
+   的暂存副本上。守卫：`marketplace-name-stamp.test.mjs`、`publish-dist-branch-closure-gate.test.mjs`、
+   `npm-pack-e2e.test.mjs`（去掉任一出口的戳即红）。
 
 **AC5（能取假）**：在任一**非** quay 项目起会话 ⇒ `PATH` 不含 `<quay>/plugin/bin`
 **且** `quay:execute` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
@@ -291,9 +343,10 @@ mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩�
 - **AC5 作用域不外溢**（裁定 5，判据全文见 §4b）：非 quay 项目的会话中
   `PATH` 不含 `<quay>/plugin/bin` **且** `quay:execute` NOT-AVAILABLE。
   *能取假*：**当前状态即红**（实测 `/home/yale` 会话 PATH 含该路径两次）——先红后绿。
-- **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键
-  **只有** `extraKnownMarketplaces.quay`，**没有** `enabledPlugins["quay@quay"]`。
-  *能取假*：写回该启用键即红。
+- **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键**只有** marketplace **源**
+  （`extraKnownMarketplaces.quay` → github `yaleh/quay`；`extraKnownMarketplaces.quay-dev` → directory
+  `<本仓库>/plugin`），**没有**任何 `enabledPlugins["quay@…"]` 键。*能取假*：写回任一 quay 启用键即红。
+  （判据正本 = `goals/AC-161-user-level-marketplace-only.md` 的 criterion：读 `enabledPlugins` 的键集与 `env`。）
 - **AC4（反例判据）**：三条 AC 都不得只靠 fixture 满足——AC1/AC2 读仓库真实文件，
   AC3 读一次真实 laydown 的产物清单（硬规则 4 推论三：读生产载体，不读注入数据）。
 

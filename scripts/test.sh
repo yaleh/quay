@@ -173,7 +173,47 @@ set -euo pipefail
 # entry-level, never a single-point patch). `unset` (⛔ not NO_COLOR=1 — Node IGNORES NO_COLOR while
 # FORCE_COLOR is set, warns and still colors) restores node's own TTY detection; suite subprocesses are
 # always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
-unset FORCE_COLOR
+#
+# ── QUAY_GOAL_ACCEPTANCE_ACTIVE normalization (gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env) ──
+# The SECOND member of the same entry-normalization block, for the same reason as FORCE_COLOR above
+# (entry-level, never a single-point patch): a variable whose value is only meaningful in the process
+# that set it must not be handed to every child of the suite entry.
+#
+# WHAT IT IS: GOAL_ACCEPTANCE_ACTIVE_ENV (packages/quay/src/goal-store.ts:118) is the goal-layer
+# RE-ENTRANCY GUARD. Its meaning is a sentence about ONE process — "THIS process is running criteria"
+# (goal-store.ts:1784/1992 check it, :1791/:2055 set it around the criterion spawn; goal-driver.ts:639
+# the same). goal-store.ts:1751-1759 states the intent: a criterion whose own shell calls back into the
+# checker must not run criteria again, so the guard is exported to the *criterion's child shell*
+# (runAcceptance inherits process.env). That inheritance is by design and stays — see the three
+# consumers in the AC3 evidence (goal-driver-s02 AC1/AC2: gate ⇒ depth 1, `env -u` ⇒ depth ≥3).
+#
+# THE LEAK THIS CLOSES (measured, not inferred): a resident driver-anchor started from a shell that had
+# exported the variable carries it in its own environ (/proc/<anchor>/environ, 2026-09-24) and hands it
+# to every worker session + worker-driver it spawns; suite-driver.ts:176 spawns the suite with
+# `env: {...process.env, …}` ⇒ `scripts/test.sh` ⇒ `node --test`. Every goal-family test file whose
+# subject runs a criterion then reads a store that REFUSES (goal-store returns `evaluated:false` /
+# `guardRefused:true` — a distinct value, not an empty success) and goes red. Reproduced at one commit,
+# one worktree, un-fixed entry:
+#   QUAY_GOAL_ACCEPTANCE_ACTIVE=1     node --test plugin/test/goal-invariants-standing.test.mjs ⇒ RED
+#   env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --test plugin/test/goal-invariants-standing.test.mjs ⇒ 19/19
+# The same red reached fan-in as `# fail 30` with exactly 8 goal-family files `passed=false`
+# (.quay/fan-in-suite-gap-ac295-…log) — a red that is a property of the ANCHOR's lineage, not of any
+# task's delta, so it is either waived or burns a task to its retry cap depending on which window it
+# lands in.
+#
+# ⛔ NOT a weakening of the guard (AC3): `unset` here removes the leak's SOURCE for the suite subtree
+# only. The guard's own set/restore discipline around the criterion spawn (goal-store / goal-driver) is
+# untouched, and the criterion's child shell still inherits "1" through runAcceptance's process.env.
+# The suite is not a criterion-running context, which is exactly why it must not see the guard.
+#
+# ⛔ WHY THE MEMBER RIDES ON THE EXISTING `unset` LINE INSTEAD OF GETTING ITS OWN: both members are
+# removed by ONE statement, on purpose. sh-census-check's `embeddedInterpreterLines` axis is a
+# shrink-only ratchet over the CODE-line count of every .sh carrying an embedded interpreter — and
+# scripts/test.sh is one (710 code lines, measured 2026-09-24). A net-zero edit is how a new member of
+# this normalization block lands without paying shell-line growth for it; the explanation is free
+# (comment lines are not counted), the code line is not. Verified: sh-census-check stays at the
+# baseline (7686), ⛔ not raised — `plugin/sh-census-baseline.json`'s ceiling is shrink-only too.
+unset FORCE_COLOR QUAY_GOAL_ACCEPTANCE_ACTIVE
 
 # `pwd -P` (PHYSICAL), ⛔ not plain `pwd` (gap-suite-ambient-reds-block-all-code-landings, AC6
 # sweep — the symlink-form family). Plain `pwd` is LOGICAL: it keeps whatever spelling got you here.

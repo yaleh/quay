@@ -418,6 +418,13 @@ ensure_loop_config() {
   if [ ! -f "$cfg" ]; then return; fi
   # The merge + no-gratuitous-rewrite logic (and the exact report lines) live in
   # `ensureLoopConfig` (packages/quay/src/init.ts) — one implementation, no second copy.
+  # ⛔ `loop.doc_surfaces` is deliberately NOT passed here: it is a VERSION-LEVEL default, and this
+  # step is the four VALUE-level project-derived values only (repo_root/test_command/tmux_session/
+  # worktree_root). Its delivery to an existing config is the comment-preserving per-key reconcile
+  # (`LOOP_VERSION_DEFAULTS` in init.ts, reachable via `quay init --reconcile` / the MCP init tool) —
+  # see plugin/skills/init/SKILL.md, "Re-running on an existing project". Routing it through this
+  # step instead would re-serialize the whole document with the value-merge writer, which DROPS the
+  # user's comments (the "NO GRATUITOUS REWRITE" discipline this file's comments describe).
   quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"
 }
 
@@ -1510,7 +1517,10 @@ write_config() {
     # quay's own incident log to a reader who took it for their own project's history
     # (gap-quay-init-config-heredoc-leaks-maintainer-comments). Keep it out here.
     # The body keeps ONLY what a CONSUMER of the generated config needs to know (the loop.test_command
-    # contract note above test_command, and the fork_baseline line).
+    # contract note above test_command, the loop.doc_surfaces contract note, and the fork_baseline line).
+    # ⚠️ The fork_baseline text that follows is the MIRROR half of LOOP_VERSION_DEFAULTS — a version-level
+    # default that a consumer of the generated config benefits from reading, but that a future editor of
+    # THIS writer must keep in sync with init.ts (see the ⚠️ note below).
     #
     # ⚠️ 本 heredoc 是【新装】写者，而版本级默认值的正本是 packages/quay/src/init.ts 的 LOOP_VERSION_DEFAULTS（CLI 的 quay init --reconcile 子命令用它做 diff）；shell 无法 import TS，所以下面那行 fork_baseline 是【镜像】——新增版本级默认值时要同时改两处，或把这里改成从 schema 派生。
     #
@@ -1545,6 +1555,14 @@ loop:
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
+  # The doc/code split the mechanical fan-in uses to decide whether a task's delta may skip the full
+  # suite: listed path prefixes are DOC, everything else is CODE (fail-closed). This default names only
+  # the surfaces quay itself writes, so ADD your own docs / telemetry directories here. It decides only
+  # when this tree carries no quay checker registry; a tree that carries one uses the registry. It is
+  # a version-level default: the shipped reconcile fills the same value into an existing config
+  # comment-preservingly (packages/quay/src/init.ts LOOP_VERSION_DEFAULTS — the two writers must agree).
+  # Full contract: plugin/skills/init/SKILL.md, section "loop.doc_surfaces".
+  doc_surfaces: ["tasks/", "goals/", ".quay/"]
   # The branch a task worktree forks from ("quay init --reconcile" fills it in on upgrade if absent).
   fork_baseline: develop
 EOF
@@ -1755,10 +1773,16 @@ The files just written ENABLE the quay plugin for this project, but they DO NOT 
 `enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project
 settings are not read at all — so "config committed => auto-installed" is FALSE. Install it first:
 
-  # 1. register the marketplace source (User Scope, machine-specific path — not committed):
-EOF
-  printf '  claude plugin marketplace add quay "%s"\n\n' "$PLUGIN_ROOT"
-  cat <<'EOF'
+  # 1. register the PUBLISHED marketplace source — the github channel. The CLI takes exactly ONE
+  #    <source> argument: `marketplace add <name> <source>` is rejected outright (Claude Code
+  #    2.1.280: "✘ Invalid marketplace source format. Try: owner/repo, https://..., or ./path"),
+  #    and registering a DIRECTORY here would pin this project to wherever this plugin bundle
+  #    happens to sit on THIS machine — it would load in place, leave no install record, and take
+  #    the machine-wide `quay` name slot. The marketplace name comes from the source root's
+  #    .claude-plugin/marketplace.json; it is not aliased. (This repo's own dog-food channel is
+  #    the SEPARATE name `quay-dev` → a directory source, declared at user scope there.)
+  claude plugin marketplace add yaleh/quay
+
   # 2. install the plugin for THIS project (⛔ always pass --scope: `claude plugin install` defaults
   #    to `user`, which writes a user-level enabledPlugins key and reddens the STANDING goal AC-161):
   claude plugin install quay@quay --scope project
