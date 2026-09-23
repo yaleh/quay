@@ -1,7 +1,7 @@
 ---
 id: gap-goal-gate-verdict-single-mapping-not-evaluated
 title: goal gate 两个入口把 exit 3 / 超时 / 127 记成 fail：三个写入点共用一个 verdict 映射
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -63,13 +63,25 @@ extra:
 
 ⇒ 取法：**默认值只留 develop 的那一处**，本分支的 `resolveAcceptanceTimeout` 改为 `import` 它（不再自带 `60_000` 字面量），其记录优先级链 `record > env > default` 不变；sweep 点的 deadline 取 develop 的 `resolveAcceptanceTimeoutMs()`，mapping 取本分支的 `verdictFromAcceptance`。`goal gate` 的输出同时保留 develop 的 `timeoutMs` 字段与本分支的 `cause` 字段。
 
+`packages/quay/test/goal-criterion-timeout-resolution.test.mjs`（develop 的文件）被改了三处断言：它们把「超时 ⇒ fail」写死，与本任务的核心要求直接冲突（例：「a criterion killed at the deadline is a fail」）。每条的**自身主张**——解析后的期限真的支配了这次运行，由 `reason`/`timeoutMs`/elapsed 读出——逐条保留，只换 verdict 那个词。该文件因此登记进 `## Touches`。
+
 ### 合并后重跑的四条读数（均在本 worktree，post-merge）
 
 - **AC1**：`bash scripts/test.sh packages/quay/test/goal-gate-verdict-mapping.test.mjs` → 17 tests / 17 pass / 0 fail。
 - **AC2（取假，逐入口分别做）**：仅把 `goal-store.ts` 的 `gate` case 改回二元 ⇒ 6 fail（三个 `quay goal gate` 用例 + 两入口一致性 + 两条记录级 deadline 用例），MCP 用例仍绿；仅把 `mcp-server.ts` 的 `goal_gate` 改回二元 ⇒ 4 fail（三个 MCP 用例 + 一致性），CLI 用例仍绿。两个方向互为镜像，证明判据按入口分辨而非全局。两份文件随后按备份逐字节还原（`diff -q` 通过）。
 - **AC3**：`grep -rnE 'ok \? "pass" : "fail"' packages/quay/src packages/quay-native/src --include=*.ts` ⇒ 4 条命中，**GateEvent 写入点 0 条**：`gate/types.ts:29`（注释）、`gate/engine.ts:107`（注释）、`gate/acceptance-runner.ts:58`（注释）、`gate/acceptance-runner.ts:124`（`verdictFromGateCheck` 的布尔回退——唯一被允许存在的那一处，所有写入点都经它）。**正控**：同一谓词对着 merge-base 干跑 ⇒ 7 条命中，其中 4 条曾是 GateEvent 写入点（`mcp-server.ts:500`、`engine.ts:110`、`lifecycle.ts:306`、`goal-store.ts:3108`），现已全部消失或改写。
 - **AC4**：临时 workspace 内写入 `timeoutMs: 120000`、判据 `sleep 70; echo "finished the 70s run"` 的记录 ⇒ `quay goal gate AC-012 --json` 于 2026-09-23T17:12:40Z 起、17:13:50Z 止（**70s**），exit 0，`{"verdict":"pass","cause":null,"timeoutMs":120000,"reason":"acceptance passed (exit 0)"}`，ledger 新增记录 `verdict":"pass"`。若仍是写死的 60000，该判据会在 60s 被杀并记 `not-evaluated (timeout)`——记录自己的 deadline 才是让它通过的原因。
-- **AC5**：`bash scripts/test.sh --for-task gap-goal-gate-verdict-single-mapping-not-evaluated --allow-thin` → 见提交。
+- **AC5**（生产形态，与 fan-in 同一条命令）：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE bash scripts/test.sh --for-task gap-goal-gate-verdict-single-mapping-not-evaluated --allow-thin` ⇒ **exit 0，189 tests / 189 pass / 0 fail**。裸形态（不加 `--allow-thin`）⇒ **exit 1，但 `fail 0`**，原因是 `test-selection-thin (selector exit 1)`——这是选择面宽度的信号（本任务的 Touches 含 shard/harness 路径），**不是用例失败**；两个读数都记在此处，不做单边声明。
+
+### ⚠️ 一个会误诊的环境陷阱：泄漏的 `QUAY_GOAL_ACCEPTANCE_ACTIVE`
+
+本轮第一次跑 scoped 门时，`goal-store.test.mjs` 报了 **8 条红**，全部落在 `checkAchievedFailing` / I5 / AC-242 轮转这些**跑判据**的用例上（例：判据 `false` 应落 `achievedButFailing`，实得 `[]`）。
+
+**它不是本任务引入的缺陷。** 根因是 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 泄漏进了**本 worker 会话自身的环境**（`/proc/<claude pid>/environ` 可见），而 `checkAchievedFailing` 的重入闸（`goal-store.ts:1784`）读到它就**拒绝运行并返回空数组**——空数组与「跑完且都通过」同形，于是读起来像「判据为假」（正是本任务在修的同一族混淆，硬规则 3b）。
+
+- **判据（一条命令取假/取真）**：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE bash scripts/test.sh packages/quay/test/goal-store.test.mjs` ⇒ **72/72 全绿**（带该变量时 8 红）。⇒ 8 红是该变量的产物，不是代码。
+- **对 fan-in 无影响**：`scripts/test.sh` 既不设置也不清理该变量；且**驱动进程自己的 env 里没有它**（已核 `/proc/<pid>/environ`：worker-driver 及其 node 子进程均无，只有本会话进程有）。fan-in 的 scoped 门/全量因此走的是干净环境。
+- 记在此处是因为：下一个读这份记录的人如果看到「scoped 门曾红过 8 条」，会去追一个不存在的代码缺陷。
 
 ### DoD 状态
 
