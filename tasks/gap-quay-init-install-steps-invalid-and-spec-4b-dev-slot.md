@@ -16,7 +16,7 @@ goal_ac: AC-161
 
 ## Proposal
 
-**来源**：2026-09-23 人裁定「只保障 Claude Code plugin marketplace 这一条部署途径；其它项目使用 github 的 marketplace（`/plugin marketplace add yaleh/quay`），本项目使用自己的 dog food」，同日已落地 dog food 半边（`fa031022b`：`dev/quay-dev-marketplace/` → `quay@quay-dev`）。本任务收尾剩下的两处：
+**来源**：2026-09-23 人裁定「只保障 Claude Code plugin marketplace 这一条部署途径；其它项目使用 github 的 marketplace（`/plugin marketplace add yaleh/quay`），本项目使用自己的 dog food」，同日已落地 dog food 半边（`d55cb22c9`：`plugin/.claude-plugin/marketplace.json` 源码形态改名 `quay-dev`，本仓启用 `quay@quay-dev`；发布副本由 `scripts/stamp-marketplace-name.mjs` 在 `publish-dist-branch.sh` / `package.sh` 两个出口戳回 `quay`。先前 `fa031022b` 的 symlink 目录方案已撤：skills/agent 全部 path-traversal 加载失败）。本任务收尾剩下的两处：
 
 **① `quay-init` 打印的安装步骤本身是坏的，且指向错误的渠道。** `plugin/scripts/quay-init.sh:1756` 与 `plugin/skills/init/SKILL.md:84` 打印：
 
@@ -39,7 +39,7 @@ claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
 
 ```
 ~/.claude/settings.json   extraKnownMarketplaces.quay     = github yaleh/quay                        ✅ 发布渠道
-                          extraKnownMarketplaces.quay-dev = directory → <本仓库>/dev/quay-dev-marketplace ✅ dog food（机器特定路径，不入库）
+                          extraKnownMarketplaces.quay-dev = directory → <本仓库>/plugin              ✅ dog food（机器特定路径，不入库）
                           enabledPlugins 不含任何 quay 键                                         ✅ AC-161 不变
 <quay repo>/.claude/settings.json  enabledPlugins["quay@quay-dev"] = true                        ✅ 本仓 dog food
 <其它项目>/.claude/settings.json   enabledPlugins["quay@quay"] = true  + install --scope project ✅ github 渠道
@@ -50,8 +50,8 @@ claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
 2. 名字不可别名：注册名 = 源根 `.claude-plugin/marketplace.json` 的 `name`；插件命名空间不含 marketplace 名 ⇒ `mcp__plugin_quay_quay__*` 与 `quay:*` 不变。
 3. `marketplace add` 对**已存在的同名槽静默不改**（无输出、无报错）；只有 `marketplace remove` 能改，而 `remove` 会删除该 marketplace 下**所有项目**的安装记录 ⇒ 迁移后须逐项目重装。
 4. 同一项目同时启用 `quay@quay` 与 `quay@quay-dev` ⇒ 只剩一个 `plugin:quay:quay`，静默择一、不报冲突。
-5. 目录源插件从源目录**原地**运行（`dev/quay-dev-marketplace/quay/vendor/quay/dist/quay.js`），不是从缓存副本。
-6. `plugin/.claude-plugin/marketplace.json` **故意保持 `quay`**：它随 `dist-plugin` 与 `release.yml` 渠道校验发布；开发名只存在于 `dev/`。
+5. 目录源插件从源目录**原地**运行（`<本仓库>/plugin/vendor/quay/dist/quay.js`），不是从缓存副本。**目录源的插件根不能是 symlink**：commands/agents 路径按 realpath 核对，逃出 marketplace 目录即 `path-traversal`（MCP 不受此检查，所以 `claude mcp list` 正常不代表插件加载成功——判据须读 `claude plugin list --json` 的 `errors`）；`../` 源被拒、对象式 `directory` 源不支持、按 `.json` 文件路径注册则恒 `cache-miss` ⇒ 唯一可行布局是 `plugin/` 自身作 marketplace 根。
+6. `plugin/.claude-plugin/marketplace.json` 源码形态名为 `quay-dev`，**发布形态为 `quay`**：`scripts/stamp-marketplace-name.mjs` 从仓库根 `.claude-plugin/marketplace.json` 读发布名，只改副本（`publish-dist-branch.sh` 串在组装树的 rsync 上，覆盖 `dist-plugin` 与 `release.yml` 的 `plugin-channel-verify`；`package.sh` 改暂存副本）。守卫：`marketplace-name-stamp.test.mjs`、`publish-dist-branch-closure-gate.test.mjs`、`npm-pack-e2e.test.mjs`（去掉任一出口的戳即红）。
 
 <!-- dedup-ref -->
 **相关（溯源，非前置）**：`gap-ac161-user-level-marketplace-only`（done，§4b 旧形态的落地任务）、`gap-verify-deliver-coldstart-marketplace-channel-unverified`（done）。AC-161 判据只读 user 级 `enabledPlugins`/`env`，**观测不到**「目录源名槽 + 他项目项目级启用 ⇒ 全机加载开发树」这种穿透——本任务 AC3 补一条能取假的读数，是否升格为常设判据由人另行裁定。
@@ -60,7 +60,7 @@ claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
 
 - [ ] AC1（配方可被 CLI 接受）：`grep -n -E 'marketplace add quay ' plugin/scripts/quay-init.sh plugin/skills/init/SKILL.md` 零命中（先打印前 3 条命中再判），且二者打印的配方为 `claude plugin marketplace add yaleh/quay` + `claude plugin install quay@quay --scope project`
 - [ ] AC2（真喂给 CLI，不是字样匹配）：在 `mktemp -d` 的空 cwd + 隔离 `CLAUDE_CONFIG_DIR` 下，逐行执行 `quay-init` 实际打印出的两条安装命令，均 exit 0，且该 cwd 下 `claude mcp list` 的 `plugin:quay:quay` 行路径含 `/cache/quay/quay/`；对照：把第一条换回旧两参数形式 ⇒ exit ≠ 0（证明该判据能取假）。执行后 `git -C <本仓> status --short .claude/` 为空（隔离负控制）
-- [ ] AC3（生产读数，落地后当轮取）：在本机真实配置下，本仓 `claude mcp list` 的 quay 行路径含 `dev/quay-dev-marketplace/`，quay-fleet / meta-cc / lan / claudecodeui 各自含 `/cache/quay/quay/`，任一无关空目录下无 `plugin:quay` 行；六条读数原文贴进本任务
+- [ ] AC3（生产读数，落地后当轮取）：在本机真实配置下，本仓 `claude plugin list --json` 的 `quay@quay-dev` 为 `enabled: true` 且**无 `errors` 键**、`claude mcp list` 的 quay 行路径含 `/work/quay/plugin/`，quay-fleet / meta-cc / lan / claudecodeui 各自含 `/cache/quay/quay/`，任一无关空目录下无 `plugin:quay` 行；六条读数原文贴进本任务
 - [ ] AC4（SPEC 更新）：`grep -n 'quay-dev' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` 在 §4b 内非零，且 §4b 不再把 `directory → <本仓库>/plugin` 写作 `quay` 的允许项；Proposal ② 的 6 条机制事实逐条在 §4b 有落点（贴映射）
 - [ ] AC5：`plugin/test/quay-init.test.mjs` 与 `test/cold-start-e2e.sh` 的配方断言改为匹配完整的单参数 github 配方，并对旧两参数形式取假（改前对坏配方跑一次确认红）；`scripts/test.sh --for-task <本任务id>` 绿
 - [ ] AC6：AC-161 判据仍 exit 0
