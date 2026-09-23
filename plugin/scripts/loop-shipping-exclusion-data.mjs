@@ -15,6 +15,7 @@
 //     WITHOUT one (the ## Contract invariant's "或写明为何保留" branch). Present only on entries
 //     that are deliberately kept despite suppressing nothing right now.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -86,7 +87,7 @@ export const stagingDirPrefix = 'plugin-staging-';
  * @returns {Set<string>} absolute container paths
  */
 export function worktreeContainerPaths(repoRoot) {
-  const root = path.resolve(repoRoot);
+  const root = canonical(path.resolve(repoRoot));
   const containers = new Set([path.join(root, '.claude', 'worktrees')]);
   let porcelain = '';
   try {
@@ -101,10 +102,30 @@ export function worktreeContainerPaths(repoRoot) {
   }
   for (const line of porcelain.split('\n')) {
     if (!line.startsWith('worktree ')) continue;
-    const wt = path.resolve(line.slice('worktree '.length).trim());
+    const wt = canonical(path.resolve(line.slice('worktree '.length).trim()));
     if (wt !== root) containers.add(wt);
   }
   return containers;
+}
+
+/** Canonicalize a path for COMPARISON: realpath when it exists, else the resolved path unchanged
+ *  (⛔ never drop an entry just because it could not be read — 硬规则 6, 缺值 ≠ 为假).
+ *
+ *  Why every container must go through this (gap-suite-ambient-reds-block-all-code-landings, the
+ *  same spelling family as `scripts/test.sh`'s `pwd -P` and `arch-coverage-report`'s class 3):
+ *  this repo's root is reachable by two spellings — `/data/home/yale/work/quay` (the realpath) and
+ *  `/home/yale/work/quay` (a symlink). `git worktree list` reports each worktree in the spelling it
+ *  was REGISTERED with, and the 14 stale worktrees under `.quay/` were registered through the
+ *  symlink ⇒ they came back as `/home/yale/work/quay/.quay/...`. `walkCorpus` compares with
+ *  `startsWith(dir + sep)` against a realpath `dir`, so every one of them silently failed to
+ *  exclude, and the AC2 scan counted 14 extra `fast-mode-telemetry.ts` copies. Realpathing both
+ *  sides makes the reading independent of the host's path SPELLING (硬规则 4b). */
+function canonical(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 /**

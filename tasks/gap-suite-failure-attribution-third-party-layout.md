@@ -1,7 +1,7 @@
 ---
 id: gap-suite-failure-attribution-third-party-layout
 title: suite 失败归因只认 quay 自身测试布局：第三方项目的 suite 红恒归因不出，被误判「没有 worker 能修的东西」
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -30,10 +30,10 @@ goal_ac: AC-317
 
 ## AC
 
-- [ ] `node --test plugin/test/worker-driver-retry-classification.test.mjs` 退出 0，且新增用例覆盖：①第三方布局 `__PERFILE__ duration_ms=1 server/x/y.test.ts passed=false end_ms=2` ⇒ 提取 `server/x/y.test.ts`；②`__PERFILE__ … lint passed=false` 单独出现 ⇒ 不把 `lint` 当测试文件；③同一日志中另有 `not ok - lint: server/a/b.test.ts:10:49: …` ⇒ 归因到 `server/a/b.test.ts`；④quay 自身布局（`plugin/test/x.test.mjs`，含 worktree 绝对路径形态）仍按原样提取（负控，不回归）。
-- [ ] 取假：把新解析逻辑回退到旧正则后，上述用例①③红（附实跑输出）。
-- [ ] `grep -n "names nothing a worker could fix" plugin/scripts/worker-driver.ts` 命中数为 0；「读不懂」分支的判词含解析器读到的失败行数 N（用例断言判词文本含 `0 of`）。
-- [ ] `bash scripts/test.sh --for-task gap-suite-failure-attribution-third-party-layout` 退出 0，且确实执行了 ≥1 个测试文件（非 thin）。
+- [x] `node --test plugin/test/worker-driver-retry-classification.test.mjs` 退出 0，且新增用例覆盖：①第三方布局 `__PERFILE__ duration_ms=1 server/x/y.test.ts passed=false end_ms=2` ⇒ 提取 `server/x/y.test.ts`；②`__PERFILE__ … lint passed=false` 单独出现 ⇒ 不把 `lint` 当测试文件；③同一日志中另有 `not ok - lint: server/a/b.test.ts:10:49: …` ⇒ 归因到 `server/a/b.test.ts`；④quay 自身布局（`plugin/test/x.test.mjs`，含 worktree 绝对路径形态）仍按原样提取（负控，不回归）。
+- [x] 取假：把新解析逻辑回退到旧正则后，上述用例①③红（附实跑输出）。
+- [x] `grep -n "names nothing a worker could fix" plugin/scripts/worker-driver.ts` 命中数为 0；「读不懂」分支的判词含解析器读到的失败行数 N（用例断言判词文本含 `0 of`）。
+- [x] `bash scripts/test.sh --for-task gap-suite-failure-attribution-third-party-layout` 退出 0，且确实执行了 ≥1 个测试文件（非 thin）。
 
 ## DoD
 
@@ -43,5 +43,6 @@ goal_ac: AC-317
 
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver-retry-classification.test.mjs
-- plugin/test/fixtures/suite-log-third-party-lint-failure.log (new)
+- plugin/test/worker-driver-fan-in-s04.test.mjs
+- plugin/test/fixtures/suite-log-third-party-lint-failure.txt (new)
 - tasks/gap-suite-failure-attribution-third-party-layout.md

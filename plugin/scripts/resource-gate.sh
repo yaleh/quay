@@ -69,7 +69,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 MODE="report"        # report | full-suite
 # CPU_LIMIT — the binary full-suite gate's WAIT threshold on cpu `some avg10`. UNIFIED with
@@ -247,8 +247,8 @@ detect_caller_scope() {
   git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
   common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
   if [ -z "${git_dir}" ] || [ -z "${common_dir}" ]; then echo "unknown"; return; fi
-  case "${git_dir}" in /*) gd="${git_dir}" ;; *) gd="$(pwd)/${git_dir}" ;; esac
-  case "${common_dir}" in /*) cd="${common_dir}" ;; *) cd="$(pwd)/${common_dir}" ;; esac
+  case "${git_dir}" in /*) gd="${git_dir}" ;; *) gd="$(pwd -P)/${git_dir}" ;; esac
+  case "${common_dir}" in /*) cd="${common_dir}" ;; *) cd="$(pwd -P)/${common_dir}" ;; esac
   if [ "${gd}" = "${cd}" ]; then echo "main"; else echo "worktree"; fi
 }
 
