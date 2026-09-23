@@ -21,7 +21,7 @@
 //     **创建** commit 的记 `commit: <msg>`（`commit (amend):` / `commit (merge):` / `commit (initial):`）；
 //     把 ref 移到**已存在的** commit（ref-level 落地）记 `push`（`git push . src:develop`）/
 //     `merge <b>: Fast-forward`（`git merge --ff-only`）/ `branch: Reset to <t>`|`Created from <t>`
-//     （`git branch -f` / `git checkout -B`）/ `reset: moving to <t>` / `fetch …: storing ref`。
+//     （`git branch -f` / `git checkout -B`）/ `reset: moving to <t>` / `fetch …`（任意 status 后缀）。
 //     ⛔ 第四种拼法（`branch: Reset to`）曾不在白名单内 ⇒ 两条 tip 落进 unclassifiable ⇒ AC-194 恒 fail
 //     （tasks/gap-ac194-reflog-action-vocabulary-incomplete）。但 reflog 会被 gc 全局剪 ⇒ 老 commit 条目过期。
 // 扫描（gap-ac194-bypass-check-unclassifiable-window）：只扫 `git rev-list --first-parent baseline..develop`
@@ -438,7 +438,8 @@ export function extractFanInLandedShas(events) {
 //   git commit                       → `commit: <subject>` / `commit (initial): …` / `commit (amend): …`
 //                                      / `commit (merge): …`                        ⇒ direct
 //   git push . <src>:<dst>           → `push`                                       ⇒ refMove
-//   git fetch . <src>:<dst>          → `fetch -q . <sha>:refs/heads/<b>: storing ref` ⇒ refMove
+//   git fetch . <src>:<dst>          → `fetch -q . <src>:<dst>: <status>`（storing head/ref、
+//                                      fast-forward、forced-update 均实测到）  ⇒ refMove
 //   git merge --ff-only <b>          → `merge <b>: Fast-forward`                    ⇒ refMove
 //   git branch -f <已存在 b> <t>     → `branch: Reset to <t>`                       ⇒ refMove
 //   git checkout -B <已存在 b> <t>   → `branch: Reset to <t>`                       ⇒ refMove
@@ -475,8 +476,27 @@ export function classifyReflogAction(gs) {
   // `^([a-z() ]+?):` 对 `merge task/gap-foo: Fast-forward` 无匹配）。`\b` 边界防 `committed`/`merged` 误命中。
   if (/^commit\b/.test(s)) return "direct"; // 在 develop 上创建了 commit（`commit:` / `commit (amend):` / `commit (merge):` / `commit (initial):`）
   if (s === "push") return "refMove"; // git push . <src>:<dst>（git 只写这一个词）
-  // git fetch . <src>:<dst>：%gs 保留整条命令行（含 `-q` 与 `<sha>:refs/heads/<b>`）
-  if (/^fetch\b/.test(s) && /: storing ref\s*$/.test(s)) return "refMove";
+  // git fetch <remote> <src>:<dst> ⇒ refMove —— **按结构**，⛔ 不看 status 后缀。
+  //
+  // 缺陷（tasks/gap-suite-ambient-reds-block-all-code-landings，第 4 类）：旧判据要求 `: storing
+  // ref$`，而那只是一种后缀拼法。实测本仓自己的 author↔develop 传播产生的是
+  //   fetch -q . author:develop: fast-forward
+  // ⇒ 不匹配 ⇒ unknown ⇒ NOT-EVALUATED（`unsupported-reflog-action: fetch -q . author:develop, …`），
+  // 整个 AC3 回放用例从 `unclassifiable-commits-in-range` 变成红。
+  //
+  // ⛔ 修法**不是**把 `fast-forward` 补进白名单——白名单对下一种拼法结构上不可能发现（本文件 :1150
+  // 附近逐字写着这条，`branch: Reset to HEAD` 就是这样破掉 AC-194 的）。按结构：**`fetch` 这个
+  // action 词只由 git-fetch 写出，而 git-fetch 在本地【从不创建 commit】**——它只能把 ref 指向
+  // 一个从远端收到的、**已存在的**对象。所以任何以 `fetch` 开头的 reflog action 都必然是一次
+  // ref-level 移动，与 status 后缀是什么无关。
+  //
+  // 后缀词表由探针仓库实测（clone 出一对 src/dst，逐条贴 %gs；⛔ 无凭记忆字面量）：
+  //   git fetch <r> <src>:<已存在 ref>（ff）        → `fetch -q <r> <src>:<ref>: fast-forward`
+  //   git fetch --force <r> <src>:<已存在 ref>（非ff）→ `fetch -q --force <r> <src>:<ref>: forced-update`
+  //   git fetch <r> <分支名>:<新 ref>               → `fetch -q <r> <src>:refs/heads/<b>: storing head`
+  //   git fetch <r> <sha>:<新 ref>                  → `fetch -q <r> <sha>:refs/heads/<b>: storing ref`
+  // 四种后缀全落在这一条上；而它不看后缀 ⇒ 第五种出现时也自动正确（见 AC4 ④ 负控制）。
+  if (/^fetch\b/.test(s)) return "refMove";
   if (/^merge\b/.test(s) && /: Fast-forward\s*$/.test(s)) return "refMove"; // git merge --ff-only <b>
   // git branch -f / -B / branch <b> <start>：`Reset to`（已存在分支）与 `Created from`（新分支）
   // 都只把 ref 指向**已存在的** commit。
@@ -527,7 +547,7 @@ export function buildReflogIndex(reflogLines) {
 /** 从有序 reflog 行（`git log -g --format=%H%x09%gs develop` 输出，newest first）建立 ref-level 落地括注
  *  结构。返回 `{ refMoveTips, brackets }`：
  *   · `refMoveTips` = 所有 `refMove` 落地 tip（`push` / `merge …Fast-forward` / `branch: Reset to|Created from`
- *     / `reset: moving to` / `fetch …: storing ref`）的 sha 集——tip 自己即一次落地（含 reflog 最老一条
+ *     / `reset: moving to` / `fetch …`）的 sha 集——tip 自己即一次落地（含 reflog 最老一条
  *     refMove tip，其「之前」超出 reflog 保留、无前一条条目可配对）；
  *   · `brackets` = 时间序（newest first）的 `{T, P}` 对——T = 本次落地 tip，P = 前一条 reflog 条目
  *     （更旧）的 sha；`rev-list --first-parent P..T` 即本次落地带入的 first-parent 提交（中间 commit 无独立
@@ -553,7 +573,7 @@ export function buildRefMoveBrackets(reflogLines) {
 /** spine 提交的落地方式（gap-ac194 括注分类的三态，纯判定——`gitDevelopDirectCommits` 把括注覆盖集算好后
  *  逐条喂入）：
  *   "fan-in"         ledger 有记录，或 refMoveTips（ref-level 落地 tip：push / Fast-forward / branch: Reset to
- *                    / Created from / reset: moving to / fetch …: storing ref），或括注覆盖（中间 commit）
+ *                    / Created from / reset: moving to / fetch …），或括注覆盖（中间 commit）
  *   "direct"         reflog 有「直接 commit」条目（报红候选）
  *   "unclassifiable" ledger 无记录、非 direct、非 refMoveTips、也不在任何括注区间（reflog 被 gc 剪 /
  *                    落不进括注的老 commit / **未分类 action 形的 tip** ⇒ NOT-EVALUATED，⛔ 不与合格同形）
@@ -750,7 +770,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   const offSpineCommits = fullDag ? Math.max(0, fullDag.length - reachable.length) : null;
 
   // reflog：direct（commit 直投）+ ref-level 落地括注（classifyReflogAction 的结构判定——push /
-  // merge …Fast-forward / branch: Reset to|Created from / reset: moving to / fetch …: storing ref；
+  // merge …Fast-forward / branch: Reset to|Created from / reset: moving to / fetch …；
   // ⛔ 不是拼法白名单）。reflogActionBySha 供未分类 action 形点名根因（AC2）。
   let reflogIndex = null;
   let refMoveTips = new Set();
@@ -921,7 +941,7 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
 判定（AC1）：直接提交 develop ∧ 触及代码/断言面 ∧ 无 ff-lock 时间窗事件 ⇒ RED。
   · 直接提交 = develop reflog action 以 \`commit\` 开头（在 develop 上**创建**了 commit）；ref-level 落地
     （不创建 commit，把 ref 移到已存在的 commit）= \`push\` / \`merge …: Fast-forward\` /
-    \`branch: Reset to|Created from <t>\` / \`reset: moving to <t>\` / \`fetch …: storing ref\`——按结构判定
+    \`branch: Reset to|Created from <t>\` / \`reset: moving to <t>\` / \`fetch …\`（任意 status 后缀）——按结构判定
     （classifyReflogAction），⛔ 不是拼法白名单。读不懂的 action 形 ⇒ NOT-EVALUATED 且 reason 点名该形
     （\`unsupported-reflog-action: <form>\`）
   · 代码/断言面 = 改动文件不落在设计内排除集（记账/转向/遥测面 + manager 独占 + 基础设施 +
@@ -1134,7 +1154,7 @@ export function main(argv) {
       refMoveVocabulary:
         "structural classification of the develop reflog action: 'direct' = action starts with `commit` (a commit was CREATED on develop); " +
         "'refMove' = the ref was moved to an EXISTING commit, no commit created (`push` | `merge <b>: Fast-forward` | " +
-        "`branch: Reset to <t>` | `branch: Created from <t>` | `reset: moving to <t>` | `fetch …: storing ref`); " +
+        "`branch: Reset to <t>` | `branch: Created from <t>` | `reset: moving to <t>` | `fetch …`); " +
         "'unknown' = unreadable action form ⇒ NOT-EVALUATED fail-closed, reason names the form (`unsupported-reflog-action: <form>`). " +
         "⛔ Not a spelling whitelist — a spelling whitelist is structurally blind to the next landing form (that is exactly how " +
         "`branch: Reset to HEAD` broke AC-194). refMove is VISIBLE, not silently exempt: refMoveIntroduced + nonForwardRefMoves " +

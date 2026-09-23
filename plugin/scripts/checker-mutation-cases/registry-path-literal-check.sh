@@ -34,8 +34,8 @@
 set -u
 name="registry-path-literal-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-repo_root="$(cd "${checker_dir}/../.." && pwd)"
+checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 declaration="${repo_root}/plugin/scripts/select-static-checks-for-touches.ts"
 
 mkdir -p "${workdir}/plugin/scripts" "${workdir}/packages/quay/src"

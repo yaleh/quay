@@ -32,7 +32,7 @@
 #
 # 纯读契约（与 monitor-mount-check.sh 同源）：本脚本只读注册表 + git log + stat，不写任何东西。
 # 用法:
-#   bash plugin/scripts/loop-driver-check.sh [<root>]         # <root> 缺省为 $(pwd)
+#   bash plugin/scripts/loop-driver-check.sh [<root>]         # <root> 缺省为 $(pwd -P)
 #   bash plugin/scripts/loop-driver-check.sh --check [<root>] # --check = 显式第二层（可观测）
 #                                                             # 模式；判据与无 --check 时相同
 #   bash plugin/scripts/loop-driver-check.sh --json [<root>]  # AC99 — ONE JSON document on stdout:
@@ -49,7 +49,7 @@ fi
 set -uo pipefail
 
 JSON=0
-ROOT="$(pwd)"
+ROOT="$(pwd -P)"
 for _arg in "$@"; do
   case "$_arg" in
     --json) JSON=1 ;;

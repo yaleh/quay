@@ -41,7 +41,7 @@ fi
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="${ROOT:-}"
 fail=0
 json=0
@@ -55,7 +55,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "${ROOT}" ] || ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+[ -n "${ROOT}" ] || ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 [ -d "${ROOT}" ] || { echo "worktree-node-modules-check: repo root not found: ${ROOT}" >&2; exit 2; }
 
 # Enumerate registered worktrees. A task worktree's .git is a FILE pointing at the shared gitdir;

@@ -46,8 +46,8 @@
 # 通过 --root 指向 fixture 目录（L2 仅在真实根下可测，fixture 下 --root 缺失则只判 L1）。
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 
 LOG="${OUTER_TICK_LOG:-${DEFAULT_ROOT}/orchestration/tick-log.md}"
 FRESH_MINUTES="${OUTER_TICK_FRESH_MINUTES:-60}"

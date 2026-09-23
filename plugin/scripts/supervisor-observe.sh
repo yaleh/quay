@@ -70,11 +70,11 @@ set -uo pipefail
 # receives an explicit --root) degrades gracefully instead of tripping set -u.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 fi
 REPO_ROOT=""
 if [ -n "$SCRIPT_DIR" ]; then
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 fi
 
 printf 'supervisor-observe: starting pid=%s file=%s md5=%s\n' \
@@ -113,7 +113,7 @@ case "$CMD" in
 esac
 
 [ -n "$ROOT" ] || ROOT="$REPO_ROOT"
-ROOT="$(cd "$ROOT" 2>/dev/null && pwd)" || { echo "supervisor-observe: --root $ROOT is not a directory" >&2; exit 2; }
+ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P)" || { echo "supervisor-observe: --root $ROOT is not a directory" >&2; exit 2; }
 
 # ── remote transport (ssh-transport-agnostic: same shape, --host decides the wrapper) ──────────────
 # For --host <hostname>: pipe THIS script over ssh and run it remotely with --host local.

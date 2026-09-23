@@ -101,13 +101,14 @@ test("gap-fix-worker-spawn-inherits-unrecognized-model — fix-worker argv align
   const settings = JSON.parse(settingsRaw);
   const mi = def.indexOf("--model");
   const model = def[mi + 1];
-  // AC1/AC4 结构保证：SDK 只在 --model 命中 ANTHROPIC_DEFAULT_*_MODEL 时才认自定义 model id（否则
-  // unrecognized_model sdk、回退到 wrapper 的无后缀值）；且 -anthropic 后缀必须保留到 litellm（fallback
-  // group，AC4 不回归）。
+  // AC1 结构保证：SDK 只在 --model 命中 ANTHROPIC_DEFAULT_*_MODEL 时才认自定义 model id（否则
+  // unrecognized_model sdk、回退到 wrapper 的默认值）。这三条才是本 AC 真正要的「对齐」性质，且能取假。
   assert.equal(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, model, "HAIKU default must match --model (else unrecognized_model)");
   assert.equal(settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL, model, "SONNET default must match --model (else unrecognized_model)");
   assert.equal(settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL, model, "OPUS default must match --model (else unrecognized_model)");
-  assert.equal(model, "deepseek-v4-pro-anthropic", "the model must keep the -anthropic suffix (litellm fallback group)");
+  // ⛔ 不断言模型名字面量、也不断言 `-anthropic` 后缀形态：模型名是【运行环境取值】（随网关导出集合
+  //   漂移），而 `-anthropic` 是【旧网关 fjbigmodel.fjdac.cn 的命名约定】，对现在的 127.0.0.1:26510
+  //   不适用（见 ~/.local/bin/claude-fjdac 的 2026-09-20 更正）。钉住它只会让判据在换模型时烂掉。
 });
 
 

@@ -86,9 +86,9 @@ postinstall_fail() {
 }
 trap postinstall_fail EXIT
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd "${PLUGIN_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+REPO_ROOT="$(cd "${PLUGIN_DIR}/.." && pwd -P)"
 
 SRC="${REPO_ROOT}/packages/quay"
 DEST="${PLUGIN_DIR}/vendor/quay"

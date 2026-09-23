@@ -5,8 +5,8 @@
 set -u
 name="test-coverage-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scripts_dir="$(cd "${checker_dir}/../.." && pwd)/scripts"
+checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+scripts_dir="$(cd "${checker_dir}/../.." && pwd -P)/scripts"
 
 node --experimental-strip-types "${scripts_dir}/test-coverage-check.ts" --selftest
 code=$?
