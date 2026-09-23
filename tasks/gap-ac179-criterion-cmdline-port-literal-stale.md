@@ -79,11 +79,15 @@ $ pgrep -af 'quay.ts serve'                  → 1805344（真实例，cwd=root�
 
 ## Touches
 
-- `goals/AC-179-web-card-and-cli.md` — criterion 的地址派生那一步（本任务的实际交付物；`expect` 与正文语义按性质 3 保持不变，只补「为什么改」）
-- `packages/quay/test/ac179-criterion-address-derivation.test.mjs` — 新增：两方向夹具（内核分配端口的生产形态 ⇒ 0；卡片缺失 / 服务停止 ⇒ 非 0 且成因具名），即 AC2/AC3 的正负控制
-- `tasks/gap-ac179-criterion-cmdline-port-literal-stale.md` — 本任务自身（self-touch）
+- `goals/AC-179-web-card-and-cli.md`
+- `packages/quay/test/ac179-criterion-address-derivation.test.mjs` (new)
+- `tasks/gap-ac179-criterion-cmdline-port-literal-stale.md`
 
-（若执行者另行抽出可测的派生助手并新增 `plugin/scripts/*.ts`，必须同时把 outline 与 `plugin/scripts/capability-catalog-declarations.json` 写进 Touches，并把任何被牵动的 `*.baseline.json` 一并声明；⛔ 不新增脚本是本任务的默认取向。）
+（说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-179 --criterion …` 落库，`expect`
+与正文语义按性质 3 保持不变、只补「为什么改」；第二条是配套的两方向夹具（内核分配端口的生产形态 ⇒ 0；卡片缺失 /
+服务停止 ⇒ 非 0 且成因具名，即 AC2/AC3 的正负控制）；第三条是 self-touch。若执行者另行抽出可测的派生助手并新增
+`plugin/scripts/*.ts`，必须同时把 outline 与 `plugin/scripts/capability-catalog-declarations.json` 加进本节，并把
+任何被牵动的 `*.baseline.json` 一并声明；⛔ 不新增脚本是本任务的默认取向。）
 
 ## AC
 
