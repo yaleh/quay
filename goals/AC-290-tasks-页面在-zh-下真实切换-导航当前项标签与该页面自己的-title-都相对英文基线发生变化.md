@@ -5,12 +5,6 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
-  root=$(git rev-parse --show-toplevel)
-
-  ROUTE="/tasks"
-
-  LABEL_EN="Tasks"
-
   # WHY THIS STEP WAS RE-ANCHORED (2026-09-23,
   gap-ac290-criterion-cmdline-port-literal-stale):
 
@@ -65,6 +59,17 @@ criterion: >-
 
   # >>> addr-derivation (this block is run VERBATIM by
   packages/quay/test/ac290-criterion-address-derivation.test.mjs)
+
+  root=$(git rev-parse --show-toplevel)
+
+  ROUTE="/tasks"
+
+  LABEL_EN="Tasks"
+
+  if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
+  rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
+  attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
+  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
 
   cands=""
 
