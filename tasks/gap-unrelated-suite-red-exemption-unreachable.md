@@ -1,7 +1,7 @@
 ---
 id: gap-unrelated-suite-red-exemption-unreachable
 title: suite-red 豁免依赖「窗口内恰好有 ≥2 个任务的日志可读」——同一份不相关的红，有时豁免、有时记到任务头上
-status: ready
+status: done
 labels:
   - gap
   - defect
