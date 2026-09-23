@@ -151,7 +151,20 @@ import {
   normalizeAssertionSignature,
   judgeRetryExemption,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
+  // gap-worker-quick-death-environment-fatal-halts-driver：环境级（environment-fatal）分类的四件套
+  // ——签名表（含机器可读正反例）/ 富分类结果 / 签名指纹 / 停机写盘。
+  ENVIRONMENT_FATAL_SIGNATURES,
+  classifyQuickDeathEvidence,
+  quickDeathSignature,
+  haltForEnvironmentFatal,
+  environmentFatalHaltReason,
+  ENVIRONMENT_FATAL_HALTED_BY,
+  WORKER_STDERR_TAIL_MAX_BYTES,
+  ENV_FATAL_FANOUT_WINDOW_MS,
 } from "../../scripts/worker-driver.ts";
+// gap-worker-quick-death-environment-fatal-halts-driver AC3：`quay driver start --kind worker` 的启动冒烟
+// 单一真相源在 driver-runtime.ts（与上面的分类器共用同一份签名表，⛔ 两份清单 = 漂移）。
+import { runEnvironmentSmoke, ENVIRONMENT_SMOKE_PROMPT } from "../../scripts/driver-runtime.ts";
 import { defaultLaneCount, SUITE_LOG_NOT_RUN_PREFIX } from "../../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../../scripts/suite-lock-slots.ts";
@@ -423,4 +436,5 @@ async function readSuiteLogUntil(file, needle, timeoutMs = 3000) {
   }
 }
 
+export { ENVIRONMENT_FATAL_HALTED_BY, ENVIRONMENT_FATAL_SIGNATURES, ENVIRONMENT_SMOKE_PROMPT, ENV_FATAL_FANOUT_WINDOW_MS, WORKER_STDERR_TAIL_MAX_BYTES, classifyQuickDeathEvidence, environmentFatalHaltReason, haltForEnvironmentFatal, quickDeathSignature, runEnvironmentSmoke };
 export { FAMILY_SRC, CONTROL_CALLERS_ENV, CONTROL_HEADER, CONTROL_STATE_REL, DRIVER, EXEMPT_TEST, EXITED_NOT_LANDED_EXIT, FF_MERGE_MODULE, FINAL_STATES, MAX_FIX_RETRIES_DEFAULT, ORDINARY_REASON, QUICK_DEATH_BACKOFF_DEFAULT, RATE_LIMIT_NO_RESET_REASON, RATE_LIMIT_REASON, RECONCILE_INTERVAL_SECS_DEFAULT, REPO_ROOT, RESIDENT_INTERVAL_MS_DEFAULT, RETRY_CAP_DEFAULT, RETRY_EXEMPTION_WINDOW_MS_DEFAULT, SLOT_LIB, SUITE_LOG_NOT_RUN_PREFIX, WORKER_OUTCOME_REL, WORKER_PROCESS_NAME, WORKER_ROUND_REL, acShortCircuitVerdict, acquireFanInLock, advanceRetryCap, after, appendCompleteGateEvent, appendFanInStepTrace, appendFanInTrace, appendOtherSuiteRed, appendOutcomeToFile, applyForceDispatch, applyHalt, applyPreference, applyTaskFilters, assert, assertionSignaturesFromSuiteLog, backoffDelayMs, branchHeadSubject, branchHeadSubjectAsync, buildContinueWorkerPrompt, buildWorkerPrompt, classifyQuickDeathCause, cleanupOrphanWorktree, combinedOutput, computeHaltedOutcome, computeLandingState, computeOutcome, computeWorkerRoundRecord, continueStateForTask, continueStateForTaskAsync, countBranchCommits, countBranchCommitsAsync, counterNodeE, defaultControlState, defaultLaneCount, defaultLivenessCheckArgv, defaultMechanicalSuiteCommand, defaultReadyPoolArgv, defaultSelectorArgv, defaultWorkerArgv, dispatchStoreFile, enumerateColdStartInflight, enumerateLiveWorkerCmdlines, enumerateTaskWorktreeTasks, execFileSync, extractFailureSummary, extractFirstFailureLine, extractSuiteNotRunLine, failingTestFilesFromSuiteLog, fanInLockFile, fanInLogFileName, fileURLToPath, fs, hasLiveWorkerForTask, headerValue, isBackedOff, isFfNotFastForwardFailure, isHalted, isQuickDeath, isSigtermExitCode, judgeRetryExemption, knownCallers, lastExitedNotLandedReason, launchArgv, makeFilterContext, makeGitRoot, makeMechRepo, makeReuseRepo, makeRoot, markNeedsHuman, mechOpts, mechSh, mirrorMechanicalFanInSuiteState, newMechanicalSuiteRunId, newQuickDeathBackoffState, newSessionId, normalizeAssertionSignature, os, pairedEndCount, parseBackoffBaseMs, parseBackoffMaxMs, parseBackoffThreshold, parseIntervalMs, parseMaxRetries, parseQuickDeathMs, parseRateLimitResetAtMs, parseReconcileIntervalSecs, parseSelectorOutput, parseTimeoutMs, path, pathToFileURL, promoAdvanceRetryCap, promoMarkNeedsHuman, pruneTaskSuiteLogs, readAcCheckState, readControlState, readDispatchStore, readFanInLockHold, readLockMetricsForRun, readOutcomeLines, readPreviousGreenSuiteCommit, readRoundLines, readSharedTrace, readSuiteLogUntil, readTaskStatus, readyPoolCheck, recordQuickDeathBackoff, resolveCaller, resolveConcurrency, resolveRun, resolveWorkerProcessName, resourceGateCheck, rmSafe, runDriver, runGit, runLivenessCheck, runMechanicalFanIn, runSelectorWorker, serveControlPlane, shuffle, signalExitCode, spawn, spawnMechanicalFanIn, spawnResident, spawnSuiteAndWait, spawnSync, splitArgs, stashIfDirty, stopAllResidentDrivers, suiteLockBase, suiteLockSlotPaths, suiteLogFileName, taskBranchHasCommits, test, upsertDispatchRecord, waitFor, workerArgvForTask, workerArgvForTaskAsync, workerPromptForTask, workerPromptForTaskAsync, worktreePathsForTask, worktreePathsForTaskAsync, worktreePresentForTask, worktreePresentForTaskAsync, writeAcTaskBody, writeControlState, writeExemptionTask, writeFailingTest, writeProfileCarrier, writeSuiteRedLog, writeTaskFile, writeTouchedTask };
