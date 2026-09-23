@@ -138,13 +138,20 @@ function argsFor(base) {
 // this row must be re-anchored WITH the change that moved it), or it regressed.
 // RE-ANCHORED 2026-09-24 (gap-fan-in-delta-classify-declared-doc-surfaces): the fresh-install heredoc
 // gained the `loop.doc_surfaces` key (the doc/code declaration the mechanical fan-in reads), so
-// `.quay/config.yml` legitimately moved. Only that one line changed; the other six rows are untouched,
-// which is what the row-per-file shape is for.
+// `.quay/config.yml` legitimately moved. The block is ONE key line + SEVEN comment lines and the
+// comments ship inside the emitted file (they are heredoc body, not script comments), so the moved
+// text is 8 lines — the "only that one line changed" reading is wrong for a hash over the output.
+// ⚠️ The first value recorded on this row (c2200494…) was STALE, not merely superseded: it matches no
+// emission of this branch. Verified by re-running the laydown with the pin's OWN commit's quay-init.sh
+// (`git show ce570e8bf:plugin/scripts/quay-init.sh` -> same c2740778…), and by the inverse control —
+// stripping exactly this block from the live output reproduces develop's recorded 27caf439… byte for
+// byte, which is what pins the method itself. The other six rows are untouched, which is what the
+// row-per-file shape is for.
 const PINNED = {
   fresh: {
     rc: 0,
     surface: [
-      ".quay/config.yml  c22004941595b56b254f3099e09c3027dd3f75f4d639995ba718b219ad3b258d",
+      ".quay/config.yml  c2740778723eb8a8c44735d65bfa1e627532242b0a1a0d018e4c70ba1174a7c8",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",
