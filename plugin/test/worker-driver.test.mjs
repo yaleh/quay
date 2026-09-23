@@ -1389,6 +1389,121 @@ test("AC2 (gap-driver-fanin-hardcoded-test-sh-third-party) — 第三方 fan-in 
   assert.equal(ran, 2, `scoped-gate + suite 各执行一次 test_command ⇒ marker 2 行（got ${ran}）`);
 });
 
+// ── gap-scoped-gate-thin-selection-not-same-shape-as-green — scoped 门取值三态 ──────────────────────
+// 缺陷：scoped 命令【取零个测试文件】时 exit 0（claudecodeui `scripts/test.sh:114`
+// `no scoped test files for <id> (thin)` + exit 0），fan-in 把这一跑记成与「真评了 ≥1 个文件且全绿」
+// 【同形】的 ok:true —— 硬规则 3b 的假绿。修法 = 输出契约：没有可评对象时打一行 `SCOPED-THIN
+// selected=<n>`，fan-in 据此记 `not-evaluated`（⛔ 不记 green，也⛔ 不当失败：全量 suite 照跑）。
+// 三态（not-evaluated / green / red）必须在【同一用例文件内】两两不同形。
+
+/** 第三方夹具的 scoped 命令：真文件、真 spawn、真跑 node --test。$1 = 这一跑是 thin / green / red。
+ *  thin  ⇒ 打契约标记 + exit 0（= 缺陷现场，修复前 fan-in 记 ok:true）
+ *  green ⇒ 真执行 1 个测试文件，全绿（stdout 落 <base>/scoped-fixture/green.out 作「真跑了」的可核证据）
+ *  red   ⇒ 真执行 1 个会失败的测试文件（exit 非零）
+ *  ⛔ 不铺 scripts/test.sh：本用例走【第三方】scoped 路径（本仓库形态的那条由既有 AC2 用例覆盖）。 */
+function writeThirdPartyScopedGate(base) {
+  const fixture = path.join(base, "scoped-fixture");
+  fs.mkdirSync(fixture, { recursive: true });
+  fs.writeFileSync(path.join(fixture, "one.test.mjs"),
+    'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("one", () => assert.equal(1, 1));\n', "utf8");
+  fs.writeFileSync(path.join(fixture, "failing.test.mjs"),
+    'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("failing", () => assert.equal(1, 2));\n', "utf8");
+  const script = path.join(base, "scoped-gate.sh");
+  fs.writeFileSync(script, [
+    "#!/usr/bin/env bash",
+    "# third-party scoped-gate fixture (gap-scoped-gate-thin-selection-not-same-shape-as-green)",
+    'mode="${1:-thin}"',
+    'fixture="${2:?fixture dir}"',
+    'case "${mode}" in',
+    '  thin)  echo "SCOPED-THIN selected=0"; exit 0 ;;',
+    // `env -u NODE_TEST_CONTEXT`：本夹具自己跑在本仓库的 `node --test` 里，继承的 test-context 会让
+    // 嵌套的 node --test 直接「skipping running files」（测出来的是嵌套限制，不是判据）⇒ 显式摘掉。
+    '  green) env -u NODE_TEST_CONTEXT node --test "${fixture}/one.test.mjs" > "${fixture}/green.out" 2>&1; exit $? ;;',
+    '  red)   env -u NODE_TEST_CONTEXT node --test "${fixture}/failing.test.mjs" > "${fixture}/red.out" 2>&1; exit $? ;;',
+    '  *) echo "unknown fixture mode: ${mode}" >&2; exit 2 ;;',
+    "esac",
+    "",
+  ].join("\n"), "utf8");
+  return { script, fixture };
+}
+
+/** 读【共享】步骤 trace 载体（.quay/fan-in-step-trace.jsonl，跨任务聚合读者）里本任务 + runId 的
+ *  最后一条 step-end —— AC1 的「step trace 记录中可读出该取值」就落在这个载体上。 */
+function readSharedStepTrace(repo, runId, step) {
+  const file = path.join(repo, ".quay", "fan-in-step-trace.jsonl");
+  const lines = fs.readFileSync(file, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  const hits = lines.filter((e) => e.step === step && e.runId === runId && e.event === "step-end");
+  return hits.length > 0 ? hits[hits.length - 1] : null;
+}
+
+function thirdPartyFanInArgs({ repo, worktree, base, runId, scopedGateCommand }) {
+  return {
+    task: SCG_TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+    scopedGateCommand,
+    docCheckCommand: ["true"],
+  };
+}
+
+test("AC1/AC2 (gap-scoped-gate-thin-selection-not-same-shape-as-green) — scoped 门三态：thin ⇒ not-evaluated（⛔ 非 green、⛔ 非失败）/ 真绿 ⇒ green / 真红 ⇒ red，且两两不同形", async (t) => {
+  // ⚠️ 每条臂用【独立夹具】：landed 的那条臂会被 ff 落地并清掉 worktree（复用同一夹具 ⇒ 第二条臂
+  // 死在 merge-develop 的「目录不存在」，测出来的是夹具复用而不是判据）。
+  const arm = async (mode, runId) => {
+    const { base, repo, worktree } = makeThirdPartyRepo();
+    t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+    const { script, fixture } = writeThirdPartyScopedGate(base);
+    const r = await runMechanicalFanIn(thirdPartyFanInArgs({
+      repo, worktree, base, runId, scopedGateCommand: ["bash", script, mode, fixture],
+    }));
+    return { r, repo, fixture };
+  };
+
+  // ① thin（契约标记 + exit 0）⇒ not-evaluated，且【不是失败】——fan-in 照常走到 suite 并 landed。
+  const thinArm = await arm("thin", "scoped-thin-1");
+  assert.equal(thinArm.r.outcome, "landed", `thin 不是失败：全量 suite 照跑（got ${thinArm.r.outcome} step=${thinArm.r.step} reason=${thinArm.r.reason}）`);
+  const thinShared = readSharedStepTrace(thinArm.repo, "scoped-thin-1", "scoped-gate");
+  assert.ok(thinShared, "共享 step trace 有 scoped-gate 记录");
+  assert.equal(thinShared.verdict, "not-evaluated", "thin ⇒ 取值 not-evaluated（⛔ 不记 green）");
+  assert.match(thinShared.reason ?? "", /scoped-thin\(selected=0\)/, "取值附出处（可读出「为什么是 not-evaluated」）");
+  // 两路载体一致（per-run 过程日志同取值——⛔ 不给两个读者两套说法）。
+  const thinPerRun = readFanInTraceLine(thinArm.repo, "scoped-thin-1", "scoped-gate");
+  assert.equal(thinPerRun.verdict, "not-evaluated", "per-run 过程日志同取值");
+
+  // ② green（真执行 1 个测试文件、全绿）⇒ green。可核证据：node --test 的真实输出里 pass ≥1。
+  const greenArm = await arm("green", "scoped-green-1");
+  assert.equal(greenArm.r.outcome, "landed", `green arm must land（got ${greenArm.r.outcome} step=${greenArm.r.step} reason=${greenArm.r.reason}）`);
+  const greenOut = fs.readFileSync(path.join(greenArm.fixture, "green.out"), "utf8");
+  assert.match(greenOut, /(?:#|\u2139) pass 1\b/, "scoped 命令真的执行了 ≥1 个测试文件（node --test 的真实计数）");
+  const greenShared = readSharedStepTrace(greenArm.repo, "scoped-green-1", "scoped-gate");
+  assert.equal(greenShared.verdict, "green", "真评了且全绿 ⇒ green");
+  assert.equal(greenShared.reason, undefined, "green 无 reason（与修复前逐字同形，⛔ 不给通过步加噪声）");
+  assert.equal(greenShared.selected, undefined, "green 不带 selected（契约标记只在 thin 时打）");
+
+  // ③ red（真执行、有红）⇒ red，且 fan-in 的失败步就是 scoped-gate（判词仍走既有失败摘要路径）。
+  const redArm = await arm("red", "scoped-red-1");
+  assert.equal(redArm.r.outcome, "red", "真红 ⇒ fan-in red");
+  assert.equal(redArm.r.step, "scoped-gate", "失败步 = scoped-gate");
+  assert.match(fs.readFileSync(path.join(redArm.fixture, "red.out"), "utf8"), /(?:#|\u2139) fail 1\b/, "red arm 真的跑了一个失败测试");
+  const redShared = readSharedStepTrace(redArm.repo, "scoped-red-1", "scoped-gate");
+  assert.equal(redShared.verdict, "red", "真评了且有红 ⇒ red");
+  assert.equal(redShared.ok, false, "red 仍是控制流失败（verdict 是取值，ok 是控制流）");
+
+  // 三态两两不同形（同一用例文件内断言，硬规则 3b）：三个取值互不相同，且 not-evaluated 不是 ok 的别名。
+  const verdicts = [thinShared.verdict, greenShared.verdict, redShared.verdict];
+  assert.deepEqual(verdicts, ["not-evaluated", "green", "red"], "三态取值逐字");
+  assert.equal(new Set(verdicts).size, 3, `三态两两不同形（got ${JSON.stringify(verdicts)}）`);
+  assert.equal(thinShared.ok, true, "thin 的 ok:true 是【控制流】字段（不失败），取值由 verdict 承载");
+  assert.notDeepEqual(
+    { verdict: thinShared.verdict, ok: thinShared.ok },
+    { verdict: greenShared.verdict, ok: greenShared.ok },
+    "「没评成」与「评了且全绿」在记录上不同形（⛔ 修复前两者都是 {ok:true}）",
+  );
+});
+
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
   // non-git dir (the phase-1 makeRoot shape) ⇒ graceful no-op.
   const nonGit = makeRoot("nogit");
