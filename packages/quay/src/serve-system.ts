@@ -1,7 +1,7 @@
 // serve-system.ts — /system + /manager route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readSystem, readManager, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
+import { readSystem, readManager, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { systemLabelsFor, systemLabel, fillLabel, managerLabelsFor } from "./serve-i18n.ts";
@@ -89,7 +89,14 @@ export function renderBar(label: string, val: number | null, numericLimit: numbe
  *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: a direct `renderSystemPage()` caller that predates
  *  it keeps rendering byte-for-byte what it rendered before, and `pageNameFor`'s en column is the
  *  identity for every token — so the en baseline the goal criterion reads off the live page cannot
- *  move as this page is wired. */
+ *  move as this page is wired.
+ *
+ *  ⚠️ The two `<h2>`s and the `dataSourceNote` parameters are DERIVED (`RESOURCE_GATE_NAME` /
+ *  `PROCESS_BUDGET_NAME`, from the single REL constants in observation.ts) — ⛔ this file must not
+ *  spell either basename. It used to spell both twice (a product-layer literal naming a mechanism
+ *  script = the forbidden layering direction, and a second naming point for the same entity):
+ *  gap-serve-labels-hardcode-mechanism-script-basenames. A grep for a basename in this file is
+ *  therefore expected to be EMPTY — read that as "derived", not as "the label was dropped". */
 function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
   const rg = sys.resourceGate;
   const pb = sys.processBudget;
@@ -106,10 +113,10 @@ function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = nu
     ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>${pageTitle(pageNameFor("System", lang), identity, lang)} — ${escapeHtml(L.pageSubtitle)}</title></head>
     <body>${renderMobileChrome("system", "system", lang)}${renderSiteNav("system", lang)}<main id="main">
       <h1>${heading}</h1>
-      <p class="meta">${fillLabel(L.dataSourceNote, { gate: "<code>resource-gate.sh --json</code>", budget: "<code>process-budget.sh --json</code>" })}</p>
+      <p class="meta">${fillLabel(L.dataSourceNote, { gate: `<code>${RESOURCE_GATE_NAME} --json</code>`, budget: `<code>${PROCESS_BUDGET_NAME} --json</code>` })}</p>
       ${banner}
       ${obsNote(rg.status, rg.reason)}
-      <h2>resource-gate.sh</h2>
+      <h2>${escapeHtml(RESOURCE_GATE_NAME)}</h2>
       ${rg.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
         ${systemBars(rg).map((b) => renderBar(b.label, b.val, b.numericLimit, b.displayLimit, lang)).join("")}
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>mem_avail</span><span>${rg.memAvailMb != null ? `${escapeHtml(String(rg.memAvailMb))} MB` : "—"}</span></div>
@@ -117,7 +124,7 @@ function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = nu
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(rg.verdict ?? "—")}</span></div>
       </div>` : ""}
       ${obsNote(pb.status, pb.reason)}
-      <h2>process-budget.sh</h2>
+      <h2>${escapeHtml(PROCESS_BUDGET_NAME)}</h2>
       ${pb.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.5rem;max-width:640px">
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>total_budget</span><span>${pb.totalBudget != null ? escapeHtml(String(pb.totalBudget)) : "—"}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>in_use</span><span>${pb.inUse != null ? escapeHtml(String(pb.inUse)) : "—"}</span></div>

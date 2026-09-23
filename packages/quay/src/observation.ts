@@ -2958,7 +2958,8 @@ export function readGitRemotes(root: string): string[] {
 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
 // Each new view reads the MECHANISM that produces its numbers (AC2):
-//   system       → resource-gate.sh + process-budget.sh (text output)
+//   system       → the resource gate + process budget scripts (text output; each is NAMED exactly
+//                  once, by the RESOURCE_GATE_REL / PROCESS_BUDGET_REL constants below)
 //   manager      → loop-driver-check.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
 //   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
@@ -3050,7 +3051,7 @@ export interface ResourceGateReading {
   nodeProcs: number | null;
   verdict: "GO" | "WAIT" | null;
   /** AC99/AC3 — the overload-window loadavg threshold (nproc × load_over_factor), computed INSIDE
-   *  resource-gate.sh from nproc — never a host-derived literal. The UI displays this value. */
+   *  the resource gate from nproc — never a host-derived literal. The UI displays this value. */
   loadThreshold: number | null;
   loadOverFactor: number | null;
 }
@@ -3081,13 +3082,32 @@ export interface SystemResult {
 export const RESOURCE_GATE_REL = path.join("scripts", "resource-gate.sh");
 export const PROCESS_BUDGET_REL = "scripts/process-budget.sh";
 
+/** The display basename of a plugin-root-relative script rel — the ONE derivation every
+ *  product-layer surface names a mechanism script through.
+ *
+ *  Why it exists (gap-serve-labels-hardcode-mechanism-script-basenames): the /system page used to
+ *  spell the two basenames a SECOND time as product-layer literals (`<h2>…</h2>` + the
+ *  `dataSourceNote` parameters), so the same entity had two naming points and the layering ran
+ *  product → mechanism. Now each basename is named once (the REL constants above) and every label
+ *  derives it here.
+ *
+ *  ⛔ Pure function of its input, NOT a lookup table: a table keyed by rel would just be the copy
+ *  moved into another file (and would answer for a rel it was never given). PURE. */
+export function scriptBasename(rel: string): string {
+  return path.basename(rel);
+}
+
+/** The two `/system` labels — derived from the REL constants above, never re-spelled. */
+export const RESOURCE_GATE_NAME = scriptBasename(RESOURCE_GATE_REL);
+export const PROCESS_BUDGET_NAME = scriptBasename(PROCESS_BUDGET_REL);
+
 /** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */
 function jsonNum(j: Record<string, unknown>, key: string): number | null {
   const v = j[key];
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-/** Parse resource-gate.sh --json's single JSON document into structured fields. Pure. */
+/** Parse the resource gate's `--json` single JSON document into structured fields. Pure. */
 export function parseResourceGateJson(text: string): Omit<ResourceGateReading, "status" | "reason"> {
   let j: Record<string, unknown> = {};
   try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
@@ -3104,7 +3124,7 @@ export function parseResourceGateJson(text: string): Omit<ResourceGateReading, "
   };
 }
 
-/** Parse process-budget.sh --json's single JSON document into structured fields. Pure. */
+/** Parse the process budget's `--json` single JSON document into structured fields. Pure. */
 export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading, "status" | "reason"> {
   let j: Record<string, unknown> = {};
   try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
@@ -3116,7 +3136,7 @@ export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading,
   };
 }
 
-/** System view: resource-gate.sh --json + process-budget.sh --json parsed to structured fields. */
+/** System view: the two mechanism scripts' `--json` documents parsed to structured fields. */
 export async function readSystem(root: string): Promise<SystemResult> {
   // AC1 (gap-webui-dashboard-manager-slow-parallelize): the two mechanism scripts are independent —
   // run them CONCURRENTLY. Serial was resource-gate(1.65s)→process-budget(0.35s) ≈ 2.0s; parallel is
