@@ -111,28 +111,30 @@ criterion: >-
     [ -d /proc/$p ] || continue
     [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
     ncand=$((ncand + 1))
-    if tr '\0' '\n' < /proc/$p/cmdline 2>/dev/null | grep -qx -- 'serve'; then nserve=$((nserve + 1)); fi
     a=""
     cause=""
-    lit=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
-    case "$lit" in *:0) lit="" ;; esac
-    if [ -n "$lit" ]; then
-    a="$lit"
-    else
+    av=$(tr '\0' '\n' < /proc/$p/cmdline 2>/dev/null | awk '{arg[NR]=$0} END{s=0; for(i=1;i<=NR;i++) if(arg[i]=="serve"){s=i; break}; if(s==0){print "argv-no-serve-subcommand"; exit}; h=""; q=""; for(i=s+1;i<=NR;i++){ if(arg[i]=="--host"&&i<NR) h=arg[i+1]; else if(arg[i]=="--port"&&i<NR) q=arg[i+1]; else if(arg[i]~/^--host=/) h=substr(arg[i],8); else if(arg[i]~/^--port=/) q=substr(arg[i],8)}; if(q==""){print "argv-port-absent"; exit}; if(q+0<1){print "argv-port-kernel-assigned"; exit}; if(h==""){print "argv-host-absent"; exit}; print "addr="h":"(q+0)}')
+    avc="$av"
+    case "$av" in
+    addr=*) a="${av#addr=}"; avc="argv-explicit-port"; nserve=$((nserve + 1)) ;;
+    argv-no-serve-subcommand) ;;
+    *) nserve=$((nserve + 1)) ;;
+    esac
+    if [ -z "$a" ]; then
     a=$(node -e 'const fs=require("fs");const R=process.argv[1],P=String(process.argv[2]);let s=null;try{s=JSON.parse(fs.readFileSync(R+"/.quay/server.json","utf8"))}catch(e){process.exit(2)}if(!s||s.schemaVersion!==1||!Array.isArray(s.services))process.exit(2);if(String(s.pid)!==P)process.exit(3);const w=s.services.filter(function(x){return x&&x.name==="web"})[0];if(!w)process.exit(4);if(w.up===false)process.exit(5);if(typeof w.host!=="string"||w.host===""||typeof w.port!=="number"||!(w.port>0))process.exit(6);process.stdout.write(w.host+":"+w.port)' "$root" "$p" 2>/dev/null)
     rc=$?
     if [ "$rc" != 0 ]; then a=""; case "$rc" in 2) cause="carrier-unreadable" ;; 3) cause="carrier-pid-mismatch" ;; 4) cause="carrier-no-web-entry" ;; 5) cause="carrier-web-marked-down" ;; 6) cause="carrier-web-address-unusable" ;; *) cause="carrier-read-failed(exit=$rc)" ;; esac; fi
     fi
     case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; ::*) a="127.0.0.1:${a#::}" ;; esac
     if [ -n "$a" ]; then nderived=$((nderived + 1)); fi
-    if [ -z "$a" ]; then report="$report; pid=$p addr=<none> cause=${cause:-not-derivable}"; continue; fi
-    if [ -n "$addr" ]; then report="$report; pid=$p addr=$a cause=not-probed -- an earlier candidate already answered"; continue; fi
+    if [ -z "$a" ]; then report="$report; pid=$p addr=<none> argv=$avc cause=${cause:-not-derivable}"; continue; fi
+    if [ -n "$addr" ]; then report="$report; pid=$p addr=$a argv=$avc cause=not-probed -- an earlier candidate already answered"; continue; fi
     curl -sf --max-time 10 -o /dev/null "http://$a$ROUTE" 2>/dev/null
     crc=$?
-    if [ "$crc" = 0 ]; then addr="$a"; report="$report; pid=$p addr=$a cause=fetch-answered"; continue; fi
+    if [ "$crc" = 0 ]; then addr="$a"; report="$report; pid=$p addr=$a argv=$avc cause=fetch-answered"; continue; fi
     case "$crc" in 6) cc="host-unresolvable" ;; 7) cc="connection-refused" ;; 22) cc="http-error" ;; 28) cc="timeout" ;; *) cc="curl-exit-$crc" ;; esac
     why=$(curl -sfS --max-time 10 -o /dev/null "http://$a$ROUTE" 2>&1 | tr '\n' ' ')
-    report="$report; pid=$p addr=$a cause=fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
+    report="$report; pid=$p addr=$a argv=$avc cause=fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
   done
 
 
