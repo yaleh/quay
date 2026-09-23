@@ -33,6 +33,11 @@ import {
   readManager,
   readTranscriptTail,
   readTests,
+  scriptBasename,
+  RESOURCE_GATE_REL,
+  PROCESS_BUDGET_REL,
+  RESOURCE_GATE_NAME,
+  PROCESS_BUDGET_NAME,
 } from "../src/observation.ts";
 import { renderSiteNav } from "../src/serve-handlers.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -119,6 +124,29 @@ test("AC2: parseProcessBudgetJson extracts the budget --json fields", () => {
   assert.equal(r.inUse, 18);
   assert.equal(r.available, 0);
   assert.equal(r.verdict, "WAIT");
+});
+
+// ── AC2 of gap-serve-labels-hardcode-mechanism-script-basenames: the /system labels are DERIVED
+// from the single naming point (the REL constants), ⛔ not a second literal and ⛔ not a lookup
+// table. The two arms below are what tells those apart — a table keyed by the two known rels would
+// pass the second arm and fail the first.
+test("AC2: scriptBasename is a general derivation — a rel in NO table yields its basename (negative control)", () => {
+  // (a) the arm a LOOKUP TABLE cannot pass: a rel that appears in no table/constant anywhere.
+  assert.equal(scriptBasename("scripts/whatever.sh"), "whatever.sh",
+    "a rel in no table must still yield its basename — a table would return undefined/throw here");
+  // …and it is not keyed on the directory either: same basename, arbitrary prefix.
+  assert.equal(scriptBasename(path.join("some", "other", "dir", "whatever.sh")), "whatever.sh");
+  // …nor restricted to `.sh` (the face is a derivation over rels, not a shell-script table).
+  assert.equal(scriptBasename("plugin/scripts/thing.ts"), "thing.ts");
+  // (b) the real labels come off the SAME single accessor.
+  assert.equal(scriptBasename(RESOURCE_GATE_REL), "resource-gate.sh");
+  assert.equal(scriptBasename(PROCESS_BUDGET_REL), "process-budget.sh");
+  assert.equal(RESOURCE_GATE_NAME, "resource-gate.sh");
+  assert.equal(PROCESS_BUDGET_NAME, "process-budget.sh");
+  // (c) the property a SECOND LITERAL could not have: the label follows the rel. Taken on the
+  // derivation face (no need to mutate the constant to falsify it).
+  assert.equal(scriptBasename(path.join("scripts", "renamed-gate.sh")), "renamed-gate.sh");
+  assert.equal(RESOURCE_GATE_NAME, scriptBasename(RESOURCE_GATE_REL));
 });
 
 test("AC2: parseLoopDriverJson extracts verdict + exit code + detail", () => {

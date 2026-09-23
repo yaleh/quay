@@ -69,6 +69,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim). Own copy was one of the
+// twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -158,10 +162,6 @@ function extractTmuxTarget(stripped: string): string | null {
   const m = stripped.match(/(?:^|\s)-t\s+([^\s]+)/);
   if (!m) return null;
   return m[1].replace(/^['"]|['"]$/g, "");
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

@@ -42,7 +42,7 @@ import {
   selectFilings,
   selectProbeRoutines,
 } from "../scripts/probe-routine.ts";
-import { renderRoutineTaskBody } from "../scripts/routine-file-gate.ts";
+import { findingKey, recurrenceByKey, renderRoutineTaskBody, routineFindingCandidateText } from "../scripts/routine-file-gate.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -510,6 +510,116 @@ test("FILING — with NO registry declared the producer gate does not apply (gen
   const { facts, written } = await runFilingRoutine(root, { ...FRESHNESS_FINDING, producer: "who-knows" });
   assert.equal(facts[0].state, "verified", facts[0].reason);
   assert.equal(written.length, 1, "a routine that declares no producer registry is unaffected by the gate");
+});
+
+// ── FILING PRIORITY — the real round, replayed (gap-routine-semantic-dedup-scan-recurring-cluster-
+//    starvation; the fix is `recurrenceByKey`/`recurrenceOrder` in routine-file-gate.ts + the order
+//    `selectFilings` consumes the rate budget in)
+//
+// THE DEFECT: the round's rate budget (k=3) was spent in the probe's EMISSION order, which carries no
+// value signal. Measured on the carrier's own `filing-round` record below: the three filings went to
+// findings the corpus had seen {0, 0, 2} prior rounds, while the rate gate rejected the clusters it had
+// been re-reporting for {3, 3, 4} rounds — the throttle bit exactly the work that had proved durable.
+//
+// This case is a REPLAY of that round, not a fixture narrative: the candidates, the recorded outcome
+// and the recurrence reading all come from the repo's TRACKED carrier. It is run TWICE on the SAME
+// input — once with the priority withheld (`recurrence: null`) and once with it applied — so the
+// difference between the two arms is caused by the priority and nothing else:
+//   arm② (withheld)  must reproduce the round's RECORDED outcome, filed set and rejection reasons
+//                    alike. That is the self-check on this test: if it ever stops reproducing the
+//                    round, the replay is no longer that round and nothing below may be believed.
+//   arm① (applied)   must satisfy the invariant arm② violates: no finding rejected by the rate gate
+//                    may have been re-reported in MORE rounds than a finding that took one of the
+//                    three slots.
+test("FILING PRIORITY — replaying the REAL starvation round: withheld ⇒ the recorded outcome, applied ⇒ the recurrence order", () => {
+  const carrierPath = path.join(REPO_ROOT, ROUTINE_FINDINGS_REL);
+  assert.ok(fs.existsSync(carrierPath), `the repo's own carrier must exist to be read: ${carrierPath}`);
+  const RUN = "semantic-dedup-scan-1790118332027"; // the round whose finding filed this task
+  const lines = fs.readFileSync(carrierPath, "utf8").split("\n").filter((l) => l.trim());
+  const records = lines.map((l) => JSON.parse(l));
+  const toFinding = (r) => ({
+    id: r.findingId ?? null, kind: r.dupKind ?? null, symbols: r.symbols ?? [], files: r.files ?? [],
+    verdict: r.verdict ?? null, rationale: r.rationale ?? "", suggestedAction: r.suggestedAction ?? null,
+    producer: r.producer ?? null,
+  });
+
+  const recorded = records.find((r) => r.kind === "filing-round" && r.runId === RUN);
+  assert.ok(recorded, `the round's own filing-round record must be in the carrier: ${RUN}`);
+  const candidates = records.filter((r) => r.kind === "finding" && r.runId === RUN).map(toFinding);
+  assert.equal(candidates.length, recorded.candidates, "the round's candidates are exactly its carrier records");
+
+  // ── the replay's inputs, each one DERIVED rather than assumed ──────────────────────────────────
+  // (1) The round's records are ONE contiguous block ⇒ "the carrier up to this round" is a real
+  //     prefix, and the recurrence reading below is the AS-OF-THAT-ROUND reading (which is what
+  //     「re-reported in N rounds」 meant to the decision, and is stable: history is append-only —
+  //     rounds that ran LATER are in the carrier too, and using them would re-rank a past decision).
+  const own = records.map((r, i) => (r.runId === RUN ? i : -1)).filter((i) => i >= 0);
+  assert.ok(own.length > 0, `the round's records must be in the carrier: ${RUN}`);
+  assert.equal(own[own.length - 1] - own[0] + 1, own.length,
+    "the round's records must form one contiguous block for a prefix reading to mean anything");
+  const prefix = path.join(makeTmpDir("sds-replay-prefix-"), "routine-findings.jsonl");
+  fs.writeFileSync(prefix, lines.slice(0, own[0]).join("\n") + "\n", "utf8");
+  // (2) The board AS OF THAT ROUND: the round logged 0 dedup rejections, so the board contributed
+  //     nothing to any of its decisions ⇒ an empty board is the faithful one. Today's board is NOT
+  //     (it already holds this round's filings) and would reject candidates that were filed.
+  const dedupRejects = (recorded.rejected ?? []).filter((x) => String(x.reason).startsWith("dedup:"));
+  assert.equal(dedupRejects.length, 0,
+    "this round's decisions saw an empty board — if that ever changes, the replay needs the historical board, not this one");
+  // (3) An empty tasks dir: the replay must not collide with the files this round actually filed
+  //     (today's tasks/ holds them, which would append the deterministic `-<sha1>` suffix to the ids
+  //     and hide whether the FILED SET — the thing under test — really matches the record).
+  const tasksDir = makeTmpDir("sds-replay-tasks-");
+  const opts = {
+    routine: "semantic-dedup-scan", probe: "semantic-dedup-scan", runId: RUN, ts: recorded.ts,
+    carrierPath: prefix, carrierRel: ROUTINE_FINDINGS_REL, tasksDir,
+    nowMs: Date.parse(recorded.ts), k: 3, registeredProducers: undefined,
+  };
+  // ⚠️ selectFilings MUTATES the `boardKeys` it is handed (each accepted key is added so a later
+  // candidate of the same round dedups against it) — each arm gets its own set, or arm①'s accepts
+  // become arm②'s board.
+  const withheld = selectFilings(candidates, { ...opts, boardKeys: new Set(), recurrence: null });
+  const applied = selectFilings(candidates, { ...opts, boardKeys: new Set() });
+
+  const recurrenceOf = new Map([...recurrenceByKey(prefix)].map(([k, n]) => [k, n]));
+  const recurrence = (d) => {
+    const f = candidates.find((c) => c.id === d.findingId);
+    return recurrenceOf.get(findingKey(routineFindingCandidateText(f))) ?? 0;
+  };
+  const filed = (ds) => ds.filter((d) => d.accepted);
+  const rateRejected = (ds) => ds.filter((d) => !d.accepted && String(d.reason).startsWith("rate:"));
+
+  // ── arm② — WITHHELD: this must BE the round that happened ───────────────────────────────────────
+  assert.deepEqual(filed(withheld).map((d) => d.taskId).sort(), [...(recorded.filed ?? [])].sort(),
+    "⛔ with the priority withheld the selector must reproduce the round's RECORDED filings — this is the " +
+    "self-check that the replay is faithful (candidates, board, rate window, empty tasks dir)");
+  const baseReason = (r) => String(r).replace(/ \(subject recurrence: .*\)$/, "");
+  assert.deepEqual(
+    withheld.filter((d) => !d.accepted).map((d) => `${d.findingId}|${d.gate}|${baseReason(d.reason)}`).sort(),
+    (recorded.rejected ?? []).map((x) => `${x.findingId}|${x.gate}|${x.reason}`).sort(),
+    "⛔ and reproduce every recorded REJECTION with its reason — a replay that agreed on the filed set but " +
+    "not on why the rest were rejected would not be the same decision");
+
+  // the measured starvation, read off the live records rather than hardcoded:
+  const minFiledWithheld = Math.min(...filed(withheld).map(recurrence));
+  const maxRateRejectedWithheld = Math.max(...rateRejected(withheld).map(recurrence));
+  assert.ok(maxRateRejectedWithheld > minFiledWithheld,
+    `the round really did starve: it filed down to recurrence ${minFiledWithheld} while rate-rejecting up to ${maxRateRejectedWithheld}`);
+
+  // ── arm① — APPLIED: the same input, the priority the only difference ─────────────────────────────
+  const filedApplied = filed(applied).map((d) => d.taskId).sort();
+  assert.notDeepEqual(filedApplied, [...(recorded.filed ?? [])].sort(),
+    "⛔ WITH the priority the outcome must CHANGE — if it does not, the priority is inert decoration");
+  const minFiledApplied = Math.min(...filed(applied).map(recurrence));
+  const maxRateRejectedApplied = Math.max(...rateRejected(applied).map(recurrence));
+  assert.ok(minFiledApplied >= maxRateRejectedApplied,
+    `every rate-rejected candidate must have been re-reported no more often than every filed one ` +
+    `(filed down to ${minFiledApplied}, rate-rejected up to ${maxRateRejectedApplied}) — otherwise the ` +
+    `budget is still being spent on the wrong candidates`);
+  assert.ok(minFiledApplied > minFiledWithheld,
+    `the filed floor must rise: withheld ${minFiledWithheld} → applied ${minFiledApplied}`);
+  // and the two arms still dispose of EVERY candidate (枚举不布尔 — the priority reorders, ⛔ never drops)
+  assert.equal(applied.length, candidates.length);
+  assert.equal(withheld.length, candidates.length);
 });
 
 test("FILING — the selector is PURE: run over the repo's REAL carrier it writes nothing", async () => {

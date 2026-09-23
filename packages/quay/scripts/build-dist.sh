@@ -19,8 +19,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PKG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PKG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 cd "${PKG_DIR}"
 
 echo "[build-dist] Bundling quay (Core) bin/quay.ts -> dist/quay.js (ESM, createRequire banner)..."

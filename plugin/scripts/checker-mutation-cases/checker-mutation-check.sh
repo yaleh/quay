@@ -10,8 +10,8 @@
 set -u
 name="checker-mutation-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-repo_root="$(cd "${checker_dir}/../.." && pwd)"
+checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 
 bash "${checker_dir}/checker-mutation-check.sh" --repo-root "${repo_root}" --selftest
 code=$?

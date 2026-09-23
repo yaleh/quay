@@ -104,7 +104,7 @@ if [ -z "$PLUGIN_ROOT" ]; then
   SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
   PLUGIN_ROOT="$(cd "$(dirname "$(dirname "$SELF")")" 2>/dev/null && pwd || true)"
 fi
-WORKSPACE_ROOT="$(pwd)"
+WORKSPACE_ROOT="$(pwd -P)"
 PROJECT_NAME=""
 REPO_ROOT=""
 TMUX_SESSION=""
@@ -182,7 +182,7 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
   echo "ERROR: --root does not exist: $WORKSPACE_ROOT" >&2
   exit 2
 fi
-WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
+WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd -P)"
 
 # ── pre-write closed-set snapshot (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade)
 # report_closed_set_state (below) classifies each of the seven closed-set items by comparing their
@@ -294,7 +294,7 @@ if [ ! -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
   echo "ERROR: ${PLUGIN_ROOT} is not a quay plugin (missing .claude-plugin/plugin.json)." >&2
   exit 2
 fi
-PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd)"
+PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd -P)"
 
 PLUGIN_VERSION="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" version unknown 2>/dev/null || echo unknown)"
 PLUGIN_NAME="$(quay-init-step json-field "$PLUGIN_ROOT/.claude-plugin/plugin.json" name quay 2>/dev/null || echo quay)"
@@ -722,8 +722,17 @@ _derive_loop_scripts_once() {
   #   into the dist bundle. Without this explicit entry a cold-started consumer lays ready-pool-check.ts
   #   with no sibling shape-sections.ts and dies with ERR_MODULE_NOT_FOUND (this is exactly the defect
   #   this task closed: the section list lived in store.ts which is NOT laid down).
+  #   regex-escape.ts (gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre):
+  #   the SAME class as shape-sections.ts one entry up — a kernel leaf reached through a plugin-side
+  #   re-export. ELEVEN laid-down instruments now import it via ESM `./regex-escape.ts` (ready-pool-check.ts,
+  #   worker-driver.ts, task-ops.ts, rhythm-consumer-check.ts, deletion-closure-check.ts,
+  #   identity-replication-check.ts, enum-surface-parity-check.ts, prod-data-audit.ts,
+  #   agent-panel-classify.ts, repo-root-derivation-check.ts, manager-observation-runtime-check.ts) —
+  #   an ESM `./` import is INVISIBLE to closure step (d), and the kernel path itself is unreachable
+  #   from a flat laydown tree. Without this explicit entry a cold-started consumer lays those eleven
+  #   without their sibling and dies with ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts regex-escape.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
@@ -1064,7 +1073,7 @@ verify_referenced_landed() {
 verify_delivery_surface_l1() {
   local delivery_root spec_file
   l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
-  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd -P)"
   spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
   if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
     if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then

@@ -28,6 +28,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
+import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
 export const NAME = "manager-tick-readings";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
@@ -310,8 +311,7 @@ export function renderSelected(cmd: string, args: string[], projects: Project[])
 
 export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number {
   const env = opts?.env ?? process.env;
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot = path.resolve(here, "..", "..");
+  const repoRoot = moduleRepoRoot();
   const projects = parseProjects(env);
   const args = argv.slice(2);
   const cmd = args[0] ?? "";

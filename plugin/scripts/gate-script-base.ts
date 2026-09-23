@@ -123,6 +123,30 @@ export function flagValue(argv: readonly string[], name: string): string | undef
   return idx === -1 ? undefined : argv[idx + 1];
 }
 
+// ── resolveRoot ─────────────────────────────────────────────────────────────────────────────────────
+// Resolve a caller-supplied `--root <dir>` value to an absolute path, falling back to the current
+// working directory when the flag is absent. The relative/absolute decision is `path.resolve`'s, so a
+// RELATIVE `--root` resolves against cwd (the conventional CLI reading) rather than against this
+// module's own directory — a checker invoked from anywhere lands on the directory the user named.
+//
+// WHY THIS EXPORT EXISTS — an extraction, not a new idea (semantic-dedup-scan routine, runId
+// `semantic-dedup-scan-1790028867335`, findingId `resolveroot`, verdict `real-duplication`,
+// suggestedAction `extract`): five checkers (concurrency-literal-check / instrument-failure-check /
+// landing-target-check / suite-slot-ssot-check / task-file-bypass-check) carried this byte-identical
+// body, and all five ALREADY imported this module — so the shared home existed and the copies were
+// pure maintainability debt. Each call site now reads `resolveRoot(flagValue(args, "--root"))`, which
+// keeps the token source visible per flagValue's own contract, and the arity-1 `flagVal` closure that
+// existed only to feed the private copy is gone with it.
+//
+// ⛔ NOT the same function as `repoRoot()` (repo-root.ts): that one WALKS UPWARD from a start dir to
+// discover the repo/workspace root; this one only converts a value the caller already named. The three
+// checkers that default `--root` to the REPO ROOT instead of cwd (fan-in-runid-check / inner-idle-log /
+// crystallization-half-life) are therefore a different behavior and are deliberately NOT folded in
+// here — that divergence is a separate filed finding (`resolveroot-2`).
+export function resolveRoot(rootArg: string | undefined): string {
+  return path.resolve(rootArg ?? process.cwd());
+}
+
 // ── readFrontmatter ─────────────────────────────────────────────────────────────────────────────────
 // Read and parse YAML frontmatter from a markdown file.
 // Returns a Record of key→value for simple scalar/list fields, or null if no frontmatter found.
@@ -168,6 +192,64 @@ export function readFileSafe(p: string): string {
   } catch {
     return "";
   }
+}
+
+// ── readJsonLines ───────────────────────────────────────────────────────────────────────────────────
+// Read a JSONL ledger (`.quay/*.jsonl`, `.quay/per-task-suite-records.jsonl`, …) into
+// `Record<string, unknown>[]`, tolerating the two things an append-only carrier genuinely produces:
+// blank lines and a malformed/torn line at the tail.
+//
+// WHY THIS EXISTS: semantic-dedup-scan finding `readjsonlines-seven-defs-three-behaviors`
+// (.quay/routine-findings.jsonl, runId `semantic-dedup-scan-1790118332027`, verdict
+// `real-duplication`) found SEVEN private copies, none imported, in obligation-ledger.ts /
+// obligation-ledger-check.ts / psi-failure-correlation-check.ts / psi-window-join.ts /
+// freshness-producer-coverage-check.ts / ready-pool-check.ts / trend-check.ts — all seven declaring
+// (or implying, in the two exported JS-mode ones) `Record<string, unknown>[]`.
+//
+// They collapsed to THREE runtime behaviors, differing on exactly TWO axes:
+//   axis 1 — line splitting: `split("\n")` (5 copies) vs `split(/\r?\n/)` (2).
+//   axis 2 — the non-object guard: none (4) | `v && typeof v === "object"` (2 — a TRUTHY check, and
+//            `typeof [] === "object"`, so it admits ARRAYS) | `typeof r === "object" && r !== null &&
+//            !Array.isArray(r)` (1).
+// ⇒ a line whose top-level JSON value is not an object (`null`, `42`, `"x"`, `[1,2]`) became a ROW in
+// 6 of the 7 copies and was dropped in the 7th: the same ledger yielded different row sets per caller.
+// Both axes are settled here, once:
+//   axis 1 → `split(/\r?\n/)`. Strictly WIDER than `split("\n")` (a lone `\r` still separates), so no
+//            caller loses a row it used to get.
+//   axis 2 → the strict non-array object guard. Every consumer indexes fields off the row
+//            (`r.fullSuiteRan`, `obj.cpu_stall`, …), so a `null` row is a TypeError rather than a
+//            datum — the 6 permissive copies were violating their own declared return type.
+//            ⛔ This is not a silent narrowing of a load-bearing difference: every writer of every
+//            ledger this reads serializes an OBJECT (checker-cost.ts / runner-state-write.ts /
+//            suite-load-sampler.ts / obligation-ledger.ts `JSON.stringify(rec)` of an object,
+//            per-task-suite-record.ts likewise), so the guard drops only corrupt input. The control
+//            that pins the divergence — and that the retired copies agree on every other input — is
+//            in plugin/test/gate-script-base.test.mjs.
+//
+// FAIL-OPEN by design: an absent or unreadable file yields `[]`, never a throw. The distinction a
+// reader cannot make here is the CALLER's: a checker that must report NOT-EVALUATED for "the carrier
+// is absent" (硬规则 3b) rather than PASS for "the carrier is empty" must stat the file itself —
+// freshness-producer-coverage-check.ts does exactly that with `fs.existsSync` before calling, and
+// reports the two states with different `reason` strings.
+export function readJsonLines(file: string): Record<string, unknown>[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return []; // absent / unreadable carrier = no history (see the fail-open note above)
+  }
+  const rows: Record<string, unknown>[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const v = JSON.parse(line);
+      if (typeof v === "object" && v !== null && !Array.isArray(v)) rows.push(v as Record<string, unknown>);
+    } catch {
+      // A malformed line is skipped rather than fatal — these carriers are append-only across many
+      // writers, and one torn line must not blind the whole judgement.
+    }
+  }
+  return rows;
 }
 
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────

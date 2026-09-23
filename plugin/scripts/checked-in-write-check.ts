@@ -74,10 +74,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Default judged root = the repo this script is checked into (this file is <repo>/plugin/scripts/). */
-export const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+export const DEFAULT_ROOT = repoRoot();
 /** Default judged surface: the test corpus the defect class lives in. */
 export const DEFAULT_TEST_DIR_REL = "plugin/test";
 /** The runtime judge (CommonJS, loaded via `node --require`). */

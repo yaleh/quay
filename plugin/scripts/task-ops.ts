@@ -31,6 +31,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseFrontmatterCompletely, frontmatterStatus } from "./task-schema.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim). Own copy was one of the
+// twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 
 // ── parse (delegates to task-schema.ts — no new frontmatter parser) ──────────────────────────────
 
@@ -72,11 +76,8 @@ export function patchStatusField(
   return { ok: true, fm: frontmatterRaw.replace(statusLineRe, `status: ${toStatus}`), from, replaced: true, to: toStatus };
 }
 
-/** Escape a literal string for use inside a RegExp, so the label→has-label line match treats the label
- *  as a literal (never a regex pattern). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// `escapeRegExp` (imported above) escapes a literal string for use inside a RegExp, so the
+// label→has-label line match treats the label as a literal (never a regex pattern).
 
 /** Ensure the frontmatter carries `label` — the generic "append one label, touch nothing else"
  *  primitive (gap-task-write-labels-replace-not-append-no-safe-add-action). Reads the existing labels

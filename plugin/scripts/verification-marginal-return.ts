@@ -50,6 +50,9 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { repoRoot } from "./repo-root.ts";
+// The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
+// derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
+import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
 
 export const NOT_EVALUATED = 3;
 
@@ -836,7 +839,7 @@ export async function loadCarriers(root: string, over: Partial<Record<string, st
     gates: over.gates ?? path.join(root, ".quay", "gate-events.jsonl"),
     promotion: over.promotion ?? path.join(root, ".quay", "promotion-outcome.jsonl"),
     rounds: over.rounds ?? path.join(root, ".quay", "verification-round.jsonl"),
-    registry: over.registry ?? path.join(root, "plugin", "scripts", "runner-static-gate.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    registry: over.registry ?? path.join(root, REGISTRY_REL_CANDIDATES[0]),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     registryExtra: over.registryExtra ?? path.join(root, "scripts", "test.sh"),
     mutationCases: over.mutationCases ?? path.join(root, "plugin", "scripts", "checker-mutation-cases"),
   };

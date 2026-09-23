@@ -48,8 +48,10 @@ const IDENTITY = {
     pairs: [{ plugin: "plugin/scripts/foo.ts", experiment: "experiments/quay-perpetual-stream/scripts/foo.ts" }],
   },
   table: [
-    { entity: "session-liveness.sh", code: 5, hardcoded: 4, codeFiles: ["plugin/scripts/a.ts", "packages/quay/src/observation.ts"] },
-    { entity: "gate-script-base.ts", code: 3, hardcoded: 0, codeFiles: ["plugin/scripts/c.ts"] },
+    // 成簇行：满足检测器判定 `hardcoded >= 5 && hardcoded > accessor`。⛔ 本 fixture 原先只写
+    // `hardcoded: 4`（旧的裸计数判据 `hardcoded > 0` 放行）——下面 AC5 的两条对照用例把这个谓词钉死。
+    { entity: "session-liveness.sh", code: 5, accessor: 0, hardcoded: 5, codeFiles: ["plugin/scripts/a.ts", "packages/quay/src/observation.ts"] },
+    { entity: "gate-script-base.ts", code: 3, accessor: 231, hardcoded: 0, codeFiles: ["plugin/scripts/c.ts"] },
   ],
 };
 
@@ -117,6 +119,95 @@ test("AC1 — per-source clustering maps each detector's shape to clusters", () 
   assert.match(deletion[0].label, /R=2\.00/);
 });
 
+// ── 阈值谓词：cluster 阶段消费检测器自己的判定（gap-arch-review-cluster-ignores-detector-flag-predicate
+//    AC5(a)/(b)）—— 两侧都要能取假：只做「过滤掉清白行」而不做「flagged=true 侧仍成簇」，等于把检测器
+//    关掉（正是 identity-replication-check.ts 里那条注释自己担心的那件事）。
+//    两个样本都是**实测过的真读数**：10/231 = gate-script-base.ts（检测器判清白，修前却成簇），
+//    59/3 = quay-init.sh（真复制，修前后都必须成簇）。
+
+test("AC5(a) — 检测器判清白的行（hardcoded=10 < accessor=231）不产出该簇", () => {
+  const r = { table: [{ entity: "gate-script-base.ts", code: 241, accessor: 231, hardcoded: 10, codeFiles: ["plugin/scripts/a.ts"] }] };
+  assert.deepEqual(
+    clusterIdentityReport(r).map((c) => c.clusterId),
+    [],
+    "hardcoded < accessor ⇒ 大量文件走单一访问器引用（共享模块正常形态）⇒ ⛔ 不成簇",
+  );
+});
+
+test("AC5(b) — 检测器判定 flagged 的行（hardcoded=59 > accessor=3）仍产出该簇", () => {
+  const r = { table: [{ entity: "quay-init.sh", code: 62, accessor: 3, hardcoded: 59, codeFiles: ["plugin/scripts/a.ts"] }] };
+  const ids = clusterIdentityReport(r).map((c) => c.clusterId);
+  assert.deepEqual(ids, ["P2-identity-quay-init.sh"], "flagged ⇒ 仍成簇（阈值判定没被用来关掉检测器）");
+  // rawCount 仍是裸 hardcoded 计数（判据是「成不成簇」，不是「报什么数」）。
+  const c = clusterIdentityReport(r)[0];
+  assert.equal(c.rawCount, 59);
+});
+
+test("AC5(a/b) 反向控制 — 同一份输入里两条行只在 accessor 上不同，成簇与否必须跟着翻转", () => {
+  const row = (hardcoded, accessor) => ({ entity: "x.sh", code: hardcoded + accessor, accessor, hardcoded, codeFiles: ["plugin/scripts/a.ts"] });
+  // 差分对照：hardcoded 不变（=59），只把 accessor 从 3 抬到 59 ⇒ 判定翻转。若 cluster 侧退回裸
+  // `hardcoded > 0`，下面第二条断言立刻变红（hardcoded 两态都是 59 > 0）。
+  assert.deepEqual(clusterIdentityReport({ table: [row(59, 3)] }).map((c) => c.clusterId), ["P2-identity-x.sh"]);
+  assert.deepEqual(clusterIdentityReport({ table: [row(59, 59)] }).map((c) => c.clusterId), []);
+});
+
+// ── 判词必须与**这一行自己的读数**一致 (gap-identity-replication-requires-structural-relation AC4) ──
+// 立案缺陷: 判词把「without a single accessor」写成了**字面量**, 与行上的 `accessor` 无关 ——
+// 17 个 P2-identity-* 簇里 **14** 个在 `accessor > 0` 时照样这么断言 (最极端的 driver-runtime.ts
+// 是 accessor=26)。读数与判词矛盾时仍输出同一句话 ⇒ 「查过且合格」与「没查成」共用输出 (硬规则 3b)。
+// 两个方向都要钉住: accessor>0 **不得**断言独占; accessor=0 **必须**断言 —— 后者否证「把这句话删掉」
+// 冒充修法 (删掉字面量能让前半条恒绿, 却把强断言在整个判据里弄丢)。
+
+test("AC4 — 判词不得在 accessor>0 时断言 without a single accessor (=0 时必须断言)", () => {
+  const row = (hardcoded, accessor) => ({ entity: "x.sh", code: hardcoded + accessor, accessor, hardcoded, codeFiles: ["plugin/scripts/a.ts"] });
+
+  const partial = clusterIdentityReport({ table: [row(59, 3)] })[0];
+  assert.equal(/without a single accessor/.test(partial.label), false,
+    `accessor=3 ⇒ ⛔ 不得断言「没有单一访问器」, label=${partial.label}`);
+  assert.match(partial.label, /3 file\(s\) reach it through an accessor/,
+    "读数必须**出现在判词里** (不是把这句话删掉了事)");
+  assert.match(partial.label, /59 code file\(s\)/, "hardcoded 计数仍在判词里");
+
+  const exclusive = clusterIdentityReport({ table: [row(59, 0)] })[0];
+  assert.match(exclusive.label, /without a single accessor/,
+    "accessor=0 ⇒ 强断言必须仍然输出 (否则这条判据在真取真的那一半上被架空)");
+});
+
+// ── 判定重写计数收窄后的簇侧行为 (gap-identity-rewrite-count-includes-carve-outs AC5) ───────────
+// 收窄把「哪些站点算判定重写」的类别判定收进检测器 (`classifyRewriteSite`)：`judgmentRewrites` 只剩
+// **可合并到 kernel leaf 的**站点，非可合并的四类（test / `.sh` / 已 import leaf / repo-import-free
+// `.mjs`）改经 `judgmentRewriteCarveOuts`（带类别 + 理由）在场。
+// 本组两个方向都要钉住（硬规则 2 的另一半 = 零计数也要干跑已知真样本）：
+//   · 列表为空 ⇒ ⛔ 不产出该簇（已 done 的 proc-identity 迁移机制不再每轮被重报）；
+//   · 注入一个可合并站点 ⇒ **必须**重新产出（否则「不产出」与「判据坏死」在报告上同形）。
+// ⛔ cluster 侧不另写一份过滤: 它读的就是检测器已收窄的列表（下游再过滤 = 硬规则 5b 违规）。
+
+test("AC5 — 判定重写列表为空 ⇒ 不产出 P2-judgment-rewrites (不再重报已 done 机制)", () => {
+  const ids = clusterIdentityReport({ judgmentRewrites: [] }).map((c) => c.clusterId);
+  assert.deepEqual(ids, [], "0 个可合并站点 ⇒ 该簇缺席（检测到的 carve-out 不经此面）");
+});
+
+test("AC5 反向 — 注入一个可合并站点 ⇒ 该簇必须重新产出 (判据非恒假/非空转)", () => {
+  const r = { judgmentRewrites: [{ file: "plugin/scripts/never-seen-before.ts", line: 7 }] };
+  const clusters = clusterIdentityReport(r);
+  assert.deepEqual(clusters.map((c) => c.clusterId), ["P2-judgment-rewrites"]);
+  assert.equal(clusters[0].rawCount, 1);
+  assert.deepEqual(clusters[0].files, ["plugin/scripts/never-seen-before.ts"]);
+  assert.match(clusters[0].label, /independently re-implemented 1×/, "判词里的计数与读数一致");
+});
+
+test("AC5 — carve-out 字段不经簇面消费 (排除 ≠ 没扫到, 但 carve-out 不是簇的输入)", () => {
+  // 同一份 --json 里另有一个 judgmentRewriteCarveOuts 列表；即使它非空，可合并列表为空就仍然不产簇。
+  const ids = clusterIdentityReport({
+    judgmentRewrites: [],
+    judgmentRewriteCarveOuts: [
+      { file: "plugin/scripts/os-anchor-watchdog.sh", line: 130, carveOut: "shell", carveOutReason: "shell carrier" },
+      { file: "plugin/test/x.test.mjs", line: 1, carveOut: "test", carveOutReason: "test carrier" },
+    ],
+  }).map((c) => c.clusterId);
+  assert.deepEqual(ids, [], "carve-out 不是可合并站点 ⇒ 不产簇 (它们由检测器的独立字段在场)");
+});
+
 test("AC1 — empty deletion report / no components ⇒ no P1 cluster", () => {
   assert.deepEqual(clusterDeletionReport({ components: [], dc: [], counts: { dcTotal: 0 } }), []);
   assert.deepEqual(clusterDeletionReport({ components: ["x.sh"], dc: [], counts: { dcTotal: 0 } }), []);
@@ -125,6 +216,38 @@ test("AC1 — empty deletion report / no components ⇒ no P1 cluster", () => {
 test("AC1 — deletionClosureComponents derives hardcoded>0 entities (top N)", () => {
   assert.deepEqual(deletionClosureComponents(IDENTITY, 3), ["session-liveness.sh"]);
   assert.deepEqual(deletionClosureComponents(IDENTITY, 0), []);
+});
+
+// ── AC3/AC5 · P1 候选构件选取与 P2 面共用 `isFlagged`（硬规则 5b：同一原则在 P1 面的未扫兄弟）──────
+// 判据必须能取假：一张 below-threshold 的行排在 top-N 边界内，裸判据选它、`isFlagged` 判据不选它。
+// ⛔ 本组第二条是「另一半能取假」——把 leak.ts 的 accessor 降到谓词之下后**仍须被选出**，
+//    证明修法排的是「检测器判过清白」，不是把边界行一律丢掉（否则就是空转）。
+
+/** AC3 的差分表：leak.ts 20/23 硬编码多但访问器更多（共享模块的正常形态），其余三行真越过谓词。 */
+const BOUNDARY_TABLE = [
+  { entity: "leak.ts", hardcoded: 20, accessor: 23 },
+  { entity: "real.ts", hardcoded: 9, accessor: 2 },
+  { entity: "real2.ts", hardcoded: 8, accessor: 3 },
+  { entity: "real3.ts", hardcoded: 7, accessor: 4 },
+];
+
+test("AC3/AC5 — below-threshold boundary row is NOT selected as a P1 component", () => {
+  // 修前（裸 `(row.hardcoded ?? 0) > 0`）选出 ["leak.ts","real.ts","real2.ts"] —— leak.ts 20/23 在列。
+  // 修后（`isFlagged`）选出 ["real.ts","real2.ts","real3.ts"] —— leak.ts 被排除，真构件不被丢掉。
+  assert.deepEqual(
+    deletionClosureComponents({ table: BOUNDARY_TABLE }, 3),
+    ["real.ts", "real2.ts", "real3.ts"],
+  );
+});
+
+test("AC3/AC5 — 另一半能取假：越过谓词的边界行修后仍被选出", () => {
+  // 只把 accessor 20/23 → 20/3（越过 `hardcoded > accessor && hardcoded >= 5`）⇒ 必须回到候选池。
+  // 若修法写成「把 top-N 边界整段丢掉」或「按文件名/位置排除」，本条即变红。
+  const crossed = BOUNDARY_TABLE.map((r) => (r.entity === "leak.ts" ? { ...r, accessor: 3 } : r));
+  assert.deepEqual(
+    deletionClosureComponents({ table: crossed }, 3),
+    ["leak.ts", "real.ts", "real2.ts"],
+  );
 });
 
 // ── 触发（能取假）─────────────────────────────────────────────────────────────────────────────

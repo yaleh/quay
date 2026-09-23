@@ -67,6 +67,17 @@ import { createHash } from "node:crypto";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// The generator's SINGLE repo-root-relative naming point — the sibling assertion module owns it
+// (gap-quay-init-sh-no-single-naming-point). ⛔ Read WHY IT LIVES THERE, in `QUAY_INIT_REL`'s comment
+// in quay-init-closure-assertion.ts before moving it back here: that module is SHIPPED to remote hosts
+// by develop-deliver-tgz.sh and this one is not, so the constant has to live on the transportable side
+// of the pair — a shipped→non-shipped `./` import breaks the transport closure
+// (`--selfcheck-transport-closure`), while this direction (dev-tree → shipped) is both invisible to
+// that check and true in fact. Importing it is what makes the generator's name single: the same
+// constant feeds `LAYDOWN_SOURCES[0]` (the freshness judgment `precommit-guard.ts` runs) and the path
+// `runLaydown()` actually spawns, which used to be two independent spellings of one name (editing the
+// list changed what the guard judged and silently left the spawned path alone — 硬规则 5b).
+import { QUAY_INIT_REL } from "./quay-init-closure-assertion.ts";
 
 // `.quay/` is EXCLUDED from the measurement (the generated, non-deterministic namespace): config.yml
 // embeds random target absolute paths (mcp_entry / repo_root / worktree_root), quay-init-state.json
@@ -82,16 +93,17 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 const BASELINE_FILE_REL = "docs/analysis/quay-init-closure-ratchet.baseline.json";
 
 // The precise source set that DETERMINES the closed-set laydown output (repo-root-relative paths).
-// quay-init.sh is the generator (its content decides config.yml/.gitignore/.claude/settings.json);
-// the two templates are laid verbatim; plugin.json is read for the plugin name+version. A change to
-// ANY of these must invalidate the baseline (re-anchor).
+// The generator (the imported `QUAY_INIT_REL` above) decides config.yml/.gitignore/.claude/settings.json
+// content; the two templates are laid verbatim; plugin.json is read for the plugin name+version. A
+// change to ANY of these must invalidate the baseline (re-anchor).
 // EXPORTED (gap-closure-ratchet-stale-wire-into-precommit-guard): `precommit-guard.ts` imports this
 // very constant to decide whether a commit touches the laydown source set — the freshness judgment is
 // now ALSO run at the commit moment (④ there), not only at the suite's @static-tier change layer.
 // ⛔ It must stay a single exported constant: a second hand-copied list in the guard would drift and
-// one side would silently stop checking (硬规则 5b).
+// one side would silently stop checking (硬规则 5b). Same rule INSIDE the list: the generator's entry
+// is the `QUAY_INIT_REL` constant above, not a second literal.
 export const LAYDOWN_SOURCES: readonly string[] = [
-  "plugin/scripts/quay-init.sh",
+  QUAY_INIT_REL,
   "plugin/.quay/profiles.yml",
   "plugin/.claude/launch.settings.json",
   "plugin/.claude-plugin/plugin.json",
@@ -171,9 +183,9 @@ export function countTree(dir: string, exclude: ReadonlySet<string> = new Set())
  * whole laydown into the repo — the exact pollution this ratchet exists to prevent). Removed in finally.
  */
 export function runLaydown(root: string, opts: { timeoutMs?: number } = {}): LaydownResult {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) {
-    return { evaluated: false, files: 0, bytes: 0, error: `quay-init.sh not found at ${quayInit}` };
+    return { evaluated: false, files: 0, bytes: 0, error: `${QUAY_INIT_REL} not found at ${quayInit}` };
   }
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-ratchet-"));
   const target = path.join(tmpBase, "target");

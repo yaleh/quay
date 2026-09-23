@@ -6,11 +6,11 @@
 #   Exit: 0 = all cases as asserted; 1 = mismatch; 2 = environment error.
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd to experiment root" >&2; exit 2; }
-SCHED="./scripts/concurrent-batch-scheduler.sh"
+SCHED="./scripts/concurrent-batch-scheduler.ts"
 FIX="fixtures/scheduler"
-[ -x "$SCHED" ] || { echo "ERROR: $SCHED not found/executable" >&2; exit 2; }
+[ -f "$SCHED" ] || { echo "ERROR: $SCHED not found" >&2; exit 2; }
 
-batch_line() { "$SCHED" "$@" 2>/dev/null | grep '^BATCH'; }
+batch_line() { node "$SCHED" "$@" 2>/dev/null | grep '^BATCH'; }
 
 fail=0
 # Case 1: disjoint execution pair → both in the batch.

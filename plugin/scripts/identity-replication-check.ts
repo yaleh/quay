@@ -36,10 +36,59 @@ import path from "node:path";
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 import { walkFiles } from "./fs-walk.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
+// name this file's call sites already use. Own copy was one of the twelve byte-identical bodies
+// extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
+// lineOf 上收到 source-text-lib.ts (semantic-dedup-scan `lineof-lineat`); 本地 `relOf` 包装
+// (body 恰为 `path.relative(root, f)`) 已就地内联 —— 一行 stdlib 委托没有可抽的算法。
+import { lineOf } from "./source-text-lib.ts";
 
 // ── 位置掩码 (comment-only: 只标注释为非代码, 字符串/模板字面量保持代码) ─────────────────────
 // 与 checker-lib.ts 的 buildNonCodeMask 不同: 那个把字符串也标为非代码 (用于「命令位置」判定);
 // 本任务要测的是【字面量】复制度 — 字符串字面量正是被测对象, 必须算代码。注释与文档才剔除。
+
+/** `/` 处是否可能是【正则字面量】的开头 —— ECMAScript 的除法/正则歧义。
+ *  只回看前一个【有效】字符 (跳过空格与 tab, ⛔ **不跳换行**: 换行意味着上一语句已结束, 行首的
+ *  `/` 是新表达式而非除法的延续): 标识符字符 / 数字 / `)` / `]` / `}` / 引号 / 反引号 ⇒ 是除法;
+ *  其余 (`(`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `+`, `-`, `*`, `%`, `~`, `^`, `<`, `>`, `;`, `{`, `,`) ⇒ 可能是正则。
+ *  关键字例外补上 `return /re/.test(x)` 一族。 */
+function maybeRegexStart(src: string, i: number): boolean {
+  let p = i - 1;
+  while (p >= 0 && (src[p] === " " || src[p] === "\t")) p--;
+  const prev = p < 0 ? "\n" : src[p];
+  if (!/[A-Za-z0-9_$)\]}"'`]/.test(prev)) return true;
+  return /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)\s*$/.test(
+    src.slice(0, i),
+  );
+}
+
+/** 正则字面量的闭合位置 (闭合 `/` 之后的下标), 或 -1 = **不是**正则字面量。
+ *  ⛔ 同行护栏是本函数的关键: ECMAScript 的正则字面量**不含行终止符**, 所以「同一行找不到未转义、
+ *  不在 `[…]` 字符类内的 `/`」就说明判错了 ⇒ 退回普通字符。没有这条护栏, 一次误判会跨行吞掉后面的代码。
+ *
+ *  这段存在的理由 (本任务 AC3 的实测根因): 旧掩码不认识正则字面量, 于是
+ *  `list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""))` 里的引号被当成**字符串起点**,
+ *  打开一个跨行的「幻影字符串」; 后面的块注释 (斜杠星号 … 星号斜杠) 与 `//` 行注释因此全部落在
+ *  字符串态里, 位置掩码把它们标成【代码】—— `plugin/scripts/task-ops.ts:158` 的 `ready-pool-check.ts`
+ *  (块注释内) 就是这样被计进 `codeFiles` 的。四个 AC3 实例文件的首次掩码分叉点**逐一无例外**落在
+ *  一个含引号的正则字面量上 (task-ops.ts:97、strategic-doc-staleness-check.ts、
+ *  touches-orthogonality-check.ts 的 `match(/^role:\s*["']?…/)`、build-plugin-dist.mjs 的
+ *  `dirname \"\$0\"` 正则), 不是「疑似反引号让词法器失步」那类假说。 */
+function regexLiteralEnd(src: string, i: number): number {
+  if (!maybeRegexStart(src, i)) return -1;
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length && src[j] !== "\n") {
+    const c = src[j];
+    if (c === "\\") { j += 2; continue; }
+    if (c === "[") { inClass = true; j++; continue; }
+    if (c === "]") { inClass = false; j++; continue; }
+    if (c === "/" && !inClass) return j + 1;
+    j++;
+  }
+  return -1;
+}
 
 // .ts/.mjs/.js 注释掩码: 标 // 行注释与 /* */ 块注释为非代码; 字符串/模板/正则保持代码。
 export function tsCommentMask(src: string): Uint8Array {
@@ -70,9 +119,40 @@ export function tsCommentMask(src: string): Uint8Array {
       if (i < n) { mask[i] = 1; mask[i + 1] = 1; i += 2; }
       continue;
     }
+    if (c === "/") {
+      // 正则字面量: 其**内部**的引号不是字符串起点 (旧实现漏了一步 ⇒ 幻影字符串, 见 regexLiteralEnd)。
+      const end = regexLiteralEnd(src, i);
+      if (end !== -1) { i = end; continue; }
+    }
     i++;
   }
   return mask;
+}
+
+/** 注释位置替换为**空格**、其余原样 —— 长度、行号、其余每个字符都与 `src` 逐位一致。
+ *
+ *  用途: 让**结构性关系**的判定正则跑在「注释已被抹平」的视图上。理由是把注释语法从正则里拿掉:
+ *  旧 import 分支写成 `import\s+[^'"\n]*?from\s*["']` —— `[^'"\n]` 既**排除换行**(多行命名导入读不进去)
+ *  又**排除引号**(为了不跨字符串)。两条约束一叠加, 它连"注释里有撇号"的多行导入块都跨不过去
+ *  (本仓主流形态, `plugin/scripts/slot-refill.ts` 的 30+ 行导入块)。抹平注释后,**唯一**还需要在正则里
+ *  表达的约束只剩「不跨字符串」(`"`/`'`) 与「不跨语句边界」(`;`) —— 这是真结构, 不是行内锚点。
+ *  ⛔ 字符串**不**抹平: 抹平它等于让正则读不到 specifier, 也就把 accessor 判定关掉了。 */
+export function blankComments(src: string, mask: Uint8Array): string {
+  if (!mask.some((m) => m === 1)) return src; // 无注释 ⇒ 原样返回, 不复制
+  const parts: string[] = [];
+  let i = 0;
+  while (i < src.length) {
+    let j = i;
+    if (mask[i] === 1) {
+      while (j < src.length && mask[j] === 1) j++;
+      parts.push(" ".repeat(j - i));
+    } else {
+      while (j < src.length && mask[j] !== 1) j++;
+      parts.push(src.slice(i, j));
+    }
+    i = j;
+  }
+  return parts.join("");
 }
 
 // .sh 注释掩码: 标 # 行注释为非代码 (单/双引号字符串保持代码; # 在字符串内不误标)。
@@ -114,8 +194,19 @@ function maskFor(f: string): (src: string) => Uint8Array {
 const SKIP_DIRS = new Set(["node_modules", "vendor", "fixture", ".git", ".quay", "dist", "coverage"]);
 const CODE_EXTS = new Set([".ts", ".sh", ".mjs", ".js"]);
 
-/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules)。
- *  遍历用 fs-walk.ts；skip 集与扩展名集仍是本检查器自己的。 */
+/** 跳过的【构建产物树】——点名的不是 basename 而是【仓内相对路径前缀】。
+ *  `packages/quay/plugin/` 是 `package.sh` 在 `npm pack` 前把仓根 `plugin/` 整体**暂存**出来的快照
+ *  (`.gitignore:26`；`git ls-files packages/quay/plugin` = 0 条，411 个常规文件 / 0 个软链)：它与
+ *  `plugin/` 是同一批文件的**第二份拷贝**，枚举它等于把每个实体数两遍，直接抬高 `code`/`hardcoded`
+ *  (实测：`table[].codeFiles` 并集 729 个里有 **82** 个落在此前缀下)。
+ *  ⛔ 为什么不写进 SKIP_DIRS：`walkFiles` 的 `prune` 只拿到 **basename**，而 `plugin` 同时是四个扫描根
+ *  之一（prune 对根本身不生效，但一个**全局**裸名 `plugin` 会连带剪掉**任何**叫 plugin 的目录）；
+ *  名字面比要表达的面宽 ⇒ 静默过度剪枝，正是硬规则 3b 的形态。按路径前缀表达才是这个谓词本身
+ *  (gap-arch-review-cluster-ignores-detector-flag-predicate 成因二)。 */
+const SKIP_REL_PREFIXES = ["packages/quay/plugin/"];
+
+/** 递归枚举 root 下 plugin/packages/experiments/scripts 的代码文件 (跳过 vendor/dist/fixture/node_modules
+ *  与构建产物树 SKIP_REL_PREFIXES)。遍历用 fs-walk.ts；skip 集与扩展名集仍是本检查器自己的。 */
 export function walkCodeFiles(root: string): string[] {
   const roots = ["plugin", "packages", "experiments", "scripts"].map((d) => path.join(root, d));
   const out = roots.flatMap((r) =>
@@ -125,17 +216,12 @@ export function walkCodeFiles(root: string): string[] {
       include: (name, ext) => CODE_EXTS.has(ext),
     }),
   );
-  return out.sort();
-}
-
-function relOf(root: string, f: string): string {
-  return path.relative(root, f);
-}
-
-function lineOf(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
+  return out
+    .filter((f) => {
+      const rel = path.relative(root, f).split(path.sep).join("/");
+      return !SKIP_REL_PREFIXES.some((p) => rel.startsWith(p));
+    })
+    .sort();
 }
 
 /** 正则命中且命中【起点】落在代码位置 (mask[start] === 0)。 */
@@ -150,10 +236,6 @@ function codeMatch(src: string, mask: Uint8Array, re: RegExp): { line: number; m
   return hits;
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 // ── 单一访问器正则 ───────────────────────────────────────────────────────────────────────────
 // 【一处定义, 两处使用】literalReplication() 与 replicationTable() 曾经各持这份正则的一份【逐字副本】
 // (gap-identity-accessor-regex-source-computed-path): 两份副本既让同一缺陷要修两遍, 又允许两条路径
@@ -164,7 +246,9 @@ function escapeRegex(s: string): string {
  *  处必然失败 ⇒ 本仓 6 个直接引用文件被逐个计成 hardcoded。
  *  ⛔ 两个方向都不能过: 简单放宽成 `[^\n]*?` 会让 `. "$CONF" # loads x.sh` 这种【行尾注释里的提及】
  *  也算成 accessor (匹配起点是行首的 `.`, 落在代码位置, 位置掩码拦不住) —— 等于把
- *  `flagged = hardcoded >= threshold && hardcoded > accessor` 架空, 即把检测器关掉。
+ *  `isFlagged` 的评判 (硬编码数须达到阈值且多于访问器数) 架空, 即把检测器关掉。
+ *  ⛔ 此处刻意不逐字写出谓词: 本文件上「阈值谓词有几个实现」的机械读数是一条裸 grep (AC6),
+ *  注释里再写一遍会让它把**文档**算成第二个实现 (硬规则 2: 按位置判定, 注释不是代码位置)。
  *  仅要求引号成对【也】不够: 那样 `. "$CONF" # loads x.sh` 会被读成「引号段 "$CONF" + 后面的路径」。
  *  故未加引号的片段额外排除 `#` (shell 里词首的 `#` 开注释; 引号段内的 `#` 不受影响)。
  *  两条合起来才同时做到「读得懂嵌套引号」与「不吞掉行尾注释」。 */
@@ -181,18 +265,39 @@ const ASSIGN_ANCHOR = `(?:^|[;&|{\\n])\\s*`;
 /** 赋值语句与随后的 `source <变量>` 之间允许的最大距离 (字符)。 */
 const ACCESSOR_VAR_WINDOW = 2000;
 
+/** 命名导入 / 再导出**子句**的字符集 —— 子句里只可能出现 标识符 / 空白 / 花括号 / 逗号 / `*`
+ *  (`import defaultExport, { a as b } from …` 是它的上界, 见 accessorRegexSource 的注释)。
+ *  ⛔ 引号与 `;` **不在**其中 —— 这两条排除正是「不跨字符串 ∧ 不跨语句边界」两条真结构约束的载体。 */
+const CLAUSE = `[\\w$\\s{}*,]*?`;
+
 /** 单一访问器正则【源】—— 三个族:
- *  ① `import … from "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
+ *  ① `import … from "…"` / `export … from "…"` / `import "…"` / `import("…")` / `require("…")`  (TS/JS 模块访问器)
  *  ② `source <.路径表达式>` / `. <.路径表达式>`        (shell 内联路径, 引号可嵌套)
  *  ③ `VAR="<.路径表达式>"` … `. "$VAR"` / `source "${VAR}"`  (shell 先赋值路径、后 source 变量,
  *     本仓 61 个 .sh 的主流形态 —— 单份正则做不到, 故用 \\1 反向引用把两半绑在同一个变量名上)
- *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。 */
+ *  调用方统一 `new RegExp(accessorRegexSource(stem))`; 两条读数路径共用它 ⇒ 不可能分叉。
+ *
+ *  ⛔ ① 的子句**允许跨行**, 但「跨到哪里为止」由 CLAUSE 这个**结构字符集**表达, 不是行内锚点:
+ *    · 旧写法 `import\s+[^'"\n]*?from\s*["']` 里的 `[^'"\n]` 把换行也排除了, 于是本仓**主流**的
+ *      多行命名导入 (`import {\n  a,\n  b,\n} from "./x.ts"`, 以及 `plugin/scripts/slot-refill.ts`
+ *      那种 30+ 行、内部夹注释的导入块) 整族读成 hardcoded —— 与「没有复制」同形 (硬规则 3b)。
+ *    · CLAUSE 读得进换行、花括号与注释(调用方已用 `blankComments()` 抹平注释), 但**读不进引号**:
+ *      每个 import 语句里都至少有一个带引号的 specifier 挡在中间 ⇒ 它绝不吞掉【另一个】import 的
+ *      specifier (惰性匹配在那里必然失败并回溯)。
+ *    · `(?<![\w$.])from` 是最后一道: 子句惰性截断在词中间时 (`trans|from`), 这个 `from` 不算数。
+ *  ⛔ 仍不接 `export function … {}` 这种形态: `from` 只认【re-export】(`export {…} from` /
+ *    `export * [as ns] from` / `export type {…} from`), 否则一个普通 export 声明会一路扫到下一个
+ *    真 import 的 `from` (那里没有引号拦着)。 */
 export function accessorRegexSource(stem: string): string {
   const s = escapeRegex(stem);
+  const ext = `(?:\\.(?:ts|mjs|js))?`;
+  const spec = `\\s*["'][^"']*?${s}${ext}["']`;
   return (
-    `(?:import\\s+[^'"\\n]*?from\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
-    `import\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
-    `require\\s*\\(\\s*["'][^"']*?${s}(?:\\.(?:ts|mjs|js))?["']|` +
+    `(?:import\\s+${CLAUSE}(?<![\\w$.])from${spec}|` +
+    `export\\s+(?:type\\s+)?(?:\\{${CLAUSE}\\}|\\*(?:\\s+as\\s+[\\w$]+)?)\\s*(?<![\\w$.])from${spec}|` +
+    `import${spec}|` +
+    `import\\s*\\(${spec}|` +
+    `require\\s*\\(${spec}|` +
     `${SOURCE_CMD}["']?${PATH_EXPR}${s}(?:\\.sh)?["']?|` +
     `${ASSIGN_ANCHOR}([A-Za-z_][A-Za-z0-9_]*)=(["'])${PATH_EXPR}${s}(?:\\.sh)?\\2` +
     `[\\s\\S]{0,${ACCESSOR_VAR_WINDOW}}?${SOURCE_CMD}["']?\\$\\{?\\1\\}?["']?)`
@@ -221,7 +326,7 @@ export function findPathConstants(root: string, files: string[]): PathConstant[]
       if (mask[m.index] !== 0) continue;
       const script = m[4];
       out.push({
-        file: relOf(root, f),
+        file: path.relative(root, f),
         line: lineOf(src, m.index),
         name: m[1],
         script,
@@ -237,6 +342,13 @@ export function findPathConstants(root: string, files: string[]): PathConstant[]
 export interface JudgmentRewrite {
   file: string;
   line: number;
+  /** true ⇔ 该站点**可合并到 kernel leaf** ⇒ 计入 `judgmentRewrites` (见 classifyRewriteSite)。 */
+  mergeable: boolean;
+  /** `mergeable === false` 时的 carve-out 类别，true 时为 null —— 枚举取值，⛔ 不是布尔：
+   *  「被排除」必须能说出是被【哪一条】规则排除的 (硬规则 3)。 */
+  carveOut: RewriteCarveOutKind | null;
+  /** 一行结构性理由；`mergeable === true` 时为 null。 */
+  carveOutReason: string | null;
 }
 
 /** 读取原语 —— 「这一行是在【读】」那一半。 */
@@ -297,10 +409,147 @@ function boundToRead(src: string, at: number, prefix: string, suffix: string, is
   return subj !== null && subjectCompared(src, at, subj, isShell);
 }
 
+// ── 判定重写的【可合并性】分类（本任务：把非可合并的站点类从计数里排除）──────────────────────
+//
+// 计数语义（收窄后）：`judgmentRewrites` = **可合并到 kernel leaf 的**判定重写 —— 即该站点所在的
+// 载体能把 `packages/quay/src/kernel/proc-identity.ts` 当作单一实现来用。不含该条件的站点**不是**
+// 「没有判定重写」，而是**结构上不可能合并**：它们的载体有真实理由各自实现判据。
+//
+// ⛔ 按【类】排除，⛔ 不按文件名白名单：按文件名硬编码等于把下一条同类站点漏掉 —— 缺陷是成簇的，
+// 兄弟实例常在同一目录甚至同一文件（硬规则 5b）。下面四条规则问的都是载体的**结构性属性**。
+//
+// ⛔ 排除不得静默（硬规则 3b + 3 枚举）：被排除的站点与理由以**独立取值**出现在 report 里
+// （`judgmentRewriteCarveOuts`，每条带 `carveOut` 类别 + `carveOutReason`），人类可读面也打印它们。
+// **它们没有被删掉** —— 「作为 carve-out 排除」与「没扫到」必须可区分。
+//
+// 已知残余（如实记，⛔ 不假装规则 (d) 无代价）：一条**真的可合并**的重复判定若落在 repo-import-free
+// 的 `.mjs` 里，会被规则 (d) 排除而不上报。这不是恒定盲区 —— `--no-carve-out import-free-mjs` 关掉
+// 该规则后它就回到可合并列表（AC3 的两态对照钉的就是这一点），所以该盲区是**可检的**，不是静默的。
+
+/** carve-out 的四个类别。 */
+export const REWRITE_CARVE_OUT_KINDS = ["test", "shell", "imports-leaf", "import-free-mjs"] as const;
+export type RewriteCarveOutKind = (typeof REWRITE_CARVE_OUT_KINDS)[number];
+
+/** 分类结果 —— 枚举取值而非布尔（硬规则 3）。 */
+export interface RewriteSiteClass {
+  /** true ⇔ 该站点可合并到 kernel leaf ⇒ 计入 `judgmentRewrites`。 */
+  mergeable: boolean;
+  /** `mergeable === false` 时的类别；true 时为 null。 */
+  carveOut: RewriteCarveOutKind | null;
+  /** 一行结构性理由；`mergeable === true` 时为 null。 */
+  carveOutReason: string | null;
+}
+
+/** kernel leaf 的 specifier 词干 —— 供 `accessorRegexSource()` 复用**本文件唯一那套** accessor 正则。 */
+const KERNEL_LEAF_STEM = "kernel/proc-identity";
+
+/** 载体是否是**测试**：路径段里有 `test|tests|__tests__|__test__`，或 basename 形如 `*.test.mjs` /
+ *  `*.spec.ts`。理由：判据与被判对象必须**独立实现**（G3 —— judge 不得共享被判实现）；测试若 import
+ *  生产侧的判定叶子，它验的就是那条叶子自己，测不出叶子错在哪。
+ *  按**路径/命名约定**判定，⛔ 不列文件名（硬规则 5b）。 */
+function isTestCarrier(relFile: string): boolean {
+  const segs = relFile.split("/");
+  const base = segs[segs.length - 1] ?? "";
+  if (segs.slice(0, -1).some((s) => s === "test" || s === "tests" || s === "__tests__" || s === "__test__")) {
+    return true;
+  }
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(base);
+}
+
+/** 载体是否已**经结构性关系到达 kernel leaf**。复用本文件**唯一**那套 accessor 正则
+ *  (`accessorRegexSource`) 并跑在 `blankComments()` 的视图上，⛔ 不另写一份 specifier 匹配 ——
+ *  两份副本正是本仓反复出现的成因形态（硬规则 5b）。
+ *  理由：已 import 叶子的载体里残余的 /proc 读取是**没有被迁移判定的那部分**（例如只取 argv[0] 的
+ *  第三个谓词），不是对同一判定的独立重写。 */
+function importsKernelLeaf(src: string, relFile: string): boolean {
+  const mask = maskFor(relFile)(src);
+  const re = new RegExp(accessorRegexSource(KERNEL_LEAF_STEM));
+  re.lastIndex = 0;
+  return re.test(blankComments(src, mask));
+}
+
+/** 仓内相对 specifier 的四种形态（静态 `import … from` / re-export / 动态 `import()` / `require()`）。
+ *  跑在 `blankComments()` 的视图上：注释里写的 `"./x"` 不是 specifier（硬规则 2：按位置判定 ——
+ *  注释不是代码位置）。`[^;]*?` 读得进换行，故多行导入块不会被漏掉。 */
+const REPO_INTERNAL_SPECIFIER =
+  /(?:^|[^\w$.])(?:import|export)\b[^;]*?\bfrom\s*["']\.{1,2}\/|(?:^|[^\w$.])import\s*\(\s*["']\.{1,2}\/|(?:^|[^\w$.])require\s*\(\s*["']\.{1,2}\/|(?:^|[^\w$.])import\s+["']\.{1,2}\//;
+
+/** 载体是否是**仓内 import-free 的 `.mjs` 运行时助手**：模块 specifier 全部是 `node:` 内建或裸包名，
+ *  没有一条相对路径。理由：这类载体**刻意不 import 仓内 TS 内部件** —— 它们要能以 `node <file>` 单独
+ *  跑、并进 npm-pack 包体，把 kernel leaf 拉进来会破坏它们的存在理由。 */
+function isImportFreeMjs(src: string, relFile: string): boolean {
+  if (!relFile.endsWith(".mjs")) return false;
+  const mask = maskFor(relFile)(src);
+  return !REPO_INTERNAL_SPECIFIER.test(blankComments(src, mask));
+}
+
+/** 命中的 carve-out 规则 + 一行理由；未命中任何规则 ⇒ null（= 真可合并站点）。 */
+function carveOutFor(src: string, relFile: string): { kind: RewriteCarveOutKind; reason: string } | null {
+  if (isTestCarrier(relFile)) {
+    return { kind: "test", reason: "test carrier — 判据与被判对象必须独立实现 (G3), 不得共享被判叶子" };
+  }
+  if (relFile.endsWith(".sh")) {
+    return { kind: "shell", reason: "shell carrier — .sh 不能 import TS kernel leaf (文档化 carve-out)" };
+  }
+  if (importsKernelLeaf(src, relFile)) {
+    return {
+      kind: "imports-leaf",
+      reason: "already imports kernel/proc-identity.ts — 残余 /proc 读取不是被迁移判定的独立重写",
+    };
+  }
+  if (isImportFreeMjs(src, relFile)) {
+    return {
+      kind: "import-free-mjs",
+      reason: "repo-import-free .mjs runtime helper — 刻意不 import 仓内 TS 内部件 (独立运行 + 进包体)",
+    };
+  }
+  return null;
+}
+
+/** **唯一**的可合并性判定（AC2：`grep -n` 只有这一处定义，`architecture-review-cluster.ts` 不另写
+ *  一份 —— 那里只消费 `judgmentRewrites`）。
+ *
+ *  `src` 省略时按 `root/relFile` 从盘上读 —— 便于对一批真实路径逐一求值。
+ *  `disabled` 关掉若干规则（AC3 的两态对照：关掉某条 ⇒ 该条下的站点回到可合并列表）。⛔ 它能取假是
+ *  本条判据的价值所在：一条只会在「全部规则都生效」的世界里取真的谓词是与「没有站点」同形的回声。
+ *  PURE（只读 `src`/盘上文件）。 */
+export function classifyRewriteSite(
+  root: string,
+  relFile: string,
+  src?: string,
+  disabled: readonly RewriteCarveOutKind[] = [],
+): RewriteSiteClass {
+  const text = src ?? fs.readFileSync(path.join(root, relFile), "utf8");
+  const hit = carveOutFor(text, relFile);
+  if (hit === null || disabled.includes(hit.kind)) {
+    return { mergeable: true, carveOut: null, carveOutReason: null };
+  }
+  return { mergeable: false, carveOut: hit.kind, carveOutReason: hit.reason };
+}
+
+/** 便捷布尔视图（AC2 点名的谓词）。⛔ 判定本体是 `classifyRewriteSite` —— 这里只是一层委托，
+ *  两份实现会分叉，故不复制逻辑（硬规则 5b）。 */
+export function isMergeableRewriteSite(
+  root: string,
+  relFile: string,
+  src?: string,
+  disabled: readonly RewriteCarveOutKind[] = [],
+): boolean {
+  return classifyRewriteSite(root, relFile, src, disabled).mergeable;
+}
+
 /** 判定指纹 F: 一个代码文件【读 /proc/<pid>/cmdline】(外部事实 A) 且【对读到的内容做名字/特征比较】
  *  (外部事实 B: grep -q / .includes / .indexOf / .match / basename / .split / argv[0] / comm)。
- *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。 */
-export function findJudgmentRewrites(root: string, files: string[]): JudgmentRewrite[] {
+ *  ⛔ B 不是【文件级】读数（收窄，AC4）：比较原语必须绑到这次读的结果上（见 boundToRead）。
+ *
+ *  ⛔ 本函数返回**全部**检测到的站点（含 carve-out），每条自带 `mergeable`/`carveOut` 分类 ——
+ *  「检测到了什么」与「哪些可合并」是两件事，前者的已知真样本（含 `.sh`）必须继续被报出，否则
+ *  收窄会把检测器本身砍空（硬规则 2 的零计数半边，见本文件单测的收窄双向 fixture）。 */
+export function findJudgmentRewrites(
+  root: string,
+  files: string[],
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): JudgmentRewrite[] {
   // 外部事实 A: 读 /proc/<pid>/cmdline — 必须出现在【读】上下文 (readFile* / shell `<` 重定向 / cat /
   // python open), 而非仅仅在描述字符串里提及该路径 (capability-catalog 的 QUESTION 描述不算实现)。
   // 两种实现形态都要抓 (文档 §2.8 方法(e) 的教训: 单位选错聚不出靶子): ①字面量 `/proc/${pid}/cmdline`;
@@ -335,9 +584,29 @@ export function findJudgmentRewrites(root: string, files: string[]): JudgmentRew
     };
     scan(procPath);
     if (!found) scan(constructed);
-    if (found) out.push({ file: relOf(root, f), line: hitLine });
+    if (found) {
+      const rel = path.relative(root, f);
+      const cls = classifyRewriteSite(root, rel, src, opts.disabledCarveOuts ?? []);
+      out.push({
+        file: rel,
+        line: hitLine,
+        mergeable: cls.mergeable,
+        carveOut: cls.carveOut,
+        carveOutReason: cls.carveOutReason,
+      });
+    }
   }
   return out;
+}
+
+/** **可合并**的判定重写 —— `run()` 的 `judgmentRewrites` 就是这个集合，与 `judgmentRewriteCarveOuts`
+ *  互补、不重叠，并集 = `findJudgmentRewrites()` 的全部检测结果（枚举：没有第三条去路）。 */
+export function findMergeableJudgmentRewrites(
+  root: string,
+  files: string[],
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): JudgmentRewrite[] {
+  return findJudgmentRewrites(root, files, opts).filter((j) => j.mergeable);
 }
 
 // ── (a-side) 字节完全相同文件对 (AC3: plugin/scripts ↔ experiments/*/scripts) ────────────────
@@ -411,7 +680,7 @@ export function findByteIdenticalPairs(
       const candBuf = fs.readFileSync(cand);
       if (pluginBuf.equals(candBuf)) {
         const lines = pluginBuf.toString("utf8").split("\n").length - 1;
-        pairs.push({ plugin: `plugin/scripts/${name}`, experiment: relOf(root, cand), lines });
+        pairs.push({ plugin: `plugin/scripts/${name}`, experiment: path.relative(root, cand), lines });
         totalLines += lines;
       }
     }
@@ -421,42 +690,137 @@ export function findByteIdenticalPairs(
 
 // ── (a) 字面量复制度 (AC5: full vs code 分列; 单一访问器 vs 硬编码) ───────────────────────────
 
+/** 命中点是不是「**按路径调用**」该实体 (而非**命名**它) —— 本任务 §三明列的非证据类。
+ *
+ *  为什么它【非证据】: 一个实体被**调用**时必然要写出它住在哪 —— 那是位置知识, 正是单一访问器
+ *  (import / source) 要收敛掉的那一半; 而「身份复制」问的是这个实体被**独立命名/独立判定**了几次。
+ *  两个形态 (判词 §三 逐字点名的两类):
+ *    A 路径尾 —— 实体名是更长路径串的最后一段 (`"…/scripts/ready-pool-check.ts"`、
+ *      `path.join(__dirname, "../scripts/ready-pool-check.ts")`) ⇒ 前一个字符是路径分隔符;
+ *    B 实参位 —— 实体名**整段**是一个字符串字面量, 且该字面量在实参/数组元素位 (紧邻的前一个非空白
+ *      字符是 `(` / `,` / `[`) ⇒ 它被**交给**某个调用, 而不是被**写进**某段文本:
+ *      `path.join(root, "plugin", "scripts", "ready-pool-check.ts")`、
+ *      `resolveKernelSibling("ready-pool-check.ts")`、spawn 的 argv 数组、`runHelp("ready-pool-check.ts")`。
+ *
+ *  ⛔ 反向边界同样要钉住 (否则本判定会被自己对 0 的那种形态架空, 硬规则 2 的零计数半边):
+ *  **裸 basename 出现在文本/散文/注册表串里仍是证据** —— `echo "shared-lib.sh"`、
+ *  `"Usage: node workflow-event-schema.mjs --validate <file>"`、`<h2>resource-gate.sh</h2>`。
+ *  它们的前一个非空白字符是标识符或运算符, 不是实参位 ⇒ 不被本谓词取掉。
+ *  `plugin/test/identity-replication-check.test.mjs` 的 string-only / comment-tail 两条负控制
+ *  就钉在这一边界上。 */
+export function isPathInvocationMention(src: string, idx: number, entity: string): boolean {
+  const prev = idx > 0 ? src[idx - 1] : "";
+  if (prev === "/" || prev === "\\") return true; // A 路径尾
+  if (prev !== '"' && prev !== "'") return false; // B 只对「整段是实体名」的引号串成立
+  if (src[idx + entity.length] !== prev) return false;
+  let p = idx - 2;
+  while (p >= 0 && (src[p] === " " || src[p] === "\t" || src[p] === "\n" || src[p] === "\r")) p--;
+  const before = p >= 0 ? src[p] : "";
+  return before === "(" || before === "," || before === "[";
+}
+
+/** 单文件 × 单实体的分类结果。 */
+export interface EntityMatch {
+  /** 该文件在代码位置提及该实体, 或经结构性关系引用它 ⇒ 计入 `code`/`codeFiles`。 */
+  code: boolean;
+  /** 经 import / re-export / require / source 单一访问器引用。 */
+  accessor: boolean;
+  /** 代码位置且**非按路径**的命中 —— `hardcoded` 的样本来源 (行号 + 该行原文)。 */
+  evidenceLines: { line: number; text: string }[];
+}
+
+/** `literalReplication()` 与 `replicationTable()` 共用的**唯一**一份逐文件判定。
+ *  (两份逐字副本正是本文件那个缺陷的成因形态: 同一判据在两个消费点各写一遍, 修了一处漏另一处。)
+ *
+ *  判定顺序是判据的一半, 不能颠倒:
+ *    1. **先**问「这个文件是否经结构性关系到达该实体」(`accessorRe` 跑在 `blankComments()` 的视图上)
+ *       —— 有即 `accessor`, 与它的命中点长什么样无关。⛔ 先按位置筛会把 accessor 全筛掉:
+ *       import 的 specifier 本身就是 `"./ready-pool-check.ts"`, 天然是「路径尾」。
+ *    2. **再**问「有没有【代码位置 ∧ 非按路径】的命中」—— 有即 `hardcoded`。
+ *    3. 两条都不成立 ⇒ 不计数 (只被路径引用 / 只在注释与文档里提到)。
+ *
+ *  这与旧实现的差别正是本任务判据的两处产地: 旧的第 2 步只问 `mask[idx] === 0`(注释与文档),
+ *  不看「按路径引用」, 也没有把 accessor 判定前置。 */
+export function matchEntity(
+  src: string,
+  mask: Uint8Array,
+  blanked: string,
+  accessorRe: RegExp,
+  entity: string,
+): EntityMatch {
+  // ⛔ 这里**不**用 `codeMatch()` 的「命中起点必须落在代码位置」那一半判据 —— 它在抹平后的视图上
+  // 会取假(假阴性): 起点可以落在**已被抹成空格**的注释里 (`^` + `\s*` 恰好跨过整行注释), 于是
+  // 一条真正的 `source "$(dirname "$0")/shared-lib.sh"` 被丢掉 —— 实测: 该处起点是注释的第 0 列。
+  // 位置过滤本身没有缺席, 只是换了载体: `blankComments()` 已经把注释**内容**整个抹成空格, 所以
+  // 正则根本读不到注释里的任何实体 (`. "$CONF"  # loads x.sh` 的 `x.sh` 已不存在 ⇒ 不可能命中),
+  // 而命中里留下的实体一定在代码位置 (实体名不含空格 ⇒ 它对不上任何被抹平的区段)。
+  accessorRe.lastIndex = 0; // 调用方传非 global 的正则; 若将来带了 `g`, 这一行让它仍然无状态。
+  const accessor = accessorRe.test(blanked);
+  const evidenceLines: { line: number; text: string }[] = [];
+  let anyEvidence = false;
+  let idx = 0;
+  while ((idx = src.indexOf(entity, idx)) !== -1) {
+    if (mask[idx] === 0 && !isPathInvocationMention(src, idx, entity)) {
+      anyEvidence = true;
+      if (evidenceLines.length < HARDCODED_SAMPLE_LIMIT) {
+        const lineStart = src.lastIndexOf("\n", idx) + 1;
+        let lineEnd = src.indexOf("\n", idx);
+        if (lineEnd === -1) lineEnd = src.length;
+        evidenceLines.push({ line: lineOf(src, idx), text: src.slice(lineStart, lineEnd).trim().slice(0, 120) });
+      }
+      // 样本收满 ⇒「有没有」已确定, 不必扫完剩下的命中 (大文件的完整扫描是这条检查器的热点)。
+      if (evidenceLines.length >= HARDCODED_SAMPLE_LIMIT) break;
+    }
+    idx += entity.length;
+  }
+  return { code: accessor || anyEvidence, accessor, evidenceLines };
+}
+
+/** 每个命中文件取样上限 —— 「报一个计数时同时报出它匹配到的前几条实际内容」(docs 附录 A)。 */
+export const HARDCODED_SAMPLE_LIMIT = 3;
+
 export interface LiteralReplication {
   entity: string;
   full: number;       // 含该 basename 的代码文件数 (全文)
-  code: number;       // 其中 basename 落在【代码位置】(剔除注释/文档) 的文件数
-  accessor: number;   // 经 import/require/source 单一访问器引用的文件数
-  hardcoded: number;  // 代码位置硬编码字面量 (非 import/source) 的文件数
+  code: number;       // 其中 basename 落在【代码位置】或经结构性关系引用的文件数
+  accessor: number;   // 经 import/re-export/require/source 单一访问器引用的文件数
+  hardcoded: number;  // 代码位置【独立命名】该实体 (无结构性关系) 的文件数
   codeFiles: string[];
+  /** 硬编码文件的实测样本 (前 `HARDCODED_SAMPLE_LIMIT` 条, 每条含文件:行 + 该行原文)。
+   *  ⛔ 不是装饰: 计数为 N 的判红行必须能在**同一读数**里给出它命中的是什么 —— 否则「N 个文件
+   *  独立命名了它」与「N 个文件里恰好有个同名串」在报告上同形 (硬规则 2/3b)。 */
+  hardcodedSamples: string[];
 }
 
 export function literalReplication(root: string, files: string[], entity: string): LiteralReplication {
   const stem = entity.replace(/\.(ts|sh|mjs|js)$/, "");
   const codeFiles: string[] = [];
+  const hardcodedSamples: string[] = [];
   let full = 0;
   let code = 0;
   let accessor = 0;
   let hardcoded = 0;
-  const importRe = new RegExp(accessorRegexSource(stem));
+  const accessorRe = new RegExp(accessorRegexSource(stem));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     if (!src.includes(entity)) continue;
     full++;
     const mask = maskFor(f)(src);
-    let codeHit = false;
-    let idx = 0;
-    while ((idx = src.indexOf(entity, idx)) !== -1) {
-      if (mask[idx] === 0) { codeHit = true; break; }
-      idx += entity.length;
-    }
-    if (codeHit) {
-      code++;
-      codeFiles.push(relOf(root, f));
-      if (codeMatch(src, mask, importRe).length > 0) accessor++;
-      else hardcoded++;
+    const m = matchEntity(src, mask, blankComments(src, mask), accessorRe, entity);
+    if (!m.code) continue;
+    code++;
+    codeFiles.push(path.relative(root, f));
+    if (m.accessor) accessor++;
+    else {
+      hardcoded++;
+      for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
+        if (hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
+          hardcodedSamples.push(`${path.relative(root, f)}:${e.line}  ${e.text}`);
+        }
+      }
     }
   }
-  return { entity, full, code, accessor, hardcoded, codeFiles };
+  return { entity, full, code, accessor, hardcoded, codeFiles, hardcodedSamples };
 }
 
 /** 全量字面量复制度表: 对每个 plugin 脚本 basename 一次性算 full/code (单趟扫描所有文件)。 */
@@ -465,7 +829,6 @@ export function replicationTable(
   files: string[],
   entities: string[],
 ): LiteralReplication[] {
-  const scriptsDir = path.join(root, "plugin", "scripts");
   const rows = entities.map((e) => ({
     entity: e,
     full: 0,
@@ -473,6 +836,7 @@ export function replicationTable(
     accessor: 0,
     hardcoded: 0,
     codeFiles: [] as string[],
+    hardcodedSamples: [] as string[],
   }));
   const stems = rows.map((r) => r.entity.replace(/\.(ts|sh|mjs|js)$/, ""));
   // 每个实体只编译一次访问器正则 (原来是每个 (文件 × 实体) 编译一次)。共享同一份 accessorRegexSource,
@@ -480,23 +844,27 @@ export function replicationTable(
   const accessorRes = stems.map((s) => new RegExp(accessorRegexSource(s)));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
+    // 掩码与「注释抹平」视图按文件算一次, 与实体数无关 (原来每个实体重算一遍掩码)。
+    const mask = maskFor(f)(src);
+    const blanked = blankComments(src, mask);
     for (let ri = 0; ri < rows.length; ri++) {
       const row = rows[ri];
       if (!src.includes(row.entity)) continue;
       row.full++;
-      const mask = maskFor(f)(src);
-      let idx = 0;
-      let codeHit = false;
-      while ((idx = src.indexOf(row.entity, idx)) !== -1) {
-        if (mask[idx] === 0) { codeHit = true; break; }
-        idx += row.entity.length;
-      }
-      if (!codeHit) continue;
+      const m = matchEntity(src, mask, blanked, accessorRes[ri], row.entity);
+      if (!m.code) continue;
       row.code++;
       row.codeFiles.push(rel);
-      if (codeMatch(src, mask, accessorRes[ri]).length > 0) row.accessor++;
-      else row.hardcoded++;
+      if (m.accessor) row.accessor++;
+      else {
+        row.hardcoded++;
+        for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
+          if (row.hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
+            row.hardcodedSamples.push(`${rel}:${e.line}  ${e.text}`);
+          }
+        }
+      }
     }
   }
   return rows;
@@ -512,6 +880,24 @@ export interface SharedModuleControl {
   sampleFiles: string[];
 }
 
+/** 高复制度的**阈值谓词 —— 单一实现**（两处消费者：`sharedModuleControl` 与下游的
+ *  `architecture-review-cluster.ts#clusterIdentityReport`）。
+ *
+ *  为什么必须收成一处：判据有两半，「字面量重复出现 ≥ threshold 次」只是其一；另一半（硬编码数须
+ *  **多于**访问器数）才是把「**大量文件走单一访问器引用、少数硬编码**」（= 共享模块的正常形态，
+ *  `gate-script-base.ts` 就是它）与真正的复制区分开的那一半。下游曾只读裸计数 `hardcoded > 0`，
+ *  阈值判定整个缺席 ⇒ 25 个逐实体簇里 8 个是检测器**已经判过清白**的假簇
+ *  (gap-arch-review-cluster-ignores-detector-flag-predicate：上游判过、下游不读 ⇒ 输出与
+ *  「查过且合格」同形，硬规则 3b)。两份副本正是本缺陷的成因形态，故只此一份。
+ *
+ *  `accessor`/`hardcoded` 缺席按 0 计：缺值不等于「未判」——行上两者都在（`LiteralReplication`），
+ *  缺省只出现在手写 fixture 里。PURE。 */
+export function isFlagged(row: { hardcoded?: number; accessor?: number }, threshold = 5): boolean {
+  const hardcoded = row.hardcoded ?? 0;
+  const accessor = row.accessor ?? 0;
+  return hardcoded >= threshold && hardcoded > accessor;
+}
+
 export function sharedModuleControl(
   root: string,
   files: string[],
@@ -519,7 +905,7 @@ export function sharedModuleControl(
   threshold = 5,
 ): SharedModuleControl {
   const r = literalReplication(root, files, entity);
-  const flagged = r.hardcoded >= threshold && r.hardcoded > r.accessor;
+  const flagged = isFlagged(r, threshold);
   return {
     entity,
     importAccessor: r.accessor,
@@ -534,7 +920,12 @@ export function sharedModuleControl(
 export interface Report {
   root: string;
   pathConstants: PathConstant[];
+  /** **可合并到 kernel leaf 的**判定重写（收窄后的计数语义，见 classifyRewriteSite）。 */
   judgmentRewrites: JudgmentRewrite[];
+  /** 检测到但**结构上不可合并**的站点 —— 以独立取值在场并各带一行理由。
+   *  ⛔ 不是被删掉的读数：`judgmentRewrites.length + judgmentRewriteCarveOuts.length` =
+   *  检测到的全部站点数，「作为 carve-out 排除」与「没扫到」因此可区分 (硬规则 3b)。 */
+  judgmentRewriteCarveOuts: JudgmentRewrite[];
   byteIdentical: {
     count: number;
     totalLines: number;
@@ -547,7 +938,11 @@ export interface Report {
   table: LiteralReplication[];
 }
 
-export function run(root: string, limit: number): Report {
+export function run(
+  root: string,
+  limit: number,
+  opts: { disabledCarveOuts?: readonly RewriteCarveOutKind[] } = {},
+): Report {
   // 排除检测器自身 + 其单测: 这两个文件含 /proc/<pid>/cmdline 指纹正则、"session-liveness.sh"
   // 被测实体字面量、以及 *_REL 合成 fixture 字符串 (检测器定义/测试输入, 不是被测对象) — 计入会
   // 把检测器自指与测试 fixture 误报成判定重写/复制度 (grep 自匹配, instrument-failure FAMILY-3 同形)。
@@ -557,7 +952,11 @@ export function run(root: string, limit: number): Report {
 
   const pathConstants = findPathConstants(root, files);
 
-  const judgmentRewrites = findJudgmentRewrites(root, files);
+  // 判定重写: 一次检测, 两个互补列表 (可合并 / carve-out)。⛔ 不在这里过滤第二遍 —— 分类判定
+  // 只有一个老家 (classifyRewriteSite), 消费者 import 结果。
+  const detectedRewrites = findJudgmentRewrites(root, files, opts);
+  const judgmentRewrites = detectedRewrites.filter((j) => j.mergeable);
+  const judgmentRewriteCarveOuts = detectedRewrites.filter((j) => !j.mergeable);
 
   const byteIdenticalRaw = findByteIdenticalPairs(root);
 
@@ -584,6 +983,7 @@ export function run(root: string, limit: number): Report {
     root,
     pathConstants,
     judgmentRewrites,
+    judgmentRewriteCarveOuts,
     byteIdentical: {
       count: byteIdenticalRaw.pairs.length,
       totalLines: byteIdenticalRaw.totalLines,
@@ -601,12 +1001,38 @@ export function run(root: string, limit: number): Report {
 function usage(): never {
   console.error(
     "usage: node --experimental-strip-types identity-replication-check.ts [--root <dir>] [--json] [--limit <n>]\n" +
+      "                                        [--no-carve-out <kind>[,<kind>…]]\n" +
       "  --root <dir>   repo to scan (default: repo-root.ts resolution)\n" +
       "  --limit <n>    max rows in the human literal-replication table (default 25)\n" +
       "  --json         emit the full report as JSON\n" +
+      `  --no-carve-out disable one non-mergeable-site rule (repeatable). kinds: ${REWRITE_CARVE_OUT_KINDS.join(", ")}\n` +
+      "                 (disabling a rule moves its sites back into `judgmentRewrites` — the two-state check)\n" +
       "Exit: 0 = report produced (observer, not a pass/fail gate); 2 = usage/environment error.",
   );
   process.exit(0);
+}
+
+/** 解析 `--no-carve-out <kind>`（可重复、可逗号分隔）。未知 kind ⇒ exit 2，⛔ 不静默忽略：
+ *  一条读不懂的规则名若被吞掉，输出就与「该规则已生效」同形（硬规则 3b）。 */
+function collectDisabledCarveOuts(args: string[]): RewriteCarveOutKind[] {
+  const out: RewriteCarveOutKind[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--no-carve-out") continue;
+    const raw = args[i + 1];
+    if (raw === undefined || raw.startsWith("--")) {
+      console.error("ERROR: --no-carve-out needs a kind");
+      process.exit(2);
+    }
+    for (const part of raw.split(",")) {
+      const kind = part.trim();
+      if (!(REWRITE_CARVE_OUT_KINDS as readonly string[]).includes(kind)) {
+        console.error(`ERROR: unknown carve-out kind "${kind}" — one of: ${REWRITE_CARVE_OUT_KINDS.join(", ")}`);
+        process.exit(2);
+      }
+      out.push(kind as RewriteCarveOutKind);
+    }
+  }
+  return out;
 }
 
 function printHuman(report: Report): void {
@@ -620,8 +1046,24 @@ function printHuman(report: Report): void {
   }
   if (report.pathConstants.length === 0) console.log("  (none)");
 
-  console.log(`\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ${report.judgmentRewrites.length} 处 ==`);
+  console.log(
+    `\n== 判定重写 (AC2) — 读 /proc/<pid>/cmdline ∧ 比较名字 (识别进程) — ` +
+      `**可合并到 kernel leaf** ${report.judgmentRewrites.length} 处 ==`,
+  );
   for (const j of report.judgmentRewrites) console.log(`  ${j.file}:${j.line}`);
+  if (report.judgmentRewrites.length === 0) {
+    console.log("  (none — 检测到的站点全部落在 carve-out 里; 见下一节, 它们没有被删掉)");
+  }
+
+  // carve-out 面与上面并列在场: 「被排除」与「没扫到」必须在同一份报告里可区分 (硬规则 3b)。
+  console.log(
+    `\n== 判定重写的 carve-out (检测到但结构上不可合并, 带理由) — ` +
+      `${report.judgmentRewriteCarveOuts.length} 处 ==`,
+  );
+  for (const j of report.judgmentRewriteCarveOuts) {
+    console.log(`  ${j.file}:${j.line}  [${j.carveOut}] ${j.carveOutReason}`);
+  }
+  if (report.judgmentRewriteCarveOuts.length === 0) console.log("  (none)");
 
   console.log(
     `\n== 字节完全相同文件对 (AC3) — ${report.byteIdentical.count} 对 / ${report.byteIdentical.totalLines} 行 ` +
@@ -641,7 +1083,19 @@ function printHuman(report: Report): void {
 
   console.log(`\n== 全量字面量复制度表 (code 位置计数 > 0, top ${report.table.length}) ==`);
   for (const r of report.table) {
-    console.log(`  ${r.entity.padEnd(44)} code=${String(r.code).padStart(3)}  full=${String(r.full).padStart(3)}  accessor=${r.accessor}  hardcoded=${r.hardcoded}`);
+    const flagged = isFlagged(r);
+    console.log(
+      `  ${r.entity.padEnd(44)} code=${String(r.code).padStart(3)}  full=${String(r.full).padStart(3)}  ` +
+        `accessor=${r.accessor}  hardcoded=${r.hardcoded}${flagged ? "  <<FLAGGED" : ""}`,
+    );
+    // 判红行必须**就地**给出它命中的实际内容 (硬规则 2): 一个只报数字的判红行, 与「同名串恰好
+    // 出现在别处」在报告上同形 —— 读的人无法判断这是真复制还是判据又错了。
+    if (flagged) {
+      for (const s of r.hardcodedSamples) console.log(`        sample: ${s}`);
+      if (r.hardcodedSamples.length === 0) {
+        console.log("        sample: (none — 判红却取不出样本 ⇒ 判据故障, 不是「没有复制」)");
+      }
+    }
   }
 }
 
@@ -661,7 +1115,7 @@ export function main(argv: string[]): number {
     console.error(`ERROR: plugin/scripts not found under ${root} — is --root correct?`);
     process.exit(2);
   }
-  const report = run(root, limit);
+  const report = run(root, limit, { disabledCarveOuts: collectDisabledCarveOuts(args) });
   if (asJson) {
     console.log(JSON.stringify(report, null, 2));
   } else {

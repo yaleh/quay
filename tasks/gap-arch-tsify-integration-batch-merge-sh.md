@@ -2,7 +2,7 @@
 id: gap-arch-tsify-integration-batch-merge-sh
 title: shell→TS（SPEC Phase 5.2）：integration-batch-merge.sh（697 行，内嵌
   node+python3）改写为 TS，先做 characterization
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -122,6 +122,13 @@ $ node --test plugin/test/sh-census-check.test.mjs → tests 20 / pass 20 / fail
 - 基线 **9133 → 8439（-694）**，已在 `plugin/sh-census-baseline.json` 同步下调并写了 `_reanchorLog` 条目（含逐行归因：`-694 = 697-3`，残差 0 **由构造保证**：本支相对 develop 的全部 diff 只有 6 个路径，其中 `*.sh` 恰好这一个）。
 - `tsTwin` 读数需要 `.ts` **被 git 跟踪**才为 true（checker 读 `git ls-files`）；已在改写提交落地后复读，为 `true`。
 
+**⛔ 合入 develop 后的基线再锚（2026-09-20，fan-in 前置 pre-merge 步）**：本支 fork 之后 develop 上另有两次同类下移（`gap-arch-tsify-develop-deliver-tgz-python-heredocs` 9133→8894、`gap-arch-tsify-cross-machine-verify-sh` 8894→8413），二者与本支的 −694 作用在**互不相交**的 `.sh` 上。`git merge develop` 时 `sh-census-baseline.json` 与 `capability-catalog-declarations.json` 双双冲突：前者两侧各改了 `_reanchorLog` 尾部，后者**整个文件**冲突（develop 把该 JSON 重排成 2 空格缩进）。解法是**取 develop 版、再重新施加本支语义**（不是取本支版、也不是取 develop 版了事）：
+
+- `capability-catalog-declarations.json`：保留 develop 的缩进与它新增的两条 twin 声明（`develop-deliver-python-steps.ts` / `cross-machine-verify.ts`），重新施加本支的 6 行（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / **CONSUMER**），**丢掉** inert 的 `PUBLIC_ENTRYPOINTS` twin 行。
+- `sh-census-baseline.json`：保留 develop 的 `_reanchorLog`（10 条）并在其后追加第 11 条，`from` = develop 末条的 `to`（8413），`to` = **本树实测 7719**，顶层两个数字同步为 `7719 / 0`。
+
+实测（checker 自己的 `--json`，不是手算）：`files[path=plugin/scripts/integration-batch-merge.sh]` = `{"codeLines":3,"embedded":["node"],"tsTwin":true}`；`totals.embeddedInterpreterLines = 7719`。7719 = 8413 − 694，即 develop 侧两次下移（−239 / −481，互不相交的 `.sh`）与本支的 −694 **精确复合、无重复计数**。`sh-census-check` → `PASS — embeddedInterpreterLines=7719 ≤ 7719, duplicateCopies=0 ≤ 0`，`plugin/test/sh-census-check.test.mjs` 20/20 绿 —— AC6 的「基线必须**等于**实测」在合入 develop 之后仍然成立（这正是 AC6 用 `deepEqual` 而非 `≤` 的意义：只写「≤」的话，develop 的两次下移会让本支的旧数字变成一个**空转**的宽上界）。
+
 ### AC4 证据（6 个调用方各自的测试，逐个跑）
 
 上文更正 2 说明这 6 个是注释/注册面而非调用面；这里按「与该调用方相关的测试」逐个单独跑（`node --test <file>`，`rc` 为 node 退出码）：
@@ -136,7 +143,7 @@ $ node --test plugin/test/sh-census-check.test.mjs → tests 20 / pass 20 / fail
 | `sync-lag-check.sh` | `sync-lag-check.test.mjs`（含 `--sync` / `--sync-pull` 两条真实走本脚本的路径） | 13/13/0 | 0 |
 | （直接调用面） | `integration-batch-merge.test.mjs`（47）+ `branch-model.test.mjs`（11）+ `integration-batch-merge-characterization.test.mjs`（5） | 63/63/0 | 0 |
 
-原始输出：`.quay/ac312/callers/*.txt`。
+原始输出：`.quay/ac312/callers/*.txt`。续做轮（合入 develop 之后）复跑直接调用面四份：`integration-batch-merge.test.mjs` 47/47、`integration-batch-merge-characterization.test.mjs` 5/5、`branch-model.test.mjs` 11/11、`sync-lag-check.test.mjs` 13/13，四份 `rc=0`。
 
 **移植期被 AC4 抓住的一个真缺陷（保留在此，因为它正是「单独跑调用方」的价值）**：我最初的 `2>&1` 合并辅助用 `bash -c 'exec "$0" "$@" 2>&1'`（裸 `exec`），而旧 bash 一律是 `bash <script>`——`sync-lag-check.sh` 没有 +x 位，裸 exec 直接 `Permission denied`（exit 126），`sync-lag-check.test.mjs` 的三条 `--sync-pull` 用例立刻红。修为 `exec bash "$0" "$@"`。这正是「只看 scoped 门会漏、必须逐个跑调用方」的实例。
 
@@ -188,7 +195,11 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/import-graph-chec
 {"ok": true, "over": [], "baselineRaised": [], "headBaseline": {"valueSccs":0,"typeSccs":0,"reverseEdges":0}, "bootstrap": false, "kernelBlocked": false}
 ```
 
-`integration-batch-merge.ts` 在 `capability-catalog-declarations.json` 的**五个结晶轴**（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING）各加一行，沿用 `slot-refill.ts` 的先例（CONSUMER / PUBLIC_ENTRYPOINTS 描述的是**书面入口**，保持 `.sh` 单行不加 twin：消费者按的仍是 `bash …integration-batch-merge.sh`）。新 `.ts` 只 import `node:*` 内建模块，不新增任何模块依赖边 ⇒ 无新环。
+`integration-batch-merge.ts` 在 `capability-catalog-declarations.json` 的**五个结晶轴**（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING）各加一行 **+ CONSUMER 一行**。新 `.ts` 只 import `node:*` 内建模块，不新增任何模块依赖边 ⇒ 无新环。
+
+**⚠️ CONSUMER 行的更正（fan-in 全量 suite 抓到的，2026-09-20）**：初版按「沿用 `slot-refill.ts` 先例，CONSUMER / PUBLIC_ENTRYPOINTS 只认**书面入口** `.sh`、`.ts` 不加 twin」处理 —— **这条先例用错了对象**：`slot-refill.ts` 的 cadence 是**每轮**（判据2 只审 `按需` 条目），而本 `.ts` 的 cadence 是 `按需`。`rhythm-consumer-check` 判据2 因此**正确地**报红：`integration-batch-merge.ts: 按需 without a CONSUMER row —— 「按需」=「无人」, no presser declared`（全量 suite 输出 `STATIC_CHECK_FAILED: rhythm-consumer-check exit=1`，整轮被这一条判红）。修法是**加 CONSUMER 行**，**不是**改检查器给 twin 开豁免——后者会让一个真·无人按的 `按需` twin 躲在 `.sh` 后面。本 `.ts` 按的人与 `.sh` **是同一批**（薄入口 `exec` 到它，条件同样是「要批量 ff 合入 develop」），所以这一行是如实描述而非凑绿。全仓先例支持这一修法：四个既有 `按需` 的 sh/ts 对（`claim-task` / `drivable-workspace-check` / `repo-root` / `vmeta-lag-check`）**都**在两侧各有一行 CONSUMER。`PUBLIC_ENTRYPOINTS` 仍**只**保留 `.sh` 一行（`capability-catalog.ts:410` 只对 `.sh` 判 surface，非 `.sh` 的 surface 恒 `null` ⇒ `.ts` 那行是 inert 的，不加）。更正后 `rhythm-consumer-check --check` → `判据2 ok — 120 judged, 0 violation(s)`，`plugin/test/rhythm-consumer-check.test.mjs` 16/16 绿。
+
+**合入 develop 后的读数**：`capability-catalog.sh --summary` = `352 scripts | 352 declared | 0 unclassified | 347 ship`（350→352 是 develop 侧新增的两个 twin 声明，非本支引入；`0 unclassified` 不变）；`import-graph-check.ts --json` `verdict.ok=true` 不变。
 
 ### AC7 证据（回归面）
 
@@ -199,7 +210,9 @@ $ bash scripts/test.sh --for-task gap-arch-tsify-integration-batch-merge-sh --al
   ℹ tests 91 / pass 91 / fail 0
   rc=0
 ```
-原始输出 `.quay/ac312/scoped-gate-1.txt`。**注意**：scoped 门选的是「任务 Touches 相关」子集，它**不含**全部 6 个调用方的测试——这正是 AC4 单独逐个跑的理由（AC4 抓到的那条 `sync-lag-check.sh` +x 缺陷 scoped 门也报了，但只有逐个跑才定位到根因）。fan-in 前的 pre-merge 步已执行：`git merge --no-edit develop` → `Already up to date`；scoped-gate cache 已写（`--task gap-arch-tsify-integration-batch-merge-sh --develop-sha da28318b1…` → `{"event":"scoped-gate-cache-written",…}`）。
+原始输出 `.quay/ac312/scoped-gate-1.txt`。**注意**：scoped 门选的是「任务 Touches 相关」子集，它**不含**全部 6 个调用方的测试——这正是 AC4 单独逐个跑的理由（AC4 抓到的那条 `sync-lag-check.sh` +x 缺陷 scoped 门也报了，但只有逐个跑才定位到根因）。
+
+**第二轮（2026-09-20 续做轮，修正 CONSUMER 行之后）**：fan-in 前置 pre-merge 步执行的是**真 merge**（develop 已前进，两个 JSON 冲突按上文「取 develop 版再重新施加本支语义」解决并提交），随后重跑 scoped 门：`bash scripts/test.sh --for-task gap-arch-tsify-integration-batch-merge-sh --allow-thin` → `rc=0`，`ℹ tests 91 / pass 91 / fail 0`，全部 scoped 静态检查 PASS（含 `sh-census-check` 7719 ≤ 7719、`import-graph-check`、`capability-catalog`、`instrument-failure-check`）。原始输出 `/tmp/ac312-scoped-gate.txt`（易失；`.quay/ac312/` 内亦留档）。scoped-gate cache 以**本轮**的 develop sha 写入。
 
 ### 未改动的语义（明确声明）
 

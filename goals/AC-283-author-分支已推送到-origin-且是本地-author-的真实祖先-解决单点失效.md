@@ -12,7 +12,7 @@ criterion: >-
   git fetch origin author >/dev/null 2>&1 || true
 
   sha_remote="$(git ls-remote --heads origin author 2>/dev/null | awk '{print
-  $1}')"
+  $1}' || true)"
 
   if [ -z "$sha_remote" ]; then
     echo "CAUSE=origin-author-absent — origin has no 'author' branch yet; push it first (git push -u origin author)" >&2; exit 1

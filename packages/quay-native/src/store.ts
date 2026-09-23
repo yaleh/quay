@@ -32,6 +32,13 @@ import { commitStoreWrite } from "../../quay/src/store-commit.ts";
 // writer's own path is here, so the rule is enforced here (硬规则 4 推论三: a judgment only the hand
 // path can reach proves nothing about the writer path).
 import { GOAL_CARRIER_DIR_NAME, writeFaceRejectionOnCreate } from "../../quay/src/goal-ac-write-face.ts";
+// The single regex-literal escaper, a kernel leaf — the SAME function plugin/scripts/ready-pool-check.ts
+// imports (via the plugin-side entry `plugin/scripts/regex-escape.ts`). The two judges previously each
+// carried their own byte-identical copy and documented the agreement only by comment ("Mirrors
+// ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract)"); the
+// agreement is now structural. Own copy was one of the twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "../../quay/src/kernel/regex-escape.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — packages/quay/src/kernel/
 // shape-sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts
@@ -108,15 +115,13 @@ export const SHAPE_REGISTRY = {
 
 export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
 
-/** Escape regex-special characters so a heading is matched LITERALLY. Without this, a registered
- *  heading like `AC (draft)` or `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$`
- *  regex where the parentheses become capture groups and NEVER match the literal `## AC (draft)` line.
- *  All the pre-variant headings are plain section names (no special chars), so escaping is a no-op for
- *  them — it only matters for the parenthesized suffix/draft variants now registered in SHAPE_REGISTRY.
- *  Mirrors ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// `escapeRegExp` (imported above, the kernel leaf) escapes regex-special characters so a heading is
+// matched LITERALLY. Without it, a registered heading like `AC (draft)` or
+// `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$` regex where the parentheses
+// become capture groups and NEVER match the literal `## AC (draft)` line. All the pre-variant headings
+// are plain section names (no special chars), so escaping is a no-op for them — it only matters for the
+// parenthesized suffix/draft variants now registered in SHAPE_REGISTRY. It is the same function
+// ready-pool-check.ts uses, so the single-judge contract is structural, not a mirrored copy.
 
 /** Does `body` contain a `## <heading>` line that is EXACTLY that heading
  *  (trailing whitespace allowed)? Exact match prevents false positives from

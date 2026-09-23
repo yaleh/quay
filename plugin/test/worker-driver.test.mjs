@@ -176,6 +176,12 @@ import {
   writeTouchedTask,
 } from "./helpers/worker-driver-harness.mjs";
 
+// gap-arch-worker-fan-in-extract-from-worker-driver：机械 fan-in 区域（fail()/step()/flipTaskDone 的
+// reason 机件）的正本已迁 worker-fan-in.ts。worker-driver.ts 经 re-export 保持【import 面】逐字不变，
+// 但【读源码的结构判据】必须按代码实际所在处取——否则判据读的是一个不再持有该代码的文件（硬规则 3b 的
+// 镜像：读错载体 ≠ 查过）。正臂断言读 FAN_IN；负臂断言（「某坏形态已消失」）对两个文件都查，故强度不降。
+const FAN_IN = path.join(path.dirname(DRIVER), "worker-fan-in.ts");
+
 // gap-process-budget-in-use-structurally-zero-never-throttles: defaultLaneCount is now BUDGET-AWARE
 // (subtracts in_use via testProcessesInUse()). Pin in_use=0 so the D7 laneCount assertion below stays
 // deterministic (mirrorMechanicalFanInSuiteState writes defaultLaneCount(); the assertion re-reads it —
@@ -399,11 +405,14 @@ test("D6 — extractFailureSummary strips MODULE_TYPELESS noise + keeps the fail
 });
 
 test("D6 — fail 产出结构化 verdict（step/verdict/exitCode/summary/logFile），⛔ 不再 (stderr||stdout).trim() 裸流", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.match(src, /verdict: \{ step, verdict: "failed", exitCode, summary, logFile \}/, "D6: verdictOf produces the structured per-step verdict");
-  assert.match(src, /reason: summary/, "D6: reason is the summary projection (⛔ not the raw stream)");
-  assert.doesNotMatch(src, /\(a\.stderr \|\| a\.stdout \|\| ""\)\.trim\(\)/, "D6: the raw (stderr||stdout).trim() dump is gone");
-  assert.match(src, /extractFailureSummary\(combined\)/, "D6: summary extracted via the noise-stripping pure fn");
+  const fanSrc = fs.readFileSync(FAN_IN, "utf8");
+  assert.match(fanSrc, /verdict: \{ step, verdict: "failed", exitCode, summary, logFile \}/, "D6: verdictOf produces the structured per-step verdict");
+  assert.match(fanSrc, /reason: summary/, "D6: reason is the summary projection (⛔ not the raw stream)");
+  // 负臂对【两个文件】都查（坏形态在任何一处重现都算红）——⛔ 不因代码搬家而把负臂收窄成只查新文件。
+  for (const s of [fs.readFileSync(DRIVER, "utf8"), fanSrc]) {
+    assert.doesNotMatch(s, /\(a\.stderr \|\| a\.stdout \|\| ""\)\.trim\(\)/, "D6: the raw (stderr||stdout).trim() dump is gone");
+  }
+  assert.match(fanSrc, /extractFailureSummary\(combined\)/, "D6: summary extracted via the noise-stripping pure fn");
 });
 
 // ── gap-scoped-gate-reason-stderr-drops-stdout ─────────────────────────────────────────────────────
@@ -468,9 +477,11 @@ test("AC1 (gap-step-trace-reason-captures-gate-stdout) — ac-gate/anti-drift �
 });
 
 test("AC2 (gap-step-trace-reason-captures-gate-stdout) — step() 包层 trace reason 用 extractFailureSummary(combinedOutput)，⛔ 不再 (r.stderr||r.stdout).trim()", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.doesNotMatch(src, /reason: \(r\.stderr \|\| r\.stdout \|\| ""\)\.trim\(\)/, "AC2: step() trace 的 stderr 优先裸流已移除");
-  assert.match(src, /extractFailureSummary\(combinedOutput\(r\.stdout, r\.stderr\)\)/, "AC2: step() trace reason 走同一去噪机件（与 fail() 共用）");
+  const fanSrc = fs.readFileSync(FAN_IN, "utf8");
+  for (const s of [fs.readFileSync(DRIVER, "utf8"), fanSrc]) {
+    assert.doesNotMatch(s, /reason: \(r\.stderr \|\| r\.stdout \|\| ""\)\.trim\(\)/, "AC2: step() trace 的 stderr 优先裸流已移除");
+  }
+  assert.match(fanSrc, /extractFailureSummary\(combinedOutput\(r\.stdout, r\.stderr\)\)/, "AC2: step() trace reason 走同一去噪机件（与 fail() 共用）");
 });
 
 // ── gap-worker-driver-complete-logging-doc ───────────────────────────────────────────────────────────
@@ -493,10 +504,12 @@ test("AC1 (gap-worker-driver-complete-logging-doc) — combinedOutput 合并 std
 });
 
 test("AC1 (gap-worker-driver-complete-logging-doc) — flip 的 git add/commit 失败 reason 用 combinedOutput（⛔ 不再 a.stderr||exit 丢弃 stdout）", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
-  assert.doesNotMatch(src, /a\.stderr \|\| `exit/, "flip 的 git add/commit 失败 reason 不再 stderr-only");
-  assert.match(src, /combinedOutput\(a\.stdout, a\.stderr\)/, "flip reason 用 combinedOutput 合并 stdout+stderr");
-  assert.match(src, /export function combinedOutput/, "combinedOutput 是单一共享机件（fail() 与 flip 共用）");
+  const fanSrc = fs.readFileSync(FAN_IN, "utf8");
+  for (const s of [fs.readFileSync(DRIVER, "utf8"), fanSrc]) {
+    assert.doesNotMatch(s, /a\.stderr \|\| `exit/, "flip 的 git add/commit 失败 reason 不再 stderr-only");
+  }
+  assert.match(fanSrc, /combinedOutput\(a\.stdout, a\.stderr\)/, "flip reason 用 combinedOutput 合并 stdout+stderr");
+  assert.match(fanSrc, /export function combinedOutput/, "combinedOutput 是单一共享机件（fail() 与 flip 共用）");
 });
 
 test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finishedAt == suiteFinishedEpoch, scope=worktree, taskId)", (t) => {

@@ -27,9 +27,13 @@
 // module's public surface (and plugin/test/criterion-failure-attribution-check.test.mjs) is unchanged.
 //
 // WHAT IT ENUMERATES (hard rule 2 — position, not keyword): see the predicate's own documentation in
-// goal-store.ts. In one line: per criterion LINE, failure-exit ∧ ¬(stderr | >&2 | console.error);
-// plus, for a criterion with NO exit statement at all, the silent status-bearing segment whose
-// inherited non-zero IS the criterion's exit.
+// goal-store.ts. In one line, three ADDITIVE classes: ① per criterion LINE, failure-exit ∧
+// ¬(stderr | >&2 | console.error); ② for a criterion with NO exit statement at all, the silent
+// status-bearing segment whose inherited non-zero IS the criterion's exit; ③ for a criterion that
+// enables errexit, an UNGUARDED assignment-with-command-substitution — under `set -e` its non-zero ends
+// the shell on that line, so the attributed cause written below it never runs. Class ③ is the
+// 2026-09-21 addition (AC-286's shape): ⛔ it is NOT behind class ②'s `out.length === 0` mutex, because
+// a criterion can carry attributed explicit exits AND still die with zero output.
 //
 // THREE-STATE OUTPUT (hard rule 3b — 读不懂输入 ≠ 合格):
 //   0 = PASS (bare-AC count ≤ committed baseline; the ratchet is shrink-only, see below)
@@ -81,6 +85,7 @@ export {
   isSilentOnFailureSegment,
   statusBearingStatement,
   implicitFailureExitLines,
+  errexitAbortSilentExits,
   maskHashComments,
   maskValueStrings,
   isBareFailureExitLine,

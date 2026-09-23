@@ -9,9 +9,11 @@
 //         gate's laydown-set rehearsal).
 //   AC3 — the cold-start AC8c dead keys are gone: `grep 'inner-state.sh\|send-keys-verified'`
 //         on plugin/skills/cold-start/SKILL.md is 0 hits (Contract invoke/control).
-//   AC4 — the launch config 三件套 (claude-fjdac --model deepseek-v4-pro +
-//         CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is in the checked-in deliverable
-//         (.claude/launch.settings.json), referenced by the manager skill's launch section.
+//   AC4 — the launch config 三件套 (claude-fjdac launcher + a PINNED model + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000)
+//         is in the checked-in deliverable (.claude/launch.settings.json + .quay/profiles.yml),
+//         referenced by the manager skill's launch section.
+//         ⛔ The specific model id is a runtime-environment value (drifts with the gateway's /v1/models
+//         export) — asserted as "pinned + non-empty", never as a literal (see profile-policy.test.mjs AC3).
 //   AC5 — the manager skill's planning function carries a live roadmap/strategic counterpart
 //         reference (cross-project portability) + the strategic-doc-staleness mechanism.
 //   AC6 — the manager skill lists the SPEC methodology sources as an index (referenced, not
@@ -77,7 +79,7 @@ test('AC3 — the cold-start skill has ZERO inner-state.sh / send-keys-verified 
 });
 
 // ── AC4 — the launch config 三件套 is in the deliverable ────────────────────────────────────────────
-test('AC4 — the launch config 三件套 (deepseek-v4-pro-anthropic + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in', () => {
+test('AC4 — the launch config 三件套 (launcher + a pinned model + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in', () => {
   const settingsPath = path.join(repoRoot, '.claude', 'launch.settings.json');
   assert.ok(fs.existsSync(settingsPath), '.claude/launch.settings.json must exist (checked-in deliverable)');
   const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -90,7 +92,10 @@ test('AC4 — the launch config 三件套 (deepseek-v4-pro-anthropic + CLAUDE_CO
   const p = JSON.parse(py.stdout);
   const outerProf = p.profiles[p.roles.outer.profile];
   assert.equal(outerProf.launcher, 'claude-fjdac', 'outer role must use claude-fjdac launcher (三件套 #2)');
-  assert.equal(outerProf.model, 'deepseek-v4-pro-anthropic', 'outer role must pin deepseek-v4-pro-anthropic (三件套 #3)');
+  // 三件套 #3 的意图是「outer **自己钉住** model，不留给 wrapper 的默认」—— 与具体模型名无关。
+  // ⛔ 不钉字面量：模型名是运行环境取值（随网关导出集合漂移），钉住它只会在换模型时烂掉。
+  assert.equal(typeof outerProf.model, 'string', 'outer role must PIN a model (三件套 #3: 不留给 wrapper 默认)');
+  assert.ok(outerProf.model.length > 0, 'outer role model must be a non-empty id');
   // The manager skill references the launch config for the manager's own start (tribal → installable),
   // WITHOUT exposing the bare launcher script — a skill is the user-facing interface, the launcher is
   // skill-internal (gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal AC2/AC4).

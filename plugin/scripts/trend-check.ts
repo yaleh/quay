@@ -46,7 +46,7 @@
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, readJsonLines } from "./gate-script-base.ts";
 
 // ── Trend math (pure, unit-tested) ────────────────────────────────────────────────────────────────────
 
@@ -95,26 +95,10 @@ export function shouldFlag(values: number[], threshold: number): boolean {
 }
 
 // ── Reading the ledgers (passive — read-only, never writes) ──────────────────────────────────────────
-
-/** Parse a JSONL file into objects, skipping blank lines and unparseable rows (best-effort). */
-export function readJsonLines(file: string): Record<string, unknown>[] {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return []; // absent ledger = no history = no trend
-  }
-  const rows: Record<string, unknown>[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line) as Record<string, unknown>);
-    } catch {
-      // skip a corrupt line — never let one bad row hide the rest of the history
-    }
-  }
-  return rows;
-}
+// `readJsonLines` now lives in gate-script-base.ts (semantic-dedup-scan finding
+// `readjsonlines-seven-defs-three-behaviors`); it is re-exported here, not re-implemented, because it
+// was part of this module's export surface before the extraction.
+export { readJsonLines };
 
 export interface SuiteRoundRow {
   round?: number;

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount, LOOP_DRIVER_CHECK_REL, OBSERVER_REGISTRY_REL, runLoopDriverProbe, readManager } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount, LOOP_DRIVER_CHECK_REL, OBSERVER_REGISTRY_REL, runLoopDriverProbe, readManager, scriptBasename, RESOURCE_GATE_REL, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, TASK_STATUS_DRIFT_CHECK_REL, TASK_STATUS_DRIFT_CHECK_NAME } from "../src/observation.ts";
 import { resolvePluginScript, resolveOrchestrationFile } from "../src/plugin-root.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
@@ -1584,4 +1584,37 @@ test("AC5: observer-registry.conf is read through resolveOrchestrationFile — r
   } finally {
     fs.rmSync(noPlugin, { recursive: true, force: true });
   }
+});
+
+// ── gap-task-status-drift-check-serve-labels-no-rel-accessor ───────────────────────────────────────
+// AC2's negative control: the landing source's display name must be DERIVED from the one rel
+// constant, not a second literal that happens to be equal today. The discriminator is the middle
+// test — a rel the code has never heard of must still get its own basename, which a lookup table
+// (a copy moved into another file) cannot do. `scriptBasename` is the same pure function the
+// sibling task introduced for resource-gate.sh / process-budget.sh
+// (gap-serve-labels-hardcode-mechanism-script-basenames); this is its third application.
+test("AC2: TASK_STATUS_DRIFT_CHECK_NAME is scriptBasename(TASK_STATUS_DRIFT_CHECK_REL) — derived, not a second literal", () => {
+  assert.equal(TASK_STATUS_DRIFT_CHECK_NAME, scriptBasename(TASK_STATUS_DRIFT_CHECK_REL),
+    "the display name IS the rel's basename (one derivation, not two naming points)");
+  assert.equal(TASK_STATUS_DRIFT_CHECK_NAME, "task-status-drift-check.ts",
+    "…and the byte value is unchanged from the pre-fix rendering (AC4's live assertions depend on it)");
+  // The rel itself is the plugin-root-relative form the resolver consumes (path.join, per the
+  // AC1b loop-shipping constraint documented next to RESOURCE_GATE_REL).
+  assert.equal(TASK_STATUS_DRIFT_CHECK_REL, path.join("scripts", "task-status-drift-check.ts"),
+    "the rel is the plugin-root-relative scripts/ path, built with path.join");
+});
+
+test("AC2: scriptBasename is a PURE function of its input, not a lookup table (the negative control)", () => {
+  // A rel that appears in NO table anywhere. A lookup-table implementation (the copy moved into
+  // another file) would have to answer `undefined`/`""` here, or a default — this test is what makes
+  // 「恰好相等的第二份字面量」 distinguishable from 「派生」.
+  assert.equal(scriptBasename("scripts/whatever.sh"), "whatever.sh",
+    "an unknown rel still yields ITS OWN basename");
+  assert.equal(scriptBasename("scripts/never-heard-of-this.ts"), "never-heard-of-this.ts");
+  assert.equal(scriptBasename("/abs/path/to/another-thing.ts"), "another-thing.ts");
+  // …and the derivation is total over the sibling rels too (one function, four names — no per-rel branch).
+  assert.equal(RESOURCE_GATE_NAME, scriptBasename(RESOURCE_GATE_REL));
+  assert.equal(PROCESS_BUDGET_NAME, scriptBasename("scripts/process-budget.sh"));
+  // Two DIFFERENT rels must not collapse onto one name (a table keyed too coarsely would).
+  assert.notEqual(TASK_STATUS_DRIFT_CHECK_NAME, RESOURCE_GATE_NAME);
 });

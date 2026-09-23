@@ -2,7 +2,7 @@
 id: gap-arch-tsify-checker-mutation-check-sh
 title: shell→TS（SPEC Phase 5.2）：checker-mutation-check.sh（490 行）改写为 TS，先做
   characterization；mutation-cases 目录的 sh 用例不在本任务范围
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -142,3 +142,14 @@ scoped-gate 缓存已写（`developSha=0d241f91066bc992b0df890a3d5e470ba1835f6f`
 - plugin/scripts/axis-generator.ts
 - plugin/scripts/checked-in-write-check.ts
 - tasks/gap-arch-tsify-checker-mutation-check-sh.md
+
+## Needs-Human
+
+**执行 2026-09-20T20:38:54.709Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 失败步/判词：step=suite: # fail 47
+- run_id：wk-prod-anchor
+- session_id：caa0b901-a3ab-492e-a470-15dacef54c0b
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-arch-tsify-checker-mutation-check-sh~wk-prod-anchor~1789936621276-793e6e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-arch-tsify-checker-mutation-check-sh-wk-prod-anchor.log

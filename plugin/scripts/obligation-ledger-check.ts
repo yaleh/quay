@@ -26,7 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { deriveObligationId } from "./obligation-discharge-agent.ts";
-import { helpExit, emitPass, emitFail } from "./gate-script-base.ts";
+import { helpExit, emitPass, emitFail, readJsonLines } from "./gate-script-base.ts";
 
 interface Obligation {
   id: string;
@@ -43,25 +43,6 @@ interface RoundRecord {
   round: number;
   obligations: Obligation[];
   canClose: boolean;
-}
-
-function readJsonLines(file: string): Record<string, unknown>[] {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return [];
-  }
-  const rows: Record<string, unknown>[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      // skip a corrupt line — never let one bad row hide the rest of the history
-    }
-  }
-  return rows;
 }
 
 /** Recompute the round-close verdict from a round's obligations (same rule as the engine). */

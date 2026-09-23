@@ -31,8 +31,8 @@ if [ $# -ne 2 ]; then
   exit 2
 fi
 
-PLUGIN_SRC="$(cd "$1" 2>/dev/null && pwd)" || { echo "FAIL: plugin source dir not readable: $1" >&2; exit 2; }
-WORKSPACE="$(cd "$2" 2>/dev/null && pwd)" || { echo "FAIL: workspace root not readable: $2" >&2; exit 2; }
+PLUGIN_SRC="$(cd "$1" 2>/dev/null && pwd -P)" || { echo "FAIL: plugin source dir not readable: $1" >&2; exit 2; }
+WORKSPACE="$(cd "$2" 2>/dev/null && pwd -P)" || { echo "FAIL: workspace root not readable: $2" >&2; exit 2; }
 
 FAILED=0
 checked=0

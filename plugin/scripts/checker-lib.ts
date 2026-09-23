@@ -17,6 +17,13 @@
 //
 // 该文件同时被 capability-catalog 的 QUESTION 表声明为仓库能力 (capability-catalog-declarations.json)
 // ("Do shared checker primitives (position-matching / enumerative existence) behave correctly?").
+//
+// 行号/列号原语 (lineOf / colOf) 曾以 PRIVATE 副本住在本文件里 (semantic-dedup-scan finding
+// `lineof-lineat` 点名的那个「就在已导出位置原语的模块内」的副本)。它们不是判定原语而是
+// 【纯源文本变换】, 已上收到 source-text-lib.ts (该模块声明范围恰为此), 本文件改为 import ——
+// 单向边, source-text-lib.ts 不 import 任何模块, 故不引入 import 环。
+
+import { lineOf, colOf } from "./source-text-lib.ts";
 
 // ── Primitive 1: position-based matching (按位置不按关键词) ─────────────────────────────────────────
 
@@ -107,21 +114,6 @@ export interface PositionalHit {
 export interface MatchAtCommandPositionOpts {
   /** 跳过注释/字符串/正则字面量位置 (代码位置判定)。默认 false (全文结构签名判定)。 */
   maskNonCode?: boolean;
-}
-
-/** 源文本里 `idx` 的 1-based 行号。 */
-function lineOf(text: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < text.length; i++) {
-    if (text[i] === "\n") line++;
-  }
-  return line;
-}
-
-/** 源文本里 `idx` 的 1-based 列号。 */
-function colOf(text: string, idx: number): number {
-  const nl = text.lastIndexOf("\n", idx);
-  return idx - nl;
 }
 
 /**

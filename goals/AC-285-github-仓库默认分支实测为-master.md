@@ -9,7 +9,7 @@ criterion: >-
 
   set -euo pipefail
 
-  line="$(git ls-remote --symref origin HEAD 2>/dev/null | head -1)"
+  line="$(git ls-remote --symref origin HEAD 2>/dev/null | head -1 || true)"
 
   if [ -z "$line" ]; then
     echo "CAUSE=symref-unreadable — git ls-remote --symref origin HEAD returned nothing; cannot determine GitHub's current default branch" >&2; exit 1

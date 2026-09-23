@@ -1593,8 +1593,8 @@ function readDashboardLive(root: string): LiveResult {
 }
 
 // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: readSystem / readManagerLight are the
-// dashboard's last two UN-cached probes — they shell out to resource-gate.sh / process-budget.sh /
-// loop-driver-check.sh on EVERY render (~2s combined, host-load-dependent), which is what pushes a warm
+// dashboard's last two UN-cached probes — they shell out to the resource gate, the process budget and
+// the loop-driver check on EVERY render (~2s combined, host-load-dependent), which is what pushes a warm
 // dashboard past the 5s budget when a 15s background-refresh tick collides. The dashboard is a display
 // snapshot with a 30s auto-refresh (DASHBOARD_CARD_REFRESH_MS), so these two probes get the SAME 30s
 // snapshot cache as readLive/taskSummary — a cache hit returns the resolved value with zero subprocess

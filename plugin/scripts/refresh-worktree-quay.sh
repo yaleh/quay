@@ -84,7 +84,7 @@ fi
 
 # Linked-worktree guard: when the worktree IS the main checkout, there is nothing to refresh
 # (a main-checkout run already reads its own live .quay/).
-if [ "$(cd "${worktree}" && pwd)" = "$(cd "${root}" && pwd)" ]; then
+if [ "$(cd "${worktree}" && pwd -P)" = "$(cd "${root}" && pwd -P)" ]; then
   echo "refresh-worktree-quay: ${worktree} is the main checkout — no-op" >&2
   exit 0
 fi

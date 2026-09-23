@@ -1031,19 +1031,27 @@ export const BOARD_LABELS: Record<BoardKey, { en: string; zh: string }> = {
   // One row per SOURCE-and-STATE pair: these are two different sources (execution / landing) each
   // with its own failure modes, and collapsing them would report which one failed as a generic
   // 「a source failed」 — the fact the banner exists to state.
+  //
+  // gap-task-status-drift-check-serve-labels-no-rel-accessor: the three `srcLanding*` rows name the
+  // landing source through `{source}`, filled by the caller with observation.ts's
+  // TASK_STATUS_DRIFT_CHECK_NAME. They must NOT spell the basename here — this module is import-free
+  // by design (see the header), so a literal here would be a SECOND naming point that no change to
+  // the checker's rel could reach (the defect this task exists to end; gap-serve-labels-hardcode-
+  // mechanism-script-basenames was its sibling on /system). The `srcExec*` rows need no placeholder:
+  // `.workflow-events/` is a directory this page names directly, not a mechanism script rel.
   srcExecEmpty: { en: "the execution source (.workflow-events/) has no data", zh: "执行源（.workflow-events/）无数据" },
   srcExecFailed: { en: "the execution source (.workflow-events/) read failed", zh: "执行源（.workflow-events/）读失败" },
   srcLandingTimeout: {
-    en: "the landing source (task-status-drift-check.ts) read timed out",
-    zh: "落地源（task-status-drift-check.ts）读取超时",
+    en: "the landing source ({source}) read timed out",
+    zh: "落地源（{source}）读取超时",
   },
   srcLandingUnavailable: {
-    en: "the landing source (task-status-drift-check.ts) is unavailable",
-    zh: "落地源（task-status-drift-check.ts）不可用",
+    en: "the landing source ({source}) is unavailable",
+    zh: "落地源（{source}）不可用",
   },
   srcLandingFailed: {
-    en: "the landing source (task-status-drift-check.ts) read failed",
-    zh: "落地源（task-status-drift-check.ts）读失败",
+    en: "the landing source ({source}) read failed",
+    zh: "落地源（{source}）读失败",
   },
 };
 
@@ -1361,8 +1369,9 @@ export function docTaskLabel(
 //    the `<strong>⇒ GO</strong>` verdict token, and the colon that joins them is language-bearing
 //    (zh full-width `：`, en ASCII `: `) — so it lives in the row, exactly as ROW 13 ② keeps the
 //    brackets in the row. The verdict TOKEN itself (`GO`/`WAIT`) stays in the markup: it is the
-//    machine's own word (the `verdict` field of `resource-gate.sh --json`), not copy, and it reads
-//    the same in both languages.
+//    machine's own word (the `verdict` field of the resource gate's `--json` — the script's name
+//    itself is DERIVED on the page from the single accessor in observation.ts, never re-spelled
+//    here), not copy, and it reads the same in both languages.
 //
 // ③ THE PAGE NAME AND THE SUBTITLE ARE PARALLEL, NOT MERGED (this task's ruling). `pageTitle`
 //    receives the bare `System` token and its suffix is appended OUTSIDE it, so the NAME resolves
@@ -1775,8 +1784,12 @@ export function sessionLayerHeading(
 //    - The observer TABLE's rows (`name`/`status`/`root`/`note`) are DATA read out of
 //      `orchestration/observer-registry.conf`; this repo's own registry carries Chinese notes
 //      (`本仓库（项目类）`, `兄弟项目`), and translating them would be translating the user's registry.
-//    - The two JSON field-name `<h2>`s (`resource-gate.sh` / `process-budget.sh`) and the meter
-//      labels are /system's (ROW 14 ④) and are untouched from this side too.
+//    - The two JSON field-name `<h2>`s and the meter labels are /system's (ROW 14 ④) and are
+//      untouched from this side too. ⚠️ Those two `<h2>`s are named NOWHERE in this module: their
+//      text is DERIVED from the single accessor (observation.ts's REL constants →
+//      `scriptBasename`), so neither basename is a dictionary literal here — a second literal would
+//      be exactly the copy this table exists to prevent
+//      (gap-serve-labels-hardcode-mechanism-script-basenames).
 export const MANAGER_KEYS = [
   // <head> meta description (②) + the <h1>'s subtitle tail (①)
   "metaDescription", "h1Subtitle",

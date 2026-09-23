@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 import {
@@ -24,6 +25,8 @@ import {
   exitedNotLandedRecordsForTask,
   computeWorkerRoundRecord,
   defaultMechanicalSuiteCommand,
+  failingTestFilesFromSuiteLog,
+  parseSuiteLogFailures,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
   readTaskStatus,
   WORKER_OUTCOME_REL,
@@ -364,4 +367,137 @@ test("AC4（模板半边）— quay-init 真实落盘生成的 .quay/config.yml 
   assert.match(cfg, /positional test-file argument/, "生成的示例注记写明「不得当成位置参数」");
   assert.match(cfg, /plugin\/skills\/init\/SKILL\.md/, "生成的示例注记指向正本文档（单一真相源，⛔ 不复制整段契约）");
   assert.match(cfg, /test_command: npm test/, "loop.test_command 照常写入（注记不破坏配置）");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-suite-failure-attribution-third-party-layout — 归因解析只认 quay 自身测试布局
+//
+// 缺陷：`failingTestFilesFromSuiteLog` 曾把本仓库布局写死进判据（前缀只认 `packages|plugin|experiments/`、
+// 后缀只认 `.test.mjs`）。第三方项目（`server/**/*.test.ts`）匹配恒为 0 ⇒ 返回 [] ⇒ 判 insufficient-data-
+// fallback ⇒ park 判词写成「the suite log names nothing a worker could fix」——**一个肯定断言，而它的依据
+// 只是「解析器没读懂」**（硬规则 3b 的镜像）。生产读数（claudecodeui worker-round.jsonl，2026-09-20→09-23）：
+// 51 次 retry_exemptions 中 failingTestFiles 非空 **0 次**，波及 29 个任务。
+//
+// 本段测【解析与判词】；真实第三方项目上的端到端观测见任务 DoD（⛔ fixture 不算测量，硬规则 4 推论三）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// 真实日志节选：claudecodeui `scripts/__fixtures__/fan-in-suite-lint-failure.log` 的逐字节副本
+// （md5 07e94a5baff0bb80f4018aee59951d7b，见下 AC 的断言）。真凶是一条可一行修的 barrel 导入 lint 错误。
+// 后缀用 `.txt` 而非源文件的 `.log`：本仓库 `.gitignore` 把 `*.log` 与 `dist/`、`*.tgz`、`**/worktrees/`
+// 同列进「生成物/运行态，永不入库」，全库 tracked 的 `.log` 为 0 个；而捕获输出的 fixture 约定就是
+// `.txt`（同目录 `criterion-fidelity/real-judge-post.stdout.txt`）⇒ 换后缀才是「把它入库」的原意，
+// ⛔ 不 `git add -f` 去撞一条全库遵守的 ignore 规则。内容逐字节未改（md5 断言钉住）。
+const THIRD_PARTY_LINT_FIXTURE = path.join(
+  REPO_ROOT, "plugin", "test", "fixtures", "suite-log-third-party-lint-failure.txt",
+);
+
+test("AC1① — 第三方布局 `server/x/y.test.ts` 被提取（⛔ 不再只认 packages|plugin|experiments/*.test.mjs）", () => {
+  const line = "__PERFILE__ duration_ms=1 server/x/y.test.ts passed=false end_ms=2";
+  assert.deepEqual(
+    failingTestFilesFromSuiteLog(line), ["server/x/y.test.ts"],
+    "第三方项目的 per-file 记录必须被提取（旧正则的 `.test.mjs` 后缀 + 三前缀白名单在此恒不匹配）",
+  );
+});
+
+test("AC1② — `__PERFILE__ … lint passed=false` 单独出现 ⇒ 不把 `lint` 当测试文件（伪阶段名有独立取值）", () => {
+  const p = parseSuiteLogFailures("__PERFILE__ duration_ms=1 lint passed=false end_ms=2");
+  assert.deepEqual(p.files, [], "`lint` 是阶段名不是文件——⛔ 不得混进失败测试集");
+  assert.deepEqual(p.pseudoStages, ["lint"], "伪阶段名走独立取值（硬规则 3b：读不懂/非文件不与「文件」同形）");
+  assert.equal(p.failingLines, 1, "它仍是一条【失败行】——`0 of 1` 与 `0 of 0` 是两种不同实况");
+});
+
+test("AC1③ — `not ok - lint: server/a/b.test.ts:10:49: …` ⇒ 归因到被指名的 server/a/b.test.ts", () => {
+  const line = "not ok - lint: server/a/b.test.ts:10:49: error boundaries(dependencies): Cross-module imports must go through that module's barrel file";
+  const p = parseSuiteLogFailures(line);
+  assert.deepEqual(p.files, ["server/a/b.test.ts"], "阶段失败被【指名】到真实文件上 ⇒ 归因到它");
+  assert.deepEqual(p.pseudoStages, ["lint"], "同行的 `lint` 仍是伪阶段名");
+  assert.equal(p.failingLines, 1, "`not ok - …` 也是失败行（N 的分母）");
+});
+
+test("AC1④（负控制，不回归）— quay 自身布局与 worktree 绝对路径形态仍按原样提取", (t) => {
+  const root = makeRoot("rcl-quay-layout");
+  t.after(() => rmSafe(root));
+  // 本仓库布局（repo-relative）：逐字保留旧行为。
+  assert.deepEqual(
+    failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=1 plugin/test/x.test.mjs passed=false end_ms=2"),
+    ["plugin/test/x.test.mjs"],
+  );
+  assert.deepEqual(
+    failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=1 packages/quay/test/a.test.mjs passed=false end_ms=2"),
+    ["packages/quay/test/a.test.mjs"],
+  );
+  assert.deepEqual(
+    failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=1 experiments/x/test/b.test.mjs passed=false end_ms=2"),
+    ["experiments/x/test/b.test.mjs"],
+  );
+  // worktree 绝对路径形态（`/…/quay-worktrees/<task>/plugin/test/x.test.mjs`）⇒ 仍提取 repo-relative 后缀。
+  assert.deepEqual(
+    failingTestFilesFromSuiteLog(`__PERFILE__ duration_ms=1 ${root}/plugin/test/x.test.mjs passed=false end_ms=2`, root),
+    ["plugin/test/x.test.mjs"],
+    "绝对路径按 root 前缀剥离（⛔ 不按关键词猜前缀——那正是本缺陷的成因）",
+  );
+});
+
+test("AC(真实日志) — claudecodeui 的 lint 失败节选（真日志逐字节副本）归因到 model-context-window.test.ts", () => {
+  const log = fs.readFileSync(THIRD_PARTY_LINT_FIXTURE, "utf8");
+  assert.equal(
+    crypto.createHash("md5").update(log).digest("hex"), "07e94a5baff0bb80f4018aee59951d7b",
+    "fixture 是第三方真日志的逐字节副本（⛔ 不是手写的仿真样本）",
+  );
+  const p = parseSuiteLogFailures(log);
+  assert.ok(
+    p.files.includes("server/modules/launch-profiles/tests/model-context-window.test.ts"),
+    `真日志的失败文件必须被归因出来（实测 files=${JSON.stringify(p.files)}）`,
+  );
+  assert.ok(!p.files.includes("lint"), "`lint`/`typecheck` 这类伪阶段名不得混进失败测试集");
+  assert.ok(p.pseudoStages.includes("lint"), "`lint` 走伪阶段名取值（留证）");
+  assert.equal(p.failingLines, 4, "N = 2 条 `__PERFILE__ … passed=false` + 2 条 `not ok - …`");
+});
+
+test("AC(载体字段) — 第三方日志经 judgeRetryExemption ⇒ failingTestFiles 非空（AC-317 读的就是这个字段）", (t) => {
+  const root = makeRoot("rcl-third-party-carrier");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["src/unrelated.ts"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", fs.readFileSync(THIRD_PARTY_LINT_FIXTURE, "utf8"));
+
+  const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
+  // 关键：AC-317 的判据只读 retry_exemptions[].failingTestFiles 是否非空——verdict 名不变也照样成立。
+  assert.ok(
+    j.failingTestFiles.includes("server/modules/launch-profiles/tests/model-context-window.test.ts"),
+    `第三方 suite 红的归因必须落到载体字段上（实测 ${JSON.stringify(j.failingTestFiles)}）`,
+  );
+  assert.equal(j.suiteFailingLines, 4, "读到的失败行数一并入判定（判词据此区分「0 of N」与「0 of 0」）");
+});
+
+test("AC3(判词) — 「读不懂」判词含解析器读到的失败行数 N（`0 of N`），⛔ 断言句已消失", (t) => {
+  const root = makeRoot("rcl-wording");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  // ① 有失败行但一行也归因不出（第三方伪阶段名）⇒「0 of 1」。
+  writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
+  const withFailingLines = writeSuiteLog(root, "fan-in-suite~2.log", "__PERFILE__ duration_ms=1 lint passed=false end_ms=2\n");
+  const outcome = suiteRedOutcome(T1, withFailingLines);
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  assert.match(j.reason, /no failing test file extracted/, "仍逐字点名「提取不出失败测试文件」");
+  assert.match(j.reason, /0 of 1 failing lines/, "判词报「读到了 1 行失败、0 行归因到文件」（旧措辞两者同形）");
+  assert.match(j.reason, /pseudo-stage tokens: lint/, "留证：读不懂的那个 token 是什么");
+
+  // ② 连失败行形态都没有 ⇒「0 of 0」——与 ① 是两种不同实况，判词必须能区分。
+  //    上一轮用【内容不同】的日志（⛔ 否则先撞哈希判据那条 stop 分支，测不到本段要测的判词）。
+  writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
+  appendSuiteRedOutcome(root, "gap-a", T0, "fan-in-suite~1.log");
+  const logB = writeSuiteLog(root, "fan-in-suite~3.log", UNATTRIBUTABLE_LOG_B);
+  const outcomeB = suiteRedOutcome(T1, logB);
+  const jB = judgeRetryExemption(root, "gap-a", outcomeB, { nowMs: NOW });
+  assert.match(jB.reason, /0 of 0 failing lines/, "日志里没有失败行 ⇒ 0 of 0");
+  const dB = decideExitedNotLandedAction(root, "gap-a", outcomeB, jB, { nowMs: NOW });
+  assert.equal(dB.kind, "stop-terminal", "（前置保持）第二轮归因不出仍停");
+  assert.match(dB.reason, /0 of 0 failing lines/, "stop-terminal 判词同样带读数");
+  assert.doesNotMatch(dB.reason, /names nothing a worker could fix/, "⛔ 肯定断言已消失");
+  assert.match(dB.reason, /infra\/contract suspected/, "（前置保持）判词仍点名基建/契约疑似");
+});
+
+test("AC3(静态) — 「names nothing a worker could fix」肯定断言已从源码消失", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts"), "utf8");
+  assert.equal(src.includes("names nothing a worker could fix"), false, "该肯定断言的依据只是「解析器没读懂」（硬规则 3b）");
 });

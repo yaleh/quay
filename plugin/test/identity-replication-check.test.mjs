@@ -4,10 +4,13 @@
 //   - tsCommentMask / shCommentMask: 注释被标为非代码, 字符串字面量保持代码 (字面量是被测对象)。
 //   - findPathConstants: *_REL 路径常量按位置命中, 注释提及不命中。
 //   - findJudgmentRewrites: 读 /proc/<pid>/cmdline ∧ 比较名字 = 判定重写; 仅注释/无比较不命中。
+//   - classifyRewriteSite / isMergeableRewriteSite: 判定重写的**可合并性**分类 (test / .sh /
+//     已 import leaf / repo-import-free .mjs 四类 carve-out, 按类不按文件名; `--no-carve-out` 两态)。
 //   - findByteIdenticalPairs: plugin/scripts ↔ experiments/*/scripts 字节相同对计数 + 行数;
 //     任一侧是软链的条目不是 pair (单一来源引用/同一 inode, 与 mirror-pair-drift-check.ts 同规则)。
 //   - literalReplication: full vs code 分列 (证明脚本自己做位置区分, 不靠人工)。
 //   - sharedModuleControl: 经 import 单一访问器的真共享模块不得报高复制度 (AC4 负控制)。
+//   - isFlagged: 阈值谓词的单一实现, 两态都用真读数 (10/231 清白 vs 59/3 成簇)。
 //
 // Run:
 //   node --experimental-strip-types plugin/test/identity-replication-check.test.mjs
@@ -21,15 +24,21 @@ import path from "node:path";
 import {
   tsCommentMask,
   shCommentMask,
+  blankComments,
+  accessorRegexSource,
+  isPathInvocationMention,
   findPathConstants,
   findJudgmentRewrites,
+  findMergeableJudgmentRewrites,
+  classifyRewriteSite,
+  isMergeableRewriteSite,
   findByteIdenticalPairs,
   literalReplication,
   replicationTable,
   sharedModuleControl,
+  isFlagged,
   run,
 } from "../scripts/identity-replication-check.ts";
-
 /** Temp dirs created this run — removed in the top-level `after` hook below (test-isolation R6). */
 const _createdDirs = [];
 
@@ -168,6 +177,110 @@ test("findJudgmentRewrites — 收窄双向: 纯快照收集器出列 ∧ 三条
     "plugin/scripts/hit-pipe.sh",
     "plugin/scripts/hit-subject.ts",
   ], `expected exactly the three bound fixtures, got ${JSON.stringify(found)}`);
+});
+
+// ── 可合并性 carve-out: 「哪些站点算判定重写」的类别判定 ──────────────────────────────────────────
+// 立案缺陷 (gap-identity-rewrite-count-includes-carve-outs): 计数语义曾把**结构上不可能合并到
+// kernel leaf** 的站点点名成缺陷 —— 现场 8 条全部如此（4 个 test 载体 / 2 个 .sh / 1 个已 import leaf
+// / 1 个 repo-import-free 的随包 .mjs），于是已 done 的 proc-identity 迁移机制每轮被 judge 重报一次。
+//
+// ⛔ 两个方向都要钉住（硬规则 2 的另一半是「零计数也要干跑已知真样本」）：
+//   · 真可合并站点**必须**在列（否则收窄把检测器砍空 ⇒ 与「没有判定重写」同形）；
+//   · 四条 carve-out 类各自的站点**必须**出列，且出列得**说得出是被哪条规则排除的**（枚举，非布尔）。
+//
+// AC4 fixture 矩阵: **同一段**「读 cmdline ∧ 绑到这次读的比较」内联进四个临时文件，只有载体属性
+// 不同 —— 这保证出列是载体分类的功劳，而不是判据恰好看不见那三个文件。
+
+/** 那段被判据识别的实现（AC4 逐字要求「同一段」）：读 /proc/<pid>/cmdline ∧ 绑到这次读的比较。
+ *  ⛔ shell 的绑定形态与 TS 不同（`COMPARE_PRIM` 词表进不去 `case … in`，shell 那一支走
+ *  `SHELL_CMP` 的管道形态）—— 同一条**指纹**，载体语言决定了它的绑定表达式。 */
+const GRAFTED_TS_JUDGMENT =
+  'const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");\nif (cmd.includes("claude")) return true;\n';
+const GRAFTED_SH_JUDGMENT =
+  '#!/usr/bin/env bash\nif tr \'\\0\' \' \' < "/proc/$pid/cmdline" 2>/dev/null | grep -q claude; then echo 1; fi\n';
+
+function carveOutFixture() {
+  return {
+    "plugin/scripts/genuine.ts": GRAFTED_TS_JUDGMENT,
+    "plugin/scripts/genuine.test.mjs": GRAFTED_TS_JUDGMENT,
+    "plugin/scripts/genuine.sh": GRAFTED_SH_JUDGMENT,
+    "plugin/scripts/genuine-imports-leaf.ts":
+      'import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";\n' + GRAFTED_TS_JUDGMENT,
+  };
+}
+
+const CARVE_OUT_FIXTURE_FILES = Object.keys(carveOutFixture());
+
+test("AC4 — carve-out 矩阵: 同一段判定在四种载体里的命运 (双向, 非空转)", () => {
+  const dir = mktmp(carveOutFixture());
+  const mergeable = (rel) =>
+    findMergeableJudgmentRewrites(dir, [path.join(dir, rel)]).length > 0;
+
+  assert.equal(mergeable("plugin/scripts/genuine.ts"), true,
+    "真可合并站点 (非 test / 非 .sh / 未 import leaf) 必须【在列】—— 否则这条收窄就是把检测器关掉");
+  assert.equal(mergeable("plugin/scripts/genuine.test.mjs"), false,
+    "test 载体必须出列 (G3: 判据与被判对象必须独立实现)");
+  assert.equal(mergeable("plugin/scripts/genuine.sh"), false,
+    "`.sh` 载体必须出列 (shell 不能 import TS kernel leaf)");
+  assert.equal(mergeable("plugin/scripts/genuine-imports-leaf.ts"), false,
+    "已 import kernel leaf 的载体必须出列 (残余 /proc 读取不是被迁移判定的独立重写)");
+
+  // ⛔ 出列 ≠ 没扫到: 检测器仍报出全部四处, 只是分类不同 (硬规则 3b —— 两态必须可区分)。
+  const all = findJudgmentRewrites(dir, CARVE_OUT_FIXTURE_FILES.map((p) => path.join(dir, p)));
+  assert.equal(all.length, 4, `检测面不得被收窄吞掉任何站点, got ${JSON.stringify(all.map((j) => j.file))}`);
+  assert.equal(all.filter((j) => !j.mergeable).length, 3, "其中三处是 carve-out");
+
+  const byFile = Object.fromEntries(all.map((j) => [j.file, j]));
+  assert.equal(byFile["plugin/scripts/genuine.test.mjs"].carveOut, "test");
+  assert.equal(byFile["plugin/scripts/genuine.sh"].carveOut, "shell");
+  assert.equal(byFile["plugin/scripts/genuine-imports-leaf.ts"].carveOut, "imports-leaf");
+  for (const j of all) {
+    assert.equal(j.mergeable, j.carveOut === null, `${j.file}: mergeable ⇔ carveOut===null`);
+    assert.equal(typeof j.carveOutReason === "string" && j.carveOutReason.length > 0, !j.mergeable,
+      `${j.file}: 每条 carve-out 必须带理由, 可合并站点不带 (理由为空 = 「排除」与「没扫到」同形)`);
+  }
+});
+
+test("AC3 — 两态可区分: 关掉一条规则 ⇒ 该条下的站点回到可合并列表", () => {
+  const dir = mktmp(carveOutFixture());
+  const off = ["test", "shell", "imports-leaf"];
+  const on = findMergeableJudgmentRewrites(dir, CARVE_OUT_FIXTURE_FILES.map((p) => path.join(dir, p)));
+  const disabled = findMergeableJudgmentRewrites(
+    dir,
+    CARVE_OUT_FIXTURE_FILES.map((p) => path.join(dir, p)),
+    { disabledCarveOuts: off },
+  );
+  assert.deepEqual(on.map((j) => j.file), ["plugin/scripts/genuine.ts"]);
+  assert.deepEqual(
+    disabled.map((j) => j.file).sort(),
+    ["plugin/scripts/genuine-imports-leaf.ts", "plugin/scripts/genuine.sh", "plugin/scripts/genuine.test.mjs", "plugin/scripts/genuine.ts"],
+    "关掉三条规则 ⇒ 对应三处回到可合并列表 (谓词不是恒假: 它的取值随输入变)",
+  );
+
+  // `isMergeableRewriteSite` 与分类本体同源 (AC2: 一处定义, 消费者 import)。
+  assert.equal(isMergeableRewriteSite(dir, "plugin/scripts/genuine.ts"), true);
+  assert.equal(isMergeableRewriteSite(dir, "plugin/scripts/genuine.sh"), false);
+  assert.equal(isMergeableRewriteSite(dir, "plugin/scripts/genuine.sh", undefined, ["shell"]), true);
+});
+
+test("AC2 — carve-out 按【类】判定, 不按文件名白名单", () => {
+  const dir = mktmp({
+    // 同一段内容放在**从未出现过的**文件名/目录下 ⇒ 分类必须照样成立 (按文件名硬编码会漏掉它)。
+    "plugin/scripts/never-seen-before-carrier.ts": GRAFTED_TS_JUDGMENT,
+    "plugin/scripts/nested/test/another-unseen-name.ts": GRAFTED_TS_JUDGMENT, // test 段在任何位置都算
+    "plugin/scripts/weird.spec.ts": GRAFTED_TS_JUDGMENT, // basename 约定, 不依赖 test/ 目录
+  });
+  assert.equal(isMergeableRewriteSite(dir, "plugin/scripts/never-seen-before-carrier.ts"), true);
+  assert.equal(isMergeableRewriteSite(dir, "plugin/scripts/nested/test/another-unseen-name.ts"), false);
+  assert.equal(
+    classifyRewriteSite(dir, "plugin/scripts/nested/test/another-unseen-name.ts").carveOut,
+    "test",
+  );
+  assert.equal(classifyRewriteSite(dir, "plugin/scripts/weird.spec.ts").carveOut, "test");
+  // 反向: 一个带 `test` 字样的**普通**目录名不构成 test 载体 (`testimony/` 不是 `test/`)。
+  const dir2 = mktmp({ "plugin/scripts/testimony/plain.ts": GRAFTED_TS_JUDGMENT });
+  assert.equal(isMergeableRewriteSite(dir2, "plugin/scripts/testimony/plain.ts"), true,
+    "路径段必须【整个】等于 test/tests/__tests__, 前缀相似的目录名不排除");
 });
 
 test("findByteIdenticalPairs — 字节相同对计数 + 行数, 漂移副本不算", () => {
@@ -314,6 +427,136 @@ test("sharedModuleControl — 经 import 单一访问器的真共享模块不得
   assert.equal(c.flagged, false, "a single-accessor module must NOT be flagged as replicated");
 });
 
+// ── 阈值谓词 isFlagged：单一实现的直接单测（gap-arch-review-cluster-ignores-detector-flag-predicate AC5）──
+// 两个样本都是**实测过的真读数**（不是编出来的边界）：
+//   `{hardcoded:10, accessor:231}` = gate-script-base.ts 的 sharedModuleControl —— 检测器判清白；
+//   `{hardcoded:59, accessor:3}`   = table 里的 quay-init.sh —— 真复制，必须成簇。
+// ⛔ 这条谓词是 cluster 阶段此前整个缺席的那一半判据；它一旦恒真/恒假，本文件与 cluster 侧同时失守。
+
+test("isFlagged — 阈值谓词两态（真样本：10/231 清白 vs 59/3 成簇）", () => {
+  assert.equal(isFlagged({ hardcoded: 10, accessor: 231 }), false, "hardcoded >= 5 但 hardcoded <= accessor ⇒ 清白（共享模块正常形态）");
+  assert.equal(isFlagged({ hardcoded: 59, accessor: 3 }), true, "hardcoded >= 5 且 hardcoded > accessor ⇒ 真复制");
+  // 第一半（阈值）单独能取假：hardcoded 低于阈值且压倒 accessor，仍不成簇。
+  assert.equal(isFlagged({ hardcoded: 4, accessor: 0 }), false, "低于阈值 ⇒ 不成簇（第一半能取假）");
+  // 第二半（> accessor）单独能取假：accessor 持平/反超即清白，与 hardcoded 多大无关。
+  assert.equal(isFlagged({ hardcoded: 1000, accessor: 1000 }), false, "hardcoded == accessor ⇒ 清白（第二半能取假）");
+  // 缺席按 0 计（手写 fixture 的行上没有 accessor）：不因缺字段而恒假或抛错。
+  assert.equal(isFlagged({ hardcoded: 5 }), true, "accessor 缺席按 0 计（缺值 ≠ 未判）");
+  assert.equal(isFlagged({}), false, "两个操作数都缺席 ⇒ 全 0 ⇒ 不成簇");
+  // threshold 可调（sharedModuleControl 的既有参数面）。
+  assert.equal(isFlagged({ hardcoded: 2, accessor: 0 }, 2), true, "threshold 参数透传");
+});
+
+// ── 判据产地的三处修正 (gap-identity-replication-requires-structural-relation) ────────────────
+// 立案缺陷: 判词「named in 52 code file(s) without a single accessor」的两半都不成立 ——
+//   ① 「without a single accessor」是**写死的字面量**, 与行上的 accessor 无关 (17 簇里 14 簇如此);
+//   ② 52 个「hardcoded」里 0 个是复制 —— 注释行与**按路径调用**各行其是地混在一起。
+// 下面五条各自钉住一个产地, 且**每一条在修前实现上都是红的** (负控制: 证明它测的是这个缺陷):
+//   · AC3 地形  → tsCommentMask 的幻影字符串 (根因, 不是「疑似反引号让词法器失步」那类假说);
+//   · AC1 地形  → 多行命名导入 (本仓主流写法) 读不进去;
+//   · AC2 地形  → 按路径调用被计成 hardcoded;
+//   · AC6③ 地形 → 判红行给不出命中样本 (计数与内容不同源);
+//   · 反向边界  → 文本里的裸 basename 仍须是证据 (否证「一律放宽」把检测器关掉)。
+
+test("tsCommentMask — 含引号的正则字面量不打开幻影字符串 (AC3 根因)", () => {
+  // 与 plugin/scripts/task-ops.ts:97 同形: 正则里 `["']` 的引号成对出现后, 紧跟的 `'` 在【旧实现】里
+  // 会打开一个单引号串并一路吞到下一个 `'` —— 中间整块注释因此被标成【代码位置】。
+  const src =
+    'const items = list.split(",").map((s) => s.trim().replace(/^["\']|["\']$/g, "")).filter(Boolean);\n' +
+    "/** Ensure the frontmatter carries the label (moved from session-liveness.sh; single\n" +
+    " *  source now lives here). */\n" +
+    "// session-liveness.sh in a line comment\n";
+  const mask = tsCommentMask(src);
+  const idx = occurrences(src, NEEDLE);
+  assert.equal(idx.length, 2, `two mentions (block + line comment), got ${idx.length}`);
+  assert.equal(mask[idx[0]], 1, "块注释里的提及不是代码位置 (旧实现打开幻影字符串后此处为 0)");
+  assert.equal(mask[idx[1]], 1, "行注释里的提及同样不是代码位置");
+  // 反向: 同一份源码里的**字符串字面量**仍须算代码 (否证「把正则一并标死」)。
+  const codeOnly = 'const p = "session-liveness.sh";\n';
+  assert.equal(tsCommentMask(codeOnly)[occurrences(codeOnly, NEEDLE)[0]], 0,
+    "字符串字面量仍是被测对象, 必须保持代码位置 (掩码不能把真样本一起剔掉)");
+});
+
+test("blankComments — 抹平注释但逐位保持长度与偏移 (结构性判定跑在它上面)", () => {
+  const src = 'const a = 1; // session-liveness.sh here\necho "session-liveness.sh"\n';
+  const blanked = blankComments(src, tsCommentMask(src));
+  assert.equal(blanked.length, src.length, "长度不变 ⇒ 命中下标与 src 一一对应");
+  assert.equal(blanked.split("\n").length, src.split("\n").length, "行号不变");
+  assert.equal(blanked.includes("here"), false, "注释内容被抹掉");
+  assert.equal(blanked.includes('"session-liveness.sh"'), true, "字符串字面量**不**被抹平 (抹平它等于关掉 accessor 判定)");
+});
+
+test("accessorRegexSource — 多行命名导入是 accessor, 且不吞掉另一个 import 的 specifier (AC1)", () => {
+  const re = new RegExp(accessorRegexSource("shared-lib"));
+  assert.equal(re.test('import { a } from "./shared-lib.ts";'), true, "单行命名导入");
+  assert.equal(re.test('import {\n  a,\n  b,\n} from "./shared-lib.ts";'), true, "多行命名导入 (AC1 命令的形态)");
+  // 本仓主流形态: 30+ 行、子句内部夹注释 (含撇号) —— 调用方先 blankComments, 所以这里的输入是抹平后的视图。
+  const big =
+    "import {\n  a,\n  // the pool's marker, reused\n  b,\n} from \"./shared-lib.ts\";\n";
+  assert.equal(re.test(blankComments(big, tsCommentMask(big))), true, "带注释的多行导入块");
+  assert.equal(re.test('export { a } from "./shared-lib.ts";'), true, "re-export 也是结构性关系");
+  assert.equal(re.test('import "./shared-lib.ts";'), true, "无 from 的副作用 import");
+  assert.equal(re.test('import { a } from "./other.ts";'), false, "别的 specifier 不算");
+  // ⛔ 负控制【不许吞掉别的语句】: `export function` 不是 re-export 形态, 不得一路扫到后面 import 的 from。
+  assert.equal(re.test('export function f() { return 1 }\nimport { z } from "./other.ts";\n'), false,
+    "export 声明不得被读成 re-export (否则它会跨语句吞掉下一个 import 的 specifier)");
+  assert.equal(re.test('const p = "shared-lib";\n'), false, "裸字符串提及不是 accessor");
+});
+
+test("isPathInvocationMention — 按路径调用是位置, 文本里的裸 basename 是身份 (AC2 与反向边界)", () => {
+  const ent = "shared-lib.ts";
+  const at = (src) => isPathInvocationMention(src, src.indexOf(ent), ent);
+  assert.equal(at('const p = "plugin/scripts/shared-lib.ts";'), true, "A 路径尾 (仓库相对路径串)");
+  assert.equal(at('const p = path.join(__dirname, "../scripts/shared-lib.ts");'), true, "A 路径尾 (path.join 的相对段)");
+  assert.equal(at('const p = path.join(root, "plugin", "scripts", "shared-lib.ts");'), true, "B 实参位 (路径分段拼出)");
+  assert.equal(at('const p = resolveKernelSibling("shared-lib.ts");'), true, "B 实参位 (kernel 同胞解析)");
+  assert.equal(at('spawn("node", ["shared-lib.ts"]);'), true, "B 实参位 (spawn argv)");
+  // 反向边界: 文本/散文/UI 里的裸 basename 是**命名**, 仍是证据。
+  assert.equal(at('console.error("Usage: node shared-lib.ts --json");'), false, "用法串里命名它");
+  assert.equal(at("echo \"shared-lib.ts\"\n"), false, "`echo \"x\"` 不是实参位 (紧邻的前一个非空白是标识符)");
+  assert.equal(at("<h2>shared-lib.ts</h2>"), false, "UI 标签里命名它");
+});
+
+test("literalReplication — 按路径调用的文件不再计入, 文本命名的仍计入 (AC2)", () => {
+  const dir = mktmp({
+    "plugin/scripts/path-rel.ts": 'const p = "plugin/scripts/shared-lib.ts";\n',
+    "plugin/scripts/path-join-tail.ts": 'const p = path.join(__dirname, "../scripts/shared-lib.ts");\n',
+    "plugin/scripts/path-join-args.ts": 'const p = path.join(root, "plugin", "scripts", "shared-lib.ts");\n',
+    "plugin/scripts/sibling-resolve.ts": 'const p = resolveKernelSibling("shared-lib.ts");\n',
+    "plugin/scripts/usage-text.ts": 'console.error("Usage: node shared-lib.ts --json");\n',
+    "plugin/scripts/comment-only.ts": "// shared-lib.ts is the single accessor\nexport const a = 1;\n",
+  });
+  const one = (rel) => literalReplication(dir, [path.join(dir, rel)], "shared-lib.ts");
+  for (const rel of [
+    "plugin/scripts/path-rel.ts",
+    "plugin/scripts/path-join-tail.ts",
+    "plugin/scripts/path-join-args.ts",
+    "plugin/scripts/sibling-resolve.ts",
+    "plugin/scripts/comment-only.ts",
+  ]) {
+    assert.equal(one(rel).code, 0, `${rel} 只有按路径调用/注释 ⇒ 不进 codeFiles (修前会被计成 hardcoded)`);
+  }
+  // 反向: 文本里命名它的文件**仍须**计入 —— 否则这条修法就是把检测器关掉 (硬规则 2 的零计数半边)。
+  assert.equal(one("plugin/scripts/usage-text.ts").hardcoded, 1, "用法串里命名它 ⇒ 仍是硬编码 (证据)");
+});
+
+test("literalReplication — 判红行必须就地给出命中样本 (AC6③: 计数与内容同源)", () => {
+  const dir = mktmp({
+    "plugin/scripts/a.ts": 'console.error("Usage: node shared-lib.ts --json");\n',
+    "plugin/scripts/b.ts": 'console.log("shared-lib.ts — second independent naming");\n',
+  });
+  const files = ["plugin/scripts/a.ts", "plugin/scripts/b.ts"].map((p) => path.join(dir, p));
+  const one = literalReplication(dir, files, "shared-lib.ts");
+  assert.equal(one.hardcoded, 2, "两个文件独立命名它");
+  assert.equal(one.hardcodedSamples.length, 2, "每个硬编码文件都带一条实测样本 (修前没有这个字段)");
+  assert.match(one.hardcodedSamples[0], /^plugin\/scripts\/[ab]\.ts:\d+ {2}/, `样本形如 文件:行 + 该行原文, got ${one.hardcodedSamples[0]}`);
+  assert.equal(one.hardcodedSamples[0].includes("shared-lib.ts"), true, "样本里含命中的实际内容, 不是一个空的占位");
+
+  // 与 replicationTable 同源 (两条读数路径共用同一份分类)。
+  const row = replicationTable(dir, files, ["shared-lib.ts"]).find((r) => r.entity === "shared-lib.ts");
+  assert.deepEqual(row.hardcodedSamples, one.hardcodedSamples, "表读数与单实体读数给出同一批样本");
+});
+
 test("run — 产出完整 report (各 section 在场)", () => {
   const dir = mktmp({
     "plugin/scripts/foo.ts": "export const x = 1;\n",
@@ -323,6 +566,10 @@ test("run — 产出完整 report (各 section 在场)", () => {
   assert.equal(typeof report.root, "string");
   assert.ok(Array.isArray(report.pathConstants));
   assert.ok(Array.isArray(report.judgmentRewrites));
+  // 两个列表互补: 并集 = 检测到的全部站点 (carve-out 是「排除」, 不是「没扫到」)。
+  assert.ok(Array.isArray(report.judgmentRewriteCarveOuts));
+  assert.ok(report.judgmentRewrites.every((j) => j.mergeable && j.carveOut === null));
+  assert.ok(report.judgmentRewriteCarveOuts.every((j) => !j.mergeable && typeof j.carveOut === "string"));
   assert.equal(typeof report.byteIdentical.count, "number");
   assert.ok(report.literalReplication.sessionLiveness);
   assert.ok(report.sharedModuleControl);

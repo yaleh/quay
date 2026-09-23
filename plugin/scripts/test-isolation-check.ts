@@ -96,7 +96,12 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 // task-file-bypass-check.ts's copy, differing only in parameter order — .quay/routine-findings.jsonl
 // finding `firstargregion-stripshellcomments`). Imported, not re-exported: this module never
 // exported it.
-import { firstArgRegion } from "./source-text-lib.ts";
+//
+// `lineAt` / `snippetAt` joined it in the same module (finding `lineof-lineat`, runId
+// `semantic-dedup-scan-1790028867335`): the 1-based newline counter had eleven live copies under two
+// names, and `snippetAt` differed from `snippetOf` ONLY by the width bound it applied — so both are
+// now the one `lineOf` / `snippetOf` pair, the latter called with an explicit `80`.
+import { firstArgRegion, lineOf, snippetOf } from "./source-text-lib.ts";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -132,21 +137,6 @@ export interface Violation {
 }
 
 // ── code-position utilities ──────────────────────────────────────────────────────────────────────────
-
-/** 1-based line number of a character index. */
-function lineAt(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
-/** Trim one line of context around a match for the report. */
-function snippetAt(src: string, idx: number, len = 80): string {
-  const start = src.lastIndexOf("\n", idx) + 1;
-  const end = src.indexOf("\n", idx);
-  const line = src.slice(start, end === -1 ? src.length : end).trim();
-  return line.length > len ? `${line.slice(0, len - 3)}...` : line;
-}
 
 /** Indices (absolute) of every CODE-position occurrence of `re` in `src` (mask skips non-code). */
 export function codePositions(src: string, mask: Uint8Array, re: RegExp): number[] {
@@ -300,7 +290,7 @@ export function detectFixedPathWrites(src: string, rel: string): Violation[] {
     const hasDotTmp = codeStrings(src, mask, openIdx, end).some((s) => /\.tmp(?:-|\b)/.test(s));
     if (!isCheckoutPath || !hasDotTmp) continue;
     if (insideMkdtempCall(src, mask, openIdx)) continue; // mkdtemp PREFIX is per-run-unique
-    out.push({ rel, rule: "fixed-path-write", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+    out.push({ rel, rule: "fixed-path-write", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
   }
   return out;
 }
@@ -324,7 +314,7 @@ export function detectSharedBuildArtifactWrites(src: string, rel: string): Viola
     const invokesSyncVendor = args.some((s) => s.includes("sync-vendor.sh"));
     const isCheckOnly = args.some((s) => s.includes("--check"));
     if (invokesSyncVendor && !isCheckOnly) {
-      out.push({ rel, rule: "shared-build-artifact-write", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      out.push({ rel, rule: "shared-build-artifact-write", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
       continue;
     }
   }
@@ -337,7 +327,7 @@ export function detectSharedBuildArtifactWrites(src: string, rel: string): Viola
     if (!literalArg) continue;
     const p = literalArg[1];
     if (/(?:packages\/[^/]+\/dist\/|plugin\/vendor\/)/.test(p)) {
-      out.push({ rel, rule: "shared-build-artifact-write", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      out.push({ rel, rule: "shared-build-artifact-write", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
     }
   }
   return out;
@@ -363,7 +353,7 @@ export function detectSpawnsTestSh(src: string, rel: string): Violation[] {
     const hitsLiteral = codeStrings(src, mask, openIdx, end).some((s) => s.includes("test.sh"));
     const hitsVar = [...testShVars].some((v) => codeRegionHas(src, mask, openIdx, region, new RegExp(`\\b${v}\\b`)));
     if (hitsLiteral || hitsVar) {
-      out.push({ rel, rule: "spawns-test-sh", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      out.push({ rel, rule: "spawns-test-sh", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
     }
   }
   return out;
@@ -384,7 +374,7 @@ export function detectProcessExit1(src: string, rel: string): Violation[] {
   const re = /process\.exit\s*\(\s*1\s*\)/g;
   for (const m of src.matchAll(re)) {
     if (mask[m.index] !== 0) continue;
-    out.push({ rel, rule: "process-exit-1", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+    out.push({ rel, rule: "process-exit-1", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
     break; // one report per file per rule is enough for the ratchet
   }
   return out;
@@ -446,7 +436,7 @@ export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
   const regions = cleanupRegions(src, mask);
   if (regions.length === 0) {
     // No cleanup construct at all — the original no-cleanup leak shape.
-    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, mkdtempCalls[0].index), snippet: snippetAt(src, mkdtempCalls[0].index) }];
+    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineOf(src, mkdtempCalls[0].index), snippet: snippetOf(src, mkdtempCalls[0].index, 80) }];
   }
 
   const defs = functionDefs(src, mask);
@@ -459,14 +449,14 @@ export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
       const fname = nearestFuncName(defs, c.index);
       if (fname && rets.inline.has(fname)) {
         if (callerCleansReturn(src, mask, fname, (v) => isCoveredVar(src, mask, v, regions))) continue;
-        return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, c.index), snippet: snippetAt(src, c.index) }];
+        return [{ rel, rule: "mkdtemp-no-cleanup", line: lineOf(src, c.index), snippet: snippetOf(src, c.index, 80) }];
       }
       continue;
     }
     if (isCoveredVar(src, mask, c.varName, regions)) continue;
     const rec = rets.byVar.get(c.varName);
     if (rec && rec.funcName && callerCleansReturn(src, mask, rec.funcName, (v) => isCoveredVar(src, mask, v, regions))) continue;
-    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, c.index), snippet: snippetAt(src, c.index) }];
+    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineOf(src, c.index), snippet: snippetOf(src, c.index, 80) }];
   }
   return [];
 }
@@ -643,7 +633,7 @@ export function detectLiveDataDirWrites(src: string, rel: string): Violation[] {
       }
     }
     if (hit !== null) {
-      out.push({ rel, rule: "live-data-dir-write", line: lineAt(src, hit), snippet: snippetAt(src, hit) });
+      out.push({ rel, rule: "live-data-dir-write", line: lineOf(src, hit), snippet: snippetOf(src, hit, 80) });
     }
   }
   return out;
@@ -683,7 +673,7 @@ export function detectSharedRootMkdtemp(src: string, rel: string): Violation[] {
     if (safeTmp) continue;
     // VIOLATION: the root resolves into the shared checkout — a direct token ...
     if (codeRegionHas(src, mask, openIdx, region, SHARED_ROOT_TOKEN_RE)) {
-      out.push({ rel, rule: "shared-root-mkdtemp", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      out.push({ rel, rule: "shared-root-mkdtemp", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
       continue;
     }
     // ... or a variable whose initializer references a shared-checkout root.
@@ -692,7 +682,7 @@ export function detectSharedRootMkdtemp(src: string, rel: string): Violation[] {
       if (codeRegionHas(src, mask, openIdx, region, new RegExp(`\\b${v}\\b`))) { shared = true; break; }
     }
     if (shared) {
-      out.push({ rel, rule: "shared-root-mkdtemp", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      out.push({ rel, rule: "shared-root-mkdtemp", line: lineOf(src, m.index), snippet: snippetOf(src, m.index, 80) });
     }
     // unknown root — lenient-skip (a function-param tmp root is not statically distinguishable).
   }

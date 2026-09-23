@@ -47,9 +47,9 @@ import {
   resolveWorktreeNamespace,
   DEFAULT_WORKTREE_NAMESPACE_NAME,
 } from "../../packages/quay/src/worktree-namespace.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 export const DEFAULT_HISTORY_FILE = path.join(REPO_ROOT, ".quay", "measure-history.jsonl");
 export const DEFAULT_LOG_FILE = path.join(REPO_ROOT, ".quay", "full-suite.log");

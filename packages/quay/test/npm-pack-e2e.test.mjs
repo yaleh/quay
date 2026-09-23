@@ -117,6 +117,12 @@ function makeTempPackageCopy() {
   fs.cpSync(path.join(repoRoot, "plugin"), path.join(base, "plugin"), { recursive: true });
   fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(root, "node_modules"), "dir");
   copyVersionGateInputs(base);
+  // package.sh stamps the staged plugin's marketplace name from the repo-root marketplace
+  // (scripts/stamp-marketplace-name.mjs) — both are repo-root relative, like the version gate.
+  for (const rel of ["scripts/stamp-marketplace-name.mjs", ".claude-plugin/marketplace.json"]) {
+    fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true });
+    fs.cpSync(path.join(repoRoot, rel), path.join(base, rel));
+  }
   return base; // the mkdtemp result itself — caller captures it into tempBase, cleaned in after()
 }
 
@@ -242,6 +248,13 @@ test("the tarball ships the postinstall register script + the plugin's .claude-p
   for (const rel of ["package/plugin/.claude-plugin/marketplace.json", "package/plugin/.claude-plugin/plugin.json"]) {
     assert.ok(tar.includes(rel), `tarball must carry ${rel}`);
   }
+  // plugin/'s marketplace is `quay-dev` in source (this repo's dogfood slot); package.sh stamps the
+  // packed copy with the release channel's name (scripts/stamp-marketplace-name.mjs). Read the name
+  // from the tarball itself — the artifact a consumer receives, not the staging directory.
+  const packedMarketplace = JSON.parse(
+    execFileSync("tar", ["-xzOf", tgz, "package/plugin/.claude-plugin/marketplace.json"], { encoding: "utf8" })
+  );
+  assert.equal(packedMarketplace.name, "quay", "the packed plugin must carry the release marketplace name, not the source-form `quay-dev`");
 });
 
 test("register-plugin.mjs names the user-level enable key on comment lines only (STANDING AC-162)", () => {

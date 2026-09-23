@@ -33,7 +33,7 @@ criterion: >-
   # reap it with a `wait` afterward in the same function — not just mention
   "parallel" in a comment.
 
-  CALL_LINE="$(grep -n 'run_one_case "\$name" "\$workdir"' "$SRC" | head -1)"
+  CALL_LINE="$(grep -n 'run_one_case "\$name" "\$workdir"' "$SRC" | head -1 || true)"
 
   if [ -z "$CALL_LINE" ]; then
     echo "CAUSE=call-site-not-found — no line in $SRC calls run_one_case \"\$name\" \"\$workdir\" verbatim; the refactor may have renamed the call — this criterion needs updating, not silently passed" >&2; exit 1

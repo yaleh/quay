@@ -56,10 +56,17 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { matchAtCommandPosition } from "./checker-lib.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim). This file's own copy
+// was one of the twelve byte-identical bodies extracted by
+// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp } from "./regex-escape.ts";
 // The --root read below is now delegated to the shared `flagValue`; its indexOf+next-arg read was
 // one of the copies of that idiom in plugin/scripts (.quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, createSelftest, flagValue } from "./gate-script-base.ts";
+// The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
+// derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
+import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -279,7 +286,7 @@ export function loadCatalogDecls(root: string): CatalogDecl[] {
 export function strictSurfaceFiles(root: string): string[] {
   const out = [
     path.join(root, "scripts", "test.sh"),
-    path.join(root, "plugin", "scripts", "runner-static-gate.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    path.join(root, REGISTRY_REL_CANDIDATES[0]),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   ];
   for (const dir of ["orchestration", "plugin/loop"]) {
     const d = path.join(root, dir);
@@ -324,10 +331,6 @@ export function broadSurfaceFiles(root: string): string[] {
     }
   }
   return out;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Full-text basename presence in a file (the call-surface convention mechanism-vitality uses). */
@@ -385,7 +388,7 @@ export function runCheck(root: string, asJson: boolean): number {
   // ── 判据3 — --no-block checkers must declare who reads the output ────────────────────────────────
   // The --no-block run_checker invocations live in run_static_checks, which moved to runner-static-gate.ts
   // (gap-ac128-hub-split-harness-concerns) — read that file, not scripts/test.sh.
-  const testShPath = path.join(root, "plugin", "scripts", "runner-static-gate.ts");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const testShPath = path.join(root, REGISTRY_REL_CANDIDATES[0]);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const noBlock = fs.existsSync(testShPath) ? extractNoBlockCheckers(fs.readFileSync(testShPath, "utf8")) : [];
   const c3: any[] = [];
   for (const nb of noBlock) {

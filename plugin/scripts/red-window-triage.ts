@@ -46,8 +46,7 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { scanFamily, kindForFile, isFamilyMember } from "./known-load-sensitive.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 export interface TriageFailure {
   line: string;

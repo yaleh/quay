@@ -36,8 +36,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { emitPass, emitFail, emitNotEvaluated, helpExit } from "./gate-script-base.ts";
 import { readProfilesConfig } from "./profile-policy.ts";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+import { repoRoot } from "./repo-root.ts";
 
 /** Directories under plugin/scripts/ that are NOT driver sources (fixtures / archived copies). */
 const CORPUS_EXCLUDES = ["checker-mutation-cases", "archive", "node_modules", "dist"];
@@ -226,7 +225,7 @@ function main(argv: string[]): number {
         "Exit 0 = pass, 1 = fail, 2 = usage/env error, 3 = NOT-EVALUATED (no init artifact obtainable).",
     );
   }
-  let root = path.resolve(HERE, "..", "..");
+  let root = repoRoot();
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") {
       const v = args[i + 1];
