@@ -3,7 +3,7 @@ id: gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout
 title: goal 判据执行的 60 s 超时在 goal-store.ts 四处写死，不读 QUAY_ACCEPTANCE_TIMEOUT_MS /
   gates timeoutMs / --timeout ⇒ 判据本身合法但 >60 s 的 AC 每轮被杀、无任何配置可救（GOAL-002 AC-014
   实证：测试 ~348 s 通过，goal gate 每轮 60 s 被 kill）
-status: ready
+status: done
 labels:
   - gap
   - defect
