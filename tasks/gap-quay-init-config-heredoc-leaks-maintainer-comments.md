@@ -32,14 +32,14 @@ extra:
 
 真实落地判据：用含修复版本的插件在一个全新的临时第三方目录跑一次真实 `quay-init`（不是只跑单测），写出的 `.quay/config.yml` 不含维护者注释且 YAML 合法；对一个已有项目跑一次升级路径（`quay init --reconcile` 或等价入口），结果保持合法 YAML 且用户自定义的键不被覆盖。完成记录附两次写出的文件摘要。
 
-## 实现读数（AC 逐条 + DoD 两次写出 + 合并面）
+## 实现读数（AC 逐条 + DoD 两次写出 + 合并面 + 两红归因）
 
 **改动面**：`plugin/scripts/quay-init.sh` 的 `write_config()` —— 维护者注释整段移出未加引号的 heredoc，成为 `cat` 之上的 shell 注释；heredoc 正文只留**面向使用者**的三处（`loop.test_command` 契约、`loop.doc_surfaces` 契约、`fork_baseline` 一行）。被拼断的那句合成完整一句（合并后 `:1525` 单行）。新增用例 `AC1/AC2`（`plugin/test/quay-init-loop.test.mjs`）。**三处机械重锚/补声明**：① `docs/analysis/quay-init-closure-ratchet.baseline.json` 用 `--reanchor` 重锚（footprint 3 files / 1022 bytes **不变**，只有 fingerprint 与 `quay-init.sh` 的 sha 变 —— 本次是「源改了」而非「footprint 长了」）；② `plugin/test/quay-init-characterization.test.mjs` 里 `.quay/config.yml` 那一行的钉死值（见下「合并面」）；③ **Touches 补入 `plugin/test/quay-init-characterization.test.mjs`** —— 它是把 quay-init 的**新装闭集产出逐字节钉死**的表征测试，本修复**必然**移动它，原 Touches 漏声明了这一处强制改动面（`anti-drift-touches-check` 的「写出声明之外的文件」会硬红）。**⛔ `packages/quay/src/init.ts` 未改**：本次落 Proposal 修法 ①+③；修法 ②（新装写出整体迁到 TS 序列化器、让 AC5 守卫退役）是一个独立的更大改动 —— 它会改 `plugin/vendor/quay/dist/quay.js` 这个已提交的构建产物面，与本缺陷的修复不是同一件事，故不在此夹带。
 
 **AC①** `node --test plugin/test/quay-init-loop.test.mjs` → exit 0（7 tests / 7 pass / 0 fail，合并后复跑同读数）。新用例按行扫描并逐条列出命中行；它自带**正控**（这些维护者用语必须仍存在于 `quay-init.sh` 源里，否则「产物里没有」什么也没证明）。
 **AC②** 同一用例：`YAML.parse` 通过；`providers.native.path` / `loop.test_command` / `loop.worktree_root` / `loop.fork_baseline` 与改动前逐字一致（归一化机器注入的绝对路径后比对）。⚠️ 合并后 `loop:` 是 **6** 键（develop 同期加了 `doc_surfaces`，非本任务所加）—— 该用例不断言键集合，只断言上面四个值与「无维护者用语」，故 develop 的增键不会使它红；这正是它被写成值断言而非哈希表的价值。
 **AC③** `grep -n "而版本级默认值的正本是" plugin/scripts/quay-init.sh packages/quay/src/init.ts` → **1** 命中（合并后 `plugin/scripts/quay-init.sh:1525`），整句连同 `LOOP_VERSION_DEFAULTS（…）` 收在一行内，下一行是段的空分隔 `    #`（`init.ts` 本就无此句，故只有一条命中）。原文那句是被拆成「头 … 5 行别的 … 尾」的，现已合拢。
-**AC④** `bash scripts/test.sh --for-task gap-quay-init-config-heredoc-leaks-maintainer-comments`（生产形态 `--allow-thin`，即 `.quay/config.yml` 的 `scoped_command`、fan-in 实跑的那条）→ **exit 0，151 tests / 0 fail**（合并后读数）。⚠️ 该读数取自 **Touches 补入表征测试之前**的选择器（当时它不在选中集里）；补入后本任务的测试面会变大（见下「合并后一轮」）。
+**AC④** `bash scripts/test.sh --for-task gap-quay-init-config-heredoc-leaks-maintainer-comments --allow-thin`（生产形态，即 `.quay/config.yml` 的 `scoped_command`、fan-in 实跑的那条）→ **exit 0，157 tests / 0 fail**。读数在**最终树**上取：`HEAD=15f4a866`、`DEVELOP=e4f6ad31`（develop 是 HEAD 的祖先）。157 而不是上一轮的 151，差额 **+6 = 补入 Touches 后表征测试文件被选进来的那 6 个用例**（`plugin/test/quay-init-characterization.test.mjs` 单独跑也是 6/6 绿）—— 这条差额同时证明「Touches 补入 ⇒ 选择器把它并进本任务的测试面」这一因果，而不是它碰巧一直不在。
 
 **负控（RED→GREEN）**：把 `plugin/scripts/quay-init.sh` 单独回退到修复前、用例不动 → 新用例**红**，命中行逐条列出（含 `heredoc`/`EOF`/`实证 2026-09-18`/`quay-init-loop.test.mjs`）；恢复修复版后绿。⇒ 该用例是测量，不是回声。
 
@@ -53,6 +53,10 @@ extra:
 **DoD 两次写出**（修复版、合并前测量；合并只增 `doc_surfaces` 键，升级面逻辑在 `init.ts` 未动）：
 1. **全新第三方目录**（`git init` + 一次提交）跑真实 `quay-init --loop`：写出的 `.quay/config.yml` 四个维护者用语零命中、`YAML.parse` 通过；正文只剩给使用者看的契约注释。**合并后已复核**：AC① 用例在合并树上复跑绿（7/7），它扫的正是这份新装产物。
 2. **升级面**（两路都跑）：① 同一目录注入用户自有内容（`loop.user_knob`、顶层 `my_team`、`loop_extra_owned_by_user`、用户注释行）后重跑 `quay-init` → 报「unchanged … 无 gratuitous rewrite」，用户键与注释逐字保留；② 删掉 `fork_baseline` 后跑 `quay init --reconcile`（该子命令存在但 `quay init --help` 未列出）→ 报 `filled loop.fork_baseline (was absent)`，YAML 合法、`user_knob` / `my_team` / 顶层用户键与用户注释全部保留；scoped 门里 `AC2 reconcile` 用例在合并树上同样绿。
+
+**本轮两次 suite-red 的归因（⛔ 不是「都是环境」）**：上两轮 fan-in 都因 suite-red 退场，同一份真因日志 `.quay/fan-in-suite-…-8b458b.log`（7993 tests / 2 fail）里两条红**性质不同，必须分开**：
+1. `plugin/test/quay-init-characterization.test.mjs` —— **本任务的错**（我漏声明 + 钉死值必然移动）。派发提示按「不在 Touches 且直接 import 不相交」把它判为 `UNRELATED`，**这个判据看不见它**：表征测试与我的 delta 之间**没有 import 边**，唯一的耦合是「我的产物字节 = 它钉死的字节」。⇒ 提示是复现的线索，不是结论。
+2. `plugin/test/workflow-journal.test.mjs` —— **与本任务无关**（另一条，真因另立）：`ENOENT mkdtemp '<wt>/tmp/workflow-journal-selftest-XXXXXX'`。根因是 `workflow-journal.ts:472` 在 `<cwd>/tmp` 下 mkdtemp 但**不创建**该父目录，而 `tmp/` 被 `.gitignore:464` 忽视 ⇒ 新 worktree 里它只作为**兄弟 selftest 的副作用**出现（`run-identity.ts:389` 会创建），绿不绿取决于套件里谁先跑。已**单独立案**：`tasks/gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir.md`（本轮由我 file，promotion-driver 随后机械晋升 todo→ready）。⇒ 本条红**不阻塞本任务**，但也不静默：它有了自己的载体。
 
 ## Touches
 
