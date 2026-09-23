@@ -171,6 +171,25 @@ function addVersionStampInputs(root) {
   for (const [rel, body] of Object.entries(carriers)) writeFile(path.join(root, rel), body);
 }
 
+/** The marketplace-name stamp the REAL publish script runs right after its rsync (2026-09-23): the
+ *  stamp entry is copied from the repo (same discipline as the version stamp above), the two
+ *  marketplaces are minimal synthetic ones in the SHAPE the repo ships — plugin/ named `quay-dev`
+ *  (source form, the dogfood slot), the repo root named `quay` (the release channel the stamp reads). */
+function addMarketplaceNameStampInputs(root) {
+  writeFile(
+    path.join(root, "scripts", "stamp-marketplace-name.mjs"),
+    fs.readFileSync(path.join(repoRoot, "scripts", "stamp-marketplace-name.mjs"))
+  );
+  writeFile(
+    path.join(root, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({ name: "quay", plugins: [{ name: "quay", source: { source: "github", repo: "x/quay", ref: "dist-plugin" } }] }, null, 2) + "\n"
+  );
+  writeFile(
+    path.join(root, "plugin", ".claude-plugin", "marketplace.json"),
+    JSON.stringify({ name: "quay-dev", plugins: [{ name: "quay", source: "." }] }, null, 2) + "\n"
+  );
+}
+
 /** A disposable stub repo holding the REAL publish script + the REAL bundler, with one bundleable
  *  script referenced by one carrier — small enough to assemble in seconds, structurally the same
  *  shape the real repo hands the script (plugin/ + packages/quay/scripts + vendor bundle).
@@ -204,6 +223,7 @@ function makeStubRepo(tag) {
   );
   writeFile(path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"), "// stub vendor bundle\n");
   addVersionStampInputs(root);
+  addMarketplaceNameStampInputs(root);
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");
   git(root, "-c", "user.name=ac263", "-c", "user.email=ac263@test.invalid", "commit", "-q", "-m", "stub");
@@ -255,6 +275,15 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
   assert.match(ok.stdout, /dist-closure gate OK \(directory\): 1 referenced dist bundles/);
   assert.match(ok.stdout, /orphan commit ready/);
   assert.equal(git(stub, "branch", "--list", branch).length > 0, true, "green run must create the branch");
+  // the PUBLISHED tree carries the release channel's marketplace name, not plugin/'s source-form
+  // `quay-dev` (read from the committed orphan branch — what a consumer or release.yml would fetch)
+  const published = JSON.parse(git(stub, "show", `${branch}:.claude-plugin/marketplace.json`));
+  assert.equal(published.name, "quay", "publish-dist-branch.sh must stamp the release marketplace name onto the published tree");
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(stub, "plugin", ".claude-plugin", "marketplace.json"), "utf8")).name,
+    "quay-dev",
+    "the stamp must act on the assembled COPY, never on the source plugin/"
+  );
   git(stub, "branch", "-D", branch);
 
   // red: one referenced bundle removed from the tree the gate reads

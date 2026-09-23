@@ -104,6 +104,9 @@ echo "Staging the plugin bundle (packages/quay/plugin/) from repo-root plugin/ b
 rm -rf "${PLUGIN_DEST}"
 mkdir -p "${PLUGIN_DEST}"
 cp -R "${PLUGIN_SRC}/." "${PLUGIN_DEST}/"
+# plugin/'s marketplace is named `quay-dev` in source (this repo's dogfood slot); the packed copy
+# carries the release channel's name — scripts/stamp-marketplace-name.mjs. Stamps the COPY only.
+node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${PLUGIN_DEST}" --repo-root "${REPO_ROOT}"
 
 # EXCLUDE quay's OWN tests from the shipped artifact (human ruling 2026-08-06: 剔除测试).
 # Measured before the ruling: plugin/test/ was 151 of 406 plugin entries (37%) and 1.9MB of

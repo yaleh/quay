@@ -107,7 +107,11 @@ find "$WORK" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 # currently support a `path` subdirectory parameter (only `ref`), so the orphan branch's
 # root IS the plugin, mirroring what `./plugin` means for the local-directory marketplace
 # source used by master.
-rsync -a --exclude='.git' "${PLUGIN_DIR}/" "${WORK}/"
+# The source form of plugin/.claude-plugin/marketplace.json is named `quay-dev` (this repo's dogfood
+# slot); the published tree carries the release channel's name. The stamp is chained onto the copy
+# so it cannot be separated from it, and acts on the COPY, never plugin/ itself — see
+# scripts/stamp-marketplace-name.mjs. Fail-closed under `set -e`.
+rsync -a --exclude='.git' "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
 # plugin/scripts (and gate-scripts) as RAW .ts alongside whatever dist/*.js happened to already
