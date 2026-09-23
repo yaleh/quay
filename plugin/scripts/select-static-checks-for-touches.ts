@@ -44,6 +44,11 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
+// `loop.doc_surfaces` is read from the target's `.quay/config.yml`. The `yaml` package is already a
+// shipped dependency of this plugin bundle (worker-fan-in.ts / task-schema.ts / driver-config.ts all
+// import it, and the plugin bundle carries the createRequire banner yaml's CJS interop needs) — ⛔ not
+// a hand-rolled YAML scanner, that would be a second parser to drift.
+import { parse as parseYaml } from "yaml";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -76,8 +81,12 @@ export const REGISTRY_BASENAME = "runner-static-gate.ts";
  *       every non-flip delta ⇒ full suites burned (gap-classify-delta-registry-path-layout-aware).
  *
  *  ⛔ Still three-state, not boolean (hard rule 3b): "not found under ANY layout" stays exit 2 with the
- *  original wording — an external project that carries no registry of its own AND is not sitting under
- *  a packaged plugin root is `not-evaluated`, never an invented "empty registry ⇒ inert" verdict. */
+ *  original wording for every mode that genuinely NEEDS the registry (the scoped selection / --list /
+ *  the ## Touches registration check) — a caller must never read a missing registry as an invented
+ *  "empty registry ⇒ nothing selected". The two modes that CAN answer without it are handled above the
+ *  requirement and do NOT exit 2: `--bootstrap-orchestration` (reads only the fan-in file set) and
+ *  `--classify-delta` (falls back to the project's declared `loop.doc_surfaces`, then to the
+ *  conservative quay-written-surfaces default — gap-fan-in-delta-classify-declared-doc-surfaces). */
 export const REGISTRY_REL_CANDIDATES = [
   path.posix.join("plugin", "scripts", REGISTRY_BASENAME),
   path.posix.join("scripts", REGISTRY_BASENAME),
@@ -88,8 +97,9 @@ export const REGISTRY_REL_CANDIDATES = [
 export const TEST_SH_REL = REGISTRY_REL_CANDIDATES[0];
 
 /** The FIRST candidate root that actually carries the registry, or null when none does. Pure lookup:
- *  the caller decides what an absent registry MEANS (here: exit 2), so a miss can never be mistaken
- *  for a verdict. */
+ *  the caller decides what an absent registry MEANS (the registry-requiring modes exit 2; the
+ *  `--classify-delta` path falls back to the declared/conservative doc surfaces), so a miss can never
+ *  be mistaken for a verdict. */
 export function resolveRegistryPath(root) {
   for (const rel of REGISTRY_REL_CANDIDATES) {
     const abs = path.join(root, rel);
@@ -257,6 +267,13 @@ export function matchesObject(object, touch) {
 //      to code (hard rule 3b: 判不出 ≠ 不需要; an unrecognized path may break the suite).
 // A path is DOC only when neither holds AND it is a task file or under a doc surface.
 //
+// ⚠️ ① only exists in REGISTRY mode — the tree carries quay's checker list, i.e. it IS quay's own tree
+// (or vendored a copy). A tree without it has no checker set to ask "does anything read this?", so the
+// judgment is ② alone over the surfaces the project declared (`loop.doc_surfaces`) or, absent a
+// declaration, the conservative quay-written default. Which of the three applies is
+// `resolveDocSurfaceDecision` — the ONE entry both the fan-in step-4 skip/rerun judgment and the
+// ff-merge certificate gate call (gap-fan-in-delta-classify-declared-doc-surfaces, 硬规则 5b).
+//
 // Falsification (pinned by plugin/test/fan-in-execute-paths.test.mjs):
 //   取假二: orchestration/manager-tick-core.md (read by tick-core-static-check / rhythm-consumer's
 //   `orchestration/*-tick-core.md`) must classify as CODE — never doc-only skip.
@@ -269,10 +286,119 @@ export const DOC_SURFACES = [
   "orchestration/archive/", "plugin/loop/",
 ];
 
+/** The conservative, layout-INDEPENDENT doc-surface default — used when this tree carries NO quay
+ *  static-check registry and the project declared no `loop.doc_surfaces` (i.e. a third-party project).
+ *  It names ONLY the surfaces quay's own machinery writes into EVERY workspace (the task board, the
+ *  goal store, the workspace config/telemetry dir): a project with none of these has an empty doc
+ *  face and every delta is code — fail-closed, hard rule 3b.
+ *
+ *  ⛔ `DOC_SURFACES` above is NOT a valid default here. It is quay's OWN layout (docs/, adr/,
+ *  measurements/, milestones/, orchestration/archive/, plugin/loop/); applying it to a foreign tree
+ *  would call that tree's product code "doc" and silently skip its full suite — the exact
+ *  "判不出 ≠ 不需要" failure the conservative default exists to prevent.
+ *  (gap-fan-in-delta-classify-declared-doc-surfaces) */
+export const CONSERVATIVE_DOC_SURFACES = ["tasks", "goals", ".quay"];
+
+/** The `loop:` key a project uses to DECLARE its doc-only path prefixes — the third-party half of the
+ *  fan-in doc/code classification (see plugin/skills/init/SKILL.md, section "loop.doc_surfaces"). */
+export const DOC_SURFACES_KEY = "doc_surfaces";
+
+/** Read `<root>/.quay/config.yml` `loop.doc_surfaces` — the project's EXPLICIT declaration, or null
+ *  when it is absent / unreadable / malformed / not a non-empty list of strings.
+ *
+ *  ⛔ null means "not declared", NEVER "declared to be empty": an empty list is indistinguishable from
+ *  a truncated read, and reading a malformed value as a deliberate one is exactly the
+ *  "读不懂 ⇒ 伪装成合格" shape of hard rule 3b. Entries are canonicalised through `normalizeRel` and
+ *  de-slashed, so `docs`, `docs/`, `./docs/` and `docs//` all match the delta path `docs/x.md`. */
+export function readDeclaredDocSurfaces(root) {
+  let parsed;
+  try {
+    parsed = parseYaml(fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8"));
+  } catch {
+    return null; // absent or unparseable ⇒ not declared (never an invented empty declaration)
+  }
+  const loop = parsed && typeof parsed === "object" ? parsed.loop : undefined;
+  const declared = loop && typeof loop === "object" ? loop[DOC_SURFACES_KEY] : undefined;
+  if (!Array.isArray(declared)) return null;
+  const out = declared
+    .filter((s) => typeof s === "string")
+    .map((s) => normalizeRel(s))
+    .filter((s) => s !== "");
+  return out.length > 0 ? [...new Set(out)] : null;
+}
+
+/** Canonicalise a doc-surface entry for prefix matching: `normalizeRel` (drops `./`, `.`, `..`, a
+ *  trailing `/`) then compare segment-wise. ⛔ The match is `p === s || p.startsWith(s + "/")`, never a
+ *  bare `startsWith(s)`: `docs` must not swallow `docs-old/x.ts` (the same over-broad-substring defect
+ *  the `goals/` fixture pins). */
+export function isUnderDocSurface(p, docSurfaces) {
+  return (docSurfaces ?? []).some((raw) => {
+    const s = normalizeRel(raw);
+    return s !== "" && (p === s || p.startsWith(`${s}/`));
+  });
+}
+
+/** How the doc/code judgment is decided for a given root — the THREE states the classifier can be in.
+ *  ⛔ Never collapse them into a boolean (hard rule 3b): a reader must be able to ask WHICH rule
+ *  produced a verdict, and "the tree carries no registry and declares no surfaces" must be visible
+ *  rather than looking like a well-founded registry verdict.
+ *
+ *    registry             this tree carries quay's static-check registry ⇒ the registry decides (the
+ *                         delta∩{checker-@static-object} test), with DOC_SURFACES as the surface list.
+ *                         This is quay's OWN tree (and any tree that vendored the registry).
+ *    declared             no registry, but `.quay/config.yml` declares `loop.doc_surfaces` ⇒ those
+ *                         prefixes (plus the `tasks/` carve-out) are doc, everything else is code.
+ *    conservative-default neither ⇒ task board / goal store / `.quay/` are doc, everything else is code.
+ *
+ *  THE DEFECT THIS CLOSES (gap-fan-in-delta-classify-declared-doc-surfaces): the registry lookup was
+ *  the ONLY path, so a third-party tree exited 2 ⇒ worker-fan-in's `__CLASSIFY_FAILED__` ⇒ full suite
+ *  on EVERY non-empty delta (measured: 11 of 177 delta judgments on claudecodeui), and the project
+ *  "fixed" it by committing a COPY of quay's registry into its own repo — at which point quay's
+ *  checker list decided a foreign tree's doc/code split, which is meaningless. */
+export function resolveDocSurfaceDecision(root) {
+  const registryPath = resolveRegistryPath(root);
+  if (registryPath) {
+    return {
+      mode: "registry",
+      registry: parseStaticCheckRegistry(fs.readFileSync(registryPath, "utf8")),
+      docSurfaces: DOC_SURFACES,
+      detail: `registry at ${registryPath}`,
+    };
+  }
+  const declared = readDeclaredDocSurfaces(root);
+  if (declared) {
+    return {
+      mode: "declared",
+      registry: null,
+      docSurfaces: declared,
+      detail: `loop.${DOC_SURFACES_KEY} declares [${declared.join(", ")}]`,
+    };
+  }
+  return {
+    mode: "conservative-default",
+    registry: null,
+    docSurfaces: CONSERVATIVE_DOC_SURFACES,
+    detail: `no registry and no loop.${DOC_SURFACES_KEY} declaration ⇒ quay-written surfaces only`,
+  };
+}
+
+/** The fan-in's ONE classification entry (`--classify-delta` is its CLI face): given the tree the
+ *  delta is relative to and the delta paths, return the decision AND the CODE subset. Both the fan-in
+ *  step-4 skip/rerun judgment (worker-fan-in.ts) and the ff-merge suite-certificate gate
+ *  (packages/quay/src/fan-in/ff-merge.ts) go through this one judgment — 硬规则 5b: a second
+ *  doc-surface list anywhere is a drift, not an optimization. */
+export function classifyDeltaPaths(root, paths) {
+  const decision = resolveDocSurfaceDecision(root);
+  const codePaths = (paths ?? []).filter((p) => !isDocPath(p, decision.registry, decision.docSurfaces));
+  return { decision, codePaths };
+}
+
 /** True iff a repo-relative delta path is DOC (safe to skip the full suite). false = code (the full
  *  suite must re-run). `registry` is the parsed static-check registry (parseStaticCheckRegistry) —
- *  required, so the classification is always computed from scripts/test.sh's current annotations. */
-export function isDocPath(pathStr, registry) {
+ *  null when the tree carries none, in which case `docSurfaces` (the caller's decision, see
+ *  resolveDocSurfaceDecision) is the whole judgment. Defaults keep the pre-existing callers (the
+ *  scoped selector / driver-filters) on quay's own surface list. */
+export function isDocPath(pathStr, registry, docSurfaces = DOC_SURFACES) {
   const p = String(pathStr).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
   if (!p) return true;
   // The task-file carve-out (see the block comment above): task files are the doc surface the
@@ -283,7 +409,7 @@ export function isDocPath(pathStr, registry) {
     .filter((c) => c.tier === "change" || c.tier === "full")
     .flatMap((c) => c.objects);
   if (codeObjects.some((o) => matchesObject(o, p))) return false; // a checker reads it ⇒ code
-  if (DOC_SURFACES.some((s) => p.startsWith(s))) return true; // known task-board/doc/telemetry surface
+  if (isUnderDocSurface(p, docSurfaces)) return true; // known task-board/doc/telemetry surface
   return false; // product code / unknown path ⇒ code (fail-closed)
 }
 
@@ -639,10 +765,19 @@ Output modes:
   --list               — the full registry (tier / objects / scoped-mode per checker)
   --json               — machine-readable selection {selected, deferred, always, change}
   --classify-delta <path>… — fan-in doc/code classification (gap-fan-in-delta-scope-doc-only-skip):
-      print the CODE (non-doc) paths among the given repo-relative delta files (one per line). doc =
-      "no change/full-tier checker's @static-object glob matches it" (computed from scripts/test.sh)
-      AND it is under a task-board/doc/telemetry surface (tasks/, docs/, adr/, .quay/, measurements/,
-      milestones/, orchestration/archive/, plugin/loop/); everything else is code (fail-closed).
+      print the CODE (non-doc) paths among the given repo-relative delta files (one per line). WHICH
+      paths count as doc is decided in three states, never a bare boolean
+      (gap-fan-in-delta-classify-declared-doc-surfaces):
+        registry              this tree carries quay's checker registry (plugin/scripts/… or scripts/…)
+                              ⇒ doc = "no change/full-tier checker's @static-object glob matches it" AND
+                              under a task-board/doc/telemetry surface (tasks/, docs/, adr/, .quay/,
+                              measurements/, milestones/, orchestration/archive/, plugin/loop/).
+        declared              no registry, but the config's loop.doc_surfaces declares the
+                              project's doc prefixes ⇒ those (plus tasks/) are doc.
+        conservative-default  neither ⇒ only the surfaces quay itself writes (tasks/, goals/, .quay/)
+                              are doc; everything else is code.
+      Exit 0 on every well-formed input (empty input ⇒ empty output = doc-only). ⛔ Absence of a
+      registry is NOT exit 2 here — a third-party tree gets a real verdict, not a fail-closed rerun.
   --bootstrap-orchestration <path>… — fan-in orchestration bootstrap detection
       (gap-fan-in-orchestration-bootstrap-self-fix): print the given repo-relative delta paths that are
       fan-in orchestration files themselves (fan-in-execute.js / select-static-checks-for-touches.ts /
@@ -806,33 +941,18 @@ export function main(argv) {
     return 0;
   }
 
-  const testSh = resolveRegistryPath(root);
-  if (!testSh) {
-    const looked = REGISTRY_REL_CANDIDATES.map((rel) => path.join(root, rel)).join(" or ");
-    process.stderr.write(`select-static-checks-for-touches: registry file (${REGISTRY_BASENAME}) not found at ${looked}\n`);
-    return 2;
-  }
-  const registry = parseStaticCheckRegistry(fs.readFileSync(testSh, "utf8"));
-
-  if (listMode) {
-    for (const c of registry) {
-      const obj = c.objects.length ? ` [${c.objects.join(", ")}]` : "";
-      const mode = c.scopedMode ? ` (${c.scopedMode})` : "";
-      console.log(`${c.tier}\t${c.name}${mode}${obj}`);
-    }
-    return 0;
-  }
-
-  // --classify-delta <path>… — fan-in step-2 doc/code classification (gap-fan-in-delta-scope-doc-only-
-  // skip, AC2). Each argv path is a repo-relative delta file (from `git diff --name-only`); print the
-  // CODE (non-doc) ones, one per line. A path no suite checker reads AND under a doc surface is doc;
-  // everything else (a checker reads it, product code, unknown) is code ⇒ the fan-in re-runs the full
-  // suite. Exit 0 always on well-formed input (empty input ⇒ empty output = doc-only).
+  // --classify-delta <path>… — fan-in step-4 doc/code classification (gap-fan-in-delta-scope-doc-only-
+  // skip, AC2; declared-surface fallback by gap-fan-in-delta-classify-declared-doc-surfaces). Each argv
+  // path is a repo-relative delta file (from `git diff --name-only`); print the CODE (non-doc) ones, one
+  // per line. Which paths count as doc is decided by resolveDocSurfaceDecision(root) — the registry when
+  // the tree carries one, else the project's declared `loop.doc_surfaces`, else the conservative
+  // quay-written-surfaces default. Exit 0 always on well-formed input (empty input ⇒ empty output =
+  // doc-only), and ⛔ NEVER exit 2 for a delta it can judge: a third-party tree without a registry is a
+  // real verdict ("these paths are code"), not an un-evaluable one. This branch runs BEFORE the
+  // registry requirement below — it is the one mode that does not need the registry at all.
   if (classifyDelta) {
-    const paths = positionalArgs(args);
-    for (const p of paths) {
-      if (!isDocPath(p, registry)) console.log(p);
-    }
+    const { codePaths } = classifyDeltaPaths(root, positionalArgs(args));
+    for (const p of codePaths) console.log(p);
     return 0;
   }
 
@@ -847,6 +967,29 @@ export function main(argv) {
   if (bootstrapOrchestration) {
     const paths = positionalArgs(args);
     for (const p of fanInOrchestrationBootstrapHit(paths)) console.log(p);
+    return 0;
+  }
+
+  // ── from here on the mode genuinely NEEDS the checker registry ─────────────────────────────────
+  // (the scoped selection / --list / the ## Touches registration check all read it: without it there
+  // is no mapping to compute, so a miss is exit 2 — the un-evaluable state, ⛔ never an invented
+  // "empty registry ⇒ nothing selected". The two modes above deliberately sit ABOVE this line because
+  // they can answer without it: --classify-delta has its declared/conservative fallback, and
+  // --bootstrap-orchestration reads only the fan-in orchestration file set.)
+  const testSh = resolveRegistryPath(root);
+  if (!testSh) {
+    const looked = REGISTRY_REL_CANDIDATES.map((rel) => path.join(root, rel)).join(" or ");
+    process.stderr.write(`select-static-checks-for-touches: registry file (${REGISTRY_BASENAME}) not found at ${looked}\n`);
+    return 2;
+  }
+  const registry = parseStaticCheckRegistry(fs.readFileSync(testSh, "utf8"));
+
+  if (listMode) {
+    for (const c of registry) {
+      const obj = c.objects.length ? ` [${c.objects.join(", ")}]` : "";
+      const mode = c.scopedMode ? ` (${c.scopedMode})` : "";
+      console.log(`${c.tier}\t${c.name}${mode}${obj}`);
+    }
     return 0;
   }
 

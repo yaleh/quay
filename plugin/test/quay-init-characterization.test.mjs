@@ -136,11 +136,15 @@ function argsFor(base) {
 // with the ported one on these exact fixtures — see this file's header for the falsifiability
 // record. A future RED here is a question, not a verdict: either the script's output moved (and
 // this row must be re-anchored WITH the change that moved it), or it regressed.
+// RE-ANCHORED 2026-09-24 (gap-fan-in-delta-classify-declared-doc-surfaces): the fresh-install heredoc
+// gained the `loop.doc_surfaces` key (the doc/code declaration the mechanical fan-in reads), so
+// `.quay/config.yml` legitimately moved. Only that one line changed; the other six rows are untouched,
+// which is what the row-per-file shape is for.
 const PINNED = {
   fresh: {
     rc: 0,
     surface: [
-      ".quay/config.yml  27caf439460ee215c8c9a507f269ce86b5f11a47b2107e6e4688aa5dc7bf3f18",
+      ".quay/config.yml  c22004941595b56b254f3099e09c3027dd3f75f4d639995ba718b219ad3b258d",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",

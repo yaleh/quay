@@ -418,6 +418,13 @@ ensure_loop_config() {
   if [ ! -f "$cfg" ]; then return; fi
   # The merge + no-gratuitous-rewrite logic (and the exact report lines) live in
   # `ensureLoopConfig` (packages/quay/src/init.ts) — one implementation, no second copy.
+  # ⛔ `loop.doc_surfaces` is deliberately NOT passed here: it is a VERSION-LEVEL default, and this
+  # step is the four VALUE-level project-derived values only (repo_root/test_command/tmux_session/
+  # worktree_root). Its delivery to an existing config is the comment-preserving per-key reconcile
+  # (`LOOP_VERSION_DEFAULTS` in init.ts, reachable via `quay init --reconcile` / the MCP init tool) —
+  # see plugin/skills/init/SKILL.md, "Re-running on an existing project". Routing it through this
+  # step instead would re-serialize the whole document with the value-merge writer, which DROPS the
+  # user's comments (the "NO GRATUITOUS REWRITE" discipline this file's comments describe).
   quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"
 }
 
@@ -1529,6 +1536,14 @@ loop:
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
+  # The doc/code split the mechanical fan-in uses to decide whether a task's delta may skip the full
+  # suite: listed path prefixes are DOC, everything else is CODE (fail-closed). This default names only
+  # the surfaces quay itself writes, so ADD your own docs / telemetry directories here. It decides only
+  # when this tree carries no quay checker registry; a tree that carries one uses the registry. It is
+  # a version-level default: the shipped reconcile fills the same value into an existing config
+  # comment-preservingly (packages/quay/src/init.ts LOOP_VERSION_DEFAULTS — the two writers must agree).
+  # Full contract: plugin/skills/init/SKILL.md, section "loop.doc_surfaces".
+  doc_surfaces: ["tasks/", "goals/", ".quay/"]
   # ⚠️ 本 heredoc 是【新装】写者，而版本级默认值的正本是 packages/quay/src/init.ts 的
   # ⛔ 本 heredoc 的定界符 EOF 【未加引号】⇒ 正文（注释也算）里的反引号、以及「美元符号 + 圆括号」
   # 的替换形式都会被【求值】——写成注释也照样执行，且产物是【写出的 .quay/config.yml】。

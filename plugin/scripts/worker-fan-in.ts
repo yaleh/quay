@@ -177,6 +177,23 @@ export function docCheckCommandFor(worktree: string): string[] | null {
   return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
 }
 
+/** fan-in 的 delta 判定「没判出来」哨兵：分类器非零退出（它没能给出结论）⇒ 本轮 fail-closed 跑全量
+ *  suite（硬规则 3b：判不出 ≠ 不需要）。⛔ 它不是「delta 是 code」的同义词——两者的后果相同（都跑
+ *  suite），但只有前者是【判决】；日志的 reason 必须能把二者分开。 */
+export const CLASSIFY_FAILED = "__CLASSIFY_FAILED__";
+
+/** 把一次 `--classify-delta` 调用映射成 fan-in 的三态 code_delta 取值（【单一定义点】——step 4 与
+ *  其 4b「develop 前进面复用」判定共用，⛔ 两处不得各写一份三元式，硬规则 5b）：
+ *    ""                分类器给出了结论，且 delta 全落 doc/inert 面 ⇒ 跳过全量 suite；
+ *    "<path>…"         分类器给出了结论，且有 code 面 ⇒ 跑全量 suite；
+ *    CLASSIFY_FAILED   分类器【没给出结论】（非零退出）⇒ 跑全量 suite（fail-closed）。
+ *  第三方 worktree 过去必然落到第三者（分类器 `--root <worktree>` 找不到 quay 的检查注册表 ⇒ exit 2，
+ *  生产读数：claudecodeui 177 次 delta 判定中 11 次）——分类器现在自带「声明的 loop.doc_surfaces →
+ *  保守缺省」兜底，第三方也走前两者（gap-fan-in-delta-classify-declared-doc-surfaces）。 */
+export function classifyDeltaOutcome(ok: boolean, stdout: string): string {
+  return ok ? String(stdout ?? "").trim() : CLASSIFY_FAILED;
+}
+
 /** 解析本 kernel 的一个 shell sibling（.sh）—— 实现已上收 `driver-runtime.resolveKernelShellSibling`
  *  （单一入口，⛔ 不各写一份 basename==="dist" 上跳逻辑）。本文件经 import 消费，⛔ 不再本地复制一份。
  *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
@@ -1389,7 +1406,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     let codeDelta = "";
     if (deltaList.length > 0) {
       const cd = await mechSh([...classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
-      codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
+      codeDelta = classifyDeltaOutcome(cd.ok, cd.stdout || "");
     }
     // 4b. develop 前进面复用（gap-fan-in-continue-doc-only-advance-reuse-suite）：任务自身 delta 是 code
     // 时，若上一轮 green bucket suite（full-suite-state.json 的 mirror 记录，taskId=本任务）之后、
@@ -1397,7 +1414,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // CONTINUE 重跑，重跑时任务 delta 仍是 code），则复用上一 green 判定、不重跑 suite。判不出
     // （无上一 green / 非祖先 / classify 失败）⇒ fail-closed 照常跑 suite（硬规则 3b）。
     let reuseSkip = false;
-    if (codeDelta !== "" && codeDelta !== "__CLASSIFY_FAILED__") {
+    if (codeDelta !== "" && codeDelta !== CLASSIFY_FAILED) {
       const prevCommit = readPreviousGreenSuiteCommit(suiteStateFile, task);
       if (prevCommit) {
         const anc = await mechSh(["git", "-C", worktree, "merge-base", "--is-ancestor", prevCommit, "HEAD"], 30_000);
@@ -1405,12 +1422,13 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
           const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
-          reuseSkip = adv.ok && (adv.stdout || "").trim() === ""; // 前进面全 doc/inert ⇒ 复用上一 green
+          // 前进面全 doc/inert ⇒ 复用上一 green（同一映射：【没判出来】不构成复用理由）
+          reuseSkip = classifyDeltaOutcome(adv.ok, adv.stdout || "") === "";
         }
       }
     }
-    const needSuite = opts.forceSuite === true || codeDelta === "__CLASSIFY_FAILED__" || (codeDelta !== "" && !reuseSkip);
-    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === "__CLASSIFY_FAILED__" ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
+    const needSuite = opts.forceSuite === true || codeDelta === CLASSIFY_FAILED || (codeDelta !== "" && !reuseSkip);
+    trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === CLASSIFY_FAILED ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
 
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。

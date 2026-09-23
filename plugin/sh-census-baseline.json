@@ -232,8 +232,24 @@
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
       },
       "ratchetNote": "This is the axis's SECOND upward re-anchor (the first is the 2026-09-19 land entry, +259, same mechanism): a committed raise is visible and reviewable, an uncommitted one is caught by the worktree-vs-HEAD guard. It is the honest cost of a thin entry for a script that had no embedded interpreter to convert. ⛔ It is NOT a ratchet weakening: the reading and the baseline are both the checker's own numbers on this tree."
+    },
+    {
+      "when": "2026-09-24 (gap-fan-in-delta-classify-declared-doc-surfaces)",
+      "from": {
+        "embeddedInterpreterLines": 7688,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7689,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+1) — the exceptional direction, forced by the one change this task cannot make any other way. This task makes the mechanical fan-in's doc/code classification answerable on a THIRD-PARTY tree (one that carries no quay checker registry) by reading the project's declared `loop.doc_surfaces`. That key must be DELIVERED by quay-init, and the fresh-install writer is plugin/scripts/quay-init.sh's own `loop:` heredoc, where a YAML key is one effective line: it cannot be expressed as a comment nor folded onto another key's line (the writer-face extractor of plugin/scripts/config-key-consumer-check.ts reads `^  <key>:` at two-space indent, and that same extraction is what makes this task's AC3 reading — doc_surfaces: has-consumer — possible at all). quay-init.sh is ALREADY an embedded-interpreter .sh (embedded: [node] — it is the shell entry that execs the node step CLI), so every effective line it gains lands on this axis. Per this file's _note the raise is legal only once COMMITTED: the shrink-guard compares the worktree copy against the git-HEAD copy of this very file, so this entry is committed together with the heredoc line and the two sides agree. ⛔ NOT a threshold relaxed to buy a pass — the +1 is measured, attributed line-for-line below (residual = 0), and the ratchet's own AC6 test (plugin/test/sh-census-check.test.mjs) requires this file to EQUAL the live reading, so leaving 7688 would red the whole static layer.",
+      "attribution": {
+        "embeddedInterpreterLines": "+1 = plugin/scripts/quay-init.sh effective lines 1012 -> 1013 — exactly the added heredoc line carrying `doc_surfaces: [tasks/, goals/, .quay/]`. Its four explanatory comment lines are FREE on this axis (comments do not count). An earlier form of this same edit — a `DEFAULT_DOC_SURFACES=` shell variable plus `${DEFAULT_DOC_SURFACES}` in the heredoc — measured +2 and was rewritten for exactly this reason: with the version-level writer reverted to the reconcile (LOOP_VERSION_DEFAULTS in packages/quay/src/init.ts, a .ts and therefore outside a .sh census) the shell needs the literal only once, and the one-literal form is what ships. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire `*.sh` delta vs develop is exactly one path (`git diff --name-only develop HEAD -- '*.sh'` -> plugin/scripts/quay-init.sh), so nothing else in the census can have moved. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/quay-init.sh].codeLines 1012 -> 1013 and totals.embeddedInterpreterLines 7688 -> 7689 — the two readings differ by exactly that one line.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 7688,
+  "embeddedInterpreterLines": 7689,
   "duplicateCopies": 0
 }
