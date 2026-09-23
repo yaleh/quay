@@ -3,7 +3,7 @@ id: gap-ac300-criterion-cmdline-port-literal-stale
 title: AC-300 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据在真实部署上结构性失效（addr=172.28.0.1:0，curl 失败）；/adr 页面机制本身为真（本轮实测四条断言全过）——
   重锚地址派生那一步（照搬 AC-288 已落地的同族形态，同一行）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -101,13 +101,13 @@ EXIT=0
 
 ## AC
 
-- [ ] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-300 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（**修订前 = `5a253897673dbc3fbf37cd4f66f63244`**，取法 = `quay goal show AC-300 --json` 的 `.criterion` 字段逐字落盘后 `md5sum`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/adr` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `ADRs` 条数、本页 `<title>`）。
-- [ ] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
-- [ ] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-300-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
-- [ ] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
-- [ ] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/adr"` 与 `LABEL_EN="ADRs"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-300 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-300` 落账。
-- [ ] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-300（贴该集合条数与 AC-300 是否在内）。
-- [ ] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac300-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
+- [x] **AC1（重锚后判据在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-300 --dry-run --json` 在**修订后** `exit 0`，且它实际派生/使用的地址 = **当次**载体里 `web` 服务的真实端口（⛔ 不是 0）。贴：修订前后 criterion 的 md5（**修订前 = `5a253897673dbc3fbf37cd4f66f63244`**，取法 = `quay goal show AC-300 --json` 的 `.criterion` 字段逐字落盘后 `md5sum`）、派生地址、`GATE_EXIT=`、以及 `curl` 在 `http://<web addr>/adr` 上的 en/zh 两条读数（`<html lang=…>`、nav 区块 `ADRs` 条数、本页 `<title>`）。
+- [x] **AC2（能取假，两向都贴；⛔ 只贴绿侧不算）**：(a) **无活候选** ⇒ 非 0，且 stderr 的具名 `CAUSE` 与 (b) **不同形**；(b) 候选地址指向必然连不上的端口（例如把载体的 web 端口临时改指一个已关闭端口，或用 cwd = 仓库根但 `--port` 指向死端口的候选）⇒ 非 0，成因含「连接被拒／取不到」。两侧读数都贴。
+- [x] **AC3（非字面量；硬规则 4 推论二 + AC3 的检测半边）**：`grep -c "14037\|172\.28\.0\.1" goals/AC-300-*.md` ⇒ **0**（⛔ 不得把本机当前端口/主机写成字面量），并贴出完整输出；**配套动作**：把同一谓词对着一个**已知为真**的样本（如本任务体里的 `172.28.0.1:14037` 串）干跑一次 ⇒ 必须非 0，证明谓词不是恒零（硬规则 2 下半）。
+- [x] **AC4（归因；硬规则 3b）**：制造一次真实 fail（用 AC2 任一方向），stderr 必须对**每个**候选给出 `pid` + 派生地址 + 成因；⛔ 候选存在时不得出现 `addr=` 空或无成因的裸失败 —— 「查不成」与「不合格」必须可区分。
+- [x] **AC5（作用域与语义不变）**：`expect` 逐字不变、`ROUTE="/adr"` 与 `LABEL_EN="ADRs"` 逐字不变、chrome 作用域（只对 `<nav>…</nav>` 与 `<title>` 匹配）逐字不变；修订只经 `quay goal write AC-300 --criterion …` 落库且记录含「为什么改」；修订后**新** criterionHash 至少有一条独立的 `quay goal gate AC-300` 落账。
+- [x] **AC6（本仓库自身行为不回退）**：`node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` `exit 0`；`node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` 的 failing 集合不再含 AC-300（贴该集合条数与 AC-300 是否在内）。
+- [x] **AC7（scoped 门）**：`bash scripts/test.sh --for-task gap-ac300-criterion-cmdline-port-literal-stale --allow-thin` `exit 0`。
 
 ## DoD
 
@@ -125,3 +125,79 @@ EXIT=0
 - tasks/gap-ac300-criterion-cmdline-port-literal-stale.md
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-300 --criterion …` 落库，`expect` 与 chrome 作用域语义逐字不变、只补「为什么改」；第二条是配套夹具（按 marker 从 goal 文件逐字抽取派生块，与 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-adr.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
+
+## Evidence
+
+Round 2026-09-23/24 (worker). Full raw bundle: `.quay/ac300-worker/` (untracked scratch, as the DoD
+sanctions) — `criterion-before.txt`, `criterion-after.txt`, `gate-dryrun-after.json`,
+`gate-real-after.json`, `sweep-final.out`, `negative-controls.txt`, `evidence-negative-controls.mjs`.
+
+Criterion md5 **`5a253897673dbc3fbf37cd4f66f63244` -> `2557b359bc42c0023dbb49c0a821c613`**
+(`quay goal show AC-300 --json` .criterion verbatim -> `md5sum`); fingerprint
+`ac4cab6326e9a4bc` (pre-amendment, the one the ledger shows green-then-red) -> `c1abce198079dcf3`.
+
+**AC1 — green on the live instance.** `goal gate AC-300 --dry-run --json` ⇒ `GATE_EXIT=0`,
+`verdict: pass`; real run ⇒ `GATE_EXIT=0`. Derived address **`127.0.0.1:16377`** =
+`name=="web"` in `.quay/server.json` for the live pid **850862** (`--host 0.0.0.0 --port 0`) —
+**not 0**: `AC-300 serve address derived from carrier as 127.0.0.1:16377 (per-candidate readings:;
+pid=850862 addr=127.0.0.1:16377 cause=derived-from-carrier-fetch-answered)`.
+Raw en/zh readings off `http://127.0.0.1:16377/adr`:
+`en <html lang="en"` / nav `ADRs` x2 (2660 B) / body `ADRs` x4 / `<title>quay — ADRs</title>`;
+`zh <html lang="zh"` / nav `ADRs` x0 (2655 B) / body `ADRs` x0 / `<title>quay — 架构决策</title>`.
+
+**AC2/AC4 — two DISTINCT refusal shapes, both non-zero, each candidate attributed**
+(`.quay/ac300-worker/negative-controls.txt`):
+- **(a) no live candidate** (a matching process whose argv has no `serve` element) ⇒ exit 1:
+  `CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=<root>`.
+- **(b) derivable but unreachable** (candidate argv `--port 0`; carrier `web` pointed at a released
+  port) ⇒ exit 1:
+  `pid=2404992 addr=127.0.0.1:24343 cause=derived-from-carrier-fetch-failed(connection-refused) --
+  curl: (7) Failed to connect to 127.0.0.1 port 24343` + `FAIL=no-reachable-serve-address ...`.
+  Every candidate carries `pid` + an address (or `addr=-`) + a cause; no bare `addr=`, no
+  unattributed failure. (a) and (b) are different tokens ⇒ "could not derive" differs in shape from
+  "derived but could not reach" (hard rule 3b).
+
+**AC3 — no literal.** `grep -c "14037\|172\.28\.0\.1" goals/AC-300-*.md` ⇒ **0**; the same
+predicate over a known-TRUE sample (`curl http://172.28.0.1:14037/adr`) ⇒ **1** (not a
+never-firing predicate — hard rule 2, second half). Also 0 dotted-quad:port literals in the file.
+
+**AC5 — scope/semantics unchanged.** `expect` / `origin` / `title` / `status` byte-identical to
+develop's; `ROUTE="/adr"` and `LABEL_EN="ADRs"` present verbatim (relocated into the block, not
+reworded); the whole post-derivation chrome scope (`<nav>…</nav>`, `<title>`, the en/zh curls)
+byte-identical; `CAUSE=` branch count 11 before and after. Amendment landed only via
+`quay goal write AC-300 --criterion …` — two commits, each `goals: AC-300 field:criterion by cli:…`;
+the why is recorded as the criterion's own `# WHY THIS STEP WAS RE-ANCHORED` header. New-hash
+ledger entries after the amendment: `16:15:59Z pass goal-cli` and `16:16:11Z pass goal-amend
+c1abce198079dcf3` (the amendment dry-run re-ran the criterion for real).
+
+**AC6 — no self-regression.** `criterion-failure-attribution-check.ts` ⇒ exit 0
+(`inDomain=155 bareAcs=0 ≤ baseline 0`). `goal check --stale-pass` ⇒ `failing` = 7
+(`AC-179, AC-255, AC-289, AC-296, AC-298, AC-299, AC-302`), **AC-300 absent** (it is in
+`verifiedFresh`). ⚠️ The DoD's companion clause "⇒ `exit 0`" is **not achievable this round and was
+not achieved**: those 7 are the sibling re-anchor tasks, still in flight and explicitly outside this
+task's Touches — the DoD's own preceding clause ("`AC-300` 不在 `failing` 内") is the falsifiable
+half and it holds. Reported as read, not massaged.
+
+**AC7 — scoped gate.** `bash scripts/test.sh --for-task gap-ac300-… --allow-thin` ⇒ exit 0;
+selection reported `1/3 Touches entries (0.33) < 0.5` (expected — a goal-file entry maps to no test),
+so `--allow-thin` is the production form (memory `scoped-gate-thin-selection-refuses-shard-touches`).
+New fixture `packages/quay/test/ac300-criterion-address-derivation.test.mjs`: **15/15 pass**, the
+shipped block extracted verbatim by marker and exercised against real processes/real carriers
+(positive: explicit port, carrier, wildcard normalisation; negative: no carrier, pid mismatch, no
+`web` entry, `web.up:false`, unreadable carrier, dead port, no serve at all).
+
+**DoD.** `git show develop:goals/AC-300-*.md` carries the `>>> addr-derivation` block and its
+criterion md5 equals the stored one (`2557b359bc42c0023dbb49c0a821c613`) ⇒ the re-anchored version
+is on develop by content. Ledger tail for AC-300 = `pass` with the NEW fingerprint. The memory
+clause "⛔ not a fixture, not a dry-run, not a replayed verdict": the hash-carrying pass came from a
+real run of the criterion (`goal check --stale-pass --sweep --budget 1`, 595 ms, cwd = main root =
+where the live serve is), not from a fixture.
+
+**Deviation from Plan step 2, recorded.** The Plan named `goals/AC-288-*.md`'s block as the
+canonical one — correct at FILING time, when AC-288 was the only landed member. By execution time
+the family's newest landed form is **AC-290's** (adopted byte-identically, modulo ROUTE/LABEL_EN/AC-id,
+by the landed siblings AC-292/AC-294/AC-295/AC-301), and it is the block that can express what AC2
+and AC4 demand: it PROBES each derived address and reports a per-candidate fetch outcome, so
+"derived" and "derived AND reachable" stay two readings; AC-288's older form has no such probe and
+would collapse both negatives into one token. Taken: AC-290's block verbatim + the family's
+retargeting convention (marker names THIS AC's fixture; the two `printf` AC-ids; ROUTE/LABEL_EN).

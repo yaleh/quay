@@ -27,6 +27,8 @@ import {
   defaultMechanicalSuiteCommand,
   failingTestFilesFromSuiteLog,
   parseSuiteLogFailures,
+  parseStaticCheckFailures,
+  namedArtifactHitsDelta,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
   readTaskStatus,
   WORKER_OUTCOME_REL,
@@ -500,4 +502,144 @@ test("AC3(判词) — 「读不懂」判词含解析器读到的失败行数 N�
 test("AC3(静态) — 「names nothing a worker could fix」肯定断言已从源码消失", () => {
   const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts"), "utf8");
   assert.equal(src.includes("names nothing a worker could fix"), false, "该肯定断言的依据只是「解析器没读懂」（硬规则 3b）");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-suite-red-attribution-blind-to-static-phase — 静态相位的红对归因器完全不可见
+//
+// 缺陷：归因只有「失败的测试文件」一条路（`__PERFILE__ … passed=false` / `not ok - …`）。suite 死在
+// 【静态相位】时日志里 **没有**失败测试行（`# tests 0`），真因在 `STATIC_CHECK_FAILED: <checker> exit=<rc>`
+// 机器行 + checker 违规块里。该相位对本模块 grep 计为 **0**（见 AC1 的读数），于是
+// `failingTestFiles.length === 0` 恒成立 ⇒ 一律 insufficient-data-fallback ⇒ 终局判词写成
+// 「infra/contract suspected, not an implementable defect」——而日志逐字点名了本任务 delta 内的可修缺陷。
+//
+// 与硬规则 3b 同源、方向相反：读不懂的输入不得触发与「已读懂且判为不可修」相同的动作。
+// 本段只测【判定与判词】；真实 round 记录上的读数见任务体的 AC5 证据（⛔ fixture 不算测量）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// 真实日志节选：`.quay/fan-in-suite-gap-arch-tsify-checker-mutation-check-sh~wk-prod-anchor~
+// 1789936621276-793e6e.log`（2026-09-20T20:37Z，173482 B）的逐行副本——含 checker 违规块、三条
+// STATIC_CHECK_FAILED 机器行、`# tests 0` 与 `# suite red static-check` 收尾。行序与本行数照原样
+// 保留（块内明细 → 机器行 → 测试计数 → 结束行），⛔ 不手写仿真样本。
+const STATIC_PHASE_RED_LOG = [
+  "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) ==",
+  "checker-mechanical-spine-check — 133 checker(s), 1 violation(s), 0 exempted",
+  "FAIL: 1 unexempted violation(s):",
+  "  - checker-mutation-check.ts (json): --json claimed but no JSON primitive",
+  "== worktree-namespace literal check (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root, AC3) ==",
+  "STATIC_CHECK_FAILED: checker-mechanical-spine-check exit=1",
+  "STATIC_CHECK_FAILED: kernel-sibling-resolution-check exit=1",
+  "STATIC_CHECK_FAILED: rhythm-consumer-check exit=1",
+  "checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): checker-mechanical-spine-check(exit=1) kernel-sibling-resolution-check(exit=1) rhythm-consumer-check(exit=1)",
+  "# tests 0",
+  "# pass 0",
+  "# fail 47",
+  "# cancelled 0",
+  "# suite red static-check",
+  "",
+].join("\n");
+
+// 同一份日志里【通过】的 checker 照样逐条打印 grandfather 明细（实测 44 条 `VIOLATION:` + 106 条
+// `unowned:`），而 task-contract-check 并未失败。归因器【不得】把这些 baselined 明细算成本任务的指名。
+const STATIC_PHASE_RED_LOG_WITH_BASELINED_DETAIL = [
+  STATIC_PHASE_RED_LOG.trimEnd(),
+  "",
+  "task-ac-carryover: 106 BLOCKED done task(s) — 169 unchecked AC(s) with NO carrying successor",
+  "  unowned: gap-elsewhere — missing AC2 (1 unchecked total, carried: none)",
+  "ratchet ceiling: 10; recorded (non-blocking): 159 (DIR-127: AC2, gap-elsewhere: AC5)",
+  "VIOLATION: tasks/gap-elsewhere.md — measure-no-command: measure \"total_refs\" has no backtick command",
+  "",
+].join("\n");
+
+test("AC1(静态相位) — 机器行/结束行被识别，失败块里指名的文件被提取（`# tests 0` 的相位不再不可见）", () => {
+  const p = parseStaticCheckFailures(STATIC_PHASE_RED_LOG);
+  assert.equal(p.staticPhaseRed, true, "`STATIC_CHECK_FAILED:` / `# suite red static-check` 任一在 ⇒ 静态相位红");
+  assert.deepEqual(
+    p.failedCheckers,
+    ["checker-mechanical-spine-check", "kernel-sibling-resolution-check", "rhythm-consumer-check"],
+    "三条机器行的 checker 名逐字提取（顺序 = 出现序）",
+  );
+  assert.deepEqual(p.namedArtifacts, ["checker-mutation-check.ts"], "失败块内指名的文件被提取");
+  // 该相位此前对本模块完全不可见：`failingTestFilesFromSuiteLog` 对同一份日志恒为 []（`# tests 0`）。
+  assert.deepEqual(failingTestFilesFromSuiteLog(STATIC_PHASE_RED_LOG), [], "静态相位红里没有任何失败【测试】行");
+});
+
+test("AC1(盲区已消除) — 源码现在认得静态相位的机器行（旧读数：grep -c 'STATIC_CHECK_FAILED' = 0）", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts"), "utf8");
+  assert.ok(src.includes("STATIC_CHECK_FAILED"), "归因器必须认得这条机器行（旧实现 grep 计数为 0 ⇒ 该相位对分类器不可见）");
+  assert.ok(src.includes("#\\s*suite red static-check"), "静态相位的 suite 收尾行同样被认得");
+});
+
+test("AC2（读数 ⇒ 动作分叉）— 点名文件在本任务 delta 内 ⇒ static-phase-attributed（⛔ 不再落 insufficient-data-fallback）", (t) => {
+  const root = makeRoot("rcl-static-ac2");
+  t.after(() => rmSafe(root));
+  // 本任务 delta 就是那条被点名的文件（真实情形：该任务把 checker-mutation-check.sh 改写成 .ts）。
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/checker-mutation-check.ts", "tasks/gap-a.md"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG);
+
+  const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
+  assert.equal(j.verdict, "static-phase-attributed", `静态相位已归因必须是可区分取值（实测 ${j.verdict}）`);
+  assert.notEqual(j.verdict, "insufficient-data-fallback", "⛔ 不得与「读不懂/数据不足」同形（硬规则 3b）");
+  assert.match(j.reason, /checker-mutation-check\.ts/, "判词逐字点名归因到哪个被指名对象");
+  assert.match(j.reason, /in this task's Touches\/diff/, "判词说明它落在本任务 delta 内");
+  assert.equal(j.staticPhaseRed, true, "载体字段记下这是静态相位红");
+  assert.deepEqual(j.staticPhaseNamedFiles, ["checker-mutation-check.ts"], "点名的文件一并入判定");
+  assert.deepEqual(j.staticPhaseCheckers?.length, 3, "点名的 checker 一并入判定");
+
+  const d = decideExitedNotLandedAction(root, "gap-a", suiteRedOutcome(T0, log), j, { nowMs: NOW });
+  assert.equal(d.kind, "count-and-retry", "已归因 ⇒ 走既有重试上限路径（⛔ 不是 stop-terminal）");
+});
+
+test("AC3①（负控制·方向一）— 点名的 checker 本身在本任务 delta 内 ⇒ 归因到本任务", (t) => {
+  const root = makeRoot("rcl-static-ac3a");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/checker-mechanical-spine-check.ts"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG);
+  const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
+  assert.equal(j.verdict, "static-phase-attributed", "`STATIC_CHECK_FAILED: checker-mechanical-spine-check` 的 stem 命中 delta");
+  assert.match(j.reason, /checker-mechanical-spine-check/, "判词点名命中的是哪个被指名对象");
+});
+
+test("AC3②（负控制·方向二）— 点名的 checker 与本任务 delta 无关 ⇒ ⛔ 不得归因到本任务", (t) => {
+  const root = makeRoot("rcl-static-ac3b");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG);
+  const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
+  assert.notEqual(j.verdict, "static-phase-attributed", "⛔ 无关不得归因到本任务（负控制）");
+  assert.equal(j.verdict, "insufficient-data-fallback", "走既有不相关路径（AC3② 逐字）");
+  // 判词仍须如实：点名的 checker/文件都要报出来（⛔ 不是「日志里什么都没有」）。
+  assert.match(j.reason, /static phase red named 4 artifact\(s\)/, "报出被指名对象的条数（3 checker + 1 文件）");
+  assert.match(j.reason, /none is in this task's Touches\/diff/, "并说明都不在本任务 delta 内");
+  assert.match(j.reason, /checkers: checker-mechanical-spine-check/, "点名了哪些 checker 存证");
+  assert.match(j.reason, /named files: checker-mutation-check\.ts/, "点名了哪些文件存证");
+  assert.equal(j.staticPhaseRed, true, "静态相位读数仍在载体上可区分");
+});
+
+test("AC3②（负控制·不误收 baselined 明细）— 通过 checker 打印的 grandfather 明细不算指名", (t) => {
+  const root = makeRoot("rcl-static-baselined");
+  t.after(() => rmSafe(root));
+  // delta 与那份 baselined 明细里点到的文件【正交】——若归因器把明细当指名，本用例会红。
+  writeTaskWithTouches(root, "gap-a", ["tasks/gap-elsewhere.md"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG_WITH_BASELINED_DETAIL);
+  const p = parseStaticCheckFailures(STATIC_PHASE_RED_LOG_WITH_BASELINED_DETAIL);
+  assert.deepEqual(p.namedArtifacts, ["checker-mutation-check.ts"], "⛔ 无 FAIL 标记的 `VIOLATION:` / `unowned:` 明细不入指名集");
+  const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
+  assert.notEqual(j.verdict, "static-phase-attributed", "baselined 明细不得把无关 delta 变成「已归因」");
+});
+
+test("AC4（判词不得再说假话）— 已归因的静态相位红 ⇒ 判词点名归因对象，⛔ 不再说「日志里没有可修的」", (t) => {
+  const root = makeRoot("rcl-static-ac4");
+  t.after(() => rmSafe(root));
+  writeTaskWithTouches(root, "gap-a", ["plugin/scripts/checker-mutation-check.ts"]);
+  const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG);
+  const outcome = suiteRedOutcome(T0, log);
+  const j = judgeRetryExemption(root, "gap-a", outcome, { nowMs: NOW });
+  const d = decideExitedNotLandedAction(root, "gap-a", outcome, j, { nowMs: NOW });
+  assert.equal(d.kind, "count-and-retry", "静态相位已归因 ⇒ 不落 stop-terminal 的基建疑似判词");
+  assert.match(d.reason, /static-phase-attributed/, "判词带上 verdict");
+  assert.match(d.reason, /checker-mutation-check\.ts \(failure-detail\)/, "判词带上【归因到什么】");
+  assert.doesNotMatch(d.reason, /names nothing a worker could fix/, "⛔ 旧肯定断言不得回归");
+  assert.doesNotMatch(d.reason, /infra\/contract suspected/, "⛔ 已归因时不得再报「基建/契约疑似」");
+  assert.doesNotMatch(d.reason, /not an implementable defect/, "⛔ 已归因时不得再断言「非可修缺陷」（真因就在日志里）");
 });
