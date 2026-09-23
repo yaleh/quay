@@ -2,7 +2,7 @@
 id: gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot
 title: quay-init 安装步骤两参数形式被 CLI 拒且指向缓存目录——改为 github 发布渠道配方；SPEC §4b 改写为
   quay(github) / quay-dev(dog food) 双槽
-status: ready
+status: done
 labels:
   - gap
   - defect
