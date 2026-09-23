@@ -234,12 +234,18 @@ test("AC4 — negative control: flipping promptSuggestions to true removes the R
 test("AC4 — negative control: changing the shared profile model changes every worker command (one place)", () => {
   const good = launch("task-worker", ["--dry-run"]).stdout.trim();
   const raw = fs.readFileSync(PROFILES, "utf8");
-  const broken = raw.replace("model: deepseek-v4-pro", "model: deepseek-v4-changed");
+  // ⛔ 替换锚点【从真配置派生】，不写死字面量：模型名是运行环境取值，写死它会让这条负控制随着
+  //   网关换模型而静默失效（锚点找不到 ⇒ 替换成空操作；本用例的 assert.notEqual 会响亮报错，
+  //   但真正的问题是「它本来想验证的性质再也没被验证」）。派生锚点永不过期。
+  const cur = readProfiles().profiles["worker-default"].model;
+  assert.equal(typeof cur, "string", "worker-default.model must be a concrete id, else this negative control is vacuous");
+  const mutated = `${cur}-changed`;
+  const broken = raw.replace(`model: ${cur}`, `model: ${mutated}`);
   assert.notEqual(broken, raw, "the substitution must actually change profiles.yml");
   const r = launchWithProfiles("task-worker", broken, ["--dry-run"]);
   assert.equal(r.status, 0);
   assert.notEqual(r.stdout.trim(), good, "a changed model must change the launch command");
-  assert.ok(r.stdout.includes("--model deepseek-v4-changed"), "the mutated model must be visible in the command");
+  assert.ok(r.stdout.includes(`--model ${mutated}`), "the mutated model must be visible in the command");
 });
 
 // ── ghost-suggestion source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false) ──

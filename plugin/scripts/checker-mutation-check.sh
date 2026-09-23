@@ -92,8 +92,8 @@ fi
 set -u
 
 # ── locations ──────────────────────────────────────────────────────────────────────────────────────
-_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${_script_dir}/../.." && pwd)"
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd "${_script_dir}/../.." && pwd -P)"
 CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"
 TEST_SH="${repo_root}/scripts/test.sh"
 STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"

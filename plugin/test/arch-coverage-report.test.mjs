@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LANGUAGES, EXCLUSION_RULES, isExcluded, dirInsideSource } from "../scripts/arch-coverage-report.ts";
+import { LANGUAGES, EXCLUSION_RULES, isExcluded, dirInsideSource, canonicalPath } from "../scripts/arch-coverage-report.ts";
 import { mainCheckoutRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -247,12 +247,25 @@ test("real repo — a scope source that is a foreign absolute path is relativize
   // The worktree case: the manifest lives at the MAIN checkout and its sources are absolute paths
   // under it. Without relativization every .ts would be reported uncovered purely because the
   // strings differ — the report would be confidently wrong.
+  //
+  // SYMLINK SPELLING (gap-suite-ambient-reds-block-all-code-landings, class 3): the SAME directory
+  // is reachable as /data/home/yale/work/quay (realpath) and /home/yale/work/quay (a symlink created
+  // 2026-09-19), and the generated manifest records whichever spelling the analyzer was invoked
+  // through — on this host, the symlink one. `MAIN_ROOT` resolves to the realpath, so a bare
+  // `path.relative(MAIN_ROOT, r)` re-derivation answers `../../../../../home/yale/...` and the
+  // assertion fails while BOTH sides are in fact naming one directory. The re-derivation therefore
+  // canonicalizes both sides exactly as the production `relativizeSource` now does: the assertion
+  // keeps testing "does the report relativize by rule", which is its whole point, instead of
+  // accidentally testing which spelling the host happened to use.
   const { parsed } = jsonRun([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST]);
   for (const s of parsed.archguard.scopes) {
     for (const src of s.sources) {
       assert.equal(src.startsWith("/"), false, `scope ${s.key} source was not relativized: ${src}`);
     }
-    assert.deepEqual(s.sources, s.rawSources.map((r) => path.relative(MAIN_ROOT, r).split(path.sep).join("/")));
+    assert.deepEqual(
+      s.sources,
+      s.rawSources.map((r) => path.relative(canonicalPath(MAIN_ROOT), canonicalPath(r)).split(path.sep).join("/")),
+    );
   }
   assert.equal(dirInsideSource("packages/quay/src/cli", "packages/quay/src"), true);
   assert.equal(dirInsideSource("packages/quay/srcfoo", "packages/quay/src"), false, "prefix match must be segment-aware");

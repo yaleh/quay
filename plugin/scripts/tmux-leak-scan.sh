@@ -38,23 +38,39 @@ set -uo pipefail
 
 prefixes='skv-|session-liveness-|ol-tok-|enter-repro-|quay-init-tmux-|quay-isc-|repro-rmsync-'
 
+# ── tmp_root — the scan面 must be the SAME directory the producers/fixtures actually use ──────────
+# (gap-suite-ambient-reds-block-all-code-landings, class 2.) This script hardcoded `/tmp` while the
+# fixtures (plugin/test/tmux-leak-scan.test.mjs:224) and every hermetic probe create their private
+# sockets under `os.tmpdir()`. On any host where TMPDIR ≠ /tmp the two point at DIFFERENT
+# directories, so the scan looked in the wrong place and reported CLEAN — the 硬规则 3b shape
+# ("read the wrong input ⇒ indistinguishable from qualified"), and NOT merely a test problem: a real
+# orphaned server on such a host was invisible to the very scanner built to catch it.
+# Node's os.tmpdir() on POSIX reads TMPDIR, then TMP, then TEMP, and strips trailing slashes —
+# mirrored exactly here so the producer and the scanner can never drift apart again. An unset/
+# empty value falls back to /tmp, which keeps the historical behaviour on hosts that never set it.
+tmp_root() {
+  local d="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+  while [ "${d}" != "/" ] && [ "${d%/}" != "${d}" ]; do d="${d%/}"; done
+  printf '%s' "${d}"
+}
+
 # gap-leak-residue-per-run-namespace-isolation (2026-08-13): when the runner delivered QUAY_RUN_ID,
-# the suite's probe tmp root is the PER-RUN namespace /tmp/quay-run-<runId>/ (session-liveness-
+# the suite's probe tmp root is the PER-RUN namespace <tmp_root>/quay-run-<runId>/ (session-liveness-
 # helpers.mjs probeRoot). This scan then covers ONLY that subtree — "本轮创建的东西 = 一棵子树" — so
 # residue from a DIFFERENT run (a previous round, a concurrent worktree) is never attributed to this
 # run (AC4 negative control), and the runner's unified cleanup has a PATH-OWNERSHIP + OWNER-LIVENESS
 # criterion (dirHasLiveOwner) instead of the forbidden name-based kill. Without QUAY_RUN_ID (scoped /
-# direct runs, legacy callers) the scan keeps the historical /tmp prefixes. The runId is a SHORT id
+# direct runs, legacy callers) the scan keeps the historical <tmp_root> prefixes. The runId is a SHORT id
 # (8 hex chars from the state-file UUID) so the tmux socket sun_path stays under the ~107-byte bound.
 run_root=""
 if [ -n "${QUAY_RUN_ID:-}" ]; then
-  run_root="/tmp/quay-run-${QUAY_RUN_ID}"
+  run_root="$(tmp_root)/quay-run-${QUAY_RUN_ID}"
 fi
 # --scope <dir> (gap-leak-residue-per-run-namespace-isolation 2026-08-13): override the scan scope
-# to a TEST-LOCAL subroot. The default namespaced scope (/tmp/quay-run-<runId>/) is SHARED by every
+# to a TEST-LOCAL subroot. The default namespaced scope (<tmp_root>/quay-run-<runId>/) is SHARED by every
 # test in the suite, so leak-simulation tests see each other's fixtures as residue (round 131:
 # tmux-leak-scan R2/R3 × test-isolation DELTA cross-flagged). A test passes --scope
-# /tmp/quay-run-<runId>/leaktest-<pid>/ so the scan covers ONLY its own simulated leakage.
+# <tmp_root>/quay-run-<runId>/leaktest-<pid>/ so the scan covers ONLY its own simulated leakage.
 scope_dir=""
 case "${1:-}" in
   --scope) scope_dir="${2:-}"; shift 2 ;;
@@ -100,7 +116,8 @@ scan_matches() {
   if [ -n "$run_root" ]; then
     leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
   else
-    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
+    local _tr; _tr="$(tmp_root)"
+    leaked_dirs="$(ls -d "${_tr}"/skv-* "${_tr}"/session-liveness-* "${_tr}"/ol-tok-* "${_tr}"/enter-repro-* "${_tr}"/quay-init-tmux-* "${_tr}"/quay-isc-* "${_tr}"/repro-rmsync-* 2>/dev/null || true)"
   fi
   {
     [ -n "$leaked_procs" ] && printf '%s\n' "$leaked_procs"
@@ -180,13 +197,13 @@ fi
 if [ "$mode" = "sweep" ]; then
   # --sweep (gap-tmux-leak-scan-sweep-orphaned-servers): the CURE for the orphan class --check can
   # only DETECT. A SIGKILL'd/panicked suite leaves hermetic tmux servers on their private sockets
-  # (/tmp/quay-isc-* etc. — os.tmpdir()-direct mkdtemp) with no teardown left
+  # (<tmp_root>/quay-isc-* etc. — os.tmpdir()-direct mkdtemp) with no teardown left
   # to reap them (2026-08-29: pid 1406623 leaked 1h23m). Reuses scan_matches + prefixes (single
   # source of truth — sweep and scan never drift), but forces the LEGACY prefix scope: the run
-  # namespace (/tmp/quay-run-<id>/) is empty at suite start (the runner's sweepRunNamespaces already
-  # handles it), while the SIGKILL residue lives at /tmp/<prefix>*. An explicit --scope still
+  # namespace (<tmp_root>/quay-run-<id>/) is empty at suite start (the runner's sweepRunNamespaces already
+  # handles it), while the SIGKILL residue lives at <tmp_root>/<prefix>*. An explicit --scope still
   # overrides (test confinement). Per match line: a proc line ("PID tmux -S <socket> ...") → extract
-  # the socket and `tmux -S <socket> kill-server`; a dir line ("/tmp/<prefix>*") → rm -rf. best-effort:
+  # the socket and `tmux -S <socket> kill-server`; a dir line ("<tmp_root>/<prefix>*") → rm -rf. best-effort:
   # exit 0 always (a failed cleanup never changes the verdict); idempotent (no orphans → no-op).
   if [ -z "$scope_dir" ]; then
     run_root=""
@@ -240,7 +257,8 @@ fi
 if [ -n "$run_root" ]; then
   leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
 else
-  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* /tmp/quay-init-tmux-* /tmp/quay-isc-* /tmp/repro-rmsync-* 2>/dev/null || true)"
+  _tr="$(tmp_root)"
+  leaked_dirs="$(ls -d "${_tr}"/skv-* "${_tr}"/session-liveness-* "${_tr}"/ol-tok-* "${_tr}"/enter-repro-* "${_tr}"/quay-init-tmux-* "${_tr}"/quay-isc-* "${_tr}"/repro-rmsync-* 2>/dev/null || true)"
 fi
 
 if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then
@@ -249,7 +267,7 @@ if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then
     while IFS= read -r line; do [ -n "${line}" ] && echo "  tmux: ${line}" >&2; done <<< "${leaked_procs}"
   fi
   if [ -n "${leaked_dirs}" ]; then
-    while IFS= read -r line; do [ -n "${line}" ] && echo "  /tmp: ${line}" >&2; done <<< "${leaked_dirs}"
+    while IFS= read -r line; do [ -n "${line}" ] && echo "  tmp: ${line}" >&2; done <<< "${leaked_dirs}"
   fi
   exit 1
 fi
