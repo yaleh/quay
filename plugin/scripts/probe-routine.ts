@@ -55,6 +55,8 @@ import {
   hasRequestedAction,
   producerGate,
   readProducerRegistry,
+  recurrenceByKey,
+  recurrenceOrder,
   renderRoutineTaskBody,
   resolveTaskCliEntry,
   routineFindingCandidateText,
@@ -334,19 +336,32 @@ export interface FilingOptions {
   /** 登记在册的产出者集合。**三值**（见 producerGate 注释）：`undefined` = 本例程未声明登记面 ⇒
    *  该闸不适用；`null` = 声明了但读不懂 ⇒ fail-closed；`Set` = 读到了，按成员判定。 */
   registeredProducers: Set<string> | null | undefined;
+  /** 复现优先级读数的注入缝。**三值**（同 registeredProducers 的形状）：`undefined` = 从载体读
+   *  （生产路径）；`null` = 明确「读不出」⇒ 退回探针顺序（⛔ 不退化成「都没复现过」）；`Map` = 用这个
+   *  读数。缺省即生产行为，测试缝只为把同一个判定对着**受控语料**跑。 */
+  recurrence?: Map<string, number> | null;
 }
 
 /** 逐条处置 finding（⛔ 不只回一个布尔，硬规则 3）。**纯函数**：不写盘、不 spawn——落盘在调用方，
- *  于是同一个判定可以对着**生产载体**跑一次而不改变任何东西（AC5 的「生产载体真实读数」）。 */
+ *  于是同一个判定可以对着**生产载体**跑一次而不改变任何东西（AC5 的「生产载体真实读数」）。
+ *
+ *  ⚠️ **判定顺序 ≠ 输出顺序**（`gap-routine-semantic-dedup-scan-recurring-cluster-starvation`）：
+ *  本轮预算（rate 闸）按**复现次数降序**发放 —— 高复现主语先花，探针发射顺序只在同分时才是次序
+ *  （见 routine-file-gate.ts 的 recurrence 段，那里同时是这条改动的实测读数）。输出仍按**探针顺序**
+ *  返回：载体里的 filing-round 记录要跨轮可比，⛔ 不因优先级改动而整体重排。 */
 export function selectFilings(findings: readonly ProbeFinding[], o: FilingOptions): FilingDisposition[] {
-  const out: FilingDisposition[] = [];
   const keys = o.boardKeys ?? boardKeys(o.tasksDir);
+  // ⓪ 优先级（只决定顺序，⛔ 不改变任何判据）：读不出载体 ⇒ 探针顺序，与修复前逐字节相同。
+  const recurrence = o.recurrence === undefined ? recurrenceByKey(o.carrierPath) : o.recurrence;
+  const order = recurrenceOrder(findings, recurrence);
+  const byIndex = new Array<FilingDisposition | undefined>(findings.length);
   let acceptedThisRound = 0;
   let recentBase: number | null = null;
-  for (const f of findings) {
+  for (const rank of order) {
+    const f = findings[rank.index];
     const id = f.id;
     const reject = (gate: FilingDisposition["gate"], reason: string): void => {
-      out.push({ findingId: id, taskId: null, accepted: false, gate, reason });
+      byIndex[rank.index] = { findingId: id, taskId: null, accepted: false, gate, reason };
     };
 
     // ① 只立「要求了动作」的 finding。semantic-dedup-scan 的 `suggestedAction: "leave"` 判定是
@@ -362,7 +377,15 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
     const candidate = routineFindingCandidateText(f);
     const g = gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
-    if (!g.accept) { reject("quality-dedup-rate", g.reason); continue; }
+    if (!g.accept) {
+      // rate 拒绝把**复现读数**一并落痕：残余饥饿（复现很高却仍被限流）必须可审，⛔ 否则
+      // 「限流正确」与「优先级没生效」在载体记录里同形（硬规则 3）。null = 没读到，写明。
+      const reason = g.reason.startsWith("rate:")
+        ? `${g.reason} (subject recurrence: ${rank.recurrence === null ? "unknown — carrier unreadable" : `${rank.recurrence} round(s)`})`
+        : g.reason;
+      reject("quality-dedup-rate", reason);
+      continue;
+    }
 
     // ④ id 派生 + 撞车处置：同 slug 但**不同** finding ⇒ 加确定性后缀（⛔ 不覆盖既有任务体）。
     let taskId = routineTaskId(o.routine, f.id);
@@ -375,9 +398,13 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     }
     keys.add(findingKey(candidate));
     acceptedThisRound += 1;
-    out.push({ findingId: id, taskId, accepted: true, gate: "filed", reason: "accepted: actionable, novel, within rate" });
+    byIndex[rank.index] = { findingId: id, taskId, accepted: true, gate: "filed", reason: "accepted: actionable, novel, within rate" };
   }
-  return out;
+  // 每个候选恰有一条处置（⛔ 不返回带洞的数组：一条 undefined 会静默变成载体里的空洞）。
+  for (let i = 0; i < findings.length; i++) {
+    if (!byIndex[i]) throw new Error(`selectFilings: finding #${i} (${findings[i].id ?? "<no-id>"}) got no disposition — the priority order dropped it`);
+  }
+  return byIndex as FilingDisposition[];
 }
 
 /** 立一条任务：spawn workspace 自己的 task store CLI（⛔ 不手搓 markdown 落盘）。

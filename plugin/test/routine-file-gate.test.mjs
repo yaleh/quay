@@ -40,6 +40,8 @@ import {
   gateFinding,
   isActionable,
   proseKey,
+  recurrenceByKey,
+  recurrenceOrder,
   renderRoutineTaskBody,
   routineFindingCandidateText,
 } from "../scripts/routine-file-gate.ts";
@@ -176,6 +178,101 @@ test("NO OVER-BLOCK: two different subjects sharing a file set keep distinct key
   const moved = { ...ROUND_A, files: ROUND_B.files };
   assert.equal(findingKey(routineFindingCandidateText(ROUND_A)), findingKey(routineFindingCandidateText(moved)),
     "a line-number shift is not a new finding");
+});
+
+// ── ⑧-⑩ the round's filing PRIORITY (recurrence) ────────────────────────────────────────────────
+//
+// The sibling defect to ①-⑦ above: the key fix made re-found clusters DEDUPABLE, but dedup only stops
+// a cluster from being filed twice — it says nothing about which of a round's ~50-120 candidates gets
+// the round's rate budget, which the loop spent in the probe's emission order. The recurring clusters
+// were therefore rejected `rate:` every round while first-seen findings walked in (measured on the
+// real round in probe-routine.test.mjs, AC "PRODUCTION REPLAY"). These cases pin the READING and the
+// ORDER; the reader/writer pair must agree (⑧'s symmetry case), and "cannot read the carrier" must
+// not be renderable as "nothing recurred" (⑨ — 硬规则 3b).
+
+const carrierLine = (rec) => `${JSON.stringify(rec)}\n`;
+const findingRec = (runId, id, symbols, extra = {}) => ({
+  ts: "2026-09-22T23:05:32.027Z", kind: "finding", routine: "semantic-dedup-scan", probe: "semantic-dedup-scan",
+  runId, findingId: id, dupKind: "same-symbol-multi-file", symbols, files: ["packages/quay/src/x.ts:1"],
+  verdict: "real-duplication", rationale: `a real finding about ${symbols.join("+")} — repro \`node x.mjs\` exit 2`,
+  suggestedAction: "extract", ...extra,
+});
+
+test("⑧ recurrenceByKey counts DISTINCT ROUNDS (not records) and reads the SAME key the gate keys", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-recurrence-"));
+  try {
+    const carrier = path.join(dir, "routine-findings.jsonl");
+    const A = findingRec("round-A", "f-one", ["assertSafeId"]);
+    fs.writeFileSync(carrier, [
+      // one sharded round emits the SAME subject TWICE — one round, not two (the reason the count is
+      // over distinct runIds: counting records would make a sharded scan look like recurrence)
+      carrierLine(A),
+      carrierLine(findingRec("round-A", "f-one-bis", ["assertSafeId"])),
+      carrierLine(findingRec("round-B", "f-two", ["assertSafeId"])),
+      // non-finding records name the same symbols and MUST NOT count (the carrier is a mix of kinds)
+      carrierLine({ ts: "2026-09-22T23:05:32.027Z", kind: "scan-round", routine: "semantic-dedup-scan",
+        runId: "round-B", symbols: ["assertSafeId"] }),
+      carrierLine({ ts: "2026-09-22T23:05:32.027Z", kind: "filing-round", routine: "semantic-dedup-scan",
+        runId: "round-B", filed: [] }),
+      carrierLine(findingRec("round-C", "f-three", ["someOtherThing"])),
+    ].join(""), "utf8");
+    const rec = recurrenceByKey(carrier);
+    assert.ok(rec instanceof Map, "a readable carrier yields a reading");
+    assert.equal(rec.get(findingKey(routineFindingCandidateText(A))), 2,
+      "two rounds reported assertSafeId — the shard's second record must not inflate it to 3");
+    assert.equal(rec.size, 2, "one entry per distinct subject");
+    // SYMMETRY (the reason the priority and the dedup branch can never disagree): the reading's key for
+    // a carrier record IS the key the gate computes for the same finding's candidate text.
+    for (const f of [A, findingRec("round-C", "f-three", ["someOtherThing"])]) {
+      assert.ok(rec.has(findingKey(routineFindingCandidateText(f))), "carrier records key through the same renderer");
+    }
+    // ⛔ And a subject the carrier never reported is absent, not 0-by-accident: absence is informative
+    // only because the reading is COMPLETE (硬规则 6) — the caller reads it as 0.
+    assert.equal(rec.has(findingKey(routineFindingCandidateText(findingRec("round-Z", "z", ["neverSeen"])))), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("⑨ recurrenceByKey is THREE-valued: unreadable ⇒ null, readable-but-unintelligible ⇒ null, empty ⇒ a real empty reading", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-recurrence3-"));
+  try {
+    // (a) no file at all — the reading was never taken
+    assert.equal(recurrenceByKey(path.join(dir, "absent.jsonl")), null);
+    // (b) a file whose every non-blank line is unreadable — ⛔ must NOT come back as "nothing recurred"
+    const garbage = path.join(dir, "garbage.jsonl");
+    fs.writeFileSync(garbage, "not json\n{broken\n<<<<<<\n", "utf8");
+    assert.equal(recurrenceByKey(garbage), null,
+      "「读不懂」must not be shaped like 「都只报过一次」 (硬规则 3b) — the caller falls back to probe order, ⛔ not to 「复现 0」");
+    // (c) an empty (or all-blank) carrier — read it; nothing recurred. A legitimate empty Map.
+    const blank = path.join(dir, "blank.jsonl");
+    fs.writeFileSync(blank, "\n\n", "utf8");
+    assert.deepEqual([...recurrenceByKey(blank)], [], "readable + no records ⇒ a real empty reading, ⛔ not null");
+    // (d) readable, records present, no FINDING record among them ⇒ still a real empty reading
+    const other = path.join(dir, "other.jsonl");
+    fs.writeFileSync(other, carrierLine({ ts: "2026-09-22T23:05:32.027Z", kind: "scan-round", runId: "r" }), "utf8");
+    assert.deepEqual([...recurrenceByKey(other)], [], "no finding records ⇒ nothing recurred, ⛔ not 「读不懂」");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("⑩ recurrenceOrder: recurrence desc, probe order on ties, and an UNREADABLE carrier keeps probe order without faking 0", () => {
+  const subject = (name) => findingRec("round-X", `id-${name}`, [name]);
+  const [a, b, c, d] = [subject("alpha"), subject("beta"), subject("gamma"), subject("delta")];
+  const keyOf = (f) => findingKey(routineFindingCandidateText(f));
+  const rec = new Map([[keyOf(b), 3], [keyOf(d), 3], [keyOf(a), 1]]); // c never reported ⇒ 0
+  const order = recurrenceOrder([a, b, c, d], rec);
+  assert.deepEqual(order.map((r) => r.index), [1, 3, 0, 2],
+    "β(3) and δ(3) first — β before δ because they tie and β came first in probe order; then α(1), then γ(0)");
+  assert.deepEqual(order.map((r) => r.recurrence), [3, 3, 1, 0]);
+  assert.equal(order[0].key, keyOf(b), "each rank carries the key it was ranked by (an audit surface, not an opaque sort)");
+
+  // Withholding the reading is NOT "everything is fresh": it is the pre-recurrence decision order,
+  // and the ranks say so (null), so a caller can never render it as 「复现 0」 (硬规则 3b).
+  const off = recurrenceOrder([a, b, c, d], null);
+  assert.deepEqual(off.map((r) => r.index), [0, 1, 2, 3], "no reading ⇒ probe order, byte for byte");
+  assert.deepEqual(off.map((r) => r.recurrence), [null, null, null, null], "⛔ null ≠ 0 — 「没测到」 must stay distinct from 「没复现过」");
 });
 
 // ── ⑦ the QUALITY bar is unmoved by any of this (it reads the text, not the identity) ───────────

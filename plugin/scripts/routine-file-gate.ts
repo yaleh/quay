@@ -103,6 +103,136 @@ export function findingKey(taskText) {
   return prose ? `prose:${prose}` : "";
 }
 
+// ── recurrence — the round's filing PRIORITY ─────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS (measured 2026-09-23, from the routine's own carrier `.quay/routine-findings.jsonl`
+// — 544 finding records / 69 filing-rounds at that reading; the file is TRACKED, so every number here
+// is re-derivable with one replay, ⛔ not a fixture).
+//
+// The three gates above decide WHETHER a finding may be filed. None of them says WHICH of a round's
+// 50–120 candidates gets the round's rate budget (`DEFAULT_RATE` filings per window) — the loop spent
+// it in the PROBE'S EMISSION ORDER, an order that carries no value signal at all. The slots therefore
+// went to whichever clusters the fresh-context scan happened to list first, while clusters the corpus
+// had already re-reported for 3–6 rounds were rejected `rate:` and never became a task. Measured in
+// the very round that filed THIS task (`semantic-dedup-scan-1790118332027`, 52 candidates, k=3):
+//
+//     filed                 prior-round recurrence {0, 0, 1}   ← two first-seen findings took 2 of 3 slots
+//     rejected `rate:`      prior-round recurrence {4, 3, 3, 3} — mergeenv·mergeprofileenv,
+//                           isdeadinflight·isdeadmerge, parseargs, statecolortoken·timelinecolortoken
+//
+// — i.e. the rate gate was throttling exactly the work the corpus had been re-reporting, while
+// first-seen findings (the cheapest thing for a scan to emit) walked in. The highest-recurrence
+// cluster measured over all rounds, `readmanifest`, had been re-reported in **6** prior rounds and its
+// final candidate was never filed (that one is an `action:` reject — a `leave` verdict, so priority
+// alone does not file it; see the residual note below).
+//
+// ⛔ WHAT THIS IS NOT. It does not raise the cap, weaken a gate, or add a second quality judge: it
+// ORDERS the candidates the existing gates already judge, so the same budget buys the highest-value
+// work. `rate:` stays the declared throttle — it now drops the FRESHEST tail instead of an arbitrary
+// one. The combination with the subject key above is what converges: a filed cluster is deduped away
+// on the next round, so the queue drains from the top down rather than being re-chosen at random.
+//
+// THE PRIORITY KEY IS THE DEDUP KEY — literally the same call (`findingKey` over the same rendered
+// candidate text). A separate "recurrence key" that could drift from the dedup key would prioritize
+// by a quantity no gate keys on, and the drift would be silent (硬规则 5b).
+//
+// DECLARED RESIDUAL: priority is not eligibility. A 6-round cluster carrying `suggestedAction:
+// "leave"` is still a measurement and still not filed (the `action:` gate) — so the top of the
+// priority order is not always the top of the filed set. That is correct and is why the filings record
+// the recurrence next to the verdict (see `selectFilings`' rate reason).
+
+/** A carrier `finding` record → the `FileableFinding` shape `routineFindingCandidateText` renders.
+ *  ⚠️ The finding's own kind is the record's `dupKind`: the record's top-level `kind` is the RECORD
+ *  kind (`"finding"`). Reading `kind` here would put the string "finding" in every candidate text
+ *  (harmless for the key, which ignores it — but it would silently misreport the finding's kind). */
+function carrierFinding(r: Record<string, unknown>): FileableFinding {
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  const arr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    id: str(r.findingId),
+    kind: str(r.dupKind),
+    symbols: arr(r.symbols),
+    files: arr(r.files),
+    verdict: str(r.verdict),
+    rationale: str(r.rationale) ?? "",
+    suggestedAction: str(r.suggestedAction),
+    producer: str(r.producer),
+  };
+}
+
+/** Recurrence of every subject the carrier has ever reported: finding key → the number of DISTINCT
+ *  `runId`s that reported it (「这个主语被几轮重复报过」 — the quantity the finding above is about).
+ *
+ *  **Three-valued, and the three must not share an output** (硬规则 3b — the failure mode this repo
+ *  has measured three times is 「读不懂输入」 sharing a return value with 「合格」):
+ *    `Map`  = read it; a key absent from the map was never reported ⇒ recurrence 0 (a complete
+ *             reading makes absence informative — 硬规则 6's 「缺值」 would be a HALF-read map);
+ *    `null` = unreadable, or readable but carrying no parseable record at all ⇒ recurrence UNKNOWN.
+ *             Callers must fall back to the pre-recurrence behaviour (probe order) and must NOT
+ *             render this as 「复现 0」 — "we could not measure it" and "nothing recurred" are the
+ *             two states this function exists to keep apart.
+ *  An empty-but-readable carrier is a legitimate `Map` (no records ⇒ nothing recurred).
+ *
+ *  ⚠️ Distinct runIds, ⛔ not record count: one round can emit the same subject twice (the probe
+ *  splits a scan into shards), and counting records would make a sharded round look like recurrence.
+ *  A record with no usable `runId` cannot be attributed to a round and is skipped rather than
+ *  counted as its own round. */
+export function recurrenceByKey(carrierPath: string): Map<string, number> | null {
+  let text: string;
+  try { text = fs.readFileSync(carrierPath, "utf8"); } catch { return null; }
+  const rounds = new Map<string, Set<string>>();
+  let nonBlank = 0;
+  let parsed = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    nonBlank += 1;
+    let rec: unknown;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+    parsed += 1;
+    const r = rec as Record<string, unknown>;
+    if (r.kind !== "finding") continue;
+    const run = typeof r.runId === "string" ? r.runId.trim() : "";
+    if (!run) continue;
+    const key = findingKey(routineFindingCandidateText(carrierFinding(r)));
+    if (!key) continue;
+    let seen = rounds.get(key);
+    if (!seen) { seen = new Set<string>(); rounds.set(key, seen); }
+    seen.add(run);
+  }
+  // Read it, and every non-blank line was unintelligible ⇒ we did NOT read it (hard rule 3b).
+  if (nonBlank > 0 && parsed === 0) return null;
+  const out = new Map<string, number>();
+  for (const [key, seen] of rounds) out.set(key, seen.size);
+  return out;
+}
+
+/** One candidate's place in the round's decision order — the audit surface of the priority: which
+ *  key it was ranked by, and the recurrence that produced its rank (`null` = the carrier could not be
+ *  read, so there was no ranking at all — ⛔ never 0, which would read as 「没复现过」). */
+export interface RecurrenceRank {
+  index: number;
+  key: string;
+  recurrence: number | null;
+}
+
+/** The order in which a round's candidates should consume the rate budget: **recurrence desc**, ties
+ *  (and an unreadable carrier) in the probe's own order — so a tie is not silently reshuffled and the
+ *  fallback is the exact pre-recurrence behaviour, ⛔ never worse.
+ *
+ *  Pure (the caller does the reading), because the priority must be re-runnable against the real
+ *  carrier as a pure READING — the same reason `selectFilings` is pure. */
+export function recurrenceOrder(
+  findings: readonly FileableFinding[], recurrence: Map<string, number> | null,
+): RecurrenceRank[] {
+  const ranked = findings.map((f, index) => {
+    const key = findingKey(routineFindingCandidateText(f));
+    return { index, key, recurrence: recurrence ? recurrence.get(key) ?? 0 : null };
+  });
+  if (!recurrence) return ranked; // probe order: the pre-recurrence decision order, byte for byte
+  return [...ranked].sort((a, b) => (b.recurrence as number) - (a.recurrence as number) || a.index - b.index);
+}
+
 // ── quality ──────────────────────────────────────────────────────────────────────────────────────
 // A finding is actionable iff it has a non-trivial `## Finding` AND cites reproduction evidence (a
 // command, a path, a diff/commit ref, a test name) — not a vague concern.
