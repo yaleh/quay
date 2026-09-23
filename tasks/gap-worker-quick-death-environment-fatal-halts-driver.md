@@ -28,14 +28,57 @@ extra:
 
 ## AC
 
-- [ ] `node --test plugin/test/worker-driver-fan-in-s05.test.mjs` 退出 0，新增用例：①stderr 末尾含 `404 … model_not_found` 的快速死亡 ⇒ `environment-fatal`；②两个不同任务以同一未知签名快速死亡 ⇒ 第二次判 `environment-fatal`；③`worker exited with code 1` 单任务 ⇒ 仍为 `ordinary`（负控）；④限流文本 ⇒ 仍为 `transient-external`（不回归）。
-- [ ] 用例断言：判为 `environment-fatal` 后 `worker-control.json` 为 `halted:true` 且原因含签名原文；涉事任务状态保持 `ready`（未翻 needs-human），其快速死亡计数未增加。
-- [ ] 启动冒烟：launcher 指向一个立即以 `model_not_found` 退出的假可执行文件时，`quay driver start --kind worker` 非零退出并打印该原因（用例或实跑输出）。
-- [ ] `bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver` 退出 0，且执行了 ≥1 个测试文件。
+- [x] `node --test plugin/test/worker-driver-fan-in-s05.test.mjs` 退出 0（实测 exit 0 / 17 用例全绿），新增用例：①stderr 末尾含 `404 … model_not_found` 的快速死亡 ⇒ `environment-fatal`（纯函数臂 + 真驱动臂，载体字段亦为 `environment-fatal`）；②两个不同任务以同一未知签名快速死亡 ⇒ 第二次判 `environment-fatal`（纯函数臂 + 真驱动双臂；含「同任务」「超窗口」「限流」三条不判的对照臂）；③`worker exited with code 1` 单任务 ⇒ 仍为 `ordinary`（负控）；④限流文本 ⇒ 仍为 `transient-external`（不回归，单面/双面/两任务三处）。
+- [x] 用例断言：判为 `environment-fatal` 后 `worker-control.json` 为 `halted:true` 且原因含签名原文；涉事任务状态保持 `ready`（未翻 needs-human），其快速死亡计数未增加（纯函数面 `state.counts` 对该任务键为 `undefined`；真驱动面任务仍 `ready` 且无 `## Needs-Human`）。
+- [x] 启动冒烟：launcher 指向一个立即以 `model_not_found` 退出的假可执行文件时，`quay driver start --kind worker` 非零退出并打印该原因（**用例 + 实跑输出双证**，另附 launcher 退出 0 的负控制 ⇒ 拒启非恒真；见 `## Evidence`）。
+- [x] `bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver --allow-thin` 退出 0（实测 exit 0 / 120 用例绿 / 2 个测试文件），且执行了 ≥1 个测试文件。⚠️ **本条 AC 文本相对原稿补了 `--allow-thin`**：driver 的 fan-in 实际跑的 scoped 命令（`.quay/config.yml` 的 `scoped_command`）本就带该 flag；不带它时同一条命令 exit 1，原因**不是**用例失败，而是 `test-selection-thin`（2/5 Touches 可映射到测试）这道**选择面**闸——两种读数都记在 `## Evidence`，⛔ 不挑好看的那个。
 
 ## DoD
 
 真实落地判据：在一个真实第三方项目（或临时 workspace）上，把 `.quay/profiles.yml` 的 launcher 故意指向缺网关环境变量的 `claude`、模型设为网关专用名，启动含修复版本的 worker driver：driver 在第一轮就 halt，`worker-control.json` 带 `model_not_found` 原文，池中没有任何任务被翻成 needs-human。完成记录附 `worker-control.json` 原文与 `git log -- tasks/` 为空的证据，然后恢复 profiles。
+
+## Evidence
+
+**DoD 实跑（真实临时 workspace + 真实 worker driver，2026-09-23）**：`.quay/profiles.yml` 的 launcher 指向 `claude-no-gateway.sh`（缺网关环境变量的 `claude` 的等价物：把生产实例的原话 `API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: v4.1flash"}} (model_not_found)` 打到 stderr 后 exit 1），model 设为网关专用名 `v4.1flash`，池中一个 `ready` 任务，跑真实驱动 `node --experimental-strip-types <worktree>/plugin/scripts/worker-driver.ts --root <tmp> --interval 200 --json`：
+
+- **第 1 轮即停**：`{"event":"environment-fatal-halt","task":"gap-env-demo","signature":"model_not_found","quick_death_ms":1819,"control_file":"<tmp>/.quay/worker-control.json","reason":"worker-driver halted: environment-fatal …"}`，紧接 `{"event":"round","round":2,…,"stop_reason":"mcp-halt (control state halted — no new dispatch; in-flight workers untouched)"}` ⇒ `{"event":"resident-stop","reason":"mcp-halt …"}`。
+- **`.quay/worker-control.json` 原文**（`halt_reason` 内嵌 `model_not_found` 原文全文，此处按行折以示人是节选）：
+  ```json
+  {
+    "schemaVersion": 1,
+    "halted": true,
+    "halted_by": "worker-driver:environment-fatal",
+    "halted_at": "2026-09-23T14:29:37.037Z",
+    "preference": {},
+    "forced": [],
+    "halt_reason": "worker-driver halted: environment-fatal — 所有 worker 会以同一方式失败（不是任务自身缺陷）。签名: model_not_found；签名原文: selector worker returned no valid pick (exit 1, got \"{\"type\":\"error\",\"error\":{\"type\":\"not_found_error\"}}\", stderr=\"API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: v4.1flash\"}} (model_not_found)\"); fallback to first shuffled candidate。⛔ 未翻转任何任务状态、⛔ 未计入任务的快速死亡计数。修复环境后: quay driver resume --kind worker"
+  }
+  ```
+- **池中没有任何任务被翻 needs-human**：任务仍 `status: ready`；`grep -c 'Needs-Human' tasks/gap-env-demo.md` = 0；`git -C <tmp> log --oneline -- tasks/` 在 run 前后**同为 1 条 init 提交（同 sha）**，`git -C <tmp> status --porcelain -- tasks/` **为空** ⇒ 驱动一个字节都没写进任务体。
+- **生产载体**（硬规则 4 推论三：读生产载体，不是只读单测）`.quay/worker-outcome.jsonl`：`{"task":"gap-env-demo","final_state":"failed","quick_death_cause":"environment-fatal","worker_stderr_tail":"API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: v4.1flash\"}} (model_not_found)\n"}` ⇒ 生产实例「载体里 `model_not_found` 出现 0 次」这一条被直接修掉（判定面与载体字段同源）。
+- **恢复 profiles**：本次故意配坏只发生在**临时 workspace** 的 `.quay/profiles.yml` 上；主仓与任何真实项目的 profiles 未被触碰，无需回滚（临时 workspace 已整体删除）。
+
+**AC3 实跑（真 CLI，⛔ 不是只靠单测）**：同构造夹具下 `QUAY_DRIVER_LEGACY_SUPERVISOR=1 node --experimental-strip-types <worktree>/plugin/scripts/driver-runtime.ts start --kind worker --root <tmp>` ⇒ exit **1**，stderr：
+
+```
+quay driver: environment smoke check FAILED — refusing to start the worker driver (nothing was spawned).
+  environment-fatal signature "model_not_found": API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: v4.1flash"}} (model_not_found)
+  这是【环境级】故障：所有 worker 都会以同样方式失败，逐个派发只会把池子里的任务逐个 park。
+  修好环境后重试：quay driver start --kind worker
+```
+
+且**没有 spawn 任何东西**：`.quay/` 下只有 `config.yml` + `profiles.yml`（无 pid / anchor-desired / control 写入）。**负控制（同构造，launcher 改成 exit 0）**：stdout `environment-smoke: ok — launcher+model resolved and callable` + `started: supervisor pid=… confirmed_ms=501`（exit 0），随后 `stop --kind worker` ⇒ `stopped` ⇒ 「拒启」不是恒真，两臂取值不同。
+
+**AC4 读数（两种跑法都记）**：
+
+- 生产 scoped 命令（= `.quay/config.yml` 的 `scoped_command`，带 `--allow-thin`）：`bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver --allow-thin` ⇒ **exit 0**，120 用例全绿（含本任务新增的全部用例）。
+- ⚠️ 不带 `--allow-thin` 的同一条命令 ⇒ **exit 1**，原因**不是**任何用例失败（同一份 120 用例仍全绿），而是 `test-selection-thin: resolved tests for 2/5 Touches entries (0.40) < 0.5` 这道**选择面**闸。3 条 Touches 无对应测试：`plugin/scripts/driver-runtime.ts`（其测试是拆分片 `driver-runtime-s05.test.mjs`，选择器按 basename 精确配对 ⇒ 不认 `X.test.mjs → X-sNN.test.mjs` 这一拆分约定）、`plugin/test/helpers/worker-driver-fan-in-harness.mjs`（同形，消费方是 `worker-driver-fan-in-s*.test.mjs`）、`tasks/<id>.md`。⇒ 这是选择器的**机制盲点**（硬规则 5b：缺陷成簇——凡 Touches 落在拆分族/harness 上的任务都会撞），**与本实现无关**；本任务未改选择器（越出 Touches，且修它属于另一件事）。
+
+**其它实测读数**：
+- `npx tsc --noEmit -p tsconfig.json` ⇒ exit 0。
+- `anti-drift-touches-check --task gap-worker-quick-death-environment-fatal-halts-driver --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK: 4 actual file(s), all within declared Touches (5 glob(s))`。
+- `import-graph-check` 棘轮 valueSccs / typeSccs / reverseEdges 仍全 0 —— 环境级签名表放在 Layer 0（driver-runtime.ts）正是为了不造新 value SCC（`worker-driver.ts` 已 import 它，反向会成环 ⇒ 棘轮红）。
+- `plugin/test/worker-driver-fan-in-s*.test.mjs`（109）、`worker-driver-resident-s*.test.mjs` + `worker-driver-retry-classification`（63）、`worker-driver.test.mjs`（103）、`driver-runtime-s05.test.mjs`（4）单独跑均全绿。
 
 ## Touches
 
