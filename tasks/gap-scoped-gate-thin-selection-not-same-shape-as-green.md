@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-thin-selection-not-same-shape-as-green
 title: scoped 门取零个测试文件时与「绿」同形：第三方契约缺「thin ⇒ not-evaluated」这一半
-status: todo
+status: ready
 labels:
   - gap
   - defect
