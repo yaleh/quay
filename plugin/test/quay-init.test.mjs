@@ -12,8 +12,10 @@
 //   .claude/launch.settings.json / .claude/settings.json
 // — and NOTHING else (no .claude/{skills,workflows,agents}, no plugin/scripts copies, no .quay/runtime).
 // It is NOT an installer: the extension files + scripts are delivered by the quay Claude Code plugin,
-// so the output must carry an EXPLICIT install step (`claude plugin marketplace add` +
-// `claude plugin install`), never a "config-just-works" implication (AC4 / SPEC §6 T3).
+// so the output must carry an EXPLICIT install step (`claude plugin marketplace add yaleh/quay` +
+// `claude plugin install quay@quay --scope project` — the FULL recipe, not the bare
+// `claude plugin marketplace add` substring, which also matched the rejected two-arg form), never a
+// "config-just-works" implication (AC4 / SPEC §6 T3).
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init.test.mjs
@@ -190,8 +192,30 @@ test("AC4 — the output carries the explicit install steps and never implies co
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const out = r.stdout;
     // The explicit install step (SPEC §6 / T3): 启用 ≠ 安装, 未信任目录 settings 不被读 ⇒ 必须显式装.
-    assert.match(out, /claude plugin marketplace add/, "must print the marketplace-add step");
-    assert.match(out, /claude plugin install/, "must print the plugin-install step (or the npm-global register-plugin.mjs path)");
+    //
+    // ── AC5 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot): the predicate is ANCHORED
+    // on the FULL single-<source> github recipe, not on the loose `claude plugin marketplace add`
+    // substring. The loose form also passed the BROKEN two-arg recipe
+    // (`marketplace add quay "${CLAUDE_PLUGIN_ROOT}"`) — rejected outright by the CLI
+    // ("✘ Invalid marketplace source format. Try: owner/repo, https://..., or ./path") and a
+    // DIRECTORY source into the bargain. That is the 硬规则 3b shape: a broken recipe read the
+    // same as a qualified one for as long as the assertion lived. Both halves of 硬规则 2 are
+    // discharged in this test: the positive match below, and the dry-run of the SAME predicate
+    // against a known-BAD sample (the old recipe) at the bottom — a predicate that cannot go red
+    // is caught here instead of in production.
+    assert.match(out, /claude plugin marketplace add yaleh\/quay/,
+      "must print the FULL github recipe `claude plugin marketplace add yaleh/quay` (one <source> arg)");
+    assert.match(out, /claude plugin install quay@quay --scope project/,
+      "must print the project-scoped install step (or the npm-global register-plugin.mjs path)");
+    assert.doesNotMatch(out, /marketplace add quay "/,
+      "must NOT print the rejected two-arg form (`marketplace add <name> <source>`)");
+    // Known-BAD sample dry-run (硬规则 2, the zero-count half): the old recipe must still satisfy the
+    // LOOSE predicate (else the strong one is not what changed) and must FAIL the strong one.
+    const OLD_RECIPE = '  claude plugin marketplace add quay "/cache/quay/quay/0.11.0"';
+    assert.match(OLD_RECIPE, /claude plugin marketplace add/,
+      "the LOOSE predicate must still match the old form — otherwise the strong predicate proves nothing");
+    assert.doesNotMatch(OLD_RECIPE, /claude plugin marketplace add yaleh\/quay/,
+      "the STRONG predicate must go RED on the old two-arg recipe — else this assertion cannot take false");
     // The negative control (硬规则 4 / SPEC §6): the forbidden "配置即生效" implication is absent.
     assert.doesNotMatch(out, /配置即生效/, "must not print the forbidden config-just-works phrasing");
     assert.doesNotMatch(out, /自动安装|自动装上/, "must not imply auto-install from config alone");
