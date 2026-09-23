@@ -222,6 +222,30 @@ export function parseManifestText(text: string): ManifestParse {
 }
 
 /**
+ * Canonicalize a path for COMPARISON: resolve symlinks when the path exists, else fall back to
+ * `path.resolve` (a source directory that has since been deleted must still compare, not throw).
+ *
+ * WHY THIS IS NEEDED (gap-suite-ambient-reds-block-all-code-landings, class 3): the same directory
+ * is reachable by two spellings on this host — `/data/home/yale/work/quay` (the realpath) and
+ * `/home/yale/work/quay` (a symlink created 2026-09-19). The generated `.archguard/query/manifest.json`
+ * records `sources` in the SYMLINK spelling (the analyzer was invoked through it), while the report's
+ * own root is the REALPATH spelling. `startsWith(base + sep)` then misses, and the two sides are
+ * normalized by different rules — so the comparison silently stops measuring path identity and starts
+ * measuring path SPELLING (硬规则 4b). Realpathing both sides before comparing makes the reading
+ * invariant under the symlink, which is the property the caller actually wants.
+ * ⛔ NOT fixed by deleting `.archguard/` and regenerating: the analyzer would write the symlink
+ * spelling again (that is the path it is invoked through), so the defect would only move later.
+ */
+export function canonicalPath(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/**
  * Turn an absolute manifest source into a repo-relative `/`-separated path.
  *
  * WHY THIS IS NEEDED: `.archguard/` is generated at the MAIN CHECKOUT and its `sources` are absolute
@@ -229,12 +253,16 @@ export function parseManifestText(text: string): ManifestParse {
  * different directory — a first fix would be to string-compare, which would then report "every .ts
  * file is uncovered" purely because the paths disagree. So a source is relativized against (a) the
  * report root, (b) the main checkout root, and only then (c) by longest-existing-suffix.
+ *
+ * Both sides go through `canonicalPath` first (class 3): without it, a manifest written through the
+ * `/home/yale/...` symlink and a root resolved to `/data/home/yale/...` never match at (a)/(b), and
+ * the answer is produced by the (c) suffix fallback alone — correct by luck rather than by rule.
  */
 export function relativizeSource(source: string, root: string, mainRoot: string): string {
-  const norm = path.resolve(source);
+  const norm = canonicalPath(source);
   const bases = [root, mainRoot].filter((b) => typeof b === "string" && b !== "");
   for (const b of bases) {
-    const base = path.resolve(b);
+    const base = canonicalPath(b);
     if (norm === base) return ""; // the source IS a root ⇒ covers everything under it
     if (norm.startsWith(base + path.sep)) return norm.slice(base.length + 1).split(path.sep).join("/");
   }

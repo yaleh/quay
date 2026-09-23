@@ -39,6 +39,13 @@ jobs:
     env:
       LC_ALL: C.UTF-8
       LANG: C.UTF-8
+      # TZ (gap-suite-ambient-reds-block-all-code-landings, class 1). The runner image happens to be
+      # UTC, so `outer-tick-log-check` was green here WITHOUT this line — but "the host is UTC" is a
+      # property of ubuntu-latest, not a declaration of this workflow (硬规则 4 推论二), and it made
+      # the timezone half of the fix invisible: pinning only the locale leaves that file at 25 pass /
+      # 2 fail on any non-UTC host. Declared explicitly so scripts/test.sh's own pin and this one are
+      # the same statement rather than one statement plus one silent reliance on the runner.
+      TZ: UTC
     permissions:
       contents: read
       issues: read

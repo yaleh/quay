@@ -1,4 +1,23 @@
 // @test-group product
+// @load-sensitive child-spawn
+// @load-sensitive-entry 2026-09-23 real `quay serve` on an ephemeral port + real quay-native CLI subprocesses (execFileSync) + chdir across isolated workspaces; failed under full-suite concurrency (1 failure in 72 recorded fan-in suite rounds)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — same family and the
+// same three ingredients as packages/quay/test/serve.test.mjs, which HAS been registered since
+// 2026-08-10: it BINDS AN EPHEMERAL HTTP PORT (startServer({port:0}), so not a fixed-port collision),
+// SPAWNS REAL quay-native CLI SUBPROCESSES (execFileSync), and CHDIRs the process across isolated
+// workspaces. It was missing from this registry
+// (gap-suite-ambient-reds-block-all-code-landings, class 5): the registry's own `child-spawn`
+// comment names "serve (real subprocess + port binding)" as a member, and this file matches that
+// description, so `relatednessSignalsFor`'s load-sensitive hint was structurally blind to it.
+// ⚠️ Two corrections to the earlier reading of this file, both kept visible so the distinction is
+// not re-lost (硬规则 4 推论四):
+//   ① Its node:test summary DOES appear when the suite runs it (`ℹ tests 1 / pass 0|1 / fail 0|1` —
+//      the whole file is one implicit test whose verdict is the process exit code). It reports
+//      NO `ℹ pass`/`ℹ fail` lines only under a DIRECT `node <file>` invocation, which is what the
+//      file's own "Run:" comment suggests. So "no summary line ⇒ NR" was a WRONG PREDICATE, not a
+//      defect in this file — the NR classification is withdrawn.
+//   ② Its in-file harness prints `PASS: <name>` lines and ends with
+//      "All M26-adversarial-eval serve.js/provider-client.js fault-injection tests passed."
 // M26-adversarial-eval (DIR-001 item 4): targeted fault-injection regression
 // tests for the highest-risk real gaps this milestone's Phase A audit found
 // in serve.js and provider-client.js. Each test asserts SAFE degradation
@@ -56,7 +75,33 @@ function assert(cond, msg) {
   }
 }
 
-function get(port, urlPath, timeoutMs = 5000) {
+/**
+ * PER-REQUEST BOUND (gap-suite-ambient-reds-block-all-code-landings, class 5) — host-derived, ⛔ not a
+ * 5000ms literal. The bound exists to catch ONE failure mode: ADV-002's hang, a request that never
+ * completes because the handler threw and took the process down. A genuine hang never completes
+ * REGARDLESS of the bound, so widening it cannot turn a real defect green — it only stops flagging
+ * requests that are slow because the box is busy. Same argument and same host-derived-default shape as
+ * tmux-leak-scan.sh's reap_wait_default ("a genuine leak never clears regardless of the bound, so
+ * widening only absorbs slow teardown — it never turns a leak green"). `availableParallelism()` reads
+ * the HOST (more threads ⇒ more concurrent lanes ⇒ more stretch) instead of hardcoding a literal that
+ * is only "big enough" on the box it was written on (CLAUDE.md 硬规则 4 推论二).
+ *
+ * ⚠️ HONEST STATUS — this is a hardening, NOT the diagnosed fix, and it is NOT claimed as one. The
+ * 12×-concurrent-copy A/B run for this file (old 5000ms vs new bound, same machine, same load) came
+ * back PASS=12/FAIL=0 on BOTH arms: the flake could NOT be reproduced at that load, so nothing here
+ * is evidence that the literal was the cause. What IS established is narrower and still worth having:
+ * the file's measured per-file duration under the real suite has run 4s..36s for a body whose
+ * isolated runtime is ~2.6s, and a 5000ms per-request budget sits inside that spread. The real
+ * disposition for this file is the registry annotation in the header; see the AC for the readings.
+ * The constant is deliberately modest (250ms per hardware thread, floored at the historical 5000ms)
+ * so a genuine hang is still reported in well under a minute rather than being papered over.
+ */
+const REQUEST_TIMEOUT_MS = Math.max(5000, (os.availableParallelism?.() ?? os.cpus().length) * 250);
+
+/**
+ * `get(port, path)` — one HTTP GET against the server under test.
+ */
+function get(port, urlPath, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const req = http.get({ host: "127.0.0.1", port, path: urlPath, timeout: timeoutMs }, (res) => {
       let body = "";
