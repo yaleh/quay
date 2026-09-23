@@ -24,7 +24,7 @@ profiles:
   # 三个 worker role（task-worker / selector / fix-worker）+ outer 共享的 recipe。
   worker-default:
     launcher: claude-fjdac
-    model: deepseek-v4-pro-anthropic
+    model: v4.1flash-anthropic
     bare: false
     auth: token            # claude-fjdac 只提供 ANTHROPIC_AUTH_TOKEN（并置空 ANTHROPIC_API_KEY）
     # ⚠️ gap-fix-worker-spawn-timeout-persists-post-fix（2026-09-07）更正上一轮
@@ -36,12 +36,16 @@ profiles:
     #   claude -p 保留「end_turn 时存活后台任务」的 600s 宽限期（gap-worker-print-bg-wait-ceiling-600s），
     #   而 promotion-driver 的 spawnSync timeout=180s ⇒ 600s > 180s，spawn 先超时（timedOut=true，
     #   exitCode=null），编辑其实已落盘（DIR-131）。修法 = roles.fix-worker.env 加该键。
-    #   下面三个 DEFAULT_*_MODEL 对齐到带后缀值保留（无害、非成因），⛔ 勿再当超时修法。
-    #   （旧文案：wrapper export 的不带后缀值与 model 不一致 ⇒ SDK 找不到 ⇒ 回退到无后缀到达 litellm。）
+    # 2026-09-23 更正：deepseek-v4-pro-anthropic 从未被本机网关（http://127.0.0.1:26510/）导出过
+    #   （/v1/models 实测只有 v4.1flash / v4.1flash-anthropic / v4pro / v4pro-anthropic 等，无 deepseek-*）。
+    #   ~/.local/bin/claude-fjdac 已于 2026-09-20 更正自己的默认值为 v4.1flash，但本文件当时未同步，
+    #   ⇒ 每次 spawn 的 selector/worker 都被网关 400 拒绝（"Invalid model name passed in
+    #   model=deepseek-v..."），worker-driver 连续快速死亡。model 与下面三个 DEFAULT_*_MODEL 已对齐到
+    #   网关真实存在的 v4.1flash-anthropic，⛔ 不要再改回 deepseek-*。
     env:
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-pro-anthropic
-      ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-pro-anthropic
-      ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-pro-anthropic
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: v4.1flash-anthropic
+      ANTHROPIC_DEFAULT_SONNET_MODEL: v4.1flash-anthropic
+      ANTHROPIC_DEFAULT_OPUS_MODEL: v4.1flash-anthropic
     # fallbackModel 缺省留空：当前无已知不可用的主 model。主备回退是 policy 能力（AC1），
     # 由 profile-policy.test.mjs 用合成配置验证（model=glm-5.3 + fallbackModel=deepseek-v4-pro）。
   # manager 用原生 claude + 默认模型，显式取消继承 917k 三件套（unset 显式化旧的空串约定）。
