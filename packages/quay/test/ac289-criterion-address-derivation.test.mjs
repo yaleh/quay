@@ -66,21 +66,35 @@ function missingTool() {
   return null;
 }
 
-function template() {
-  return {
-    // The criterion resolves $root with `git rev-parse --show-toplevel`, so the temp root must BE a
-    // repo; realpath because /proc/<pid>/cwd is a real path and `rev-parse` prints one too.
-    root: null,
-    servers: [],
-    children: [],
-  };
-}
-
-function makeTmpContext() {
-  const raw = fs.mkdtempSync(path.join(os.tmpdir(), "ac289-crit-"));
-  execFileSync("git", ["init", "-q"], { cwd: raw });
-  fs.mkdirSync(path.join(raw, ".quay"), { recursive: true });
-  return { ...template(), root: fs.realpathSync(raw) };
+/** The context a case is handed, plus the temp-root lifecycle.
+ *
+ *  ⚠️ The `mkdtempSync` binding and its `rmSync` live in THIS function on purpose — same scope, the
+ *  removal inside a `finally`. That is the shape `tmp-leak-pairing-check` / `test-isolation-check`'s
+ *  `detectMkdtempNoCleanup` accepts (its header: "covered when the variable is rmSync'd inside a
+ *  cleanup region"); the earlier draft created the dir in a `makeTmpContext()` helper and cleaned
+ *  `ctx.root` (a `realpathSync` of it), which the gate read as an UNPAIRED mkdtemp and blocked on.
+ *  A /tmp leak gate that cannot see the pairing is not a false alarm here — the detector asks for the
+ *  binding itself to be removed, so it is removed. */
+async function withContext(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac289-crit-"));
+  // The criterion resolves $root with `git rev-parse --show-toplevel`, so the temp root must BE a
+  // repo; realpath because /proc/<pid>/cwd is a real path and `rev-parse` prints one too.
+  const ctx = { root: fs.realpathSync(dir), servers: [], children: [] };
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ctx.root });
+    fs.mkdirSync(path.join(ctx.root, ".quay"), { recursive: true });
+    await fn(ctx);
+  } finally {
+    for (const pid of ctx.children) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+    for (const s of ctx.servers) await new Promise((r) => s.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** A live process whose cmdline is `argv0` and whose cwd is the temp root — the shape the criterion
@@ -161,23 +175,6 @@ function runCriterion(ctx) {
       resolve({ code, stdout, stderr });
     });
   });
-}
-
-async function withContext(fn) {
-  const ctx = makeTmpContext();
-  try {
-    await fn(ctx);
-  } finally {
-    for (const pid of ctx.children) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* already gone */
-      }
-    }
-    for (const s of ctx.servers) await new Promise((r) => s.close(r));
-    fs.rmSync(ctx.root, { recursive: true, force: true });
-  }
 }
 
 const GATE = missingTool() === null ? test : test.skip;
