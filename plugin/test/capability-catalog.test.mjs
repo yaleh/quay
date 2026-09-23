@@ -454,6 +454,17 @@ test("AC2 — the three named exp5-legacy families are ships:false (do not ship 
 });
 
 // ── AC5: a random sample of 5 delivered checks each answers a SPECIFIC question ──
+// The mark that ends a question is EITHER the ASCII '?' OR the CJK full-width '？' (U+FF1F). 11 of
+// the 357 declarations are Chinese prose whose sentence-final mark is the full-width form, and the
+// table is (per its own `_comment`) a character-for-character migration of the bash arrays it
+// replaced — so the full-width form is the original text, not a drifted one, and it is no weaker a
+// claim that the answer is a question. An ASCII-only predicate made this test a time bomb: the
+// sample below is SEEDED (a pure function of the sorted row set), so it read green until a landing
+// shifted the sample onto one of the 11 — then it read red for every tree at once, deterministically.
+// ⛔ This widens the SPELLING, never the predicate: the control below pins that a declaration
+// carrying NEITHER mark is still rejected (the widening must not become a relaxation).
+const QUESTION_MARK = /[?？]/;
+
 test("AC5 — a random sample of 5 delivered checks each answers a specific question", () => {
   const rows = catalogRows();
   const seeded = mulberry32(20260804); // reproducible "random"
@@ -464,8 +475,16 @@ test("AC5 — a random sample of 5 delivered checks each answers a specific ques
     assert.ok(r.question && r.question.trim().length >= 20,
       `sampled check answers a specific question: ${r.file} → "${r.question}"`);
     assert.ok(!vague.test(r.question), `sampled check must not be the empty answer: ${r.file}`);
-    assert.match(r.question, /\?/, `answers are phrased as QUESTIONS (a capability = a question made askable): ${r.file}`);
+    assert.match(r.question, QUESTION_MARK, `answers are phrased as QUESTIONS (a capability = a question made askable): ${r.file}`);
   }
+});
+
+// ── AC5 control: the widened mark is still a predicate that can take FALSE ──
+test("AC5 control — QUESTION_MARK accepts both marks and still rejects a declaration with neither", () => {
+  assert.equal(QUESTION_MARK.test("谁保证这一步会发生"), false,
+    "no mark at all ⇒ not a question (the control that stops the widening from being a relaxation)");
+  assert.equal(QUESTION_MARK.test("谁保证这一步会发生？"), true, "CJK full-width U+FF1F ⇒ a question");
+  assert.equal(QUESTION_MARK.test("who guarantees this step happens?"), true, "ASCII ? ⇒ a question");
 });
 
 // ── Wiring: capability-catalog.sh is a plugin script (not laid down by quay-init after AC168) ──
