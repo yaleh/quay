@@ -92,6 +92,15 @@ Usage:
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (⛔ not just a
              record count, which cannot distinguish "growing" from "stalled").
+             Also reports loaded_version: whether the RUNNING host (anchor/supervisor) loaded the
+             installed kernel — current / behind / ahead / not-evaluated, with the two version
+             numbers (loaded / installed) and the loaded kernel path. ⛔ Read from the running
+             process (/proc/<pid>/cmdline), NOT from the kernel you happen to run status with: after
+             a plugin upgrade an old anchor keeps running the old cache dir, and the older reading
+             (supervisor_stale) is structurally blind to it (unwatched + fresh on a built artifact).
+             ⛔ Report only — nothing auto-restarts; behind tells you to run: quay driver restart
+             config_provider_path compares .quay/config.yml's provider path version segment with
+             the installed version (the second drift source).
   restart    stop then start.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted). Reads the workspace's own runtime

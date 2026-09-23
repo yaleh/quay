@@ -81,11 +81,20 @@ settings are not read at all (SPEC §6 / T3) — so "config committed ⇒ auto-i
 script's output carries the explicit steps, which are:
 
 ```bash
-claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
+claude plugin marketplace add yaleh/quay
 claude plugin install quay@quay --scope project
 # (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall registers the
 #  marketplace source only; the enable is deliberately NOT user-scope by default)
 ```
+
+⚠️ **`marketplace add` takes ONE `<source>`, not `<name> <source>`.** The two-argument form is
+rejected outright (Claude Code 2.1.280: `✘ Invalid marketplace source format. Try: owner/repo,
+https://..., or ./path`). The registered name is **not** aliasable either — it is the `name` field
+of the source root's `.claude-plugin/marketplace.json`. And registering a *directory* here would be
+wrong twice over: it pins the project to a path on one machine, and a directory source loads the
+plugin **in place** with no install record — `claude mcp list` looks Connected while nothing was
+ever installed. The published channel is the github source above; this repo's own dog-food channel
+is the separate name `quay-dev` (directory → `<this repo>/plugin`, declared at user scope, SPEC §4b).
 
 ⚠️ **Always pass `--scope`.** `claude plugin install` defaults to `scope=user`, which writes a
 user-level `enabledPlugins` key and reddens the STANDING goal AC-161 (the user level is allowed to
