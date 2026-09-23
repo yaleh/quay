@@ -153,8 +153,15 @@ checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-close
   "verdict": "static-phase-attributed", "suiteLogHash": null}]
 ```
 
-该记录由**真实 driver 常驻环**跑出：真实机械 fan-in（锁 → merge develop → delta → anti-drift → typecheck → scoped 门 → ac-precheck → **真实 suite**）在 `gap-arch-tsify-checker-mutation-check-sh` 的真实 worktree 上真跑，静态相位真的红（``# suite red static-check``），判据与 round 写入是未经改动的机制。为不劫持在飞生产 worker（共享 `.quay/dispatch-record.jsonl` 的 adopt 语义）、并把选择输入收敛到那一个任务，运行时的 `--root` 指向一个隔离根（其 `.quay/worker-round.jsonl` 是**指向本仓库真实载体文件的符号链接**，故记录落在真载体上），`--ready-pool-cmd` / `--worker-cmd-exact` 分别给出唯一候选与一个立即退出的 worker。⛔ 不是手写 JSON、不是先在单测里造一条记录。
+该记录由**真实 driver 常驻环**跑出：真实机械 fan-in（锁 → merge develop → delta → anti-drift → typecheck → scoped 门 → ac-precheck → **真实 suite**）在 `gap-arch-tsify-checker-mutation-check-sh` 的真实 worktree 上真跑，静态相位真的红（`# suite red static-check`），判据与 round 写入是未经改动的机制。为不劫持在飞生产 worker（共享 `.quay/dispatch-record.jsonl` 的 adopt 语义）、并把选择输入收敛到那一个任务，运行时的 `--root` 指向一个隔离根（其 `.quay/worker-round.jsonl` 是**指向本仓库真实载体文件的符号链接**，故记录落在真载体上），`--ready-pool-cmd` / `--worker-cmd-exact` 分别给出唯一候选与一个立即退出的 worker。⛔ 不是手写 JSON、不是先在单测里造一条记录。
+
+**该次运行对 `gap-arch-tsify-checker-mutation-check-sh` 的唯一副作用**：fan-in 的 merge 步在其 `task/…` 分支上加了 2 个 merge commit（`a7e61ff61` 等，前向 additive；其 worktree 无 tracked 改动、任务文件无未提交改动、status 仍 `ready`、无 needs-human 翻转——旧的停派判词在本次运行里【没有】触发，正是本改动的效果本身）。
 
 ### AC6 — scoped 门
 
-`bash scripts/test.sh --for-task gap-suite-red-attribution-blind-to-static-phase --allow-thin`（driver fan-in 用的同一条命令）：exit 0，scoped 静态检查全 PASS（无 `STATIC_CHECK_FAILED`），`tests 103 / pass 103 / fail 0`。新增用例另单独跑 `node --experimental-strip-types --test plugin/test/worker-driver-retry-classification.test.mjs`：`tests 27 / pass 27 / fail 0`。
+`bash scripts/test.sh --for-task gap-suite-red-attribution-blind-to-static-phase --allow-thin`（driver fan-in 用的同一条命令），两次读数：
+
+- ① Touches 更新**前**（选择面只含 `plugin/test/worker-driver.test.mjs`）：exit 0，scoped 静态检查全 PASS，`tests 103 / pass 103 / fail 0`。
+- ② Touches 更新**后**（并入本任务的 `plugin/test/worker-driver-retry-classification.test.mjs`，即最终声明的 Touches 面）：exit 0，`tests 130 / pass 130 / fail 0`（103 + 新增 27）。
+
+`plugin/scripts/anti-drift-touches-check.ts --task … --worktree … --merge-target develop`（fan-in 的同一步）：`ANTI-DRIFT OK — 2 actual file(s), all within declared Touches (4 glob(s))`。
