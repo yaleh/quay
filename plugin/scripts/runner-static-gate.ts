@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 66 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 67 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -326,6 +326,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
   run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
+  echo "== registry-path literal check (gap-registry-path-second-copy-five-checker-sites, AC5) =="
+  # 检查器注册表 runner-static-gate.ts 的【路径】只有单一正本（select-static-checks-for-touches.ts 的
+  # REGISTRY_BASENAME / REGISTRY_REL_CANDIDATES）；把它拼成三段相邻字符串字面量的第二份副本 = 声明
+  # 「盘的路径字面量只有一处」而盘上有 N 处（2026-09-22 实测 5 处，字面量全同、强制力为零）。谓词即 AC
+  # 自己的 grep，命中数须为 0（该正本用 path.posix.join(…, REGISTRY_BASENAME) 派生，故没有任何一处
+  # 有权拼出三段字面量）。数据/散文里的裸文件名（清单键、find -name glob）只报 advisory、永不判红
+  # （硬规则 2/5b）。本例检查器自身【不含】该三段序列（needle 由 REGISTRY_REL_CANDIDATES[0] 派生），
+  # 故不会把自己算成第二处。
+  # @static-tier change
+  # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/registry-path-literal-check.ts plugin/test/registry-path-literal-check.test.mjs
+  run_checker "registry-path-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/registry-path-literal-check.ts" --root "${repo_root}"
   echo "== freshness-producer coverage check (gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger, AC7) =="
   # AC-214 要求七个「载体型主体」的证据距 develop tip ≤ K 交付面提交，而**刷新动作曾无触发器**：
   # 4 次转红 / 5 天，每次一次性人工重跑关闭、每次关闭后重新越界。本检查判的是**刷新机制的完备性**

@@ -119,6 +119,9 @@ import {
   readBaseline,
   runLaydown,
 } from "./quay-init-closure-ratchet.ts";
+// The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
+// derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
+import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -239,7 +242,7 @@ export function staticObjectPatterns(root: string): string[] {
   const sources: string[] = [];
   const testSh = path.join(root, "scripts", "test.sh");
   if (fs.existsSync(testSh)) sources.push(fs.readFileSync(testSh, "utf8"));
-  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const staticGate = path.join(root, REGISTRY_REL_CANDIDATES[0]);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (fs.existsSync(staticGate)) sources.push(fs.readFileSync(staticGate, "utf8"));
   const patterns = new Set<string>();
   for (const src of sources) {
