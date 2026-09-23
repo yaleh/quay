@@ -71,6 +71,7 @@ criterion: >-
       rc2=$(carrier_addr "$p")
       case "$rc2" in addr=*) a="${rc2#addr=}"; s="carrier" ;; *) c="${c:+$c,}$rc2" ;; esac
     fi
+    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; "*:"*) a="127.0.0.1:${a#*:}" ;; "::"*) a="127.0.0.1:${a#::}" ;; esac
     if [ -n "$a" ]; then
       rep="$rep | pid=$p addr=$a cause=derived-from-$s"
       if [ -z "$addr" ]; then addr="$a"; src="$s"; fi
