@@ -49,4 +49,28 @@ extra:
 - packages/quay/src/goal-store.ts
 - packages/quay-native/src/mcp-server.ts
 - packages/quay/test/goal-gate-verdict-mapping.test.mjs (new)
+- packages/quay/test/goal-criterion-timeout-resolution.test.mjs (合并 develop 时必须改：见 §Evidence「与 develop 兄弟任务的语义合并」——它的三个断言把「超时 ⇒ fail」写死，与本任务的核心要求直接冲突)
 - tasks/gap-goal-gate-verdict-single-mapping-not-evaluated.md
+
+## Evidence
+
+### 与 develop 兄弟任务的语义合并（2026-09-24，本轮）
+
+本分支落在 merge-base 之后，develop 已合并兄弟任务 `gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout`（其修法方向与本任务的 Proposal §2 重叠）。两个改动都必须留下，但**不能各留一份默认值**：
+
+- develop 把「默认 60000」收进 `gate/config/utils.ts:DEFAULT_ACCEPTANCE_TIMEOUT_MS` 一处，并删除了 `goal-store.ts` 的私有 `SWEEP_CRITERION_TIMEOUT_MS`（它正是绕过配置面的那个常量），四个调用点改用 `resolveAcceptanceTimeoutMs()`。
+- 本分支读**记录自己的** `timeoutMs`，并在三个写入点共用 `verdictFromAcceptance`。
+
+⇒ 取法：**默认值只留 develop 的那一处**，本分支的 `resolveAcceptanceTimeout` 改为 `import` 它（不再自带 `60_000` 字面量），其记录优先级链 `record > env > default` 不变；sweep 点的 deadline 取 develop 的 `resolveAcceptanceTimeoutMs()`，mapping 取本分支的 `verdictFromAcceptance`。`goal gate` 的输出同时保留 develop 的 `timeoutMs` 字段与本分支的 `cause` 字段。
+
+### 合并后重跑的四条读数（均在本 worktree，post-merge）
+
+- **AC1**：`bash scripts/test.sh packages/quay/test/goal-gate-verdict-mapping.test.mjs` → 17 tests / 17 pass / 0 fail。
+- **AC2（取假，逐入口分别做）**：仅把 `goal-store.ts` 的 `gate` case 改回二元 ⇒ 6 fail（三个 `quay goal gate` 用例 + 两入口一致性 + 两条记录级 deadline 用例），MCP 用例仍绿；仅把 `mcp-server.ts` 的 `goal_gate` 改回二元 ⇒ 4 fail（三个 MCP 用例 + 一致性），CLI 用例仍绿。两个方向互为镜像，证明判据按入口分辨而非全局。两份文件随后按备份逐字节还原（`diff -q` 通过）。
+- **AC3**：`grep -rnE 'ok \? "pass" : "fail"' packages/quay/src packages/quay-native/src --include=*.ts` ⇒ 4 条命中，**GateEvent 写入点 0 条**：`gate/types.ts:29`（注释）、`gate/engine.ts:107`（注释）、`gate/acceptance-runner.ts:58`（注释）、`gate/acceptance-runner.ts:124`（`verdictFromGateCheck` 的布尔回退——唯一被允许存在的那一处，所有写入点都经它）。**正控**：同一谓词对着 merge-base 干跑 ⇒ 7 条命中，其中 4 条曾是 GateEvent 写入点（`mcp-server.ts:500`、`engine.ts:110`、`lifecycle.ts:306`、`goal-store.ts:3108`），现已全部消失或改写。
+- **AC4**：临时 workspace 内写入 `timeoutMs: 120000`、判据 `sleep 70; echo "finished the 70s run"` 的记录 ⇒ `quay goal gate AC-012 --json` 于 2026-09-23T17:12:40Z 起、17:13:50Z 止（**70s**），exit 0，`{"verdict":"pass","cause":null,"timeoutMs":120000,"reason":"acceptance passed (exit 0)"}`，ledger 新增记录 `verdict":"pass"`。若仍是写死的 60000，该判据会在 60s 被杀并记 `not-evaluated (timeout)`——记录自己的 deadline 才是让它通过的原因。
+- **AC5**：`bash scripts/test.sh --for-task gap-goal-gate-verdict-single-mapping-not-evaluated --allow-thin` → 见提交。
+
+### DoD 状态
+
+DoD 的 claudecodeui 重跑是 **post-landing** 的：它要求该工作区的 driver/插件先升级到含本修复的版本，本轮无法在本 worktree 内完成。缺陷形状的生产侧佐证（只读、fix 前）已记录在提交里：AC-012 最后几条 goal-cli 事件读 `fail | acceptance failed (exit 127) — sh: 1: playwright: not found`，即「判据的命令根本跑不起来」被记成「判据为假」。
