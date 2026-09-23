@@ -12,9 +12,12 @@
 //   ① 区域本体 —— 锁事件 / 步骤 trace / suite 日志与 runId / scoped-gate 缓存 / runMechanicalFanIn /
 //      spawnMechanicalFanIn / mirrorMechanicalFanInSuiteState；
 //   ② scoped 门 + doc-check 命令解析（resolveScopedGateCommand / scopedGateCommandFor /
-//      docCheckCommandFor 及私有 testShAt / hasTestSh / shq / readLoopTestCommand / readLoopTestOutput）——
-//      「本仓库 scripts/test.sh vs 第三方 loop.test_command」的单一真相源，fan-in 执行侧与 worker prompt
-//      侧共用（gap-driver-fanin-hardcoded-test-sh-third-party / gap-worker-premerge-scoped-gate-cache）；
+//      resolveDocCheckCommand / docCheckCommandFor / readLoopFanInContract 及私有 shq /
+//      readLoopSection / readLoopTestCommand / readLoopTestOutput）——
+//      「本项目声明了什么能力」的单一真相源，fan-in 执行侧与 worker prompt 侧共用
+//      （gap-driver-fanin-hardcoded-test-sh-third-party / gap-worker-premerge-scoped-gate-cache）；
+//      ⛔ 判据是 `.quay/config.yml` 的显式声明，**不是任何文件是否存在**
+//      （gap-repo-shape-inferred-from-test-sh-existence / GOAL-027 / AC-316）；
 //   ③ kernel sibling 运行 argv 前缀（kernelSiblingArgv）与 worker 侧 scoped-gate 缓存写入签名
 //      （scopedGateCacheWriteSignature，派生自 workerDriverSelfArgv）—— 机械 fan-in 的 suite / spawn 与
 //      缓存写入两条路径共用同一入口（AC152 同族：⛔ 不各写一份 .ts/.js 回退）；
@@ -55,28 +58,17 @@ import { fetchTaskStatusAtRef } from "./task-schema.ts";
 // 按同一处 specifier 内联。
 import type { InstrumentProbe } from "../../packages/quay/src/fan-in/ff-merge.ts";
 
-/** 单一定义点：一个目录内本仓库测试入口 scripts/test.sh 的绝对路径（第三方项目 quay-init 不铺
- *  scripts/ 目录，无此文件）。⛔ 其余处不再各自 path.join(dir, "scripts", "test.sh")。 */
-function testShAt(dir: string): string {
-  return path.join(dir, "scripts", "test.sh");
-}
-
-/** 一个目录是否「本仓库形态」（有 scripts/test.sh）——第三方项目无此文件，doc-check / scoped-gate /
- *  suite 三步据此退化为「跳过 / 委托 loop.test_command」，⛔ 不调用本仓库专属脚本。 */
-function hasTestSh(dir: string): boolean {
-  return fs.existsSync(testShAt(dir));
-}
-
 /** 单引号 shell 转义（第三方 test_command 需 `cd <worktree> && <test_command>` 在工作树内跑——worktree
  *  路径可能含空格/特殊字符，⛔ 不裸拼）。 */
 function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** 读 <dir>/.quay/config.yml 的 loop.test_command（第三方项目 quay-init --loop 写入的全量测试命令，
- *  如 `node --test`）。缺失/不可解析/非字符串 ⇒ null。⛔ 不依赖 packages/quay/src/config.ts
- *  （第三方安装物可能无 packages/ 树）——直接 YAML 读，与 driver-config.ts 同法。 */
-function readLoopTestCommand(dir: string): string | null {
+/** 读 <dir>/.quay/config.yml 的 `loop:` 映射（缺失/不可解析/非对象 ⇒ null）。本文件三个 loop 读面
+ *  （test_command / test_output / fan-in 契约）共用这一处 YAML 读法，⛔ 不各写一份解析。⛔ 不依赖
+ *  packages/quay/src/config.ts（第三方安装物可能无 packages/ 树）——直接 YAML 读，与 driver-config.ts
+ *  同法。 */
+function readLoopSection(dir: string): Record<string, unknown> | null {
   const file = path.join(dir, ".quay", "config.yml");
   let text: string;
   try {
@@ -90,10 +82,14 @@ function readLoopTestCommand(dir: string): string | null {
   } catch {
     return null;
   }
-  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
-    | Record<string, unknown>
-    | undefined;
-  const cmd = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_command : undefined;
+  const loop = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined;
+  return loop && typeof loop === "object" && !Array.isArray(loop) ? (loop as Record<string, unknown>) : null;
+}
+
+/** 读 <dir>/.quay/config.yml 的 loop.test_command（项目 quay-init --loop 写入的全量测试命令，如
+ *  `node --test`）。缺失/不可解析/非字符串 ⇒ null。 */
+function readLoopTestCommand(dir: string): string | null {
+  const cmd = readLoopSection(dir)?.test_command;
   return typeof cmd === "string" && cmd.trim() ? cmd.trim() : null;
 }
 
@@ -107,23 +103,7 @@ function readLoopTestCommand(dir: string): string | null {
  *  侧 fail-closed 处理（不匹配 ⇒ 该字段缺席，⛔ 不伪造 0）。无有效声明 ⇒ null（调用方退回内建解析，
  *  本仓库形态零回归）。与 readLoopTestCommand 同一 YAML 读法（⛔ 不依赖 packages/quay/src/config.ts）。 */
 export function readLoopTestOutput(dir: string): Record<string, string> | null {
-  const file = path.join(dir, ".quay", "config.yml");
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(text);
-  } catch {
-    return null;
-  }
-  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
-    | Record<string, unknown>
-    | undefined;
-  const decl = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_output : undefined;
+  const decl = readLoopSection(dir)?.test_output;
   if (!decl || typeof decl !== "object" || Array.isArray(decl)) return null;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(decl as Record<string, unknown>)) {
@@ -132,49 +112,129 @@ export function readLoopTestOutput(dir: string): Record<string, string> | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** 一个能力的声明状态——**三态可分**（硬规则 3b）：declared（读到有效值）/ absent（未声明）/
+ *  invalid（声明了但读不懂，原文留在 raw 里供点名）。⛔ invalid 不得与 absent 同形：那会把「用户想跑
+ *  但配置写错」静默降级成「这个项目没有该能力」——正是本缺陷的形态。 */
+export type CapabilityDecl<T> =
+  | { state: "declared"; value: T }
+  | { state: "absent" }
+  | { state: "invalid"; raw: string };
+
+/** `.quay/config.yml` `loop:` 下**显式声明**的 fan-in 契约（GOAL-027 / AC-316 的读面）。
+ *
+ *  本模块此前按「worktree 里有没有 `scripts/test.sh`」推断「这是不是本仓库形态」——第三方项目只要按
+ *  `loop.test_command` 的约定交付了自己的 `scripts/test.sh`，就被整体当成 quay 仓库，随后 scoped 门 /
+ *  doc-check / suite 调度逐项对不上，而每一处对不上都表现为「读不出东西」而不是报错（硬规则 3b）。
+ *  现在：**声明了 ⇒ 用；没声明 ⇒ 独立的「未提供」取值**；声明了但读不懂 ⇒ 第三态，fail-closed。
+ *  ⛔ 判据不再是任何文件是否存在。 */
+export interface LoopFanInContract {
+  /** `suite_runner`: `quay-buckets`（经 full-suite-runner.ts 跑 bucket 协议）| `delegated`（用本项目自己的
+   *  `loop.test_command` 跑全量）。未声明 ⇒ delegated 当且仅当 testCommand 有声明，否则无测试能力
+   *  fail-closed。 */
+  suiteRunner: CapabilityDecl<"quay-buckets" | "delegated">;
+  /** `scoped_command`: scoped 门的 argv 模板（`{worktree}` / `{task}` 占位符）。未声明 ⇒ 该能力「未提供」。 */
+  scopedCommand: CapabilityDecl<string[]>;
+  /** `doc_check_command`: doc-check 的 argv 模板（`{worktree}` 占位符）。未声明 ⇒ 同上。 */
+  docCheckCommand: CapabilityDecl<string[]>;
+  /** `loop.test_command`：本项目声明的全量测试命令。未声明 ⇒ null。 */
+  testCommand: string | null;
+}
+
+/** 读一个 argv 模板声明（逐元素非空字符串的**非空**列表 ⇒ declared；键缺席 / YAML null ⇒ absent；
+ *  其它任何形状（字符串、空列表、数字元素…）⇒ invalid + 原文）。 */
+function readArgvTemplate(loop: Record<string, unknown>, key: string): CapabilityDecl<string[]> {
+  const raw = loop[key];
+  if (raw === undefined || raw === null) return { state: "absent" };
+  if (Array.isArray(raw) && raw.length > 0 && raw.every((a) => typeof a === "string" && a !== "")) {
+    return { state: "declared", value: raw as string[] };
+  }
+  return { state: "invalid", raw: JSON.stringify(raw) };
+}
+
+/** 读 <dir>/.quay/config.yml `loop:` 里声明的 fan-in 契约。⛔ 本函数的判据【只有声明本身】——
+ *  任何文件（`scripts/test.sh`、`plugin/`…）是否存在都不参与（本缺陷的根因）。 */
+export function readLoopFanInContract(dir: string): LoopFanInContract {
+  const loop = readLoopSection(dir) ?? {};
+  const sr = loop["suite_runner"];
+  let suiteRunner: CapabilityDecl<"quay-buckets" | "delegated">;
+  if (sr === undefined || sr === null) suiteRunner = { state: "absent" };
+  else if (sr === "quay-buckets" || sr === "delegated") suiteRunner = { state: "declared", value: sr };
+  else suiteRunner = { state: "invalid", raw: JSON.stringify(sr) };
+  return {
+    suiteRunner,
+    scopedCommand: readArgvTemplate(loop, "scoped_command"),
+    docCheckCommand: readArgvTemplate(loop, "doc_check_command"),
+    testCommand: readLoopTestCommand(dir),
+  };
+}
+
+/** argv 模板的占位符替换：`{worktree}` → argvDir、`{task}` → task。⛔ 逐元素整串替换——模板值是
+ *  【argv 元素】，不经 shell 求值（占位符是路径，可能含空格/特殊字符，替换后仍是一个 argv 元素）。 */
+function applyTemplate(argv: string[], vars: { worktree: string; task: string }): string[] {
+  return argv.map((a) => a.split("{worktree}").join(vars.worktree).split("{task}").join(vars.task));
+}
+
 /** scoped-gate 命令的解析结果（gap-driver-fanin-hardcoded-test-sh-third-party）：
- *  - run  argv  — 本仓库（有 scripts/test.sh）⇒ bash <argvDir>/scripts/test.sh --for-task <task>
- *                --allow-thin（与修改前逐字一致）；第三方（无 test.sh 但有 loop.test_command）⇒
- *                bash -c <test_command>（全量，第三方无 "scoped" 能力）。
- *  - skip       — 两者皆无 ⇒ 第三方项目无 scoped 能力，fan-in 跳过 scoped 门直接进全量 suite 步骤。
- *  argvDir 拼命令路径、capabilityDir 判能力（execution 侧二者都 = worktree；prompt 侧 capabilityDir
- *  = root、argvDir = 占位符 worktree 路径——同一 repo 二者同形，因 scripts/test.sh 与 .quay/config.yml
- *  都随 worktree 铺出）。 */
+ *  - run   argv  — `loop.scoped_command` 声明的 argv 模板（占位符已替换）。本仓库声明的是
+ *                 `bash {worktree}/scripts/test.sh --for-task {task} --allow-thin`（与迁移前逐字一致）。
+ *  - skip        — 未声明 ⇒ 该项目没有 scoped 能力，fan-in 跳过 scoped 门直接进全量 suite 步骤
+ *                 （可区分取值 no-scoped-command-declared，⛔ 不与「scoped 门跑了且失败」同形）。
+ *  - fail        — 声明了但读不懂 ⇒ **fail-closed**（⛔ 不得静默当成 skip：那是 fail-open，硬规则 3b）。
+ *  argvDir 用于替换 `{worktree}`、capabilityDir 用于读声明（execution 侧二者都 = worktree；prompt 侧
+ *  capabilityDir = root、argvDir = 占位符 worktree 路径——同一 repo 二者同形，因 .quay/config.yml 随
+ *  worktree 铺出）。 */
 export type ScopedGateResolution =
   | { kind: "run"; argv: string[] }
-  | { kind: "skip"; reason: string };
+  | { kind: "skip"; reason: string }
+  | { kind: "fail"; reason: string };
 
 /** 解析 scoped-gate 命令（单一真相源，fan-in 执行侧与 worker prompt 侧共用——⛔ 两处不得出现两套
  *  标准）。 */
 export function resolveScopedGateCommand(task: string, capabilityDir: string, argvDir: string): ScopedGateResolution {
-  if (hasTestSh(capabilityDir)) {
-    return { kind: "run", argv: ["bash", testShAt(argvDir), "--for-task", task, "--allow-thin"] };
+  const decl = readLoopFanInContract(capabilityDir).scopedCommand;
+  if (decl.state === "declared") {
+    return { kind: "run", argv: applyTemplate(decl.value, { worktree: argvDir, task }) };
   }
-  const testCommand = readLoopTestCommand(capabilityDir);
-  if (testCommand !== null) {
-    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 argvDir（execution
-    // 侧 = worktree）再跑。⛔ step()/mechSh spawn 不设 cwd（驱动 cwd 是主检出，非 worktree）。
-    return { kind: "run", argv: ["bash", "-c", `cd ${shq(argvDir)} && ${testCommand}`] };
+  if (decl.state === "invalid") {
+    return {
+      kind: "fail",
+      reason: `scoped-command-declaration-unreadable: loop.scoped_command = ${decl.raw}（须是非空字符串列表；⛔ 不静默跳过该门）`,
+    };
   }
-  return { kind: "skip", reason: "third-party-no-scoped-tooling" };
+  return { kind: "skip", reason: "no-scoped-command-declared" };
 }
 
 /** 机械 fan-in 的 scoped 门缺省命令（gap-worker-premerge-scoped-gate-cache 抽成单一真相源）：
- *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin（本仓库）；第三方项目无
- *  scripts/test.sh ⇒ 退化为 loop.test_command（bash -c <test_command>）；两者皆无 ⇒ null（fan-in 跳过
- *  scoped 门）。⛔ 不再是唯一硬编码的 worktree scripts/test.sh 路径（本缺陷）。 */
+ *  `loop.scoped_command` 声明的 argv；未声明 ⇒ null（fan-in 跳过 scoped 门）。⛔ 不再是按
+ *  `<worktree>/scripts/test.sh` 是否存在推断（本缺陷）；声明读不懂 ⇒ 也返回 null，由
+ *  `resolveScopedGateCommand`（fan-in 与 worker prompt 实际用的三态入口）报 fail。 */
 export function scopedGateCommandFor(task: string, worktree: string): string[] | null {
   const r = resolveScopedGateCommand(task, worktree, worktree);
   return r.kind === "run" ? r.argv : null;
 }
 
-/** 机械 fan-in 的 doc-check 缺省命令（gap-driver-fanin-hardcoded-test-sh-third-party）：
- *  本仓库有 scripts/test.sh ⇒ bash <worktree>/scripts/test.sh --static-checks-doc（与修改前逐字一致）；
- *  第三方项目无该文件 ⇒ null（fan-in 跳过 doc-check，可区分取值 third-party-no-doc-check-tooling，
- *  ⛔ 不与「doc 检查真的跑了且失败」同形——硬规则 3b）。 */
+/** doc-check 命名的三态解析（fan-in 的 doc-check 步用这个，⛔ 不是 `docCheckCommandFor`——后者是面向
+ *  「命令构造」的简化读面，把 invalid 与 absent 都折成 null）。 */
+export function resolveDocCheckCommand(capabilityDir: string, argvDir: string): ScopedGateResolution {
+  const decl = readLoopFanInContract(capabilityDir).docCheckCommand;
+  if (decl.state === "declared") {
+    return { kind: "run", argv: applyTemplate(decl.value, { worktree: argvDir, task: "" }) };
+  }
+  if (decl.state === "invalid") {
+    return {
+      kind: "fail",
+      reason: `doc-check-command-declaration-unreadable: loop.doc_check_command = ${decl.raw}（须是非空字符串列表；⛔ 不静默跳过 doc-check）`,
+    };
+  }
+  return { kind: "skip", reason: "no-doc-check-command-declared" };
+}
+
+/** 机械 fan-in 的 doc-check 缺省命令（gap-driver-fanin-hardcoded-test-sh-third-party）：`loop.doc_check_command`
+ *  声明的 argv（占位符已替换）；未声明 **或读不懂** ⇒ null。⛔ 按文件是否存在推断（本缺陷）已删除。
+ *  ⚠️ 三态判定（invalid ≠ absent）由 `resolveDocCheckCommand` 提供，fan-in 用后者。 */
 export function docCheckCommandFor(worktree: string): string[] | null {
-  const testSh = testShAt(worktree);
-  return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
+  const r = resolveDocCheckCommand(worktree, worktree);
+  return r.kind === "run" ? r.argv : null;
 }
 
 /** 解析本 kernel 的一个 shell sibling（.sh）—— 实现已上收 `driver-runtime.resolveKernelShellSibling`
@@ -901,7 +961,15 @@ export function defaultMechanicalSuiteCommand(opts: {
   // 一致）；第三方项目无该文件 ⇒ 直接委托 loop.test_command（全量）——⛔ 不调用 full-suite-runner
   // （其内部锚点假设本仓库结构，gap-driver-fanin-hardcoded-test-sh-third-party 范围扩展：修 5 处
   // __dirname 是治标，第三方本就不该走这条路径）。
-  if (hasTestSh(opts.worktree)) {
+  const contract = readLoopFanInContract(opts.worktree);
+  const sr = contract.suiteRunner;
+  if (sr.state === "invalid") {
+    // 声明了但读不懂 ⇒ fail-closed，⛔ 不静默当成 delegated（那是把「配置写错」伪装成「跑过了」）。
+    return suiteCapabilityFailClosed(
+      `suite-runner-declaration-unreadable: loop.suite_runner = ${sr.raw}（有效值：quay-buckets | delegated）`,
+    );
+  }
+  if (sr.state === "declared" && sr.value === "quay-buckets") {
     return [
       "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
       "--buckets", opts.task,
@@ -912,30 +980,42 @@ export function defaultMechanicalSuiteCommand(opts: {
       "--run-id", opts.runId,
     ];
   }
-  const testCommand = readLoopTestCommand(opts.worktree);
-  if (testCommand !== null) {
-    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 worktree 再跑
-    // （spawnSuiteAndWait spawn 不设 cwd）。
-    return ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`];
-  }
-  // 无 scripts/test.sh 且无 loop.test_command ⇒ 无测试能力（quay-init 对第三方已 fail-closed 缺
-  // test_command，此分支仅防半初始化工作区）。fail-closed 且可区分（⛔ 与「suite 跑了且失败」同形）。
-  // ⛔ 不再以「命令不存在」的 exit code 127 形态出现——「能力不存在」须可区分于「命令不存在」
-  // （GOAL-012 退出条件②；gap-ac227-third-party-capability-degradation）。
-  return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 2`];
+  // declared "delegated" 或未声明 ⇒ 用本项目自己声明的全量命令（loop.test_command）。该项目自己的
+  // test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 worktree 再跑
+  // （spawnSuiteAndWait spawn 不设 cwd）。
+  const testCommand = contract.testCommand;
+  if (testCommand !== null) return ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`];
+  // 无全量测试能力（quay-init 对第三方已 fail-closed 缺 test_command，此分支仅防半初始化工作区）。
+  // fail-closed 且可区分（⛔ 不与「suite 跑了且失败」同形）。⛔ 不再以「命令不存在」的 exit code 127
+  // 形态出现——「能力不存在」须可区分于「命令不存在」（GOAL-012 退出条件②；
+  // gap-ac227-third-party-capability-degradation）。
+  return suiteCapabilityFailClosed(
+    sr.state === "declared"
+      ? "no-suite-tooling: loop.suite_runner=delegated 但未声明 loop.test_command（无测试能力）"
+      : "no-suite-tooling: 未声明 loop.suite_runner 且未声明 loop.test_command（无测试能力）",
+  );
+}
+
+/** 无测试能力的 fail-closed argv（exit 2 + 具名 cause；⛔ 不是 exit 127 的「命令不存在」形态）。 */
+function suiteCapabilityFailClosed(cause: string): string[] {
+  return ["bash", "-c", `echo ${shq(cause)} >&2; exit 2`];
 }
 
 /** gap-verification-round-bound-to-quay-shaped-suite-entry — 本 fan-in 的 suite 是否【不经
- *  full-suite-runner.ts】：第三方项目（无 scripts/test.sh）用它自己的 loop.test_command 跑全量 ⇒
- *  runner 这条 verification-round 唯一 writer 不在路径上 ⇒ 台账行须由本层补写（appendDelegatedSuiteRound）。
+ *  full-suite-runner.ts】：只有声明 `suite_runner: quay-buckets` 才经该 runner；其余（delegated 或未
+ *  声明）用它自己的 loop.test_command 跑全量 ⇒ runner 这条 verification-round 唯一 writer 不在路径上
+ *  ⇒ 台账行须由本层补写（appendDelegatedSuiteRound）。
  *
- *  ⛔ 判据与 defaultMechanicalSuiteCommand / resolveScopedGateCommand 的分支【同源】（hasTestSh +
- *  readLoopTestCommand），不新造第三种「算不算第三方」的判法——三处一旦各判各的，「suite 跑在谁手里」
- *  与「谁负责入账」就会分叉（硬规则 5b：修一个别漏一簇）。
- *  两者皆无（无 test.sh 也无 test_command）⇒ false：那种工作区根本没有 suite 可跑（命令是 fail-closed
- *  exit 2 的「无测试能力」），没有「一轮 suite」可入账。 */
+ *  ⛔ 判据与 defaultMechanicalSuiteCommand / resolveScopedGateCommand 的分支【同源】（同一份声明），
+ *  不新造第三种「算不算 quay 形态」的判法——三处一旦各判各的，「suite 跑在谁手里」与「谁负责入账」
+ *  就会分叉（硬规则 5b：修一个别漏一簇）。
+ *  未声明 test_command ⇒ false：那种工作区根本没有 suite 可跑（命令是 fail-closed exit 2 的「无测试
+ *  能力」），没有「一轮 suite」可入账。 */
 export function suiteRunsOutsideRunner(dir: string): boolean {
-  return !hasTestSh(dir) && readLoopTestCommand(dir) !== null;
+  const contract = readLoopFanInContract(dir);
+  const viaBucketsRunner =
+    contract.suiteRunner.state === "declared" && contract.suiteRunner.value === "quay-buckets";
+  return !viaBucketsRunner && contract.testCommand !== null;
 }
 
 /** gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方 fan-in 的 verification-round 入账：
@@ -1349,22 +1429,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。
     //    失败报告顺序 typecheck 先于 doc-check（与串行序一致——AC3 判定一致性的读面）。
-    const docCmd = opts.docCheckCommand ?? docCheckCommandFor(worktree);
+    // 三态解析（run / skip / fail）：声明了跑、未声明跳过（可区分取值）、声明了但读不懂 ⇒ fail-closed。
+    const docRes: ScopedGateResolution =
+      opts.docCheckCommand !== undefined
+        ? { kind: "run", argv: opts.docCheckCommand }
+        : resolveDocCheckCommand(worktree, worktree);
     // doc-check 缓存（gap-fan-in-doc-check-cache）：doc 面 = run_doc_checks 读的全部输入（@static-object
     // 判定对象 + plugin/scripts 检查器/仪器面 + scripts/test.sh + .gitignore + 全树文件结构）。面未变 ⇒
     // 命中上次绿 verdict（~0s，reason=cache-hit）；面变 ⇒ 失效重跑。⛔ 只缓存绿、⛔ 键算不出 ⇒ 照跑（fail-closed）。
     const docCacheFile = opts.docCheckCacheFile ?? path.join(root, ".quay", "doc-check-cache.json");
     const docCheckLeg = async (): Promise<MechShResult> => {
       const t0 = Date.now();
-      // 第三方项目：无 doc-check 工具（scripts/test.sh 不存在）⇒ 跳过，可区分取值
-      // third-party-no-doc-check-tooling（⛔ 不与「doc 检查真的跑了且失败」同形，硬规则 3b）。
-      if (docCmd === null) {
-        const reason = "third-party-no-doc-check-tooling";
+      // 未声明 doc_check_command ⇒ 跳过，可区分取值 no-doc-check-command-declared（⛔ 不与「doc 检查
+      // 真的跑了且失败」同形，硬规则 3b）。声明了但读不懂 ⇒ fail-closed（⛔ 不静默降级成跳过）。
+      if (docRes.kind === "fail") {
+        return { ok: false, status: 2, stdout: "", stderr: docRes.reason, error: docRes.reason };
+      }
+      if (docRes.kind === "skip") {
+        const reason = docRes.reason;
         const durMs = Date.now() - t0;
         appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason, durationMs: durMs });
         trace({ step: "doc-check", exit: 0, wall_ms: durMs, ok: true, reason });
         return { ok: true, status: 0, stdout: "", stderr: "", error: null };
       }
+      const docCmd = docRes.argv;
       const docKey = computeDocCheckFaceKey(worktree);
       const cachedDocOk = docKey === null ? null : readDocCheckCache(docCacheFile, docKey);
       if (cachedDocOk === true) {
@@ -1391,17 +1479,25 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     //    scoped-gate-cache）⇒ 锁内 merge 到的 develop tip 与 worker 记录的 developSha 完全一致时跳过
     //    （可证明冗余——worker 已对着这个确切状态验证过绿）；develop 前进 / 缓存缺失 / 读不懂 ⇒ 照跑
     //    （fail-closed，同 docCheckLeg 的「面未变才命中、算不出就照跑」纪律）。
-    const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
+    const scopedRes: ScopedGateResolution =
+      opts.scopedGateCommand !== undefined
+        ? { kind: "run", argv: opts.scopedGateCommand }
+        : resolveScopedGateCommand(task, worktree, worktree);
     const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
     const scopedT0 = Date.now();
-    // 第三方项目：无 scoped 能力（scripts/test.sh 与 loop.test_command 皆无）⇒ 跳过 scoped 门直接进
-    // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
-    if (scopedCmd === null) {
-      const reason = "third-party-no-scoped-tooling";
+    // 未声明 scoped_command ⇒ 该项目没有 scoped 能力，跳过该步直接进全量 suite，可区分取值
+    // no-scoped-command-declared（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。声明了但读不懂 ⇒
+    // 直接 fail（⛔ 不静默跳过——那会让「配置写错」与「项目没有该能力」不可分）。
+    if (scopedRes.kind === "fail") {
+      return fail("scoped-gate", { ok: false, status: 2, stdout: "", stderr: scopedRes.reason, error: scopedRes.reason });
+    }
+    if (scopedRes.kind === "skip") {
+      const reason = scopedRes.reason;
       const durMs = Date.now() - scopedT0;
       appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason, durationMs: durMs });
       trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, reason });
     } else {
+      const scopedCmd = scopedRes.argv;
       const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
       const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
       if (scopedCacheHit) {
@@ -1437,7 +1533,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
     // gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方路径（suite 由项目自己的
     // loop.test_command 跑，不经 full-suite-runner）的 verification-round 入账。绿/红共用这一处
-    // （⛔ 不两条分支各写一份——那正是硬规则 5b 的成簇漏改形态）。本仓库形态（有 scripts/test.sh）⇒
+    // （⛔ 不两条分支各写一份——那正是硬规则 5b 的成簇漏改形态）。声明了 suite_runner: quay-buckets ⇒
     // suiteRunsOutsideRunner=false 直接返回，runner 已写，行为逐字不变（AC2 负控制）。
     const recordDelegatedRound = (state: "green" | "red", startedAt: string, durationMs: number, o?: { force?: boolean; notEvaluated?: string }): void => {
       // gap-watchdog-killed-round-writes-no-verification-round-record — `force` 是「本轮的预定 writer 已

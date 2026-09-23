@@ -140,7 +140,12 @@ const PINNED = {
   fresh: {
     rc: 0,
     surface: [
-      ".quay/config.yml  27caf439460ee215c8c9a507f269ce86b5f11a47b2107e6e4688aa5dc7bf3f18",
+      // Re-anchored 2026-09-23 (gap-repo-shape-inferred-from-test-sh-existence / GOAL-027 / AC-316):
+      // the fresh-install writer now emits the three fan-in contract keys (suite_runner: delegated /
+      // scoped_command: null / doc_check_command: null) next to fork_baseline. This row moved WITH
+      // that intentional change — the other five files are byte-identical, which is the cross-check
+      // that only the loop: block was touched.
+      ".quay/config.yml  64f59cdcc1fb1f97cfb4097c225a7ad4291e1d71175591298c2d42f8f41847c8",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",

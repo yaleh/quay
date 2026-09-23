@@ -1499,7 +1499,7 @@ write_config() {
     ensure_provider_carrier_env
     ensure_loop_config
   elif [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
+    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/suite_runner/scoped_command/doc_check_command)"
   else
     mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"
     cat > "$cfg" <<EOF
@@ -1543,8 +1543,22 @@ loop:
   # ⛔ 不要在这里补那个已被删除的零消费者分支键：plugin/test/quay-init.test.mjs 以可执行的判据
   # 钉住"它不被写出"（gap-config-key-consumer-check-mechanical-enumeration）；理由见 init.ts。
   fork_baseline: develop
+  # ── fan-in 契约（GOAL-027 / AC-316）——quay 的机械 fan-in 只按【这里的显式声明】决定跑什么，
+  # ⛔ 不再按「你的仓库里有没有 scripts/test.sh」推断「你是不是 quay 形态」。三个键的语义：
+  #   suite_runner        quay-buckets | delegated。quay-buckets ⇒ 全量 suite 经 quay 的 bucket runner
+  #                       跑（bucket 协议 + 台账），**只有 quay 本仓库该用这个值**；delegated ⇒ 用下面
+  #                       的 test_command 跑全量（第三方项目的缺省值，也是本行的值）。
+  #   scoped_command      scoped 门（快速子集检查）的 argv 模板；{worktree} / {task} 是占位符。
+  #                       未声明（null）⇒ 该项目没有 scoped 能力，fan-in 跳过该步直接进全量 suite。
+  #   doc_check_command   doc-check 的 argv 模板；{worktree} 是占位符。未声明（null）⇒ 同上。
+  # ⛔ 声明了但形状不对（不是非空字符串列表）⇒ fan-in **fail-closed**，不会静默跳过该门。
+  # 本项目若确有 scoped / doc-check 工具，把对应的 null 换成 argv 列表即可，例如：
+  #   scoped_command: ["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]
+  suite_runner: delegated
+  scoped_command: null
+  doc_check_command: null
 EOF
-    echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
+    echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/suite_runner/scoped_command/doc_check_command)"
   fi
 }
 
