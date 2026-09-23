@@ -28,11 +28,11 @@ extra:
 
 ## AC
 
-- [ ] `node --test packages/quay/test/goal-gate-verdict-mapping.test.mjs` 退出 0（新文件），用例：判据 `exit 3` / `sleep` 超过超时 / 不存在的命令（127）⇒ 经 `quay goal gate` 与 MCP goal gate 两条入口写出的 GateEvent `verdict` 均为 `not-evaluated`；`exit 1` ⇒ `fail`；`exit 0` ⇒ `pass`。
-- [ ] 取假：把任一入口改回二元映射后，上述用例红（附实跑输出）。
-- [ ] `grep -rnE 'ok \? "pass" : "fail"' packages/quay/src packages/quay-native/src --include=*.ts` 在 GateEvent 写入点上的非注释命中为 0（命中清单与前 3 条贴进提交；非 GateEvent 的日志行若保留，逐条说明）。
-- [ ] 带 `timeoutMs: 120000` 的 goal 记录，其判据运行 70s 时 `quay goal gate` 判 `pass` 而不是超时。
-- [ ] `bash scripts/test.sh --for-task gap-goal-gate-verdict-single-mapping-not-evaluated` 退出 0，且执行了 ≥1 个测试文件。
+- [x] `node --test packages/quay/test/goal-gate-verdict-mapping.test.mjs` 退出 0（新文件），用例：判据 `exit 3` / `sleep` 超过超时 / 不存在的命令（127）⇒ 经 `quay goal gate` 与 MCP goal gate 两条入口写出的 GateEvent `verdict` 均为 `not-evaluated`；`exit 1` ⇒ `fail`；`exit 0` ⇒ `pass`。
+- [x] 取假：把任一入口改回二元映射后，上述用例红（附实跑输出）。
+- [x] `grep -rnE 'ok \? "pass" : "fail"' packages/quay/src packages/quay-native/src --include=*.ts` 在 GateEvent 写入点上的非注释命中为 0（命中清单与前 3 条贴进提交；非 GateEvent 的日志行若保留，逐条说明）。
+- [x] 带 `timeoutMs: 120000` 的 goal 记录，其判据运行 70s 时 `quay goal gate` 判 `pass` 而不是超时。
+- [x] `bash scripts/test.sh --for-task gap-goal-gate-verdict-single-mapping-not-evaluated` 退出 0，且执行了 ≥1 个测试文件。
 
 ## DoD
 
@@ -41,6 +41,11 @@ extra:
 ## Touches
 
 - packages/quay/src/gate/acceptance-runner.ts
+- packages/quay/src/gate/types.ts
+- packages/quay/src/gate/registry.ts
+- packages/quay/src/gate/factories/goal.ts
+- packages/quay/src/gate/engine.ts
+- packages/quay/src/gate/lifecycle.ts
 - packages/quay/src/goal-store.ts
 - packages/quay-native/src/mcp-server.ts
 - packages/quay/test/goal-gate-verdict-mapping.test.mjs (new)
