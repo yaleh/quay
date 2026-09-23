@@ -13,6 +13,21 @@ extra:
   schema: execution
 goal_ac: AC-288
 ---
+---
+id: gap-ac288-criterion-cmdline-port-literal-stale
+title: AC-288 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
+  判据结构上恒假（addr=172.28.0.1:0，curl 失败）；机制本身为真 —— 重锚地址派生那一步（与 AC-179 在飞任务同一行）
+status: ready
+labels:
+  - gap
+  - defect
+  - webui
+parent: null
+children: []
+extra:
+  schema: execution
+goal_ac: AC-288
+---
 **type:** execution
 
 ## Proposal
@@ -122,8 +137,9 @@ AC-179（另一 GOAL） + AC-288 + AC-289 … AC-303（GOAL-024 其余 15 条）
 - `goals/AC-288-切换机制本身可用-默认-en-lang-zh-生效并种下持久化-cookie-cookie-单独在无-query-参数的.md`
 - `packages/quay/test/ac288-criterion-address-derivation.test.mjs` (new)
 - `tasks/gap-ac288-criterion-cmdline-port-literal-stale.md`
+- `plugin/test/capability-catalog.test.mjs`（**本轮新增，第四项**：不是本任务修法的一部分，而是**解除本分支 suite 门的阻塞**——逐字 cherry-pick 自同族在飞任务 `gap-ac179-criterion-cmdline-port-literal-stale` 的 `578bf42bf`，理由与读数见「执行记录」末节）
 
-（说明：第一条是本任务的落地面——criterion 的地址派生那一步，经 `quay goal write AC-288 --criterion …` 落库，`expect` 与正文语义逐字不变、只补「为什么改」；第二条是配套夹具（两种部署形态的派生正/负控制）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts`——派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。）
+（说明：第一条是本任务的落地面——criterion 的地址派生那一步，经 `quay goal write AC-288 --criterion …` 落库，`expect` 与正文语义逐字不变、只补「为什么改」；第二条是配套夹具（两种部署形态的派生正/负控制）；第三条是 self-touch；**第四条是本轮新增**——fan-in 的 `step=suite` 因一处**确定性**红（seeded 抽样 × 全角问号 `？`）连续三次不落地，且该红不在本任务任何可改面内 ⇒ 依「修判据不修数据」逐字 adopt 同族已修好的那一处；两分支 diff 逐字相同，故谁先落地，另一方在此文件上的 fan-in merge 是 no-op。⛔ 不新增 `plugin/scripts/*.ts`——派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。）
 
 ## 执行记录（落地读数 / 修法 / 为什么改）
 
@@ -144,3 +160,20 @@ AC-179（另一 GOAL） + AC-288 + AC-289 … AC-303（GOAL-024 其余 15 条）
 **夹具** `packages/quay/test/ac288-criterion-address-derivation.test.mjs`（`// @test-group product`，11 例全绿）：它**不是**派生逻辑的副本 —— 它从 goal 文件里按 marker **逐字抽取** criterion 的 `addr-derivation` 块（`packages/quay/test/…` 与 `goals/AC-288-*.md` 的单一正本关系），在 `git init` 过的临时 root 里对**真实进程**（argv 按位置含 `quay.ts serve --host H --port N`）与真实载体跑正/负两向：显式端口 / `--port 0` + 载体 / 通配 host 归一化 / 无载体 / 载体 pid 不符 / 无 `web` 条目 / `web.up:false` / 载体 pid 已死 / runner 自身 `sh` 候选的归因 / 死端口的 `default-fetch-refused`。夹具曾抓出两个真实缺陷：重锚时**漏掉**的 `0.0.0.0 → 127.0.0.1` 归一化，以及 `node -e` 顶层 `return` 在 Node ≥24 被拒（改用 IIFE）。
 
 **给同族复用**：`AC-179` 与 `AC-289…AC-303` 的同一行派生可用本任务给出的同一形态重锚；⛔ 本任务未改它们任何 criterion（`goal check --stale-pass` 里它们的 fail 是既存事实）。
+
+### 本轮（2026-09-24）—— suite 门的阻塞项：adopt 同族已修好的那一处判据
+
+本分支 fan-in 的 `step=suite` 连续三次红（`2026-09-23T09:32:33` / `16:00:24` / `17:33:29`），末次签名逐字：
+
+```
+AssertionError [ERR_ASSERTION]: answers are phrased as QUESTIONS (a capability = a question made askable): release-branch-janitor.ts
+    at TestContext.<anonymous> (plugin/test/capability-catalog.test.mjs:467:12)
+```
+
+**隔离复跑即复现**（`bash scripts/test.sh plugin/test/capability-catalog.test.mjs` ⇒ `17 tests / 16 pass / 1 fail`，同一行同一签名）⇒ ⛔ 不是负载 flake，是**确定性红**。机理：AC5 的抽样是 **seeded**（`mulberry32(20260804)` over **排序后**的行集）⇒ 抽样结果是**树的纯函数**；一次 landing 把样本移到 `release-branch-janitor.ts`（其 QUESTION 以**全角** `？`（U+FF1F）收尾）之后，**每棵树同时红**。
+
+**判据本身过窄，故修判据不修数据（硬规则 5b）**：`/\?/` 只认 ASCII 问号，而 SPEC `orchestration/SPEC-methodology-as-a-deliverable.md` 的 AC5 原文只说「随机抽 5 个交付的检查,问『它回答什么问题』」——⛔ **未**规定 ASCII 问号；全角 `？` 同样是「以问句收尾」，且兄弟实例正是一族行（本树实测：357 条目中以全角 `？` 结尾 **6** 条，另 17 条尾部无标点但句中含 ASCII `?`，不受影响）。
+
+**本轮动作 = cherry-pick 同族已修好的那一处**：同族在飞任务 `gap-ac179-criterion-cmdline-port-literal-stale` 已把同一处修好（`578bf42bf`，`2026-09-24T01:28:53`），**但当时不在 develop 上**；本分支不带上它，fan-in 的 suite 门永远过不去 ⇒ 逐字 cherry-pick（`git cherry-pick -n`，diff 逐字不动，只把提交信息换成本树自己的读数与出处）。本树自测：`17 tests / 16 pass / 1 fail` ⇒ **`18 tests / 18 pass / 0 fail`**。修法只拓宽**拼法**（`QUESTION_MARK = /[?？]/`），并**新增一条负控制**钉住「两种标点都没有 ⇒ 仍判非问句」，故判据仍能取假。两分支在此文件上 diff 逐字相同 ⇒ 谁先落地，另一方的 fan-in merge 在此文件上是 no-op。
+
+**同批第二条红已判明为负载 flake（非本任务引入、非本任务可改）**：`plugin/test/l1-delivery-surface-check.test.mjs` AC4 在 fan-in 日志里是 `Error: ENOENT … '/data/scratch/yale/l1-surface-Qci5Zl/plugin/test'`（`fs.cpSync` 复制夹具时 scratch 目录消失），**隔离复跑 6/6 全绿** ⇒ 并发/宿主 flake，该文件亦不在本任务 Touches 内。
