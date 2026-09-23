@@ -294,6 +294,56 @@ fan-in; `ok` is the control-flow field, `verdict` is the value):
 that actually measured the change) — it is there so that "nothing was measured" is never written
 down as a pass.
 
+## `loop.doc_surfaces` — what quay is allowed to skip the full suite for
+
+Before running the full suite, quay's mechanical fan-in classifies the task branch's delta
+(`git diff --name-only <fork> HEAD`) as **doc** (the scoped + doc phases already verified it ⇒ the
+full suite is skipped) or **code** (the full suite must re-run). Which paths count as doc is decided
+in three states, never a bare yes/no:
+
+| state | when | doc = |
+|---|---|---|
+| `registry` | the tree carries quay's own checker registry (`runner-static-gate.ts`, under the plugin's `scripts/` directory) | the paths no change/full-tier checker's `@static-object` glob matches, among quay's own surfaces |
+| `declared` | no registry, and `.quay/config.yml` declares `loop.doc_surfaces` | those path prefixes, plus `tasks/` |
+| `conservative-default` | neither | only `tasks/`, `goals/`, `.quay/` — the surfaces quay itself writes |
+
+**Why you should declare it.** `quay-init` writes the conservative default so that a project is
+never left without a judgment, but that default names only quay's own directories: in **your**
+project a delta under `docs/`, `website/`, `notes/` — or whatever your documentation and telemetry
+live in — counts as **code**, and every such task pays a full suite. Add them:
+
+```yaml
+loop:
+  doc_surfaces: ["tasks/", "goals/", ".quay/", "docs/", "website/docs/"]
+```
+
+Rules of the declaration:
+
+1. **A listed entry is a path PREFIX, matched segment-wise** — `docs` covers `docs/a/b.md` but not
+   `docs-old/a.md`. A trailing slash, a leading `./` and a doubled slash are all normalised away, so
+   write it the way your tree reads.
+2. **Anything not listed is CODE** (fail-closed): an unrecognized path may break a suite quay cannot
+   see, so it is never assumed harmless. Declaring a path quay has no checker for costs a suite run;
+   failing to declare a path a checker reads loses a verification. Only one of those is recoverable.
+3. **`tasks/` is always doc**, declared or not — it is the fan-in's own task file, already covered by
+   the scoped and doc phases.
+4. **The declaration is yours.** `quay-init` writes it only when the key is absent; a value you set
+   is preserved verbatim by every upgrade.
+5. **It only applies where there is no registry.** A tree carrying quay's checker registry (i.e.
+   quay itself) is judged by that registry — so **do not commit a copy of that registry into your
+   project** to make classification "work": it does not fix the judgment, it makes quay's checker
+   list decide your project's doc/code split.
+
+Run the judgment yourself, on any set of paths:
+
+```bash
+node --experimental-strip-types <plugin-root>/scripts/select-static-checks-for-touches.ts \
+     --classify-delta --root . docs/a.md server/x.ts
+```
+
+It prints the CODE paths (one per line, empty = the whole delta is doc) and always exits 0 for
+well-formed input — no registry required.
+
 ## Steps
 
 ### 1. Resolve the plugin root

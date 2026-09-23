@@ -1,7 +1,7 @@
 ---
 id: gap-repo-shape-inferred-from-test-sh-existence
 title: fan-in 按「有没有 scripts/test.sh」推断本仓库形态：改为读 .quay/config.yml 显式声明的契约
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -61,3 +61,11 @@ goal_ac: AC-316
 - plugin/test/quay-init-characterization.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-repo-shape-inferred-from-test-sh-existence.md
+
+## Needs-Human
+
+**执行 2026-09-23T18:40:58.194Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-repo-shape-inferred-from-test-sh-existence still present
+- run_id：wk-prod-anchor

@@ -865,10 +865,17 @@ test("AC2 reconcile unit: reconcileConfigContent edits in place — only the key
   // The schema is the version's REQUIREMENT list, and it is deliberately short: a key this version
   // does not require must not be silently introduced by a reconcile (that is how a dead key comes
   // back). Pinning it here means widening the schema is an explicit, reviewable edit.
-  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["fork_baseline"], "the version-required loop keys, today");
+  // 2026-09-24 (gap-fan-in-delta-classify-declared-doc-surfaces): widened by ONE entry —
+  // `doc_surfaces`, the doc/code declaration the mechanical fan-in reads. It is a version-level
+  // constant (the surfaces quay itself writes; a project extends the list), and it must reach
+  // EXISTING configs through this comment-preserving reconcile rather than through
+  // `ensureLoopConfig`'s whole-document re-serialisation (which drops the user's comments).
+  assert.deepEqual(Object.keys(LOOP_VERSION_DEFAULTS), ["fork_baseline", "doc_surfaces"], "the version-required loop keys, today");
   const doc = YAML.parse(content);
   assert.equal(doc.loop.board, "native", "the pre-existing key is preserved");
-  for (const k of Object.keys(LOOP_VERSION_DEFAULTS)) assert.equal(doc.loop[k], LOOP_VERSION_DEFAULTS[k], `loop.${k} filled`);
+  // deepEqual (not equal): a default may be a STRUCTURE (`doc_surfaces` is a list), and a reference
+  // comparison would call a correctly-filled list unfilled.
+  for (const k of Object.keys(LOOP_VERSION_DEFAULTS)) assert.deepEqual(doc.loop[k], LOOP_VERSION_DEFAULTS[k], `loop.${k} filled`);
 
   // Falsifier for the "no gratuitous rewrite" arm: the same document, once current, reports unchanged.
   const again = reconcileConfigContent(content);

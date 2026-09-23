@@ -151,13 +151,34 @@ const anchorStateFile = (root) => path.join(root, ".quay", "anchor.json");
 const anchorPidFile = (root) => path.join(root, ".quay", "anchor.pid");
 const anchorLogFile = (root) => path.join(root, ".quay", "anchor.log");
 
-/** 读 `.quay/anchor.json`（anchor 每趟 reconcile 重写的回读面）。读不到 ⇒ null（⛔ 不冒充 `{}`）。 */
+/** 读 `.quay/anchor.json`（anchor 每趟 reconcile 重写的回读面）。⛔ 三态各自独立（硬规则 3b）：
+ *  · `{ok:true, value}`  文件在且可解析
+ *  · `{ok:false, reason:"missing"}`  还没有这个文件（还没写过 / 刚被清理）
+ *  · `{ok:false, reason:"torn"}`     文件在但**读不懂**（半写 / 0 字节 / 人为损坏）
+ *  ⛔ 后两者**不得同形**：`torn` 是**别人正在写的坏文件**（非原子写 ⇒ 并发读者看到半写文件，
+ *  gap-anchor-state-nonatomic-and-declaration-outruns-log 的 M2），把它冒充成「还没有回读面」
+ *  会让一次**正在发生的**损坏读成「一切正常，只是还早」——本文件此前正是在这里抛
+ *  `TypeError: Cannot read properties of null (reading 'kinds')`，与「该 kind 没在跑」同形。 */
 function readAnchorJson(root) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(anchorStateFile(root), "utf8"));
-  } catch {
-    return null;
+    raw = fs.readFileSync(anchorStateFile(root), "utf8");
+  } catch (e) {
+    return { ok: false, reason: e?.code === "ENOENT" ? "missing" : "torn" };
   }
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch {
+    return { ok: false, reason: "torn" };
+  }
+}
+
+/** 直接断言用的读法：读不懂 ⇒ 报一条**说清是哪种**的断言失败（⛔ 不是 `TypeError`——那与「字段缺失」
+ *  同形，看不出是载体坏了还是该 kind 没在跑）。 */
+function requireAnchorJson(root) {
+  const r = readAnchorJson(root);
+  assert.ok(r.ok, `\`.quay/anchor.json\` must be readable (got: ${r.ok ? "-" : r.reason})`);
+  return r.value;
 }
 
 function roundCarrier(root, kind) {
@@ -194,23 +215,23 @@ test("AC4 — 某个 kind 既不在期望态、又无停机记录 ⇒ `not-decla
   startAnchor(root);
 
   await waitFor(() => {
-    const j = readAnchorJson(root);
-    return j !== null && Array.isArray(j.kinds) && j.kinds.length === KNOWN_KINDS.length;
+    const r = readAnchorJson(root);
+    return r.ok && Array.isArray(r.value.kinds) && r.value.kinds.length === KNOWN_KINDS.length;
   }, 20_000, "the anchor to carry all six kinds");
 
   // 基线：六个 kind 全 `declared`，没有任何 `not-declared`/`stopped-explicitly`。
-  const base = readAnchorJson(root).declaration;
+  const base = requireAnchorJson(root).declaration;
   assert.ok(base && typeof base === "object", "`.quay/anchor.json` carries a `declaration` map");
   for (const kind of KNOWN_KINDS) assert.equal(base[kind], "declared", `baseline: ${kind} is declared`);
 
   // ① 静默移出 quality + meta —— 直接改写期望态，**不留**任何停机记录（这正是生产上发生的那件事的形态）。
   writeDesired(root, ["promotion", "worker", "outer", "goal"], "test:simulate-silent-loss");
   await waitFor(() => {
-    const d = readAnchorJson(root)?.declaration;
-    return d?.quality === "not-declared" && d?.meta === "not-declared";
+    const r = readAnchorJson(root);
+    return r.ok && r.value.declaration?.quality === "not-declared" && r.value.declaration?.meta === "not-declared";
   }, 20_000, "`not-declared` to appear for the two silently-dropped kinds");
 
-  const dropped = readAnchorJson(root);
+  const dropped = requireAnchorJson(root);
   assert.equal(dropped.declaration.quality, "not-declared", "quality: 静默脱离期望态有独立取值");
   assert.equal(dropped.declaration.meta, "not-declared", "meta: 静默脱离期望态有独立取值");
   // ⛔ 关键的反向半边：**其余四个**不得被报成静默 —— 否则这个取值对「谁出了问题」零信息。
@@ -222,6 +243,11 @@ test("AC4 — 某个 kind 既不在期望态、又无停机记录 ⇒ `not-decla
   // 直接读函数与回读面同值（⛔ 不是只给 fixture 看的那一份）。
   assert.equal(kindDeclaration(root, "quality"), "not-declared");
   // ⛔ 且这条读数**不静默**：anchor 日志里有一行点名（不刷屏，集合变化时一行）。
+  // ⚠️ 这条断言在修前是**相位敏感**的：`wanted` / `silent` / 发布面派生自三次**独立**读盘，期望态落在
+  //    它们之间时那一趟会「发布 `not-declared` 却打不出这行」（诊断行落到下一趟）⇒ 全量 suite 负载下
+  //    这里随机红。修后三处派生自**同一份快照**（`driver-anchor` 的 `snap`），故「发布面报到
+  //    `not-declared`」与「那一行已在日志里」在**同一趟内**同时成立 —— 上面 `waitFor` 一看到发布面，
+  //    这行必然已经写下了（同趟的日志追加排在 `writeState` 之前）。⛔ 断言本身一行未放宽。
   assert.match(
     fs.readFileSync(anchorLogFile(root), "utf8"),
     /absent from the desired set with NO explicit stop record: \[quality,meta\]/,
@@ -231,8 +257,8 @@ test("AC4 — 某个 kind 既不在期望态、又无停机记录 ⇒ `not-decla
   // ② 补回 ⇒ 该取值消失。
   writeDesired(root, [...KNOWN_KINDS], "test:ac4-restore");
   await waitFor(() => {
-    const d = readAnchorJson(root)?.declaration;
-    return d?.quality === "declared" && d?.meta === "declared";
+    const r = readAnchorJson(root);
+    return r.ok && r.value.declaration?.quality === "declared" && r.value.declaration?.meta === "declared";
   }, 20_000, "`not-declared` to disappear once the kinds are declared again");
   assert.equal(kindDeclaration(root, "quality"), "declared", "restored ⇒ back to declared");
 });
@@ -246,8 +272,8 @@ test("AC5 — `stop --kind X` ⇒ X 保持停止、读数显示 `stopped-explici
   startAnchor(root);
 
   await waitFor(() => {
-    const j = readAnchorJson(root);
-    return j !== null && Array.isArray(j.kinds) && j.kinds.length === 3;
+    const r = readAnchorJson(root);
+    return r.ok && Array.isArray(r.value.kinds) && r.value.kinds.length === 3;
   }, 20_000, "the anchor to carry the three declared kinds");
   assert.equal(kindDeclaration(root, "quality"), "declared", "baseline: quality is declared");
 
@@ -258,7 +284,10 @@ test("AC5 — `stop --kind X` ⇒ X 保持停止、读数显示 `stopped-explici
   assert.equal(readKindStops(root).quality?.by, "quay-driver-stop", "the stop landed a distinguishable record");
   assert.equal(kindDeclaration(root, "quality"), "stopped-explicitly", "the reading names the explicit stop");
 
-  await waitFor(() => readAnchorJson(root)?.declaration?.quality === "stopped-explicitly", 20_000, "the anchor's read-back面 to report the explicit stop");
+  await waitFor(() => {
+    const r = readAnchorJson(root);
+    return r.ok && r.value.declaration?.quality === "stopped-explicitly";
+  }, 20_000, "the anchor's read-back面 to report the explicit stop");
 
   // ⛔ **不被 reconcile 自动拉起**：这条是 AC4 的反向控制（缺它 ⇒ 修法退化成「永远拉满六个 kind」）。
   //    直接量 = anchor.json 的 `kinds`（此刻实际在跑的集合）在**多趟** reconcile 后仍不含 quality；
@@ -268,7 +297,7 @@ test("AC5 — `stop --kind X` ⇒ X 保持停止、读数显示 `stopped-explici
   const beatsAtStop = beats();
   for (let i = 0; i < 12; i += 1) {
     await sleep(120); // 12 × 120ms = 1.44s ≈ 14 趟 reconcile（每 100ms 一趟）
-    assert.ok(!readAnchorJson(root).kinds.includes("quality"), `reconcile pass ${i + 1}: quality must NOT be auto-started (SPEC §6.9 inv.1)`);
+    assert.ok(!requireAnchorJson(root).kinds.includes("quality"), `reconcile pass ${i + 1}: quality must NOT be auto-started (SPEC §6.9 inv.1)`);
   }
   assert.equal(beats(), beatsAtStop, "quality's round carrier stopped advancing (its loop really is down)");
   assert.equal(kindDeclaration(root, "quality"), "stopped-explicitly", "still explicitly stopped after many reconcile passes");
@@ -278,7 +307,10 @@ test("AC5 — `stop --kind X` ⇒ X 保持停止、读数显示 `stopped-explici
   assert.equal(restarted.status, 0, `start --kind quality exits 0 (stderr: ${restarted.stderr})`);
   assert.deepEqual(readKindStops(root), {}, "the stop record is cleared on start");
   assert.equal(kindDeclaration(root, "quality"), "declared", "started ⇒ declared again");
-  await waitFor(() => readAnchorJson(root)?.kinds?.includes("quality"), 20_000, "quality's loop to be back in the running set");
+  await waitFor(() => {
+    const r = readAnchorJson(root);
+    return r.ok && r.value.kinds?.includes("quality");
+  }, 20_000, "quality's loop to be back in the running set");
   await waitFor(() => beats() > beatsAtStop, 20_000, "quality's round carrier to advance again");
 });
 

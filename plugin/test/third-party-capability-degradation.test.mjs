@@ -20,6 +20,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   docCheckCommandFor,
@@ -32,6 +34,11 @@ import {
   // AC5 — 项目声明的输出约定（loop.test_output）的读面。
   readLoopTestOutput,
 } from "../scripts/worker-driver.ts";
+// fan-in 的 delta 判定三态映射（`CLASSIFY_FAILED` 哨兵 + 它到 code_delta 字符串的映射）——从它自己的
+// 模块直接取（本文件既有做法：下面的 parseScopedThin/scopedGateVerdict 也走 worker-fan-in.ts 直 import）。
+// ⛔ 不在这里另写一份「status === 0 就当没失败」——「不是 CLASSIFY_FAILED」这条断言必须走 fan-in 自己
+// 那条路径（硬规则 5b）。
+import { CLASSIFY_FAILED, classifyDeltaOutcome } from "../scripts/worker-fan-in.ts";
 // scoped 门的输出契约 + 三态取值（gap-scoped-gate-thin-selection-not-same-shape-as-green）。直接 import
 // 该模块（本仓库 test 的常规做法——worker-driver.ts 的 re-export 面是为【既有】测试的 import 面冻结的，
 // 本任务新增的判据面不与它耦合）。
@@ -392,4 +399,97 @@ test("AC2 (gap-scoped-gate-thin…) — scopedGateVerdict 三态两两不同形�
   assert.equal(green.reason, null, "green 无 reason（与修复前逐字同形，⛔ 不给通过步加噪声）");
   // 非零退出 + thin 标记 ⇒ red（fail-closed：真失败的命令就是真失败，⛔ 不让「它说自己没评」洗白它）
   assert.equal(scopedGateVerdict({ state: "run", ok: false, output: "SCOPED-THIN selected=0\n" }).verdict, "red");
+});
+
+// ── fan-in delta 分类在第三方面（gap-fan-in-delta-classify-declared-doc-surfaces）─────────────────────
+// 缺陷：fan-in step 4 用 `--classify-delta --root <worktree>` 判「本分支 delta 是否只剩 doc 面 ⇒ 可跳过
+// 全量 suite」，而该分类【唯一】的判据曾是 quay 自己的检查注册表（runner-static-gate.ts）。第三方项目
+// 不携带它 ⇒ exit 2 ⇒ worker-fan-in 的 CLASSIFY_FAILED ⇒ 每个非空 delta 都跑全量 suite（生产读数：
+// claudecodeui 177 次判定里 11 次）。项目自己的「修法」是把 quay 的注册表副本提交进自己的仓库
+// （claudecodeui f7604c68）——那不是修复，那是让 quay 的检查器清单去判一个外国仓库的 doc/code 划分。
+//
+// 修法：分类器读【本项目显式声明】的 `loop.doc_surfaces`；未声明时用与布局无关的保守缺省（只有
+// quay 自己会写入的面算 doc）。三态取值：registry / declared / conservative-default。
+//
+// 这里 spawn【真分类器】（与 fan-in 逐字同一条命令），而不是在测试里重写一份判定（硬规则 5b）；
+// `CLASSIFY_FAILED` / `classifyDeltaOutcome` 从 worker-fan-in.ts 直接取——「不是 CLASSIFY_FAILED」这条
+// 断言用的是 fan-in 自己的三态映射，⛔ 不是测试里另写的 `status === 0` 假装同义。
+
+const CLASSIFIER = fileURLToPath(new URL("../scripts/select-static-checks-for-touches.ts", import.meta.url));
+
+/** Run the REAL fan-in classification command against `root` for `paths`. */
+function classifyDeltaCli(root, paths) {
+  const r = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", CLASSIFIER, "--classify-delta", "--root", root, ...paths],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** 一个第三方面夹具：只有 `.quay/config.yml`（第三方项目不携带 quay 的检查注册表）。 */
+function makeThirdPartyTree(t, configBody) {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-classify-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  writeFile(path.join(wt, ".quay", "config.yml"), configBody);
+  // 夹具的【否定前提】：quay 的检查注册表确实不在（旧实现的死因）。这条断言让夹具可证伪——
+  // 若某天它被放进来了，下面的用例就不再证明「无注册表也能判」。
+  assert.ok(
+    !fs.existsSync(path.join(wt, "plugin", "scripts", "runner-static-gate.ts")) &&
+      !fs.existsSync(path.join(wt, "scripts", "runner-static-gate.ts")),
+    "第三方面夹具不得携带 quay 的检查注册表",
+  );
+  return wt;
+}
+
+test("AC1 (gap-fan-in-delta-classify…) — 声明的 loop.doc_surfaces 第三方 worktree：doc 面跳过、code 面重跑，且【不是】CLASSIFY_FAILED", (t) => {
+  const wt = makeThirdPartyTree(t, 'loop:\n  doc_surfaces: ["docs/", "tasks/"]\n');
+
+  // ① doc 面：声明的两个前缀 ⇒ code_delta 为空 ⇒ fan-in 跳过全量 suite。
+  const docOnly = classifyDeltaCli(wt, ["docs/a.md", "tasks/t.md"]);
+  assert.equal(docOnly.status, 0, `无注册表的树必须仍给出结论（exit 0）：${docOnly.stderr}`);
+  assert.equal(docOnly.stdout.trim(), "", "声明的 doc 前缀 ⇒ 输出为空（整个 delta 都是 doc）");
+  assert.equal(
+    classifyDeltaOutcome(docOnly.status === 0, docOnly.stdout),
+    "",
+    "经 fan-in 的三态映射 ⇒ doc-only（⛔ 不是 CLASSIFY_FAILED 的 fail-closed 重跑）",
+  );
+
+  // ② code 面：未声明的路径 ⇒ 判 code ⇒ fan-in 重跑全量 suite（fail-closed 方向不变）。
+  const code = classifyDeltaCli(wt, ["server/x.ts"]);
+  assert.equal(code.status, 0, `未声明路径同样是【判决】而不是「没判出来」：${code.stderr}`);
+  assert.deepEqual(code.stdout.trim().split("\n"), ["server/x.ts"]);
+  const mapped = classifyDeltaOutcome(code.status === 0, code.stdout);
+  assert.equal(mapped, "server/x.ts", "code_delta 就是该路径本身");
+  assert.notEqual(mapped, CLASSIFY_FAILED, "⛔ 分类器给出了结论，不是「没判出来」");
+});
+
+test("AC2 负控 (gap-fan-in-delta-classify…) — 未声明 loop.doc_surfaces 的第三方 worktree：保守缺省判 docs/ 为 code，且分类仍有结论", (t) => {
+  // 与上一条唯一的不同：没有 doc_surfaces 声明（但 config 存在且有别的 loop 键——第三方项目的常态）。
+  const wt = makeThirdPartyTree(t, "loop:\n  test_command: node --test\n");
+
+  const r = classifyDeltaCli(wt, ["docs/a.md", "tasks/t.md", "server/x.ts"]);
+  assert.equal(r.status, 0, `保守缺省同样给出结论：${r.stderr}`);
+  // 【枚举，不布尔】把整份输出对出来：docs/ 未被声明 ⇒ code（保守缺省）；tasks/ 是 fan-in 自己的任务
+  // 文件面，任何模式下都是 doc；server/x.ts 是 code。
+  assert.deepEqual(r.stdout.trim().split("\n").sort(), ["docs/a.md", "server/x.ts"]);
+  assert.notEqual(
+    classifyDeltaOutcome(r.status === 0, r.stdout),
+    CLASSIFY_FAILED,
+    "「未声明」不是「判不出」——保守缺省是一个判决（⛔ 旧实现在这里 exit 2）",
+  );
+});
+
+test("负控 (gap-fan-in-delta-classify…) — 本仓库自身（携带注册表）：注册表判定不被声明面取代", (t) => {
+  // 反向面：本仓库继续用注册表判定（doc 面的定义是「没有 change/full 检查器读它」），既有分类不回归。
+  // 取假样本：orchestration/manager-tick-core.md 被 tick-core-static-check 读（@static-object），必须
+  // 仍是 CODE——若声明面把它翻成 doc，一个 (src:N) 违规就能静默跳过全量 suite。
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const r = classifyDeltaCli(repo, [
+    "orchestration/manager-tick-core.md",
+    "docs/proposals/does-not-need-to-exist.md",
+    "tasks/gap-x.md",
+  ]);
+  assert.equal(r.status, 0, `本仓库自身必须照常分类：${r.stderr}`);
+  assert.deepEqual(r.stdout.trim().split("\n"), ["orchestration/manager-tick-core.md"], "检查器读的路径仍是 code，纯文档面仍是 doc");
 });

@@ -37,7 +37,9 @@ import {
   preferredAnchorKernel,
   kindDeclarationMap,
   readAnchorPid,
+  readDeclarationSnapshot,
   readDesired,
+  readKindStops,
   rebuildKernelBundle,
   requestKindStop,
   resolveKernelSibling,
@@ -50,6 +52,7 @@ import {
   writeDesired,
   type AnchorBundleReading,
   type AnchorDesiredEntry,
+  type DeclarationSnapshot,
   type DriverKind,
   type KernelBundleRebuildResult,
   type KernelBundleSyncState,
@@ -396,8 +399,12 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // ⚠️ 重建**有冷却**：重建成功后本进程内存里仍是旧代码，若不重启，`bundleStale` 会一直为真 ⇒
   // 每趟 reconcile 重建一次 = 重建风暴。冷却 + 「成功过就不再重试」两道一起挡。
   const rebuildCooldownMs = Math.max(0, Number(process.env.QUAY_ANCHOR_BUNDLE_REBUILD_COOLDOWN_MS ?? 600_000));
-  // 测试缝/运维：重建成功后**不**重启（默认重启——⛔ 只重建不重启等于把日志里的建议照抄一遍，
+  // 测试缝/运维：**不 spawn 替换进程**（默认重启——⛔ 只重建不重启等于把日志里的建议照抄一遍，
   // 因为本进程的 ESM 缓存按 URL，重建的文件不会被已加载的进程看见）。
+  // ⚠️ 它的覆盖面是**整条自刷新路径**（不只是「重建成功后不再置真」这一处）：见下面 `canRefresh` 的
+  // **最终判定**。⛔ 只在重建那一处拦 = 缝的名字与它的实际覆盖面不同形（硬规则 3b 的镜像）——
+  // 当时 `stale`/`mainKernelStale` 两条通用路径正好从这道缝漏过去，夹具每跑一次就漏一个 detached
+  // 替换 anchor（gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor）。
   const rebuildNoRestart = process.env.QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART === "1";
   let lastRebuildAtMs = 0;
   let lastRebuildResult: KernelBundleRebuildResult | null = null;
@@ -412,32 +419,42 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // 盘上没有期望态而我们给了初始集合 ⇒ 落盘，使后续 `start/stop --kind X` 有一个可读改的基底。
   if (readDesired(opts.root) === null) writeDesired(opts.root, initial, "driver-anchor:cold-start");
 
-  const writeState = (): void => {
+  // ⚠️ `snap` = 本趟判定用的读盘快照（`DeclarationSnapshot`）。**一趟 reconcile 只读一次期望态**，
+  // 并把**同一个对象**同时用于 `wanted`、`silent`（`undeclaredKinds`）与这里的发布面
+  // （`kindDeclarationMap`）—— 见下面 reconcile 循环里那条注释（M1 的修法）。
+  const writeState = (snap?: DeclarationSnapshot): void => {
     try {
-      fs.writeFileSync(
-        paths.stateFile,
-        JSON.stringify({
-          pid: process.pid,
-          startedAt: new Date(hostStartedAt).toISOString(),
-          kinds: [...active.keys()],
-          host: "anchor",
-          // 内核 bundle 同步读数（每趟 pass 重写；`KernelBundleSyncState` 六态各自独立，⛔ 不与 fresh 同形）。
-          bundle: bundleReading,
-          // 接管异常读数（D3，`TakeoverRecord`）：无记录 ⇒ **null**，⛔ 与那三个具名态都不共用取值。
-          // 放在这里而不是只留在 `.quay/anchor-takeover.json`：`anchor.json` 是 manager/外层已经在读的
-          // 回读面（与 `bundle` 同字段同形）⇒ 交接异常在既有消费者那里**可见**，⛔ 不是只给 fixture 看。
-          // ⚠️ 在任 anchor 也会把它读到的记录（= 某个接管者写的）原样带上——那正是期望的：此刻确实
-          // 有一次交接在进行/已收敛，读方按 `state` + 记录里 `pid` 的存活区分「在等」与「已收敛」。
-          takeover: readTakeoverRecord(opts.root),
-          // 逐 kind 的**声明状态**（AC-255 能力半边，每趟 reconcile 重写）：`declared` /
-          // `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/ `not-evaluated`。
-          // ⛔ 四态各自独立，⛔ 不与 `kinds`（此刻实际在跑的集合）共用输出：`kinds` 少了一个不代表
-          // 「有人停的」——那正是本任务要分开的两件事。放在这里而不是只留在 `.quay/anchor-kind-stops.json`：
-          // `anchor.json` 是 manager/外层/`server status` 已经在读的回读面（与 `bundle`/`takeover` 同形）。
-          declaration: kindDeclarationMap(opts.root),
-        }) + "\n",
-        "utf8",
-      );
+      fs.mkdirSync(path.dirname(paths.stateFile), { recursive: true });
+      const body = JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date(hostStartedAt).toISOString(),
+        kinds: [...active.keys()],
+        host: "anchor",
+        // 内核 bundle 同步读数（每趟 pass 重写；`KernelBundleSyncState` 六态各自独立，⛔ 不与 fresh 同形）。
+        bundle: bundleReading,
+        // 接管异常读数（D3，`TakeoverRecord`）：无记录 ⇒ **null**，⛔ 与那三个具名态都不共用取值。
+        // 放在这里而不是只留在 `.quay/anchor-takeover.json`：`anchor.json` 是 manager/外层已经在读的
+        // 回读面（与 `bundle` 同字段同形）⇒ 交接异常在既有消费者那里**可见**，⛔ 不是只给 fixture 看。
+        // ⚠️ 在任 anchor 也会把它读到的记录（= 某个接管者写的）原样带上——那正是期望的：此刻确实
+        // 有一次交接在进行/已收敛，读方按 `state` + 记录里 `pid` 的存活区分「在等」与「已收敛」。
+        takeover: readTakeoverRecord(opts.root),
+        // 逐 kind 的**声明状态**（AC-255 能力半边，每趟 reconcile 重写）：`declared` /
+        // `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/ `not-evaluated`。
+        // ⛔ 四态各自独立，⛔ 不与 `kinds`（此刻实际在跑的集合）共用输出：`kinds` 少了一个不代表
+        // 「有人停的」——那正是本任务要分开的两件事。放在这里而不是只留在 `.quay/anchor-kind-stops.json`：
+        // `anchor.json` 是 manager/外层/`server status` 已经在读的回读面（与 `bundle`/`takeover` 同形）。
+        // ⛔ 必须与本趟 `silent` 用**同一份快照**（不传 ⇒ 现读一次，那会让两处又变成两次独立读盘）。
+        declaration: kindDeclarationMap(opts.root, snap),
+      }) + "\n";
+      // ── M2：**原子替换**（tmp + rename），⛔ 不是裸 `fs.writeFileSync` ──────────────────────────────
+      // 裸写 = `O_TRUNC` 之后写 ⇒ 并发读者可观测到**零长度/半写**的 `.quay/anchor.json`（实测：本机
+      // ambient load 下 0/32/96 三档 torn 率 5.6e-4 / 5.2e-4 / 1.4e-3；全量 suite 负载下读者把解析失败
+      // 读成 `null`，与「文件不存在」同形 ⇒ `TypeError: Cannot read properties of null (reading 'kinds')`）。
+      // 与同一文件族的 `writeDesired`（driver-runtime）逐字同款：读者要么看到完整旧值、要么看到完整新值。
+      // ⛔ 字段集与语义逐字未动（只换写入方式）—— `stateFile` 的**读**侧一行未改。
+      const tmp = `${paths.stateFile}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, body, "utf8");
+      fs.renameSync(tmp, paths.stateFile);
     } catch { /* 回读面写失败不致命（日志行仍在） */ }
   };
   writeState();
@@ -484,7 +501,17 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     await new Promise<void>((r) => setTimeout(r, reconcileMs));
     passes += 1;
 
-    const wanted = readDesired(opts.root)?.kinds ?? [];
+    // ── M1：**一趟只读一次期望态**，`wanted` / `silent` / 发布面全部派生自这一份快照 ────────────────
+    // 修前这里是三次独立读盘（`readDesired` 取 `wanted`；`undeclaredKinds` 内部**再读一次**、
+    // 却用**陈旧的 `wanted`** 过滤；`writeState` → `kindDeclarationMap` 又读第三次）。期望态恰好落在
+    // 这三者之间时，这一趟会**发布 `not-declared` 而 `silent` 为空 ⇒ 不打那行日志**，诊断行落到下一趟
+    // （≤1 个 reconcile 周期）。⇒ 「同一趟的发布面」与「同一趟的日志行」不同现，且只在宿主负载把
+    // 那段同步体放大到够撞上时才出现（全量 suite 下随机红）。收敛到一份快照后，该分叉结构上不可能出现。
+    // ⛔ 不传 `snap` 的调用（下面启动期的两次 `writeState()`）各自现读一次，那是**有意**的：那两处
+    //    不在 reconcile 趟内，没有「同一趟」可言。
+    const desired = readDesired(opts.root);
+    const wanted = desired?.kinds ?? [];
+    const snap: DeclarationSnapshot = { desired, stops: readKindStops(opts.root) };
     // 起：期望态里有而没在跑 ⇒ 起（幂等：已在 active 的就是 no-op，⛔ 不重启——§6.9 不变式 1）。
     //
     // ⛔ `!stopping` 闸（D1，2026-09-18 实测）：停机是**不可逆**态，一旦请求就⛔ 不得再拉起任何 kind。
@@ -494,8 +521,10 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     //   15:34:41 / 15:36:07 三次 `loop started` → 宽限到点后仍等满 `min(60s, grace)` ⇒ **233s** 才退出，
     //   超过接管者的等待预算 ⇒ `REFUSING to start` + 旧 anchor 随后退出 = **零 anchor 27 分钟**。
     if (!stopping) {
+      const opts0 = desired?.opts ?? {};
       for (const kind of wanted) {
-        if (!active.has(kind)) startKindTask(kind, opts, log, active, desiredOpts()[kind] ?? {});
+        // ⚠️ 用**本趟快照**的 opts（⛔ 不是再读一次盘）：同一趟的判定面全部同源。
+        if (!active.has(kind)) startKindTask(kind, opts, log, active, opts0[kind] ?? {});
       }
     }
     // 停：在跑而期望态里没有 ⇒ 只停那一个（§6.9 不变式 2：⛔ 不波及其余）。
@@ -509,7 +538,10 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     //   停摆 264min，期间 anchor 健康、其余四个 kind 新鲜）。⛔ 只报 `not-declared`：
     //   `stopped-explicitly` 是**有意**的，混进来 = 每个正常停掉的 kind 每轮报红 = 信号被噪声淹没。
     // ⚠️ 与 `staleBundleLogged` 同款：只在集合**变化**时打一行，⛔ 不每 500ms 刷屏。
-    const silent = undeclaredKinds(opts.root).filter((k) => !wanted.includes(k));
+    // ⛔ 必须用**本趟快照**（`silent` 与下面 `writeState(snap)` 的发布面同源 ⇒ 同趟一致）。
+    //    末尾那个 `!wanted.includes(k)` 现在由快照蕴含（`not-declared` ⇒ 不在 `desired.kinds`），保留它
+    //    只是把「日志行 ⊆ 不在 wanted 里的 kind」这条不变量写成断言，⛔ 它不再是一次独立读盘。
+    const silent = undeclaredKinds(opts.root, snap).filter((k) => !wanted.includes(k));
     const silentKey = silent.join(",");
     if (silentKey !== lastUndeclaredLogged) {
       lastUndeclaredLogged = silentKey;
@@ -522,7 +554,7 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
         );
       }
     }
-    writeState();
+    writeState(snap);
 
     // 源码自刷新（AC-184）：被监视源码推进到本 anchor 启动时刻之后 ⇒ 整个 anchor 重启（模块级热重载
     // 会因为双份 driver-runtime 而让停机登记表分裂，见 invokeKindDefault 的注释）。⛔ 只在**确认替换
@@ -575,6 +607,13 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           fs.statSync(cand.path).mtimeMs > kernelBuiltAt;
       } catch { canRefresh = false; /* 读不到 ⇒ 换不动（⛔ 不把「读不懂」当「可换」） */ }
     }
+    // ⛔ 测试缝的**最终判定**处（`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 一个替换进程都不起）：
+    // 必须是**最后**一道，⛔ 不是把 `&& !rebuildNoRestart` 并进上面第一条赋值——上面 `!canRefresh &&
+    // bundleStale` 那条复核会把它救回来（`preferredAnchorKernel()` 真解析到一份更新的内核）。
+    // 覆盖面是**整条自刷新路径**：`stale`（源码在本内核一生里推进）、`mainKernelStale`（主检出内核
+    // 推进）与 bundle 重建三条都归零，因此缝的名字（NO_RESTART）与它实际挡住的面对齐（硬规则 3b）。
+    // ⛔ 生产不带这个变量 ⇒ 这一行是恒等，产品行为逐字不变。
+    if (rebuildNoRestart) canRefresh = false;
     // ── bundle 同步读数（`.quay/anchor.json.bundle`）：六态各自独立，⛔ 不与 fresh 同形 ──────────
     //
     // ⚠️ 这里就是「陈旧且换不动」的**动作面**：它不再只打一行日志——`!canRefresh` 时**机械重建**
@@ -626,7 +665,9 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           state = r.ok ? "stale-rebuilt" : r.attempted ? "stale-rebuild-failed" : "stale-no-action";
           // ⛔ 重建成功后走既有的整进程自刷新：替换进程加载的**就是**刚重建出来的这一份
           // （`preferredAnchorKernel()` 在本内核就是产物时返回本路径）。
-          // ⛔ 测试缝：`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 只验「重建发生了」，不 spawn 替换进程。
+          // ⛔ 测试缝（`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1`）**不在这里**拦 —— 见上面
+          // `if (rebuildNoRestart) canRefresh = false;` 那处最终判定：缝的覆盖面是整条自刷新路径，
+          // 这一行的 `!rebuildNoRestart` 只是让「重建成功后不再置真」，⛔ 单独看它不是那条缝。
           if (r.ok && !rebuildNoRestart) canRefresh = true;
         }
       }

@@ -2,8 +2,13 @@
 // identity-replication-check.ts — P2 身份复制检测器 (docs/proposals/archguard-generation-era-primitives.md §3 P2).
 // 同一个运行时实体被【独立命名 / 独立判定】的次数, 两个子度量:
 //   (a) 字面量复制度: 含 X 路径/basename/env 名/CLI flag 的【代码】文件数, 且未经由单一访问器
-//       (import/require/source)。按位置区分代码 / 注释 / 文档 — 注释与 .md 文档不算, 字符串字面量
-//       (路径常量、spawn 参数、注册表条目) 是代码级引用, 算。
+//       (import/require/source)。位置分两层: ①代码 / 注释 / 文档 —— 注释与 .md 文档不算;
+//       ②**出现角色** (gap-identity-hardcoded-needs-occurrence-role-filter) —— 代码位置里还要再分
+//       「命名点」与「叙述」: 字符串字面量是代码级引用, 但**把一个实体的名字写进一段叙述文本、
+//       断言消息、test 标题或错误消息, 不是独立命名它**。判据 = 该出现处所在字面量的内容是否
+//       **恰为实体名**(身份值) 而非嵌在更长的文本里; 未被引号包裹的裸名则只在**名字清单**
+//       (邻词也是脚本名) 或赋值右侧才算。⛔ 反向边界: `NEVER_LAYDOWN="quay-init.sh"` 这类
+//       **把裸 basename 赋成身份值**的位点仍是证据 —— 收窄不得把检测器砍空。
 //       单一访问器认【三族】形态, 全在 accessorRegexSource() 一处: ①import/require ②source <内联路径
 //       (引号可嵌套): source "$(dirname "$0")/x.sh" ③先赋值路径到变量、再 source 该变量 (本仓 .sh
 //       的主流形态: _lib="$(dirname "${BASH_SOURCE[0]}")/x.sh"; … . "$_lib")。②③ 缺席曾使
@@ -702,12 +707,13 @@ export function findByteIdenticalPairs(
  *      `path.join(root, "plugin", "scripts", "ready-pool-check.ts")`、
  *      `resolveKernelSibling("ready-pool-check.ts")`、spawn 的 argv 数组、`runHelp("ready-pool-check.ts")`。
  *
- *  ⛔ 反向边界同样要钉住 (否则本判定会被自己对 0 的那种形态架空, 硬规则 2 的零计数半边):
- *  **裸 basename 出现在文本/散文/注册表串里仍是证据** —— `echo "shared-lib.sh"`、
- *  `"Usage: node workflow-event-schema.mjs --validate <file>"`、`<h2>resource-gate.sh</h2>`。
- *  它们的前一个非空白字符是标识符或运算符, 不是实参位 ⇒ 不被本谓词取掉。
- *  `plugin/test/identity-replication-check.test.mjs` 的 string-only / comment-tail 两条负控制
- *  就钉在这一边界上。 */
+ *  ⛔ 边界随本任务收窄 (gap-identity-hardcoded-needs-occurrence-role-filter): 本谓词**只**判
+ *  「按路径调用」这一维。散文/标题/断言消息里的提及 (`<h2>resource-gate.sh</h2>`、
+ *  `"Usage: node workflow-event-schema.mjs --validate <file>"`) 的前一个非空白字符是标识符或
+ *  运算符 ⇒ **本谓词仍然返回 false** (它们不是实参位), 但它们**不再是证据** —— 把它们降为非证据
+ *  的是**另一个**判据 (`occurrenceRole` 的 `text` 角色: 字面量内容不等于实体名), 不是这里。
+ *  旧版本注释曾把这一族写成「仍是证据」(旧边界「文本里的裸 basename 是身份」), 该边界已在本任务
+ *  重新裁定; `plugin/test/identity-replication-check.test.mjs` 的负控制已随之改写。 */
 export function isPathInvocationMention(src: string, idx: number, entity: string): boolean {
   const prev = idx > 0 ? src[idx - 1] : "";
   if (prev === "/" || prev === "\\") return true; // A 路径尾
@@ -719,13 +725,177 @@ export function isPathInvocationMention(src: string, idx: number, entity: string
   return before === "(" || before === "," || before === "[";
 }
 
+// ── 出现角色过滤器 (gap-identity-hardcoded-needs-occurrence-role-filter) ────────────────────
+//
+// 缺口: 旧判据的第 2 步只问「代码位置 ∧ 非按路径」, 于是 `test("…resource-gate.sh…")` 的**标题**、
+// `assert.equal(x, "resource-gate.sh")` 的**期望值**、错误消息串, 与 `NEVER_LAYDOWN="quay-init.sh"`
+// 这类**真把实体名当身份使用**的位点同形计入。硬规则 2 要的「按位置判定」在**出现角色**这一维上
+// 还没有落地: 位置只分到代码/注释/文档, 而代码位置里叙述串与身份值是两种东西。
+//
+// ⛔ 反向边界同时钉住 (否则等价于把检测器关掉): 身份值位点仍是证据。'name-value' 就是它。
+// ⛔ 角色是**枚举取值**不是布尔 (硬规则 3): 「非证据」必须能说出被【哪一类】排除的, 否则
+//    「读不懂这段文本」会与「查过且非证据」同形 (硬规则 3b)。
+
+/** 出现角色。`name-value` = 在该位置**把这个名字当作值**(独立命名点, 证据);
+ *  `text` = 嵌在叙述/标题/消息/散文里 (非证据); `by-path` = 按路径调用 (位置知识, 非证据);
+ *  `comment` = 注释 (非证据, 由位置掩码给出)。 */
+export const OCCURRENCE_ROLES = ["name-value", "text", "by-path", "comment"] as const;
+export type OccurrenceRole = (typeof OCCURRENCE_ROLES)[number];
+
+/** 字符串 / 模板字面量的跨度。`[start, end)` 覆盖两个定界引号**本身**。 */
+interface StringSpan {
+  start: number;
+  end: number;
+}
+
+/** 字面量跨度表 —— 与 tsCommentMask / shCommentMask **同一套扫描骨架**, 但只记录字面量跨度,
+ *  且**跳过注释区段**: 注释里的撇号不得打开「幻影字符串」(那是本文件已经踩过一次的坑 —— 见
+ *  regexLiteralEnd 的头注释: 一次误判会跨行吞掉后面的代码)。
+ *
+ *  ⛔ 刻意**不**按扩展名分 TS / shell 两套: `matchEntity()` 拿到的只有 src/mask, 拿不到文件名
+ *  (AC1 的探针正以这个签名调用它) ⇒ 规则必须在两种模式下同形, 否则探针里的 .sh 用例会走错分支。
+ *  两种模式在**本判据关心的范围**内差别只有一个 —— 注释记号 (`#` vs `//`), 而注释已由调用方给的
+ *  mask 表达 ⇒ 这里不需要知道文件名。
+ *
+ *  ⛔ 换行护栏 (同 regexLiteralEnd 的教训): `"` 与 `'` 字面量**不含未转义的行终止符**, 所以同行
+ *  找不到闭合引号就说明判错了 (heredoc 散文里一个撇号足以让朴素词法器跨行吞掉后面的真代码) ⇒
+ *  不产出该跨度。反引号 (模板字面量) 合法跨行, 保留。
+ *
+ *  已知残余: 模板字面量的 `${…}` 内嵌表达式不单独解析 (整段算一个字面量跨度)。*/
+function stringSpans(src: string, mask: Uint8Array): StringSpan[] {
+  const spans: StringSpan[] = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    if (mask[i] === 1) { i++; continue; }
+    const q = src[i];
+    if (q !== '"' && q !== "'" && q !== "`") { i++; continue; }
+    const start = i;
+    i++;
+    let closed = false;
+    while (i < n) {
+      if (mask[i] === 1) { i++; continue; }
+      if (src[i] === "\\") { i += 2; continue; }
+      if (src[i] === "\n" && q !== "`") break; // 换行护栏: 未闭合的 ' / " 不是字面量
+      if (src[i] === q) { i++; closed = true; break; }
+      i++;
+    }
+    if (closed) spans.push({ start, end: i });
+  }
+  return spans;
+}
+
+/** 跨度表按 (mask 对象, src) 记忆 —— 每个文件只词法分析一次 (调用方对同一文件复用它算出的 mask)。 */
+const _spanCache = new WeakMap<Uint8Array, { src: string; spans: StringSpan[] }>();
+function stringSpansOf(src: string, mask: Uint8Array): StringSpan[] {
+  const hit = _spanCache.get(mask);
+  if (hit !== undefined && hit.src === src) return hit.spans;
+  const spans = stringSpans(src, mask);
+  _spanCache.set(mask, { src, spans });
+  return spans;
+}
+
+/** 脚本名形状的词 (`foo.sh` / `bar.ts` / `baz.mjs`), 去掉包裹的括号/逗号/分号再看。
+ *  用途见 bareWordRole: 名字清单的判据。 */
+const SCRIPT_NAME_WORD = /^[\w./-]+\.(?:sh|ts|mjs|js)$/;
+
+/** 去掉词首的 `([{` 与词尾的 `)]},;:` —— `case "$x" in quay-init.sh)` 这类词形。 */
+function stripWordPunct(w: string): string {
+  return w.replace(/^[([{]+/, "").replace(/[)\]},;:]+$/, "");
+}
+
+/** 同一【逻辑行】上的词 (行连续符 `\` 把多行接成一行 —— 名字清单常被折成多行)。 */
+function logicalLineWords(blanked: string, idx: number): { words: string[]; at: number } {
+  let ls = blanked.lastIndexOf("\n", idx) + 1;
+  // 向左并上以 `\` 结尾的续行 (最多 200 行, 防病态输入)
+  for (let guard = 0; guard < 200 && ls > 0; guard++) {
+    const prevStart = blanked.lastIndexOf("\n", ls - 2) + 1;
+    if (!/\\\s*$/.test(blanked.slice(prevStart, ls - 1))) break;
+    ls = prevStart;
+  }
+  let le = blanked.indexOf("\n", idx);
+  if (le === -1) le = blanked.length;
+  for (let guard = 0; guard < 200 && /\\\s*$/.test(blanked.slice(ls, le)); guard++) {
+    const next = blanked.indexOf("\n", le + 1);
+    if (next === -1) { le = blanked.length; break; }
+    le = next;
+  }
+  const words: string[] = [];
+  const re = /\S+/g;
+  let m: RegExpExecArray | null;
+  const text = blanked.slice(ls, le);
+  while ((m = re.exec(text)) !== null) words.push(m[0]);
+  return { words, at: idx - ls };
+}
+
+/** 裸词 (未被引号包裹) 出现的角色。
+ *
+ *  ⛔ 这是本任务最窄的一条判据, 只说一件事: **在名字清单里登记的裸名是命名点, 其余不是**。
+ *  为什么用邻词 (硬规则 2 的位置判定在无引号时的唯一载体): 裸名没有引号替它说话, 只能看它**周围
+ *  是什么词**。邻词也是脚本名形状 ⇒ 这一行在**登记一批名字** (`quay-init.sh` 的 laydown
+ *  `printf '%s\n' a.ts b.ts … >> "$out"` 清单); 邻词是 `--flag` / 散文词 ⇒ 这一行是命令行调用
+ *  或叙述 (`checker-mutation-cases/red-on-omission-audit.sh` 的 heredoc fixture 正文
+ *  `C3 resource-gate.sh --for full-suite。`) —— 两者都不是**独立命名**。
+ *
+ *  ⛔ 赋值的右侧 (`NEVER_LAYDOWN=<entity>`) 是身份值, 由下面的 `NAME=` 预判接住 (带引号的版本
+ *  走字面量分支; **裸 basename 被赋成身份值**正是本任务的反向边界)。
+ *
+ *  已知残余 (如实记): 名字清单若**整行只有一个名字**(清单首行 `printf '%s\n' a.ts \` 里那个
+ *  a.ts), 它的邻词是命令词 ⇒ 被判为非证据。这是本规则唯一的假阴性方向, 且它**可检**:
+ *  实体在别处的身份值位点仍会被报出。 */
+function bareWordRole(blanked: string, idx: number, entity: string): OccurrenceRole {
+  const before = blanked.slice(blanked.lastIndexOf("\n", idx) + 1, idx);
+  if (/[A-Za-z_][A-Za-z0-9_]*=["']?$/.test(before)) return "name-value"; // NAME=<entity> (裸或已开引号)
+  const { words, at } = logicalLineWords(blanked, idx);
+  let mine = -1;
+  let offset = 0;
+  for (let k = 0; k < words.length; k++) {
+    const w = words[k];
+    if (at >= offset && at < offset + w.length) { mine = k; break; }
+    offset += w.length + 1; // 词之间至少一个空白
+  }
+  if (mine === -1) return "text";
+  if (stripWordPunct(words[mine]) !== entity) return "text"; // 实体不是一个完整的词 ⇒ 不是命名点
+  for (const nb of [words[mine - 1], words[mine + 1]]) {
+    if (nb !== undefined && SCRIPT_NAME_WORD.test(stripWordPunct(nb))) return "name-value";
+  }
+  return "text";
+}
+
+/** 一个出现处的角色 —— **唯一**一份判定 (literalReplication / replicationTable / 探针共用
+ *  `matchEntity()`, 而 `matchEntity()` 只调它)。PURE。 */
+export function occurrenceRole(
+  src: string,
+  mask: Uint8Array,
+  blanked: string,
+  idx: number,
+  entity: string,
+): OccurrenceRole {
+  if (mask[idx] !== 0) return "comment";
+  if (isPathInvocationMention(src, idx, entity)) return "by-path";
+  const sp = stringSpansOf(src, mask).find((s) => idx > s.start && idx < s.end);
+  if (sp !== undefined) {
+    // 字面量内容 (去掉定界引号、trim) **恰为**实体名 ⇒ 一处独立命名 (身份值);
+    // 否则实体是嵌在更长的文本里 —— 标题 / 断言消息 / 错误消息 / 叙述串 ⇒ 非证据。
+    return src.slice(sp.start + 1, sp.end - 1).trim() === entity ? "name-value" : "text";
+  }
+  return bareWordRole(blanked, idx, entity);
+}
+
 /** 单文件 × 单实体的分类结果。 */
 export interface EntityMatch {
-  /** 该文件在代码位置提及该实体, 或经结构性关系引用它 ⇒ 计入 `code`/`codeFiles`。 */
+  /** 该文件在**代码位置**提到它 (任意出现角色, 只要不是按路径调用), 或经结构性关系引用它
+   *  ⇒ 计入 `code`。⛔ 这是**提及级**读数, 定义与收窄前逐字一致 ⇒ 读数面 (哪一行进表、
+   *  行怎么排序) 不因本任务而变, 五个簇的修前/修后对照可以在**同一面**上读。 */
   code: boolean;
+  /** 该文件**独立命名**了它 (出现角色 = name-value) ⇒ 与 `accessor` 一起构成 `codeFiles`
+   *  (本任务把 `codeFiles` 从「代码位置提及」重锚到「独立命名」, 见 LiteralReplication.codeFiles)。 */
+  naming: boolean;
   /** 经 import / re-export / require / source 单一访问器引用。 */
   accessor: boolean;
-  /** 代码位置且**非按路径**的命中 —— `hardcoded` 的样本来源 (行号 + 该行原文)。 */
+  /** 角色为 `name-value` 的命中 —— `hardcoded` 的样本来源 (行号 + 该行原文)。
+   *  ⛔ 不是「代码位置 ∧ 非按路径」: 出现角色为 `text` 的位点 (标题/断言消息/错误消息/叙述串)
+   *  已在这一步被排除, 见 occurrenceRole。 */
   evidenceLines: { line: number; text: string }[];
 }
 
@@ -736,11 +906,11 @@ export interface EntityMatch {
  *    1. **先**问「这个文件是否经结构性关系到达该实体」(`accessorRe` 跑在 `blankComments()` 的视图上)
  *       —— 有即 `accessor`, 与它的命中点长什么样无关。⛔ 先按位置筛会把 accessor 全筛掉:
  *       import 的 specifier 本身就是 `"./ready-pool-check.ts"`, 天然是「路径尾」。
- *    2. **再**问「有没有【代码位置 ∧ 非按路径】的命中」—— 有即 `hardcoded`。
- *    3. 两条都不成立 ⇒ 不计数 (只被路径引用 / 只在注释与文档里提到)。
+ *    2. **再**问「有没有【出现角色 = name-value】的命中」—— 有即 `hardcoded`。
+ *    3. 两条都不成立 ⇒ 不计数 (只被路径引用 / 只在注释与文档里提到 / 只在叙述串里出现)。
  *
  *  这与旧实现的差别正是本任务判据的两处产地: 旧的第 2 步只问 `mask[idx] === 0`(注释与文档),
- *  不看「按路径引用」, 也没有把 accessor 判定前置。 */
+ *  不看「按路径引用」, 也没有把 accessor 判定前置, 更不看**出现角色** (叙述串与身份值同形)。 */
 export function matchEntity(
   src: string,
   mask: Uint8Array,
@@ -757,23 +927,29 @@ export function matchEntity(
   accessorRe.lastIndex = 0; // 调用方传非 global 的正则; 若将来带了 `g`, 这一行让它仍然无状态。
   const accessor = accessorRe.test(blanked);
   const evidenceLines: { line: number; text: string }[] = [];
-  let anyEvidence = false;
+  let anyMention = false;  // 代码位置 ∧ 非按路径 (任意出现角色) ⇒ 提及级 `code`
+  let anyNaming = false;   // 出现角色 = name-value ⇒ 命名级 `naming`(⇒ `hardcoded`)
   let idx = 0;
   while ((idx = src.indexOf(entity, idx)) !== -1) {
-    if (mask[idx] === 0 && !isPathInvocationMention(src, idx, entity)) {
-      anyEvidence = true;
+    // 出现角色过滤 (缺口②): 代码位置里只有 'name-value' 是**独立命名**; 注释 / 按路径调用 /
+    // 叙述串 (标题/断言消息/错误消息/散文) 都不是证据。判定只此一处 (occurrenceRole)。
+    const role = occurrenceRole(src, mask, blanked, idx, entity);
+    if (role === "name-value" || role === "text") anyMention = true;
+    if (role === "name-value") {
+      anyNaming = true;
       if (evidenceLines.length < HARDCODED_SAMPLE_LIMIT) {
         const lineStart = src.lastIndexOf("\n", idx) + 1;
         let lineEnd = src.indexOf("\n", idx);
         if (lineEnd === -1) lineEnd = src.length;
         evidenceLines.push({ line: lineOf(src, idx), text: src.slice(lineStart, lineEnd).trim().slice(0, 120) });
       }
-      // 样本收满 ⇒「有没有」已确定, 不必扫完剩下的命中 (大文件的完整扫描是这条检查器的热点)。
-      if (evidenceLines.length >= HARDCODED_SAMPLE_LIMIT) break;
     }
+    // 样本收满 ⇒ 两个布尔都已定型 (name-value ⇒ 也是 mention) ⇒ 不必扫完剩下的命中
+    // (大文件的完整扫描是这条检查器的热点)。
+    if (evidenceLines.length >= HARDCODED_SAMPLE_LIMIT) break;
     idx += entity.length;
   }
-  return { code: accessor || anyEvidence, accessor, evidenceLines };
+  return { code: accessor || anyMention, naming: anyNaming, accessor, evidenceLines };
 }
 
 /** 每个命中文件取样上限 —— 「报一个计数时同时报出它匹配到的前几条实际内容」(docs 附录 A)。 */
@@ -782,9 +958,21 @@ export const HARDCODED_SAMPLE_LIMIT = 3;
 export interface LiteralReplication {
   entity: string;
   full: number;       // 含该 basename 的代码文件数 (全文)
-  code: number;       // 其中 basename 落在【代码位置】或经结构性关系引用的文件数
+  /** **提及级**: basename 落在【代码位置】(任意出现角色, 但非按路径调用) 或经结构性关系引用的
+   *  文件数。⛔ 定义与收窄前逐字一致 —— 本任务的读数面因此**不动**, 五个簇的修前/修后对照能在
+   *  同一面上读 (「不得换读数面」)。 */
+  code: number;
   accessor: number;   // 经 import/re-export/require/source 单一访问器引用的文件数
-  hardcoded: number;  // 代码位置【独立命名】该实体 (无结构性关系) 的文件数
+  /** **命名级**: 代码位置**独立命名**该实体 (出现角色 = name-value, 且无结构性关系) 的文件数。 */
+  hardcoded: number;
+  /** **命名级名单**: 经结构性关系到达该实体、或**独立命名**它的文件。
+   *
+   *  ⛔ 本任务把它**重锚**了 (原语义 = `code` 的名单, 即「代码位置提及」)。为什么必须重锚而不能
+   *  两处并存: 一个文件「只经断言消息 / test 标题 / 错误消息 / 路径」到达该实体时, 它**不再**是
+   *  一处独立命名 —— 若 `codeFiles` 仍按提及级收录, 那么「N 个文件独立命名了它」与「N 个文件里
+   *  恰好有个同名串」在**下游读得见的读数**上仍然同形 (硬规则 2/3b), 而 `hardcoded` 的样本面
+   *  (`hardcodedSamples`) 是判红行才打印的、不是每个消费者的输入面。
+   *  ⇒ 不变式: `codeFiles.length === accessor + hardcoded`。 */
   codeFiles: string[];
   /** 硬编码文件的实测样本 (前 `HARDCODED_SAMPLE_LIMIT` 条, 每条含文件:行 + 该行原文)。
    *  ⛔ 不是装饰: 计数为 N 的判红行必须能在**同一读数**里给出它命中的是什么 —— 否则「N 个文件
@@ -807,12 +995,14 @@ export function literalReplication(root: string, files: string[], entity: string
     full++;
     const mask = maskFor(f)(src);
     const m = matchEntity(src, mask, blankComments(src, mask), accessorRe, entity);
-    if (!m.code) continue;
-    code++;
-    codeFiles.push(path.relative(root, f));
-    if (m.accessor) accessor++;
-    else {
+    if (m.code) code++; // 提及级
+    // 命名级: 只有「经结构性关系到达」或「独立命名」的文件进 codeFiles / accessor / hardcoded。
+    if (m.accessor) {
+      accessor++;
+      codeFiles.push(path.relative(root, f));
+    } else if (m.naming) {
       hardcoded++;
+      codeFiles.push(path.relative(root, f));
       for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
         if (hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
           hardcodedSamples.push(`${path.relative(root, f)}:${e.line}  ${e.text}`);
@@ -853,12 +1043,14 @@ export function replicationTable(
       if (!src.includes(row.entity)) continue;
       row.full++;
       const m = matchEntity(src, mask, blanked, accessorRes[ri], row.entity);
-      if (!m.code) continue;
-      row.code++;
-      row.codeFiles.push(rel);
-      if (m.accessor) row.accessor++;
-      else {
+      if (m.code) row.code++; // 提及级
+      // 命名级 (与 literalReplication 同一判定、同一不变式 codeFiles.length === accessor + hardcoded)
+      if (m.accessor) {
+        row.accessor++;
+        row.codeFiles.push(rel);
+      } else if (m.naming) {
         row.hardcoded++;
+        row.codeFiles.push(rel);
         for (const e of m.evidenceLines.slice(0, HARDCODED_SAMPLE_LIMIT)) {
           if (row.hardcodedSamples.length < HARDCODED_SAMPLE_LIMIT) {
             row.hardcodedSamples.push(`${rel}:${e.line}  ${e.text}`);
