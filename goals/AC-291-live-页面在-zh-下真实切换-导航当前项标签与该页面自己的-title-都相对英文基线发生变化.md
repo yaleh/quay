@@ -22,31 +22,33 @@ criterion: >-
   (plugin/scripts/start-drivers.ts:20-28,
 
   # "临时端口下真实端口只在载体里可知"; changed by ce0f47518,
-  gap-serve-same-root-admission-lock). A live
+  gap-serve-same-root-admission-lock), so a
 
-  # instance is therefore started as `quay.ts serve --host H --port 0` (measured
-  2026-09-23: pid
+  # live instance is a `quay.ts serve` process whose port flag carries that 0
+  (measured 2026-09-23:
 
-  # 1449431, cwd = the repo root), so this criterion's old step -- grep -oE
-  '--host [^ ]+ --port
+  # pid 1449431, cwd = the repo root). This criterion's old step grepped the
+  process's own cmdline for
 
-  # [0-9]+' over the process's own cmdline -- derived the structurally
-  unfetchable "H:0" and died with
+  # the host/port flag PAIR -- which was then the only place the port was
+  knowable -- so it derived the
 
-  # CAUSE=en-fetch-failed against a server that was up the whole time. The
-  ledger pins the CARRIER as
+  # structurally unfetchable "<host>:0" and died with CAUSE=en-fetch-failed
+  against a server that was
 
-  # the thing that moved, not the criterion's subject: item_id=AC-291, the SAME
-  criterionHash
+  # up the whole time. The ledger pins the CARRIER as the thing that moved, not
+  the criterion's
 
-  # 848bfb6418f2a892, goal-sweep pass at 2026-09-23T05:08:40.467Z and fail at
-  08:36:03.044Z; the
+  # subject: item_id=AC-291, the SAME criterionHash 848bfb6418f2a892, goal-sweep
+  pass at
 
-  # goal-cli runs from 08:43:41.902Z read CAUSE=en-fetch-failed -- GET
-  http://172.28.0.1:0/live (later
+  # 2026-09-23T05:08:40.467Z and fail at 08:36:03.044Z; the goal-cli runs from
+  08:43:41.902Z read
 
-  # 127.0.0.1:0, after the bind host changed). Nothing about the /live
-  assertions below changed.
+  # CAUSE=en-fetch-failed -- GET http://172.28.0.1:0/live (later 127.0.0.1:0,
+  after the bind host
+
+  # changed). Nothing about the /live assertions below changed.
 
   # The real listening port is knowable only from the live host's own carrier
   $root/.quay/server.json
@@ -66,24 +68,34 @@ criterion: >-
   # an address; the verdict stays the external HTTP GET below (hard rule 4b --
   never judge a live
 
-  # surface by a reading that surface produced about itself). The eleven refusal
-  branches below are
+  # surface by a reading that surface produced about itself). Both deployment
+  shapes stay supported: an
 
-  # byte-identical to the pre-amendment criterion; this step keeps BOTH
-  deployment shapes (an explicit
+  # explicit non-zero port on the cmdline is still used as-is, and a
+  kernel-assigned (or absent) one
 
-  # `--port N` >= 1 on the cmdline, and the launcher's kernel-assigned `--port
-  0` / absent `--port`
+  # falls through to the carrier. Every candidate is reported with its own pid +
+  address + cause and
 
-  # resolved from the carrier), and every candidate gets its own pid + address +
-  cause line so no
+  # none can wipe a derived address -- including the gate's OWN `sh -c` runner,
+  whose cwd is $root and
 
-  # candidate can wipe a derived address (the gate runs the criterion under `sh
-  -c`, so its OWN shell
+  # whose cmdline contains this very text, so it matches pgrep too. That runner
+  is why `nserve` counts
 
-  # matches pgrep too).
+  # only candidates whose argv carries the `serve` subcommand as its own
+  element: without it, the
+
+  # no-instance refusal below would be unreachable (the runner would always look
+  like a candidate) and
+
+  # "there is no serve here" would wear the same shape as "there is one and I
+  could not reach it".
 
   ncand=0
+
+
+  nserve=0
 
 
   nderived=0
@@ -99,6 +111,7 @@ criterion: >-
     [ -d /proc/$p ] || continue
     [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
     ncand=$((ncand + 1))
+    if tr '\0' '\n' < /proc/$p/cmdline 2>/dev/null | grep -qx -- 'serve'; then nserve=$((nserve + 1)); fi
     a=""
     cause=""
     lit=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
@@ -123,23 +136,26 @@ criterion: >-
   done
 
 
-  if [ "$ncand" = 0 ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
-  serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  printf 'AC-291 candidate readings (cwd=%s, nserve=%s, ncand=%s,
+  nderived=%s):%s\n' "$root" "$nserve" "$ncand" "$nderived" "$report" >&2
 
 
-  if [ "$nderived" = 0 ]; then printf 'CAUSE=no-derivable-serve-address -- %s
-  quay.ts serve candidate(s) with cwd=%s, none yielded a derivable address;
-  per-candidate readings:%s\n' "$ncand" "$root" "$report" >&2; exit 1; fi
+  if [ -z "$addr" ] && [ "$nserve" = 0 ]; then echo
+  "CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=$root;
+  $ROUTE cannot be evaluated on a live surface (AC-179 probe pattern)" >&2; exit
+  1; fi
+
+
+  if [ -z "$addr" ] && [ "$nderived" = 0 ]; then printf
+  'CAUSE=no-derivable-serve-address -- %s quay.ts serve candidate(s) with
+  cwd=%s, none yielded a derivable address; per-candidate readings:%s\n'
+  "$nserve" "$root" "$report" >&2; exit 1; fi
 
 
   if [ -z "$addr" ]; then printf 'CAUSE=no-reachable-serve-address -- %s
   derivable address(es) among %s candidate(s) for cwd=%s, none answered $ROUTE
   (connection refused / timed out / non-2xx); per-candidate readings:%s\n'
-  "$nderived" "$ncand" "$root" "$report" >&2; exit 1; fi
-
-
-  printf 'AC-291 candidate readings (cwd=%s):%s\n' "$root" "$report" >&2
+  "$nderived" "$nserve" "$root" "$report" >&2; exit 1; fi
 
   en=$(curl -sf --max-time 10 "http://$addr$ROUTE" 2>/dev/null)
 
