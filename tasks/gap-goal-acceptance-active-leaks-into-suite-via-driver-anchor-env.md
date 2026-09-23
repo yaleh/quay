@@ -3,7 +3,7 @@ id: gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env
 title: driver-anchor 环境泄漏的 QUAY_GOAL_ACCEPTANCE_ACTIVE=1 被 suite 继承 ⇒ 8 个 goal
   家族测试文件恒红（同一份与 delta 无关的红，视 anchor 谱系时而落地、时而烧到重试上限）——scripts/test.sh 入口归一化块（既有
   unset FORCE_COLOR 那一块）缺了这个成员
-status: todo
+status: ready
 labels:
   - gap
   - defect
