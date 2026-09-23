@@ -1031,19 +1031,27 @@ export const BOARD_LABELS: Record<BoardKey, { en: string; zh: string }> = {
   // One row per SOURCE-and-STATE pair: these are two different sources (execution / landing) each
   // with its own failure modes, and collapsing them would report which one failed as a generic
   // 「a source failed」 — the fact the banner exists to state.
+  //
+  // gap-task-status-drift-check-serve-labels-no-rel-accessor: the three `srcLanding*` rows name the
+  // landing source through `{source}`, filled by the caller with observation.ts's
+  // TASK_STATUS_DRIFT_CHECK_NAME. They must NOT spell the basename here — this module is import-free
+  // by design (see the header), so a literal here would be a SECOND naming point that no change to
+  // the checker's rel could reach (the defect this task exists to end; gap-serve-labels-hardcode-
+  // mechanism-script-basenames was its sibling on /system). The `srcExec*` rows need no placeholder:
+  // `.workflow-events/` is a directory this page names directly, not a mechanism script rel.
   srcExecEmpty: { en: "the execution source (.workflow-events/) has no data", zh: "执行源（.workflow-events/）无数据" },
   srcExecFailed: { en: "the execution source (.workflow-events/) read failed", zh: "执行源（.workflow-events/）读失败" },
   srcLandingTimeout: {
-    en: "the landing source (task-status-drift-check.ts) read timed out",
-    zh: "落地源（task-status-drift-check.ts）读取超时",
+    en: "the landing source ({source}) read timed out",
+    zh: "落地源（{source}）读取超时",
   },
   srcLandingUnavailable: {
-    en: "the landing source (task-status-drift-check.ts) is unavailable",
-    zh: "落地源（task-status-drift-check.ts）不可用",
+    en: "the landing source ({source}) is unavailable",
+    zh: "落地源（{source}）不可用",
   },
   srcLandingFailed: {
-    en: "the landing source (task-status-drift-check.ts) read failed",
-    zh: "落地源（task-status-drift-check.ts）读失败",
+    en: "the landing source ({source}) read failed",
+    zh: "落地源（{source}）读失败",
   },
 };
 
