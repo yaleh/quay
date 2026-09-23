@@ -94,9 +94,17 @@ unsupported-reflog-action: fetch -q . author:develop, fetch -q . chore/quay-dev-
 
 ⛔ 修法**不得**是往白名单加字符串——本仓自己在该文件 `:1137` 附近逐字写明「⛔ Not a spelling whitelist — a spelling whitelist is structurally blind to the next landing form（这正是 `branch: Reset to HEAD` 破掉 AC-194 的方式）」。
 
-### 第 5 类 · 未归因（必须在范围内解决）
+### 第 5 类 · 未注解的负载敏感测试（1 个文件）
 
-`packages/quay/test/serve-adversarial-eval.test.mjs` 在**主检出与 provisioned worktree 两处都取不到读数**（无 `ℹ pass/fail` 汇总行，即 NR；600s 超时内）。**本任务立案时尚未归因**（超时 / 挂起 / 崩溃未知）。它若在 suite 里恒红，同样挡落地 ⇒ 必须归因并解决，或给出可区分的独立取值。
+**⚠️ 本节结论已更正一次（保留原文以示区别，硬规则 4 推论四）**：立案时本节写的是「未归因（超时/挂起/崩溃未知）」。**该说法已被复测推翻**，真因是我的测量谓词错了，不是测试有问题。
+
+`packages/quay/test/serve-adversarial-eval.test.mjs` 是**真子进程 + 真端口绑定**的测试（实测它会启动 `quay serve` 并监听端口，control plane 与 web 同 pid）。但它**没有 `@load-sensitive` 注解，也不在 `plugin/scripts/known-load-sensitive.ts` 注册表里**。
+
+- **隔离跑是绿的**：`RC=0`、`8 PASS / 0 FAIL`（主检出与 provisioned worktree 两处读数一致）。
+- **它不产出 node:test 汇总行**（自带 harness，打印 `PASS: …` 并以 `All M26-adversarial-eval serve.js/provider-client.js fault-injection tests passed.` 收尾）。实测 `grep -cE '^ℹ (pass|fail)'` = **0** ⇒ 用「有没有 `ℹ pass` 行」当谓词读它必然得到 NR。**那是读法错误，不是缺陷**——⛔ 不得把 NR 当成一种失败形态记入本任务。
+- **全量并发下它会红**：ac179 那次 fan-in 的 17 个失败文件里包含它 ⇒ 端口绑定在并发下的竞态。
+
+⇒ **这不是「未归因」，是一处注册表缺口**：注册表 `child-spawn` 类的注释里逐字列着「serve（real subprocess + port binding）」，本文件符合该族却未注解 ⇒ 驱动侧 `relatednessSignalsFor` 的 load-sensitive 提示看不见它。修法 = 补注解，**或**让端口分配在并发下不冲突；⛔ 不是发明新机制、也不是把判据放宽。
 
 ## AC
 
@@ -104,7 +112,7 @@ unsupported-reflog-action: fetch -q . author:develop, fetch -q . chore/quay-dev-
 - [ ] AC2（第 2 类·复现 + 修后 + 取假）① 贴 `TMPDIR=/data/scratch/yale` ⇒ 11/1 与 `TMPDIR=/tmp` ⇒ 12/0 两条读数；② 修后在不改 `TMPDIR` 的宿主 env 下该文件全绿；③ **负控制**：构造一个此前未见过的私有 socket 前缀夹具，扫描仍能报红（证明是"看对了目录"，不是"把判据放宽了"）
 - [ ] AC3（第 3 类·复现 + 修后 + 取假）① 贴失败断言 `actual`/`expected` 原文与 manifest 的 mtime、`grep -c '/home/yale/' .archguard/query/manifest.json` 的读数；② 修后该文件全绿；③ **位置判定**：manifest 仍是 symlink 形态（上述 `grep -c` 仍非零）而测试绿 ⇒ 证明是归一生效，不是"机器态碰巧被清理"
 - [ ] AC4（第 4 类·复现 + 修后 + 取假）① 贴 57/1 与失败断言的 `actual`（`unsupported-reflog-action: …`）/`expected` 原文，并贴 `git reflog show develop` 中该条目的完整 `%gs`；② 点名 `fetch -q . author:develop` 由哪个机制、哪个文件:行产生；③ 修后该文件全绿，且该形态被**按结构**归类（贴分类结果）；④ **负控制**：构造一个此前未出现过的 `fetch` 变体（如 `fetch -q . <sha>:refs/heads/x`），分类器仍正确归类 ⇒ 证明不是白名单
-- [ ] AC5（第 5 类）`serve-adversarial-eval.test.mjs` 的 NR 被归因（贴超时/挂起/崩溃的直接读数），并在本任务内解决至可产出汇总行；若判为独立缺陷，必须**另立任务**并在本 AC 贴出该任务 id 与它的读数——⛔ 不得以"与本任务无关"直接略过
+- [ ] AC5（第 5 类·注册表缺口 + 读法更正）① 贴隔离读数 `RC=0` 与 `8 PASS / 0 FAIL`，以及 `grep -cE '^ℹ (pass|fail)'` = **0** 的直接读数 —— 证明它不是"未归因"而是"读法与它的 harness 不匹配"；② 贴它启动真实 serve 子进程与端口绑定的证据（监听行原文）；③ 修后 `known-load-sensitive.ts` 的输出中包含本文件（贴该行），且全量 suite 中它不再出现在 `passed=false` 行；④ 若最终判定它不应进注册表，须给出**可区分**的替代处置（例如让端口分配不冲突）并贴读数——⛔ 不得以"与本任务无关"直接略过
 - [ ] AC6（sources 面完整性，硬规则 5b）除上述 5 个文件外，在同一 provisioned worktree 内系统扫描**同族**（读 `os.tmpdir()`/`TMPDIR` 的、读 symlink 形态绝对路径的、读 reflog action 词的），把命中数与前 3 条贴出；命中者一并纳入本任务或各立任务并贴 id
 - [ ] AC7（**破锁判据·本任务存在的理由**）在一个 provisioned worktree（`git worktree add` + `bash plugin/scripts/dispatch-worktree-setup.sh <wt>`）内，**在宿主 env 下**跑本仓真全量入口（`bash scripts/test.sh`），得到 `# fail 0` 且**红桶为空**；贴 suite 日志路径、`# tests/# pass/# fail` 计数原文、以及运行时刻。⛔ 不得只跑子集、不得只跑 scoped 门、不得钉 env 之后再跑（env 必须与 fan-in 实际继承的一致——即修法本身必须让默认入口绿）
 - [ ] AC8（**生产读数·锁真的开了**）落地后时间窗内，`.quay/gate-events.jsonl` 出现**至少一条** `gate=complete` ∧ `payload.from=ready` ∧ `payload.to=done` 的记录，其任务**不是** doc-only 跳过 suite 的（该任务存在 `.quay/fan-in-suite-<id>*.log` 且其中 `# fail 0`）；贴两条记录的原文与时间戳（均晚于本任务落地提交）。⛔ 这是本任务与"只修好文件"的分界：证明另一个 code 任务真的过了那堵墙
