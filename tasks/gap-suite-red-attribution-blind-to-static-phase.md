@@ -1,7 +1,7 @@
 ---
 id: gap-suite-red-attribution-blind-to-static-phase
 title: worker-driver 的重试归因只看"失败的测试文件"——suite 死在静态相位时真因不可见，可修缺陷被报成"infra suspected"
-status: ready
+status: done
 labels:
   - gap
   - defect
