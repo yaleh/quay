@@ -80,7 +80,12 @@ criterion: >-
     if [ -n "$a" ]; then nderived=$((nderived + 1)); fi
     if [ -z "$a" ]; then report="$report; pid=$p addr=<none> cause=${cause:-not-derivable}"; continue; fi
     if [ -n "$addr" ]; then report="$report; pid=$p addr=$a cause=not-probed -- an earlier candidate already answered"; continue; fi
-    if curl -sf --max-time 10 -o /dev/null "http://$a$ROUTE" 2>/dev/null; then addr="$a"; report="$report; pid=$p addr=$a cause=fetch-answered"; else why=$(curl -sf --max-time 10 "http://$a$ROUTE" 2>&1 >/dev/null | tr '\n' ' '); report="$report; pid=$p addr=$a cause=fetch-failed -- ${why:-curl exited non-zero with no message}"; fi
+    curl -sf --max-time 10 -o /dev/null "http://$a$ROUTE" 2>/dev/null
+    crc=$?
+    if [ "$crc" = 0 ]; then addr="$a"; report="$report; pid=$p addr=$a cause=fetch-answered"; continue; fi
+    case "$crc" in 6) cc="host-unresolvable" ;; 7) cc="connection-refused" ;; 22) cc="http-error" ;; 28) cc="timeout" ;; *) cc="curl-exit-$crc" ;; esac
+    why=$(curl -sfS --max-time 10 -o /dev/null "http://$a$ROUTE" 2>&1 | tr '\n' ' ')
+    report="$report; pid=$p addr=$a cause=fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
   done
 
 
