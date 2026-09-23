@@ -1,7 +1,7 @@
 ---
 id: gap-unrelated-suite-red-exemption-unreachable
 title: '"与 delta 无关"的重试豁免当前不可达——跨任务签名复发要读的其它任务 suite 日志已不在盘上'
-status: todo
+status: ready
 labels:
   - gap
   - defect
