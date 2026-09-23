@@ -1,7 +1,7 @@
 ---
 id: gap-suite-failure-attribution-third-party-layout
 title: suite 失败归因只认 quay 自身测试布局：第三方项目的 suite 红恒归因不出，被误判「没有 worker 能修的东西」
-status: todo
+status: ready
 labels:
   - gap
   - defect
