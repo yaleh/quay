@@ -68,12 +68,21 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
-import { runAcceptance } from "./gate/acceptance-runner.ts";
+import {
+  runAcceptance,
+  resolveAcceptanceTimeout,
+  timeoutKnobHint,
+  verdictFromAcceptance,
+} from "./gate/acceptance-runner.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
 // runs takes its kill deadline from here. ⛔ `resolveAcceptanceTimeoutMs`, NOT `resolveRunnerOptions`
 // — the latter also resolves a cwd (preferring `QUAY_ACCEPTANCE_CWD`), and a goal criterion's cwd is
 // the git root by design (see the call sites' own comments); taking the whole options object would
 // silently relocate every criterion the moment that variable was set.
+//
+// ⛔ `resolveAcceptanceTimeout` (above) is the RECORD-aware sibling the `goal gate` verb uses: it is
+// this same chain with the record's own `timeoutMs` in front of it, so a per-record deadline is
+// honoured WITHOUT a second default literal (gap-goal-gate-verdict-single-mapping-not-evaluated AC4).
 import { resolveAcceptanceTimeoutMs } from "./gate/config/utils.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
@@ -298,10 +307,15 @@ export interface StalePassReading {
   /** Last recorded verdict is a pass, but no ROTATION verdict within `maxAgeMs` — current truth
    *  UNKNOWN. Reported so the coverage gap is visible; ⛔ not a pass (hard rule 3b). */
   staleUnverified: string[];
-  /** The rotation ran and the criterion itself declared NOT-EVALUATED (exit 3 — this repo's
-   *  convention, e.g. 「NOT-EVALUATED: carrier absent」). ⛔ NOT a failure: "I cannot evaluate this
-   *  HERE" must not share an output shape with "this is false" — recording it as `fail` would be
-   *  this file's own original sin (conflating what was recorded with what is true) in a new place.
+  /** The last relevant verdict was NOT-EVALUATED — the criterion never got to state anything.
+   *  Three causes, all recorded by the ONE mapping (`gate/acceptance-runner.ts`
+   *  `verdictFromAcceptance`): the criterion itself declared it (exit 3 — this repo's convention,
+   *  e.g. 「NOT-EVALUATED: carrier absent」), it was killed at its deadline, or its command could not
+   *  be run at all (exit 126/127 / spawn failure). ⛔ NOT a failure: "I cannot evaluate this HERE"
+   *  must not share an output shape with "this is false" — recording it as `fail` would be this
+   *  file's own original sin (conflating what was recorded with what is true) in a new place.
+   *  Reached from a ROTATION verdict (the sweep branch above) or from the last-recorded-verdict
+   *  fallback when that tail is a `goal-cli`/MCP not-evaluated event.
    *  ⚠️ Consequence worth knowing: several frozen criteria read gitignored runtime carriers under
    *  `.quay/`, so they legitimately report NOT-EVALUATED in a transient worktree and PASS in the
    *  workspace that owns those carriers ⇒ the rotation is WORKSPACE-LOCAL and is driven from the
@@ -341,7 +355,7 @@ export interface StalePassReading {
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-  "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity",
+  "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -640,6 +654,12 @@ interface GoalFrontmatter {
   labels?: string[];
   /** GOAL 层 posture 声明（如 `measure-only`——先测量后承诺，名下 draft AC 不得判 activate，AC-215）。 */
   posture?: string;
+  /** 本判据自己的运行期限（毫秒）。`quay goal gate` / MCP `goal_gate` 优先读它，其次
+   *  `QUAY_ACCEPTANCE_TIMEOUT_MS`，再次默认值（gap-goal-gate-verdict-single-mapping-not-evaluated）：
+   *  在此之前 goal 路径把 60000 写死，而超时判词却叫读者去调 gates.yml —— 那条建议在这条路径上
+   *  不起作用（goal 既不读 `extra.acceptance` 也不读 gates.yml）。⛔ 非「有限正数」的值被忽略而非
+   *  强转（`spawnSync({timeout: NaN})` 等于「无期限」，一个笔误会把闸门关掉）。 */
+  timeoutMs?: number;
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes?: string[];
   "superseded-by"?: string[];
@@ -666,6 +686,9 @@ interface GoalViewModel {
   origin: unknown;
   /** GOAL 层 posture 声明（AC-215：`measure-only` ⇒ 名下 draft AC 分诊不得判 activate）。 */
   posture: unknown;
+  /** The record's own criterion deadline (ms), if it declares one — read by the two goal gate
+   *  entry points via `resolveAcceptanceTimeout` (see GoalFrontmatter.timeoutMs). */
+  timeoutMs: unknown;
   evidence: unknown;
   activatedAt?: string;
   statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
@@ -1559,6 +1582,7 @@ export function createGoalStore(
       expect: frontmatter.expect,
       origin: frontmatter.origin,
       posture: frontmatter.posture,
+      timeoutMs: frontmatter.timeoutMs,
       longTerm: frontmatter["long-term"] === true,
       fidelity: frontmatter.fidelity,
       evidence,
@@ -1908,6 +1932,14 @@ export function createGoalStore(
         else notEvaluated.push(id); // "not-evaluated" — 判据自己声明【此地无法评估】，⛔ 不是假
       } else if (tail.verdict === "fail") {
         failing.push(id);
+      } else if (tail.verdict === "not-evaluated") {
+        // The tail fallback's third answer. ⛔ Without this branch a not-evaluated tail (a goal-cli
+        // event whose criterion timed out, could not spawn, or exited 126/127) fell through to
+        // `staleUnverified` — "last verdict was a pass, but we have not looked recently enough" —
+        // which asserts something about a pass that never happened
+        // (gap-goal-gate-verdict-single-mapping-not-evaluated). Same distinction the rotation branch
+        // above already draws, applied to the write path that now produces it.
+        notEvaluated.push(id);
       } else {
         staleUnverified.push(id);
       }
@@ -2031,12 +2063,16 @@ export function createGoalStore(
         }
         const criterion = String(byId.get(id)?.criterion ?? "");
         const t0 = Date.now();
+        // The DEADLINE is `resolveAcceptanceTimeoutMs()` — the shared config-surface chain, ⛔ not a
+        // private literal (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
         const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
-        // ⛔ exit 3 = the criterion itself declared NOT-EVALUATED (this repo's convention). It is
-        // recorded AS SUCH: writing `fail` would assert "this is false" about a criterion that said
-        // "I cannot evaluate this here" — hard rule 3b, and the very conflation this task is about.
-        const verdict: "pass" | "fail" | "not-evaluated" = res.ok ? "pass" : res.code === 3 ? "not-evaluated" : "fail";
-        ran.push({ id, verdict, reason: res.reason.slice(0, 500), ms: Date.now() - t0 });
+        // ⛔ Through the ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it,
+        // this site recognised only exit 3 and recorded a timeout / spawn failure / exit 126-127 as
+        // `fail` — i.e. asserted "this criterion is FALSE" about a criterion that never got to say
+        // anything (hard rule 3b, and the very conflation this task is about). `res.reason`'s own
+        // exit-3 convention is unchanged; the additional causes now travel with it.
+        const v = verdictFromAcceptance(res);
+        ran.push({ id, verdict: v.verdict, reason: v.reason.slice(0, 500), ms: Date.now() - t0 });
         appendGateEvent(logPath, {
           id: randomUUID(),
           item_id: id,
@@ -2047,12 +2083,18 @@ export function createGoalStore(
           // "its criterion text changed, so this round ran it immediately". Both count as rotation
           // writes (see `gateTails`), because both are re-verifications.
           actor: amendedIds.has(id) ? AMEND_ACTOR : SWEEP_ACTOR,
-          verdict,
+          verdict: v.verdict,
           timestamp: new Date().toISOString(),
           // The fingerprint pins WHICH criterion text this verdict is about — the whole point of the
           // amendment gate. ⛔ Recorded, not inferred later from mtime/clock (hard rule 4 corollary
           // 2: a value that depends on the host is not a measurement).
-          payload: { reason: res.reason, criterionHash: criterionFingerprint(criterion) },
+          // `cause` is present only when there IS one (⛔ not `cause: null` on the pass/fail events):
+          // the shape of the 8000+ existing goal events is a contract several readers parse.
+          payload: {
+            reason: v.reason,
+            ...(v.cause ? { cause: v.cause } : {}),
+            criterionHash: criterionFingerprint(criterion),
+          },
         });
       }
     } finally {
@@ -2406,13 +2448,17 @@ export function createGoalStore(
         // actually been evaluated to a verdict.
         const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: resolveAcceptanceTimeoutMs() });
         const wallMs = Date.now() - startedMs;
-        // not-evaluated = the command never ran to a verdict (spawn error); "ran and failed"
-        // (exit ≠0) and timeouts are both a definitive "fail" verdict ⇒ evaluable ⇒ allowed.
+        // EVALUABILITY (a question about the criterion's existence, answered by the runner
+        // reaching a process at all) — ⛔ a DIFFERENT question from the verdict vocabulary
+        // (gate/acceptance-runner.ts verdictFromAcceptance, where a timeout is NOT "false"):
+        // "ran and failed" (exit ≠0) and a timeout both prove the command is runnable ⇒ allowed.
         if (gateRes.code === null && !gateRes.timedOut) {
           throw new Error(`cannot activate ${id}: criterion not-evaluated (${gateRes.reason}) — pass --force to override`);
         }
         // P10 — make the activation cost visible: the criterion now joins the per-round hot loop.
-        console.error(`goal-store: activated ${id} — criterion ran in ${wallMs}ms (${gateRes.ok ? "pass" : "fail"})`);
+        // The token printed is the shared 3-valued one (⛔ not a hand-rolled binary ternary) so a
+        // reader of this line and a reader of the ledger see the same vocabulary.
+        console.error(`goal-store: activated ${id} — criterion ran in ${wallMs}ms (${verdictFromAcceptance(gateRes).verdict})`);
       }
 
       // P6-goal — the GOAL half of the SAME activation gate (gap-meta-goal-store-activation-gate):
@@ -2576,7 +2622,7 @@ export function createGoalStore(
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity",
+        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity", "timeoutMs",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -3153,19 +3199,39 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       const criterion = rec.criterion;
       let verdict: string;
       let reason: string;
+      let cause: string | null = null;
       // The deadline THIS invocation actually used — surfaced in the JSON below so a caller can tell
       // "the criterion timed out" from "the criterion timed out at a deadline I did not intend".
-      // ⛔ Read BEFORE running: `resolveAcceptanceTimeoutMs()` is pure, and resolving it after a
-      // 60s+ wait would report a value the run did not necessarily use if the env changed mid-flight.
-      const timeoutMs = resolveAcceptanceTimeoutMs();
+      // ⛔ Read BEFORE running: the resolver is pure, and resolving it after a 60s+ wait would report a
+      // value the run did not necessarily use if the env changed mid-flight.
+      // ⛔ RECORD-aware: a goal record's own `timeoutMs` is the deadline in force for its criterion;
+      // the shared env/default chain is only the fallback beneath it (AC4 of this task — the record
+      // is the only place a goal's own deadline can be declared, and the goal path reads no gates.yml).
+      const t = resolveAcceptanceTimeout((rec as unknown as { timeoutMs?: unknown }).timeoutMs);
+      const timeoutMs = t.timeoutMs;
       if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
         verdict = "fail";
         reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
       } else {
-        const result = runAcceptance({ command: criterion, cwd: root, timeoutMs });
-        verdict = result.ok ? "pass" : "fail";
-        reason = result.reason;
+        // The deadline is `t` resolved above — the RECORD's `timeoutMs` when it declares one, else the
+        // shared env/default chain. ⛔ NOT gates.yml's: the goal path reads neither the task's
+        // `extra.acceptance` nor a gates.yml key for its criterion, so a reason telling a goal reader
+        // to raise those names a knob that does not exist here
+        // (gap-goal-gate-verdict-single-mapping-not-evaluated; the hint below is the one that does).
+        const result = runAcceptance({
+          command: criterion,
+          cwd: root,
+          timeoutMs: t.timeoutMs,
+          timeoutKnob: timeoutKnobHint(t),
+        });
+        // ⛔ The ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated): a timeout, a
+        // spawn failure and exit 126/127 record `not-evaluated`, ⛔ not `fail` — "we could not
+        // measure this" must never wear the shape of "this is false" (hard rule 3b).
+        const v = verdictFromAcceptance(result);
+        verdict = v.verdict;
+        reason = v.reason;
+        cause = v.cause;
       }
       const event = {
         id: randomUUID(),
@@ -3175,7 +3241,8 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
         actor: "goal-cli",
         verdict,
         timestamp: new Date().toISOString(),
-        payload: { reason },
+        // `cause` only when there is one — see the sweep site's note on the payload shape.
+        payload: { reason, ...(cause ? { cause } : {}) },
       };
       // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
       if (!dryRun) appendGateEvent(logPath, event);
@@ -3187,8 +3254,12 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // production surface. ⛔ Without it, "the default is still 60000 when nothing overrides it" is
       // only observable by waiting 60 seconds for a kill, which is exactly the kind of
       // wait-for-the-failure check a test should never have to make.
-      const out = { id, verdict, reason, timeoutMs, timestamp: event.timestamp, dryRun, event };
+      // `cause` travels beside it (non-null exactly when the verdict is `not-evaluated`), so a reader
+      // can tell WHICH knob to turn without parsing the reason string.
+      const out = { id, verdict, cause, reason, timeoutMs, timestamp: event.timestamp, dryRun, event };
       process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+      // ⛔ `pass` is the ONLY exit 0: not-evaluated is not a pass (the driver reads this code as a
+      // verdict), it is merely a different kind of non-pass, distinguishable in the ledger.
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
