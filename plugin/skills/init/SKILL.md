@@ -267,7 +267,7 @@ in three states, never a bare yes/no:
 
 | state | when | doc = |
 |---|---|---|
-| `registry` | the tree carries quay's own checker registry (`plugin/scripts/runner-static-gate.ts` or the shipped `scripts/runner-static-gate.ts`) | the paths no change/full-tier checker's `@static-object` glob matches, among quay's own surfaces |
+| `registry` | the tree carries quay's own checker registry (`runner-static-gate.ts`, under the plugin's `scripts/` directory) | the paths no change/full-tier checker's `@static-object` glob matches, among quay's own surfaces |
 | `declared` | no registry, and `.quay/config.yml` declares `loop.doc_surfaces` | those path prefixes, plus `tasks/` |
 | `conservative-default` | neither | only `tasks/`, `goals/`, `.quay/` — the surfaces quay itself writes |
 
