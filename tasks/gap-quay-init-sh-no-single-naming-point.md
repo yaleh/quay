@@ -102,3 +102,94 @@ packages/quay/src/cli/help.ts:238/272  与  packages/quay/src/cli/init.ts:56/91/
 - `plugin/test/precommit-guard.test.mjs`
 - `packages/quay/test/init.test.mjs`
 - `tasks/gap-quay-init-sh-no-single-naming-point.md`
+
+## Evidence（2026-09-23 第 2 轮 worker —— 修 suite 红 + 记录实现偏差）
+
+### 本轮修的 suite 红：真因是本任务的实现，不是环境
+
+上一轮 fan-in 的失败用例逐字（正本 log：`.quay/fan-in-suite-gap-quay-init-sh-no-single-naming-point~wk-prod-anchor~1790136256016-3a54d0.log`）：
+
+```
+✖ ⑥ shipped-set closure — the ENUMERATION is proven complete, not asserted (AC1..AC4)
+  AssertionError [ERR_ASSERTION]: --selfcheck-transport-closure must exit 0:
+  selfcheck-transport-closure: positive → violations=1 (expect 0)
+  selfcheck-transport-closure:   IMPORT-UNSHIPPED: quay-init-closure-assertion.ts imports ./quay-init-closure-ratchet.ts — not in the shipped set
+```
+
+**真因**：上一轮按 Proposal 修法把命名点放在 `quay-init-closure-ratchet.ts`，并让 `quay-init-closure-assertion.ts` import 它。但 `plugin/scripts/develop-deliver-tgz.sh` 的 `transport_flat_files` 把 **assertion 列为随行交付文件**（远程 `verify-deliver-coldstart.sh:5017` 会 import 它），而 **ratchet 不在交付集**（dev-tree only，消费者是 `precommit-guard.ts` / `runner-static-gate.ts`）⇒ 一个 shipped→non-shipped 的 `./` import 打破了交付闭包，远程会 MODULE_NOT_FOUND。fan-in 的 delta 提示把该用例判为 UNRELATED，**实测复现后确认为本任务引入的真因**（提示只是提示，不是结论）。
+
+### 实现偏差（Proposal 允许「除非能给出更强理由」，此处即该理由）
+
+`QUAY_INIT_REL` 的**家从 ratchet 移到 assertion**（shipped 的那一侧），ratchet 改为 import 它。理由不是风格：交付闭包要求 shipped 文件自足（其每个 `./` import 也必须在交付集内），所以常量必须落在**能被交付的一侧**；反向（dev-tree → shipped）对闭包检查不可见、且事实上成立。三个 spawn/清单点（ratchet 的 `runLaydown`、assertion 的 `runLaydownPaths` / `runFailureStateReport`、`LAYDOWN_SOURCES[0]`）**全部派生自这一个常量** —— 「每层一个命名点」不变，只是位置从「机制层里先想到的那个模块」改成「机制层里可交付的那个模块」。
+
+### 逐条 AC 读数
+
+**AC1**（机制层单一命名点，按位置核）：
+
+```
+$ grep -n 'quay-init\.sh' plugin/scripts/quay-init-closure-ratchet.ts plugin/scripts/quay-init-closure-assertion.ts
+plugin/scripts/quay-init-closure-assertion.ts:31:// `path.join(root, "plugin", "scripts", "quay-init.sh")` independently, i.e. this file carried two
+plugin/scripts/quay-init-closure-assertion.ts:47:export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
+plugin/scripts/quay-init-closure-assertion.ts:114: * Returns null (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits non-zero.
+plugin/scripts/quay-init-closure-assertion.ts:213: * lines a non-zero exit must emit). Returns null when quay-init.sh is absent (the same NOT-EVALUATED
+plugin/scripts/quay-init-closure-ratchet.ts:37://   plugin/scripts/quay-init.sh          the generator (config.yml / .gitignore / settings.json content)
+plugin/scripts/quay-init-closure-ratchet.ts:180: * product. Returns evaluated:false (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits
+```
+
+唯一的**路径字面量**是 `quay-init-closure-assertion.ts:47` 的常量定义行；其余命中全是注释散文（⛔ 按位置判定，注释不算命名点 —— 硬规则 2）。原 `:174`（ratchet 的 `runLaydown` spawn）、`:97`/`:198`（assertion 两处 spawn）已全部改为 `path.join(root, QUAY_INIT_REL)`。
+
+**AC2**（产品层单一命名点 + 行为保持，真 CLI）：
+
+```
+$ grep -rn 'quay-init\.sh' packages/quay/src/cli/help.ts packages/quay/src/cli/init.ts
+packages/quay/src/cli/help.ts:31:export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
+```
+
+`init.ts` 零命中（它只引用符号 `QUAY_INIT_REL`，不拼字面量）。**真实 CLI 输出**（`node packages/quay/bin/quay.js init --help`，非读源码）：
+
+```
+51:  need the branch model established (the shipped plugin/scripts/quay-init.sh
+```
+
+名字跟随常量，行为保持。
+
+**AC3**（三处 carve-out 逐条判定，无留白）：
+
+1. `plugin/scripts/laydown-set-check.sh:93` `. "$SELF_DIR/quay-init.sh"` —— **不可派生**：POSIX `source` 按**文件名**载入机制脚本，而本任务的命名点是 TypeScript 模块常量；`.sh` 无法 import `.ts`（检测器自己为此设了 `shell` carve-out 族）。
+2. `plugin/scripts/runner-static-gate.ts:741` `# @static-object plugin/scripts/quay-init.sh …` —— **不是可执行路径**：`@static-object` 是 static-tier 选择器读的**标注散文**；同块真正执行的路径在第 742 行（`profiles-role-coverage-check.ts`）。
+3. `packages/quay/scripts/build-plugin-dist.mjs:810` `path.basename(f) === "quay-init.sh"` —— **不可派生**（两条独立理由）：它是施加在 `walk(pluginRoot)` 任意被走到文件上的**识别谓词**，不是路径副本；且该文件由 `packages/quay/scripts/package.sh:168` 以**裸 `node`**（无 `--experimental-strip-types`）调用，产品层那个 `.ts` 常量在运行期根本不可 import。
+
+**AC4**（红控制，能取假）—— 把 `QUAY_INIT_REL` 临时改成 `plugin/scripts/quay-init-REDCONTROL-NOT-A-REAL-FILE.sh`：
+
+```
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .
+NOT-EVALUATED: quay-init-closure-ratchet: NOT-EVALUATED — plugin/scripts/quay-init-REDCONTROL-NOT-A-REAL-FILE.sh not found at …/plugin/scripts/quay-init-REDCONTROL-NOT-A-REAL-FILE.sh (a checker that cannot read its input is never conflated with "≤ baseline")
+exit=3
+$ node --experimental-strip-types plugin/scripts/quay-init-closure-assertion.ts --gate --root .
+NOT-EVALUATED: quay-init-closure-assertion: NOT-EVALUATED — the real quay-init laydown could not run (a checker that cannot read its input is never conflated with 'closed set satisfied')
+exit=3
+```
+
+ratchet 的报错**报出新名字**（证明 `runLaydown` 的 spawn 路径派生自常量，而不是恰好相等的第二份字面量）；assertion 由 PASS 翻成 NOT-EVALUATED（证明它的两处 spawn 同样派生）。还原后：`md5sum plugin/scripts/quay-init-closure-assertion.ts` = `83d506af489b0894bd95561cad526b93`（与红控制前同一值），`assertion --gate` 回到 `PASS: quay-init laydown is within the closed set (5 file(s), zero extension-file copies)…` exit 0，红控制零残留。
+
+**AC5**（簇的产出侧读数，能取假；检测器只跑不改）：
+
+```
+修前（立案基线）：=== quay-init.sh full=83 code=22 accessor=2 hardcoded=20
+修后：            full=82 code=19 accessor=2 hardcoded=17
+```
+
+`hardcoded` 20 → 17（低于基线，判据满足）。**残余如实报出**（⛔ 不报 0 充数）：17 = 13 个 G3 test carrier + 4 个非测试载体，非测试残余逐字：`plugin/scripts/quay-init.sh`（实体自身：`NEVER_LAYDOWN` + `derive_loop_scripts` 名单）、`plugin/scripts/laydown-set-check.sh:93`（AC3 #1 的 shell carve-out）、`plugin/scripts/runner-static-gate.ts:741`（AC3 #2 的标注散文）、`packages/quay/scripts/build-plugin-dist.mjs:810`（AC3 #3 的识别谓词）。
+
+**额外残余（Proposal 的 9 点清单未列，本轮实测发现、如实报出、本任务未修）**：`plugin/scripts/verify-deliver-coldstart.sh` 有 5 处**真实路径构造**（`:1386` `:3606` `:4573` `:5904` 等，形如 `"$plugin_root/scripts/quay-init.sh"`）。它与 AC3 #1 同类（shipped shell 载体按文件名拼兄弟脚本，无法 import TS 常量），但不在本任务的三处 carve-out 名单内 —— 报出而不当作已消解。
+
+**AC6**（scoped 门）：`bash scripts/test.sh --for-task gap-quay-init-sh-no-single-naming-point --allow-thin` **exit 0**，`tests 179 / pass 179 / fail 0`（≈63s）。
+
+### DoD 载体复核
+
+1. **机制层**真实载体：AC4 的红控制跑的是**真实 gate 运行**（`--gate --root .`，非单测），其 spawn 路径随常量改变 ⇒ 载体证据成立。
+2. **产品层**真实载体：AC2 读的是**真实 CLI 输出**（非源码）⇒ 成立。
+
+### 本轮回归
+
+`node --test`（Touches 内四个测试文件：quay-init-closure-ratchet / quay-init-laydown-closure / precommit-guard / packages/quay/test/init）**94 tests / 94 pass / 0 fail**；`develop-deliver-tgz-evidence-transport.test.mjs` **20/20 pass**（原红用例 ⑥ 转绿：`positive → violations=0`，交付集仍为 9 flat files + 1 node_modules dep，未增长交付面）。
