@@ -1,7 +1,7 @@
 ---
 id: gap-driver-status-loaded-vs-installed-version-drift
 title: driver status 以查询者自己的 kernel 目录判新鲜度：运行中 anchor 落后已安装版本 3 天仍报 fresh
-status: todo
+status: ready
 labels:
   - gap
   - defect
