@@ -16,12 +16,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { execFileSync } from "node:child_process";
+
 import {
   aliasesOf,
   classifyCodeFile,
   classifyDocFile,
   deletionClosure,
+  ignoreSourceOf,
+  scanVisible,
 } from "../scripts/deletion-closure-check.ts";
+import { gitVisiblePaths, visibleDirPrefixes } from "../scripts/fs-walk.ts";
 
 const _createdDirs = [];
 
@@ -141,6 +146,92 @@ test("deletionClosure — 反向判据 (AC2): 单一 source 访问器 R≈1, 叙
   assert.equal(r.counts.dcTotal, 4, "3 call + 1 doc");
   assert.ok(r.counts.ratio <= 2, `R=${r.counts.ratio} 不得 > 2 (封装良好)`);
   assert.equal(r.callGraph.includes("orchestration/d.md"), false, "doc 提及不进 CallGraph");
+});
+
+// ── skip 面由 gitignore 驱动 (gap-deletion-closure-walker-respects-gitignore) ─────────────────
+// 本缺陷：walker 的 skip 面是手工名单，不认 .gitignore ⇒ 把 `.claude/worktrees/` 里【另一个
+// worktree 的整份 repo 副本】读成"引用 X 的文件"（立案时 12010 条闭包里 11054 条落在 gitignored
+// 前缀下）。下表三组测试钉住修法：机制本身、它的三取值边界 (NOT-EVALUATED 不是空集)、
+// 以及"真的会排除"的对照 (同一棵树，面开/面关)。
+
+/** `git init` 过的夹具 —— 让 `git ls-files -co --exclude-standard` 有得可答。 */
+function mkgit(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcc-git-"));
+  _createdDirs.push(dir);
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  // 宿主的全局 excludes 不是被测对象，会引入无关不确定性 ⇒ 在本夹具里置空。/dev/null 是"读不到
+  // 规则"，与"没有任何规则"对 .gitignore 的判定等价（fixture 的 .gitignore 仍然照常生效）。
+  execFileSync("git", ["config", "core.excludesFile", "/dev/null"], { cwd: dir });
+  for (const [rel, data] of Object.entries(contents)) {
+    const p = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, data);
+  }
+  return dir;
+}
+
+test("gitVisiblePaths — 非 git 根返回 null (NOT-EVALUATED), 不是空集", () => {
+  const dir = mktmp({ "plugin/scripts/a.ts": "export const a=1;\n" }); // mktmp 不 git init
+  const v = gitVisiblePaths(dir);
+  assert.equal(v, null, "读不懂输入必须与'合格'不同形 (硬规则 3b)：空集会读成'这里没有东西被忽略'");
+  assert.equal(scanVisible(dir), null);
+  assert.equal(ignoreSourceOf(dir, null).kind, "manual-skip-only", "兜底态必须在报告里可区分");
+});
+
+test("gitVisiblePaths — tracked ∪ untracked-not-ignored, 排除 gitignored 树", () => {
+  const dir = mkgit({
+    ".gitignore": "ignored-tree/\n",
+    "plugin/scripts/tracked.ts": "export const t=1;\n",
+    "plugin/scripts/untracked.ts": "export const u=1;\n",
+    "ignored-tree/copy.ts": "export const c=1;\n",
+  });
+  execFileSync("git", ["add", "plugin/scripts/tracked.ts"], { cwd: dir }); // 进 index ⇒ --cached 面
+  const v = gitVisiblePaths(dir);
+  assert.ok(v instanceof Set, "git 回答得了 ⇒ 不是 null");
+  assert.ok(v.has("plugin/scripts/tracked.ts"), "--cached 面");
+  assert.ok(v.has("plugin/scripts/untracked.ts"), "--others --exclude-standard 面");
+  assert.equal(v.has("ignored-tree/copy.ts"), false, "gitignored 树里的文件不在集合里");
+  assert.equal(v.has(".gitignore"), true, ".gitignore 自己不是被忽略的");
+  assert.equal(ignoreSourceOf(dir, scanVisible(dir)).kind, "git-worktree");
+});
+
+test("visibleDirPrefixes — 每个可见路径的全部祖先目录; 根级文件不产生目录", () => {
+  const dirs = visibleDirPrefixes(["a/b/c.ts", "a/d.ts", "top.md"]);
+  assert.deepEqual([...dirs].sort(), ["a", "a/b"]);
+});
+
+test("deletionClosure — gitignored 树不进闭包; 同一棵树关掉这个面则进 (真排除的对照)", () => {
+  // 两个 .md 都**逐字**提及构件，唯一差别是所在目录是否被 gitignore —— 所以 refs 的差只能由
+  // skip 面解释，不能由"现场恰好没有引用"解释 (AC4 的三读对照在单测层的同形)。
+  const MENTION = "run foo.sh to do things\n";
+  const dir = mkgit({
+    ".gitignore": "ignored-tree/\n",
+    "visible.md": MENTION,
+    "ignored-tree/ref.md": MENTION,
+  });
+  const withFace = deletionClosure(dir, ["foo.sh"]);
+  assert.equal(withFace.dc.includes("ignored-tree/ref.md"), false, "gitignored 树不进闭包");
+  assert.equal(withFace.dc.includes("visible.md"), true, "可见引用面**不许**被一起丢掉");
+  assert.equal(withFace.ignoreSource.kind, "git-worktree");
+
+  // 对照：显式传 visible=null (面关掉) —— 同一棵树、同一份内容，gitignored 引用立刻出现。
+  // 没有这一读，"前缀为 0" 与 "闭包本来就是空的" 同形。
+  const noFace = deletionClosure(dir, ["foo.sh"], null);
+  assert.equal(noFace.dc.includes("ignored-tree/ref.md"), true, "关掉面 ⇒ 该引用确实在闭包里");
+  assert.equal(noFace.ignoreSource.kind, "manual-skip-only");
+  assert.equal(withFace.dc.length + 1, noFace.dc.length, "面开/面关只差被排除的那一条");
+});
+
+test("deletionClosure — gitignored 树里的【代码】引用同样排除 (不只 .md)", () => {
+  const dir = mkgit({
+    ".gitignore": "mirror/\n",
+    "plugin/scripts/live.sh": 'bash "$DIR/foo.sh"\n', // 可见 ⇒ CallGraph 的一条
+    "mirror/copy.sh": 'bash "$DIR/foo.sh"\n', // gitignored ⇒ 不得进 CallGraph
+  });
+  const r = deletionClosure(dir, ["foo.sh"]);
+  assert.equal(r.callGraph.includes("mirror/copy.sh"), false, "gitignored 代码不进 CallGraph");
+  assert.equal(r.callGraph.includes("plugin/scripts/live.sh"), true);
+  assert.equal(r.counts.callGraphTotal, 1);
 });
 
 after(() => {
