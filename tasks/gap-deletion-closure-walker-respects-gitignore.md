@@ -218,7 +218,7 @@ SCOPED GATE EXIT=0
 
 `scripts/test.sh` 里 `tests 31` 是该 scoped 泳道同时跑的 `fs-walk.test.mjs` + `deletion-closure-check.test.mjs`。
 
-### DoD 核对
+## DoD
 
 - 生产载体（本仓真实树 `/home/yale/work/quay`）跑过 `--json`：三个 gitignored 前缀条数各 **0**，报告仍非空（`CallGraph = 205 > 0`）✅
 - AC2/AC3/AC4 三组真实输出（含 AC4 的注入前/注入后/撤除后三读 + 面开关对照）已逐字贴入本任务体 ✅
