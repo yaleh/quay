@@ -3,8 +3,8 @@
 // ac295-criterion-address-derivation.test.mjs — the fixture for the RE-ANCHORED address-derivation
 // step of `goals/AC-295-*.md`'s criterion (gap-ac295-criterion-cmdline-port-literal-stale).
 //
-// It is the SIBLING of packages/quay/test/ac288-criterion-address-derivation.test.mjs and
-// ac295-criterion-address-derivation.test.mjs (the family's established re-anchors): the derivation
+// It follows the family's established re-anchors — the sibling fixtures at
+// packages/quay/test/ac2*-criterion-address-derivation.test.mjs: the derivation
 // step is one shared line across the family, so the block is adopted VERBATIM (per its own "copy it,
 // do not re-derive") with only ROUTE / LABEL_EN retargeted to this AC (/needs-human, "Needs Human").
 //
