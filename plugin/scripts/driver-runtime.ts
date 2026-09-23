@@ -1491,6 +1491,157 @@ export function launchArgv(role: string, prompt: string, root: string, opts: Lau
   return argv;
 }
 
+// ── 环境级（environment-fatal）签名：launcher/model 解析结果【必然导致所有 worker 同样失败】的字面形态 ──
+// 为什么这份表住在 Layer 0（driver-runtime）而不是 worker-driver：**两个消费方必须共用同一份清单**——
+// ① 本文件的启动冒烟 `runEnvironmentSmoke`（起循环【之前】就拒绝一个坏环境）；② worker-driver 的快速
+// 死亡分类器（循环【之中】发现环境级故障 ⇒ 停 driver 而不是逐个 park 任务）。而 worker-driver **已经**
+// 从本文件 import（stopCondition 等），反向 import 会造出一个新的 value SCC（import-graph-check 是
+// shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。把表放在【被依赖的那一侧】是唯一不造环的单一真相源。
+// 生产实例 → `gap-worker-quick-death-environment-fatal-halts-driver`（claudecodeui 2026-09-20）。
+//
+// ⛔ 宁窄勿宽（硬规则 2 按位置判定）：每条签名都配一条【不命中】的反例，由测试逐条双向断言——过宽的
+// 签名必然在它自己的反例上命中，所以这份表能对自己的「过宽」取假。
+
+/** 环境级签名的一条匹配规则。`example`/`counterexample` 是机器可读的正反例（测试逐条断言）。 */
+export interface EnvFatalSignature {
+  /** 签名名（人读标识，落进停机原因）；⛔ 不是匹配面本身。 */
+  name: string;
+  /** 匹配规则。⛔ 用正则而非裸子串：`401` 这类短数字裸子串会命中 `wall_clock_ms=4012`。 */
+  re: RegExp;
+  /** 一条【命中】该签名的真实文本形态（第一手样本或同族字面形态）。 */
+  example: string;
+  /** 一条【不命中】该签名的反例——必须「看起来像」但结构上不同形。 */
+  counterexample: string;
+}
+
+/** 环境级签名表（见上方「为什么住在 Layer 0」）。 */
+export const ENVIRONMENT_FATAL_SIGNATURES: readonly EnvFatalSignature[] = [
+  {
+    name: "model_not_found",
+    re: /model_not_found/i,
+    example:
+      'API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: v4.1flash"}} (model_not_found)',
+    counterexample: "worker exited with code 1",
+  },
+  {
+    name: "auth-401",
+    // ⛔ 裸 `401` 太宽（`wall_clock_ms=4012` 会命中）⇒ 必须带 HTTP 错误语境。
+    re: /api error:\s*(401|403)\b/i,
+    example: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    counterexample: "worker exited with code 4012",
+  },
+  {
+    name: "invalid-x-api-key",
+    re: /invalid\s+x-api-key/i,
+    example: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    counterexample: "x-api-key header accepted by gateway",
+  },
+  {
+    name: "authentication_error",
+    re: /authentication_error/i,
+    example: '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    counterexample: "worker exited with code 1",
+  },
+  {
+    name: "launcher-enoent",
+    // ⛔ 裸 `ENOENT` 太宽（`ENOENT: no such file or directory, open 'tasks/x.md'` 是任务自身缺陷的常见
+    // 形态）⇒ 只认「spawn 一个可执行文件」那一种 node 错误形态。
+    re: /spawn\s+\S+\s+enoent/i,
+    example: "Error: spawn claude-fjdac ENOENT",
+    counterexample: "ENOENT: no such file or directory, open 'tasks/gap-x.md'",
+  },
+  {
+    name: "dns-unresolvable",
+    re: /could not resolve host/i,
+    example: "curl: (6) Could not resolve host: api.anthropic.com",
+    counterexample: "resolved host api.anthropic.com → 160.79.104.10",
+  },
+];
+
+/** 环境级签名匹配结果：命中的签名名 + 【原文摘录】（停机原因与载体要附的「签名原文」）。 */
+export interface EnvFatalMatch {
+  signature: string;
+  /** 命中处的原文（截断到一行）。⛔ 理论上可为 null（跨行正则命中而非单行），调用方须容忍。 */
+  evidence: string | null;
+}
+
+/** 在一段文本里找第一条命中的环境级签名（纯函数，⛔ 不读文件、⛔ 不看进程、⛔ 不调模型）。
+ *  返回 null = 【没命中】（硬规则 3：不与「命中某条」同形）。 */
+export function matchEnvironmentFatalSignature(text: string | null | undefined): EnvFatalMatch | null {
+  if (typeof text !== "string" || text.trim().length === 0) return null;
+  for (const sig of ENVIRONMENT_FATAL_SIGNATURES) {
+    if (!sig.re.test(text)) continue;
+    let evidence: string | null = null;
+    for (const line of text.split("\n")) {
+      if (line.trim().length === 0) continue;
+      if (sig.re.test(line)) { evidence = line.trim().slice(0, 400); break; }
+    }
+    if (evidence == null) {
+      const first = text.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+      evidence = first != null ? first.slice(0, 400) : null;
+    }
+    return { signature: sig.name, evidence };
+  }
+  return null;
+}
+
+// ── Layer 0 · 环境冒烟（`quay driver start --kind worker` 起循环【之前】的拒绝闸）─────────────────
+
+/** 冒烟调用用的最小 prompt（⛔ 不是任务 prompt——它只问「这个 launcher+model 现在能不能通」）。 */
+export const ENVIRONMENT_SMOKE_PROMPT = "Reply with exactly: ok";
+/** 冒烟调用预算（ms）。机制常量（一次最小往返的上界），⛔ 不读宿主规格。 */
+export const ENVIRONMENT_SMOKE_TIMEOUT_MS = 120_000;
+
+/** 环境冒烟结果【四态】（⛔ 两两不同形，硬规则 3/3b）：
+ *   - "pass"                    —— launcher+model 解析得出，冒烟退出 0。
+ *   - "refused"                 —— 命中环境级签名（含 launcher 根本起不来）⇒ 调用方拒绝启动。
+ *   - "failed-non-environment"  —— 跑了、非零退出/超时/起不来，但【没有】环境级签名（如瞬时限流）
+ *                                  ⇒ 只告警不拒启（拒启会把一次限流变成「起不了 driver」，而限流正是
+ *                                  驱动自己该退避处理的态）。
+ *   - "not-evaluated"           —— 连冒烟 argv 都构不出（profiles.yml 缺失/非法 ⇒ 解析不出 launcher/
+ *                                  model）⇒ 如实报「未评估」，⛔ 不与 "pass" 同形（硬规则 3b：读不懂 ≠ 合格）。 */
+export type EnvironmentSmokeVerdict = "pass" | "refused" | "failed-non-environment" | "not-evaluated";
+
+/** 一次环境冒烟的结果（verdict + 人读原因 + 命中签名 + 输出尾部）。 */
+export interface EnvironmentSmokeResult {
+  verdict: EnvironmentSmokeVerdict;
+  reason: string;
+  signature: string | null;
+  /** 冒烟输出的尾部（供人/载体读）。⛔ 未评估 ⇒ 空串（没跑就没输出）。 */
+  output: string;
+}
+
+/** 用【解析出的 launcher + model】做一次最小调用，回答「这个环境现在能不能跑 worker」。
+ *  判定面 = 子进程的 stderr+stdout+spawn 错误（⛔ 不看退出码单独下结论：launcher 可能把 404 打在
+ *  输出里却 exit 0）。**失败即拒绝**只留给环境级签名与「起不来」；其余失败只告警（见四态注释）。 */
+export async function runEnvironmentSmoke(
+  root: string,
+  opts: { timeoutMs?: number; role?: string } = {},
+): Promise<EnvironmentSmokeResult> {
+  let argv: string[];
+  try {
+    argv = launchArgv(opts.role ?? "task-worker", ENVIRONMENT_SMOKE_PROMPT, root);
+  } catch (e) {
+    // 解析不出 launcher/model ⇒ 没有可比对的对象。⛔ 不伪装成 pass。
+    return { verdict: "not-evaluated", reason: `profile resolution failed: ${e instanceof Error ? e.message : String(e)}`, signature: null, output: "" };
+  }
+  const r = await runAsync(argv, { timeoutMs: opts.timeoutMs ?? ENVIRONMENT_SMOKE_TIMEOUT_MS, collectStderr: true });
+  const spawnErr = r.error ? String(r.error.message ?? r.error) : "";
+  const combined = [r.stderr, r.stdout, spawnErr].filter((s) => s.length > 0).join("\n");
+  const match = matchEnvironmentFatalSignature(combined);
+  if (match != null) {
+    const ev = match.evidence ?? combined.slice(-400);
+    return { verdict: "refused", reason: `environment-fatal signature "${match.signature}": ${ev}`, signature: match.signature, output: combined.slice(-4000) };
+  }
+  if (r.error) {
+    return { verdict: "failed-non-environment", reason: `smoke call could not run: ${spawnErr}`, signature: null, output: combined.slice(-4000) };
+  }
+  if (r.status !== 0) {
+    return { verdict: "failed-non-environment", reason: `smoke call exited ${r.status} without an environment-fatal signature`, signature: null, output: combined.slice(-4000) };
+  }
+  return { verdict: "pass", reason: "smoke call exited 0", signature: null, output: combined.slice(-4000) };
+}
+
 // ── Layer 0 · 异步 spawn 原语（runAsync，SPEC §5.7：循环体用 spawnSync 会冻住协调地板）──────────────
 
 /** 异步 spawn（spawn 而非 spawnSync）：不阻塞事件循环，child exit 本身是一个唤醒源。collectStderr=true
@@ -2961,6 +3112,8 @@ export interface StartOptions {
   restartDelaySecs: number;
   runId?: string;
   confirmTimeoutSecs?: number;
+  /** 启动环境冒烟的预算（ms，测试缝）。⛔ 缺省 = ENVIRONMENT_SMOKE_TIMEOUT_MS（生产值）。 */
+  smokeTimeoutMs?: number;
 }
 
 export async function startKind(
@@ -3006,6 +3159,28 @@ export async function startKind(
   if (ctl.state.halted) {
     err(`quay driver: ${kind} is halted (halted_by=${ctl.state.halted_by ?? "unknown"}${ctl.state.halted_at ? `, halted_at=${ctl.state.halted_at}` : ""}) — refusing to start; clear the halt first with: quay driver resume --kind ${kind}\n`);
     return 1;
+  }
+
+  // ── 环境冒烟（gap-worker-quick-death-environment-fatal-halts-driver item 4）：起 worker 循环【之前】
+  //    用解析出的 launcher + model 做一次最小调用——环境级故障（模型名/密钥/launcher/网关）在起循环
+  //    之前就拒绝，⛔ 不让 driver 拿着一个必然失败的环境去逐个 park 池子里的任务（本缺陷真正烧掉的是
+  //    整池：claudecodeui 2026-09-20 一次坏环境 = 5 个任务被翻 needs-human）。
+  //    四态（见 runEnvironmentSmoke）：refused ⇒ 拒绝启动（退出 1，⛔ 不 spawn 任何东西）；
+  //    pass ⇒ 一行确认；not-evaluated / failed-non-environment ⇒ 告警但照常启动（⛔ 不把一次限流
+  //    变成「起不了 driver」，也 ⛔ 不把「解析不出 launcher」伪装成冒烟通过——硬规则 3b）。
+  if (kind === "worker") {
+    const smoke = await runEnvironmentSmoke(root, { timeoutMs: opts.smokeTimeoutMs });
+    if (smoke.verdict === "refused") {
+      err(
+        `quay driver: environment smoke check FAILED — refusing to start the worker driver (nothing was spawned).\n` +
+        `  ${smoke.reason}\n` +
+        `  这是【环境级】故障：所有 worker 都会以同样方式失败，逐个派发只会把池子里的任务逐个 park。\n` +
+        `  修好环境后重试：quay driver start --kind worker\n`,
+      );
+      return 1;
+    }
+    if (smoke.verdict === "pass") out(`environment-smoke: ok — launcher+model resolved and callable\n`);
+    else err(`start-warning: kind=worker — environment smoke ${smoke.verdict}: ${smoke.reason}\n`);
   }
 
   // ── SPEC §7 阶段 C（GOAL-017/AC-255）：默认走 **anchor 承载** ────────────────────────────────────

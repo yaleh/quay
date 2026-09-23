@@ -3,7 +3,7 @@
 // SPLIT from worker-driver-fan-in.test.mjs by gap-suite-split-15-over-30s-test-files — shard 5/10 (10 tests). Shared fixtures: ./helpers/worker-driver-fan-in-harness.mjs (single source).
 
 import { test } from "node:test";
-import { ORDINARY_REASON, QUICK_DEATH_BACKOFF_DEFAULT, RATE_LIMIT_NO_RESET_REASON, RATE_LIMIT_REASON, WORKER_OUTCOME_REL, after, appendOutcomeToFile, assert, classifyQuickDeathCause, computeOutcome, dispatchStoreFile, fs, isBackedOff, isQuickDeath, makeGitRoot, newQuickDeathBackoffState, parseBackoffBaseMs, parseBackoffMaxMs, parseBackoffThreshold, parseQuickDeathMs, parseRateLimitResetAtMs, path, readDispatchStore, readOutcomeLines, readTaskStatus, recordQuickDeathBackoff, resolveWorkerProcessName, rmSafe, runGit, spawn, spawnResident, splitArgs, upsertDispatchRecord, waitFor, writeProfileCarrier, writeTaskFile } from "./helpers/worker-driver-fan-in-harness.mjs";
+import { CONTROL_STATE_REL, ENVIRONMENT_FATAL_HALTED_BY, ENVIRONMENT_FATAL_SIGNATURES, ENV_FATAL_FANOUT_WINDOW_MS, ORDINARY_REASON, QUICK_DEATH_BACKOFF_DEFAULT, RATE_LIMIT_NO_RESET_REASON, RATE_LIMIT_REASON, WORKER_OUTCOME_REL, after, appendOutcomeToFile, assert, classifyQuickDeathCause, classifyQuickDeathEvidence, computeOutcome, dispatchStoreFile, environmentFatalHaltReason, fs, haltForEnvironmentFatal, isBackedOff, isQuickDeath, makeGitRoot, makeRoot, newQuickDeathBackoffState, parseBackoffBaseMs, parseBackoffMaxMs, parseBackoffThreshold, parseQuickDeathMs, parseRateLimitResetAtMs, path, quickDeathSignature, readControlState, readDispatchStore, readOutcomeLines, readTaskStatus, recordQuickDeathBackoff, resolveWorkerProcessName, rmSafe, runEnvironmentSmoke, runGit, spawn, spawnResident, splitArgs, upsertDispatchRecord, waitFor, writeProfileCarrier, writeTaskFile } from "./helpers/worker-driver-fan-in-harness.mjs";
 
 test("AC1+AC3 pure — recordQuickDeathBackoff: 退避按 task、间隔随次数增长、到上限转 needsHuman、非快速死亡复位", () => {
   const state = newQuickDeathBackoffState();
@@ -382,4 +382,253 @@ test("parse helpers — quick-death-ms/backoff-base-ms/backoff-max-ms/backoff-th
   assert.equal(parseBackoffThreshold("2"), 2);
   assert.equal(parseBackoffThreshold("0"), 1, "threshold must be ≥1 ⇒ default");
   assert.equal(parseBackoffThreshold("1.5"), 1, "non-integer ⇒ default");
+});
+
+
+// ── gap-worker-quick-death-environment-fatal-halts-driver ────────────────────────────────────────────
+// 根因（生产实例 claudecodeui 2026-09-20）：`.quay/profiles.yml` 还是出厂模板（launcher `claude` /
+// model 为网关专用名），首个 API 调用 404 `model_not_found` ⇒ 秒死。driver 把这当成【任务级】快速死亡
+// 逐个计数、逐个 park，直到池子被清空（13 条快速死亡全被判 ordinary、载体里 `model_not_found` 出现
+// 0 次、5 个任务被翻 needs-human）。两处结构性原因：① 分类器只读 selector_reason，而 worker 的 stderr
+// 以 `stdio:"inherit"` 流走、一个字节都进不了判定面；② 动作只有「退避重试 / 翻该任务」两种，没有
+// 「停 driver」。修法 = 环境级第四类 + 跨任务关联 + driver 自停 + 启动冒烟。
+
+/** worker 命令夹具（真驱动臂）：写一行 stderr 后非零退出。⛔ 不能含空白——splitArgs 按空白裸切、无
+ *  shell 引号（同本文件上面的 selectorFor）：空格一律写成 `\x20`，由 `node -e` 在 JS 字符串字面量里还原。 */
+const workerCmdWritingStderr = (body) => `node -e process.stderr.write('${body}');process.exit(1)`;
+/** 第一手字面形态（AC1① 的字面要求：`404 … model_not_found`）。 */
+const MODEL_NOT_FOUND_STDERR = "API\\x20Error:\\x20404\\x20model_not_found";
+/** 一个【不在清单里】的签名（AC1② 的跨任务关联臂：两个任务以它快速死亡 ⇒ 第二条判 environment-fatal）。 */
+const UNKNOWN_SIGNATURE_STDERR = "flaky\\x20unknown\\x20signature\\x20E42";
+const CONTROL_STATE_ABS = (root) => path.join(root, CONTROL_STATE_REL);
+const readControlFile = (root) => {
+  try { return JSON.parse(fs.readFileSync(CONTROL_STATE_ABS(root), "utf8")); } catch { return null; }
+};
+
+test("签名表 (能取假, 双向) — 每条环境级签名命中自己的 example、【不】命中自己的 counterexample；正反例都非空", () => {
+  assert.ok(ENVIRONMENT_FATAL_SIGNATURES.length >= 4, `签名表非空且覆盖四族（实测 ${ENVIRONMENT_FATAL_SIGNATURES.length} 条）`);
+  for (const sig of ENVIRONMENT_FATAL_SIGNATURES) {
+    assert.ok(!sig.re.global, `${sig.name}: 正则不得带 g（带 g 的 test 有 lastIndex 状态 ⇒ 判据会抖动）`);
+    assert.ok(sig.example.length > 0 && sig.counterexample.length > 0, `${sig.name}: 正反例都必须非空`);
+    assert.ok(sig.re.test(sig.example), `${sig.name} 必须命中自己的 example（否则这条签名是死的）`);
+    // 承重条：过宽的签名必然在自己的反例上命中 ⇒ 「宁窄勿宽」在这个断言上真正取假。
+    assert.ok(!sig.re.test(sig.counterexample), `${sig.name} ⛔ 不得命中自己的 counterexample（过宽即在此失败）`);
+  }
+  // 整张表对 canonical 普通失败文本一条都不命中（负控）。
+  assert.equal(classifyQuickDeathEvidence(ORDINARY_REASON, ORDINARY_REASON).cause, "ordinary",
+    "普通快速死亡文本 ⇒ ordinary（⛔ 不命中任何环境级签名）");
+});
+
+test("AC1①+AC1④ (纯函数, 双输入) — stderr 尾部的 `404 … model_not_found` ⇒ environment-fatal；限流文本 ⇒ 仍 transient-external（不回归）", () => {
+  // ① 判定面②（stderr）：selector_reason 是普通文本，环境级证据只在 stderr 尾部——旧实现看不到它。
+  const byStderr = classifyQuickDeathEvidence(ORDINARY_REASON, "API Error: 404 model_not_found");
+  assert.equal(byStderr.cause, "environment-fatal", "AC1①：stderr 尾部的 model_not_found ⇒ environment-fatal");
+  assert.equal(byStderr.signature, "model_not_found");
+  assert.match(String(byStderr.evidence), /model_not_found/, "带命中处原文（停机原因要附的「签名原文」）");
+  // 双输入对照：同一 selector_reason 换成普通 stderr ⇒ 不同取值（否则这条判据空转）。
+  const plain = classifyQuickDeathEvidence(ORDINARY_REASON, null);
+  assert.notEqual(plain.cause, byStderr.cause, "AC1 承重：有/无 stderr 证据必须给出不同判定");
+  assert.equal(plain.cause, "ordinary");
+  // ② 判定面①（selector_reason）：环境级证据只在这一面时同样命中。
+  const byReason = classifyQuickDeathEvidence("API Error: 404 model_not_found", null);
+  assert.equal(byReason.cause, "environment-fatal", "两个判定面都可独立命中");
+  // ③ 限流文本【不回归】：单面 / 双面 / 两个任务都仍是 transient-external。
+  assert.equal(classifyQuickDeathEvidence(RATE_LIMIT_REASON).cause, "transient-external", "AC1④：限流文本仍判 transient-external");
+  assert.equal(classifyQuickDeathEvidence(ORDINARY_REASON, RATE_LIMIT_REASON).cause, "transient-external",
+    "AC1④：限流文本出现在 stderr 面时同样判 transient-external");
+  // ④ 三态互不相同（硬规则 3b：读不懂不得与任一合格态同形）。
+  assert.equal(classifyQuickDeathEvidence(null, "   ").cause, "unclassifiable", "两个面都读不懂 ⇒ unclassifiable");
+  const three = new Set([byStderr.cause, classifyQuickDeathEvidence(RATE_LIMIT_REASON).cause, plain.cause, classifyQuickDeathEvidence(null, null).cause]);
+  assert.equal(three.size, 4, "四态两两不同形");
+});
+
+test("AC1②+AC2 (纯函数) — 跨任务关联：同一【未知】签名 + 不同任务 + 窗口内 ⇒ 第二次判 environment-fatal；同任务/超窗口/限流 三条对照臂都不判", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  const SIG = "flaky unknown signature E42";
+  // 主臂：任务 t1 先死（普通），任务 t2 以同一签名紧随其后 ⇒ environment-fatal。
+  const s = newQuickDeathBackoffState();
+  const r1 = recordQuickDeathBackoff(s, "gap-t1", "failed", 5000, 1_000_000, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  assert.equal(r1.cause, "ordinary", "第一例：单个任务的未知签名 ⇒ 仍是普通（一个样本不构成环境证据）");
+  const r2 = recordQuickDeathBackoff(s, "gap-t2", "failed", 5000, 1_000_100, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  assert.equal(r2.cause, "environment-fatal", "AC1②：第二个【不同任务】同签名 ⇒ environment-fatal（即使签名不在清单里）");
+  assert.match(String(r2.signature), /^cross-task:/, "跨任务关联的签名名带 cross-task: 前缀（与字面签名可区分）");
+  assert.equal(r2.newlyNeedsHuman, false, "AC2：跨任务关联命中 ⇒ ⛔ 也不翻该任务");
+  assert.equal(s.counts.get("gap-t2"), undefined, "AC2：跨任务关联命中的任务⛔ 不增加其快速死亡计数");
+  assert.equal(s.backoffUntil.get("gap-t2"), undefined, "⛔ 不设退避（该停的是 driver，不是这个任务）");
+  // 对照臂①：同一任务重复同一签名 ⇒ ⛔ 不判（任务级缺陷，正是本条要与之区分的那一类）。
+  const same = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(same, "gap-t1", "failed", 5000, 1_000_000, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  const again = recordQuickDeathBackoff(same, "gap-t1", "failed", 5000, 1_000_100, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  assert.equal(again.cause, "ordinary", "同一任务重复 ⇒ ⛔ 不判环境级（对照臂：证明「不同任务」这一条真的在判）");
+  // 对照臂②：超出窗口 ⇒ ⛔ 不判（否则一个跑了一天的 driver 会把任意两次同签名死亡关联起来）。
+  const late = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(late, "gap-t1", "failed", 5000, 1_000_000, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  const beyond = recordQuickDeathBackoff(late, "gap-t2", "failed", 5000, 1_000_000 + ENV_FATAL_FANOUT_WINDOW_MS + 1, 3, cfg, undefined, ORDINARY_REASON, SIG);
+  assert.equal(beyond.cause, "ordinary", "超出窗口 ⇒ ⛔ 不判（对照臂：证明窗口真的生效）");
+  // 对照臂③：两个任务同样【限流】⇒ 仍 transient-external（AC1④ 的承重条——限流是同族但动作不同）。
+  const rl = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(rl, "gap-r1", "failed", 5000, 1_000_000, 3, cfg, undefined, RATE_LIMIT_REASON);
+  const rl2 = recordQuickDeathBackoff(rl, "gap-r2", "failed", 5000, 1_000_100, 3, cfg, undefined, RATE_LIMIT_REASON);
+  assert.equal(rl2.cause, "transient-external", "两个任务同样限流 ⇒ 仍是 transient-external（⛔ 不被跨任务关联判成环境级）");
+  // 签名指纹归一化：易变量（数字/路径/哈希）折占位，措辞逐字保留——复用全仓唯一归一化点。
+  assert.equal(quickDeathSignature(null, "boom 1234 x").fingerprint, quickDeathSignature(null, "boom 9876 x").fingerprint,
+    "易变量差异不产生不同指纹（同一缺陷在不同任务上必须是同一签名，否则跨任务关联结构性永不成立）");
+  assert.notEqual(quickDeathSignature(null, "boom 1234 x").fingerprint, quickDeathSignature(null, "other 1234 x").fingerprint,
+    "措辞差异必须产生不同指纹（否则所有错误互相「关联」——硬规则 3b 的镜像面）");
+  assert.equal(quickDeathSignature(null, "  "), null, "读不懂 ⇒ null（⛔ 不伪造成一个空指纹 ⇒ 读不懂的死亡不互相关联）");
+  assert.equal(quickDeathSignature(null, "1 !== 2"), null, "退化指纹（折叠后无字母）⇒ null（⛔ 不当作身份，否则所有数字型失败互相关联）");
+});
+
+test("AC2 (纯函数 + 停机写盘) — environment-fatal：计数未增加/无退避/不翻 needs-human；worker-control.json halted:true 且原因含签名原文", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+  // maxRetries=1：普通快速死亡【一次】就该翻 needs-human——用来对照环境级「一次也不翻」。
+  const s = newQuickDeathBackoffState();
+  const env = recordQuickDeathBackoff(s, "gap-env", "failed", 5000, 100_000, 1, cfg, undefined, ORDINARY_REASON, "API Error: 404 model_not_found");
+  assert.equal(env.cause, "environment-fatal");
+  assert.equal(env.newlyNeedsHuman, false, "AC2：⛔ 不翻（maxRetries=1 也不翻——逐个 park 池子正是本缺陷）");
+  assert.equal(s.counts.get("gap-env"), undefined, "AC2：涉事任务的快速死亡计数【未增加】");
+  assert.equal(s.backoffUntil.get("gap-env"), undefined, "⛔ 不设退避（该停的是 driver）");
+  // 对照臂（同构造）：换成普通 stderr ⇒ 计数 +1 且到上限翻 needs-human。
+  const s2 = newQuickDeathBackoffState();
+  const ord = recordQuickDeathBackoff(s2, "gap-ord", "failed", 5000, 100_000, 1, cfg, undefined, ORDINARY_REASON, null);
+  assert.equal(ord.cause, "ordinary");
+  assert.equal(s2.counts.get("gap-ord"), 1, "对照臂：普通快速死亡照常计数");
+  assert.equal(ord.newlyNeedsHuman, true, "对照臂：maxRetries=1 ⇒ 到上限翻 needs-human");
+  assert.notEqual(env.newlyNeedsHuman, ord.newlyNeedsHuman, "AC2 承重：两臂的翻/不翻必须不同（否则这条判据什么也没测）");
+  // 停机写盘（AC2 的载体面）。
+  const root = makeRoot("env-fatal-halt-write");
+  try {
+    const reason = environmentFatalHaltReason(env);
+    const file = haltForEnvironmentFatal(root, reason);
+    assert.equal(file, CONTROL_STATE_ABS(root), "写在控制态单一真相源路径上");
+    const raw = fs.readFileSync(file, "utf8");
+    const ctl = JSON.parse(raw);
+    assert.equal(ctl.halted, true, "AC2：worker-control.json 为 halted:true");
+    assert.equal(ctl.halted_by, ENVIRONMENT_FATAL_HALTED_BY, "停机主体可辨识（人/start 拒绝信息读它）");
+    assert.match(ctl.halt_reason, /model_not_found/, "AC2：停机原因含【签名原文】");
+    assert.equal(readControlState(root).state.halted, true, "经单一真相源 API 读回也是 halted（⛔ 不是只写了个文件）");
+  } finally { rmSafe(root); }
+});
+
+test("AC1①+AC2 (真驱动, 生产载体) — stderr 尾部的 `404 … model_not_found` 快速死亡 ⇒ 载体判 environment-fatal、driver 自停、涉事任务仍 ready", async (t) => {
+  const root = makeGitRoot("env-fatal-ac1");
+  t.after(() => rmSafe(root));
+  writeTaskFile(root, "gap-env", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-env'],pool:1}))",
+    "--selector-cmd", "node -e console.log('gap-env\\x20ordinary\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", workerCmdWritingStderr(MODEL_NOT_FOUND_STDERR),
+    "--max-retries", "2", "--backoff-base-ms", "20", "--backoff-max-ms", "40", "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readOutcomeLines(root).length >= 1, 30000);
+  const rec = readOutcomeLines(root)[0];
+  assert.ok(rec, "至少一条 outcome（真驱动的生产载体）");
+  assert.equal(rec.final_state, "failed", "快速死亡（<60s 非零退出）");
+  assert.equal(rec.quick_death_cause, "environment-fatal", "AC1①：真驱动把 stderr 尾部的 model_not_found 判成 environment-fatal（⛔ 不是 fixture 顶替）");
+  assert.match(String(rec.worker_stderr_tail ?? ""), /model_not_found/,
+    "生产载体带 worker stderr 尾部（旧实现的 stdio:inherit 让它一个字节都进不到判定面/载体）");
+  await waitFor(() => readControlFile(root)?.halted === true, 20000);
+  const ctl = readControlFile(root);
+  assert.equal(ctl?.halted, true, "AC2：environment-fatal ⇒ driver 自己 halt（worker-control.json halted:true）");
+  assert.equal(ctl?.halted_by, ENVIRONMENT_FATAL_HALTED_BY);
+  assert.match(String(ctl?.halt_reason ?? ""), /model_not_found/, "AC2：停机原因含签名原文");
+  // 控制态与事件写在【同一段代码】里（控制态在前），但事件还要过一次 stdout 管道才到父进程 ⇒ 用
+  // 有界 waitFor 兜住送达延迟，⛔ 不用裸断言（同 AC1② 的成因，见那里的注释）。
+  assert.ok(await waitFor(() => drv.events().some((e) => e.event === "environment-fatal-halt"), 20000),
+    "驱动发射 environment-fatal-halt 事件");
+  assert.equal(readTaskStatus(root, "gap-env"), "ready", "AC2：涉事任务状态保持 ready（⛔ 未被翻 needs-human）");
+  assert.ok(!fs.readFileSync(path.join(root, "tasks", "gap-env.md"), "utf8").includes("## Needs-Human"),
+    "AC2：⛔ 不写 ## Needs-Human");
+  await drv.stop();
+});
+
+test("AC1② (真驱动, 两个不同任务) — 同一【未知】签名快速死亡 ⇒ 第二条判 environment-fatal；池中无任务被翻 needs-human", async (t) => {
+  const root = makeGitRoot("env-fatal-cross");
+  t.after(() => rmSafe(root));
+  writeTaskFile(root, "gap-env-a", "ready");
+  writeTaskFile(root, "gap-env-b", "ready");
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:['gap-env-a','gap-env-b'],pool:2}))",
+    // ⛔ 固定选择 gap-env-a：它在飞时过滤器（notInFlight）把它滤掉 ⇒ parseSelectorOutput 回退到剩下的
+    //    那个候选（gap-env-b）——两个任务都会被派发（--concurrency 2），这正是本臂要的形态。
+    "--selector-cmd", "node -e console.log('gap-env-a\\x20cross\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", workerCmdWritingStderr(UNKNOWN_SIGNATURE_STDERR),
+    "--concurrency", "2", "--max-retries", "5", "--backoff-base-ms", "5000", "--backoff-max-ms", "5000", "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => readOutcomeLines(root).some((r) => r.quick_death_cause === "environment-fatal"), 30000);
+  const recs = readOutcomeLines(root);
+  const envRecs = recs.filter((r) => r.quick_death_cause === "environment-fatal");
+  const ordRecs = recs.filter((r) => r.quick_death_cause === "ordinary");
+  assert.equal(envRecs.length, 1, `AC1②：恰好一条被判 environment-fatal（实测 ${recs.length} 条 outcome：${recs.map((r) => r.quick_death_cause).join(",")}）`);
+  assert.ok(ordRecs.length >= 1, "AC1②：另一条（先死的那个任务）仍是 ordinary——单任务同签名不构成环境证据");
+  // 载体必须记的是【判定】：被判 environment-fatal 的那条记录不能写成 ordinary（判定依赖跨任务状态，
+  // 逐记录的无状态重算看不到它 —— 否则「driver 因它而停」与「载体说它普通」并存，读载体的人找不到真因）。
+  assert.notEqual(ordRecs[0].task, envRecs[0].task, "两条结果分属不同任务");
+  assert.match(String(envRecs[0].worker_stderr_tail ?? ""), /unknown signature E42/,
+    "被判 environment-fatal 的记录带原始签名文本（跨任务关联命中的那个任务）");
+  // 跨任务关联的签名标识出现在 json 事件流里（载体可核）。
+  // ⛔ 顺序承重（实测过一次负载相关的假红）：上面的 waitFor 等的是【载体】(worker-outcome.jsonl)，
+  // 它在 runOneWorker 内落盘；而 environment-fatal-halt 事件在 onWorkerFinished 里【之后】才写 stdout
+  // ⇒ 载体一可见就断言事件 = 与 stdout 管道送达赛跑（判定本身是对的，事件也发了，只是还没到父进程）。
+  // 故先等 driver 侧的停机控制态（与事件同一段代码、写在其【前】），事件断言再走一次 waitFor 兜住送达
+  // 延迟。⛔ 断言不弱化：事件若根本不发，waitFor 超时返回假 ⇒ 照常红（AC1① 同型）。
+  await waitFor(() => readControlFile(root)?.halted === true, 20000);
+  assert.equal(readControlFile(root)?.halted, true, "driver 自己 halt");
+  assert.ok(await waitFor(() => drv.events().some((e) => e.event === "environment-fatal-halt" && String(e.signature ?? "").startsWith("cross-task:")), 20000),
+    "跨任务关联命中的签名名带 cross-task: 前缀，并出现在 environment-fatal-halt 事件里");
+  assert.equal(readTaskStatus(root, "gap-env-a"), "ready", "池中无任务被翻 needs-human（maxRetries=5 且每次至多 1-2 次死亡）");
+  assert.equal(readTaskStatus(root, "gap-env-b"), "ready", "同上（跨任务关联命中的那个任务也保持 ready）");
+  await drv.stop();
+});
+
+test("AC3 (能取假, 四态) — 启动冒烟：launcher 立即以 model_not_found 退出 ⇒ refused 且原因含原文；退出 0 ⇒ pass；无 profiles ⇒ not-evaluated；非环境级失败 ⇒ failed-non-environment", async (t) => {
+  const roots = [];
+  const mk = (tag) => { const r = makeRoot(tag); roots.push(r); return r; };
+  t.after(() => roots.forEach((r) => rmSafe(r)));
+  const writeLauncher = (root, name, body) => {
+    const p = path.join(root, name);
+    fs.writeFileSync(p, body, { mode: 0o755 });
+    return p;
+  };
+
+  // ① 假 launcher：把收到的 argv 落盘、打签名到 stderr、退出 1（AC3 的字面夹具）。
+  const rootA = mk("env-smoke-refuse");
+  const argvDump = path.join(rootA, "launcher-argv.txt");
+  const fakeBad = writeLauncher(rootA, "fake-launcher.sh",
+    `#!/bin/sh\nprintf '%s\\n' "$@" > ${argvDump}\necho 'API Error: 404 {"type":"not_found_error"} model_not_found' >&2\nexit 1\n`);
+  writeProfileCarrier(rootA, { launcher: fakeBad, model: "v4.1flash" });
+  const refused = await runEnvironmentSmoke(rootA, { timeoutMs: 30000 });
+  assert.equal(refused.verdict, "refused", "AC3：launcher 立即以 model_not_found 退出 ⇒ refused（调方据此非零退出、不 spawn 任何东西）");
+  assert.equal(refused.signature, "model_not_found");
+  assert.match(refused.reason, /model_not_found/, "AC3：原因含该原文");
+  // 非空转条：冒烟用的确实是【解析出的 launcher + model】（读假 launcher 收到的 argv，而不是自证）。
+  const seenArgv = fs.readFileSync(argvDump, "utf8");
+  assert.match(seenArgv, /--model\nv4\.1flash/, `冒烟调用用的是 profiles.yml 解析出的 model（实测 argv: ${JSON.stringify(seenArgv)}）`);
+
+  // ② 负控：launcher 退出 0 ⇒ pass。
+  const rootB = mk("env-smoke-pass");
+  const fakeOk = writeLauncher(rootB, "ok-launcher.sh", "#!/bin/sh\necho ok\nexit 0\n");
+  writeProfileCarrier(rootB, { launcher: fakeOk, model: "test-model" });
+  const pass = await runEnvironmentSmoke(rootB, { timeoutMs: 30000 });
+  assert.equal(pass.verdict, "pass", "对照臂：launcher 退出 0 ⇒ pass");
+  assert.notEqual(pass.verdict, refused.verdict, "AC3 承重：两臂取值必须不同（否则这条判据空转）");
+
+  // ③ 读不懂：无 profiles.yml ⇒ not-evaluated（⛔ 不与 pass 同形，硬规则 3b）。
+  const rootC = mk("env-smoke-not-evaluated");
+  const notEval = await runEnvironmentSmoke(rootC, { timeoutMs: 5000 });
+  assert.equal(notEval.verdict, "not-evaluated", "解析不出 launcher/model ⇒ 未评估（⛔ 不伪装成通过）");
+
+  // ④ 非环境级失败（如瞬时限流）⇒ 只告警不拒启。
+  const rootD = mk("env-smoke-non-env");
+  const fakeOrd = writeLauncher(rootD, "ord-launcher.sh", "#!/bin/sh\necho boom >&2\nexit 3\n");
+  writeProfileCarrier(rootD, { launcher: fakeOrd, model: "test-model" });
+  const nonEnv = await runEnvironmentSmoke(rootD, { timeoutMs: 30000 });
+  assert.equal(nonEnv.verdict, "failed-non-environment", "非环境级失败 ⇒ 只告警（拒启会把一次限流变成「起不了 driver」）");
+
+  const verdicts = [refused.verdict, pass.verdict, notEval.verdict, nonEnv.verdict];
+  assert.equal(new Set(verdicts).size, 4, `四态两两不同形（实测 ${verdicts.join(",")}）`);
 });

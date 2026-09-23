@@ -142,6 +142,13 @@ import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 import {
   resourceGateCheck,
   isHalted,
+  // environment-fatal 停机（gap-worker-quick-death-environment-fatal-halts-driver）：写控制态 halted。
+  // 经 driver-shared 的 re-export（单一真相源 = kernel control-state.ts），⛔ 不在此手搓 JSON 写盘。
+  readControlState,
+  writeControlState,
+  applyHalt,
+  CONTROL_STATE_REL,
+  type ControlState,
 } from "./driver-shared.ts";
 export {
   CONTROL_STATE_REL,
@@ -281,6 +288,12 @@ export {
   makeStopCondition,
   type LivenessResult,
 } from "./driver-runtime.ts";
+// 环境级签名（单一真相源 = driver-runtime.ts，见该处「为什么这份表住在 Layer 0」）：① `quay driver
+// start` 的启动冒烟与 ② 本文件的快速死亡分类器**必须共用同一份清单**（两份 = 漂移：签名加在一处、
+// 另一处静默漏判）。方向只能这一个——worker-driver 已从 driver-runtime import，反向会造出新的
+// value SCC（import-graph-check 是 shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。
+import { matchEnvironmentFatalSignature } from "./driver-runtime.ts";
+export { ENVIRONMENT_FATAL_SIGNATURES, type EnvFatalSignature } from "./driver-runtime.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
 import { runPushLagCheck, resolvePushLagThresholdMs, type PushLagOutcome } from "./fan-in-push-lag-check.ts";
 import { parse as parseYaml } from "yaml";
@@ -463,8 +476,9 @@ export const RECONCILE_INTERVAL_SECS_DEFAULT = defaultDriverConfig().worker.reco
  * 一条结构化 outcome 记录（SPEC §4③ 字段齐全 + 直接量 + 超时标记 + 落地判定 + transcript session_id）。
  * @returns {object} { ts, task, selector_reason, exit_code, signal, wall_clock_ms, final_state,
  *   failure_reason, started_at, ended_at, worker_pid, run_id, in_flight_count, timed_out, session_id }
- *   ＋ 快速死亡时追加 `quick_death_cause`（"transient-external" | "ordinary" | "unclassifiable"；
- *   非快速死亡 ⇒ 缺键。见下方发射点注释）。
+ *   ＋ 快速死亡时追加 `quick_death_cause`（"environment-fatal" | "transient-external" | "ordinary" |
+ *   "unclassifiable"；非快速死亡 ⇒ 缺键。见下方发射点注释）
+ *   ＋ 捕获到 worker stderr 尾部时追加 `worker_stderr_tail`（未捕获 ⇒ 缺键）。
  */
 export function computeOutcome({
   task,
@@ -483,6 +497,7 @@ export function computeOutcome({
   sessionId = null,
   lockWaitMs = null,
   lockHoldMs = null,
+  stderrTail = null,
 }: {
   task: string;
   selectorReason: string;
@@ -497,6 +512,11 @@ export function computeOutcome({
   timedOut?: boolean;
   landed?: boolean | null;
   landReason?: string | null;
+  /** worker stderr 的【末尾】捕获（runOneWorker 边转发边留的尾部窗口）。null = 未捕获（未 spawn /
+   *  孤儿 finalize 等无子进程路径）。它同时是成因分类的第二个判定面（`classifyQuickDeathEvidence`）
+   *  与生产载体字段 `worker_stderr_tail` 的来源——本条缺陷的一个成因就是「worker stderr 以
+   *  stdio:"inherit" 流走，判定面与载体都看不到它」。 */
+  stderrTail?: string | null;
   /** 本次尝试的 transcript session id（gap-worker-task-transcript-access-webui AC1：spawn 传
    *  `--session-id <uuid>`，同一 uuid 落盘 ⇒ web 可逐次访问该尝试的 transcript）。null = 无会话
    *  （not-dispatched 等未 spawn 路径）。 */
@@ -568,8 +588,12 @@ export function computeOutcome({
     // 判定；driver 的 --quick-death-ms 覆盖只影响退避决策，不回溯改写已落盘记录——记录同带 final_state
     // + wall_clock_ms，自定义阈值下的读者可自行复算（差异在此注明，⛔ 不静默）。
     ...(isQuickDeath(finalState, endedAtMs - startedAtMs)
-      ? { quick_death_cause: classifyQuickDeathCause(selectorReason) }
+      ? { quick_death_cause: classifyQuickDeathCause(selectorReason, stderrTail) }
       : {}),
+    // worker stderr 尾部（gap-worker-quick-death-environment-fatal-halts-driver）：只有【捕获到了】
+    // 才发射（null ⇒ 缺键，硬规则 6：缺值 ≠ 空字符串）。这是生产实例里「载体中 model_not_found 出现
+    // 0 次」的直接修法——分类判据与事后取证读的是同一个面，⛔ 不再需要谁去翻 driver 的日志流。
+    ...(typeof stderrTail === "string" && stderrTail.length > 0 ? { worker_stderr_tail: stderrTail } : {}),
   };
 }
 
@@ -3068,15 +3092,20 @@ export function isQuickDeath(
 //   "session limit" 的 0 条——quay 的 worker 经 ANTHROPIC_DEFAULT_*_MODEL 走别的后端，不消耗 Anthropic
 //   账号额度 ⇒ 本缺陷只在 worker 使用 Anthropic 账号的第三方项目上暴露，本仓库的生产数据不会自然产生样本。
 
-/** 快速死亡成因（可枚举三态，两两不同形）：
+/** 快速死亡成因（可枚举四态，两两不同形）：
+ *   - "environment-fatal"：命中【环境级】签名（模型名/密钥/launcher/网关不可用，见 driver-runtime.ts 的
+ *     ENVIRONMENT_FATAL_SIGNATURES），或窗口内 ≥2 个【不同任务】以同一签名快速死亡 ⇒ 这是【所有 worker
+ *     必然同样失败】的环境故障，⛔ 不是任务自身缺陷：动作是 **driver 自己 halt**（写控制态 halted），
+ *     ⛔ 不翻转任何任务状态、⛔ 不计入任务的快速死亡计数
+ *     （gap-worker-quick-death-environment-fatal-halts-driver；生产实例 claudecodeui 2026-09-20）。
  *   - "transient-external"：已捕获的文本命中【账号级限流/配额】签名 ⇒ 瞬时、外部、自愈 ⇒
  *     ⛔ 不计入 backoffMaxRetries 连续计数（否则终态停摆，正是本缺陷），改为退避重试。
  *   - "ordinary"：文本【读得懂】且不命中 ⇒ 普通快速死亡 ⇒ 沿用既有语义（计入连续计数，到上限转 needs-human）。
- *   - "unclassifiable"：文本缺失/读不懂（null / 非字符串 / 全空白）⇒ 第三个取值。⛔ 既不与
- *     "transient-external" 同形（那会把读不懂静默当成自愈、让它无限重派），也不与 "ordinary" 同形
+ *   - "unclassifiable"：文本缺失/读不懂（两个判定面都是 null / 非字符串 / 全空白）⇒ 第三个取值。⛔ 既不
+ *     与 "transient-external" 同形（那会把读不懂静默当成自愈、让它无限重派），也不与 "ordinary" 同形
  *     （那会把读不懂静默当成任务自身缺陷）。判别式上按 ordinary 计（fail-safe 不无限重派），
  *     但【取值本身】可区分——这正是硬规则 3b：读不懂不得与任一合格态同形。 */
-export type QuickDeathCause = "transient-external" | "ordinary" | "unclassifiable";
+export type QuickDeathCause = "environment-fatal" | "transient-external" | "ordinary" | "unclassifiable";
 
 /** 账号级限流/配额签名（【字面子串】，大小写归一后匹配；⛔ 无语义判断、⛔ 不调模型、⛔ 不新增探测面）。
  *  以 2026-09-13 quay-fleet 第一手样本 "You've hit your session limit · resets 11:30am (UTC)" 为准，
@@ -3092,16 +3121,91 @@ const TRANSIENT_EXTERNAL_SIGNATURES: readonly string[] = [
   "too many requests",
 ];
 
-/** 快速死亡成因分类（纯函数）。只对 driver 已捕获的文本做字面子串匹配（硬规则 2 按位置判定）。
- *  输入读不懂（null / 非字符串 / 全空白）⇒ "unclassifiable"（⛔ 不与任一合格态同形，硬规则 3b）。
- *  ⛔ 本函数不读文件、不看进程、不调模型——它只回答「这条已捕获文本说的是哪一类成因」。 */
-export function classifyQuickDeathCause(selectorReason: string | null | undefined): QuickDeathCause {
-  if (typeof selectorReason !== "string" || selectorReason.trim().length === 0) return "unclassifiable";
-  const lower = selectorReason.toLowerCase();
-  for (const sig of TRANSIENT_EXTERNAL_SIGNATURES) {
-    if (lower.includes(sig)) return "transient-external";
+/** worker stderr 尾部捕获上限（字节）。⛔ 只留【末尾】——错误分类要的是最后一条致命错的原文，不是
+ *  整段日志（几百 MB 的构建输出里翻签名会让判定面变成第二个日志存储）。机制常量，⛔ 不读宿主规格。 */
+export const WORKER_STDERR_TAIL_MAX_BYTES = 4096;
+
+/** 跨任务关联窗口（ms）：同一签名在【不同任务】上出现的最小时间跨度内 ⇒ 判 environment-fatal。
+ *  机制常量（与 quickDeathMs 同族：观测到的「同一轮派发窗口」量级），⛔ 不是宿主规格阈值。 */
+export const ENV_FATAL_FANOUT_WINDOW_MS = 600_000;
+
+/** 一次分类的完整结果（硬规则 3：枚举，不布尔——`signature`/`evidence` 取 null 表示【没命中】，
+ *  ⛔ 不与「命中某条」共用取值）。 */
+export interface QuickDeathClassification {
+  cause: QuickDeathCause;
+  /** 命中的环境级签名名；⛔ null = 未命中（≠ 命中了某条）。 */
+  signature: string | null;
+  /** 判定所依据的【原文摘录】（停机原因里要附的「签名原文」）；⛔ null = 无依据可摘。 */
+  evidence: string | null;
+}
+
+/** 两个判定面（selector_reason 与 worker stderr 尾部）里，哪一处【读得懂】：非空字符串。
+ *  ⛔ 读不懂的输入不参与匹配，但它的存在也不能让整体判成「读不懂」（另一个面可能读得懂）。 */
+function readableTexts(...inputs: Array<string | null | undefined>): string[] {
+  return inputs.filter((t): t is string => typeof t === "string" && t.trim().length > 0);
+}
+
+/** 快速死亡成因分类（纯函数，判定面 = selector_reason + worker stderr 尾部）。
+ *  只对 driver 已捕获的文本做【字面】匹配（硬规则 2 按位置判定）——⛔ 不读文件、⛔ 不看进程、⛔ 不调模型。
+ *  优先级：环境级签名 ⇒ environment-fatal（停 driver 是最保守动作，故先判）> 限流类 ⇒ transient-external
+ *  > 其余 ⇒ ordinary。
+ *  输入【两个面都】读不懂（null / 非字符串 / 全空白）⇒ "unclassifiable"（⛔ 不与任一合格态同形，硬规则 3b）；
+ *  只要有一面读得懂，结论就是读得懂的那一面的结论。
+ *  环境级匹配走 `matchEnvironmentFatalSignature`（driver-runtime.ts 的单一真相源——启动冒烟用的是同一份
+ *  清单，⛔ 不在此另写一份）。 */
+export function classifyQuickDeathEvidence(
+  selectorReason: string | null | undefined,
+  stderrTail: string | null | undefined = undefined,
+): QuickDeathClassification {
+  const texts = readableTexts(selectorReason, stderrTail);
+  if (texts.length === 0) return { cause: "unclassifiable", signature: null, evidence: null };
+  for (const text of texts) {
+    const m = matchEnvironmentFatalSignature(text);
+    if (m != null) return { cause: "environment-fatal", signature: m.signature, evidence: m.evidence };
   }
-  return "ordinary";
+  for (const text of texts) {
+    const lower = text.toLowerCase();
+    for (const sig of TRANSIENT_EXTERNAL_SIGNATURES) {
+      if (lower.includes(sig)) return { cause: "transient-external", signature: null, evidence: null };
+    }
+  }
+  return { cause: "ordinary", signature: null, evidence: null };
+}
+
+/** 成因取值（`classifyQuickDeathEvidence` 的薄封装，保持既有调用面/返回词表不变）。 */
+export function classifyQuickDeathCause(
+  selectorReason: string | null | undefined,
+  stderrTail: string | null | undefined = undefined,
+): QuickDeathCause {
+  return classifyQuickDeathEvidence(selectorReason, stderrTail).cause;
+}
+
+/** 一次快速死亡的【签名指纹】——用于跨任务关联（item 2）：窗口内 ≥2 个【不同任务】以同一签名快速死亡
+ *  ⇒ 同样判 environment-fatal（即使签名不在清单里）。
+ *  取末尾一行（致命错通常最后落出），归一化**复用全仓唯一的签名归一化点** `normalizeAssertionSignature`
+ *  （⛔ 不手搓第二份「哪些字符算易变量」的清单：两份清单必然漂移，且 s04 的结构判据盯着这件事）。
+ *  它的语义正好是本场景要的——把每次都会变的**量**（pid / 毫秒 / 端口 / 路径 / 哈希）折成占位，把**措辞**
+ *  逐字保留（措辞才是身份）；跨任务比较时不同任务的 pid/路径不该把同一个错拆成不同签名。
+ *  ⛔ 不额外小写化：现有签名面（retry 豁免）也不小写，且不折能让「不同大小写的两个错」保持不同 ⇒ 更窄。
+ *  两面都读不懂 ⇒ null（硬规则 6：缺值 = 未查，⛔ 不伪造成某个签名——一个空指纹会让所有读不懂的快速
+ *  死亡互相「关联」）。退化指纹（折叠后除占位符外一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）同判：
+ *  它在不同缺陷间恒等，留下它等于把所有数字型失败互相关联（判据同 assertionSignaturesFromSuiteLog）。 */
+export function quickDeathSignature(
+  selectorReason: string | null | undefined,
+  stderrTail: string | null | undefined = undefined,
+): { fingerprint: string; raw: string } | null {
+  // stderr 尾部优先（它才是 worker 的原话），selector_reason 兜底。
+  const texts = readableTexts(stderrTail, selectorReason);
+  if (texts.length === 0) return null;
+  const lines = texts[0].split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const raw = lines.length > 0 ? lines[lines.length - 1] : texts[0].trim();
+  if (raw.length === 0) return null;
+  const fingerprint = normalizeAssertionSignature(raw);
+  if (fingerprint.length === 0) return null;
+  // ⚠️ 必须先把占位符形态泛型剥掉再找字母——`<n>` 自己含字母 `n`（同 assertionSignaturesFromSuiteLog
+  // 实测踩到过的那个坑）。
+  if (!/\p{L}/u.test(fingerprint.replace(/<[a-z]+>/g, ""))) return null;
+  return { fingerprint, raw: raw.slice(0, 400) };
 }
 
 /** 从已捕获文本里解析账号限流的【重置时刻】（UTC）——错误文本自带，⛔ 不猜、⛔ 不新增探测面。
@@ -3150,11 +3254,14 @@ export interface QuickDeathBackoffState {
   transientCounts: Map<string, number>;
   /** task id → 退避到此时刻（epoch ms）。now < until 期间不重派该 task。 */
   backoffUntil: Map<string, number>;
+  /** 签名指纹 → 最近一次以该指纹快速死亡的任务与时刻（跨任务关联，item 2）。⛔ 与 counts 分开记——
+   *  它记的是「这个签名见过谁」，不是「某个任务死了几次」。 */
+  signatureSeen: Map<string, { task: string; atMs: number; raw: string }>;
 }
 
 /** 新建一个退避状态。 */
 export function newQuickDeathBackoffState(): QuickDeathBackoffState {
-  return { counts: new Map(), transientCounts: new Map(), backoffUntil: new Map() };
+  return { counts: new Map(), transientCounts: new Map(), backoffUntil: new Map(), signatureSeen: new Map() };
 }
 
 /** 该 task 此刻是否在退避中（backoffUntil 未到）。 */
@@ -3182,9 +3289,15 @@ export function isBackedOff(state: QuickDeathBackoffState, taskId: string, nowMs
  *    selectorReason 判为 "unclassifiable" ⇒ 取值如实为 "unclassifiable"（读者可区分），判别式上按普通
  *    快速死亡计（fail-safe：读不懂不无限重派）。
  *    liveness === "unknown"/"alive" 或 非快速死亡 ⇒ 两个连续计数一并复位（「连续」断链）。
- *  @returns { quickDeath, backedOff, newlyNeedsHuman, cause, backoffUntil }
+ *  环境级分流（gap-worker-quick-death-environment-fatal-halts-driver）：
+ *    两个判定面（selector_reason + worker stderr 尾部）命中 environment-fatal 签名，或【窗口内 ≥2 个
+ *    不同任务以同一签名快速死亡】⇒ cause = "environment-fatal"。此时**该任务的状态一个字节都不动**：
+ *    ⛔ 不进 counts（计数未增加，AC2）⇒ ⛔ 永不 newlyNeedsHuman，⛔ 不设 backoffUntil（该停的是 driver，
+ *    不是这一个任务——逐任务退避仍会把池子逐个 park）。停机动作由调用方按 cause 承担（写控制态 halted）。
+ *  @returns { quickDeath, backedOff, newlyNeedsHuman, cause, backoffUntil, signature, evidence }
  *    cause：本次的成因取值（非快速死亡 / 未评估 ⇒ null，缺值 ≠ 某个取值，硬规则 6）。
- *    backoffUntil：本次实际设下的退避时刻（未退避 ⇒ null），供调用方/载体观测。 */
+ *    backoffUntil：本次实际设下的退避时刻（未退避 ⇒ null），供调用方/载体观测。
+ *    signature / evidence：环境级命中的签名名与原文摘录（供停机原因）；未命中 ⇒ null。 */
 export function recordQuickDeathBackoff(
   state: QuickDeathBackoffState,
   taskId: string,
@@ -3195,24 +3308,42 @@ export function recordQuickDeathBackoff(
   cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
   liveness: OrphanPidLiveness | null | undefined = undefined,
   selectorReason: string | null | undefined = undefined,
+  stderrTail: string | null | undefined = undefined,
+  envFatalWindowMs: number = ENV_FATAL_FANOUT_WINDOW_MS,
 ): {
   quickDeath: boolean;
   backedOff: boolean;
   newlyNeedsHuman: boolean;
   cause: QuickDeathCause | null;
   backoffUntil: number | null;
+  /** 命中的环境级签名名（⛔ null = 未命中 ≠ 命中某条）；跨任务关联命中的填 `cross-task:<fingerprint>`。 */
+  signature: string | null;
+  /** 判定依据的原文摘录（停机原因里要附的「签名原文」）；⛔ null = 无依据。 */
+  evidence: string | null;
 } {
   if (liveness === "unknown" || liveness === "alive") {
-    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null };
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null, signature: null, evidence: null };
   }
   if (!isQuickDeath(finalState, wallClockMs, cfg, liveness)) {
     state.counts.delete(taskId);
     state.transientCounts.delete(taskId);
     state.backoffUntil.delete(taskId);
-    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null };
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false, cause: null, backoffUntil: null, signature: null, evidence: null };
   }
-  const cause = classifyQuickDeathCause(selectorReason);
-  if (cause === "transient-external") {
+  const cls = classifyQuickDeathEvidence(selectorReason, stderrTail);
+  if (cls.cause === "environment-fatal") {
+    // 环境级故障：⛔ 不进 state.counts（⛔ 不计入任务的快速死亡计数，⛔ 永不 newlyNeedsHuman）、
+    // ⛔ 不设 backoffUntil（该停的是 driver，不是这一个任务——逐任务退避仍会逐个 park 整个池子）。
+    // 只记一次签名观测（供后续同签名的跨任务关联）。动作（halt driver）由调用方按 cause 承担。
+    const sig = quickDeathSignature(selectorReason, stderrTail);
+    if (sig != null) state.signatureSeen.set(sig.fingerprint, { task: taskId, atMs: nowMs, raw: sig.raw });
+    return {
+      quickDeath: true, backedOff: false, newlyNeedsHuman: false, cause: cls.cause, backoffUntil: null,
+      signature: cls.signature, evidence: cls.evidence ?? sig?.raw ?? null,
+    };
+  }
+  if (cls.cause === "transient-external") {
+    const cause = cls.cause;
     // 瞬时外部（账号级限流/配额）：⛔ 不进 state.counts ⇒ ⛔ 永不 newlyNeedsHuman（终态不自愈正是本缺陷）。
     // state.counts 也【不复位】——「连续普通快速死亡」序列不被限流打断，也不被限流洗白（同 unknown 分支）。
     const tn = (state.transientCounts.get(taskId) ?? 0) + 1;
@@ -3221,19 +3352,72 @@ export function recordQuickDeathBackoff(
     const until = parseRateLimitResetAtMs(selectorReason, nowMs) ?? nowMs + backoffDelayMs(tn, cfg);
     const backedOff = tn >= cfg.backoffThreshold;
     if (backedOff) state.backoffUntil.set(taskId, until);
-    return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: backedOff ? until : null };
+    return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: backedOff ? until : null, signature: null, evidence: null };
+  }
+  // ── 跨任务关联（item 2）：窗口内 ≥2 个【不同任务】以同一签名快速死亡 ⇒ 同样判 environment-fatal ──
+  // 判据是「同一签名 ∧ 不同任务 ∧ 窗口内」三者同时成立（缺一不判）：同一任务重复死是任务级缺陷（本条
+  // 缺陷正是把环境级故障错当任务级），没有签名（读不懂）无从关联，超过窗口就不再是「同一个环境」。
+  // ⛔ 只在【不命中】环境级/限流签名时做——限流类两任务同签名是预期形态（各等各的重置时刻），把它判成
+  // 环境级会让 AC1④ 的 transient-external 语义回归。⛔ 判为 environment-fatal 后【不进 counts】。
+  const sig = quickDeathSignature(selectorReason, stderrTail);
+  if (sig != null) {
+    const prev = state.signatureSeen.get(sig.fingerprint);
+    if (prev != null && prev.task !== taskId && nowMs - prev.atMs <= envFatalWindowMs) {
+      state.signatureSeen.set(sig.fingerprint, { task: taskId, atMs: nowMs, raw: sig.raw });
+      return {
+        quickDeath: true, backedOff: false, newlyNeedsHuman: false, cause: "environment-fatal", backoffUntil: null,
+        signature: `cross-task:${sig.fingerprint}`, evidence: sig.raw,
+      };
+    }
+    state.signatureSeen.set(sig.fingerprint, { task: taskId, atMs: nowMs, raw: sig.raw });
   }
   // ordinary / unclassifiable 共用既有判别式（fail-safe：读不懂不无限重派），但 cause 取值如实可区分。
+  const cause = cls.cause;
   const n = (state.counts.get(taskId) ?? 0) + 1;
   state.counts.set(taskId, n);
   if (n >= backoffMaxRetries) {
     state.backoffUntil.delete(taskId);
-    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true, cause, backoffUntil: null };
+    return { quickDeath: true, backedOff: false, newlyNeedsHuman: true, cause, backoffUntil: null, signature: null, evidence: null };
   }
   const backedOff = n >= cfg.backoffThreshold;
   const until = backedOff ? nowMs + backoffDelayMs(n, cfg) : null;
   if (until != null) state.backoffUntil.set(taskId, until);
-  return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: until };
+  return { quickDeath: true, backedOff, newlyNeedsHuman: false, cause, backoffUntil: until, signature: null, evidence: null };
+}
+
+/** environment-fatal 的 halted_by 取值（控制态里的停机主体，人/`quay driver start` 拒绝时读它）。 */
+export const ENVIRONMENT_FATAL_HALTED_BY = "worker-driver:environment-fatal";
+
+/** 停机原因文本（含【签名原文】——AC2 要求 worker-control.json 的原因里能读到它）。
+ *  `backoff` 是 recordQuickDeathBackoff 的环境级返回值：signature 给出签名名（含跨任务关联的
+ *  `cross-task:<指纹>` 形态），evidence 给出原文摘录。⛔ 两者缺一 ⇒ 如实写「未捕获原文」，⛔ 不编造。 */
+export function environmentFatalHaltReason(backoff: {
+  signature: string | null;
+  evidence: string | null;
+  cause: QuickDeathCause | null;
+}): string {
+  const sig = backoff.signature ?? "unknown";
+  const ev = backoff.evidence != null && backoff.evidence.length > 0 ? backoff.evidence : "(未捕获原文)";
+  return (
+    `worker-driver halted: environment-fatal — 所有 worker 会以同一方式失败（不是任务自身缺陷）。` +
+    `签名: ${sig}；签名原文: ${ev}。` +
+    `⛔ 未翻转任何任务状态、⛔ 未计入任务的快速死亡计数。修复环境后: quay driver resume --kind worker`
+  );
+}
+
+/** environment-fatal ⇒ driver 自己 halt（写 `.quay/worker-control.json` halted:true + 原因与签名原文）。
+ *  语义与 `quay driver drain` 同一条路（applyHalt ⇒ 派发环 spawn 前读到 halted ⇒ 停【新】派发，
+ *  ⛔ 不杀在飞 worker）。⛔ 不翻转任何任务状态——那是「任务级缺陷」的动作，本条正是要把它与环境故障
+ *  分开；⛔ 也不计入快速死亡计数（调用方在 recordQuickDeathBackoff 的 environment-fatal 分支里不碰
+ *  counts）。`halt_reason` 是控制态的附加字段（kernel 的 ControlState 只认 halted/halted_by/halted_at，
+ *  未知键在读回时被 mergeControlState 丢弃）——它落盘供人读，⛔ 不参与任何判定。 */
+export function haltForEnvironmentFatal(root: string, reason: string, nowIso = new Date().toISOString()): string {
+  const { state } = readControlState(root, process.env, CONTROL_STATE_REL);
+  const next: ControlState & { halt_reason: string } = {
+    ...applyHalt(state, ENVIRONMENT_FATAL_HALTED_BY, true, nowIso),
+    halt_reason: reason,
+  };
+  return writeControlState(root, next, CONTROL_STATE_REL);
 }
 
 /** 解析 --quick-death-ms <ms>（快速死亡墙钟阈值）。缺省/非法 ⇒ 缺省（fail-to-default 约定）。 */
@@ -3364,7 +3548,19 @@ export interface WorkerRunResult {
   taskId: string;
   outcome: ReturnType<typeof computeOutcome>;
   exitCode: number;
+  /** 快速死亡判定（由常驻环注入的回调产出，见 QuickDeathJudge）。⛔ 缺键 = 没注入回调（批量路径 /
+   *  孤儿 adopt 路径）≠「判过且无结论」——前者由调用方自行记录，后者是 cause: null。 */
+  quickDeath?: ReturnType<typeof recordQuickDeathBackoff>;
 }
+
+/** 快速死亡判定回调（常驻环注入 runOneWorker）：**判定必须在写载体【之前】发生**——否则一条真正触发
+ *  environment-fatal 的记录，其载体的 `quick_death_cause` 会按【逐记录的无状态重算】写成 ordinary，
+ *  于是「driver 因它而停」与「载体说它是普通死亡」并存，读载体的人看不到真因（正是本任务要修的那类
+ *  「载体里出现 0 次」的证据缺口）。回调同时承担状态记账（计数/退避/签名观测），⛔ 调用方不得再记一次。 */
+export type QuickDeathJudge = (
+  outcome: ReturnType<typeof computeOutcome>,
+  stderrTail: string | null,
+) => ReturnType<typeof recordQuickDeathBackoff> | null;
 
 /** 原子追加 worker pid 到 pid-file（观测抓手）：读-改-写 tmp 再 rename，外部读者绝不读到半截/空文件。
  *  非原子的 appendFileSync 会在 open(O_CREAT) 与 write 之间暴露【空文件窗口】——全量 suite 高并发下
@@ -3827,6 +4023,7 @@ function runOneWorker({
   pidFile,
   sessionId = newSessionId(),
   injectSessionId = true,
+  judgeQuickDeath,
 }: {
   taskId: string;
   selectorReason: string;
@@ -3840,6 +4037,9 @@ function runOneWorker({
   pidFile?: string;
   sessionId?: string;
   injectSessionId?: boolean;
+  /** 快速死亡判定回调（常驻环注入；批量路径不注入）。见 QuickDeathJudge 的头注释——判定必须在
+   *  载体落盘【之前】发生，否则跨任务关联命中的那条记录会在载体里写成 ordinary。 */
+  judgeQuickDeath?: QuickDeathJudge;
 }): Promise<WorkerRunResult> {
   const argv = injectSessionId ? [...workerArgv, "--session-id", sessionId] : workerArgv;
   return new Promise((resolve) => {
@@ -3847,10 +4047,27 @@ function runOneWorker({
     const startedAtMs = Date.now();
     let child: ReturnType<typeof spawn> | null = null;
     let spawnError: string | null = null;
+    // worker stderr 尾部捕获（gap-worker-quick-death-environment-fatal-halts-driver）：旧实现
+    // stdio:"inherit" 让 worker 的 stderr 直接继承 driver 的 fd ⇒ 一个字节都不进判定面（生产实例里
+    // 明明打了 `model_not_found`，`.quay/worker-outcome.jsonl` 里出现 0 次）。改为 stderr 走管道：
+    // 【照常转发】到 driver 的 stderr（人的可观测性不变），同时留最后 N KB 作判定面与载体字段。
+    // ⛔ stdin/stdout 仍是 inherit（不改 worker 的 stdout 契约，也不缓冲它的输出）。
+    let stderrTail = "";
     try {
-      child = spawn(cmd, cmdArgs, { cwd: rootDir, stdio: "inherit", detached: false });
+      child = spawn(cmd, cmdArgs, { cwd: rootDir, stdio: ["inherit", "inherit", "pipe"], detached: false });
     } catch (e) {
       spawnError = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    }
+    if (child?.stderr) {
+      child.stderr.on("data", (chunk: Buffer | string) => {
+        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        try {
+          process.stderr.write(s); // 照常转发——⛔ 不因新增判定面而吞掉人的可观测性
+        } catch { /* 转发失败（下游关闭）不影响判定面 */ }
+        stderrTail = (stderrTail + s).slice(-WORKER_STDERR_TAIL_MAX_BYTES);
+      });
+      // 管道读错误（child 被杀等）⇒ 保留已捕获的尾部，⛔ 不因读取异常清空判定面。
+      child.stderr.on("error", () => { /* best-effort */ });
     }
     const workerPid = child && child.pid ? child.pid : null;
     let timedOut = false;
@@ -3891,7 +4108,19 @@ function runOneWorker({
         sessionId,
         lockWaitMs: lockMetrics.lockWaitMs,
         lockHoldMs: lockMetrics.lockHoldMs,
+        // 快速死亡成因的第二个判定面 + 生产载体字段（gap-worker-quick-death-environment-fatal-halts-driver）。
+        stderrTail,
       });
+      // 快速死亡【判定】先于载体落盘：判定可能依赖【跨任务】状态（同一签名窗口内 ≥2 个不同任务 ⇒
+      // environment-fatal），逐记录的无状态重算看不到它。就地用判定结果校准载体的 quick_death_cause，
+      // ⛔ 否则会出现「driver 因这条记录而停」而「载体说它是 ordinary」的错报。
+      let quickDeath: ReturnType<typeof recordQuickDeathBackoff> | null = null;
+      if (judgeQuickDeath != null) {
+        quickDeath = judgeQuickDeath(outcome, stderrTail.length > 0 ? stderrTail : null);
+        if (quickDeath != null && quickDeath.cause != null) {
+          (outcome as unknown as Record<string, unknown>).quick_death_cause = quickDeath.cause;
+        }
+      }
       // gap-worker-driver-no-record-on-abnormal-death（AC2，能取假）：worker 异常死亡（failed/killed——
       // worker 没跑完、无完成实现）后，orphan worktree 永久残留会挡 driver 下轮对同一 task 的
       // `git worktree add`。写终态的同时清理（⛔ completed/spawn-failed/not-dispatched 无 worktree 可清；
@@ -3944,7 +4173,7 @@ function runOneWorker({
       else if (finalOutcome.final_state === "spawn-failed") exitCode = 2;
       else if (finalOutcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
       else exitCode = code ?? 2;
-      resolve({ taskId, outcome: finalOutcome, exitCode });
+      resolve({ taskId, outcome: finalOutcome, exitCode, ...(quickDeath != null ? { quickDeath } : {}) });
     };
 
     // 机械 fan-in 接线（gap-fan-in-driver-mechanical-orchestration）：worker 只实现（prompt 要求实现后
@@ -4265,6 +4494,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // ⇒ ⛔ 不杀在飞子进程（§6.9 不变式 3，与旧 `quay driver stop` 的语义逐字相同）。
   registerKindStop("worker");
 
+  /** 快速死亡判定闭包（注入 runOneWorker）：**唯一记账点**（计数 / 退避 / 跨任务签名观测），且必须在
+   *  载体落盘【之前】跑到——跨任务关联（同一签名 + 不同任务 + 窗口内 ⇒ environment-fatal）依赖状态，
+   *  逐记录的无状态重算看不到它。见 QuickDeathJudge 的头注释。 */
+  const judgeQuickDeathFor = (taskId: string): QuickDeathJudge => (outcome, stderrTail) =>
+    recordQuickDeathBackoff(
+      backoffState, taskId, outcome.final_state, outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+      undefined, // 自有子进程（非孤儿 adopt）：无 /proc 存活实测取值
+      (outcome as { selector_reason?: string | null }).selector_reason ?? null,
+      stderrTail,
+    );
+
   /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
    *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
    *  走同一归宿。 */
@@ -4339,11 +4579,31 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // 把 driver 【已捕获】的 selector_reason 交给纯分类器（⛔ 不新增探测面、⛔ 无语义判断）。
     // transient-external（账号级限流/配额）⇒ 内部不计入连续上限、只退避 ⇒ 下面的 newlyNeedsHuman
     // 分支对它永不成立（任务不再被终态停摆）；转而按错误文本自带的重置时刻退避重试。
-    const backoff = recordQuickDeathBackoff(
+    // 快速死亡判定已由 runOneWorker 在【写载体之前】做好（judgeQuickDeath 注入，见 QuickDeathJudge）
+    // ——这里直接消费它的结论，⛔ 不再重算（重算会二次记账，且与载体写下的那一份可能不一致）。
+    // 孤儿 adopt 路径的 outcome 不是 runOneWorker 产的（无该字段）⇒ 回落到原地的记录调用。
+    const backoff = r.quickDeath ?? recordQuickDeathBackoff(
       backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
       (r.outcome as { orphan_pid_liveness?: OrphanPidLiveness | null }).orphan_pid_liveness ?? undefined,
       (r.outcome as { selector_reason?: string | null }).selector_reason ?? null,
+      // 第二个判定面：worker stderr 的末尾捕获（runOneWorker 边转发边留的尾部窗口）。
+      (r.outcome as { worker_stderr_tail?: string | null }).worker_stderr_tail ?? null,
     );
+    // 环境级故障（gap-worker-quick-death-environment-fatal-halts-driver）：worker 在 60s 内以
+    // `model_not_found` / 401 / launcher ENOENT / DNS 不可解等【所有 worker 都会同样遇到】的方式死掉，
+    // 或窗口内 ≥2 个【不同任务】以同一签名死掉 ⇒ 停的是 driver，不是任务。
+    // ⛔ 不 markNeedsHuman（这正是本缺陷：逐个 park 任务直到池子清空，任务状态被动过、真因却丢了）；
+    // ⛔ 不动 counts（AC2：涉事任务的快速死亡计数不增加）。
+    if (backoff.cause === "environment-fatal") {
+      const reason = environmentFatalHaltReason(backoff);
+      const controlFile = haltForEnvironmentFatal(rootDir, reason);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "environment-fatal-halt", task: r.taskId, signature: backoff.signature, quick_death_ms: r.outcome.wall_clock_ms, control_file: controlFile, reason })}\n`,
+        );
+      }
+      return r;
+    }
     if (backoff.newlyNeedsHuman) {
       retryState.needsHuman.add(r.taskId);
       // 注记必须让读者一眼区分真因（plan item 4）：本路径【没有】exited-not-landed 尝试 ⇒ 注记的
@@ -4391,6 +4651,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       json,
       pidFile,
       injectSessionId: workerCmdOpts.exact == null,
+      // 判定注入：写载体之前跑（见 QuickDeathJudge），onWorkerFinished 消费结论、⛔ 不再重算。
+      judgeQuickDeath: judgeQuickDeathFor(sel.task),
     }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
     if (json) {
