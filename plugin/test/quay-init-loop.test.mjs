@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit, pluginDir } from "./quay-init-loop-helpers.mjs";
+import YAML from "yaml";
+import { makeTmp, cleanup, runInit, pluginDir, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
 
 function git(cwd, args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -194,4 +195,76 @@ test('AC5 — no unquoted heredoc body in quay-init.sh carries a backtick or com
     violations, [],
     `unquoted heredocs execute backticks/$( ) even inside comments — an executed command's stdout is spliced into the written file:\n${violations.join("\n")}`,
   );
+});
+
+// ── AC1/AC2 (gap-quay-init-config-heredoc-leaks-maintainer-comments): the fresh-install writer must
+// ship a CONSUMER-usable config, not quay's own maintenance notes.
+//
+// THE DEFECT: the writer's heredoc BODY carried a block addressed to whoever EDITS quay-init.sh —
+// which writer owns the version-level defaults, why the delimiter must stay unquoted, a dated
+// incident log, the name of the test that pins it — and an unquoted heredoc body is written verbatim
+// into the user's file, so every third-party project that ran quay-init received that block. A real
+// install (claudecodeui, 2026-09-20) delivered it, and a reader took quay's own incident for their
+// own project's history. The note now lives in SHELL comments above the heredoc opener.
+//
+// WHY THE ASSERTION IS TWO-SIDED (硬规则 2 + 3b): "the tokens are absent from the output" is
+// vacuously true the moment the tokens stop existing in the writer — the guard would then read
+// exactly like a pass while checking nothing. So this test FIRST proves each forbidden token IS in
+// quay-init.sh (the predicate run against a known-true sample), THEN that none of them reaches the
+// written file. Delete the note from the script and the positive half goes red instead of the guard
+// silently becoming a no-op. The consumer-facing control points the other way: a "fix" that emptied
+// the body entirely would pass the leak half alone, so the body's own user documentation is asserted
+// present too.
+const MAINTAINER_TOKENS = ["heredoc", "EOF", "quay-init-loop.test.mjs", "实证 2026-09-18"];
+
+test('AC1/AC2 — the fresh-install config carries no maintainer commentary, and the values it carries are unchanged', () => {
+  const ws = makeTmp("quay-init-note-");
+  // An explicit disk worktree root so AC2 can compare loop.worktree_root against a KNOWN input
+  // (runInit would otherwise inject a fresh mkdtemp the test cannot name).
+  const wtRoot = diskWorktreeRoot();
+  try {
+    const r = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wtRoot]);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+
+    // ── positive control: the forbidden tokens must EXIST in the writer, or their absence from the
+    // output proves nothing (the guard has gone vacuous — re-anchor the token set, do not delete it).
+    const src = fs.readFileSync(path.join(pluginDir, "scripts", "quay-init.sh"), "utf8");
+    for (const tok of MAINTAINER_TOKENS) {
+      assert.ok(
+        src.includes(tok),
+        `guard is vacuous: quay-init.sh no longer contains "${tok}", so "absent from the output" checks nothing`,
+      );
+    }
+
+    // ── AC1: whole-file per-line scan, hits listed (a bare boolean could not say WHICH line leaked,
+    // or how many). The machine-injected absolute paths are neutralized FIRST, because they are the
+    // test's OWN inputs, not bytes the writer's template emitted — and one of them necessarily
+    // contains a forbidden token here: this task's id is
+    // "gap-quay-init-config-heredoc-leaks-maintainer-comments", so the worktree path the writer
+    // substitutes into providers.native.path ends in "...-heredoc-leaks-maintainer-comments". Red-
+    // lighting on that would be a false positive about the test's own working directory rather than
+    // about shipped prose — and it would red in EVERY worktree of this task, including fan-in's.
+    const scanned = cfg.split(ws).join("<WS>").split(pluginDir).join("<PLUGIN>").split(wtRoot).join("<WT>");
+    const hits = [];
+    scanned.split("\n").forEach((line, i) => {
+      for (const tok of MAINTAINER_TOKENS) {
+        if (line.toLowerCase().includes(tok.toLowerCase())) hits.push(`:${i + 1} [${tok}] ${line.trim()}`);
+      }
+    });
+    assert.deepEqual(hits, [], `maintainer commentary leaked into the installed .quay/config.yml:\n${hits.join("\n")}`);
+
+    // ── AC2: the written file is real YAML and the four delivered values are byte-identical to what
+    // the pre-fix writer emitted (the negative control that relocating the note changed no behaviour).
+    const doc = YAML.parse(cfg);
+    assert.equal(doc.providers.native.path, path.join(pluginDir, "vendor", "quay-native"), 'providers.native.path');
+    assert.equal(doc.loop.test_command, "node --test", 'loop.test_command');
+    assert.equal(doc.loop.worktree_root, wtRoot, 'loop.worktree_root');
+    assert.equal(doc.loop.fork_baseline, "develop", 'loop.fork_baseline');
+
+    // ── consumer-facing control (the opposite direction): the body must STILL carry the
+    // loop.test_command contract note — emptying the body would satisfy AC1 while removing the one
+    // piece of documentation the config's reader actually needs.
+    assert.match(cfg, /loop\.test_command/, 'the body must keep its consumer-facing loop.test_command contract note');
+  } finally { cleanup(ws); }
 });
