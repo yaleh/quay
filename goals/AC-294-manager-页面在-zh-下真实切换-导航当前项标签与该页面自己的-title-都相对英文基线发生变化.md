@@ -55,16 +55,16 @@ criterion: >-
   # about itself. The ten CAUSE-prefixed refusal branches AFTER this block are
   byte-identical to the
 
-  # pre-amendment criterion, and so is the CAUSE=no-running-serve-instance
-  refusal the block still
+  # pre-amendment criterion, and so is the no-running-serve-instance refusal the
+  block still emits, so
 
-  # emits, so the two refusal modes this amendment ADDS carry their own
-  FAIL-prefixed token rather
+  # the two refusal modes this amendment ADDS carry their own FAIL-prefixed
+  token rather than a twelfth
 
-  # than a twelfth CAUSE -- a distinct value, so "could not derive/reach an
-  address" never wears the
+  # CAUSE-branch -- a distinct value, so "could not derive/reach an address"
+  never wears the same shape
 
-  # same shape as the branch it was added beside (hard rule 3b).
+  # as the branch it was added beside (hard rule 3b).
 
   # >>> addr-derivation (this block is run VERBATIM by
   packages/quay/test/ac294-criterion-address-derivation.test.mjs)
@@ -170,7 +170,7 @@ criterion: >-
     rep="$rep; pid=$p addr=$a cause=derived-from-$s-fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
   done
 
-  if [ -z "$addr" ] && [ "$ncand" != 0 ]; then printf 'AC-290 candidate readings
+  if [ -z "$addr" ] && [ "$ncand" != 0 ]; then printf 'AC-294 candidate readings
   (cwd=%s, nserve=%s, ncand=%s, nderived=%s):%s\n' "$root" "$nserve" "$ncand"
   "$nderived" "$rep" >&2; fi
 
@@ -190,7 +190,7 @@ criterion: >-
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
   (AC-179 probe pattern)" >&2; exit 1; fi
 
-  printf 'AC-290 serve address derived from %s as %s (per-candidate
+  printf 'AC-294 serve address derived from %s as %s (per-candidate
   readings:%s)\n' "$src" "$addr" "$rep"
 
   # <<< addr-derivation
