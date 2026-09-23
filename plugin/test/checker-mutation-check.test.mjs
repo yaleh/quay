@@ -24,6 +24,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-check.sh");
+// The implementation the thin `checker-mutation-check.sh` entry execs (gap-arch-tsify-checker-mutation-
+// check-sh, SPEC-architecture-consolidation §5 Phase 5.2): the program moved here, so the code-level
+// negative controls below mutate THIS file while still driving the shipped `.sh` entry everywhere else.
+const TS_SCRIPT = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-check.ts");
 const CASES_DIR = path.join(REPO_ROOT, "plugin/scripts/checker-mutation-cases");
 
 
@@ -151,17 +155,32 @@ test("AC4: --meta-inject breakages fail the gate (mechanism mutates itself)", ()
   }
 });
 
-test("AC4: a code-level break of the parser fails the gate (sed-mutated copy)", () => {
+test("AC4: a code-level break of the parser fails the gate (mutated copy of the implementation)", () => {
+  // The judged object moved with the rewrite (gap-arch-tsify-checker-mutation-check-sh): the parser
+  // body used to live in this `.sh`, and it now lives in plugin/scripts/checker-mutation-check.ts —
+  // same negative control, same assertion, pointed at the file that actually holds the parser.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cmc-ac4-"));
   tmpDirs.push(tmp);
-  const broken = path.join(tmp, "broken.sh");
-  let src = fs.readFileSync(SCRIPT, "utf8");
-  assert.ok(src.includes("(list_run_static_checks_checkers; list_ci_checkers) | sort -u"),
-    "parser body must be present for the sed mutation to be meaningful");
-  src = src.replace("(list_run_static_checks_checkers; list_ci_checkers) | sort -u", 'echo ""');
+  // A SHADOW of plugin/scripts (every sibling symlinked) so the mutated copy still resolves its own
+  // imports (`./gate-script-base.ts`) while the real tree stays untouched — a copy dropped in /tmp
+  // would fail to import and the gate would fail for the wrong reason (a vacuous green).
+  const shadowScripts = path.join(tmp, "plugin", "scripts");
+  fs.mkdirSync(shadowScripts, { recursive: true });
+  for (const f of fs.readdirSync(path.join(REPO_ROOT, "plugin", "scripts"))) {
+    fs.symlinkSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(shadowScripts, f));
+  }
+  const broken = path.join(shadowScripts, "checker-mutation-check.ts");
+  fs.rmSync(broken);
+  let src = fs.readFileSync(TS_SCRIPT, "utf8");
+  const anchor = "checkers: sortUnique([...runStatic, ...ci])";
+  assert.ok(src.includes(anchor), `parser body must be present for the mutation to be meaningful (${anchor})`);
+  src = src.replace(anchor, "checkers: []");
   fs.writeFileSync(broken, src);
-  const r = spawnSync("bash", [broken, "--repo-root", REPO_ROOT, "--check"], { encoding: "utf8" });
+  const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", broken, "--repo-root", REPO_ROOT, "--check"], {
+    encoding: "utf8",
+  });
   assert.notEqual(r.status, 0, "a mechanism whose parser returns no checkers must fail the gate");
+  assert.match(r.stderr, /manifest is EMPTY/, "the failure must be the EMPTY-manifest path, not an import error");
 });
 
 // ── AC5 #6: the rename negative control — a probe that cannot fail is exactly what L_S catches ───
