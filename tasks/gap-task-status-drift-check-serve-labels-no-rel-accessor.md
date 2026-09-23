@@ -3,7 +3,7 @@ id: gap-task-status-drift-check-serve-labels-no-rel-accessor
 title: task-status-drift-check.ts 的 basename 在 serve-board/serve-i18n 硬编码 10
   处、且无 REL 访问器（簇 P2-identity-task-status-drift-check.ts ——
   gap-serve-labels-hardcode-mechanism-script-basenames 的 Touches 漏掉的兄弟实例）
-status: todo
+status: ready
 labels:
   - gap
   - defect
