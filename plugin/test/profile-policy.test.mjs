@@ -162,9 +162,13 @@ test("AC3 — the three worker roles share ONE profile, declaring only name/env 
     assert.equal(spec.profile, "worker-default", `${role} must reference the shared worker-default profile`);
     const r = resolveRole(cfg, role);
     assert.equal(r.launcher, "claude-fjdac");
-    assert.equal(r.model, "deepseek-v4-pro-anthropic");
     assert.equal(r.bare, false);
   }
+  // ⛔ 不钉具体模型名。模型名是【运行环境取值】（随网关导出集合漂移），钉住它不携带新信息
+  //   —— 上面已断言 role 不自己声明 model（:160）—— 却会在换模型时让判据烂掉。
+  //   留下能取假的那条：三个 role 必须解析出【同一个】model，谁私自覆盖就红。
+  const models = ["task-worker", "selector", "fix-worker"].map((x) => resolveRole(cfg, x).model);
+  assert.equal(new Set(models).size, 1, "the three worker roles must resolve the SAME model (换模型改一处)");
 });
 
 test("AC3 — outer/selector share the same worker-default recipe (换模型改一处)", () => {
@@ -174,7 +178,24 @@ test("AC3 — outer/selector share the same worker-default recipe (换模型改�
   assert.equal(outer.launcher, selector.launcher);
   assert.equal(outer.model, selector.model);
   assert.equal(outer.launcher, "claude-fjdac");
-  assert.equal(selector.model, "deepseek-v4-pro-anthropic");
+
+  // 取假负控制（照 worker-driver-resident-s04.test.mjs AC140-1b 的手法）：改合成 config 的
+  // worker-default.model 一处 ⇒ 四个 role 全部跟随；任一 role 私自覆盖 model ⇒ 本断言即红。
+  // ⛔ 不锚具体模型名 —— 那正是本用例此前烂掉的原因（判据钉的是运行环境取值，会随网关漂移）。
+  const synth = {
+    version: 1,
+    profiles: { "worker-default": { launcher: "claude-fjdac", model: "SYNTH-MODEL-X", bare: false, auth: "token" } },
+    roles: {
+      outer: { profile: "worker-default", name: "o" },
+      "task-worker": { profile: "worker-default", name: "t" },
+      selector: { profile: "worker-default", name: "s" },
+      "fix-worker": { profile: "worker-default", name: "f" },
+    },
+  };
+  for (const role of ["outer", "task-worker", "selector", "fix-worker"]) {
+    assert.equal(resolveRole(synth, role).model, "SYNTH-MODEL-X",
+      `${role} must follow the shared worker-default model (换模型改一处)`);
+  }
 });
 
 // ── AC0 — 真 profiles.yml 钉死（文件可读 + 校验通过 + 六 role 可解析）──────────────────────────
