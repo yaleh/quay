@@ -1751,10 +1751,16 @@ The files just written ENABLE the quay plugin for this project, but they DO NOT 
 `enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project
 settings are not read at all — so "config committed => auto-installed" is FALSE. Install it first:
 
-  # 1. register the marketplace source (User Scope, machine-specific path — not committed):
-EOF
-  printf '  claude plugin marketplace add quay "%s"\n\n' "$PLUGIN_ROOT"
-  cat <<'EOF'
+  # 1. register the PUBLISHED marketplace source — the github channel. The CLI takes exactly ONE
+  #    <source> argument: `marketplace add <name> <source>` is rejected outright (Claude Code
+  #    2.1.280: "✘ Invalid marketplace source format. Try: owner/repo, https://..., or ./path"),
+  #    and registering a DIRECTORY here would pin this project to wherever this plugin bundle
+  #    happens to sit on THIS machine — it would load in place, leave no install record, and take
+  #    the machine-wide `quay` name slot. The marketplace name comes from the source root's
+  #    .claude-plugin/marketplace.json; it is not aliased. (This repo's own dog-food channel is
+  #    the SEPARATE name `quay-dev` → a directory source, declared at user scope there.)
+  claude plugin marketplace add yaleh/quay
+
   # 2. install the plugin for THIS project (⛔ always pass --scope: `claude plugin install` defaults
   #    to `user`, which writes a user-level enabledPlugins key and reddens the STANDING goal AC-161):
   claude plugin install quay@quay --scope project

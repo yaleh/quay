@@ -256,12 +256,31 @@ echo "  no plugin/ orchestration/ docs/analysis/ extension copies, no node_modul
 # §6-T3 measured that `enabledPlugins` ENABLES an already-installed plugin and never installs one, and
 # that an untrusted directory's project settings are not read at all. So the init output MUST name the
 # real steps; "配置即生效" would be the repo's most expensive failure class (存在≠生效).
+#
+# ── AC5 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot): the predicate is ANCHORED on the
+# FULL single-<source> github recipe, not the loose `claude plugin marketplace add` substring. The
+# loose form also passed the BROKEN two-arg recipe (`marketplace add quay "$PLUGIN_ROOT"`) — rejected
+# outright by the CLI and a DIRECTORY source into the bargain — i.e. the 硬规则 3b shape, where a
+# broken recipe reads exactly like a qualified one. The comment header at the top of this script
+# claimed the step was asserted; what was asserted was a substring both recipes carry.
 echo "== LEG 3a: the output names the explicit plugin install step (§6-T3) =="
-printf '%s\n' "$INIT_OUT" | grep -q 'claude plugin marketplace add' \
-  || fail "quay-init output does not name 'claude plugin marketplace add' — the install step must be explicit, not implied by config (§6-T3)"
-printf '%s\n' "$INIT_OUT" | grep -q 'claude plugin install' \
-  || fail "quay-init output does not name 'claude plugin install' — enabledPlugins only ENABLES an installed plugin (§6-T3)"
-echo "  the output names the marketplace-add + plugin-install steps explicitly"
+printf '%s\n' "$INIT_OUT" | grep -q 'claude plugin marketplace add yaleh/quay' \
+  || fail "quay-init output does not name the FULL github recipe 'claude plugin marketplace add yaleh/quay' — the step must be explicit AND CLI-acceptable, not implied by config (§6-T3)"
+printf '%s\n' "$INIT_OUT" | grep -q 'claude plugin install quay@quay --scope project' \
+  || fail "quay-init output does not name 'claude plugin install quay@quay --scope project' — enabledPlugins only ENABLES an installed plugin (§6-T3)"
+# Both halves of 硬规则 2, discharged on a known-BAD sample (the old two-arg recipe): it must still
+# satisfy the LOOSE predicate (else the strong one is not the thing that changed), and it must FAIL the
+# strong one (else the assertions above cannot take false — 零计数的配套动作是另一半).
+OLD_RECIPE='  claude plugin marketplace add quay "/cache/quay/quay/0.11.0"'
+printf '%s\n' "$OLD_RECIPE" | grep -q 'claude plugin marketplace add' \
+  || fail "negative control broken: the LOOSE predicate no longer matches the old two-arg recipe, so the anchored assertions above prove nothing"
+if printf '%s\n' "$OLD_RECIPE" | grep -q 'claude plugin marketplace add yaleh/quay'; then
+  fail "negative control broken: the ANCHORED predicate matched the old two-arg recipe — it cannot take false"
+fi
+if printf '%s\n' "$INIT_OUT" | grep -qE 'marketplace add quay "'; then
+  fail "quay-init output still prints the rejected two-arg form (marketplace add <name> <source>)"
+fi
+echo "  the output names the marketplace-add + plugin-install steps explicitly (full github recipe; the old two-arg form is red)"
 
 # ── 6. LEG 3b: the delivered runtime actually OPERATES the project (存在≠生效) ──────────────────────
 # The project carries NO copy of the runtime — it binds to the plugin's vendored bundle via
