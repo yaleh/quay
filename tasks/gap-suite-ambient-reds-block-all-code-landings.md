@@ -230,3 +230,12 @@ unsupported-reflog-action: fetch -q . author:develop, fetch -q . chore/quay-dev-
 - plugin/test/direct-to-develop-bypass-check.test.mjs
 - packages/quay/test/serve-adversarial-eval.test.mjs
 - tasks/gap-suite-ambient-reds-block-all-code-landings.md
+- goals/AC-290-tasks-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
+- plugin/sh-census-baseline.json
+- plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/test/profile-policy.test.mjs
+- plugin/test/worker-driver-resident-s04.test.mjs
+- plugin/test/promotion-driver-s04.test.mjs
+- plugin/test/manager-layer-skill.test.mjs
+- plugin/test/launch-settings.test.mjs
+- plugin/test/manager-layer-shipping.test.mjs
