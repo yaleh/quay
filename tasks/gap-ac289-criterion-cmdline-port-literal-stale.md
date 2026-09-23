@@ -3,7 +3,7 @@ id: gap-ac289-criterion-cmdline-port-literal-stale
 title: AC-289 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假（addr=172.28.0.1:0，curl 失败）；页面侧保证本身实测为真 —— 重锚地址派生那一步（与 AC-179 / AC-288
   在飞任务同一行、不同承载体）
-status: todo
+status: ready
 labels:
   - gap
   - defect
