@@ -248,6 +248,7 @@ AC-161 exit=0
 - `orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`
 - `plugin/test/quay-init.test.mjs`
 - `test/cold-start-e2e.sh`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot.md`
 ## Needs-Human
 
