@@ -2,7 +2,7 @@
 id: gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir
 title: workflow-journal 的 selftest 依赖一个被 gitignore 的 tmp/，而只有兄弟 selftest 顺手创建它
   —— 新 worktree 里按测试顺序随机红（实测 2 次 fan-in 退场）
-status: todo
+status: ready
 labels:
   - gap
   - defect
