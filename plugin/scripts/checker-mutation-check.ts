@@ -308,11 +308,15 @@ export function listJson(ctx: Ctx, m: Manifest): string {
   const uncovered = m.checkers.filter((n) => !hasCase(ctx, n));
   const covered = m.checkers.length - uncovered.length;
   const checkers = m.checkers
-    .map((n) => `{"name":"${n}","source":"${sourceOf(m, n)}","covered":${hasCase(ctx, n) ? "true" : "false"}}`)
+    .map(
+      (n) =>
+        `{"name":${JSON.stringify(n)},"source":${JSON.stringify(sourceOf(m, n))},` +
+        `"covered":${hasCase(ctx, n) ? "true" : "false"}}`,
+    )
     .join(",");
   return (
     `{"checkers_total":${m.checkers.length},"checkers_with_mutation":${covered},` +
-    `"uncovered":[${uncovered.map((n) => `"${n}"`).join(", ")}],` +
+    `"uncovered":[${uncovered.map((n) => JSON.stringify(n)).join(", ")}],` +
     `"checkers":[${checkers}]}\n`
   );
 }
@@ -618,23 +622,28 @@ export function runPlain(ctx: Ctx, m: Manifest, o: RunOutcome, opts: RunOptions)
   return `${lines.join("\n")}\n`;
 }
 
-/** `join_json_names` — a JSON string array, ", "-joined, safe for zero args. */
+/** `join_json_names` — a JSON string array, ", "-joined, safe for zero args. Each element goes
+ *  through `JSON.stringify` so a name carrying a quote/backslash stays valid JSON (the bash
+ *  hand-quoted `"${n}"` did not escape). Byte-identical for plain names. */
 export function joinJsonNames(names: readonly string[]): string {
-  return names.map((n) => `"${n}"`).join(", ");
+  return names.map((n) => JSON.stringify(n)).join(", ");
 }
 
-/** `csv_to_json_array` — a JSON string array from a comma-separated list, ","-joined, [] for empty. */
+/** `csv_to_json_array` — a JSON string array from a comma-separated list, ","-joined, [] for empty.
+ *  Quoted via `JSON.stringify` (escaping included), preserving the bash's "," separator exactly. */
 export function csvToJsonArray(csv: string): string {
   return csv
     .split(",")
     .map((n) => n.replace(/[ \t]/g, ""))
     .filter((n) => n !== "")
-    .map((n) => `"${n}"`)
+    .map((n) => JSON.stringify(n))
     .join(",");
 }
 
 export function runJsonLine(ctx: Ctx, m: Manifest, o: RunOutcome, opts: RunOptions): string {
-  const resultsJson = `{${[...o.results.entries()].map(([n, r]) => `"${n}":"${r}"`).join(",")}}`;
+  const resultsJson = `{${[...o.results.entries()]
+    .map(([n, r]) => `${JSON.stringify(n)}:${JSON.stringify(r)}`)
+    .join(",")}}`;
   return (
     `{"checkers_total":${m.checkers.length},"checkers_with_mutation":${coveredCount(ctx, m)},` +
     `"mutations_that_stayed_green":${o.stayedGreen.length},"stayed_green":[${joinJsonNames(o.stayedGreen)}],` +
