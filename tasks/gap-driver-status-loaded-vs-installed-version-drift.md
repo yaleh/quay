@@ -30,14 +30,20 @@ extra:
 
 ## AC
 
-- [ ] `node --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0（新文件），用例：①运行记录声明 kernel 0.10.0、当前安装 0.11.0 ⇒ `loaded_version: "behind"`，并带 `loaded: "0.10.0"`、`installed: "0.11.0"`；②同版本 ⇒ `current`；③运行记录缺失 ⇒ `not-evaluated`（⛔ 不与 `current` 同形）；④config provider path 版本段落后 ⇒ `config_provider_path: "behind"`。
-- [ ] 取假：把判定改回「以查询者自己的目录为准」后，用例①红（附实跑输出）。
-- [ ] 实跑：在本机对 claudecodeui 执行含修复版本的 `driver status --kind worker --json`（anchor 未重启时）读出 `loaded_version: "behind"`；输出原文贴进完成记录。
-- [ ] `bash scripts/test.sh --for-task gap-driver-status-loaded-vs-installed-version-drift` 退出 0，且执行了 ≥1 个测试文件。
+- [x] `node --test plugin/test/driver-runtime-loaded-version-drift.test.mjs` 退出 0（新文件），用例：①运行记录声明 kernel 0.10.0、当前安装 0.11.0 ⇒ `loaded_version: "behind"`，并带 `loaded: "0.10.0"`、`installed: "0.11.0"`；②同版本 ⇒ `current`；③运行记录缺失 ⇒ `not-evaluated`（⛔ 不与 `current` 同形）；④config provider path 版本段落后 ⇒ `config_provider_path: "behind"`。
+- [x] 取假：把判定改回「以查询者自己的目录为准」后，用例①红（附实跑输出）。
+- [x] 实跑：在本机对 claudecodeui 执行含修复版本的 `driver status --kind worker --json`（anchor 未重启时）读出 `loaded_version: "behind"`；输出原文贴进完成记录。
+- [x] `bash scripts/test.sh --for-task gap-driver-status-loaded-vs-installed-version-drift` 退出 0，且执行了 ≥1 个测试文件。
 
 ## DoD
 
 真实落地判据：对一个真实运行中、加载旧版本的第三方 anchor（claudecodeui 当前正是这种状态，若届时已重启则在临时 workspace 用旧版本 cache 启动一个 anchor 再升级），`quay driver status` 报 `behind` 并给出两个版本号；执行 `quay driver restart` 后再次 status 报 `current`。完成记录附前后两次输出原文。
+
+**完成记录（worker, 2026-09-23）**：`/data/home/yale/work/quay/.quay/lvdrift-evidence.md`（含 AC1 测试输出、AC2 变异红、AC3 生产现场 claudecodeui 原文、DoD 的 before/after 两次 status 原文与 `ps`）。判据落地形态：`loaded_version` 四态（`current` / `behind` / `ahead` / `not-evaluated`）+ `loaded` / `installed` / `installed_at` / `installed_source` + `loaded_kernel` / `loaded_kernel_source` + `config_provider_path`(+`_version`)；宿主内核路径取 `/proc/<pid>/cmdline`（外部可核直接量，硬规则 4b），读不到才退回 anchor 回读面 `.quay/anchor.json.bundle.kernel` 并单列来源；已安装版本取 `installed_plugins.json` 的 `quay@quay` 最高版本条目（附安装时刻），注册表读不到才退回本内核 `VERSION`；`ahead` 单列为第四态（⛔ 不并进 `behind`，否则 quay 自己的源树检出会永久报一个方向错误的读数）。
+
+**两处与 DoD 字面不同的地方，如实记下**：
+1. **DoD 的收敛半边做在真实第三方 workspace 上，⛔ 不是 claudecodeui**。claudecodeui 的 anchor 是一个**正在生产运行的、别的项目的**循环（采样时刻 2 个在飞 worker、六个 carrier 秒级刷新），重启是对外且难回退的动作，本任务 Proposal 第 4 条自己也写「重启时机由人或 manager 决定」⇒ 未重启，改在 DoD 自己给出的替代形态（临时第三方 workspace + 真 0.10.0/0.11.0 cache 内核 + 真 anchor 进程）上取 before/after：`behind` → `current`。DoD 的**生产半边**（真实运行中、加载旧版本的第三方 anchor 报 `behind`）已由 claudecodeui 原文直接取到（AC3）。
+2. **DoD 写的 `quay driver restart` 一步，实测在跨版本时走不通**（用已安装 0.11.0 的 CLI 对跑 0.10.0 内核的 anchor 执行 `restart --kind worker`，60s 停止确认窗超时 ⇒ `restart-aborted`，⛔ 不起新循环以免双派发；旧 anchor 只是在循环 return 时才读 desired，本轮 worker 实测 168–498s 才 return 一次）。收敛因此靠 `stop` + `start` 两步。这是一条**独立于本任务**的既有障碍，已在完成记录 (c) 段留下原文，供 human/manager 重启 claudecodeui 时参考。
 
 ## Touches
 
