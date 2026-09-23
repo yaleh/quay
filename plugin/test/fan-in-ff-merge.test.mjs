@@ -37,6 +37,16 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const MERGE_SCRIPT = path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts");
 const SUITE_LOCK_0 = "full-suite.lock.0";
 const MERGE_LOCK = "fan-in-merge.lock";
+// The classifier THIS file's fixtures must be judged by — the tree under test, pinned explicitly.
+// ⛔ Not left to `defaultScriptsDir()`: Core's `resolvePluginRoot()` prefers the MERGE ROOT whenever the
+// caller runs from a worktree, so an unpinned `runMerge` grades this tree's fan-in with whatever
+// classifier the MAIN CHECKOUT happens to carry. That is invisible while the two are in step, and
+// silently wrong the moment they are not (measured 2026-09-23: the converge/inert-retry cases below
+// read `not-evaluated` because the main checkout's classifier could not judge a registry-less root,
+// while the tree under test could). The fixture shims (`writeClassifierShim` /
+// `externalScriptsDir`) already forward to `REPO_ROOT`'s real classifier — this is the same rule for
+// the cases that drive the cert gate with no fixture scripts dir of their own.
+const REPO_SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -948,7 +958,7 @@ test("AC1 — status-only dirty (promotion-driver flip) auto-converges and the f
     const retries = path.join(st, "retries.jsonl");
     const capArgs = captureArgs(st, "fanin-x", tip);
 
-    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, "--scripts-dir", REPO_SCRIPTS_DIR, ...capArgs, "--lock-events", events, "--retry-record", retries]);
     assert.equal(r.status, 0, `status-only dirty must auto-converge and complete the ff:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.doesNotMatch(r.stderr, /not clean/, "the converge must remove the dirty-tree refusal, not report it");
     assert.match(r.stderr, /converged a status-only dirty tree/, "the converge is attributed and observable");
@@ -1398,6 +1408,18 @@ test("AC2 — install layout: the delta classifier resolves to the shipped dist 
 // exit 2 ⇒ not-evaluated ⇒ the certificate gate refused every non-flip delta in a third-party project
 // and burned full suites. Single variable across the three halves below: the delta path, plus the
 // registry's presence (the negative control).
+//
+// ⚠️ SUBJECT SUPERSEDED (gap-fan-in-delta-classify-declared-doc-surfaces, 2026-09-24): the fix that
+// made this layout reachable was a plugin-root SUBSTITUTION inside the certificate gate
+// (`classifyRootCandidates` — try `root` first, then the plugin root). That substitution is retired:
+// the gate now classifies `root` and only `root`, and a registry-less root is answered by the
+// classifier itself (declared `loop.doc_surfaces`, else the conservative quay-written default). What
+// the three halves below still pin is therefore the SEMANTIC that survives — the delta path decides
+// code (refused) vs doc (lands) for an external project, and quay's own registry does NOT enter that
+// judgment (asserted as a mode reading in (a): it must be conservative-default with the packaged
+// registry present AND absent). ⛔ The old claim ("remove the registry ⇒ the gate fails closed") is
+// gone because the failure it described — no verdict at all for a foreign tree — is the defect the
+// later task removed.
 
 /** The layout `package.sh` really stages: `scriptsDir = <pluginroot>/scripts/dist`, registry at
  *  `<pluginroot>/scripts/runner-static-gate.ts` (⛔ no nested `plugin/`). */
@@ -1423,16 +1445,35 @@ test("AC2 — flat packaged layout + an EXTERNAL project: a doc delta is INERT a
       assert.ok(!fs.existsSync(path.join(dir, rel)), `fixture premise: the external project carries no ${rel}`);
     }
 
-    // (a) NEGATIVE CONTROL (the DoD's contrast half): remove the packaged registry ⇒ the SAME command on
-    //     the SAME fixture returns not-evaluated. This is what pins the verdicts below to the registry,
-    //     rather than to a candidate root that would have resolved anyway.
+    // (a) THE CONTROL, REPOINTED (gap-fan-in-delta-classify-declared-doc-surfaces): this arm used to
+    //     assert that REMOVING the packaged registry makes the gate fail closed (exit 2 /
+    //     NOT-EVALUATED) — the reading that pinned `gap-classify-delta-registry-path-layout-aware`'s
+    //     plugin-root SUBSTITUTION (`classifyRootCandidates`, which tried the plugin root when `root`
+    //     carried no registry). That substitution is retired on purpose: the certificate gate now
+    //     classifies `root` and ONLY `root`, because asking quay's checker list to judge a FOREIGN
+    //     project's paths is a question with no meaning — it is what the production workaround
+    //     (committing a copy of quay's registry into the project) was really answering, and what made a
+    //     third-party project's `docs/` read as quay's `docs/`.
+    //     So the claim inverts, and it stays FALSIFIABLE: the packaged registry must make NO difference
+    //     to how an external project is judged — the mode reads conservative-default either way, which
+    //     is exactly the reading that goes red if the substitution ever comes back.
+    // `fx.scriptsDir` IS the dist dir in this layout (`<pluginRoot>/scripts/dist`), so the shim sits
+    // directly inside it — ⛔ not `<scriptsDir>/dist/…`.
+    const shim = path.join(fx.scriptsDir, "select-static-checks-for-touches.js");
+    const modeOf = () => JSON.parse(
+      spawnSync("node", [shim, "--classify-delta", "--resolution", "--root", dir], { encoding: "utf8" }).stdout.trim()).mode;
+    assert.equal(modeOf(), "conservative-default", "quay's packaged registry does NOT judge a foreign project");
     const savedRegistry = fs.readFileSync(fx.registry, "utf8");
     fs.rmSync(fx.registry);
-    const { base: baseN, tip: tipN } = makeTaskBranchWith(dir, "flatpkg-none", "tasks/flatpkg-none.md", "---\nid: flatpkg-none\n---\n");
+    assert.equal(modeOf(), "conservative-default", "…and removing it changes nothing (⛔ the substitution must not come back)");
+    // The half that still protects the suite, and it is what the refusal is really for: the conservative
+    // default calls everything outside the project's own declared surfaces CODE, so a code delta is
+    // refused — the certificate is never granted on a registry-less project's product change.
+    const { base: baseN, tip: tipN } = makeTaskBranchWith(dir, "flatpkg-none", "src/app.ts", "export const n = 1;\n");
     const capN = ["--suite-capture", writeSuiteCapture(st, "flatpkg-none", baseN)];
     const rN = runMerge(["--task", "flatpkg-none", "--root", dir, "--scripts-dir", fx.scriptsDir, ...capN]);
-    assert.equal(rN.status, 2, `without the packaged registry the gate must fail closed:\n${rN.stdout}${rN.stderr}`);
-    assert.match(rN.stderr, /NOT-EVALUATED/, `⛔ the contrast half — no registry ⇒ no verdict:\n${rN.stderr}`);
+    assert.equal(rN.status, 2, `without the packaged registry a CODE delta must still fail closed:\n${rN.stdout}${rN.stderr}`);
+    assert.match(rN.stderr, /non-inert \(src\/app\.ts\)/, `⛔ the contrast half — the refusal names the code path:\n${rN.stderr}`);
     assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tipN, "develop must NOT have advanced");
     fs.writeFileSync(fx.registry, savedRegistry, "utf8");
 
@@ -1540,7 +1581,7 @@ test("gap-ff-merge-quotepath-breaks-inert-retry — same-file sibling: a NON-ASC
     assert.match(rawPorcelain, /^ M "/m, "fixture premise: porcelain C-quotes the non-ASCII path by default — that quoted string IS the defect's input");
 
     const capArgs = captureArgs(st, "fanin-x", tip);
-    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, ...capArgs]);
+    const r = runMerge(["--task", "fanin-x", "--root", dir, "--worktree", wt, "--scripts-dir", REPO_SCRIPTS_DIR, ...capArgs]);
     assert.equal(r.status, 0, `a non-ASCII status-only dirty tree must converge and land:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.doesNotMatch(r.stderr, /not clean/, "the converge must remove the dirty-tree refusal, not report it");
     assert.match(r.stderr, /converged a status-only dirty tree/, "the converge is attributed and observable");
@@ -2137,25 +2178,28 @@ test("gap-fan-in-cert-flip-commit-identity-inert AC3 (real object) — an EXTERN
   const scriptsDir = externalScriptsDir("ext");
   try {
     initRepo(dir);
-    // Premise, asserted not assumed: this project carries no registry where the classifier looks, and
-    // the REAL classifier therefore cannot answer here — probed directly, so the pre-fix refusal below
-    // is attributable to the registry's absence and not to something else about the fixture. (The
-    // gate's own detail line carries the classifier's FIRST stderr line, which node's module-type
-    // warning can occupy — hence the direct probe rather than a substring of the refusal.)
+    // Premise, asserted not assumed: this project is REGISTRY-FREE, and the real classifier says so
+    // itself — it ANSWERS, and its own resolution line reports that the answer did not come from quay's
+    // checker list (⛔ never inferred from the exit code, which is 0 either way since
+    // gap-fan-in-delta-classify-declared-doc-surfaces — hard rule 4: a reading that cannot take a
+    // second value is not a measurement). The pre-task premise here was "the real classifier CANNOT
+    // answer"; that task changed it on purpose (a third-party project no longer has to commit a copy of
+    // quay's registry to be judged), so what is pinned is registry-FREE-ness, not un-answerability.
     assert.ok(!fs.existsSync(path.join(dir, "plugin", "scripts", "runner-static-gate.ts")),
       "fixture premise: an external project carries no plugin/scripts/runner-static-gate.ts");
     const probe = spawnSync("node", ["--experimental-strip-types",
       path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts"),
-      "--classify-delta", "--root", dir, "tasks/ext-1.md"], { encoding: "utf8" });
-    assert.equal(probe.status, 2, `fixture premise: the real classifier cannot judge in a registry-free project:\n${probe.stdout}${probe.stderr}`);
-    assert.match(probe.stderr, /registry file \(runner-static-gate\.ts\) not found/, `fixture premise: the cause IS the missing registry:\n${probe.stderr}`);
+      "--classify-delta", "--resolution", "--root", dir, "tasks/ext-1.md"], { encoding: "utf8" });
+    assert.equal(probe.status, 0, `fixture premise: the classifier answers for a registry-free project:\n${probe.stdout}${probe.stderr}`);
+    const resolution = JSON.parse(probe.stdout.trim());
+    assert.equal(resolution.registryPath, null, `fixture premise: no registry was found for this project:\n${probe.stdout}`);
+    assert.equal(resolution.mode, "conservative-default",
+      `fixture premise: the verdict is the conservative default, ⛔ not a registry verdict:\n${probe.stdout}`);
+    assert.ok(resolution.registryCandidates.every((p) => p.endsWith(`runner-static-gate.ts`)),
+      `fixture premise: what it looked for IS the registry, so the absence is attributable to the fixture:\n${probe.stdout}`);
 
     const { suiteHead, tip } = makeFlipBranch(dir, "ext-1");
     const cap = ["--suite-capture", writeSuiteCapture(st, "ext-1", suiteHead)];
-    // (a) PRE-FIX reading on this exact fixture: seam off ⇒ the classifier cannot answer ⇒ refused.
-    const pre = runMerge(["--task", "ext-1", "--root", dir, "--scripts-dir", scriptsDir, "--no-flip-identity-shortcut", ...cap]);
-    assert.equal(pre.status, 2, `pre-fix: the certificate must be refused:\n${pre.stdout}${pre.stderr}`);
-    assert.match(pre.stderr, /NOT-EVALUATED/, `pre-fix reading (the literal wording):\n${pre.stderr}`);
 
     // (b) POST-FIX: the identity verdict ⇒ the certificate is granted and the ff LANDS ON THE FIRST TRY.
     const post = runMerge(["--task", "ext-1", "--root", dir, "--scripts-dir", scriptsDir, ...cap]);
@@ -2167,10 +2211,35 @@ test("gap-fan-in-cert-flip-commit-identity-inert AC3 (real object) — an EXTERN
     cleanup(dir); cleanup(st); cleanup(scriptsDir);
   }
 
+  // (a) THE OTHER MECHANISM, on its own fixture (so the first landing above stays a real first landing):
+  //     identity short-circuit OFF ⇒ the delta goes to the CLASSIFIER. It answers conservatively (see
+  //     the premise above) and, because this delta is doc-only, grants the certificate that way too —
+  //     ⛔ but the landing must NOT claim the identity verdict. That attribution difference is the
+  //     contrast; a SOURCE delta is still refused (part (c) below).
+  //     ⚠️ This arm used to assert a REFUSAL (exit 2 / NOT-EVALUATED) — the pre-task reading, when a
+  //     registry-less root had no verdict at all and the identity short-circuit was the ONLY way an
+  //     external project could pass the certificate gate.
+  const dirA = makeTmp("extproj-noid");
+  const stA = stateDir("extproj-noid");
+  const scriptsDirA = externalScriptsDir("extnoid");
+  try {
+    initRepo(dirA);
+    const { suiteHead: shA, tip: tipA } = makeFlipBranch(dirA, "ext-3");
+    const capA = ["--suite-capture", writeSuiteCapture(stA, "ext-3", shA)];
+    const pre = runMerge(["--task", "ext-3", "--root", dirA, "--scripts-dir", scriptsDirA, "--no-flip-identity-shortcut", ...capA]);
+    assert.equal(pre.status, 0, `short-circuit off: the classifier itself grants a doc-only certificate:\n${pre.stdout}${pre.stderr}`);
+    assert.ok(!/未调分类器/.test(pre.stderr), `⛔ the landing must NOT be attributed to the identity verdict:\n${pre.stderr}`);
+    assert.ok(!/NOT-EVALUATED/.test(pre.stderr), `⛔ the classifier judged it — no un-evaluable reading:\n${pre.stderr}`);
+    assert.equal(gitCmd(dirA, "rev-parse", "develop").stdout.trim(), tipA, "develop fast-forwarded to the task tip");
+  } finally {
+    cleanup(dirA); cleanup(stA); cleanup(scriptsDirA);
+  }
+
   // (c) The OTHER side of the control — SAME project, SAME command, single variable = the delta path:
-  //     a commit that also changes SOURCE must still take the classifier. Without the registry the
-  //     classifier yields not-evaluated, so the reading is a refusal — which is exactly the point: the
-  //     identity verdict never widens what counts as inert.
+  //     a commit that also changes SOURCE must still take the classifier, and the classifier's own
+  //     verdict must REFUSE it. In a registry-free project the conservative default is what calls it
+  //     code, so the refusal names the real path — which is exactly the point: the identity verdict
+  //     never widens what counts as inert.
   const dir2 = makeTmp("extproj-code");
   const st2 = stateDir("extproj-code");
   const scriptsDir2 = externalScriptsDir("extcode");
@@ -2186,7 +2255,8 @@ test("gap-fan-in-cert-flip-commit-identity-inert AC3 (real object) — an EXTERN
     const cap2 = ["--suite-capture", writeSuiteCapture(st2, "ext-2", suiteHead)];
     const r = runMerge(["--task", "ext-2", "--root", dir2, "--scripts-dir", scriptsDir2, ...cap2]);
     assert.equal(r.status, 2, `a source delta must NOT be short-circuited:\n${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /NOT-EVALUATED/, `it still goes to the classifier — which, in a registry-free project, reads not-evaluated:\n${r.stderr}`);
+    assert.match(r.stderr, /non-inert \(src\/app\.ts\)/, `the classifier's OWN verdict names the code path — the conservative default is what calls it code:\n${r.stderr}`);
+    assert.ok(!/NOT-EVALUATED/.test(r.stderr), `⛔ a REAL verdict, not an un-evaluable refusal (the pre-task reading here):\n${r.stderr}`);
     assert.ok(!/未调分类器/.test(r.stderr), "⛔ the identity verdict must not have been claimed for a source delta");
     assert.notEqual(gitCmd(dir2, "rev-parse", "develop").stdout.trim(), tip, "develop must NOT have advanced");
   } finally {

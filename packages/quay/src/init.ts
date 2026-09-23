@@ -99,6 +99,22 @@ export function classifyConfig(configPath: string): ConfigClassification {
 export const LOOP_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
   /** The branch a task worktree forks from (SPEC-branching-model current ruling: `develop`). */
   fork_baseline: "develop",
+  /**
+   * The doc/code declaration the mechanical fan-in reads to decide whether a task branch's delta may
+   * skip the full suite (`select-static-checks-for-touches.ts --classify-delta`, through its
+   * `resolveDocSurfaceDecision`; gap-fan-in-delta-classify-declared-doc-surfaces).
+   *
+   * A VERSION-LEVEL constant, not a detected value: quay can name the surfaces IT writes into every
+   * workspace (the task board, the goal store, this config dir), and a project EXTENDS the list with
+   * its own documentation/telemetry prefixes. Anything not listed is CODE (fail-closed), so the cost
+   * of a too-short list is a suite run, while the cost of a missing entry is a lost verification.
+   * ⛔ It only decides on a tree that carries no quay checker registry — that registry decides on
+   * quay's own tree, where the declaration is inert.
+   * ⛔ Mirror: `plugin/scripts/quay-init.sh`'s fresh-install heredoc writes the same value from its
+   * own DEFAULT_DOC_SURFACES (shell cannot import this table) — change both together, as that file's
+   * own note about mirroring version-level defaults requires.
+   */
+  doc_surfaces: ["tasks/", "goals/", ".quay/"],
 };
 
 // ⛔ `merge_target` is DELIBERATELY NOT in the table above, and the reason is executable rather than
@@ -467,7 +483,10 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     // (`LOOP_VERSION_DEFAULTS`) rather than re-typed here. Two hand-kept copies of one list is the
     // defect this whole change exists to remove: a fresh workspace must not be born one reconcile
     // behind, which is exactly what a template that forgets a key the reconcile knows about produces.
-    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${String(v)}`),
+    // `loopDefaultLine` (not `String(v)`) so a LIST value emits a real YAML flow sequence —
+    // `String(["a"])` is `"a"`, which parses back as the scalar `a` and silently turns a list into a
+    // string (the same class as the "a value that looks like a declaration but is not one" defect).
+    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${loopDefaultLine(v)}`),
     "  # stop: \"once\"                # uncomment and set your preferred stop policy",
     "  # policy: \"ready-first\"        # uncomment to customize task selection",
     "  # execution: \"dispatched\"      # uncomment to use inline builds",
@@ -485,6 +504,18 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
 
 function ruleLine(len: number): string {
   return "─".repeat(len);
+}
+
+/** Render ONE `LOOP_VERSION_DEFAULTS` value as YAML for the fresh-install template. A string array
+ *  becomes a flow sequence of double-quoted scalars (`["a", "b"]`) — `String(v)` would emit `a,b`,
+ *  which YAML reads back as the single scalar `a,b` (a list silently becoming a string is the kind of
+ *  quiet mis-typing the template must not introduce). Every other value keeps the historical
+ *  `String(v)` rendering, so no existing key's emitted bytes move. */
+function loopDefaultLine(v: unknown): string {
+  if (Array.isArray(v)) {
+    return `[${v.map((x) => JSON.stringify(String(x))).join(", ")}]`;
+  }
+  return String(v);
 }
 
 interface GateSuggestion {
@@ -1159,9 +1190,16 @@ export interface EnsureLoopConfigOpts {
 /**
  * `ensure_loop_config` — add/update the four fast-mode target-project values in an EXISTING config's
  * `loop:` section. MERGED, never replaced: every other `loop:` key (the loop-driver schema's
- * `board`/`gates`/`stop`/`policy`, fast mode's `concurrency_bands`/`fork_baseline`/`routines`)
- * survives. NO GRATUITOUS REWRITE: a re-dump is not free (it reformats the whole document), so the
- * write happens ONLY when a VALUE actually changed — equal ⇒ no write at all.
+ * `board`/`gates`/`stop`/`policy`, fast mode's `concurrency_bands`/`fork_baseline`/`routines`, and the
+ * version-level `doc_surfaces`) survives. NO GRATUITOUS REWRITE: a re-dump is not free (it reformats
+ * the whole document), so the write happens ONLY when a VALUE actually changed — equal ⇒ no write at
+ * all.
+ *
+ * ⛔ A VERSION-LEVEL default must NOT be routed through this function (gap-fan-in-delta-classify-
+ * declared-doc-surfaces): its writer is `pyYamlDump`, which re-serialises the whole document and DROPS
+ * every comment — the exact cost the "no gratuitous rewrite" rule exists to avoid. `doc_surfaces` is
+ * therefore delivered by the comment-preserving per-key reconcile (`LOOP_VERSION_DEFAULTS` +
+ * `reconcileConfigContent` below), not here. This step stays the four project-DERIVED values.
  *
  * An empty tmux session is written as an explicit YAML null, not `""`: the session is optional
  * since SPEC-tmux-retirement-2026-09-03 and null is the honest "not set".
@@ -1187,11 +1225,11 @@ export function ensureLoopConfig(o: EnsureLoopConfigOpts): void {
     return;
   }
   if (o.dryRun) {
-    console.log("  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)");
+    console.log("  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated, doc_surfaces filled when absent; 其余 loop 键保留 — config 保留 增量升级)");
     return;
   }
   fs.writeFileSync(o.cfgPath, after, "utf8");
-  console.log("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)");
+  console.log("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated, doc_surfaces filled when absent; 其余 loop 键保留 — config 保留 增量升级)");
 }
 
 export interface EnsureCarrierEnvOpts {
