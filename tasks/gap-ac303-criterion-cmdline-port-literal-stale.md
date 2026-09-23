@@ -148,6 +148,8 @@ GREEN_EXIT=0
 
 **⛔ 越界声明**：只重锚了 AC-303 一条。AC-179、AC-288…AC-302 的 criterion 未动（它们的 `goals/AC-*.md` 不在本任务 Touches 内，逐条前后读数也未测 ⇒ 按 DoD 不批量改）。
 
+**复跑补充（2026-09-24，worker 续做轮 —— 落笔当轮重新取读数，⛔ 非转述上一轮）** — 载体在本轮期间**已重启**（`pid 850862 → 2035152`，web `0.0.0.0:16377 → 0.0.0.0:10539`），这恰好是 AC3 非字面量性质的一次**外生复测**：同一份判据文本在新载体上重新派生 ⇒ `+ addr=127.0.0.1:10539`、`+ src=carrier`（通配 host 归一化 0.0.0.0→127.0.0.1），`goal gate AC-303 --dry-run --json` 仍 `verdict="pass"` / `GATE_EXIT=0`（⛔ 判据未被重启打 stale）。同一地址上重取 en/zh 直读（criterion 自己的 chrome 作用域）：en `<html lang="en"` / nav `Architecture` **2** 条 / nav 2642 bytes / `<title>quay — Architecture — system component map` / 整段响应 `Architecture` **4** 条；zh `<html lang="zh"` / nav `Architecture` **0** 条 / nav 2637 bytes / `<title>quay — 架构 — 系统组件图` / 整段响应 **0** 条。`criterion md5` 两侧与上表同值（前 `441ab29887d0a4f2572b03a3ad7791d6` / 后 `7b35d8c0511508643b9c0c484a55700a`），AC5 的 `expect` / `ROUTE` / `LABEL_EN` / 作用域逐字未变。AC6 本轮复跑：attribution check `exit 0`；`goal check --stale-pass` 的 failing 集合已收敛到 **1 条 = `[AC-179]`**（上一轮记的 `[AC-255, AC-289, AC-296, AC-298, AC-299, AC-300, AC-302]` 是同族各自重锚过程中的中间态），**AC-303 仍不在内**。AC7 本轮复跑 `bash scripts/test.sh --for-task gap-ac303-criterion-cmdline-port-literal-stale --allow-thin` ⇒ `exit 0`（夹具 `tests 20 / pass 20 / fail 0`）。⚠️ 上一轮 fan-in 的 `step=suite` 红是 `plugin/test/ready-pool-check-s22.test.mjs` 的 AC5 N=2000 计时断言（`cached=4256ms uncached=2400ms ratio=1.77`）—— 与本任务 delta 无关（不触碰该文件、无 import 交集），是已登记的 ~25%、**负荷无关**的抛硬币型 flake（按 `unrelated-flaky-exempt` 处理）；⛔ 未修改它（不在本任务 Touches 内，改它反而触发 anti-drift 硬失败）。
+
 ## Touches
 
 - goals/AC-303-architecture-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
@@ -155,71 +157,3 @@ GREEN_EXIT=0
 - tasks/gap-ac303-criterion-cmdline-port-literal-stale.md
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-303 --criterion …` 落库，`expect` 与 chrome 作用域语义逐字不变、只补「为什么改」；第二条是配套夹具（按 marker 从 goal 文件逐字抽取派生块，与 `packages/quay/test/ac288-criterion-address-derivation.test.mjs` 同族、页面各一）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts` —— 派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。⛔ `packages/quay/src/serve-architecture.ts` / `serve-i18n.ts` **不在本 Touches 内** —— 它们已被本 AC 的 done 任务修好且本轮实测为真。）
-
-## Evidence
-
-**AC1 — 重锚后判据在活实例上为真**（读数在**落脚本轮**重新取一次，⛔ 非转述上一轮）
-
-- criterion md5 **修订前** = `441ab29887d0a4f2572b03a3ad7791d6`（3075 bytes；逐字复跑得 `CAUSE=en-fetch-failed -- GET http://127.0.0.1:0/architecture returned nothing (addr=127.0.0.1:0)`）
-- criterion md5 **修订后** = `7b35d8c0511508643b9c0c484a55700a`（8247 bytes）
-- 活载体 `/data/home/yale/work/quay/.quay/server.json`：`pid=2035152`，`name=="web"` ⇒ `0.0.0.0:10539` `up=true`（`control` 是同 pid 的另一个端口，⛔ 取错会打到控制面）
-- 判据**自己那一步**派生的地址（`bash -x` 抓 `+ addr=`）：`127.0.0.1:10539`，`src=carrier`（通配 host 已归一化到 loopback；⛔ 不是 0）
-- `GATE_EXIT=0` —— `goal gate AC-303 --dry-run --json` ⇒ `verdict: "pass"`，`"acceptance passed (exit 0)"`
-- en/zh 两条读数（在**判据实际使用的地址**上由响应体直读，chrome 作用域 = criterion 自己的取法：`tr '\n' ' '` 后 `grep -o '<nav.*</nav>'` / `grep -oE '<title>[^<]*</title>'`）
-
-| 读数 | en | zh |
-|---|---|---|
-| `<html lang=…>` | `<html lang="en"` | `<html lang="zh"` |
-| `<nav>…</nav>` 区块内 `Architecture` **条数** | **2** | **0** |
-| nav 区块字节数 | 2642 | 2637 |
-| 本页自己的 `<title>` | `quay — Architecture — system component map` | `quay — 架构 — 系统组件图` |
-| （判别性对照）整段响应 `Architecture` **条数** | **4** | **0** |
-
-⇒ en 基线在场 ∧ zh 三条断言臂（`<html lang="zh"`、nav 无该字面量、本页 `<title>` 变中文）都成立。⚠️ en 全响应 4 条里约 3 条落在 `<nav>` 之外（`<h1>`/图例/表格）—— 这正是作用域必须窄的原因；⛔ 修订未放宽作用域。
-
-**AC2 / AC4 — 负控制两向 + 归因**（原始读数 `.quay/ac303-crit-evidence/neg-controls.out`，驱动脚本同目录 `neg-controls.sh`）
-
-(a) **无活候选**（cwd = 一个没有对应 serve 进程的 git root）：
-```
-CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=<worktree>; the locale mechanism cannot be evaluated on a live surface (AC-179 probe pattern)
-CANDIDATES: none -- pgrep -f 'quay.ts serve' x cwd=<worktree> matched no process
-EXIT_A=1
-```
-(b) **候选可派生但无人应答**（显式 `--port` 指向一个刚释放的死端口）：
-```
-CAUSE=en-fetch-failed -- GET http://127.0.0.1:2297/architecture returned nothing (addr=127.0.0.1:2297)
-EXIT_B=1
-```
-两侧具名成因**不同形**（`no-running-serve-instance` vs `en-fetch-failed`），⛔ 不是同一个裸失败。
-
-AC4 **归因**（候选存在但无一可派生 ⇒ 每个候选各成一行，`addr=-` + 成因；⛔ 无空 `addr=` 的裸失败）：
-```
-CAUSE=no-derivable-address -- pgrep -f 'quay.ts serve' x cwd=<tmp root> matched candidate(s) but none yielded a live web address (an explicit --port >= 1 on the process's own argv, or this root's .quay/server.json naming that pid's web service)
-CANDIDATES: | pid=2306119 addr=- cause=argv-port-kernel-assigned,carrier-absent | pid=2306124 addr=- cause=argv-port-kernel-assigned,carrier-absent
-EXIT_C=1
-```
-反向配套（一可派生 + 一不可 ⇒ 成功，且**两行都不丢**）：
-```
-DERIVED_ADDR=127.0.0.1:46021
-REPORT= | pid=2306119 addr=- cause=argv-port-kernel-assigned,carrier-absent | pid=2306124 addr=- cause=argv-port-kernel-assigned,carrier-absent | pid=2308393 addr=127.0.0.1:46021 cause=derived-from-argv
-EXIT_D=0
-```
-
-**AC3 — 非字面量 + 同一谓词对已知为真样本的检测半边**
-```
-$ grep -c "19071\|172\.28\.0\.1" goals/AC-303-*.md
-0                                  (rc=1)
-$ printf 'addr 127.0.0.1:19071\n' | grep -c "19071\|172\.28\.0\.1"
-1                                  (rc=0)   ← 非恒零，谓词本身有效
-```
-
-**AC5 — 作用域与语义不变**
-- `expect`、`ROUTE="/architecture"`、`LABEL_EN="Architecture"` 与 chrome 作用域（只匹配 `<nav>…</nav>` 与 `<title>`）逐字未变；修订只经 `quay goal write AC-303 --criterion …` 落库，⛔ 未直接 `Edit` goal 文件；「为什么改」写在 criterion 顶部的 `# WHY THIS STEP WAS RE-ANCHORED` 注释块里。
-- 新 `criterionHash` = `abc74ce6609f1567`（≠ 修订前 `f452c81b20f3ae15`），有**两条独立落账**：`actor=goal-amend` `2026-09-23T16:11:31.630Z` 与 `actor=goal-sweep` `2026-09-23T17:23:51.587Z`，均 `verdict:"pass"`。
-- 单一正本关系的机械保证：夹具 `packages/quay/test/ac303-criterion-address-derivation.test.mjs` 有一条用例断言「按 marker 从 goal 文件抽出的块 == 落库的派生块」且 why/route/label 留在块外。
-
-**AC6 — 本仓库自身行为不回退**（本轮实测）
-- `node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts` ⇒ `PASS: criterion failure attribution intact: inDomain=155 bareAcs=0 ≤ baseline 0 (bareLines=0)`，`exit 0`。
-- `node --experimental-strip-types packages/quay/bin/quay.ts goal check --stale-pass` ⇒ failing 集合 = `AC-179`（**1 条**），**AC-303 不在内**（立案当轮基线 = **15 条**且 AC-303 在内）。
-
-**AC7 — scoped 门**：`bash scripts/test.sh --for-task gap-ac303-criterion-cmdline-port-literal-stale --allow-thin` ⇒ `exit 0`（本 AC 夹具 20 条用例全绿，含 9 条派生分支的负向枚举）。
