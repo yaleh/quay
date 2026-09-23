@@ -1885,26 +1885,26 @@ function classifySuiteToken(token: string): "file" | "pseudo-stage" | "unclassif
   return SUITE_TEST_FILE_RE.test(t) ? "file" : "unclassified";
 }
 
-/** token → repo-relative。worktree 绝对路径形态（`/…/quay-worktrees/<task>/plugin/test/x.test.mjs`）
- *  按 root 前缀剥离（⛔ 不按 `packages|plugin|experiments` 关键词猜前缀——那正是本缺陷的成因）。
- *  不在本 worktree 下的绝对路径 ⇒ 取「在 worktree 里真实存在」的最长后缀；都不存在则原样返回。 */
-function toRepoRelToken(token: string, root: string | null): string {
+/** token → repo-relative；定位不出 ⇒ null（**读不懂的独立取值**，硬规则 3b）。
+ *  绝对路径的 repo 根【只能】由 root 给出（生产里 `measure-suite-reporter` 发的是 full-path，而 suite
+ *  在任务 worktree 里跑、调用方拿的是主检出 root）：先按 root 前缀剥离，不在 root 下则取「在 root 下
+ *  真实存在」的最长后缀——存在性是判据。⛔ 不按 `packages|plugin|experiments` 关键词猜前缀（那正是本
+ *  缺陷的成因）；⛔ 也不在无 root 时把绝对路径削成「看着像 repo-relative」的假路径——它会被当成已归因，
+ *  直接污染 AC-317 的读数（假在产物字段上 ⇒ 比读不懂更坏）。 */
+function toRepoRelToken(token: string, root: string | null): string | null {
   const raw = String(token ?? "").replace(/\\/g, "/").trim();
-  if (!raw.startsWith("/")) return normalizeRel(raw);
+  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
   const rootAbs = root ? `/${normalizeRel(root)}` : "";
-  if (rootAbs && rootAbs !== "/" && (raw === rootAbs || raw.startsWith(`${rootAbs}/`))) {
-    return normalizeRel(raw.slice(rootAbs.length));
+  if (!rootAbs || rootAbs === "/") return null;
+  if (raw === rootAbs || raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
+  const parts = raw.split("/").filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    const cand = parts.slice(i).join("/");
+    try {
+      if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
+    } catch { /* 该后缀不存在，继续缩短 */ }
   }
-  if (rootAbs && rootAbs !== "/") {
-    const parts = raw.split("/").filter(Boolean);
-    for (let i = 1; i < parts.length; i += 1) {
-      const cand = parts.slice(i).join("/");
-      try {
-        if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
-      } catch { /* 该后缀不存在，继续缩短 */ }
-    }
-  }
-  return normalizeRel(raw);
+  return null;
 }
 
 /** `__PERFILE__ duration_ms=… <token> passed=false …` 的 <token> = `passed=false` 前那个字段。 */
@@ -1947,12 +1947,14 @@ export function parseSuiteLogFailures(logText: string, root?: string | null): Su
   const pseudoStages: string[] = [];
   const unclassified: string[] = [];
   let failingLines = 0;
-  const addFile = (token: string): void => {
-    const rel = toRepoRelToken(token, root ?? null);
-    if (rel && !files.includes(rel)) files.push(rel);
-  };
   const notePseudo = (t: string): void => { if (t && !pseudoStages.includes(t)) pseudoStages.push(t); };
   const noteUnclassified = (t: string): void => { if (t && !unclassified.includes(t)) unclassified.push(t); };
+  const addFile = (token: string): void => {
+    // 定位不出 repo-relative（如无 root 的绝对路径）⇒ 归入「读不懂」，⛔ 不冒充已归因（硬规则 3b）。
+    const rel = toRepoRelToken(token, root ?? null);
+    if (!rel) { noteUnclassified(token); return; }
+    if (!files.includes(rel)) files.push(rel);
+  };
 
   for (const raw of String(logText ?? "").split("\n")) {
     const line = raw.trim();
