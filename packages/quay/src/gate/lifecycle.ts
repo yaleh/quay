@@ -16,6 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runGate } from "./engine.ts";
+import { verdictFromGateCheck } from "./acceptance-runner.ts";
 import { readGatesConfig } from "./registry.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import { TASK_STATUS, type Task } from "../abi.ts";
@@ -297,17 +298,23 @@ export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }:
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   const r = await client.taskCheck(id);
+  // ⛔ Through the one mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). `taskCheck`
+  // is boolean-only BY CONTRACT ("are all ACs ticked") — it has no not-evaluated answer to
+  // give, so `verdictFromGateCheck`'s fallback IS its complete mapping; passing it explicitly
+  // keeps this write point from hand-rolling a binary ternary the next reader would have to
+  // re-audit. If taskCheck ever grows a third state, this call site needs no change.
+  const auditVerdict = verdictFromGateCheck({ ok: r.ok });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({
       id,
       gate: "audit",
       actor,
-      verdict: r.ok ? "pass" : "fail",
+      verdict: auditVerdict,
       payload: { reason: r.reason, observed_status: task.status },
     })
   );
-  console.log(`AUDIT ${r.ok ? "pass" : "fail"} — ${r.reason}`);
+  console.log(`AUDIT ${auditVerdict} — ${r.reason}`);
   return { ok: r.ok, reason: r.reason, exitCode: 0 };
 }
 

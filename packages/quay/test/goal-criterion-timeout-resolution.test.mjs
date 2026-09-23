@@ -140,10 +140,16 @@ test("AC3 — QUAY_ACCEPTANCE_TIMEOUT_MS 生效：同一判据在 1000ms 下被 
 
   const short = goal(ws, ["gate", "AC-900", "--dry-run", "--json"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
   const s = JSON.parse(short.stdout);
-  assert.equal(s.verdict, "fail", `1000ms < sleep 2 ⇒ must be killed:\n${short.stdout}${short.stderr}`);
+  // ⛔ `not-evaluated`, NOT `fail` (gap-goal-gate-verdict-single-mapping-not-evaluated): a criterion
+  // killed at its deadline never got to state anything, so "we could not measure this" must not wear
+  // the shape of "this is false". The AC's own claim — the resolved deadline GOVERNED the run — is
+  // carried by `reason`/`timeoutMs`/elapsed below, which is why the vocabulary change leaves them
+  // intact and only this verdict word moves.
+  assert.equal(s.verdict, "not-evaluated", `1000ms < sleep 2 ⇒ must be killed ⇒ not-evaluated:\n${short.stdout}${short.stderr}`);
+  assert.equal(s.cause, "timeout", "and the cause names the knob-shaped reason it was not evaluated");
   assert.match(s.reason, /timed out after 1000ms/, `reason names the deadline that killed it: ${s.reason}`);
   assert.equal(s.timeoutMs, 1000, "the printed JSON reports the deadline that governed the run");
-  assert.equal(short.status, 1, "a failing criterion exits 1");
+  assert.equal(short.status, 1, "a non-pass criterion exits 1");
 
   const long = goal(ws, ["gate", "AC-900", "--dry-run", "--json"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "5000" });
   const l = JSON.parse(long.stdout);
@@ -229,7 +235,10 @@ test("AC6(b) — 轮转扫描走同一解析来源：sweep 的 reason 与 elapse
   const s1 = JSON.parse(swept.stdout).sweep;
   assert.equal(s1.ran.length, 1, `one bounded rotation step:\n${swept.stdout}${swept.stderr}`);
   assert.equal(s1.ran[0].id, "AC-903", "least-recently-verified-first (both never touched ⇒ id order)");
-  assert.equal(s1.ran[0].verdict, "fail", "a criterion killed at the deadline is a fail");
+  // ⛔ `not-evaluated`, NOT `fail` (gap-goal-gate-verdict-single-mapping-not-evaluated): the sweep is
+  // one of the three GateEvent write points that share the ONE mapping, so a criterion killed at its
+  // deadline is recorded as "not measured", never as "false".
+  assert.equal(s1.ran[0].verdict, "not-evaluated", "a criterion killed at the deadline is not-evaluated");
   assert.match(s1.ran[0].reason, /timed out after 1000ms/, `the sweep surfaces the runner's reason: ${s1.ran[0].reason}`);
   // ⛔ The ELAPSED reading, not just the reason text: it is what proves the 1000ms deadline actually
   // governed the run (a reason string alone could be produced by a branch that never ran anything).
@@ -247,7 +256,7 @@ test("AC6(b) — 轮转扫描走同一解析来源：sweep 的 reason 与 elapse
 
 // ── (c) the P6 activation check — goal-store.ts `write` on a transition INTO active ───────────────
 
-test("AC6(c) — 激活检查走同一解析来源：成本行的 elapsed/fail 反映解析后的界，而非字面 60s", () => {
+test("AC6(c) — 激活检查走同一解析来源：成本行的 elapsed/verdict 反映解析后的界，而非字面 60s", () => {
   const ws = makeWorkspace("activation");
   // ⚠️ The activation gate fires on a TRANSITION into active (`prevStatus !== undefined`), so the
   // record must be born in a non-active status and then flipped — a create-as-active write never
@@ -256,16 +265,19 @@ test("AC6(c) — 激活检查走同一解析来源：成本行的 elapsed/fail �
 
   const at1000 = goal(ws, ["write", "AC-905", "--status", "active"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
   assert.equal(at1000.status, 0, `a timeout is a definitive verdict ⇒ evaluable ⇒ activation allowed:\n${at1000.stdout}${at1000.stderr}`);
-  const m1 = /activated AC-905 — criterion ran in (\d+)ms \((pass|fail)\)/.exec(at1000.stderr);
+  // ⛔ The cost line prints the 3-valued verdict now (gap-goal-gate-verdict-single-mapping-not-evaluated),
+  // so the vocabulary is widened — the AC's own claim is the ELAPSED reading asserted below, which is
+  // what proves the 1000ms deadline governed the run rather than a literal 60s.
+  const m1 = /activated AC-905 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(at1000.stderr);
   assert.ok(m1, `the P10 cost line must be emitted: ${at1000.stderr}`);
-  assert.equal(m1[2], "fail", "killed at 1000ms ⇒ the activation check reports a fail verdict");
+  assert.equal(m1[2], "not-evaluated", "killed at 1000ms ⇒ the activation check reports a not-evaluated verdict");
   assert.ok(Number(m1[1]) >= 900 && Number(m1[1]) < 1900, `elapsed must be ~1000ms, got ${m1[1]}ms — a literal 60s would print ~2000ms (pass)`);
 
   // The other direction, on a second record so the transition is fresh (⛔ not a re-read of the
   // now-active AC-905, which would not be activating at all and would measure nothing).
   seedGoal(ws, "GOAL-906", [["AC-906", { status: "draft", criterion: SLOW }]]);
   const bare = goal(ws, ["write", "AC-906", "--status", "active"]);
-  const m2 = /activated AC-906 — criterion ran in (\d+)ms \((pass|fail)\)/.exec(bare.stderr);
+  const m2 = /activated AC-906 — criterion ran in (\d+)ms \((pass|fail|not-evaluated)\)/.exec(bare.stderr);
   assert.ok(m2, `the P10 cost line must be emitted: ${bare.stderr}`);
   assert.equal(m2[2], "pass", "no env ⇒ the criterion runs to completion");
   assert.ok(Number(m2[1]) >= 1900, `elapsed must be ~2000ms (not a ~1000ms kill), got ${m2[1]}ms`);
