@@ -6,131 +6,98 @@ kind: criterion
 goal: GOAL-024
 criterion: >-
   # WHY THIS STEP WAS RE-ANCHORED (2026-09-23,
-
   gap-ac295-criterion-cmdline-port-literal-stale):
 
 
   # the launcher default for the web port is now 0 = kernel-assigned ephemeral
+  (plugin/scripts/start-drivers.ts),
 
 
-  # (plugin/scripts/start-drivers.ts), so a live gen-2 instance's cmdline
-  literally
+  # so a live gen-2 instance cmdline reads "--host H --port 0" and the previous
+  derivation produced
 
-  reads
 
+  # the structurally unfetchable "H:0", failing with the en-fetch-failed refusal
+  against a server
 
-  # "--host H --port 0" and the previous derivation produced the structurally
 
-  unfetchable "H:0",
+  # that was up the whole time. The ledger is unambiguous because AC-295 carries
+  ONE distinct
 
 
-  # failing with the en-fetch-failed refusal against a server that was up the
+  # criterionHash across all 109 of its events: bf42948d03aef763 was GREEN 34
+  times from
 
-  whole time. The ledger
 
+  # 2026-09-18T00:09:33.947Z through 2026-09-23T05:08:45.828Z (goal-sweep) and
+  RED twice
 
-  # is unambiguous here because AC-295 has ONE distinct criterionHash across all
 
-  109 of its events:
+  # (2026-09-23T08:36:03.396Z, 2026-09-23T14:54:39.524Z) -- the SAME criterion
+  text, so the CARRIER
 
 
-  # bf42948d03aef763 was GREEN 34 times from 2026-09-18T00:09:33.947Z through
+  # moved rather than this AC subject. The subject itself was re-measured TRUE
+  on the live address
 
-  2026-09-23T05:08:45.828Z
 
+  # the same day: the nav region carries "Needs Human" x2 under en and x0 under
+  zh, the zh response is
 
-  # (goal-sweep) and RED twice (2026-09-23T08:36:03.396Z,
 
-  2026-09-23T14:54:39.524Z) -- the SAME
+  # html-lang-zh, this page own title "quay -- Needs Human" becomes "quay --
+  待人工", and 0
 
 
-  # criterion text, so the CARRIER moved rather than this AC's subject. The
+  # "Needs Human" residues remain anywhere in the zh response. The real
+  listening port is knowable
 
-  subject itself
 
+  # ONLY from the live host OWN carrier $root/.quay/server.json (writer
+  packages/quay/src/serve.ts;
 
-  # (/needs-human's zh chrome) was re-measured TRUE on the live address the same
 
-  day: nav region
+  # read contract packages/quay/src/server-state.ts, whose absent / unreadable /
+  present three-way
 
 
-  # "Needs Human" x2 under en and x0 under zh, "<html lang=\"zh\">" present,
-  this
+  # outcome is mirrored by the carrier-* tokens below). No host/port literal is
+  written down here --
 
-  page's own <title>
 
+  # it is re-derived on EVERY run, so a restart (which binds a different
+  ephemeral port) cannot stale
 
-  # "quay -- Needs Human" becoming "quay -- 待人工", and 0 "Needs Human"
 
-  residues anywhere in the
+  # it again. The carrier is used ONLY to derive an address; the verdict stays
+  the external HTTP GET
 
 
-  # zh response. The real listening port is knowable only from the live host's
-  OWN
+  # further down, asserted over the chrome regions (<nav> block and <title>,
+  never the whole response
 
-  carrier
 
+  # body) -- hard rule 4b: never judge a live surface by a reading that surface
+  produced about itself.
 
-  # $root/.quay/server.json (writer packages/quay/src/serve.ts; read contract
 
-  packages/quay/src/server-state.ts,
+  # The ten CAUSE-prefixed refusal branches AFTER this block are byte-identical
+  to the pre-amendment
 
 
-  # whose absent / unreadable / present three-way outcome is mirrored by the
+  # criterion, and so is the no-running-serve-instance refusal the block still
+  emits, so the two
 
-  carrier-* tokens
 
+  # refusal modes this amendment ADDS carry their own FAIL-prefixed token rather
+  than a twelfth
 
-  # below). No host/port literal is written down here -- it is re-derived on
-  EVERY
 
-  run, so a restart
+  # CAUSE-branch -- a distinct value, so "could not derive/reach an address"
+  never wears the same
 
 
-  # (which binds a different ephemeral port) cannot stale it again. The carrier
-  is
-
-  used ONLY to derive
-
-
-  # an address; the verdict stays the external HTTP GET further down, asserted
-
-  over /needs-human's
-
-
-  # chrome regions (<nav> block and <title>, never the whole response body) --
-
-  hard rule 4b: never
-
-
-  # judge a live surface by a reading that surface produced about itself. The
-  ten
-
-  CAUSE-prefixed
-
-
-  # refusal branches AFTER this block are byte-identical to the pre-amendment
-
-  criterion, and so is the
-
-
-  # no-running-serve-instance refusal the block still emits, so the two refusal
-
-  modes this amendment
-
-
-  # ADDS carry their own FAIL-prefixed token rather than a twelfth CAUSE-branch
-  --
-
-  a distinct value,
-
-
-  # so "could not derive/reach an address" never wears the same shape as the
-
-  branch it was added
-
-
-  # beside (hard rule 3b).
+  # shape as the branch it was added beside (hard rule 3b).
 
 
   # >>> addr-derivation (this block is run VERBATIM by
