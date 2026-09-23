@@ -2,7 +2,7 @@
 id: gap-serve-labels-hardcode-mechanism-script-basenames
 title: serve-system/serve-i18n 把机制层脚本 basename
   当产品层字面量硬编码：同一实体两次命名，方向为分层声明禁止的产品→机制（R3 / 簇 P2-identity-resource-gate.sh）
-status: ready
+status: done
 labels:
   - gap
   - defect
