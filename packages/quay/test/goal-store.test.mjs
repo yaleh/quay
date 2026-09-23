@@ -1344,9 +1344,18 @@ test("AC-242 successor — 轮转有界：budget 封顶、到期对象枚举、�
   n(["check", "--stale-pass", "--sweep", "--budget", "5"]);
   const s4 = JSON.parse(n(["check", "--stale-pass", "--sweep"]).stdout).sweep;
   assert.equal(s4.ran.length, 0, "稳态：上次轮转未到期 ⇒ 本次零判据（成本上界因此成立）");
-  // The written bound is pinned to ONE literal per knob (⛔ 两处各写一份即漂移).
+  // The written bound is pinned to ONE literal per knob (⛔ 两处各写一份即漂移) — with the
+  // criterion-timeout knob now DELIBERATELY carrying NO local literal at all
+  // (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout).
+  // The private `SWEEP_CRITERION_TIMEOUT_MS = 60_000` was the mechanism by which the goal path
+  // bypassed QUAY_ACCEPTANCE_TIMEOUT_MS / `--timeout`: it read its own constant instead of the
+  // resolved deadline. Its own comment claimed「与 runAcceptance 缺省同值……只在此一处成立」while
+  // the repo carried five copies of that number — the claim was the drift, so the assertion that
+  // pinned it is inverted rather than deleted. Both directions are asserted: the literal is GONE
+  // (a "kept for compatibility" edit would otherwise pass), and the shared resolver is PRESENT.
   const src = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
-  assert.match(src, /SWEEP_CRITERION_TIMEOUT_MS = 60_000/, "判据超时与 runAcceptance 缺省同值——成本算式只在此一处成立");
+  assert.doesNotMatch(src, /SWEEP_CRITERION_TIMEOUT_MS\s*=\s*60_?000/, "私有字面量必须消失——它正是绕过配置面的那个常量");
+  assert.match(src, /resolveAcceptanceTimeoutMs/, "轮转扫描改取共享解析函数（单一来源，env/--timeout 才能生效）");
   assert.match(src, /DEFAULT_SWEEP_BUDGET = 6/);
   assert.match(src, /DEFAULT_SWEEP_WALL_MS = 30_000/);
 });

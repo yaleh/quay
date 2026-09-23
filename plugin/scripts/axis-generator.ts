@@ -162,7 +162,10 @@ export function readHeaderComment(filePath) {
   return out.join("\n").trim();
 }
 
-/** Extract the body of a `name() { ... }` function from a shell file (mirrors checker-mutation-check.sh's awk). */
+/** Extract the body of a `name() { ... }` function from a shell file (mirrors
+ *  checker-mutation-check.ts's extraction — the awk this was ported from went with the program when
+ *  `checker-mutation-check.sh` became a thin entry, so naming the `.sh` here would point at a file
+ *  that no longer holds it). */
 export function extractFunctionBody(text, name) {
   const lines = text.split(/\r?\n/);
   let f = false;
@@ -214,7 +217,7 @@ export function enumerateGates(root) {
   return gates;
 }
 
-/** Static checkers from runner-static-gate.ts's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.sh — run_static_checks moved OUT of scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
+/** Static checkers from runner-static-gate.ts's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.ts's manifest parse — run_static_checks moved OUT of scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
 export function enumerateStaticCheckers(root) {
   const staticGate = readFile(path.join(root, REGISTRY_REL_CANDIDATES[0]));  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const names = new Set();
