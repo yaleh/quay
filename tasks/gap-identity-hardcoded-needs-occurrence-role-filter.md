@@ -104,7 +104,7 @@ samples: packages/quay/test/serve-ac95-views.test.mjs:552  test("AC99 — resour
 
 ## AC
 
-- [ ] AC1 出现角色过滤器可跑且**可证否**（四类非证据 + 反向边界逐条给期望值）。命令（今天 **4 条不符 ⇒ `exit 1`**，修后须打印 `mismatches: 0` 且 `exit 0`）——探针只用**既有导出**（`matchEntity` / `tsCommentMask` / `shCommentMask` / `blankComments` / `accessorRegexSource`），⛔ 不预设新过滤器的内部形状：
+- [x] AC1 出现角色过滤器可跑且**可证否**（四类非证据 + 反向边界逐条给期望值）。命令（今天 **4 条不符 ⇒ `exit 1`**，修后须打印 `mismatches: 0` 且 `exit 0`）——探针只用**既有导出**（`matchEntity` / `tsCommentMask` / `shCommentMask` / `blankComments` / `accessorRegexSource`），⛔ 不预设新过滤器的内部形状：
 
       node --experimental-strip-types -e '
       import { matchEntity, tsCommentMask, shCommentMask, blankComments, accessorRegexSource } from "./plugin/scripts/identity-replication-check.ts";
@@ -127,7 +127,7 @@ samples: packages/quay/test/serve-ac95-views.test.mjs:552  test("AC99 — resour
       '
 
       `T1–T5` **须 evidence=0**（非证据）；`T6` **须 evidence=0（回归：按路径调用现行已对）**；`R1` **须 evidence≥1（反向边界：身份值位点仍是证据）**。
-- [ ] AC2 只经「访问器派生 / 断言 / 标题 / 消息 / 路径」到达该实体的文件**离开 `codeFiles`**。命令（今天 **6/6 仍在 ⇒ `exit 1`**，修后须 `0/6` 且 `exit 0`；行按 entity 寻址、故用 `--limit 400`；行不存在时须报 `NOT FOUND` 并 `exit 1` —— ⛔ 不得把「读不到」当通过，硬规则 3b）：
+- [x] AC2 只经「访问器派生 / 断言 / 标题 / 消息 / 路径」到达该实体的文件**离开 `codeFiles`**。命令（今天 **6/6 仍在 ⇒ `exit 1`**，修后须 `0/6` 且 `exit 0`；行按 entity 寻址、故用 `--limit 400`；行不存在时须报 `NOT FOUND` 并 `exit 1` —— ⛔ 不得把「读不到」当通过，硬规则 3b）：
 
       node --experimental-strip-types plugin/scripts/identity-replication-check.ts --json --limit 400 | node -e '
       let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
@@ -140,11 +140,148 @@ samples: packages/quay/test/serve-ac95-views.test.mjs:552  test("AC99 — resour
       });'
 
       六条：`packages/quay/test/serve-ac95-views.test.mjs`（A+B+C）、`packages/quay/test/serve-system-body-i18n.test.mjs`（B）、`plugin/test/cap-from-gate-cli-s02.test.mjs`（B）、`plugin/test/driver-third-party-fixture.test.mjs`（B）、`plugin/test/resource-gate-s08.test.mjs`（B）、`plugin/scripts/driver-shared.ts`（**访问器本体**，B+C）。
-- [ ] AC3 **重测 round 2116 的五个簇**：用**复核同一读数面**（`… --json`，`--limit` 缺省 25）跑，把五个簇各自的 `full/code/accessor/hardcoded` **修前→修后**对照贴进本任务体（修前值已在 Proposal 一节逐字给出）。⛔ 不得只贴总数、不得换读数面。
-- [ ] AC4 **诚实分类，不许用「过滤掉了」代替分类**：对 AC3 五行里 `hardcoded==0` 的行，逐条贴出它**修前**的全部证据样本并说明每一处为何属 A–D 类；对 `hardcoded>0` 的行，贴出至少一条样本并说明它为何是身份位点。同时给出**全表**（`--limit 400`）判红行数的修前/修后（修前 **21**）。
-- [ ] AC5 旧负控制重新裁定：`plugin/test/identity-replication-check.test.mjs` 的 `:360/366/387/389` 与 `:506`/`:514`（旧边界「文本里的裸 basename 是证据」）**显式**更新或在任务体里给出保留理由；检测器头注释（`identity-replication-check.ts:4-6`）与 `plugin/scripts/capability-catalog-declarations.json` 的 `identity-replication-check.ts` 声明文本（`:372`）同步 —— 三处逐字贴出改动前后。
-- [ ] AC6 观测者契约与同族面不退化：检测器 CLI 仍 `exit 0`；`sharedModuleControl.flagged === false`；`deletion-closure-check.ts`（复用掩码）与 `quality-gate-driver.ts`（P2 消费 `--json`）给出修前/修后读数对照。
-- [ ] AC7 测试：`bash scripts/test.sh plugin/test/identity-replication-check.test.mjs plugin/test/architecture-review-cluster.test.mjs plugin/test/deletion-closure-check.test.mjs plugin/test/quality-gate-driver.test.mjs` `exit 0`；且**新增用例对【修前】实现为红**（负控制：证明它真的测到这个缺陷，而不是断言一个恒真的量）。
+- [x] AC3 **重测 round 2116 的五个簇**：用**复核同一读数面**（`… --json`，`--limit` 缺省 25）跑，把五个簇各自的 `full/code/accessor/hardcoded` **修前→修后**对照贴进本任务体（修前值已在 Proposal 一节逐字给出）。⛔ 不得只贴总数、不得换读数面。→ 见「落地读数」§AC3
+- [x] AC4 **诚实分类，不许用「过滤掉了」代替分类**：对 AC3 五行里 `hardcoded==0` 的行，逐条贴出它**修前**的全部证据样本并说明每一处为何属 A–D 类；对 `hardcoded>0` 的行，贴出至少一条样本并说明它为何是身份位点。同时给出**全表**（`--limit 400`）判红行数的修前/修后（修前 **21**）。→ 见「落地读数」§AC4
+- [x] AC5 旧负控制重新裁定：`plugin/test/identity-replication-check.test.mjs` 的 `:360/366/387/389` 与 `:506`/`:514`（旧边界「文本里的裸 basename 是证据」）**显式**更新或在任务体里给出保留理由；检测器头注释（`identity-replication-check.ts:4-6`）与 `plugin/scripts/capability-catalog-declarations.json` 的 `identity-replication-check.ts` 声明文本（`:372`）同步 —— 三处逐字贴出改动前后。→ 见「落地读数」§AC5
+- [x] AC6 观测者契约与同族面不退化：检测器 CLI 仍 `exit 0`；`sharedModuleControl.flagged === false`；`deletion-closure-check.ts`（复用掩码）与 `quality-gate-driver.ts`（P2 消费 `--json`）给出修前/修后读数对照。→ 见「落地读数」§AC6
+- [x] AC7 测试：`bash scripts/test.sh plugin/test/identity-replication-check.test.mjs plugin/test/architecture-review-cluster.test.mjs plugin/test/deletion-closure-check.test.mjs plugin/test/quality-gate-driver.test.mjs` `exit 0`；且**新增用例对【修前】实现为红**（负控制：证明它真的测到这个缺陷，而不是断言一个恒真的量）。→ 见「落地读数」§AC7
+
+## 落地读数（2026-09-24，worker 在 task worktree 实跑；合并 develop 后复测，读数不变）
+
+实现：`identity-replication-check.ts` 新增 **`occurrenceRole()`**（**唯一**一份，`matchEntity()` 只调它），四态枚举：
+
+| 角色 | 判据 | 是否证据 |
+|---|---|---|
+| `comment` | 位置掩码（既有） | 否 |
+| `by-path` | `isPathInvocationMention()`（既有，未退化） | 否 |
+| `text` | 所在**字面量内容 ≠ 实体名**（test 标题 / 断言期望或消息 / 错误消息 / 叙述串），或裸词既非赋值右侧又不在**名字清单**里 | 否 |
+| `name-value` | **字面量内容恰为实体名**（身份值）/ `NAME=<实体>` 右侧 / 裸名且**邻词也是脚本名**（登记表） | **是** |
+
+⚠️ **一处必须说明的判据重锚（不是顺手改的）**：`code` 保持**提及级**定义（与收窄前逐字一致 ⇒ 读数面不动，AC3 的修前/修后才能在**同一面**上读）；`codeFiles` 从「代码位置提及」重锚为**命名级**名单（`codeFiles.length === accessor + hardcoded`）。若不重锚，则「N 个文件独立命名了它」在**下游读得见的**读数上与「N 个文件里恰好有个同名串」仍然同形（`hardcodedSamples` 只在判红行打印，不是消费者的输入面）。
+
+### §AC3 — 五个簇，**同一读数面**（`--json`，`--limit` 缺省 25）修前 → 修后
+
+| entity | full | code | accessor | hardcoded |
+|---|---|---|---|---|
+| `quay-init.sh` | 82 → 82 | 19 → 19 | 2 → 2 | **17 → 3** |
+| `runner-static-gate.ts` | 61 → 61 | 17 → 17 | 1 → 1 | **16 → 4** |
+| `task-status-drift-check.ts` | 30 → 30 | 17 → 17 | 7 → 7 | **10 → 1** |
+| `quay-launch.sh` | 28 → 28 | 15 → 15 | 0 → 0 | **15 → 1** |
+| `resource-gate.sh` | 50 → 50 | 14 → 14 | 0 → 0 | **14 → 0** |
+
+读数面不动的机械证据：`--json` 缺省 25 行**逐行同名同序**；`--limit 400` 的全表 329 行亦逐行同名同序。
+
+### §AC4 — 诚实分类
+
+**`hardcoded>0` 的四行 —— 存活样本（每一处都是身份值位点）**：
+
+```
+quay-init.sh (h=3)
+  packages/quay/scripts/build-plugin-dist.mjs:810  const isQuayInit = path.basename(f) === "quay-init.sh";
+  plugin/scripts/quay-init.sh:557  NEVER_LAYDOWN="quay-init.sh"
+  plugin/test/architecture-review-cluster.test.mjs:138  { entity: "quay-init.sh", code: 62, accessor: 3, hardcoded: 59, codeFiles: [...] }
+runner-static-gate.ts (h=4)
+  packages/quay/scripts/package.sh:183  find "${PLUGIN_DEST}/scripts" … -name '*.ts' ! -name 'runner-static-gate.ts' -delete
+  plugin/scripts/publish-dist-branch.sh:137  （同上形态：`-name 'runner-static-gate.ts'` 排除项）
+  plugin/scripts/select-static-checks-for-touches.ts:65  export const REGISTRY_BASENAME = "runner-static-gate.ts";
+task-status-drift-check.ts (h=1)
+  plugin/scripts/quay-init.sh:744  inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
+quay-launch.sh (h=1)
+  plugin/scripts/quay-session.ts:20  { name: "quay-launch", file: "quay-launch.sh", kind: "bash", description: "启动 quay 会话" },
+```
+
+逐条理由：整段字面量**就是**实体名（`"quay-init.sh"` / `"runner-static-gate.ts"` / `"quay-launch.sh"`）⇒ 身份值；`NEVER_LAYDOWN=` 是赋值右侧；`:744` 是**名字清单**（该行其余词全是脚本名形状）⇒ 登记。四处都不是叙述串。⛔ 这四条同时就是「收窄没有把检测器砍空」的零计数干跑对照：谓词对**已知为真**的样本确实命中了。
+
+**`hardcoded==0` 的行：`resource-gate.sh`** —— 修前它有 **26 处**代码位置且非按路径的命中，逐处角色如下，**全部是 `text`**（另有 by-path / comment 命中由既有两级覆盖，不在旧判据的证据集内）：
+
+```
+[text] packages/quay/test/serve-ac95-views.test.mjs:552 | test("AC99 — resource-gate.sh/process-budget.sh --json are valid …      ← B 标题
+[text] packages/quay/test/serve-system-body-i18n.test.mjs:218 | assert.ok(en.body.includes("Data source: <code>resource-gate.sh --json</code> …  ← B 断言期望串
+[text] plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh:56 | C3 resource-gate.sh --for full-suite。  ← D heredoc fixture 正文 (按 text 角色判, ⛔ 未把 heredoc 一律当注释)
+[text] plugin/scripts/driver-shared.ts:69 | … reason: "resource-gate.sh not found (kernel install location) — fail-closed" };  ← B 错误消息
+[text] plugin/scripts/red-on-omission-audit.ts:304/305/314/315/323/395 | behavior/redReading/`has(t, "…")` 叙述与检索针  ← B
+[text] plugin/test/cap-from-gate-cli-s02.test.mjs:39 | assert.match(src, /resource-gate/, "the signal source (resource-gate.sh) must be referenced");  ← B 断言消息
+[text] plugin/test/cap-from-gate-config-budget.test.mjs:209 | test("resource-gate.sh reports BOTH avg10 and avg300 lines …  ← B 标题
+[text] plugin/test/cap-from-gate-process-budget-path.test.mjs:120/134 | test(…) / assert.equal(calls, 1, `resource-gate.sh must be invoked …`)  ← B
+[text] plugin/test/driver-shared.test.mjs:43/62/68/81/95 | assert 消息与 test 标题  ← B
+[text] plugin/test/driver-third-party-fixture.test.mjs:150 | assert.ok(fs.existsSync(gate), "resolved resource-gate.sh exists on disk");  ← B
+[text] plugin/test/helpers/resource-gate-harness.mjs:145 | assert.ok(m, "resource-gate.sh must define CPU_LIMIT …");  ← B
+[text] plugin/test/red-on-omission-audit.test.mjs:214 | "## R32 — … `resource-gate.sh --for full-suite` 放行 …"  ← B fixture 文档正文
+[text] plugin/test/resource-gate-s08.test.mjs:30/58 | test("AC99 — resource-gate.sh --json …  ← B 标题
+[text] plugin/workflows/execute-suite-fix.js:238 | 2. reason=aborted 且是 resource-gate WAIT …："resource-gate.sh --for full-suite"  ← B agent prompt 文本
+```
+
+**全表（`--limit 400`）判红行数：21 → 0。** 读法（⛔ 不隐藏）：21 行到 0 行是**判据修对方向的直接后果**，不是把检测器关掉 —— 三条零计数对照同时在场：① 上表四行 surviving 样本是**真命中**；② 全表仍有跨越所有实体的 `name-value` 命中（如 `plugin/scripts/deliver-verify-usage.sh:41` 的 `"closure-lag-check|sh|closure-lag-check.sh|--root @WS@"` 注册表行、`plugin/scripts/quay-deliver.ts:20` 的 `{ name:…, file: "supervisor-deliver.sh" }`、`plugin/test/supervisor-health.test.mjs:89` 的对象键）；③ 反向边界 fixture（`NEVER_LAYDOWN="x"`）在 AC1 的 R1 与单测里都取 1。剩下的问题不是「检测器还报不报」，而是**这 21 个簇的硬编码计数本来就由叙述串凑够阈值** —— 正是 round 2116 判词说的事。
+
+### §AC5 — 三处声明/载体同步（逐字改动前后）
+
+**① 检测器头注释（`identity-replication-check.ts:4-6`）**
+
+改前：
+```
+//   (a) 字面量复制度: 含 X 路径/basename/env 名/CLI flag 的【代码】文件数, 且未经由单一访问器
+//       (import/require/source)。按位置区分代码 / 注释 / 文档 — 注释与 .md 文档不算, 字符串字面量
+//       (路径常量、spawn 参数、注册表条目) 是代码级引用, 算。
+```
+改后：
+```
+//   (a) 字面量复制度: 含 X 路径/basename/env 名/CLI flag 的【代码】文件数, 且未经由单一访问器
+//       (import/require/source)。位置分两层: ①代码 / 注释 / 文档 —— 注释与 .md 文档不算;
+//       ②**出现角色** (gap-identity-hardcoded-needs-occurrence-role-filter) —— 代码位置里还要再分
+//       「命名点」与「叙述」: 字符串字面量是代码级引用, 但**把一个实体的名字写进一段叙述文本、
+//       断言消息、test 标题或错误消息, 不是独立命名它**。判据 = 该出现处所在字面量的内容是否
+//       **恰为实体名**(身份值) 而非嵌在更长的文本里; 未被引号包裹的裸名则只在**名字清单**
+//       (邻词也是脚本名) 或赋值右侧才算。⛔ 反向边界: `NEVER_LAYDOWN="quay-init.sh"` 这类
+//       **把裸 basename 赋成身份值**的位点仍是证据 —— 收窄不得把检测器砍空。
+```
+（`isPathInvocationMention()` 头注释的「反向边界」段同时改写了：该谓词**只**判按路径调用这一维，散文串仍返回 false，但「不是证据」这件事由 `occurrenceRole` 负责 —— 旧注释逐字写着它们「仍是证据」。）
+
+**② `plugin/scripts/capability-catalog-declarations.json`（`identity-replication-check.ts` 的 QUESTION，`:372`）**
+
+改前（节选，逐字）：
+```
+… non-evidence = comment/doc positions AND by-path invocation: a path-tail mention, or the entity name as a whole string argument to a call/path-join/spawn argv, since naming WHERE a script lives is the accessor's job, not identity replication), a structural relation (import / re-export / require / source …) distinguished from those code-position name mentions, …
+```
+改后（节选，逐字）：
+```
+… non-evidence = comment/doc positions, by-path invocation — … — AND occurrence role: a code-position occurrence counts as an INDEPENDENT NAMING POINT only when it is an identity value (the string literal's content is exactly the entity name, an assignment right-hand side, or a bare name inside a name list/registry), while an occurrence embedded inside a longer string (test title, assertion expectation/message, error message, narrative prose) or a bare word outside such a list is role=text and NOT evidence — gap-identity-hardcoded-needs-occurrence-role-filter; the code count stays the mention-level reading (definition unchanged, so pre/post readings share one face) while codeFiles/accessor/hardcoded are the naming level), a structural relation (import / re-export / require / source …) distinguished from those code-position name mentions, …
+```
+
+**③ `plugin/test/identity-replication-check.test.mjs`（旧边界负控制的重新裁定）**
+
+- `:506` 测试名：`isPathInvocationMention — 按路径调用是位置, 文本里的裸 basename 是身份 (AC2 与反向边界)` → `isPathInvocationMention — 按路径调用是位置 (只此一维; 叙述串由 occurrenceRole 排除)`；`:514` 的注释「反向边界: 文本/散文/UI 里的裸 basename 是**命名**, 仍是证据」→「本谓词**只**判「按路径调用」…（这三处）**不是证据**这件事由 occurrenceRole 的 `text` 角色负责 —— ⛔ 旧注释曾写「仍是命名, 仍是证据」，该边界已重新裁定」。断言值不变（该谓词未变）。
+- `:520` 那条：测试名与反向 fixture 改写。`usage-text.ts`（`console.error("Usage: node shared-lib.ts --json")`）从「仍须计入」改为「提及级 code=1、**不进 codeFiles**」，并**新增**一条 `identity-value.sh`（`NEVER_LAYDOWN="shared-lib.ts"`）作为非空转的反向边界。
+- `:360/:366`（`string-only.sh` / `comment-tail.sh`）**保留**，理由逐字写进 fixture 注释：这两条断言的是**整段字面量恰为实体名**（`echo "shared-lib.sh"`）⇒ 角色仍是 `name-value`，本任务移动的是**另一条**边界（嵌在更长叙述串里的提及）。`comment-tail.sh` 第 3 行同时补注：它必须是身份值形态，否则整文件会被角色过滤提前剔除 → 守卫空转。
+- 新增测试 `occurrenceRole — 出现角色四态: 身份值 / 叙述串 / 按路径 / 注释 (AC1 逐态)`；`判红行必须就地给出命中样本` 的两条 fixture 从散文串改成身份值形态（否则断言一个恒为 0 的量 = 空转）。
+
+### §AC6 — 观测者契约与同族面
+
+```
+identity-replication-check.ts            CLI exit 0                    （修前 exit 0，不变；它是观测者不是门）
+sharedModuleControl.flagged              false                         （修前 false；importAccessor=238, hardcoded 4→3）
+deletion-closure-check.ts resource-gate.sh --json
+  修前 counts={code:42,comment:72,doc:163,call:37,literal:5,schema:36,fixture:26,touches:41,dcTotal:252,callGraphTotal:37,ratio:6.8108}
+  修后 同上逐字不变（它复用 tsCommentMask/shCommentMask/blankComments —— 本任务**没有**动掩码）
+quality-gate-driver.ts 的 P2 面（clusterIdentityReport，读 identity --json）
+  P2 clusters 修前 22 个（P2-judgment-rewrites + 21 个 P2-identity-*）
+  修后  1 个（只剩 P2-judgment-rewrites —— 那是本任务未触及的另一枚子检测器）
+  deletionClosureComponents(identity) 候选构件 修前 3 个 [quay-init.sh, runner-static-gate.ts, quay-launch.sh] → 修后 0 个
+```
+
+### §AC7 — 测试与负控制
+
+```
+$ bash scripts/test.sh plugin/test/identity-replication-check.test.mjs plugin/test/architecture-review-cluster.test.mjs \
+      plugin/test/deletion-closure-check.test.mjs plugin/test/quality-gate-driver.test.mjs
+EXIT=0   （ℹ tests 89 ℹ fail 0；单文件跑：tests 23 / pass 23 / fail 0）
+```
+
+**新增/改写的用例对【修前】实现为红**（负控制，两侧读数都跑过）：
+1. 把新测试文件对着 **`git show develop:plugin/scripts/identity-replication-check.ts`** 跑：`SyntaxError: The requested module … does not provide an export named 'occurrenceRole'` ⇒ 新角色判据在修前**不存在**。
+2. 去掉该 import 与那条新测试后再对修前实现跑（隔离出**行为**对照）：`✖ literalReplication — 按路径调用/叙述串的文件不再计入… AssertionError: 但它不进 codeFiles (非命名点) 1 !== 0` ⇒ 同一断言修前红、修后绿。
+3. AC1 的探针**只用修前就存在的导出**（`matchEntity`/掩码/`accessorRegexSource`），因此对两版都能跑：**修前 `mismatches: 4` + exit 1，修后 `mismatches: 0` + exit 0** —— 这是最干净的两态对照（T1/T2/T4/T5 修前误报为证据）。
+
+⚠️ 残留（如实记，不假装覆盖）：名字清单规则的唯一假阴性方向是**清单首行的第一个名字**（它的一侧邻词是命令词 `printf`），见 `bareWordRole` 注释；本仓当前无命中此形态的实体。
 
 ## DoD
 
