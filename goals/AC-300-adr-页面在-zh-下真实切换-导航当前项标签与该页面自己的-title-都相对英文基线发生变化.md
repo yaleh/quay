@@ -19,14 +19,14 @@ criterion: >-
   # this criterion grepped exactly that literal and produced the structurally
   unfetchable "H:0",
 
-  # reporting CAUSE=en-fetch-failed -- the same shape the whole
-  AC-179/AC-288/AC-290/.../AC-303 family
+  # refusing with the en-fetch-failed token -- the same shape the whole AC-179 /
+  AC-288 / AC-290 / ... /
 
-  # reported -- against a server that was up the whole time. The ledger shows
-  the CARRIER moved, not the
+  # AC-303 family reported -- against a server that was up the whole time. The
+  ledger shows the CARRIER
 
-  # criterion's subject: the SAME payload.criterionHash ac4cab6326e9a4bc is
-  green at
+  # moved, not the criterion's subject: the SAME payload.criterionHash
+  ac4cab6326e9a4bc is green at
 
   # 2026-09-23T05:21:09.821Z (and on every rotation before it) and red at
   2026-09-23T08:42:34.572Z --
@@ -57,7 +57,7 @@ criterion: >-
   # down (hard rule 4b -- never judge a live surface by a reading that surface
   produced about itself).
 
-  # The eleven CAUSE-prefixed refusal branches below are byte-identical to the
+  # The eleven pre-existing refusal branches below are byte-identical to the
   pre-amendment criterion
 
   # (the amendment re-anchored the address derivation only), so the two refusal
