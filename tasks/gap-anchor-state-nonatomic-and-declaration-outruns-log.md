@@ -2,7 +2,7 @@
 id: gap-anchor-state-nonatomic-and-declaration-outruns-log
 title: driver-anchor 的 writeState() 非原子（O_TRUNC）+ 同趟把 declaration
   发布在「静默脱离」日志之前最多一个 reconcile 周期 ⇒ 夹具 AC4/AC5 在 suite 负载下随机红（两机制均实测）
-status: ready
+status: done
 labels:
   - gap
   - defect
