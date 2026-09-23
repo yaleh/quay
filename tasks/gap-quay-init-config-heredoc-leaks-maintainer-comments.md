@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-config-heredoc-leaks-maintainer-comments
 title: quay-init 把写给维护者的 heredoc 注释原样写进下游 .quay/config.yml（且句子被拼断）
-status: todo
+status: ready
 labels:
   - gap
   - defect
