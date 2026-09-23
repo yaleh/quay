@@ -105,12 +105,12 @@ grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/ | wc -l   ⇒ 17
 
 ## AC
 
-- [ ] **AC1（承载体已重锚且不减强度）**：`goals/AC-292-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改从活宿主载体取；`expect` 与正文语义逐字不变（贴 `git diff`，只有派生那一步与「为什么改」的说明变化）。⛔ 除非经 `quay goal write` 落库否则不算。
-- [ ] **AC2（判据能取假 —— 两个负控制）**：① 无运行实例时 `quay goal gate AC-292` 非 0 且以 `CAUSE=no-running-serve-instance` 可区分；② 候选地址指向必然连不上的端口时非 0 且成因可区分。两条均贴退出码与逐字 stderr。
-- [ ] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-292` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Board` 计数 ≥1 / zh 响应含 `<html lang="zh"` / zh nav `Board` 计数 =0 / zh `<title>` ≠ en `<title>`）。
-- [ ] **AC4（地址覆盖两种部署形态）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；贴出两种形态下的派生结果。⛔ 不把本机当前端口写进任何文件。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/` **逐文件**贴出并与立案基线对照（总数 **17**）：本任务后 **AC-292 那一条 1→0**，其余 **16 个文件不受本条影响**（它们各自归自己的立案轮）。⛔ 若同族在飞任务已落地，本条判据是**逐文件差量**，不是绝对值。
-- [ ] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-292` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ 修订前指纹（贴两行）。
+- [x] **AC1（承载体已重锚且不减强度）**：`goals/AC-292-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改从活宿主载体取；`expect` 与正文语义逐字不变（贴 `git diff`，只有派生那一步与「为什么改」的说明变化）。⛔ 除非经 `quay goal write` 落库否则不算。
+- [x] **AC2（判据能取假 —— 两个负控制）**：① 无运行实例时 `quay goal gate AC-292` 非 0 且以 `CAUSE=no-running-serve-instance` 可区分；② 候选地址指向必然连不上的端口时非 0 且成因可区分。两条均贴退出码与逐字 stderr。
+- [x] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-292` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Board` 计数 ≥1 / zh 响应含 `<html lang="zh"` / zh nav `Board` 计数 =0 / zh `<title>` ≠ en `<title>`）。
+- [x] **AC4（地址覆盖两种部署形态）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；贴出两种形态下的派生结果。⛔ 不把本机当前端口写进任何文件。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac292-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/` **逐文件**贴出并与立案基线对照（总数 **17**）：本任务后 **AC-292 那一条 1→0**，其余 **16 个文件不受本条影响**（它们各自归自己的立案轮）。⛔ 若同族在飞任务已落地，本条判据是**逐文件差量**，不是绝对值。
+- [x] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-292` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ 修订前指纹（贴两行）。
 
 ## DoD
 

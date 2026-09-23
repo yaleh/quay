@@ -995,9 +995,9 @@ export interface SystemdRunLimits {
   tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
 }
 
-/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）; MemoryMax=6G（人 2026-08-12 裁定④给的数值, 04:45 真 cgroup OOM 实证 4G 不足, 宿主当时仍 13G 可用）。 */
+/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）; MemoryMax=16G（人 2026-09-24 裁定：6G 是 4 核旧机上定的；迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时实测峰值 8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。此前：人 2026-08-12 裁定④ 4G→6G, 04:45 真 cgroup OOM 实证 4G 不足）。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
-  memoryMax: "6G",
+  memoryMax: "16G",
   cpuQuota: "",
   tasksMax: "",
 };
