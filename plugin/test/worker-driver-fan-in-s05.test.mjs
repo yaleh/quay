@@ -534,7 +534,10 @@ test("AC1①+AC2 (真驱动, 生产载体) — stderr 尾部的 `404 … model_n
   assert.equal(ctl?.halted, true, "AC2：environment-fatal ⇒ driver 自己 halt（worker-control.json halted:true）");
   assert.equal(ctl?.halted_by, ENVIRONMENT_FATAL_HALTED_BY);
   assert.match(String(ctl?.halt_reason ?? ""), /model_not_found/, "AC2：停机原因含签名原文");
-  assert.ok(drv.events().some((e) => e.event === "environment-fatal-halt"), "驱动发射 environment-fatal-halt 事件");
+  // 控制态与事件写在【同一段代码】里（控制态在前），但事件还要过一次 stdout 管道才到父进程 ⇒ 用
+  // 有界 waitFor 兜住送达延迟，⛔ 不用裸断言（同 AC1② 的成因，见那里的注释）。
+  assert.ok(await waitFor(() => drv.events().some((e) => e.event === "environment-fatal-halt"), 20000),
+    "驱动发射 environment-fatal-halt 事件");
   assert.equal(readTaskStatus(root, "gap-env"), "ready", "AC2：涉事任务状态保持 ready（⛔ 未被翻 needs-human）");
   assert.ok(!fs.readFileSync(path.join(root, "tasks", "gap-env.md"), "utf8").includes("## Needs-Human"),
     "AC2：⛔ 不写 ## Needs-Human");
@@ -568,10 +571,15 @@ test("AC1② (真驱动, 两个不同任务) — 同一【未知】签名快速�
   assert.match(String(envRecs[0].worker_stderr_tail ?? ""), /unknown signature E42/,
     "被判 environment-fatal 的记录带原始签名文本（跨任务关联命中的那个任务）");
   // 跨任务关联的签名标识出现在 json 事件流里（载体可核）。
-  assert.ok(drv.events().some((e) => e.event === "environment-fatal-halt" && String(e.signature ?? "").startsWith("cross-task:")),
-    "跨任务关联命中的签名名带 cross-task: 前缀，并出现在 environment-fatal-halt 事件里");
+  // ⛔ 顺序承重（实测过一次负载相关的假红）：上面的 waitFor 等的是【载体】(worker-outcome.jsonl)，
+  // 它在 runOneWorker 内落盘；而 environment-fatal-halt 事件在 onWorkerFinished 里【之后】才写 stdout
+  // ⇒ 载体一可见就断言事件 = 与 stdout 管道送达赛跑（判定本身是对的，事件也发了，只是还没到父进程）。
+  // 故先等 driver 侧的停机控制态（与事件同一段代码、写在其【前】），事件断言再走一次 waitFor 兜住送达
+  // 延迟。⛔ 断言不弱化：事件若根本不发，waitFor 超时返回假 ⇒ 照常红（AC1① 同型）。
   await waitFor(() => readControlFile(root)?.halted === true, 20000);
   assert.equal(readControlFile(root)?.halted, true, "driver 自己 halt");
+  assert.ok(await waitFor(() => drv.events().some((e) => e.event === "environment-fatal-halt" && String(e.signature ?? "").startsWith("cross-task:")), 20000),
+    "跨任务关联命中的签名名带 cross-task: 前缀，并出现在 environment-fatal-halt 事件里");
   assert.equal(readTaskStatus(root, "gap-env-a"), "ready", "池中无任务被翻 needs-human（maxRetries=5 且每次至多 1-2 次死亡）");
   assert.equal(readTaskStatus(root, "gap-env-b"), "ready", "同上（跨任务关联命中的那个任务也保持 ready）");
   await drv.stop();
