@@ -236,6 +236,36 @@ AC-161 exit=0
   未改动。`grep -rn 'marketplace add quay ' <repo>`（排除 node_modules / vendor）命中数 = **2**（即上面两个
   Touches 文件），前 3 条即全部 ⇒ 本次是成对修，不是只修被报出来的那一个。
 
+### 本轮收尾（2026-09-23 worker 第 2 轮）：sh-census 基线再锚 + 全量 suite 红的环境成因（A/B 实测）
+
+**① `plugin/sh-census-baseline.json` 再锚 7680 → 7678（本任务的直接后果，已随本轮提交）**
+
+`quay-init.sh` 的安装配方重写把该文件的 effective lines 从 **1012 压到 1010**（旧的 `printf` + heredoc 收/开共 3 行 → 1 行命令）。该文件在 command position 上 exec `node`、不在例外清单 ⇒ **留在 ratchet 轴内**（是行数变了，不是成员变了）。
+`plugin/test/sh-census-check.test.mjs` 的 AC6 要求 committed baseline **等于**（不是 ≤）实测读数 ⇒ 缩轴也必须落档，否则下一次 land 时整个静态层变红——这正是该 AC6 存在的意义。
+两侧都用 checker 自己的原语实测：develop 1012 / `embedded: [node]` ⇒ HEAD 1010 / `embedded: [node]`；`totals.embeddedInterpreterLines` 7680 → 7678 与 `files[path=plugin/scripts/quay-init.sh].codeLines` 1012 → 1010 **差值同为 −2**，即没有第二个文件在动。
+**Residual = 0 是构造性而非抽样**：本轮 diff 共 7 条路径，其中 `*.sh` 有两条——另一条 `test/cold-start-e2e.sh` 实测 178 → 187（+9）但 `embedded: []`（纯 shell，无 command-position 解释器）⇒ **在本轴之外、贡献 0**（显式点出而非并进去，读 diff 的人才能逐行对上）。
+⇒ 故本任务 `## Touches` 增加 `plugin/sh-census-baseline.json`（被 `anti-drift-touches-check --task ... --merge-target develop` 以 `out-of-declared` 检出，已声明后复跑 0 违规）。
+
+**② 本轮 `step=suite` 红的其余 6 个失败：环境/机器态成因，A/B 实测（均与任务 delta 无关）**
+
+驱动自身的分类器已判 `failing tests unrelated to this task's delta`（见 `.quay/worker-round.jsonl` 的 `retry_exemptions[].reason`），只因「断言签名未在 ≥2 个任务上复现（fail-closed 计数）」而计入本任务。逐条实测成因：
+
+| 失败文件 | 成因 | A/B 实测（同一份代码，只换环境） |
+|---|---|---|
+| `develop-deliver-tgz-evidence-transport.test.mjs` ⑥ | GNU `sort` 的 collation 随 locale 变（`develop-deliver-tgz.sh` 的 `transport_imports_of` 用 `sort -u`） | `en_US.UTF-8` ⇒ 19/20；`LC_ALL=C` ⇒ **20/20** |
+| `laydown-set-check.test.mjs` AC2 | 同类：`derive_loop_scripts()` 走 shell `sort`，而测试侧 `deriveViaQuayInit()` 用 JS `.sort()`（code-unit 序） | `en_US.UTF-8` ⇒ 8/9；`LC_ALL=C` ⇒ **9/9** |
+| `outer-tick-log-check.test.mjs` ×2 | 时间标签判据读宿主时区（fixture 用 UTC `Z` 标签 + `Date.UTC` mtime，本机 `TZ` 未设 ⇒ CST/UTC+8） | 默认 ⇒ 25/27；`TZ=UTC` ⇒ **27/27** |
+| `arch-coverage-report.test.mjs:246` | `.archguard` manifest 的 sources 记的是 `/home/yale/...`（symlink 形态；该 symlink 2026-09-19 才出现），而 `MAIN_ROOT` 是 `/data/home/yale/...` ⇒ 测试的 `path.relative(MAIN_ROOT, r)` 期望值与实现的 realpath 归一秒不掉 | 机器态（`.archguard` 不入 git），非本任务可改 |
+| `direct-to-develop-bypass-check.test.mjs` AC3 | reflog 含 `fetch -q . author:develop` 一类 fetch 条目 ⇒ 分类器给 `unsupported-reflog-action`，而 fixture 期望 `unclassifiable-commits-in-range` | 共享 `.git` 的 reflog 态，非本任务可改 |
+
+**这一类不是新问题——本仓已诊断过一次，但只修了 CI 那一半（硬规则 5b 形态）。**
+`.github/workflows/ci.yml:29–41`（2026-09-16 `gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red`）已写明：job **显式声明** locale 而不是继承 runner 宿主，并给出同机同 commit 的 A/B（`LC_ALL=C.UTF-8` ⇒ 27 pass / 0 fail；`en_US.UTF-8` ⇒ 25 pass / 2 fail）。
+**同载体的兄弟实例至今未修**：本地入口 `scripts/test.sh` 与 driver 的 fan-in **仍继承宿主 locale/时区**，而本机 `LANG=en_US.UTF-8`、`TZ` 未设（CST）⇒ 正是那个 25/2 形态（本轮实测 6 个文件红，上表前 3 行属此类）。
+⇒ 单点修法（**本轮未做，交 suite-fix / manager 裁定**）：在 `scripts/test.sh` 顶部钉住 `LC_ALL=C.UTF-8` / `LANG=C.UTF-8` / `TZ=UTC`，与 CI 已声明的配置一致。
+**本轮不做的理由（不是遗漏）**：它不在本任务 Touches 内；且即使钉住也只修得好上表前 3 行（后 2 行是机器态）⇒ 本任务仍然落不了地，**不构成一次可验证的收益**，而会以「worker 单方面改全仓测试入口」的形式扩大 blast radius。
+
+**③ 本任务自身的门禁（本轮实测）**：`scripts/test.sh --for-task gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot --allow-thin` ⇒ **EXIT=0**（scoped 只选到 `quay-init.test.mjs`：14 tests / 14 pass / 0 fail，静态检查与 typecheck 全绿）；`anti-drift-touches-check --task ... --merge-target develop` ⇒ 0 违规。
+
 ## DoD
 
 - 一个真实的新项目（空目录，非 fixture）按 `quay-init` 打印的步骤原样操作后，会话里的 quay MCP 从 github 发布渠道的缓存加载（AC2 读数 + 一次真实项目读数）；本仓继续从 `quay-dev` 加载开发树（AC3）。文件改了、测试绿了只是必要条件——判据是生产读数。
@@ -249,6 +279,7 @@ AC-161 exit=0
 - `plugin/test/quay-init.test.mjs`
 - `test/cold-start-e2e.sh`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `plugin/sh-census-baseline.json`
 - `tasks/gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot.md`
 ## Needs-Human
 
