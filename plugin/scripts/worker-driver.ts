@@ -1915,22 +1915,23 @@ function suiteTokenBeforePassedFalse(line: string): string | null {
   return parts.length ? parts[parts.length - 1] : null;
 }
 
-/** `not ok - <head>[: …]` 的 <head>（`not ok` 后的编号与 `- ` 兼容 TAP 两形态）。无该形态 ⇒ null。 */
-function suiteNotOkHead(line: string): string | null {
+/** `not ok - <rest>` 的 <rest>（兼容 TAP 的 `not ok 1 - name` 编号形态）。无该形态 / 空 ⇒ null。
+ *  ⛔ 这一个正则就是「什么算 not ok 行」的唯一定义：下面的 head / 指名文件两个读者共用它。 */
+function suiteNotOkRest(line: string): string | null {
   const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
   if (!m) return null;
-  const rest = m[1].trim();
-  if (!rest) return null;
-  const ci = rest.indexOf(":");
-  return (ci < 0 ? rest : rest.slice(0, ci)).trim() || null;
+  return m[1].trim() || null;
 }
 
-/** 伪阶段名后指名的真实文件：`not ok - lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
+/** `<rest>` 里 `:` 之前的头部 token（`lint` / `server/a/b.test.ts`）；空 ⇒ ""（调用方按 unclassified 处置）。 */
+function suiteNotOkHead(rest: string): string {
+  const ci = rest.indexOf(":");
+  return (ci < 0 ? rest : rest.slice(0, ci)).trim();
+}
+
+/** 伪阶段名后指名的真实文件：`lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
  *  只在确实像路径/测试文件时返回（⛔ 不把 `not ok - lint: 5 problems` 的 `5` 当文件）。 */
-function suiteFileNamedAfterStage(line: string): string | null {
-  const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
-  if (!m) return null;
-  const rest = m[1].trim();
+function suiteFileNamedAfterStage(rest: string): string | null {
   const ci = rest.indexOf(":");
   if (ci < 0) return null;
   const chunk = (rest.slice(ci + 1).trim().split(/\s+/)[0] ?? "").replace(/(?::\d+){1,2}:?$/, "").replace(/:$/, "");
@@ -1968,15 +1969,16 @@ export function parseSuiteLogFailures(logText: string, root?: string | null): Su
       else noteUnclassified(token);
       continue;
     }
-    const head = suiteNotOkHead(line);
-    if (head === null) continue;
+    const rest = suiteNotOkRest(line);
+    if (rest === null) continue;
     failingLines += 1;
+    const head = suiteNotOkHead(rest);
     const cls = classifySuiteToken(head);
     if (cls === "file") { addFile(head); continue; }
     if (cls === "pseudo-stage") notePseudo(head);
     else noteUnclassified(head);
     // `not ok - <stage>: <rel>:<line>:<col>` 行把阶段失败【指名】到了真实文件上 ⇒ 归因到它。
-    const named = suiteFileNamedAfterStage(line);
+    const named = suiteFileNamedAfterStage(rest);
     if (named !== null) {
       if (classifySuiteToken(named) === "file") addFile(named);
       else noteUnclassified(named);
