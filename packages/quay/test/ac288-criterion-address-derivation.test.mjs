@@ -134,9 +134,28 @@ function killAndReap(child) {
   });
 }
 
+/**
+ * A HARNESS bound, not part of the shipped block. The block shells out to `node -e` (or `python3`)
+ * to parse the carrier, and under a fully-loaded suite a cold interpreter start has been measured
+ * well past 30s wall: a 30s bound turned the `carrier naming another pid` case into a bare
+ * `status === null` on the 2026-09-23 suite run (32.2s, against ~150ms standalone) while every
+ * other case in this file — none of which starts an interpreter — stayed fast. The bound stays
+ * FINITE so a genuinely hung block still fails loudly instead of wedging the file.
+ */
+const RUNSH_TIMEOUT_MS = 120000;
+
 /** Run `script` in `root` under /bin/sh (the same shell the acceptance runner uses). */
 function runSh(script, root) {
-  const r = spawnSync("/bin/sh", ["-c", script], { cwd: root, encoding: "utf8", timeout: 30000 });
+  const r = spawnSync("/bin/sh", ["-c", script], { cwd: root, encoding: "utf8", timeout: RUNSH_TIMEOUT_MS });
+  // A timeout kill must not wear the same shape as a derivation refusal (hard rule 3b): `status` is
+  // null on SIGTERM, which every `assert.equal(r.code, 1)` below would report as an opaque
+  // `null !== 1`. Name the cause instead.
+  if (r.status === null && r.signal) {
+    throw new Error(
+      `derivation block did not finish within ${RUNSH_TIMEOUT_MS}ms (killed by ${r.signal}) — ` +
+        `this is the fixture's harness bound, not an assertion about the block`,
+    );
+  }
   return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
