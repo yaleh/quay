@@ -103,3 +103,13 @@ quay driver: environment smoke check FAILED — refusing to start the worker dri
 - 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
 - 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-worker-quick-death-environment-fatal-halts-driver still present
 - run_id：wk-prod-anchor
+
+
+
+
+**本轮补记（2026-09-24，worker 续做轮 3：AC 逐条复验 + 上一轮红测的双面对照归因）**：本轮**未改任何实现**（分支 11 提交原样保留），只做 AC 逐条复验与上一轮 fan-in suite 红的归因对照。
+
+- **AC1 复验**：`node --test plugin/test/worker-driver-fan-in-s05.test.mjs` ⇒ **exit 0 / 17 用例全绿 / 0 失败**。
+- **AC4 复验**：`git merge develop` ⇒ `Already up to date`（`git rev-list --count HEAD..develop` = 0，无 unmerged path）；随后 `bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver --allow-thin` ⇒ **exit 0 / 126 用例绿 / 0 失败**。`test-selection-thin: 2/5 Touches (0.40) < 0.5` 告警仍在（**选择面**闸，非用例失败，与本实现无关，见上文 AC4 读数）。scoped-gate 缓存已按 **merge 时刻** 的 develop sha `74def5f8`（实测是 HEAD 的祖先）写入。
+- **上一轮 suite 红（`goal-driver-s02/s04/s10/s12/s13` + `goal-invariants-standing`）双面对照 ⇒ 复现的是环境泄漏，不是本 delta**：本 worker shell 实测 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（泄漏正在飞）——① 直接 `node --test plugin/test/goal-driver-s13.test.mjs plugin/test/goal-driver-s12.test.mjs` ⇒ **exit 1**，判词逐字复现上一轮红（`actual: 'not-evaluated'` vs `expected: 'violated'`）；② **同一 shell、同一对文件**，只把入口换成 `bash scripts/test.sh <同两文件>` ⇒ **exit 0 / 7 用例全绿**。两臂只差入口 ⇒ 差异来自 `scripts/test.sh:216` 的 `unset … QUAY_GOAL_ACCEPTANCE_ACTIVE`（即 `e1a1f1b1b`，已是本分支祖先），与本任务 delta 无关。
+- **AC3** 的四态由 s05 用例覆盖并通过（真跑 `runEnvironmentSmoke`；含「读假 launcher 实际收到的 argv 以证明用的是解析出的 launcher+model」这条非空转条，与「四态两两不同形」断言）；其**真 CLI 臂**读数见上文（`driver-runtime.ts start --kind worker` 拒启 + launcher exit 0 的负控制）。
