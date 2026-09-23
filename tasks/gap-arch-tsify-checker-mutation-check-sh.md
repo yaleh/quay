@@ -2,7 +2,7 @@
 id: gap-arch-tsify-checker-mutation-check-sh
 title: shell→TS（SPEC Phase 5.2）：checker-mutation-check.sh（490 行）改写为 TS，先做
   characterization；mutation-cases 目录的 sh 用例不在本任务范围
-status: ready
+status: done
 labels:
   - gap
 parent: null

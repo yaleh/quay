@@ -37,4 +37,5 @@ extra:
 - plugin/scripts/quay-init.sh
 - packages/quay/src/init.ts
 - plugin/test/quay-init-loop.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-config-heredoc-leaks-maintainer-comments.md
