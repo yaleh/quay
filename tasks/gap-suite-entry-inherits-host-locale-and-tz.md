@@ -1,7 +1,7 @@
 ---
 id: gap-suite-entry-inherits-host-locale-and-tz
 title: scripts/test.sh 不声明 locale/时区而继承宿主——与 CI 已声明的配置背离，3 个测试文件在任何任务的 fan-in 里恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
