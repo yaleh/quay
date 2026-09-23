@@ -1,7 +1,7 @@
 ---
 id: gap-worker-quick-death-environment-fatal-halts-driver
 title: 环境级快速死亡（model_not_found 等）被按任务计数逐个 park：应判 environment-fatal 并 halt driver
-status: todo
+status: ready
 labels:
   - gap
   - defect
