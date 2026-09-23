@@ -143,3 +143,42 @@ curl -sf --max-time 10 -H 'Cookie: lang=zh' http://172.28.0.1:13609/needs-human 
 **环境泄漏本轮仍在**：`/proc/2391720/environ`（driver-anchor，root=`/data/home/yale/work/quay`，2026-09-24T02:33 启动）实测含 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`；本 worker 会话进程亦继承（父链直上该 anchor）。
 
 **⇒ 上一节的「建议单独立案」本轮已兑现（⛔ 不重复诊断第 4 次）**：新任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env`（`labels: gap/defect`，`status: todo`，5 条 AC，`task_check` 的 `author->ready` 读作 `ok:true, shape: finding`）——内含泄漏链逐层证据、发生率（`.quay/worker-outcome.jsonl` 两条带 `suiteSignatures` 的记录）、逐项同族枚举 AC，与最小修法（`scripts/test.sh` 既有入口归一化块补一个成员 / `suite-driver.ts` spawn env 剔除）。⛔ 本任务**仍未**越界修它（`## Touches` 不含 `scripts/test.sh`）。
+
+## Evidence — 本轮（2026-09-24，第 5 轮）· 受控 A/B 复验；卡点确认仍在飞
+
+**实现侧零改动**（分支 delta 对 develop 仍 = 1 file：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`）。
+
+- `task_check` ⇒ `ok:true`，**6/6** AC（`acTotal:6, acChecked:6`）。
+- `goal gate AC-295 --dry-run --json` ⇒ **EXIT=0**（活实例上判据仍为真）。
+- **scoped gate（与 fan-in 同一条命令、裸跑、⛔ 不加 `env -u`）**：`bash scripts/test.sh --for-task gap-ac295-… --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。
+- `git merge --no-edit develop` ⇒ **Already up to date**，无未合并路径；worktree clean。
+- `--write-scoped-gate-cache` ⇒ `{"key":"gap-ac295-…\t1f884c10fa76bcdb67686c9b49f17a615f079f7a","ok":true}`。
+  ⚠️ 该缓存文件实测是**单条记录**（写入前内容为 `gap-anchor-state-nonatomic-…\ta6a730c9…`）⇒ 本次写入顶掉了对端那条；对端只会因此多跑一次 scoped 门，无正确性影响。
+
+**上一轮 `# fail 29` 本轮受控 A/B 复验（硬规则 4 推论四：给出「若因不成立则结果会不同」的对照）**
+
+同 worktree、同 HEAD、同一组 7 个测试文件，**唯一变量** = `QUAY_GOAL_ACCEPTANCE_ACTIVE`：
+
+| 条件 | 读数 |
+|---|---|
+| `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`（= 环境现状） | **`pass 101 / fail 29`** —— 与 fan-in 日志 `# fail 29` **逐数一致** |
+| `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` | **`pass 130 / fail 0`** |
+
+⇒ 29 条红**全部**由该环境变量造成，与 delta 无关（对照存在且能取假）。7 个文件：`goal-driver-s02/s04/s10/s12/s13`、`goal-invariants-standing`、`goal-store`。
+
+**泄漏链本轮直接量（⛔ 非转述，读的是当前进程的 `/proc/*/environ`）**
+
+- 本 worker 会话（pid 1015613）的**父进程 = driver-anchor pid 2391720**，其 environ 含 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`。
+- **正在跑的 fan-in 进程 pid 910685**（`worker-driver.ts --mechanical-fan-in --task gap-anchor-state-nonatomic-and-declaration-outruns-log --root /data/home/yale/work/quay`）environ **同样含该变量**，PPID = 2391720 ⇒ 泄漏在**本轮 fan-in 路径上仍然生效**。
+- 本会话自身 environ 亦含该变量（继承）。
+
+**⇒ 第 5 轮仍无法落地的原因与前一轮同一条；修复已确认在被并行实现**
+
+姊妹任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env` 已 `todo→ready`，其 worktree
+`quay-worktrees/gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env` **于 03:05 建立**，与 peer worker
+会话 pid 544836 的启动时刻 `03:05:16` 吻合 ⇒ **该修复正在被实现中**。它一旦落地（其自身 fan-in 跑的是**它分支上**已
+`unset` 的 `scripts/test.sh` ⇒ 能绿、能落），develop 的 `scripts/test.sh` 即带上该 `unset`，本任务下一轮 fan-in 的
+suite 步即可绿。
+
+⛔ 本任务**未**越界改 `scripts/test.sh`（不在 `## Touches`，会被 anti-drift 拒）；**未**重启 driver-anchor
+（driver 生命周期是 manager 层的人授常设权，本 worker 无此权；且第二个 driver 会劫持在飞 worker）。

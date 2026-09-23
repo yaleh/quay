@@ -36,6 +36,14 @@ goal_ac: AC-318
 - **Proposal 点 3**：ff-merge 证书闸改为**只对 `root`**（delta 所相对的那棵树）分类——`classifyRootCandidates` 的插件根 + `..` 跳数候选整组删除。原因不只是冗余：`--root` 同时是分类器读 `.quay/config.yml` 的那棵树，用插件根替换它＝拿 quay 的检查器清单去判一个外国项目的 delta，正是生产里「提交注册表副本才能过」的根因。
 - **Proposal 点 4**：`loop.doc_surfaces` 的交付分两处、一个值：新装写者在 `quay-init.sh` 的 heredoc（shell 无法 import TS ⇒ 该文件注释里既有的「镜像」约定）；版本级默认值在 `packages/quay/src/init.ts` 的 `LOOP_VERSION_DEFAULTS`，由**注释保留式** reconcile（`quay init --reconcile` / MCP `init`）补进已存在的 config。⛔ 刻意**不**塞进 `ensureLoopConfig`（那一步的写者是 `pyYamlDump`，会整篇重排、**丢用户注释**——实测 2 例既有测试正是钉这条）。
 
+### 第二轮收口（2026-09-24：分类器一旦对无注册表作答，三处既有契约被砸掉，逐个修）
+
+- **仪器探针**：`probeClassifier` 原以 `--classify-delta` 的 exit code 为读数（「exit 0 ⇔ 这棵树带注册表」）。该等价性正是本任务取消的东西 ⇒ 探针会对**每个** root 读 `evaluated:true`，一个结构上无法取假的量（硬规则 4）。改为消费分类器新增的 `--classify-delta --resolution`（一行 JSON：`mode` / `registryPath` / `registryCandidates` / `docSurfaces`），`evaluated ⇔ mode === "registry"`；两种降级模式在 `detail` 里可见，候选表由分类器自报（硬规则 5b：此处不复制路径表）。解析出的 kernel 早于该 flag 时（版本错位：`resolvePluginRoot()` 优先主检出）保留 exit-code 读法，并在 `detail` 里言明用的是哪套契约。
+- **证书闸的插件根替换被撤销之后**，`gap-classify-delta-registry-path-layout-aware` 那条「删掉打包注册表 ⇒ fail closed」控制的前提失效。它改为钉该任务真正该钉、且**可取假**的新语义：quay 的注册表**不参与**外来项目的判定（mode 恒 `conservative-default`，有无打包注册表都一样）；安全半边照旧（code delta 仍被拒，判词点名真实路径）。
+- **`gap-fan-in-cert-flip-commit-identity-inert` AC3**：其「真分类器在无注册表项目上无法作答」的前提与 (a) 的 `NOT-EVALUATED` 断言属同一被取代契约。前提改钉 registry-free 本身（读分类器自报的 `mode`，⛔ 不由 exit code 反推）；(a) 移到独立夹具上（保 (b) 仍是真正的「首次即落地」）——关掉身份短路 ⇒ 分类器自行判惰性放行，且⛔ 不得冒认身份判词；(c) 的 source delta 仍被拒。
+- **两处测试对环境的隐式依赖**：ff-merge 的 converge / quotepath-sibling 两例原先不传 `--scripts-dir`，于是 `defaultScriptsDir()` 走 Core `resolvePluginRoot()` 的**主检出**分支——判定结果取决于主检出恰好带着哪个分类器（实测：主检出旧分类器判不了无注册表夹具 ⇒ 被测树这两例假红）。改为与本文件 shim 同一规矩：钉到被测树自己的 `plugin/scripts`。
+- **`scripts/test.sh` 入口 unset 泄漏的 goal 重入闸**（同 `gap-suite-ambient-reds-block-all-code-landings` class 1 的 locale/TZ，这里是 class 2）：`QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 由窗口内拉起的**长命子进程**（判据内 start/restart driver ⇒ anchor 出生即带闸）泄漏给此后每个 worker 与每个 suite，使 7 个 goal 家族文件假红。该变量⛔ 不是测试输入（需要它的套件自己置位、不该看到它的套件早已自行 `delete env.<it>`），故在入口 unset——这是**唯一**同时覆盖两个发起方（driver 的 fan-in suite 与人的 scoped 跑）的位置；CI 无需配套改动。⛔ 不抬 sh-census 棘轮：把 unset 并进既有 `unset FORCE_COLOR` 那一行（净增 0 行代码），7687 = baseline 不变。
+
 ## AC
 
 - [x] `node --test plugin/test/fan-in-execute-paths-s01.test.mjs plugin/test/third-party-capability-degradation.test.mjs` 退出 0，新增用例：一个**不含** `runner-static-gate.ts` 的第三方 worktree 夹具（带 `loop.doc_surfaces: ["docs/", "tasks/"]`）上，delta `["docs/a.md","tasks/t.md"]` 判 doc-only，`["server/x.ts"]` 判 code，两者都**不是** `__CLASSIFY_FAILED__`。
@@ -54,6 +62,21 @@ goal_ac: AC-318
 - **AC4**：`bash scripts/test.sh --for-task gap-fan-in-delta-classify-declared-doc-surfaces` → exit 0，`tests 189 / pass 189 / fail 0`（真跑了 189 个用例，含本次 Touches 的两个测试文件与全部 change-tier 静态检查）；生产形态（driver fan-in 用的 `--allow-thin`）同读数 exit 0。
 - **附：一次真回归（本任务自己引入、被 scoped 门抓住，已修）**：`plugin/skills/init/SKILL.md` 里把注册表写成路径前缀形态 `plugin/scripts/runner-static-gate.ts`，会被 `packages/quay/scripts/build-plugin-dist.mjs` 的 `MD_PATH_PREFIXED_RE` 当成「调用点」⇒ 该 bash 脚本（故意命名 `.ts`）被拉进 bundle 条目 ⇒ esbuild 解析报错 ⇒ `package.sh` 失败 ⇒ `npm-pack-e2e` 11 例全红。实测 `deriveEntries`：修复前 108 条（含 `scripts/runner-static-gate.ts`），改成裸 basename 后 107 条、无该条目；修复提交 `865b768ec`。
 
+## 判定读数 · 第二轮（2026-09-24，承接上表；merge develop@edf5fa9d8 之后，worktree 内）
+
+上一轮的读数在**分类器开始对无注册表作答**之前取得，故上表仍有效但不足以描述落地形态；本轮的读数为准。
+
+- **探针三态实测**（直接调用 `probeInstruments`，单变量 = root）：registry-free root ⇒ `evaluated:false`、`detail` 含 `mode=conservative-default` 与分类器自报的候选路径；带注册表的 root（本 worktree 自身）⇒ `evaluated:true`、`detail` 含 `mode=registry` 与 `exit=0`；空 scripts dir ⇒ `evaluated:false`、`NOT RESOLVABLE`。⇒ `evaluated` 两种取值都取得到（⛔ 不是常量）。
+- **AC1 复验**：`node --no-warnings --test plugin/test/fan-in-execute-paths-s01.test.mjs plugin/test/third-party-capability-degradation.test.mjs` → `tests 22 / pass 22 / fail 0`，exit 0。
+- **AC3 复验**：`node --no-warnings --experimental-strip-types plugin/scripts/config-key-consumer-check.ts --json` → exit 0，`doc_surfaces` = `has-consumer`（本轮 `consumers:3`；上表的 4 是重构前的读数，两者都满足 AC3 的判据）。
+- **本轮修动的测试文件**（均 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE`；develop 基线读数用于归因对照）：`plugin/test/fan-in-ff-merge.test.mjs` → `tests 54 / pass 54 / fail 0`（develop 同文件基线 54/54；本轮开始时本树 49/54，5 条红**全部**归因于本任务）；`plugin/test/worker-driver.test.mjs` → `tests 109 / pass 109 / fail 0`（基线 109/109；开始时 108/109）。
+- **分类器相关其余文件**：`select-static-checks-for-touches` / `installed-layout-sibling-resolvability` / `fan-in-execute-paths-s04` / `fan-in-driver-mechanical-orchestration` → `tests 50 / pass 50 / fail 0`。
+- **本任务 Touches 四文件**（`fan-in-execute-paths-s01` / `third-party-capability-degradation` / `quay-init-characterization` / `packages/quay/test/init.test.mjs`）→ `tests 73 / pass 73 / fail 0`。
+- **`scripts/test.sh` 环境修的对照三段**（同一文件 `plugin/test/goal-invariants-standing.test.mjs`，单变量）：直跑 + 带闸 ⇒ rc=1（红）；经 `scripts/test.sh`、调用方环境带闸 ⇒ rc=0 且 `ℹ tests 19`（该文件确实跑了，⛔ 不是被跳过）；直跑 + `env -u` ⇒ rc=0。⇒ 红是被入口的 unset 消掉的。
+- **7 个 goal 家族文件的单变量读数**（带闸 / 不带闸的失败行数）：`packages/quay/test/goal-store.test.mjs` 17/0、`goal-driver-s02` 11/0、`-s04` 11/0、`-s10` 9/0、`-s13` 7/0、`goal-invariants-standing` 7/0、`-s12` 3/0。
+- **`sh-census-check`**：`embeddedInterpreterLines=7687 ≤ 7687`、`duplicateCopies=0`，PASS（⛔ 未改 `plugin/sh-census-baseline.json`，未抬棘轮）。
+- **⛔ 本轮未跑全量 suite**：按 worker 协议，全量 suite 由 worker-driver 的机械 fan-in 执行，不在本回合内；上表与本表都只记本回合**实跑**的读数。
+
 ## DoD
 
 真实落地判据：GOAL-027 / AC-318 的判据在 claudecodeui 上读出 exit 0。这要求：该项目删除提交进去的 `plugin/scripts/runner-static-gate.ts` 副本、在 `.quay/config.yml` 声明 `loop.doc_surfaces`、driver 重启到含修复的版本，之后其 fan-in 日志里至少出现 1 次 delta 判定且 `classify failed` 为 0。完成记录写明删除副本的提交与 driver 重启时刻。
@@ -71,7 +94,9 @@ goal_ac: AC-318
 - plugin/test/fan-in-execute-paths-s01.test.mjs
 - plugin/test/third-party-capability-degradation.test.mjs
 - plugin/test/quay-init-characterization.test.mjs
+- plugin/test/fan-in-ff-merge.test.mjs
 - packages/quay/test/init.test.mjs
+- scripts/test.sh
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/sh-census-baseline.json
 - tasks/gap-fan-in-delta-classify-declared-doc-surfaces.md
