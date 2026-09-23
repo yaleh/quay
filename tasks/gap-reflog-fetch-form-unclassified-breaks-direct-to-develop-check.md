@@ -2,7 +2,7 @@
 id: gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check
 title: reflog 分类器声称覆盖 fetch 却认不出本仓自己同步机制产生的 fetch
   形态——direct-to-develop-bypass-check 恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
