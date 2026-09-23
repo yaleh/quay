@@ -1,7 +1,7 @@
 ---
 id: gap-worker-quick-death-environment-fatal-halts-driver
 title: 环境级快速死亡（model_not_found 等）被按任务计数逐个 park：应判 environment-fatal 并 halt driver
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -96,3 +96,10 @@ quay driver: environment smoke check FAILED — refusing to start the worker dri
 - tasks/gap-worker-quick-death-environment-fatal-halts-driver.md
 
 **本轮补记（2026-09-24，worker 续做轮 2：诊断上一轮 suite 红）**：上一轮 `step=suite` 红（`goal-driver-s02/s04/s10/s12/s13` + `goal-invariants-standing` 六个文件，形如「缺口立案侧：违反且无在飞任务 ⇒ standing-violated（可立案）」实际得 `standing-ok`；`sweepFrozenAcs` 读数落 `not-evaluated`）**既不是本任务 delta，也不是用例缺陷**，而是**环境泄漏造成的陈旧读数**：driver anchor 把 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 继承进 suite 子树，goal 族判据因此执行不出结论 ⇒ 落到三态里的 `not-evaluated`。真因已由独立任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env` 修复（`e1a1f1b1b`：`scripts/test.sh:216` 入口 `unset FORCE_COLOR QUAY_GOAL_ACCEPTANCE_ACTIVE`，2026-09-24 03:14 落地 develop）；上一轮 suite 日志时间戳为当日 00:56 ⇒ **早于该修复**，故读到的是修复前的环境。三方取证：① 把本任务 delta 四个文件全部回退到 develop 版本后，同文件**照旧红**（⇒ 与本 delta 无关）；② 在**主检出**（非本分支）跑同文件**同样红**（⇒ 是 develop 级，不是分支级）；③ 在**泄漏仍存在于当前 shell** 的前提下经 `bash scripts/test.sh plugin/test/goal-driver-s13.test.mjs plugin/test/goal-driver-s12.test.mjs` 跑 ⇒ **7/7 全绿**（入口 unset 对真实 fan-in 路径生效——`suite-driver.ts:378` 正是 `bash <wt>/scripts/test.sh --buckets <task>`）。本轮**未改任何判定逻辑、未改实现**（分支 7 提交原样保留）。合并 develop（`24f59dd22f9163ee267738f6f41ba9a9e781ee3d`，落后 0、无 unmerged path）后复跑 `bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver --allow-thin` ⇒ **exit 0 / 126 用例全绿 / 0 失败**（上轮读数 120，增量来自 develop 新并进来的用例），scoped-gate 缓存已按 merge-time develop sha 写入。
+## Needs-Human
+
+**执行 2026-09-23T19:46:23.096Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser attributed no failing file (failure-line count unavailable on this judgment)); stopping instead of spending another worker session
+- 失败步/判词：adopted orphan worker exited (exit code unobservable) — task status=ready (not done) and leftover worktree task/gap-worker-quick-death-environment-fatal-halts-driver still present
+- run_id：wk-prod-anchor
