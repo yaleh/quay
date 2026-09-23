@@ -5,26 +5,225 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THIS STEP WAS RE-ANCHORED (2026-09-23,
+  gap-ac293-criterion-cmdline-port-literal-stale):
+
+  # the launcher default for the web port is now 0 = kernel-assigned ephemeral
+
+  # (plugin/scripts/start-drivers.ts:58-59, changed by ce0f47518
+  gap-serve-same-root-admission-lock),
+
+  # so a live instance's cmdline literally reads "--host H --port 0" and the
+  previous derivation
+
+  # produced the structurally unfetchable "H:0", failing with the
+  en-fetch-failed refusal against a server
+
+  # that was up the whole time. The ledger pins the CARRIER as the thing that
+  moved, not the
+
+  # criterion's subject: item_id=AC-293, the SAME criterionHash
+  ed17ab6306fffea8, goal-sweep pass at
+
+  # 2026-09-23T05:08:44.218Z and fail at 2026-09-23T08:36:03.223Z; the goal-cli
+  runs from
+
+  # 08:43:43.609Z on read "addr=172.28.0.1:0" (later 127.0.0.1:0, after the bind
+  host changed), and
+
+  # the AC-242 stale-pass scan of 08:43:32.984Z listed AC-293 among the frozen
+  achieved ACs whose
+
+  # criterion is CURRENTLY false. Nothing about the /system assertions below
+  changed. The real
+
+  # listening port is knowable only from the live host's own carrier
+  $root/.quay/server.json (writer
+
+  # packages/quay/src/serve.ts; read contract packages/quay/src/server-state.ts,
+  which already owns
+
+  # the shape + the three-way read outcome this step mirrors as distinct
+  causes). No host/port
+
+  # literal is written down here -- the value is re-derived on EVERY run, so a
+  restart (which binds
+
+  # a different ephemeral port) cannot stale it again. The carrier is used ONLY
+  to derive an
+
+  # address; the verdict stays the external HTTP GET further down (hard rule 4b
+  -- never judge a
+
+  # live surface by a reading that surface produced about itself). Both
+  deployment shapes stay
+
+  # supported: an explicit non-zero port on the cmdline is still used as-is, and
+  a kernel-assigned
+
+  # (or absent) one falls through to the carrier. Every candidate is reported
+  with its own pid +
+
+  # address + cause and none can wipe a derived address -- including the gate's
+  OWN `sh -c` runner,
+
+  # whose cwd is $root and whose cmdline contains this very text, so it matches
+  pgrep too. That
+
+  # runner is why `nserve` counts only candidates whose argv carries the `serve`
+  subcommand as its
+
+  # own element: without it, the no-instance refusal below would be unreachable
+  (the runner would
+
+  # always look like a candidate) and "there is no serve here" would wear the
+  same shape as "there
+
+  # is one and I could not reach it". The eleven CAUSE-prefixed refusal branches
+  below are
+
+  # byte-identical to the pre-amendment criterion, so the two refusal modes this
+  amendment ADDS
+
+  # carry their own FAIL-prefixed token rather than a twelfth one -- a distinct
+  value, so "could not
+
+  # derive/reach an address" never wears the same shape as the branch it was
+  added beside (hard
+
+  # rule 3b).
+
+  # >>> addr-derivation (this block is run VERBATIM by
+  packages/quay/test/ac293-criterion-address-derivation.test.mjs)
+
+
   root=$(git rev-parse --show-toplevel)
 
   ROUTE="/system"
 
   LABEL_EN="System"
 
-  addr=""
+  if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
+  rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
+  attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
+  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
+
+  cands=""
 
   for p in $(pgrep -f 'quay.ts serve' 2>/dev/null); do
+    [ -d "/proc/$p" ] || continue
     [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
-    a=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
-    [ -n "$a" ] || continue
-    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; esac
-    addr="$a"
-    break
+    cands="$cands $p"
   done
+
+  argv_addr() { tr '\0' '\n' < "/proc/$1/cmdline" 2>/dev/null | awk
+  '{arg[NR]=$0} END{s=0; for(i=1;i<=NR;i++) if(arg[i]=="serve"){s=i; break};
+  if(s==0){print "argv-no-serve-subcommand"; exit}; h=""; q="";
+  for(i=s+1;i<=NR;i++){ if(arg[i]=="--host"&&i<NR) h=arg[i+1]; else
+  if(arg[i]=="--port"&&i<NR) q=arg[i+1]; else if(arg[i]~/^--host=/)
+  h=substr(arg[i],8); else if(arg[i]~/^--port=/) q=substr(arg[i],8)};
+  if(q==""){print "argv-port-absent"; exit}; if(q+0<1){print
+  "argv-port-kernel-assigned"; exit}; if(h==""){print "argv-host-absent"; exit};
+  print "addr="h":"(q+0)}'; }
+
+  carrier_addr() {
+    f="$root/.quay/server.json"
+    [ -f "$f" ] || { echo "carrier-absent"; return; }
+    kill -0 "$1" 2>/dev/null || { echo "candidate-pid-dead"; return; }
+    if command -v node >/dev/null 2>&1; then
+      o=$(node -e '(()=>{const fs=require("fs");let j;try{j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){return console.log("carrier-unreadable")};if(!j||j.schemaVersion!==1||!Array.isArray(j.services))return console.log("carrier-unreadable");if(String(j.pid)!==process.argv[2])return console.log("carrier-pid-mismatch");const w=j.services.filter(x=>x&&x.name==="web");if(!w.length)return console.log("carrier-no-web-service");if(w[0].up!==true)return console.log("carrier-web-down");const h=w[0].host,p=w[0].port;if(typeof h!=="string"||h===""||typeof p!=="number"||!(p>0))return console.log("carrier-web-address-unusable");console.log("addr="+h+":"+p)})()' "$f" "$1" 2>/dev/null)
+    elif command -v python3 >/dev/null 2>&1; then
+      o=$(python3 -c 'import json,sys
+  try: j=json.load(open(sys.argv[1]))
+
+  except Exception: print("carrier-unreadable"); sys.exit()
+
+  if j.get("schemaVersion")!=1 or not isinstance(j.get("services"),list):
+  print("carrier-unreadable"); sys.exit()
+
+  if str(j.get("pid"))!=sys.argv[2]: print("carrier-pid-mismatch"); sys.exit()
+
+  w=[x for x in j.get("services") if isinstance(x,dict) and
+  x.get("name")=="web"]
+
+  if not w: print("carrier-no-web-service"); sys.exit()
+
+  if w[0].get("up") is not True: print("carrier-web-down"); sys.exit()
+
+  h=w[0].get("host"); p=w[0].get("port")
+
+  if not isinstance(h,str) or not h or not isinstance(p,int) or p<1:
+  print("carrier-web-address-unusable"); sys.exit()
+
+  print("addr=%s:%d"%(h,p))' "$f" "$1" 2>/dev/null)
+    else
+      o="carrier-no-json-tool"
+    fi
+    rc=$?
+    if [ -z "$o" ]; then if [ "$rc" != 0 ]; then o="carrier-unreadable-rc$rc"; else o="carrier-unreadable"; fi; fi
+    echo "$o"
+  }
+
+  addr=""
+
+  src=""
+
+  rep=""
+
+  ncand=0
+
+  nderived=0
+
+  nserve=0
+
+  for p in $cands; do
+    ncand=$((ncand + 1))
+    a=""
+    c=""
+    s=""
+    isserve=0
+    ra=$(argv_addr "$p")
+    case "$ra" in addr=*) a="${ra#addr=}"; s="argv"; isserve=1 ;; argv-no-serve-subcommand) c="$ra" ;; *) c="$ra"; isserve=1 ;; esac
+    if [ -z "$a" ]; then rb=$(carrier_addr "$p"); case "$rb" in addr=*) a="${rb#addr=}"; s="carrier"; isserve=1 ;; *) c="${c:+$c,}$rb" ;; esac; fi
+    case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; "::"*) a="127.0.0.1:${a#::}" ;; esac
+    if [ "$isserve" = 1 ]; then nserve=$((nserve + 1)); fi
+    if [ -z "$a" ]; then rep="$rep; pid=$p addr=- cause=${c:-address-not-derivable}"; continue; fi
+    nderived=$((nderived + 1))
+    if [ -n "$addr" ]; then rep="$rep; pid=$p addr=$a cause=derived-from-$s-not-probed (an earlier candidate already answered $ROUTE)"; continue; fi
+    curl -sf --max-time 10 -o /dev/null "http://$a$ROUTE" 2>/dev/null
+    crc=$?
+    if [ "$crc" = 0 ]; then addr="$a"; src="$s"; rep="$rep; pid=$p addr=$a cause=derived-from-$s-fetch-answered"; continue; fi
+    case "$crc" in 6) cc="host-unresolvable" ;; 7) cc="connection-refused" ;; 22) cc="http-error" ;; 28) cc="timeout" ;; *) cc="curl-exit-$crc" ;; esac
+    why=$(curl -sfS --max-time 10 -o /dev/null "http://$a$ROUTE" 2>&1 | tr '\n' ' ')
+    rep="$rep; pid=$p addr=$a cause=derived-from-$s-fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
+  done
+
+  if [ -z "$addr" ] && [ "$ncand" != 0 ]; then printf 'AC-293 candidate readings
+  (cwd=%s, nserve=%s, ncand=%s, nderived=%s):%s\n' "$root" "$nserve" "$ncand"
+  "$nderived" "$rep" >&2; fi
+
+  if [ -z "$addr" ] && [ "$nserve" != 0 ] && [ "$nderived" = 0 ]; then printf
+  'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
+  none yielded an address (no explicit --port >= 1 on its own argv, and no
+  .quay/server.json entry naming that pid with an up web service); per-candidate
+  readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
+
+  if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
+  'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
+  serve process(es) for cwd=%s, none answered %s (connection refused / timed out
+  / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
+  "$root" "$ROUTE" >&2; exit 1; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
   (AC-179 probe pattern)" >&2; exit 1; fi
+
+  printf 'AC-293 serve address derived from %s as %s (per-candidate
+  readings:%s)\n' "$src" "$addr" "$rep"
+
+
+  # <<< addr-derivation
+
 
   en=$(curl -sf --max-time 10 "http://$addr$ROUTE" 2>/dev/null)
 

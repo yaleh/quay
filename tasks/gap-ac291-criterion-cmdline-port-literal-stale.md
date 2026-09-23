@@ -110,12 +110,12 @@ grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/ | wc -l   ⇒ 17
 
 ## AC
 
-- [ ] **AC1（承载体已重锚且不减强度）**：`goals/AC-291-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改从活宿主载体取；`expect` 与正文语义逐字不变（贴 `git diff`，只有派生那一步与「为什么改」的说明变化）。⛔ 除非经 `quay goal write` 落库否则不算。
-- [ ] **AC2（判据能取假 —— 两个负控制）**：① 无运行实例时 `quay goal gate AC-291` 非 0 且以 `CAUSE=no-running-serve-instance` 可区分；② 候选地址指向必然连不上的端口时非 0 且成因可区分。两条均贴退出码与逐字 stderr。
-- [ ] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-291` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Live` 计数 ≥1 / zh 响应含 `<html lang="zh"` / zh nav `Live` 计数 =0 / zh `<title>` ≠ en `<title>`）。
-- [ ] **AC4（地址覆盖两种部署形态）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；贴出两种形态下的派生结果。⛔ 不把本机当前端口写进任何文件。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac291-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rc "grep -oE -- '--host \[^ \]+ --port \[0-9\]+'" goals/` **逐文件**贴出并与立案基线对照（总数 **17**）：本任务后 **AC-291 那一条 1→0**，其余 **16 个文件计数一字未动**（它们各自归自己的立案轮）。⛔ 若同族在飞任务已落地，本条判据是**逐文件差量**，不是绝对值。
-- [ ] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-291` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ 修订前指纹（贴两行）。
+- [x] **AC1（承载体已重锚且不减强度）**：`goals/AC-291-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改从活宿主载体取；`expect` 与正文语义逐字不变（贴 `git diff`，只有派生那一步与「为什么改」的说明变化）。⛔ 除非经 `quay goal write` 落库否则不算。
+- [x] **AC2（判据能取假 —— 两个负控制）**：① 无运行实例时 `quay goal gate AC-291` 非 0 且以 `CAUSE=no-running-serve-instance` 可区分；② 候选地址指向必然连不上的端口时非 0 且成因可区分。两条均贴退出码与逐字 stderr。
+- [x] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-291` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Live` 计数 ≥1 / zh 响应含 `<html lang="zh"` / zh nav `Live` 计数 =0 / zh `<title>` ≠ en `<title>`）。
+- [x] **AC4（地址覆盖两种部署形态）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；贴出两种形态下的派生结果。⛔ 不把本机当前端口写进任何文件。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac291-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rc "grep -oE -- '--host \[^ \]+ --port \[0-9\]+'" goals/` **逐文件**贴出并与立案基线对照（总数 **17**）：本任务后 **AC-291 那一条 1→0**，其余 **16 个文件计数一字未动**（它们各自归自己的立案轮）。⛔ 若同族在飞任务已落地，本条判据是**逐文件差量**，不是绝对值。
+- [x] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-291` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ 修订前指纹（贴两行）。
 
 ## DoD
 
@@ -134,3 +134,132 @@ grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/ | wc -l   ⇒ 17
 - `tasks/gap-ac291-criterion-cmdline-port-literal-stale.md`
 
 （说明：第一条是本任务的落地面——criterion 的地址派生那一步，经 `quay goal write AC-291 --criterion …` 落库，`expect` 与正文语义逐字不变、只补「为什么改」；第二条是配套夹具（两种部署形态的派生正/负控制）；第三条是 self-touch。⛔ 不新增 `plugin/scripts/*.ts`——派生助手若要抽出，默认放 `packages/quay/src/`；若最终落在 `plugin/scripts/`，必须同时把 outline、`plugin/scripts/capability-catalog-declarations.json` 与本任务 Touches 一并更新。）
+
+## Evidence（执行轮，2026-09-23T14:20–14:35Z，worker worktree `/home/yale/work/quay-worktrees/gap-ac291-criterion-cmdline-port-literal-stale`）
+
+⛔ 本节的每条读数都是本执行轮的**直接量**；未跟踪的原始 bundle 在同 worktree 的 `.quay/ac291-*.txt` / `.quay/ac291-*.sh`（下一轮可用同样脚本独立复算）。
+
+### 落库与指纹（AC1 / AC6 的载体）
+
+```
+cf5a0a7bf goals: AC-291 field:criterion by cli:1138007     ← worktree 终版（argv 版派生）
+4aa2fc0d4 goals: AC-291 field:criterion by cli:4051302
+0748b9920 goals: AC-291 field:criterion by cli:3732539
+e6ee77ab8 test(ac291): bind the re-anchored address derivation to the stored criterion
+26e13c0fa / 8a3c9ccbf  goals: AC-291 field:criterion …      ← 主检出（生产 goal store；终版已随 doc 同步可见于 develop）
+```
+
+- 旧 criterionHash（台账 `2026-09-23T05:08:40.467Z` goal-sweep pass 与 `08:36:03.044Z` fail **同一值**）：`848bfb6418f2a892`
+- 新 criterionHash：`f455d4534f8067e9`（`criterionFingerprint` 实算，非目测）
+- 新 criterion md5：`e13b1ab9ad8530581d6c17522522036a`
+- 主检出与 worktree 的 goal 文件**逐字相同**（`diff` 空 ⇒ fan-in 无冲突）
+- `expect` 字段：`git diff` 无变化（逐字保留）；断言块（`<nav>` 区块抽取 / `title_of()` / `<html lang="zh"` / `nav-label-untranslated` / `title-unchanged` / `echo OK`）与 11 条 `CAUSE=` 文本逐字保留；改的只有「派生那一步」+「为什么改」注释块。
+  - 旧派生 = `grep -oE -- '--host [^ ]+ --port [0-9]+'`（从 joined cmdline 取端口字面量）；新派生 = `awk` **逐 argv 元素**认 `serve` 子命令 + `--host`/`--port`（显式 N≥1 直接用），否则回落活宿主载体 `$root/.quay/server.json`（**只取 `name=="web"`**，并校验 `carrier.pid == 候选 pid` ∧ 候选 `/proc/<pid>/cwd == $root`）。
+  - ⛔ 判据仍能取假（见 AC2），⛔ 判据里没有任何 host/port 字面量（每次运行重新派生）。
+
+### 勾选写面
+
+AC1–AC6 的勾选经 **Provider ABI** 落库：`quay-native task edit gap-ac291-… --body "$(cat <新 body>)"` —— body 由脚本从**当前 body** 生成（`- [ ]` → `- [x]` 只动 6 行的复选框字符，AC 正文逐字不变；再追加本节），⛔ 不是手改 `- [ ]` 字符。
+落库后 `task_check` 独立确认 AC 全勾 ⇒ `ok:true`。
+
+### AC1 —— 承载体重锚（活生产实例上为真，见 AC3）
+
+### AC2 —— 两个负控制（同一判据文本，worktree root）
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-291 --root <worktree>     # 无 serve 实例
+GATE_EXIT=1
+reason: acceptance failed (exit 1) — AC-291 candidate readings (cwd=…, nserve=0, ncand=1, nderived=0):
+  ; pid=1694355 addr=<none> argv=argv-no-serve-subcommand cause=carrier-unreadable
+  CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=…; /live cannot be evaluated on a live surface (AC-179 probe pattern)
+
+$ sh .quay/ac291-e3b-deadport.sh /tmp/ac291/stored-criterion.sh           # 活候选 + 载体指向死端口
+--- criterion run (cwd=/tmp/ac291-dead.rT1mC2) ---
+AC-291 candidate readings (cwd=/tmp/ac291-dead.rT1mC2, nserve=1, ncand=2, nderived=1):
+  ; pid=1694568 addr=127.0.0.1:11355 argv=argv-port-kernel-assigned cause=fetch-failed(connection-refused) -- curl: (7) Failed to connect to 127.0.0.1 port 11355 after 0 ms: Couldn't connect to server
+  ; pid=1695340 addr=<none> argv=argv-no-serve-subcommand cause=carrier-pid-mismatch
+CAUSE=no-reachable-serve-address -- 1 derivable address(es) among 1 candidate(s) for cwd=…, none answered /live (connection refused / timed out / non-2xx)
+CRITERION_EXIT=1
+```
+
+**三态可区分**（硬规则 3）：`nserve=0` ⇒ `no-running-serve-instance`；`nserve=1 nderived=0` ⇒ `no-derivable-serve-address`；`nserve=1 nderived=1` 但连不上 ⇒ `no-reachable-serve-address`（第三条由夹具单测同样覆盖）。每个候选都带 `pid` + `addr` + `argv`（派生来源）+ `cause`，⛔ 无 `addr=` 空、无无成因行。
+**runner 自身也在候选里**（gate 以 `sh -c` 跑判据 ⇒ 其 cwd == `$root` 且 cmdline 含判据文本）——上表 `pid=… argv=argv-no-serve-subcommand cause=carrier-pid-mismatch` 那行就是它；它**不计入 `nserve`**，这正是 `no-running-serve-instance` 在 gate 路径上仍然可达（不被自身进程抹掉）的原因。
+
+### AC3 —— 正控制：修订后的判据在**运行中的生产实例**上为真
+
+```
+$ cd /data/home/yale/work/quay && sh -c "$(cat /tmp/ac291/stored-criterion.sh)"   # cwd = 仓库根 = 生产实例 cwd
+EXIT=0
+stderr: AC-291 candidate readings (cwd=/data/home/yale/work/quay, nserve=1, ncand=2, nderived=1):
+  ; pid=1449431 addr=127.0.0.1:15147 argv=argv-port-kernel-assigned cause=fetch-answered
+  ; pid=1594202 addr=<none> argv=argv-no-serve-subcommand cause=carrier-pid-mismatch
+stdout: OK -- /live: default nav region carries "Live" and <title>="quay — Live — loop activity"; under Cookie: lang=zh the response is <html lang=zh>, that English nav label is gone from the nav region, and this page's own <title> became "quay — 实时 — 循环活动"
+```
+
+四条断言各自独立复算（对生产端口 `127.0.0.1:15147` 的两条响应体直读，`.quay/ac291-four-assertions.mjs`）：
+
+```
+(1) en nav region: "Live" count = 2        (>=1 required)
+(2) zh response contains <html lang="zh": true
+(3) zh nav region: "Live" count = 0        (0 required)
+(4) en title = "<title>quay — Live — loop activity</title>"
+    zh title = "<title>quay — 实时 — 循环活动</title>"   titles differ: true
+```
+
+同时 `node packages/quay/bin/quay.js goal gate AC-291 --root /data/home/yale/work/quay` ⇒ `exit 0`（`actor: goal-cli`）。修订前同一命令在生产上是 **fail**：`verdict: fail — CAUSE=en-fetch-failed -- GET http://127.0.0.1:0/live returned nothing (addr=127.0.0.1:0)`（同轮 dry-run 重测 `2026-09-23T14:25:35.236Z`，`verdict: fail`；台账另有 `14:26:03.814Z` actor=goal-cli 的 fail 一条，同一成因）。
+
+### AC4 —— 两种部署形态（各对**真实例**，非夹具；夹具单测同覆盖）
+
+```
+shape 2（启动器默认 --port 0）: cmdline `… serve --host 127.0.0.1 --port 0`；carrier web = 127.0.0.1:6409
+  ⇒ pid=1634432 addr=127.0.0.1:6409 argv=argv-port-kernel-assigned cause=fetch-answered   CRITERION_EXIT=0
+shape 1a（显式 --port 8391）: cmdline `… serve --host 127.0.0.1 --port 8391`；carrier web = 127.0.0.1:8391
+  ⇒ pid=1642585 addr=127.0.0.1:8391 argv=argv-explicit-port cause=fetch-answered           CRITERION_EXIT=0
+shape 1b（同一活实例，**删掉载体**）: carrier: absent
+  ⇒ pid=1642585 addr=127.0.0.1:8391 argv=argv-explicit-port cause=fetch-answered           CRITERION_EXIT=0
+```
+
+shape 1b 是关键：载体不存在时仍派生出 8391 ⇒ 该形态确实走 argv 而非载体；shape 2 的 `--port 0` 被 `argv-port-kernel-assigned` 拒绝后由载体给出真实端口。⛔ 本机当前端口未写进任何受控文件（只在未跟踪 evidence 里）。
+
+### AC5 —— 不回归 + 作用域逐文件枚举
+
+① scoped 门：`bash scripts/test.sh --for-task gap-ac291-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **exit 0**（13/13 单测通过；`Merge branch 'develop'` 之后跑的）。scoped-gate 缓存已写：`developSha=8a3c9ccbf7b5418c5cd8b01e36d770cda25d5978`。
+
+② 家族计数（`grep -F -c "grep -oE -- '--host [^ ]+ --port [0-9]+'"`；before = 本任务 fork 点 `bed012a86`）：
+
+```
+file (goals/)                 before  after
+AC-179                           1      1
+AC-289                           1      1
+AC-291                           1      0   <== 唯一变化
+AC-292                           1      1
+AC-293                           1      1
+AC-294                           1      1
+AC-295                           1      1
+AC-296                           1      1
+AC-298                           1      1
+AC-299                           1      1
+AC-300                           1      1
+AC-301                           1      1
+AC-302                           1      1
+AC-303                           1      1
+TOTAL files with the literal    14     13
+```
+
+- 本任务只动 AC-291 那一格（1→0），其余 13 个文件计数**一字未动**。
+- ⚠️ 与立案轮（Proposal/AC5 写的 **17**）的差：立案后同族 **AC-288 / AC-290 / AC-297** 的重锚已先后落地（`git log develop -- goals/`：`51ad3c709` / `ffc11ee98` / `c7615c52e`），故 fork 点基线已是 14。按 AC5 自己的口径（「若同族在飞任务已落地，本条判据是逐文件差量，不是绝对值」）以逐文件差量为准。
+
+### AC6 —— 新指纹落账（生产台账 `.quay/gate-events.jsonl`，`item_id=AC-291` 末三条）
+
+```
+{"ts":"2026-09-23T14:29:49.013Z","gate":"goal","actor":"goal-cli","verdict":"pass","criterionHash":"(absent)","reason":"acceptance passed (exit 0)"}
+{"ts":"2026-09-23T14:29:52.196Z","gate":"goal","actor":"goal-amend","verdict":"pass","criterionHash":"f455d4534f8067e9","reason":"acceptance passed (exit 0)"}
+```
+
+最后一条 = `verdict:"pass"` 且 `payload.criterionHash = f455d4534f8067e9 ≠ 848bfb6418f2a892`（修订前指纹）✅；`actor:"goal-cli"` 的 pass 事件紧随其前（DoD 第 1/2 条的 actor+verdict）。
+**两条读数都不是手写的**：`goal-cli` 那条由 `quay goal gate AC-291` 产出；`goal-amend` 那条由 goal 机制自己的**有界轮转**（`sweepFrozen({budget:1})`，同一方法 `goal check --stale-pass --sweep` 调用）产出——它把 AC-291 排在第一位是因为**修订优先**（上一条轮转 verdict 的 hash 与当前判据不符）。⛔ 未手写任何 ledger 行。
+
+### 负控制留痕之外的两条自检
+
+- `anti-drift-touches-check.ts --task gap-ac291-… --worktree <worktree> --merge-target develop` ⇒ `ANTI-DRIFT OK: 1 actual file(s), all within declared Touches`。
+- 本任务 Touches 三条声明与实际 delta 一致（分支对 develop 的 delta = 新单测一个文件；goal 文件已随 doc 同步在 develop 上，故不在 delta 内）。
