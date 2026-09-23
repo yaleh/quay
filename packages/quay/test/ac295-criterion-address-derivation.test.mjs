@@ -550,3 +550,24 @@ test("the eleven pre-amendment CAUSE branches are present and the count is uncha
     );
   }
 });
+
+// ── ⑥ the WHOLE criterion parses, not just the extracted block ───────────────────────────────────
+
+test("the whole stored criterion is shell-parseable (sh -n), not just the derivation block", () => {
+  // The tests above extract ONLY the block between the two markers, so a defect anywhere else in the
+  // criterion — the WHY comment this amendment added, most of all — is invisible to them. That blind
+  // spot is not hypothetical: this task's FIRST landing wrote the header with a hard newline inside a
+  // `#` comment; the goal store folds on blank lines, so the continuation line came back as CODE and
+  // `quay goal gate AC-295` died with `/bin/sh: 2: Syntax error: ")" unexpected` (exit 2) while every
+  // block-scoped test below stayed green. `sh -n` parses the whole thing without running it, which is
+  // exactly the missing reading: it cannot tell a working criterion from a broken one, but it does
+  // not silently accept a criterion no shell can even read.
+  const r = spawnSync("/bin/sh", ["-n"], { input: criterionText(), encoding: "utf8" });
+  assert.equal(
+    r.status,
+    0,
+    `sh -n rejected the stored criterion (exit ${r.status}): ${r.stderr}` +
+      "\nA comment line split across a HARD newline parses as code, not as a comment — the goal " +
+      "writer folds on blank lines, so every '#' comment must be ONE logical line.",
+  );
+});
