@@ -19,6 +19,32 @@
 
 import type { Task } from "../abi.ts";
 
-export interface GateVerdict { ok: boolean; reason: string; }
+/**
+ * A gate verdict — THREE states, ⛔ never a boolean
+ * (gap-goal-gate-verdict-single-mapping-not-evaluated).
+ *
+ * "not-evaluated" is a DISTINCT value from "fail": "this was not measured" must never wear the
+ * same output shape as "this is false" (hard rule 3b). Before this type existed, two of the three
+ * GateEvent write points in this repo mapped the acceptance runner's result with the binary
+ * `ok ? "pass" : "fail"` — so a criterion that TIMED OUT, failed to spawn, or could not be run at
+ * all (exit 126/127) was recorded as a claim that the criterion was FALSE. On the live
+ * claudecodeui ledger that was 61 timeouts + ~370 exit-127 events (criteria whose scripts no
+ * longer exist) among 8185 `fail`s — indistinguishable from a criterion that genuinely said no.
+ */
+export type GateVerdictKind = "pass" | "fail" | "not-evaluated";
+
+export interface GateVerdict {
+  ok: boolean;
+  reason: string;
+  /**
+   * The 3-valued verdict this check reached, when the check can produce one. A check shape that
+   * only ever has a boolean answer (`taskCheck` — "are all ACs ticked?" — is genuinely binary, it
+   * has no third answer to give) leaves this unset, and the engine's single mapping
+   * (`verdictFromGateCheck`) falls back to `ok → pass/fail`.
+   * ⛔ Optional rather than required so existing boolean-only checkers need no change; the point is
+   * that a check which CAN report "not evaluated" cannot have that signal dropped at the write site.
+   */
+  kind?: GateVerdictKind;
+}
 export interface GateDefinition { description?: string; onPass?: string; onFail?: string; check?: (task: Task, client: unknown) => Promise<GateVerdict>; }
 export type GateFn = (task: Task, client: unknown) => Promise<GateVerdict>;

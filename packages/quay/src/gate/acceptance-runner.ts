@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { shQuote } from "./config/utils.ts";
+import type { GateVerdictKind } from "./types.ts";
 
 export interface AcceptanceResult {
   ok: boolean;
@@ -31,6 +32,12 @@ export interface RunAcceptanceArgs {
   cwd: string;
   /** kill deadline in ms (SIGKILL on expiry) */
   timeoutMs?: number;
+  /** DIR-046-C's knob DISCOVERABILITY, per caller path: the text appended to a timeout `reason`
+   *  naming what to raise. ⛔ The default (gates.yml / `--timeout`) is the TASK-gate wording; a
+   *  GOAL caller must pass its own, because the goal paths read neither of those — the
+   *  2026-09-23 defect was exactly a reason telling a goal reader to raise a gates.yml key that
+   *  path never consults (hard rule 5b: the advice, not just the mapping, is per-path). */
+  timeoutKnob?: string;
   /** DIR-103-C: per-provider `acceptance_env` file path (resolved absolute).
    *  When set, the runner dot-sources this file before the acceptance command;
    *  missing file fails closed pre-execution. Undefined means no env file. */
@@ -38,6 +45,127 @@ export interface RunAcceptanceArgs {
   /** Optional gate label for the cost ledger (`name`); default: the command's
    *  first script basename, else "acceptance" (see gateCostName). */
   name?: string;
+}
+
+// ── the SINGLE verdict mapping (gap-goal-gate-verdict-single-mapping-not-evaluated) ──────────────
+//
+// Every GateEvent verdict in packages/quay/src and packages/quay-native/src is produced by ONE of
+// the two functions below — ⛔ no write point hand-rolls `ok ? "pass" : "fail"` any more. That is
+// the mechanism, not a style preference: an inline binary ternary at a write site DROPS the
+// not-evaluated signal wherever a caller has one, and it does so silently (the event looks exactly
+// like a real "false"). The live evidence that this matters was 61 timeouts + ~370 exit-127 events
+// recorded as `fail` on one workspace's ledger.
+
+/** Why a criterion was NOT evaluated. Enumerated so a reader can act: `timeout` names a knob to
+ *  turn, `not-runnable` a broken criterion, `spawn` a broken instrument. */
+export type NotEvaluatedCause =
+  /** the criterion itself exited 3 — this repo's "I cannot evaluate this HERE" convention */
+  | "declared"
+  /** killed at the deadline (raise the knob named in `reason`) */
+  | "timeout"
+  /** the runner could not spawn a shell at all */
+  | "spawn"
+  /** exit 126 / 127 — the criterion's own command could not be run (not found / not executable) */
+  | "not-runnable";
+
+/** The default criterion deadline when neither the record nor the environment names one. */
+export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 60_000;
+
+/** exit 126 (found, not executable) / 127 (not found): the criterion never got to state anything. */
+const NOT_RUNNABLE_EXIT_CODES = new Set([126, 127]);
+
+export interface AcceptanceVerdict {
+  verdict: GateVerdictKind;
+  /** the cause — non-null exactly when `verdict === "not-evaluated"` */
+  cause: NotEvaluatedCause | null;
+  /** The reason to RECORD. For a not-evaluated verdict it is PREFIXED with the cause token
+   *  (`not-evaluated (timeout): …`) so the cause travels with the reason a reader greps for —
+   *  ⛔ not only in a sibling field a `grep not-runnable .quay/gate-events.jsonl` would miss. */
+  reason: string;
+}
+
+/**
+ * Map a REAL child-process outcome to a 3-valued verdict. THE single mapping — the goal sweep,
+ * `quay goal gate`, the MCP `goal_gate` tool and the task acceptance gate all call this (or
+ * `verdictFromGateCheck`) rather than re-deriving a verdict from `ok`.
+ *
+ * ⛔ Order matters. `timedOut` is checked before `code === null`, because a timeout ALSO reports
+ * `code === null` (SIGKILL) — reading it as a spawn failure would misname the knob to turn.
+ */
+export function verdictFromAcceptance(r: AcceptanceResult): AcceptanceVerdict {
+  if (r.ok) return { verdict: "pass", cause: null, reason: r.reason };
+  const cause: NotEvaluatedCause | null = r.timedOut
+    ? "timeout"
+    : r.code === null
+      ? "spawn"
+      : NOT_RUNNABLE_EXIT_CODES.has(r.code)
+        ? "not-runnable"
+        : r.code === 3
+          ? "declared"
+          : null;
+  if (cause === null) return { verdict: "fail", cause: null, reason: r.reason };
+  return {
+    verdict: "not-evaluated",
+    cause,
+    reason: `not-evaluated (${cause}): ${r.reason}`.slice(0, FAILURE_REASON_MAX_CHARS),
+  };
+}
+
+/**
+ * The mapping for a gate CHECK's result: either the check already resolved its 3-valued verdict
+ * (`kind` — the acceptance gate does, via `verdictFromAcceptance`) or it is a boolean-only check
+ * (`taskCheck`-shaped: "are all ACs ticked?" has no third answer to give, so `ok → pass/fail` is
+ * the COMPLETE mapping for it, ⛔ not a conflation).
+ */
+export function verdictFromGateCheck(r: { ok: boolean; kind?: GateVerdictKind }): GateVerdictKind {
+  if (r.kind !== undefined) return r.kind;
+  return r.ok ? "pass" : "fail";
+}
+
+/** The env knob a caller with no record-level declaration can turn. Named once so the reason text
+ *  and the resolver cannot drift apart. */
+export const ACCEPTANCE_TIMEOUT_ENV = "QUAY_ACCEPTANCE_TIMEOUT_MS";
+
+/** A resolved deadline AND where it came from — the source is what makes the timeout `reason`
+ *  name a knob that actually exists on the caller's path. */
+export interface AcceptanceTimeout {
+  timeoutMs: number;
+  source: "record" | "env" | "default";
+}
+
+/**
+ * Resolve a GOAL criterion's deadline: the record's own `timeoutMs` > `QUAY_ACCEPTANCE_TIMEOUT_MS`
+ * > the default.
+ *
+ * ⛔ A record value that is not a finite positive number is IGNORED, never coerced: `spawnSync`
+ * treats `timeout: NaN` as "no deadline", so a typo in a record would silently DISABLE the guard
+ * rather than fall back to it (hard rule 3b — a value nobody can read must not become a value that
+ * means something else).
+ */
+export function resolveAcceptanceTimeout(
+  recordTimeoutMs?: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): AcceptanceTimeout {
+  if (typeof recordTimeoutMs === "number" && Number.isFinite(recordTimeoutMs) && recordTimeoutMs > 0) {
+    return { timeoutMs: recordTimeoutMs, source: "record" };
+  }
+  const raw = env[ACCEPTANCE_TIMEOUT_ENV];
+  const n = raw === undefined ? NaN : Number(String(raw).trim());
+  if (Number.isFinite(n) && n > 0) return { timeoutMs: n, source: "env" };
+  return { timeoutMs: DEFAULT_ACCEPTANCE_TIMEOUT_MS, source: "default" };
+}
+
+/** The hint appended to a TIMEOUT reason for a resolved deadline — ⛔ names only knobs THIS path
+ *  reads (see `RunAcceptanceArgs.timeoutKnob`). */
+export function timeoutKnobHint(t: AcceptanceTimeout): string {
+  switch (t.source) {
+    case "record":
+      return "raise this record's `timeoutMs` (the deadline in force)";
+    case "env":
+      return `raise ${ACCEPTANCE_TIMEOUT_ENV}`;
+    default:
+      return `set the record's \`timeoutMs\` or ${ACCEPTANCE_TIMEOUT_ENV}`;
+  }
 }
 
 // ── gate cost ledger (gap-no-criterion-records-its-own-cost-checker-cost-jsonl AC1) ───────────────────
@@ -153,7 +281,7 @@ export function withFailureOutput(
  * exports are visible to the acceptance command, and the remaining environment
  * is inherited from the invoking process.
  */
-export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name }: RunAcceptanceArgs): AcceptanceResult {
+export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name, timeoutKnob }: RunAcceptanceArgs): AcceptanceResult {
   // DIR-103-C: fail-closed BEFORE execution when envFile is set but missing.
   if (envFile !== undefined && !fs.existsSync(envFile)) {
     return {
@@ -196,7 +324,9 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name }
       // DIR-046-C: name the actual knob to raise, not just the fact of the
       // timeout — this is the exact discoverability gap session 8b74052c hit
       // (the user spent ~15min grepping installed source for the env var).
-      reason: `acceptance timed out after ${timeoutMs}ms (killed) — raise gates.yml timeoutMs / --timeout`,
+      // ⛔ `timeoutKnob` is per-CALLER-PATH: the default wording is the task
+      // gate's, and a goal caller passes its own (see the field's doc comment).
+      reason: `acceptance timed out after ${timeoutMs}ms (killed) — ${timeoutKnob ?? "raise gates.yml timeoutMs / --timeout"}`,
     };
   }
   // Any other spawn error (e.g. bad cwd / unrunnable shell).

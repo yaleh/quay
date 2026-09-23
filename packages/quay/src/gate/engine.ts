@@ -10,6 +10,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveGate } from "./registry.ts";
+import { verdictFromGateCheck } from "./acceptance-runner.ts";
+import type { GateVerdictKind } from "./types.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import type { Task } from "../abi.ts";
 
@@ -31,7 +33,11 @@ function load1(): number {
     return 0;
   }
 }
-function recordGateCost(opts: { root: string; name: string; ms: number; verdict: "pass" | "fail" }): void {
+// `verdict` is the gate's THREE-state outcome — the same vocabulary the ledger's own writer
+// declares (`plugin/scripts/checker-cost.ts`'s `CheckerVerdict`), so a gate that could not
+// evaluate its criterion is not recorded as a cost row claiming a `fail`
+// (gap-goal-gate-verdict-single-mapping-not-evaluated).
+function recordGateCost(opts: { root: string; name: string; ms: number; verdict: GateVerdictKind }): void {
   const file = path.join(opts.root, ".quay", "checker-cost.jsonl");
   const rec = { name: opts.name, ms: opts.ms, n: 1, load: load1(), at: new Date().toISOString(), verdict: opts.verdict };
   try {
@@ -97,9 +103,16 @@ export async function runGate({ client, id, gate = "dod", logPath, actor = "quay
   // lifecycle/driver unit paths, most tests) skip the write — no synthetic rows pollute the real
   // .quay/checker-cost.jsonl during the suite.
   const t0 = Date.now();
-  const { ok, reason } = await fn(task, client);
+  const r = await fn(task, client);
+  // ⛔ ONE mapping, never an inline `ok ? "pass" : "fail"` (gap-goal-gate-verdict-single-mapping-
+  // not-evaluated): a check that resolved a 3-valued verdict (the acceptance gate does, via
+  // verdictFromAcceptance) must not have its "not-evaluated" flattened into "fail" here. For a
+  // boolean-only check (taskCheck-shaped) the fallback IS the complete mapping — reported so,
+  // never silently assumed.
+  const verdict = verdictFromGateCheck(r);
+  const { ok, reason } = r;
   if (workspaceRoot) {
-    recordGateCost({ root: workspaceRoot, name: `gate:${gate}:${id}`, ms: Date.now() - t0, verdict: ok ? "pass" : "fail" });
+    recordGateCost({ root: workspaceRoot, name: `gate:${gate}:${id}`, ms: Date.now() - t0, verdict });
   }
   const event: GateEvent = {
     id: randomUUID(),
@@ -107,7 +120,7 @@ export async function runGate({ client, id, gate = "dod", logPath, actor = "quay
     pipeline_id: id,
     gate,
     actor,
-    verdict: ok ? "pass" : "fail",
+    verdict,
     timestamp: new Date().toISOString(),
     payload: { reason },
   };
