@@ -25,6 +25,13 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// The generator's path — the sibling module's SINGLE exported naming point for this entity
+// (gap-quay-init-sh-no-single-naming-point). Both spawn sites below used to spell
+// `path.join(root, "plugin", "scripts", "quay-init.sh")` independently, i.e. this file carried two
+// more naming points of the same name the ratchet carried two of (硬规则 5b: the fix is the shared
+// source, not a second correct-looking copy — a copy that agrees TODAY drifts later, and one side
+// would silently keep spawning the old name).
+import { QUAY_INIT_REL } from "./quay-init-closure-ratchet.ts";
 
 // The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`
 // and `goals/` directories admit their descendants.
@@ -94,7 +101,7 @@ export function assertClosure(relPaths: string[]): ClosureAssertionVerdict {
  * Returns null (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits non-zero.
  */
 export function runLaydownPaths(root: string): string[] | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-assertion-"));
   const target = path.join(tmpBase, "target");
@@ -195,7 +202,7 @@ export function reportedItems(report: FailureStateReport): string[] {
  * failure but saw none must not look like "覆盖了失败路径").
  */
 export function runFailureStateReport(root: string): FailureStateReport | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-fail-"));
   const target = path.join(tmpBase, "target");

@@ -81,17 +81,34 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // alongside test-file-baseline.txt — a COMMITTED baseline artifact, not a plugin/scripts/ executable.
 const BASELINE_FILE_REL = "docs/analysis/quay-init-closure-ratchet.baseline.json";
 
+// The generator's repo-root-relative path — THE mechanism-layer naming point for this entity
+// (gap-quay-init-sh-no-single-naming-point). ⛔ Every mechanism-layer site that needs the generator's
+// location derives it from here, never from a second spelling: the file's own comment below already
+// argues that for the LIST (`LAYDOWN_SOURCES` must stay a single exported constant) — this constant
+// closes the same hole one level DOWN, where `LAYDOWN_SOURCES[0]` (the generator, used by the
+// freshness judgment) and the path actually spawned by `runLaydown()` used to be two independent
+// spellings of one name: editing the list changed what `precommit-guard.ts` judged and silently left
+// the spawned path alone. `quay-init-closure-assertion.ts` imports THIS constant for its own two
+// spawn sites (same hole, sibling module).
+// The shape mirrors the product layer's single naming point (`RESOURCE_GATE_REL` + `scriptBasename`,
+// observation.ts): one naming point PER LAYER — ⛔ deliberately not one across layers, because
+// `plugin/scripts/*.ts` and `packages/quay/src/*` do not import each other (the mechanism layer is
+// packaged and shipped independently of the product CLI), so a cross-layer constant would be the
+// layering inversion that split exists to prevent, not a stronger version of this fix.
+export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
+
 // The precise source set that DETERMINES the closed-set laydown output (repo-root-relative paths).
-// quay-init.sh is the generator (its content decides config.yml/.gitignore/.claude/settings.json);
+// The generator (QUAY_INIT_REL above) decides config.yml/.gitignore/.claude/settings.json content;
 // the two templates are laid verbatim; plugin.json is read for the plugin name+version. A change to
 // ANY of these must invalidate the baseline (re-anchor).
 // EXPORTED (gap-closure-ratchet-stale-wire-into-precommit-guard): `precommit-guard.ts` imports this
 // very constant to decide whether a commit touches the laydown source set — the freshness judgment is
 // now ALSO run at the commit moment (④ there), not only at the suite's @static-tier change layer.
 // ⛔ It must stay a single exported constant: a second hand-copied list in the guard would drift and
-// one side would silently stop checking (硬规则 5b).
+// one side would silently stop checking (硬规则 5b). Same rule INSIDE the list: the generator's entry
+// is the `QUAY_INIT_REL` constant above, not a second literal.
 export const LAYDOWN_SOURCES: readonly string[] = [
-  "plugin/scripts/quay-init.sh",
+  QUAY_INIT_REL,
   "plugin/.quay/profiles.yml",
   "plugin/.claude/launch.settings.json",
   "plugin/.claude-plugin/plugin.json",
@@ -171,9 +188,9 @@ export function countTree(dir: string, exclude: ReadonlySet<string> = new Set())
  * whole laydown into the repo — the exact pollution this ratchet exists to prevent). Removed in finally.
  */
 export function runLaydown(root: string, opts: { timeoutMs?: number } = {}): LaydownResult {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) {
-    return { evaluated: false, files: 0, bytes: 0, error: `quay-init.sh not found at ${quayInit}` };
+    return { evaluated: false, files: 0, bytes: 0, error: `${QUAY_INIT_REL} not found at ${quayInit}` };
   }
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-ratchet-"));
   const target = path.join(tmpBase, "target");

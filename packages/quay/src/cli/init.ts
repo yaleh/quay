@@ -3,6 +3,11 @@
 // gap-cli-import-command-migration-into-src. No behavior change.
 
 import { parseFlags } from "./shared.ts";
+// The init help prose + the shipped entry's name: ONE naming point, in cli/help.ts
+// (gap-quay-init-sh-no-single-naming-point). The two renderings of `quay init --help` — this
+// handler's and help.ts's — used to carry byte-identical copies of these sentences, so every edit
+// had to be made twice and the two could drift apart silently.
+import { INIT_BRANCH_MODEL_ONLY_PROSE, INIT_DOC_BRANCH_NO_DEFAULT_PROSE } from "./help.ts";
 import { runInit, printNextSteps } from "../init.ts";
 import {
   ensureDocBranch,
@@ -53,8 +58,7 @@ Flags:
                sharing one branch and one git index. Already off 'develop' => no-op. <name>
                taken by a branch unrelated to 'develop' => REFUSED (exit 1, nothing moved).
                Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
-               default for <name>: it is supplied by the caller (the shipped quay-init.sh
-               resolves --doc-branch-name, then loop.doc_branch, then its own default).
+               ${INIT_DOC_BRANCH_NO_DEFAULT_PROSE}
   --dry-run    Print the generated config to stdout without writing to disk.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
@@ -87,10 +91,7 @@ Description:
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
 
-  Use --branch-model-only when the project is already initialized and you only
-  need the branch model established (the shipped plugin/scripts/quay-init.sh
-  upgrade entry calls this): it never rewrites config, so an existing project's
-  gates: / loop: / routines: survive.
+  ${INIT_BRANCH_MODEL_ONLY_PROSE}
 
   Adding --doc-branch-name to that entry also ESTABLISHES the doc-only work
   branch. 'quay init' REPORTS which branch fills the doc role and never names
@@ -141,11 +142,11 @@ Description:
   const adoptBranchModel = initFlags["adopt-branch-model"] === true;
   const branchModelOnly = initFlags["branch-model-only"] === true;
   // The doc-branch NAME (gap-quay-init-no-doc-branch-bootstrap-…). ⛔ This CLI carries NO default
-  // literal for it: the caller supplies it (`--doc-branch-name <name>`, or the shipped
-  // plugin/scripts/quay-init.sh, which resolves flag → `loop.doc_branch` → its own CLI-parameter
-  // default). An absent name is reported as NOT-EVALUATED rather than silently defaulted here —
-  // inventing a branch name inside this layer is exactly the per-project identity literal
-  // `target-identity-literal-check.ts` fails RED on (`"author"` is deliberately NOT in
+  // literal for it: the caller supplies it (`--doc-branch-name <name>`, or the shipped upgrade
+  // entry — cli/help.ts's `QUAY_INIT_REL` — which resolves flag → `loop.doc_branch` → its own
+  // CLI-parameter default). An absent name is reported as NOT-EVALUATED rather than silently
+  // defaulted here — inventing a branch name inside this layer is exactly the per-project identity
+  // literal `target-identity-literal-check.ts` fails RED on (`"author"` is deliberately NOT in
   // `LEGAL_IDENTITY_VALUES`).
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
@@ -165,7 +166,7 @@ Description:
       if (!result.branchModel.ok && !dryRun) {
         // Fail-closed: a divergent landing baseline without an adoption decision. The report already
         // carries the remedy (`formatBranchModelReport` prints the `remedy:` line), so the caller
-        // (the shipped quay-init.sh upgrade entry) can relay it verbatim. `--dry-run` reports the
+        // (the shipped upgrade entry) can relay it verbatim. `--dry-run` reports the
         // same block but does not fail — a dry run's job is to say what WOULD happen.
         process.exitCode = 1;
         return;
@@ -204,7 +205,7 @@ Description:
       // Runs AFTER the landing baseline was judged (and after a divergence refusal above returned
       // early — never move the main checkout onto a doc branch for a project whose baseline is
       // already refused). Only in the config-free branch-model entry: that is the entry the shipped
-      // upgrade (`plugin/scripts/quay-init.sh` → `ensure_target_branch_model`) drives, and it is the
+      // upgrade (cli/help.ts's `QUAY_INIT_REL` → `ensure_target_branch_model`) drives, and it is the
       // one whose contract is "establish the branch model, touch nothing else" — a `git checkout` of
       // the main checkout is git metadata + the same commit's tree, never a config/content write.
       // Called UNCONDITIONALLY — an absent name is its own reported state (NOT-EVALUATED), never a
