@@ -216,9 +216,12 @@ zh: <html lang="zh"   <title>quay — 仪表盘</title>       nav(首段) … <d
 
 ```
 08:56:48.919Z  fail  goal-cli     （旧文本）
-09:19:01.706Z  pass  goal-cli     （新文本，一次独立真跑）
-09:19:13.493Z  pass  goal-amend   payload.criterionHash=4eb0f39c780536d6   ← 尾事件 = 新 hash 的 pass
+09:18:26.625Z  fail  goal-cli     （快照带过来的旧文本轮次）
+09:26:06.318Z  pass  goal-cli     （新文本，一次独立真跑：本 checkout 的活实例）
+09:26:07.790Z  pass  goal-amend   payload.criterionHash=4eb0f39c780536d6   ← 尾事件 = 新 hash 的 pass
 ```
+
+（本轮该台账被快照覆盖过两次 —— 见下方 ⚠️；09:26 这对事件在写入后**立刻**转存到 `.quay/ac289-ledger-evidence.txt`，是本条可复算的载体：`node packages/quay/bin/quay.js goal gate AC-289` 然后 `goal check --stale-pass --sweep`。）
 
 轮转的**修订优先**路径实测生效：`check --stale-pass --sweep` 把 AC-289 排在**第一个**跑（226ms，pass）——因为该 AC 在台账里已有一条**旧 hash** 的轮转事件（`08:21:12.959Z goal-sweep hash=d5569285de4b0f26`），`amendedIds` 据此给它优先权（`goal-store.ts:1930-1966`）。`check --stale-pass` 现读数：`AC-289 ∈ verifiedFresh`，⛔ 不在 `failing`、不在 `staleUnverified`。
 
