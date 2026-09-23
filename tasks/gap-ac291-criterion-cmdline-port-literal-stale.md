@@ -223,7 +223,7 @@ shape 1b 是关键：载体不存在时仍派生出 8391 ⇒ 该形态确实走 
 
 ### AC5 —— 不回归 + 作用域逐文件枚举
 
-① scoped 门：`bash scripts/test.sh --for-task gap-ac291-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **exit 0**（13/13 单测通过；`Merge branch 'develop'` 之后跑的）。scoped-gate 缓存已写：`developSha=8a3c9ccbf7b5418c5cd8b01e36d770cda25d5978`。
+① scoped 门：`bash scripts/test.sh --for-task gap-ac291-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **exit 0**（13/13 单测通过）。跑了**两次**：第一次在 `Merge branch 'develop'`（`936522f87`）之后（`developSha=8a3c9ccbf7b5418c5cd8b01e36d770cda25d5978`），随后 develop 又前进到 `291c5121e`（本任务的 AC 勾选落库 + 同族 AC-293 的 goal 修订，都是 doc 面），于是**再 merge 一次 develop**（`edbef2bb9`）并**重跑**同一命令 ⇒ 仍 exit 0（13/13）。scoped-gate 缓存按最终 tip 落：`developSha=291c5121e7411ee5cff6213367f7741ed4e531ac`。
 
 ② 家族计数（`grep -F -c "grep -oE -- '--host [^ ]+ --port [0-9]+'"`；before = 本任务 fork 点 `bed012a86`）：
 
