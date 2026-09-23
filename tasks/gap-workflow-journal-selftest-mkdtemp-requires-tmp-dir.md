@@ -52,10 +52,10 @@ fs.mkdirSync(tmpParent, { recursive: true });
 
 ## AC
 
-- [ ] `plugin/scripts/workflow-journal.ts` 的 `selftest()` 里，`mkdtempSync` 之前有一行创建 `tmp` 父目录（按**位置**判定：该 `mkdirSync` 必须在同一个函数内、位于那一次 `mkdtempSync` 之前；⛔ 不按关键词判定，别处出现 `mkdirSync` 不算）。
-- [ ] 同一处修复在**两个镜像**上都存在且逐字节相同：`plugin/scripts/workflow-journal.ts` 与 `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`（引用既有 `mirror-pair-drift-check`，⛔ 不新造检查器）。
-- [ ] **负控（RED→GREEN，一条命令可查）**：把 `<worktree>/tmp/` 整个移走，`node --test plugin/test/workflow-journal.test.mjs` 仍 **exit 0**（12 pass / 0 fail）。移走前红、移走后绿才成立；若移走后仍红 ⇒ 该 AC 不成立，说明还有第二个 `<cwd>/tmp` 依赖没被处理。
-- [ ] `bash scripts/test.sh --for-task gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir` 退出 0，且执行 ≥1 个测试文件。
+- [x] `plugin/scripts/workflow-journal.ts` 的 `selftest()` 里，`mkdtempSync` 之前有一行创建 `tmp` 父目录（按**位置**判定：该 `mkdirSync` 必须在同一个函数内、位于那一次 `mkdtempSync` 之前；⛔ 不按关键词判定，别处出现 `mkdirSync` 不算）。
+- [x] 同一处修复在**两个镜像**上都存在且逐字节相同：`plugin/scripts/workflow-journal.ts` 与 `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`（引用既有 `mirror-pair-drift-check`，⛔ 不新造检查器）。
+- [x] **负控（RED→GREEN，一条命令可查）**：把 `<worktree>/tmp/` 整个移走，`node --test plugin/test/workflow-journal.test.mjs` 仍 **exit 0**（12 pass / 0 fail）。移走前红、移走后绿才成立；若移走后仍红 ⇒ 该 AC 不成立，说明还有第二个 `<cwd>/tmp` 依赖没被处理。
+- [x] `bash scripts/test.sh --for-task gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir` 退出 0，且执行 ≥1 个测试文件。
 
 ## DoD
 
@@ -66,3 +66,33 @@ fs.mkdirSync(tmpParent, { recursive: true });
 - plugin/scripts/workflow-journal.ts
 - experiments/quay-perpetual-stream/scripts/workflow-journal.ts
 - tasks/gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir.md
+
+## Evidence — 本轮（2026-09-24）· 冷载体 RED→GREEN 复验 + 兄弟扫尾
+
+**改动**：`plugin/scripts/workflow-journal.ts` `selftest()` 内，`mkdtempSync` 之前加
+`const tmpParent = path.join(savedCwd, "tmp"); fs.mkdirSync(tmpParent, { recursive: true });`
+（与已修的 `stage-receipt.ts` 同形）。
+
+**兄弟扫尾（硬规则 5b）**：全仓扫 `mkdtempSync(path.join(<x>, "tmp", ...))` 只剩 2 处 —— `run-identity.ts:390`（已自建父目录）与 `workflow-journal.ts:472`（本任务修掉）；`stage-receipt.ts` 已用 `tmpParent` 变量形式修过。**无第三处遗漏。**
+
+**AC2（镜像）**：`experiments/quay-perpetual-stream/scripts/workflow-journal.ts` 是指向 `../../../plugin/scripts/workflow-journal.ts` 的 **symlink** ⇒ 一处改动即覆盖两镜像，无法漂移；scoped 门内 `mirror parity: workflow-journal.ts byte-identical across experiments/plugin` 绿。⛔ 未新造检查器。
+
+**AC1（按位置）**：`plugin/scripts/workflow-journal.ts` 实测行号 —— `467: export function selftest()` / `476: fs.mkdirSync(tmpParent, { recursive: true })` / `477: const fixtureDir = fs.mkdtempSync(path.join(tmpParent, ...))`。同函数、严格位于该次 `mkdtempSync` 之前。
+
+**AC3 负控（同一条断言，两个方向）**，实测于**全新 `git worktree add`（`tmp/` 结构上不存在）**：
+- 修复前（develop 版文件）：12 tests / **11 pass / 1 fail**，exit 1，`ENOENT … mkdtemp '<wt>/tmp/workflow-journal-selftest-XXXXXX'`
+- 修复后：**12 pass / 0 fail**，exit 0
+- 再把 `<wt>/tmp` 整个 `mv` 走 ⇒ 仍 **12 pass / 0 fail**，exit 0
+
+**AC4**：`bash scripts/test.sh --for-task gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir --allow-thin` ⇒ **exit 0**，执行 `plugin/test/workflow-journal.test.mjs`（12 tests / 12 pass / 0 fail）。合并当前 develop tip `24f59dd2` 后再跑一次仍 exit 0。scoped-gate cache 已写（key `24f59dd2`）。
+
+**DoD 冷载体读数**：
+① 新 worktree 绝对路径 = `/data/home/yale/work/cold-carrier-wj-selftest`（`git worktree add --detach` @ 本任务 merge tip `7da4ecd35`；刻意建在 `quay-worktrees/` **之外**，不污染"在飞任务数"读数）。
+② `ls -d <wt>/tmp` 两次读数：
+- **T0 = `03:42:14.022`**（`rm -rf` 后）⇒ `No such file or directory` —— **不存在**
+- 跑 `bash scripts/test.sh plugin/test/workflow-journal.test.mjs plugin/test/stage-receipt.test.mjs`（`workflow-journal` **排在最先**，即会红的那个顺序）⇒ 20 tests / **20 pass / 0 fail**，exit 0
+- **T1 = `03:42:31.608`**（跑完）⇒ `tmp` 存在，`mtime = 03:42:31.581`，**落在 [T0, T1] 窗口内**
+
+⚠️ **逐字读 DoD 的「自始至终不存在」在修复后不可能成立**（修复本身就 `mkdirSync` 出 `tmp/`，与 `run-identity`/`stage-receipt` 同款行为）。载荷读数是 **T0 时不存在** —— 那才是让缺陷可观测的冷启动条件；T1 后的存在**由修复产生**，已用 `mtime` 落在运行窗口内证明它不是"被谁中途建了"的既有目录。
+
+⚠️ **未跑 `scripts/test.sh` 的默认全 glob**：worker 合同明确「不跑 suite（fan-in 负责）」，且本机正与 peer worker 的 suite 并发（load ≈ 35/128，台账记有多个负载敏感 flake 家族）。故冷载体冷跑只覆盖 DoD 点名的两个文件（仍是冷 `scripts/test.sh` 调用，且把会红的顺序放最前）。全 glob 冷跑由 fan-in 在合并后的同一 worktree 上给出 —— 本 worktree 退出前已移除 `tmp/`，使那次全量 suite 成为真正的冷启动跑。
