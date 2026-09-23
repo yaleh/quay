@@ -183,10 +183,12 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
                     packages/quay/src/gate/config/loader.ts's own doc comment) is a
                     lower-precedence third option.
   --timeout <ms>    DIR-046: override the acceptance runner's kill deadline in milliseconds
-                    (default 60000). Also honored by 'complete'/'promote'/'run'. A per-gate
-                    'timeoutMs' field in that same workspace gates config is a lower-precedence
-                    workspace-data alternative — a TIMEOUT failure's reason names both knobs
-                    ("raise the gates config's timeoutMs / --timeout").
+                    (default 60000). Also honored by 'complete'/'promote'/'run', and by
+                    'goal gate' (see "quay goal --help" — there it is the only per-invocation
+                    knob, since a goal criterion has no per-gate entry to read a 'timeoutMs'
+                    from). A per-gate 'timeoutMs' field in that same workspace gates config is a
+                    lower-precedence workspace-data alternative — a TIMEOUT failure's reason
+                    names both knobs ("raise the gates config's timeoutMs / --timeout").
 
 // Environment contract — when the acceptance gate spawns a command:
   The runner spawns 'sh -c' (a clean shell — no .bashrc/.profile is sourced).
@@ -360,6 +362,7 @@ Flags:
   --list            With 'gate' (no task id): list registered gate names.
   --cwd <dir>       Run the acceptance command in <dir> instead of the workspace root.
   --timeout <ms>    Override the acceptance runner's kill deadline in ms (default 60000).
+                    'goal gate' accepts the same flag (same precedence: flag > env > default).
   --dry-run         Execute task.extra.acceptance with the same cwd/timeout/env as a real
                     gate run, print stdout/stderr + exit code, but do NOT append a GateEvent
                     or mutate task status. Short form: -n. Only valid with the default
@@ -390,7 +393,7 @@ Usage:
   quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
-  quay goal gate <id> [--dry-run] [--json] [--root <path>]
+  quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
   quay goal check [--staleness|--achieved-failing|--stale-pass [--sweep]|--reverify-scope] [--json] [--root <path>]
   quay goal batch --json '<array-of-records>' [--root <path>]
 
@@ -398,6 +401,15 @@ Usage:
   gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
                         GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
                         2 = usage (no such record / bad args). An EMPTY criterion fails closed.
+                        The kill deadline is resolved from the SAME source the task gates use
+                        (resolveAcceptanceTimeoutMs): --timeout <ms> > QUAY_ACCEPTANCE_TIMEOUT_MS >
+                        60000. A per-gate 'timeoutMs' in the workspace gates config does NOT reach
+                        a goal criterion — there is no goal-gate entry to carry it. ⛔ A criterion
+                        that legitimately needs longer is KILLED at the deadline and recorded as a
+                        fail, so raise the deadline here rather than accepting the verdict. The
+                        printed JSON carries the 'timeoutMs' that governed it.
+                        ⚠️ The criterion runs in the GIT ROOT, not the cwd the task gates would use:
+                        QUAY_ACCEPTANCE_CWD does not move it (it is a goal-criterion invariant).
   check                 Read the goal mechanism's own three-state readings, in the goal store's
                         single implementation:
                           --staleness         which GOALs' 'achieved' may be outdated (I3) + divergences (I4)
@@ -420,6 +432,9 @@ Options:
                         signal on a transition back into 'active'). Implies the store dialect.
   --reason <why>        write: why. Implies the store dialect.
   --dry-run             write/gate: execute but persist nothing.
+  --timeout <ms>        gate: override the criterion's kill deadline in milliseconds. Precedence:
+                        --timeout > QUAY_ACCEPTANCE_TIMEOUT_MS > 60000. Same knob (and same
+                        semantics) as the task gate's own --timeout — see the top-level section.
   --json                Machine-readable output (the store-level verbs always print JSON).
   --root <path>         The workspace root (ABI route) or the goal store's root (store dialect):
                         <root>/goals, <root>/.quay/gate-events.jsonl.

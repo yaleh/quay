@@ -69,6 +69,12 @@ import {
   slugify,
 } from "./frontmatter-store-base.ts";
 import { runAcceptance } from "./gate/acceptance-runner.ts";
+// gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
+// runs takes its kill deadline from here. ⛔ `resolveAcceptanceTimeoutMs`, NOT `resolveRunnerOptions`
+// — the latter also resolves a cwd (preferring `QUAY_ACCEPTANCE_CWD`), and a goal criterion's cwd is
+// the git root by design (see the call sites' own comments); taking the whole options object would
+// silently relocate every criterion the moment that variable was set.
+import { resolveAcceptanceTimeoutMs } from "./gate/config/utils.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
@@ -125,10 +131,23 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 //   ⇒ one full rotation ≈ M × ~1.3s ≈ 106s ≈ 1.8 min of CPU, amortized over the rotation period.
 // With `DEFAULT_SWEEP_MIN_AGE_MS` = 1h the steady-state cost is therefore ≈ M × 1.3s / 1h ≈ 106s
 // per hour (≈3% of one core), and the per-invocation bound is
-//   ≤ min(DEFAULT_SWEEP_BUDGET × criterion-timeout, DEFAULT_SWEEP_WALL_MS)
-// = ≤ min(6 × 60s, 30s) = ≤ 30s — an invocation that exceeds the wall budget stops early and the
-// remaining ACs are picked up by the next invocation (the rotation is resumable from the ledger
-// ALONE: eligibility is "oldest recorded verification first", so there is no cursor to drift).
+//   ≤ min(DEFAULT_SWEEP_BUDGET × T, DEFAULT_SWEEP_WALL_MS + T)
+// where T is the criterion deadline `resolveAcceptanceTimeoutMs()` returned for THIS invocation
+// (pre-set `QUAY_ACCEPTANCE_TIMEOUT_MS` > the gate's own `timeoutMs` field > the sole default
+// `DEFAULT_ACCEPTANCE_TIMEOUT_MS`) — NOT a constant of this file.
+// ⚠️ Two honest corrections to the derivation this comment used to carry:
+//   (a) it read `min(6 × 60s, 30s) = 30s`, silently treating `T` as the literal 60s. `T` is a
+//       resolved value, so the default-value instance must be named as such: under the defaults
+//       (T = 60s, wall = 30s, budget = 6) the bound is ≤ 60s.
+//   (b) `min(budget × T, wallMs)` would be right only if the wall were enforced DURING a criterion.
+//       It is not: the `Date.now() - startedAt > wallMs` guard sits at the TOP of the loop body,
+//       i.e. BETWEEN criteria (read `sweepFrozen`) — so it bounds how many MORE criteria get
+//       STARTED, never how long the one already running may take. Hence `wallMs + T`, not `wallMs`.
+//   ⛔ Raising T therefore raises this bound linearly. That is the configured consequence of the
+//   knob, not a silent one: the same setting that buys a longer single criterion names the cost here.
+// An invocation that trips the wall budget stops early and the remaining ACs are picked up by the
+// next invocation (the rotation is resumable from the ledger ALONE: eligibility is "oldest recorded
+// verification first", so there is no cursor to drift).
 export const SWEEP_ACTOR = "goal-sweep";
 /** The AMENDMENT dry-run's actor — deliberately a DIFFERENT string from `SWEEP_ACTOR`
  *  (gap-ac242-derived-criterion-double-judged-and-amendment-unguarded, defect ②):
@@ -184,7 +203,10 @@ export function criterionFingerprint(criterion: unknown): string {
 export const DEFAULT_SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
 /** Criteria per invocation (the hard cap; the wall budget below can stop it earlier). */
 export const DEFAULT_SWEEP_BUDGET = 6;
-/** Wall-clock cap per invocation — the driver's round must not be stalled by a slow criterion. */
+/** Budget on the wall clock an invocation may accumulate before it stops STARTING criteria — so the
+ *  driver's round is not stalled by an unbounded number of slow criteria. ⚠️ It is checked BETWEEN
+ *  criteria, never during one (see `sweepFrozen` and the header bound): the worst-case wall clock of
+ *  an invocation is therefore `min(budget × T, wallMs + T)`, ⛔ NOT `min(budget × T, wallMs)`. */
 export const DEFAULT_SWEEP_WALL_MS = 30_000;
 /** An AC whose last RECORDED verdict is `fail` becomes eligible again at `minAgeMs / this` — i.e. a
  *  failure is re-checked sooner than a pass. Two reasons, both concrete:
@@ -203,9 +225,14 @@ export const DEFAULT_FAIL_RECHECK_DIVISOR = 6;
  *  the rotation sweeps; 4× the period leaves room for a rotation that is merely behind, while still
  *  being finite. */
 export const DEFAULT_STALE_PASS_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-/** Per-criterion deadline. ⛔ The SAME value `runAcceptance` defaults to — the budget arithmetic
- *  above is only true if these two agree, so it is one literal, not two. */
-export const SWEEP_CRITERION_TIMEOUT_MS = 60_000;
+// ⛔ `SWEEP_CRITERION_TIMEOUT_MS` USED TO LIVE HERE and is deliberately GONE
+// (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). It was a 60_000 literal
+// whose own comment claimed it was "the SAME value `runAcceptance` defaults to ... one literal, not
+// two" — while the repo actually carried FIVE copies, and its presence here is exactly what made the
+// goal path bypass the DIR-046 configuration surface (`QUAY_ACCEPTANCE_TIMEOUT_MS` / gates
+// `timeoutMs` / `--timeout`): the sweep read its own private constant instead of the resolved one.
+// Removing it is the fix, not a cleanup: the sweep now takes the deadline from
+// `resolveAcceptanceTimeoutMs()`, the same call the other three goal entry points use.
 
 /** One `gate:"goal"` ledger row, reduced to the fields a rotation judgment needs.
  *  `criterionHash` = the criterion fingerprint the writer verified (`payload.criterionHash`),
@@ -1742,7 +1769,9 @@ export function createGoalStore(
     try {
       for (const ac of inScope) {
         const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
+        // Resolved deadline (env > gates timeoutMs > default) — ⛔ NOT a private literal, which is
+        // what made this entry point immune to every configuration knob (see the constant's tombstone).
+        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
     } finally {
@@ -1906,8 +1935,10 @@ export function createGoalStore(
    *
    * Eligibility = "last ROTATION verdict older than `minAgeMs`", ordered oldest-first (never-touched
    * first) ⇒ least-recently-verified-first, self-resuming, and bounded: at most `budget` criteria and
-   * at most `wallMs` of wall clock per invocation, with a hard per-criterion deadline of
-   * `SWEEP_CRITERION_TIMEOUT_MS`. ⛔ The rotation NEVER flips a record's status — the same ruling as
+   * at most `wallMs` of wall clock per invocation, with a hard per-criterion deadline from
+   * `resolveAcceptanceTimeoutMs()` (env > gates `timeoutMs` > default — the SAME resolved value the
+   * other three goal entry points use; see the header bound for what a raised value costs).
+   * ⛔ The rotation NEVER flips a record's status — the same ruling as
    * I5 ("⛔ 不反向翻转 achieved→active，激活归人"): it records what it observed and nothing else.
    */
   async function sweepFrozen(
@@ -2000,7 +2031,7 @@ export function createGoalStore(
         }
         const criterion = String(byId.get(id)?.criterion ?? "");
         const t0 = Date.now();
-        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: SWEEP_CRITERION_TIMEOUT_MS });
+        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: resolveAcceptanceTimeoutMs() });
         // ⛔ exit 3 = the criterion itself declared NOT-EVALUATED (this repo's convention). It is
         // recorded AS SUCH: writing `fail` would assert "this is false" about a criterion that said
         // "I cannot evaluate this here" — hard rule 3b, and the very conflation this task is about.
@@ -2367,7 +2398,13 @@ export function createGoalStore(
         }
         const gateRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
         const startedMs = Date.now();
-        const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: 60000 });
+        // Resolved deadline (env > gates timeoutMs > default). ⚠️ This matters more than at the other
+        // three sites: the verdict here decides whether the write is ACCEPTED, so a criterion that
+        // legitimately needs > 60s was being killed and then silently re-read as "ran and failed"
+        // (a timeout IS a definitive fail ⇒ evaluable ⇒ allowed) — the write went through, but the
+        // P10 cost line below reported a `fail` and a ~60s wall for a criterion that had never
+        // actually been evaluated to a verdict.
+        const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: resolveAcceptanceTimeoutMs() });
         const wallMs = Date.now() - startedMs;
         // not-evaluated = the command never ran to a verdict (spawn error); "ran and failed"
         // (exit ≠0) and timeouts are both a definitive "fail" verdict ⇒ evaluable ⇒ allowed.
@@ -3090,6 +3127,23 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       const id = rest[0];
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
       const dryRun = rest.includes("--dry-run");
+      // `--timeout <ms>` (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout): the
+      // per-invocation override, resolved with the SAME "explicit override wins" idiom the task
+      // gates already use (`cli/shared.ts#pinAcceptanceEnv`): the flag PINS the env var, so
+      // `resolveAcceptanceTimeoutMs`'s own precedence (env > gates `timeoutMs` > default) then
+      // yields `--timeout` first without a second, divergent precedence ladder living here.
+      // ⛔ `--timeout` is not in `rest` positionally; it must be consumed (below) so it cannot be
+      // mistaken for the record id.
+      const timeoutIdx = rest.indexOf("--timeout");
+      if (timeoutIdx >= 0) {
+        const raw = rest[timeoutIdx + 1];
+        const ms = Number(raw);
+        if (raw === undefined || !Number.isFinite(ms) || ms <= 0) {
+          console.error(`goal-store: --timeout requires a positive number of milliseconds (got ${JSON.stringify(raw)})`);
+          return 2;
+        }
+        process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(ms);
+      }
       // Criterion execution REUSES the task acceptance-runner shape (SPEC §3) and the gate
       // ledger REUSES the existing GateEvent format (.quay/gate-events.jsonl).
       // (`runAcceptance` is a static import at the top — also used by checkAchievedFailing's I5 bucket.)
@@ -3099,12 +3153,17 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       const criterion = rec.criterion;
       let verdict: string;
       let reason: string;
+      // The deadline THIS invocation actually used — surfaced in the JSON below so a caller can tell
+      // "the criterion timed out" from "the criterion timed out at a deadline I did not intend".
+      // ⛔ Read BEFORE running: `resolveAcceptanceTimeoutMs()` is pure, and resolving it after a
+      // 60s+ wait would report a value the run did not necessarily use if the env changed mid-flight.
+      const timeoutMs = resolveAcceptanceTimeoutMs();
       if (typeof criterion !== "string" || criterion.trim() === "") {
         // AC2 — empty criterion FAILS CLOSED (red), never a silent PASS.
         verdict = "fail";
         reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
       } else {
-        const result = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
+        const result = runAcceptance({ command: criterion, cwd: root, timeoutMs });
         verdict = result.ok ? "pass" : "fail";
         reason = result.reason;
       }
@@ -3124,7 +3183,11 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       // (gap-goal-evidence-cache-should-not-enter-git). The ledger event just appended IS the
       // evidence — writing it into goals/*.md would re-couple the ~42s gate cadence to the tracked
       // file and let a stale reading travel via git (the exact defect this task removes).
-      const out = { id, verdict, reason, timestamp: event.timestamp, dryRun, event };
+      // `timeoutMs` is what governed this verdict — a reading of the RESOLVED deadline at the
+      // production surface. ⛔ Without it, "the default is still 60000 when nothing overrides it" is
+      // only observable by waiting 60 seconds for a kill, which is exactly the kind of
+      // wait-for-the-failure check a test should never have to make.
+      const out = { id, verdict, reason, timeoutMs, timestamp: event.timestamp, dryRun, event };
       process.stdout.write(JSON.stringify(out, null, 2) + "\n");
       return verdict === "pass" ? 0 : 1;
     }
