@@ -147,11 +147,24 @@ function argsFor(base) {
 // stripping exactly this block from the live output reproduces develop's recorded 27caf439… byte for
 // byte, which is what pins the method itself. The other six rows are untouched, which is what the
 // row-per-file shape is for.
+// RE-ANCHORED 2026-09-24 AGAIN, by this row's SECOND mover (gap-quay-init-config-heredoc-leaks-
+// maintainer-comments) — and this one is the interesting kind of second move: the two changes are
+// INDEPENDENT and OVERLAP IN THE SAME emitted region, so neither recorded value survives. That task
+// lifted a block of MAINTAINER-addressed commentary out of the heredoc body (it was being shipped to
+// every downstream project's config — a real install read quay's own incident log as its own
+// history), and it also repaired a sentence that the block had been spliced across. develop's
+// doc_surfaces block was added ON TOP of that same region. Measured relationship between develop's
+// emission and this branch's, on identical fixtures: 48 → 36 lines, the difference being EXACTLY the
+// 13-line maintainer block deleted and replaced by the one user-facing `fork_baseline` comment line;
+// `doc_surfaces` and its seven consumer comment lines are present in BOTH, and the other 35 lines are
+// byte-identical. (That is also why "take develop's recorded c2740778…" would be wrong, and why
+// neither side's value could be kept: the emitted bytes are the union of develop's ADDITION and this
+// task's DELETION.) The one-line `loop.doc_surfaces` row-pinning lesson above still holds.
 const PINNED = {
   fresh: {
     rc: 0,
     surface: [
-      ".quay/config.yml  c2740778723eb8a8c44735d65bfa1e627532242b0a1a0d018e4c70ba1174a7c8",
+      ".quay/config.yml  ba6933df139927a566c785d7e9565c76297ea29cf74c67300cb9e2cce12fde4f",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       ".gitignore  f9e6655aa4762432b178420cf9c9d773fc88a67822c6e44fcbdf5f51a8e6ec7a",
       ".claude/launch.settings.json  25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec",

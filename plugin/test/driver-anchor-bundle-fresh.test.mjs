@@ -64,6 +64,7 @@ import {
   kernelSourceScriptsDir,
   preferredAnchorKernelIn,
   readAnchorBundleReading,
+  readAnchorState,
   rebuildKernelBundle,
   resolveQuayKernelBuildScript,
   sourceFilesMaxMtimeMs,
@@ -168,8 +169,77 @@ function makeBundleStaleFixture(tag, { sourceNewerThanKernel = true } = {}) {
   return { root, pluginRoot: path.join(root, "staging", "plugin"), marker: path.join(root, ".quay", "rebuild-marker.txt"), buildScript };
 }
 
+/** 夹具 teardown 的 `rmSync` 退避：`force: true` 的 `maxRetries` 默认 **0** ⇒ 与任何**残余写者**
+ *  赛跑时最后一次 rmdir 撞 ENOTEMPTY 就直接抛。本组的两类写者：① 漏出来的 detached 替换 anchor
+ *  （每 reconcile 周期重写 `.quay/anchor.json`，见 `reapStrayAnchors`）；② 夹具自己 spawn 的 anchor
+ *  在退出路径上删/重建它的载体。同形的已修实例 = `plugin/test/full-suite-runner-{s11,phases}.test.mjs`
+ *  （gap-full-suite-runner-crash-test-rmSync-enotempty-flaky —— ⚠️ 那次只修了那一个文件，本组是
+ *  硬规则 5b 扫出来的兄弟）。 */
+const RM_FIXTURE_OPTS = { recursive: true, force: true, maxRetries: 20, retryDelay: 100 };
+
+/** 进程是否还活着（`kill(pid, 0)`；⛔ 不解析 `/proc` 的存在性——pid 会被回收）。 */
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** 收掉**本夹具的**散落 anchor：`spawnAnchor`（driver-runtime.ts）起的那一份是 `detached: true` +
+ *  `child.unref()` 的，⛔ 不在下面那个 `child` 的等待面上 —— 于是测试返回之后它仍在按 reconcile
+ *  周期重写 `<root>/.quay/anchor.json`，`t.after` 的 `rmSync` 便落在「rmSync 走完 `.quay` ⇒ 写者又
+ *  把它建回来 ⇒ 最后一次 rmdir 撞 ENOTEMPTY」的竞态里
+ *  （gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor：实测挡掉 fan-in 一次）。
+ *
+ *  判据是 **argv 里的 `--root` 逐字等于本夹具 root**，⛔ 不是「读 `.quay/anchor.json` 自报的 pid」：
+ *  那个文件**每个 reconcile pass 重写一次**（⛔ 不是启动时写一次的声明），替换进程尚未接管时读到的
+ *  仍是行将退出的直接子进程 ⇒ 会在「替换进程已起、还没写第一行」的窗口里漏掉它。外部同形读数：
+ *  `ps -eo pid,ppid,args | grep 'driver-anchor.ts __anchor'`（漏出来的那些 ppid=1，已被 init 收养
+ *  —— 这正是「测试在结构上收不到它」的形态）。
+ *
+ *  ⚠️ 主子进程必须先收（调用点在 `child` 退出之后）：替换进程是在某趟 reconcile 里起的，先扫再杀
+ *  主进程会漏掉「最后一次 pass 刚 spawn 出来」的那一个。
+ *  ⚠️ 本文件与 `driver-anchor-bundle.test.mjs` 是**刻意重复**的一对（拆分时以「零共享可变状态」为
+ *  边界，见文件头）：⛔ 不要为这一对抽公共模块——那会重新引入共享（本注释在两处逐字相同是症状，
+ *  不是缺陷）。改一处请对照另一处改。 */
+async function reapStrayAnchors(root, selfPid) {
+  const strayPids = [];
+  let entries;
+  try { entries = fs.readdirSync("/proc"); } catch { return strayPids; /* 无 /proc ⇒ 不猜、不误杀 */ }
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    const pid = Number(e);
+    if (pid === selfPid || pid === process.pid) continue;
+    let argv;
+    try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean); } catch { continue; /* 已消失/不可读 */ }
+    if (!argv.includes("__anchor")) continue;
+    if (!argv.some((a) => a.endsWith("driver-anchor.ts"))) continue;
+    const i = argv.indexOf("--root");
+    if (i < 0 || argv[i + 1] !== root) continue; // ⛔ 只收本夹具的：生产 anchor 的 root 是仓库根
+    strayPids.push(pid);
+    try { process.kill(pid, "SIGTERM"); } catch { /* 已退出 */ }
+  }
+  // 给一个短窗口走它自己的收尾；仍在 ⇒ SIGKILL（⛔ 不等它的 shutdownGraceMs 宽限去「体面退出」——
+  // 它就是那个「测试退出后还在写」的写者，收尸不该把它请回来）。
+  for (const pid of strayPids) {
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && pidAlive(pid)) await new Promise((r) => setTimeout(r, 50));
+    if (pidAlive(pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
+  }
+  return strayPids;
+}
+
+/** 缝的诚实性（AC3）：夹具全程开着 `QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 替换进程**真的不被
+ *  spawn**。两半缺一不可：`strayPids` 是**动作面**（argv 扫描，抓得到接管窗口里的那一个），
+ *  `statePid` 是任务 AC3 逐字要求的**回读面**（`.quay/anchor.json` 自报 pid = 直接子进程）——
+ *  ⛔ 只有后者会退化成「没人去读所以看不见第二个 pid」。 */
+function assertSeamHonest(r) {
+  assert.deepEqual(r.strayPids, [], `缝不诚实则会留下散落的替换 anchor（ppid=1，测试退出后继续写夹具）: ${JSON.stringify(r.strayPids)}`);
+  assert.equal(r.statePid, r.childPid, "`.quay/anchor.json` 的 pid 就是直接子进程（⛔ 不是「没人去读所以看不见第二个 pid」）");
+}
+
 /** 直接起一个常驻 anchor（⛔ 不经 `start` CLI 的就绪闸——本组测的是 reconcile 里的判定与动作），
- *  轮询到 `predicate` 成立后停机。
+ *  轮询到 `predicate` 成立后停机。返回 `{stderr, reading, childPid, statePid, strayPids}`：
+ *  `childPid` = 直接子进程 pid，`statePid` = 活着时从 `.quay/anchor.json` 读到的自报 pid，
+ *  `strayPids` = 收掉的散落替换进程（**空集是判据**：本夹具开着 `…REBUILD_NO_RESTART=1`，
+ *  一个替换进程都不该被起）。
  *
  *  ⚠️ 必须**在它活着的时候**读 `.quay/anchor.json`：正常退出时 anchor 会主动删掉 pid / state 载体
  *  （「已经在跑」与「已经停了」不得同形，硬规则 3b）—— 所以本夹具不能等它退出再读。 */
@@ -190,20 +260,30 @@ async function runAnchorUntil(root, pluginRoot, predicate, extraEnv = {}) {
       },
     },
   );
+  const childPid = child.pid ?? null;
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += String(d); });
   // ⚠️ 读数必须在**它活着的时候**抓下来：正常退出会删掉 `.quay/anchor.json`（见上）。
   let captured = null;
+  // `.quay/anchor.json` 自报的 pid，逐轮抓（同上：退出后该载体就没了）。它**只说明「谁在写」**，
+  // ⛔ 说明不了「谁被起过」——替换进程尚未接管时这里读到的还是直接子进程（见 reapStrayAnchors 头注释）。
+  let statePid = null;
+  let strayPids = [];
   try {
-    await waitFor(() => { const v = predicate(); if (v) { captured = v; return true; } return false; }, 30_000, "the anchor to publish the expected bundle reading");
+    await waitFor(() => {
+      const st = readAnchorState(root);
+      if (st?.pid) statePid = st.pid;
+      const v = predicate(); if (v) { captured = v; return true; } return false;
+    }, 30_000, "the anchor to publish the expected bundle reading");
   } finally {
     child.kill("SIGTERM");
     await new Promise((r) => {
       const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } r(); }, 20_000);
       child.on("exit", () => { clearTimeout(t); r(); });
     });
+    strayPids = await reapStrayAnchors(root, childPid);
   }
-  return { stderr, reading: captured };
+  return { stderr, reading: captured, childPid, statePid, strayPids };
 }
 
 /** 轮询谓词：`bundle.state` 等于期望值时把**那一份读数**交出来（⛔ 不是事后重读一个已被删的文件）。 */
@@ -224,10 +304,11 @@ const anchorLogOf = (root) => {
 
 test("陈旧 bundle ② — 补救 seam 关掉 ⇒ 陈旧**仍被报出**（⛔ 不静默降级成 fresh）", async (t) => {
   const f = makeBundleStaleFixture("no-action");
-  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(f.root, RM_FIXTURE_OPTS));
   const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "stale-no-action"),
     { QUAY_ANCHOR_NO_BUNDLE_REBUILD: "1", QUAY_FAKE_BUILD_MARKER: f.marker });
   assert.ok(!fs.existsSync(f.marker), `kill switch ⇒ 构建脚本没有被调用 (stderr: ${r.stderr})`);
+  assertSeamHonest(r);
 
   const log = anchorLogOf(f.root);
   assert.match(log, /STALE BUNDLE — source tree is newer than this kernel's build/, "陈旧条件**仍被报出**");
@@ -240,10 +321,11 @@ test("陈旧 bundle ② — 补救 seam 关掉 ⇒ 陈旧**仍被报出**（⛔ 
 
 test("陈旧 bundle ④ — 反例对照：**不陈旧**（源树早于本内核）⇒ 不触发补救，state = fresh", async (t) => {
   const f = makeBundleStaleFixture("fresh", { sourceNewerThanKernel: false });
-  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(f.root, RM_FIXTURE_OPTS));
   const r = await runAnchorUntil(f.root, f.pluginRoot, bundleStateIs(f.root, "fresh"),
     { QUAY_FAKE_BUILD_MARKER: f.marker });
   assert.ok(!fs.existsSync(f.marker), `源树更旧 ⇒ 构建脚本**没有**被调用 (stderr: ${r.stderr})`);
+  assertSeamHonest(r);
   const log = anchorLogOf(f.root);
   assert.doesNotMatch(log, /bundle rebuild/, "⛔ 没有任何重建行（用于区分「补救在工作」与「恒有输出」）");
   assert.doesNotMatch(log, /STALE BUNDLE/, "⛔ 不陈旧就不该报陈旧");
@@ -254,7 +336,7 @@ test("陈旧 bundle ④ — 反例对照：**不陈旧**（源树早于本内核
 test("陈旧 bundle ⑤ — 没有源树（装好的产物）⇒ fail-closed：解析不到构建脚本且不冒认「可重建」", (t) => {
   // 装好的产物形态（npm-pack / marketplace cache / 第三方 vendored）：盘上**没有**同名源树。
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "bundlestale-nosrc-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(root, RM_FIXTURE_OPTS));
   const scripts = path.join(root, "pkg", "plugin", "scripts");
   fs.mkdirSync(path.join(scripts, "dist"), { recursive: true });
   fs.writeFileSync(path.join(scripts, "dist", "driver-anchor.js"), "// installed\n", "utf8");

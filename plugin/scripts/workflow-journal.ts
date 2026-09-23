@@ -469,7 +469,12 @@ export function selftest(): boolean {
   const check = st.check;
 
   const savedCwd = process.cwd();
-  const fixtureDir = fs.mkdtempSync(path.join(savedCwd, "tmp", "workflow-journal-selftest-"));
+  // gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir: `tmp/` is gitignored runtime state —
+  // present in the primary checkout but ABSENT in a fresh worktree/CI checkout. mkdtempSync
+  // under a non-existent parent throws ENOENT. Ensure it exists (same fix as stage-receipt.ts).
+  const tmpParent = path.join(savedCwd, "tmp");
+  fs.mkdirSync(tmpParent, { recursive: true });
+  const fixtureDir = fs.mkdtempSync(path.join(tmpParent, "workflow-journal-selftest-"));
   try {
     fs.mkdirSync(path.join(fixtureDir, "plugin", "scripts"), { recursive: true });
     fs.mkdirSync(path.join(fixtureDir, "tasks"), { recursive: true });

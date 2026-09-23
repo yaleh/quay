@@ -2,7 +2,7 @@
 id: gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir
 title: workflow-journal 的 selftest 依赖一个被 gitignore 的 tmp/，而只有兄弟 selftest 顺手创建它
   —— 新 worktree 里按测试顺序随机红（实测 2 次 fan-in 退场）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -73,7 +73,16 @@ fs.mkdirSync(tmpParent, { recursive: true });
 `const tmpParent = path.join(savedCwd, "tmp"); fs.mkdirSync(tmpParent, { recursive: true });`
 （与已修的 `stage-receipt.ts` 同形）。
 
-**兄弟扫尾（硬规则 5b）**：全仓扫 `mkdtempSync(path.join(<x>, "tmp", ...))` 只剩 2 处 —— `run-identity.ts:390`（已自建父目录）与 `workflow-journal.ts:472`（本任务修掉）；`stage-receipt.ts` 已用 `tmpParent` 变量形式修过。**无第三处遗漏。**
+**兄弟扫尾（硬规则 5b）—— repo-root `tmp/` 的【全部 4 个】消费者，现已全部自足**（无一再依赖"别人先建"）：
+
+| 消费者 | 自足方式 |
+|---|---|
+| `plugin/scripts/run-identity.ts:389` | `fs.mkdirSync(path.join(savedCwd, "tmp"), { recursive: true })`（原有） |
+| `plugin/scripts/stage-receipt.ts:685` | `tmpParent` 变量 + `mkdirSync`（既有修复 `f05a4bdfe`） |
+| `plugin/scripts/workflow-journal.ts:475` | **本次修复** |
+| `plugin/test/workflow-event-schema.test.mjs:37` | `if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true })`（既有，自足） |
+
+第 4 项**不在**任务原述的 3 个之列：它经 `const TMP = path.join(REPO_ROOT, "tmp")` 间接引用，故 `mkdtempSync(path.join(<x>, "tmp", ...))` 的窄模式扫不到。用更宽的模式（`join(...`tmp`...)` 且排除 os.tmpdir/TMPDIR/`/tmp`）才扫出来，确认它**自足**（非缺陷实例）。⇒ **无遗漏的依赖实例。**
 
 **AC2（镜像）**：`experiments/quay-perpetual-stream/scripts/workflow-journal.ts` 是指向 `../../../plugin/scripts/workflow-journal.ts` 的 **symlink** ⇒ 一处改动即覆盖两镜像，无法漂移；scoped 门内 `mirror parity: workflow-journal.ts byte-identical across experiments/plugin` 绿。⛔ 未新造检查器。
 
@@ -84,7 +93,7 @@ fs.mkdirSync(tmpParent, { recursive: true });
 - 修复后：**12 pass / 0 fail**，exit 0
 - 再把 `<wt>/tmp` 整个 `mv` 走 ⇒ 仍 **12 pass / 0 fail**，exit 0
 
-**AC4**：`bash scripts/test.sh --for-task gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir --allow-thin` ⇒ **exit 0**，执行 `plugin/test/workflow-journal.test.mjs`（12 tests / 12 pass / 0 fail）。合并当前 develop tip `24f59dd2` 后再跑一次仍 exit 0。scoped-gate cache 已写（key `24f59dd2`）。
+**AC4**：`bash scripts/test.sh --for-task gap-workflow-journal-selftest-mkdtemp-requires-tmp-dir --allow-thin` ⇒ **exit 0**，执行 `plugin/test/workflow-journal.test.mjs`（12 tests / 12 pass / 0 fail）。scoped-gate cache 已写，key = 该轮 scoped 门**实际评过的** develop sha（worker 退出前 merge 到的 tip）。
 
 **DoD 冷载体读数**：
 ① 新 worktree 绝对路径 = `/data/home/yale/work/cold-carrier-wj-selftest`（`git worktree add --detach` @ 本任务 merge tip `7da4ecd35`；刻意建在 `quay-worktrees/` **之外**，不污染"在飞任务数"读数）。
@@ -95,4 +104,4 @@ fs.mkdirSync(tmpParent, { recursive: true });
 
 ⚠️ **逐字读 DoD 的「自始至终不存在」在修复后不可能成立**（修复本身就 `mkdirSync` 出 `tmp/`，与 `run-identity`/`stage-receipt` 同款行为）。载荷读数是 **T0 时不存在** —— 那才是让缺陷可观测的冷启动条件；T1 后的存在**由修复产生**，已用 `mtime` 落在运行窗口内证明它不是"被谁中途建了"的既有目录。
 
-⚠️ **未跑 `scripts/test.sh` 的默认全 glob**：worker 合同明确「不跑 suite（fan-in 负责）」，且本机正与 peer worker 的 suite 并发（load ≈ 35/128，台账记有多个负载敏感 flake 家族）。故冷载体冷跑只覆盖 DoD 点名的两个文件（仍是冷 `scripts/test.sh` 调用，且把会红的顺序放最前）。全 glob 冷跑由 fan-in 在合并后的同一 worktree 上给出 —— 本 worktree 退出前已移除 `tmp/`，使那次全量 suite 成为真正的冷启动跑。
+⚠️ **冷载体的冷跑只覆盖 DoD 点名的两个文件，不是 `scripts/test.sh` 的默认全 glob**：worker 合同明确「不跑 suite（fan-in 负责）」，且本机正与 peer worker 的 suite 并发（load ≈ 35/128，台账记有多个负载敏感 flake 家族）。全 glob 冷跑改由 fan-in 在**本 worktree** 上给出 —— worker 退出前**已移除本 worktree 的 `tmp/`**，使那次全量 suite 成为真正的冷启动跑（且上面已证明全 glob 内仅有的 4 个 repo-root `tmp/` 消费者现在都自足）。

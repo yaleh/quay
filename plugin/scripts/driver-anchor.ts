@@ -399,8 +399,12 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // ⚠️ 重建**有冷却**：重建成功后本进程内存里仍是旧代码，若不重启，`bundleStale` 会一直为真 ⇒
   // 每趟 reconcile 重建一次 = 重建风暴。冷却 + 「成功过就不再重试」两道一起挡。
   const rebuildCooldownMs = Math.max(0, Number(process.env.QUAY_ANCHOR_BUNDLE_REBUILD_COOLDOWN_MS ?? 600_000));
-  // 测试缝/运维：重建成功后**不**重启（默认重启——⛔ 只重建不重启等于把日志里的建议照抄一遍，
+  // 测试缝/运维：**不 spawn 替换进程**（默认重启——⛔ 只重建不重启等于把日志里的建议照抄一遍，
   // 因为本进程的 ESM 缓存按 URL，重建的文件不会被已加载的进程看见）。
+  // ⚠️ 它的覆盖面是**整条自刷新路径**（不只是「重建成功后不再置真」这一处）：见下面 `canRefresh` 的
+  // **最终判定**。⛔ 只在重建那一处拦 = 缝的名字与它的实际覆盖面不同形（硬规则 3b 的镜像）——
+  // 当时 `stale`/`mainKernelStale` 两条通用路径正好从这道缝漏过去，夹具每跑一次就漏一个 detached
+  // 替换 anchor（gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor）。
   const rebuildNoRestart = process.env.QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART === "1";
   let lastRebuildAtMs = 0;
   let lastRebuildResult: KernelBundleRebuildResult | null = null;
@@ -603,6 +607,13 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           fs.statSync(cand.path).mtimeMs > kernelBuiltAt;
       } catch { canRefresh = false; /* 读不到 ⇒ 换不动（⛔ 不把「读不懂」当「可换」） */ }
     }
+    // ⛔ 测试缝的**最终判定**处（`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 一个替换进程都不起）：
+    // 必须是**最后**一道，⛔ 不是把 `&& !rebuildNoRestart` 并进上面第一条赋值——上面 `!canRefresh &&
+    // bundleStale` 那条复核会把它救回来（`preferredAnchorKernel()` 真解析到一份更新的内核）。
+    // 覆盖面是**整条自刷新路径**：`stale`（源码在本内核一生里推进）、`mainKernelStale`（主检出内核
+    // 推进）与 bundle 重建三条都归零，因此缝的名字（NO_RESTART）与它实际挡住的面对齐（硬规则 3b）。
+    // ⛔ 生产不带这个变量 ⇒ 这一行是恒等，产品行为逐字不变。
+    if (rebuildNoRestart) canRefresh = false;
     // ── bundle 同步读数（`.quay/anchor.json.bundle`）：六态各自独立，⛔ 不与 fresh 同形 ──────────
     //
     // ⚠️ 这里就是「陈旧且换不动」的**动作面**：它不再只打一行日志——`!canRefresh` 时**机械重建**
@@ -654,7 +665,9 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           state = r.ok ? "stale-rebuilt" : r.attempted ? "stale-rebuild-failed" : "stale-no-action";
           // ⛔ 重建成功后走既有的整进程自刷新：替换进程加载的**就是**刚重建出来的这一份
           // （`preferredAnchorKernel()` 在本内核就是产物时返回本路径）。
-          // ⛔ 测试缝：`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1` ⇒ 只验「重建发生了」，不 spawn 替换进程。
+          // ⛔ 测试缝（`QUAY_ANCHOR_BUNDLE_REBUILD_NO_RESTART=1`）**不在这里**拦 —— 见上面
+          // `if (rebuildNoRestart) canRefresh = false;` 那处最终判定：缝的覆盖面是整条自刷新路径，
+          // 这一行的 `!rebuildNoRestart` 只是让「重建成功后不再置真」，⛔ 单独看它不是那条缝。
           if (r.ok && !rebuildNoRestart) canRefresh = true;
         }
       }
