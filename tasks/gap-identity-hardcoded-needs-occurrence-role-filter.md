@@ -3,7 +3,7 @@ id: gap-identity-hardcoded-needs-occurrence-role-filter
 title: identity-replication-check 的 hardcoded 判据缺"出现角色"过滤：test
   标题/断言消息/错误消息串与访问器派生值被计成独立命名点（P2-identity-resource-gate.sh 的 14
   个"命名点"逐处核实全属非证据；覆盖 round 2116 全部五个 P2-identity 簇）
-status: ready
+status: done
 labels:
   - gap
   - defect
