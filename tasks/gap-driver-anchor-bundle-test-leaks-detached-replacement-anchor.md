@@ -3,7 +3,7 @@ id: gap-driver-anchor-bundle-test-leaks-detached-replacement-anchor
 title: driver-anchor-bundle.test.mjs 的 NO_RESTART 测试缝只挡重建路径，通用自刷新仍 spawn 一个
   detached 替换 anchor ⇒ 测试退出后它继续写夹具 ⇒ teardown rmSync 撞 ENOTEMPTY（实测挡掉 fan-in）+
   21 个孤儿 anchor/18 个残留夹具目录
-status: todo
+status: ready
 labels:
   - gap
   - defect
