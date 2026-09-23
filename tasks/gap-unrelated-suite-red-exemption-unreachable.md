@@ -109,7 +109,9 @@ recurred: ["gap-ac179-criterion-cmdline-port-literal-stale"]
 
   ⚠️ **载体选择如实记（⛔ 不假装）**：**未**写 live 项目 `/data/home/yale/work/quay/.quay/worker-round.jsonl`——本仓库生产 loop 此刻在跑（`worker-driver.ts --mechanical-fan-in --task gap-ac255-… --root /data/home/yale/work/quay` 在飞），往在跑的 loop 的 round 载体塞外来记录会扰动它的 round/stop 状态读取。故该读数落在 **scratch workspace 自己的 `.quay/worker-round.jsonl`**：同一个生产写入者（worker-driver 常驻环）、同一路径约定、同一记录格式、同一判词函数。判词的**输入**侧另有真账本重放（AC3 节）锚在 live 数据上。
 
-- [ ] AC6 `bash scripts/test.sh --for-task gap-unrelated-suite-red-exemption-unreachable` 绿
+- [x] AC6 `bash scripts/test.sh --for-task gap-unrelated-suite-red-exemption-unreachable` 绿
+
+  **读数（两条命令都贴）**：AC6 原文命令（无 `--allow-thin`）`exit=0`，`tests 108 / pass 108 / fail 0`；driver fan-in 用的生产形态（`--allow-thin`）同样 `exit=0`，`pass 108 / fail 0`。两条都含本次新增的 5 个用例（`AC1+AC3` / `AC4①` / `AC4②` / `AC3 证据基础` / `withRecordedSuiteSignatures`）全绿。
 
 ## DoD
 

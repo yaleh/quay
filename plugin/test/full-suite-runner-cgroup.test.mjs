@@ -330,7 +330,7 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "--scope",
     "--quiet",
     "-p",
-    "MemoryMax=6G",
+    "MemoryMax=16G",
     "bash",
     "-c",
     "bash scripts/test.sh",
@@ -374,7 +374,7 @@ test(
       const s = readState(root);
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
-      assert.equal(s.systemdRun.memoryMax, "6G");
+      assert.equal(s.systemdRun.memoryMax, "16G");
       assert.equal(s.systemdRun.cpuQuota, "");
       assert.equal(s.systemdRun.tasksMax, "");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
@@ -382,7 +382,7 @@ test(
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
       assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
-      assert.match(txt, /MemoryMax=6442450944/, "MemoryMax=6G applied (bytes)");
+      assert.match(txt, /MemoryMax=17179869184/, "MemoryMax=16G applied (bytes)");
       assert.doesNotMatch(txt, /TasksMax=200/, "no TasksMax=200 passed (人 2026-08-12 裁定③: task limit canceled)");
       assert.match(txt, /CPUQuotaPerSecUSec=(max|infinity)/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max/infinity per systemd)");
     } finally {
