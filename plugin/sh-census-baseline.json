@@ -201,22 +201,38 @@
       }
     },
     {
-      "when": "2026-09-23 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot)",
+      "when": "2026-09-23 (gap-suite-ambient-reds-block-all-code-landings)",
       "from": {
         "embeddedInterpreterLines": 7680,
         "duplicateCopies": 0
       },
       "to": {
-        "embeddedInterpreterLines": 7678,
+        "embeddedInterpreterLines": 7683,
         "duplicateCopies": 0
       },
-      "why": "DOWNWARD re-anchor — the intended direction, and here a SIDE EFFECT of the fix rather than its goal. This task rewrites the plugin-install recipe quay-init prints: the old two-argument form (`claude plugin marketplace add quay \"$PLUGIN_ROOT\"` — rejected outright by the current CLI, and pointing consumers at the machine-local plugin-cache directory) becomes the single-argument github channel (`claude plugin marketplace add yaleh/quay`) plus `claude plugin install quay@quay --scope project`. In the shell that collapses a `printf` + a heredoc close + a heredoc open (3 effective lines) into one command line (1 effective line), so plugin/scripts/quay-init.sh falls 1012 -> 1010 effective lines. The file still execs `node` at a command position and is not on the exception list, so it STAYS IN the axis — the line count moved, not its membership (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh entries above). ⚠️ Why this re-anchor is not optional: AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it — a stale-higher baseline would let a future +2 embedded-interpreter .sh land for free, i.e. this gain would be un-recaptured. Re-anchored after the recipe edit was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` -> totals) on this tree, never hand-fitted.",
+      "why": "UPWARD re-anchor (+3) — the exceptional direction for this ratchet, forced by the one change this task cannot make any other way. This task's class 1 pins the suite's locale and timezone at the entry point (`export LC_ALL`/`export LANG`/`export TZ` in scripts/test.sh) because the suite is written against a C collation and a UTC clock while the entry inherited the host's (LANG=en_US.UTF-8, LC_ALL unset, TZ unset); that pin is three real statements and cannot be expressed as comments or as zero lines. scripts/test.sh is ALREADY an embedded-interpreter .sh (it execs `node` at a command position for its static tier), so every effective line it gains lands on this axis. Per this file's _note the raise is legal only once COMMITTED — the shrink-guard compares the worktree copy against the git-HEAD copy of this very file, so this entry is committed in the same commit as the pin and the two sides agree. ⛔ NOT a threshold relaxed to buy a pass: the +3 is measured, attributed line-for-line below (residual = 0), and the ratchet's own AC6 test (plugin/test/sh-census-check.test.mjs) requires this file to EQUAL the live reading, so leaving 7680 would red the whole static layer. This is the same structural weakness the 2026-09-19 entry above already names ('any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor').",
+      "attribution": {
+        "embeddedInterpreterLines": "+3 = scripts/test.sh effective lines 706 -> 709 — exactly the three added statements `export LC_ALL=\"C.UTF-8\"`, `export LANG=\"C.UTF-8\"`, `export TZ=\"UTC\"`. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire `*.sh` delta vs develop is exactly two paths (`git diff --name-only develop HEAD -- '*.sh'` -> scripts/test.sh, plugin/scripts/tmux-leak-scan.sh), and of those only test.sh is IN this axis. The other, plugin/scripts/tmux-leak-scan.sh, gained 7 effective lines (160 -> 167, the class-2 `tmp_root()` helper that stops the scan hardcoding /tmp) but its `embedded` reading is `[]` in BOTH the before and after copies — it contains no embedded interpreter at a command position, so none of those 7 lines was ever counted here. That +7 is called out rather than folded in: a reader summing this task's diff must be able to account for every line, and only 3 of the 10 are in-axis. Measured per file with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters) on `git show HEAD:<f>` vs the worktree copy, and totals.embeddedInterpreterLines 7680 -> 7683 on the real tree (`sh-census-check.ts --json` -> totals).",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
+    },
+    {
+      "when": "2026-09-23 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot)",
+      "from": {
+        "embeddedInterpreterLines": 7683,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7681,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and here a SIDE EFFECT of the fix rather than its goal. This task rewrites the plugin-install recipe quay-init prints: the old two-argument form (`claude plugin marketplace add quay \"$PLUGIN_ROOT\"` — rejected outright by the current CLI, and pointing consumers at the machine-local plugin-cache directory) becomes the single-argument github channel (`claude plugin marketplace add yaleh/quay`) plus `claude plugin install quay@quay --scope project`. In the shell that collapses a `printf` + a heredoc close + a heredoc open (3 effective lines) into one command line (1 effective line), so plugin/scripts/quay-init.sh falls 1012 -> 1010 effective lines. The file still execs `node` at a command position and is not on the exception list, so it STAYS IN the axis — the line count moved, not its membership (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh entries above). ⚠️ Why this re-anchor is not optional: AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it — a stale-higher baseline would let a future +2 embedded-interpreter .sh land for free, i.e. this gain would be un-recaptured. Re-anchored after the recipe edit was final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` -> totals) on this tree, never hand-fitted. ⚠️ Re-based on 2026-09-23 after merging develop (which had itself re-anchored 7680 -> 7683 for gap-suite-ambient-reds-block-all-code-landings): the -2 is unchanged, the from/to are now 7683 -> 7681, and 7681 is the checker's own live reading (`sh-census-check.ts --json` -> totals.embeddedInterpreterLines) on the merged tree.",
       "attribution": {
         "embeddedInterpreterLines": "-2 = plugin/scripts/quay-init.sh effective lines 1012 -> 1010, measured on BOTH sides with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters): `git show develop:plugin/scripts/quay-init.sh` reads 1012 / embedded [node]; the worktree copy reads 1010 / embedded [node] — so the file is IN the axis on both sides and the move is a line count, not a membership change. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire diff vs develop is 6 paths (`git diff --name-only develop HEAD` -> orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md, plugin/scripts/quay-init.sh, plugin/skills/init/SKILL.md, plugin/test/quay-init.test.mjs, test/cold-start-e2e.sh, docs/analysis/quay-init-closure-ratchet.baseline.json), of which TWO are `*.sh`. The SECOND one is called out rather than folded in: test/cold-start-e2e.sh moved 178 -> 187 effective lines (+9, the new recipe assertions) but its `embedded` reading is `[]` on both sides — pure shell, no interpreter at a command position — so it is OUTSIDE this axis entirely and contributes 0, which is why the total moves by exactly the one file. Confirmed by the checker itself: totals.embeddedInterpreterLines = 7678 and files[path=plugin/scripts/quay-init.sh].codeLines = 1010 differ from the develop-side 7680 / 1012 by exactly the same 2, so nothing else moved.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (both edited .sh are real files, not symlinks, so totals.symlinkedCopies stays 59)."
       }
     }
   ],
-  "embeddedInterpreterLines": 7678,
+  "embeddedInterpreterLines": 7681,
   "duplicateCopies": 0
 }

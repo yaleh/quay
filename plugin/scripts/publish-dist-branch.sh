@@ -32,9 +32,9 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd "${PLUGIN_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+REPO_ROOT="$(cd "${PLUGIN_DIR}/.." && pwd -P)"
 
 REMOTE="origin"
 BRANCH="dist-plugin"

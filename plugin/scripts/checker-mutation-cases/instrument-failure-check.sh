@@ -12,8 +12,8 @@
 set -u
 name="instrument-failure-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-repo_root="$(cd "${checker_dir}/../.." && pwd)"
+checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 
 # The ## Contract scan surface (must match instrument-failure-check.ts DEFAULT_SURFACE).
 # AC59 (gap-ac59-family5-scan-covers-execution-cores): now includes the three execution cores —

@@ -175,7 +175,26 @@ set -euo pipefail
 # always piped so they emit no color regardless of a parent FORCE_COLOR value (1/2/3).
 unset FORCE_COLOR
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# `pwd -P` (PHYSICAL), ⛔ not plain `pwd` (gap-suite-ambient-reds-block-all-code-landings, AC6
+# sweep — the symlink-form family). Plain `pwd` is LOGICAL: it keeps whatever spelling got you here.
+# This repo's root is now reachable by two spellings — /data/home/yale/work/quay (the realpath) and
+# /home/yale/work/quay (a symlink created 2026-09-19) — and the suite was NOT invariant under the
+# choice. Measured at one commit, one worktree, only the cwd spelling differing:
+#   cwd = /data/home/...  ⇒ test-file-snapshot, suite-bucket-reattr-ratchet, checker-mutation: GREEN
+#   cwd = /home/yale/...  ⇒ all three RED (and the suite reddens end-to-end)
+# Why one spelling breaks them: this `repo_root` is handed to the checkers as an explicit `--root`
+# (runner-static-gate.ts:393 `--gate --root "${repo_root}"`), OVERRIDING the canonical `repoRoot()`
+# those checkers would otherwise derive for themselves (plugin/scripts/repo-root.ts — it resolves
+# realpaths, which is why the TS side is already immune). Their inputs are realpath-form: test.sh's
+# own `--list-files` dedups by realpath, and `git rev-parse`/`git worktree list` both emit realpaths.
+# So a logical `repo_root` makes a prefix-strip (`test-file-snapshot.sh`'s strip_repo_root) and a
+# path-join (`suite-bucket-attribution.ts`'s toRepoRel) silently miss, and hundreds of files that
+# demonstrably exist read as REMOVED — a reading that depends on the host's path SPELLING, i.e. an
+# instrument-vs-environment mismatch (硬规则 4b: 一个量若随宿主拼法改变，它就不是在测被测对象).
+# ⛔ Not a workaround for "use the realpath cwd instead": the spelling must not be load-bearing.
+# The symlink spelling is the one .quay/config.yml's `worktree_root` declares
+# (/home/yale/work/quay-worktrees), so it is a FIRST-CLASS path here, not a typo.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
 # main_root derivation → plugin/scripts/runner-concurrency.ts deriveMainRoot() (SPEC P4 套件入口收进 TS).
@@ -226,6 +245,33 @@ case " $* " in
     fi
     ;;
 esac
+
+# ── locale + timezone pinning (gap-suite-ambient-reds-block-all-code-landings, class 1) ───────────
+# The suite is WRITTEN against a C collation and a UTC clock, but this entry point inherited whatever
+# the host happened to export. Under this machine's default (LANG=en_US.UTF-8, LC_ALL unset, TZ unset
+# ⇒ CST) three files went red for reasons that have nothing to do with the code under test — GNU
+# sort's collation (`sort -u` emits a DIFFERENT order under en_US.UTF-8, so order-sensitive set
+# comparisons disagree) and local-time formatting (a UTC-vs-CST day boundary moves a record between
+# days). Measured at one commit, same machine, three files:
+#   laydown-set-check                    8 pass / 1 fail  →  9 / 0
+#   develop-deliver-tgz-evidence-transport 19 / 1          →  20 / 0
+#   outer-tick-log-check                 25 / 2            →  27 / 0
+# ⛔ BOTH are needed, and that is NOT obvious: pinning only the locale leaves outer-tick-log-check at
+# 25 / 2 — the timezone half is invisible in CI because the runner is ITSELF UTC (CLAUDE.md 硬规则 4
+# 推论二: a host property that is "equivalent to unlimited on this box" is not a declaration). So TZ
+# is pinned here even though .github/workflows/ci.yml never needed to.
+# The values are the CI ones VERBATIM (C.UTF-8, the configuration the suite was green against —
+# see ci.yml's own comment), so local and CI stop being two configurations (硬规则 5b: the earlier
+# fix landed only on the CI half). `TZ: UTC` is added to ci.yml too, so the two surfaces stay one
+# declaration rather than one declaration plus one silent reliance on the runner.
+# ⛔ Pinned OUTRIGHT, not `${LC_ALL:-C.UTF-8}`: this host exports LANG=en_US.UTF-8, so a
+# default-only form would keep the host's value and silently stay a second configuration — the
+# `${VAR:-default}` idiom only helps when the variable is UNSET, which is exactly not the case for
+# the one that does the damage. (LC_ALL empty + LANG=en_US.UTF-8 is this box's actual shape.)
+# The negative control (AC1 ③) is therefore "comment these three lines out", not an env override.
+export LC_ALL="C.UTF-8"
+export LANG="C.UTF-8"
+export TZ="UTC"
 
 # ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
 # Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped

@@ -1,0 +1,17 @@
+# Captured fan-in suite log excerpt (2026-09-20) — a real failure, kept as a fixture so the probe's
+# self-test does not depend on which .quay/fan-in-suite-*.log happens to be the newest one; the
+# driver prunes those.
+#
+# Two line shapes matter here:
+#   __PERFILE__ … <file>|<pseudo-file> passed=<true|false> …  per-file records emitted by scripts/test.sh
+#   not ok - …                                                failing-file records
+# `lint` and `typecheck` are PATHLESS pseudo-files. A `not ok - lint:` line names a real file after
+# the colon — that is a file the parser must attribute — while the pseudo-file itself is not a test.
+__PERFILE__ duration_ms=1180 server/shared/tests/quay-test-script.test.ts passed=true end_ms=1789898748016
+__PERFILE__ duration_ms=2104 server/modules/launch-profiles/tests/model-context-window.test.ts passed=false end_ms=1789898748016
+__PERFILE__ duration_ms=8170 lint passed=false end_ms=1789898748016
+__PERFILE_KIND__ file=server/modules/launch-profiles/tests/model-context-window.test.ts kind=assert
+__PERFILE_KIND__ file=lint kind=assert
+suite: 3 units, 1 failed, 2 passed
+not ok - lint: server/modules/launch-profiles/tests/model-context-window.test.ts:10:49: error boundaries(dependencies): Cross-module imports must go through that module's barrel file (server/modules/<module>/index.ts or index.js).
+not ok - server/modules/launch-profiles/tests/model-context-window.test.ts: error boundaries(dependencies): Cross-module imports must go through that module's barrel file
