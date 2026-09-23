@@ -1841,23 +1841,166 @@ export interface RelatednessSignal {
   reason: string;
 }
 
-/** 从 suite 日志文本提取失败测试文件（repo-relative）。node:test 每文件一行
- *  `__PERFILE__ duration_ms=… <rel> passed=false end_ms=…`——passed=false 即该文件红。读不出 ⇒ []
- *  （不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定是否 suite 红）。 */
-export function failingTestFilesFromSuiteLog(logText: string): string[] {
-  const out: string[] = [];
+// ── suite 失败行解析（gap-suite-failure-attribution-third-party-layout）─────────────────────────────
+// 上游缺陷：本函数曾把【本仓库的测试布局】写死进判据——前缀只认 `(packages|plugin|experiments)/`、
+// 后缀只认 `.test.mjs`。第三方项目（`server/**/*.test.ts`、`src/**/*.test.tsx`）匹配恒为 0 ⇒ 返回
+// `[]` ⇒ judgeRetryExemption 判 insufficient-data-fallback ⇒ park 时的判词写成「the suite log names
+// nothing a worker could fix」——**一个肯定断言，而它的依据只是「解析器没读懂」**（硬规则 3b 的镜像：
+// 读不懂 ⇒ 伪装成判定）。生产读数（claudecodeui `.quay/worker-round.jsonl`，2026-09-20→09-23）：51 次
+// retry_exemptions 中 failingTestFiles 非空 **0 次**，波及 29 个任务；其中一例真凶是一条可一行修的
+// barrel 导入 lint 错误（`not ok - lint: server/…/model-context-window.test.ts:10:49: …`）。
+//
+// 修法：⛔ 不再按路径前缀/后缀白名单判定，改为**按 token 的形态**分三类（硬规则 3b 要求「读不懂」有
+// 独立取值，⛔ 不与「合格」同形）：
+//   - 带路径分隔符的 token ⇒ 真实文件位置（`server/x/y.test.ts`、worktree 绝对路径形态都算）
+//   - 无路径且无扩展名的 token ⇒ **伪阶段名**（`lint` / `typecheck`——runner 的 per-file 记录里它们
+//     占同一字段位，但它们不是文件；旧实现会把 `lint` 当测试文件）
+//   - 其余（含句子碎片、无路径又非测试后缀的 token）⇒ **无法识别**，原样留证，⛔ 不混进 files
+/** suite 日志失败行的解析结果。三态可区分（硬规则 3b）。 */
+export interface SuiteLogFailureParse {
+  /** 归因到的失败文件（repo-relative；worktree 绝对路径形态按 root 归一）。 */
+  files: string[];
+  /** 解析器识别出的失败行数 N（`__PERFILE__ … passed=false` 与 `not ok - …` 两类之和）——
+   *  唯一能区分「日志里没有失败行」与「有失败行但解析器读不懂」的量（⛔ 旧实现两者同形）。 */
+  failingLines: number;
+  /** 识别为伪阶段名的 token（`lint` / `typecheck` 等）——⛔ 不是测试文件。 */
+  pseudoStages: string[];
+  /** 既非真实文件也非伪阶段名 ⇒ 读不懂的 token（原样留证）。 */
+  unclassified: string[];
+}
+
+/** 测试文件后缀（node:test 的 `*.test.*` 与 jest/vitest 的 `*.spec.*`；本仓库自身用 .test.mjs）。 */
+const SUITE_TEST_FILE_RE = /\.(?:test|spec)\.(?:mjs|cjs|js|ts|tsx|jsx|mts|cts)$/i;
+/** 路径 token 的合法字符集——挡掉 `boundaries(dependencies):` 这类句子碎片混进文件名（那是"读不懂"）。 */
+const SUITE_PATH_TOKEN_RE = /^[\w./@~+-]+$/;
+
+/** 单个 token 的形态分类。⛔ 不查 worktree 是否存在：第三方日志里的失败文件常常不在本 worktree
+ *  （其它模块/并行分支），存在性检查会把真实文件误判成读不懂（且 AC 用例的假 root 里文件不存在）。 */
+function classifySuiteToken(token: string): "file" | "pseudo-stage" | "unclassified" {
+  const t = String(token ?? "").trim().replace(/[,;]+$/, "");
+  if (!t) return "unclassified";
+  if (!SUITE_PATH_TOKEN_RE.test(t)) return "unclassified";
+  if (t.includes("/")) return "file";
+  if (!t.includes(".")) return "pseudo-stage";
+  return SUITE_TEST_FILE_RE.test(t) ? "file" : "unclassified";
+}
+
+/** token → repo-relative；定位不出 ⇒ null（**读不懂的独立取值**，硬规则 3b）。
+ *  绝对路径的 repo 根【只能】由 root 给出（生产里 `measure-suite-reporter` 发的是 full-path，而 suite
+ *  在任务 worktree 里跑、调用方拿的是主检出 root）：先按 root 前缀剥离，不在 root 下则取「在 root 下
+ *  真实存在」的最长后缀——存在性是判据。⛔ 不按 `packages|plugin|experiments` 关键词猜前缀（那正是本
+ *  缺陷的成因）；⛔ 也不在无 root 时把绝对路径削成「看着像 repo-relative」的假路径——它会被当成已归因，
+ *  直接污染 AC-317 的读数（假在产物字段上 ⇒ 比读不懂更坏）。 */
+function toRepoRelToken(token: string, root: string | null): string | null {
+  const raw = String(token ?? "").replace(/\\/g, "/").trim();
+  if (!raw.startsWith("/")) return normalizeRel(raw) || null;
+  const rootAbs = root ? `/${normalizeRel(root)}` : "";
+  if (!rootAbs || rootAbs === "/") return null;
+  if (raw === rootAbs || raw.startsWith(`${rootAbs}/`)) return normalizeRel(raw.slice(rootAbs.length)) || null;
+  const parts = raw.split("/").filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    const cand = parts.slice(i).join("/");
+    try {
+      if (fs.statSync(path.join(rootAbs, cand)).isFile()) return cand;
+    } catch { /* 该后缀不存在，继续缩短 */ }
+  }
+  return null;
+}
+
+/** `__PERFILE__ duration_ms=… <token> passed=false …` 的 <token> = `passed=false` 前那个字段。 */
+function suiteTokenBeforePassedFalse(line: string): string | null {
+  const idx = line.indexOf("passed=false");
+  if (idx < 0) return null;
+  const parts = line.slice(0, idx).trim().split(/\s+/);
+  return parts.length ? parts[parts.length - 1] : null;
+}
+
+/** `not ok - <rest>` 的 <rest>（兼容 TAP 的 `not ok 1 - name` 编号形态）。无该形态 / 空 ⇒ null。
+ *  ⛔ 这一个正则就是「什么算 not ok 行」的唯一定义：下面的 head / 指名文件两个读者共用它。 */
+function suiteNotOkRest(line: string): string | null {
+  const m = /^not ok\b(?:\s+\d+)?\s*-\s*(.*)$/i.exec(line);
+  if (!m) return null;
+  return m[1].trim() || null;
+}
+
+/** `<rest>` 里 `:` 之前的头部 token（`lint` / `server/a/b.test.ts`）；空 ⇒ ""（调用方按 unclassified 处置）。 */
+function suiteNotOkHead(rest: string): string {
+  const ci = rest.indexOf(":");
+  return (ci < 0 ? rest : rest.slice(0, ci)).trim();
+}
+
+/** 伪阶段名后指名的真实文件：`lint: <rel>:<line>:<col>: <msg>` ⇒ `<rel>`。
+ *  只在确实像路径/测试文件时返回（⛔ 不把 `not ok - lint: 5 problems` 的 `5` 当文件）。 */
+function suiteFileNamedAfterStage(rest: string): string | null {
+  const ci = rest.indexOf(":");
+  if (ci < 0) return null;
+  const chunk = (rest.slice(ci + 1).trim().split(/\s+/)[0] ?? "").replace(/(?::\d+){1,2}:?$/, "").replace(/:$/, "");
+  if (!chunk) return null;
+  if (!chunk.includes("/") && !SUITE_TEST_FILE_RE.test(chunk)) return null;
+  return chunk;
+}
+
+/** suite 日志 → 失败行解析（三态）。N = 失败行数（`__PERFILE__ … passed=false` + `not ok - …`）。
+ *  ⛔ N 与 files 分开返回：调用方据此把「日志里没有失败行」与「有 N 行但一行也归因不出」写成不同的判词
+ *  （旧实现两者都只说「提取不出」，与「真的没有可修对象」同形）。 */
+export function parseSuiteLogFailures(logText: string, root?: string | null): SuiteLogFailureParse {
+  const files: string[] = [];
+  const pseudoStages: string[] = [];
+  const unclassified: string[] = [];
+  let failingLines = 0;
+  const notePseudo = (t: string): void => { if (t && !pseudoStages.includes(t)) pseudoStages.push(t); };
+  const noteUnclassified = (t: string): void => { if (t && !unclassified.includes(t)) unclassified.push(t); };
+  const addFile = (token: string): void => {
+    // 定位不出 repo-relative（如无 root 的绝对路径）⇒ 归入「读不懂」，⛔ 不冒充已归因（硬规则 3b）。
+    const rel = toRepoRelToken(token, root ?? null);
+    if (!rel) { noteUnclassified(token); return; }
+    if (!files.includes(rel)) files.push(rel);
+  };
+
   for (const raw of String(logText ?? "").split("\n")) {
     const line = raw.trim();
-    if (!line.includes("passed=false")) continue;
-    // `__PERFILE__ duration_ms=… <path> passed=false …` 的 <path> 有两种实况形态（同一 runner，不同 cwd/
-    // 传参路径）：repo-relative（`plugin/test/x.test.mjs`）与 worktree 绝对路径（`/…/quay-worktrees/<task>/
-    // plugin/test/x.test.mjs`）。只取 repo-relative 的 `(packages|plugin|experiments)/…` 后缀，其前可接
-    // 行首 / 空白 / 路径分隔符——⛔ 只匹配 `(?:^|\s)` 会漏掉绝对路径形态（`/plugin/…` 前是 `/` 非空白），
-    // 使续做提示与豁免判定的失败测试集对绝对路径日志恒空（恒假，硬规则 4b）。
-    const m = /(?:^|\s|\/)((?:packages|plugin|experiments)\/[^\s]+\.test\.mjs)\s+passed=false\b/.exec(line);
-    if (m && !out.includes(m[1])) out.push(m[1]);
+    if (line.includes("passed=false")) {
+      const token = suiteTokenBeforePassedFalse(line);
+      if (!token) continue;
+      failingLines += 1;
+      const cls = classifySuiteToken(token);
+      if (cls === "file") addFile(token);
+      else if (cls === "pseudo-stage") notePseudo(token);
+      else noteUnclassified(token);
+      continue;
+    }
+    const rest = suiteNotOkRest(line);
+    if (rest === null) continue;
+    failingLines += 1;
+    const head = suiteNotOkHead(rest);
+    const cls = classifySuiteToken(head);
+    if (cls === "file") { addFile(head); continue; }
+    if (cls === "pseudo-stage") notePseudo(head);
+    else noteUnclassified(head);
+    // `not ok - <stage>: <rel>:<line>:<col>` 行把阶段失败【指名】到了真实文件上 ⇒ 归因到它。
+    const named = suiteFileNamedAfterStage(rest);
+    if (named !== null) {
+      if (classifySuiteToken(named) === "file") addFile(named);
+      else noteUnclassified(named);
+    }
   }
-  return out;
+  return { files, failingLines, pseudoStages, unclassified };
+}
+
+/** 判词的「读到了什么」半边：伪阶段名 + 读不懂的 token 摘要（judgeRetryExemption 与 stop-terminal 判词
+ *  共用一份措辞，⛔ 不各写一遍——两份措辞就是两处漂移）。 */
+function suiteTokenDetail(pseudoStages: string[], unclassified: string[]): string {
+  const extra: string[] = [];
+  if (pseudoStages.length) extra.push(`pseudo-stage tokens: ${pseudoStages.slice(0, 5).join(", ")}`);
+  if (unclassified.length) extra.push(`unrecognized tokens: ${unclassified.slice(0, 5).join(", ")}`);
+  return extra.length ? `; ${extra.join("; ")}` : "";
+}
+
+/** 从 suite 日志文本提取失败测试文件（repo-relative）。见 parseSuiteLogFailures。
+ *  读不出 ⇒ []（不伪造；空列表与「读懂了但无失败」同形，调用方据 continueSuiteLogNote 的有无判定
+ *  是否 suite 红，或据 parseSuiteLogFailures().failingLines 把两者分开）。 */
+export function failingTestFilesFromSuiteLog(logText: string, root?: string | null): string[] {
+  return parseSuiteLogFailures(logText, root).files;
 }
 
 /** 读任务 `## Touches`（repo-relative 路径列表，normalizeRel）。任务文件缺失 / 无 Touches 段 ⇒ null
@@ -2024,7 +2167,7 @@ export function continueRelatednessNote(root: string, task: string, attempts: Ex
   } catch {
     return "";
   }
-  const failing = failingTestFilesFromSuiteLog(logText);
+  const failing = failingTestFilesFromSuiteLog(logText, root);
   if (failing.length === 0) return "";
   return formatRelatednessNote(relatednessSignalsFor(root, task, failing));
 }
@@ -2057,6 +2200,14 @@ export interface RetryExemptionJudgment {
   signatures: string[];
   /** 窗口内命中同一签名的【其它】不同任务 id（豁免时非空；非豁免 = []）。 */
   recurredTasks: string[];
+  /** 本次 suite 日志里解析器识别出的失败行数 N。⛔ 与 failingTestFiles 分开记：`0 of N` 才是
+   *  「日志里有 N 行失败、一行也没归因出」的证据；N=0 则说明日志里连失败行形态都没有。
+   *  两者在旧实现里同形（都只说「提取不出」）⇒ 判词曾写成「没有 worker 能修的东西」（硬规则 3b）。 */
+  suiteFailingLines?: number;
+  /** 解析器读不懂的 token（伪阶段名 / 句子碎片，原样留证）。 */
+  suiteUnclassified?: string[];
+  /** 解析器识别出的伪阶段名 token（`lint` / `typecheck`——它们不是测试文件）。 */
+  suitePseudoStages?: string[];
 }
 
 /** 近期窗口缺省：48h（与提案 48h needs-human 复盘同窗）。非新设数值阈值——只是「近期」的操作化，与
@@ -2222,18 +2373,34 @@ export function judgeRetryExemption(
   } catch {
     return { verdict: "insufficient-data-fallback", reason: `unable to read suite log ${suiteLogPath}`, failingTestFiles: [], signatures: [], recurredTasks: [] };
   }
-  const failingTestFiles = failingTestFilesFromSuiteLog(logText);
+  const parsed = parseSuiteLogFailures(logText, root);
+  const parseNote = {
+    suiteFailingLines: parsed.failingLines,
+    suiteUnclassified: parsed.unclassified,
+    suitePseudoStages: parsed.pseudoStages,
+  };
+  const failingTestFiles = parsed.files;
   if (failingTestFiles.length === 0) {
-    return { verdict: "insufficient-data-fallback", reason: "no failing test file extracted from the suite log", failingTestFiles: [], signatures: [], recurredTasks: [] };
+    // ⛔ 判词不得写成肯定断言（旧措辞「没有 worker 能修的东西」——依据只是「解析器没读懂」，硬规则 3b）。
+    // 只报可核的读数：解析器读到 N 行失败、0 行归因到文件。`0 of N` 与 `0 of 0` 是两种不同的实况。
+    const detail = suiteTokenDetail(parsed.pseudoStages, parsed.unclassified);
+    return {
+      verdict: "insufficient-data-fallback",
+      reason: `no failing test file extracted from the suite log (parser extracted 0 of ${parsed.failingLines} failing lines${detail})`,
+      failingTestFiles: [],
+      signatures: [],
+      recurredTasks: [],
+      ...parseNote,
+    };
   }
   const signatures = assertionSignaturesFromSuiteLog(logText);
   if (signatures.length === 0) {
-    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [] };
+    return { verdict: "insufficient-data-fallback", reason: "no assertion signature extracted from the suite log", failingTestFiles, signatures: [], recurredTasks: [], ...parseNote };
   }
   // ① 失败测试文件与任务 Touches/diff 交集——任一命中 ⇒ 任务自身缺陷，照常计数（AC2 防滥用负控制）。
   const delta = computeDeltaPaths(root, taskId);
   if (delta === null) {
-    return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [] };
+    return { verdict: "insufficient-data-fallback", reason: "unable to read this task's Touches/diff (delta unreadable)", failingTestFiles, signatures, recurredTasks: [], ...parseNote };
   }
   for (const rel of failingTestFiles) {
     const d = classifyDeltaRelatedness(rel, delta, directImportRels(root, rel));
@@ -2241,7 +2408,7 @@ export function judgeRetryExemption(
       return { verdict: "own-defect-counted", reason: `failing test ${rel} is in this task's Touches/diff (own defect)`, failingTestFiles, signatures, recurredTasks: [] };
     }
     if (d.verdict === "unknown") {
-      return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [] };
+      return { verdict: "insufficient-data-fallback", reason: `unable to determine relatedness of failing test ${rel}`, failingTestFiles, signatures, recurredTasks: [], ...parseNote };
     }
   }
   // ② 全部失败测试文件与本任务无关 ⇒ 查签名跨任务复发。
@@ -2357,6 +2524,17 @@ function unattributablePriorAttempts(
   return out;
 }
 
+/** stop-terminal 判词的归因依据。⛔ 只说【解析器读到了什么】，不做「日志里没有 worker 能修的东西」这类
+ *  肯定断言——那句话的依据只是「解析器没读懂」（硬规则 3b：读不懂 ⇒ 伪装成判定）。N 是解析器读到的失败
+ *  行数：`0 of N`（N>0）说明日志里有失败行却一行也没归因出；`0 of 0` 说明连失败行形态都没有。 */
+function suiteAttributionEvidence(exemption: RetryExemptionJudgment): string {
+  const n = exemption.suiteFailingLines;
+  const base = typeof n === "number"
+    ? `parser extracted 0 of ${n} failing lines and attributed none to a file`
+    : "parser attributed no failing file (failure-line count unavailable on this judgment)";
+  return `${base}${suiteTokenDetail(exemption.suitePseudoStages ?? [], exemption.suiteUnclassified ?? [])}`;
+}
+
 /** 后续动作判定（纯结构性、不写盘、不调 LLM）。输入 = 本轮 judgeRetryExemption 的判定；输出 =
  *  「照常计数重派」还是「立即停 + 标 needs-human」。⛔ 不重写既有重试上限逻辑：`count-and-retry`
  *  的诊断与计数仍由 onWorkerFinished 的 advanceRetryCap 路径负责，本函数只回答【该不该再拿一个
@@ -2403,7 +2581,7 @@ export function decideExitedNotLandedAction(
       reason:
         `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
         `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
-        `(the suite log names nothing a worker could fix); stopping instead of spending another worker session`,
+        `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`,
     };
   }
   return {
