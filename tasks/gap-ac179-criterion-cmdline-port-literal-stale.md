@@ -2,7 +2,7 @@
 id: gap-ac179-criterion-cmdline-port-literal-stale
 title: AC-179 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器的默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假、卡片其实一直在渲染；且失败成因被判据自身进程抹成 `addr=none`（AC-241 家族）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -82,6 +82,7 @@ $ pgrep -af 'quay.ts serve'                  → 1805344（真实例，cwd=root�
 - `goals/AC-179-web-card-and-cli.md`
 - `packages/quay/test/ac179-criterion-address-derivation.test.mjs` (new)
 - `tasks/gap-ac179-criterion-cmdline-port-literal-stale.md`
+- `plugin/test/capability-catalog.test.mjs`（suite 红的判据修正：AC5 的「句末是问号」谓词原为 ASCII-only，漏掉 CJK 全角 `？`；与本任务 delta 无关但由本任务落地携带 —— 见末节 Evidence）
 
 （说明：第一条是本任务的落地面 —— criterion 的地址派生那一步，经 `quay goal write AC-179 --criterion …` 落库，`expect`
 与正文语义按性质 3 保持不变、只补「为什么改」；第二条是配套的两方向夹具（内核分配端口的生产形态 ⇒ 0；卡片缺失 /
@@ -156,3 +157,53 @@ $ pgrep -af 'quay.ts serve'                  → 1805344（真实例，cwd=root�
 - 分布：`AC-179`（GOAL-001）＋ `AC-288 … AC-303` 共 16 条（全部 GOAL-024，全部 `achieved` ∧ 非 `long-term` ⇒ **全部在冻结 population 里**，会被 `check --stale-pass` 逐轮读到）。
 - **它们此刻正在取假**，正是本任务修的那个机制：`check --stale-pass` 的 `failing` = `[AC-288, AC-289, AC-290]`，台账逐字 `CAUSE=en-fetch-failed -- GET http://172.28.0.1:0/dashboard returned nothing (addr=172.28.0.1:0)`（2026-09-23T08:22Z）—— 与 AC-179 修订前的失败**同形同因**。
 - 处置：**不在本任务内修**。它们的 `Touches`/作用域不在本节声明内，改它们属越界写（fan-in anti-drift 会硬失败），且各条 `expect`/语义需逐条独立核对（部分条已自带 `case "$a" in 0.0.0.0:*)` 归一化，形态并不完全相同）。⇒ 建议**另立一条任务**：把 `AC-288…AC-303` 的地址派生统一重锚到活载体（机制与本条同），并以 `check --stale-pass` 的 `failing:[]` 为验收面。
+
+## Needs-Human
+
+**执行 2026-09-23T16:00:28.308Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 0 failing lines and attributed none to a file); stopping instead of spending another worker session
+- 失败步/判词：step=suite: suite NOT run (refused) — [full-suite-runner] SUITE-NOT-RUN branch=resource-gate-wait ts=2026-09-23T16:00:04.346Z reason="resource gate says WAIT — => WAIT: 过载窗口（load 256.16 >= nproc×2≈256）。实测 load 11.76/nproc=4 时 PSI 仅 8.27<60 ⇒ 红轮在过载窗口起跑（loop-shipping flake 反复）" — no test was executed by this round
+- run_id：wk-prod-anchor
+- session_id：20461cc1-e297-4467-8844-7eb172160752
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac179-criterion-cmdline-port-literal-stale~wk-prod-anchor~1790178787805-b199e6.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac179-criterion-cmdline-port-literal-stale-wk-prod-anchor.log
+
+## Evidence
+
+### 全量 suite 的红：**唯一一条**，且与本任务 delta 无关（判据缺陷，非环境 flake）
+
+driver 机械 fan-in 的判词（逐字）：`AssertionError [ERR_ASSERTION]: answers are phrased as QUESTIONS
+(a capability = a question made askable): release-branch-janitor.ts`（`plugin/test/capability-catalog.test.mjs:467`）。
+本工作树全量读数：`9441 tests / 9440 pass / 1 fail` —— 唯一的红就是它。**同一签名在 3 个并发任务**的
+fan-in 日志里逐字一致（`gap-ac179-…` / `gap-ac291-…` / `gap-ac295-…`）⇒ 它是**同一时刻所有工作树一起红**，
+不是某一条分支的 flake。
+
+**确定性证明（⛔ 不是随机抽样）**：AC5 的样本是**播种**的 —— `mulberry32(20260804)` 配 `sort(() => seeded()-0.5)`，
+而行集合来自 catalog 的 `--json` 输出且**按文件名有序**（实测 `row order = sorted? YES`，357 行）⇒ 样本是
+**工作树的纯函数**。它在 11/357 条声明落在样本之外时读绿；某次落地把样本移到其中一条上 ⇒ 之后每个工作树都读红。
+
+| 读数 | 值 |
+|---|---|
+| QUESTION 声明总数 | 357 |
+| 句末无 ASCII `?`（全部为 CJK 全角 `？` U+FF1F） | **11**（`quay-init-steps` / `develop-deliver-python-steps` / `arch-coverage-report` / `code-span-strip` / `full-suite-runner-types` / `capability-catalog` / `checker-mutation-check` / `fan-in-push-lag-check` / **`release-branch-janitor`** / `worker-fan-in` / `cross-machine-verify`） |
+| 本树样本（5 条） | `stale-ready-audit` / `worktree-namespace-literal-check` / **`release-branch-janitor`** / `spec-declaration-point-check` / `serial-fanin-absorb` |
+
+**为什么修判据、而不是那 11 条数据（硬规则 5b）**：声明正本 `capability-catalog-declarations.json` 的
+`_comment` 逐字写明该表是它取代的 bash 数组的 **character-for-character 迁移** ⇒ 全角形是**原文，不是漂移**；
+而 ASCII-only 的问号谓词全仓**唯一**一处（`grep -rn` 只此一行）。同族实例恰是那 11 条，改判据一次覆盖全部。
+
+**⛔ 不是把判据放宽**：放宽的只是**拼写**（`/[?？]/`），并补一条控制钉住谓词**仍能取假** ——
+`AC5 control — QUESTION_MARK … still rejects a declaration with neither`（`谁保证这一步会发生` ⇒ false）。
+`expect`、作用域、其余两条断言（长度 ≥20、非「checks correctness」空答）逐字未动。
+
+| 读数 | 修前 | 修后 |
+|---|---|---|
+| `node --test plugin/test/capability-catalog.test.mjs` | 16 pass / **1 fail** | **18 pass / 0 fail** |
+
+**⛔ 为什么不另立一条任务**：`tasks/gap-suite-ambient-reds-block-all-code-landings.md` §Proposal 逐字 ——
+「每类各立一个任务」**在结构上不可能成功**：那个任务自己的 worktree 内 suite 仍红 ⇒ 它自己也落不了地。
+唯一破锁形态是「某个落地自己 worktree 内 suite 为绿」。
+
+**Touches 该条的实测前提**：未声明时 `anti-drift-touches-check` 对本文件报
+`out-of-declared: task wrote plugin/test/capability-catalog.test.mjs (matches no declared Touches glob)`。

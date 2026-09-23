@@ -230,6 +230,61 @@ when two consecutive rounds produce byte-identical logs (a retry provably cannot
 result), leaving the task in a human-readable `needs-human` terminal state. Keeping the obligations
 above costs one `shift 2`; violating them costs a full agent session per round.
 
+## The scoped gate's output contract (`SCOPED-THIN`) — read this before writing a scoped entrypoint
+
+quay's mechanical fan-in has a **scoped gate**: before the full suite it runs the project's scoped
+entrypoint (`.quay/config.yml` `loop.scoped_command`; a project that declares none is recorded as
+`not-evaluated` — quay does not invent a scoped run for you) so that a per-task regression is
+caught in seconds instead of after a full suite.
+
+**The contract (one line, and it is the whole point of this section):** when the scoped
+entrypoint resolves **no test files to evaluate** for the task (= nothing was measured), it MUST
+print one line on stdout
+
+```
+SCOPED-THIN selected=0
+```
+
+and still exit **0**. The marker is matched **at the start of a line** (after trimming) — a
+sentence that merely *mentions* `SCOPED-THIN` somewhere in its middle is not a match.
+
+**Why this is required, not a nicety.** Exit-code-only signalling cannot tell "I ran your tests
+and they passed" apart from "I ran nothing": both exit 0. quay records the two as *different
+values* — `green` vs `not-evaluated` — and the only witness to "nothing was measured" is the
+entrypoint itself. Without the marker, a scoped gate that measured nothing is recorded as a pass,
+which is a green that can never go red. Two real consequences you will otherwise hit:
+
+- Tasks whose deliverable is shell/script/config files list no test files in `## Touches`, so a
+  "select the test files named in Touches" entrypoint selects **zero** and, without the marker,
+  silently reports success on every round.
+- A human reading a `scoped-gate: ok` record cannot tell whether the gate worked at all.
+
+**Adopt it like this:**
+
+1. **Touches names test files ⇒ the scoped run MUST really run them.** If your selector finds the
+   files the task declares but runs none of them, that is a defect in your selector, not something
+   to report as success. Do **not** print the marker in this case.
+2. **Touches names no test files ⇒ run the check you do have** (your own linter/contract checker/
+   build) and print the marker only if that check measured nothing either. A project-delivered
+   checker that genuinely ran is a real scoped run: exit 0 with no marker, and it will be recorded
+   `green`.
+3. **Never print the marker to make a red run green.** A non-zero exit is recorded `red`
+   regardless of the marker; the marker is only read when the command exited 0.
+
+**What quay records** (`.quay/fan-in-step-trace.jsonl`, one `scoped-gate` `step-end` record per
+fan-in; `ok` is the control-flow field, `verdict` is the value):
+
+| scoped run | `verdict` | `reason` |
+|---|---|---|
+| ran ≥1 test file, all green | `green` | — |
+| ran ≥1 test file, some red | `red` | the failure summary (and the step fails the fan-in) |
+| exit 0 + `SCOPED-THIN …` | `not-evaluated` | `scoped-thin(selected=0)` |
+| no scoped command declared | `not-evaluated` | `no-scoped-command-declared` |
+
+`not-evaluated` does **not** fail the fan-in (the full suite still runs, and it is the only thing
+that actually measured the change) — it is there so that "nothing was measured" is never written
+down as a pass.
+
 ## Steps
 
 ### 1. Resolve the plugin root
