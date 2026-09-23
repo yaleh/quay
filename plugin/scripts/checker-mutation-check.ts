@@ -127,6 +127,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
+// derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
+import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
 
 // ── locations ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -149,7 +152,7 @@ export function makeCtx(root: string): Ctx {
     root: abs,
     casesDir: path.join(abs, "plugin", "scripts", "checker-mutation-cases"),
     testSh: path.join(abs, "scripts", "test.sh"),
-    staticGate: path.join(abs, "plugin", "scripts", "runner-static-gate.ts"),
+    staticGate: path.join(abs, REGISTRY_REL_CANDIDATES[0]),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     workflowsDir: path.join(abs, ".github", "workflows"),
   };
 }
