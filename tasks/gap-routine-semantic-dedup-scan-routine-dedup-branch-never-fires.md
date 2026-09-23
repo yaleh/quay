@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-routine-dedup-branch-never-fires
 title: "semantic-dedup-scan: The gate documents dedup 'by a stable finding key'
   (routine-file-gate.ts:5) but across 6 semantic-dedup-scan rounds 0 of 264
   rejections carry the 'dedup:' reas"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
