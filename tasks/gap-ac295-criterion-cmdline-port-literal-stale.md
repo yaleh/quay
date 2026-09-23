@@ -124,3 +124,22 @@ curl -sf --max-time 10 -H 'Cookie: lang=zh' http://172.28.0.1:13609/needs-human 
 一行复现：`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --test plugin/test/goal-invariants-standing.test.mjs`（带该变量 ⇒ 红；不带 ⇒ 绿）。
 
 ⚠️ 本任务 Touches 不含 `scripts/test.sh` / `plugin/scripts/suite-driver.ts` ⇒ **不在本任务内修**（越界写会被 fan-in 的 anti-drift 拒）。同族 8 个 in-flight 任务（`gap-ac179/288/289/290/291/292/293/294-…`）同样会被这条卡住 ⇒ 建议单独立案（最小修法：`scripts/test.sh` 入口 `unset QUAY_GOAL_ACCEPTANCE_ACTIVE`，与既有 `unset FORCE_COLOR` 同形；或在 `suite-driver.ts` 的 spawn env 里剔除）。
+
+## Evidence — 本轮（2026-09-24，第 4 轮）· 卡点已收敛到单一环境缺陷，实现侧零改动
+
+**本轮复验（同一 worktree，HEAD = `6a2d0ab8e`，已并入 develop）：**
+
+- `task_check` ⇒ `ok:true`，**6/6** AC。
+- **scoped gate**（与 fan-in 同一条命令，**裸跑**、⛔ 不加 `env -u`）：`bash scripts/test.sh --for-task gap-ac295-criterion-cmdline-port-literal-stale --allow-thin` ⇒ **EXIT=0**，`tests 14 / pass 14 / fail 0`。
+- **AC-295 判据在活实例上仍为真**：`node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json` ⇒ **exit 0**，`payload.reason = "acceptance passed (exit 0)"`。
+- **AC6 台账尾**：`item_id=AC-295` 最后一条 = `2026-09-23T18:03:41.416Z | pass | goal-sweep | hash 7631739f3aeeeafc`（= 修订后指纹，⛔ 非旧 `bf42948d03aef763`）；该 AC 累计 116 条事件。
+- 分支 delta 对 develop = **1 file**：`packages/quay/test/ac295-criterion-address-derivation.test.mjs`（`goals/AC-295-*.md` 的重锚已在 develop 上）。worktree clean，merge 已提交。
+- `--write-scoped-gate-cache` ⇒ `{ok:true, key: "gap-ac295-…\tedf5fa9d8b4a16c2c624c34a4d00054fcba6c78e"}`。
+
+**上一轮 suite 红的归因本轮升级为机制自身的判词（⛔ 不再是人工推断）**：直接调用生产判定函数 `judgeRetryExemption`（`plugin/scripts/worker-driver.ts`）喂入本任务最后一条 `exited-not-landed` 记录 ⇒ `verdict: "unrelated-flaky-exempt"`；`recurredTasks: ["gap-fan-in-delta-classify-declared-doc-surfaces"]`；`failingTestFiles` = 上一轮那 8 个 goal 家族文件。⇒ **「与 delta 无关」已被机制自身认定**。但该判词把动作定为 `count-and-retry`（`decideExitedNotLandedAction`，⛔ **不是**放行落地），而 fan-in 的 suite 步对红一律 `failSuite` fail-closed ⇒ **本任务仍无法落地**。
+
+**30 条红的成分核对（硬规则 3：给条数不给单一布尔）**：上一轮日志 `__PERFILE__ … passed=false` 恰好 **8 个文件**（`goal-driver-s02/s04/s10/s12/s13`、`l1-delivery-surface-check`、`goal-store`、`goal-invariants-standing`），其余文件全部 `passed=true`；`# fail 30` **全部**落在这 8 个文件内 ⇒ 无第二种成因。
+
+**环境泄漏本轮仍在**：`/proc/2391720/environ`（driver-anchor，root=`/data/home/yale/work/quay`，2026-09-24T02:33 启动）实测含 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1`；本 worker 会话进程亦继承（父链直上该 anchor）。
+
+**⇒ 上一节的「建议单独立案」本轮已兑现（⛔ 不重复诊断第 4 次）**：新任务 `gap-goal-acceptance-active-leaks-into-suite-via-driver-anchor-env`（`labels: gap/defect`，`status: todo`，5 条 AC，`task_check` 的 `author->ready` 读作 `ok:true, shape: finding`）——内含泄漏链逐层证据、发生率（`.quay/worker-outcome.jsonl` 两条带 `suiteSignatures` 的记录）、逐项同族枚举 AC，与最小修法（`scripts/test.sh` 既有入口归一化块补一个成员 / `suite-driver.ts` spawn env 剔除）。⛔ 本任务**仍未**越界修它（`## Touches` 不含 `scripts/test.sh`）。
