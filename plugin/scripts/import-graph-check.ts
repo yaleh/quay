@@ -48,6 +48,9 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "./checker-lib.ts";
 import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
+// `lineAt` was this file's own copy of the 1-based newline counter — same body as eleven others
+// (semantic-dedup-scan `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
+import { lineOf } from "./source-text-lib.ts";
 
 // ── the three measured quantities + the conditional fourth rule ─────────────────────────────────────
 
@@ -159,13 +162,6 @@ export interface RawImport {
   kind: "value" | "type";
 }
 
-/** 1-based line number of a source index. */
-function lineAt(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
 /**
  * Extract the module specifiers a source file imports, BY POSITION: a candidate matches only when the
  * `import` / `export` KEYWORD sits at a code position (mask === 0). The specifier STRING is of course
@@ -183,7 +179,7 @@ export function extractImports(src: string): RawImport[] {
   const add = (kwIdx: number, fromIdx: number, spec: string, kind: "value" | "type"): void => {
     if (kwIdx < 0 || kwIdx >= src.length || mask[kwIdx] !== 0) return;
     if (fromIdx >= 0 && (fromIdx >= src.length || mask[fromIdx] !== 0)) return;
-    const line = lineAt(src, kwIdx);
+    const line = lineOf(src, kwIdx);
     found.set(`${line}\t${spec}`, { spec, line, kind });
   };
 

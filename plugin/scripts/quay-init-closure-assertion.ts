@@ -26,6 +26,26 @@ import { execFileSync } from "node:child_process";
 import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
+// The generator's repo-root-relative path — THE mechanism-layer naming point for this entity
+// (gap-quay-init-sh-no-single-naming-point). Both spawn sites below used to spell
+// `path.join(root, "plugin", "scripts", "quay-init.sh")` independently, i.e. this file carried two
+// more naming points of the same name the ratchet carried two of (硬规则 5b: the fix is the shared
+// source, not a second correct-looking copy — a copy that agrees TODAY drifts later, and one side
+// would silently keep spawning the old name).
+//
+// ⛔ WHY IT LIVES HERE (in the assertion) AND NOT IN `quay-init-closure-ratchet.ts` (where the
+// naming-point fix started): THIS module is one of the files `develop-deliver-tgz.sh` ships to the
+// remote host (`transport_flat_files`), and that enumeration is checked MECHANICALLY — a shipped file
+// must be self-sufficient flat, so its every `./` import must itself be in the shipped set
+// (`--selfcheck-transport-closure`, and the 2026-09-11 production defect it exists to catch: a
+// dependency gained here but not added there dies MODULE_NOT_FOUND on the remote, where nothing local
+// sees it). The SIBLING is NOT shipped (dev-tree only: `precommit-guard.ts` / `runner-static-gate.ts`
+// are its callers), so a shipped→non-shipped import is a closure violation, while the reverse
+// direction is invisible to the check and true in fact. The constant's home is therefore the
+// TRANSPORTABLE side of the pair — the direction that keeps the closure intact — and the sibling
+// imports it for `LAYDOWN_SOURCES[0]` + its own spawn site.
+export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
+
 // The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`
 // and `goals/` directories admit their descendants.
 export const CLOSED_SET_FILES: ReadonlySet<string> = new Set([
@@ -94,7 +114,7 @@ export function assertClosure(relPaths: string[]): ClosureAssertionVerdict {
  * Returns null (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits non-zero.
  */
 export function runLaydownPaths(root: string): string[] | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-assertion-"));
   const target = path.join(tmpBase, "target");
@@ -195,7 +215,7 @@ export function reportedItems(report: FailureStateReport): string[] {
  * failure but saw none must not look like "覆盖了失败路径").
  */
 export function runFailureStateReport(root: string): FailureStateReport | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const quayInit = path.join(root, QUAY_INIT_REL);  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-fail-"));
   const target = path.join(tmpBase, "target");

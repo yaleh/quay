@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # touches-orthogonality-selfcheck.sh — regression acceptance test for the milestone-`touches`
 # disjointness check (DIR-044 increment 1). EXTERNAL acceptance predicate: it does NOT trust the
-# check's self-report — it runs `touches-orthogonality-check.sh` against fixed fixture charter PAIRS
-# and asserts the EXPECTED exit code for each.
+# check's self-report — it runs `touches-orthogonality-check.ts` (the module itself; the thin
+# `.sh` wrapper it used to go through was deleted in SPEC Phase 1c) against fixed fixture charter
+# PAIRS and asserts the EXPECTED exit code for each.
 #
 # CRITICAL (DIR-019 discipline): each pair isolates ONE outcome and is RED-then-GREEN against the
 # module. If a pair behaves wrong, the fix belongs in `scripts/touches-orthogonality-check.mjs`,
@@ -17,9 +18,9 @@
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd to experiment root" >&2; exit 2; }
 
-CHECK="./scripts/touches-orthogonality-check.sh"
+CHECK="./scripts/touches-orthogonality-check.ts"
 FIX="fixtures/touches"
-[ -x "$CHECK" ] || { echo "ERROR: $CHECK not found/executable" >&2; exit 2; }
+[ -f "$CHECK" ] || { echo "ERROR: $CHECK not found" >&2; exit 2; }
 
 # id | charterA | charterB | expected exit (0 = DISJOINT; 1 = OVERLAP/conservative-serialize)
 CASES=(
@@ -35,7 +36,7 @@ CASES=(
 fail=0
 for c in "${CASES[@]}"; do
   IFS='|' read -r id a b want <<< "$c"
-  "$CHECK" "$a" "$b" >/dev/null 2>&1
+  node "$CHECK" "$a" "$b" >/dev/null 2>&1
   got=$?
   if [ "$got" = "$want" ]; then
     echo "PASS: $id — exit $got (expected $want)"

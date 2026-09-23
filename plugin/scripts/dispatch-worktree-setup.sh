@@ -77,7 +77,7 @@ fi
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 worktree=""
 root=""
@@ -108,7 +108,7 @@ done
 if [ -z "${root}" ]; then
   root="$(mainCheckoutRoot "${worktree}")"
 fi
-[ -n "${root}" ] || root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+[ -n "${root}" ] || root="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 [ -d "${root}" ] || { echo "dispatch-worktree-setup: main repo dir not found: ${root}" >&2; exit 2; }
 
 # ── 0. branch self-check (gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind) ──

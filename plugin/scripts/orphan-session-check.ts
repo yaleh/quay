@@ -43,6 +43,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
+import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 // Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
 // (packages/quay/src/primitives/PROVENANCE.md). The `/proc/<pid>/stat` field-22 read below used to
 // be a local hand-rolled copy; it is not any more (SPEC §3.3: a second implementation is the one
@@ -144,15 +145,14 @@ export function sessionsUnderWorkspace(procs: ClaudeSessionProc[], workspace: st
 /**
  * Read one process's argv from /proc/<pid>/cmdline (NUL-separated). Returns null if the process is
  * already gone / unreadable (transient — a teardown racing a process exit must not fabricate a hit).
+ *
+ * 读 + NUL 切分由 kernel leaf `readProcCmdline` 单点实现（本文件原有第二份手搓副本 —
+ * gap-judgment-rewrites-route-through-proc-identity-leaf）。本处只保留【调用点自己的口径】：
+ * 丢弃空字段。⛔ 失败值仍是 null，不折成 []（两者语义不同：null = 读不成，[] = 读到了但无参数）。
  */
 export function readProcArgv(pid: number): string[] | null {
-  try {
-    const raw = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    if (!raw) return null;
-    return raw.split("\0").filter((s) => s.length > 0);
-  } catch {
-    return null;
-  }
+  const argv = readProcCmdline(pid);
+  return argv === null ? null : argv.filter((s) => s.length > 0);
 }
 
 /**

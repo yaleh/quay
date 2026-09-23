@@ -16,7 +16,40 @@
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
+import path from "node:path";
 import { ALL_SERVICE_NAMES, KINDS, VERBS } from "./driver-vocab.ts";
+
+// ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
+// (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
+// observation.ts — ONE naming point PER LAYER.)
+//
+// The name used to be written out in FOUR independent product-layer places: two prose sites here
+// (this file's init help) plus two byte-identical duplicates in cli/init.ts's own handler help. The
+// duplicated sentences agreed only because nobody had edited one of them yet — the "one entity, N
+// naming points" shape (硬规则 5b): a name spelled twice drifts, and the stale half keeps being
+// shown/used. Now the name is written ONCE (below) and every prose surface derives it.
+export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
+
+/** The display basename of `QUAY_INIT_REL` — DERIVED, ⛔ never re-spelled.
+ *  `node:path`'s basename rather than observation.ts's `scriptBasename()` wrapper on purpose:
+ *  bin/quay.ts imports this module statically on EVERY CLI invocation, so pulling a heavy module in
+ *  for a one-line wrapper would tax `quay --help`. It is the same primitive that wrapper wraps — not
+ *  a second derivation. */
+export const QUAY_INIT_BASENAME = path.basename(QUAY_INIT_REL);
+
+/** `quay init --help`, the `--doc-branch-name` flag's "no default" clause. Shared VERBATIM by this
+ *  file and `cli/init.ts` (both render it; the two copies used to be byte-identical duplicates). */
+export const INIT_DOC_BRANCH_NO_DEFAULT_PROSE =
+  `default for <name>: it is supplied by the caller (the shipped ${QUAY_INIT_BASENAME}\n` +
+  `               resolves --doc-branch-name, then loop.doc_branch, then its own default).`;
+
+/** `quay init --help`, the `--branch-model-only` description. Shared VERBATIM by this file and
+ *  `cli/init.ts` (same duplication as the constant above). */
+export const INIT_BRANCH_MODEL_ONLY_PROSE =
+  `Use --branch-model-only when the project is already initialized and you only\n` +
+  `  need the branch model established (the shipped ${QUAY_INIT_REL}\n` +
+  `  upgrade entry calls this): it never rewrites config, so an existing project's\n` +
+  `  gates: / loop: / routines: survive.`;
 
 export function printHelp(sub) {
   if (!sub || sub === "task") {
@@ -235,8 +268,7 @@ Flags:
                sharing one branch and one git index. Already off 'develop' => no-op. <name>
                taken by a branch unrelated to 'develop' => REFUSED (exit 1, nothing moved).
                Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
-               default for <name>: it is supplied by the caller (the shipped quay-init.sh
-               resolves --doc-branch-name, then loop.doc_branch, then its own default).
+               ${INIT_DOC_BRANCH_NO_DEFAULT_PROSE}
   --dry-run    Print the generated config to stdout without writing to disk.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
@@ -268,10 +300,7 @@ Description:
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
 
-  Use --branch-model-only when the project is already initialized and you only
-  need the branch model established (the shipped plugin/scripts/quay-init.sh
-  upgrade entry calls this): it never rewrites config, so an existing project's
-  gates: / loop: / routines: survive.
+  ${INIT_BRANCH_MODEL_ONLY_PROSE}
 
   Adding --doc-branch-name to that entry also ESTABLISHES the doc-only work
   branch. 'quay init' REPORTS which branch fills the doc role and never names

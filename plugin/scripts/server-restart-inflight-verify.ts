@@ -86,6 +86,7 @@ import { lastLine, parseRoundRecord, roundCarrierName, type RoundReading } from 
 // quay's own naming; a third-party project renames the role and every probe built on the literal
 // silently misses — see resolveWorkerProcessName's own first-hand record).
 import { resolveWorkerProcessName } from "./worker-driver.ts";
+import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
 /** AC-256's own id, verbatim — the criterion matches this string exactly. */
 export const AC_ID = "GOAL-017-AC-256";
@@ -443,11 +444,9 @@ export function buildRecord(r: Readings): BuildResult {
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-
 function resolveCliPath(explicit: string | undefined): string | null {
   if (explicit) return fs.existsSync(explicit) ? explicit : null;
-  const repoRoot = path.resolve(SCRIPT_DIR, "..", "..");
+  const repoRoot = moduleRepoRoot();
   const devEntry = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
   return fs.existsSync(devEntry) ? devEntry : null;
 }

@@ -38,15 +38,36 @@ export type Primitive = (typeof PRIMITIVES)[number];
 /** P3（Artifact Liveness）无现成脚本——本任务不实现，只留此占位说明来源尚缺。 */
 export const PRIMITIVE_P3_PLACEHOLDER = "P3";
 
+// ── 阈值谓词：与检测器【共用同一份实现】（本文件唯一的一处 import）────────────────────────────────
+// 为什么破例 import：cluster 阶段曾用裸计数 `hardcoded > 0` 取代检测器自己的阈值判定
+// (`hardcoded >= 5 && hardcoded > accessor`)，于是 25 个逐实体簇里 8 个是检测器**已经判过清白**的
+// 假簇 —— 上游判过、下游不读，输出就与「查过且合格」同形（硬规则 3b）。**两份副本正是这个缺陷的
+// 成因形态**，所以谓词只此一份，定义在 `identity-replication-check.ts`（那里是阈值判定的老家，
+// 且是唯一能与 `sharedModuleControl` 共用的位置）。
+// 代价如实记在此处：本模块被 esbuild 打进 driver bundle (`plugin/scripts/dist/*.js`) 时，检测器会被
+// 一并内联。检测器只依赖 node 内建 + 三个纯模块，且其 CLI 由 `isDirectEntry(import.meta, …)` 守卫
+// ——内联副本的 `import.meta.url` 是 bundle 路径，永远不等于期望 basename，⛔ 不会当 CLI 跑
+// (driver-runtime.ts 的 bundle 重建与 `plugin/scripts/dist/*.js` 均不受影响)。
+import { isFlagged } from "./identity-replication-check.ts";
+
 // ── 三个检测器 `--json` 输出的【最小结构视图】（聚类消费的字段面，⛔ 不 import 检测器本体，
-//    否则会把纯函数绑到它们的 fs/repo-root 重依赖上——strip-types 下 import 是运行时 import）─────
+//    否则会把纯函数绑到它们的 fs/repo-root 重依赖上——strip-types 下 import 是运行时 import。
+//    **唯一例外**：下面那个纯谓词 `isFlagged` —— 它正是本模块要消费、而上一版没消费的那个判定，
+//    复制一份到这里就是本缺陷的成因形态，故宁可真 import 一次；代价与安全论证见其注释）─────────────
 
 /** identity-replication-check.ts --json（P2）里聚类消费的面。 */
 export interface IdentityReportView {
   pathConstants?: Array<{ file?: string }>;
+  /** 判定重写（P2）—— 收窄后的语义：**可合并到 kernel leaf 的**站点。
+   *  `judgmentRewriteCarveOuts`（同一检测器 `--json` 的另一个字段：检测到但结构上不可合并，
+   *  每条带 `carveOut` 类别 + 理由）**刻意不被本模块消费** —— 它不是簇的输入，是「排除 ≠ 没扫到」
+   *  的可区分性载体。⛔ 不要在这里对它再判一次。 */
   judgmentRewrites?: Array<{ file?: string }>;
   byteIdentical?: { count?: number; pairs?: Array<{ plugin?: string; experiment?: string }> };
-  table?: Array<{ entity?: string; code?: number; hardcoded?: number; codeFiles?: string[] }>;
+  // `accessor`/`hardcoded` 是阈值谓词的两个操作数，行上都有（检测器的 LiteralReplication）——
+  // ⛔ 不消费 `flagged`：那是 `sharedModuleControl`（单实体）独有的派生字段，`table[]` 行上没有
+  // （照字面「读 row.flagged」读不到 ⇒ `undefined` ⇒ 判据恒真，硬规则 4）。
+  table?: Array<{ entity?: string; code?: number; accessor?: number; hardcoded?: number; codeFiles?: string[] }>;
 }
 
 /** guard-lineage-check.ts --json（P4）里聚类消费的面。 */
@@ -82,6 +103,16 @@ function relPath(dir: string | undefined, basename: string | undefined): string 
   return dir ? `${dir}/${basename}` : basename;
 }
 
+/** 逐实体复制度降序比较器——**P2 面（`clusterIdentityReport`）与 P1 面（`deletionClosureComponents`）
+ *  共用同一份**，⛔ 不各写一遍（两处副本正是本文件那个缺陷的成因形态：同一判据在两个消费点各写一次，
+ *  修了一处漏另一处 ⇒ 硬规则 5b）。只排序，⛔ 不是选取谓词——选取一律走 `isFlagged`。 */
+function byHardcodedDesc(
+  a: { hardcoded?: number },
+  b: { hardcoded?: number },
+): number {
+  return (b.hardcoded ?? 0) - (a.hardcoded ?? 0);
+}
+
 /** P2 聚类：身份复制（字面量复制度 + 判定重写 + 字节相同对 + 路径字面量常量）。PURE。 */
 export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
   const out: Cluster[] = [];
@@ -99,6 +130,12 @@ export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
   }
 
   // 判定重写：读 /proc/<pid>/cmdline ∧ 比较名字 ⇒ 识别进程，被独立实现多处。
+  // ⛔ 此处**不再过滤一遍**：`judgmentRewrites` 已经是检测器按**类**收窄后的【可合并到 kernel leaf 的】
+  //   站点；结构上不可合并的站点（test / `.sh` / 已 import leaf / repo-import-free `.mjs`）在检测器的
+  //   `classifyRewriteSite` 里被排除，并以 `judgmentRewriteCarveOuts`（每条带类别 + 一行理由）**独立
+  //   出现在同一份 `--json` 里** —— 它们是「排除」，不是「没扫到」。
+  //   在这里再过滤一次就是同一判据的第二份实现（硬规则 5b：修一处漏另一处），与本文件顶部
+  //   `isFlagged` 那条的成因形态完全相同。
   const rewrites = uniqueSorted((r.judgmentRewrites ?? []).map((j) => j.file));
   if (rewrites.length > 0) {
     out.push({
@@ -122,18 +159,33 @@ export function clusterIdentityReport(r: IdentityReportView): Cluster[] {
     });
   }
 
-  // 逐实体字面量复制度：未经单一访问器（hardcoded>0）的实体。
+  // 逐实体字面量复制度：**检测器判定 `flagged` 的实体**才成簇 —— `hardcoded >= 5 && hardcoded > accessor`，
+  // 与 `sharedModuleControl` 共用同一份 `isFlagged`（见文件顶部的 import 注释）。
+  // ⛔ 不是裸 `hardcoded > 0`：那恰好漏掉判据的另一半，把「大量文件走单一访问器引用、少数硬编码」
+  //   （共享模块的正常形态，gate-script-base.ts 10/231 在列）也成簇 —— 25 簇里 8 簇如此。
+  // ⛔ 也不是「把阈值调大」：调阈值仍会把检测器判过清白的行留在族里，同一缺陷换个数字复发。
   const entities = (r.table ?? [])
-    .filter((row) => (row.hardcoded ?? 0) > 0 && typeof row.entity === "string" && row.entity.length > 0)
-    .sort((a, b) => (b.hardcoded ?? 0) - (a.hardcoded ?? 0));
+    .filter((row) => isFlagged(row) && typeof row.entity === "string" && row.entity.length > 0)
+    .sort(byHardcodedDesc);
   for (const row of entities) {
     const entity = row.entity as string;
+    // 判词必须与**这一行自己的读数**一致 (硬规则 3b: 读数与判词矛盾时仍输出同一句话, 就是让
+    // 「查过且清白」与「没查成」共用输出)。旧判词把「without a single accessor」写成了字面量,
+    // 于是 `accessor > 0` 的行照样这么断言 —— 立案实测: 17 个 P2-identity-* 簇里 **14** 个如此,
+    // 最极端的 `P2-identity-driver-runtime.ts` 是 accessor=26 (gap-identity-replication-requires-structural-relation)。
+    // ⇒ 强断言只在它**真的取真**时输出; 否则输出与读数一致的那一句。
+    const hardcoded = row.hardcoded ?? 0;
+    const accessor = row.accessor ?? 0;
     out.push({
       clusterId: `P2-identity-${entity}`,
       primitive: "P2",
       files: uniqueSorted(row.codeFiles ?? []),
-      rawCount: row.hardcoded ?? 0,
-      label: `identity replication: "${entity}" named in ${row.hardcoded} code file(s) without a single accessor`,
+      rawCount: hardcoded,
+      label:
+        accessor > 0
+          ? `identity replication: "${entity}" named in ${hardcoded} code file(s) that carry no structural relation to it ` +
+            `(a further ${accessor} file(s) reach it through an accessor — partial, not exclusive, replication)`
+          : `identity replication: "${entity}" named in ${hardcoded} code file(s) without a single accessor`,
     });
   }
 
@@ -187,11 +239,20 @@ export function clusterDeletionReport(r: DeletionReportView): Cluster[] {
   ];
 }
 
-/** 从 identity 报告的逐实体复制度表推导 deletion-closure 的候选构件（hardcoded>0 的前 max 个）。PURE。 */
+/** 从 identity 报告的逐实体复制度表推导 deletion-closure 的候选构件（**检测器判定 `isFlagged`
+ *  的前 max 个**）。PURE。
+ *
+ *  ⛔ 不是裸 `(row.hardcoded ?? 0) > 0`：那是**同一个缺陷在 P1 面的未扫兄弟**（硬规则 5b）——
+ *  `clusterIdentityReport()` 已改成消费 `isFlagged`（`hardcoded >= 5 && hardcoded > accessor`），
+ *  本函数却仍按裸计数选取，于是检测器**已经判过清白**的共享模块（`hardcoded` 高但 `accessor` 更高：
+ *  `gate-script-base.ts` 10/230、`touches-orthogonality-check.ts` 20/23…）照样作为「构件」被送进
+ *  `deletion-closure-check.ts`，产出一条大而无意义的 DC。实测池 25 → 17，8 个已判清白的行退出。
+ *  ⛔ 也不是「把 max 调小」或「调阈值」：那仍会把判过清白的行留在族里，同一缺陷换个数字复发。
+ *  谓词只有一份实现（上面 import 的 `isFlagged`），与 P2 面共用，⛔ 不各写一遍。 */
 export function deletionClosureComponents(r: IdentityReportView, max = 3): string[] {
   return (r.table ?? [])
-    .filter((row) => (row.hardcoded ?? 0) > 0 && typeof row.entity === "string" && row.entity.length > 0)
-    .sort((a, b) => (b.hardcoded ?? 0) - (a.hardcoded ?? 0))
+    .filter((row) => isFlagged(row) && typeof row.entity === "string" && row.entity.length > 0)
+    .sort(byHardcodedDesc)
     .slice(0, max)
     .map((row) => row.entity as string);
 }

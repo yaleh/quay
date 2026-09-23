@@ -151,8 +151,72 @@
         "embeddedInterpreterLines": "-239 = plugin/scripts/develop-deliver-tgz.sh effective lines 2354 -> 2115. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is exactly this one file (`git diff --name-only develop HEAD` → the new .ts, the two .mjs tests, and this .sh), and the new module is a `.ts`, outside a `*.sh` census. Measured with the checker's OWN reading, per file: files[path=plugin/scripts/develop-deliver-tgz.sh].codeLines 2354 -> 2115, and totals.embeddedInterpreterLines 9133 -> 8894 — the two readings differ by exactly the one file, so nothing else moved.",
         "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no pair."
       }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-cross-machine-verify-sh, SPEC §5 Phase 5.2)",
+      "from": {
+        "embeddedInterpreterLines": 8894,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 8413,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of the task. plugin/scripts/cross-machine-verify.sh was 489 effective lines carrying FIVE embedded `python3` invocations (three `-c` one-liners + two heredocs: the concatenated-JSON-object scanner, ISO->epoch, hours-between, the gate's failing-file extraction, and the report's JSON emitter). The program now lives in the new sibling plugin/scripts/cross-machine-verify.ts and the .sh is an 8-effective-line thin entry that execs it. BOTH halves of this task's AC3 hold on the checker's own reading: that file's `embedded` is now [\"node\"] — python3 is GONE — AND its codeLines is 8 (<= 25), so it is a thin entry rather than merely a shrunken program. NOTE the axis counts effective lines of .sh containing an embedded interpreter AT A COMMAND POSITION, and the wrapper execs `node --no-warnings --experimental-strip-types`, so the file STAYS IN the axis — the line count moved, not its membership (the same shape as the capability-catalog.sh / quay-init.sh / develop-deliver-tgz.sh entries above). Lowering is the permitted direction and needs no ceremony beyond this committed file change.",
+      "attribution": {
+        "embeddedInterpreterLines": "-481 = plugin/scripts/cross-machine-verify.sh effective lines 489 -> 8. Residual = 0 BY CONSTRUCTION, not by sampling: the branch's `.sh` delta vs develop is EXACTLY this one file (`git diff --name-only develop HEAD` -> plugin/scripts/cross-machine-verify.sh, plus the new .ts and the new .mjs test; the new module is a `.ts`, outside a `*.sh` census). Measured with the checker's OWN reading: files[path=plugin/scripts/cross-machine-verify.sh].codeLines 489 -> 8 and totals.embeddedInterpreterLines 8894 -> 8413; the two readings differ by exactly the one file, so nothing else moved.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-tsify-integration-batch-merge-sh, SPEC-architecture-consolidation §5 Phase 5.2)",
+      "from": {
+        "embeddedInterpreterLines": 8413,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7719,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of SPEC-architecture-consolidation-ts-and-shell-2026-09-19 §5 Phase 5.2’s first script. plugin/scripts/integration-batch-merge.sh (697 effective lines, TWO embedded interpreters: the `node … orphan-session-check.ts` teardown helper and five `python3 -c`/heredoc JSON reads) is now plugin/scripts/integration-batch-merge.ts; the .sh is a 3-effective-line thin entry that execs it. This is Phase 4’s catalog shape repeated: the .sh STILL carries `node` at a command position (it execs the module), so it STAYS IN the axis — it is the line count that moved, not its membership. AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it: leaving the previous number would let a 694-line embedded-interpreter .sh be re-added for free, i.e. the whole Phase 5.2 gain would be un-recaptured. NOTE the `from` here is the baseline as it stands AFTER develop’s concurrent thinnings landed (gap-arch-tsify-develop-deliver-tgz-python-heredocs 9133->8894 and gap-arch-tsify-cross-machine-verify-sh 8894->8413, both already logged above), because this worktree was merged with develop before re-anchoring; the two deltas are disjoint .sh files so the numbers compose without double counting.",
+      "attribution": {
+        "embeddedInterpreterLines": "-694 = plugin/scripts/integration-batch-merge.sh effective lines 697 -> 3. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch’s own `.sh` delta vs its fork point is EXACTLY this one file (git diff --name-only develop HEAD at the fork -> integration-batch-merge.sh, capability-catalog-declarations.json, sh-census-baseline.json, plus the new .ts and .mjs which are outside a *.sh census). After the develop merge the tree’s measured total is 7719 = 8413 - 694, i.e. the develop-side deltas (-239 develop-deliver-tgz.sh, -481 cross-machine-verify.sh, both on disjoint files) and this delta (-694) compose exactly. Measured with the checker’s OWN reading (`sh-census-check.ts --json` -> files[path=plugin/scripts/integration-batch-merge.sh].codeLines before 697 / after 3, and totals.embeddedInterpreterLines 8413 -> 7719).",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
+    },
+    {
+      "when": "2026-09-20 (gap-arch-thin-sh-wrappers-callers-call-ts-directly, SPEC Phase 1c)",
+      "from": {
+        "embeddedInterpreterLines": 7719,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7680,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor — the intended direction, and the point of SPEC-architecture-consolidation-ts-and-shell-2026-09-19 Phase 1c. Five experiments/quay-perpetual-stream/scripts/*.sh that were nothing but `node \"$(dirname \"$0\")/<basename>.ts\" \"$@\"` shells (5/7/11/5/11 effective lines) were deleted and their live callers switched to the direct `node <basename>.ts` invocation: anti-drift-touches-check.sh, concurrent-batch-scheduler.sh, it0-backlog-projection-check.sh, serial-fanin-absorb.sh, touches-orthogonality-check.sh. All five carried `embedded: [\"node\"]`, so all five are IN this axis (the axis counts effective lines of .sh containing an embedded interpreter at a command position) — this is a line-count move, not a membership move. ⚠️ The other 22 plugins/experiments thin shells that the same census flags (`tsTwin=true ∧ codeLines<=25`) are deliberately NOT deleted: each is a declared/consumer-facing entry (PUBLIC_ENTRYPOINTS), a `parts/quay/scripts/package.sh`-gated shipped gate, a `runner-static-gate.ts` registration whose `.sh` form is what `build-plugin-dist.mjs --rewrite` rewrites to `dist/*.js`, or a `.quay/config.yml.example` gate script — see the task's AC1 disposition table. AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it: leaving 7719 would let five new embedded-interpreter .sh land for free, i.e. the Phase 1c gain would be un-recaptured. Re-anchored after the deletions and the caller conversions were final; both numbers are the checker's OWN reading (`sh-census-check.ts --json` -> totals) on this tree, never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "-39 = the five deleted shells' effective lines, summed from the checker's OWN per-file reading taken BEFORE the deletion (`sh-census-check.ts --json` -> files[path].codeLines): anti-drift-touches-check.sh 5 + concurrent-batch-scheduler.sh 7 + it0-backlog-projection-check.sh 11 + serial-fanin-absorb.sh 5 + touches-orthogonality-check.sh 11 = 39. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's `.sh` delta vs develop is EXACTLY these five paths (`git diff --name-status develop HEAD -- '*.sh'` -> 5 x `D`), and every caller edit this task made is to a `.sh` file that already existed and whose own line count is unchanged in a way this axis reads (the four `*-selfcheck.sh` edits swap `\"$CHK\"` for `node \"$CHK\"` and `-x` for `-f`, +0 effective lines each — all four remain non-embedded pure-shell programs). ⛔ The totals.scripts movement (147 -> 142) and embeddedInterpreterScripts (59 -> 54) are called out rather than folded in: they are the same five files, seen from the count axes, and neither is a ratchet axis.",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair (the five deleted paths are real files, not symlinks, so totals.symlinkedCopies stays 59)."
+      }
+    },
+    {
+      "when": "2026-09-23 (gap-suite-ambient-reds-block-all-code-landings)",
+      "from": {
+        "embeddedInterpreterLines": 7680,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 7683,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+3) — the exceptional direction for this ratchet, forced by the one change this task cannot make any other way. This task's class 1 pins the suite's locale and timezone at the entry point (`export LC_ALL`/`export LANG`/`export TZ` in scripts/test.sh) because the suite is written against a C collation and a UTC clock while the entry inherited the host's (LANG=en_US.UTF-8, LC_ALL unset, TZ unset); that pin is three real statements and cannot be expressed as comments or as zero lines. scripts/test.sh is ALREADY an embedded-interpreter .sh (it execs `node` at a command position for its static tier), so every effective line it gains lands on this axis. Per this file's _note the raise is legal only once COMMITTED — the shrink-guard compares the worktree copy against the git-HEAD copy of this very file, so this entry is committed in the same commit as the pin and the two sides agree. ⛔ NOT a threshold relaxed to buy a pass: the +3 is measured, attributed line-for-line below (residual = 0), and the ratchet's own AC6 test (plugin/test/sh-census-check.test.mjs) requires this file to EQUAL the live reading, so leaving 7680 would red the whole static layer. This is the same structural weakness the 2026-09-19 entry above already names ('any task that lands a NEW embedded-interpreter .sh raises the axis, and the only legal response is a committed re-anchor').",
+      "attribution": {
+        "embeddedInterpreterLines": "+3 = scripts/test.sh effective lines 706 -> 709 — exactly the three added statements `export LC_ALL=\"C.UTF-8\"`, `export LANG=\"C.UTF-8\"`, `export TZ=\"UTC\"`. Residual = 0 BY CONSTRUCTION rather than by sampling: the branch's entire `*.sh` delta vs develop is exactly two paths (`git diff --name-only develop HEAD -- '*.sh'` -> scripts/test.sh, plugin/scripts/tmux-leak-scan.sh), and of those only test.sh is IN this axis. The other, plugin/scripts/tmux-leak-scan.sh, gained 7 effective lines (160 -> 167, the class-2 `tmp_root()` helper that stops the scan hardcoding /tmp) but its `embedded` reading is `[]` in BOTH the before and after copies — it contains no embedded interpreter at a command position, so none of those 7 lines was ever counted here. That +7 is called out rather than folded in: a reader summing this task's diff must be able to account for every line, and only 3 of the 10 are in-axis. Measured per file with the checker's OWN primitives (countCodeLines + extractEmbeddedInterpreters) on `git show HEAD:<f>` vs the worktree copy, and totals.embeddedInterpreterLines 7680 -> 7683 on the real tree (`sh-census-check.ts --json` -> totals).",
+        "duplicateCopies": "0 — untouched. This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 8894,
+  "embeddedInterpreterLines": 7683,
   "duplicateCopies": 0
 }

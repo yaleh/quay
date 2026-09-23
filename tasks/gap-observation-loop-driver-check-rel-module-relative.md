@@ -2,7 +2,7 @@
 id: gap-observation-loop-driver-check-rel-module-relative
 title: observation.ts:3200 LOOP_DRIVER_CHECK_REL 仍是模块相对 walk-up 路径字面量——绕过
   plugin-root 解析器（同族另两个常量已迁）
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -41,9 +41,9 @@ import { fileURLToPath } from "node:url";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const REPO_ROOT = repoRoot();
 
 export const DEFAULT_LIMIT_MS = 600_000; // AC101's 600s target (人设定，非自推导)
 

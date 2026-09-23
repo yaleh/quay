@@ -44,8 +44,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -uo pipefail
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SELF_DIR/../.." && pwd)"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SELF_DIR/../.." && pwd -P)"
 WATCHDOG="$SELF_DIR/os-anchor-watchdog.sh"
 
 INSTALL_DIR="${OS_ANCHOR_INSTALL_DIR:-${HOME:-/home/yale}/.config/quay/os-anchor}"

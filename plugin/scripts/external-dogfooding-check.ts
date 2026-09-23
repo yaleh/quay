@@ -46,6 +46,7 @@ import { parseTrigger } from "./routine-scheduler.ts";
 import { isCovered, loadRegistry, parseRegistry } from "./drivable-workspace-check.ts";
 import type { Registry } from "./drivable-workspace-check.ts";
 import { isActionable } from "./routine-file-gate.ts";
+import { repoRoot } from "./repo-root.ts";
 
 // ── sub-check 1: cadence ──────────────────────────────────────────────────────────────────────────
 // A routine must fire on a configurable cadence — every(N) or on(<event>) — the EXACT grammar the
@@ -232,7 +233,7 @@ export function selftest(): boolean {
   check("target-uncovered", checkTargetDrivable("/tmp/x", fixtureRegistry).ok === false, "uncovered target rejected (fail-closed)");
   check("target-empty", checkTargetDrivable("", fixtureRegistry).ok === false, "empty target rejected");
   // Real registry round-trip (unconditional — a missing/moved registry must surface as a FAILURE):
-  const realRegistryPath = path.resolve(__dirname, "..", "..", "experiments", "quay-perpetual-stream", "drivable-workspaces.yml");
+  const realRegistryPath = path.join(repoRoot(), "experiments", "quay-perpetual-stream", "drivable-workspaces.yml");
   const realExists = fs.existsSync(realRegistryPath);
   check("real-registry-exists", realExists, `path=${realRegistryPath}`);
   const real = realExists ? loadRegistry(realRegistryPath) : { authorizedRoot: null, workspacePaths: [] };

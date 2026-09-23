@@ -34,12 +34,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, execFile, spawn } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
+import { readProcCmdlineText } from "./kernel/proc-identity.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
-import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
+import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./plugin-root.ts";
 // Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
 // blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
 // ⛔ Do not re-implement either of these here: SPEC §3.3's only unacceptable outcome is a second
@@ -971,10 +972,11 @@ export function readLiveWorkerProcesses(procDir: string = "/proc", { root = null
   const out: LiveWorker[] = [];
   for (const e of entries) {
     if (!/^\d+$/.test(e)) continue;
-    let cmdline: string;
-    try {
-      cmdline = fs.readFileSync(path.join(procDir, e, "cmdline"), "utf8").replace(/\0/g, " ").trim();
-    } catch { continue; }
+    // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（同文件 runProcessAliveSync 下方的迁移）。
+    // ⛔ 读不成 ⇒ null ⇒ continue（与迁移前 catch 同路），不折成空串。
+    const text = readProcCmdlineText(e, procDir);
+    if (text === null) continue;
+    const cmdline = text.trim();
     const taskId = workerTaskIdFromCmdline(cmdline);
     if (!taskId) continue;
     const repoRoot = workerRepoRootFromCmdline(cmdline);
@@ -2389,7 +2391,8 @@ export function readJournal(root: string, nowMs: number = Date.now()): JournalRe
 //       module location and consumes its JSON. No second copy exists.
 //   Q4: Not reimplementing — the drift checker is authoritative, so AC4's "who is authoritative
 //       when the two drift" question is moot: there is only ONE implementation.
-// CONSEQUENCE: the board's data-flag agrees with `task-status-drift-check.ts --json` per-task
+// CONSEQUENCE: the board's data-flag agrees with the drift checker's `--json` (named once, by
+// TASK_STATUS_DRIFT_CHECK_REL below) per-task
 // BY CONSTRUCTION (AC2/AC3) — the board consumes the checker's own suspects/reverse output.
 // DEGRADATION: the subprocess is fail-closed. If plugin/scripts is absent (a product install
 // without the methodology layer) the landing column reports 「无数据」; if it fails to run/parse
@@ -2425,9 +2428,9 @@ export interface BoardExecution {
 }
 
 // ── Board landing cache — short-TTL, mirroring the pool-metrics probe (readPoolMetrics) ────────────
-// readBoardLanding cold-runs plugin/scripts/task-status-drift-check.ts, which on a large repo does a
-// FULL git-log pass over the landing ref — >150s measured, documented by the checker's own comment
-// (task-status-drift-check.ts:462). Per-request cold-running is exactly the 120s /board defect
+// readBoardLanding cold-runs the drift checker (named once, by TASK_STATUS_DRIFT_CHECK_REL below),
+// which on a large repo does a FULL git-log pass over the landing ref — >150s measured, documented
+// by the checker's own comment. Per-request cold-running is exactly the 120s /board defect
 // (gap-webui-board-load-120s), so a reading is short-TTL-cached (30s, the same window as
 // POOL_METRICS_CACHE_TTL_MS). A TIMEOUT is cached too: on a large repo the checker's steady state IS
 // a timeout, and not caching it would make EVERY request pay the full second-level cap — the AC2
@@ -2462,9 +2465,9 @@ export interface ReadBoardLandingOpts {
 }
 
 /**
- * Reuse the drift checker as the single authoritative landing judgment. Runs
- * `plugin/scripts/task-status-drift-check.ts --json` (resolved relative to THIS module, with
- * cwd = the served workspace root so findRepoRoot finds the served store) and maps its output:
+ * Reuse the drift checker as the single authoritative landing judgment. Runs the checker
+ * (`TASK_STATUS_DRIFT_CHECK_REL`, resolved relative to THIS module, with
+ * cwd = the served workspace root so findRepoRoot finds the served store) as `--json` and maps its output:
  *   suspects  → "landed-not-closed"  (已落地但未收尾: code in tree, status not closed)
  *   reverse   → "done-unlanded"      (done 但未落地: done, code never landed)
  * The result is short-TTL-cached (LANDING_CACHE_TTL_MS) — a cache hit returns WITHOUT spawning the
@@ -2489,11 +2492,11 @@ export async function readBoardLanding(root: string, opts: ReadBoardLandingOpts 
     // `resolvePluginScriptExec` also applies the dev/dist fallback
     // (gap-shipped-ts-files-are-not-bundled: the shipped artifact carries the checker only as
     // bundled dist/*.js, run without --experimental-strip-types).
-    const resolved = resolvePluginScriptExec(path.join("scripts", "task-status-drift-check.ts"));
+    const resolved = resolvePluginScriptExec(TASK_STATUS_DRIFT_CHECK_REL);
     if (resolved == null) {
       return {
         status: "empty",
-        reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts/dist bundle 不存在 — 产品安装无 methodology 层）",
+        reason: `landing 判断源缺失（plugin/${TASK_STATUS_DRIFT_CHECK_REL}/dist bundle 不存在 — 产品安装无 methodology 层）`,
         flags: new Map(),
         scanned: 0,
       };
@@ -2562,13 +2565,14 @@ export function runProcessAliveSync(runId: string): boolean | null {
   try {
     const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
     for (const pid of procs) {
-      try {
-        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
-        readable++;
-        if (cmd.includes(needle)) return true;
-      } catch {
-        // pid exited mid-scan — not a match
-      }
+      // 读 /proc/<pid>/cmdline 由 kernel leaf 单点实现（本文件原有第二份手搓副本 —
+      // gap-judgment-rewrites-route-through-proc-identity-leaf）。用 Text 形而非 argv 形是刻意的：
+      // 本函数比的是【空格 join 后的整串】，且「读到了但空」与「读不成」在这里都不命中、都计入
+      // readable —— Text 形对两者分别给出 "" / null，落到同一个 continue-后-else 分支上，与迁移前逐字一致。
+      const cmd = readProcCmdlineText(pid);
+      if (cmd === null) continue; // pid exited mid-scan — not a match
+      readable++;
+      if (cmd.includes(needle)) return true;
     }
   } catch {
     return null; // /proc unavailable (non-Linux / restricted) — unknown
@@ -2955,7 +2959,8 @@ export function readGitRemotes(root: string): string[] {
 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
 // Each new view reads the MECHANISM that produces its numbers (AC2):
-//   system       → resource-gate.sh + process-budget.sh (text output)
+//   system       → the resource gate + process budget scripts (text output; each is NAMED exactly
+//                  once, by the RESOURCE_GATE_REL / PROCESS_BUDGET_REL constants below)
 //   manager      → loop-driver-check.sh + observer-registry.conf + ready-pool-check.ts
 //   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
 //   sessions     → claude agents --json (running) + transcript-dir scan (ended) + transcript tails
@@ -3047,7 +3052,7 @@ export interface ResourceGateReading {
   nodeProcs: number | null;
   verdict: "GO" | "WAIT" | null;
   /** AC99/AC3 — the overload-window loadavg threshold (nproc × load_over_factor), computed INSIDE
-   *  resource-gate.sh from nproc — never a host-derived literal. The UI displays this value. */
+   *  the resource gate from nproc — never a host-derived literal. The UI displays this value. */
   loadThreshold: number | null;
   loadOverFactor: number | null;
 }
@@ -3077,6 +3082,40 @@ export interface SystemResult {
 // catch a real stale bare reference. (gap-plugin-root-resolution-remaining-callsites)
 export const RESOURCE_GATE_REL = path.join("scripts", "resource-gate.sh");
 export const PROCESS_BUDGET_REL = "scripts/process-budget.sh";
+// The landing judgment source (gap-task-status-drift-check-serve-labels-no-rel-accessor): the SAME
+// single-naming-point rule as the two above, applied to the /board landing column. Before this, the
+// basename was spelled independently three ways — the 4 `<code>` labels in serve-board.ts, the 6
+// `srcLanding*` label pairs in serve-i18n.ts, and the resolved script path here — so changing the
+// display name could not change what was actually spawned, and vice versa. path.join for the same
+// AC1b reason as RESOURCE_GATE_REL above.
+export const TASK_STATUS_DRIFT_CHECK_REL = path.join("scripts", "task-status-drift-check.ts");
+
+/** The display basename of a plugin-root-relative script rel — the ONE derivation every
+ *  product-layer surface names a mechanism script through.
+ *
+ *  Why it exists (gap-serve-labels-hardcode-mechanism-script-basenames): the /system page used to
+ *  spell the two basenames a SECOND time as product-layer literals (`<h2>…</h2>` + the
+ *  `dataSourceNote` parameters), so the same entity had two naming points and the layering ran
+ *  product → mechanism. Now each basename is named once (the REL constants above) and every label
+ *  derives it here.
+ *
+ *  ⛔ Pure function of its input, NOT a lookup table: a table keyed by rel would just be the copy
+ *  moved into another file (and would answer for a rel it was never given). PURE. */
+export function scriptBasename(rel: string): string {
+  return path.basename(rel);
+}
+
+/** The two `/system` labels — derived from the REL constants above, never re-spelled. */
+export const RESOURCE_GATE_NAME = scriptBasename(RESOURCE_GATE_REL);
+export const PROCESS_BUDGET_NAME = scriptBasename(PROCESS_BUDGET_REL);
+
+/** The `/board` landing-source label — derived from TASK_STATUS_DRIFT_CHECK_REL above (the same
+ *  single-naming-point rule, its third application). Every landing surface names the checker through
+ *  THIS constant: serve-board.ts's `<code>` labels and the `{source}` slot of serve-i18n.ts's three
+ *  `srcLanding*` label pairs. serve-i18n.ts itself cannot import it — that module's ZERO-import
+ *  constraint is by design (serve-i18n.ts's own header), which is exactly why those labels carry a
+ *  `{source}` placeholder the caller fills. */
+export const TASK_STATUS_DRIFT_CHECK_NAME = scriptBasename(TASK_STATUS_DRIFT_CHECK_REL);
 
 /** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */
 function jsonNum(j: Record<string, unknown>, key: string): number | null {
@@ -3084,7 +3123,7 @@ function jsonNum(j: Record<string, unknown>, key: string): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-/** Parse resource-gate.sh --json's single JSON document into structured fields. Pure. */
+/** Parse the resource gate's `--json` single JSON document into structured fields. Pure. */
 export function parseResourceGateJson(text: string): Omit<ResourceGateReading, "status" | "reason"> {
   let j: Record<string, unknown> = {};
   try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
@@ -3101,7 +3140,7 @@ export function parseResourceGateJson(text: string): Omit<ResourceGateReading, "
   };
 }
 
-/** Parse process-budget.sh --json's single JSON document into structured fields. Pure. */
+/** Parse the process budget's `--json` single JSON document into structured fields. Pure. */
 export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading, "status" | "reason"> {
   let j: Record<string, unknown> = {};
   try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
@@ -3113,7 +3152,7 @@ export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading,
   };
 }
 
-/** System view: resource-gate.sh --json + process-budget.sh --json parsed to structured fields. */
+/** System view: the two mechanism scripts' `--json` documents parsed to structured fields. */
 export async function readSystem(root: string): Promise<SystemResult> {
   // AC1 (gap-webui-dashboard-manager-slow-parallelize): the two mechanism scripts are independent —
   // run them CONCURRENTLY. Serial was resource-gate(1.65s)→process-budget(0.35s) ≈ 2.0s; parallel is
@@ -3197,8 +3236,27 @@ export interface ManagerResult {
   drivers?: DriversReading;
 }
 
-export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
-export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
+/** Plugin-root-relative rel for the loop-driver probe — resolved by the canonical resolver
+ *  (`runPluginScript` → `resolvePluginScript`), exactly like RESOURCE_GATE_REL / PROCESS_BUDGET_REL
+ *  above. (gap-observation-loop-driver-check-rel-module-relative: the third and LAST survivor of the
+ *  module-relative family in this file.)
+ *
+ *  ⛔ The old module-relative walk-up literal was not merely non-canonical — it was a LIVE DEFECT:
+ *  `resolvePluginScript` resolves a rel against the PLUGIN ROOT, so joining `<repo>/plugin/` with that
+ *  walk-up pointed outside the repo entirely and `readManager` reported the loopDriver probe as
+ *  「未接入」 in EVERY repo, this one included (measured 2026-09-20 pre-fix: `status:"empty"`, reason
+ *  `<rel> 缺失（产品安装无 methodology 层 → 未接入）`). `scripts/…` is the only shape the resolver
+ *  accepts (it probes `plugin/scripts/…` and `scripts/…` per level).
+ *  path.join, not a bare literal, mirrors RESOURCE_GATE_REL's AC1b-safe form. */
+export const LOOP_DRIVER_CHECK_REL = path.join("scripts", "loop-driver-check.sh");
+
+/** The observer registry, relative to the `orchestration/` METHODOLOGY tree — resolved by
+ *  `resolveOrchestrationFile` (plugin-root.ts), never by a module-relative `import.meta.url` walk-up.
+ *  (`OBSERVER_REGISTRY_CONF` before this change: the module-relative form read the WORKTREE's copy of
+ *  a methodology file, violating SPEC §6b constraint ①, and pointed at a non-existent path in every
+ *  shipped install.) `orchestration/` is a SIBLING of `plugin/`, so no plugin-root rel can reach it —
+ *  hence the dedicated sibling resolver rather than a plugin-relative constant. */
+export const OBSERVER_REGISTRY_REL = "observer-registry.conf";
 
 /** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
 export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "status" | "reason"> {
@@ -3232,8 +3290,13 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
 
 /** loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
  *  first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
- *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes. */
-async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
+ *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes.
+ *
+ *  EXPORTED for the AC4 two-way negative control (gap-observation-loop-driver-check-rel-module-relative):
+ *  the probe must (①) resolve the REAL script in this repo and (②) report the explicit 「未接入」
+ *  reading — not a spawn failure / ENOENT — when no plugin tree is reachable. The QUAY_PLUGIN_ROOT
+ *  seam (plugin-root.ts) makes ② hermetic, so the control needs no second checkout. */
+export async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
   const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", "--json", root], 15_000);
   if (r.stdout == null) {
     return { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
@@ -3536,20 +3599,36 @@ export async function readManager(root: string): Promise<ManagerResult> {
 
   const liveness: SessionLivenessReading = { status: "empty", reason: "liveness observer retired 2026-09-03", sessions: [] };
 
-  // observer-registry.conf — the single registration surface (mechanism input, not prose).
+  // observer-registry.conf — the single registration surface (mechanism input, not prose). It lives
+  // in the METHODOLOGY tree (`orchestration/`, a SIBLING of `plugin/`), so it is resolved by
+  // resolveOrchestrationFile — three-valued: a real path, or null when the tree is not installed.
+  // The null branch is its own explicit reading (硬规则 3b: "absent" must not be shaped like "read").
   let observers: ManagerResult["observers"];
   {
-    const conf = fileURLToPath(new URL(OBSERVER_REGISTRY_CONF, import.meta.url));
-    let rows: ObserverRow[] = [];
-    try {
-      if (!fs.existsSync(conf)) throw new Error("missing");
-      rows = parseObserverRegistry(fs.readFileSync(conf, "utf8"));
-    } catch (err) {
-      observers = { status: "empty", reason: `observer-registry.conf 不可读（${err instanceof Error ? err.message : String(err)} → 未接入）`, rows: [] };
+    const conf = resolveOrchestrationFile(OBSERVER_REGISTRY_REL);
+    if (conf === null) {
+      observers = {
+        status: "empty",
+        reason: "observer-registry.conf 缺失（orchestration 树未随安装落地 → 未接入）",
+        rows: [],
+      };
+    } else {
+      let rows: ObserverRow[] = [];
+      let readError: string | null = null;
+      try {
+        rows = parseObserverRegistry(fs.readFileSync(conf, "utf8"));
+      } catch (err) {
+        readError = err instanceof Error ? err.message : String(err);
+      }
+      if (readError !== null) {
+        // PRESENT but unreadable — its own value, never the 「为空」 reading below (DEGRADATION CONTRACT).
+        observers = { status: "empty", reason: `observer-registry.conf 不可读（${readError}）`, rows: [] };
+      } else {
+        observers = rows.length > 0
+          ? { status: "ok", reason: null, rows }
+          : { status: "empty", reason: "observer-registry.conf 为空", rows };
+      }
     }
-    observers = rows.length > 0
-      ? { status: "ok", reason: null, rows }
-      : { status: "empty", reason: "observer-registry.conf 为空", rows };
   }
 
   // version — build-time-embedded QUAY_VERSION (version.ts) — NEVER a runtime read of package.json,

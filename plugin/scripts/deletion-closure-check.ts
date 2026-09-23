@@ -48,10 +48,15 @@ import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
 import { walkFiles, gitVisiblePaths, type VisibleSet } from "./fs-walk.ts";
+// The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
+// name this file's six call sites already use. Own copy was one of the twelve byte-identical bodies
+// extracted by gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
+import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
 // argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { lineOf } from "./source-text-lib.ts";
 
 // ── 别名索引 ───────────────────────────────────────────────────────────────────────────────────
 
@@ -74,10 +79,6 @@ export function aliasesOf(component: string): Aliases {
     spaceStem: stem.replace(/-/g, " "),
     relPath: norm.includes("/") ? norm : `plugin/scripts/${basename}`,
   };
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function maskFor(f: string): (src: string) => Uint8Array {
@@ -175,15 +176,9 @@ export function walkDocFiles(root: string, visible: VisibleSet | null = scanVisi
   });
 }
 
-function relOf(root: string, f: string): string {
-  return path.relative(root, f);
-}
-
-function lineOf(src: string, idx: number): number {
-  let line = 1;
-  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
+// lineOf 上收到 source-text-lib.ts (semantic-dedup-scan `lineof-lineat`); 本地 `relOf` 包装
+// (body 恰为 `path.relative(root, f)`) 已就地内联 —— 一行 stdlib 委托没有可抽的算法, 两个私有
+// 同名包装才是被报出的那份重复。
 
 // ── 引用抽取 (按位置: code / comment / doc) ──────────────────────────────────────────────────
 
@@ -371,7 +366,7 @@ export function deletionClosure(root: string, components: string[], visible: Vis
     } catch {
       continue;
     }
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
     for (const a of aliases) {
       if (!mentions(src, a)) continue;
       const r = classifyCodeFile(rel, src, a);
@@ -386,7 +381,7 @@ export function deletionClosure(root: string, components: string[], visible: Vis
     } catch {
       continue;
     }
-    const rel = relOf(root, f);
+    const rel = path.relative(root, f);
     for (const a of aliases) {
       const r = classifyDocFile(rel, src, a);
       if (r) bump(r);

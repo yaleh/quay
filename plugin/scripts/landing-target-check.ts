@@ -53,7 +53,7 @@ import { execFileSync } from "node:child_process";
 // flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, helpExit, flagValue, resolveRoot } from "./gate-script-base.ts";
 
 /** The two-line model's refs — the SPEC's relation (develop..integration=0), not a hardcoded forward. */
 export const MODEL_REFS = ["develop", "integration"] as const;
@@ -272,17 +272,11 @@ Usage:
 
 Exit codes: 0 PASS/measure · 1 gate FAIL · 2 usage/env error.`;
 
-function resolveRoot(rootArg: string | undefined): string {
-  return path.resolve(rootArg ?? process.cwd());
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
-  const flagVal = (name: string): string | undefined => flagValue(args, name);
   const asJson = args.includes("--json");
-  const root = resolveRoot(flagVal("--root"));
+  const root = resolveRoot(flagValue(args, "--root"));
   const fwd = forwardBranch(root);
   const branches = branchSet(root);
   const surface = scanSurface(root);

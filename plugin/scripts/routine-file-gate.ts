@@ -2,7 +2,9 @@
 // DIR-051 adversarial audit refuted the gate as prose-only — this makes it runnable). A routine FILES
 // findings as tasks; before one lands, it must pass this gate: QUALITY (a real, actionable finding —
 // carries a `## Finding` with reproduction evidence, not a vague concern), DEDUP (not already on the
-// board — by a stable finding key), RATE (≤ K new routine-filed tasks per window). This does NOT make
+// board — keyed on the finding's mechanical SUBJECT, the symbols it names, with the finding's prose
+// as the fallback; see findingKey for why prose alone is not cross-round-stable), RATE (≤ K new
+// routine-filed tasks per window). This does NOT make
 // the FILE-only-vs-execute boundary mechanical (that is the driving agent's contract, backstopped by
 // a post-fire "a routine produced no commits, only task files" check in the skill) — but it removes
 // the "queue-spam is prose-capped only" hole the audit found.
@@ -16,12 +18,219 @@ import { isDirectEntry } from "./gate-script-base.ts";
 export const DEFAULT_RATE = 3; // ≤ K routine-filed tasks per window (tunable)
 
 // ── findingKey ───────────────────────────────────────────────────────────────────────────────────
-// A stable dedup key from a task's `## Finding` section (normalized: lowercased, whitespace-collapsed,
-// first 200 chars). Two findings with the same normalized finding text are duplicates.
+// The dedup key for a task's `## Finding` section. TWO sources, in priority order:
+//
+//   ① THE SUBJECT — the symbols the finding names (`symbols: \`a\`, \`b\`` in a candidate text;
+//      `- 观测符号：\`a\`、\`b\`` in a filed task body — ONE parser reads both spellings). Normalized
+//      to `symbols:<sorted,lowercased,deduped>`. This is the STABLE handle: the probe extracts it
+//      mechanically from its inventory, so it survives a round boundary.
+//   ② THE PROSE — normalized (lowercased, whitespace-collapsed), first 200 chars, prefixed `prose:`.
+//      The fallback for a finding that names no symbols, and the ORIGINAL behaviour.
+//
+// WHY ① EXISTS — measured 2026-09-22 (gap-routine-semantic-dedup-scan-routine-dedup-branch-never-fires).
+// The key used to be ② alone. For `semantic-dedup-scan` the rationale is re-paraphrased by a
+// fresh-context LLM every round, so ② has NO cross-round persistence: grouping that routine's 476
+// carrier records by their mechanical subject (symbol set) yields **76 clusters recurring across ≥2
+// rounds (129 round-instances), and 0 of them ever produced the same prose key twice**. The gate's
+// own output shows the consequence: across every `semantic-dedup-scan` filing round **0 rejections
+// carried `dedup:`** (277 `rate:`, 36 `action:`), while the SAME clusters (readManifest / sha256 /
+// escapeRegExp / lineOf / maskComments …) were re-reported every round under a regenerated slug. The
+// branch was never broken — the quantity it keyed on simply had no cross-round persistence.
+// ② is KEPT, ⛔ not replaced: it stays correct for a routine whose rationale IS mechanical
+// (freshness-refresh templates it from the subject id, and its `dedup:` branch demonstrably fires —
+// 2 dedup rejections recorded 2026-09-18). Deleting ② would disable dedup for those routines.
+//
+// WHY THE SYMBOLS AND NOT THE FILES — measured on the same corpus: the file axis is unstable AND not
+// even discriminating. Only 42/76 recurring clusters list the same file set across rounds (the `walk`
+// cluster: 12 files → 6, with ZERO overlap) **and** a files-only key swallows **121 distinct clusters
+// under 40 key values** — it would suppress a real finding as a "duplicate" of an unrelated one, the
+// over-block that turns a noisy track off. The symbol set is the axis that survives.
+// ⛔ Do NOT fold the file set back into the key; that is exactly what made the old key round-specific.
+//
+// The two sources carry DISTINCT prefixes so a value from one can never equal a value from the other
+// (硬规则 3b: 「没有 subject」与「有 subject」不得共用一种键形，否则"读不出主语"会伪装成"命中").
+// Measured over all 544 carrier finding records: 360 distinct symbol sets, **0 shared across two
+// routines** ⇒ the subject alone is discriminating today, and the routine is deliberately NOT folded
+// in (硬规则 12: no prerequisite without an occurrence reading — the reading here is 0).
+//
+// THE DECLARED BOUNDARY of the subject key — exact symbol-set equality, on purpose. The probe's
+// symbol set DOES drift between rounds in the looser sense: of the 360 observed sets, 346 pairs are
+// subset/superset and 320 partially overlap (`readjsonlines` vs `readjsonlines,readjsonllines` vs
+// `readjsonlines,readjsonllines,readfrontfield` are one cluster in three shapes). A subset/superset
+// rule would swallow **161 of the 360 sets under a family-mate** — nearly half of all subjects
+// suppressible by an unrelated broad entry, the silent over-block that turns a noisy track off. So
+// the key stays exact: a re-finding whose symbol set drifted is NOT deduped and remains RATE-limited
+// — i.e. it degrades to the pre-fix behaviour for that record. ⛔ Never worse than before; the
+// boundary is named here so the residual reads as declared, not as the branch being dead again.
+
+/** The `## Finding` section. Shared by every extractor below — one section grammar, not three. */
+const FINDING_SECTION = /##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i;
+
+/** The symbols line, in either spelling the two renderers emit — the candidate's
+ *  `symbols: \`a\`, \`b\`` and the filed body's `- 观测符号：\`a\`、\`b\``. ⛔ ONE parser for both: the
+ *  candidate and the board task MUST key identically, and the task-body spelling is what board tasks
+ *  filed before this change already carry ⇒ they retro-fit with no migration.
+ *  `- 观测符号：<none>` (the renderer's no-symbols form) matches the LINE but yields no backticked
+ *  token ⇒ "" — a real "names no symbols", ⛔ never a key of the literal `<none>`. */
+const SYMBOLS_LINE = /^[ \t]*[-*]?[ \t]*(?:观测符号|symbols)[ \t]*[:：][ \t]*(.*)$/im;
+
+/** The finding's mechanical subject: the sorted, lowercased symbol set it names. "" when the finding
+ *  names no symbols — a legitimate state (the freshness routine's ids are not symbols), ⛔ not an
+ *  error and not a key (硬规则 6: 缺值 ≠ 为假; a fabricated key would dedup everything against it). */
+export function findingSubjectKey(taskText) {
+  const section = String(taskText).match(FINDING_SECTION);
+  if (!section) return "";
+  const line = section[1].match(SYMBOLS_LINE);
+  if (!line) return "";
+  const syms = [...line[1].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim().toLowerCase()).filter(Boolean);
+  if (!syms.length) return "";
+  return `symbols:${[...new Set(syms)].sort().join(",")}`;
+}
+
+/** The prose key — the ORIGINAL `findingKey` body, kept byte-for-byte and **unprefixed** so
+ *  `isActionable` (and every consumer that wants "the finding's TEXT", not "its identity") reads
+ *  exactly what it read before this function existed. Prefixing here would shift `isActionable`'s
+ *  20-char bar by the prefix length and silently reclassify boundary findings (硬规则 4b). */
+export function proseKey(taskText) {
+  const m = String(taskText).match(FINDING_SECTION);
+  return (m ? m[1] : "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+}
+
 export function findingKey(taskText) {
-  const m = String(taskText).match(/##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i);
-  const body = (m ? m[1] : "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
-  return body;
+  const subject = findingSubjectKey(taskText);
+  if (subject) return subject;
+  const prose = proseKey(taskText);
+  return prose ? `prose:${prose}` : "";
+}
+
+// ── recurrence — the round's filing PRIORITY ─────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS (measured 2026-09-23, from the routine's own carrier `.quay/routine-findings.jsonl`
+// — 544 finding records / 69 filing-rounds at that reading; the file is TRACKED, so every number here
+// is re-derivable with one replay, ⛔ not a fixture).
+//
+// The three gates above decide WHETHER a finding may be filed. None of them says WHICH of a round's
+// 50–120 candidates gets the round's rate budget (`DEFAULT_RATE` filings per window) — the loop spent
+// it in the PROBE'S EMISSION ORDER, an order that carries no value signal at all. The slots therefore
+// went to whichever clusters the fresh-context scan happened to list first, while clusters the corpus
+// had already re-reported for 3–6 rounds were rejected `rate:` and never became a task. Measured in
+// the very round that filed THIS task (`semantic-dedup-scan-1790118332027`, 52 candidates, k=3):
+//
+//     filed                 prior-round recurrence {0, 0, 1}   ← two first-seen findings took 2 of 3 slots
+//     rejected `rate:`      prior-round recurrence {4, 3, 3, 3} — mergeenv·mergeprofileenv,
+//                           isdeadinflight·isdeadmerge, parseargs, statecolortoken·timelinecolortoken
+//
+// — i.e. the rate gate was throttling exactly the work the corpus had been re-reporting, while
+// first-seen findings (the cheapest thing for a scan to emit) walked in. The highest-recurrence
+// cluster measured over all rounds, `readmanifest`, had been re-reported in **6** prior rounds and its
+// final candidate was never filed (that one is an `action:` reject — a `leave` verdict, so priority
+// alone does not file it; see the residual note below).
+//
+// ⛔ WHAT THIS IS NOT. It does not raise the cap, weaken a gate, or add a second quality judge: it
+// ORDERS the candidates the existing gates already judge, so the same budget buys the highest-value
+// work. `rate:` stays the declared throttle — it now drops the FRESHEST tail instead of an arbitrary
+// one. The combination with the subject key above is what converges: a filed cluster is deduped away
+// on the next round, so the queue drains from the top down rather than being re-chosen at random.
+//
+// THE PRIORITY KEY IS THE DEDUP KEY — literally the same call (`findingKey` over the same rendered
+// candidate text). A separate "recurrence key" that could drift from the dedup key would prioritize
+// by a quantity no gate keys on, and the drift would be silent (硬规则 5b).
+//
+// DECLARED RESIDUAL: priority is not eligibility. A 6-round cluster carrying `suggestedAction:
+// "leave"` is still a measurement and still not filed (the `action:` gate) — so the top of the
+// priority order is not always the top of the filed set. That is correct and is why the filings record
+// the recurrence next to the verdict (see `selectFilings`' rate reason).
+
+/** A carrier `finding` record → the `FileableFinding` shape `routineFindingCandidateText` renders.
+ *  ⚠️ The finding's own kind is the record's `dupKind`: the record's top-level `kind` is the RECORD
+ *  kind (`"finding"`). Reading `kind` here would put the string "finding" in every candidate text
+ *  (harmless for the key, which ignores it — but it would silently misreport the finding's kind). */
+function carrierFinding(r: Record<string, unknown>): FileableFinding {
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  const arr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    id: str(r.findingId),
+    kind: str(r.dupKind),
+    symbols: arr(r.symbols),
+    files: arr(r.files),
+    verdict: str(r.verdict),
+    rationale: str(r.rationale) ?? "",
+    suggestedAction: str(r.suggestedAction),
+    producer: str(r.producer),
+  };
+}
+
+/** Recurrence of every subject the carrier has ever reported: finding key → the number of DISTINCT
+ *  `runId`s that reported it (「这个主语被几轮重复报过」 — the quantity the finding above is about).
+ *
+ *  **Three-valued, and the three must not share an output** (硬规则 3b — the failure mode this repo
+ *  has measured three times is 「读不懂输入」 sharing a return value with 「合格」):
+ *    `Map`  = read it; a key absent from the map was never reported ⇒ recurrence 0 (a complete
+ *             reading makes absence informative — 硬规则 6's 「缺值」 would be a HALF-read map);
+ *    `null` = unreadable, or readable but carrying no parseable record at all ⇒ recurrence UNKNOWN.
+ *             Callers must fall back to the pre-recurrence behaviour (probe order) and must NOT
+ *             render this as 「复现 0」 — "we could not measure it" and "nothing recurred" are the
+ *             two states this function exists to keep apart.
+ *  An empty-but-readable carrier is a legitimate `Map` (no records ⇒ nothing recurred).
+ *
+ *  ⚠️ Distinct runIds, ⛔ not record count: one round can emit the same subject twice (the probe
+ *  splits a scan into shards), and counting records would make a sharded round look like recurrence.
+ *  A record with no usable `runId` cannot be attributed to a round and is skipped rather than
+ *  counted as its own round. */
+export function recurrenceByKey(carrierPath: string): Map<string, number> | null {
+  let text: string;
+  try { text = fs.readFileSync(carrierPath, "utf8"); } catch { return null; }
+  const rounds = new Map<string, Set<string>>();
+  let nonBlank = 0;
+  let parsed = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    nonBlank += 1;
+    let rec: unknown;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+    parsed += 1;
+    const r = rec as Record<string, unknown>;
+    if (r.kind !== "finding") continue;
+    const run = typeof r.runId === "string" ? r.runId.trim() : "";
+    if (!run) continue;
+    const key = findingKey(routineFindingCandidateText(carrierFinding(r)));
+    if (!key) continue;
+    let seen = rounds.get(key);
+    if (!seen) { seen = new Set<string>(); rounds.set(key, seen); }
+    seen.add(run);
+  }
+  // Read it, and every non-blank line was unintelligible ⇒ we did NOT read it (hard rule 3b).
+  if (nonBlank > 0 && parsed === 0) return null;
+  const out = new Map<string, number>();
+  for (const [key, seen] of rounds) out.set(key, seen.size);
+  return out;
+}
+
+/** One candidate's place in the round's decision order — the audit surface of the priority: which
+ *  key it was ranked by, and the recurrence that produced its rank (`null` = the carrier could not be
+ *  read, so there was no ranking at all — ⛔ never 0, which would read as 「没复现过」). */
+export interface RecurrenceRank {
+  index: number;
+  key: string;
+  recurrence: number | null;
+}
+
+/** The order in which a round's candidates should consume the rate budget: **recurrence desc**, ties
+ *  (and an unreadable carrier) in the probe's own order — so a tie is not silently reshuffled and the
+ *  fallback is the exact pre-recurrence behaviour, ⛔ never worse.
+ *
+ *  Pure (the caller does the reading), because the priority must be re-runnable against the real
+ *  carrier as a pure READING — the same reason `selectFilings` is pure. */
+export function recurrenceOrder(
+  findings: readonly FileableFinding[], recurrence: Map<string, number> | null,
+): RecurrenceRank[] {
+  const ranked = findings.map((f, index) => {
+    const key = findingKey(routineFindingCandidateText(f));
+    return { index, key, recurrence: recurrence ? recurrence.get(key) ?? 0 : null };
+  });
+  if (!recurrence) return ranked; // probe order: the pre-recurrence decision order, byte for byte
+  return [...ranked].sort((a, b) => (b.recurrence as number) - (a.recurrence as number) || a.index - b.index);
 }
 
 // ── quality ──────────────────────────────────────────────────────────────────────────────────────
@@ -29,9 +238,12 @@ export function findingKey(taskText) {
 // command, a path, a diff/commit ref, a test name) — not a vague concern.
 const EVIDENCE = /(`[^`]+`|\b\w[\w./-]*\.(mjs|js|ts|md|json|sh)\b|\b[0-9a-f]{7,40}\b|exit\s+\d|npx |node |git )/i;
 export function isActionable(taskText) {
-  const key = findingKey(taskText);
+  // ⛔ `proseKey`, never `findingKey`: the quality bar is about the TEXT, and it must not shift when
+  // the dedup key's SOURCE changes. (The subject is not evidence of actionability either — a bare
+  // symbol list is a name, not a reproduction.) Behaviour is byte-identical to the pre-subject gate.
+  const key = proseKey(taskText);
   if (key.length < 20) return false;                 // a real finding is more than a phrase
-  const m = String(taskText).match(/##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i);
+  const m = String(taskText).match(FINDING_SECTION);
   return !!m && EVIDENCE.test(m[1]);                 // must cite concrete evidence
 }
 
@@ -42,7 +254,10 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
   if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
   const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
   const key = findingKey(candidate);
-  if (keys.has(key)) return { accept: false, reason: "dedup: an equivalent finding is already on the board" };
+  // The matched key is NAMED in the reason: the reason is recorded verbatim in the carrier, and
+  // without it a dedup decision is unauditable — you cannot tell which subject swallowed a candidate,
+  // so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
+  if (keys.has(key)) return { accept: false, reason: `dedup: an equivalent finding is already on the board (matched key: ${key})` };
   if (recentCount >= K) return { accept: false, reason: `rate: ${recentCount} routine-filed tasks this window ≥ cap ${K}` };
   return { accept: true, reason: "accepted: actionable, novel, within rate" };
 }

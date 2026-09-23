@@ -52,8 +52,8 @@ fi
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-default_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+default_root="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 
 worktree=""
 root="${default_root}"

@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, type BoardLanding, type BoardExecution } from "./observation.ts";
+import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, TASK_STATUS_DRIFT_CHECK_NAME, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 // gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 11
@@ -13,7 +13,8 @@ import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
-// judgment is REUSED from plugin/scripts/task-status-drift-check.ts via observation.readBoardLanding
+// judgment is REUSED from the drift checker (named once, by observation.ts's
+// TASK_STATUS_DRIFT_CHECK_REL) via observation.readBoardLanding
 // (AC1: reuse, not reimplement — the drift checker is the single authority). The board emits one
 // `data-flag` attribute per task matching the checker's suspects/reverse, so the Contract's band
 // (board_flags == suspects + reverse, per-task) holds BY CONSTRUCTION (AC2/AC3). Execution flags
@@ -26,7 +27,7 @@ import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
 // /tasks handler's QW-007 pagination pattern.
 
 // ── gap-webui-board-transient-columns-drowned-by-history: the transient default view ──────────────
-// 「执行」(.workflow-events/) and 「落地」 (task-status-drift-check.ts) are TRANSIENT signals: a row is
+// 「执行」(.workflow-events/) and 「落地」 (the drift checker, TASK_STATUS_DRIFT_CHECK_NAME) are TRANSIENT signals: a row is
 // non-empty only while its task is actually in flight, awaiting fan-in, or carrying a drift flag.
 // Painted across the WHOLE store (production: 2248 rows, 2171 of them done and mostly 57+ days idle)
 // the default view is near-necessarily a wall of 「—」 whatever the sampling luck — the page's own
@@ -122,16 +123,21 @@ export function renderBoardPage(board: {
   // The page's whole body-copy roster, taken ONCE (ROW 5's `navLabelsFor` idiom) instead of
   // re-reading BOARD_LABELS at each of ~30 call sites.
   const L = boardLabelsFor(lang);
+  // gap-task-status-drift-check-serve-labels-no-rel-accessor: the landing source's name is NOT
+  // spelled here. TASK_STATUS_DRIFT_CHECK_NAME is derived (observation.ts) from the ONE rel constant
+  // that also decides which script readBoardLanding actually spawns, so a rename of the checker
+  // moves the display label and the subprocess together instead of leaving two independent names.
+  const landingName = TASK_STATUS_DRIFT_CHECK_NAME;
   const landingNote = board.landing.status === "ok"
-    ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · ${fillLabel(L.scanTasks, { n: board.landing.scanned })}</span>`
+    ? html`<span>${L.landingSource} <code>${landingName}</code> · ${fillLabel(L.scanTasks, { n: board.landing.scanned })}</span>`
     : board.landing.status === "empty"
-      ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.noData}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+      ? html`<span>${L.landingSource} <code>${landingName}</code> · <strong>${L.noData}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
       : board.landing.timedOut
         // gap-webui-board-load-120s AC3 — fail-open: a subprocess that exceeded LANDING_TIMEOUT_MS
         // renders 「读取超时」 (distinct from a generic 读失败) instead of empty-waiting to the old
         // 120s hard cap.
-        ? html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.readTimeout}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
-        : html`<span>${L.landingSource} <code>task-status-drift-check.ts</code> · <strong>${L.readFailed}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
+        ? html`<span>${L.landingSource} <code>${landingName}</code> · <strong>${L.readTimeout}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+        : html`<span>${L.landingSource} <code>${landingName}</code> · <strong>${L.readFailed}</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
   // gap-inflight-states-missing-impl-complete-event: the in-flight view splits into TWO independent
   // counts — implementing (start, no impl-complete: 真正在实现) vs awaiting-land (impl-complete, no
   // end: 排队待落地). Build dispatch reads the former; the land single-flight gate reads the latter.
@@ -280,7 +286,7 @@ export function renderBoardPage(board: {
 // path reads a SNAPSHOT — a synchronous Map lookup, zero readers, zero subprocesses, zero scans.
 //
 // What the request path used to pay, per request (measured on this worktree):
-//   readBoardLanding        → spawns `node task-status-drift-check.ts --json`, a FULL scan: 6.46 s
+//   readBoardLanding        → spawns `node ${TASK_STATUS_DRIFT_CHECK_REL} --json`, a FULL scan: 6.46 s
 //   readTaskStatusMapAtRef  → `git ls-tree` + `cat-file --batch` over EVERY task file:     1.41 s
 //   client.taskList()       → a provider round-trip over every task file
 //   readBoardExecution      → readLive over .workflow-events/                             0.04 s
@@ -540,6 +546,9 @@ function renderBoardResponse(res: ServerResponse, snap: BoardSnapshot, url: URL,
     incompleteSources.push(boardLabel(execution.status === "empty" ? "srcExecEmpty" : "srcExecFailed", cfg.lang));
   }
   if (landing.status !== "ok") {
+    // The three `srcLanding*` rows carry `{source}` (serve-i18n.ts's rows name the source through a
+    // placeholder because that module is import-free by design) — the name is filled HERE, from the
+    // same derived constant the `<code>` above uses, so label and subprocess cannot diverge.
     incompleteSources.push(boardLabel(
       landing.timedOut === true
         ? "srcLandingTimeout"
@@ -547,6 +556,7 @@ function renderBoardResponse(res: ServerResponse, snap: BoardSnapshot, url: URL,
           ? "srcLandingUnavailable"
           : "srcLandingFailed",
       cfg.lang,
+      { source: TASK_STATUS_DRIFT_CHECK_NAME },
     ));
   }
   // An explicit status/label filter is the user asking for a NAMED set — the transient default must

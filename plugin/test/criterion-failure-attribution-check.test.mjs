@@ -24,6 +24,8 @@ import {
   isBareFailureExitLine,
   hasTrailingComputedFailureExit,
   implicitFailureExitLines,
+  errexitAbortSilentExits,
+  bareFailureExitsOfCriterion,
   isSilentOnFailureSegment,
   splitTopLevelSegments,
   statusBearingStatement,
@@ -237,6 +239,101 @@ test("implicitFailureExitLines — the class is DISJOINT from the explicit forms
   assert.deepEqual(implicitFailureExitLines(AC245_CRITERION_LINE), []);
 });
 
+// ── THE ERREXIT-ABORT CLASS (2026-09-21, gap-ac241-errexit-abort-silent-failures-have-no-predicate) ──
+// The SIXTH recurrence of AC-241. The five repairs before it all covered "the failure exit STATEMENT
+// itself is silent"; this class is "the failure exit statements are all attributed, and the shell dies
+// on a NON-exit statement before reaching them". Measured in the production ledger 2026-09-20T23:50:57Z:
+// AC-286 carries three attributed `CAUSE=…` exits and still wrote ZERO bytes on both streams.
+
+/** AC-286's criterion VERBATIM as it stood when it went red (the anchor is the pre-fix one; the shape is
+ *  what matters — `set -euo pipefail` + an UNGUARDED assignment-with-command-substitution + attributed
+ *  guards below it). */
+const AC286_RED_CRITERION = [
+  "bash <<'CRIT'",
+  "set -euo pipefail",
+  'SRC="plugin/scripts/worker-driver.ts"',
+  'if [ ! -f "$SRC" ]; then',
+  '  echo "CAUSE=source-absent" >&2; exit 1',
+  "fi",
+  "LINE=\"$(grep -nE 'const[[:space:]]+mergeTarget' \"$SRC\" | head -1)\"",
+  'if [ -z "$LINE" ]; then',
+  '  echo "CAUSE=default-assignment-not-found" >&2; exit 1',
+  "fi",
+  "CRIT",
+].join("\n");
+
+test("errexitAbortSilentExits — positive control: AC-286's RED form is a failure exit (the 6th blind spot)", () => {
+  const hits = errexitAbortSilentExits(AC286_RED_CRITERION);
+  assert.equal(hits.length, 1, `exactly the unguarded assignment: ${JSON.stringify(hits)}`);
+  assert.equal(hits[0].line, 7, "…named by the LINE that aborts");
+  assert.equal(hits[0].errexitAbort, true, "…and marked as the errexit class (a THIRD repair, not 'write a cause here')");
+  // ⛔ It is INVISIBLE to the two older classes — that is the whole defect, pinned as a reading.
+  assert.deepEqual(implicitFailureExitLines(AC286_RED_CRITERION), [], "class ② cannot see it (an explicit exit exists)");
+  assert.equal(
+    AC286_RED_CRITERION.split("\n").filter((l) => isBareFailureExitLine(l)).length,
+    0,
+    "class ① cannot see it either — the assignment contains no exit statement",
+  );
+});
+
+test("errexitAbortSilentExits — the class is ADDITIVE: it fires although every exit is attributed", () => {
+  // The previous five repairs all held while AC-241 stayed red BECAUSE class ② lives behind
+  // `out.length === 0`. The third class must not inherit that mutex.
+  const bare = bareFailureExitsOfCriterion(AC286_RED_CRITERION);
+  assert.equal(bare.length, 1);
+  assert.equal(bare[0].errexitAbort, true);
+});
+
+test("errexitAbortSilentExits — negative controls: the GUARDED and NON-errexit forms are clean", () => {
+  const clean = [
+    // `|| true` INSIDE the substitution — measured: exit 0, the guard runs
+    "set -euo pipefail\nLINE=\"$(grep -nE 'p' \"$f\" | head -1 || true)\"\nif [ -z \"$LINE\" ]; then echo CAUSE=x >&2; exit 1; fi",
+    // `|| true` AFTER the assignment — measured: exit 0
+    "set -euo pipefail\nLINE=\"$(grep -nE 'p' \"$f\" | head -1)\" || true\nif [ -z \"$LINE\" ]; then echo CAUSE=x >&2; exit 1; fi",
+    // a CONDITION — POSIX exempts it from errexit, which is why this is the correct repair
+    "set -euo pipefail\nif ! LINE=$(grep -nE 'p' \"$f\"); then echo CAUSE=x >&2; exit 1; fi",
+    // no errexit at all
+    "LINE=\"$(grep -nE 'p' \"$f\" | head -1)\"\nif [ -z \"$LINE\" ]; then echo CAUSE=x >&2; exit 1; fi",
+    // substitution NOT in value position: the statement's status is `echo`'s
+    "set -euo pipefail\necho \"$(grep -nE 'p' \"$f\" | head -1)\"",
+    // a plain assignment cannot fail this way
+    'set -euo pipefail\nSRC="plugin/scripts/worker-fan-in.ts"\nexit 0',
+  ];
+  for (const c of clean) {
+    assert.deepEqual(errexitAbortSilentExits(c), [], `must be CLEAN (a false positive accuses a clean criterion): ${c}`);
+  }
+});
+
+test("errexitAbortSilentExits — the errexit STATE MACHINE: `set +e` really disables, and only from its line on", () => {
+  assert.deepEqual(errexitAbortSilentExits("set -e\nset +e\nLINE=\"$(cmd)\""), [], "`set +e` turns the class off");
+  assert.equal(errexitAbortSilentExits("set -e\nset +e\nset -e\nLINE=\"$(cmd)\"").length, 1, "…and `set -e` turns it back on");
+  assert.equal(errexitAbortSilentExits("set -o errexit\nLINE=\"$(cmd)\"").length, 1, "the long form counts too");
+  assert.deepEqual(errexitAbortSilentExits("set -o pipefail\nset -u\nLINE=\"$(cmd)\""), [], "`set -o pipefail` alone is NOT errexit");
+  assert.deepEqual(errexitAbortSilentExits("set -o errexit\nset +o errexit\nLINE=\"$(cmd)\""), [], "`set +o errexit` disables");
+});
+
+test("errexitAbortSilentExits — a guard on a LATER line of a MULTI-LINE statement is still seen", () => {
+  // Read per PHYSICAL line, the guarded form below would read BARE — a detector accusing a clean
+  // criterion (硬规则 3b). The statement is joined before its guards are judged.
+  const guardedMulti = 'set -euo pipefail\nLINE="$(grep -nE\n\'p\'\n"$f" | head -1 || true)"\nif [ -z "$LINE" ]; then echo CAUSE=x >&2; exit 1; fi';
+  assert.deepEqual(errexitAbortSilentExits(guardedMulti), [], "the guard on the closing line must be seen");
+  const bareMulti = 'set -euo pipefail\nLINE="$(grep -nE\n\'p\'\n"$f" | head -1)"\nif [ -z "$LINE" ]; then echo CAUSE=x >&2; exit 1; fi';
+  assert.equal(errexitAbortSilentExits(bareMulti).length, 1, "…and the unguarded multi-line form is still BARE");
+  assert.equal(errexitAbortSilentExits(bareMulti)[0].line, 2, "reported at the line that OPENS the statement");
+});
+
+test("errexitAbortSilentExits — a MULTI-LINE condition region is exempt (its commands are not errexit-aborting)", () => {
+  const crit = [
+    "set -euo pipefail",
+    "if [ -f x ] \\",
+    "   && [ -f y ]; then",
+    "  echo ok",
+    "fi",
+    "LINE=\"$(cmd || true)\"",
+  ].join("\n");
+  assert.deepEqual(errexitAbortSilentExits(crit), [], "the `if` region is a condition, and the trailing line is guarded");
+});
+
 test("isSilentOnFailureSegment — the silencers, and the segment that must NOT be one", () => {
   assert.equal(isSilentOnFailureSegment("grep -q 'x' f"), true);
   assert.equal(isSilentOnFailureSegment("test -f x"), true);
@@ -359,6 +456,58 @@ test("CLI: AC-172's ORIGINAL implicit-exit form makes the ratchet BITE (+1 / del
 
   fs.rmSync(path.join(root, "goals/AC-990-fixture.md"));
   assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
+});
+
+test("CLI: AC-286's RED errexit-abort form makes the ratchet BITE (+1 / delta +1 / named), then release", () => {
+  // The 6th recurrence's two-way control, mechanical and against a baseline of 0. Before this revision
+  // the SAME injection read `bareAcs=0` / status=pass / exit=0 and the id was absent from `ids` — a
+  // silent pass while the criterion wrote an unattributable fail into the append-only ledger.
+  const root = makeRoot(0);
+  fs.writeFileSync(
+    path.join(root, BASELINE_REL),
+    JSON.stringify({ count: 0, inDomain: 0, entries: [], generatedAt: "2026-09-11T00:00:00.000Z" }, null, 2) + "\n",
+  );
+  fs.writeFileSync(
+    path.join(root, "goals/AC-900-fixture.md"),
+    ["---", "id: AC-900", "status: active", "kind: criterion", "criterion: |", "  exit 0", "---", ""].join("\n"),
+  );
+  assert.equal(runCli(["--root", root]).status, 0, "baseline-consistent fixture must start GREEN");
+
+  fs.writeFileSync(
+    path.join(root, "goals/AC-990-fixture.md"),
+    ["---", "id: AC-990", "status: active", "kind: criterion", "criterion: |",
+      ...AC286_RED_CRITERION.split("\n").map((l) => `  ${l}`), "---", ""].join("\n"),
+  );
+  const injected = runCli(["--root", root, "--json"]);
+  assert.equal(injected.status, 1, `the errexit-abort form must turn the ratchet RED: ${injected.stdout}${injected.stderr}`);
+  const out = JSON.parse(injected.stdout);
+  assert.equal(out.bareAcs, 1, "baseline 0 + 1");
+  assert.equal(out.delta, 1);
+  assert.deepEqual(out.added, ["AC-990"], "the injected id must be NAMED");
+
+  fs.rmSync(path.join(root, "goals/AC-990-fixture.md"));
+  assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
+});
+
+test("CLI: the errexit-abort class's GUARDED controls add no hit (bareAcs unchanged)", () => {
+  const root = makeRoot(0);
+  fs.writeFileSync(
+    path.join(root, BASELINE_REL),
+    JSON.stringify({ count: 0, inDomain: 0, entries: [], generatedAt: "2026-09-11T00:00:00.000Z" }, null, 2) + "\n",
+  );
+  const guarded = [
+    "set -euo pipefail",
+    "LINE=\"$(grep -nE 'p' \"$f\" | head -1 || true)\"",
+    'if [ -z "$LINE" ]; then echo CAUSE=x >&2; exit 1; fi',
+  ].join("\n");
+  fs.writeFileSync(
+    path.join(root, "goals/AC-900-fixture.md"),
+    ["---", "id: AC-900", "status: active", "kind: criterion", "criterion: |",
+      ...guarded.split("\n").map((l) => `  ${l}`), "---", ""].join("\n"),
+  );
+  const r = runCli(["--root", root, "--json"]);
+  assert.equal(r.status, 0, `a GUARDED assignment must stay green: ${r.stdout}${r.stderr}`);
+  assert.deepEqual(JSON.parse(r.stdout).ids, []);
 });
 
 test("CLI: the implicit-exit class's three NEGATIVE controls add no hit (bareAcs unchanged)", () => {

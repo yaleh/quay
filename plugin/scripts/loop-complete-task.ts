@@ -34,9 +34,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // (single source, never a parallel copy). A plugin→plugin static import (ready-pool-check imports no
 // packages/ tree), so the esbuild plugin bundle resolves it fine.
 import { countCompletionCheckboxes } from "./ready-pool-check.ts";
+import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "..", "..");
+const repoRoot = moduleRepoRoot();
 
 function usage() {
   process.stderr.write(

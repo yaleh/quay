@@ -219,7 +219,8 @@ export function checkAntiDrift(builds, opts) {
 // would land) vs the task's DECLARED `## Touches`:
 //   node --experimental-strip-types anti-drift-touches-check.ts --task <id> --worktree <dir>
 //        [--merge-target <ref>]
-// The classic-loop driver (anti-drift-touches-check.sh) supplied a pre-computed manifest from
+// The classic-loop driver (the since-deleted anti-drift-touches-check.sh — its callers now invoke
+// this module directly, SPEC Phase 1c) supplied a pre-computed manifest from
 // `git diff --numstat`; THIS driver computes the actual diff itself (`git diff --name-only
 // <merge-target>...HEAD` — the task's own commits, i.e. exactly what fan-in-ff-merge would land)
 // and reads the declared globs from the task body (the ONE touches-parser). The judgment — one

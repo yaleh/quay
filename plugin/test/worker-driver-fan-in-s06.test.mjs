@@ -5,6 +5,12 @@
 import { test } from "node:test";
 import { DRIVER, acquireFanInLock, after, appendFanInStepTrace, appendFanInTrace, assert, counterNodeE, fanInLockFile, fanInLogFileName, fs, makeGitRoot, makeRoot, markNeedsHuman, mechSh, os, path, pathToFileURL, readOutcomeLines, readTaskStatus, rmSafe, runMechanicalFanIn, spawn, spawnMechanicalFanIn, spawnResident, spawnSync, waitFor, writeTaskFile } from "./helpers/worker-driver-fan-in-harness.mjs";
 
+// gap-arch-worker-fan-in-extract-from-worker-driver：机械 fan-in 区域（runMechanicalFanIn / step() /
+// spawnMechanicalFanIn …）的正本已迁 worker-fan-in.ts。worker-driver.ts 经 re-export 保持【import 面】
+// 逐字不变（AC2），但【读源码的结构判据】必须按代码实际所在处取——否则判据会从「查过了」退化为
+// 「查了一个不再持有该代码的文件」而仍报绿（硬规则 3b 的镜像：判据读错载体）。
+const FAN_IN = path.join(path.dirname(DRIVER), "worker-fan-in.ts");
+
 test("AC1 (integration) — worker 快速死亡后 driver 退避：不立即重派（worker-backoff 事件 + 无第二次立即派发）", async (t) => {
   const root = makeGitRoot("backoff-ac1");
   writeTaskFile(root, "gap-qd", "ready");
@@ -231,9 +237,12 @@ test("AC1 (integration) — runMechanicalFanIn writes a per-step trace covering 
 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载当前代码（⛔ 不再 in-process）", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
+  // gap-arch-worker-fan-in-extract-from-worker-driver：spawnMechanicalFanIn 本体已迁 worker-fan-in.ts
+  // ⇒ 它的两条断言按【代码所在模块】读（⛔ 不是删断言、也不是去 worker-driver.ts 里假装还在）。
+  const fanSrc = fs.readFileSync(FAN_IN, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
-  assert.match(src, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
+  assert.match(fanSrc, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
+  assert.match(fanSrc, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
 });
@@ -370,7 +379,9 @@ test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery) — appendFanInStepTrace
 
 
 test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery / gap-mech-fan-in-log-webui-visible-clickable) — runMechanicalFanIn 每步都有 begin/end（挂起定位）+ A1 过程日志 trace", () => {
-  const src = fs.readFileSync(DRIVER, "utf8");
+  // gap-arch-worker-fan-in-extract-from-worker-driver：runMechanicalFanIn / step() 已迁 worker-fan-in.ts
+  // ⇒ 本结构判据按【代码所在模块】读（判据强度不变，只是换了正本所在文件）。
+  const src = fs.readFileSync(FAN_IN, "utf8");
   // mechSh 步经 step() 包层——包层内 appendFanInStepTrace begin/end（挂起 = begin 无 end）+ A1 一行。
   // ⛔ ff 不在其中：P2 (gap-execution-loop-productization-p2-p4) 把 ff 持锁段 TS 模块化（worker-driver
   // import packages/quay/src/fan-in/ff-merge.ts，⛔ 不再 shell-out 到 bash fan-in-ff-merge.sh）——ff 是

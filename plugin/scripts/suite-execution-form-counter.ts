@@ -56,6 +56,7 @@ import { fileURLToPath } from "node:url";
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
 /** 默认 verification-round 相对路径（<root>/.quay/verification-round.jsonl）——外层每轮一行套件记录。 */
 export const DEFAULT_VERIFICATION_ROUND_REL = path.join(".quay", "verification-round.jsonl");
@@ -368,8 +369,7 @@ export function main(argv) {
     return 0;
   }
   const jsonOut = args.includes("--json");
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const autoRoot = path.resolve(scriptDir, "..", "..");
+  const autoRoot = repoRoot();
   const root = flagVal("--root", autoRoot);
   const epsilonArg = flagVal("--epsilon-ms", String(DEFAULT_EPSILON_MS));
   const epsilonMs = Number(epsilonArg);

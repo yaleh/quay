@@ -72,10 +72,13 @@ import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
+// lineOf / snippetOf now live once in source-text-lib.ts (semantic-dedup-scan `lineof-lineat`).
+import { lineOf, snippetOf } from "./source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
-const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_ROOT = repoRoot();
 
 /** 脚本文件扩展名（sibling 脚本的可运行形态）。 */
 const SCRIPT_EXT = "(?:sh|ts|js|mjs|cjs)";
@@ -258,22 +261,6 @@ export function maskComments(src: string): Uint8Array {
     i++;
   }
   return comment;
-}
-
-/** 取第 index 个字符所在的行号（1-based）。 */
-function lineOf(src: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
-/** 取第 index 个字符所在整行的 trimmed 文本。 */
-function snippetOf(src: string, index: number): string {
-  let start = index;
-  while (start > 0 && src[start - 1] !== "\n") start--;
-  let end = index;
-  while (end < src.length && src[end] !== "\n") end++;
-  return src.slice(start, end).trim();
 }
 
 /** 模板字面量（backtick-delimited）的 body 及其起始 index。处理 `\\`` 转义；嵌套反引号按外层

@@ -5,11 +5,20 @@
 import { test } from "node:test";
 import { EXEMPT_TEST, RETRY_EXEMPTION_WINDOW_MS_DEFAULT, after, appendOtherSuiteRed, assert, assertionSignaturesFromSuiteLog, backoffDelayMs, failingTestFilesFromSuiteLog, fs, isQuickDeath, judgeRetryExemption, makeRoot, markNeedsHuman, normalizeAssertionSignature, path, rmSafe, spawn, writeExemptionTask, writeFailingTest, writeSuiteRedLog } from "./helpers/worker-driver-fan-in-harness.mjs";
 
-test("failingTestFilesFromSuiteLog — 绝对路径 __PERFILE__ 行也提取 repo-relative 失败测试（⛔ 只匹配相对路径 ⇒ 恒空）", () => {
-  const abs = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=10 /home/yale/work/quay-worktrees/gap-x/plugin/test/obs.test.mjs passed=false end_ms=1\n");
+test("failingTestFilesFromSuiteLog — 绝对路径 __PERFILE__ 行也提取 repo-relative 失败测试（⛔ 只匹配相对路径 ⇒ 恒空）", (t) => {
+  // gap-suite-failure-attribution-third-party-layout：绝对路径的 repo 根【由 root 给出】。生产里
+  // measure-suite-reporter 发的是 full-path，而 suite 在任务 worktree 里跑、调用方手里是 worktree
+  // root ⇒ 按前缀剥离。⛔ 旧实现改为按 `packages|plugin|experiments` 关键词猜后缀，那正是本任务修的
+  // 缺陷（第三方布局恒不匹配）——所以本用例把 root 传进来，而不是留一个「无 root 也能猜」的假要求。
+  const root = makeRoot("s04-abs");
+  t.after(() => rmSafe(root));
+  const abs = failingTestFilesFromSuiteLog(`__PERFILE__ duration_ms=10 ${root}/plugin/test/obs.test.mjs passed=false end_ms=1\n`, root);
   assert.deepEqual(abs, [EXEMPT_TEST], "absolute-path __PERFILE__ line extracts the repo-relative path");
   const rel = failingTestFilesFromSuiteLog("__PERFILE__ duration_ms=10 plugin/test/obs.test.mjs passed=false end_ms=1\n");
   assert.deepEqual(rel, [EXEMPT_TEST], "relative __PERFILE__ line still extracts (no regression)");
+  // 无 root 的绝对路径 ⇒ 读不懂（独立取值），⛔ 不削成「看着像 repo-relative」的假路径冒充已归因。
+  const noRoot = failingTestFilesFromSuiteLog(`__PERFILE__ duration_ms=10 ${root}/plugin/test/obs.test.mjs passed=false end_ms=1\n`);
+  assert.deepEqual(noRoot, [], "无 root ⇒ 不冒充已归因");
 });
 
 

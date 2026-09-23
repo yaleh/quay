@@ -6,8 +6,8 @@
 #   Exit: 0 = all cases as asserted; 1 = mismatch; 2 = environment error.
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd to experiment root" >&2; exit 2; }
-CHK="./scripts/anti-drift-touches-check.sh"; FIX="fixtures/antidrift"
-[ -x "$CHK" ] || { echo "ERROR: $CHK not found/executable" >&2; exit 2; }
+CHK="./scripts/anti-drift-touches-check.ts"; FIX="fixtures/antidrift"
+[ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 # id | manifest | expected exit (0 = clean; 1 = HARD FAIL)
 CASES=(
   "clean-batch|$FIX/green.json|0"
@@ -18,7 +18,7 @@ CASES=(
 fail=0
 for c in "${CASES[@]}"; do
   IFS='|' read -r id file want <<< "$c"
-  "$CHK" "$file" >/dev/null 2>&1; got=$?
+  node "$CHK" "$file" >/dev/null 2>&1; got=$?
   [ "$got" = "$want" ] && echo "PASS: $id — exit $got (expected $want)" || { echo "FAIL: $id — exit $got EXPECTED $want"; fail=1; }
 done
 echo

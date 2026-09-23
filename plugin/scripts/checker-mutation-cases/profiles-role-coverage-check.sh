@@ -25,8 +25,8 @@
 set -u
 name="profiles-role-coverage-check"
 workdir="${1:?usage: $name.sh <workdir>}"
-checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # <repo>/plugin/scripts
-repo_root="$(cd "${checker_dir}/../.." && pwd)"                  # <repo>
+checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"   # <repo>/plugin/scripts
+repo_root="$(cd "${checker_dir}/../.." && pwd -P)"                  # <repo>
 CHECKER="${checker_dir}/profiles-role-coverage-check.ts"
 SHIPPED="${checker_dir}/../.quay/profiles.yml"
 CALL="launchArgv("

@@ -95,7 +95,12 @@ function fakeIdentityScript(tmp, withEntity) {
     tmp,
     "fake-identity.js",
     withEntity
-      ? `process.stdout.write(JSON.stringify({table:[{entity:"session-liveness.sh",code:5,hardcoded:4,codeFiles:["plugin/scripts/a.ts","packages/quay/src/observation.ts"]}],judgmentRewrites:[{file:"plugin/scripts/worker-driver.ts"}],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`
+      // ⚠️ 该行的 `hardcoded`/`accessor` 必须**真的越过检测器的阈值谓词**
+      // (`isFlagged` = `hardcoded >= 5 && hardcoded > accessor`)，否则本簇不会被产出：
+      // 上一版是 `code:5, hardcoded:4` —— 它在旧的裸 `hardcoded > 0` 判据下成簇，
+      // 而那个裸判据正是 gap-arch-review-cluster-ignores-detector-flag-predicate 修掉的缺陷。
+      // 现取真实读数形态（对照生产里 `P2-identity-quay-init.sh` 实测 59 hardcoded / 3 accessor）。
+      ? `process.stdout.write(JSON.stringify({table:[{entity:"session-liveness.sh",code:62,hardcoded:59,accessor:3,codeFiles:["plugin/scripts/a.ts","packages/quay/src/observation.ts"]}],judgmentRewrites:[{file:"plugin/scripts/worker-driver.ts"}],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`
       : `process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`,
   );
 }
@@ -114,6 +119,52 @@ function fakeDeletionScript(tmp) {
     "fake-deletion.js",
     `process.stdout.write(JSON.stringify({components:["session-liveness.sh"],dc:["plugin/scripts/a.ts","tasks/x.md"],counts:{dcTotal:2,callGraphTotal:1,ratio:2}}));`,
   );
+}
+
+// AC4(b) 的 driver 边界缝（gap-arch-review-p1-seed-ignores-detector-flag-predicate）──────────────
+// 纯函数单测不够——driver 才是 deletion-closure-check 的真实消费面。本缝把 driver **实际传给**
+// deletion 脚本的构件清单落盘，于是「哪些行被当成 P1 构件送进删除闭包扫描」变成一个可断言的读数。
+
+/** identity 表：leak.ts 20/23 是 below-threshold（**裸判据下排第一**），其余三行真越过 `isFlagged`。 */
+function fakeIdentityBoundaryScript(tmp) {
+  return writeFixture(
+    tmp,
+    "fake-identity-boundary.js",
+    `process.stdout.write(JSON.stringify({table:[`
+      + `{entity:"leak.ts",code:20,hardcoded:20,accessor:23,codeFiles:["plugin/scripts/leak.ts"]},`
+      + `{entity:"real.ts",code:9,hardcoded:9,accessor:2,codeFiles:["plugin/scripts/real.ts"]},`
+      + `{entity:"real2.ts",code:8,hardcoded:8,accessor:3,codeFiles:["plugin/scripts/real2.ts"]},`
+      + `{entity:"real3.ts",code:7,hardcoded:7,accessor:4,codeFiles:["plugin/scripts/real3.ts"]}],`
+      + `judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`,
+  );
+}
+
+/** deletion 缝：在 `root` 下装一个假的 `plugin/scripts/deletion-closure-check.ts`，让它把收到的构件
+ *  清单 append 到 logPath 再回一个合法报告（⛔ 不真跑检测器）。
+ *
+ *  ⚠️ **为什么不用 `deletionCmd` 注入缝**：`deletionCmd` 是**整条 argv 的替代**（driver 里
+ *  `deletionCmd ?? defaultDeletionClosureArgv(root, components)`），注入它就把 driver 推导出的构件
+ *  **一并绕掉**了——缝里永远看到空参数，断言恒真（硬规则 4）。装在 root 下则走 **`defaultDeletionClosureArgv`
+ * 这条生产路径**：driver 推导构件 → 拼进缺省 argv → spawn，构件在缝里真实可见。 */
+function fakeDeletionStubUnderRoot(tmp, logPath) {
+  const dir = path.join(tmp, "plugin", "scripts");
+  fs.mkdirSync(dir, { recursive: true });
+  return writeFixture(
+    dir,
+    "deletion-closure-check.ts",
+    `const fs=require("node:fs");
+const argv=process.argv.slice(2);
+const i=argv.indexOf("--root");
+const components=i<0?argv:argv.slice(0,i);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(components)+"\\n");
+process.stdout.write(JSON.stringify({components,dc:["plugin/scripts/a.ts"],counts:{dcTotal:1,callGraphTotal:1,ratio:1}}));`,
+  );
+}
+
+/** 读 driver 边界缝的日志：每条 = 一次 deletion spawn 收到的构件数组。 */
+function readDeletionComponentLog(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
 
 function fakeArchJudgeScript(tmp) {
@@ -564,6 +615,33 @@ test("AC3 — runArchitectureReview not-triggered ⇒ verified fired=false + not
   assert.equal(fact.value.clusterCount, 0);
   const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
   assert.equal(rec.state, "not-triggered");
+});
+
+// gap-arch-review-p1-seed-ignores-detector-flag-predicate AC4(b)：P1 候选构件选取的**真实消费面**。
+// 断言的是 `runArchitectureReview` 实际交给 deletion 脚本的构件清单——把 `deletionClosureComponents`
+// 的谓词换回裸 `(row.hardcoded ?? 0) > 0` 时本条**必须变红**（leak.ts 20/23 会顶掉 real3.ts）。
+test("AC4(b) — driver 边界：below-threshold 行不作为 P1 构件传给 deletion 脚本", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-p1-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const logPath = path.join(tmp, "deletion-components.jsonl");
+  const identityCmd = ["node", fakeIdentityBoundaryScript(tmp)];
+  const lineageCmd = ["node", fakeLineageScript(tmp, false)];
+  fakeDeletionStubUnderRoot(tmp, logPath);
+  // deletionCmd=null ⇒ 走 defaultDeletionClosureArgv(root, components)（生产路径），假 stub 装在
+  // root/plugin/scripts/deletion-closure-check.ts 接住它。judgeArgv=null 且 halted=true ⇒ 步骤 5
+  // 提前返回：⛔ 不 spawn 真 claude -p，也不落判词载体；但步骤 1-3（identity spawn → 推导构件 →
+  // deletion spawn）已全部跑完——那正是本条的观测面。
+  await runArchitectureReview(tmp, identityCmd, lineageCmd, null, null, null, false, Infinity, true);
+
+  const calls = readDeletionComponentLog(logPath);
+  assert.equal(calls.length, 1, "有候选构件 ⇒ deletion 脚本被 spawn 恰一次");
+  const components = calls[0];
+  assert.deepEqual(
+    components,
+    ["real.ts", "real2.ts", "real3.ts"],
+    "只有 isFlagged=true 的行成为 P1 构件（top-3）",
+  );
+  assert.ok(!components.includes("leak.ts"), "below-threshold 的 leak.ts(20/23) 不得作为 P1 构件");
 });
 
 test("AC3 — runArchitectureReview judge exit non-zero ⇒ failed + failed record", async (t) => {

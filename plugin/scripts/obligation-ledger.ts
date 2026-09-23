@@ -53,6 +53,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateDischargeVerdict, deriveObligationId, DISCHARGE_VERDICT_SCHEMA } from "./obligation-discharge-agent.ts";
+// readJsonLines — semantic-dedup-scan finding `readjsonlines-seven-defs-three-behaviors`: this module
+// carried its own private copy; the ledger reader now lives in gate-script-base.ts, once.
+import { readJsonLines } from "./gate-script-base.ts";
 
 // ── generator registry — the SINGLE SOURCE the obligation set is DERIVED from (三层共用) ─────────────
 // The `condition` describes WHEN the obligation is live (needs handling). `semantic:true` means the
@@ -104,25 +107,6 @@ type LedgerEvent = { _kind: "discharge" | "defer"; id: string; at: string; round
 // ── ledger IO (append-only; absent ledger = []) ──────────────────────────────────────────────────────
 export function defaultLedgerPath(root: string): string {
   return path.join(root, ".quay", "obligation-ledger.jsonl");
-}
-
-function readJsonLines(file: string): Record<string, unknown>[] {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return [];
-  }
-  const rows: Record<string, unknown>[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      // skip a corrupt line — never let one bad row hide the rest of the history
-    }
-  }
-  return rows;
 }
 
 function appendLine(file: string, obj: Record<string, unknown>): void {

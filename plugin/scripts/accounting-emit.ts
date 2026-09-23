@@ -66,6 +66,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { layerMechanisms, LAYER_MECHANISMS } from "./accounting-emit-layer-map.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT_DIR = __dirname;
@@ -280,7 +281,7 @@ function parseArgs(argv: string[]): {
 } {
   const out = {
     layer: null as string | null,
-    root: path.resolve(SCRIPT_DIR, "..", ".."),
+    root: repoRoot(),
     json: false,
     inFlight: null as number | null,
     cap: null as number | null,

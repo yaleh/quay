@@ -54,10 +54,12 @@ import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
+// lineOf / snippetOf now live once in source-text-lib.ts (semantic-dedup-scan `lineof-lineat`).
+import { lineOf, snippetOf } from "./source-text-lib.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
-const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_ROOT = repoRoot();
 
 /** 合法身份默认值（逐项目不变——协议固定的 git ref + 协议固定的任务目录名）。值规范化后（trim + 去
  *  前导 `./`）逐 token 判定；`tasks` 覆盖 `tasks_dir` 的默认目录名，`develop/integration/master` 覆盖
@@ -122,22 +124,6 @@ const ASSIGN_RE = /(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\
 
 /** 对象键形态：`KEY: "value"`（config 键名 `tasks_dir`/`test_command` 的裸字面量写法）。 */
 const KEY_RE = /([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(["'])([^"']*)\2/g;
-
-/** 取第 index 个字符所在的行号（1-based）。 */
-function lineOf(src: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
-/** 取第 index 个字符所在整行的 trimmed 文本。 */
-function snippetOf(src: string, index: number): string {
-  let start = index;
-  while (start > 0 && src[start - 1] !== "\n") start--;
-  let end = index;
-  while (end < src.length && src[end] !== "\n") end++;
-  return src.slice(start, end).trim();
-}
 
 /**
  * 纯判定：给定源文本，返回无 override 裸身份字面量违例清单（空 = 合规）。

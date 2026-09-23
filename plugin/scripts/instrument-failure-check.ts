@@ -55,7 +55,7 @@ import { fileURLToPath } from "node:url";
 // flagVal (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, flagValue, resolveRoot } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -332,17 +332,11 @@ Usage:
 
 Exit codes: 0 PASS/measure · 1 gate FAIL · 2 usage/env error.`;
 
-function resolveRoot(rootArg: string | undefined): string {
-  return path.resolve(rootArg ?? process.cwd());
-}
-
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) helpExit(usage);
-  /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
-  const flagVal = (name: string): string | undefined => flagValue(args, name);
   const asJson = args.includes("--json");
-  const root = resolveRoot(flagVal("--root"));
+  const root = resolveRoot(flagValue(args, "--root"));
   const scanIdx = args.indexOf("--scan");
 
   if (scanIdx !== -1) {

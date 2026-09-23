@@ -40,15 +40,18 @@ import { fileURLToPath } from "node:url";
 // stripComments now lives in source-text-lib.ts (it was byte-identical to runtime-usage-inventory.ts's
 // copy — a 硬规则 5b sweep of plugin/scripts turned it up alongside the finding's own pair). Not
 // re-exported: this module never exported it.
-import { stripComments } from "./source-text-lib.ts";
+// lineOf / snippetOf joined stripComments here in the same module (semantic-dedup-scan
+// `lineof-lineat`): the 1-based newline counter had eleven live copies under two names.
+import { stripComments, lineOf, snippetOf } from "./source-text-lib.ts";
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
-export const DEFAULT_ROOT = path.resolve(__dirname, "..", "..");
+export const DEFAULT_ROOT = repoRoot();
 export const SCRIPTS_DIR_REL = "plugin/scripts";
 /** 脚本全域 = plugin/scripts 顶层 .ts/.sh/.mjs（SPEC §12e 的 309 = 218+78+13）。 */
 export const SCRIPT_EXTENSIONS = new Set([".ts", ".sh", ".mjs"]);
@@ -144,22 +147,6 @@ export function maskComments(src: string): Uint8Array {
     i++;
   }
   return mask;
-}
-
-/** 取第 index 个字符所在的行号（1-based）。 */
-function lineOf(src: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index && i < src.length; i++) if (src[i] === "\n") line++;
-  return line;
-}
-
-/** 取第 index 个字符所在整行的 trimmed 文本。 */
-function snippetOf(src: string, index: number): string {
-  let start = index;
-  while (start > 0 && src[start - 1] !== "\n") start--;
-  let end = index;
-  while (end < src.length && src[end] !== "\n") end++;
-  return src.slice(start, end).trim();
 }
 
 /**

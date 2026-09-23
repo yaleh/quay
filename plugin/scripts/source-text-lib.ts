@@ -12,7 +12,13 @@
 //   stripComments       registry-bare-filename-scan.ts / runtime-usage-inventory.ts
 // All three now exist here once.
 //
-// ⛔ What this module deliberately does NOT do: give the three ONE semantics. Two of them strip
+// A LATER pass of the same routine (finding `lineof-lineat`, runId
+// `semantic-dedup-scan-1790028867335`) found the same pattern again in the position/slice family —
+// lineOf / lineAt (11 live copies, 2 names), snippetOf / snippetAt, and the one-line relOf wrapper —
+// and those now exist here once too (see the second block at the bottom of this file).
+//
+// ⛔ What this module deliberately does NOT do: give the three comment/region primitives ONE
+// semantics. Two of them strip
 // comments of two DIFFERENT languages, and that difference is load-bearing, not cosmetic:
 //   • stripShellComments — `#`-to-EOL, quote-aware, and NO block comments. Shell only. It must not
 //     be pointed at a .ts file: a `//`-comment or a string literal there survives it
@@ -109,4 +115,54 @@ export function firstArgRegion(src: string, mask: Uint8Array, openIdx: number, r
     } else if (c === "," && depth === 0) return [openIdx + 1, i];
   }
   return [openIdx + 1, endBound - 1];
+}
+
+// ── 位置 / 切片原语（第二轮同族抽库）────────────────────────────────────────────────────────────
+//
+// PROVENANCE: the semantic-dedup-scan routine's next pass (.quay/routine-findings.jsonl, finding
+// `lineof-lineat`, runId `semantic-dedup-scan-1790028867335`, suggestedAction `extract`) found FIVE
+// byte-identical 1-based newline counters split across TWO names (lineOf x2 / lineAt x3), with the
+// same body reaching ELEVEN live copies repo-wide once the `index`-parameter and brace variants are
+// counted — including a PRIVATE unexported one in checker-lib.ts, the very module that already
+// exports the code-position primitives these counters feed. The family repeats with snippetOf /
+// snippetAt and with the one-line `relOf` wrapper.
+//
+// ⛔ WHY HERE AND NOT checker-lib.ts (the 判定-side primitives library): checker-lib.test.mjs pins
+// that module to FOUR primitives, ALL of them 判定-side (matchAtCommandPosition / buildNonCodeMask /
+// enumerativeExistence / hasMatchAtCommandPosition); checker-io.ts records the same reading
+// (「先读 checker-lib.test.mjs」) as the reason it stayed out. A line number (or a trimmed line of
+// context) is not a judgment — it is a PURE SOURCE-TEXT transform, which is exactly this module's
+// declared scope. checker-lib.ts imports lineOf/colOf from here for its own hit reports; the edge is
+// one-way (this module imports NOTHING), so no import cycle is created.
+//
+// ⛔ WHAT IS DELIBERATELY *NOT* UNIFIED (same discipline as the two strippers above): the `snippet`
+// family is ONE function with an OPTIONAL width bound, not two. `snippetAt(src, idx, len)` and
+// `snippetOf(src, idx)` differed ONLY by a truncation the former applied unconditionally; folding
+// them required no semantic choice, because `maxLen = Infinity` reproduces the unbounded body
+// exactly. ⛔ `Infinity` rather than a large literal — "big enough on this machine" is a
+// host-dependent constant, not an absence of a bound (硬规则 4 推论二).
+
+/** `idx` 在 `src` 里的 1-based 行号（按 `\n` 计数；`lineOf` 与历史名 `lineAt` 是同一个量，
+ *  只保留一个名字 —— 两个名字本身就是 finding 报出的「rename signal」）。 */
+export function lineOf(src: string, idx: number): number {
+  let line = 1;
+  for (let i = 0; i < idx && i < src.length; i++) if (src[i] === "\n") line++;
+  return line;
+}
+
+/** `idx` 在 `src` 里的 1-based 列号（行内偏移，`\n` 自身记为下一行的第 1 列）。 */
+export function colOf(src: string, idx: number): number {
+  return idx - src.lastIndexOf("\n", idx);
+}
+
+/** `idx` 所在整行的 trimmed 文本（报告里给出命中上下文）。
+ *  `maxLen` 给定且该行更长时，截断为前 `maxLen - 3` 个字符 + `...`（总长恰为 `maxLen`）；
+ *  不传 = 不截断（`Infinity`，结构性无上限，不是某个"够大"的字面量）。 */
+export function snippetOf(src: string, idx: number, maxLen = Infinity): string {
+  let start = idx;
+  while (start > 0 && src[start - 1] !== "\n") start--;
+  let end = idx;
+  while (end < src.length && src[end] !== "\n") end++;
+  const line = src.slice(start, end).trim();
+  return line.length > maxLen ? `${line.slice(0, maxLen - 3)}...` : line;
 }

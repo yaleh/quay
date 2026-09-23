@@ -10,10 +10,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount, LOOP_DRIVER_CHECK_REL, OBSERVER_REGISTRY_REL, runLoopDriverProbe, readManager, scriptBasename, RESOURCE_GATE_REL, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, TASK_STATUS_DRIFT_CHECK_REL, TASK_STATUS_DRIFT_CHECK_NAME } from "../src/observation.ts";
+import { resolvePluginScript, resolveOrchestrationFile } from "../src/plugin-root.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 
@@ -1487,4 +1489,132 @@ test("parseWorkerOutcomeRecordsDetailed: line accounting; the lossy parseWorkerO
   assert.equal(a.suiteLog, null);
   assert.equal(a.fanInLog, null);
   assert.equal(a.outcome, null);
+});
+
+// ── gap-observation-loop-driver-check-rel-module-relative ────────────────────────────────────────
+// `LOOP_DRIVER_CHECK_REL` was `"../../../plugin/scripts/loop-driver-check.sh"` — a module-relative
+// walk-up that `resolvePluginScript` resolves against the PLUGIN ROOT, so `<repo>/plugin/../../../…`
+// never existed and the probe reported 「未接入」 in EVERY repo (a live defect, not a cosmetic one).
+// `OBSERVER_REGISTRY_CONF` (now `OBSERVER_REGISTRY_REL`) was the same defect class over the
+// methodology tree, read through `new URL(..., import.meta.url)` — the worktree-copy + shipped-install
+// failure shape SPEC §6b forbids.
+//
+// The two arms here are the AC4 pair: ① the probe RESOLVES the real script and reports a real
+// verdict; ② with no plugin tree reachable it reports the explicit 「未接入」 reading — never a spawn
+// failure / ENOENT. Arm ② is made hermetic with the QUAY_PLUGIN_ROOT seam (plugin-root.ts), so it
+// needs no second checkout.
+
+const VERDICT_ENUM = ["LIVE", "STALLED", "DOUBLE-TRIGGER", "BANNED-MECHANISM", "DEAD"];
+
+/** Run `fn` with QUAY_PLUGIN_ROOT pinned, restoring whatever was there before (this seam is
+ *  process-global and this file's other tests resolve real plugin scripts). */
+async function withPluginRoot(value, fn) {
+  const had = Object.prototype.hasOwnProperty.call(process.env, "QUAY_PLUGIN_ROOT");
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = value;
+  try { return await fn(); } finally {
+    if (had) process.env.QUAY_PLUGIN_ROOT = prev; else delete process.env.QUAY_PLUGIN_ROOT;
+  }
+}
+
+test("AC2: LOOP_DRIVER_CHECK_REL is a plugin-root rel (no `../` walk-up) and the canonical resolver actually resolves it", () => {
+  assert.ok(!LOOP_DRIVER_CHECK_REL.includes(".."),
+    `the constant must not be a module-relative walk-up (got ${LOOP_DRIVER_CHECK_REL})`);
+  assert.equal(LOOP_DRIVER_CHECK_REL, "scripts/loop-driver-check.sh",
+    "the rel shape resolvePluginScriptUnder expects: relative to the PLUGIN ROOT, not to this module");
+  // The load-bearing half: the rel is only a fix if the resolver can USE it. Position-based, not a
+  // string comparison — resolvePluginScript is the one canonical resolver (plugin-root.ts).
+  const resolved = resolvePluginScript(LOOP_DRIVER_CHECK_REL);
+  assert.ok(resolved != null && resolved.endsWith(path.join("plugin", "scripts", "loop-driver-check.sh")),
+    `LOOP_DRIVER_CHECK_REL must resolve through the canonical resolver (got ${resolved})`);
+});
+
+test("AC4 ①: runLoopDriverProbe over THIS repo resolves the real script and returns a real verdict (not the 未接入 reading)", async () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const r = await runLoopDriverProbe(repoRoot);
+  assert.equal(r.status, "ok", `the probe resolved and ran loop-driver-check.sh (reason: ${r.reason})`);
+  assert.equal(r.reason, null, "no missing-script / spawn-failure diagnostic on the resolved path");
+  assert.ok(VERDICT_ENUM.includes(r.verdict), `a verdict from the script's own JSON enum (got ${r.verdict})`);
+  assert.equal(typeof r.exitCode, "number", "the script's exit code is carried through (0 LIVE / 3 STALLED / …)");
+  // The regression this task exists for: the reading must not be the resolved-as-未接入 shape.
+  assert.ok(!String(r.reason ?? "").includes("未接入"),
+    "the probe no longer reports the missing-script reading it reported in every repo before this fix");
+});
+
+test("AC4 ②: with no plugin tree reachable the probe reports the EXPLICIT 未接入 reading — never a spawn failure / ENOENT", async () => {
+  const noPlugin = fs.mkdtempSync(path.join(os.tmpdir(), "obs-noplugin-"));
+  try {
+    const r = await withPluginRoot(noPlugin, () => runLoopDriverProbe(noPlugin));
+    assert.equal(r.status, "empty", "absent mechanism ⇒ the empty reading (⛔ never a throw out of the probe)");
+    assert.ok(r.reason != null && r.reason.includes("未接入"),
+      `the reading NAMES the cause (got ${r.reason})`);
+    assert.ok(!r.reason.includes("未能运行"),
+      "it is the 「missing」 value, NOT the spawn-failure value — the two must stay distinguishable (硬规则 3b)");
+    assert.equal(r.verdict, null, "no verdict is fabricated from a script that never ran");
+    assert.equal(r.exitCode, null, "no exit code is fabricated either");
+  } finally {
+    fs.rmSync(noPlugin, { recursive: true, force: true });
+  }
+});
+
+test("AC5: observer-registry.conf is read through resolveOrchestrationFile — real path in this repo, explicit 未接入 under the no-plugin seam", async () => {
+  // ① this repo: the methodology tree is a sibling of plugin/, so the resolver reaches it.
+  const conf = resolveOrchestrationFile(OBSERVER_REGISTRY_REL);
+  assert.ok(conf != null && conf.endsWith(path.join("orchestration", "observer-registry.conf")),
+    `resolved from the plugin root's sibling orchestration/ tree (got ${conf})`);
+  assert.ok(fs.existsSync(conf), "…and it is a real file (a path that does not exist would be a false green)");
+
+  // ② a product install carries no methodology tree ⇒ null, and readManager renders it as its OWN
+  //    reading rather than as an empty registry (硬规则 3b).
+  const noPlugin = fs.mkdtempSync(path.join(os.tmpdir(), "obs-noplugin-reg-"));
+  try {
+    const seam = await withPluginRoot(noPlugin, async () => ({
+      file: resolveOrchestrationFile(OBSERVER_REGISTRY_REL),
+      mgr: await readManager(noPlugin),
+    }));
+    assert.equal(seam.file, null, "no plugin root ⇒ no orchestration tree ⇒ null (the EXPECTED value for a shipped install)");
+    assert.equal(seam.mgr.observers.status, "empty");
+    assert.deepEqual(seam.mgr.observers.rows, []);
+    assert.ok(seam.mgr.observers.reason.includes("未接入"),
+      `the absent tree is named as such, not as an empty registry (got ${seam.mgr.observers.reason})`);
+    // Negative control for the OTHER value of the same branch: with the real install the registry has
+    // rows, so the two readings are distinguishable and ② was not vacuous.
+    assert.ok((await readManager(noPlugin)).observers.rows.length > 0,
+      "control: without the seam the same call reads real rows — so the assertion above is about the seam");
+  } finally {
+    fs.rmSync(noPlugin, { recursive: true, force: true });
+  }
+});
+
+// ── gap-task-status-drift-check-serve-labels-no-rel-accessor ───────────────────────────────────────
+// AC2's negative control: the landing source's display name must be DERIVED from the one rel
+// constant, not a second literal that happens to be equal today. The discriminator is the middle
+// test — a rel the code has never heard of must still get its own basename, which a lookup table
+// (a copy moved into another file) cannot do. `scriptBasename` is the same pure function the
+// sibling task introduced for resource-gate.sh / process-budget.sh
+// (gap-serve-labels-hardcode-mechanism-script-basenames); this is its third application.
+test("AC2: TASK_STATUS_DRIFT_CHECK_NAME is scriptBasename(TASK_STATUS_DRIFT_CHECK_REL) — derived, not a second literal", () => {
+  assert.equal(TASK_STATUS_DRIFT_CHECK_NAME, scriptBasename(TASK_STATUS_DRIFT_CHECK_REL),
+    "the display name IS the rel's basename (one derivation, not two naming points)");
+  assert.equal(TASK_STATUS_DRIFT_CHECK_NAME, "task-status-drift-check.ts",
+    "…and the byte value is unchanged from the pre-fix rendering (AC4's live assertions depend on it)");
+  // The rel itself is the plugin-root-relative form the resolver consumes (path.join, per the
+  // AC1b loop-shipping constraint documented next to RESOURCE_GATE_REL).
+  assert.equal(TASK_STATUS_DRIFT_CHECK_REL, path.join("scripts", "task-status-drift-check.ts"),
+    "the rel is the plugin-root-relative scripts/ path, built with path.join");
+});
+
+test("AC2: scriptBasename is a PURE function of its input, not a lookup table (the negative control)", () => {
+  // A rel that appears in NO table anywhere. A lookup-table implementation (the copy moved into
+  // another file) would have to answer `undefined`/`""` here, or a default — this test is what makes
+  // 「恰好相等的第二份字面量」 distinguishable from 「派生」.
+  assert.equal(scriptBasename("scripts/whatever.sh"), "whatever.sh",
+    "an unknown rel still yields ITS OWN basename");
+  assert.equal(scriptBasename("scripts/never-heard-of-this.ts"), "never-heard-of-this.ts");
+  assert.equal(scriptBasename("/abs/path/to/another-thing.ts"), "another-thing.ts");
+  // …and the derivation is total over the sibling rels too (one function, four names — no per-rel branch).
+  assert.equal(RESOURCE_GATE_NAME, scriptBasename(RESOURCE_GATE_REL));
+  assert.equal(PROCESS_BUDGET_NAME, scriptBasename("scripts/process-budget.sh"));
+  // Two DIFFERENT rels must not collapse onto one name (a table keyed too coarsely would).
+  assert.notEqual(TASK_STATUS_DRIFT_CHECK_NAME, RESOURCE_GATE_NAME);
 });

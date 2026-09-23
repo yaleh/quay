@@ -94,6 +94,7 @@ import { repoRoot } from "./repo-root.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
+import { readJsonLines } from "./gate-script-base.ts";
 
 type Sample = { t: number; cpu_stall: number };
 type PerFileRec = { file: string; startedAtMs: number; endedAtMs: number; passed: boolean };
@@ -305,27 +306,6 @@ function fmtRunDelay(ns: number): string {
   if (!Number.isFinite(ns)) return "  n/a";
   if (ns < 1_000_000) return `${(ns / 1000).toFixed(1)}µs`;
   return `${(ns / 1_000_000).toFixed(1)}ms`;
-}
-
-function readJsonLines(file: string): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return out;
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const s = line.trim();
-    if (!s) continue;
-    try {
-      const v = JSON.parse(s);
-      if (v && typeof v === "object") out.push(v as Record<string, unknown>);
-    } catch {
-      /* skip */
-    }
-  }
-  return out;
 }
 
 // ── (b) passive historical ──────────────────────────────────────────────────────────
