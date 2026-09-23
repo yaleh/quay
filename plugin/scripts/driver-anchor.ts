@@ -35,6 +35,7 @@ import {
   pidArgFile,
   pidAlive,
   preferredAnchorKernel,
+  kindDeclarationMap,
   readAnchorPid,
   readDesired,
   rebuildKernelBundle,
@@ -45,6 +46,7 @@ import {
   spawnAnchor,
   statePaths,
   ts,
+  undeclaredKinds,
   writeDesired,
   type AnchorBundleReading,
   type AnchorDesiredEntry,
@@ -380,6 +382,8 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   } catch { kernelBuiltAt = 0; }
   // 「陈旧且换不动」这条读数只在其 kinds 集合变化时打一次（⛔ 每 500ms reconcile 刷屏）。
   let staleBundleLogged = "";
+  // 同款（AC-255 能力半边）：「静默脱离期望态」的 kind 集合变化时才打一行，⛔ 不刷屏。
+  let lastUndeclaredLogged: string | null = null;
 
   // ── 陈旧 bundle 的**动作面**（gap-ac214-sixth-crossing-stale-bundle-detected-but-no-remediation）──
   //
@@ -425,6 +429,12 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           // ⚠️ 在任 anchor 也会把它读到的记录（= 某个接管者写的）原样带上——那正是期望的：此刻确实
           // 有一次交接在进行/已收敛，读方按 `state` + 记录里 `pid` 的存活区分「在等」与「已收敛」。
           takeover: readTakeoverRecord(opts.root),
+          // 逐 kind 的**声明状态**（AC-255 能力半边，每趟 reconcile 重写）：`declared` /
+          // `stopped-explicitly`（操作员有意停机）/ `not-declared`（**静默脱离期望态**）/ `not-evaluated`。
+          // ⛔ 四态各自独立，⛔ 不与 `kinds`（此刻实际在跑的集合）共用输出：`kinds` 少了一个不代表
+          // 「有人停的」——那正是本任务要分开的两件事。放在这里而不是只留在 `.quay/anchor-kind-stops.json`：
+          // `anchor.json` 是 manager/外层/`server status` 已经在读的回读面（与 `bundle`/`takeover` 同形）。
+          declaration: kindDeclarationMap(opts.root),
         }) + "\n",
         "utf8",
       );
@@ -491,6 +501,26 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
     // 停：在跑而期望态里没有 ⇒ 只停那一个（§6.9 不变式 2：⛔ 不波及其余）。
     for (const kind of [...active.keys()]) {
       if (!wanted.includes(kind)) active.get(kind)?.stop();
+    }
+    // AC-255 能力半边：**静默脱离期望态**的 kind（既不在期望态里、又没有显式停机记录）。
+    // ⛔ 这不是一个「动作」，只是一条读数：reconcile 的**行为**一行未动（它只起 `wanted`）。缺这条读数时，
+    //   「有人 `stop --kind X`」与「X 某次被静默移出且无人加回」在**任何**盘上载体上都同形 —— anchor
+    //   照常以「一个健康进程」的样子跑剩余 kind，`ps` 看不见少了谁（2026-09-23 实测：`quality`/`meta`
+    //   停摆 264min，期间 anchor 健康、其余四个 kind 新鲜）。⛔ 只报 `not-declared`：
+    //   `stopped-explicitly` 是**有意**的，混进来 = 每个正常停掉的 kind 每轮报红 = 信号被噪声淹没。
+    // ⚠️ 与 `staleBundleLogged` 同款：只在集合**变化**时打一行，⛔ 不每 500ms 刷屏。
+    const silent = undeclaredKinds(opts.root).filter((k) => !wanted.includes(k));
+    const silentKey = silent.join(",");
+    if (silentKey !== lastUndeclaredLogged) {
+      lastUndeclaredLogged = silentKey;
+      if (silent.length > 0) {
+        log(
+          `${ts()} anchor: kind(s) absent from the desired set with NO explicit stop record: [${silentKey}] ` +
+          `— either an operator stopped them without a record or they were silently dropped ` +
+          `(⛔ this anchor will NOT auto-start them: an explicit \`stop --kind X\` must stay stopped, SPEC §6.9 inv.1; ` +
+          `restore with \`quay driver start --kind X\`)`,
+        );
+      }
     }
     writeState();
 
