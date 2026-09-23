@@ -234,6 +234,20 @@ $ node packages/quay/bin/quay.js goal check --stale-pass        # 本 checkout�
 ```
 （failing 里的 16 条 = AC-179 / AC-194 / AC-290…AC-303 —— **同族、未重锚**，⛔ 不在本任务 Touches 内。生产 checkout 此刻仍是 17 条（含 AC-289，旧文本），重锚版随 fan-in 落地后收敛。）
 
+### AC7 —— scoped 门
+
+```
+$ bash <worktree>/scripts/test.sh --for-task gap-ac289-criterion-cmdline-port-literal-stale --allow-thin
+SCOPED_GATE_EXIT=0
+  tmp-leak-pairing-check — 878 file(s), 0 unpaired mkdtemp result(s). PASS.
+  test-isolation-check — 878 glob file(s), 21 current violation(s) … mkdtemp-no-cleanup=0
+  PASS: all 21 violation(s) are baselined; the list can only get SHORTER (no additions, no growth, no stale entries).
+  PASS: no checked-in-tree writes … 0 inside the tree (delta against develop)
+  PASS — every declared landing target == forward branch 'develop' (0 violations)
+```
+
+首次运行 **红**（`tmp-leak-pairing-check` + `test-isolation-check` 同源判据各报一条）：夹具把临时目录 `mkdtempSync` 在 `makeTmpContext()` 里、却在 `withContext` 里删 `ctx.root`（它的 `realpathSync`）⇒ 检测器看不到「绑定被移除」。已改为**同一作用域**内 mkdtemp + `finally` 里 `rmSync`（`bf68f6089`），⛔ 未加进 `plugin/test-isolation-violations.txt`（该表只减不增）。
+
 ### 配套夹具（Plan 步骤 4）
 
 `packages/quay/test/ac289-criterion-address-derivation.test.mjs`（`@test-group product`）——**跑的盘上 criterion 原文**（⛔ 不是拷贝：拷贝会在原文退回字面量后继续绿），11 个用例全绿：
