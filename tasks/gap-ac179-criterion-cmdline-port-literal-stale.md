@@ -2,7 +2,7 @@
 id: gap-ac179-criterion-cmdline-port-literal-stale
 title: AC-179 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器的默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假、卡片其实一直在渲染；且失败成因被判据自身进程抹成 `addr=none`（AC-241 家族）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -156,3 +156,14 @@ $ pgrep -af 'quay.ts serve'                  → 1805344（真实例，cwd=root�
 - 分布：`AC-179`（GOAL-001）＋ `AC-288 … AC-303` 共 16 条（全部 GOAL-024，全部 `achieved` ∧ 非 `long-term` ⇒ **全部在冻结 population 里**，会被 `check --stale-pass` 逐轮读到）。
 - **它们此刻正在取假**，正是本任务修的那个机制：`check --stale-pass` 的 `failing` = `[AC-288, AC-289, AC-290]`，台账逐字 `CAUSE=en-fetch-failed -- GET http://172.28.0.1:0/dashboard returned nothing (addr=172.28.0.1:0)`（2026-09-23T08:22Z）—— 与 AC-179 修订前的失败**同形同因**。
 - 处置：**不在本任务内修**。它们的 `Touches`/作用域不在本节声明内，改它们属越界写（fan-in anti-drift 会硬失败），且各条 `expect`/语义需逐条独立核对（部分条已自带 `case "$a" in 0.0.0.0:*)` 归一化，形态并不完全相同）。⇒ 建议**另立一条任务**：把 `AC-288…AC-303` 的地址派生统一重锚到活载体（机制与本条同），并以 `check --stale-pass` 的 `failing:[]` 为验收面。
+
+## Needs-Human
+
+**执行 2026-09-23T16:00:28.308Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 0 failing lines and attributed none to a file); stopping instead of spending another worker session
+- 失败步/判词：step=suite: suite NOT run (refused) — [full-suite-runner] SUITE-NOT-RUN branch=resource-gate-wait ts=2026-09-23T16:00:04.346Z reason="resource gate says WAIT — => WAIT: 过载窗口（load 256.16 >= nproc×2≈256）。实测 load 11.76/nproc=4 时 PSI 仅 8.27<60 ⇒ 红轮在过载窗口起跑（loop-shipping flake 反复）" — no test was executed by this round
+- run_id：wk-prod-anchor
+- session_id：20461cc1-e297-4467-8844-7eb172160752
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac179-criterion-cmdline-port-literal-stale~wk-prod-anchor~1790178787805-b199e6.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac179-criterion-cmdline-port-literal-stale-wk-prod-anchor.log
