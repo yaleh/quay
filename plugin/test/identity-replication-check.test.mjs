@@ -27,6 +27,7 @@ import {
   blankComments,
   accessorRegexSource,
   isPathInvocationMention,
+  occurrenceRole,
   findPathConstants,
   findJudgmentRewrites,
   findMergeableJudgmentRewrites,
@@ -356,11 +357,15 @@ function accessorFixtures() {
       '#!/usr/bin/env bash\n_lib="$(dirname "${BASH_SOURCE[0]}")/shared-lib.sh"\nif [ -f "$_lib" ]; then . "$_lib"; fi\n',
     // ③ 负控制: 只在【注释】里提及 ⇒ code 位置判定即剔除, 既不 accessor 也不 hardcoded。
     "plugin/scripts/comment-only.sh": "#!/usr/bin/env bash\n# shared-lib.sh is the single accessor\necho hi\n",
-    // ④ 负控制 (AC3 的反向实例): 字符串字面量提到 basename、从不 source/import ⇒ 仍是 hardcoded。
+    // ④ 负控制 (AC3 的反向实例): 整段字符串字面量**就是** basename、从不 source/import ⇒ 仍是 hardcoded。
+    //    ⛔ 这条在 gap-identity-hardcoded-needs-occurrence-role-filter 后仍成立的**理由**要说清:
+    //    该字面量的内容恰为实体名 ⇒ 出现角色 = name-value (身份值)。移动的是**另一条**边界 ——
+    //    嵌在更长叙述串里的提及 (test 标题 / 断言消息 / 错误消息, 见 usage-text.ts 那条) 不再是证据。
     "plugin/scripts/string-only.sh": '#!/usr/bin/env bash\necho "shared-lib.sh"\n',
     // ⑤ 负控制【放宽过头】: 真 source 的【行尾注释】里提到 basename, 不得因此升为 accessor。
-    //    第 3 行提供【代码位置】的提及, 否则整文件会被位置判定提前剔除, 这条守卫就成了空转
-    //    (与「忽略」同形)。两种过头放宽都会在第 2 行命中: `[^\n]*?` 直接吞到行尾; 只要求引号成对
+    //    第 3 行的提及必须是**身份值**形态 (整段字面量 = 实体名), 否则整文件会被**出现角色**
+    //    过滤器提前剔除, 这条守卫就成了空转 (与「忽略」同形) —— 散文串 (`echo "loads shared-lib.sh"`)
+    //    在本任务后已不是命名点。两种过头放宽都会在第 2 行命中: `[^\n]*?` 直接吞到行尾; 只要求引号成对
     //    则把 "$CONF" 读成一个引号段、再吃掉后面的 `#`。匹配起点是行首的 `.` (代码位置), 位置掩码
     //    拦不住 ⇒ 只有「引号成对 ∧ 未加引号片段不含 #」两条合起来才挡得住。
     "plugin/scripts/comment-tail.sh":
@@ -503,7 +508,34 @@ test("accessorRegexSource — 多行命名导入是 accessor, 且不吞掉另一
   assert.equal(re.test('const p = "shared-lib";\n'), false, "裸字符串提及不是 accessor");
 });
 
-test("isPathInvocationMention — 按路径调用是位置, 文本里的裸 basename 是身份 (AC2 与反向边界)", () => {
+// ── 出现角色过滤器 (gap-identity-hardcoded-needs-occurrence-role-filter, AC5 的旧边界重裁定) ──
+// ⛔ 旧边界逐字是「**文本里的裸 basename 是身份**, 仍是证据」—— 它把 `console.error("Usage: node
+// x.ts --json")` 这类**嵌在散文里的提及**算成独立命名。本任务把它重新裁定为:
+//   · 出现角色 = `name-value` (字面量内容**恰为**实体名 / 赋值右侧的身份值 / 名字清单里的裸名)
+//     ⇒ **是**独立命名 (证据);
+//   · 出现角色 = `text` (嵌在更长的叙述/标题/消息/散文里) ⇒ **不是**证据。
+// 反向边界同时钉住: 「全部不认」等于把检测器关掉 (硬规则 2 的零计数半边)。
+
+test("occurrenceRole — 出现角色四态: 身份值 / 叙述串 / 按路径 / 注释 (AC1 逐态)", () => {
+  const ent = "resource-gate.sh";
+  const ts = (src) => { const m = tsCommentMask(src); return occurrenceRole(src, m, blankComments(src, m), src.indexOf(ent), ent); };
+  const sh = (src) => { const m = shCommentMask(src); return occurrenceRole(src, m, blankComments(src, m), src.indexOf(ent), ent); };
+  // 非证据: 叙述串 (test 标题 / 断言消息 / 期望值 / 错误消息) 与按路径调用、注释
+  assert.equal(ts('test("AC99 — resource-gate.sh --json is valid", () => {});\n'), "text", "test 标题是叙述");
+  assert.equal(ts('assert.ok(fs.existsSync(gate), "resolved resource-gate.sh exists on disk");\n'), "text", "断言消息是叙述");
+  assert.equal(ts('return { reason: "resource-gate.sh not found (kernel install location) — fail-closed" };\n'), "text", "错误消息是叙述");
+  assert.equal(sh("C3 resource-gate.sh --for full-suite。\n"), "text", "heredoc fixture 正文里的散文是叙述");
+  assert.equal(ts('const s = path.join(pluginRoot, "scripts", "resource-gate.sh");\n'), "by-path", "按路径调用是位置 (未退化)");
+  assert.equal(ts("// resource-gate.sh is the gate\nexport const a = 1;\n"), "comment", "注释由位置掩码排除");
+  // 反向边界 (证据): 字面量内容**恰为**实体名 ⇒ 身份值; `NAME=<entity>` 的裸右侧同理。
+  assert.equal(sh('NEVER_LAYDOWN="resource-gate.sh"\n'), "name-value", "裸 basename 被赋成身份值 ⇒ 仍是证据");
+  assert.equal(sh("NEVER_LAYDOWN=resource-gate.sh\n"), "name-value", "无引号的赋值右侧 = 身份值");
+  assert.equal(ts('export const GATE_NAME = "resource-gate.sh";\n'), "name-value", "整段字面量 = 独立命名");
+  assert.equal(sh("printf '%s\\n' a.ts resource-gate.sh b.ts >> \"$out\"\n"), "name-value",
+    "名字清单 (邻词也是脚本名) 里的裸名 = 登记, 不是散文");
+});
+
+test("isPathInvocationMention — 按路径调用是位置 (只此一维; 叙述串由 occurrenceRole 排除)", () => {
   const ent = "shared-lib.ts";
   const at = (src) => isPathInvocationMention(src, src.indexOf(ent), ent);
   assert.equal(at('const p = "plugin/scripts/shared-lib.ts";'), true, "A 路径尾 (仓库相对路径串)");
@@ -511,13 +543,15 @@ test("isPathInvocationMention — 按路径调用是位置, 文本里的裸 base
   assert.equal(at('const p = path.join(root, "plugin", "scripts", "shared-lib.ts");'), true, "B 实参位 (路径分段拼出)");
   assert.equal(at('const p = resolveKernelSibling("shared-lib.ts");'), true, "B 实参位 (kernel 同胞解析)");
   assert.equal(at('spawn("node", ["shared-lib.ts"]);'), true, "B 实参位 (spawn argv)");
-  // 反向边界: 文本/散文/UI 里的裸 basename 是**命名**, 仍是证据。
-  assert.equal(at('console.error("Usage: node shared-lib.ts --json");'), false, "用法串里命名它");
-  assert.equal(at("echo \"shared-lib.ts\"\n"), false, "`echo \"x\"` 不是实参位 (紧邻的前一个非空白是标识符)");
-  assert.equal(at("<h2>shared-lib.ts</h2>"), false, "UI 标签里命名它");
+  // 本谓词**只**判「按路径调用」: 下列三处都不是实参位 ⇒ 仍返回 false。它们**不是证据**这件事由
+  // occurrenceRole 的 `text` 角色负责 (散文串) —— ⛔ 旧注释曾在这里写「仍是命名, 仍是证据」, 该边界
+  // 已在 gap-identity-hardcoded-needs-occurrence-role-filter 重新裁定, 见上一个 test。
+  assert.equal(at('console.error("Usage: node shared-lib.ts --json");'), false, "用法串不是实参位 (但它也不是证据: role=text)");
+  assert.equal(at("echo \"shared-lib.ts\"\n"), false, "`echo \"x\"` 不是实参位");
+  assert.equal(at("<h2>shared-lib.ts</h2>"), false, "UI 标签不是实参位 (但它也不是证据: role=text)");
 });
 
-test("literalReplication — 按路径调用的文件不再计入, 文本命名的仍计入 (AC2)", () => {
+test("literalReplication — 按路径调用/叙述串的文件不再计入, 身份值的仍计入 (AC2 + 反向边界)", () => {
   const dir = mktmp({
     "plugin/scripts/path-rel.ts": 'const p = "plugin/scripts/shared-lib.ts";\n',
     "plugin/scripts/path-join-tail.ts": 'const p = path.join(__dirname, "../scripts/shared-lib.ts");\n',
@@ -534,16 +568,29 @@ test("literalReplication — 按路径调用的文件不再计入, 文本命名�
     "plugin/scripts/sibling-resolve.ts",
     "plugin/scripts/comment-only.ts",
   ]) {
-    assert.equal(one(rel).code, 0, `${rel} 只有按路径调用/注释 ⇒ 不进 codeFiles (修前会被计成 hardcoded)`);
+    assert.equal(one(rel).code, 0, `${rel} 只有按路径调用/注释 ⇒ 连提及级 code 都不进`);
+    assert.equal(one(rel).codeFiles.length, 0, `${rel} 不进 codeFiles`);
   }
-  // 反向: 文本里命名它的文件**仍须**计入 —— 否则这条修法就是把检测器关掉 (硬规则 2 的零计数半边)。
-  assert.equal(one("plugin/scripts/usage-text.ts").hardcoded, 1, "用法串里命名它 ⇒ 仍是硬编码 (证据)");
+  // 叙述串 (role=text): **提及级 code 仍是 1** (它确实出现在代码位置) 而**命名级**为 0 ⇒ 不进
+  // codeFiles。这正是两个字段的分工: `code` 是读数面 (修前/修后同面), `codeFiles` 是命名级名单。
+  assert.equal(one("plugin/scripts/usage-text.ts").code, 1, "散文用法串仍是代码位置提及 (读数面不动)");
+  assert.equal(one("plugin/scripts/usage-text.ts").codeFiles.length, 0, "但它不进 codeFiles (非命名点)");
+  // 反向边界 (**不许砍空**): 把裸 basename 赋成身份值的文件**仍须**计入 —— 否则这条修法就是把
+  // 检测器关掉 (硬规则 2 的零计数半边)。两条对照只差「字面量内容是否恰为实体名」。
+  assert.equal(one("plugin/scripts/usage-text.ts").hardcoded, 0, "散文用法串 ⇒ 非命名点");
+  const two = mktmp({
+    "plugin/scripts/identity-value.sh": '#!/usr/bin/env bash\nNEVER_LAYDOWN="shared-lib.ts"\n',
+  });
+  assert.equal(literalReplication(two, [path.join(two, "plugin/scripts/identity-value.sh")], "shared-lib.ts").hardcoded, 1,
+    "身份值位点仍计入 (反向边界非空转)");
 });
 
 test("literalReplication — 判红行必须就地给出命中样本 (AC6③: 计数与内容同源)", () => {
   const dir = mktmp({
-    "plugin/scripts/a.ts": 'console.error("Usage: node shared-lib.ts --json");\n',
-    "plugin/scripts/b.ts": 'console.log("shared-lib.ts — second independent naming");\n',
+    // ⛔ 两条 fixture 必须是**身份值**形态 (整段字面量 = 实体名): 散文串 (`console.error("Usage: …")`)
+    // 在本任务后已不是命名点, 用它当样本来源会让这条测试断言一个恒为 0 的量 (空转)。
+    "plugin/scripts/a.ts": 'export const A_NAME = "shared-lib.ts";\n',
+    "plugin/scripts/b.ts": 'const { b } = { b: "shared-lib.ts" };\n',
   });
   const files = ["plugin/scripts/a.ts", "plugin/scripts/b.ts"].map((p) => path.join(dir, p));
   const one = literalReplication(dir, files, "shared-lib.ts");
