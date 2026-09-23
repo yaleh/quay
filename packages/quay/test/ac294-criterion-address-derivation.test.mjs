@@ -14,8 +14,8 @@
 // (`gap-serve-same-root-admission-lock`) moved the web port's DEFAULT to kernel-assigned
 // (`--port 0`), so on the launcher default that step derived `<host>:0`, a structurally
 // unfetchable address. The ledger shows the failure is a CARRIER move, not a subject regression: the
-// SAME criterionHash 94183bf6f36b6d15 was green at 2026-09-23T05:08:37.165Z and red at
-// 08:21:13.049Z. The derivation step was re-anchored to two sources:
+// SAME criterionHash 597695d4730a8e33 was green at 2026-09-23T05:08:45.174Z and red at
+// 2026-09-23T08:36:03.310Z. The derivation step was re-anchored to two sources:
 //   ① the process's OWN argv, read POSITIONALLY (`serve … --host H --port N`, N >= 1);
 //   ② otherwise this root's `.quay/server.json` carrier — the only place a kernel-assigned port is
 //      knowable — accepted only when its schemaVersion is 1, its `pid` IS this candidate, that pid
