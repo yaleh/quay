@@ -80,6 +80,13 @@ quay driver: environment smoke check FAILED — refusing to start the worker dri
 - `import-graph-check` 棘轮 valueSccs / typeSccs / reverseEdges 仍全 0 —— 环境级签名表放在 Layer 0（driver-runtime.ts）正是为了不造新 value SCC（`worker-driver.ts` 已 import 它，反向会成环 ⇒ 棘轮红）。
 - `plugin/test/worker-driver-fan-in-s*.test.mjs`（109）、`worker-driver-resident-s*.test.mjs` + `worker-driver-retry-classification`（63）、`worker-driver.test.mjs`（103）、`driver-runtime-s05.test.mjs`（4）单独跑均全绿。
 
+**本轮补记（2026-09-24，worker 续做轮：修一处假红 + 复跑读数）**：实现与四项 AC 均已在分支上（`be3174fc6`），本轮**未改任何判定逻辑**，只修掉一处**负载相关的假红**并复跑读数：
+
+- **假红成因（约 9 次全文件运行中实测 1 次）**：AC1② 在 `waitFor(载体出现 environment-fatal)` 之后**立即**断言 `drv.events()`，而载体 `worker-outcome.jsonl` 由 `runOneWorker` 落盘（`worker-driver.ts:3873`）、`environment-fatal-halt` 事件要到 `onWorkerFinished`（`:4300`）才写 stdout ⇒ 载体一可见就断言事件 = 与 stdout 管道送达赛跑（**判定与事件都是对的**，只是事件还没到父进程）。AC1① 早已是正确顺序（先等 driver 侧停机控制态，控制态与事件写在同一段代码且在其前）。
+- **修法（⛔ 不弱化断言）**：AC1② 的事件断言移到「等停机控制态」之后；两处事件断言都改成有界 `waitFor`。事件若根本不发 ⇒ waitFor 超时返回假 ⇒ 照常红。
+- **非空转双向实测（真驱动，⛔ 非 fixture）**：**正臂**——真实驱动事件流里恰有 1 条 `{"event":"environment-fatal-halt","task":"gap-env-b","signature":"cross-task:flaky unknown signature E42"}`，停机原因含签名原文，outcome 为 `gap-env-a=ordinary / gap-env-b=environment-fatal`；**负臂**——把 emit 的前缀临时改成 `xtask:` ⇒ AC1② 在 20.6s（waitFor 预算）干净失败、判词正确；改回后 17/17 全绿。
+- **复跑读数（合并 develop 80 个提交之后）**：`node --test plugin/test/worker-driver-fan-in-s05.test.mjs` ⇒ exit 0 / 17 全绿（连跑 5 次不变）；`bash scripts/test.sh --for-task gap-worker-quick-death-environment-fatal-halts-driver --allow-thin` ⇒ **exit 0 / 120 用例绿**（与上表同）；merge 后 `git rev-list --count HEAD..develop` = 0 且无 unmerged path。
+
 ## Touches
 
 - plugin/scripts/worker-driver.ts

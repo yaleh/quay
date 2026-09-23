@@ -28,6 +28,10 @@ import {
   // AC5 — 项目声明的输出约定（loop.test_output）的读面。
   readLoopTestOutput,
 } from "../scripts/worker-driver.ts";
+// scoped 门的输出契约 + 三态取值（gap-scoped-gate-thin-selection-not-same-shape-as-green）。直接 import
+// 该模块（本仓库 test 的常规做法——worker-driver.ts 的 re-export 面是为【既有】测试的 import 面冻结的，
+// 本任务新增的判据面不与它耦合）。
+import { parseScopedThin, scopedGateVerdict, SCOPED_THIN_MARKER } from "../scripts/worker-fan-in.ts";
 // /tests 页自己的读者（同一载体 verification-round.jsonl 的读面）——「web 面能看到这一轮」的机器判定面，
 // 与写面同源、⛔ 不在测试里另写一个 JSON.parse 假装读者（硬规则 5b：写面修了读面也要走同一实现的判据）。
 import { readTests } from "../../packages/quay/src/observation.ts";
@@ -293,4 +297,54 @@ test("AC5 负控制 — 无声明 ⇒ 内建形状解析（vitest 输出解析�
   rec = JSON.parse(lines[1]);
   assert.equal(rec.pass, undefined, "声明没匹配 ⇒ 字段仍缺席（⛔ 不退回伪造/默认值）");
   assert.equal(rec.state, "green", "轮次本身照常入账（观测字段缺失不阻塞台账）");
+});
+
+// ── gap-scoped-gate-thin-selection-not-same-shape-as-green — scoped 命令的【输出契约】+ 三态取值 ──────
+// 缺陷：scoped 命令取零个测试文件时 exit 0（生产实例 claudecodeui `scripts/test.sh:114`
+// `no scoped test files for <id> (thin)` + exit 0），fan-in 把它记成与「真评了 ≥1 个文件且全绿」
+// 【同形】的 ok:true。契约面是双向的：命令侧打 `SCOPED-THIN selected=<n>`（第三方遵循的接口），
+// fan-in 侧读它并记 `not-evaluated`——⛔ 不记 green，也⛔ 不当失败。两者按同一处判定（本文件的
+// 读面就是 fan-in 的读面，⛔ 测试里不另写一个解析器假装读者）。
+
+test("AC1 (gap-scoped-gate-thin…) — thin 标记按【位置】判定：行首命中 ⇒ thin；正文里提到（非行首）⇒ 不算", () => {
+  assert.equal(SCOPED_THIN_MARKER, "SCOPED-THIN", "契约标记逐字（第三方照此实现）");
+  // ① 契约形（第三方会照抄的那一行）⇒ thin，并取出 selected
+  assert.deepEqual(parseScopedThin("SCOPED-THIN selected=0\n"), { thin: true, selected: 0, detail: "selected=0" });
+  // 前导空白、前后其它输出行都不影响（trim 后【行首】命中即算——契约与噪声并存时仍可读）
+  assert.equal(parseScopedThin("some noise\n  SCOPED-THIN selected=0  \n").thin, true);
+  // ② 只打标记、没写计数 ⇒ selected=null（⛔ 不伪造成 0：「没写计数」与「评了 0 个」不同形）
+  assert.equal(parseScopedThin("SCOPED-THIN\n").thin, true);
+  assert.equal(parseScopedThin("SCOPED-THIN\n").selected, null);
+  // ③ 负控制（按位置判定，硬规则 2）：标记只出现在行【中间】（正文/日志提到它）⇒ 不算命中
+  assert.equal(parseScopedThin("note: SCOPED-THIN is a quay contract\n").thin, false);
+  // 第三方【自造】措辞不构成契约命中——⛔ 不去猜别人的自由文本（那会让判定依赖措辞而不是接口）
+  assert.equal(parseScopedThin("no scoped test files for X (thin)\n").thin, false);
+  // 无输出 / 普通成功输出 ⇒ 不 thin（⇒ 与修复前的「真评了」同形，本任务不改变这条路径）
+  assert.equal(parseScopedThin("").thin, false);
+  assert.equal(parseScopedThin("# pass 3\n# fail 0\n").thin, false);
+});
+
+test("AC2 (gap-scoped-gate-thin…) — scopedGateVerdict 三态两两不同形；not-evaluated 的两条来源各带出处", () => {
+  // not-evaluated 的两条来源（thin / 未声明该能力）各自带可区分的出处
+  assert.deepEqual(scopedGateVerdict({ state: "run", ok: true, output: "SCOPED-THIN selected=0\n" }),
+    { verdict: "not-evaluated", reason: "scoped-thin(selected=0)" });
+  assert.deepEqual(scopedGateVerdict({ state: "skip", skipReason: "third-party-no-scoped-tooling" }),
+    { verdict: "not-evaluated", reason: "third-party-no-scoped-tooling" });
+  // green / red —— 真评了才有这两个取值
+  assert.deepEqual(scopedGateVerdict({ state: "run", ok: true, output: "# pass 3\n" }), { verdict: "green", reason: null });
+  assert.deepEqual(scopedGateVerdict({ state: "run", ok: false, output: "# fail 1\n" }), { verdict: "red", reason: null });
+  // 缓存命中 ⇒ green（worker 已对着【同一 develop tip】评过绿），出处写在 reason 里（⛔ 不是「没评」）
+  assert.deepEqual(scopedGateVerdict({ state: "cache-hit" }), { verdict: "green", reason: "cache-hit(worker-premerge)" });
+
+  // 三态两两不同形（硬规则 3b：第三态不得与「合格」共用取值）
+  const thin = scopedGateVerdict({ state: "run", ok: true, output: "SCOPED-THIN selected=0\n" });
+  const green = scopedGateVerdict({ state: "run", ok: true, output: "" });
+  const red = scopedGateVerdict({ state: "run", ok: false, output: "" });
+  assert.deepEqual([thin.verdict, green.verdict, red.verdict], ["not-evaluated", "green", "red"]);
+  assert.equal(new Set([thin.verdict, green.verdict, red.verdict]).size, 3, "三态两两不同形");
+  assert.notDeepEqual(thin, green, "「没评成」与「评了且全绿」不同形（⛔ 修复前二者在记录上同形）");
+  assert.notEqual(thin.reason, null, "not-evaluated 恒带出处");
+  assert.equal(green.reason, null, "green 无 reason（与修复前逐字同形，⛔ 不给通过步加噪声）");
+  // 非零退出 + thin 标记 ⇒ red（fail-closed：真失败的命令就是真失败，⛔ 不让「它说自己没评」洗白它）
+  assert.equal(scopedGateVerdict({ state: "run", ok: false, output: "SCOPED-THIN selected=0\n" }).verdict, "red");
 });
