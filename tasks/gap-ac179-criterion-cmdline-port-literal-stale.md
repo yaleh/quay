@@ -2,7 +2,7 @@
 id: gap-ac179-criterion-cmdline-port-literal-stale
 title: AC-179 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器的默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假、卡片其实一直在渲染；且失败成因被判据自身进程抹成 `addr=none`（AC-241 家族）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
