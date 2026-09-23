@@ -83,12 +83,12 @@ grep '"item_id":"AC-297"' .quay/gate-events.jsonl | grep -o '"verdict":"[a-z]*"'
 
 ## AC
 
-- [ ] **AC1（承载体已重锚且不减强度）**：`goals/AC-297-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改用 AC-288 已落地的 `# >>> addr-derivation` 块（`--port N`（N≥1）⇒ 该候选自己的 argv；否则 `.quay/server.json` 中 `pid` 相符 ∧ `kill -0` 活 ∧ `name=="web"` ∧ `up` 为真 ⇒ `host:port`；两者皆取不到 ⇒ 记该候选成因、**继续下一候选**，⛔ 不清空已派生地址、⛔ 不放弃后续候选）；`expect` 与 chrome 作用域语义（导航只匹配 `<nav>…</nav>`、标题只匹配 `<title>`，⛔ 不对整段响应体做子串匹配）逐字不变（贴 `git diff`，只有派生块与「为什么改」变化）。⛔ 除非经 `quay goal write` 落库否则不算。
-- [ ] **AC2（判据能取假 —— 两个负控制）**：① 该 root 无运行实例时 `quay goal gate AC-297` 非 0 且以具名 `CAUSE=no-derivable-address`（或其同族具名成因）可区分；② 候选地址指向必然连不上的端口时非 0 且成因与 ① **不同形**（如 `connection refused`）。两条均贴退出码与逐字 stderr。
-- [ ] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-297` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Git History` 计数 / zh 响应含 `<html lang="zh">` / zh nav `Git History` 计数 = 0 / zh 本页 `<title>` ≠ en `<title>`），并贴出 zh 响应里 `Git History` 的残留条数（硬规则 3：给条数）。
-- [ ] **AC4（地址覆盖两种部署形态，非字面量）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；**重启**生产 serve（内核分配**另一个**端口）后同一份 criterion 文本仍 `exit 0`、派生端口随载体变化（贴两次端口值 + 两次 exit）。⛔ 不把本机当前端口写进任何被提交的文件。⚠️ 重启前按负面记忆：**永不 `pkill -f` 匹配 `quay.ts serve` 的模式**（会连带杀掉自己的 shell 包装与生产实例）——解析出 pid 再按号杀，并用同一命令行重启、端口从载体重读。
-- [ ] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac297-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/` **逐文件**贴出并与立案基线对照（**立案基线 16**，含 AC-297；AC-288 已于本族先行重锚、不在基线内）：本任务后 **AC-297 那一条 1→0**，其余 **15 个文件不受本条影响**。⛔ 同族在飞任务若已落地，本条判据是**逐文件差量**，不是绝对值。
-- [ ] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-297` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ `bbace9c25e47832d`（贴两行）。
+- [x] **AC1（承载体已重锚且不减强度）**：`goals/AC-297-*.md` 的 criterion 不再解析 `--port [0-9]+` 字面量派生地址，改用 AC-288 已落地的 `# >>> addr-derivation` 块（`--port N`（N≥1）⇒ 该候选自己的 argv；否则 `.quay/server.json` 中 `pid` 相符 ∧ `kill -0` 活 ∧ `name=="web"` ∧ `up` 为真 ⇒ `host:port`；两者皆取不到 ⇒ 记该候选成因、**继续下一候选**，⛔ 不清空已派生地址、⛔ 不放弃后续候选）；`expect` 与 chrome 作用域语义（导航只匹配 `<nav>…</nav>`、标题只匹配 `<title>`，⛔ 不对整段响应体做子串匹配）逐字不变（贴 `git diff`，只有派生块与「为什么改」变化）。⛔ 除非经 `quay goal write` 落库否则不算。
+- [x] **AC2（判据能取假 —— 两个负控制）**：① 该 root 无运行实例时 `quay goal gate AC-297` 非 0 且以具名 `CAUSE=no-derivable-address`（或其同族具名成因）可区分；② 候选地址指向必然连不上的端口时非 0 且成因与 ① **不同形**（如 `connection refused`）。两条均贴退出码与逐字 stderr。
+- [x] **AC3（正控制：修订后在活实例上为真）**：`node packages/quay/bin/quay.js goal gate AC-297` ⇒ **exit 0**，逐字贴出；且同一时刻四条断言各自独立可核（en nav `Git History` 计数 / zh 响应含 `<html lang="zh">` / zh nav `Git History` 计数 = 0 / zh 本页 `<title>` ≠ en `<title>`），并贴出 zh 响应里 `Git History` 的残留条数（硬规则 3：给条数）。
+- [x] **AC4（地址覆盖两种部署形态，非字面量）**：对显式端口实例与 `--port 0` 实例（或用两种 cmdline 的夹具）各断言派生地址正确；**重启**生产 serve（内核分配**另一个**端口）后同一份 criterion 文本仍 `exit 0`、派生端口随载体变化（贴两次端口值 + 两次 exit）。⛔ 不把本机当前端口写进任何被提交的文件。⚠️ 重启前按负面记忆：**永不 `pkill -f` 匹配 `quay.ts serve` 的模式**（会连带杀掉自己的 shell 包装与生产实例）——解析出 pid 再按号杀，并用同一命令行重启、端口从载体重读。
+- [x] **AC5（不回归 + 作用域枚举）**：① `bash scripts/test.sh --for-task gap-ac297-criterion-cmdline-port-literal-stale` 绿；② 作用域举证：`grep -rlF "grep -oE -- '--host [^ ]+ --port [0-9]+'" goals/` **逐文件**贴出并与立案基线对照（**立案基线 16**，含 AC-297；AC-288 已于本族先行重锚、不在基线内）：本任务后 **AC-297 那一条 1→0**，其余 **15 个文件不受本条影响**。⛔ 同族在飞任务若已落地，本条判据是**逐文件差量**，不是绝对值。
+- [x] **AC6（新指纹落账）**：台账 `.quay/gate-events.jsonl` 中 `item_id=AC-297` 的最后一条为 `verdict:"pass"`，且其 `payload.criterionHash` ≠ `bbace9c25e47832d`（贴两行）。
 
 ## DoD
 
