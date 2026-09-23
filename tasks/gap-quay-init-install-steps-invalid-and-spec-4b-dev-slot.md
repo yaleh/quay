@@ -2,7 +2,7 @@
 id: gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot
 title: quay-init 安装步骤两参数形式被 CLI 拒且指向缓存目录——改为 github 发布渠道配方；SPEC §4b 改写为
   quay(github) / quay-dev(dog food) 双槽
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -78,3 +78,8 @@ claude plugin marketplace add quay "${CLAUDE_PLUGIN_ROOT}"
 - `plugin/test/quay-init.test.mjs`
 - `test/cold-start-e2e.sh`
 - `tasks/gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot.md`
+## Needs-Human
+
+**执行 2026-09-23T07:32:52.807Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 <60000ms 快速死亡（退避上限）；快速死亡分类：ordinary
