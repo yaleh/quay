@@ -414,8 +414,8 @@ detect_tmux_session() {
 # the provider block of a project that needed no change at all — a byte-level side effect of a
 # value-level no-op. Values equal ⇒ no write, and the config survives byte-identical.
 ensure_loop_config() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ ! -f "$cfg" ]; then return; fi
+  # `|| return 0` (⛔ not a bare `return`): a bare return here would inherit the failed `[` status.
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"; [ -f "$cfg" ] || return 0
   # The merge + no-gratuitous-rewrite logic (and the exact report lines) live in
   # `ensureLoopConfig` (packages/quay/src/init.ts) — one implementation, no second copy.
   quay-init-step ensure-loop-config "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN"
@@ -445,8 +445,7 @@ ensure_loop_config() {
 # existing ones; a key already present is NEVER overwritten (a user's own value wins), and a config
 # whose env block already carries all four is left byte-for-byte untouched — no write, hence no diff.
 ensure_provider_carrier_env() {
-  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ ! -f "$cfg" ]; then return; fi
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"; [ -f "$cfg" ] || return 0
   # The indent-anchored, line-level insert (never a yaml round-trip: that would reformat every other
   # key and lose the file's comments) lives in `ensureProviderCarrierEnv` (packages/quay/src/init.ts).
   quay-init-step ensure-carrier-env "$cfg" "$WORKSPACE_ROOT" "$DRY_RUN"
@@ -1125,8 +1124,7 @@ dist_stale() {
 # to update/reinstall the plugin). Returns 0 when consistent or unverifiable, 1 when a mismatch was
 # reported (callers decide whether a warning is fatal).
 vendor_runtime_user_scope_stale_check() {
-  local dist="$PLUGIN_ROOT/vendor/quay/dist/quay.js"
-  local pkg="$PLUGIN_ROOT/vendor/quay/package.json"
+  local dist="$PLUGIN_ROOT/vendor/quay/dist/quay.js" pkg="$PLUGIN_ROOT/vendor/quay/package.json"
   [ -f "$dist" ] && [ -f "$pkg" ] || return 0
   local embedded declared
   embedded="$(node "$dist" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
