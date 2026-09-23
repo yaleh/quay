@@ -741,28 +741,45 @@ export function readAnchorPid(root: string): number | null {
   return /^\d+$/.test(raw) ? Number(raw) : null;
 }
 
-/** 读 anchor 的**结构化回读面** `.quay/anchor.json`（`{pid, startedAt, kinds, host}`）。⇒
- *  **anchor 每个 reconcile pass 重写一次**（⛔ 不是「启动时写一次的静态声明」），故 `kinds` 是
- *  「**此刻实际在跑循环的 kind 集合**」的权威读数——⛔ 与 `readDesired`（期望态）不同：声明了却没能
- *  起来循环的 kind 不在 `kinds` 里。
- *  读不到 / 不可解析 / 无 `kinds` 数组 ⇒ null（三态；⛔ 与「一个 kind 都没托管」不同形——那是 `[]`）。 */
-export function readAnchorState(root: string): { pid: number | null; kinds: DriverKind[] } | null {
+/** `.quay/anchor.json` 的**带原因**读法（硬规则 3b）。⛔ 「文件不存在」与「文件在但读不懂」不得共用
+ *  输出：前者只是「还没有写过回读面」，后者是**别人写坏了**（非原子写的 torn read / 人为损坏）。
+ *  `readAnchorState` 为兼容把两者都映射成 null（对它的消费者而言那条回退是**有意**的，见 `anchorHosts`），
+ *  但夹具与诊断面拿得到具名原因 —— 否则一次**正在发生的**损坏会被读成「一切正常，只是还早」。 */
+export type AnchorStateRead =
+  | { ok: true; pid: number | null; kinds: DriverKind[] }
+  | { ok: false; reason: "missing" | "unreadable" | "malformed" };
+
+export function readAnchorStateDetailed(root: string): AnchorStateRead {
   let raw: string;
   try {
     raw = fs.readFileSync(anchorPaths(root).stateFile, "utf8");
-  } catch {
-    return null;
+  } catch (e) {
+    // ⛔ 只有 ENOENT 是「不存在」；其余（EACCES / EMFILE / …）是**读不成**，各自具名。
+    return { ok: false, reason: (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "unreadable" };
   }
   try {
     const j = JSON.parse(raw) as { pid?: unknown; kinds?: unknown };
-    if (!Array.isArray(j.kinds)) return null;
+    if (!Array.isArray(j.kinds)) return { ok: false, reason: "malformed" };
     return {
+      ok: true,
       pid: typeof j.pid === "number" && Number.isFinite(j.pid) ? j.pid : null,
       kinds: j.kinds.filter((k): k is DriverKind => KNOWN_KINDS.includes(k as DriverKind)),
     };
   } catch {
-    return null;
+    return { ok: false, reason: "malformed" };
   }
+}
+
+/** 读 anchor 的**结构化回读面** `.quay/anchor.json`（`{pid, startedAt, kinds, host}`）。⇒
+ *  **anchor 每个 reconcile pass 重写一次**（⛔ 不是「启动时写一次的静态声明」），故 `kinds` 是
+ *  「**此刻实际在跑循环的 kind 集合**」的权威读数——⛔ 与 `readDesired`（期望态）不同：声明了却没能
+ *  起来循环的 kind 不在 `kinds` 里。
+ *  读不到 / 不可解析 / 无 `kinds` 数组 ⇒ null（三态；⛔ 与「一个 kind 都没托管」不同形——那是 `[]`）。
+ *  ⚠️ 「读不到」在这里**同时覆盖**「不存在」与「读不懂」——那是**给本函数的消费者**的回退语义
+ *  （`anchorHosts` 用它，而那条回退对两者本来就该走同一支）。要分得开请用 `readAnchorStateDetailed`。 */
+export function readAnchorState(root: string): { pid: number | null; kinds: DriverKind[] } | null {
+  const r = readAnchorStateDetailed(root);
+  return r.ok ? { pid: r.pid, kinds: r.kinds } : null;
 }
 
 /** `.quay/anchor.json` 里 anchor 自报的**内核 bundle 同步读数**（每个 reconcile pass 重写）。
@@ -1013,12 +1030,37 @@ export function clearKindStop(root: string, kind: DriverKind): void {
   writeKindStops(root, next);
 }
 
+/** 一趟判定所用的**期望态 + 停机记录**快照（gap-anchor-state-nonatomic-and-declaration-outruns-log M1）。
+ *
+ *  为什么需要它：`kindDeclaration` 一族每次调用都**现读盘**。`driver-anchor` 的一趟 reconcile 里
+ *  `wanted`（趟首快照）、`silent`（`undeclaredKinds`）、发布面（`kindDeclarationMap`）本是**三次独立
+ *  读盘**——期望态恰好落在它们之间时（`writeDesired` 是 tmp+rename 原子写，故只会读到完整的新集合），
+ *  这一趟就会**发布 `not-declared` 而 `silent` 为空 ⇒ 不打那行日志**，诊断行落到**下一趟**
+ *  （≤1 个 reconcile 周期）。三处收敛到**同一份快照**之后，这个分叉在结构上不可能出现
+ *  （⛔ 修法不是把夹具的断言放宽 —— 那是把测量换成回声）。
+ *
+ *  ⛔ 它**不**声称 `desired` 与 `stops` 两个文件之间是原子读：期望态与停机记录由 `updateDesired`
+ *  在**同一次调用**里写两处，跨文件原子性是另一个问题，不在这里解决。它保证的只有一条：
+ *  **同一趟内的判定用同一份快照**。 */
+export interface DeclarationSnapshot {
+  desired: AnchorDesired | null;
+  stops: Record<string, AnchorKindStopRecord> | null;
+}
+
+/** 读一次盘，得到本趟判定用的快照。⛔ 调用方**一趟只调一次**，然后把**同一个对象**传给
+ *  `undeclaredKinds` / `kindDeclarationMap` / `kindDeclaration`（三者都接受它）。不传 ⇒ 各自现读
+ *  （等价于本函数出现之前的行为，供一次性/诊断调用方使用）。 */
+export function readDeclarationSnapshot(root: string): DeclarationSnapshot {
+  return { desired: readDesired(root), stops: readKindStops(root) };
+}
+
 /** 一个 kind 相对**期望态**的声明状态。四态各自独立（硬规则 3b：⛔ 没有「未评估」这一态的判定
  *  就无法区分「查过」与「没查成」）：
  *  · `declared`           ∈ `desired.kinds`（正在跑的那个集合）
  *  · `stopped-explicitly` ∉ 期望态 ∧ **有**显式停机记录（操作员有意停机 —— AC5）
  *  · `not-declared`       ∉ 期望态 ∧ **无**显式停机记录（静默脱离期望态 —— 本任务要报出的那一态，AC4）
- *  · `not-evaluated`      读不懂期望态**或**读不懂停机记录 ⇒ 不冒充上面任一取值 */
+ *  · `not-evaluated`      读不懂期望态**或**读不懂停机记录 ⇒ 不冒充上面任一取值
+ *  `snap` = 本趟的读盘快照（见 `DeclarationSnapshot`）；不传 ⇒ 现读一次。 */
 export type KindDeclaration = "declared" | "stopped-explicitly" | "not-declared" | "not-evaluated";
 
 export const KIND_DECLARATIONS: readonly KindDeclaration[] = [
@@ -1028,28 +1070,32 @@ export const KIND_DECLARATIONS: readonly KindDeclaration[] = [
   "not-evaluated",
 ];
 
-export function kindDeclaration(root: string, kind: DriverKind): KindDeclaration {
-  const desired = readDesired(root);
-  if (desired === null) return "not-evaluated";
-  if (desired.kinds.includes(kind)) return "declared";
-  const stops = readKindStops(root);
-  if (stops === null) return "not-evaluated";
-  return stops[kind] ? "stopped-explicitly" : "not-declared";
+export function kindDeclaration(root: string, kind: DriverKind, snap?: DeclarationSnapshot): KindDeclaration {
+  const s = snap ?? readDeclarationSnapshot(root);
+  if (s.desired === null) return "not-evaluated";
+  if (s.desired.kinds.includes(kind)) return "declared";
+  if (s.stops === null) return "not-evaluated";
+  return s.stops[kind] ? "stopped-explicitly" : "not-declared";
 }
 
 /** 六个 kind 各自相对期望态的声明读法（四态见 `KindDeclaration`）。消费面有两处：`driver-anchor`
  *  每趟把本函数的返回发布到盘上，`quay driver status` 逐 kind 报出它 —— ⛔ 两处都只是**发布**，
- *  判据的正本始终是本函数（它每次现算，⛔ 不读任何派生的快照）。 */
-export function kindDeclarationMap(root: string): Record<DriverKind, KindDeclaration> {
+ *  判据的正本始终是本函数（不传 `snap` 时它每次现算，⛔ 不读任何派生的快照）。
+ *  ⚠️ `driver-anchor` 一趟里**必须**传 `snap`（且与 `undeclaredKinds` 传**同一个**）：否则
+ *  「发布面」与「日志行」又变成两次独立读盘 —— 那正是本函数接受 `snap` 要关掉的那个分叉。 */
+export function kindDeclarationMap(root: string, snap?: DeclarationSnapshot): Record<DriverKind, KindDeclaration> {
+  const s = snap ?? readDeclarationSnapshot(root);
   const out = {} as Record<DriverKind, KindDeclaration>;
-  for (const kind of KNOWN_KINDS) out[kind] = kindDeclaration(root, kind);
+  for (const kind of KNOWN_KINDS) out[kind] = kindDeclaration(root, kind, s);
   return out;
 }
 
 /** 静默脱离期望态的 kind（`not-declared`）。⛔ 只报这一态：`stopped-explicitly` 是**有意**的，
- *  把它混进来会让每一个被正常停掉的 kind 每轮都被"报红"（噪声会把信号淹没）。 */
-export function undeclaredKinds(root: string): DriverKind[] {
-  return KNOWN_KINDS.filter((k) => kindDeclaration(root, k) === "not-declared");
+ *  把它混进来会让每一个被正常停掉的 kind 每轮都被"报红"（噪声会把信号淹没）。
+ *  `snap` 见 `DeclarationSnapshot`（⛔ 与 `kindDeclarationMap` 用**同一个**对象才是同趟一致）。 */
+export function undeclaredKinds(root: string, snap?: DeclarationSnapshot): DriverKind[] {
+  const s = snap ?? readDeclarationSnapshot(root);
+  return KNOWN_KINDS.filter((k) => kindDeclaration(root, k, s) === "not-declared");
 }
 
 /** 本内核【自身安装位置】在主检出里的对应目录 —— 仅当本内核跑在一个 **linked worktree** 里时才与自身
