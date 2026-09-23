@@ -54,8 +54,8 @@
 # Exit: 0 success / not-offline · 1 offline (for --is-offline/--is-offline-session) · 2 usage/config
 set -uo pipefail
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_REGISTRY="$(cd "$SELF_DIR/../.." && pwd)/orchestration/observer-registry.conf"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_REGISTRY="$(cd "$SELF_DIR/../.." && pwd -P)/orchestration/observer-registry.conf"
 REGISTRY_FILE="${OBSERVER_REGISTRY_FILE:-$DEFAULT_REGISTRY}"
 
 log() { echo "observer-registry: $*"; }

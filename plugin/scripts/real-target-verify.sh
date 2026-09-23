@@ -119,7 +119,7 @@ if [ ! -d "$TARGET" ]; then
   echo "[real-target] ERROR: target is not a directory: $TARGET" >&2
   exit 2
 fi
-TARGET="$(cd "$TARGET" && pwd)"
+TARGET="$(cd "$TARGET" && pwd -P)"
 
 # ── real-consumer precondition (AC1) ────────────────────────────────────────────────────────────────────
 # A REAL downstream = a workspace that has actually been through quay-init and runs the loop: it

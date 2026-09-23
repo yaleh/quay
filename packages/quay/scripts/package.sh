@@ -20,8 +20,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 
 echo "Building quay release artifact from ${PACKAGE_DIR}..."
 
@@ -86,7 +86,7 @@ fi
 # A drift fails closed: shipping a lying plugin manifest shows users the wrong version in `/plugin`
 # listings (gap-npm-install-does-not-register-the-plugin-with-claude-code), and a stale
 # `delivery-manifest.json` has bitten the release path before.
-REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd -P)"
 STAMP_ENTRY="${REPO_ROOT}/scripts/stamp-version.mjs"
 if [ ! -f "${STAMP_ENTRY}" ]; then
   echo "ERROR: the version gate is missing: ${STAMP_ENTRY}" >&2

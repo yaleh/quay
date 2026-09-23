@@ -40,10 +40,10 @@ fi
 set -uo pipefail
 
 # ── locations ──────────────────────────────────────────────────────────────────────────────────────
-_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="${1:-}"
 if [ -z "${repo_root}" ] || [ "${repo_root}" = "--since" ] || [ "${repo_root}" = "--root" ] || [ "${repo_root}" = "--json" ]; then
-  repo_root="$(cd "${_script_dir}/../.." && pwd)"
+  repo_root="$(cd "${_script_dir}/../.." && pwd -P)"
 fi
 
 since="24 hours ago"

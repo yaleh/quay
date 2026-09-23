@@ -3,7 +3,8 @@
 // SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 4/8 (5 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
 
 import { test } from "node:test";
-import { REPO_ROOT, WORKER_PROCESS_NAME, after, assert, defaultSelectorArgv, defaultWorkerArgv, fs, hasLiveWorkerForTask, launchArgv, makeGitRoot, makeRoot, path, readRoundLines, readTaskStatus, rmSafe, runGit, spawn, spawnResident, waitFor, worktreePresentForTask, writeTaskFile } from "./helpers/worker-driver-resident-harness.mjs";
+import { REPO_ROOT, WORKER_PROCESS_NAME, after, assert, defaultSelectorArgv, defaultWorkerArgv, fs, hasLiveWorkerForTask, launchArgv, makeGitRoot, makeRoot, path, readProfiles, readRoundLines, readTaskStatus, rmSafe, runGit, spawn, spawnResident, waitFor, worktreePresentForTask, writeTaskFile } from "./helpers/worker-driver-resident-harness.mjs";
+import { resolveRole } from "../scripts/profile-policy.ts";
 
 test("AC6 end-to-end (superseded-reclaim) — a real superseded worktree is reclaimed by the resident loop (worktree removed, branch preserved)", async (t) => {
   const root = makeGitRoot("sup-wire-e2e");
@@ -146,7 +147,11 @@ test("AC140-1 — single constructor: launchArgv resolves kind → profile via p
   const tw = launchArgv("task-worker", "WPROMPT", REPO_ROOT);
   assert.equal(tw[0], "claude-fjdac", "launcher resolved from profile (⛔ bash quay-launch.sh)");
   assert.equal(tw[1], "--settings");
-  assert.equal(tw[tw.indexOf("--model") + 1], "deepseek-v4-pro-anthropic");
+  // ⛔ 不钉具体模型名（模型名是运行环境取值，会随网关漂移）：断言 argv 的 --model 与【policy 解析值】
+  //   一致 —— 这才是本 AC 的「单一构造」性质，且【能取假】：launchArgv 一旦绕过 policy 或硬编码就红。
+  const policyModel = resolveRole(readProfiles(), "task-worker").model;
+  assert.equal(tw[tw.indexOf("--model") + 1], policyModel,
+    "argv 的 --model 必须等于 policy 的解析值（单一构造；⛔ 不钉具体模型名）");
   assert.equal(tw[tw.indexOf("-n") + 1], "quay-task-worker");
   assert.equal(tw[tw.length - 1], "WPROMPT", "prompt is the last argv payload");
   assert.ok(!tw.includes("quay-launch.sh"), "no bash quay-launch.sh in the spawn argv (⛔ bash 第二份实现)");

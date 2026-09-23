@@ -29,11 +29,19 @@ goal_ac: AC-316
 
 ## AC
 
-- [ ] `node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-316 --dry-run` 退出 0（AC-316 判据：fan-in/suite 调度面上 `hasTestSh(` / `existsSync(…test.sh…)` 的非注释命中 = 0；落笔当轮读数为 exit 1、点名 5 处）。
-- [ ] `node --experimental-strip-types plugin/scripts/config-key-consumer-check.ts --json` 退出 0，且本任务新增的每个 `loop.*` 键状态为 `has-consumer`。
-- [ ] `node --test plugin/test/third-party-capability-degradation.test.mjs plugin/test/conformance-target-fixture.test.mjs` 退出 0，新增用例：一个**带自己 `scripts/test.sh`、但未声明 scoped/doc-check 契约**的第三方夹具 ⇒ scoped 门与 doc-check 取值为「未提供」（可区分取值），⛔ 不调用 `--for-task … --allow-thin` / `--static-checks-doc`。
-- [ ] 负控：quay 自身仓库的 fan-in 路径行为不变（既有 `worker-driver.test.mjs` 中 scoped/doc-check 命令断言照常通过）。
-- [ ] `bash scripts/test.sh --for-task gap-repo-shape-inferred-from-test-sh-existence` 退出 0，且执行了 ≥1 个测试文件。
+- [x] `node --experimental-strip-types packages/quay/bin/quay.ts goal gate AC-316 --dry-run` 退出 0（AC-316 判据：fan-in/suite 调度面上 `hasTestSh(` / `existsSync(…test.sh…)` 的非注释命中 = 0；落笔当轮读数为 exit 1、点名 5 处）。
+- [x] `node --experimental-strip-types plugin/scripts/config-key-consumer-check.ts --json` 退出 0，且本任务新增的每个 `loop.*` 键状态为 `has-consumer`。
+- [x] `node --test plugin/test/third-party-capability-degradation.test.mjs plugin/test/conformance-target-fixture.test.mjs` 退出 0，新增用例：一个**带自己 `scripts/test.sh`、但未声明 scoped/doc-check 契约**的第三方夹具 ⇒ scoped 门与 doc-check 取值为「未提供」（可区分取值），⛔ 不调用 `--for-task … --allow-thin` / `--static-checks-doc`。
+- [x] 负控：quay 自身仓库的 fan-in 路径行为不变（既有 `worker-driver.test.mjs` 中 scoped/doc-check 命令断言照常通过）。
+- [x] `bash scripts/test.sh --for-task gap-repo-shape-inferred-from-test-sh-existence` 退出 0，且执行了 ≥1 个测试文件。
+
+## 判定读数（实现完成当轮实测，worktree 内）
+
+- AC1：`goal gate AC-316 --dry-run` → `verdict=pass`，`reason="acceptance passed (exit 0)"`（落笔当轮为 `verdict=fail`，`CAUSE=… 5 处 … worker-fan-in.ts:66/150/177`）。
+- AC2：`config-key-consumer-check --json` → `ok=true, keys_total=8, no_consumer_to_wire=0`；新增三键均 `has-consumer`（`suite_runner` 1 / `scoped_command` 2 / `doc_check_command` 1 个消费文件）。
+- AC3：`node --test third-party-capability-degradation.test.mjs conformance-target-fixture.test.mjs` → `pass 17 / fail 0`，exit 0（含新增用例「AC-316 正向 — 带自己 scripts/test.sh 但未声明契约的第三方 ⇒ scoped/doc-check 都「未提供」」，其否定断言以「该文件确实存在（旧判据会命中它）」为前提，故可证伪）。
+- AC4：`node --test plugin/test/worker-driver.test.mjs` → `pass 104 / fail 0`；scoped/doc-check 逐字一致的断言在夹具改为【显式声明契约】后仍逐字通过。
+- AC5：`bash scripts/test.sh --for-task gap-repo-shape-inferred-from-test-sh-existence --allow-thin` → exit 0，`tests 266 / pass 266 / fail 0`。
 
 ## DoD
 
@@ -42,6 +50,7 @@ goal_ac: AC-316
 ## Touches
 
 - plugin/scripts/worker-fan-in.ts
+- plugin/scripts/worker-driver.ts
 - plugin/scripts/quay-init.sh
 - packages/quay/src/init.ts
 - plugin/skills/init/SKILL.md
@@ -49,4 +58,6 @@ goal_ac: AC-316
 - plugin/test/third-party-capability-degradation.test.mjs
 - plugin/test/conformance-target-fixture.test.mjs
 - plugin/test/worker-driver.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-repo-shape-inferred-from-test-sh-existence.md

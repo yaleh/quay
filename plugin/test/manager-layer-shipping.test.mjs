@@ -35,6 +35,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +48,15 @@ const LAUNCH_SETTINGS = path.join(repoRoot, '.claude', 'launch.settings.json');
 const PROFILES = path.join(repoRoot, '.quay', 'profiles.yml');
 const PORTABILITY_DOC = path.join(repoRoot, 'docs', 'proposals', 'fast-mode-cross-project-portability.md');
 const SPEC_DIR = path.join(repoRoot, 'orchestration');
+
+/** profiles.yml 是 YAML（launcher 经 python3+yaml 消费）—— 用同一手法转 JSON 后按【位置】取值。
+ *  ⛔ 不对原始文本做关键词匹配：raw-text 匹配会命中【注释】，本文件 AC4 此前正是这个形态（判据空转，
+ *  见硬规则 2：按位置判定，不按关键词）。 */
+function readProfilesYaml(file) {
+  const r = spawnSync('python3', ['-c', 'import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))', file], { encoding: 'utf8' });
+  assert.equal(r.status, 0, `profiles.yml must parse as YAML:\n${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
 
 // ── AC1/AC2: the manager layer ships as plugin/skills/manager/SKILL.md ──────────────────────────────
 test('AC1/AC2 — plugin/skills/manager/SKILL.md exists (third_layer_shipped non-empty) and crystallizes cadence + three functions + two rules', () => {
@@ -80,16 +90,22 @@ test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.s
 });
 
 // ── AC4: the launch-config trio ships in the checked-in settings + profiles files ────────────────────
-test('AC4 — the launch-config trio is checked-in: claude-fjdac + deepseek-v4-pro-anthropic (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env)', () => {
+test('AC4 — the launch-config trio is checked-in: claude-fjdac + a PINNED model (profiles.yml) + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 (settings env)', () => {
   assert.ok(fs.existsSync(LAUNCH_SETTINGS), '.claude/launch.settings.json must exist (checked-in launch config)');
   const settingsSrc = fs.readFileSync(LAUNCH_SETTINGS, 'utf8');
   assert.match(settingsSrc, /CLAUDE_CODE_MAX_CONTEXT_TOKENS/, 'launch config must set CLAUDE_CODE_MAX_CONTEXT_TOKENS');
   assert.match(settingsSrc, /917000/, 'CLAUDE_CODE_MAX_CONTEXT_TOKENS must be 917000');
   // AC154: launcher + model moved out of launch.settings.json into .quay/profiles.yml (profile 抽层).
   assert.ok(fs.existsSync(PROFILES), '.quay/profiles.yml must exist (AC154 profile carrier)');
-  const profilesSrc = fs.readFileSync(PROFILES, 'utf8');
-  assert.match(profilesSrc, /claude-fjdac/, 'launch config must use the claude-fjdac launcher (in profiles.yml)');
-  assert.match(profilesSrc, /deepseek-v4-pro-anthropic/, 'launch config must set --model deepseek-v4-pro-anthropic (in profiles.yml)');
+  // ⛔ 按【位置】取值。此前这两条是对原始文本做关键词匹配 —— 两行都命中了文件里的【注释】字样
+  //   （deepseek-v4-pro-anthropic 只出现在更正注释里），而 worker-default.model 的真实取值是另一个，
+  //   ⇒ 判据空转（把 model 改成垃圾也照样绿）。硬规则 2：按位置判定，不按关键词。
+  const wd = readProfilesYaml(PROFILES).profiles['worker-default'];
+  assert.equal(wd.launcher, 'claude-fjdac', 'worker-default.launcher must be claude-fjdac (in profiles.yml)');
+  // ⛔ 不钉具体模型名：模型名是【运行环境取值】（随网关 /v1/models 导出集合漂移）。断言「已钉住且非空」
+  //   —— 能取假（被清成 null/空串 ⇒ 红），又不会在换模型时烂掉。
+  assert.equal(typeof wd.model, 'string', 'worker-default must PIN a model (⛔ not null)');
+  assert.ok(wd.model.length > 0, 'worker-default.model must be a non-empty id');
   // The cold-start skill must document the launch config as checked-in (tribal knowledge → installable).
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
   assert.match(cold, /launch\.settings\.json/, 'cold-start skill must reference the checked-in launch config');

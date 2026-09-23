@@ -65,8 +65,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 remote="${QUAY_CLAIM_REMOTE:-}"
 EMPTY_TREE="$(git hash-object -w -t tree /dev/null 2>/dev/null || git hash-object -t tree /dev/null)"
 
