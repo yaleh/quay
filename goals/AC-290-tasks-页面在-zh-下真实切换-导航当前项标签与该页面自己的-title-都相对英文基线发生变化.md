@@ -161,18 +161,21 @@ criterion: >-
     rep="$rep; pid=$p addr=$a cause=derived-from-$s-fetch-failed($cc) -- ${why:-curl exited $crc with no message}"
   done
 
+  if [ -z "$addr" ] && [ "$ncand" != 0 ]; then printf 'AC-290 candidate readings
+  (cwd=%s, nserve=%s, ncand=%s, nderived=%s):%s\n' "$root" "$nserve" "$ncand"
+  "$nderived" "$rep" >&2; fi
+
   if [ -z "$addr" ] && [ "$nserve" != 0 ] && [ "$nderived" = 0 ]; then printf
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
-  .quay/server.json entry naming that pid with an up web service); %s pgrep x
-  cwd candidate(s), per-candidate readings:%s\n' "$nserve" "$root" "$ncand"
-  "$rep" >&2; exit 1; fi
+  .quay/server.json entry naming that pid with an up web service); per-candidate
+  readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
   serve process(es) for cwd=%s, none answered %s (connection refused / timed out
-  / non-2xx); per-candidate readings:%s\n' "$nderived" "$nserve" "$root"
-  "$ROUTE" "$rep" >&2; exit 1; fi
+  / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
+  "$root" "$ROUTE" >&2; exit 1; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
