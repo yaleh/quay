@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-delta-classify-declared-doc-surfaces
 title: fan-in delta 分类在第三方 worktree 里找 quay 的检查注册表：改读显式声明的 loop.doc_surfaces
-status: todo
+status: ready
 labels:
   - gap
   - defect
