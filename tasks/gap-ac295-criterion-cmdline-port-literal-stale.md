@@ -3,7 +3,7 @@ id: gap-ac295-criterion-cmdline-port-literal-stale
 title: AC-295 判据从 cmdline 的 `--port` 字面量派生地址，而生产启动器默认已是 `--port 0`（内核分配临时端口）⇒
   判据结构上恒假（addr=172.28.0.1:0，curl 失败）；机制本身为真（实测 /needs-human 四条断言全过）——
   重锚地址派生那一步（与 AC-179/288/289/290/291/292/293/294 同族任务同一行）
-status: todo
+status: ready
 labels:
   - gap
   - defect
