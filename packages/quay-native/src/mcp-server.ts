@@ -23,7 +23,11 @@ import { createGoalStore, readGoalConfig } from "./goal-store.ts";
 import { createMetaStore } from "./meta-store.ts";
 // `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
 // the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
-import { runAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
+import { runAcceptance, resolveAcceptanceTimeout, timeoutKnobHint, verdictFromAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
+// …and records the verdict in the SAME ledger `quay goal gate` appends to, so the two entry points
+// for one criterion leave the same durable evidence (gap-goal-gate-verdict-single-mapping-not-evaluated).
+import { appendGateEvent } from "../../quay/src/gate/gate-event-store.ts";
+import { randomUUID } from "node:crypto";
 
 // ── task_list's text/content budget ────────────────────────────────────────────────────────────
 // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
@@ -492,15 +496,48 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
       const criterion = (goal as unknown as Record<string, unknown>).criterion;
       let verdict: string;
       let reason: string;
+      let cause: string | null = null;
       if (typeof criterion !== "string" || criterion.trim() === "") {
         verdict = "fail";
         reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
       } else {
-        const result = runAcceptance({ command: criterion, cwd: path.dirname(resolvedGoalDir), timeoutMs: 60000 });
-        verdict = result.ok ? "pass" : "fail";
-        reason = result.reason;
+        // ⛔ The ONE mapping, shared with `quay goal gate` and the sweep
+        // (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it, this entry recorded a
+        // criterion that TIMED OUT, failed to spawn, or could not be run at all (exit 126/127) as
+        // `fail` — i.e. asserted "this criterion is false" about one that never stated anything
+        // (hard rule 3b).
+        // The deadline comes from the RECORD's `timeoutMs` (or QUAY_ACCEPTANCE_TIMEOUT_MS), ⛔ not a
+        // hard-wired 60000: a `timeoutMs` on the record was previously unreadable on this path, and
+        // the timeout reason named a gates.yml key the goal path never consults.
+        const t = resolveAcceptanceTimeout((goal as unknown as { timeoutMs?: unknown }).timeoutMs);
+        const result = runAcceptance({
+          command: criterion,
+          cwd: path.dirname(resolvedGoalDir),
+          timeoutMs: t.timeoutMs,
+          timeoutKnob: timeoutKnobHint(t),
+        });
+        const v = verdictFromAcceptance(result);
+        verdict = v.verdict;
+        reason = v.reason;
+        cause = v.cause;
       }
-      const out = { id, verdict, reason, timestamp: new Date().toISOString() };
+      // The ledger is the DURABLE record of the verdict — the same carrier `quay goal gate` appends
+      // to (same derivation `<workspaceRoot>/.quay/gate-events.jsonl`, same `gate:"goal"` shape, same
+      // `payload.cause`). ⛔ Without this the MCP entry point's verdict existed only in a transient
+      // tool response: a criterion that could not be evaluated left NO evidence, while the CLI
+      // entry point for the same criterion did (hard rule 5b — the cluster, not the reported site).
+      const timestamp = new Date().toISOString();
+      appendGateEvent(path.join(path.dirname(resolvedGoalDir), ".quay", "gate-events.jsonl"), {
+        id: randomUUID(),
+        item_id: id,
+        pipeline_id: id,
+        gate: "goal",
+        actor: "goal-mcp",
+        verdict,
+        timestamp,
+        payload: { reason, ...(cause ? { cause } : {}) },
+      });
+      const out = { id, verdict, cause, reason, timestamp };
       return {
         content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
         structuredContent: out,

@@ -1,7 +1,7 @@
 ---
 id: gap-goal-gate-verdict-single-mapping-not-evaluated
 title: goal gate 两个入口把 exit 3 / 超时 / 127 记成 fail：三个写入点共用一个 verdict 映射
-status: ready
+status: done
 labels:
   - gap
   - defect
