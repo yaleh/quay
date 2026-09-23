@@ -15,7 +15,7 @@
 
 import path from "node:path";
 import type { GateFn } from "../types.ts";
-import { runAcceptance } from "../acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "../acceptance-runner.ts";
 import { resolveRunnerOptions } from "../config/utils.ts";
 import { createGoalStore } from "../../goal-store.ts";
 import type { Task } from "../../abi.ts";
@@ -41,7 +41,12 @@ export function makeGoalGate(goalId: string, goalDir: string): GateFn {
     // `criterion:` commands are workspace-relative (e.g. "git rev-list --count
     // integration..develop"), so they must run with cwd = workspaceRoot (goalDir's parent).
     const { cwd, timeoutMs } = resolveRunnerOptions({ cwd: path.dirname(goalDir) });
-    const { ok, reason } = runAcceptance({ command: criterion, cwd, timeoutMs });
-    return { ok, reason };
+    const result = runAcceptance({ command: criterion, cwd, timeoutMs });
+    // ⛔ The 3-valued verdict travels with the check (gate/acceptance-runner.ts
+    // `verdictFromAcceptance`): a criterion that TIMED OUT or that could not be run at all is
+    // NOT the same claim as one that ran and said no — see
+    // gap-goal-gate-verdict-single-mapping-not-evaluated. Dropping it here would make the
+    // engine's event record a not-evaluated outcome as `fail`.
+    return { ok: result.ok, reason: result.reason, kind: verdictFromAcceptance(result).verdict };
   };
 }

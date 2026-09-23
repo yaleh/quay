@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runAcceptance } from "./acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "./acceptance-runner.ts";
 import { darkAxisGateCheck } from "./dark-axis-record.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
 import { makeGoalGate } from "./factories/goal.ts";
@@ -55,7 +55,10 @@ export var gateRegistry = {
     }
     var opts = resolveRunnerOptions();
     var result = runAcceptance({ command: command, cwd: opts.cwd, timeoutMs: opts.timeoutMs, envFile: opts.envFile });
-    return { ok: result.ok, reason: result.reason };
+    // ⛔ Forwards the 3-valued verdict, not just `ok` — see gate/acceptance-runner.ts's
+    // verdictFromAcceptance. Without this the ENGINE's GateEvent would record a timed-out or
+    // unrunnable acceptance command as `fail` (gap-goal-gate-verdict-single-mapping-not-evaluated).
+    return { ok: result.ok, reason: result.reason, kind: verdictFromAcceptance(result).verdict };
   },
   // ADR-007's PER-MILESTONE half (net-new; tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate).
   // The ADR forbids judging a milestone on L_T alone, and has recorded since 2026-07-20 that the
