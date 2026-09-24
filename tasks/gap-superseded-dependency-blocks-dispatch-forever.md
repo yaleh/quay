@@ -264,3 +264,32 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 - plugin/test/driver-filters.test.mjs
 - experiments/quay-perpetual-stream/test/portfolio-choice.test.mjs
 - tasks/gap-superseded-dependency-blocks-dispatch-forever.md
+
+---
+_2026-09-24T06:39:48.554Z_: ## 2026-09-24 E6 的「代价半边」已被实测证伪（更正；由 gap-it0-dep-done-iff-deps-blind-to-superseded 追加）
+
+E6 对本 checker（`plugin/scripts/it0-split-or-commit-check.ts` 的 `if (depStatus !== "done")`）判「**不适用**」，
+其**语义半边今天仍然成立**（陈旧退役边值得浮出来给人改——本条的数据侧处置正是照此做的），
+**但它的代价半边已被实测证伪**：
+
+    2026-09-24T04:38Z 起，develop 上【每一个】提交的 CI：
+      STATIC_CHECK_FAILED: it0-split-or-commit-check exit=1
+      checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed)
+      ⇒ `Run tests` 38 秒即退出，`node --test` 一行都没跑
+    逐字复现（pre-fix 代码 + 当时的真实形态，2026-09-24 实跑）：
+      FAIL: 1 split-or-commit violation(s) found:
+        - DEP-DONE-IFF-DEPS: task "gap-ac194-production-criterion-owner" is done but has 1 non-done
+          prerequisite(s) in depends_on:
+          gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check (status: superseded)
+      exit=1
+
+⇒ E6 原文那句「**且它不阻塞任何未来动作**」在 2026-09-24 是**假的**：该规则以**全店不变式**注册在
+`scripts/test.sh` 的静态层（`--changed` 的 delta 伴随只覆盖 scoped 门），**单条陈旧边即可让静态层整体
+fail-closed**，从而阻塞每一个提交、每一个需要绿套件的落地，以及 release。全店扫描 2415 个任务只有 1 对。
+
+**处置 = 保留 E6 语义半边、只去掉被证伪的代价半边**：该死判定已改为**三值**（复用 `driver-filters.ts` 的
+`judgeDeps` 单一真相源，⛔ 不新写第二份判定）——退休依赖**不阻塞**（不再 fail-closed 整层），
+但 ⛔ **不计作 done**，以独立的 `RETIRED-DEP:` advisory 读数浮出，并附「该边应重指到哪个后继」的修复指引。
+
+⛔ 本段**不**把 E6 判为「第三个消费者忘了跟上」——那条说法与 E6 的逐字记录矛盾：E6 当时是**逐字审过**
+这一处的，它的结论只是建立在一个今天被实测证伪的前提上。
