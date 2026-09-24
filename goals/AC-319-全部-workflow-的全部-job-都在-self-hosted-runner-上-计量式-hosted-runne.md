@@ -1,7 +1,7 @@
 ---
 id: AC-319
 title: 全部 workflow 的全部 job 都在 self-hosted runner 上——计量式 hosted runner 的账单闸不再能挡住 CI 与发布
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -68,6 +68,11 @@ statusLog:
     to: active
     actor: human
     reason: 人 2026-09-24 裁定重开 GOAL-020：按裁定激活
+  - at: 2026-09-24T08:47:18.915Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
