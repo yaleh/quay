@@ -170,6 +170,8 @@ $ grep -rn "all depends_on prerequisites done\|non-done prerequisite\|must all b
 
 派发 prompt 假定 MCP `task_write` 的勾选会「branch-aware 地自己提交」并「到达 fan-in 的 ac-precheck」。**实测不然**：`task_get`（MCP）读的是**主检出**的 store（以 `gap-superseded-dependency-blocks-dispatch-forever` 的追加节为探针：worktree 副本有、MCP 读回没有），而 fan-in 的 ac-precheck（`worker-fan-in.ts:1670` → `fan-in-ac-completion-gate.ts:110`）读的是 `<worktree>/tasks/<id>.md`。⇒ 勾选与 Evidence 必须**同时**落在两处：主检出（ABI 记录面）+ 任务分支（ac-precheck 的读取面，即本仓既有的 `tasks: carry the ABI-written task body onto the task branch` 体例）。本任务按该体例执行。
 
+补充读数（本轮实跑撞到的写面陷阱，一并登记）：`quay-native task edit --body <值>` 的 `--body` **不能**以 `--` 开头的值 —— 该 CLI 的 flag 解析器（`bin/quay-native.ts:71`）把 `next.startsWith("--")` 当成「没有取值」⇒ `flags.body = true`，随后 `store.write()` 在 `maskSelfOnlyBody` 上以 `body.replace is not a function` 崩掉（**write 未发生**，文件未动）。故 `--body` 必须传**纯 body**（不带 `---` frontmatter 围栏，围栏由 `serialize(frontmatter, body)` 生成）—— 本任务即按此写入。
+
 ### 附 3 — 落地读数（scoped 门）
 
 `bash scripts/test.sh --for-task gap-it0-dep-done-iff-deps-blind-to-superseded --allow-thin` ⇒ **EXIT=0**（scoped 静态检查全绿，含 `import-graph-check` 与 `checker-mutation-check --check-changed`；`ℹ tests 33 / pass 33 / fail 0`）。
@@ -180,7 +182,6 @@ $ grep -rn "all depends_on prerequisites done\|non-done prerequisite\|must all b
 - plugin/scripts/it0-split-or-commit-check.ts
 - plugin/scripts/checker-mutation-cases/it0-split-or-commit-check.sh
 - tasks/gap-it0-dep-done-iff-deps-blind-to-superseded.md
-
 - tasks/gap-superseded-dependency-blocks-dispatch-forever.md
 
 （原文那段：「若选定读法 ①，`done` 翻转侧的载体——由实现者定位，可能含 `plugin/scripts/worker-fan-in.ts` 或 `driver-filters.ts`——必须在派发时**补进本 `## Touches`**，⛔ 不得在未申报的情况下写它。」——**本任务选定读法 ②，不涉及翻转侧**。实际补入的唯一越界文件是上面第 4 条：AC4/DoD 要求在 E6 的**载体**里更正那条被实测证伪的判据，且已按原段的要求**先**补进本 `## Touches` 再写它。另：`tasks/gap-it0-dep-done-iff-deps-blind-to-superseded.md`（自身的勾选与 Evidence）经 Provider ABI 写入。）
