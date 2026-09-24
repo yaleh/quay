@@ -3,7 +3,7 @@ id: gap-webui-goal-list-prune-low-signal-columns
 title: /goal 列表去掉零信息列并压缩首屏：Criteria 页 criterion 列（服务端截 60 字符后又被 CSS 截到约 10
   字符）、recent verdict 被截掉有用的时间、first evidence 并入 last progress、可点链接不可辨认、决策横幅占首屏约
   200px
-status: ready
+status: done
 labels:
   - gap
   - webui
