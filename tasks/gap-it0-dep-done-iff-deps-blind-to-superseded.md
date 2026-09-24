@@ -3,7 +3,7 @@ id: gap-it0-dep-done-iff-deps-blind-to-superseded
 title: it0-split-or-commit-check 的 DEP-DONE-IFF-DEPS 对
   superseded（退役依赖）没有第三取值——done 任务的退役前置与"没做完"同形输出，全店不变式因此在静态层 fail-closed，使每一个提交的
   CI 恒红并阻塞 release
-status: todo
+status: ready
 labels:
   - gap
   - defect
