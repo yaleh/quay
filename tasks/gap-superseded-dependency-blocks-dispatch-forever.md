@@ -1,7 +1,7 @@
 ---
 id: gap-superseded-dependency-blocks-dispatch-forever
 title: depends_on 指向 superseded（终态）的任务永久派不出去——allDepsDone 只认 done，散文路径已有的豁免没跟到关系边
-status: ready
+status: done
 labels:
   - gap
   - defect
