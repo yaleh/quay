@@ -62,14 +62,81 @@ export interface TaskFilter {
 
 // ── 共享的依赖判定核（ready-pool-check 的 depsReadyFor 亦复用，⛔ 不各写一遍） ────────────────────────
 
-/** 依赖是否全部 done。`statusOf(depId)` 返回依赖的 status（读不懂/缺失 ⇒ null ⇒ 非 done ⇒ false）。
- *  `depIds` 空 ⇒ 真无依赖 ⇒ true（⛔ 不是「读不懂」——读不懂由 statusOf 返回 null 表达）。 */
-export function allDepsDone(depIds: string[], statusOf: (depId: string) => string | null): boolean {
-  if (depIds.length === 0) return true;
+// 依赖判定的【三值】核（gap-superseded-dependency-blocks-dispatch-forever）。
+//
+// WHY THREE VALUES, NOT ONE BOOLEAN（硬规则 3b + 硬规则 4c）：
+// `superseded` 是【终态】——该前置被人裁定退役（前提被删除），其继任者承载真依赖。
+// 修前 `allDepsDone` 只认 `done` ⇒ 一条指向 superseded 的任务 `depsReady` 【恒为 false】，
+// 且【没有任何事件能把它翻过来】。于是它在台账里与「依赖尚未满足」**同形**（`depsReady=false`），
+// 生产上表现为连续 260+ 轮 `unfixable:["depsReady==false"]` 的永久停摆（实证对象
+// gap-ac194-production-criterion-owner）。这正是硬规则 3b 的形态：**不可满足**被伪装成**尚未满足**。
+// 反向的同形同样禁止：把退役依赖静默当成 `done`（那就把「它的前提没了」伪装成「它的前提做完了」）。
+// ⇒ 判定必须给出【可区分的读数】：退役依赖走**自己的集合**，既不与 done 合并，也不落进 blocking。
+//
+// 同一条原则在本仓的散文路径上【已经修过】——ready-pool-check.ts prosePrereqRefs 的 add() 逐字写着
+// 「A retired task (`superseded`) is not a current-prereq target — its successor carries the real
+// dependency」，并与 `done` 一起排除出 gap 集。本条是把同一个判据补到【关系边】这条路径上
+// （硬规则 5b：同一原则的其它适用点）。
+
+/** 单条依赖的判定态。
+ *  `done`       — 已落地，前置已满足（正常路径）。
+ *  `superseded` — 该前置已被人裁定退役（终态）。**不再阻塞**，但 ⛔ 不等于 done。
+ *  `blocking`   — 仍须等待：todo / ready / needs-human / 读不出（null）/ 任何未知取值。fail-closed。 */
+export type DepVerdict = "done" | "superseded" | "blocking";
+
+/** 依赖判定的【可区分读数】。`ready` 是给既有布尔消费方（谓词 / 准入合取）的投影；
+ *  「有没有退役依赖」这件事**只在 `supersededDeps` 上可见**——⛔ 不合并进 `doneDeps`
+ *  （硬规则 3b：一个判定若能区分「已退役」与「已完成」，它才能把永久停摆与一切正常分开）。
+ *  `blockingDeps` 与 `doneDeps` 同时非空是可能的，`ready` 只由 `blockingDeps` 决定。 */
+export interface DepsReadiness {
+  /** 没有【活的】未满足前置（`blockingDeps` 为空）。⚠️ ready ≠ 「依赖全 done」—— 见 `supersededDeps`。 */
+  ready: boolean;
+  /** 已落地（`done`）的依赖 id。 */
+  doneDeps: string[];
+  /** 已退役（`superseded`）的依赖 id —— 单独一类，⛔ 既不入 `doneDeps` 也不入 `blockingDeps`。 */
+  supersededDeps: string[];
+  /** 仍阻塞的依赖 id（todo / ready / needs-human / 读不出 / 未知）—— fail-closed 集合。 */
+  blockingDeps: string[];
+}
+
+/** 状态词 → 三值判定。**单一真相源**：所有依赖边判定（本文件 depsSatisfied、ready-pool-check
+ *  depsReadinessFor、slot-refill depsReadyFor、portfolio-choice findUnmetDependency）共用这一份，
+ *  ⛔ 不各写一遍 `=== "done" || === "superseded"`。
+ *  读不懂/缺失 ⇒ `null` ⇒ `blocking`（fail-closed：⛔ 不得伪装成 done 或 superseded）。 */
+export function judgeDepStatus(status: string | null): DepVerdict {
+  if (status === TASK_STATUS.DONE) return "done";
+  if (status === TASK_STATUS.SUPERSEDED) return "superseded";
+  return "blocking";
+}
+
+/** 依赖集判定核。`depIds` 空 ⇒ `ready=true` 且三个集合皆空（真无依赖；⛔ 不是「读不懂」——
+ *  读不懂由 `statusOf` 返回 null 表达）。同一条 depId 重复出现 ⇒ 逐次入集（不静默去重）。 */
+export function judgeDeps(depIds: string[], statusOf: (depId: string) => string | null): DepsReadiness {
+  const out: DepsReadiness = { ready: true, doneDeps: [], supersededDeps: [], blockingDeps: [] };
   for (const depId of depIds) {
-    if (statusOf(depId) !== TASK_STATUS.DONE) return false;
+    switch (judgeDepStatus(statusOf(depId))) {
+      case "done":
+        out.doneDeps.push(depId);
+        break;
+      case "superseded":
+        out.supersededDeps.push(depId);
+        break;
+      default:
+        out.blockingDeps.push(depId);
+        out.ready = false;
+    }
   }
-  return true;
+  return out;
+}
+
+/** 依赖是否【不再需要等待】：每个依赖要么 done，要么已被裁定退役（superseded）。
+ *  ⚠️ 名字里的 `Done` 是 gap-ac152 起的既有 API 名（driver-runtime 再导出、单测逐字钉着、
+ *  下游 skip 台账写 `depsReady=false`），语义是「没有【活的】未满足前置」，不是「字面全 done」。
+ *  两者的区别**不在这里**（这里是布尔投影），而在 `judgeDeps` 的 `doneDeps` / `supersededDeps`
+ *  两个【分开的】集合上——需要区分时用 `judgeDeps`，⛔ 不要从这个布尔值上猜。
+ *  仍 fail-closed：`ready` / `todo` / `needs-human` / 读不出（null）/ 未知取值 ⇒ false。 */
+export function allDepsDone(depIds: string[], statusOf: (depId: string) => string | null): boolean {
+  return judgeDeps(depIds, statusOf).ready;
 }
 
 // readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
@@ -104,7 +171,10 @@ export const notInFlight: TaskFilter = {
   },
 };
 
-/** 候选的 depends_on 全部 done（ac138 白烧一轮防）。候选自身文件读失败 ⇒ false（fail-closed）。 */
+/** 候选的 depends_on 全部【不再需要等待】（done，或已被裁定退役的 superseded —— 见 judgeDeps：
+ *  一个指向 superseded 的依赖没有任何未来事件能翻成 done，若在此处仍当阻塞，候选就是永久不可派发）。
+ *  ⛔ ready / todo / 读不出 仍阻塞。候选自身文件读失败 ⇒ false（fail-closed）。
+ *  需要区分「依赖已退役」与「依赖全 done」时用 judgeDeps（谓词按契约只回布尔）。 */
 export const depsSatisfied: TaskFilter = {
   name: "depsSatisfied",
   predicate: (ctx) => (id) => {

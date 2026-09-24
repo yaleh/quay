@@ -188,9 +188,11 @@ import { classifyDarkAxisRecord } from "./dark-axis-record-check.ts";
 // fence 切分 + status/labels 行正则）。ensureDeliveryCriticalLabel re-export 保持旧 import 面。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, ensureDeliveryCriticalLabel, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 export { ensureDeliveryCriticalLabel } from "./task-ops.ts";
-// AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
-// ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, syncDocDevelopBidirectional } from "./driver-filters.ts";
+// AC152：依赖判定的核复用 driver-filters.ts（depsSatisfied 谓词同一份实现，⛔ 不各写一遍
+// 「逐个查 status !== done」的循环）。gap-superseded-dependency-blocks-dispatch-forever：复用点从
+// 布尔投影 allDepsDone 上移到【三值】judgeDeps —— 本文件必须能区分「依赖全 done」与「依赖已退役」，
+// 布尔投影只够准入判定，不够读数（硬规则 3b）。
+import { judgeDeps, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -1994,10 +1996,10 @@ export function isCompoundTask(task) {
   return readFrontField(task.frontmatterRaw, "role") === "compound";
 }
 
-function depsReadyFor(task, allTasks, root, develop = "develop") {
+export function depsReadinessFor(task, allTasks, root, develop = "develop") {
   // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
   // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
-  // the dispatch check reads). Each must be done; a missing file fails closed.
+  // the dispatch check reads). Each must be settled; a missing file fails closed.
   const deps = [];
   const parent = task.parent;
   if (parent && parent !== "null" && parent !== "~") {
@@ -2011,20 +2013,30 @@ function depsReadyFor(task, allTasks, root, develop = "develop") {
     if (!isCompoundTask(allTasks.get(parent))) deps.push(parent);
   }
   for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
-  // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（单一实现，⛔ 不各写一遍
-  // 「逐个查 status !== done」的循环）。statusOf 返回依赖的 status；Parent/dep 文件缺失 ⇒ null ⇒
-  // 非 done ⇒ fail closed（conservative, not dispatchable）。
+  // AC152：依赖判定的核复用 driver-filters.ts 的 judgeDeps（单一实现，⛔ 不各写一遍「逐个查
+  // status !== done」的循环）。
   // gap-ready-pool-depends-on-status-stale-read：statusOf 原从 allTasks Map 读依赖状态，而 allTasks
   // 由主检出 disk 构建（硬规则 4b 的陈旧代理量）——依赖已在 develop done 仍报 blocking。改为读
   // canonical develop ref（readTaskStatusAtRef，与 (乙) gap-dispatch-reads-stale-main-checkout-
   // task-status 统一 task 自身 status 的读源）。ref 读成功即权威；ref 读不可用（非 git fixture
   // root / 依赖不在 ref）退回 allTasks 内存 status（既有行为，null ⇒ fail closed）。
-  return allDepsDone(deps, (depId) => {
+  // gap-superseded-dependency-blocks-dispatch-forever：返回【三值读数】而非布尔 —— 退役依赖
+  // （superseded，终态）不再阻塞，但走自己的集合，⛔ 不与 done 合并（硬规则 3b）。parent 边与
+  // depends_on 边共用同一份判定（本条 AC7：parent 边是 superseded 也得给可区分读数）。
+  return judgeDeps(deps, (depId) => {
     const refStatus = root ? readTaskStatusAtRef(root, develop, depId) : null;
     if (refStatus !== null) return refStatus;
     const p = allTasks.get(depId);
     return p ? p.status : null;
   });
+}
+
+/** Boolean projection of `depsReadinessFor` — the admission judge. ⚠️ `true` means "no LIVE unmet
+ *  prerequisite" (done OR retired-superseded), NOT "every dep is literally done". Callers that must
+ *  TELL THE TWO APART (readings / ledgers — 硬规则 3b) use `depsReadinessFor` and its separate
+ *  `doneDeps` / `supersededDeps` / `blockingDeps` sets, never this projection. */
+function depsReadyFor(task, allTasks, root, develop = "develop") {
+  return depsReadinessFor(task, allTasks, root, develop).ready;
 }
 
 /** Largest subset of `parsed` (an array of parseTouches results) whose members are pairwise
@@ -2082,7 +2094,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // but is a silent global dispatch lock while in flight. Gate it AT PROMOTION so the fix-worker
   // narrows it before it ever enters the pool (overbroad → can't land; dir-glob → locks all peers).
   const touchesNarrow = checkTouchesNarrow(task.body);
-  const depsReady = depsReadyFor(task, allTasks, root, develop);
+  // gap-superseded-dependency-blocks-dispatch-forever: the candidate carries the FULL three-value
+  // dependency reading, not just the boolean — `depsReady` alone cannot distinguish "every dep is
+  // done" from "a dep was retired (superseded)" (硬规则 3b: 不可满足 must not share a shape with
+  // 尚未满足). The candidate output below exposes `supersededDeps` / `blockingDeps` alongside it.
+  const depsReadiness = depsReadinessFor(task, allTasks, root, develop);
+  const depsReady = depsReadiness.ready;
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
   // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria that slot-refill's step-4
@@ -2155,6 +2172,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     touchesNarrow: touchesNarrow.narrow,
     wideTouches: touchesNarrow.wideGlobs,
     depsReady,
+    // gap-superseded-dependency-blocks-dispatch-forever (AC4, 硬规则 3b): the DEPENDENCY BREAKDOWN —
+    // three disjoint sets so a reader (and the promotion ledger) can tell
+    //   all-done        (doneDeps   = N, supersededDeps = [], blockingDeps = [])
+    // from
+    //   had-a-retired-dep (supersededDeps = [<id>], blockingDeps = [], depsReady = true)
+    // which the single boolean `depsReady` renders IDENTICAL. Without this, a dep retired by a human
+    // ruling shows up exactly like a satisfied one (and, before the fix, exactly like an unmet one).
+    depsDone: depsReadiness.doneDeps,
+    supersededDeps: depsReadiness.supersededDeps,
+    blockingDeps: depsReadiness.blockingDeps,
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     disjointScore,
@@ -2316,7 +2343,10 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // the same wrong landing point and is removed with it: the goal-layer half lives in
   // long-term-guarantee-goal-backed-check.ts (per-round re-evaluation, activation line), never here.
   const four = artifactsComplete(task.body);
-  const depsReady = depsReadyFor(task, allTasks, root, develop);
+  // Same three-value dependency reading as the bulk path (gap-superseded-dependency-blocks-dispatch-
+  // forever): the targeted checks block carries the breakdown, not just the boolean.
+  const depsReadiness = depsReadinessFor(task, allTasks, root, develop);
+  const depsReady = depsReadiness.ready;
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
   const touchesNarrow = checkTouchesNarrow(task.body);
@@ -2329,6 +2359,11 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
+    // gap-superseded-dependency-blocks-dispatch-forever (AC4): the distinguishable dependency
+    // reading on the targeted path too — same three disjoint sets as the bulk candidate.
+    depsDone: depsReadiness.doneDeps,
+    supersededDeps: depsReadiness.supersededDeps,
+    blockingDeps: depsReadiness.blockingDeps,
     touchesResolve,
     touchesNarrow: touchesNarrow.narrow,
     wideTouches: touchesNarrow.wideGlobs,
@@ -2351,7 +2386,7 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     reason: eligible
       ? `${id}: targeted promotion (outer stage-goal selection) — mechanically eligible; run \`quay promote ${id}\``
       : `${id}: not eligible · four-artifacts ${four.complete ? "complete" : `missing ${four.missing.join(",")}`} · ` +
-        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"} · ` +
+        `deps ${depsReady ? (depsReadiness.supersededDeps.length > 0 ? `ready(retired: ${depsReadiness.supersededDeps.join(",")})` : "ready") : `NOT-ready(${depsReadiness.blockingDeps.join(",")})`} · touches ${touchesResolve ? "resolve" : "MISSING"} · ` +
         `prose-prereq ${prosePrereqGapIds.length === 0 ? "ok" : `GAP(${prosePrereqGapIds.join(",")})`}`,
   };
 }
@@ -3266,7 +3301,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       priority: Number.isFinite(c.priority) ? c.priority : 0,
       reason:
         `${c.kind}-* candidate · disjoint ${c.disjointScore}/${poolParsed.length + inFlightParsed.length} · ` +
-        `deps ${c.depsReady ? "ready" : "NOT-ready"} · ` +
+        `deps ${c.depsReady ? (c.supersededDeps?.length ? `ready(retired: ${c.supersededDeps.join(",")})` : "ready") : `NOT-ready(${c.blockingDeps?.join(",") ?? ""})`} · ` +
         `touches ${c.touchesResolve ? "resolve" : "MISSING"} · ` +
         `four-artifacts ${c.fourArtifacts ? "complete" : `INCOMPLETE (${c.missingArtifacts.join(",")})`}` +
         (c.compound ? " · compound-NOT-dispatchable" : "") +
