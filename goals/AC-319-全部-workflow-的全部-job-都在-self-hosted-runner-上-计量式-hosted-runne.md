@@ -1,7 +1,7 @@
 ---
 id: AC-319
 title: 全部 workflow 的全部 job 都在 self-hosted runner 上——计量式 hosted runner 的账单闸不再能挡住 CI 与发布
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -61,5 +61,16 @@ origin: 人 2026-09-24 裁定重开 GOAL-020。直接量：run 35966264609 的 v
   not started because recent account payments have failed or your spending limit
   needs to be increased』；release.yml 3 job + publish-plugin-dist.yml 1 job +
   ci.yml 3 job 同在 ubuntu-latest。
+activatedAt: 2026-09-24T08:19:32.639Z
+statusLog:
+  - at: 2026-09-24T08:19:32.639Z
+    from: draft
+    to: active
+    actor: human
+    reason: 人 2026-09-24 裁定重开 GOAL-020：按裁定激活
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-24T08:19:32.638Z
 ---
