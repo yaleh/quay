@@ -2,7 +2,7 @@
 id: gap-metered-hosted-runner-jobs-to-self-hosted
 title: 7 个 ubuntu-latest job 被 hosted runner 账单闸挡住未启动——迁到 self-hosted
   tokyo-alpha + 防回漂静态闸（AC-319）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
