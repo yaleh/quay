@@ -2,7 +2,7 @@
 id: AC-320
 title: 立条后切出的每一个 release tag 都在主检出台账 .quay/release-branch-finish.jsonl 有
   form=tagged exit=0 记录——切版走可重复载体且留痕可读回
-status: draft
+status: active
 kind: criterion
 goal: GOAL-020
 criterion: >-
@@ -92,5 +92,16 @@ expect: exit 0 = 本记录 add 提交之后创建的每个 vX.Y.Z tag，在【�
 origin: 人 2026-09-24 裁定重开 GOAL-020。直接量：v0.12.0 手工 12 步切版，release-branch-finish
   记录落在 /data/scratch/yale/quay-release-cut-v0120/.quay/，主检出台账末行仍是 2026-09-20；脚本
   repo_root 默认取脚本自身所在检出（release-branch-finish.sh:87），从 worktree/副本跑即落错台账。
+activatedAt: 2026-09-24T08:20:49.887Z
+statusLog:
+  - at: 2026-09-24T08:20:49.887Z
+    from: draft
+    to: active
+    actor: human
+    reason: 人 2026-09-24 裁定重开 GOAL-020：按裁定激活
 long-term: true
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-24T08:20:49.886Z
 ---
