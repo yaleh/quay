@@ -1,6 +1,6 @@
 ---
 id: gap-ac194-production-criterion-owner
-title: AC-194 判据第五次变假——分类器按拼法枚举落地形态，且这条 AC 在生产载体上始终没有拥有者
+title: "AC-194 结构判定缺钉子——测试只钉旧拼法（: storing ref），改回白名单不会有任何测试变红"
 status: todo
 labels:
   - gap
@@ -11,78 +11,77 @@ extra:
   schema: execution
 depends_on:
   - gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check
+  - gap-superseded-dependency-blocks-dispatch-forever
 goal_ac: AC-194
 ---
 **type:** execution
 
 ## Proposal
 
-AC-194（`goals/AC-194-no-direct-to-develop-bypass.md`，`expect: exit 0`，GOAL-007 三例之③）此刻取假，
-且**没有任何在飞任务认领这条 AC**——这是冻结population（`frozen-violated`）本轮报出的缺口。本条认领
-此前 5 次认领都没人认领的那半边：AC-194 在**生产载体**上此刻为真、并在下一种落地拼法出现时**仍然**为真。
+**本条已收窄（2026-09-24，manager 层裁定）。** 立案时的前提（AC-194 判据 `EXIT=1`、`unclassifiableCommits:2`）
+**已被他任务满足**，剩下的唯一活口是「缺钉子」。
 
-**本轮直接量（立案前实测，⛔ 非台账尾陈旧读数）**：判据逐字重跑 ⇒ `EXIT=1`，stdout 末行
+**此刻的生产读数（逐字重跑，生产 root HEAD `993859ea`，2026-09-24T02:40:27Z）**：
 
-    direct-to-develop bypass check not pass: unsupported-reflog-action: fetch -q . author:develop, fetch -q . chore/quay-dev-marketplace:develop
+    EXIT=0
+    evaluated=true   ok=true   reasonSecondary=null
+    unclassifiableCommits=0
+    classification: 100/100 (ratio 1)
+    denominator.totalDirectCommits=0
+    candidates.length=0
 
-同一 checker `--root . --baseline develop~100 --json` 的读数：`evaluated:false`、
-`reasonSecondary:"unclassifiable-commits-in-range"`、`unclassifiableCommits:2`、
-`classification.ratio:0.98`（98/100）、`denominator.totalDirectCommits:0`、`candidates:[]`。
+`.quay/gate-events.jsonl` 的 AC-194 goal-sweep 尾条亦为 `verdict=pass`
+（2026-09-23T17:50:01.644Z，`criterionHash=d3eb8d7a6165b156`）。
 
-⇒ **不是「发生了直投」**（`totalDirectCommits` 为 0），而是**判据读不懂输入**：硬规则③b 下 checker 以
-exit 3（NOT-EVALUATED）fail-closed，criterion 记 fail。两条不可分类的 reflog 条目原文
-（`git reflog show develop` 的 `%gs`）：
+**前置由谁满足（⛔ 本条不重做那部分）**：`gap-suite-ambient-reds-block-all-code-landings`（done）的"第 4 类"
+已按**结构**修好分类器——原文见 `plugin/scripts/direct-to-develop-bypass-check.ts:479` 起：任何以 `fetch`
+开头的 reflog action 都必然是一次 ref-level 移动（git-fetch 在本地从不创建 commit），与 status 后缀无关。
+立案当轮探针实测（6 个变体，含**从未在任何名单里出现过**的后缀）：
 
-- `6de94b9e4 develop@{42}: fetch -q . author:develop: fast-forward`
-- `fa031022b develop@{45}: fetch -q . chore/quay-dev-marketplace:develop: fast-forward`
+| `%gs` 输入 | `classifyReflogAction` |
+|---|---|
+| `fetch -q . author:develop: fast-forward` | `refMove` |
+| `fetch -q --force . some-branch:develop: forced-update` | `refMove` |
+| `fetch -q . totally-novel-branch-i-have-never-seen:develop: pruned` | `refMove` |
+| `fetch -q . x:develop: some-future-suffix-nobody-enumerated` | `refMove` |
+| `commit: fix something` | `direct`（负控成立） |
 
-分类器（`plugin/scripts/direct-to-develop-bypass-check.ts:479`）只把 `/^fetch\b/ && /: storing ref\s*$/`
-认作 `refMove`，而本仓的 author→develop 同步路径产生的是 `fetch -q . <branch>:<branch>: fast-forward`
-⇒ 落入 unknown。
+⇒ 原 AC3（生产真值）、AC4（台账翻转）、AC6 的**实现侧**均已满足。
 
-**为什么此前 5 次认领都没让判据留住为真**：全部是**一次性、按拼法或覆盖点**打的补丁，没有任何一条拥有
-AC-194 这条【生产载体上的长期保证】本身——它们的 AC 全是 test 层读数（「同一测试 58/0」），结构上没有
-一条要求过 `gate AC-194` 在生产 root 上 exit 0：
+**剩下的真缺口是「钉子」**：`plugin/test/direct-to-develop-bypass-check.test.mjs` 对 fetch **只有 1 条断言**
+（`:1017`），且用的是**旧拼法** `: storing ref`。也就是说——**把结构判定改回白名单，不会有任何测试变红。**
+这正是本任务要防的"第 6 次"，而它此刻**没有载体**（硬规则 9：可见性 ≠ 执行，该给它造产物）。
 
-| 认领任务 | status | 它补的点 |
-|---|---|---|
-| `gap-ac194-bypass-check-unclassifiable-window` | done | 把整 DAG 721 条收窄到 first-parent 100 条 |
-| `gap-ac194-reflog-action-vocabulary-incomplete` | done | 补第三种 action 拼法（`branch: Reset to`） |
-| `gap-ac194-bracket-filter-drops-offspine-landing-tip` | done | 补括注准入（落地 tip 须在 spine 上） |
-| `gap-ac194-frozen-verdict-predates-fix` | done | 判据读数重取（非缺陷，读数早于修复） |
-| `gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check` | ready | 补 `fetch -q . <branch>:<branch>` 这一形态 |
-
-<!-- dedup-ref -->
-（去重说明，按机制不按症状）上表最后一条（ready）已认领**分类器拼法识别本身**的修复——它改
-`plugin/scripts/direct-to-develop-bypass-check.ts` 的分类路径与同名测试，本条⛔不重做那部分；两条任务的
-次序用顶层 `depends_on` 字段机械表达（⛔不靠本段散文）。本条补的是无人认领的另一半：生产载体上的
-AC-194 真值，以及它**长期**成立。
-
-**修法方向（⛔ 不是再加一个字符串）**：`plugin/scripts/direct-to-develop-bypass-check.ts:1137` 自己逐字写着
-「⛔ Not a spelling whitelist — a spelling whitelist is structurally blind to the next landing form」，
-而这正是它连续被破 5 次的方式。归类必须按**结构**判定（该 reflog 条目把 develop 前移到一个已存在的
-commit ⇒ `refMove`，与拼法无关），否则第 6 次只是时间问题。
+⛔ 本条**不再**新增任何字符串白名单；⛔ 不重做分类器实现（已由他任务完成）。
 
 ## AC
 
-- [ ] AC1（立案直接量·复现固化）逐字重跑 AC-194 判据 ⇒ `EXIT=1`；贴 stdout/stderr 原文，与 `direct-to-develop-bypass-check.ts --root . --baseline develop~100 --json` 的 `evaluated` / `reason` / `unclassifiableCommits` / `denominator.totalDirectCommits` / `classification.ratio` 五个字段读数
-- [ ] AC2（归因，硬规则④推论四）贴出那两条不可分类 reflog 条目的**完整 `%gs` 原文 + 时间戳**，点名产生它们的机制与 `文件:行`（本仓 author→develop 同步路径），并给出一条**若该机制为假则读数会不同**的对照
-- [ ] AC3（真值恢复·**生产载体**，⛔ 非 fixture）在前置落地后，于同一生产 root 逐字重跑 AC-194 判据 ⇒ `exit 0`；并贴 `--json` 的 `evaluated:true`、`unclassifiableCommits:0`、`denominator.totalDirectCommits:0`
-- [ ] AC4（台账翻转）`.quay/gate-events.jsonl` 中 AC-194 的 **goal-sweep 尾条** `verdict=pass`（贴该条原文与时间戳）
-- [ ] AC5（负控制·证明判据能取假）注入一次 `commit:` 形态的 code-surface 直投进 `develop~100` 窗口 ⇒ 同一 checker `exit 1`（贴读数与恢复步骤）——判据不是恒真
-- [ ] AC6（结构而非拼法·防第 6 次）造一个**此前未在任何名单里出现过**的 fetch 变体，分类器仍给出结构性归类（贴该形态的分类输出原文）；⛔ 若改法只是往名单里加字符串 ⇒ 本 AC 取假
-- [ ] AC7（残留兜底）若前置落地后 AC3 仍非 `exit 0`（同窗口出现新形态或残留），本任务负责补齐**结构性**修法并使 AC3 成立；`gate AC-194` 仍非 0 而本任务被标 done ⇒ 不算完成
-- [ ] AC8（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-production-criterion-owner` 绿；若本任务零代码改动，改贴 `git diff --name-only` 证明改动仅限 `tasks/gap-ac194-production-criterion-owner.md`
+- [ ] AC1（现状固化·生产载体）在生产 root 逐字重跑 AC-194 判据 ⇒ `exit 0`，贴 `evaluated` /
+      `unclassifiableCommits` / `classification.ratio` / `denominator.totalDirectCommits` / `candidates.length`
+      五个字段读数；并附 `.quay/gate-events.jsonl` 中 AC-194 的 goal-sweep 尾条原文与时间戳
+- [ ] AC2（前置归属·引用不重做）贴 `plugin/scripts/direct-to-develop-bypass-check.ts:479` 起的结构判定注释原文，
+      点名 `gap-suite-ambient-reds-block-all-code-landings` 为其落点；证明本条**零实现改动**
+- [ ] AC3（**钉子**·本条核心）在 `plugin/test/direct-to-develop-bypass-check.test.mjs` 增加断言，至少钉住：
+      （a）生产真实形态 `fetch -q . author:develop: fast-forward` ⇒ `refMove`；
+      （b）≥1 个**任何名单里都没有**的后缀（如 `pruned`）⇒ `refMove`。
+      **并做一次变异检验**：把 `classifyReflogAction` 的 fetch 分支临时改回 `&& /: storing ref\s*$/.test(s)`
+      ⇒ 新断言**必须变红**（贴红/绿两次读数 + 恢复后的 `git diff --stat` 为空）。⛔ 只加一条与 `:1017` 同形的
+      拼法断言 ⇒ 本 AC 取假
+- [ ] AC4（负控制·判据不是恒真）在**一次性 scratch clone**（⛔ 不在真 develop 上注入）的窗口内
+      注入一次 `commit:` 形态的 code-surface 直投 ⇒ 同一 checker `exit 1`；贴读数与恢复步骤
+- [ ] AC5（防第 6 次·结构余量）列出实测到的 fetch 后缀词表，并证明一个**不在该词表内**的后缀仍归类 `refMove`
+      （即判定与词表无关）；贴分类输出原文
+- [ ] AC6（本任务自身的门）`bash scripts/test.sh --for-task gap-ac194-production-criterion-owner` 绿
 
 ## DoD
 
-真实落地：**AC-194 判据在生产载体上逐字重跑 `exit 0`（AC3）**，且 `.quay/gate-events.jsonl` 的 AC-194
-goal-sweep 尾条翻为 `verdict=pass`（AC4），且该真值**不依赖任何新增的字符串白名单**（AC6 取假：一个从未
-见过的拼法仍被结构性归类）。只把同名测试刷到 58/0、而生产 `gate AC-194` 仍非 0 ⇒ 不算完成（这正是此前
-5 次认领的共同形态）。注入 `commit:` 直投后同一 checker 仍 `exit 1`（AC5）——判据能取假，不是恒真。
+真实落地：**钉子存在且可证伪**——AC3 的变异检验里把结构判定改回白名单后**新断言变红**（这是"测得出来"的
+唯一证据；硬规则 4 推论三：一个**改回旧实现也不变红**的测试不是钉子，只是回声）。且生产 root 上 AC-194 判据
+保持 `exit 0`（AC1），且负控仍能取假（AC4）。只把测试条数刷高、或新增一条与 `:1017` 同形的拼法断言 ⇒ 不算完成；
+把分类器实现重做一遍（已由他任务完成）⇒ 也不算完成。
 
 ## Touches
 
-- plugin/scripts/direct-to-develop-bypass-check.ts
 - plugin/test/direct-to-develop-bypass-check.test.mjs
+- plugin/scripts/direct-to-develop-bypass-check.ts
 - tasks/gap-ac194-production-criterion-owner.md
