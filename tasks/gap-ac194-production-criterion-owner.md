@@ -1,7 +1,7 @@
 ---
 id: gap-ac194-production-criterion-owner
 title: "AC-194 结构判定缺钉子——测试只钉旧拼法（: storing ref），改回白名单不会有任何测试变红"
-status: todo
+status: ready
 labels:
   - gap
   - defect
