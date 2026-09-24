@@ -78,6 +78,7 @@ import { repoRoot } from "./repo-root.ts";
 import { flagValue } from "./gate-script-base.ts";
 import {
   attributeRun,
+  jobNeverStarted,
   loadKnownFlakes,
   defaultKnownFlakesPath,
   type KnownFlakeRegistry,
@@ -105,6 +106,12 @@ export interface GhJob {
   id?: number | string;
   name?: string;
   conclusion?: string | null;
+  /**
+   * 该 job 拿到的 runner 名（jobs API 原生字段）。**直接量**：`""` = 这个 job 从未拿到 runner
+   * （实测 2026-09-24 run 35966264609 的 `version-consistency`），⛔ `null` = API 说「还没有值」
+   * （排队中）—— 两者在采集器里必须**分别**落成「写空串」与「不写键」，见 `toJobReadings`。
+   */
+  runner_name?: string | null;
   started_at?: string;
   completed_at?: string;
   steps?: Array<{ name?: string; conclusion?: string | null; number?: number }>;
@@ -235,6 +242,64 @@ export function hasSchedulerMs(reading: { schedulerMs?: unknown }): boolean {
   return typeof reading.schedulerMs === "number" && Number.isFinite(reading.schedulerMs);
 }
 
+// ── notStartedCause：**未启动 job 的成因**（tasks/gap-ci-collector-job-not-started-misattributed-as-timeout）──
+// 为什么需要它：`runnerName === ""` + `steps: []` 已经能把「从没起跑」从「跑到一半挂死」里分出来
+// （那才是主判据，见 ci-red-attribute.ts 的 `jobNeverStarted`），但**为什么没起跑**只在 check-run
+// annotation 里 —— 实测 run 35966264609 逐字给出：
+//   *"The job was not started because recent account payments have failed or your spending limit needs to
+//     be increased"*
+// 没有它，「未启动」只说明现象、不说明成因（是配额？是余额？是 runner 池没容量？）。
+//
+// ⛔ 它是**成因补充，不是信号源**：拿不到成因时写 `null`（= 试过但拿不到），而 not-started 这个 signal
+// **照常产出** —— 绝不因为拿不到成因就回落到 `job-timeout-reached`（那正是本任务要修的误归因）。
+// ⛔ 也只对 conclusion=failure 的未启动 job 调（成功的 run 根本不做归因，拉了纯属浪费配额）。
+
+/** `notStartedCause` 的截断长度 —— **唯一一处**常量（写入侧与测试都读它，⛔ 不出现第二个字面值）。 */
+export const NOT_STARTED_CAUSE_MAX_CHARS = 400;
+
+/** check-runs annotations 响应**里一个元素**用到的字段（`gh api /repos/<repo>/check-runs/<id>/annotations`；
+ *  ⚠️ 响应顶层是**数组**，见 `deriveNotStartedCause`）。 */
+export interface GhAnnotation {
+  annotation_level?: string | null;
+  message?: string | null;
+}
+
+/**
+ * 从 annotations 响应里取**失败级**成因：`annotation_level === "failure"` 的第一条 message，**逐字**
+ * （只按 `NOT_STARTED_CAUSE_MAX_CHARS` 截断，⛔ 不加省略号 —— 加了就不是逐字了）。
+ *
+ * ⚠️ **响应形态实测**（2026-09-24，`gh api /repos/yaleh/quay/check-runs/107553751055/annotations`）：
+ * 这个端点返回的是**裸 JSON 数组**，⛔ 不是 `{annotations: […]}` 包一层的对象
+ * （逐字：`[{"path":".github",…,"annotation_level":"failure","message":"The job was not started because
+ * recent account payments have failed…"},{…,"annotation_level":"notice",…}]`）。
+ * 故两种形态都收：**裸数组**（实测形态）与 `{annotations: […]}`（包一层，防御性）。⛔ 只认前者会让
+ * 生产侧**永远**只落 `null` —— 而 `null` 恰好也是「没拿到成因」的合法取值，于是「端点形态读错了」
+ * 与「真的没有成因」同形（硬规则 3b）。这条只有**真打一次 API** 才能发现：单测夹具若照着自己以为的
+ * 形状写，绿色也只证明自己和自己一致。
+ *
+ * 拿不到 ⇒ `null`（**独立取值**，硬规则 3b）：响应既不是数组也不是对象 / 一条 failure 级的都没有 /
+ * message 是空白。⛔ 绝不回落成空串（空串在本模块里是 `runnerName` 那个「确定读到」的取值，两者不得同形）。
+ */
+export function deriveNotStartedCause(body: unknown): string | null {
+  const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  let list: unknown[];
+  if (Array.isArray(body)) {
+    list = asList(body);
+  } else {
+    const obj = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    list = obj === null ? [] : asList(obj.annotations);
+  }
+  for (const a of list) {
+    const rec = a !== null && typeof a === "object" && !Array.isArray(a) ? (a as Record<string, unknown>) : null;
+    if (rec === null) continue;
+    if (String(rec.annotation_level ?? "") !== "failure") continue;
+    const msg = typeof rec.message === "string" ? rec.message : "";
+    if (msg.trim() === "") continue;
+    return msg.length > NOT_STARTED_CAUSE_MAX_CHARS ? msg.slice(0, NOT_STARTED_CAUSE_MAX_CHARS) : msg;
+  }
+  return null;
+}
+
 // ── seaVerify：SEA 产物「真的能在无 Node 环境跑起来吗」的载体字段（AC-267 载体臂）──────────────
 // 为什么需要它：AC-267 的判据静态臂只证明**源码里**再没有模块顶层求值 `import.meta.url` 的点；
 // 「发出去的二进制真的能起 `quay serve`」这件事只能由**一次真实 release run** 证明。在此之前载体里
@@ -341,6 +406,9 @@ export function toJobReadings(
       name,
       conclusion: j.conclusion === null || j.conclusion === undefined ? undefined : String(j.conclusion),
     };
+    // runnerName：**只有 API 给了字符串才落键**。`""` 是「从未拿到 runner」的直接读数（要落），
+    // `null` / 缺键 = API 说「还没有值」/ 这个字段没采到 ⇒ **不落键**（缺 ≠ 空串，硬规则 6）。
+    if (typeof j.runner_name === "string") reading.runnerName = j.runner_name;
     const dur = secsBetween(j.started_at, j.completed_at);
     if (dur !== undefined) reading.durationSec = dur;
     const to = timeouts[name];
@@ -369,6 +437,11 @@ export interface BuildRecordOptions {
   prereqByJob?: ReadonlyMap<GhJob, Record<string, string>>;
   /** 这次真的拉到过日志的 job → 它日志里派生出的 `schedulerMs`（见 `toJobReadings`）。 */
   schedulerByJob?: ReadonlyMap<GhJob, number>;
+  /**
+   * **未启动 job 的成因**（check-runs annotation 的 message 逐字；`null` = 试过但拿不到）。
+   * ⛔ 只在**这条 run 真的有未启动 job** 时才传 —— 键缺失 = 没有未启动 job（缺 ≠ `null`，硬规则 6）。
+   */
+  notStartedCause?: string | null;
 }
 
 /**
@@ -407,6 +480,9 @@ export function buildRecord(run: GhRun, opts: BuildRecordOptions = {}): RunRecor
   }
   if (typeof opts.testFiles === "number" && opts.testFiles > 0) rec.testFiles = opts.testFiles;
   if (Array.isArray(opts.failedTests) && opts.failedTests.length > 0) rec.failedTests = opts.failedTests;
+  // 未启动 job 的成因：⛔ `null` 要**落键**（那是「试过但拿不到」这个独立取值），故判 `!== undefined`
+  // —— 末尾那句「删掉所有 undefined 键」的清扫不会碰它。
+  if (opts.notStartedCause !== undefined) rec.notStartedCause = opts.notStartedCause;
 
   for (const k of Object.keys(rec)) if (rec[k] === undefined) delete rec[k];
   return rec;
@@ -564,6 +640,48 @@ export interface CollectResult {
 }
 
 /**
+ * 为一条 run 里**未启动的失败 job** 取成因（见文件头 `notStartedCause` 段）。
+ *
+ * 三态返回（硬规则 3b）：
+ *   · `undefined` —— 这条 run **没有**未启动的失败 job ⇒ 调用方**不写**该键（缺 ≠ `null`）；
+ *   · 字符串 —— 取到逐字成因；
+ *   · `null` —— 有未启动 job 而**成因没拿到**（离线缝没试 / 调用失败 / 响应里没有 failure 级 annotation）。
+ *     ⛔ 它**不**影响 not-started signal 的产出：拿不到成因 ≠ 回落成 `job-timeout-reached`。
+ *
+ * 判据（哪些 job 算「未启动」）复用归因器那一份 `jobNeverStarted` —— ⛔ **不在这里重写一遍**：
+ * 两处若各写一份，「哪些 job 要拉 annotation」与「哪些 job 报 not-started」会各自漂移。
+ */
+function deriveRunNotStartedCause(
+  run: GhRunner,
+  repo: string,
+  jobs: GhJob[],
+  offlineSeam: boolean,
+  warnings: string[],
+): string | null | undefined {
+  const misses = jobs.filter(
+    (j) => String(j.conclusion ?? "") === "failure" && jobNeverStarted({ runnerName: j.runner_name, steps: j.steps }),
+  );
+  if (misses.length === 0) return undefined;
+  // 离线缝的承诺是「整条路径零 gh」⇒ ⛔ 不为成因破例（`--from-file` 那条路本就没有网络）。
+  if (offlineSeam) return null;
+  for (const j of misses) {
+    if (typeof j.id !== "number" && typeof j.id !== "string") continue;
+    try {
+      const body = ghJson<unknown>(run, [
+        "api",
+        `/repos/${repo}/check-runs/${j.id}/annotations`,
+      ]);
+      const cause = deriveNotStartedCause(body);
+      if (cause !== null) return cause;
+    } catch (e) {
+      // ⛔ 调用失败只留痕、只落 `null`（「试过但拿不到」是独立取值），绝不静默吞掉。
+      warnings.push(`not-started-annotation-unreadable:${j.id}:${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return null;
+}
+
+/**
  * 采集：拉 run（或读离线缝）→ 拉 job 读数 → 派生 testFiles → 组装记录。**不落盘、不归因。**
  * 归因由 writeCarrier() 在落盘前统一施加。
  */
@@ -714,7 +832,10 @@ export function collect(opts: CollectOptions): CollectResult {
       }
     }
 
-    records.push(buildRecord(r, { jobs, timeouts, testFiles, prereqByJob, schedulerByJob }));
+    // 未启动 job 的成因（每个这样的 job 至多一次 API 调用；它们本来就罕见）。位置在 log 派生之后、
+    // 组装之前：`runnerName`/`steps` 是 jobs API 直接给的，与日志拉取无关，两条路径互不依赖。
+    const notStartedCause = deriveRunNotStartedCause(run, opts.repo, jobs, offlineSeam, warnings);
+    records.push(buildRecord(r, { jobs, timeouts, testFiles, prereqByJob, schedulerByJob, notStartedCause }));
   }
 
   return { records, warnings, logRunsFetched: logRunsUsed };
@@ -903,6 +1024,10 @@ interface Enrichment {
  * 两个 job 级补全**串联**（不是一个盖掉另一个）：它们写在同一个 `jobs` 数组的**不同键**上，串联后
  * 两条都能落到同一次落盘里；各自动没动分别用独立读数报（⛔ 不合并成一个 `jobs` 布尔，那样「补了
  * 哪个」就不可区分了 —— 硬规则 3b）。
+ *
+ * ⛔ `runnerName` / `notStartedCause` **刻意不在这里**（tasks/gap-ci-collector-job-not-started-misattributed-as-timeout
+ * 的「回填」条款）：那两个是**新判据的输入**，对落地**之前**采集的历史记录重算它们，等于用今天的
+ * 采集能力改写昨天的观测 —— 历史载体不重算，新行为只对落地后采集的记录生效。
  */
 function enrichable(existing: RunRecord, incoming: RunRecord): Enrichment | null {
   const patch: Record<string, unknown> = {};

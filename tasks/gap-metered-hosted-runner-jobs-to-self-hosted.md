@@ -2,7 +2,7 @@
 id: gap-metered-hosted-runner-jobs-to-self-hosted
 title: 7 个 ubuntu-latest job 被 hosted runner 账单闸挡住未启动——迁到 self-hosted
   tokyo-alpha + 防回漂静态闸（AC-319）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -23,12 +23,12 @@ goal_ac: AC-319
 
 ## AC
 
-- [ ] `grep -nE 'runs-on:\s*ubuntu-latest' .github/workflows/*.yml | wc -l` = 0（立条读数 7，能取假）
-- [ ] `node --experimental-strip-types plugin/scripts/workflow-runner-self-hosted-check.ts --root .` exit 0；对一份把任一 job 改回 `ubuntu-latest` 的副本 exit 1 且输出点名该 job；对无 workflow 目录 exit 3
-- [ ] `bash plugin/scripts/checker-mutation-cases/workflow-runner-self-hosted-check.sh` exit 0，且 `runner-static-gate.ts` 的 `@checker-count` 与实际 `run_checker` 数一致
-- [ ] 测试文件里存在一条用例：同一组 fixture 分别跑检查器与 `goals/AC-319-*.md` 的 criterion（经 `bash`），二者 pass/fail/not-evaluated 结论逐一相同
-- [ ] 逐 job 枚举（python+yaml，打印前 3 条命中）：在 7 个被迁移 job 中，凡 steps 的 `run:` 调用 `node`/`npm`/`npx` 的，都有一步 `uses: actions/setup-node@…`；缺者数 = 0（⛔ 不按全文件 grep 计数——计数不能证明每个 job 都有）
-- [ ] `quay goal gate AC-319 --dry-run` exit 0
+- [x] `grep -nE 'runs-on:\s*ubuntu-latest' .github/workflows/*.yml | wc -l` = 0（立条读数 7，能取假）
+- [x] `node --experimental-strip-types plugin/scripts/workflow-runner-self-hosted-check.ts --root .` exit 0；对一份把任一 job 改回 `ubuntu-latest` 的副本 exit 1 且输出点名该 job；对无 workflow 目录 exit 3
+- [x] `bash plugin/scripts/checker-mutation-cases/workflow-runner-self-hosted-check.sh` exit 0，且 `runner-static-gate.ts` 的 `@checker-count` 与实际 `run_checker` 数一致
+- [x] 测试文件里存在一条用例：同一组 fixture 分别跑检查器与 `goals/AC-319-*.md` 的 criterion（经 `bash`），二者 pass/fail/not-evaluated 结论逐一相同
+- [x] 逐 job 枚举（python+yaml，打印前 3 条命中）：在 7 个被迁移 job 中，凡 steps 的 `run:` 调用 `node`/`npm`/`npx` 的，都有一步 `uses: actions/setup-node@…`；缺者数 = 0（⛔ 不按全文件 grep 计数——计数不能证明每个 job 都有）
+- [x] `quay goal gate AC-319 --dry-run` exit 0
 
 ## DoD
 

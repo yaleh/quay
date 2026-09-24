@@ -78,7 +78,11 @@ jobs:
   # The environment is naturally isolated: a GitHub-hosted runner starts empty, so the marketplace
   # cache, the Claude Code config and the scratch project below are all fresh per run.
   verify-plugin-channel:
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319): the metered
+    # ubuntu-latest gate refused to START this job on 2026-09-24, which is why the v0.12.0 release
+    # run was not executable. node/npm/npx below come from the actions/setup-node step (tokyo-alpha's
+    # image node is v10 with no npm, so nothing here may rely on the image).
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -268,7 +272,10 @@ jobs:
   # is never created for a tag whose channel does not install, initialise and serve.
   create-github-release:
     needs: [verify-plugin-channel]
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319). ⛔ NO actions/setup-node
+    # step belongs here: this job has NO checkout and invokes NO node/npm/npx — every operation goes
+    # through the `gh` REST API, which the runner image already provides.
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 10
     permissions:
       contents: write
@@ -393,7 +400,9 @@ jobs:
     # created is not a release anyone can see (see the header note). Omitting it would let master
     # advance onto a release that exists only in `.quay/ci-runs.jsonl`.
     needs: [verify-plugin-channel, create-github-release]
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319). ⛔ NO actions/setup-node
+    # step belongs here: this job is a git checkout + `git push` — it invokes NO node/npm/npx.
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 5
     permissions:
       contents: write

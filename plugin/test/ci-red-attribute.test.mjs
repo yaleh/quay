@@ -538,3 +538,80 @@ test("仓库自带的 known-flakes.json 可读且每条登记完整（防登记�
     assert.ok(f.evidence.length > 40, `evidence 必须指向可复现读数: ${f.test}`);
   }
 });
+
+// ── 「从未起跑」不得被报成「超时」────────────────────────────────────────────────────────────────
+// tasks/gap-ci-collector-job-not-started-misattributed-as-timeout（2026-09-24 实测 run 35966264609）。
+//
+// 真实语料逐字：`version-consistency` job 的 jobs API 读数 `runner_name=""`、`steps=[]`、
+// `started_at == created_at == 06:48:06`、`completed_at == 06:50:18`（⇒ 132s），而 `timeout-minutes: 2`。
+// 旧判据 `dur >= to*60` 因此产出 `infra:job-timeout-reached` —— 但那个 job **从未拿到 runner**，
+// 132s 是排队到被拒的时长（check-run annotation 逐字：*"The job was not started because recent account
+// payments have failed…"*）。`timeout-minutes` 只计执行时间，它根本没撞到自己的超时。
+// 形态 = 硬规则 4b：由间接形态推出的量（耗时）冒充了直接量（有没有 runner）。
+
+/** 真实 run 35966264609 的 `version-consistency` job 读数（字段逐字取自 jobs API）。 */
+const NEVER_STARTED_JOB = {
+  name: "version-consistency",
+  conclusion: "failure",
+  runnerName: "",
+  steps: [],
+  durationSec: 132, // 06:48:06 → 06:50:18：排队到被拒的时长，不是执行时长
+  timeoutMinutes: 2,
+};
+
+test("AC1 — 从未拿到 runner 的 job ⇒ infra:job-not-started，且【不】产出同 job 的 job-timeout-reached", () => {
+  const res = attributeRun({ conclusion: "failure", jobs: [NEVER_STARTED_JOB] }, { knownFlakes: null });
+  console.log(`    attribution=${res.attribution} signals=${JSON.stringify(res.signals)}`);
+  assert.ok(res.signals.includes("infra:job-not-started:version-consistency"), JSON.stringify(res.signals));
+  assert.ok(
+    !res.signals.some((s) => s.includes("infra:job-timeout-reached:version-consistency")),
+    `⛔ 互斥被破坏（同一个 job 既报 not-started 又报 timeout）: ${JSON.stringify(res.signals)}`,
+  );
+  assert.equal(res.attribution, "infrastructure");
+});
+
+test("AC2 — 负控制（同一 fixture 只翻转 runner_name 与 steps）⇒ 真超时仍产出 job-timeout-reached", () => {
+  // 单变量对照：除 `runnerName` / `steps` 外逐字不变（dur=132、timeoutMinutes=2 都没动）。
+  // ⚠️ steps 刻意**非空但无失败步**：若放一个失败的 `Run tests`，`jobFailureIsSubstantive` 会把 infra
+  // 信号整体压制（那是另一条判据，见上面两条回归），差异就不再只来自 runnerName 了。
+  const timedOutJob = {
+    ...NEVER_STARTED_JOB,
+    runnerName: "tokyo-alpha-1",
+    steps: [{ name: "Set up job", conclusion: "success" }],
+  };
+  const res = attributeRun({ conclusion: "failure", jobs: [timedOutJob] }, { knownFlakes: null });
+  console.log(`    attribution=${res.attribution} signals=${JSON.stringify(res.signals)}`);
+  assert.ok(res.signals.includes("infra:job-timeout-reached:version-consistency"), JSON.stringify(res.signals));
+  assert.ok(
+    !res.signals.some((s) => s.includes("infra:job-not-started:")),
+    `⛔ 真超时被判成「从未起跑」: ${JSON.stringify(res.signals)}`,
+  );
+});
+
+test("AC3 — 缺 runner_name 键（≠ 空串）⇒ 判不出 not-started（硬规则 6：缺 ≠ 空）", () => {
+  const { runnerName: _dropped, ...withoutKey } = NEVER_STARTED_JOB;
+  assert.equal("runnerName" in withoutKey, false, "夹具本身必须真的没有这个键");
+  const res = attributeRun({ conclusion: "failure", jobs: [withoutKey] }, { knownFlakes: null });
+  console.log(`    attribution=${res.attribution} signals=${JSON.stringify(res.signals)}`);
+  assert.ok(!res.signals.some((s) => s.includes("infra:job-not-started:")), JSON.stringify(res.signals));
+  // 诚实的方向：判不出 not-started 就落回**旧**行为（这条 132s / timeout 2 仍报 timeout）。
+  // 断言它，是为了证明上面那条「不产出 timeout」不是恒真的回声。
+  assert.ok(res.signals.includes("infra:job-timeout-reached:version-consistency"), JSON.stringify(res.signals));
+});
+
+test("AC3 配套 — 判据的【两个】条件都必须成立（steps 空数组 / runnerName 空串，缺一不报）", () => {
+  const emptyStepsOnly = { ...NEVER_STARTED_JOB, runnerName: "tokyo-alpha-1" }; // steps 仍为 []
+  const noStepsOnly = { ...NEVER_STARTED_JOB, steps: [{ name: "Set up job", conclusion: "success" }] };
+  for (const [label, job] of [["runnerName 非空", emptyStepsOnly], ["steps 非空", noStepsOnly]]) {
+    const res = attributeRun({ conclusion: "failure", jobs: [job] }, { knownFlakes: null });
+    assert.ok(
+      !res.signals.some((s) => s.includes("infra:job-not-started:")),
+      `${label} ⇒ 不得报 not-started: ${JSON.stringify(res.signals)}`,
+    );
+  }
+  // steps 键**缺失**（≠ 空数组）：分不出「没有步」与「没读到步」⇒ 同样不报（硬规则 3b）。
+  const noStepsKey = { ...NEVER_STARTED_JOB };
+  delete noStepsKey.steps;
+  const res = attributeRun({ conclusion: "failure", jobs: [noStepsKey] }, { knownFlakes: null });
+  assert.ok(!res.signals.some((s) => s.includes("infra:job-not-started:")), JSON.stringify(res.signals));
+});

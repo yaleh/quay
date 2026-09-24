@@ -1,0 +1,1 @@
+../../../plugin/scripts/workflow-runner-self-hosted-check.ts

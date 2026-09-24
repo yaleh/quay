@@ -948,6 +948,7 @@
   "plugin/test/workflow-journal.test.mjs": 2908,
   "plugin/test/workflow-metadata-conformance.test.mjs": 1454,
   "plugin/test/workflow-replay.test.mjs": 367,
+  "plugin/test/workflow-runner-self-hosted-check.test.mjs": 1570,
   "plugin/test/workflows-dual-copy-drift-check.test.mjs": 2750,
   "plugin/test/worktree-namespace-literal-check.test.mjs": 567,
   "plugin/test/worktree-process-reaper.test.mjs": 9135,

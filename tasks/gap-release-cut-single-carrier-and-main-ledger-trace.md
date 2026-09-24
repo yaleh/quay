@@ -25,11 +25,11 @@ goal_ac: AC-320
 
 ## AC
 
-- [ ] `bash plugin/scripts/release-cut.sh 9.9.9 --dry-run` 在主检出下 exit 0，输出按序列出全部步骤（含 worktree 路径、`--root`、trace 绝对路径、bump 与 ratchet 重锚）且 `git status --porcelain` 前后一致（dry-run 不写）
-- [ ] 测试（/tmp 仓库 + linked worktree fixture）：从 linked worktree 调 `release-branch-finish.sh --cut` 且不传 `--trace` ⇒ 记录落在**主检出**的 `.quay/release-branch-finish.jsonl`，linked worktree 的 `.quay/` 下无该文件
-- [ ] 测试：独立 clone 里调用 ⇒ stderr 含 `WARN: trace lands in an independent clone`，exit 码与不 WARN 时相同
-- [ ] 测试：`release-cut.sh` 在 tag 已存在 / develop 不干净 / version-consistency 失败 三种前置下各自非零退出且 `CAUSE=` 不同，且均未创建 worktree
-- [ ] `grep -c 'release-cut.sh' orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` ≥ 1
+- [x] `bash plugin/scripts/release-cut.sh 9.9.9 --dry-run` 在主检出下 exit 0，输出按序列出全部步骤（含 worktree 路径、`--root`、trace 绝对路径、bump 与 ratchet 重锚）且 `git status --porcelain` 前后一致（dry-run 不写）
+- [x] 测试（/tmp 仓库 + linked worktree fixture）：从 linked worktree 调 `release-branch-finish.sh --cut` 且不传 `--trace` ⇒ 记录落在**主检出**的 `.quay/release-branch-finish.jsonl`，linked worktree 的 `.quay/` 下无该文件
+- [x] 测试：独立 clone 里调用 ⇒ stderr 含 `WARN: trace lands in an independent clone`，exit 码与不 WARN 时相同
+- [x] 测试：`release-cut.sh` 在 tag 已存在 / develop 不干净 / version-consistency 失败 三种前置下各自非零退出且 `CAUSE=` 不同，且均未创建 worktree
+- [x] `grep -c 'release-cut.sh' orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` ≥ 1
 
 ## DoD
 
