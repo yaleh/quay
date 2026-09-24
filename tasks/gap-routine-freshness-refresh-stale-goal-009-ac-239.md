@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-239
 title: "freshness-refresh: Newest AC-239 evidence shares the same run and
   build_sha (fa1cae20, ts 2026-09-19T11:06:09Z) as AC-238, d=194 of K=200;
   margin/K=0.03 is far under the upgrade-fa"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
