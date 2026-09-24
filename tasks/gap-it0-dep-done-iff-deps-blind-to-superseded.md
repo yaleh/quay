@@ -2,7 +2,7 @@
 id: gap-it0-dep-done-iff-deps-blind-to-superseded
 title: it0-split-or-commit-check 的 DEP-DONE-IFF-DEPS：E6
   判定的「不阻塞任何未来动作」已被实测证伪——单条陈旧退役边使全店静态层 fail-closed，阻塞每个提交与 release
-status: ready
+status: done
 labels:
   - gap
   - defect
