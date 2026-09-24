@@ -2642,6 +2642,12 @@ export const GOAL_KEYS = [
   // the empty state: the two `<strong>` variants, then the source-of-truth sentence and the
   // corrected-pointer note (each with its own `{code}` hole — ⛔ not concatenated at the call site)
   "emptyFiltered", "emptyDir", "emptyExplain", "emptyPointerNote",
+  // gap-webui-goal-list-title-search-and-ac-rollup-sort: the `?q=` search affordance (placeholder +
+  // button) and the no-match empty state (its `{q}` sentence + the link that clears the search).
+  // ⚠️ FOUR rows, and the no-match one is separate from `emptyFiltered`/`emptyDir` on purpose: "the
+  // store is empty" and "your search matched nothing" are different facts, and a page that showed
+  // either sentence for the other state would send the reader to the wrong place (硬规则 3b).
+  "searchPlaceholder", "searchButton", "searchNoMatch", "searchClear",
   // the detail page: the three meta-prefixes, the criteria section heading, its empty note, and the
   // `挂靠任务: ` prefix (a DIFFERENT rendered string from the `<th>` above — same words, own colon)
   "detailRecentProgress", "detailFirstEvidence", "detailRecentVerdict", "detailAttachedTasks",
@@ -2724,6 +2730,20 @@ export const GOAL_LABELS: Record<GoalKey, { en: string; zh: string }> = {
     en: "(This used to point at {code}, which was downgraded to an archive by G3 and is no longer the source of truth — the pointer has been fixed.)",
     zh: "（此处原先指向 {code}，该文件已随 G3 降级为归档，不再是正本——指针已修正。）",
   },
+
+  // The `?q=` affordance. ⚠️ The placeholder names BOTH searched fields rather than saying
+  // "search…": the Goals tab matches id + title and the Criteria tab adds the owning goal id, so a
+  // reader who cannot see WHAT is searched has no way to predict a miss (the /tasks placeholder
+  // "Search titles and descriptions…" is the same kind of statement about its own fields).
+  searchPlaceholder: { en: "Search ids and titles…", zh: "搜索 id 与标题…" },
+  searchButton: { en: "Search", zh: "搜索" },
+  // ⚠️ The zh sentence is NOT a back-translation of the en one: it is written the way the page's
+  // other zh copy states a count of records (「没有…的记录」, the `draftOwnBanner` 「{n} 条 …」 family),
+  // and the quotes around `{q}` are the full-width pair the zh column uses elsewhere.
+  // ⛔ `{q}` is the reader's OWN input and is HTML-escaped by the caller before it enters the hole —
+  // the dictionary stays copy-only (the ROW 20 `{code}` precedent).
+  searchNoMatch: { en: "No matches for “{q}”", zh: "没有匹配 “{q}” 的记录" },
+  searchClear: { en: "clear the search", zh: "清除搜索" },
 
   // The trailing `: ` is INSIDE each row (absent before the value in neither column — the two
   // columns are peers, and the zh baseline has a space after its colon too).

@@ -69,12 +69,19 @@ function goalIdLink(id: unknown): string {
 
 // ── M2/M4 list-page helpers (filter/sort/time/rollup), all in-memory over the ONE unfiltered read ──
 
-/** Build a /goal query string, preserving status/kind/goal filters and adding sort/dir. */
-function goalListHref(opts: { status?: string | null; kind?: string | null; goal?: string | null; sort?: string | null; dir?: string | null }): string {
+/** Build a /goal query string, preserving status/kind/goal filters, the `q` search, and sort/dir.
+ *
+ *  ⚠️ `q` is a FIRST-CLASS view parameter, not a one-shot form field: every link that means "the same
+ *  view, seen from another angle" (a status filter, a column-header sort toggle, a tab switch, a
+ *  draft-banner jump) must carry it, or clicking sort silently throws the reader's search away. That
+ *  is why it rides in THIS builder rather than being appended at one or two call sites — a call site
+ *  that forgets it is invisible (the href still renders, still works, just for a different query set). */
+function goalListHref(opts: { status?: string | null; kind?: string | null; goal?: string | null; q?: string | null; sort?: string | null; dir?: string | null }): string {
   const params = new URLSearchParams();
   if (opts.status) params.set("status", opts.status);
   if (opts.kind) params.set("kind", opts.kind);
   if (opts.goal) params.set("goal", opts.goal);
+  if (opts.q) params.set("q", opts.q);
   if (opts.sort) params.set("sort", opts.sort);
   if (opts.dir) params.set("dir", opts.dir);
   const qs = params.toString();
@@ -150,6 +157,64 @@ function sortGoalRows(rows: Record<string, unknown>[], sort: string | null, dir:
     return asc ? cmp : -cmp;
   });
 }
+
+/** `?sort=acRollup` — the 「AC 达成」 column is a RENDER-TIME rollup, so it cannot be a `goalSortKey`
+ *  string (the column carries no record field; see `makeAcRollup`). The ordering therefore takes the
+ *  same accessor the column renders through — one口径, two callers.
+ *
+ *  ⛔ `total === 0` (0/0, i.e. the goal has no in-domain AC at all) is NOT 0%: it is the
+ *  cannot-evaluate state, and it must not be ranked as if it were the lowest ratio (硬规则 3 — a
+ *  value table with no "not evaluated" entry cannot tell "measured 0" from "nothing to measure").
+ *  Those rows sink to the bottom in BOTH directions; among themselves they fall back to id asc so the
+ *  order is total and repeatable rather than dependent on the pre-sort array order.
+ *
+ *  Ratio compared by CROSS-MULTIPLICATION (`a.achieved*b.total` vs `b.achieved*a.total`) rather than
+ *  by float division: 1/3 vs 2/6 are the same ratio, and a float comparison would make their order
+ *  depend on rounding. Tie ⇒ id asc (direction-independent, so `dir` only ever reverses the ratios,
+ *  never shuffles the ties). */
+function sortGoalsByAcRollup(
+  rows: Record<string, unknown>[],
+  rollupFor: (gid: string) => { achieved: number; total: number },
+  dir: string | null,
+): Record<string, unknown>[] {
+  const asc = dir !== "desc";
+  return [...rows].sort((a, b) => {
+    const ra = rollupFor(String(a.id ?? ""));
+    const rb = rollupFor(String(b.id ?? ""));
+    const aNone = ra.total === 0;
+    const bNone = rb.total === 0;
+    if (aNone || bNone) {
+      if (aNone && bNone) return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+      return aNone ? 1 : -1;
+    }
+    const cross = ra.achieved * rb.total - rb.achieved * ra.total;
+    if (cross !== 0) return asc ? cross : -cross;
+    return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+  });
+}
+
+/** `?q=` — case-insensitive substring search over the fields a reader can SEE for the active tab:
+ *  the id and the title (Goals tab), plus the owning goal id (Criteria tab — an AC is found by the
+ *  goal it belongs to as often as by its own name).
+ *
+ *  ⚠️ One `includes` per FIELD, never one over the fields CONCATENATED. The /tasks precedent joins
+ *  `title + " " + body` into a single haystack, which is right there (it wants body prose too) but
+ *  wrong here: with several short structured fields, a joined haystack matches a needle that SPANS
+ *  the boundary (`GOAL-001 plugin` would hit `GOAL-001` + `plugin surface`), i.e. a row that
+ *  contains neither field as asked. */
+function goalMatchesQuery(rec: Record<string, unknown>, tab: "goal" | "criterion", qLower: string): boolean {
+  return SEARCHED_FIELDS[tab].some((key) => String(rec[key] ?? "").toLowerCase().includes(qLower));
+}
+
+/** The per-tab searched fields — a table rather than a call-site list, so the RENDERED columns and
+ *  the SEARCHED fields are read from one place: the Goals tab shows id/status/title, the Criteria tab
+ *  adds the owning `goal`. (Deliberately NOT a search over every record field: `criterion`,
+ *  `origin` and `body` are prose that the list does not show, and matching text the reader cannot see
+ *  produces a row that looks like a false positive.) */
+const SEARCHED_FIELDS: Record<"goal" | "criterion", string[]> = {
+  goal: ["id", "title"],
+  criterion: ["id", "title", "goal"],
+};
 
 // gap-webui-goal-list-tab-split-goal-ac: the merged view is gone — GOAL and AC are two different
 // objects that no longer share one table, so their default orders split too. The Goals tab's
@@ -351,6 +416,26 @@ async function readGoalTasks(workspaceRoot: string, client: ProviderClient): Pro
   }
 }
 
+/** The 「AC 达成」 rollup 口径, as a factory over the UNFILTERED record array: `acs = goal==gid AND
+ *  isAcRollupCounted(status)`, `achieved = acs where status=="achieved"` (renderGoalCard's own
+ *  formula) — so a goal with 0 in-domain criteria shows 0/0, never a hard-rule-6 "—".
+ *  gap-dashboard-goal-card-ac-denominator-includes-superseded-retired: the denominator drops the
+ *  已退场 terminal states (`superseded`/`retired`) through the SAME `isAcRollupCounted` predicate the
+ *  dashboard goal card uses — this column is the same 「AC 达成」 number for the same goal, so fixing
+ *  only the card would leave this surface reporting 「6/10」 for GOAL-020 beside a card saying 「6/7」.
+ *
+ *  ⛔ ONE definition, TWO callers: the Goals-tab COLUMN and the `?sort=acRollup` ORDERING. A second,
+ *  copy-pasted ratio in the sort is exactly how the column and the ordering would come to disagree
+ *  about the same row (the 硬规则 5b cluster: the sibling of a changed rule is usually in the same
+ *  file), and it is the reason `?sort=acRollup` takes this accessor instead of re-deriving it. */
+function makeAcRollup(all: Record<string, unknown>[]): (gid: string) => { achieved: number; total: number } {
+  return (gid: string) => {
+    const acs = all.filter((r) => String(r.goal ?? "") === gid && isAcRollupCounted(r.status));
+    const achieved = acs.filter((r) => r.status === "achieved").length;
+    return { achieved, total: acs.length };
+  };
+}
+
 /** Goals-tab table (6 cols): id / status / title / AC 达成 / last progress (carrying first evidence) /
  *  挂靠任务. The "AC 达成" and "挂靠任务" cells link to `/goal?kind=criterion&goal=<id>` (proposal 4:
  *  "先看 GOAL 概览、点进去看它的 AC 明细" without leaving the list page).
@@ -364,19 +449,8 @@ function renderGoalsTable(
   taskRead: GoalTaskRead,
   th: (col: string, label: string) => string,
   L: Record<GoalKey, string>,
+  rollupFor: (gid: string) => { achieved: number; total: number },
 ): string {
-  // AC rollup over the UNFILTERED array (renderGoalCard's own formula: acs = goal==gid, achieved =
-  // status=="achieved") — so a goal with 0 criteria shows 0/0, never a hard-rule-6 "—".
-  // gap-dashboard-goal-card-ac-denominator-includes-superseded-retired: the denominator drops the
-  // 已退场 terminal states (`superseded`/`retired`) through the SAME `isAcRollupCounted` predicate the
-  // dashboard goal card uses — this column is the same 「AC 达成」 number for the same goal, so fixing
-  // only the card would leave this surface reporting 「6/10」 for GOAL-020 beside a card saying 「6/7」.
-  // ⛔ one predicate, two callers — never a second, looser copy of the rule.
-  const rollupFor = (gid: string): { achieved: number; total: number } => {
-    const acs = all.filter((r) => String(r.goal ?? "") === gid && isAcRollupCounted(r.status));
-    const achieved = acs.filter((r) => r.status === "achieved").length;
-    return { achieved, total: acs.length };
-  };
   // AC ids of ONE goal (the task-attach口径: a task hangs on an AC, never directly on the goal —
   // the same `goal == gid && id != gid` filter the detail page's criteria block uses).
   const criteriaIdsFor = (gid: string): string[] =>
@@ -399,8 +473,14 @@ function renderGoalsTable(
   // `goalTableStyles()` above). The header row carries the same 6 columns in the same order as the
   // body cells above — ⛔ and there is no `first evidence` `<th>`: the merged cell would then sit
   // under a header that names only half of what it shows.
+  //
+  // ⚠️ The 「AC 达成」 header is now a SORT LINK like the other sortable columns (`th("acRollup", …)`,
+  // NOT the plain `<th>` it used to be). It has to be, because `?sort=acRollup` has no other entry
+  // point on the page: a sortable key that no affordance points at is a feature the reader cannot
+  // reach, and the column it orders is the one column whose ordering the whole task exists to add.
+  // The label still comes from the dictionary (`L.colAcRollup`), so the zh header bytes are unmoved.
   return html`<table class="goal-table">
-    <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}<th>${L.colAcRollup}</th>${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
+    <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}${th("acRollup", L.colAcRollup)}${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
     ${body}
   </table>`;
 }
@@ -477,6 +557,9 @@ export async function handleGoalList(
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
   const goalFilter = url.searchParams.get("goal");
+  // `|| null` (the /tasks shape): an EMPTY `?q=` is "no search", not "search for the empty string"
+  // (which would match every row and read as a filter that does nothing).
+  const qFilter = url.searchParams.get("q") || null;
   const sortParam = url.searchParams.get("sort");
   const dirParam = url.searchParams.get("dir");
 
@@ -512,20 +595,35 @@ export async function handleGoalList(
   let rows = all.filter((g) => String(g.kind ?? "") === tab);
   if (statusFilter) rows = rows.filter((g) => g.status === statusFilter);
   if (goalFilter) rows = rows.filter((g) => String(g.goal) === goalFilter);
+  // `?q=` (proposal a): AND with every filter above — a search narrows the current view, it does not
+  // replace it. Case-insensitive substring, over the fields listed in SEARCHED_FIELDS for this tab.
+  if (qFilter) {
+    const qLower = qFilter.toLowerCase();
+    rows = rows.filter((g) => goalMatchesQuery(g, tab, qLower));
+  }
+
+  // The rollup accessor is built ONCE per request and handed to BOTH consumers — the Goals-tab column
+  // and the `?sort=acRollup` ordering below (`makeAcRollup` is the single口径).
+  const rollupFor = makeAcRollup(all);
 
   // M2: sort in the handler. ?sort is whitelisted; absent → the tab's own default order.
-  rows = sortParam
-    ? sortGoalRows(rows, sortParam, dirParam)
-    : tab === "goal" ? defaultSortGoalRows(rows) : defaultSortCriteriaRows(rows);
+  // ⚠️ `acRollup` is dispatched BEFORE `sortGoalRows` because it is not a record FIELD: `goalSortKey`
+  // returns "" for it (fail-closed, by design), so leaving it to that path would sort every row equal
+  // and present the default order as if the reader's sort had applied.
+  rows = sortParam === "acRollup"
+    ? sortGoalsByAcRollup(rows, rollupFor, dirParam)
+    : sortParam
+      ? sortGoalRows(rows, sortParam, dirParam)
+      : tab === "goal" ? defaultSortGoalRows(rows) : defaultSortCriteriaRows(rows);
 
   const statusNav = [
-    !statusFilter ? html`<strong>All</strong>` : html`<a href="${goalListHref({ kind: kindFilter, goal: goalFilter })}">All</a>`,
+    !statusFilter ? html`<strong>All</strong>` : html`<a href="${goalListHref({ kind: kindFilter, goal: goalFilter, q: qFilter })}">All</a>`,
     // draft 排在最前：它是唯一需要人动作的态（此前该筛选项缺失 ⇒ ?status=draft 有记录
     // 但页面上没有任何入口能到达它）。
     ...["draft", "active", "achieved", "superseded", "retired"].map((s) =>
       s === statusFilter
         ? html`<strong>${s}</strong>`
-        : html`<a href="${goalListHref({ status: s, kind: kindFilter, goal: goalFilter })}">${s}</a>`
+        : html`<a href="${goalListHref({ status: s, kind: kindFilter, goal: goalFilter, q: qFilter })}">${s}</a>`
     ),
   ].join(" · ");
   // Tab nav (proposal 1): two pure server-rendered links (no client JS), reusing the kindNav styling
@@ -539,15 +637,18 @@ export async function handleGoalList(
   // bilingual.
   const tabNav = html`${tab === "goal"
     ? `<strong>${pageNameFor("Goals", lang)}</strong>`
-    : `<a href="${goalListHref({ status: statusFilter, goal: goalFilter })}">${pageNameFor("Goals", lang)}</a>`} · ${tab === "criterion"
+    : `<a href="${goalListHref({ status: statusFilter, goal: goalFilter, q: qFilter })}">${pageNameFor("Goals", lang)}</a>`} · ${tab === "criterion"
       ? `<strong>Criteria</strong>`
-      : `<a href="${goalListHref({ kind: "criterion", status: statusFilter, goal: goalFilter })}">Criteria</a>`}`;
-  // Sortable column headers (M2): each is a link that toggles asc↔desc, preserving all filters.
+      : `<a href="${goalListHref({ kind: "criterion", status: statusFilter, goal: goalFilter, q: qFilter })}">Criteria</a>`}`;
+  // Sortable column headers (M2): each is a link that toggles asc↔desc, preserving all filters AND
+  // the search. ⚠️ `q` rides in every one of them (proposal a): sorting is the OTHER half of "find a
+  // goal" — a reader who searches and then sorts must not lose the search to the click, which is
+  // exactly what an href that carried only status/kind/goal would do.
   const th = (col: string, label: string): string => {
     const active = sortParam === col;
     const nextDir = active && dirParam !== "desc" ? "desc" : "asc";
     const arrow = active ? (dirParam === "desc" ? " ↓" : " ↑") : "";
-    return html`<th><a href="${goalListHref({ status: statusFilter, kind: kindFilter, goal: goalFilter, sort: col, dir: nextDir })}">${label}${arrow}</a></th>`;
+    return html`<th><a href="${goalListHref({ status: statusFilter, kind: kindFilter, goal: goalFilter, q: qFilter, sort: col, dir: nextDir })}">${label}${arrow}</a></th>`;
   };
 
   // Draft banner (proposal 4 / AC5): the current tab's own drafts + a cross-tab hint when the OTHER
@@ -557,10 +658,10 @@ export async function handleGoalList(
   const ownLabel = tab === "goal" ? "GOAL" : "AC";
   const otherLabel = tab === "goal" ? "AC" : "GOAL";
   const otherHref = tab === "goal"
-    ? goalListHref({ kind: "criterion", status: "draft" })
-    : goalListHref({ status: "draft" });
+    ? goalListHref({ kind: "criterion", status: "draft", q: qFilter })
+    : goalListHref({ status: "draft", q: qFilter });
   const otherTabLabel = tab === "goal" ? "Criteria" : "Goals";
-  const ownDraftHref = goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter });
+  const ownDraftHref = goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter, q: qFilter });
 
   // gap-webui-goal-list-prune-low-signal-columns (proposal e): when BOTH kinds are pending, the
   // banner collapses to ONE line — `N GOAL · M AC awaiting a decision` + the two jump links. The
@@ -580,6 +681,44 @@ export async function handleGoalList(
     ? html`<p><strong>${fillLabel(L.draftBothBanner, { n: ownDraft, kind: ownLabel, m: otherDraft, kind2: otherLabel })}</strong> <a href="${ownDraftHref}">${L.viewDrafts}</a> · <a href="${otherHref}">${fillLabel(L.draftOtherLink, { tab: otherTabLabel })}</a></p>`
     : html`${ownDraft > 0 ? html`<p><strong>${fillLabel(L.draftOwnBanner, { n: ownDraft, kind: ownLabel })}</strong>${fillLabel(L.draftExplain, { cmd: `<code>goal-store.ts write &lt;id&gt; --status active</code>` })}<a href="${ownDraftHref}">${L.viewDrafts}</a></p>` : ""}
 ${otherDraft > 0 ? html`<p><strong>${fillLabel(L.draftOtherBanner, { n: otherDraft, kind: otherLabel })}</strong> → <a href="${otherHref}">${fillLabel(L.draftOtherLink, { tab: otherTabLabel })}</a></p>` : ""}`;
+
+  // ── `?q=` search form (proposal a) ──────────────────────────────────────────────────────────
+  // The /tasks form structure, reused: a GET form (bookmarkable URL, no client JS), the ACTIVE view
+  // parameters as hidden fields so submitting the search does not silently drop them, and the search
+  // affordance itself carrying the current value so the box shows what is filtering the page.
+  //
+  // ⚠️ Each hidden field is emitted only when its filter is ACTIVE (`/tasks`' own rule) — an inert
+  // `sort=""` field would round-trip a key whose absence and empty value mean different things
+  // (硬规则 3b). `kind` is what keeps the reader on the Criteria tab: without it, searching from
+  // `?kind=criterion` would submit to the plain Goals tab and search the wrong record kind.
+  const searchForm = html`<form method="GET" action="/goal" style="margin:0.5rem 0 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+    ${kindFilter ? html`<input type="hidden" name="kind" value="${escapeHtml(kindFilter)}">` : ""}
+    ${statusFilter ? html`<input type="hidden" name="status" value="${escapeHtml(statusFilter)}">` : ""}
+    ${goalFilter ? html`<input type="hidden" name="goal" value="${escapeHtml(goalFilter)}">` : ""}
+    ${sortParam ? html`<input type="hidden" name="sort" value="${escapeHtml(sortParam)}">` : ""}
+    ${dirParam ? html`<input type="hidden" name="dir" value="${escapeHtml(dirParam)}">` : ""}
+    <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="${escapeHtml(L.searchPlaceholder)}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:180px">
+    <button type="submit" style="padding:0.4rem 0.8rem">${L.searchButton}</button>
+  </form>`;
+
+  // ── the empty state: THREE distinct states, never one blank (硬规则 3b) ──────────────────────
+  //  ① the read FAILED → nothing here (the error banner above already said so; a second "empty"
+  //     claim would assert a fact about a store that was never read — the live-page discipline);
+  //  ② a SEARCH is active and matched nothing → the no-match state. ⛔ It does NOT carry
+  //     `emptyExplain`/`emptyPointerNote`: those sentences claim `goals/` is empty, which is FALSE
+  //     here (the store has records — the needle missed), and a reader told "the directory is empty"
+  //     while looking at a search box holding their query would go debug the wrong thing.
+  //  ③ no search → the pre-existing filtered/dir branch, byte-for-byte unchanged.
+  const emptyBlock = readError
+    ? ""
+    : qFilter
+      ? html`<div class="info-banner" role="status">
+          <p><strong>${fillLabel(L.searchNoMatch, { q: escapeHtml(qFilter) })}</strong> <a href="${goalListHref({ status: statusFilter, kind: kindFilter, goal: goalFilter, sort: sortParam, dir: dirParam })}">${L.searchClear}</a></p>
+        </div>`
+      : html`<div class="info-banner" role="status">
+          <p><strong>${statusFilter || goalFilter ? L.emptyFiltered : L.emptyDir}</strong>${fillLabel(L.emptyExplain, { code: "<code>goals/</code>" })}</p>
+          <p class="meta">${fillLabel(L.emptyPointerNote, { code: "<code>orchestration/manager-phase-goal.md</code>" })}</p>
+        </div>`;
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   // AC-301: this page's chrome sites take the per-request language resolved by AC-288 (`lang`, read
@@ -636,15 +775,11 @@ ${otherDraft > 0 ? html`<p><strong>${fillLabel(L.draftOtherBanner, { n: otherDra
         : ""}
       <p class="meta">Tab: ${tabNav}</p>
       <p class="meta">Status: ${statusNav}</p>
+      ${searchForm}
       ${rows.length === 0
-        ? (readError
-            ? "" /* 读失败：上方 error-banner 已传达，空态不得再叠加误导性的「目录为空」（live 空态同纪律） */
-            : html`<div class="info-banner" role="status">
-                <p><strong>${statusFilter || goalFilter ? L.emptyFiltered : L.emptyDir}</strong>${fillLabel(L.emptyExplain, { code: "<code>goals/</code>" })}</p>
-                <p class="meta">${fillLabel(L.emptyPointerNote, { code: "<code>orchestration/manager-phase-goal.md</code>" })}</p>
-              </div>`)
+        ? emptyBlock
         : tableWrap(tab === "goal"
-          ? renderGoalsTable(rows, all, taskRead, th, L)
+          ? renderGoalsTable(rows, all, taskRead, th, L, rollupFor)
           : renderCriteriaTable(rows, taskRead, th, L))}
     </main></body></html>`);
 }
