@@ -45,7 +45,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -532,6 +532,151 @@ test("--cut preconditions fail closed: missing --tag / existing tag / HEAD not b
     assert.equal(git(w.root, "rev-parse", "release/v0.1.1").stdout.trim(), branchBefore, "no refusal may move the branch");
     assert.deepEqual(releaseBranches(w.root), ["release/v0.1.1"]);
   } finally {
+    cleanup(w.root);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// (f) WHERE THE RECORD LANDS — property 5, AC-320
+// (gap-release-cut-single-carrier-and-main-ledger-trace).
+//
+// A linked worktree and its main checkout SHARE one `.git`. The finish record must land with the
+// OWNER of that git dir, or "THE FINISH LEAVES A RECORD" is true of a file nobody reads.
+// Measured cost 2026-09-24: the v0.12.0 cut ran from an INDEPENDENT CLONE (because `--cut` needs
+// HEAD == base and the main checkout sits on `author`), so its record landed in the clone's
+// `.quay/` and the main checkout's ledger末行 stayed at 2026-09-20 — invisible to every reader of
+// the main ledger, which is exactly what AC-320's criterion reads.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A linked worktree of `root` with `branch` (default `develop`) checked out. */
+function makeLinkedWorktree(root, prefix, branch = "develop") {
+  const parent = mkdtempSync(join(tmpdir(), `release-branch-finish-${prefix}-`));
+  const wt = join(parent, "wt");
+  // A branch may be checked out in only ONE worktree. If the source repo already has it, detach
+  // there first — the source repo's checkout is not what is under test here, the worktree is.
+  if (git(root, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.trim() === branch) {
+    assert.equal(git(root, "checkout", "-q", "--detach").status, 0);
+  }
+  const r = git(root, "worktree", "add", "-q", wt, branch);
+  assert.equal(r.status, 0, `worktree add must succeed: ${r.stderr}`);
+  return wt;
+}
+
+/** An INDEPENDENT clone of `root` (⛔ not a linked worktree — its own git dir, its own refs). */
+function makeClone(src, prefix) {
+  const parent = mkdtempSync(join(tmpdir(), `release-branch-finish-${prefix}-`));
+  const root = join(parent, "clone");
+  const r = spawnSync("git", ["clone", "-q", src, root], { encoding: "utf8" });
+  assert.equal(r.status, 0, `clone must succeed: ${r.stderr}`);
+  git(root, "config", "user.name", "test");
+  git(root, "config", "user.email", "test@example.com");
+  return root;
+}
+
+test("from a LINKED WORKTREE the record lands in the MAIN checkout's ledger, not the worktree's", () => {
+  const w = makeRepo("wtledger");
+  let wt = "";
+  try {
+    // The release branch must exist BEFORE `develop` is checked out in the worktree (a branch can
+    // be checked out in only one worktree at a time), and it must carry a commit so `--cut` does a
+    // REAL merge + tag rather than the no-op path.
+    const tip = makeReleaseBranchWithBump(w.root, "release/v0.4.0", "bump.txt", "0.4.0\n");
+    wt = makeLinkedWorktree(w.root, "wtledger");
+
+    const r = run(["release/v0.4.0", "--cut", "--tag", "v0.4.0", "--root", wt, "--no-remote"]);
+    assert.equal(r.status, 0, `the cut must land from a linked worktree: ${r.stdout}${r.stderr}`);
+
+    const mainLedger = join(w.root, ".quay", "release-branch-finish.jsonl");
+    const wtLedger = join(wt, ".quay", "release-branch-finish.jsonl");
+    assert.equal(existsSync(mainLedger), true,
+      `the record must land in the MAIN checkout's ledger (${mainLedger}); stderr said: ${r.stderr}`);
+    assert.equal(existsSync(wtLedger), false,
+      `the linked worktree must NOT grow its own ledger (${wtLedger}) — a per-worktree ledger is the defect`);
+
+    const text = readFileSync(mainLedger, "utf8");
+    assert.match(text, /"form":"cut"/, "the --cut landing must be what the main ledger records");
+    assert.match(text, /"tag":"v0\.4\.0"/);
+    assert.match(text, new RegExp(`"sha":"${tip}"`), "the record names the branch tip it licensed");
+    assert.match(text, /"exit":0/);
+
+    // The branch really is gone and the tag really holds the merge point — the record is not the
+    // only thing that changed.
+    assert.deepEqual(releaseBranches(w.root), []);
+    assert.match(git(w.root, "tag", "--list", "v0.4.0").stdout, /v0\.4\.0/);
+
+    // ... and the ledger is READABLE from the main checkout, which is the whole point.
+    const log = run(["--log", "--root", w.root]);
+    assert.equal(log.status, 0, log.stderr);
+    assert.match(log.stdout, /form=cut/);
+    assert.match(log.stdout, /tag=v0\.4\.0/);
+  } finally {
+    if (wt) cleanup(dirname(wt));
+    cleanup(w.root);
+  }
+});
+
+test("an INDEPENDENT CLONE gets the WARN naming the path, and the exit code is unchanged by it", () => {
+  const w = makeRepo("clonewarn");
+  let clone = "";
+  try {
+    assert.equal(git(w.root, "branch", "release/v0.5.0", "develop").status, 0);
+
+    // The clone is made FIRST, while the source repo still has a real HEAD branch for `git clone`
+    // to resolve (a detached source clones to an empty checkout). It gets its own refs, so the
+    // control below can delete the source's branch without touching the clone's.
+    clone = makeClone(w.root, "clonewarn");
+    assert.equal(git(clone, "branch", "release/v0.5.0", "origin/develop").status, 0);
+    const r = run(["release/v0.5.0", "--root", clone, "--no-remote"]);
+    assert.equal(r.status, 0, `the clone's finish must still succeed: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /WARN: trace lands in an independent clone/);
+    assert.match(r.stderr, /WARN: trace lands in an independent clone[^\n]*\.quay\/release-branch-finish\.jsonl/,
+      "the WARN must name the ABSOLUTE path it is warning about (the direct quantity)");
+    assert.match(r.stderr, new RegExp(`release-branch-finish: trace=${clone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.quay/release-branch-finish\\.jsonl`));
+
+    // The record really did land in the clone — the WARN is a pointer, not a prevention.
+    assert.equal(existsSync(join(clone, ".quay", "release-branch-finish.jsonl")), true);
+    assert.equal(existsSync(join(w.root, ".quay", "release-branch-finish.jsonl")), false,
+      "the source repo must not gain a record: an independent clone's finish is invisible to it — which is why it is warned about");
+
+    // Control (no WARN): the same finish from a LINKED WORKTREE — the ledger root is a DIFFERENT
+    // directory there, so the self-rooted predicate is false. Both runs exit 0, which is the
+    // "exit code the same with and without the WARN" half: the WARN is informational only.
+    const wt = makeLinkedWorktree(w.root, "clonewarn-wt");
+    try {
+      const viaWorktree = run(["release/v0.5.0", "--root", wt, "--no-remote"]);
+      assert.equal(viaWorktree.status, 0, `linked-worktree finish must succeed: ${viaWorktree.stdout}${viaWorktree.stderr}`);
+      assert.doesNotMatch(viaWorktree.stderr, /WARN: trace lands in an independent clone/,
+        "a linked worktree shares the main checkout's ledger, so there is nothing to warn about");
+      assert.equal(existsSync(join(w.root, ".quay", "release-branch-finish.jsonl")), true,
+        "the linked-worktree finish DOES reach the source repo's ledger");
+    } finally {
+      cleanup(dirname(wt));
+    }
+  } finally {
+    if (clone) cleanup(dirname(clone));
+    cleanup(w.root);
+  }
+});
+
+test("--trace-path answers 'where does the record land?' and writes nothing", () => {
+  const w = makeRepo("tracepath");
+  let wt = "";
+  try {
+    wt = makeLinkedWorktree(w.root, "tracepath");
+    const before = git(w.root, "for-each-ref").stdout;
+    const r = run(["--trace-path", "--root", wt]);
+    assert.equal(r.status, 0, r.stderr);
+    // The worktree shares the main checkout's git dir ⇒ the same ledger, asked from either side.
+    assert.equal(r.stdout.trim(), join(realpathSync(w.root), ".quay", "release-branch-finish.jsonl"),
+      "the answer must be the MAIN checkout's ledger, asked from a linked worktree");
+    assert.equal(git(w.root, "for-each-ref").stdout, before, "--trace-path must not touch any ref");
+    assert.equal(existsSync(join(wt, ".quay")), false, "--trace-path must not create anything");
+
+    // An explicit --trace still wins over the default (the operator's own choice is not overridden).
+    const explicit = run(["--trace-path", "--trace", join(w.root, "custom.jsonl")]);
+    assert.equal(explicit.stdout.trim(), join(realpathSync(w.root), "custom.jsonl"));
+  } finally {
+    if (wt) cleanup(dirname(wt));
     cleanup(w.root);
   }
 });

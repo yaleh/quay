@@ -76,6 +76,7 @@ fi
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 version=""
 root=""
 worktree=""
@@ -156,6 +157,15 @@ if [ ! -d "$root/.git" ] && ! git -C "$root" rev-parse --git-dir >/dev/null 2>&1
 fi
 root="$(cd "$root" && pwd -P)"
 
+# ── WHICH TOOLCHAIN: the checkout THIS SCRIPT ships in, never `--root` ────────────────────────
+# In production the two are the same object (`--root` defaults to this script's own main
+# checkout). They differ only when `--root` names another tree (a fixture, or a deliberate
+# cross-checkout cut), and there the pair that ships together must be the pair that runs: a newer
+# release-cut.sh driving an older `release-branch-finish.sh` would pass flags the carrier does not
+# understand (`--trace-path`), and the failure would look like a broken carrier rather than a
+# version skew. What IS judged from `--root` is the TREE: the checker takes `--root`, so the tree
+# under test supplies its own VERSION and its own carrier files — only the table that reads them
+# comes from here.
 # ── preflight (read-only; ⛔ nothing below this block runs if any check fails) ─────────────────
 # ① the tag must not exist: re-pointing a version tag is the one thing a cut must never do.
 if git -C "$root" rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
@@ -165,9 +175,7 @@ fi
 
 # ② the tree's version carriers must agree with `VERSION` — the tag is about to name exactly this
 # tree, and `version-consistency-check.ts` is the EXTERNAL single-source judgment over it.
-# ⛔ Resolution: the checker comes from `--root` itself (the tree under test), so the carrier table
-# that judges a tree is that tree's own — there is no second, drifting copy.
-checker="$root/scripts/version-consistency-check.ts"
+checker="$SCRIPT_ROOT/scripts/version-consistency-check.ts"
 if [ ! -f "$checker" ]; then
   echo "CAUSE=release-cut-version-checker-missing — '$checker' does not exist, so 'is this tree version-consistent?' cannot be asked; refusing to cut a tree this command cannot judge (hard rule 3b)" >&2
   exit 2
@@ -187,13 +195,25 @@ if [ -n "$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)" 
   exit 2
 fi
 
-# ④ `develop` must resolve, and must not be BEHIND the remote — a tag cut from a develop that the
-# remote has already moved past would ship a release missing commits that are already published.
-# ⚠️ This reads the LAST-FETCHED `origin/develop`; it never fetches (a cut must not need network).
+# ④ `develop` must resolve, must be FREE to check out, and must not be BEHIND the remote.
 if ! git -C "$root" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
   echo "CAUSE=release-cut-base-unresolvable — '--base $base' does not resolve to a commit in $root" >&2
   exit 2
 fi
+# The landing face merges INTO `$base` and therefore requires HEAD == `$base`, so the worktree this
+# command creates must have `$base` checked out — and git refuses to check out one branch in two
+# worktrees at once. So an occupied `$base` is a real precondition, not a nuisance: in this repo
+# the main checkout normally sits on `author` and this never fires.
+if git -C "$root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null; then
+  holders="$(git -C "$root" worktree list --porcelain 2>/dev/null | awk -v b="refs/heads/$base" '/^worktree /{ w=$2 } $1=="branch" && $2==b { print w }')"
+  if [ -n "$holders" ]; then
+    echo "CAUSE=release-cut-base-checked-out — '$base' is already checked out at [$(printf '%s' "$holders" | tr '\n' ' ')]; the cut must check '$base' out in its own linked worktree (the landing face merges INTO '$base' and requires HEAD == '$base'), and git allows a branch in only ONE worktree. Check another branch out there first (in this repo the main checkout normally carries 'author')" >&2
+    exit 2
+  fi
+fi
+# ... and it must not be BEHIND the remote: a tag cut from a develop the remote has already moved
+# past would ship a release missing commits that are already published. ⚠️ This reads the
+# LAST-FETCHED `origin/develop` and never fetches (a cut must not need the network).
 if [ "$base" = "develop" ] && [ "$remote" != "" ] && [ "$do_push" -eq 1 ]; then
   remote_base_ref="refs/remotes/$remote/develop"
   if ! git -C "$root" rev-parse --verify --quiet "$remote_base_ref" >/dev/null; then
@@ -216,9 +236,9 @@ if [ -z "$worktree" ]; then
   root_parent="$(dirname "$root")"
   worktree="$root_parent/$(basename "$root")-worktrees/release-$tag"
 fi
-finish_carrier="$root/plugin/scripts/release-branch-finish.sh"
+finish_carrier="$SCRIPT_ROOT/plugin/scripts/release-branch-finish.sh"
 if [ ! -f "$finish_carrier" ]; then
-  echo "CAUSE=release-cut-finish-carrier-missing — '$finish_carrier' does not exist, so the cut's landing face (merge → tag → delete) has no carrier in this tree" >&2
+  echo "CAUSE=release-cut-finish-carrier-missing — '$finish_carrier' does not exist, so the cut's landing face (merge → tag → delete) has no carrier in the checkout this command ships in" >&2
   exit 2
 fi
 # The landing root is asked of the carrier ITSELF (`--trace-path`), so this script does not carry a
@@ -239,6 +259,7 @@ if [ "$dry_run" -eq 1 ]; then
   plan_out "dry-run: preflight PASSED — nothing was created and no ref was touched"
   plan_out "  1. create linked worktree '$worktree' off '$base' in $root"
   plan_out "     (⛔ a LINKED WORKTREE off $base — not an independent clone, not a branch switch in the main checkout)"
+  plan_out "  1b. link node_modules into it (the bump stage's closure-ratchet re-anchor runs a real quay-init laydown)"
   plan_out "  2. create '$branch' at '$base'"
   plan_out "  3. bash $finish_carrier $branch --cut --tag $tag --root $worktree"
   plan_out "     → merge '$branch' back into '$base', tag $tag at the merge point, delete '$branch'"
@@ -265,6 +286,23 @@ if ! git -C "$root" worktree add "$worktree" "$base" >/dev/null 2>&1; then
   git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true
   echo "CAUSE=release-cut-worktree-create-failed — could not create the linked worktree at '$worktree' on '$base' (is '$base' checked out in another worktree?); the branch '$branch' was removed again, nothing was tagged" >&2
   exit 1
+fi
+
+# ── step 1b: PROVISION it (⛔ a bare `git worktree add` is not enough — measured) ──────────────
+# `git worktree add` places only TRACKED files, and step 5's closure-ratchet re-anchor runs a REAL
+# `quay-init --all --loop --manager` laydown, which needs esbuild/node from node_modules. Measured
+# on a bare worktree off `develop` (2026-09-24): without node_modules the laydown exits non-zero and
+# the ratchet reports NOT-EVALUATED ("unwritten: tasks goals .gitignore .claude/…", i.e. "cannot
+# re-anchor without a measurement"); with a node_modules link — and nothing else — it PASSES and
+# re-measures exactly the committed 3 files / 1022 bytes. So the gitignored carriers that
+# `scripts/worktree-include.sh` copies (.quay/config.yml, the plugin/vendor dist bundles) are NOT
+# needed for this stage, and calling it here would make the cut depend on the source checkout having
+# built artifacts it does not need. ⛔ Never `npm install` per release worktree: the main checkout's
+# installed deps are shared by symlink, exactly as plugin/scripts/dispatch-worktree-setup.sh step 1
+# does (that script is the canonical provisioner but is TASK-branch-specific by design — it refuses
+# a worktree whose branch is not `task/*`, and this one carries `$base`).
+if [ -d "$root/node_modules" ] && [ ! -e "$worktree/node_modules" ]; then
+  ln -s "$root/node_modules" "$worktree/node_modules" 2>/dev/null || true
 fi
 
 # ── step 2: the cut's landing face, in ONE invocation (merge → tag → delete) ──────────────────
@@ -308,8 +346,8 @@ fi
 # re-anchor is NOT optional: the bump changes plugin/.claude-plugin/plugin.json, which is a
 # closure-ratchet laydown source ⇒ the committed baseline goes stale and the pre-commit guard
 # rejects every later commit (measured: the v0.12.0 bump commit touched 12 files).
-stamper="$root/scripts/stamp-version.ts"
-ratchet="$root/plugin/scripts/quay-init-closure-ratchet.ts"
+stamper="$SCRIPT_ROOT/scripts/stamp-version.ts"
+ratchet="$SCRIPT_ROOT/plugin/scripts/quay-init-closure-ratchet.ts"
 if [ ! -f "$stamper" ] || [ ! -f "$ratchet" ]; then
   echo "CAUSE=release-cut-bump-tooling-missing — '$stamper' and/or '$ratchet' is missing from $root, so the next-version bump cannot be performed; the cut itself is complete (tag $tag). Bump by hand: write VERSION=$next_version, run scripts/stamp-version.ts, then re-anchor the closure ratchet, and commit on $base" >&2
   exit 1

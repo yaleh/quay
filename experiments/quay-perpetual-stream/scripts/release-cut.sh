@@ -1,0 +1,1 @@
+../../../plugin/scripts/release-cut.sh

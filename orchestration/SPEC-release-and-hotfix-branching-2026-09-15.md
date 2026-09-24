@@ -349,6 +349,19 @@ release/vX.Y.Z        ← 取代现行的 release-vXXX-build
       bash plugin/scripts/release-branch-finish.sh <branch> --cut --tag vX.Y.Z
 ```
 
+**⛔ 整条规程（本节 ① 的前置校验 + 切分支 + 上面这条 `--cut` + push + dispatch `release.yml` + §12 的下一版
+bump/重锚 + 清理）= 一条命令（2026-09-24 起，唯一正本在脚本自己）：**
+
+```
+bash plugin/scripts/release-cut.sh <X.Y.Z> [--dry-run]
+```
+
+`--help` 是该命令用法的唯一正本；`--dry-run` 打印全部步骤（含**台账落点的绝对路径**）而不写任何东西。
+本 SPEC ⛔ 不再复述那一串手工步骤（它们是 §4.1.1 / §12 的历史读数，不是操作说明）。**动机（实测）**：2026-09-24 的
+v0.12.0 切版按散文手工做了 12 步，其中两步是散文没写的 —— `release-branch-finish.sh --cut` 要求 `HEAD == base`，
+从主检出（`HEAD=author`）跑不了，于是切版搬进一个**独立 clone**，台账随之落进那个 clone 的 `.quay/`（AC-320 立案
+的直接量）；下一版 bump 又必然让 closure-ratchet 基线变脏。ADR-004：散文会被改写掉，规程要带执行面。
+
 **⚠️ 2026-09-20（§12 追加裁定）：本条**没有**「版本 bump」这一步。** 切 release 分支**不再**伴随一次
 「把 `-dev` 去掉」的提交——release 分支上的提交与 develop 上逐字相同（`X.Y.Z-dev`），发布产物的**无后缀**
 形态是 `resolveVersion(VERSION,'build')` 在**构建时**按模式解析出来的（HEAD 在 tag `vX.Y.Z` 上，或分支名是
@@ -909,6 +922,11 @@ delivery-manifest-verify             :499   (needs: [release, sea-release])
 **⇒ tag 提交不自描述（人的裁定）**：tag `vX.Y.Z` 打在**合回 develop 的合并点**上，而该点的提交内容是
 `X.Y.Z-dev`。**发布产物的版本是构建的属性，不是提交的属性**——这个不一致是**设计**。
 ⇒ 合回之后人只改 `VERSION` 一行（`X.Y.(Z+1)`）+ 跑生成器；⛔ **没有**去后缀提交，也⛔ **没有**加回后缀提交。
+
+**⇒ 人侧的动作已机械化（2026-09-24）**：上面「改 `VERSION` 一行 + 跑生成器」、以及重锚 closure-ratchet 基线
+（版本 bump 会改 `plugin/.claude-plugin/plugin.json`，那是 ratchet 的 laydown 源之一，基线必然变脏），
+连同 §4 的整条切版规程，由 **`bash plugin/scripts/release-cut.sh <X.Y.Z>`** 一条命令执行（用法正本 = 该命令的
+`--help`）。⛔ 本 SPEC 不复述那串步骤。
 
 ### 12.3 marketplace `plugins[].version`：实测删除（同日）
 

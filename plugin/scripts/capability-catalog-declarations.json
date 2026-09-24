@@ -26,6 +26,7 @@
     "NEW_SCRIPT_REGISTRATION_REQUIRED so a new-script task must declare it in Touches."
   ],
   "QUESTION": {
+    "release-cut.sh": "How does a RELEASE CUT — the whole SPEC §4/§12 sequence, not just its last three steps — happen as ONE re-runnable command instead of a remembered list? Measured 2026-09-24 (the v0.12.0 cut): ~12 hand-steps, of which two bit — release-branch-finish.sh --cut requires HEAD == base, so it could not be run from the main checkout (HEAD=author) and the cut moved into an INDEPENDENT CLONE, where the finish record landed in that clone's .quay/ (invisible to the main ledger AC-320 reads); and the next-version bump necessarily staled the closure-ratchet baseline, which the prose never mentioned. This command does the sequence in one invocation: preflight (tag free / version-consistent / clean tree / develop not behind the remote) -> a LINKED WORKTREE off develop (never a clone, never a branch switch in the main checkout) -> release-branch-finish.sh --cut --tag (merge back + tag the merge point + delete) -> push -> dispatch release.yml and echo the run URL -> next-version bump on develop + stamp-version + closure-ratchet re-anchor -> remove the worktree, each stage with its own CAUSE= and exit code, plus an --dry-run that prints every step (including the ledger's ABSOLUTE landing path) while writing nothing?",
     "workflow-runner-self-hosted-check.ts": "Is every job of every .github/workflows/*.{yml,yaml} under the tree on a SELF-HOSTED runner — each job's runs-on label list containing self-hosted, a job carrying NO runs-on at all (a reusable-workflow call, whose runner is decided in another file) or an expression runs-on (decided at run time) counted as NOT statically self-hosted, and the offending jobs NAMED in the output — so that the metered hosted-runner billing/spending-limit gate which silently refused to START 7 of this repo's 8 jobs on 2026-09-24 (runner_name='', steps=0, annotation 'The job was not started because recent account payments have failed') can never stop CI or a release unnoticed again; an absent-or-empty workflow population, an unparseable file, a file with no jobs mapping, and an unavailable YAML implementation each report NOT-EVALUATED under their OWN cause token rather than a pass (tasks/gap-metered-hosted-runner-jobs-to-self-hosted, goal AC-319)?",
     "regex-escape.ts": "What is the ONE implementation of \"escape every regex metacharacter in a string\" — the kernel leaf escapeRegExp (the 14 regex-special characters: . * + ? ^ dollar { } ( ) | [ ] backslash) that BOTH packages/quay-native/src/store.ts (product judge) and eleven plugin/scripts instruments reach, so the twelve byte-identical bodies that had accumulated under three names (escapeRe x3 / escapeRegex x2 / escapeRegExp x7) collapse to one and a heading like AC (draft) is escaped identically on both sides (routine semantic-dedup-scan finding escapere-escaperegex-escaperegexp-fndefre-stemre-escapere)?",
     "quay-init-steps.ts": "plugin/scripts/quay-init.sh 的每一个内嵌步骤，现在由 packages/quay/src/init.ts 的哪个函数实现、输入/输出契约是什么，以及去掉那 12 处内嵌 python3（8 段 heredoc + 4 个 -c 单行）之后，这条入口在【没有 python3 的机器】上是否仍能把六文件面写对？（可复核读数是 sh-census-check 里 quay-init.sh 的 embedded 集合不含 python3）",
@@ -395,6 +396,7 @@
     "verification-marginal-return.ts": "invariant:一个 checker/闸 的拦截数只有三种取值（查过且有 / 查过且零 / 未查），「没有拦截通道」绝不与「拦截数 = 0」同形（硬规则 6 + 3b）—— 并给出判据：谓词 isPureTax 必须对一个【已知有拦截】的行干跑一次返回 false"
   },
   "CADENCE": {
+    "release-cut.sh": "按需",
     "workflow-runner-self-hosted-check.ts": "每轮",
     "regex-escape.ts": "每里程碑",
     "quay-init-steps.ts": "按需",
@@ -755,6 +757,7 @@
     "repo-root-derivation-check.ts": "按需"
   },
   "INVALIDATION": {
+    "release-cut.sh": "失效前提：release 切版仍是「从 develop 切 release/vX → 合回 → 在合并点打 tag → 删分支 → push → dispatch release.yml → develop 上 bump 下一版 + closure-ratchet 重锚」这一串（SPEC §4 + §12），且 develop 仍是合回目标、VERSION 仍是唯一版本来源、release-branch-finish.sh 仍是 --cut 的落地载体；若切版改由 CI 内部完成（本命令的前提「develop 未被任何 worktree 占用 / 主检出干净 / tag 未存在」随之失效）、或下一版号规则不再是 (Y+1).0、或 closure-ratchet 基线不再随版本 bump 变脏（那一步的重锚可去掉），本条口径需同步",
     "workflow-runner-self-hosted-check.ts": "失效前提：本仓库的 CI 与发布仍由 .github/workflows/*.yml 承载，且『某个 job 跑在哪台 runner 上』仍由该 job 自身的 runs-on 静态决定（若 workflow 改由另一机制调度、或 runs-on 改为集中声明/矩阵生成而不再逐 job 可读，本条口径需同步，否则会把读不懂误判为合格）；另：若托管 runner 恢复可用且裁定不再要求 self-hosted，本条退休",
     "regex-escape.ts": "无可测前提，靠周期复核",
     "quay-init-steps.ts": "失效前提：① quay-init.sh 仍以 node --no-warnings --experimental-strip-types \"${SCRIPT_DIR}/quay-init-steps.ts\" <step> … 这一形态调用（build-plugin-dist.mjs 的 INVOCATION_RE 按这个形态把它的 dist 入口派进 bundle 集合，staged 改写把它换成同一目录下的 dist/quay-init-steps.js）；② 由此到达的 init.ts 函数仍是【逐行等价移植】而不是重写；③ 那 12 个调用点仍各自占 quay-init.sh 的一行。三点任一改变（例如 quay-init.sh 整体退役、或改成直调 vendored 的 dist/quay.js），本条的读数不再成立",
@@ -1115,6 +1118,7 @@
     "repo-root-derivation-check.ts": "失效前提：① repoRoot() 仍是 repo-root.ts 导出的唯一根解析器（bundle→consumer→plain-git 标记向上走查 + git rev-parse --show-toplevel + cwd 兜底），且 ② 判定形态仍是「本文件的脚本目录常量 + 紧邻的两级上溯」。任一改变即失效：例如根解析改为显式参数/环境变量传入、脚本目录常量不再由 path.dirname(fileURLToPath(import.meta.url)) 派生、或 plugin/scripts 不再是扫描面。"
   },
   "LAST_REAFFIRMED": {
+    "release-cut.sh": "2026-09-24",
     "workflow-runner-self-hosted-check.ts": "2026-09-24",
     "regex-escape.ts": "2026-09-21",
     "quay-init-steps.ts": "2026-09-20",
@@ -1475,6 +1479,7 @@
     "repo-root-derivation-check.ts": "2026-09-21"
   },
   "MATCHING": {
+    "release-cut.sh": "keyword",
     "workflow-runner-self-hosted-check.ts": "position",
     "regex-escape.ts": "n/a",
     "quay-init-steps.ts": "n/a",
@@ -1835,6 +1840,7 @@
     "repo-root-derivation-check.ts": "position"
   },
   "CONSUMER": {
+    "release-cut.sh": "谁按：切一次 release 的人按（bash plugin/scripts/release-cut.sh <X.Y.Z>；--dry-run 先看计划，--no-push/--no-dispatch 用于本地或测试切版），也由 SPEC §4/§12 的读者按（那两节的手工步骤散文已改为指向本命令的一行指针）；条件=要把整条切版协议作为一次可重复、每步留 CAUSE= 的动作执行、要在真仓库上切出下一个版本而不手工切换分支或另建一个 clone、或要在动手前先看一次切版会创建/推送/提交什么",
     "workflow-runner-self-hosted-check.ts": "谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object .github/workflows/ 以及本检查自身的三个文件：plugin/scripts/workflow-runner-self-hosted-check.ts、plugin/test/workflow-runner-self-hosted-check.test.mjs、plugin/scripts/checker-mutation-cases/workflow-runner-self-hosted-check.sh）；⚠️ 同一谓词在 goal 层另有一份【独立测量】—— goals/AC-319-*.md 的 python3+pyyaml criterion 刻意不 import 本脚本（goal 层是独立测量），两份实现的一致性由 plugin/test/workflow-runner-self-hosted-check.test.mjs 用同一组 fixture 跑两份、断言三态结论逐一相同来保持（硬规则 5b：改一处须改另一处，落在同一次提交内）。条件=要判『CI 与发布的每个 job 是否真能起跑』—— 这正是 2026-09-24 hosted runner 账单闸那次静默未启动（job 未启动 ≠ 测试红）的取假点（tasks/gap-metered-hosted-runner-jobs-to-self-hosted，goal AC-319）",
     "quay-init-steps.ts": "谁按：plugin/scripts/quay-init.sh 的 quay-init-step 函数（唯一调用者，每个 step 占一行）；机械消费者是 plugin/test/quay-init-characterization.test.mjs（跑真实入口、把六文件面与退出码按 sha256 钉住，并已实测可取假）与 plugin/scripts/sh-census-check.ts（读 quay-init.sh 的 embedded 集合是否还含 python3）。命令行：node --no-warnings --experimental-strip-types plugin/scripts/quay-init-steps.ts <step> [args…]（--help 列出全部 step）",
     "develop-deliver-python-steps.ts": "谁按：plugin/scripts/develop-deliver-tgz.sh 的 py_steps 包装函数（唯一调用者，每个 step 占一行 —— transport_evidence_append / check_evidence_completeness / check_e2e_pairing / check_upgrade_pairing / selfcheck_adrflip_transport / selfcheck_complete_change_transport / read_state_field / age_seconds）；机械消费者是 plugin/test/develop-deliver-tgz-characterization.test.mjs（跑真实的 --selfcheck* 与 --check 入口，把 12 个契约的 stdout/退出码钉住，并已实测可取假）、plugin/test/develop-deliver-tgz-evidence-transport.test.mjs 与 plugin/scripts/sh-census-check.ts（读 develop-deliver-tgz.sh 的 embedded 集合是否还含 python3）。命令行：node --no-warnings --experimental-strip-types plugin/scripts/develop-deliver-python-steps.ts <step> [args…]（--help 列出全部 step）",
