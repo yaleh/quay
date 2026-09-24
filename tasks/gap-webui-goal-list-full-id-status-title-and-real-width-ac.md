@@ -2,7 +2,7 @@
 id: gap-webui-goal-list-full-id-status-title-and-real-width-ac
 title: /goal 列表 id/status 被截成 `G…`/`achi…`、标题单行截断：改自适应列宽 + 放宽 main + 窄屏横向滚动，并把
   AC3 从「表头不截」补成「数据行 id/status 不截」（两个视口实测）
-status: ready
+status: done
 labels:
   - gap
   - defect
