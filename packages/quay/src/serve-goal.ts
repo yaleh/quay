@@ -41,7 +41,24 @@ function goalEvidenceCell(ext: Record<string, unknown>): string {
   const vColored = verdict === "pass"
     ? `<strong class="verdict-pass">pass</strong>`
     : `<strong class="verdict-fail">${escapeHtml(verdict || "unknown")}</strong>`;
-  return html`${vColored}${at ? ` · ${escapeHtml(at)}` : ""}`;
+  // gap-webui-goal-list-prune-low-signal-columns (proposal b): a JUDGED row renders the stamp as a
+  // RELATIVE time and keeps the absolute one on `title`. The visible absolute form was `2026-…` —
+  // the 4-digit year is the least informative part of the whole stamp and it was the only part that
+  // survived the column width, while the part a reader actually wants (`2d ago`) was the part cut.
+  // ⚠️ The absolute value is NOT dropped: it moves to `title` and the cell stays byte-searchable.
+  //
+  // ⛔ THE UN-JUDGED ROWS ARE RETURNED BYTE-IDENTICAL — both of them:
+  //   • no `evidence` at all / neither key set ⇒ `—` (the "no evidence" value);
+  //   • `at` present but `verdict` empty ⇒ the pre-existing `unknown · <at>` rendering.
+  // The second is the 未评估 state, and it is a DIFFERENT state from a judged one; rendering it
+  // through the relative-time path would make "judged, and the verdict word was lost" and "not
+  // judged at all" the same shape (硬规则 3b). Its `at` is also left ABSOLUTE on purpose: the whole
+  // point of the branch is that nothing about it moved, so a reviewer diffing this cell sees the
+  // pre-change bytes.
+  if (!verdict) return html`${vColored}${at ? ` · ${escapeHtml(at)}` : ""}`;
+  const judged = timeValue(at);
+  if (!judged) return html`${vColored}${at ? ` · ${escapeHtml(at)}` : ""}`;
+  return html`${vColored} · <span title="${escapeHtml(judged.iso)}">${escapeHtml(relativeTime(judged.ms))}</span>`;
 }
 
 // gap-webui-goal-detail-no-entity-links (提案 1): the /goal list and the detail page's criterion
@@ -72,11 +89,37 @@ function goalListHref(opts: { status?: string | null; kind?: string | null; goal
  *  roster, and a defaulted language here would silently render the marker in the wrong language on a
  *  page whose other copy had switched (硬规则 3b — a silently-defaulted label is indistinguishable
  *  from a wired one). */
-function timeCell(ts: unknown, L: Record<GoalKey, string>): string {
-  if (typeof ts !== "string" || ts === "") return `<span class="not-recorded">${L.notRecorded}</span>`;
+function timeValue(ts: unknown): { ms: number; iso: string } | null {
+  if (typeof ts !== "string" || ts === "") return null;
   const ms = Date.parse(ts);
-  if (Number.isNaN(ms)) return `<span class="not-recorded">${L.notRecorded}</span>`;
-  return `<span title="${escapeHtml(ts)}">${escapeHtml(relativeTime(ms))}</span>`;
+  return Number.isNaN(ms) ? null : { ms, iso: ts };
+}
+
+function timeCell(ts: unknown, L: Record<GoalKey, string>): string {
+  const v = timeValue(ts);
+  if (!v) return `<span class="not-recorded">${L.notRecorded}</span>`;
+  return `<span title="${escapeHtml(v.iso)}">${escapeHtml(relativeTime(v.ms))}</span>`;
+}
+
+/** The Goals tab's MERGED progress cell (gap-webui-goal-list-prune-low-signal-columns, proposal c):
+ *  `last progress` and `first evidence` on ONE row. Both were short texts (`10s ago` / `9d ago`)
+ *  spending two whole columns — ~31% of the table — to say what one column can say, while the cells
+ *  that genuinely needed width (id/status/title) shared the same squeeze.
+ *
+ *  ⚠️ NOTHING IS DROPPED: each half keeps its own absolute timestamp on its own `title`, so both
+ *  values stay individually recoverable (the relative form is what a reader scans; the absolute one
+ *  is what they copy). The `since {rel}` wording is serve-i18n copy (`sincePrefix`) — ⛔ not a
+ *  hard-coded English literal (ROW 21's rule, and the reason `L` is threaded in here).
+ *
+ *  A missing/unparseable `firstEvidenceAt` renders the SAME 「未记录」 marker `timeCell` uses, never
+ *  an empty half (硬规则 6 — a blank cell and a not-recorded one look identical to the reader).
+ *  ⛔ The marker is NOT wrapped in the `since` sentence: `since not recorded` reads as a VALUE. */
+function goalProgressCell(last: unknown, first: unknown, L: Record<GoalKey, string>): string {
+  const f = timeValue(first);
+  const firstPart = f
+    ? `<span title="${escapeHtml(f.iso)}">${escapeHtml(fillLabel(L.sincePrefix, { rel: relativeTime(f.ms) }))}</span>`
+    : `<span class="not-recorded">${L.notRecorded}</span>`;
+  return html`${timeCell(last, L)} · ${firstPart}`;
 }
 
 /** Sortable column keys. Anything else → "" (fail-closed: an unknown ?sort= never reorders). */
@@ -181,9 +224,22 @@ function goalTableStyles(): string {
     // information: an ellipsized `GOAL-020` is not "slightly less precise", it is unreadable, and
     // the reader cannot tell `G…` for GOAL-020 from `G…` for GOAL-021 (硬规则 3b — a truncated id
     // and an absent id look the same). The rest stay single-line so a row is one visual line.
-    + `.goal-table .c-id,.goal-table .c-status,.goal-table .c-goal,.goal-table .c-criterion,`
+    // ⛔ `.c-criterion` is deliberately ABSENT from this list: the criterion column left the LIST
+    // (gap-webui-goal-list-prune-low-signal-columns, proposal a) — the full text lives on
+    // `/goal/<id>`. A nowrap rule for a class no cell carries is a dead selector that reads as if the
+    // column still existed (硬规则 5b: the sibling of a removed thing is easy to leave behind).
+    + `.goal-table .c-id,.goal-table .c-status,.goal-table .c-goal,`
     + `.goal-table .c-verdict,.goal-table .c-time,.goal-table .ac-rollup,.goal-table .task-attach`
     + `{white-space:nowrap}`
+    // ── the link affordance (proposal d) ───────────────────────────────────────────────────────
+    // `AC 达成` and `挂靠任务` ARE links (they jump to the criteria of the goal), but under the base
+    // sheet's `a{text-decoration:none}` they rendered exactly like the id link — a row of three
+    // same-coloured, same-styled links, so a reader could not tell WHICH cells were clickable.
+    // Always-on underline + tabular figures makes them legible as links (and keeps `7/8` aligned).
+    // ⚠️ The id link keeps the base styling, and the DIFFERENCE is the criterion — styling both
+    // sides the same would restore the defect this rule exists to remove.
+    + `.goal-table .ac-rollup a,.goal-table .task-attach a{text-decoration:underline;font-variant-numeric:tabular-nums}`
+    + `.goal-table .c-id a{text-decoration:none;font-variant-numeric:normal}`
     // title: two clamped lines instead of an ellipsized fragment.
     // ⚠️ The clamp lives on an INNER element, not on the `<td>` itself, and that is not cosmetic.
     // `-webkit-line-clamp` requires `display:-webkit-box`, and a table cell that carries it loses
@@ -295,9 +351,13 @@ async function readGoalTasks(workspaceRoot: string, client: ProviderClient): Pro
   }
 }
 
-/** Goals-tab table (7 cols): id / status / title / AC 达成 / last progress / first evidence /
+/** Goals-tab table (6 cols): id / status / title / AC 达成 / last progress (carrying first evidence) /
  *  挂靠任务. The "AC 达成" and "挂靠任务" cells link to `/goal?kind=criterion&goal=<id>` (proposal 4:
- *  "先看 GOAL 概览、点进去看它的 AC 明细" without leaving the list page). */
+ *  "先看 GOAL 概览、点进去看它的 AC 明细" without leaving the list page).
+ *
+ *  ⚠️ 7 → 6 by MERGING, not by dropping: `first evidence` folded into the `last progress` cell
+ *  (`goalProgressCell`) — see that helper for what is preserved. The column ORDER of the survivors is
+ *  unchanged, so a reader's eye path across the row does not move. */
 function renderGoalsTable(
   rows: Record<string, unknown>[],
   all: Record<string, unknown>[],
@@ -331,22 +391,33 @@ function renderGoalsTable(
       <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
       <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}"><span class="c-title-text">${escapeHtml(String(g.title ?? ""))}</span></td>
       <td class="ac-rollup"><a href="${criteriaHref(gid)}">${rollup.achieved}/${rollup.total}</a></td>
-      <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>
-      <td class="c-time">${timeCell(g.firstEvidenceAt, L)}</td>
+      <td class="c-time">${goalProgressCell(g.lastProgressAt, g.firstEvidenceAt, L)}</td>
       <td class="task-attach"><a href="${criteriaHref(gid)}">${escapeHtml(taskAttach)}</a></td>
     </tr>`;
   }).join("\n");
   // ⛔ NO `<colgroup>`: the per-column percentage widths were the truncation mechanism (see
-  // `goalTableStyles()` above). The header row keeps the same 7 columns in the same order.
+  // `goalTableStyles()` above). The header row carries the same 6 columns in the same order as the
+  // body cells above — ⛔ and there is no `first evidence` `<th>`: the merged cell would then sit
+  // under a header that names only half of what it shows.
   return html`<table class="goal-table">
-    <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}<th>${L.colAcRollup}</th>${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>${L.colAttachedTasks}</th></tr>
+    <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}<th>${L.colAcRollup}</th>${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
     ${body}
   </table>`;
 }
 
-/** Criteria-tab table (8 cols): id / goal / status / title / criterion / recent verdict /
- *  last progress / 挂靠任务. The `goal` cell is the NEW clickable entry point to the store's
- *  long-supported `?goal=` filter (proposal 3 / AC4): `/goal?kind=criterion&goal=<id>`. */
+/** Criteria-tab table (7 cols): id / goal / status / title / recent verdict / last progress /
+ *  挂靠任务. The `goal` cell is the NEW clickable entry point to the store's long-supported `?goal=`
+ *  filter (proposal 3 / AC4): `/goal?kind=criterion&goal=<id>`.
+ *
+ *  ⚠️ 8 → 7 by DROPPING the `criterion` column (gap-webui-goal-list-prune-low-signal-columns,
+ *  proposal a). It was never readable in the list: the server truncated it to 60 chars and the
+ *  stylesheet then clipped that to ~10 (`node -…`, `python…`), so the column spent ~11% of the table
+ *  width displaying a fragment that identified nothing. ⛔ NOTHING IS LOST — the full text is on the
+ *  detail page (`/goal/<id>`, `criterion: <code>…</code>`), which the id cell one column to the left
+ *  links to. The surviving columns keep their order.
+ *
+ *  The sort whitelist (`goalSortKey`) deliberately still accepts `criterion`: it is a whitelist of
+ *  SORTABLE RECORD FIELDS, not of rendered columns, and `?sort=criterion` was never a header link. */
 function renderCriteriaTable(
   rows: Record<string, unknown>[],
   taskRead: GoalTaskRead,
@@ -356,15 +427,12 @@ function renderCriteriaTable(
   const body = rows.map((g) => {
     const goal = String(g.goal ?? "");
     const gid = String(g.id ?? "");
-    const criterion = typeof g.criterion === "string" ? g.criterion : "";
-    const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
     const taskAttach = renderTaskAttachText(taskRead, [gid], L);
     return html`<tr>
       <td class="c-id" title="${escapeHtml(gid)}">${goalIdLink(g.id)}</td>
       <td class="c-goal">${goal ? html`<a href="/goal?kind=criterion&goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
       <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
       <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}"><span class="c-title-text">${escapeHtml(String(g.title ?? ""))}</span></td>
-      <td class="c-criterion"><code>${criterionCell || "—"}</code></td>
       <td class="c-verdict">${goalEvidenceCell(g)}</td>
       <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>
       <td class="task-attach">${escapeHtml(taskAttach)}</td>
@@ -372,7 +440,7 @@ function renderCriteriaTable(
   }).join("\n");
   // ⛔ NO `<colgroup>` — same reason as the Goals table above.
   return html`<table class="goal-table">
-    <tr>${th("id", "id")}${th("goal", "goal")}${th("status", "status")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
+    <tr>${th("id", "id")}${th("goal", "goal")}${th("status", "status")}${th("title", "title")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
     ${body}
   </table>`;
 }
@@ -492,6 +560,26 @@ export async function handleGoalList(
     ? goalListHref({ kind: "criterion", status: "draft" })
     : goalListHref({ status: "draft" });
   const otherTabLabel = tab === "goal" ? "Criteria" : "Goals";
+  const ownDraftHref = goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter });
+
+  // gap-webui-goal-list-prune-low-signal-columns (proposal e): when BOTH kinds are pending, the
+  // banner collapses to ONE line — `N GOAL · M AC awaiting a decision` + the two jump links. The
+  // pre-change shape was TWO `<p>`s (one per kind) carrying a three-line explanatory sentence, which
+  // cost ~200px of the first screen and pushed the table below the fold.
+  //
+  // ⚠️ The collapse is scoped to the BOTH case on purpose: with one kind pending there is nothing to
+  // merge, and that branch keeps its sentence AND its explanation byte-for-byte — so the collapse
+  // cannot silently swallow copy from the state a single-kind reader still sees. In the both case the
+  // explanation is what the one-line form buys back; the action it explained is still one click away
+  // under `viewDrafts`, whose label names it ("View the drafts awaiting a decision").
+  //
+  // ⛔ Both hrefs are BYTE-IDENTICAL to the pre-change values (`ownDraftHref` / `otherHref` above):
+  // the collapse is a layout change, not a routing change — the two destinations are the same two
+  // filters the banner always pointed at.
+  const draftBanner = (ownDraft > 0 && otherDraft > 0)
+    ? html`<p><strong>${fillLabel(L.draftBothBanner, { n: ownDraft, kind: ownLabel, m: otherDraft, kind2: otherLabel })}</strong> <a href="${ownDraftHref}">${L.viewDrafts}</a> · <a href="${otherHref}">${fillLabel(L.draftOtherLink, { tab: otherTabLabel })}</a></p>`
+    : html`${ownDraft > 0 ? html`<p><strong>${fillLabel(L.draftOwnBanner, { n: ownDraft, kind: ownLabel })}</strong>${fillLabel(L.draftExplain, { cmd: `<code>goal-store.ts write &lt;id&gt; --status active</code>` })}<a href="${ownDraftHref}">${L.viewDrafts}</a></p>` : ""}
+${otherDraft > 0 ? html`<p><strong>${fillLabel(L.draftOtherBanner, { n: otherDraft, kind: otherLabel })}</strong> → <a href="${otherHref}">${fillLabel(L.draftOtherLink, { tab: otherTabLabel })}</a></p>` : ""}`;
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   // AC-301: this page's chrome sites take the per-request language resolved by AC-288 (`lang`, read
@@ -544,10 +632,7 @@ export async function handleGoalList(
       <h1>${pageNameFor("Goals", lang)} — ${tab === "goal" ? L.pageSubtitleGoal : L.pageSubtitleCriteria} (${rows.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>${L.listReadFailed}</strong> ${escapeHtml(readError)}</div>` : ""}
       ${statusFilter !== "draft" && (ownDraft > 0 || otherDraft > 0)
-        ? html`<div class="info-banner" role="status">
-            ${ownDraft > 0 ? html`<p><strong>${fillLabel(L.draftOwnBanner, { n: ownDraft, kind: ownLabel })}</strong>${fillLabel(L.draftExplain, { cmd: `<code>goal-store.ts write &lt;id&gt; --status active</code>` })}<a href="${goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter })}">${L.viewDrafts}</a></p>` : ""}
-            ${otherDraft > 0 ? html`<p><strong>${fillLabel(L.draftOtherBanner, { n: otherDraft, kind: otherLabel })}</strong> → <a href="${otherHref}">${fillLabel(L.draftOtherLink, { tab: otherTabLabel })}</a></p>` : ""}
-          </div>`
+        ? html`<div class="info-banner" role="status">${draftBanner}</div>`
         : ""}
       <p class="meta">Tab: ${tabNav}</p>
       <p class="meta">Status: ${statusNav}</p>

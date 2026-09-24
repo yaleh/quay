@@ -2618,6 +2618,13 @@ export const GOAL_KEYS = [
   "attachNotLinked", "attachReadFailed", "attachCount",
   // the ledger-derived time cell's "no timestamp" marker — DISTINCT from `—` (the evidence cell)
   "notRecorded",
+  // gap-webui-goal-list-prune-low-signal-columns: the Goals tab's MERGED progress cell needs the word
+  // that introduces its SECOND half (`since {rel}`). ⚠️ A NEW row rather than a literal at the call
+  // site, even though it is one word: a hard-coded `since ` would be page copy that never switches
+  // language on a `?lang=zh` page, and the ROW 21 rule is about the copy, not about its length.
+  // The `{rel}` hole carries the RELATIVE string from `relativeTime()` (itself not localized today —
+  // the same treatment the pre-existing `last progress` column already gives it).
+  "sincePrefix",
   // the list page's read-failure banner (`<strong>`) — reached only when `client.goalList()` throws,
   // so it is INVISIBLE to a probe that never constructs the state (硬规则 4: a criterion whose state
   // cannot be built is not a measurement). ⚠️ Found by a POSITIONAL sweep of the source after the
@@ -2626,6 +2633,12 @@ export const GOAL_KEYS = [
   // the draft banner: this tab's own count, the explanation with its `<code>` hole, the link, and
   // the cross-tab hint (another tab's count + the link into it)
   "draftOwnBanner", "draftExplain", "viewDrafts", "draftOtherBanner", "draftOtherLink",
+  // …and the ONE-LINE form used when BOTH kinds are pending (gap-webui-goal-list-prune-low-signal-
+  // columns, proposal e): the two counts on one line instead of two `<p>`s. A separate row rather
+  // than a concatenation of the two above, because the rendered sentence is a different sentence —
+  // ⛔ `draftOwnBanner` + `draftOtherBanner` glued at the call site would be a sentence assembled
+  // outside the dictionary, i.e. one no translator can reorder.
+  "draftBothBanner",
   // the empty state: the two `<strong>` variants, then the source-of-truth sentence and the
   // corrected-pointer note (each with its own `{code}` hole — ⛔ not concatenated at the call site)
   "emptyFiltered", "emptyDir", "emptyExplain", "emptyPointerNote",
@@ -2658,6 +2671,10 @@ export const GOAL_LABELS: Record<GoalKey, { en: string; zh: string }> = {
   attachCount: { en: "{n} ({dist})", zh: "{n}（{dist}）" },
 
   notRecorded: { en: "not recorded", zh: "未记录" },
+  // ⚠️ The zh word is the PRE-EXISTING dictionary's own vocabulary for this relation (「自」 is the
+  // same character `firstAt`-style labels use elsewhere); it is not a back-translation of `since`.
+  // ⛔ Both columns carry the `{rel}` hole — a one-sided template is not translatable (AC4's rule).
+  sincePrefix: { en: "since {rel}", zh: "自 {rel}" },
 
   // ⚠️ The `:` is ASCII in the zh column because it is ASCII in the pre-extraction literal
   // (`<strong>读失败:</strong>`) — see ROW 13 ②, which made the same reading for /doc's banner. The
@@ -2688,6 +2705,14 @@ export const GOAL_LABELS: Record<GoalKey, { en: string; zh: string }> = {
   // ⚠️ `{tab}` is a tab NAME (`Criteria` / `Goals`), passed raw for the same reason as ④.
   draftOtherBanner: { en: "{n} more {kind} awaiting a decision", zh: "另有 {n} 条 {kind} 待裁定" },
   draftOtherLink: { en: "Go to the {tab} tab", zh: "去 {tab} tab 查看" },
+  // ⚠️ `{kind}`/`{kind2}` are the tab's own tokens (`GOAL` / `AC`), passed RAW — see ④ above. The
+  // OWN kind comes first (`{n} {kind}`), mirroring the two-`<p>` form it replaces, where the current
+  // tab's line came first; ⛔ the order is part of the sentence, so a translator sees it here rather
+  // than in a call-site concatenation.
+  draftBothBanner: {
+    en: "{n} {kind} · {m} {kind2} awaiting a decision",
+    zh: "{n} 条 {kind} · {m} 条 {kind2} 待裁定",
+  },
 
   emptyFiltered: { en: "No records under the current filter", zh: "当前筛选下无记录" },
   emptyDir: { en: "the goals/ directory is empty", zh: "goals/ 目录为空" },

@@ -56,9 +56,11 @@ function captureRes() {
 }
 
 /** Parse the /goal list table into rows. gap-webui-goal-list-tab-split-goal-ac: the list is now the
- *  Goals tab (7 cols: id / status / title / AC 达成 / last progress / first evidence / 挂靠任务), so
- *  the task-attach cell is index 6 and — because it links cross-tab — is wrapped in an <a>. Strip the
- *  anchor to read the plain count text the detail page (which renders no anchor) shares. */
+ *  Goals tab; gap-webui-goal-list-prune-low-signal-columns then folded `first evidence` into the
+ *  `last progress` cell, so the tab is 6 cols (id / status / title / AC 达成 / last progress +
+ *  first evidence / 挂靠任务) and the task-attach cell moved from index 6 to index 5. It links
+ *  cross-tab, so it is wrapped in an <a>: strip the anchor to read the plain count text the detail
+ *  page (which renders no anchor) shares. */
 function goalTableRows(html) {
   const m = /<table[^>]*>([\s\S]*?)<\/table>/.exec(html);
   if (!m) return [];
@@ -69,7 +71,7 @@ function goalTableRows(html) {
     return {
       id: idM ? idM[1] : "",
       kind: "goal",
-      taskAttach: (cells[6] || "").replace(/<[^>]*>/g, "").trim(),
+      taskAttach: (cells[5] || "").replace(/<[^>]*>/g, "").trim(),
     };
   });
 }

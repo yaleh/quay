@@ -70,27 +70,31 @@ function mainHtml(html) {
 }
 
 /** Parse a tab's list table into row objects. `tab` selects the column map:
- *   - "goal"      (7 cols): id / status / title / AC rollup / last progress / first evidence / 挂靠任务
- *   - "criterion" (8 cols): id / goal / status / title / criterion / recent verdict / last progress / 挂靠任务
- *  Time cells expose the absolute `title` timestamp (null when the cell is the 未记录 marker). */
+ *   - "goal"      (6 cols): id / status / title / AC rollup / last progress (carrying first evidence) / 挂靠任务
+ *   - "criterion" (7 cols): id / goal / status / title / recent verdict / last progress / 挂靠任务
+ *  Time cells expose their absolute `title` timestamp(s). ⚠️ The Goals tab's merged cell carries TWO
+ *  of them (last progress, then since-first-evidence) — `allTitles` reads them positionally, which is
+ *  what keeps this file's ledger comparisons exact instead of "some timestamp is present".
+ *  page-gap-webui-goal-list-prune-low-signal-columns: 7→6 / 8→7, the merged `first evidence` and the
+ *  dropped `criterion` column moved the surviving indices. */
 function listRows(html, tab) {
   const m = /<table[^>]*>([\s\S]*?)<\/table>/.exec(html);
   if (!m) return [];
   const trs = [...m[1].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((x) => x[1]).filter((r) => !/<th/.test(r));
   const idOf = (cell) => (/href="\/goal\/([^"]+)"/.exec(cell || "") || [])[1] || "";
-  const titleOf = (cell) => (/title="([^"]*)"/.exec(cell || "") || [])[1] ?? null;
+  const allTitles = (cell) => [...(cell || "").matchAll(/title="([^"]*)"/g)].map((x) => x[1]);
   return trs.map((r) => {
     const cells = [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]);
     if (tab === "goal") {
       const rollupM = /(\d+)\/(\d+)/.exec(cells[3] || "");
+      const t = allTitles(cells[4]);
       return {
         id: idOf(cells[0]),
         kind: "goal",
         status: (cells[1] || "").trim(),
-        lastAt: titleOf(cells[4]),
-        firstAt: titleOf(cells[5]),
+        lastAt: t[0] ?? null,
+        firstAt: t[1] ?? null,
         lastRaw: cells[4] || "",
-        firstRaw: cells[5] || "",
         rollup: rollupM ? { achieved: Number(rollupM[1]), total: Number(rollupM[2]) } : null,
       };
     }
@@ -99,8 +103,8 @@ function listRows(html, tab) {
       kind: "criterion",
       status: (cells[2] || "").trim(),
       goal: (/href="\/goal\?kind=criterion&goal=([^"]+)"/.exec(cells[1] || "") || [])[1] || "",
-      lastAt: titleOf(cells[6]),
-      lastRaw: cells[6] || "",
+      lastAt: allTitles(cells[5])[0] ?? null,
+      lastRaw: cells[5] || "",
     };
   });
 }
@@ -227,7 +231,11 @@ test("AC1: origin column removed; time + rollup columns present", async () => {
   const header = tableMatch[1].split("</tr>")[0];
   assert.doesNotMatch(header, /origin/, "no origin column in header");
   assert.match(header, /last progress/, "last progress column present");
-  assert.match(header, /first evidence/, "first evidence column present");
+  // gap-webui-goal-list-prune-low-signal-columns (proposal c): `first evidence` is no longer a COLUMN
+  // — it folded into the `last progress` cell — so this arm flips from "header present" to "header
+  // absent, and the value it named is still in that cell". The value-side half lives in the merged
+  // cell's two `title` attributes, asserted positionally by `listRows`' `firstAt` (AC3/AC10 below).
+  assert.doesNotMatch(header, /first evidence/, "first evidence is no longer its own column");
   assert.match(header, /AC 达成/, "AC rollup column present");
   assert.doesNotMatch(r.body, /recorded at length and in full detail/, "GOAL-008's long origin prose is not in the list");
   // …and the en peer, so the zh arm above cannot be satisfied by a page that renders zh in both

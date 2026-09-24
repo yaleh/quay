@@ -7,11 +7,14 @@
 // kind are meaningless on criterion rows) — so the title cell measured scrollWidth 336 vs
 // clientWidth 156 (180px truncated) and five headers were ellipsized.
 //
-// The fix (proposal): `/goal` (no kind) defaults to a Goals tab (7 cols); `/goal?kind=criterion` is
-// a Criteria tab (8 cols); the "All" merged view is gone; the store's existing `?goal=` filter gets
+// The fix (proposal): `/goal` (no kind) defaults to a Goals tab; `/goal?kind=criterion` is a
+// Criteria tab; the "All" merged view is gone; the store's existing `?goal=` filter gets
 // a clickable entry point (the criteria `goal` column + the goals' AC 达成 / 挂靠任务 cross-tab
 // links); the draft banner splits into per-kind counts with a cross-tab "另有 N 条 X 待裁定" hint;
 // and the single `client.goalList()` read invariant is preserved (tab split changes only the render).
+// ⚠️ The column COUNTS asserted below moved 7→6 / 8→7 by gap-webui-goal-list-prune-low-signal-columns
+// (the Goals 'first evidence' column folded into 'last progress'; the Criteria 'criterion' column was
+// dropped in favour of the detail page) — ⛔ re-pinned, never deleted.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -85,7 +88,10 @@ const hrefOf = (cell) => (/href="([^"]+)"/.exec(cell || "") || [])[1] || "";
 const goalIdOf = (cell) => (/href="\/goal\/([^"]+)"/.exec(cell || "") || [])[1] || "";
 const stripTags = (s) => (s || "").replace(/<[^>]*>/g, "").trim();
 
-/** Goals-tab rows (7 cols): id / status / title / AC 达成 / last progress / first evidence / 挂靠任务. */
+/** Goals-tab rows (6 cols): id / status / title / AC 达成 / last progress (carrying first evidence) /
+ *  挂靠任务. page-gap-webui-goal-list-prune-low-signal-columns: the merge moved `挂靠任务` from index
+ *  6 to index 5 — a stale index here reads an empty cell and would fail as "no cross-tab link", not
+ *  as "wrong column". */
 function goalRows(html) {
   return dataRows(html).map((cells) => ({
     id: goalIdOf(cells[0]),
@@ -94,11 +100,11 @@ function goalRows(html) {
     title: stripTags(cells[2]),
     rollupHref: hrefOf(cells[3]),
     rollup: stripTags(cells[3]),
-    taskAttachHref: hrefOf(cells[6]),
+    taskAttachHref: hrefOf(cells[5]),
   }));
 }
 
-/** Criteria-tab rows (8 cols): id / goal / status / title / criterion / recent verdict / last progress / 挂靠任务. */
+/** Criteria-tab rows (7 cols): id / goal / status / title / recent verdict / last progress / 挂靠任务. */
 function criterionRows(html) {
   return dataRows(html).map((cells) => ({
     id: goalIdOf(cells[0]),
@@ -191,18 +197,23 @@ after(async () => {
 
 // ── AC1: /goal (no kind) is the Goals tab — 7 headers, goal rows only ────────────────────────
 
-test("AC1: /goal renders 7 columns, no criterion/recent verdict/kind, all rows kind=goal", async () => {
+test("AC1: /goal renders 6 columns, no criterion/recent verdict/kind/first evidence, all rows kind=goal", async () => {
   // `lang=zh`: the two Chinese headers pinned below are ROW 21's zh columns (`colAcRollup`,
   // `colAttachedTasks`). The column COUNT and the row-kind assertions are language-independent, so
   // asking for zh does not weaken them.
+  //
+  // page-gap-webui-goal-list-prune-low-signal-columns: the count moved 7 → 6 — `first evidence` is no
+  // longer a column (it folded into the `last progress` cell). The arm is RE-PINNED, not deleted:
+  // dropping it would leave the column set unmeasured, which is the state that let the previous
+  // width regime ship a truncating table.
   const r = await get(port, "/goal", "lang=zh");
   assert.equal(r.status, 200);
   const hs = headers(r.body);
-  assert.equal(hs.length, 7, `Goals tab has 7 <th>; got: ${hs.join(" | ")}`);
-  for (const banned of ["criterion", "recent verdict", "kind"]) {
+  assert.equal(hs.length, 6, `Goals tab has 6 <th>; got: ${hs.join(" | ")}`);
+  for (const banned of ["criterion", "recent verdict", "kind", "first evidence"]) {
     assert.ok(!hs.includes(banned), `Goals tab must not have a "${banned}" header`);
   }
-  for (const want of ["id", "status", "title", "AC 达成", "last progress", "first evidence", "挂靠任务"]) {
+  for (const want of ["id", "status", "title", "AC 达成", "last progress", "挂靠任务"]) {
     assert.ok(hs.includes(want), `Goals tab must have "${want}"`);
   }
   const rows = goalRows(r.body);
@@ -210,28 +221,34 @@ test("AC1: /goal renders 7 columns, no criterion/recent verdict/kind, all rows k
   const bad = rows.filter((x) => x.kind !== "goal").map((x) => `id=${x.id}`);
   assert.deepEqual(bad, [], `non-goal rows on the Goals tab:\n  ${bad.join("\n  ")}`);
 
-  // The en peer — same 7 columns, same order, the two translated labels in the same positions, and
+  // The en peer — same 6 columns, same order, the two translated labels in the same positions, and
   // ⛔ neither Chinese header anywhere in the en row of `<th>`s (the language really follows the
   // request rather than the page being zh in both).
   const en = await get(port, "/goal", "lang=en");
   const enHs = headers(en.body);
-  assert.deepEqual(enHs, ["id", "status", "title", "AC achieved", "last progress", "first evidence", "attached tasks"],
+  assert.deepEqual(enHs, ["id", "status", "title", "AC achieved", "last progress", "attached tasks"],
     `the en Goals tab carries the translated headers; got: ${enHs.join(" | ")}`);
   assert.ok(!enHs.includes("AC 达成") && !enHs.includes("挂靠任务"), "the en header row carries no Chinese");
 });
 
 // ── AC2: /goal?kind=criterion is the Criteria tab — 8 headers, criterion rows only ───────────
 
-test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, all rows criterion", async () => {
+test("AC2: /goal?kind=criterion renders 7 columns, no AC 达成/kind/criterion, has goal, all rows criterion", async () => {
   // `lang=zh` for the same reason as AC1: `挂靠任务` is pinned below.
+  //
+  // page-gap-webui-goal-list-prune-low-signal-columns: the count moved 8 → 7 — the `criterion` column
+  // was dropped from the LIST (its server-truncated + CSS-clipped fragment identified nothing; the
+  // full text is on `/goal/<id>`, which the id cell links to). ⛔ `criterion` therefore moves from the
+  // `want` list to the `banned` list: leaving it in `want` would have pinned a column this task
+  // deliberately removed.
   const r = await get(port, "/goal?kind=criterion", "lang=zh");
   assert.equal(r.status, 200);
   const hs = headers(r.body);
-  assert.equal(hs.length, 8, `Criteria tab has 8 <th>; got: ${hs.join(" | ")}`);
-  for (const banned of ["AC 达成", "kind"]) {
+  assert.equal(hs.length, 7, `Criteria tab has 7 <th>; got: ${hs.join(" | ")}`);
+  for (const banned of ["AC 达成", "kind", "criterion"]) {
     assert.ok(!hs.includes(banned), `Criteria tab must not have a "${banned}" header`);
   }
-  for (const want of ["id", "goal", "status", "title", "criterion", "recent verdict", "last progress", "挂靠任务"]) {
+  for (const want of ["id", "goal", "status", "title", "recent verdict", "last progress", "挂靠任务"]) {
     assert.ok(hs.includes(want), `Criteria tab must have "${want}"`);
   }
   const rows = criterionRows(r.body);
@@ -239,10 +256,10 @@ test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, 
   const bad = rows.filter((x) => x.kind !== "criterion").map((x) => `id=${x.id}`);
   assert.deepEqual(bad, [], `non-criterion rows on the Criteria tab:\n  ${bad.join("\n  ")}`);
 
-  // The en peer: the same 8 columns, and the Criteria tab still has no rollup column in EITHER
+  // The en peer: the same 7 columns, and the Criteria tab still has no rollup column in EITHER
   // language — the "no AC 达成" ban is a statement about the column set, not about the word.
   const enHs = headers((await get(port, "/goal?kind=criterion", "lang=en")).body);
-  assert.deepEqual(enHs, ["id", "goal", "status", "title", "criterion", "recent verdict", "last progress", "attached tasks"],
+  assert.deepEqual(enHs, ["id", "goal", "status", "title", "recent verdict", "last progress", "attached tasks"],
     `the en Criteria tab carries the translated 挂靠任务 header; got: ${enHs.join(" | ")}`);
 });
 
@@ -259,7 +276,7 @@ test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, 
 // the defect, and a criterion that measures the header cannot see a data-row truncation.
 
 test("AC3: neither tab declares a percentage <colgroup>; both are auto-layout (mechanism absent)", async () => {
-  for (const [urlPath, cols] of [["/goal", 7], ["/goal?kind=criterion", 8]]) {
+  for (const [urlPath, cols] of [["/goal", 6], ["/goal?kind=criterion", 7]]) {
     const r = await get(port, urlPath);
     const cols_ = pctCols(r.body);
     assert.deepEqual(cols_, [], `${urlPath}: no percentage <col> (the squeezing mechanism is gone)`);
@@ -267,8 +284,10 @@ test("AC3: neither tab declares a percentage <colgroup>; both are auto-layout (m
     const style = goalStyleBlock(r.body);
     assert.match(style, /\.goal-table\{table-layout:auto/, `${urlPath}: the table is auto-layout`);
     assert.doesNotMatch(style, /table-layout:\s*fixed/, `${urlPath}: the fixed-layout regime is gone`);
-    // The column COUNT is unchanged — this task re-scoped the widths, it did not drop a column.
-    assert.equal(headers(r.body).length, cols, `${urlPath}: still ${cols} columns`);
+    // The column COUNT is re-pinned here (6 / 7) because gap-webui-goal-list-prune-low-signal-columns
+    // changed it — that task removed one column from THIS table by merging/dropping, so the number is
+    // a deliberate value, not "whatever the renderer happens to emit".
+    assert.equal(headers(r.body).length, cols, `${urlPath}: ${cols} columns`);
   }
 });
 
