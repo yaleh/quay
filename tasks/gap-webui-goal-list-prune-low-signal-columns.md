@@ -32,15 +32,28 @@ e) 决策横幅折叠成一行摘要（如 `2 GOAL · 7 AC awaiting a decision �
 
 ## AC
 
-- [ ] `node --experimental-strip-types --test packages/quay/test/gap-webui-goal-list-prune-low-signal-columns.test.mjs` exit 0：`/goal?kind=criterion` 表头不含 `criterion`、列数 = 7；`/goal/<某 AC id>` 详情页仍含该 AC 的完整 criterion 全文（守住「信息没丢」）。
-- [ ] 同一测试：Goals 页签表头不含 `first evidence`、列数 = 6；`last progress` 单元格可见文本同时含相对时间与首证据相对时间，`title` 属性含两个绝对时间戳；firstEvidenceAt 缺值的行显示 not-recorded 文案而非空单元格（先打印前 3 行实际内容再引用计数）。
-- [ ] 同一测试：verdict 单元格可见文本不含 4 位年份前缀，绝对时间在 `title`；无 verdict 的行取值与改前逐字相同（未评估态仍与 pass 可区分）。
-- [ ] 同一测试：GOAL 与 AC 两类待决同时存在时，横幅可见文本为单行摘要，仍含指向 drafts 与另一页签的两个链接，href 与改前逐字相同。
-- [ ] 同一测试在 zh 与 en 两种语言下各跑一遍，新增文案全部走 serve-i18n 词条（不硬编码英文串）：`node --experimental-strip-types --test packages/quay/test/serve-goal-body-i18n.test.mjs packages/quay/test/serve-goal-zh-chrome.test.mjs packages/quay/test/gap-webui-goal-list-tab-split-goal-ac.test.mjs packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs` exit 0（旧测试里对列数 7/8 的钉死断言改为 6/7，不是删除）。
+- [x] `node --experimental-strip-types --test packages/quay/test/gap-webui-goal-list-prune-low-signal-columns.test.mjs` exit 0：`/goal?kind=criterion` 表头不含 `criterion`、列数 = 7；`/goal/<某 AC id>` 详情页仍含该 AC 的完整 criterion 全文（守住「信息没丢」）。
+- [x] 同一测试：Goals 页签表头不含 `first evidence`、列数 = 6；`last progress` 单元格可见文本同时含相对时间与首证据相对时间，`title` 属性含两个绝对时间戳；firstEvidenceAt 缺值的行显示 not-recorded 文案而非空单元格（先打印前 3 行实际内容再引用计数）。
+- [x] 同一测试：verdict 单元格可见文本不含 4 位年份前缀，绝对时间在 `title`；无 verdict 的行取值与改前逐字相同（未评估态仍与 pass 可区分）。
+- [x] 同一测试：GOAL 与 AC 两类待决同时存在时，横幅可见文本为单行摘要，仍含指向 drafts 与另一页签的两个链接，href 与改前逐字相同。
+- [x] 同一测试在 zh 与 en 两种语言下各跑一遍，新增文案全部走 serve-i18n 词条（不硬编码英文串）：`node --experimental-strip-types --test packages/quay/test/serve-goal-body-i18n.test.mjs packages/quay/test/serve-goal-zh-chrome.test.mjs packages/quay/test/gap-webui-goal-list-tab-split-goal-ac.test.mjs packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs` exit 0（旧测试里对列数 7/8 的钉死断言改为 6/7，不是删除）。
 
 ## DoD
 
 在运行中的生产 serve 的 `/goal` 两个页签上真实读数：表头清单、列数、表格顶部 y 坐标改前/改后各一份（真浏览器，贴数值，不预设阈值——首屏节省量是成本结构未测前不设目标的量）。验收对象是「删掉的列在详情页仍可达、合并后的单元格两个时间都可读」。
+
+读数（无头 Chromium，1440×900，生产数据；改前 = 生产 serve `:10539`（跑的还是未改的 develop 代码），改后 = 本 worktree 的 serve `:39217`；原始 JSON → `.quay/gap-webui-goal-list-prune-low-signal-columns-evidence.json`）：
+
+| 读数 | 改前 | 改后 |
+|---|---|---|
+| Goals 页签表头 | `id/status/title/AC achieved/last progress/first evidence/attached tasks`（7） | `id/status/title/AC achieved/last progress/attached tasks`（6） |
+| Criteria 页签表头 | `id/goal/status/title/criterion/recent verdict/last progress/attached tasks`（8） | 同上去掉 `criterion`（7） |
+| 表格顶部 y | 383 | 302 |
+| 决策横幅高度 | 135px | 54px |
+| Goals 合并单元格 | 两列：`1m ago` / `9d ago` | 一列：`1m ago · since 9d ago`，`title` = `2026-09-24T12:56:38.835Z` / `2026-09-15T11:58:37.318Z` |
+| Criteria verdict 单元格 | `pass · 2026-09-09T03:43:40.845Z` | `pass · 15d ago`，`title` = `2026-09-09T03:43:40.845Z` |
+| 被删列的值 | `node --experimental-strip-types --input-type=module -e 'impo…`（截断） | 列没了；`/goal/AC-187` 详情页含该命令**全文**（500+ 字符） |
+| id / AC达成 / 挂靠任务 链接 `text-decoration` | 三者皆 `none` | `none` / `underline` / `underline`（后两者另带 `tabular-nums`） |
 
 ## Touches
 
@@ -49,6 +62,7 @@ e) 决策横幅折叠成一行摘要（如 `2 GOAL · 7 AC awaiting a decision �
 - packages/quay/test/gap-webui-goal-list-prune-low-signal-columns.test.mjs
 - packages/quay/test/gap-webui-goal-list-tab-split-goal-ac.test.mjs
 - packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs
+- packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs
 - packages/quay/test/serve-goal-body-i18n.test.mjs
 - packages/quay/test/serve-goal-zh-chrome.test.mjs
 - tasks/gap-webui-goal-list-prune-low-signal-columns.md
