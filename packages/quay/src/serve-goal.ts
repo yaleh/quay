@@ -184,16 +184,35 @@ function goalTableStyles(): string {
     + `.goal-table .c-id,.goal-table .c-status,.goal-table .c-goal,.goal-table .c-criterion,`
     + `.goal-table .c-verdict,.goal-table .c-time,.goal-table .ac-rollup,.goal-table .task-attach`
     + `{white-space:nowrap}`
-    // title: two clamped lines instead of an ellipsized fragment. (Verified in headless Chrome:
-    // `-webkit-line-clamp` on a table cell keeps the row's layout and clamps to exactly 2 lines.)
-    + `.goal-table .c-title{white-space:normal;overflow:hidden;display:-webkit-box;`
+    // title: two clamped lines instead of an ellipsized fragment.
+    // ⚠️ The clamp lives on an INNER element, not on the `<td>` itself, and that is not cosmetic.
+    // `-webkit-line-clamp` requires `display:-webkit-box`, and a table cell that carries it loses
+    // its `table-cell` display — Chrome wraps it in an anonymous table-cell, and the measured
+    // result on this page was a row sized to two lines whose THIRD line still painted, clipped
+    // mid-glyph (headless-Chrome screenshot `probe-clamp-on-td-bleeds-900.png`). With the clamp on
+    // a child the td stays `table-cell` and the child measures exactly 2 × line-height (46px at
+    // 23.04px/line, screenshot `probe-clamp-inner-element-900.png`). The criterion is about the
+    // title CELL; it is the cell's content box that has to carry the property to make it true.
+    + `.goal-table .c-title{white-space:normal}`
+    + `.goal-table .c-title>.c-title-text{display:-webkit-box;overflow:hidden;`
     + `-webkit-line-clamp:2;-webkit-box-orient:vertical}`
     // ≤900px the viewport cannot hold the content-sized table, so `.table-wrap` scrolls it — and the
     // id column is pinned to the container's left edge, otherwise scrolling right loses the row's
     // identity. The `background` is load-bearing: a sticky cell must be opaque or the cells scrolling
     // underneath it show through.
-    + `@media (max-width:900px){.goal-table .c-id{position:sticky;left:0;`
-    + `background:var(--color-surface)}}`
+    //
+    // ⚠️ `overflow:visible` here is NOT decoration — without it the sticky declaration above is
+    // INERT, and that was measured in the browser, not assumed. `pageStyles()`'s base rule
+    // `table{overflow:hidden}` (there to clip the rounded corners) makes the TABLE itself the
+    // nearest scroll container for its own cells, so `position:sticky` on a `<td>` resolves against
+    // a container that never scrolls: at 900px on the Criteria tab, `scrollLeft=300` moved the id
+    // cell to `left:-266` instead of pinning it at the wrap's `left:34`
+    // (`probe-sticky-before-overflow-fix-900.png`). With `overflow:visible` the cell pins exactly
+    // (`idLeft==wrapLeft==34`, `fixed-criterion-900-scrolled.png`). Both live in this media query
+    // rather than the base rule so the desktop rendering keeps the base sheet's clipped corners
+    // unchanged. All four readings live in `.quay/full-id-width-evidence/`.
+    + `@media (max-width:900px){.goal-table{overflow:visible}`
+    + `.goal-table .c-id{position:sticky;left:0;background:var(--color-surface)}}`
     + `.goal-table th a{color:inherit}</style>`;
 }
 
@@ -310,7 +329,7 @@ function renderGoalsTable(
     return html`<tr>
       <td class="c-id" title="${escapeHtml(gid)}">${goalIdLink(g.id)}</td>
       <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
-      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}"><span class="c-title-text">${escapeHtml(String(g.title ?? ""))}</span></td>
       <td class="ac-rollup"><a href="${criteriaHref(gid)}">${rollup.achieved}/${rollup.total}</a></td>
       <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>
       <td class="c-time">${timeCell(g.firstEvidenceAt, L)}</td>
@@ -344,7 +363,7 @@ function renderCriteriaTable(
       <td class="c-id" title="${escapeHtml(gid)}">${goalIdLink(g.id)}</td>
       <td class="c-goal">${goal ? html`<a href="/goal?kind=criterion&goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
       <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
-      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}"><span class="c-title-text">${escapeHtml(String(g.title ?? ""))}</span></td>
       <td class="c-criterion"><code>${criterionCell || "—"}</code></td>
       <td class="c-verdict">${goalEvidenceCell(g)}</td>
       <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>

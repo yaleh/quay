@@ -191,7 +191,11 @@ test("AC2/AC3: /goal list table is wrapped and content-sized (ids/statuses not e
   // `text-overflow` on the short identity columns is the `G…` defect, so its ABSENCE sheet-wide is
   // the assertion (a per-selector check could be satisfied by some other selector matching them).
   assert.doesNotMatch(style, /text-overflow/, "no cell in the /goal sheet ellipsizes");
+  // The clamp rides on an inner element — a `<td>` carrying `display:-webkit-box` would stop
+  // being a table cell (see the note in serve-goal.ts's goalTableStyles).
   assert.match(style, /-webkit-line-clamp:\s*2/, "the prose column clamps instead (two-line title)");
+  assert.match(res.body, /<td class="c-title" title="[^"]*"><span class="c-title-text">/,
+    "the clamped element is present in the markup the rule matches");
 });
 
 // ── AC2: /tests history table (server-level) is wrapped ───────────────────────────────────────────

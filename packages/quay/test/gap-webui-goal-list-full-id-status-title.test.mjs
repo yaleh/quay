@@ -230,15 +230,26 @@ test("AC2: title cell clamps to 2 lines and carries the full title; wide main is
   for (const [urlPath, tab] of [["/goal", "goal"], ["/goal?kind=criterion", "criterion"]]) {
     const r = await get(port, urlPath);
     const style = goalStyleBlock(r.body);
-    const rule = cssRule(style, ".goal-table .c-title");
+    // ⚠️ The clamp is on the title cell's CONTENT element, not on the `<td>` — a table cell that
+    // carries `display:-webkit-box` loses `table-cell` and Chrome wraps it in an anonymous
+    // table-cell, which on this page left a third line painted outside the two-line box (measured
+    // in headless Chrome). So the criterion ("the title cell clamps to 2 lines") is judged on the
+    // cell's content box: the `<td class="c-title">` must CONTAIN an element carrying the clamp.
+    const rule = cssRule(style, ".goal-table .c-title>.c-title-text");
     assert.match(rule, /-webkit-line-clamp:\s*2/, `${urlPath}: the title cell clamps to 2 lines`);
     assert.match(rule, /-webkit-box-orient:\s*vertical/, `${urlPath}: the clamp is vertical`);
+    assert.match(cssRule(style, ".goal-table .c-title"), /white-space:\s*normal/,
+      `${urlPath}: the title cell itself may wrap`);
 
     const rows = rowsOf(r.body, tab);
     assert.ok(rows.length >= 1, `${urlPath}: at least one title cell to judge`);
     const bad = rows.filter((x) => attr(x.cellTitle, "title") !== x.title || x.title === "")
       .map((x) => `title="${attr(x.cellTitle, "title")}" cellText="${x.title}"`);
     assert.deepEqual(bad, [], `${urlPath}: every title cell's title attribute == the full title:\n  ${bad.join("\n  ")}`);
+    // …and the clamped content really is inside an element the rule matches (a rule with no
+    // matching element in the markup would be a stylesheet that clamps nothing).
+    assert.match(r.body, /<td class="c-title" title="[^"]*"><span class="c-title-text">/,
+      `${urlPath}: the title cell wraps its content in the clamped element`);
   }
 
   // The long-title fixture really is long enough to clamp (>= 2 lines at any plausible width) — a
@@ -279,6 +290,14 @@ test("AC3: the goal table scrolls inside .table-wrap and the id column is sticky
     assert.match(sticky, /position:\s*sticky/, `${urlPath}: the id column is sticky at ≤900px`);
     assert.match(sticky, /left:\s*0/, `${urlPath}: the id column sticks to the container's left edge`);
     assert.match(sticky, /background:/, `${urlPath}: the sticky cell is opaque (else scrolled cells show through)`);
+    // ⚠️ `position:sticky` ALONE IS INERT HERE — and asserting only the declaration would be the
+    // 4b trap (a proxy that reads "fine" while nothing happens). The base sheet's `table{overflow:
+    // hidden}` makes the table its own cells' nearest scroll container, so the cell would resolve
+    // against a container that never scrolls. Measured: the declaration without `overflow:visible`
+    // left the cell at `left:-266` under `scrollLeft=300`. So the exemption is part of the
+    // criterion, not an implementation detail.
+    assert.match(cssRule(media[1], ".goal-table"), /overflow:\s*visible/,
+      `${urlPath}: the table must opt out of the base sheet's overflow:hidden, else the sticky cell is inert`);
   }
 });
 
