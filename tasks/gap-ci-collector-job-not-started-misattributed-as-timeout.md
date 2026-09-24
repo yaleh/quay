@@ -2,7 +2,7 @@
 id: gap-ci-collector-job-not-started-misattributed-as-timeout
 title: 采集器不读 runner_name/annotation——从未起跑的 job 被归因成 infra:job-timeout-reached；补
   job-not-started 独立取值
-status: ready
+status: done
 labels:
   - gap
   - defect
