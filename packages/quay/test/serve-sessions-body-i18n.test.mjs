@@ -91,9 +91,10 @@ function stripLangSwitcher(body) {
  *  same function every page renders, assigned by ROW 15 ⑥ to the series' shared residue list
  *  (gap-webui-dashboard-body-copy-en-zh). ⛔ Not a blanket exemption: the list is NAMED and its
  *  hits are counted in the assertion below, so it cannot silently grow to swallow this page's own
- *  copy. In this fixture `readSessions` normally reports `ok` (zero sessions) and NOTHING here
- *  renders — the exclusion exists so an environment where `claude agents --json` is unavailable
- *  fails the ZERO arm for a named, visible reason instead of a mystery. */
+ *  copy. `provisionFixtureClaude()` makes the reader deterministic (`ok`, zero sessions) so NOTHING
+ *  here renders and this list is a bounded, COUNTED guard rather than a live exemption — it is
+ *  deliberately kept (not deleted) so that if the fixture's `claude` ever goes missing again, the
+ *  ZERO arm still fails for a named, visible reason instead of a mystery. */
 const SHARED_CHROME_WORDS = ["未接入/无数据", "已接入/暂无记录", "读失败"];
 
 /** Chinese lines this PAGE authored — excluding (a) the switcher's endonym, (b) the named shared
@@ -116,7 +117,35 @@ function pageAuthoredCjk(body, readerTexts) {
 // ── the fixture: a real workspace, no sessions (so the ONLY possible CJK in the response is the
 //    page's own copy) ────────────────────────────────────────────────────────────────────────────
 
-let server, port, root, originalCwd, tasksDir;
+let server, port, root, originalCwd, tasksDir, originalPath;
+
+/** THE FIXTURE OWNS ITS `claude` (gap-serve-sessions-body-i18n-red-only-under-full-ci-concurrency).
+ *
+ *  `handleSessions` reads the session registry through `readSessions` → `runScriptBounded(["claude",
+ *  "agents", "--json"], …)`, spawned with the SERVE PROCESS's env — so `PATH` decides what that child
+ *  is. Left ambient the fixture reads something it does not own, and the two hosts disagree:
+ *
+ *    • CI runner — `claude` is not installed at all ⇒ `spawn` fails ENOENT. That is not merely a
+ *      different reading: it puts the serve process on `runScriptBounded`'s spawn-FAILURE path, where
+ *      the process ABORTS (SIGABRT, `si_code=SI_TKILL`, no message — strace-verified). Measured on
+ *      this box: 14/20 red with `claude` off `PATH`, 0/20 with it on. That asymmetry is the WHOLE of
+ *      the "red only under full CI concurrency" symptom — CI simply has no `claude`; concurrency was
+ *      never the variable.
+ *    • dev box — the real CLI returns the WHOLE machine's live session registry.
+ *
+ *  A fixture-local `claude` on `PATH` makes the answer OURS and byte-identical on both: `[]` — zero
+ *  sessions, `status: "ok"`, `reason: null`. That is exactly the state a dev box already lands in
+ *  AFTER `readSessions` scopes the real registry down to this throwaway workspace (nothing in it has
+ *  this cwd), so the green baseline is preserved, not weakened. */
+function provisionFixtureClaude() {
+  const binDir = path.join(root, "fixture-bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const stub = path.join(binDir, "claude");
+  fs.writeFileSync(stub, "#!/bin/sh\n# fixture-owned `claude` — see provisionFixtureClaude(): the session registry this page reads\nprintf '[]\\n'\n");
+  fs.chmodSync(stub, 0o755);
+  originalPath = process.env.PATH;
+  process.env.PATH = originalPath === undefined ? binDir : `${binDir}${path.delimiter}${originalPath}`;
+}
 
 before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "sess-i18n-ws-"));
@@ -127,6 +156,7 @@ before(async () => {
     path.join(root, ".quay", "config.yml"),
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`,
   );
+  provisionFixtureClaude();
   originalCwd = process.cwd();
   process.chdir(root);
   // port 0: let the kernel pick — probe-then-bind is a TOCTOU that races the kernel and leaks the
@@ -139,6 +169,7 @@ after(async () => {
   await new Promise((r) => server.close(r));
   if (server?.client) await server.client.close();
   process.chdir(originalCwd);
+  if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
   fs.rmSync(root, { recursive: true, force: true });
 });
 
