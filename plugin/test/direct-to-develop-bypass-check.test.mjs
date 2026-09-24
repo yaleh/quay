@@ -33,6 +33,13 @@
 //   · CLI rewind（P 非 T 祖先）⇒ 不计为「带入 commit 的落地」，单列 `nonForwardRefMoves`（引入集为空）；
 //   · CLI `commit:` action 的 code-surface 直投仍 RED（放宽词汇表不得漏掉真直投）。
 //
+// 钉子（gap-ac194-production-criterion-owner）：上一条目对 fetch 只钉了**一种后缀拼法**（`: storing ref`）
+// ⇒ 把 fetch 分支改回拼法白名单**不会有任何测试变红**——「第 6 次拼法变更」没有载体（硬规则 9）。
+// 本文件现另钉两类读数：(a) 生产真实形态 `fetch -q . author:develop: fast-forward`（develop 真实 reflog
+// 里的逐字条目，见下方「fetch 形的钉子」节的实测引用）；(b) 词表外后缀（`pruned`）仍 ⇒ refMove。
+// **变异检验**：把该分支改回 `&& /: storing ref\s*$/.test(s)` ⇒ 这些断言必须变红（否则它只是回声，
+// 硬规则④推论三）。
+//
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
 //   node --test plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -1025,6 +1032,50 @@ test("PURE classifyReflogAction — 结构判定：commit 前缀 ⇒ direct；�
   assert.equal(classifyReflogAction(undefined), "unknown");
 });
 
+// ── fetch 形的钉子（gap-ac194-production-criterion-owner AC3/AC5）──────────────────────────────────
+// 缺口（本任务的**唯一活口**）：上一条测试对 fetch 只有**一条**断言（`: storing ref` 那行，原文在
+// gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check 立案时就在），而那是**一种后缀拼法**。
+// ⇒ 把 fetch 分支改回 `/^fetch\b/ && /: storing ref\s*$/`（拼法白名单），本文件**没有任何测试变红**——
+// 「第 6 次拼法变更」没有载体（硬规则 9：可见性 ≠ 执行，该给它造产物，而不是把规则写得更醒目）。
+// 下面两类读数就是那个产物，缺一不可：
+//   (a) 【生产真实形态】`fetch -q . author:develop: fast-forward`。⛔ 不是构造的字符串——本仓 develop
+//       **真实 reflog** 里逐字有它（本任务实测：`git reflog show develop --format='%gd|%h|%gs'` ⇒
+//       `develop@{225}|6de94b9e4|fetch -q . author:develop: fast-forward`；同形另有
+//       `fetch -q . memorymax-16g:develop: fast-forward` / `fetch -q . chore/quay-dev-marketplace:develop:
+//       fast-forward` / `fetch . spec-ctx-on-develop:develop: fast-forward`——三种 src 名、含非 `-q` 拼法）。
+//   (b) 【词表外后缀】`pruned`。实测**不在** git 2.43.0 的 fetch reflog 词表内：`strings $(command -v git)`
+//       只有 `storing head` / `storing ref` / `storing tag` / `fast-forward` / `forced-update`，且
+//       `git fetch --prune` 删除 ref 时**连同其 reflog 一起消失**（`.git/logs` 下不产生任何 `pruned` 行）
+//       ⇒ 它是「判定与词表无关」的干净样本（词表内找一个样本证明不了与词表无关）。
+// 后缀词表实测（git 2.43.0，本机探针仓库 `git fetch . <src>:<dst>` 逐条贴 %gs；⛔ 无凭记忆字面量）：
+//   git fetch <r> <分支名>:<已存在 ref>（ff）    → `fetch -q <r> <src>:<ref>: fast-forward`   ← 生产形态
+//   git fetch --force <r> <src>:<已存在 ref>     → `fetch -q --force <r> <src>:<ref>: forced-update`
+//   git fetch <r> <分支名>:<新 ref>              → `fetch -q <r> <src>:refs/heads/<b>: storing head`
+//   git fetch <r> <sha>:<新 ref>                 → `fetch -q <r> <sha>:refs/heads/<b>: storing ref`
+// 判定按**结构**（action 词是 `fetch` ⇒ git-fetch 在本地从不创建 commit ⇒ 只能把 ref 指向一个已存在的
+// 对象），与上表**无关**：表里没有的后缀（b）落同一边。⛔ 本测试**不**逐一枚举后缀（枚举正是在造下一个
+// 白名单）；它只钉住「生产形态正确」与「后缀不在表内也正确」。
+
+test("PURE classifyReflogAction — fetch 形按结构判定（钉子）：生产形态 `fetch -q . author:develop: fast-forward` 与词表外后缀 `pruned` 都 ⇒ refMove", () => {
+  // (a) 生产真实形态（见上注：develop 真实 reflog 里的逐字条目）
+  assert.equal(classifyReflogAction("fetch -q . author:develop: fast-forward"), "refMove",
+    "生产形态 ⇒ refMove（旧判据要求 `: storing ref$` ⇒ 这条落 unknown ⇒ NOT-EVALUATED ⇒ AC-194 结构上不可达）");
+  assert.equal(classifyReflogAction("fetch -q . chore/quay-dev-marketplace:develop: fast-forward"), "refMove", "同形、另一 src 名");
+  assert.equal(classifyReflogAction("fetch . spec-ctx-on-develop:develop: fast-forward"), "refMove", "非 `-q` 拼法同形（⛔ 判定不看 `-q`）");
+  // 词表内其余后缀（实测原文）——四种后缀全落同一边
+  assert.equal(classifyReflogAction("fetch -q --force . author:develop: forced-update"), "refMove");
+  assert.equal(classifyReflogAction("fetch -q . author:refs/heads/newb: storing head"), "refMove");
+  assert.equal(classifyReflogAction("fetch -q . 17c89a07ed01e0d9d25074b101cf56d8e279d82a:refs/heads/dst: storing ref"), "refMove");
+  // (b) 词表外后缀 ⇒ 仍 refMove（判定与词表无关；`pruned` 见上注：实测不在词表内）
+  assert.equal(classifyReflogAction("fetch -q . author:develop: pruned"), "refMove",
+    "词表外后缀必须仍 refMove——白名单对下一种后缀结构上不可能发现（这正是 `branch: Reset to HEAD` 破掉 AC-194 的方式）");
+  assert.equal(classifyReflogAction("fetch -q . author:develop: suffix-nobody-enumerated"), "refMove", "任意未来后缀同形：判定不看后缀");
+  // 负控制①：放宽 fetch **不得**把真直投洗成 refMove
+  assert.equal(classifyReflogAction("commit: direct"), "direct", "fetch 分支放宽不得吞掉 `commit:` 形");
+  // 负控制②：`\b` 词边界——`fetching` 不是 git 的 action 词，前缀相似不得被吞
+  assert.equal(classifyReflogAction("fetching: nope"), "unknown", "前缀相似但不是 action 词 ⇒ 仍 fail-closed");
+});
+
 test("PURE reflogActionForm — 点名根因用的 action 形（取前缀；无前缀形取整串；空 ⇒ (empty)）", () => {
   assert.equal(reflogActionForm("reset: moving to HEAD~1"), "reset");
   assert.equal(reflogActionForm("branch: Reset to HEAD"), "branch");
@@ -1684,6 +1735,68 @@ test("AC3 CLI — `commit:` action 的 code-surface 直投仍 RED（放宽词汇
     const r2 = runChecker(["--root", dir, "--commits", sha]);
     assert.equal(r2.status, 1, `--commits 回放同一 commit 也必须 RED: ${r2.stdout}${r2.stderr}`);
     assert.equal(jsonOut(r2).reason, "direct-commit-bypasses-fan-in");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── fetch 形的钉子·CLI 级（gap-ac194-production-criterion-owner AC3/AC5）───────────────────────────
+// 上面那条 PURE 测试钉的是**函数**；这两条钉的是**整条判定链**（gitDevelopDirectCommits →
+// buildRefMoveBrackets → classifySpineLandingMode → 三态退出码）对同一个 fetch 形的行为——
+// 白名单化会先在这里把结果从 exit 0 翻成 exit 3（NOT-EVALUATED），而不只是让一个纯函数返回值变。
+
+test("AC3 CLI — 生产形态 `git fetch -q . author:develop` 的**真实 reflog**落地 ⇒ refMove：exit 0、unclassifiable 归零、ratio 1", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-fetch-prod");
+  try {
+    const tip = commitCodeSurface(dir, "fetchprod.ts");
+    gitCmd(dir, "branch", "author", tip);
+    gitCmd(dir, "checkout", "-q", "--detach"); // develop 不再被检出 ⇒ fetch 可写 develop ref
+    const fr = gitCmd(dir, "fetch", "-q", ".", "author:develop");
+    assert.equal(fr.status, 0, `git fetch . author:develop 应成功: ${fr.stderr}`);
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    // 夹具前置断言：必须产出**生产形态**——否则本测试测的是另一种形，钉不到 AC3(a)。
+    assert.match(reflog, /^fetch -q \. author:develop: fast-forward$/m,
+      `夹具必须产出生产形态（本仓 develop reflog 逐字同形 develop@{225}）: ${reflog}`);
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    assert.equal(r.status, 0, `fetch 落地是 ref-level 移动（不创建 commit）⇒ 不得判直投: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.unclassifiableCommits, 0,
+      "生产形态若落 unclassifiable ⇒ 判据恒 NOT-EVALUATED ⇒ AC-194 结构上不可达（旧白名单正是在这里失明）");
+    assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+    assert.equal(out.classification.unclassifiedActionForms.length, 0);
+    assert.equal(out.denominator.totalDirectCommits, 0, "refMove 不计入直投分母");
+    // 可见而非静默豁免：带入窗内的 first-parent sha 清单仍在。
+    assert.equal(out.classification.refMoveIntroduced.length, 1);
+    assert.equal(out.classification.refMoveIntroduced[0].tip, tip);
+    assert.deepEqual(out.classification.refMoveIntroduced[0].introduced.map((i) => i.sha), [tip]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC5 CLI — 词表外 fetch 后缀（`pruned`）落在**真实 reflog 行** ⇒ 仍 refMove：判定与后缀词表无关", () => {
+  const { dir, base } = makeForkedDevelopRepo("cli-fetch-unlisted");
+  try {
+    const tip = commitCodeSurface(dir, "fetchunlisted.ts");
+    gitCmd(dir, "checkout", "-q", "--detach");
+    // 把词表外的后缀写进**真实** reflog（同一手法用于既有 unknown 形用例：git 允许 -m 指定任意 reflog 文本）。
+    const ur = gitCmd(dir, "update-ref", "-m", "fetch -q . author:develop: pruned", "refs/heads/develop", tip);
+    assert.equal(ur.status, 0, `git update-ref 应成功: ${ur.stderr}`);
+    const reflog = gitCmd(dir, "reflog", "show", "develop", "--format=%gs").stdout;
+    assert.match(reflog, /^fetch -q \. author:develop: pruned$/m, `夹具必须产出词表外后缀的真实 reflog 行: ${reflog}`);
+
+    const r = runChecker(["--root", dir, "--develop", "develop", "--baseline", base]);
+    assert.equal(r.status, 0,
+      `词表外 fetch 后缀仍必须 refMove（⛔ 不得落 unknown ⇒ NOT-EVALUATED/exit 3）: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.unclassifiableCommits, 0, "词表外后缀不得落 unclassifiable");
+    assert.equal(out.classification.unclassifiedActionForms.length, 0, "⛔ 不得被点名为「读不懂的 action 形」");
+    assert.equal(out.classification.ratio, 1);
+    assert.equal(out.denominator.totalDirectCommits, 0);
   } finally {
     cleanup(dir);
   }
