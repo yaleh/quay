@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 67 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 68 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -961,6 +961,25 @@ run_static_checks() {
   # @static-tier change
   # @static-object .github/workflows/release.yml plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh
   run_checker "release-master-advance-needs-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-master-advance-needs-check.ts" --root "${repo_root}"
+  echo "== workflow-runner-self-hosted check (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) =="
+  # Every job of every .github/workflows/*.{yml,yaml} must carry `self-hosted` in its `runs-on`, so
+  # the metered hosted-runner billing gate (measured 2026-09-24: 7 of this repo's 8 jobs came back
+  # `runner_name=""`, `steps=0`, annotation "The job was not started because recent account payments
+  # have failed") can never again stop CI or a release SILENTLY. Code-class, not operational: the only
+  # input is a checked-in workflow file, so it belongs here and its verdict is about the tree under
+  # test — `--root repo_root`, NOT main_root, because this task's worktree carries the migration
+  # before the main checkout does.
+  # Exit vocabulary: 0 = every job judged AND self-hosted · 1 = a job is not statically self-hosted
+  # (named in the output; CAUSE=metered-runner-job) · 3 = NOT-EVALUATED (no workflow file / a file
+  # that does not parse / a file with no jobs mapping / the yaml implementation unavailable) — never
+  # conflated with 0, because an empty population is not a pass (硬规则 3b).
+  # ⚠️ Same predicate as the goal-layer criterion goals/AC-319-*.md, which deliberately does NOT
+  # import this file (the goal layer is an independent measurement). The two are held together by
+  # plugin/test/workflow-runner-self-hosted-check.test.mjs, which runs BOTH over one fixture set and
+  # asserts identical three-valued conclusions — change one, change the other in the same commit.
+  # @static-tier change
+  # @static-object .github/workflows/ plugin/scripts/workflow-runner-self-hosted-check.ts plugin/test/workflow-runner-self-hosted-check.test.mjs plugin/scripts/checker-mutation-cases/workflow-runner-self-hosted-check.sh
+  run_checker "workflow-runner-self-hosted-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/workflow-runner-self-hosted-check.ts" --root "${repo_root}"
   echo "== import-graph ratchet (tasks/gap-arch-import-graph-check — SPEC-architecture-consolidation §2 P1 / §5 Phase 0a) =="
   # The module dependency graph read BY STATEMENT POSITION (value / type-only SCCs + packages→plugin|
   # experiments reverse edges + the conditional packages/quay/src/kernel boundary), ratcheted shrink-only

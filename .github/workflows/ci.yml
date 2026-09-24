@@ -258,7 +258,12 @@ jobs:
   # explicitly NOT a `node --test *.test.mjs` suite and is NOT covered by `scripts/test.sh`/the
   # `test` job above; a green `test` job run says nothing about whether packaging itself works.
   dist-verify-node-floor:
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319): the metered
+    # ubuntu-latest gate refused to START this job on 2026-09-24 (annotation: "recent account
+    # payments have failed"). The Node 20 FLOOR this job exists to prove is unaffected — it is
+    # supplied by the actions/setup-node step below, NOT by the runner image (tokyo-alpha ships a
+    # node v10 with no npm; every node/npm/npx invocation here is downstream of setup-node).
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -307,7 +312,9 @@ jobs:
   # Runs version-consistency-check.ts on every push; fails the build if any
   # of the 9 version-bearing artifacts has drifted from the unified version.
   version-consistency:
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) — same metered-runner
+    # refusal; its node/npx come from the actions/setup-node step below.
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v4
@@ -342,7 +349,9 @@ jobs:
   # (AC10) — this job only builds + installs from the orphan commit, it does not release.
   cold-start-e2e:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) — same metered-runner
+    # refusal; `npm install` below runs on the setup-node-supplied node, not the image's.
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 15
     permissions:
       contents: read

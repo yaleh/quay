@@ -835,6 +835,7 @@ plugin/test/workflow-invariant-ownership.test.mjs
 plugin/test/workflow-journal.test.mjs
 plugin/test/workflow-metadata-conformance.test.mjs
 plugin/test/workflow-replay.test.mjs
+plugin/test/workflow-runner-self-hosted-check.test.mjs
 plugin/test/worktree-namespace-literal-check.test.mjs
 plugin/test/worktree-process-reaper.test.mjs
 plugin/test/worktree-root-fs-check.test.mjs

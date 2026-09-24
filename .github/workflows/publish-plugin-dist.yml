@@ -41,7 +41,10 @@ on:
 
 jobs:
   publish-dist-branch:
-    runs-on: ubuntu-latest
+    # self-hosted (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319): the metered ubuntu-latest
+    # gate refused to START this job on 2026-09-24. Its `npm install` runs on the setup-node-supplied
+    # node below, never on the image's (tokyo-alpha ships node v10 with no npm).
+    runs-on: [self-hosted, tokyo-alpha]
     timeout-minutes: 10
     permissions:
       contents: write
