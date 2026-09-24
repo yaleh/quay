@@ -17,12 +17,33 @@
 //      can be judged `done` while a real phase is still open — the exact modeling hole that made
 //      M-TS-MIGRATION (children: [P0-only]) read as complete while P1-P4 were unlisted.
 //
-//   4. DEP-DONE-IFF-DEPS: A task marked `done` whose `depends_on:` prerequisites are NOT all `done`
-//      is a violation — a task cannot be done before its declared prerequisites. `depends_on` is the
-//      machine-readable home for prerequisites (gap-prerequisite-gates-prose-invisible-to-mechanisms):
+//   4. DEP-DONE-IFF-DEPS: A task marked `done` whose `depends_on:` prerequisites are still BLOCKING is
+//      a violation — a task cannot be done before its live prerequisites are satisfied. `depends_on` is
+//      the machine-readable home for prerequisites (gap-prerequisite-gates-prose-invisible-to-mechanisms):
 //      the same edges the ready-pool author→ready gate and the A15② dispatch dependency-readiness
 //      check read, so a prose-only prerequisite (a `[[task-id]]` wikilink in a "Do not dispatch until
 //      … lands" paragraph) is visible here and caught before a dependent is judged complete.
+//
+//      ⚠️ THE JUDGMENT IS THREE-VALUED, NOT BOOLEAN (gap-it0-dep-done-iff-deps-blind-to-superseded).
+//      A dependency whose task was RETIRED (`status: superseded` — a terminal state: the premise was
+//      ruled obsolete and its successor carries the real dependency) is a THIRD state. Before this fix
+//      the rule read `status !== "done"` ⇒ retired and "not done yet" printed the SAME violation. That
+//      is hard rule 3b's exact shape — **the unsatisfiable masquerading as the not-yet-satisfied** —
+//      and its cost is measured: because this rule is a whole-store invariant registered in the static
+//      tier, ONE done task holding a retired `depends_on` edge reddened EVERY commit's CI at the static
+//      layer (`STATIC_CHECK_FAILED: it0-split-or-commit-check exit=1`; `node --test` never ran), which
+//      blocked release. Note this is not a one-off: the SAME principle was already fixed on two sibling
+//      paths — `ready-pool-check.ts`'s `prosePrereqRefs` (the prose path) and `driver-filters.ts`'s
+//      `judgeDeps` (the relation-edge path, imported below as the single source of truth, hard rule 5b).
+//      ⇒ the checker now READS the three states apart:
+//        · `done`       — satisfied; nothing reported.
+//        · `superseded` — retired: does NOT block (its successor carries the dependency), but ⛔ is NOT
+//                         counted as done. Surfaced as its own `RETIRED-DEP:` readout — never merged into
+//                         the violation list, never merged into the satisfied set.
+//        · blocking     — todo / ready / needs-human / missing / unreadable ⇒ STILL a violation
+//                         (fail-closed; the exemption must never widen to "any non-done passes").
+//      The `RETIRED-DEP:` readout is an ADVISORY, not a failure — it keeps the distinction visible
+//      (hard rule 3b) without re-introducing the permanent red it exists to remove.
 //
 //   5. DEP-DANGLING: A task declaring `depends_on: [X]` where X does not exist is a dangling
 //      prerequisite edge — fail-closed (a missing dep file cannot be confirmed done), the same
@@ -72,6 +93,8 @@
 //   0 = all checks PASS (also: `--changed` with nothing to evaluate — NOT-EVALUATED)
 //   1 = at least one violation found
 //   2 = usage/environment error
+// ⛔ CHECK 4's `RETIRED-DEP:` advisories (see rule 4 above) NEVER affect the exit code — they are a
+//    readout, not a verdict, in both the whole-store and `--changed` modes.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -83,6 +106,16 @@ import { fileURLToPath } from "node:url";
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 // (The local adapter is named `flagArg`, not `flagValue`, so it cannot shadow the import.)
 import { helpExit, flagValue, isDirectEntry } from "./gate-script-base.ts";
+// CHECK 4's three-valued dependency judgment is NOT re-implemented here: it is imported from
+// driver-filters.ts, the SINGLE SOURCE OF TRUTH for the `depends_on` relation-edge verdict
+// (`judgeDepStatus` / `judgeDeps`), which ready-pool-check.ts's `depsReadinessFor` and slot-refill's
+// `depsReadyFor` already share. `ready-pool-check.ts` imports it by the same route (AC152), so this
+// checker is the THIRD consumer of one judgment rather than the home of a second copy of it
+// (gap-it0-dep-done-iff-deps-blind-to-superseded / hard rule 5b). The three values it returns —
+// `done` / `superseded` / `blocking` — are exactly CHECK 4's three states, which is why no local
+// mirror is needed (verified: the edge creates no new value/type SCC and no reverse edge, so
+// plugin/scripts/import-graph-check.ts's ratchet is unmoved).
+import { judgeDeps } from "./driver-filters.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -260,9 +293,17 @@ function isCompound(t: TaskFrontmatter): boolean {
 
 export interface CheckResult {
   failures: string[];
+  /** CHECK 4's ADVISORY readout: `done` tasks holding one or more RETIRED (`superseded`) `depends_on`
+   *  prerequisites. A separate list from `failures` ON PURPOSE — that separation IS the fix
+   *  (gap-it0-dep-done-iff-deps-blind-to-superseded / hard rule 3b): a retired prerequisite neither
+   *  blocks (so it must not appear in `failures`) nor counts as done (so it must not vanish silently
+   *  either). Collapsing it into either list is the defect this field exists to prevent. */
+  retired: string[];
 }
 
-// ── runChecks — pure function: given a Map<id, task>, returns {failures: string[]}. ──────────────
+// ── runChecks — pure function: given a Map<id, task>, returns {failures: string[], retired: string[]}.
+// `failures` = the five rules' violations (exit 1); `retired` = CHECK 4's non-blocking advisories
+// (reported, never an exit-code input). ─────────────────────────────────────────────────────────────
 // Reconciliation with store.js childrenStatus(): store.js does a recursive tree walk to build a
 // view-model (propagating "stale-done" up to callers). This gate uses a FLAT per-task check
 // instead: each done compound task is checked against its direct children's stored status. Deeper
@@ -271,6 +312,7 @@ export interface CheckResult {
 // and is the right shape for a gate: produce one clear error per violated boundary.
 export function runChecks(taskMap: Map<string, TaskFrontmatter>, attributeTo?: Set<string>): CheckResult {
   const failures: string[] = [];
+  const retired: string[] = [];
 
   // ATTRIBUTION FILTER — used by `--changed` ONLY (undefined ⇒ whole-store behaviour, byte-identical
   // to every existing caller). A violation is a RELATION among named tasks; it is reported here only
@@ -348,30 +390,38 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>, attributeTo?: S
     }
   }
 
-  // CHECK 4: DEP-DONE-IFF-DEPS
-  // For every task marked `done`, all `depends_on:` prerequisites must ALSO be `done`. A task cannot
-  // be done before its declared prerequisites — otherwise a dependent is judged complete while a
-  // prerequisite is still open (the same "prematurely done" family PARENT-DONE-IFF-CHILDREN kills,
-  // over the depends_on edge). This is the split-or-commit gate's half of making prerequisites
-  // mechanism-visible: a prose-only prerequisite has no depends_on edge, so it is NOT checked here —
-  // the ready-pool author→ready gate (prose-prereq-no-edge exclusion) blocks that shape at promotion.
+  // CHECK 4: DEP-DONE-IFF-DEPS  (THREE-VALUED — see the file header, gap-it0-dep-done-iff-deps-blind-to-superseded)
+  // For every task marked `done`, each `depends_on:` prerequisite is judged into one of THREE states by
+  // the shared `judgeDeps` kernel (driver-filters.ts — the same call ready-pool-check.ts makes):
+  //   · done       ⇒ satisfied, silent.
+  //   · superseded ⇒ RETIRED. Does NOT block (the premise was ruled obsolete; its successor carries the
+  //                  real dependency) and ⛔ is NOT treated as done. Emitted as a `RETIRED-DEP:`
+  //                  advisory readout on `retired`, never as a violation.
+  //   · blocking   ⇒ todo / ready / needs-human / missing / unreadable ⇒ VIOLATION, as before.
+  // The old body compared `depStatus !== "done"`, which made the RETIRED state print the SAME violation
+  // as "not done yet" — the unsatisfiable masquerading as the not-yet-satisfied (hard rule 3b). Because
+  // this rule is a whole-store static-tier invariant, one such edge reddened every commit's CI.
+  // ⛔ FAIL-CLOSED IS PRESERVED: only `superseded` is exempt; everything else — including a missing or
+  // unreadable prerequisite — stays in `blockingDeps` (judgeDeps maps null/unknown to `blocking`), so
+  // the exemption can never widen to "any non-done passes".
   for (const [id, t] of taskMap) {
     if (t.status !== "done") continue;
     const deps = t.dependsOn || [];
     if (deps.length === 0) continue;
-    const nonDoneDeps: string[] = [];
-    const nonDoneDepIds: string[] = [];
-    for (const depId of deps) {
-      const dep = taskMap.get(depId);
-      const depStatus = dep ? dep.status : "missing";
-      if (depStatus !== "done") {
-        nonDoneDeps.push(`${depId} (status: ${depStatus})`);
-        nonDoneDepIds.push(depId);
-      }
-    }
-    if (nonDoneDeps.length > 0 && keep([id, ...nonDoneDepIds])) {
+    const depStatusText = (depId: string): string => taskMap.get(depId)?.status ?? "missing";
+    const readiness = judgeDeps(deps, (depId) => taskMap.get(depId)?.status ?? null);
+    if (readiness.blockingDeps.length > 0 && keep([id, ...readiness.blockingDeps])) {
+      const blocking = readiness.blockingDeps.map((depId) => `${depId} (status: ${depStatusText(depId)})`);
       failures.push(
-        `DEP-DONE-IFF-DEPS: task "${id}" is done but has ${nonDoneDeps.length} non-done prerequisite(s) in depends_on: ${nonDoneDeps.join(", ")} — a done task requires ALL its depends_on prerequisites done (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
+        `DEP-DONE-IFF-DEPS: task "${id}" is done but has ${readiness.blockingDeps.length} blocking prerequisite(s) in depends_on: ${blocking.join(", ")} — a done task requires all its LIVE depends_on prerequisites satisfied (done, or retired by a human ruling); a blocking prerequisite is neither (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
+      );
+    }
+    if (readiness.supersededDeps.length > 0 && keep([id, ...readiness.supersededDeps])) {
+      // The THIRD state, surfaced so it can never be confused with either neighbour: this line names the
+      // retired prerequisite and says explicitly that it is not a violation AND not a completion.
+      const retiredDeps = readiness.supersededDeps.map((depId) => `${depId} (status: ${depStatusText(depId)})`);
+      retired.push(
+        `RETIRED-DEP: task "${id}" is done and has ${readiness.supersededDeps.length} retired (superseded) prerequisite(s) in depends_on: ${retiredDeps.join(", ")} — a retired prerequisite does not block (its successor carries the real dependency) and ⛔ is NOT counted as done; reported for visibility only, NOT a violation`
       );
     }
   }
@@ -390,16 +440,29 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>, attributeTo?: S
     }
   }
 
-  return { failures };
+  return { failures, retired };
 }
 
 // ── selftest — runs fixture cases internally using temp task files. ───────────────────────────────
+// Each case is a fixture task set plus an EXPECTATION. A case can expect more than "FAIL"/"PASS":
+// `retiredIncludes` / `retiredExcludes` / `violationMentions` pin WHICH state a dependency landed in,
+// which is what makes the three-valued CHECK 4 measurable rather than merely non-zero (hard rule 3b —
+// a fixture that only counts violations cannot tell "retired" from "blocking" from "done").
 // RED case 1: parent `done` with a child that is `ready` → FAIL
 // RED case 2: compound task with `todo` status and NO children → FAIL
 // RED case 3: child declares `parent` but the parent's `children` omits it (link asymmetry) → FAIL
 // RED case 4: child declares a `parent` that does not exist (dangling link) → FAIL
 // RED case 5: task `done` with a depends_on prerequisite that is `todo` (DEP-DONE-IFF-DEPS) → FAIL
 // RED case 6: task declares a `depends_on` id that does not exist (DEP-DANGLING) → FAIL
+// THREE-VALUED case 7 (AC1): task `done` with a `superseded` depends_on prerequisite → PASS **and** the
+//   retired prerequisite appears in the dedicated `retired` readout, ⛔ not in `failures`.
+// THREE-VALUED case 8 (AC2 negative control): the SAME fixture with that prerequisite swapped to `todo`
+//   → FAIL, the violation NAMES that prerequisite, and it must NOT appear in the retired readout
+//   (the exemption must not widen to "any non-done prerequisite passes").
+// THREE-VALUED case 9: the same swap to `needs-human` (the second blocking state AC2 names) → same shape.
+// THREE-VALUED case 10 (the sharpest separation): a done task with BOTH a `superseded` and a `todo`
+//   prerequisite → the violation names ONLY the blocking one while the retired readout names ONLY the
+//   retired one — both states visible at once, neither merged into the other.
 // GREEN case: parent `done` with all children `done` + compound `todo` with children + symmetric
 //   links + a done task whose depends_on deps are all done → PASS
 export function selftest(): boolean {
@@ -412,6 +475,20 @@ export function selftest(): boolean {
     children?: string[];
     parent?: string;
     dependsOn?: string[];
+  }
+
+  /** What a fixture asserts. A bare boolean (the original form) means "violations present?"; the
+   *  object form additionally pins WHERE each named prerequisite landed. */
+  interface FixtureExpectation {
+    fail: boolean;
+    /** Each id MUST be named by the `retired` advisory readout and MUST NOT be named by a violation. */
+    retiredIncludes?: string[];
+    /** Each id MUST NOT be named by the `retired` advisory readout. */
+    retiredExcludes?: string[];
+    /** Each id MUST be named by a violation. */
+    violationMentions?: string[];
+    /** Each id MUST NOT be named by a violation (the negative half of `violationMentions`). */
+    violationExcludes?: string[];
   }
 
   function writeTask(dir: string, id: string, fields: TaskDef): void {
@@ -428,25 +505,60 @@ export function selftest(): boolean {
     fs.writeFileSync(path.join(dir, `${id}.md`), content);
   }
 
-  function runFixture(name: string, taskDefs: Record<string, TaskDef>, expectFail: boolean): void {
+  // Position-based mention test (hard rule 2): a line "names" an id only in the `id (status: …)` slot
+  // both message forms use. A bare substring hit would let `dep-a` match `dep-ab` — a mention is not a
+  // declaration, and a shared prefix is not a mention.
+  const names = (line: string, id: string): boolean => line.includes(`${id} (status:`);
+
+  function runFixture(name: string, taskDefs: Record<string, TaskDef>, expect: boolean | FixtureExpectation): void {
     const dir = path.join(tmpDir, name);
     fs.mkdirSync(dir, { recursive: true });
     for (const [id, fields] of Object.entries(taskDefs)) {
       writeTask(dir, id, fields);
     }
     const taskMap = loadTasks(dir);
-    const { failures } = runChecks(taskMap);
+    const { failures, retired } = runChecks(taskMap);
+    const exp: FixtureExpectation = typeof expect === "boolean" ? { fail: expect } : expect;
     const didFail = failures.length > 0;
-    if (didFail === expectFail) {
-      console.log(`SELFTEST PASS: ${name} — ${expectFail ? `correctly detected ${failures.length} violation(s)` : "correctly found no violations"}`);
-      if (failures.length > 0) {
-        for (const f of failures) console.log(`  violation: ${f}`);
+
+    const problems: string[] = [];
+    if (didFail !== exp.fail) {
+      problems.push(`expected ${exp.fail ? "FAIL" : "PASS"} but got ${didFail ? "FAIL" : "PASS"}`);
+    }
+    for (const id of exp.retiredIncludes ?? []) {
+      if (!retired.some((r) => names(r, id))) {
+        problems.push(`id "${id}" is NOT in the retired readout — a retired prerequisite would be indistinguishable from a satisfied one`);
       }
+      if (failures.some((f) => names(f, id))) {
+        problems.push(`id "${id}" is named by a VIOLATION — retired was merged into blocking (the two states must stay separable)`);
+      }
+    }
+    for (const id of exp.retiredExcludes ?? []) {
+      if (retired.some((r) => names(r, id))) {
+        problems.push(`id "${id}" IS in the retired readout — a still-blocking prerequisite was reported as retired`);
+      }
+    }
+    for (const id of exp.violationMentions ?? []) {
+      if (!failures.some((f) => names(f, id))) {
+        problems.push(`no violation names "${id}"`);
+      }
+    }
+    for (const id of exp.violationExcludes ?? []) {
+      if (failures.some((f) => names(f, id))) {
+        problems.push(`a violation names "${id}", which must not be reported as blocking`);
+      }
+    }
+
+    if (problems.length === 0) {
+      const what = exp.fail ? `correctly detected ${failures.length} violation(s)` : "correctly found no violations";
+      const extra = retired.length > 0 ? ` + ${retired.length} retired advisory readout(s)` : "";
+      console.log(`SELFTEST PASS: ${name} — ${what}${extra}`);
+      for (const f of failures) console.log(`  violation: ${f}`);
+      for (const r of retired) console.log(`  retired: ${r}`);
     } else {
-      console.error(`SELFTEST FAIL: ${name} — expected ${expectFail ? "FAIL" : "PASS"} but got ${didFail ? "FAIL" : "PASS"}`);
-      if (failures.length > 0) {
-        for (const f of failures) console.error(`  violation: ${f}`);
-      }
+      console.error(`SELFTEST FAIL: ${name} — ${problems.join("; ")}`);
+      for (const f of failures) console.error(`  violation: ${f}`);
+      for (const r of retired) console.error(`  retired: ${r}`);
       allPassed = false;
     }
   }
@@ -486,6 +598,50 @@ export function selftest(): boolean {
     "dep-user": { status: "ready", role: "primitive", children: [], dependsOn: ["ghost-dep"] },
   }, true /* expect FAIL */);
 
+  // ── THREE-VALUED CHECK 4 fixtures (gap-it0-dep-done-iff-deps-blind-to-superseded) ──────────────
+  // The pair that pins the fix: SAME dependent, SAME edge, only the prerequisite's status differs.
+  // Before the fix both cases produced the identical DEP-DONE-IFF-DEPS violation (hard rule 3b).
+
+  // AC1: a done task whose dependency is RETIRED (`superseded`) ⇒ PASS, with a DISTINCT retired readout.
+  runFixture("three-valued-done-with-superseded-dep", {
+    "retired-dep": { status: "superseded", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["retired-dep"] },
+  }, { fail: false, retiredIncludes: ["retired-dep"] });
+
+  // AC2 negative control, direction 1: the same fixture with the dependency swapped to `todo` ⇒ STILL
+  // a violation, and the violation NAMES it while the retired readout does NOT (an exemption that
+  // widened to "any non-done passes" would silently pass this).
+  runFixture("three-valued-done-with-todo-dep", {
+    "todo-dep": { status: "todo", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["todo-dep"] },
+  }, { fail: true, violationMentions: ["todo-dep"], retiredExcludes: ["todo-dep"] });
+
+  // AC2 negative control, direction 2: the other blocking state AC2 names.
+  runFixture("three-valued-done-with-needs-human-dep", {
+    "nh-dep": { status: "needs-human", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["nh-dep"] },
+  }, { fail: true, violationMentions: ["nh-dep"], retiredExcludes: ["nh-dep"] });
+
+  // The sharpest separation: BOTH states on ONE done task. The violation must name only the blocking
+  // one and the retired readout only the retired one — two states visible at once, neither merged.
+  runFixture("three-valued-mixed-retired-and-blocking", {
+    "retired-dep": { status: "superseded", role: "primitive", children: [] },
+    "todo-dep": { status: "todo", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["retired-dep", "todo-dep"] },
+  }, {
+    fail: true,
+    violationMentions: ["todo-dep"],
+    violationExcludes: ["retired-dep"],
+    retiredIncludes: ["retired-dep"],
+    retiredExcludes: ["todo-dep"],
+  });
+
+  // A done task whose dependency is MISSING entirely must stay BLOCKING (fail-closed), not retired —
+  // "read nothing" and "read retired" are different states and must not share an output.
+  runFixture("three-valued-done-with-missing-dep", {
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["ghost-dep"] },
+  }, { fail: true, violationMentions: ["ghost-dep"], retiredExcludes: ["ghost-dep"] });
+
   // GREEN case: parent `done` with all children `done` + compound `todo` with children + SYMMETRIC
   // links + a done task whose depends_on deps are all done
   runFixture("green-compliant", {
@@ -503,7 +659,7 @@ export function selftest(): boolean {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   if (allPassed) {
-    console.log("SELFTEST: all 7 fixture cases PASS.");
+    console.log("SELFTEST: all 12 fixture cases PASS.");
     return true;
   } else {
     console.error("SELFTEST: one or more fixture cases FAILED.");
@@ -512,6 +668,16 @@ export function selftest(): boolean {
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
+/** Print CHECK 4's RETIRED advisories. Deliberately its OWN output block, never folded into the FAIL
+ *  lines above it: that block boundary is what makes "retired" readable as neither "blocking" nor
+ *  "done" (hard rule 3b). Prints nothing when there is nothing retired, so a clean store's output is
+ *  unchanged. ⛔ Never reaches an exit code — an advisory is not a violation. */
+function printRetiredAdvisories(retired: string[]): void {
+  if (retired.length === 0) return;
+  console.log(`ADVISORY — ${retired.length} done task(s) hold RETIRED (superseded) depends_on prerequisite(s). A retired prerequisite does NOT block (its successor carries the dependency) and is ⛔ NOT counted as done; this is reported for visibility only, NOT a violation:`);
+  for (const r of retired) console.log(`  - ${r}`);
+}
+
 function usage(): never {
   console.error("usage: node it0-split-or-commit-check.ts [--allow-empty] [--tasks-dir <dir>] <workspace-root>");
   console.error("       node it0-split-or-commit-check.ts --changed [--base <ref>] [--only <id,id,…>] [--tasks-dir <dir>] <workspace-root>");
@@ -587,13 +753,15 @@ if (isDirect) {
       console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — none of the ${seedIds.length} delta task file(s) resolved in ${tasksDir} (⛔ NOT conflated with PASS).`);
       process.exit(0);
     }
-    const { failures } = runChecks(closure, deltaSet);
+    const { failures, retired } = runChecks(closure, deltaSet);
     if (failures.length > 0) {
       console.log(`FAIL: ${failures.length} split-or-commit violation(s) attributable to THIS delta (${seedIds.length} delta task file(s), ${closure.size} task(s) in the delta+1-hop closure — ⛔ not the whole store):`);
       for (const f of failures) console.log(`  - ${f}`);
+      printRetiredAdvisories(retired);
       process.exit(1);
     }
     console.log(`PASS: ${seedIds.length} delta task file(s) + neighbours (${closure.size} task(s) total) — no split-or-commit violation attributable to this delta (base ${baseLabel}); the whole-store pass remains at the full-tier gate.`);
+    printRetiredAdvisories(retired);
     process.exit(0);
   }
 
@@ -610,13 +778,15 @@ if (isDirect) {
     console.log(`FAIL: 0 task(s) checked — the task set is empty, so this gate verified nothing (fail-closed: 'no problems' must not be indistinguishable from 'never looked'; pass --allow-empty to waive)`);
     process.exit(1);
   }
-  const { failures } = runChecks(taskMap);
+  const { failures, retired } = runChecks(taskMap);
   if (failures.length > 0) {
     console.log(`FAIL: ${failures.length} split-or-commit violation(s) found:`);
     for (const f of failures) console.log(`  - ${f}`);
+    printRetiredAdvisories(retired);
     process.exit(1);
   } else {
-    console.log(`PASS: ${taskMap.size} task(s) checked — no split-or-commit violations (parent-done-iff-children + SELECT-split + child-link-symmetry rules satisfied).`);
+    console.log(`PASS: ${taskMap.size} task(s) checked — no split-or-commit violations (parent-done-iff-children + SELECT-split + child-link-symmetry + dep-done-iff-deps rules satisfied).`);
+    printRetiredAdvisories(retired);
     process.exit(0);
   }
 }
