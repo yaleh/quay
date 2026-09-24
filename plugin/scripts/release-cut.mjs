@@ -327,7 +327,13 @@ if (base === "develop" && remote !== "" && doPush) {
 if (!worktree) {
   worktree = path.join(path.dirname(root), `${path.basename(root)}-worktrees`, `release-${tag}`);
 }
-const finishCarrier = path.join(SCRIPT_ROOT, "plugin", "scripts", "release-branch-finish.sh");
+// Anchored on THIS tool's own directory (`SCRIPT_DIR`), ⛔ never re-derived from a root — the same
+// rule `driver-runtime.ts::resolveKernelScriptsDir()` states for a kernel sibling (it resolves to
+// `path.dirname(kernelSelfPath())`, and for a plain-ESM renderer that cannot import the `.ts` kernel
+// this is its faithful expression). ⛔ `path.join(SCRIPT_ROOT, "plugin", "scripts", …)` is this same
+// path in the dev tree and a nonexistent one in every other layout — the exact `target-root` form
+// `kernel-sibling-resolution-check.ts` exists to reject (it reported this line).
+const finishCarrier = path.join(SCRIPT_DIR, "release-branch-finish.sh");
 if (!fs.existsSync(finishCarrier)) {
   fail(
     "release-cut-finish-carrier-missing",
@@ -473,8 +479,12 @@ if (doDispatch) {
 // re-anchor is NOT optional: the bump changes plugin/.claude-plugin/plugin.json, which is a
 // closure-ratchet laydown source ⇒ the committed baseline goes stale and the pre-commit guard
 // rejects every later commit (measured: the v0.12.0 bump commit touched 12 files).
+// The two tooling paths are anchored differently, on purpose: `quay-init-closure-ratchet.ts` is a
+// kernel sibling (same `SCRIPT_DIR` rule as `finishCarrier` above), while `stamp-version.ts` lives in
+// the REPO TREE's `scripts/` — outside `plugin/`, never shipped, and run as raw `.ts`. That pair is
+// why a release cut is a DEV-TREE-ONLY operation by construction (⛔ not a missing fallback).
 const stamper = path.join(SCRIPT_ROOT, "scripts", "stamp-version.ts");
-const ratchet = path.join(SCRIPT_ROOT, "plugin", "scripts", "quay-init-closure-ratchet.ts");
+const ratchet = path.join(SCRIPT_DIR, "quay-init-closure-ratchet.ts");
 if (!fs.existsSync(stamper) || !fs.existsSync(ratchet)) {
   fail(
     "release-cut-bump-tooling-missing",
