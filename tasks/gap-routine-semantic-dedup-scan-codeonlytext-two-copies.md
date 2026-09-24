@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-codeonlytext-two-copies
 title: "semantic-dedup-scan: codeOnlyText is byte-identical (only the doc
   comment differs) and both files carry maskComments; the two files are not a
   whole-file fork (378 vs 384 lines, nea"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
