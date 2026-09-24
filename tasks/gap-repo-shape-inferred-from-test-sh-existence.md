@@ -1,7 +1,7 @@
 ---
 id: gap-repo-shape-inferred-from-test-sh-existence
 title: fan-in 按「有没有 scripts/test.sh」推断本仓库形态：改为读 .quay/config.yml 显式声明的契约
-status: ready
+status: done
 labels:
   - gap
   - defect
