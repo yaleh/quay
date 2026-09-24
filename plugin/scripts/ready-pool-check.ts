@@ -1392,6 +1392,72 @@ function isDedupExemptParagraph(para) {
   return para.trimStart().startsWith(DEDUP_REF_MARKER);
 }
 
+/** The SENTENCE-scoped twin of DEDUP_REF_MARKER (gap-prose-prereq-exemption-paragraph-scoped-not-
+ *  sentence). A separate literal on purpose: `startsWith` on the paragraph marker must keep meaning
+ *  "opens the paragraph", and the sentence marker must not be readable as one.
+ *
+ *  WHY IT EXISTS — the asymmetry the paragraph marker cannot cover. SCOPE was narrowed from paragraph
+ *  to SENTENCE (see the Plan 1 comment on prosePrereqScan), but the EXEMPTION stayed paragraph-scoped.
+ *  So a citation sentence sitting inside a list block had no reachable exemption: `## AC` is ONE
+ *  paragraph (paragraphs split on blank lines, and the `- [ ]` items are hard-wrapped single-spaced
+ *  lines), so exempting the paragraph exempts the whole AC list — including the genuine prereq
+ *  declarations AC is the most common home of. The finer the judgment got, the LESS escapable the
+ *  false positive became at exactly the most citation-dense position.
+ *
+ *  MEASURED (production root, 2026-09-24): `gap-superseded-dependency-blocks-dispatch-forever` —
+ *  four artifacts complete, self-touch present, Touches resolving, every other pool criterion passed —
+ *  sat excluded for 40+ consecutive rounds (`.quay/worker-round.jsonl` rounds 43→48 onward, all
+ *  `pool-empty`) on ONE AC3 line: 「且 `gap-ac194-production-criterion-owner` 的生产 `depends_on`
+ *  里现在还有第二条活边」, a sentence that names the OTHER task's `depends_on` FIELD (traceability)
+ *  but matches the keyword. The author had already put `<!-- dedup-ref -->` on two other paragraphs
+ *  and it could not help here: the offending sentence is inside `## AC`, whose other sentences are
+ *  non-triggering, so a paragraph-level exemption would have blinded the AC list wholesale.
+ *
+ *  QUOTING GEOMETRY — the same species of guard as the paragraph marker's "must OPEN the paragraph",
+ *  chosen so a task merely DISCUSSING the marker does not exempt the sentence it discusses it in: the
+ *  marker is read off the INLINE-CODE-STRIPPED sentence, and quoting a marker in this repo's prose
+ *  means wrapping it in backticks (every existing dedup-ref test does exactly that). A bare marker in
+ *  a sentence is therefore an author's explicit annotation; a backtick-wrapped one is an illustration.
+ *  (The paragraph arm needs no such rule because its `startsWith` anchor already excludes quotations.) */
+export const DEDUP_REF_INLINE_MARKER = "<!-- dedup-ref:inline -->";
+
+/** The same token in terminator-free delimiters. An HTML comment OPENS with `<!`, and `!` is one of
+ *  SENTENCE_SPLIT_RE's terminators — so the author-facing literal CANNOT survive sentence splitting,
+ *  and a sentence-scoped check run on the split pieces would degrade to matching the fragment
+ *  `-- dedup-ref:inline -->`. Neutralise it BEFORE splitting so the marker arrives at the sentence
+ *  check intact — the same trick this file already uses to keep the affirmative idiom `不得不` from
+ *  reading as a negation marker (AFFIRMATIVE_IDIOM_RE).
+ *
+ *  The paragraph-scoped marker needs none of this: it is tested with `startsWith` on the UNSPLIT
+ *  paragraph, so its `!` never reaches SENTENCE_SPLIT_RE. That asymmetry is precisely why the
+ *  paragraph scope worked and a naive sentence scope would not.
+ *
+ *  The delimiters are deliberately NOT prose-reachable (`<<…>>` is not a markdown construct, and
+ *  this spelling appears nowhere in the task corpus): the sentinel is only ever produced by
+ *  `neutralizeInlineMarker`, so prose that happens to spell something similar cannot self-exempt. */
+const NEUTRAL_INLINE_MARKER = "<<dedup-ref:inline>>";
+
+/** Replace the inline marker with its terminator-free twin, so splitting cannot shred it. */
+function neutralizeInlineMarker(text) {
+  return text.split(DEDUP_REF_INLINE_MARKER).join(NEUTRAL_INLINE_MARKER);
+}
+
+/** Is this SENTENCE annotated as traceability-only? See DEDUP_REF_INLINE_MARKER for the geometry.
+ *
+ *  ⚠️ The argument is expected to come from NEUTRALISED text (the scan neutralises before splitting),
+ *  so the token searched for here is NEUTRAL_INLINE_MARKER, not the author-facing literal. Getting
+ *  that backwards is SILENT — the check simply never fires and the exemption looks inert rather than
+ *  broken (硬规则③b's failure shape), which is why the two names are kept visually distinct.
+ *
+ *  The marker must sit IN the sentence — append it to the offending line, or prefix that same line;
+ *  putting it alone on its own line does NOT work (that line becomes its own sentence piece, so the
+ *  claim it would exempt lives in a different piece). That is deliberate: a marker on a line of its
+ *  own makes "which sentence does this apply to?" ambiguous, and a whole-paragraph exemption already
+ *  exists for the case where an entire paragraph is traceability. */
+function isDedupExemptSentence(sentence) {
+  return stripInlineCodeSpans(sentence).includes(NEUTRAL_INLINE_MARKER);
+}
+
 /** Split a paragraph into sentences (empty/whitespace-only pieces dropped). */
 function splitSentences(text) {
   return text.split(SENTENCE_SPLIT_RE).filter((s) => s.trim().length > 0);
@@ -1410,9 +1476,39 @@ function readTaskStatusOnDisk(tasksDir, id) {
   return fm ? readFrontField(fm[1], "status") : null;
 }
 
-/** Task ids referenced inside prereq-declaration SENTENCES of the body. Two citation forms are
- *  recognized (both gated by the prereq keyword on the sentence — the keyword decides whether the
- *  sentence DECLARES a prerequisite at all):
+/** Add `id` to `refs` when it is a real UNSATISFIED prereq target. Every reader below shares this one
+ *  resolution filter, so the exemption scopes can never disagree about what counts as a target. */
+function addResolvedRef(tasksDir, refs, id) {
+  if (refs.has(id)) return;
+  const status = readTaskStatusOnDisk(tasksDir, id);
+  // A retired task (`superseded`) is not a current-prereq target — its successor carries the real
+  // dependency. A FINISHED task (`done`) is not an UNSATISFIED prereq — the cited reference is a
+  // satisfied one. Both are non-gaps; every OTHER value (todo / ready / in-progress / "" / a junk
+  // token / null) stays IN the gap set, fail-closed: a status this function cannot read must never
+  // be mistaken for `done` (硬规则③b — 读不懂不得伪装成合格). Dropping `done` here is what makes the
+  // citing task self-healing: before it, a prose sentence whose cited task later COMPLETED stayed a
+  // permanent promotion block (production, 2026-09-18: 88 consecutive skips of
+  // gap-touches-parser-early-subheading-latch-hides-declaration on
+  // prosePrereqGap=[gap-git-history-window-notes-ref-dominates], whose cited task had been done
+  // since 14:28Z that day — no future event could ever clear it, so the only exit was a human
+  // rewording the sentence).
+  if (status === "superseded" || status === "done") return;
+  const file = path.join(tasksDir, `${id}.md`);
+  if (fs.existsSync(file)) refs.add(id);
+}
+
+/** Harvest one declaring SENTENCE's ids of one citation FORM into `into` (sibling mentions dropped). */
+function collectSentenceRefs(sentence, citationRe, tasksDir, into) {
+  for (const m of sentence.matchAll(citationRe)) {
+    if (isSiblingMention(sentence, m.index, m.index + m[0].length)) continue;
+    addResolvedRef(tasksDir, into, m[1]);
+  }
+}
+
+/** THE single prose-prereq SCAN. `prosePrereqRefs` / `prosePrereqGap` / `prosePrereqAssessment` are
+ *  all derived from it, so the two exemption scopes share one pass and cannot drift apart. Two
+ *  citation forms are recognized (both gated by the prereq keyword on the sentence — the keyword
+ *  decides whether the sentence DECLARES a prerequisite at all):
  *    - wikilinks `[[id]]`, matched on an inline-backtick-stripped copy so a QUOTED wikilink stays an
  *      illustrative mention (the original stripCodeSpans intent);
  *    - inline backtick spans `` `id` `` — the repo's dominant citation form (≈11:1 over wikilinks),
@@ -1422,76 +1518,108 @@ function readTaskStatusOnDisk(tasksDir, id) {
  *    - SCOPE is the SENTENCE, never the paragraph — a keyword in one sentence may not claim ids in
  *      another (see SENTENCE_SPLIT_RE / splitSentences);
  *    - POLARITY is checked per keyword occurrence — a sentence whose only keyword occurrences are
- *      NEGATED ("⛔ 不另立 depends_on 边") declares nothing (see declaresPrereq);
- *    - a paragraph OPENED with DEDUP_REF_MARKER is traceability, exempt wholesale.
+ *      NEGATED ("⛔ 不另立 depends_on 边") declares nothing (see declaresPrereq).
+ *  An EXEMPT statement is traceability rather than a prereq claim, and the exemption exists at BOTH
+ *  scopes the judgment has (gap-prose-prereq-exemption-paragraph-scoped-not-sentence — the marker
+ *  family is only useful to the extent it reaches every granularity the detector does):
+ *    - a paragraph OPENED with DEDUP_REF_MARKER ⇒ exempt wholesale (the whole paragraph is skipped);
+ *    - a SENTENCE carrying DEDUP_REF_INLINE_MARKER ⇒ that sentence alone is exempt, which is the only
+ *      reachable form inside a one-paragraph list block such as `## AC` (see that marker's doc).
+ *  Exemptions SPLIT the scan's output instead of erasing it: a sentence that declares and is exempt
+ *  lands in `exempted`, not in `declared`. That is deliberate (硬规则③b) — the two are separate
+ *  return VALUES so a caller can tell "this task's only declaration is an exempted citation" from
+ *  "this task declares nothing", which one merged empty array could not express.
  *  Two further ref-level filters keep the detector PRECISE (a sibling/heritage mention is not a
  *  prereq):
  *    - a ref whose context carries a sibling marker is dropped (see SIBLING_MENTION_RE);
  *    - a ref to a SUPERSEDED task (its successor is the real prereq) or to a DONE task (a finished
- *      task is not an UNSATISFIED prereq) is dropped — see `add()` below for why the `done` arm is
+ *      task is not an UNSATISFIED prereq) is dropped — see `addResolvedRef` for why the `done` arm is
  *      what makes the citing task self-healing rather than permanently blocked.
  *  Only ids that resolve to an existing task file whose status is neither `superseded` nor `done` are
  *  returned; todo / ready / in-progress / unreadable status stay in the set (fail-closed). */
-export function prosePrereqRefs(body, tasksDir) {
-  const refs = new Set();
+function prosePrereqScan(body, tasksDir) {
+  const declared = new Set();
+  const exempted = new Set();
   const noFence = stripFences(body);
-  const inlineStripped = stripInlineCodeSpans(noFence);
-  const paras = noFence.split(/\r?\n\s*\r?\n/);
+  // Neutralise the inline marker BEFORE any splitting (its own `!` would otherwise be eaten by
+  // SENTENCE_SPLIT_RE — see NEUTRAL_INLINE_MARKER). Everything downstream reads the neutralised
+  // text; only the marker's spelling differs, so ids, keywords and polarity are untouched.
+  const splittable = neutralizeInlineMarker(noFence);
+  const inlineStripped = stripInlineCodeSpans(splittable);
+  const paras = splittable.split(/\r?\n\s*\r?\n/);
   const inlineParas = inlineStripped.split(/\r?\n\s*\r?\n/);
-  const add = (id) => {
-    if (refs.has(id)) return;
-    const status = readTaskStatusOnDisk(tasksDir, id);
-    // A retired task (`superseded`) is not a current-prereq target — its successor carries the real
-    // dependency. A FINISHED task (`done`) is not an UNSATISFIED prereq — the cited reference is a
-    // satisfied one. Both are non-gaps; every OTHER value (todo / ready / in-progress / "" / a junk
-    // token / null) stays IN the gap set, fail-closed: a status this function cannot read must never
-    // be mistaken for `done` (硬规则③b — 读不懂不得伪装成合格). Dropping `done` here is what makes the
-    // citing task self-healing: before it, a prose sentence whose cited task later COMPLETED stayed a
-    // permanent promotion block (production, 2026-09-18: 88 consecutive skips of
-    // gap-touches-parser-early-subheading-latch-hides-declaration on
-    // prosePrereqGap=[gap-git-history-window-notes-ref-dominates], whose cited task had been done
-    // since 14:28Z that day — no future event could ever clear it, so the only exit was a human
-    // rewording the sentence).
-    if (status === "superseded" || status === "done") return;
-    const file = path.join(tasksDir, `${id}.md`);
-    if (fs.existsSync(file)) refs.add(id);
-  };
   for (let i = 0; i < paras.length; i++) {
     const para = paras[i];
-    // Dedup-backlink exemption (Plan 3): a paragraph the author OPENED with the marker is
-    // traceability, not a prereq claim — no keyword in it counts (see DEDUP_REF_MARKER).
+    // Dedup-backlink exemption, paragraph scope (Plan 3): a paragraph the author OPENED with the
+    // marker is traceability, not a prereq claim — no keyword in it counts (see DEDUP_REF_MARKER).
     if (isDedupExemptParagraph(para)) continue;
     // Cheap paragraph gate first (unchanged): no keyword anywhere ⇒ nothing to attribute.
     if (!PREREQ_KEYWORD_RE.test(para)) continue;
     const inlinePara = inlineParas[i] ?? "";
     // The keyword→id association is SENTENCE-scoped (Plan 1) and a sentence only declares when it
     // carries a NON-NEGATED keyword occurrence (Plan 2) — see SENTENCE_SPLIT_RE / declaresPrereq.
+    // PLAN 4: each declaring sentence then lands in ONE of the two sets — `exempted` when the
+    // sentence itself is annotated (dedup-ref, sentence scope), else `declared`. The wikilink arm
+    // reads the inline-STRIPPED sentence (a quoted wikilink is an illustration); the backtick arm
+    // reads the fence-only one (inline spans ARE the citation) — which is why isDedupExemptSentence
+    // strips inline spans itself rather than relying on its input already being stripped.
     for (const sent of splitSentences(inlinePara)) {
       if (!declaresPrereq(sent)) continue;
-      for (const m of sent.matchAll(WIKILINK_RE)) {
-        if (isSiblingMention(sent, m.index, m.index + m[0].length)) continue;
-        add(m[1]);
-      }
+      collectSentenceRefs(sent, WIKILINK_RE, tasksDir, isDedupExemptSentence(sent) ? exempted : declared);
     }
     for (const sent of splitSentences(para)) {
       if (!declaresPrereq(sent)) continue;
-      for (const m of sent.matchAll(BACKTICK_ID_RE)) {
-        if (isSiblingMention(sent, m.index, m.index + m[0].length)) continue;
-        add(m[1]);
-      }
+      collectSentenceRefs(sent, BACKTICK_ID_RE, tasksDir, isDedupExemptSentence(sent) ? exempted : declared);
     }
   }
-  return [...refs];
+  return { declared, exempted };
+}
+
+/** Task ids referenced inside prereq-declaration SENTENCES of the body — the EFFECTIVE declarations
+ *  (`prosePrereqScan`'s `declared`). Sentence-scoped exempt citations are NOT here; they are reported
+ *  separately by `prosePrereqAssessment`, never silently dropped. See `prosePrereqScan` for the full
+ *  contract (citation forms, scope, polarity, both exemption scopes, resolution filter). */
+export function prosePrereqRefs(body, tasksDir) {
+  return [...prosePrereqScan(body, tasksDir).declared];
 }
 
 /** Prose-declared prerequisites that are NOT expressed as a relation edge. Empty array = no gap (all
  *  prose-declared prereqs are also edges, or there are none). A non-empty result is the fail-closed
  *  signal: this task declares a prerequisite the mechanisms cannot see. */
 export function prosePrereqGap(body, frontmatterRaw, tasksDir) {
-  const refs = prosePrereqRefs(body, tasksDir);
-  if (refs.length === 0) return [];
+  const { declared } = prosePrereqScan(body, tasksDir);
+  if (declared.size === 0) return [];
   const edges = relationEdges(frontmatterRaw);
-  return refs.filter((r) => !edges.has(r));
+  return [...declared].filter((r) => !edges.has(r));
+}
+
+/** The FULL prose-prereq judgment, three-valued (硬规则③b — a reader must be able to tell "checked and
+ *  clean" from "exempted" from "not evaluated"; `gap` alone cannot, because every clean outcome
+ *  collapses to `[]`):
+ *    - `declared`   ids cited by a declaring, NON-exempt sentence (== `prosePrereqRefs`);
+ *    - `exempted`   ids cited by a declaring sentence the author annotated with
+ *                   DEDUP_REF_INLINE_MARKER — removed from the gap set by an EXPLICIT annotation, and
+ *                   reported here so that removal stays observable rather than indistinguishable
+ *                   from "there was nothing to find";
+ *    - `gap`        `declared` minus the ids that are already relation edges (== `prosePrereqGap`,
+ *                   the exclusion driver);
+ *    - `evaluated`  `true` — this scan is total over the body (it always runs, on any input), so the
+ *                   third state is expressed by the three LISTS, not by a flag that could only ever
+ *                   take one value. It is carried explicitly so a consumer that reads a bare `[]`
+ *                   from an upstream wrapper still has a shape that can say "not evaluated" without a
+ *                   type change (硬规则③b: no output vocab that lacks an "unevaluated" state).
+ *  A task with no prose prereq at all reads `declared: [], exempted: [], gap: []`; a task whose only
+ *  declaration is an exempted citation reads `declared: [], exempted: [<id>], gap: []`. Two DIFFERENT
+ *  readings — which is the whole point. */
+export function prosePrereqAssessment(body, frontmatterRaw, tasksDir) {
+  const { declared, exempted } = prosePrereqScan(body, tasksDir);
+  const edges = relationEdges(frontmatterRaw);
+  return {
+    evaluated: true,
+    declared: [...declared].sort(),
+    exempted: [...exempted].sort(),
+    gap: [...declared].filter((r) => !edges.has(r)).sort(),
+  };
 }
 
 /** Mechanical strategic-traceability grep: does the body reference a written strategic question

@@ -18,6 +18,11 @@
 // SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 18/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
+// Plan 4's exemption constants + the sentence splitter are imported STRAIGHT from the module (the
+// dominant convention here — 543 test files do this) rather than threaded through the shared fixture
+// harness: they are the unit under test, not shared fixtures, and the harness is a mirror of this
+// module's public surface, not its home.
+import { DEDUP_REF_INLINE_MARKER, DEDUP_REF_MARKER, SENTENCE_SPLIT_RE } from "../scripts/ready-pool-check.ts";
 import { PRE_EDGE_AC207_SNIPPET, SAMPLE_1_DENYING_PARA, SAMPLE_1_GENUINE_PARA, SAMPLE_2_PARA, SAMPLE_IDS, assert, declaresPrereq, fourArtifactBody, fs, makeWorkspace, path, prosePrereqGap, prosePrereqRefs, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 
 test("prosePrereqRefs finds backtick-cited ids inside 阻塞 paragraphs (AC2)", (t) => {
@@ -189,4 +194,115 @@ test("AC3b — the negation guard is LOCAL: unrelated 不 does not disarm a genu
   assert.equal(declaresPrereq("非前置声明"), false, "非 + 前置 is a denial");
   assert.equal(declaresPrereq("无需前置"), false, "无需 + 前置 is a denial");
   assert.equal(declaresPrereq("不作为本任务的阻塞"), false, "不作为…的 + 阻塞 is a denial");
+});
+
+
+// ── Plan 4 — the EXEMPTION follows the judgment down to the SENTENCE ──────────────────────────────
+// (tasks/gap-prose-prereq-exemption-paragraph-scoped-not-sentence). Plan 1 narrowed the keyword→id
+// association from the paragraph to the SENTENCE, but the only exemption (DEDUP_REF_MARKER) stayed
+// PARAGRAPH-scoped. The two halves were therefore asymmetric, and the position where citations are
+// densest is exactly where the asymmetry bites: `## AC` is ONE paragraph (paragraphs split on blank
+// lines; the `- [ ]` items are hard-wrapped, single-spaced lines), so exempting the paragraph would
+// exempt the whole AC list — including the genuine prereq declarations AC is the most common home of.
+
+
+test("Plan 4 scope — the inline marker exempts THAT sentence inside a one-paragraph ## AC block, not the block (能取假, 双向对照)", (t) => {
+  const root = makeWorkspace("prereq-inline-scope");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⚠️ `ready`, not `done`: the exemption claim is only tested if the refs survive the status filter
+  // (a `done` ref is dropped for a reason unrelated to what this test asserts).
+  writeTask(root, "gap-inline-cited", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-inline-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  // The PRODUCTION SHAPE, reduced to its bones: one AC paragraph, a CITATION sentence naming the
+  // other task's `depends_on` FIELD (traceability), and a GENUINE declaration sentence — each naming
+  // a DIFFERENT id, so which sentence contributed is readable from the output.
+  const CITATION = "- [ ] AC2 且 `gap-inline-cited` 的生产 `depends_on` 里现在还有第二条活边";
+  const GENUINE = "- [ ] AC3 前序任务 `gap-inline-real` 先落地。";
+  const acBlock = ["- [ ] AC1 读数见 ## Evidence E1", CITATION, GENUINE].join("\n");
+  // ① UNMARKED: both keyword-bearing sentences declare (so the fixture is not vacuously empty).
+  assert.deepEqual(
+    prosePrereqRefs(acBlock, tasksDir).slice().sort(),
+    ["gap-inline-cited", "gap-inline-real"],
+    "① unmarked, the citation sentence declares (the defect) AND so does the genuine one",
+  );
+  // ② MARK ONLY THE CITATION SENTENCE. Sentence-scoped exemption ⇒ the genuine declaration in the
+  // SAME paragraph survives. A paragraph-scoped exemption would have emptied the list here, and a
+  // whole-block AC exemption (the "AC 块内引用一律不判" shape the DoD forbids) would too.
+  const marked = acBlock.replace(CITATION, `${CITATION} ${DEDUP_REF_INLINE_MARKER}`);
+  assert.notEqual(marked, acBlock, "the fixture edit must actually land");
+  assert.deepEqual(
+    prosePrereqRefs(marked, tasksDir),
+    ["gap-inline-real"],
+    "② the marked sentence is exempt, the UNMARKED genuine sentence in the same paragraph is not",
+  );
+  // ③ 取假 in the other direction: mark the GENUINE sentence instead (marker INSIDE it, before its
+  // `。`) ⇒ the exemption tracks the MARKER, not the wording, and the citation declares again. Stated
+  // explicitly because it is the honest property of an author-applied opt-out (the paragraph marker
+  // behaves the same way): a mislabelled genuine declaration is the AUTHOR's claim, and this
+  // mechanism does not pretend to out-guess it.
+  assert.deepEqual(
+    prosePrereqRefs(acBlock.replace(GENUINE, `- [ ] AC3 前序任务 \`gap-inline-real\` ${DEDUP_REF_INLINE_MARKER} 先落地。`), tasksDir),
+    ["gap-inline-cited"],
+    "③ the exemption follows the marker, so mislabelling a genuine declaration is an explicit act",
+  );
+  // ④ …and the geometry is "IN the sentence", not "on the line": the SAME marker appended AFTER the
+  // sentence terminator is its own sentence piece, so it exempts nothing. This is what keeps the
+  // scope a SENTENCE rather than drifting to line- or blank-line-scope, and it is the assertion that
+  // would go red if the exemption were ever loosened to "the marker appears somewhere nearby".
+  assert.deepEqual(
+    prosePrereqRefs(`${acBlock}\n${DEDUP_REF_INLINE_MARKER}`, tasksDir).slice().sort(),
+    ["gap-inline-cited", "gap-inline-real"],
+    "④ a marker on its own line exempts nothing — it must sit IN the sentence it annotates",
+  );
+});
+
+
+test("Plan 4 splitter — the inline marker survives SENTENCE_SPLIT_RE (its own `!` is a terminator)", (t) => {
+  const root = makeWorkspace("prereq-inline-splitter");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-split-cited", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  const sentence = "**此刻尚未落地**；且 `gap-split-cited` 的生产 `depends_on` 里现在还有第二条活边";
+  // The hazard, asserted rather than assumed: an HTML comment's `<!` opens with a SENTENCE terminator,
+  // so a marker checked on the SPLIT pieces would be reduced to the fragment `-- dedup-ref:inline -->`
+  // and would never match — silently inert, which is 硬规则③b's failure shape (indistinguishable from
+  // "nothing to exempt"). `prosePrereqScan` neutralises the marker before splitting for exactly this
+  // reason; these two assertions are what would go red if that step were dropped.
+  assert.ok(SENTENCE_SPLIT_RE.test("!"), "`!` is a sentence terminator in this repo's splitter");
+  assert.ok(DEDUP_REF_INLINE_MARKER.includes("!"), "…and the author-facing marker literal contains one");
+  assert.deepEqual(
+    prosePrereqRefs(`${sentence} ${DEDUP_REF_INLINE_MARKER}`, tasksDir),
+    [],
+    "…yet the marked sentence is still exempt ⇒ the marker reached the check whole",
+  );
+});
+
+
+test("Plan 4 quoting — the marker family is quotation-safe at BOTH scopes, and the two tokens are distinct", (t) => {
+  const root = makeWorkspace("prereq-inline-quote");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-quote-cited", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  const sentence = "且 `gap-quote-cited` 的生产 `depends_on` 里还有第二条活边";
+  // Both markers are read off an inline-code-stripped copy, and quoting a marker in this repo's prose
+  // means wrapping it in backticks (every dedup-ref test does) ⇒ a QUOTED mention never exempts.
+  assert.deepEqual(
+    prosePrereqRefs(`${sentence} 见 \`${DEDUP_REF_INLINE_MARKER}\` 约定。`, tasksDir),
+    ["gap-quote-cited"],
+    "a backtick-wrapped mention of the inline marker does not exempt the sentence it is quoted in",
+  );
+  assert.deepEqual(
+    prosePrereqRefs(`见 \`${DEDUP_REF_MARKER}\` ${sentence}`, tasksDir),
+    ["gap-quote-cited"],
+    "…and the paragraph marker's existing quotation guard is unchanged",
+  );
+  // The two tokens must stay mutually exclusive: if the inline marker STARTED WITH the paragraph
+  // marker, a paragraph opened with the inline one would silently become paragraph-exempt, i.e. the
+  // sentence scope would widen to the very scope this task exists to escape.
+  assert.equal(
+    DEDUP_REF_INLINE_MARKER.startsWith(DEDUP_REF_MARKER),
+    false,
+    "the sentence marker must not be readable as the paragraph marker",
+  );
 });
