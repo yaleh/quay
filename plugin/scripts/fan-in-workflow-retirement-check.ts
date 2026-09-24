@@ -44,6 +44,12 @@ import { listExecutableFiles } from "./fs-walk.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// maskComments / codeOnlyText now live in source-text-lib.ts (maskComments was byte-identical in
+// three checkers, codeOnlyText in two of them — .quay/routine-findings.jsonl finding
+// `codeonlytext-two-copies`, routine `semantic-dedup-scan`). Re-exported below so this checker's
+// own test file keeps importing them from here.
+import { maskComments, codeOnlyText } from "./source-text-lib.ts";
+export { maskComments, codeOnlyText };
 
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
 const DEFAULT_ROOT = repoRoot();
@@ -149,77 +155,7 @@ export interface RetirementCheckResult {
 // ── 位置判定：屏蔽注释（//、/* */、bash #），但【不】屏蔽字符串/模板/正则字面量 ──
 // import 说明符 `from "./x.ts"`、scriptPath 字符串 `"/path/fan-in-execute.js"` 里的文件名是真实调用面，
 // 必须落在未屏蔽位置；注释里提到 `fan-in-execute`（说明文档 / 退役标注）不算复活路径。
-export function maskComments(src: string): Uint8Array {
-  const mask = new Uint8Array(src.length);
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === "/" && d === "/") {
-      mask[i] = 1;
-      mask[i + 1] = 1;
-      i += 2;
-      while (i < n && src[i] !== "\n") {
-        mask[i] = 1;
-        i++;
-      }
-      continue;
-    }
-    if (c === "/" && d === "*") {
-      mask[i] = 1;
-      mask[i + 1] = 1;
-      i += 2;
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) {
-        mask[i] = 1;
-        i++;
-      }
-      if (i < n) {
-        mask[i] = 1;
-        mask[i + 1] = 1;
-        i += 2;
-      }
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      const q = c;
-      i++;
-      while (i < n) {
-        if (src[i] === "\\") {
-          i += 2;
-          continue;
-        }
-        if (src[i] === q) {
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
-    if (c === "#") {
-      mask[i] = 1;
-      i++;
-      while (i < n && src[i] !== "\n") {
-        mask[i] = 1;
-        i++;
-      }
-      continue;
-    }
-    i++;
-  }
-  return mask;
-}
-
-/** 把被屏蔽（注释）的字符替换成空格（保留长度），得到「仅代码」文本供 includes/regex 搜索。 */
-export function codeOnlyText(src: string): string {
-  const mask = maskComments(src);
-  const chars: string[] = [];
-  for (let i = 0; i < src.length; i++) {
-    chars.push(mask[i] === 1 ? " " : src[i]);
-  }
-  return chars.join("");
-}
+// ⛔ 实现已上收 source-text-lib.ts（见文件头的 import 注释）——此处不再保留副本。
 
 /** 路径（已归一化为 / 分隔）是否落在归档白名单目录前缀下。 */
 function isArchived(rel: string): boolean {

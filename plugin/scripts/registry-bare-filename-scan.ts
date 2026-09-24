@@ -42,7 +42,11 @@ import { fileURLToPath } from "node:url";
 // re-exported: this module never exported it.
 // lineOf / snippetOf joined stripComments here in the same module (semantic-dedup-scan
 // `lineof-lineat`): the 1-based newline counter had eleven live copies under two names.
-import { stripComments, lineOf, snippetOf } from "./source-text-lib.ts";
+// maskComments joined them too (semantic-dedup-scan `codeonlytext-two-copies`): this file's copy was
+// semantically identical to fan-in-workflow-retirement-check.ts / outer-retirement-precondition-check.ts
+// (its own header had already said so), which a differential control over 23 inputs confirmed.
+import { stripComments, lineOf, snippetOf, maskComments, codeOnlyText } from "./source-text-lib.ts";
+export { maskComments };
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -108,46 +112,10 @@ export interface BareScanResult {
 }
 
 // ── 注释屏蔽 + 字符串字面量提取（按位置判定，硬规则 2）──────────────────────────────────────────────
-// 与 outer-retirement-precondition-check.ts 的 maskComments 同语义：屏蔽 `//` `/* */` 与 bash `#` 行注释，
-// 【不】屏蔽字符串——import 说明符 `from "./x.ts"` 与 `file: "x.sh"` 里的文件名是真实调用面，必须命中。
-export function maskComments(src: string): Uint8Array {
-  const mask = new Uint8Array(src.length);
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === "/" && d === "/") {
-      mask[i] = 1; mask[i + 1] = 1; i += 2;
-      while (i < n && src[i] !== "\n") { mask[i] = 1; i++; }
-      continue;
-    }
-    if (c === "/" && d === "*") {
-      mask[i] = 1; mask[i + 1] = 1; i += 2;
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) { mask[i] = 1; i++; }
-      if (i < n) { mask[i] = 1; mask[i + 1] = 1; i += 2; }
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      const q = c;
-      i++;
-      while (i < n) {
-        if (src[i] === "\\") { i += 2; continue; }
-        if (src[i] === q) { i++; break; }
-        i++;
-      }
-      continue;
-    }
-    if (c === "#") {
-      // bash `#` 行注释（字符串内的 `#` 已被上面的字符串分支跳过）。
-      mask[i] = 1; i++;
-      while (i < n && src[i] !== "\n") { mask[i] = 1; i++; }
-      continue;
-    }
-    i++;
-  }
-  return mask;
-}
+// maskComments 上收 source-text-lib.ts（semantic-dedup-scan `codeonlytext-two-copies`）：屏蔽
+// `//` `/* */` 与 bash `#` 行注释，【不】屏蔽字符串——import 说明符 `from "./x.ts"` 与
+// `file: "x.sh"` 里的文件名是真实调用面，必须命中。此处不再保留副本（本文件历史上那份与
+// outer-retirement-precondition-check.ts 的副本语义相同，见上方 import 注释）。
 
 /**
  * 从源码（code 载体）提取「值恰等于某已知裸文件名」的字符串字面量。按位置：先屏蔽注释，
@@ -534,13 +502,13 @@ function walkSourceFiles(root: string): string[] {
  *  原样的字符串。`stripComments` 只认行注释与块注释：对 bash 语法的 `.ts`（如 runner-static-gate.ts，
  *  被 scripts/test.sh `source`）里的 `# @static-object …` 注释行，其中的星号斜杠 glob 会被误当块注释
  *  起点，吞掉 run_checker 行 ⇒ `${repo_root}/plugin/scripts/<name>` 调用行读不到（AC158 负控制发现的
- *  14 个活 checker 假死的根因）。复用 maskComments（已含井号注释且跳过字符串，硬规则 2）。 */
-function stripCommentsIncludingHash(src: string): string {
-  const mask = maskComments(src);
-  let out = "";
-  for (let i = 0; i < src.length; i++) out += mask[i] === 1 ? " " : src[i];
-  return out;
-}
+ *  14 个活 checker 假死的根因）。复用 maskComments（已含井号注释且跳过字符串，硬规则 2）。
+ *
+ *  ⛔ 本函数曾是一个局部副本（`stripCommentsIncludingHash`），其函数体与 fan-in-workflow-retirement-check.ts
+ *  / outer-retirement-precondition-check.ts 的 `codeOnlyText` 逐操作相同（maskComments + 逐位清空），
+ *  只是名字不同 —— `.quay/routine-findings.jsonl` finding `codeonlytext-two-copies` 的 硬规则 5b 同载体
+ *  扫描在 `plugin/scripts/*.ts` 里数出的第 3 处。名字已收敛到共用名 `codeOnlyText`（两个名字本身就是
+ *  「rename signal」），上面这段「为什么必须含井号」的理由留在此处，因为它是本文件自己的判据。 */
 
 const IMPORT_SPEC_RE = /(?:import\s*\(\s*|require\s*\(\s*|from\s*|import\s*)(['"])([^'"]+)\1/g;
 
@@ -650,7 +618,7 @@ export function collectExtraRefs(root: string, scripts: string[]): ExtraRef[] {
     } catch {
       continue;
     }
-    const cleaned = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : stripCommentsIncludingHash(text);
+    const cleaned = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : codeOnlyText(text);
     SOURCE_BUILTIN_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = SOURCE_BUILTIN_RE.exec(cleaned)) !== null) {
@@ -714,7 +682,7 @@ export function collectExtraRefs(root: string, scripts: string[]): ExtraRef[] {
     } catch {
       continue;
     }
-    const shCleaned = stripCommentsIncludingHash(shText);
+    const shCleaned = codeOnlyText(shText);
     if (!shCleaned.includes(pair.ts)) continue; // 非委托对（checker-cost / repo-root 等不引用同名 .ts）
     const idx = shCleaned.indexOf(pair.ts);
     const line = lineOf(shCleaned, idx);
@@ -785,9 +753,9 @@ export function buildReferenceMap(
       }
     }
     // (2) plugin/scripts/<name> 调用行（代码与 .md/.yml 交付面都认）。代码侧改用含 bash `#` 的屏蔽
-    //     （stripCommentsIncludingHash）：runner-static-gate.ts 这类 bash `.ts` 的 `# @static-object` glob
+    //     （codeOnlyText）：runner-static-gate.ts 这类 bash `.ts` 的 `# @static-object` glob
     //     会把 `/*` 误判成块注释、吞掉 `${repo_root}/plugin/scripts/<name>` 调用行。
-    const cleanedCode = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : stripCommentsIncludingHash(text);
+    const cleanedCode = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : codeOnlyText(text);
     let m: RegExpExecArray | null;
     PATH_REF_RE.lastIndex = 0;
     while ((m = PATH_REF_RE.exec(cleanedCode)) !== null) {

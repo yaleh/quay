@@ -17,6 +17,10 @@
 // lineOf / lineAt (11 live copies, 2 names), snippetOf / snippetAt, and the one-line relOf wrapper —
 // and those now exist here once too (see the second block at the bottom of this file).
 //
+// A THIRD pass (finding `codeonlytext-two-copies`, runId `semantic-dedup-scan-1790218481576`) found
+// the comment-mask pair — maskComments (3 byte-agreeing copies, only two of them named by the
+// finding) and codeOnlyText (2) — and those now exist here once too (third block at the bottom).
+//
 // ⛔ What this module deliberately does NOT do: give the three comment/region primitives ONE
 // semantics. Two of them strip
 // comments of two DIFFERENT languages, and that difference is load-bearing, not cosmetic:
@@ -165,4 +169,131 @@ export function snippetOf(src: string, idx: number, maxLen = Infinity): string {
   while (end < src.length && src[end] !== "\n") end++;
   const line = src.slice(start, end).trim();
   return line.length > maxLen ? `${line.slice(0, maxLen - 3)}...` : line;
+}
+
+// ── 注释掩码 / 「仅代码」文本（第三轮同族抽库）──────────────────────────────────────────────────
+//
+// PROVENANCE: the semantic-dedup-scan routine's next pass (.quay/routine-findings.jsonl, finding
+// `codeonlytext-two-copies`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1790218481576`, suggestedAction `extract`) reported `codeOnlyText` as
+// byte-identical in fan-in-workflow-retirement-check.ts and outer-retirement-precondition-check.ts,
+// with `maskComments` carried by both — and the two files are NOT a whole-file fork (378 vs 384
+// lines, near-disjoint exports), so this helper pair was the true residual overlap.
+//
+// A 硬规则 5b sweep of the same carrier (`plugin/scripts/*.ts`) found the maskComments body in a
+// THIRD file: registry-bare-filename-scan.ts, whose own header had already said 「与
+// outer-retirement-precondition-check.ts 的 maskComments 同语义」. A differential control over 23
+// inputs (line/block/`#` comments, strings, template literals, escaped quotes, unterminated
+// literals, empty) confirmed all three agree byte-for-byte, and that `codeOnlyText` in both its
+// holders is exactly "blank the masked positions". All three now reach this module.
+//
+// ⛔ WHAT IS DELIBERATELY *NOT* UNIFIED (same discipline as the strippers above; each was read and
+// rejected as a family member, not overlooked):
+//   • `stripComments` (this module) — naive, NOT quote-aware: a `//` inside a string literal is
+//     treated as a real comment. Acceptable only as an import-specifier pre-filter.
+//   • `stripShellComments` (this module) — shell only: `#`, quote-aware, NO block comments.
+//   • `checker-lib.ts#buildNonCodeMask` — the SAME skeleton plus string/template AND REGEX literal
+//     masking; a regex literal written as `/import { test } from "node:test"/` satisfies it
+//     (REFUTE round-2). A caller that must judge regex positions needs it, ⛔ not `maskComments`.
+//   • `goal-driver-task-boundary-check.ts#maskCommentsAndStrings` — this mask EXTENDED with a second
+//     string mask, and with the bash `#` branch deliberately REMOVED (that checker scans only `.ts`,
+//     where `#` is the private-field sigil — masking it would hide real code).
+//   • `profiles-role-coverage-check.ts#maskComments` — returns a STRING, strips only `//` (whole-line
+//     and whitespace-preceded), deliberately no `#` and no block-comment awareness. Not this family.
+//   • `registry-bare-filename-scan.ts#stripCommentsIncludingHash` — a NAME, not a second
+//     implementation: it is this module's `maskComments` used as a stripper. Pinned by
+//     `plugin/test/source-text-lib.test.mjs` ("no second declaration of the family").
+// Collapsing any of them would silently change WHICH positions a checker judges — the 硬规则 3b
+// failure shape, where a checker reading the wrong surface returns the "pass" shape.
+
+/** Mark every COMMENT position: `mask[i] === 1` ⇔ byte `i` of `src` is inside a `//` line comment, a
+ *  slash-star block comment, or a bash `#` line comment. Length-preserving and indexed exactly like
+ *  `src`, so callers can report the line/column of a hit against the ORIGINAL text.
+ *
+ *  ⛔ String / template literals are SKIPPED, never masked: an import specifier
+ *  (`from "./x.ts"`) or a quoted filename (`file: "x.sh"`) is a REAL call surface and must land in
+ *  an unmasked position. Skipping them is also what keeps a `//` or `#` INSIDE a literal from being
+ *  read as a comment start (硬规则 2 — judge by position, but only the position the language says is
+ *  a comment).
+ *
+ *  The bash `#` branch is UNCONDITIONAL (not whitespace-gated) because the callers' corpus includes
+ *  `.ts`-named files that are really bash (e.g. runner-static-gate.ts, `source`d by scripts/test.sh)
+ *  — a whitespace gate would miss a column-0 `#`. The price is that `this.#private` would be masked;
+ *  no caller scans a file where that matters (kernel-sibling-resolution-check.ts, which does, carries
+ *  its OWN whitespace-gated mask — deliberately NOT this one). */
+export function maskComments(src: string): Uint8Array {
+  const mask = new Uint8Array(src.length);
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === "/" && d === "/") {
+      mask[i] = 1;
+      mask[i + 1] = 1;
+      i += 2;
+      while (i < n && src[i] !== "\n") {
+        mask[i] = 1;
+        i++;
+      }
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      mask[i] = 1;
+      mask[i + 1] = 1;
+      i += 2;
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) {
+        mask[i] = 1;
+        i++;
+      }
+      if (i < n) {
+        mask[i] = 1;
+        mask[i + 1] = 1;
+        i += 2;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const q = c;
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (src[i] === q) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (c === "#") {
+      mask[i] = 1;
+      i++;
+      while (i < n && src[i] !== "\n") {
+        mask[i] = 1;
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return mask;
+}
+
+/** `src` with every MASKED (comment) position replaced by a single space — same length as `src`, so
+ *  offsets computed on the result stay valid against the original (line/column reporting) and a
+ *  plain `includes` / `RegExp.test` on the result is a code-position judgment (硬规则 2).
+ *
+ *  Exactly "blank the mask" — `codeOnlyText(s)` ≡ the mask applied to `s` position by position.
+ *  ⛔ The space (not deletion) is load-bearing: deleting would shift every later offset. */
+export function codeOnlyText(src: string): string {
+  const mask = maskComments(src);
+  const chars: string[] = [];
+  for (let i = 0; i < src.length; i++) {
+    chars.push(mask[i] === 1 ? " " : src[i]);
+  }
+  return chars.join("");
 }
