@@ -39,6 +39,10 @@ extract
 - [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
+- `plugin/scripts/source-text-lib.ts`
 - `plugin/scripts/fan-in-workflow-retirement-check.ts`
 - `plugin/scripts/outer-retirement-precondition-check.ts`
+- `plugin/scripts/registry-bare-filename-scan.ts`
+- `plugin/test/source-text-lib.test.mjs`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-semantic-dedup-scan-codeonlytext-two-copies.md`
