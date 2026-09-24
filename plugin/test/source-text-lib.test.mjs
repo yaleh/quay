@@ -26,6 +26,13 @@
 //     and each carrier imports it — the standing guard that makes the extraction stick. Without it
 //     the routine simply re-finds the same twelve copies on its next pass.
 //
+// A THIRD pass of the same routine (finding `codeonlytext-two-copies`, runId
+// `semantic-dedup-scan-1790218481576`, suggestedAction `extract`) added the comment-mask family —
+// maskComments / codeOnlyText. Their controls are at the bottom too: the mask is NO MORE
+// interchangeable with the three strippers above than they are with each other (it is the only one
+// of the four that blanks rather than deletes, and the only one that treats a `#` inside a string as
+// code), and the same positional sweep guards its one declared home.
+//
 // Run: scripts/test.sh plugin/test/source-text-lib.test.mjs
 
 import { test } from "node:test";
@@ -35,6 +42,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildNonCodeMask } from "../scripts/checker-lib.ts";
 import { callRegion } from "../scripts/test-isolation-check.ts";
+// The near-neighbour that deliberately stayed OUT of this module — imported under an alias so the
+// control below can hold the two masks side by side (they must NOT agree on `this.#p`).
+import { maskComments as siblingMask } from "../scripts/kernel-sibling-resolution-check.ts";
 import {
   stripShellComments,
   stripComments,
@@ -42,6 +52,8 @@ import {
   lineOf,
   colOf,
   snippetOf,
+  maskComments,
+  codeOnlyText,
 } from "../scripts/source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -176,6 +188,149 @@ test("control: snippetOf(src, idx, Infinity) ≡ snippetOf(src, idx) — the fol
   for (const idx of [0, 6, 40, src.length - 2]) {
     assert.equal(snippetOf(src, idx, Infinity), snippetOf(src, idx), `idx=${idx}`);
   }
+});
+
+// ── maskComments / codeOnlyText (finding `codeonlytext-two-copies`) ───────────────────────────
+
+test("maskComments: `//`, slash-star and bash `#` line comments masked; strings are SKIPPED", () => {
+  const src = '// line c\n/* block c */ const a = "// in a string";\n# bash c\nconst b = \'# in a string\';\n';
+  const mask = maskComments(src);
+  assert.equal(mask.length, src.length, "the mask is indexed exactly like src");
+  assert.equal(mask[src.indexOf("line c")], 1, "// line comment masked");
+  assert.equal(mask[src.indexOf("block c")], 1, "slash-star block comment masked");
+  assert.equal(mask[src.indexOf("bash c")], 1, "bash # line comment masked");
+  assert.equal(mask[src.indexOf("const a")], 0, "code is not masked");
+  // The load-bearing half: a `//` or `#` INSIDE a literal is not a comment, and an import specifier
+  // (a string) must land in an unmasked position or the checkers read the wrong surface.
+  assert.equal(mask[src.indexOf("// in a string")], 0, "`//` inside a string is NOT a comment");
+  assert.equal(mask[src.indexOf("# in a string")], 0, "`#` inside a string is NOT a comment");
+});
+
+test("maskComments: an escaped quote does not end the string (a `//` after it is still inside)", () => {
+  const src = 'const s = "esc \\" // still in the string";\n';
+  assert.equal(maskComments(src)[src.indexOf("// still")], 0);
+});
+
+test("codeOnlyText: blanks exactly the masked positions — length and offsets preserved", () => {
+  const src = "const a = 1; // gone\n# bash\nrun x\n";
+  const code = codeOnlyText(src);
+  assert.equal(code.length, src.length, "blanked, not deleted — a later offset stays valid");
+  assert.equal(code.split("\n")[0].slice(0, 12), "const a = 1;", "code is untouched");
+  assert.ok(!code.includes("gone") && !code.includes("bash"), "comment text is gone");
+  // `codeOnlyText` is not a second judgment: it IS the mask, applied position by position.
+  const mask = maskComments(src);
+  for (let i = 0; i < src.length; i++) assert.equal(code[i], mask[i] === 1 ? " " : src[i], `offset ${i}`);
+});
+
+// ── the cross-primitive control for maskComments (same reason as the strippers above) ──────────
+
+test("control: one input, FOUR different answers — none of the four is a stand-in for another", () => {
+  // Each primitive neutralizes a different set of positions; if any two were interchangeable the
+  // extraction would have been free. It was not (see the module header's non-goal list).
+  const src = 'const u = "http://x"; // c\n# b\necho z\n';
+  const answers = {
+    stripShellComments: stripShellComments(src),
+    stripComments: stripComments(src),
+    codeOnlyText: codeOnlyText(src),
+    buildNonCodeMask: buildNonCodeMask(src).join(""),
+  };
+  assert.equal(
+    new Set(Object.values(answers)).size,
+    4,
+    `expected 4 distinct answers, got ${JSON.stringify(answers, null, 1)}`,
+  );
+  // …and the two that matter most for a checker, spelled out:
+  const url = 'const u = "http://x";\n';
+  assert.equal(stripComments(url), 'const u = "http:\n', "the naive stripper eats a `//` inside a string");
+  assert.equal(codeOnlyText(url), url, "the mask is quote-aware — this is why it is not stripComments");
+  assert.equal(stripShellComments("# a\n"), "\n", "the shell stripper DELETES a comment");
+  assert.equal(codeOnlyText("# a\n"), "   \n", "the mask BLANKS it — offsets survive");
+});
+
+test("control: a REGEX literal is code to maskComments and MASKED by buildNonCodeMask", () => {
+  // Both are linear state machines over the same skeleton; only buildNonCodeMask models regex
+  // literals. A caller judging regex positions (checker-lib's position matching) needs that one.
+  const src = 'const r = /import { test } from "node:test"/;\n';
+  const i = src.indexOf("import { test }");
+  assert.equal(maskComments(src)[i], 0, "maskComments deliberately does NOT model regex literals");
+  assert.equal(buildNonCodeMask(src)[i], 1, "buildNonCodeMask does — hence the two live apart");
+});
+
+test("control: the `#` branch differs from kernel-sibling-resolution-check.ts's mask, deliberately", () => {
+  // That checker scans `.ts` where `#` is the private-field sigil, so it gates `#` on preceding
+  // whitespace; this family must mask a column-0 `#` because its corpus includes bash-syntax `.ts`
+  // (runner-static-gate.ts, `source`d by scripts/test.sh). Swapping them changes which positions
+  // each checker judges — 硬规则 3b's failure shape.
+  const priv = "const a = this.#p;\n";
+  assert.equal(maskComments(priv)[priv.indexOf("#")], 1, "shared mask: column-0-or-not, `#` is a comment");
+  assert.equal(siblingMask(priv)[priv.indexOf("#")], 0, "sibling mask: `#` after `.` is code");
+  const hash = "# @static-object x/**/y\nrun_checker\n";
+  assert.equal(maskComments(hash)[hash.indexOf("run_checker")], 0, "the line after a `#` comment is code");
+});
+
+// ── regression: the comment-mask family lives in ONE place (the guard that makes it stick) ────
+
+/** The carriers that each held a SAME-semantics copy before the extraction — three for the mask
+ *  (the finding named two; the 硬规则 5b sweep of `plugin/scripts/*.ts` found the third) and two for
+ *  the text. Every one must now reach the shared module. */
+const MASK_CARRIERS = [
+  "fan-in-workflow-retirement-check.ts",
+  "outer-retirement-precondition-check.ts",
+  "registry-bare-filename-scan.ts",
+];
+
+test("regression: no plugin/scripts file declares its own copy of the comment-mask family", () => {
+  // 硬规则 2 — by POSITION, not keyword: the predicate runs over the non-code mask, so a comment
+  // (like the ones the extraction left behind, which do spell these names) can never satisfy it,
+  // and a real declaration always does.
+  const scriptsDir = path.join(REPO_ROOT, "plugin", "scripts");
+  const decl = /function\s+(maskComments|codeOnlyText)\s*\(/g;
+  const offenders = [];
+  for (const name of fs.readdirSync(scriptsDir)) {
+    if (!/\.(ts|mjs|js)$/.test(name)) continue;
+    if (name === "source-text-lib.ts") continue; // the one declared home
+    const src = fs.readFileSync(path.join(scriptsDir, name), "utf8");
+    const mask = buildNonCodeMask(src);
+    for (const m of src.matchAll(decl)) {
+      if (mask[m.index] === 0) offenders.push(`${name} ${m[1]}`);
+    }
+  }
+  // An ENUMERATION, not a boolean (硬规则 3): the residual is named, so a NEW copy anywhere fails
+  // this test AND deleting one of the two known-distinct variants fails it too (forcing a
+  // deliberate update rather than a silent widening). ⛔ `maskCommentsAndStrings`
+  // (goal-driver-task-boundary-check.ts) does not match the predicate: it is a different name with a
+  // different body, and the module header records why it stays apart.
+  assert.deepEqual(
+    offenders.sort(),
+    ["kernel-sibling-resolution-check.ts maskComments", "profiles-role-coverage-check.ts maskComments"],
+    "the comment-mask family moved, or a copy reappeared (finding `codeonlytext-two-copies` is back). " +
+      "If the new declaration has the SAME semantics, import it from source-text-lib.ts instead; if it " +
+      "is genuinely different, add it to this list WITH its reason in the module header.",
+  );
+});
+
+test("regression: every carrier of the comment-mask family imports it from source-text-lib", () => {
+  for (const name of MASK_CARRIERS) {
+    const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", name), "utf8");
+    assert.match(src, /from "\.\/source-text-lib\.ts"/, `${name} must import source-text-lib.ts`);
+  }
+});
+
+test("regression: the same-semantics copies are GONE, not aliased — `codeOnlyText` has one home", () => {
+  const lib = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "source-text-lib.ts"), "utf8");
+  assert.match(lib, /export function maskComments\b/);
+  assert.match(lib, /export function codeOnlyText\b/);
+  // The rename signal: registry-bare-filename-scan.ts's second name for the same computation
+  // (`stripCommentsIncludingHash`) collapsed into the shared one — an alias would leave two names
+  // for one quantity, which is what the routine reported in the first place. Checked BY POSITION
+  // (硬规则 2): the extraction's own comment spells the old name, and a keyword grep would read
+  // that prose as a surviving call.
+  const scan = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "registry-bare-filename-scan.ts"), "utf8");
+  const scanMask = buildNonCodeMask(scan);
+  const codeUses = [...scan.matchAll(/stripCommentsIncludingHash/g)]
+    .filter((m) => scanMask[m.index] === 0)
+    .map((m) => scan.slice(0, m.index).split("\n").length);
+  assert.deepEqual(codeUses, [], `the second name must be gone from CODE, not aliased (lines ${codeUses})`);
 });
 
 // ── regression: the family lives in ONE place (the guard that makes the extraction stick) ─────

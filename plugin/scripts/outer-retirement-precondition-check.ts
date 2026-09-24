@@ -49,6 +49,12 @@ import { listExecutableFiles, EXEC_EXTENSIONS } from "./fs-walk.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// maskComments / codeOnlyText now live in source-text-lib.ts (byte-identical in two checkers and
+// semantically identical in a third — .quay/routine-findings.jsonl finding
+// `codeonlytext-two-copies`, routine `semantic-dedup-scan`). Re-exported below so this checker's
+// own test file keeps importing them from here.
+import { maskComments, codeOnlyText } from "./source-text-lib.ts";
+export { maskComments, codeOnlyText };
 
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
 const DEFAULT_ROOT = repoRoot();
@@ -99,81 +105,8 @@ export interface PreconditionResult {
 /** 屏蔽注释（TS 的行/块注释 + bash 的 `#` 行注释），但【不】屏蔽字符串/模板/正则字面量——
  *  import 说明符 `from "./name.ts"` 里的文件名是真实调用面，必须落在未屏蔽位置。
  *  `#` 行注释必须一并屏蔽：runner-static-gate.ts 等 .ts 扩展名的 bash 脚本用 `#` 注释，
- *  不屏蔽会把 `# （outer-anchor-check.ts 带标记）` 这类注释误判为代码引用。 */
-export function maskComments(src: string): Uint8Array {
-  const mask = new Uint8Array(src.length);
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === "/" && d === "/") {
-      mask[i] = 1;
-      mask[i + 1] = 1;
-      i += 2;
-      while (i < n && src[i] !== "\n") {
-        mask[i] = 1;
-        i++;
-      }
-      continue;
-    }
-    if (c === "/" && d === "*") {
-      mask[i] = 1;
-      mask[i + 1] = 1;
-      i += 2;
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) {
-        mask[i] = 1;
-        i++;
-      }
-      if (i < n) {
-        mask[i] = 1;
-        mask[i + 1] = 1;
-        i += 2;
-      }
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      // 跳过字符串/模板字面量【不屏蔽】——import 说明符 `from "./name.ts"` 是真实调用面，
-      // 且字符串内部的 `//` / `/*` / `#` 不是注释，必须不被误判为注释起点。
-      const q = c;
-      i++;
-      while (i < n) {
-        if (src[i] === "\\") {
-          i += 2;
-          continue;
-        }
-        if (src[i] === q) {
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
-    if (c === "#") {
-      // bash `#` 行注释（字符串内部的 `#` 已被上面的字符串跳过分支处理，不会到这里）。
-      mask[i] = 1;
-      i++;
-      while (i < n && src[i] !== "\n") {
-        mask[i] = 1;
-        i++;
-      }
-      continue;
-    }
-    i++;
-  }
-  return mask;
-}
-
-/** 把被屏蔽（注释）的字符替换成空格（保留长度），得到「仅代码」文本供 includes 搜索。 */
-export function codeOnlyText(src: string): string {
-  const mask = maskComments(src);
-  const chars: string[] = [];
-  for (let i = 0; i < src.length; i++) {
-    chars.push(mask[i] === 1 ? " " : src[i]);
-  }
-  return chars.join("");
-}
+ *  不屏蔽会把 `# （outer-anchor-check.ts 带标记）` 这类注释误判为代码引用。
+ *  ⛔ 实现已上收 source-text-lib.ts（见文件头的 import 注释）——此处不再保留副本。 */
 
 /** 枚举 plugin/scripts 顶层脚本（.ts/.sh/.mjs，非递归——checker-mutation-cases 是子目录）。 */
 export function listScriptBasenames(root: string): string[] {
