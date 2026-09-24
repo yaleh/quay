@@ -1,7 +1,7 @@
 ---
 id: gap-release-cut-single-carrier-and-main-ledger-trace
 title: 切版一条命令载体 release-cut.sh + release-branch-finish 台账缺省落主检出（AC-320）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
