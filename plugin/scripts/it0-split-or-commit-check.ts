@@ -37,13 +37,17 @@
 //      `judgeDeps` (the relation-edge path, imported below as the single source of truth, hard rule 5b).
 //      ⇒ the checker now READS the three states apart:
 //        · `done`       — satisfied; nothing reported.
-//        · `superseded` — retired: does NOT block (its successor carries the dependency), but ⛔ is NOT
-//                         counted as done. Surfaced as its own `RETIRED-DEP:` readout — never merged into
-//                         the violation list, never merged into the satisfied set.
+//        · `superseded` — retired: does NOT block, but ⛔ is NOT counted as done. Surfaced as its own
+//                         `RETIRED-DEP:` readout — never merged into the violation list, never merged
+//                         into the satisfied set. The readout carries REPAIR GUIDANCE (which successor
+//                         the stale edge should point at, read from the retired task's recorded
+//                         `superseded_by`; "none recorded" is stated as such, never invented).
 //        · blocking     — todo / ready / needs-human / missing / unreadable ⇒ STILL a violation
 //                         (fail-closed; the exemption must never widen to "any non-done passes").
 //      The `RETIRED-DEP:` readout is an ADVISORY, not a failure — it keeps the distinction visible
-//      (hard rule 3b) without re-introducing the permanent red it exists to remove.
+//      (hard rule 3b) without re-introducing the permanent red it exists to remove, and it is what
+//      keeps the retired verdict's SIGNAL (a stale edge is worth surfacing for a human to fix) while
+//      dropping only its measured-false cost claim (that it "blocks no future action").
 //
 //   5. DEP-DANGLING: A task declaring `depends_on: [X]` where X does not exist is a dangling
 //      prerequisite edge — fail-closed (a missing dep file cannot be confirmed done), the same
@@ -127,6 +131,10 @@ export interface TaskFrontmatter {
   labels: string[];
   parent: string | null;
   dependsOn: string[];
+  /** For a RETIRED (`superseded`) task: the task that now carries the dependency. `null` = the store
+   *  does not record one — kept as its OWN value (hard rule 6: 缺值 = 未查) so CHECK 4's advisory can
+   *  say "no successor recorded" instead of inventing one. */
+  supersededBy: string | null;
 }
 
 // ── parseFrontmatter — extract id, status, role, children from YAML frontmatter. ─────────────────
@@ -140,6 +148,14 @@ export function parseFrontmatter(text: string): TaskFrontmatter | null {
   // Scalar field: `key: value`
   function scalar(key: string): string | null {
     const m = fm.match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m"));
+    return m ? m[1].replace(/^["']|["']$/g, "").trim() : null;
+  }
+
+  /** Scalar at ANY indentation — for `superseded_by`, which this store writes nested under `extra:`
+   *  (`  superseded_by: <id>`), unlike the top-level scalars `scalar()` reads. Anchored to the
+   *  frontmatter block only, so a body line mentioning the key is not a declaration (hard rule 2). */
+  function nestedScalar(key: string): string | null {
+    const m = fm.match(new RegExp(`^\\s*${key}:\\s*(.+?)\\s*$`, "m"));
     return m ? m[1].replace(/^["']|["']$/g, "").trim() : null;
   }
 
@@ -169,6 +185,7 @@ export function parseFrontmatter(text: string): TaskFrontmatter | null {
     labels: list("labels"),
     parent: scalar("parent"),
     dependsOn: list("depends_on"),
+    supersededBy: nestedScalar("superseded_by"),
   };
 }
 
@@ -417,11 +434,22 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>, attributeTo?: S
       );
     }
     if (readiness.supersededDeps.length > 0 && keep([id, ...readiness.supersededDeps])) {
-      // The THIRD state, surfaced so it can never be confused with either neighbour: this line names the
-      // retired prerequisite and says explicitly that it is not a violation AND not a completion.
-      const retiredDeps = readiness.supersededDeps.map((depId) => `${depId} (status: ${depStatusText(depId)})`);
+      // The THIRD state, surfaced so it can never be confused with either neighbour. This is reading ②
+      // in the task's own terms: E6's signal ("a stale edge is worth surfacing for a human to fix") is
+      // KEPT, but demoted from "the whole static layer fails closed" to a distinguishable readout that
+      // carries the repair guidance — which successor the edge should point at. The successor comes
+      // from the retired task's own recorded `superseded_by`; when the store records none, the line
+      // says exactly that instead of asserting a successor that was never written down (hard rule 6:
+      // 缺值 = 未查 — never rendered as a positive claim).
+      const retiredDeps = readiness.supersededDeps.map((depId) => {
+        const successor = taskMap.get(depId)?.supersededBy ?? null;
+        const guidance = successor
+          ? `re-point the edge to its recorded successor "${successor}"`
+          : `⚠️ no successor is recorded for it in this store (nothing states which task now carries the dependency)`;
+        return `${depId} (status: ${depStatusText(depId)}) — ${guidance}`;
+      });
       retired.push(
-        `RETIRED-DEP: task "${id}" is done and has ${readiness.supersededDeps.length} retired (superseded) prerequisite(s) in depends_on: ${retiredDeps.join(", ")} — a retired prerequisite does not block (its successor carries the real dependency) and ⛔ is NOT counted as done; reported for visibility only, NOT a violation`
+        `RETIRED-DEP: task "${id}" is done and has ${readiness.supersededDeps.length} retired (superseded) prerequisite(s) in depends_on: ${retiredDeps.join("; ")} — a retired prerequisite does NOT block and ⛔ is NOT counted as done; reported for visibility only, NOT a violation`
       );
     }
   }
@@ -475,6 +503,8 @@ export function selftest(): boolean {
     children?: string[];
     parent?: string;
     dependsOn?: string[];
+    /** Written under `extra:` — the same nesting the real store uses (see `nestedScalar`). */
+    supersededBy?: string;
   }
 
   /** What a fixture asserts. A bare boolean (the original form) means "violations present?"; the
@@ -485,6 +515,8 @@ export function selftest(): boolean {
     retiredIncludes?: string[];
     /** Each id MUST NOT be named by the `retired` advisory readout. */
     retiredExcludes?: string[];
+    /** Each substring MUST appear somewhere in the `retired` advisory readout. */
+    retiredMentions?: string[];
     /** Each id MUST be named by a violation. */
     violationMentions?: string[];
     /** Each id MUST NOT be named by a violation (the negative half of `violationMentions`). */
@@ -501,7 +533,10 @@ export function selftest(): boolean {
         ? `depends_on:\n${fields.dependsOn.map((d) => `  - ${d}`).join("\n")}`
         : "depends_on: []";
     const parentLine = `parent: ${fields.parent || "null"}`;
-    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${parentLine}\n${childrenBlock}\n${dependsOnBlock}\n---\n`;
+    const extraBlock = fields.supersededBy
+      ? `extra:\n  schema: execution\n  superseded_by: ${fields.supersededBy}`
+      : `extra:\n  schema: execution`;
+    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${parentLine}\n${childrenBlock}\n${dependsOnBlock}\n${extraBlock}\n---\n`;
     fs.writeFileSync(path.join(dir, `${id}.md`), content);
   }
 
@@ -536,6 +571,11 @@ export function selftest(): boolean {
     for (const id of exp.retiredExcludes ?? []) {
       if (retired.some((r) => names(r, id))) {
         problems.push(`id "${id}" IS in the retired readout — a still-blocking prerequisite was reported as retired`);
+      }
+    }
+    for (const phrase of exp.retiredMentions ?? []) {
+      if (!retired.some((r) => r.includes(phrase))) {
+        problems.push(`the retired readout does not carry the repair guidance "${phrase}"`);
       }
     }
     for (const id of exp.violationMentions ?? []) {
@@ -608,6 +648,24 @@ export function selftest(): boolean {
     "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["retired-dep"] },
   }, { fail: false, retiredIncludes: ["retired-dep"] });
 
+  // The SAME case with the retired task's successor RECORDED (`superseded_by` nested under `extra:` —
+  // the form the real store uses): the readout must carry the repair guidance, i.e. NAME the successor
+  // so the stale edge can be re-pointed. This is the half of the chosen reading that makes the signal
+  // actionable — without it the advisory says "something is stale" but not "point it here".
+  runFixture("three-valued-retired-dep-with-recorded-successor", {
+    "retired-dep": { status: "superseded", role: "primitive", children: [], supersededBy: "successor-task" },
+    "successor-task": { status: "ready", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["retired-dep"] },
+  }, { fail: false, retiredIncludes: ["retired-dep"], retiredMentions: ['recorded successor "successor-task"'] });
+
+  // ⛔ NOT the same as the above: with NO recorded successor the readout must SAY SO rather than
+  // assert one. "The store does not say" and "the successor is X" are different facts and must not
+  // share an output (hard rule 3b / hard rule 6).
+  runFixture("three-valued-retired-dep-without-recorded-successor", {
+    "retired-dep": { status: "superseded", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["retired-dep"] },
+  }, { fail: false, retiredIncludes: ["retired-dep"], retiredMentions: ["no successor is recorded"] });
+
   // AC2 negative control, direction 1: the same fixture with the dependency swapped to `todo` ⇒ STILL
   // a violation, and the violation NAMES it while the retired readout does NOT (an exemption that
   // widened to "any non-done passes" would silently pass this).
@@ -659,7 +717,7 @@ export function selftest(): boolean {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   if (allPassed) {
-    console.log("SELFTEST: all 12 fixture cases PASS.");
+    console.log("SELFTEST: all 14 fixture cases PASS.");
     return true;
   } else {
     console.error("SELFTEST: one or more fixture cases FAILED.");
@@ -674,7 +732,7 @@ export function selftest(): boolean {
  *  unchanged. ⛔ Never reaches an exit code — an advisory is not a violation. */
 function printRetiredAdvisories(retired: string[]): void {
   if (retired.length === 0) return;
-  console.log(`ADVISORY — ${retired.length} done task(s) hold RETIRED (superseded) depends_on prerequisite(s). A retired prerequisite does NOT block (its successor carries the dependency) and is ⛔ NOT counted as done; this is reported for visibility only, NOT a violation:`);
+  console.log(`ADVISORY — ${retired.length} done task(s) hold RETIRED (superseded) depends_on prerequisite(s). A retired prerequisite does NOT block and is ⛔ NOT counted as done; each line below names the recorded successor to re-point the stale edge at, or says that the store records none. Reported for visibility only, NOT a violation:`);
   for (const r of retired) console.log(`  - ${r}`);
 }
 
