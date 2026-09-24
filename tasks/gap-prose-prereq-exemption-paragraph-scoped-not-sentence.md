@@ -1,7 +1,7 @@
 ---
 id: gap-prose-prereq-exemption-paragraph-scoped-not-sentence
 title: "反向依赖 + 散文引用 = 永久互堵——prose-prereq 豁免是段落作用域，够不着落在 ## AC 块内的单句"
-status: todo
+status: ready
 labels:
   - gap
   - defect
