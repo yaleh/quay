@@ -83,6 +83,17 @@ export interface JobReading {
    * `prereqProvision` 的先例。一个恒为 0 的字段会让 AC-281 的判据变成恒真的回声（硬规则 4）。
    */
   schedulerMs?: number;
+  /**
+   * 该 job 拿到的 **runner 名**（jobs API 的 `runner_name`）——「这个 job 到底起跑没有」的**直接量**。
+   *
+   * ⛔ **只有 API 给了字符串才写这个键**：`runner_name: null` / 缺键 ⇒ 采集器**不写**（缺 ≠ 空串，
+   * 硬规则 6）。GitHub 在「这个 job 从未拿到 runner」时给的正是**空串**（实测 2026-09-24 run
+   * 35966264609 的 `version-consistency`：`runner_name=""`、`steps=[]`、`started_at == created_at`）
+   * ⇒ 空串是一个**可区分**的观测，不是「没有值」。
+   * 没有它，`jobNeverStarted` 判不出（`undefined` 被刻意排除），那条 job 的 132s 排队时长会被读成
+   * 「执行了 132s」而进 `job-timeout-reached` 分支 —— 那正是本字段存在的理由。
+   */
+  runnerName?: string;
   steps?: JobStepReading[];
 }
 
@@ -101,6 +112,19 @@ export interface RunRecord {
   durationSec?: number;
   /** 失败测试标识 `文件::测试名`（由日志/报告派生；没有就是没有）。 */
   failedTests?: string[];
+  /**
+   * **未启动 job 的成因** —— check-runs annotation 里 `annotation_level=failure` 的 message **逐字**
+   * （截断长度是 `ci-runs-collect.ts` 的 `NOT_STARTED_CAUSE_MAX_CHARS`，唯一一处常量）。
+   *
+   * **三态可区分**（硬规则 3b）：
+   *   · 字符串 —— 取到了，逐字（实测形态：*"The job was not started because recent account payments
+   *     have failed or your spending limit needs to be increased"*）；
+   *   · `null` —— **没拿到成因**（离线缝没试 / annotation 调用失败 / 响应里没有 failure 级 annotation）。
+   *     这是「试过但拿不到」这个**独立取值**：⛔ 它**不**影响 not-started 这个 signal 本身是否产出
+   *     （拿不到成因 ≠ 回落成 job-timeout-reached）；
+   *   · **键缺失** —— 这条 run **没有**未启动 job（缺 ≠ `null`，硬规则 6）。
+   */
+  notStartedCause?: string | null;
   jobs?: JobReading[];
   attribution?: string;
   signals?: string[];
@@ -142,6 +166,33 @@ export interface AttributeOptions {
 export const TEST_STEP_RE = /(run tests?\b|run the (test )?suite|test suite\b|vitest|node --test|npm (run )?test\b|jest\b|playwright|cypress|\be2e\b)/i;
 /** job 里「失败的只是 setup」的步名形态（Finding 点名的三类：checkout / setup-node / 依赖安装）。 */
 export const SETUP_STEP_RE = /(set up job|checkout|setup-node|setup node|install|npm ci|npm install|yarn|pnpm|restore cache|cache)/i;
+
+/** 「这个 job 从未拿到 runner」这条 infra 信号的**前缀**（后接 job 名）。 */
+export const JOB_NOT_STARTED_PREFIX = "infra:job-not-started:";
+
+/**
+ * 「这个 job **从未拿到 runner**」的直接量判据（tasks/gap-ci-collector-job-not-started-misattributed-as-timeout）。
+ *
+ * 为什么需要它（2026-09-24 实测 run `35966264609`）：`version-consistency` job 从未拿到 runner
+ * （jobs API 逐字：`runner_name=""`、`steps=[]`、`started_at == created_at == 06:48:06`、
+ * `completed_at` 06:50:18），而 `timeout-minutes: 2` ⇒ 旧的 `dur >= to*60` 判据把 132s 报成
+ * `infra:job-timeout-reached:version-consistency`。真相是 check-run annotation 逐字给出的
+ * *"The job was not started because recent account payments have failed…"* —— 那 132s 是**排队到被拒**
+ * 的时长，`timeout-minutes` 只计执行时间，它根本没撞到自己的超时。
+ * 形态 = 硬规则 4b：一个**由间接形态推出**的量（时长 ≥ 阈值）冒充了**直接量**（有没有 runner）；
+ * 也让「从没起跑」与「跑到一半挂死」共用同一个 signal（硬规则 3b）。
+ *
+ * 两个条件都不可省：
+ *   · `runnerName === ""` —— 严格等于**空串**（API 的直接读数）。⛔ `undefined`（API 给 `null` /
+ *     缺键 ⇒ 采集器不写该键）**不算**命中：缺 ≠ 空串（硬规则 6），否则「没采集到」会伪装成「从未起跑」。
+ *   · `steps` **存在且为空数组** —— 从未起跑的 job 一条步读数都没有。⛔ 同样要求**存在**：
+ *     `steps` 键缺失 = 分不出「没有步」与「没读到步」（硬规则 3b），此时不得报 infra（方向安全）。
+ *
+ * ⛔ 与 `job-timeout-reached` **互斥且优先**：命中本判据的 job 不再产出同 job 的 timeout signal。
+ */
+export function jobNeverStarted(job: { runnerName?: unknown; steps?: unknown }): boolean {
+  return job.runnerName === "" && Array.isArray(job.steps) && job.steps.length === 0;
+}
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -234,7 +285,12 @@ export function attributeRun(record: RunRecord, opts: AttributeOptions = {}): At
       typeof job.timeoutMinutes === "number" && job.timeoutMinutes > 0
         ? job.timeoutMinutes
         : runLevelTimeout;
-    if (typeof dur === "number" && dur > 0 && to !== null && dur >= to * 60) {
+    // ⛔ 互斥且**优先**：从未拿到 runner 的 job，它的 `durationSec` 是**排队到被拒**的时长，不是执行
+    // 时长 ⇒ 不得再产出同 job 的 `job-timeout-reached`（两个成因对同一个 job 互斥，且直接量优先）。
+    // 不加这条 else，一个 132s 的排队会被读成「撞到了 2 分钟的执行超时」（2026-09-24 实测的误归因）。
+    if (jobNeverStarted(job)) {
+      infra.push(`${JOB_NOT_STARTED_PREFIX}${name}`);
+    } else if (typeof dur === "number" && dur > 0 && to !== null && dur >= to * 60) {
       infra.push(`infra:job-timeout-reached:${name}`);
     }
     if (String(job.conclusion ?? "") === "cancelled") {

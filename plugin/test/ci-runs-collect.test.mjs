@@ -45,9 +45,11 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  NOT_STARTED_CAUSE_MAX_CHARS,
   buildRecord,
   collect,
   collectForRound,
+  deriveNotStartedCause,
   derivePrereqProvision,
   deriveSchedulerMs,
   deriveTestFilesFromLog,
@@ -55,6 +57,7 @@ import {
   knownSchedulerRunsFromCarrier,
   knownTestFilesFromCarrier,
   resolveGhBin,
+  withAttribution,
   writeCarrier,
 } from "../scripts/ci-runs-collect.ts";
 
@@ -1070,4 +1073,204 @@ test("buildRecord — schedulerByJob 里没有这个 job ⇒ 该 job 读数上�
   });
   assert.equal(rec.jobs.find((j) => j.name === "test").schedulerMs, 53507);
   assert.equal("schedulerMs" in rec.jobs.find((j) => j.name === "version-consistency"), false);
+});
+
+// ── ⑪ runnerName / notStartedCause ───────────────────────────────────────────────────────────────
+// tasks/gap-ci-collector-job-not-started-misattributed-as-timeout（2026-09-24 实测 run 35966264609）。
+//
+// 采集面要补的两件事：
+//   ① `runner_name` 是 jobs API **本来就返回**的直接量，而采集器此前根本不读它（`grep -c runner_name`
+//      = 0）⇒ 归因器只能拿时长（间接量）去猜「起跑没有」，把「从未拿到 runner」的 132s 排队时长报成
+//      `job-timeout-reached`（硬规则 4b）。⚠️ 落键纪律：`""` 要落（API 在「从未拿到 runner」时给的正是
+//      空串），`null` / 缺键**不落**（缺 ≠ 空串，硬规则 6）。
+//   ② `notStartedCause`：成因只在 check-run annotation 里。**只对 conclusion=failure 的未启动 job** 调，
+//      失败 ⇒ 落 `null`（独立取值），且 not-started signal 照常产出（⛔ 绝不回落成 timeout）。
+
+/** 真实 run 35966264609 的 `version-consistency`：从未拿到 runner（字段逐字取自 jobs API）。 */
+function ghNeverStartedJob(over = {}) {
+  return {
+    id: 9010001,
+    name: "version-consistency",
+    conclusion: "failure",
+    runner_name: "",
+    started_at: "2026-09-24T06:48:06Z",
+    completed_at: "2026-09-24T06:50:18Z", // ⇒ durationSec = 132
+    steps: [],
+    ...over,
+  };
+}
+/** 该 job 在 workflow YAML 里的 `timeout-minutes`（实测 2）—— 离线缝的 timeouts 是显式喂的。 */
+const NEVER_STARTED_TIMEOUTS = { "version-consistency": 2 };
+
+/** 走**真实装配路径**（buildRecord = 写盘前最后一道闸）+ 真实归因（withAttribution）。 */
+function neverStartedRecord(job) {
+  const rec = buildRecord(ghRun({ id: 35966264609 }), { jobs: [job], timeouts: NEVER_STARTED_TIMEOUTS });
+  return { raw: rec, attributed: withAttribution(rec, null) };
+}
+
+test("SC11-1 runnerName — API 给空串就【落】空串（「从未拿到 runner」的直接读数，⛔ 不是「没有值」）", () => {
+  const { raw, attributed } = neverStartedRecord(ghNeverStartedJob());
+  assert.equal(raw.jobs[0].runnerName, "", "空串必须落键 —— 它就是 never-started 的直接量");
+  assert.equal(raw.jobs[0].durationSec, 132, "夹具的 132s 排队时长");
+  assert.ok(attributed.signals.includes("infra:job-not-started:version-consistency"), JSON.stringify(attributed.signals));
+  assert.ok(
+    !attributed.signals.some((s) => s.includes("infra:job-timeout-reached:")),
+    `⛔ 排队时长被读成执行超时: ${JSON.stringify(attributed.signals)}`,
+  );
+});
+
+test("SC11-2 runnerName — API 给 null / 缺键 ⇒ 【不】落键（缺 ≠ 空串，硬规则 6）", () => {
+  for (const [label, job] of [
+    ["runner_name: null", ghNeverStartedJob({ runner_name: null })],
+    ["缺 runner_name 键", (() => { const j = ghNeverStartedJob(); delete j.runner_name; return j; })()],
+  ]) {
+    const { raw, attributed } = neverStartedRecord(job);
+    assert.equal("runnerName" in raw.jobs[0], false, `${label} ⇒ 不得落 runnerName 键`);
+    assert.ok(
+      !attributed.signals.some((s) => s.includes("infra:job-not-started:")),
+      `${label} ⇒ 判不出 not-started: ${JSON.stringify(attributed.signals)}`,
+    );
+    // 对照方向（证明上面那条不是回声）：判不出就落回**旧**行为，这条夹具仍报 timeout。
+    assert.ok(attributed.signals.includes("infra:job-timeout-reached:version-consistency"), JSON.stringify(attributed.signals));
+  }
+});
+
+test("SC11-3 runnerName — 正常拿到 runner 的 self-hosted job ⇒ 逐字落名，且零 infra 信号", () => {
+  const job = ghNeverStartedJob({ runner_name: "tokyo-alpha-1", steps: [{ name: "Run tests", conclusion: "failure" }] });
+  const { raw, attributed } = neverStartedRecord(job);
+  assert.equal(raw.jobs[0].runnerName, "tokyo-alpha-1");
+  assert.ok(!attributed.signals.some((s) => s.startsWith("infra:")), JSON.stringify(attributed.signals));
+});
+
+test("SC11-3b 负控制（API 形状）— 同 fixture 只把 runner_name 换成一个真 runner、steps 非空 ⇒ 真超时仍产出 timeout", () => {
+  // 单变量对照（`runner_name` / `steps` 之外的字段逐字不动：id / name / 132s / timeout-minutes 2 都没动）。
+  // 这一条与 SC11-1 配对，证明 SC11-1 的「不产出 timeout」不是恒真的回声。
+  const job = ghNeverStartedJob({
+    runner_name: "tokyo-alpha-1",
+    steps: [{ name: "Set up job", conclusion: "success" }], // 非空但无失败步 ⇒ 不触发「兄弟实质失败」压制
+  });
+  const { attributed } = neverStartedRecord(job);
+  assert.ok(attributed.signals.includes("infra:job-timeout-reached:version-consistency"), JSON.stringify(attributed.signals));
+  assert.ok(
+    !attributed.signals.some((s) => s.includes("infra:job-not-started:")),
+    `⛔ 真超时被判成「从未起跑」: ${JSON.stringify(attributed.signals)}`,
+  );
+});
+
+test("SC11-4 notStartedCause — annotation 调用失败 ⇒ null（独立取值），且 not-started signal 仍在", () => {
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(" "));
+    if (args.includes("--allow-escape-sequences")) return LOG_WITHOUT_GROUPS;
+    throw new Error("HTTP 403（测试缝：annotation 读不到）");
+  };
+  const { records, warnings } = collect({
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 35966264609 })],
+    jobsByRun: { "35966264609": [ghNeverStartedJob()] },
+  });
+  const attributed = withAttribution(records[0], null);
+  assert.ok(
+    calls.some((c) => c.includes("/check-runs/9010001/annotations")),
+    `必须真的去调了 annotation（否则这条测试是回声）: ${JSON.stringify(calls)}`,
+  );
+  assert.equal(records[0].notStartedCause, null, "拿不到成因 ⇒ 独立取值 null（⛔ 不是空串、也不是省略这个键）");
+  assert.ok(
+    warnings.some((w) => w.startsWith("not-started-annotation-unreadable:9010001")),
+    `调用失败必须留痕: ${JSON.stringify(warnings)}`,
+  );
+  assert.equal(attributed.attribution, "infrastructure");
+  assert.ok(attributed.signals.includes("infra:job-not-started:version-consistency"), JSON.stringify(attributed.signals));
+  assert.ok(
+    !attributed.signals.some((s) => s.includes("infra:job-timeout-reached:")),
+    `⛔ 拿不到成因不得回落成 timeout: ${JSON.stringify(attributed.signals)}`,
+  );
+});
+
+test("SC11-5 notStartedCause — 正控制：annotation 拿得到 ⇒ 逐字写进记录（证明上一条的 null 不是恒值）", () => {
+  const CAUSE =
+    "The job was not started because recent account payments have failed or your spending limit needs to be increased";
+  const seen = [];
+  const run = (args) => {
+    seen.push(args.join(" "));
+    const p = args[args.length - 1];
+    if (p.includes("/check-runs/")) {
+      return JSON.stringify({
+        annotations: [
+          { annotation_level: "notice", message: "这是 notice，⛔ 不得被当成成因" },
+          { annotation_level: "failure", message: CAUSE },
+        ],
+      });
+    }
+    return LOG_WITHOUT_GROUPS;
+  };
+  const { records } = collect({
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun({ id: 35966264609 })],
+    jobsByRun: { "35966264609": [ghNeverStartedJob()] },
+  });
+  assert.equal(records[0].notStartedCause, CAUSE, "取 failure 级 message 逐字（notice 级不算）");
+  assert.ok(seen.some((c) => c.includes("/check-runs/")), "annotation 真的调过");
+});
+
+test("SC11-6 notStartedCause — 没有未启动 job ⇒ 【不写】这个键（缺 ≠ null，硬规则 6）", () => {
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(" "));
+    return LOG_WITH_GROUPS;
+  };
+  const { records } = collect({
+    repo: "o/n",
+    run,
+    limit: 1,
+    runs: [ghRun()],
+    jobsByRun: { "1001": [ghJob()] }, // 正常拿到 runner 的 job（fixture 无 runner_name ⇒ 连键都没有）
+  });
+  assert.equal("notStartedCause" in records[0], false, "没有未启动 job ⇒ 键缺失");
+  assert.ok(!calls.some((c) => c.includes("/check-runs/")), "没有未启动 job 就一次 annotation 都不该调（省配额）");
+});
+
+test("SC11-7 notStartedCause — 离线缝（--from-file：零 gh）不为成因破例，落 null 而 signal 照常", () => {
+  const { records } = collect({
+    repo: "o/n",
+    limit: 1,
+    runs: [ghRun({ id: 35966264609 })],
+    jobsByRun: { "35966264609": [ghNeverStartedJob()] },
+  });
+  assert.equal(records[0].notStartedCause, null, "没试过 ⇒ 成因没拿到（null），⛔ 不虚构一个成因");
+  const attributed = withAttribution(records[0], null);
+  assert.ok(attributed.signals.includes("infra:job-not-started:version-consistency"), JSON.stringify(attributed.signals));
+});
+
+test("SC11-8 deriveNotStartedCause — 只认 failure 级；没有 / 空白 / 读不懂 ⇒ null（⛔ 不是空串）", () => {
+  assert.equal(deriveNotStartedCause({ annotations: [{ annotation_level: "warning", message: "x" }] }), null);
+  assert.equal(deriveNotStartedCause({ annotations: [{ annotation_level: "failure", message: "   " }] }), null);
+  assert.equal(deriveNotStartedCause({ annotations: [] }), null);
+  assert.equal(deriveNotStartedCause({}), null);
+  assert.equal(deriveNotStartedCause(null), null);
+  assert.equal(deriveNotStartedCause("不是对象"), null);
+  const long = "あ".repeat(NOT_STARTED_CAUSE_MAX_CHARS + 50);
+  const got = deriveNotStartedCause({ annotations: [{ annotation_level: "failure", message: long }] });
+  assert.equal(got.length, NOT_STARTED_CAUSE_MAX_CHARS, "截断长度写死在唯一一处常量上");
+  assert.equal(got, long.slice(0, NOT_STARTED_CAUSE_MAX_CHARS), "截断是逐字前缀（⛔ 不加省略号）");
+});
+
+test("SC11-9 deriveNotStartedCause — 真实响应形态是**裸数组**（⛔ 不是 {annotations:[…]} 包一层）", () => {
+  // 实测 2026-09-24（gh api /repos/yaleh/quay/check-runs/<job>/annotations 的原始字节）：顶层是数组，
+  // 里面第一条就是 failure 级成因，第二条是 notice。⛔ 只认包一层的形态会让生产侧**永远**只落 null ——
+  // 而 null 恰好也是「没拿到成因」的合法取值 ⇒「端点形态读错了」与「真的没有成因」同形（硬规则 3b）。
+  // 这条夹具与 SC11-5 的差别**只在响应外壳**：同一个 message，一个裸数组、一个包一层，两者都必须命中。
+  const CAUSE =
+    "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings";
+  const realShaped = [
+    { path: ".github", start_line: 1, annotation_level: "failure", title: "", message: CAUSE },
+    { path: ".github", start_line: 1, annotation_level: "notice", title: "", message: "ubuntu-latest 迁移公告" },
+  ];
+  assert.equal(deriveNotStartedCause(realShaped), CAUSE, "裸数组形态（实测）必须命中");
+  assert.equal(deriveNotStartedCause({ annotations: realShaped }), CAUSE, "包一层形态同样命中");
+  assert.equal(deriveNotStartedCause([]), null, "空数组 ⇒ null（⛔ 不是空串）");
 });
