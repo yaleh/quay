@@ -32,6 +32,21 @@
 #      `--log`. Before this existed the command only wrote to stdout, so "was the finish step
 #      run, and how?" was indistinguishable in the record from "it never ran" (hard rule 9) —
 #      measured cost 2026-09-19: a release branch vanished with NO attributable trace at all.
+#   5. THE RECORD LANDS IN THE **MAIN CHECKOUT**, NOT IN THE CHECKOUT THE COMMAND RAN FROM
+#      (gap-release-cut-single-carrier-and-main-ledger-trace, AC-320, 2026-09-24). A linked
+#      worktree and its main checkout SHARE one `.git`, so the ledger must live with the OWNER
+#      of that git dir — otherwise "THE FINISH LEAVES A RECORD" is true of a file nobody reads.
+#      Measured cost 2026-09-24: the v0.12.0 cut was run from an independent clone
+#      (/data/scratch/yale/quay-release-cut-v0120) because `--cut` needs HEAD == base; the
+#      record landed in THAT clone's `.quay/`, and the main checkout's ledger末行 stayed at
+#      2026-09-20. So the default trace path is now `dirname(git-common-dir)/.quay/…`
+#      (order-independent — never `git worktree list`'s first entry, see repo-root.ts), the
+#      absolute path is printed to stderr on every write and by `--log`, and `--trace-path`
+#      answers "where would the record land?" without writing anything.
+#      ⚠️ A checkout that IS its own git-common-dir root (the main checkout, or a throwaway
+#      clone) is indistinguishable from inside git — both get one WARN line naming the
+#      absolute path. The WARN is a pointer at the DIRECT quantity (the path), not a verdict
+#      about which checkout you are in.
 #
 # `--cut` — THE CUT'S LANDING FACE (AC4). SPEC §4.1's protocol ends with three steps (合回 →
 # 在合并点打 tag → 删除). `--cut` performs all three in ONE invocation on the LOCAL side
@@ -51,6 +66,7 @@
 #   release-branch-finish.sh <branch> --cut --tag <vX.Y.Z> [--root <repo>] [--base <ref>]
 #                            [--remote <name>] [--no-remote] [--dry-run] [--trace <file>]
 #   release-branch-finish.sh --log [--trace <file>] [--root <repo>]
+#   release-branch-finish.sh --trace-path [--trace <file>] [--root <repo>]
 #   <branch>     a release branch name matching release-* / release/*
 #   --root       repo to operate on (default: the repo this script lives in)
 #   --remote     remote to also delete the ref from (default: origin)
@@ -61,18 +77,24 @@
 #   --tag        the version tag to create at the merge point (required by --cut; refused if it
 #                already exists)
 #   --dry-run    print what WOULD happen, exit 0, mutate nothing
-#   --trace      the finish-record file (default: <root>/.quay/release-branch-finish.jsonl)
+#   --trace      the finish-record file (default: <main checkout>/.quay/release-branch-finish.jsonl
+#                — the checkout that OWNS `<root>`'s shared git dir, so a linked worktree and its
+#                main checkout share ONE ledger; ⛔ NOT `<root>/.quay/…`)
+#   --trace-path PRINT the absolute record path (the same value stderr shows on every write) and
+#                exit 0 — answers "where does the record land?" without writing anything
 #   --log        READ the finish record: print one line per recorded decision (branch, time,
 #                form, tag, result) + the record count. Absent trace file ⇒ exit 2 with its own
 #                CAUSE (never ran is ⛔ not "ran with no records")
 #
 # Exit codes:
 #   0  finished — the branch is gone locally (and remotely, when a remote was consulted);
-#      also 0 when it was already gone (idempotent finish), and for `--log` on a readable trace
+#      also 0 when it was already gone (idempotent finish), and for `--log` on a readable trace,
+#      and for `--trace-path`
 #   1  a delete actually failed, or the remote could not be read / deleted, or a --cut stage
 #      after the merge failed — CAUSE= names which
 #   2  usage error / the name is not a release branch / the check could not be performed /
-#      a --cut precondition failed / the trace could not be read or written
+#      a --cut precondition failed / the trace could not be read or written /
+#      the record's landing root could not be derived
 #   3  no license to delete: the branch is neither merged into <base> nor contained in any tag
 #      — refused, nothing deleted
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -94,6 +116,7 @@ do_cut=0
 cut_tag=""
 trace_file=""
 log_mode=0
+trace_path_mode=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -105,13 +128,68 @@ while [ "$#" -gt 0 ]; do
     --cut) do_cut=1; shift ;;
     --tag) cut_tag="$2"; shift 2 ;;
     --trace) trace_file="$2"; shift 2 ;;
+    --trace-path) trace_path_mode=1; shift ;;
     --log) log_mode=1; shift ;;
     -*) echo "release-branch-finish: unknown option: $1" >&2; exit 2 ;;
     *) branch="$1"; shift ;;
   esac
 done
 
-[ -n "$trace_file" ] || trace_file="$repo_root/.quay/release-branch-finish.jsonl"
+# ── property 5: the record's LANDING ROOT (the checkout that OWNS the shared git dir) ─────────
+# A linked worktree and its main checkout share ONE `.git`; the record must live with its owner,
+# so "THE FINISH LEAVES A RECORD" is true of the file a reader of the main ledger opens. This is
+# the order-independent derivation (parent of `--git-common-dir`), never `git worktree list`'s
+# first entry — that list's order is not guaranteed (see plugin/scripts/repo-root.ts).
+ledger_root_of() { # <dir> → absolute checkout path, or "" when it cannot be derived
+  local d="$1" gd=""
+  gd="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || gd=""
+  if [ -z "$gd" ]; then
+    # Older git has no --path-format: --git-common-dir may come back RELATIVE to <dir>.
+    gd="$(git -C "$d" rev-parse --git-common-dir 2>/dev/null)" || gd=""
+    [ -n "$gd" ] || return 1
+    case "$gd" in /*) : ;; *) gd="$d/$gd" ;; esac
+  fi
+  [ -n "$gd" ] || return 1
+  ( cd "$(dirname "$gd")" 2>/dev/null && pwd -P ) || return 1
+}
+
+# The invocation is "self-rooted" when the checkout it operates on IS the owner of its own git
+# dir — i.e. no *other* checkout shares this ledger. The real main checkout and a throwaway clone
+# are indistinguishable from inside git (both are self-rooted), so this is deliberately a
+# POINTER, not a verdict: it names the absolute path so the reader can judge. A linked-worktree
+# invocation can never set it, because there the ledger root is a DIFFERENT directory — which is
+# exactly the sharing this property provides.
+self_rooted=0
+toplevel_of_root="$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)" || toplevel_of_root=""
+
+[ -n "$trace_file" ] || {
+  ledger_root="$(ledger_root_of "$repo_root")" || ledger_root=""
+  if [ -z "$ledger_root" ]; then
+    echo "CAUSE=release-branch-ledger-root-unresolvable — could not derive the checkout that owns '$repo_root''s shared git dir (git rev-parse --git-common-dir failed), so where the record would land is UNKNOWN; refusing to write it to a guess (hard rule 3b)" >&2
+    exit 2
+  fi
+  trace_file="$ledger_root/.quay/release-branch-finish.jsonl"
+  # Spelled as an `if` on purpose: the `[ A ] || [ B ] && c=1` shorthand reads as
+  # "(A || B) && c=1" to the shell, which sets c when the toplevel is EMPTY (an
+  # undeterminable read) — the "could not look ⇒ looks like a hit" shape (hard rule 3b).
+  if [ -n "$toplevel_of_root" ] && [ "$ledger_root" = "$toplevel_of_root" ]; then
+    self_rooted=1
+  fi
+}
+
+abs_path() { # <path> → absolute path of the LEAF (which need not exist yet)
+  local p="$1" d b d2
+  case "$p" in /*) : ;; *) p="$PWD/$p" ;; esac
+  d="$(dirname "$p")"; b="$(basename "$p")"
+  if d2="$(cd "$d" 2>/dev/null && pwd -P)"; then :; else d2="$d"; fi
+  printf '%s/%s\n' "${d2%/}" "$b"
+}
+
+# ── --trace-path: answer "where does the record land?" without writing anything ───────────────
+if [ "$trace_path_mode" -eq 1 ]; then
+  abs_path "$trace_file"
+  exit 0
+fi
 
 # ── the finish record (property 4): one JSONL line per decision ───────────────────────────────
 # Keys are written in a FIXED order (ts, branch, sha, form, tag, base, result, remote_result,
@@ -120,6 +198,20 @@ done
 # in a ref name would otherwise forge a key.
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
+# ── property 5's disclosure face: name the DIRECT quantity (the absolute path) every time ─────
+# The WARN is a pointer at that path, not a verdict about which checkout this is (see the header:
+# the main checkout and a throwaway clone are indistinguishable from inside git). It is emitted on
+# the write path only — `--log` prints the plain `reading:` line instead, and `--trace-path` IS the
+# path. A reader who sees a path that is not their main checkout has the whole finding.
+trace_landing_note() {
+  local abs
+  abs="$(abs_path "$trace_file")"
+  echo "release-branch-finish: trace=$abs" >&2
+  if [ "$self_rooted" -eq 1 ]; then
+    echo "WARN: trace lands in an independent clone, not a linked worktree of the main checkout — $abs (this invocation's git dir IS its own root, so NO other main checkout shares this ledger; if '$repo_root' is a scratch clone or a copy, the record is invisible to whoever reads the main checkout's ledger)" >&2
+  fi
+}
+
 trace_append() { # <result> <form> <tag> <sha> <remote_result> <exit>
   local ts line dir
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -127,6 +219,7 @@ trace_append() { # <result> <form> <tag> <sha> <remote_result> <exit>
   if [ ! -d "$dir" ]; then
     mkdir -p "$dir" 2>/dev/null || true
   fi
+  trace_landing_note
   line="$(printf '{"ts":"%s","branch":"%s","sha":"%s","form":"%s","tag":"%s","base":"%s","result":"%s","remote_result":"%s","exit":%s}' \
     "$ts" "$(json_escape "$branch")" "$(json_escape "$4")" "$(json_escape "$2")" \
     "$(json_escape "$3")" "$(json_escape "$base")" "$(json_escape "$1")" "$(json_escape "$5")" "$6")"
@@ -143,6 +236,9 @@ if [ "$log_mode" -eq 1 ]; then
     echo "release-branch-finish: --log takes no branch name (got '$branch')" >&2
     exit 2
   fi
+  # Name the file being read BEFORE judging it: "which ledger did I just read?" is otherwise
+  # unanswerable from the transcript, and it is the whole question property 5 turns on.
+  echo "release-branch-finish: reading=$(abs_path "$trace_file")" >&2
   if [ ! -e "$trace_file" ]; then
     echo "CAUSE=release-branch-trace-missing — no finish record at '$trace_file': the finish step has never been recorded here. This is 'never ran' — ⛔ NOT the same as 'ran and recorded nothing' (hard rule 3b)" >&2
     exit 2
