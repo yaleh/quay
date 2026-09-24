@@ -18,7 +18,8 @@ extra:
 `superseded` 是**终态**（前提被人裁定删除，不是"进行中"）⇒ 一个 `depends_on` 指向 superseded 任务的任务，
 `depsReady` **恒为 false**，且**没有任何事件能把它翻过来**——superseded 不会再变成 done。
 
-**生产实例（本条立案的直接量）**：`gap-ac194-production-criterion-owner`（todo）的唯一依赖
+<!-- dedup-ref -->
+**生产实例（本条立案的直接量，仅登记为实证对象，⛔ 不构成前置）**：`gap-ac194-production-criterion-owner`（todo）的唯一依赖
 `gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check` 已被 superseded（其任务体 `## Superseded`
 节逐字写明并入 `gap-suite-ambient-reds-block-all-code-landings`）。后果读数：
 
@@ -83,10 +84,14 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 
 ## DoD
 
+<!-- dedup-ref -->
 真实落地：`gap-ac194-production-criterion-owner` 在生产 root 上 `depsReady=true ∧ eligible=true`（AC3），
 且**它不是靠放宽依赖语义换来的**——`ready` / `todo` / 读不出状态 的依赖仍 fail-closed（AC5 逐字过）。
 退役依赖在读数上**可区分**（AC4），不是静默当成 satisfied。把 `allDepsDone` 改成"对一切非 done 返回 true"、
 或只给 `gap-ac194-production-criterion-owner` 单条改 `depends_on` 了事 ⇒ 均不算完成。
+**（本段与上方「生产实例」段对该 id 的引用是实证对象登记，⛔ 不构成前置：本任务与它是【反向】关系——
+它 `depends_on` 本任务所修的机制，⛔ 不是本任务 `depends_on` 它。加 `<!-- dedup-ref -->` 的原因即此：
+`ready-pool-check.ts` 的 `prosePrereqRefs` 只能看关键词、看不出关系方向，会把这条登记读成一条前置声明。）**
 
 ## Touches
 
