@@ -67,13 +67,13 @@ v0.6.2（run 34843029988）与 v0.6.3（run 34845477762）**失败形态逐字�
 ### 三、判据设计的两条直接依据（⛔ 不是风格偏好，是机制约束）
 
 1. **`achieved` 永久锁定。** 全仓 `writeGoalStatus` 仅 2 个调用点、都写 `"achieved"`，
-   **没有任何路径把 achieved 翻回 active**（`goal-driver.ts:214` 注释逐字）。
-   ⚠️ **2026-09-24 更正：此前提已过期。** 2026-09-10 起 achieved→active 的重开路径被允许（人裁定，
-   `50ed1cbc8`；`goal-store.ts` activation 注释逐字「Reopen paths — achieved→active … are activations
-   too」），本 GOAL 即经该路径重开。`long-term: true` 的设计理由仍成立（重开是人的动作，不是自动回退）。故「CI 保持绿」
+   **没有任何路径把 achieved 翻回 active**（`goal-driver.ts:214` 注释逐字）。故「CI 保持绿」
    这类会回退的活性判据一旦翻 achieved，该记录将永久声称一件已不成立的事（AC-181 即此类）。
    ⇒ **本 GOAL 名下 AC-265/266/267/269 全部写 `long-term: true`**，进 AC-216 复验域每轮重跑，
    回归时 `standing-violated` 自动立案；AC-268（一次性发版）不带。
+   ⚠️ **2026-09-24 更正：此前提已过期。** 2026-09-10 起 achieved→active 的重开路径被允许（人裁定，
+   `50ed1cbc8`；`goal-store.ts` activation 注释逐字「Reopen paths — achieved→active … are activations
+   too」），本 GOAL 即经该路径重开。`long-term: true` 的设计理由仍成立（重开是人的动作，不是自动回退）。
 2. **criterion 只有 pass/fail 两态**（`acceptance-runner.ts:213` `const ok = r.status === 0`），
    **没有 NOT-EVALUATED 通道**，且总预算 **60s**（`goal-store.ts` gate 的 `timeoutMs: 60000`）。
    ⇒ ①criterion **不现场调 `gh`**（网络+认证+限流都会被记成「CI 红」，而 `gh` 在非标准的
