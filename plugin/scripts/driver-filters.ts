@@ -102,8 +102,10 @@ export interface DepsReadiness {
 /** 状态词 → 三值判定。**单一真相源**：所有依赖边判定（本文件 depsSatisfied、ready-pool-check
  *  depsReadinessFor、slot-refill depsReadyFor、portfolio-choice findUnmetDependency）共用这一份，
  *  ⛔ 不各写一遍 `=== "done" || === "superseded"`。
- *  读不懂/缺失 ⇒ `null` ⇒ `blocking`（fail-closed：⛔ 不得伪装成 done 或 superseded）。 */
-export function judgeDepStatus(status: string | null): DepVerdict {
+ *  读不懂/缺失/无此键（`null` / `undefined`）⇒ `blocking`（fail-closed：⛔ 不得伪装成 done 或
+ *  superseded）。`undefined` 是 Map `.get()` 的缺失形态（portfolio-choice 的 statusById），与 `null`
+ *  同为「读不出」，⛔ 不因为类型更宽就换一个判定。 */
+export function judgeDepStatus(status: string | null | undefined): DepVerdict {
   if (status === TASK_STATUS.DONE) return "done";
   if (status === TASK_STATUS.SUPERSEDED) return "superseded";
   return "blocking";
