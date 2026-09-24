@@ -1,7 +1,7 @@
 ---
 id: gap-serve-sessions-body-i18n-red-only-under-full-ci-concurrency
 title: serve-sessions-body-i18n.test.mjs 只在 CI 全量并发下红、单跑 12/12 绿——先取证再归因
-status: ready
+status: done
 labels:
   - gap
   - defect
