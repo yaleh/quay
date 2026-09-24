@@ -1,7 +1,7 @@
 ---
 id: GOAL-020
 title: CI 与 release 渠道成为可信守门员：develop 首绿 + release 能发出三平台可用产物
-status: achieved
+status: active
 kind: goal
 origin: 人 2026-09-15 裁定：以 GitHub CI 与 release 为目标建 GOAL 并持续驱动；并逐条拍板 (a) 接受 5 条
   AC 的范围、(b) 接受 AC-268 需在本 GOAL 期内真发一次版本（workflow_dispatch）。立案读数见 body：develop
@@ -18,6 +18,13 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: all ACs achieved + sufficiency covered"
+  - at: 2026-09-24T08:18:10.451Z
+    from: achieved
+    to: active
+    actor: human
+    reason: 人 2026-09-24 裁定重开：hosted runner 账单闸挡住发布链（run 35966264609 annotation『The
+      job was not started because recent account payments have failed…』）；新增长期保证
+      AC-319（全 job self-hosted）/ AC-320（切版留痕落主台账）
 ---
 ## 背景（2026-09-15 实测，全部为直接量）
 
@@ -60,7 +67,10 @@ v0.6.2（run 34843029988）与 v0.6.3（run 34845477762）**失败形态逐字�
 ### 三、判据设计的两条直接依据（⛔ 不是风格偏好，是机制约束）
 
 1. **`achieved` 永久锁定。** 全仓 `writeGoalStatus` 仅 2 个调用点、都写 `"achieved"`，
-   **没有任何路径把 achieved 翻回 active**（`goal-driver.ts:214` 注释逐字）。故「CI 保持绿」
+   **没有任何路径把 achieved 翻回 active**（`goal-driver.ts:214` 注释逐字）。
+   ⚠️ **2026-09-24 更正：此前提已过期。** 2026-09-10 起 achieved→active 的重开路径被允许（人裁定，
+   `50ed1cbc8`；`goal-store.ts` activation 注释逐字「Reopen paths — achieved→active … are activations
+   too」），本 GOAL 即经该路径重开。`long-term: true` 的设计理由仍成立（重开是人的动作，不是自动回退）。故「CI 保持绿」
    这类会回退的活性判据一旦翻 achieved，该记录将永久声称一件已不成立的事（AC-181 即此类）。
    ⇒ **本 GOAL 名下 AC-265/266/267/269 全部写 `long-term: true`**，进 AC-216 复验域每轮重跑，
    回归时 `standing-violated` 自动立案；AC-268（一次性发版）不带。
@@ -80,7 +90,7 @@ CI 日志自带 `__GROUP__ concurrency=8 files=631` 读数。按 `test-file-base
 （只比相邻一次 ⇒ 不引入窗口大小魔数，且恰好抓住「为了绿而删/跳测试」这个动作发生的区间）。
 ⛔ 永不写 `== 631` 这类快照形态。
 
-## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-273、AC-274，共 7 条）
+## 范围（在域 AC = AC-265、AC-269、AC-270、AC-271、AC-272、AC-273、AC-274、AC-319、AC-320，共 9 条）
 
 - **AC-265** develop 首绿，且绿不是靠少跑测试换来的（long-term）
 - **AC-269** CI 红有机械归因：真缺陷 / 基础设施 / 已知 flake（long-term）
@@ -89,6 +99,8 @@ CI 日志自带 `__GROUP__ concurrency=8 files=631` 读数。按 `test-file-base
 - **AC-272** 滚动渠道自证版本：`-dev` 后缀，或等于同名 tag 的构建（long-term）
 - **AC-273** origin/HEAD 指向 origin/develop（long-term）
 - **AC-274** 首次真实全绿发布 + master 已 ff 到它（一次性，时间窗限定立案之后）
+- **AC-319** 全部 workflow 的全部 job 都在 self-hosted runner 上——计量式 hosted runner 的账单闸不再能挡住 CI/发布（long-term，2026-09-24 重开时新增）
+- **AC-320** 立条后每一个 release tag 在**主检出**台账 `.quay/release-branch-finish.jsonl` 有 `form=tagged exit=0` 记录——切版走可重复载体且留痕可读回（long-term，2026-09-24 重开时新增）
 
 ⛔ 已退役、不再计入范围：**AC-266 / AC-267 / AC-268**——主体（SEA/npm 产物线）经人 2026-09-16 裁定取消，已 `superseded`（SPEC §11.4）。
 
@@ -116,3 +128,22 @@ GOAL-020 管 SEA bundle 里的**顶层求值时机**（`MODULE_DIR` 在 import �
    alive，见 SPEC §11.2）。
 ③ **红有机械归因**——CI 转红时，载体里有一条区分「真缺陷 / 基础设施 / 已知 flake」的记录，
    不需要人肉读 15000 行日志来定性（2026-09-15 为定性这一批红花掉的人力，正是立本 GOAL 的直接动因）。
+
+## 重开（2026-09-24，人裁定）
+
+**直接量**：run `35966264609`（develop CI）的 `version-consistency` / `dist-verify-node-floor` 两个 job
+`runner_name=""`、`steps=0`，check-run annotation 逐字 *"The job was not started because recent account
+payments have failed or your spending limit needs to be increased"*；同形挡住 `release.yml` 全部 3 个 job 与
+`publish-plugin-dist.yml` ⇒ v0.12.0（tag 已切，`5e373be`）的 release run 不可执行，master 停在 v0.11.0
+——**按 AC-270 这是正确输出**（master 只随全绿 release run 的 `advance-master` 前进，⛔ 不手推）。
+
+**为什么挂本 GOAL 而不新立**：本 GOAL 退出条件 ②「release 渠道能发出产物」在账单闸下已不成立，而它的
+long-term AC 全部判为通过——它们读的是**已发生的** run，结构上看不见「下一次 run 起不来」。缺的保证
+是「交付链不依赖计量式 runner」（AC-319）与「切版可重复且留痕在主台账」（AC-320）。
+
+**⛔ 不新增**「master = 最近一次全绿 release tag」一条：AC-270 已覆盖 master 值域，而全绿 run 自带
+`advance-master` ⇒ 增量近零（硬规则 5 去重）。
+
+**执行任务**：runner 迁移 + 防回漂静态闸（`goal_ac: AC-319`）；切版载体 + 主台账落点（`goal_ac: AC-320`）；
+采集器「未启动」独立取值（正文关联 AC-269 的归因正确性）；CI 并发下红的 `serve-sessions-body-i18n.test.mjs`
+（正文关联 AC-265）。
