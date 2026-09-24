@@ -321,8 +321,12 @@ import {
 export {
   resolveScopedGateCommand,
   scopedGateCommandFor,
+  resolveDocCheckCommand,
   docCheckCommandFor,
+  readLoopFanInContract,
   readLoopTestOutput,
+  type CapabilityDecl,
+  type LoopFanInContract,
   type ScopedGateResolution,
   type MechanicalFanInOptions,
   type MechanicalFanInStepVerdict,
@@ -1593,10 +1597,17 @@ function preMergeNote(task: string, root: string, worktree: string): string {
       `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
       `(v) commit and exit.`,
     );
-  } else {
+  } else if (scoped.kind === "skip") {
     lines.push(
-      `(ii) skip the scoped gate (${scoped.reason}: third-party project has no scripts/test.sh and no loop.test_command — the driver's fan-in goes straight to the full-suite step);`,
+      `(ii) skip the scoped gate (${scoped.reason}: this project declares no loop.scoped_command in .quay/config.yml — the driver's fan-in goes straight to the full-suite step);`,
       `(iii) commit and exit.`,
+    );
+  } else {
+    // 声明了但读不懂 ⇒ 本项目不会跑 scoped 门（fan-in 会 fail-closed）；prompt 里如实说明，⛔ 不假装跳过。
+    lines.push(
+      `(ii) NOTE: the scoped gate cannot run — ${scoped.reason}`,
+      `(iii) fix loop.scoped_command in .quay/config.yml (or remove it) and re-run; the driver's fan-in fails closed on an unreadable declaration.`,
+      `(iv) commit and exit.`,
     );
   }
   return lines.join(" ");

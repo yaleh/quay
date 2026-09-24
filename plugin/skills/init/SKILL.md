@@ -159,8 +159,12 @@ categories). `--check-drift` / `--check-dependency-closure` are retired (no copy
 ## `loop.test_command` contract (what quay appends to your test entrypoint)
 
 **Read this before writing `scripts/test.sh`.** quay's mechanical fan-in runs the project's suite
-inside the task worktree, and when the project ships its own `scripts/test.sh` quay invokes it with
-its **own value-taking flags appended**:
+inside the task worktree. **Which command it runs is decided ONLY by the `loop:` declarations in
+your `.quay/config.yml`** (see "The `loop:` fan-in contract keys" below) — `quay-init` writes
+`suite_runner: delegated`, so a fresh project runs `bash -c "cd <worktree> && <loop.test_command>"`
+and nothing in this section applies. If you additionally ship a bucket-protocol `scripts/test.sh`
+and declare `suite_runner: quay-buckets`, quay invokes **that** script with its **own value-taking
+flags appended**:
 
 ```
 bash scripts/test.sh --buckets <task-id> --root <worktree> --state-dir <root>/.quay \
@@ -170,9 +174,32 @@ bash scripts/test.sh --buckets <task-id> --root <worktree> --state-dir <root>/.q
 
 The flag set above is the real one passed to quay's suite runner (`--buckets` / `--root` /
 `--state-dir` / `--runner` / `--log-file` / `--run-id`), plus `--test-concurrency=<N>` which the
-runner splices into the command it hands to `test.sh`. A project **without** `scripts/test.sh` is
-run as `bash -c "cd <worktree> && <loop.test_command>"` — `loop.test_command` itself never receives
-these flags; only a project-supplied `scripts/test.sh` does.
+runner splices into the command it hands to `test.sh`. Under `suite_runner: delegated` (the
+`quay-init` default) the full suite is `bash -c "cd <worktree> && <loop.test_command>"` —
+`loop.test_command` itself never receives these flags.
+
+⚠️ **The decision is a DECLARATION, never a file's existence** (GOAL-027 / AC-316): quay used to
+treat "this project has a `scripts/test.sh`" as "this project is quay-shaped" and then called that
+script with quay's own flags. A third-party project that correctly named its own entrypoint
+`scripts/test.sh` (the name `--test-command` detection suggests) therefore had quay's flags handed
+to a script that never agreed to consume them, and every mismatch surfaced as "read nothing"
+rather than as an error. Shipping a file no longer changes quay's behaviour; declaring the
+capability does.
+
+### The `loop:` fan-in contract keys
+
+| key | values | meaning |
+|---|---|---|
+| `suite_runner` | `quay-buckets` or `delegated` | `quay-buckets` ⇒ the full suite runs through quay's bucket runner (`full-suite-runner.ts`), the only writer of `verification-round.jsonl` — **quay's own repo uses this**; `delegated` ⇒ run `loop.test_command` as the full suite (the `quay-init` default for a new project). Absent ⇒ `delegated` iff `loop.test_command` is declared, else a fail-closed "no test tooling" command (exit 2 — never exit 127, so "capability absent" stays distinguishable from "command not found"). |
+| `scoped_command` | argv list; `{worktree}` and `{task}` are placeholders | The scoped gate's argv, e.g. `["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]`. **Absent (or `null`) ⇒ this project has no scoped capability**: fan-in skips that step with its own distinguishable value, `no-scoped-command-declared`. A declared-but-malformed value (a bare string, an empty list) **fails closed** — it is never silently treated as "not provided". |
+| `doc_check_command` | argv list; `{worktree}` is a placeholder | The doc-check argv, e.g. `["bash", "{worktree}/scripts/test.sh", "--static-checks-doc"]`. Same three-state rule as `scoped_command`; the absent state reads `no-doc-check-command-declared`. |
+
+`quay-init` writes `suite_runner: delegated`, `scoped_command: null` and `doc_check_command: null`
+into a fresh project's config, with these semantics spelled out in comments next to the keys. A
+project that genuinely has a scoped gate or a doc check replaces the `null` with its own argv
+list. An EXISTING config is never given these keys by an upgrade (the config-preserving merge only
+updates the values it owns), so a project installed earlier simply has them absent — which is the
+honest reading: it never declared those capabilities.
 
 **Your tolerance obligations** (a violation is not harmless — it burns whole worker sessions):
 

@@ -116,11 +116,21 @@ function makePReal() {
   return ws;
 }
 
-/** P-self: this-repo shape — scripts/test.sh present + a plugin/ dir + working branch author. */
+/** P-self: this-repo shape — the three fan-in contract keys declared in .quay/config.yml, a scripts/test.sh
+ *  (so the declared argv points at a real file), a plugin/ dir, working branch author.
+ *
+ *  gap-repo-shape-inferred-from-test-sh-existence / AC-316: "this-repo shape" is now expressed by the
+ *  DECLARATION, not by the file's existence — the fixture carries what this repo's own .quay/config.yml
+ *  carries (suite_runner: quay-buckets + scoped_command + doc_check_command). */
 function makePSelf() {
   const ws = makeTmp();
   fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
   fs.writeFileSync(path.join(ws, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"),
+    "loop:\n  suite_runner: quay-buckets\n" +
+    '  scoped_command: ["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]\n' +
+    '  doc_check_command: ["bash", "{worktree}/scripts/test.sh", "--static-checks-doc"]\n');
   fs.mkdirSync(path.join(ws, "plugin"), { recursive: true });
   fs.writeFileSync(path.join(ws, "plugin", ".keep"), "this-repo shape marker\n");
   execFileSync("git", ["init", "-q", "-b", "author", ws], { stdio: "ignore" });
@@ -208,17 +218,18 @@ test("AC4 (B) — resolveDocBranch reads the target's real checked-out branch, �
   assert.notEqual(resolveDocBranch(ws), DOC_BRANCH, "doc branch is not the hardcoded literal 'author'");
 });
 
-test("AC4 (C) — no scripts/test.sh ⇒ delegate to loop.test_command / independent capability-absent value, no exit 127", () => {
+test("AC4 (C) — no declared scoped/doc-check contract ⇒ independent capability-absent value, no exit 127", () => {
   const ws = pReal();
 
   // doc-check: independent "capability absent" value (null), ⛔ not a broken dev-tree script argv.
-  assert.equal(docCheckCommandFor(ws), null, "doc-check returns null (third-party-no-doc-check-tooling)");
+  assert.equal(docCheckCommandFor(ws), null, "doc-check returns null (no-doc-check-command-declared)");
 
-  // scoped-gate: delegates to loop.test_command (`node --test`) via cd into the worktree.
+  // scoped-gate: the project declares no loop.scoped_command ⇒ that capability is absent (skip), with its
+  // OWN distinguishable value — ⛔ never the full test_command wearing a scoped gate's name (AC-316).
   const scoped = resolveScopedGateCommand("gap-x", ws, ws);
-  assert.equal(scoped.kind, "run", "scoped gate runs (delegated to test_command)");
-  assert.deepEqual(scoped.argv, ["bash", "-c", `cd '${ws}' && node --test`], "scoped argv = bash -c 'cd <ws> && node --test'");
-  assert.ok(!scoped.argv.join(" ").includes("exit 127"), "no exit 127 in scoped argv");
+  assert.equal(scoped.kind, "skip", "scoped gate skipped (no-scoped-command-declared)");
+  assert.equal(scoped.reason, "no-scoped-command-declared", "distinguishable capability-absent value");
+  assert.ok(!JSON.stringify(scoped).includes("exit 127"), "no exit 127 in the scoped resolution");
 
   // suite: delegates to loop.test_command (⛔ not full-suite-runner, which assumes this repo's layout).
   const suite = defaultMechanicalSuiteCommand({
@@ -298,6 +309,7 @@ test("AC6 (C) — unconditionally calling the dev-tree's own scripts/test.sh on 
 
   const oldScoped = { kind: "run", argv: ["bash", path.join(ws, "scripts", "test.sh"), "--for-task", "gap-x", "--allow-thin"] };
   assert.notDeepEqual(resolveScopedGateCommand("gap-x", ws, ws), oldScoped, "correct scoped form ≠ the old unconditional dev-tree argv");
+  assert.equal(resolveScopedGateCommand("gap-x", ws, ws).kind, "skip", "correct scoped form = the capability-absent value — GREEN");
 });
 
 // ── AC7: hygiene — targets are mkdtemp'd OUTSIDE the repo tree and cleaned up by teardown ────────────

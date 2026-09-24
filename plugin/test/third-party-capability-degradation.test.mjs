@@ -1,9 +1,13 @@
 // @test-group engine
 // third-party-capability-degradation.test.mjs — gap-ac227-third-party-capability-degradation（AC-227 判据
-// 的机器判定面）。GOAL-012 退出条件②④：fan-in 的 doc-check / scoped-gate / suite 三步在【第三方面】
-// （无 scripts/test.sh）必须各产一个「能力不存在」的独立取值（可区分的 skipped/capability-absent），
-// 且不以 exit 127 形态出现；反向【本仓库面】（有 scripts/test.sh）三步仍真跑、命令与迁移前逐字一致、
-// 降级不回流污染。
+// 的机器判定面）。GOAL-012 退出条件②④：fan-in 的 doc-check / scoped-gate / suite 三步在【未声明能力的项目面】
+// 必须各产一个「能力不存在」的独立取值（可区分的 skipped/capability-absent），且不以 exit 127 形态出现；
+// 反向【声明了契约的项目面】三步仍真跑、命令与迁移前逐字一致、降级不回流污染。
+//
+// ⚠️ 2026-09-23 更新（gap-repo-shape-inferred-from-test-sh-existence / AC-316 / GOAL-027）：「是不是本
+// 仓库形态」的判据从【有没有 scripts/test.sh】改为【.quay/config.yml loop: 里声明了什么】。上面
+// 「第三方面 / 本仓库面」现在分别由「未声明 / 声明了三个契约键」表达。⛔ 一个【带自己 scripts/test.sh
+// 但没声明契约】的项目属于「未声明能力的项目面」——这正是本任务要修的现场（AC-316 正向用例）。
 //
 // hermetic：自建 mkdtemp 目标 + 直接调用命令构造/降级判定函数，⛔ 不读 .quay/fan-in-step-trace.jsonl
 // 等生产载体、⛔ 不 spawn 真实 fan-in（真实世界证明归 GOAL-009 AC-207，周期复证归例行监控——人
@@ -61,15 +65,12 @@ test("正向 hermetic — 第三方面三步各产「能力不存在」独立取
   const docCmd = docCheckCommandFor(wt);
   assert.equal(docCmd, null, "doc-check 能力不存在 ⇒ null（skip 独立取值）");
 
-  // ② scoped-gate —— scoped 能力不存在 ⇒ 委托 loop.test_command（⛔ 非 scripts/test.sh）。
+  // ② scoped-gate —— 未声明 loop.scoped_command ⇒ scoped 能力「未提供」⇒ skip（独立取值，⛔ 非 run）。
+  // gap-repo-shape-inferred-from-test-sh-existence / AC-316：判据是【声明】。全量 test_command 不是
+  // scoped 门——拿它冒充，会让「这个项目没有 scoped 能力」与「scoped 门跑了且绿」不可分（硬规则 3b）。
   const scoped = resolveScopedGateCommand("gap-cap-deg", wt, wt);
-  assert.equal(scoped.kind, "run", "有 test_command ⇒ 委托（run），⛔ 不是 skip");
-  assert.deepEqual(
-    scoped.argv,
-    ["bash", "-c", `cd '${wt}' && node --test`],
-    "scoped-gate 委托 test_command（cd 进 worktree），⛔ 非 scripts/test.sh",
-  );
-  assert.ok(!scoped.argv.some((a) => a.includes("scripts/test.sh")), "⛔ 不得引用 scripts/test.sh");
+  assert.equal(scoped.kind, "skip", "未声明 scoped_command ⇒ skip（独立取值），⛔ 不是 run");
+  assert.equal(scoped.reason, "no-scoped-command-declared");
 
   // ③ suite —— suite 能力不存在 ⇒ 委托 loop.test_command（⛔ 非 full-suite-runner）。
   const suiteCmd = defaultMechanicalSuiteCommand({
@@ -86,11 +87,8 @@ test("正向 hermetic — 第三方面三步各产「能力不存在」独立取
   );
   assert.ok(!suiteCmd.some((a) => a.includes("full-suite-runner")), "⛔ 不得调用 full-suite-runner");
 
-  // 三步 argv 均不含 exit 127（GOAL-012 退出条件②：能力不存在 ≠ 命令不存在）。
-  assert.ok(
-    scoped.argv.every((a) => !a.includes("exit 127")) && suiteCmd.every((a) => !a.includes("exit 127")),
-    "scoped-gate/suite argv 不含 exit 127",
-  );
+  // suite argv 不含 exit 127（GOAL-012 退出条件②：能力不存在 ≠ 命令不存在）。
+  assert.ok(suiteCmd.every((a) => !a.includes("exit 127")), "suite argv 不含 exit 127");
 });
 
 // ── 反向：本仓库面（有 scripts/test.sh）—— 降级不回流污染 ─────────────────────────────────────────────
@@ -101,6 +99,12 @@ test("反向负控制 — 本仓库面三步与迁移前逐字一致（真跑，
   fs.mkdirSync(path.join(wt, "scripts"), { recursive: true });
   fs.writeFileSync(path.join(wt, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
   const testSh = path.join(wt, "scripts", "test.sh");
+  // gap-repo-shape-inferred-from-test-sh-existence / AC-316：本仓库形态现在由【声明】表达
+  // （.quay/config.yml loop.scoped_command / doc_check_command / suite_runner），⛔ 文件存在不再参与判定。
+  writeFile(path.join(wt, ".quay", "config.yml"),
+    "loop:\n  suite_runner: quay-buckets\n" +
+    '  scoped_command: ["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]\n' +
+    '  doc_check_command: ["bash", "{worktree}/scripts/test.sh", "--static-checks-doc"]\n');
 
   // ① doc-check —— 真跑，逐字一致（bash <dir>/scripts/test.sh --static-checks-doc）。
   assert.deepEqual(
@@ -111,11 +115,11 @@ test("反向负控制 — 本仓库面三步与迁移前逐字一致（真跑，
 
   // ② scoped-gate —— 真跑，逐字一致（bash <dir>/scripts/test.sh --for-task <task> --allow-thin）。
   const scoped = resolveScopedGateCommand("gap-cap-deg", wt, wt);
-  assert.equal(scoped.kind, "run", "本仓库形态 ⇒ 真跑（⛔ 不降级 skip）");
+  assert.equal(scoped.kind, "run", "声明了 scoped_command ⇒ 真跑（⛔ 不降级 skip）");
   assert.deepEqual(
     scoped.argv,
     ["bash", testSh, "--for-task", "gap-cap-deg", "--allow-thin"],
-    "scoped-gate 与迁移前逐字一致（⛔ 不委托 test_command）",
+    "scoped-gate 与迁移前逐字一致（⛔ 未委托 test_command）",
   );
 
   // ③ suite —— 真跑 full-suite-runner（⛔ 不降级到 test_command）。
@@ -139,6 +143,47 @@ test("反向负控制 — 本仓库面三步与迁移前逐字一致（真跑，
   assert.ok(suiteCmd.includes("--log-file") && suiteCmd.includes("/tmp/fan-in-suite-gap-cap-deg.log"), "suite 带 --log-file <suiteLogFile>");
   assert.ok(suiteCmd.includes("--run-id") && suiteCmd.includes("mfi-gap-cap-deg-1788022868-abc123"), "suite 带 --run-id <runId>");
   assert.ok(!suiteCmd.some((a) => a.includes("scripts/test.sh")), "⛔ 不得平行跑 scripts/test.sh harness");
+});
+
+// ── gap-repo-shape-inferred-from-test-sh-existence / AC-316 ─────────────────────────────────────────
+// 本缺陷的现场：一个项目【按 loop.test_command 的约定交付了自己的 scripts/test.sh】，于是旧判据
+// （hasTestSh = 文件存在）把它整体当成 quay 仓库——scoped 门被拿 --for-task … --allow-thin 调用、doc-check
+// 被拿 --static-checks-doc 调用，而它根本没有这两个能力：每一处对不上都表现为「读不出东西」而不报错
+// （硬规则 3b）。新判据下，这个夹具的 scoped 门与 doc-check 都取「未提供」这个【独立取值】。
+
+test("AC-316 正向 — 带自己 scripts/test.sh 但未声明契约的第三方 ⇒ scoped/doc-check 都「未提供」，⛔ 不调用 quay 专属参数", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-self-testsh-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  // 第三方项目【自己】的 scripts/test.sh（不是 quay 的），且只声明了 test_command。
+  fs.mkdirSync(path.join(wt, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: bash scripts/test.sh\n");
+
+  // ① doc-check：未声明 ⇒ 独立取值 null（⛔ 不是 bash <wt>/scripts/test.sh --static-checks-doc）。
+  assert.equal(docCheckCommandFor(wt), null, "未声明 doc_check_command ⇒ null（能力未提供）");
+
+  // ② scoped 门：未声明 ⇒ skip（独立取值 no-scoped-command-declared）。
+  const scoped = resolveScopedGateCommand("gap-cap-deg", wt, wt);
+  assert.equal(scoped.kind, "skip", "未声明 scoped_command ⇒ skip（⛔ 不是 run）");
+  assert.equal(scoped.reason, "no-scoped-command-declared");
+
+  // ③ 关键否定断言（可证伪：前置证明旧判据【会】命中这个夹具）。旧判据 hasTestSh = 文件存在 ⇒ 会构造
+  // 出下面两条把该项目当 quay 仓库的 argv；新判据下它们都没有被产出。
+  const oldDocCheck = ["bash", path.join(wt, "scripts", "test.sh"), "--static-checks-doc"];
+  const oldScoped = {
+    kind: "run",
+    argv: ["bash", path.join(wt, "scripts", "test.sh"), "--for-task", "gap-cap-deg", "--allow-thin"],
+  };
+  assert.equal(fs.existsSync(path.join(wt, "scripts", "test.sh")), true, "前置：scripts/test.sh 确实存在（旧判据会命中它）");
+  assert.notDeepEqual(docCheckCommandFor(wt), oldDocCheck, "⛔ 不产出 --static-checks-doc 形态的 argv");
+  assert.notDeepEqual(scoped, oldScoped, "⛔ 不产出 --for-task … --allow-thin 形态的 argv");
+  assert.equal(scoped.kind === "run" ? scoped.argv : null, null, "skip ⇒ 没有任何 argv 可被 fan-in 执行");
+  // ④ suite 仍走该项目自己声明的 test_command（能力对齐：全量测试是它【声明】有的）。
+  assert.deepEqual(
+    defaultMechanicalSuiteCommand({ task: "gap-cap-deg", worktree: wt, root: "/tmp/root", suiteLogFile: "/tmp/f.log", runId: "r1" }),
+    ["bash", "-c", `cd '${wt}' && bash scripts/test.sh`],
+    "suite 用项目自己声明的 loop.test_command",
+  );
 });
 
 // ── gap-verification-round-bound-to-quay-shaped-suite-entry ──────────────────────────────────────────
@@ -209,15 +254,15 @@ test("正向 — appendDelegatedSuiteRound 追加真记录，且 /tests 的读�
   assert.equal(JSON.parse(lines[1]).state, "red", "第二轮 state=red");
 });
 
-test("反向负控制 — 本仓库形态（有 scripts/test.sh）⇒ 新增写入者不在该路径上（runner 是唯一 writer）", (t) => {
+test("反向负控制 — 声明 suite_runner: quay-buckets ⇒ 新增写入者不在该路径上（runner 是唯一 writer）", (t) => {
   const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-vr-quay-"));
   t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
   fs.mkdirSync(path.join(wt, "scripts"), { recursive: true });
   fs.writeFileSync(path.join(wt, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
-  // 即使 .quay/config.yml 同时带 test_command（本仓库并不带），有 scripts/test.sh ⇒ suite 仍走
-  // full-suite-runner（defaultMechanicalSuiteCommand 的分支次序）⇒ 台账由 runner 写，本层不得再写。
-  writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: node --test\n");
-  assert.equal(suiteRunsOutsideRunner(wt), false, "有 scripts/test.sh ⇒ 本层不补写（⛔ 不双写）");
+  // 即使同时带 test_command，声明 suite_runner: quay-buckets ⇒ suite 走 full-suite-runner
+  // （defaultMechanicalSuiteCommand 的同一份声明）⇒ 台账由 runner 写，本层不得再写。
+  writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  suite_runner: quay-buckets\n  test_command: node --test\n");
+  assert.equal(suiteRunsOutsideRunner(wt), false, "声明 quay-buckets ⇒ 本层不补写（⛔ 不双写）");
 });
 
 // ── AC5（人 2026-09-12 裁定）：出口可配 + 项目【声明】的输出约定，quay 依声明解析 ──────────────────────
