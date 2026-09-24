@@ -144,30 +144,57 @@ function defaultSortCriteriaRows(rows: Record<string, unknown>[]): Record<string
   });
 }
 
-// M1: the list table must fit inside <main> (AC1). Removing the whole-prose `origin` column alone
-// did NOT do it — a long GOAL `title` (Chinese prose wraps per-char) and a long unbreakable
-// `criterion` shell command still pushed the table to 1404px vs a 900px <main> and rows to 132px.
-// `table-layout: fixed` + per-column widths makes the table exactly `main`'s width, and
-// nowrap+ellipsis keeps every row single-line (the full title stays reachable via the `title` attr).
+// M1 (historical, now superseded): the list table must fit inside <main> (AC1). Removing the
+// whole-prose `origin` column alone did NOT do it — a long GOAL `title` and a long unbreakable
+// `criterion` shell command still pushed the table past a 900px <main>. The fix at the time was
+// `table-layout: fixed` + a percentage `<colgroup>`; gap-webui-goal-list-tab-split-goal-ac then
+// split the merged view into two tabs so each table carried only its own columns.
 //
-// gap-webui-goal-list-tab-split-goal-ac: the tab split lets each table carry ONLY its own columns,
-// so every remaining header fits WITHOUT truncation (AC3: no `<th>` scrollWidth > clientWidth) and
-// the semantic columns get a wider budget — title is the widest on both tabs (30% / 16%), up from
-// the merged view's 18% (the pre-fix 336px-vs-156px title squeeze came from packing 11 columns).
-// Goals tab (7 cols): id / status / title / AC 达成 / last progress / first evidence / 挂靠任务.
-// Widths are sized so every `<th>` label fits WITHOUT ellipsis (AC3: no header scrollWidth >
-// clientWidth, measured at 1440px = 868px table). `title` keeps the widest share (34%, up from the
-// merged view's 18% / 156px) — the pre-fix 336px title truncated 180px; at ~295px it truncates ~41px
-// (a ~77% reduction). The long time labels (last progress / first evidence) need ≥128px / ≥132px.
-const GOAL_COL_WIDTHS = ["5%", "9%", "34%", "10%", "15%", "16%", "11%"];
-// Criteria tab (8 cols): id / goal / status / title / criterion / recent verdict / last progress /
-// 挂靠任务. Same header-fit discipline: `recent verdict` (the longest label) needs ≥135px; title
-// keeps 24% (208px — still wider than the merged view's 156px) while the long labels keep their
-// exact-required shares.
-const CRITERIA_COL_WIDTHS = ["5%", "8%", "9%", "24%", "11%", "16%", "15%", "12%"];
-
+// gap-webui-goal-list-full-id-status-title-and-real-width-ac (2026-09-24) REVERSED that regime.
+// ⛔ Why the old one could not be patched: `table-layout:fixed` applies the declared share to the
+// DATA cells exactly as it does to the headers, and the shares that make the *labels* fit
+// (`id` 5% ≈ 43px, `status` 9% ≈ 78px) are far below what the *values* need (`GOAL-020` ≈ 75px,
+// `achieved`/`superseded` ≈ 80px). Production therefore rendered `G…` / `achi…` at 1440px while
+// ~280px of gutter sat unused on either side, because `serve-render.ts`'s `main{max-width:900px}`
+// capped the table at ≈868px. The old AC3 measured only `<th>` scrollWidth, so nothing ever went
+// red — **a criterion that measures the header structurally cannot see a data-row truncation**.
+//
+// The new regime is auto layout + a wider (but still bounded) page, and it deliberately does ⛔ NOT
+// re-state any percentage: percentages were the old mechanism's unit, and re-adding them would
+// re-create the defect. The browser now distributes width by content; `/goal` alone lifts `main`
+// to `min(1400px,96vw)` so a 1440px screen has room for the content-sized table; and a table that
+// still exceeds its page is scrolled by `tableWrap()`'s `.table-wrap` rather than widening the page.
+// `title` is the one prose column and gets two clamped lines (its full text, like every id cell's,
+// stays on the `title` attribute — so even a clipped case is recoverable on hover).
 function goalTableStyles(): string {
-  return `<style>.goal-table{table-layout:fixed;width:100%}.goal-table th,.goal-table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.goal-table th a{color:inherit}</style>`;
+  return `<style>`
+    // The page's own content width. This rule is emitted ONLY on /goal (`goalTableStyles()` is
+    // concatenated into this page's <head>, AFTER `shellStyles()`), so every other page keeps
+    // `pageStyles()`'s `main{max-width:900px}` — that equality is the AC's negative control, not an
+    // accident: a rule that leaked into the base sheet would widen /tasks /board and be invisible
+    // to a criterion that only reads /goal.
+    + `main{max-width:min(1400px,96vw)}`
+    + `.goal-table{table-layout:auto;width:100%}`
+    + `.goal-table th{white-space:nowrap}`
+    + `.goal-table td{vertical-align:top}`
+    // nowrap and ⛔ NO `text-overflow:ellipsis`. These are SHORT values whose full text IS the
+    // information: an ellipsized `GOAL-020` is not "slightly less precise", it is unreadable, and
+    // the reader cannot tell `G…` for GOAL-020 from `G…` for GOAL-021 (硬规则 3b — a truncated id
+    // and an absent id look the same). The rest stay single-line so a row is one visual line.
+    + `.goal-table .c-id,.goal-table .c-status,.goal-table .c-goal,.goal-table .c-criterion,`
+    + `.goal-table .c-verdict,.goal-table .c-time,.goal-table .ac-rollup,.goal-table .task-attach`
+    + `{white-space:nowrap}`
+    // title: two clamped lines instead of an ellipsized fragment. (Verified in headless Chrome:
+    // `-webkit-line-clamp` on a table cell keeps the row's layout and clamps to exactly 2 lines.)
+    + `.goal-table .c-title{white-space:normal;overflow:hidden;display:-webkit-box;`
+    + `-webkit-line-clamp:2;-webkit-box-orient:vertical}`
+    // ≤900px the viewport cannot hold the content-sized table, so `.table-wrap` scrolls it — and the
+    // id column is pinned to the container's left edge, otherwise scrolling right loses the row's
+    // identity. The `background` is load-bearing: a sticky cell must be opaque or the cells scrolling
+    // underneath it show through.
+    + `@media (max-width:900px){.goal-table .c-id{position:sticky;left:0;`
+    + `background:var(--color-surface)}}`
+    + `.goal-table th a{color:inherit}</style>`;
 }
 
 function goalCriterionRow(g: { id?: unknown; status?: unknown }, taskAttach: string, L: Record<GoalKey, string>): string {
@@ -281,17 +308,18 @@ function renderGoalsTable(
     const rollup = rollupFor(gid);
     const taskAttach = renderTaskAttachText(taskRead, criteriaIdsFor(gid), L);
     return html`<tr>
-      <td>${goalIdLink(g.id)}</td>
-      <td>${escapeHtml(String(g.status ?? ""))}</td>
-      <td title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td class="c-id" title="${escapeHtml(gid)}">${goalIdLink(g.id)}</td>
+      <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
+      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
       <td class="ac-rollup"><a href="${criteriaHref(gid)}">${rollup.achieved}/${rollup.total}</a></td>
-      <td>${timeCell(g.lastProgressAt, L)}</td>
-      <td>${timeCell(g.firstEvidenceAt, L)}</td>
+      <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>
+      <td class="c-time">${timeCell(g.firstEvidenceAt, L)}</td>
       <td class="task-attach"><a href="${criteriaHref(gid)}">${escapeHtml(taskAttach)}</a></td>
     </tr>`;
   }).join("\n");
+  // ⛔ NO `<colgroup>`: the per-column percentage widths were the truncation mechanism (see
+  // `goalTableStyles()` above). The header row keeps the same 7 columns in the same order.
   return html`<table class="goal-table">
-    <colgroup>${GOAL_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
     <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}<th>${L.colAcRollup}</th>${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>${L.colAttachedTasks}</th></tr>
     ${body}
   </table>`;
@@ -313,18 +341,18 @@ function renderCriteriaTable(
     const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
     const taskAttach = renderTaskAttachText(taskRead, [gid], L);
     return html`<tr>
-      <td>${goalIdLink(g.id)}</td>
-      <td>${goal ? html`<a href="/goal?kind=criterion&goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
-      <td>${escapeHtml(String(g.status ?? ""))}</td>
-      <td title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
-      <td><code>${criterionCell || "—"}</code></td>
-      <td>${goalEvidenceCell(g)}</td>
-      <td>${timeCell(g.lastProgressAt, L)}</td>
+      <td class="c-id" title="${escapeHtml(gid)}">${goalIdLink(g.id)}</td>
+      <td class="c-goal">${goal ? html`<a href="/goal?kind=criterion&goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
+      <td class="c-status">${escapeHtml(String(g.status ?? ""))}</td>
+      <td class="c-title" title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td class="c-criterion"><code>${criterionCell || "—"}</code></td>
+      <td class="c-verdict">${goalEvidenceCell(g)}</td>
+      <td class="c-time">${timeCell(g.lastProgressAt, L)}</td>
       <td class="task-attach">${escapeHtml(taskAttach)}</td>
     </tr>`;
   }).join("\n");
+  // ⛔ NO `<colgroup>` — same reason as the Goals table above.
   return html`<table class="goal-table">
-    <colgroup>${CRITERIA_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
     <tr>${th("id", "id")}${th("goal", "goal")}${th("status", "status")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}<th>${L.colAttachedTasks}</th></tr>
     ${body}
   </table>`;

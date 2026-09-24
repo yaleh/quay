@@ -160,9 +160,21 @@ test("AC2: /tests perFile + file-history tables are wrapped", () => {
   assertAllTablesWrapped(fh, "/tests file history");
 });
 
-// ── AC2/AC3: /goal (handler-level) — wrapped + fixed-layout prose clamp ───────────────────────────
+// ── AC2/AC3: /goal (handler-level) — wrapped + content-sized ─────────────────────────────────────
+// ⚠️ RE-SCOPED by gap-webui-goal-list-full-id-status-title-and-real-width-ac (2026-09-24). This
+// test used to pin `/goal` to `table-layout:fixed` + `text-overflow:ellipsis`, on the theory that a
+// table exactly `<main>`-wide can never overflow. Production disproved it: the fixed shares applied
+// to the DATA cells too, so `id` (5% ≈ 43px) rendered `G…` for `GOAL-020` and the row was unreadable
+// at 1440px. The scroll shell this file exists for is UNCHANGED and still asserted below (the
+// `assertAllTablesWrapped` arm is the load-bearing one); what changed is the prose-clamp mechanism —
+// only the title column clamps now, and the short identity columns must ⛔ NOT ellipsize.
 
-test("AC2/AC3: /goal list table is wrapped and fixed-layout (prose clamped, single-line rows)", async () => {
+/** The page's own goal-table stylesheet (the one `goalTableStyles()` emits). */
+function goalStyleBlock(html) {
+  return [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).find((b) => b.includes(".goal-table{")) ?? "";
+}
+
+test("AC2/AC3: /goal list table is wrapped and content-sized (ids/statuses not ellipsized)", async () => {
   const client = {
     goalList: async () => [
       { id: "GOAL-001", title: "a goal title", status: "active", kind: "goal", goal: "", criterion: "", lastProgressAt: "", firstEvidenceAt: "", evidence: null, body: "" },
@@ -172,8 +184,14 @@ test("AC2/AC3: /goal list table is wrapped and fixed-layout (prose clamped, sing
   await handleGoalList({}, res, new URL("http://localhost/goal"), client);
   assert.equal(res.statusCode, 200);
   assertAllTablesWrapped(res.body, "/goal");
-  assert.match(res.body, /table-layout:\s*fixed/, "/goal table is table-layout:fixed (never wider than <main>)");
-  assert.match(res.body, /text-overflow:\s*ellipsis/, "/goal cells ellipsize prose");
+  const style = goalStyleBlock(res.body);
+  assert.match(style, /\.goal-table\{table-layout:auto/, "/goal table is content-sized (auto layout)");
+  assert.doesNotMatch(style, /table-layout:\s*fixed/, "/goal table is NOT table-layout:fixed");
+  // The only ellipsis-family property this sheet may carry is the title's line clamp: a
+  // `text-overflow` on the short identity columns is the `G…` defect, so its ABSENCE sheet-wide is
+  // the assertion (a per-selector check could be satisfied by some other selector matching them).
+  assert.doesNotMatch(style, /text-overflow/, "no cell in the /goal sheet ellipsizes");
+  assert.match(style, /-webkit-line-clamp:\s*2/, "the prose column clamps instead (two-line title)");
 });
 
 // ── AC2: /tests history table (server-level) is wrapped ───────────────────────────────────────────

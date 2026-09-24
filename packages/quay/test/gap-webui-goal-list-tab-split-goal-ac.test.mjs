@@ -60,11 +60,18 @@ function headers(html) {
   return [...head.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((x) => x[1].replace(/<[^>]*>/g, "").trim());
 }
 
-/** The `<colgroup>` widths as percentages, in order. */
-function colWidths(html) {
-  const m = /<colgroup>([\s\S]*?)<\/colgroup>/.exec(html);
-  if (!m) return [];
-  return [...m[1].matchAll(/width:([\d.]+)%/g)].map((x) => Number(x[1]));
+/** The percentage-width `<col>`s on the page, in order. ⛔ Expected to be EMPTY: the percentage
+ *  `<colgroup>` was the mechanism that squeezed the DATA cells into `G…` / `achi…`
+ *  (gap-webui-goal-list-full-id-status-title-and-real-width-ac reversed it). Kept as a helper
+ *  rather than dropped, so the assertion below reads as "this mechanism is absent" — a deleted
+ *  assertion could not tell "absent" from "never checked". */
+function pctCols(html) {
+  return [...html.matchAll(/<col\b[^>]*width:\s*([\d.]+)%/g)].map((x) => Number(x[1]));
+}
+
+/** The page's own goal-table stylesheet (the one `goalTableStyles()` emits). */
+function goalStyleBlock(html) {
+  return [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).find((b) => b.includes(".goal-table{")) ?? "";
 }
 
 function dataRows(html) {
@@ -239,30 +246,54 @@ test("AC2: /goal?kind=criterion renders 8 columns, no AC 达成/kind, has goal, 
     `the en Criteria tab carries the translated 挂靠任务 header; got: ${enHs.join(" | ")}`);
 });
 
-// ── AC3: structural squeeze resolved — the title column gets the widest budget (structural proxy
-//  for the DOM scrollWidth reading, which the DoD measures on a real browser) ─────────────────
+// ── AC3: structural squeeze resolved. ⚠️ RE-SCOPED by
+// gap-webui-goal-list-full-id-status-title-and-real-width-ac (2026-09-24): the assertions below
+// used to read the `<colgroup>` PERCENTAGES this page declared. Those percentages are gone — they
+// were themselves the defect (`id` 5% ≈ 43px cannot hold `GOAL-020`, and the share applied to the
+// data cells, so the page rendered `G…`). The successor criterion keeps the same INTENT ("no column
+// is squeezed below what its content needs") but reads the two things that can actually take the
+// false reading now: (a) the width-squeezing mechanism is absent, and (b) the cells the old shares
+// truncated carry their FULL value in markup. The DOM `scrollWidth <= clientWidth` reading — the
+// thing that really decides readability — is the DoD's live-Chrome evidence; no CSS string can
+// stand in for it. ⛔ This is a re-scope, not a deletion: the old assertions could not have caught
+// the defect, and a criterion that measures the header cannot see a data-row truncation.
 
-test("AC3: title column is widest on the Goals tab; no dead columns remain (structural)", async () => {
-  const r = await get(port, "/goal");
-  const widths = colWidths(r.body);
-  assert.equal(widths.length, 7, `Goals tab has 7 col widths: ${widths.join(", ")}`);
-  const sum = widths.reduce((a, b) => a + b, 0);
-  assert.ok(Math.abs(sum - 100) < 0.01, `col widths sum to 100%: ${sum}`);
-  // title is index 2 (id/status/title/...) and must be the widest (34% — up from the merged 18%).
-  assert.equal(widths[2], Math.max(...widths), `title (${widths[2]}%) is the widest Goals column`);
-  assert.ok(widths[2] >= 30, `title budget >= 30% (was 18% pre-fix): ${widths[2]}%`);
+test("AC3: neither tab declares a percentage <colgroup>; both are auto-layout (mechanism absent)", async () => {
+  for (const [urlPath, cols] of [["/goal", 7], ["/goal?kind=criterion", 8]]) {
+    const r = await get(port, urlPath);
+    const cols_ = pctCols(r.body);
+    assert.deepEqual(cols_, [], `${urlPath}: no percentage <col> (the squeezing mechanism is gone)`);
+    assert.ok(!/<colgroup>/.test(r.body), `${urlPath}: no <colgroup> at all`);
+    const style = goalStyleBlock(r.body);
+    assert.match(style, /\.goal-table\{table-layout:auto/, `${urlPath}: the table is auto-layout`);
+    assert.doesNotMatch(style, /table-layout:\s*fixed/, `${urlPath}: the fixed-layout regime is gone`);
+    // The column COUNT is unchanged — this task re-scoped the widths, it did not drop a column.
+    assert.equal(headers(r.body).length, cols, `${urlPath}: still ${cols} columns`);
+  }
 });
 
-test("AC3: Criteria tab title column is wider than the merged view's 18% (structural)", async () => {
-  const r = await get(port, "/goal?kind=criterion");
-  const widths = colWidths(r.body);
-  assert.equal(widths.length, 8, `Criteria tab has 8 col widths: ${widths.join(", ")}`);
-  const sum = widths.reduce((a, b) => a + b, 0);
-  assert.ok(Math.abs(sum - 100) < 0.01, `col widths sum to 100%: ${sum}`);
-  // title is index 3, criterion is index 4 — both fit without header truncation (the DoD measures
-  // the actual scrollWidth/clientWidth on a real browser).
-  assert.ok(widths[3] >= 18, `title (${widths[3]}%) keeps a wider budget than merged view's 18% squeeze`);
-  assert.ok(widths[4] >= 10, `criterion (${widths[4]}%) keeps a readable prefix for its shell command`);
+test("AC3: the cells the old shares truncated carry their FULL value (id/status, both tabs)", async () => {
+  // Structural half of the browser reading: `GOAL-001`/`achieved` must be IN the markup in full.
+  // A page that rendered `G…` would fail here without any browser — which is exactly what the
+  // predecessor criterion, reading `<th>` only, could not do.
+  const goals = goalRows((await get(port, "/goal")).body);
+  assert.ok(goals.length >= 4, `Goals tab renders rows (${goals.length})`);
+  for (const row of goals) {
+    assert.match(row.id, /^GOAL-\d{3}$/, `goal row id is complete: "${row.id}"`);
+    assert.ok(row.status.length > 0, `goal row ${row.id} carries a status`);
+  }
+  const crit = criterionRows((await get(port, "/goal?kind=criterion")).body);
+  assert.ok(crit.length >= 4, `Criteria tab renders rows (${crit.length})`);
+  for (const row of crit) {
+    assert.match(row.id, /^AC-\d{3}$/, `criterion row id is complete: "${row.id}"`);
+    assert.match(row.goal, /^GOAL-\d{3}$/, `criterion row ${row.id} goal is complete: "${row.goal}"`);
+    assert.ok(row.status.length > 0, `criterion row ${row.id} carries a status`);
+  }
+  // The markup carries the full text (no server-side truncation of the id/status/goal cells).
+  for (const [urlPath, id] of [["/goal", "GOAL-001"], ["/goal?kind=criterion", "AC-101"]]) {
+    const body = (await get(port, urlPath)).body;
+    assert.ok(body.includes(`title="${id}"`), `${urlPath}: ${id}'s cell carries its full id on the title attribute`);
+  }
 });
 
 // ── AC4: ?goal= has a clickable entry point on BOTH tabs ─────────────────────────────────────
