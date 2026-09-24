@@ -83,6 +83,7 @@ extra:
       （不是都输出 `[]`），贴两条并列读数 —— 见 ## Evidence E5
 - [x] AC6（5b 姊妹实例）grep 同一原则的其它适用点（还有哪些"引用密集但非声明"的区块被整块判定、
       或还有哪些豁免手段是段落级而判定已收到句子级），贴命中数与前 3 条 —— 见 ## Evidence E6
+      （含**本条实测的自咬**：E6 第一次落笔即被判 `parked`，见 E6-4）
 - [x] AC7（本任务自身的门）`bash scripts/test.sh --for-task gap-prose-prereq-exemption-paragraph-scoped-not-sentence` 绿
       —— 见 ## Evidence E7
 
@@ -209,9 +210,9 @@ AC4-c 引用句加标记 + 注入真前置句 ⇒ {"declared":["gap-ac194-produc
 ⇒ 两者 `gap` 同为 `[]`（⇒ 只读 `gap` **不可分**），但 `exempted` 是**分开的一个取值** ⇒ 取值可区分 ✓
 （硬规则 3b：豁免不是"没查"，也不是"查过且合格"）。配套单测 `plugin/test/ready-pool-check-s19.test.mjs:375` 逐字钉住。
 
-### E6 — AC6 5b 姊妹实例
+### E6 — AC6 5b 姊妹实例（命中 3 处 + 1 次**活的自咬**）
 
-同一原则的适用点 grep（豁免/判定的**作用域粗于**它所代表的标注）——命中 **3** 处：
+同一原则的适用点 grep（豁免/判定的**作用域粗于**它所代表的标注）：
 
 ```
 $ grep -rn --include=*.ts -E 'isParked|isDedupExemptParagraph|strategicTraceable' plugin/scripts/
@@ -222,16 +223,27 @@ plugin/scripts/ready-pool-check.ts:1627:  return STRATEGIC_REF_RE.test(body);   
 
 前 3 条逐条：
 
-1. `isParked`（`:1118`）—— `PARKED_MARKER_RE`（`:327`）**无行首锚**（与 `SUPERSEDED_MARKER_RE` /
-   `RETREATED_MARKER_RE` 那两条的 `^\s*(?:>\s*)?` 不同），故 `**PARKED**` 出现在句子中间即命中。
-   **实测**：`isParked({body:"本任务的 AC3 里逐字引用了 \`**PARKED**\` 这个标记的写法。"}) === true`；
-   全量 `tasks/*.md` 命中 5 个文件，其中 **2** 个（`gap-addressedtasks-…` / `gap-priority-has-no-mechanism-reader`）
-   **不带行首形式** ⇒ 作用域盈余 2/5。
+1. `isParked`（`:1118`）—— `PARKED_MARKER_RE`（`:327`，正则逐字 `/\*\*PARKED\b/i`）**无行首锚**：与
+   `SUPERSEDED_MARKER_RE` / `RETREATED_MARKER_RE` 那两条带 `^\s*(?:>\s*)?` 的不同，它扫的是**整篇 body**，
+   故该加粗标记出现在**句子中间**（而非行首）时同样命中。**实测**：把该标记放在句子中间喂给
+   `isParked` 仍返回 `true`；全量 `tasks/*.md` 命中 5 个文件，其中 **2** 个
+   （`gap-addressedtasks-…` / `gap-priority-has-no-mechanism-reader`）**不带行首形式** ⇒ 作用域盈余 2/5。
 2. `isDedupExemptParagraph`（`:1389`）—— 豁免段落级 vs 判定句子级；本条修的就是它，已补句子级
    `DEDUP_REF_INLINE_MARKER`。
 3. `strategicTraceable`（`:1627`）—— `STRATEGIC_REF_RE.test(body)`，**整篇 body 任一命中**即判真，同一形状。
 
-⛔ AC6 只要求 grep + 贴命中数与前 3 条，未要求修 1/3；本次不改它们（不在本任务 `## Touches` 内）。
+4. **（本条实测的自咬 —— 不是推演）** 本条自己的第一次 `task_write`（commit `f4c712a5b`）把那个加粗标记
+   的**字面**写进了本节正文 ⇒ **本条任务当场被池子判 `parked` 并排除**，固定代码 + 活 root 的读数：
+
+```
+excluded: ["gap-prose-prereq-exemption-paragraph-scoped-not-sentence :: parked"]
+```
+
+   ⇒ 作用域盈余在**同一次会话内**造成了一次真实误判，且被误判的正是**记录该缺陷的这一条**。随后把字面
+   改为转义写法（源串不再含连续的 `**`+标记名），读数恢复为 `ready`。这是 AC6 想要的最强证据形态：
+   ⛔ 不是"grep 到一处可疑"，而是**该可疑处在生产上真的咬了一口，有 excluded 原文与时间戳**。
+
+⛔ AC6 只要求 grep + 贴命中数与前 3 条，未要求修 1/3；本次不改 1/3（不在本任务 `## Touches` 内）。
 
 ### E7 — AC7 本任务自身的门
 
