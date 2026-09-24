@@ -23,6 +23,18 @@
 //     "empty store"; a `total=0` rollup is not `—`.
 //   • The hand-computed orders below are written as LITERAL arrays plus an independently-written
 //     rollup table, never derived by re-running the page's own arithmetic (硬规则 4b).
+//
+// NEGATIVE CONTROLS (run while authoring this file; each mutation of `serve-goal.ts` was applied,
+// the suite re-run, and the file restored). Every one of these goes RED, which is what makes the
+// arms above measurements rather than echoes:
+//   1. match case-SENSITIVELY                    → AC1 red (the three-spelling loop)
+//   2. drop the `total === 0` special case       → AC3 red (the `dir=asc` tail)
+//   3. rank 0/0 as the ratio 0 (no special case) → AC3 red
+//   4. `th()` forgets `q` in the sort href       → AC2 red (the header href array)
+//   5. render the no-match banner for ANY empty  → AC2 red (the ?status=retired control)
+//   6. the Criteria field list loses `goal`      → AC1 red (the owning-goal-id arm)
+//   7. the form drops the hidden `kind`          → AC2 red
+//   8. search over ONE joined haystack           → AC1 red (the boundary-spanning needle)
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -108,56 +120,63 @@ function statusNavHrefs(html) {
 // Designed so that EVERY asserted number is hand-computable from this table alone:
 //
 //   goal      title                     status     ACs                        rollup  ratio
-//   GOAL-001  plugin layer surface      active     AC-101✓ AC-102✗ AC-103✓      2/3    0.667
-//   GOAL-002  store layer internals     achieved   AC-201✓ AC-202✓              2/2    1.000
-//   GOAL-003  searchable needle item    active     AC-301✗ AC-302✗ AC-303✗ ✓304  1/4    0.250
-//   GOAL-004  no criteria here          active     (none)                       0/0    —
-//   GOAL-005  only retired criteria     active     AC-501 (superseded)          0/0    —
+//   GOAL-001  no criteria here          active     (none)                       0/0    —
+//   GOAL-002  only retired criteria     active     AC-501 (superseded)          0/0    —
+//   GOAL-003  plugin layer surface      active     AC-101✓ AC-102✗ AC-103✓      2/3    0.667
+//   GOAL-004  store layer internals     achieved   AC-201✓ AC-202✓              2/2    1.000
+//   GOAL-005  searchable needle item    active     AC-301✗ AC-302✗ AC-303✗ ✓304  1/4    0.250
 //
 // ① "needle" is in EXACTLY ONE goal title (AC1's count == 1 arm).
 // ② "layer" is in TWO goal titles with DIFFERENT statuses (the `q` ∧ `status` AND arm: 2 → 1 from
 //    either direction, so the arm cannot pass on "status wins" or "q wins").
-// ③ GOAL-004 has no criteria and GOAL-005's only criterion is `superseded`, i.e. OUT of the rollup
-//    denominator — so both render 0/0, and 005 is the arm that pins the `isAcRollupCounted` 口径
-//    (a looser denominator would render it 0/1, a ratio of 0, and rank it FIRST under `dir=asc`).
-// ④ the three non-zero ratios are DISTINCT (1.000 / 0.667 / 0.250), so no ordering arm below depends
+// ③ GOAL-001 has no criteria and GOAL-002's only criterion is `superseded`, i.e. OUT of the rollup
+//    denominator — so both render 0/0, and 002 is the arm that pins the `isAcRollupCounted` 口径
+//    (a looser denominator would render it 0/1, a ratio of 0, and rank it as a measured 0%).
+// ④ ⚠️ THE TWO 0/0 ROWS CARRY THE TWO LOWEST IDS, and that placement is LOAD-BEARING, not cosmetic.
+//    An implementation that ranks 0/0 as "the ratio 0" — or one that lets the ratio comparison
+//    degenerate to a tie for them — orders them FIRST under `dir=asc`; an implementation with an
+//    id-ascending tie-break and no special case interleaves them FIRST under BOTH directions. Either
+//    way the rows land at the TOP, so an arm asserting "the 0/0 rows are LAST" can see it. With the
+//    highest ids instead, both defects would coincidentally leave them last and the arm would pass
+//    while measuring nothing (verified by mutation: see the file header's negative-control note).
+// ⑤ the three non-zero ratios are DISTINCT (1.000 / 0.667 / 0.250), so no ordering arm below depends
 //    on a tie-break the fixture never exercises.
 
 const FIXTURE = [
-  { id: "GOAL-001", title: "plugin layer surface", status: "active" },
-  { id: "GOAL-002", title: "store layer internals", status: "achieved" },
-  { id: "GOAL-003", title: "searchable needle item", status: "active" },
-  { id: "GOAL-004", title: "no criteria here", status: "active" },
-  { id: "GOAL-005", title: "only retired criteria", status: "active" },
+  { id: "GOAL-001", title: "no criteria here", status: "active" },
+  { id: "GOAL-002", title: "only retired criteria", status: "active" },
+  { id: "GOAL-003", title: "plugin layer surface", status: "active" },
+  { id: "GOAL-004", title: "store layer internals", status: "achieved" },
+  { id: "GOAL-005", title: "searchable needle item", status: "active" },
 ];
 
 /** The rollup every goal row must render — written by hand from the AC table above, and compared
  *  against the PAGE (served over HTTP), never against the page's own sort order. */
 const HAND_ROLLUPS = {
-  "GOAL-001": { achieved: 2, total: 3 },
-  "GOAL-002": { achieved: 2, total: 2 },
-  "GOAL-003": { achieved: 1, total: 4 },
-  "GOAL-004": { achieved: 0, total: 0 },
-  "GOAL-005": { achieved: 0, total: 0 },
+  "GOAL-001": { achieved: 0, total: 0 },
+  "GOAL-002": { achieved: 0, total: 0 },
+  "GOAL-003": { achieved: 2, total: 3 },
+  "GOAL-004": { achieved: 2, total: 2 },
+  "GOAL-005": { achieved: 1, total: 4 },
 };
 
 const ACS = [
-  { id: "AC-101", goal: "GOAL-001", status: "achieved" },
-  { id: "AC-102", goal: "GOAL-001", status: "active" },
-  { id: "AC-103", goal: "GOAL-001", status: "achieved" },
-  { id: "AC-201", goal: "GOAL-002", status: "achieved" },
-  { id: "AC-202", goal: "GOAL-002", status: "achieved" },
-  { id: "AC-301", goal: "GOAL-003", status: "active" },
-  { id: "AC-302", goal: "GOAL-003", status: "active" },
-  { id: "AC-303", goal: "GOAL-003", status: "active" },
-  { id: "AC-304", goal: "GOAL-003", status: "achieved" },
-  { id: "AC-501", goal: "GOAL-005", status: "superseded" },
+  { id: "AC-101", goal: "GOAL-003", status: "achieved" },
+  { id: "AC-102", goal: "GOAL-003", status: "active" },
+  { id: "AC-103", goal: "GOAL-003", status: "achieved" },
+  { id: "AC-201", goal: "GOAL-004", status: "achieved" },
+  { id: "AC-202", goal: "GOAL-004", status: "achieved" },
+  { id: "AC-301", goal: "GOAL-005", status: "active" },
+  { id: "AC-302", goal: "GOAL-005", status: "active" },
+  { id: "AC-303", goal: "GOAL-005", status: "active" },
+  { id: "AC-304", goal: "GOAL-005", status: "achieved" },
+  { id: "AC-501", goal: "GOAL-002", status: "superseded" },
 ];
 
 // The handed orders for `?sort=acRollup`. `0/0` sinks to the BOTTOM in both directions, so the tail
-// is the same in both — and in the ASCENDING one it is the whole point (see ③ above).
-const EXPECTED_DESC = ["GOAL-002", "GOAL-001", "GOAL-003", "GOAL-004", "GOAL-005"];
-const EXPECTED_ASC = ["GOAL-003", "GOAL-001", "GOAL-002", "GOAL-004", "GOAL-005"];
+// is the same in both — and in the ASCENDING one it is the whole point (see ③/④ above).
+const EXPECTED_DESC = ["GOAL-004", "GOAL-003", "GOAL-005", "GOAL-001", "GOAL-002"];
+const EXPECTED_ASC = ["GOAL-005", "GOAL-003", "GOAL-004", "GOAL-001", "GOAL-002"];
 
 let server, port, originalCwd;
 
@@ -206,12 +225,12 @@ test("AC1: ?q= matches one goal title (case-insensitively); the Criteria tab mat
   console.log(`[/goal?q=needle] ${hit.length} row(s):`);
   for (const r of hit.slice(0, 3)) console.log(`  ${r.id}  |  ${r.title}  |  rollup=${r.rollupText}`);
   assert.equal(hit.length, 1, "exactly ONE goal title carries `needle` (hand-counted from FIXTURE)");
-  assert.equal(hit[0].id, "GOAL-003");
+  assert.equal(hit[0].id, "GOAL-005");
 
   // Case-insensitivity is a property of the MATCHER, so it is read through three spellings of the
   // same needle — one of them would pass on a case-sensitive implementation only by luck.
   for (const q of ["NEEDLE", "NeEdLe", "needle"]) {
-    assert.deepEqual(goalRows((await get(port, `/goal?q=${q}`)).body).map((r) => r.id), ["GOAL-003"],
+    assert.deepEqual(goalRows((await get(port, `/goal?q=${q}`)).body).map((r) => r.id), ["GOAL-005"],
       `q=${q}: case-insensitive match`);
   }
   // ⛔ The zero arm needs its control (硬规则 2): the SAME predicate that returns 0 for the absent
@@ -227,6 +246,18 @@ test("AC1: ?q= matches one goal title (case-insensitively); the Criteria tab mat
   assert.equal(goalRows((await get(port, "/goal?q=")).body).length, FIXTURE.length,
     "an empty ?q= filters nothing");
 
+  // ⛔ The searched fields are a DISJUNCTION, never one concatenated haystack. A needle that only
+  // "matches" by SPANNING the join — the id field followed by the first word of the title field —
+  // hits a joined haystack, and that hit reports a row which contains neither field as asked. The
+  // /tasks precedent joins `title + body` because it wants body PROSE; here the fields are short and
+  // structured, so the honest predicate is "some field contains the needle".
+  assert.equal(goalRows((await get(port, "/goal?q=GOAL-005%20searchable")).body).length, 0,
+    "a needle spanning the id/title boundary matches nothing");
+  // …and both halves alone DO hit, so the 0 above is about the boundary rather than about a needle
+  // that matches nothing anywhere.
+  assert.equal(goalRows((await get(port, "/goal?q=GOAL-005")).body).length, 1, "control: the id half alone hits");
+  assert.equal(goalRows((await get(port, "/goal?q=searchable")).body).length, 1, "control: the title half alone hits");
+
   // — the Criteria tab: the AC's own id …
   const byAcId = criterionRows((await get(port, "/goal?kind=criterion&q=AC-202")).body);
   console.log(`[/goal?kind=criterion&q=AC-202] ${byAcId.length} row(s):`);
@@ -236,13 +267,13 @@ test("AC1: ?q= matches one goal title (case-insensitively); the Criteria tab mat
 
   // — … and the goal it belongs to (the field the Goals tab does not search, and the reason the two
   //   tabs have different field lists rather than one shared haystack).
-  const byGoalId = criterionRows((await get(port, "/goal?kind=criterion&q=GOAL-003")).body);
-  console.log(`[/goal?kind=criterion&q=GOAL-003] ${byGoalId.length} row(s):`);
+  const byGoalId = criterionRows((await get(port, "/goal?kind=criterion&q=GOAL-005")).body);
+  console.log(`[/goal?kind=criterion&q=GOAL-005] ${byGoalId.length} row(s):`);
   for (const r of byGoalId.slice(0, 3)) console.log(`  ${r.id}  |  goal=${r.goal}`);
-  const expectedAcs = ACS.filter((a) => a.goal === "GOAL-003").map((a) => a.id);
+  const expectedAcs = ACS.filter((a) => a.goal === "GOAL-005").map((a) => a.id);
   assert.equal(byGoalId.length, expectedAcs.length, "the owning goal id finds exactly that goal's ACs (hand-counted)");
   assert.deepEqual(byGoalId.map((r) => r.id).sort(), [...expectedAcs].sort());
-  assert.ok(byGoalId.every((r) => r.goal === "GOAL-003"), "every hit's own goal field is the needle");
+  assert.ok(byGoalId.every((r) => r.goal === "GOAL-005"), "every hit's own goal field is the needle");
 
   // The tab-scoping control: `needle` lives in a GOAL title and in no AC title, so the same needle
   // that returns 1 on the Goals tab returns 0 here. A single shared matcher would return the goal row
@@ -256,10 +287,10 @@ test("AC1: ?q= matches one goal title (case-insensitively); the Criteria tab mat
 test("AC2: q AND status; a no-match state DISTINCT from the empty-store state; every filter/sort link keeps q", async () => {
   // — `q` ∧ `status`: the two needles have different statuses, so BOTH directions narrow 2 → 1 …
   const both = goalRows((await get(port, "/goal?q=layer")).body);
-  assert.deepEqual(both.map((r) => r.id).sort(), ["GOAL-001", "GOAL-002"], "precondition: `layer` hits 2 goals");
-  assert.deepEqual(goalRows((await get(port, "/goal?q=layer&status=active")).body).map((r) => r.id), ["GOAL-001"],
+  assert.deepEqual(both.map((r) => r.id).sort(), ["GOAL-003", "GOAL-004"], "precondition: `layer` hits 2 goals");
+  assert.deepEqual(goalRows((await get(port, "/goal?q=layer&status=active")).body).map((r) => r.id), ["GOAL-003"],
     "q ∧ status=active ⇒ only the active one");
-  assert.deepEqual(goalRows((await get(port, "/goal?q=layer&status=achieved")).body).map((r) => r.id), ["GOAL-002"],
+  assert.deepEqual(goalRows((await get(port, "/goal?q=layer&status=achieved")).body).map((r) => r.id), ["GOAL-004"],
     "q ∧ status=achieved ⇒ only the achieved one (so this is AND, not status-wins or q-wins)");
   assert.equal(goalRows((await get(port, "/goal?q=layer&status=retired")).body).length, 0,
     "q ∧ status=retired ⇒ 0 (neither hit is retired)");
@@ -341,23 +372,25 @@ test("AC3: ?sort=acRollup orders by hand-computed ratio; 0/0 rows are LAST in bo
   // naive "it returns rows" arm).
   assert.notDeepEqual(desc, asc, "the two directions are not the same order");
 
-  // (iii) 0/0 is NOT 0%. Ranked as a ratio it would be the MINIMUM, i.e. FIRST under `dir=asc`; the
-  //       arm that pins this is therefore the ascending tail, not the descending one.
-  assert.deepEqual(asc.slice(-2), ["GOAL-004", "GOAL-005"], "the two 0/0 rows are LAST under dir=asc");
-  assert.deepEqual(desc.slice(-2), ["GOAL-004", "GOAL-005"], "…and last under dir=desc");
-  assert.notEqual(asc[0], "GOAL-004", "0/0 is not ranked as the lowest ratio");
+  // (iii) 0/0 is NOT 0%. Ranked as a ratio it would be the MINIMUM — i.e. FIRST under `dir=asc` — and
+  //       the fixture's 0/0 rows carry the LOWEST ids, so a tie-break-by-id implementation also puts
+  //       them first, in BOTH directions. Both defects are therefore visible here.
+  assert.deepEqual(asc.slice(-2), ["GOAL-001", "GOAL-002"], "the two 0/0 rows are LAST under dir=asc");
+  assert.deepEqual(desc.slice(-2), ["GOAL-001", "GOAL-002"], "…and last under dir=desc");
+  assert.ok(!["GOAL-001", "GOAL-002"].includes(asc[0]), "0/0 is not ranked as the lowest ratio");
+  assert.ok(!["GOAL-001", "GOAL-002"].includes(desc[0]), "…nor as the highest");
   // ⛔ and it is its OWN value: not `—` (the "no evidence" marker elsewhere on this page) and not a
-  // percentage. GOAL-005 is the discriminating row — its only AC is `superseded`, OUT of the rollup
-  // denominator, so a looser denominator would render `0/1` and rank it as a real 0%.
-  const zero = rows.find((r) => r.id === "GOAL-005");
+  // percentage. GOAL-002 is the discriminating row — its only AC is `superseded`, OUT of the rollup
+  // denominator, so a looser denominator would render `0/1` and rank it as a measured 0%.
+  const zero = rows.find((r) => r.id === "GOAL-002");
   assert.equal(zero.rollupText, "0/0", "a goal whose only AC is out-of-domain renders 0/0, not 0/1");
   assert.notEqual(zero.rollupText, "—", "…and not the no-evidence marker");
 
   // (iv) `q` and the rollup sort compose: the sort applies to the SEARCHED rows, and the rollups stay
   //      the full-population values (a search narrows the rows, never the denominator).
   const searched = goalRows((await get(port, "/goal?q=layer&sort=acRollup&dir=desc")).body);
-  assert.deepEqual(searched.map((r) => r.id), ["GOAL-002", "GOAL-001"], "the searched subset keeps the ratio order");
-  assert.deepEqual(searched.map((r) => r.rollup), [HAND_ROLLUPS["GOAL-002"], HAND_ROLLUPS["GOAL-001"]],
+  assert.deepEqual(searched.map((r) => r.id), ["GOAL-004", "GOAL-003"], "the searched subset keeps the ratio order");
+  assert.deepEqual(searched.map((r) => r.rollup), [HAND_ROLLUPS["GOAL-004"], HAND_ROLLUPS["GOAL-003"]],
     "…and each row's rollup is still computed over the FULL record set, not over the search hits");
 });
 
