@@ -21,6 +21,8 @@ import {
   applyTaskFilters,
   makeFilterContext,
   allDepsDone,
+  judgeDeps,
+  judgeDepStatus,
   readTaskStatus,
   readTaskStatusAtRef,
   markNeedsHuman,
@@ -36,6 +38,10 @@ import {
   discardedCommitsAreDisposable,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
+// gap-superseded-dependency-blocks-dispatch-forever AC7: the relation-edge judgment that lives in
+// ready-pool-check (parent edge + depends_on edge share ONE reading) — imported here so the NOVEL
+// retired-dependency shapes (multiple superseded / superseded-as-parent) get their own assertions.
+import { depsReadinessFor } from "../scripts/ready-pool-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,6 +103,107 @@ test("allDepsDone — empty deps ⇒ true; all done ⇒ true; any not-done/missi
   assert.equal(allDepsDone(["a"], () => null), false, "missing dep (statusOf → null) ⇒ fail-closed");
 });
 
+// ── judgeDeps / judgeDepStatus — the THREE-VALUE kernel (gap-superseded-dependency-blocks-───────
+// dispatch-forever). WHY the boolean was not enough (硬规则 3b): `superseded` is a TERMINAL status —
+// a prerequisite a human ruling RETIRED. A `depends_on` edge pointing at it could never be flipped to
+// done by any future event, so pre-fix the depending task's `depsReady` was permanently false and
+// read EXACTLY like "the prerequisite simply hasn't happened yet" (production: 260+ consecutive
+// promotion rounds of `unfixable:["depsReady=false"]`). The boolean is the projection; the three
+// disjoint sets are the READING. ⛔ The fix must not be "non-done ⇒ true": ready/todo/needs-human and
+// an UNREADABLE status (null) all stay blocking.
+
+test("judgeDepStatus — done / superseded / blocking are three DISTINCT values; unreadable is blocking", () => {
+  assert.equal(judgeDepStatus("done"), "done");
+  assert.equal(judgeDepStatus("superseded"), "superseded", "retired is its own value, not done and not blocking");
+  assert.equal(judgeDepStatus("ready"), "blocking");
+  assert.equal(judgeDepStatus("todo"), "blocking");
+  assert.equal(judgeDepStatus("needs-human"), "blocking");
+  assert.equal(judgeDepStatus(null), "blocking", "读不懂 ⇒ blocking (fail-closed, never done/superseded)");
+  assert.equal(judgeDepStatus(""), "blocking", "junk token ⇒ blocking");
+  assert.equal(judgeDepStatus("in-progress"), "blocking", "unknown word ⇒ blocking");
+});
+
+test("judgeDeps — superseded dep no longer blocks, and is reported in its OWN set (⛔ not merged into doneDeps)", () => {
+  const r = judgeDeps(["gap-retired"], () => "superseded");
+  assert.equal(r.ready, true, "a retired prerequisite is not a LIVE unmet prerequisite ⇒ not blocking");
+  assert.deepEqual(r.supersededDeps, ["gap-retired"]);
+  assert.deepEqual(r.doneDeps, [], "⛔ NOT reported as done — '前提被删除' must not read as '前提做完了'");
+  assert.deepEqual(r.blockingDeps, []);
+  // The distinguishable reading vs the all-done case (same `ready`, different shape — 硬规则 3b):
+  const allDone = judgeDeps(["gap-retired"], () => "done");
+  assert.equal(allDone.ready, true);
+  assert.deepEqual(allDone.doneDeps, ["gap-retired"]);
+  assert.deepEqual(allDone.supersededDeps, [], "the two readings are disjoint and tellable apart");
+});
+
+test("judgeDeps — AC5 negative control: ready / todo / needs-human / unreadable deps stay BLOCKING (semantics not widened)", () => {
+  for (const [status, label] of [["ready", "ready"], ["todo", "todo"], ["needs-human", "needs-human"], [null, "读不出(null)"], ["", "空串"]]) {
+    const r = judgeDeps(["gap-dep"], () => status);
+    assert.equal(r.ready, false, `${label} dep must block (fail-closed)`);
+    assert.deepEqual(r.blockingDeps, ["gap-dep"], `${label} dep lands in blockingDeps`);
+    assert.deepEqual(r.supersededDeps, [], `${label} dep must NOT be reported as retired`);
+  }
+});
+
+test("judgeDeps — empty dep set ⇒ ready with all three sets empty (真无依赖, ⛔ not 「读不懂」)", () => {
+  const r = judgeDeps([], () => null);
+  assert.equal(r.ready, true);
+  assert.deepEqual([r.doneDeps, r.supersededDeps, r.blockingDeps], [[], [], []]);
+});
+
+test("judgeDeps — a retired dep and a blocking dep COEXIST: ready=false AND supersededDeps still names the retired one", () => {
+  // The shape that proves the two conditions never collapse into one (硬规则 3b): the task is still
+  // blocked (a live prerequisite), but the retired edge is not silently the reason.
+  const r = judgeDeps(["gap-retired", "gap-live"], (d) => (d === "gap-retired" ? "superseded" : "todo"));
+  assert.equal(r.ready, false, "a live unmet prerequisite still blocks");
+  assert.deepEqual(r.supersededDeps, ["gap-retired"], "the retired edge stays visible in its own set");
+  assert.deepEqual(r.blockingDeps, ["gap-live"], "⛔ the retired dep is NOT what is blocking");
+});
+
+// ── AC7: NOVEL retired-dependency shapes (never seen in production) ─────────────────────────────
+// The production instance was a single superseded `depends_on` edge. These are shapes nobody has hit
+// yet: several retired deps at once, and a retired dep that is ALSO the parent edge. Both must
+// produce a distinguishable reading, never a permanent false.
+
+test("AC7 (novel shape A) — MULTIPLE superseded deps coexist ⇒ ready, every retired id named", () => {
+  const r = judgeDeps(["gap-r1", "gap-r2", "gap-r3"], () => "superseded");
+  assert.equal(r.ready, true, "3 retired deps ⇒ still not blocked");
+  assert.deepEqual(r.supersededDeps, ["gap-r1", "gap-r2", "gap-r3"]);
+  assert.deepEqual(r.blockingDeps, []);
+});
+
+test("AC7 (novel shape B) — a SUPERSEDED dep that is ALSO the parent edge ⇒ ready, parent named in supersededDeps", (t) => {
+  const root = makeRoot("ac7-parent-superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // parent edge (read from frontmatter `parent:`), no depends_on at all.
+  const task = { parent: "gap-retired-parent", frontmatterRaw: "parent: gap-retired-parent\n", body: "" };
+  const allTasks = new Map([["gap-retired-parent", { status: "superseded" }]]);
+  const r = depsReadinessFor(task, allTasks, null /* no git ref ⇒ allTasks fallback */);
+  assert.equal(r.ready, true, "a retired PARENT edge no longer blocks the child forever");
+  assert.deepEqual(r.supersededDeps, ["gap-retired-parent"], "the retired parent edge is reported, not swallowed");
+  assert.deepEqual(r.blockingDeps, []);
+  // negative control: the SAME parent edge with a live (ready) status still blocks.
+  const live = depsReadinessFor(task, new Map([["gap-retired-parent", { status: "ready" }]]), null);
+  assert.equal(live.ready, false, "a non-retired parent still blocks (semantics unchanged)");
+  assert.deepEqual(live.blockingDeps, ["gap-retired-parent"]);
+});
+
+test("AC7 (novel shape C) — retired parent edge + a retired depends_on edge together ⇒ both named, ready", (t) => {
+  const root = makeRoot("ac7-mixed-retired");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const task = {
+    parent: "gap-retired-parent",
+    frontmatterRaw: "parent: gap-retired-parent\ndepends_on:\n  - gap-retired-dep\n",
+    body: "",
+  };
+  const r = depsReadinessFor(task, new Map([
+    ["gap-retired-parent", { status: "superseded" }],
+    ["gap-retired-dep", { status: "superseded" }],
+  ]), null);
+  assert.equal(r.ready, true);
+  assert.deepEqual(r.supersededDeps, ["gap-retired-parent", "gap-retired-dep"]);
+});
+
 // ── notInFlight ─────────────────────────────────────────────────────────────────────────────────
 
 test("notInFlight — filters the in-flight ids, keeps the rest", () => {
@@ -132,6 +239,26 @@ test("depsSatisfied — no deps ⇒ true; all done ⇒ true; not-done ⇒ false;
 
   write("gap-flow", "---\nid: gap-flow\nstatus: ready\ndepends_on: [gap-prereq, gap-prereq2]\n---\n\nbody\n");
   assert.equal(pred("gap-flow"), false, "flow form: any not-done dep blocks");
+});
+
+test("depsSatisfied — a SUPERSEDED (retired) dep does not block dispatch; ready/missing still do", (t) => {
+  const root = makeRoot("deps-superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const pred = TASK_FILTERS[1].predicate(ctx(root));
+  const write = (id, fm) => fs.writeFileSync(path.join(root, "tasks", `${id}.md`), fm);
+
+  write("gap-retired", "---\nid: gap-retired\nstatus: superseded\n---\n\nbody\n");
+  write("gap-after-retired", "---\nid: gap-after-retired\nstatus: ready\ndepends_on:\n  - gap-retired\n---\n\nbody\n");
+  assert.equal(pred("gap-after-retired"), true,
+    "a retired prerequisite has no future event that could flip it to done ⇒ blocking here is a permanent stop");
+
+  // ⛔ Semantics NOT widened — the live/unreadable arms keep blocking (same negative controls as above).
+  write("gap-live", "---\nid: gap-live\nstatus: todo\n---\n\nbody\n");
+  write("gap-after-live", "---\nid: gap-after-live\nstatus: ready\ndepends_on:\n  - gap-live\n---\n\nbody\n");
+  assert.equal(pred("gap-after-live"), false, "todo dep still blocks");
+
+  write("gap-after-missing", "---\nid: gap-after-missing\nstatus: ready\ndepends_on:\n  - gap-does-not-exist\n---\n\nbody\n");
+  assert.equal(pred("gap-after-missing"), false, "unreadable dep still blocks (fail-closed)");
 });
 
 // ── touchesDisjoint ─────────────────────────────────────────────────────────────────────────────

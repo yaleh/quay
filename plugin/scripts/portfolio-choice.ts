@@ -13,6 +13,10 @@
 import type { MilestoneCandidate, RejectedShape, MilestonePortfolio } from "./candidate-contracts.ts";
 import { CONTRACT_VERSION } from "./candidate-contracts.ts";
 import { createSelftest } from "./gate-script-base.ts";
+// 依赖边判定（done / superseded / blocking 的三值判定）单一真相源在 driver-filters.ts —— 本模块
+// 只消费它，⛔ 不再自己写一份 `=== "done"` 的状态比较（gap-superseded-dependency-blocks-dispatch-
+// forever 的 5b 姊妹实例：同一条原则的两处实现曾经分叉，一处修了另一处没修）。
+import { judgeDepStatus } from "./driver-filters.ts";
 
 // ── CadenceConstraint (M188/DIR-119-A AC5 follow-up) ─────────────────────────────────────────────────
 // Wires explore-exploit-cadence.ts's verdict into portfolio choice: when an EXPLORE milestone is DUE,
@@ -62,7 +66,8 @@ function overlaps(a: MilestoneCandidate, taken: Set<string>): boolean {
 
 // ── findUnmetDependency ───────────────────────────────────────────────────────────────────────────
 // Returns a concrete reason string if `candidate` has an external (cross-candidate) dependency that
-// is neither done nor covered by `allSelectedTaskIds`; null if every dependency is resolved.
+// is neither SETTLED (done / retired-superseded) nor covered by `allSelectedTaskIds`; null if every
+// dependency is resolved.
 export function findUnmetDependency(
   candidate: MilestoneCandidate,
   allSelectedTaskIds: ReadonlySet<string>,
@@ -74,7 +79,16 @@ export function findUnmetDependency(
       if (candidate.taskIds.includes(target)) continue; // internal — already closed by synthesis
       const known = dep.dependsOnById.has(target) || dep.statusById.has(target);
       if (!known) continue; // outside this SELECT cycle's fact set — fail-open, never fabricate a block
-      if (dep.statusById.get(target) === "done") continue; // already landed — satisfied
+      // SETTLED-DEPENDENCY JUDGMENT (gap-superseded-dependency-blocks-dispatch-forever, 硬规则 5b 姊妹实例):
+      // `done`（已落地）与 `superseded`（**被人裁定退役** —— 前提被删除，其继任者承载真依赖）都是
+      // 【等待已结束】。⛔ 修前这一行只认 `done`，于是一条【永远不会有未来事件把它翻成 done】的
+      // 退役依赖会落到下一行，被判成「open but not selected」——候选被**永久**拒绝，而理由读起来
+      // 与「前置还没做」**同形**（与 driver-filters' allDepsDone 修前完全同形）。
+      // 判定本身单一真相源在 driver-filters.ts 的 judgeDepStatus（⛔ 不在此处再拼一遍
+      // `=== "done" || === "superseded"`）。
+      // ⛔ todo / ready / needs-human / 读不出（statusById 无此键 ⇒ undefined）仍走 blocking ⇒
+      // fail-closed（落到下面那行报 unresolved）。
+      if (judgeDepStatus(dep.statusById.get(target)) !== "blocking") continue; // done or retired
       if (allSelectedTaskIds.has(target)) continue; // will land in the same portfolio round
       return `unresolved dependency: ${taskId} depends on ${target}, which is open but not selected in this portfolio round`;
     }

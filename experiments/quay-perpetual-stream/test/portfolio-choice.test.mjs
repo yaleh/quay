@@ -135,6 +135,43 @@ test("findUnmetDependency: null (satisfied) when the dependency target is alread
   assert.equal(findUnmetDependency(candidate, new Set(["DEP-B"]), dep), null);
 });
 
+// ── RETIRED (superseded) dependency — 硬规则 5b 姊妹实例 (gap-superseded-dependency-blocks-──────
+// dispatch-forever AC6). `superseded` is TERMINAL: the prerequisite was retired by a human ruling and
+// its successor carries the real dependency, so no future event can make it `done`. Pre-fix this
+// function only recognized `done`, so a candidate whose external prerequisite had been retired was
+// rejected FOREVER with `unresolved dependency: …` — a reason that reads exactly like "the
+// prerequisite hasn't happened yet" (same shape as driver-filters' pre-fix allDepsDone). ⛔ The fix
+// must not widen the other way either: todo / ready / needs-human / unreadable stay BLOCKING.
+
+test("findUnmetDependency: null (satisfied) when the dependency target was RETIRED (superseded)", () => {
+  const candidate = mkC("dependent", ["DEP-B"], 50);
+  const dep = { dependsOnById: new Map([["DEP-B", ["DEP-A"]]]), statusById: new Map([["DEP-A", "superseded"]]) };
+  assert.equal(findUnmetDependency(candidate, new Set(["DEP-B"]), dep), null,
+    "a retired prerequisite is not an open dependency — blocking here is a permanent rejection");
+});
+
+test("findUnmetDependency: negative control — ready/todo/needs-human/unreadable deps still report unresolved", () => {
+  for (const status of ["ready", "todo", "needs-human", ""]) {
+    const candidate = mkC("dependent", ["DEP-B"], 50);
+    const dep = { dependsOnById: new Map([["DEP-B", ["DEP-A"]]]), statusById: new Map([["DEP-A", status]]) };
+    assert.match(findUnmetDependency(candidate, new Set(["DEP-B"]), dep), /unresolved dependency.*DEP-B.*DEP-A/,
+      `status ${JSON.stringify(status)} must still block (semantics not widened)`);
+  }
+  // An EMPTY status map entry is impossible to distinguish from "unknown word" through the Map, so
+  // the unreadable arm is pinned by an id present in dependsOnById but carrying no usable status.
+  const candidate = mkC("dependent", ["DEP-B"], 50);
+  const dep = { dependsOnById: new Map([["DEP-B", ["DEP-A"]]]), statusById: new Map([["DEP-A", null]]) };
+  assert.match(findUnmetDependency(candidate, new Set(["DEP-B"]), dep), /unresolved dependency/,
+    "an unreadable status must still block (fail-closed)");
+});
+
+test("choosePortfolio: a candidate whose only external dep was retired IS selected (not rejected forever)", () => {
+  const dep = { dependsOnById: new Map([["DEP-B", ["DEP-A"]]]), statusById: new Map([["DEP-A", "superseded"]]) };
+  const p = choosePortfolio([mkC("dependent", ["DEP-B"], 50)], { dependency: dep });
+  assert.equal(p.selected.length, 1, "retired prerequisite ⇒ selectable");
+  assert.equal(p.selected[0].candidateId, "dependent");
+});
+
 test("findUnmetDependency: fails open (null) on a dependency target unknown to this fact set", () => {
   const candidate = mkC("dependent", ["DEP-B"], 50);
   const dep = { dependsOnById: new Map([["DEP-B", ["OUTSIDE-EVERYTHING"]]]), statusById: new Map() };
