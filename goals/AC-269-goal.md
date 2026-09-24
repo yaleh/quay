@@ -7,24 +7,33 @@ goal: GOAL-020
 criterion: |-
   python3 - <<'P'
   import json, os, subprocess, sys
+  from datetime import datetime, timezone
   ATTR = "plugin/scripts/ci-red-attribute.ts"
   CAR = ".quay/ci-runs.jsonl"
   VOCAB = ("real-defect", "infrastructure", "known-flake")
-  land = subprocess.run(["git","log","-1","--format=%cI","--",ATTR],capture_output=True,text=True).stdout.strip()
-  if not land:
+  def epoch(s):
+      try: d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+      except Exception: return None
+      return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+  land_s = subprocess.run(["git","log","-1","--format=%ct","--",ATTR],capture_output=True,text=True).stdout.strip()
+  if not land_s:
       sys.stderr.write("CAUSE=attributor-not-landed — no commit touches %s => nothing mechanically classifies a red CI run, which is precisely the cost this AC exists to remove (2026-09-15: defining one batch of reds took a human read of a 15684-line log)\n" % ATTR); sys.exit(1)
+  land = int(land_s)
+  land_txt = datetime.fromtimestamp(land, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
   if not os.path.exists(CAR):
-      sys.stderr.write("CAUSE=carrier-absent — %s does not exist => the attributor landed at %s but no run record has ever been written\n" % (CAR, land)); sys.exit(1)
-  post = []
+      sys.stderr.write("CAUSE=carrier-absent — %s does not exist => the attributor landed at %s but no run record has ever been written\n" % (CAR, land_txt)); sys.exit(1)
+  post, bad = [], 0
   for ln in open(CAR, encoding="utf-8"):
       ln = ln.strip()
       if not ln: continue
       try: r = json.loads(ln)
       except Exception: continue
-      ts = str(r.get("ts") or "")
-      if ts and ts > land: post.append(r)
+      ts = epoch(r.get("ts"))
+      if ts is None: bad += 1; continue
+      if ts > land: post.append(r)
+  note = "" if bad == 0 else " [%d carrier rows had a missing/unparseable ts and were not placed in the window]" % bad
   if not post:
-      sys.stderr.write("CAUSE=collection-stalled — carrier holds no record with ts > the attributor landing %s => either no CI has run since, or the collector stopped writing; both leave this AC unverifiable on production data\n" % land); sys.exit(1)
+      sys.stderr.write("CAUSE=collection-stalled — carrier holds no record with ts after the attributor landing %s (compared as instants, not strings) => either no CI has run since, or the collector stopped writing; both leave this AC unverifiable on production data%s\n" % (land_txt, note)); sys.exit(1)
   reds = [r for r in post if r.get("conclusion") == "failure"]
   if not reds:
       # Legitimate vacuous-but-honest state: collection is demonstrably alive (post is non-empty) and

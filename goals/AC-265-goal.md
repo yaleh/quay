@@ -7,14 +7,21 @@ goal: GOAL-020
 criterion: |-
   python3 - <<'P'
   import json, os, subprocess, sys
+  from datetime import datetime, timezone
   CAR = ".quay/ci-runs.jsonl"
   COLLECTOR = "plugin/scripts/ci-runs-collect.ts"
-  land = subprocess.run(["git","log","-1","--format=%cI","--",COLLECTOR],capture_output=True,text=True).stdout.strip()
-  if not land:
+  def epoch(s):
+      try: d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+      except Exception: return None
+      return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+  land_s = subprocess.run(["git","log","-1","--format=%ct","--",COLLECTOR],capture_output=True,text=True).stdout.strip()
+  if not land_s:
       sys.stderr.write("CAUSE=collector-not-landed — no commit touches %s => the CI-conclusion collector does not exist, so there is no post-landing window to read (criterion reads a local carrier on purpose: gh is not on the driver's PATH and a network/auth failure would be indistinguishable from a red CI)\n" % COLLECTOR); sys.exit(1)
+  land = int(land_s)
+  land_txt = datetime.fromtimestamp(land, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
   if not os.path.exists(CAR):
-      sys.stderr.write("CAUSE=carrier-absent — %s does not exist => the collector landed at %s but has never written a run record\n" % (CAR, land)); sys.exit(1)
-  rows = []
+      sys.stderr.write("CAUSE=carrier-absent — %s does not exist => the collector landed at %s but has never written a run record\n" % (CAR, land_txt)); sys.exit(1)
+  rows, bad = [], 0
   for ln in open(CAR, encoding="utf-8"):
       ln = ln.strip()
       if not ln: continue
@@ -23,16 +30,17 @@ criterion: |-
       if r.get("branch") != "develop": continue
       if r.get("workflow") not in (None, "ci.yml", "CI"): continue
       if r.get("conclusion") not in ("success", "failure"): continue
-      ts = str(r.get("ts") or "")
-      if not ts: continue
+      ts = epoch(r.get("ts"))
+      if ts is None: bad += 1; continue
       rows.append((ts, r.get("conclusion"), r))
+  note = "" if bad == 0 else " [%d develop decisive rows had a missing/unparseable ts and were not placed in the window]" % bad
   rows.sort(key=lambda x: x[0])
   post = [x for x in rows if x[0] > land]
   if not post:
-      sys.stderr.write("CAUSE=no-decisive-run-after-landing — carrier holds %d decisive develop runs in total but none with ts > the collector landing %s (cancelled runs are excluded by design: 43%% of develop runs are superseded pushes, not reds)\n" % (len(rows), land)); sys.exit(1)
+      sys.stderr.write("CAUSE=no-decisive-run-after-landing — carrier holds %d decisive develop runs in total but none with ts after the collector landing %s (compared as instants, not strings; cancelled runs are excluded by design: 43%% of develop runs are superseded pushes, not reds)%s\n" % (len(rows), land_txt, note)); sys.exit(1)
   greens = [i for i, x in enumerate(rows) if x[1] == "success" and x[0] > land]
   if not greens:
-      sys.stderr.write("CAUSE=still-red — %d decisive develop CI runs after %s, none with conclusion=success (baseline at filing: 0 successes in 52 decisive runs)\n" % (len(post), land)); sys.exit(1)
+      sys.stderr.write("CAUSE=still-red — %d decisive develop CI runs after %s, none with conclusion=success (compared as instants)%s\n" % (len(post), land_txt, note)); sys.exit(1)
   gi = greens[0]
   g = rows[gi][2]
   gf = g.get("testFiles")

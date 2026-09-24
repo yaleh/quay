@@ -1,7 +1,7 @@
 ---
 id: gap-webui-goal-list-title-search-and-ac-rollup-sort
 title: /goal 列表缺 /tasks 已有的标题搜索，且排序不含 AC 达成率——找特定 goal 只能肉眼扫，按「哪个 goal 离达成最近」也排不了
-status: todo
+status: ready
 labels:
   - gap
   - webui
