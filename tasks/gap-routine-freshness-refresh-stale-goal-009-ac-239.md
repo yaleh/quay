@@ -94,11 +94,11 @@ rc=255
 
 `BatchMode=yes` ⇒ ⛔ 无口令回退 ⇒ 产出者在 `scp`（同文件 `:1625` / `:1785`）第一步就被挡住，远端 ⑦/⑦b 无从谈起。
 该 0 号前置（含补救 = 目标侧人授权动作）已由同轮兄弟任务登记进 `plugin/freshness-producers.json` 的 `upgrade-face.preconditions[0]` —— **AC-239 逐字继承它**：AC-239 没有别的刷新路径（③(i)）。
-⇒ **本主体这一侧的失败步骤没有独立的新断点**；本轮新增的是 ③ 那三条**AC-239 特有**的形态。
+⇒ **本主体这一侧的失败步骤没有独立的新断点**；本轮新增的是 ③ 那两条**AC-239 特有**的形态。
 
 ### ③ 处置动作：把这个主体特有的刷新形态登记进 mapping（本任务唯一的改动面，commit `86dcb2578`）
 
-`plugin/freshness-producers.json` 的 `upgrade-face` 条目加 **2** 条（⛔ 未新造键、⛔ 未动 `wallclock_hours` —— 改它会移动探针阈值，且本任务没测出端到端 W）：
+`plugin/freshness-producers.json` 的 `upgrade-face` 条目加 **2** 条：一个**新描述性键** `_ac239_refresh_shape`（按本文件既有约定用 `_` 前缀；`ProducerEntry` 的声明 schema 只要求 `id`/`command`/`wallclock_hours`/`subjects` 四键，`_`-键是非 schema 的说明面 —— 本文件已有 `_wallclock_measured`/`_aged_source`/`_same_run_as` 三个同类先例），以及 `preconditions` 数组里**新增一条**。⛔ 未动 `wallclock_hours`（改它会移动探针阈值，且本任务没测出端到端 W）。
 
 **(i) `_ac239_refresh_shape`（新键）** —— finding 题面那句「the AC-239 leg has no separate command，所以它会随 AC-238 一起老化」的**机器可核版本**：
 - **无独立命令**（按位置）：⑦b 的调用点 `verify-deliver-coldstart.sh:8803-8804` 嵌在 `if [ "$UPGRADE_EXISTING" = 1 ]`（同文件 `:8796`）之内；`--ac239-e2e` 在 `develop-deliver-tgz.sh` 里只有两个读数点（`:1743` / `:1826`），两处都在 `verify_upgrade_mode` 函数体内。
@@ -128,7 +128,7 @@ PARTIAL present=1 missing=1 list=GOAL-009-AC-239                                
 - ⛔ **未跑 `upgrade-face`**：**跑不了**（② 的读数，同一个 0 号前置），⛔ 不是没跑；也没有把失败截断在 build 之前。
 - ⛔ 未 ssh 到 B 复核盘量/授权：通道就是 ② 断掉的那一步。
 - ⛔ 未在 B 上删任何文件、未改 B 上任何东西：对外、难逆、需人授权。
-- ⛔ 未改 `plugin/scripts/develop-deliver-tgz.sh`、`plugin/scripts/verify-deliver-coldstart.sh`（**均不在 Touches**）—— ③ 的两条观察正是落在它们身上，故只记观察（⑤）。
+- ⛔ 未改 `plugin/scripts/develop-deliver-tgz.sh`、`plugin/scripts/verify-deliver-coldstart.sh`（**均不在 Touches**）—— ⑤ 的两条观察正是落在它们身上，故只记观察。
 - ⛔ 未改 `goals/`、未改 K、未改 criterion、未动两个载体（`.quay/*.jsonl` 只读；实测用夹具走 `/tmp`）、未改探针、未改 AC-238 的任务文件。
 - ⛔ 未把任务置 `needs-human`：本 AC 的第二个分支（写明「已有机制在管、失败在哪一步」）**已可满足**。
 
