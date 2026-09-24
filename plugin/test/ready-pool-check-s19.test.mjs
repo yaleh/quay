@@ -18,6 +18,9 @@
 // SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 19/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
+// Plan 4's exemption marker + the three-valued assessment are imported STRAIGHT from the module (the
+// dominant convention here) — they are the unit under test, not shared fixtures.
+import { DEDUP_REF_INLINE_MARKER, prosePrereqAssessment } from "../scripts/ready-pool-check.ts";
 import { SUPERSEDED_MARKER_RE, __dirname, analyzeTasks, assert, buildTargetedPromotion, declaresPrereq, fourArtifactBody, fs, gapTask, makeWorkspace, parseTask, path, prosePrereqGap, prosePrereqRefs, withSelfTouch, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 
 test("AC4 — a paragraph OPENED with <!-- dedup-ref --> is traceability, not a prereq claim (能取假)", (t) => {
@@ -358,4 +361,105 @@ test("AC1: compound and self-touch-missing todo candidates are rejected at the b
   assert.ok(!r.promotions.some((p) => p.id === "gap-compound-candidate"), "compound candidate never promoted");
   assert.ok(!r.promotions.some((p) => p.id === "gap-self-touch-missing"), "self-touch candidate never promoted");
   assert.ok(r.promotions.some((p) => p.id === "gap-clean-candidate"), "clean candidate is promoted");
+});
+
+
+// ── Plan 4 — the sentence-scoped exemption must not be SAME-SHAPED as "nothing to find" ───────────
+// (tasks/gap-prose-prereq-exemption-paragraph-scoped-not-sentence, AC5 / 硬规则③b). Making the
+// exemption able to reach a single sentence is only half the job: if `prosePrereqGap` keeps returning
+// a bare `[]` for "exempted" exactly as it does for "declares nothing", then the mechanism's central
+// act — REMOVING a declaration — is unobservable, and "未评估" and "查过且合格" collapse into one
+// shape again. `prosePrereqAssessment` carries all three states as separate VALUES.
+
+
+test("AC5 — an EXEMPTED citation and 'declares no prereq at all' are distinguishable readings, not two empty arrays (硬规则③b)", (t) => {
+  const root = makeWorkspace("prereq-inline-distinct");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ⚠️ `ready`, not `done`: the claim is about the MARKER, so the ref must survive the status filter.
+  writeTask(root, "gap-distinct-cited", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  const citation = "且 `gap-distinct-cited` 的生产 `depends_on` 里现在还有第二条活边";
+  const clean = prosePrereqAssessment("## AC\n\n- [ ] 本项与任何任务无关，仅描述读数。\n", "", tasksDir);
+  const exempted = prosePrereqAssessment(`## AC\n\n- [ ] ${citation} ${DEDUP_REF_INLINE_MARKER}\n`, "", tasksDir);
+  const unmarked = prosePrereqAssessment(`## AC\n\n- [ ] ${citation}\n`, "", tasksDir);
+  // The control first, so the two readings below are not vacuous: UNMARKED, that very sentence IS a gap.
+  assert.deepEqual(unmarked.declared, ["gap-distinct-cited"], "control: unmarked, the sentence declares");
+  assert.deepEqual(unmarked.gap, ["gap-distinct-cited"], "control: …and it is a real, blocking gap");
+  // Now the two situations the exclusion driver cannot tell apart — BOTH read `gap: []`:
+  assert.deepEqual(clean.gap, [], "clean: no gap");
+  assert.deepEqual(exempted.gap, [], "exempted: also no gap");
+  assert.equal(clean.evaluated, true, "both are EVALUATED — the distinction is carried by the values");
+  assert.equal(exempted.evaluated, true, "…not by a flag that could only ever say one thing");
+  // …and here is where they differ. `exempted` REPORTS the removal instead of swallowing it:
+  assert.deepEqual(exempted.exempted, ["gap-distinct-cited"], "the exemption is reported, never silently dropped");
+  assert.deepEqual(clean.exempted, [], "…and a task that declares nothing reports nothing exempted");
+  assert.deepEqual(exempted.declared, [], "…the exempted ref is NOT among the declarations either");
+  assert.notDeepEqual(clean, exempted, "the two situations must never be same-shaped (硬规则③b)");
+});
+
+
+test("AC4 — a GENUINE prereq sentence in the same ## AC block is STILL caught; the marker cannot widen it away (生产形态, 双向)", (t) => {
+  const root = makeWorkspace("prereq-inline-ac4");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-cite-x", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-real-y", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  const CAND = "gap-ac4-cand";
+  // The production SHAPE at gate level: one `## AC` paragraph carrying BOTH a traceability citation
+  // (naming the other task's `depends_on` FIELD) and a GENUINE declaration — the two differ only in
+  // wording, which is exactly why the exemption is an explicit annotation and not a heuristic.
+  //
+  // ⚠️ The genuine sentence carries a real KEYWORD (`依赖前序`, or equivalently `前序`). Note that the
+  // bare word 依赖 is DELIBERATELY absent from PREREQ_KEYWORD_RE ("依赖" alone would false-fire on
+  // "无代码依赖 / no code dependency"), so a sentence spelled 本任务依赖 `gap-x` 未 done 前不落地 —
+  // the wording AC4 happens to quote — declares NOTHING and is not a usable negative control. Using it
+  // would have made ① below pass vacuously. Measured: declaresPrereq("本任务依赖 `gap-x` 未 done 前不落地")
+  // === false, declaresPrereq("本任务依赖前序 `gap-x` 未 done 前不落地") === true.
+  const AC = [
+    "- [ ] a first AC item that is long enough to count as a real acceptance criterion box",
+    "- [ ] 且 `gap-cite-x` 的生产 `depends_on` 里现在还有第二条活边",
+    "- [ ] 本任务依赖前序 `gap-real-y` 未 done 前不落地",
+  ];
+  const bodyWith = (acs) =>
+    withSelfTouch(
+      [
+        "**type:** execution",
+        "## Proposal",
+        "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+        "## Contract",
+        "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+        "band      ready_pool = true",
+        "invoke    `node plugin/scripts/ready-pool-check.ts`",
+        "control   ok",
+        "resume    前置 done 后再 dispatch",
+        "## Acceptance Criteria",
+        ...acs,
+        "## Definition of Done",
+        "standard DoD — the five clauses; meta-enforcer fixture-pinned, definitely long enough content.",
+      ].join("\n"),
+      CAND,
+    );
+  const gate = (acs) => {
+    writeTask(root, CAND, { status: "todo", labels: ["gap"], parent: null, children: [], body: bodyWith(acs) });
+    const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: CAND });
+    return r.targeted_promotion;
+  };
+  const MARKED = `${AC[1]} ${DEDUP_REF_INLINE_MARKER}`;
+  // ① unmarked: the citation and the genuine declaration are BOTH gaps (the fixture is not vacuous).
+  assert.deepEqual(
+    gate(AC).checks.prosePrereqGap.slice().sort(),
+    ["gap-cite-x", "gap-real-y"],
+    "① unmarked, the citation and the genuine declaration are both gaps",
+  );
+  // ② mark ONLY the citation ⇒ it is exempted, and the GENUINE declaration in the same block STILL
+  // blocks. This is AC4's negative control: the exemption removes exactly what it annotates, and a
+  // "AC 块内引用一律不判" widening (which the DoD forbids) would have made this read `[]`.
+  const markedOnly = gate([AC[0], MARKED, AC[2]]);
+  assert.deepEqual(markedOnly.checks.prosePrereqGap, ["gap-real-y"], "② the genuine declaration survives the exemption");
+  assert.equal(markedOnly.eligible, false, "② …so the task is still NOT promotable (no widening into 恒绿)");
+  // ③ mark BOTH ⇒ no gap and the task becomes promotable, i.e. the production SHAPE is dispatchable
+  // through the sentence-scoped exemption (the mechanism AC3 reads at the pool level). Only the
+  // ANNOTATION differs between ② and ③ — the wording of the genuine sentence is byte-identical.
+  const markedBoth = gate([AC[0], MARKED, `${AC[2]} ${DEDUP_REF_INLINE_MARKER}`]);
+  assert.deepEqual(markedBoth.checks.prosePrereqGap, [], "③ both annotated ⇒ no prose-prereq gap remains");
+  assert.equal(markedBoth.eligible, true, "③ …and the task is promotable (the shape is now reachable)");
 });
