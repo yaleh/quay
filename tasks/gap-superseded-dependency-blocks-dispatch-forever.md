@@ -69,8 +69,7 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
       豁免（`ready-pool-check.ts:1442-1453`）两处原文并点名差异；给出**一条若该归因为假则读数会不同的对照**
       （例如把该 dep 的 status 临时当成 `done` 后 `depsReady` 翻 true）—— 见 ## Evidence E2（对照组 = 同一生产
       root、同一 ref、**未修**代码 ⇒ false / **已修**代码 ⇒ true；唯一变量是代码）
-- [ ] AC3（真值恢复·**生产载体**，⛔ 非 fixture）修复落地后，于同一生产 root 上
-      `gap-ac194-production-criterion-owner` 的 `depsReady=true` ∧ `eligible=true`；贴 `--json` 原文与时间戳（待外部）
+- [ ] AC3（真值恢复·**生产载体**，⛔ 非 fixture）修复落地后，于同一生产 root 上 `gap-ac194-production-criterion-owner` 的 `depsReady=true` ∧ `eligible=true`；贴 `--json` 原文与时间戳（待外部）
       ⛔ **为何此刻不是 [x]（如实登记，⛔ 不是没做）**：AC3 的判据量取真于「修复**落地**后」那一刻，而本任务
       **此刻尚未落地**；且 `gap-ac194-production-criterion-owner` 的生产 `depends_on` 里现在还有**第二条活边**
       —— **本任务自己**（该边由 commit `e40c77779` 于 2026-09-24T10:42:20Z 加上，即本任务立案后 106 秒，
@@ -105,7 +104,7 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 ## Evidence
 
 ### E1 — AC1 立案直接量（修前读数，生产 root `/data/home/yale/work/quay`）
-时间戳 `2026-09-24T02:47:0xZ`（修前，主检出未修代码）+ 修前 `--json` 候选原文：
+时间戳 `2026-09-24T02:47Z`（修前，主检出未修代码）+ 修前 `--json` 候选原文：
 
     { "id": "gap-ac194-production-criterion-owner", "kind": "gap",
       "touchesResolve": true, "touchesNarrow": true,
@@ -128,7 +127,7 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
       return true;
     }
 
-已修的散文路径（`ready-pool-check.ts:1453` 起，逐字）：
+已修的散文路径（`ready-pool-check.ts:1455`，逐字）：
 
     if (status === "superseded" || status === "done") return;   // ← 注释：A retired task (`superseded`) is not a
                                                                  //   current-prereq target — its successor carries
@@ -163,17 +162,17 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 
 活读数（已修代码，develop HEAD）：
 
-    {"depsReady": false, "supersededDeps": ["gap-reflog-fetch-…"], 
+    {"depsReady": false, "supersededDeps": ["gap-reflog-fetch-form-unclassified-breaks-direct-to-develop-check"],
      "blockingDeps": ["gap-superseded-dependency-blocks-dispatch-forever"], "eligible": false}
 
 ⇒ 退役依赖**已不再阻塞**（从 `blockingDeps` 中消失并单独成类）；唯一剩下的阻塞**是本任务自己尚未落地** ——
-这是正常的调度排序，不是本条所修的永久停摆。本任务落地后该活边即 settled，AC3 的判据量随之取真。
+这是正常的依赖排序，不是本条所修的永久停摆。本任务落地后该活边即 settled，AC3 的判据量随之取真。
 
 ### E4 — AC4 可区分读数（硬规则 3b）
 判定输出词表里 `done` / `superseded` / `blocking` 三值分离，读数上三个集合不相交（`.quay/ac-superseded-deps-verify.mjs` 输出）：
 
     "AC4-superseded-vs-done": {
-      "gap-cand-done":    {"depsReady":true, "depsDone":["gap-landed"], "supersededDeps":[],           "blockingDeps":[], "eligible":true},
+      "gap-cand-done":    {"depsReady":true, "depsDone":["gap-landed"], "supersededDeps":[],             "blockingDeps":[], "eligible":true},
       "gap-cand-retired": {"depsReady":true, "depsDone":[],             "supersededDeps":["gap-retired"], "blockingDeps":[], "eligible":true}
     }
 
@@ -185,7 +184,8 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 
        test("allDepsDone — empty deps ⇒ true; all done ⇒ true; any not-done/missing ⇒ false", ...)
        ✔ allDepsDone — empty deps ⇒ true; all done ⇒ true; any not-done/missing ⇒ false
-       （`allDepsDone(["a","b"], id=>id==="a"?"done":"ready") === false` / `allDepsDone(["a"], ()=>null) === false` 均仍断言通过）
+
+   （`allDepsDone(["a","b"], id=>id==="a"?"done":"ready") === false` 与 `allDepsDone(["a"], ()=>null) === false` 均仍断言通过）
 
 2) 新注入的负控制读数：
 
@@ -239,14 +239,14 @@ sentence"）。**同一个成因、同一个后果，在关系边（`depends_on`
 （scoped 静态检查全绿 + `ℹ tests 88 / pass 88 / fail 0`）。
 因 scoped 选择偏薄，另行直接跑了改动模块的消费者测试，全部绿：
 
-    ready-pool-check-s01..s06   48 tests  pass 48  fail 0
-    ready-pool-check-s07..s15   72 tests  pass 72  fail 0
-    ready-pool-check-s16..s21 + heartbeat  52 tests  pass 52  fail 0
-    slot-refill-s01..s06 + heartbeat       39 tests  pass 39  fail 0
-    promotion-driver-s01..s08              47 tests  pass 47  fail 0
-    worker-driver.test.mjs                110 tests  pass 110 fail 0
-    driver-filters.test.mjs                66 tests  pass 66  fail 0
-    portfolio-choice.test.mjs              22 tests  pass 22  fail 0
+    ready-pool-check-s01..s06             48 tests  pass 48  fail 0
+    ready-pool-check-s07..s15             72 tests  pass 72  fail 0
+    ready-pool-check-s16..s21 + heartbeat 52 tests  pass 52  fail 0
+    slot-refill-s01..s06 + heartbeat      39 tests  pass 39  fail 0
+    promotion-driver-s01..s08             47 tests  pass 47  fail 0
+    worker-driver.test.mjs               110 tests  pass 110 fail 0
+    driver-filters.test.mjs               66 tests  pass 66  fail 0
+    portfolio-choice.test.mjs             22 tests  pass 22  fail 0
 
 代码改动面（`git diff --name-only`，⛔ 与 `## Touches` 一致，零越界）：
 
