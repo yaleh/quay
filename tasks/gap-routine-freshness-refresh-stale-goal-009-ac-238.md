@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-stale-goal-009-ac-238
 title: "freshness-refresh: Newest AC-238 evidence is build_sha fa1cae20 at ts
   2026-09-19T11:06:09Z, already d=194 of K=200 delivery-face commits behind the
   develop tip; margin/K=0.03 is fa"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
