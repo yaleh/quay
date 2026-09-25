@@ -3,7 +3,7 @@ id: gap-ac214-ninth-crossing-freshness-clock-counts-fan-in-merges
 title: AC-214 第九次转红（AC-201/203/205/207/232 = 203/200，AC-238/239 = 251/200，7/7
   主体越界；连续 810 fail / 0 pass）：判据的「交付面提交距离」把 fan-in 记账 merge 计入 —— 84/203 与
   102/251 是幻影，同一个 develop 变更被重复计数，时钟由 loop 自己的分支拓扑驱动
-status: ready
+status: done
 labels:
   - gap
   - defect
