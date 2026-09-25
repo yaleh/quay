@@ -38,6 +38,7 @@ extra:
 - `plugin/test/develop-deliver-tgz.test.mjs`
 - `plugin/freshness-producers.json`
 - `tasks/gap-e2e-verify-pushes-dev-host-profile-model-to-target-host.md`
+- `plugin/sh-census-baseline.json`
 
 ## Evidence
 （worker 轮，worktree `quay-worktrees/gap-e2e-verify-pushes-dev-host-profile-model-to-target-host`，实现提交 `develop-deliver: --driving-profiles 覆盖入口（推送侧）…`）
@@ -80,3 +81,21 @@ extra:
   ```
   读回：`.quay/productization-verification.jsonl` 中 `ac=="GOAL-009-AC-207"` / `ac=="GOAL-009-AC-239"` 各自 `ts` 晚于落地提交时刻 ∧ `build_sha` == 该次 develop tip 的条数 ≥1（打印条数与前 3 条）。
 - ⚠️ 本任务的因果判断**仍是假说**，尚未反事实检验：若换上 B 认得的模型名后仍出现同样的 `400 Invalid model name` / `unrecognized_model`，则「模型名是根因」为假，**须据实改写 Proposal 的因果状态段**（AC5 末句的原文要求）。
+
+### 续做轮（2026-09-25，第 3 次派发）：suite 红根因定位（本任务的 delta，不是环境）+ sh-census 向下重锚
+
+**上一轮 exit 的 `step=suite` 红，本轮定位为【本任务的 delta 造成】，且可复现**（读正本 `fan-in-suite-…-98b360.log:6983` + 本轮隔离重跑）：`plugin/test/sh-census-check.test.mjs` 的 **AC6** 断言 `measuredOf(readCensus(root))` 必须**等于**committed baseline；实测 `actual {embeddedInterpreterLines: 7686}` vs `expected {7687}`。隔离重跑（`node --experimental-strip-types --test plugin/test/sh-census-check.test.mjs`）**同样红** ⇒ 不是环境/负载 flake（对照：delta-relatedness 检查报 UNRELATED，那是**一跳 import 启发式**，看不见「本任务改了被计费的 .sh」这条因果 —— 见下）。
+
+**根因（用 checker 自己的原语逐文件测，不是抽样）**：本任务把 `plugin/scripts/develop-deliver-tgz.sh` 两处内联的 5 行 scp 块折成**一个**共享 `ship_driving_profiles()`（调用点 `… || { fail=1; continue; }`），该文件有效代码行 **2115 → 2114**，而它 `embedded: [node]`、不在 exception 列表 ⇒ **仍在棘轮轴内**，只是行数动了。逐文件对照 develop（`readCensus(root).files.filter(f => !f.exception && f.embedded.length > 0)` 共 55 个文件，每个都用 `git show develop:<path>` + 同一个 `countCodeLines` 重算）：**恰好 1 个真实文件不同、差值恰好 -1**，即本文件；本任务另两个路径（`plugin/test/develop-deliver-tgz.test.mjs` 是 .mjs、`plugin/freshness-producers.json` 是 JSON）根本不在轴上，贡献 0。⚠️ 对照必须**跳过符号链接**的轴内成员（`experiments/quay-perpetual-stream/scripts/` 下 7 个，另计为 `symlinkedCopies=61`）：对它们 `git show develop:<path>` 返回的是**链接 blob**（1 行 = 目标路径文本）而不是目标内容，天真对照会读出 7 个 ±15 的假差异。
+
+**修法 = 向下重锚 baseline，不是改代码**：`plugin/sh-census-baseline.json` `embeddedInterpreterLines` **7687 → 7686**，并按其 `_reanchorLog` 既有体例补一条 entry（含 from/to/why/attribution）。为什么必须重锚而不是「≤ 就够」：AC6 要求 committed baseline **等于**实时读数（`_note` 与上一条 2026-09-24 entry 都写明这条理由）—— 留一个偏高的 baseline 等于把这次 -1 的收缩**白送**给未来的 +1。向下正是该 `_note` 说的「intended direction」（向上才是例外方向）。重锚后实测：`sh-census-check.ts` ⇒ `PASS — embeddedInterpreterLines=7686 ≤ 7686, duplicateCopies=0`（exit 0，`headBaseline 7687` 即 HEAD 侧值，属合法收缩不是 raised）；`sh-census-check.test.mjs` ⇒ **20/20 绿**（AC6 转绿）。
+
+**AC1–AC4 本轮在 worktree 复验（只读重跑，读数与上一轮一致）**：
+- AC1 `grep -n 'repo_root}/.quay/profiles.yml'` ⇒ 3 命中（`:93`/`:313` 注释、`:323` 定义行 `${driving_profiles_local:-${repo_root}/.quay/profiles.yml}`）；**全部 scp 调用点** `grep -n 'scp '` 复核：driving-profiles 只有**一个** scp 点（`:568`，在 `ship_driving_profiles()` 内，源为 `${driving_profiles_src}`），两条腿 `:1622`(AC-207) / `:1779`(AC-239) 都经它取 ⇒ 单一可覆盖变量成立。
+- AC2 `node --test plugin/test/develop-deliver-tgz.test.mjs` ⇒ `pass 10 / fail 0`（含 AC2a 默认不变 / AC2b override 内容真的到目标 / AC2c 不存在⇒NOT-EVALUATED 且不运输 / AC2-mutation 负控制）。
+- AC3 `sh-census-check.ts` ⇒ PASS（见上）；锚点 `grep -n '^ssh_opts=('` ⇒ `:193`、`host_target[B]=` ⇒ `:1437`，与 `plugin/freshness-producers.json` 的 `:193 / :1437` 引用一致（未回退）。
+- AC4 `freshness-producer-coverage-check.ts --json` ⇒ `evaluated=true`、`ok=true`、`findings=0`，`observedSubjects` 含 `GOAL-009-AC-207` 与 `GOAL-009-AC-239`；`freshness-producers.json` 里 `--driving-profiles` 出现 9 处、目标主机模型名前置在位；`json.load` 通过。
+
+**⚠️ Touches 扩张（本轮唯一的结构性声明变更）**：`plugin/sh-census-baseline.json` 并入 `## Touches`。这不是可选的美化 —— 本轮**实测**过反例：反漂移闸 `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` 在该路径未声明时报 `ANTI-DRIFT HARD FAIL … out-of-declared: task wrote plugin/sh-census-baseline.json (matches no declared Touches glob)`，exit 1。它读的是**worktree 里的** `tasks/<id>.md`（`runTaskDriver` 的 `taskPath`）⇒ 该声明必须真到 worktree 才算数。
+
+**AC5 / DoD#1 本轮处置不变**：仍为（待外部），承接链与裁定依据见上一轮（第 2 次派发）小节，本轮**不复述、不改动**。⛔ 本轮仍不往 `.quay/productization-verification.jsonl` 写落地前记录（那是假归因，硬规则 4 推论三）。
