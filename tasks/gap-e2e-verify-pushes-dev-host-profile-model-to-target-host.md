@@ -22,19 +22,30 @@ extra:
 **⚠️ 硬约束（sh-census 零余量棘轮 + 行号是公开接口）**：`develop-deliver-tgz.sh` 是被 `plugin/scripts/sh-census-check.ts` 按全文件代码行计费的脚本（当前 embeddedInterpreterLines=7687=基线，零余量）——改动必须【净增代码行 ≤0】（注释行免费；`if ! x; then…fi` 三行可折成 `x || …` 一行以抵扣新增），且 `ssh_opts=(`（:183）、`host_target[B]=`（:1402）等被 `plugin/freshness-producers.json` 与 30 余处引用的锚点行号必须仍然成立（或同一 delta 内同步改引用）。
 
 ## AC
-- [ ] 动手前干跑谓词（对已知为真的样本）：`grep -c 'repo_root}/.quay/profiles.yml' plugin/scripts/develop-deliver-tgz.sh` 在改动前应为 2（两处 scp 点）——把这个读数与命中的前 3 行贴进提交说明；改动后两处 scp 的源路径必须来自同一个可被覆盖的变量。
-- [ ] 新增测试（`plugin/test/develop-deliver-tgz.test.mjs`，PATH 上放假 `scp`/`ssh` 记录 argv，不联网）：(a) 未指定覆盖 ⇒ `--ac207-e2e` 与 `--ac239-e2e` 两条腿的 scp 源都是 `<root>/.quay/profiles.yml`（对照：默认行为不变）；(b) 指定覆盖文件 ⇒ 两条腿 scp 源都是该文件、且被推送的内容是覆盖文件的而不是 root 的；(c) 指定路径不存在 ⇒ 输出含 NOT-EVALUATED、退出码非 0、假 scp 的调用记录里【没有】开发机 profile。`node --test plugin/test/develop-deliver-tgz.test.mjs` 退出 0。负控制：临时回退脚本改动，(b) 必须转红（贴出红的输出）。
-- [ ] 行数与锚点不回退：`node --experimental-strip-types plugin/scripts/sh-census-check.ts` 输出 PASS 且 embeddedInterpreterLines ≤ 7687；`grep -n '^ssh_opts=(' plugin/scripts/develop-deliver-tgz.sh` 与 `grep -n 'host_target\[B\]=' plugin/scripts/develop-deliver-tgz.sh` 的行号仍与 `plugin/freshness-producers.json` 里的引用一致（或引用在同一 delta 内同步更新）。
-- [ ] `plugin/freshness-producers.json` 同步：coldstart-face / session-delivery / upgrade-face 三条 producer 记录了该覆盖入口的用法，且新增一条前置：「被推送 profile 的 worker-default.model 必须是目标主机网关认得的名字；开发机 profile 的模型名不保证在 B/C 可用」；coldstart-face 与 session-delivery 共用同一命令行，两处必须同改（其 `_same_run_as` 已声明）。`python3 -c "import json;json.load(open('plugin/freshness-producers.json'))"` 退出 0，且 `node --experimental-strip-types plugin/scripts/freshness-producer-coverage-check.ts --json` 报 evaluated=true、ok=true。
+- [x] 动手前干跑谓词（对已知为真的样本）：`grep -c 'repo_root}/.quay/profiles.yml' plugin/scripts/develop-deliver-tgz.sh` 在改动前应为 2（两处 scp 点）——把这个读数与命中的前 3 行贴进提交说明；改动后两处 scp 的源路径必须来自同一个可被覆盖的变量。
+- [x] 新增测试（`plugin/test/develop-deliver-tgz.test.mjs`，PATH 上放假 `scp`/`ssh` 记录 argv，不联网）：(a) 未指定覆盖 ⇒ `--ac207-e2e` 与 `--ac239-e2e` 两条腿的 scp 源都是 `<root>/.quay/profiles.yml`（对照：默认行为不变）；(b) 指定覆盖文件 ⇒ 两条腿 scp 源都是该文件、且被推送的内容是覆盖文件的而不是 root 的；(c) 指定路径不存在 ⇒ 输出含 NOT-EVALUATED、退出码非 0、假 scp 的调用记录里【没有】开发机 profile。`node --test plugin/test/develop-deliver-tgz.test.mjs` 退出 0。负控制：临时回退脚本改动，(b) 必须转红（贴出红的输出）。
+- [x] 行数与锚点不回退：`node --experimental-strip-types plugin/scripts/sh-census-check.ts` 输出 PASS 且 embeddedInterpreterLines ≤ 7687；`grep -n '^ssh_opts=(' plugin/scripts/develop-deliver-tgz.sh` 与 `grep -n 'host_target\[B\]=' plugin/scripts/develop-deliver-tgz.sh` 的行号仍与 `plugin/freshness-producers.json` 里的引用一致（或引用在同一 delta 内同步更新）。
+- [x] `plugin/freshness-producers.json` 同步：coldstart-face / session-delivery / upgrade-face 三条 producer 记录了该覆盖入口的用法，且新增一条前置：「被推送 profile 的 worker-default.model 必须是目标主机网关认得的名字；开发机 profile 的模型名不保证在 B/C 可用」；coldstart-face 与 session-delivery 共用同一命令行，两处必须同改（其 `_same_run_as` 已声明）。`python3 -c "import json;json.load(open('plugin/freshness-producers.json'))"` 退出 0，且 `node --experimental-strip-types plugin/scripts/freshness-producer-coverage-check.ts --json` 报 evaluated=true、ok=true。
 - [ ] 【读生产载体，且只计实现落地之后的时间窗】落地后用一份 B 认得的模型名 profile 真跑 coldstart-face（`--verify-coldstart --ac207-e2e --hosts "B C" --driving-profiles <该文件> --force --root <main-checkout>`）与 upgrade-face（`--verify-upgrade … --ac239-e2e --hosts B …`）各一次；`.quay/productization-verification.jsonl` 中 `ac=="GOAL-009-AC-207"` 且 `ts` 晚于落地提交时刻且 `build_sha` == 该次 develop tip 的记录数 ≥1（打印条数与前 3 条）；`ac=="GOAL-009-AC-239"` 同理 ≥1，或者——若 AC-239 腿因【非模型】前置失败（go 工具链 / profiles 未配 / develop 基线分叉，见 freshness-producers.json upgrade-face 前置）而缺失——则写明是哪一条，且远端 `.quay/worker-outcome.jsonl` 中 `Invalid model name|unrecognized_model` 命中数为 0。这一条同时是「模型名假说」的反事实检验：若换了 B 认得的模型名后仍出现同样的 400，则本任务的因果判断为假，须据实改写 Proposal 的因果状态段。
 
 ## DoD
 - [ ] 上面的判据实跑通过，并且是【真实对象被机制操作过】：覆盖入口被一次真实的 B 端跑用过，载体里有落地后的 AC-207 新记录（fixture / 假 scp 只证明「能转发」，不证明「已产出」，硬规则 4 推论三）。
-- [ ] ⛔ 本任务不代关、不改动 gap-routine-freshness-refresh-freshness-goal-009-* 那批 needs-human 任务的状态；它们的收尾按各自 AC 由人确认。⛔ 不手工改目标主机上任何隔离副本的 profiles.yml 来「凑」证据（那会使证据不再是未经改动的交付路径）。
-- [ ] 提交说明里贴出：改动前后 `git diff --numstat` 对 develop-deliver-tgz.sh 的净行数（≤0）与 sh-census 读数。
+- [x] ⛔ 本任务不代关、不改动 gap-routine-freshness-refresh-freshness-goal-009-* 那批 needs-human 任务的状态；它们的收尾按各自 AC 由人确认。⛔ 不手工改目标主机上任何隔离副本的 profiles.yml 来「凑」证据（那会使证据不再是未经改动的交付路径）。
+- [x] 提交说明里贴出：改动前后 `git diff --numstat` 对 develop-deliver-tgz.sh 的净行数（≤0）与 sh-census 读数。
 
 ## Touches
 - `plugin/scripts/develop-deliver-tgz.sh`
 - `plugin/test/develop-deliver-tgz.test.mjs`
 - `plugin/freshness-producers.json`
 - `tasks/gap-e2e-verify-pushes-dev-host-profile-model-to-target-host.md`
+
+## Evidence
+（worker 轮，worktree `quay-worktrees/gap-e2e-verify-pushes-dev-host-profile-model-to-target-host`，实现提交 `develop-deliver: --driving-profiles 覆盖入口（推送侧）…`）
+
+**做完了什么**：`--driving-profiles <本地路径>` 覆盖入口落地；两处 scp 收进单一 `ship_driving_profiles()`，其源 = `driving_profiles_src="${driving_profiles_local:-${repo_root}/.quay/profiles.yml}"`；未指定 ⇒ 逐字节同旧行为；指定但不存在的路径 ⇒ NOT-EVALUATED + exit 2，且发生在任何 scp/ssh 之前（实测：假 scp 的 argv 日志为空）。`plugin/freshness-producers.json` 三条 producer 的 command 带上该 flag，三条各加同一条前置；脚本行号引用在同一 delta 内全部同步（:183→:193、:1402→:1437、:1625→:1658、:1785→:1816、:1751→:1782，以及 `_ac239_refresh_shape` 内 7 处），15 处引用逐条按内容复核通过。
+
+**AC1-AC4 的读数**：改动前谓词 `grep -c 'repo_root}/.quay/profiles.yml'` = 2（命中 :1585 / :1744，两处 scp）；改动后同一谓词 = 2，但一处是注释、一处是唯一可覆盖变量 `driving_profiles_src` 的定义行（两处 scp 都经 `ship_driving_profiles()` 取它）。sh-census：per-file codeLines 2115 → 2114（净 -1），`PASS — embeddedInterpreterLines=7686 ≤ 7687`。`node --test plugin/test/develop-deliver-tgz.test.mjs` 10/10；四个同族测试文件 67/67。`freshness-producer-coverage-check.ts --json` 在主检出（载体在位）报 evaluated=true / ok=true / findings=0。负控制：把两处 scp 源临时改回字面量后 AC2b 与 AC2c 双双转红（AC2b 报 `the override must be what reaches the target — got [.../root/.quay/profiles.yml]`），恢复后 10/10 绿、文件 md5 前后一致。
+
+**AC5 / DoD#1 为何【未勾】（诚实标注，不是漏做）**：该条的满足条件是「载体记录 `ts` 晚于【落地提交】时刻 ∧ `build_sha` == 该次 develop tip」，即记录必须由【已在 develop 上的那份实现】产出。它是**结构性后置**的：我这一轮只能产出未落地的 worktree 提交，而任何落地前的真跑写出的记录其 `build_sha` 都是**不含本修复的 develop tip**（当前 ec673d599）——那正是该条的 `ts` 窗口要排除的假归因记录（硬规则 4 推论三），把它写进生产载体是污染而不是证据。反过来，`--root <main-checkout>` 那条命令要跑的是主检出里的脚本，本修复要等 fan-in + 同步才到那里。⇒ 「先落地才谈得上验、但验不过就不许落地」构成一个**环**，worker 无法在轮内破环：⛔ 不勾（勾了就是「读不懂 ⇒ 伪装成合格」，硬规则 3b），也不自行给该条加 `（待外部）` 注解（该注解按裁定由**任务作者/人**写，worker 自注解以解锁自己的落地属于自判）。
+
+**落地后可直接照跑的读数（本轮已实测，用于拆掉「环境」这一层借口）**：驱动主机到 B 的 ssh **现在已经授权**（`ssh -o BatchMode=yes … yale@orangevps.wan.hwang.men 'echo SSH-OK'` ⇒ SSH-OK，rc=0；同一命令 2026-09-25 还是 rc=255 Permission denied）；B 的登录 shell 能解析 go（`/home/yale/go-sdk/bin/go`，go1.24.4）⇒ AC-239 腿的 `go` 前置可满足；带旧版 `.quay/runtime/bin/*` 布局的 aged 源在 B 上存在（`~/work/meta-cc-aged-ac238-copy`，`~/work/meta-cc` 已无该布局）；B 根盘 `df -h /` = 96G 中 4.3G 可用（磁盘前置偏紧但非零）。⇒ 落地后剩下的唯一变量就是「一份 B 的网关认得的 profile」——也正是本任务要验的那件事。
