@@ -36,10 +36,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 在**跨设备**宿主（repo 在 `/data`，`TMPDIR` 未设 ⇒ tmpdir 在 `/`）上 `node --test plugin/test/release-cut.test.mjs` 退出码 0（改前同一条命令 exit 1，7 条全死，作为负控制留档）。
-- [ ] 负控制可复核：把 `--no-hardlinks` 去掉后同一条命令复红，且失败签名仍是 `Invalid cross-device link`（证明确实是这一处、而不是别的原因变绿）。
-- [ ] `makeClone` 输出一条「本次 fixture clone 是否跨设备」的独立读数（枚举取值，不是布尔 `ok`），且该读数在跨设备宿主上取到 `cross`。
-- [ ] `git -C <repo> grep -c 'clone", "--local"' plugin/test/release-cut.test.mjs` 为 0，且新 argv 里同时含 `--local` 与 `--no-hardlinks`（保留原意的证据）。
+- [x] 在**跨设备**宿主（repo 在 `/data`，`TMPDIR` 未设 ⇒ tmpdir 在 `/`）上 `node --test plugin/test/release-cut.test.mjs` 退出码 0（改前同一条命令 exit 1，7 条全死，作为负控制留档）。
+- [x] 负控制可复核：把 `--no-hardlinks` 去掉后同一条命令复红，且失败签名仍是 `Invalid cross-device link`（证明确实是这一处、而不是别的原因变绿）。
+- [x] `makeClone` 输出一条「本次 fixture clone 是否跨设备」的独立读数（枚举取值，不是布尔 `ok`），且该读数在跨设备宿主上取到 `cross`。
+- [x] `git -C <repo> grep -c 'clone", "--local"' plugin/test/release-cut.test.mjs` 为 0，且新 argv 里同时含 `--local` 与 `--no-hardlinks`（保留原意的证据）。
 
 ## Definition of Done
 
