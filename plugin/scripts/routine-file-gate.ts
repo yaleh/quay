@@ -157,6 +157,7 @@ function carrierFinding(r: Record<string, unknown>): FileableFinding {
     rationale: str(r.rationale) ?? "",
     suggestedAction: str(r.suggestedAction),
     producer: str(r.producer),
+    subject: str(r.subject),
   };
 }
 
@@ -322,6 +323,11 @@ export interface FileableFinding {
   /** Producer/subject the finding names, when the probe's contract carries one. `null` = the finding
    *  names none (⛔ not the same as "named one that is not registered" — 硬规则 3b). */
   producer?: string | null;
+  /** The tracked SUBJECT the finding is about (`GOAL-009-AC-NNN`), declared by the freshness probe's
+   *  own output contract. `null` = the probe reported none. Load-bearing for the escalation dedup
+   *  ("同一主体"): the producer id is coarser (one producer can own several subjects) and the
+   *  finding id is re-slugged by a fresh context every round. */
+  subject?: string | null;
 }
 
 /** Declared no-op actions — a finding whose action is one of these is a *measurement*, not work.
@@ -364,28 +370,297 @@ export function routineTaskId(routine: string, findingId: string | null): string
   return `${ROUTINE_TASK_PREFIX}${a}-${b}`.slice(0, 100).replace(/-$/, "");
 }
 
+/** One read of the mapping file, two extractions (`producers` ids + the `execution_probe`
+ *  declaration). ONE read on purpose: two readers of the same file can drift, and the drift would be
+ *  invisible (硬规则 5b). `null` from either field is the THREE-valued "could not read it" (硬规则 3b)
+ *  — ⛔ never conflated with "read it and the field was empty/absent":
+ *    `producers: null`         = the file or its shape could not be read ⇒ callers fail closed;
+ *    `executionProbe: null`    = the file WAS read and declares no `execution_probe` ⇒ the
+ *                                remedy-availability reading is `not-declared` (gate not applicable),
+ *                                which is a different state from "we tried and could not tell". */
+export interface ProducerMappingRead {
+  producers: Set<string> | null;
+  executionProbe: ExecutionProbeDecl | null;
+  /** id → the entry's own `command`, for quoting VERBATIM into an escalation (⛔ never re-typed). */
+  commands: Map<string, string>;
+}
+
+export function readProducerMapping(file: string): ProducerMappingRead {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return { producers: null, executionProbe: null, commands: new Map() };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { producers: null, executionProbe: null, commands: new Map() };
+  }
+  const root = parsed as Record<string, unknown>;
+  const list = root.producers;
+  if (!Array.isArray(list)) return { producers: null, executionProbe: null, commands: new Map() };
+  const ids = new Set<string>();
+  const commands = new Map<string, string>();
+  for (const p of list) {
+    if (p && typeof p === "object" && !Array.isArray(p)) {
+      const id = (p as Record<string, unknown>).id;
+      if (typeof id === "string" && id.trim()) {
+        ids.add(id.trim());
+        const cmd = (p as Record<string, unknown>).command;
+        if (typeof cmd === "string" && cmd.trim()) commands.set(id.trim(), cmd.trim());
+      }
+    }
+  }
+  return { producers: ids, executionProbe: parseExecutionProbe(root.execution_probe), commands };
+}
+
 /** Read a producer registry (`{ producers: [{id}, …] }`) into a set of registered ids.
  *  Unreadable / malformed / empty ⇒ **null**, which is a THIRD value distinct from "read it and it
  *  had no producers" (硬规则 3b: 读不懂 must not be shaped like 读懂了). Callers must fail closed on
  *  null rather than treating it as "nothing is registered". */
 export function readProducerRegistry(file: string): Set<string> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
+  return readProducerMapping(file).producers;
+}
+
+// ── remedy availability (tasks/gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer) ────────
+//
+// THE DEFECT THIS SECTION EXISTS FOR (measured 2026-09-25, `.quay/routine-findings.jsonl` line 878).
+// The probe had ALREADY measured, and honestly written into the production carrier, the quantity
+// `inventory.producers_executable_from_this_host: 0` — with its cause named in `notes`
+// (`ssh precondition 0 verified live this run (… Permission denied, rc=255) so NO producer is
+// runnable from this host without an authorization change`). The SAME round's `filing-round` record
+// still filed two `status: ready` tasks whose requested action was `re-run coldstart-face on a host
+// already authorized to B`. ⇒ The reading had no consumer, so it was shaped exactly like "nothing
+// happened" (硬规则 3b / 4b): a truthful reading that changes nothing is indistinguishable from a
+// system that never looked.
+//
+// THE SHAPE OF THE FIX — three independently-valued states, none of which shares an output with
+// another (硬规则 3b), and each of which CHANGES THE RESULT:
+//   `executable`    the declared `execution_probe` ran and succeeded ⇒ file as before;
+//   `blocked`       the probe ran and returned the DECLARED denial ⇒ the finding goes to the
+//                   human-visible channel (a `needs-human` task quoting the verbatim remedy) and
+//                   NEVER to a dispatchable `ready` task — and the same subject is not escalated
+//                   twice while the reading stays blocked;
+//   `not-evaluated` the probe could not be read (spawn error, timeout, or a non-zero result that is
+//                   NOT the declared denial) ⇒ the reading is recorded but the filing shape is
+//                   unchanged. Fail-OPEN is deliberate and is the declared direction: the 2026-09-25
+//                   reading was produced by a probe that ran fine, and a false `blocked` would make
+//                   the mechanism stop filing real work (a "恒报挡住" failure, which is why AC4's
+//                   negative control exists). The state is visible in the carrier either way.
+//   `not-declared`  the mapping declares no `execution_probe` at all ⇒ the gate does not apply
+//                   (a routine/workspace with no such concept is none of this gate's business).
+//
+// ⛔ SCOPE, deliberately narrow: the reading gates ONLY a finding whose named producer appears in the
+// `execution_probe.producers` list. A `missing-producer` finding asks for a registration change
+// (locally executable), and a finding naming some other producer is none of this probe's business —
+// escalating either would be the over-block that turns the track off.
+
+/** The declared `execution_probe` block of `plugin/freshness-producers.json` (see its `_comment`). */
+export interface ExecutionProbeDecl {
+  id: string;
+  /** argv of the reachability check (⛔ a check, never a producer run). */
+  command: string[];
+  timeoutMs: number;
+  /** The substring whose presence in the probe output marks a DEFINITE authorization denial. */
+  blockedPattern: string | null;
+  /** Which registered producers this reading gates. */
+  producers: string[];
+  /** The verbatim human remedy, quoted into the escalation task. */
+  remedy: { host: string | null; action: string; alternative: string | null } | null;
+}
+
+/** Parse the declared block. Absent/malformed ⇒ null (= "not declared", see readProducerMapping).
+ *  A malformed block is NOT distinguished from an absent one here on purpose: both mean "no usable
+ *  declaration", and the reading that results (`not-declared`) is recorded verbatim in the carrier —
+ *  ⛔ it is never rendered as `executable`. */
+export function parseExecutionProbe(raw: unknown): ExecutionProbeDecl | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === "string" && r.id.trim() ? r.id.trim() : null;
+  const command = Array.isArray(r.command) && r.command.length > 0 && r.command.every((x) => typeof x === "string" && x)
+    ? (r.command as string[]) : null;
+  if (!id || !command) return null;
+  const producers = Array.isArray(r.producers) ? r.producers.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()) : [];
+  const remedyRaw = r.remedy && typeof r.remedy === "object" && !Array.isArray(r.remedy) ? r.remedy as Record<string, unknown> : null;
+  const action = remedyRaw && typeof remedyRaw.action === "string" && remedyRaw.action.trim() ? remedyRaw.action.trim() : null;
+  return {
+    id,
+    command,
+    timeoutMs: typeof r.timeout_ms === "number" && Number.isFinite(r.timeout_ms) && r.timeout_ms > 0 ? r.timeout_ms : 20_000,
+    blockedPattern: typeof r.blocked_pattern === "string" && r.blocked_pattern.trim() ? r.blocked_pattern.trim() : null,
+    producers,
+    remedy: remedyRaw && action
+      ? {
+        host: typeof remedyRaw.host === "string" && remedyRaw.host.trim() ? remedyRaw.host.trim() : null,
+        action,
+        alternative: typeof remedyRaw.alternative === "string" && remedyRaw.alternative.trim() ? remedyRaw.alternative.trim() : null,
+      }
+      : null,
+  };
+}
+
+/** The routine's own vocabulary. The probe spec DECLARES the same three (`output_routing.remedy_availability.values`)
+ *  and the declaration is load-bearing: a value the spec does not declare is not readable (硬规则 3b). */
+export const REMEDY_AVAILABILITY_VALUES = ["executable", "blocked", "not-evaluated"] as const;
+export type RemedyAvailabilityStatus = (typeof REMEDY_AVAILABILITY_VALUES)[number] | "not-declared";
+
+/** Which channel decided the round's reading — enumerated, ⛔ never a boolean (硬规则 3). */
+export type RemedyAvailabilitySource = "execution-probe" | "probe-reported" | "none";
+
+export interface RemedyAvailability {
+  status: RemedyAvailabilityStatus;
+  /** false for `not-declared` / `not-evaluated` — never conflated with a judged `executable`. */
+  evaluated: boolean;
+  /** Which channel produced `status`. */
+  source: RemedyAvailabilitySource;
+  /** The declared probe id, when one was declared. */
+  probeId: string | null;
+  /** The probe's OWN reported value, verbatim — `null` when it reported none. Kept so a reader can
+   *  tell "the probe agreed" from "the probe said nothing" (⛔ not from "the probe disagreed"). */
+  probeReported: string | null;
+  /** The spec's declared vocabulary, verbatim (`[]` when the spec declares none). */
+  specValues: string[];
+  /** The verbatim observation that produced the reading (the probe's own output, one line). */
+  observed: string | null;
+  reason: string;
+}
+
+function notEvaluated(reason: string, base: Partial<RemedyAvailability> = {}): RemedyAvailability {
+  return {
+    status: "not-evaluated", evaluated: false, source: "none", probeId: null, probeReported: null,
+    specValues: [], observed: null, reason, ...base,
+  };
+}
+
+/** Classify ONE run of the declared `execution_probe`. Pure — the caller spawns.
+ *
+ *  ⚠️ The classifier's whole job is the THREE-WAY split, so read the branches as the specification:
+ *  success ⇒ `executable`; the DECLARED denial pattern ⇒ `blocked`; EVERYTHING ELSE (spawn error,
+ *  timeout, any other non-zero exit) ⇒ `not-evaluated`. ⛔ Do not widen `blocked` to "non-zero exit":
+ *  on this host the FQDN form gives rc=255 + `Permission denied`, while the short-alias form gives
+ *  rc=255 + `Could not resolve hostname` (no `~/.ssh/config`) — same rc, and only the first is an
+ *  authorization fact. Widening it would make a DNS failure read as "the humans must act". */
+export function classifyExecutionProbeResult(
+  decl: ExecutionProbeDecl,
+  r: { status: number | null; error?: { message?: string } | null; stdout?: string | null; stderr?: string | null },
+): RemedyAvailability {
+  const base = { probeId: decl.id, specValues: [] as string[] };
+  if (r.error) {
+    return notEvaluated(`execution probe '${decl.id}' could not be run (${r.error.message ?? "spawn error"}) ⇒ remedy availability NOT evaluated`, base);
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const list = (parsed as Record<string, unknown>).producers;
-  if (!Array.isArray(list)) return null;
-  const ids = new Set<string>();
-  for (const p of list) {
-    if (p && typeof p === "object" && !Array.isArray(p)) {
-      const id = (p as Record<string, unknown>).id;
-      if (typeof id === "string" && id.trim()) ids.add(id.trim());
-    }
+  const out = `${String(r.stdout ?? "")}\n${String(r.stderr ?? "")}`.trim();
+  const observed = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3).join(" | ") || null;
+  if (r.status === 0) {
+    return {
+      status: "executable", evaluated: true, source: "execution-probe", probeId: decl.id, probeReported: null,
+      specValues: [], observed, reason: `execution probe '${decl.id}' succeeded (exit 0) ⇒ the producers it gates are executable from this host`,
+    };
   }
-  return ids;
+  if (decl.blockedPattern && out.includes(decl.blockedPattern)) {
+    return {
+      status: "blocked", evaluated: true, source: "execution-probe", probeId: decl.id, probeReported: null,
+      specValues: [], observed,
+      reason: `execution probe '${decl.id}' returned the declared denial (exit ${r.status}, matched ${JSON.stringify(decl.blockedPattern)}) ⇒ NO producer it gates is runnable from this host without an authorization change`,
+    };
+  }
+  return notEvaluated(
+    `execution probe '${decl.id}' exited ${r.status} but did not match the declared denial pattern ${JSON.stringify(decl.blockedPattern)} ⇒ the reading is NOT 'blocked' (this is the third state: could not tell)`,
+    { ...base, observed },
+  );
+}
+
+/** Fold the probe's OWN declared value into the reading. The spec's `values` list is what makes the
+ *  probe's answer readable: a value the spec does not declare is dropped (硬规则 3b — an undeclared
+ *  token must not be silently accepted as a state this routine understands).
+ *  Precedence: the MECHANICAL reading wins when it is evaluated (it is reproducible and the probe's
+ *  value is a re-paraphrase by a fresh context); the probe's value is used only when the mechanical
+ *  one could not be read. Both are recorded either way. */
+export function foldProbeReportedValue(
+  mechanical: RemedyAvailability,
+  probeReported: unknown,
+  specValues: readonly string[],
+): RemedyAvailability {
+  const raw = typeof probeReported === "string" && probeReported.trim() ? probeReported.trim() : null;
+  const values = specValues.map((v) => String(v).trim()).filter(Boolean);
+  const accepted = raw !== null && values.includes(raw) ? raw : null;
+  const withSpec: RemedyAvailability = { ...mechanical, probeReported: raw, specValues: values };
+  if (mechanical.evaluated) return withSpec;
+  if (accepted === null) {
+    return {
+      ...withSpec,
+      reason: `${mechanical.reason}; the probe reported ${raw === null ? "no value" : JSON.stringify(raw)}${raw !== null && values.length === 0 ? " and the spec declares no vocabulary" : ""} ⇒ nothing to fall back on`,
+    };
+  }
+  if (accepted === "blocked" && mechanical.status === "not-evaluated") {
+    return {
+      ...withSpec,
+      status: "blocked", evaluated: true, source: "probe-reported",
+      reason: `${mechanical.reason}; the PROBE reported '${accepted}' (a declared value) ⇒ the round is treated as blocked on the probe's own live reading`,
+    };
+  }
+  if (accepted === "executable") {
+    return {
+      ...withSpec,
+      status: "executable", evaluated: true, source: "probe-reported",
+      reason: `${mechanical.reason}; the PROBE reported 'executable' (a declared value) ⇒ the round files normally`,
+    };
+  }
+  return {
+    ...withSpec,
+    reason: `${mechanical.reason}; the probe reported '${accepted}', which is not a terminal reading here ⇒ not evaluated`,
+  };
+}
+
+/** Does the reading gate THIS finding's producer? Only when the reading is `blocked` AND the finding
+ *  names a producer the declared probe covers. See the ⛔ SCOPE note above. */
+export function remedyGatesProducer(remedy: RemedyAvailability | undefined, decl: ExecutionProbeDecl | null, producer: string | null | undefined): boolean {
+  if (!remedy || remedy.status !== "blocked") return false;
+  const named = String(producer ?? "").trim();
+  if (!named) return false;
+  if (!decl || decl.producers.length === 0) return false;
+  return decl.producers.includes(named);
+}
+
+/** The escalation's identity — "同一主体" for a freshness finding is its SUBJECT (`GOAL-009-AC-NNN`),
+ *  which the probe's own output contract declares. Falls back to the producer (an escalation is then
+ *  per-producer), then to the finding id. "" ⇒ nothing stable to key on ⇒ the caller records the
+ *  escalation but cannot dedup it (⛔ recorded, never silently dropped). */
+export function escalationKey(f: FileableFinding): string {
+  const subject = String(f.subject ?? "").trim();
+  if (subject) return `subject:${subject}`;
+  const producer = String(f.producer ?? "").trim();
+  if (producer) return `producer:${producer}`;
+  const id = String(f.id ?? "").trim();
+  return id ? `finding:${id}` : "";
+}
+
+/** The line every escalation task body carries. It is the ONLY marker of "this file is a
+ *  human-visible escalation, not a dispatchable finding task", and it is what makes the
+ *  "do not re-file the same subject while the reading is unchanged" rule re-readable from the BOARD
+ *  (⛔ not from a hand-kept counter). Both the `blocked` state and the subject are in it, so a reader
+ *  can tell it from the `executable`/`not-evaluated` shapes and from another subject's escalation. */
+export function escalationMarkerLine(subject: string, probeId: string | null): string {
+  return `- remedy-availability：\`blocked\` · subject：\`${subject}\` · host-execution-probe：\`${probeId ?? "<none>"}\``;
+}
+
+const ESCALATION_MARKER_RE = /^[ \t]*[-*][ \t]*remedy-availability[ \t]*[:：][ \t]*`blocked`[ \t]*·[ \t]*subject[ \t]*[:：][ \t]*`([^`]+)`/im;
+
+/** Subject (the full escalation key, ⛔ not the bare subject) → the task file that already carries
+ *  it, for every `tasks/*.md` on the board that is a blocked escalation. An unreadable board
+ *  returns an EMPTY map — which is the same value a clean board gives. That is acceptable here and
+ *  only here: the failure direction is "we might re-file a subject we already escalated", which is
+ *  visible on the board (two files, same marker) rather than silent. ⛔ Never used to decide that
+ *  something is NOT blocked. */
+export function escalationMarkerByKey(boardDir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let files: string[];
+  try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return out; }
+  for (const f of files) {
+    let text: string;
+    try { text = fs.readFileSync(path.join(boardDir, f), "utf8"); } catch { continue; }
+    const m = text.match(ESCALATION_MARKER_RE);
+    if (m) out.set(`subject:${m[1].trim()}`, f);
+  }
+  return out;
 }
 
 /** The producer gate (AC5's red side). A finding that NAMES a producer must name one the workspace
@@ -437,14 +712,59 @@ export function countRecentFilings(carrierPath: string, nowMs: number, windowMs:
   return n;
 }
 
+/** Everything the ESCALATION variant of the body needs, all of it quoted from declarations (⛔ no
+ *  string is invented here): the probe that produced the reading, its verbatim observation, the
+ *  declared human remedy, and the finding's own producer command. */
+export interface BlockedRemedyContext {
+  probeId: string | null;
+  /** Verbatim observation that produced the `blocked` reading (the probe's own output). */
+  observed: string | null;
+  remedy: { host: string | null; action: string; alternative: string | null } | null;
+  /** The named producer's OWN `command` from `plugin/freshness-producers.json` (single source). */
+  producerCommand: string | null;
+}
+
+/** The escalation's `## Requested action` preamble: a step-by-step, human-executable remedy that
+ *  names the machine, the command and the `authorized_keys` change. Rendered as list items so it
+ *  stays inside the `## Requested action` section (⛔ no new heading — the task-body shape is shared
+ *  with the dispatchable variant and a new heading would be a second shape to keep in sync). */
+function blockedRemedyBlock(f: FileableFinding, b: BlockedRemedyContext): string[] {
+  const lines = [
+    "⛔ **本立案的补救在【本机】不可执行** —— 例程机械执行 `plugin/freshness-producers.json` 声明的",
+    `可达性探针 \`${b.probeId ?? "<none>"}\`，读到的是**明确的授权拒绝**（`+ "`blocked`" + `），不是网络故障、`,
+    "也不是「没读出来」（那两种是另一个取值）。⇒ 本任务⛔ **不进派发候选**，只走人可见通道。",
+    "",
+    `- 逐字观测：${b.observed ? `\`${b.observed}\`` : "（未记录）"}`,
+    ...(b.remedy?.host ? [`- 目标机：\`${b.remedy.host}\``] : []),
+    ...(b.remedy?.action ? [`- 补救（一）：${b.remedy.action}`] : []),
+    ...(b.remedy?.alternative ? [`- 补救（二）：${b.remedy.alternative}`] : []),
+    ...(b.producerCommand ? ["- 本 finding 自己的 producer 命令（逐字，来自 `plugin/freshness-producers.json`）：", `  \`${b.producerCommand}\``] : []),
+    `- ⛔ 读数不变（仍是 \`blocked\`）时**不重复立案同一主体**：\`${String(f.subject ?? "").trim() || "<none>"}\` 已在板上 ⇒ 不再升级第二次。`,
+  ];
+  return lines;
+}
+
 /** The task body. Shape = `finding`-shape (`## Finding` + AC + DoD), which is the shape
  *  `ready-pool-check.ts`'s SHAPE_REGISTRY recognizes for a defect report — so a filed task is
  *  author→ready-eligible rather than pool noise. The finding's own evidence is quoted VERBATIM in
  *  `## Finding` so the task and the carrier record are checkably the same fact. */
-export function renderRoutineTaskBody(f: FileableFinding, ctx: { routine: string; probe: string; runId: string; carrier: string; ts: string; taskId: string }): string {
+export function renderRoutineTaskBody(
+  f: FileableFinding,
+  ctx: { routine: string; probe: string; runId: string; carrier: string; ts: string; taskId: string },
+  opts?: { blocked?: BlockedRemedyContext },
+): string {
   const files = f.files.map((x) => `- \`${x}\``);
+  const blocked = opts?.blocked ?? null;
   return [
     "## Finding",
+    // ⛔ 升级形态的标记行是 `## Finding` 的**第一行**（**唯一**的「这是人可见升级、不是可派发 finding
+    //   任务」的判据；见 escalationMarkerLine）。位置是判据的一部分，⛔ 不是排版：`proseKey` 取的是本
+    //   节的**前 200 字符**，把标记行放在最前 ⇒ 升级体的 prose key **结构上**不可能等于同一条 finding
+    //   的可派发形态的 prose key。若把它放在 rationale 之后，当 rationale 长于 200 字符时两者的 key
+    //   会**逐字相同** —— 于是一个升级体会把读数恢复 executable 之后该主语的派发立案**永久吃掉**，
+    //   而那是静默的（硬规则 5b：修一处 ≠ 只此一处）。
+    ...(blocked ? [escalationMarkerLine(String(f.subject ?? "").trim(), blocked.probeId)] : []),
+    ...(blocked ? [""] : []),
     String(f.rationale ?? "").trim(),
     "",
     `载体记录（逐字来源）：\`${ctx.carrier}\` · routine \`${ctx.routine}\` · probe \`${ctx.probe}\` · runId \`${ctx.runId}\` · ts \`${ctx.ts}\`。`,
@@ -452,12 +772,22 @@ export function renderRoutineTaskBody(f: FileableFinding, ctx: { routine: string
     "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的三道闸",
     "（quality / dedup / rate）机械立案 —— ⛔ 不是由人转抄，也不是由探针自行执行。",
     "",
-    `- 观测符号：${f.symbols.map((s) => `\`${s}\``).join("、") || "<none>"}`,
+    // ⛔ 升级形态**不带** `- 观测符号：` 行：符号键是「可派发立案」的 dedup 空间，一个升级体若带符号，
+    //   会在读数恢复 executable 之后把同一产出者的**全部**主语永久挡在派发通道之外（那正是本条要
+    //   关掉的「越修越堵」形态）。主体由上面的标记行承载，⛔ 信息没有丢失。
+    ...(blocked
+      ? [`- subject：\`${String(f.subject ?? "").trim() || "<none>"}\``]
+      : [`- 观测符号：${f.symbols.map((s) => `\`${s}\``).join("、") || "<none>"}`]),
     ...(files.length ? ["- 涉及文件：", ...files] : []),
     ...(f.kind ? [`- kind：\`${f.kind}\``] : []),
     ...(f.verdict ? [`- verdict：\`${f.verdict}\``] : []),
     "",
     "## Requested action",
+    // ⚠️ 升级形态（`blocked`）在这里把**逐字补救**放到最前，并**逐字**保留 finding 自己的
+    // suggestedAction —— 派遣链上的读者看到的是「这件事本机做不了 + 谁能做」，⛔ 不是一条假装
+    // 本机可执行的指令。见 escalationMarkerLine 的注释（标记行在上面的 ## Finding 里）。
+    ...(opts?.blocked ? blockedRemedyBlock(f, opts.blocked) : []),
+    ...(opts?.blocked ? ["", "（finding 自己的 suggestedAction，逐字：）"] : []),
     String(f.suggestedAction ?? "").trim() || "（finding 未给出 suggestedAction —— 立案时按 rationale 判定处置）",
     "",
     // ⛔ 平标题，**不加 `（draft）` 后缀**：`SHAPE_SECTIONS` 两种都认，但 **checkbox 闸只认平标题** ——
@@ -466,12 +796,21 @@ export function renderRoutineTaskBody(f: FileableFinding, ctx: { routine: string
     // 「看起来立了案、其实动不了」的形态。同一个坑在 meta-driver 的 renderAutoDriveBody 里也在（本文
     // 只修例程这一侧，⛔ 不动不在 Touches 内的 meta-driver.ts）。
     "## AC",
-    `- [ ] \`${ctx.carrier}\` 中 finding \`${f.id ?? "<no-id>"}\`（routine \`${ctx.routine}\`，runId \`${ctx.runId}\`）所描述的问题被复核并处置`,
-    "- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案",
+    ...(blocked
+      ? [
+        `- [ ] 上面那台机上那条补救被执行（或本机授权被开通），且 \`${ctx.carrier}\` 里 \`${String(f.subject ?? "").trim() || "<none>"}\` 的证据记录 \`ts\` 晚于本次升级`,
+        "- [ ] 处置结论可核：要么真的重跑了产出者并把新记录落进载体，要么写明是哪一侧的授权/磁盘前置仍不满足，⛔ 不以「已注意到」结案",
+      ]
+      : [
+        `- [ ] \`${ctx.carrier}\` 中 finding \`${f.id ?? "<no-id>"}\`（routine \`${ctx.routine}\`，runId \`${ctx.runId}\`）所描述的问题被复核并处置`,
+        "- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案",
+      ]),
     "",
     "## DoD",
     "- [ ] 上面的判据实跑通过",
-    "- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑",
+    ...(blocked
+      ? ["- [ ] ⛔ 本任务**不是**派发任务：补救在**另一台机**上、或需要目标侧 `authorized_keys` 变更（人授权）；⛔ 例程不代跑，⛔ 也没有「可机械再入队」的路径（人 2026-09-20 裁定）"]
+      : ["- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑"]),
     "",
     "## Touches",
     // The finding's own files (path only — a `path:line` is not a writable surface) plus the task's

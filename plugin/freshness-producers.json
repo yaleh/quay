@@ -32,6 +32,45 @@
   "subject_id_pattern": "^GOAL-009-AC-\\d+$",
   "subject_requires_build_sha": true,
   "_scope_note": "A carrier record counts as a REFRESHABLE SUBJECT iff its `ac` matches subject_id_pattern AND it carries a top-level 40-hex build_sha. Measured on the real carrier 2026-09-14, that rule yields exactly the seven subjects below: GOAL-009-AC-204/206 match the pattern but carry no build_sha; GOAL-018-AC-257 carries a build_sha but not the GOAL-009 prefix.",
+  "execution_probe": {
+    "_comment": [
+      "MECHANICAL reading of 'are the producers below EXECUTABLE FROM THE HOST that runs the loop?'",
+      "(tasks/gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer).",
+      "",
+      "WHY THIS EXISTS: until now the answer to that question was produced by the PROBE (an LLM agent)",
+      "as an undeclared field (`inventory.producers_executable_from_this_host`), derived by the agent",
+      "from the prose `preconditions` below. Measured 2026-09-25: that field appeared in the carrier's",
+      "scan-round record, named its own cause, and had ZERO consumers — the same round still filed two",
+      "dispatchable `ready` tasks whose requested action ('re-run coldstart-face') cannot be performed",
+      "on this host at all. A reading that no mechanism reads is shaped exactly like 'nothing happened'.",
+      "",
+      "WHAT IT IS NOT: this is a REACHABILITY probe (one BatchMode ssh with a trivial remote command).",
+      "It is NOT a producer run — the FILE-ONLY boundary in plugin/probes/freshness-refresh.md is",
+      "unchanged, and a routine must never execute a producer.",
+      "",
+      "`blocked_pattern` is load-bearing: ONLY a definite AUTHORIZATION denial makes the reading",
+      "`blocked`. Anything else that returns non-zero (network down, DNS failure for a short alias,",
+      "host key mismatch) is NOT `blocked` — it is the third state (`not-evaluated`), because from such",
+      "a failure one cannot tell whether the authorization holds. Measured 2026-09-25 on this host:",
+      "`ssh -o BatchMode=yes -o ConnectTimeout=8 yale@orangevps.wan.hwang.men 'true'` => `Permission",
+      "denied (publickey,password).` rc=255; the short alias `orangevps` instead gives `Could not",
+      "resolve hostname` rc=255 (no ~/.ssh/config on this host) — same rc, different state.",
+      "",
+      "`remedy` is quoted VERBATIM into the human-visible escalation task this reading produces when",
+      "`blocked`; the per-producer command is NOT copied here — the escalation quotes each finding's",
+      "own `producers[].command` (single source)."
+    ],
+    "id": "host-b-ssh",
+    "command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "yale@orangevps.wan.hwang.men", "true"],
+    "timeout_ms": 20000,
+    "blocked_pattern": "Permission denied",
+    "producers": ["coldstart-face", "session-delivery", "upgrade-face"],
+    "remedy": {
+      "host": "yale@orangevps.wan.hwang.men",
+      "action": "把本机 `~/.ssh/id_ed25519.pub` 逐字追加到 `yale@orangevps.wan.hwang.men` 的 `~/.ssh/authorized_keys`（目标侧动作，需人授权）",
+      "alternative": "或改在**一台已被 B 授权的主机**上跑本 finding 自己那条 producer 命令（逐字见本文件 `producers[].command`），⛔ 不在此处复制第二份"
+    }
+  },
   "producers": [
     {
       "id": "coldstart-face",
