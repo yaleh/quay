@@ -88,9 +88,19 @@
 #                  AC-238+AC-239 on one root ⇒ exit 0; AC-239-only ⇒ exit 2 + UPGRADE_PAIR_MISSING=1;
 #                  different project_roots ⇒ exit 2; produced_by_driver=false ⇒ exit 2; empty evidence ⇒
 #                  exit 1 (NOT-EVALUATED).
+#     --driving-profiles <local path>  the LOCAL profiles file pushed to each target as
+#                  ~/quay-driving-profiles.yml by --ac207-e2e / --ac239-e2e (default:
+#                  ${repo_root}/.quay/profiles.yml). ⛔ Unset ⇒ byte-identical to the behaviour before
+#                  this flag existed; given but not a file on this host ⇒ NOT-EVALUATED + exit 2 before
+#                  ANY scp/ssh — the driving repo's profile is NOT a fallback (硬规则 3b). Supply a
+#                  profile whose worker-default.model the TARGET host's gateway serves: the driving
+#                  repo's model name is host-specific, and pushing it verbatim is what killed both e2e
+#                  legs on 2026-09-25 (`unrecognized_model` / `API Error: 400 Invalid model name`).
 #     --ac207-e2e     (with --verify-coldstart) additionally run the GOAL-009-AC-207 end-to-end step
-#                  on each host: scp the driving repo's .quay/profiles.yml (so the target project's
-#                  worker-default launcher/model/auth derive from the single source of truth), put
+#                  on each host: scp the driving profiles (${driving_profiles_src} — the
+#                  --driving-profiles override when given, else the driving repo's own profiles.yml,
+#                  so the target project's worker-default launcher/model/auth derive from the single
+#                  source of truth), put
 #                  ~/.local/bin on the remote PATH, and pass --ac207-e2e + --driving-profiles to the
 #                  remote verify. Expensive: the worker-driver spawns a real worker (claude-fjdac -p)
 #                  that does a full implementation → fan-in → suite (up to AC207_POLL_SECS).
@@ -261,6 +271,7 @@ while [ $# -gt 0 ]; do
     --upgrade-source) upgrade_source="$2"; shift 2 ;;
     --ac207-e2e) ac207_e2e=1; shift ;;
     --ac239-e2e) ac239_e2e=1; shift ;;
+    --driving-profiles) driving_profiles_local="$2"; shift 2 ;;
     --verify-takeover) verify_takeover=1; shift ;;
     --takeover-root) takeover_root="$2"; shift 2 ;;
     --verify-adr-flip) verify_adr_flip=1; shift ;;
@@ -297,6 +308,20 @@ done
 case "${max_age}" in
   ''|*[!0-9]*) echo "develop-deliver: --max-age must be a non-negative integer: ${max_age}" >&2; exit 2 ;;
 esac
+
+# --driving-profiles <local path> — the LOCAL profiles file pushed to each target as ~/quay-driving-profiles.yml.
+# ⛔ Unset ⇒ ${repo_root}/.quay/profiles.yml: byte-identical to the pre-override behaviour. Given but not a FILE
+# on this host ⇒ NOT-EVALUATED + exit 2 BEFORE any scp/ssh — ⛔ the driving repo's profile is NOT a fallback.
+# WHY (defect 2026-09-25, tasks/gap-e2e-verify-pushes-dev-host-profile-model-to-target-host): the pushed profile
+# IS the single source the remote derives the target project's worker-default launcher/model/auth from, and the
+# driving repo's worker-default.model is served by the DRIVING host's own gateway. Pushed verbatim to a host whose
+# gateway does not serve it, every worker the e2e legs spawn dies (`unrecognized_model` / `API Error: 400 Invalid
+# model name`) and the run produces no record — the failure the legs exist to detect, manufactured by the transport.
+# ⛔ No model/launcher/auth literal is written here (硬规则 4 推论二): the caller supplies a profile the TARGET
+# host accepts. A hardcoded host-specific value reads as "unlimited" on its own machine and becomes a silent
+# limit everywhere else. Refusing an unreadable override (instead of falling back) is 硬规则 3b.
+driving_profiles_src="${driving_profiles_local:-${repo_root}/.quay/profiles.yml}"
+[ -z "${driving_profiles_local+set}" ] || [ -f "${driving_profiles_src}" ] || { echo "develop-deliver: --driving-profiles NOT-EVALUATED — not a file: ${driving_profiles_local}" >&2; exit 2; }
 
 # state/worktree paths derive from the FINAL repo_root (--root override must reach them — a fixture
 # --check run otherwise reads the script's own .quay/, not the fixture's).
@@ -532,6 +557,16 @@ ship_verify_closure() {
     fi
   fi
   return 0
+}
+
+# ship_driving_profiles <host-key> <target> — copy the DRIVING profiles to <target>:~/quay-driving-profiles.yml.
+# The source is ${driving_profiles_src} (the --driving-profiles override when given, else the driving repo's own
+# .quay/profiles.yml) — ONE place, so both e2e legs answer "which profile reached the target?" identically and a
+# leg added later inherits the override instead of re-inlining a second copy (硬规则 5b). A failure prints the
+# captured transport detail (⛔ the failing step, not just "scp FAILED", is the diagnosis).
+ship_driving_profiles() {
+  local detail; if detail="$(scp "${ssh_opts[@]}" "${driving_profiles_src}" "${2}:~/quay-driving-profiles.yml" 2>&1)"; then return 0; fi
+  echo "develop-deliver: ${1} (${2}) — driving-profiles scp FAILED (NOT-EVALUATED) ⇒ ${detail:-<no stderr>}"; return 1
 }
 
 
@@ -1573,20 +1608,18 @@ verify_coldstart_mode() {
       fail=1
       continue
     fi
-    # --ac207-e2e: the target project's worker must actually spawn, which needs (a) the driving repo's
-    # .quay/profiles.yml on the remote so resolve_driving_profiles can derive worker-default
-    # launcher/model/auth (single source of truth, 硬规则 4c — ⛔ not a second hardcoded copy here), and
-    # (b) ~/.local/bin on PATH so the claude-fjdac/claude wrappers resolve (the ssh non-interactive PATH
+    # --ac207-e2e: the target project's worker must actually spawn, which needs (a) a profiles file on the
+    # remote so resolve_driving_profiles can derive worker-default launcher/model/auth (single source of truth,
+    # 硬规则 4c — ⛔ not a second hardcoded copy here) — ${driving_profiles_src}, i.e. the --driving-profiles
+    # override when given, else the driving repo's own profiles.yml (see the note at its derivation: the
+    # driving machine's model name is host-specific and must NOT be pushed to a host that cannot serve it) —
+    # and (b) ~/.local/bin on PATH so the claude-fjdac/claude wrappers resolve (the ssh non-interactive PATH
     # has neither). Built into the remote script below; both are literal-inserted (single-quoted value,
     # so $HOME/$PATH stay literal and expand on the remote, not here).
     ac207_extra=""
     ac207_path_export=""
     if [ "${ac207_e2e}" -eq 1 ]; then
-      if ! transport_detail="$(scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" 2>&1)"; then
-        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
-        fail=1
-        continue
-      fi
+      ship_driving_profiles "${hk}" "${target}" || { fail=1; continue; }
       # AC207_POLL_SECS: the e2e task's first worker attempt can fail the fan-in suite cert (non-inert
       # delta) and need a retry, pushing task-done past the verify script's 1800s default poll window
       # (实测 2026-09-11: done@~30min, poll 1800s 过期 ~19s 早 → 记录未写)。3600s 给足双次尝试余量。
@@ -1733,19 +1766,17 @@ verify_upgrade_mode() {
       continue
     fi
     # --ac239-e2e: 升级【后】的动态闭环（GOAL-009-AC-239）。要能在【升级后的那个项目里】真起 worker，
-    # 两件与 --ac207-e2e 同源的前置缺一不可：(a) 驱动方仓库的 .quay/profiles.yml 到远端，让目标项目
-    # worker-default 的 launcher/model/auth 从单一真相源派生（硬规则 4c：⛔ 不在这里写第二份字面量）；
-    # (b) ~/.local/bin 进 PATH，否则 claude/claude-fjdac 解析不到（ssh 非交互 PATH 两样都没有）。
+    # 两件与 --ac207-e2e 同源的前置缺一不可：(a) profiles 文件到远端（=${driving_profiles_src}，即
+    # --driving-profiles 覆盖值；未给时才用驱动方自己的 profiles.yml —— 驱动方的模型名是主机专属的，
+    # ⛔ 不许推给一个服务不了它的主机），让目标项目 worker-default 的 launcher/model/auth 从单一真相源
+    # 派生（硬规则 4c：⛔ 不在这里写第二份字面量）；(b) ~/.local/bin 进 PATH，否则 claude/claude-fjdac
+    # 解析不到（ssh 非交互 PATH 两样都没有）。
     # 两者都以【单引号】字面插入远端脚本，使 $HOME/$PATH 在远端展开而不是在本机展开。
     ac239_extra=""
     ac239_path_export=""
     ac239_expected="GOAL-009-AC-238"
     if [ "${ac239_e2e}" -eq 1 ]; then
-      if ! transport_detail="$(scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" 2>&1)"; then
-        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
-        fail=1
-        continue
-      fi
+      ship_driving_profiles "${hk}" "${target}" || { fail=1; continue; }
       # AC239_POLL_SECS: 本任务是一条【真实缺陷修复】（定位→改 Go 源码→跑测试→fan-in 全量 suite），
       # 比 AC-207 的 marker 任务重得多；3600s 给足余量，超时即不写记录（fail-closed，⛔ 不无限等）。
       ac239_path_export='export PATH="$HOME/.local/bin:$PATH"; export AC239_POLL_SECS="${AC239_POLL_SECS:-3600}"'
