@@ -140,3 +140,14 @@ scope 之外不受影响：本 shell（pid 2583082）存活；MemAvailable=22778
 本次 dormant anchor 读到 `59265024`（≈57 MiB，几乎全是 node 基线）。⚠️ 拿它校准 0.25 时必须在**有在飞 worker**
 的窗口读（空载只读到 anchor 自身基线）；`MemoryPeak` 只在单元存活期间有意义，`--collect` 回收后 `systemctl show`
 给的是 not-loaded 存根（`MemoryMax=infinity`）——那读数是「读不到」，⛔ 不是「上限被撤了」。
+
+
+### Round 2 (2026-09-25, worker) — 全量套件在 suite 步恒红，成因不在本任务 delta
+
+全量套件在 `plugin/test/release-cut.test.mjs` 恒红（签名唯一：`clone must succeed: fatal: failed to create link .../repo/.git/objects/...: Invalid cross-device link`，7 条全死在 `makeClone()`）。
+
+- **机制**：该测试用**显式** `git clone --local`；git 在 `link()` 返 `EXDEV` 时不回退为拷贝（`copy_or_link_directory()` 里 `option_local > 0` ⇒ `die_errno`）。本机 `/data` = xfs(`/dev/vdb`)、`/tmp` = ext4(`/dev/vda2`) ⇒ 跨设备。
+- **develop-wide 证据**：该文件 2026-09-24 17:04 由 `39df7b2ee` 落 develop；此后 develop 上**仅有的 2 次** fan-in 全量套件（11:26、11:41）**2/2 同签名**，非 flake。该文件与本分支逐字节相同，本任务 delta 仅 4 文件（driver-anchor.ts / driver-runtime.ts / SKILL.md / 新测试）⇒ 零交集。
+- **已单独立案**：`gap-release-cut-test-clone-local-cross-device`（todo，body 内含实测修复 `--local --no-hardlinks` 与负控制判据）。修法已实测：裸 `--local` 复红，`--local --no-hardlinks` 成功。
+
+**本任务自身状态**：scoped 门 `scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0（13/13，含真 cgroup OOM 负控制）**，AC 7/7 不变，scoped-gate 缓存已按 develop sha `ba7d3bdc` 写入。⇒ 本任务被 suite 步挡住；待上述任务落地后重新 fan-in 即可，**无需再改本任务代码**。
