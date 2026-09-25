@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-201
 title: "freshness-refresh: margin 20/K=200 = 10% of the window left, below the
   23.4% the producer+interval can consume at the measured burst rate; newest
   evidence frozen at 2026-09-20T13:5"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
