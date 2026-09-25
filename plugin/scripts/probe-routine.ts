@@ -55,6 +55,7 @@ import {
   escalationMarkerByKey,
   findingKey,
   foldProbeReportedValue,
+  gateEscalation,
   gateFinding,
   hasRequestedAction,
   producerGate,
@@ -411,9 +412,15 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
       }
     }
     // ③ 既有三道闸（质量 / 去重 / 限流）——⛔ 复用单一实现，不在这里另写一份判据。
-    if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+    //    ⚠️ 升级形态走的是**人可见通道**，它不进食派发池 ⇒ 不受派发侧的 rate 窗口约束（它的闸是
+    //    「同一主体在该读数不变时只升级一次」，见 gateEscalation 的注释）。质量/去重两道**照旧**。
     const candidate = routineFindingCandidateText(f);
-    const g = gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+    const g = escalate
+      ? gateEscalation(candidate, { existingKeys: keys })
+      : (() => {
+        if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+        return gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+      })();
     if (!g.accept) {
       // rate 拒绝把**复现读数**一并落痕：残余饥饿（复现很高却仍被限流）必须可审，⛔ 否则
       // 「限流正确」与「优先级没生效」在载体记录里同形（硬规则 3）。null = 没读到，写明。
@@ -440,9 +447,11 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     byIndex[rank.index] = {
       findingId: id, taskId, accepted: true, escalate,
       gate: "filed",
+      // 接受理由**逐字来自那一道判据**（⛔ 不在这里另写一句）：升级形态的接受理由必须自己说出
+      // 「走的是人可见通道」，否则载体上「升级」与「派发立案」两条通道的接受记录会同形（硬规则 3）。
       reason: escalate
-        ? `accepted: actionable, novel, within rate — routed to the HUMAN-VISIBLE channel because remedy availability is 'blocked' (the requested action is not performable from this host)`
-        : "accepted: actionable, novel, within rate",
+        ? `${g.reason} · remedy availability 'blocked' ⇒ the requested action is not performable from this host`
+        : g.reason,
     };
   }
   // 每个候选恰有一条处置（⛔ 不返回带洞的数组：一条 undefined 会静默变成载体里的空洞）。

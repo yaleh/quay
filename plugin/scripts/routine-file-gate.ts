@@ -263,6 +263,34 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
   return { accept: true, reason: "accepted: actionable, novel, within rate" };
 }
 
+/** The gate for the HUMAN-VISIBLE escalation channel (remedy availability = `blocked`).
+ *
+ *  Same QUALITY and DEDUP judgments as `gateFinding` (⛔ reusing `isActionable`/`findingKey`, not a
+ *  second parser), but **no rate window** — and that omission is the point, not an exemption from
+ *  throttling:
+ *
+ *  ✦ The dispatch rate window bounds *dispatch-queue* pressure: `filed` entries feed the ready pool.
+ *    An escalation never enters that pool (it is created `status: needs-human`), so it is not the
+ *    quantity that window bounds. Measured 2026-09-25 on this task's own first production round:
+ *    the window was already saturated (3 filings in 24h — 2 of them freshness-refresh's own, 1 from
+ *    `semantic-dedup-scan`), so a `blocked` reading was recorded while the escalation was **starved
+ *    to zero**: the reading changed nothing, which is the exact defect this task closes, reproduced
+ *    one layer down at the throttle.
+ *  ✦ The escalation channel has its OWN bound, and it is the one the task's 2b prescribes: **at most
+ *    one open escalation per SUBJECT while the reading is unchanged** (enforced by the
+ *    `escalationMarkerByKey` board marker + the caller's `blocked-repeat` disposition). That bound is
+ *    by identity, not by rate, and it is ≤ |tracked subjects| in total — it cannot spam.
+ *  ✦ ⛔ The measured reading is still the reason a reader can audit this: the round record carries
+ *    `escalated` (separately from `filed`) and `remedy_availability` verbatim, so "escalated" and
+ *    "dispatch-filed" never share a shape. */
+export function gateEscalation(candidate: string, { existingKeys = [] as string[] | Set<string> } = {}): { accept: boolean; reason: string } {
+  if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
+  const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
+  const key = findingKey(candidate);
+  if (keys.has(key)) return { accept: false, reason: `dedup: an equivalent finding is already on the board (matched key: ${key})` };
+  return { accept: true, reason: "accepted: actionable, novel — routed to the HUMAN-VISIBLE channel (its own throttle: one open escalation per subject while the reading is unchanged)" };
+}
+
 // ── boardKeys ────────────────────────────────────────────────────────────────────────────────────
 // Gather existing finding keys from a board dir (task .md files) for the dedup check.
 // excludePath: when provided, skip the file whose resolved/real path matches this path — so a

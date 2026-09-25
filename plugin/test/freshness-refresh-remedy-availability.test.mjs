@@ -252,7 +252,12 @@ function makeWorkspace({ declareProbe = true, declareSpec = true, label = "w" } 
     `---\ninstrument: none\nfallback: none\n${routing}---\nReport stale subjects.\n`, "utf8");
   const mapping = {
     producer_registry: true,
-    producers: [{ id: "coldstart-face", command: PRODUCER_CMD, wallclock_hours: 0.34, subjects: ["GOAL-009-AC-207"] }],
+    producers: [
+      { id: "coldstart-face", command: PRODUCER_CMD, wallclock_hours: 0.34, subjects: ["GOAL-009-AC-207"] },
+      // a SECOND producer the declared execution probe does NOT gate — the arm that proves the
+      // reading is scoped (and that the escalation channel's exemption is not a blanket hole).
+      { id: "some-other-producer", command: "bash plugin/scripts/other.sh", wallclock_hours: 0.1, subjects: ["GOAL-009-AC-999"] },
+    ],
     ...(declareProbe ? {
       execution_probe: {
         id: "host-b-ssh",
@@ -288,13 +293,13 @@ function readCarrier(root) {
 
 /** 跑一次例程。`probeRun` 是**执行探针**的注入读数（受控语料）；`fileTaskFn` 像生产那样把任务
  *  体写进 `tasks/`，于是**第二次**运行能像生产一样从板上读到「已升级」。 */
-async function runRoutine(root, { probeRun, nowMs, extra = {} } = {}) {
+async function runRoutine(root, { probeRun, nowMs, findings = [FRESHNESS_FINDING], extra = {} } = {}) {
   const written = [];
   const routine = llmProbeRoutine(
     { name: "freshness-refresh", trigger: "interval:120m", probe: "freshness-refresh", dispatch: null },
     {
       root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
-      probeArgv: () => fakeProbeArgv({ findings: [FRESHNESS_FINDING], shards: 1, notes: "controlled reading" }),
+      probeArgv: () => fakeProbeArgv({ findings, shards: 1, notes: "controlled reading" }),
       runExecutionProbe: () => probeRun,
       now: () => nowMs.value,
       fileTaskFn: async (taskId, title, body, status) => {
@@ -406,6 +411,34 @@ test("ROUTINE (no execution probe declared) — `not-declared` is a THIRD shape:
   assert.notEqual(scan.remedy_availability.status, "executable", "⛔ nor as 'executable'");
   assert.equal(written.length, 1, "no declaration ⇒ the filing shape is unchanged");
   assert.notEqual(written[0].status, "needs-human");
+});
+
+test("ROUTINE (rate window) — the blocked reading reaches the human channel even when the DISPATCH budget is exhausted", async () => {
+  // MEASURED (2026-09-25, this task's first real production round): the 24h dispatch rate window was
+  // already saturated (3 filings — 2 of them freshness-refresh's own, 1 from `semantic-dedup-scan`),
+  // so a `blocked` reading was recorded while EVERY escalation was starved to zero. The reading
+  // changed nothing. The escalation channel is therefore bounded by its own rule (one open
+  // escalation per subject while the reading is unchanged), ⛔ not by the dispatch window.
+  const root = makeWorkspace({ label: "rate" });
+  const uncovered = {
+    ...FRESHNESS_FINDING, id: "freshness-other", subject: "GOAL-009-AC-999",
+    producer: "some-other-producer", symbols: ["some-other-producer"],
+  };
+  const { written } = await runRoutine(root, {
+    probeRun: DENIED, nowMs: { value: Date.parse("2026-09-25T06:00:00Z") },
+    findings: [FRESHNESS_FINDING, uncovered],
+    extra: { filingRate: 0 }, // the dispatch budget is exhausted by construction
+  });
+  assert.equal(written.length, 1, "exactly one task — the escalation");
+  assert.equal(written[0].taskId.includes("freshness-stale-goal-009-ac-207"), true);
+  assert.equal(written[0].status, "needs-human");
+  const filing = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.deepEqual(filing.escalated, [written[0].taskId]);
+  // the reverse arm in the SAME round: a finding whose producer the reading does NOT gate is still
+  // subject to the dispatch window (⛔ the exemption is scoped to the human channel, not a hole)
+  const other = filing.rejected.find((x) => x.findingId === "freshness-other");
+  assert.ok(other, `the uncovered producer must still be dispatch-throttled: ${JSON.stringify(filing.rejected)}`);
+  assert.match(other.reason, /^rate:/);
 });
 
 test("BOARD READER — the escalation marker is re-readable from the board, and a normal task is NOT one", () => {
