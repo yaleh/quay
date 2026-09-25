@@ -70,7 +70,7 @@ import {
   routineTaskId,
   DEFAULT_RATE,
 } from "./routine-file-gate.ts";
-import type { ExecutionProbeDecl, RemedyAvailability } from "./routine-file-gate.ts";
+import type { BoardKeys, DedupReading, ExecutionProbeDecl, RemedyAvailability } from "./routine-file-gate.ts";
 import type { Fact, RoutineSpec } from "./driver-runtime.ts";
 
 /** 结构化 finding 的载体（追加式 JSONL）。登记在任务 ## Touches 里 ⇒ 是**可查的落地产物**，
@@ -331,6 +331,12 @@ export interface FilingDisposition {
   /** 本条落哪条通道。`false` = 派发链（⛔ 与修复前逐字节同形）；`true` = 人可见通道
    *  （`needs-human` 升级，携带逐字补救）。被拒时恒为 false。 */
   escalate: boolean;
+  /** 本条与**板上去重空间**的关系（`routine-file-gate.ts` 的 `DedupReading`：`novel` /
+   *  `done-only` / `live` / `unknown` + 该判定的逐字理由）。**枚举，⛔ 不布尔** —— 它让载体区分
+   *  「板上根本没这个键」「只有已关闭任务供给」「被一条未关闭任务供给」「拥有者状态读不出」四种形态；
+   *  这四种在修复前**共用同一个拒绝**（任何键都挡），于是「把真去重关掉」与「修好 done 键沉淀」
+   *  在载体上同形。quality 闸先拒时没有做过去重判定 ⇒ `null`（⛔ 不是「novel」）。 */
+  dedup: DedupReading | null;
 }
 
 export interface FilingOptions {
@@ -344,8 +350,10 @@ export interface FilingOptions {
   carrierRel: string;
   /** 任务板目录（绝对）——dedup 闸从这里读既有 finding key。 */
   tasksDir: string;
-  /** 板上的既有任务文件路径 → 内容（测试缝可覆盖；缺省从 tasksDir 读）。 */
-  boardKeys?: Set<string>;
+  /** 板上的既有 finding 键（测试缝可覆盖；缺省 `boardKeys(tasksDir)`）。
+   *  ⚠️ 缺省的 `BoardKeys` 里每个键**带它的拥有者状态**（本条任务的落点）；测试缝传一个裸 `Set`
+   *  ⇒ 判定读作 `unknown`（fail-closed = 修复前逐字节的行为，⛔ 不是「没有重复」）。 */
+  boardKeys?: Set<string> | BoardKeys;
   nowMs: number;
   /** rate 闸的上限（本窗口内允许立案的条数）。 */
   k: number;
@@ -385,8 +393,10 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
   for (const rank of order) {
     const f = findings[rank.index];
     const id = f.id;
-    const reject = (gate: FilingDisposition["gate"], reason: string): void => {
-      byIndex[rank.index] = { findingId: id, taskId: null, accepted: false, gate, reason, escalate: false };
+    //  `dedup` 缺省 null = **本条的处置没有做过去重判定**（在它之前就由别的闸拒了）—— ⛔ 与
+    //  「做了判定、结论是 novel」不同形（硬规则 3b）。
+    const reject = (gate: FilingDisposition["gate"], reason: string, dedup: DedupReading | null = null): void => {
+      byIndex[rank.index] = { findingId: id, taskId: null, accepted: false, gate, reason, escalate: false, dedup };
     };
 
     // ① 只立「要求了动作」的 finding。semantic-dedup-scan 的 `suggestedAction: "leave"` 判定是
@@ -427,7 +437,7 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
       const reason = g.reason.startsWith("rate:")
         ? `${g.reason} (subject recurrence: ${rank.recurrence === null ? "unknown — carrier unreadable" : `${rank.recurrence} round(s)`})`
         : g.reason;
-      reject("quality-dedup-rate", reason);
+      reject("quality-dedup-rate", reason, g.dedup);
       continue;
     }
 
@@ -452,6 +462,10 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
       reason: escalate
         ? `${g.reason} · remedy availability 'blocked' ⇒ the requested action is not performable from this host`
         : g.reason,
+      // 接受面的**去重读数**一并带出（理由里已有逐字事实，这里带上机读取值）：⛔ 在此之前，一条
+      // 「板上只有 done ⇒ 照旧立案」的接受在载体上与「板上根本没这个键」同形，而接受的 reason
+      // 从未落盘（`filed` 只记 task id）—— 正是本任务要关掉的「honest reading with no consumer」。
+      dedup: g.dedup,
     };
   }
   // 每个候选恰有一条处置（⛔ 不返回带洞的数组：一条 undefined 会静默变成载体里的空洞）。
@@ -986,6 +1000,15 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           escalated,
           remedy_availability: remedy.status,
           rejected: dispositions.filter((d) => !d.accepted).map((d) => ({ findingId: d.findingId, gate: d.gate, reason: d.reason })),
+          // 去重读数的**独立落痕**（枚举，⛔ 不布尔）：本条任务之前，被接受的立案只留一个 task id，
+          // 于是「板上只有 done / 拥有者状态读不出」这两条判据在载体上**没有消费者**（硬规则 3b 的
+          // 形态：一个诚实的读数，若无消费者就与「没看过」同形）。这里按候选逐条记 `state` 与
+          // `matchedKey`，接受的条目另带那条已经携带该事实的 reason（拒绝侧的 reason 已在 `rejected`）。
+          dedup_state: dispositions.flatMap((d) => (d.dedup ? [{
+            findingId: d.findingId, taskId: d.taskId, accepted: d.accepted,
+            state: d.dedup.state, matchedKey: d.dedup.key || null,
+            ...(d.accepted ? { reason: d.reason } : {}),
+          }] : [])),
           errors: fileErrors,
         }]);
       } catch { /* 立案落痕失败不推翻本轮读数 */ }

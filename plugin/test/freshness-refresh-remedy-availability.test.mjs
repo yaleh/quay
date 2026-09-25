@@ -441,6 +441,68 @@ test("ROUTINE (rate window) — the blocked reading reaches the human channel ev
   assert.match(other.reason, /^rate:/);
 });
 
+// ── the SHAPE that actually happened: the subject's symbol key is held by a `done` task ───────────
+//
+// MEASURED (2026-09-25, `.quay/routine-findings.jsonl` line 974, runId
+// `freshness-refresh-1790308195712`, task gap-ac214-eighth-crossing-done-key-permanently-suppresses-…):
+// the two subjects that were over the freshness margin (AC-238/239) had their symbol key supplied by
+// a `status: done` routine task, and `boardKeys()` was status-BLIND ⇒ `gateEscalation` rejected them
+// `dedup: an equivalent finding is already on the board (matched key: symbols:goal-009-ac-238,
+// upgrade-face)` in EVERY round through 790 consecutive failures. The escalation channel built one
+// crossing earlier (this file's parent task) therefore never reached them. The fixture below is that
+// shape in ONE workspace: a prior task holding the subject's symbol key, `status:` the only variable.
+
+/** The prior task's body = the DISPATCHABLE routine shape (it carries the `- 观测符号：` bullet the
+ *  board reader keys on). Its key must equal the CANDIDATE's key or the fixture proves nothing. */
+function seedPriorTask(root, status) {
+  const body = renderRoutineTaskBody({ ...FRESHNESS_FINDING }, {
+    routine: "freshness-refresh", probe: "freshness-refresh", runId: "prior", carrier: ".quay/routine-findings.jsonl",
+    ts: "2026-09-25T05:00:00Z", taskId: "gap-routine-prior",
+  });
+  assert.match(body, /- 观测符号：`coldstart-face`/, "the seed must carry the symbol key the candidate keys on");
+  fs.writeFileSync(path.join(root, "tasks", "gap-routine-prior.md"),
+    `---\nid: gap-routine-prior\ntitle: prior\nstatus: ${status}\n---\n${body}\n`, "utf8");
+}
+
+test("ROUTINE (a DONE task already holds the subject's symbol key) — the escalation is NOT swallowed", async () => {
+  const root = makeWorkspace({ label: "closed-key" });
+  seedPriorTask(root, "done");
+  const { facts, written } = await runRoutine(root, { probeRun: DENIED, nowMs: { value: Date.parse("2026-09-25T06:00:00Z") } });
+
+  assert.equal(facts[0].state, "verified", facts[0].reason);
+  assert.equal(written.length, 1, "⛔ a FINISHED task's key must not swallow the escalation — this is the crossing this closes");
+  assert.equal(written[0].status, "needs-human");
+  assert.match(written[0].body, /remedy-availability：`blocked` · subject：`GOAL-009-AC-207`/, "the verbatim remedy must still reach the human channel");
+
+  const filing = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.deepEqual(filing.escalated, [written[0].taskId]);
+  assert.equal(filing.rejected.some((x) => String(x.reason).startsWith("dedup:")), false,
+    "no `dedup:` rejection for that subject — the done key must not be a blocking项");
+  // the acceptance's dedup reading is on the CARRIER (⛔ not only in prose): an acceptance that
+  // matched a closed key and one that matched nothing must not look alike
+  const reading = filing.dedup_state.find((d) => d.findingId === FRESHNESS_FINDING.id);
+  assert.ok(reading, `the accepted filing must carry its dedup reading: ${JSON.stringify(filing.dedup_state)}`);
+  assert.equal(reading.state, "done-only");
+  assert.equal(reading.accepted, true);
+  assert.match(reading.matchedKey, /^symbols:/);
+  assert.match(reading.reason, /CLOSED task/);
+});
+
+test("ROUTINE (the SAME board with the prior task OPEN) — the escalation IS dedup-rejected (reverse control)", async () => {
+  const root = makeWorkspace({ label: "live-key" });
+  seedPriorTask(root, "ready"); // the ONLY difference from the test above
+  const { written } = await runRoutine(root, { probeRun: DENIED, nowMs: { value: Date.parse("2026-09-25T06:00:00Z") } });
+
+  assert.equal(written.length, 0, "⛔ an OPEN equivalent still blocks — the fix is not 「把 dedup 关掉」");
+  const filing = readCarrier(root).find((r) => r.kind === "filing-round");
+  const reject = filing.rejected.find((x) => x.findingId === FRESHNESS_FINDING.id);
+  assert.ok(reject, `the open-key arm must reject: ${JSON.stringify(filing.rejected)}`);
+  assert.match(reject.reason, /^dedup:/);
+  const reading = filing.dedup_state.find((d) => d.findingId === FRESHNESS_FINDING.id);
+  assert.equal(reading.state, "live");
+  assert.equal(reading.accepted, false);
+});
+
 test("BOARD READER — the escalation marker is re-readable from the board, and a normal task is NOT one", () => {
   const dir = makeTmpDir("remedy-board-");
   const subject = "GOAL-009-AC-207";

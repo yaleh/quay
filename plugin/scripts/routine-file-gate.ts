@@ -251,16 +251,22 @@ export function isActionable(taskText) {
 // ── gateFinding ──────────────────────────────────────────────────────────────────────────────────
 // candidate: the new task text. opts: { existingKeys:Set|[], recentCount:number, K:number }.
 // Returns { accept, reason }.
-export function gateFinding(candidate: string, { existingKeys = [] as string[], recentCount = 0, K = DEFAULT_RATE }: { existingKeys?: Set<string> | string[]; recentCount?: number; K?: number } = {}) {
-  if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
-  const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
-  const key = findingKey(candidate);
-  // The matched key is NAMED in the reason: the reason is recorded verbatim in the carrier, and
-  // without it a dedup decision is unauditable — you cannot tell which subject swallowed a candidate,
-  // so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
-  if (keys.has(key)) return { accept: false, reason: `dedup: an equivalent finding is already on the board (matched key: ${key})` };
-  if (recentCount >= K) return { accept: false, reason: `rate: ${recentCount} routine-filed tasks this window ≥ cap ${K}` };
-  return { accept: true, reason: "accepted: actionable, novel, within rate" };
+export function gateFinding(candidate: string, { existingKeys = [] as string[], recentCount = 0, K = DEFAULT_RATE }: { existingKeys?: Set<string> | readonly string[]; recentCount?: number; K?: number } = {}): { accept: boolean; reason: string; dedup: DedupReading | null } {
+  if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence", dedup: null };
+  // The dedup judgment is ONE call into ONE implementation (`dedupReading`, which carries the
+  // matched key AND the holder's status into the reason): the reason is recorded verbatim in the
+  // carrier, and without it a dedup decision is unauditable — you cannot tell which subject swallowed
+  // a candidate, so an over-block reads exactly like a correct suppression (硬规则 3: 枚举不布尔).
+  const dedup = dedupReading(existingKeys, findingKey(candidate));
+  if (dedup.block) return { accept: false, reason: dedup.reason, dedup };
+  if (recentCount >= K) return { accept: false, reason: `rate: ${recentCount} routine-filed tasks this window ≥ cap ${K}`, dedup };
+  // ⚠️ A `novel` acceptance keeps the pre-status reason VERBATIM; when the candidate matched keys
+  // that are all CLOSED, the reason carries that fact — ⛔ an accepted finding whose subject is
+  // 「板上只有 done」 must not read like 「板上什么都没有」 (硬规则 3).
+  return {
+    accept: true, dedup,
+    reason: dedup.state === "novel" ? "accepted: actionable, novel, within rate" : `accepted: actionable, novel, within rate — ${dedup.reason}`,
+  };
 }
 
 /** The gate for the HUMAN-VISIBLE escalation channel (remedy availability = `blocked`).
@@ -283,22 +289,127 @@ export function gateFinding(candidate: string, { existingKeys = [] as string[], 
  *  ✦ ⛔ The measured reading is still the reason a reader can audit this: the round record carries
  *    `escalated` (separately from `filed`) and `remedy_availability` verbatim, so "escalated" and
  *    "dispatch-filed" never share a shape. */
-export function gateEscalation(candidate: string, { existingKeys = [] as string[] | Set<string> } = {}): { accept: boolean; reason: string } {
-  if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
-  const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
-  const key = findingKey(candidate);
-  if (keys.has(key)) return { accept: false, reason: `dedup: an equivalent finding is already on the board (matched key: ${key})` };
-  return { accept: true, reason: "accepted: actionable, novel — routed to the HUMAN-VISIBLE channel (its own throttle: one open escalation per subject while the reading is unchanged)" };
+export function gateEscalation(candidate: string, { existingKeys = [] as string[] | Set<string> } = {}): { accept: boolean; reason: string; dedup: DedupReading | null } {
+  if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence", dedup: null };
+  // ⚠️ The same QUALITY + DEDUP judgment as `gateFinding` (⛔ one implementation, `dedupReading`),
+  // judged on THIS channel's own terms: an escalation's object is 「该读数**仍然**陈旧」, so a key held
+  // only by FINISHED tasks has no semantics for it at all — ⛔ it must not pose as an open duplicate
+  // and swallow the escalation (that is exactly the defect this section closes). A key held by an
+  // OPEN task still blocks, and an unreadable owner still fails closed.
+  const dedup = dedupReading(existingKeys, findingKey(candidate));
+  if (dedup.block) return { accept: false, reason: dedup.reason, dedup };
+  const base = "accepted: actionable, novel — routed to the HUMAN-VISIBLE channel (its own throttle: one open escalation per subject while the reading is unchanged)";
+  return {
+    accept: true, dedup,
+    reason: dedup.state === "novel" ? base : `${base} · ${dedup.reason} — ⛔ a finished task does not close the READING`,
+  };
 }
 
-// ── boardKeys ────────────────────────────────────────────────────────────────────────────────────
-// Gather existing finding keys from a board dir (task .md files) for the dedup check.
-// excludePath: when provided, skip the file whose resolved/real path matches this path — so a
-// candidate physically IN the board dir is not counted as its own duplicate.
-export function boardKeys(boardDir: string, excludePath: string | null = null): Set<string> {
-  const keys = new Set<string>();
+// ── boardKeys / the dedup space's STATUS DIMENSION ───────────────────────────────────────────────
+//
+// WHY THE STATUS DIMENSION EXISTS (tasks/gap-ac214-eighth-crossing-done-key-permanently-suppresses-…;
+// measured 2026-09-25 on `.quay/routine-findings.jsonl` line 974, runId
+// `freshness-refresh-1790308195712`). `boardKeys()` was status-BLIND: every `.md` on the board
+// supplying a key made that key a blocking duplicate — including a key supplied ONLY by a `done`
+// task. For `freshness-refresh` that semantics is inverted: its findings do not describe a defect
+// that is fixed once, they describe a STATE that goes stale again as `develop` advances. Sealing a
+// subject with `done` turns 「处理过一次」 into 「从此不再看它」 — and it sealed exactly the two subjects
+// that were over the freshness margin: AC-238/239 matched `symbols:goal-009-ac-238,upgrade-face` /
+// `…-239…`, both owned by a `status: done` routine task, so the escalation channel built one
+// crossing earlier was structurally unreachable for them — every round, through 790 consecutive
+// failures. This is the parent AC's own theme (「一旦转绿即永久绿」) in dedup space.
+//
+// THE THREE STATES (硬规则 3b — ⛔ no two of them may share an output):
+//   `live`      ≥1 owner is `todo`/`ready`/`needs-human` ⇒ a REAL duplicate ⇒ blocks, as always.
+//   `done-only` EVERY owner's status was read and all are `done`/`superseded` ⇒ not an OPEN
+//               equivalent ⇒ must NOT block (this is the crossing-closing state).
+//   `unknown`   the key is present but no owner's status could be read (absent/unrecognized
+//               `status:`, a bare caller-supplied key set, or this round's own acceptance) ⇒
+//               NOT-EVALUATED, fail-closed. ⛔ 「读不出拥有者状态」must not be shaped like
+//               `done-only` (that is the 3b failure: 读不懂 ⇒ 伪装成检查通过) and must not be shaped
+//               like `live` (that hides a mechanism failure as a correct suppression).
+// ⛔ The match stays EXACT and the boundary is unchanged: only a key whose OWNERS are all closed
+//   stops blocking. A closed key does not make some other symbol set non-blocking (see the DECLARED
+//   BOUNDARY note above `findingKey`).
+//
+// ⛔ NOT relaxed here: the human channel's own throttle (`escalationMarkerByKey` + the caller's
+//   `blocked-repeat`) is by IDENTITY (≤ one open escalation per subject while the reading is
+//   unchanged), and it is untouched — this dimension only removes a FINISHED task's power to pose as
+//   an open duplicate.
+
+/** The statuses that mean "this file is still OPEN work" — an equivalent finding under one of these
+ *  is a real duplicate. `needs-human` is OPEN: the file is waiting on a human, it is not finished. */
+export const LIVE_TASK_STATUSES: readonly string[] = ["todo", "ready", "needs-human"];
+/** The statuses that mean "this file is FINISHED" — `done` is work completed, `superseded` was
+ *  replaced. Neither closes the SUBJECT (see the section comment). */
+export const CLOSED_TASK_STATUSES: readonly string[] = ["done", "superseded"];
+
+/** One board file that supplies a finding key, with its own `status` read from the frontmatter.
+ *  `status: null` = could NOT be read (no frontmatter / no `status:` line / empty value) — a THIRD
+ *  value, ⛔ never conflated with a status string (硬规则 3b / 6). */
+export interface BoardKeyOwner { file: string; status: string | null }
+
+/** A key's standing on the board — the STATUS DIMENSION's three values. ⛔ Not a boolean: `live` and
+ *  `unknown` both block but for different reasons, and `unknown` must never be reported as
+ *  `done-only` (that would be 「读不懂」伪装成「检查通过」, 硬规则 3b). */
+export type BoardKeyState = "live" | "done-only" | "unknown";
+
+const FRONTMATTER_BLOCK = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+const FRONTMATTER_STATUS = /^status[ \t]*:[ \t]*["']?([^\s"']+)["']?[ \t]*$/m;
+
+/** The task file's own `status:` scalar. `null` = not readable (硬规则 6: 缺值 = 未查, ⛔ never a
+ *  value). A local 3-line reader on purpose: it must not couple this gate to a task store, and the
+ *  frontmatter shape is already shared with every other reader in the repo. */
+export function readTaskStatus(taskText: string): string | null {
+  const fm = String(taskText).match(FRONTMATTER_BLOCK);
+  if (!fm) return null;
+  const m = fm[1].match(FRONTMATTER_STATUS);
+  return m ? m[1].trim().toLowerCase() : null;
+}
+
+/** Classify ONE key's owners. Priority `live` > `unknown` > `done-only`:
+ *   `live` first — one OPEN owner is a definite reading whatever its siblings say;
+ *   `unknown` BEFORE `done-only` — a key with one closed owner and one unreadable owner fails
+ *   closed instead of being reported as 「只有已关闭的」 (硬规则 3b).
+ *  An empty/absent owner list is `unknown`, ⛔ never `done-only`: 「没有记下任何拥有者」 is exactly
+ *  the state that must not be renderable as 「已关闭」. */
+export function boardKeyState(owners: readonly BoardKeyOwner[] | null | undefined): BoardKeyState {
+  if (!owners || owners.length === 0) return "unknown";
+  if (owners.some((o) => LIVE_TASK_STATUSES.includes(String(o.status)))) return "live";
+  return owners.every((o) => CLOSED_TASK_STATUSES.includes(String(o.status))) ? "done-only" : "unknown";
+}
+
+/** The board's dedup space: the key set **plus** each key's owners. The two live in ONE object on
+ *  purpose — a second, parallel structure could drift from the set, and the drift would be silent
+ *  (硬规则 5b).
+ *
+ *  ⚠️ It IS a `Set<string>`, so every existing caller reads unchanged: `keys.has`, `keys.add`,
+ *  `[...keys]`, and a test handing in a plain `Set`. A caller that passes a BARE set — no board
+ *  provenance — classifies as `unknown` (fail-closed): byte-for-byte the pre-status behaviour, ⛔ not
+ *  a silent 「no duplicate」. */
+export class BoardKeys extends Set<string> {
+  /** key → the board files that supply it, each with its own status. */
+  readonly owners: Map<string, BoardKeyOwner[]>;
+  /** `false` = the board directory could NOT be listed ⇒ every membership answer is NOT-EVALUATED
+   *  (硬规则 3b: ⛔ not "the board is empty"). */
+  readonly readable: boolean;
+  constructor(owners: Map<string, BoardKeyOwner[]>, readable = true) {
+    super(owners.keys());
+    this.owners = owners;
+    this.readable = readable;
+  }
+}
+
+/** Gather existing finding keys from a board dir (task .md files) for the dedup check, WITH the
+ *  status of every file supplying each key. excludePath semantics are unchanged (skip the candidate's
+ *  own file — see exp5-DEFECT-ROUTINE-GATE-SELF-REJECT).
+ *  ⚠️ A file whose bytes cannot be READ contributes no key — unchanged from before this change, and a
+ *  declared residual: the state this section adds is the OWNER's status, while board unreadability is
+ *  reported separately by `BoardKeys.readable`. */
+export function boardKeys(boardDir: string, excludePath: string | null = null): BoardKeys {
+  const owners = new Map<string, BoardKeyOwner[]>();
   let files;
-  try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return keys; }
+  try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return new BoardKeys(owners, false); }
   let skip = null;
   if (excludePath) { try { skip = fs.realpathSync(path.resolve(excludePath)); } catch { skip = path.resolve(excludePath); } }
   for (const f of files) {
@@ -306,11 +417,74 @@ export function boardKeys(boardDir: string, excludePath: string | null = null): 
       const abs = path.join(boardDir, f);
       let absReal; try { absReal = fs.realpathSync(abs); } catch { absReal = path.resolve(abs); }
       if (skip && absReal === skip) continue;
-      const k = findingKey(fs.readFileSync(abs, "utf8"));
-      if (k) keys.add(k);
+      const text = fs.readFileSync(abs, "utf8");
+      const k = findingKey(text);
+      if (!k) continue;
+      const owner: BoardKeyOwner = { file: f, status: readTaskStatus(text) };
+      const list = owners.get(k);
+      if (list) list.push(owner); else owners.set(k, [owner]);
     } catch { /* skip */ }
   }
-  return keys;
+  return new BoardKeys(owners);
+}
+
+// ── dedupReading — the gate's ONE dedup judgment, over the key AND its owners' statuses ──────────
+/** A candidate's standing against the dedup space. `novel` is the pre-existing "no match at all";
+ *  the other three are the STATUS DIMENSION's values (see the boardKeys section comment). */
+export type DedupState = "novel" | "done-only" | "live" | "unknown";
+
+export interface DedupReading {
+  state: DedupState;
+  /** The candidate's OWN key ("" when it names neither symbols nor a prose body). */
+  key: string;
+  /** The key's board owners (`[]` for `novel`). */
+  owners: BoardKeyOwner[];
+  /** Does this verdict BLOCK the channel that asked? */
+  block: boolean;
+  /** The audit line. ⛔ It always names WHY — an over-block that names no cause reads exactly like a
+   *  correct suppression (硬规则 3: 枚举不布尔). */
+  reason: string;
+}
+
+/** Classify a candidate key against the dedup space. Pure — the caller supplies the space (so the
+ *  same judgment can be re-run against the real board as a pure READING, like `recurrenceOrder`). */
+export function dedupReading(existingKeys: Set<string> | readonly string[], key: string): DedupReading {
+  const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
+  if (!key || !keys.has(key)) {
+    return {
+      state: "novel", key, owners: [], block: false,
+      reason: key
+        ? `novel: no finding on the board carries the key '${key}'`
+        : "novel: the candidate names no symbols and has no prose ⇒ there is no key to match",
+    };
+  }
+  const board = existingKeys instanceof BoardKeys ? existingKeys : null;
+  const owners = board && board.readable ? board.owners.get(key) ?? null : null;
+  const state = boardKeyState(owners);
+  const named = (owners ?? []).map((o) => `${o.file} [status: ${o.status ?? "<unreadable>"}]`).join(", ");
+  if (state === "live") {
+    return {
+      state, key, owners: owners ?? [], block: true,
+      reason: `dedup: an equivalent finding is already OPEN on the board (matched key: ${key}, holder: ${named})`,
+    };
+  }
+  if (state === "unknown") {
+    const why = !board
+      ? "the key set was supplied without board provenance (a bare Set), so no owner status was ever read"
+      : !board.readable
+        ? "the board directory could not be listed"
+        : owners === null
+          ? "the key was recorded by THIS round's own acceptance, not read from a board file"
+          : "no supplying file carries a readable `status:` this gate recognizes";
+    return {
+      state, key, owners: owners ?? [], block: true,
+      reason: `dedup: the board holds '${key}' but its owner's status was NOT EVALUATED (${why}${named ? `; holders: ${named}` : ""}) ⇒ fail-closed — ⛔ this is neither 「a live duplicate」 nor 「only closed tasks」`,
+    };
+  }
+  return {
+    state, key, owners: owners ?? [], block: false,
+    reason: `not an open duplicate: the board holds '${key}' only under CLOSED task(s) (${named}) ⇒ 「该主体曾被处理过」 is not 「该主体此刻仍有未处理的等价工作」`,
+  };
 }
 
 // ── FILING PRIMITIVES (gap-ac214-fifth-crossing-routine-detects-but-nothing-acts) ────────────────
@@ -899,6 +1073,8 @@ export async function main(argv) {
   if (files.length !== 1 || !Number.isFinite(recent) || !Number.isFinite(K) || K < 1) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: not found: ${files[0]}\n`); return 2; }
   const candidate = fs.readFileSync(files[0], "utf8");
+  // ⛔ 不要把 `boardKeys()` 的返回值**拷成**一个裸 Set（`new Set([...boardKeys(dir)])`）：键集一样，
+  //    而每个键的拥有者状态会在拷贝时静默丢掉 ⇒ 已关闭任务重新变成永久阻断项，且看不出是拷贝丢的。
   const existingKeys: Set<string> = board ? boardKeys(board, files[0]) : new Set<string>();
   const r = gateFinding(candidate, { existingKeys, recentCount: recent, K });
   process.stdout.write(`${r.accept ? "ACCEPT" : "REJECT"}: ${r.reason}\n`);

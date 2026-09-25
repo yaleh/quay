@@ -35,11 +35,14 @@ import path from "node:path";
 import {
   DEFAULT_RATE,
   boardKeys,
+  dedupReading,
   findingKey,
   findingSubjectKey,
+  gateEscalation,
   gateFinding,
   isActionable,
   proseKey,
+  readTaskStatus,
   recurrenceByKey,
   recurrenceOrder,
   renderRoutineTaskBody,
@@ -273,6 +276,161 @@ test("⑩ recurrenceOrder: recurrence desc, probe order on ties, and an UNREADAB
   const off = recurrenceOrder([a, b, c, d], null);
   assert.deepEqual(off.map((r) => r.index), [0, 1, 2, 3], "no reading ⇒ probe order, byte for byte");
   assert.deepEqual(off.map((r) => r.recurrence), [null, null, null, null], "⛔ null ≠ 0 — 「没测到」 must stay distinct from 「没复现过」");
+});
+
+// ── ⑪-⑭ the dedup space's STATUS DIMENSION ──────────────────────────────────────────────────────
+//
+// THE DEFECT (tasks/gap-ac214-eighth-crossing-done-key-permanently-suppresses-escalation; measured
+// 2026-09-25, `.quay/routine-findings.jsonl` line 974, runId `freshness-refresh-1790308195712`):
+// `boardKeys()` was status-BLIND — a key supplied ONLY by a `done` task blocked forever. It blocked
+// exactly the two subjects that were over the freshness margin (AC-238/239: `symbols:goal-009-ac-238,
+// upgrade-face` / `…-239…`, each held by one `status: done` routine task), every round, through 790
+// consecutive failures — so the escalation channel built one crossing earlier was structurally
+// unreachable for them. The seventh crossing's fixture could not see this: its board held **no done
+// task at all**, so the state was structurally unreachable in that fixture (硬规则 4 推论三).
+//
+// THE THREE STATES pinned below, each able to TAKE FALSE in the others' arm (硬规则 3b):
+//   `live`      an OPEN equivalent (`todo`/`ready`/`needs-human`) ⇒ reject, exactly as before — this
+//               arm is the negative control that proves dedup was not switched off;
+//   `done-only` every owner's status was READ and all are `done`/`superseded` ⇒ ACCEPT, with the
+//               fact NAMED (an acceptance that silently matched a closed key would be
+//               indistinguishable from 「板上没有这个键」);
+//   `unknown`   no owner status could be read ⇒ its OWN value, fail-closed.
+
+const SUBJECT_KEY = "symbols:assertsafeid";
+// The routine-shaped body (THE dispatchable shape — it carries the `- 观测符号：` bullet the board
+// reader keys on). ROUND_A's subject is `assertSafeId` ⇒ SUBJECT_KEY above.
+const BOARD_BODY = renderRoutineTaskBody(ROUND_A, CONTEXT);
+
+/** A board file: optional frontmatter `status:` + the routine body. `status = null` ⇒ NO frontmatter
+ *  at all (the shape whose status is genuinely unreadable). */
+const boardTask = (status) => `${status === null ? "" : `---\nid: t\nstatus: ${status}\n---\n`}${BOARD_BODY}`;
+
+/** Read ONE board (fresh dir per call, so each arm is isolated) and return its `DedupReading`. */
+function readBoard(entries) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-status-"));
+  try {
+    for (const [name, status] of entries) fs.writeFileSync(path.join(dir, `${name}.md`), boardTask(status), "utf8");
+    const keys = boardKeys(dir);
+    assert.equal(keys instanceof Set, true, "the board reading is still a Set<string> — every pre-status caller reads unchanged");
+    assert.equal(keys.has(SUBJECT_KEY), true, `the fixture must really supply ${SUBJECT_KEY}`);
+    return { keys, reading: dedupReading(keys, SUBJECT_KEY), dir };
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("⑪ boardKeys carries the OWNER'S STATUS — three distinct states, ⛔ not a boolean", () => {
+  // the reader itself (硬规则 6: 缺值 = 未查 — ⛔ never a default status)
+  assert.equal(readTaskStatus(boardTask("done")), "done");
+  assert.equal(readTaskStatus(boardTask("needs-human")), "needs-human");
+  assert.equal(readTaskStatus(boardTask(null)), null, "no frontmatter ⇒ no status");
+  assert.equal(readTaskStatus("---\nid: t\ntitle: x\n---\nbody"), null, "frontmatter without `status:` ⇒ null");
+
+  const live = readBoard([["open", "ready"]]).reading;
+  const todo = readBoard([["open", "todo"]]).reading;
+  const human = readBoard([["open", "needs-human"]]).reading;
+  const done = readBoard([["closed", "done"]]).reading;
+  const superseded = readBoard([["closed", "superseded"]]).reading;
+  const unreadable = readBoard([["nostatus", null]]).reading;
+  const mixed = readBoard([["closed", "done"], ["open", "ready"]]).reading;
+  const halfUnknown = readBoard([["closed", "done"], ["nostatus", null]]).reading;
+
+  assert.equal(live.state, "live");
+  assert.equal(todo.state, "live");
+  assert.equal(human.state, "live", "`needs-human` is OPEN — it waits on a human, it is not finished");
+  assert.equal(done.state, "done-only");
+  assert.equal(superseded.state, "done-only", "a replaced task is finished too");
+  assert.equal(unreadable.state, "unknown");
+  assert.equal(mixed.state, "live", "one OPEN owner is a definite reading whatever its siblings say");
+  assert.equal(halfUnknown.state, "unknown",
+    "⛔ one closed owner + one unreadable owner must NOT be reported as 「只有已关闭的」 (硬规则 3b)");
+
+  // the three states must not share an output (硬规则 3b), and the VERDICTS differ where they must
+  assert.equal(new Set([live.state, done.state, unreadable.state]).size, 3, "three distinct values");
+  assert.equal(live.block, true);
+  assert.equal(unreadable.block, true, "⛔ fail-closed: 「读不出拥有者状态」 must not be shaped like 「合格」");
+  assert.equal(done.block, false, "⛔ a FINISHED task is not an OPEN equivalent — this is the crossing-closing state");
+
+  // ⛔ a bare key set has NO board provenance ⇒ NOT-EVALUATED (fail-closed) — byte-for-byte the
+  //    pre-status behaviour, and ⛔ not a silent 「no duplicate」.
+  const bare = dedupReading(new Set([SUBJECT_KEY]), SUBJECT_KEY);
+  assert.equal(bare.state, "unknown");
+  assert.equal(bare.block, true);
+  assert.match(bare.reason, /without board provenance/);
+  // ...and the reverse: a key nobody supplies is `novel` on any space (the pre-existing value)
+  assert.equal(dedupReading(new Set([SUBJECT_KEY]), "symbols:nobody").state, "novel");
+  assert.equal(dedupReading(new Set([SUBJECT_KEY]), "symbols:nobody").block, false);
+});
+
+test("⑫ NEGATIVE CONTROL — a LIVE equivalent finding still rejects on BOTH channels (⛔ dedup was not switched off)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-live-"));
+  try {
+    fs.writeFileSync(path.join(dir, "open.md"), boardTask("ready"), "utf8");
+    const keys = boardKeys(dir);
+    const cand = candidateB();
+
+    const finding = gateFinding(cand, { existingKeys: keys, recentCount: 0, K: DEFAULT_RATE });
+    assert.equal(finding.accept, false, "the dispatch channel still dedups a live equivalent");
+    assert.match(finding.reason, /^dedup:/);
+    assert.match(finding.reason, /symbols:assertsafeid/, "an over-block that names no key reads exactly like a correct suppression");
+    assert.match(finding.reason, /open\.md \[status: ready\]/, "the holder and its status must be named");
+    assert.equal(finding.dedup.state, "live");
+
+    const esc = gateEscalation(cand, { existingKeys: keys });
+    assert.equal(esc.accept, false, "⛔ the human channel's dedup is not a hole either");
+    assert.match(esc.reason, /^dedup:/);
+    assert.equal(esc.dedup.state, "live");
+
+    // the arm TAKES FALSE: the SAME candidate against the SAME board, only the `status:` changed
+    fs.writeFileSync(path.join(dir, "open.md"), boardTask("done"), "utf8");
+    const closed = boardKeys(dir);
+    assert.equal(gateFinding(cand, { existingKeys: closed, recentCount: 0, K: DEFAULT_RATE }).accept, true,
+      "the rejection above is caused by the OWNER BEING OPEN, not by the candidate being unfileable");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("⑬ done-only ⇒ ACCEPT on both channels, and the closed-owner fact is NAMED", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-closed-"));
+  try {
+    fs.writeFileSync(path.join(dir, "closed.md"), boardTask("done"), "utf8");
+    const keys = boardKeys(dir);
+    const cand = candidateB();
+
+    const g = gateFinding(cand, { existingKeys: keys, recentCount: 0, K: DEFAULT_RATE });
+    assert.equal(g.accept, true, "⛔ a FINISHED task must not block a re-finding (the whole point)");
+    assert.equal(g.dedup.state, "done-only");
+    assert.match(g.reason, /CLOSED task/, "an accepted finding that matched a closed key must SAY so");
+    assert.match(g.reason, /closed\.md \[status: done\]/, "and name the holder");
+    // ⛔ the rate window is untouched by this: a closed key is not an exemption from the budget
+    assert.equal(gateFinding(cand, { existingKeys: keys, recentCount: DEFAULT_RATE, K: DEFAULT_RATE }).accept, false);
+
+    const esc = gateEscalation(cand, { existingKeys: keys });
+    assert.equal(esc.accept, true, "the escalation channel must reach the human — that is the crossing this closes");
+    assert.equal(esc.dedup.state, "done-only");
+    assert.match(esc.reason, /HUMAN-VISIBLE channel/);
+    assert.match(esc.reason, /CLOSED task/, "the escalation's acceptance must say WHY a finished task did not block it");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("⑭ an unreadable owner status is its OWN value, fails closed, and is ⛔ NOT shaped like done-only", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-unknown-"));
+  try {
+    fs.writeFileSync(path.join(dir, "nostatus.md"), boardTask(null), "utf8");
+    const keys = boardKeys(dir);
+    const cand = candidateB();
+
+    const r = dedupReading(keys, SUBJECT_KEY);
+    assert.equal(r.state, "unknown");
+    assert.equal(r.block, true, "fail-closed");
+    assert.match(r.reason, /NOT EVALUATED/);
+    assert.doesNotMatch(r.reason, /only under CLOSED task/, "⛔ 「读不出状态」 must not be rendered as 「已关闭」");
+    // the two blocking states are still distinguishable from each other (硬规则 3b)
+    assert.notEqual(r.reason, dedupReading(new Set([SUBJECT_KEY]), SUBJECT_KEY).reason);
+    assert.match(dedupReading(new Set([SUBJECT_KEY]), SUBJECT_KEY).reason, /without board provenance/);
+
+    // and the same reading through both gates: a rejection, ⛔ not a silent acceptance
+    assert.equal(gateFinding(cand, { existingKeys: keys, recentCount: 0, K: DEFAULT_RATE }).accept, false);
+    assert.equal(gateEscalation(cand, { existingKeys: keys }).accept, false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── ⑦ the QUALITY bar is unmoved by any of this (it reads the text, not the identity) ───────────
