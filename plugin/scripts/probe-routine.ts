@@ -49,20 +49,28 @@ import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guar
 //  正是 probe-write-guard 当初被拆出去要消掉的那个环）。
 import {
   boardKeys,
+  classifyExecutionProbeResult,
   countRecentFilings,
+  escalationKey,
+  escalationMarkerByKey,
   findingKey,
+  foldProbeReportedValue,
+  gateEscalation,
   gateFinding,
   hasRequestedAction,
   producerGate,
-  readProducerRegistry,
+  readProducerMapping,
   recurrenceByKey,
   recurrenceOrder,
+  remedyGatesProducer,
+  REMEDY_AVAILABILITY_VALUES,
   renderRoutineTaskBody,
   resolveTaskCliEntry,
   routineFindingCandidateText,
   routineTaskId,
   DEFAULT_RATE,
 } from "./routine-file-gate.ts";
+import type { ExecutionProbeDecl, RemedyAvailability } from "./routine-file-gate.ts";
 import type { Fact, RoutineSpec } from "./driver-runtime.ts";
 
 /** 结构化 finding 的载体（追加式 JSONL）。登记在任务 ## Touches 里 ⇒ 是**可查的落地产物**，
@@ -183,6 +191,9 @@ export interface ProbeFinding {
   /** 探针点名的产出者/主体（探针契约可选带；`plugin/probes/freshness-refresh.md` 的 finding 带
    *  `producer`）。⛔ `null` = 没点名，与「点名了但没登记」不同形（硬规则 3b）。 */
   producer: string | null;
+  /** 探针点名的**跟踪主体**（`GOAL-009-AC-NNN`）。与 `producer` 分开：一个产出者可拥有多个主体，
+   *  而升级面的去重键是**主体**（「不重复立案同一主体」）。⛔ `null` = 探针没报，不是某个默认值。 */
+  subject: string | null;
 }
 
 export interface ParsedProbeOutput {
@@ -277,6 +288,7 @@ export function parseProbeFindings(stdout: string): ParsedProbeOutput | null {
       rationale,
       suggestedAction: typeof r.suggestedAction === "string" && r.suggestedAction.trim() ? r.suggestedAction.trim() : null,
       producer: typeof r.producer === "string" && r.producer.trim() ? r.producer.trim() : null,
+      subject: typeof r.subject === "string" && r.subject.trim() ? r.subject.trim() : null,
     });
   }
   const inv = obj.inventory && typeof obj.inventory === "object" && !Array.isArray(obj.inventory)
@@ -312,9 +324,13 @@ export interface FilingDisposition {
   taskId: string | null;
   accepted: boolean;
   /** 哪一道处置判据给的结论——⛔ 不合并成布尔（硬规则 3）；`producer` 单独一类，因为它是探针
-   *  自身完整性问题（点名一个不存在的产出者），与「有产出者但被质量/去重/限流挡下」不同形。 */
-  gate: "action" | "producer" | "quality-dedup-rate" | "collision" | "filed";
+   *  自身完整性问题（点名一个不存在的产出者），与「有产出者但被质量/去重/限流挡下」不同形；
+   *  `blocked-repeat` 同理单独一类——「同一主体在该读数不变时已升级过」与 rate 限流不同形。 */
+  gate: "action" | "producer" | "quality-dedup-rate" | "blocked-repeat" | "collision" | "filed";
   reason: string;
+  /** 本条落哪条通道。`false` = 派发链（⛔ 与修复前逐字节同形）；`true` = 人可见通道
+   *  （`needs-human` 升级，携带逐字补救）。被拒时恒为 false。 */
+  escalate: boolean;
 }
 
 export interface FilingOptions {
@@ -340,6 +356,13 @@ export interface FilingOptions {
    *  （生产路径）；`null` = 明确「读不出」⇒ 退回探针顺序（⛔ 不退化成「都没复现过」）；`Map` = 用这个
    *  读数。缺省即生产行为，测试缝只为把同一个判定对着**受控语料**跑。 */
   recurrence?: Map<string, number> | null;
+  /** 本轮的 remedy-availability 读数（机械执行探针 + 探针自报的折叠结果）。**缺省 `undefined`**
+   *  = 未评估 ⇒ 逐字节退回修复前的行为（⛔ 不是「默认可执行」，也不是「默认被挡住」）。 */
+  remedy?: RemedyAvailability;
+  /** 声明了该读数的执行探针（用于判定 finding 点名的产出者是否被这一读数覆盖）。 */
+  remedyProbe?: ExecutionProbeDecl | null;
+  /** 板上【已升级为 needs-human】的主体键 → 立案文件名。缺省从 tasksDir 机械读（⛔ 不另立计数器）。 */
+  escalatedKeys?: Map<string, string>;
 }
 
 /** 逐条处置 finding（⛔ 不只回一个布尔，硬规则 3）。**纯函数**：不写盘、不 spawn——落盘在调用方，
@@ -357,11 +380,13 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
   const byIndex = new Array<FilingDisposition | undefined>(findings.length);
   let acceptedThisRound = 0;
   let recentBase: number | null = null;
+  // ⓪b 升级面（remedy availability = blocked 时才读；⛔ 读数不是 blocked 时一次盘都不碰）。
+  let escalated: Map<string, string> | null = null;
   for (const rank of order) {
     const f = findings[rank.index];
     const id = f.id;
     const reject = (gate: FilingDisposition["gate"], reason: string): void => {
-      byIndex[rank.index] = { findingId: id, taskId: null, accepted: false, gate, reason };
+      byIndex[rank.index] = { findingId: id, taskId: null, accepted: false, gate, reason, escalate: false };
     };
 
     // ① 只立「要求了动作」的 finding。semantic-dedup-scan 的 `suggestedAction: "leave"` 判定是
@@ -373,10 +398,29 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
     // ② 产出者闸（AC5 红侧）：点名的产出者必须在登记面上。
     const pg = producerGate(f, o.registeredProducers);
     if (!pg.ok) { reject("producer", pg.reason); continue; }
+    // ②b 升级面（本条要点）：本读数 = blocked 且该 finding 点名的产出者被这一读数覆盖
+    //     ⇒ ⛔ 不得产出与「可在本处执行」同形的可派发任务；改走人可见通道，且同一主体
+    //     在该读数不变时不重复升级。判据在 routine-file-gate.ts（单一实现，⛔ 不在此处重写）。
+    const escalate = remedyGatesProducer(o.remedy, o.remedyProbe ?? null, f.producer);
+    const escKey = escalate ? escalationKey(f) : "";
+    if (escalate) {
+      if (escalated === null) escalated = o.escalatedKeys ?? escalationMarkerByKey(o.tasksDir);
+      const already = escKey ? escalated.get(escKey) : undefined;
+      if (already) {
+        reject("blocked-repeat", `blocked-repeat: ${escKey} is already escalated to the human-visible channel (tasks/${already}) and remedy availability is still 'blocked' (probe '${o.remedy?.probeId ?? "<none>"}') ⇒ not re-filing`);
+        continue;
+      }
+    }
     // ③ 既有三道闸（质量 / 去重 / 限流）——⛔ 复用单一实现，不在这里另写一份判据。
-    if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+    //    ⚠️ 升级形态走的是**人可见通道**，它不进食派发池 ⇒ 不受派发侧的 rate 窗口约束（它的闸是
+    //    「同一主体在该读数不变时只升级一次」，见 gateEscalation 的注释）。质量/去重两道**照旧**。
     const candidate = routineFindingCandidateText(f);
-    const g = gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+    const g = escalate
+      ? gateEscalation(candidate, { existingKeys: keys })
+      : (() => {
+        if (recentBase === null) recentBase = countRecentFilings(o.carrierPath, o.nowMs);
+        return gateFinding(candidate, { existingKeys: keys, recentCount: recentBase + acceptedThisRound, K: o.k });
+      })();
     if (!g.accept) {
       // rate 拒绝把**复现读数**一并落痕：残余饥饿（复现很高却仍被限流）必须可审，⛔ 否则
       // 「限流正确」与「优先级没生效」在载体记录里同形（硬规则 3）。null = 没读到，写明。
@@ -397,14 +441,74 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
       continue;
     }
     keys.add(findingKey(candidate));
+    // 同一轮内第二个同主体的 finding 也按「已升级」处理（板上还没有它 ⇒ 只靠 board 读挡不住）。
+    if (escalate && escKey !== "") escalated?.set(escKey, `${taskId}.md`);
     acceptedThisRound += 1;
-    byIndex[rank.index] = { findingId: id, taskId, accepted: true, gate: "filed", reason: "accepted: actionable, novel, within rate" };
+    byIndex[rank.index] = {
+      findingId: id, taskId, accepted: true, escalate,
+      gate: "filed",
+      // 接受理由**逐字来自那一道判据**（⛔ 不在这里另写一句）：升级形态的接受理由必须自己说出
+      // 「走的是人可见通道」，否则载体上「升级」与「派发立案」两条通道的接受记录会同形（硬规则 3）。
+      reason: escalate
+        ? `${g.reason} · remedy availability 'blocked' ⇒ the requested action is not performable from this host`
+        : g.reason,
+    };
   }
   // 每个候选恰有一条处置（⛔ 不返回带洞的数组：一条 undefined 会静默变成载体里的空洞）。
   for (let i = 0; i < findings.length; i++) {
     if (!byIndex[i]) throw new Error(`selectFilings: finding #${i} (${findings[i].id ?? "<no-id>"}) got no disposition — the priority order dropped it`);
   }
   return byIndex as FilingDisposition[];
+}
+
+/** 一条执行探针的运行结果（`spawnSync` 的形状里只取判定要用的四个字段）。 */
+export interface ExecutionProbeRun {
+  status: number | null;
+  error?: { message?: string } | null;
+  stdout?: string | null;
+  stderr?: string | null;
+}
+
+/** 生产实现：按 mapping 声明的 argv 跑**可达性探针**（⛔ 不是产出者；见 freshness-producers.json 的
+ *  `execution_probe._comment`）。超时由声明里的 `timeout_ms` 给（⛔ 不在这里写死秒数——硬规则 4 推论二）。
+ *  `spawnSync` 是**有意**的选择：本步在例程的 spawn 序列之外、要一个确定性的、有界的、可判定的读数，
+ *  而异步 spawn 会让「读不出」与「还没跑完」在调用方同形（硬规则 3b）。 */
+export function defaultRunExecutionProbe(decl: ExecutionProbeDecl): ExecutionProbeRun {
+  const r = spawnSync(decl.command[0], decl.command.slice(1), {
+    encoding: "utf8", timeout: decl.timeoutMs,
+  });
+  return {
+    status: r.status,
+    error: r.error ? { message: (r.error as Error).message } : null,
+    stdout: r.stdout ?? null,
+    stderr: r.stderr ?? null,
+  };
+}
+
+/** 解析探针规格声明的 `producers_file` 到**磁盘上的那一份**。
+ *
+ *  解析顺序（⛔ ① 在前是有理由的，见下）：
+ *    ① `<pluginRoot>/<basename(declared)>` —— 与**读该规格的那一份代码修订**同源的副本；
+ *    ② `<root>/<declared>`               —— workspace 自己的副本（声明的路径写的是 root 相对）。
+ *
+ *  WHY ① 在前（2026-09-25 **实测**，本条任务 AC6 的第一次真实读数）：规格从**代码修订**读，而它
+ *  指向的 mapping 从 **workspace** 读 ⇒ 一次代码修订切换（`--script-root` / 换 worktree）会加载
+ *  **新规格 + 旧 mapping**，于是 remedy-availability 静默变成 `not-declared`、**声明没有消费者** ——
+ *  正是本条要关掉的那个形态，只是又低了一层。同一个「源与跑的不是一份」的家族（第 6 次是
+ *  源 vs 编译产物）。⛔ 这里仍然**不是**「谁新用谁」的猜测：只按固定顺序取第一份存在的文件。
+ *
+ *  ⚠️ 生产等价性（这是它能被安全引入的原因）：quality-gate-driver 传的恒是
+ *  `pluginRoot = <root>/plugin`，而此时 ① 与 ② 是**同一个路径**（`declared` 就是
+ *  `plugin/freshness-producers.json`）⇒ 本仓库的生产行为逐字节不变。
+ *  ⚠️ 声明边界：一个同时拥有 vendored plugin 与自己的 `plugin/freshness-producers.json` 的
+ *  workspace，会取到 plugin 那一份——本仓库不存在该形态（`plugin/` 就是本仓的插件目录），
+ *  故作为**已声明的**边界记在此处，⛔ 不声称对所有布局都无影响。
+ *  两份都不存在 ⇒ 返回 ②（= 修复前的路径）⇒ 读不出 ⇒ 调用方照旧 fail-closed。 */
+export function resolveMappingPath(root: string, pluginRoot: string, declared: string): string {
+  const workspacePath = path.resolve(root, declared);
+  const pluginPath = path.resolve(pluginRoot, path.basename(declared));
+  if (pluginPath !== workspacePath && fs.existsSync(pluginPath)) return pluginPath;
+  return workspacePath;
 }
 
 /** 立一条任务：spawn workspace 自己的 task store CLI（⛔ 不手搓 markdown 落盘）。
@@ -419,11 +523,17 @@ export function selectFilings(findings: readonly ProbeFinding[], o: FilingOption
  *  解析不出 CLI ⇒ 返回 `unresolved`（与「没有要立的」不同形，硬规则 3b）。 */
 export function fileRoutineTask(
   root: string, kernelPluginRoot: string | null, taskId: string, title: string, body: string,
-  labels: readonly string[], tasksDir: string, timeoutMs = 120_000,
+  labels: readonly string[], tasksDir: string, status: string | null = null, timeoutMs = 120_000,
 ): { ok: boolean; reason: string } {
   const entry = resolveTaskCliEntry(root, kernelPluginRoot);
   if (!entry) return { ok: false, reason: "task store CLI unresolved (no packages/quay-native and no vendored bundle) — nothing filed" };
-  const argv = [process.execPath, ...entry, "task", "create", taskId, "--title", title, "--labels", labels.join(","), "--body", body];
+  // `status` 只在**升级形态**（remedy-availability = blocked）传入，值为 `needs-human`：那是本项目
+  // 现成的「人可见、不进派发候选」通道（⛔ 不新增成因枚举、⛔ 不新增再入队路径 —— 人 2026-09-20 裁定）。
+  // 缺省 null ⇒ 不传 `--status`，由 store 的 default_task_status 决定，与修复前逐字节相同。
+  const argv = [
+    process.execPath, ...entry, "task", "create", taskId, "--title", title, "--labels", labels.join(","), "--body", body,
+    ...(status ? ["--status", status] : []),
+  ];
   const r = spawnSync(argv[0], argv.slice(1), {
     cwd: root,
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: path.resolve(tasksDir) },
@@ -628,8 +738,12 @@ export interface ProbeRoutineOptions {
   filingEnabled?: boolean;
   /** 立案的 rate 上限（缺省 DEFAULT_RATE）。 */
   filingRate?: number;
-  /** 任务写入缝（测试用；缺省 spawn workspace 自己的 task store CLI）。 */
-  fileTaskFn?: (taskId: string, title: string, body: string) => Promise<{ ok: boolean; reason: string }>;
+  /** 任务写入缝（测试用；缺省 spawn workspace 自己的 task store CLI）。第四参 = 要落的 status
+   *  （升级形态为 `needs-human`；缺省 null = 由 store 的 default_task_status 决定）。 */
+  fileTaskFn?: (taskId: string, title: string, body: string, status?: string | null) => Promise<{ ok: boolean; reason: string }>;
+  /** 执行探针的 spawn 缝（测试用；缺省 `defaultRunExecutionProbe` = 真跑 mapping 声明的 argv）。
+   *  ⛔ 注入它是为了让**同一个判定**能对着受控读数跑；生产路径恒为默认值。 */
+  runExecutionProbe?: (decl: ExecutionProbeDecl) => ExecutionProbeRun;
 }
 
 /** 把一条声明变成 Layer-1b 例程。`schedule` 用 routine-scheduler 的解析结果（**interval:<N>m 是
@@ -722,6 +836,45 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           `unparseable probe output (exit ${r.status})${rawRel ? ` — raw stdout saved to ${rawRel}` : ""} — expected one JSON object per the probe's output contract`);
       }
       const runId = `${decl.name}-${started}`;
+      const tasksDir = opts.tasksDir ?? path.join(opts.root, "tasks");
+      // ⑥b remedy availability —— 本条（gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer）的
+      //     要点：把「本机可执行的产出者 = 0」从一个**探针自发字段**（只活在 inventory/notes 散文里、
+      //     零消费者）升成**规格声明的取值**，并在**立案链**里消费它。⛔ 这里是**机械**评估：与探针
+      //     自报值分开记录、机械值优先（它可复现，而探针自报值是每轮重新释义的）。⛔ 不执行产出者 ——
+      //     只跑 mapping 声明的**可达性探针**（一条 BatchMode ssh 的 trivial 远程命令）。
+      const mappingRel = (spec.output_routing as Record<string, unknown> | undefined)?.producers_file;
+      const mappingDeclared = typeof mappingRel === "string" && mappingRel.trim() !== "";
+      // ⚠️ 三值，⛔ 不把「未声明」与「声明了但读不懂」合并（硬规则 3b；第一版合并过，被 (f) 的
+      //    「no registry declared」用例抓住）：undefined = 未声明 ⇒ 闸不适用；null = 读不懂 ⇒ fail-closed。
+      const mappingPath = mappingDeclared ? resolveMappingPath(opts.root, opts.pluginRoot, String(mappingRel)) : null;
+      const mapping = mappingPath
+        ? readProducerMapping(mappingPath)
+        : { producers: undefined as undefined, executionProbe: null as ExecutionProbeDecl | null, commands: new Map<string, string>() };
+      const registeredProducers = mapping.producers;
+      const executionProbe = mapping.executionProbe;
+      const remedySpec = (spec.output_routing as Record<string, unknown> | undefined)?.remedy_availability;
+      const remedySpecValues = remedySpec && typeof remedySpec === "object" && !Array.isArray(remedySpec)
+        ? (Array.isArray((remedySpec as Record<string, unknown>).values)
+          ? ((remedySpec as Record<string, unknown>).values as unknown[]).map((v) => String(v).trim()).filter(Boolean)
+          : [])
+        : [];
+      const remedy = ((): RemedyAvailability => {
+        if (!executionProbe) {
+          return {
+            status: "not-declared", evaluated: false, source: "none", probeId: null, probeReported: null,
+            specValues: remedySpecValues, observed: null,
+            reason: `${String(mappingRel ?? "<no mapping>")} declares no execution_probe ⇒ remedy availability not applicable to this routine (⛔ NOT the same as 'executable')`,
+          };
+        }
+        const run = (opts.runExecutionProbe ?? defaultRunExecutionProbe)(executionProbe);
+        const mechanical = classifyExecutionProbeResult(executionProbe, run);
+        const obj = extractJsonObject(r.stdout ?? "") as Record<string, unknown> | null;
+        const reportedKey = remedySpec && typeof remedySpec === "object" && !Array.isArray(remedySpec)
+          && typeof (remedySpec as Record<string, unknown>).key === "string" && String((remedySpec as Record<string, unknown>).key).trim()
+          ? String((remedySpec as Record<string, unknown>).key).trim()
+          : "remedyAvailability";
+        return foldProbeReportedValue(mechanical, obj ? obj[reportedKey] : null, remedySpecValues);
+      })();
       const records: Record<string, unknown>[] = [{
         ts: new Date(started).toISOString(),
         kind: "scan-round",
@@ -734,6 +887,9 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         shards: parsed.shards,
         inventory: parsed.inventory,
         notes: parsed.notes,
+        // ⛔ 顶层、独立取值（硬规则 3b）：⛔ 不与 inventory/notes 散文混写 —— 一个只活在散文里的
+        //    读数没有消费者，正是本条要关掉的那个形态。词表由探针规格声明（`remedy_availability`）。
+        remedy_availability: remedy,
         exit: r.status,
         durationMs,
       }, ...parsed.findings.map((f) => ({
@@ -744,6 +900,7 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         runId,
         findingId: f.id,
         dupKind: f.kind,
+        subject: f.subject,
         symbols: f.symbols,
         files: f.files,
         verdict: f.verdict,
@@ -759,41 +916,49 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
 
       // ⑦ 机械立案（AC5/AC6）：append 之后，把 actionable finding 经三道闸落成**新任务文件**。
       //    ⛔ FILE-ONLY —— 只立案，不执行（缺口重跑/修复仍归派发链）。见本文件头部与 selectFilings 注释。
-      const tasksDir = opts.tasksDir ?? path.join(opts.root, "tasks");
-      // 产出者登记面：由**探针规格自己声明**（`output_routing.producers_file`，readProbeSpec 原样透传），
-      // 故本步对任意 routine 通用——未声明 ⇒ 该闸不适用，而不是「都未登记」。
-      const registryRel = (spec.output_routing as Record<string, unknown> | undefined)?.producers_file;
-      const producersDeclared = typeof registryRel === "string" && registryRel.trim() !== "";
-      // ⚠️ 三值，⛔ 不把「未声明」与「声明了但读不懂」合并（硬规则 3b；第一版合并过，被 (f) 的
-      //    「no registry declared」用例抓住）：undefined = 未声明 ⇒ 闸不适用；null = 读不懂 ⇒ fail-closed。
-      const registeredProducers = producersDeclared ? readProducerRegistry(path.join(opts.root, String(registryRel))) : undefined;
-      if (producersDeclared && registeredProducers === null) {
+      //    产出者登记面与执行探针都在 ⑥b 一次读完（⛔ 同一份文件不读第二遍）。
+      if (mappingDeclared && registeredProducers === null) {
         // fail-closed：登记面声明了却读不懂 ⇒ 不立案（⛔ 不得把「读不懂」当成「没有未登记的」）。
-        return fact("failed", { ...base, runId, recordsAppended: recorded, producerRegistry: String(registryRel) },
-          `producer registry declared but unreadable (${String(registryRel)}) ⇒ no findings filed this round, carrier records kept`);
+        return fact("failed", { ...base, runId, recordsAppended: recorded, producerRegistry: String(mappingRel) },
+          `producer registry declared but unreadable (${String(mappingRel)}) ⇒ no findings filed this round, carrier records kept`);
       }
       let dispositions: FilingDisposition[] = [];
       const filed: string[] = [];
+      const escalated: string[] = [];
       const fileErrors: string[] = [];
       if (opts.filingEnabled !== false) {
         dispositions = selectFilings(parsed.findings, {
           routine: decl.name, probe: decl.probe as string, runId, ts: new Date(started).toISOString(),
           carrierPath: findingsPath, carrierRel: path.relative(opts.root, findingsPath),
           tasksDir, nowMs: started, k: opts.filingRate ?? DEFAULT_RATE, registeredProducers,
+          remedy, remedyProbe: executionProbe,
         });
         for (const d of dispositions) {
           if (!d.accepted || !d.taskId) continue;
           const f = parsed.findings.find((x) => x.id === d.findingId);
           if (!f) continue;
           // 单行标题：rationale 里的换行会让 `task create --title` 写出 YAML 折行块（实测），难看且易漂。
-          const title = `${decl.name}: ${String(f.rationale).replace(/\s+/g, " ").trim()}`.slice(0, 180);
+          // 升级形态在标题前加一个可见前缀，使板上「人可见通道」的立案与可派发立案在标题面即可区分。
+          const title = `${decl.name}${d.escalate ? " [remedy-blocked] " : ": "}${String(f.rationale).replace(/\s+/g, " ").trim()}`.slice(0, 180);
           const body = renderRoutineTaskBody({ ...f }, {
             routine: decl.name, probe: decl.probe as string, runId, carrier: path.relative(opts.root, findingsPath),
             ts: new Date(started).toISOString(), taskId: d.taskId,
-          });
+          }, d.escalate ? {
+            blocked: {
+              probeId: remedy.probeId,
+              observed: remedy.observed,
+              remedy: executionProbe?.remedy ?? null,
+              // ⛔ 逐字来自 mapping 自己的 `producers[].command`（同一次读，`mapping.commands`）——
+              //    升级体里 ⛔ 不重打一份命令，那会制造第二个真相源（硬规则 5b）。
+              producerCommand: (f.producer ? mapping.commands.get(String(f.producer).trim()) : null) ?? null,
+            },
+          } : undefined);
+          // 升级形态落 `needs-human`：本项目现成的「人可见、不进派发候选」通道。⛔ 不新增成因枚举、
+          // ⛔ 不新增再入队路径（人 2026-09-20 裁定）；⛔ 也不给这个任务加任何成因类 frontmatter 字段。
+          const escalateStatus = d.escalate ? "needs-human" : null;
           const w = opts.fileTaskFn
-            ? await opts.fileTaskFn(d.taskId, title, body)
-            : fileRoutineTask(opts.root, opts.kernelPluginRoot ?? null, d.taskId, title, body, ["gap", "routine-filed", decl.name], tasksDir);
+            ? await opts.fileTaskFn(d.taskId, title, body, escalateStatus)
+            : fileRoutineTask(opts.root, opts.kernelPluginRoot ?? null, d.taskId, title, body, ["gap", "routine-filed", decl.name], tasksDir, escalateStatus);
           if (w.ok) {
             // 写盘即提交（与载体同一条判据）：⛔ 不留一个「已立案但没人提交」的任务文件。
             // ⚠️ 实测这里通常是**空转**——`quay-native task create` 自己就提交它写的文件（见
@@ -802,6 +967,7 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
             const taskRel = path.relative(opts.root, path.join(tasksDir, `${d.taskId}.md`));
             const tc = commitRoutineWrite(opts.root, taskRel, `routine(${decl.name}): file ${d.taskId} from finding ${d.findingId}`);
             filed.push(d.taskId);
+            if (d.escalate) escalated.push(d.taskId);
             if (!tc.ok) fileErrors.push(`${d.taskId}: filed but not committed — ${tc.reason}`);
           } else {
             fileErrors.push(`${d.taskId}: ${w.reason}`);
@@ -815,6 +981,10 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           runId, evaluated: opts.filingEnabled !== false,
           candidates: parsed.findings.length,
           filed,
+          // 升级面单独一类（⛔ 不与 `filed` 合并）：这两条通道的产物**形状不同、消费者不同**，
+          // 合并会让「本轮走了人可见通道」与「本轮照常派发」在载体里同形（硬规则 3）。
+          escalated,
+          remedy_availability: remedy.status,
           rejected: dispositions.filter((d) => !d.accepted).map((d) => ({ findingId: d.findingId, gate: d.gate, reason: d.reason })),
           errors: fileErrors,
         }]);
@@ -847,9 +1017,12 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
         inventory: parsed.inventory,
         recordsAppended: recorded,
         filed,
+        escalated,
+        remedy_availability: remedy.status,
+        remedy_source: remedy.source,
         filingRejected: dispositions.filter((d) => !d.accepted).length,
         carrierCommit: commit.ok ? "committed" : commit.reason,
-      }, `deep scan ran: ${parsed.findings.length} structured finding(s), ${parsed.malformed} malformed, ${parsed.shards ?? "?"} shard(s), ${recorded} record(s) appended to ${path.relative(opts.root, findingsPath)}, ${filed.length} filed as task(s)`);
+      }, `deep scan ran: ${parsed.findings.length} structured finding(s), ${parsed.malformed} malformed, ${parsed.shards ?? "?"} shard(s), ${recorded} record(s) appended to ${path.relative(opts.root, findingsPath)}, ${filed.length} filed as task(s)${escalated.length ? `, ${escalated.length} of them via the HUMAN-VISIBLE channel (remedy availability: ${remedy.status})` : ""} — remedy availability: ${remedy.status} (${remedy.reason})`);
     },
   };
 }
