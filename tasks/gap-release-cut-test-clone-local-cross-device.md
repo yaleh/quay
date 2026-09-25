@@ -1,7 +1,7 @@
 ---
 id: gap-release-cut-test-clone-local-cross-device
 title: release-cut.test.mjs 的 fixture `git clone --local` 跨设备恒红——全量套件在 fan-in 恒失败
-status: ready
+status: done
 labels:
   - gap
   - defect
