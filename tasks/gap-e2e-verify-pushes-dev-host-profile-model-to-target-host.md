@@ -2,7 +2,7 @@
 id: gap-e2e-verify-pushes-dev-host-profile-model-to-target-host
 title: --ac207-e2e / --ac239-e2e 把开发机 .quay/profiles.yml 原样 scp 给目标主机，其 worker
   模型名（本机网关专属）在 host B 上被拒 ⇒ AC-207/AC-239 两条腿 worker 全死、记录不产出，且无覆盖入口
-status: todo
+status: ready
 labels:
   - gap
   - defect
