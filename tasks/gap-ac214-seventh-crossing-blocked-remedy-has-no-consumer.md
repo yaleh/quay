@@ -213,6 +213,9 @@ grep -n "ssh\|precondition"  plugin/probes/freshness-refresh.md  → 0 命中（
   - `ROUTINE (rate window)`：`filingRate: 0`（派发预算被构造性耗尽）下升级**照旧到达人可见通道**，而同一轮里**不被该读数覆盖**的产出者仍被 `rate:` 挡下（⛔ 豁免只属于人可见通道，不是洞）。
   - `RESOLUTION`：mapping 与规格同源（修**实测**到的那个静默 `not-declared`）。
   **scoped 门**：`bash scripts/test.sh --for-task gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer --allow-thin` ⇒ **EXIT=0**（`tests 51 / pass 51 / fail 0`，45 条 scoped 静态检查全 PASS）。
+  **⛔ 变异检验（比「换个读数」更强的取假）：把机制本身改坏，测试必须红 —— 两处都实测过，且都已还原（`git status --short` 只剩未跟踪的取证目录）**：
+  - 变异①：`classifyExecutionProbeResult` 的 blocked 分支恒不成立（`if (false && …)`）⇒ **5 条红**（CLASSIFIER / GATE / blocked arm / unchanged reading / rate window）。
+  - 变异②（**正是本条要关掉的那个形态**）：`const escalate = remedyGatesProducer(...)` 强迫为 false，即**读数照样记录、但消费者不再改变结果** ⇒ **3 条红**（blocked arm / unchanged reading / rate window），而「可执行」臂**保持绿** ⇒ 这套用例能把「消费者在工作」与「消费者是死的」分开，⛔ 不是恒有输出。
 
 - [x] AC6 生产读数（硬规则 4 推论三：AC 必须读**生产载体**）：修复落地后**真实**的一轮 `freshness-refresh`（常驻 driver 调度，⛔ 不是 `--selfcheck`、⛔ 不是夹具）在 `.quay/routine-findings.jsonl` 留下带 remedy-availability **独立取值**的记录，`ts` 晚于修复落地时刻；且该轮在 ssh 阻断下**不再**产出与「可执行」同形的可派发任务。贴命令、runId、记录全文、产物状态。
 
