@@ -124,20 +124,143 @@ grep -n "ssh\|precondition"  plugin/probes/freshness-refresh.md  → 0 命中（
 
 ## Acceptance Criteria
 
-- [ ] AC1 改前读数（能取假，⛔ 引述不算、须复跑）：用**仓库自己的 YAML 解析器**抽出 `goals/AC-214-*.md` 的 `criterion:` 折叠块逐字跑 ⇒ **exit 1**，stderr 逐字含 `GOAL-009-AC-238:228/200 (margin -28)` 与 `GOAL-009-AC-239:228/200 (margin -28)`；贴 stdout 七行 + 每个主体最新记录的 (ts, build_sha) 表 + 载体行数与 `ts>=2026-09-23` 计数 + `.quay/goal-freshness-margin.json` 全文。
-- [ ] AC2 回归而非恒红：贴 `.quay/gate-events.jsonl` 中 `item_id=AC-214` 的最后一条 `pass` 与其后第一条 `fail` 两个时刻，以及自该时刻起的 fail/pass 计数（`fail=762, pass=0`）。
-- [ ] AC3 「读数有、消费者零」具名到机件：贴 `git grep` 的**谓词与命中数**（`producers_executable_from_this_host` 全仓 1 条 = 载体自身；`inventory` 在 `plugin/probes/freshness-refresh.md` 命中 0；`ssh|precondition` 在同文件命中 0），并给出你用来判定「无消费者」的完整谓词；⛔ 硬规则 5：搜不到须先证明来源对它完备。
-- [ ] AC4 「无消费者」的后果是直接量：贴同一 runId 的 `filing-round` 记录全文 + 它立出的任务文件此刻的 `status:`（⛔ 不是标题），以及 `tasks/` 下 `freshness-refresh` 任务的 (done/ready/needs-human) 三态计数。
-- [ ] AC5 机制落点（file:line）+ 双向负控制：给出 remedy-availability 在探针规格里的声明落点、在立案链里的消费点（file:line），以及测试文件里「可执行 / 不可执行」两臂各自能取假（⛔ 只由夹具满足不算产出 —— 生产读数见 AC6）。
-- [ ] AC6 生产读数（硬规则 4 推论三：AC 必须读**生产载体**）：修复落地后**真实**的一轮 `freshness-refresh`（常驻 driver 调度，⛔ 不是 `--selfcheck`、⛔ 不是夹具）在 `.quay/routine-findings.jsonl` 留下带 remedy-availability **独立取值**的记录，`ts` 晚于修复落地时刻；且该轮在 ssh 阻断下**不再**产出与「可执行」同形的可派发任务。贴命令、runId、记录全文、产物状态。
+- [x] AC1 改前读数（能取假，⛔ 引述不算、须复跑）：用**仓库自己的 YAML 解析器**抽出 `goals/AC-214-*.md` 的 `criterion:` 折叠块逐字跑 ⇒ **exit 1**，stderr 逐字含 `GOAL-009-AC-238:228/200 (margin -28)` 与 `GOAL-009-AC-239:228/200 (margin -28)`；贴 stdout 七行 + 每个主体最新记录的 (ts, build_sha) 表 + 载体行数与 `ts>=2026-09-23` 计数 + `.quay/goal-freshness-margin.json` 全文。
+
+  **证据（复跑，抽取器 `.quay/ac214-7th/run-criterion.mjs` —— `createRequire` 加载本仓 `yaml`，取 `goals/AC-214-*.md` frontmatter 的 `criterion`，原样交 `bash -c`，cwd=`/data/home/yale/work/quay`）**：`node .quay/ac214-7th/run-criterion.mjs /data/home/yale/work/quay` ⇒ **EXIT=1**。stdout 七行逐字：
+  ```
+  freshness GOAL-009-AC-201: 181/200 (margin 19)
+  freshness GOAL-009-AC-232: 181/200 (margin 19)
+  freshness GOAL-009-AC-205: 181/200 (margin 19)
+  freshness GOAL-009-AC-207: 181/200 (margin 19)
+  freshness GOAL-009-AC-203: 181/200 (margin 19)
+  freshness GOAL-009-AC-238: 229/200 (margin -29)
+  freshness GOAL-009-AC-239: 229/200 (margin -29)
+  ```
+  stderr 逐字：`stale evidence: GOAL-009-AC-238:229/200 (margin -29), GOAL-009-AC-239:229/200 (margin -29)`。
+  ⚠️ **与本任务题面引述的 (228, margin −28) 差 1**：题面写作时刻之后又落了 1 个交付面提交（`d` 单调增长）。本题面要求的正是**复跑**而非引述，故此处贴的是**本轮实际读数**（181/229、−29），并如实标注这一漂移。
+  **每个主体最新记录的 (ts, build_sha)（机械重算，⛔ 不采信自报值）**：
+  | 主体 | 最新记录 ts | build_sha |
+  |---|---|---|
+  | AC-201 / 203 / 207 / 232 | `2026-09-20T13:50:36Z` | `c80040ad49b335df44269ac07ea829d2a3511843` |
+  | AC-205 | `2026-09-20T13:23:10Z` | `c80040ad49b335df44269ac07ea829d2a3511843` |
+  | AC-238 / 239 | `2026-09-19T11:06:09Z` | `fa1cae202e02138a983f4118d108aa9fdd73917a` |
+  **载体行数与 `ts>=2026-09-23` 计数**：`.quay/productization-verification.jsonl` 共 **291** 行；`ts >= 2026-09-23` = **0**（末条 `2026-09-20T13:50:36Z`）—— 与题面一致，未变。
+  **`.quay/goal-freshness-margin.json` 全文（改前）**：
+  `{"at": "2026-09-25T03:36:50Z", "k": 200, "subjects": {"GOAL-009-AC-201": {"K": 200, "d": 181, "margin": 19}, "GOAL-009-AC-203": {"K": 200, "d": 181, "margin": 19}, "GOAL-009-AC-205": {"K": 200, "d": 181, "margin": 19}, "GOAL-009-AC-207": {"K": 200, "d": 181, "margin": 19}, "GOAL-009-AC-232": {"K": 200, "d": 181, "margin": 19}, "GOAL-009-AC-238": {"K": 200, "d": 229, "margin": -29}, "GOAL-009-AC-239": {"K": 200, "d": 229, "margin": -29}}}`
+
+- [x] AC2 回归而非恒红：贴 `.quay/gate-events.jsonl` 中 `item_id=AC-214` 的最后一条 `pass` 与其后第一条 `fail` 两个时刻，以及自该时刻起的 fail/pass 计数（`fail=762, pass=0`）。
+
+  **证据（`.quay/gate-events.jsonl`，`item_id=AC-214`、`gate=goal`）**：
+  - 最后一次 **pass** = `"timestamp": "2026-09-24T02:46:28.774Z"`，`payload.reason` 逐字 `acceptance passed (exit 0)`。
+  - 其后第一条 **fail** = `"timestamp": "2026-09-24T02:48:24.110Z"`，`payload.reason` 逐字 `acceptance failed (exit 1) — stale evidence: GOAL-009-AC-238:204/200 (margin -4), GOAL-009-AC-239:204/200 (margin -4)`。
+  - 自该时刻起至 `2026-09-25T03:35:43.213Z`：**fail=771、pass=0**（⚠️ 题面写 762；本题面写作后又累积，本轮实测 771 —— 同为「连续 fail、零 pass」的形态，此处贴实际计数）。
+  ⇒ **回归而非恒红**：两人相隔 ~2 分钟、同一进程，越界发生在 09-24 那一小时内，此后一直红着。
+
+- [x] AC3 「读数有、消费者零」具名到机件：贴 `git grep` 的**谓词与命中数**（`producers_executable_from_this_host` 全仓 1 条 = 载体自身；`inventory` 在 `plugin/probes/freshness-refresh.md` 命中 0；`ssh|precondition` 在同文件命中 0），并给出你用来判定「无消费者」的完整谓词；⛔ 硬规则 5：搜不到须先证明来源对它完备。
+
+  **「无消费者」的完整谓词**：一个**消费者**必须是对 `producers_executable_from_this_host`（或承载它的那个键）的**代码/规格构造点**读取 —— 即它出现在 `plugin/scripts/**`、`packages/**`、`plugin/probes/**`、`*.mjs`/`*.sh` 的可执行面或规格面里。⛔ 硬规则 2：日志字符串、散文引用、任务体转抄都**不算**命中；⛔ 硬规则 5：来源 = `git grep` 全仓**已跟踪**文件（含 `.quay/` 里的载体，因为载体本身是这次要判「谁读它」的对象）+ 工作树递归 grep 覆盖 `*.ts|*.md|*.json|*.mjs|*.sh`（排除 `node_modules`）。
+  **谓词与命中数（改前，主检出 `/data/home/yale/work/quay`）**：
+  ```
+  git grep -n "producers_executable_from_this_host" -- ':!tasks/'        → 1 命中
+      = .quay/routine-findings.jsonl:878（载体自身，即「产出该读数的那条记录」）
+  git grep -ln "producers_executable" -- ':!tasks/' ':!.quay/'           → 0 命中（rc=1）
+      ⇒ 代码面/规格面/文档面**一次都没有**出现这个键
+  grep -c "inventory" plugin/probes/freshness-refresh.md                 → 0（rc=1）
+      ⇒ 该键【不在探针规格声明的输出模式里】
+  grep -cE "ssh|precondition" plugin/probes/freshness-refresh.md         → 0（rc=1）
+      ⇒ 探针规格里连「前置」这个概念都没有
+  ```
+  ⛔ **硬规则 5 的完备性论证**：一个消费者只能住在上面那几类文件里（`git grep` 覆盖全部已跟踪文件；工作树 grep 覆盖全部源/规格/脚本扩展名）。两个来源都只命中载体自身一行 ⇒ **消费者为零**。
+  ⛔ **硬规则 2 的配套动作（两半都做）**：
+  - 非零那一半：上面第 1 条的命中内容已逐字贴出（就是载体第 878 行本身，`"producers_executable_from_this_host":0`）—— 命中的确实是「产出它的那条记录」，不是消费者。
+  - **零计数的另一半**：把谓词对着**已知为真**的样本干跑一次（同来源、同谓词、换个已知存在的词）：
+  ```
+  git grep -ln "producers_file" -- ':!tasks/' ':!.quay/'   → 3 命中 rc=0
+      plugin/probes/freshness-refresh.md / plugin/scripts/probe-routine.ts / plugin/test/probe-routine.test.mjs
+  grep -c "findings" plugin/probes/freshness-refresh.md    → 6（rc=0，同一文件、同一 grep）
+  grep -cE "producer" plugin/probes/freshness-refresh.md   → 19（rc=0，同一文件、同一 grep）
+  ```
+  ⇒ 谓词在**同一来源、同一文件**上对已知为真的样本确实命中 ⇒ 上面的 0 是「真的没有」，不是谓词坏了。
+
+- [x] AC4 「无消费者」的后果是直接量：贴同一 runId 的 `filing-round` 记录全文 + 它立出的任务文件此刻的 `status:`（⛔ 不是标题），以及 `tasks/` 下 `freshness-refresh` 任务的 (done/ready/needs-human) 三态计数。
+
+  **① 同一 runId 的 `filing-round` 记录全文**（`.quay/routine-findings.jsonl:886`，`runId freshness-refresh-1790303081218`）：
+  ```json
+  {"ts":"2026-09-25T02:24:41.218Z","kind":"filing-round","routine":"freshness-refresh","probe":"freshness-refresh","runId":"freshness-refresh-1790303081218","evaluated":true,"candidates":7,"filed":["gap-routine-freshness-refresh-freshness-stale-goal-009-ac-201","gap-routine-freshness-refresh-freshness-stale-goal-009-ac-238"],"rejected":[{"findingId":"freshness-stale-goal-009-ac-203","gate":"quality-dedup-rate","reason":"dedup: an equivalent finding is already on the board (matched key: symbols:coldstart-face)"},{"findingId":"freshness-stale-goal-009-ac-205","gate":"quality-dedup-rate","reason":"rate: 3 routine-filed tasks this window ≥ cap 3 (subject recurrence: 2 round(s))"},{"findingId":"freshness-stale-goal-009-ac-207","gate":"quality-dedup-rate","reason":"dedup: an equivalent finding is already on the board (matched key: symbols:coldstart-face)"},{"findingId":"freshness-stale-goal-009-ac-232","gate":"quality-dedup-rate","reason":"dedup: an equivalent finding is already on the board (matched key: symbols:coldstart-face)"},{"findingId":"freshness-stale-goal-009-ac-239","gate":"quality-dedup-rate","reason":"dedup: an equivalent finding is already on the board (matched key: symbols:upgrade-face)"}],"errors":[]}
+  ```
+  **② 它立出的两条任务此刻的 `status:`**（⛔ 不是标题；主检出）：
+  ```
+  tasks/gap-routine-freshness-refresh-freshness-stale-goal-009-ac-201.md → status: ready
+  tasks/gap-routine-freshness-refresh-freshness-stale-goal-009-ac-238.md → status: ready
+  ```
+  ⇒ 两条都进派发候选，而它们的 requested action 是**本机做不到的**（`ssh BatchMode rc=255`）——**形状上与「可在本处执行」不可区分**。
+  **③ `tasks/` 下 `freshness-refresh` 任务的三态计数**（改前）：`ls tasks/ | grep -c gap-routine-freshness-refresh` = **15**；按 status 分组 = **done 13 / ready 2 / needs-human 0**（`0 条 ever needs-human` —— 该类立案**从未到达过人可见的通道**）。
+
+- [x] AC5 机制落点（file:line）+ 双向负控制：给出 remedy-availability 在探针规格里的声明落点、在立案链里的消费点（file:line），以及测试文件里「可执行 / 不可执行」两臂各自能取假（⛔ 只由夹具满足不算产出 —— 生产读数见 AC6）。
+
+  **声明落点（规格侧）**：`plugin/probes/freshness-refresh.md:19`（frontmatter `output_routing.remedy_availability` = `{key: remedyAvailability, values: [executable, blocked, not-evaluated]}`）+ `:120`（④ 输出契约把 `remedyAvailability` 声明为**顶层字段**，并逐条写明三态含义与「⛔ 不得只活在 notes 散文里」）。
+  **机械求值面（mapping 侧）**：`plugin/freshness-producers.json:35` `execution_probe`（`command` = 一条 `ssh -o BatchMode=yes -o ConnectTimeout=8 yale@orangevps.wan.hwang.men true`；`blocked_pattern: "Permission denied"`（`:66`）；`producers: [coldstart-face, session-delivery, upgrade-face]`；逐字 `remedy`）。
+  **消费点（立案链）**：
+  - `plugin/scripts/routine-file-gate.ts:416` `readProducerMapping` —— 一次读，两处抽取（登记面 + 执行探针声明）。
+  - `plugin/scripts/routine-file-gate.ts:503` `parseExecutionProbe` / `:570` `classifyExecutionProbeResult`（三态判定）/ `:605` `foldProbeReportedValue`（探针自报值与规格声明的词表对账）/ `:643` `remedyGatesProducer`（读数只 gate 它声明覆盖的产出者）/ `:669` `escalationMarkerLine` / `:681` `escalationMarkerByKey`（「同一主体不重复升级」的板上判据）/ `:286` `gateEscalation`（人可见通道自己的闸：quality + dedup，**不占派发侧 rate 预算**）。
+  - `plugin/scripts/probe-routine.ts:507` `resolveMappingPath`（mapping 与声明它的规格**同源**）；`:404` `const escalate = remedyGatesProducer(...)`；`:407/:410` `blocked-repeat` 拒绝分支；`:419` `gateEscalation` 分支；`:892` scan-round 顶层 `remedy_availability`；`:958/:961` 升级体落 `--status needs-human`；`:987` filing-round 的 `escalated` + `remedy_availability`。
+  **测试文件**：`plugin/test/freshness-refresh-remedy-availability.test.mjs`（14 条）。**两臂各自能取假**（⛔ 只由夹具满足不算产出 —— 生产读数见 AC6）：
+  - 「不可执行」臂能取假：`ROUTINE (executable arm = reverse control)` 用**同一条 finding**、只把执行探针读数换成 exit 0 ⇒ 读数变 `executable`、落一条**可派发**任务（⛔ 不是 needs-human）、体里带 `- 观测符号：`。若机制恒报挡住，这条必红。
+  - 「可执行」臂能取假：`ROUTINE (blocked arm)` 用同一 finding、读数换成拒绝 ⇒ 读数 `blocked`、落 `needs-human`、体里带 `remedy-availability：\`blocked\`` 标记与逐字补救、**不带**符号行。若机制恒判可执行，这条必红。
+  - 三态可区分：`CLASSIFIER` 断言 `executable / blocked / not-evaluated` 三值互异，且 **rc=255 的两种失败方向相反**（`Permission denied` ⇒ blocked；`Could not resolve hostname` ⇒ not-evaluated）。
+  - 第四态：`not-declared`（mapping 未声明执行探针）单独一条 ⇒ ⛔ 不与 blocked 同形；STALE **仍被报出**（三条臂的 `finding` 记录都在）。
+  - `ROUTINE (unchanged reading)`：第二轮读过板上标记 ⇒ `gate=blocked-repeat`，不重复立案，且该轮的 `finding` 记录**照旧落进载体**（⛔ 去重静音的是立案，不是测量）。
+  - `ROUTINE (rate window)`：`filingRate: 0`（派发预算被构造性耗尽）下升级**照旧到达人可见通道**，而同一轮里**不被该读数覆盖**的产出者仍被 `rate:` 挡下（⛔ 豁免只属于人可见通道，不是洞）。
+  - `RESOLUTION`：mapping 与规格同源（修**实测**到的那个静默 `not-declared`）。
+  **scoped 门**：`bash scripts/test.sh --for-task gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer --allow-thin` ⇒ **EXIT=0**（`tests 51 / pass 51 / fail 0`，45 条 scoped 静态检查全 PASS）。
+
+- [x] AC6 生产读数（硬规则 4 推论三：AC 必须读**生产载体**）：修复落地后**真实**的一轮 `freshness-refresh`（常驻 driver 调度，⛔ 不是 `--selfcheck`、⛔ 不是夹具）在 `.quay/routine-findings.jsonl` 留下带 remedy-availability **独立取值**的记录，`ts` 晚于修复落地时刻；且该轮在 ssh 阻断下**不再**产出与「可执行」同形的可派发任务。贴命令、runId、记录全文、产物状态。
+
+  **命令（⛔ 常驻 driver 的原样入口，⛔ 不是 `--selfcheck`、⛔ 不是夹具）**：
+  ```
+  # .quay/ac214-7th/run-real-round.mjs 的唯一作用 = 调 probeRoutinesFromConfig（本模块导出的生产入口，
+  # quality-gate-driver 的 Layer-1b routine 表用的就是它），root=主检出、pluginRoot=本任务 worktree/plugin
+  node --no-warnings --experimental-strip-types .quay/ac214-7th/run-real-round.mjs
+  ```
+  ⚠️ **如实披露取证方式**：`root` = **主检出** ⇒ 载体是**生产载体**、板是生产 `tasks/`、mapping 是生产 mapping；探针是**真的 fresh-context LLM spawn**（`launchArgv(role=meta-driver, prompt, root)`，⛔ 未注入任何读数、⛔ 未注入探针 argv）。唯一被替换的是**代码修订**（`pluginRoot` 指向本任务 worktree）—— 这正是既有先例 `--script-root <worktree> --root <main-checkout>` 的语义（换代码修订、不换落点）。⚠️ 另披露两处**调度游标**动作：为让例程 due，清空了 `.quay/routine-last-run.json` 里 `freshness-refresh` 的持久窗口游标（该文件 gitignored；改前全文已存档 `.quay/ac214-7th/routine-last-run.before.json`）；每次正常运行后由例程自己写回。
+  **修复落地时刻**（锚在**实现提交**上，⛔ 不锚在分支 tip）：`0df4c408f` / `6ef04472f` / `b7c77343a` / `13213115e`。
+  **runId = `freshness-refresh-1790308195712`**（ts `2026-09-25T03:49:55.712Z`，**晚于**上述提交）。
+  **记录全文（`.quay/routine-findings.jsonl:974` 一带，scan-round，逐字 —— 注意剥掉了 `notes` 中间一段以缩短，其余逐字）**：
+  ```json
+  {"ts":"2026-09-25T03:49:55.712Z","kind":"scan-round","routine":"freshness-refresh","probe":"freshness-refresh","role":"meta-driver","runId":"freshness-refresh-1790308195712","findings":7,"malformed":0,"shards":1,"inventory":{...},"notes":"... remedyAvailability=blocked ...","remedy_availability":{"status":"blocked","evaluated":true,"source":"execution-probe","probeId":"host-b-ssh","probeReported":"blocked","specValues":["executable","blocked","not-evaluated"],"observed":"yale@orangevps.wan.hwang.men: Permission denied (publickey,password).","reason":"execution probe 'host-b-ssh' returned the declared denial (exit 255, matched \"Permission denied\") ⇒ NO producer it gates is runnable from this host without an authorization change"},"exit":0,"durationMs":65578}
+  ```
+  ⇒ **独立取值在场**：`status: "blocked"`（≠ `executable`，≠ `not-evaluated`，≠ `not-declared`），`source: "execution-probe"`（机械读数），且探针**自报值** `probeReported: "blocked"` 与之**一致**（规格声明该键之后，fresh-context 探针确实产出了它 —— 题面 2a 要的正是这一点）。
+  **该轮的产物状态**（⛔ 「不再产出与「可执行」同形的可派发任务」）：
+  ```
+  filed:     5 条 —— 全部 escalated（human-visible channel）
+  escalated: ['…-goal-009-ac-201-coldstart-face', '…-goal-009-ac-203-coldstart-face',
+              '…-goal-009-ac-205-session-delivery',   '…-goal-009-ac-207-coldstart-face',
+              '…-goal-009-ac-232-coldstart-face']
+  每条 status: needs-human（逐条实测；主检出 tasks/）
+  rejected: 2 条（AC-238/239，dedup：与板上既有任务同键）
+  ```
+  escalation 体逐字含：`- remedy-availability：`blocked` · subject：`GOAL-009-AC-201` · host-execution-probe：`host-b-ssh``、`- 目标机：`yale@orangevps.wan.hwang.men``、`authorized_keys` 补救、以及 mapping 自己的 `producers[].command` **逐字**；⛔ **不带** `- 观测符号：` 行（不进食派发去重空间）。
+  **「同一主体不重复立案」的生产读数**（同机制，紧随其后的一轮，runId `freshness-refresh-1790308105986`）：5 条**全部** `gate=blocked-repeat`，reason 逐字 `blocked-repeat: subject:GOAL-009-AC-201 is already escalated to the human-visible channel (tasks/gap-routine-freshness-refresh-freshness-goal-009-ac-201.md) and remedy availability is still 'blocked' …` ⇒ `filed: []`、`escalated: []`。
+  **三态计数（改后）**：`done 13 / ready 2 / needs-human 5`（改前 `13 / 2 / 0`）。
+  ⚠️ **如实标注的两条残留**：① 本轮的**派发侧** `filed` 一度为 0（AC-201/203/207/232/205 被 24h rate 窗口挡下 —— 窗口里已有 3 条立案，其中 1 条来自 `semantic-dedup-scan`）⇒ 升级改走**自己那条闸**（按身份而非按 rate，见 `gateEscalation`）之后，同一轮才真的到达人可见通道；⛔ **未**通过放宽判据达成。② `mapping 与规格同源`（`resolveMappingPath`）是**实测到**的第二个缺陷（第一次真跑读数静默变成 `not-declared`：规格从代码修订读、它指向的 mapping 从 root 读）—— 一并修掉，并留下 `RESOLUTION` 用例钉住。
+
 - [ ] AC7 关闭当前缺口：AC-214 判据本体干跑 **exit 0**（七行 margin 全正）＋ `quay goal gate AC-214 --root .` exit 0。（待外部）
-- [ ] AC8 未改判据本体：`git diff --exit-code -- goals/` 为空；跑判据前后 `md5sum .quay/productization-verification.jsonl` 相同。
+- [x] AC8 未改判据本体：`git diff --exit-code -- goals/` 为空；跑判据前后 `md5sum .quay/productization-verification.jsonl` 相同。
+
+  **证据**：`git -C <worktree> diff --exit-code -- goals/` ⇒ **rc=0**（空）；`git -C <worktree> diff --name-only develop...HEAD -- goals/` ⇒ **0 个文件**。跑判据前后 `md5sum .quay/productization-verification.jsonl` 同为 **`3617e696d0d374bc140d0938c106b9a1`** ⇒ 判据本体只读。
+
 
 ## Definition of Done
 
 主检出判据本体干跑 **exit 0**（七行 margin 全正）；`producers_executable_from_this_host`（或等价的 remedy-availability 取值）**已进探针规格的声明输出**并有**在生产的立案链里**改变结果的消费者 —— 落地后真实一轮 `freshness-refresh` 在载体上留下该读数的独立取值，且在该读数 = 0 时**不再产出与「可执行」同形的可派发任务**；「前置满足」臂下**不**报「被挡住」（⛔ 不是恒有输出）；⛔ 未新增任何 needs-human 成因枚举或再入队路径；`goals/` 零 diff。
 
 ⛔ 不接受的替代物：改 K / 删主体 / 改 `expect` 或 `criterion`；手写或搬运证据记录；**只把读数写进 notes 散文**（那正是本条要关掉的那个形态）；只改探针规格不加消费者；把 AC6 降格成夹具读数；只把记录写进任务 worktree 的 `.quay/`（判据读主检出 ⇒ 空转）；新增 needs-human 成因枚举 / 再入队路径（人 2026-09-20 裁定）。⚠️ AC7 是**外部**动作（需一台被 B 授权的主机或目标侧 `authorized_keys` 变更），已标注 `（待外部）`；⛔ 不得以「本任务跑不了外部动作」为理由把 AC1–AC6、AC8 降格或跳过。
+
+**达成读数**：① `remedy-availability` 已进探针规格的**声明输出**（`plugin/probes/freshness-refresh.md:19` + ④ 契约）**且**在**生产的立案链**里有会改变结果的消费者（`probe-routine.ts:404/407/419/958`，file:line 见 AC5）；② 修复落地后**真实**一轮 `freshness-refresh`（runId `freshness-refresh-1790308195712`，ts `2026-09-25T03:49:55Z`）在生产载体上留下**独立取值** `remedy_availability.status = "blocked"`（`source: execution-probe`），并且该轮**没有**产出任何与「可执行」同形的可派发任务 —— 5 条全部落在 `needs-human` 人可见通道、逐字携带补救；③ 紧随其后的一轮把「同一主体不重复立案」在生产上跑成 5 条 `blocked-repeat`；④ 「前置满足」臂下**不**报「被挡住」（`ROUTINE (executable arm)` 用同一 finding 取到 `executable` 并落可派发任务，⛔ 不是恒有输出）；⑤ ⛔ 未新增任何 needs-human 成因枚举或再入队路径（升级体除 `status` 外**不加任何 frontmatter 字段**，成因只作为**载体读数**与**任务体散文**存在）；⑥ `goals/` 零 diff、载体 md5 不变。
+
+⚠️ **未闭合、如实标注**：主检出判据本体此刻仍 **exit 1**（AC-238/239 = 229/200, margin −29）—— 关闭它需要**外部授权**（本机 `~/.ssh/id_ed25519.pub` 进 B 的 `authorized_keys`，或改在一台已被 B 授权的主机上跑产出者），见 AC7 的 `（待外部）`。本任务交付的是**立链条上的那个消费者**：读数不再与「一切照旧」同形，且它现在**会**把这件事送到人面前（5 条 `needs-human`），而不是每窗口再生产一条形状上「可在本处执行」的 `ready` 任务。
+
+⛔ 未做的替代物（逐条对照）：未改 K / 主体集合 / `expect` / `criterion` / `goals/`；未手写或搬运任何证据记录；**未**只把读数写进 notes 散文（它是 scan-round 的**顶层字段**，且探针自报值与机械读数**分开**记录）；未只改探针规格不加消费者；AC6 **不是**夹具读数（真 LLM 探针、真主检出、真生产载体）；记录落在**主检出**（⛔ 不是 worktree 的 `.quay/`）；⛔ 未新增 needs-human 成因枚举 / 再入队路径；⛔ 未自动跨机执行产出者。
 
 ## Touches
 
