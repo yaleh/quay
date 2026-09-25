@@ -14,7 +14,7 @@ import {
   // the one Vary/Cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
 } from "./serve-render.ts";
-import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
+import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours, stateColorToken } from "./serve-dashboard.ts";
 // ROW 20 (gap-webui-tests-body-copy-en-zh): this page's body-copy dictionary. `testsLabelsFor` takes
 // the whole roster once per render (the `dashboardLabelsFor` idiom); `fillLabel` fills the `{name}`
 // holes. ⛔ The page never re-reads `?lang=`/the cookie — `lang` arrives as a parameter, exactly as
@@ -284,24 +284,22 @@ ${points}
 // per-file gantt 两个 svg）。本段在 /tests 顶部复用该 export（import，不复制渲染逻辑），数据取
 // tests.runs（与 dashboard 同源），分段颜色按 state red/green，窗口档位与 dashboard 一致
 // （1h·3h·6h·12h，parseTimelineHours 另允许 1..24 的更长档）。
+//
+// gap-routine-semantic-dedup-scan-statecolortoken-pair: 颜色映射同样走 import —— 此处曾有第二份
+// `timelineColorToken` 三元复刻，它存在的唯一理由是 serve-dashboard 的 stateColorToken 当时是模块
+// 私有（非 export）；把上游导出后即 import 复用，三个 token 字面量只剩一处定义（漂移面归零）。
+// AC2 禁的是复制【渲染】函数（renderTimelineBarSvg）—— 该 import 保持不动。
 
-/** 测试轮 state → 与 dashboard testsCard 相同的颜色 token（green → positive，red → accent，其它 →
- *  neutral）。serve-dashboard.ts 的 stateColorToken 是模块私有（非 export），故此处按同一三元复刻
- *  这 3 行「颜色映射」——复刻的是映射不是渲染逻辑，渲染仍走 import 的 renderTimelineBarSvg（AC2
- *  断言 serve-tests.ts 里 0 个同名 function 定义，即不复制渲染函数）。 */
-function timelineColorToken(state: string | null): string {
-  return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
-}
-
-/** tests.runs → 每轮一段 [startedAt, startedAt+durationMs]，颜色按 state。与 dashboard
- *  renderTestsCard 内的同款 map 逐字一致（AC4 的「同一份数据」：同源 verification-round.jsonl、
- *  同一套 start/end 换算，不是各算各的）。startedAt 不可解析 / durationMs 缺失的轮 → NaN（随后被
- *  renderTimelineBarSvg 的窗口过滤跳过，绝不臆造位置）。 */
+/** tests.runs → 每轮一段 [startedAt, startedAt+durationMs]，颜色按 state（走 import 的
+ *  stateColorToken，与 dashboard 同一份映射）。与 dashboard renderTestsCard 内的同款 map 逐字一致
+ *  （AC4 的「同一份数据」：同源 verification-round.jsonl、同一套 start/end 换算，不是各算各的）。
+ *  startedAt 不可解析 / durationMs 缺失的轮 → NaN（随后被 renderTimelineBarSvg 的窗口过滤跳过，
+ *  绝不臆造位置）。 */
 export function buildTestsTimelineSegments(runs: TestRunRecord[]): Array<{ startMs: number; endMs: number; colorVar: string }> {
   return runs.map((r) => {
     const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
     const endMs = Number.isFinite(startMs) && r.durationMs != null ? startMs + r.durationMs : NaN;
-    return { startMs, endMs, colorVar: timelineColorToken(r.state) };
+    return { startMs, endMs, colorVar: stateColorToken(r.state) };
   });
 }
 
