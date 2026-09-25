@@ -67,8 +67,8 @@
     "producers": ["coldstart-face", "session-delivery", "upgrade-face"],
     "remedy": {
       "host": "yale@orangevps.wan.hwang.men",
-      "action": "把本机 `~/.ssh/id_ed25519.pub` 逐字追加到 `yale@orangevps.wan.hwang.men` 的 `~/.ssh/authorized_keys`（目标侧动作，需人授权）",
-      "alternative": "或改在**一台已被 B 授权的主机**上跑本 finding 自己那条 producer 命令（逐字见本文件 `producers[].command`），⛔ 不在此处复制第二份"
+      "action": "把本机 `~/.ssh/id_ed25519.pub` 逐字追加到**该 finding 自己的 producer 在 `--hosts` 里声明的每一台**的 `~/.ssh/authorized_keys`（目标侧动作，需人授权）。⚠️ 不是只加 B 这一台 —— 本探针只读 B，而 coldstart-face 与 session-delivery 的 `--hosts` 含 B 与 C 两台：只加 B 时本探针会读成 `executable`，这两条 producer 却仍跑不动。实测 2026-09-25 从本机跑 coldstart-face（develop tip 5fd1128a68aa）：构建成功（两个 .tgz 均出），随后 B `⇒ yale@orangevps.wan.hwang.men: Permission denied (publickey,password).` 与 C `⇒ yale@ad-arm1.wan.hwang.men: Permission denied (publickey).` **同时**拒绝，rc=1 / 20s / 载体零追加。upgrade-face 的 `--hosts` 只含 B ⇒ 它只需 B。",
+      "alternative": "或改在**一台已被该 producer 自己 `--hosts` 全部主机授权**的主机上跑本 finding 自己那条 producer 命令（逐字见本文件 `producers[].command`），⛔ 不在此处复制第二份"
     }
   },
   "producers": [
