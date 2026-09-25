@@ -45,7 +45,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
 import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
@@ -1301,7 +1301,233 @@ export function rebuildKernelBundle(opts: { timeoutMs?: number; scriptPath?: str
   return { attempted: true, ok: true, reason: null, command: argv.join(" "), durationMs: Date.now() - t0, outputTail: tail };
 }
 
-/** 起一个 anchor 子进程（detached，setsid 等价）。返回 {pid, error}。⛔ 不继承调用者 stdout/stderr。 */
+// ── gap-driver-anchor-runs-without-host-derived-memory-envelope ──────────────────────────────────────
+// 现场（2026-09-25，一次真事故）：`quay-drivers-claudecodeui-*.scope` 里的 driver 群与其全部 worker
+// 在 10:15–10:37 被内核 OOM killer 击杀 36 次，load 冲到 4309。那个 scope **不是 quay 创建的**：有人
+// 用 `systemd-run --user --scope -p OOMPolicy=continue` 手工包了一层 `start-drivers`，**没有 MemoryMax**、
+// 也没开内存记账 ⇒ 事后连峰值读数都没有。根因不是「运维不会用 systemd-run」，而是**机制缺口**：
+// `spawnAnchor` 直接 `spawn(node, [driver-anchor …], {detached:true})`，六个 kind 的常驻循环与
+// worker-driver 派出的**全部** worker 都继承调用者所在的 cgroup；`systemd-run --scope` 此前只出现在
+// `full-suite-runner.ts`（全量套件有包络、driver 群没有）⇒ 想要包络的人只能自己手搓一个（且搓得不带上限）。
+//
+// 本条把包络放在 anchor 的**唯一起点**：spawnAnchor（`startKindViaAnchor` 与自刷新/接管两条路都经它）。
+// 实测（2026-09-25）`systemd-run --scope` 会**原地 exec**——被 spawn 的 pid 与内层 `$$` 相同
+// （210035 == 210035）⇒ `.quay/anchor.pid` / `*-driver.pid` 的语义（pid 是 anchor 自己写的）一行未变，
+// 而 anchor 的全部子进程（含每个 worker）都在该 scope 内。
+//
+// ⛔ 为什么 MemoryMax 必须**宿主推导**而不是写死一个 `16G` 类字面量（CLAUDE.md 硬规则 4 推论二）：
+//   写死的上限在写它的那台机器上「等价于无限制」，换台机器就变成**真**限制且静默。默认取宿主总内存的
+//   一个比例（下面的 ANCHOR_ENVELOPE_HOST_FRACTION），可用 QUAY_DRIVER_SYSTEMD_RUN_LIMITS 覆盖。
+//   ⚠️ 该比例**是未经测量的起始值**，不是目标：本机 246G ⇒ ≈61G，而同机全量套件无上限时实测峰值
+//   8–10.5G。本任务同时落 `MemoryPeak` 读数（见 SKILL），之后**按实测调**，⛔ 不是凭空定阈值。
+//
+// ⛔ 复用的是 `full-suite-runner.ts` 的**思路与 seam 名**，不是它的模块：`full-suite-runner.ts` 反过来
+//   `import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts"`（:140），
+//   `driver-runtime → full-suite-runner` 会成**新的 import 环**（`valueSccs` 基线不许涨）。故此处自带
+//   最小一份，功能对应关系写在这里，⛔ 不 import：
+//     · `parseSystemdRunLimits`  ↦ `parseAnchorMemoryMaxOverride`（只取 MemoryMax 一键；语义差别见其注释）
+//     · `systemdRunAvailable`    ↦ `anchorSystemdRunAvailable`（同一 QUAY_TEST_SYSTEMD_RUN_AVAILABLE seam）
+//     · `buildSystemdRunArgv`    ↦ `anchorLaunchArgv`（同一 --user --scope 形状；本处多 --collect/--unit）
+//   ⛔ 三条各自的**消费者不同**（套件 vs anchor 组），合并到共享模块要动第三份文件，收益只是省几十行。
+
+/** 包络里的上限来源：宿主推导 / env 覆盖 / env 明确不设上限 / 读不到（⛔ 四态各自独立，不与「没包络」同形）。 */
+export type AnchorEnvelopeSource = "host-derived" | "env-override" | "env-unlimited" | null;
+
+/** anchor 组的内存包络读数（纯函数判定 + 内核直接量两条路**共用同一形状**）。
+ *
+ *  ⛔ `envelope` 的取值**不包含**「缺字段/未评估」以外的东西：`"none"` 是**如实报出无包络**的独立取值
+ *  （硬规则 3b —— ⛔ 不把「无包络」伪装成「有包络」，也 ⛔ 不把它伪装成「检查失败」）；区分「没查成」
+ *  与「查了、就是没有」的是 `reason` 的具名取值，⛔ 不是让两者共用 `"none"` 而不给原因。 */
+export interface AnchorEnvelope {
+  /** "scope" = 本进程（或本次启动将）在一个 quay-anchor-*.scope 内；"none" = 无包络（回退当前行为）。 */
+  envelope: "scope" | "none";
+  /** cgroup 末段单元名（直接量，取自 /proc/self/cgroup）。读不到/不在 scope 内 ⇒ null。 */
+  unit: string | null;
+  /** 内核**实际生效**的 memory.max（直接量，读 cgroup 的 memory.max 文件；"max" = 内核语的无上限）。
+   *  ⛔ 不是回显我们传给 systemd-run 的参数（硬规则 4b：回显是自证，不是测量）。 */
+  memoryMax: string | null;
+  /** 上限**由谁决定**（启动者声明，经 QUAY_ANCHOR_ENVELOPE_SOURCE 传给 anchor；内核读不到这件事）。 */
+  source: AnchorEnvelopeSource;
+  /** envelope==="none" 时的**具名**原因（⛔ 不给原因 = 与「没查」同形）。 */
+  reason: string | null;
+}
+
+/** anchor scope 的单元名前缀。读侧靠它把「我们给的包络」与**环境自带的 scope**（GUI 会话的
+ *  `session-N.scope` 等）分开：后者也以 `.scope` 结尾，但**不是**本机制给的包络。 */
+export const ANCHOR_UNIT_PREFIX = "quay-anchor-";
+/** 默认上限 = 宿主总内存 × 本比例。⚠️ **未经测量的起始值**（见上面长注释）——用 MemoryPeak 实测后调。 */
+export const ANCHOR_ENVELOPE_HOST_FRACTION = 0.25;
+/** 覆盖上限的环境变量（语法同 full-suite-runner 的 QUAY_TEST_SYSTEMD_RUN_LIMITS；**显式空串 = 不设上限**）。 */
+export const ANCHOR_LIMITS_ENV = "QUAY_DRIVER_SYSTEMD_RUN_LIMITS";
+/** 启动者把「上限由谁决定」传给 anchor 的 seam（内核读不到这件事，只能由启动者声明）。 */
+export const ANCHOR_ENVELOPE_SOURCE_ENV = "QUAY_ANCHOR_ENVELOPE_SOURCE";
+/** 把内存上限对齐到页边界，避免 systemd/cgroup 侧取整后与读数差几 KB（AC3 的一致性比较靠这个）。 */
+const ANCHOR_ENVELOPE_PAGE_BYTES = 4096;
+
+/** 默认上限（宿主推导）：`floor(totalmem × 比例)` 向下对齐页边界，至少一页。
+ *  ⛔ 纯函数（入参是字节数，不是 os.totalmem()）⇒ 两个注入宿主必得两个不同的值（AC1）。 */
+export function defaultAnchorMemoryMax(totalmemBytes: number): string {
+  const bytes = Math.floor(Math.max(0, totalmemBytes) * ANCHOR_ENVELOPE_HOST_FRACTION);
+  const aligned = Math.max(ANCHOR_ENVELOPE_PAGE_BYTES, Math.floor(bytes / ANCHOR_ENVELOPE_PAGE_BYTES) * ANCHOR_ENVELOPE_PAGE_BYTES);
+  return String(aligned);
+}
+
+/** 从覆盖串里取 MemoryMax 一键。三态（⛔ 各自独立，不与「没给这个键」共用一个取值）：
+ *   - `"absent"`    —— 串里没有 MemoryMax ⇒ **宿主推导**的默认值生效（与 parseSystemdRunLimits 的
+ *                      「缺键回落默认值」同形，只是本处的默认值是宿主推导而非字面量）；串为 `undefined`
+ *                      （env 根本未设）也走这一支。
+ *   - `"value"`     —— `MemoryMax=<v>`（v 非空）⇒ 用 `<v>`。
+ *   - `"unlimited"` —— 串**显式为空/全空白**（明确「一组属性都不设」）或 `MemoryMax=`（值为空）
+ *                      ⇒ 不传 `-p MemoryMax=`（机制上不设该限制，⛔ 不写一个"等价无限制"的字面值）。 */
+export function parseAnchorMemoryMaxOverride(raw: string | undefined): { kind: "absent" | "value" | "unlimited"; value: string | null } {
+  if (raw === undefined) return { kind: "absent", value: null };
+  if (raw.trim() === "") return { kind: "unlimited", value: null };
+  for (const part of raw.trim().split(/\s+/)) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq) !== "MemoryMax") continue;
+    const value = part.slice(eq + 1);
+    return value === "" ? { kind: "unlimited", value: null } : { kind: "value", value };
+  }
+  return { kind: "absent", value: null };
+}
+
+/** anchor 的 scope 单元名（`quay-anchor-<root 基名>-<ts>.scope`）：可读、可按前缀 grep、可按 root 分辨。
+ *  sanitize 到 systemd 允许的字符集；⛔ 不依赖它全局唯一（同名已存在的单元 systemd-run 会拒绝起新的）。 */
+export function anchorUnitName(root: string, nowMs: number): string {
+  const base = path.basename(path.resolve(root)).replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[^A-Za-z0-9]+/, "");
+  const slug = base === "" ? "root" : base;
+  // 单元名总长上限 255；留出 ".scope" 与余量。
+  return `${ANCHOR_UNIT_PREFIX}${slug.slice(0, 180)}-${nowMs}.scope`;
+}
+
+/** `systemd-run --user --scope` 在本机是否可用（记忆化）。与 full-suite-runner.systemdRunAvailable 的
+ *  **同一判据、同一 seam**：起一个真瞬态 scope（`true`）——二进制在不在**不构成**判据，必须有一个活的
+ *  user manager（user session / D-Bus）接受 `--scope` + 属性。`QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1` 强制。 */
+let _anchorSystemdRunAvailable: boolean | null = null;
+export function anchorSystemdRunAvailable(): boolean {
+  if (_anchorSystemdRunAvailable !== null) return _anchorSystemdRunAvailable;
+  const forced = process.env.QUAY_TEST_SYSTEMD_RUN_AVAILABLE;
+  if (forced === "0") return (_anchorSystemdRunAvailable = false);
+  if (forced === "1") return (_anchorSystemdRunAvailable = true);
+  try {
+    execFileSync("systemd-run", ["--user", "--scope", "--quiet", "-p", "MemoryAccounting=yes", "true"], {
+      stdio: "ignore",
+      timeout: 10_000,
+    });
+    _anchorSystemdRunAvailable = true;
+  } catch {
+    _anchorSystemdRunAvailable = false;
+  }
+  return _anchorSystemdRunAvailable;
+}
+
+/** 算出 anchor 启动方式：包不包、包住时的上限是多少。**纯函数**（宿主总内存 / env / 探测全可注入）
+ *  ⇒ 两个注入宿主必得两个不同的 MemoryMax（AC1），且 systemd 不可用时有独立取值 `"none"`（⛔ 不是缺字段）。 */
+export function resolveAnchorEnvelope(opts: {
+  root: string;
+  /** 测试缝：宿主总内存（字节）。缺省 = `os.totalmem()`。 */
+  totalmemBytes?: number;
+  /** 测试缝：覆盖串。缺省 = 读 `process.env.QUAY_DRIVER_SYSTEMD_RUN_LIMITS`。传 `undefined` = 「env 未设」。 */
+  limitsRaw?: string;
+  /** 测试缝：systemd-run 可用性。缺省 = `anchorSystemdRunAvailable()`。 */
+  systemdRun?: boolean;
+  /** 测试缝：单元名里的时间戳。缺省 = `Date.now()`。 */
+  nowMs?: number;
+}): { envelope: "scope" | "none"; memoryMax: string | null; source: AnchorEnvelopeSource; unit: string | null; reason: string | null } {
+  const available = opts.systemdRun ?? anchorSystemdRunAvailable();
+  if (!available) {
+    return {
+      envelope: "none",
+      memoryMax: null,
+      source: null,
+      unit: null,
+      reason: "systemd-run --user --scope unavailable on this host (no user manager / no D-Bus / probe failed) — falling back to an unenveloped spawn",
+    };
+  }
+  const raw = opts.limitsRaw !== undefined ? opts.limitsRaw : process.env[ANCHOR_LIMITS_ENV];
+  const override = parseAnchorMemoryMaxOverride(raw);
+  let memoryMax: string | null;
+  let source: AnchorEnvelopeSource;
+  if (override.kind === "value") {
+    memoryMax = override.value;
+    source = "env-override";
+  } else if (override.kind === "unlimited") {
+    memoryMax = null;
+    source = "env-unlimited";
+  } else {
+    memoryMax = defaultAnchorMemoryMax(opts.totalmemBytes ?? os.totalmem());
+    source = "host-derived";
+  }
+  return {
+    envelope: "scope",
+    memoryMax,
+    source,
+    unit: anchorUnitName(opts.root, opts.nowMs ?? Date.now()),
+    reason: null,
+  };
+}
+
+/** 把内层 argv 包进 `systemd-run --user --scope`（envelope==="none" ⇒ **原样返回**内层 argv = 回退当前行为）。
+ *  `--scope` 下 systemd-run 会**原地 exec** ⇒ 内层 argv 是**尾段**、pid 与 `.quay/anchor.pid` 的语义不变
+ *  （AC5 的结构性理由：⛔ 不经 shell、⛔ 不 fork 一个中间进程）。`--collect` = 单元退出后自动回收
+ *  （含失败），避免瞬态 scope 在 user manager 里堆积；`OOMPolicy=continue` = 组内某个进程被 OOM 杀
+ *  **不**拖垮整个 anchor（正是事故里那个手工 scope 唯一的正确之处）。 */
+export function anchorLaunchArgv(innerArgv: string[], res: { envelope: "scope" | "none"; memoryMax: string | null; unit: string | null }): string[] {
+  if (res.envelope === "none" || !res.unit) return innerArgv;
+  const argv = [
+    "systemd-run", "--user", "--scope", "--collect",
+    `--unit=${res.unit}`,
+    "-p", "MemoryAccounting=yes",
+    "-p", "OOMPolicy=continue",
+  ];
+  // ⛔ 上限为空 = **不传**该属性（机制上不设限制）；⛔ 不写一个「等价无限制」的字面值（CLAUDE.md 推论二）。
+  if (res.memoryMax) argv.push("-p", `MemoryMax=${res.memoryMax}`);
+  return [...argv, ...innerArgv];
+}
+
+/** anchor 侧读**内核实际生效**的包络（直接量）：`/proc/self/cgroup` 取单元名、该 cgroup 的 `memory.max`
+ *  取上限。⚠️ 与 `resolveAnchorEnvelope` 的入参不同：那条算「我们要传什么」，本条读「内核真给了什么」——
+ *  ⛔ 不回声自己传的参数（硬规则 4b），故两者**可以在诊断上不一致**，而那种不一致正是要能被看见的东西。
+ *
+ *  四态（`envelope` × `reason`）：`"scope"`（在 `quay-anchor-*.scope` 内，带 memory.max 直接量）/
+ *  `"none"` + 具名原因（① 不是 cgroup v2 ② cgroup 读不到 ③ 不在 `.scope` 内 ④ 在别的 scope 内，如
+ *  环境自带的 `session-N.scope`）。⛔ 四种原因各自具名，全部与「有包络」不同形。 */
+export function readAnchorEnvelope(env: Record<string, string | undefined> = process.env): AnchorEnvelope {
+  const source = (env[ANCHOR_ENVELOPE_SOURCE_ENV] ?? null) as AnchorEnvelopeSource;
+  let cgroup = "";
+  try {
+    cgroup = fs.readFileSync("/proc/self/cgroup", "utf8");
+  } catch (e) {
+    return { envelope: "none", unit: null, memoryMax: null, source: null, reason: `cannot read /proc/self/cgroup (${e instanceof Error ? e.message : String(e)}) — cgroup membership unknown, not evaluated` };
+  }
+  // cgroup v2 的 unified 行是 `0::<path>`；v1 主机没有这一行（⇒ 具名说「不是 v2」，⛔ 不说「无上限」）。
+  const m = cgroup.match(/(?:^|\n)0::(\/\S*)/);
+  if (!m) {
+    return { envelope: "none", unit: null, memoryMax: null, source: null, reason: "not a cgroup-v2 host (no 0:: line in /proc/self/cgroup) — envelope not evaluated" };
+  }
+  const cgPath = m[1];
+  const unit = cgPath.split("/").filter(Boolean).pop() ?? null;
+  if (unit === null || !unit.endsWith(".scope")) {
+    return { envelope: "none", unit, memoryMax: null, source: null, reason: `not inside a transient scope (cgroup=${cgPath})` };
+  }
+  if (!unit.startsWith(ANCHOR_UNIT_PREFIX)) {
+    return { envelope: "none", unit, memoryMax: null, source: null, reason: `inside an ambient scope, not this mechanism's envelope (unit=${unit}; expected prefix ${ANCHOR_UNIT_PREFIX})` };
+  }
+  let memoryMax: string;
+  try {
+    memoryMax = fs.readFileSync(`/sys/fs/cgroup${cgPath}/memory.max`, "utf8").trim();
+  } catch (e) {
+    return { envelope: "none", unit, memoryMax: null, source: null, reason: `cannot read the scope's memory.max (${e instanceof Error ? e.message : String(e)}) — limit not evaluated` };
+  }
+  return { envelope: "scope", unit, memoryMax, source, reason: null };
+}
+
+/** 起一个 anchor 子进程（detached，setsid 等价）。返回 {pid, error}。⛔ 不继承调用者 stdout/stderr。
+ *
+ *  自 2026-09-25 起：可用时**包在 `systemd-run --user --scope` 里**起（见上面那段长注释；实测原地 exec
+ *  ⇒ pid 语义不变）。systemd-run 不可用 ⇒ **回退为原行为**，但把独立取值 `envelope: "none"` + 具名原因
+ *  写进 anchor 日志（硬规则 3b：⛔ 不静默地假装有包络）。 */
 export function spawnAnchor(
   root: string,
   opts: { logFile?: string; takeoverPid?: number | null } = {},
@@ -1316,7 +1542,7 @@ export function spawnAnchor(
   } catch {
     return { pid: null, error: `cannot open anchor log ${anchorLog}` };
   }
-  const args = [
+  const innerArgs = [
     process.execPath,
     ...(sibling.stripTypes ? ["--experimental-strip-types"] : []),
     sibling.path,
@@ -1324,8 +1550,21 @@ export function spawnAnchor(
     "--root",
     root,
   ];
-  if (opts.takeoverPid) args.push("--takeover", String(opts.takeoverPid));
-  const child = spawn(args[0], args.slice(1), { detached: true, stdio: ["ignore", fd, fd], env: process.env });
+  if (opts.takeoverPid) innerArgs.push("--takeover", String(opts.takeoverPid));
+  const res = resolveAnchorEnvelope({ root });
+  const args = anchorLaunchArgv(innerArgs, res);
+  // envelope 读数是**启动者的声明**（内核读不到「上限由谁决定」），经 env 交给 anchor 去发布（Plan 步 2）；
+  // ⛔ memoryMax 本身**不**走这条——它由 anchor 从 cgroup 文件读（硬规则 4b）。
+  const childEnv: NodeJS.ProcessEnv = res.source ? { ...process.env, [ANCHOR_ENVELOPE_SOURCE_ENV]: res.source } : process.env;
+  try {
+    fs.writeSync(
+      fd,
+      res.envelope === "scope"
+        ? `driver-runtime: anchor envelope: unit=${res.unit} memoryMax=${res.memoryMax ?? "(unset — env explicitly unlimited)"} source=${res.source}\n`
+        : `driver-runtime: anchor envelope: none — ${res.reason}\n`,
+    );
+  } catch { /* 日志写失败不致命 */ }
+  const child = spawn(args[0], args.slice(1), { detached: true, stdio: ["ignore", fd, fd], env: childEnv });
   child.unref();
   return { pid: child.pid ?? null, error: child.pid ? null : "spawn returned no pid" };
 }

@@ -15,7 +15,7 @@
 //   `.quay/<prefix>-supervisor.pid` 阶段 C 起**退役**——anchor 承担 respawn，⛔ 不再有 supervisor 层
 //   `.quay/anchor.pid`              anchor 自身 pid（⛔ 刻意不叫 `*-driver.pid`，见 driver-runtime 注释）
 //   `.quay/anchor-desired.json`     期望托管的 kind 集合（声明式；`quay driver start/stop --kind X` 改它）
-//   `.quay/anchor.json`             结构化回读面 {pid, startedAt, kinds, host, bundle, takeover}
+//   `.quay/anchor.json`             结构化回读面 {pid, startedAt, kinds, host, bundle, takeover, declaration, envelope}
 //   `.quay/anchor-takeover.json`    **接管异常**记录（无此文件 = 干净交接/未发生接管；三态见 TakeoverRecord）
 //
 // ⛔ **本文件是【唯一】把多个 kind 收进一个进程的地方**——若未来某个 kind 需要独立进程（例如 CPU 密集
@@ -36,6 +36,7 @@ import {
   pidAlive,
   preferredAnchorKernel,
   kindDeclarationMap,
+  readAnchorEnvelope,
   readAnchorPid,
   readDeclarationSnapshot,
   readDesired,
@@ -52,6 +53,7 @@ import {
   writeDesired,
   type AnchorBundleReading,
   type AnchorDesiredEntry,
+  type AnchorEnvelope,
   type DeclarationSnapshot,
   type DriverKind,
   type KernelBundleRebuildResult,
@@ -419,6 +421,13 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // 盘上没有期望态而我们给了初始集合 ⇒ 落盘，使后续 `start/stop --kind X` 有一个可读改的基底。
   if (readDesired(opts.root) === null) writeDesired(opts.root, initial, "driver-anchor:cold-start");
 
+  // ── 内存包络读数（gap-driver-anchor-runs-without-host-derived-memory-envelope，Plan 步 2）─────────────
+  // ⛔ 进程的 cgroup 归属在生命周期内不变 ⇒ 每趟 reconcile **不重读**（那会是 500ms 两次文件读的白烧）；
+  // 本进程的替换者（自刷新/接管）跑它自己的 `runAnchor` ⇒ 各自算各自的那一份。
+  // ⚠️ 这是**内核直接量**（/proc/self/cgroup + cgroup 的 memory.max），⛔ 不是回显 spawnAnchor 传的参数
+  // （硬规则 4b）——两者若不一致，正是要被看见的那种不一致。
+  const envelopeReading: AnchorEnvelope = readAnchorEnvelope();
+
   // ⚠️ `snap` = 本趟判定用的读盘快照（`DeclarationSnapshot`）。**一趟 reconcile 只读一次期望态**，
   // 并把**同一个对象**同时用于 `wanted`、`silent`（`undeclaredKinds`）与这里的发布面
   // （`kindDeclarationMap`）—— 见下面 reconcile 循环里那条注释（M1 的修法）。
@@ -432,6 +441,11 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
         host: "anchor",
         // 内核 bundle 同步读数（每趟 pass 重写；`KernelBundleSyncState` 六态各自独立，⛔ 不与 fresh 同形）。
         bundle: bundleReading,
+        // 内存包络读数（**本进程的 cgroup 直接量**，见上面 envelopeReading 的注释）：`envelope:"scope"`
+        // 带 `{unit, memoryMax, source}`；`envelope:"none"` 带**具名 reason**（无 systemd / 不在本机制的
+        // scope 内 / 读不到 cgroup）——⛔ 两态各自独立，⛔ 不与「有包络」同形（硬规则 3b）。放在这里而不是
+        // 只留在 anchor 日志里：`anchor.json` 是 manager/外层/`server status` 已经在读的回读面。
+        envelope: envelopeReading,
         // 接管异常读数（D3，`TakeoverRecord`）：无记录 ⇒ **null**，⛔ 与那三个具名态都不共用取值。
         // 放在这里而不是只留在 `.quay/anchor-takeover.json`：`anchor.json` 是 manager/外层已经在读的
         // 回读面（与 `bundle` 同字段同形）⇒ 交接异常在既有消费者那里**可见**，⛔ 不是只给 fixture 看。
