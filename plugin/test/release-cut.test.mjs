@@ -93,10 +93,11 @@ function cloneLocality(parent) {
  * WHY `--no-hardlinks`: bare `--local` makes git hardlink every object and `die_errno("failed to
  * create link")` with NO copy fallback, the moment the destination is on another filesystem. That
  * premise belongs to the HOST, not to this repository — 2026-09-25, the repo is on /data (xfs)
- * while `os.tmpdir()` is `/` (ext4), so all 7 tests in this file died with `EXDEV` and every
- * fan-in's full suite was red develop-wide. `--no-hardlinks` gives up only the hardlinking, which
- * is precisely the part that cannot work cross-device; the locality reading below records which
- * kind of host the run saw instead of leaving that premise implicit in a comment.
+ * while `os.tmpdir()` is `/` (ext4), so every test in this file died with `EXDEV` (pristine
+ * baseline: 6 tests, 0 pass, 6 fail) and every fan-in's full suite was red develop-wide.
+ * `--no-hardlinks` gives up the hardlinking only — the one part that cannot work cross-device —
+ * and keeps the original intent (no network, no `file://` transport). The locality reading below
+ * records which kind of host the run saw, instead of leaving that premise implicit in a comment.
  *
  * Returns { parent, root, locality } — `parent` is where the command would create its worktree,
  * which is how "no worktree was created" is checked; `locality` is that enumerated reading.
