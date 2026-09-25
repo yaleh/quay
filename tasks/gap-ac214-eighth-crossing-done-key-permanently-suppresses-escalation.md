@@ -3,7 +3,7 @@ id: gap-ac214-eighth-crossing-done-key-permanently-suppresses-escalation
 title: AC-214 第八次转红（AC-238/239 = 237/200，margin −37；连续 790 fail / 0
   pass）：第七次刚建的升级通道对【曾被立案过的主体】结构性不可达 —— 供给 dedup 键的是两条 done 任务，boardKeys() 无
   status 维度
-status: todo
+status: ready
 labels:
   - gap
   - defect
