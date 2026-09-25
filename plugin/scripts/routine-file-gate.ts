@@ -797,8 +797,19 @@ export function renderRoutineTaskBody(
     "",
     `载体记录（逐字来源）：\`${ctx.carrier}\` · routine \`${ctx.routine}\` · probe \`${ctx.probe}\` · runId \`${ctx.runId}\` · ts \`${ctx.ts}\`。`,
     "",
-    "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的三道闸",
-    "（quality / dedup / rate）机械立案 —— ⛔ 不是由人转抄，也不是由探针自行执行。",
+    // ⚠️ 升级形态说的是**它实际过的那两道闸**（quality / dedup）：这是任务的**人可见通道**，它不进食
+    //    派发池，故不占派发侧的 rate 预算（见 gateEscalation）。⛔ 不在这句话里沿用三道闸的说法 ——
+    //    任务体是**给人读的**，一句不真的话正是硬规则 2 要防的形态。
+    ...(blocked
+      ? [
+        "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的",
+        "quality / dedup 两道闸机械立案，并按 `remedy-availability` = `blocked` 改走**人可见通道**",
+        "（`status: needs-human`，⛔ 不进派发候选）—— ⛔ 不是由人转抄，也不是由探针自行执行。",
+      ]
+      : [
+        "该 finding 由例程的机械通道产出，本任务由**同一条通道**依赖 `plugin/scripts/routine-file-gate.ts` 的三道闸",
+        "（quality / dedup / rate）机械立案 —— ⛔ 不是由人转抄，也不是由探针自行执行。",
+      ]),
     "",
     // ⛔ 升级形态**不带** `- 观测符号：` 行：符号键是「可派发立案」的 dedup 空间，一个升级体若带符号，
     //   会在读数恢复 executable 之后把同一产出者的**全部**主语永久挡在派发通道之外（那正是本条要
