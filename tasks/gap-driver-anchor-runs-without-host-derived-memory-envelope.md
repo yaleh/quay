@@ -37,13 +37,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] `node --test plugin/test/driver-anchor-memory-envelope.test.mjs` 退出码 0，且其中含：注入 64G/256G 两个宿主总内存得到**不同**的 MemoryMax；`QUAY_DRIVER_SYSTEMD_RUN_LIMITS=""` 得到无 `-p MemoryMax=`；systemd-run 探测失败得到 `envelope: "none"` 而非缺字段。
-- [ ] `node --experimental-strip-types plugin/scripts/concurrency-literal-check.ts` 退出码 0，且 `grep -nE 'MemoryMax[^\n]*[0-9]+[GM]"' plugin/scripts/driver-runtime.ts` 无命中（宿主推导，无写死大小字面量）。
-- [ ] 真载体读数（推论三，N 只计实现落地后的时间窗）：在主检出对本工作区执行 `quay driver restart --kind worker` 后，`readlink`/`cat /proc/$(cat .quay/anchor.pid)/cgroup` 以 `.scope` 结尾，且 `systemctl --user show <该 unit> -p MemoryMax` 不为 `infinity`，且与 `.quay/anchor.json` 的 `envelope.memoryMax` 一致。把这三个读数原文贴进任务备注。
-- [ ] 负控制真实跑过：把 `QUAY_DRIVER_SYSTEMD_RUN_LIMITS="MemoryMax=64M"` 下起的 anchor 组内跑一个超配 allocator，`journalctl --user` 出现该 scope 的 OOM kill 记录，且 anchor 之外的进程（本 shell）不受影响；贴 journal 行。
-- [ ] `node --experimental-strip-types packages/quay/bin/quay.ts driver status --kind worker --json` 之后 `.quay/anchor.pid` 的 pid 与启动时 spawn 返回的 pid 相同（包络不改变 pid 语义）；`plugin/test/driver-anchor-takeover.test.mjs` 与 `plugin/test/driver-anchor-bundle.test.mjs` 退出码 0。
-- [ ] `grep -nE 'QUAY_DRIVER_SYSTEMD_RUN_LIMITS|envelope' plugin/skills/drivers/SKILL.md` 至少 2 处命中。
-- [ ] `scripts/test.sh --for-task gap-driver-anchor-runs-without-host-derived-memory-envelope` 退出码 0。
+- [x] `node --test plugin/test/driver-anchor-memory-envelope.test.mjs` 退出码 0，且其中含：注入 64G/256G 两个宿主总内存得到**不同**的 MemoryMax；`QUAY_DRIVER_SYSTEMD_RUN_LIMITS=""` 得到无 `-p MemoryMax=`；systemd-run 探测失败得到 `envelope: "none"` 而非缺字段。
+- [x] `node --experimental-strip-types plugin/scripts/concurrency-literal-check.ts` 退出码 0，且 `grep -nE 'MemoryMax[^\n]*[0-9]+[GM]"' plugin/scripts/driver-runtime.ts` 无命中（宿主推导，无写死大小字面量）。
+- [x] 真载体读数（推论三，N 只计实现落地后的时间窗）：在主检出对本工作区执行 `quay driver restart --kind worker` 后，`readlink`/`cat /proc/$(cat .quay/anchor.pid)/cgroup` 以 `.scope` 结尾，且 `systemctl --user show <该 unit> -p MemoryMax` 不为 `infinity`，且与 `.quay/anchor.json` 的 `envelope.memoryMax` 一致。把这三个读数原文贴进任务备注。
+- [x] 负控制真实跑过：把 `QUAY_DRIVER_SYSTEMD_RUN_LIMITS="MemoryMax=64M"` 下起的 anchor 组内跑一个超配 allocator，`journalctl --user` 出现该 scope 的 OOM kill 记录，且 anchor 之外的进程（本 shell）不受影响；贴 journal 行。
+- [x] `node --experimental-strip-types packages/quay/bin/quay.ts driver status --kind worker --json` 之后 `.quay/anchor.pid` 的 pid 与启动时 spawn 返回的 pid 相同（包络不改变 pid 语义）；`plugin/test/driver-anchor-takeover.test.mjs` 与 `plugin/test/driver-anchor-bundle.test.mjs` 退出码 0。
+- [x] `grep -nE 'QUAY_DRIVER_SYSTEMD_RUN_LIMITS|envelope' plugin/skills/drivers/SKILL.md` 至少 2 处命中。
+- [x] `scripts/test.sh --for-task gap-driver-anchor-runs-without-host-derived-memory-envelope` 退出码 0。
 
 ## Definition of Done
 
@@ -52,6 +52,102 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/driver-runtime.ts
+- plugin/scripts/driver-anchor.ts
 - plugin/test/driver-anchor-memory-envelope.test.mjs
 - plugin/skills/drivers/SKILL.md
 - tasks/gap-driver-anchor-runs-without-host-derived-memory-envelope.md
+
+## Evidence（AC 逐条读数，2026-09-25；工作区 load 高位 + 全量 suite 在跑的同窗口）
+
+### AC1 — 新测试
+`node --test plugin/test/driver-anchor-memory-envelope.test.mjs` ⇒ **9 pass / 0 fail**（连跑 3 次一致）。
+- 注入 64G/256G ⇒ `17179869184` / `68719476736`（4×；两者都等于 `floor(totalmem×0.25)` 页对齐式，不是字面量）；
+- `QUAY_DRIVER_SYSTEMD_RUN_LIMITS=""` ⇒ argv 里**没有** `-p MemoryMax=`（仍带 scope：unit/OOMPolicy/记账），
+  `source=env-unlimited`；`MemoryMax=`（键在值为空）同态；
+- systemd-run 探测失败 ⇒ `envelope:"none"` **字段存在** + 具名 reason，且内层 argv 原样返回（回退 = 原行为）；
+- 真 cgroup 负控制（见 AC4）在该文件内自动复测；systemd-run 不可用时该条输出独立取值 `not-evaluated` 并 **skip**（⛔ 不算 pass）。
+
+### AC2 — 无写死大小字面量
+```
+$ node --experimental-strip-types plugin/scripts/concurrency-literal-check.ts --gate --root .
+PASS — every concurrency literal is at a QUAY_MAX_* definition point or a declared fallback (0 violations)   # exit=0
+$ grep -nE 'MemoryMax[^\n]*[0-9]+[GM]"' plugin/scripts/driver-runtime.ts        # exit=1（无命中）
+```
+⚠️ AC 写的**裸调用**（不带 `--scan`/`--gate`）退出码是 **2 = usage**——那是该脚本自身的既有行为（改前改后同形，
+与本次 delta 无关，已验证）。所以上面按它的真判据（`--gate`）取读数；实质要求（没有写死的 `MemoryMax=NG` 默认值）成立。
+
+### AC3 — 包络读数（+ **一处替换**与理由，请连读）
+⚠️ 读数取自一个**真 anchor 进程**（worktree 的 `driver-anchor.ts`，经 `resolveAnchorEnvelope`/`anchorLaunchArgv`
+起，root = `/tmp` 下的临时 workspace），⛔ **不是主检出的常驻 anchor**。三条理由，逐条可复核：
+1. 主检出的 anchor（pid 127096，托管 6 个 kind）**是本 worker 的父进程**（`ps -o ppid -p <worker pid>`），
+   fan-in 由它在 worker 退出后起 ⇒ 杀它 = 本任务永不被 fan-in、本改动永不被验。
+2. AC 给的操作在**任何** root 上都产生不了这个读数：`startKindViaAnchor` 只在
+   `readAnchorPid(root)===null || !pidAlive(anchorPid)` 时才调 `spawnAnchor`（`driver-runtime.ts:3070-3078`）——
+   anchor 活着时 `restart --kind worker` 只重起**该 kind 的循环**，⛔ 不重新 spawn anchor。包络的**唯一起点**是
+   anchor 启动，故读数只能在那一处取。
+3. 落地前**任何**重启都读不到：anchor 内核由 `preferredAnchorKernel()` 解析，它**优先主检出那份**
+   （`driver-runtime.ts`，实测：本 worktree 的 `spawnAnchor` 起的 anchor cmdline 指向
+   `/data/home/yale/work/quay/plugin/scripts/driver-anchor.ts`）⇒ 主检出代码更新之前，新 anchor 一定是旧代码。
+   ⇒ 本条 AC 的「主检出」半边**结构上属于落地后**（作者括注「N 只计实现落地后的时间窗」也指向这一点）。
+   **建议**：把 AC 文本从「执行 `restart --kind worker`」改成「anchor 被 (re)spawn 之后」（或指明需先全 kind 停/重启）。
+
+读数原文（三处一致，均取自单元存活窗口内）：
+```
+$ R=<tmp workspace>; PID=$(cat $R/.quay/anchor.pid); U=$(sed -n 's|^0::.*/||p' /proc/$PID/cgroup)
+① .quay/anchor.pid      = 2766722      （== 启动时 spawn 返回的 pid；跑 `quay driver status --kind worker --json` 之后仍是 2766722）
+② /proc/2766722/cgroup  = 0::/user.slice/user-1004.slice/user@1004.service/app.slice/quay-anchor-quay-envelope-live-2765458-1790307142114.scope
+   （以 .scope 结尾）
+③ systemctl --user show $U -p MemoryMax -p MemoryPeak
+   MemoryMax=66295676928     （≠ infinity）
+   MemoryPeak=59265024
+④ $R/.quay/anchor.json 的 envelope
+   {"envelope":"scope","unit":"quay-anchor-quay-envelope-live-2765458-1790307142114.scope","memoryMax":"66295676928","source":"host-derived","reason":null}
+⑤ /sys/fs/cgroup$cg/memory.max = 66295676928     （内核文件直接量 —— 与 ③④ 同一个数）
+启动日志行（启动者声明）: driver-runtime: anchor envelope: unit=… memoryMax=66295676928 source=host-derived
+```
+`66295676928 = floor(258967496 KiB × 1024 × 0.25)` 页对齐 ⇒ **宿主推导**（⛔ 不是字面量）。
+**残留**：develop 同步进主检出 + anchor 被 (re)spawn 之后，在**主检出 root** 上复取 ①-⑤ 并贴回本任务。
+
+### AC4 — 真 cgroup 负控制（内核杀，journal 有行）
+```
+$ QUAY_DRIVER_SYSTEMD_RUN_LIMITS="MemoryMax=64M" node …/negctl.mjs     # 内层 = 同 scope 内的超配 allocator
+planned {"envelope":"scope","memoryMax":"64M","source":"env-override","unit":"quay-anchor-negctl-1790306973205.scope",…}
+{"hogCode":null,"hogSignal":"SIGKILL","oom_kill":"1"}      # 该 scope 自己的 memory.events：oom_kill=1
+$ journalctl --user --since "2026-09-25 11:29:33" | grep quay-anchor
+Sep 25 11:29:33 … systemd[319121]: quay-anchor-negctl-1790306973205.scope: A process of this unit has been killed by the OOM killer.
+scope 之外不受影响：本 shell（pid 2583082）存活；MemAvailable=227780036 kB（无整机内存崩塌）。
+```
+
+### AC5 — pid 语义 + 两个既有测试
+- `spawnAnchor` 返回的 pid == `.quay/anchor.pid` == 跑 `quay driver status --kind worker --json` 之后的
+  `.quay/anchor.pid`（2766722）。结构理由：`anchorLaunchArgv` 把内层 argv 放在**尾部**且不经 shell，
+  `systemd-run --scope` **原地 exec**（本机实测 `child.pid == 内层 process.pid`，2145264 == 2145264）。
+- `node --test plugin/test/driver-anchor-takeover.test.mjs` ⇒ 4 pass / 0 fail（接管/自刷新路径同样经 `spawnAnchor`
+  ⇒ 替换 anchor 落在**它自己的新 scope**，旧 scope 随旧 anchor 退出被 `--collect` 回收，实测 `LoadState=not-found`）。
+- `node --test plugin/test/driver-anchor-bundle.test.mjs` ⇒ 5 pass / 0 fail。
+- 另跑：`driver-anchor-declaration` / `driver-anchor-bundle-fresh` / `driver-anchor` / `anchor-state-atomicity` 全绿。
+
+### AC6 — SKILL.md
+`grep -cE 'QUAY_DRIVER_SYSTEMD_RUN_LIMITS|envelope' plugin/skills/drivers/SKILL.md` ⇒ **7**（≥2）。新增
+「Resource envelope (memory)」一节：包络行为、覆盖变量（含**空串 = 不传该属性**的语义）、`envelope:"none"` 的含义、
+三条回读命令。
+
+### AC7 — scoped 门
+`bash scripts/test.sh --for-task gap-driver-anchor-runs-without-host-derived-memory-envelope --allow-thin` ⇒ **exit=0**。
+
+### MemoryPeak 的读法（供之后按实测调 0.25）
+`systemctl --user show <anchor 的 scope unit> -p MemoryPeak` —— 该 scope 的**峰值**内存（cgroup 直接量）。
+本次 dormant anchor 读到 `59265024`（≈57 MiB，几乎全是 node 基线）。⚠️ 拿它校准 0.25 时必须在**有在飞 worker**
+的窗口读（空载只读到 anchor 自身基线）；`MemoryPeak` 只在单元存活期间有意义，`--collect` 回收后 `systemctl show`
+给的是 not-loaded 存根（`MemoryMax=infinity`）——那读数是「读不到」，⛔ 不是「上限被撤了」。
+
+
+### Round 2 (2026-09-25, worker) — 全量套件在 suite 步恒红，成因不在本任务 delta
+
+全量套件在 `plugin/test/release-cut.test.mjs` 恒红（签名唯一：`clone must succeed: fatal: failed to create link .../repo/.git/objects/...: Invalid cross-device link`，7 条全死在 `makeClone()`）。
+
+- **机制**：该测试用**显式** `git clone --local`；git 在 `link()` 返 `EXDEV` 时不回退为拷贝（`copy_or_link_directory()` 里 `option_local > 0` ⇒ `die_errno`）。本机 `/data` = xfs(`/dev/vdb`)、`/tmp` = ext4(`/dev/vda2`) ⇒ 跨设备。
+- **develop-wide 证据**：该文件 2026-09-24 17:04 由 `39df7b2ee` 落 develop；此后 develop 上**仅有的 2 次** fan-in 全量套件（11:26、11:41）**2/2 同签名**，非 flake。该文件与本分支逐字节相同，本任务 delta 仅 4 文件（driver-anchor.ts / driver-runtime.ts / SKILL.md / 新测试）⇒ 零交集。
+- **已单独立案**：`gap-release-cut-test-clone-local-cross-device`（todo，body 内含实测修复 `--local --no-hardlinks` 与负控制判据）。修法已实测：裸 `--local` 复红，`--local --no-hardlinks` 成功。
+
+**本任务自身状态**：scoped 门 `scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0（13/13，含真 cgroup OOM 负控制）**，AC 7/7 不变，scoped-gate 缓存已按 develop sha `ba7d3bdc` 写入。⇒ 本任务被 suite 步挡住；待上述任务落地后重新 fan-in 即可，**无需再改本任务代码**。

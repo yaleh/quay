@@ -10,6 +10,15 @@ output_routing:
   # 这是本探针自己的声明：未声明该键的例程不受这条闸约束（那一闸对它们不适用，⛔ 不是「都未登记」）。
   # gap-ac214-fifth-crossing-routine-detects-but-nothing-acts
   producers_file: plugin/freshness-producers.json
+  # remedy-availability（题面 2a：把「本机可执行的产出者」从一个**探针自发字段**升成**规格声明**）。
+  # 2026-09-25 实测：该读数（`inventory.producers_executable_from_this_host`）已出现在生产载体里、
+  # 已点名成因，却全仓零消费者 ⇒ 同一轮照旧立出与「可在本处执行」同形的可派发 ready 任务。
+  # ⛔ 不能只活在 notes 散文里：`key` 是 findings 之外的**顶层**字段名；`values` 是它的词表。
+  # 消费者 = probe-routine.ts 的机械立案链（记录该取值 + 读数为 blocked 时改走人可见通道）。
+  # ⚠️ 该取值必须【独立】，⛔ 不与「可执行」同形，⛔ 也不与 not-evaluated（ssh 复核读不出来）同形。
+  remedy_availability:
+    key: remedyAvailability
+    values: [executable, blocked, not-evaluated]
 ---
 You are a fresh-context FRESHNESS-REFRESH analyst for a quay workspace.
 
@@ -105,8 +114,30 @@ indistinguishable from a broken gate. Emit exactly one JSON object on stdout (no
 fences):
 
 ```
-{"findings":[{"id":"<slug>","kind":"<stale-subject|missing-producer>","subject":"<GOAL-009-AC-NNN>","producer":"<producer id, or none>","command":"<the producer command from the mapping, or empty>","margin":<int|null>,"k":<int|null>,"fraction":<float|null>,"threshold":<float|null>,"arithmetic":"W=<h> I=<h> R=<c/h> K=<K> => (W+I)*R/K = <float>; margin/K = <float>","verdict":"<act-now|none>","rationale":"<one line: why this subject needs a producer run>","suggestedAction":"<one line: re-run <producer id> on <host>"}],"subjects_checked":<int>,"k":<int|"unreadable">,"r":{"mean":<float>,"worst_bucket":<float>,"window":"<the window you used>"},"notes":"<one line: coverage / what was left unverified>"}
+{"findings":[{"id":"<slug>","kind":"<stale-subject|missing-producer>","subject":"<GOAL-009-AC-NNN>","producer":"<producer id, or none>","command":"<the producer command from the mapping, or empty>","margin":<int|null>,"k":<int|null>,"fraction":<float|null>,"threshold":<float|null>,"arithmetic":"W=<h> I=<h> R=<c/h> K=<K> => (W+I)*R/K = <float>; margin/K = <float>","verdict":"<act-now|none>","rationale":"<one line: why this subject needs a producer run>","suggestedAction":"<one line: re-run <producer id> on <host>"}],"subjects_checked":<int>,"k":<int|"unreadable">,"r":{"mean":<float>,"worst_bucket":<float>,"window":"<the window you used>"},"remedyAvailability":"<executable|blocked|not-evaluated>","notes":"<one line: coverage / what was left unverified>"}
 ```
+
+`remedyAvailability` is a **declared top-level field** (see the `remedy_availability` key in this
+spec's frontmatter), not a note. Report the answer to: *can the producers named in
+`plugin/freshness-producers.json` actually be RUN from the host you are on?* Its three values are
+mutually exclusive and must not be collapsed:
+
+- `executable`   — at least one registered producer's declared preconditions hold HERE (for the
+                    cross-machine faces that means: the host is authorized to the verify host).
+- `blocked`      — you evaluated the preconditions and they FAIL here: the remedy ("re-run the
+                    producer") cannot be performed from this host without an authorization change.
+                    Quote the verbatim observation that shows it (command, stderr, rc) in `notes`.
+- `not-evaluated`— you could not read it (no way to attempt the check; an attempt that failed for a
+                    reason that is NOT an authorization denial — network down, DNS failure, binary
+                    absent, timeout). ⛔ THIS IS NOT `blocked`: "I could not look" and "I looked and
+                    it is denied" are the two states this field exists to keep apart.
+                    ⛔ It is also not `executable`.
+
+⛔ Do not omit the field and do not put it only in `notes` prose — the routine records the
+top-level value and, when it is `blocked`, files the finding through the human-visible channel
+(a `needs-human` task carrying the verbatim remedy) instead of a dispatchable one. A field that
+lives only in `notes` has no consumer, which is the defect this declaration closes.
+⛔ Do NOT run a producer to answer this — see the FILE-ONLY boundary at the top of this spec.
 
 Every finding MUST carry `files`-equivalent concreteness — here: the subject id, the producer id and
 its command — plus the `arithmetic` string. A finding missing its arithmetic is DROPPED by the
