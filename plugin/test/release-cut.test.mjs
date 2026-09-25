@@ -21,8 +21,9 @@
 //     cut from the linked worktree this command creates writes there — the AC-320 property, checked
 //     end-to-end rather than by reading the carrier's source.
 //
-// Fixtures are clones of THIS repository, cloned with `git clone --local` (hardlinked objects, no
-// network) so the real `scripts/version-consistency-check.ts` and carrier files are present: the
+// Fixtures are clones of THIS repository, cloned with `git clone --local --no-hardlinks` (no
+// network, no `file://` transport; objects are COPIED) so the real
+// `scripts/version-consistency-check.ts` and carrier files are present: the
 // version-consistency preflight must be able to pass on a healthy fixture, or "it failed because
 // VERSION was wrong" would be indistinguishable from "it failed because the checker was missing".
 // ⛔ Nothing in the real checkout is mutated (R3 test-isolation); every fixture is removed in a
@@ -34,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, linkSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,17 +59,65 @@ function cleanup(dir) {
 }
 
 /**
- * A throwaway clone of this repository (`--local`: hardlinked objects, ~0.7 s, no network).
- * The clone IS the fixture's "main checkout" and the command's `--root`, so the toolchain, the
- * carrier files and `VERSION` are all the real ones at the real relative paths.
- * Returns { parent, root } — `parent` is where the command would create its worktree, which is
- * how "no worktree was created" is checked.
+ * The `st_dev` of the filesystem holding `p`, or null when it cannot be read at all.
+ * ⛔ null is its own value, never folded into a verdict: "I could not measure" and "I measured and
+ * it is fine" must not share an output (硬规则 3b).
+ */
+function deviceOf(p) {
+  try { return statSync(p).dev; } catch (_) { return null; }
+}
+
+/**
+ * Did this run have to link clone objects ACROSS filesystems — the premise that makes a hardlinking
+ * `git clone --local` die with `EXDEV`? An ENUMERATED reading (`same` | `cross` | `unknown`), not a
+ * boolean `ok`: with a boolean, "cross-device" (the failure premise) and "not measured" would print
+ * the same value and the reading would carry no information.
+ *
+ * `st_dev` is compared, deliberately NOT `statfsSync().type`: the latter is the filesystem's MAGIC
+ * NUMBER, which two distinct filesystems of the same type (two xfs mounts) share — it would answer
+ * "same device" for different devices, i.e. a proxy that drifts from the fact it stands for
+ * (硬规则 4b). `st_dev` is the exact quantity `link(2)` itself compares.
+ */
+function cloneLocality(parent) {
+  const srcDev = deviceOf(join(repoRoot, ".git", "objects")) ?? deviceOf(repoRoot);
+  const dstDev = deviceOf(parent);
+  if (srcDev === null || dstDev === null) return { locality: "unknown", srcDev, dstDev };
+  return { locality: srcDev === dstDev ? "same" : "cross", srcDev, dstDev };
+}
+
+/**
+ * A throwaway clone of this repository: no network, no `file://` transport, objects COPIED rather
+ * than hardlinked. The clone IS the fixture's "main checkout" and the command's `--root`, so the
+ * toolchain, the carrier files and `VERSION` are all the real ones at the real relative paths.
+ *
+ * WHY `--no-hardlinks`: bare `--local` makes git hardlink every object and `die_errno("failed to
+ * create link")` with NO copy fallback, the moment the destination is on another filesystem. That
+ * premise belongs to the HOST, not to this repository — 2026-09-25, the repo is on /data (xfs)
+ * while `os.tmpdir()` is `/` (ext4), so every test in this file died with `EXDEV` (pristine
+ * baseline: 6 tests, 0 pass, 6 fail) and every fan-in's full suite was red develop-wide.
+ * `--no-hardlinks` gives up the hardlinking only — the one part that cannot work cross-device —
+ * and keeps the original intent (no network, no `file://` transport). The locality reading below
+ * records which kind of host the run saw, instead of leaving that premise implicit in a comment.
+ *
+ * Returns { parent, root, locality } — `parent` is where the command would create its worktree,
+ * which is how "no worktree was created" is checked; `locality` is that enumerated reading.
  */
 function makeClone(prefix) {
   const parent = mkdtempSync(join(tmpdir(), `release-cut-${prefix}-`));
   const root = join(parent, "repo");
-  const r = spawnSync("git", ["clone", "--local", "-q", repoRoot, root], { encoding: "utf8" });
-  assert.equal(r.status, 0, `clone must succeed: ${r.stderr}`);
+  const { locality, srcDev, dstDev } = cloneLocality(parent);
+  process.stdout.write(`SUITE-RELEASE-CUT-FIXTURE clone-locality=${locality}`
+    + ` repo-dev=${srcDev ?? "unreadable"} tmp-dev=${dstDev ?? "unreadable"}\n`);
+  const args = [
+    "clone",
+    "--local",
+    "--no-hardlinks",
+    "-q",
+    repoRoot,
+    root,
+  ];
+  const r = spawnSync("git", args, { encoding: "utf8" });
+  assert.equal(r.status, 0, `clone must succeed (clone-locality=${locality}): ${r.stderr}`);
   git(root, "config", "user.name", "test");
   git(root, "config", "user.email", "test@example.com");
   // A local `develop` (a clone only materialises the default branch) — the branch the cut merges
@@ -84,7 +133,7 @@ function makeClone(prefix) {
   // bump stage runnable, so the happy path below is the real one rather than a graceful failure.
   const nm = join(repoRoot, "node_modules");
   if (existsSync(nm)) symlinkSync(nm, join(root, "node_modules"));
-  return { parent, root };
+  return { parent, root, locality };
 }
 
 /** Every path the command is allowed to create a worktree under. */
@@ -92,6 +141,36 @@ function worktreeDirs(parent) {
   const r = spawnSync("bash", ["-c", `ls -d ${JSON.stringify(parent)}/*-worktrees 2>/dev/null || true`], { encoding: "utf8" });
   return r.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The premise, made verifiable: does this host clone across filesystems, and does the fixture SAY so?
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("the fixture reports its clone locality as an ENUMERATED value that agrees with a real link() probe", () => {
+  const c = makeClone("locality");
+  try {
+    assert.ok(["same", "cross"].includes(c.locality),
+      `on a readable host the locality must be same|cross, got '${c.locality}' (a null device is reported as 'unknown')`);
+
+    // An INDEPENDENT probe of the same premise, by the very mechanism git uses: `link(2)` from the
+    // repo into the fixture's parent. EXDEV *is* the cross-device verdict and success *is* the
+    // same-device verdict; any other errno is reported as its own value, never folded into either.
+    // A reading that cannot disagree with this probe would be unfalsifiable (硬规则 4).
+    const probeDst = join(c.parent, "link-probe");
+    let probe;
+    try {
+      linkSync(join(repoRoot, "VERSION"), probeDst);
+      unlinkSync(probeDst);
+      probe = "same";
+    } catch (e) {
+      probe = e.code === "EXDEV" ? "cross" : `unknown:${e.code}`;
+    }
+    assert.equal(c.locality, probe,
+      `the reported clone locality must agree with a real link() probe (got '${probe}')`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // AC1 — the dry run: exit 0, every step listed, nothing written
