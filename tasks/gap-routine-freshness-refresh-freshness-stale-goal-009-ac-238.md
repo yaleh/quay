@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-238
 title: "freshness-refresh: ALREADY past the window: d=228 > K=200, newest
   evidence 2026-09-19T11:06:09Z (build_sha fa1cae202e02); no carrier record
   since 2026-09-20T13:50:36Z, so this face"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
