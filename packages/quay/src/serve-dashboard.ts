@@ -156,10 +156,14 @@ function timelineHoursFromRequest(req: IncomingMessage): number {
   }
 }
 
-/** Test-run state → the dashboard card's own colour token (green → positive, red → accent, other →
- *  neutral). Bare token name, so the round-number chip writes `background:var(--color-…)` and the
- *  timeline SVG writes `fill="var(--color-…)"` from ONE source (no drift). */
-function stateColorToken(state: string | null): string {
+/** Test-run state → the shared colour token (green → positive, red → accent, other → neutral). Bare
+ *  token name, so the dashboard round-number chip writes `background:var(--color-…)` and the timeline
+ *  SVG writes `fill="var(--color-…)"` from ONE source (no drift). EXPORTED because /tests renders the
+ *  same state→token mapping over the same `state` domain from the same carrier
+ *  (verification-round.jsonl): `serve-tests.ts` imports this instead of re-typing the ternary, so the
+ *  three token literals have exactly one definition site (gap-routine-semantic-dedup-scan-statecolortoken-pair
+ *  — the prior copy existed only because this function was module-private). */
+export function stateColorToken(state: string | null): string {
   return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
 }
 
