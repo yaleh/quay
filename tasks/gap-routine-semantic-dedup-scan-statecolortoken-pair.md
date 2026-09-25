@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-statecolortoken-pair
 title: "semantic-dedup-scan: Identical 3-way token mapping over the identical
   domain; serve-tests.ts:288-291 documents re-copying it because
   serve-dashboard's version is module-private and"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
