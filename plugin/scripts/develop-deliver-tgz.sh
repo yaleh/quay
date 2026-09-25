@@ -506,7 +506,7 @@ transport_closure_violations() {
 
 # ship_verify_closure <target> [extra-file…] — copy the WHOLE closure to $HOME on <target>.
 # Returns 0 on success; ANY leg failing prints a distinguishable line and returns 1 so the caller
-# marks that host failed (硬规则 3b — never a silent continue on a partial ship).
+# marks that host failed (硬规则 3b — never a silent continue on a partial ship). ⛔ LOAD-BEARING: EVERY leg below (and the other 12 scp/ssh legs in this file) CAPTURES `2>&1` INTO $transport_detail INSTEAD OF DISCARDING BOTH STREAMS — the failing STEP is not the diagnosis. Measured 2026-09-25: an ssh auth denial (rc=255 `Permission denied (publickey,password)`), an unreachable host, and a remote ENOSPC ALL reduce to the one line "closure scp FAILED", and their remedies share nothing (target-side key authorization / network / the target's disk). With the streams discarded, naming the cause took an out-of-band manual `ssh -o BatchMode=yes … 'df -h /'` — the very reading plugin/freshness-producers.json's upgrade-face `preconditions[0]` had to record by hand (2026-09-24), i.e. the producer's own log did not carry it. All 15 sibling legs were fixed together (硬规则 5b — a cluster, not the one instance observed).
 ship_verify_closure() {
   local target="$1"; shift
   local -a flat=() deps=() extra=("$@")
@@ -514,20 +514,20 @@ ship_verify_closure() {
   while IFS= read -r f; do [ -n "$f" ] && flat+=("$f"); done < <(transport_flat_files)
   while IFS= read -r f; do [ -n "$f" ] && deps+=("$f"); done < <(transport_node_modules_deps)
 
-  if ! scp "${ssh_opts[@]}" "${flat[@]}" ${extra[@]+"${extra[@]}"} "${target}:~/" >/dev/null 2>&1; then
-    echo "develop-deliver: ${target} — closure scp FAILED (flat set: verify-deliver-coldstart.sh + \$SCRIPT_DIR siblings + SPEC)" >&2
+  if ! transport_detail="$(scp "${ssh_opts[@]}" "${flat[@]}" ${extra[@]+"${extra[@]}"} "${target}:~/" 2>&1)"; then
+    echo "develop-deliver: ${target} — closure scp FAILED (flat set: verify-deliver-coldstart.sh + \$SCRIPT_DIR siblings + SPEC) ⇒ ${transport_detail:-<no stderr>}" >&2
     return 1
   fi
   if [ "${#deps[@]}" -gt 0 ]; then
     # ⛔ scp -r does NOT create missing intermediate dirs (measured 2026-09-11: `scp -r d
     # host:~/a/b/c` fails "path canonicalization failed" when ~/a/b is absent) — make the
     # resolution root first, or the node_modules half silently does not arrive.
-    if ! ssh "${ssh_opts[@]}" "${target}" 'mkdir -p "$HOME/node_modules"' >/dev/null 2>&1; then
-      echo "develop-deliver: ${target} — closure mkdir \$HOME/node_modules FAILED (node_modules set)" >&2
+    if ! transport_detail="$(ssh "${ssh_opts[@]}" "${target}" 'mkdir -p "$HOME/node_modules"' 2>&1)"; then
+      echo "develop-deliver: ${target} — closure mkdir \$HOME/node_modules FAILED (node_modules set) ⇒ ${transport_detail:-<no stderr>}" >&2
       return 1
     fi
-    if ! scp "${ssh_opts[@]}" -r "${deps[@]}" "${target}:~/node_modules/" >/dev/null 2>&1; then
-      echo "develop-deliver: ${target} — closure scp FAILED (node_modules set — a bare specifier the pre-e1bdd0292 sibling set never had)" >&2
+    if ! transport_detail="$(scp "${ssh_opts[@]}" -r "${deps[@]}" "${target}:~/node_modules/" 2>&1)"; then
+      echo "develop-deliver: ${target} — closure scp FAILED (node_modules set — a bare specifier the pre-e1bdd0292 sibling set never had) ⇒ ${transport_detail:-<no stderr>}" >&2
       return 1
     fi
   fi
@@ -1582,8 +1582,8 @@ verify_coldstart_mode() {
     ac207_extra=""
     ac207_path_export=""
     if [ "${ac207_e2e}" -eq 1 ]; then
-      if ! scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" >/dev/null 2>&1; then
-        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED)"
+      if ! transport_detail="$(scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" 2>&1)"; then
+        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
         fail=1
         continue
       fi
@@ -1644,8 +1644,8 @@ REMOTE
     evidence_local="${repo_root}/.quay/verify-coldstart-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
     echo "develop-deliver: ${hk} (${target}) — scp back: scp ${ssh_opts[*]} ${target}:${remote_evidence} ${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -1741,8 +1741,8 @@ verify_upgrade_mode() {
     ac239_path_export=""
     ac239_expected="GOAL-009-AC-238"
     if [ "${ac239_e2e}" -eq 1 ]; then
-      if ! scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" >/dev/null 2>&1; then
-        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED)"
+      if ! transport_detail="$(scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" 2>&1)"; then
+        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
         fail=1
         continue
       fi
@@ -1798,8 +1798,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-upgrade-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -1952,8 +1952,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-takeover-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2062,8 +2062,8 @@ verify_ac257_mode() {
     # scp 直接失败（实测 2026-09-14：整个模式在门口 NOT-EVALUATED，远端根本没有那个文件）。
     # `~` 是 SFTP 协议自己认的，所以本文件其余五处 scp 目标一律写 `:~/`。两条路径在远端是同一个
     # 文件（脚本用 `\${HOME}/ac257-task-body.md` 读它）。
-    if ! scp "${ssh_opts[@]}" "${ac257_task_body}" "${target}:~/ac257-task-body.md" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${ac257_task_body}" "${target}:~/ac257-task-body.md" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2120,8 +2120,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-ac257-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2504,8 +2504,8 @@ verify_ac258_mode() {
     fi
     # ⚠️ scp 目标写 `~/`，⛔ 不是 `\$HOME/`：现代 scp 走 SFTP 子系统，远端路径不做 shell 展开
     # （AC-257 实测过一次：整个模式在门口 NOT-EVALUATED）。
-    if ! scp "${ssh_opts[@]}" "${ac258_task_body}" "${target}:~/ac258-task-body.md" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${ac258_task_body}" "${target}:~/ac258-task-body.md" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2561,8 +2561,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-ac258-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2688,8 +2688,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-adrflip-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2812,8 +2812,8 @@ REMOTE
     fi
     evidence_local="${repo_root}/.quay/verify-completechange-evidence-${hk}-${develop_tip:0:8}.jsonl"
     rm -f "${evidence_local}"
-    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
-      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+    if ! transport_detail="$(scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" 2>&1)"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED) ⇒ ${transport_detail:-<no stderr>}"
       fail=1
       continue
     fi
@@ -2938,8 +2938,8 @@ for hk in ${hosts}; do
     continue
   fi
   # scp both tgz
-  if ! scp "${ssh_opts[@]}" "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
-    echo "develop-deliver: ${hk} (${target}) — scp FAILED (not-evaluated)"
+  if ! transport_detail="$(scp "${ssh_opts[@]}" "${quay_tgz}" "${qn_tgz}" "${target}:~/" 2>&1)"; then
+    echo "develop-deliver: ${hk} (${target}) — scp FAILED (not-evaluated) ⇒ ${transport_detail:-<no stderr>}"
     http_codes[$hk]="not-evaluated"
     usage_verify[$hk]="not-run"
     deliver_fail=1
