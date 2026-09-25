@@ -476,6 +476,32 @@ export function defaultRunExecutionProbe(decl: ExecutionProbeDecl): ExecutionPro
   };
 }
 
+/** 解析探针规格声明的 `producers_file` 到**磁盘上的那一份**。
+ *
+ *  解析顺序（⛔ ① 在前是有理由的，见下）：
+ *    ① `<pluginRoot>/<basename(declared)>` —— 与**读该规格的那一份代码修订**同源的副本；
+ *    ② `<root>/<declared>`               —— workspace 自己的副本（声明的路径写的是 root 相对）。
+ *
+ *  WHY ① 在前（2026-09-25 **实测**，本条任务 AC6 的第一次真实读数）：规格从**代码修订**读，而它
+ *  指向的 mapping 从 **workspace** 读 ⇒ 一次代码修订切换（`--script-root` / 换 worktree）会加载
+ *  **新规格 + 旧 mapping**，于是 remedy-availability 静默变成 `not-declared`、**声明没有消费者** ——
+ *  正是本条要关掉的那个形态，只是又低了一层。同一个「源与跑的不是一份」的家族（第 6 次是
+ *  源 vs 编译产物）。⛔ 这里仍然**不是**「谁新用谁」的猜测：只按固定顺序取第一份存在的文件。
+ *
+ *  ⚠️ 生产等价性（这是它能被安全引入的原因）：quality-gate-driver 传的恒是
+ *  `pluginRoot = <root>/plugin`，而此时 ① 与 ② 是**同一个路径**（`declared` 就是
+ *  `plugin/freshness-producers.json`）⇒ 本仓库的生产行为逐字节不变。
+ *  ⚠️ 声明边界：一个同时拥有 vendored plugin 与自己的 `plugin/freshness-producers.json` 的
+ *  workspace，会取到 plugin 那一份——本仓库不存在该形态（`plugin/` 就是本仓的插件目录），
+ *  故作为**已声明的**边界记在此处，⛔ 不声称对所有布局都无影响。
+ *  两份都不存在 ⇒ 返回 ②（= 修复前的路径）⇒ 读不出 ⇒ 调用方照旧 fail-closed。 */
+export function resolveMappingPath(root: string, pluginRoot: string, declared: string): string {
+  const workspacePath = path.resolve(root, declared);
+  const pluginPath = path.resolve(pluginRoot, path.basename(declared));
+  if (pluginPath !== workspacePath && fs.existsSync(pluginPath)) return pluginPath;
+  return workspacePath;
+}
+
 /** 立一条任务：spawn workspace 自己的 task store CLI（⛔ 不手搓 markdown 落盘）。
  *
  *  ⚠️ `cwd` 必须显式设为 root，⛔ 不能靠继承（`runAsync` 不接受 cwd ⇒ 用的是**父进程的** cwd）。
@@ -811,8 +837,9 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       const mappingDeclared = typeof mappingRel === "string" && mappingRel.trim() !== "";
       // ⚠️ 三值，⛔ 不把「未声明」与「声明了但读不懂」合并（硬规则 3b；第一版合并过，被 (f) 的
       //    「no registry declared」用例抓住）：undefined = 未声明 ⇒ 闸不适用；null = 读不懂 ⇒ fail-closed。
-      const mapping = mappingDeclared
-        ? readProducerMapping(path.join(opts.root, String(mappingRel)))
+      const mappingPath = mappingDeclared ? resolveMappingPath(opts.root, opts.pluginRoot, String(mappingRel)) : null;
+      const mapping = mappingPath
+        ? readProducerMapping(mappingPath)
         : { producers: undefined as undefined, executionProbe: null as ExecutionProbeDecl | null, commands: new Map<string, string>() };
       const registeredProducers = mapping.producers;
       const executionProbe = mapping.executionProbe;

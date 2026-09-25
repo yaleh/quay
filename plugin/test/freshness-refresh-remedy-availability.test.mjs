@@ -37,7 +37,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { llmProbeRoutine } from "../scripts/probe-routine.ts";
+import { llmProbeRoutine, resolveMappingPath } from "../scripts/probe-routine.ts";
 import {
   classifyExecutionProbeResult,
   escalationKey,
@@ -112,6 +112,34 @@ const DECL = {
   producers: ["coldstart-face", "session-delivery", "upgrade-face"],
   remedy: { host: "yale@orangevps.wan.hwang.men", action: "把本机 `~/.ssh/id_ed25519.pub` 追加到目标侧 `~/.ssh/authorized_keys`（需人授权）", alternative: "或在一台已被 B 授权的主机上跑" },
 };
+
+test("RESOLUTION — the mapping is read from the SAME code revision as the spec that declares it", () => {
+  // The failure this pins was MEASURED on this task's own first production reading attempt: with the
+  // code revision swapped in (spec read from the worktree) but the mapping read from `root`, the
+  // reading silently became `not-declared` — a declaration whose consumer could not see it.
+  const root = makeTmpDir("remedy-resolve-root-");
+  const rev = makeTmpDir("remedy-resolve-rev-");
+  fs.mkdirSync(path.join(root, "plugin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "freshness-producers.json"), "{\"producers\":[]}", "utf8");
+  fs.writeFileSync(path.join(rev, "freshness-producers.json"), "{\"producers\":[],\"execution_probe\":{\"id\":\"x\"}}", "utf8");
+  assert.equal(resolveMappingPath(root, rev, "plugin/freshness-producers.json"),
+    path.join(rev, "freshness-producers.json"),
+    "the revision's copy wins when the two differ and it exists");
+
+  // in-tree kernel (the production wiring: pluginRoot === <root>/plugin) ⇒ ONE path, no change
+  const inTree = path.join(root, "plugin");
+  assert.equal(resolveMappingPath(root, inTree, "plugin/freshness-producers.json"),
+    path.join(root, "plugin", "freshness-producers.json"));
+  assert.equal(resolveMappingPath(root, inTree, "plugin/freshness-producers.json"),
+    path.resolve(root, "plugin/freshness-producers.json"),
+    "pluginRoot === <root>/plugin ⇒ the two candidates are the same path (production unchanged)");
+
+  // a workspace that keeps its mapping elsewhere (no plugin-side copy) still resolves its own
+  assert.equal(resolveMappingPath(root, rev, ".quay/my-producers.json"),
+    path.join(root, ".quay", "my-producers.json"));
+  // neither exists ⇒ the pre-fix path is returned, so the caller still fails closed on unreadable
+  assert.equal(resolveMappingPath(root, rev, ".quay/nope.json"), path.join(root, ".quay", "nope.json"));
+});
 
 test("CLASSIFIER — the three states are independently valued; each takes false in the other's arm", () => {
   const executable = classifyExecutionProbeResult(DECL, { status: 0, stdout: "", stderr: "" });
