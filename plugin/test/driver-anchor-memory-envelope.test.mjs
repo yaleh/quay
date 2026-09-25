@@ -188,12 +188,18 @@ test("AC4 — real-cgroup negative control: the KERNEL OOM-kills the hog inside 
   assert.equal(process.pid > 0, true);
   assert.doesNotMatch(fs.readFileSync("/proc/self/cgroup", "utf8"), /quay-anchor-/);
   assert.ok(process.memoryUsage().rss > 0);
-  // ⑤ scope 被 --collect 回收（⛔ 不在 user manager 里堆积）——`systemctl show` 读出 LoadState 非 loaded。
+  // ⑤ scope 被 --collect 回收（⛔ 不在 user manager 里堆积）。⚠️ 回收是**异步**的：命令退出后的一小段
+  // 窗口里 `LoadState` 仍是 `loaded`（实测：全量 suite 负载下必然撞上）⇒ 有界轮询到终态，⛔ 不是查一次就判死。
   if (res.unit) {
-    const show = spawnSync("systemctl", ["--user", "show", res.unit, "-p", "LoadState", "-p", "MemoryMax"], { encoding: "utf8" });
-    if (show.status === 0) {
-      assert.match(show.stdout, /LoadState=(not-found|masked|dead)/, `transient scope must be collected: ${show.stdout}`);
+    const deadline = Date.now() + 10_000;
+    let last = "";
+    for (;;) {
+      const show = spawnSync("systemctl", ["--user", "show", res.unit, "-p", "LoadState"], { encoding: "utf8" });
+      last = show.stdout ?? "";
+      if (!/LoadState=loaded/.test(last) || Date.now() >= deadline) break;
+      await new Promise((r) => setTimeout(r, 250));
     }
+    assert.match(last, /LoadState=(not-found|masked|dead|inactive)/, `transient scope must be collected (waited 10s): ${last}`);
   }
 });
 
