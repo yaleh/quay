@@ -2,7 +2,7 @@
 id: gap-ac214-seventh-crossing-blocked-remedy-has-no-consumer
 title: AC-214 第七次转红（AC-238/239 = 228/200，margin −28；连续 762 fail 无
   pass）：「本机可执行的产出者=0」这个读数已在生产载体里，却全仓零消费者 —— 立案照旧产出可派发的 ready 任务
-status: todo
+status: ready
 labels:
   - gap
   - defect
