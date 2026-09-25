@@ -3,7 +3,7 @@ id: gap-driver-anchor-runs-without-host-derived-memory-envelope
 title: driver anchor 组无内存包络——spawnAnchor 直接 detached 起 anchor，driver 群与全部 worker
   在用户 cgroup 里无 MemoryMax；quay 只给全量套件套了 systemd-run，运维被迫手搓无上限 scope（2026-09-25
   一次 OOM 事故 36 次 kill）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -151,3 +151,33 @@ scope 之外不受影响：本 shell（pid 2583082）存活；MemAvailable=22778
 - **已单独立案**：`gap-release-cut-test-clone-local-cross-device`（todo，body 内含实测修复 `--local --no-hardlinks` 与负控制判据）。修法已实测：裸 `--local` 复红，`--local --no-hardlinks` 成功。
 
 **本任务自身状态**：scoped 门 `scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0（13/13，含真 cgroup OOM 负控制）**，AC 7/7 不变，scoped-gate 缓存已按 develop sha `ba7d3bdc` 写入。⇒ 本任务被 suite 步挡住；待上述任务落地后重新 fan-in 即可，**无需再改本任务代码**。
+
+### Round 3 (2026-09-25, worker) — 阻塞项已落地，套件步不再恒红；本任务无需改代码
+
+**阻塞项已解除（不是本任务的改动）**：`gap-release-cut-test-clone-local-cross-device` 的修复（`9f9a09c5a`
+`fix(release-cut test): clone fixtures with --no-hardlinks — bare --local dies EXDEV cross-device`）经其自身 fan-in
+**已落 develop**（本 worker 轮内轮询确认：11:59:36 `git show develop:plugin/test/release-cut.test.mjs` 起含 `no-hardlinks`）。
+该修复 worker（pid 785012）与本 worker 并发在飞；本 worker 选择**等它落地**而不是再烧一次全量套件
+（同一 suite 步在 11:26 / 11:41 / 03:41 / 03:49 已 4 次同签名复红）。
+
+**本 worker 本轮实做（⛔ 未改任何实现代码，未新增提交的 delta）**：
+1. 合并 develop 进本 worktree **两次**（第一次 11:59 拿到该修复；第二次 12:10 追平后续落地的
+   `gap-ac214-seventh-crossing-…` 等 11 个提交）——**两次均 clean，无冲突、无 unmerged path**。
+2. **直接验证阻塞项确实解除**（这是 Round 2 判词的反面读数）：
+   `node --test plugin/test/release-cut.test.mjs` ⇒ **7 pass / 0 fail**（Round 2 同一条命令是 7 条全死在 `makeClone()`）。
+3. 在**合并后的树**上重跑 scoped 门（不是复用 11:59 那次的结果——两次之间 develop 又落了 11 个提交，
+   门必须在将要交给 fan-in 的那棵树上取读数）：`bash scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0，13/13**
+   （日志 `.quay/scoped-gate-round3b.log`；合并前的同一条命令亦 exit 0，`.quay/scoped-gate-round3.log`）。
+4. scoped-gate 缓存按**本轮 merge 时捕获的** develop sha `04e41f0bb` 写入（`--write-scoped-gate-cache` ⇒
+   `{"event":"scoped-gate-cache-written",…,"developSha":"04e41f0bb…"}`）。
+   ⚠️ 该缓存是**精确键**匹配（`scopedGateKey = <task>\t<sha>`，`worker-fan-in.ts:1181/1592` 读的是 fan-in 当刻
+   worktree 的 `rev-parse develop`）⇒ develop 若在本行之后继续前进，缓存**必然 miss**、fan-in 自己重跑 scoped 门
+   （少一次缓存命中，不是失败）。这是该机制的既有性质，⛔ 不要读成「缓存失效 = 本任务有问题」。
+
+**本任务 delta 未变**（`git diff --stat develop...HEAD`）：仅 4 文件 `driver-anchor.ts` / `driver-runtime.ts` /
+`plugin/test/driver-anchor-memory-envelope.test.mjs` / `plugin/skills/drivers/SKILL.md`，**全部在 `## Touches` 内**，
+无越界写。AC 7/7 未变；`task_check` ⇒ `{"ok":true,"acTotal":7,"acChecked":7,"reason":"all AC and DoD checkboxes checked"}`。
+
+**逐条 AC 复核（本轮）**：AC1/AC2/AC4/AC5/AC6 的读数由 Round 1 Evidence 保存且未被本轮改动触及（delta 零变化）；
+AC7 = 上面第 3 条的 scoped 门 exit 0；AC3 的「残留」半边（主检出 root 上复取 ①-⑤）**仍属落地后**——
+其结构理由见 Round 1 AC3 三条，本轮不重复，且本轮通过 fan-in 即是它具备条件的前置。

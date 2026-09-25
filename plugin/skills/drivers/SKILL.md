@@ -85,6 +85,57 @@ quay driver status --kind worker    --root <path>   # "alive":1
 curl -sf http://<host>:<port>/health || curl -sf http://<host>:<port>/
 ```
 
+## Resource envelope (memory) — what the anchor group runs inside
+
+`spawnAnchor` (`plugin/scripts/driver-runtime.ts`, the ONE place an anchor is started — `start --kind`,
+self-refresh and takeover all go through it) wraps the anchor in
+`systemd-run --user --scope --collect -p MemoryAccounting=yes -p OOMPolicy=continue -p MemoryMax=<host-derived>`
+whenever `systemd-run --user --scope` works on the host. **All six kind loops and every worker the worker
+driver spawns inherit that scope** — so a memory blowout inside a worker is bounded to the anchor group,
+not to the machine (2026-09-25: a hand-made scope with **no** `MemoryMax` had the whole driver group
+OOM-killed 36 times, load 4309).
+
+- **`MemoryMax` is host-derived**: `floor(os.totalmem() × 0.25)`, page-aligned. ⛔ Never a literal like
+  `16G` — a literal that means "unlimited" on the machine that wrote it becomes a *real* limit on the
+  next host, silently (CLAUDE.md 硬规则 4 推论二). 0.25 is a **starting value, not a goal**: measure it
+  (below) before changing it.
+- **Override**: `QUAY_DRIVER_SYSTEMD_RUN_LIMITS="MemoryMax=4G"` (same key syntax as the suite's
+  `QUAY_TEST_SYSTEMD_RUN_LIMITS`). **Explicitly empty (`=""`) means "no `MemoryMax` property at all"** —
+  `"not limited"` is expressed by *not setting the property*, ⛔ not by a value that is only unlimited
+  on this host.
+- **`systemd-run` unavailable** (no systemd / no user bus / probe failed) ⇒ the anchor is started exactly
+  as before (unenveloped), and the fallback is reported with an independently-valued reading
+  `envelope: "none"` + a **named reason** — ⛔ it is never silently shaped like a working envelope
+  (硬规则 3b).
+- **pid semantics are unchanged**: `systemd-run --scope` execs in place, so the pid you spawn IS the
+  anchor pid; `.quay/anchor.pid` / `*-driver.pid` keep meaning what they meant.
+
+### Reading it back (this is the measurement, not the claim)
+
+`<root>/.quay/anchor.json` carries an `envelope` field, rewritten by the anchor every reconcile pass:
+
+```json
+"envelope": { "envelope": "scope", "unit": "quay-anchor-<root>-<ts>.scope",
+              "memoryMax": "66295676928", "source": "host-derived", "reason": null }
+```
+
+`unit` comes from `/proc/self/cgroup` and `memoryMax` from that cgroup's `memory.max` file — **kernel
+direct quantities, ⛔ not an echo of the parameter we passed** (硬规则 4b), so plan-vs-kernel disagreement
+is visible rather than papered over. `source` is the launcher's declaration
+(`host-derived` / `env-override` / `env-unlimited`); it is the one field the kernel cannot answer.
+
+Cross-check + the number to tune the 0.25 with:
+
+```bash
+R=<workspace root>; PID=$(cat $R/.quay/anchor.pid); U=$(sed -n 's|^0::.*/||p' /proc/$PID/cgroup)
+cat /proc/$PID/cgroup                                  # must end in .scope
+systemctl --user show "$U" -p MemoryMax -p MemoryPeak  # MemoryMax must not be `infinity`
+python3 -c "import json;print(json.load(open('$R/.quay/anchor.json'))['envelope'])"
+```
+
+`MemoryPeak` (from `systemctl --user show`) is the **peak RSS the scope actually reached** — that is the
+reading the 0.25 factor should eventually be set from; ⛔ do not set a threshold before measuring it.
+
 ## Known failure paths (relayed, not swallowed)
 
 The script forwards the CLI's own error verbatim and exits non-zero — it never replaces a real
