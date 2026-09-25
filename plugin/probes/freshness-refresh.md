@@ -47,10 +47,19 @@ finding.
    - `producers[]`: each with `id`, `command`, `wallclock_hours`, and the `subjects` it produces.
 2. `.quay/goal-freshness-margin.json` — the snapshot the goal layer's own freshness criterion
    writes every time it runs. Its `subjects` map is the AUTHORITATIVE list of tracked subjects and
-   carries each one's current `margin` (= `K - d`, where `d` is the delivery-face commit distance
-   from that subject's newest evidence to the current tip). Its `k` field is K. **Read K from this
-   file — ⛔ never write K as a literal here.** If this file is absent or unreadable, say so in
-   `notes` and produce only the ①b findings below; ⛔ do not invent margins.
+   carries each one's current `margin` (= `K - d`, where `d` is the DELIVERY-FACE CONTENT distance
+   from that subject's newest evidence to the current tip — see ③ for the one rule that computes it).
+   Its `k` field is K. **Read K from this file — ⛔ never write K as a literal here.** If this file is
+   absent or unreadable, say so in `notes` and produce only the ①b findings below; ⛔ do not invent
+   margins.
+
+   **⚠️ A healthy `margin` is NOT "this was recently re-verified".** The same snapshot also carries
+   each subject's `evidence_ts` and `evidence_age_hours` (the WALL-CLOCK age of the evidence record
+   the margin was computed from) and a top-level `producer_latest_ts` (the moment of the most recent
+   producer run across all tracked subjects). Both are read straight off the carrier's `ts` field —
+   the same single source as `margin`, ⛔ never a second one. A criterion can be green (the content
+   window is wide) while the newest evidence is days old. Quote the age you actually read; ⛔ do not
+   translate "the criterion passes" into "the producers are running".
 
 ## ② Decide which subjects to file
 
@@ -90,19 +99,31 @@ noisy track gets switched off.
 
 ## ③ Measure R first-hand (⛔ do not copy a rate from prose)
 
-R is a MEASURED quantity. Measure it on the delivery-face path set, derived the same way the
-freshness criterion derives it (the tarball's `files` array plus the two staging roots — ⛔ never a
-hand-written path list):
+R is a MEASURED quantity, and **the rule that turns commits into a count is NOT restated here**. It is
+the ONE implementation declared in `plugin/freshness-producers.json` → `delivery_face.command` — the
+very same argv the AC-214 criterion calls, and the same one that derives the delivery-face path set
+(the tarball's `files` plus the two staging roots, mechanically — ⛔ never a hand-written path list).
+⛔ Do not hand-roll a second `git rev-list` here: the pre-2026-09-25 rule counted fan-in BOOKKEEPING
+merges (`Merge branch 'develop' into task/<X>` — 82/84 of the measured merges), made the clock run
+~1.7x fast, and let THIS routine file findings on a clock the loop could push itself.
 
 ```sh
-# 1. the delivery-face path set, mechanically derived from packages/quay/package.json
-node -e 'const p=require("./packages/quay/package.json");console.log(p.files.map(f=>"packages/quay/"+f).filter(require("fs").existsSync).concat(["plugin","packages/quay-native/src"]).join(" "))'
-# 2. the advance rate over a trailing window (pick the window, and SAY which you picked)
-git rev-list --count --since="7 days ago" develop -- <the paths from 1>
-#    R = that count / (window hours)   — and also report the WORST single hour you can see, since the
-#    failure mode is a burst, not the mean: the 2026-09-14 crossings advanced ~15/h against a
-#    ~83/day design assumption.
+# 1. the delivery-face advance over a trailing window. `delivery_face.command` is an argv ARRAY;
+#    render it as a shell line, then append the window you picked (and SAY which window you picked).
+#    The line below is plugin/test/freshness-distance-counting.test.mjs-asserted to be THAT rendering.
+node --experimental-strip-types plugin/scripts/freshness-producer-coverage-check.ts --delivery-face-distance --since "7 days ago" --json
+#    → {"state":"computed","distance":N,"contentCommits":..,"contentMerges":..,"bookkeepingMerges":..,"paths":[..],"reason":".."}
+#    R = distance / (window hours)
+# 2. also report the WORST single hour you can see, since the failure mode is a burst, not the mean:
+#    re-run the same command once per hour bucket across the window and take the largest. (The
+#    2026-09-14 crossings advanced ~15/h against a ~83/day design assumption.)
 ```
+
+⚠️ **Read `state` before you read `distance`.** Only `state:"computed"` yields an R. The other two
+states — `empty-path-set` and `not-evaluated` — carry `distance: null` and exit 3; they mean you could
+NOT measure. Report the state and its `reason` in `notes` and use no rate at all; ⛔ do not substitute
+`0`, and ⛔ do not fall back to a rate quoted from prose (硬规则 3b: "I could not look" must not be
+written in the shape of a reading).
 
 Report both the mean and the worst bucket, and use the WORST for the arithmetic — underestimating R
 files too late, which is the direction that actually loses the window.
