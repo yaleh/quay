@@ -3,7 +3,7 @@ id: gap-driver-anchor-runs-without-host-derived-memory-envelope
 title: driver anchor 组无内存包络——spawnAnchor 直接 detached 起 anchor，driver 群与全部 worker
   在用户 cgroup 里无 MemoryMax；quay 只给全量套件套了 systemd-run，运维被迫手搓无上限 scope（2026-09-25
   一次 OOM 事故 36 次 kill）
-status: todo
+status: ready
 labels:
   - gap
   - defect
