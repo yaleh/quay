@@ -83,6 +83,8 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 
 ⛔ 本任务未做：未改 `goals/`、未改判据/K、未动 `.quay/routine-findings.jsonl`、未改任何其它任务。
 
+该轴仍暗，理由：本任务为新鲜度载体刷新的收尾（记录产出者重跑与新载体记录），未产生代码 delta，故未做 L_D/L_G 测量；本次实测读数见本文件 ③（载体记录数）与 ④（margin）。
+
 ## Touches
 - `plugin/freshness-producers.json`
 - `tasks/gap-routine-freshness-refresh-freshness-goal-009-ac-239-upgrade-face-8c2414da.md`
