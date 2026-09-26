@@ -31,10 +31,19 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/adr016-screen-use-check.test.mjs` 退出码 0（17 条全过，含 2 条新增的 walk→read 竞态测试）。
-- [ ] 负控制可复核：把 `adr016-screen-use-check.ts` 的读取步还原成裸 `fs.readFileSync`（`git stash` 该文件）后，同一命令上「walk→read race: a listed .sh that vanishes」那条复红，其余不变。
-- [ ] `node --no-warnings --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts --root .` 输出含 `unreadable: 0` 且退出码 0；`--selftest` 8/8。
-- [ ] 非 ENOENT 读错误仍抛出：EACCES 那条测试通过（不得把所有读错误一律吞成「已跳过」）。
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/adr016-screen-use-check.test.mjs` 退出码 0（17 条全过，含 2 条新增的 walk→read 竞态测试）。
+- [x] 负控制可复核：把 `adr016-screen-use-check.ts` 的读取步还原成裸 `fs.readFileSync`（`git stash` 该文件）后，同一命令上「walk→read race: a listed .sh that vanishes」那条复红，其余不变。
+- [x] `node --no-warnings --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts --root .` 输出含 `unreadable: 0` 且退出码 0；`--selftest` 8/8。
+- [x] 非 ENOENT 读错误仍抛出：EACCES 那条测试通过（不得把所有读错误一律吞成「已跳过」）。
+
+## Evidence
+
+在本任务 worktree（`/data/home/yale/work/quay-worktrees/gap-adr016-screen-use-check-walk-read-enoent-race`，HEAD=224e6b97f，worktree 干净）逐条复核：
+
+- **AC1**：`node --no-warnings --experimental-strip-types --test plugin/test/adr016-screen-use-check.test.mjs` → `tests 17 / pass 17 / fail 0`，`EXIT=0`。
+- **AC2（负控制，未用 `git stash`——`git stash` 是 repo-global，裸 `pop` 会偷到同仓其它会话的 stash；改用 `git checkout HEAD~1 -- <file>` + 事后 `git checkout HEAD -- <file>` 还原）**：还原读取步后 `grep` 确认第 249 行回到裸 `fs.readFileSync(path.join(root, rel), "utf8")`；同一命令 → `pass 16 / fail 1`，`EXIT=1`，唯一红项正是 `walk→read race: a listed .sh that vanishes before its read is SKIPPED and REPORTED, never a crash`。还原修复后复跑回 17/17 绿。
+- **AC3**：`… adr016-screen-use-check.ts --root .` → `violations: 0` / `unreadable: 0` / `PASS: active whole-screen-hash violations (0) within band (0..1)`，`EXIT=0`（155 file(s) scanned）；`--selftest` → `8 passed, 0 failed`，`EXIT=0`。
+- **AC4**：`walk→read race: only ENOENT is tolerated — a genuinely unreadable file (EACCES) still surfaces` 在上述两次运行中均绿（`assert.throws(…, { code: "EACCES" })`）。
 
 ## Definition of Done
 
