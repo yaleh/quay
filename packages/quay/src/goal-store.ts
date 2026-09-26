@@ -89,6 +89,7 @@ import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome 
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import { GOAL_STATUSES } from "./abi.ts";
+import { mergeEnv } from "./kernel/env-merge.ts";
 
 // ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
 // (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
@@ -2836,15 +2837,10 @@ function judgeFromArgv(judgeArgv: string[]): FidelityInvokeJudge {
 // ⛔ 不回落 faithful）。判据 cost：只构造 argv、不 spawn（本函数不调 LLM；LLM 只在 write() 激活钩子被
 // spawnSync 触发，⛔ 不在 goal-driver 每轮 ~42s 的 gate 路径）。
 
-/** env 合并（复刻 profile-policy mergeEnv：override 中 "" = 删键，其余含 "0" 保留）。 */
-function mergeProfileEnv(base: Record<string, string>, override: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { ...base };
-  for (const [k, v] of Object.entries(override)) {
-    if (v === "") delete out[k];
-    else out[k] = v;
-  }
-  return out;
-}
+// env 合并（override 中 `""` = 删键，其余含 `"0"` 保留）的实现 = kernel 叶
+// `./kernel/env-merge.ts` 的单一一份 —— ⛔ 不在这里留第二份（routine `semantic-dedup-scan`
+// finding `mergeenv-cross-layer-byte-identical-under-renamed-symbol` 的处置：本函数原名
+// `mergeProfileEnv`，与 plugin/scripts/profile-policy.ts 的 `mergeEnv` 逐字节相同）。
 
 /** 读 .quay/profiles.yml → 顶层对象；缺失/非法 ⇒ null（fail-closed，⛔ 不静默冒充空配置）。 */
 function readProfilesYaml(root: string): Record<string, unknown> | null {
@@ -2911,7 +2907,7 @@ export function resolveFidelityJudgeArgvFromConfig(root: string): string[] | nul
 
   const baseEnv = (profile.env && typeof profile.env === "object" ? profile.env : {}) as Record<string, string>;
   const roleEnv = (role.env && typeof role.env === "object" ? role.env : {}) as Record<string, string>;
-  const env = mergeProfileEnv(baseEnv, roleEnv);
+  const env = mergeEnv(baseEnv, roleEnv);
   const unset = [
     ...(Array.isArray(profile.unset) ? profile.unset.map(String) : []),
     ...(Array.isArray(role.unset) ? role.unset.map(String) : []),
