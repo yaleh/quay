@@ -2,7 +2,7 @@
 id: gap-adr016-screen-use-check-walk-read-enoent-race
 title: "adr016-screen-use-check: walk→read ENOENT race crashes the scan (exit 1
   same shape as a violation)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
