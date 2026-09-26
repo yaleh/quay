@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-seeded-prng-three-copies-two-names-reproduci
 title: "semantic-dedup-scan: three copies under two names; a literal-level
   comparison (not just comment-stripped) confirms the two cited bodies are
   identical INCLUDING every constant, and "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
