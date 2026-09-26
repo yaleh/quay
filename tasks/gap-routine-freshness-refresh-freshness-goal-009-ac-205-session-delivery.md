@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-205-session-delivery
 title: freshness-refresh [remedy-blocked] Same 19/200 window as the coldstart
   face, but this subject additionally needs a LIVE session on the verify host
   whose settings allow inbound; a r
-status: needs-human
+status: todo
 labels:
   - gap
   - routine-filed
