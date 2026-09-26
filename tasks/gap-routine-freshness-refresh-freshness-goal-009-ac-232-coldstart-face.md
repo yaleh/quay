@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-232-coldstart-face
 title: "freshness-refresh [remedy-blocked] Only 19 of 200 commits of window
   remain (0.095) while a coldstart-face run started now needs 2.34h during which
   the delivery face can advance 56 "
-status: needs-human
+status: todo
 labels:
   - gap
   - routine-filed
