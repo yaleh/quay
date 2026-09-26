@@ -9,8 +9,12 @@
 // ⛔ 不是「配置项自由组合」：schema 是封闭的（ProfileSpec/RoleSpec 逐字段列出），不会长成第二个
 //   bare 那种两级歧义旋钮。
 //
-// ⚠️ 保留 `""` = 取消继承语义（quay-launch.sh:98 `with_entries(select(.value != ""))`，manager 靠它
-//   取消 917k 三件套；`"0"` 是有效值要保留）——mergeEnv 里 `""` 删键、其余（含 "0"）保留。
+// ⚠️ 保留 `""` = 取消继承语义（manager 靠它取消 917k 三件套；`"0"` 是有效值要保留）——mergeEnv 里
+//   `""` 删键、其余（含 "0"）保留。
+//   ⛔ 本行原先引的 `quay-launch.sh:98 with_entries(select(.value != ""))` 已失效（2026-09-26 实测：
+//   该 jq 已不在树里；shell 层改用显式 `unset` 列表，quay-launch.sh:124「取消继承 = 从 base env 删
+//   unset 键（显式列表，⛔ 非空串约定）」，`applyUnset` 即该显式形态的 TS 对应物）。`""` 规则在本层
+//   继续保留是【刻意的向后兼容】，⛔ 不是因为 shell 层还有定义点 —— 别再把死锚点复制到第三处。
 //
 // 归属 blocker（归人裁定，未决，本模块不默认取值）：packages/quay（产品）vs plugin/scripts（编排）。
 // 本文件落在编排层（与 L1 quay-launch.sh 同层）；若「包裹会话的 quay」是产品主张，L1/L2/L3 再整体迁。
@@ -86,16 +90,15 @@ export interface ResolveOptions {
 }
 
 // ── env 合并：`""` = 取消继承（删键）；`"0"` 等其余值原样保留 ───────────────────────────────────
-/** 把 override 合并到 base 之上。override 中值为 `""` 的键 = 从结果里删掉（取消继承，
- *  复刻 quay-launch.sh:98 `with_entries(select(.value != ""))`）；`"0"` 是有效值，保留。 */
-export function mergeEnv(base: Record<string, string>, override: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { ...base };
-  for (const [k, v] of Object.entries(override)) {
-    if (v === "") delete out[k];
-    else out[k] = v;
-  }
-  return out;
-}
+// 实现单一来源 = kernel 叶 `packages/quay/src/kernel/env-merge.ts`。本文件只 import 并原样转出
+// （公开面不变：`mergeEnv` 仍从本路径导出，签名不变）。落 kernel 的理由 = 两层唯一共同可达：
+// ⛔ 产品层（`packages/quay/src/goal-store.ts` 的保真性判定器缺省 wiring）也读这一份，而
+// `packages/**` → `plugin/**` 是 import-graph-check 的 `reverseEdges` 棘轮（基线 0）明令的逆向边，
+// 故实现不能留在 plugin/scripts 里。原为两份逐字节相同的 body（本文件的 `mergeEnv` 与
+// goal-store 的 `mergeProfileEnv`）—— routine `semantic-dedup-scan` finding
+// `mergeenv-cross-layer-byte-identical-under-renamed-symbol` 的处置。
+import { mergeEnv } from "../../packages/quay/src/kernel/env-merge.ts";
+export { mergeEnv };
 
 /** 对一份已合并的 env 应用 `unset: [...]`（显式取消继承，L1 目标形态）。unset 优先于 env 覆盖。 */
 export function applyUnset(env: Record<string, string>, unset: readonly string[]): Record<string, string> {

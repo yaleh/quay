@@ -61,6 +61,7 @@
  */
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { seededRng } from "./gate-script-base.ts";
 
 // ── 取值词表：三态，⛔ 「读不出来」不得与「高置信」共用取值（硬规则 3b）──────────
 export type Confidence = "high" | "low" | "unresolvable";
@@ -302,22 +303,15 @@ export function dist(xs: number[]): Distribution {
   };
 }
 
-/** mulberry32 — 确定性 PRNG，让「随机取 10 条」可被他人用同一个 seed 复现（AC3）。 */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** `mulberry32` — 本文件历史上的名字，指向**唯一实现**（gate-script-base.ts 的 `seededRng`）。
+ *  保留该导出名是为了让老报告里记的 seed 仍可复现（同一 seed ⇒ 同一序列，逐值不变）；
+ *  .quay/routine-findings.jsonl finding `seeded-prng-three-copies-two-names-reproducibility-primitive`。 */
+export { seededRng as mulberry32 };
 
 /** 从 `pool` 里确定性取 `n` 条（先按 taskId 排序，再 Fisher–Yates with seeded PRNG）。 */
 export function sampleDeterministic<T extends { taskId: string }>(pool: T[], n: number, seed: number): T[] {
   const a = [...pool].sort((x, y) => (x.taskId < y.taskId ? -1 : x.taskId > y.taskId ? 1 : 0));
-  const rnd = mulberry32(seed);
+  const rnd = seededRng(seed);
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];

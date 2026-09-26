@@ -68,7 +68,7 @@ import { fileURLToPath } from "node:url";
 import { parseTask } from "./task-schema.ts";
 import { parseTouchEntries, extractTouchesSection } from "./touches-parser.ts";
 import { detectShape } from "./ready-pool-check.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, seededRng } from "./gate-script-base.ts";
 import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
 
 // ── The four-state `final_state` judgement (the dead-value trap lives here) ──────────────────────────
@@ -341,16 +341,10 @@ export function partialSpearman(x: number[], y: number[], z: number[]): number {
   return spearman(rankResidual(x, z), rankResidual(y, z));
 }
 
-/** Deterministic PRNG (mulberry32) — the permutation test must be reproducible from `--seed`. */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** `mulberry32` — 本文件历史上的名字，指向**唯一实现**（gate-script-base.ts 的 `seededRng`）。
+ *  保留该导出名是为了让 `--seed` 记下的置换检验仍可复现（逐值不变）；
+ *  .quay/routine-findings.jsonl finding `seeded-prng-three-copies-two-names-reproducibility-primitive`。 */
+export { seededRng as mulberry32 };
 
 /**
  * Permutation test for `spearman(x, y)`: shuffle y's pairing, recompute |rho|, repeat.
@@ -359,7 +353,7 @@ export function mulberry32(seed: number): () => number {
  * observed magnitude. NaNs (constant vectors) yield a `null*` of NaN, which is reported as such.
  */
 export function permutationTest(x: number[], y: number[], permutations: number, seed: number): PermutationResult {
-  const rnd = mulberry32(seed);
+  const rnd = seededRng(seed);
   const observed = Math.abs(spearman(x, y));
   const nulls: number[] = [];
   const work = y.slice();
