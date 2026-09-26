@@ -104,6 +104,22 @@ function cloneLocality(parent) {
  */
 function makeClone(prefix) {
   const parent = mkdtempSync(join(tmpdir(), `release-cut-${prefix}-`));
+  // ⛔ CLEAN UP ON OUR OWN FAILURE. Every caller does `const c = makeClone(...); try {…} finally
+  // { cleanup(c.parent); }` — which does NOT run when this function THROWS, because `c` was never
+  // assigned. What leaks is a FULL CLONE OF THIS REPOSITORY (measured ~503 MB in os.tmpdir()).
+  // Measured 2026-09-26: a red run of this file left 68 `release-cut-*` trees / 7.8 GB under
+  // /tmp — which lives on the 50 GB ROOT filesystem of this host — filling it to 99% and killing an
+  // UNRELATED scoped-gate run with ENOSPC (its log was truncated mid-line). The fixture's own
+  // failure must not be able to damage the shared host, so reclaim `parent` here and rethrow.
+  try {
+    return makeCloneIn(parent, prefix);
+  } catch (e) {
+    cleanup(parent);
+    throw e;
+  }
+}
+
+function makeCloneIn(parent, prefix) {
   const root = join(parent, "repo");
   const { locality, srcDev, dstDev } = cloneLocality(parent);
   process.stdout.write(`SUITE-RELEASE-CUT-FIXTURE clone-locality=${locality}`
