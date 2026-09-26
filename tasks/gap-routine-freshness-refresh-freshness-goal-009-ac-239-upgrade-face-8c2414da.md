@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-239-upgrade-face-8c2414d
 title: "freshness-refresh [remedy-blocked] margin/K (-0.230) is BELOW zero and
   <= threshold (0.3094): AC-239 has no separate command and is only refreshed by
   the same --verify-upgrade run,"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
