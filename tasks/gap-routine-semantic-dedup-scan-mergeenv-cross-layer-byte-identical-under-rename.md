@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-mergeenv-cross-layer-byte-identical-under-re
 title: "semantic-dedup-scan: digest-identical 8-line body across the
   plugin/product boundary, declared in the product copy as a deliberate 复刻, and
   the rename is exactly what hid it from na"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
