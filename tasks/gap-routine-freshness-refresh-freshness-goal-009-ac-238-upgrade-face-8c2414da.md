@@ -79,7 +79,7 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 
 ③ 载体新记录（本任务验收命令读的就是这条）：`.quay/productization-verification.jsonl` 中 `ac == "GOAL-009-AC-238"` ∧ `ts` 晚于本次升级（`2026-09-25T04:19:13.418Z`）∧ `build_sha` 前缀 `09f5c3a8` 的记录数 = **1**，最新 `ts` = **2026-09-25T16:27:01Z**。
 
-④ 新鲜度读数：`.quay/goal-freshness-margin.json`（2026-09-26T00:31:06Z）`GOAL-009-AC-238` **d=0 / margin=200**；立案时逐字为「margin/K (-0.230) is BELOW zero and <= threshold (0.3094)：AC-239 无独立命令、只随同一次 --verify-upgrade 运行老化，而一次 PARTIAL 运行会让 AC-238 单独刷新」。
+④ 新鲜度读数：`.quay/goal-freshness-margin.json`（2026-09-26T00:31:06Z）`GOAL-009-AC-238` **d=0 / margin=200**；立案时逐字为「margin/K (-0.230) is BELOW zero and <= threshold (0.3094): the AC-238 evidence (2026-09-19T11:06:09Z) is already 246 delivery-face commits behind the tip, i.e. 46 commits PAST the window — the criterion is red now, not merely at risk.」。
 
 ⑤ 据实记录一处判据瑕疵：本任务 AC-1 把载体写作 `.quay/routine-findings.jsonl`。该文件确有本主体条目，但**产出者证据的真实载体**是 `.quay/productization-verification.jsonl`——验收命令读的是后者（真实读数），⛔ 未按字面读前者充数。
 
