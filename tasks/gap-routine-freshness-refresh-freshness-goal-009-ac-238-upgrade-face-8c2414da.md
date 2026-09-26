@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-238-upgrade-face-8c2414d
 title: "freshness-refresh [remedy-blocked] margin/K (-0.230) is BELOW zero and
   <= threshold (0.3094): the AC-238 evidence (2026-09-19T11:06:09Z) is already
   246 delivery-face commits behind"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
