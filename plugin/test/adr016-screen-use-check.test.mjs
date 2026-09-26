@@ -113,6 +113,30 @@ test("AC3/AC7: the checker scans shell scripts + tick-doc bash blocks — .md pr
   assert.equal(retired.length, 0);
 });
 
+test("walk→read race: a listed .sh that vanishes before its read is SKIPPED and REPORTED, never a crash (npm-pack staging rm -rf's packages/quay/plugin/ mid-suite)", (t) => {
+  const victim = "plugin/scripts/drivable-workspace-check.sh";
+  const real = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (p, ...rest) => {
+    if (String(p).endsWith(victim)) throw Object.assign(new Error(`ENOENT: no such file or directory, open '${p}'`), { code: "ENOENT" });
+    return real(p, ...rest);
+  });
+  const scan = scanForScreenHashViolations(repoRoot);
+  assert.deepEqual(scan.unreadable, [{ rel: victim, reason: "ENOENT" }], "the vanished file must be RETURNED, not swallowed");
+  assert.equal(scan.violations.length, 0);
+  const verdict = judgeScreenHashScan(scan);
+  assert.equal(verdict.state, "verified", "a vanished file is not a violation");
+  assert.match(verdict.verifiedBy ?? "", /1 个文件/, "the verdict must name the skip — 0 violations over a partly-read input is not a clean full scan");
+});
+
+test("walk→read race: only ENOENT is tolerated — a genuinely unreadable file (EACCES) still surfaces", (t) => {
+  const real = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (p, ...rest) => {
+    if (String(p).endsWith("plugin/scripts/drivable-workspace-check.sh")) throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+    return real(p, ...rest);
+  });
+  assert.throws(() => scanForScreenHashViolations(repoRoot), { code: "EACCES" });
+});
+
 test("AC3: a fenced ```bash INSTRUCTION block in a tick doc is a violation (shipped bash blocks are not prose)", () => {
   const src = [
     "# prose heading — never scanned",
@@ -147,7 +171,7 @@ test("stripShellComments: comments are stripped but string literals preserved", 
 // ── B4 DriverResult（gap-b4-checker-reuse-driver-result：判定收敛到 DriverResult<T> 词表）────────────
 
 test("B4 AC3: judgeScreenHashScan maps in-band⇒verified / out-of-band⇒failed (DriverResult, exit 0/1)", () => {
-  const inBand = judgeScreenHashScan({ violations: [], retired: [], files: ["a.sh"] });
+  const inBand = judgeScreenHashScan({ violations: [], retired: [], files: ["a.sh"], unreadable: [] });
   assert.equal(inBand.state, "verified");
   assert.equal(driverResultToExit(inBand), 0);
 
@@ -155,6 +179,7 @@ test("B4 AC3: judgeScreenHashScan maps in-band⇒verified / out-of-band⇒failed
     violations: [{ rel: "a.sh", line: 1, snippet: "x", reason: "same-command" }],
     retired: [],
     files: ["a.sh"],
+    unreadable: [],
   });
   assert.equal(one.state, "verified", "band 0..1 tolerates one legacy observer");
   assert.equal(driverResultToExit(one), 0);
@@ -166,6 +191,7 @@ test("B4 AC3: judgeScreenHashScan maps in-band⇒verified / out-of-band⇒failed
     ],
     retired: [],
     files: ["a.sh", "b.sh"],
+    unreadable: [],
   });
   assert.equal(two.state, "failed", "a second active violation exceeds the band");
   assert.equal(driverResultToExit(two), 1);

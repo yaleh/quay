@@ -126,10 +126,17 @@ export interface Violation {
   taintSource?: string;
 }
 
+/** A file the walk listed that vanished before it was read (see scanForScreenHashViolations). */
+export interface Unreadable {
+  rel: string;
+  reason: string;
+}
+
 export interface ScanResult {
   violations: Violation[];
   retired: Violation[];
   files: string[];
+  unreadable: Unreadable[];
 }
 
 /** True iff `text` references shell variable `name` as `$name` or `${name}`. */
@@ -236,6 +243,10 @@ export function scanForScreenHashViolations(root: string): ScanResult {
   // prunes `vendor` instead. ⛔ The two stay apart (fs-walk.ts#collectShellScripts) — merging them
   // would change which files each scans, and a checker reading the wrong surface passes silently
   // (硬规则 3b).
+  // Walk→read is two steps and the tree can move between them: the npm-pack / delivery-smoke path
+  // stages a mirror of plugin/ into packages/quay/plugin/ and rm -rf's it while the suite runs, so a
+  // listed .sh can vanish before it is read. A vanished file is skipped and RETURNED in `unreadable`
+  // (same convention as dead-code-after-return-check.ts#scanTree); a non-ENOENT error still throws.
   const files = collectShellScripts(root, SKIP_DIRS);
   const violations: Violation[] = [];
   const retired: Violation[] = [];
@@ -245,8 +256,18 @@ export function scanForScreenHashViolations(root: string): ScanResult {
       else violations.push(v);
     }
   };
+  const unreadable: Unreadable[] = [];
   for (const rel of files) {
-    absorb(rel, detectFileViolations(rel, fs.readFileSync(path.join(root, rel), "utf8")));
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(root, rel), "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw err;
+      unreadable.push({ rel, reason: code });
+      continue;
+    }
+    absorb(rel, detectFileViolations(rel, source));
   }
   for (const rel of MD_TICK_DOCS) {
     const full = path.join(root, rel);
@@ -255,7 +276,7 @@ export function scanForScreenHashViolations(root: string): ScanResult {
       absorb(rel, detectTickDocViolations(rel, fs.readFileSync(full, "utf8")));
     }
   }
-  return { violations, retired, files };
+  return { violations, retired, files, unreadable };
 }
 
 /** Pure band judgment (path→content, gap-b5): the whole-screen-hash band is 0..1 ACTIVE violations
@@ -276,7 +297,8 @@ export function judgeScreenHashScan(scan: ScanResult): DriverResult<ScanResult> 
   if (!inBand) {
     return failed(`${scan.violations.length} active whole-screen-hash violations — band is 0..1`);
   }
-  return verified(scan, "活跃 whole-screen-hash 违例在 band 内（0..1）");
+  const racy = scan.unreadable.length > 0 ? `；${scan.unreadable.length} 个文件在 walk→read 之间消失（ENOENT，已跳过）` : "";
+  return verified(scan, `活跃 whole-screen-hash 违例在 band 内（0..1）${racy}`);
 }
 
 /** Pure RED/GREEN selftest (ADR-018 selfcheck-fixture pattern). */
@@ -352,13 +374,13 @@ export function main(argv: string[]): number {
   }
 
   const scan = scanForScreenHashViolations(root);
-  const { violations, retired, files } = scan;
+  const { violations, retired, files, unreadable } = scan;
   const active = violations.length;
   const result = judgeScreenHashScan(scan);
   const inBand = result.state === "verified";
 
   if (asJson) {
-    console.log(JSON.stringify({ ok: inBand, violations: active, active: violations, retired, files_scanned: files.length }, null, 2));
+    console.log(JSON.stringify({ ok: inBand, violations: active, active: violations, retired, files_scanned: files.length, unreadable }, null, 2));
   } else {
     console.log(`adr016-screen-use-check — ${files.length} file(s) scanned (shell scripts + tick-doc bash blocks)`);
     if (active === 0) console.log("violations: 0");
@@ -368,6 +390,7 @@ export function main(argv: string[]): number {
         console.log(`  ${v.rel}:${v.line}  ${v.snippet}  [${v.reason}${v.taintSource ? ` ← $${v.taintSource}` : ""}]`);
       }
     }
+    console.log(`unreadable: ${unreadable.length}${unreadable.length ? ` (${unreadable.map((u) => `${u.rel}:${u.reason}`).join(", ")})` : ""}`);
     if (retired.length) {
       console.log(`retired (reported, not counted): ${retired.length}`);
       for (const v of retired) {
