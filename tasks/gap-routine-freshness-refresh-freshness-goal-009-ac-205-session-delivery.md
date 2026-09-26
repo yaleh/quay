@@ -74,13 +74,13 @@ re-run session-delivery on host B, which must already hold a live session with c
 bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B C" --driving-profiles /data/home/yale/work/quay-driving-profiles-target.yml --force --root /data/home/yale/work/quay
 ```
 
-逐字结果：rc=2（PARTIAL）；B 腿 rc=0、C 腿 rc=0；e2e-pairing E2E-PAIR OK（AC-203 与 AC-207 落在同一 project_root）；evidence-completeness PARTIAL present=5 missing=1 list=GOAL-009-AC-205（仅 host C 缺 AC-205——C 上没有允许入站的活会话，该前置未变）AC-205 本身由 host B 腿产出（ts 17:02:50Z，transcript_confirmed:true）；缺的是 host C 侧
+逐字结果：rc=2（PARTIAL）；B 腿 rc=0、C 腿 rc=0；e2e-pairing E2E-PAIR OK（AC-203 与 AC-207 落在同一 project_root）；evidence-completeness PARTIAL present=5 missing=1 list=GOAL-009-AC-205（仅 host C 缺 AC-205——C 上没有允许入站的活会话，该前置未变）；AC-205 本身由 host B 腿产出（ts 17:02:50Z，transcript_confirmed:true）；缺的是 host C 侧
 
 ⚠️ 该次运行带 `--driving-profiles /data/home/yale/work/quay-driving-profiles-target.yml`：本仓 `.quay/profiles.yml` 的 `worker-default.model` 是本机网关专属名，被目标主机网关 400 拒绝，导致两条 e2e 腿的 worker 全灭。该缺口（推送侧无覆盖入口）由任务 `gap-e2e-verify-pushes-dev-host-profile-model-to-target-host` 修复并已落地，本处用的是它提供的覆盖入口。
 
 ③ 载体新记录（本任务验收命令读的就是这条）：`.quay/productization-verification.jsonl` 中 `ac == "GOAL-009-AC-205"` ∧ `ts` 晚于本次升级（`2026-09-25T03:49:55.712Z`）∧ `build_sha` 前缀 `09f5c3a8` 的记录数 = **1**，最新 `ts` = **2026-09-25T17:02:50Z**。
 
-④ 新鲜度读数：`.quay/goal-freshness-margin.json`（2026-09-26T00:31:06Z）`GOAL-009-AC-205` **d=0 / margin=200**；立案时逐字为「Only 19 of 200 commits of window remain (0.095) while a coldstart-face run started now needs 2.34h during which the delivery face can advance 56 commits」。
+④ 新鲜度读数：`.quay/goal-freshness-margin.json`（2026-09-26T00:31:06Z）`GOAL-009-AC-205` **d=0 / margin=200**；立案时逐字为「Same 19/200 window as the coldstart face, but this subject additionally needs a LIVE session on the verify host whose settings allow inbound; a re-run is only a remedy once that precondition holds (host C measured unsatisfied 2026-09-15).」。
 
 ⑤ 据实记录一处判据瑕疵：本任务 AC-1 把载体写作 `.quay/routine-findings.jsonl`。该文件确有本主体条目，但**产出者证据的真实载体**是 `.quay/productization-verification.jsonl`——验收命令读的是后者（真实读数），⛔ 未按字面读前者充数。
 
