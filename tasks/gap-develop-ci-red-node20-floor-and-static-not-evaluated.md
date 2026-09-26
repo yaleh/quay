@@ -3,7 +3,7 @@ id: gap-develop-ci-red-node20-floor-and-static-not-evaluated
 title: 真实 develop CI 恒红：dist-verify-node-floor 在它要验证的 Node 20 底线上调用
   `--experimental-strip-types`（该 flag 需 Node ≥22.6）致打包闸 fail-closed；test job 三条
   STATIC_CHECK_NOT_EVALUATED 后退出 1 ⇒ AC-281 恒不可达
-status: todo
+status: ready
 labels:
   - gap
   - defect
