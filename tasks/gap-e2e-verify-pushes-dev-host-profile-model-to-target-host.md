@@ -98,4 +98,4 @@ extra:
 
 **⚠️ Touches 扩张（本轮唯一的结构性声明变更）**：`plugin/sh-census-baseline.json` 并入 `## Touches`。这不是可选的美化 —— 本轮**实测**过反例：反漂移闸 `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` 在该路径未声明时报 `ANTI-DRIFT HARD FAIL … out-of-declared: task wrote plugin/sh-census-baseline.json (matches no declared Touches glob)`，exit 1。它读的是**worktree 里的** `tasks/<id>.md`（`runTaskDriver` 的 `taskPath`）⇒ 该声明必须真到 worktree 才算数。
 
-**AC5 / DoD#1 本轮处置不变**：仍为（待外部），承接链与裁定依据见上一轮（第 2 次派发）小节，本轮**不复述、不改动**。⛔ 本轮仍不往 `.quay/productization-verification.jsonl` 写落地前记录（那是假归因，硬规则 4 推论三）。
+**AC5 / DoD#1 已勾（2026-09-26 补记，取代下面"标（待外部）"的处置）**：外部验证已发生——载体 `.quay/productization-verification.jsonl` 中 `ac="GOAL-009-AC-207"` 的记录 `ts` 为 `2026-09-25T17:02:50Z`（host B）与 `2026-09-25T17:17:02Z`（host C），均晚于本任务落地提交 `2026-09-25T13:54:40Z`，`build_sha 09f5c3a8`；host B/C 均无 `Invalid model name`。以目标主机认得的模型名（`deepseek-v4-pro-anthropic`）重跑两条 producer：upgrade `rc=0`（AC-238 与 AC-239 成对回传）、coldstart `rc=2`（仅 host C 缺 AC-205，其活会话前置未变）。⛔ 「落地前不写记录」的原则不变（硬规则 4 推论三）——此处是**落地之后**的真实读数。
