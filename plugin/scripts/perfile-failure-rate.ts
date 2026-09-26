@@ -43,7 +43,8 @@
 // within-baseline — the safe direction (it does NOT escalate a noisy-but-known file; reliably
 // detecting a rate-doubling inside an already-noisy file needs more samples than one suite round).
 //
-// DATA-SOURCE RESOLUTION (AC3, same convention as psi-failure-correlation-check.ts): the carrier
+// DATA-SOURCE RESOLUTION (AC3: the single shared resolveCarrierRoot defined below — the psi family
+// imports it instead of re-writing the convention): the carrier
 // .quay/verification-round.jsonl is gitignored — `git worktree add` does not carry it. The carrier
 // root resolves `--root` → `process.env.QUAY_MAIN_CHECKOUT` → repoRoot(), and FAILS CLOSED (exit 2)
 // when the carrier is absent in the resolved root — a worker in a fresh worktree that forgets --root
@@ -150,7 +151,23 @@ export function classifyFailure(history: PerFileRec[], opts?: { minRuns?: number
 
 // ── Carrier reading (the I/O half, kept separate from the pure functions) ──────────────────────────
 
-/** Resolve the carrier root: --root arg → QUAY_MAIN_CHECKOUT → repoRoot() (psi script convention). */
+/**
+ * Resolve the carrier root: --root arg → QUAY_MAIN_CHECKOUT → repoRoot().
+ *
+ * THE SINGLE DEFINITION of this convention. It was byte-identical in three files (here, plus private
+ * copies in psi-failure-correlation-check.ts and psi-window-join.ts) until semantic-dedup-scan
+ * finding `resolve-carrier-root-three-byte-identical-silent-zero` (`real-duplication`) merged them:
+ * both psi scripts now import this function. Three homes for ONE rule meant a change to the
+ * resolution order could land in one copy only, silently, in the other two — psi-window-join.ts's own
+ * header documented the intent as "the SAME resolution convention as psi-failure-correlation-check.ts",
+ * i.e. consistency by copy. (The drift was not hypothetical: psi-failure-correlation-check.ts's header
+ * already said the last fallback was `cwd` while all three bodies fell back to `repoRoot()`.)
+ *
+ * The `argRoot?: string` signature is a SUPERSET of the two private copies' `argRoot: string` — every
+ * former call site passes `args.root`, which is `""` when the flag is absent, and `""` is falsy here,
+ * so the observable behavior is unchanged. The ratchet test in plugin/test/perfile-failure-rate.test.mjs
+ * fails if a private copy reappears.
+ */
 export function resolveCarrierRoot(argRoot?: string): string {
   if (argRoot) return argRoot;
   if (process.env.QUAY_MAIN_CHECKOUT) return process.env.QUAY_MAIN_CHECKOUT;

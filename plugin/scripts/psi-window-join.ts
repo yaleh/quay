@@ -22,6 +22,9 @@
 //
 // REUSE (AC1/AC5): 窗口联接原语 windowMeanStall 是唯一实现（从 psi-failure-correlation-check.ts
 // 抽出并成为其 import 来源），本文件不得、psi-failure-correlation-check.ts 也不再另写一份窗口聚合。
+// 同理 resolveCarrierRoot 只有一份实现（perfile-failure-rate.ts），本文件 import 它 ——
+// 此前「同一约定抄三份」的写法由 semantic-dedup-scan finding
+// `resolve-carrier-root-three-byte-identical-silent-zero` 立案，本文件是三个落点之一。
 //
 // Exit codes (CLI): 0 = found:true（查到并返回采样序列）; 2 = usage error（缺 --run-id/--file）或
 // found:false（载体缺失 / runId 未命中 / file 未命中）——fail-closed。
@@ -31,8 +34,8 @@
 //        --run-id <runId> --file <repo-relpath> [--root <repo-root>] [--json]
 //   --run-id   the suite round id (matches a .quay/suite-load-<runId>.jsonl basename).
 //   --file     repo-relative test path, as recorded in verification-round.jsonl perFile[].file.
-//   --root     repo/carrier root (default: QUAY_MAIN_CHECKOUT → repoRoot() — the same resolution
-//              convention as psi-failure-correlation-check.ts).
+//   --root     repo/carrier root (default: QUAY_MAIN_CHECKOUT → repoRoot()). Resolved by the SINGLE
+//              shared resolveCarrierRoot, imported from perfile-failure-rate.ts.
 //   --json     emit the raw result object as JSON.
 //
 //   import { joinFilePsiWindow } from "./psi-window-join.ts";
@@ -42,8 +45,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { repoRoot } from "./repo-root.ts";
 import { readJsonLines } from "./gate-script-base.ts";
+import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
 
 export type PsiSample = { t: number; cpu_stall: number };
 
@@ -136,13 +139,11 @@ export function joinFilePsiWindow(root: string, runId: string, file: string): Jo
   };
 }
 
-// resolveCarrierRoot — the SAME resolution convention as psi-failure-correlation-check.ts (AC2: 不新造
-// 一套解析规则): --root → QUAY_MAIN_CHECKOUT → repoRoot().
-function resolveCarrierRoot(argRoot: string): string {
-  if (argRoot) return argRoot;
-  if (process.env.QUAY_MAIN_CHECKOUT) return process.env.QUAY_MAIN_CHECKOUT;
-  return repoRoot();
-}
+// resolveCarrierRoot is IMPORTED (single definition in perfile-failure-rate.ts) — see the REUSE note
+// in the header. It used to be a private byte-identical copy of the same 4-line convention here, and
+// a copy of the same convention in psi-failure-correlation-check.ts (semantic-dedup-scan finding
+// `resolve-carrier-root-three-byte-identical-silent-zero`): three homes for ONE rule meant a change
+// to the resolution order landing in one copy only, silently, in the other two.
 
 function parseArgs(argv: string[]) {
   const out = { runId: "", file: "", root: "", json: false, help: false };

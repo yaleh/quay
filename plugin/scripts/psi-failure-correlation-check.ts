@@ -37,10 +37,13 @@
 // DATA-SOURCE RESOLUTION (订正①, AC2): the two historical carriers (.quay/verification-round.jsonl
 // and .quay/suite-load-*.jsonl) are BOTH gitignored — `git worktree add` does not carry them, and
 // dispatch-worktree-setup.sh does not refresh them. The script resolves the carrier root as
-// `--root` → `process.env.QUAY_MAIN_CHECKOUT` → cwd, and FAIL-CLOSED (exit 2) when the carrier is
-// absent in the resolved root — a worker in a fresh worktree that forgets `--root` must see
-// "carrier not found", never a silent empty result. The active experiment (a) does NOT depend on
-// those carriers and runs in any environment (including a bare worktree).
+// `--root` → `process.env.QUAY_MAIN_CHECKOUT` → `repoRoot()` (the single shared `resolveCarrierRoot`,
+// imported from perfile-failure-rate.ts — the three copies of this rule were one semantic-dedup-scan
+// finding; this header line had already drifted to "→ cwd" while the code fell back to repoRoot()),
+// and FAIL-CLOSED (exit 2) when the carrier is absent in the resolved root — a worker in a fresh
+// worktree that forgets `--root` must see "carrier not found", never a silent empty result. The
+// active experiment (a) does NOT depend on those carriers and runs in any environment (including a
+// bare worktree).
 //
 // MIN-N (honest small-sample floor, AC3): the PASSIVE source still defines a minimum sample N; a bin
 // whose fail-group N is below the floor reports 「样本不足」, never a direction (硬规则 3b).
@@ -94,6 +97,7 @@ import { repoRoot } from "./repo-root.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
+import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
 import { readJsonLines } from "./gate-script-base.ts";
 
 type Sample = { t: number; cpu_stall: number };
@@ -211,11 +215,10 @@ function parseArgs(argv: string[]) {
   return out;
 }
 
-function resolveCarrierRoot(argRoot: string): string {
-  if (argRoot) return argRoot;
-  if (process.env.QUAY_MAIN_CHECKOUT) return process.env.QUAY_MAIN_CHECKOUT;
-  return repoRoot();
-}
+// resolveCarrierRoot is IMPORTED (single definition in perfile-failure-rate.ts). This file used to
+// carry the second of three byte-identical copies of the same 4-line convention (semantic-dedup-scan
+// finding `resolve-carrier-root-three-byte-identical-silent-zero`); three homes for one rule meant a
+// change to the resolution order landing in one copy only, silently, in the other two.
 
 function readCpuStall(): number | null {
   try {

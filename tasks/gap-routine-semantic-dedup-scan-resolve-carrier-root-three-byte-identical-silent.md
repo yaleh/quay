@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-resolve-carrier-root-three-byte-identical-si
 title: "semantic-dedup-scan: three digest-identical copies with the same name,
   one already exported so the others could import it today, and the consumer
   fails closed only for an ABSENT ca"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
