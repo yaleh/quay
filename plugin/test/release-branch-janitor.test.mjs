@@ -35,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -285,38 +285,59 @@ test("AC3: an instrument failure has its OWN exit code + CAUSE, never 'enumerati
 
 // ── AC5: the record's three states, each with its own exit code + CAUSE ──────────────────────────
 
-test("AC5: ran-and-empty / never-ran / unreadable are three distinct outputs", () => {
+test("AC5: ran-and-empty / never-ran / unreadable are three distinct outputs", (t) => {
   const root = makeRepo("trace");
-  const t = tempTrace("trace");
+  const tr = tempTrace("trace");
   try {
     // (1) never ran: the file does not exist.
-    const missing = run(["--log", "--trace", t.file]);
+    const missing = run(["--log", "--trace", tr.file]);
     assert.equal(missing.status, 4);
     assert.match(missing.stderr, /CAUSE=release-branch-janitor-trace-missing/);
 
     // (2) ran, nothing to handle: a pass line exists, and `--log` reads it back.
-    const pass = run(["--root", root, "--trace", t.file]);
+    const pass = run(["--root", root, "--trace", tr.file]);
     assert.equal(pass.status, 0);
-    const logged = run(["--log", "--trace", t.file]);
+    const logged = run(["--log", "--trace", tr.file]);
     assert.equal(logged.status, 0, "a recorded pass must be readable");
     assert.match(logged.stdout, /disposition=pass-clean/);
     assert.match(logged.stdout, /trace: 1 record\(s\)/);
     assert.notEqual(logged.status, missing.status);
 
     // (3) exists but cannot be read: "could not look" is not "nothing there".
-    chmodSync(t.file, 0o000);
+    chmodSync(tr.file, 0o000);
     try {
-      const unreadable = run(["--log", "--trace", t.file]);
+      // ⛔ The precondition is PROBED, never assumed. `chmod 000` denies read only to a process
+      // WITHOUT CAP_DAC_OVERRIDE, and the CI runner runs the suite as uid 0 — its own prerequisite
+      // step prints `uid=0` (measured 2026-09-26, run 36205553373). There the file stayed readable,
+      // the janitor legitimately reported state (2) (exit 0), and this assertion went `actual 0 !==
+      // expected 5` — the test was reporting the HOST, not the mechanism. A host that cannot deny
+      // itself read cannot construct state (3) at all, so the sub-case says so instead of failing;
+      // states (1) and (2) are asserted unconditionally above, so the three-way distinction is still
+      // pinned everywhere it is constructible.
+      let deniable = false;
+      try {
+        accessSync(tr.file, constants.R_OK);
+      } catch {
+        deniable = true;
+      }
+      if (!deniable) {
+        t.skip(
+          `this host cannot deny itself read of ${tr.file} (uid ${process.getuid?.() ?? "?"} ⇒ ` +
+            'CAP_DAC_OVERRIDE), so the "exists but cannot be read" state is not constructible here',
+        );
+        return;
+      }
+      const unreadable = run(["--log", "--trace", tr.file]);
       assert.equal(unreadable.status, 5);
       assert.match(unreadable.stderr, /CAUSE=release-branch-janitor-trace-unreadable/);
       assert.notEqual(unreadable.status, logged.status);
       assert.notEqual(unreadable.status, missing.status);
     } finally {
-      chmodSync(t.file, 0o600);
+      chmodSync(tr.file, 0o600);
     }
   } finally {
     cleanup(root);
-    cleanup(t.dir);
+    cleanup(tr.dir);
   }
 });
 

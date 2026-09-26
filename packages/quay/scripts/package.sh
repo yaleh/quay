@@ -128,29 +128,18 @@ node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${PLUGIN_DEST}" -
 rm -rf "${PLUGIN_DEST}/test"
 echo "Excluded: plugin/test/ (quay's own suite — not a user-facing deliverable)"
 
-# ── gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form ──────────
-# The delivered artifact's delivery FORM for the plugin's bash tools was 86 loose .sh files —
-# every one an independently-invocable surface, with NO argued decision about the entry count
-# (Core ships as ONE bundled dist/quay.js; the plugin shipped as 86 loose scripts). Human ruling
-# 2026-08-06: the user should get a SMALL number of executable files. bash cannot be bundled into a
-# single executable (unlike .ts via esbuild — gap-shipped-ts-files-are-not-bundled-* owns that axis),
-# so the .sh reachable form is "few entry points + internal parts not exposed": the consumer-facing
-# entry set is DECLARED (the capability-catalog PUBLIC_ENTRYPOINTS table, in
-# plugin/scripts/capability-catalog-declarations.json) and mechanically cross-checked
-# against the shipped consumer docs HERE at pack time. This is the AC3 negative control: an internal
-# .sh that appears in consumer-facing docs (plugin/loop/*.md + plugin/skills/*/SKILL.md) is an
-# UNARGUED consumer-facing surface → the pack FAILS CLOSED rather than shipping a delivery form whose
-# entry count is an accident (the 2026-08-06→08-08 drift 86→94 with no argued decision is the failure
-# this gate exists to stop).
-echo "Checking the .sh delivery form on the staged copy (declared entry surface vs consumer docs)..."
-if ! bash "${PLUGIN_DEST}/scripts/capability-catalog.sh" --entry-surface; then
-  echo "ERROR: the staged plugin's .sh delivery form is not an argued decision — see above." >&2
-  echo "       An internal .sh appears in consumer-facing docs (plugin/loop/*.md or plugin/skills/*/SKILL.md)." >&2
-  echo "       Either declare it in PUBLIC_ENTRYPOINTS (plugin/scripts/capability-catalog-declarations.json) or remove the doc reference." >&2
-  exit 1
-fi
-LOOSE_SH_COUNT="$(find "${PLUGIN_DEST}" -name '*.sh' | wc -l | tr -d ' ')"
-echo "Delivery form measured: ${LOOSE_SH_COUNT} loose .sh staged | consumer-facing surface declared + gated (AC3)"
+# ── the .sh delivery-form gate is DEFERRED to after the dist rewrite — see "Checking the .sh
+#    delivery form" below, immediately before `npm pack`. It is the same gate with the same
+#    fail-closed body, moved for a reason that is load-bearing (gap-develop-ci-red-node20-floor-
+#    and-static-not-evaluated ①): it drives `capability-catalog.sh`, and BEFORE the rewrite that
+#    wrapper execs the RAW `.ts` with `--experimental-strip-types` — a flag Node 20 does not have.
+#    Running it here made `bash packages/quay/scripts/package.sh` structurally impossible on the
+#    very Node floor this repo declares (`.github/workflows/ci.yml` dist-verify-node-floor pins
+#    Node 20), so the pack aborted with `node: bad option` before it could ever report on the
+#    delivery form. AFTER the rewrite the same wrapper resolves to its bundled
+#    `scripts/dist/capability-catalog.js` and needs no flag at all, so the gate is BOTH runnable
+#    on the floor AND checking the form the consumer actually receives (the rewritten docs).
+
 # ── gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact ─────────────────────────
 # The plugin's consumer-referenced .ts used to ship RAW (80 files), so every invocation on a
 # consumer machine paid `node --experimental-strip-types` and the consumer's Node had to support
@@ -192,6 +181,37 @@ echo "Kept (non-module .ts, read as data): plugin/scripts/runner-static-gate.ts 
 echo "Rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles..."
 node "${SCRIPT_DIR}/build-plugin-dist.mjs" --rewrite "${PLUGIN_DEST}"
 echo "Staged: ${PLUGIN_DEST} ($(find "${PLUGIN_DEST}" -type f | wc -l) files)"
+
+# ── gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form ──────────
+# The delivered artifact's delivery FORM for the plugin's bash tools was 86 loose .sh files —
+# every one an independently-invocable surface, with NO argued decision about the entry count
+# (Core ships as ONE bundled dist/quay.js; the plugin shipped as 86 loose scripts). Human ruling
+# 2026-08-06: the user should get a SMALL number of executable files. bash cannot be bundled into a
+# single executable (unlike .ts via esbuild — gap-shipped-ts-files-are-not-bundled-* owns that axis),
+# so the .sh reachable form is "few entry points + internal parts not exposed": the consumer-facing
+# entry set is DECLARED (the capability-catalog PUBLIC_ENTRYPOINTS table, in
+# plugin/scripts/capability-catalog-declarations.json) and mechanically cross-checked
+# against the shipped consumer docs HERE at pack time. This is the AC3 negative control: an internal
+# .sh that appears in consumer-facing docs (plugin/loop/*.md + plugin/skills/*/SKILL.md) is an
+# UNARGUED consumer-facing surface → the pack FAILS CLOSED rather than shipping a delivery form whose
+# entry count is an accident (the 2026-08-06→08-08 drift 86→94 with no argued decision is the failure
+# this gate exists to stop).
+# ⛔ ORDERING IS LOAD-BEARING: this gate runs AFTER the rewrite above, so `capability-catalog.sh`
+# resolves to `scripts/dist/capability-catalog.js` and needs no `--experimental-strip-types`. Running
+# it earlier made `package.sh` un-runnable on the Node 20 floor it is supposed to verify (see the
+# deferred-gate note further up). The gate is stronger here, not weaker: it judges the REWRITTEN
+# consumer docs — the form the consumer actually receives — and the doc `.sh` reference census it
+# reads is unchanged by the rewrite (measured after the move: 21 distinct doc-referenced .sh, 0
+# missing from the declared entry set).
+echo "Checking the .sh delivery form on the staged copy (declared entry surface vs consumer docs)..."
+if ! bash "${PLUGIN_DEST}/scripts/capability-catalog.sh" --entry-surface; then
+  echo "ERROR: the staged plugin's .sh delivery form is not an argued decision — see above." >&2
+  echo "       An internal .sh appears in consumer-facing docs (plugin/loop/*.md or plugin/skills/*/SKILL.md)." >&2
+  echo "       Either declare it in PUBLIC_ENTRYPOINTS (plugin/scripts/capability-catalog-declarations.json) or remove the doc reference." >&2
+  exit 1
+fi
+LOOSE_SH_COUNT="$(find "${PLUGIN_DEST}" -name '*.sh' | wc -l | tr -d ' ')"
+echo "Delivery form measured: ${LOOSE_SH_COUNT} loose .sh staged | consumer-facing surface declared + gated (AC3)"
 
 # Pack the package. This produces quay-<version>.tgz in the current directory.
 # The --pack-destination flag (npm >=7) puts the .tgz in the caller's original

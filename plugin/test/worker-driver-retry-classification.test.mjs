@@ -320,22 +320,33 @@ test("AC1/AC2（集成，负控制）— 归因不出的重派停在 2：任务�
 
 // ── AC4：loop.test_command 契约落在 adopter 可见文档上，且由一条静态判据钉住不漂移 ──────────────
 
-test("AC4 — adopter 可见文档逐字列出 quay 附加的内部 flag 集合（与 worker-driver.ts suite 步一致，静态钉住）", () => {
+test("AC4 — adopter 可见文档逐字列出 quay 附加的内部 flag 集合（与 worker-driver.ts suite 步一致，静态钉住）", (t) => {
   const docPath = path.join(REPO_ROOT, "plugin", "skills", "init", "SKILL.md");
   const doc = fs.readFileSync(docPath, "utf8");
   assert.match(doc, /^## `loop\.test_command` contract/m, "adopter 可见文档（quay-init skill）里存在契约段");
 
   // 判据两边都由机械量派生，⛔ 不写「已知的 flag 清单」第二份副本：
   //   左边 = worker-driver.ts suite 步真实 argv 里、传给 full-suite-runner 的 flag（真值来源）。
+  // ⛔ 分叉的前置是【worktree 的声明】，不是「本仓库有 scripts/test.sh」：defaultMechanicalSuiteCommand
+  //    读的是 worktree 的 `.quay/config.yml`（readLoopFanInContract）。原先直接传 REPO_ROOT，等于把
+  //    这条判据挂在【本工作区的环境配置】上——CI 用 `.quay/config.yml.example` bootstrap，而该模板
+  //    刻意不声明 loop.suite_runner（它是给任何 adopters 复制的模板，quay-buckets 只对 quay 自己成立）
+  //    ⇒ 解析成 no-suite-tooling 的 fail-closed argv ⇒ 断言红，可 doc 与 code 其实一致（实测
+  //    2026-09-26：CI 上 actual = `bash -c echo 'no-suite-tooling…' >&2; exit 2`）。夹具改为自建一个
+  //    【就地声明 quay-buckets】的 worktree，判据不再随宿主配置漂移，且测的仍是同一件事。
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "ac4-suite-contract-"));
+  t.after(() => rmSafe(ws));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "loop:\n  suite_runner: quay-buckets\n", "utf8");
   const argv = defaultMechanicalSuiteCommand({
     task: "gap-x",
-    worktree: REPO_ROOT, // 本仓库有 scripts/test.sh ⇒ suite 步走 full-suite-runner（第三方退化的另一半见 worker-driver.test.mjs）
+    worktree: ws, // 声明 quay-buckets ⇒ suite 步走 full-suite-runner（第三方退化的另一半见 worker-driver.test.mjs）
     root: REPO_ROOT,
     suiteLogFile: "/tmp/suite.log",
     runId: "mf-run-1",
   });
   const runnerIdx = argv.findIndex((a) => String(a).includes("full-suite-runner.ts"));
-  assert.ok(runnerIdx > 0, `本仓库（有 scripts/test.sh）⇒ suite 步走 full-suite-runner：${argv.join(" ")}`);
+  assert.ok(runnerIdx > 0, `声明 loop.suite_runner=quay-buckets ⇒ suite 步走 full-suite-runner：${argv.join(" ")}`);
   const runnerFlags = argv.slice(runnerIdx + 1).filter((a) => String(a).startsWith("--"));
   assert.ok(runnerFlags.length >= 6, `suite 步至少传 6 个内部 flag：${runnerFlags.join(" ")}`);
 

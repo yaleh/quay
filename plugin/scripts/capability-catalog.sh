@@ -40,4 +40,12 @@ if [ ! -f "$CATALOG_DECLARATIONS" ]; then
   exit 3
 fi
 
-exec node --experimental-strip-types "${SCRIPT_DIR}/capability-catalog.ts" "$@"
+# ⛔ KEEP THE SPELLING UNBRACED (`"$SCRIPT_DIR/X.ts"`, ⛔ not `"${SCRIPT_DIR}/X.ts"`). The braces are
+# load-bearing: `build-plugin-dist.mjs`'s staged rewrite drops `--experimental-strip-types` ONLY for
+# the unbraced form (rewriteShell's `exec node --experimental-strip-types "$SCRIPT_DIR/X.ts"` rule).
+# With the braced spelling the generic `${SCRIPT_DIR}/X.ts` → `${SCRIPT_DIR}/dist/X.js` rule rewrites
+# the PATH but LEAVES the flag, so the shipped artifact ran `node --experimental-strip-types
+# .../dist/capability-catalog.js` — a bundle that needs no flag — and every Node <22.6 rejected it
+# with `node: bad option` (exactly the defect quay-init.sh documents for its own sibling). The dev
+# tree still runs the raw .ts here (source needs Node >=22.6, which is already the dev floor).
+exec node --experimental-strip-types "$SCRIPT_DIR/capability-catalog.ts" "$@"

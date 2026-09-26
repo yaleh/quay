@@ -208,9 +208,20 @@ test("C1a — record-merge attaches the note as the MERGING machine with the com
   const r = cmvOn(a, ["--record-merge", sha, "--machine", "machine-A"]);
 
   assert.equal(r.status, 0, `record-merge must exit 0:\n${r.stdout}\n${r.stderr}`);
+  // ⛔ The expected timestamp is DERIVED, not spelled as a literal. `commit_iso` (both the pre-rewrite
+  // bash and the TS) is `git show -s --format=%cI`, whose SPELLING of a zero offset is a property of
+  // the HOST GIT VERSION, not of this mechanism: git 69e2bee1 ("date: make iso-strict conforming for
+  // the UTC timezone", shipped after v2.44) changed it from `+00:00` to `Z`, and this file's literal
+  // `at=${D2}` therefore went red on the CI runner (git 2.50.1) while passing on the dev host
+  // (git 2.43.0) — same input, same code, measured 2026-09-26 (`actual: at=2026-01-02T04:05:06Z` vs
+  // `expected: at=2026-01-02T04:05:06\+00:00`). Asking the FIXTURE's own git for the spelling keeps
+  // the assertion on the property the test's title names — "the commit's own timestamp" — and the
+  // instant equality against D2 below keeps it from degrading into a tautology.
+  const ctime = git(a, ["show", "-s", "--format=%cI", sha]).trim();
+  assert.equal(Date.parse(ctime), Date.parse(D2), `the recorded time must be D2's instant (got ${ctime})`);
   assert.match(
     r.stdout,
-    new RegExp(`^recorded merge: ${sha.slice(0, 12)} branch=develop merger_machine=machine-A at=${D2.replace(/\+/g, "\\+")}$`, "m"),
+    new RegExp(`^recorded merge: ${sha.slice(0, 12)} branch=develop merger_machine=machine-A at=${ctime.replace(/[+]/g, "\\+")}$`, "m"),
     "the recorded line names the merge, its tracked branch, the RECORDING machine and the commit time",
   );
   assert.match(

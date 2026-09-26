@@ -125,7 +125,19 @@ function makeClone(prefix) {
   // checkout carries `author`. The cut has to check `develop` out in its own worktree, and git
   // permits that only if no other worktree holds it — a fixture sitting on `develop` would test a
   // state production never has (and would trip `CAUSE=release-cut-base-checked-out`).
-  assert.equal(git(root, "branch", "develop", "origin/develop").status, 0);
+  // ⛔ NOT unconditional. `git clone` materialises the SOURCE's HEAD branch as a LOCAL branch, and
+  // on the CI runner the checkout's HEAD *is* `develop` (ci.yml triggers on push to develop), so a
+  // bare `git branch develop origin/develop` died with `fatal: a branch named 'develop' already
+  // exists` (exit 128) — every one of this file's 7 tests red, on a host where the fixture's premise
+  // ("the main checkout carries `author`", see the comment above) does not hold. Measured
+  // 2026-09-26: 128 !== 0 at this line on a fresh clone whose source was on `develop`; green when
+  // the source was on `author`. Create the branch only when the clone has not already done so; the
+  // `checkout -B author` right below puts HEAD where the premise requires in EITHER case, so the
+  // fixture still presents production's shape (a `develop` branch that is not the checked-out one)
+  // rather than a weaker one.
+  if (git(root, "rev-parse", "--verify", "-q", "refs/heads/develop").status !== 0) {
+    assert.equal(git(root, "branch", "develop", "origin/develop").status, 0);
+  }
   assert.equal(git(root, "checkout", "-q", "-B", "author", "origin/develop").status, 0);
   // node_modules is gitignored, so a clone never has it — but the command links `--root`'s
   // node_modules into the release worktree, and the bump stage's closure-ratchet re-anchor runs a
