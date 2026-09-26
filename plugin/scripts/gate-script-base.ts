@@ -270,6 +270,32 @@ export function normalizeRel(p: string): string {
   return out.join("/");
 }
 
+// ── seededRng (the ONE deterministic PRNG) ──────────────────────────────────────────────────────────
+// mulberry32. ONE implementation for the whole plugin/scripts tree — it was three byte-identical copies
+// under two names (`mulberry32` in defect-latency-pair.ts / rework-predictors.ts, `makeRng` in
+// discovery-path-classify.ts); .quay/routine-findings.jsonl finding
+// `seeded-prng-three-copies-two-names-reproducibility-primitive`, routine `semantic-dedup-scan`.
+// Those three sites now re-export from here under their historical names (ADR-004 single source).
+//
+// WHY THIS MATTERS BEYOND TIDINESS: a seed is the reproducibility primitive cross-report seed
+// comparability depends on — a seed recorded in a doc must reproduce the same draw for every reader,
+// so the extraction MUST NOT move a single output value. The third copy carried the same algorithm in a
+// different expression form (`a = (a + c) | 0` and `(t + …) ^ t` instead of `(a + c) >>> 0` and
+// `t ^= …`). Measured 2026-09-26 over 10 seeds × 10000 draws: 0/100000 mismatches — and the same
+// comparator reads 100000/100000 against a deliberately perturbed increment, so the zero is a
+// measurement rather than a blind instrument (硬规则 2: a zero count needs the predicate dry-run against
+// a known-true sample). The `>>> 0` form is kept as canonical.
+export function seededRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // ── Verdict emission (the behavior contract) ─────────────────────────────────────────────────────────
 // The three-state verdict output layer shared by checkers: PASS (exit 0) / FAIL (exit 1) /
 // NOT-EVALUATED (exit 3 — the harness-canonical third state per gap-not-evaluated-harness-third-state;

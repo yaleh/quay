@@ -65,7 +65,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, seededRng } from "./gate-script-base.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -420,23 +420,16 @@ export function classifiedShares(c: Counts): Record<string, number> {
 
 // ── 确定性抽样（种子写进文档；`Math.random` 不可复跑，故不用）──────────────────────────────
 
-/** mulberry32 —— 32 位确定性 PRNG。同一 seed 在任何机器上给同一序列。 */
-export function makeRng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** `makeRng` —— 本文件历史上的名字，指向**唯一实现**（gate-script-base.ts 的 `seededRng`）。
+ *  保留该导出名是为了让文档里写下的 seed 仍给同一序列（同一 seed 在任何机器上逐值不变）；
+ *  .quay/routine-findings.jsonl finding `seeded-prng-three-copies-two-names-reproducibility-primitive`。 */
+export { seededRng as makeRng };
 
 /** 分层随机抽样：每类按**其在语料中的占比**分配名额（余数补给最大类），类内随机。
  *  纯均匀抽样会让 suite-gate（大头）占据几乎全部样本，human 类一条都抽不到 ⇒ 一致率
  *  只反映大类的准确率。分层保证了小类也被量到。 */
 export function stratifiedSample(recs: TaskRecord[], n: number, seed: number): TaskRecord[] {
-  const rng = makeRng(seed);
+  const rng = seededRng(seed);
   const groups = new Map<DiscoveryClass, TaskRecord[]>();
   for (const c of CLASSES) groups.set(c, []);
   for (const r of recs) groups.get(r.verdict.cls)!.push(r);
