@@ -2,7 +2,7 @@
 id: gap-ac233-criterion-not-hermetic-host-quota-false-red
 title: AC-233 判据非自足——测试依赖 ambient $TMPDIR / npm cache，宿主 /data
   用户配额触顶时同一判据红成假红（恒假），而交付物从未回退
-status: ready
+status: done
 labels:
   - gap
   - defect
