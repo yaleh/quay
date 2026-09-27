@@ -346,8 +346,17 @@ export const INFLIGHT_WORKTREE_STALE_MS = 15 * 60 * 1000;
 /** The dead predicate: ALIVE unless BOTH direct quantities prove otherwise — (a) zero live
  *  processes under the worktree, AND (b) a known commit time older than `staleMs`. Unknown
  *  liveness (`lv` null) or an unreadable commit time (null) is ALIVE (conservative — excluding
- *  without evidence could dispatch a colliding task; hard rule 6: 缺值 = 未查, not 为假). */
-function isDeadInFlightWorktree(lv, nowMs, staleMs) {
+ *  without evidence could dispatch a colliding task; hard rule 6: 缺值 = 未查, not 为假).
+ *
+ *  SINGLE SOURCE (gap-routine-semantic-dedup-scan-worktree-liveness-predicate-private): EXPORTED
+ *  because this predicate has TWO consumers — the in-flight task-worktree occupancy arm below
+ *  (`resolveInFlightWorktrees`) and the merge-surface arm in ready-pool-check.ts
+ *  (`resolveMergeWorktreeSurfaces`, gap-merge-worktree-surface-lacks-liveness-overbroad AC2). The
+ *  merge arm used to carry a byte-identical private copy named `isDeadMergeWorktree` only because
+ *  this one was module-private; a divergence between the two silently flips dead to alive on one
+ *  path (硬规则 5b). `staleMs` stays a parameter so a future divergence is a call-site choice, not
+ *  a second body. */
+export function isDeadInFlightWorktree(lv, nowMs, staleMs) {
   if (!lv) return false; // no liveness facts ⇒ alive (backward-compatible, conservative)
   if (lv.hasLiveProcess) return false; // a live process ⇒ alive regardless of commit age
   const last = lv.lastCommitMs;
@@ -358,8 +367,12 @@ function isDeadInFlightWorktree(lv, nowMs, staleMs) {
 /** The worktree HEAD's committer time (ms), or null when unreadable. `git -C <worktree> log -1`
  *  reads the worktree's OWN checked-out HEAD — the direct "last commit in THIS worktree" quantity,
  *  independent of the main checkout's branch namespace (a deleted-but-still-listed branch still
- *  resolves via its worktree HEAD). */
-function lastCommitMsOfWorktree(worktreePath) {
+ *  resolves via its worktree HEAD).
+ *
+ *  EXPORTED for the same reason as `isDeadInFlightWorktree` above: the merge-surface arm in
+ *  ready-pool-check.ts reads the SAME direct quantity, and a parallel copy there is the drift this
+ *  export removes (the two were byte-identical). */
+export function lastCommitMsOfWorktree(worktreePath) {
   try {
     const out = execFileSync("git", ["-C", worktreePath, "log", "-1", "--format=%ct"], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],

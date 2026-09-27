@@ -214,7 +214,19 @@ import {
 } from "./touches-orthogonality-check.ts";
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
-import { expandDeclaredTouches, INFLIGHT_WORKTREE_STALE_MS } from "./concurrent-batch-scheduler.ts";
+// MERGE-SURFACE LIVENESS (gap-merge-worktree-surface-lacks-liveness-overbroad AC2) shares the SAME
+// single source as the task-worktree arm (gap-routine-semantic-dedup-scan-worktree-liveness-
+// predicate-private): `isDeadInFlightWorktree` (the dead predicate) + `lastCommitMsOfWorktree` (the
+// direct quantity it reads) + `INFLIGHT_WORKTREE_STALE_MS` (the threshold) all live in
+// concurrent-batch-scheduler.ts. This file used to carry byte-identical private copies of the first
+// two (`isDeadMergeWorktree` / `lastCommitMsOfWorktree`) — 硬规则 5b: a divergence between the two
+// paths silently flips dead to alive on one of them, so the copy is deleted, not maintained.
+import {
+  expandDeclaredTouches,
+  INFLIGHT_WORKTREE_STALE_MS,
+  isDeadInFlightWorktree,
+  lastCommitMsOfWorktree,
+} from "./concurrent-batch-scheduler.ts";
 // MERGE-WORKTREE LIVENESS (gap-merge-worktree-surface-lacks-liveness-overbroad AC2): the same
 // worktree-process-reaper /proc enumerator the in-flight-worktree liveness uses (concurrent-batch-
 // scheduler.ts imports it for computeInFlightWorktreeTouches) — enumerateProcs + cwdUnder, NOT a
@@ -517,36 +529,6 @@ export function unmergedConflictPaths(wtPath) {
   }
 }
 
-/** The worktree HEAD's committer time (ms), or null when unreadable — the SAME direct quantity the
- *  in-flight-worktree liveness uses (`lastCommitMsOfWorktree` in concurrent-batch-scheduler.ts;
- *  reimplemented here because that one is module-private — this file must not modify its sibling, so
- *  only the shared threshold `INFLIGHT_WORKTREE_STALE_MS` is imported). `git -C <wt> log -1
- *  --format=%ct` reads the worktree's OWN checked-out HEAD. */
-function lastCommitMsOfWorktree(worktreePath) {
-  try {
-    const out = execFileSync("git", ["-C", worktreePath, "log", "-1", "--format=%ct"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    });
-    const line = out.trim();
-    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
-  } catch (_) { /* unreadable worktree HEAD — conservative alive (null) */ }
-  return null;
-}
-
-/** The dead predicate — SAME semantics as concurrent-batch-scheduler.ts `isDeadInFlightWorktree`
- *  (gap-compute-inflight-worktree-touches-no-liveness-check; reimplemented because the source is
- *  module-private and this file must not modify its sibling). ALIVE unless BOTH direct quantities
- *  prove otherwise: (a) zero live processes under the worktree, AND (b) a known commit time older
- *  than `staleMs`. Unknown liveness (`lv` null) or an unreadable commit time (null) is ALIVE
- *  (conservative — hard rule 6: 缺值 = 未查, not 为假). */
-function isDeadMergeWorktree(lv, nowMs, staleMs) {
-  if (!lv) return false; // no liveness facts ⇒ alive (backward-compatible, conservative)
-  if (lv.hasLiveProcess) return false; // a live process ⇒ alive regardless of commit age
-  const last = lv.lastCommitMs;
-  if (typeof last !== "number" || !Number.isFinite(last)) return false; // unknown commit ⇒ alive
-  return nowMs - last > staleMs; // zero processes AND stale ⇒ dead
-}
-
 /** PURE core: resolve open-worktree listings to merge conflict surfaces, applying the liveness
  *  DIRECT quantity. The worktree list / merge predicate / conflict-file enumerator / liveness facts
  *  are all INJECTED so tests exercise the resolution without faking git or /proc;
@@ -582,7 +564,7 @@ export function resolveMergeWorktreeSurfaces(worktrees, {
     // exited-not-landed merge-develop half-failure shape) must not present a conflict surface,
     // else a dead 3-file conflict locks out the whole dispatch pool.
     const lv = liveness ? liveness(wt) : null;
-    if (isDeadMergeWorktree(lv, nowMs, staleMs)) continue;
+    if (isDeadInFlightWorktree(lv, nowMs, staleMs)) continue;
     const files = conflictFiles(wt.path);
     if (files.length === 0) continue; // a merge with no conflict surface blocks nothing
     out.push({ name: path.basename(wt.path), path: wt.path, files });
