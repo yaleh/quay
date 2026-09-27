@@ -125,6 +125,11 @@ import { fileURLToPath } from "node:url";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim). This file used to inline the body
+// with the receiver spelled `String(s)` instead of `s` — which is exactly why the previous sweep's
+// `s.replace(` byte needle could not see it (finding `escaperegexp-sweep-missed-two`, routine
+// `semantic-dedup-scan`; see packages/quay/test/kernel-regex-escape.test.mjs ④).
+import { escapeRegExp } from "./regex-escape.ts";
 import {
   SCHEMA_VERSION,
   VALID_STAGES,
@@ -913,11 +918,6 @@ export function extractRunIdFromCommitSubject(subject) {
   return m ? m[1] : null;
 }
 
-/** Escape a literal string for use as a git log --grep regex (runIds contain `.`/`-`). */
-export function escapeGrep(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * The fan-in merge commit that landed `task/<taskId>` — the NEWEST merge commit whose message matches
  * the fan-in convention and references the task. Resolution order (first match wins, each the newest
@@ -965,7 +965,7 @@ export function findFanInCommitSha(root, taskId) {
  */
 export function findFanInCommit(root, { taskId, runId, ref = "HEAD" } = {}) {
   const patterns = [];
-  if (runId) patterns.push(escapeGrep(runId));
+  if (runId) patterns.push(escapeRegExp(String(runId)));
   if (taskId) patterns.push(`merge: fan-in task/${taskId}`);
   for (const pat of patterns) {
     try {

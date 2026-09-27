@@ -25,6 +25,11 @@
 //   ③ BEHAVIOR — the 14 metacharacters, the no-op on plain section names, and the actual motivating
 //      regression: an escaped heading must match its own literal line, which is what fails if the
 //      parenthesis in `AC (draft)` is read as a capture group.
+//   ④ THE FAMILY, re-run (added by gap-routine-semantic-dedup-scan-escaperegexp-sweep-missed-two) —
+//      ①–③ were green while FOUR more members of the family were alive: two char-by-char `Set`-loop
+//      rewrites, one single-quoted arrow, and one `String(s)`-receiver copy. ① could not see any of
+//      them because it searches for one exact byte spelling. ④ judges the family on a declaration
+//      predicate and a receiver-/quote-agnostic body predicate instead — see its own block below.
 //
 // The negative control (硬规则 2's zero-count half): assertion ③'s last case asserts the UNESCAPED
 // pattern does NOT match, so the escaped case cannot be passing vacuously.
@@ -179,4 +184,110 @@ test("③ escaping is total over the metacharacter set (no metacharacter survive
     const re = new RegExp(`^${escapeRegExp(s)}$`);
     assert.ok(re.test(s), `escaped pattern must match ${JSON.stringify(s)} literally`);
   }
+});
+
+// ── ④ the FAMILY check, re-run properly ────────────────────────────────────────────────────────────
+//
+// ① is a BYTE-IDENTICAL-body check: it searches for ONE exact spelling. That is why the sweep that
+// collapsed the twelve copies could not see the two char-by-char `Set`-loop rewrites — nor the
+// `String(s)`-receiver spelling, nor the single-quoted one — so its "12/12, complete" claim was only
+// APPARENTLY complete (硬规则 5b). Re-running ① and reading its green would have repeated the mistake.
+//
+// ④ re-checks the same family on predicates a rewrite cannot evade:
+//   (a) DECLARATION — no production file may declare a family member by name. A re-created local
+//       helper has to be declared *somehow*; the NAME is what a body rewrite cannot hide.
+//   (b) BODY SPELLING — the escape body, taken WITHOUT its receiver and WITHOUT its replacement
+//       argument, must occur in no file but the kernel leaf. Stripping the receiver kills the
+//       `String(s)` evasion; ending the needle at the comma kills the `'\\$&'`-vs-`"\\$&"` evasion.
+//   (c) SET-LOOP SHAPE — the char-by-char rewrite (a metacharacter `Set` consulted per character)
+//       must not appear anywhere.
+// Zero-count discipline (硬规则 2's zero half): (a)-(c) are dry-run against known-TRUE samples
+// BEFORE the tree is judged, so a zero means "looked and found none", never "the predicate matches
+// nothing". The import-vs-declaration control is the other half: an `import {…}` of the kernel leaf
+// must NOT count, or every already-migrated caller would red.
+//
+// ⛔ SCOPE, stated so "not covered" cannot read as "covered": the scan surface is ①'s (the probe's
+// own rules — `plugin/**` + `packages/*/src/**`, minus node_modules/dist/archive/test/fixtures).
+// `experiments/**` and the test trees are OUTSIDE it and do carry inline uses; the kernel leaf's
+// header records that remainder by name.
+
+const FAMILY_NAMES = ["escapeRegExp", "escapeRegex", "escapeRe", "escapeGrep"];
+
+/** The escape body minus receiver and minus replacement argument — assembled the way BODY is (a
+ *  `fromCharCode` backslash), for the same reason: a hand-spelled needle here would silently make ④
+ *  pass by searching for a string that appears nowhere. */
+const BODY_PREFIX = ["replace(/[.*+?^${}()|[", BS, "]", BS, BS, "]/g,"].join("");
+
+/** The char-by-char `Set`-loop rewrite's shape. Two tokens, so reformatting does not evade it. */
+function isSetLoopEscape(text) {
+  return text.includes("new Set([") && text.includes("SPECIAL.has(");
+}
+
+/** Which family names `text` DECLARES (function / const-let-var / assignment form). An `import {…}`
+ *  is deliberately NOT a declaration. */
+function declaredFamilyNames(text) {
+  return FAMILY_NAMES.filter((name) =>
+    new RegExp(`(?:function|const|let|var)\\s+${name}\\s*[(=]|\\b${name}\\s*=\\s*(?:function|\\()`).test(text),
+  );
+}
+
+test("④ the FAMILY: one declaration site and one body spelling — anywhere else is RED", () => {
+  const KERNEL_REL = "packages/quay/src/kernel/regex-escape.ts";
+  const rel = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join("/");
+
+  // (i) controls FIRST — all three predicates must fire on known-true samples.
+  assert.deepEqual(
+    declaredFamilyNames("function escapeRegExp(s) { return s; }"),
+    ["escapeRegExp"],
+    "the declaration predicate must fire on the known-true function form",
+  );
+  for (const name of FAMILY_NAMES) {
+    assert.ok(
+      declaredFamilyNames(`const ${name} = (s) => s;`).includes(name),
+      `the declaration predicate must fire on the const-arrow form of ${name}`,
+    );
+  }
+  assert.deepEqual(
+    declaredFamilyNames('import { escapeRegExp as escapeRe } from "./regex-escape.ts";'),
+    [],
+    "an IMPORT of the kernel leaf is not a declaration — else every migrated caller would red",
+  );
+  // The two evasions ① could not see, as literal samples: the `String(s)` receiver and the
+  // single-quoted replacement. Both must match BODY_PREFIX.
+  assert.ok(
+    `const f = (s) => String(s).${BODY_PREFIX} '\\\\$&');`.includes(BODY_PREFIX),
+    "the body needle must match the `String(s)`-receiver rewrite (① missed it)",
+  );
+  assert.ok(
+    `const g = (s) => s.${BODY_PREFIX} "\\\\$&");`.includes(BODY_PREFIX),
+    "the body needle must match the double-quoted form too",
+  );
+  assert.ok(
+    isSetLoopEscape('const SPECIAL = new Set(["."]); out += SPECIAL.has(ch) ? 1 : 0;'),
+    "the Set-loop predicate must fire on the known-true rewrite",
+  );
+  assert.ok(
+    !isSetLoopEscape("const s = new Set([1, 2]); s.add(3);"),
+    "the Set-loop predicate must NOT fire on an unrelated Set — a predicate that fires on everything measures nothing",
+  );
+
+  // (ii) the real judgment — over the production tree, not over the controls.
+  const files = SCAN_ROOTS.flatMap((root) => walkProductionSources(path.join(REPO_ROOT, root)));
+
+  const declaring = files.filter((abs) => declaredFamilyNames(fs.readFileSync(abs, "utf8")).length > 0).map(rel).sort();
+  assert.deepEqual(
+    declaring,
+    [KERNEL_REL],
+    `exactly one file may DECLARE a family member; found ${JSON.stringify(declaring)}`,
+  );
+
+  const spellingBody = files.filter((abs) => fs.readFileSync(abs, "utf8").includes(BODY_PREFIX)).map(rel).sort();
+  assert.deepEqual(
+    spellingBody,
+    [KERNEL_REL],
+    `exactly one file may spell the escape body; found ${JSON.stringify(spellingBody)}`,
+  );
+
+  const setLoops = files.filter((abs) => isSetLoopEscape(fs.readFileSync(abs, "utf8"))).map(rel).sort();
+  assert.deepEqual(setLoops, [], `the Set-loop rewrite must be gone from the production tree; found ${JSON.stringify(setLoops)}`);
 });

@@ -10,6 +10,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } from "./branch-model.ts";
+// The ONE regex-literal escaper (kernel leaf). This file used to inline the escape body at the
+// `key`-literal site — one of the spelling variants invisible to the previous sweep's byte needle
+// (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
+// packages/quay/test/kernel-regex-escape.test.mjs ④).
+import { escapeRegExp } from "./kernel/regex-escape.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -1277,7 +1282,7 @@ export function ensureProviderCarrierEnv(o: EnsureCarrierEnvOpts): void {
   };
   /** [index, indent] of the first `key:` line in [start, end) at indent >= minIndent. */
   const findChild = (start: number, end: number, key: string, minIndent: number): [number, number] | null => {
-    const pat = new RegExp("^(\\s*)" + key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*:");
+    const pat = new RegExp("^(\\s*)" + escapeRegExp(key) + "\\s*:");
     for (let i = start; i < end; i++) {
       const m = pat.exec(lines[i]!);
       if (m && m[1]!.length >= minIndent) return [i, m[1]!.length];

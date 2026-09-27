@@ -33,7 +33,11 @@ export const oldPaths = [
   'scripts/resource-gate.sh',
 ];
 
-const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// The ONE regex-literal escaper (kernel leaf via the plugin shim). Was a local arrow rewrite with the
+// byte-identical body but single-quoted replacement — invisible to the previous sweep's needle on BOTH
+// counts (quote style AND the missing receiver-agnostic shape); found by this task's 5b re-enumeration
+// (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from './regex-escape.ts';
 
 /**
  * The AC1b scan regexes, DERIVED from oldPaths so the two can never disagree:

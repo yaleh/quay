@@ -36,6 +36,9 @@ import { parseTask, extractSection, countAcCheckboxes } from "./task-schema.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { stripTouchAnnotation, parseTouchEntries, parseTouchEntriesWithTags } from "./touches-parser.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body in
+// `wordMatch` (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 export { stripTouchAnnotation, parseTouchEntries };
 // countAcCheckboxes — SINGLE-SOURCE in task-schema.ts (gap-ac-checkbox-counting-four-counters-drifted),
 // re-exported here for ready-pool-check.ts / slot-refill.ts / the parity + drift tests that import it
@@ -359,7 +362,7 @@ export function taskIdTokens(taskId) {
 
 /** Does `message` contain `token` as a delimited word (surrounded by non-[A-Za-z0-9_-])? */
 export function wordMatch(message, token) {
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = escapeRegExp(token);
   return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`).test(message);
 }
 

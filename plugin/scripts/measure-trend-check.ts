@@ -43,6 +43,9 @@ import crypto from "node:crypto";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import { fileURLToPath } from "node:url";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
+// the `segment` site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 import {
   resolveWorktreeNamespace,
   DEFAULT_WORKTREE_NAMESPACE_NAME,
@@ -132,7 +135,7 @@ export interface LandResult {
  */
 export function normalizePerFileKey(file: string, worktreeDir?: string | null): string {
   const segment = path.basename(worktreeDir && worktreeDir.length > 0 ? worktreeDir : DEFAULT_WORKTREE_NAMESPACE_NAME);
-  const escaped = segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = escapeRegExp(segment);
   const m = file.match(new RegExp(`^.*/${escaped}/[^/]+/(.+)$`));
   return m ? m[1] : file;
 }

@@ -8,6 +8,25 @@
 // `escapere-escaperegex-escaperegexp-fndefre-stemre-escapere`, task
 // gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre).
 //
+// 5b 边界 — 为什么「TWELVE 处」这个数**不完整**，以及本文件的第二条收敛
+// (routine `semantic-dedup-scan` finding `escaperegexp-sweep-missed-two`, task
+// gap-routine-semantic-dedup-scan-escaperegexp-sweep-missed-two):
+// 上面那句 TWELVE 是**逐字节 body** 判定的产物，它对两种**语义等价但拼写不同**的重写是盲的 ——
+//   ① char-by-char `Set` 循环重写（`plugin/scripts/precommit-guard.ts`、`.../select-static-checks-for-touches.ts`）；
+//   ② 接收者拼作 `String(s)` 而不是 `s` 的同一 body（`plugin/scripts/fast-mode-telemetry.ts` 的
+//      `escapeGrep`）—— 逐字节针是 `s.replace(`，而它是 `String(s).replace(`，**字面上就差一个字符**。
+// 因此「重跑家族检查、看它绿」不等于家族已收敛（硬规则 5b：修好一处 ≠ 它只在一处）。本任务按同一
+// 原则**重新枚举**，把上面两种重写与另外 7 处**内联** body 一并并入本叶（`escapeGrep` 这个薄名一并删除，
+// 让家族只剩一个名字），并把家族检查升级为双判定 —— 见
+// `packages/quay/test/kernel-regex-escape.test.mjs` ④：
+//   · 家族**声明位**（escapeRegExp / escapeRegex / escapeRe / escapeGrep）在探针扫描面上恰好 1 处（本文件）；
+//   · 转义 **body 字面量**在探针扫描面上恰好 1 个文件（本文件）；Set 循环拼写 0 处。
+// 扫描面 = `plugin/**` + `packages/*/src/**`，排除 node_modules / dist / archive / test / fixtures
+// （与探针自身的排除规则一致，⛔ 不是随手定的）。
+// ⛔ 本条**不声称**全仓再无该写法：`experiments/quay-perpetual-stream/scripts/it0-dod-check.ts` 尚有 2 处
+// 内联调用（methodology 层，在探针扫描面之外），测试面（`plugin/test`、`packages/quay/test`）的内联调用同理
+// —— 它们与本条的对象（探针扫描面上的家族副本）不同类，写明而非沉默略过。
+//
 // The kernel is the only placement both sides can reach. The direction must be plugin → kernel:
 // `packages/**` importing `plugin/**` is a REVERSE EDGE (import-graph-check's `reverseEdges`
 // ratchet, baselined at 0), so the product-side judge cannot import the methodology-side copy.

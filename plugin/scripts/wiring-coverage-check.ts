@@ -46,6 +46,13 @@ import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
+// The ONE regex-literal escaper — the kernel leaf imports NOTHING, so it costs this module no new
+// dependency (unlike task-schema.ts, which is why the section reader above stays local). This file was
+// the last spelling site on the probe's surface and it was INVISIBLE to every grep-based enumeration:
+// it contains a raw NUL byte, which makes grep treat it as binary and report no match at all
+// (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
+// packages/quay/test/kernel-regex-escape.test.mjs ④, whose walker reads bytes rather than grepping).
+import { escapeRegExp } from "./regex-escape.ts";
 
 // `owns?` intentionally excludes the ubiquitous possessive-determiner usage ("the task's own AC
 // section", "its own merits") via a negative lookbehind on `'s `/`s' `/a possessive pronoun
@@ -551,11 +558,12 @@ export function checkWiringClaimAcProbe(acSectionText) {
 // (default deny).
 
 // Extract the raw text of one `## <heading>` section (everything up to the next `## ` heading or
-// EOF), mirroring the section semantics task-schema.ts's extractSection relies on — kept local and
-// minimal here so this module stays dependency-free (the one source both callers share).
+// EOF), mirroring the section semantics task-schema.ts's extractSection relies on — the reader stays
+// local and minimal so this module does not depend on task-schema.ts (the one source both callers
+// share); the escaping itself is NOT local — it is the kernel leaf, which pulls nothing in.
 function extractSectionForCli(body, heading) {
   const lines = body.split(/\r?\n/);
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = escapeRegExp(heading);
   const headRe = new RegExp(`^##\\s+${escaped}\\s*$`);
   const out = [];
   let inSection = false;

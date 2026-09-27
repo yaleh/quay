@@ -49,6 +49,9 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
 // （Layer 1b 例程契约）。
 import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
+// the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal 动词的 argv 单一构造点 + 「quay CLI 解析得出吗」的判据（同 meta-driver，⛔ 本文件不另拼路径）。
@@ -991,7 +994,7 @@ interface BodySection {
  *  ⛔ 标题后只允许水平空白（或整行剩余文本），不用 `\s*`——`\s` 含 \n，会把「标题后紧跟的空行 + 下一节
  *  标题」吞进标题匹配，导致空节被误判为「有内容」（原 `exitConditionsText` 注释的同一理由）。 */
 function extractSections(body: string, heading: string, opts: { allowHeadingSuffix?: boolean } = {}): BodySection[] {
-  const esc = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const esc = escapeRegExp(heading);
   const suffix = opts.allowHeadingSuffix === true ? "[^\\r\\n]*" : "[ \\t]*";
   const re = new RegExp(`##[ \\t]+(${esc}${suffix})\\r?\\n([\\s\\S]*?)(?=\\r?\\n##[ \\t]|$)`, "g");
   const out: BodySection[] = [];

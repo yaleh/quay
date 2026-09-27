@@ -122,6 +122,12 @@ import {
 // The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
 // derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
 import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim). This file used to carry a private
+// char-by-char `Set`-loop rewrite of it — semantically identical, textually different, therefore
+// invisible to the previous sweep's byte-identical-body needle (finding `escaperegexp-sweep-missed-two`,
+// routine `semantic-dedup-scan`; see packages/quay/test/kernel-regex-escape.test.mjs ④ and
+// packages/quay/src/kernel/regex-escape.ts's 5b boundary note).
+import { escapeRegExp } from "./regex-escape.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -197,13 +203,6 @@ export function allTrackedFiles(root: string): string[] {
   } catch {
     return [];
   }
-}
-
-function escapeRegExp(s: string): string {
-  const SPECIAL = new Set([".", "*", "+", "?", "^", "$", "{", "}", "(", ")", "|", "[", "]", "\\"]);
-  let out = "";
-  for (const ch of String(s)) out += SPECIAL.has(ch) ? `\\${ch}` : ch;
-  return out;
 }
 
 /**

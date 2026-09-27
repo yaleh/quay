@@ -53,6 +53,13 @@ import { parse as parseYaml } from "yaml";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim). This file used to carry a private
+// char-by-char `Set`-loop rewrite; its comment claimed the TS type-stripper mis-parses the
+// character-class literal — measured false on Node v24 (the kernel leaf IS that literal, alive), and
+// the rewrite made the copy invisible to the previous sweep's byte-identical-body needle (finding
+// `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
+// packages/quay/test/kernel-regex-escape.test.mjs ④).
+import { escapeRegExp } from "./regex-escape.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -199,14 +206,6 @@ export function checkTouchesRegistration(touches, newTouches) {
 
 // ── Path helpers ──────────────────────────────────────────────────────────────────────────────────────
 
-function escapeRegExp(s) {
-  // Escaped char-by-char (no tricky character-class literal — the TS type-stripper mis-parses
-  // `/[.*+?^${}()|[\]\\]/g` inside this file; this loop is equivalent).
-  const SPECIAL = new Set([".", "*", "+", "?", "^", "$", "{", "}", "(", ")", "|", "[", "]", "\\"]);
-  let out = "";
-  for (const ch of String(s)) out += SPECIAL.has(ch) ? `\\${ch}` : ch;
-  return out;
-}
 
 /**
  * True iff a repo-relative touch path falls inside a checker's object glob.

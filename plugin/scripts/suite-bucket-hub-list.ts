@@ -44,6 +44,9 @@ import { fileURLToPath } from "node:url";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body in
+// the hub-glob → RegExp builder (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 
 
 /** The explicit hub-file list (data, not a heuristic). `*` is the only glob metacharacter. */
@@ -71,7 +74,7 @@ export const HUB_FILES: readonly string[] = [
 export function hubEntryToRegExp(entry: string): RegExp {
   const escaped = String(entry)
     .split("*")
-    .map((seg) => seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .map((seg) => escapeRegExp(seg))
     .join(".*");
   return new RegExp(`^${escaped}$`);
 }

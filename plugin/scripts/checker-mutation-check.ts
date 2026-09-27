@@ -130,6 +130,9 @@ import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
 // derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
 import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body
+// at the `fnName` site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 
 // ── locations ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -171,7 +174,7 @@ export type CaseResult = "pass" | "stayed-green" | "always-red" | "error" | "not
  *  Byte-equivalent to the awk the bash used (`/^fn\(\)/{f=1;next} f && /^}/{f=0} f`), including the
  *  detail that the closing `}` line is consumed but never emitted. */
 export function functionBody(src: string, fnName: string): string {
-  const open = new RegExp(`^${fnName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\(\\)`);
+  const open = new RegExp(`^${escapeRegExp(fnName)}\\(\\)`);
   const out: string[] = [];
   let inFn = false;
   for (const line of src.split("\n")) {

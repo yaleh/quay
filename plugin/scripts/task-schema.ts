@@ -125,6 +125,9 @@ export function extractSection(fullText, heading) {
 // round-trips byte-identically through every reader. This REPLACES the old lenient hand-parse (scalars
 // only) that silently dropped nested extra structures (e.g. `extra.depends_on` read back as "").
 import { parse as parseYaml } from "yaml";
+// The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body in
+// the section-heading matcher (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
+import { escapeRegExp } from "./regex-escape.ts";
 
 export function parseFrontmatterCompletely(frontmatterRaw) {
   return (parseYaml(frontmatterRaw) ?? {});
@@ -207,7 +210,7 @@ export function appendBodySection(fullText, heading, content) {
   const body = fmMatch[2] ?? "";
   // Prefer appending to the END of an existing section of the same heading; otherwise create it at
   // the end of the body. Never touch the frontmatter block.
-  const headingRe = new RegExp(`^##\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
+  const headingRe = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "m");
   let newBody;
   if (headingRe.test(body)) {
     // Section already exists → insert the content at the END of that section (true append: the
