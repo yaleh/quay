@@ -21,6 +21,12 @@ export interface CliSpec {
   usage: string;
   /** Named flags accepted by this command. */
   flags?: Record<string, FlagSpec>;
+  /**
+   * Reject an UNRECOGNIZED `--flag` (stderr `unknown argument: --<flag>`, exit 2) instead of
+   * accepting it as an undeclared string flag. Default false, so no existing caller's input
+   * language changes; see the parseArgs block below for why the default is not strict.
+   */
+  strict?: boolean;
 }
 
 export interface ParsedArgs {
@@ -48,6 +54,31 @@ export function helpExit(usage: string): never {
 // `--help` / `-h` anywhere in argv ⇒ print usage to stdout and exit 0 (the shared contract above),
 // evaluated BEFORE the minArgs failure path so `--help` never reads as a missing-arg error.
 // Otherwise exits with code 2 and a usage message if fewer than minArgs positional args are provided.
+//
+// WHY `strict` EXISTS — a semantic-dedup-scan pass (.quay/routine-findings.jsonl, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1790503843524`, finding `parseargs-local-copies`,
+// verdict `divergent-implementation`) counted 21 files under plugin/scripts declaring a private
+// `parseArgs`, of which only 3 imported this one, and named the axes they diverge on as "argv
+// slicing, unknown-arg handling and missing-value shape".
+//
+// MEASURED (not assumed) for the unknown-arg axis, with this spec `{minArgs:0, flags:{root,json}}`:
+//     parseArgs(["node","s","--bogus"], spec)  ⇒  { args: [], flags: { bogus: "" } }   exit 0
+// i.e. this function SILENTLY ACCEPTS a flag it was never told about, while every one of those 21
+// private copies rejects it (throw / exit 2 / an `error` field). That asymmetry is why the copies
+// could not converge here: adopting the base as-is would have DELETED their unknown-arg guard, and a
+// typo'd `--rrot /tmp` would then fall through to the caller's `?? default` — the substitution of a
+// value the user never supplied, which is exactly the failure mode 硬规则 3b forbids ("读不懂" must
+// not come back shaped like "合格"). `strict` restores the guard as an OPT-IN, so the three existing
+// call sites (enum-surface-parity-check / prepare-admission-check / proposal-convergence — none of
+// which passes a `strict` key) keep their input language byte-for-byte.
+//
+// ⛔ Still NOT expressible by this spec, and deliberately not added here — each is a separate CLI
+// contract, not incidental trivia, so folding those callers needs its own finding:
+//   • a GREEDY list (`--files a b c`, checked-in-write-check.ts): measured, this parser reads
+//     `files:"a"` and leaks `b`,`c` into `args` — folding that caller would silently drop 2 of 3
+//     input files from the judgement.
+//   • a NON-EXITING error return (loadbearing-test-gate.ts returns `{error}`, it must not kill the
+//     process): this parser owns `process.exit` on both the `--help` and minArgs paths.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
@@ -64,6 +95,10 @@ export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
       const eqIdx = a.indexOf("=");
       const name = eqIdx >= 0 ? a.slice(2, eqIdx) : a.slice(2);
       const def = flagDefs[name];
+      if (!def && spec.strict) {
+        console.error(`unknown argument: --${name}`);
+        process.exit(2);
+      }
       if (def?.type === "boolean") {
         result.flags[name] = true;
       } else if (eqIdx >= 0) {

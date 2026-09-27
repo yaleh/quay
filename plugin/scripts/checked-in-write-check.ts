@@ -371,6 +371,15 @@ export function checkCheckedInWrites(opts: {
   return { ...base, ok: parsed.violations.length === 0, evaluated: true };
 }
 
+// ⛔ NOT foldable onto gate-script-base's spec-driven parseArgs — and the blocker is a MEASURED
+// input-language difference, not tidiness (semantic-dedup-scan finding `parseargs-local-copies`,
+// runId `semantic-dedup-scan-1790503843524`, which named this file's copy as one of its exemplars).
+// `--files` is a GREEDY LIST: `--files a b c` is one flag carrying three values (documented at the
+// top of this file as `[--files <f> [<f>…]]`). The shared parser reads ONE value per `--flag`:
+//     parseArgs(["node","s","--files","a","b","c"], spec) ⇒ flags.files = "a", args = ["b","c"]
+// so adopting it here would DROP `b` and `c` from the judgement while the checker still reports a
+// verdict — a silent reduction of the input set, the exact 硬规则 3b shape ("读不懂" returned in the
+// shape of "合格"). Absorbing this caller needs a greedy-list flag type in the base first.
 function parseArgs(argv: string[]): { root: string; dir?: string; files: string[]; json: boolean; timeoutMs?: number; changed: boolean; base?: string } {
   let root = DEFAULT_ROOT;
   let dir: string | undefined;
