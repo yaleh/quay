@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parseargs-local-copies
 title: "semantic-dedup-scan: 21 files declare their own parseArgs and only 3
   import the shared one, differing on argv slicing, unknown-arg handling and
   missing-value shape."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
