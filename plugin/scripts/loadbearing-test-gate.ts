@@ -211,6 +211,15 @@ export function checkTree(cfg: ScriptCfg): TreeResult {
 }
 
 // ── CLI arg parse. --scripts (required), --tests, --import-root (repeatable), --registry, --outer-loop. ─
+// ⛔ NOT foldable onto gate-script-base's parseArgs — the blocker is this function's CONTROL-FLOW
+// contract, not its syntax (semantic-dedup-scan finding `parseargs-local-copies`, runId
+// `semantic-dedup-scan-1790503843524`, which named this file's copy as one of its exemplars).
+// This is a LIBRARY-shaped parser: a bad argument is RETURNED as `{error}`, and the CALLER decides
+// what to do with it (main turns it into exit 2; an importer could ignore it). The shared parser
+// OWNS `process.exit` on both its `--help` path (helpExit) and its minArgs path, so adopting it here
+// would let an argument typo terminate the process from inside what is currently a pure function —
+// and `--import-root` is likewise repeatable (`<dir> ...`), which the shared one-value-per-flag
+// parser cannot express either. Absorbing this caller needs a non-exiting error mode in the base.
 function parseArgs(argv: string[]): { cfg?: ScriptCfg; allowEmpty?: boolean; error?: string } {
   const cfg: ScriptCfg = { scriptsDir: null as any, testDir: null, importSearchRoots: [], registryFile: null, outerLoopFile: null };
   let allowEmpty = false;
