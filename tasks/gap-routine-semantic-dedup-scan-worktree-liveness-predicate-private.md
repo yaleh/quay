@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-worktree-liveness-predicate-private
 title: "semantic-dedup-scan: the dead-worktree predicate and its direct-quantity
   reader are byte-identical under two names because the source is
   module-private; the stated blocker only for"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
