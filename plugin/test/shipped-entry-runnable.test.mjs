@@ -42,14 +42,24 @@
 // mechanism state absorbs the plugin bundle in the checkout that has it, and the
 // bin/ defect surface (tracked files) is present in both.
 //
+// Hermeticity note (gap-ac233-criterion-not-hermetic-host-quota-false-red): this criterion used to
+// read TWO ambient host resources, and on a host whose `/data` user quota sits at its boundary that
+// turned "the host is out of quota right now" into "the deliverable is broken" — same exit code 1,
+// indistinguishable downstream (硬规则 3b/4c, the 恒假 shape). Both are now owned by the test:
+//   (a) every mkdtemp goes through makeTmpDir(), which write-probes its way to a WRITABLE root
+//       instead of trusting $TMPDIR (plugin/test/helpers/tmp-workspace.mjs);
+//   (b) `npm pack` runs with an explicit `npm_config_cache` under that same root, so it never reads
+//       the ambient ~/.npm/_cacache (which lives on the quota'd filesystem).
+// The verdict is unchanged; only "where this file is allowed to spill" is now decided here.
+//
 // Run: node --test plugin/test/shipped-entry-runnable.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -67,11 +77,20 @@ function declaredBinPaths() {
 // `npm pack --dry-run --json` is the authoritative "what actually ships" source —
 // the same mechanism AC-233's own AC4 uses. Emits a JSON array on stdout; each
 // entry's `files[]` carries {path, size, mode}.
+//
+// The npm cache is EXPLICIT: without `npm_config_cache`, npm writes its `_cacache`
+// (and `_logs`) under `~/.npm`, i.e. on the ambient home filesystem — on this host
+// the quota'd `/data` mount. A pack that then dies on EDQUOT reports a non-zero
+// status that looks exactly like "the deliverable is broken". Pointing the cache at
+// a dir this test owns (created under the helper's writable root, removed with the
+// test file) makes the read independent of both the ambient cache and its mount.
 function packedFiles() {
+  const npmCache = makeTmpDir("quay-shipped-entry-npmcache-");
   const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: PKG_DIR,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, npm_config_cache: npmCache },
   });
   return JSON.parse(out)[0].files.map((f) => ({ path: f.path, mode: f.mode }));
 }
@@ -113,7 +132,7 @@ function lifecycleHookPaths() {
 // is a self-contained esbuild bundle (version embedded at build time), so copying
 // the single file is a faithful install-location simulation.
 function runsFromInstallLayout(rel) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-shipped-entry-"));
+  const tmp = makeTmpDir("quay-shipped-entry-");
   const dest = path.join(tmp, "node_modules", "quay", rel);
   try {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -218,7 +237,7 @@ test("negative control: the install-layout run check refuses a .ts entry and acc
   // pins the refusal (non-zero exit + a produced error), not the Node-internal
   // error string, so it stays true across Node floors (a pre-stripping Node
   // fails the .ts with a SyntaxError instead — still a refusal).
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-shipped-entry-nc-"));
+  const tmp = makeTmpDir("quay-shipped-entry-nc-");
   const nmRoot = path.join(tmp, "node_modules", "quay");
   fs.mkdirSync(nmRoot, { recursive: true });
   try {
