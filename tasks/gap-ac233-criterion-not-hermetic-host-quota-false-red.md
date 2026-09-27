@@ -59,11 +59,11 @@ TMPDIR=/tmp npm_config_cache=/tmp/npm-cache-probe \
 
 ## AC
 
-- [ ] AC1 **判据自足（$TMPDIR 侧）**：`TMPDIR` 指向一个不可写路径时，`node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs` 仍 **exit 0**，且输出不含 `Unknown system error -122`（写探针择优生效）。可复现命令：`TMPDIR=/nonexistent-quota-probe ...`（或 mode 500 的目录）
-- [ ] AC2 **npm cache 显式隔离**：该测试调用 `npm pack` 时带**显式** cache 目录（`npm_config_cache` 指向测试自有目录，随测试清理）；**且** `npm_config_cache` 被指向不可写路径时该判据仍 exit 0——证明覆盖真的生效，而非碰巧 ambient 可写
-- [ ] AC3 **正向不空转（该判据仍能取假）**：在 `packages/quay/bin/` 注入一个带 shebang、未被 `bin` 声明的 `.ts` 入口（如 `evil.ts`）⇒ 判据 **exit 1** 且报出该文件为违规；移除注入 ⇒ **exit 0**。一条命令可复现，两次读数都贴出（⛔ 只断言「声明的 bin 能跑」不算）
-- [ ] AC4 **单一真相源 + 不新增泄漏**：可写临时根的选择只在 `plugin/test/helpers/tmp-workspace.mjs` 一处实现；`grep -n 'os\.tmpdir()' plugin/test/shipped-entry-runnable.test.mjs` **无输出**；`node plugin/scripts/tmp-leak-pairing-check.ts` ⇒ **exit 0**
-- [ ] AC5 **自检**：`node plugin/scripts/task-schema-check.ts tasks/gap-ac233-criterion-not-hermetic-host-quota-false-red.md` ⇒ **exit 0**，且 `node packages/quay/bin/quay.ts task check gap-ac233-criterion-not-hermetic-host-quota-false-red --json` 的 `missing` 为 `[]`
+- [x] AC1 **判据自足（$TMPDIR 侧）**：`TMPDIR` 指向一个不可写路径时，`node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs` 仍 **exit 0**，且输出不含 `Unknown system error -122`（写探针择优生效）。可复现命令：`TMPDIR=/nonexistent-quota-probe ...`（或 mode 500 的目录）
+- [x] AC2 **npm cache 显式隔离**：该测试调用 `npm pack` 时带**显式** cache 目录（`npm_config_cache` 指向测试自有目录，随测试清理）；**且** `npm_config_cache` 被指向不可写路径时该判据仍 exit 0——证明覆盖真的生效，而非碰巧 ambient 可写
+- [x] AC3 **正向不空转（该判据仍能取假）**：在 `packages/quay/bin/` 注入一个带 shebang、未被 `bin` 声明的 `.ts` 入口（如 `evil.ts`）⇒ 判据 **exit 1** 且报出该文件为违规；移除注入 ⇒ **exit 0**。一条命令可复现，两次读数都贴出（⛔ 只断言「声明的 bin 能跑」不算）
+- [x] AC4 **单一真相源 + 不新增泄漏**：可写临时根的选择只在 `plugin/test/helpers/tmp-workspace.mjs` 一处实现；`grep -n 'os\.tmpdir()' plugin/test/shipped-entry-runnable.test.mjs` **无输出**；`node plugin/scripts/tmp-leak-pairing-check.ts` ⇒ **exit 0**
+- [x] AC5 **自检**：`node plugin/scripts/task-schema-check.ts tasks/gap-ac233-criterion-not-hermetic-host-quota-false-red.md` ⇒ **exit 0**，且 `node packages/quay/bin/quay.ts task check gap-ac233-criterion-not-hermetic-host-quota-false-red --json` 的 `missing` 为 `[]`
 
 ## DoD
 
@@ -73,6 +73,107 @@ TMPDIR=/tmp npm_config_cache=/tmp/npm-cache-probe \
 2. 同轮贴出**环境读数**：`echo $TMPDIR`、`df -h /data`、一次写探针（`echo x > /data/scratch/yale/probe-$$` 的成败）——否则无法证明那次绿不是因为宿主恰好空出了空间。
 3. **负控制同轮跑**：AC3 的「注入 ⇒ 红 / 撤销 ⇒ 绿」两次读数必须同时出现，证明该判据没有退化成空转（硬规则 4c 的「空转」半边）。
 4. **判据自足的直接证据**：`TMPDIR=/nonexistent-quota-probe` 形态下复现一次绿（AC1）——若落地时 `/data` 恰好可写，这一条是**唯一**能证明修的是自足性而不是运气的读数，不可省略。
+
+## Evidence
+
+**① 判据原始输出（本工作树，2026-09-28；`dist/quay.js` 已随 scoped 门构建）**
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs
+# shipped-entry classification — declared-bin-runnable=1 [dist/quay.js] | declared-bin-not-runnable=0 [none] | bin-entry-not-declared=0 [none] | shipped-mechanism=0 [none] | non-entry=120 [CHANGELOG.md] | lifecycle-hook=1
+ℹ tests 2
+ℹ pass 2
+ℹ fail 0
+EXIT=0
+```
+
+**② 同轮环境读数**（证明这次绿不是「宿主恰好空出了空间」）
+
+```
+$TMPDIR=''                       # 未设置 ⇒ 走 OS 默认根
+df -h /data → /dev/vdb  4.0T  566G  3.5T  14% /data
+echo x > /data/scratch/yale/probe-2242416  →  PROBE OK（配额此刻可写）
+```
+
+⇒ 本轮 `/data` **可写**，所以下面的 AC1 读数是唯一能把「修的是自足性」与「运气」分开的证据。
+
+**③ AC1 自足性直接证据（DoD 第 4 条）**
+
+```
+$ TMPDIR=/nonexistent-quota-probe node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs
+ℹ tests 2 / ℹ pass 2 / ℹ fail 0          EXIT=0
+`Unknown system error -122` / `EDQUOT` 出现次数：stdout 0、stderr 0
+$ TMPDIR=/nonexistent-quota-probe node … -e "import('./plugin/test/helpers/tmp-workspace.mjs').then(m=>console.log(m.writableTmpRoot()))"
+resolved root = /tmp                     # 写探针跳过了不可写的 $TMPDIR，落到宿主默认根
+```
+
+（修前同一命令的读数：`Error: ENOENT … mkdtemp '/nonexistent-quota-probe/quay-shipped-entry-nc-XXXXXX'` ⇒ EXIT=1。）
+
+**④ AC2 npm cache 隔离 + 对照组（证明覆盖是承重的）**
+
+```
+$ TMPDIR=/nonexistent-quota-probe npm_config_cache=/nonexistent-npm-cache-probe \
+    node --no-warnings --experimental-strip-types --test plugin/test/shipped-entry-runnable.test.mjs
+ℹ tests 2 / ℹ pass 2 / ℹ fail 0          EXIT=0
+
+# 对照：不做覆盖时，同一条 npm pack 读那个不可写的 cache ⇒
+$ (cd packages/quay && npm_config_cache=/nonexistent-npm-cache-probe npm pack --dry-run --json)
+EXIT=243   npm error … error writing to the directory: /nonexistent-npm-cache-probe/_logs
+```
+
+**⑤ AC3 负控制（同轮两臂，DoD 第 3 条）**
+
+```
+[注入] packages/quay/bin/evil.ts  (#!/usr/bin/env node, +x)
+# shipped-entry classification — … bin-entry-not-declared=1 [bin/evil.ts] …
+✖ bin/evil.ts: under bin/ but not a declared package.json bin
+ℹ pass 1 / ℹ fail 1                      EXIT=1
+
+[撤销] rm packages/quay/bin/evil.ts       (git status packages/quay/bin → 空)
+# shipped-entry classification — declared-bin-runnable=1 [dist/quay.js] | … bin-entry-not-declared=0 [none] …
+ℹ pass 2 / ℹ fail 0                      EXIT=0
+```
+
+**⑥ AC4 单一真相源 + 无新增泄漏**
+
+```
+$ grep -n 'os\.tmpdir()' plugin/test/shipped-entry-runnable.test.mjs   → 无输出 (exit 1)
+$ node plugin/scripts/tmp-leak-pairing-check.ts
+  → 911 file(s), 0 unpaired mkdtemp result(s). PASS.     (exit 0)
+$ node plugin/scripts/tmp-leak-pairing-check.ts . --files plugin/test/helpers/tmp-workspace.mjs
+  → 1 file(s), 0 unpaired mkdtemp result(s). PASS.       (helper 自身也配对)
+```
+
+选择逻辑只有一处实现：`plugin/test/helpers/tmp-workspace.mjs`（`resolveTmpRoot` / `writableTmpRoot`）；
+`grep -rn "resolveTmpRoot\|writableTmpRoot"` 除 helper 外只有受测文件的 import 与调用，无第二处实现。
+
+**⑦ AC5 自检 + 一处读数替换（如实记录，硬规则 3b）**
+
+```
+$ node plugin/scripts/task-schema-check.ts tasks/gap-ac233-criterion-not-hermetic-host-quota-false-red.md
+  1 total, 0 pass, 1 N/A-legacy, 0 fail                   (exit 0)
+```
+
+`quay.ts task check <id> --json`（以及 MCP `task_check`）在任务已 `ready` 时走的是 execute→done 分支，
+输出 `{id, gate, ok, acTotal, acChecked, dodTotal, dodChecked, reason}` —— **不携带 `missing` 字段**
+（`missing` 只存在于 todo→ready 分支，且在那里是以 reason 散文形态出现，不是数组）。故 AC5 的第二半按
+**同一真相源的导出生产者**取数：`artifactsComplete(body)`（`plugin/scripts/ready-pool-check.ts:712`，
+正是 todo→ready 门 `ready-pool-check.ts:2213` 消费的同一个函数）：
+
+```
+artifactsComplete → {"shape":"proposal","complete":true,"artifacts":{"proposal":true,"ac":true,"dod":true},"missing":[]}
+missing = []
+```
+
+⇒ AC5 的**意图**（无缺失必需要件）成立；改变的是取数表面，不是判据含义。若把「该表面不发射此键」读成
+「判据不满足」，就是把一次**没取到读数**伪装成一次**已合格**（硬规则 3b 的反向形态），故在此显式记录替换。
+
+**⑧ 本工作树内的两道门**
+
+```
+$ bash scripts/test.sh --for-task gap-ac233-criterion-not-hermetic-host-quota-false-red --allow-thin   → EXIT=0
+$ node --test <全部 70 个 helper 导入者文件>   → ℹ tests 892 / ℹ pass 891 / ℹ fail 0 / 1 skipped   EXIT=0
+```
 
 ## Touches
 
