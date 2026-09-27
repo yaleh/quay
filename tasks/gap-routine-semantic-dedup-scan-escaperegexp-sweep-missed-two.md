@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-escaperegexp-sweep-missed-two
 title: "semantic-dedup-scan: the documented sweep that collapsed twelve
   byte-identical copies could not see these two semantically identical Set-loop
   rewrites, so a completed dedup is only"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
