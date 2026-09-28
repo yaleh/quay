@@ -20,6 +20,7 @@ import {
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
 import { resolvePluginScript } from "./plugin-root.ts";
+import { writeJson } from "./serve-http-json.ts";
 // gap-webui-sessions-body-copy-en-zh: this file's BODY copy resolves through serve-i18n.ts ROW 15.
 // ⛔ `serve-i18n.ts` (not `serve-render.ts`) because the page's own labels are that table's business;
 // `serve-render.ts` re-exports the MECHANISM (lang resolution, the ROW 1/3 chrome), which is what
@@ -685,11 +686,6 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on("end", () => resolve(data));
     req.on("error", () => resolve(data));
   });
-}
-
-function writeJson(res: ServerResponse, status: number, obj: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(obj));
 }
 
 /**
