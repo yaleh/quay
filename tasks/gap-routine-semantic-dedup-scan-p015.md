@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-p015
 title: "semantic-dedup-scan: Byte-identical 4-line helper (writeHead
   application/json then end(JSON.stringify)) in the same package and same
   HTTP-handler idiom."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
