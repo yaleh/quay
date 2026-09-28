@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-p197
 title: "semantic-dedup-scan: diff proves the bodies are byte-identical at module
   level too (same __dirname/MANIFEST_PATH constants); the only delta is the
   two-line header comment naming th"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
