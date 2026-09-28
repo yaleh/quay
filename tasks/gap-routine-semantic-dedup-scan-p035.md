@@ -41,4 +41,6 @@ extract the counting variant; do NOT point both at readJsonLines whose fail-open
 ## Touches
 - `plugin/scripts/direct-to-develop-bypass-check.ts`
 - `plugin/scripts/fan-in-ff-protocol-check.ts`
+- `plugin/scripts/gate-script-base.ts`
+- `plugin/test/gate-script-base.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-p035.md`
