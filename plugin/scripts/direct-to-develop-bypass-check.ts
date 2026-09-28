@@ -115,14 +115,20 @@
 //       [--develop <ref>] [--baseline <ref>] [--lock-events <file>] [--commits <csv>]
 //       [--json] [--help]
 
-import fs from "node:fs";
+// (no `node:fs` import: the only fs call was inside the now-extracted `readJsonlLines`)
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// `readJsonlLines` (sentinel-preserving carrier reader) — semantic-dedup-scan finding
+// `byte-identical-body` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1790592211995`)
+// found this module's private copy byte-identical to fan-in-ff-protocol-check.ts's; it now lives in
+// gate-script-base.ts, once. ⛔ NOT `readJsonLines` — that one drops the malformed row and returns []
+// for an absent carrier, which would make this module's `__unparseable` branch permanently false
+// (see the boundary test in plugin/test/gate-script-base.test.mjs).
+import { isDirectEntry, flagValue, readJsonlLines } from "./gate-script-base.ts";
 import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
@@ -923,15 +929,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   };
 }
 
-function readJsonlLines(file) {
-  if (!fs.existsSync(file)) return null;
-  const out = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try { out.push(JSON.parse(line)); } catch { out.push({ __unparseable: true }); }
-  }
-  return out;
-}
+// readJsonlLines — extracted to gate-script-base.ts (see the import note above).
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 

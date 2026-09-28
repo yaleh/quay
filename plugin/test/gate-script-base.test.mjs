@@ -29,6 +29,7 @@ import {
   resolveRoot,
   createSelftest,
   readJsonLines,
+  readJsonlLines,
 } from "../scripts/gate-script-base.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
@@ -585,30 +586,93 @@ test("CONTROL: the CRLF axis does NOT change the row set — the finding's CRLF 
   assert.deepEqual(readJsonLines(fileOf(crlf)), [{ a: 1 }, { b: 2 }]);
 });
 
-test("BOUNDARY: the readJsonlLines sentinel pair is NOT folded in — its divergence is load-bearing", () => {
-  // The SAME routine run that filed this task also emitted finding
-  // `readjsonllines-load-bearing-unparseable-sentinel` (runId semantic-dedup-scan-1790118332027) for a
-  // DIFFERENT symbol — `readJsonlLines` (note the extra `l`), 2 copies — and its own rationale says
-  // why they must stay separate: absent file ⇒ `null` (not `[]`), and a corrupt line ⇒
-  // `{__unparseable:true}`, a sentinel consumed at 4 call sites. Folding them into the reader above
-  // "would make unparseable permanently false and silently pass two checkers" (硬规则 3b — a judge
-  // that cannot read its input must not return the value shaped like "qualified").
-  //
-  // So the extraction's BOUNDARY is part of its contract, and this test is the mechanical form of it:
-  // a later dedup pass that folds the pair in goes RED here instead of quietly disarming two checkers.
-  const SENTINEL_READERS = ["direct-to-develop-bypass-check.ts", "fan-in-ff-protocol-check.ts"];
+// ── readJsonlLines — the SENTINEL-PRESERVING sibling, also extracted ────────────────────────────────
+// The SAME routine run that filed the finding behind the block above also emitted
+// `readjsonllines-load-bearing-unparseable-sentinel` (runId semantic-dedup-scan-1790118332027) for a
+// DIFFERENT symbol — `readJsonlLines` (note the extra `l`) — and then
+// `byte-identical-body` (runId semantic-dedup-scan-1790592211995, verdict `real-duplication`) for its
+// TWO private copies, with requested action `extract the counting variant; do NOT point both at
+// readJsonLines whose fail-open form loses the malformed row`.
+//
+// So the disposition is: EXTRACT the pair into this same base (dedup), while keeping it a SEPARATE
+// reader from `readJsonLines` (do not fold). The divergence stays load-bearing on two axes — absent
+// file ⇒ `null` not `[]`; corrupt line ⇒ a `{__unparseable:true}` placeholder ROW not a skip — and
+// folding the pair in would make `rows.some(r => r.__unparseable)` permanently false and silently
+// pass two checkers (硬规则 3b — a judge that cannot read its input must not return the value shaped
+// like "qualified").
+//
+// This test is the mechanical form of that boundary: the extraction is pinned as single-source +
+// imported, AND the fold is pinned as forbidden. A later dedup pass that folds the pair in goes RED
+// here instead of quietly disarming two checkers.
+
+/** The two modules that carried a byte-identical private copy of `readJsonlLines`. */
+const SENTINEL_READERS = ["direct-to-develop-bypass-check.ts", "fan-in-ff-protocol-check.ts"];
+
+test("readJsonlLines: defined exactly ONCE under plugin/scripts (gate-script-base.ts)", () => {
+  const defs = scriptTsFiles().filter((f) => /\bfunction readJsonlLines\b/.test(sourceOf(f)));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `readJsonlLines must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+test("readJsonlLines: neither former carrier re-defines it, and each IMPORTS the shared one", () => {
   for (const f of SENTINEL_READERS) {
     const src = sourceOf(f);
-    assert.match(src, /\bfunction readJsonlLines\b/, `${f} must keep its own sentinel-preserving reader`);
-    assert.match(src, /__unparseable/, `${f} must keep the __unparseable sentinel its callers test for`);
+    assert.doesNotMatch(src, /\bfunction readJsonlLines\b/, `${f} must not redefine readJsonlLines`);
+    // Deleting the private copy without importing the shared one would still pass the line above, so
+    // this half is not redundant — it is the half that distinguishes "extracted" from "deleted".
+    assert.match(
+      src,
+      /import \{[^}]*\breadJsonlLines\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import readJsonlLines from the base`,
+    );
+    // ...and the fold is still forbidden: importing the LINE-DROPPING reader would disarm the
+    // `__unparseable` branch its callers test for. (The name is a prefix of the other, so this regex
+    // is what keeps the census exact.)
     assert.doesNotMatch(
       src,
+      // `\b` after `readJsonLines` is what keeps this exact: it does NOT match the `readJsonlLines`
+      // import the assertion above requires (`s`→`l` is not a word boundary).
       /import \{[^}]*\breadJsonLines\b[^}]*\} from "\.\/gate-script-base\.ts"/,
       `${f} must NOT be folded onto the line-dropping reader — that would disarm its unparseable check`,
     );
+    // The sentinel stays consumed at the call sites (the branch the fold would kill).
+    assert.match(src, /__unparseable/, `${f} must keep the __unparseable branch its callers test for`);
   }
   // ...and the two symbols are genuinely different names, which is why the census has to be exact:
   assert.notEqual("readJsonlLines", "readJsonLines");
+});
+
+test("readJsonlLines: absent / unreadable-by-absence file ⇒ null (NOT [], the deliberate divergence)", () => {
+  withTempDir("readjsonllines-absent-", (dir) => {
+    // The whole point of the sibling: `null` says "no carrier", `[]` (what readJsonLines gives) says
+    // "carrier present but empty". The two callers branch on exactly this.
+    assert.equal(readJsonlLines(path.join(dir, "does-not-exist.jsonl")), null);
+    assert.notDeepEqual(readJsonlLines(path.join(dir, "does-not-exist.jsonl")), readJsonLines(path.join(dir, "does-not-exist.jsonl")));
+  });
+});
+
+test("readJsonlLines: a corrupt line ⇒ a {__unparseable:true} PLACEHOLDER ROW, so row↔line counts stay comparable", () => {
+  withTempDir("readjsonllines-sentinel-", (dir) => {
+    const file = path.join(dir, "lock-events.jsonl");
+    const lines = [
+      '{"event":"acquire"}',
+      "",                       // blank — skipped, by design (not a line a writer produces)
+      "{oops not json",         // corrupt — the sentinel
+      '{"event":"release"}',
+    ];
+    fs.writeFileSync(file, lines.join("\n") + "\n");
+    const rows = readJsonlLines(file);
+    assert.deepEqual(rows, [{ event: "acquire" }, { __unparseable: true }, { event: "release" }]);
+    assert.equal(rows.some((r) => r && r.__unparseable), true, "the branch the callers test for is live");
+    // THE control for this reader's reason to exist: the shared line-dropping reader returns the SAME
+    // two rows with NO sentinel ⇒ `rows.some(r => r.__unparseable)` is permanently false there. That
+    // is the disarm the boundary above forbids, measured rather than asserted.
+    assert.deepEqual(readJsonLines(file), [{ event: "acquire" }, { event: "release" }]);
+    assert.equal(readJsonLines(file).some((r) => r && r.__unparseable), false, "…and the fold would kill the branch");
+  });
 });
 
 /** The retired permissive parse (no guard) — the row set a split strategy alone produces. */

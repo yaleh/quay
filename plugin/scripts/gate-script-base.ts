@@ -287,6 +287,50 @@ export function readJsonLines(file: string): Record<string, unknown>[] {
   return rows;
 }
 
+// ── readJsonlLines ──────────────────────────────────────────────────────────────────────────────────
+// The SENTINEL-PRESERVING sibling of `readJsonLines` above. Same job (a `.quay/*.jsonl` carrier →
+// `Record<string, unknown>[]`), deliberately DIFFERENT contract on the two inputs a checker must be
+// able to read separately. Extracted here — byte-identical from two private copies — by
+// semantic-dedup-scan finding `byte-identical-body` (`.quay/routine-findings.jsonl`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1790592211995`, verdict `real-duplication`,
+// requested action `extract the counting variant`), which named its two carriers:
+//   direct-to-develop-bypass-check.ts:926 / fan-in-ff-protocol-check.ts:280.
+//
+// ⛔ DO NOT collapse this into `readJsonLines` above. The divergence is load-bearing on BOTH axes, and
+// folding it in disarms two checkers (硬规则 3b — a judge that cannot read its input must not return a
+// value shaped like "qualified"):
+//   axis 1 — absent file ⇒ `null`, NOT `[]`. `readJsonLines`'s fail-open `[]` makes "the carrier was
+//            never written" indistinguishable from "the carrier exists and is empty"; both callers
+//            branch on the distinction (`no-lock-events-file` / `no-lock-events (vacuous…)`). A
+//            caller that must report NOT-EVALUATED for an absent carrier can still stat the file
+//            itself (freshness-producer-coverage-check.ts does), but these two do not — they need the
+//            reader to say it.
+//   axis 2 — a corrupt/torn line ⇒ a `{__unparseable: true}` PLACEHOLDER ROW, NOT a skip. The
+//            placeholder keeps the row→line correspondence so a caller can report
+//            `malformed-lock-events (NOT-EVALUATED)`. `readJsonLines` drops the line instead, which
+//            would make `rows.some(r => r.__unparseable)` permanently FALSE ⇒ the malformed branch
+//            goes dead and a NOT-EVALUATED state silently becomes a PASS. It is consumed at exactly
+//            those call sites (`.some(e => e && e.__unparseable)` in both carriers).
+// The prior disposition of the sibling finding `readjsonllines-load-bearing-unparseable-sentinel`
+// (same runId) was "do not fold"; that stands — this extraction moves the code WITHOUT touching the
+// agreed contract. The mechanical form of the boundary is in plugin/test/gate-script-base.test.mjs
+// ("BOUNDARY: …") — folding the pair in goes RED there rather than quietly disarming two checkers.
+//
+// Behaviour beyond the two axes is `readJsonLines`-equivalent (blank lines skipped, non-object rows
+// kept as-is — a check this file's sibling reader does not make, and the callers index only on
+// `__unparseable`). A path that exists but cannot be READ (e.g. a directory: EISDIR) still THROWS —
+// unchanged from both former copies, and deliberately not widened to `null` here: `null` means "no
+// carrier", which these callers treat as a vacuous PASS.
+export function readJsonlLines(file: string): Record<string, unknown>[] | null {
+  if (!fs.existsSync(file)) return null;
+  const out: Record<string, unknown>[] = [];
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch { out.push({ __unparseable: true }); }
+  }
+  return out;
+}
+
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
 // Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
 // empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,

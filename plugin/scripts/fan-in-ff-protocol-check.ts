@@ -53,7 +53,13 @@ import { fileURLToPath } from "node:url";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// `readJsonlLines` (sentinel-preserving carrier reader) — semantic-dedup-scan finding
+// `byte-identical-body` (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1790592211995`)
+// found this module's private copy byte-identical to direct-to-develop-bypass-check.ts's; it now
+// lives in gate-script-base.ts, once. ⛔ NOT `readJsonLines` — that one drops the malformed row and
+// returns [] for an absent carrier, which would make the `__unparseable` branches below permanently
+// false (see the boundary test in plugin/test/gate-script-base.test.mjs).
+import { isDirectEntry, flagValue, readJsonlLines } from "./gate-script-base.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -277,15 +283,7 @@ export function gitLogMergeSubjects(root, baseline, develop) {
   }
 }
 
-function readJsonlLines(file) {
-  if (!fs.existsSync(file)) return null;
-  const out = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try { out.push(JSON.parse(line)); } catch { out.push({ __unparseable: true }); }
-  }
-  return out;
-}
+// readJsonlLines — extracted to gate-script-base.ts (see the import note at the top of this file).
 
 /** Parse the suite-run interval from a full-suite-state file: `{state, startedAt, finishedAt}`.
  *  Returns `{start, end, taskId}` in epoch seconds (finishedAt is epoch; startedAt is ISO or epoch),
