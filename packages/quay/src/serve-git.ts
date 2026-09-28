@@ -25,6 +25,7 @@ import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryR
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "./serve-i18n.ts";
+import { writeJson } from "./serve-http-json.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).
@@ -1068,11 +1069,6 @@ export async function handleGitHistory(
   // the cookie or `?lang=` at this point: a second parse is a second decision table, and it would
   // read different request inputs than the one `Vary: Cookie` was declared for.
   res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes, cfg.identity, cfg.lang));
-}
-
-function writeJson(res: ServerResponse, status: number, obj: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(obj));
 }
 
 /**
