@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-p035
 title: "semantic-dedup-scan: Diff of the two regions is clean, including the
   absent-file return null and the {__unparseable:true} sentinel that keeps line
   counts comparable: a contract the"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
