@@ -116,13 +116,13 @@ grep -rl 'no-reachable-serve-address' goals/ | wc -l   ⇒ 10
 
 ## AC
 
-- [ ] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条 `CAUSE=` 断言分支逐字相同；`CAUSE=` 行计数仍为 **11**。⛔ 未经 `quay goal write` 落库不算。
-- [ ] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac292-criterion-address-derivation.test.mjs` 的 7 个负例断言 `code === 3`、5 个正例仍 `code === 0`；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的运行（`git stash` 或 `git show <old>:<file>` 对照）证明这 7 条确实 1 → 3。
-- [ ] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-292` ⇒ **exit 0**，逐字贴出；四条断言各自独立可核；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、cmdline 含 `packages/quay/bin/quay.ts serve` 的活进程。
-- [ ] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/board` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=` 可区分（`nav-label-untranslated` 或 `no-nav-region`），逐字贴出。⛔ 该证据的活面由夹具自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
-- [ ] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-292 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
-- [ ] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-292` 最新一条为 `verdict:"pass"`，其 `payload.criterionHash` **≠** 修订前指纹（两行都贴）；② `bash scripts/test.sh --for-task gap-ac292-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（`grep -rl` 三个 token 各 17 / 10 / 10），并说明本任务只改 AC-292 一条的退出码。
-- [ ] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下观察项「本实例无监督者、死亡后不会被自动拉回」及其发生率读数（18 条台账事件 / 跨 2 日 / 涉 9 个 AC）。
+- [x] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条 `CAUSE=` 断言分支逐字相同；`CAUSE=` 行计数仍为 **11**。⛔ 未经 `quay goal write` 落库不算。
+- [x] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac292-criterion-address-derivation.test.mjs` 的 7 个负例断言 `code === 3`、5 个正例仍 `code === 0`；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的运行（`git stash` 或 `git show <old>:<file>` 对照）证明这 7 条确实 1 → 3。
+- [x] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-292` ⇒ **exit 0**，逐字贴出；四条断言各自独立可核；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、cmdline 含 `packages/quay/bin/quay.ts serve` 的活进程。
+- [x] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/board` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=` 可区分（`nav-label-untranslated` 或 `no-nav-region`），逐字贴出。⛔ 该证据的活面由夹具自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
+- [x] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-292 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
+- [x] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-292` 最新一条为 `verdict:"pass"`，其 `payload.criterionHash` **≠** 修订前指纹（两行都贴）；② `bash scripts/test.sh --for-task gap-ac292-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（`grep -rl` 三个 token 各 17 / 10 / 10），并说明本任务只改 AC-292 一条的退出码。
+- [x] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下观察项「本实例无监督者、死亡后不会被自动拉回」及其发生率读数（18 条台账事件 / 跨 2 日 / 涉 9 个 AC）。
 
 ## DoD
 
@@ -140,3 +140,276 @@ grep -rl 'no-reachable-serve-address' goals/ | wc -l   ⇒ 10
 - `tasks/gap-ac292-criterion-carrier-absence-not-evaluated.md`
 
 （说明：第一条是本任务的落地面 —— 地址派生那步的**退出码**，经 `quay goal write AC-292 --criterion …` 落库，`expect` 与分支文本逐字不变；第二条是与该块逐字绑定的夹具（7 个负例断言随之同步，并新增一条整条 criterion 的断言侧负控制）；第三条是 self-touch。⛔ `plugin/scripts/driver-anchor.ts`、`plugin/scripts/start-drivers.ts`、任何 `plugin/scripts/*.ts`、任何 `packages/quay/src/serve-*.ts` **均不在本 Touches 内**（前者是观察项非目标，后者是夹具自造活面的约束）。）
+
+## Evidence
+
+Round 2026-09-29 (**worker** `gap-ac292-criterion-carrier-absence-not-evaluated`; task worktree
+`/data/home/yale/work/quay-worktrees/gap-ac292-criterion-carrier-absence-not-evaluated`, branch
+`task/gap-ac292-criterion-carrier-absence-not-evaluated`; every gate reading below taken at the
+**main checkout** root, per Plan 8, because the live instance / `.quay/server.json` / `.quay/gate-events.jsonl`
+all live there).
+
+### 0. Red baseline (taken, not assumed) and the pre-amendment fingerprint
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json
+{ "id":"AC-292","verdict":"fail","cause":null,
+  "reason":"acceptance failed (exit 1) — AC-292 candidate readings (cwd=/data/home/yale/work/quay,
+            nserve=0, ncand=1, nderived=0):; pid=3112620 addr=- cause=argv-no-serve-subcommand,carrier-pid-mismatch
+            CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=/data/home/yale/work/quay;
+            /board cannot be evaluated on a live surface (AC-179 probe pattern)",
+  "timestamp":"2026-09-29T02:02:02.066Z","dryRun":true }
+EXIT=1
+$ for p in $(pgrep -f 'quay.ts serve'); do printf 'pid=%s cwd=%s\n' "$p" "$(readlink /proc/$p/cwd 2>/dev/null)"; done
+pid=2973129 cwd=                    # another root (/data/home/tom/tom.zhao/1/quay) — not ours
+pid=3113546 cwd=/data/home/yale/work/quay   # the acceptance runner's own `sh -c` (argv-no-serve-subcommand)
+$ kill -0 1555141   # the `.quay/server.json` pid
+kill: (1555141) - No such process   ⇒ exit=1
+```
+
+Pre-amendment `criterionHash` = `82c584f991cf3ee8` (computed with `criterionFingerprint`'s own
+whitespace-normalised sha256 over the criterion text, and matching the last `goal-sweep` events
+`2026-09-29T00:50:43.322Z pass` / `01:52:30.757Z fail`).
+
+### AC1 — the four carrier-absence branches take exit 3; the assertion branches are byte-identical
+
+Landed with `quay goal write AC-292 --criterion "$(cat <new criterion>)"` (⛔ no hand edit of
+`goals/*.md`), in the worktree **and** at the main root — both stored texts are byte-identical to
+the intended string (`criterion===intended: true`), fingerprint `05d67676ece2a75c`.
+
+Criterion diff, line-by-line over the whole text (only the four blocks below differ; the amendment
+prepends 29 comment lines):
+
+```
+--- line 23 ---  ...unreadable /proc/<pid>/cwd would compare equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
++++ line 23 +++  ...unreadable /proc/<pid>/cwd would compare equal to the empty root\n' "$(pwd)" >&2; exit 3; fi
+--- line 84 ---  ...up web service); per-candidate readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
++++ line 84 +++  ...up web service); per-candidate readings on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
+--- line 85 ---  ...readings on stderr above\n' "$nderived" "$nserve" "$root" "$ROUTE" >&2; exit 1; fi
++++ line 85 +++  ...readings on stderr above\n' "$nderived" "$nserve" "$root" "$ROUTE" >&2; exit 3; fi
+--- line 86 ---  ...cwd=$root; $ROUTE cannot be evaluated on a live surface (AC-179 probe pattern)" >&2; exit 1; fi
++++ line 86 +++  ...cwd=$root; $ROUTE cannot be evaluated on a live surface (AC-179 probe pattern)" >&2; exit 3; fi
+```
+
+- `differing body lines: 4` — nothing else in the 107-line body moved (criterion 107 → 136 lines).
+- `CAUSE=` line count: **11** before and after (the header is written so it never contains the
+  literal token — it says "the nav-label-untranslated token", not `CAUSE=nav-label-untranslated`;
+  otherwise the fixture's own 11-line pin would have counted the comment).
+- `exit 1` lines: **10**; `exit 3; fi` lines: **4**.
+- `expect`, `origin`, `status`, `title`, `goal`, `kind` byte-identical across the write
+  (`git diff 3c2aee6e7^ 3c2aee6e7 --numstat` = `85 4`, one file, and the field-level
+  comparison prints `expect identical: true / origin identical: true / title identical: true`).
+- DoD 4 (motive travels WITH the criterion): the new 29-line header records carrier-absence ≠ false,
+  the `goal-store.ts:305-318` convention and the `acceptance-runner.ts:97-114` mapping, **and the
+  cost reading**, re-taken rather than copied — see §AC6③ below.
+
+### AC2 — the fixture is synchronised, and the 7 cases really moved 1 → 3
+
+- The seven §④ negatives now assert `r.code === 3` (the two that carried a message keep it
+  verbatim); the five §①/§② positives still assert `r.code === 0` and are byte-for-byte unchanged.
+  `git diff` over the fixture removes exactly those seven lines and nothing else.
+- `node --test packages/quay/test/ac292-criterion-address-derivation.test.mjs` ⇒ **16 pass / 0 fail**.
+- Pre-amendment run of the SAME file against the AMENDED criterion (fixture restored from
+  `git show HEAD:<file>`): **6 pass / 7 fail**, and the failures are exactly those seven:
+
+```
+AssertionError [ERR_ASSERTION]: a root whose only serve candidate has no carrier must not derive an address
+3 !== 1
+  at ...ac292-criterion-address-derivation.test.mjs:373:14
+  actual: 3,
+  expected: 1,
+```
+
+### AC3 — positive control on a live instance (`goal gate` exit 0)
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-292
+{ "id":"AC-292","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)",
+  "timeoutMs":60000,"timestamp":"2026-09-29T02:11:57.403Z","dryRun":false }
+EXIT=0
+```
+
+The four assertions, each read INDEPENDENTLY of the criterion (`addr` derived from the carrier's web
+entry = `127.0.0.1:20119`):
+
+```
+① en nav "Board" occurrences            : 2
+② zh response <html lang="zh" present   : 1
+③ zh nav "Board" occurrences            : 0
+④ en title = <title>quay — Board — three-source join</title>
+   zh title = <title>quay — 看板 — 三源 join 看板</title>   → differs: YES
+```
+
+The live process, at the same moment:
+
+```
+$ pgrep -af 'quay.ts serve'      (+ readlink /proc/<pid>/cwd)
+3652175 node --no-warnings --experimental-strip-types /data/home/yale/work/quay/packages/quay/bin/quay.ts serve --host 127.0.0.1
+   cwd=/data/home/yale/work/quay
+$ cat .quay/server.json
+{ "schemaVersion":1, "pid":3652175, "startedAt":"2026-09-29T02:07:52.833Z",
+  "services":[{"name":"web","pid":3652175,"host":"127.0.0.1","port":20119,"up":true},
+              {"name":"control","pid":3652175,"host":"127.0.0.1","port":16031,"up":false}] }
+```
+
+Started from the main checkout HEAD with the repo's own launcher verb — `quay server start --only web`
+(idempotent; `--only web` so no driver is touched) — ⛔ not a hand-assembled spawn. The port is
+kernel-assigned (`--port` absent on the cmdline), so the address is knowable only from the carrier —
+which is exactly the path this criterion was re-anchored onto.
+
+### AC4 — negative control: the assertion branches still bite (behaviour, not a diff)
+
+The whole criterion — the same text `quay goal gate AC-292` executes — run against a **self-made**
+live surface (a scratch `git init` root, a serve-shaped candidate with an explicit `--port N` on its
+own argv and cwd = that root, and a real listener answering `/board` in two bodies by cookie).
+⛔ No `packages/quay/src/serve-*.ts` was touched; the surface is built by the fixture.
+
+```
+############ POSITIVE CONTROL (wired zh) ############
+derived addr = 127.0.0.1:3661  (candidate argv: quay.ts serve --host 127.0.0.1 --port 3661, cwd=root)
+EXIT = 0
+--- stdout ---
+OK -- /board: default nav region carries "Board" and <title>="Board - quay"; under Cookie: lang=zh the
+response is <html lang=zh>, that English nav label is gone from the nav region, and this page's own
+<title> became "Kanban - quay"
+--- stderr ---
+(empty)
+
+############ NEGATIVE CONTROL (untranslated zh) ############
+derived addr = 127.0.0.1:4599  (candidate argv: quay.ts serve --host 127.0.0.1 --port 4599, cwd=root)
+EXIT = 1
+--- stderr ---
+CAUSE=nav-label-untranslated -- the nav region of /board under Cookie: lang=zh still renders the
+literal English nav label "Board"; the nav is not wired to the zh dictionary
+```
+
+Both readings come from the landed fixture too (§⑥, two tests that call `runCriterion()`):
+
+```
+$ node --test --test-name-pattern="whole criterion" packages/quay/test/ac292-criterion-address-derivation.test.mjs
+✔ the whole criterion PASSES (exit 0) on a live surface whose zh nav really is translated (154.25ms)
+✔ the whole criterion still FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page (153.46ms)
+ℹ tests 2  ℹ pass 2  ℹ fail 0
+```
+
+⛔ The two states do not wear the same shape: the unwired case is **1**, never **3** (`assert.notEqual(r.code, 3)`).
+
+### AC5 — not-evaluated and false are distinguishable (two JSONs, verbatim)
+
+Withhold the surface (`quay server stop --only web` — the host process stays, the web face closes):
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json
+{ "id":"AC-292","verdict":"not-evaluated","cause":"declared",
+  "reason":"not-evaluated (declared): acceptance failed (exit 3) — AC-292 candidate readings
+            (cwd=/data/home/yale/work/quay, nserve=1, ncand=2, nderived=0):;
+            pid=3652175 addr=- cause=argv-port-absent,carrier-web-down;
+            pid=3807429 addr=- cause=argv-no-serve-subcommand,carrier-pid-mismatch
+            FAIL=no-derivable-serve-address -- 1 quay.ts serve process(es) with cwd=/data/home/yale/work/quay,
+            none yielded an address ...",
+  "timestamp":"2026-09-29T02:11:32.727Z","dryRun":true }
+```
+
+With the surface back:
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-292
+{ "id":"AC-292","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)",
+  "timestamp":"2026-09-29T02:11:57.403Z","dryRun":false }
+```
+
+A third reading, taken with **no** `quay.ts serve` process at all (before the instance was started),
+exercises the `CAUSE=no-running-serve-instance` branch on the amended criterion:
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-292 --dry-run --json
+{ "id":"AC-292","verdict":"not-evaluated","cause":"declared",
+  "reason":"not-evaluated (declared): acceptance failed (exit 3) — AC-292 candidate readings
+            (cwd=/data/home/yale/work/quay, nserve=0, ncand=2, nderived=0):; ...
+            CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=/data/home/yale/work/quay; ...",
+  "timestamp":"2026-09-29T02:07:31.477Z","dryRun":true }
+```
+
+⚠️ `quay goal gate`'s own **exit code** is 1 for both `fail` and `not-evaluated` — deliberate
+(`goal-store.ts` at the gate return: "`pass` is the ONLY exit 0 … it is merely a different kind of
+non-pass, **distinguishable in the ledger**"), and `goal-driver.ts`'s `runPrefilingRecheck` reads the
+**verdict**, not this code. The distinction this AC cares about is the value, and it is present.
+
+### AC6 — new fingerprint on the ledger, scoped gate green, family enumerated
+
+① The ledger, newest last (`.quay/gate-events.jsonl`, at the main checkout):
+
+```
+2026-09-29T01:52:30.757Z | actor=goal-sweep | verdict=fail | criterionHash=82c584f991cf3ee8   ← PRE-amendment
+2026-09-29T02:11:12.987Z | actor=goal-amend | verdict=pass | criterionHash=05d67676ece2a75c   ← POST-amendment
+```
+
+The sweep reached AC-292 **immediately** (actor `goal-amend`, not `goal-sweep`): its criterion text no
+longer matches the fingerprint the last recorded verification pinned. `05d67676ece2a75c ≠ 82c584f991cf3ee8`.
+(`goal gate`'s own event carries no `criterionHash` — only the sweep/amend writer does — so the
+fingerprint-bearing event is the one quoted.)
+
+② Scoped gate (the same command the driver's fan-in runs):
+
+```
+$ bash scripts/test.sh --for-task gap-ac292-criterion-carrier-absence-not-evaluated --allow-thin
+warning: test-selection-thin: task ... resolved tests for 1/3 Touches entries (0.33) < 0.5; pass --allow-thin to run anyway
+... scoped static checks ...
+✔ ... (all 16 ac292-criterion-address-derivation tests)
+ℹ tests 16  ℹ pass 16  ℹ fail 0
+EXIT=0
+```
+
+③ Family enumeration (`goals/`, at the main checkout):
+
+```
+$ grep -rl 'no-running-serve-instance'  goals/ | wc -l   ⇒ 17   (= GOAL-024 + AC-288..AC-303)
+$ grep -rl 'no-derivable-serve-address' goals/ | wc -l   ⇒ 10
+$ grep -rl 'no-reachable-serve-address' goals/ | wc -l   ⇒ 10
+```
+
+**This task changes AC-292 only.** The mechanical proof, not the prose: the not-evaluated exit status
+appears in exactly ONE goal file —
+
+```
+$ grep -rl 'exit 3; fi' goals/ | wc -l   ⇒ 1
+goals/AC-292-board-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
+$ grep -c 'exit 3; fi' goals/AC-292-*.md   ⇒ 4
+```
+
+— so the other 16 files of the `no-running-serve-instance` family are untouched and each still exits 1
+on carrier absence, to be re-anchored by its own filing round (as the prior re-anchor task did).
+
+### AC7 — the non-goal boundary was not crossed
+
+Branch delta against develop (`git diff --name-only develop...HEAD`), exactly the three declared Touches:
+
+```
+goals/AC-292-board-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
+packages/quay/test/ac292-criterion-address-derivation.test.mjs
+tasks/gap-ac292-criterion-carrier-absence-not-evaluated.md
+```
+
+Nothing outside them: ⛔ no `plugin/scripts/driver-anchor.ts`, ⛔ no
+`plugin/scripts/start-drivers.ts`, ⛔ **no `plugin/scripts/*.ts` at all** (hence no
+outline/capability-catalog/laydown registration was needed), ⛔ no `packages/quay/src/serve-*.ts`
+(the AC4 negative control's live surface is built by the fixture).
+
+**Observation, NOT a precondition** (硬规则 12 — no落点 or boundary ruling is offered, so this does
+not block anything): `quay serve` has **no supervisor**. `plugin/scripts/driver-anchor.ts`'s
+`DRIVER_KINDS` covers promotion/worker/outer/quality/meta/goal — **web is not among them**, so an
+instance that dies is never pulled back, and this criterion then reads `not-evaluated` until
+something starts one. Occurrence reading, re-taken at `2026-09-29T02:10:58Z` over
+`.quay/gate-events.jsonl`: **24 events** carrying the `no-running-serve-instance` token, across
+**2 dates** (2026-09-23 ×16, 2026-09-29 ×8) and **10 distinct ACs** (AC-288 .. AC-301) — up from the
+18 / 2 / 9 measured at filing, i.e. it accrued for as long as the carrier stayed absent. The death
+itself is visible in the carrier: `.quay/server.json` named pid 1555141, started
+`2026-09-25T10:08:25.330Z`, and `kill -0 1555141` ⇒ `No such process`, with no shutdown line in
+`.quay/serve.log`.
+
+### Post-conditions left behind
+
+- A live `quay.ts serve` (pid 3652175, cwd = the main root, `web` up on 127.0.0.1:20119) is **running**,
+  so the criterion reads `pass` on the real production surface rather than only in fixtures.
+  ⚠️ It has no supervisor (above): if it dies, this criterion goes back to `not-evaluated` — which is
+  now a truthful reading instead of a spurious filing.
