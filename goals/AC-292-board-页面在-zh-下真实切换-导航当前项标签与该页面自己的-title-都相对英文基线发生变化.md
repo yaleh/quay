@@ -5,6 +5,87 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THIS CRITERION'S CARRIER-ABSENCE BRANCHES NOW REPORT NOT-EVALUATED
+  (2026-09-29,
+
+  # gap-ac292-criterion-carrier-absence-not-evaluated): the four branches below
+  that report
+
+  # "I could not find / reach a live surface" used to exit with status 1, so a
+  run in which no
+
+  # cwd=repo-root `quay.ts serve` existed was RECORDED as this criterion being
+  FALSE. That is "I
+
+  # cannot evaluate this HERE" wearing the same output shape as "this is false"
+  (hard rule 3b) --
+
+  # and this repo already fixed the value for that state:
+  packages/quay/src/goal-store.ts:305-318
+
+  # names it verbatim ("exit 3 -- this repo's convention, e.g. NOT-EVALUATED:
+  carrier absent") and
+
+  # packages/quay/src/gate/acceptance-runner.ts:97-114 maps status 3 to verdict
+  "not-evaluated" /
+
+  # cause "declared" (NOT_RUNNABLE_EXIT_CODES holds only 126/127, never 3).
+
+  #
+
+  # WHAT IT COST (a ledger reading, not an assertion): 18 events carrying
+  no-running-serve-instance,
+
+  # across 2 dates (2026-09-23 x16, 2026-09-29 x2) and 9 distinct ACs (AC-288 ..
+  AC-296). The goal
+
+  # driver's `runPrefilingRecheck` sends verdict "fail" to outcome
+  "confirmed-failing" (FILE a task)
+
+  # and every other verdict -- "not-evaluated" included -- to "not-evaluated"
+  (file nothing), so the
+
+  # status alone decided whether this gap was re-filed EVERY round. This
+  amendment's own task is
+
+  # that difference.
+
+  #
+
+  # WHAT IS NOT CHANGED, DELIBERATELY: `expect`, the post-derivation assertion
+  branches, and all
+
+  # eleven refusal branches below are byte-identical to the previous revision.
+  Exactly FOUR
+
+  # carrier-absence branches moved into the not-evaluated status: the
+  workspace-root-unresolvable
+
+  # branch, the no-derivable-serve-address branch, the
+  no-reachable-serve-address branch, and the
+
+  # no-running-serve-instance branch. The criterion can still be FALSE: a live
+  instance whose /board
+
+  # under `Cookie: lang=zh` still renders the literal English nav label refuses
+  with the
+
+  # nav-label-untranslated token at status 1. Withdrawing the carrier no longer
+  wears that refusal's
+
+  # shape -- it now says, distinguishably, that it could not look.
+
+  #
+
+  # NOT A PRECONDITION, AN OBSERVATION: `quay serve` has no supervisor (web is
+  not among
+
+  # plugin/scripts/driver-anchor.ts's DRIVER_KINDS), so an instance that dies is
+  not pulled back
+
+  # automatically and this criterion then reads not-evaluated until something
+  starts one.
+
   # WHY THIS STEP WAS RE-ANCHORED (2026-09-23,
   gap-ac292-criterion-cmdline-port-literal-stale):
 
@@ -69,7 +150,7 @@ criterion: >-
   if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
   rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
   attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
-  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
+  equal to the empty root\n' "$(pwd)" >&2; exit 3; fi
 
   cands=""
 
@@ -169,17 +250,17 @@ criterion: >-
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
   .quay/server.json entry naming that pid with an up web service); per-candidate
-  readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
+  readings on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
   serve process(es) for cwd=%s, none answered %s (connection refused / timed out
   / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
-  "$root" "$ROUTE" >&2; exit 1; fi
+  "$root" "$ROUTE" >&2; exit 3; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  (AC-179 probe pattern)" >&2; exit 3; fi
 
   printf 'AC-292 serve address derived from %s as %s (per-candidate
   readings:%s)\n' "$src" "$addr" "$rep"
