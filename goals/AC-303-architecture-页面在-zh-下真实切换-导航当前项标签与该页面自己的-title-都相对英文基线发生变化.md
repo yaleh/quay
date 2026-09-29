@@ -5,6 +5,99 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THIS CRITERION'S CARRIER-ABSENCE BRANCHES NOW REPORT NOT-EVALUATED
+  (2026-09-29,
+
+  # gap-ac303-criterion-carrier-absence-not-evaluated): the two branches below
+  that report "I could not
+
+  # find or reach a live surface" -- no-running-serve-instance and
+  no-derivable-address -- used to leave
+
+  # through fail(), i.e. with status 1, so a run in which no cwd=repo-root
+  `quay.ts serve` existed was
+
+  # RECORDED as this criterion being FALSE. That is "I cannot evaluate this
+  HERE" wearing the same output
+
+  # shape as "this is false" (hard rule 3b) -- and this repo already fixed the
+  value for that state:
+
+  # packages/quay/src/goal-store.ts:311-318 names it verbatim ("exit 3 -- this
+  repo's convention, e.g.
+
+  # NOT-EVALUATED: carrier absent") and
+  packages/quay/src/gate/acceptance-runner.ts verdictFromAcceptance
+
+  # maps status 3 to verdict "not-evaluated" / cause "declared"
+  (NOT_RUNNABLE_EXIT_CODES holds only
+
+  # 126/127, never 3).
+
+  #
+
+  # WHAT IT COST (a ledger reading, not an assertion -- re-take it by counting
+  item_id=AC-303 over
+
+  # .quay/gate-events.jsonl): read at 2026-09-29T10:45Z the file holds 215 such
+  events, 134 pass / 81
+
+  # fail, and those 81 split into 46 html-lang-not-zh (filed 2026-09-17), 33
+  en-fetch-failed
+
+  # (2026-09-23) and 2 no-derivable-address (2026-09-29T02:05:58.575Z and
+  02:06:53.018Z). That last pair
+
+  # is this amendment's own cause: the workspace's `quay serve` had died, BOTH
+  evaluability branches
+
+  # reported that as a FALSE criterion, and the goal driver's
+  `runPrefilingRecheck` -- which sends
+
+  # verdict "fail" to outcome "confirmed-failing" (FILE a task) and every other
+  verdict, "not-evaluated"
+
+  # included, to "not-evaluated" (file nothing) -- therefore re-filed this AC. A
+  peer restarted the
+
+  # server at 2026-09-29T02:07:52.833Z and the SAME criterion with the SAME
+  fingerprint abc74ce6609f1567
+
+  # read pass at 02:16:49.304Z: it oscillated between "unable to look" and
+  "true" while recording the
+
+  # former as false.
+
+  #
+
+  # WHAT IS NOT CHANGED, DELIBERATELY: `expect`, the ten post-derivation
+  assertion branches, and the two
+
+  # evaluability branches' own text are byte-identical to the previous revision.
+  Exactly one thing moved:
+
+  # fail() -- the exit path of BOTH evaluability branches and of nothing else --
+  now leaves with status
+
+  # 3 instead of 1. The criterion can still be FALSE: a live instance whose
+  /architecture under
+
+  # `Cookie: lang=zh` still renders the literal English nav label refuses at
+  status 1 with the
+
+  # nav-label-untranslated token. Withdrawing the carrier no longer wears that
+  refusal's shape -- it now
+
+  # says, distinguishably, that it could not look.
+
+  #
+
+  # NOT A PRECONDITION, AN OBSERVATION: `quay serve` has no supervisor, so an
+  instance that dies is not
+
+  # pulled back automatically and this criterion then reads not-evaluated until
+  something starts one.
+
   # WHY THIS STEP WAS RE-ANCHORED (2026-09-24,
   gap-ac303-criterion-cmdline-port-literal-stale):
 
@@ -119,7 +212,7 @@ criterion: >-
 
   fail() { echo "CAUSE=$1" >&2; if [ -n "$cands" ]; then echo "CANDIDATES:$rep"
   >&2; else echo "CANDIDATES: none -- pgrep -f 'quay.ts serve' x cwd=$root
-  matched no process" >&2; fi; exit 1; }
+  matched no process" >&2; fi; exit 3; }
 
   addr=""
 
