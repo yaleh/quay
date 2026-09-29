@@ -142,22 +142,74 @@ criterion: >-
   nderived=%s):%s\n' "$root" "$nserve" "$ncand" "$nderived" "$report" >&2
 
 
+  # WHY THE THREE EVALUABILITY REFUSALS BELOW EXIT 3 (2026-09-29,
+  gap-ac291-criterion-carrier-absence-not-evaluated)
+
+  # A live carrier (a running quay.ts serve whose cwd is $root) can be ABSENT.
+  When it is, this criterion
+
+  # has proved NOTHING about $ROUTE: the guarantee is neither confirmed nor
+  refuted, it is NOT-EVALUATED.
+
+  # Reporting that as a failure made the goal driver read "confirmed-failing"
+  (plugin/scripts/goal-driver.ts
+
+  # runPrefilingRecheck) and file a task EVERY round. Measured cost: ledger
+  item_id=AC-291 carried 4 such
+
+  # events across 2 dates (2026-09-23 and 2026-09-29), all verdict=fail; the
+  filing round read nserve=0 at
+
+  # 2026-09-29T02:07:41.658Z and the SAME probe read pass 11s later, because a
+  peer worker restarted serve
+
+  # at 02:07:52Z. So the criterion oscillated between "cannot evaluate" and
+  "true" while recording the
+
+  # former as "false". exit 3 is THIS REPO OWN CONVENTION for "I cannot evaluate
+  this HERE" --
+
+  # packages/quay/src/goal-store.ts:305-318 states it verbatim (the criterion
+  itself declared it: exit 3,
+
+  # this repo convention, e.g. NOT-EVALUATED: carrier absent ... NOT a failure),
+  and the ONE mapping
+
+  # already honors it: packages/quay/src/gate/acceptance-runner.ts
+  verdictFromAcceptance maps code 3 to
+
+  # not-evaluated with declared cause, while NOT_RUNNABLE_EXIT_CODES holds only
+  126 and 127.
+
+  # WHAT IS NOT CHANGED: the ten ASSERTION branches below (en fetch, zh fetch,
+  nav region, nav region zh,
+
+  # english baseline, title tag, html lang, nav label untranslated, title tag
+  zh, title unchanged) are
+
+  # this criterion real teeth and keep their failure code verbatim. A probe that
+  cannot be false is not a
+
+  # measurement, so the negative control stands: a REACHABLE but untranslated
+  $ROUTE still fails.
+
+
   if [ -z "$addr" ] && [ "$nserve" = 0 ]; then echo
   "CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=$root;
   $ROUTE cannot be evaluated on a live surface (AC-179 probe pattern)" >&2; exit
-  1; fi
+  3; fi
 
 
   if [ -z "$addr" ] && [ "$nderived" = 0 ]; then printf
   'CAUSE=no-derivable-serve-address -- %s quay.ts serve candidate(s) with
   cwd=%s, none yielded a derivable address; per-candidate readings:%s\n'
-  "$nserve" "$root" "$report" >&2; exit 1; fi
+  "$nserve" "$root" "$report" >&2; exit 3; fi
 
 
   if [ -z "$addr" ]; then printf 'CAUSE=no-reachable-serve-address -- %s
   derivable address(es) among %s candidate(s) for cwd=%s, none answered $ROUTE
   (connection refused / timed out / non-2xx); per-candidate readings:%s\n'
-  "$nderived" "$nserve" "$root" "$report" >&2; exit 1; fi
+  "$nderived" "$nserve" "$root" "$report" >&2; exit 3; fi
 
   en=$(curl -sf --max-time 10 "http://$addr$ROUTE" 2>/dev/null)
 
