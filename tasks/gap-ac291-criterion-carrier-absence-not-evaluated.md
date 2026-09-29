@@ -189,6 +189,11 @@ $ node --test packages/quay/test/ac291-criterion-address-derivation.test.mjs
 
 ⚠️ **与任务体 Plan 第 5 条的一处实测差异**（硬规则 4c：判据落笔当轮取真实读数就是为了抓到这类）：AC-291 的夹具**不使用** `# >>> addr-derivation` / `# <<< addr-derivation` 定界块 —— 那两个 marker 只存在于同族其余判据里（`grep -c addr-derivation goals/AC-291-*.md ⇒ 0`）。它用 `storedCriterion()` 读整条 `criterion` 字段、在 `git init` 过的临时根里跑**整条**判据（比抽块更强，不是回声）。故本任务只改 6 条断言的数值，⛔ 未为引入 marker 而重构夹具（那既超出本任务语义，也与「其余逐字保留」冲突）。
 
+⚠️ **执行轮实测的两处工具陷阱**（记录，供同族后续轮复用）：
+
+- `quay-native task edit <id> --body-file <f>` **被静默丢弃** —— `packages/quay-native/bin/quay-native.ts` 的 `adr` / `doc` 两个 `write|new|edit` 分支都读 `flags["body-file"]`（:134 / :170），而 **`task edit` 分支只读 `flags["body"]`**（:390）。后果：`patch.body` 保持 undefined ⇒ `store.write(id, {})` 把文件**原样重写**（mtime 变、内容一字不变），却以 **exit 0 + `updated <id>`** 报告成功。本执行轮先命中它：那次写入后 `git status` 干净、复选框仍 0/7。改用 `--body "$(cat <file>)"` 即正常。（同族先例：`task edit <id> --help` 同样是静默写入而非帮助。）
+- **两条写面的尾随换行不一致**：`"$(cat f)"` 会剥掉尾随换行，而 MCP `task_write` 的 body 保留它 ⇒ 两边产出的文件差一个 `\n`（实测 32144 vs 32145 字节，末行内容相同）。为避免 fan-in 的 merge 在末行上起冲突，本轮把 worktree 与主检出两侧**校准到逐字相同**（`md5 acab4b4bc319a6f638a0638ec4c9ea0a`）。
+
 ### AC3 —— 正控制：活实例上真 pass
 
 ```
