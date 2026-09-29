@@ -60,6 +60,63 @@ criterion: >-
 
   # it was added beside (hard rule 3b).
 
+  # WHY THE FOUR EVALUABILITY BRANCHES NOW EXIT 3 (2026-09-29,
+  gap-ac301-criterion-carrier-absence-not-evaluated):
+
+  # this criterion's carrier is a RUNNING `quay.ts serve` with cwd = repo root,
+  and that carrier is not always present:
+
+  # there may be no instance at all, or an instance whose address cannot be
+  derived or reached. In those states the
+
+  # guarantee below has been neither shown true nor shown false -- it is
+  NOT-EVALUATED, and the goal mechanism already
+
+  # reserves a distinct exit code for exactly that state: exit 3, which
+  acceptance-runner's verdictFromAcceptance maps
+
+  # to verdict "not-evaluated" / cause "declared" (NOT_RUNNABLE_EXIT_CODES
+  carries only 126/127, so 3 is not a
+
+  # runner-failure code), and which packages/quay/src/goal-store.ts states
+  verbatim as this repo's convention
+
+  # ("NOT-EVALUATED: carrier absent"). Reporting those four branches with exit 1
+  instead made every carrier absence
+
+  # land as verdict "fail", so plugin/scripts/goal-driver.ts's
+  runPrefilingRecheck classified it "confirmed-failing"
+
+  # and filed a fresh defect task EVERY round. The measured cost: the ledger
+  holds that reading at
+
+  # 2026-09-29T02:05:58.462Z AND 02:06:52.172Z, a peer restarted the instance at
+  02:07:52.833Z, and three
+
+  # immediately-following runs all returned exit 0 -- the criterion oscillated
+  between "true" and "cannot be
+
+  # evaluated HERE", with the latter wearing the shape of "false" (hard rule
+  3b).
+
+  # ONLY the four evaluability exits changed. The ten assertion-side refusals
+  (en-fetch-failed, zh-fetch-failed,
+
+  # no-nav-region, no-nav-region-zh, english-baseline-missing, no-title-tag,
+  html-lang-not-zh,
+
+  # nav-label-untranslated, no-title-tag-zh, title-unchanged) keep exit 1 byte
+  for byte: they answer "is this page
+
+  # wired to the zh locale?", which stays answerable and stays FALSE whenever a
+  reachable instance serves an
+
+  # untranslated nav -- so the criterion still has teeth, and the fixture's
+  whole-criterion negative control
+
+  # (packages/quay/test/ac301-criterion-address-derivation.test.mjs) is what
+  proves it still does.
+
   # >>> addr-derivation (this block is run VERBATIM by
   packages/quay/test/ac301-criterion-address-derivation.test.mjs)
 
@@ -72,7 +129,7 @@ criterion: >-
   if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
   rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
   attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
-  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
+  equal to the empty root\n' "$(pwd)" >&2; exit 3; fi
 
   cands=""
 
@@ -172,17 +229,17 @@ criterion: >-
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
   .quay/server.json entry naming that pid with an up web service); per-candidate
-  readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
+  readings on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
   serve process(es) for cwd=%s, none answered %s (connection refused / timed out
   / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
-  "$root" "$ROUTE" >&2; exit 1; fi
+  "$root" "$ROUTE" >&2; exit 3; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  (AC-179 probe pattern)" >&2; exit 3; fi
 
   printf 'AC-301 serve address derived from %s as %s (per-candidate
   readings:%s)\n' "$src" "$addr" "$rep"
