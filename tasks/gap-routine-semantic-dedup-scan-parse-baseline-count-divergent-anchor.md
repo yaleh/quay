@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor
 title: "semantic-dedup-scan: Two byte-identical parseBaselineCount bodies use
   ^#\\s*baseline-count:\\s*(\\d+)\\s*$ while the baseline-reader family uses ^#
   baseline-count:\\s*(\\d+), so a line w"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
