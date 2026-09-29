@@ -303,6 +303,11 @@ FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page`，gre
 
 **② 不回归**：`bash scripts/test.sh --for-task gap-ac301-criterion-carrier-absence-not-evaluated
 --allow-thin` ⇒ **exit 0**；夹具 **17/17 绿**；16 项 scoped 静态检查全过。
+⛔ 这不是「跑过一次就算」：**任务体（7 处勾选 + 本节）写入之后**，重新 merge 当时的 `develop`
+（`aa749206c` —— 它已经包含本次 task 文件的写入）并**重跑同一条命令**，同样 **exit 0 / 17 绿**；
+那一轮的 delta 明确**含任务文件**（`task-contract-check: no violations`、
+`checked-in-write-check … 0 inside the tree … PASS`、`touches-one-entry-one-path-check` 在集内），
+即勾选与本节本身也过了 scoped 静态检查那一层。
 ⚠️ 选择器报 `test-selection-thin: resolved tests for 1/3 Touches entries (0.33)` —— 另外两条
 Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表判据没被验到**：夹具的 `goalFile()` /
 `criterionText()` 正是**直接从那个 goal 文件**读判据文本再逐字执行（单源），所以该文件的内容确实
