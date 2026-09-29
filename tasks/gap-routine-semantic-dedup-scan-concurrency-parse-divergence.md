@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-concurrency-parse-divergence
 title: "semantic-dedup-scan: Gated on Number.isInteger vs Number.isFinite, so
   --test-concurrency=1.5 yields 1 in the runner and 1.5 in the reporter even
   though the runner comment claims th"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
