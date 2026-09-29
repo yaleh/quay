@@ -378,3 +378,39 @@ _2026-09-29T04:45:04.276Z_: Round 2026-09-29T04:38–04:44Z (worker, continuatio
 **The only reason this round is still `exited-not-landed` is the already-filed cross-task family deadlock** — `gap-goal-write-outruns-bound-fixture-family-deadlock` (status `ready`). Direct readings this round: on `develop` the goal criteria for AC-292 / AC-301 / AC-303 already exit `3`, while their three bound fixtures still assert `1`; those three fixtures are **byte-identical between develop and this worktree** (`git diff develop HEAD -- <the three files>` is empty), so they are not this task's delta. The mechanical fan-in runs the **full** suite in *this* branch's merge tree, which necessarily still carries those three unfixed fixtures ⇒ a deterministic 22-red suite ⇒ no branch in the family can be green ⇒ no fan-in can land (measured: 30+ suite-red attempts across the four sibling tasks since 02:22Z, every one judged `unrelated-flaky-exempt`, so the retry cap never trips and the driver re-dispatches indefinitely).
 
 ⛔ This worker did **not** try to break out from its own mandate: the sibling fixtures are outside this task's `## Touches`, `anti-drift-touches-check.ts` HARD-FAILs out-of-declared writes, and widening `## Touches` by hand would falsify this task's own AC7. The break-out is a manager action on the filed deadlock task.
+
+_2026-09-29T05:13:30.829Z_: 
+执行轮 7（2026-09-29T05:13Z，同一 worker worktree；`git merge develop` ⇒ clean，合并 develop @ e937b4e4e）—— ⛔ 未改任何代码（`git diff --stat develop...HEAD` 仍只有 ac291 夹具 + 本任务体两条）。
+
+**根因升级：从推论到机械直读。** 前几轮写的是「合并树红」；本轮直接给 develop 自身做普查 ⇒ **develop 自己就是红的**，与合并无关：
+
+```
+goals/AC-291-*.md  exit3=4 exit1=10   ← 判据（exit 3 已落）
+goals/AC-292-*.md  exit3=5 exit1=10
+goals/AC-301-*.md  exit3=5 exit1=12
+goals/AC-303-*.md  exit3=2 exit1=10
+夹具 develop 副本      code===1 断言：ac292 7 / ac303 10 / ac291 7，code===3 全 0
+```
+
+即：`quay goal write` 把**判据**即时直落 develop，而**绑定夹具**只能经 fan-in 落地 ⇒ 半迁移态。**只要 develop 上这三份夹具仍是 `code === 1`，本任务（以及三支兄弟）的 fan-in 就不可能过 suite。**
+
+**复现（逐文件 `node --test`，⛔ 非全量 suite）**：
+
+```
+ac291  13 / 13 pass  / 0 fail    ← 本任务 delta，绿
+ac292  13 /  6 pass  / 7 fail    ← 7× "3 !== 1"
+ac301  14 /  7 pass  / 7 fail    ← 7× "3 !== 1"（含 2× "expected exit 1, got 3"）
+ac303  20 / 12 pass  / 8 fail    ← 8× "3 !== 1"
+家族红 22 条；失败形一律 3 !== 1
+```
+
+**饿死链（本轮新读，硬规则 4b：用外部可核的量）**：`ready-pool-check.ts --json` ⇒ `pool=4 / dispatchable_disjoint=3 / landing_blocked=false`。四支 = ac291 / ac301 / ac303 / 解法任务（ac292 已 needs-human 出池）；`recommended` 批次是**互斥**批，非 disjoint 的那一条正是 `gap-goal-write-outruns-bound-fixture-family-deadlock`（其 Touches 逐条压在三支在飞兄弟的夹具上）⇒ **解法任务被它正要解锁的那三个任务静态饿死**。已知唯一出口（见 `gap-goal-write-outruns-bound-fixture-family-deadlock`）：把兄弟**移出在飞集** —— park，或加一条 `depends_on` 边（`deps-ready` 过滤器承认该边）；提高其 relevance / `blocking` 无效。⚠️ 三个**同时**移出才够（只移本任务一个，解法仍与另两支非 disjoint）。
+
+`suite_blocking.consecutive_red=0 / window_active=false` 本轮再次实测 —— 刹车结构上不可能持有 red（`per-task-suite-records.jsonl` 唯一活 writer 把 `--state green` 写死，且只在全绿后跑）。
+
+**三态复核（本轮实测，活载体 pid 3652175 cwd=/data/home/yale/work/quay）**：① 活实例 + 真接线 ⇒ `verdict:"pass"` / exit 0；② 无实例 scratch 根 ⇒ `verdict:"not-evaluated"` / `cause:"declared"`（⛔ 非 `fail`）；③ 可达但 zh 未翻译 ⇒ exit 1（执行轮 4 行为证据 + 夹具末条独立覆盖）。**本任务交付物本身完好。**
+
+scoped 门 `--for-task gap-ac291-… --allow-thin` ⇒ **exit 0（13/13）**；scoped-gate cache 以 **merge 时刻** develop sha `e937b4e4ec00792e9bababaab17fee9513030fcb`（= `HEAD^2`，实测是 HEAD 的祖先）写盘。
+
+⛔ 本轮未越 Touches、未改任何 `status:`、未 un-park 兄弟、未扩 `## Touches`（遵本任务既有约束与 worker prompt「status 归 driver」）。**结论：本任务 delta 已完成且自绿，落地面被一个已立案的跨任务死锁阻塞；需要 manager 层做一次顺序裁定（三个兄弟同时 park / 加 `depends_on` 边），否则本家族每轮各烧一个 ~20 分钟全量 suite 且恒定 exited-not-landed。**
+
