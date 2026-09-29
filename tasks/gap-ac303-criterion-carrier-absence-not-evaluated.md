@@ -4,7 +4,7 @@ title: "AC-303 判据把「活载体缺席」记成「此刻为假」——`/arc
   出声，违反仓库自己的约定（exit 3 = not-evaluated，goal-store.ts:311-318
   逐字给出的例子正是「NOT-EVALUATED: carrier absent」）⇒ driver 每轮把它当 confirmed-failing
   立案；修法=两个分支改 exit 3 + 保持 cwd=仓库根的活实例使判据真 pass 并落新指纹，以「接线破坏仍 exit 1」证明强度未减"
-status: ready
+status: done
 labels:
   - gap
   - defect
