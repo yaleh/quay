@@ -349,3 +349,17 @@ $ git -C <worktree> diff --name-only develop...HEAD | grep -E '^plugin/scripts/.
 
 <!-- dedup-ref -->
 **⚠️ 新观察（本轮机械算出，⛔ 非关键词匹配）**：逐文件求 `## Touches` 交集 ⇒ 三个兄弟任务**彼此不相交**，而解法任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的 5 条 Touches 与三个兄弟**逐一相交**（各命中同一条夹具）⇒ `dispatchable_disjoint=3` 中那个非 disjoint 项就是**解法任务本身**。后果：解法任务只能在三个兄弟都不在飞时才被派，而三个兄弟每轮 fan-in 失败即被重派（重试上限因 `unrelated-flaky-exempt` 不前进）⇒ **存在「解法被它所要解锁的那三个任务饿死」的路径**。本任务⛔ 不改任何状态（不 un-park 兄弟、不自改 `status`、不扩 `## Touches`），只把读数记在此处。
+
+
+执行轮 6（2026-09-29T04:30Z，同一 worker worktree）—— 本轮⛔未改任何代码（`git merge --no-edit develop` ⇒ `Already up to date`；`git merge-base --is-ancestor develop HEAD` ⇒ 真，分支已带上全部实现）。本轮复核读数：本任务夹具 `node --test packages/quay/test/ac291-criterion-address-derivation.test.mjs` ⇒ tests 13 / pass 13 / fail 0；scoped 门 `bash scripts/test.sh --for-task gap-ac291-criterion-carrier-absence-not-evaluated --allow-thin` ⇒ SCOPED_GATE_EXIT=0；scoped-gate cache 以 **merge 时刻**的 develop sha `c297b38e32d7f241fdc534939decc85578647a49`（实测是 HEAD 的祖先）写盘 —— ⛔ 不用 scoped 门跑完后 `git rev-parse develop` 的值：develop 在那 6 分钟内已前进到 `09a66639a26ec7022f9cdfb63ee5376a3af0315b`，而那**不是** HEAD 的祖先，写进去永远不会命中（`worker-fan-in.ts:1592` 的判定是「与锁内 merge 到的 develop tip **完全一致**」）。
+
+**本轮新读数（硬规则 4：一个结构上不可能取某值的量，不是测量）**：`ready-pool-check.ts` 的 suite-red 刹车**结构上永不触发**。
+
+- 刹车读 `.quay/per-task-suite-records.jsonl`（`ready-pool-check.ts:1724` → `:3268` `computeSuiteBlocking`）。
+- 该账本的**唯一活 writer** 是 `plugin/workflows/fan-in-execute.js:787/798`，它在「无锁段 step 4.5 — per-task-suite 入账（**全绿后**）」块内、把 `--state green` **写死** ⇒ 红 fan-in 永远走不到那一步 ⇒ 账本**不可能新增 red 行**。实测：635 行 = `{green: 631, red: 4}`，4 条 red 全在 2026-08-16/17（旧 writer 遗留），末行 `2026-09-24 green`，**2026-09-29 共 0 行**（而当天有多轮红 fan-in suite）。
+- 真 red 读数**就在隔壁且是今天的**：`.quay/verification-round.jsonl` round **2189 / 2190 / 2191** 全 `state: red`，taskId 正是本家族三支（ac291 / ac301 / ac303）；但 `ready-pool-check.ts:3257` 逐字写明它「**NO LONGER** a throttling input」。
+- `worker-fan-in.ts` 与 `worker-driver.ts` 对该 writer 的引用数各 = **0** ⇒ 机械 fan-in（happy path）什么都不写。
+
+⇒ `consecutiveRedRounds()` 从一个「按构造为绿」的尾部往回数 ⇒ 恒 0 ⇒ 本轮实测 `consecutive_red:0` / `window_active:false` / `landing_blocked:false` ⇒ 本任务与三支兄弟被无限重派，**每轮烧一个 ~20 分钟全量 suite**。
+
+与 `judgeRetryExemption` 的 `unrelated-flaky-exempt`（同断言签名跨 ≥2 任务 ⇒ **不推进重试上限**）合起来构成**无出口的 churn**：本任务第 4 / 5 / 6 轮全部 `exited-not-landed` 于 step=suite，且本轮读数给出**本轮无法落地**的判据 —— 本任务 delta 只有 `packages/quay/test/ac291-criterion-address-derivation.test.mjs` 一条（`git diff --stat develop...HEAD` 逐字），其余红源（ac292 / ac301 / ac303 三份绑定夹具）在 `## Touches` 之外，而 `anti-drift-touches-check.ts` 对未声明写入 HARD-FAIL ⇒ **在 develop 变绿之前本任务的 fan-in 不可能成功**，与重试次数无关。⛔ 本轮未越 Touches、未改任何兄弟夹具、未写任何 `status:`、未 un-park 任何任务、未新增 `plugin/scripts/*.ts`。
