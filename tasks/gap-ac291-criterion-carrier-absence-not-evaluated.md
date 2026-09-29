@@ -4,7 +4,7 @@ title: "AC-291 判据把「活载体缺席」记成「此刻为假」——地�
   not-evaluated，goal-store.ts 逐字给出的例子正是「NOT-EVALUATED: carrier absent」）⇒ driver
   每轮把它当 confirmed-failing 立案；修法=三处改 exit 3 + 保持 cwd=仓库根的活实例使判据真 pass
   并落新指纹，以「接线破坏仍 exit 1」证明强度未减"
-status: ready
+status: done
 labels:
   - gap
   - defect
