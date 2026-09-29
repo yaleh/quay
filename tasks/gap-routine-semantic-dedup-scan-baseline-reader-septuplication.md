@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-baseline-reader-septuplication
 title: "semantic-dedup-scan: One behavior copied seven times (bodies hash
   identically after name/path normalization): read the ratchet file, parse
   baseline-count, set of non-comment lines,"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
