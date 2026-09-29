@@ -64,6 +64,7 @@ import { fileURLToPath } from "node:url";
 import { extractSection, countAcCheckboxes } from "./task-schema.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { recordNoBlockLedger } from "./task-contract-check.ts";
+import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 import { TASK_STATUS } from "./task-status.ts";
 
 
@@ -210,55 +211,34 @@ export function scanStore({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), f
 // ── Ratchet data file (AC7: shrink-only legacy baseline) ──────────────────────────────────────────
 export const BASELINE_FILE_REL = "docs/analysis/task-ac-carryover-baseline.md";
 
+/** The mechanism (read + shrink-only write) is ratchet-baseline.ts; what this consumer OWNS and
+ * passes in is the file path, its header prose, and the noun its entries are called. */
+const BASELINE_HEADER_LINES = [
+  "# task-ac-carryover-baseline.md — shrink-only ratchet list for task-ac-carryover-check.ts",
+  "# (tasks/gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC7). A line here means a",
+  "# `status: done` task still has an unchecked AC with no carrying successor — a LEGACY case",
+  "# baselined so the gate does not block the whole store at once.",
+  "#",
+  "# RATCHET: the list can ONLY get SHORTER. task-ac-carryover-check.ts exits 1 if a NEW unowned",
+  "# AC appears that is not already listed. Remove an entry only after the AC gains a carrying",
+  "# successor (then run --write-ratchet to persist the shrunken list). `--write-ratchet",
+  "# --reset-baseline` is the deliberate one-shot re-baseline after a criterion change.",
+  "#",
+  "# Format: one `<task-id>: <AC-id>` per line (sorted; one line per unowned AC).",
+];
+
 export function readBaseline(root) {
-  const p = path.join(root, BASELINE_FILE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, BASELINE_FILE_REL);
 }
 
 export function writeBaseline(root, currentEntries, { reset = false } = {}) {
-  const p = path.join(root, BASELINE_FILE_REL);
-  const { baseline, baselineCount } = readBaseline(root);
-  const ceiling = reset ? currentEntries.length : (baselineCount ?? currentEntries.length);
-  if (!reset && currentEntries.length > ceiling) {
-    return { ok: false, reason: `current unowned ACs (${currentEntries.length}) exceed the ratchet ceiling (${ceiling}) — the list can only get SHORTER; give the ACs a carrying successor, do not add them` };
-  }
-  if (!reset && baseline.size > 0) {
-    const newOnes = currentEntries.filter((e) => !baseline.has(e));
-    if (newOnes.length > 0) {
-      return { ok: false, reason: `refusing to write: ${newOnes.length} NEW unowned AC(s) not in the baseline — the list can only get SHORTER: ${newOnes.slice(0, 5).join(", ")}${newOnes.length > 5 ? "…" : ""}` };
-    }
-  }
-  const lines = [
-    "# task-ac-carryover-baseline.md — shrink-only ratchet list for task-ac-carryover-check.ts",
-    "# (tasks/gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC7). A line here means a",
-    "# `status: done` task still has an unchecked AC with no carrying successor — a LEGACY case",
-    "# baselined so the gate does not block the whole store at once.",
-    "#",
-    "# RATCHET: the list can ONLY get SHORTER. task-ac-carryover-check.ts exits 1 if a NEW unowned",
-    "# AC appears that is not already listed. Remove an entry only after the AC gains a carrying",
-    "# successor (then run --write-ratchet to persist the shrunken list). `--write-ratchet",
-    "# --reset-baseline` is the deliberate one-shot re-baseline after a criterion change.",
-    "#",
-    "# Format: one `<task-id>: <AC-id>` per line (sorted; one line per unowned AC).",
-    "# baseline-count: " + ceiling,
-    "",
-    ...currentEntries,
-    "",
-  ];
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, lines.join("\n"));
-  return { ok: true, reason: reset
-    ? `ratchet baseline RESET to ${currentEntries.length} entry/entries (ceiling re-anchored to ${ceiling})`
-    : `ratchet list written (${currentEntries.length} entry/entries; ceiling ${ceiling})` };
+  return writeRatchetBaseline(root, BASELINE_FILE_REL, currentEntries, {
+    reset,
+    headerLines: BASELINE_HEADER_LINES,
+    entriesLabel: "unowned ACs",
+    newEntryLabel: "unowned AC(s)",
+    overCeilingAdvice: "give the ACs a carrying successor, do not add them",
+  });
 }
 
 // ── Report formatting (pure — unit-tested) ────────────────────────────────────────────────────────

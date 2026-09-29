@@ -60,6 +60,9 @@ import { TASK_STATUS } from "./task-status.ts";
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
 import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// The ONE shrink-only ratchet reader/writer (single-source) — this file reads FOUR baselines (the
+// violation list + three grandfather lists) through it instead of carrying four copies.
+import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 
 
 // ── Consumer checks (read content, match by declared position) ───────────────────────────────────────
@@ -242,17 +245,7 @@ export const DOD_SUITE_LINE_BASELINE_REL = "docs/analysis/dod-suite-line-baselin
 /** Read the shrink-only grandfather list of task files whose DoD legitimately still carries the
  * full-suite demand. Absent file ⇒ empty set (nothing grandfathered — every demand is reported). */
 export function readDodSuiteLineBaseline(root) {
-  const p = path.join(root, DOD_SUITE_LINE_BASELINE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, DOD_SUITE_LINE_BASELINE_REL);
 }
 
 /** A task's `## Definition of Done` section carries the full-suite demand AND the file is not
@@ -281,17 +274,7 @@ export const BARE_DIR_TOUCHES_BASELINE_REL = "docs/analysis/bare-dir-touches-bas
 /** Read the shrink-only grandfather list of task files that legitimately still carry the bare-dir +
  *  uncertain-annotation Touches pattern (pre-rule debt). Absent file ⇒ empty set (nothing grandfathered). */
 export function readBareDirTouchesBaseline(root) {
-  const p = path.join(root, BARE_DIR_TOUCHES_BASELINE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, BARE_DIR_TOUCHES_BASELINE_REL);
 }
 
 /** A task's `## Touches` carries the bare-dir + uncertain-annotation pattern AND the file is not
@@ -325,17 +308,7 @@ export const WIRING_CLAIM_AC_PROBE_BASELINE_REL = "docs/analysis/wiring-claim-ac
 /** Read the shrink-only grandfather list of task files whose AC legitimately still carries the wiring/
  *  reachability declaration without a real input probe (pre-rule debt). Absent file ⇒ empty set. */
 export function readWiringClaimAcProbeBaseline(root) {
-  const p = path.join(root, WIRING_CLAIM_AC_PROBE_BASELINE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, WIRING_CLAIM_AC_PROBE_BASELINE_REL);
 }
 
 /** A task's `## Acceptance Criteria` carries a wiring/reachability declaration WITHOUT a real input
@@ -424,57 +397,37 @@ export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = ne
 export const DATA_FILE_REL = "docs/analysis/contract-violations.md";
 
 export function readRatchet(root) {
-  const p = path.join(root, DATA_FILE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, DATA_FILE_REL);
 }
 
+// The mechanism is ratchet-baseline.ts; this consumer OWNS the path, its header prose, and the
+// nouns its entries are called — passed in, so its wording cannot silently become another's.
+const RATCHET_HEADER_LINES = [
+  "# contract-violations.md — shrink-only ratchet list for the ## Contract consumer checks",
+  "# (tasks/gap-dispatch-gate-has-no-checklist-and-no-trace, AC6). A violation here means the task's",
+  "# ## Contract block (or ## Dispatch review section) fails one of the five consumer judgments.",
+  "#",
+  "# RATCHET: the list can ONLY get SHORTER. task-contract-check.ts exits 1 if a NEW violation",
+  "# appears that is not already listed, or if the list would exceed the baseline-count ceiling.",
+  "# Remove an entry only after the underlying violation is fixed (then run --write-ratchet to",
+  "# persist the shrunken list). `--write-ratchet --reset-baseline` is the deliberate one-shot",
+  "# re-baseline after a criterion fix; it re-anchors the ceiling to the current violation set.",
+  "#",
+  "# Format: one `<task-file>: <violation-code>` per line (repo-root-relative, sorted).",
+];
+
 export function writeRatchet(root, currentEntries, { reset = false } = {}) {
-  const p = path.join(root, DATA_FILE_REL);
-  const { baseline, baselineCount } = readRatchet(root);
   // reset=true is the DELIBERATE one-shot re-baseline (gap-contract-ratchet-has-no-runner-and-grew-
   // tenfold-unnoticed): after a criterion fix drops false positives, the ceiling is re-anchored to the
   // current violation set. It bypasses the shrink-only guard ONCE, so the caller must record the
   // before/after run output. Any subsequent write is shrink-only again (ceiling never grows).
-  const ceiling = reset ? currentEntries.length : (baselineCount ?? currentEntries.length);
-  if (!reset && currentEntries.length > ceiling) {
-    return { ok: false, reason: `current violations (${currentEntries.length}) exceed the ratchet ceiling (${ceiling}) — the list can only get SHORTER; fix violations, do not add them` };
-  }
-  if (!reset && baseline.size > 0) {
-    const newOnes = currentEntries.filter((e) => !baseline.has(e));
-    if (newOnes.length > 0) {
-      return { ok: false, reason: `refusing to write: ${newOnes.length} NEW violation(s) not in the baseline — the list can only get SHORTER: ${newOnes.slice(0, 5).join(", ")}${newOnes.length > 5 ? "…" : ""}` };
-    }
-  }
-  const lines = [
-    "# contract-violations.md — shrink-only ratchet list for the ## Contract consumer checks",
-    "# (tasks/gap-dispatch-gate-has-no-checklist-and-no-trace, AC6). A violation here means the task's",
-    "# ## Contract block (or ## Dispatch review section) fails one of the five consumer judgments.",
-    "#",
-    "# RATCHET: the list can ONLY get SHORTER. task-contract-check.ts exits 1 if a NEW violation",
-    "# appears that is not already listed, or if the list would exceed the baseline-count ceiling.",
-    "# Remove an entry only after the underlying violation is fixed (then run --write-ratchet to",
-    "# persist the shrunken list). `--write-ratchet --reset-baseline` is the deliberate one-shot",
-    "# re-baseline after a criterion fix; it re-anchors the ceiling to the current violation set.",
-    "#",
-    "# Format: one `<task-file>: <violation-code>` per line (repo-root-relative, sorted).",
-    "# baseline-count: " + ceiling,
-    "",
-    ...currentEntries,
-    "",
-  ];
-  fs.writeFileSync(p, lines.join("\n"));
-  return { ok: true, reason: reset
-    ? `ratchet baseline RESET to ${currentEntries.length} entry/entries (ceiling re-anchored to ${ceiling})`
-    : `ratchet list written (${currentEntries.length} entry/entries; ceiling ${ceiling})` };
+  return writeRatchetBaseline(root, DATA_FILE_REL, currentEntries, {
+    reset,
+    headerLines: RATCHET_HEADER_LINES,
+    entriesLabel: "violations",
+    newEntryLabel: "violation(s)",
+    overCeilingAdvice: "fix violations, do not add them",
+  });
 }
 
 // ── Grow-only ledger (--no-block: task-file violations are RECORDED, never blocking) ────────────────
