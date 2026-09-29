@@ -363,3 +363,5 @@ Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表�
 
 ---
 _2026-09-29T04:12:20.535Z_: 第 4 轮 fan-in 退出成因（2026-09-29，跨任务红源，⛔ 非本任务缺陷）：step=suite 的红全部落在三份**兄弟夹具**上，本任务夹具 17/17 绿。读数：ac291 7 红 / ac292 7 红 / ac303 10 红，三份在 develop 上与本工作树逐字相同（git diff develop HEAD -- <file> 为空），而 goals/AC-291/292/303-*.md 的可评估性出口已在 develop 上 exit 3。成因：quay goal write 立即 propagate 到 develop，绑定夹具却只能经 fan-in 落地 —— 家族四支分支各只带自己那份夹具修复 ⇒ 无一支分支的合并树全绿 ⇒ 谁也落不了地。既有立案：gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，在 ready pool 内）。本任务不扩 Touches（AC7），修复由该家族任务一次带四份夹具落地完成。
+
+_2026-09-29T04:26:45.000Z_: 第 5 轮读数（成因与第 4 轮同源，⛔ 非本任务缺陷）：本任务夹具 17/17 绿、scoped 门 exit 0（缓存已写，develop-sha c297b38e3）；三份兄弟夹具在 develop 上仍断言 exit 1 而 develop 的三条判据已 exit 3。**本轮新读数**：gap-ac292 / gap-ac303 两条兄弟任务已是 status done，且各自分支已带夹具修复（git show task/gap-ac29{2,3}-...:packages/quay/test/ac29{2,3}-criterion-address-derivation.test.mjs | grep -c 'code, 3' = 8），但其夹具不在 develop 上 —— 两条终态任务把修复留在了不再会被 fan-in 的分支上。⇒ 家族修复的路径从「四支分支各自落地」收窄为**只剩** gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，self-touch 齐备）。本任务不扩 Touches（AC7）。
