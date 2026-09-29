@@ -407,3 +407,33 @@ _2026-09-29T05:30Z_: 第 9 轮（worker）。**本轮新增读数：解法 1 已
 本轮读侧复核（硬规则 2/4c，均在 worktree 内取自 git 而非转述）：suite 日志 `# fail 21` 的 **21 条全部**落在三份兄弟夹具（ac291 6 / ac292 7 / ac303 8），**无第四个红源**；本任务夹具 17/17 绿。吸收三份夹具后 `git restore --staged --worktree` 复原，工作树与本分支 `## Touches` 一致。
 
 本轮未扩 Touches、未改兄弟夹具（只在 worktree 内临时取用后复原）、未写 `status`、未 un-park、未新增 `plugin/scripts/*.ts`。
+
+---
+_2026-09-29T05:30:11.848Z_: 
+---
+_2026-09-29T05:35Z_: 第 10 轮（worker）。**本轮首次点名「家族任务被什么挡住」的机制 —— 并更正第 9 轮的结论。**
+
+第 9 轮写「解法 1 已实测可行，缺的只是一个被授权的执行者」。本轮直接量显示那句话**不完整**：执行者不是不存在，而是被**机械地饿死**，且饿死它的正是本任务自己。
+
+三条读数（均在主检出根，⛔ 非转述）：
+
+1. `slot-refill.ts --json` ⇒ `recommended: []`；deferred 里家族任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的 reason **逐字** = `touches-overlap-in-flight (peer gap-ac301-criterion-carrier-absence-not-evaluated)` —— **被点名的 peer 是本任务**（第 8 轮该位置是 ac291，说明这个 peer 是「当前仍新鲜的那一个」，不是固定的）。
+2. `slot-refill.ts --json --in-flight-count 0` ⇒ deferred **完全不变**，家族任务仍报同一个 peer。⇒ 拦住它的**不是运行期在飞集**（`--in-flight-count` 根本不参与），而是 `plugin/scripts/concurrent-batch-scheduler.ts:421` 的 `computeInFlightWorktreeTouches` —— 即 `git worktree list` 解析出的 **worktree 臂**（`slot-refill.ts:1019` 把 `worktreeInFlight` 并入 `inFlightParsed`）。**⇒ 退出/重派不可能解开它；改 `--in-flight-count` 也不可能。**
+3. 四支 worktree 的**活性/新鲜度直接量**（`ls -l /proc/*/cwd` + `git log -1 --format=%ct`，阈值 `INFLIGHT_WORKTREE_STALE_MS = 900s`）：
+
+| worktree | 活进程 | 末次提交距今 | 判定 |
+|---|---|---|---|
+| ac291 | 0 | 1035s | **已过期 ⇒ 已退出在飞集**（故本轮不再被点名） |
+| ac292 | 0 | 9797s | 已过期（且该任务已 needs-human） |
+| ac303 | 0 | 491s | **仍新鲜 ⇒ 仍在飞** |
+| **ac301（本任务）** | 0 | 420s | **仍新鲜 ⇒ 仍在飞 = 当轮被点名的 blocker** |
+
+⇒ **机制（本轮结论）**：这不是「结构性死锁」，而是一个**相位锁住的 churn** —— 家族任务只有在「四支兄弟 worktree 中与其 `## Touches` 重叠的那些**同时过期**」的窗口里才会进 `recommended`；而**每一支兄弟任务的任何一次提交都会把自己的 worktree 重新计时 15 分钟**。所以只要任一支兄弟 worker 还在被重派并提交，窗口就永远不开。
+
+⇒ **可执行的解**（⛔ 均在本任务 mandate 之外，留给 manager / driver，本任务不自行执行）：① 让四支兄弟 worktree 静默 ≥15 分钟（**不提交**即自然达成）；② 或在任务存储层把兄弟任务 park / 去掉它们的 worktree；③ 或给家族任务一条能穿过 `deps-ready` 的 `depends_on` 边。**①②③ 都要求「停止重派这些已 `landed-implementation` 的兄弟任务」**——本轮 `deferred` 里 ac301/ac303 的 reason 逐字都是 `landed-implementation`，即它们的实现早已落地、重派纯属 churn。
+
+**本轮的自我约束**：正因如此，本轮**只做**「合并 develop（no-op，`Already up to date`）+ scoped 门 + 写缓存」这最后一段，并把本条读数落进任务体 —— 这是本轮唯一的产物；⛔ 未扩 Touches、未改兄弟夹具、未写 `status`、未 un-park、未新增 `plugin/scripts/*.ts`、未改任何 `packages/quay/src/serve-*.ts`。
+
+**本轮 AC 逐条复验（全部直接量，非转述）**：AC1 判据 `exit 0/1/3 = 1/10/4`、`CAUSE=` 11、`FAIL=` 3；AC2 本任务夹具 `node --test` ⇒ **17/17 绿**（含两条整条 criterion 的正/负控制）；AC3 活实例 `pid=3652175`（`cwd=/data/home/yale/work/quay`，argv 无 `--port`，载体 web `127.0.0.1:20119` `up:true`）上 `goal gate AC-301 --dry-run --json` ⇒ `verdict:"pass"` / exit 0；AC5 同一条判据在 worktree 根（无实例）⇒ `verdict:"not-evaluated"` / `cause:"declared"`；AC6① 台账最新带指纹事件 `2026-09-29T05:22:09.771Z` / `081aaf4720c8bf53` ≠ `56de07b5a4505f73`；AC6② `scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0 / 17 绿**；AC7 `git diff --name-only develop...HEAD` ⇒ 只有 `packages/quay/test/ac301-criterion-address-derivation.test.mjs` 与本任务文件（goal 文件经 `quay goal write` 已在 develop 上，故不在 delta 内）。scoped-gate 缓存以 merge 时刻 develop sha `4d144a9cc498e00dba5202bcd1bc10b84918e7ee` 写盘。
+
+**suite 红源未变（复现，⛔ 非本任务缺陷）**：本轮 fan-in 日志 `# tests 9764 / # pass 9743 / # fail 21`，21 条全部落在三份兄弟夹具（ac291 6 / ac292 7 / ac303 8）；三份 `passed=false` 的 `__PERFILE__` 行逐字为 `packages/quay/test/ac29{1,2,3}-criterion-address-derivation.test.mjs`，本任务夹具不在红集内 ⇒ **无第四个红源**。
