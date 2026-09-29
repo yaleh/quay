@@ -33,22 +33,29 @@ criterion: >-
 
   #
 
-  # WHAT IT COST (a ledger reading, not an assertion): 18 events carrying
-  no-running-serve-instance,
+  # WHAT IT COST (a ledger reading, not an assertion -- re-take it by grepping
+  the token over the
 
-  # across 2 dates (2026-09-23 x16, 2026-09-29 x2) and 9 distinct ACs (AC-288 ..
-  AC-296). The goal
+  # events file): at filing (2026-09-29T01:53Z) 18 events carried the token,
+  across 2 dates
 
-  # driver's `runPrefilingRecheck` sends verdict "fail" to outcome
-  "confirmed-failing" (FILE a task)
+  # (2026-09-23 x16, 2026-09-29 x2) and 9 distinct ACs (AC-288 .. AC-296).
+  Re-read at 2026-09-29T02:10:58Z it was
 
-  # and every other verdict -- "not-evaluated" included -- to "not-evaluated"
-  (file nothing), so the
+  # 24 events across 2 dates (2026-09-23 x16, 2026-09-29 x8) and 10 distinct ACs
+  (AC-288 .. AC-301)
 
-  # status alone decided whether this gap was re-filed EVERY round. This
-  amendment's own task is
+  # -- it accrued for as long as the carrier stayed absent. The goal driver's
+  `runPrefilingRecheck`
 
-  # that difference.
+  # sends verdict "fail" to outcome "confirmed-failing" (FILE a task) and every
+  other verdict --
+
+  # "not-evaluated" included -- to "not-evaluated" (file nothing), so the status
+  alone decided
+
+  # whether this gap was re-filed EVERY round. This amendment's own task is that
+  difference.
 
   #
 
