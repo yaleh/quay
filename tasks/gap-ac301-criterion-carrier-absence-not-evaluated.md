@@ -113,13 +113,13 @@ GATE_EXIT=1
 
 ## AC
 
-- [ ] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条 `CAUSE=` 断言分支逐字相同；`CAUSE=` 行计数仍为 **11**。⛔ 未经 `quay goal write` 落库不算。
-- [ ] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac301-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `status === 3`、第 170 / 185 / 323 行的 `status === 0` 仍绿、断言侧「eleven CAUSE branches」测试仍绿；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `status === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
-- [ ] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-301` ⇒ **exit 0**，逐字贴出；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、argv 含 `quay.ts serve` 的活进程。
-- [ ] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/goal` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=nav-label-untranslated`（或 `no-nav-region`）可区分，逐字贴出。⛔ 该证据的活面由夹具自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
-- [ ] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-301 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
-- [ ] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-301` 最新一条为 `verdict:"pass"`，其 `payload.criterionHash` **≠** `56de07b5a4505f73`（两行都贴）；② `bash scripts/test.sh --for-task gap-ac301-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（`grep -rl` 四个 token 各 17 / 10 / 10 / 8），并说明本任务只改 AC-301 一条的退出码。
-- [ ] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下派发/执行时 `ps aux | grep -c '[q]uay-task-worker'` 的读数与「本实例无监督者、死亡后不会被自动拉回」的观察项及其发生率读数（AC-301 2 条 / 家族 17 个 goal 文件）。
+- [x] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条 `CAUSE=` 断言分支逐字相同；`CAUSE=` 行计数仍为 **11**。⛔ 未经 `quay goal write` 落库不算。
+- [x] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac301-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `status === 3`、第 170 / 185 / 323 行的 `status === 0` 仍绿、断言侧「eleven CAUSE branches」测试仍绿；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `status === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
+- [x] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-301` ⇒ **exit 0**，逐字贴出；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、argv 含 `quay.ts serve` 的活进程。
+- [x] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/goal` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=nav-label-untranslated`（或 `no-nav-region`）可区分，逐字贴出。⛔ 该证据的活面由夹具自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
+- [x] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-301 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
+- [x] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-301` 最新一条为 `verdict:"pass"`，其 `payload.criterionHash` **≠** `56de07b5a4505f73`（两行都贴）；② `bash scripts/test.sh --for-task gap-ac301-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（`grep -rl` 四个 token 各 17 / 10 / 10 / 8），并说明本任务只改 AC-301 一条的退出码。
+- [x] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下派发/执行时 `ps aux | grep -c '[q]uay-task-worker'` 的读数与「本实例无监督者、死亡后不会被自动拉回」的观察项及其发生率读数（AC-301 2 条 / 家族 17 个 goal 文件）。
 
 ## DoD
 
@@ -137,3 +137,221 @@ GATE_EXIT=1
 - `tasks/gap-ac301-criterion-carrier-absence-not-evaluated.md`
 
 （说明：第一条是本任务的落地面 —— 地址派生那步的**退出码**，经 `quay goal write AC-301 --criterion …` 落库，`expect` 与分支文本逐字不变；第二条是与该块逐字绑定的夹具（7 个可评估性负例断言随之同步，并新增一条整条 criterion 的断言侧负控制）；第三条是 self-touch。⛔ `plugin/scripts/driver-anchor.ts`、`plugin/scripts/start-drivers.ts`、任何 `plugin/scripts/*.ts`、任何 `packages/quay/src/serve-*.ts` **均不在本 Touches 内**（前者是观察项非目标，后者是夹具自造活面的约束）。）
+
+## Evidence
+
+（2026-09-29。判据**落库在主检出** `/data/home/yale/work/quay`（活实例、`.quay/server.json` 载体、
+`.quay/gate-events.jsonl` 台账都在那里）；实现提交在任务 worktree。⛔ 本任务未改任何
+`plugin/scripts/*.ts` 与任何 `packages/quay/src/serve-*.ts`。）
+
+### AC1 — 只有四处可评估性分支改了退出码（经 `quay goal write` 落库）
+
+落库命令（⛔ 非手工 Edit `goals/*.md`）：
+`node packages/quay/bin/quay.js goal write AC-301 --criterion "$(cat <新判据文本>)"`
+
+| 落点 | 提交 |
+|---|---|
+| 主检出（经 doc-branch propagate 已到 `develop`） | `86ed0af4d goals: AC-301 field:criterion by cli:870809` |
+| 任务分支 | `9e5a026a9 goals: AC-301 field:criterion by cli:891407` |
+
+**落库保真（折叠无损）**：把落库后的 criterion 经 `parseFrontmatter` 读回，与意图文本 `cmp` ⇒
+**byte-identical（11911 bytes）**；`sh -n <落库后 criterion>` ⇒ exit 0。
+
+**代码行（排除 `#` 注释行）退出码清单**：
+
+| | exit 0 | exit 1 | exit 3 |
+|---|---|---|---|
+| 修订前（`64a9d8ad0`） | 1 | 14 | 0 |
+| 修订后（落库后读回） | 1 | 10 | 4 |
+
+四处可评估性分支：**行体逐字相同，只有行尾 `exit 1` → `exit 3`**（判据：每一处
+`old.slice(0,-8) === new.slice(0,-8)` ⇒ `true`）：
+
+```
+FAIL=workspace-root-unresolvable : ' "$(pwd)" >&2; exit 1; fi          ->  …; exit 3; fi
+FAIL=no-derivable-serve-address  : "$nserve" "$root" >&2; exit 1; fi   ->  …; exit 3; fi
+FAIL=no-reachable-serve-address  : "$nderived" "$nserve" "$root" "$ROUTE" >&2; exit 1; fi  ->  …; exit 3; fi
+CAUSE=no-running-serve-instance  : (AC-179 probe pattern)" >&2; exit 1; fi  ->  …; exit 3; fi
+```
+
+**十一条非可评估性出口行逐字相同**：把两版里所有不含上述四个 token 的 `exit N` 行取出比较，
+`JSON.stringify` 集合相等 ⇒ `true`（10 条 `exit 1` + 1 条终末 `exit 0`）。
+**`CAUSE=` 计数 11 → 11；`FAIL=` 3 → 3。**
+**goal 记录字段级 diff**（`64a9d8ad0` vs 落库后的文件）：`criterion` 是**唯一**变化的字段
+（10350 → 12428 字符）；`expect` **逐字相同**、`origin` **逐字相同**。
+
+### AC2 — 夹具同步（7 处 1 → 3），且该项确实是可取的假
+
+`packages/quay/test/ac301-criterion-address-derivation.test.mjs`：
+
+**修订前**（`git show 64a9d8ad0:<该文件>`）：
+```
+208:  assert.equal(r.status, 1, "an unnormalisable wildcard must not yield a green");
+221:  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout: ${r.stdout}`);
+237:  assert.equal(r.status, 1);
+249:  assert.equal(r.status, 1);
+261:  assert.equal(r.status, 1);
+274:  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout: ${r.stdout}`);
+287:  assert.equal(r.status, 1);
+```
+**修订后**：同一顺序落在第 240 / 253 / 269 / 281 / 293 / 306 / 319 行，全部
+`assert.equal(r.status, 3, …)`。两处原本带 message 的，message 里的期望值随之写成 `exit 3`
+（断言不得与它自己的失败信息互相矛盾）；另 4 处原本无 message 的补上 `NOT_EVALUATED_WHY`
+（与同机制的兄弟夹具同一写法）。
+
+**正例与文本断言逐字不动**：修订前第 170 / 185 / 323 行的 `assert.equal(r.status, 0, …)`
+在修订后第 202 / 217 / 355 行**逐字相同**（只有行号平移）；断言侧那条「keeps its eleven
+pre-amendment CAUSE refusal branches」测试**逐字未动**（`CAUSE=` 计数 = 11 仍绿）。
+
+`node --test <该文件>` ⇒ **17 pass / 0 fail**。
+
+**「1 → 3 是真的」的负控制（⛔ 运行读数，不是文本 diff）**：把**修订前**的夹具原样放进
+`packages/quay/test/` 跑**修订后**的判据 ⇒ **恰好 7 条红**，红的正是这 7 条可评估性负例
+（IPv6-wildcard / no-carrier / pid-mismatch / no-web-service / web-down / unreachable /
+no-instance），2 条正例与全部文本断言仍绿（**7 pass / 7 fail**）。控制文件跑完即删，
+`git status` 无残留。
+
+### AC3 — 正控制：活实例上真 pass
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-301        # 主检出根，2026-09-29T02:48:30.756Z
+{"id":"AC-301","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)",
+ "timeoutMs":60000,"dryRun":false,"event":{…,"actor":"goal-cli","verdict":"pass",…}}
+GATE_EXIT=0
+```
+同一时刻的活实例（`pgrep -f 'quay.ts serve'` + `readlink /proc/<pid>/cwd`）：
+```
+pid=3652175  cwd=/data/home/yale/work/quay
+  argv = /data/home/yale/.nvm/versions/node/v24.21.0/bin/node --no-warnings --experimental-strip-types
+         /data/home/yale/work/quay/packages/quay/bin/quay.ts serve --host 127.0.0.1
+载体 .quay/server.json: {"schemaVersion":1,"pid":3652175,"startedAt":"2026-09-29T02:07:52.834Z",
+  "web":{"name":"web","pid":3652175,"host":"127.0.0.1","port":20119,"up":true}}
+```
+（argv **无 `--port`** ⇒ 地址只能由活宿主载体派生，正是 09-23 那次重锚要覆盖的面。）
+四条断言各自独立可核，见 AC5 里整条判据的逐字输出（en nav 含 `Goals` / zh 响应为
+`<html lang="zh"` / zh nav 里 `Goals` 已消失 / zh `<title>` ≠ en `<title>`）。
+
+### AC4 — 负控制：该报假时仍报假（行为证据，⛔ 不是文本 diff）
+
+活面由夹具自造（`git init` scratch 根 + 一个 argv 带显式 `--port N` 的 serve 形候选 + 一个真的
+监听 N 端口、按请求自己的 `Cookie: lang=zh` 分派两个 body 的 listener）。整条 criterion 逐字跑：
+
+```
+(B) LIVE surface + UNTRANSLATED zh (reachable, <html lang=zh>, nav still English)
+  criterion EXIT CODE = 1
+--- stdout ---
+AC-301 serve address derived from argv as 127.0.0.1:24185 (per-candidate readings:; pid=1723943 addr=127.0.0.1:24185 cause=derived-from-argv-fetch-answered; pid=1724002 addr=- cause=argv-no-serve-subcommand,carrier-absent)
+--- stderr ---
+CAUSE=nav-label-untranslated -- the nav region of /goal under Cookie: lang=zh still renders the literal English nav label "Goals"; the nav is not wired to the zh dictionary
+```
+⇒ 一条**可达、`<html lang="zh">`、title 确实切了、但 nav 没接线**的 zh 响应**仍 `exit 1`**，且以
+`CAUSE=nav-label-untranslated` 与另两态可区分。这一条同时进夹具（`AC-301 whole criterion still
+FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page`，green），与它配对的
+正例 `… PASSES (exit 0) on a live surface whose zh nav really is translated` 亦 green。
+
+### AC5 — 三态互不同形（同一条判据的三个取值，逐字）
+
+```
+(A) LIVE surface + WIRED zh          ⇒ criterion EXIT CODE = 0
+    stdout: OK -- /goal: default nav region carries "Goals" and <title>="quay — Goals"; under
+            Cookie: lang=zh the response is <html lang=zh>, that English nav label is gone from
+            the nav region, and this page's own <title> became "quay — 目标"
+
+(B) LIVE surface + UNTRANSLATED zh   ⇒ criterion EXIT CODE = 1   （CAUSE=nav-label-untranslated，见 AC4）
+
+(C) NO serve-shaped candidate at all ⇒ criterion EXIT CODE = 3
+    stderr: AC-301 candidate readings (cwd=/tmp/ac301-ev-UjJLAu, nserve=0, ncand=1, nderived=0):;
+            pid=1724281 addr=- cause=argv-no-serve-subcommand,carrier-absent
+            CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=/tmp/ac301-ev-UjJLAu;
+            /goal cannot be evaluated on a live surface (AC-179 probe pattern)
+```
+
+同样两态经 `verdictFromAcceptance` 映射后的 JSON：
+
+- **无活实例**（在任务 worktree 根上跑 —— 该根下确无 cwd 相符的活实例；⛔ 按 Plan 第 7 条**未**停掉
+  生产实例）：`goal gate AC-301 --dry-run --json --root <worktree>` ⇒
+  ```json
+  {"id":"AC-301","verdict":"not-evaluated","cause":"declared",
+   "reason":"not-evaluated (declared): acceptance failed (exit 3) — AC-301 candidate readings (cwd=/data/home/yale/work/quay-worktrees/gap-ac301-criterion-carrier-absence-not-evaluated, nserve=0, ncand=1, nderived=0):; pid=1731058 addr=- cause=argv-no-serve-subcommand,carrier-absent CAUSE=no-running-serve-instance -- no quay.ts serve process with cwd=…; /goal cannot be evaluated on a live surface (AC-179 probe pattern)",
+   "timeoutMs":60000,"dryRun":true,…}
+  ```
+  **⛔ `verdict` 不是 `fail`**，是 `not-evaluated` / `cause:"declared"`。
+- **活实例 + 真接线** ⇒ `{"id":"AC-301","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)"}`
+  （见 AC3）。
+
+⚠️ 诚实交代一个**未做**的读数：`quay goal gate` 这条 CLI 自身对 not-evaluated **也返回 1**
+（`goal-store.ts` 的 `return verdict === "pass" ? 0 : 1` —— `pass` 是唯一 0；三态的区分活在台账的
+`verdict` / `cause` 字段里，那正是 driver 读的东西，也正逐字出现在上面的 `reason` 中）。本任务改的是
+**判据自己的**退出码（`exit 3`），⛔ 未改 CLI 的退出映射（那不在本任务落点内，改它等于改生产行为）。
+
+### AC6 — 新指纹落账 + 不回归 + 家族枚举
+
+**① 台账两条（逐字）**：
+```
+# 修订前（pass，旧指纹）
+{"id":"1ce0920c-…","item_id":"AC-301","gate":"goal","actor":"goal-sweep","verdict":"pass","timestamp":"2026-09-29T00:55:59.623Z","payload":{"reason":"acceptance passed (exit 0)","criterionHash":"56de07b5a4505f73"}}
+# 修订后（pass，新指纹）
+{"id":"dcd69742-…","item_id":"AC-301","gate":"goal","actor":"goal-amend","verdict":"pass","timestamp":"2026-09-29T02:44:34.494Z","payload":{"reason":"acceptance passed (exit 0)","criterionHash":"081aaf4720c8bf53"}}
+```
+`criterionFingerprint()` 直接复算：修订前 `56de07b5a4505f73`（= 立案时那个），修订后
+`081aaf4720c8bf53`，**≠** ✅。落账命令：
+`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node packages/quay/bin/quay.js goal check --stale-pass --sweep --budget 1`
+（⛔ 不带 `env -u …` 时 sweep 会 refuse），随后 `check --stale-pass` 读回：AC-301 已在
+`verifiedFresh`，`staleUnverified` 为空。
+⚠️ 上述两条**带指纹**的事件都来自 `--sweep`（`goal gate` 事件按设计**不写** `criterionHash`，
+只写 reason —— 所以「新指纹落账」这条只能由 sweep 满足，Plan 第 8 条正是为此）。
+
+**② 不回归**：`bash scripts/test.sh --for-task gap-ac301-criterion-carrier-absence-not-evaluated
+--allow-thin` ⇒ **exit 0**；夹具 **17/17 绿**；16 项 scoped 静态检查全过。
+⚠️ 选择器报 `test-selection-thin: resolved tests for 1/3 Touches entries (0.33)` —— 另外两条
+Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表判据没被验到**：夹具的 `goalFile()` /
+`criterionText()` 正是**直接从那个 goal 文件**读判据文本再逐字执行（单源），所以该文件的内容确实
+被这 17 条测试行使。
+
+**③ 家族枚举**（`grep -rl '<token>' goals/`，逐文件已核）：
+
+| token | goal 文件数 |
+|---|---|
+| `no-running-serve-instance` | **17** |
+| `no-derivable-serve-address` | **10** |
+| `no-reachable-serve-address` | **10** |
+| `workspace-root-unresolvable` | **8** |
+
+本任务只改 **AC-301 一条**的退出码；其余同类文件一字未动（同机制的兄弟立案各自认领各自的 AC）。
+
+### AC7 — 非目标边界未被越过
+
+`git diff --name-only develop...HEAD`（任务分支）⇒ 只有
+`packages/quay/test/ac301-criterion-address-derivation.test.mjs` 一个文件。
+`goals/AC-301-*.md` 的改动经 `quay goal write` 落在主检出、并已 propagate 到 `develop`
+（`86ed0af4d`），故任务分支上与该文件无 delta；三条 Touches 全部有主。
+
+⛔ **未改**：`plugin/scripts/driver-anchor.ts`、`plugin/scripts/start-drivers.ts`、
+**任何 `plugin/scripts/*.ts`**（故无需 outline / capability-catalog / laydown 三处登记）、
+**任何 `packages/quay/src/serve-*.ts`**（AC4 的活面由夹具自造）。
+
+**观察项（⛔ 非门禁、非前置；拿不出落点与边界裁定 ⇒ 不拦路）**：`quay serve` **没有监督者** ——
+`plugin/scripts/driver-anchor.ts` 的 `DRIVER_KINDS` 不含 web，实例死掉不会被自动拉回，判据此后停在
+`not-evaluated` 直到有人拉起（这正是让判据反复摆动的上游成因）。
+
+发生率（2026-09-29 复取 `.quay/gate-events.jsonl`）：含 `no-running-serve-instance` 的
+**AC-301 事件 2 条**，均在 2026-09-29，**verdict 全为 `fail`**：
+
+```
+2026-09-29T02:05:58.462Z | goal-sweep | fail
+2026-09-29T02:06:52.172Z | goal-cli   | fail
+```
+（这正是本次要消灭的形态：载体缺席被记成「此刻为假」。）家族面 **17 个 goal 文件**共享该 token
+（枚举见 AC6③）。
+
+执行期间的 worker 读数 `ps aux | grep -c '[q]uay-task-worker'`：派发时刻 **2**，执行期间 **3–4**
+（并发 peer）。⇒ 本任务**复用**了现成的 pid 3652175 实例，⛔ 未重启、⛔ 未停任何 peer 依赖的服务。
+
+### 遗留后置条件
+
+- 一个 `cwd = /data/home/yale/work/quay` 的 `quay.ts serve` 在跑（pid 3652175），判据在**真实生产
+  面**上读 `pass`（AC3），不是只在夹具里。
+- 载体缺席时判据读 `not-evaluated`（exit 3），不再被 driver 的 `runPrefilingRecheck` 当
+  `confirmed-failing` 每轮立案 —— 这才是本次修改要买的东西（本轮这份任务本身就是旧形态的产物）。
+- ⚠️ 该实例同样没有监督者（见上），它再次死掉时判据会回到 `not-evaluated`；那是一个**诚实**的读数，
+  而不再是一次虚假立案。
