@@ -371,3 +371,27 @@ _2026-09-29T04:47:35.255Z_: 第 6 轮（2026-09-29T04:50Z, worker）：合并冲
 
 
 _2026-09-29T05:05Z_: 第 7 轮（worker；merge develop 6244047f8 无冲突）。AC 逐条复验全绿：判据四处可评估性出口 exit 3（CAUSE= 计数仍 11）；本任务夹具 17/17；活实例 pid=3652175（cwd=主检出）上 goal gate AC-301 ⇒ verdict:pass / exit 0；--root <worktree> ⇒ verdict:not-evaluated / cause:declared；台账最新带指纹事件 081aaf4720c8bf53 ≠ 56de07b5a4505f73；task_check ⇒ ok:true 7/7；scoped 门 exit 0 且 cache 以 develop-sha 6244047f8 写盘。跨任务红源未变并被直接量复现：四份夹具合跑 ⇒ 63 tests / 42 pass / 21 fail（ac291 6 / ac292 7 / ac303 8 / ac301 0），三份兄弟夹具与 develop 逐字相同。⚠️ 本轮新读数：同一份 suite 日志里两条红源并存，而上一轮 exited-not-landed 报出的 step=suite 断言是 s22 的 N=2000 计时断言（cached=1757 uncached=2329 ratio=0.75）——【概率性】红源被报出，而【确定性】的 21 条兄弟红同时在册；只治 s22 不会让本任务落地。本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
+
+_2026-09-29T05:10Z_: 第 8 轮（worker；`git merge develop` 到 e937b4e4e，无冲突、无 unmerged path）。AC 逐条复验：
+判据四处可评估性出口 `exit 3`（`exit 0/1/3` = 1/10/4，`CAUSE=` 11、`FAIL=` 3）；本任务夹具 17/17 绿；
+活实例 pid=3652175（cwd=主检出，载体 web 127.0.0.1:20119 up）上 `goal gate AC-301 --dry-run --json`
+⇒ `verdict:"pass"` / exit 0；`--root <worktree>` ⇒ `verdict:"not-evaluated"` / `cause:"declared"`；
+台账最新带指纹事件 `2026-09-29T04:08:47.880Z` / `081aaf4720c8bf53` ≠ `56de07b5a4505f73`；
+`task_check` ⇒ ok:true 7/7；scoped 门 exit 0 / 17 绿，cache 以 develop-sha
+`e937b4e4ec00792e9bababaab17fee9513030fcb` 写盘。
+
+跨任务红源未变并复现（⛔ 非本任务缺陷）：三份兄弟夹具合跑 ⇒ 46 tests / 25 pass / **21 fail**
+（ac291 6 / ac292 7 / ac303 8），三份与 develop 逐字相同（`git diff develop HEAD -- <file>` 空），
+而 develop 的三条判据已 `exit 3`。
+
+**本轮派发侧直接量（新）**：`slot-refill.ts --json` ⇒ `pool=4` / `dispatchable_disjoint=3` /
+`recommended: []`；deferred 中解法任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的
+reason 逐字 = `touches-overlap-in-flight (peer gap-ac291-criterion-carrier-absence-not-evaluated)`。
+**同一读数里 `arbitration.suite_red=false`、`suite_blocking.consecutive_red=0`、`window_active=false`、
+`failure_files=[]`、`landing_blocked=false`** —— 全量 suite 确定性 21 红，而仲裁层读到的红是 0
+⇒ 该红在「收窄 cap / 触发 brake / 标 landing_blocked」这三条链路上**均不可见**（与
+`casebook` 记的「suite-red brake 读的台账结构上装不下红」同形）。
+⇒ 本轮零可派工作，家族修复仍被在飞兄弟静态饿死；依 `gap-goal-write-outruns-bound-fixture-family-deadlock`
+自己的判定，两条候选解法的裁决归 manager，worker 不得自行扩 Touches（AC7）。
+
+本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
