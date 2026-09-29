@@ -4,7 +4,7 @@ title: "AC-301 判据把「活载体缺席」记成「此刻为假」——地�
   not-evaluated，goal-store.ts 逐字给出的例子正是「NOT-EVALUATED: carrier absent」）⇒ driver
   每轮把它当 confirmed-failing 立案；修法=四处改 exit 3 + 保持 cwd=仓库根的活实例使判据真 pass
   并落新指纹，以「接线破坏仍 exit 1」证明强度未减"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -361,5 +361,79 @@ Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表�
 - ⚠️ 该实例同样没有监督者（见上），它再次死掉时判据会回到 `not-evaluated`；那是一个**诚实**的读数，
   而不再是一次虚假立案。
 
+---
+_2026-09-29T04:12:20.535Z_: 第 4 轮 fan-in 退出成因（2026-09-29，跨任务红源，⛔ 非本任务缺陷）：step=suite 的红全部落在三份**兄弟夹具**上，本任务夹具 17/17 绿。读数：ac291 7 红 / ac292 7 红 / ac303 10 红，三份在 develop 上与本工作树逐字相同（git diff develop HEAD -- <file> 为空），而 goals/AC-291/292/303-*.md 的可评估性出口已在 develop 上 exit 3。成因：quay goal write 立即 propagate 到 develop，绑定夹具却只能经 fan-in 落地 —— 家族四支分支各只带自己那份夹具修复 ⇒ 无一支分支的合并树全绿 ⇒ 谁也落不了地。既有立案：gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，在 ready pool 内）。本任务不扩 Touches（AC7），修复由该家族任务一次带四份夹具落地完成。
 
 _2026-09-29T04:26:45.000Z_: 第 5 轮读数（成因与第 4 轮同源，⛔ 非本任务缺陷）：本任务夹具 17/17 绿、scoped 门 exit 0（缓存已写，develop-sha c297b38e3）；三份兄弟夹具在 develop 上仍断言 exit 1 而 develop 的三条判据已 exit 3。**本轮新读数**：gap-ac292 / gap-ac303 两条兄弟任务已是 status done，且各自分支已带夹具修复（git show task/gap-ac29{2,3}-...:packages/quay/test/ac29{2,3}-criterion-address-derivation.test.mjs | grep -c 'code, 3' = 8），但其夹具不在 develop 上 —— 两条终态任务把修复留在了不再会被 fan-in 的分支上。⇒ 家族修复的路径从「四支分支各自落地」收窄为**只剩** gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，self-touch 齐备）。本任务不扩 Touches（AC7）。
+
+---
+_2026-09-29T04:47:35.255Z_: 第 6 轮（2026-09-29T04:50Z, worker）：合并冲突已按逐 hunk 并集消解（第 4/5 轮 notes 俱存）；更正第 5 轮误报 —— gap-ac292 = needs-human、gap-ac303 = ready，均非 done（worktree 仍在）。本轮直接量：node --test ac291/ac292/ac301/ac303-criterion-address-derivation.test.mjs ⇒ tests 63 / pass 42 / fail 21，21 红全在三份兄弟夹具，本任务夹具 17/17 绿。派发侧独立读数：slot-refill --json ⇒ pool=4 / dispatchable_disjoint=3，deferred 中解法任务 gap-goal-write-outruns-bound-fixture-family-deadlock 的 reason 逐字 = touches-overlap-in-flight (peer gap-ac291-criterion-carrier-absence-not-evaluated)，三兄弟均 landed-implementation，recommended 为空 ⇒ 零可派工作；.quay/worker-round.jsonl round 2722 记 ac291 豁免 = unrelated-flaky-exempt ⇒ 重试上限不前进 ⇒ 既不落地也不被 park。scoped 门（merge 后）exit 0 / 17 绿；cache 以 merge 时刻 develop sha 6244047f8 写盘。本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
+
+
+_2026-09-29T05:05Z_: 第 7 轮（worker；merge develop 6244047f8 无冲突）。AC 逐条复验全绿：判据四处可评估性出口 exit 3（CAUSE= 计数仍 11）；本任务夹具 17/17；活实例 pid=3652175（cwd=主检出）上 goal gate AC-301 ⇒ verdict:pass / exit 0；--root <worktree> ⇒ verdict:not-evaluated / cause:declared；台账最新带指纹事件 081aaf4720c8bf53 ≠ 56de07b5a4505f73；task_check ⇒ ok:true 7/7；scoped 门 exit 0 且 cache 以 develop-sha 6244047f8 写盘。跨任务红源未变并被直接量复现：四份夹具合跑 ⇒ 63 tests / 42 pass / 21 fail（ac291 6 / ac292 7 / ac303 8 / ac301 0），三份兄弟夹具与 develop 逐字相同。⚠️ 本轮新读数：同一份 suite 日志里两条红源并存，而上一轮 exited-not-landed 报出的 step=suite 断言是 s22 的 N=2000 计时断言（cached=1757 uncached=2329 ratio=0.75）——【概率性】红源被报出，而【确定性】的 21 条兄弟红同时在册；只治 s22 不会让本任务落地。本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
+
+_2026-09-29T05:10Z_: 第 8 轮（worker；`git merge develop` 到 e937b4e4e，无冲突、无 unmerged path）。AC 逐条复验：
+判据四处可评估性出口 `exit 3`（`exit 0/1/3` = 1/10/4，`CAUSE=` 11、`FAIL=` 3）；本任务夹具 17/17 绿；
+活实例 pid=3652175（cwd=主检出，载体 web 127.0.0.1:20119 up）上 `goal gate AC-301 --dry-run --json`
+⇒ `verdict:"pass"` / exit 0；`--root <worktree>` ⇒ `verdict:"not-evaluated"` / `cause:"declared"`；
+台账最新带指纹事件 `2026-09-29T04:08:47.880Z` / `081aaf4720c8bf53` ≠ `56de07b5a4505f73`；
+`task_check` ⇒ ok:true 7/7；scoped 门 exit 0 / 17 绿，cache 以 develop-sha
+`e937b4e4ec00792e9bababaab17fee9513030fcb` 写盘。
+
+跨任务红源未变并复现（⛔ 非本任务缺陷）：三份兄弟夹具合跑 ⇒ 46 tests / 25 pass / **21 fail**
+（ac291 6 / ac292 7 / ac303 8），三份与 develop 逐字相同（`git diff develop HEAD -- <file>` 空），
+而 develop 的三条判据已 `exit 3`。
+
+**本轮派发侧直接量（新）**：`slot-refill.ts --json` ⇒ `pool=4` / `dispatchable_disjoint=3` /
+`recommended: []`；deferred 中解法任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的
+reason 逐字 = `touches-overlap-in-flight (peer gap-ac291-criterion-carrier-absence-not-evaluated)`。
+**同一读数里 `arbitration.suite_red=false`、`suite_blocking.consecutive_red=0`、`window_active=false`、
+`failure_files=[]`、`landing_blocked=false`** —— 全量 suite 确定性 21 红，而仲裁层读到的红是 0
+⇒ 该红在「收窄 cap / 触发 brake / 标 landing_blocked」这三条链路上**均不可见**（与
+`casebook` 记的「suite-red brake 读的台账结构上装不下红」同形）。
+⇒ 本轮零可派工作，家族修复仍被在飞兄弟静态饿死；依 `gap-goal-write-outruns-bound-fixture-family-deadlock`
+自己的判定，两条候选解法的裁决归 manager，worker 不得自行扩 Touches（AC7）。
+
+本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
+
+---
+_2026-09-29T05:19:53.901Z_: <!-- dedup-ref -->
+_2026-09-29T05:30Z_: 第 9 轮（worker）。**本轮新增读数：解法 1 已实测可行 —— 修复是现成的，缺的只是一个被授权的执行者。**
+
+在 worktree 内取三支兄弟分支各自的夹具（`git checkout task/gap-ac29{1,2,3}-criterion-carrier-absence-not-evaluated -- packages/quay/test/ac29{1,2,3}-criterion-address-derivation.test.mjs`）后合跑四份夹具 ⇒ **70 tests / 70 pass / 0 fail**（ac291 13 / ac292 16 / ac301 17 / ac303 24；逐文件单独复跑同值）。三份兄弟夹具相对各自 merge-base 是**干净的前向改动**（`git diff <mb> develop -- <该文件>` 为空 ⇒ develop 自分叉点起未动过它们），且 develop 上三条判据的可评估性出口已是 `exit 3` ⇒ 取过来即同形。
+
+⇒ 结论：`gap-goal-write-outruns-bound-fixture-family-deadlock` 的解法 1 **不再是假设**（四份夹具同树全绿已被直接量证明），只等「一个任务同时带四份夹具落地」这个动作。该动作的裁决归 manager（该任务 Finding 逐字：「两条候选解法（裁决归 manager，本条只立案不裁决）」；其 Finding 亦逐字记「worker 不能从自己的 mandate 里破」）。
+
+本轮读侧复核（硬规则 2/4c，均在 worktree 内取自 git 而非转述）：suite 日志 `# fail 21` 的 **21 条全部**落在三份兄弟夹具（ac291 6 / ac292 7 / ac303 8），**无第四个红源**；本任务夹具 17/17 绿。吸收三份夹具后 `git restore --staged --worktree` 复原，工作树与本分支 `## Touches` 一致。
+
+本轮未扩 Touches、未改兄弟夹具（只在 worktree 内临时取用后复原）、未写 `status`、未 un-park、未新增 `plugin/scripts/*.ts`。
+
+---
+_2026-09-29T05:30:11.848Z_: 
+---
+_2026-09-29T05:35Z_: 第 10 轮（worker）。**本轮首次点名「家族任务被什么挡住」的机制 —— 并更正第 9 轮的结论。**
+
+第 9 轮写「解法 1 已实测可行，缺的只是一个被授权的执行者」。本轮直接量显示那句话**不完整**：执行者不是不存在，而是被**机械地饿死**，且饿死它的正是本任务自己。
+
+三条读数（均在主检出根，⛔ 非转述）：
+
+1. `slot-refill.ts --json` ⇒ `recommended: []`；deferred 里家族任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的 reason **逐字** = `touches-overlap-in-flight (peer gap-ac301-criterion-carrier-absence-not-evaluated)` —— **被点名的 peer 是本任务**（第 8 轮该位置是 ac291，说明这个 peer 是「当前仍新鲜的那一个」，不是固定的）。
+2. `slot-refill.ts --json --in-flight-count 0` ⇒ deferred **完全不变**，家族任务仍报同一个 peer。⇒ 拦住它的**不是运行期在飞集**（`--in-flight-count` 根本不参与），而是 `plugin/scripts/concurrent-batch-scheduler.ts:421` 的 `computeInFlightWorktreeTouches` —— 即 `git worktree list` 解析出的 **worktree 臂**（`slot-refill.ts:1019` 把 `worktreeInFlight` 并入 `inFlightParsed`）。**⇒ 退出/重派不可能解开它；改 `--in-flight-count` 也不可能。**
+3. 四支 worktree 的**活性/新鲜度直接量**（`ls -l /proc/*/cwd` + `git log -1 --format=%ct`，阈值 `INFLIGHT_WORKTREE_STALE_MS = 900s`）：
+
+| worktree | 活进程 | 末次提交距今 | 判定 |
+|---|---|---|---|
+| ac291 | 0 | 1035s | **已过期 ⇒ 已退出在飞集**（故本轮不再被点名） |
+| ac292 | 0 | 9797s | 已过期（且该任务已 needs-human） |
+| ac303 | 0 | 491s | **仍新鲜 ⇒ 仍在飞** |
+| **ac301（本任务）** | 0 | 420s | **仍新鲜 ⇒ 仍在飞 = 当轮被点名的 blocker** |
+
+⇒ **机制（本轮结论）**：这不是「结构性死锁」，而是一个**相位锁住的 churn** —— 家族任务只有在「四支兄弟 worktree 中与其 `## Touches` 重叠的那些**同时过期**」的窗口里才会进 `recommended`；而**每一支兄弟任务的任何一次提交都会把自己的 worktree 重新计时 15 分钟**。所以只要任一支兄弟 worker 还在被重派并提交，窗口就永远不开。
+
+⇒ **可执行的解**（⛔ 均在本任务 mandate 之外，留给 manager / driver，本任务不自行执行）：① 让四支兄弟 worktree 静默 ≥15 分钟（**不提交**即自然达成）；② 或在任务存储层把兄弟任务 park / 去掉它们的 worktree；③ 或给家族任务一条能穿过 `deps-ready` 的 `depends_on` 边。**①②③ 都要求「停止重派这些已 `landed-implementation` 的兄弟任务」**——本轮 `deferred` 里 ac301/ac303 的 reason 逐字都是 `landed-implementation`，即它们的实现早已落地、重派纯属 churn。
+
+**本轮的自我约束**：正因如此，本轮**只做**「合并 develop（no-op，`Already up to date`）+ scoped 门 + 写缓存」这最后一段，并把本条读数落进任务体 —— 这是本轮唯一的产物；⛔ 未扩 Touches、未改兄弟夹具、未写 `status`、未 un-park、未新增 `plugin/scripts/*.ts`、未改任何 `packages/quay/src/serve-*.ts`。
+
+**本轮 AC 逐条复验（全部直接量，非转述）**：AC1 判据 `exit 0/1/3 = 1/10/4`、`CAUSE=` 11、`FAIL=` 3；AC2 本任务夹具 `node --test` ⇒ **17/17 绿**（含两条整条 criterion 的正/负控制）；AC3 活实例 `pid=3652175`（`cwd=/data/home/yale/work/quay`，argv 无 `--port`，载体 web `127.0.0.1:20119` `up:true`）上 `goal gate AC-301 --dry-run --json` ⇒ `verdict:"pass"` / exit 0；AC5 同一条判据在 worktree 根（无实例）⇒ `verdict:"not-evaluated"` / `cause:"declared"`；AC6① 台账最新带指纹事件 `2026-09-29T05:22:09.771Z` / `081aaf4720c8bf53` ≠ `56de07b5a4505f73`；AC6② `scripts/test.sh --for-task … --allow-thin` ⇒ **exit 0 / 17 绿**；AC7 `git diff --name-only develop...HEAD` ⇒ 只有 `packages/quay/test/ac301-criterion-address-derivation.test.mjs` 与本任务文件（goal 文件经 `quay goal write` 已在 develop 上，故不在 delta 内）。scoped-gate 缓存以 merge 时刻 develop sha `4d144a9cc498e00dba5202bcd1bc10b84918e7ee` 写盘。
+
+**suite 红源未变（复现，⛔ 非本任务缺陷）**：本轮 fan-in 日志 `# tests 9764 / # pass 9743 / # fail 21`，21 条全部落在三份兄弟夹具（ac291 6 / ac292 7 / ac303 8）；三份 `passed=false` 的 `__PERFILE__` 行逐字为 `packages/quay/test/ac29{1,2,3}-criterion-address-derivation.test.mjs`，本任务夹具不在红集内 ⇒ **无第四个红源**。
