@@ -20,6 +20,21 @@
 //     are three DISTINCT refusal tokens (hard rule 3b — "could not evaluate" must not wear the
 //     shape of another verdict);
 //   · the amendment left the eleven pre-amendment CAUSE branches and the page assertions intact.
+//
+// ── THE 2026-09-29 AMENDMENT: CARRIER ABSENCE IS `not-evaluated` (exit 3), NOT `false` (exit 1) ──
+// (gap-ac301-criterion-carrier-absence-not-evaluated). Until this revision the four branches that
+// report "I could not find / reach a live surface" exited 1, so a run in which no cwd=repo-root
+// `quay.ts serve` existed was RECORDED as the criterion being false — a state the repo already has a
+// value for (`goal-store.ts` names it verbatim: "exit 3 — this repo's convention, e.g.
+// NOT-EVALUATED: carrier absent"; `gate/acceptance-runner.ts`'s `verdictFromAcceptance` maps 3 to
+// `not-evaluated`/`declared`, and `NOT_RUNNABLE_EXIT_CODES` holds only 126/127). The seven negative
+// cases in §② below therefore assert `status === 3`; the two positive cases (explicit `--port`,
+// carrier fallback) still assert `status === 0` and are byte-for-byte unchanged. §② runs only the
+// derivation BLOCK, so it pins the block's own exit status; the NEW §④ cases run the WHOLE criterion
+// (`runCriterion()`) against a self-made live surface, which is what keeps the assertion branches'
+// teeth a BEHAVIOUR reading rather than a claim about a diff: a zh response that is genuinely
+// translated ⇒ exit 0, one that merely claims `<html lang="zh">` while its nav is untouched ⇒ exit 1
+// + `CAUSE=nav-label-untranslated`.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -34,6 +49,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../..");
 const GOALS_DIR = path.join(REPO_ROOT, "goals");
 const FIXTURE_REL = "packages/quay/test/ac301-criterion-address-derivation.test.mjs";
+
+/** Why the seven carrier-absence negatives assert 3 and not 1 — the whole point of the 2026-09-29
+ *  amendment, kept on every one of them so a future reader does not "fix" one back to a bare failure. */
+const NOT_EVALUATED_WHY =
+  "carrier absence is NOT-EVALUATED (exit 3), never 'this is false' (exit 1) — hard rule 3b";
 
 // gap-tests-never-clean-up-their-tmpdirs: every temp dir and every fake-serve child is released in a
 // file-level after() hook, which runs even when a test fails.
@@ -149,11 +169,23 @@ const webService = ({ pid, host = "0.0.0.0", port, up = true }) => ({ name: "web
 // root. `sh -c` is deliberate — its own cmdline CONTAINS the block text (hence the literal
 // `quay.ts serve`), so it is itself a discovery candidate with no `serve` subcommand in its argv.
 // That is the masquerade the block's nserve/ncand split exists to reject.
-function runBlock(root) {
+function runShText(text, root) {
   const env = { ...process.env };
   delete env.QUAY_GOAL_ACCEPTANCE_ACTIVE; // the goal-store re-entrancy guard must not leak in
-  const r = spawnSync("/bin/sh", ["-c", addrBlock()], { cwd: root, encoding: "utf8", timeout: 60_000, env });
+  const r = spawnSync("/bin/sh", ["-c", text], { cwd: root, encoding: "utf8", timeout: 60_000, env });
   return { status: r.status, stdout: r.stdout || "", stderr: r.stderr || "" };
+}
+
+/** The derivation BLOCK only — §①/§② below, which pin the address contract without a page to assert over. */
+function runBlock(root) {
+  return runShText(addrBlock(), root);
+}
+
+/** The WHOLE shipped criterion — the exact text `quay goal gate AC-301` executes. §④'s cases use this
+ *  so "the assertion branches still have teeth" is a BEHAVIOUR reading of the shipped text rather than
+ *  a claim about the diff. */
+function runCriterion(root) {
+  return runShText(criterionText(), root);
 }
 
 // ── positive direction ──────────────────────────────────────────────────────────────────────────
@@ -205,7 +237,7 @@ test("AC-301 block: an IPv6-wildcard (`::`) carrier host fails CLOSED with a nam
   writeCarrier(root, { pid: child.pid, services: [webService({ pid: child.pid, host: "::", port })] });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1, "an unnormalisable wildcard must not yield a green");
+  assert.equal(r.status, 3, "an unnormalisable wildcard must not yield a green");
   assert.match(r.stderr, /FAIL=no-reachable-serve-address/);
   assert.match(r.stderr, /fetch-failed\(curl-exit-\d+\)/, "the curl EXIT must be translated into a named cause");
   assert.match(r.stderr, new RegExp(`pid=${child.pid}`), "the candidate must still be attributable");
@@ -218,7 +250,7 @@ test("AC-301 block: --port 0 with NO carrier refuses with FAIL=no-derivable-serv
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout: ${r.stdout}`);
+  assert.equal(r.status, 3, `expected exit 3, got ${r.status}\nstdout: ${r.stdout}`);
   assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
   assert.match(r.stderr, new RegExp(`pid=${child.pid}`), "the candidate must be named");
   assert.match(r.stderr, /addr=-/, "a candidate with no usable address must say so rather than print an empty addr");
@@ -234,7 +266,7 @@ test("AC-301 block: a carrier whose pid is not the candidate's is refused (carri
   writeCarrier(root, { pid: child.pid + 999_999, services: [webService({ pid: child.pid + 999_999, host: "127.0.0.1", port })] });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 3, NOT_EVALUATED_WHY);
   assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
   assert.match(r.stderr, /carrier-pid-mismatch/);
   assert.match(r.stderr, new RegExp(`pid=${child.pid}`));
@@ -246,7 +278,7 @@ test("AC-301 block: a carrier with no `web` service is refused (carrier-no-web-s
   writeCarrier(root, { pid: child.pid, services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 9081, up: true }] });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 3, NOT_EVALUATED_WHY);
   assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
   assert.match(r.stderr, /carrier-no-web-service/, "the control-plane entry must not be mistaken for the web service");
 });
@@ -258,7 +290,7 @@ test("AC-301 block: a carrier whose web service is down is refused (carrier-web-
   writeCarrier(root, { pid: child.pid, services: [webService({ pid: child.pid, host: "127.0.0.1", port, up: false })] });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 3, NOT_EVALUATED_WHY);
   assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
   assert.match(r.stderr, /carrier-web-down/);
 });
@@ -271,7 +303,7 @@ test("AC-301 block: a derivable but unreachable address is REFUSED with FAIL=no-
   writeCarrier(root, { pid: child.pid, services: [webService({ pid: child.pid, host: "127.0.0.1", port: deadPort })] });
 
   const r = runBlock(root);
-  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstdout: ${r.stdout}`);
+  assert.equal(r.status, 3, `expected exit 3, got ${r.status}\nstdout: ${r.stdout}`);
   assert.match(r.stderr, /FAIL=no-reachable-serve-address/);
   assert.match(r.stderr, /connection-refused/, "the curl EXIT must be translated into a named cause");
   assert.match(r.stderr, new RegExp(`pid=${child.pid}`), "the candidate must be named");
@@ -284,7 +316,7 @@ test("AC-301 block: no serve-shaped candidate yields CAUSE=no-running-serve-inst
   const root = mkRoot(); // no fake serve at all; only the `sh -c <block>` runner itself lives here
 
   const r = runBlock(root);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 3, NOT_EVALUATED_WHY);
   assert.match(r.stderr, /CAUSE=no-running-serve-instance/);
   assert.ok(!/FAIL=no-derivable-serve-address/.test(r.stderr), "this is a DIFFERENT refusal from 'could not derive'");
   assert.ok(!/FAIL=no-reachable-serve-address/.test(r.stderr), "this is a DIFFERENT refusal from 'could not reach'");
@@ -354,4 +386,128 @@ test("AC-301 criterion pins no host/port literal (it must re-derive on every run
   assert.equal((c.match(/19071|172\.28/g) || []).length, 0, "a literal host/port would go stale on the next restart");
   // Negative control for the predicate itself: it must be able to fire (hard rule 2).
   assert.ok(/19071/.test("127.0.0.1:19071"), "the predicate must match a known-positive sample");
+});
+
+// ── ④ the WHOLE criterion on a self-made live surface: it must still be able to say NO ────────────
+//
+// §② above pins the derivation BLOCK's exit status (it appends `exit 0`). These cases run the ENTIRE
+// criterion — the exact text `quay goal gate AC-301` executes — so "the assertion branches still have
+// teeth" is a BEHAVIOUR reading of the shipped text, not a claim about the diff. The live surface is
+// built HERE (a `git init`-ed scratch root, a real serve-shaped candidate carrying an explicit
+// `--port N` on its OWN argv, and a real listener on that port answering /goal in two bodies chosen by
+// the request's own `Cookie: lang=zh` header): ⛔ nothing under `packages/quay/src/serve-*.ts` is
+// touched, and ⛔ the product's own serving path is not reused.
+
+/** The same discovery surface as FAKE_SERVE_SRC, but the response body is chosen by the cookie — the two
+ *  probes the criterion itself makes. Unlike FAKE_SERVE_SRC this one MUST listen on its argv port,
+ *  because here the criterion reaches it through a real HTTP fetch rather than a refusal path. */
+const FAKE_I18N_SERVE_SRC = [
+  'const http = require("node:http");',
+  'const en = process.env.FAKE_BODY_EN || "";',
+  'const zh = process.env.FAKE_BODY_ZH || "";',
+  "const port = Number(process.env.FAKE_LISTEN_PORT || 0);",
+  "http",
+  "  .createServer((req, res) => {",
+  '    const wantsZh = /(?:^|;\\s*)lang=zh(?:;|$)/.test(req.headers.cookie || "");',
+  '    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });',
+  "    res.end(wantsZh ? zh : en);",
+  "  })",
+  '  .listen(port, "127.0.0.1");',
+  "setInterval(() => {}, 1 << 30);",
+].join("\n");
+
+function spawnI18nServe(root, { argvPort, bodyEn, bodyZh }) {
+  const child = spawn(
+    process.execPath,
+    ["-e", FAKE_I18N_SERVE_SRC, "quay.ts", "serve", "--host", "127.0.0.1", "--port", String(argvPort)],
+    {
+      cwd: root,
+      env: { ...process.env, FAKE_LISTEN_PORT: String(argvPort), FAKE_BODY_EN: bodyEn, FAKE_BODY_ZH: bodyZh },
+      stdio: "ignore",
+    },
+  );
+  _children.push(child);
+  return child;
+}
+
+const GOAL_EN =
+  '<html lang="en"><nav><a href="/goal" class="current">Goals</a></nav><title>quay — Goals</title></html>';
+/** Wired: the zh nav no longer carries the English label AND this page's own <title> switched. */
+const GOAL_ZH_WIRED =
+  '<html lang="zh"><nav><a href="/goal" class="current">目标</a></nav><title>quay — 目标</title></html>';
+/** Not wired: the zh response IS <html lang="zh"> and its title DID switch, but the nav bar is untouched. */
+const GOAL_ZH_UNTRANSLATED =
+  '<html lang="zh"><nav><a href="/goal" class="current">Goals</a></nav><title>quay — 目标</title></html>';
+
+test("AC-301 whole criterion PASSES (exit 0) on a live surface whose zh nav really is translated", async () => {
+  const root = mkRoot();
+  const port = await freePort();
+  spawnI18nServe(root, { argvPort: port, bodyEn: GOAL_EN, bodyZh: GOAL_ZH_WIRED });
+  assert.ok(await waitForPort(port), "the i18n fake serve must be listening before the criterion runs");
+
+  const r = runCriterion(root);
+  assert.equal(r.status, 0, `a wired surface must PASS: ${r.stderr}`);
+  assert.match(r.stdout, /OK -- \/goal:/);
+  // It reached the assertions — i.e. it did NOT read the address derivation's refusal path.
+  assert.doesNotMatch(r.stderr, /FAIL=|CAUSE=/);
+});
+
+test("AC-301 whole criterion still FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page", async () => {
+  const root = mkRoot();
+  const port = await freePort();
+  spawnI18nServe(root, { argvPort: port, bodyEn: GOAL_EN, bodyZh: GOAL_ZH_UNTRANSLATED });
+  assert.ok(await waitForPort(port), "the i18n fake serve must be listening before the criterion runs");
+
+  const r = runCriterion(root);
+  assert.equal(r.status, 1, `an unwired zh nav IS false — it must not report not-evaluated: ${r.stdout}`);
+  assert.match(r.stderr, /CAUSE=nav-label-untranslated/);
+  // The two states must not wear the same shape: this is FALSE (1), never NOT-EVALUATED (3).
+  assert.notEqual(r.status, 3);
+});
+
+// ── ⑤ the amendment's own boundary, read off the shipped text ─────────────────────────────────────
+test("AC-301 exactly four branches report not-evaluated and the ten assertion branches still fail", () => {
+  // Comment lines are excluded: the amendment's WHY comment is PROSE that quotes both exit codes, and a
+  // count that cannot tell prose from code would be a count of the comment (hard rule 2).
+  const code = criterionText()
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l));
+  const notEvaluated = code.filter((l) => /\bexit 3\b/.test(l));
+  assert.equal(
+    notEvaluated.length,
+    4,
+    `exactly four carrier-absence branches report not-evaluated, got ${notEvaluated.length}:\n${notEvaluated.join("\n")}`,
+  );
+  for (const token of [
+    "FAIL=workspace-root-unresolvable",
+    "FAIL=no-derivable-serve-address",
+    "FAIL=no-reachable-serve-address",
+    "CAUSE=no-running-serve-instance",
+  ]) {
+    assert.ok(
+      notEvaluated.some((l) => l.includes(token)),
+      `${token} must report not-evaluated (exit 3), not "this is false"`,
+    );
+  }
+  // The other half of the amendment: nothing else moved. Every assertion branch keeps failing.
+  const failing = code.filter((l) => /\bexit 1\b/.test(l));
+  assert.equal(
+    failing.length,
+    10,
+    `the ten assertion branches must still exit 1, got ${failing.length}:\n${failing.join("\n")}`,
+  );
+  for (const token of [
+    "CAUSE=en-fetch-failed",
+    "CAUSE=zh-fetch-failed",
+    "CAUSE=no-nav-region ",
+    "CAUSE=no-nav-region-zh",
+    "CAUSE=english-baseline-missing",
+    "CAUSE=no-title-tag ",
+    "CAUSE=html-lang-not-zh",
+    "CAUSE=nav-label-untranslated",
+    "CAUSE=no-title-tag-zh",
+    "CAUSE=title-unchanged",
+  ]) {
+    assert.ok(failing.some((l) => l.includes(token)), `${token} must still be able to say NO (exit 1)`);
+  }
 });

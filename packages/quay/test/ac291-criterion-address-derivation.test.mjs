@@ -37,6 +37,20 @@
 // with a pid + address + cause, but it is NOT counted as a serve (its argv carries no standalone
 // `serve` element), so "no instance here" stays distinguishable from "an instance I could not reach".
 //
+// THE THREE EVALUABILITY REFUSALS NOW EXIT 3, NOT 1 (2026-09-29,
+// gap-ac291-criterion-carrier-absence-not-evaluated). The cases below that assert code `3` are the six
+// in which the criterion could not evaluate its subject at all — no instance, no derivable address, a
+// carrier that is unreadable / has no `web` entry / belongs to another pid / is marked down, or a
+// derived address nobody answers. None of those is the page being WRONG; they are "I cannot evaluate
+// this HERE", and exit 1 made them indistinguishable from it (the goal driver reads exit 1 as
+// confirmed-failing and files a task every round — ledger item_id=AC-291 carried 4 such events across
+// 2026-09-23 and 2026-09-29). `3` is this repo's own convention for NOT-EVALUATED
+// (packages/quay/src/goal-store.ts:305-318) and the one mapping already honors it
+// (packages/quay/src/gate/acceptance-runner.ts `verdictFromAcceptance`: code 3 ⇒ not-evaluated,
+// cause `declared`; NOT_RUNNABLE_EXIT_CODES holds only 126/127). The ASSERTION-side case at the end of
+// this file — a reachable zh page whose nav was never wired — still asserts code `1` VERBATIM: the
+// criterion must still be able to be false, and this file is where that is proven.
+//
 // Run (scoped): node --test packages/quay/test/ac291-criterion-address-derivation.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -279,7 +293,7 @@ GATE("AC-291 criterion: no serve instance ⇒ `CAUSE=no-running-serve-instance`,
     // underivable-address one. That distinction is what makes this a control rather than a variant
     // of the next case.
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1, `expected a non-zero verdict, got ${r.code}`);
+    assert.equal(r.code, 3, `expected NOT-EVALUATED, got ${r.code}`);
     assert.match(r.stderr, /CAUSE=no-running-serve-instance/, r.stderr);
     assert.match(r.stderr, /nserve=0/, r.stderr);
     assert.match(r.stderr, /ncand=[1-9]/, `the runner itself is a candidate: ${r.stderr}`);
@@ -295,7 +309,7 @@ GATE("AC-291 criterion: a candidate with no derivable address ⇒ `CAUSE=no-deri
   await withContext(async (ctx) => {
     await fakeServe(ctx, ["--host", "127.0.0.1", "--port", "0"]);
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1, `expected a non-zero verdict, got ${r.code}`);
+    assert.equal(r.code, 3, `expected NOT-EVALUATED, got ${r.code}`);
     assert.match(r.stderr, /cause=carrier-unreadable/, r.stderr);
     assert.match(r.stderr, /CAUSE=no-derivable-serve-address/, r.stderr);
     assert.match(r.stderr, /nserve=1/, `the fixture IS a serve, so this is the underivable case: ${r.stderr}`);
@@ -312,7 +326,7 @@ GATE("AC-291 criterion: carrier without a `web` service ⇒ carrier-no-web-entry
     const pid = await fakeServe(ctx, ["--host", "127.0.0.1", "--port", "0"]);
     writeCarrier(ctx, { pid, host: "127.0.0.1", port: 1, dropWeb: true });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(r.stderr, /cause=carrier-no-web-entry/, r.stderr);
   });
 });
@@ -322,7 +336,7 @@ GATE("AC-291 criterion: carrier naming a DIFFERENT pid is refused (a stale carri
     const pid = await fakeServe(ctx, ["--host", "127.0.0.1", "--port", "0"]);
     writeCarrier(ctx, { pid: pid + 100000, host: "127.0.0.1", port: 1 });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(r.stderr, /cause=carrier-pid-mismatch/, r.stderr);
   });
 });
@@ -332,7 +346,7 @@ GATE("AC-291 criterion: a `web` entry marked down ⇒ carrier-web-marked-down", 
     const pid = await fakeServe(ctx, ["--host", "127.0.0.1", "--port", "0"]);
     writeCarrier(ctx, { pid, host: "127.0.0.1", port: 1, up: false });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(r.stderr, /cause=carrier-web-marked-down/, r.stderr);
   });
 });
@@ -343,7 +357,7 @@ GATE("AC-291 criterion: a carrier port nobody listens on ⇒ connection-refused 
     const pid = await fakeServe(ctx, ["--host", "127.0.0.1", "--port", "0"]);
     writeCarrier(ctx, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(r.stderr, /CAUSE=no-reachable-serve-address/, r.stderr);
     assert.match(r.stderr, new RegExp(`addr=127\\.0\\.0\\.1:${port} argv=\\S+ cause=fetch-failed\\(connection-refused\\)`), r.stderr);
   });

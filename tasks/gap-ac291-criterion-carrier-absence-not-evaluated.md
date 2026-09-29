@@ -4,7 +4,7 @@ title: "AC-291 判据把「活载体缺席」记成「此刻为假」——地�
   not-evaluated，goal-store.ts 逐字给出的例子正是「NOT-EVALUATED: carrier absent」）⇒ driver
   每轮把它当 confirmed-failing 立案；修法=三处改 exit 3 + 保持 cwd=仓库根的活实例使判据真 pass
   并落新指纹，以「接线破坏仍 exit 1」证明强度未减"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -365,6 +365,20 @@ $ git -C <worktree> diff --name-only develop...HEAD | grep -E '^plugin/scripts/.
 与 `judgeRetryExemption` 的 `unrelated-flaky-exempt`（同断言签名跨 ≥2 任务 ⇒ **不推进重试上限**）合起来构成**无出口的 churn**：本任务第 4 / 5 / 6 轮全部 `exited-not-landed` 于 step=suite，且本轮读数给出**本轮无法落地**的判据 —— 本任务 delta 只有 `packages/quay/test/ac291-criterion-address-derivation.test.mjs` 一条（`git diff --stat develop...HEAD` 逐字），其余红源（ac292 / ac301 / ac303 三份绑定夹具）在 `## Touches` 之外，而 `anti-drift-touches-check.ts` 对未声明写入 HARD-FAIL ⇒ **在 develop 变绿之前本任务的 fan-in 不可能成功**，与重试次数无关。⛔ 本轮未越 Touches、未改任何兄弟夹具、未写任何 `status:`、未 un-park 任何任务、未新增 `plugin/scripts/*.ts`。
 
 ---
+_2026-09-29T04:45:04.276Z_: Round 2026-09-29T04:38–04:44Z (worker, continuation round). ⛔ NOT a re-implementation: the branch's 15 commits already carry the landing object (goal write in main checkout + worktree, byte-identical md5 `ff10ec355f37133093e000463b38997e`). This round re-verified AC1–AC7 one by one with fresh direct readings:
+
+- **AC1** — parsed criterion (`YAML.parse(frontmatter).criterion`, 115 logical lines): `exit 3` lands on critlines **92 / 94 / 96** = exactly the three evaluability branches (`CAUSE=no-running-serve-instance` / `no-derivable-serve-address` / `no-reachable-serve-address`); critlines 82/83 are the WHY-comment prose. `exit 1` count = **10** = exactly the ten assertion branches.
+- **AC2** — `node --test packages/quay/test/ac291-criterion-address-derivation.test.mjs` ⇒ **13 pass / 0 fail**; `git diff develop...HEAD` = that one file, exactly the 6 evaluability assertions `1 → 3` with the 7th (ASSERTION block) kept at `1` and all positives at `0`.
+- **AC3** — live reading **2026-09-29T04:43:17.390Z**: `node packages/quay/bin/quay.js goal gate AC-291 --dry-run --json` ⇒ `"verdict":"pass"`, `GATE_EXIT=0`; same instant `pgrep -f 'quay.ts serve'` + `readlink /proc/<pid>/cwd` ⇒ live instances at cwd=`/data/home/yale/work/quay` (pid 2205593, 3652175).
+- **AC4** — the negative control is behavioural and green: the last of the 13 tests (`the ASSERTION block is still live — a zh page whose nav was never wired fails, and says which arm`) asserts `code === 1` and passes.
+- **AC6①** — ledger `.quay/gate-events.jsonl`, `item_id=AC-291`: latest event **2026-09-29T04:08:49.860Z** `gate=goal` `actor=goal-sweep` `verdict:"pass"` with `payload.criterionHash = fc4b03f7c662d8ec` ≠ the filing hash `f455d4534f8067e9`.
+- **AC6②** — scoped gate `bash scripts/test.sh --for-task gap-ac291-criterion-carrier-absence-not-evaluated --allow-thin` ⇒ **EXIT=0** (13 pass / 0 fail; log `.quay/ac291-round2-scoped-gate.log`); scoped-gate cache written for `developSha 6244047f8266c882ae0d1f8ef79916e8b796e71a`.
+- **AC7** — `git diff --name-only develop...HEAD` = `packages/quay/test/ac291-criterion-address-derivation.test.mjs` only, which IS in `## Touches`. No `plugin/scripts/*.ts`, no `packages/quay/src/serve-*.ts` touched.
+
+**The only reason this round is still `exited-not-landed` is the already-filed cross-task family deadlock** — `gap-goal-write-outruns-bound-fixture-family-deadlock` (status `ready`). Direct readings this round: on `develop` the goal criteria for AC-292 / AC-301 / AC-303 already exit `3`, while their three bound fixtures still assert `1`; those three fixtures are **byte-identical between develop and this worktree** (`git diff develop HEAD -- <the three files>` is empty), so they are not this task's delta. The mechanical fan-in runs the **full** suite in *this* branch's merge tree, which necessarily still carries those three unfixed fixtures ⇒ a deterministic 22-red suite ⇒ no branch in the family can be green ⇒ no fan-in can land (measured: 30+ suite-red attempts across the four sibling tasks since 02:22Z, every one judged `unrelated-flaky-exempt`, so the retry cap never trips and the driver re-dispatches indefinitely).
+
+⛔ This worker did **not** try to break out from its own mandate: the sibling fixtures are outside this task's `## Touches`, `anti-drift-touches-check.ts` HARD-FAILs out-of-declared writes, and widening `## Touches` by hand would falsify this task's own AC7. The break-out is a manager action on the filed deadlock task.
+
 _2026-09-29T05:13:30.829Z_: 
 执行轮 7（2026-09-29T05:13Z，同一 worker worktree；`git merge develop` ⇒ clean，合并 develop @ e937b4e4e）—— ⛔ 未改任何代码（`git diff --stat develop...HEAD` 仍只有 ac291 夹具 + 本任务体两条）。
 
@@ -399,3 +413,50 @@ ac303  20 / 12 pass  / 8 fail    ← 8× "3 !== 1"
 scoped 门 `--for-task gap-ac291-… --allow-thin` ⇒ **exit 0（13/13）**；scoped-gate cache 以 **merge 时刻** develop sha `e937b4e4ec00792e9bababaab17fee9513030fcb`（= `HEAD^2`，实测是 HEAD 的祖先）写盘。
 
 ⛔ 本轮未越 Touches、未改任何 `status:`、未 un-park 兄弟、未扩 `## Touches`（遵本任务既有约束与 worker prompt「status 归 driver」）。**结论：本任务 delta 已完成且自绿，落地面被一个已立案的跨任务死锁阻塞；需要 manager 层做一次顺序裁定（三个兄弟同时 park / 加 `depends_on` 边），否则本家族每轮各烧一个 ~20 分钟全量 suite 且恒定 exited-not-landed。**
+
+---
+_2026-09-29T06:13:46.363Z_: Round 8 (2026-09-29T06:12Z) — THE BLOCKER OF ROUNDS 4–7 IS GONE; ⛔ NOT a re-implementation.
+
+The previous four rounds all exited-not-landed at step=suite for ONE reason: a cross-task family
+deadlock (four AC-29x goal criteria landed with the evaluability branches at `exit 3` while their
+bound fixtures still asserted `1`), filed as `gap-goal-write-outruns-bound-fixture-family-deadlock`.
+That task has since LANDED on develop (`23dc19417` "fix(tests): land the four bound fixtures on one
+commit"), so develop's four fixtures now carry the exit-3 expectations. The branch was simply 7
+commits BEHIND develop — branch-lag, not a code defect.
+
+This round: `git merge develop` @ `7c311f20e`. The only conflict was in THIS task file; both sides
+were append-only Evidence blocks ⇒ resolved by per-hunk union (both kept, round 6 then round 7).
+Branch delta vs develop is now the TASK FILE ONLY — the ac291 fixture blob is `2480540cf`,
+byte-identical to develop's, i.e. this task's own fixture fix is what the family landing propagated.
+
+Fresh readings this round, all taken in the merge tree:
+
+- the four family fixtures together (`node --test ac291 ac292 ac301 ac303`) ⇒ **70 pass / 0 fail**
+  (the prior rounds measured 22 red spread across the three sibling fixtures).
+- scoped gate `bash scripts/test.sh --for-task gap-ac291-… --allow-thin` ⇒ **exit 0** (13/13,
+  the AC-291 block).
+- AC1, criterion: exactly **3** evaluability branches at `exit 3` (l.206 `no-running-serve-instance`,
+  l.212 `no-derivable-serve-address`, plus the line-wrapped `no-reachable-serve-address` arm — the
+  folded YAML scalar puts its `exit` and `3` on different lines, which is why a naive
+  `grep 'exit 3'` sees only two) and exactly **10** assertion branches at `exit 1`, verbatim.
+- AC3, live: `node packages/quay/bin/quay.js goal gate AC-291 --dry-run --json` @
+  2026-09-29T06:12:47.644Z ⇒ `"verdict":"pass"`, `GATE_EXIT=0`; live instance pid 3652175 with
+  `cwd=/data/home/yale/work/quay`.
+- AC5, three-state: a scratch **git** root with no live instance ⇒ `"verdict":"not-evaluated"`,
+  `"cause":"declared"` (⛔ not `"fail"`), while the same criterion on the live instance ⇒ `pass`.
+  The not-evaluated / false / true distinction holds end to end.
+- AC6①, ledger: the last `item_id=AC-291` event is 2026-09-29T05:22:12.218Z `verdict:"pass"`
+  with `payload.criterionHash = fc4b03f7c662d8ec` ≠ the filing hash `f455d4534f8067e9`.
+- AC6③, family enumeration: `no-running-serve-instance` **17** / `no-derivable-serve-address`
+  **10** / `no-reachable-serve-address` **10** goal files.
+- AC7: `git diff --name-only develop...HEAD` = `tasks/gap-ac291-…md` only (which IS in `## Touches`);
+  no `plugin/scripts/*.ts`, no `packages/quay/src/serve-*.ts`.
+
+⚠️ OBSERVED, not fixed (outside `## Touches`): `.quay/scoped-gate-cache.json` is a SINGLE flat
+record. A peer worker rewrote it with its own task key within the same minute this round wrote its
+own (observed key `gap-ac301-…\t7c311f20…`). The cache is an optimization only — on a miss the
+driver simply re-runs the scoped gate, so this costs time, never correctness. Recording it as a
+reading, not acting on it.
+
+⇒ This task's deliverable is complete and self-green, and the landing surface is now clear:
+develop carries the family fix, the branch is current, and the scoped gate is green.
