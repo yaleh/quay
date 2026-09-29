@@ -63,8 +63,14 @@ function dropRawDiagnostics() {
  *  validity predicate differed (`Number.isInteger` here vs `Number.isFinite` there), so
  *  `--test-concurrency=1.5` gave the runner 1 lane while the reporter printed 1.5 — while this
  *  comment claimed they were "the SAME parse" (gap-routine-semantic-dedup-scan-concurrency-parse-
- *  divergence). A comment asserting sameness is not sameness; the shared import is. */
-export { readConcurrency as readConcurrencyFromExecArgv };
+ *  divergence). A comment asserting sameness is not sameness; the shared import is.
+ *
+ *  ⛔ The alias must be a real LOCAL binding, not just an export-table entry: `export { x as y }`
+ *  binds only the export table, so a local `y()` is a ReferenceError. main() below calls it locally,
+ *  so the plain `export { readConcurrency as readConcurrencyFromExecArgv }` form — which passes an
+ *  identity test that merely IMPORTS the alias — left the runner unable to start at all. */
+const readConcurrencyFromExecArgv = readConcurrency;
+export { readConcurrencyFromExecArgv };
 
 /** Parse the runner's argv: positional args are test files; --test-name-pattern[=]<pat> maps to
  *  run()'s testNamePatterns; --test-concurrency[=]<n> is IGNORED (it rides in execArgv, the single

@@ -19,6 +19,11 @@
 // never existed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import perFileReporter, { readConcurrency } from "../scripts/measure-suite-reporter.mjs";
 import { readConcurrencyFromExecArgv } from "../scripts/suite-lpt-runner.mjs";
@@ -120,5 +125,53 @@ test("what the reporter PRINTS equals what the runner RUNS — 1.5 reports 1, ne
       executed,
       `reporter printed concurrency=${reported} but the runner would run with ${executed} — ${why}`,
     );
+  }
+});
+
+// ── The runtime arm: the assertions above are all satisfiable by IMPORTING the alias, which cannot
+// see whether the runner's own module scope can call it. `export { x as y }` binds only the export
+// table, so the runner shipped with a local `readConcurrencyFromExecArgv()` that was a ReferenceError
+// — the module could not start at all, while every import-based assertion here stayed green (the
+// real red surfaced only in the pre-existing gap-suite-lpt-runner-exitcode test). Reading the
+// PRODUCTION carrier — an actually-spawned runner process — is the reading that can take the value
+// false. ⛔ Do not replace this with another import-based check.
+test("the runner PROCESS starts and reports the same lane count it runs (import-only checks miss a local ReferenceError)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "concurrency-single-source-"));
+  try {
+    const fixture = join(dir, "fixture.test.mjs");
+    await writeFile(fixture, 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("trivially passes", () => { assert.equal(1, 1); });\n');
+    const runner = fileURLToPath(new URL("../scripts/suite-lpt-runner.mjs", import.meta.url));
+
+    // ⛔ NODE_TEST_CONTEXT must NOT reach the child: this test file itself runs under `node --test`,
+    // so that var is inherited, and a child that sees it speaks the parent-runner protocol instead of
+    // running the fixture — the run then reports `ℹ pass 0` / `files=0` and every assertion below would
+    // be reading a run that never happened (an echo, not a measurement). Strip it.
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+
+    // `--test-concurrency=1.5` rides in the child's process.execArgv (a node flag before the script) —
+    // the divergence input, so a runner that starts must run 1 lane AND report 1.
+    const res = spawnSync(process.execPath, ["--test-concurrency=1.5", runner, fixture], {
+      encoding: "utf8",
+      timeout: 60_000,
+      env,
+    });
+
+    assert.doesNotMatch(
+      `${res.stderr}`,
+      /ReferenceError|is not defined/,
+      "the runner's local alias call must be a real binding — a bare `export { x as y }` is not",
+    );
+    assert.equal(res.status, 0, `the runner must run the file and exit 0 (stderr: ${res.stderr})`);
+    // The fixture really executed — without this, `files=0`/`pass 0` would still satisfy the two
+    // assertions below about an empty run.
+    assert.match(`${res.stdout}`, /ℹ pass 1\b/, "the fixture must actually have run and passed");
+    assert.match(`${res.stdout}`, /✔ trivially passes/, "the fixture's own test name must appear in the spec output");
+    const group = `${res.stderr}`.split("\n").find((l) => l.startsWith("__GROUP__ "));
+    assert.ok(group, "the reporter composed INSIDE the runner must emit __GROUP__");
+    assert.match(group, /concurrency=1\b/, "the runner's reporter must print the 1 lane it actually runs");
+    assert.match(group, /files=1\b/, "the reporter's own file tally must agree the fixture ran");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
