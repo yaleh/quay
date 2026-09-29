@@ -2,7 +2,7 @@
 id: gap-goal-write-outruns-bound-fixture-family-deadlock
 title: goal write 先于绑定夹具落地 ⇒ 一个 AC 家族互相死锁：develop 的判据已 exit 3 而夹具仍断言 1（全量 suite
   20 红，四个任务无一能落地）
-status: ready
+status: done
 labels:
   - gap
   - defect
