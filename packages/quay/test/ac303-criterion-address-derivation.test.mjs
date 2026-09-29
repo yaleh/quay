@@ -42,6 +42,24 @@
 // The two fetch-half cases run the WHOLE criterion text — derivation AND the /architecture
 // assertions after it — because the property "an address that nothing answers must not pass" lives
 // in the tail, not in the derivation.
+//
+// REVISED 2026-09-29 (gap-ac303-criterion-carrier-absence-not-evaluated) — THREE-VALUED, NOT
+// BOOLEAN. The criterion's two EVALUABILITY branches (no-running-serve-instance,
+// no-derivable-address) left through `fail()`, i.e. status 1, so "there is no live carrier HERE and
+// I cannot evaluate this" was recorded as "this is false" — the goal driver's pre-filing recheck
+// files a `fail` as confirmed-failing and files nothing for `not-evaluated`, so a dead server
+// re-filed the AC every round (the ledger's two `no-derivable-address` fails on 2026-09-29). The
+// repo already fixes that value one layer down: `goal-store.ts:311-318` names `exit 3` as the
+// not-evaluated convention and `gate/acceptance-runner.ts` `verdictFromAcceptance` maps code 3 to
+// verdict `not-evaluated` / cause `declared`. So `fail()` now exits 3 and the EIGHT evaluability
+// negatives below assert `code === 3`. ⛔ The ten post-derivation ASSERTION branches still exit 1
+// and the two fetch-half cases still assert `code === 1`: a reachable-but-wrong page is a hard
+// fail, and this file pins that separation from both sides — the third section below pairs a live
+// untranslated `/architecture` (status 1, nav-label-untranslated) with a live translated one
+// (status 0), so a "not-evaluated" that had swallowed the assertion half could not stay green.
+// The last test parses the WHOLE criterion with `/bin/sh -n`: the criterion lives in a YAML `>-`
+// folded scalar, and a comment written with a hard newline comes back as non-comment shell code
+// (the AC-295 landing died of exactly that while every block-scoped case stayed green).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -381,7 +399,7 @@ test("no carrier: refuses with no-derivable-address and names carrier-absent for
   const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
   try {
     const r = derive(root);
-    assert.equal(r.code, 1, "a root whose only serve candidate has no carrier must not derive an address");
+    assert.equal(r.code, 3, "a root whose only serve candidate has no carrier must not derive an address");
     assert.match(r.stderr, /CAUSE=no-derivable-address/);
     const row = candidateRow(r.stderr, child.pid);
     assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
@@ -402,7 +420,7 @@ test("carrier naming another pid is refused (pid is the positional link, not the
       services: [{ name: "web", pid: child.pid + 1000000, host: "172.28.0.1", port: 34570, up: true }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     const row = candidateRow(r.stderr, child.pid);
     assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
     assert.match(row, /cause=argv-port-kernel-assigned,carrier-pid-mismatch/);
@@ -421,7 +439,7 @@ test("carrier with no `web` entry is refused (a control-only carrier names no we
       services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 34571, up: true }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-no-web-service/);
   } finally {
     killQuietly(child);
@@ -438,7 +456,7 @@ test("carrier whose web service is down (up:false) is refused", () => {
       services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34572, up: false }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-web-down/);
   } finally {
     killQuietly(child);
@@ -486,7 +504,7 @@ test("an unreadable carrier is a NAMED cause, not a silent empty address", () =>
     fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
     fs.writeFileSync(path.join(root, ".quay", "server.json"), "{ this is not json");
     const r = derive(root);
-    assert.equal(r.code, 1, "a malformed carrier must not yield an address");
+    assert.equal(r.code, 3, "a malformed carrier must not yield an address");
     // hard rule 3b: the "could not read it" outcome is a distinct value, never the shape of a
     // successful derivation and never a bare `addr=`.
     const row = candidateRow(r.stderr, child.pid) ?? "";
@@ -506,7 +524,7 @@ test("no live candidate: a distinct named CAUSE, different in shape from the der
     // No serve-shaped process at all for this root, and the block runs from a FILE so the invoking
     // shell's own argv does not masquerade as one.
     const r = deriveFromFile(root);
-    assert.equal(r.code, 1, "no candidate must not pass");
+    assert.equal(r.code, 3, "no candidate must not pass");
     assert.match(r.stderr, /CAUSE=no-running-serve-instance/);
     assert.match(r.stderr, /CANDIDATES: none -- /);
     // ...and it is NOT the same token as "candidates existed but none yielded a live address".
@@ -521,7 +539,7 @@ test("candidates exist but none is live: no-derivable-address, NOT no-running-se
   const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
   try {
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3);
     assert.match(r.stderr, /CAUSE=no-derivable-address/);
     assert.doesNotMatch(r.stderr, /CAUSE=no-running-serve-instance/);
   } finally {
@@ -556,7 +574,7 @@ test("attribution on a refusal: every candidate row carries pid, addr=-, and a c
   const bare2 = spawnServeShaped(root, { host: "10.0.0.5", port: 0 });
   try {
     const r = deriveFromFile(root);
-    assert.equal(r.code, 1, "with no derivable candidate the block must refuse");
+    assert.equal(r.code, 3, "with no derivable candidate the block must refuse");
     const rows = candidateRows(r.stderr);
     assert.ok(rows.length >= 2, `both candidates must be attributed: ${r.stderr}`);
     for (const row of rows) {
@@ -635,4 +653,156 @@ test("full criterion: a dead CARRIER port fails too — the carrier derives, it 
     killQuietly(child);
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── ④ the assertion half keeps its teeth: a LIVE, WRONG /architecture is still a hard fail ───────
+//
+// Moving the two evaluability branches to status 3 creates a risk worth measuring, not asserting
+// away: a criterion that answers "I could not evaluate this HERE" in a case that is genuinely false
+// is a guard that can never say no (hard rule 3b's vacuous half — indistinguishable from "checked
+// and fine"). These two cases close it from BOTH sides on a page that really ANSWERS. Same criterion
+// text, same serve-shaped candidate and carrier; the ONLY difference is whether the zh response
+// localises the nav label. exit 1 + the nav-label-untranslated token versus exit 0 — so a status-3
+// branch that had swallowed the assertion half would turn one of them red.
+
+/** The fixture pages. `translated` decides whether the zh nav region still carries the English nav
+ *  label (the criterion's nav-label-untranslated branch); the zh <title> differs in both variants,
+ *  so the nav label is the single discriminator between the pass and the fail below. */
+function archPages(translated) {
+  const en =
+    '<!doctype html><html lang="en"><head><title>Architecture</title></head><body><nav><a href="/architecture">Architecture</a></nav></body></html>';
+  const zh = translated
+    ? '<!doctype html><html lang="zh"><head><title>架构</title></head><body><nav><a href="/architecture">架构</a></nav></body></html>'
+    : '<!doctype html><html lang="zh"><head><title>架构</title></head><body><nav><a href="/architecture">Architecture</a></nav></body></html>';
+  return { en, zh };
+}
+
+/**
+ * A REAL listening server that ALSO carries the serve-shaped argv the derivation step reads:
+ * `node -e <script> quay.ts serve --host H --port 0`, cwd = `root`. That is the launcher-default
+ * gen-2 shape the criterion was re-anchored for — the port is kernel-assigned, so the address is
+ * knowable ONLY from the carrier, which this fixture writes with the port the child reports back.
+ *
+ * The answer half lives in a SEPARATE PROCESS on purpose: the criterion is run through `runSh`
+ * (`spawnSync`), which blocks THIS process's event loop, so an in-process listener could never
+ * answer a request the blocked loop was holding open.
+ */
+function spawnServeListening(root, { translated, host = "127.0.0.1" }) {
+  const script = [
+    'const http = require("http");',
+    "const pages = JSON.parse(process.env.AC303_PAGES);",
+    "const srv = http.createServer((req, res) => {",
+    '  const zh = /(?:^|;\\s*)lang=zh/.test(req.headers.cookie || "");',
+    '  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });',
+    "  res.end(zh ? pages.zh : pages.en);",
+    "});",
+    'srv.listen(0, "127.0.0.1", () => process.stdout.write(String(srv.address().port)));',
+  ].join("\n");
+  const child = spawn(
+    process.execPath,
+    ["-e", script, "quay.ts", "serve", "--host", host, "--port", "0"],
+    {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: { ...process.env, AC303_PAGES: JSON.stringify(archPages(translated)) },
+    },
+  );
+  return new Promise((resolve, reject) => {
+    let buf = "";
+    let settled = false;
+    child.stdout.on("data", (d) => {
+      buf += d;
+      const m = /^(\d+)/.exec(buf);
+      if (m && !settled) {
+        settled = true;
+        resolve({ child, port: Number(m[1]) });
+      }
+    });
+    child.on("error", (e) => {
+      if (!settled) {
+        settled = true;
+        reject(e);
+      }
+    });
+    child.on("exit", (c) => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`listening fixture exited before reporting a port (code ${c})`));
+      }
+    });
+  });
+}
+
+test("full criterion on a LIVE but untranslated /architecture: hard fail at 1, not not-evaluated", async () => {
+  const root = mkRoot();
+  const { child, port } = await spawnServeListening(root, { translated: false });
+  try {
+    writeCarrier(root, {
+      pid: child.pid,
+      services: [{ name: "web", pid: child.pid, host: "127.0.0.1", port, up: true }],
+    });
+    const r = runSh(criterionText(), root);
+    assert.equal(r.code, 1, "a reachable page whose zh nav is untranslated is FALSE, not not-evaluated");
+    assert.match(r.stderr, /CAUSE=nav-label-untranslated\b/);
+    // ...and it is NOT one of the evaluability refusals: the status-3 branches must not be reachable
+    // while an answer was actually obtained.
+    assert.doesNotMatch(r.stderr, /CAUSE=no-derivable-address|CAUSE=no-running-serve-instance/);
+  } finally {
+    killQuietly(child);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("full criterion on a LIVE translated /architecture: passes at 0 (the same text can say both)", async () => {
+  const root = mkRoot();
+  const { child, port } = await spawnServeListening(root, { translated: true });
+  try {
+    writeCarrier(root, {
+      pid: child.pid,
+      services: [{ name: "web", pid: child.pid, host: "127.0.0.1", port, up: true }],
+    });
+    const r = runSh(criterionText(), root);
+    assert.equal(r.code, 0, `a correctly localised live page must pass: ${r.stderr}`);
+    assert.match(r.stdout, /^OK -- \/architecture:/m);
+  } finally {
+    killQuietly(child);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── ⑤ the amendment's own shape: ONE exit path moved, and the criterion is still valid sh ────────
+
+test("exactly one exit path moved to 3; the ten assertion branches and the refusal tokens are untouched", () => {
+  const lines = criterionText().split("\n");
+  const code = lines.filter((l) => !l.trimStart().startsWith("#"));
+  assert.equal(
+    code.filter((l) => /\bexit 1\b/.test(l)).length,
+    10,
+    "the ten post-derivation assertion branches must all still exit 1",
+  );
+  assert.equal(
+    code.filter((l) => /\bexit 3\b/.test(l)).length,
+    1,
+    "exactly ONE exit path — the evaluability helper — may exit 3",
+  );
+  const failLine = code.find((l) => /^fail\(\) \{/.test(l));
+  assert.ok(failLine, "both evaluability branches must still leave through fail()");
+  assert.match(failLine, /exit 3; \}$/);
+  assert.equal(
+    code.filter((l) => /fail "/.test(l)).length,
+    2,
+    "fail() must still have exactly its two evaluability callers",
+  );
+  // The refusal TOKENS are byte-untouched: a new comment that spelled one would move this count
+  // (that is exactly how the AC-292 sibling's first landing went red).
+  assert.equal(lines.filter((l) => l.includes("CAUSE=")).length, 12);
+  assert.equal(lines.filter((l) => l.includes("FAIL=")).length, 0);
+});
+
+test("the WHOLE criterion is valid sh (a folded-scalar comment hazard would die here)", () => {
+  // The criterion is persisted as a YAML `>-` folded scalar, so a `#` comment that came back as two
+  // logical lines is shell code, not a comment — the AC-295 landing died of `Syntax error: ")"` while
+  // every block-scoped case stayed green. `-n` parses without executing (no serve, no cwd needed).
+  const r = spawnSync("/bin/sh", ["-n"], { input: criterionText(), encoding: "utf8" });
+  assert.equal(r.status, 0, `criterion is not parseable by /bin/sh: ${r.stderr}`);
 });
