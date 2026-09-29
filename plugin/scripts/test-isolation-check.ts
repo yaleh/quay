@@ -110,6 +110,11 @@ import {
   hasNodeTestImport,
   canonicalTestFiles,
 } from "./test-framework-policy-check.ts";
+// The `# baseline-count:` ceiling parser lives in ratchet-baseline.ts — the ONE home of the token.
+// This file's copy was byte-identical to test-framework-policy-check.ts's (both end-anchored, both
+// diverging from the entry-set readers' grammar) — tasks/
+// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor.
+import { parseBaselineCount } from "./ratchet-baseline.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -896,11 +901,12 @@ export function parseViolationList(text: string): string[] {
     .filter((l) => l.length > 0 && !l.startsWith("#"));
 }
 
-/** Parse the commit-surviving ratchet ceiling from the header: `# baseline-count: <n>`. */
-export function parseBaselineCount(text: string): number | null {
-  const m = text.match(/^#\s*baseline-count:\s*(\d+)\s*$/m);
-  return m ? Number(m[1]) : null;
-}
+/** The commit-surviving ratchet ceiling from the header (`# baseline-count: <n>`) — MECHANISM is
+ * `ratchet-baseline.ts`'s `parseBaselineCount` (see the note on the import above); re-exported
+ * under this name to keep this module's public surface. Import-and-export, NOT
+ * `export { … } from`: the latter binds only the export table and would leave this module's own
+ * call sites with no module-scope binding. */
+export { parseBaselineCount };
 
 /** Map a `<rel>:<rule>` entry to `{rel, rule}`; null when malformed or the rule key is unknown. */
 export function parseEntry(entry: string): { rel: string; rule: RuleKey } | null {

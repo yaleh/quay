@@ -19,18 +19,31 @@
 // the noun its entries are called, and what the author should do instead of adding an entry. Those
 // stay at the call site, passed in — so a call site cannot silently inherit another's wording.
 //
-// ⛔ This module deliberately does NOT absorb the two narrower ceiling-only parsers in
-// test-framework-policy-check.ts / test-isolation-check.ts. They parse `# baseline-count: <n>` from
-// a *string* with a stricter anchored regex (`^#\s*baseline-count:\s*(\d+)\s*$`) and never build the
-// entry set, so they are a different function, not a copy of this one; folding them in would force
-// one regex to serve two contracts. Recorded rather than silently left out (硬规则 5b).
+// ⛔ The two narrower ceiling-only parsers that used to live in test-framework-policy-check.ts and
+// test-isolation-check.ts ARE now this module's `parseBaselineCount` below
+// (tasks/gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor, the
+// `semantic-dedup-scan` routine's `parse-baseline-count-divergent-anchor` finding, kind
+// `same-symbol-multi-file`, verdict `divergent-implementation`). The two bodies were byte-identical
+// to EACH OTHER and they read the token with an end-ANCHORED regex
+// (`^#\s*baseline-count:\s*(\d+)\s*$`) while every entry-set reader here read it with
+// `BASELINE_COUNT_RE` — same token, same files, TWO grammars. The anchored one was the WEAKER:
+// `# baseline-count: 51 (frozen)` reads 51 for the entry-set consumers and null for the
+// ceiling-only ones, and a null ceiling is "no ceiling enforced" (硬规则 3b) ⇒ a trailing annotation
+// silently disabled the commit-surviving AC4 backstop the parser exists to supply. ONE token now has
+// ONE grammar and ONE home; the anchored form is retired. Recorded, not silently dropped (硬规则 5b).
 
 import fs from "node:fs";
 import path from "node:path";
 
 /** The ceiling token every baseline file carries in its header. Deliberately UNANCHORED at the end
- * (this is the regex the seven readers used) so the shared reader changes no existing behaviour. */
-export const BASELINE_COUNT_RE = /^# baseline-count:\s*(\d+)/m;
+ * (this is the regex the seven readers used) so the shared reader changes no existing behaviour.
+ *
+ * `[ \t]*` after the `#` is the ONE widening on top of the shipped `# ` form: a token separated by
+ * zero or more spaces/tabs was read by NEITHER grammar before (the anchored copy allowed it, the
+ * readers did not), so widening here can only turn "no ceiling" into "the ceiling that is written",
+ * never the reverse. Everything after the token name is unchanged (`\s*(\d+)`, no end anchor) so the
+ * change stays a strict superset of the grammar the seven readers shipped with. */
+export const BASELINE_COUNT_RE = /^#[ \t]*baseline-count:\s*(\d+)/m;
 
 export interface RatchetBaseline {
   /** The non-comment, non-blank lines, trimmed — one entry per line. */
@@ -39,16 +52,25 @@ export interface RatchetBaseline {
   baselineCount: number | null;
 }
 
+/** The CEILING-ONLY half of the token, read from a *string*: the consumers that never build the
+ * entry set (test-framework-policy-check.ts, test-isolation-check.ts) call this directly, and
+ * `parseRatchetBaselineText` below is built on it — so the two contracts share one grammar rather
+ * than one grammar each. Returns `null` when the token is absent (no ceiling enforced) — NOT 0,
+ * which would be a ceiling of zero (硬规则 3b). */
+export function parseBaselineCount(text: string): number | null {
+  const m = text.match(BASELINE_COUNT_RE);
+  return m ? Number(m[1]) : null;
+}
+
 /** Parse a baseline file's TEXT into `{ baseline, baselineCount }`. Pure — the unit-testable half. */
 export function parseRatchetBaselineText(text: string): RatchetBaseline {
-  const countMatch = text.match(BASELINE_COUNT_RE);
   const baseline = new Set<string>();
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
     if (!t || t.startsWith("#")) continue;
     baseline.add(t);
   }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return { baseline, baselineCount: parseBaselineCount(text) };
 }
 
 /** Read `<root>/<rel>`. Absent file ⇒ `{ baseline: empty, baselineCount: null }` — the shrink-only

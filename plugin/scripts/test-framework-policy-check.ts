@@ -66,6 +66,11 @@ import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
 import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
+// The `# baseline-count:` ceiling parser lives in ratchet-baseline.ts — the ONE home of the token.
+// It was a local body here AND a byte-identical copy in test-isolation-check.ts, each reading the
+// token with its own end-anchored regex (tasks/
+// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor).
+import { parseBaselineCount } from "./ratchet-baseline.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -152,14 +157,15 @@ export function parseExemptionList(text: string): string[] {
     .filter((l) => l.length > 0 && !l.startsWith("#"));
 }
 
-/** Parse the RATCHET CEILING from the data file header: a `# baseline-count: <n>` line.
- * This is the commit-surviving AC4 backstop — the list can never exceed this many entries, even
- * at a clean commit where the git-HEAD baseline already moved past a smuggled addition (REFUTE
- * round-1 MAJOR). Returns null when the token is absent (no ceiling enforced). */
-export function parseBaselineCount(text: string): number | null {
-  const m = text.match(/^#\s*baseline-count:\s*(\d+)\s*$/m);
-  return m ? Number(m[1]) : null;
-}
+/** The RATCHET CEILING (the `# baseline-count: <n>` header of the data file) — this is the
+ * commit-surviving AC4 backstop: the list can never exceed this many entries, even at a clean
+ * commit where the git-HEAD baseline already moved past a smuggled addition (REFUTE round-1
+ * MAJOR). MECHANISM is `ratchet-baseline.ts`'s `parseBaselineCount` (same grammar as the
+ * entry-set readers — see the note on the import above); re-exported here because this module's
+ * own test and its callers below reach it under this name. Import-and-export, NOT
+ * `export { … } from`: the latter binds only the export table and would leave this module's own
+ * call sites with no module-scope binding. */
+export { parseBaselineCount };
 
 // ── the pure policy check ──────────────────────────────────────────────────────────────────────────
 

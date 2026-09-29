@@ -23,8 +23,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   BASELINE_COUNT_RE,
+  parseBaselineCount,
   parseRatchetBaselineText,
   readRatchetBaseline,
   writeRatchetBaseline,
@@ -83,6 +85,54 @@ test("BASELINE_COUNT_RE is unanchored at the end — the regex the seven extract
   // Pinning the exact token shape the extraction had to preserve: a trailing annotation after the
   // number still yields the number (an end-anchored regex would silently read null here).
   assert.equal("# baseline-count: 12  (re-anchored 2026-09-29)".match(BASELINE_COUNT_RE)[1], "12");
+});
+
+test("parseBaselineCount: the ceiling-only half shares the readers' grammar — the anchored copy is retired", () => {
+  // tasks/gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor (routine
+  // `semantic-dedup-scan`): this function used to be a byte-identical body in
+  // test-framework-policy-check.ts AND test-isolation-check.ts, both spelling
+  // `^#\s*baseline-count:\s*(\d+)\s*$` while every entry-set reader spelled
+  // `^# baseline-count:\s*(\d+)`. Same token, same files, two grammars — and the ANCHORED one was
+  // the WEAKER: under it a header annotated after the number read null ⇒ "no ceiling enforced"
+  // (硬规则 3b), so a trailing annotation silently voided the commit-surviving AC4 backstop. The
+  // bodies were identical to each other and divergent from the readers, which is why the fix is
+  // extraction onto the readers' grammar rather than a third spelling.
+  //
+  // MUTATION CONTROL: reinstate the anchored regex and the trailing-prose arm below turns null.
+  assert.equal(parseBaselineCount("# baseline-count: 51"), 51);
+  assert.equal(parseBaselineCount("# baseline-count: 51  (frozen by DIR-028)\n"), 51,
+    "trailing prose must not void the ceiling (this is the arm the anchored grammar failed)");
+  assert.equal(parseBaselineCount("#  baseline-count: 7\n"), 7,
+    "extra whitespace after '#' — read by the retired anchored copy, not by the readers; ONE grammar now reads it");
+  assert.equal(parseBaselineCount("#baseline-count: 7\n"), 7, "no space after '#' at all");
+  // Absent token ⇒ null, NOT 0 — "no ceiling recorded" must not be spelled like "ceiling is zero".
+  assert.equal(parseBaselineCount("# a header with no ceiling token\n\ntasks/a.md: V1\n"), null);
+});
+
+test("real repo: every baseline file that carries the token yields a positive ceiling under the shared parser", () => {
+  // 硬规则 4 推论三: read the PRODUCTION carriers, not a fixture. This is the non-tautological half
+  // of "one grammar" — after the extraction `parseBaselineCount(t)` and
+  // `parseRatchetBaselineText(t).baselineCount` are the same expression, so asserting they agree
+  // would be a量 that structurally cannot fail. What CAN fail is a real header going unreadable
+  // under a future grammar change.
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const carriers = [
+    ...fs.readdirSync(path.join(repoRoot, "docs/analysis")).filter((f) => f.endsWith(".md")).map((f) => `docs/analysis/${f}`),
+    ...fs.readdirSync(path.join(repoRoot, "plugin")).filter((f) => f.endsWith(".txt")).map((f) => `plugin/${f}`),
+  ];
+  const withToken = [];
+  const unreadable = [];
+  for (const rel of carriers) {
+    const text = fs.readFileSync(path.join(repoRoot, rel), "utf8");
+    if (!/^#[ \t]*baseline-count:/m.test(text)) continue;
+    withToken.push(rel);
+    const n = parseBaselineCount(text);
+    if (n === null || !Number.isInteger(n) || n <= 0) unreadable.push(`${rel} → ${n}`);
+  }
+  // Non-vacuity: the enumeration must actually have found the carriers, or the arm above is a loop
+  // over nothing that passes for the wrong reason.
+  assert.ok(withToken.length >= 5, `expected >=5 baseline-carrying files, found ${withToken.length}: ${withToken.join(", ")}`);
+  assert.deepEqual(unreadable, [], `baseline files whose ceiling no longer parses: ${unreadable.join(", ")}`);
 });
 
 // ── the reader ──────────────────────────────────────────────────────────────────────────────────
