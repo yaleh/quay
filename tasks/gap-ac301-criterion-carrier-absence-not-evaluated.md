@@ -360,3 +360,6 @@ Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表�
   `confirmed-failing` 每轮立案 —— 这才是本次修改要买的东西（本轮这份任务本身就是旧形态的产物）。
 - ⚠️ 该实例同样没有监督者（见上），它再次死掉时判据会回到 `not-evaluated`；那是一个**诚实**的读数，
   而不再是一次虚假立案。
+
+
+_2026-09-29T04:26:45.000Z_: 第 5 轮读数（成因与第 4 轮同源，⛔ 非本任务缺陷）：本任务夹具 17/17 绿、scoped 门 exit 0（缓存已写，develop-sha c297b38e3）；三份兄弟夹具在 develop 上仍断言 exit 1 而 develop 的三条判据已 exit 3。**本轮新读数**：gap-ac292 / gap-ac303 两条兄弟任务已是 status done，且各自分支已带夹具修复（git show task/gap-ac29{2,3}-...:packages/quay/test/ac29{2,3}-criterion-address-derivation.test.mjs | grep -c 'code, 3' = 8），但其夹具不在 develop 上 —— 两条终态任务把修复留在了不再会被 fan-in 的分支上。⇒ 家族修复的路径从「四支分支各自落地」收窄为**只剩** gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，self-touch 齐备）。本任务不扩 Touches（AC7）。
