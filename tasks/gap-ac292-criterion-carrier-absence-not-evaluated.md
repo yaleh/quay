@@ -4,7 +4,7 @@ title: "AC-292 判据把「活载体缺席」记成「此刻为假」——地�
   判据声明 not-evaluated，goal-store.ts:313 逐字给出的例子正是「NOT-EVALUATED: carrier
   absent」）⇒ driver 每轮把它当 confirmed-failing 立案；修法=这些分支改 exit 3 + 从 HEAD 拉起活实例使判据真
   pass，并以「接线破坏仍 exit 1」证明强度未减"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -413,3 +413,13 @@ itself is visible in the carrier: `.quay/server.json` named pid 1555141, started
   so the criterion reads `pass` on the real production surface rather than only in fixtures.
   ⚠️ It has no supervisor (above): if it dies, this criterion goes back to `not-evaluated` — which is
   now a truthful reading instead of a spurious filing.
+## Needs-Human
+
+**执行 2026-09-29T02:47:30.233Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 0 failing lines and attributed none to a file); stopping instead of spending another worker session
+- 失败步/判词：step=suite: suite NOT run (refused) — [full-suite-runner] SUITE-NOT-RUN branch=resource-gate-wait ts=2026-09-29T02:47:29.263Z reason="resource gate says WAIT — => WAIT: CPU 饥饿（some avg10 >= 60）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）" — no test was executed by this round
+- run_id：wk-prod-anchor
+- session_id：d0ac051d-3145-458c-992e-3b48b4cf6a64
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac292-criterion-carrier-absence-not-evaluated~wk-prod-anchor~1790650043634-20ce76.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac292-criterion-carrier-absence-not-evaluated-wk-prod-anchor.log
