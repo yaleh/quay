@@ -44,6 +44,7 @@ import path from "node:path";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // The ONE Touches parser — extract the `## Touches` section the same way every other consumer does.
 import { extractTouchesSection } from "./touches-parser.ts";
+import { readRatchetBaseline } from "./ratchet-baseline.ts";
 
 /** Repo-root-relative path of the shrink-only grandfather baseline (bare-dir-touches precedent). */
 export const ONE_ENTRY_BASELINE_REL = "docs/analysis/touches-one-entry-one-path-baseline.md";
@@ -197,19 +198,10 @@ export function scanTasksDirectoryGlobHints(tasksDir) {
   return hints;
 }
 
-/** Read the shrink-only grandfather list. Absent file ⇒ empty set (nothing grandfathered). */
+/** Read the shrink-only grandfather list. Absent file ⇒ empty set (nothing grandfathered).
+ * The mechanism lives in ratchet-baseline.ts (single-source); this file owns only the path. */
 export function readOneEntryBaseline(root) {
-  const p = path.join(root, ONE_ENTRY_BASELINE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, ONE_ENTRY_BASELINE_REL);
 }
 
 /**

@@ -79,6 +79,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 import { buildFileIndex, type FileIndex } from "./fs-walk.ts";
+import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 
 export const DATA_FILE_REL = "docs/analysis/threshold-scope-violations.md";
 
@@ -384,55 +385,35 @@ export function collectKeys(results: DocResult[]): string[] {
 
 // ── Data-file ratchet (same model as contract-violations.md) ────────────────────────────────────────
 export function readRatchet(root: string): { baseline: Set<string>; baselineCount: number | null } {
-  const p = path.join(root, DATA_FILE_REL);
-  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
-  const text = fs.readFileSync(p, "utf8");
-  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
-  const baseline = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+  return readRatchetBaseline(root, DATA_FILE_REL);
 }
 
+// The mechanism is ratchet-baseline.ts; this consumer OWNS the path, its header prose, and the nouns
+// its entries are called — passed in, so its wording cannot silently become another's.
+const RATCHET_HEADER_LINES = [
+  "# threshold-scope-violations.md — shrink-only ratchet list for the quantified stop-condition scope",
+  "# and stale-path checks (tasks/gap-quantified-stop-conditions-have-no-scope). A violation here means",
+  "# a scanned driver doc (plugin/loop/fast-mode-loop-tick.md / plugin/loop/orchestrator-loop-tick.md",
+  "# / CLAUDE.md) carries a count-threshold stop/trigger condition without naming its window, or a",
+  "# backtick-named path that cannot be resolved (three-layer judgment, placeholder-skipped).",
+  "#",
+  "# RATCHET: the list can ONLY get SHORTER. threshold-scope-check.ts exits 1 if a NEW violation",
+  "# appears that is not already listed, or if the list would exceed the baseline-count ceiling.",
+  "# Remove an entry only after the underlying doc is fixed (then run --write-ratchet to persist the",
+  "# shrunken list). `--write-ratchet --reset-baseline` is the deliberate one-shot re-baseline after a",
+  "# criterion fix; it re-anchors the ceiling to the current violation set.",
+  "#",
+  "# Format: one `<rel-file>: <code>: <detail>` per line (repo-root-relative, sorted).",
+];
+
 export function writeRatchet(root: string, currentKeys: string[], { reset = false } = {}): { ok: boolean; reason: string } {
-  const p = path.join(root, DATA_FILE_REL);
-  const { baseline, baselineCount } = readRatchet(root);
-  const ceiling = reset ? currentKeys.length : (baselineCount ?? currentKeys.length);
-  if (!reset && currentKeys.length > ceiling) {
-    return { ok: false, reason: `current violations (${currentKeys.length}) exceed the ratchet ceiling (${ceiling}) — the list can only get SHORTER; fix the scanned docs, do not add violations` };
-  }
-  if (!reset && baseline.size > 0) {
-    const newOnes = currentKeys.filter((k) => !baseline.has(k));
-    if (newOnes.length > 0) {
-      return { ok: false, reason: `refusing to write: ${newOnes.length} NEW violation(s) not in the baseline — the list can only get SHORTER: ${newOnes.slice(0, 5).join(", ")}${newOnes.length > 5 ? "…" : ""}` };
-    }
-  }
-  const lines = [
-    "# threshold-scope-violations.md — shrink-only ratchet list for the quantified stop-condition scope",
-    "# and stale-path checks (tasks/gap-quantified-stop-conditions-have-no-scope). A violation here means",
-    "# a scanned driver doc (plugin/loop/fast-mode-loop-tick.md / plugin/loop/orchestrator-loop-tick.md",
-    "# / CLAUDE.md) carries a count-threshold stop/trigger condition without naming its window, or a",
-    "# backtick-named path that cannot be resolved (three-layer judgment, placeholder-skipped).",
-    "#",
-    "# RATCHET: the list can ONLY get SHORTER. threshold-scope-check.ts exits 1 if a NEW violation",
-    "# appears that is not already listed, or if the list would exceed the baseline-count ceiling.",
-    "# Remove an entry only after the underlying doc is fixed (then run --write-ratchet to persist the",
-    "# shrunken list). `--write-ratchet --reset-baseline` is the deliberate one-shot re-baseline after a",
-    "# criterion fix; it re-anchors the ceiling to the current violation set.",
-    "#",
-    "# Format: one `<rel-file>: <code>: <detail>` per line (repo-root-relative, sorted).",
-    "# baseline-count: " + ceiling,
-    "",
-    ...currentKeys,
-    "",
-  ];
-  fs.writeFileSync(p, lines.join("\n"));
-  return { ok: true, reason: reset
-    ? `ratchet baseline RESET to ${currentKeys.length} entry/entries (ceiling re-anchored to ${ceiling})`
-    : `ratchet list written (${currentKeys.length} entry/entries; ceiling ${ceiling})` };
+  return writeRatchetBaseline(root, DATA_FILE_REL, currentKeys, {
+    reset,
+    headerLines: RATCHET_HEADER_LINES,
+    entriesLabel: "violations",
+    newEntryLabel: "violation(s)",
+    overCeilingAdvice: "fix the scanned docs, do not add violations",
+  });
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
