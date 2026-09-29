@@ -116,18 +116,30 @@ function collectDescendants(rootPid, seen) {
   return seen;
 }
 
-/** Read `--test-concurrency=N` from process.execArgv (both = and space spellings). */
-function readConcurrency() {
+/** Read `--test-concurrency=N` from process.execArgv (both = and space spellings) — the SINGLE
+ *  concurrency parse, EXPORTED because it is shared: this reporter uses it for its
+ *  `__GROUP__ concurrency=` line and suite-lpt-runner.mjs re-exports it for its `run({concurrency})`,
+ *  so the lane count the runner actually executes and the lane count the reporter prints cannot
+ *  disagree by construction.
+ *
+ *  The predicate is `Number.isInteger`, NOT `Number.isFinite`: node:test's run() REJECTS a
+ *  non-integer concurrency (`ERR_OUT_OF_RANGE: options.concurrency ... must be an integer`), so a
+ *  fractional `--test-concurrency=1.5` must fall back to the serial default rather than be *reported*
+ *  as a lane count the runner never used. Two hand-kept copies of this loop is exactly how the two
+ *  predicates drifted apart (gap-routine-semantic-dedup-scan-concurrency-parse-divergence — the
+ *  reporter printed `concurrency=1.5` while the runner ran 1); one exported definition removes the
+ *  class. */
+export function readConcurrency() {
   const argv = process.execArgv ?? [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith("--test-concurrency=")) {
       const n = Number(a.slice("--test-concurrency=".length));
-      if (Number.isFinite(n) && n >= 1) return n;
+      if (Number.isInteger(n) && n >= 1) return n;
     }
     if (a === "--test-concurrency" && i + 1 < argv.length) {
       const n = Number(argv[i + 1]);
-      if (Number.isFinite(n) && n >= 1) return n;
+      if (Number.isInteger(n) && n >= 1) return n;
     }
   }
   return 1; // default: serial semantics (cc=1) — safest when unknown

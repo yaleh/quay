@@ -29,7 +29,7 @@ import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { basename } from "node:path";
 import { Transform } from "node:stream";
-import perFileReporter from "./measure-suite-reporter.mjs";
+import perFileReporter, { readConcurrency } from "./measure-suite-reporter.mjs";
 
 /** A stream.Transform that drops `test:stdout` / `test:stderr` events before the spec reporter.
  *
@@ -55,24 +55,16 @@ function dropRawDiagnostics() {
   });
 }
 
-/** Read `--test-concurrency=N` from process.execArgv (both = and space spellings) — the SAME
- *  parse as measure-suite-reporter.mjs's readConcurrency(), so the runner's run() concurrency and
- *  the reporter's __GROUP__ concurrency can never disagree. */
-export function readConcurrencyFromExecArgv() {
-  const argv = process.execArgv ?? [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--test-concurrency=")) {
-      const n = Number(a.slice("--test-concurrency=".length));
-      if (Number.isInteger(n) && n >= 1) return n;
-    }
-    if (a === "--test-concurrency" && i + 1 < argv.length) {
-      const n = Number(argv[i + 1]);
-      if (Number.isInteger(n) && n >= 1) return n;
-    }
-  }
-  return 1; // default: serial semantics — safest when unknown
-}
+/** `--test-concurrency=N` from process.execArgv (both spellings) — RE-EXPORTED, never re-implemented.
+ *
+ *  The one parse lives in measure-suite-reporter.mjs's readConcurrency() (the SAME value the reporter
+ *  renders as `__GROUP__ concurrency=`), so the runner's run({concurrency}) and the reporter's
+ *  reported lane count cannot disagree by construction. This used to be a second hand-kept copy whose
+ *  validity predicate differed (`Number.isInteger` here vs `Number.isFinite` there), so
+ *  `--test-concurrency=1.5` gave the runner 1 lane while the reporter printed 1.5 — while this
+ *  comment claimed they were "the SAME parse" (gap-routine-semantic-dedup-scan-concurrency-parse-
+ *  divergence). A comment asserting sameness is not sameness; the shared import is. */
+export { readConcurrency as readConcurrencyFromExecArgv };
 
 /** Parse the runner's argv: positional args are test files; --test-name-pattern[=]<pat> maps to
  *  run()'s testNamePatterns; --test-concurrency[=]<n> is IGNORED (it rides in execArgv, the single
