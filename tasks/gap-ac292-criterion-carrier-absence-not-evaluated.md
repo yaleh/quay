@@ -4,7 +4,7 @@ title: "AC-292 判据把「活载体缺席」记成「此刻为假」——地�
   判据声明 not-evaluated，goal-store.ts:313 逐字给出的例子正是「NOT-EVALUATED: carrier
   absent」）⇒ driver 每轮把它当 confirmed-failing 立案；修法=这些分支改 exit 3 + 从 HEAD 拉起活实例使判据真
   pass，并以「接线破坏仍 exit 1」证明强度未减"
-status: todo
+status: ready
 labels:
   - gap
   - defect
