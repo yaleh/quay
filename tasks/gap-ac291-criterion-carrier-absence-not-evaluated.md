@@ -276,7 +276,7 @@ GATE_EXIT=0
 
 ### AC6 —— 新指纹落账 + 不回归 + 家族枚举
 
-① 台账 `.quay/gate-events.jsonl` 中 `item_id=AC-291` 的**最新一条**（修订后、⛔ 非 dry-run）：
+① 台账 `.quay/gate-events.jsonl` 中 `item_id=AC-291` 的**最后一条带 `criterionHash` 的记录**（修订后、⛔ 非 dry-run）—— ⚠️ 以「带指纹的那条」为准，是因为 `goal gate`（actor=goal-cli）路径按设计**不写**该字段（本任务实测多条），而 goal driver 的轮转每几分钟就追加一条不带指纹的 `pass` ⇒ 「最新一条」这个措辞会随台账尾移动而失效：
 
 ```
 {"id":"35a913a8-d2c7-4266-a746-01bf53306428","item_id":"AC-291","pipeline_id":"AC-291","gate":"goal","actor":"goal-amend","verdict":"pass","timestamp":"2026-09-29T02:44:57.567Z","payload":{"reason":"acceptance passed (exit 0)","criterionHash":"fc4b03f7c662d8ec"}}
@@ -289,6 +289,8 @@ GATE_EXIT=0
 ```
 
 ⇒ `f455d4534f8067e9` → `fc4b03f7c662d8ec`。该 `goal-amend` 行由**生产 goal driver 的轮转自动产生**（`sweepFrozen` 的 AMENDMENT PRIORITY：判据文本变过 ⇒ 不等 `minAgeMs` 即重跑并记录），即「判据改版后自动获得一条针对新版可用的 verdict」这条设计路径按预期工作；`check --stale-pass` 在同一时刻把 AC-291 从 `amendedUnverified` 中移出（修订后读数：`amendedUnverified` 已不含 AC-291）。
+
+该行 `actor: goal-amend`，由生产 goal driver 的轮转写下；其指纹与修订文本实算值一致 ⇒ 本条断言对后续任何一次轮转**保持为真**（判据已改版，之后的轮转只会写新指纹）。
 
 ② scoped 门绿（driver fan-in 跑的正是同一条命令）：
 
@@ -333,4 +335,4 @@ $ git -C <worktree> diff --name-only develop...HEAD | grep -E '^plugin/scripts/.
 
 执行轮读数：`ps aux | grep -c '[q]uay-task-worker'` ⇒ **4**。
 
-**观察项（非目标，⛔ 不构成任何门禁要求）**：`quay serve` **无监督者** —— web 不在 `plugin/scripts/driver-anchor.ts` 的 `DRIVER_KINDS` 六类里，`start-drivers.ts` 只在**被调用时**判 staleness/down ⇒ 实例死亡后不会被自动拉回。发生率读数（硬规则 12，查历史而非等下一轮）：台账 `item_id=AC-291` 事件共 **200** 条，其中含 `no-running-serve-instance` 的 **4** 条，跨越 **2** 个日期（2026-09-23、2026-09-29），verdict 全为 `fail`；家族面含 `.quay/server.json` 的 goal 文件 **17** 个。本执行的**承接线**：派发时已有一个 cwd=仓库根的活实例（pid 3652175），**直接复用**，⛔ 未重启任何 peer 在飞任务所依赖的服务。
+**观察项（非目标，⛔ 不构成任何门禁要求）**：`quay serve` **无监督者** —— web 不在 `plugin/scripts/driver-anchor.ts` 的 `DRIVER_KINDS` 六类里，`start-drivers.ts` 只在**被调用时**判 staleness/down ⇒ 实例死亡后不会被自动拉回。发生率读数（硬规则 12，查历史而非等下一轮；⛔ 下列为**本轮读数**，台账尾会继续增长）：台账 `item_id=AC-291` 事件共 **200** 条，其中含 `no-running-serve-instance` 的 **4** 条，跨越 **2** 个日期（2026-09-23、2026-09-29），verdict 全为 `fail`；家族面含 `.quay/server.json` 的 goal 文件 **17** 个。本执行的**承接线**：派发时已有一个 cwd=仓库根的活实例（pid 3652175），**直接复用**，⛔ 未重启任何 peer 在飞任务所依赖的服务。
