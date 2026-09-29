@@ -18,7 +18,7 @@
 // Run:
 //   scripts/test.sh plugin/test/ratchet-baseline.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -30,8 +30,17 @@ import {
   writeRatchetBaseline,
 } from "../scripts/ratchet-baseline.ts";
 
+// Every mkdtemp result goes into this carrier, which the single after() hook below drains —
+// the tmp-leak-pairing-check / test-isolation-check R6 pairing requirement.
+const tmpDirs = [];
+after(() => {
+  for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function mkTmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "ratchet-baseline-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ratchet-baseline-"));
+  tmpDirs.push(dir);
+  return dir;
 }
 
 /** The three per-consumer knobs, so every call site in this file differs only where a real
