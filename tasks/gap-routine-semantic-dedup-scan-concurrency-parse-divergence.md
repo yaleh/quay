@@ -38,10 +38,11 @@ merge
 
 **处置（requested action: merge → 合并成单一定义）**：
 - `plugin/scripts/measure-suite-reporter.mjs` 导出 `readConcurrency()`（唯一定义，整数谓词）。
-- `plugin/scripts/suite-lpt-runner.mjs` 改为 `export { readConcurrency as readConcurrencyFromExecArgv }`，⛔ 不再有本地副本。
+- `plugin/scripts/suite-lpt-runner.mjs` 改为 `const readConcurrencyFromExecArgv = readConcurrency;` 再 `export { readConcurrencyFromExecArgv };` —— ⛔ 不再有本地副本（仍是单一定义、同一函数对象）。
+  **⚠️ 必须是一个真正的本地绑定，不能只写 `export { readConcurrency as readConcurrencyFromExecArgv }`**：后者只绑**导出表**、不绑模块作用域，于是 runner 自己 `main()` 里那句本地调用 `readConcurrencyFromExecArgv()` 是 `ReferenceError: readConcurrencyFromExecArgv is not defined`（`suite-lpt-runner.mjs:128`）—— **runner 根本起不来**。而断言 ① 只 **import** 这个别名，全程是绿的。**判据看得见导出表，看不见运行时**（硬规则 4 推论三的镜像：证明了「能产出」，没证明「已产出」）。首轮正是因为这一条 exited-not-landed。
 
-**产物（可核）**：`plugin/test/concurrency-parse-single-source.test.mjs`，3 条断言 —— ① 同一性 `readConcurrencyFromExecArgv === readConcurrency`；② 解析行为表（`1.5`/`2.5`/`0`/`-2`/`abc` → 1；`=4`/` 3` → 4/3；首个合法 flag 胜出）；③ 真跑 reporter 生成器，读它**实际打印**的 `__GROUP__ concurrency=`，断言 1.5 打 1（而非 1.5）且恒等于 runner 的解析值。
-**负控制（判据能取假，两个方向都实跑过）**：把谓词改回 `Number.isFinite` ⇒ ②③ 变红；把 runner 改回本地副本 ⇒ ①③ 变红。
+**产物（可核）**：`plugin/test/concurrency-parse-single-source.test.mjs`，4 条断言 —— ① 同一性 `readConcurrencyFromExecArgv === readConcurrency`；② 解析行为表（`1.5`/`2.5`/`0`/`-2`/`abc` → 1；`=4`/` 3` → 4/3；首个合法 flag 胜出）；③ 真跑 reporter 生成器，读它**实际打印**的 `__GROUP__ concurrency=`，断言 1.5 打 1（而非 1.5）且恒等于 runner 的解析值；④ **运行时臂（本轮补）**——真 spawn 一个 runner 进程（`--test-concurrency=1.5`），读它的**生产载体**：stdout spec（`ℹ pass 1`、`✔ trivially passes`）与 stderr `__GROUP__ concurrency=1 files=1`，断言点起的 runner 确实跑完了 fixture、且「报的 1 lane = 跑的 1 lane」。⛔ 必须剥掉继承来的 `NODE_TEST_CONTEXT`，否则子进程被当成 parent-runner child（实测 `pass 0` / `files=0`，断言读到的是**一次没发生的运行**——又一个「空转」）。
+**负控制（判据能取假，实跑过）**：把谓词改回 `Number.isFinite` ⇒ ②③ 变红；把 runner 改回本地副本 ⇒ ①③ 变红；把 runner 改回别名-only 的 `export { … as … }` ⇒ **④ 变红，而 ①②③ 全绿**——这正是 ④ 存在的理由。变异用 `cp` 备份、`cp` 复原（md5 校验一致：`25f3509e1dee7abf825410f7d31aca8f`）。
 
 **5b 扫描（同原则的其它落点）**：把 `--test-concurrency` 参数解析成**数字**的站点共 3 处 —— ① `measure-suite-reporter.mjs:readConcurrency`（现唯一源）；② `suite-lpt-runner.mjs`（现为 re-export，无副本）；③ `runner-concurrency.ts:bucketTestConcurrency`（`/^[0-9]+$/`，本就只收整数，且它是**选值**方、不是**读值**方 ⇒ 不在本 divergence 类）。`suite-scheduler.ts:507` 只 **strip** 该 flag、不做数字解析。
 
@@ -52,6 +53,13 @@ merge
 ## DoD
 - [x] 上面的判据实跑通过
 - [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+
+## Evidence
+- **复现（修前，worktree HEAD `5e9ff89c8`）**：`node plugin/scripts/suite-lpt-runner.mjs` ⇒ `ReferenceError: readConcurrencyFromExecArgv is not defined` at `plugin/scripts/suite-lpt-runner.mjs:128`。与上一轮 fan-in suite 红的签名逐字一致，⇒ **真阳，不是环境噪声**。
+- **修后**：同命令 ⇒ `suite-lpt-runner: no test files given (invoke via scripts/test.sh --buckets <task>)`，exit 2 —— 模块正常加载并走到预期分支。
+- `node --test plugin/test/concurrency-parse-single-source.test.mjs` ⇒ tests 4 / pass 4 / fail 0。
+- `node --test plugin/test/suite-lpt-order.test.mjs` ⇒ tests 21 / pass 21 / fail 0（含上轮点红的那条 AC1/AC2 用例）。
+- **生产载体读数**（真 spawn，非 fixture 回声）：`__GROUP__ concurrency=1 files=1 sum_ms=40.695599 …` + `✔ trivially passes` + `ℹ pass 1`。
 
 ## Touches
 - `plugin/scripts/suite-lpt-runner.mjs`
