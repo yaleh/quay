@@ -336,3 +336,6 @@ $ git -C <worktree> diff --name-only develop...HEAD | grep -E '^plugin/scripts/.
 执行轮读数：`ps aux | grep -c '[q]uay-task-worker'` ⇒ **4**。
 
 **观察项（非目标，⛔ 不构成任何门禁要求）**：`quay serve` **无监督者** —— web 不在 `plugin/scripts/driver-anchor.ts` 的 `DRIVER_KINDS` 六类里，`start-drivers.ts` 只在**被调用时**判 staleness/down ⇒ 实例死亡后不会被自动拉回。发生率读数（硬规则 12，查历史而非等下一轮；⛔ 下列为**本轮读数**，台账尾会继续增长）：台账 `item_id=AC-291` 事件共 **200** 条，其中含 `no-running-serve-instance` 的 **4** 条，跨越 **2** 个日期（2026-09-23、2026-09-29），verdict 全为 `fail`；家族面含 `.quay/server.json` 的 goal 文件 **17** 个。本执行的**承接线**：派发时已有一个 cwd=仓库根的活实例（pid 3652175），**直接复用**，⛔ 未重启任何 peer 在飞任务所依赖的服务。
+
+
+执行轮 4（2026-09-29，worker worktree）—— 本轮 exited-not-landed 于 step=suite，⛔ 不是本任务 delta 的缺陷。读数：suite 红 23（20 确定性 + 3 同源计数），其中 20 条分布在 packages/quay/test/ac{292,301,303}-criterion-address-derivation.test.mjs；那三份夹具与本任务工作树/develop 逐字相同（git diff develop HEAD -- <三文件> 为空），失败形一律 '3 !== 1'。根因：三支兄弟任务的 quay goal write 已直落 develop（判据的可评估性出口已 exit 3），而其绑定夹具只能经 fan-in 落地 ⇒ 合并树不绿。本任务 delta 只有 packages/quay/test/ac291-...test.mjs 一条，其夹具 13/13 绿，scoped 门 exit 0。剩余 1 条 plugin/test/tmux-isolated.test.mjs 隔离跑 5/5 绿 ⇒ suite 负载下的 flake，非缺陷。该机制已由 gap-goal-write-outruns-bound-fixture-family-deadlock（status ready）立案；其永久化半边是 gap-ac292 已 needs-human（分支带着自己的夹具修复却不落地）⇒ 家族一起落地或改 goal 写入时序之前，本任务无法经 fan-in 落地。⛔ 未越 Touches、未改任何兄弟夹具。
