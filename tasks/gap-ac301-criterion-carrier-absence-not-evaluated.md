@@ -395,3 +395,15 @@ reason 逐字 = `touches-overlap-in-flight (peer gap-ac291-criterion-carrier-abs
 自己的判定，两条候选解法的裁决归 manager，worker 不得自行扩 Touches（AC7）。
 
 本轮未扩 Touches、未改兄弟夹具、未写 status、未 un-park、未新增 plugin/scripts 脚本。
+
+---
+_2026-09-29T05:19:53.901Z_: <!-- dedup-ref -->
+_2026-09-29T05:30Z_: 第 9 轮（worker）。**本轮新增读数：解法 1 已实测可行 —— 修复是现成的，缺的只是一个被授权的执行者。**
+
+在 worktree 内取三支兄弟分支各自的夹具（`git checkout task/gap-ac29{1,2,3}-criterion-carrier-absence-not-evaluated -- packages/quay/test/ac29{1,2,3}-criterion-address-derivation.test.mjs`）后合跑四份夹具 ⇒ **70 tests / 70 pass / 0 fail**（ac291 13 / ac292 16 / ac301 17 / ac303 24；逐文件单独复跑同值）。三份兄弟夹具相对各自 merge-base 是**干净的前向改动**（`git diff <mb> develop -- <该文件>` 为空 ⇒ develop 自分叉点起未动过它们），且 develop 上三条判据的可评估性出口已是 `exit 3` ⇒ 取过来即同形。
+
+⇒ 结论：`gap-goal-write-outruns-bound-fixture-family-deadlock` 的解法 1 **不再是假设**（四份夹具同树全绿已被直接量证明），只等「一个任务同时带四份夹具落地」这个动作。该动作的裁决归 manager（该任务 Finding 逐字：「两条候选解法（裁决归 manager，本条只立案不裁决）」；其 Finding 亦逐字记「worker 不能从自己的 mandate 里破」）。
+
+本轮读侧复核（硬规则 2/4c，均在 worktree 内取自 git 而非转述）：suite 日志 `# fail 21` 的 **21 条全部**落在三份兄弟夹具（ac291 6 / ac292 7 / ac303 8），**无第四个红源**；本任务夹具 17/17 绿。吸收三份夹具后 `git restore --staged --worktree` 复原，工作树与本分支 `## Touches` 一致。
+
+本轮未扩 Touches、未改兄弟夹具（只在 worktree 内临时取用后复原）、未写 `status`、未 un-park、未新增 `plugin/scripts/*.ts`。
