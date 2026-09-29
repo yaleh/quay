@@ -44,8 +44,11 @@ extract
 - [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
+- `plugin/scripts/ratchet-baseline.ts`
 - `plugin/scripts/task-ac-carryover-check.ts`
 - `plugin/scripts/task-contract-check.ts`
 - `plugin/scripts/touches-one-entry-one-path-check.ts`
 - `plugin/scripts/threshold-scope-check.ts`
+- `plugin/scripts/capability-catalog-declarations.json`
+- `plugin/test/ratchet-baseline.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-baseline-reader-septuplication.md`
