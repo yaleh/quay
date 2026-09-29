@@ -341,3 +341,11 @@ $ git -C <worktree> diff --name-only develop...HEAD | grep -E '^plugin/scripts/.
 执行轮 4（2026-09-29，worker worktree）—— 本轮 exited-not-landed 于 step=suite，⛔ 不是本任务 delta 的缺陷。读数：suite 红 23（20 确定性 + 3 同源计数），其中 20 条分布在 packages/quay/test/ac{292,301,303}-criterion-address-derivation.test.mjs；那三份夹具与本任务工作树/develop 逐字相同（git diff develop HEAD -- <三文件> 为空），失败形一律 '3 !== 1'。根因：三支兄弟任务的 quay goal write 已直落 develop（判据的可评估性出口已 exit 3），而其绑定夹具只能经 fan-in 落地 ⇒ 合并树不绿。本任务 delta 只有 packages/quay/test/ac291-...test.mjs 一条，其夹具 13/13 绿，scoped 门 exit 0。剩余 1 条 plugin/test/tmux-isolated.test.mjs 隔离跑 5/5 绿 ⇒ suite 负载下的 flake，非缺陷。该机制已由 gap-goal-write-outruns-bound-fixture-family-deadlock（status ready）立案；其永久化半边是 gap-ac292 已 needs-human（分支带着自己的夹具修复却不落地）⇒ 家族一起落地或改 goal 写入时序之前，本任务无法经 fan-in 落地。⛔ 未越 Touches、未改任何兄弟夹具。
 
 更正上一则笔记的计数（硬规则 2：贴出计数前先核命中）：精确读数为 22 条家族红 + 1 条 flake = 23，不是 20。（a）本工作树（ac291 夹具已修）跑出的 23 = ac292 7 + ac301 7 + ac303 8 + plugin/test/tmux-isolated.test.mjs 1；上一则写的 20 来自一次被 head 截断的隔离跑，作废。（b）develop 树的家族红是 28 = 上述 22 + 本任务自己的 ac291 6 条（develop 上 ac291 夹具仍断言 1）。逐字依据：suite 日志 'AssertionError [ERR_ASSERTION]' 行 = 23；'test at <file>' 头按文件分布 = ac292 7 / ac301 7 / ac303 8 / tmux-isolated 1；tmux-isolated 隔离跑 5/5 绿 ⇒ 负载 flake。本任务 delta 仍是唯一一条 ac291 夹具，13/13 绿。
+
+
+执行轮 5（2026-09-29T04:02Z，同一 worker worktree）—— 本轮**未改任何代码**（`git merge develop` ⇒ `Already up to date`；`git merge-base --is-ancestor develop HEAD` ⇒ 真，分支已自带前 13 提交的全部实现）。本轮只做**逐条 AC 复核**与**死锁现状的直接量复核**。
+
+**复核读数（本轮实测，⛔ 非转述）**：合并树内四份绑定夹具逐文件 `node --test` ⇒ ac291 **13 tests / 13 pass / 0 fail**（本任务 delta，绿色）、ac292 **13 / 6 / 7 fail**、ac301 **14 / 7 / 7 fail**、ac303 **20 / 12 / 8 fail**，合计 **22 红**，与 fan-in suite 日志 `# fail 22` 逐字一致；红形一律 `expected exit 1, got 3`。`ready-pool-check.ts --json` ⇒ `pool=4`、`dispatchable_disjoint=3`、`landing_blocked=false`、`suite_blocking.consecutive_red=0`、`ready=[ac291, ac301, ac303, 解法任务]`。
+
+<!-- dedup-ref -->
+**⚠️ 新观察（本轮机械算出，⛔ 非关键词匹配）**：逐文件求 `## Touches` 交集 ⇒ 三个兄弟任务**彼此不相交**，而解法任务 `gap-goal-write-outruns-bound-fixture-family-deadlock` 的 5 条 Touches 与三个兄弟**逐一相交**（各命中同一条夹具）⇒ `dispatchable_disjoint=3` 中那个非 disjoint 项就是**解法任务本身**。后果：解法任务只能在三个兄弟都不在飞时才被派，而三个兄弟每轮 fan-in 失败即被重派（重试上限因 `unrelated-flaky-exempt` 不前进）⇒ **存在「解法被它所要解锁的那三个任务饿死」的路径**。本任务⛔ 不改任何状态（不 un-park 兄弟、不自改 `status`、不扩 `## Touches`），只把读数记在此处。
