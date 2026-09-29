@@ -360,3 +360,6 @@ Touches 是 goal 文件与任务文件（都无同名测试）。**这不代表�
   `confirmed-failing` 每轮立案 —— 这才是本次修改要买的东西（本轮这份任务本身就是旧形态的产物）。
 - ⚠️ 该实例同样没有监督者（见上），它再次死掉时判据会回到 `not-evaluated`；那是一个**诚实**的读数，
   而不再是一次虚假立案。
+
+---
+_2026-09-29T04:12:20.535Z_: 第 4 轮 fan-in 退出成因（2026-09-29，跨任务红源，⛔ 非本任务缺陷）：step=suite 的红全部落在三份**兄弟夹具**上，本任务夹具 17/17 绿。读数：ac291 7 红 / ac292 7 红 / ac303 10 红，三份在 develop 上与本工作树逐字相同（git diff develop HEAD -- <file> 为空），而 goals/AC-291/292/303-*.md 的可评估性出口已在 develop 上 exit 3。成因：quay goal write 立即 propagate 到 develop，绑定夹具却只能经 fan-in 落地 —— 家族四支分支各只带自己那份夹具修复 ⇒ 无一支分支的合并树全绿 ⇒ 谁也落不了地。既有立案：gap-goal-write-outruns-bound-fixture-family-deadlock（status ready，## Touches = 四份夹具，在 ready pool 内）。本任务不扩 Touches（AC7），修复由该家族任务一次带四份夹具落地完成。
