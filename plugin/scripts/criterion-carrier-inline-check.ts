@@ -28,6 +28,25 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { helpExit } from "./gate-script-base.ts";
+
+/** `--help` prints usage FIRST and exits 0, side-effect-free — the `-check.ts` contract pinned by
+ *  plugin/test/help-contract-incompatible-behaviors.test.mjs. ⛔ Not optional: a `-check.ts` that
+ *  rejects `--help` reads as a harness failure, and one that silently runs would be worse. */
+const USAGE = `criterion-carrier-inline-check — no goal criterion may inline the live-host carrier path.
+
+Usage:
+  node --no-warnings --experimental-strip-types criterion-carrier-inline-check.ts [--root <dir>]
+
+Reads every <root>/goals/*.md record and reports any whose CRITERION text names the live-host
+carrier file — an inlined copy of the derivation plugin/scripts/live-web-address.ts owns.
+⛔ Only the criterion position is read; origin/expect prose is never scanned.
+
+Exit codes:
+  0  every criterion is clean
+  1  >=1 criterion inlines the carrier (named, with its goal file)
+  2  usage error, or the goals dir cannot be read (NOT-EVALUATED, ⛔ never an empty pass)
+`;
 
 /** The file name a criterion must NOT name itself. Any occurrence — in an inline `node -e` payload,
  *  in a shell variable assignment, even in a `#` comment — is reported: the criterion is executable
@@ -75,6 +94,8 @@ export function scanGoalDir(goalDir: string): InlineViolation[] {
 }
 
 function main(argv: readonly string[]): number {
+  // The `-check.ts` help contract, evaluated BEFORE any work: usage + exit 0, no side effect.
+  if (argv.includes("--help") || argv.includes("-h")) helpExit(USAGE);
   let root = process.cwd();
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--root") {

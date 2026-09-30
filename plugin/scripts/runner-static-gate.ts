@@ -345,8 +345,18 @@ run_static_checks() {
   # 是 plugin/scripts/live-web-address.ts，判据只能【调用】它；判据再点名载体就是第 18 份副本。按位置判定：
   # 只读每条记录的 criterion 文本（可执行的那段），⛔ 不扫 origin/expect 散文。goals 目录读不到 ⇒ exit 2
   # NOT-EVALUATED，⛔ 不是空列表冒充通过（硬规则 3b）。
+  # ⛔ `goals/` 刻意【不】登记为 @static-object：本检查器确实读 goals/，但登记一个目录 glob 会命中
+  # goals/ 下的每条路径，而 `isDocPath` 的注册表覆盖【先于】DOC_SURFACES 生效 ⇒ 整个 goals/ 面由
+  # doc 翻成 CODE。本任务实测两次同源红：plugin/test/fan-in-execute-paths-s01.test.mjs 的
+  # 「① REAL doc delta」（`pure-doc delta must produce empty code_delta, got: "goals/AC-999-fake.md"`）
+  # 与 plugin/test/fan-in-ff-merge.test.mjs 的「非 ASCII inert increment 仍走 in-lock retry」——
+  # 后者因 increment 被误判 code、inert retry 永不触发而 ff 失败。DOC_SURFACES 里的 `goals/` 是另一个
+  # 任务（gap-doc-surfaces-missing-goals-prefix）钉过的结论，那条优先。代价诚实记下：**只改 goals/ 的
+  # 分支 code_delta 为空 ⇒ 跳过全量 suite ⇒ 本检查器那一轮不跑**；覆盖来自 ①本检查器自身文件（脚本/单测/
+  # mutation case）被触碰时的 scoped 子集，②任何一次真正跑起来的全量 suite（run_static_checks 本行无条件
+  # 执行）。⛔ 不要为了补这个洞把目录 glob 加回来（同 criterion-failure-attribution-check 上方的实证坑）。
   # @static-tier change
-  # @static-object goals/ plugin/scripts/live-web-address.ts plugin/scripts/criterion-carrier-inline-check.ts plugin/test/criterion-carrier-inline-check.test.mjs
+  # @static-object plugin/scripts/live-web-address.ts plugin/scripts/criterion-carrier-inline-check.ts plugin/test/criterion-carrier-inline-check.test.mjs
   run_checker "criterion-carrier-inline-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/criterion-carrier-inline-check.ts" --root "${repo_root}"
   echo "== registry-path literal check (gap-registry-path-second-copy-five-checker-sites, AC5) =="
   # 检查器注册表 runner-static-gate.ts 的【路径】只有单一正本（select-static-checks-for-touches.ts 的
