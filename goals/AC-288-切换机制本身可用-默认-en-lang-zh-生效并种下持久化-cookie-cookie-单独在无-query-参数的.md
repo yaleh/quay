@@ -22,33 +22,15 @@ criterion: >-
   }
 
   carrier_addr() {
-    f="$root/.quay/server.json"
-    [ -f "$f" ] || { echo "carrier-absent"; return; }
     kill -0 "$1" 2>/dev/null || { echo "candidate-pid-dead"; return; }
-    if command -v node >/dev/null 2>&1; then
-      o=$(node -e '(()=>{const j=require(process.argv[1]);if(String(j.pid)!==process.argv[2])return console.log("carrier-pid-mismatch");const w=(j.services||[]).filter(x=>x&&x.name==="web");if(!w.length)return console.log("carrier-no-web-service");if(w[0].up!==true)return console.log("carrier-web-down");console.log("addr="+w[0].host+":"+w[0].port)})()' "$f" "$1" 2>/dev/null)
-    elif command -v python3 >/dev/null 2>&1; then
-      o=$(python3 -c 'import json,sys
-  d=json.load(open(sys.argv[1]))
-
-  if str(d.get("pid"))!=sys.argv[2]: print("carrier-pid-mismatch"); sys.exit()
-
-  w=[x for x in (d.get("services") or []) if x.get("name")=="web"]
-
-  if not w: print("carrier-no-web-service"); sys.exit()
-
-  if w[0].get("up") is not True: print("carrier-web-down"); sys.exit()
-
-  print("addr=%s:%s"%(w[0].get("host"),w[0].get("port")))' "$f" "$1"
-  2>/dev/null)
-    else
-      o="carrier-no-json-tool"
-    fi
+    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$1" 2>&1)
     rc=$?
-    if [ -z "$o" ]; then
-      if [ "$rc" != 0 ]; then o="carrier-unreadable-rc$rc"; else o="carrier-unreadable"; fi
-    fi
-    echo "$o"
+    case "$rc:$o" in
+      0:*) printf 'addr=%s\n' "$o" ;;
+      1:carrier-web-down) printf 'carrier-web-down\n' ;;
+      3:*) printf '%s\n' "${o:-carrier-unreadable}" ;;
+      *) printf 'carrier-helper-unavailable(exit=%s)\n' "$rc" ;;
+    esac
   }
 
   fail() { echo "CAUSE=$1" >&2; if [ -n "$cands" ]; then echo "CANDIDATES:$rep"
@@ -82,7 +64,7 @@ criterion: >-
 
   if [ -z "$addr" ]; then
     if [ -z "$cands" ]; then fail "no-running-serve-instance -- no quay.ts serve process with cwd=$root; the locale mechanism cannot be evaluated on a live surface (AC-179 probe pattern)"; fi
-    fail "no-derivable-address -- pgrep -f 'quay.ts serve' x cwd=$root matched candidate(s) but none yielded a live web address (an explicit --port >= 1 on the process's own argv, or this root's .quay/server.json naming that pid's web service)"
+    fail "no-derivable-address -- pgrep -f 'quay.ts serve' x cwd=$root matched candidate(s) but none yielded a live web address (an explicit --port >= 1 on the process's own argv, or this root's live-service state carrier naming that pid's web service)"
   fi
 
   # <<< addr-derivation
