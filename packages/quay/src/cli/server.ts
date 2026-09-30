@@ -496,11 +496,15 @@ function spawnHost(workspaceRoot: string, initial: string[], port: string | unde
   // The dev tree entry is a `.ts` file (needs the strip-types flag); the shipped bundle is `.js`
   // and must NOT be given it (an older Node would reject the flag on a plain ESM bundle).
   const stripTypes = entry.endsWith(".ts") ? ["--experimental-strip-types"] : [];
-  // ⛔ `--port` is passed ONLY when the caller named one (gap-serve-same-root-admission-lock): the
-  // web port's default now belongs to ONE place — `startServer`'s own `port = 0` (kernel-assigned
-  // ephemeral). Spelling a hardcoded number here would be a second, silently diverging default, and
-  // pinning every spawned host to one number is exactly the collision the ephemeral default removes.
-  const args = ["--no-warnings", ...stripTypes, entry, "serve", "--host", hostFlag ?? "127.0.0.1",
+  // ⛔ Neither `--host` nor `--port` is spelled here unless the caller named one
+  // (gap-serve-binding-defaults-three-copies-to-one-definition-point). BOTH defaults now belong to
+  // ONE place — `resolveServeBinding` in packages/quay/src/serve-binding.ts, reached by the spawned
+  // `quay serve` itself (CLI flag > `.quay/config.yml` `serve:` > the single fallback). Before this,
+  // this line injected a SECOND host default (a loopback fallback tacked onto `hostFlag`) that
+  // contradicted the web leg's own all-interfaces default — the same command listening on two
+  // different surfaces depending on which entry the operator happened to use.
+  const args = ["--no-warnings", ...stripTypes, entry, "serve",
+    ...(hostFlag !== undefined && hostFlag !== "" ? ["--host", hostFlag] : []),
     ...(port !== undefined && port !== "" ? ["--port", port] : [])];
   const child = spawn(process.execPath, args, {
     cwd: workspaceRoot,

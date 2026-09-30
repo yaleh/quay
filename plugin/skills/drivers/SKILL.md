@@ -24,8 +24,11 @@ The three commands the script wraps (per `quay driver --help` / `quay serve`, 20
 ```
 quay driver start --kind promotion [--root <path>]
 quay driver start --kind worker    [--root <path>]
-quay serve --host <ip> --port <p>            # web UI (default host 0.0.0.0; --port omitted ⇒ kernel-assigned
-                                             # ephemeral port, read back from .quay/server.json)
+quay serve [--host <ip>] [--port <p>]        # web UI — BOTH flags optional. Omitted ⇒ resolved through
+                                             # the ONE definition point (packages/quay/src/serve-binding.ts):
+                                             # .quay/config.yml `serve.host`/`serve.port`, else the single
+                                             # fallback — host 0.0.0.0, port 0 = kernel-assigned ephemeral
+                                             # (read back from .quay/server.json)
 ```
 
 The script is **idempotent** — safe to call repeatedly:
@@ -53,15 +56,19 @@ directory you just ran `quay-init` in. If the script is not run from inside the 
 node --experimental-strip-types plugin/scripts/start-drivers.ts
 ```
 
-With an explicit workspace root / non-default web binding:
+With an explicit workspace root (and, only when you must pin the binding, `--host` / `--port`):
 
 ```bash
 node --experimental-strip-types plugin/scripts/start-drivers.ts \
-  --root <path> --host 0.0.0.0
+  --root <path>
 
-# ⛔ `--port` is optional and defaults to 0 =「让内核分配临时端口」. Pass it only to PIN an exact port
-# (a deployment that must be addressable at a fixed number); a real collision then fails loudly rather
-# than silently moving to another port.
+# ⛔ `--host` and `--port` are FORWARDED to the spawned `quay serve` ONLY WHEN GIVEN
+# (gap-serve-binding-defaults-three-copies-to-one-definition-point): an omitted flag is NOT written into
+# the child's cmdline. Omitted ⇒ the host resolves it through the ONE definition point
+# (packages/quay/src/serve-binding.ts): `.quay/config.yml`'s `serve.host` / `serve.port`, else the single
+# fallback — host 0.0.0.0, port 0 =「让内核分配临时端口」. Pass `--port` only to PIN an exact port (a
+# deployment that must be addressable at a fixed number); a real collision then fails loudly rather than
+# silently moving to another port.
 ```
 
 On success the script prints, per component, whether it was already running or was started (e.g.
