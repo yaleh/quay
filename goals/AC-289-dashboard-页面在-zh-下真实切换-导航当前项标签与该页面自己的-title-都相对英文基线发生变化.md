@@ -89,20 +89,50 @@ criterion: >-
   done
 
 
+  # ── THE THREE UNEVALUABLE BRANCHES BELOW CARRY THE REPO'S NOT-EVALUATED CODE,
+  NOT 1 ────────────
+
+  # WHY (2026-09-30, gap-ac289-criterion-carrier-absence-not-evaluated): "no
+  live instance", "no
+
+  # derivable address" and "no reachable address" are each "I cannot evaluate
+  this HERE", not "this
+
+  # is false". The repo already fixed a value for that state —
+  plugin/scripts/live-web-address.ts's
+
+  # header cites the word list verbatim (0=pass / 1=fail / 2=usage /
+  3=not-evaluated), and
+
+  # packages/quay/src/gate/acceptance-runner.ts maps only 126/127 to
+  not-runnable, so a branch that
+
+  # wants the not-evaluated verdict must carry that code itself. Measured before
+  this amendment:
+
+  # goal-driver.ts's runPrefilingRecheck read these branches as
+  `confirmed-failing` and filed a gap
+
+  # EVERY round against a live server that was answering. The 10 ASSERTION
+  branches below are
+
+  # UNCHANGED and still carry the failure code — a broken page must never read
+  as unevaluable.
+
   if [ "$ncand" = 0 ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  (AC-179 probe pattern)" >&2; exit 3; fi
 
 
   if [ "$nderived" = 0 ]; then printf 'CAUSE=no-derivable-serve-address -- %s
   quay.ts serve candidate(s) with cwd=%s, none yielded a derivable address;
-  per-candidate readings:%s\n' "$ncand" "$root" "$report" >&2; exit 1; fi
+  per-candidate readings:%s\n' "$ncand" "$root" "$report" >&2; exit 3; fi
 
 
   if [ -z "$addr" ]; then printf 'CAUSE=no-reachable-serve-address -- %s
   derivable address(es) among %s candidate(s) for cwd=%s, none answered $ROUTE
   (connection refused / timed out / non-2xx); per-candidate readings:%s\n'
-  "$nderived" "$ncand" "$root" "$report" >&2; exit 1; fi
+  "$nderived" "$ncand" "$root" "$report" >&2; exit 3; fi
 
 
   printf 'AC-289 candidate readings (cwd=%s):%s\n' "$root" "$report" >&2
