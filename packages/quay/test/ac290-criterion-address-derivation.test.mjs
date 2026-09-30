@@ -46,6 +46,19 @@
 // "evaluated"). One test additionally pins the ELEVEN `CAUSE=` refusal branches of the pre-amendment
 // criterion, because the amendment re-anchored the address derivation only and must not have
 // dropped or reworded them.
+//
+// ── THE 2026-09-30 AMENDMENT: CARRIER ABSENCE IS `not-evaluated` (exit 3), NOT `false` (exit 1) ──
+// (gap-ac290-criterion-carrier-absence-not-evaluated). Until this revision the four branches that
+// report "I could not find / reach a live surface" exited 1, so a run in which no cwd=repo-root
+// `quay.ts serve` existed was RECORDED as the criterion being false — a state the repo already has a
+// value for (`goal-store.ts:311-318` names it verbatim: "exit 3 — this repo's convention, e.g.
+// NOT-EVALUATED: carrier absent"; `gate/acceptance-runner.ts`'s `verdictFromAcceptance` maps 3 to
+// `not-evaluated`/`declared`). The seven negative cases in §④ therefore assert `code === 3`; the five
+// positive cases in §①/§② still assert `code === 0` and are byte-for-byte unchanged. §④ was already a
+// measurement of the derivation BLOCK (`derive()` appends `exit 0`), so it pins the block's own exit
+// status; the two NEW cases in §⑥ run the WHOLE criterion (`runCriterion()`) against a self-made live
+// surface, which is what keeps the assertion branches' teeth a BEHAVIOUR reading rather than a claim:
+// a zh response that is genuinely translated ⇒ exit 0, one that is not ⇒ exit 1 + a named refusal.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,6 +75,11 @@ const REPO = path.resolve(HERE, "..", "..", "..");
 
 const MARK_START = ">>> addr-derivation";
 const MARK_END = "<<< addr-derivation";
+
+/** Why the seven §④ negatives assert 3 and not 1 — the whole point of the 2026-09-30 amendment, kept
+ *  on every one of them so a future reader does not "fix" one back to a bare failure. */
+const NOT_EVALUATED_WHY =
+  "carrier absence is NOT-EVALUATED (exit 3), never 'this is false' (exit 1) — hard rule 3b";
 
 /** The one goal file this fixture is pinned to. Resolved by id prefix, so a rename that keeps the
  *  id still resolves; a missing file fails loudly rather than skipping. */
@@ -178,6 +196,41 @@ function listen() {
 }
 
 /**
+ * A real HTTP listener on 127.0.0.1:0 that answers EVERY path with one of two bodies, chosen by the
+ * request's own `Cookie: lang=zh` header — exactly the two probes the criterion makes. `en` and `zh`
+ * are injected by the caller, so a case decides for itself whether the zh response is WIRED or not;
+ * that is what lets §⑥ exercise the assertion branches as a behaviour rather than a claim.
+ */
+function listenTasks({ en, zh }) {
+  return new Promise((resolve, reject) => {
+    const script = [
+      'const h = require("http");',
+      `const en = ${JSON.stringify(en)};`,
+      `const zh = ${JSON.stringify(zh)};`,
+      "const s = h.createServer((q, r) => {",
+      '  const wantsZh = /(?:^|;\\s*)lang=zh(?:;|$)/.test(q.headers.cookie || "");',
+      '  r.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });',
+      "  r.end(wantsZh ? zh : en);",
+      "});",
+      's.listen(0, "127.0.0.1", () => console.log(s.address().port));',
+    ].join("\n");
+    const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
+    child.stdout.setEncoding("utf8");
+    let buf = "";
+    const t = setTimeout(() => reject(new Error("tasks listener never announced its port")), 10000);
+    child.stdout.on("data", (d) => {
+      buf += d;
+      const m = /(\d+)\s*\n/.exec(buf);
+      if (m) {
+        clearTimeout(t);
+        resolve({ child, port: Number(m[1]) });
+      }
+    });
+    child.once("exit", () => clearTimeout(t));
+  });
+}
+
+/**
  * SIGKILL and WAIT FOR THE REAP. An un-reaped child stays in the process table as a zombie, and
  * `kill(pid, 0)` — the liveness probe both this fixture and the product's `pidAlive` use — reports a
  * zombie as ALIVE. Waiting for the `exit` event lets node reap it, so "dead" means dead here.
@@ -215,6 +268,14 @@ function derive(root) {
     `echo "REPORT:$rep"\n` +
     `exit 0\n`;
   return runSh(script, root);
+}
+
+/** Run the WHOLE shipped criterion — not just the derivation block — in `root`. This is the exact
+ *  text `quay goal gate AC-290` executes, so §⑥'s two cases are behaviour measurements of the
+ *  assertion branches (the §①–④ `derive()` cases deliberately stop at the block, so they can pin the
+ *  derivation's own contract without a page to assert over). */
+function runCriterion(root) {
+  return runSh(criterionText(), root);
 }
 
 /** The candidate row the block emits for one pid, or undefined when that pid is absent. */
@@ -378,7 +439,7 @@ test("no carrier: refuses with FAIL=no-derivable-serve-address and names both ca
       const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
       children.push(child);
       const r = derive(root);
-      assert.equal(r.code, 1, "a root whose only serve candidate has no carrier must not derive an address");
+      assert.equal(r.code, 3, "a root whose only serve candidate has no carrier must not derive an address");
       assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
       const row = candidateRow(r.stderr, child.pid);
       assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
@@ -403,7 +464,7 @@ test("carrier naming another pid is refused (pid is the positional link, not the
         services: [{ name: "web", pid: child.pid + 1000000, host: "172.28.0.1", port: 34570, up: true }],
       });
       const r = derive(root);
-      assert.equal(r.code, 1);
+      assert.equal(r.code, 3, NOT_EVALUATED_WHY);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-pid-mismatch/);
     },
   );
@@ -422,7 +483,7 @@ test("carrier with no `web` entry is refused (a control-only carrier names no we
         services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 34571, up: true }],
       });
       const r = derive(root);
-      assert.equal(r.code, 1);
+      assert.equal(r.code, 3, NOT_EVALUATED_WHY);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-no-web-service/);
     },
   );
@@ -441,7 +502,7 @@ test("carrier whose web service is down is refused (a down service is not an add
         services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34572, up: false }],
       });
       const r = derive(root);
-      assert.equal(r.code, 1);
+      assert.equal(r.code, 3, NOT_EVALUATED_WHY);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-web-down/);
     },
   );
@@ -461,7 +522,7 @@ test("a carrier that is not a schemaVersion-1 record is unreadable, not silently
         services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34573, up: true }],
       });
       const r = derive(root);
-      assert.equal(r.code, 1);
+      assert.equal(r.code, 3, NOT_EVALUATED_WHY);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-unreadable/);
     },
   );
@@ -483,7 +544,7 @@ test("a derivable but UNREACHABLE address refuses with no-reachable-serve-addres
         services: [{ name: "web", pid: child.pid, host: "127.0.0.1", port, up: true }],
       });
       const r = derive(root);
-      assert.equal(r.code, 1, "a derived-but-refused address must not read as a derivation");
+      assert.equal(r.code, 3, "a derived-but-refused address must not read as a derivation");
       assert.match(r.stderr, /FAIL=no-reachable-serve-address/);
       const row = candidateRow(r.stderr, child.pid);
       assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
@@ -502,7 +563,7 @@ test("no serve process at all: the verbatim no-running-serve-instance branch, wi
     async (root) => {
       children.push(spawnNotAServe(root));
       const r = derive(root);
-      assert.equal(r.code, 1);
+      assert.equal(r.code, 3, NOT_EVALUATED_WHY);
       assert.equal(r.stdout, "", "the refusal must exit before the post-block echoes");
       assert.match(r.stderr, /CAUSE=no-running-serve-instance -- no quay\.ts serve process with cwd=/);
       // The report is printed on this branch too: a candidate that derived nothing still carries its
@@ -543,4 +604,99 @@ test("the eleven pre-amendment CAUSE branches are present and the count is uncha
       `the re-anchor dropped the pre-existing refusal branch ${t}`,
     );
   }
+});
+
+// ── ⑤b exactly four branches report not-evaluated and the ten assertion branches still fail ──────
+
+test("exactly four branches report not-evaluated and the ten assertion branches still fail", () => {
+  const lines = criterionText().split("\n");
+  // `exit 3; fi` and not a bare /\bexit 3\b/ — the amendment's own WHY comment quotes "exit 3" as
+  // PROSE, and a keyword count that cannot tell the two apart would be a count of the comment.
+  const notEvaluated = lines.filter((l) => /\bexit 3\s*;\s*fi\b/.test(l));
+  assert.equal(
+    notEvaluated.length,
+    4,
+    `exactly four carrier-absence branches report not-evaluated, got ${notEvaluated.length}:\n${notEvaluated.join("\n")}`,
+  );
+  for (const token of [
+    "FAIL=workspace-root-unresolvable",
+    "FAIL=no-derivable-serve-address",
+    "FAIL=no-reachable-serve-address",
+    "CAUSE=no-running-serve-instance",
+  ]) {
+    assert.ok(
+      notEvaluated.some((l) => l.includes(token)),
+      `${token} must report not-evaluated (exit 3), not "this is false"`,
+    );
+  }
+  // The other half of the amendment: nothing else moved. Every assertion branch keeps failing.
+  const failing = lines.filter((l) => /\bexit 1\b/.test(l));
+  assert.equal(
+    failing.length,
+    10,
+    `the ten assertion branches must still exit 1, got ${failing.length}:\n${failing.join("\n")}`,
+  );
+  for (const token of [
+    "CAUSE=en-fetch-failed",
+    "CAUSE=zh-fetch-failed",
+    "CAUSE=no-nav-region ",
+    "CAUSE=no-nav-region-zh",
+    "CAUSE=english-baseline-missing",
+    "CAUSE=no-title-tag ",
+    "CAUSE=html-lang-not-zh",
+    "CAUSE=nav-label-untranslated",
+    "CAUSE=no-title-tag-zh",
+    "CAUSE=title-unchanged",
+  ]) {
+    assert.ok(failing.some((l) => l.includes(token)), `${token} must still be able to say NO (exit 1)`);
+  }
+});
+
+// ── ⑥ the WHOLE criterion on a self-made live surface: it must still be able to say NO ───────────
+//
+// The §④ cases above pin the derivation BLOCK's exit status (they append `exit 0`). These two run
+// the ENTIRE criterion — the same text `quay goal gate AC-290` executes — so "the assertion branches
+// still have teeth" is a behaviour reading, not a claim about the diff. The live surface is built
+// HERE (a `git init`-ed scratch root, a real serve-shaped candidate with an explicit `--port N`, and
+// a real listener answering /tasks in two bodies by cookie): ⛔ nothing under
+// `packages/quay/src/serve-*.ts` is touched, and ⛔ the product's own serving path is not reused.
+
+const TASKS_EN = '<html lang="en"><nav><a href="/dashboard">Dashboard</a><a href="/tasks">Tasks</a></nav><title>Tasks - quay</title></html>';
+/** Wired: the zh nav no longer carries the English label and this page's own title switched. */
+const TASKS_ZH_WIRED = '<html lang="zh"><nav><a href="/dashboard">看板</a><a href="/tasks">任务</a></nav><title>任务 - quay</title></html>';
+/** Not wired: the zh response IS <html lang="zh"> and its title DID switch, but the nav is untouched. */
+const TASKS_ZH_UNTRANSLATED = '<html lang="zh"><nav><a href="/dashboard">Dashboard</a><a href="/tasks">Tasks</a></nav><title>任务 - quay</title></html>';
+
+test("the whole criterion PASSES (exit 0) on a live surface whose zh nav really is translated", async () => {
+  const { child: srv, port } = await listenTasks({ en: TASKS_EN, zh: TASKS_ZH_WIRED });
+  const children = [];
+  await withFixture(
+    children,
+    [srv],
+    async (root) => {
+      children.push(spawnServeShaped(root, { host: "127.0.0.1", port }));
+      const r = runCriterion(root);
+      assert.equal(r.code, 0, `a wired surface must PASS: ${r.stderr}`);
+      assert.match(r.stdout, /OK -- \/tasks:/);
+      // It reached the assertions — i.e. it did NOT read the address derivation's refusal path.
+      assert.doesNotMatch(r.stderr, /FAIL=/);
+    },
+  );
+});
+
+test("the whole criterion still FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page", async () => {
+  const { child: srv, port } = await listenTasks({ en: TASKS_EN, zh: TASKS_ZH_UNTRANSLATED });
+  const children = [];
+  await withFixture(
+    children,
+    [srv],
+    async (root) => {
+      children.push(spawnServeShaped(root, { host: "127.0.0.1", port }));
+      const r = runCriterion(root);
+      assert.equal(r.code, 1, `an unwired zh nav IS false — it must not report not-evaluated: ${r.stdout}`);
+      assert.match(r.stderr, /CAUSE=nav-label-untranslated/);
+      // The two states must not wear the same shape: this is FALSE (1), never NOT-EVALUATED (3).
+      assert.notEqual(r.code, 3);
+    },
+  );
 });
