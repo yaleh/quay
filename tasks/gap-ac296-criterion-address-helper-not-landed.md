@@ -6,7 +6,7 @@ title: AC-296 判据的地址派生调用 plugin/scripts/live-web-address.ts，�
   <html lang=zh / zh nav 计数 0 / 本页 title 变为「日志 / 循环最近记录」），且判据改写落库与判决 pass→fail
   相隔 36 秒而产品代码未动，夹具也同步撕开（仍断言 server.json）—— 助手的拥有者是 in-flight 的
   gap-criterion-live-web-address-derivation-17-copies-to-one
-status: ready
+status: done
 labels:
   - gap
   - defect
