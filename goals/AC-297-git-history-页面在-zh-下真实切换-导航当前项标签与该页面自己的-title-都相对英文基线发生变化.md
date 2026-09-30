@@ -110,9 +110,37 @@ criterion: >-
     echo "$o"
   }
 
+  # WHY fail() USES THE NOT-EVALUATED EXIT CODE AND NOT THE FALSE ONE
+  (2026-09-30, gap-ac297-criterion-carrier-absence-not-evaluated): this helper
+  is the shared exit of EXACTLY TWO branches -- no-running-serve-instance and
+  no-derivable-address -- and both of them say "I cannot evaluate this HERE",
+  not "this is false". This repo already fixed that convention everywhere else:
+  packages/quay/src/goal-store.ts reserves exit-code 3 for NOT-EVALUATED (its
+  own words: "I cannot evaluate this HERE" must not share an output shape with
+  "this is false"), acceptance-runner.ts's verdictFromAcceptance maps code 3 to
+  verdict "not-evaluated" (NOT_RUNNABLE_EXIT_CODES holds only 126/127, NOT 3),
+  and goal-driver.ts's runPrefilingRecheck files a task ONLY for verdict "fail"
+  (pass -> cleared; anything else, including not-evaluated -> no filing). Using
+  the false code here turned every absent carrier into a fresh confirmed-failing
+  filing: on 2026-09-30 this AC held 219 goal events, 2 of them
+  CAUSE=no-derivable-address, against a page wiring that was never broken. The
+  criterionHash never moved across the flip -- 1374f0d89eb3ccc6 reads pass at
+  2026-09-30T05:58:35Z and fail at 2026-09-30T07:07:21Z -- so the criterion did
+  not change, only the presence of its live carrier did, which is exactly the
+  confusion an exit code must not create. The TEN assertion branches below
+  (en-fetch-failed / zh-fetch-failed / no-nav-region / no-nav-region-zh /
+  english-baseline-missing / no-title-tag / html-lang-not-zh /
+  nav-label-untranslated / no-title-tag-zh / title-unchanged) keep the false
+  code VERBATIM: they are the two-valued half ("measured, and false"), and they
+  still have teeth -- that is the negative control this amendment is quantified
+  against. This AC has NO no-reachable-serve-address branch, so its "derived an
+  address but nobody answered" case lands on the en-fetch-failed assertion and
+  stays a false verdict by design.
+
+
   fail() { echo "CAUSE=$1" >&2; if [ -n "$cands" ]; then echo "CANDIDATES:$rep"
   >&2; else echo "CANDIDATES: none -- pgrep -f 'quay.ts serve' x cwd=$root
-  matched no process" >&2; fi; exit 1; }
+  matched no process" >&2; fi; exit 3; }
 
   addr=""
 
