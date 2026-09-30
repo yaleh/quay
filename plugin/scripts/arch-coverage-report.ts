@@ -39,6 +39,22 @@
 //                         unreadable one means the report itself cannot be trusted. exit 2 for this one.
 // The three never collapse into one another: (a) and (b) are per-row, (c) is top-level + non-zero exit.
 //
+// ── WHOLE-REPO SCOPES ARE REPORTED, NEVER CREDITED ────────────────────────────────────────────────
+// A manifest scope whose sources are the repo ROOT contains every tracked path BY CONSTRUCTION, so
+// "it covers everything" cannot be false and is therefore not a measurement (硬规则 4). Such a scope
+// arises trivially — ANY `archguard_analyze` that omits `sources` plans a project-root scope and takes
+// the manifest's `role:"primary"`; and once it holds that role a later sources-given analyze (the exact
+// shape `archguard-runner.ts` runs every round) can never displace it, because such a run contributes a
+// scope but no primary, after which the global is re-picked as the WIDEST parsed scope — which the root
+// scope, holding every file, always wins (measured 2026-09-30 on the main checkout AND on a worktree
+// copy; task gap-arch-coverage-primary-scope-usurped-by-root-analyze AC2). Crediting that scope made
+// this report read clean on precisely the question it exists to answer. So: every whole-repo scope is
+// LISTED (`ScopeRow.wholeRepo`), the declared global scope is CLASSIFIED (`globalScopeKind`, with a LOUD
+// `globalScopeNote` when it degenerates), and coverage attribution uses only the rest. The declared
+// scope's own readings (`globalScopeSources`, `globalScopeCoversTsFraction`) are kept LITERAL — the
+// degeneracy is disambiguated by a new, distinguishable value, ⛔ never by silently reporting some other
+// scope's number in its place (that substitution is itself the 硬规则 3b failure this report exists for).
+//
 // ── 口径 (the count caliber) ──────────────────────────────────────────────────────────────────────
 // Data source is ALWAYS `git ls-files` — ⛔ never `find`. Measured: one `find` walked into
 // `.claude/worktrees/*` and inflated the `.sh` count to 5213. The exclusion rules are declared ONCE in
@@ -332,9 +348,18 @@ export interface ScopeRow {
   /** The manifest's verbatim values, kept so nothing is lost by the relativization. */
   rawSources: string[];
   entityCount: number;
-  /** Tracked non-test .ts files attributed to THIS scope (most-specific attribution). */
+  /** Tracked non-test .ts files attributed to THIS scope (most-specific attribution).
+   *  ⛔ Always 0 when `wholeRepo` is true: a whole-repo scope is never credited (see that field). */
   tsFiles: number;
+  /** true ⇒ this scope's sources include `""`, the repo root, so it contains EVERY tracked path BY
+   *  CONSTRUCTION. Such a scope cannot be falsified, so "it covers everything" carries no information
+   *  (硬规则 4: a quantity that structurally cannot be false is not a measurement) — it is REPORTED
+   *  (here + `globalScopeNote`) but EXCLUDED from the coverage attribution in `buildReport`. */
+  wholeRepo: boolean;
 }
+
+/** The three states of the DECLARED global scope (硬规则 3b — they never collapse into one another). */
+export type GlobalScopeKind = "narrow" | "whole-repo" | "unresolved";
 
 export interface ArchguardSection {
   manifestFound: boolean;
@@ -347,6 +372,20 @@ export interface ArchguardSection {
    *  manifest (or its global scope) is unavailable, ⛔ never 0 (0 would read as "the global scope
    *  covers nothing", which is a different and much stronger claim). */
   globalScopeCoversTsFraction: number | null;
+  /** Classification of the DECLARED global scope. Consumers must branch on THIS, not on the length or
+   *  contents of `globalScopeSources`:
+   *   • `"narrow"`     — resolves to a scope narrower than the repo root: a real measurement surface.
+   *   • `"whole-repo"` — resolves to a scope whose sources include the repo root. It covers the tree by
+   *                      construction, so the AC3 finding cannot be measured against it (see the note).
+   *   • `"unresolved"` — no manifest / unparseable / the key does not resolve to any scope.
+   *  A manifest with no global scope at all is `"unresolved"` here, ⛔ never silently "narrow". */
+  globalScopeKind: GlobalScopeKind;
+  /** Non-null iff `globalScopeKind === "whole-repo"`. States IN WORDS that the declared global scope is
+   *  the repository root, that it covers every tracked path by construction, and that it is therefore
+   *  reported but not credited as coverage. The note is the point: substituting a reading from some
+   *  other scope for the declared one *silently* would itself be the 硬规则 3b failure this whole report
+   *  exists to kill, so the substitution is spelled out instead of performed. null in the other states. */
+  globalScopeNote: string | null;
   scopes: ScopeRow[];
 }
 
@@ -409,6 +448,8 @@ export function buildReport(input: BuildInput): Report {
     globalScopeResolved: false,
     globalScopeSources: [],
     globalScopeCoversTsFraction: null,
+    globalScopeKind: "unresolved",
+    globalScopeNote: null,
     scopes: [],
   };
   let archguard = emptyArchguard;
@@ -417,15 +458,38 @@ export function buildReport(input: BuildInput): Report {
 
   if (input.manifest) {
     const mainRoot = safeMainCheckoutRoot(root);
-    const scopes: ScopeRow[] = input.manifest.scopes.map((s) => ({
-      key: s.key,
-      label: s.label ?? null,
-      sources: s.sources.map((src) => relativizeSource(src, root, mainRoot)),
-      rawSources: [...s.sources],
-      entityCount: s.entityCount,
-      tsFiles: 0,
-    }));
-    const scopeRefs = scopes.map((s) => ({ key: s.key, relSources: s.sources }));
+    const scopes: ScopeRow[] = input.manifest.scopes.map((s) => {
+      const sources = s.sources.map((src) => relativizeSource(src, root, mainRoot));
+      return {
+        key: s.key,
+        label: s.label ?? null,
+        sources,
+        rawSources: [...s.sources],
+        entityCount: s.entityCount,
+        tsFiles: 0,
+        // "" is the repo root: a scope anchored there contains every tracked path, so nothing can ever
+        // be outside it. See the attribution comment below for why that must not be credited.
+        wholeRepo: sources.includes(""),
+      };
+    });
+
+    // ── Attribution runs over the NON-whole-repo scopes only ────────────────────────────────────────
+    // WHY THIS EXCLUSION IS THE FIX (gap-arch-coverage-primary-scope-usurped-by-root-analyze):
+    // `.archguard/query/manifest.json`'s `role:"primary"` is granted by whichever analyze runs WITHOUT
+    // `sources` (it then plans a scope rooted at the project root and marks it primary). Once a root
+    // scope holds that role, a later sources-given analyze — including the exact shape
+    // `archguard-runner.ts` runs every round — can NEVER take it back: it contributes a scope but no
+    // primary, and `selectGlobalScopeKey` then re-picks the widest parsed scope, which the root scope
+    // (every file) always wins. Measured 2026-09-30 on both roots; see the task's AC2.
+    // A whole-repo scope covers the tree BY CONSTRUCTION, so crediting it as coverage makes the
+    // report's one substantive reading — "which tracked .ts directories does no scope reach?" —
+    // structurally unable to be non-empty. That is the silent-clean the whole report exists to kill
+    // (硬规则 4: a quantity that cannot be false is not a measurement; 硬规则 3b: it must not be spelled
+    // like the passing value). So such a scope is reported (`wholeRepo:true` + `globalScopeNote`) and
+    // NOT credited. It is a single rule applied in one place: attribution, per-scope `tsFiles`, the
+    // per-language coverage fraction and the uncovered-dir list all read from `attributionScopes`.
+    const attributionScopes = scopes.filter((s) => !s.wholeRepo);
+    const scopeRefs = attributionScopes.map((s) => ({ key: s.key, relSources: s.sources }));
 
     // Per-file attribution: the most specific covering scope.
     const attribution = new Map<string, string | null>();
@@ -439,6 +503,10 @@ export function buildReport(input: BuildInput): Report {
     const globalKey = input.manifest.globalScopeKey;
     const globalScope = globalKey === null ? undefined : scopes.find((s) => s.key === globalKey);
     const globalScopeResolved = globalScope !== undefined;
+    const globalScopeKind: GlobalScopeKind = !globalScope ? "unresolved" : globalScope.wholeRepo ? "whole-repo" : "narrow";
+    // Kept LITERAL on purpose: this is what the declared global scope really covers. The degenerate
+    // case is disambiguated by `globalScopeKind`/`globalScopeNote`, ⛔ not by silently reporting some
+    // other scope's number here (that substitution is the thing 硬规则 3b forbids).
     const globalCovered = globalScope
       ? tsFiles.filter((f) => globalScope.sources.some((src) => dirInsideSource(dirOf(f), src))).length
       : 0;
@@ -455,6 +523,11 @@ export function buildReport(input: BuildInput): Report {
       globalScopeResolved,
       globalScopeSources: globalScope ? [...globalScope.sources] : [],
       globalScopeCoversTsFraction: globalScope ? (tsFiles.length === 0 ? 0 : globalCovered / tsFiles.length) : null,
+      globalScopeKind,
+      globalScopeNote:
+        globalScopeKind === "whole-repo"
+          ? `the manifest's global scope ${globalKey} is the REPOSITORY ROOT (relativized sources [""]) — it contains every tracked path BY CONSTRUCTION, so "covers everything" is a tautology rather than a coverage reading, and it is therefore reported here but NOT credited in the per-scope attribution`
+          : null,
       scopes,
     };
   }
@@ -506,31 +579,42 @@ export function buildReport(input: BuildInput): Report {
         coverageFraction: null,
       };
     }
-    const covered = files.filter((f) => (archguard.scopes.length > 0 ? mostSpecificScope(dirOf(f), archguard.scopes.map((s) => ({ key: s.key, relSources: s.sources }))) : null) !== null).length;
+    // Attribution over the NON-whole-repo scopes — the same single rule as the archguard block above.
+    const narrowRefs = archguard.scopes.filter((s) => !s.wholeRepo).map((s) => ({ key: s.key, relSources: s.sources }));
+    const covered = files.filter((f) => (narrowRefs.length > 0 ? mostSpecificScope(dirOf(f), narrowRefs) : null) !== null).length;
     // The row's single attributed analyzer: the scope covering the most files of this language
     // (deterministic ties by key), falling back to the resolved global scope key when it covers ≥1 file.
     const counts = new Map<string, number>();
     for (const f of files) {
-      const k = mostSpecificScope(dirOf(f), archguard.scopes.map((s) => ({ key: s.key, relSources: s.sources })));
+      const k = mostSpecificScope(dirOf(f), narrowRefs);
       if (k !== null) counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     const ranked = [...counts.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
     const globalCovers = archguard.globalScopeResolved
       ? files.filter((f) => archguard.globalScopeSources.some((src) => dirInsideSource(dirOf(f), src))).length
       : 0;
+    const globalClause =
+      archguard.globalScopeKind === "whole-repo"
+        ? `; the declared GLOBAL scope ${archguard.globalScopeKey} is the repository root, so it covers every file BY CONSTRUCTION and is NOT credited as coverage`
+        : archguard.globalScopeResolved
+          ? `; the GLOBAL scope ${archguard.globalScopeKey} alone covers ${globalCovers}/${files.length}`
+          : "";
+    // ⛔ A whole-repo global scope is never named as this language's analyzer: that degenerate
+    // attribution is exactly what this report exists to expose, so the row falls through to the
+    // narrow-scope ranking instead of letting the root scope impersonate a real analysis.
     const analyzedBy =
-      archguard.globalScopeResolved && globalCovers > 0 ? archguard.globalScopeKey : (ranked[0]?.[0] ?? null);
+      archguard.globalScopeResolved && archguard.globalScopeKind !== "whole-repo" && globalCovers > 0
+        ? archguard.globalScopeKey
+        : (ranked[0]?.[0] ?? null);
     const fraction = files.length === 0 ? 1 : covered / files.length;
     const reason =
       covered === files.length
         ? `fully-covered: all ${files.length} tracked non-test ${spec.language} file(s) fall inside a registered archguard scope` +
-          (archguard.globalScopeResolved
-            ? `; the GLOBAL scope ${archguard.globalScopeKey} alone covers ${globalCovers}/${files.length}`
+          (archguard.globalScopeResolved || archguard.globalScopeKind === "whole-repo"
+            ? globalClause
             : "; the manifest declares no resolvable global scope")
         : `partial-coverage: ${covered}/${files.length} tracked non-test ${spec.language} file(s) (${(fraction * 100).toFixed(1)}%) fall inside any registered archguard scope` +
-          (archguard.globalScopeResolved
-            ? `; the GLOBAL scope ${archguard.globalScopeKey} alone covers ${globalCovers}/${files.length} (${((globalCovers / files.length) * 100).toFixed(1)}%)`
-            : "") +
+          globalClause +
           `; ${uncoveredTsDirs.length} director${uncoveredTsDirs.length === 1 ? "y" : "ies"} uncovered`;
     return {
       language: spec.language,
@@ -641,6 +725,12 @@ function readFileOrEmpty(p: string): string {
 }
 
 // ── Human-readable rendering ────────────────────────────────────────────────────────────────────────
+/** A relativized source list, with `""` (the repo root) spelled out — an empty cell would read as
+ *  "no sources" rather than "the whole repository", and those are opposite claims. */
+function renderSources(sources: readonly string[]): string {
+  return sources.map((s) => (s === "" ? "(repo root)" : s)).join(", ");
+}
+
 export function renderHuman(report: Report): string {
   const lines: string[] = [];
   lines.push(`arch-coverage-report — ${report.root}`);
@@ -655,14 +745,19 @@ export function renderHuman(report: Report): string {
   lines.push("");
   const a = report.archguard;
   lines.push(`archguard manifest: ${a.manifestFound ? a.manifestPath : "NOT FOUND"}`);
-  lines.push(`  global scope key:  ${a.globalScopeKey ?? "-"}  resolved=${a.globalScopeResolved}`);
-  lines.push(`  global sources:    ${a.globalScopeSources.length > 0 ? a.globalScopeSources.join(", ") : "-"}`);
+  lines.push(`  global scope key:  ${a.globalScopeKey ?? "-"}  resolved=${a.globalScopeResolved}  kind=${a.globalScopeKind}`);
+  lines.push(`  global sources:    ${a.globalScopeSources.length > 0 ? renderSources(a.globalScopeSources) : "-"}`);
   lines.push(
     `  global covers ts:  ${a.globalScopeCoversTsFraction === null ? "not evaluable" : `${(a.globalScopeCoversTsFraction * 100).toFixed(1)}%`}`,
   );
+  if (a.globalScopeNote !== null) lines.push(`  ⚠️  global scope note: ${a.globalScopeNote}`);
   lines.push(`  scopes (${a.scopes.length}):`);
   for (const s of a.scopes) {
-    lines.push(`    ${s.key}  entities=${String(s.entityCount).padStart(6)}  tsFiles=${String(s.tsFiles).padStart(4)}  ${s.sources.join(", ")}`);
+    lines.push(
+      `    ${s.key}  entities=${String(s.entityCount).padStart(6)}  tsFiles=${String(s.tsFiles).padStart(4)}  ${
+        s.wholeRepo ? "[WHOLE-REPO — not credited] " : ""
+      }${renderSources(s.sources)}`,
+    );
   }
   lines.push("");
   lines.push(
@@ -761,20 +856,60 @@ export function selftest(): boolean {
     check(
       "partial-coverage-drops-out-of-uncovered-when-scope-widened",
       (() => {
+        // Widening to a BROADER BUT STILL NARROW scope is a real widening: `packages/` now covers
+        // packages/quay/src, so that directory leaves the uncovered list (plugin/scripts remains).
         const wide = JSON.stringify({
           version: "1.0",
           globalScopeKey: "SCOPE_GLOBAL",
           scopes: [
-            { key: "SCOPE_GLOBAL", label: "all", sources: [repo], entityCount: 3 },
+            { key: "SCOPE_GLOBAL", label: "packages", sources: [path.join(repo, "packages")], entityCount: 2 },
           ],
         });
         const widePath = path.join(tmp, "manifest-wide.json");
         fs.writeFileSync(widePath, wide);
         const rr = runReport({ root: repo, manifestPath: widePath, now: "T" });
-        return rr.report.uncoveredTsDirs.length === 0 && rr.report.uncoveredTsDirsEvaluated === true;
+        return (
+          rr.report.uncoveredTsDirsEvaluated === true &&
+          !rr.report.uncoveredTsDirs.includes("packages/quay/src") &&
+          rr.report.uncoveredTsDirs.includes("plugin/scripts")
+        );
       })(),
-      "a scope rooted at the repo root must leave nothing uncovered",
+      "widening to packages/ must drop packages/quay/src but keep plugin/scripts uncovered",
     );
+
+    // case 2b — widening all the way to the REPO ROOT is NOT a widening (gap-arch-coverage-primary-
+    //           scope-usurped-by-root-analyze). A scope anchored at the repo root contains every tracked
+    //           path BY CONSTRUCTION, so "it covers everything" is a tautology (硬规则 4) rather than a
+    //           reading — crediting it is how a stray no-sources `archguard_analyze` (which takes the
+    //           manifest's `role:"primary"` and can never be displaced by a later sources-given one)
+    //           silently turned this report's "nothing is uncovered" into the truth-shaped value the
+    //           report exists to prevent. The scope must still be REPORTED (classified + noted), and it
+    //           must not be credited: the uncovered list stays exactly as it was.
+    {
+      const whole = JSON.stringify({
+        version: "1.0",
+        globalScopeKey: "SCOPE_ROOT",
+        scopes: [{ key: "SCOPE_ROOT", label: "all", sources: [repo], entityCount: 3 }],
+      });
+      const wholePath = path.join(tmp, "manifest-whole-repo.json");
+      fs.writeFileSync(wholePath, whole);
+      const r2 = runReport({ root: repo, manifestPath: wholePath, now: "T" });
+      const a = r2.report.archguard;
+      check(
+        "whole-repo-global-scope-is-classified-not-silently-narrow",
+        a.globalScopeKind === "whole-repo" && a.globalScopeResolved === true && a.globalScopeNote !== null,
+        `kind=${a.globalScopeKind} resolved=${a.globalScopeResolved} note=${a.globalScopeNote === null ? "null" : "set"}`,
+      );
+      check(
+        "whole-repo-scope-is-not-credited-as-coverage",
+        r2.report.uncoveredTsDirsEvaluated === true &&
+          r2.report.uncoveredTsDirs.length === 2 &&
+          r2.report.uncoveredTsDirs.includes("packages/quay/src") &&
+          r2.report.uncoveredTsDirs.includes("plugin/scripts") &&
+          r2.report.archguard.scopes.every((s) => (s.wholeRepo ? s.tsFiles === 0 : true)),
+        `uncoveredTsDirs=${JSON.stringify(r2.report.uncoveredTsDirs)} tsFiles=${JSON.stringify(r2.report.archguard.scopes.map((s) => [s.key, s.tsFiles, s.wholeRepo]))}`,
+      );
+    }
   }
 
   // case 3 — a repo with no .sh at all ⇒ the sh row is PRESENT with trackedFiles 0 (not absent).
