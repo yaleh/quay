@@ -245,7 +245,7 @@ test("no carrier: refuses with no-derivable-address and names carrier-absent for
   const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
   try {
     const r = derive(root);
-    assert.equal(r.code, 1, "a root whose only serve candidate has no carrier must not derive an address");
+    assert.equal(r.code, 3, "a root whose only serve candidate has no carrier must not derive an address — and must say NOT-EVALUATED (3), not 'false' (1)");
     assert.match(r.stderr, /CAUSE=no-derivable-address/);
     const row = candidateRow(r.stderr, child.pid);
     assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
@@ -266,7 +266,7 @@ test("carrier naming another pid is refused (pid is the positional link, not the
       services: [{ name: "web", pid: child.pid + 1000000, host: "172.28.0.1", port: 34570, up: true }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3, "a refused derivation is NOT-EVALUATED, not 'false'");
     const row = candidateRow(r.stderr, child.pid);
     assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
     assert.match(row, /cause=argv-port-kernel-assigned,carrier-pid-mismatch/);
@@ -285,7 +285,7 @@ test("carrier with no `web` entry is refused (a control-only carrier names no we
       services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 34571, up: true }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3, "a refused derivation is NOT-EVALUATED, not 'false'");
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-no-web-service/);
   } finally {
     killQuietly(child);
@@ -302,7 +302,7 @@ test("carrier whose web service is down (up:false) is refused", () => {
       services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34572, up: false }],
     });
     const r = derive(root);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, 3, "a refused derivation is NOT-EVALUATED, not 'false'");
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-web-down/);
   } finally {
     killQuietly(child);
