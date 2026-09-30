@@ -2,7 +2,7 @@
 id: gap-arch-coverage-primary-scope-usurped-by-root-analyze
 title: arch-coverage-report 的 primary scope 被一次「无 sources 的 archguard
   analyze」夺走且不可归还 —— 每个 worktree 的 full suite 恒 2 红，挡住全部 code 落地
-status: ready
+status: done
 labels:
   - gap
   - defect
