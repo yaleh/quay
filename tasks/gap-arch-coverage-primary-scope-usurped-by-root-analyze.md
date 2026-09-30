@@ -124,3 +124,7 @@ extra:
 **DoD 3（不得以删除为修法）**：`.archguard` 未删、manifest JSON 未手改（见 AC4）；测试侧也没有把 `uncoveredTsDirs` 的期望放宽——它现在仍要求**非空**，靠的是报告不再把根 scope 记为覆盖。
 
 **DoD 4（可回滚）**：修法落在 (b)/(c)，纯代码、无外部状态 ⇒ 回滚 = `git checkout -- plugin/scripts/arch-coverage-report.ts plugin/test/arch-coverage-report.test.mjs`（回到修前形态：该文件重新 `fail 2`）。manifest 与 `.archguard` 全程未被本任务写过（除 CONTROL 2 那次机件 analyze，其读数字节不变）。
+
+**本轮收尾补记（2026-09-30T10:5xZ，零 delta 落地的可解释性留痕）**：本任务的分支在最后一次 `git merge develop` 后 **delta 为空** —— `git diff --name-only develop HEAD` 输出为空，因为 `plugin/scripts/arch-coverage-report.ts` 与 `plugin/test/arch-coverage-report.test.mjs` 的两份字节已先由在飞任务 `gap-ac289-criterion-carrier-absence-not-evaluated`（**done**）在 `652176915` "adopt gap-arch-coverage's committed fix byte-exact, breaking the second half of the suite deadlock" 中**逐字采纳**（md5 双向核对：`e75534975cc7f584194f45cd14d5b4e0` / `fadffb2f054182bbc31cc2eaf0184053`），并于 develop tip `dbc3df984` 可见。⇒ 本任务是「谁先落地谁带走字节」的**后落地**一侧：零 delta 是既定收敛结果，不是「没干活」（硬规则 11b 的另一半：已生效而未记录）。⛔ 未为此制造任何 delta。
+
+同一轮实测（合并后树，三条此前全红的文件在隔离跑）：`node --test packages/quay/test/ac289-criterion-address-derivation.test.mjs packages/quay/test/ac302-criterion-address-derivation.test.mjs plugin/test/arch-coverage-report.test.mjs` ⇒ `tests 45 / pass 45 / fail 0`；`fan-in-ac-completion-gate.ts --task <id> --worktree <wt> --json` ⇒ `{ok:true,total:5,checked:5}`；`bash scripts/test.sh --for-task gap-arch-coverage-primary-scope-usurped-by-root-analyze --allow-thin` ⇒ **rc=0**（scoped 测试 `pass 14 / fail 0`）。
