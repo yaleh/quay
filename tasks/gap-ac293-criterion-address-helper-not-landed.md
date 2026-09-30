@@ -5,7 +5,7 @@ title: AC-293 判据的地址派生调用 plugin/scripts/live-web-address.ts，�
   FAIL=no-derivable-serve-address；/system 的四条 chrome 断言实测全绿（默认 nav 含 "System"、zh
   响应 <html lang="zh"、zh nav 不含 "System"、本页 title 相对英文基线变化），仅「助手未落地」这一步悬空 ——
   助手的拥有者是 in-flight 的 gap-criterion-live-web-address-derivation-17-copies-to-one
-status: ready
+status: done
 labels:
   - gap
   - defect
