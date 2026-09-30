@@ -51,7 +51,7 @@ criterion: >-
   # changed). Nothing about the /live assertions below changed.
 
   # The real listening port is knowable only from the live host's own carrier
-  $root/.quay/server.json
+  活宿主自身的服务状态载体
 
   # (writer packages/quay/src/serve.ts; read contract
   packages/quay/src/server-state.ts, which already
@@ -121,9 +121,9 @@ criterion: >-
     *) nserve=$((nserve + 1)) ;;
     esac
     if [ -z "$a" ]; then
-    a=$(node -e 'const fs=require("fs");const R=process.argv[1],P=String(process.argv[2]);let s=null;try{s=JSON.parse(fs.readFileSync(R+"/.quay/server.json","utf8"))}catch(e){process.exit(2)}if(!s||s.schemaVersion!==1||!Array.isArray(s.services))process.exit(2);if(String(s.pid)!==P)process.exit(3);const w=s.services.filter(function(x){return x&&x.name==="web"})[0];if(!w)process.exit(4);if(w.up===false)process.exit(5);if(typeof w.host!=="string"||w.host===""||typeof w.port!=="number"||!(w.port>0))process.exit(6);process.stdout.write(w.host+":"+w.port)' "$root" "$p" 2>/dev/null)
+    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p" 2>&1)
     rc=$?
-    if [ "$rc" != 0 ]; then a=""; case "$rc" in 2) cause="carrier-unreadable" ;; 3) cause="carrier-pid-mismatch" ;; 4) cause="carrier-no-web-entry" ;; 5) cause="carrier-web-marked-down" ;; 6) cause="carrier-web-address-unusable" ;; *) cause="carrier-read-failed(exit=$rc)" ;; esac; fi
+    if [ "$rc" = 0 ]; then a="$o"; else a=""; case "$rc:$o" in 1:carrier-web-down) cause="carrier-web-down" ;; 3:*) cause="${o:-carrier-unreadable}" ;; *) cause="carrier-helper-unavailable(exit=$rc)" ;; esac; fi
     fi
     case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; ::*) a="127.0.0.1:${a#::}" ;; esac
     if [ -n "$a" ]; then nderived=$((nderived + 1)); fi
