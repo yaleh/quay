@@ -28,6 +28,16 @@
 // `/proc/<pid>/cwd` is the temp root), so `pgrep`/`/proc`/`curl` are exercised for real — nothing
 // here stubs the probe.
 //
+// THE SECOND AMENDMENT THIS FILE PINS (task/gap-ac289-criterion-carrier-absence-not-evaluated,
+// 2026-09-30). The criterion's three UNEVALUABLE branches — `no-running-serve-instance`,
+// `no-derivable-serve-address`, `no-reachable-serve-address` — used to exit with the FAILURE code,
+// so `goal-driver.ts`'s prefiling recheck read "I could not evaluate this HERE" as "this is false"
+// and filed a gap every round against a live server that was answering. They now carry this repo's
+// NOT-EVALUATED code (see `plugin/scripts/live-web-address.ts`'s header for the word list, and
+// `packages/quay/src/gate/acceptance-runner.ts`, which maps only 126/127 to not-runnable). The ten
+// ASSERTION branches are byte-for-byte unchanged and still exit 1 — a broken page must never read as
+// unevaluable (hard rule 3b), which is what §⑥ below is the standing control for.
+//
 // Run (scoped): node --test packages/quay/test/ac289-criterion-address-derivation.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -49,6 +59,11 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const GOALS_DIR = path.join(REPO_ROOT, "goals");
 const SHELL = "/bin/sh";
+/** The criterion's three-state exit word list (0=pass / 1=fail / 2=usage / 3=not-evaluated), named
+ *  so the negative cases read against the convention instead of a bare literal. "I cannot evaluate
+ *  this HERE" and "this is false" must never share a value (hard rule 3b). */
+const NOT_EVALUATED = 3;
+const FAILED = 1;
 
 /** The criterion as STORED — never a copy. `parseDocument` (⛔ not `parse`) because a goal file
  *  carries a `statusLog` document after the frontmatter, which makes `parse` throw
@@ -229,11 +244,11 @@ GATE("AC-289 criterion: NOT a literal — a restart binding a different port res
   });
 });
 
-GATE("AC-289 criterion: no carrier at all ⇒ address not derivable, fails closed with a NAMED cause", async () => {
+GATE("AC-289 criterion: no carrier at all ⇒ address not derivable, NOT-EVALUATED with a NAMED cause", async () => {
   await withContext(async (ctx) => {
     await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1, `expected a non-zero verdict, got ${r.code}`);
+    assert.equal(r.code, NOT_EVALUATED, `an underivable address is "cannot evaluate here", not "false"; got ${r.code}`);
     assert.match(r.stderr, /cause=carrier-absent/, r.stderr);
     assert.match(r.stderr, /CAUSE=no-derivable-serve-address/, r.stderr);
     assert.doesNotMatch(r.stderr, /CAUSE=en-fetch-failed/, "an underivable address is NOT a fetch failure");
@@ -245,7 +260,7 @@ GATE("AC-289 criterion: carrier without a `web` service ⇒ carrier-no-web-servi
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: 1, dropWeb: true });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, NOT_EVALUATED);
     assert.match(r.stderr, /cause=carrier-no-web-service/, r.stderr);
   });
 });
@@ -255,7 +270,7 @@ GATE("AC-289 criterion: carrier naming a DIFFERENT pid is refused (a stale carri
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     writeCarrier(ctx.root, { pid: pid + 100000, host: "127.0.0.1", port: 1 });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, NOT_EVALUATED);
     assert.match(r.stderr, /cause=carrier-pid-mismatch/, r.stderr);
   });
 });
@@ -265,7 +280,10 @@ GATE("AC-289 criterion: a `web` entry marked down ⇒ carrier-web-down", async (
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: 1, up: false });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    // The helper DOES report a real `false` here (exit 1, `carrier-web-down`) — but that is the
+    // helper's own three-state output, not a verdict about the page: this criterion has no address
+    // to probe, so ITS branch is still `no-derivable-serve-address`, i.e. NOT-EVALUATED.
+    assert.equal(r.code, NOT_EVALUATED);
     assert.match(r.stderr, /cause=carrier-web-down/, r.stderr);
   });
 });
@@ -276,7 +294,7 @@ GATE("AC-289 criterion: a carrier port nobody listens on ⇒ connection-refused 
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     writeCarrier(ctx.root, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1);
+    assert.equal(r.code, NOT_EVALUATED);
     assert.match(r.stderr, /CAUSE=no-reachable-serve-address/, r.stderr);
     assert.match(r.stderr, new RegExp(`addr=127\\.0\\.0\\.1:${port} cause=fetch-failed\\(connection-refused\\)`), r.stderr);
   });
@@ -306,8 +324,42 @@ GATE("AC-289 criterion: the ASSERTION block is still live — a zh page whose na
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     writeCarrier(ctx.root, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
-    assert.equal(r.code, 1, "the amended derivation must not have softened the assertion it feeds");
+    assert.equal(r.code, FAILED, "the amended derivation must not have softened the assertion it feeds");
+    assert.notEqual(r.code, NOT_EVALUATED, "a BROKEN PAGE is a real false, never an unevaluable one");
     assert.match(r.stderr, /CAUSE=nav-label-untranslated/, r.stderr);
     assert.match(r.stderr, new RegExp(`addr=127\\.0\\.0\\.1:${port}`), "the address was derived — the failure is the assertion, not the probe");
   });
+});
+
+GATE("AC-289 criterion TEXT: exactly the 3 UNEVALUABLE branches carry the not-evaluated code, and the 10 ASSERTION branches still carry the failure code", () => {
+  // Structural half of the amendment, read off the STORED text rather than restated: a behavioural
+  // case can only reach one branch per run, so "all three were changed and no assertion was" is a
+  // claim about the text itself. Enumerated, ⛔ not a single total (hard rule 3): the two lists are
+  // printed into the failure message so a count mismatch is attributable.
+  const criterion = storedCriterion();
+  // Both branch shapes: `… >&2; exit N; fi` (the three carrier-absence branches) and
+  // `case … >&2; exit N ;; esac` (three of the assertion branches). Matching the exit code plus the
+  // branch's own `CAUSE=` is what makes a moved assertion attributable rather than a bare count.
+  const branchExit = (code) =>
+    criterion.split("\n").filter((l) => l.includes(`exit ${code}`) && l.includes("CAUSE="));
+  const unevaluable = branchExit(NOT_EVALUATED).map((l) => (l.match(/CAUSE=([a-z-]+)/) ?? [])[1]);
+  const assertions = branchExit(FAILED).map((l) => (l.match(/CAUSE=([a-z-]+)/) ?? [])[1]);
+  assert.deepEqual(
+    [...unevaluable].sort(),
+    ["no-derivable-serve-address", "no-reachable-serve-address", "no-running-serve-instance"],
+    `the not-evaluated branches are not exactly the three carrier-absence states: ${JSON.stringify(unevaluable)}`,
+  );
+  assert.deepEqual(
+    [...assertions].sort(),
+    [
+      "en-fetch-failed", "english-baseline-missing", "html-lang-not-zh", "nav-label-untranslated",
+      "no-nav-region", "no-nav-region-zh", "no-title-tag", "no-title-tag-zh", "title-unchanged", "zh-fetch-failed",
+    ],
+    `an ASSERTION branch was moved off the failure code: ${JSON.stringify(assertions)}`,
+  );
+  assert.equal(
+    criterion.split("\n").filter((l) => l.includes("exit 0")).length,
+    1,
+    "the criterion keeps exactly one success exit",
+  );
 });
