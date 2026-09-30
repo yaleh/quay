@@ -86,14 +86,14 @@ serve:            # 可选。缺席 ⇒ 用声明式回退（host 0.0.0.0 / port
 
 ## Acceptance Criteria
 
-- [ ] AC1（唯一定义点·按位置）`grep -n '"0\.0\.0\.0"\|"127\.0\.0\.1"' packages/quay/src/serve.ts packages/quay/src/cli/server.ts packages/quay/src/cli/serve.ts plugin/scripts/start-drivers.ts` 输出 **0 行**；同一条 grep 加上 `packages/quay/src/serve-binding.ts` 后**恰好 1 处**命中，且该命中在 `SERVE_BINDING_FALLBACK` 那一行。
-- [ ] AC2（负控·不是回声）把 `SERVE_BINDING_FALLBACK.host` 的值改掉 ⇒ `resolveServeBinding({}).host` 随之改变；改回 ⇒ 恢复。证明三处读到的是**同一个量**（硬规则 4：能取假才算测量）。
-- [ ] AC3（坏值 fail-closed·三分法）`resolveServeBinding({ config: { serve: { port: "abc" } } })` ⇒ `kind === "not-evaluated"`（⛔ 不是回退值、⛔ 不是抛栈），且 `startServer` 在该情形下**不产生任何 LISTEN 套接字**、进程非 0 退出。
-- [ ] AC4（机制性根因）`plugin/scripts/start-drivers.ts` 在用户**未**传 `--port` 时，spawn 出的宿主 `/proc/<pid>/cmdline` **不含 `--port`**；显式传 `--port <N>` 时含 `--port <N>`。这是那 17 条判据恒假的根因是否被消除的直接读数。
-- [ ] AC5（配置生效·读生产载体）临时真 workspace 的 `.quay/config.yml` 写 `serve: { host: "0.0.0.0", port: <N> }`（N 为 >1024 的空闲端口）后起宿主 ⇒ `.quay/server.json` 的 web 条目 `port === N`（**内核回读值 = 配置值**）；删掉 `serve:` 段重起 ⇒ `port !== N`。
-- [ ] AC6（人裁定的收敛值·直接量）三个入口（`quay serve` / `quay server start` / `start-drivers.ts`）在**未**显式给 `--host` 时，宿主监听套接字的本地地址均为 `0.0.0.0`（`ss -ltnp` 该 pid 行以 `0.0.0.0:` 开头），⛔ 不是 `127.0.0.1`。
-- [ ] AC7（产物取假）a) 新检查器：注入一个引号内 `"0.0.0.0"` 副本 ⇒ 判红；撤掉 ⇒ 判绿。b) `config-wiring-check`：把 `serve.host` 的读者注掉 ⇒ 报 `NO_READER`；恢复 ⇒ 绿。
-- [ ] AC8（隐藏面一致性）`packages/quay/src/cli/help.ts` 与 `plugin/skills/drivers/SKILL.md` 里 `--host` 默认值的文本与 `SERVE_BINDING_FALLBACK.host` 一致（grep 出两处文本 == 真源值）。
+- [x] AC1（唯一定义点·按位置）`grep -n '"0\.0\.0\.0"\|"127\.0\.0\.1"' packages/quay/src/serve.ts packages/quay/src/cli/server.ts packages/quay/src/cli/serve.ts plugin/scripts/start-drivers.ts` 输出 **0 行**；同一条 grep 加上 `packages/quay/src/serve-binding.ts` 后**恰好 1 处**命中，且该命中在 `SERVE_BINDING_FALLBACK` 那一行。
+- [x] AC2（负控·不是回声）把 `SERVE_BINDING_FALLBACK.host` 的值改掉 ⇒ `resolveServeBinding({}).host` 随之改变；改回 ⇒ 恢复。证明三处读到的是**同一个量**（硬规则 4：能取假才算测量）。
+- [x] AC3（坏值 fail-closed·三分法）`resolveServeBinding({ config: { serve: { port: "abc" } } })` ⇒ `kind === "not-evaluated"`（⛔ 不是回退值、⛔ 不是抛栈），且 `startServer` 在该情形下**不产生任何 LISTEN 套接字**、进程非 0 退出。
+- [x] AC4（机制性根因）`plugin/scripts/start-drivers.ts` 在用户**未**传 `--port` 时，spawn 出的宿主 `/proc/<pid>/cmdline` **不含 `--port`**；显式传 `--port <N>` 时含 `--port <N>`。这是那 17 条判据恒假的根因是否被消除的直接读数。
+- [x] AC5（配置生效·读生产载体）临时真 workspace 的 `.quay/config.yml` 写 `serve: { host: "0.0.0.0", port: <N> }`（N 为 >1024 的空闲端口）后起宿主 ⇒ `.quay/server.json` 的 web 条目 `port === N`（**内核回读值 = 配置值**）；删掉 `serve:` 段重起 ⇒ `port !== N`。
+- [x] AC6（人裁定的收敛值·直接量）三个入口（`quay serve` / `quay server start` / `start-drivers.ts`）在**未**显式给 `--host` 时，宿主监听套接字的本地地址均为 `0.0.0.0`（`ss -ltnp` 该 pid 行以 `0.0.0.0:` 开头），⛔ 不是 `127.0.0.1`。
+- [x] AC7（产物取假）a) 新检查器：注入一个引号内 `"0.0.0.0"` 副本 ⇒ 判红；撤掉 ⇒ 判绿。b) `config-wiring-check`：把 `serve.host` 的读者注掉 ⇒ 报 `NO_READER`；恢复 ⇒ 绿。
+- [x] AC8（隐藏面一致性）`packages/quay/src/cli/help.ts` 与 `plugin/skills/drivers/SKILL.md` 里 `--host` 默认值的文本与 `SERVE_BINDING_FALLBACK.host` 一致（grep 出两处文本 == 真源值）。
 
 ## DoD
 
