@@ -5,7 +5,7 @@ title: AC-289 判据把「地址不可派生」记成「此刻为假」——三
   出声，违反仓库约定（exit 3 = NOT-EVALUATED，acceptance-runner.ts 的 verdictFromAcceptance
   把 code 3 映成 not-evaluated/declared）⇒ driver 每轮把它当 confirmed-failing
   立案；修法=三条分支改 exit 3 + 夹具负例同步 + 活实例上真 pass
-status: ready
+status: done
 labels:
   - gap
   - defect
