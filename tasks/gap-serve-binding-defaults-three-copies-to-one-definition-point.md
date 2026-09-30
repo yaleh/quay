@@ -120,3 +120,9 @@ serve:            # 可选。缺席 ⇒ 用声明式回退（host 0.0.0.0 / port
 - packages/quay/test/serve-binding.test.mjs
 - packages/quay/test/config.test.mjs
 - tasks/gap-serve-binding-defaults-three-copies-to-one-definition-point.md
+- packages/quay/src/cli/init.ts
+- packages/quay/src/kernel/control-plane-http.ts
+- packages/quay/src/mcp-server.ts
+- packages/quay/src/serve-render.ts
+- packages/quay/test/init.test.mjs
+- plugin/scripts/checker-mutation-cases/serve-binding-literal-check.sh
