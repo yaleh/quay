@@ -157,3 +157,23 @@ carrier-pid-mismatch      rc=3
 ### 欠账（本任务**没有**做，已量、须另立）
 
 **10 条判据仍把「地址不可派生」记成 exit 1（= FAIL），违反仓库自定约定（exit 3 = NOT-EVALUATED）。** 实测（与 AC5 同一夹具、突变助手）：exit 3 的有 AC-179/290/291/292/297/301/303（7 条），exit 1 的有 AC-288/289/293/294/295/296/298/299/300/302（10 条）。成因是 `gap-ac2XX-criterion-carrier-absence-not-evaluated` 家族**只对其中 4 条**（291/292/301/303）立过案；后果是 goal driver 每轮把这 10 条当 confirmed-failing。修法有现成模板（同族 4 条已落地：判据的不可评估分支改 exit 3，断言分支逐字不动），但⛔不在本任务 P1–P4 范围内 —— 记此欠账，供下次立案。
+
+
+### 复核轮（2026-09-30 第 3 轮 worker，worktree 复用）
+
+前两轮 exited-not-landed 都是 `step=suite` 全量红，且**两次红点不同**（① 非 ASCII inert increment 的 in-lock 重试；② `ready-pool-check-s22` 的 N=2000 缓存加速比）。本轮对 ② 做了归因取证：
+
+- 红断言 = `plugin/test/ready-pool-check-s22.test.mjs:192` `tCached < tUncached*0.75`，实测 `cached=1763ms uncached=2326ms ratio=0.76`（阈值 1744.5ms，**差 19ms**）。
+- 该文件**不在本任务 Touches/diff**（`git diff develop --stat` 对该文件为空）；机械 delta-relatedness = UNRELATED。
+- **隔离复跑 3 次全绿**：ratio 0.72 / 0.72 / 0.71 —— **不复现**。
+- 近 60 份 `.quay/fan-in-suite-*.log` 中该断言仅 1 次红（就是本任务这次），而其中 **18 个不同任务**各有 suite 红 ⇒ 属 `gap-suite-ambient-reds-block-all-code-landings` 记录的 ambient-red 家族。
+- 与既有记忆 `ready-pool-check-s22-timing-assertion-is-unregistered-load-flake`（razor-thin、load-independent、未登记进 known-load-sensitive）逐字吻合。
+
+⇒ 结论：**witness 是环境性 ambient red，非本 delta 缺陷**（硬规则 4 推论四：附了「若 Y 为假则结果会不同」的对照 = 隔离复跑）。故本轮**不改该文件**（它在 Touches 外，改会触发 anti-drift 硬失败），按记忆处方 exit。
+
+本轮复核读数（同一 worktree，代码未改）：
+- 17 个判据测试文件 **246 例全绿**（60 + 84 + 102）；`live-web-address.test.mjs` + `criterion-carrier-inline-check.test.mjs` **24 例全绿**。
+- AC1 `grep -rl 'server.json' goals/*.md | wc -l` ⇒ **0**；AC2 17 条 criterion 各调用助手 ⇒ **17**；AC6 17 个测试内本地 `writeCarrier|mkRoot|runSh|derive` 定义数 ⇒ **0**。
+- DoD 生产读数复取：真载体 + pid 1709183 ⇒ exit 0 / `172.28.0.1:20119`（与 `quay server status --json` 的 web 条目逐字相同）；pid 999999 ⇒ exit 3 / `carrier-pid-mismatch`。
+- 17 条 AC 的 goal-gate 事件 `payload.criterionHash` **逐条 == 当前 criterion 指纹**（17/17 OK，0 mismatch）⇒ `amendedUnverified` 为空。
+- 合并 develop：无冲突；scoped gate `--for-task … --allow-thin` ⇒ **exit 0**；scoped-gate cache 已按 merge-time develop sha `bb568cf6d` 写入。
