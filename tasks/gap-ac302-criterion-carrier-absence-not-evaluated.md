@@ -201,14 +201,24 @@ GATE_EXIT=0
 ③ 家族枚举（逐文件）：
 `ls tasks/ | grep -c 'carrier-absence-not-evaluated'` = **8**（7 → 8，含本任务）：ac289 / ac290 / ac291 / ac292 / ac297 / ac301 / ac302 / ac303；
 `ls tasks/ | grep -c 'address-helper-not-landed'` = **8**（不变，本任务不改它们）。
-④ `git diff --name-only develop...HEAD`（worktree）：
+④ `git diff --name-only develop...HEAD`（worktree，末态）：
 
 ```
 packages/quay/test/ac302-criterion-address-derivation.test.mjs
+tasks/gap-ac302-criterion-carrier-absence-not-evaluated.md
 ```
 
-一句 —— 只含本任务 Touches 内的路径。`goals/AC-302-*.md` 的改动**此刻已在 develop 上**（`30f8ed017 goals: AC-302 field:criterion by cli:3136754`，由主检出写侧经 doc-branch 机制推进），故不出现在三点差里；`git diff develop HEAD -- 'goals/AC-302-*'` 为空（两侧逐字节相同）。
+两条都在本任务 Touches 内；任务文件两侧内容逐字节相同（`git diff develop HEAD -- tasks/gap-ac302-criterion-carrier-absence-not-evaluated.md` 为空），三点差列出它只因它相对 merge-base 变过。`goals/AC-302-*.md` 的改动**此刻已在 develop 上**（`30f8ed017 goals: AC-302 field:criterion by cli:3136754`，由主检出写侧经 doc-branch 机制推进），故不出现在三点差里；`git diff develop HEAD -- 'goals/AC-302-*'` 为空（两侧逐字节相同）。
 ⇒ 由此证明 `plugin/scripts/*`、`packages/quay/src/serve-*.ts`、以及 8 条 `address-helper-not-landed` 同伴的载体**一字未改**。
+
+### AC6 附 — 勾选落点（tick 对每个读侧的可达性，实测）
+
+`quay task edit --body-file` 的两次写各在 `.quay/store-commit-propagation.jsonl` 留痕：
+worktree cwd ⇒ `{"changeKind":"must-propagate","branchClass":"task-branch","propagated":false}`（commit `2b3cce015` on `task/gap-ac302-…`，**fan-in 携带的那一份**）；
+主检出 cwd ⇒ `{"changeKind":"self-only","branchClass":"other","propagated":false}`（MCP/`task_check` 读的那一份）。
+这与仓库既有结论一致（勾选 + `## Evidence` 属 `self-only` 掩码类，⛔ 单靠主检出那一次写不会进 develop），故两次都写了。
+
+末态三方读数一致（6 = 全部 AC）：worktree 副本 **6**；`git show develop:tasks/gap-ac302-….md` **6**（215 行，与本 worktree 副本 `cmp` 逐字节相同）；MCP `task_check` = `{"acTotal":6,"acChecked":6,"ok":true}`。
 
 ### DoD 5 — 回滚形态
 
