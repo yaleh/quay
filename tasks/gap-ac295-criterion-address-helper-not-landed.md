@@ -138,12 +138,12 @@ $ node --test packages/quay/test/ac295-criterion-address-derivation.test.mjs    
 
 ## AC
 
-- [ ] **AC1（助手在库内）** 主检出与 `develop` 都存在该文件：`ls plugin/scripts/live-web-address.ts` exit 0 **且** `git cat-file -e develop:plugin/scripts/live-web-address.ts` exit 0。
-- [ ] **AC2（四条 chrome 断言·活实例·各自独立）** 对 cwd=仓库根的运行中 `quay.ts serve` 真读 `/needs-human`：① en nav 区块字面量 `Needs Human` 计数 = **2**；② zh 响应含 `<html lang="zh"`；③ zh nav 区块 `Needs Human` 计数 = **0**（同一谓词在 en 上 = 2 ⇒ 该量能取假，不是空断言）；④ zh 的 `<title>` 与 en 的 `<title>` 逐字不同。**四段分开贴原始片段**，⛔ 只报「整页看起来翻了」不算（硬规则 3）。
-- [ ] **AC3（判据回绿·活实例）** `node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根；需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
-- [ ] **AC4（助手真调用·非回声）** 对真实载体 `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> <web-pid>` ⇒ exit 0 且 stdout 的 `host:port` 与活实例监听地址逐字相同；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
-- [ ] **AC5（真呼叫·负控）** 把助手临时改名 ⇒ AC-295 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。两次读数并排贴出。
-- [ ] **AC6（夹具绿）** `node --test packages/quay/test/ac295-criterion-address-derivation.test.mjs` exit 0（当前主检出上它 12 个块全红、exit 1，原因见 Proposal）。
+- [x] **AC1（助手在库内）** 主检出与 `develop` 都存在该文件：`ls plugin/scripts/live-web-address.ts` exit 0 **且** `git cat-file -e develop:plugin/scripts/live-web-address.ts` exit 0。
+- [x] **AC2（四条 chrome 断言·活实例·各自独立）** 对 cwd=仓库根的运行中 `quay.ts serve` 真读 `/needs-human`：① en nav 区块字面量 `Needs Human` 计数 = **2**；② zh 响应含 `<html lang="zh"`；③ zh nav 区块 `Needs Human` 计数 = **0**（同一谓词在 en 上 = 2 ⇒ 该量能取假，不是空断言）；④ zh 的 `<title>` 与 en 的 `<title>` 逐字不同。**四段分开贴原始片段**，⛔ 只报「整页看起来翻了」不算（硬规则 3）。
+- [x] **AC3（判据回绿·活实例）** `node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根；需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
+- [x] **AC4（助手真调用·非回声）** 对真实载体 `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> <web-pid>` ⇒ exit 0 且 stdout 的 `host:port` 与活实例监听地址逐字相同；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
+- [x] **AC5（真呼叫·负控）** 把助手临时改名 ⇒ AC-295 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。两次读数并排贴出。
+- [x] **AC6（夹具绿）** `node --test packages/quay/test/ac295-criterion-address-derivation.test.mjs` exit 0（当前主检出上它 12 个块全红、exit 1，原因见 Proposal）。
 
 ## DoD
 
@@ -157,3 +157,116 @@ AC-295 判据在**生产载体**（主检出 cwd=仓库根的活 `quay.ts serve`
 - tasks/gap-ac295-criterion-address-helper-not-landed.md
 
 （说明：第一条是 P3 兜底时的落地面，也是判据解析地址所必需的唯一文件 —— 其**实现**与 capability-catalog 注册归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，本任务不重复实现、不重复注册；第二条是判据载体（经 `quay goal write` 落库，⛔ 不手改 `goals/*.md`）；第三条是与判据文本逐字绑定的夹具；第四条为 self-touch。）
+
+## Evidence（执行轮，2026-09-30，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac295-criterion-address-helper-not-landed`，主检出 `/data/home/yale/work/quay`）
+
+### 走的是哪条路：P1 的【退化分支】—— 修复已由上游落地，本任务做确认 + 生产回绿读数
+
+立案时（2026-09-30T08:37Z）助手只存在于在飞 worktree；本轮开工前复核，**该文件已随
+`gap-criterion-live-web-address-derivation-17-copies-to-one` 的 fan-in 落进 `develop` 与主检出**（其 `status` 现为 `done`，
+worktree 已回收）。故 P1 的正面动作退化为「确认存在」，P3（本任务接管实现）**未触发**，
+本轮**无产品代码 delta** —— 这是退化分支的正常终态，⛔ 不是「没做完」。
+
+三条独立复核（⛔ 不是「文件在不在」的目测）：
+
+- 拥有者任务：`tasks/gap-criterion-live-web-address-derivation-17-copies-to-one.md` 头部 ⇒ `status: done`；
+  `ls -d /data/home/yale/work/quay-worktrees/gap-criterion-live-web-address-derivation-17-copies-to-one` ⇒
+  `No such file or directory`（worktree 已回收）。
+- capability-catalog 注册**已在落地变更内完成**（本任务⛔ 不重复注册）：
+  `bash plugin/scripts/capability-catalog.sh` ⇒ `live-web-address.ts` 在册，`criterion-carrier-inline-check.ts` 同在。
+- 落地面三态（见 AC1）：主检出 blob == `develop:` blob == `fa13316c3f7dfa7e4fbec119172128a1a8d0586f`，9797 字节。
+
+### AC 逐条读数
+
+**AC1（助手在库内）**：真命令退出码，非肉眼看文件树 ——
+`ls plugin/scripts/live-web-address.ts` ⇒ **exit 0**（9797 B）；
+`git cat-file -e develop:plugin/scripts/live-web-address.ts` ⇒ **exit 0**；
+`git cat-file -e HEAD:plugin/scripts/live-web-address.ts` ⇒ **exit 0**；
+且两侧 blob **字节相同**（`git hash-object <主检出>/plugin/scripts/live-web-address.ts` = `fa13316c3f7dfa7e4fbec119172128a1a8d0586f`
+= `git rev-parse develop:plugin/scripts/live-web-address.ts`）⇒ 不是「同名不同物」。
+
+**AC2（四条 chrome 断言·活实例·各自独立）**：生产活实例 `pid=1709183`（cwd=`/data/home/yale/work/quay`，
+地址由助手派生 `172.28.0.1:20119`），en 45926 B / zh 45609 B。四段原始片段分开贴出：
+
+| # | 断言 | 读数 |
+|---|---|---|
+| ① | en nav 区块字面量 `Needs Human` 计数 | **2** |
+| ② | zh 响应含 `<html lang="zh"` | `<html lang="zh"` |
+| ③ | zh nav 区块 `Needs Human` 计数（同一谓词） | **0** |
+| ④ | en / zh 的 `<title>` 是否逐字不同 | 不同 |
+
+① 的原始命中（en，`tr '\n' ' ' | grep -o '<nav.*</nav>' | fold -w 200 | grep 'Needs Human'`，两条分别为移动菜单与桌面导航的当前项）：
+
+```
+ nav-current" aria-current="page">Needs Human</span>   </div><div class="mobile-menu-group">     <div class="mobile-menu-group-label">Records</div>     <a class="mobile-menu-item" href="/journal">Jour
+ef="/manager">Manager</a><span class="nav-item nav-current" aria-current="page">Needs Human</span></span><span class="nav-group"><a class="nav-item" href="/journal">Journal</a><a class="nav-item" href
+```
+
+② 的原始片段：zh 响应首行 `<html lang="zh"`（en 同位置为 `<html lang="en"`）。
+
+③ 的原始片段：zh nav 区块内 `grep -o 'Needs Human' | wc -l` ⇒ `0`；同位置渲染的是
+`nav-current" aria-current="page">待人工<`（两处，与 en 的两处一一对应）。
+
+④ 的原始片段：en `<title>quay — Needs Human</title>` / zh `<title>quay — 待人工</title>`。
+
+③ 是**能取假的那个量**：同一谓词在 en 上读 2（两条命中都是 chrome 当前项），
+故「zh = 0」是测量而非空断言（硬规则 3）。
+
+**AC3（判据回绿·活实例）**：`node packages/quay/bin/quay.js goal gate AC-295 --dry-run --json`（cwd = 主检出）⇒
+`GATE_EXIT=0`、`verdict: "pass"`、`cause: null`、`reason: "acceptance passed (exit 0)"`、stderr 空。
+立案轮同一条命令读的是 `verdict: "fail"` + `carrier-helper-unavailable(exit=1)` ⇒ **该判据能取假**，不是恒真。
+
+**AC4（助手真调用·非回声）**：对**真实载体** `pid=1709183` ——
+stdout `172.28.0.1:20119`、`HELPER_EXIT=0`；与两条独立读数逐字相同：`ss -ltnp` 的
+`LISTEN 0 511 172.28.0.1:20119 0.0.0.0:* users:(("MainThread",pid=1709183,fd=24))`，以及 `.quay/server.json` 的
+`services[name=web] {host:"172.28.0.1", port:20119, up:true}`。
+传 `pid=999999` ⇒ `HELPER_EXIT=3`、**stdout 为空**、stderr 恰为 `carrier-pid-mismatch`（分通道实测，⛔ 非合并 `2>&1` 的目测）。
+
+**AC5（真呼叫·负控）**：见下节，两臂并排，判据**原文**（`goal show AC-295 --json` 取出的 8991 字符 criterion，经 `/bin/sh` 逐字执行）跑出，stderr 单独捕获。
+
+**AC6（夹具绿）**：`node --test packages/quay/test/ac295-criterion-address-derivation.test.mjs` ⇒ **14/14 pass, 0 fail**，exit 0。
+该夹具在运行期 `readFileSync` `goals/AC-295-…md` 并抽出 `>>> addr-derivation` / `<<< addr-derivation` 之间的区块**逐字执行**
+⇒ 它绑的是**当前**判据文本，故 P4「夹具一致」在本轮**无需改动即成立**（立案时 12 块全红已随落地变更的夹具修订版一并消除；
+`git show develop:… | grep -c 'server.json'` 现为 **2**，两条都是注释——第 21 行解释载体路径、第 122 行描述夹具自带的载体重建，
+⛔ 没有任何断言要求抽出的区块含 `server.json`）。
+
+### AC5 负控（两臂）
+
+**臂 1 —— 生产根（主检出）+ 生产活实例**：判据需 root = 主检出，故对主检出助手 `mv` 走，**窗口约 1 秒**并以 `trap` 保还原。
+
+| 臂 | 读数 |
+|---|---|
+| A 助手在位（基准） | `A_EXIT=0`、`verdict: pass` |
+| B 助手 `mv` 走 | `B_EXIT=1`、`verdict: fail`，`reason` 逐字含 `pid=1709183 addr=- cause=argv-port-absent,carrier-helper-unavailable(exit=1)` + `FAIL=no-derivable-serve-address` —— 与立案轮读数**同形** |
+| C `mv` 回 | `C_EXIT=0`、`verdict: pass` |
+
+残留核查：`git status --porcelain -- plugin/scripts/live-web-address.ts` 为空、`plugin/scripts/` 下 0 个 `hidden` 残留、
+文件复原为 9797 B 且 blob 仍为 `fa13316c3f7dfa7e4fbec119172128a1a8d0586f`；
+`grep -c '"item_id":"AC-295"' .quay/gate-events.jsonl` 前后同为 **255**（`--dry-run` 不追加事件）；
+生产实例 pid 1709183 全程存活。
+
+**臂 2 —— 本任务 worktree 内（⛔ 全程未碰主检出）**：worktree 自起
+`serve --host 172.28.0.1 --port 0`（pid 2761656 ⇒ `172.28.0.1:28167`，跑完按 pid 精确 kill）。
+`--port 0` 使 argv 派生落 `argv-port-kernel-assigned` ⇒ **强制走载体/助手分支**，
+即本案的分支；⛔ 若用 `--port N≥1` 则助手根本不被调用，负控会退化成空转：
+
+| 臂 | 读数 |
+|---|---|
+| A 助手在位 | `ARM_A_EXIT=0`，`addr=172.28.0.1:28167 cause=derived-from-carrier-fetch-answered` |
+| B 助手 `mv` 走 | `ARM_B_EXIT=1`，stderr 逐字含 `cause=argv-port-kernel-assigned,carrier-helper-unavailable(exit=1)` + `FAIL=no-derivable-serve-address` |
+| C `mv` 回 | `ARM_C_EXIT=0`，与 A 同形；0 个 `hidden` 残留，worktree 内 `git status --porcelain` 对该文件为空 |
+
+### DoD（生产载体上的真读数，硬规则 4 推论三）
+
+AC-295 判据在**生产载体**上真跑并 exit 0：root = 主检出 `/data/home/yale/work/quay`，候选是**运行中**的生产 `quay.ts serve`
+（pid=1709183，cwd=主检出），地址由**真实载体读数**派生（`.quay/server.json` 的 `web{host:172.28.0.1, port:20119, up:true}`，
+与 `ss -ltnp` 逐字一致），四条 chrome 断言全部取在**该服务返回的 HTTP 响应**上（AC2 的四段原始片段），
+⛔ 不是 fixture、⛔ 不是 render 函数返回值。`plugin/scripts/live-web-address.ts` 在 `develop` 与主检出可见
+（`git show develop:` 可读、blob 双向相同），绑定夹具在同一 develop 上 14/14 绿。
+
+### 本轮无产品代码 delta（说明，⛔ 不是遗漏）
+
+本任务的落地面（助手本体 + 其 capability-catalog 注册 + 夹具修订版）已在
+`gap-criterion-live-web-address-derivation-17-copies-to-one` 的 fan-in 中全部落地；P3「本任务接管实现」的前提
+（在飞任务卡住 → `needs-human` / fan-in 反复不过）**不成立**。故本任务只产生 `tasks/<id>.md` 的 AC 翻转提交，
+无 `plugin/` / `packages/` 改动。
