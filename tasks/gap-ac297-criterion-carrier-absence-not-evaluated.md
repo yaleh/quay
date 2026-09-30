@@ -6,7 +6,7 @@ title: AC-297 判据把「活载体缺席」记成「此刻为假」——`fail(
   not-evaluated/declared）⇒ driver 每轮把它当 confirmed-failing 立案；修法=`fail()` 改 exit
   3（10 条断言分支逐字不动）+ 保持 cwd=仓库根的活实例使判据在新指纹下落真 pass + 以 `en-fetch-failed` 仍 exit 1
   证明强度未减
-status: ready
+status: done
 labels:
   - gap
   - defect
