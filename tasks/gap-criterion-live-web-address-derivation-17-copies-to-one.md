@@ -4,7 +4,7 @@ title: 「活 web 地址派生」在 17 条判据里各内联一份（已分裂�
   在缺字段时判定相反、require() 版丢了 schemaVersion 与 host/port 校验、exit 3（=NOT-EVALUATED
   的约定值）被拿来表示 pid-mismatch），17 个测试各带一整套本地夹具（零共享、命名分 ≥3 族），6 天后第二波 4 条（exit
   词表违规、AC-292 至今 needs-human）⇒ 收成一个三态派生助手
-status: ready
+status: done
 labels:
   - gap
   - defect
