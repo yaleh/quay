@@ -125,8 +125,9 @@ AC-289 的判据在**生产载体**（主检出 cwd=仓库根的活 `quay.ts ser
 - tasks/gap-ac289-criterion-carrier-absence-not-evaluated.md
 - goals/AC-289-dashboard-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
 - packages/quay/test/ac289-criterion-address-derivation.test.mjs
+- packages/quay/test/ac302-criterion-address-derivation.test.mjs
 
-（说明：第 1 条 self-touch；第 2 条是判据载体，经 `quay goal write AC-289 --criterion …` 落库，⛔ 不手改 `goals/*.md`；第 3 条是与该判据文本逐字绑定的夹具。⛔ `plugin/scripts/live-web-address.ts`、`packages/quay/test/helpers/live-web-address-fixture.mjs`、`packages/quay/src/serve-*.ts` **均不在本 Touches 内** —— 助手与共享夹具归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，页面接线归 done 的 `gap-ac289-dashboard-zh-nav-label-and-own-title` 且立案轮实测为真。）
+（说明：第 1 条 self-touch；第 2 条是判据载体，经 `quay goal write AC-289 --criterion …` 落库，⛔ 不手改 `goals/*.md`；第 3 条是与该判据文本逐字绑定的夹具。⛔ `plugin/scripts/live-web-address.ts`、`packages/quay/test/helpers/live-web-address-fixture.mjs`、`packages/quay/src/serve-*.ts` **均不在本 Touches 内** —— 助手与共享夹具归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，页面接线归 done 的 `gap-ac289-dashboard-zh-nav-label-and-own-title` 且立案轮实测为真。第 4 条是**另一任务的夹具**（`gap-ac302-criterion-carrier-absence-not-evaluated`），本轮**采纳**其已提交的修正：AC-302 的判据同日也改成 `exit 3` 而夹具未同步 ⇒ 在 `develop` 上红；而本任务的夹具在 AC-302 的分支上红 —— 两条分支互为对方的 suite 红，谁都 land 不了。把 AC-302 侧夹具一并带上并声明在此，一次落地即解除该死锁（详见 `## Evidence` 的「死锁互解」一节）。）
 
 ## Evidence（执行轮，2026-09-30T09:18–09:33Z，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac289-criterion-carrier-absence-not-evaluated`）
 
