@@ -42,7 +42,7 @@ criterion: >-
   false" for a state in which it could
 
   # not be evaluated at all, while the guarantee itself was measured TRUE on the
-  live instance (172.28.0.1:20119:
+  live instance the carrier named:
 
   # en nav "Docs" x2, zh <html lang="zh">, zh nav "Docs" x0, zh <title> != en
   <title>). The address-derivation step
