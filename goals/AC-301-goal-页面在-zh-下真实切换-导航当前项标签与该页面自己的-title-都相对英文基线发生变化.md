@@ -28,8 +28,7 @@ criterion: >-
   # not the criterion's subject (/goal answers on the real port the whole time).
   The real listening port
 
-  # is knowable only from the live host's OWN carrier $root/.quay/server.json
-  (writer
+  # is knowable only from the live host's OWN carrier 活宿主自身的服务状态载体 (writer
 
   # packages/quay/src/serve.ts; read contract packages/quay/src/server-state.ts,
   whose absent /
@@ -150,41 +149,15 @@ criterion: >-
   print "addr="h":"(q+0)}'; }
 
   carrier_addr() {
-    f="$root/.quay/server.json"
-    [ -f "$f" ] || { echo "carrier-absent"; return; }
     kill -0 "$1" 2>/dev/null || { echo "candidate-pid-dead"; return; }
-    if command -v node >/dev/null 2>&1; then
-      o=$(node -e '(()=>{const fs=require("fs");let j;try{j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){return console.log("carrier-unreadable")};if(!j||j.schemaVersion!==1||!Array.isArray(j.services))return console.log("carrier-unreadable");if(String(j.pid)!==process.argv[2])return console.log("carrier-pid-mismatch");const w=j.services.filter(x=>x&&x.name==="web");if(!w.length)return console.log("carrier-no-web-service");if(w[0].up!==true)return console.log("carrier-web-down");const h=w[0].host,p=w[0].port;if(typeof h!=="string"||h===""||typeof p!=="number"||!(p>0))return console.log("carrier-web-address-unusable");console.log("addr="+h+":"+p)})()' "$f" "$1" 2>/dev/null)
-    elif command -v python3 >/dev/null 2>&1; then
-      o=$(python3 -c 'import json,sys
-  try: j=json.load(open(sys.argv[1]))
-
-  except Exception: print("carrier-unreadable"); sys.exit()
-
-  if j.get("schemaVersion")!=1 or not isinstance(j.get("services"),list):
-  print("carrier-unreadable"); sys.exit()
-
-  if str(j.get("pid"))!=sys.argv[2]: print("carrier-pid-mismatch"); sys.exit()
-
-  w=[x for x in j.get("services") if isinstance(x,dict) and
-  x.get("name")=="web"]
-
-  if not w: print("carrier-no-web-service"); sys.exit()
-
-  if w[0].get("up") is not True: print("carrier-web-down"); sys.exit()
-
-  h=w[0].get("host"); p=w[0].get("port")
-
-  if not isinstance(h,str) or not h or not isinstance(p,int) or p<1:
-  print("carrier-web-address-unusable"); sys.exit()
-
-  print("addr=%s:%d"%(h,p))' "$f" "$1" 2>/dev/null)
-    else
-      o="carrier-no-json-tool"
-    fi
+    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$1" 2>&1)
     rc=$?
-    if [ -z "$o" ]; then if [ "$rc" != 0 ]; then o="carrier-unreadable-rc$rc"; else o="carrier-unreadable"; fi; fi
-    echo "$o"
+    case "$rc:$o" in
+      0:*) printf 'addr=%s\n' "$o" ;;
+      1:carrier-web-down) printf 'carrier-web-down\n' ;;
+      3:*) printf '%s\n' "${o:-carrier-unreadable}" ;;
+      *) printf 'carrier-helper-unavailable(exit=%s)\n' "$rc" ;;
+    esac
   }
 
   addr=""
@@ -228,8 +201,8 @@ criterion: >-
   if [ -z "$addr" ] && [ "$nserve" != 0 ] && [ "$nderived" = 0 ]; then printf
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
-  .quay/server.json entry naming that pid with an up web service); per-candidate
-  readings on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
+  活服务状态载体 entry naming that pid with an up web service); per-candidate readings
+  on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
