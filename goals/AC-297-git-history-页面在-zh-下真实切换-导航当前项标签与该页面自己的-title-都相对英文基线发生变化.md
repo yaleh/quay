@@ -133,9 +133,9 @@ criterion: >-
   nav-label-untranslated / no-title-tag-zh / title-unchanged) keep the false
   code VERBATIM: they are the two-valued half ("measured, and false"), and they
   still have teeth -- that is the negative control this amendment is quantified
-  against. This AC has NO no-reachable-serve-address branch, so its "derived an
-  address but nobody answered" case lands on the en-fetch-failed assertion and
-  stays a false verdict by design.
+  against. This AC carries no reachable-but-unanswered derivation branch of its
+  own, so its "derived an address but nobody answered" case lands on the
+  en-fetch-failed assertion and stays a false verdict by design.
 
 
   fail() { echo "CAUSE=$1" >&2; if [ -n "$cands" ]; then echo "CANDIDATES:$rep"
