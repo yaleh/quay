@@ -5,6 +5,74 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THE FOUR EVALUABILITY BRANCHES NOW REPORT NOT-EVALUATED (status 3) --
+  2026-09-30, gap-ac302-criterion-carrier-absence-not-evaluated:
+
+  # this criterion's carrier is a RUNNING `quay.ts serve` with cwd = repo root,
+  and that carrier is not always present:
+
+  # there may be no instance at all, or an instance whose address cannot be
+  derived or reached. In those states the
+
+  # guarantee below has been neither shown true nor shown false -- it is
+  NOT-EVALUATED, and the goal mechanism already
+
+  # reserves a distinct value for exactly that state -- status 3 -- which
+  acceptance-runner's verdictFromAcceptance maps
+
+  # to verdict "not-evaluated" / cause "declared" (NOT_RUNNABLE_EXIT_CODES
+  carries only 126/127, so 3 is not a
+
+  # runner-failure status), and which packages/quay/src/goal-store.ts states
+  verbatim as this repo's convention
+
+  # ("NOT-EVALUATED: carrier absent"). Reporting those four branches with status
+  1 instead made every carrier absence
+
+  # land as verdict "fail", so plugin/scripts/goal-driver.ts's
+  runPrefilingRecheck classified it "confirmed-failing"
+
+  # and filed a fresh defect task EVERY round. The measured cost on THIS AC: the
+  ledger holds that reading at
+
+  # 2026-09-30T08:45:43.734Z AND 08:56:58.320Z (both status 1, nderived=0,
+  criterionHash null), and the
+
+  # 08:57:21.713Z dry-run reproduces it -- the criterion was reporting "this is
+  false" for a state in which it could
+
+  # not be evaluated at all, while the guarantee itself was measured TRUE on the
+  live instance (172.28.0.1:20119:
+
+  # en nav "Docs" x2, zh <html lang="zh">, zh nav "Docs" x0, zh <title> != en
+  <title>). The address-derivation step
+
+  # meanwhile moved onto the shared helper plugin/scripts/live-web-address.ts,
+  and the SAME criterion then read
+
+  # status 0 -- it oscillated between "true" and "cannot be evaluated HERE",
+  with the latter wearing the shape of
+
+  # "false" (hard rule 3b).
+
+  # ONLY the four evaluability branches changed. The ten assertion-side refusals
+  (en-fetch-failed, zh-fetch-failed,
+
+  # no-nav-region, no-nav-region-zh, english-baseline-missing, no-title-tag,
+  html-lang-not-zh,
+
+  # nav-label-untranslated, no-title-tag-zh, title-unchanged) keep status 1 byte
+  for byte: they answer "is this page
+
+  # wired to the zh locale?", which stays answerable and stays FALSE whenever a
+  reachable instance serves an
+
+  # untranslated nav -- so the criterion still has teeth, and the fixture's
+  whole-criterion negative control
+
+  # (packages/quay/test/ac302-criterion-address-derivation.test.mjs) is what
+  proves it still does.
+
   # >>> addr-derivation (this block is run VERBATIM by
   packages/quay/test/ac302-criterion-address-derivation.test.mjs)
 
@@ -17,7 +85,7 @@ criterion: >-
   if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
   rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
   attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
-  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
+  equal to the empty root\n' "$(pwd)" >&2; exit 3; fi
 
   cands=""
 
@@ -91,17 +159,17 @@ criterion: >-
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
   活服务状态载体 entry naming that pid with an up web service); per-candidate readings
-  on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
+  on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
   serve process(es) for cwd=%s, none answered %s (connection refused / timed out
   / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
-  "$root" "$ROUTE" >&2; exit 1; fi
+  "$root" "$ROUTE" >&2; exit 3; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  (AC-179 probe pattern)" >&2; exit 3; fi
 
   printf 'AC-302 serve address derived from %s as %s (per-candidate
   readings:%s)\n' "$src" "$addr" "$rep"
