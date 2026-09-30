@@ -35,8 +35,8 @@ criterion: >-
   # CARRIER moved, not the criterion's subject). The real listening port is
   knowable only from the
 
-  # live host's own carrier $root/.quay/server.json (writer
-  packages/quay/src/serve.ts; read contract
+  # live host's own carrier 活宿主自身的服务状态载体 (writer packages/quay/src/serve.ts;
+  read contract
 
   # packages/quay/src/server-state.ts, which already owns the shape + the
   three-way read outcome).
@@ -72,9 +72,9 @@ criterion: >-
     if [ -n "$lit" ]; then
     a="$lit"
     else
-    a=$(node -e 'const fs=require("fs");const R=process.argv[1],P=String(process.argv[2]);let s=null;try{s=JSON.parse(fs.readFileSync(R+"/.quay/server.json","utf8"))}catch(e){process.exit(2)}if(!s||s.schemaVersion!==1||!Array.isArray(s.services))process.exit(2);if(String(s.pid)!==P)process.exit(3);const w=s.services.filter(function(x){return x&&x.name==="web"})[0];if(!w)process.exit(4);if(w.up===false)process.exit(5);if(typeof w.host!=="string"||w.host===""||typeof w.port!=="number"||!(w.port>0))process.exit(6);process.stdout.write(w.host+":"+w.port)' "$root" "$p" 2>/dev/null)
+    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p" 2>&1)
     rc=$?
-    if [ "$rc" != 0 ]; then a=""; case "$rc" in 2) cause="carrier-unreadable" ;; 3) cause="carrier-pid-mismatch" ;; 4) cause="carrier-no-web-entry" ;; 5) cause="carrier-web-marked-down" ;; 6) cause="carrier-web-address-unusable" ;; *) cause="carrier-read-failed(exit=$rc)" ;; esac; fi
+    if [ "$rc" = 0 ]; then a="$o"; else a=""; case "$rc:$o" in 1:carrier-web-down) cause="carrier-web-down" ;; 3:*) cause="${o:-carrier-unreadable}" ;; *) cause="carrier-helper-unavailable(exit=$rc)" ;; esac; fi
     fi
     case "$a" in 0.0.0.0:*) a="127.0.0.1:${a#0.0.0.0:}" ;; ::*) a="127.0.0.1:${a#::}" ;; esac
     if [ -n "$a" ]; then nderived=$((nderived + 1)); fi
@@ -208,7 +208,7 @@ origin: 人 2026-09-17 讨论裁定：GOAL-024 达成范围 = 全部 15 个 SITE
   与 `08:21:12Z` fail 同为 `d5569285de4b0f26`）⇒ 判据文本没变，**是承载体（部署形态）搬了家**；同族的 AC-288
   在同一对时刻同向翻转。⛔ 修法不是把 web 钉回固定端口（那会把 `start-drivers.ts`
   头注释记下的「无关进程占住硬编码端口⇒假绿」重新引入，且正是硬规则 4
-  推论二点名的形态），而是把派生那一步移到**真正承载这个角色的地方**：活宿主自己的载体 `$root/.quay/server.json`（写者
+  推论二点名的形态），而是把派生那一步移到**真正承载这个角色的地方**：活宿主自己的载体 `活宿主自身的服务状态载体`（写者
   `packages/quay/src/serve.ts`，读契约正本 `packages/quay/src/server-state.ts`；结构化读面
   `quay server status --json`）。载体只用来**派生地址**，判定仍由对 `/dashboard` 的外部 HTTP GET
   作出（硬规则 4b）；`expect`、作用域（仍只遍历 cwd=仓库根的生产 serve）、对 `<nav>` 区块与本页 `<title>`
