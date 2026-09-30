@@ -126,20 +126,20 @@ extra:
 
 ### 落地面
 
-- 新增 `plugin/scripts/live-web-address.ts`（唯一派生点，三态：0=可评估 stdouthost:port / 1=载体明确 down / 3=NOT-EVALUATED 且 stderr 给**各不相同**的子态词 carrier-absent | carrier-unreadable | carrier-pid-mismatch | carrier-no-web-service | carrier-web-up-absent | carrier-web-address-unusable）。
-- 新增 `plugin/scripts/criterion-carrier-inline-check.ts`（P4 防复发，判据文本点名载体即红；goals 目录不可读 ⇒ exit 2 NOT-EVALUATED）。
+- 新增 `plugin/scripts/live-web-address.ts`（唯一派生点，三态：0=可评估 stdout host:port / 1=载体明确 down / 3=NOT-EVALUATED 且 stderr 给**各不相同**的子态词 carrier-absent | carrier-unreadable | carrier-pid-mismatch | carrier-no-web-service | carrier-web-up-absent | carrier-web-address-unusable）。
+- 新增 `plugin/scripts/criterion-carrier-inline-check.ts`（P4 防复发，判据文本点名载体即红；goals 目录不可读 ⇒ exit 2 NOT-EVALUATED）+ 其 mutation case。
 - 新增 `packages/quay/test/helpers/live-web-address-fixture.mjs`（writeCarrier/mkRoot/runSh/derive 各**恰好一份**；含 installLiveWebAddressHelper，把真助手逐字节 copy 进临时 root）。
 - 17 条判据（AC-179、AC-288..AC-303）经 `quay goal write` 重写为**调用助手**（worktree root + 主检出 root 两处同文，主检出那侧由 driver 的 doc 分支同步推进 develop）。
 - 17 个 `packages/quay/test/ac*-criterion-address-derivation.test.mjs` 改为 import 共享夹具；catalog（6 张表）+ `runner-static-gate.ts` 登记新检查器。
 
 ### AC 逐条读数
 
-- **AC1**：`grep -rl server.json goals/*.md | wc -l` ⇒ **0**（worktree 与主检出各测一次，均 0；改前 17）。逐条 criterion 内 `server.json` 出现次数 ⇒ **0/17**。
+- **AC1**：`grep -rl 'server.json' goals/*.md | wc -l` ⇒ **0**（worktree 与主检出各测一次，均 0；改前 17）。逐条 criterion 内 `server.json` 出现次数 ⇒ **0/17**。
 - **AC2**：17 条 criterion 内 `live-web-address.ts` 出现次数 ⇒ **各恰 1**，且都落在调用行（`node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p"`；AC-179 为 python `subprocess.run([...])` 的 argv 首元素）。
-- **AC3**：`plugin/test/live-web-address.test.mjs` 用**真实载体**（temp root 上写盘、真 spawn CLI）测三态：合法 ⇒ exit 0 + stdout `host:port`；坏 JSON ⇒ exit 3 + `carrier-unreadable`；缺席 ⇒ exit 3 + `carrier-absent`（**与坏 JSON 不同词**，硬规则 3b）。13 例绿。
+- **AC3**：`plugin/test/live-web-address.test.mjs` 用**真实载体**（temp root 上写盘、真 spawn CLI）测三态：合法 ⇒ exit 0 + stdout `host:port`；坏 JSON ⇒ exit 3 + `carrier-unreadable`；缺席 ⇒ exit 3 + `carrier-absent`（**与坏 JSON 不同词**，硬规则 3b）。
 - **AC4**：缺 `up` ⇒ **exit 3 / carrier-web-up-absent**（缺值 = 未查，硬规则 6）；`up:true` ⇒ 地址、`up:false` ⇒ exit 1 / carrier-web-down、缺 `up` ⇒ exit 3 —— 三者**三态可分**，测试逐条钉住（含 `up:"yes"` 这类非布尔值也归「未查」）。
 - **AC5**：见上方 AC5 行与「欠账」。基准臂/突变臂/删除臂三臂都跑**出货判据文本**（从 `goals/` 读，非副本）于同一夹具；逐条读数在测试里枚举（真助手：17/17 exit 0；突变：17/17 非 0 且点名不可派生；删除：17/17 非 0）。
-- **AC6**：17 个测试文件内 `writeCarrier|mkRoot|runSh|derive` 的本地定义数 ⇒ **0**；共享 helper 内各 **1**（合计 == 1）。17 个文件全绿：6+4+7 三批共 **93 / 50 / 103** 例，0 fail。
+- **AC6**：17 个测试文件内 `writeCarrier|mkRoot|runSh|derive` 的本地定义数 ⇒ **0**；共享 helper 内各 **1**（合计 == 1）。17 个文件全绿：三批共 **93 / 50 / 103** 例，0 fail。
 - **AC7**：`plugin/test/criterion-carrier-inline-check.test.mjs` 注入 `server.json` 到某 criterion ⇒ 判红（CLI exit 1）；撤掉 ⇒ 判绿（exit 0）；另测「origin/expect 散文里提到不算」（按位置，硬规则 2）、「goals 目录缺失 ⇒ exit 2 而非空列表」。
 
 ### DoD（生产载体上的真读数，硬规则 4 推论三）
