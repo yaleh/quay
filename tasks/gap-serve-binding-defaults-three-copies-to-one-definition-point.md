@@ -5,7 +5,7 @@ title: serve 绑定默认值有三个定义点（serve.ts host="0.0.0.0" / cli/s
   0`），host 两值互相矛盾，且实测落在任何检测器范围外（两个最近类比 checker 均 PASS）⇒ 收成唯一解析点
   resolveServeBinding + 一份带 marker 的回退字面量 + `.quay/config.yml#serve` 期望态；人
   2026-09-30 裁定默认收敛到 0.0.0.0
-status: todo
+status: ready
 labels:
   - gap
   - defect
