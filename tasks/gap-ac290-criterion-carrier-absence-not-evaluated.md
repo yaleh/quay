@@ -139,13 +139,13 @@ $ node --test packages/quay/test/ac290-criterion-address-derivation.test.mjs
 
 ## AC
 
-- [ ] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条断言分支逐字相同（`exit 1` 计数 14 → 10，`exit 3` 计数 0 → 4，解析后逐行贴出）。⛔ 未经 `quay goal write` 落库不算。
-- [ ] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac290-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `code === 3`、5 个正例仍 `code === 0`、第 ⑤ 组 11 条 `CAUSE=` 计数断言逐字未动；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
-- [ ] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-290` ⇒ **exit 0**，逐字贴出；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、argv 含 `quay.ts serve` 的活进程。
-- [ ] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/tasks` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=nav-label-untranslated`（或 `no-nav-region`）可区分，逐字贴出。⛔ 该证据的活面由夹具/脚本自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
-- [ ] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-290 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
-- [ ] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-290` 最新一条带 `payload.criterionHash` 的事件为 `verdict:"pass"`，其 `criterionHash` **≠** `f62c0c486e26a83a`（修订前后两行都贴，并注明哪条由生产轮转自动写下）；② `bash scripts/test.sh --for-task gap-ac290-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（五个 token 各 17 / 10 / 10 / 17 / 8），并说明本任务只改 AC-290 一条的退出码。
-- [ ] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下派发/执行时 `ps aux | grep -c '[q]uay-task-worker'` 的读数与「本实例无监督者、死亡后不会被自动拉回」的观察项及其发生率读数。
+- [x] **AC1（可评估性分支已取 exit 3，断言分支逐字未动）**：贴出经 `quay goal write` 落库后的 criterion diff：**只有** `FAIL=workspace-root-unresolvable`、`FAIL=no-derivable-serve-address`、`FAIL=no-reachable-serve-address`、`CAUSE=no-running-serve-instance` 四处由 `exit 1` 变 `exit 3`；`expect` 与十条断言分支逐字相同（`exit 1` 计数 14 → 10，`exit 3` 计数 0 → 4，解析后逐行贴出）。⛔ 未经 `quay goal write` 落库不算。
+- [x] **AC2（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac290-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `code === 3`、5 个正例仍 `code === 0`、第 ⑤ 组 11 条 `CAUSE=` 计数断言逐字未动；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
+- [x] **AC3（正控制：活实例上真 pass）**：`node packages/quay/bin/quay.js goal gate AC-290` ⇒ **exit 0**，逐字贴出；同一时刻 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd` 指向一个 cwd=仓库根、argv 含 `quay.ts serve` 的活进程。
+- [x] **AC4（负控制：该报假时仍报假）**：一条**行为**证据（不是文本 diff）证明断言分支仍有牙 —— 对一个真实监听但 zh 未翻译的 `/tasks` 跑整条 criterion ⇒ **`exit 1`**，且 `CAUSE=nav-label-untranslated`（或 `no-nav-region`）可区分，逐字贴出。⛔ 该证据的活面由夹具/脚本自造，⛔ 不得改 `packages/quay/src/serve-*.ts`。
+- [x] **AC5（不可评估态与为假态可区分）**：无活实例时 `quay goal gate AC-290 --dry-run --json` ⇒ `verdict:"not-evaluated"`、`cause:"declared"`（⛔ 不是 `fail`）；活实例 + 真接线 ⇒ `verdict:"pass"`。两个 JSON 逐字贴出。
+- [x] **AC6（新指纹落账 + 不回归 + 家族枚举）**：① `.quay/gate-events.jsonl` 中 `item_id=AC-290` 最新一条带 `payload.criterionHash` 的事件为 `verdict:"pass"`，其 `criterionHash` **≠** `f62c0c486e26a83a`（修订前后两行都贴，并注明哪条由生产轮转自动写下）；② `bash scripts/test.sh --for-task gap-ac290-criterion-carrier-absence-not-evaluated` 绿；③ 家族枚举逐文件贴出（五个 token 各 17 / 10 / 10 / 17 / 8），并说明本任务只改 AC-290 一条的退出码。
+- [x] **AC7（非目标边界未被越过）**：`git diff --name-only` 对 Touches 之外为空；贴出证据说明**没有**改 `plugin/scripts/driver-anchor.ts` / `plugin/scripts/start-drivers.ts` / 任何 `plugin/scripts/*.ts` / 任何 `packages/quay/src/serve-*.ts`；Evidence 里记下派发/执行时 `ps aux | grep -c '[q]uay-task-worker'` 的读数与「本实例无监督者、死亡后不会被自动拉回」的观察项及其发生率读数。
 
 ## DoD
 
@@ -164,3 +164,126 @@ $ node --test packages/quay/test/ac290-criterion-address-derivation.test.mjs
 - tasks/gap-ac290-criterion-carrier-absence-not-evaluated.md
 
 （说明：第一条是落地面 —— 地址派生那步的**退出码**，经 `quay goal write AC-290 --criterion …` 落库，`expect` 与分支文本逐字不变；第二条是与该块逐字绑定的夹具（7 个可评估性负例断言随之同步，正例与 11 条 `CAUSE=` 计数断言不动）；第三条是 self-touch。⛔ `plugin/scripts/*.ts`、任何 `packages/quay/src/serve-*.ts` **均不在本 Touches 内**（前者是观察项非目标，后者是夹具自造活面的约束）。运行时证据落 `.quay/` **保持未跟踪**，故不声明 —— `anti-drift-touches-check` 只比对已跟踪文件。）
+## Evidence（执行轮，2026-09-30T07:04–07:20Z，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac290-criterion-carrier-absence-not-evaluated`）
+
+**AC1 — 四处可评估性分支改 `exit 3`，经 `quay goal write` 落库（⛔ 非手工 Edit `goals/*.md`）。**
+落库提交：主检出 `ba5c68791` + `b1a87e583`；worktree `d966e8433` + `b1a87e583`（两处 blob 逐字节相同，`git rev-parse` 对照）。
+判据正文 **107 行，只有 4 行改变**（逐行全量对照，⛔ 不是抽查）：
+
+```
+line 22:  FAIL=workspace-root-unresolvable … >&2; exit 1; fi   ⇒  … >&2; exit 3; fi
+line 83:  FAIL=no-derivable-serve-address … >&2; exit 1; fi   ⇒  … >&2; exit 3; fi
+line 84:  FAIL=no-reachable-serve-address … >&2; exit 1; fi   ⇒  … >&2; exit 3; fi
+line 85:  CAUSE=no-running-serve-instance … >&2; exit 1; fi   ⇒  … >&2; exit 3; fi
+```
+
+计数（解析后的逻辑行）：含 `exit 1` 的行 **14 → 10**；结尾为 `exit 3; fi` 的**分支行** **0 → 4**。
+（`exit 3` 这个子串在整段文本里出现 5 次，第 5 次在注释里逐字引用仓库自己的约定
+`"exit 3 -- this repo's convention, e.g. NOT-EVALUATED: carrier absent"` —— 与同样已落地的 AC-292 的注释逐字同形；
+**判据分支的计数是 4**，注释里的那次是引用，⛔ 两者不可混计。）
+`expect` 写前写后逐字相同；`<<< addr-derivation` 之后的十条断言分支与全部 `FAIL=`/`CAUSE=` 分支逐字未动；
+每条注释都是**单一逻辑行**（folded scalar 约束）。写后回读 `quay goal show AC-290 --json` 的 criterion
+与写前准备的文本**逐字节相同**（round-trip 已验，⛔ 不是「写进去了大概对」）。
+
+**AC2 — 夹具同步（7 条 1 → 3；正例与 11 条 `CAUSE=` 计数断言逐字不动）。**
+修订前 `git show develop:packages/quay/test/ac290-criterion-address-derivation.test.mjs | grep -n 'assert.equal(r.code'`
+⇒ 5 条 `code, 0` + 7 条 `code, 1`（行 381 / 406 / 425 / 444 / 464 / 486 / 505，全部是可评估性负例）。
+修订后同一命令 ⇒ 5 条 `code, 0` **逐字不变**、那 7 条变 `code, 3`，另加 §⑤b（结构性：恰好 4 条 `exit 3; fi`、
+恰好 10 条 `exit 1`）与 §⑥（整条判据的行为控制，2 例：wired ⇒ 0，unwired ⇒ 1）。
+第 ⑤ 组 11 条 `CAUSE=` 计数断言逐字未动；经 `quay goal show` 回读该判据的 `CAUSE=` 行数仍为 **11**。
+`node --test packages/quay/test/ac290-criterion-address-derivation.test.mjs` ⇒ `tests 16 / pass 16 / fail 0`。
+**夹具本身可取假（突变对照）**：把 §⑥ 的 `TASKS_ZH_UNTRANSLATED` 常量临时改指到 wired 体后重跑 ⇒
+**只有** §⑥ 那条失败用例转红（15 pass / 1 fail），其余 15 条逐字不变 ⇒ 该断言不是空转；改回后 16/16 再次全绿
+（对照后 `md5sum` 证明文件已逐字节还原）。
+
+**AC3 — 正控制（活实例上真 `pass`）。**
+活实例由仓库自己的启动器拉起（`node packages/quay/bin/quay.js server start --only web --host 127.0.0.1`；
+⛔ 不手拼 spawn、⛔ 未碰任何 driver、⛔ 未重启 peer 在飞 worker 依赖的任何服务）：
+
+```
+pid=438577  cwd=/data/home/yale/work/quay
+argv=…/node --no-warnings --experimental-strip-types …/packages/quay/bin/quay.ts serve --host 127.0.0.1
+.quay/server.json: pid=438577 startedAt=2026-09-30T07:10:02.925Z  web 127.0.0.1:23311 up:true
+$ node packages/quay/bin/quay.js goal gate AC-290
+{ "id": "AC-290", "verdict": "pass", "cause": null, "reason": "acceptance passed (exit 0)", "timeoutMs": 60000,
+  "timestamp": "2026-09-30T07:14:59.792Z", "dryRun": false, … }
+GATE_EXIT=0
+```
+
+四段断言各自独立可核（判据源码里逐条可读）：en nav 含 `Tasks`、zh 响应含 `<html lang="zh"`、
+zh nav 里该英文字面量计数为 0、zh `<title>` ≠ en `<title>`。
+
+**AC4 — 负控制（行为读数，不是文本 diff；活面由脚本自造，⛔ 未改任何 `packages/quay/src/serve-*.ts`）。**
+`/tmp/ac290-negative-control.mjs`：临时 `git init` 根 + 真 http server（按 `Cookie: lang=zh` 给两副响应体）
++ 真 serve 形状子进程（`quay.ts serve --host 127.0.0.1 --port N`，N≥1）+ 判据自己的 `pgrep`/`curl` 探针；
+喂给它的判据文本取自 `quay goal show AC-290 --json`（⛔ 不是判据的副本，是同一份文本）。逐字读数：
+
+```
+── CASE=zh-nav-WIRED
+   surface: pid=849862 quay.ts serve --host 127.0.0.1 --port 14205 (cwd=/tmp/ac290-neg-ING6AM), listener answers /tasks
+   criterion rc = 0
+   stdout = "AC-290 serve address derived from argv as 127.0.0.1:14205 … OK -- /tasks: default nav region carries \"Tasks\" …"
+── CASE=zh-nav-UNTRANSLATED
+   surface: pid=850404 quay.ts serve --host 127.0.0.1 --port 26461 (cwd=/tmp/ac290-neg-ING6AM), listener answers /tasks
+   criterion rc = 1
+   stderr = "CAUSE=nav-label-untranslated -- the nav region of /tasks under Cookie: lang=zh still renders the literal English nav label \"Tasks\"; the nav is not wired to the zh dictionary"
+```
+
+⇒ 接线一破，判据仍以 **1** 出声、且以 `CAUSE=nav-label-untranslated` 与可评估性态**不同形**。
+
+**AC5 — 三态可区分（同一条判据，三个互不同形的取值）。**
+无活实例（scratch `git init` 根 + 同一份判据，`--dry-run`；⛔ 未停生产实例）：
+
+```
+$ node …/quay.js goal gate AC-290 --dry-run --json --root /tmp/ac290-scratch
+{ "verdict": "not-evaluated", "cause": "declared",
+  "reason": "not-evaluated (declared): acceptance failed (exit 3) — AC-290 candidate readings (cwd=/tmp/ac290-scratch, nserve=0, ncand=1, nderived=0): … CAUSE=no-running-serve-instance …" }
+```
+
+活实例 + 真接线 ⇒ `"verdict": "pass"`（AC3 逐字）；可达但 zh 未翻译 ⇒ `rc = 1` + `CAUSE=nav-label-untranslated`（AC4 逐字）。
+⇒ `pass` / `fail` / `not-evaluated` 三值互不同形，**且「不可评估」不再与「为假」共用输出**。
+
+**AC6 — 新指纹落账 + 不回归 + 家族枚举。**
+① 台账 `.quay/gate-events.jsonl`，`item_id=AC-290`，**修订前最后一条带指纹**的事件：
+```
+{"id":"54d8ef80-b55a-4107-932f-f1cc8001d97b","item_id":"AC-290","gate":"goal","actor":"goal-sweep","verdict":"fail",
+ "timestamp":"2026-09-30T06:50:33.896Z","payload":{…,"criterionHash":"f62c0c486e26a83a"}}
+```
+**修订后最新一条带指纹**的事件：
+```
+{"id":"ececec59-24d6-4b8d-b2d9-9c93175a7fc6","item_id":"AC-290","gate":"goal","actor":"goal-amend","verdict":"pass",
+ "timestamp":"2026-09-30T07:14:22.365Z","payload":{"reason":"acceptance passed (exit 0)","criterionHash":"5554701a9b826a78"}}
+```
+⇒ `verdict:"pass"` ∧ `criterionHash 5554701a9b826a78 ≠ f62c0c486e26a83a`。
+**哪条是谁写的**：06:50:33Z 那条是**生产轮转自动**落下的（修订前文本，载体缺席 ⇒ `fail`）；
+07:07:16Z 有一条 `actor:"goal-amend"` / `verdict:"not-evaluated"` / `criterionHash:"d2ed0b103c80cd63"`，
+也是**生产 goal-driver 的轮转自动**落下的 —— 判据一改，上一轮结尾的指纹就不对，下一轮轮转把它优先复验，
+当时无实例 ⇒ 它落的是 `not-evaluated`（**同一个「载体缺席」，修订前落 `fail`、修订后落 `not-evaluated`**，
+这正是本任务要的那条分界）。07:14:22Z 那条 `pass` 由本轮**显式**触发的一次 bounded rotation 写下：
+`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node packages/quay/bin/quay.js goal check --stale-pass --sweep --budget 1`
+（不加 `env -u` 时该命令自报 `refused`，故必须加）；它 pick 到 AC-290 是因为该 AC 被本轮的判据修订
+标成「amend 优先」，与年龄无关。`quay goal check --stale-pass` 现报 `notEvaluated: []`、`AC-290 ∈ verifiedFresh`。
+② `bash scripts/test.sh --for-task gap-ac290-criterion-carrier-absence-not-evaluated --allow-thin` ⇒ **exit 0**
+（夹具 16/16 绿，dist build 通过）。
+③ 家族枚举（`grep -rlF <token> goals/ | wc -l`，每个 token 同时打印前 3 条命中以确认谓词命中的是我要的东西）：
+`.quay/server.json` **17**、`no-derivable-serve-address` **10**、`no-reachable-serve-address` **10**、
+`no-running-serve-instance` **17**、`workspace-root-unresolvable` **8** —— 与本任务立案时逐字相同。
+本任务**只改 AC-290 一条**的退出码；家族里其余 16 条判据的退出码逐字未动（各归自己的立案轮）。
+
+**AC7 — 非目标边界未被越过。**
+`git diff --name-only develop...HEAD` ⇒ 恰好两条：`goals/AC-290-*.md`、`packages/quay/test/ac290-criterion-address-derivation.test.mjs`
+（外加 self-touch 的 `tasks/<id>.md`，其变更经 ABI 落库）。对该列表 `grep -E 'plugin/scripts/|packages/quay/src/serve-|driver-anchor|start-drivers'`
+⇒ **零命中**：⛔ 未改 `plugin/scripts/driver-anchor.ts`、⛔ 未改 `plugin/scripts/start-drivers.ts`、
+⛔ 未改任何 `plugin/scripts/*.ts`（⛔ 也未新增脚本）、⛔ 未改任何 `packages/quay/src/serve-*.ts`。
+派发/执行时 `ps aux | grep -c '[q]uay-task-worker'` = **2**（本轮执行中另行读到 1）。
+**观察项（非门禁，⛔ 未被写成任何前置）**：`quay serve` 没有监督者 ⇒ 该实例一旦死亡不会被自动拉回。
+本轮实测的频次读数：台账 `item_id=AC-290` 事件共 **219** 条，其中 `no-running-serve-instance` **2** 条
+（跨 2026-09-23、2026-09-30 两个日期）、`no-reachable-serve-address` **1** 条。
+本轮的活实例正是按任务许可「**只在没有实例时**才拉起」启的（执行前实测：cwd=仓库根的 `serve` **零个**，
+载体 `.quay/server.json` 的 pid 2094594 已死）。
+
+**DoD 5 — 可回滚。**
+回滚形态：`node packages/quay/bin/quay.js goal write AC-290 --criterion "$(cat <修订前的判据全文>)"`，
+再把夹具还原到 develop 版（`git checkout develop -- packages/quay/test/ac290-criterion-address-derivation.test.mjs`）
+并重跑 `node --test <该文件>`。作用域 = **一处判据文本 + 一处测试断言**的纯本地改动，**无外部状态**：
+⛔ 未改产品源码、⛔ 未改任何 driver、⛔ 未新增脚本、⛔ 未动 `.gitignore` 或任何配置。
