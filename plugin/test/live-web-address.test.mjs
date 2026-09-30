@@ -378,8 +378,9 @@ test("AC5 (mutant arm): a helper that always reports NOT-EVALUATED makes EVERY c
   // 17 criteria ALREADY mapped their underivable-address refusal to exit 1 (measured 2026-09-30 on
   // this very fixture: `3` for AC-179/290/291/292/297/301/303, `1` for the other ten). That split is
   // the leftover of the `gap-ac2XX-criterion-carrier-absence-not-evaluated` family — filed one-AC-at-a-
-  // time for 291/292/301/303 only — and is ⛔ NOT what this task's P1–P4 scope; it is filed as a
-  // follow-up gap. What THIS task must prove, and what is asserted below, is the property its own
+  // time for 291/292/301/303 only — and is ⛔ NOT in this task's P1–P4 scope (the Plan changes the
+  // DERIVATION, not each criterion's verdict vocabulary); it is recorded as an owed follow-up in the
+  // task body's Evidence. What THIS task must prove, and what is asserted below, is the property its own
   // parenthetical names: mutating the single definition point must make every criterion FAIL CLOSED
   // and NAME the underivable address — a criterion that still printed `OK --` would be the silent
   // pass the negative control exists to exclude.
