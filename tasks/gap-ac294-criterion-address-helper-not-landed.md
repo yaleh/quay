@@ -6,7 +6,7 @@ title: AC-294 判据的地址派生调用 plugin/scripts/live-web-address.ts，�
   zh 响应 <html lang=zh / zh nav 计数 0 / 本页 title 变为「管理器 / 外层 / 内层」），且判据改写落库与判决
   pass→fail 相隔 39 秒而产品代码未动 —— 助手的拥有者是 in-flight 的
   gap-criterion-live-web-address-derivation-17-copies-to-one
-status: ready
+status: done
 labels:
   - gap
   - defect
