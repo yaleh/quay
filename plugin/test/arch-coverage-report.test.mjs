@@ -19,6 +19,12 @@
 //      keeps its meaning as the tree grows — but the "not evaluated set must not be empty" assertion
 //      is deliberately NOT relaxed, because an empty unevaluated set IS the checker-failure signature
 //      the task names.
+//      ⚠️ ONE literal WAS removed (gap-arch-coverage-primary-scope-usurped-by-root-analyze): the
+//      global scope's sources are no longer pinned to `["packages/quay/src"]`. That is a property of
+//      the HOST's generated manifest, and any `archguard_analyze` omitting `sources` re-points
+//      `globalScopeKey` at the repo root permanently. The report now CLASSIFIES the declared global
+//      scope (`globalScopeKind`) and refuses to credit a whole-repo one as coverage; the assertions
+//      moved onto that classification, which is what actually has to stay true.
 //
 // Run:
 //   node --experimental-strip-types --test plugin/test/arch-coverage-report.test.mjs
@@ -214,7 +220,7 @@ test("real repo — the unevaluated set is NOT empty (an empty one is the checke
   }
 });
 
-test("real repo — the default global scope covers only PART of the tracked .ts (AC3)", () => {
+test("real repo — the declared global scope is CLASSIFIED, never read as 'covers everything' (AC3)", () => {
   const { parsed } = jsonRun([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST]);
   const a = parsed.archguard;
   if (!HAS_REAL_MANIFEST) {
@@ -223,7 +229,9 @@ test("real repo — the default global scope covers only PART of the tracked .ts
     assert.equal(a.manifestFound, false, `no manifest at ${REAL_MANIFEST} ⇒ manifestFound must be false`);
     assert.equal(a.manifestParsed, false);
     assert.equal(a.globalScopeResolved, false);
+    assert.equal(a.globalScopeKind, "unresolved", "no manifest ⇒ its own state, ⛔ not silently 'narrow'/'whole-repo'");
     assert.equal(a.globalScopeCoversTsFraction, null, "a fraction over an unresolved scope must be null, ⛔ not 0/1");
+    assert.equal(a.globalScopeNote, null, "there is nothing to note about a scope that was never read");
     assert.deepEqual(a.globalScopeSources, []);
     assert.deepEqual(a.scopes, []);
     return;
@@ -231,18 +239,51 @@ test("real repo — the default global scope covers only PART of the tracked .ts
   assert.equal(a.manifestFound, true, `no manifest at ${REAL_MANIFEST}`);
   assert.equal(a.manifestParsed, true);
   assert.equal(a.globalScopeResolved, true);
-  // AC3 pins this to the repo-relative form — an absolute path here would silently stop matching the
-  // tracked-file paths in a worktree.
-  assert.deepEqual(a.globalScopeSources, ["packages/quay/src"]);
+  // AC3's ORIGINAL expectation here was the frozen literal `["packages/quay/src"]` — i.e. that the
+  // host's generated manifest names a NARROW project scope as global. That is a property of the
+  // manifest, not of the report, and it is not stable: a single `archguard_analyze` with no `sources`
+  // plans a project-root scope and takes `role:"primary"`, and a later sources-given analyze can NEVER
+  // take it back (this task's AC2; measured 2026-09-30 on the main checkout AND on a worktree copy).
+  // Freezing the literal made this test red on a manifest that is a perfectly ordinary product of the
+  // instrument — it was asserting a machine-state spelling, not the report's contract.
+  // The assertion is therefore the invariant that has to hold in BOTH real states, and that still goes
+  // red if the report misrepresents which state it is in:
+  //   • the declared global scope is CLASSIFIED, and a degenerate (root-anchored) one is reported
+  //     LOUDLY — never silently presented as a healthy narrow global (硬规则 3b);
+  //   • the COVERAGE reading (which never credits a whole-repo scope) is still partial.
+  assert.ok(["narrow", "whole-repo"].includes(a.globalScopeKind), `unexpected globalScopeKind: ${a.globalScopeKind}`);
+  if (a.globalScopeKind === "whole-repo") {
+    // A root-anchored scope contains every tracked file by construction: that is exactly why it cannot
+    // be the measurement AC3's finding is taken against, and why the report must say so in words.
+    assert.deepEqual(a.globalScopeSources, [""], "a whole-repo scope relativizes to the repo root");
+    assert.equal(a.globalScopeCoversTsFraction, 1, "…and therefore covers every .ts by construction");
+    assert.ok(
+      a.globalScopeNote !== null && /REPOSITORY ROOT/.test(a.globalScopeNote),
+      `a whole-repo global scope must be reported LOUDLY; got note=${JSON.stringify(a.globalScopeNote)}`,
+    );
+  } else {
+    assert.ok(
+      a.globalScopeCoversTsFraction !== null && a.globalScopeCoversTsFraction > 0 && a.globalScopeCoversTsFraction < 1,
+      `a narrow global scope must cover SOME but NOT ALL .ts; got ${a.globalScopeCoversTsFraction}`,
+    );
+    assert.equal(a.globalScopeNote, null, "a narrow global scope needs no degeneracy note");
+  }
+  // The COVERAGE reading, however the declared global scope happens to be spelled: it is taken from the
+  // non-whole-repo scopes, so it must still be a real partial reading rather than a vacuous 1.
+  const ts = rowOf(parsed, "ts");
   assert.ok(
-    a.globalScopeCoversTsFraction !== null && a.globalScopeCoversTsFraction > 0 && a.globalScopeCoversTsFraction < 1,
-    `the finding is that the global scope covers SOME but NOT ALL .ts; got ${a.globalScopeCoversTsFraction}`,
+    ts.coverageFraction !== null && ts.coverageFraction > 0 && ts.coverageFraction < 1,
+    `the non-whole-repo coverage of .ts must be SOME but NOT ALL; got ${ts.coverageFraction}`,
   );
   // The scopes that DO exist are reported with their sources — that is what makes "not in the global
-  // scope" resolvable to "…but covered by this other scope".
+  // scope" resolvable to "…but covered by this other scope". A whole-repo scope is still LISTED.
   assert.ok(a.scopes.length >= 2, "the manifest must expose more than the global scope");
+  for (const s of a.scopes) {
+    assert.equal(typeof s.wholeRepo, "boolean", `scope ${s.key} must carry an explicit wholeRepo classification`);
+    if (s.wholeRepo) assert.equal(s.tsFiles, 0, `${s.key} is a whole-repo scope: it must not be credited with coverage`);
+  }
   const total = a.scopes.reduce((n, s) => n + s.tsFiles, 0);
-  assert.ok(total > 0 && total <= rowOf(parsed, "ts").trackedFiles, `per-scope ts attribution out of range: ${total}`);
+  assert.ok(total > 0 && total <= ts.trackedFiles, `per-scope ts attribution out of range: ${total}`);
 });
 
 test("real repo — at least one tracked .ts directory is covered by NO scope (AC3's companion)", () => {
@@ -267,8 +308,79 @@ test("real repo — at least one tracked .ts directory is covered by NO scope (A
     const files = spawnSync("bash", ["-c", `git ls-files '${d}/*.ts'`], { cwd: REPO_ROOT, encoding: "utf8" });
     const here = files.stdout.split("\n").filter((f) => f !== "" && !isExcluded(f));
     assert.ok(here.length > 0, `reported uncovered dir ${d} has no tracked non-test .ts`);
-    const insideSomeScope = parsed.archguard.scopes.some((s) => s.sources.some((src) => dirInsideSource(d, src)));
-    assert.equal(insideSomeScope, false, `${d} is reported uncovered but a scope source does contain it`);
+    // ⛔ Whole-repo scopes are deliberately NOT credited (task gap-arch-coverage-primary-scope-usurped-
+    // by-root-analyze): a scope rooted at the repo root contains every path by construction, so letting
+    // it count would make this list structurally unable to be non-empty. The independent re-derivation
+    // therefore excludes them too — otherwise the assertion would contradict the production rule it is
+    // supposed to be checking.
+    const insideSomeCreditedScope = parsed.archguard.scopes
+      .filter((s) => !s.wholeRepo)
+      .some((s) => s.sources.some((src) => dirInsideSource(d, src)));
+    assert.equal(
+      insideSomeCreditedScope,
+      false,
+      `${d} is reported uncovered but a CREDITED scope source does contain it (whole-repo scopes are not credited)`,
+    );
+  }
+});
+
+test("injected fixtures — a whole-repo global scope and a narrow one give two DISTINGUISHABLE readings (AC3 negative control)", () => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "arch-coverage-global-"));
+  try {
+    // The injection seam the report itself exposes (`--archguard-manifest`): two manifests differing
+    // ONLY in which scope `globalScopeKey` names. ⛔ These are FIXTURES — the live
+    // `.archguard/query/manifest.json` is not edited or regenerated by this test (this task's AC4).
+    const scope = (key, sources, entityCount) => ({ key, label: key, sources, entityCount });
+    const wholeRepoPath = path.join(tmp, "manifest-whole-repo.json");
+    fs.writeFileSync(
+      wholeRepoPath,
+      JSON.stringify({ version: "1.0", globalScopeKey: "ROOT", scopes: [scope("ROOT", [MAIN_ROOT], 9999)] }),
+    );
+    const narrowPath = path.join(tmp, "manifest-narrow.json");
+    fs.writeFileSync(
+      narrowPath,
+      JSON.stringify({
+        version: "1.0",
+        globalScopeKey: "NARROW",
+        scopes: [scope("NARROW", [path.join(MAIN_ROOT, "packages", "quay", "src")], 446)],
+      }),
+    );
+
+    const whole = jsonRun([REPO_ROOT, "--archguard-manifest", wholeRepoPath]).parsed;
+    const narrow = jsonRun([REPO_ROOT, "--archguard-manifest", narrowPath]).parsed;
+
+    // ① The whole-repo state — the state a stray no-sources `archguard_analyze` produces, and the state
+    //    this task was filed about. The root scope covers every tracked path BY CONSTRUCTION, so it is
+    //    classified and noted LOUDLY, and — the load-bearing half — it is NOT credited. If the
+    //    exclusion in `buildReport` is ever reverted, every assertion below goes red simultaneously
+    //    (that is this control's purpose: it is a criterion that can still fail).
+    assert.equal(whole.archguard.globalScopeKind, "whole-repo", "a root-anchored global scope is its own state");
+    assert.deepEqual(whole.archguard.globalScopeSources, [""], "…which relativizes to the repo root");
+    assert.equal(whole.archguard.globalScopeCoversTsFraction, 1, "…and covers every .ts by construction");
+    assert.ok(whole.archguard.globalScopeNote !== null, "…and must SAY SO, ⛔ never silently");
+    assert.equal(rowOf(whole, "ts").coverageFraction, 0, "a whole-repo scope must not be credited as coverage");
+    assert.ok(
+      whole.uncoveredTsDirs.length > 0,
+      "…so directories stay uncovered instead of reading 'all covered' — an empty list here is the silent-clean this report exists to prevent",
+    );
+
+    // ② The narrow state — the ordinary, meaningful global scope (what the manifest named before the
+    //    usurpation), read as a real partial-coverage measurement.
+    assert.equal(narrow.archguard.globalScopeKind, "narrow");
+    assert.equal(narrow.archguard.globalScopeNote, null, "a narrow global scope needs no degeneracy note");
+    assert.deepEqual(narrow.archguard.globalScopeSources, ["packages/quay/src"]);
+    assert.ok(
+      narrow.archguard.globalScopeCoversTsFraction > 0 && narrow.archguard.globalScopeCoversTsFraction < 1,
+      `a narrow global scope is a partial reading; got ${narrow.archguard.globalScopeCoversTsFraction}`,
+    );
+
+    // ③ …and the two states are DISTINGUISHABLE — which is the entire point of adding the classification
+    //    rather than substituting one scope's numbers for the other's (硬规则 3b).
+    assert.notEqual(whole.archguard.globalScopeKind, narrow.archguard.globalScopeKind);
+    assert.notDeepEqual(whole.archguard.globalScopeSources, narrow.archguard.globalScopeSources);
+    assert.notDeepEqual(whole.uncoveredTsDirs, narrow.uncoveredTsDirs);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
