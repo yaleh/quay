@@ -6,7 +6,7 @@ title: AC-288 判据在 2026-09-30 16:11（commit c7075a155）被重写为调用
   ?lang=zh / cookie 三断言全绿），仅「助手未落地」这一步悬空 —— 助手的拥有者是 in-flight 的
   gap-criterion-live-web-address-derivation-17-copies-to-one（其 worktree
   内已有该文件，对真实载体返回 172.28.0.1:20119 / exit 0）
-status: todo
+status: ready
 labels:
   - gap
   - defect
