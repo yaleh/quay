@@ -5,7 +5,7 @@ title: "AC-302 判据把「活载体缺席/地址不可派生」记成「此刻�
   逐字示例「NOT-EVALUATED: carrier absent」）⇒ goal-driver 每轮判它 confirmed-failing
   重新立案；而保证本身实测为真（活实例 172.28.0.1:20119 上 en→zh 四条断言全绿）。修法=四处 exit 1→3（同族
   AC-301/AC-303 已由同形同伴落地 done）+ 夹具同步 + 助手落地后活实例上真 pass"
-status: ready
+status: done
 labels:
   - gap
   - defect
