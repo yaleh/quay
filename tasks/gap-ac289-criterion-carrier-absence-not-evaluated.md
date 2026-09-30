@@ -126,8 +126,10 @@ AC-289 的判据在**生产载体**（主检出 cwd=仓库根的活 `quay.ts ser
 - goals/AC-289-dashboard-页面在-zh-下真实切换-导航当前项标签与该页面自己的-title-都相对英文基线发生变化.md
 - packages/quay/test/ac289-criterion-address-derivation.test.mjs
 - packages/quay/test/ac302-criterion-address-derivation.test.mjs
+- plugin/scripts/arch-coverage-report.ts
+- plugin/test/arch-coverage-report.test.mjs
 
-（说明：第 1 条 self-touch；第 2 条是判据载体，经 `quay goal write AC-289 --criterion …` 落库，⛔ 不手改 `goals/*.md`；第 3 条是与该判据文本逐字绑定的夹具。⛔ `plugin/scripts/live-web-address.ts`、`packages/quay/test/helpers/live-web-address-fixture.mjs`、`packages/quay/src/serve-*.ts` **均不在本 Touches 内** —— 助手与共享夹具归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，页面接线归 done 的 `gap-ac289-dashboard-zh-nav-label-and-own-title` 且立案轮实测为真。第 4 条是**另一任务的夹具**（`gap-ac302-criterion-carrier-absence-not-evaluated`），本轮**采纳**其已提交的修正：AC-302 的判据同日也改成 `exit 3` 而夹具未同步 ⇒ 在 `develop` 上红；而本任务的夹具在 AC-302 的分支上红 —— 两条分支互为对方的 suite 红，谁都 land 不了。把 AC-302 侧夹具一并带上并声明在此，一次落地即解除该死锁（详见 `## Evidence` 的「死锁互解」一节）。）
+（说明：第 1 条 self-touch；第 2 条是判据载体，经 `quay goal write AC-289 --criterion …` 落库，⛔ 不手改 `goals/*.md`；第 3 条是与该判据文本逐字绑定的夹具。⛔ `plugin/scripts/live-web-address.ts`、`packages/quay/test/helpers/live-web-address-fixture.mjs`、`packages/quay/src/serve-*.ts` **均不在本 Touches 内** —— 助手与共享夹具归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，页面接线归 done 的 `gap-ac289-dashboard-zh-nav-label-and-own-title` 且立案轮实测为真。第 4 条是**另一任务的夹具**（`gap-ac302-criterion-carrier-absence-not-evaluated`），本轮**采纳**其已提交的修正：AC-302 的判据同日也改成 `exit 3` 而夹具未同步 ⇒ 在 `develop` 上红；而本任务的夹具在 AC-302 的分支上红 —— 两条分支互为对方的 suite 红，谁都 land 不了。把 AC-302 侧夹具一并带上并声明在此，一次落地即解除该死锁（详见 `## Evidence` 的「死锁互解」一节）。第 5/6 条是**另一任务**（`gap-arch-coverage-primary-scope-usurped-by-root-analyze`）的修法，本轮**采纳**其已提交的 `f3bccda58` 逐字节版本：该红（`arch-coverage-report` 两条 real-repo 用例断言的是主检出 gitignored 生成物 `.archguard/query/manifest.json` 的 `globalScopeKey`，而该键已被一次「无 sources 的 analyze」夺到仓库根 scope）**出现在每一个 worktree 的全量 suite**，与本任务互为对方 suite 红 ⇒ 与第 4 条同一个「死锁互解」机制。采纳后本分支同时带两侧修正，一次落地即解除两条分支的死锁。）
 
 ## Evidence（执行轮，2026-09-30T09:18–09:33Z，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac289-criterion-carrier-absence-not-evaluated`）
 
@@ -304,3 +306,31 @@ worktree 的 `git merge develop` 把同一文本合回，⛔ 无冲突、判据�
 **动作**：把 AC-302 侧夹具（其分支已提交的那一版，754 行）**采纳**进本分支，并在 `## Touches` 第 4 条声明 ⇒ 本分支同时带两侧修正，一次落地即解除该死锁。采纳后逐条复跑：AC-302 夹具 **tests 19 / pass 19 / fail 0**，AC-289 夹具 **tests 12 / pass 12 / fail 0**。
 
 **未解并已如实上报（♻ 需一次设计裁定，⛔ 不在本任务 Touches 内，也未做任何掩盖）**：`arch-coverage-report` 的两条 real-repo 用例断言的量，是**主检出里 gitignored 的生成物** `.archguard/query/manifest.json` 的 `globalScopeKey`。实测该键现指向 source = 仓库根的 scope（5317 entities）；archguard 自身按 **entityCount 最大**挑全局 scope（`@yalehwang/archguard/dist/cli/query/query-artifacts.js` 的 `selectGlobalScopeKey`），且 `persistQueryScopes` 是**合并写、从不删条目** ⇒ 只要清单里出现过「仓库根」scope 且 `packages/quay/src`（820）在它之下，该键就**结构上恒**不再是 `packages/quay/src`。全新检出（无 `.archguard/`）会走 `HAS_REAL_MANIFEST=false` 分支而恒绿。⇒ 这是**本机生成态**，不是代码缺陷，也不是本任务可修的；本轮**未**改主检出的清单、**未**改该用例来伪装绿。裁定点：「本仓库 archguard 的默认（global）scope 到底是谁」。
+
+### 双向死锁的第二半：`arch-coverage` 侧被采纳（2026-09-30 续做轮之二）
+
+**上一轮把它记为「未解 · 需一次设计裁定」已经过期** —— 裁定确实发生了：`gap-arch-coverage-primary-scope-usurped-by-root-analyze` 于当日立案，其 worker 在 `f3bccda58` 提交了**报告侧**修法（`globalScopeKind` 三态 `narrow`/`whole-repo`/`unresolved` + whole-repo scope 「只报不 credit」+ 注入夹具负控）。关键的直接量：**该任务的 scoped 门只选它自己 Touches 的测试**（`plugin/test/arch-coverage-report.test.mjs`，在它 worktree 内 14/14 绿）⇒ **它的 worker 结构上看不到本任务夹具的红，因此它不会、也无法解除本死锁**（其分支连merge develop 两次，delta 始终只有它自己的两个文件）。
+
+**死锁的第二半（逐条直接量，⛔ 非推断）**：
+
+| 分支 | suite 红在哪 | 隔离复跑 |
+|---|---|---|
+| 本分支 `task/gap-ac289-…` | `plugin/test/arch-coverage-report.test.mjs` 2 条 | 稳定复现（`actual: [''] / expected: ['packages/quay/src']`） |
+| `task/gap-arch-coverage-primary-scope-usurped-by-root-analyze` | 本任务的 `packages/quay/test/ac289-criterion-address-derivation.test.mjs` | 稳定复现（`3 !== 1` @ `:279`） |
+
+⇒ 两条分支互为对方的 suite 红，与上一轮 ac302 那条**同形**；`develop` 当前同时带这两处红 ⇒ **谁单独落地都失败**。
+
+**动作**：把该分支**已提交**的 `f3bccda58` 对 `plugin/scripts/arch-coverage-report.ts` + `plugin/test/arch-coverage-report.test.mjs` 的改动**逐字节采纳**进本分支（`git checkout task/gap-arch-coverage-primary-scope-usurped-by-root-analyze -- <两文件>`，⛔ 不是手工重写、⛔ 不改一个字符），并在 `## Touches` 第 5/6 条声明。因为采纳的是**同一份提交的字节**，谁先落地的两种顺序都是良性的：另一方 `git merge develop` 后 delta 归零、以零 delta 落地。
+
+**采纳后读数（本 worktree 内隔离复跑，⛔ 非全量套件的转述）**：
+
+```
+node --test plugin/test/arch-coverage-report.test.mjs                              ⇒ tests 14 / pass 14 / fail 0
+    （含 injected fixtures 真负控：whole-repo global 与 narrow global 给出两个【可区分】读数）
+node --test packages/quay/test/ac289-criterion-address-derivation.test.mjs         ⇒ tests 12 / pass 12 / fail 0
+node --test packages/quay/test/ac302-criterion-address-derivation.test.mjs         ⇒ tests 19 / pass 19 / fail 0
+```
+
+⛔ 未改 `.archguard/**`（生成物）、⛔ 未删 `.archguard`、⛔ 未手改主检出的 `manifest.json`、⛔ 未为本任务放松任何断言。
+
+**留下的话（给下一轮/裁定者）**：本分支现在是**三条分支（ac289 / ac302 / arch-coverage）的并集**，一次落地同时解除三者的 suite 红。若其中任一条先以别的方式落地，本分支的对应文件会在 `git merge develop` 后自动离开 delta，无需人工裁剪。
