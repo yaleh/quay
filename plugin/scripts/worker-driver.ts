@@ -1578,6 +1578,23 @@ function acCheckNote(): string {
   ].join(" ");
 }
 
+/** Bash 写入护栏（gap-worker-prompt-guards-file-tools-not-bash）：CRITICAL 段原先只点名 file tools
+ *  （Read/Edit/Write 的 file_path），对 Bash 只字未提 ⇒ 一个在 Bash 命令/脚本里硬编码主检出根
+ *  `${root}` 作为写入目标的 worker，**逐字符合旧护栏**（2026-09-30 实证：worker 设对了 `WT=<worktree>`，
+ *  却在 `cat > "$WT/tmp/x.mjs"` 的脚本体内硬编码 `const T = "${root}/packages/quay/test"` +
+ *  `fs.writeFileSync`，把 17 个文件写进共享检出）。护栏必须保护**实际会写文件的通道**，不只是它点名的那条；
+ *  Bash 与 file tools 同样不感知 shell `cd` ⇒ 写入目标必须显式写成 worktree 绝对路径。
+ *  创建 prompt 与续做 prompt 共用（单一真相源，硬规则 5b：兄弟实例同文件；worktree 引用由调用方填）。 */
+function bashWriteTargetGuardNote(root: string, worktreeClause: string): string {
+  return [
+    `⛔ THIS GUARD ALSO COVERS BASH: any Bash command, shell script, or inline \`node -e\`/\`python -c\``,
+    `that writes a file must target ${worktreeClause} — Bash does NOT sense shell \`cd\` either,`,
+    `so never hardcode the main-checkout root \`${root}\` as a write target inside a script`,
+    `(e.g. \`cat > "$WT/x.mjs"\` whose script body contains \`const T = "${root}/…"\` + \`fs.writeFileSync\`);`,
+    `writing under \`${root}\` from Bash lands the files in the develop shared checkout exactly like a main-checkout file_path does.`,
+  ].join(" ");
+}
+
 /** worker 退出前 pre-merge + scoped test 步骤（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker
  *  （agent，非纯脚本）实现+提交+勾 AC 之后、driverFanInNote 退出之前，先自己 merge develop 到 worktree、
  *  跑与 fan-in 完全相同的 scoped 门命令；冲突/红则用 agent 判断力修到绿；绿后机械写 scoped-gate 缓存
@@ -1640,7 +1657,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
-    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. ${bashWriteTargetGuardNote(root, "the absolute path of the worktree you created in step 1")} This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
   ].join(" ");
 }
@@ -2929,7 +2946,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
-    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. ${bashWriteTargetGuardNote(root, `the absolute path of the existing worktree \`${wt}\``)} This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
