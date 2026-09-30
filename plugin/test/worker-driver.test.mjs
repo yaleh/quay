@@ -927,6 +927,50 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
+// gap-worker-prompt-guards-file-tools-not-bash（AC1/AC2）：旧 CRITICAL 段只护 file tools
+// （Read/Edit/Write 的 file_path），对 Bash 只字未提 ⇒ 一个在 Bash 脚本里硬编码主检出根作为写入目标的
+// 命令「逐字符合护栏」（2026-09-30 实证：worker 在 `cat > "$WT/x.mjs"` 的脚本体内写
+// `const T = "${root}/…"` + writeFileSync，把 17 个文件写进共享检出）。本测试对【两个】builder 各自
+// 独立断言（硬规则 5b：兄弟实例同文件），且按位置判——命中必须在 ⚠️ CRITICAL 段【内】，
+// ⛔ 不是文件别处的偶然命中。任一处漏改 ⇒ 对应 arm 独立转红（AC4 反例：删掉子句即红）。
+test("AC1/AC2 (能取假) — 两个 prompt builder 的 CRITICAL 段都把路径护栏从 file tools 扩到 Bash 写入目标", () => {
+  const root = "/main-root";
+  const cases = [
+    ["buildWorkerPrompt", buildWorkerPrompt("gap-x", root)],
+    [
+      "buildContinueWorkerPrompt",
+      buildContinueWorkerPrompt("gap-x", root, {
+        worktreePath: "/wt",
+        branchCommits: 3,
+        branchHeadSubject: "x",
+        acChecked: 0,
+        acTotal: 3,
+        failureReason: "r",
+      }),
+    ],
+  ];
+  for (const [label, prompt] of cases) {
+    const start = prompt.indexOf("⚠️ CRITICAL");
+    const end = prompt.indexOf("This rule does NOT cover the task file", start);
+    assert.ok(start !== -1 && end > start, `${label}: the ⚠️ CRITICAL guard sentence is present and delimited`);
+    const guard = prompt.slice(start, end);
+    // (a) 显式点名 Bash / shell 脚本 —— 按位置判：在护栏句【内】，非全文别处。
+    assert.match(guard, /Bash/, `${label}: guard sentence names Bash (in-guard, by position)`);
+    assert.match(guard, /shell script/, `${label}: guard sentence names shell scripts`);
+    // (b) 逐字含「不得把主检出根 <root> 作为写入目标」义，且把具体根字面量钉在护栏里。
+    assert.ok(
+      guard.includes(`never hardcode the main-checkout root \`${root}\` as a write target`),
+      `${label}: guard forbids the main-checkout root as a write target, verbatim`,
+    );
+    assert.ok(guard.includes(`\`${root}\``), `${label}: guard pins the concrete main-checkout root`);
+  }
+  // 单一真相源（fork 检测）：两个 builder 共用同一段 Bash 护栏字面；若将来被 fork 成两份、其中一份丢失
+  // 该标记，此处失败。注意这是弱断言——**实质测量是上面的 per-builder 护栏断言**，本行只防 fork。
+  const marker = "THIS GUARD ALSO COVERS BASH";
+  assert.ok(cases[0][1].includes(marker), "create prompt carries the shared Bash-guard marker");
+  assert.ok(cases[1][1].includes(marker), "continue prompt carries the SAME Bash-guard marker (not a forked copy)");
+});
+
 // gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：kernel dist 布局（无
 // plugin/scripts/*.ts，只有 shipped dist/*.js + loose scripts/*.sh）时，worker prompt 的
 // scoped-gate-cache 写入入口须解析到 shipped dist/worker-driver.js（stripTypes=false，⛔ 不带

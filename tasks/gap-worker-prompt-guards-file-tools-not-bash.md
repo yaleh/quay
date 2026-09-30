@@ -3,7 +3,7 @@ id: gap-worker-prompt-guards-file-tools-not-bash
 title: worker 派发提示的路径护栏只护 Edit/Write 的 file_path，对 Bash 只字未提 —— worker 用 Bash
   脚本硬编码主检出路径即可把整批文件写进 develop 共享检出（2026-09-30 实证），修法=两处 prompt
   模板（buildWorkerPrompt / buildContinueWorkerPrompt）的 CRITICAL 段扩到 Bash
-status: ready
+status: done
 labels:
   - gap
   - defect
