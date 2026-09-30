@@ -72,7 +72,7 @@ criterion: >-
     if [ -n "$lit" ]; then
     a="$lit"
     else
-    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$1" 2>&1)
+    o=$(node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p" 2>&1)
     rc=$?
     if [ "$rc" = 0 ]; then a="$o"; else a=""; case "$rc:$o" in 1:carrier-web-down) cause="carrier-web-down" ;; 3:*) cause="${o:-carrier-unreadable}" ;; *) cause="carrier-helper-unavailable(exit=$rc)" ;; esac; fi
     fi
