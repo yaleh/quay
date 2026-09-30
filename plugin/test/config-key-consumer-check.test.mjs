@@ -28,6 +28,7 @@ import {
   audit,
   classifyKey,
   extractWriterKeys,
+  extractServeVersionKeys,
   validateExemptions,
 } from "../scripts/config-key-consumer-check.ts";
 
@@ -130,6 +131,45 @@ test("extractWriterKeys — a blank line still terminates the block (pre-existin
     "  not_a_loop_key: x",
   ].join("\n");
   assert.deepEqual(extractWriterKeys(src), ["repo_root"], "a blank line ends the block");
+});
+
+// ── the SECOND writer face (gap-serve-binding-defaults-three-copies-to-one-definition-point P3.3) ──
+// The `serve:` section is written by packages/quay/src/init.ts, not by quay-init.sh — reading only
+// the shell face would leave these delivered keys un-enumerated (invisible to the very check whose
+// job is to find delivered-but-unread keys).
+test("serve: writer face — extractServeVersionKeys reads the SERVE_VERSION_DEFAULTS table, brace-balanced", () => {
+  const src = [
+    "export const SERVE_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {",
+    "  host: SERVE_BINDING_FALLBACK.host,",
+    "  port: SERVE_BINDING_FALLBACK.port,",
+    "};",
+    "",
+    "export function unrelated() { return { not_a_key: 1 }; }",
+  ].join("\n");
+  assert.deepEqual(extractServeVersionKeys(src), ["host", "port"], "the table's keys ARE the delivered keys");
+  // A nested value must not end the table early (the balanced-brace scan).
+  const nested = [
+    "export const SERVE_VERSION_DEFAULTS = {",
+    "  host: \"x\",",
+    "  extra: { a: 1 },",
+    "  port: 0,",
+    "};",
+  ].join("\n");
+  assert.deepEqual(extractServeVersionKeys(nested), ["extra", "host", "port"]);
+  // Absent table ⇒ no keys (never a crash): the shell face is still the hard requirement.
+  assert.deepEqual(extractServeVersionKeys("loop:\n  board: native\n"), []);
+});
+
+test("serve: the real-repo audit ENUMERATES serve.host / serve.port and finds them consumed", () => {
+  const res = run("--json");
+  assert.equal(res.status, 0, `real-repo audit must pass:\n${res.stdout}${res.stderr}`);
+  const out = JSON.parse(res.stdout);
+  const byKey = new Map(out.entries.map((e) => [e.key, e]));
+  assert.ok(byKey.has("serve.host"), `serve.host must be enumerated, got ${[...byKey.keys()].join(", ")}`);
+  assert.ok(byKey.has("serve.port"), "serve.port must be enumerated");
+  assert.equal(byKey.get("serve.host").state, "has-consumer", "resolveServeBinding reads it");
+  assert.equal(byKey.get("serve.port").state, "has-consumer");
+  assert.match(out.writer, /packages\/quay\/src\/init\.ts/, "the second writer face is named in the report");
 });
 
 test("AC3 — the three states are distinguishable (has-consumer / no-consumer-to-wire / documented-with-reason)", () => {

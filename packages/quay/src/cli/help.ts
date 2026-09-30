@@ -18,6 +18,10 @@
 
 import path from "node:path";
 import { ALL_SERVICE_NAMES, KINDS, VERBS } from "./driver-vocab.ts";
+// The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
+// re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
+// resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
+import { SERVE_BINDING_FALLBACK } from "../serve-binding.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -90,7 +94,7 @@ Usage:
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay migrate --from <providerId> --to <providerId> [--json]
   quay config validate [--json|--format json] [--check-files] [--root <path>]
-  quay serve [--port <port>] [--host <host>]
+  quay serve [--port <port>] [--host <host>]        (--host default ${SERVE_BINDING_FALLBACK.host}; --port default ${SERVE_BINDING_FALLBACK.port} = kernel-assigned; .quay/config.yml \`serve:\` overrides)
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
   quay server add <svc,...> [--json] [--root <path>]
   quay server stop --only <svc,...> [--json] [--root <path>]
@@ -532,6 +536,27 @@ Usage:
            \`started\` because "brought up a service that was down" and "swapped a running service
            for a new process" are different facts).
   --root   Workspace root (default: discovered via .quay/config.yml from cwd).
+`);
+  } else if (sub === "serve") {
+    process.stdout.write(`quay serve — start the web UI + MCP control plane in ONE process
+
+Usage:
+  quay serve [--port <port>] [--host <host>]
+
+  Brings up the unified host: the Web HTTP listener and the MCP control plane
+  (halt / setPreference / forceDispatch) answer under one pid.
+
+  --host   Web bind host. Default: ${SERVE_BINDING_FALLBACK.host} (all interfaces).
+  --port   Web port.   Default: ${SERVE_BINDING_FALLBACK.port} — the kernel picks an ephemeral port,
+           read back from .quay/server.json. A collision on an EXPLICIT port fails loudly.
+
+  BOTH defaults come from ONE definition point — .quay/config.yml's optional \`serve:\` section
+  (\`serve.host\` / \`serve.port\`), else the fallback printed above; an explicit flag still wins.
+  A malformed \`serve:\` value (a non-integer port, a blank host) REFUSES the start rather than
+  silently binding something else, so 「配错了」 and 「没配」 are never the same reading.
+
+  Identity/misconfiguration is a REFUSAL, not a silent second host: a live host already owning
+  this workspace root makes this process exit 0 and print a machine-readable admission marker.
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).

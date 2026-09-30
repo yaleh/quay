@@ -168,8 +168,13 @@ if (cmd === "driver") {
   }
   process.exit(2);
 } else if (cmd === "serve") {
-  const wantPort = Number(argv[argv.indexOf("--port") + 1]);
-  const host = argv[argv.indexOf("--host") + 1];
+  // gap-serve-binding-defaults-three-copies-to-one-definition-point: both flags are now OPTIONAL.
+  // The real host resolves an absent one through the ONE definition point; this fake only needs the
+  // same POSTURE (bind a kernel port when unnamed) so the forwarding contract stays exercised.
+  const portIdx = argv.indexOf("--port");
+  const hostIdx = argv.indexOf("--host");
+  const wantPort = portIdx === -1 ? 0 : Number(argv[portIdx + 1]);
+  const host = hostIdx === -1 ? "127.0.0.1" : argv[hostIdx + 1];
   const healthFile = process.env.FAKE_QUAY_HEALTH_FILE || "";
   // The body is read PER REQUEST when a file is named, so a test can change what the LIVE host says
   // about its own freshness between runs (that is exactly the reload scenario).
@@ -674,6 +679,75 @@ test("AC-203 — start exit 0 but status unreadable ⇒ the script exits non-zer
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── AC4 (gap-serve-binding-defaults-three-copies-to-one-definition-point): the MECHANISM root cause.
+// Before this task, `startServe` wrote `--port <n>` into EVERY spawned host's cmdline (n = the
+// parser's seeded default 0). Seventeen `…criterion-cmdline-port-literal-stale` gaps had criteria
+// that derived a live address from that literal, so they were structurally false (`addr=…:0`) while
+// the mechanism itself was fine. The direct reading is the CHILD's own /proc/<pid>/cmdline.
+function readCmdline(pid) {
+  return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+}
+
+test("AC4 — the spawned host's cmdline carries --port ONLY when the caller named one", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-ac4-"));
+  try {
+    // Arm (a): NO --port (and no --host): the flag must be ABSENT from the child's cmdline.
+    const rootA = makeWorkspaceRoot(path.join(tmp, "a"));
+    const fakeA = writeFakeQuay(path.join(tmp, "a"));
+    const a = runScript(["--cli", fakeA, "--root", rootA, "--serve-timeout", "15000", "--json"], {
+      env: {
+        FAKE_QUAY_LOG: path.join(tmp, "a", "log.jsonl"),
+        FAKE_QUAY_STATE: path.join(tmp, "a", "state.json"),
+        FAKE_QUAY_ROOT: rootA,
+      },
+    });
+    assert.equal(a.status, 0, `arm (a) must start:\n${a.stdout}\n${a.stderr}`);
+    const repA = jsonReport(a.stdout);
+    assert.equal(repA.serve.state, "started");
+    const argvA = readCmdline(repA.serve.pid);
+    assert.equal(argvA.includes("--port"), false,
+      `⛔ an unnamed --port must NOT be written into the host's cmdline (got: ${argvA.join(" ")})`);
+    assert.equal(argvA.includes("--host"), false,
+      `⛔ an unnamed --host must NOT be written either — the host resolves its own default (got: ${argvA.join(" ")})`);
+    // …and the report reads the host from the CARRIER (a direct reading), not from a flag it never had.
+    assert.equal(repA.serve.host, "127.0.0.1", "the reported host comes from the carrier the host published");
+
+    // Arm (b): an EXPLICIT --port must reach the child verbatim.
+    const rootB = makeWorkspaceRoot(path.join(tmp, "b"));
+    const fakeB = writeFakeQuay(path.join(tmp, "b"));
+    const portB = await freePort();
+    const b = runScript(["--cli", fakeB, "--root", rootB, "--host", "127.0.0.1", "--port", String(portB), "--serve-timeout", "15000", "--json"], {
+      env: {
+        FAKE_QUAY_LOG: path.join(tmp, "b", "log.jsonl"),
+        FAKE_QUAY_STATE: path.join(tmp, "b", "state.json"),
+        FAKE_QUAY_ROOT: rootB,
+      },
+    });
+    assert.equal(b.status, 0, `arm (b) must start:\n${b.stdout}\n${b.stderr}`);
+    const repB = jsonReport(b.stdout);
+    assert.equal(repB.serve.state, "started");
+    const argvB = readCmdline(repB.serve.pid);
+    const at = argvB.indexOf("--port");
+    assert.notEqual(at, -1, `an explicit --port must be forwarded (got: ${argvB.join(" ")})`);
+    assert.equal(Number(argvB[at + 1]), portB, "…with the caller's exact value");
+    assert.equal(repB.serve.port, portB, "and it is the port the host really bound");
+  } finally {
+    reapFakeHost(path.join(tmp, "a", "ws"));
+    reapFakeHost(path.join(tmp, "b", "ws"));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC4 unit — parseArgs leaves host/port UNSET when unnamed, and still validates an explicit bad one", () => {
+  const help = runScript(["--help"]);
+  assert.match(help.stdout, /--host <ip>/, "the help still documents --host");
+  assert.ok(!/default: 0\.0\.0\.0/.test(help.stdout),
+    "the help text must no longer present a locally-declared host default — this script declares none");
+  const bad = runScript(["--port", "not-a-number"]);
+  assert.equal(bad.status, 2, "an explicit malformed --port is still a usage error");
+  assert.match(bad.stderr, /invalid --port/);
 });
 
 test("the drivers skill references plugin/scripts/start-drivers.ts (the ONE delegate)", () => {

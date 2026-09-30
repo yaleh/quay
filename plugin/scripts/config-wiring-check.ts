@@ -62,6 +62,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit, readFileSafe, createSelftest } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+import { stripComments } from "./source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // plugin/scripts -> plugin -> repo root. Robust to being invoked via the experiments/ symlink
@@ -71,6 +72,24 @@ const REPO_ROOT = repoRoot();
 
 const LOOP_FIELDS = ["board", "gates", "stop", "policy", "execution", "audit", "concurrency", "routines"] as const;
 type LoopField = (typeof LOOP_FIELDS)[number];
+
+// ── the `serve:` section (gap-serve-binding-defaults-three-copies-to-one-definition-point P4) ─────
+// The web binding's config keys get the SAME three-state treatment as the loop fields. The reader is
+// `resolveServeBinding`, whose source reads each key into a binding named `serve<Cap>` (host →
+// `serveHost`) — that identifier is the predicate, so commenting the read out flips this check to
+// NO_READER (AC7b) instead of leaving a keyword-in-comment false pass (硬规则 2).
+const SERVE_FIELDS = ["serve.host", "serve.port"] as const;
+type ServeField = (typeof SERVE_FIELDS)[number];
+/** The single module allowed to read the `serve:` keys. */
+const SERVE_READER_REL = "packages/quay/src/serve-binding.ts";
+/** The serve ENTRY that must actually call the reader (the "driver" half of the same split). */
+const SERVE_ENTRY_REL = "packages/quay/src/serve.ts";
+
+/** `serve.host` → `serveHost` — the identifier `resolveServeBinding` binds the key to. */
+function serveReaderIdentifier(field: ServeField): string {
+  const key = field.slice("serve.".length);
+  return "serve" + key[0].toUpperCase() + key.slice(1);
+}
 
 interface EvidenceResult {
   ok: boolean;
@@ -84,7 +103,8 @@ interface FieldIssue {
 }
 
 interface FieldReport {
-  field: LoopField;
+  /** A loop field (`board`, …) or a `serve:` field (`serve.host`) — the report covers both. */
+  field: LoopField | ServeField;
   value: unknown;
   issues: FieldIssue[];
 }
@@ -256,6 +276,89 @@ async function checkField(field: LoopField, value: unknown, drivers: string[], r
   return { field, value, issues };
 }
 
+// ── the `serve:` reader face (gap-serve-binding-defaults-three-copies-to-one-definition-point) ───
+// General reader: does `resolveServeBinding` actually READ `config.serve.<key>`? The predicate is the
+// bound identifier (`serveHost` / `servePort`) in CODE, comments stripped — so a commented-out read
+// line is not a reader (硬规则 2: 按位置判定，不按关键词).
+function checkServeGeneralReader(field: ServeField, repoRoot: string): EvidenceResult {
+  const file = path.join(repoRoot, SERVE_READER_REL);
+  const code = stripComments(readFileSafe(file));
+  const ident = serveReaderIdentifier(field);
+  // The READ is the BINDING (`const serveHost = s.host;`), not every later use of the name — so
+  // commenting the read out is exactly what flips this to NO_READER, while a downstream `if
+  // (serveHost …)` cannot keep it green by itself. That is the contract `serve-binding.ts` documents.
+  const re = new RegExp(`\\b(?:const|let|var)\\s+${ident}\\s*=`);
+  const ok = re.test(code);
+  return {
+    ok,
+    evidence: ok
+      ? `${SERVE_READER_REL} binds '${field}' into \`${ident}\` — resolveServeBinding reads it`
+      : `${SERVE_READER_REL} never binds ${field} (no \`const ${ident} =\` in its code) — the key has no reader`,
+  };
+}
+
+/** Driver half: does the serve ENTRY actually call the reader? A reader that nothing calls is the
+ *  NOT_CONSUMED_BY_DRIVER shape this checker already distinguishes for the loop fields. */
+function checkServeEntryConsumes(field: ServeField, repoRoot: string): EvidenceResult {
+  const src = stripComments(readFileSafe(path.join(repoRoot, SERVE_ENTRY_REL)));
+  const ok = /resolveServeBinding\s*\(/.test(src);
+  return {
+    ok,
+    evidence: ok
+      ? `${SERVE_ENTRY_REL} calls resolveServeBinding( — '${field}' is consumed by the serve entry`
+      : `${SERVE_ENTRY_REL} does NOT call resolveServeBinding( — '${field}' is declared but never consumed by the serve entry`,
+  };
+}
+
+/** Value resolvability: does this workspace's own `serve:` value RESOLVE? The ground truth is the
+ *  reader itself — `resolveServeBinding` on the workspace config — not a re-implemented type check. */
+async function checkServeValueResolvable(workspaceRoot: string, repoRoot: string): Promise<EvidenceResult> {
+  const { loadConfig } = await import(pathToFileUrl(path.join(repoRoot, "packages/quay/src/config.ts")));
+  const { resolveServeBinding } = await import(pathToFileUrl(path.join(repoRoot, SERVE_READER_REL)));
+  const cfg = loadConfig(workspaceRoot);
+  const read = resolveServeBinding({ config: (cfg as { config?: unknown }).config });
+  const ok = read.kind === "resolved";
+  return {
+    ok,
+    evidence: ok
+      ? `this workspace's serve: section resolves via resolveServeBinding (host=${(read as { host: string }).host}, port=${(read as { port: number }).port})`
+      : `this workspace's serve: section does NOT resolve: ${(read as { reason: string }).reason}`,
+  };
+}
+
+/** Per-field report for a `serve:` key — the same three codes, in the same order. */
+async function checkServeField(field: ServeField, value: unknown, drivers: string[], repoRoot: string, workspaceRoot: string): Promise<FieldReport> {
+  const issues: FieldIssue[] = [];
+  const general = checkServeGeneralReader(field, repoRoot);
+  if (!general.ok) {
+    issues.push({ code: "NO_READER", message: general.evidence });
+    return { field, value, issues };
+  }
+  for (const driver of drivers) {
+    // The `serve:` keys have ONE consumption path (the serve entry), independent of the loop-driver
+    // axis — report it once per requested driver so the code is not silently skipped for `generic`.
+    const dc = checkServeEntryConsumes(field, repoRoot);
+    if (!dc.ok) issues.push({ code: "NOT_CONSUMED_BY_DRIVER", driver, message: dc.evidence });
+  }
+  const vc = await checkServeValueResolvable(workspaceRoot, repoRoot);
+  if (!vc.ok) issues.push({ code: "UNRESOLVABLE_VALUE", message: vc.evidence });
+  return { field, value, issues };
+}
+
+/** Read the workspace's raw `serve:` mapping, for the VALUE column of the report. A missing or
+ *  non-mapping section yields `{}` — the resolver's own `not-evaluated` arm carries any real reason,
+ *  so this never has to guess. */
+async function readServeSectionValues(workspaceRoot: string, repoRoot: string): Promise<Record<string, unknown>> {
+  try {
+    const { loadConfig } = await import(pathToFileUrl(path.join(repoRoot, "packages/quay/src/config.ts")));
+    const cfg = loadConfig(workspaceRoot) as { config?: unknown };
+    const section = (cfg.config as Record<string, unknown> | null | undefined)?.serve;
+    return section && typeof section === "object" && !Array.isArray(section) ? (section as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 // ── --verify-readers: cross-check the checker's own verdict against the real readers ────────────
 // Every gate name readGatesConfig(workspaceRoot) actually returns, flattened to the same
 // lower-cased-adr / bare-name shape loadWorkspaceGates uses to build its gate map (see loader.ts).
@@ -352,6 +455,10 @@ export {
   checkField,
   verifyReaders,
   LOOP_FIELDS,
+  SERVE_FIELDS,
+  checkServeGeneralReader,
+  checkServeEntryConsumes,
+  checkServeValueResolvable,
 };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
@@ -426,6 +533,12 @@ async function main(argv: string[]): Promise<number> {
   for (const field of LOOP_FIELDS) {
     reports.push(await checkField(field, params[field], drivers, REPO_ROOT));
   }
+  // The `serve:` keys ride the SAME three-state treatment (gap-serve-binding-defaults-three-copies-
+  // to-one-definition-point P4/AC7b): NO_READER / NOT_CONSUMED_BY_DRIVER / UNRESOLVABLE_VALUE.
+  const serveValues = await readServeSectionValues(workspaceRoot, REPO_ROOT);
+  for (const field of SERVE_FIELDS) {
+    reports.push(await checkServeField(field, serveValues[field.slice("serve.".length)], drivers, REPO_ROOT, workspaceRoot));
+  }
 
   const totalIssues = reports.reduce((n, r) => n + r.issues.length, 0);
 
@@ -493,6 +606,18 @@ async function runSelftest(): Promise<number> {
   check("field-report-routines-no-issues-for-bespoke", fr2.issues.length === 0, JSON.stringify(fr2.issues));
   const fr3 = await checkField("board", "native", ["generic"], REPO_ROOT);
   check("field-report-board-no-issues-for-generic", fr3.issues.length === 0, JSON.stringify(fr3.issues));
+
+  // ── serve: reader face (gap-serve-binding-defaults-three-copies-to-one-definition-point) ──
+  const s1 = checkServeGeneralReader("serve.host", REPO_ROOT);
+  check("serve-host-has-a-reader", s1.ok === true, s1.evidence);
+  const s2 = checkServeGeneralReader("serve.port", REPO_ROOT);
+  check("serve-port-has-a-reader", s2.ok === true, s2.evidence);
+  const s3 = checkServeGeneralReader("serve.bogus_key" as ServeField, REPO_ROOT);
+  check("serve-bogus-key-has-no-reader (negative control)", s3.ok === false, s3.evidence);
+  const s4 = checkServeEntryConsumes("serve.host", REPO_ROOT);
+  check("serve-entry-consumes-the-reader", s4.ok === true, s4.evidence);
+  const s5 = await checkServeValueResolvable(REPO_ROOT, REPO_ROOT);
+  check("serve-value-resolvable-on-the-real-repo (no serve: section ⇒ the declared fallback)", s5.ok === true, s5.evidence);
 
   // ── CLI end-to-end smoke: run main() against a real temp workspace with a GREEN config ──
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "config-wiring-selftest-"));

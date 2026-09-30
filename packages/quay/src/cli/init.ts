@@ -261,6 +261,7 @@ Description:
       } else {
         console.log(`${result.configPath}: reconciled to this version's defaults.`);
         for (const k of r?.added ?? []) console.log(`  filled loop.${k} (was absent)`);
+        for (const k of r?.addedServe ?? []) console.log(`  filled serve.${k} (was absent)`);
         for (const m of r?.migrated ?? []) console.log(`  migrated loop.${m}`);
       }
       return;

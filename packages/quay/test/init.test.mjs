@@ -21,7 +21,9 @@ import {
   classifyConfig,
   reconcileConfigContent,
   LOOP_VERSION_DEFAULTS,
+  SERVE_VERSION_DEFAULTS,
 } from "../src/init.ts";
+import { SERVE_BINDING_FALLBACK } from "../src/serve-binding.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
@@ -815,6 +817,16 @@ test("AC2 reconcile: a legacy config missing the version defaults gets them — 
   assert.equal(doc.loop.board, "native", "a pre-existing key keeps its user value");
   assert.match(after, /^# a user's own comment that a YAML re-dump would destroy$/m, "comments survive (a YAML round-trip would drop them)");
   assert.match(after, /^  # the project's own tuning, which must survive verbatim$/m, "inline comments inside the edited block survive too");
+
+  // gap-serve-binding-defaults-three-copies-to-one-definition-point P3.2 — the SAME defect shape as
+  // the loop fill above, one section over: a `serve:` key added to the fresh-install template but not
+  // to the reconcile would be unreachable for every project initialized before it, forever. This
+  // fixture's config predates the key, so the fill is the reading that proves the key IS reachable.
+  assert.match(out, /filled serve\.host/, `the report names the serve key it filled:\n${out}`);
+  assert.match(out, /filled serve\.port/, `and its sibling:\n${out}`);
+  assert.deepEqual(doc.serve, SERVE_VERSION_DEFAULTS, "serve: is filled from SERVE_VERSION_DEFAULTS (whose values ARE the resolver's fallback)");
+  assert.equal(doc.serve.host, SERVE_BINDING_FALLBACK.host, "the delivered host default is the ONE fallback constant, not a re-typed literal");
+  assert.equal(doc.serve.port, SERVE_BINDING_FALLBACK.port, "…and so is the port default");
 });
 
 test("AC2 reconcile: a config already current is NOT rewritten (no gratuitous rewrite)", () => {

@@ -1,5 +1,5 @@
 // quay init — workspace scaffolding (DIR-098 / M164).
-// Generates .quay/config.yml with all 3 sections (providers, gates, loop) +
+// Generates .quay/config.yml with all 4 sections (providers, gates, loop, serve) +
 // inline documentation, creates tasks/ dir, prints next-step instructions.
 //
 // Shared between Core CLI (packages/quay/bin/quay.ts) and native CLI
@@ -15,6 +15,9 @@ import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } fr
 // (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
 // packages/quay/test/kernel-regex-escape.test.mjs ④).
 import { escapeRegExp } from "./kernel/regex-escape.ts";
+// The serve binding's ONE fallback (a leaf module): the seed values of the `serve:` config section
+// are THAT constant, so the delivered key and the code's fallback cannot become two defaults.
+import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -152,9 +155,27 @@ export const LOOP_VALUE_MIGRATIONS: Readonly<Record<string, { from: readonly str
   },
 };
 
+/**
+ * The current-version `serve:` default schema — the SAME single-source discipline as
+ * `LOOP_VERSION_DEFAULTS`, for the web binding (gap-serve-binding-defaults-three-copies-to-one-
+ * definition-point). The seed values ARE the fallback (⛔ not a literal port): a fresh workspace is
+ * born carrying the same values `resolveServeBinding` falls back to, so the delivered key and the
+ * code's fallback cannot drift into two defaults. Keyed `serve:` → key, filled by the same
+ * comment-preserving reconcile that fills `loop:` — without that, the key is unreachable for every
+ * project initialized before it, forever (the defect `init.ts:90` records verbatim).
+ */
+export const SERVE_VERSION_DEFAULTS: Readonly<Record<string, unknown>> = {
+  host: SERVE_BINDING_FALLBACK.host,
+  port: SERVE_BINDING_FALLBACK.port,
+};
+
 export interface ReconcileReport {
   /** `loop:` keys that were absent from the config and were filled from LOOP_VERSION_DEFAULTS. */
   added: string[];
+  /** `serve:` keys that were absent and were filled from SERVE_VERSION_DEFAULTS. Kept SEPARATE from
+   *  `added` so "the version-required loop keys" keeps meaning exactly that (the pinned schema test
+   *  reads `added`), while the fill is still reported to the operator. */
+  addedServe: string[];
   /** `key: old -> new` for values rewritten via LOOP_VALUE_MIGRATIONS. */
   migrated: string[];
   /**
@@ -181,12 +202,21 @@ export interface ReconcileReport {
 export function reconcileConfigContent(raw: string): { content: string; report: ReconcileReport } {
   const doc = YAML.parseDocument(raw);
   const added: string[] = [];
+  const addedServe: string[] = [];
   const migrated: string[] = [];
 
   for (const [key, value] of Object.entries(LOOP_VERSION_DEFAULTS)) {
     if (doc.hasIn(["loop", key])) continue;
     doc.setIn(["loop", key], value);
     added.push(key);
+  }
+
+  // The serve binding's version-level defaults travel through the SAME comment-preserving
+  // reconcile — an absent `serve:` section is filled, a present one is left byte-for-byte alone.
+  for (const [key, value] of Object.entries(SERVE_VERSION_DEFAULTS)) {
+    if (doc.hasIn(["serve", key])) continue;
+    doc.setIn(["serve", key], value);
+    addedServe.push(key);
   }
 
   for (const [key, rule] of Object.entries(LOOP_VALUE_MIGRATIONS)) {
@@ -202,8 +232,8 @@ export function reconcileConfigContent(raw: string): { content: string; report: 
   // MEANING of (a trailing blank line, say), so a no-op reconcile of a current config would report
   // "changed" and rewrite the file — the gratuitous rewrite this whole discipline exists to avoid.
   // A reconcile with nothing to add and nothing to migrate has nothing to write, full stop.
-  const unchanged = added.length === 0 && migrated.length === 0;
-  return { content: unchanged ? raw : doc.toString(), report: { added, migrated, unchanged } };
+  const unchanged = added.length === 0 && addedServe.length === 0 && migrated.length === 0;
+  return { content: unchanged ? raw : doc.toString(), report: { added, addedServe, migrated, unchanged } };
 }
 
 /**
@@ -491,7 +521,7 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     // `loopDefaultLine` (not `String(v)`) so a LIST value emits a real YAML flow sequence —
     // `String(["a"])` is `"a"`, which parses back as the scalar `a` and silently turns a list into a
     // string (the same class as the "a value that looks like a declaration but is not one" defect).
-    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${loopDefaultLine(v)}`),
+    ...Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${versionDefaultLine(v)}`),
     "  # stop: \"once\"                # uncomment and set your preferred stop policy",
     "  # policy: \"ready-first\"        # uncomment to customize task selection",
     "  # execution: \"dispatched\"      # uncomment to use inline builds",
@@ -502,6 +532,25 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "  #     trigger: \"every(60)\"",
     "  #     probe: \"health\"",
     "",
+    "# " + ruleLine(69),
+    "# Section 4: Serve — the web server's bind binding",
+    "# " + ruleLine(69),
+    "# OPTIONAL. The web server's bind host/port. Absent ⇒ the declared fallback below (a host on",
+    "# all interfaces, and port 0 = NO CONSTRAINT — the kernel assigns an ephemeral port that is",
+    "# read back from .quay/server.json). This section is PER-CHECKOUT by construction:",
+    "# `.quay/config.yml` is gitignored, so two workspaces on one machine pick different ports.",
+    "#",
+    "# Exactly ONE reader: `resolveServeBinding` (packages/quay/src/serve-binding.ts). An explicit",
+    "# command-line `--host` / `--port` still wins over this section; a malformed value here (a",
+    "# non-integer port, a blank host) REFUSES the start rather than silently falling back — so",
+    "# 「配错了」 and 「没配」 are never the same reading.",
+    "#",
+    "serve:",
+    // Emitted from the SAME table the reconcile fills from (SERVE_VERSION_DEFAULTS), whose values are
+    // the ONE fallback constant — a fresh workspace is born carrying exactly what the code falls back
+    // to, so the delivered key cannot drift into a second default.
+    ...Object.entries(SERVE_VERSION_DEFAULTS).map(([k, v]) => `  ${k}: ${versionDefaultLine(v)}`),
+    "",
   ];
 
   return lines.join("\n");
@@ -511,12 +560,13 @@ function ruleLine(len: number): string {
   return "─".repeat(len);
 }
 
-/** Render ONE `LOOP_VERSION_DEFAULTS` value as YAML for the fresh-install template. A string array
- *  becomes a flow sequence of double-quoted scalars (`["a", "b"]`) — `String(v)` would emit `a,b`,
- *  which YAML reads back as the single scalar `a,b` (a list silently becoming a string is the kind of
- *  quiet mis-typing the template must not introduce). Every other value keeps the historical
- *  `String(v)` rendering, so no existing key's emitted bytes move. */
-function loopDefaultLine(v: unknown): string {
+/** Render ONE version-level default value (`LOOP_VERSION_DEFAULTS` / `SERVE_VERSION_DEFAULTS`) as
+ *  YAML for the fresh-install template. A string array becomes a flow sequence of double-quoted
+ *  scalars (`["a", "b"]`) — `String(v)` would emit `a,b`, which YAML reads back as the single scalar
+ *  `a,b` (a list silently becoming a string is the kind of quiet mis-typing the template must not
+ *  introduce). Every other value keeps the historical `String(v)` rendering, so no existing key's
+ *  emitted bytes move. */
+function versionDefaultLine(v: unknown): string {
   if (Array.isArray(v)) {
     return `[${v.map((x) => JSON.stringify(String(x))).join(", ")}]`;
   }

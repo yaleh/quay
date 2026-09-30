@@ -10,6 +10,7 @@ import path from "node:path";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
 import { DEFAULT_LANG, LANGS, type Lang } from "./serve-lang.ts";
+import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
 // AC-289: the label dictionary is imported for the render functions here and re-exported for pages,
 // for the SAME reason `htmlLangTag` is (above) — a page's consumption stays one line against the
 // module it already imports from, and no page ever re-reads the dictionary.
@@ -1247,8 +1248,12 @@ export function serveIdentity(input: ServeIdentityInput): ServeIdentity {
   return {
     projectName: path.basename(root) || root,
     projectRoot: root,
-    host: input.host ?? "0.0.0.0",
-    port: input.port ?? 0,
+    // The identity's address falls back to the SAME single definition point the binding resolves
+    // through (serve-binding.ts) — ⛔ not a second pair of literals (gap-serve-binding-defaults-
+    // three-copies-to-one-definition-point). serve.ts always passes a resolved host/port; this arm
+    // is for a caller that renders an identity before a bind exists.
+    host: input.host ?? SERVE_BINDING_FALLBACK.host,
+    port: input.port ?? SERVE_BINDING_FALLBACK.port,
     hostname: hostname || "unknown-host",
     deliveredPluginVersion: input.deliveredPluginVersion !== undefined
       ? input.deliveredPluginVersion

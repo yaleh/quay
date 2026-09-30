@@ -35,7 +35,8 @@ import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // the product HOSTS the control plane, so its implementation must be reachable from the product
 // without the product reverse-importing `plugin/**`. This import used to point at
 // plugin/scripts/driver-shared.ts; the kernel home makes it an in-package one.
-import { serveControlPlane, type ControlPlaneHandle } from "./kernel/control-plane-http.ts";
+import { serveControlPlane, CONTROL_PLANE_DEFAULT_HOST, type ControlPlaneHandle } from "./kernel/control-plane-http.ts";
+import { resolveServeBinding } from "./serve-binding.ts";
 import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "./server-state.ts";
 import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
 // The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is
@@ -173,7 +174,9 @@ export interface StartServerOptions {
    *  and published in the carrier). An explicit value is honored exactly: a genuine collision
    *  rejects loudly instead of silently moving to another port. */
   port?: number;
-  /** Host to bind to. Defaults to "0.0.0.0" (all interfaces). */
+  /** Host to bind to. When omitted, resolved through the ONE definition point —
+   *  {@link resolveServeBinding} in serve-binding.ts (CLI flag > `.quay/config.yml` `serve.host` >
+   *  the single fallback). */
   host?: string;
   /**
    * Where to append the access log (one line per request: ISO timestamp +
@@ -549,6 +552,25 @@ export function isServeAdmissionRefused(err: unknown): err is ServeAdmissionRefu
   return !!err && typeof err === "object" && (err as { code?: unknown }).code === "QUAY_SERVE_ADMISSION_HELD";
 }
 
+/** 「web 绑定解析不出来」的拒绝 —— 与准入拒绝**不同形**（硬规则 3b）：前者是「配置/参数坏了」，
+ *  后者是「已经有一个宿主」。⛔ 也不与启动失败同形：它发生在**任何套接字存在之前**，所以
+ *  `resolveServeBinding` 的 `not-evaluated` 必须在取准入锁之前就拒绝（AC3：不产生任何 LISTEN
+ *  套接字、进程非 0 退出）。 */
+export class ServeBindingRefusedError extends Error {
+  readonly code = "QUAY_SERVE_BINDING_NOT_EVALUATED";
+  readonly reason: string;
+  constructor(reason: string) {
+    super(`quay serve: refusing to start — the web binding could not be resolved (${reason})`);
+    this.name = "ServeBindingRefusedError";
+    this.reason = reason;
+  }
+}
+
+/** 这个错误是不是「web 绑定解析不出来」的拒绝？ */
+export function isServeBindingRefused(err: unknown): err is ServeBindingRefusedError {
+  return !!err && typeof err === "object" && (err as { code?: unknown }).code === "QUAY_SERVE_BINDING_NOT_EVALUATED";
+}
+
 /**
  * `quay serve` 的入口：**先取同-root 准入锁**，再走原有的启动序列。
  *
@@ -558,17 +580,35 @@ export function isServeAdmissionRefused(err: unknown): err is ServeAdmissionRefu
  */
 export async function startServer(options: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   const cfg = loadConfig();
+  // gap-serve-binding-defaults-three-copies-to-one-definition-point: the web binding is resolved at
+  // the ONE definition point, and resolved BEFORE the admission lock is taken. A malformed
+  // --host/--port or `.quay/config.yml` `serve:` value refuses the start here — no provider child,
+  // no control-plane socket, no web listener, and no admission lock left behind (AC3).
+  const binding = resolveServeBinding({
+    cliHost: options.host,
+    cliPort: options.port,
+    config: (cfg as { config?: unknown }).config,
+  });
+  if (binding.kind === "not-evaluated") throw new ServeBindingRefusedError(binding.reason);
   const admission = acquireServeAdmissionLock(cfg.workspaceRoot);
   if (admission.state !== "acquired") throw new ServeAdmissionRefusedError(admission);
   try {
-    return await startServerUnderLock(cfg, options);
+    return await startServerUnderLock(cfg, { ...options, host: binding.host, port: binding.port });
   } catch (err) {
     releaseServeAdmissionLock(cfg.workspaceRoot);
     throw err;
   }
 }
 
-async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port = 0, host = "0.0.0.0", accessLogPath }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
+/** The binding a caller has already resolved — `port`/`host` are REQUIRED here, which is what makes
+ *  "this layer no longer decides a default" true by construction rather than by discipline. */
+interface ResolvedStartServerOptions {
+  port: number;
+  host: string;
+  accessLogPath?: string;
+}
+
+async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port, host, accessLogPath }: ResolvedStartServerOptions): Promise<Server & { client: ProviderClient }> {
   // gap-web-server-access-logging (AC2): resolve the access-log path (default
   // <workspaceRoot>/.quay/quay-access.log) and ensure its parent dir exists
   // before the first request, so appendFileSync never fails on a missing dir.
@@ -634,7 +674,7 @@ async function startServerUnderLock(cfg: ReturnType<typeof loadConfig>, { port =
   //
   // ⛔ This is deliberately NOT a new `quay serve` flag: SPEC §8 criterion 9 forbids stage A from
   // introducing a new user-visible capability, and env is not CLI surface.
-  const controlHost = process.env.QUAY_CONTROL_HOST || "127.0.0.1";
+  const controlHost = process.env.QUAY_CONTROL_HOST || CONTROL_PLANE_DEFAULT_HOST;
   const controlPortRaw = Number(process.env.QUAY_CONTROL_PORT ?? "0");
   const controlPort = Number.isInteger(controlPortRaw) && controlPortRaw >= 0 ? controlPortRaw : 0;
   let control: ControlPlaneHandle;

@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 68 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 69 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -326,6 +326,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
   run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
+  echo "== serve-binding literal check (gap-serve-binding-defaults-three-copies-to-one-definition-point, AC1/AC7/AC8) =="
+  # serve 的绑定默认值（host/port）只有一个定义点：packages/quay/src/serve-binding.ts 的
+  # SERVE_BINDING_FALLBACK（唯一解析器 resolveServeBinding 的回落分支）。此前同一量有三个定义点且
+  # host 互相矛盾（serve.ts 全接口 / cli/server.ts 回环 / start-drivers.ts 全接口 + 无条件写
+  # --port 0）—— 最后一条正是 17 条 criterion-cmdline-port-literal-stale 的机制根因。谓词即 AC 自己的
+  # grep（双引号 0.0.0.0 / 127.0.0.1 在 packages/quay/src + plugin/scripts 的命中，除逐条带理由的例外
+  # 清单外，恰为 1 处且落在该声明行）；例外清单（回环探测归一化 / 渲染默认 / 探针 harness 自身监听等
+  # 不同口径）只报 advisory、永不判红（硬规则 5b 兄弟可见性）。另判 AC8：复述该默认值的文档面
+  # plugin/skills/drivers/SKILL.md 必须仍含真源值（cli/help.ts 是插值，不会漂移）。
+  # 本例检查器自身【不含】该字面量（搜的是 JSON.stringify(常量)），故不会把自己算成第二处。
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/serve-binding-literal-check.ts plugin/test/serve-binding-literal-check.test.mjs
+  run_checker "serve-binding-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/serve-binding-literal-check.ts" --root "${repo_root}"
   echo "== registry-path literal check (gap-registry-path-second-copy-five-checker-sites, AC5) =="
   # 检查器注册表 runner-static-gate.ts 的【路径】只有单一正本（select-static-checks-for-touches.ts 的
   # REGISTRY_BASENAME / REGISTRY_REL_CANDIDATES）；把它拼成三段相邻字符串字面量的第二份副本 = 声明
