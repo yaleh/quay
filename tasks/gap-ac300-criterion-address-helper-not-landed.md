@@ -136,12 +136,12 @@ $ node --test packages/quay/test/ac300-criterion-address-derivation.test.mjs    
 
 ## AC
 
-- [ ] **AC1（助手在库内）** 主检出与 `develop` 都存在该文件：`ls plugin/scripts/live-web-address.ts` exit 0 **且** `git cat-file -e develop:plugin/scripts/live-web-address.ts` exit 0。
-- [ ] **AC2（四条 chrome 断言·活实例·各自独立）** 对 cwd=仓库根的运行中 `quay.ts serve` 真读 `/adr`：① en nav 区块字面量 `ADRs` 计数 ≥ 1；② zh 响应含 `<html lang="zh"`；③ zh nav 区块 `ADRs` 计数 = **0**（同一谓词在 en 上 ≥ 1 ⇒ 该量能取假，不是空断言）；④ zh 的 `<title>` 与 en 的 `<title>` 逐字不同。**四段分开贴原始片段**，⛔ 只报「整页看起来翻了」不算（硬规则 3）。
-- [ ] **AC3（判据回绿·活实例）** `node packages/quay/bin/quay.js goal gate AC-300 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根；需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
-- [ ] **AC4（助手真调用·非回声）** 对真实载体 `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> 1709183` ⇒ exit 0 且 stdout 的 `host:port` 与 `.quay/server.json` 的 web 服务逐字相同；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
-- [ ] **AC5（真呼叫·负控）** 把助手临时改名 ⇒ AC-300 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。两次读数并排贴出。
-- [ ] **AC6（夹具绿）** `node --test packages/quay/test/ac300-criterion-address-derivation.test.mjs` exit 0（当前主检出与 `develop` 上均 `exit 1`，块内报 `extracted block does not contain server.json`，见 Proposal）。
+- [x] **AC1（助手在库内）** 主检出与 `develop` 都存在该文件：`ls plugin/scripts/live-web-address.ts` exit 0 **且** `git cat-file -e develop:plugin/scripts/live-web-address.ts` exit 0。
+- [x] **AC2（四条 chrome 断言·活实例·各自独立）** 对 cwd=仓库根的运行中 `quay.ts serve` 真读 `/adr`：① en nav 区块字面量 `ADRs` 计数 ≥ 1；② zh 响应含 `<html lang="zh"`；③ zh nav 区块 `ADRs` 计数 = **0**（同一谓词在 en 上 ≥ 1 ⇒ 该量能取假，不是空断言）；④ zh 的 `<title>` 与 en 的 `<title>` 逐字不同。**四段分开贴原始片段**，⛔ 只报「整页看起来翻了」不算（硬规则 3）。
+- [x] **AC3（判据回绿·活实例）** `node packages/quay/bin/quay.js goal gate AC-300 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根；需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
+- [x] **AC4（助手真调用·非回声）** 对真实载体 `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> 1709183` ⇒ exit 0 且 stdout 的 `host:port` 与 `.quay/server.json` 的 web 服务逐字相同；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
+- [x] **AC5（真呼叫·负控）** 把助手临时改名 ⇒ AC-300 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。两次读数并排贴出。
+- [x] **AC6（夹具绿）** `node --test packages/quay/test/ac300-criterion-address-derivation.test.mjs` exit 0（当前主检出与 `develop` 上均 `exit 1`，块内报 `extracted block does not contain server.json`，见 Proposal）。
 
 ## DoD
 
@@ -155,3 +155,50 @@ AC-300 判据在**生产载体**（主检出 cwd=仓库根的活 `quay.ts serve`
 - tasks/gap-ac300-criterion-address-helper-not-landed.md
 
 （说明：第一条是 P3 兜底时的落地面，也是判据解析地址所必需的唯一文件 —— 其**实现**与 capability-catalog 注册归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，本任务不重复实现、不重复注册；第二条是判据载体（经 `quay goal write` 落库，⛔ 不手改 `goals/*.md`）；第三条是与判据文本逐字绑定的夹具；第四条为 self-touch。）
+
+## Evidence（执行轮，2026-09-30，worker worktree `/data/home/yale/work/quay-worktrees/gap-ac300-criterion-address-helper-not-landed`，主检出 `/data/home/yale/work/quay`）
+
+### 走的是哪条路：P1 的【退化分支】—— 修复已由上游 fan-in 落地，本任务做确认 + 生产回绿读数
+
+立案时助手只存在于在飞 worktree（`/data/home/yale/work/quay-worktrees/gap-criterion-live-web-address-derivation-17-copies-to-one/plugin/scripts/live-web-address.ts`）。本轮开工前复核：该文件已随拥有者任务 `gap-criterion-live-web-address-derivation-17-copies-to-one` 的 fan-in 落进 `develop`、`author` 与主检出。故 P1 的正面动作退化为「确认存在」，**P3（本任务接管实现）未触发**，本轮**无产品代码 delta**（`git -C <wt> rev-list --count develop..HEAD` ⇒ **0**）—— 这是退化分支的正常终态，⛔ 不是「没做完」。
+
+落地面三态同一（⛔ 不是「文件在不在」的目测）：`git hash-object <主检出>/plugin/scripts/live-web-address.ts` = `git rev-parse HEAD:plugin/scripts/live-web-address.ts` = `git rev-parse develop:plugin/scripts/live-web-address.ts` = `fa13316c3f7dfa7e4fbec119172128a1a8d0586f`（9797 B）。
+
+### AC 逐条读数
+
+**AC1（助手在库内）** —— 真命令退出码，非肉眼看文件树：`ls plugin/scripts/live-web-address.ts` ⇒ **exit 0**（9797 B）；`git cat-file -e develop:plugin/scripts/live-web-address.ts` ⇒ **exit 0**；`git cat-file -e HEAD:plugin/scripts/live-web-address.ts` ⇒ **exit 0**；三处 blob **字节相同**（`fa13316c…`，见上）⇒ 不是「同名不同物」。
+
+**AC2（四条 chrome 断言·活实例·各自独立）** —— 生产活实例 `pid=1709183`（`readlink /proc/1709183/cwd` = `/data/home/yale/work/quay`），地址由助手派生 `172.28.0.1:20119`；en **44099 B** / zh **44110 B**（**不相等**）。四段原始片段分开贴出（`curl -s http://172.28.0.1:20119/adr`，zh 带 `Cookie: lang=zh`）：
+
+| # | 断言 | 读数 |
+|---|---|---|
+| ① | en nav 区块字面量 `ADRs` 计数 | **2**（≥1）|
+| ② | zh 响应含 `<html lang="zh"` | 命中（en 同位置为 `<html lang="en"`）|
+| ③ | zh nav 区块 `ADRs` 计数（**同一谓词**）| **0** |
+| ④ | zh `<title>` 与 en `<title>` 是否逐字不同 | 不同 |
+
+①/③ 原始片段（`tr '\n' ' ' | grep -o '<nav.*</nav>' | grep -o 'ADRs' | wc -l`）：en ⇒ `2`；zh ⇒ `0`。② 原始片段：en `<html lang="en"` / zh `<html lang="zh"`。④ 原始片段：en `<title>quay — ADRs</title>` / zh `<title>quay — 架构决策</title>`（同轮移动 header：en `mobile-header-page">adrs` / zh `mobile-header-page">架构决策`；`<h1>`：en `<h1>ADRs (36)</h1>` / zh `<h1>架构决策 (36)</h1>`）。
+
+③ 是**能取假的那个量**：同一谓词在 en 上读 **2**，故「zh = 0」是测量而非空断言（硬规则 3）。
+
+**AC3（判据回绿·活实例）**：`node packages/quay/bin/quay.js goal gate AC-300 --dry-run --json`（cwd = 主检出）⇒ **exit 0**、`verdict: "pass"`、`cause: null`、`reason: "acceptance passed (exit 0)"`、stderr 空。立案轮同一条命令读的是 `verdict: "fail"` + `carrier-helper-unavailable(exit=1)` ⇒ **该判据能取假**，不是恒真。
+
+**AC4（助手真调用·非回声）**：
+- 真 pid `1709183` ⇒ `HELPER_EXIT=0`、stdout=`172.28.0.1:20119`、stderr 空；与独立读数逐字相同：`.quay/server.json` 的 `services[name=web]` ⇒ `{host:"172.28.0.1", port:20119, pid:1709183, up:true}`；且生产 serve 的 argv 上**无** `--port`（默认内核分配 ⇒ argv 派生分支报 `argv-port-absent`，助手是唯一路径）。
+- 不存在 pid `999999` ⇒ `HELPER_BADPID_EXIT=3`、**stdout 为空**、stderr 恰为 `carrier-pid-mismatch`（**分通道**实测，⛔ 非合并 `2>&1` 的目测）。
+
+**AC5（真呼叫·负控）** —— 两臂并排；判据由直跑判据文本（`bash <criterion>`，由 `quay goal show AC-300 --json` 的 `.criterion` 取出，8861 B）**逐字执行**，对**主检出**助手做 `mv`（判据的 `$root` 由 `git rev-parse --show-toplevel` 解析 = 主检出；`trap` 保还原，窗口约 1 秒）：
+
+| 臂 | 动作 | 判据退出码 | stderr |
+|---|---|---|---|
+| ① 绿 | 助手在位 | **0** | 空 |
+| ② 负控 | `mv plugin/scripts/live-web-address.ts → .ac300bak` | **1** | `AC-300 candidate readings (cwd=/data/home/yale/work/quay, nserve=1, ncand=1, nderived=0):; pid=1709183 addr=- cause=argv-port-absent,carrier-helper-unavailable(exit=1)` + `FAIL=no-derivable-serve-address …` |
+| ③ 还原 | `mv` 回 | **0** | 空 |
+
+② 同轮 `quay goal gate AC-300 --dry-run --json` ⇒ `verdict: "fail"`。③ 还原后 `git hash-object` 与 ① 前逐字相同（`fa13316c…`）⇒ 还原**经哈希证明**，⛔ 非「mv 回去了应该没事」的推断（硬规则 4）。
+
+**AC6（夹具绿）** — `node --test packages/quay/test/ac300-criterion-address-derivation.test.mjs`（worktree 内）⇒ **exit 0**、`pass 15 / fail 0`。立案轮同一条命令 `exit 1` 且块内报 `extracted block does not contain server.json`（夹具仍断言旧的内联读载体形态）；本轮夹具与判据文本同态（断言 `live-web-address.ts`，import `packages/quay/test/helpers/live-web-address-fixture.mjs`）⇒ **该夹具能取假**，不是恒绿。
+
+### DoD
+
+AC-300 判据在**生产载体**（主检出 cwd=仓库根的活 `quay.ts serve` + 真实载体读数）上真跑过一次并 **exit 0**（`verdict: pass`，见 AC3），四条 `/adr` chrome 断言均在**运行中的服务**的 HTTP 响应上取到读数（见 AC2），⛔ 不是 fixture、也不是 render 函数返回值（硬规则 4 推论三）。`plugin/scripts/live-web-address.ts` 在 `develop` 与主检出可见（AC1），其绑定的夹具同态且绿（AC6）。
