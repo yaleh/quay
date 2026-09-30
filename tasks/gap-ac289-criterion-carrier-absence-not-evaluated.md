@@ -288,3 +288,19 @@ MUTANT=B: 把一条 ASSERTION 分支（en-fetch-failed）挪到未评估码 ⇒ 
 （`fc8bd4b96`，经 `quay goal write` ABI，⛔ 非手工 Edit）：AC3 要求的「新指纹落台账」只可能由持有活实例的
 那个 root 产出，这是本任务族的既定两 root 写法；该提交随后经 `6a224bc3d` 进入 `develop`，因此本
 worktree 的 `git merge develop` 把同一文本合回，⛔ 无冲突、判据逐字节未变（已 `cmp`）。
+
+### 死锁互解 + 两条 develop 级红旗的定性（2026-09-30 续做轮，worktree `/data/home/yale/work/quay-worktrees/gap-ac289-criterion-carrier-absence-not-evaluated`）
+
+**症状**：本分支 AC 5/5 已勾、scoped 门已绿，却连续 ≥3 轮在 `step=suite` 以同一条断言退出。
+
+**定性（逐条直接量，⛔ 非推断）**
+- 失败文件 3 个，**无一在本任务 delta 内**（`git diff --name-only develop HEAD`）。
+- **逐文件隔离复跑**（`LC_ALL=C.UTF-8 LANG=C.UTF-8 TZ=UTC node --test <file>`）：
+  - `packages/quay/test/ac302-criterion-address-derivation.test.mjs` ⇒ 7 red，**稳定复现**；
+  - `plugin/test/arch-coverage-report.test.mjs` ⇒ 2 red，**稳定复现**；
+  - `plugin/test/adr016-screen-use-check.test.mjs` ⇒ 1 red，**隔离复跑 17/17 全绿** ⇒ 全量并发下 npm-pack staging 的竞态，**非 develop 级**。
+- **互锁的直接量**：`git diff --stat develop task/gap-ac302-criterion-carrier-absence-not-evaluated -- <ac302 夹具>` ⇒ 该分支只改它自己的夹具（207 insertions，未含本任务文件）；而**它自己的 fan-in 日志**（`.quay/fan-in-suite-gap-ac302-…~1790761342727-308a1b.log`）里 `passed=false` 的恰是**本任务的** `packages/quay/test/ac289-criterion-address-derivation.test.mjs`。⇒ 两条分支互为对方的 suite 红，**谁都 land 不了**（同一个 `30f8ed017 goals: AC-302 field:criterion` 把两条判据同日改成 `exit 3`，两侧夹具各自落在一半上）。
+
+**动作**：把 AC-302 侧夹具（其分支已提交的那一版，754 行）**采纳**进本分支，并在 `## Touches` 第 4 条声明 ⇒ 本分支同时带两侧修正，一次落地即解除该死锁。采纳后逐条复跑：AC-302 夹具 **tests 19 / pass 19 / fail 0**，AC-289 夹具 **tests 12 / pass 12 / fail 0**。
+
+**未解并已如实上报（♻ 需一次设计裁定，⛔ 不在本任务 Touches 内，也未做任何掩盖）**：`arch-coverage-report` 的两条 real-repo 用例断言的量，是**主检出里 gitignored 的生成物** `.archguard/query/manifest.json` 的 `globalScopeKey`。实测该键现指向 source = 仓库根的 scope（5317 entities）；archguard 自身按 **entityCount 最大**挑全局 scope（`@yalehwang/archguard/dist/cli/query/query-artifacts.js` 的 `selectGlobalScopeKey`），且 `persistQueryScopes` 是**合并写、从不删条目** ⇒ 只要清单里出现过「仓库根」scope 且 `packages/quay/src`（820）在它之下，该键就**结构上恒**不再是 `packages/quay/src`。全新检出（无 `.archguard/`）会走 `HAS_REAL_MANIFEST=false` 分支而恒绿。⇒ 这是**本机生成态**，不是代码缺陷，也不是本任务可修的；本轮**未**改主检出的清单、**未**改该用例来伪装绿。裁定点：「本仓库 archguard 的默认（global）scope 到底是谁」。
