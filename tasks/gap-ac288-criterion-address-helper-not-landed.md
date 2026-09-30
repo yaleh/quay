@@ -6,7 +6,7 @@ title: AC-288 判据在 2026-09-30 16:11（commit c7075a155）被重写为调用
   ?lang=zh / cookie 三断言全绿），仅「助手未落地」这一步悬空 —— 助手的拥有者是 in-flight 的
   gap-criterion-live-web-address-derivation-17-copies-to-one（其 worktree
   内已有该文件，对真实载体返回 172.28.0.1:20119 / exit 0）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -76,11 +76,11 @@ esac
 
 ## AC
 
-- [ ] AC1（助手在库内）主检出与 `develop` 都存在该文件：`test -f plugin/scripts/live-web-address.ts` exit 0 **且** `git show develop:plugin/scripts/live-web-address.ts >/dev/null` exit 0。
-- [ ] AC2（判据回绿·活实例）`node packages/quay/bin/quay.js goal gate AC-288 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根，需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
-- [ ] AC3（助手真调用·非回声）对**真实载体** `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> <web-pid>` ⇒ exit 0 且 stdout 的 `host:port` 与 `.quay/server.json` 的 web 条目**逐字相同**；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
-- [ ] AC4（呼叫是真呼叫·负控）把助手临时改名 ⇒ AC-288 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。证明判据确实经助手取地址，而不是静默通过。
-- [ ] AC5（夹具绿）`node --test packages/quay/test/ac288-criterion-address-derivation.test.mjs` exit 0。
+- [x] AC1（助手在库内）主检出与 `develop` 都存在该文件：`test -f plugin/scripts/live-web-address.ts` exit 0 **且** `git show develop:plugin/scripts/live-web-address.ts >/dev/null` exit 0。
+- [x] AC2（判据回绿·活实例）`node packages/quay/bin/quay.js goal gate AC-288 --dry-run --json` 的 `.verdict == "pass"`（cwd = 仓库根，需有 cwd=仓库根的 `quay.ts serve` 实例在跑）。
+- [x] AC3（助手真调用·非回声）对**真实载体** `node --no-warnings --experimental-strip-types plugin/scripts/live-web-address.ts <repo-root> <web-pid>` ⇒ exit 0 且 stdout 的 `host:port` 与 `.quay/server.json` 的 web 条目**逐字相同**；传不存在的 pid ⇒ exit 3 且 stderr 为 `carrier-pid-mismatch`。
+- [x] AC4（呼叫是真呼叫·负控）把助手临时改名 ⇒ AC-288 判据非 0 退出且 stderr 出现 `carrier-helper-unavailable`；改回 ⇒ 回绿。证明判据确实经助手取地址，而不是静默通过。
+- [x] AC5（夹具绿）`node --test packages/quay/test/ac288-criterion-address-derivation.test.mjs` exit 0。
 
 ## DoD
 
