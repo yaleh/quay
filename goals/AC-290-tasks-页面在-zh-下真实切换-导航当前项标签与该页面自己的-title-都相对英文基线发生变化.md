@@ -119,6 +119,35 @@ criterion: >-
 
   #
 
+  # WHAT THE AMENDMENT WAS VERIFIED AGAINST (2026-09-30, the round that landed
+  it). Three readings of
+
+  # the SAME criterion text, all taken from the main checkout root -- the
+  workspace that owns the
+
+  # carrier and the ledger: (1) against a live cwd=repo-root `quay.ts serve`
+  whose kernel-assigned port
+
+  # is read back from .quay/server.json, the criterion exits 0 and the ledger
+  gains a gate:"goal" pass;
+
+  # (2) against a self-made reachable surface whose zh response IS <html
+  lang=zh> but whose nav still
+
+  # renders the English label, it exits 1 with the nav-label-untranslated token
+  -- the assertion
+
+  # branches keep their teeth; (3) in a scratch git root with no serve process
+  at all it exits 3, and
+
+  # the store's ONE mapping turns that into verdict "not-evaluated" / cause
+  "declared", NOT into
+
+  # "fail". Reading (3) is what this amendment is about: that same
+  byte-identical absence used to be
+
+  # recorded as this criterion being false, once per driver round.
+
   # NOT A PRECONDITION, AN OBSERVATION: `quay serve` has no supervisor (web is
   not among
 
