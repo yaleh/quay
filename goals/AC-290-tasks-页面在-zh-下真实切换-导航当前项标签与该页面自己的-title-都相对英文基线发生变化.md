@@ -5,6 +5,129 @@ status: achieved
 kind: criterion
 goal: GOAL-024
 criterion: >-
+  # WHY THIS CRITERION'S CARRIER-ABSENCE BRANCHES NOW REPORT NOT-EVALUATED
+  (2026-09-30,
+
+  # gap-ac290-criterion-carrier-absence-not-evaluated): the four branches below
+  that report
+
+  # "I could not find / reach a live surface" used to exit with status 1, so a
+  run in which no
+
+  # cwd=repo-root `quay.ts serve` existed was RECORDED as this criterion being
+  FALSE. That is "I
+
+  # cannot evaluate this HERE" wearing the same output shape as "this is false"
+  (hard rule 3b) --
+
+  # and this repo already fixed the value for that state:
+  packages/quay/src/goal-store.ts:311-318
+
+  # names it verbatim ("exit 3 -- this repo's convention, e.g. NOT-EVALUATED:
+  carrier absent") and
+
+  # packages/quay/src/gate/acceptance-runner.ts maps status 3 to verdict
+  "not-evaluated" /
+
+  # cause "declared" (NOT_RUNNABLE_EXIT_CODES holds only 126/127, never 3).
+
+  #
+
+  # WHAT IT COST (a ledger reading, not an assertion -- re-take it by grepping
+  the token over the
+
+  # events file): at filing (2026-09-30T06:58Z) the ledger held 219
+  item_id=AC-290 events; the
+
+  # no-running-serve-instance token alone appeared in 2 of them, across 2 dates
+  (2026-09-23,
+
+  # 2026-09-30), and the sibling no-reachable-serve-address token in 1 more.
+  Each such round the
+
+  # goal driver's `runPrefilingRecheck` sent verdict "fail" to outcome
+  "confirmed-failing" (FILE a
+
+  # task), while every other verdict -- "not-evaluated" included -- goes to
+  "not-evaluated" (file
+
+  # nothing), so the status alone decided whether this gap was re-filed EVERY
+  round. The same
+
+  # reading holds across the family: 17 goal files carry the carrier reference,
+  17 the
+
+  # no-running-serve-instance branch, and 10 each the two FAIL-prefixed
+  derivation branches.
+
+  #
+
+  # WHAT IS NOT CHANGED, DELIBERATELY: `expect`, the post-derivation assertion
+  branches, and all
+
+  # eleven refusal branches below are byte-identical to the previous revision.
+  Exactly FOUR
+
+  # carrier-absence branches moved into the not-evaluated status: the
+  workspace-root-unresolvable
+
+  # branch, the no-derivable-serve-address branch, the
+  no-reachable-serve-address branch, and the
+
+  # no-running-serve-instance branch. The criterion can still be FALSE: a live
+  instance whose
+
+  # /tasks under `Cookie: lang=zh` still renders the literal English nav label
+  refuses with the
+
+  # nav-label-untranslated token at status 1. Withdrawing the carrier no longer
+  wears that
+
+  # refusal's shape -- it now says, distinguishably, that it could not look.
+
+  #
+
+  # THE ONE FAMILY DIVERGENCE, AND WHY THIS RECORD PICKS NOT-EVALUATED: the
+  sibling amendments of
+
+  # 2026-09-29 put the no-reachable-serve-address branch at status 3 in AC-291 /
+  AC-292 / AC-301,
+
+  # but LEFT IT at status 1 in AC-303 -- a criterion-specific trade-off, and
+  both sides were taken
+
+  # on a reading. THIS record takes status 3, on its own round's measurement:
+  the derived-but-
+
+  # unanswered case recorded at 2026-09-30T06:50:33Z (pid=3652175
+  addr=127.0.0.1:20119, carrier-
+
+  # derived, fetch failed) is a STALE carrier -- the instance had moved on while
+  the carrier still
+
+  # named the old address -- so it reads "I could not see the present state",
+  not "the guarantee is
+
+  # false". An address that derives but does not answer cannot be a live
+  surface, so it is the same
+
+  # class as no instance at all, one step later in the pipeline. A host that
+  DOES answer with an
+
+  # untranslated nav is a different branch (nav-label-untranslated) and still
+  exits 1.
+
+  #
+
+  # NOT A PRECONDITION, AN OBSERVATION: `quay serve` has no supervisor (web is
+  not among
+
+  # plugin/scripts/driver-anchor.ts's DRIVER_KINDS), so an instance that dies is
+  not pulled back
+
+  # automatically and this criterion then reads not-evaluated until something
+  starts one.
+
   # WHY THIS STEP WAS RE-ANCHORED (2026-09-23,
   gap-ac290-criterion-cmdline-port-literal-stale):
 
@@ -69,7 +192,7 @@ criterion: >-
   if [ -z "$root" ]; then printf 'FAIL=workspace-root-unresolvable -- git
   rev-parse --show-toplevel in cwd=%s produced nothing, so no candidate can be
   attributed to a workspace and every unreadable /proc/<pid>/cwd would compare
-  equal to the empty root\n' "$(pwd)" >&2; exit 1; fi
+  equal to the empty root\n' "$(pwd)" >&2; exit 3; fi
 
   cands=""
 
@@ -169,17 +292,17 @@ criterion: >-
   'FAIL=no-derivable-serve-address -- %s quay.ts serve process(es) with cwd=%s,
   none yielded an address (no explicit --port >= 1 on its own argv, and no
   .quay/server.json entry naming that pid with an up web service); per-candidate
-  readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi
+  readings on stderr above\n' "$nserve" "$root" >&2; exit 3; fi
 
   if [ -z "$addr" ] && [ "$nserve" != 0 ]; then printf
   'FAIL=no-reachable-serve-address -- %s derivable address(es) among %s quay.ts
   serve process(es) for cwd=%s, none answered %s (connection refused / timed out
   / non-2xx); per-candidate readings on stderr above\n' "$nderived" "$nserve"
-  "$root" "$ROUTE" >&2; exit 1; fi
+  "$root" "$ROUTE" >&2; exit 3; fi
 
   if [ -z "$addr" ]; then echo "CAUSE=no-running-serve-instance -- no quay.ts
   serve process with cwd=$root; $ROUTE cannot be evaluated on a live surface
-  (AC-179 probe pattern)" >&2; exit 1; fi
+  (AC-179 probe pattern)" >&2; exit 3; fi
 
   printf 'AC-290 serve address derived from %s as %s (per-candidate
   readings:%s)\n' "$src" "$addr" "$rep"
