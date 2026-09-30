@@ -64,6 +64,13 @@ import path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
+import {
+  writeCarrier,
+  mkRoot,
+  runSh,
+  derive,
+  installLiveWebAddressHelper,
+} from "./helpers/live-web-address-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Repo root of THIS checkout (a task worktree during dispatch). */
@@ -105,7 +112,7 @@ function derivationBlock() {
     "argv_addr()",
     "carrier_addr()",
     "pgrep -f 'quay.ts serve'",
-    "server.json",
+    "live-web-address.ts",
     "FAIL=no-derivable-serve-address",
     "FAIL=no-reachable-serve-address",
   ]) {
@@ -115,21 +122,7 @@ function derivationBlock() {
 }
 
 /** A fresh temp root that IS a git root (`git rev-parse --show-toplevel` == itself). */
-function mkRoot() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac302-derive-"));
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  return dir;
-}
-
 /** The carrier this root's OWN server would publish (`.quay/server.json`, schemaVersion 1). */
-function writeCarrier(root, state) {
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, startedAt: new Date().toISOString(), ...state }, null, 2),
-  );
-}
-
 /**
  * A real child process whose OWN argv positionally reads `… quay.ts serve --host <host> --port <n>`,
  * with cwd = `root` — the exact shape both `pgrep -f 'quay.ts serve'` and the derivation step are
@@ -210,25 +203,7 @@ function killAndReap(child) {
 }
 
 /** Run `script` in `root` under /bin/sh (the same shell the acceptance runner uses). */
-function runSh(script, root) {
-  const r = spawnSync("/bin/sh", ["-c", script], { cwd: root, encoding: "utf8", timeout: 60000 });
-  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", pid: r.pid };
-}
-
 /** Run the shipped block and report what it derived, or why it refused. */
-function derive(root) {
-  const script =
-    `${derivationBlock()}\n` +
-    `echo "DERIVED_ADDR=$addr"\n` +
-    `echo "DERIVED_SRC=$src"\n` +
-    `echo "NSERVE=$nserve"\n` +
-    `echo "NCAND=$ncand"\n` +
-    `echo "NDERIVED=$nderived"\n` +
-    `echo "REPORT:$rep"\n` +
-    `exit 0\n`;
-  return runSh(script, root);
-}
-
 /** The candidate row the block emits for one pid, or undefined when that pid is absent. */
 function candidateRow(text, pid) {
   return text
@@ -260,7 +235,7 @@ test("explicit --port N >= 1 on the process argv derives host:port and is probed
     [srv],
     async (root) => {
       children.push(spawnServeShaped(root, { host: "127.0.0.1", port }));
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
       assert.match(r.stdout, new RegExp(`DERIVED_ADDR=127\\.0\\.0\\.1:${port}\\b`));
       assert.match(r.stdout, /DERIVED_SRC=argv\b/);
@@ -277,7 +252,7 @@ test("wildcard bind host is normalised to loopback (0.0.0.0 -> 127.0.0.1)", asyn
     [srv],
     async (root) => {
       children.push(spawnServeShaped(root, { host: "0.0.0.0", port }));
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
       assert.match(r.stdout, new RegExp(`DERIVED_ADDR=127\\.0\\.0\\.1:${port}\\b`));
     },
@@ -302,7 +277,7 @@ test("--port 0 derives the carrier's web port for THIS pid (the launcher default
           { name: "control", pid: child.pid, host: "127.0.0.1", port: port + 1, up: true },
         ],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
       assert.match(r.stdout, new RegExp(`DERIVED_ADDR=127\\.0\\.0\\.1:${port}\\b`));
       assert.match(r.stdout, /DERIVED_SRC=carrier\b/);
@@ -326,7 +301,7 @@ test("a wildcard web host in the carrier is normalised to loopback too", async (
         pid: child.pid,
         services: [{ name: "web", pid: child.pid, host: "0.0.0.0", port, up: true }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
       assert.match(r.stdout, new RegExp(`DERIVED_ADDR=127\\.0\\.0\\.1:${port}\\b`));
     },
@@ -348,7 +323,7 @@ test("the runner's OWN shell is a candidate, is attributed addr=-, and does not 
       children.push(spawnNotAServe(root));
       const serveChild = spawnServeShaped(root, { host: "127.0.0.1", port });
       children.push(serveChild);
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
       const notServe = candidateRow(r.stdout, children[0].pid);
       assert.ok(notServe, `non-serve candidate must be attributed: ${r.stdout}`);
@@ -381,7 +356,7 @@ test("no carrier: refuses with FAIL=no-derivable-serve-address and names both ca
     async (root) => {
       const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
       children.push(child);
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1, "a root whose only serve candidate has no carrier must not derive an address");
       assert.match(r.stderr, /FAIL=no-derivable-serve-address/);
       const row = candidateRow(r.stderr, child.pid);
@@ -406,7 +381,7 @@ test("carrier naming another pid is refused (pid is the positional link, not the
         pid: child.pid + 1000000,
         services: [{ name: "web", pid: child.pid + 1000000, host: "172.28.0.1", port: 34570, up: true }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-pid-mismatch/);
     },
@@ -425,7 +400,7 @@ test("carrier with no `web` entry is refused (a control-only carrier names no we
         pid: child.pid,
         services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 34571, up: true }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-no-web-service/);
     },
@@ -444,7 +419,7 @@ test("carrier whose web service is down is refused (a down service is not an add
         pid: child.pid,
         services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34572, up: false }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-web-down/);
     },
@@ -464,7 +439,7 @@ test("a carrier that is not a schemaVersion-1 record is unreadable, not silently
         pid: child.pid,
         services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34573, up: true }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1);
       assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-unreadable/);
     },
@@ -486,7 +461,7 @@ test("a derivable but UNREACHABLE address refuses with no-reachable-serve-addres
         pid: child.pid,
         services: [{ name: "web", pid: child.pid, host: "127.0.0.1", port, up: true }],
       });
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1, "a derived-but-refused address must not read as a derivation");
       assert.match(r.stderr, /FAIL=no-reachable-serve-address/);
       const row = candidateRow(r.stderr, child.pid);
@@ -505,7 +480,7 @@ test("no serve process at all: the verbatim no-running-serve-instance branch, wi
     [],
     async (root) => {
       children.push(spawnNotAServe(root));
-      const r = derive(root);
+      const r = derive(root, derivationBlock());
       assert.equal(r.code, 1);
       assert.equal(r.stdout, "", "the refusal must exit before the post-block echoes");
       assert.match(r.stderr, /CAUSE=no-running-serve-instance -- no quay\.ts serve process with cwd=/);

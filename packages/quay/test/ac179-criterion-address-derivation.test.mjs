@@ -33,6 +33,13 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { evaluateCriterionAttribution } from "../src/goal-store.ts";
+import {
+  writeCarrier,
+  mkRoot,
+  runSh,
+  derive,
+  installLiveWebAddressHelper,
+} from "./helpers/live-web-address-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -113,6 +120,7 @@ async function portServing(port) {
 function makeRoot(tag) {
   const root = fs.realpathSync(makeTmpDir(tag));
   execFileSync("git", ["init", "-q"], { cwd: root });
+  installLiveWebAddressHelper(root);
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, "quay.ts"), FIXTURE_SERVE);
   return root;
@@ -140,13 +148,6 @@ function startServe(root, { port = 0, mode = "card" } = {}) {
 }
 
 /** Write a schemaVersion-1 carrier (`services` as given; `web` must appear exactly once). */
-function writeCarrier(root, pid, services) {
-  fs.writeFileSync(
-    path.join(root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, pid, startedAt: new Date().toISOString(), services }, null, 2),
-  );
-}
-
 function carrierDefault(pid, web, control) {
   return [
     { name: "web", pid, host: "127.0.0.1", port: web, up: true },

@@ -44,6 +44,13 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatter } from "../src/frontmatter-store-base.ts";
+import {
+  writeCarrier,
+  mkRoot,
+  runSh,
+  derive,
+  installLiveWebAddressHelper,
+} from "./helpers/live-web-address-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../..");
@@ -58,6 +65,14 @@ const NOT_EVALUATED_WHY =
 // gap-tests-never-clean-up-their-tmpdirs: every temp dir and every fake-serve child is released in a
 // file-level after() hook, which runs even when a test fails.
 const _dirs = [];
+
+/** Track a shared-factory root so the `after()` hook below can remove it (the factory does not know
+ *  about this file cleanup list). The mkdtemp itself lives in the shared fixture — ONE definition. */
+function trackedRoot() {
+  const dir = mkRoot();
+  _dirs.push(dir);
+  return dir;
+}
 const _children = [];
 after(() => {
   for (const c of _children) {
@@ -93,14 +108,6 @@ function addrBlock() {
 }
 
 // ── harness: real processes, real carriers ──────────────────────────────────────────────────────
-function mkRoot() {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ac301-addr-")));
-  _dirs.push(dir);
-  const g = spawnSync("git", ["init", "-q"], { cwd: dir });
-  assert.equal(g.status, 0, `git init must succeed in ${dir}`);
-  return dir;
-}
-
 function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -155,14 +162,6 @@ function spawnFakeServe(root, { argvHost, argvPort, listenPort = 0 }) {
   return child;
 }
 
-function writeCarrier(root, { pid, services }) {
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, pid, startedAt: new Date().toISOString(), services }, null, 2),
-  );
-}
-
 const webService = ({ pid, host = "0.0.0.0", port, up = true }) => ({ name: "web", pid, host, port, up });
 
 // Run the shipped block exactly as the acceptance runner would: `sh -c <criterion text>` with cwd =
@@ -190,7 +189,7 @@ function runCriterion(root) {
 
 // ── positive direction ──────────────────────────────────────────────────────────────────────────
 test("AC-301 block: an explicit --port >= 1 on the candidate's own argv is used, and reported as such", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const port = await freePort();
   const child = spawnFakeServe(root, { argvHost: "127.0.0.1", argvPort: port, listenPort: port });
   assert.ok(await waitForPort(port), "the fake serve must be listening before the block runs");
@@ -207,7 +206,7 @@ test("AC-301 block: an explicit --port >= 1 on the candidate's own argv is used,
 });
 
 test("AC-301 block: --port 0 (kernel-assigned) falls back to the carrier's web service, wildcard host normalised", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const port = await freePort();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: port });
   assert.ok(await waitForPort(port), "the fake serve must be listening before the block runs");
@@ -230,7 +229,7 @@ test("AC-301 block: --port 0 (kernel-assigned) falls back to the carrier's web s
 // the block must FAIL CLOSED with a named, attributable cause rather than silently hand back a
 // plausible-looking address. Production binds `0.0.0.0`, so AC-301's live criterion is unaffected.
 test("AC-301 block: an IPv6-wildcard (`::`) carrier host fails CLOSED with a named cause, never a silent wrong address", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const port = await freePort();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: port });
   assert.ok(await waitForPort(port));
@@ -246,7 +245,7 @@ test("AC-301 block: an IPv6-wildcard (`::`) carrier host fails CLOSED with a nam
 
 // ── negative direction: "could not derive" ──────────────────────────────────────────────────────
 test("AC-301 block: --port 0 with NO carrier refuses with FAIL=no-derivable-serve-address and names every candidate", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
 
   const r = runBlock(root);
@@ -260,7 +259,7 @@ test("AC-301 block: --port 0 with NO carrier refuses with FAIL=no-derivable-serv
 });
 
 test("AC-301 block: a carrier whose pid is not the candidate's is refused (carrier-pid-mismatch)", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
   const port = await freePort();
   writeCarrier(root, { pid: child.pid + 999_999, services: [webService({ pid: child.pid + 999_999, host: "127.0.0.1", port })] });
@@ -273,7 +272,7 @@ test("AC-301 block: a carrier whose pid is not the candidate's is refused (carri
 });
 
 test("AC-301 block: a carrier with no `web` service is refused (carrier-no-web-service)", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
   writeCarrier(root, { pid: child.pid, services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 9081, up: true }] });
 
@@ -284,7 +283,7 @@ test("AC-301 block: a carrier with no `web` service is refused (carrier-no-web-s
 });
 
 test("AC-301 block: a carrier whose web service is down is refused (carrier-web-down)", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
   const port = await freePort();
   writeCarrier(root, { pid: child.pid, services: [webService({ pid: child.pid, host: "127.0.0.1", port, up: false })] });
@@ -297,7 +296,7 @@ test("AC-301 block: a carrier whose web service is down is refused (carrier-web-
 
 // ── negative direction: "derived but could not reach" ───────────────────────────────────────────
 test("AC-301 block: a derivable but unreachable address is REFUSED with FAIL=no-reachable-serve-address", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const child = spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
   const deadPort = await freePort(); // allocated then released: nothing is listening on it
   writeCarrier(root, { pid: child.pid, services: [webService({ pid: child.pid, host: "127.0.0.1", port: deadPort })] });
@@ -313,7 +312,7 @@ test("AC-301 block: a derivable but unreachable address is REFUSED with FAIL=no-
 
 // ── negative direction: "no instance at all", distinct from both of the above ────────────────────
 test("AC-301 block: no serve-shaped candidate yields CAUSE=no-running-serve-instance — the `sh -c` runner must not masquerade as one", async () => {
-  const root = mkRoot(); // no fake serve at all; only the `sh -c <block>` runner itself lives here
+  const root = trackedRoot(); // no fake serve at all; only the `sh -c <block>` runner itself lives here
 
   const r = runBlock(root);
   assert.equal(r.status, 3, NOT_EVALUATED_WHY);
@@ -330,16 +329,16 @@ test("AC-301 block: no serve-shaped candidate yields CAUSE=no-running-serve-inst
 // ── the three refusal shapes are pairwise distinct ──────────────────────────────────────────────
 test("AC-301 block: the three refusal tokens are pairwise distinct (hard rule 3b)", async () => {
   const noInstance = (() => {
-    const root = mkRoot();
+    const root = trackedRoot();
     return runBlock(root).stderr.match(/CAUSE=no-running-serve-instance/)?.[0];
   })();
   const cannotDerive = (() => {
-    const root = mkRoot();
+    const root = trackedRoot();
     spawnFakeServe(root, { argvHost: "0.0.0.0", argvPort: 0, listenPort: 0 });
     return runBlock(root).stderr.match(/FAIL=no-derivable-serve-address/)?.[0];
   })();
   const cannotReach = (() => {
-    const root = mkRoot();
+    const root = trackedRoot();
     return runBlock(root).stderr.match(/FAIL=no-reachable-serve-address/)?.[0] ?? "absent";
   })();
 
@@ -440,7 +439,7 @@ const GOAL_ZH_UNTRANSLATED =
   '<html lang="zh"><nav><a href="/goal" class="current">Goals</a></nav><title>quay — 目标</title></html>';
 
 test("AC-301 whole criterion PASSES (exit 0) on a live surface whose zh nav really is translated", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const port = await freePort();
   spawnI18nServe(root, { argvPort: port, bodyEn: GOAL_EN, bodyZh: GOAL_ZH_WIRED });
   assert.ok(await waitForPort(port), "the i18n fake serve must be listening before the criterion runs");
@@ -453,7 +452,7 @@ test("AC-301 whole criterion PASSES (exit 0) on a live surface whose zh nav real
 });
 
 test("AC-301 whole criterion still FAILS (exit 1, nav-label-untranslated) on a reachable but unwired zh page", async () => {
-  const root = mkRoot();
+  const root = trackedRoot();
   const port = await freePort();
   spawnI18nServe(root, { argvPort: port, bodyEn: GOAL_EN, bodyZh: GOAL_ZH_UNTRANSLATED });
   assert.ok(await waitForPort(port), "the i18n fake serve must be listening before the criterion runs");

@@ -51,6 +51,13 @@ import path from "node:path";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
+import {
+  writeCarrier,
+  mkRoot,
+  runSh,
+  derive,
+  installLiveWebAddressHelper,
+} from "./helpers/live-web-address-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Repo root of THIS checkout (a task worktree during dispatch). */
@@ -88,7 +95,7 @@ function derivationBlock() {
   const block = lines.slice(start + 1, end).join("\n");
   // The block must actually be the derivation (a marker left over an emptied block would otherwise
   // make every case below vacuously "pass" on an empty script).
-  for (const needle of ["argv_addr()", "carrier_addr()", "pgrep -f 'quay.ts serve'", "server.json"]) {
+  for (const needle of ["argv_addr()", "carrier_addr()", "pgrep -f 'quay.ts serve'", "live-web-address.ts"]) {
     assert.ok(block.includes(needle), `extracted block does not contain ${needle}`);
   }
   // The whole point of the re-anchor: the literal `--port N` cmdline parse must be GONE from the
@@ -98,21 +105,7 @@ function derivationBlock() {
 }
 
 /** A fresh temp root that IS a git root (`git rev-parse --show-toplevel` == itself). */
-function mkRoot() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac296-derive-"));
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  return dir;
-}
-
 /** The carrier this root's OWN server would publish (`.quay/server.json`, schemaVersion 1). */
-function writeCarrier(root, state) {
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, startedAt: new Date().toISOString(), ...state }, null, 2),
-  );
-}
-
 /**
  * A real child process whose OWN argv positionally reads `… quay.ts serve --host <host> --port <n>`,
  * with cwd = `root` — the exact shape both `pgrep -f 'quay.ts serve'` and the derivation step are
@@ -148,17 +141,7 @@ function killAndReap(child) {
 }
 
 /** Run `script` in `root` under /bin/sh (the same shell the acceptance runner uses). */
-function runSh(script, root) {
-  const r = spawnSync("/bin/sh", ["-c", script], { cwd: root, encoding: "utf8", timeout: 30000 });
-  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
 /** Run the shipped block and report what it derived, or why it refused. */
-function derive(root) {
-  const script = `${derivationBlock()}\necho "DERIVED_ADDR=$addr"\necho "DERIVED_SRC=$src"\necho "REPORT=$rep"\nexit 0\n`;
-  return runSh(script, root);
-}
-
 /** The candidate row the block emits for one pid, or undefined when that pid is absent. */
 function candidateRow(stderr, pid) {
   return stderr
@@ -203,7 +186,7 @@ test("explicit --port N >= 1 on the process argv derives host:port (no carrier n
   const root = mkRoot();
   const child = spawnServeShaped(root, { host: "127.0.0.1", port: 46011 });
   try {
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
     assert.match(r.stdout, /DERIVED_ADDR=127\.0\.0\.1:46011\b/);
     assert.match(r.stdout, /DERIVED_SRC=argv\b/);
@@ -218,7 +201,7 @@ test("wildcard bind host is normalised to loopback (0.0.0.0 -> 127.0.0.1)", () =
   const root = mkRoot();
   const child = spawnServeShaped(root, { host: "0.0.0.0", port: 46012 });
   try {
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
     assert.match(r.stdout, /DERIVED_ADDR=127\.0\.0\.1:46012\b/);
   } finally {
@@ -240,7 +223,7 @@ test("--port 0 derives the carrier's web port for THIS pid (the launcher default
         { name: "control", pid: child.pid, host: "127.0.0.1", port: 34568, up: true },
       ],
     });
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
     assert.match(r.stdout, /DERIVED_ADDR=172\.28\.0\.1:34567\b/);
     assert.match(r.stdout, /DERIVED_SRC=carrier\b/);
@@ -264,7 +247,7 @@ test("the derived port FOLLOWS the carrier across a restart (kernel re-assignmen
       pid: child.pid,
       services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34574, up: true }],
     });
-    const before = derive(root);
+    const before = derive(root, derivationBlock());
     assert.equal(before.code, 0, `derivation must succeed: ${before.stderr}`);
     assert.match(before.stdout, /DERIVED_ADDR=172\.28\.0\.1:34574\b/);
 
@@ -272,7 +255,7 @@ test("the derived port FOLLOWS the carrier across a restart (kernel re-assignmen
       pid: child.pid,
       services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34579, up: true }],
     });
-    const after = derive(root);
+    const after = derive(root, derivationBlock());
     assert.equal(after.code, 0, `derivation must succeed: ${after.stderr}`);
     assert.match(after.stdout, /DERIVED_ADDR=172\.28\.0\.1:34579\b/);
     // No file on disk carries either port — both are read from the live carrier at run time.
@@ -290,7 +273,7 @@ test("a wildcard web host in the carrier is normalised to loopback too", () => {
       pid: child.pid,
       services: [{ name: "web", pid: child.pid, host: "0.0.0.0", port: 34569, up: true }],
     });
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 0, `derivation must succeed: ${r.stderr}`);
     assert.match(r.stdout, /DERIVED_ADDR=127\.0\.0\.1:34569\b/);
   } finally {
@@ -305,7 +288,7 @@ test("no carrier: refuses with no-derivable-address and names carrier-absent for
   const root = mkRoot();
   const child = spawnServeShaped(root, { host: "172.28.0.1", port: 0 });
   try {
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 1, "a root whose only serve candidate has no carrier must not derive an address");
     assert.match(r.stderr, /CAUSE=no-derivable-address/);
     const row = candidateRow(r.stderr, child.pid);
@@ -326,7 +309,7 @@ test("carrier naming another pid is refused (pid is the positional link, not the
       pid: child.pid + 1000000,
       services: [{ name: "web", pid: child.pid + 1000000, host: "172.28.0.1", port: 34570, up: true }],
     });
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 1);
     const row = candidateRow(r.stderr, child.pid);
     assert.ok(row, `candidate ${child.pid} must be attributed: ${r.stderr}`);
@@ -345,7 +328,7 @@ test("carrier with no `web` entry is refused (a control-only carrier names no we
       pid: child.pid,
       services: [{ name: "control", pid: child.pid, host: "127.0.0.1", port: 34571, up: true }],
     });
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 1);
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-no-web-service/);
   } finally {
@@ -362,7 +345,7 @@ test("carrier whose web service is down (up:false) is refused", () => {
       pid: child.pid,
       services: [{ name: "web", pid: child.pid, host: "172.28.0.1", port: 34572, up: false }],
     });
-    const r = derive(root);
+    const r = derive(root, derivationBlock());
     assert.equal(r.code, 1);
     assert.match(candidateRow(r.stderr, child.pid) ?? "", /cause=argv-port-kernel-assigned,carrier-web-down/);
   } finally {
@@ -411,8 +394,8 @@ test("a candidate with no positional `serve` argv (the runner's own sh) is repor
   const root = mkRoot();
   const child = spawnServeShaped(root, { host: "127.0.0.1", port: 46013 });
   try {
-    const r = derive(root);
-    const self = r.stdout.match(/REPORT=([^\n]*)/)?.[1] ?? "";
+    const r = derive(root, derivationBlock());
+    const self = r.stdout.match(/REPORT[:=]([^\n]*)/)?.[1] ?? "";
     // The block's own text contains `quay.ts serve`, so the `sh -c` running it matches pgrep and
     // its cwd IS this root. It must appear with a cause — not vanish, and not clear the address.
     assert.match(self, /pid=\d+ addr=- cause=argv-no-serve/);

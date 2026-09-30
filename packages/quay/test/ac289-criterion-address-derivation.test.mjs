@@ -38,6 +38,13 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { parseDocument } from "yaml";
+import {
+  writeCarrier,
+  mkRoot,
+  runSh,
+  derive,
+  installLiveWebAddressHelper,
+} from "./helpers/live-web-address-fixture.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const GOALS_DIR = path.join(REPO_ROOT, "goals");
@@ -82,6 +89,7 @@ async function withContext(fn) {
   const ctx = { root: fs.realpathSync(dir), servers: [], children: [] };
   try {
     execFileSync("git", ["init", "-q"], { cwd: ctx.root });
+    installLiveWebAddressHelper(ctx.root);
     fs.mkdirSync(path.join(ctx.root, ".quay"), { recursive: true });
     await fn(ctx);
   } finally {
@@ -144,16 +152,6 @@ async function deadPort() {
   return port;
 }
 
-function writeCarrier(ctx, { pid, host, port, up = true, web = true, dropWeb = false }) {
-  const services = [];
-  if (!dropWeb) services.push({ name: "web", pid, host, port, up });
-  services.push({ name: "control", pid, host: "127.0.0.1", port: 1, up: true });
-  fs.writeFileSync(
-    path.join(ctx.root, ".quay", "server.json"),
-    JSON.stringify({ schemaVersion: 1, pid, startedAt: new Date().toISOString(), services }, null, 2),
-  );
-}
-
 /** Run the stored criterion with `cwd` = the temp root (the same anchor `runAcceptance` uses).
  *
  *  ⚠️ ASYNC ON PURPOSE — `spawnSync` here would deadlock the probe it is measuring: the HTTP face of
@@ -195,7 +193,7 @@ GATE("AC-289 criterion: shape 2 — `--port 0` (the launcher default) falls back
   await withContext(async (ctx) => {
     const port = await startPage(ctx);
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 0, `criterion should pass, got ${r.code}; stderr=${r.stderr}`);
     assert.match(r.stderr, new RegExp(`addr=127\\.0\\.0\\.1:${port} cause=fetch-answered`), r.stderr);
@@ -207,7 +205,7 @@ GATE("AC-289 criterion: a `0.0.0.0` bind host from the carrier is normalized to 
   await withContext(async (ctx) => {
     const port = await startPage(ctx);
     const pid = await fakeServe(ctx, "quay.ts serve --host 0.0.0.0 --port 0");
-    writeCarrier(ctx, { pid, host: "0.0.0.0", port });
+    writeCarrier(ctx.root, { pid, host: "0.0.0.0", port });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 0, `criterion should pass, got ${r.code}; stderr=${r.stderr}`);
     assert.match(r.stderr, new RegExp(`addr=127\\.0\\.0\\.1:${port}`), r.stderr);
@@ -218,10 +216,10 @@ GATE("AC-289 criterion: NOT a literal — a restart binding a different port res
   await withContext(async (ctx) => {
     const first = await startPage(ctx);
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port: first });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: first });
     const a = await runCriterion(ctx);
     const second = await startPage(ctx);
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port: second });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: second });
     const b = await runCriterion(ctx);
     assert.notEqual(first, second, "the two HTTP faces must be on different ports for this to be a control");
     assert.equal(a.code, 0, `run A failed: ${a.stderr}`);
@@ -236,39 +234,39 @@ GATE("AC-289 criterion: no carrier at all ⇒ address not derivable, fails close
     await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1, `expected a non-zero verdict, got ${r.code}`);
-    assert.match(r.stderr, /cause=carrier-unreadable/, r.stderr);
+    assert.match(r.stderr, /cause=carrier-absent/, r.stderr);
     assert.match(r.stderr, /CAUSE=no-derivable-serve-address/, r.stderr);
     assert.doesNotMatch(r.stderr, /CAUSE=en-fetch-failed/, "an underivable address is NOT a fetch failure");
   });
 });
 
-GATE("AC-289 criterion: carrier without a `web` service ⇒ carrier-no-web-entry", async () => {
+GATE("AC-289 criterion: carrier without a `web` service ⇒ carrier-no-web-service", async () => {
   await withContext(async (ctx) => {
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port: 1, dropWeb: true });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: 1, dropWeb: true });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /cause=carrier-no-web-entry/, r.stderr);
+    assert.match(r.stderr, /cause=carrier-no-web-service/, r.stderr);
   });
 });
 
 GATE("AC-289 criterion: carrier naming a DIFFERENT pid is refused (a stale carrier must not be trusted)", async () => {
   await withContext(async (ctx) => {
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid: pid + 100000, host: "127.0.0.1", port: 1 });
+    writeCarrier(ctx.root, { pid: pid + 100000, host: "127.0.0.1", port: 1 });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /cause=carrier-pid-mismatch/, r.stderr);
   });
 });
 
-GATE("AC-289 criterion: a `web` entry marked down ⇒ carrier-web-marked-down", async () => {
+GATE("AC-289 criterion: a `web` entry marked down ⇒ carrier-web-down", async () => {
   await withContext(async (ctx) => {
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port: 1, up: false });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port: 1, up: false });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /cause=carrier-web-marked-down/, r.stderr);
+    assert.match(r.stderr, /cause=carrier-web-down/, r.stderr);
   });
 });
 
@@ -276,7 +274,7 @@ GATE("AC-289 criterion: a carrier port nobody listens on ⇒ connection-refused 
   await withContext(async (ctx) => {
     const port = await deadPort();
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /CAUSE=no-reachable-serve-address/, r.stderr);
@@ -306,7 +304,7 @@ GATE("AC-289 criterion: the ASSERTION block is still live — a zh page whose na
   await withContext(async (ctx) => {
     const port = await startPage(ctx, ZH_PAGE_NAV_NOT_WIRED);
     const pid = await fakeServe(ctx, "quay.ts serve --host 127.0.0.1 --port 0");
-    writeCarrier(ctx, { pid, host: "127.0.0.1", port });
+    writeCarrier(ctx.root, { pid, host: "127.0.0.1", port });
     const r = await runCriterion(ctx);
     assert.equal(r.code, 1, "the amended derivation must not have softened the assertion it feeds");
     assert.match(r.stderr, /CAUSE=nav-label-untranslated/, r.stderr);

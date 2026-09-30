@@ -339,6 +339,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/serve-binding-literal-check.ts plugin/test/serve-binding-literal-check.test.mjs
   run_checker "serve-binding-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/serve-binding-literal-check.ts" --root "${repo_root}"
+  echo "== criterion-carrier-inline check (gap-criterion-live-web-address-derivation-17-copies-to-one, AC7) =="
+  # 判据文本不得点名活宿主载体文件：同一段「派生活 web 地址」曾在 17 条判据里各内联一份，并已分裂成
+  # 三种语义（缺 up 字段读成 pass / fail / unusable；一份用 require() 丢了 schemaVersion 门）。唯一定义点
+  # 是 plugin/scripts/live-web-address.ts，判据只能【调用】它；判据再点名载体就是第 18 份副本。按位置判定：
+  # 只读每条记录的 criterion 文本（可执行的那段），⛔ 不扫 origin/expect 散文。goals 目录读不到 ⇒ exit 2
+  # NOT-EVALUATED，⛔ 不是空列表冒充通过（硬规则 3b）。
+  # @static-tier change
+  # @static-object goals/ plugin/scripts/live-web-address.ts plugin/scripts/criterion-carrier-inline-check.ts plugin/test/criterion-carrier-inline-check.test.mjs
+  run_checker "criterion-carrier-inline-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/criterion-carrier-inline-check.ts" --root "${repo_root}"
   echo "== registry-path literal check (gap-registry-path-second-copy-five-checker-sites, AC5) =="
   # 检查器注册表 runner-static-gate.ts 的【路径】只有单一正本（select-static-checks-for-touches.ts 的
   # REGISTRY_BASENAME / REGISTRY_REL_CANDIDATES）；把它拼成三段相邻字符串字面量的第二份副本 = 声明
