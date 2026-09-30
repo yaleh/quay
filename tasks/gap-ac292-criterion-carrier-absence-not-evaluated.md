@@ -4,7 +4,7 @@ title: "AC-292 判据把「活载体缺席」记成「此刻为假」——地�
   判据声明 not-evaluated，goal-store.ts:313 逐字给出的例子正是「NOT-EVALUATED: carrier
   absent」）⇒ driver 每轮把它当 confirmed-failing 立案；修法=这些分支改 exit 3 + 从 HEAD 拉起活实例使判据真
   pass，并以「接线破坏仍 exit 1」证明强度未减"
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -423,3 +423,28 @@ itself is visible in the carrier: `.quay/server.json` named pid 1555141, started
 - session_id：d0ac051d-3145-458c-992e-3b48b4cf6a64
 - suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac292-criterion-carrier-absence-not-evaluated~wk-prod-anchor~1790650043634-20ce76.log
 - fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac292-criterion-carrier-absence-not-evaluated-wk-prod-anchor.log
+
+## Needs-Human 处置（2026-09-30，manager 直接置终态）
+
+本任务 2026-09-29T02:47:30Z 被标 `needs-human` 的**成因是基建、不是实现缺陷**：失败步逐字为
+`step=suite: suite NOT run (refused) — resource gate says WAIT … CPU 饥饿（some avg10 >= 60）`
+—— 资源闸拒绝跑 suite，**没有任何测试被执行**，解析器因此归因不出失败文件。
+
+2026-09-30 复核（直接量，非转述），阻塞已消失且全部工作已在 develop 上：
+
+| 面 | 读数 |
+|---|---|
+| 本任务 7 条 AC | 全 `[x]` |
+| 判据修订是否落 develop | `grep -c 'exit 3; fi' goals/AC-292-*.md` ⇒ **4** |
+| 夹具是否同步落 develop | 7 处 `assert.equal(r.code, 3, …)`；`node --test packages/quay/test/ac292-criterion-address-derivation.test.mjs` ⇒ **16 pass / 0 fail** |
+| `goal gate AC-292` | `verdict:"pass"`（活实例 pid 1709183 / `172.28.0.1:20119`）；台账当日 3 次 `goal-sweep pass`，`criterionHash=05d67676ece2a75c`（修订后指纹） |
+| 分支相对 develop 的 delta | **空**（`git diff --name-only develop...HEAD` 唯一命中内容逐字相同） |
+| 资源闸 | `/proc/pressure/cpu some avg10=0.00`，load ≈ 9.7/128 ⇒ 不再 WAIT |
+
+⇒ 工作已落 develop、判据真 pass、阻塞已在机制上消失；而 `needs-human` 是终态、不会被自动再晋，
+CLI 的 acceptance 闸又因本任务未设 `extra.acceptance` 而 fail-closed ⇒ **机制上无法自解**。
+依 `orchestration/manager-tick-log.md:10631`「硬终态直改」先例，manager 直接置 `done`。
+
+⛔ 本次**未**跑 driver 机械 fan-in（delta 为空，且 `orchestration/tick-log.md:974` 判「工作已落 develop，
+retreat/重跑无意义」）。**因此 `done` 这一断言由上表的直接测量背书，而非机制产出的闸判词** ——
+该差额明记于此，供后续读者自行折价。
