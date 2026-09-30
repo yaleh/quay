@@ -66,7 +66,7 @@ criterion: >-
 
 
   def helper_addr(pid):
-      """(addr, cause) from the SINGLE derivation point — plugin/scripts/live-web-address.ts — which
+      """(addr, cause) from the SINGLE derivation point (the shared live-address helper) — which
       owns the whole carrier read (path, schemaVersion shape, the ONE 'web' entry, its `up` field and
       its host/port). ⛔ This criterion no longer parses the carrier itself: 17 inlined copies of that
       step had already drifted into three different semantics (a missing `up` was read as pass, as
