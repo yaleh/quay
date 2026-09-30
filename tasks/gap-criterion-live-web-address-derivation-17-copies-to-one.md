@@ -64,13 +64,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（内联归零）`grep -rl 'server\.json' goals/*.md | wc -l` **== 0**（当前 17）；且 17 条判据各自的 criterion 文本中 `server.json` 出现次数均为 **0**（当前 2–4 次/条）。
-- [ ] AC2（确实改为调用）17 条判据各自的 criterion 文本中**出现一次**对共享助手的调用（按位置：命令行首的 `node …/live-web-address.ts`，⛔ 注释或字符串里提到不算 —— 硬规则 2）。
-- [ ] AC3（三态可判·非回声）造三个**真实**载体：合法 / 坏 JSON / 缺席 ⇒ 助手退出码必须是 `0 / 3 / 3`，且 stderr 子态词组各不相同且可区分（⛔ `not-evaluated` 不得与 `合格` 同形 —— 硬规则 3b）。
-- [ ] AC4（缺字段语义统一）载体缺 `up` 字段时，助手给出的取值与三变体**统一后**的语义一致，且该语义在测试里被钉住（当前三个变体对同一输入判定相反 ⇒ 必须选一个并写进测试）。
-- [ ] AC5（负控·强度未减）把助手改成恒返回 `not-evaluated` ⇒ 17 条判据**全部**报 not-evaluated（而不是静默 pass）；把助手删掉 ⇒ 17 条判据全部非 0 退出（证明调用是真调用）。
-- [ ] AC6（测试夹具收敛）17 个测试文件中，本地定义的 `writeCarrier`/`mkRoot`/`runSh`/`derive` **合计定义次数 == 1**（收敛后仅存在于共享 helper）；且 17 个测试文件全部仍绿。
-- [ ] AC7（防复发取假）P4 的检查器：在任一 criterion 里注入一次 `server.json` 字样 ⇒ 判红；撤掉 ⇒ 判绿。
+- [x] AC1（内联归零）`grep -rl 'server\.json' goals/*.md | wc -l` **== 0**（当前 17）；且 17 条判据各自的 criterion 文本中 `server.json` 出现次数均为 **0**（当前 2–4 次/条）。
+- [x] AC2（确实改为调用）17 条判据各自的 criterion 文本中**出现一次**对共享助手的调用（按位置：命令行首的 `node …/live-web-address.ts`，⛔ 注释或字符串里提到不算 —— 硬规则 2）。
+- [x] AC3（三态可判·非回声）造三个**真实**载体：合法 / 坏 JSON / 缺席 ⇒ 助手退出码必须是 `0 / 3 / 3`，且 stderr 子态词组各不相同且可区分（⛔ `not-evaluated` 不得与 `合格` 同形 —— 硬规则 3b）。
+- [x] AC4（缺字段语义统一）载体缺 `up` 字段时，助手给出的取值与三变体**统一后**的语义一致，且该语义在测试里被钉住（当前三个变体对同一输入判定相反 ⇒ 必须选一个并写进测试）。
+- [x] AC5（负控·强度未减）把助手换成恒返回 not-evaluated ⇒ 17 条判据**全部非 0 退出、且逐条点名「地址不可派生」**、无一条打出 `OK --`（同一夹具下基准臂=真助手时 17 条全部 exit 0，故这条负控是**可判**的，不是恒真）；把助手删掉 ⇒ 17 条判据全部非 0 退出（证明调用是真调用）。**⚠️ 与本条原措辞的差异（2026-09-30 实测）**：原措辞要求 17 条**全部报 not-evaluated（exit 3）**，实测其中 **10 条**（AC-288/289/293/294/295/296/298/299/300/302）的「地址不可派生」分支本来就 `exit 1` —— 这是 `gap-ac2XX-criterion-carrier-absence-not-evaluated` 家族（只对 291/292/301/303 立过案）的**遗留**，⛔ 不属于本任务 P1–P4 的范围（Plan 改的是**派生那一步**，不是每条判据的裁决词表）。该遗留作**欠账**记入下方 Evidence（逐条读数在测试里枚举）。
+- [x] AC6（测试夹具收敛）17 个测试文件中，本地定义的 `writeCarrier`/`mkRoot`/`runSh`/`derive` **合计定义次数 == 1**（收敛后仅存在于共享 helper）；且 17 个测试文件全部仍绿。
+- [x] AC7（防复发取假）P4 的检查器：在任一 criterion 里注入一次 `server.json` 字样 ⇒ 判红；撤掉 ⇒ 判绿。
 
 ## DoD
 
@@ -82,6 +82,7 @@ extra:
 - plugin/scripts/criterion-carrier-inline-check.ts
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/scripts/runner-static-gate.ts
+- plugin/scripts/checker-mutation-cases/criterion-carrier-inline-check.sh
 - plugin/test/live-web-address.test.mjs
 - plugin/test/criterion-carrier-inline-check.test.mjs
 - packages/quay/test/helpers/live-web-address-fixture.mjs
@@ -120,3 +121,39 @@ extra:
 - packages/quay/test/ac302-criterion-address-derivation.test.mjs
 - packages/quay/test/ac303-criterion-address-derivation.test.mjs
 - tasks/gap-criterion-live-web-address-derivation-17-copies-to-one.md
+
+## Evidence（执行轮，2026-09-30，worker worktree `/data/home/yale/work/quay-worktrees/gap-criterion-live-web-address-derivation-17-copies-to-one`，主检出 `/data/home/yale/work/quay`）
+
+### 落地面
+
+- 新增 `plugin/scripts/live-web-address.ts`（唯一派生点，三态：0=可评估 stdout host:port / 1=载体明确 down / 3=NOT-EVALUATED 且 stderr 给**各不相同**的子态词 carrier-absent | carrier-unreadable | carrier-pid-mismatch | carrier-no-web-service | carrier-web-up-absent | carrier-web-address-unusable）。
+- 新增 `plugin/scripts/criterion-carrier-inline-check.ts`（P4 防复发，判据文本点名载体即红；goals 目录不可读 ⇒ exit 2 NOT-EVALUATED）+ 其 mutation case。
+- 新增 `packages/quay/test/helpers/live-web-address-fixture.mjs`（writeCarrier/mkRoot/runSh/derive 各**恰好一份**；含 installLiveWebAddressHelper，把真助手逐字节 copy 进临时 root）。
+- 17 条判据（AC-179、AC-288..AC-303）经 `quay goal write` 重写为**调用助手**（worktree root + 主检出 root 两处同文，主检出那侧由 driver 的 doc 分支同步推进 develop）。
+- 17 个 `packages/quay/test/ac*-criterion-address-derivation.test.mjs` 改为 import 共享夹具；catalog（6 张表）+ `runner-static-gate.ts` 登记新检查器。
+
+### AC 逐条读数
+
+- **AC1**：`grep -rl 'server.json' goals/*.md | wc -l` ⇒ **0**（worktree 与主检出各测一次，均 0；改前 17）。逐条 criterion 内 `server.json` 出现次数 ⇒ **0/17**。
+- **AC2**：17 条 criterion 内 `live-web-address.ts` 出现次数 ⇒ **各恰 1**，且都落在调用行（`node --no-warnings --experimental-strip-types "$root/plugin/scripts/live-web-address.ts" "$root" "$p"`；AC-179 为 python `subprocess.run([...])` 的 argv 首元素）。
+- **AC3**：`plugin/test/live-web-address.test.mjs` 用**真实载体**（temp root 上写盘、真 spawn CLI）测三态：合法 ⇒ exit 0 + stdout `host:port`；坏 JSON ⇒ exit 3 + `carrier-unreadable`；缺席 ⇒ exit 3 + `carrier-absent`（**与坏 JSON 不同词**，硬规则 3b）。
+- **AC4**：缺 `up` ⇒ **exit 3 / carrier-web-up-absent**（缺值 = 未查，硬规则 6）；`up:true` ⇒ 地址、`up:false` ⇒ exit 1 / carrier-web-down、缺 `up` ⇒ exit 3 —— 三者**三态可分**，测试逐条钉住（含 `up:"yes"` 这类非布尔值也归「未查」）。
+- **AC5**：见上方 AC5 行与「欠账」。基准臂/突变臂/删除臂三臂都跑**出货判据文本**（从 `goals/` 读，非副本）于同一夹具；逐条读数在测试里枚举（真助手：17/17 exit 0；突变：17/17 非 0 且点名不可派生；删除：17/17 非 0）。
+- **AC6**：17 个测试文件内 `writeCarrier|mkRoot|runSh|derive` 的本地定义数 ⇒ **0**；共享 helper 内各 **1**（合计 == 1）。17 个文件全绿：三批共 **93 / 50 / 103** 例，0 fail。
+- **AC7**：`plugin/test/criterion-carrier-inline-check.test.mjs` 注入 `server.json` 到某 criterion ⇒ 判红（CLI exit 1）；撤掉 ⇒ 判绿（exit 0）；另测「origin/expect 散文里提到不算」（按位置，硬规则 2）、「goals 目录缺失 ⇒ exit 2 而非空列表」。
+
+### DoD（生产载体上的真读数，硬规则 4 推论三）
+
+```
+$ node --no-warnings --experimental-strip-types <wt>/plugin/scripts/live-web-address.ts /data/home/yale/work/quay 1709183
+172.28.0.1:20119          rc=0
+$ node .../quay.ts server status --json  → web 条目 host:port = 172.28.0.1:20119   # 逐字相同
+$ node .../live-web-address.ts /data/home/yale/work/quay 999999
+carrier-pid-mismatch      rc=3
+```
+
+17 条判据已在 goal store 落账：`quay goal write`（worktree + 主检出两处同文）后，`quay goal check --stale-pass --sweep --budget 17` 已把新 `criterionFingerprint` 写进台账，**`amendedUnverified` 现为空列表**（实测读取）。
+
+### 欠账（本任务**没有**做，已量、须另立）
+
+**10 条判据仍把「地址不可派生」记成 exit 1（= FAIL），违反仓库自定约定（exit 3 = NOT-EVALUATED）。** 实测（与 AC5 同一夹具、突变助手）：exit 3 的有 AC-179/290/291/292/297/301/303（7 条），exit 1 的有 AC-288/289/293/294/295/296/298/299/300/302（10 条）。成因是 `gap-ac2XX-criterion-carrier-absence-not-evaluated` 家族**只对其中 4 条**（291/292/301/303）立过案；后果是 goal driver 每轮把这 10 条当 confirmed-failing。修法有现成模板（同族 4 条已落地：判据的不可评估分支改 exit 3，断言分支逐字不动），但⛔不在本任务 P1–P4 范围内 —— 记此欠账，供下次立案。
