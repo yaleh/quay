@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { findConfig, loadConfig, activeProvider } from "../src/config.ts";
+import { resolveServeBinding } from "../src/serve-binding.ts";
 
 let failures = 0;
 function assert(cond, msg) {
@@ -182,6 +183,32 @@ function main() {
 
   fs.rmSync(root1, { recursive: true, force: true });
   fs.rmSync(root2, { recursive: true, force: true });
+
+  // --- serve: section — loadConfig carries it, and resolveServeBinding reads THAT document ---
+  // gap-serve-binding-defaults-three-copies-to-one-definition-point P3: the `serve:` keys are a
+  // config surface, so the chain that must hold is loadConfig() -> resolveServeBinding(). Asserting
+  // the pair here (the config module's own test) is what ties "the key is delivered and readable" to
+  // "the resolver reads the very document the CLI loads".
+  const root4 = fs.mkdtempSync(path.join(os.tmpdir(), "quay-config-serve-"));
+  const serveDir = mkTree(root4, "a");
+  fs.mkdirSync(path.join(serveDir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(serveDir, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\nserve:\n  host: \"10.9.8.7\"\n  port: 4321\n"
+  );
+  const cfg4 = loadConfig(serveDir);
+  assert(cfg4.config && cfg4.config.serve && cfg4.config.serve.port === 4321,
+    "loadConfig() carries the serve: section verbatim (it is a plain document read)");
+  const bound = resolveServeBinding({ config: cfg4.config });
+  assert(bound.kind === "resolved" && bound.host === "10.9.8.7" && bound.port === 4321 && bound.source === "config",
+    `resolveServeBinding reads the SAME document loadConfig produced (got ${JSON.stringify(bound)})`);
+  const badDir = mkTree(root4, "b");
+  fs.mkdirSync(path.join(badDir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(badDir, ".quay", "config.yml"), "providers: {}\nserve:\n  port: nope\n");
+  const badBound = resolveServeBinding({ config: loadConfig(badDir).config });
+  assert(badBound.kind === "not-evaluated",
+    "a malformed serve: value read through the SAME chain is refused, never silently defaulted");
+  fs.rmSync(root4, { recursive: true, force: true });
 
   console.log(failures === 0 ? "\nAll QN-032 config.js regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;

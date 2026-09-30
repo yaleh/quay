@@ -35,6 +35,13 @@ import {
   writeControlState,
 } from "./control-state.ts";
 
+/** The control plane's bind host fallback — LOOPBACK by design (its only gate is the
+ *  caller-identity check, kernel/control-state.ts CONTROL_HEADER), and a DIFFERENT quantity from
+ *  the web binding (packages/quay/src/serve-binding.ts): the web leg is reachable on all
+ *  interfaces, the control leg is not. Exported so `serve.ts` publishes this same value into the
+ *  carrier instead of re-spelling it (gap-serve-binding-defaults-three-copies-to-one-definition-point). */
+export const CONTROL_PLANE_DEFAULT_HOST = "127.0.0.1";
+
 /** serveControlPlane 返回的句柄（url 可观测，close 停服）。 */
 export interface ControlPlaneHandle {
   url: string;
@@ -57,7 +64,7 @@ export async function serveControlPlane(opts: {
   name?: string;
 }): Promise<ControlPlaneHandle> {
   const root = path.resolve(opts.root);
-  const host = opts.host ?? "127.0.0.1";
+  const host = opts.host ?? CONTROL_PLANE_DEFAULT_HOST;
   const env = opts.env ?? process.env;
   const rel = opts.rel ?? CONTROL_STATE_REL;
   const name = opts.name ?? "driver-control";

@@ -55,9 +55,13 @@
 //   node --experimental-strip-types plugin/scripts/start-drivers.ts [--root <path>] [--host <ip>]
 //     [--port <p>] [--cli <path>] [--serve-timeout <ms>] [--json]
 //
-//   ⛔ `--port` is OPTIONAL and defaults to 0 =「让内核分配临时端口」. Only pass it to pin a host to
-//   an exact port (a deployment that must be addressable at a fixed number); the pinned value is
-//   then honored exactly and a real collision fails loudly.
+//   ⛔ `--host` / `--port` are OPTIONAL and are FORWARDED only when given
+//   (gap-serve-binding-defaults-three-copies-to-one-definition-point): when omitted, the spawned
+//   `quay serve` resolves both through the ONE definition point
+//   (packages/quay/src/serve-binding.ts — `.quay/config.yml` `serve:` section, else the single
+//   declared fallback, port 0 =「让内核分配临时端口」). Only pass `--port` to pin a host to an exact
+//   port (a deployment that must be addressable at a fixed number); the pinned value is then honored
+//   exactly and a real collision fails loudly.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -88,13 +92,15 @@ function withServeHeapCap(existing: string | undefined): string {
 }
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
-const DEFAULT_SERVE_HOST = "0.0.0.0";
-/** The web port's default: **0 = let the kernel assign an ephemeral port** (read back from the
- *  carrier). A hardcoded 4173 was a second, silently-diverging default that also made two hosts on
- *  two roots collide, and it made an unrelated process squatting the number look like our server —
- *  the exact misreading this task closes. ⛔ The default belongs to ONE place (`startServer`'s own
- *  `port = 0`); this literal exists only for the `--port` help text and the argument parser. */
-const DEFAULT_SERVE_PORT = 0;
+// ⛔ This file declares NO web bind default — not the host, not the port
+// (gap-serve-binding-defaults-three-copies-to-one-definition-point). It used to seed the parser with
+// all-interfaces + port 0 and then write `--port <n>` into EVERY spawned host's cmdline; that
+// unconditional `--port 0` is the mechanism behind the seventeen
+// `…criterion-cmdline-port-literal-stale` gaps, whose criteria derived a live address from a literal
+// that was structurally always 0. The serve binding now has ONE definition point —
+// `packages/quay/src/serve-binding.ts` — reached by the spawned `quay serve` itself, so this script
+// only FORWARDS a flag the operator actually named. That is also why it still needs no `.quay/config.yml`
+// read (zero closure deps, see the direct-entry guard at the bottom).
 const DEFAULT_SERVE_TIMEOUT_MS = 30000;
 /** `GET /health` budget. Short: this is a local freshness read, not a build. */
 const HEALTH_PROBE_TIMEOUT_MS = 2000;
@@ -412,7 +418,7 @@ export function probeServeStaleness(
  *  how a reload becomes a no-op. */
 export function readServeHostPid(
   root: string,
-): { state: "present"; pid: number; startedAt: string | null; port: number | null } | { state: "absent" } | { state: "unreadable"; reason: string } {
+): { state: "present"; pid: number; startedAt: string | null; host: string | null; port: number | null } | { state: "absent" } | { state: "unreadable"; reason: string } {
   const p = path.join(root, ".quay", "server.json");
   let raw: string;
   try {
@@ -436,12 +442,16 @@ export function readServeHostPid(
   // web entry: that is a NOT-EVALUATED staleness reading (own literal), never port 0 / never a guess.
   const services = (obj as { services?: unknown }).services;
   const webEntry = Array.isArray(services)
-    ? (services as Array<{ name?: unknown; port?: unknown }>).find((s) => s && s.name === "web")
+    ? (services as Array<{ name?: unknown; host?: unknown; port?: unknown }>).find((s) => s && s.name === "web")
     : undefined;
   const port = webEntry && typeof webEntry.port === "number" && Number.isInteger(webEntry.port) && webEntry.port > 0
     ? webEntry.port
     : null;
-  return { state: "present", pid, startedAt, port };
+  // The bind host the host ITSELF recorded at listen time — the reading a caller that forwarded no
+  // `--host` needs (it has no flag value of its own to report). null = the carrier did not name a
+  // usable one; never a guess, never a hardcoded fallback (this file declares no host default).
+  const host = webEntry && typeof webEntry.host === "string" && webEntry.host.trim() !== "" ? webEntry.host : null;
+  return { state: "present", pid, startedAt, host, port };
 }
 
 /** SIGTERM the serve host, then wait for ITS PID to die. Discriminated result — "could not stop it"
@@ -488,6 +498,10 @@ export interface ServeStartResult {
    *  `started`; null when the carrier named no usable web port (the host is up — we just did not
    *  read its port). */
   port?: number | null;
+  /** The bind host the child's carrier recorded — the ACTUAL bound host (a direct reading), not the
+   *  flag this script forwarded (it may have forwarded none). Only for `started`; null when the
+   *  carrier named no usable web host. */
+  host?: string | null;
   /** The live host that already owns this root (the admission lock's holder). Only for
    *  `already-running`. */
   holderPid?: number | null;
@@ -546,8 +560,8 @@ export function readAdmissionRefusal(logPath: string, startOffset: number, child
 export async function startServe(
   inv: { argv0: string; args: string[] },
   root: string,
-  host: string,
-  port: number,
+  host: string | undefined,
+  port: number | undefined,
   timeoutMs: number,
 ): Promise<ServeStartResult> {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
@@ -561,9 +575,16 @@ export async function startServe(
     logFd = fs.openSync("/dev/null", "w");
   }
   const spawnedAtMs = Date.now();
+  // ⛔ Forward ONLY what the operator named. The host/port defaults are resolved by the spawned
+  // `quay serve` through `resolveServeBinding` (packages/quay/src/serve-binding.ts); writing a
+  // default here would be a second definition point — and an unconditional `--port` in particular
+  // makes every cmdline-derived address reading structurally false (AC4).
+  const serveArgs = [...inv.args, "serve"];
+  if (host !== undefined) serveArgs.push("--host", host);
+  if (port !== undefined) serveArgs.push("--port", String(port));
   const child = spawn(
     inv.argv0,
-    [...inv.args, "serve", "--host", host, "--port", String(port)],
+    serveArgs,
     {
       detached: true,
       stdio: ["ignore", logFd, logFd],
@@ -593,7 +614,7 @@ export async function startServe(
     if (carrier.state === "present" && carrier.pid === child.pid) {
       const startedMs = carrier.startedAt ? Date.parse(carrier.startedAt) : NaN;
       if (!Number.isFinite(startedMs) || startedMs >= spawnedAtMs - 2000) {
-        return { state: "started", pid: child.pid, port: carrier.port };
+        return { state: "started", pid: child.pid, port: carrier.port, host: carrier.host };
       }
     }
     await sleep(250);
@@ -603,8 +624,10 @@ export async function startServe(
 
 interface Options {
   root?: string;
-  host: string;
-  port: number;
+  /** `--host` as given (undefined = not given ⇒ the spawned host resolves its own default). */
+  host?: string;
+  /** `--port` as given (undefined = not given ⇒ the spawned host resolves its own default). */
+  port?: number;
   cli?: string;
   serveTimeoutMs: number;
   json: boolean;
@@ -612,8 +635,6 @@ interface Options {
 
 function parseArgs(argv: string[]): Options | null {
   const opts: Options = {
-    host: DEFAULT_SERVE_HOST,
-    port: DEFAULT_SERVE_PORT,
     serveTimeoutMs: DEFAULT_SERVE_TIMEOUT_MS,
     json: false,
   };
@@ -633,9 +654,14 @@ Usage:
 
 Flags:
   --root <path>          Workspace root (default: discovered via .quay/config.yml from cwd).
-  --host <ip>            Web server bind host (default: ${DEFAULT_SERVE_HOST}).
-  --port <p>             Web server port (default: ${DEFAULT_SERVE_PORT} = kernel-assigned ephemeral).
-                         Pass it only to pin an exact port; a real collision then fails loudly.
+  --host <ip>            Web server bind host. Forwarded to \`quay serve\` ONLY when given; when
+                         omitted the host is resolved by the ONE definition point
+                         (packages/quay/src/serve-binding.ts): .quay/config.yml \`serve.host\`, else
+                         the single declared fallback.
+  --port <p>             Web server port. Forwarded to \`quay serve\` ONLY when given; when omitted
+                         the port is resolved by the same definition point and defaults to 0 =
+                         kernel-assigned ephemeral (read back from .quay/server.json). Pass it only
+                         to pin an exact port; a real collision then fails loudly.
   --cli <path>           Explicit quay CLI path (default: auto-resolve source-tree → plugin vendor bundle → PATH).
   --serve-timeout <ms>   How long to wait for the spawned serve host to report its verdict (default: ${DEFAULT_SERVE_TIMEOUT_MS}).
   --json                 Machine-readable summary on stdout.
@@ -661,8 +687,10 @@ host, wait for its pid to die, spawn a fresh one); unreadable ⇒ LEFT ALONE and
 async function main(argv: string[]): Promise<number> {
   const opts = parseArgs(argv);
   if (opts === null) return 2;
-  // 0 is the DEFAULT and a legal value (kernel-assigned); ⛔ it is not "unset" — see the help text.
-  if (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535) {
+  // Validate ONLY what was given: `undefined` means the operator named no port and the spawned host
+  // resolves its own default (0 = kernel-assigned is then a value that host picks, not one this
+  // script injects). A port of 0 given EXPLICITLY is legal and is forwarded verbatim.
+  if (opts.port !== undefined && (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535)) {
     process.stderr.write(`start-drivers: invalid --port: ${opts.port}\n`);
     return 2;
   }
@@ -771,10 +799,13 @@ async function main(argv: string[]): Promise<number> {
 
   if (admission.state === "started") {
     const boundPort = admission.port ?? null;
-    report.serve = { state: "started", pid: admission.pid, host: opts.host, port: boundPort };
+    // Report the host the CARRIER recorded (the actual bind), falling back to the forwarded flag and
+    // then to null — ⛔ never to a hardcoded default, which this script no longer declares.
+    const boundHost = admission.host ?? opts.host ?? null;
+    report.serve = { state: "started", pid: admission.pid, host: boundHost, port: boundPort };
     if (!opts.json) {
       process.stdout.write(
-        `serve: started (pid=${admission.pid ?? "?"}) on http://${opts.host}:${boundPort ?? "?"}` +
+        `serve: started (pid=${admission.pid ?? "?"}) on http://${boundHost ?? "?"}:${boundPort ?? "?"}` +
         `${boundPort == null ? " (port not read back from the carrier)" : ""}\n`,
       );
     }
@@ -784,6 +815,9 @@ async function main(argv: string[]): Promise<number> {
     // default port is kernel-assigned, which is what makes the freshness read possible at all.
     const carrier = readServeHostPid(root);
     const livePort = carrier.state === "present" ? carrier.port : null;
+    const carrierHost = carrier.state === "present" ? carrier.host : null;
+    // The address to REPORT/probe: the forwarded flag, else the carrier's own record, else unknown.
+    const liveHost = opts.host ?? carrierHost ?? null;
     let staleness: ServeStaleness;
     if (carrier.state !== "present") {
       // Three-way carrier (硬規則 3b): "exists but unusable" is its own literal, never folded into
@@ -791,8 +825,12 @@ async function main(argv: string[]): Promise<number> {
       staleness = { evaluated: false, stale: null, reason: `carrier-${carrier.state}${carrier.state === "unreadable" ? `:${carrier.reason}` : ""}` };
     } else if (livePort == null) {
       staleness = { evaluated: false, stale: null, reason: "carrier-no-web-port" };
+    } else if (liveHost == null) {
+      // A live host with a usable port but NO address to reach it: a reading we could not take, with
+      // its own literal (⛔ not a hardcoded probe host, and ⛔ not "fresh").
+      staleness = { evaluated: false, stale: null, reason: "carrier-no-web-host" };
     } else {
-      staleness = await probeServeStaleness(opts.host, livePort);
+      staleness = await probeServeStaleness(liveHost, livePort);
     }
 
     const action = planServeAction({ admission: "already-running", staleness: staleness.evaluated ? staleness.stale : null });
@@ -804,14 +842,14 @@ async function main(argv: string[]): Promise<number> {
       const kind = staleness.evaluated ? "fresh" : "not-evaluated";
       report.serve = {
         state: "already-listening",
-        host: opts.host,
+        host: liveHost,
         port: livePort,
         pid: carrier.state === "present" ? carrier.pid : (admission.holderPid ?? null),
         staleness: kind,
         stalenessReason: staleness.reason,
       };
       if (staleness.evaluated) {
-        if (!opts.json) process.stdout.write(`serve: already running (pid=${carrier.state === "present" ? carrier.pid : "?"}) on http://${opts.host}:${livePort} (code fresh)\n`);
+        if (!opts.json) process.stdout.write(`serve: already running (pid=${carrier.state === "present" ? carrier.pid : "?"}) on http://${liveHost ?? "?"}:${livePort} (code fresh)\n`);
       } else {
         // ...and is LOUD, because the alternative reading is "no signal at all" — the 2026-08-23
         // state this task exists to close. ⛔ Still no restart: we do not tear down a running server
@@ -820,7 +858,7 @@ async function main(argv: string[]): Promise<number> {
           `serve: already running (pid=${carrier.state === "present" ? carrier.pid : "?"}) — ⛔ staleness NOT-EVALUATED ` +
           `(reason: ${staleness.reason}); NOT restarting (a reading we could not take is not a verdict).\n`,
         );
-        if (!opts.json) process.stdout.write(`serve: already running on http://${opts.host}:${livePort ?? "?"} (staleness NOT-EVALUATED: ${staleness.reason})\n`);
+        if (!opts.json) process.stdout.write(`serve: already running on http://${liveHost ?? "?"}:${livePort ?? "?"} (staleness NOT-EVALUATED: ${staleness.reason})\n`);
       }
     } else {
       // RELOAD — the case that used to be silently skipped. The host to stop is the one the lock
@@ -834,7 +872,7 @@ async function main(argv: string[]): Promise<number> {
           `stop it by hand and re-run.\n` +
           `  carrier file: .quay/server.json\n`,
         );
-        report.serve = { state: "reload-host-unknown", host: opts.host, port: null, staleness: "stale", carrier: carrier.state };
+        report.serve = { state: "reload-host-unknown", host: liveHost, port: null, staleness: "stale", carrier: carrier.state };
         if (opts.json) process.stdout.write(JSON.stringify(report));
         return 1;
       }
@@ -844,14 +882,15 @@ async function main(argv: string[]): Promise<number> {
           `serve: stale serve host pid=${carrier.pid} could not be stopped (${stopped.state}` +
           `${stopped.error ? `: ${stopped.error}` : ""}) — it is still alive; ⛔ not spawning a second host on top of it.\n`,
         );
-        report.serve = { state: "reload-stop-failed", host: opts.host, port: livePort, staleness: "stale", previousPid: carrier.pid, detail: stopped.state };
+        report.serve = { state: "reload-stop-failed", host: liveHost, port: livePort, staleness: "stale", previousPid: carrier.pid, detail: stopped.state };
         if (opts.json) process.stdout.write(JSON.stringify(report));
         return 1;
       }
       process.stderr.write(`serve: STALE (code on disk newer than pid=${carrier.pid}) — reloading\n`);
       const res = await startServe(inv, root, opts.host, opts.port, opts.serveTimeoutMs);
       const boundPort = res.state === "started" ? (res.port ?? null) : livePort;
-      report.serve = { ...res, state: res.state === "started" ? "reloaded-stale" : res.state, host: opts.host, port: boundPort, staleness: "stale", previousPid: carrier.pid };
+      const boundHost = res.state === "started" ? (res.host ?? liveHost) : liveHost;
+      report.serve = { ...res, state: res.state === "started" ? "reloaded-stale" : res.state, host: boundHost, port: boundPort, staleness: "stale", previousPid: carrier.pid };
       if (res.state !== "started") {
         process.stderr.write(
           `serve: reload failed after stopping pid=${carrier.pid} (${res.state}${res.state === "already-running" ? " — another host took this root in the window" : ""}); see .quay/serve.log\n`,
@@ -860,14 +899,14 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       if (!opts.json) {
-        process.stdout.write(`serve: reloaded (was stale pid=${carrier.pid} → pid=${res.pid ?? "?"}) on http://${opts.host}:${res.port ?? "?"}\n`);
+        process.stdout.write(`serve: reloaded (was stale pid=${carrier.pid} → pid=${res.pid ?? "?"}) on http://${boundHost ?? "?"}:${res.port ?? "?"}\n`);
       }
     }
   } else {
     // The child never delivered a verdict: spawn failure (never started), exit, or timeout. All
     // three are failures of THIS run — ⛔ `already-running` is NOT among them (it is handled above
     // as an idempotent outcome), which is the whole point of the extra state.
-    report.serve = { ...admission, host: opts.host, port: null };
+    report.serve = { ...admission, host: opts.host ?? null, port: null };
     if (admission.state === "spawn-failed") {
       const diag = formatCliFailure(inv, { status: null, error: Object.assign(new Error(`spawn ${inv.argv0}: ${admission.error}`), { code: admission.error }) });
       process.stderr.write(`serve: the quay CLI could not be executed (${admission.error}); argv0=${inv.argv0}; argv=${formatInvocation(inv)}\n`);

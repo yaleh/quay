@@ -5,7 +5,7 @@ title: serve 绑定默认值有三个定义点（serve.ts host="0.0.0.0" / cli/s
   0`），host 两值互相矛盾，且实测落在任何检测器范围外（两个最近类比 checker 均 PASS）⇒ 收成唯一解析点
   resolveServeBinding + 一份带 marker 的回退字面量 + `.quay/config.yml#serve` 期望态；人
   2026-09-30 裁定默认收敛到 0.0.0.0
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -120,3 +120,9 @@ serve:            # 可选。缺席 ⇒ 用声明式回退（host 0.0.0.0 / port
 - packages/quay/test/serve-binding.test.mjs
 - packages/quay/test/config.test.mjs
 - tasks/gap-serve-binding-defaults-three-copies-to-one-definition-point.md
+- packages/quay/src/cli/init.ts
+- packages/quay/src/kernel/control-plane-http.ts
+- packages/quay/src/mcp-server.ts
+- packages/quay/src/serve-render.ts
+- packages/quay/test/init.test.mjs
+- plugin/scripts/checker-mutation-cases/serve-binding-literal-check.sh

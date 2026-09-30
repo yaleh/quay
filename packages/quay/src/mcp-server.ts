@@ -268,6 +268,7 @@ function registerBootstrapHandlers(server: McpServer): void {
           configPath: result.configPath,
           tasksDir: result.tasksDir,
           added: result.reconcile?.added ?? [],
+          addedServe: result.reconcile?.addedServe ?? [],
           migrated: result.reconcile?.migrated ?? [],
           content: dryRun === true ? result.content : undefined,
         };

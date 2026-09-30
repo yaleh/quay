@@ -46,6 +46,19 @@ import { emitVerdict, helpExit, isDirectEntry, readFileSafe } from "./gate-scrip
 /** The writer face: quay-init.sh writes delivery config keys into downstream `.quay/config.yml`. */
 export const WRITER_REL = "plugin/scripts/quay-init.sh";
 
+/** The SECOND writer face (gap-serve-binding-defaults-three-copies-to-one-definition-point P3.3):
+ *  the `serve:` section is written by `packages/quay/src/init.ts` — both the fresh-install template
+ *  and the comment-preserving reconcile (`quay init --reconcile`) — NOT by quay-init.sh, whose
+ *  `ensure_loop_config` delegates the loop section to `ensureLoopConfig` in that same TS module
+ *  (quay-init.sh:420: "one implementation, no second copy"). Reading only the shell face would leave
+ *  the serve keys un-enumerated — a delivered key this checker simply could not see, which is the
+ *  exact invisibility the check exists to remove. */
+export const INIT_REL = "packages/quay/src/init.ts";
+
+/** The table whose `Object.entries` IS the emitted `serve:` block (`generateConfigContent`) and the
+ *  filled set (`reconcileConfigContent`) — so its keys ARE the delivered keys. */
+export const SERVE_TABLE_MARKER = "export const SERVE_VERSION_DEFAULTS";
+
 /** The consumer face: the goal's own evidence scope (top-level .ts, non-test). */
 export const CONSUMER_DIRS: readonly string[] = ["plugin/scripts", "packages/quay/src"];
 
@@ -124,6 +137,33 @@ export function extractWriterKeys(src: string): string[] {
   return [...keys].sort();
 }
 
+/** Extract the `serve:` config keys from the TS writer face (init.ts): the keys of the
+ *  `SERVE_VERSION_DEFAULTS` table, which is what the fresh-install template emits and what the
+ *  reconcile fills. A missing marker yields [] — the caller treats an absent second face as "no
+ *  serve keys delivered", never as a crash (the shell face is still the hard requirement). */
+export function extractServeVersionKeys(initSrc: string): string[] {
+  const at = initSrc.indexOf(SERVE_TABLE_MARKER);
+  if (at === -1) return [];
+  const open = initSrc.indexOf("{", at);
+  if (open === -1) return [];
+  // Balanced-brace scan so a nested value (a list, a nested map) cannot end the table early.
+  let depth = 0;
+  let end = open;
+  for (; end < initSrc.length; end++) {
+    if (initSrc[end] === "{") depth += 1;
+    else if (initSrc[end] === "}") {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+  }
+  const keys = new Set<string>();
+  for (const line of initSrc.slice(open + 1, end).split("\n")) {
+    const m = /^\s*([a-z_][a-z0-9_]*)\s*:/.exec(line);
+    if (m) keys.add(m[1]);
+  }
+  return [...keys].sort();
+}
+
 /** Collect the consumer face: top-level `.ts` files in CONSUMER_DIRS, excluding `*.test.*` and this
  *  checker. Returns a map of repo-relative path → file content. */
 export function listConsumerFiles(root: string): Map<string, string> {
@@ -179,7 +219,14 @@ export function classifyKey(
 /** Full enumeration: extract the writer face, grep the consumer face, classify every key. */
 export function audit(root: string): AuditReport {
   const writerSrc = readFileSafe(path.join(root, WRITER_REL));
-  const keys = extractWriterKeys(writerSrc);
+  const initSrc = readFileSafe(path.join(root, INIT_REL));
+  // Section-qualified for the serve keys (`serve.host`) so the consumer-face grep means "this key of
+  // this section", not the bare word `host` that appears in every file. The loop keys keep their
+  // historical bare form (changing them would silently rewrite what this checker has always meant).
+  const keys = [
+    ...extractWriterKeys(writerSrc),
+    ...extractServeVersionKeys(initSrc).map((k) => `serve.${k}`),
+  ].sort();
   const consumerFiles = listConsumerFiles(root);
   const entries = keys.map((k) => classifyKey(k, consumerFiles, EXEMPTIONS));
   const states: Record<KeyState, number> = {
@@ -190,7 +237,7 @@ export function audit(root: string): AuditReport {
   for (const e of entries) states[e.state] += 1;
   return {
     mode: "config-key-consumer-audit",
-    writer: WRITER_REL,
+    writer: `${WRITER_REL} + ${INIT_REL} (serve: section)`,
     consumerDirs: CONSUMER_DIRS,
     keys_total: entries.length,
     no_consumer_to_wire: states["no-consumer-to-wire"],
