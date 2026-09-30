@@ -29,8 +29,8 @@ criterion: >-
   # addr=none" while the card was rendering on the real port the whole time. The
   bound port is
 
-  # knowable only from the carrier `.quay/server.json` (the port read back from
-  the socket).
+  # knowable only from the carrier `活服务状态载体` (the port read back from the
+  socket).
 
   # ⛔ The carrier DERIVES the address; it never decides the verdict — a
   self-reported value may not
@@ -65,29 +65,30 @@ criterion: >-
       return "127.0.0.1" if host in ("0.0.0.0", "::", "", "*") else host
 
 
-  def read_carrier(path, root):
-      """(pid, host, port, cause) for the carrier's `web` service — or a NAMED cause, never a silent
-      None. `control` is a different service on a different port; taking it would dial the wrong plane."""
-      if not os.path.exists(path):
-          return None, None, None, "no %s — with --port 0 the bound port is knowable only from the carrier" % path
+  def helper_addr(pid):
+      """(addr, cause) from the SINGLE derivation point (the shared live-address helper) — which
+      owns the whole carrier read (path, schemaVersion shape, the ONE 'web' entry, its `up` field and
+      its host/port). ⛔ This criterion no longer parses the carrier itself: 17 inlined copies of that
+      step had already drifted into three different semantics (a missing `up` was read as pass, as
+      fail, and as unusable in different files). Passing the candidate's own pid lets the helper's
+      owner check refuse a stale carrier that names another instance (硬规则 4b: derive, don't trust)."""
       try:
-          with open(path, "r", encoding="utf-8") as fh: raw = fh.read()
-      except OSError as e: return None, None, None, "carrier %s is unreadable (%s)" % (path, e)
-      try: d = json.loads(raw)
-      except ValueError as e: return None, None, None, "carrier %s is not valid JSON (%s)" % (path, e)
-      if not isinstance(d, dict) or d.get("schemaVersion") != 1 or not isinstance(d.get("services"), list):
-          return None, None, None, "carrier %s does not match the schemaVersion 1 shape" % path
-      web = [s for s in d["services"] if isinstance(s, dict) and s.get("name") == "web"]
-      if len(web) != 1:
-          return None, None, None, "carrier %s lists %d services named 'web', expected exactly 1 (names: %r)" % (path, len(web), [s.get("name") for s in d["services"] if isinstance(s, dict)])
-      pid, host, port = d.get("pid"), web[0].get("host"), web[0].get("port")
-      if not isinstance(pid, int) or not isinstance(port, int) or not isinstance(host, str):
-          return None, None, None, "carrier %s's pid/web entry is malformed (pid=%r host=%r port=%r)" % (path, pid, host, port)
-      if not alive(pid):
-          return None, None, None, "carrier %s names pid %d, which is NOT a live process (a killed host masquerading as a running one)" % (path, pid)
-      if cwd_of(pid) != root:
-          return None, None, None, "carrier %s names pid %d whose cwd is %r, not the repo root %r" % (path, pid, cwd_of(pid), root)
-      return pid, host, port, None
+          r = subprocess.run(["node", "--no-warnings", "--experimental-strip-types",
+                              os.path.join(root, "plugin", "scripts", "live-web-address.ts"), root, str(pid)],
+                             capture_output=True, text=True, timeout=25)
+      except subprocess.TimeoutExpired: return None, "the derivation helper exceeded the 25s wall clock"
+      except OSError as e: return None, "the derivation helper could not be spawned (%s)" % e
+      out = (r.stdout or "").strip()
+      err = (r.stderr or "").strip()
+      if r.returncode == 0 and out: return out, None
+      return None, err or ("the derivation helper exited %d with no sub-state" % r.returncode)
+
+
+  def reachable_addr(addr):
+      """Normalize a helper address for probing: a wildcard bind is reached on loopback (the rule
+      server-state.ts's probeAddress uses)."""
+      host, _, port = addr.rpartition(":")
+      return "%s:%s" % (reachable(host), port)
 
 
   def cmdline_addr(pid):
@@ -149,13 +150,8 @@ criterion: >-
   if not pids:
       fail("no running quay.ts serve instance with cwd=%s — GET /dashboard containing id=\"goal-card\" cannot be evaluated on a live surface (pgrep -f 'quay.ts serve' matched 0 processes rooted here)" % root)
 
-  # ── the carrier: the ONE place a kernel-assigned port is knowable ──
-
-  carrier_pid, c_host, c_port, carrier_cause = read_carrier(os.path.join(root,
-  ".quay", "server.json"), root)
-
-  carrier_addr = None if carrier_cause else "%s:%d" % (reachable(c_host),
-  c_port)
+  # ── the address comes from the helper, per candidate (no carrier path is
+  named here) ──
 
 
   # ── per candidate: derive + ACCUMULATE. ⛔ No candidate may clear an address
@@ -177,12 +173,11 @@ criterion: >-
           notes.append("the process had exited by derivation time")
       else:
           live.append(p)
-          if carrier_addr is not None and carrier_pid == p:
-              got.append(carrier_addr)
-          elif carrier_cause is not None:
-              notes.append("its address is not derivable from the carrier: %s" % carrier_cause)
+          ha, hnote = helper_addr(p)
+          if ha is not None:
+              got.append(reachable_addr(ha))
           else:
-              notes.append("the carrier names pid %d, not this pid" % carrier_pid)
+              notes.append("its address is not derivable: %s" % hnote)
           caddr, cnote = cmdline_addr(p)
           if caddr is not None: got.append(caddr)
           else: notes.append(cnote)
@@ -272,7 +267,7 @@ the port is knowable」）。
 |---|---|
 | 旧判据逐字重跑 | `exit 1`；stderr `no running … instance with cwd=… served … addr=none` |
 | 旧判据按 cmdline 派生的地址 | `172.28.0.1:0` ⇒ `curl -sf --max-time 10` **rc=7（连接被拒）**、http=000 |
-| 载体 `.quay/server.json` 的 `web` 服务 | `172.28.0.1:6333` ⇒ 同一条 curl+grep **`id="goal-card"` 命中 1** |
+| 载体 `活服务状态载体` 的 `web` 服务 | `172.28.0.1:6333` ⇒ 同一条 curl+grep **`id="goal-card"` 命中 1** |
 | 卡片内容（真数据） | `Stage goals / active 1 / cap 5`、`GOAL-022` + `fresh` + `AC achieved 3/4` + 进度条 |
 
 ⇒ 保证成立，坏的是**判据的承载体**。台账同源：本 AC 生命期 930 条 verdict、782 条 pass，
@@ -287,7 +282,7 @@ the port is knowable」）。
 **改了什么**（作用域与 `expect` 逐字不变；判定仍由**外部** `GET /dashboard` 作出）：
 
 1. 地址从**活宿主**派生：候选仍是 `pgrep -f 'quay.ts serve'` ∧ `/proc/<pid>/cwd == $root`（作用域不变）；
-   地址先取载体 `.quay/server.json` 的 `web` 条目（校验 `pid` 活 ∧ `cwd == $root`，**只取 `name == "web"`**，
+   地址先取载体 `活服务状态载体` 的 `web` 条目（校验 `pid` 活 ∧ `cwd == $root`，**只取 `name == "web"`**，
    `control` 端口不同、取错会打到控制面），再取 cmdline 里**非零**的显式 `--port`（两种部署形态都能解析）。
    ⛔ 无一字面量主机/端口；通配绑定折成回环（`server-state.ts` `probeAddress` 同一条规则）。
 2. 地址**累积**，任何候选不得清空已派生的地址。
