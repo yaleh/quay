@@ -448,3 +448,25 @@ CLI 的 acceptance 闸又因本任务未设 `extra.acceptance` 而 fail-closed �
 ⛔ 本次**未**跑 driver 机械 fan-in（delta 为空，且 `orchestration/tick-log.md:974` 判「工作已落 develop，
 retreat/重跑无意义」）。**因此 `done` 这一断言由上表的直接测量背书，而非机制产出的闸判词** ——
 该差额明记于此，供后续读者自行折价。
+
+**⏱ 时间限定更正（2026-09-30T08:12Z / 本地 16:12）**：上文那张表里的 `goal gate AC-292 = pass`
+读数在当时（本地 16:00 前后）**成立**，但**已被一个外生事件推翻**：
+
+- `goal-amend` 于 `08:12:29.611Z` 把 AC-292 的判据改写为「调用共享 helper」的形态，
+  指纹 `criterionHash: 05d67676ece2a75c → 3cef7979c969f2b6`；
+- 而该 helper `plugin/scripts/live-web-address.ts` **不在 develop 上**
+  （`git show develop:plugin/scripts/live-web-address.ts` ⇒ 不存在；主检出亦无）；
+- ⇒ 判据现读 `not-evaluated (declared)`、cause `carrier-helper-unavailable(exit=1)`。
+
+同一改写波及**全部 17 条**同族判据（`grep -rl 'live-web-address.ts' goals/ | wc -l` ⇒ 17）。
+
+**归因（⛔ 不推给本任务）**：本任务自身的交付物 —— 四处可评估性分支改 `exit 3` ——
+**确在 develop 且未被动过**（`grep -c 'exit 3; fi' goals/AC-292-*.md` ⇒ 4），
+DoD 要求的三态演示在 2026-09-29 的 Evidence 里已逐字给出。打断「pass」的是家族重构
+（`gap-criterion-live-web-address-derivation-17-copies-to-one`，其 worker `exited-not-landed`，
+红在 `step=suite`：`AssertionError: a non-ASCII inert increment must still take the in-lock retry and land`）
+**先落判据、后落 helper** 的顺序倒置 —— 即已知失效模式「goal→develop 瞬时，夹具等 fan-in」。
+helper 一旦落地，本条判据会自己读回 `pass`。
+
+⇒ 本节的目的只有一个：**让上面那条 `pass` 读数带上时间限定**，使后来的读者不会把它当成一条
+当下的、无条件的断言。
