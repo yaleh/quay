@@ -16,6 +16,24 @@ extra:
   schema: execution
 goal_ac: AC-302
 ---
+---
+id: gap-ac302-criterion-carrier-absence-not-evaluated
+title: "AC-302 判据把「活载体缺席/地址不可派生」记成「此刻为假」—— 四条可评估性分支（goals/AC-302-*.md 第
+  20/94/100/104 行）以 exit 1 出声，违反仓库约定（exit 3 = not-evaluated，goal-store.ts
+  逐字示例「NOT-EVALUATED: carrier absent」）⇒ goal-driver 每轮判它 confirmed-failing
+  重新立案；而保证本身实测为真（活实例 172.28.0.1:20119 上 en→zh 四条断言全绿）。修法=四处 exit 1→3（同族
+  AC-301/AC-303 已由同形同伴落地 done）+ 夹具同步 + 助手落地后活实例上真 pass"
+status: ready
+labels:
+  - gap
+  - defect
+  - webui
+parent: null
+children: []
+extra:
+  schema: execution
+goal_ac: AC-302
+---
 **type:** execution
 
 ## Proposal
@@ -85,12 +103,12 @@ curl -sf -H 'Cookie: lang=zh' http://172.28.0.1:20119/doc ⇒ <html lang="zh"  <
 
 ## AC
 
-- [ ] **AC1（四条可评估性分支已取 exit 3，十条断言分支逐字未动）**：`grep -c 'exit 3' goals/AC-302-*.md` = **4**，`grep -c 'exit 1' goals/AC-302-*.md` = **10**；逐行贴出第 20 / 94 / 100 / 104 行改为 `exit 3` 的 criterion diff，并**逐条列出**仍为 `exit 1` 的十条断言分支（⛔ 不报一个总数，硬规则 3）。⛔ 未经 `quay goal write AC-302 --criterion …` 落库不算。
-- [ ] **AC2（不可评估 ≠ 为假·活读数）**：在**地址不可派生**的时刻，`node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json` ⇒ `.verdict == "not-evaluated"` 且 `.cause == "declared"`，`reason` 含 `no-derivable-serve-address`；⛔ **不是** `"fail"`。并排贴**改前**（`fail` / `exit 1`，立案轮 `2026-09-30T08:57:21.713Z`）与**改后**（`not-evaluated` / `exit 3`）两条完整 JSON。
-- [ ] **AC3（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac302-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `code === 3`（第 385 / 410 / 429 / 448 / 468 / 490 / 509 行）、7 个正例仍 `code === 0`、整条 criterion 的 fetch 失败断言仍 `code === 1`；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
-- [ ] **AC4（强度不减·负控，行为证据不是文本 diff）**：夹具自造活面上跑**整条** criterion：真接线的 zh `/doc` ⇒ `exit 0`；未接线的 zh `/doc` ⇒ `exit 1` 且 `CAUSE=nav-label-untranslated`（**断言分支不得变成 3**）。两次读数并排贴。⛔ 不得改任何 `packages/quay/src/serve-*.ts`。
-- [ ] **AC5（正控制：活实例上真 pass）**：在载体助手已落地、且存在 cwd = 仓库根的活 `quay.ts serve` 时，`node packages/quay/bin/quay.js goal gate AC-302` ⇒ **exit 0**，逐字贴出；同一时刻贴 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd`，确认该进程 cwd = 仓库根。⚠️ 若助手仍未落地 ⇒ **如实报「助手未落地，此条取 not-evaluated」**（硬规则 3b），⛔ 不勾「已达成」后靠文字补救。
-- [ ] **AC6（不回归 + 家族枚举 + 作用域）**：① `bash scripts/test.sh --for-task gap-ac302-criterion-carrier-absence-not-evaluated --allow-thin` 绿；② `node --test packages/quay/test/ac301-criterion-address-derivation.test.mjs packages/quay/test/ac303-criterion-address-derivation.test.mjs` 绿（同族已落地的两条**必须保持绿**）；③ 家族枚举逐文件贴出（`ls tasks/ | grep -c 'carrier-absence-not-evaluated'` 由 **7 → 8**（含本任务）；`ls tasks/ | grep -c 'address-helper-not-landed'` 仍 **8**，本任务不改它们）；④ `git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过。
+- [x] **AC1（四条可评估性分支已取 exit 3，十条断言分支逐字未动）**：`grep -c 'exit 3' goals/AC-302-*.md` = **4**，`grep -c 'exit 1' goals/AC-302-*.md` = **10**；逐行贴出第 20 / 94 / 100 / 104 行改为 `exit 3` 的 criterion diff，并**逐条列出**仍为 `exit 1` 的十条断言分支（⛔ 不报一个总数，硬规则 3）。⛔ 未经 `quay goal write AC-302 --criterion …` 落库不算。
+- [x] **AC2（不可评估 ≠ 为假·活读数）**：在**地址不可派生**的时刻，`node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json` ⇒ `.verdict == "not-evaluated"` 且 `.cause == "declared"`，`reason` 含 `no-derivable-serve-address`；⛔ **不是** `"fail"`。并排贴**改前**（`fail` / `exit 1`，立案轮 `2026-09-30T08:57:21.713Z`）与**改后**（`not-evaluated` / `exit 3`）两条完整 JSON。
+- [x] **AC3（夹具同步 + 该项是可取的假）**：`packages/quay/test/ac302-criterion-address-derivation.test.mjs` 的 7 个可评估性负例断言 `code === 3`（第 385 / 410 / 429 / 448 / 468 / 490 / 509 行）、7 个正例仍 `code === 0`、整条 criterion 的 fetch 失败断言仍 `code === 1`；`node --test <该文件>` 全绿；并贴出**修订前**该文件在 `code === 1` 断言下的对照（`git show <old>:<file>`）证明这 7 条确实 1 → 3。
+- [x] **AC4（强度不减·负控，行为证据不是文本 diff）**：夹具自造活面上跑**整条** criterion：真接线的 zh `/doc` ⇒ `exit 0`；未接线的 zh `/doc` ⇒ `exit 1` 且 `CAUSE=nav-label-untranslated`（**断言分支不得变成 3**）。两次读数并排贴。⛔ 不得改任何 `packages/quay/src/serve-*.ts`。
+- [x] **AC5（正控制：活实例上真 pass）**：在载体助手已落地、且存在 cwd = 仓库根的活 `quay.ts serve` 时，`node packages/quay/bin/quay.js goal gate AC-302` ⇒ **exit 0**，逐字贴出；同一时刻贴 `pgrep -af 'quay.ts serve'` + `readlink /proc/<pid>/cwd`，确认该进程 cwd = 仓库根。⚠️ 若助手仍未落地 ⇒ **如实报「助手未落地，此条取 not-evaluated」**（硬规则 3b），⛔ 不勾「已达成」后靠文字补救。
+- [x] **AC6（不回归 + 家族枚举 + 作用域）**：① `bash scripts/test.sh --for-task gap-ac302-criterion-carrier-absence-not-evaluated --allow-thin` 绿；② `node --test packages/quay/test/ac301-criterion-address-derivation.test.mjs packages/quay/test/ac303-criterion-address-derivation.test.mjs` 绿（同族已落地的两条**必须保持绿**）；③ 家族枚举逐文件贴出（`ls tasks/ | grep -c 'carrier-absence-not-evaluated'` 由 **7 → 8**（含本任务）；`ls tasks/ | grep -c 'address-helper-not-landed'` 仍 **8**，本任务不改它们）；④ `git diff --name-only develop...HEAD` **逐条**贴出，证明只有本任务 Touches 里的路径被动过。
 
 ## DoD
 
@@ -110,3 +128,106 @@ curl -sf -H 'Cookie: lang=zh' http://172.28.0.1:20119/doc ⇒ <html lang="zh"  <
 - `tasks/gap-ac302-criterion-carrier-absence-not-evaluated.md`
 
 （说明：第一条是本任务的落地面 —— 四条**可评估性**分支的**退出码**，经 `quay goal write AC-302 --criterion …` 落库，`expect` 与十条断言分支文本逐字不变；第二条是与该块逐字绑定、随之同步的夹具（7 个可评估性负例 + 一条整条 criterion 的断言侧负控制）；第三条是 self-touch。⛔ `plugin/scripts/live-web-address.ts`、任何 `plugin/scripts/*.ts`、任何 `packages/quay/src/serve-*.ts` **均不在本 Touches 内**：助手的落地归 in-flight 的 `gap-criterion-live-web-address-derivation-17-copies-to-one`，本任务不重复实现；后者是夹具自造活面的约束。）
+
+## Evidence
+
+取证产物（未跟踪 scratch，可被下一轮独立复算）：
+`/home/yale/work/quay-worktrees/gap-ac302-criterion-carrier-absence-not-evaluated/.quay/ac302-verify/`
+（`readings.txt`、`1-wired-zh.json`/`2-unwired-zh.json`/`3-no-instance.json`/`4-address-underivable.json`、
+`branches.txt`、`fixture-1to3.txt`、`ac5-main-root-pass.txt`、`run-readings.mjs`）。
+
+### AC1 — 四条可评估性分支 `exit 3`，十条断言分支逐字未动
+
+- `grep -c 'exit 3' goals/AC-302-*.md` = **4**；`grep -c 'exit 1' goals/AC-302-*.md` = **10**（主检出与 worktree 两处读数一致）。
+- 落库路径：`quay goal write AC-302 --criterion <text>`（两次 —— worktree 分支 `task/gap-ac302-…`、主检出 `author`；`--criterion` 经 argv 直传，无 shell 求值）。回读经 `parseFrontmatter` 后与意图文本 `cmp` **逐字节相同**；`/bin/sh -n` 整条 criterion exit 0。
+- 四条（行号为 folded scalar **解析后**的行号；题面给的物理行 20 / 94 / 100 / 104 语义等价，物理行随折行变化）：
+
+  | 分支 token | before | after |
+  |---|---|---|
+  | `FAIL=workspace-root-unresolvable` | 5 `…empty root\n' "$(pwd)" >&2; exit 1; fi` | 28 同行 `exit 3; fi` |
+  | `FAIL=no-derivable-serve-address` | 52 `…readings on stderr above\n' "$nserve" "$root" >&2; exit 1; fi` | 75 同行 `exit 3; fi` |
+  | `FAIL=no-reachable-serve-address` | 53 `…\n' "$nderived" "$nserve" "$root" "$ROUTE" >&2; exit 1; fi` | 76 同行 `exit 3; fi` |
+  | `CAUSE=no-running-serve-instance` | 54 `…(AC-179 probe pattern)" >&2; exit 1; fi` | 77 同行 `exit 3; fi` |
+
+- 仍为 `exit 1` 的**十条断言分支**（after 解析行号 → 行首 token，逐条）：
+
+  1. 81 `CAUSE=en-fetch-failed` 2. 83 `CAUSE=zh-fetch-failed` 3. 86 `CAUSE=no-nav-region`
+  4. 87 `CAUSE=no-nav-region-zh` 5. 88 `CAUSE=english-baseline-missing`（`case … exit 1 ;; esac`）
+  6. 91 `CAUSE=no-title-tag` 7. 92 `CAUSE=html-lang-not-zh` 8. 93 `CAUSE=nav-label-untranslated`
+  9. 95 `CAUSE=no-title-tag-zh` 10. 96 `CAUSE=title-unchanged`
+
+- WHY 注释 23 行写在 `>>> addr-derivation` 标记**之前**（AC-301 / AC-303 同形落地形态）：`exit 3` → `acceptance-runner` 的 `declared` → `goal-driver.runPrefilingRecheck` 的 `not-evaluated ⇒ failing: []`；并具名 `NOT_RUNNABLE_EXIT_CODES = {126,127}`（故 3 不是 runner 失败码）。
+  ⚠️ 该注释刻意**不**拼 `exit 3` / `exit 1` 字面量（用 `status 3` / `status 1` 表意）：AC1 的判据是**整文件** `grep -c`，注释里引用字面量会把「代码条数」变成「代码+散文条数」（实测：初稿含该字面量时整文件计数为 5 / 13）。
+
+### AC2 — 不可评估 ≠ 为假（活读数）
+
+**改前**（台账 `.quay/gate-events.jsonl`，`item_id=AC-302`，本任务要消除的形态）：连续两条同形
+`{"verdict":"fail","timestamp":"2026-09-30T08:45:43.734Z"}` 与 `{"verdict":"fail","timestamp":"2026-09-30T08:56:58.320Z"}`，`reason` 均为 `acceptance failed (exit 1) … nderived=0`；立案轮 dry-run 为 `2026-09-30T08:57:21.713Z`。
+
+**改后**（`.quay/ac302-verify/4-address-underivable.json`；命令 `node packages/quay/bin/quay.js goal gate AC-302 --dry-run --json`）：
+
+```json
+{"id":"AC-302","verdict":"not-evaluated","cause":"declared",
+ "reason":"not-evaluated (declared): acceptance failed (exit 3) — AC-302 candidate readings (cwd=/tmp/ac302-verify-Eg5MQ6, nserve=1, ncand=2, nderived=0):; pid=3096365 addr=- cause=argv-port-kernel-assigned,carrier-absent; pid=3096510 addr=- cause=argv-no-serve-subcommand,carrier-absent FAIL=no-derivable-serve-address -- 1 quay.ts serve process(es) with cwd=/tmp/ac302-verify-Eg5MQ6, none yielded an address (no explicit --port >= 1 on its own argv, and no 活服务状态载体 entry naming that pid with …"}
+```
+
+⇒ `.verdict == "not-evaluated"`、`.cause == "declared"`、`reason` 含 `no-derivable-serve-address`，**不是** `"fail"`。
+（同一事实在无候选实例时的读数见 `3-no-instance.json`：`not-evaluated` / `declared` + `CAUSE=no-running-serve-instance`。）
+
+### AC3 — 夹具同步（7 个可评估性负例 1 → 3）
+
+`git show develop:packages/quay/test/ac302-criterion-address-derivation.test.mjs | grep -n 'r.code, 1'` ⇒ 7 条（行 360 / 385 / 404 / 423 / 443 / 465 / 484，题面给的行号来自另一修订，语义相同）；
+改后 `grep -n 'r.code, 3'` ⇒ 同行 7 条（473 / 498 / 517 / 536 / 556 / 578 / 597），均带 `NOT_EVALUATED_WHY` 说明。
+正例：`r.code, 0` 6 处（5 个 derivation-block 正例 + 新增的整条 criterion 接线正例）**未动**；
+断言侧仍有牙：`r.code, 1` 1 处（整条 criterion 未接线 ⇒ `exit 1`）。
+⚠️ 与题面的差异如实记录：题面写「7 个正例仍 `code === 0`」，实测该文件**负例 7 条、正例 5 条**（`git show develop:… | grep -c 'r.code, 0'` = 5）；本任务不改正例。
+`node --test packages/quay/test/ac302-criterion-address-derivation.test.mjs` ⇒ **19/19 pass, 0 fail**。
+
+### AC4 — 强度不减·负控（行为证据，不是文本 diff）
+
+夹具自造活面（`git init` 临时根 + 真 `--port N` 的 serve 形候选 + 真监听、按 `Cookie: lang=zh` 选体的响应）上跑**整条** criterion，
+并经**真实 CLI** `quay goal gate AC-302 --dry-run --json --root <fixture root>` 取裁决：
+
+| 活面 | 读数 |
+|---|---|
+| 真接线的 zh `/doc` | `cliExit=0`，`verdict:"pass"`，`reason:"acceptance passed (exit 0)"` |
+| 未接线的 zh `/doc`（`<html lang="zh">` 但 nav 仍渲染英文 `Docs`） | `cliExit=1`，`verdict:"fail"`，`reason` 含 `CAUSE=nav-label-untranslated` |
+
+⇒ 断言分支**没有**变成 3：同一份判据在「可评估且为假」与「不可评估」上取到两个不同取值。
+⛔ 未改任何 `packages/quay/src/serve-*.ts`（见 AC6④）。
+
+### AC5 — 正控制：活实例上真 pass
+
+主检出根、载体助手已落地（`plugin/scripts/live-web-address.ts` 在 develop 与主检出）、存在 cwd = 仓库根的活 `quay.ts serve`：
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-302
+{"id":"AC-302","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)",
+ "timestamp":"2026-09-30T09:28:37.613Z","dryRun":false,"event":{…"verdict":"pass","timestamp":"2026-09-30T09:28:37.613Z"}}
+GATE_EXIT=0
+```
+
+同一时刻的直接量（进程 cwd，不是自报心跳）：
+`pid=1709183 argv=… /data/home/yale/work/quay/packages/quay/bin/quay.ts serve`、`readlink /proc/1709183/cwd = /data/home/yale/work/quay`；
+`.quay/server.json` 登记该 pid 的 `web` 服务为 `172.28.0.1:20119`（up: true）。
+⚠️ 该实例上四条断言各自独立可核的立案轮读数（curl 直接量）：en nav `Docs` ×2 / zh `<html lang="zh"` / zh nav `Docs` ×0 / zh `<title>` ≠ en `<title>`。
+
+### AC6 — 不回归 + 家族枚举 + 作用域
+
+① `bash scripts/test.sh --for-task gap-ac302-criterion-carrier-absence-not-evaluated --allow-thin` ⇒ **exit 0**（19 pass / 0 fail）。
+② `node --test packages/quay/test/ac301-…test.mjs packages/quay/test/ac303-…test.mjs` ⇒ **41 pass / 0 fail**（同族已落地的两条仍绿）。
+③ 家族枚举（逐文件）：
+`ls tasks/ | grep -c 'carrier-absence-not-evaluated'` = **8**（7 → 8，含本任务）：ac289 / ac290 / ac291 / ac292 / ac297 / ac301 / ac302 / ac303；
+`ls tasks/ | grep -c 'address-helper-not-landed'` = **8**（不变，本任务不改它们）。
+④ `git diff --name-only develop...HEAD`（worktree）：
+
+```
+packages/quay/test/ac302-criterion-address-derivation.test.mjs
+```
+
+一句 —— 只含本任务 Touches 内的路径。`goals/AC-302-*.md` 的改动**此刻已在 develop 上**（`30f8ed017 goals: AC-302 field:criterion by cli:3136754`，由主检出写侧经 doc-branch 机制推进），故不出现在三点差里；`git diff develop HEAD -- 'goals/AC-302-*'` 为空（两侧逐字节相同）。
+⇒ 由此证明 `plugin/scripts/*`、`packages/quay/src/serve-*.ts`、以及 8 条 `address-helper-not-landed` 同伴的载体**一字未改**。
+
+### DoD 5 — 回滚形态
+
+纯本地、无外部状态：`quay goal write AC-302 --criterion <原文本>`（原文本见本任务 Proposal 的行号表，或 `git revert <本任务 goal 提交>`）+ `git checkout -- packages/quay/test/ac302-criterion-address-derivation.test.mjs`（回到 develop 版本，其 7 条负例仍断言 `code === 1`）。
