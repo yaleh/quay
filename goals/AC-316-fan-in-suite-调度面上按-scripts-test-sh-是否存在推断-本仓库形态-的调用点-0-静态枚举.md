@@ -1,7 +1,7 @@
 ---
 id: AC-316
 title: fan-in/suite 调度面上按 scripts/test.sh 是否存在推断「本仓库形态」的调用点 = 0（静态枚举，按代码位置判定）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-027
 criterion: >-
@@ -49,6 +49,17 @@ origin: 立条依据：2026-09-23 对第三方项目
   /data/home/yale/work/claudecodeui（CloudCLI，2026-09-20→09-23，worker-driven
   inner，142 条任务）的驱动过程复盘。人 2026-09-23 裁定：「本仓库形态靠文件是否存在来判断」立为 goal，第 1/2/6 项作为其实例
   task，其余缺陷立独立 task（「按你的意见执行」）。 对应 GOAL-027 范围①。
+activatedAt: 2026-10-01T18:04:57.816Z
+statusLog:
+  - at: 2026-10-01T18:04:57.816Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-01T18:04:57.816Z
 ---
 **判据（能取假）**：在第三方 driver 于 fan-in / suite 调度上实际执行的模块中，按代码位置（不含注释）枚举 `hasTestSh(` 与 `existsSync(…test.sh…)`，命中数必须为 0。
 
