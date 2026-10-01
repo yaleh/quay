@@ -2,7 +2,7 @@
 id: AC-312
 title: shell 层收敛 5.2：integration-batch-merge / checker-mutation-check /
   cross-machine-verify 三个 .sh 收成 ≤25 有效行的薄入口或已删除（由 sh-census-check 读出）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-026
 criterion: |-
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-01T18:08:16.985Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
