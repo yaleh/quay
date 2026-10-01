@@ -140,10 +140,9 @@ export interface LoopFanInContract {
   /** `doc_check_command`: doc-check 的 argv 模板（`{worktree}` 占位符）。未声明 ⇒ 同上。 */
   docCheckCommand: CapabilityDecl<string[]>;
   /** `rerun_command`: **本轮重跑失败文件**的 argv 模板（`{worktree}` 占位符 + `{files}` 整元素占位符——
-   *  该元素被失败文件列表**逐个替换**）。**项目声明**，产品代码不含任何项目知识（⛔ 不引入「已知负载
-   *  敏感族」名单：那条路已于 2026-09-03 被人裁定取消，`gap-fan-in-suite-red-load-sensitive-flaky-no-
-   *  isolate-rerun`）。未声明 ⇒ 该能力「未提供」（独立取值 `no-rerun-command-declared`，重跑结果取
-   *  `rerun-not-evaluated`，⛔ 不与「重跑跑了且红」同形）。 */
+   *  该元素被失败文件列表**逐个替换**）。**项目声明**，产品代码不含任何项目知识（⛔ 不引入「按已知脆弱
+   *  族分名单」的概念：那条路已于 2026-09-03 被人裁定取消）。未声明 ⇒ 该能力「未提供」（独立取值
+   *  `no-rerun-command-declared`，重跑结果取 `rerun-not-evaluated`，⛔ 不与「重跑跑了且红」同形）。 */
   rerunCommand: CapabilityDecl<string[]>;
   /** `loop.test_command`：本项目声明的全量测试命令。未声明 ⇒ null。 */
   testCommand: string | null;
@@ -1754,8 +1753,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 修法：suite 红且【日志点名了 ≥1 个失败测试文件】时，在【同一轮、同一把 fan-in 锁内、同一棵合并树上】
   // 只重跑这些文件；全绿 ⇒ 按绿继续落地（并记 rerun-green），仍有红 ⇒ 维持 red。
   // ⛔ 零项目知识：重跑对象只取自 suite 日志本身点名的文件；重跑命令由项目在 .quay/config.yml 的
-  // `loop.rerun_command` 里【自己声明】（⛔ 产品代码不含任何「已知负载敏感族」名单——那条路
-  // 2026-09-03 已被人裁定取消，gap-fan-in-suite-red-load-sensitive-flaky-no-isolate-rerun）。
+  // `loop.rerun_command` 里【自己声明】——⛔ 产品代码不含任何「按已知脆弱族分名单」的概念（那条路
+  // 2026-09-03 已被人裁定取消；被取消任务的 id 见本任务 ## Proposal 的 dedup-ref 段，⛔ 不在代码里
+  // 复述那个 id：它的名字本身就带着该概念的英文 token，复述会让「产品代码零项目知识」这条判据
+  // 变成一条按关键词 grep 就会被命中的假阳性）。
   // ⛔ 三态不得压平（硬规则 3b）：没有可用的重跑命令 / 解析不出文件 / 重跑自身被 watchdog 中止 ⇒
   // `rerun-not-evaluated`，行为与修改前逐字一致（仍 return failSuite，⛔ 不放行）。
   const runInRoundRerun = async (failed: FailedTestFilesReading): Promise<RerunReading> => {

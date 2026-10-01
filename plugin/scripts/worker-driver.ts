@@ -2348,6 +2348,8 @@ export function assertionSignaturesFromSuiteLog(logText: string): string[] {
 // 降序），据此决定该修哪个文件。⛔ 它是**只读观测面**，不参与任何控制流（不是判据输入、不拦截 fan-in）；
 // 数据源是唯一的耐久台账 `.quay/worker-outcome.jsonl`（suite 尝试日志会在落地时被删，台账不会）。
 //
+// ⛔ 产品代码零项目知识：本仪器不分「已知脆弱族」——它只如实聚合台账里被点名过的文件（那条按族分名单
+// 的路 2026-09-03 已被人裁定取消，被取消任务的 id 见本任务 ## Proposal 的 dedup-ref 段）。
 // 三态（硬规则 3b）：`evaluated:true` 的文件进 rows；`evaluated:false` 的轮次单独计进
 // `notEvaluatedRounds`（那是「suite 红但解析不出失败文件」，⛔ 不与 redRounds 混计）；`failedTestFiles`
 // 为 null（suite 从未红 ⇒ 不适用）的记录两边都不进。台账缺失/坏行 ⇒ 跳过（⛔ 不伪造）。
