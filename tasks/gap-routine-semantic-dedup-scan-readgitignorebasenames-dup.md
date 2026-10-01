@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readgitignorebasenames-dup
 title: "semantic-dedup-scan: byte-identical exported bodies (474 chars);
   tick-core-static-check's own JSDoc says it 'mirrors' threshold-scope-check but
   defines its own copy; no shared modu"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
