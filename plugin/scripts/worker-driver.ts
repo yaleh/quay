@@ -173,7 +173,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, readTaskStatus, advanceRetryCap, markNeedsHuman, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -498,6 +498,7 @@ export function computeOutcome({
   lockWaitMs = null,
   lockHoldMs = null,
   stderrTail = null,
+  shortCircuit = null,
 }: {
   task: string;
   selectorReason: string;
@@ -526,6 +527,11 @@ export function computeOutcome({
    *  / 读不懂）⇒ outcome 字段缺省（缺键，⛔ 不是伪造的 0）。 */
   lockWaitMs?: number | null;
   lockHoldMs?: number | null;
+  /** gap-park-reason-mislabels-ac-precheck-as-suite-red：worker exit 0 但【未 spawn 机械 fan-in】的短路
+   *  成因（当前唯一取值 `"ac-not-checked"`：AC 未全勾）。null = 未短路（⇒ 缺键，硬规则 6：缺值 ≠ 某取值）。
+   *  它是 judgeRetryExemption 把「AC 短路」与「fan-in 跑过但归因不出」分开的【结构化】判据——旧实现
+   *  只能从 failure_reason 文本猜，两者同形（硬规则 3b）。 */
+  shortCircuit?: string | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -594,6 +600,10 @@ export function computeOutcome({
     // 才发射（null ⇒ 缺键，硬规则 6：缺值 ≠ 空字符串）。这是生产实例里「载体中 model_not_found 出现
     // 0 次」的直接修法——分类判据与事后取证读的是同一个面，⛔ 不再需要谁去翻 driver 的日志流。
     ...(typeof stderrTail === "string" && stderrTail.length > 0 ? { worker_stderr_tail: stderrTail } : {}),
+    // gap-park-reason-mislabels-ac-precheck-as-suite-red：短路成因（AC 未全勾）。null ⇒ 缺键（硬规则 6：
+    // 缺值 ≠ 某个取值；硬规则 3b：未短路不得与「短路成因为 X」同形）。它是「没有 mechanical_fan_in」
+    // 的两种成因里【哪一种是哪一种】的结构化判据。
+    ...(typeof shortCircuit === "string" && shortCircuit.length > 0 ? { short_circuit: shortCircuit } : {}),
   };
 }
 
@@ -2379,7 +2389,13 @@ export type RetryExemptionVerdict =
   | "unrelated-flaky-exempt"
   | "own-defect-counted"
   | "insufficient-data-fallback"
-  | "static-phase-attributed";
+  | "static-phase-attributed"
+  // gap-park-reason-mislabels-ac-precheck-as-suite-red：AC 未全勾短路（worker exit 0 但未 spawn 机械
+  // fan-in）也产出一条【没有 mechanical_fan_in】的 outcome。旧实现让它与「fan-in 跑过但归因不出」同形
+  // （都落 insufficient-data-fallback）⇒ 下游当成「suite 红但归因不出」⇒ 两轮即 stop-terminal，停派注记
+  // 写「suite 红归因不出」，而真因是 AC 未勾选、没有 suite 跑过（硬规则 3b：读不懂/另一成因不得与已知
+  // 成因共用取值）。⇒ 独立 verdict，走既有 count-and-retry 路径（⛔ 不进 stop-terminal）。
+  | "ac-not-checked-shortcircuit";
 
 /** 一次 exited-not-landed 的重试豁免判定结果（可扩展输出，⛔ 不重写接线）。 */
 export interface RetryExemptionJudgment {
@@ -2657,6 +2673,33 @@ export function judgeRetryExemption(
     ? (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in
     : undefined;
   if (!mfi || typeof mfi !== "object") {
+    // gap-park-reason-mislabels-ac-precheck-as-suite-red：outcome 没有 mechanical_fan_in 有两种成因——
+    //   ① AC 未全勾短路（worker exit 0 但【未 spawn】fan-in）⇒ 真因是 AC 未勾选，与 suite 无关；
+    //   ② 其它 pre-fan-in 情形 ⇒ 读不懂 / 没跑过 suite，「无法评估」。
+    // 旧实现让两者同形（都落 insufficient-data-fallback）⇒ ① 被下游当成「suite 红但归因不出」，两轮即停派。
+    // 判据两路（都指向同一成因，⛔ 不是关键词猜）：① outcome 上的结构化标记 `short_circuit`（新记录）；
+    // ② `failure_reason` 含「AC 未全勾」（旧记录无标记字段——历史记录只留文本，仍须能正确分类）。
+    const shortCircuit = (outcome && typeof outcome === "object")
+      ? (outcome as { short_circuit?: unknown }).short_circuit
+      : undefined;
+    const failReason = (outcome && typeof outcome === "object")
+      ? (outcome as { failure_reason?: unknown }).failure_reason
+      : undefined;
+    if (
+      shortCircuit === "ac-not-checked" ||
+      (typeof failReason === "string" && failReason.includes("AC 未全勾"))
+    ) {
+      return {
+        verdict: "ac-not-checked-shortcircuit",
+        reason:
+          "AC 未全勾短路（worker 退出但未 spawn 机械 fan-in ⇒ 没有 suite 跑过）——真因是 AC 未勾选，" +
+          "与 suite 无关；走既有重试上限路径计数重派",
+        failingTestFiles: [], signatures: [], recurredTasks: [],
+      };
+    }
+    // 「无法评估」的独立取值（硬规则 3b），判词如实：没有 mechanical_fan_in ⇒ 没有 suite 跑过。
+    // ⛔ 措辞逐字不变——它是 AC7 生产载体谓词（`retry_exemptions[].reason` 为这一句）的匹配串，
+    // 改字会让「谓词匹配 0 条」既可以表示「缺陷已修」也可以表示「字符串变了」（假测量）。
     return { verdict: "insufficient-data-fallback", reason: "no mechanical fan-in result on the outcome (cannot attribute)", failingTestFiles: [], signatures: [], recurredTasks: [] };
   }
   const step = (mfi as { step?: unknown }).step;
@@ -2865,6 +2908,19 @@ export function decideExitedNotLandedAction(
   exemption: RetryExemptionJudgment,
   opts: { windowMs?: number; nowMs?: number } = {},
 ): ExitedNotLandedDecision {
+  // gap-park-reason-mislabels-ac-precheck-as-suite-red：AC 未全勾短路是【读得懂】的独立成因（不是
+  // 「归因不出」）⇒ 走既有 count-and-retry 路径，⛔ 不进 stop-terminal。旧实现把它当 insufficient-data-
+  // fallback ⇒ 两轮即 stop-terminal ⇒ 停派注记写「suite 红归因不出」，与真因（AC 未勾选）完全不符。
+  if (exemption.verdict === "ac-not-checked-shortcircuit") {
+    return {
+      kind: "count-and-retry",
+      verdict: exemption.verdict,
+      suiteLogHash: null,
+      reason:
+        `AC 未全勾短路（未 spawn 机械 fan-in ⇒ 没有 suite 跑过）——真因是 AC 未勾选，与 suite 无关；` +
+        `交既有重试上限路径计数重派（⛔ 不在此停派）`,
+    };
+  }
   // 非「归因不出」的 verdict（已归因的实现缺陷 / 判为无关 flaky）⇒ 动作不变（既有路径，⛔ 本改动
   // 不掐死正常重试——AC2 的双向控制半边）。
   if (exemption.verdict !== "insufficient-data-fallback") {
@@ -2882,6 +2938,13 @@ export function decideExitedNotLandedAction(
   }
   const windowMs = opts.windowMs ?? RETRY_EXEMPTION_WINDOW_MS_DEFAULT;
   const nowMs = opts.nowMs ?? Date.now();
+  // 有没有 suite 跑过——决定判词能不能说「suite 红」。判据取 `mechanical_fan_in.step === "suite"`（suite
+  // 步【真跑过】），⛔ 不取「suiteLog basename 在不在」：后者在「suite 跑了但日志名缺失/读不到」时为假
+  // （step=suite、suiteLog 缺失）——那仍是 suite 红，说「没跑过 suite」同样是假话。真判据是 mfi.step。
+  const mfiStep = (outcome && typeof outcome === "object")
+    ? ((outcome as { mechanical_fan_in?: { step?: unknown } }).mechanical_fan_in?.step)
+    : undefined;
+  const hasSuiteStep = mfiStep === "suite";
   const currentHash = suiteLogContentHash(root, suiteLogBasenameFromOutcome(outcome));
   const priors = unattributablePriorAttempts(root, taskId, outcome, windowMs, nowMs);
   // ① 相同日志内容 ⇒ 重试不可能改变结果（最硬的那条：内容相等是【可复现】的直接证据，不是启发式）。
@@ -2902,17 +2965,25 @@ export function decideExitedNotLandedAction(
       kind: "stop-terminal",
       verdict: exemption.verdict,
       suiteLogHash: currentHash,
-      reason:
-        `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
-        `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
-        `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`,
+      // point 2（gap-park-reason-mislabels-ac-precheck-as-suite-red）：没有 mechanical_fan_in ⇒ 根本没
+      // 有 suite 跑过 ⇒ 判词不得出现「suite 红」字样（⛔ 不把没发生的相位写成成因）。
+      reason: hasSuiteStep
+        ? `suite red could not be attributed to any failing test file in ${priors.length + 1} consecutive ` +
+          `rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect ` +
+          `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`
+        : `the exited-not-landed failure could not be attributed in ${priors.length + 1} consecutive rounds ` +
+          `(bounded to at most one retry; no mechanical fan-in result on the outcome ⇒ no suite ran) — ` +
+          `infra/contract suspected, not an implementable defect ` +
+          `(${suiteAttributionEvidence(exemption)}); stopping instead of spending another worker session`,
     };
   }
   return {
     kind: "count-and-retry",
     verdict: exemption.verdict,
     suiteLogHash: currentHash,
-    reason: "first unattributable suite red for this task — one bounded retry allowed (a transient cause is still possible)",
+    reason: hasSuiteStep
+      ? "first unattributable suite red for this task — one bounded retry allowed (a transient cause is still possible)"
+      : "first unattributable exited-not-landed failure for this task (no mechanical fan-in result ⇒ no suite ran) — one bounded retry allowed (a transient cause is still possible)",
   };
 }
 
@@ -4122,6 +4193,10 @@ function runOneWorker({
         // (not done)」——丢失「AC 未全勾」这个真因，续做 prompt 看不到该勾选什么。
         landed: shortCircuitReason != null ? false : landing.state === "verified" ? true : landing.state === "failed" ? false : null,
         landReason: shortCircuitReason != null ? shortCircuitReason : landing.state === "verified" ? null : landing.reason,
+        // gap-park-reason-mislabels-ac-precheck-as-suite-red：短路成因【结构化】落进载体（⛔ 不再只能从
+        // failure_reason 文本猜）——它是 judgeRetryExemption 区分「AC 短路」与「fan-in 跑过但归因不出」
+        // 的判据（两者都无 mechanical_fan_in，旧实现同形）。未短路 ⇒ null ⇒ 缺键。
+        shortCircuit: shortCircuitReason != null ? "ac-not-checked" : null,
         sessionId,
         lockWaitMs: lockMetrics.lockWaitMs,
         lockHoldMs: lockMetrics.lockHoldMs,
@@ -4536,7 +4611,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
       // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
       // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-      const needsHumanWrites: Array<{ id: string; reason: string }> = [];
+      const needsHumanWrites: Array<{ id: string; reason: string; kind: NeedsHumanKind }> = [];
       if (!isFfNotFastForwardFailure(r.outcome)) {
         // 重试上限豁免（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：suite red 的失败
         // 测试文件与任务 Touches/diff 无关 ∧ 断言签名跨任务复发（≥2 不同任务）⇒ 不计入该任务自身重试
@@ -4568,12 +4643,16 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
             retryState.counts.set(r.taskId, maxRetries);
             needsHumanWrites.push({
               id: r.taskId,
-              reason: `suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：${decision.reason}`,
+              // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：停派种类由调用方传入 markNeedsHuman
+              // ⇒ 小标题/提交消息如实写「停派」而不再恒写「重试上限」。理由去掉「suite 红」绝对断言——
+              // 这条路径也可能是「没有 mechanical_fan_in（没跑过 suite）」的无法归因（point 2）。
+              reason: `exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：${decision.reason}`,
+              kind: "stop-terminal",
             });
           }
         } else if (exemption.verdict !== "unrelated-flaky-exempt") {
           for (const id of advanceRetryCap(retryState, [r.taskId], maxRetries)) {
-            needsHumanWrites.push({ id, reason: `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）` });
+            needsHumanWrites.push({ id, reason: `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`, kind: "retry-cap" });
           }
         }
       }
@@ -4581,7 +4660,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // gap-mark-needs-human-commit-after-write：markNeedsHuman 写盘即提交，返回
         // { id, ok, reason, committed }——⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录
         // （生产载体），json 事件供测试/手动观测。
-        const nh = markNeedsHuman(rootDir, w.id, w.reason);
+        const nh = markNeedsHuman(rootDir, w.id, w.reason, w.kind);
         needsHumanResults.push(nh);
         if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
       }

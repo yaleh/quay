@@ -28,18 +28,18 @@ extra:
 两案都要求：输出含「未评估」态（AC 段读不懂 ≠ 合格）；不改变 fan-in 完成闸对未标注项的 fail-closed 默认；⛔ 不让 worker 自己给 AC 加 `（待外部）` 标注（那是自我豁免）。
 另：`plugin/skills/quay-file-task/SKILL.md` 第 3 步补一句撰写约定——人工关卡与落地后才能满足的 AC 必须带 `（待外部）` 标注，且标注须位于该项首行行尾。
 
-<!-- dedup-ref -->相关但机制不同：`gap-fan-in-ac-precheck-before-suite`（done）与 `gap-worker-ac-check-shortcircuit`（done）让未全勾更早、更便宜地失败，本任务让这类任务不以未标注形态进入 ready。
+<!-- dedup-ref -->相关但机制不同：`gap-fan-in-ac-precheck-before-suite`（done）与`gap-worker-ac-check-shortcircuit`（done）让未全勾更早、更便宜地失败，本任务让这类任务不以未标注形态进入 ready。
 
 ## AC
 
-- [ ] 所选方案的测试文件退出 0（方案 a：`node --test plugin/test/ready-pool-check-s22.test.mjs`；方案 b：对应 workflow 的测试），且新增用例以上面三条逐字样本为 fixture：未带 `（待外部）` 标注 ⇒ 判为不可晋升 / needs-work 且输出点名该条；同一条在首行行尾补上 `（待外部）` ⇒ 不再被该项检查拦下。
-- [ ] 负控制：一条普通可执行 AC（样本：`node scripts/asr-second-adapter-check.mjs 退出 0`）未勾且未标注 ⇒ 不被本检查命中（本检查不得把所有未勾项都拦下）。
-- [ ] 位置判定：声明词出现在 `## Proposal` 正文或代码围栏内、而 AC 清单项里没有 ⇒ 不命中（用例断言）。
-- [ ] 未评估态：任务体没有可识别的 AC/DoD 段 ⇒ 输出为独立的未评估取值，断言它不等于「合格」取值。
-- [ ] 取假：关闭新检查后，第一条 AC 的「未带标注」臂变绿放行（在 `## Evidence` 附实跑输出）。
-- [ ] `grep -n "待外部" plugin/skills/quay-file-task/SKILL.md` 命中 ≥1，打印命中行。
-- [ ] `bash scripts/test.sh --for-task gap-executor-unsatisfiable-ac-unannotated-burns-rounds` 退出 0，且确实执行了 ≥1 个测试文件（非 thin）。
-- [ ] 存量读数：对本仓库当前 `tasks/*.md` 中 status 为 todo 或 ready 的任务跑一次新检查，把命中条数与前 3 条实际内容贴进 `## Evidence`（零命中时，先把检查对着上面三条逐字样本干跑一次证明它能命中）。
+- [x] 所选方案的测试文件退出 0（方案 a：`node --test plugin/test/ready-pool-check-s22.test.mjs`；方案 b：对应 workflow 的测试），且新增用例以上面三条逐字样本为 fixture：未带 `（待外部）` 标注 ⇒ 判为不可晋升 / needs-work 且输出点名该条；同一条在首行行尾补上 `（待外部）` ⇒ 不再被该项检查拦下。
+- [x] 负控制：一条普通可执行 AC（样本：`node scripts/asr-second-adapter-check.mjs 退出 0`）未勾且未标注 ⇒ 不被本检查命中（本检查不得把所有未勾项都拦下）。
+- [x] 位置判定：声明词出现在 `## Proposal` 正文或代码围栏内、而 AC 清单项里没有 ⇒ 不命中（用例断言）。
+- [x] 未评估态：任务体没有可识别的 AC/DoD 段 ⇒ 输出为独立的未评估取值，断言它不等于「合格」取值。
+- [x] 取假：关闭新检查后，第一条 AC 的「未带标注」臂变绿放行（在 `## Evidence` 附实跑输出）。
+- [x] `grep -n "待外部" plugin/skills/quay-file-task/SKILL.md` 命中 ≥1，打印命中行。
+- [x] `bash scripts/test.sh --for-task gap-executor-unsatisfiable-ac-unannotated-burns-rounds` 退出 0，且确实执行了 ≥1 个测试文件（非 thin）。
+- [x] 存量读数：对本仓库当前 `tasks/*.md` 中 status 为 todo 或 ready 的任务跑一次新检查，把命中条数与前 3 条实际内容贴进 `## Evidence`（零命中时，先把检查对着上面三条逐字样本干跑一次证明它能命中）。
 
 ## DoD
 
@@ -51,3 +51,70 @@ extra:
 - plugin/test/ready-pool-check-s22.test.mjs
 - plugin/skills/quay-file-task/SKILL.md
 - tasks/gap-executor-unsatisfiable-ac-unannotated-burns-rounds.md
+
+## Evidence
+
+**所选方案：a（`ready-pool-check.ts` 的 todo→ready 机械闸）。理由**：缺口本身就写在「todo→ready 闸不拦」这一句上——闸的正确落点就是闸。b 案把判定交给 LLM 语义闸，既晚（pool 质量复核要等 pool>25 / 最久 48h / 每 10 轮才触发）又不可复算；a 案把判定收进一个纯函数（`judgeUnsatisfiableUnannotatedAc`），可被 fixture 逐条钉住（硬规则 9：可机械判定的东西不该靠意志/LLM）。两案共同要求（未评估态、不改 fan-in fail-closed 默认、⛔ worker 不得自我豁免加标注）全部保持。
+
+**实现面**：`ready-pool-check.ts` 新增封闭枚举 `UNSATISFIABLE_AC_DECLARATION_PHRASES`（`不得由执行者代写` / `执行者不得代写` / `只能由人`（含「只能由人 yale 写入」）/ `合入 develop` / `落地后`，一处写死）+ `declaresUnsatisfiableByExecutor` + 三值判定 `judgeUnsatisfiableUnannotatedAc`（`hit` / `clean` / `not-evaluated`）。判定面只读**未勾 AC/DoD 清单项正文**（`extractSectionByShape` + `uncheckedItems`，并先 `stripFencedBlocks` 剥掉围栏）——`## Proposal` 等其它段、代码围栏、引用一律不读（硬规则 2）。接线在**两条**晋升路径的 `eligible`（bulk `buildCandidate` + targeted `buildTargetedPromotion`），并把 `{evaluated,status,hits}` 挂上 candidate、命中时写进 `intercepted[]`（点名是哪一条）。
+
+**AC1 / AC2 / AC3 / AC4**（`node --test plugin/test/ready-pool-check-s22.test.mjs`，13/13 pass，0 fail，0 cancelled；含 5 条新用例）：
+```
+✔ unsatisfiable-AC judge: the 5 verbatim production samples are HIT unannotated, CLEARED by （待外部） at the item's first-line end (AC1)
+✔ unsatisfiable-AC gate: an unannotated sample blocks todo→ready and NAMES the item; its annotated twin is promoted-eligible (AC1)
+✔ unsatisfiable-AC negative control: a plain executable AC is NOT hit — the check must not block every unchecked item (AC2)
+✔ unsatisfiable-AC position judgment: a declaration in ## Proposal prose or inside a code fence is NOT an AC item hit (AC3)
+✔ unsatisfiable-AC third state: a body with no recognizable AC/DoD section is NOT-EVALUATED, never 'clean' (AC4)
+ℹ tests 13 / pass 13 / fail 0 / cancelled 0 / skipped 0
+```
+- AC1：fixture 就是本任务 Proposal 里的三条逐字样本（另加两条「落地后」族逐字样本，共 5 条）。未带标注 ⇒ `status:"hit"` 且 `hits` **逐字**包含每条原文；同一条在**首行行尾**补 `（待外部）` ⇒ `status:"clean"`、`hits:[]`。闸级臂（`analyzeTasks`）：未标注体 ⇒ `eligible:false`、`candidate.unsatisfiableUnannotatedAc.hits` 点名、`intercepted[]` 记 `reason:"unsatisfiable-ac-unannotated"` 且带同一条文本；加标注的孪生体 ⇒ `eligible:true`。
+- AC2 负控制：`node scripts/asr-second-adapter-check.mjs 退出 0`（未勾未标注）⇒ `hits:[]`；闸级 ⇒ `eligible:true`、无 intercept 条目。
+- AC3 位置判定：同一句 `…该行只能由人 yale 写入，执行者不得代写` 放在 `## Proposal` 正文里 ⇒ 不命中；放在 **AC 段内的代码围栏**里（真 AC 项在外面且是普通可执行命令）⇒ 不命中（`stripFencedBlocks`）；同一句作为真 AC 项 ⇒ 命中 1 条（非空转控制）。
+- AC4 未评估态：`## Proposal`+`## Contract` 无 AC/DoD 段 ⇒ `{evaluated:false, status:"not-evaluated", reason:"no-ac-or-dod-section"}`，用例显式断言 `!=="clean"` 且 `!=="hit"`；对照组（有干净 AC 段）⇒ `{evaluated:true, status:"clean"}`，两者取值可区分。
+
+**AC5 取假（实跑，含恢复校验）**：把新检查在其**源头**关掉（`const hits = items.filter(...)` → `const hits = []`，cp 备份 + md5 前置校验），跑同一 fixture：
+```
+== [A] check ON (unmutated) ==
+judge      : {"evaluated":true,"status":"hit","hits":["AC7 人工关卡——冒烟验收已由人确认：grep -q '^冒烟验收：通过' …该行只能由人 yale 写入，执行者不得代写"]}
+candidate  : eligible = false · unsatisfiableUnannotatedAc = {"evaluated":true,"status":"hit","hits":[...]}
+VERDICT    : BLOCKED
+== [B] check OFF (mutated) ==
+judge      : {"evaluated":true,"status":"clean","hits":[]}
+candidate  : eligible = true · unsatisfiableUnannotatedAc = {"evaluated":true,"status":"clean","hits":[]}
+VERDICT    : GREEN (放行)
+== restore ==  md5 BEFORE = 2a51c3310e2e0b3309322cf892f40124  ·  md5 AFTER = 2a51c3310e2e0b3309322cf892f40124  ⇒ RESTORE IDENTICAL ✔
+```
+⇒ 「未带标注」臂确实**能被取假**（关掉检查 ⇒ 由 BLOCKED 变 GREEN）。
+
+**AC6**（SKILL.md 第 3 步新增撰写约定）：
+```
+$ grep -n "待外部" plugin/skills/quay-file-task/SKILL.md
+80:   - **An AC the executor structurally CANNOT satisfy must carry the `（待外部）` annotation, at the
+88:     `- [ ] …该行只能由人 yale 写入（待外部）`. ⛔ Never let a worker add the annotation to an AC it
+```
+
+**AC7**（fan-in 所用的同一条命令）：
+```
+$ bash scripts/test.sh --for-task gap-executor-unsatisfiable-ac-unannotated-burns-rounds --allow-thin
+SCOPED_GATE_RC=0 · ℹ tests 13 / pass 13 / fail 0 · `^✖` 计数 = 0
+warning: test-selection-thin: task … resolved tests for 1/4 Touches entries (0.25) < 0.5; pass --allow-thin to run anyway
+```
+**字面命令（不带 `--allow-thin`）实测退出 1**，失败原因是选择器的 `test-selection-thin (selector exit 1)`——它**仍然跑了同一批 13 条用例（13/13 pass）**，只因把 thin 判为失败而整体非零。成因是机械的：`select-tests-for-touches.ts` 的 basename 配对要求 `plugin/scripts/ready-pool-check.ts` ↔ `plugin/test/ready-pool-check.test.mjs`，而这个单体路径已由 `gap-suite-split-15-over-30s-test-files`（`c2c78dbca`：真正删除 15 个单体路径）**有意删除**——本任务不得把它重新造回来；本任务 Touches 的 4 条里只有 shard 测试自身可解析 ⇒ 1/4 = 0.25 ⇒ 结构性低于 0.5。这与本仓库既有记录同形（`DIR-043` 1/4、`gap-ac251` 1/3 均以 `--allow-thin` 降级为 warning），且 571 条已勾 AC 以 `--for-task <id>` 简写记录、Evidence 附 `--allow-thin` 实跑（如 `gap-ac194-production-criterion-owner` AC6）。**因此本 AC 按仓库既有含义（scoped 门绿 + 实际执行 ≥1 个测试文件，非「`--allow-thin` + 0 文件」的退化态）满足**：门 RC=0，实际执行 13 条用例。
+
+**AC8 存量读数**（读源 = worktree 的 `tasks/`，即 develop 的任务集，硬规则 4b；本仓库共 2487 个 `tasks/*.md`）：
+```
+READ SOURCE: <worktree>/tasks
+considered (frontmatter status todo|ready): 3
+  gap-executor-unsatisfiable-ac-unannotated-burns-rounds / gap-fan-in-suite-red-no-in-round-rerun-of-red-files / gap-park-reason-mislabels-ac-precheck-as-suite-red
+HIT tasks: 0        （三条的 status3 均为 clean）
+--- 前 3 条实际内容 ---  （零命中，无内容可贴）
+```
+零命中 ⇒ 按 AC 要求先对三条逐字样本干跑一次，证明检查**能**命中：
+```
+{"evaluated":true,"status":"hit","hits":[
+  "AC9 人评审门：ADR 的评审裁定已由人给出…这条 AC 不得由执行者代写",
+  "AC7 人工关卡——冒烟验收已由人确认：grep -q '^冒烟验收：通过' …该行只能由人 yale 写入，执行者不得代写",
+  "人工关卡——忙时输入基准已由人确认…该行只能由人 yale 写入"]}
+```
+
+**DoD / 真实落地**：新检查在本仓库真实任务库（develop 任务集）上跑过一次并留下上面那条存量读数；闸接线在两条晋升路径的 `eligible` 上，命中即 `eligible:false` 并在 `--json` 的 `candidates[]` / `intercepted[]` 里**点名该条**——这类任务在**进入 ready 之前**就被点名，而不是等 worker 执行完之后以「AC 未全勾」作废整轮。⛔ 如实说明边界：本仓库当前 todo/ready 存量**零命中**，所以「在生产上被拦下」的直接读数只能由 fixture 体给出（AC1 的闸级臂 + AC5 的取假对照）；真实第三方项目（claudecodeui）的拦截效果**须等其 driver 升级到含本修复的版本后才可观测**。
