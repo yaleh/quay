@@ -1,7 +1,7 @@
 ---
 id: gap-executor-unsatisfiable-ac-unannotated-burns-rounds
 title: 执行者结构上勾不了的 AC（人工关卡 / 落地后才能满足）未带（待外部）标注就进了 ready——worker 做完其余全部仍被判「AC 未全勾」整轮作废
-status: todo
+status: ready
 labels:
   - gap
   - defect
