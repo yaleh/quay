@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface } from "../scripts/fs-walk.ts";
+import { walkFiles, buildFileIndex, scanRoots, collectShellScripts, listExecutableFiles, scanKernelSurface, readGitignoreBasenames } from "../scripts/fs-walk.ts";
 
 // tmp-leak-pairing-check requires the created dirs to live in a module-level ARRAY that the
 // after-hook references (a value returned out of a helper is not seen by the check).
@@ -263,4 +263,51 @@ test("scanKernelSurface: plugin/scripts top level + packages/quay/src recursive,
     "plugin/scripts/a.ts",
     "plugin/scripts/b.mjs",
   ]);
+});
+
+// ── readGitignoreBasenames (was byte-identical in the two stale-path checkers) ───────────────────
+// finding `readgitignorebasenames-dup`, runId `semantic-dedup-scan-1790851304231`. The two checkers
+// kept a 474-char copy each, so the runtime-artifact exemption heuristic could drift between them.
+test("readGitignoreBasenames: basenames with a real extension, slashes/globs/comments tolerated", () => {
+  const root = mkTree({
+    ".gitignore": [
+      "# a comment",
+      "",
+      "tick-log.md",
+      ".quay/gate-events.jsonl", // a prefixed pattern → the BARE basename is what matters
+      "**/full-suite-state.json", // leading `**` is in the dir segment, dropped by split("/")
+      "  padded.txt  ", // surrounding whitespace trimmed
+      "*.log", // strips to ".log" — dot at index 0 is NOT > 0, so no basename
+      "no-extension", // no dot → not a filename
+      ".hidden", // leading-dot dotfile: dot at index 0 → excluded
+      "dir/", // trailing slash → empty tail → excluded
+    ].join("\n"),
+  });
+  assert.deepEqual([...readGitignoreBasenames(root)].sort(),
+    ["full-suite-state.json", "gate-events.jsonl", "padded.txt", "tick-log.md"]);
+});
+
+test("readGitignoreBasenames: the pre-dot stem must start with an allowed char; missing file → empty", () => {
+  // `$foo.ts` is rejected (leading `$` is not in [A-Za-z0-9_@-]); `@scope.ts` / `-gen.ts` are kept.
+  const root = mkTree({ ".gitignore": ["$foo.ts", "@scope.ts", "-gen.ts"].join("\n") });
+  assert.deepEqual([...readGitignoreBasenames(root)].sort(), ["-gen.ts", "@scope.ts"]);
+  // Fail-open on an absent .gitignore: an empty set (nothing exempt via git), never a throw.
+  assert.deepEqual([...readGitignoreBasenames(path.join(os.tmpdir(), "fs-walk-no-gitignore-xyz"))], []);
+});
+
+test("readGitignoreBasenames is DEFINED once (fs-walk.ts); the two checkers only import + re-export", () => {
+  // 硬规则 4 推論三: this is the reading that proves the SINGLE definition point actually landed —
+  // a body-count over the real carrier, not an echo of the edit. If either checker re-grows its own
+  // copy the definer set grows and this goes red.
+  const scriptsDir = new URL("../scripts/", import.meta.url);
+  const definers = fs.readdirSync(scriptsDir)
+    .filter((f) => f.endsWith(".ts"))
+    .filter((f) => /(?:^|\n)\s*(?:export\s+)?function\s+readGitignoreBasenames\b/.test(
+      fs.readFileSync(new URL(f, scriptsDir), "utf8")));
+  assert.deepEqual(definers, ["fs-walk.ts"]);
+  for (const checker of ["threshold-scope-check.ts", "tick-core-static-check.ts"]) {
+    const src = fs.readFileSync(new URL(checker, scriptsDir), "utf8");
+    assert.ok(src.includes('readGitignoreBasenames } from "./fs-walk.ts"'), `${checker} must import it`);
+    assert.ok(src.includes("export { readGitignoreBasenames };"), `${checker} must re-export it`);
+  }
 });

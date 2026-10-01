@@ -63,7 +63,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { buildFileIndex, type FileIndex } from "./fs-walk.ts";
+import { buildFileIndex, type FileIndex, readGitignoreBasenames } from "./fs-walk.ts";
 
 // ── Scan surface (a ## Contract invariant — missing target = ERROR, never silent green) ──────────────
 export const CORES = [
@@ -295,24 +295,11 @@ export function gitignoredPaths(root: string, missingPaths: string[]): Set<strin
   return out;
 }
 
-/** Basenames mentioned in `.gitignore` — a BARE reference to one is a known runtime/ignored
- *  artifact (`batch2-queue-state.md` → `docs/analysis/batch2-queue-state.md`), not a stale SOURCE
- *  path. `git check-ignore` cannot match a bare basename against a prefixed pattern, so this is the
- *  bare-name companion to gitignoredPaths (mirrors threshold-scope-check). */
-export function readGitignoreBasenames(root: string): Set<string> {
-  const p = path.join(root, ".gitignore");
-  if (!fs.existsSync(p)) return new Set();
-  const out = new Set<string>();
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const seg = t.split("/").pop() || "";
-    const base = seg.replace(/[*?]/g, "").trim();
-    const dot = base.lastIndexOf(".");
-    if (dot > 0 && dot < base.length - 1 && /^[A-Za-z0-9_@-]/.test(base.slice(0, dot))) out.add(base);
-  }
-  return out;
-}
+// readGitignoreBasenames now lives in fs-walk.ts (it was byte-identical to threshold-scope-check's
+// copy — .quay/routine-findings.jsonl finding `readgitignorebasenames-dup`, runId
+// `semantic-dedup-scan-1790851304231`). Re-exported so this module's public surface is unchanged;
+// it sits in the same leaf both checkers already import for the gitignore-aware traversal face.
+export { readGitignoreBasenames };
 
 /** Scan one core's text for backtick-named pointer targets that cannot be resolved. */
 export function scanPointerTargets(text: string, rel: string, root: string, index: FileIndex, ignored: Set<string>, ignoredBasenames: Set<string> = new Set()): PointerHit[] {
