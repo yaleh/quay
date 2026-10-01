@@ -2,7 +2,7 @@
 id: gap-ac251-resident-unified-host-dead-no-restore
 title: AC-251 的活载体（主检出常驻统一 host）死了、且没有任何东西把它拉回来 ⇒ 判据此刻取假；修法=用仓库自己的动词把统一 host
   拉回主检出根，并留下「为什么它死了没人管」的直接量与发生率读数（GOAL-017 阶段 A2）
-status: todo
+status: ready
 labels:
   - gap
   - defect
