@@ -309,6 +309,29 @@ export function carrierPaths(carriers: VersionCarrier[] = VERSION_CARRIERS): str
   return [...new Set(carriers.map((c) => c.path))];
 }
 
+/**
+ * The SINGLE SOURCE's repo-relative path — `VERSION` at the repo root. Deliberately NOT a member of
+ * `VERSION_CARRIERS`: the carriers are DERIVED from it (`version-consistency-check.ts` judges every
+ * carrier against `resolveVersion(VERSION)`), so it is the source and not a carrier. It still belongs
+ * in THIS module, which is the single home of "which files carry a version" (hard rule 5b): a
+ * release-cut next-version bump rewrites the source AND every carrier, so a consumer asking "which
+ * files does a version bump touch?" must not hand-copy either half. (Mirrors the one read site,
+ * `resolve-version.ts`'s `resolve(root, 'VERSION')`.)
+ */
+export const VERSION_SOURCE_PATH = "VERSION";
+
+/**
+ * Every repo-relative path a release-cut NEXT-VERSION bump rewrites: the derived carriers
+ * (`carrierPaths()`) plus the single SOURCE (`VERSION_SOURCE_PATH`). Derived from the ONE table so a
+ * consumer never hand-copies the file list (tasks/gap-ac194-release-bump-classified-as-bypass AC3).
+ * ⛔ This is "the paths the bump writes", NOT "every version-bearing path": e.g. the closure-ratchet
+ * baseline the bump also re-anchors lives under `docs/` (design-internal), which a branch that wants
+ * the SET already excludes on its own.
+ */
+export function versionBearingPaths(carriers: VersionCarrier[] = VERSION_CARRIERS): string[] {
+  return [...new Set([...carrierPaths(carriers), VERSION_SOURCE_PATH])];
+}
+
 export interface CarrierReading {
   label: string;
   path: string;
