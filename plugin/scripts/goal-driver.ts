@@ -1942,8 +1942,8 @@ export type GapState = "in-progress" | "gap" | "workable" | "world-gated" | "unc
  *  `readsFrozenPopulation` 同一手法（criterion 文本切词后判 token），⛔ 不重推一套与判据无关的启发式。
  *  `.quay` 必须**成词**出现（前/后一字符都不是 `[\w.-]`）⇒ `my.quay/x`、`.quayx` 这类子串不算。
  *  ⚠️ **目录本身也算**（`(?:\/[\w.*-]+)?` 可省）：生产判据常写成「`.quay` 目录 + 其下的 glob」，
- *  例如第三方项目的 `d = "$T/.quay"` + `glob("fan-in-*.log")`（本仓实测 AC-318）——只认 `.quay/<file>`
- *  会漏掉这一形态，把它误判成 workable 而每轮派一个产不出该事件的 worker。
+ *  例如 `d = "$T/.quay"` 再对 `d` 做通配匹配（本仓实测 AC-318）——只认 `.quay/<file>` 会漏掉这一
+ *  形态，把它误判成 workable 而每轮派一个产不出该事件的 worker。
  *
  *  ⛔ 误判的代价是**有界的**且方向单一：把一条工作产物型判据误判成 world-gated ⇒ 它**不 spawn**
  *  （少派一个 worker，但那条 AC 仍在每轮 gate 集合里被判据复读，且路由留痕可见）；把 world-gated
